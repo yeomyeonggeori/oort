@@ -22,6 +22,9 @@ license = "Apache-2.0"
 # 올릴 때: 값만 고치지 말고 위 두 명령을 다시 재서 근거 줄을 같이 갱신할 것.
 rust-version = "1.88.0"
 
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
 [workspace.dependencies]
 # async runtime
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
