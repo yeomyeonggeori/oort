@@ -93,6 +93,7 @@ import {
   useRecheckWhenElapsed,
   useSetPresence,
 } from './selfStatus';
+import {AvatarPage} from './AvatarPage';
 import {PauseUntilPage} from './PauseUntilPage';
 import {StatusPage} from './StatusPage';
 import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
@@ -172,7 +173,8 @@ export type Page =
   | 'status'
   | 'deviceKey'
   | 'pauseUntil'
-  | 'dndUntil';
+  | 'dndUntil'
+  | 'avatar';
 
 const PAGE_TITLE: Record<Page, string> = {
   profile: '내 프로필',
@@ -181,6 +183,7 @@ const PAGE_TITLE: Record<Page, string> = {
   deviceKey: DEVICE_KEY_TITLE,
   pauseUntil: NOTIFICATION_PAUSE_LABEL,
   dndUntil: declaredStatusLabel('dnd'),
+  avatar: '프로필 사진',
 };
 
 export function ProfileSheet({
@@ -340,6 +343,13 @@ function SheetBody({
           <ThemePage />
         ) : page === 'deviceKey' ? (
           <DeviceKeyPage workspaceId={workspaceId} />
+        ) : page === 'avatar' ? (
+          <AvatarPage
+            workspaceId={workspaceId}
+            selfId={member.id}
+            directory={directory}
+            onDone={() => setPage('profile')}
+          />
         ) : page === 'status' ? (
           <StatusPage
             workspaceId={workspaceId}
@@ -368,6 +378,7 @@ function SheetBody({
             onOpenDeviceKey={() => setPage('deviceKey')}
             onOpenPauseUntil={() => setPage('pauseUntil')}
             onOpenDndUntil={() => setPage('dndUntil')}
+            onOpenAvatar={() => setPage('avatar')}
             onSignOut={onSignOut}
             onRevealEnd={revealEnd}
           />
@@ -406,6 +417,7 @@ export function ProfilePage({
   onOpenDeviceKey,
   onOpenPauseUntil,
   onOpenDndUntil,
+  onOpenAvatar,
   onSignOut,
   onRevealEnd,
 }: {
@@ -420,6 +432,8 @@ export function ProfilePage({
   onOpenPauseUntil: () => void;
   /** 방해 금지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="dnd"`). */
   onOpenDndUntil: () => void;
+  /** 프로필 사진 장을 연다(#4384). 없으면 얼굴은 눌리지 않는다(캡처 하네스). */
+  onOpenAvatar?: () => void;
   onSignOut: () => void;
   /** 확인 블록이 열리면 시트를 끝까지 내린다 — 두 버튼이 접힌 곳 아래에 서지 않게. */
   onRevealEnd: () => void;
@@ -513,13 +527,35 @@ export function ProfilePage({
   return (
     <>
       <View style={styles.hero}>
-        <View style={styles.heroRing}>
+        {/* 머리의 큰 얼굴과 그 밑의 「사진 바꾸기」가 같은 장을 연다(#4384). 얼굴만 누르게
+            두면 바꿀 수 있다는 것을 아는 사람만 바꾼다 — owner 가 「수단이 없다」고 했다. */}
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="프로필 사진 바꾸기"
+          disabled={onOpenAvatar === undefined}
+          onPress={onOpenAvatar}
+          style={({pressed}) => [styles.heroRing, pressed && styles.pressed]}
+          testID="self-profile-avatar"
+        >
           <Avatar
             directory={directory}
             memberId={member.id}
             size={HERO_AVATAR}
           />
-        </View>
+        </Pressable>
+        {onOpenAvatar ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="프로필 사진 바꾸기"
+            onPress={onOpenAvatar}
+            style={({pressed}) => [styles.photoLink, pressed && styles.pressed]}
+            testID="self-profile-avatar-change"
+          >
+            <Text style={styles.photoLinkLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+              사진 바꾸기
+            </Text>
+          </Pressable>
+        ) : null}
         <View style={styles.heroText}>
           <Text
             accessibilityRole="header"
@@ -1055,6 +1091,19 @@ const buildStyles = (color: Palette) =>
       borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: color.textFaint,
+    },
+    // 「사진 바꾸기」 — 44 의 눌림 칸, 글자는 시트의 다른 텍스트 단추(`navButtonLabel`)와 같다.
+    photoLink: {
+      minHeight: TOUCH_TARGET,
+      justifyContent: 'center',
+      paddingHorizontal: space.md,
+      borderRadius: radius.sm,
+      marginTop: -space.sm,
+    },
+    photoLinkLabel: {
+      fontSize: font.label,
+      color: color.accentText,
+      fontWeight: '600',
     },
     heroText: {alignItems: 'center', gap: space.xs},
     name: {
