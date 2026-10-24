@@ -1038,11 +1038,14 @@ fn probe_column(table: &str) -> &'static str {
 /// check passed. So `42501` is the proof that the privilege itself is gone.
 fn write_probes(table: &str) -> [(&'static str, String); 4] {
     [
-        ("INSERT", format!("INSERT INTO public.{table} DEFAULT VALUES")),
+        (
+            "INSERT",
+            format!("INSERT INTO public.{table} DEFAULT VALUES"),
+        ),
         ("UPDATE", {
-                let c = probe_column(table);
-                format!("UPDATE public.{table} SET {c} = {c} WHERE false")
-            }),
+            let c = probe_column(table);
+            format!("UPDATE public.{table} SET {c} = {c} WHERE false")
+        }),
         ("DELETE", format!("DELETE FROM public.{table} WHERE false")),
         ("TRUNCATE", format!("TRUNCATE public.{table}")),
     ]
@@ -1079,9 +1082,21 @@ async fn migration_owned_catalogs_are_read_only_for_every_runtime_role() {
     let mut read_failures: Vec<String> = Vec::new();
     for (role, password, tables) in [
         ("momo_app", "momo_app_dev_pw", &MIGRATION_OWNED_CATALOGS[..]),
-        ("momo_relay", "momo_relay_dev_pw", &MIGRATION_OWNED_CATALOGS[..]),
-        ("momo_worker", "momo_worker_dev_pw", &MIGRATION_OWNED_CATALOGS[..]),
-        ("momo_notifier", "momo_notifier_dev_pw", &MIGRATION_OWNED_CATALOGS[2..]),
+        (
+            "momo_relay",
+            "momo_relay_dev_pw",
+            &MIGRATION_OWNED_CATALOGS[..],
+        ),
+        (
+            "momo_worker",
+            "momo_worker_dev_pw",
+            &MIGRATION_OWNED_CATALOGS[..],
+        ),
+        (
+            "momo_notifier",
+            "momo_notifier_dev_pw",
+            &MIGRATION_OWNED_CATALOGS[2..],
+        ),
     ] {
         let pool = db.role(role, password).await;
         for table in tables {
@@ -1117,8 +1132,16 @@ fn catalog_readonly_lockdown_block_is_identical_in_both_bootstrap_files() {
             .join("../../..")
             .join(relative);
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
-        assert_eq!(text.matches("-- BEGIN catalog-readonly-lockdown").count(), 1, "{relative}");
-        assert_eq!(text.matches("-- END catalog-readonly-lockdown").count(), 1, "{relative}");
+        assert_eq!(
+            text.matches("-- BEGIN catalog-readonly-lockdown").count(),
+            1,
+            "{relative}"
+        );
+        assert_eq!(
+            text.matches("-- END catalog-readonly-lockdown").count(),
+            1,
+            "{relative}"
+        );
         let begin = text.find("-- BEGIN catalog-readonly-lockdown").unwrap();
         let end = text.find("-- END catalog-readonly-lockdown").unwrap();
         assert!(begin < end, "{relative}: markers out of order");
@@ -1126,9 +1149,15 @@ fn catalog_readonly_lockdown_block_is_identical_in_both_bootstrap_files() {
     }
     let dev = block("infra/rust/sql/bootstrap_roles.sql");
     let prod = block("infra/rust/sql/bootstrap_runtime_roles.sql");
-    assert_eq!(dev, prod, "catalog-readonly-lockdown differs between dev and prod bootstrap");
+    assert_eq!(
+        dev, prod,
+        "catalog-readonly-lockdown differs between dev and prod bootstrap"
+    );
     for table in MIGRATION_OWNED_CATALOGS {
-        assert!(prod.contains(&format!("'{table}'")), "lockdown must name {table}");
+        assert!(
+            prod.contains(&format!("'{table}'")),
+            "lockdown must name {table}"
+        );
     }
     assert!(!prod.contains("GRANT "), "the lockdown revokes only");
 }
