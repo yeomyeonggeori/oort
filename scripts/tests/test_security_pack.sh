@@ -63,6 +63,7 @@ wired() { # <workflow 파일>
   grep -Fq '"$SECURITY_PACK_RESULT" security_pack' <<<"$gate" || return 1
   grep -Eq '^  (pull_request_target|workflow_run):' "$f" && return 1
   grep -Fq 'secrets.' <<<"$job" && return 1
+  grep -Eq 'continue-on-error|\|\| *true' <<<"$job" && return 1
   return 0
 }
 wired "$WF" || fail "pr-ci.yml 의 Security pack 배선이 어긋났어요"
@@ -77,4 +78,6 @@ mut wrong-image 's#pgvector/pgvector:pg18#postgres:18#'
 mut no-setup 's#scripts/security_pack.sh setup#true#'
 mut result-ignored 's#"$SECURITY_PACK_RESULT" security_pack#"$RUST_RESULT" security_pack#'
 mut pack-secrets 's#DATABASE_URL: postgres://momo:momo@localhost:5432/momo#DATABASE_URL: ${{ secrets.X }}#'
-echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 6종)"
+mut continue-on-error 's/timeout-minutes: 30$/continue-on-error: true/'
+mut run-or-true 's#scripts/security_pack.sh run$#scripts/security_pack.sh run || true#'
+echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종)"
