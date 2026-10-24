@@ -187,7 +187,7 @@ jobs:
           rust=false
           node=false
           printf '%s\n' "$files" | grep -Eq \
-            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
+            '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/security-pack/|scripts/security_pack\.sh$|scripts/tests/test_security_pack\.sh$|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
@@ -489,6 +489,63 @@ jobs:
         # `check licenses`만 돈다(advisories/bans는 #1225 스코프 밖).
         run: scripts/check_cargo_licenses.sh
 
+  # ── ②-b 보안 팩 레인 (#4241 SEC-03) ──────────────────────────────────────
+  # 위의 `rust` 잡은 DB 시험을 전부 `#[ignore]`라 돌리지 못한다(그래서 RLS·인증·승인·푸시·
+  # 첨부·웹훅 시험이 PR 증거에 없었다). 이 잡은 실제 `pgvector/pgvector:pg18` 서비스
+  # 컨테이너에 마이그레이션 + bootstrap_roles.sql 을 얹고, infra/security-pack/selection.txt 가
+  # 고른 `_pg` 시험을 `--ignored --test-threads=1` 로 돌린다. 선택은 SEC-02(#4224) claims.yaml
+  # 이 착륙하면 거기서 파생한다. 나머지 PG 시험은 야간 잡(security-nightly.yml) 몫이다.
+  # 시크릿 없음: `pull_request` + `contents: read`, DB 비밀번호는 일회용 서비스 컨테이너 것.
+  # 필수 컨텍스트 이름은 「Security pack」 — 브랜치 보호 등록은 owner 설정 변경이다.
+  security_pack:
+    name: Security pack
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
+    runs-on: ubuntu-latest
+    # 행 방지 안전장치. 콜드 실측은 첫 런에서 PR 본문에 기록한다(목표 15분, 상한 25분).
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: momo
+          POSTGRES_PASSWORD: momo
+          POSTGRES_DB: momo
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U momo -d momo"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://momo:momo@localhost:5432/momo
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: 선택 목록 lint + lint 음성 대조(DB 없이)
+        run: |
+          scripts/security_pack.sh lint
+          bash scripts/tests/test_security_pack.sh
+
+      - name: cargo 캐시(레지스트리 + target)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: server-rust
+
+      - name: DB 준비(마이그레이션 + bootstrap_roles.sql)
+        run: |
+          psql --version
+          scripts/security_pack.sh setup
+
+      - name: 보안 팩 시험(--ignored --test-threads=1)
+        run: scripts/security_pack.sh run
+
+      - name: 음성 대조 — FORCE 없는 테넌트 테이블이면 tenant_catalog_pg 가 빨강
+        run: scripts/security_pack.sh negative
+
   # ── ③ Node 레인 ─────────────────────────────────────────────────────────
   # npm 라이선스 게이트 + 타입체크 3트리 + 단위 테스트 3트리.
   #
@@ -572,6 +629,7 @@ jobs:
       - gitleaks
       - advisories
       - rust
+      - security_pack
       - node
     if: always()
     runs-on: ubuntu-latest
@@ -582,6 +640,7 @@ jobs:
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       ADVISORIES_RESULT: ${{ needs.advisories.result }}
       RUST_RESULT: ${{ needs.rust.result }}
+      SECURITY_PACK_RESULT: ${{ needs.security_pack.result }}
       NODE_RESULT: ${{ needs.node.result }}
       RUST_SELECTED: ${{ needs.changes.outputs.rust }}
       NODE_SELECTED: ${{ needs.changes.outputs.node }}
@@ -603,4 +662,5 @@ jobs:
             esac
           }
           require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust
+          require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack
           require_optional_lane "$NODE_SELECTED" "$NODE_RESULT" node
