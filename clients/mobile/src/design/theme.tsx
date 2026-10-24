@@ -13,6 +13,7 @@ import {
   readMobileAppearance,
   serializeAppearance,
   type AppearanceV2,
+  type BubbleChoice,
   type SignalChoice,
 } from '@momo/core/design/appearance';
 import {normalizeHex, parseHex} from '@momo/core/design/color';
@@ -197,6 +198,13 @@ interface ThemeValue {
   backgroundActive: boolean;
   /** 고른 배경을 시스템 설정이 끄고 있다면 그 이유. */
   backgroundFallback: BackgroundFallback | null;
+  /**
+   * 말풍선 개인 덮어쓰기(#4383, 저장된 그대로). 없으면 기본(말풍선·테마 색). 그리는 쪽(`bubbleFor`)이
+   * 대비를 판정하고, 줄 보기는 `{layout: 'row'}` 다. 설정 화면·에이전트 명령은 #4307.
+   */
+  bubble: BubbleChoice | undefined;
+  /** `undefined` 면 덮어쓰기를 모두 지운다(기본으로 복귀). */
+  setBubble: (next: BubbleChoice | undefined) => void;
 }
 
 /** 시스템이 지금 말하는 것. 모름(`null`)이면 이 앱이 처음부터 입고 있던 다크다. */
@@ -238,6 +246,8 @@ const DETACHED: ThemeValue = {
   setBackground: () => {},
   backgroundActive: false,
   backgroundFallback: null,
+  bubble: undefined,
+  setBubble: () => {},
 };
 
 const ThemeContext = createContext<ThemeValue>(DETACHED);
@@ -250,6 +260,11 @@ function useResolvedPalette(): Palette {
 /** 지금 스킴의 팔레트. 스타일시트 밖에서 색 하나가 필요할 때(예: 아이콘 tint). */
 export function usePalette(): Palette {
   return useResolvedPalette();
+}
+
+/** 말풍선 개인 덮어쓰기(#4383). 말풍선을 그리는 자리가 읽는다. 프로바이더 밖이면 `undefined`(기본). */
+export function useBubbleChoice(): BubbleChoice | undefined {
+  return useContext(ThemeContext).bubble;
 }
 
 /**
@@ -320,7 +335,14 @@ export function ThemeProvider({
   const setTheme = useCallback((id: ThemeId) => update({theme: id}), [update]);
   const setSignal = useCallback((next: SignalChoice) => update({signal: next}), [update]);
 
+  const setBubble = useCallback(
+    (next: BubbleChoice | undefined) => update({bubble: next}),
+    [update],
+  );
+
   const signalId = signalKey(appearance.signal);
+  // 값이 바뀔 때만 컨텍스트를 다시 만든다 — 저장 정규화가 같은 내용에 같은 문자열을 준다.
+  const bubbleKey = JSON.stringify(appearance.bubble ?? null);
   const value = useMemo<ThemeValue>(() => {
     // 시스템의 답을 **먼저** 이름 붙인다. 이 값은 고른 것과 무관하게 참이고,
     // `scheme` 은 그것을 고른 것으로 덮은 결과다 — 두 문장이 한 줄에 접혀 있었을 때
@@ -345,6 +367,8 @@ export function ThemeProvider({
       setBackground,
       backgroundActive: shown.active,
       backgroundFallback: shown.fallback,
+      bubble: appearance.bubble,
+      setBubble,
     };
     // `signalId` 를 의존으로 쓰는 것은 객체 동일성이 아니라 값이 바뀔 때만 다시 풀기
     // 위해서다. `appearance.signal` 의 내용은 그 키가 대신한다.
@@ -360,6 +384,8 @@ export function ThemeProvider({
     setChoice,
     setTheme,
     setSignal,
+    bubbleKey,
+    setBubble,
   ]);
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
@@ -379,6 +405,7 @@ export function FixedScheme({
   theme = DEFAULT_THEME_ID,
   signal = null,
   background = NO_BACKGROUND,
+  bubble,
   children,
 }: {
   scheme: ColorScheme;
@@ -386,6 +413,8 @@ export function FixedScheme({
   signal?: SignalChoice;
   /** 하네스가 배경이 깔린 모습을 찍는다. 접근성 설정은 여기서 꺼진 것으로 본다. */
   background?: BackgroundChoice;
+  /** 하네스가 줄 보기·말풍선 덮어쓰기를 MMKV 없이 못 박아 찍는다(#4383). */
+  bubble?: BubbleChoice;
   children: React.ReactNode;
 }): React.JSX.Element {
   // 시스템도 인자를 따른다. 하네스가 스킴을 못 박는 이유가 「같은 명령이 기기 상태에
@@ -393,6 +422,7 @@ export function FixedScheme({
   // 기기에서 읽으면 그 일화가 **보조기술 문자열**로 되돌아온다 — 같은 캡처 명령이
   // 시뮬레이터 설정에 따라 다른 힌트를 담게 된다.
   const key = signalKey(signal);
+  const bubbleKey = JSON.stringify(bubble ?? null);
   const value = useMemo<ThemeValue>(() => {
     const active = background.kind !== 'none';
     const resolved = resolveAppearance(theme, scheme, signal, active);
@@ -411,9 +441,11 @@ export function FixedScheme({
       setBackground: () => {},
       backgroundActive: active,
       backgroundFallback: null,
+      bubble,
+      setBubble: () => {},
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheme, theme, key, background]);
+  }, [scheme, theme, key, background, bubbleKey]);
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
 }
 

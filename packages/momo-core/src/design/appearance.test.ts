@@ -9,6 +9,7 @@ import {
   WEB_LEGACY_SCHEME_ENTRY,
   migrateAppearanceV1,
   normalizeAppearance,
+  normalizeBubble,
   normalizeGlass,
   normalizeWallpaper,
   parseAppearanceV2,
@@ -360,5 +361,50 @@ describe("폰 저장 형태 불변", () => {
     expect(serializeAppearance(state)).toBe(
       '{"v":2,"scheme":"light","theme":"graphite","signal":{"preset":"hyeseong"},"density":"compact"}'
     );
+  });
+});
+
+// #4383 — 말풍선 개인 덮어쓰기(`bubble`). 폰 `bubbleFor` 가 읽고 #4307 설정층이 쓴다.
+describe("bubble: 말풍선 덮어쓰기 필드(#4383)", () => {
+  const base: AppearanceV2 = { ...DEFAULT_APPEARANCE };
+
+  it("기본(없음·빈 객체·알 수 없는 값)이면 레코드에 키가 없다 — 기존 저장 문자열이 한 글자도 안 바뀐다", () => {
+    const before = serializeAppearance(base);
+    expect(before).not.toContain("bubble");
+    for (const empty of [undefined, {}, { layout: "bubble" }, { layout: "row2" }, { mine: {} }, { radius: 29 }, 5, "row", []]) {
+      expect(serializeAppearance({ ...base, bubble: empty as never })).toBe(before);
+    }
+  });
+
+  it("줄 보기·색·모서리가 저장되고 다시 읽으면 제자리다", () => {
+    const state: AppearanceV2 = {
+      ...base,
+      bubble: { layout: "row", radius: 4, mine: { bg: "#7b3fe4", fg: "#ffffff" }, other: { bg: "#EEEEEE" } },
+    };
+    const raw = serializeAppearance(state);
+    const read = parseAppearanceV2(raw);
+    expect(read?.bubble).toEqual({
+      layout: "row",
+      radius: 4,
+      mine: { bg: "#7B3FE4", fg: "#FFFFFF" },
+      other: { bg: "#EEEEEE" },
+    });
+    expect(serializeAppearance(read as AppearanceV2)).toBe(raw);
+  });
+
+  it("틀린 필드만 버리고 나머지는 지킨다 (hex 형식·반경 범위·정수)", () => {
+    expect(normalizeBubble({ layout: "row", radius: 28.5, mine: { bg: "red", fg: "#000000" } })).toEqual({
+      layout: "row",
+      mine: { fg: "#000000" },
+    });
+    expect(normalizeBubble({ radius: 28 })).toEqual({ radius: 28 });
+    expect(normalizeBubble({ radius: 0 })).toEqual({ radius: 0 });
+    expect(normalizeBubble({ radius: -1 })).toBeUndefined();
+    expect(normalizeBubble({ layout: "bubble" })).toBeUndefined();
+  });
+
+  it("손으로 넣은 저장 문자열의 쓰레기 값도 화면을 잠그지 않는다", () => {
+    const raw = JSON.stringify({ v: 2, scheme: "dark", theme: "dawnsky", signal: null, density: "comfortable", bubble: "row" });
+    expect(parseAppearanceV2(raw)?.bubble).toBeUndefined();
   });
 });

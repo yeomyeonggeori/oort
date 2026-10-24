@@ -83,10 +83,19 @@ import {
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Animated,
   Image,
   Keyboard,
   Pressable,
@@ -161,7 +170,9 @@ import {
   type ApprovalGate,
   type ApprovalReceipt,
 } from './approvalGate';
-import {LandedTintFade} from './LandedTintFade';
+import {LandedTintFade, ReduceMotionRefContext} from './LandedTintFade';
+import {EASE_OUT, SEND_ARRIVE_MS, SEND_ARRIVE_RISE} from '../../design/motion';
+import {hasArrived, markArrived} from './sendArrival';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
@@ -3755,9 +3766,49 @@ export function PendingRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const failed = pending.status === 'failed';
+
+  // 등장 (#4383): 입력창에서 올라와 자리에 앉는다 — **이 메아리가 마운트되는 한 번**만. 서버
+  // 사본(`MessageRow`)이 대체할 때는 움직이지 않고, 가상화로 다시 마운트돼도 장부가 막는다.
+  // 오름·불투명도만 건드린다(높이·여백은 바닥 추적의 측정 대상이다). 「동작 줄이기」·이미 실패한
+  // 행은 처음부터 자리에 선다. 햅틱은 더하지 않는다(보내기 햅틱은 컴포저의 것이다).
+  const reduceMotionRef = useContext(ReduceMotionRefContext);
+  const [arrive] = useState(() =>
+    pending.status === 'failed' ||
+    reduceMotionRef?.current === true ||
+    hasArrived(pending.clientMsgId)
+      ? null
+      : new Animated.Value(0),
+  );
+  useLayoutEffect(() => {
+    markArrived(pending.clientMsgId);
+    if (arrive === null) return undefined;
+    const run = Animated.timing(arrive, {
+      toValue: 1,
+      duration: SEND_ARRIVE_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    });
+    run.start();
+    return () => run.stop();
+  }, [arrive, pending.clientMsgId]);
+
   return (
-    <View
-      style={[styles.row, startsGroup && styles.rowStartsGroup]}
+    <Animated.View
+      style={[
+        styles.row,
+        startsGroup && styles.rowStartsGroup,
+        arrive !== null && {
+          opacity: arrive,
+          transform: [
+            {
+              translateY: arrive.interpolate({
+                inputRange: [0, 1],
+                outputRange: [SEND_ARRIVE_RISE, 0],
+              }),
+            },
+          ],
+        },
+      ]}
       testID="pending-row">
       {/* 시각 칸은 안 쓰고(이 행에는 시각이 없다) **아바타 칸은 쓴다** — 이
           행의 존재 이유가 「서버 사본이 대체할 때 글이 다시 흐르지 않게」이고,
@@ -3820,7 +3871,7 @@ export function PendingRow({
           </Text>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
