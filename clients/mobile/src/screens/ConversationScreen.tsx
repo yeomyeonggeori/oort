@@ -1493,7 +1493,7 @@ export default function ConversationScreen({
   //   같은 방·첫 페이지 오는 중 그 읽기는 탭 **앞에** 떠났다 → 첫 페이지가 온 뒤
   //                            꼬리를 다시 읽는다(R3 N-3, `'awaiting-head'`).
   //   같은 방·들고 있음        꼬리를 다시 읽고(`catchUp`) 그 답으로 「없다」를 판정한다.
-  //   그 읽기가 실패           말하지 않는다. 레일이 다시 붙으면(복구 표지) 탭 뒤에
+  //   그 읽기가 실패           말하지 않는다. 레일이 다시 붙으면(재구독) 탭 뒤에
   //                            **다시 읽는다** — 판정은 그 답이 한다. 보이지 않는
   //                            기다림이라 세션 앵커와 같은 30초 시계를 달고, 다 되면
   //                            조용히 접는다.
@@ -1502,15 +1502,18 @@ export default function ConversationScreen({
   // 늦게 온 답이 잡은 목록을 옮기면 안 된다. `cancelJump` 의 「닫기가 곧 취소」와 같은
   // 규율이고, 이 기다림에는 상자가 없으니 손가락이 그 닫기다.
   const catchUpTimeline = timeline.catchUp;
-  const recoveryMarkCount = timeline.recoveryMarkers.length;
+  // 「레일이 다시 붙었다」를 세는 값. **복구 표지의 개수가 아니다**(#4292): 표지는 「메운 것이 있을 때만」 서므로 아무것도
+  // 놓치지 않은 재연결에는 서지 않고, 서 있던 표지도 새 메시지가 오면 걷힌다 — 개수는 재연결을 세는 값이 아니다. 재구독 횟수는
+  // 재연결이 일어날 때마다 곧바로 하나 는다.
+  const railRejoinCount = timeline.resume.resubscribeCount;
   const [landingRead, setLandingRead] = useState<{
     token: number;
     state: 'awaiting-head' | 'reading' | 'waiting-rail' | 'fresh';
   } | null>(null);
   const landingReadRef = useRef(landingRead);
   landingReadRef.current = landingRead;
-  /** 탭을 처음 본 순간의 복구 표지 수 — 그 뒤에 늘면 레일이 다시 붙은 것이다. */
-  const landingSightRef = useRef<{token: number; markers: number} | null>(null);
+  /** 탭을 처음 본 순간의 재구독 횟수 — 그 뒤에 늘면 레일이 다시 붙은 것이다. */
+  const landingSightRef = useRef<{token: number; rejoins: number} | null>(null);
   /** 앞 커밋까지 이 화면이 보이던 방 — 탭과 함께 방이 바뀌었는가(N-3). */
   const shownChannelRef = useRef<string | null>(null);
   const openThreadRootId = thread?.id ?? null;
@@ -1544,7 +1547,7 @@ export default function ConversationScreen({
     if (!notification) return;
     if (landingSightRef.current?.token === notification.token) return;
     const {token} = notification;
-    landingSightRef.current = {token, markers: recoveryMarkCount};
+    landingSightRef.current = {token, rejoins: railRejoinCount};
     const roomChanged =
       shownChannelRef.current === null ||
       !uuidEq(shownChannelRef.current, channelId);
@@ -1560,7 +1563,7 @@ export default function ConversationScreen({
     channelId,
     timelineHoldsThisChannel,
     landingHeld,
-    recoveryMarkCount,
+    railRejoinCount,
     readAfterTap,
   ]);
   // 위 효과 **뒤에** 선언한다 — 같은 커밋에서 위 효과는 앞 커밋의 방을 읽어야 한다.
@@ -1574,17 +1577,17 @@ export default function ConversationScreen({
     if (!timelineHoldsThisChannel || landingHeld) return;
     readAfterTap(landingRead.token);
   }, [landingRead, timelineHoldsThisChannel, landingHeld, readAfterTap]);
-  // 읽기가 실패한 뒤 레일이 다시 붙었다(복구 표지가 늘었다) → 탭 뒤에 다시 읽는다.
-  // 표지 자체로는 판정하지 않는다: 재생에는 그 행이 아직 없을 수 있다(R3 M-1).
-  // 읽는 중에 온 표지는 셀 필요가 없다 — 그 읽기가 답한다.
+  // 읽기가 실패한 뒤 레일이 다시 붙었다(재구독이 늘었다) → 탭 뒤에 다시 읽는다.
+  // 재연결 자체로는 판정하지 않는다: 재생에는 그 행이 아직 없을 수 있다(R3 M-1).
+  // 읽는 중에 온 재연결은 셀 필요가 없다 — 그 읽기가 답한다.
   useEffect(() => {
     const sight = landingSightRef.current;
     if (sight === null || landingRead?.token !== sight.token) return;
     if (landingRead.state !== 'waiting-rail') return;
-    if (recoveryMarkCount <= sight.markers) return;
-    sight.markers = recoveryMarkCount;
+    if (railRejoinCount <= sight.rejoins) return;
+    sight.rejoins = railRejoinCount;
     readAfterTap(sight.token);
-  }, [recoveryMarkCount, landingRead, readAfterTap]);
+  }, [railRejoinCount, landingRead, readAfterTap]);
   // 보이지 않는 기다림의 시계.
   useEffect(() => {
     if (landingRead?.state !== 'waiting-rail') return undefined;
