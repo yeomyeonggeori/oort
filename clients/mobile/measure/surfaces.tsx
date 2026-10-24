@@ -182,6 +182,7 @@ import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {DockGapSurface} from './dockGap';
+import {SteadySurface, seedSteady} from './steady';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
@@ -2192,6 +2193,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
+  }
+  // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
+  if (name.startsWith('dm-steady')) {
+    return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
   }
   // #4264: 마지막 행 아래 → 알약 위 간격. 대화 화면의 도크 스택 그대로 + 레이아웃 값 계측.
   if (name === 'gap' || name.startsWith('gap-')) {
@@ -7355,6 +7360,13 @@ if (
   LAUNCHED.name === 'gone-dm-home'
 ) {
   seedGoneDmHome();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('dm-steady')
+) {
+  seedSteady();
 }
 if (
   LAUNCHED !== null &&
