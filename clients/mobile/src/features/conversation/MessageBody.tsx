@@ -10,7 +10,7 @@ import {
   type Directory,
 } from '@momo/core/features/workspace/directory';
 import {mentionableNames} from '@momo/core/features/routing/helperAliases';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Linking,
   Pressable,
@@ -20,7 +20,8 @@ import {
   View,
 } from 'react-native';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
-import {useStyles} from '../../design/theme';
+import {usePalette, useStyles} from '../../design/theme';
+import {bubbleFor} from './bubble';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 
 // =============================================================================
@@ -191,6 +192,15 @@ const NO_MENTIONS: MentionRendering = {
   selfHandle: null,
 };
 
+/**
+ * 말풍선 안에서 글자가 입는 잉크. 중첩 `Text` 는 색을 상속하지만 링크·멘션·인라인 코드는
+ * 자기 색을 박고 있어(채움이 바닥 기준으로 정해진 값) 말풍선 채움 위에서 깨진다 — 그 셋만
+ * 이 맥락을 읽어 말풍선 잉크로 갈아입는다. 말풍선 밖(`null`)은 예전 그대로다.
+ */
+/** 말풍선 안 인라인 코드 칩의 채움 — 말풍선 글자색 위 알파 18%(0x2e). */
+const INLINE_CODE_ALPHA_HEX = '2e';
+const BubbleInk = React.createContext<{fg: string; mine: boolean} | null>(null);
+
 function InlineNodes({
   nodes,
   mentions,
@@ -215,6 +225,7 @@ function InlineNode({
   mentions: MentionRendering;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const ink = useContext(BubbleInk);
   if (node.kind === 'text') return <>{node.text}</>;
   if (node.kind === 'strong') {
     return (
@@ -232,7 +243,13 @@ function InlineNode({
   }
   if (node.kind === 'code') {
     return (
-      <Text style={styles.inlineCode} testID="message-inline-code">
+      <Text
+        style={[
+          styles.inlineCode,
+          // 내 말풍선(신호색 채움) 위에서는 바닥 기준 채움이 안 읽힌다 — 같은 잉크의 옅은 막.
+          ink?.mine && {backgroundColor: ink.fg + INLINE_CODE_ALPHA_HEX},
+        ]}
+        testID="message-inline-code">
         {node.text}
       </Text>
     );
@@ -242,7 +259,9 @@ function InlineNode({
     const self = mentions.selfHandle === node.handle;
     return (
       <Text
-        style={[styles.mention, self && styles.mentionSelf]}
+        // 내 말풍선 위의 「나를 부름」 칩은 신호색 채움이 말풍선과 같아 사라진다 — 그때는 남의
+        // 멘션과 같은 칩(옅은 채움)에 굵기로만 갈린다.
+        style={[styles.mention, self && !ink?.mine && styles.mentionSelf, self && ink?.mine && styles.mentionSelfOnMine]}
         testID={self ? 'message-self-mention' : 'message-mention'}>
         {node.raw}
       </Text>
@@ -255,7 +274,7 @@ function InlineNode({
       // (`MessageRow` 의 규칙), 링크는 그 문장 안의 낱말로 읽힌다. 누르는 것은
       // `onPress` 가 받는다.
       onPress={() => openLink(node.href)}
-      style={styles.link}
+      style={[styles.link, ink?.mine && {color: ink.fg}]}
       testID="message-link">
       <InlineNodes nodes={node.children} mentions={mentions} />
     </Text>
@@ -373,6 +392,9 @@ function BlockNode({
   mentions: MentionRendering;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const ink = useContext(BubbleInk);
+  // 말풍선 안 글자는 말풍선 잉크다 — `muted` 보다 뒤에 놓여 이긴다(보내는 중 흐림은 말풍선이 진다).
+  const inkStyle = ink ? {color: ink.fg} : null;
   if (block.kind === 'code') {
     return (
       <View style={styles.codeWrap} testID="message-code-block">
@@ -420,7 +442,7 @@ function BlockNode({
                 넣으면 접힌 한글 둘째 줄이 마커 **밑**에서 시작해, 항목 경계가
                 눈으로 사라진다. */}
             {block.ordered ? (
-              <Text style={[styles.listMarker, muted && styles.muted]}>
+              <Text style={[styles.listMarker, muted && styles.muted, inkStyle]}>
                 {`${block.start + index}.`}
               </Text>
             ) : (
@@ -440,13 +462,17 @@ function BlockNode({
               // 캡처를 2x 로 환산해서 나온 오독이었다. 이 기기는 3x 다.)
               <View style={styles.listBulletCell} testID="list-bullet">
                 <View
-                  style={[styles.listBulletDot, muted && styles.listBulletDotMuted]}
+                  style={[
+                    styles.listBulletDot,
+                    muted && styles.listBulletDotMuted,
+                    ink && {backgroundColor: ink.fg},
+                  ]}
                 />
               </View>
             )}
             <Text
               selectable={selectable}
-              style={[styles.listText, muted && styles.muted]}>
+              style={[styles.listText, muted && styles.muted, inkStyle]}>
               <InlineNodes nodes={item} mentions={mentions} />
             </Text>
           </View>
@@ -458,7 +484,7 @@ function BlockNode({
   return (
     <Text
       selectable={selectable}
-      style={[styles.paragraph, muted && styles.muted]}>
+      style={[styles.paragraph, muted && styles.muted, inkStyle]}>
       {block.lines.map((line, index) => (
         <React.Fragment key={index}>
           {index > 0 ? '\n' : null}
@@ -488,8 +514,15 @@ export function MessageBody({
   selectable = false,
   directory,
   selfMemberId,
+  bubble = null,
 }: {
   body: string;
+  /**
+   * 말풍선 (#4300). `'mine'`·`'other'` 면 **산문**(문단·목록)을 그 사람의 말풍선에 담고,
+   * 코드 블록은 말풍선 밖 **전체 폭**에 둔다(에이전트 출력은 넓게 — 긴 로그 한 줄이 말풍선을
+   * 늘리지 않는다). `null`(기본)이나 외양 토큰 `bubble.layout === 'row'` 면 예전 평면 행이다.
+   */
+  bubble?: 'mine' | 'other' | null;
   muted?: boolean;
   /** Active roster members are the authority for whether a token is a mention. */
   directory?: Directory;
@@ -513,6 +546,34 @@ export function MessageBody({
     () => (isPlainText(body) ? null : parseMarkdown(body)),
     [body],
   );
+  const palette = usePalette();
+  const tokens = useMemo(() => bubbleFor(palette), [palette]);
+  const tone = bubble !== null && tokens.layout === 'bubble' ? tokens[bubble] : null;
+  const ink = useMemo(
+    () => (tone !== null && bubble !== null ? {fg: tone.fg, mine: bubble === 'mine'} : null),
+    [tone, bubble],
+  );
+  const wrapProse = (children: React.ReactNode, key?: number): React.JSX.Element =>
+    tone === null ? (
+      <React.Fragment key={key}>{children}</React.Fragment>
+    ) : (
+      <View
+        key={key}
+        testID="message-bubble"
+        style={[
+          styles.bubble,
+          {
+            backgroundColor: tone.bg,
+            borderRadius: tokens.radius,
+            paddingHorizontal: tokens.padX,
+            paddingVertical: tokens.padY,
+          },
+          // 보내는 중 흐림은 글자색이 아니라 말풍선 전체의 막이다(채움 위 잉크 대비를 지킨다).
+          muted && styles.bubbleMuted,
+        ]}>
+        {children}
+      </View>
+    );
   const mentions = useMemo<MentionRendering>(() => {
     // Keep the pre-markdown path cheap: ordinary prose neither walks the
     // directory nor changes its rendered shape just because this prop exists.
@@ -528,31 +589,77 @@ export function MessageBody({
 
   if (blocks === null || blocks.length === 0) {
     return (
-      <Text
-        style={[styles.paragraph, muted && styles.muted]}
-        selectable={selectable}>
-        {body}
-      </Text>
+      <BubbleInk.Provider value={ink}>
+        {wrapProse(
+          <Text
+            style={[styles.paragraph, muted && styles.muted, ink && {color: ink.fg}]}
+            selectable={selectable}>
+            {body}
+          </Text>,
+        )}
+      </BubbleInk.Provider>
     );
   }
 
+  if (tone === null) {
+    return (
+      <View style={styles.markdown} testID="message-markdown">
+        {blocks.map((block, index) => (
+          <BlockNode
+            key={index}
+            block={block}
+            muted={muted}
+            selectable={selectable}
+            mentions={mentions}
+          />
+        ))}
+      </View>
+    );
+  }
+
+  // 산문 블록은 이어진 것끼리 한 말풍선에, 코드 블록은 말풍선 밖에서 끊는다.
+  const nodes: React.JSX.Element[] = [];
+  let run: React.JSX.Element[] = [];
+  const flush = (): void => {
+    if (run.length === 0) return;
+    nodes.push(
+      wrapProse(<View style={styles.markdown}>{run}</View>, nodes.length),
+    );
+    run = [];
+  };
+  blocks.forEach((block, index) => {
+    const node = (
+      <BlockNode
+        key={index}
+        block={block}
+        muted={muted}
+        selectable={selectable}
+        mentions={mentions}
+      />
+    );
+    if (block.kind === 'code') {
+      flush();
+      nodes.push(<React.Fragment key={`c${index}`}>{node}</React.Fragment>);
+    } else {
+      run.push(node);
+    }
+  });
+  flush();
+
   return (
-    <View style={styles.markdown} testID="message-markdown">
-      {blocks.map((block, index) => (
-        <BlockNode
-          key={index}
-          block={block}
-          muted={muted}
-          selectable={selectable}
-          mentions={mentions}
-        />
-      ))}
-    </View>
+    <BubbleInk.Provider value={ink}>
+      <View style={styles.markdown} testID="message-markdown">
+        {nodes}
+      </View>
+    </BubbleInk.Provider>
   );
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   markdown: {gap: space.sm},
+  // 말풍선은 내용 폭까지만 — 짧은 글(「네네」)은 좁다. 가장 넓어도 행 칸(본문 열)을 넘지 않는다.
+  bubble: {alignSelf: 'flex-start', maxWidth: '100%'},
+  bubbleMuted: {opacity: 0.6},
   paragraph: {fontSize: font.body, color: color.text, lineHeight: line.body},
   muted: {color: color.textMuted},
   strong: {fontWeight: '700'},
@@ -582,6 +689,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.accentSurface,
     fontWeight: '600',
   },
+  mentionSelfOnMine: {fontWeight: '700'},
   mentionSelf: {
     color: color.onAccent,
     backgroundColor: color.accent,

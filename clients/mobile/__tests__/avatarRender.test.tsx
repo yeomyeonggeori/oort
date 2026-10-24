@@ -1,4 +1,5 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
+import {ROW_FACE} from '../src/features/conversation/rowFace';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {
   avatarIdentity,
@@ -314,7 +315,11 @@ describe('왼쪽 칸이 모든 행에서 같다', () => {
     // 첫 줄만의 장식이 된다.
     expect(messageReserve(true)).toBe(messageReserve(false));
     // 시안 `.a-m{gap:10px}` + owner 표 「아바타 40」 (DS2-4).
-    expect(messageReserve(true)).toBe(16 + CONV.avatar + CONV.avatarGap);
+    // 화면 왼쪽 끝에서 내용까지 = 행 그릇 바깥 마진 + 안쪽 패딩(#4300: 거터 16 을 바깥 6 +
+    // 안쪽 10 으로 나눴다 — 내용 x 는 그대로다).
+    expect(ROW_FACE.outer + Number(messageReserve(true))).toBe(
+      16 + CONV.avatar + CONV.avatarGap,
+    );
   });
 
   it('낙관적 메아리도 같은 칸을 진다 (감사 M-12 의 왼쪽 판)', () => {

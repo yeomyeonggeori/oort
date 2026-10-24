@@ -184,6 +184,7 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
@@ -2195,6 +2196,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('apps-tail')) {
     return <AppsTailSurface which={name.slice('apps-tail'.length).replace(/^-/, '')} />;
   }
+  // #4300: 말풍선 대화 + 눌림·착지 강조 면(실제 MessageRow).
+  if (name.startsWith('bubble-')) return <BubbleSurface which={name.slice('bubble-'.length)} />;
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
