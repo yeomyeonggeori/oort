@@ -389,6 +389,25 @@ BEGIN
   END LOOP;
 END $$;
 
+-- #4381 (migration 147): the ten API-side mem_* definer functions (six API entry points and the four RLS
+-- policy helpers) are executable by momo_app only, not PUBLIC. Migration 147 can run before the runtime roles exist,
+-- so reassert the grant here.
+DO $$
+DECLARE f text;
+BEGIN
+  FOREACH f IN ARRAY ARRAY[
+    'mem_accept_proposal(uuid)', 'mem_digest_evidence_ok(uuid)', 'mem_edit_item(uuid,text,text)',
+    'mem_forget_item(uuid)', 'mem_item_evidence_ok(uuid)', 'mem_proposal_evidence_ok(uuid)',
+    'mem_reject_proposal(uuid)', 'mem_revert_consolidation(uuid)',
+    'mem_search_items(text,integer,uuid,text)', 'mem_topic_summary_ok(uuid)'
+  ] LOOP
+    IF to_regprocedure('public.' || f) IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC', f);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO momo_app', f);
+    END IF;
+  END LOOP;
+END $$;
+
 -- BEGIN catalog-readonly-lockdown (#4372; SEC-04 follow-up). Identical in bootstrap_roles.sql and
 -- bootstrap_runtime_roles.sql; tests compare the text between the markers.
 -- plugin_registry (013), schema_migrations (momo_db::migrate / migrate.sh) and work_cloud_host_transition

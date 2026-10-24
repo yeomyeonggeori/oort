@@ -1969,7 +1969,19 @@ async fn search_respects_rls_and_narrows_the_audience() {
     );
     assert_eq!(none, vec![it.dm_item]);
     // The session_user guard: a BYPASSRLS login (momo_worker) cannot read item text through the
-    // PUBLIC-executable API function by setting the viewer GUC itself.
+    // API function by setting the viewer GUC itself. #4381: EXECUTE on it is momo_app only (the outer
+    // wall, pinned right below); `attempt` grants it to momo_worker inside its rolled-back transaction so
+    // that the in-function guard is the only thing that refuses (and the only thing the sabotage removes).
+    let worker_may_execute: bool = sqlx::query_scalar(
+        "SELECT has_function_privilege('momo_worker', 'public.mem_search_items(text, integer, uuid, text)'::regprocedure, 'EXECUTE')",
+    )
+    .fetch_one(&su)
+    .await
+    .expect("has_function_privilege");
+    assert!(
+        !worker_may_execute,
+        "momo_worker must not EXECUTE mem_search_items (#4381)"
+    );
     let api_search = "SELECT count(*) FROM mem_search_items('기억테스트', 10)";
     let attempt = |strip_guard: bool| {
         let su = su.clone();
@@ -1988,6 +2000,10 @@ async fn search_respects_rls_and_narrows_the_audience() {
             } else {
                 su.begin().await.expect("begin")
             };
+            sqlx::query("GRANT EXECUTE ON FUNCTION public.mem_search_items(text, integer, uuid, text) TO momo_worker")
+                .execute(&mut *tx)
+                .await
+                .expect("grant (rolled back with the transaction)");
             set_gucs(&mut tx, Some(ws), Some(alice)).await;
             sqlx::query("SET LOCAL SESSION AUTHORIZATION momo_worker")
                 .execute(&mut *tx)
