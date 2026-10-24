@@ -24,6 +24,14 @@ name: 70-composer-newline
 #
 # 시뮬레이터에서 물을 수 있는 것은 여기까지다: 소프트 자판의 리턴 키 → UIKit → RN → 코어 → 서버 →
 # 말풍선. 실기기 Release 빌드·블루투스 하드웨어 키보드는 이 흐름 밖이다.
+#
+# 손으로 돌리는 법(레인 밖):
+#   1. 로그인할 수 있는 멤버가 든 격리 스택을 띄우고, **새 채널 하나**를 만들어 그 id 를 GENERAL_CHANNEL_ID 로
+#      준다. 옛 메시지에 같은 글(`A\nB`)이 남아 있으면 단정이 거짓으로 통과한다.
+#   2. 앱이 이 체크아웃의 Metro 를 보게 한다. `launchApp` 은 `-RCT_jsLocation` 을 못 넘기므로(00-login 머리말)
+#      포트가 8081 이 아니면 시뮬레이터 앱의 Preferences 에 `RCT_jsLocation` 을 적고 시뮬레이터를 다시 켠다.
+#   3. cd clients/mobile && maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… \
+#        -e GENERAL_CHANNEL_ID=<새 채널 id> maestro/70-composer-newline.yaml
 - launchApp:
     appId: app.momo.ios
 - runFlow: subflows/ensure-signed-in.yaml
