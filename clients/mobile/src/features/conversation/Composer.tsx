@@ -42,6 +42,8 @@ import {
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
+  Animated,
+  Easing,
   Image,
   Keyboard,
   Platform,
@@ -52,6 +54,7 @@ import {
   TextInput,
   useWindowDimensions,
   View,
+  type GestureResponderEvent,
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -98,6 +101,7 @@ import {photoRoom} from '../attachments/photoLibrary';
 import {nativePhotoPorts} from '../attachments/photosNative';
 import {MENU_CLOSE_WATCHDOG_MS} from '../../design/motion';
 import {haptics} from '../../lib/haptics';
+import {useReduceMotionRef} from '../../lib/useReduceMotion';
 
 // =============================================================================
 // The composer.
@@ -609,6 +613,40 @@ const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + CONV.composerTopAir;
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
 const SEND_SLOP = slopTo(CONV.composerCircle);
 
+// ---- 두 상태 (#4305) ----------------------------------------------------------
+// 입력창은 **접힘**(한 줄 알약: + · 글 · 보내기)과 **펼침**(글 칸 위, 도구 줄 아래: + 가 왼쪽 아래,
+// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **글이 있다**
+// 하나다 — 포커스가 아니다. 포커스로 펼치면 「보내서 비면 같은 프레임에 한 줄로 돌아온다」(owner 10-24,
+// iOS 3053 실기)가 키보드가 떠 있는 동안 성립하지 않는다(보낸 직후에도 포커스는 그대로다).
+//
+// 두 원은 어느 상태에서도 **알약 바닥에서 같은 자리**에 선다(절대 배치). 알약이 위로 자라고 도구 줄이
+// 그 아래 원 곁에 생기므로 「+ 가 왼쪽 아래로 내려간다」는 인상은 글 칸이 원 위로 넓게 펼쳐지는
+// 것으로 온다 — 하나의 `TextInput` 이 두 상태에서 **같은 자리에 마운트된 채** 남아 포커스·IME 조합을
+// 잃지 않는다(부모를 바꾸면 다시 마운트된다).
+//
+// 도구 줄 구성 근거: Buzz 는 + · @ · # · 이모지 · 서식, Claude 앱은 + · 모델 알약 · 마이크 · 음성 모드다.
+// 이 앱에서 지금 **실제로 하는 일이 있는 것**만 둔다 — 「+」(첨부)와 「@」(멘션: 위젯이 없는 iOS 에서
+// 입력창이 이미 가진 멘션 후보를 연다). 이모지는 자판의 지구본으로 이미 되고(앱에 따로 고르개가 없다),
+// 서식은 이 입력창이 마크다운을 그대로 쓰는 곳이라 할 일이 없다. 마이크는 #4306 이 `TOOL_SLOTS` 에
+// 붙는다 — 눌러서 아무 일도 안 하는 버튼은 두지 않는다.
+const EXPAND_MS = 160;
+const EXPAND_EASING = Easing.out(Easing.cubic);
+/** 끌어 내리기: 이만큼(pt) 내려가고 세로가 가로의 두 배를 넘으면 자판을 내린다(Buzz `Listener`). */
+const DISMISS_DRAG_PT = 28;
+/** 도구 줄에 서는 도구들. 마이크(#4306)·예약 보내기(#4216)·사진 여러 장(#4296)은 여기에 붙는다. */
+const TOOL_SLOTS: readonly 'mention'[] = ['mention'];
+const TOOL_COPY = {mention: '@로 부르기'} as const;
+
+/**
+ * 접힘 상자의 높이 — 글이 비었을 때 입력창이 **명시적으로** 갖는 높이. 엄지 바닥(44)과 한 줄(글자
+ * 배수를 곱한 줄 상자 + 세로 크롬) 중 큰 쪽이다. 글이 비면 RN iOS(Fabric)가 멀티라인 입력창의 내재
+ * 크기를 다시 재지 않아 두 줄 높이로 남던 것(owner 10-24)을, 높이를 이 값으로 못 박아 같은 프레임에
+ * 돌려놓는다.
+ */
+export function composerCollapsedHeight(fontScale: number): number {
+  return Math.max(TOUCH_TARGET, Math.ceil(line.body * fontScale) + INPUT_CHROME);
+}
+
 /** 시트가 담는 후보 수. 위 절이 이 넷을 고른 이유를 든다. */
 const MENTION_MAX_ROWS = 4;
 
@@ -993,7 +1031,6 @@ export function Composer({
   recipient,
   directory,
   viewerHumanId,
-  dmAgent,
   dmHint,
   offline,
   draftKey,
@@ -1174,6 +1211,11 @@ export function Composer({
   // depend on it — a changing identity there would rebuild the handler on every
   // keystroke, which is exactly the churn this file is careful about.
   const currentTextRef = useRef(text);
+  // 끌어 내리기가 읽는 것들 (#4305). 글자 범위를 잡고 있거나(선택 손잡이를 끄는 중) 글이 상한을 넘어 안에서
+  // 스크롤되는 중이면 아래로 끄는 손가락은 자판을 내리려는 것이 아니다.
+  const selectionRangeRef = useRef(false);
+  const overflowRef = useRef(false);
+  const dragRef = useRef<{x: number; y: number; done: boolean} | null>(null);
 
   const attachmentWorkspaceId = attachmentTarget?.workspaceId;
   const attachmentChannelId = attachmentTarget?.channelId;
@@ -1381,6 +1423,8 @@ export function Composer({
     // costs one string compare and is exact for an insertion, a deletion, and
     // for an IME replacing the composing tail.
     setCaret(caretAfterChange(currentTextRef.current, next));
+    // 접힘 ↔ 펼침 전이에는 햅틱이 없다(#4331 「채팅을 치면 진동하면서」 — 첫 글자의 진동이 같은 불만이 된다).
+    // 입력 길의 햅틱은 0번이고, 보내기만 light 한 번 울린다(`submit`).
     currentTextRef.current = next;
     setText(next);
     setMentionOpen(true);
@@ -1410,6 +1454,7 @@ export function Composer({
       // synchronously above; taking this event's value as well would let a late
       // selection event overwrite the fresh position with the old one.
       const {start, end} = event.nativeEvent.selection;
+      selectionRangeRef.current = start !== end;
       if (start === end && currentTextRef.current === text) setCaret(start);
     },
     [text],
@@ -1516,6 +1561,8 @@ export function Composer({
     ) {
       return;
     }
+    // 보내기 = light 한 번 (#4305, `haptics.ts` 표). 접힘 전이는 소리 없이 돌아온다.
+    haptics.light();
     // Clear first, send second. The echo row carries the message from here on,
     // including its failure state and its retry; a composer that stays full
     // while its message is visible below reads as if nothing happened.
@@ -1569,6 +1616,73 @@ export function Composer({
     offline !== true &&
     attachmentSurface.drafts.length < MAX_ATTACHMENTS_PER_MESSAGE;
 
+  // ---- 두 상태 (#4305) ------------------------------------------------------
+  const expanded = text !== '';
+  const reduceMotion = useReduceMotionRef();
+  const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  const expandedRef = useRef(expanded);
+  useEffect(() => {
+    if (expandedRef.current === expanded) return;
+    expandedRef.current = expanded;
+    progress.stopAnimation();
+    // 접힘은 **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다): 보낸 뒤에도 키보드가 떠 있는 동안 높이가
+    // 늘어난 채 남던 실기 결함(owner 10-24)을 애니메이션으로 가리지 않는다. 펼침만 움직이고, 「동작 줄이기」
+    // 에서는 그것도 즉시다.
+    if (!expanded || reduceMotion.current) {
+      progress.setValue(expanded ? 1 : 0);
+      return;
+    }
+    Animated.timing(progress, {
+      toValue: 1,
+      duration: EXPAND_MS,
+      easing: EXPAND_EASING,
+      useNativeDriver: false,
+    }).start();
+  }, [expanded, progress, reduceMotion]);
+
+  const collapsedHeight = composerCollapsedHeight(fontScale);
+  // 펼침일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
+  const inputInset = expanded
+    ? progress.interpolate({
+        inputRange: [0, 1],
+        outputRange: [CONV.composerCircle, 0],
+      })
+    : CONV.composerCircle;
+  const toolsHeight = progress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [0, TOUCH_TARGET],
+  });
+
+  /** 「@」 도구: 끝에 @ 를 붙여 입력창이 이미 가진 멘션 후보를 연다(별도 선택기를 만들지 않는다). */
+  const insertMention = useCallback(() => {
+    const base = currentTextRef.current;
+    onChangeText(base === '' || /\s$/.test(base) ? `${base}@` : `${base} @`);
+    inputRef.current?.focus();
+  }, [onChangeText, inputRef]);
+
+  // 아래로 끌어 자판 내리기 (Buzz `Listener`). `onTouch*` 는 **관찰만** 한다 — 응답자를 잡지 않으니 글자
+  // 선택·캐럿·안쪽 스크롤은 그대로 입력창이 받는다.
+  const onDragStart = useCallback((event: GestureResponderEvent) => {
+    dragRef.current = {
+      x: event.nativeEvent.pageX,
+      y: event.nativeEvent.pageY,
+      done: false,
+    };
+  }, []);
+  const onDragMove = useCallback((event: GestureResponderEvent) => {
+    const drag = dragRef.current;
+    if (drag === null || drag.done) return;
+    const dy = event.nativeEvent.pageY - drag.y;
+    const dx = Math.abs(event.nativeEvent.pageX - drag.x);
+    if (dy < DISMISS_DRAG_PT || dy < dx * 2) return;
+    if (selectionRangeRef.current || overflowRef.current) return;
+    drag.done = true;
+    Keyboard.dismiss();
+  }, []);
+  const onDragEnd = useCallback(() => {
+    dragRef.current = null;
+  }, []);
+
   // ---- 절 예산 (#1479) ------------------------------------------------------
   // 넘겨받은 문장에는 절 경계가 없다(위 머리말). 그때는 절도 프로브도 안 선다.
   const clauses = useMemo(
@@ -1587,6 +1701,8 @@ export function Composer({
   // 그 답은 이 상자에 대한 답이 아니다.
   const [inputWidth, setInputWidth] = useState<number | null>(null);
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
+    // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305).
+    if (expandedRef.current) return;
     const {width} = event.nativeEvent.layout;
     setInputWidth(previous => (previous === width ? previous : width));
   }, []);
@@ -1964,7 +2080,13 @@ export function Composer({
           {marginHorizontal: floatInset},
         ]}
         testID="composer-pill">
-      <View style={styles.bar}>
+      <View
+        style={styles.bar}
+        testID="composer-bar"
+        onTouchStart={onDragStart}
+        onTouchMove={onDragMove}
+        onTouchEnd={onDragEnd}
+        onTouchCancel={onDragEnd}>
         {stableAttachmentTarget === null ? null : (
           <Pressable
             ref={attachRef}
@@ -1997,9 +2119,23 @@ export function Composer({
             />
           </Pressable>
         )}
+        <Animated.View
+          style={{marginLeft: inputInset, marginRight: inputInset}}
+          testID="composer-field">
         <TextInput
           ref={inputRef}
-          style={[styles.input, {maxHeight}]}
+          // 글이 비면 높이를 **명시**한다 (#4305, owner 10-24): 값만 비우면 iOS(Fabric)가 멀티라인 입력창의
+          // 내재 크기를 다시 재지 않아 두 줄 높이가 다시 칠 때까지 남았다. 글이 있을 때는 예전처럼 콘텐츠가
+          // 정한다(`maxHeight` 까지).
+          style={[
+            styles.input,
+            {maxHeight},
+            text === '' && {height: collapsedHeight},
+          ]}
+          onContentSizeChange={event => {
+            overflowRef.current =
+              event.nativeEvent.contentSize.height + INPUT_CHROME >= maxHeight - 1;
+          }}
           onLayout={onInputLayout}
           value={text}
           onChangeText={onChangeText}
@@ -2083,6 +2219,24 @@ export function Composer({
           textAlignVertical="top"
           testID="composer-input"
         />
+        </Animated.View>
+        {expanded ? (
+          <Animated.View
+            style={[styles.tools, {height: toolsHeight, opacity: progress}]}
+            testID="composer-tools">
+            {TOOL_SLOTS.includes('mention') ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={TOOL_COPY.mention}
+                hitSlop={ATTACH_SLOP}
+                onPress={insertMention}
+                style={({pressed}) => [styles.tool, pressed && styles.pressed]}
+                testID="composer-tool-mention">
+                <Text allowFontScaling={false} style={styles.toolGlyph}>@</Text>
+              </Pressable>
+            ) : null}
+          </Animated.View>
+        ) : null}
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={sendLabel}
@@ -2152,19 +2306,39 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 자라도 원은 `flex-end` 라 아래·옆 여백이 한 줄 때와 같고, 알약의 아래 두 모서리와 동심이다.
    */
   bar: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
     paddingHorizontal: BAR_PAD_X,
     paddingVertical: BAR_PAD_Y,
   },
+  /**
+   * 펼침의 도구 줄 (#4305). 높이는 애니메이션이 정한다(0 → 엄지 바닥). 왼쪽은 + 원 자리를 비워 두고
+   * (원은 알약 바닥에 절대 배치로 서 있다) 그 오른쪽에 도구가 앉는다.
+   */
+  tools: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingLeft: CONV.composerCircle,
+    overflow: 'hidden',
+  },
+  tool: {
+    width: CONV.composerCircle,
+    height: CONV.composerCircle,
+    borderRadius: CONV.composerCircle / 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  toolGlyph: {fontSize: font.body, lineHeight: line.body, color: color.textMuted},
   /**
    * 안쪽 왼쪽 + 원(Buzz: 흰 원 + 가는 테두리). 44 는 `hitSlop` 이 진다. 한 줄 입력창(44)
    * 가운데에 앉는다.
    */
   attach: {
+    // 두 원은 **알약 바닥에 절대 배치**다 (#4305): 접힘이든 펼침이든 같은 자리에 서고, 글 칸이 그 위로
+    // 자란다. 바닥 여백은 옛 `flex-end` 줄의 `marginBottom` 과 같은 산수(안쪽 여백 + (44 − 36) / 2).
+    position: 'absolute',
+    left: BAR_PAD_X,
+    bottom: BAR_PAD_Y + (TOUCH_TARGET - CONV.composerCircle) / 2,
     width: CONV.composerCircle,
     height: CONV.composerCircle,
-    marginBottom: (TOUCH_TARGET - CONV.composerCircle) / 2,
     borderRadius: CONV.composerCircle / 2,
     alignItems: 'center',
     justifyContent: 'center',
@@ -2209,9 +2383,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 줄 옆에 남는다.
    */
   send: {
+    position: 'absolute',
+    right: BAR_PAD_X,
+    bottom: BAR_PAD_Y + (TOUCH_TARGET - CONV.composerCircle) / 2,
     width: CONV.composerCircle,
     height: CONV.composerCircle,
-    marginBottom: (TOUCH_TARGET - CONV.composerCircle) / 2,
     borderRadius: CONV.composerCircle / 2,
     alignItems: 'center',
     justifyContent: 'center',

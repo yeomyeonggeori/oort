@@ -35,24 +35,28 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
-describe('입력 길에는 햅틱이 없다 (#4331)', () => {
+describe('입력 길의 햅틱은 보내기 light 한 번뿐이다 (#4331 → #4305)', () => {
   it('대조: 첨부 + 를 누르면 햅틱이 정확히 한 번 울린다 — 이 대역이 울림을 셀 수 있다', () => {
     mount();
     fireEvent.press(screen.getByTestId('composer-attach'));
     expect(hapticCalls).toHaveLength(1);
   });
 
-  it('치고 · 줄을 바꾸고 · 지우고 · 보내는 동안 한 번도 울리지 않는다', () => {
+  it('치고 · 줄을 바꾸고 · 지우고 · 접고 펴는 동안 0번, 보내기만 light 한 번', () => {
     const sent: string[] = [];
     mount(body => sent.push(body));
     const input = screen.getByTestId('composer-input');
+    // #4305: 접힘 ↔ 펼침 전이(첫 글자·비움)에도 울리지 않는다 — 입력 중 진동은 0번이다.
     fireEvent.changeText(input, '금요일 배포는 오후로 미룰게요');
+    expect(hapticCalls).toHaveLength(0);
     fireEvent.changeText(input, '금요일 배포는 오후로 미룰게요\n그 전에 시안부터 확인해 주세요');
     fireEvent.changeText(input, '금요일 배포는 오후로 미룰게요\n그 전에 시안부터 확인해 주세요\n끝나면 여기에 남겨 둘게요');
     fireEvent.changeText(input, '금요일 배포는 오후로 미룰게요');
     fireEvent.changeText(input, '금요일 배포는 오후로 미룰게요\n한 줄 더');
+    expect(hapticCalls).toHaveLength(0);
     fireEvent.press(screen.getByTestId('composer-send'));
     expect(sent).toEqual(['금요일 배포는 오후로 미룰게요\n한 줄 더']);
-    expect(hapticCalls).toHaveLength(0);
+    // 보내기 = light 한 번뿐.
+    expect(hapticCalls).toEqual(['impact:light']);
   });
 });

@@ -572,7 +572,7 @@ function ChatComposer({
           placeholder={ready ? '다음 지시를 적어요' : '지금은 지시를 보낼 수 없어요'}
           placeholderTextColor={palette.textFaint}
           accessibilityLabel="다음 지시"
-          blurOnSubmit={false}
+          submitBehavior="newline"
           textAlignVertical="top"
           testID="work-chat-input"
         />
