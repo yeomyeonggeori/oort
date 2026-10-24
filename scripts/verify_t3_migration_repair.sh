@@ -16,7 +16,7 @@ need() {
   command -v "$1" >/dev/null 2>&1 || fail "missing required command: $1"
 }
 
-for tool in curl docker jq python3 swift; do
+for tool in curl docker jq python3 cargo; do
   need "$tool"
 done
 
@@ -334,11 +334,21 @@ free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
 }
 
+# momo-server refuses to boot without the two webhook derivation roots
+# (ADR-0004 증보 4, #2066). Throwaway per-run values: this database is
+# discarded with the container, so nothing here must outlive the run. The
+# caller's own values win, so a gate env that already sets them is unchanged.
+webhook_key() { python3 -c 'import secrets; print(secrets.token_hex(24))'; }
+WEBHOOK_KEY_INGRESS="$(webhook_key)"
+WEBHOOK_KEY_OUTBOUND="$(webhook_key)"
+
 SERVER_PORT="$(free_port)"
 (
   cd "$REPO_ROOT"
   DATABASE_URL="postgres://momo_app:momo_app_dev_pw@127.0.0.1:$HOST_PORT/$RECOVERY_DB" \
     MOMO_ENV=local HOST=127.0.0.1 PORT="$SERVER_PORT" \
+    WEBHOOK_INGRESS_MASTER_KEY="${WEBHOOK_INGRESS_MASTER_KEY:-$WEBHOOK_KEY_INGRESS}" \
+    OUTBOUND_WEBHOOK_MASTER_KEY="${OUTBOUND_WEBHOOK_MASTER_KEY:-$WEBHOOK_KEY_OUTBOUND}" \
     cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-server
 ) >"$TMP_DIR/server.log" 2>&1 &
 SERVER_PID="$!"
