@@ -21,8 +21,8 @@ describe("wordRangeAt (서식 단추의 선택 없음 처리)", () => {
 });
 
 describe("맥락 띠 판정", () => {
-  it("에이전트이고 hostOnline 이 불리언일 때만 칩이 있다", () => {
-    expect(composerContextHost({ kind: "agent", hostOnline: true })?.online).toBe(true);
+  it("에이전트이고 hostOnline 이 false 일 때만 칩이 있다(정상은 되풀이하지 않는다, #4044)", () => {
+    expect(composerContextHost({ kind: "agent", hostOnline: true })).toBeNull();
     expect(composerContextHost({ kind: "agent", hostOnline: false })?.online).toBe(false);
     expect(composerContextHost({ kind: "agent" })).toBeNull();
     expect(composerContextHost({ kind: "human", hostOnline: true })).toBeNull();
@@ -30,7 +30,7 @@ describe("맥락 띠 판정", () => {
   });
 
   it("인용이나 칩이 있을 때만 띠가 선다", () => {
-    const host = composerContextHost({ kind: "agent", hostOnline: true });
+    const host = composerContextHost({ kind: "agent", hostOnline: false });
     expect(composerContextBandShows({ quoting: false, host: null })).toBe(false);
     expect(composerContextBandShows({ quoting: true, host: null })).toBe(true);
     expect(composerContextBandShows({ quoting: false, host })).toBe(true);

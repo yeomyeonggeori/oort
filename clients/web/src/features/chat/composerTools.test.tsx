@@ -304,9 +304,10 @@ describe("맥락 띠", () => {
     expect(band.querySelector('[data-testid="composer-context-host"]')).toBeNull();
   });
 
-  it("에이전트 DM 은 호스트 연결 칩을 띠에 싣는다 — 연결됨·연결 안 됨", async () => {
+  it("에이전트 DM 은 연결 안 됨일 때만 호스트 칩을 띠에 싣는다 — 연결됨은 띠도 칩도 없다(#4044)", async () => {
     const on = await mount({ dmAgent: agent(true) });
-    expect(on.querySelector('[data-testid="composer-context-host"]')?.textContent).toBe("일하는 곳 · 연결됨");
+    expect(on.querySelector('[data-testid="composer-context-host"]')).toBeNull();
+    expect(on.querySelector('[data-testid="composer-context-band"]')).toBeNull();
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     host?.remove();
