@@ -185,7 +185,11 @@ pub fn is_notice_host(value: &str) -> bool {
 /// * `unclaimed_expired` — a job no site took for a day: no site was there to answer,
 ///   `site_off`.
 ///
-/// Both are the SERVER's observation. Neither names a `site`: a hosted connection is
+/// * `woken_not_collected` (ADR-0200 증보 3 E3) — the doorbell reached the site and it
+///   did not take the job: it is up and silent, `site_silent`. `site_off` ("no site
+///   there") would be false.
+///
+/// All are the SERVER's observation. None names a `site`: a hosted connection is
 /// not known to be a Mac or Hermes.
 pub fn stall_app_notice(code: &str, agent_has_apps: bool) -> Option<AppNotice> {
     if !agent_has_apps {
@@ -194,6 +198,7 @@ pub fn stall_app_notice(code: &str, agent_has_apps: bool) -> Option<AppNotice> {
     match code {
         "lease_abandoned" => Some(AppNotice::bare(AppNoticeKind::SiteSilent)),
         "unclaimed_expired" => Some(AppNotice::bare(AppNoticeKind::SiteOff)),
+        "woken_not_collected" => Some(AppNotice::bare(AppNoticeKind::SiteSilent)),
         _ => None,
     }
 }
@@ -341,6 +346,12 @@ mod tests {
             Some(AppNotice::bare(AppNoticeKind::SiteOff))
         );
         assert_eq!(stall_app_notice("unclaimed_expired", false), None);
+        // the bell reached the site and it took nothing: silent, NOT "off"
+        assert_eq!(
+            stall_app_notice("woken_not_collected", true),
+            Some(AppNotice::bare(AppNoticeKind::SiteSilent))
+        );
+        assert_eq!(stall_app_notice("woken_not_collected", false), None);
         assert_eq!(stall_app_notice("something_else", true), None);
         assert_eq!(
             connection_unavailable_app_notice(true),

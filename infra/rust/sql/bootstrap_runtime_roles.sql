@@ -601,8 +601,37 @@ BEGIN
   IF to_regclass('public.workspace') IS NOT NULL THEN
     GRANT SELECT (avatar_media_id) ON workspace TO momo_notifier;
   END IF;
+  --  * woken-not-collected verdict (ADR-0200 증보 3 E7, #4284): the run stall sweep reads,
+  --    per candidate run and ONLY as column grants, what `woken_uncollected_verdict`
+  --    needs. No write, no DELETE.
+  --      hosted_agent_connection: `id`, `status` (active connection), `approved_scopes`
+  --        (the job's `agent:jobs:read`), and `approved_channel_ids`,
+  --        `approved_dm_channel_ids`, `confirmed_by`, which the INVOKER function
+  --        `hosted_connection_channel_ids()` reads for the run's channel.
+  --      hosted_agent_liveness: the work signals and the last refusal. Not
+  --        `agent_member_id`, `last_tool_call_at`, `last_tool_error_code`.
+  --      hosted_agent_doorbell_ring: when a person last asked to wake the agent again.
+  --      agent_provider_pin: `kind` (the trial stop clause, `trial_members_stop_sql!`).
+  --    NOT granted, on purpose: `token` (a BYPASSRLS role never reads a credential — the
+  --    verdict drops the token conditions of the claim predicate for this reason) and
+  --    `hosted_agent_doorbell` (`url`, `secret_sealed`; the verdict needs no fire time).
   IF to_regclass('public.hosted_agent_connection') IS NOT NULL THEN
-    GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection TO momo_notifier;
+    GRANT SELECT (workspace_id, agent_member_id, id, status, approved_scopes,
+                  approved_channel_ids, approved_dm_channel_ids, confirmed_by)
+      ON hosted_agent_connection TO momo_notifier;
+  END IF;
+  IF to_regclass('public.hosted_agent_liveness') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, connection_id, last_inbox_read_at, last_claim_at,
+                  last_run_event_at, last_ping_at, last_ping_state, last_tool_error_at)
+      ON hosted_agent_liveness TO momo_notifier;
+  END IF;
+  IF to_regclass('public.hosted_agent_doorbell_ring') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, connection_id, requested_at)
+      ON hosted_agent_doorbell_ring TO momo_notifier;
+  END IF;
+  IF to_regclass('public.agent_provider_pin') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, agent_member_id, kind)
+      ON agent_provider_pin TO momo_notifier;
   END IF;
   -- ADR-0204 D7 / #3928: an approval's push goes to the people who MAY approve it,
   -- and "may" starts with the workspace role. `momo_messaging::active_workspace_role`
