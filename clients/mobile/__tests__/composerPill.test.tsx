@@ -97,7 +97,9 @@ function pillAndBar() {
   const pill = flat(screen.getByTestId('composer-pill').props.style);
   const bar = ancestorStyle(
     screen.getByTestId('composer-attach'),
-    style => style.flexDirection === 'row',
+    // 안쪽 줄은 선(알약)과 달리 가로·세로 여백을 함께 든 첫 조상이다(#4305: 더는 row 가 아니다 — 두 원이
+    // 알약 바닥에 절대 배치로 서고 글 칸·도구 줄이 세로로 쌓인다).
+    style => style.paddingHorizontal !== undefined && style.paddingVertical !== undefined,
   );
   return {pill, bar, edge: (pill.borderWidth ?? 0) as number};
 }
@@ -177,11 +179,14 @@ describe('동심 — 배송되는 렌더가 그 값을 읽는다', () => {
     // 위아래: 선 + 안쪽 줄의 세로 여백 + 원이 입력창 한 줄(44) 안에서 받는 여유 = 같은 값.
     for (const id of ['composer-attach', 'composer-send']) {
       const circle = flat(screen.getByTestId(id).props.style);
-      expect([
-        id,
-        edge + (bar.paddingVertical as number) + (circle.marginBottom as number),
-      ]).toEqual([id, CONV.composerGap]);
+      // 원은 알약 바닥·옆에 절대 배치다: 안쪽 가장자리에서 `bottom` 만큼 위, 선이 그 바깥에 더해진다.
+      expect(circle.position).toBe('absolute');
+      expect([id, edge + (circle.bottom as number)]).toEqual([id, CONV.composerGap]);
     }
+    const attach = flat(screen.getByTestId('composer-attach').props.style);
+    const send = flat(screen.getByTestId('composer-send').props.style);
+    expect(edge + (attach.left as number)).toBeCloseTo(CONV.composerGap, 10);
+    expect(edge + (send.right as number)).toBeCloseTo(CONV.composerGap, 10);
   });
 
   it('한 줄 알약의 높이가 2 × 반경이다 — 입력창 44 + 선 + 위아래 안쪽 여백', () => {
@@ -196,12 +201,18 @@ describe('동심 — 배송되는 렌더가 그 값을 읽는다', () => {
 
   it('원은 글이 여러 줄로 자라도 아래에 남는다 — 아래·옆 여백이 한 줄 때와 같다', () => {
     composer();
-    // `flex-end` 이면 원의 아래 여백(선 + 안쪽 줄 아래 여백 + 원의 marginBottom)은 줄 수와 무관하다.
+    // 원이 알약 바닥에 절대 배치(`bottom`)이면 아래 여백은 줄 수와 무관하고, 펼침(도구 줄이 생긴 뒤)에서도
+    // 같은 자리다 — 「+ 가 왼쪽 아래」(#4305).
+    const circles = () =>
+      ['composer-attach', 'composer-send'].map(id => {
+        const style = flat(screen.getByTestId(id).props.style);
+        return [style.position, style.bottom, style.left, style.right];
+      });
     const before = pillAndBar();
-    expect(before.bar.alignItems).toBe('flex-end');
+    const circlesBefore = circles();
     fireEvent.changeText(screen.getByTestId('composer-input'), '가\n나\n다\n라');
     const grown = pillAndBar();
-    expect(grown.bar.alignItems).toBe('flex-end');
+    expect(circles()).toEqual(circlesBefore);
     expect(grown.bar.paddingHorizontal).toBe(before.bar.paddingHorizontal);
     expect(grown.bar.paddingVertical).toBe(before.bar.paddingVertical);
   });
