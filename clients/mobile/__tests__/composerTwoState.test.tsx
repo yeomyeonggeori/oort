@@ -113,24 +113,17 @@ describe('접힘 ↔ 펼침', () => {
   });
 });
 
-describe('햅틱 — 전이 1회 = selection 1회, 보내기 = light 1회', () => {
-  it('첫 글자에서 selection 한 번, 펼친 채 치는 동안은 0번', () => {
+describe('햅틱 — 전이는 0번, 보내기 = light 1회', () => {
+  it('첫 글자·펼친 채 치기·지워서 비기까지 0번(전이 햅틱 없음)', () => {
     mount();
     fireEvent.changeText(input(), '가');
-    expect(hapticCalls).toEqual(['selection']);
     fireEvent.changeText(input(), '가나');
     fireEvent.changeText(input(), '가나\n다');
-    expect(hapticCalls).toEqual(['selection']);
-  });
-
-  it('지워서 비면 selection 한 번 더(접힘 전이)', () => {
-    mount();
-    fireEvent.changeText(input(), '가');
     fireEvent.changeText(input(), '');
-    expect(hapticCalls).toEqual(['selection', 'selection']);
+    expect(hapticCalls).toEqual([]);
   });
 
-  it('보내기는 light 한 번뿐이다 — 접힘 전이의 selection 이 겹치지 않는다', () => {
+  it('보내기는 light 한 번뿐이다 — 접힘 전이는 소리가 없다', () => {
     mount();
     fireEvent.changeText(input(), '가');
     hapticCalls.length = 0;

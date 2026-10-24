@@ -175,7 +175,7 @@ function useCoreSend(surface: string, onConfirmed: (message: Message) => void, m
 }
 
 /** 배송되는 `Composer` — 대화 화면과 같은 순서. */
-function RealComposerSurface(): React.JSX.Element {
+function RealComposerSurface({probeLayout = false}: {probeLayout?: boolean}): React.JSX.Element {
   useBusyJs();
   const [messages, setMessages] = useState<Message[]>(SEED);
   const [lines, mark] = useReadout();
@@ -230,15 +230,23 @@ function RealComposerSurface(): React.JSX.Element {
           />
         }
         composer={
-          <Composer
-            recipient="person"
-            channelLabel="이도현"
-            directory={DIRECTORY}
-            draftKey={DRAFT_KEY}
-            attachmentTarget={{workspaceId: WS, channelId: CHANNEL}}
-            inputRef={inputRef}
-            onSend={send}
-          />
+          <View
+            onLayout={event => {
+              // #4305: 도크(컴포저 전체)의 실제 높이를 레이아웃이 바뀔 때마다 적는다 — 「보낸 뒤 한 줄로 돌아오는가」를 숫자로 잰다.
+              if (probeLayout) {
+                probe('twostate', {stage: 'dock-height', height: event.nativeEvent.layout.height, at: Date.now()});
+              }
+            }}>
+            <Composer
+              recipient="person"
+              channelLabel="이도현"
+              directory={DIRECTORY}
+              draftKey={DRAFT_KEY}
+              attachmentTarget={{workspaceId: WS, channelId: CHANNEL}}
+              inputRef={inputRef}
+              onSend={send}
+            />
+          </View>
         }
       />
     </Screen>
@@ -316,7 +324,8 @@ function BareSurface(): React.JSX.Element {
 const NO_TOP = {paddingTop: 0} as const;
 
 export function ComposerNewlineSurface({which}: {which: string}): React.JSX.Element {
-  return which === 'bare' ? <BareSurface /> : <RealComposerSurface />;
+  if (which === 'bare') return <BareSurface />;
+  return <RealComposerSurface probeLayout={which === 'twostate'} />;
 }
 
 const styles = StyleSheet.create({

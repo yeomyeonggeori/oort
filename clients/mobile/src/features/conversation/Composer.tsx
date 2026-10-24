@@ -1031,7 +1031,6 @@ export function Composer({
   recipient,
   directory,
   viewerHumanId,
-  dmAgent,
   dmHint,
   offline,
   draftKey,
@@ -1424,10 +1423,8 @@ export function Composer({
     // costs one string compare and is exact for an insertion, a deletion, and
     // for an IME replacing the composing tail.
     setCaret(caretAfterChange(currentTextRef.current, next));
-    // 접힘 ↔ 펼침이 뒤집히는 **그 한 번**에 selection (#4305, 시각과 같은 핸들러 안에서 동기로 —
-    // `haptics.ts` 계약 1). 펼친 채 글자를 치는 것은 전이가 아니라서 0번이다(계약 2). 보내기는
-    // 이 길을 안 타고(`submit` 이 직접 비운다) light 가 대신 울린다 — 한 행동에 한 번.
-    if ((currentTextRef.current === '') !== (next === '')) haptics.selection();
+    // 접힘 ↔ 펼침 전이에는 햅틱이 없다(#4331 「채팅을 치면 진동하면서」 — 첫 글자의 진동이 같은 불만이 된다).
+    // 입력 길의 햅틱은 0번이고, 보내기만 light 한 번 울린다(`submit`).
     currentTextRef.current = next;
     setText(next);
     setMentionOpen(true);
@@ -1564,7 +1561,7 @@ export function Composer({
     ) {
       return;
     }
-    // 보내기 = light (#4305, `haptics.ts` 표). 접힘으로 돌아오는 전이의 selection 은 여기서 안 울린다.
+    // 보내기 = light 한 번 (#4305, `haptics.ts` 표). 접힘 전이는 소리 없이 돌아온다.
     haptics.light();
     // Clear first, send second. The echo row carries the message from here on,
     // including its failure state and its retry; a composer that stays full
