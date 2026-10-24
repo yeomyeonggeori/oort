@@ -94,12 +94,12 @@ describe("컴포저 공용 표면 (#1688)", () => {
     );
   });
 
-  it("채널과 스레드가 입력 다음에 @·첨부·이모지·보내기 한 벌을 둔다 (#1749)", () => {
+  it("채널과 스레드가 입력 다음에 +·@·이모지·보내기 한 벌을 둔다 (#1749)", () => {
     expect(channel).toMatch(
-      /data-testid="composer-input"[\s\S]*?data-testid="composer-mention-trigger"[\s\S]*?<AttachButton[\s\S]*?data-testid="composer-emoji-trigger"[\s\S]*?data-testid="composer-send"/
+      /data-testid="composer-input"[\s\S]*?<AttachButton[\s\S]*?data-testid="composer-mention-trigger"[\s\S]*?data-testid="composer-emoji-trigger"[\s\S]*?data-testid="composer-send"/
     );
     expect(thread).toMatch(
-      /data-testid="thread-composer-input"[\s\S]*?data-testid="thread-composer-mention-trigger"[\s\S]*?<AttachButton[\s\S]*?data-testid="thread-composer-emoji-trigger"[\s\S]*?data-testid="thread-composer-send"/
+      /data-testid="thread-composer-input"[\s\S]*?<AttachButton[\s\S]*?data-testid="thread-composer-mention-trigger"[\s\S]*?data-testid="thread-composer-emoji-trigger"[\s\S]*?data-testid="thread-composer-send"/
     );
     expect(channel.match(/data-testid="composer-mention-trigger"/g)).toHaveLength(
       1

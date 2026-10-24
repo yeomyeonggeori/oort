@@ -1,4 +1,4 @@
-import { FileText, ImageIcon, Paperclip, X } from "lucide-react";
+import { FileText, ImageIcon, Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
@@ -287,7 +287,7 @@ export function AttachButton({
         title={ATTACH_COPY.attach}
         data-testid="composer-attach"
       >
-        <Paperclip />
+        <Plus />
       </Button>
     </>
   );

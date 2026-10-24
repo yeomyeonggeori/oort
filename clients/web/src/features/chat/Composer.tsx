@@ -122,6 +122,9 @@ import { containsSecretKey } from "@momo/core/features/chat/secretKey";
 import { SecretKeyBlockNotice } from "@/features/chat/SecretKeyBlockNotice";
 import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
 import { ScheduleDialog } from "@/features/scheduled/ScheduleDialog";
+import { ComposerContextBand, ComposerHostChip } from "@/features/chat/ComposerContextBand";
+import { ComposerFormatButton } from "@/features/chat/ComposerFormatButton";
+import { composerContextBandShows, composerContextHost } from "@/features/chat/composerContext";
 import { ScheduleSendMenu } from "@/features/scheduled/ScheduleSendMenu";
 import { ScheduledBanner } from "@/features/scheduled/ScheduledBanner";
 import { useComposerSchedule } from "@/features/scheduled/useComposerSchedule";
@@ -800,6 +803,11 @@ export function Composer({
       setSecretBlocks((count) => count + 1);
     },
   });
+  const contextHost = composerContextHost(dmAgent);
+  const bandShows = composerContextBandShows({
+    quoting: quote !== null,
+    host: contextHost,
+  });
   const phoneStatusLine = isMobile && schedule.statusText !== null;
   const showsSchedule = schedule.gate.entry === "shown";
 
@@ -1013,16 +1021,7 @@ export function Composer({
         onClear={() => clearSurface(trayKey)}
         onAcknowledgeNotices={() => acknowledgeNotices(trayKey)}
       />
-      {/* 인용 칩 (ADR-0148). 라우팅 줄보다 **위**에 온다: 라우팅은 "이 글이 어떻게
-          처리되는가"고 인용은 "이 글이 무엇에 대한 것인가"라서, 읽는 순서가
-          맥락 -> 처리 -> 입력이다. */}
-      {quote && (
-        <QuoteChip
-          block={quote.block}
-          directory={directory}
-          onCancel={onCancelQuote}
-        />
-      )}
+      {/* 인용 칩(ADR-0148)은 카드 안 맥락 띠로 옮겼다(#4317). 읽는 순서는 그대로 맥락 -> 처리 -> 입력이다. */}
       {/* 입력창 바로 위: 이번 메시지에 무엇이 적용되는지가 글을 쓰는 자리에서
           보여야 한다. Cursor가 모델 피커를 입력창 하단 바에 둔 이유와 같고
           (레퍼런스 §2), 상속 상태에서도 사라지지 않는 이유는 "바꾸지 않으면
@@ -1164,6 +1163,19 @@ export function Composer({
             inputRef.current?.focus();
           }}
         >
+          {bandShows && (
+            <ComposerContextBand>
+              {quote && (
+                <QuoteChip
+                  attached
+                  block={quote.block}
+                  directory={directory}
+                  onCancel={onCancelQuote}
+                />
+              )}
+              {contextHost !== null && <ComposerHostChip host={contextHost} />}
+            </ComposerContextBand>
+          )}
           <label className="sr-only" htmlFor="composer-input">
             {composerFieldLabel(channelLabel, recipient)}
           </label>
@@ -1250,6 +1262,9 @@ export function Composer({
             data-testid="composer-actions"
           >
             <div className="flex items-center gap-1">
+              {/* 「+」는 도구 줄의 맨 왼쪽이다(Codex 입력창·폰 #4305와 같은 순서). 첨부이고, 앱 피커(#4315)가
+                  서면 이 자리의 메뉴가 된다. 마이크는 #4306 이 오른쪽에 붙고, 그 전에는 자리도 그리지 않는다. */}
+              <AttachButton onPick={onFiles} disabled={offline} />
               <Button
                 type="button"
                 variant="ghost"
@@ -1262,9 +1277,6 @@ export function Composer({
               >
                 <AtSign aria-hidden="true" />
               </Button>
-              {/* 클립은 액션 행의 왼쪽이다. 넣는 것은 앞, 보내는 것은 뒤라는
-                  기존 순서를 한 그릇 안에서도 그대로 지킨다. */}
-              <AttachButton onPick={onFiles} disabled={offline} />
               <Button
                 type="button"
                 variant="ghost"
@@ -1280,6 +1292,13 @@ export function Composer({
               >
                 <Smile aria-hidden="true" />
               </Button>
+              <ComposerFormatButton
+                available={format.available}
+                open={format.open}
+                hasText={text.trim().length > 0}
+                onPress={format.openForSelection}
+                testId="composer-format-trigger"
+              />
             </div>
             {/* 예약 확정 줄(ADR-0182 ②, UI 명세 0.3): 힌트·작성 중 줄이 서는 **같은 고정 자리**를 3초 동안 대신 쓰고
                 원래 줄로 돌아간다. 새 줄을 만들지 않으므로 입력창이 움직이지 않는다(#1749). 누를 것은 두지 않는다. 낭독은

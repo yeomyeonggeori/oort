@@ -12,6 +12,7 @@ import { isComposingEvent } from "@momo/core/features/chat/composerKeys";
 import {
   shouldShowComposerFormatTray,
   toggleComposerFormat,
+  wordRangeAt,
   type ComposerFormatKind,
 } from "./composerFormat";
 
@@ -229,6 +230,27 @@ export function useComposerFormat({
     [inputRef, onValueChange]
   );
 
+  /**
+   * 행의 「서식」 단추. 트레이가 이미 열려 있으면 트레이로 초점을 보내고, 아니면 선택(없으면 캐럿의 낱말)을
+   * 잡아 연다. 눌러서 아무 일도 없는 경우는 글이 비었을 때뿐이고, 그때 단추는 흐리다(`aria-disabled`).
+   */
+  const openForSelection = useCallback(() => {
+    const el = inputRef.current;
+    if (!el || !enabledRef.current || hideForTouch) return;
+    if (openRef.current) {
+      focusComposerFormatTray(trayRef.current);
+      return;
+    }
+    el.focus();
+    if ((el.selectionStart ?? 0) === (el.selectionEnd ?? 0)) {
+      const word = wordRangeAt(valueRef.current, el.selectionStart ?? 0);
+      if (!word) return;
+      el.setSelectionRange(word.start, word.end);
+    }
+    dismissedRangeRef.current = null;
+    sync();
+  }, [hideForTouch, inputRef, sync]);
+
   const dismiss = useCallback(() => {
     const el = inputRef.current;
     dismissedRangeRef.current = el
@@ -284,6 +306,9 @@ export function useComposerFormat({
     trayRef,
     apply,
     dismiss,
+    openForSelection,
+    /** 터치 기기는 OS 선택 콜아웃이 같은 자리를 쓰므로 단추도 없다. */
+    available: enabled && !hideForTouch,
     handleKeyDown,
     onSelect: sync,
     onBlur,
