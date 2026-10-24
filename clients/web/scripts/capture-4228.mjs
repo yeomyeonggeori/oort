@@ -9,7 +9,7 @@
 //   ① 닫기 전: DM 구역에 넷이 서고 나간 멤버는 목록에 없다(줄도 없다).
 //   ② 이도현 DM 의 호버 X 를 누른다: 하네스가 PUT …/closure 를 받아 `closed_at_seq` 를 기억하고, 앱이 즉시 그 행을 치운다.
 //   ③ 다른 기기를 모사: 투영을 다시 읽으면(30초 재조회 대신 페이지를 다시 연다) 닫힌 채다.
-//   ④ 「⋯ › 닫은 대화」: 이도현(내가 닫았어요)과 나간 멤버(상대가 나갔어요)가 「다시 열기」와 함께 선다.
+//   ④ 「⋯ › 닫은 대화」: 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 「다시 열기」와 함께 선다.
 //   ⑤ 「다시 열기」: DELETE 를 받고 그 대화가 열리고 목록에 돌아온다.
 // 라이트·다크 × 1440x900. 웹킷(데스크탑 셸의 엔진)은 라이트만 한 번 더 건다.
 // =============================================================================
@@ -230,7 +230,7 @@ async function runScheme(browserType, engine, origin, scheme) {
       await page.getByTestId("dm-closed-list").waitFor({ timeout: 5000 });
       await page.waitForTimeout(300);
       const items = await page.getByTestId("dm-closed-list-item").allInnerTexts();
-      check(engine, scheme, "B1 목록에 이도현(내가 닫았어요)과 나간 멤버(상대가 나갔어요)가 있고 지금 보이는 대화는 없다", items.length === 2 && items.some((t) => t.includes("이도현") && t.includes("내가 닫았어요")) && items.some((t) => t.includes("나간 멤버") && t.includes("상대가 나갔어요")), items.join(" | "));
+      check(engine, scheme, "B1 목록에 이도현(내가 닫았어요)과 나간 멤버(안 읽은 메시지가 없어요)가 있고 지금 보이는 대화는 없다", items.length === 2 && items.some((t) => t.includes("이도현") && t.includes("내가 닫았어요")) && items.some((t) => t.includes("나간 멤버") && t.includes("안 읽은 메시지가 없어요")), items.join(" | "));
       if (SHOTS) await page.screenshot({ path: resolve(OUT_DIR, `${PREFIX}-${engine}-dm-closed-list-${scheme}.png`) });
       server.calls.length = 0;
       await page.getByTestId("dm-closed-list-reopen").first().click();

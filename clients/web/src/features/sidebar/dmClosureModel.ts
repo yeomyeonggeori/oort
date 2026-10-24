@@ -240,7 +240,7 @@ function factsFor(input: DmFactsInput): Facts | "pending" {
       closedAtSeq: closedAt,
       latestReadableSeq: readable,
       lastReadSeq: lastRead,
-      markedUnreadBeforeSeq: read?.markedUnreadBeforeSeq ?? null,
+      markedUnreadBeforeSeq: read === undefined ? null : read.markedUnreadBeforeSeq,
       mentionCount: read?.mentionCount ?? 0,
     };
   }

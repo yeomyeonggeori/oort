@@ -4,6 +4,11 @@ import {
   dmCloseBlockedByStar,
   dmCloseOffered,
   dmClosedListReason,
+  dmClosedReasonLabel,
+  dmReopenLabelFor,
+  DM_CLOSED_LIST_HINT,
+  DM_CLOSED_LIST_LABEL,
+  DM_REOPEN_LABEL,
   dmVisibility,
   type DmVisibilityInput,
   type DmVisibilityRule,
@@ -127,5 +132,26 @@ describe("「닫은 대화」 목록에 드는 줄 (D11)", () => {
     for (const rule of [1, 2, 3, 4, 5, 8, 9] as const) {
       expect(dmClosedListReason(rule)).toBeNull();
     }
+  });
+});
+
+describe("「닫은 대화」 문구 (D11)", () => {
+  it("이유 줄은 이름을 되풀이하지 않는다: 닫음은 「내가 닫았어요」, 나간 상대는 숨은 까닭(안 읽은 메시지 없음)을 말한다", () => {
+    expect(dmClosedReasonLabel("closed")).toBe("내가 닫았어요");
+    expect(dmClosedReasonLabel("gone")).toBe("안 읽은 메시지가 없어요");
+    // 이름 줄이 이미 「나간 멤버」다.
+    expect(dmClosedReasonLabel("gone")).not.toContain("나간");
+  });
+
+  it("동작 낱말: 닫은 대화는 「다시 열기」, 나간 상대는 풀 닫힘이 없어 「열기」", () => {
+    expect(DM_REOPEN_LABEL).toBe("다시 열기");
+    expect(dmReopenLabelFor("closed")).toBe("다시 열기");
+    expect(dmReopenLabelFor("gone")).toBe("열기");
+  });
+
+  it("제목과 힌트는 한 번씩만 말한다", () => {
+    expect(DM_CLOSED_LIST_LABEL).toBe("닫은 대화");
+    expect(DM_CLOSED_LIST_HINT).toContain("새 메시지가 오면");
+    expect(DM_CLOSED_LIST_HINT).not.toContain("—");
   });
 });

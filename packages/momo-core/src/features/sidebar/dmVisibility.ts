@@ -143,12 +143,22 @@ export const DM_CLOSED_LIST_LABEL = "닫은 대화";
 export const DM_REOPEN_LABEL = "다시 열기";
 
 /** 목록 머리의 한 줄. 닫기는 지우기가 아니라는 것과 돌아오는 조건을 말한다. */
-export const DM_CLOSED_LIST_HINT =
-  "닫은 대화와 나간 멤버와의 대화예요. 닫은 대화는 새 메시지가 오면 돌아와요.";
+export const DM_CLOSED_LIST_HINT = "새 메시지가 오면 닫은 대화는 사이드바로 돌아와요.";
 
-/** 목록 행의 이유 줄. `closed` 는 내가 닫았고, `gone` 은 상대가 나갔다. */
+/**
+ * 목록 행의 이유 줄. `closed` 는 내가 닫았다. `gone` 은 이름이 이미 「나간 멤버」라 이유를 되풀이하지 않고, 왜 숨었는지를 말한다:
+ * 상대가 나갔고 안 읽은 메시지가 없다.
+ */
 export function dmClosedReasonLabel(reason: "closed" | "gone"): string {
-  return reason === "closed" ? "내가 닫았어요" : "상대가 나갔어요";
+  return reason === "closed" ? "내가 닫았어요" : "안 읽은 메시지가 없어요";
+}
+
+/**
+ * 행의 동작 낱말. 내가 닫은 대화는 「다시 열기」(닫힘을 푼다)이고, 나간 상대의 대화는 풀 닫힘이 없다 - 열려 있는 동안만 사이드바에 서고
+ * 다 읽으면 다시 숨는다(D8). 그래서 「열기」다. 「다시 열기」는 돌아와 머문다는 약속처럼 읽힌다.
+ */
+export function dmReopenLabelFor(reason: "closed" | "gone"): string {
+  return reason === "closed" ? DM_REOPEN_LABEL : "열기";
 }
 
 /** 목록이 비었을 때 메뉴가 말하는 한 줄(항목이 없는 메뉴는 문이 아니다). */

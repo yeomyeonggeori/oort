@@ -1,10 +1,11 @@
 import { useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import {
+  DM_CLOSED_LIST_EMPTY,
   DM_CLOSED_LIST_HINT,
   DM_CLOSED_LIST_LABEL,
-  DM_REOPEN_LABEL,
   dmClosedReasonLabel,
+  dmReopenLabelFor,
 } from "@momo/core/features/sidebar/dmVisibility";
 import { Button } from "@/design/ui/button";
 import {
@@ -92,6 +93,12 @@ export function DmClosedMenu({
             <DialogTitle>{DM_CLOSED_LIST_LABEL}</DialogTitle>
             <DialogDescription className="break-keep">{DM_CLOSED_LIST_HINT}</DialogDescription>
           </div>
+          {/* 목록이 열린 채 비면(다른 기기에서 다시 열었다·새 메시지로 돌아왔다) 제목과 힌트만 남지 않게 빈 상태를 말한다. */}
+          {items.length === 0 && (
+            <p className="py-2 text-body text-ink-muted" data-testid="dm-closed-list-empty">
+              {DM_CLOSED_LIST_EMPTY}
+            </p>
+          )}
           <ul className="flex max-h-[50vh] flex-col overflow-y-auto" data-testid="dm-closed-list-items">
             {items.map((item) => (
               <li
@@ -111,14 +118,14 @@ export function DmClosedMenu({
                   variant="outline"
                   size="sm"
                   data-testid="dm-closed-list-reopen"
-                  aria-label={`${item.name}, ${DM_REOPEN_LABEL}`}
+                  aria-label={`${item.name}, ${dmReopenLabelFor(item.reason)}`}
                   onClick={() => {
                     setListOpen(false);
                     onOpenChange(false);
                     onReopen(item);
                   }}
                 >
-                  {DM_REOPEN_LABEL}
+                  {dmReopenLabelFor(item.reason)}
                 </Button>
               </li>
             ))}
