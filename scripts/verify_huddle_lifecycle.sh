@@ -21,7 +21,7 @@ need docker
 need cargo
 need psql
 
-PG_IMAGE="pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
+PG_IMAGE="pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0"
 PROJECT="${HUDDLE_GATE_PROJECT:-hd1-huddle-pg}"
 CONTAINER="${PROJECT}-postgres"
 PG_PORT="${HUDDLE_GATE_POSTGRES_PORT:-19861}"

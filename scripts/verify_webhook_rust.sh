@@ -55,7 +55,7 @@ export PATH="$PSQL_DIR:$PATH"
 PROJECT="${WEBHOOK_RUST_PROJECT:-w1222-webhook-verify}"
 PG_CONTAINER="${PROJECT}-pg"
 PG_PORT="${WEBHOOK_RUST_PG_PORT:-24522}"
-PG_IMAGE="pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
+PG_IMAGE="pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0"
 KEEP_STACK="${WEBHOOK_RUST_KEEP_STACK:-0}"
 
 reclaim() {
