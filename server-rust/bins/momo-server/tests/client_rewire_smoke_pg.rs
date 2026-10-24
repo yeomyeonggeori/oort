@@ -1385,3 +1385,89 @@ async fn an_unconfigured_realtime_rail_fails_closed() {
         "an unset CENT_PROXY_SECRET must deny, never accept any header"
     );
 }
+
+/// #4311 — a connection token never outlives the access-token row it is bound
+/// to, so no connected client holds a token the subscribe proxy already refuses.
+/// The row's `expires_at` is pulled forward by fixture (the JWT stays valid), the
+/// way a session's last minutes look from the server.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_connection_token_never_outlives_its_access_token() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let access = login(&http, &base, &fixture).await["accessToken"]
+        .as_str()
+        .expect("accessToken")
+        .to_string();
+    let channel_name = cent_channel(fixture.workspace, fixture.channel);
+
+    let set_row_life = |seconds: i64| {
+        let su = su.clone();
+        let access = access.clone();
+        async move {
+            sqlx::query(
+                "UPDATE token SET expires_at = now() + make_interval(secs => $2::float8) \
+                  WHERE token_hash = digest($1::text, 'sha256')",
+            )
+            .bind(access)
+            .bind(seconds as f64)
+            .execute(&su)
+            .await
+            .expect("move the access row's expiry")
+            .rows_affected()
+        }
+    };
+
+    // 3 minutes left: shorter than the 5-minute configured TTL, so it must clamp.
+    assert_eq!(set_row_life(180).await, 1);
+    let body: Value = http
+        .post(format!("{base}/v1/auth/realtime-token"))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("realtime-token")
+        .json()
+        .await
+        .expect("body");
+    let claims =
+        decode_connection_token(body["token"].as_str().expect("token"), TEST_CENT_TOKEN_HMAC);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("clock")
+        .as_secs() as i64;
+    assert!(
+        claims.exp as i64 <= now + 180,
+        "exp {} must not pass the row's expiry ({} + 180s)",
+        claims.exp,
+        now
+    );
+    assert!(
+        body["ttlSeconds"].as_i64().expect("ttlSeconds") <= 180,
+        "{body}"
+    );
+    // While the row is alive the proxy still lets the member in.
+    let (_, allowed) =
+        subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &channel_name).await;
+    assert_allowed(&allowed);
+
+    // 10 seconds left: too short to carry a connection. A clear 401 so the client
+    // refreshes the session first, not a token that is dead on arrival.
+    assert_eq!(set_row_life(10).await, 1);
+    let short = http
+        .post(format!("{base}/v1/auth/realtime-token"))
+        .bearer_auth(&access)
+        .send()
+        .await
+        .expect("realtime-token");
+    assert_eq!(short.status().as_u16(), 401);
+
+    // The proxy's own refusal path is unchanged once the row is gone.
+    assert_eq!(set_row_life(-1).await, 1);
+    let (_, after_expiry) =
+        subscribe_proxy(&http, &base, TEST_PROXY_SECRET, &claims, &channel_name).await;
+    assert_denied(&after_expiry, "realtime credential is no longer active");
+}
