@@ -143,12 +143,26 @@ done
 export DATABASE_URL="postgres://momo:momo@127.0.0.1:${PG_PORT}/momo"
 export MOMO_APP_PASSWORD=momo_app_dev_pw
 export PGHOST=127.0.0.1 PGPORT="$PG_PORT" PGDATABASE=momo PGUSER=momo PGPASSWORD=momo
-(
-  cd server-rust
-  for t in sec07_roster_channels_join_pg sec07_channel_management_pg sec07_auth_approval_pg sec07_gateway_pg; do
-    cargo test -p momo-server --test "$t" -- --ignored --test-threads=1 --nocapture
-  done
-)
+# `--ignored` passes with 0 tests if one is deleted or renamed, so each file's
+# executed count is checked against the number it had when #4245 landed.
+run_ported_file() {
+  local file="$1" minimum="$2" out passed
+  out="$(mktemp "${TMPDIR:-/tmp}/momo-sec07-ported-out.XXXXXX")"
+  if ! (cd server-rust && cargo test -p momo-server --test "$file" -- --ignored --test-threads=1 --nocapture) 2>&1 | tee "$out"; then
+    rm -f -- "$out"
+    return 1
+  fi
+  passed="$(sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' "$out" | tail -1)"
+  rm -f -- "$out"
+  if [ -z "$passed" ] || [ "$passed" -lt "$minimum" ]; then
+    echo "[sec07-ported] $file ran ${passed:-0} tests, expected at least $minimum" >&2
+    return 1
+  fi
+}
+run_ported_file sec07_roster_channels_join_pg 4
+run_ported_file sec07_channel_management_pg 9
+run_ported_file sec07_auth_approval_pg 7
+run_ported_file sec07_gateway_pg 14
 
 remove_owned
 CLEANUP_DONE=1
