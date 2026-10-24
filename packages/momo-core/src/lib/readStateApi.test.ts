@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { fetchReadStates, touchChannelViewing, updateReadState } from "./api";
+import {
+  ApiError,
+  closeDm,
+  fetchReadStates,
+  reopenDm,
+  touchChannelViewing,
+  updateReadState,
+} from "./api";
 
 function installHost(): void {
   const session: SessionPort = {
@@ -134,6 +141,115 @@ describe("read-state wire (ADR-0178 / PR #1961 snake_case)", () => {
   });
 });
 
+// ADR-0177 D6/D8/D9 (#4227): two fields join the `GET read-state` rows. The contract the client
+// slices (#4228, #4229) lean on is that the parser keeps THREE states apart for `closedAtSeq`:
+// a number (closed at), `null` (the GET said "not closed") and `undefined` (this response did not
+// say - an older server, the `PUT read-state` response, the realtime frame). If `undefined` ever
+// collapsed into `null`, applying a response that merely lacks the field would reopen every closed
+// DM; if `null` collapsed into `undefined`, a DM could never be seen as reopened.
+describe("read-state wire: DM closure fields (ADR-0177)", () => {
+  const withClosure = {
+    ...WIRE,
+    latest_readable_seq: 8,
+    closed_at_seq: 7,
+  };
+
+  it("숫자는 숫자로 옮긴다: 닫은 워터마크와 읽을 메시지의 끝", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ read_states: [withClosure] }))
+    );
+    const [state] = await fetchReadStates("ws");
+    expect(state?.closedAtSeq).toBe(7);
+    expect(state?.latestReadableSeq).toBe(8);
+    // 옛 필드는 그대로다.
+    expect(state?.latestSeq).toBe(10);
+    expect(state?.markedUnreadBeforeSeq).toBe(3);
+  });
+
+  it("GET 이 null 을 주면 null 이다: 닫지 않았다고 말한 것이다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          read_states: [{ ...WIRE, latest_readable_seq: 0, closed_at_seq: null }],
+        })
+      )
+    );
+    const [state] = await fetchReadStates("ws");
+    expect(state?.closedAtSeq).toBeNull();
+    expect(state).toHaveProperty("closedAtSeq", null);
+    // 0 은 「읽을 메시지가 아직 없다」는 값이지 「모름」이 아니다.
+    expect(state?.latestReadableSeq).toBe(0);
+  });
+
+  it("키가 없으면 undefined 이고 키 자체가 생기지 않는다: 응답이 말하지 않은 것을 null 로 만들지 않는다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ read_states: [WIRE] }))
+    );
+    const [state] = await fetchReadStates("ws");
+    expect(state?.closedAtSeq).toBeUndefined();
+    expect(state?.latestReadableSeq).toBeUndefined();
+    expect(state).not.toHaveProperty("closedAtSeq");
+    expect(state).not.toHaveProperty("latestReadableSeq");
+  });
+
+  it("PUT read-state 응답도 같다: 두 필드를 싣지 않으므로 undefined 로 읽힌다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(WIRE)));
+    const state = await updateReadState("ws", "c-1", 10);
+    expect(state).not.toHaveProperty("closedAtSeq");
+    expect(state).not.toHaveProperty("latestReadableSeq");
+  });
+
+  it("망가진 값은 undefined 다: 닫혔다는 말도 열렸다는 말도 아니다", async () => {
+    installHost();
+    const broken = [
+      { closed_at_seq: -1, latest_readable_seq: -1 },
+      { closed_at_seq: 1.5, latest_readable_seq: 2.5 },
+      { closed_at_seq: "7", latest_readable_seq: "8" },
+      { closed_at_seq: true, latest_readable_seq: true },
+      { closed_at_seq: {}, latest_readable_seq: [] },
+    ];
+    for (const extra of broken) {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => jsonResponse({ read_states: [{ ...WIRE, ...extra }] }))
+      );
+      const [state] = await fetchReadStates("ws");
+      expect(state?.channelId, JSON.stringify(extra)).toBe("c-1");
+      expect(state, JSON.stringify(extra)).not.toHaveProperty("closedAtSeq");
+      expect(state, JSON.stringify(extra)).not.toHaveProperty("latestReadableSeq");
+    }
+  });
+
+  it("두 필드는 항목마다 독립이다: 한 응답 안에서 닫은 DM, 닫지 않은 DM, 옛 모양이 섞여도 각자 제 것을 가진다", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        jsonResponse({
+          read_states: [
+            { ...WIRE, channel_id: "closed", latest_readable_seq: 5, closed_at_seq: 5 },
+            { ...WIRE, channel_id: "open", latest_readable_seq: 9, closed_at_seq: null },
+            { ...WIRE, channel_id: "old" },
+          ],
+        })
+      )
+    );
+    const states = await fetchReadStates("ws");
+    expect(states.map((s) => [s.channelId, s.closedAtSeq, s.latestReadableSeq])).toEqual([
+      ["closed", 5, 5],
+      ["open", null, 9],
+      ["old", undefined, undefined],
+    ]);
+  });
+});
+
 describe("touchChannelViewing", () => {
   it("PUT .../channels/{ch}/viewing 를 본문 없이 보낸다", async () => {
     installHost();
@@ -157,5 +273,37 @@ describe("touchChannelViewing", () => {
     await expect(touchChannelViewing("w", "c")).rejects.toMatchObject({
       status: 404,
     });
+  });
+});
+
+describe("DM 닫기 경로 (ADR-0177 D7, #4227)", () => {
+  it("닫기는 PUT …/closure 에 seenSeq 를 싣는다", async () => {
+    installHost();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await closeDm("w-1", "c-1", 42);
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toBe("https://oort.test/v1/workspaces/w-1/channels/c-1/closure");
+    expect(call?.[1]?.method).toBe("PUT");
+    expect(putBody(fetchMock)).toEqual({ seenSeq: 42 });
+  });
+
+  it("다시 열기는 같은 경로의 DELETE 이고 본문이 없다", async () => {
+    installHost();
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    await reopenDm("w-1", "c-1");
+    const call = fetchMock.mock.calls[0];
+    expect(String(call?.[0])).toBe("https://oort.test/v1/workspaces/w-1/channels/c-1/closure");
+    expect(call?.[1]?.method).toBe("DELETE");
+    expect(call?.[1]?.body).toBeUndefined();
+  });
+
+  it("404 는 ApiError(status 404)로 던진다 - 호출부가 항목별로 갈라 읽는다", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: "dm not found" }, 404)));
+    const caught = await closeDm("w-1", "c-1", 1).catch((error: unknown) => error);
+    expect(caught).toBeInstanceOf(ApiError);
+    expect((caught as ApiError).status).toBe(404);
   });
 });

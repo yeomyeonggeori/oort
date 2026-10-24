@@ -113,7 +113,7 @@ export type ChannelActionKey =
  *   copy   이름 · 링크 · ID (행 전용, 제목 「복사」)
  *   place  섹션으로 이동 (행 전용, 채널만)
  *   state  읽음 · 읽지 않음 · 알림 · 기억 · 별표
- *   close  사이드바에서 닫기 (행 전용, DM 만)
+ *   close  대화 닫기 (행 전용, DM 만)
  *   danger 채널 나가기
  */
 export type ChannelActionCluster =

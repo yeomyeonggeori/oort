@@ -13,6 +13,8 @@ import { ShellNavProvider } from "@/app/shellNav";
 import { Sidebar } from "./Sidebar";
 import { REVIVAL_RETRY_DELAY_MS } from "./dmRevival";
 import { GONE_UNREAD_RETRY_DELAY_MS } from "./goneUnreadVerdicts";
+import { DM_CLOSURE_CACHE_KEY, DM_CLOSURE_MIGRATED_KEY, resetDmClosureFoldForTest } from "./dmClosureModel";
+import { resetDmMigrationForTest } from "./useDmVisibility";
 import {
   closeDmOnDevice,
   closedAtSeqOf,
@@ -173,10 +175,27 @@ const revival = vi.hoisted(() => ({
   pages: new Map<string, "fail" | "pending" | RevivalPage | ((after: number | undefined) => RevivalPage)>(),
   calls: [] as Array<{ channelId: string; after?: number; limit?: number }>,
 }));
+/** DM 닫기 경로의 대역(ADR-0177 D7, #4228). `fail` 이 상태 코드면 그 코드로 거절하고, 네트워크 실패면 `"network"`. */
+const closure = vi.hoisted(() => ({
+  calls: [] as Array<{ kind: "PUT" | "DELETE"; channelId: string; seenSeq?: number }>,
+  fail: null as number | "network" | null,
+}));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  const answer = () => {
+    if (closure.fail === "network") throw new Error("offline");
+    if (closure.fail !== null) throw new actual.ApiError(closure.fail, "x");
+  };
   return {
     ...actual,
+    closeDm: async (_ws: string, channelId: string, seenSeq: number) => {
+      closure.calls.push({ kind: "PUT", channelId: channelId.toLowerCase(), seenSeq });
+      answer();
+    },
+    reopenDm: async (_ws: string, channelId: string) => {
+      closure.calls.push({ kind: "DELETE", channelId: channelId.toLowerCase() });
+      answer();
+    },
     fetchMessages: async (_ws: string, channelId: string, query: { after?: number; limit?: number } = {}) => {
       revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after, limit: query.limit });
       const entry = revival.pages.get(channelId.toLowerCase()) ?? [{ type: "text" }];
@@ -351,6 +370,10 @@ beforeEach(() => {
   liveness.byAgent.clear();
   revival.pages.clear();
   revival.calls.length = 0;
+  closure.calls.length = 0;
+  closure.fail = null;
+  resetDmClosureFoldForTest();
+  resetDmMigrationForTest();
   touch.hoverNone = false;
   localStorage.clear();
   reloadClosedDmsForTest(null);
@@ -396,15 +419,34 @@ const hover = (el: HTMLElement) =>
   act(() => {
     el.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, relatedTarget: document.body }));
   });
-/** DM 구역 끝의 「나간 멤버와의 대화 N개」 줄(#4252). */
-const goneToggle = (host: HTMLElement) =>
-  host.querySelector<HTMLButtonElement>('[data-testid="gone-dm-toggle"]');
-/** 접힌 나간 멤버 DM 을 펼친다. 줄이 없으면 시험이 실패한다(접힌 대화가 없다는 뜻이다). */
-const expandGone = (host: HTMLElement) => {
-  const toggle = goneToggle(host);
-  expect(toggle, "나간 멤버와의 대화 줄").not.toBeNull();
-  if (toggle!.getAttribute("aria-expanded") !== "true") act(() => toggle!.click());
+/**
+ * 나간 멤버 DM 은 안 읽은 것이 없으면 목록에 없다(#4252, ADR-0177 D11). 그 행의 이름·아바타를 재려는 시험은 멘션을 하나 얹어 행이
+ * 서게 한다(멘션은 사람이 직접 남긴 신호라 항상 보인다, 코어 5번).
+ */
+function showGhostRow(): void {
+  setReadStates([{ ...readState(DM_ID(6), 1, 1), mentionCount: 1 }]);
+}
+const unmountForRemount = () => {
+  act(() => mountedRoot?.unmount());
+  mountedRoot = null;
+  mountedHost?.remove();
+  mountedHost = null;
 };
+/**
+ * DM 구역 머리 「⋯」 메뉴가 세는 「닫은 대화」 수(ADR-0177 D11, #4228). 「나간 멤버와의 대화 N개」 줄은 없어졌다: 나간 상대의 DM 은 안
+ * 읽은 것이 없으면 목록에서 빠지고, 내가 닫은 대화와 함께 이 목록으로 간다. 닫은 대화가 없으면 메뉴 문이 서지 않는다(0).
+ */
+const closedCount = (host: HTMLElement) => {
+  // 머리의 호버 클러스터는 쉴 때 DOM 에 없다(`data-section-action`): 호버해야 문이 선다.
+  const header = dmHeader(host);
+  if (header !== null) hover(header);
+  return Number(
+    host.querySelector<HTMLElement>('[data-testid="dm-section-menu"]')?.getAttribute("data-closed-count") ?? "0"
+  );
+};
+/** 이 판에는 「나간 멤버와의 대화 N개」 줄이 어디에도 없다(수용기준 12). */
+const foldLine = (host: HTMLElement) =>
+  host.querySelector('[data-testid="gone-dm-toggle"]') ?? (host.textContent?.includes("나간 멤버와의 대화") ? host : null);
 
 describe("사이드바 DM 구획 (#3662)", () => {
   it("「대화」 줄(nav-chat)은 없다 — 구획 A는 인박스·멤버부터다", async () => {
@@ -499,17 +541,21 @@ describe("사이드바 DM 구획 (#3662)", () => {
     const selfRow = dmRow(host, DM_ID(5));
     expect(selfRow.textContent).toContain("곽성재 (나)");
     expect(selfRow.querySelector('[data-testid="dm-avatar"]')?.textContent).toBe("곽");
-    // 명부에 없는 상대의 DM 은 안 읽음이 없으면 기본으로 접혀 있다(#4252): 펼친 줄 아래에서 이름을 잰다.
+    // 명부에 없는 상대의 DM 은 안 읽음이 없으면 목록에 없다(#4252): 「닫은 대화」에 있다. 이름은 멘션이 행을 세운 판에서 잰다.
     expect(dmRow(host, DM_ID(6))).toBeNull();
-    expandGone(host);
-    const ghostRow = dmRow(host, DM_ID(6));
+    expect(closedCount(host)).toBe(1);
+    unmountForRemount();
+    showGhostRow();
+    const withGhost = await mount();
+    await settle();
+    const ghostRow = dmRow(withGhost, DM_ID(6));
     expect(ghostRow.textContent).toContain("나간 멤버");
     expect(ghostRow.querySelector('[data-testid="dm-avatar"]')?.getAttribute("data-avatar-kind")).toBe("unknown");
   });
 });
 
 // =============================================================================
-// DM 호버 X · 사이드바에서 닫기 (#3963)
+// DM 호버 X · 대화 닫기 (#3963)
 // =============================================================================
 
 /** 브라우저가 포인터가 행에 들어올 때 쏘는 것: 네이티브 mouseenter (SidebarRow 가 이것을 듣는다). */
@@ -557,7 +603,7 @@ describe("DM 호버 X (#3963)", () => {
     const host = await mount();
     enterRow(host, DM_ID(1));
     const x = closeButton(host)!;
-    expect(x.getAttribute("aria-label")).toBe("이도현, 사이드바에서 닫기");
+    expect(x.getAttribute("aria-label")).toBe("이도현, 대화 닫기");
     expect(x.tabIndex).toBe(-1);
     // 링크 안의 버튼이 아니다: 앵커 안의 상호작용 콘텐츠는 클릭이 어느 쪽인지 브라우저마다 다르다.
     expect(dmRow(host, DM_ID(1)).contains(x)).toBe(false);
@@ -684,7 +730,7 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
     expect(closeButton(host)).toBeNull();
   });
 
-  it("우클릭 메뉴의 「사이드바에서 닫기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
+  it("우클릭 메뉴의 「대화 닫기」도 같은 규칙이다 — 안 읽음이 있으면 항목이 없고 읽은 DM 에는 있다", async () => {
     setReadStates([readState(DM_ID(1), 12, 10), readState(DM_ID(2), 9)]);
     const host = await mount();
     rightClickRow(host, DM_ID(1));
@@ -695,7 +741,7 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
     rightClickRow(host, DM_ID(2));
     await flush();
     expect(menuOpen()).toBe(true);
-    expect(menuCloseItem()?.textContent).toContain("사이드바에서 닫기");
+    expect(menuCloseItem()?.textContent).toContain("대화 닫기");
   });
 
   it("지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음이 있던 DM 이어도 닫을 수 있다", async () => {
@@ -709,6 +755,8 @@ describe("DM 닫기는 안 읽음이 없을 때만 (#3963, 소유자 결정 2026
   it("읽음 투영이 오는 중이거나 못 읽었으면 안 읽음이 없어도 X 가 없다(기준 seq 가 없다)", async () => {
     readStatesQuery.isPending = true;
     readStatesQuery.data = undefined;
+    // 마지막 투영의 사본이 있어야 행이 선다(사본도 원장도 없으면 판정을 미룬다, D8).
+    localStorage.setItem(DM_CLOSURE_CACHE_KEY, JSON.stringify({ [WS]: { [DM_ID(2)]: [null, 0, 0, 0] } }));
     const host = await mount();
     enterRow(host, DM_ID(2));
     expect(closeButton(host)).toBeNull();
@@ -832,6 +880,7 @@ describe("DM 닫기: 사라지고, 돌아온다 (#3963)", () => {
     enterRow(host, DM_ID(1));
     act(() => closeButton(host)!.click());
     const empty = host.querySelector('[data-testid="dm-section-empty"]');
+    if (empty === null) console.log("DBG", host.querySelector('[data-testid="sidebar-section-dms"]')?.outerHTML.slice(0, 1500));
     expect(empty).not.toBeNull();
     expect(empty!.textContent).toContain("닫은 대화는 새 메시지가 오면 다시 나타납니다");
     expect(empty!.textContent).not.toContain("아직 대화가 없습니다");
@@ -863,6 +912,7 @@ describe("닫기는 준비된 기준 위에서만 내민다 (design-review R1 M1
     // 「최신 > 0」이 되어 방금 닫은 대화가 되살아났다(실측 4.37초). 기준이 없으면 문을 열지 않는다.
     readStatesQuery.isPending = true;
     readStatesQuery.data = undefined;
+    localStorage.setItem(DM_CLOSURE_CACHE_KEY, JSON.stringify({ [WS]: { [DM_ID(1)]: [null, 0, 0, 0] } }));
     const host = await mount();
     enterRow(host, DM_ID(1));
     expect(closeButton(host)).toBeNull();
@@ -1018,22 +1068,6 @@ describe("닫은 DM 은 사람이 읽을 새 메시지가 올 때만 돌아온�
     expect(rowIds(host)).toContain(DM_ID(2));
   });
 
-  it("투영에 행이 없는 DM(나간 멤버 등)은 닫으면 닫힌 채다", async () => {
-    // 가설 1 의 기각: 투영에 항목이 없으면 latestSeq 는 undefined -> 0 이고 닫을 때도 0 이라 `0 <= 0` 이다.
-    setReadStates([readState(DM_ID(1), 4)]);
-    const host = await mount();
-    // 나간 멤버 DM 은 기본으로 접혀 있다(#4252). 닫는 길은 그대로이므로 펼친 줄 아래에서 닫는다.
-    expect(rowIds(host)).not.toContain(DM_ID(6));
-    expandGone(host);
-    expect(rowIds(host)).toContain(DM_ID(6));
-    enterRow(host, DM_ID(6));
-    act(() => closeButton(host)!.click());
-    expect(rowIds(host)).not.toContain(DM_ID(6));
-    await rerender();
-    await flush();
-    expect(rowIds(host)).not.toContain(DM_ID(6));
-    expect(revival.calls).toEqual([]);
-  });
 });
 
 describe("투영을 못 읽은 동안 `/` 폴백이 닫은 DM 의 원장을 지우지 않는다 (#4142)", () => {
@@ -1128,9 +1162,9 @@ describe("DM 행의 상태 점 (#3964)", () => {
 
   it("**회색 점은 에이전트에만 선다** — 평범한 사람·나간 멤버에는 점이 없다", async () => {
     liveness.byAgent.set(PEER_AGENT, "inactive");
+    showGhostRow();
     const host = await mount();
     await settle();
-    expandGone(host);
     for (const id of [DM_ID(1), DM_ID(2), DM_ID(6)]) {
       expect(dotOf(host, id)).toBeNull();
     }
@@ -1167,9 +1201,9 @@ describe("DM 행의 상태 점 (#3964)", () => {
   });
 
   it("아바타를 알아볼 수 없는 행(나간 멤버)은 점 하나가 아니라 기본 아바타다", async () => {
+    showGhostRow();
     const host = await mount();
     await settle();
-    expandGone(host);
     const ghost = dmRow(host, DM_ID(6));
     expect(ghost.querySelector('[data-testid="dm-avatar"]')?.getAttribute("data-avatar-kind")).toBe("unknown");
     expect(ghost.querySelector('[data-testid="dm-avatar-default"]')).not.toBeNull();
@@ -1198,59 +1232,20 @@ describe("나간 멤버와의 대화 (#4252)", () => {
   const GONE_DM_B = DM_ID(7);
   const ghostB = dm(GONE_DM_B, [GHOST_B]);
 
-  it("나간 멤버 DM 은 안 읽음이 없으면 기본으로 접히고, 구역 끝의 줄이 수를 센다", async () => {
+  it("나간 멤버 DM 은 안 읽음이 없으면 목록에서 빠지고 「⋯ › 닫은 대화」로 간다 - 「나간 멤버와의 대화 N개」 줄은 어디에도 없다 (ADR-0177 D11, AC 12)", async () => {
     const host = await mount();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    const toggle = goneToggle(host);
-    expect(toggle?.textContent).toBe("나간 멤버와의 대화 1개");
-    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
+    expect(closedCount(host)).toBe(1);
+    expect(foldLine(host)).toBeNull();
     // 명부에 있는 상대 · 나 혼자 · 에이전트의 DM 은 그대로 있다.
     for (const n of [1, 2, 3, 4, 5]) expect(rowIds(host)).toContain(DM_ID(n));
-  });
-
-  it("줄은 DM 구역의 마지막 줄이다 (모든 DM 행 뒤)", async () => {
-    const host = await mount();
-    const toggleItem = goneToggle(host)!.closest("li")!;
-    const lastRow = dmRow(host, DM_ID(5)).closest("li")!;
-    expect(lastRow.compareDocumentPosition(toggleItem) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(toggleItem.nextElementSibling).toBeNull();
   });
 
   it("접힌 나간 멤버가 여럿이면 수를 센다", async () => {
     channelsQuery.groups = { channels: [general], dms: [...dms, ghostB] };
     channelsQuery.data = [general, ...dms, ghostB];
     const host = await mount();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 2개");
-  });
-
-  it("줄을 누르면 접힌 대화가 줄 **아래**에 펼쳐지고, 다시 누르면 접힌다", async () => {
-    const host = await mount();
-    const toggle = goneToggle(host)!;
-    act(() => toggle.click());
-    expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    const list = host.querySelector<HTMLElement>('[data-testid="gone-dm-list"]')!;
-    expect(toggle.getAttribute("aria-controls")).toBe(list.id);
-    expect(list.contains(dmRow(host, GONE_DM))).toBe(true);
-    // 줄이 먼저고 접힌 행이 그 뒤다(눌렀던 줄이 손가락 밑에 그대로 있다).
-    expect(
-      toggle.compareDocumentPosition(dmRow(host, GONE_DM)) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy();
-    expect(dmRow(host, GONE_DM).textContent).toContain("나간 멤버");
-    act(() => toggle.click());
-    expect(toggle.getAttribute("aria-expanded")).toBe("false");
-    expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(toggle.hasAttribute("aria-controls")).toBe(false);
-  });
-
-  it("줄은 행과 같은 ↑↓ 순회에 든다 (키보드로 닿는다)", async () => {
-    const host = await mount();
-    expect(goneToggle(host)!.hasAttribute("data-sidebar-row")).toBe(true);
-  });
-
-  it("접힌 나간 멤버 DM 의 행을 펼쳐서 열면 그 대화로 간다 (접힘은 진열일 뿐이다)", async () => {
-    const host = await mount();
-    expandGone(host);
-    expect(dmRow(host, GONE_DM).getAttribute("href")).toBe(`/c/${GONE_DM}`);
+    expect(closedCount(host)).toBe(2);
   });
 
   it("안 읽은 메시지가 있으면 접히지 않고, 줄도 없다", async () => {
@@ -1258,7 +1253,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     const host = await mount();
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
     expect(dmRow(host, GONE_DM).querySelector('[data-testid="unread-count"]')).not.toBeNull();
   });
 
@@ -1266,7 +1261,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     setReadStates([{ ...readState(GONE_DM, 5, 5), mentionCount: 1 }]);
     const host = await mount();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
   it("읽으면 다시 접히고, 새 메시지가 오면 다시 보인다", async () => {
@@ -1277,22 +1272,22 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     setReadStates([readState(GONE_DM, 8, 8)]);
     await rerender();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
     setReadStates([readState(GONE_DM, 9, 8)]);
     await rerender();
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
   it("지금 열려 있는 나간 멤버 DM 은 접히지 않고, 다른 곳으로 옮겨 가면 접힌다", async () => {
     const host = await mount(`/c/${GONE_DM}`);
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
     act(() => dmRow(host, DM_ID(1)).click());
     await settle();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
   });
 
   it("명부를 아직 못 받았으면 접지 않는다 — 「불러오는 중」은 나간 멤버가 아니다", async () => {
@@ -1300,18 +1295,18 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     const host = await mount();
     expect(rowIds(host)).toContain(GONE_DM);
     expect(dmRow(host, GONE_DM).textContent).toContain("불러오는 중");
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
     rosterPhase.pending = false;
     await rerender();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
   });
 
   it("명부 조회가 실패했으면 접지 않고, 이름도 「나간 멤버」라고 거짓말하지 않는다 (「불러오는 중」, 명부를 믿을 수 있는지는 한 함수가 답한다)", async () => {
     rosterPhase.failed = true;
     const host = await mount();
     for (const n of [1, 2, 3, 4, 5, 6]) expect(rowIds(host)).toContain(DM_ID(n));
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
     // 이도현·박서연까지 「나간 멤버」로 읽히던 거짓(design-review M2): 명부를 못 받았으면 이름은 아직 모른다.
     expect(host.textContent).not.toContain("나간 멤버");
     expect(dmRow(host, DM_ID(1)).textContent).toContain("불러오는 중");
@@ -1322,7 +1317,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     readStatesQuery.data = undefined;
     const host = await mount();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
   it("읽음 투영이 오는 중이면 접힌 채 기다린다 (도착하는 순간 나타났다 사라지지 않는다)", async () => {
@@ -1330,24 +1325,16 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     readStatesQuery.data = undefined;
     const host = await mount();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    // 투영이 오는 동안은 판정을 미룬 채 숨어 있을 뿐이다: 목록(닫은 대화)에는 아직 없다.
+    expect(closedCount(host)).toBe(0);
+    expect(foldLine(host)).toBeNull();
   });
 
-  it("닫기 원장과 겹치지 않는다: X 로 닫은 나간 멤버 DM 은 접힌 줄의 수에 들지 않는다", async () => {
+  it("닫기 원장과 겹쳐도 한 번만 센다: X 로 닫은 나간 멤버 DM 은 「닫은 대화」에 하나로 든다", async () => {
     closeDmOnDevice(WS, GONE_DM, 0);
     const host = await mount();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
-    expect(closedAtSeqOf(closedDmsFor(WS), GONE_DM)).toBe(0);
-  });
-
-  it("펼친 줄 아래에서 X 로 닫으면 접힌 줄에서도 빠진다", async () => {
-    const host = await mount();
-    expandGone(host);
-    enterRow(host, GONE_DM);
-    act(() => closeButton(host)!.click());
-    expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(1);
     expect(closedAtSeqOf(closedDmsFor(WS), GONE_DM)).toBe(0);
   });
 
@@ -1357,16 +1344,18 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     const host = await mount();
     await flush();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
-  it("나간 멤버뿐인 구역: 「아직 대화가 없습니다」는 서지 않고 접힌 줄만 선다 (한 화면이 「없다」와 「1개 있다」를 같이 말하지 않는다)", async () => {
+  it("나간 멤버뿐인 구역: 「아직 대화가 없습니다」는 서지 않고 닫은 대화를 말한다 (한 화면이 「없다」와 「있다」를 같이 말하지 않는다)", async () => {
     channelsQuery.groups = { channels: [], dms: [dms[5]] };
     channelsQuery.data = [dms[5]];
     const host = await mount("/c/none");
-    expect(host.querySelector('[data-testid="dm-section-empty"]')).toBeNull();
+    expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
+      "닫은 대화는 새 메시지가 오면 다시 나타납니다"
+    );
     expect(host.textContent).not.toContain("아직 대화가 없습니다");
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
   });
 
   it("DM 이 하나도 없으면 빈 안내는 예전 그대로다 (접힌 줄이 없으니 모순이 없다)", async () => {
@@ -1376,10 +1365,10 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
       "아직 대화가 없습니다"
     );
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
-  it("닫은 DM 과 접힌 나간 멤버가 함께 있으면 닫은 대화 힌트가 서고 접힌 줄이 그 뒤에 선다 (두 말은 모순이 아니다)", async () => {
+  it("닫은 DM 과 나간 멤버가 함께 있으면 둘 다 「닫은 대화」에 들고 힌트가 한 번 선다", async () => {
     channelsQuery.groups = { channels: [], dms: [dms[0], dms[5]] };
     channelsQuery.data = [dms[0], dms[5]];
     closeDmOnDevice(WS, DM_ID(1), 3);
@@ -1388,7 +1377,7 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     expect(host.querySelector('[data-testid="dm-section-empty"]')?.textContent).toContain(
       "닫은 대화는 새 메시지가 오면 다시 나타납니다"
     );
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(2);
   });
 
   it("채널이 없을 때 `/` 는 접힌 나간 멤버 DM 을 열지 않고 다음 DM 을 연다", async () => {
@@ -1399,85 +1388,9 @@ describe("나간 멤버와의 대화 (#4252)", () => {
     const host = await mount("/");
     expect(rowIds(host)).toEqual([DM_ID(1)]);
     expect(dmRow(host, DM_ID(1)).querySelector('[data-testid="unread-count"]')).toBeNull();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
   });
 
-  it("펼친 목록에서 접힌 행을 열어도 행은 제자리에 머문다: 같은 노드·같은 목록·캐럿 유지, 줄의 수도 그대로 (design-review H1)", async () => {
-    // 예전에는 열리는 순간 행이 접힘에서 빠져 위 목록으로 옮겨 가며 리마운트됐다: 눌린 링크가 사라져 캐럿이 <body> 로 떨어지고
-    // 포인터는 행이 점프하는 것을 봤다.
-    const host = await mount();
-    expandGone(host);
-    const link = dmRow(host, GONE_DM);
-    act(() => link.focus());
-    expect(document.activeElement).toBe(link);
-    act(() => link.click());
-    await settle();
-    const after = dmRow(host, GONE_DM);
-    expect(after).toBe(link);
-    expect(after.isConnected).toBe(true);
-    expect(document.activeElement).toBe(after);
-    expect(after.getAttribute("aria-current")).toBe("page");
-    expect(after.closest('[data-testid="gone-dm-list"]')).not.toBeNull();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
-  });
-
-  it("펼친 채 다른 대화로 옮겨 가도 접힌 행은 그 자리에 있다 (선택 표시만 바뀐다)", async () => {
-    const host = await mount();
-    expandGone(host);
-    act(() => dmRow(host, GONE_DM).click());
-    await settle();
-    expect(dmRow(host, GONE_DM).getAttribute("aria-current")).toBe("page");
-    act(() => dmRow(host, DM_ID(1)).click());
-    await settle();
-    const row = dmRow(host, GONE_DM);
-    expect(row.closest('[data-testid="gone-dm-list"]')).not.toBeNull();
-    expect(row.getAttribute("aria-current")).toBeNull();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
-  });
-
-  it("줄을 접으면 열린 나간 멤버 행이 위 목록으로 올라오고, 줄은 남은 수를 센다. 다시 펼치면 제자리로 돌아간다", async () => {
-    channelsQuery.groups = { channels: [general], dms: [...dms, ghostB] };
-    channelsQuery.data = [general, ...dms, ghostB];
-    const host = await mount(`/c/${GONE_DM}`);
-    // 접힌 채: 열린 행은 위, 줄은 남은 하나.
-    expect(dmRow(host, GONE_DM).closest('[data-testid="gone-dm-list"]')).toBeNull();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
-    // 펼치면 열린 행도 접힌 목록의 제자리로 들어간다(둘).
-    expandGone(host);
-    expect(dmRow(host, GONE_DM).closest('[data-testid="gone-dm-list"]')).not.toBeNull();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 2개");
-    // 접으면 다시 위로.
-    act(() => goneToggle(host)!.click());
-    expect(dmRow(host, GONE_DM).closest('[data-testid="gone-dm-list"]')).toBeNull();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
-  });
-
-  it("줄을 펼치는 순간 접힌 목록이 보이게 스크롤을 맞춘다 (목록 맨 끝의 줄이라 결과가 화면 밖에 서기 쉽다, design-review M1)", async () => {
-    const reveals: Element[] = [];
-    HTMLElement.prototype.scrollIntoView = function (this: Element, options?: unknown) {
-      reveals.push(this);
-      expect(options).toEqual({ block: "nearest" });
-    };
-    try {
-      const host = await mount();
-      expect(reveals).toEqual([]);
-      expandGone(host);
-      expect(reveals.map((el) => el.id)).toEqual(["sidebar-gone-dm-list"]);
-      // 접을 때는 아무것도 옮기지 않는다.
-      act(() => goneToggle(host)!.click());
-      expect(reveals).toHaveLength(1);
-    } finally {
-      delete (HTMLElement.prototype as { scrollIntoView?: unknown }).scrollIntoView;
-    }
-  });
-
-  it("DM 구획을 접으면 줄도 함께 접힌다 (구획의 문법)", async () => {
-    const host = await mount();
-    act(() => host.querySelector<HTMLButtonElement>('[data-testid="section-collapse-dms"]')!.click());
-    expect(goneToggle(host)).toBeNull();
-    act(() => host.querySelector<HTMLButtonElement>('[data-testid="section-collapse-dms"]')!.click());
-    expect(goneToggle(host)).not.toBeNull();
-  });
 });
 
 // =============================================================================
@@ -1505,7 +1418,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     const host = await mount();
     await settle();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
     // 마지막으로 읽은 seq 뒤를 한 번만 읽는다.
     expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 5, limit: 200 }]);
   });
@@ -1516,7 +1429,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     const host = await mount();
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
   it("안 읽은 기계 메시지가 50~199건이어도 접힌다: 서버가 한 쪽에 줄 수 있는 최대(200건)까지 읽는다 (design-review M-A)", async () => {
@@ -1527,7 +1440,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
       const host = await mount();
       await settle();
       expect({ n, shown: rowIds(host).includes(GONE_DM) }).toEqual({ n, shown: false });
-      expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+      expect(closedCount(host)).toBe(1);
       expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 5, limit: 200 }]);
       act(() => mountedRoot?.unmount());
       mountedRoot = null;
@@ -1542,7 +1455,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     const host = await mount();
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
   it("판정이 오는 중이면 접힌 채다 (읽는 중에 깜빡이며 나타나지 않는다)", async () => {
@@ -1551,7 +1464,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     const host = await mount();
     await settle();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
   });
 
   it("닫은 뒤 사람 글로 되살아나 읽은 DM 에 기계 메시지만 새로 오면 접힌다: 원장 항목이 남아 있어도 후보에서 빼지 않는다 (design-review 3차 재확인 High)", async () => {
@@ -1572,7 +1485,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     await settle();
     await flush();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
     // (c) 기계 메시지 세 건이 새로 온다(6~8): 안 읽은 사람 글이 없으니 접힌 채여야 한다.
     revival.calls.length = 0;
     setReadStates([readState(GONE_DM, 8, 5)]);
@@ -1580,7 +1493,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     await settle();
     await flush();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
     // 마지막으로 읽은 seq(5) 뒤를 이 훅이 읽었다(되살림은 닫을 때 3 뒤를 읽는다).
     expect(callsFor(GONE_DM)).toContainEqual({ channelId: GONE_DM, after: 5, limit: 200 });
     // 새 쪽에 사람 글이 오면 도로 보인다.
@@ -1601,7 +1514,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     await settle();
     await flush();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(1);
     // 같은 URL(after=3)이 두 번 나가지 않는다: 되살림의 한 번(limit 50)뿐이다.
     expect(callsFor(GONE_DM)).toEqual([{ channelId: GONE_DM, after: 3, limit: 50 }]);
   });
@@ -1612,7 +1525,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     const host = await mount();
     await waitRetry();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
   });
 
   it("메시지를 읽지 않는 DM: 멘션 · 사람이 직접 한 「여기부터 안 읽음」 · 안 읽음이 없는 DM (멘션과 표시는 항상 보인다)", async () => {
@@ -1628,7 +1541,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
     expect(rowIds(host)).toContain(GONE_DM_B);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
     expect(callsFor(GONE_DM)).toEqual([]);
     expect(callsFor(GONE_DM_B)).toEqual([]);
   });
@@ -1637,7 +1550,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     setReadStates([readState(GONE_DM, 5, 5), readState(DM_ID(1), 9, 4)]);
     const host = await mount();
     await settle();
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
     expect(revival.calls).toEqual([]);
   });
 
@@ -1652,7 +1565,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     await rerender();
     await settle();
     expect(rowIds(host)).toContain(GONE_DM);
-    expect(goneToggle(host)).toBeNull();
+    expect(closedCount(host)).toBe(0);
     expect(callsFor(GONE_DM).map((call) => call.after)).toEqual([5, 5]);
   });
 
@@ -1698,7 +1611,7 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
     setReadStates([readState(GONE_DM, 8, 8)]);
     await rerender();
     expect(rowIds(host)).not.toContain(GONE_DM);
-    expect(goneToggle(host)?.textContent).toBe("나간 멤버와의 대화 1개");
+    expect(closedCount(host)).toBe(1);
   });
 });
 
@@ -1708,65 +1621,6 @@ describe("나간 멤버 DM 의 안 읽음은 사람이 읽을 것이어야 보�
 
 describe("나간 멤버와의 대화 줄: 캐럿과 실패의 이유 (#4252)", () => {
   const GONE_DM = DM_ID(6);
-
-  it("접힌 대화가 하나뿐이고 그것이 열려 있을 때 줄을 접으면 캐럿이 열린 행으로 간다 (줄이 눌린 채 사라진다)", async () => {
-    const host = await mount();
-    expandGone(host);
-    act(() => dmRow(host, GONE_DM).click());
-    await settle();
-    const toggle = goneToggle(host)!;
-    act(() => toggle.focus());
-    expect(document.activeElement).toBe(toggle);
-    // 키보드의 Enter·Space 는 포커스된 버튼의 click 이다.
-    act(() => toggle.click());
-    await nextFrame();
-    expect(goneToggle(host)).toBeNull();
-    const row = dmRow(host, GONE_DM);
-    expect(row.closest('[data-testid="gone-dm-list"]')).toBeNull();
-    expect(row.getAttribute("aria-current")).toBe("page");
-    expect(document.activeElement).toBe(row);
-  });
-
-  it("접힌 대화가 둘일 때 줄을 접어도 줄이 남아 캐럿은 줄에 있다 (사라지지 않으면 넘기지 않는다)", async () => {
-    const ghostB = dm(DM_ID(7), ["00000000-0000-7000-8000-000000000198"]);
-    channelsQuery.groups = { channels: [general], dms: [...dms, ghostB] };
-    channelsQuery.data = [general, ...dms, ghostB];
-    const host = await mount();
-    expandGone(host);
-    act(() => dmRow(host, GONE_DM).click());
-    await settle();
-    const toggle = goneToggle(host)!;
-    act(() => toggle.focus());
-    act(() => toggle.click());
-    await nextFrame();
-    expect(goneToggle(host)).toBe(toggle);
-    expect(document.activeElement).toBe(toggle);
-  });
-
-  it("열린 행 없이 줄에 캐럿이 있는 채 접힌 대화가 사라지면(안 읽은 사람 글이 와서 보이게 됐다) 줄 바로 위의 행으로 간다", async () => {
-    const host = await mount();
-    const toggle = goneToggle(host)!;
-    act(() => toggle.focus());
-    setReadStates([readState(GONE_DM, 8, 5)]);
-    await rerender();
-    await settle();
-    await nextFrame();
-    expect(goneToggle(host)).toBeNull();
-    expect(rowIds(host)).toContain(GONE_DM);
-    expect(document.activeElement).toBe(dmRow(host, DM_ID(5)));
-  });
-
-  it("줄에 캐럿이 없으면 줄이 사라져도 캐럿을 옮기지 않는다", async () => {
-    const host = await mount();
-    const other = dmRow(host, DM_ID(1));
-    act(() => other.focus());
-    setReadStates([readState(GONE_DM, 8, 5)]);
-    await rerender();
-    await settle();
-    await nextFrame();
-    expect(goneToggle(host)).toBeNull();
-    expect(document.activeElement).toBe(other);
-  });
 
   it("명부 조회가 실패하면 DM 구역이 이유와 다시 시도를 말한다 (design-review H2)", async () => {
     rosterPhase.failed = true;
@@ -1802,7 +1656,7 @@ describe("나간 멤버와의 대화 줄: 캐럿과 실패의 이유 (#4252)", (
     readStatesQuery.data = undefined;
     const host = await mount();
     const notice = host.querySelector<HTMLElement>('[data-testid="read-state-error"]');
-    expect(notice?.textContent).toContain("안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요.");
+    expect(notice?.textContent).toContain("안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요.");
     expect(rowIds(host)).toContain(GONE_DM);
     act(() => notice!.querySelector<HTMLButtonElement>("button")!.click());
     expect(refetchers.read).toHaveBeenCalledTimes(1);
@@ -1824,5 +1678,234 @@ describe("나간 멤버와의 대화 줄: 캐럿과 실패의 이유 (#4252)", (
     const host = await mount();
     expect(host.querySelector('[data-testid="roster-error"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="read-state-error"]')).toBeNull();
+  });
+});
+
+
+// =============================================================================
+// DM 닫기를 서버 상태로 (ADR-0177 증보 D6~D12, #4228). 서버가 읽음 투영에 `latestReadableSeq`·`closedAtSeq` 를 실으면 이 갈래다.
+// =============================================================================
+
+/** 새 서버의 읽음 투영 행: 두 필드를 싣는다. `closedAt` 이 `null` 이면 「안 닫았다」, 숫자면 그 seq 에서 닫았다. */
+function serverRow(
+  channelId: string,
+  patch: {
+    latestSeq?: number;
+    lastReadSeq?: number;
+    readable?: number;
+    closedAt?: number | null;
+    mentionCount?: number;
+  } = {}
+): ReadState {
+  const latestSeq = patch.latestSeq ?? 10;
+  const lastReadSeq = patch.lastReadSeq ?? latestSeq;
+  return {
+    ...readState(channelId, latestSeq, lastReadSeq),
+    mentionCount: patch.mentionCount ?? 0,
+    latestReadableSeq: patch.readable ?? latestSeq,
+    closedAtSeq: patch.closedAt === undefined ? null : patch.closedAt,
+  };
+}
+
+/** DM 1~5 는 안 닫은 행, 6(나간 상대)도 한 행으로 둔다. 시험이 한 칸씩 바꾼다. */
+function serverRows(patch: Partial<Record<number, Parameters<typeof serverRow>[1]>> = {}): ReadState[] {
+  return [1, 2, 3, 4, 5, 6].map((n) => serverRow(DM_ID(n), patch[n]));
+}
+
+describe("DM 닫기 · 서버 갈래 (#4228)", () => {
+  it("서버가 닫았다고 말한 DM 은 목록에서 빠지고 「닫은 대화」에 든다 - 메시지를 다시 읽지 않는다", async () => {
+    // seq 만 25 로 올랐고(기계 메시지) 읽을 seq 는 닫을 때 그대로다: 되살림 판정이 메시지를 읽지 않아도 숨은 채다.
+    setReadStates(serverRows({ 2: { latestSeq: 25, readable: 10, closedAt: 10, lastReadSeq: 4 } }));
+    const host = await mount();
+    await settle();
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    for (const n of [1, 3, 4, 5]) expect(rowIds(host)).toContain(DM_ID(n));
+    expect(closedCount(host)).toBe(2); // 내가 닫은 DM 2 + 나간 상대 DM 6
+    expect(revival.calls).toEqual([]);
+  });
+
+  it("닫은 뒤 읽을 메시지가 오면 돌아온다(8번)", async () => {
+    setReadStates(serverRows({ 2: { latestSeq: 12, readable: 12, closedAt: 10, lastReadSeq: 10 } }));
+    const host = await mount();
+    await settle();
+    expect(rowIds(host)).toContain(DM_ID(2));
+  });
+
+  it("나간 상대의 DM 은 안 읽은 것이 없으면 빠지고, 안 읽은 읽을 메시지가 있으면 보인다 - 메시지를 읽어 가르지 않는다", async () => {
+    setReadStates(serverRows({ 6: { latestSeq: 14, readable: 12, lastReadSeq: 10 } }));
+    const host = await mount();
+    await settle();
+    expect(rowIds(host)).toContain(DM_ID(6));
+    expect(closedCount(host)).toBe(0);
+    expect(revival.calls).toEqual([]);
+  });
+
+  it("호버 X 는 서버에 PUT 으로 쓴다: seenSeq 는 화면이 본 투영의 latestSeq 다", async () => {
+    setReadStates(serverRows({ 2: { latestSeq: 17, readable: 15, lastReadSeq: 17 } }));
+    const host = await mount();
+    enterRow(host, DM_ID(2));
+    await act(async () => {
+      closeButton(host)!.click();
+      await Promise.resolve();
+    });
+    expect(closure.calls).toEqual([{ kind: "PUT", channelId: DM_ID(2), seenSeq: 17 }]);
+    // 서버 갈래는 이 기기의 원장에 쓰지 않는다.
+    expect(closedDmsFor(WS)).toEqual({});
+  });
+
+  it("서버가 거절하면 말한다: 되돌려진 대화가 다시 서 있는 이유", async () => {
+    closure.fail = 500;
+    setReadStates(serverRows());
+    const host = await mount();
+    enterRow(host, DM_ID(2));
+    await act(async () => {
+      closeButton(host)!.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(host.querySelector('[data-testid="dm-close-error"]')?.textContent).toContain("대화를 닫지 못했어요");
+    expect(closedDmsFor(WS)).toEqual({});
+  });
+
+  it("경로가 없다고 답하면(405) 이 워크스페이스를 접고 이 닫기를 원장에 쓴다 - 사람이 한 닫기가 사라지지 않는다", async () => {
+    closure.fail = 405;
+    setReadStates(serverRows({ 2: { latestSeq: 9 } }));
+    const host = await mount();
+    enterRow(host, DM_ID(2));
+    await act(async () => {
+      closeButton(host)!.click();
+      await Promise.resolve();
+    });
+    await settle();
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(2))).toBe(9);
+    expect(host.querySelector('[data-testid="dm-close-error"]')).toBeNull();
+  });
+
+  it("닫은 DM 을 주소로 열면 DELETE 를 한 번 보낸다. 닫은 적 없는 DM 과 나간 상대의 DM 은 아무것도 쓰지 않는다 (D8)", async () => {
+    setReadStates(serverRows({ 2: { closedAt: 10 } }));
+    await mount(`/c/${DM_ID(2)}`);
+    await settle();
+    expect(closure.calls).toEqual([{ kind: "DELETE", channelId: DM_ID(2) }]);
+
+    unmountForRemount();
+    closure.calls.length = 0;
+    resetDmMigrationForTest();
+    setReadStates(serverRows());
+    await mount(`/c/${DM_ID(1)}`);
+    await settle();
+    expect(closure.calls).toEqual([]);
+
+    unmountForRemount();
+    // 나간 상대의 DM(6번)을 열어도 아무것도 쓰지 않는다: 열려 있는 동안만 보인다.
+    setReadStates(serverRows());
+    await mount(`/c/${DM_ID(6)}`);
+    await settle();
+    expect(closure.calls).toEqual([]);
+  });
+
+  it("투영이 준비되기 전에는 DELETE 를 보내지 않고, 준비된 뒤 열림 하나당 한 번만 보낸다", async () => {
+    readStatesQuery.isPending = true;
+    readStatesQuery.data = undefined;
+    localStorage.setItem(
+      DM_CLOSURE_CACHE_KEY,
+      JSON.stringify({ [WS]: { [DM_ID(2)]: [10, 10, 10, 0] } })
+    );
+    await mount(`/c/${DM_ID(2)}`);
+    await settle();
+    expect(closure.calls).toEqual([]);
+    readStatesQuery.isPending = false;
+    setReadStates(serverRows({ 2: { closedAt: 10 } }));
+    await rerender();
+    await settle();
+    await rerender();
+    await settle();
+    expect(closure.calls).toEqual([{ kind: "DELETE", channelId: DM_ID(2) }]);
+  });
+
+  it("콜드 스타트: 사본이 있으면 닫은 DM 이 투영보다 먼저 숨어 있다 (깜빡이지 않는다)", async () => {
+    readStatesQuery.isPending = true;
+    readStatesQuery.data = undefined;
+    localStorage.setItem(
+      DM_CLOSURE_CACHE_KEY,
+      JSON.stringify({ [WS]: { [DM_ID(2)]: [10, 10, 10, 0], [DM_ID(1)]: [null, 4, 4, 0] } })
+    );
+    const host = await mount();
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    expect(rowIds(host)).toContain(DM_ID(1));
+  });
+
+  it("저장소를 지운 뒤(재설치)에는 판정을 미룬다: 골격이 서고, 투영이 오면 닫혀 있다", async () => {
+    readStatesQuery.isPending = true;
+    readStatesQuery.data = undefined;
+    const host = await mount();
+    expect(rowIds(host).filter((id) => id !== CH_GENERAL)).toEqual([]);
+    expect(host.querySelector('[data-testid="dm-section-pending"]')).not.toBeNull();
+    readStatesQuery.isPending = false;
+    setReadStates(serverRows({ 2: { closedAt: 10 } }));
+    await rerender();
+    await settle();
+    expect(host.querySelector('[data-testid="dm-section-pending"]')).toBeNull();
+    expect(rowIds(host)).not.toContain(DM_ID(2));
+    expect(rowIds(host)).toContain(DM_ID(1));
+    // 판정이 선 뒤에는 서버 사실의 사본이 저장소에 남는다(다음 콜드 스타트용).
+    expect(localStorage.getItem(DM_CLOSURE_CACHE_KEY)).toContain(DM_ID(2));
+  });
+
+  it("옛 서버(행이 두 필드를 싣지 않음)는 지금 동작 그대로다: 원장에 쓰고 서버에는 아무것도 보내지 않는다", async () => {
+    setReadStates([readState(DM_ID(2), 9)]);
+    const host = await mount();
+    enterRow(host, DM_ID(2));
+    await act(async () => {
+      closeButton(host)!.click();
+      await Promise.resolve();
+    });
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(2))).toBe(9);
+    expect(closure.calls).toEqual([]);
+  });
+
+  it("원장 이전: 서버가 닫기를 싣는 순간, 숨은 항목만 올리고 올린 항목만 원장에서 지운다", async () => {
+    // DM 2 는 숨어 있고(원장 10, 읽을 seq 10), DM 3 은 닫은 뒤 새 메시지로 되살아났다(원장 4, 읽을 seq 9).
+    closeDmOnDevice(WS, DM_ID(2), 10);
+    closeDmOnDevice(WS, DM_ID(3), 4);
+    setReadStates(serverRows({ 2: { latestSeq: 10, readable: 10 }, 3: { latestSeq: 9, readable: 9 } }));
+    await mount();
+    await settle();
+    await settle();
+    expect(closure.calls).toEqual([{ kind: "PUT", channelId: DM_ID(2), seenSeq: 10 }]);
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(2))).toBeUndefined();
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(3))).toBe(4);
+    expect(JSON.parse(localStorage.getItem(DM_CLOSURE_MIGRATED_KEY) ?? "[]")).toEqual([WS]);
+  });
+
+  it("원장 이전은 (기기, 워크스페이스)마다 한 번이다: 표식이 있으면 다시 보내지 않는다", async () => {
+    localStorage.setItem(DM_CLOSURE_MIGRATED_KEY, JSON.stringify([WS]));
+    closeDmOnDevice(WS, DM_ID(2), 10);
+    setReadStates(serverRows({ 2: { latestSeq: 10, readable: 10 } }));
+    await mount();
+    await settle();
+    await settle();
+    expect(closure.calls).toEqual([]);
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(2))).toBe(10);
+  });
+
+  it("원장 이전에서 한 항목이 실패하면 그 항목만 남는다", async () => {
+    closeDmOnDevice(WS, DM_ID(2), 10);
+    closeDmOnDevice(WS, DM_ID(3), 10);
+    closure.fail = 500;
+    setReadStates(serverRows({ 2: { latestSeq: 10 }, 3: { latestSeq: 10 } }));
+    await mount();
+    await settle();
+    await settle();
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(2))).toBe(10);
+    expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(3))).toBe(10);
+    expect(localStorage.getItem(DM_CLOSURE_MIGRATED_KEY)).toBeNull();
+  });
+
+  it("「나간 멤버와의 대화 N개」 줄은 서버 갈래에도 어디에도 없다 (AC 12)", async () => {
+    setReadStates(serverRows());
+    const host = await mount();
+    await settle();
+    expect(foldLine(host)).toBeNull();
+    expect(closedCount(host)).toBe(1);
   });
 });

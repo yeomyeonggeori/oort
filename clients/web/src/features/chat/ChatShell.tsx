@@ -30,14 +30,8 @@ import {
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
 import { useChannelViewingBeat } from "@/features/chat/useChannelViewingBeat";
-import {
-  indexFallbackChannelId,
-  readProjectionPhase,
-  useClosedDms,
-} from "@/features/sidebar/sidebarDmClosure";
-import { useDmRevival } from "@/features/sidebar/dmRevival";
-import { goneDmIds } from "@/features/sidebar/goneDmHiding";
-import { useGoneUnreadVerdicts } from "@/features/sidebar/goneUnreadVerdicts";
+import { indexFallbackChannelId } from "@/features/sidebar/sidebarDmClosure";
+import { useDmVisibility } from "@/features/sidebar/useDmVisibility";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
@@ -209,56 +203,28 @@ export function ChatShell() {
   // Nothing is hardcoded: a workspace with no channels renders the empty state
   // instead of pointing at an id that may not exist here.
   //
-  // 닫은 DM(#3963, `sidebarDmClosure.ts`)은 이 폴백의 후보가 아니다. 사이드바가 같은 함수로 열린 대화를
-  // 정하므로, 채널이 없는 멤버의 첫 DM 을 닫으면 본문도 다음 DM(없으면 빈 상태)으로 간다.
-  const closedDms = useClosedDms(workspaceId);
-  const readPhase = readProjectionPhase(readStates);
-  const latestSeqForClosure = useDmRevival({
-    workspaceId,
-    dms: channelsQuery.groups.dms,
-    closed: closedDms,
-    byChannel: readStates.byChannel,
-    phase: readPhase,
-  });
-  // 나간 멤버와의 대화(#4252)로 접힌 DM 도 후보가 아니다: 사이드바가 같은 집합으로 접고, 접힌 대화를 본문이 도로 열면
-  // 열려 있다는 이유로 목록에 되살아난다.
+  // 닫은 DM(#3963)·나간 상대의 DM(#4252)·판정이 미뤄진 DM 은 이 폴백의 후보가 아니다. 사이드바가 **같은 훅**(`useDmVisibility`, 코어
+  // `dmVisibility` 한 함수)으로 열린 대화를 정하므로, 채널이 없는 멤버의 첫 DM 을 닫으면 본문도 다음 DM(없으면 빈 상태)으로 간다. 둘이
+  // 다르면 사이드바는 숨기는데 본문은 열어 숨긴 대화가 「열려 있음」으로 되살아난다(design-review #3963 R1 H1).
   const rosterReady = rosterLoaded(directoryQuery);
-  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다. 사이드바가 **같은 훅**을 부른다(키가 같아
-  // 한 번만 읽는다): 둘이 다르면 사이드바는 접는데 본문은 연다.
-  const goneVerdicts = useGoneUnreadVerdicts({
+  const dmVisibility = useDmVisibility({
     workspaceId,
     dms: channelsQuery.groups.dms,
     directory,
     selfMemberId: session.member.id,
     rosterReady,
-    byChannel: readStates.byChannel,
-    phase: readPhase,
-    closed: closedDms,
-    closureLatestSeqOf: latestSeqForClosure,
+    readStates,
+    // 별표·섹션 배치(코어 4번)는 읽지 않는다: 이 훅은 읽기 전용이고 배치는 사이드바가 든 쿼리다. 별표한 DM 은 웹이 만들 수 없고(별표 문은
+    // 비-DM 뿐) 다른 클라이언트가 적은 배치에서만 생긴다. 모르면 별표가 아닌 것이라 이 폴백이 그 DM 을 건너뛸 수 있을 뿐, 숨은 대화를
+    // 여는 쪽으로는 틀리지 않는다.
+    prefs: undefined,
   });
-  const foldedGone = useMemo(
-    () =>
-      goneDmIds({
-        dms: channelsQuery.groups.dms,
-        directory,
-        selfMemberId: session.member.id,
-        rosterReady,
-        byChannel: readStates.byChannel,
-        openId: null,
-        phase: readPhase,
-        verdicts: goneVerdicts,
-      }),
-    [channelsQuery.groups.dms, directory, session.member.id, rosterReady, readStates.byChannel, readPhase, goneVerdicts]
-  );
   const channelId =
     params.channelId ??
     indexFallbackChannelId({
       channels: channelsQuery.groups.channels,
       dms: channelsQuery.groups.dms,
-      closed: closedDms,
-      latestSeqOf: latestSeqForClosure,
-      phase: readPhase,
-      foldedGone,
+      shown: (id) => dmVisibility.verdictOf(id).state === "shown",
     }) ??
     null;
 
