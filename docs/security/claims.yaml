@@ -1,0 +1,336 @@
+# oort 보안 주장 ↔ 증명 시험 매핑 (#4224 SEC-02, ADR-0214).
+#
+# 규칙: 시험이 없는 보안 주장은 공개하지 않는다. 이 파일에 없는 문장은 「주장」이 아니다.
+# scripts/check_security_claims.py 가 아래를 검사한다(깨지면 exit 1).
+#   E1 증명 없음 · E2 선택자가 아무것도 못 가리킴 · E3 `runs:` 약속과 실제 실행 위치 불일치
+#   E4 P0 인데 사보타주 증거 없음 · E5 `limits:` 의 표식 누락
+#
+# 필드
+#   id        주장 ID (유일)
+#   claim     한 문장. 시험이 실제로 단정하는 것만 쓴다(시험보다 넓게 쓰지 않는다).
+#   scope     범위·한계. 무엇이 증명되지 않았는지도 여기에 적는다.
+#   priority  P0 = 경계 자체를 지키는 주장 → 사보타주(음성 대조) 증거가 필수.  P1 = 시험만 필수.
+#   runs      pr-ci | nightly | local | release. 모든 증명이 적어도 그 레인에서 돈다는 약속.
+#   proofs    시험 선택자 목록.  path.rs#fn · path.test.ts::정확한 제목 · script:경로
+#   sabotage  P0 필수. how=무엇을 깨면 어느 시험이 빨개지는가, evidence=그 음성 대조의 경로(#fn).
+#
+# 선택자 모양과 레인 판정은 scripts/check_security_claims.py 머리말이 정본이다.
+# 여기에 없는 「미검증」 주장(예: API 부팅 시 DB 역할 자기검사)은 공개 문서가 쓰지 않는다.
+version: 1
+
+claims:
+  # ---- 테넌트 격리 -----------------------------------------------------------------
+  - id: TEN-1
+    claim: "Every public table that has a workspace_id column has row-level security enabled and forced, and a policy that references app.workspace_id."
+    scope: "Checked against a real PostgreSQL 18 after all server/Migrations are applied, per table, in the Security pack lane of PR CI. Says nothing about tables without a workspace_id column (those are checked against a reviewed list, see the unclassified-table test)."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_has_rls_force_and_a_workspace_policy_on_every_tenant_table"
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_has_no_unclassified_non_tenant_table"
+    sabotage:
+      how: "A tenant table created without FORCE (or without a policy, or with a policy that ignores workspace_id) turns the catalog test red; the control_* tests feed each broken shape to the same checks, and security_pack.sh negative runs a migration fixture in CI."
+      evidence: "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#control_force_missing_is_red"
+  - id: TEN-2
+    claim: "The runtime API role momo_app has no DML privilege on a tenant table that is not forced, cannot bypass row-level security, and sees no view or foreign table outside the boundary."
+    scope: "Catalog checks on the migrated test database. Does not prove that every deployment connects as momo_app: the API does not check its own role at start-up (SECURITY.md describes the deploy-time checks)."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_gives_momo_app_no_dml_on_an_unforced_tenant_table"
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_keeps_momo_app_inside_the_rls_boundary"
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_exposes_no_view_or_foreign_relation_to_momo_app"
+    sabotage:
+      how: "Granting momo_app DML on an unforced tenant table, giving it BYPASSRLS or table ownership, or exposing a plain view turns the matching real-database test red; the control_* tests prove each shape is detected."
+      evidence: "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#control_momo_app_dml_on_an_unforced_tenant_table_is_red"
+  - id: TEN-3
+    claim: "Every SECURITY DEFINER function in the public schema pins its search_path, and the set of public definers that momo_app may execute equals a reviewed allowlist."
+    scope: "Catalog checks on the migrated test database; a new definer function needs an allowlist edit in the same change."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_pins_search_path_on_every_security_definer"
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_public_security_definers_equal_the_allowlist"
+      - "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#the_real_database_momo_app_executes_only_the_listed_security_definers"
+    sabotage:
+      how: "A definer without a pinned search_path, or an unlisted public definer (including a new overload of an allowlisted name), turns the matching test red."
+      evidence: "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#control_definer_without_search_path_is_red"
+  - id: TEN-4
+    claim: "A tenant transaction sets the row-level-security workspace variable locally, so the policies see the caller's workspace."
+    scope: "Real PostgreSQL. Covers the helper every tenant route uses, not each route individually."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-db/tests/conformance_pg.rs#with_tenant_tx_sets_the_rls_guc"
+  - id: TEN-5
+    claim: "Searching a channel the caller may not read answers exactly like searching a channel that does not exist, and a search cursor cannot be replayed under a different scope."
+    scope: "Search routes only. Real PostgreSQL."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/search_scope_conformance_pg.rs#a_channel_the_caller_may_not_read_is_the_same_404_as_one_that_is_not_there"
+      - "server-rust/bins/momo-server/tests/search_scope_conformance_pg.rs#a_cursor_may_not_be_replayed_under_a_different_scope"
+
+  # ---- 인증·세션 -------------------------------------------------------------------
+  - id: AUTH-1
+    claim: "Presenting an already-used refresh token ends the whole session lineage of that device."
+    scope: "Real PostgreSQL, device-key sessions. Not a claim about access tokens already issued, which live until they expire."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/device_key_conformance_pg.rs#a_reused_refresh_token_ends_the_whole_lineage"
+  - id: AUTH-2
+    claim: "A copy of a refresh token made without the device key ends a key-bound lineage, even inside the reuse window, and a replayed or stale proof is refused while the lineage is kept."
+    scope: "Real PostgreSQL. Applies to sessions that registered a device key."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/refresh_proof_conformance_pg.rs#a_copy_without_the_key_ends_a_bound_lineage_even_inside_the_window"
+      - "server-rust/bins/momo-server/tests/refresh_proof_conformance_pg.rs#a_replayed_or_stale_proof_is_refused_and_the_lineage_kept"
+  - id: AUTH-3
+    claim: "After logout ends a session lineage, an older access token from that lineage can still authenticate but can no longer register a device key (409 session_lineage_ended)."
+    scope: "States the honest edge: logout does not instantly invalidate access tokens already issued; it ends the lineage so no new capability can be derived from it."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/device_key_conformance_pg.rs#an_access_token_outliving_its_logout_cannot_register_a_key"
+  - id: AUTH-4
+    claim: "One-time login claims and password-reset links work once, are stored as hashes, and are scoped to their own workspace."
+    scope: "Real PostgreSQL."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/claim_conformance_pg.rs#claim_issue_login_reject_consume_login_reuse_and_hash_only"
+      - "server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs#reset_issue_consume_reuse_reissue_and_cross_workspace"
+
+  # ---- 웹훅 · 바깥으로 나가는 요청 --------------------------------------------------
+  - id: WH-1
+    claim: "An inbound webhook with a forged signature, an expired timestamp, a replayed delivery or an unknown endpoint is rejected."
+    scope: "Native oort webhook format; signature comparison is constant time. Each third-party provider's own format is not covered by this claim."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/webhook_inbound_conformance_pg.rs#native_signature_ok_forged_expired_replay_and_unknown_404"
+      - "server-rust/crates/momo-webhook/src/crypto.rs#ingress_signatures_compare_in_constant_time_and_accept_the_v1_prefix"
+  - id: WH-2
+    claim: "An outbound webhook delivery signature covers both the timestamp and the body, so a receiver can reject a replayed or altered delivery."
+    scope: "The signing function. Whether a receiver checks the timestamp is the receiver's job."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-webhook/src/crypto.rs#the_delivery_signature_binds_the_timestamp_to_the_body"
+  - id: NET-1
+    claim: "Outbound webhook delivery refuses a loopback or private target URL before any request leaves."
+    scope: "The shared SSRF guard on the delivery path."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-webhook-sender/tests/webhook_delivery_conformance_pg.rs#the_ssrf_guard_refuses_the_very_url_this_harness_uses"
+  - id: NET-2
+    claim: "The link-preview fetcher blocks private address literals before connecting and blocks a hostname whose DNS answer is a private address."
+    scope: "Link previews (unfurl) only."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-unfurl/src/fetch.rs#private_literals_are_blocked_before_connect"
+      - "server-rust/crates/momo-unfurl/src/fetch.rs#a_private_dns_answer_is_blocked"
+  - id: NET-3
+    claim: "The agent worker's outbound client refuses a hostname that resolves to a private address before connecting."
+    scope: "The agent worker egress helper. Other outbound paths have their own claims (NET-1, NET-2)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-agent-worker/src/egress.rs#a_name_resolving_to_a_private_address_is_refused_before_connect"
+
+  # ---- 첨부 · 푸시 -----------------------------------------------------------------
+  - id: ATT-1
+    claim: "Attachment bytes are served with Content-Disposition attachment and X-Content-Type-Options nosniff, and an anonymous request for them gets 401."
+    scope: "Real PostgreSQL with the local archive backend. There is no malware scan (see the limits)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#the_three_routes_round_trip_and_bind_to_a_message"
+  - id: ATT-2
+    claim: "A member cannot bind another member's attachment to a message, and the failed send rolls back with it."
+    scope: "Real PostgreSQL."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#another_members_attachment_cannot_be_bound_and_the_message_rolls_back_with_it"
+  - id: PUSH-1
+    claim: "The push dispatch payload carries identifiers only: no message body, and no content-shaped key."
+    scope: "Payload construction in momo-push and the relay's closed dispatch (static placeholder text). The notification the phone shows is built on the device after a separate authenticated fetch."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-push/src/dispatch.rs#dispatch_payload_is_id_only"
+      - "server-rust/crates/momo-push/src/dispatch.rs#dispatch_payload_cannot_carry_message_content"
+      - "server-rust/bins/momo-push-relay/src/dispatch.rs#closed_dispatch_and_apns_payload_use_only_static_placeholder_content"
+  - id: PUSH-2
+    claim: "An approval push wakes exactly the people the decision route would let through."
+    scope: "Real PostgreSQL."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/approval_push_audience_conformance_pg.rs#the_people_an_approval_push_wakes_are_the_people_the_decision_route_lets_through"
+
+  # ---- 에이전트 · 승인 --------------------------------------------------------------
+  - id: AGT-1
+    claim: "An approval from another workspace can be neither locked nor decided, a decision replay is idempotent, and an approval-gated tool does not run without a decision."
+    scope: "The agent runtime's approval tables on a real PostgreSQL. This suite is not in the PR Security pack selection yet (it is stale there, see selection.txt) and runs in the nightly lane."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/crates/momo-agent/tests/approval_pg.rs#t1_1_an_approval_gated_tool_does_not_run_without_a_decision"
+      - "server-rust/crates/momo-agent/tests/approval_pg.rs#t1_6_another_tenants_approval_cannot_be_locked_or_decided"
+      - "server-rust/crates/momo-agent/tests/approval_pg.rs#t1_7_a_replayed_decision_is_idempotent"
+  - id: AGT-2
+    claim: "A memory proposal can be decided only by a human who can read the channel."
+    scope: "Memory proposals (ADR-0196). Real PostgreSQL, nightly lane."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/bins/momo-server/tests/mem_proposal_conformance_pg.rs#only_a_human_who_can_read_the_channel_may_decide"
+  - id: AGT-3
+    claim: "Channel or memory text inserted into the team-AI prompt cannot close the data fence around it."
+    scope: "Prompt construction for the team-AI tools. It reduces, and does not eliminate, prompt injection: model behaviour is not tested."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-workspace-actions/src/team_ai_tools.rs#data_cannot_close_the_fence"
+  - id: AGT-4
+    claim: "No tool grant can pre-approve a login handoff, and the host loads only the intersection of what the server lists and what the person granted: the server cannot widen it."
+    scope: "Grant model unit tests."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/crates/momo-agent/src/tools.rs#no_grant_can_pre_approve_a_login_handoff"
+      - "server-rust/crates/momo-agent/src/app_tool_grants.rs#the_host_loads_the_intersection_and_the_server_cannot_widen_it"
+
+  # ---- 자격증명 ---------------------------------------------------------------------
+  - id: CRED-1
+    claim: "A provider API key reaches no durable row, message or error even when the provider echoes it back, and a personal key is stored without any row carrying the plaintext."
+    scope: "Real PostgreSQL with canary keys; the Anthropic adapter, the Hermes bearer and personal keys. Nightly lane."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/bins/momo-agent-worker/tests/anthropic_adapter_conformance_pg.rs#anth_3_the_key_never_reaches_a_durable_row_even_when_echoed"
+      - "server-rust/bins/momo-agent-worker/tests/agent_worker_conformance_pg.rs#b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error"
+      - "server-rust/bins/momo-agent-worker/tests/personal_key_conformance_pg.rs#no_row_carries_the_key"
+  - id: CRED-2
+    claim: "oort refuses to create a new subscription-login (OAuth auth.json) provider link."
+    scope: "The provider-link write route (unit test). A link created before the refusal stays sealed in that instance until deleted; that is documented in SECURITY.md, not claimed here."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/src/routes/provider_link.rs#a_new_oauth_link_is_refused"
+  - id: CRED-3
+    claim: "The one-time codes that pass through the operator login relay are not stored, logged, audited or published to realtime by oort."
+    scope: "Real PostgreSQL with marker strings across every channel the test can observe."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/login_relay_conformance_pg.rs#markers_never_cross_oort_in_any_channel"
+
+  # ---- 기동 설정 --------------------------------------------------------------------
+  - id: CFG-1
+    claim: "momo-server refuses to start in staging, prod, production or internal-host with a missing or placeholder realtime proxy secret."
+    scope: "Configuration parsing."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/src/config.rs#a_placeholder_proxy_secret_is_a_boot_error_only_in_strict_environments"
+  - id: CFG-2
+    claim: "momo-server refuses to start when the provider master key, the GitHub App master key or a webhook master key reuses another root secret."
+    scope: "Configuration parsing. A legacy install may still hold webhook keys copied from the JWT secret (doctor warns); that case is documented, not claimed."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/src/config.rs#the_provider_master_key_may_reuse_neither_webhook_key"
+      - "server-rust/bins/momo-server/src/config.rs#the_github_app_master_key_may_reuse_no_other_root"
+      - "server-rust/bins/momo-server/src/config.rs#two_rotated_webhook_keys_that_landed_on_one_value_refuse_the_boot"
+  - id: CFG-3
+    claim: "momo-server refuses the in-memory stub file archive in a deployed environment."
+    scope: "Configuration parsing."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/src/config.rs#a_stub_archive_is_a_boot_error_only_in_deployed_environments"
+
+  # ---- 클라이언트 -------------------------------------------------------------------
+  - id: CLI-1
+    claim: "A message body links only to an allowlist of schemes: schemes that can execute or embed, a scheme split by a control character, and relative hrefs are refused."
+    scope: "The shared markdown parser used by web, desktop and phone. Does not cover content rendered outside the message body."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "packages/momo-core/src/features/timeline/markdown.test.ts::refuses every scheme that can execute or embed"
+      - "packages/momo-core/src/features/timeline/markdown.test.ts::refuses a scheme split by a control character"
+  - id: CLI-2
+    claim: "The desktop shell keeps the session token in the OS keychain and out of web storage; if the keychain refuses a write the session stays in web storage instead of being lost."
+    scope: "The browser build always uses web storage; this claim is the desktop shell's. XSS exposure of web storage is a stated limit."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "clients/web/src/lib/session.keychain.test.ts::resumes from the keychain, with the token absent from web storage"
+      - "clients/web/src/lib/session.keychain.test.ts::demotes to web storage when the keychain refuses the write, keeping the session"
+  - id: CLI-3
+    claim: "The iOS notification extension is not granted the device-key keychain group; only the app is."
+    scope: "Entitlement and Info.plist contents, read from the repository. Does not exercise a device."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "clients/mobile/__tests__/deviceKeyContract.test.ts::is NOT declared by the notification extension"
+
+  # ---- 공급망 -----------------------------------------------------------------------
+  - id: SUP-1
+    claim: "A pull request cannot merge while a dependency has an unexcepted known advisory: cargo-deny, npm audit and OSV-Scanner run in PR CI, and exceptions expire."
+    scope: "Known advisories only, against the databases at run time. Not a claim about unknown vulnerabilities."
+    priority: P0
+    runs: pr-ci
+    proofs:
+      - "script:scripts/check_advisories.py"
+    sabotage:
+      how: "Known-vulnerable fixtures (a pinned crate and npm package) must be red, an expired exception must be red, and a missing tool must be red; the regression script runs them."
+      evidence: "scripts/tests/test_advisory_gate.sh"
+  - id: SUP-2
+    claim: "Only dependencies under the permissive-license allowlist are accepted: the cargo license gate runs on every pull request that touches Rust."
+    scope: "Cargo workspaces. npm licenses have their own gate."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "script:scripts/check_cargo_licenses.sh"
+  - id: SUP-3
+    claim: "Every server-rust crate either forbids unsafe code through the workspace lint or is on a short allowlist with a written reason."
+    scope: "Cargo.toml policy plus the compiler. Runs in the local gate; wiring it into PR CI is tracked in ADR-0214."
+    priority: P0
+    runs: local
+    proofs:
+      - "script:scripts/check_unsafe_policy.py"
+    sabotage:
+      how: "A crate that drops the workspace lint, a weakened workspace level, an allowlist row without a reason and a new crate with no lints each turn the gate red; with --compile an unsafe block is rejected by rustc."
+      evidence: "scripts/tests/test_unsafe_policy_gate.sh"
+
+# 「하지 않는 것」 — 시험으로 증명할 수 없고 증명하지 않는 문장이다(공개 약속의 일부).
+# 각 항목은 아래 문서에 `<!-- limit:ID -->` 표식이 있어야 한다(E5).
+limits:
+  - id: LIM-1
+    text: "oort is not end-to-end encrypted. The server reads message content: search, agents and notification previews depend on it."
+    docs:
+      - "SECURITY.md"
+      - "docs/security/README.ko.md"
+  - id: LIM-2
+    text: "oort has not had an external security audit or penetration test."
+    docs:
+      - "SECURITY.md"
+      - "docs/security/README.ko.md"
+  - id: LIM-3
+    text: "oort holds no SOC 2, ISO 27001 or similar certification."
+    docs:
+      - "SECURITY.md"
+      - "docs/security/README.ko.md"
+  - id: LIM-4
+    text: "Whoever operates a server can read its plaintext messages and database."
+    docs:
+      - "SECURITY.md"
+      - "docs/security/README.ko.md"

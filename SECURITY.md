@@ -58,25 +58,26 @@ until a coordinated disclosure or explicit permission to publish.
 
 ## Security posture
 
-What the code and deployment files enforce today. The Korean document linked
-above gives the file, line and test name behind each item. Tests marked (PG)
-need a real PostgreSQL and are `#[ignore]`d, so public PR CI does not run them.
-Maintainers run them by hand against an isolated PostgreSQL (most test files
-carry the command in their header: `cargo test … -- --ignored`) and record the
-result in the pull request; only some suites are also wired into
-`scripts/verify_*.sh` or a local-gate profile.
+What the code and deployment files enforce today. Every security claim is mapped
+to the tests that prove it in [`docs/security/claims.yaml`](docs/security/claims.yaml);
+`scripts/check_security_claims.py` turns a claim with no test, a test selector that
+matches nothing, or a lane promise the test does not keep into a red check
+([ADR-0214](docs/adr/0214-security-claims-need-tests.md)). The Korean document
+linked above gives the file, line and test name behind each item. Tests marked
+(PG) need a real PostgreSQL and are `#[ignore]`d in a plain `cargo test`. The
+tenant-isolation, auth, push, attachment and webhook suites listed in
+`infra/security-pack/selection.txt` run in PR CI's "Security pack" job; the other
+`#[ignore]`d suites run in the nightly workflow or by hand
+(`cargo test … -- --ignored`).
 
 - **Forced tenant isolation.** Tenant tables use PostgreSQL RLS with
   `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`; API transactions
   set `app.workspace_id` locally (`server/Migrations/001_init.sql`,
   `server-rust/crates/momo-db/src/tenant.rs`, test
-  `with_tenant_tx_sets_the_rls_guc` (PG)). A
-  catalog query in the Korean document lists every table that has a
-  `workspace_id` column but lacks forced RLS or a policy on `app.workspace_id`;
-  it returned no rows on 2026-10-22. No repository test asserts this table by
-  table yet: the committed tests check a floor of 30 forced tables and, in
-  `scripts/verify_rls.sh`, seven named tables and cross-workspace reads, and a
-  few feature suites check their own tables.
+  `with_tenant_tx_sets_the_rls_guc` (PG)). The catalog test `tenant_catalog_pg`
+  asserts, table by table, that every table with a `workspace_id` column has forced
+  RLS and a policy on `app.workspace_id`; it runs in PR CI's Security pack (claims
+  TEN-1 to TEN-3 in `docs/security/claims.yaml`).
 - **Separated database roles.** The owner role `momo` creates the schema and
   runs migrations. At runtime the stack connects the API as `momo_app`
   (`NOSUPERUSER NOBYPASSRLS`). Three background consumers that poll across
@@ -122,6 +123,36 @@ result in the pull request; only some suites are also wired into
 
 Deployment details and verification procedures are in
 [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+
+## What oort does not do
+
+These are limits, not roadmap promises. We state them because a security page that
+only lists strengths is not evidence.
+
+- <!-- limit:LIM-1 -->**oort is not end-to-end encrypted.** The server reads message
+  content; search, agents and notification previews depend on it. Slack's own
+  security page describes TLS in transit and encryption at rest and makes no
+  end-to-end claim
+  ([slack.com/resources/why-use-slack/security-at-slack](https://slack.com/resources/why-use-slack/security-at-slack)).
+- <!-- limit:LIM-2 -->**No external security audit or penetration test** has been
+  done. Everything on this page is the maintainers' own testing, published with its
+  proof.
+- <!-- limit:LIM-3 -->**No SOC 2, ISO 27001 or similar certification.**
+- <!-- limit:LIM-4 -->**Whoever operates a server can read its plaintext messages and
+  its database.** Zulip's security model says the same of its own servers: anyone
+  with root on the application or database server "can read messages, modify
+  history, etc."
+  ([zulip.readthedocs.io security model](https://zulip.readthedocs.io/en/latest/production/security-model.html)).
+  Choose an operator you trust.
+
+## What we do not publish
+
+To keep disclosure from becoming a map for attackers, we publish controls, test
+names, CI links and fixed advisories, and we do **not** publish: details of an
+unfixed vulnerability; configuration values or secrets of any running instance;
+attack-step-level threat models (summaries only); prompt-injection attack corpora
+(method and statistics only); or scan results of running environments. The full rule
+is in [ADR-0214](docs/adr/0214-security-claims-need-tests.md).
 
 ## Secrets and provider credentials
 
