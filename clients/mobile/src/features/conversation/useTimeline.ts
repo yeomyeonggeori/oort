@@ -231,6 +231,9 @@ export interface UseTimelineResult {
 
 export {RECOVERY_MARKER_TTL_MS};
 
+/** 메시지 id 를 집합의 열쇠로 접는다 — UUID 는 설계상 섞인 대소문자로 오간다(`uuidEq`). */
+const idKey = (id: string): string => id.toLowerCase();
+
 export function useTimeline(
   rail: ChannelRail | null,
   workspaceId: string,
@@ -280,8 +283,8 @@ export function useTimeline(
   /** 지금 병합하려는 줄이 타임라인에 처음 들어오는 **남의** 줄인가. 병합 **전**에 물어야 한다(병합하면 id 가 든다). */
   const isFreshFromOthers = useCallback(
     (message: Message) =>
-      !knownIdsRef.current.has(message.id) &&
-      message.authorMemberId !== authorRef.current,
+      !knownIdsRef.current.has(idKey(message.id)) &&
+      !uuidEq(message.authorMemberId, authorRef.current),
     [],
   );
   /**
@@ -298,7 +301,7 @@ export function useTimeline(
         newestSeqRef.current = message.seq;
       }
       if (watch !== null && isFreshFromOthers(message)) watch.fresh += 1;
-      knownIdsRef.current.add(message.id);
+      knownIdsRef.current.add(idKey(message.id));
     }
     // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
     // 넷(첫 화면·위로 더 읽기·재연결 백필·스레드 답글)이고, 그 넷이 전부 이 문을
@@ -937,6 +940,8 @@ export function useTimeline(
         before: oldest,
         limit: PAGE_LIMIT,
       });
+      // 위로 읽은 쪽은 `applyBatch` 를 지나지 않는다 — 그 줄의 id 도 「이미 든 줄」이다(끊긴 사이 그 오래된 줄이 수정돼 되쏘기로 오면 새 줄이 아니다).
+      for (const message of page.messages) knownIdsRef.current.add(idKey(message.id));
       setState(s => reconcileMessages(s, page.messages));
       if (page.nextBefore === undefined) setReachedStart(true);
     } catch {

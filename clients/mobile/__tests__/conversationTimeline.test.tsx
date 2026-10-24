@@ -664,6 +664,87 @@ describe('받기 — 실시간과 리플레이', () => {
       expect(result.current.recoveryMarkers).toEqual([]);
     });
 
+    it('위로 더 불러온 줄(loadOlder)의 수정 프레임이 되쏘기로 와도 표지를 세우지 않는다 — 그 쪽의 id 도 이미 든 것이다', async () => {
+      let call = 0;
+      installFetch({
+        messages: () => {
+          call += 1;
+          if (call === 1) {
+            return jsonResponse(200, {messages: [message(10), message(11)], nextBefore: 10});
+          }
+          if (call === 3) return jsonResponse(200, {messages: [message(8), message(9)]});
+          return empty();
+        },
+      });
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      await tick();
+      await act(async () => {
+        await result.current.loadOlder();
+      });
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([8, 9, 10, 11]);
+
+      // 끊긴 사이 남이 그 오래된 줄(seq 8)을 고쳤다 — 새 줄이 아니라 이미 든 줄의 수정이다.
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [{...frame(8, {body: '고쳐 썼어요'}), type: 'message.edited'}],
+        });
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('작성자 id 의 대소문자가 달라도 내 줄이다 — 표지를 세우지 않는다 (uuidEq)', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const me = 'AbCdEf12-1111-4111-8111-AAAAAAAAAAAA';
+      const {result} = renderHook(() => useTimeline(rail, WS, CH, me));
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [frame(2, {author_member_id: me.toLowerCase()})],
+        });
+      });
+      await tick();
+
+      expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 2]);
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
+    it('줄 id 의 대소문자가 달라도 이미 든 줄이다 — 되쏘기에 또 실려 와도 표지를 세우지 않는다', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      act(() => {
+        subscription().__emit('publication', {data: frame(2)});
+      });
+
+      await act(async () => {
+        subscription().__subscribed({
+          recovered: true,
+          publications: [frame(2, {id: 'MSG-2'})],
+        });
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
     it('남의 줄이 함께 오면 표지가 선다 — 그 줄이 내 줄보다 작은 seq 로 뒤늦게 닿아도 (seq 가 아니라 id 로 새것을 가린다)', async () => {
       installFetch({messages: head});
       const {rail, subscription} = makeRail();
