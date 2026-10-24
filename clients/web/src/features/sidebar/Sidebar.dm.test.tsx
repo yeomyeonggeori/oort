@@ -1875,6 +1875,8 @@ describe("DM 닫기 · 서버 갈래 (#4228)", () => {
     expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(2))).toBeUndefined();
     expect(closedAtSeqOf(closedDmsFor(WS), DM_ID(3))).toBe(4);
     expect(JSON.parse(localStorage.getItem(DM_CLOSURE_MIGRATED_KEY) ?? "[]")).toEqual([WS]);
+    // 남은 원장 항목(DM 3, 닫은 뒤 사람 글이 와 되살아남)이 있어도 서버 갈래는 그 닫은 뒤의 메시지를 다시 읽지 않는다(#4142 의 경로 제거).
+    expect(revival.calls).toEqual([]);
   });
 
   it("원장 이전은 (기기, 워크스페이스)마다 한 번이다: 표식이 있으면 다시 보내지 않는다", async () => {
