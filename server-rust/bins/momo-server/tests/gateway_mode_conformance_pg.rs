@@ -520,6 +520,16 @@ async fn b6_1_a_work_run_reaches_a_gateway_and_comes_back() {
         .expect("count");
     assert_eq!(billed, 1, "…and it was billed exactly once");
 
+    // #4375 — the camelCase usage keys above are what was billed, not a zero.
+    let (prompt, completion): (i32, i32) = sqlx::query_as(
+        "SELECT prompt_tokens, completion_tokens FROM usage_ledger WHERE run_id = $1",
+    )
+    .bind(Uuid::parse_str(&run_id).expect("uuid"))
+    .fetch_one(&su)
+    .await
+    .expect("ledger tokens");
+    assert_eq!((prompt, completion), (11, 5), "camelCase usage must bill");
+
     let rail = rail_frames(&su, tenant.workspace).await;
     let terminal = rail
         .iter()

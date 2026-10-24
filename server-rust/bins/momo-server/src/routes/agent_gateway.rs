@@ -520,6 +520,19 @@ pub async fn complete(
             }
         })?;
     let safe_error = sanitized_gateway_error(request.error.as_deref(), &state.agent_gateway.secret);
+    if let Some(unknown) = request
+        .usage
+        .as_ref()
+        .map(|dto| dto.unknown_key_names(8))
+        .filter(|keys| !keys.is_empty())
+    {
+        // #4375 — names only, never values: these keys were not read, so that
+        // part of the usage is billed as reported-nothing.
+        tracing::warn!(
+            ?unknown,
+            "agent gateway usage carried unknown keys; ignored"
+        );
+    }
     let usage = request.usage.as_ref().map(usage_report);
     let via_token_id = principal.as_ref().and_then(|p| p.token_id);
     let actor_member_id = principal.as_ref().map(|p| p.member_id);
@@ -2115,6 +2128,27 @@ fn event_progress_phase(status: &str) -> momo_agent::AgentPhase {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4375 — a camelCase usage body reaches the billed report and the echoed
+    /// detail block (the ledger input), not just the DTO.
+    #[test]
+    fn camel_case_usage_body_is_billed_and_echoed() {
+        let dto: AgentGatewayUsageDto = serde_json::from_value(json!({
+            "promptTokens": 11, "completionTokens": 5, "cachedTokens": 3,
+            "reasoningTokens": 2, "costMicroUsd": 1234, "wasEstimated": false,
+        }))
+        .expect("usage");
+        let report = usage_report(&dto);
+        assert_eq!(report.prompt_tokens, Some(11));
+        assert_eq!(report.completion_tokens, Some(5));
+        assert_eq!(report.cached_tokens, Some(3));
+        assert_eq!(report.reasoning_tokens, Some(2));
+        assert_eq!(report.cost_micro_usd, Some(1234));
+        assert_eq!(report.was_estimated, Some(false));
+        let detail = usage_detail_json(&dto);
+        assert_eq!(detail["prompt_tokens"], json!(11));
+        assert_eq!(detail["cost_micro_usd"], json!(1234));
+    }
 
     fn hosts() -> Vec<String> {
         vec!["github.com".to_string()]
