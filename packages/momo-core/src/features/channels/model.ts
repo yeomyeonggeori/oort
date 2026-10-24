@@ -220,6 +220,11 @@ export const CHANNEL_MARK_UNREAD_FAILURE =
  */
 export const DM_CLOSE_LABEL = "대화 닫기";
 
+/** 닫기·다시 열기가 서버에서 거절됐을 때 하는 말. 되돌려진 대화가 다시 서 있는 이유다. */
+export const DM_CLOSE_FAILURE = "대화를 닫지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+
+export const DM_REOPEN_FAILURE = "대화를 다시 열지 못했어요. 잠시 뒤에 다시 시도해 주세요.";
+
 /** 호버 X 의 접근 가능한 이름. 행의 링크 이름 꼴(`이름, 뜻`)을 따른다. */
 export function dmCloseButtonLabel(name: string): string {
   return `${name}, ${DM_CLOSE_LABEL}`;

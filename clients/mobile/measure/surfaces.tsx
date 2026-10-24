@@ -4901,9 +4901,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'dm-status-dots-member':
     case 'dm-status-dots-states':
     case 'dm-status-dots-states-member':
-    // #4252: 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 ·
-    // 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트 「kwak의 Claude」 포함)이 한 목록에 선다. 접힌 줄은
-    // `maestro/102-gone-dm-capture.yaml` 이 눌러 펼친다. 수리 전 코드로 띄우면 나간 멤버 넷이 모두 목록에 선다.
+    // #4252·#4367: 「닫은 대화」와 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 서버가 닫기를 싣는 투영 위에서, 내가 닫은 DM
+    // 하나·나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 · 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트
+    // 꺼진 개인 에이전트 포함)이 한 목록에 선다. 숨은 DM 은 `maestro/102-gone-dm-capture.yaml` 이 DM 섹션 ⋯ 의 「닫은 대화」로 열고,
+    // `maestro/104-dm-close-capture.yaml` 이 행을 길게 눌러 「대화 닫기」를 찍는다. 수리 전 코드로 띄우면 닫은 DM 이 목록에 그대로 선다.
     case 'gone-dm-home':
       return (
         <View style={styles.fill}>
@@ -6068,23 +6069,27 @@ function seedDmStatusDots(surface: string): void {
 }
 
 /**
- * #4252 사이드바 「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
- * `read-state`·`agent-liveness`)에 답을 **미리 꽂는다** - 화면은 배송되는 `SidebarScreen` 그대로다.
+ * #4252·#4367 사이드바 「닫은 대화」·「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
+ * `read-state`·`agent-liveness`)에 답을 **미리 꽂는다** - 화면은 배송되는 `SidebarScreen` 그대로다. 읽음 투영은 서버가 닫기를 싣는
+ * 형상(`latestReadableSeq`·`closedAtSeq` 가 모든 행에 있다)이라 보임 판정이 코어 `dmVisibility` 한 함수로 돈다.
  *
- *   이도현   안 읽음 2                    박서연   다 읽음
- *   kwak의 Claude  꺼진 에이전트(명부에 **있다** - 접지 않는 쪽)       grok   응답함
- *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(접힌다), 하나는 안 읽은 사람 메시지 1(접히지 않는다), 하나는 안 읽음 4 가
- *                 전부 기계 메시지(작업 상태·시스템 줄)라 사람이 읽을 것이 없다(접힌다, 이슈 AC 「안 읽은 사람 메시지」)
+ *   이도현   안 읽음 2                    박서연   다 읽음(닫기를 내민다)
+ *   꺼진 개인 에이전트(명부에 **있다** - 숨지 않는 쪽)       grok   응답함
+ *   최민수   내가 닫은 DM(closedAtSeq = 읽을 seq) - 목록에 없고 「닫은 대화」 시트에 「내가 닫았어요」로 선다
+ *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(숨는다), 하나는 안 읽은 사람 메시지 1(보인다), 하나는 안 읽음 4 가 전부 기계
+ *                 메시지(작업 상태·시스템 줄)라 서버가 읽을 seq 를 읽은 자리에 둔다(숨는다, 이슈 AC 「안 읽은 사람 메시지」)
  *
- * 안 읽은 쪽을 읽어 가르는 질의(`['gone-unread', ws, id, after, latest]`, `useGoneUnreadVerdicts`)도 **미리 꽂는다**: 이 하네스의
- * `fetch` 는 끝나지 않는 약속이라 판정이 영영 오는 중이고, 그러면 안 읽은 사람 메시지가 있는 DM 도 접힌 채 남는다. 값은 「사람이
- * 읽을 메시지가 있는가」(`pageHasHumanMessage`)다.
+ * 닫기·다시 열기(`PUT`·`DELETE …/closure`)는 204 로 답한다: 나머지 요청은 끝나지 않는 약속이라 투영은 씨앗 그대로 남고, 닫은 기기가
+ * 쓰는 캐시 반영(`applyClosureToReadStates`)만 화면을 바꾼다.
  */
 function seedGoneDmHome(): void {
   // 서버가 없는 하네스: 질의가 다시 나가도 끝나지 않는 약속으로 둔다(실패하면 세션 만료로 읽혀 캐시가 지워진다).
   void globalThis.fetch;
   void globalThis.Headers;
-  globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  globalThis.fetch = ((url: string) =>
+    /\/channels\/[^/]+\/closure$/.test(String(url))
+      ? Promise.resolve(new Response(null, {status: 204}))
+      : new Promise<Response>(() => {})) as typeof fetch;
   resetAgentWorking();
   harnessClient.setQueryDefaults(['agent-liveness', ADE_WS], {gcTime: Infinity});
   harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
@@ -6114,9 +6119,10 @@ function seedGoneDmHome(): void {
   const viewer = {...humanTemplate, workspaceId: ADE_WS, role: 'owner'};
   const dohyun = person('11', '이도현', 'dohyun');
   const seoyeon = person('12', '박서연', 'seoyeon');
+  const minsu = person('13', '최민수', 'minsu');
   const claude = agent('14', 'kwak의 Claude', 'kwak-claude', {hostOnline: false});
   const grok = agent('15', 'grok', 'grok', {hostOnline: true});
-  harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, claude, grok]);
+  harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, minsu, claude, grok]);
   harnessClient.setQueryData(['agent-liveness', ADE_WS, claude.id.toLowerCase()], {
     agentMemberId: claude.id,
     state: 'inactive',
@@ -6136,6 +6142,7 @@ function seedGoneDmHome(): void {
     {id: 'ch-general', workspaceId: ADE_WS, kind: 'public' as const, name: '일반', muted: false},
     dm('dohyun', dohyun.id),
     dm('seoyeon', seoyeon.id),
+    dm('minsu', minsu.id),
     dm('claude', claude.id),
     dm('grok', grok.id),
     // 명부에 없는 상대(나감·정지·꺼 둔 개인 에이전트).
@@ -6144,28 +6151,36 @@ function seedGoneDmHome(): void {
     dm('gone-b', id('99')),
     dm('gone-machine', id('96')),
   ]);
-  const read = (channelId: string, lastReadSeq: number, latestSeq: number) => ({
+  const read = (
+    channelId: string,
+    lastReadSeq: number,
+    latestSeq: number,
+    closedAtSeq: number | null = null,
+    latestReadableSeq: number = latestSeq,
+  ) => ({
     channelId,
     lastReadSeq,
     latestSeq,
     unreadCount: latestSeq - lastReadSeq,
     mentionCount: 0,
     markedUnreadBeforeSeq: null,
+    latestReadableSeq,
+    closedAtSeq,
   });
   harnessClient.setQueryData(['read-state', ADE_WS], [
     read('ch-general', 20, 20),
     read('dm-dohyun', 10, 12),
     read('dm-seoyeon', 5, 5),
+    // 내가 닫았다: 닫을 때 seq 가 읽을 seq 와 같다(7번).
+    read('dm-minsu', 8, 8, 8),
     read('dm-claude', 9, 9),
     read('dm-grok', 4, 4),
     read('dm-gone-a', 6, 6),
     read('dm-gone-unread', 3, 4),
     read('dm-gone-b', 3, 3),
-    read('dm-gone-machine', 2, 6),
+    // 안 읽음 4 는 전부 기계 메시지: 서버가 읽을 seq 를 읽은 자리(2)에 둔다.
+    read('dm-gone-machine', 2, 6, null, 2),
   ]);
-  // 안 읽은 쪽의 판정: 사람 메시지가 있는 쪽은 true(보인다), 기계 메시지뿐인 쪽은 false(접힌다).
-  harnessClient.setQueryData(['gone-unread', ADE_WS, 'dm-gone-unread', 3, 4], true);
-  harnessClient.setQueryData(['gone-unread', ADE_WS, 'dm-gone-machine', 2, 6], false);
 }
 
 /**

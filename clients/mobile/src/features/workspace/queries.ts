@@ -3,6 +3,7 @@ import {
   fetchRoster,
   listChannels,
   type Channel,
+  type ReadState,
 } from '@momo/core/lib/api';
 import {fetchWorkspace} from '@momo/core/features/settings/api';
 import type {RoleLabels} from '@momo/core/features/directory/model';
@@ -11,7 +12,7 @@ import {
   makeDirectory,
   type Directory,
 } from '@momo/core/features/workspace/directory';
-import {useQuery, useQueryClient} from '@tanstack/react-query';
+import {useQuery, useQueryClient, type QueryClient} from '@tanstack/react-query';
 import {useCallback, useMemo} from 'react';
 
 // =============================================================================
@@ -157,6 +158,25 @@ export function useReadStates(workspaceId: string) {
     [query.data],
   );
   return {...query, byChannel};
+}
+
+/**
+ * 닫기·다시 열기를 쓴 기기는 새 상태를 읽음 투영 캐시 행에 바로 적는다(ADR-0177 D10: 다른 기기는 다음 투영에서 맞춘다).
+ * `null` = 다시 열었다. 서버가 답한 **뒤에** 부른다(이 화면의 행 동작은 낙관 갱신이 없다).
+ */
+export function applyClosureToReadStates(
+  client: QueryClient,
+  workspaceId: string,
+  channelId: string,
+  closedAtSeq: number | null,
+): void {
+  client.setQueryData<ReadState[]>(workspaceKeys.readState(workspaceId), current => {
+    if (!current) return current;
+    const key = idKey(channelId);
+    return current.map(row =>
+      idKey(row.channelId) === key ? {...row, closedAtSeq} : row,
+    );
+  });
 }
 
 /**

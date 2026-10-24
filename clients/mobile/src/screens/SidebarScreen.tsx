@@ -2,12 +2,9 @@ import {ApiError, openDirectMessage, uuidEq} from '@momo/core/lib/api';
 import {NetworkError} from '@momo/core/lib/http';
 import {attachParticle} from '@momo/core/lib/koreanParticle';
 import {serverSurface} from '@momo/core/features/capabilities/serverSurfaces';
-import {channelLabel, idKey, memberFor} from '@momo/core/features/workspace/directory';
-import {
-  goneDmDisclosureLabel,
-  readProjectionPhase,
-  rosterLoaded,
-} from '@momo/core/features/sidebar/goneDm';
+import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/features/workspace/directory';
+import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
+import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
 import {
   dmPeerStatusDot,
@@ -58,18 +55,20 @@ import {usePalette, useStyles} from '../design/theme';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {useAgentWorkingSignals} from '../features/agents/workingSignal';
 import {StatusDot} from '../features/presence/StatusDot';
-import {useCollapsedSections, homeSectionItems} from '../features/home/collapsedSections';
+import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
 import {buildWorkingCard, type WorkingCardModel} from '../features/home/workingCard';
 import {workspaceHeading, type WorkspaceLogo} from '../features/home/workspaceLogo';
 import {
   buildSidebarSections,
   CHANNEL_LIST_FAILED,
-  rowCount,
-  type GoneToggleItem,
   type SidebarRow,
   type SidebarSection,
 } from '../features/sidebar/rows';
 import {useGoneUnreadVerdicts} from '../features/sidebar/useGoneUnreadVerdicts';
+import {dmClosedEntries, dmClosureMode, dmVerdicts} from '../features/sidebar/dmVerdicts';
+import {DmClosedSheet} from '../features/sidebar/DmClosedSheet';
+import {useDmClosedCacheInitial, useDmClosedCacheWrite} from '../features/sidebar/dmClosedCache';
+import {useDmReopen} from '../features/sidebar/useDmReopen';
 import {
   useChannels,
   useDirectory,
@@ -271,13 +270,6 @@ export function ProfileAvatarButton({
   );
 }
 
-/**
- * 「나간 멤버와의 대화」 줄을 누른 뒤, 펼친 행이 그려져 목록 내용이 자랄 때까지 끝으로 내릴 준비를 해 두는 시간(ms).
- * 내용이 안 자라면(접힌 행이 이미 화면 안이다) 이 시간이 지나 표지를 거둔다. 표지가 남으면 이후 다른 이유의 크기 변화가
- * 스크롤을 빼앗는다.
- */
-const REVEAL_WINDOW_MS = 1500;
-
 export default function SidebarScreen({
   openChannelId,
   onOpenConversation,
@@ -290,7 +282,7 @@ export default function SidebarScreen({
   active = true,
 }: {
   openChannelId: string | null;
-  /** 채널을 나간 뒤. 열려 있던 그 대화를 걷는다(웹은 `/` 로 착지한다). */
+  /** 채널을 나간 뒤·DM 을 닫은 뒤. 열려 있던 그 대화를 걷는다(웹은 `/` 로 착지한다). */
   onChannelLeft?: (channelId: string) => void;
   onOpenConversation: (channelId: string, title: string) => void;
   /**
@@ -347,33 +339,11 @@ export default function SidebarScreen({
   const identity = useWorkspaceIdentity(workspaceId);
   const heading = workspaceHeading(identity);
   const {collapsed, toggle} = useCollapsedSections(workspaceId);
-  // 「나간 멤버와의 대화」 펼침(#4252): 들여다보는 동작이지 설정이 아니라 저장하지 않는다.
-  const [goneOpen, setGoneOpen] = useState(false);
   const readPhase = readProjectionPhase(readStates);
-  // 행 이름과 접는 판정이 같은 답을 읽는다(`rows.ts` `rosterReady`).
+  // 행 이름과 보임 판정이 같은 답을 읽는다(`rows.ts` `rosterReady`).
   const rosterReady = rosterLoaded(directoryQuery);
-  // 줄은 목록 맨 끝이라 펼친 결과가 화면 밖에 서기 쉽다(웹과 같은 규칙, design-review #4252 M1). 펼친 직후 접힌 행이 그려져 내용이
-  // 자라면 끝으로 내린다. 표지는 한 번만 쓰고(`onContentSizeChange` 가 다른 이유로 와도 내리지 않는다), 안 오면 곧 거둔다.
-  const listHandle = useRef<{
-    getScrollResponder: () => {scrollToEnd: (options?: {animated?: boolean}) => void} | undefined | null;
-  } | null>(null);
-  const revealGoneOnGrow = useRef(false);
-  const onToggleGone = useCallback(() => {
-    if (!goneOpen) {
-      revealGoneOnGrow.current = true;
-      setTimeout(() => {
-        revealGoneOnGrow.current = false;
-      }, REVEAL_WINDOW_MS);
-    } else {
-      revealGoneOnGrow.current = false;
-    }
-    setGoneOpen(open => !open);
-  }, [goneOpen]);
-  const onListContentGrow = useCallback(() => {
-    if (!revealGoneOnGrow.current) return;
-    revealGoneOnGrow.current = false;
-    listHandle.current?.getScrollResponder()?.scrollToEnd({animated: true});
-  }, []);
+  // 서버가 닫기를 싣는가(읽음 투영 행이 말한다). 싣지 않는 서버에서는 닫기를 내밀지 않는다(폰에는 기기 로컬 닫기가 없다).
+  const closureMode = dmClosureMode(readStates.data);
 
   // Synchronous. See the note above.
   const [query, setQuery] = useState('');
@@ -390,7 +360,8 @@ export default function SidebarScreen({
     [directoryQuery.directory],
   );
 
-  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다(웹과 같은 규칙, `useGoneUnreadVerdicts`).
+  // 서버가 「사람이 읽을 마지막 seq」를 싣는 동안은 메시지를 다시 읽지 않는다(웹 `useDmVisibility` 와 같다): 후보가 비도록 국면을
+  // 오는 중으로 준다. 옛 서버에서만, 안 읽음이 있는 나간 멤버 DM 의 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다.
   const goneUnreadVerdicts = useGoneUnreadVerdicts({
     workspaceId,
     groups: channelsQuery.groups,
@@ -398,9 +369,46 @@ export default function SidebarScreen({
     selfMemberId: member.id,
     unreadByChannel: readStates.byChannel,
     openChannelId,
-    readPhase,
+    readPhase: closureMode === 'server' ? 'loading' : readPhase,
     rosterReady,
   });
+
+  // 마지막 투영의 닫힘 id: 첫 프레임에만 쓰는 캐시(원장 아님, `dmClosedCache.ts`).
+  const cachedClosed = useDmClosedCacheInitial(workspaceId);
+
+  // DM 이 목록에 서는가: 코어 `dmVisibility` 한 함수(웹과 같다). 숨은 DM 은 「⋯ › 닫은 대화」가 연다.
+  const verdicts = useMemo(
+    () =>
+      dmVerdicts({
+        dms: channelsQuery.groups.dms,
+        directory: directoryQuery.directory,
+        selfMemberId: member.id,
+        byChannel: readStates.byChannel,
+        openChannelId,
+        phase: readPhase,
+        rosterReady,
+        mode: closureMode,
+        goneVerdicts: goneUnreadVerdicts,
+        cachedClosed,
+      }),
+    [
+      channelsQuery.groups.dms,
+      directoryQuery.directory,
+      member.id,
+      readStates.byChannel,
+      openChannelId,
+      readPhase,
+      rosterReady,
+      closureMode,
+      goneUnreadVerdicts,
+      cachedClosed,
+    ],
+  );
+  useDmClosedCacheWrite(workspaceId, readPhase, closureMode === 'server', verdicts);
+  const closedEntries = useMemo(
+    () => dmClosedEntries(channelsQuery.groups.dms, verdicts),
+    [channelsQuery.groups.dms, verdicts],
+  );
 
   const sections = useMemo(
     () =>
@@ -414,7 +422,7 @@ export default function SidebarScreen({
         query,
         readPhase,
         rosterReady,
-        goneUnreadVerdicts,
+        dmVerdicts: verdicts,
       }),
     [
       channelsQuery.groups,
@@ -426,15 +434,9 @@ export default function SidebarScreen({
       query,
       readPhase,
       rosterReady,
-      goneUnreadVerdicts,
+      verdicts,
     ],
   );
-  // 접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다(웹과 같다). 접힌 줄이 없는데 펼침만 남으면 나중에 접힌 대화가 생겼을 때
-  // 처음부터 펼쳐진 채 선다.
-  const goneCount = sections.find(section => section.key === 'dms')?.tucked?.length ?? 0;
-  useEffect(() => {
-    if (goneCount === 0) setGoneOpen(false);
-  }, [goneCount]);
 
   // ---- 「작업 중」 카드 (시안 A `.a-now`) -------------------------------------
   // 시계는 두지 않는다 — 카드는 경과 숫자를 그리지 않고, 스토어가 발행·해제마다
@@ -529,13 +531,53 @@ export default function SidebarScreen({
         muted: row.muted,
         selfRole,
         readState: readStates.byChannel.get(idKey(row.targetId)) ?? null,
+        // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X·행 메뉴와 같다) + 서버가 닫기를 싣는 동안만(기기 로컬 닫기는 없다).
+        closeOffered:
+          row.kind === 'dm' &&
+          closureMode === 'server' &&
+          dmCloseOffered({
+            phase: readPhase,
+            unreadCount: row.unreadCount,
+            mentionCount: row.mentionCount,
+            starredOrSectioned: false,
+          }),
       };
     },
-    [channelById, selfRole, readStates.byChannel],
+    [channelById, selfRole, readStates.byChannel, closureMode, readPhase],
   );
 
+  // 「⋯ › 닫은 대화」 시트(ADR-0177 증보 D11, #4367). 내가 닫은 대화와 상대가 나간 대화를 다시 연다.
+  const [closedListOpen, setClosedListOpen] = useState(false);
+  const closedItems = useMemo(
+    () =>
+      closedEntries.map(entry => ({
+        entry,
+        name: channelLabelParts(
+          entry.channel,
+          directoryQuery.directory,
+          member.id,
+          {rosterReady},
+        ).text,
+      })),
+    [closedEntries, directoryQuery.directory, member.id, rosterReady],
+  );
+  const onClosedReopened = useCallback(
+    (entry: {channel: {id: string}}) => {
+      setClosedListOpen(false);
+      const item = closedItems.find(candidate => candidate.entry.channel.id === entry.channel.id);
+      onOpenConversation(entry.channel.id, item?.name ?? '다이렉트 메시지');
+    },
+    [closedItems, onOpenConversation],
+  );
+  const dmReopen = useDmReopen(workspaceId, readStates.byChannel, onClosedReopened);
+  // 시트가 열린 채 목록이 비면(다른 기기에서 다시 열었다) 빈 상태를 말한다 - 시트가 스스로 닫히지 않는다.
+  const closeClosedList = useCallback(() => {
+    setClosedListOpen(false);
+    dmReopen.clearError();
+  }, [dmReopen]);
+
   // 섹션 머리의 ⋯ (시안 `.a-sec-h .ctl`). 장식이 아니라 문이다: 헤더에서 내려온
-  // 두 검색(이름·메시지)과, DM 섹션에서는 에이전트 목록으로 간다.
+  // 두 검색(이름·메시지)과, DM 섹션에서는 에이전트 목록·닫은 대화로 간다.
   const openSectionMenu = useCallback(
     (section: Pick<SidebarSection, 'key' | 'label'>) => {
       const items: {label: string; run: () => void}[] = [
@@ -543,8 +585,14 @@ export default function SidebarScreen({
       ];
       if (section.key === 'channels') {
         items.push({label: SEARCH_SURFACE_NAME, run: () => onOpenSearch()});
-      } else if (onOpenAgentList) {
-        items.push({label: AGENT_LIST_ACTION, run: onOpenAgentList});
+      } else {
+        if (onOpenAgentList) {
+          items.push({label: AGENT_LIST_ACTION, run: onOpenAgentList});
+        }
+        // 닫은 대화가 없으면 문이 서지 않는다(웹 `DmClosedMenu` 와 같다): 항목이 없는 문은 문이 아니다.
+        if (closedEntries.length > 0) {
+          items.push({label: DM_CLOSED_LIST_LABEL, run: () => setClosedListOpen(true)});
+        }
       }
       ActionSheetIOS.showActionSheetWithOptions(
         {
@@ -555,21 +603,21 @@ export default function SidebarScreen({
         index => items[index]?.run(),
       );
     },
-    [onOpenAgentList, onOpenSearch],
+    [closedEntries.length, onOpenAgentList, onOpenSearch],
   );
 
   const shownSections = useMemo(
     () =>
       sections.map(section => ({
         ...section,
-        data: homeSectionItems(section, collapsed.has(section.key), goneOpen, row =>
+        data: visibleRows(section, collapsed.has(section.key), row =>
           uuidEq(row.targetId, openChannelId ?? undefined),
         ),
       })),
-    [sections, collapsed, goneOpen, openChannelId],
+    [sections, collapsed, openChannelId],
   );
 
-  // 읽음 투영을 한 번도 못 읽었으면 접을 근거가 없어 나간 멤버 DM 이 도로 보인다(코어 `dmHiddenAsGone`: 모를 때 숨기는 쪽이 최악이다).
+  // 읽음 투영을 한 번도 못 읽었으면 접을 근거가 없어 나간 멤버 DM 이 도로 보인다(코어 `dmVisibility` 2번: 모를 때 숨기는 쪽이 최악이다).
   // 그때 「목록은 그대로」라고 말하면 거짓이라 이유를 말한다(웹 DM 구역의 같은 안내와 같은 뜻, design-review #4252 Low).
   const goneUnfoldedByReadFailure =
     readPhase === 'error' &&
@@ -579,7 +627,8 @@ export default function SidebarScreen({
         section.key === 'dms' && section.data.some(row => row.labelKind === 'gone'),
     );
 
-  const total = rowCount(sections);
+  // 목록이 비었나: 행이 없어도 숨은 DM 만 있는 DM 섹션은 선다(`rows.ts`) - 그 머리의 ⋯ 가 닫은 대화로 가는 문이다.
+  const nothingToShow = sections.length === 0;
   const searching = query.trim() !== '';
   const loading = channelsQuery.isLoading || directoryQuery.isLoading;
   // The ROSTER counts as a list failure, not a detail that degrades quietly.
@@ -706,7 +755,7 @@ export default function SidebarScreen({
           }}
           testID="channels-error"
         />
-      ) : total === 0 && !searching ? (
+      ) : nothingToShow && !searching ? (
         <EmptyState
           headline="아직 참여한 채널이 없습니다."
           // 채널 범위의 행위는 「추가」다 (#1573 예약 · #1584). 「초대」는
@@ -720,10 +769,6 @@ export default function SidebarScreen({
         />
       ) : (
         <SectionList
-          ref={list => {
-            listHandle.current = list;
-          }}
-          onContentSizeChange={onListContentGrow}
           sections={shownSections}
           keyExtractor={row => row.key}
           ListHeaderComponent={
@@ -787,26 +832,22 @@ export default function SidebarScreen({
               ) : null}
             </View>
           )}
-          renderItem={({item}) =>
-            item.kind === 'goneToggle' ? (
-              <GoneToggleRow item={item} onPress={onToggleGone} />
-            ) : (
-              <Row
-                row={item}
-                directory={directoryQuery.directory}
-                // `uuidEq`, not `===`: ids cross the wire in mixed case, and the
-                // unread suppression one file over already compares them this way.
-                // Two different answers about the same row is how a highlighted
-                // row keeps its badge.
-                selected={uuidEq(item.targetId, openChannelId ?? undefined)}
-                busy={openDm.isPending && openDm.variables === item.targetId}
-                onPress={() => onRowPress(item)}
-                actionTarget={actionTargetFor(item)}
-                onOpenActions={rowActions.open}
-                onRunAction={rowActions.run}
-              />
-            )
-          }
+          renderItem={({item}) => (
+            <Row
+              row={item}
+              directory={directoryQuery.directory}
+              // `uuidEq`, not `===`: ids cross the wire in mixed case, and the
+              // unread suppression one file over already compares them this way.
+              // Two different answers about the same row is how a highlighted
+              // row keeps its badge.
+              selected={uuidEq(item.targetId, openChannelId ?? undefined)}
+              busy={openDm.isPending && openDm.variables === item.targetId}
+              onPress={() => onRowPress(item)}
+              actionTarget={actionTargetFor(item)}
+              onOpenActions={rowActions.open}
+              onRunAction={rowActions.run}
+            />
+          )}
           stickySectionHeadersEnabled={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
@@ -816,6 +857,16 @@ export default function SidebarScreen({
           testID="sidebar-list"
         />
       )}
+
+      {closedListOpen ? (
+        <DmClosedSheet
+          items={closedItems}
+          pendingId={dmReopen.pendingId}
+          error={dmReopen.error}
+          onReopen={dmReopen.reopen}
+          onClose={closeClosedList}
+        />
+      ) : null}
 
       {rowActions.active !== null ? (
         <ChannelActionSheet
@@ -985,54 +1036,6 @@ function DefaultFace(): React.JSX.Element {
         style={[styles.icon18, {tintColor: palette.textMuted}]}
       />
     </View>
-  );
-}
-
-/**
- * DM 섹션 끝의 조용한 줄 「나간 멤버와의 대화 N개」 (#4252). 규칙(무엇이 접히는가)은 코어 `dmHiddenAsGone` 이 갖고,
- * 이 줄은 접힌 수를 말하고 펼침을 여는 문이다. 얼굴 자리(28)에 셰브론이 서서 글자가 DM 이름과 같은 자리에서 시작한다.
- * 펼치면 접힌 대화가 이 줄 아래에 선다.
- *
- * 글자는 행의 이름과 **같은 규칙**으로 사용자의 글자 크기를 따른다(배율 상한 없음). 가장 큰 크기(AX5)에서는 한 줄에 안
- * 들어가므로 자르지 않고 줄을 바꾼다: 이 줄에서 중요한 것은 끝의 「N개」라서 말줄임이 그것을 먼저 지운다.
- */
-function GoneToggleRow({
-  item,
-  onPress,
-}: {
-  item: GoneToggleItem;
-  onPress: () => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  const label = goneDmDisclosureLabel(item.count);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{expanded: item.expanded}}
-      onPress={() => {
-        haptics.selection();
-        onPress();
-      }}
-      style={({pressed}) => [styles.goneToggle, pressed && styles.rowPressed]}
-      testID="sidebar-gone-toggle">
-      <View style={styles.goneChevronSlot}>
-        <Image
-          source={HOME_ICONS.down}
-          style={[
-            styles.icon20,
-            {tintColor: palette.icon},
-            !item.expanded && styles.chevronCollapsed,
-          ]}
-        />
-      </View>
-      {/* 줄이 바뀔 때 한글 낱말 가운데서 끊지 않는다(`atoms.tsx` `NoticeBlock` 의 같은 실측): 기본 줄바꿈은 글자 단위라
-          AX5 에서 「대 / 화 2개」로 끊겼다. 한 줄이면 아무 일도 하지 않는 값이다. */}
-      <Text style={styles.goneToggleLabel} lineBreakStrategyIOS="hangul-word">
-        {label}
-      </Text>
-    </Pressable>
   );
 }
 
@@ -1647,23 +1650,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // 「나간 멤버와의 대화 N개」 줄: 행과 같은 좌우 안쪽 여백, 얼굴 자리에 셰브론, 글자는 한 단 낮다.
-  goneToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: HOME.rowGap,
-    minHeight: TOUCH_TARGET,
-    paddingLeft: HOME.rowPadLeft,
-    paddingRight: HOME.rowPadRight,
-    borderRadius: HOME.rowRadius,
-  },
-  goneChevronSlot: {
-    width: HOME.rowFace,
-    height: HOME.rowFace,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  goneToggleLabel: {flexShrink: 1, fontSize: font.label, color: color.textMuted},
   // 상태 점이 있는 줄의 얼굴 상자(점의 절대 위치 기준). 크기는 얼굴과 같다.
   face: {width: HOME.rowFace, height: HOME.rowFace},
   statusAnchor: {position: 'absolute', right: -2, bottom: -2},
