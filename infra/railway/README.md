@@ -23,7 +23,7 @@ moves, update all of them in the same change
 
 | Service | Source | Start command | Volume | Public |
 |---|---|---|---|---|
-| **postgres** | `pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7…` (compose pin) | image default | `/var/lib/postgresql` | no |
+| **postgres** | `pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c9302…` (compose pin) | image default | `/var/lib/postgresql` | no |
 | **centrifugo** | `centrifugo/centrifugo:v6@sha256:8ba0c944…` (compose pin) | `centrifugo` | — | no — Caddy `/connection/*` |
 | **api** | `ghcr.io/yeomyeonggeori/oort@sha256:…` | `/bin/sh -c '… exec setpriv … momo-rust-entrypoint api'` + pre-deploy | `/var/lib/oort/drive` | no — Caddy `/v1/*`, `/hooks/*`, `/__momo_stub/*`, `/healthz` |
 | **relay** | same image | `momo-rust-entrypoint relay` | — | no |

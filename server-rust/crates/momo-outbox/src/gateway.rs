@@ -989,6 +989,111 @@ pub async fn settle_gateway_job_in_tx(
     Ok(settled.rows_affected() > 0)
 }
 
+/// What the outbox says about one queued run's delivery job, for the woken-not-collected
+/// verdict (ADR-0200 증보 3 E1-3, E1-6(i)). Facts only: the verdict is
+/// `momo_agent::woken_uncollected_verdict`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WokenJobFacts {
+    /// A pending/processing `agent_job` row exists for this run.
+    pub job_found: bool,
+    /// Some such job is claimable by oort's own conditions right now — the claim predicate
+    /// ([`CLAIMABLE_JOB_PREDICATE`]) minus the TOKEN conditions and the connection's
+    /// `active` status. A dead OAuth token is the agent's fact, not a reason to wait.
+    pub claimable_by_oort: bool,
+    /// The same agent holds a LIVE lease (`lease_owner` set, `lease_expires_at` in the
+    /// future) on a job of ANOTHER run. An expired lease stays on the row (no reaper) and
+    /// does not count.
+    pub other_job_live_lease: bool,
+}
+
+/// Lock this run's pending delivery job row(s) (`FOR UPDATE OF o`, so a claim arriving
+/// after waits for the sweep's transaction and finds a finished run) and read the
+/// [`WokenJobFacts`]. `$connection_id` is the agent's ACTIVE hosted connection.
+///
+/// The "claimable by oort" arm is [`CLAIMABLE_JOB_PREDICATE`]'s clauses spelled out once
+/// more — same macro for the trial stop (`trial_members_stop_sql!`), same
+/// `hosted_connection_channel_ids`, same scope — without the `token` join. The notifier
+/// role has no `token` grant (ADR-0200 증보 3 E7), which is the same decision.
+pub async fn lock_woken_job_facts_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+) -> Result<WokenJobFacts, sqlx::Error> {
+    let sql = concat!(
+        "SELECT (o.method = 'gateway' \
+                 AND o.status = 'pending' \
+                 AND o.available_at <= now() \
+                 AND NOT (o.lease_owner IS NOT NULL AND o.lease_expires_at > now()) \
+                 AND o.partition_key = $3 \
+                 AND lower(o.payload->>'agent_member_id') = lower($3::text) \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM agent_run r \
+                    WHERE r.workspace_id = o.workspace_id \
+                      AND r.id::text = lower(o.payload->>'run_id') \
+                      AND r.status::text IN ('awaiting_approval', 'succeeded', 'failed', \
+                                             'cancelled', 'timed_out') \
+                 ) \
+                 AND NOT EXISTS ( \
+                   SELECT 1 FROM agent ca \
+                    WHERE ca.workspace_id = o.workspace_id \
+                      AND ca.member_id = o.partition_key \
+                      AND ca.connector_owner_human_id IS NOT NULL \
+                      AND (lower(COALESCE(o.payload->>'author_member_id', '')) \
+                             <> lower(ca.connector_owner_human_id::text) \
+                           OR ", trial_members_stop_sql!(), ") \
+                 ) \
+                 AND EXISTS ( \
+                   SELECT 1 FROM member m \
+                     JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
+                    WHERE m.id = $3 AND m.workspace_id = $1 \
+                      AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
+                 ) \
+                 AND EXISTS ( \
+                   SELECT 1 FROM hosted_agent_connection hc \
+                    WHERE hc.workspace_id = $1 AND hc.agent_member_id = $3 \
+                      AND hc.id = $4 \
+                      AND 'agent:jobs:read' = ANY(hc.approved_scopes) \
+                      AND EXISTS ( \
+                        SELECT 1 FROM unnest(hosted_connection_channel_ids(hc.workspace_id, hc.id)) \
+                                 AS approved(channel_id) \
+                         WHERE lower(approved.channel_id::text) \
+                               = lower(o.payload->>'channel_id') \
+                      ) \
+                 ) \
+                ) AS claimable, \
+                EXISTS ( \
+                  SELECT 1 FROM outbox o2 \
+                   WHERE o2.workspace_id = $1 AND o2.kind = 'agent_job' \
+                     AND o2.partition_key = $3 \
+                     AND o2.status IN ('pending', 'processing') \
+                     AND lower(o2.payload->>'run_id') IS DISTINCT FROM lower($2::text) \
+                     AND o2.lease_owner IS NOT NULL AND o2.lease_expires_at > now() \
+                ) AS other_live_lease \
+           FROM outbox o \
+          WHERE o.workspace_id = $1 AND o.kind = 'agent_job' \
+            AND o.status IN ('pending', 'processing') \
+            AND lower(o.payload->>'run_id') = lower($2::text) \
+          ORDER BY o.id \
+            FOR UPDATE OF o"
+    );
+    let rows = sqlx::query(sql)
+        .bind(workspace_id)
+        .bind(run_id.to_string())
+        .bind(agent_member_id)
+        .bind(connection_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut facts = WokenJobFacts::default();
+    for row in &rows {
+        facts.job_found = true;
+        facts.claimable_by_oort |= row.try_get::<bool, _>("claimable")?;
+        facts.other_job_live_lease |= row.try_get::<bool, _>("other_live_lease")?;
+    }
+    Ok(facts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

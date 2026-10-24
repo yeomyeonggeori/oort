@@ -173,6 +173,7 @@ pub mod thread_wake;
 pub mod tools;
 pub mod usage;
 pub mod welcome;
+pub mod woken;
 
 // NOTE the two names this block deliberately does **not** flatten:
 // `actions::DECLARED_NOT_EXECUTABLE` and `actions::ACTIONS` live one module down
@@ -257,9 +258,9 @@ pub use hosted_dm::{
     HostedDmRow,
 };
 pub use hosted_liveness::{
-    derive_liveness, liveness_target_for_viewer_in_tx, load_liveness_rows_in_tx, record_ping_in_tx,
-    record_tool_error_in_tx, record_tool_success_in_tx, DoorbellFact, Liveness, LivenessRow,
-    LivenessState, LivenessThresholds, PingState, Touch,
+    collected_since, derive_liveness, liveness_target_for_viewer_in_tx, load_liveness_rows_in_tx,
+    record_ping_in_tx, record_tool_error_in_tx, record_tool_success_in_tx, DoorbellFact, Liveness,
+    LivenessRow, LivenessState, LivenessThresholds, PingState, Touch,
 };
 pub use hosted_notice::{
     hosted_skip_notice_body, hosted_skip_notice_body_with_owner, hosted_skip_notice_key,
@@ -324,6 +325,10 @@ pub use run_progress::{
     RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
     ToolTallyRow,
 };
+pub use woken::{
+    active_hosted_connection_id_in_tx, load_woken_agent_facts_in_tx, woken_clock_start,
+    woken_uncollected_verdict, WokenAgentFacts, WokenVerdictInput,
+};
 // ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
 pub use connector_trial::{
     agent_is_operator_env_pinned_in_tx, connector_trial_facts_in_tx, connector_trial_notice_body,
@@ -375,9 +380,10 @@ pub use usage::{
     MAX_RANGE_DAYS,
 };
 pub use welcome::{
-    ensure_agent_in_general_in_tx, lock_welcome_opener_in_tx, resolve_welcome_owner_in_tx,
-    resolve_welcome_target_in_tx, welcome_job_payload, welcome_opener_already_queued_in_tx,
-    welcome_opener_idempotency_key, welcome_run_input, WelcomeTarget, DEFAULT_WELCOME_PROMPT,
-    PROVIDER_REQUIRED_BODY, WELCOME_AUDIT_PROVIDER_REQUIRED, WELCOME_AUDIT_QUEUED,
-    WELCOME_AUDIT_SCHEMA, WELCOME_JOB_CREATED_FROM, WELCOME_RUN_INPUT_SCHEMA,
+    configure_welcome_hosted_signal_hours, ensure_agent_in_general_in_tx,
+    lock_welcome_opener_in_tx, resolve_welcome_owner_in_tx, resolve_welcome_target_in_tx,
+    welcome_job_payload, welcome_opener_already_queued_in_tx, welcome_opener_idempotency_key,
+    welcome_run_input, WelcomeTarget, DEFAULT_WELCOME_PROMPT, PROVIDER_REQUIRED_BODY,
+    WELCOME_AUDIT_PROVIDER_REQUIRED, WELCOME_AUDIT_QUEUED, WELCOME_AUDIT_SCHEMA,
+    WELCOME_JOB_CREATED_FROM, WELCOME_RUN_INPUT_SCHEMA,
 };
