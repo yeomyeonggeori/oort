@@ -670,12 +670,16 @@ mod tests {
     ///
     /// 147 is #4381's EXECUTE lockdown: ten API-side `mem_*` definer functions (six entry points, four RLS
     /// policy helpers) go from PUBLIC to `momo_app` only (also reasserted in both bootstrap SQL files).
+    ///
+    /// 148 is #4385's `member.avatar.set` (ADR-0186 증보 2026-10-25 v4): only the INSERT guard of
+    /// `agent_avatar_image` changes — the image's owner may be the person who asked the agent, the
+    /// proposer must be an agent.
     #[test]
-    fn discovers_contiguous_migrations_001_to_147() {
+    fn discovers_contiguous_migrations_001_to_148() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=147).collect();
+        let expected: Vec<i64> = (1..=148).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -683,7 +687,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=147 under {}",
+            "expected contiguous 001..=148 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -691,7 +695,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("147_mem_api_execute_lockdown"));
+            .starts_with("148_member_avatar_set_by_agent"));
     }
 
     #[test]

@@ -19,6 +19,7 @@
 //! | active human member, in the room | the judgment SQL's own joins (`member.kind='human'`, `status='active'`, `membership.left_at IS NULL`) — the same predicates as `is_active_human_member_in_tx` / `is_active_channel_member_in_tx` | — |
 //! | the role/owner condition | [`momo_agent::decider_gate`] | the same function, `approve = true` |
 //! | an `agent_editor` card's subject | [`momo_agent::pinned_target_agent`] | the same function |
+//! | a `requesting_member` card's person (`member.avatar.set`) | [`momo_agent::pinned_target_member`] | the same function |
 //! | whose machine a spawn is about | [`momo_agent::approval::reference_execution_host`] | the same function |
 //! | an admin gate (`require_admin`) | `momo_auth::active_workspace_role` → `is_admin()` | the same two calls |
 //! | an agent-editor gate (`require_profile_editor_in_tx`) | `momo_messaging::active_workspace_role` → `is_admin()`, then `agent_owner_in_tx` | the same calls, in the same order |
@@ -61,7 +62,7 @@
 
 use momo_agent::approval::reference_execution_host;
 use momo_agent::provisioning::agent_owner_in_tx;
-use momo_agent::{decider_gate, pinned_target_agent, GatePlan};
+use momo_agent::{decider_gate, pinned_target_agent, pinned_target_member, GatePlan};
 use momo_db::DbError;
 use momo_t3::{remote_host_owner_in_tx, T3Error};
 use serde_json::Value;
@@ -87,6 +88,8 @@ pub struct CardAudience {
     plan: GatePlan,
     /// The `agent_editor` card's subject (`action.pins.target`).
     target_agent: Option<Uuid>,
+    /// The `requesting_member` card's person (`action.pins.target`, `member.avatar.set`).
+    target_member: Option<Uuid>,
     /// ADR-0188 D3: the owner of the member-scoped machine this card is about — set
     /// only when the card's host is somebody's own. A workspace host, no host at
     /// all, or a host this workspace does not have say nothing here.
@@ -110,6 +113,7 @@ impl CardAudience {
         Ok(CardAudience {
             plan: decider_gate(&card.action_type, &card.payload, true),
             target_agent: pinned_target_agent(&card.payload),
+            target_member: pinned_target_member(&card.payload),
             host_owner,
         })
     }
@@ -144,6 +148,10 @@ impl CardAudience {
                         .is_some_and(|role| role.is_admin()),
                 )
             }
+            // `member.avatar.set`: the person the card was drawn for, and only them. The
+            // route's gate compares the decider with the same pin; a card that pinned
+            // nobody has nobody to wake (and the route fails it closed).
+            GatePlan::RequestingMember => Ok(self.target_member == Some(member_id)),
             // `require_profile_editor_in_tx`: an active workspace member who is an
             // admin or the target agent's owner. The target is the card's pin; a
             // card that pinned none has nobody to judge the owner arm against, so

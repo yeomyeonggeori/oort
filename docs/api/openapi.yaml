@@ -10922,14 +10922,16 @@ paths:
     get:
       tags: [approvals]
       operationId: getApprovalAvatarPreview
-      summary: The image a pending `agent.profile.update` card proposes as an avatar.
+      summary: The image a pending `agent.profile.update` or `member.avatar.set` card proposes as an avatar.
       description: >
         ADR-0186 addendum 2026-10-13 (v3) V3-2a. The approval card's `action.preview`
         block (`kind: avatar_image`) names a staged image and its `sha256`; this is
         where the approver reads those bytes **before** deciding. They are the
         server's re-encoded PNG/JPEG (at most 512x512 and 512 KiB), never the
         proposer's bytes. Readable only by a person who could decide the card — the
-        target agent's owner or a workspace admin; every other caller (another
+        target agent's owner or a workspace admin — and, for a `member.avatar.set`
+        card (ADR-0186 addendum 2026-10-25, v4), **only the person the picture is
+        for** (not an admin, not the agent's owner); every other caller (another
         channel member, an unknown approval, an approval with no staged avatar) gets
         the same 404, so the route is neither a preview for onlookers nor an oracle.
         `v` must be the image's sha256 (64 hex characters); another value is a 404.
@@ -14957,7 +14959,17 @@ components:
         authority — the install carries no grant and no token (D1-A, D2); each
         member connects for themselves. Its result `ref` is the same
         `{type: workspace_settings, id: <workspace id>}`.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+        `member.avatar.set` (`{attachmentId}`, `requesting_member`; ADR-0186
+        증보 2026-10-25 v4, #4385) lets an agent propose that **the person who
+        called it** wear a picture **that person attached in the same
+        conversation** as their own profile picture. There is no target
+        argument: the person is the author of the message that started the
+        run, derived by the server. Only that person can approve it (not an
+        admin, not the agent's owner); the card shows the staged image
+        (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
+        that person only) and its result `ref` is `{type: member, id: <the
+        person>}`.
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
 
     SuggestableCommandId:
       type: string
@@ -15014,10 +15026,12 @@ components:
         **target agent's** owner or a workspace admin — the same judgement as
         editing that agent's profile, made against the agent the proposal
         names rather than against the proposer. `workspace_operator` is a
-        workspace owner/admin or a platform operator. The canonical list is
-        `momo_agent::actions::RequiredRole`; held equal by
+        workspace owner/admin or a platform operator. `requesting_member` is
+        **the person the action changes and nobody else** (`member.avatar.set`:
+        the human who called the agent, derived by the server from the run).
+        The canonical list is `momo_agent::actions::RequiredRole`; held equal by
         `routes::actions::the_required_roles_are_one_list_in_two_places`.
-      enum: ["admin", "agent_editor", "workspace_operator"]
+      enum: ["admin", "agent_editor", "requesting_member", "workspace_operator"]
 
     ListWorkspaceActionsResponse:
       type: object
@@ -21503,7 +21517,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent, hosted_connection, workspace_settings]
+          enum: [invite, channel, agent, hosted_connection, workspace_settings, member]
         id:
           type: string
           format: uuid

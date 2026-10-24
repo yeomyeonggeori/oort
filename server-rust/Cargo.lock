@@ -2073,6 +2073,7 @@ dependencies = [
  "chrono",
  "ed25519-dalek",
  "futures",
+ "image",
  "jsonwebtoken",
  "momo-agent",
  "momo-agent-worker",

@@ -219,7 +219,10 @@ pub use card_suggest::{
     SuggestionRequester, ValidatedSuggestion, COMMAND_AI_CONNECT, COMMAND_SUGGEST_PROPS_KEY,
     SUGGESTABLE_COMMANDS,
 };
-pub use decider::{action_required_role, decider_gate, gate_plan, pinned_target_agent, GatePlan};
+pub use decider::{
+    action_required_role, decider_gate, gate_plan, pinned_target_agent, pinned_target_member,
+    GatePlan,
+};
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,
     ToolResult, ACTION_TYPE_TOOL_CALL, AUDIT_APPROVAL_REQUESTED, AUDIT_TOOL_EXECUTED,
