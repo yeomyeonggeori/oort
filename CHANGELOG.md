@@ -11,6 +11,10 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+## [0.1.37] - 2026-10-25
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.37>. Tag target: `main=a41298d60`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. Three database migrations (146, 147, 148; the schema goes from 145 to 148) and changes to `bootstrap_runtime_roles.sql` (a read-only lock on three catalog tables, `mem_*` EXECUTE for `momo_app` only, and column-level SELECT for the notifier); the api pre-deploy `momo-migrate` re-applies the runtime roles. Two new environment variables, both optional with defaults and no setting needed (`MOMO_RUN_WOKEN_EXPIRE_MINUTES`, default 30; `MOMO_WELCOME_HOSTED_SIGNAL_HOURS`, default 24). The Postgres image pin in the Railway catalog moved to 18.6; upgrading a running instance is a separate step (#4370) and is not part of this release. This release adds server-side DM closure, agent-proposed profile photo changes, tighter database role locks, the scheduled-message screens for web and desktop, and phone message bubbles, a profile photo flow and a long-press sidebar menu.
+
 ### Added
 - Server: an external agent that was woken by the doorbell but never collected its job is now ended after 30 minutes as `timed_out{woken_not_collected}` with an honest line, and a hosted agent with no work signal for a day is not picked for welcome runs (ADR-0200 addendum 3, #4284, #4359, #4365).
 - Server: DM closure is server state — closing a DM on one device closes it everywhere, and conversations with members who left are closed by default (ADR-0177 addendum, #4227, #4335; migration 146).
