@@ -30,6 +30,7 @@
 //! | `the_other_runtime_roles_reach_every_table_the_migrations_created` | a new table that `app`/`relay`/`worker` cannot read or write, or a cloud-box lockdown or a `scheduled_message*` lockdown (ADR-0208 D3: `momo_app` all four verbs, relay/worker/notifier none) that drifts |
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
+//! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
 //!
 //! Why #3553 got through anyway: the first test below already called
 //! `judge_targets` as the notifier (Postgres checks table privileges when a
@@ -1865,4 +1866,224 @@ async fn closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_str
         "closing a stream under the production grants failed:\n  {}",
         failures.join("\n  ")
     );
+}
+
+/// ADR-0200 증보 3 E7 (#4284, acceptance 10): the `woken_not_collected` rule runs as the
+/// REAL production notifier role. The dev bootstrap would hand the notifier every table and
+/// pass anyway; this provisions the table-scoped production grants, ends a real woken run
+/// with them, and then asserts what the role must NOT be able to read.
+///
+/// Status: written and type-checked, not run in stage 1 of #4284 (no Docker).
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads()
+{
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+
+    // an ACTIVE hosted connection with a real token row (the sweep must not read it)
+    let connection: Uuid = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id = $1 AND agent_member_id = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .fetch_one(&db.su)
+    .await
+    .expect("the seeded connection");
+    let scopes: Vec<String> = [
+        "agent:port:connect",
+        "agent:inbox:read",
+        "messages:read",
+        "messages:write",
+        "agent:jobs:read",
+        "agent:runs:callback",
+    ]
+    .iter()
+    .map(|scope| (*scope).to_string())
+    .collect();
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET status = 'detected', pairing_consumed_at = now(), detected_at = now(), \
+                detected_by = $3, confirmed_by = $3, confirmed_at = now(), \
+                approved_channel_ids = $4, approved_scopes = $5 \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(connection)
+    .bind(seeded.requester)
+    .bind(vec![seeded.channel])
+    .bind(&scopes)
+    .execute(&db.su)
+    .await
+    .expect("detected connection");
+    let token: Uuid = sqlx::query_scalar(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label, \
+                           credential_class, hosted_connection_id, audience, created_by) \
+         VALUES($1,'agent_bearer',$2,digest($3::text,'sha256'),$4,'h', \
+                'hosted_active',$5,'/v1/mcp/agent-port',$6) RETURNING id",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .bind(format!(
+        "momo_agent_v1.{}.{}",
+        seeded.workspace,
+        Uuid::new_v4().simple()
+    ))
+    .bind(&scopes)
+    .bind(connection)
+    .bind(seeded.requester)
+    .fetch_one(&db.su)
+    .await
+    .expect("token");
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status = 'active', active_token_id = $3, \
+                proved_at = now(), proved_by = $4 WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(connection)
+    .bind(token)
+    .bind(seeded.agent)
+    .execute(&db.su)
+    .await
+    .expect("activate");
+
+    // a queued chat run raised an hour ago, its delivery job, and ONE `_ok` ring row
+    let run = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO agent_run (id, workspace_id, agent_member_id, channel_id, status, input, \
+                                idempotency_key, created_at, updated_at) \
+         VALUES ($1,$2,$3,$4,'queued', jsonb_build_object('type','chat'), $5, \
+                 now() - interval '1 hour', now() - interval '1 hour')",
+    )
+    .bind(run)
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .bind(seeded.channel)
+    .bind(format!("t:{run}"))
+    .execute(&db.su)
+    .await
+    .expect("queued run");
+    sqlx::query(
+        "INSERT INTO outbox (workspace_id, kind, status, method, payload, partition_key) \
+         VALUES ($1,'agent_job','pending','gateway', \
+                 jsonb_build_object('run_id',$2::text,'agent_member_id',$3::text, \
+                                    'channel_id',$4::text,'author_member_id',$5::text), $3)",
+    )
+    .bind(seeded.workspace)
+    .bind(run.to_string())
+    .bind(seeded.agent)
+    .bind(seeded.channel)
+    .bind(seeded.requester)
+    .execute(&db.su)
+    .await
+    .expect("delivery job");
+    sqlx::query(
+        "SELECT agent_run_event_append($1, $2, 'doorbell_rung', NULL, 'leading_ok', NULL, NULL)",
+    )
+    .bind(seeded.workspace)
+    .bind(run)
+    .execute(&db.su)
+    .await
+    .expect("an ok ring row");
+    // the fixture wrote a message row by hand; bring the channel's counter up to it
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
+          WHERE channel_id = $1",
+    )
+    .bind(seeded.channel)
+    .execute(&db.su)
+    .await
+    .expect("channel_seq catch-up");
+    tokio::time::sleep(std::time::Duration::from_millis(2200)).await;
+
+    let stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(
+        &notifier,
+        momo_outbox::StallPolicy {
+            woken_expire_seconds: 1,
+            ..momo_outbox::StallPolicy::default()
+        },
+        32,
+    )
+    .await
+    .expect("the sweep runs as the production notifier role without a permission error");
+    assert!(stats.woken_not_collected >= 1, "{stats:?}");
+    let (status, code): (String, Option<String>) =
+        sqlx::query_as("SELECT status::text, error->>'code' FROM agent_run WHERE id = $1")
+            .bind(run)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        (status.as_str(), code.as_deref()),
+        ("timed_out", Some("woken_not_collected"))
+    );
+
+    // What the role must hold, and must not. `has_*_privilege` answers for the role itself.
+    let privilege = |sql: &'static str| {
+        let su = db.su.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>(sql)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    for (what, sql) in [
+        (
+            "hosted_agent_liveness.last_inbox_read_at",
+            "SELECT has_column_privilege('momo_notifier','hosted_agent_liveness','last_inbox_read_at','SELECT')",
+        ),
+        (
+            "hosted_agent_liveness.last_tool_error_at",
+            "SELECT has_column_privilege('momo_notifier','hosted_agent_liveness','last_tool_error_at','SELECT')",
+        ),
+        (
+            "hosted_agent_doorbell_ring.requested_at",
+            "SELECT has_column_privilege('momo_notifier','hosted_agent_doorbell_ring','requested_at','SELECT')",
+        ),
+        (
+            "agent_provider_pin.kind",
+            "SELECT has_column_privilege('momo_notifier','agent_provider_pin','kind','SELECT')",
+        ),
+        (
+            "hosted_agent_connection.approved_scopes",
+            "SELECT has_column_privilege('momo_notifier','hosted_agent_connection','approved_scopes','SELECT')",
+        ),
+    ] {
+        assert!(privilege(sql).await, "the notifier must read {what}");
+    }
+    for (what, sql) in [
+        (
+            "a table-level SELECT on hosted_agent_liveness",
+            "SELECT has_table_privilege('momo_notifier','hosted_agent_liveness','SELECT')",
+        ),
+        (
+            "hosted_agent_liveness.last_tool_call_at (not read)",
+            "SELECT has_column_privilege('momo_notifier','hosted_agent_liveness','last_tool_call_at','SELECT')",
+        ),
+        (
+            "a table-level SELECT on hosted_agent_doorbell_ring",
+            "SELECT has_table_privilege('momo_notifier','hosted_agent_doorbell_ring','SELECT')",
+        ),
+        (
+            "a table-level SELECT on agent_provider_pin",
+            "SELECT has_table_privilege('momo_notifier','agent_provider_pin','SELECT')",
+        ),
+        (
+            "any column of token",
+            "SELECT has_any_column_privilege('momo_notifier','token','SELECT')",
+        ),
+        (
+            "any column of hosted_agent_doorbell (url, secret_sealed)",
+            "SELECT has_any_column_privilege('momo_notifier','hosted_agent_doorbell','SELECT')",
+        ),
+        (
+            "hosted_agent_connection.pairing_challenge_hash",
+            "SELECT has_column_privilege('momo_notifier','hosted_agent_connection','pairing_challenge_hash','SELECT')",
+        ),
+    ] {
+        assert!(!privilege(sql).await, "RED: the notifier must NOT hold {what}");
+    }
+    db.finish().await;
 }

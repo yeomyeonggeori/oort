@@ -1566,7 +1566,7 @@ pub async fn end_parked_run_in_tx(
 }
 
 /// End a run the stall sweep found abandoned (ADR-0200 D1-4): `timed_out` with a closed
-/// code (`lease_abandoned` / `unclaimed_expired`). Guarded on `queued`/`running` so it can
+/// code (`lease_abandoned` / `unclaimed_expired` / `woken_not_collected`). Guarded on `queued`/`running` so it can
 /// only end a run that is actually live and not parked on a human (an `awaiting_approval`
 /// run is the approval sweep's, with its own deadline). Returns whether it ended one.
 pub async fn end_stalled_run_in_tx(

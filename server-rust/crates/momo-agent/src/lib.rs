@@ -173,6 +173,7 @@ pub mod thread_wake;
 pub mod tools;
 pub mod usage;
 pub mod welcome;
+pub mod woken;
 
 // NOTE the two names this block deliberately does **not** flatten:
 // `actions::DECLARED_NOT_EXECUTABLE` and `actions::ACTIONS` live one module down
@@ -257,9 +258,9 @@ pub use hosted_dm::{
     HostedDmRow,
 };
 pub use hosted_liveness::{
-    derive_liveness, liveness_target_for_viewer_in_tx, load_liveness_rows_in_tx, record_ping_in_tx,
-    record_tool_error_in_tx, record_tool_success_in_tx, DoorbellFact, Liveness, LivenessRow,
-    LivenessState, LivenessThresholds, PingState, Touch,
+    collected_since, derive_liveness, liveness_target_for_viewer_in_tx, load_liveness_rows_in_tx,
+    record_ping_in_tx, record_tool_error_in_tx, record_tool_success_in_tx, DoorbellFact, Liveness,
+    LivenessRow, LivenessState, LivenessThresholds, PingState, Touch,
 };
 pub use hosted_notice::{
     hosted_skip_notice_body, hosted_skip_notice_body_with_owner, hosted_skip_notice_key,
@@ -323,6 +324,10 @@ pub use run_progress::{
     list_run_ledger_in_tx, visible_channels_in_tx, AheadRun, JobFacts, LeaseState, QueueEntry,
     RunEventInclude, RunEventRow, RunLedger, RunPhase, RunProgressBase, RunProgressRow,
     ToolTallyRow,
+};
+pub use woken::{
+    active_hosted_connection_id_in_tx, load_woken_agent_facts_in_tx, woken_clock_start,
+    woken_uncollected_verdict, WokenAgentFacts, WokenVerdictInput,
 };
 // ADR-0200 증보 2026-10-15 R1 — the workspace "running now" read (#3847).
 pub use connector_trial::{

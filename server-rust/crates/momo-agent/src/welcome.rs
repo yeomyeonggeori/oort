@@ -271,6 +271,26 @@ pub async fn resolve_welcome_target_in_tx(
     }))
 }
 
+/// ADR-0200 증보 3 E5 (#4284): how recent a hosted agent's WORK signal (inbox read, claim,
+/// run event) must be for the server to hand it a welcome run. `MOMO_WELCOME_HOSTED_SIGNAL_HOURS`
+/// (24, clamped 1..=168). The same window decides the new-connection exception (`proved_at`).
+pub const DEFAULT_WELCOME_HOSTED_SIGNAL_HOURS: i64 = 24;
+
+/// Parse the env value: unset or not a number → the default; otherwise clamped.
+pub fn parse_welcome_hosted_signal_hours(raw: Option<&str>) -> i64 {
+    raw.and_then(|value| value.trim().parse::<i64>().ok())
+        .unwrap_or(DEFAULT_WELCOME_HOSTED_SIGNAL_HOURS)
+        .clamp(1, 168)
+}
+
+fn welcome_hosted_signal_hours() -> i64 {
+    parse_welcome_hosted_signal_hours(
+        std::env::var("MOMO_WELCOME_HOSTED_SIGNAL_HOURS")
+            .ok()
+            .as_deref(),
+    )
+}
+
 struct WelcomeAgent {
     member_id: Uuid,
     model: String,
@@ -281,10 +301,23 @@ struct WelcomeAgent {
     max_run_steps: i32,
     enabled_tools: Vec<String>,
     is_hosted: bool,
+    /// A `hosted_agent_connection` row exists (not merely `owner_only`). Only these are
+    /// held to the E5 signal rule.
+    has_hosted_connection: bool,
+    /// E5 (a): inbox read / claim / run event inside the signal window.
+    hosted_recent_work_signal: bool,
+    /// E5 (b), the new-connection exception: the connection was proved inside the same
+    /// window, so ADR-0185 D-C c2's 「활성 전이 = 첫 환영」 still works.
+    hosted_newly_active: bool,
     hosted_active_connection_id: Option<Uuid>,
     hosted_channel_approved: bool,
 }
 
+/// Can this welcome candidate be handed the opener? A hosted agent must be deliverable
+/// (gate open, active connection, `#general` approved) AND — ADR-0200 증보 3 E5 — either
+/// have done work lately or be a brand-new connection: the opener marker is written once
+/// per person, so choosing a dead agent would burn that person's first welcome (the
+/// 2026-10-23 incident: a hosted agent silent for days held a welcome run for 24 hours).
 fn hosted_agent_is_deliverable(agent: &WelcomeAgent, hosted_delivery_enabled: bool) -> bool {
     if !agent.is_hosted {
         return true;
@@ -292,6 +325,9 @@ fn hosted_agent_is_deliverable(agent: &WelcomeAgent, hosted_delivery_enabled: bo
     hosted_delivery_enabled
         && agent.hosted_active_connection_id.is_some()
         && agent.hosted_channel_approved
+        && (!agent.has_hosted_connection
+            || agent.hosted_recent_work_signal
+            || agent.hosted_newly_active)
 }
 
 // Each argument is one independent gate fact; a struct would only rename them.
@@ -317,6 +353,21 @@ async fn load_welcome_agent_in_tx(
                           WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
                  OR a.invocation_scope = 'owner_only') \
                   AS is_hosted, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                  AS has_hosted_connection, \
+                COALESCE((SELECT max(GREATEST(l.last_inbox_read_at, l.last_claim_at, \
+                                              l.last_run_event_at)) \
+                                  >= now() - make_interval(hours => $7::int) \
+                            FROM hosted_agent_liveness l \
+                           WHERE l.workspace_id = m.workspace_id \
+                             AND l.agent_member_id = m.id), false) \
+                  AS hosted_recent_work_signal, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                           AND hc.status = 'active' \
+                           AND hc.proved_at >= now() - make_interval(hours => $7::int)) \
+                  AS hosted_newly_active, \
                 (SELECT hc.id FROM hosted_agent_connection hc \
                    JOIN token t ON t.workspace_id = hc.workspace_id \
                                 AND t.id = hc.active_token_id \
@@ -372,6 +423,7 @@ async fn load_welcome_agent_in_tx(
     .bind(welcomed_member_id)
     .bind(subscription_agents_enabled)
     .bind(claude_subscription_agents_enabled)
+    .bind(welcome_hosted_signal_hours() as i32)
     .fetch_all(&mut *conn)
     .await?;
     for row in rows {
@@ -405,6 +457,9 @@ async fn load_welcome_agent_in_tx(
             max_run_steps: row.try_get("max_run_steps")?,
             enabled_tools,
             is_hosted: row.try_get("is_hosted")?,
+            has_hosted_connection: row.try_get("has_hosted_connection")?,
+            hosted_recent_work_signal: row.try_get("hosted_recent_work_signal")?,
+            hosted_newly_active: row.try_get("hosted_newly_active")?,
             hosted_active_connection_id: row.try_get("hosted_active_connection_id")?,
             hosted_channel_approved: row.try_get("hosted_channel_approved")?,
         };
@@ -503,6 +558,79 @@ pub fn welcome_job_payload(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn hosted_candidate() -> WelcomeAgent {
+        WelcomeAgent {
+            member_id: Uuid::from_u128(9),
+            model: "hosted-agent".into(),
+            model_source: ModelSource::Agent,
+            system_prompt: None,
+            tool_schema: json!([]),
+            config: json!({}),
+            max_run_steps: 50,
+            enabled_tools: vec![],
+            is_hosted: true,
+            has_hosted_connection: true,
+            hosted_recent_work_signal: false,
+            hosted_newly_active: false,
+            hosted_active_connection_id: Some(Uuid::from_u128(77)),
+            hosted_channel_approved: true,
+        }
+    }
+
+    /// ADR-0200 증보 3 E5, acceptance 7. The 10-23 incident: no work signal for days and a
+    /// connection activated long ago → no welcome. Each way back in is one fact.
+    #[test]
+    fn a_hosted_agent_is_welcomed_only_with_a_recent_work_signal_or_a_new_connection() {
+        let silent = hosted_candidate();
+        assert!(
+            !hosted_agent_is_deliverable(&silent, true),
+            "RED: a hosted agent silent for days must not be handed the opener"
+        );
+        let healthy = WelcomeAgent {
+            hosted_recent_work_signal: true,
+            ..hosted_candidate()
+        };
+        assert!(
+            hosted_agent_is_deliverable(&healthy, true),
+            "reads every 15 minutes"
+        );
+        let fresh = WelcomeAgent {
+            hosted_newly_active: true,
+            ..hosted_candidate()
+        };
+        assert!(
+            hosted_agent_is_deliverable(&fresh, true),
+            "RED: a just-activated connection (no signal yet) is the first welcome (D-C c2)"
+        );
+        // the old gates still apply on top
+        let no_channel = WelcomeAgent {
+            hosted_recent_work_signal: true,
+            hosted_channel_approved: false,
+            ..hosted_candidate()
+        };
+        assert!(!hosted_agent_is_deliverable(&no_channel, true));
+        assert!(!hosted_agent_is_deliverable(&healthy, false));
+        // an agent that is not hosted by a connection (native, or owner_only without one)
+        // is not held to the signal rule
+        let native = WelcomeAgent {
+            is_hosted: false,
+            has_hosted_connection: false,
+            ..hosted_candidate()
+        };
+        assert!(hosted_agent_is_deliverable(&native, true));
+    }
+
+    #[test]
+    fn the_signal_window_is_a_day_by_default_and_clamps_to_one_hour_to_a_week() {
+        assert_eq!(parse_welcome_hosted_signal_hours(None), 24);
+        assert_eq!(parse_welcome_hosted_signal_hours(Some("not a number")), 24);
+        assert_eq!(parse_welcome_hosted_signal_hours(Some("0")), 1);
+        assert_eq!(parse_welcome_hosted_signal_hours(Some("1")), 1);
+        assert_eq!(parse_welcome_hosted_signal_hours(Some(" 72 ")), 72);
+        assert_eq!(parse_welcome_hosted_signal_hours(Some("168")), 168);
+        assert_eq!(parse_welcome_hosted_signal_hours(Some("9999")), 168);
+    }
 
     #[test]
     fn default_copy_is_a_plain_korean_sentence() {
