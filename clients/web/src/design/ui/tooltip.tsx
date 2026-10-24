@@ -18,9 +18,13 @@ import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
 
 export type TooltipSide = "top" | "bottom";
 
+/** 트리거 기준 가로 정렬. `end`는 오른쪽 끝을 트리거 오른쪽 끝에 맞춘다(가장자리 단추의 툴팁이 잘리지 않게). */
+export type TooltipAlign = "center" | "end";
+
 interface TooltipProps {
   label: string;
   side?: TooltipSide;
+  align?: TooltipAlign;
   /** 처음부터 떠 있게 한다(갤러리·캡처 전용). 평소는 가리키거나 키보드 초점일 때만 뜬다. */
   defaultOpen?: boolean;
   /** 지연 덮어쓰기. 시험이 쓴다. 기본은 `TOOLTIP_DELAY_MS`. */
@@ -32,6 +36,9 @@ interface TooltipProps {
 /** 면의 클래스. `rowSurface.browser.test.ts`가 이 상수를 그대로 엔진에 먹여 계산된 값을 잰다. */
 export const TOOLTIP_CLASS =
   "tooltip-surface layer-content-float absolute left-1/2 -translate-x-1/2 text-meta";
+
+/** `align="end"`: 가운데 정렬 두 클래스를 덮는다(`cn`의 merge가 같은 그룹을 뒤 것으로 접는다). */
+export const TOOLTIP_END_CLASS = "left-auto right-0 translate-x-0";
 
 export const TOOLTIP_SIDE_CLASS: Record<TooltipSide, string> = {
   top: "bottom-full mb-1",
@@ -50,6 +57,7 @@ function isKeyboardFocus(target: EventTarget): boolean {
 export function Tooltip({
   label,
   side = "top",
+  align = "center",
   defaultOpen = false,
   delayMs = TOOLTIP_DELAY_MS,
   className,
@@ -99,7 +107,7 @@ export function Tooltip({
           aria-hidden="true"
           data-testid="tooltip"
           data-side={side}
-          className={cn(TOOLTIP_CLASS, TOOLTIP_SIDE_CLASS[side], TOOLTIP_MOTION)}
+          className={cn(TOOLTIP_CLASS, TOOLTIP_SIDE_CLASS[side], TOOLTIP_MOTION, align === "end" && TOOLTIP_END_CLASS)}
         >
           {label}
         </span>

@@ -500,7 +500,7 @@ export function MessageHoverToolbar({
           onOpenChange={onMenuOpenChange}
           modal={false}
         >
-          <Tooltip label="더 많은 액션" side={tipSide}>
+          <Tooltip label="더 많은 액션" side={tipSide} align="end">
             <DropdownMenuTrigger asChild>
               <button
                 type="button"

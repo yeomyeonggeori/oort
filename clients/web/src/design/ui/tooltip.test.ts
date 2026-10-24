@@ -28,7 +28,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-function mount(props: { side?: "top" | "bottom" } = {}) {
+function mount(props: { side?: "top" | "bottom"; align?: "center" | "end" } = {}) {
   const host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
@@ -145,5 +145,22 @@ describe("공용 툴팁", () => {
     expect(tip()?.getAttribute("aria-hidden")).toBe("true");
     expect(button.getAttribute("aria-describedby")).toBeNull();
     expect(button.getAttribute("title")).toBeNull();
+  });
+
+  it("align=end는 가운데 정렬 클래스를 덮어 오른쪽 끝에 붙고, 기본은 가운데다(가장자리 단추의 툴팁 잘림 M-1)", () => {
+    vi.useFakeTimers();
+    const end = mount({ align: "end" });
+    focusVisible(end.button, true);
+    act(() => end.button.focus());
+    const cls = end.tip()?.className ?? "";
+    expect(cls).toContain("right-0");
+    expect(cls).not.toContain("left-1/2");
+    expect(cls).not.toContain("-translate-x-1/2");
+    act(() => root?.unmount());
+    document.body.replaceChildren();
+    const center = mount();
+    focusVisible(center.button, true);
+    act(() => center.button.focus());
+    expect(center.tip()?.className).toContain("-translate-x-1/2");
   });
 });

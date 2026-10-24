@@ -543,6 +543,10 @@ describe("#4324 도구 막대 툴팁", () => {
         "더 많은 액션"
       );
     });
+    // M-1: 가장자리 단추(⋯)의 툴팁은 오른쪽 끝을 단추에 맞춘다(가운데 정렬이면 판 밖으로 잘린다).
+    const cls = host.querySelector('[data-testid="tooltip"]')?.className ?? "";
+    expect(cls).toContain("right-0");
+    expect(cls).not.toContain("-translate-x-1/2");
   });
 
   it("반응 단추의 툴팁은 내가 남겼는지에 따라 이름이 달라진다", () => {
