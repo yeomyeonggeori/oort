@@ -562,23 +562,24 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
    - 15분마다 읽는 에이전트: 생겨요.
    - 지정 에이전트가 탈락하면 오프너가 없어요(다음 후보로 넘어가지 않음).
    - 사보타주: 신규 연결 예외를 제거하거나 검사를 제거하면 빨개요.
-8. **건드리지 않는 run**: claim된 run, `running`·`awaiting_approval` run, 초인종 없는 연결의 run이에요.
-   - 각 대조군은 상태 하나(또는 초인종 유무)만 빼고 E1의 나머지 조건을 모두 만족해야 해요. 나머지 조건은 ring ok 행·수령 증거 없음·30분 경과예요.
+8. **건드리지 않는 run**: claim된 run, `running`·`awaiting_approval` run, 원장에 `doorbell_rung` ok 행이 없는 run(초인종이 없거나 울리지 않음)이에요.
+   - 각 대조군은 그 조건 하나만 빼고 E1의 나머지 조건을 모두 만족해야 해요. 나머지 조건은 ring ok 행·수령 증거 없음·30분 경과예요.
+   - 판정 함수는 「`queued`이고 `claimed` 없음」을 잠근 행에서 다시 확인해요. 후보 SQL만 믿지 않아요.
    - 그래야 상태 필터를 지우면 빨개져요.
 9. **한 정의**
    - `collected_since`의 비교 방향을 뒤집으면 D4 시험과 스위프 시험이 같이 빨개져요.
-   - SQL 후보는 Rust 판정의 상위집합이에요. 표 시험에 아래 입력을 넣어서, 판정이 참인 입력이 모두 후보 SQL에 잡히는 걸 보여요.
+   - SQL 후보는 Rust 판정의 상위집합이에요. DB 통합 시험에 아래 입력을 넣어서, 판정이 참인 입력이 모두 후보 SQL에 잡히는 걸 보여요.
      - `created_at = now() − 30분` 경계
      - 원장 ok 행 1개뿐
      - 다시 깨우기로 T가 늦어진 run
 10. **권한**
     - notifier 역할로 스위프가 권한 오류 없이 돌아요(prod role 시험).
     - grant 시험이 `hosted_agent_liveness`·`hosted_agent_connection`·`hosted_agent_doorbell_ring`·`agent_provider_pin`에 테이블 단위 SELECT가 없음을 단언해요. 모양은 `test_notifier_role_grants.sh`의 `workspace` 단언과 같아요. 새 열은 `column_reads`에 올려요.
-    - `token`·`hosted_agent_doorbell`에는 notifier GRANT가 하나도 없음을 단언해요.
+    - `token`·`hosted_agent_doorbell`에는 notifier GRANT가 하나도 없음을 단언해요. 기존 파서는 `ON TABLE` 줄만 보므로, 열 단위 GRANT(`GRANT SELECT (…) ON …`)까지 읽도록 파서를 넓히고 그 확장이 열 단위 GRANT 픽스처에서 빨개지는지 보여요. 실제 DB에서는 `has_table_privilege`·`has_column_privilege`로 한 번 더 단언해요(prod role 시험).
 11. **표지**: `woken_not_collected`의 앱 표지는 `site_silent`예요(코드↔표지 고정 시험).
 12. **교차 테넌트**: 다른 워크스페이스에 **같은 `run_id`의 `doorbell_rung` ok 행**을 넣어요. 원장은 FK가 없어서 넣을 수 있어요(migration 128).
     - 판정·후보 조인에서 `workspace_id` 조건을 지우면 빨개져요.
-    - `hosted_agent_liveness`·`hosted_agent_doorbell_ring` 조인도 같은 모양으로 시험해요.
+    - `hosted_agent_liveness`·`hosted_agent_doorbell_ring`은 복합 FK(`workspace_id, connection_id`)라 다른 워크스페이스 행을 같은 연결 id로 만들 수 없어요. 이 두 조인은 FK가 막는다는 사실을 스키마 시험으로 고정하고, 판정 쿼리의 조인 키에 `workspace_id`가 있음을 소스 시험으로 봐요.
 13. **호환**: 코어 `agentRunLedgerFromWire`가 `timed_out`+`woken_not_collected` 행을 받아들여요. `endReasonText`는 새 문장을 돌려주고, 모르는 코드에는 `undefined`를 돌려줘요(`runPhase.test.ts` 모양).
 14. **줄 계약**: 새 코드의 줄도 `answers_message_id`를 가져요. `client_msg_id`는 run id가 아니에요(기존 push·agent port 적합성 시험 모양).
 
