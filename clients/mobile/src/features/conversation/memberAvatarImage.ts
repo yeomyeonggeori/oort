@@ -144,7 +144,13 @@ export function peekMemberAvatar(key: string): string | null {
  * complete 로 준 `?v=` 주소라 roster 가 같은 주소를 주면 내려받기 없이 그대로 맞고, 다르면
  * 새 키로 받는다(시드는 덮이지 않고 LRU 로 밀려난다). 베어러를 쓰지 않으므로 경로 모양만 검사한다.
  */
-export function seedMemberAvatar(path: string, sourceUri: string): boolean {
+export function seedMemberAvatar(
+  path: string,
+  sourceUri: string,
+  /** `memberAvatarGeneration()` 을 올리기 시작할 때 읽은 값. 그 사이 비우기(로그아웃·계정 교체)가 있었으면 쓰지 않는다. */
+  startedGeneration: number = generation,
+): boolean {
+  if (startedGeneration !== generation) return false;
   if (memberAvatarContentPath(path) === null) return false;
   try {
     adoptExisting();
@@ -248,6 +254,11 @@ export function loadMemberAvatar(path: string): Promise<string | null> {
     });
   inflight.set(key, request);
   return request;
+}
+
+/** 비우기 세대. 올리기 같은 긴 일이 시작할 때 읽어 두었다가 끝에 `seedMemberAvatar` 로 넘긴다. */
+export function memberAvatarGeneration(): number {
+  return generation;
 }
 
 /** 로그아웃·세션 경계: 메모리 색인과 디스크 파일을 모두 비운다. */

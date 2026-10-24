@@ -14,6 +14,7 @@ import {
   __resetMemberAvatarCache,
   clearMemberAvatarCache,
   loadMemberAvatar,
+  memberAvatarGeneration,
   seedMemberAvatar,
 } from '../src/features/conversation/memberAvatarImage';
 import {__resetSessionStore} from '../src/storage/secureSession';
@@ -215,6 +216,15 @@ describe('업로드 직후 시드 (#4384)', () => {
     // 임시 파일을 지워도 캐시 파일은 남는다.
     fsMock.__files.delete(LOCAL);
     expect(fsMock.__files.has(uri)).toBe(true);
+  });
+
+  it('올리는 사이 캐시가 비워졌으면(로그아웃·계정 교체) 시드하지 않고 디스크에 남기지 않는다', () => {
+    fsMock.__files.add(LOCAL);
+    const started = memberAvatarGeneration();
+    clearMemberAvatarCache();
+    const before = [...fsMock.__files].length;
+    expect(seedMemberAvatar(PATH_A, LOCAL, started)).toBe(false);
+    expect([...fsMock.__files].length).toBe(before);
   });
 
   it('?v= 가 다른 주소는 시드를 쓰지 않고 새로 받는다', async () => {

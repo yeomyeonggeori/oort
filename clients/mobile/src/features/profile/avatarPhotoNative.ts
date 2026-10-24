@@ -3,7 +3,7 @@ import * as Device from 'expo-device';
 import * as ImagePicker from 'expo-image-picker';
 import {ImageManipulator, SaveFormat} from 'expo-image-manipulator';
 
-import {seedMemberAvatar} from '../conversation/memberAvatarImage';
+import {memberAvatarGeneration, seedMemberAvatar} from '../conversation/memberAvatarImage';
 import {putAttachmentBytes} from '../attachments/uploadTransport';
 import type {AvatarPhotoPorts, AvatarPickOutcome, AvatarSource} from './avatarPhoto';
 
@@ -59,9 +59,15 @@ async function pickCamera(): Promise<AvatarPickOutcome> {
   }
 }
 
+// 고르기 시작할 때의 캐시 세대. 올리는 사이 로그아웃·계정 교체로 캐시가 비워졌으면 시드하지 않는다
+// (앞 사람의 사진이 비운 뒤 디스크에 다시 쓰이지 않게).
+let pickedGeneration = memberAvatarGeneration();
+
 export const nativeAvatarPhotoPorts: AvatarPhotoPorts = {
-  pick: (source: AvatarSource) =>
-    source === 'camera' ? pickCamera() : pickLibrary(),
+  pick: (source: AvatarSource) => {
+    pickedGeneration = memberAvatarGeneration();
+    return source === 'camera' ? pickCamera() : pickLibrary();
+  },
   async shrink(uri, {crop, resizeLongSide, quality}) {
     const context = ImageManipulator.manipulate(uri);
     if (crop !== null) context.crop(crop);
@@ -84,7 +90,7 @@ export const nativeAvatarPhotoPorts: AvatarPhotoPorts = {
     return {ok: result.ok};
   },
   seed(avatarUrl, uri) {
-    seedMemberAvatar(avatarUrl, uri);
+    seedMemberAvatar(avatarUrl, uri, pickedGeneration);
   },
   // 시뮬레이터에서 `sourceType = .camera` 는 네이티브 예외다 — 실기기만 줄을 세운다.
   cameraAvailable: () => Device.isDevice,
