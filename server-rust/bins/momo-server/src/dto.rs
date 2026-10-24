@@ -2455,24 +2455,47 @@ pub struct AgentGatewayCompleteRequest {
 /// `init(from:)` tries the camelCase key and then the snake_case one; an adapter
 /// that sends `prompt_tokens` and one that sends `promptTokens` must produce the
 /// same ledger row, not one row and one zero.
+///
+/// #4375 — the Rust port declared `alias = "<snake_case>"` on fields that are
+/// already snake_case, so the camelCase spelling fell through serde's unknown-key
+/// skip and billed as 0 (`usage_ledger`, and so the team-AI key limit of #4117).
+/// The field name is the snake_case key; the alias is the camelCase one. A body
+/// carrying both spellings of one field is rejected by serde as a duplicate.
 #[derive(Debug, Default, Deserialize)]
 pub struct AgentGatewayUsageDto {
     #[serde(default)]
     pub model: Option<String>,
     #[serde(default)]
     pub effort: Option<String>,
-    #[serde(default, alias = "prompt_tokens")]
+    #[serde(default, alias = "promptTokens")]
     pub prompt_tokens: Option<i32>,
-    #[serde(default, alias = "completion_tokens")]
+    #[serde(default, alias = "completionTokens")]
     pub completion_tokens: Option<i32>,
-    #[serde(default, alias = "cached_tokens")]
+    #[serde(default, alias = "cachedTokens")]
     pub cached_tokens: Option<i32>,
-    #[serde(default, alias = "reasoning_tokens")]
+    #[serde(default, alias = "reasoningTokens")]
     pub reasoning_tokens: Option<i32>,
-    #[serde(default, alias = "cost_micro_usd")]
+    #[serde(default, alias = "costMicroUsd")]
     pub cost_micro_usd: Option<i64>,
-    #[serde(default, alias = "was_estimated")]
+    #[serde(default, alias = "wasEstimated")]
     pub was_estimated: Option<bool>,
+    /// Keys this contract does not know. Still ignored (the public API stays
+    /// tolerant; no `deny_unknown_fields`), but kept by *name only* so the route
+    /// can say that a sender's usage was not read instead of billing 0 in silence.
+    #[serde(flatten)]
+    unknown_keys: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
+}
+
+impl AgentGatewayUsageDto {
+    /// Unknown usage key names, at most `limit`, each cut to 40 chars. Names
+    /// come from the sender, so the log line stays bounded.
+    pub fn unknown_key_names(&self, limit: usize) -> Vec<String> {
+        self.unknown_keys
+            .keys()
+            .take(limit)
+            .map(|key| key.chars().take(40).collect())
+            .collect()
+    }
 }
 
 /// Swift `AgentGatewayCompleteResponse` (:2355-2360).
@@ -3545,10 +3568,83 @@ pub struct ReadStateDto {
     pub marked_unread_before_seq: Option<i64>,
 }
 
+/// One row of `GET read-state` (ADR-0177 증보 D8, #4227): everything [`ReadStateDto`] says plus
+/// the two fields the client needs to decide whether a DM shows.
+///
+/// Both keys are **always present**, like `marked_unread_before_seq`: `latest_readable_seq` is a
+/// `NOT NULL` column (`0` = nothing readable yet) and `closed_at_seq` is `null` when the caller has
+/// not closed the channel (and for every non-DM). A client that sees neither key is talking to a
+/// server older than this. They are not on [`ReadStateDto`] itself because that type is also the
+/// `PUT read-state` response, which does not carry them (see `ReadStateProjection`).
+#[derive(Debug, Serialize)]
+pub struct ReadStateRowDto {
+    #[serde(flatten)]
+    pub state: ReadStateDto,
+    pub latest_readable_seq: i64,
+    /// The **caller's own** closure watermark, never another member's.
+    pub closed_at_seq: Option<i64>,
+}
+
 /// Swift `ReadStateListResponseDTO` (:317-322).
 #[derive(Debug, Serialize)]
 pub struct ReadStateListResponseDto {
-    pub read_states: Vec<ReadStateDto>,
+    pub read_states: Vec<ReadStateRowDto>,
+}
+
+/// `PUT …/channels/{ch}/closure` request (ADR-0177 증보 D7, #4227).
+///
+/// **camelCase `seenSeq`**, the one spelling D7 names — unlike the snake_case read-state island next
+/// to it. It is the last seq the client *saw* for this DM (the projection's `latest_seq`), not a
+/// server timestamp: the server stores `GREATEST(existing, LEAST(seenSeq, last_seq))`. A missing
+/// field, a negative or non-integer value, or an unknown key is a 400 (the route maps every
+/// rejection of this body to 400, never Axum's 422).
+#[derive(Debug)]
+pub struct PutDmClosureRequestDto {
+    pub seen_seq: i64,
+}
+
+impl<'de> Deserialize<'de> for PutDmClosureRequestDto {
+    /// A JSON **object** with exactly one key, `seenSeq`, written once. Three things a derived struct
+    /// would let through are refused here: a positional array (`[1]` - serde reads a struct from a
+    /// sequence), a repeated key (`{"seenSeq":1,"seenSeq":2}` - a map read first keeps the last), and
+    /// a second key. Each is a visitor decision, so `deserialize_map` is the entry point: serde_json
+    /// refuses an array before the visitor runs (independent review r1: Low, then its follow-up).
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct ClosureVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ClosureVisitor {
+            type Value = PutDmClosureRequestDto;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("an object with exactly one key, seenSeq")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                const FIELD: &str = "seenSeq";
+                let mut seen_seq: Option<i64> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if key != FIELD {
+                        return Err(serde::de::Error::unknown_field(&key, &[FIELD]));
+                    }
+                    if seen_seq.is_some() {
+                        return Err(serde::de::Error::duplicate_field(FIELD));
+                    }
+                    seen_seq = Some(map.next_value::<i64>()?);
+                }
+                seen_seq
+                    .map(|seen_seq| PutDmClosureRequestDto { seen_seq })
+                    .ok_or_else(|| serde::de::Error::missing_field(FIELD))
+            }
+        }
+
+        deserializer.deserialize_map(ClosureVisitor)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -5884,6 +5980,100 @@ pub struct RemoveUnfurlsResponse {
 mod tests {
     use super::*;
 
+    /// #4375 — both spellings of every usage key reach the same field. Each value
+    /// is distinct and non-zero so a key that falls through (→ `None` → billed 0)
+    /// cannot equal its expectation by accident.
+    fn assert_usage_values(usage: &AgentGatewayUsageDto) {
+        assert_eq!(usage.prompt_tokens, Some(11));
+        assert_eq!(usage.completion_tokens, Some(5));
+        assert_eq!(usage.cached_tokens, Some(3));
+        assert_eq!(usage.reasoning_tokens, Some(2));
+        assert_eq!(usage.cost_micro_usd, Some(1234));
+        assert_eq!(usage.was_estimated, Some(true));
+    }
+
+    #[test]
+    fn gateway_usage_accepts_snake_case_keys() {
+        let usage: AgentGatewayUsageDto = serde_json::from_value(serde_json::json!({
+            "model": "m", "prompt_tokens": 11, "completion_tokens": 5,
+            "cached_tokens": 3, "reasoning_tokens": 2,
+            "cost_micro_usd": 1234, "was_estimated": true,
+        }))
+        .expect("snake_case usage");
+        assert_usage_values(&usage);
+    }
+
+    #[test]
+    fn gateway_usage_accepts_camel_case_keys() {
+        let usage: AgentGatewayUsageDto = serde_json::from_value(serde_json::json!({
+            "model": "m", "promptTokens": 11, "completionTokens": 5,
+            "cachedTokens": 3, "reasoningTokens": 2,
+            "costMicroUsd": 1234, "wasEstimated": true,
+        }))
+        .expect("camelCase usage");
+        assert_usage_values(&usage);
+    }
+
+    #[test]
+    fn gateway_usage_mixed_spellings_for_different_fields_work() {
+        let usage: AgentGatewayUsageDto = serde_json::from_value(serde_json::json!({
+            "promptTokens": 11, "completion_tokens": 5,
+            "cachedTokens": 3, "reasoning_tokens": 2,
+            "costMicroUsd": 1234, "was_estimated": true,
+        }))
+        .expect("mixed usage");
+        assert_usage_values(&usage);
+    }
+
+    /// Both spellings of one field is ambiguous, so it is refused rather than
+    /// resolved by a silent precedence (Swift preferred camelCase).
+    #[test]
+    fn gateway_usage_both_spellings_of_one_field_is_an_error() {
+        let error = serde_json::from_value::<AgentGatewayUsageDto>(serde_json::json!({
+            "promptTokens": 1, "prompt_tokens": 2,
+        }))
+        .expect_err("duplicate spelling");
+        assert!(error.to_string().contains("duplicate field"), "{error}");
+    }
+
+    /// A reported value that is not a number is an error, never a silent zero.
+    #[test]
+    fn gateway_usage_wrong_type_is_an_error_in_either_spelling() {
+        for key in ["promptTokens", "prompt_tokens"] {
+            serde_json::from_value::<AgentGatewayUsageDto>(serde_json::json!({ key: "11" }))
+                .expect_err(key);
+        }
+    }
+
+    /// #4375 — an unrecognised usage key stays accepted (public contract) but is
+    /// reported by name, never by value.
+    #[test]
+    fn gateway_usage_unknown_keys_are_ignored_but_named() {
+        let usage: AgentGatewayUsageDto = serde_json::from_value(serde_json::json!({
+            "promptTokens": 11, "inputTokens": 99, "output_tokens": "secret-value",
+        }))
+        .expect("unknown keys do not reject");
+        assert_eq!(usage.prompt_tokens, Some(11));
+        assert_eq!(usage.completion_tokens, None);
+        assert_eq!(usage.unknown_key_names(8), ["inputTokens", "output_tokens"]);
+        assert_eq!(usage.unknown_key_names(1), ["inputTokens"]);
+        let known: AgentGatewayUsageDto =
+            serde_json::from_value(serde_json::json!({"promptTokens": 1})).expect("known");
+        assert!(known.unknown_key_names(8).is_empty());
+    }
+
+    /// The complete request carries the usage block through the same two spellings.
+    #[test]
+    fn gateway_complete_request_camel_usage_reaches_the_dto() {
+        let request: AgentGatewayCompleteRequest = serde_json::from_value(serde_json::json!({
+            "status": "succeeded",
+            "usage": {"promptTokens": 11, "completionTokens": 5, "cachedTokens": 3,
+                      "reasoningTokens": 2, "costMicroUsd": 1234, "wasEstimated": true},
+        }))
+        .expect("complete request");
+        assert_usage_values(&request.usage.expect("usage"));
+    }
+
     /// **The approval wire's exact key set, pinned** (goal SRV-B5c).
     ///
     /// `docs/api/openapi.yaml` described these two schemas in snake_case for a
@@ -6386,13 +6576,17 @@ mod tests {
     #[test]
     fn read_state_dtos_stay_snake_case() {
         let json = serde_json::to_value(ReadStateListResponseDto {
-            read_states: vec![ReadStateDto {
-                channel_id: "c".into(),
-                last_read_seq: 1,
-                latest_seq: 2,
-                unread_count: 1,
-                mention_count: 0,
-                marked_unread_before_seq: None,
+            read_states: vec![ReadStateRowDto {
+                state: ReadStateDto {
+                    channel_id: "c".into(),
+                    last_read_seq: 1,
+                    latest_seq: 2,
+                    unread_count: 1,
+                    mention_count: 0,
+                    marked_unread_before_seq: None,
+                },
+                latest_readable_seq: 2,
+                closed_at_seq: None,
             }],
         })
         .expect("serialize");
@@ -6407,6 +6601,68 @@ mod tests {
             "the mark key is always present: {json}"
         );
         assert!(json["read_states"][0]["marked_unread_before_seq"].is_null());
+        // ADR-0177 증보 D8 (#4227): the two additions keep the island's snake_case and are always
+        // present — `closed_at_seq` is an explicit null, not an omitted key.
+        assert_eq!(json["read_states"][0]["latest_readable_seq"], 2);
+        assert!(
+            json["read_states"][0].get("closed_at_seq").is_some(),
+            "closed_at_seq is a key even when the caller has not closed the DM: {json}"
+        );
+        assert!(json["read_states"][0]["closed_at_seq"].is_null());
+        assert!(
+            json["read_states"][0].get("closedAtSeq").is_none(),
+            "{json}"
+        );
+        // `flatten` keeps the row flat: the cursor fields are siblings, not nested under `state`.
+        assert!(json["read_states"][0].get("state").is_none(), "{json}");
+    }
+
+    /// ADR-0177 증보 D7 (#4227): the closure body is exactly `{ "seenSeq": <integer> }`.
+    #[test]
+    fn dm_closure_request_takes_only_a_camel_case_integer_seen_seq() {
+        let ok: PutDmClosureRequestDto =
+            serde_json::from_value(serde_json::json!({"seenSeq": 7})).expect("decode");
+        assert_eq!(ok.seen_seq, 7);
+        let zero: PutDmClosureRequestDto =
+            serde_json::from_value(serde_json::json!({"seenSeq": 0})).expect("decode");
+        assert_eq!(zero.seen_seq, 0);
+        for bad in [
+            serde_json::json!({}),
+            serde_json::json!({"seen_seq": 7}),
+            serde_json::json!({"seenSeq": "7"}),
+            serde_json::json!({"seenSeq": 1.5}),
+            serde_json::json!({"seenSeq": null}),
+            serde_json::json!({"seenSeq": 7, "channelId": "x"}),
+            // A struct derived from serde reads a sequence positionally: `[1]` must not become 1.
+            serde_json::json!([1]),
+            serde_json::json!([]),
+            serde_json::json!([1, 2]),
+            serde_json::json!(7),
+        ] {
+            assert!(
+                serde_json::from_value::<PutDmClosureRequestDto>(bad.clone()).is_err(),
+                "{bad} must not decode"
+            );
+        }
+        // A `Value` cannot hold two equal keys, so the repeated key is a text case.
+        for bad in [
+            r#"{"seenSeq":1,"seenSeq":2}"#,
+            r#"{"seenSeq":1,"seenSeq":1}"#,
+            r#"[1]"#,
+            r#"{"seenSeq":5.0}"#,
+            r#"{"seenSeq":1e2}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<PutDmClosureRequestDto>(bad).is_err(),
+                "{bad} must not decode"
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<PutDmClosureRequestDto>(r#"{"seenSeq":9223372036854775807}"#)
+                .expect("i64::MAX decodes")
+                .seen_seq,
+            i64::MAX
+        );
     }
 
     #[test]

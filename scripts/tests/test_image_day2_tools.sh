@@ -120,7 +120,7 @@ docker run -d --name "$PG_NAME" --network "$NET" \
   -e POSTGRES_USER=momo \
   -e POSTGRES_PASSWORD="$TOKEN_PG" \
   -e POSTGRES_DB=momo \
-  pgvector/pgvector:0.8.5-pg18-trixie >/dev/null
+  pgvector/pgvector:0.8.7-pg18-trixie >/dev/null
 PG_CID="$PG_NAME"
 
 i=0
@@ -130,7 +130,7 @@ while [ "$i" -lt 40 ]; do
   sleep 1
 done
 docker exec "$PG_NAME" pg_isready -U momo >/dev/null 2>&1 || \
-  fail "throwaway pgvector/pgvector:0.8.5-pg18-trixie did not become ready"
+  fail "throwaway pgvector/pgvector:0.8.7-pg18-trixie did not become ready"
 
 docker exec -i "$PG_NAME" psql -U momo -d momo -v ON_ERROR_STOP=1 <<'SQL' >/dev/null
 CREATE TABLE message (id int);

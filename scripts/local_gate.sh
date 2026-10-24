@@ -139,7 +139,7 @@ AUTO_NEED_ALL=0
 auto_classify_script() {
   # scripts/** → docs + 해당 스크립트가 속한 runtime 프로파일. 모호하면 all.
   case "$1" in
-    scripts/migrate.sh|scripts/verify_owner_bootstrap_rust.sh|scripts/verify_owner_claim.sh|scripts/verify_rls.sh|scripts/verify_roster.sh|scripts/verify_channel_list.sh|scripts/verify_channel_management.sh|scripts/verify_join.sh|scripts/verify_platform_admin.sh|scripts/verify_approval_decision.sh|scripts/verify_auth_hardening.sh|scripts/verify_huddle_lifecycle.sh|scripts/terminal_attach_probe.py|scripts/terminal_attach_tls_proxy.py|scripts/verify_t3_migration_repair.sh|scripts/verify_agent_credentials_rust.sh|scripts/tests/test_agent_credentials_verifier_safety.sh)
+    scripts/migrate.sh|scripts/verify_owner_bootstrap_rust.sh|scripts/verify_owner_claim.sh|scripts/verify_rls.sh|scripts/verify_sec07_ported_claims.sh|scripts/verify_huddle_lifecycle.sh|scripts/terminal_attach_probe.py|scripts/terminal_attach_tls_proxy.py|scripts/verify_t3_migration_repair.sh|scripts/verify_agent_credentials_rust.sh|scripts/tests/test_agent_credentials_verifier_safety.sh)
       AUTO_NEED_DB=1; AUTO_REASONS+=("$1 -> runtime-db") ;;
     scripts/check_cargo_licenses.sh|scripts/check_npm_licenses.mjs|scripts/tests/test_license_gate.sh|scripts/generate_ghcr_notice_bundle.py|scripts/check_ghcr_notice_bundle.sh|scripts/check_debian_copyrights.sh|scripts/tests/test_ghcr_notice_bundle.sh)
       AUTO_NEED_LICENSE=1; AUTO_REASONS+=("$1 -> license (#1225 policy + #1332 GHCR notice bundle)") ;;
@@ -151,6 +151,10 @@ auto_classify_script() {
       # names the cheapest lane that re-proves it — and the documents it reads
       # (SELF_HOST.md, the runbooks, AGENTS.md) are docs-lane files anyway.
       AUTO_REASONS+=("$1 -> docs (#1525 docs command drift gate)") ;;
+    scripts/check_removed_tree_refs.sh|scripts/tests/test_removed_tree_refs_gate.sh)
+      # SEC-07 (#4245). Lives in add_static_commands, so it runs in every
+      # profile; this only names the cheapest lane that re-proves it.
+      AUTO_REASONS+=("$1 -> docs (#4245 removed-tree script lint)") ;;
     scripts/check_design_review_wiring.sh)
       # #1254. The guard is static and already runs in every profile via
       # add_static_commands; the surfaces it names are web + phone, and `web` is
@@ -164,7 +168,7 @@ auto_classify_script() {
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke (#1250 compose env template guard; the profile that renders these templates)") ;;
     scripts/verify_push_relay.sh|scripts/push_relay_keygen.sh)
       AUTO_NEED_RELAY=1; AUTO_REASONS+=("$1 -> runtime-relay") ;;
-    scripts/ensure_runtime_env.sh|scripts/verify_agent_worker_bootstrap.sh|scripts/verify_agent_path_equivalence.sh|scripts/verify_agent_context_bootstrap.sh|scripts/verify_agent_live_channel_bootstrap.sh|scripts/verify_hermes_verifier_bootstrap.sh|scripts/verify_local_hermes_bridge.sh|scripts/verify_hermes_gateway_adapter.sh|scripts/verify_hermes_gateway_real_smoke.sh|scripts/verify_local_hermes_credentialed_smoke.sh|scripts/mock_hermes.py)
+    scripts/ensure_runtime_env.sh|scripts/verify_agent_worker_bootstrap.sh|scripts/verify_agent_context_bootstrap.sh|scripts/verify_agent_live_channel_bootstrap.sh|scripts/verify_local_hermes_bridge.sh|scripts/verify_hermes_gateway_real_smoke.sh|scripts/verify_local_hermes_credentialed_smoke.sh|scripts/mock_hermes.py)
       AUTO_NEED_AGENT=1; AUTO_REASONS+=("$1 -> runtime-agent") ;;
     scripts/self_host_env.sh|scripts/tests/test_self_host_env_modes.sh|scripts/tests/test_publish_images_contract.py|scripts/verify_public_edge_centrifugo_contract.sh|scripts/verify_public_edge_centrifugo_boundary.sh|scripts/tests/test_public_edge_centrifugo_boundary.sh)
       AUTO_NEED_STAGING=1; AUTO_REASONS+=("$1 -> staging-smoke") ;;
@@ -433,6 +437,18 @@ export LOCAL_GATE_LOCAL_ALPHA_DIR="$RUN_ARTIFACT_DIR/local-alpha-${RUN_ID}"
 export LOCAL_GATE_INTERNAL_ALPHA_DIR="$RUN_ARTIFACT_DIR/internal-alpha-${RUN_ID}"
 export MOMO_RUNTIME_GUARD_REPO_ROOT="$REPO_ROOT"
 RUNTIME_COMPOSE_STARTED=0
+# #4386: runtime-db bootstrap on a gate-owned PG18 with a host-reachable loopback
+# port instead of `make up` + `make migrate`. scripts/gate_runtime_db.sh writes the
+# env file; run_cmd exports ENV_FILE to it right after that step passes, so every
+# later step that reads ENV_FILE (ensure_runtime_env.sh, make migrate, verify_rls.sh,
+# the agent bootstrap verifiers) sees the database this gate started, while the
+# static steps before it keep the caller's environment untouched. A caller-supplied
+# ENV_FILE is replaced from then on, not merged: it would name a database this gate
+# did not start.
+RUNTIME_GATE_DB=0
+RUNTIME_GATE_DB_UP_LABEL="isolated runtime DB up (gate-owned PG18, loopback port, generated env)"
+RUNTIME_GATE_DB_ENV_FILE="$RUN_ARTIFACT_DIR/runtime-db.env"
+[ "$PROFILE" = "runtime-db" ] && RUNTIME_GATE_DB=1
 case "$PROFILE" in
   local-alpha|internal-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|m3-dbc|all)
     # shellcheck source=scripts/runtime_process_guard.sh
@@ -455,6 +471,9 @@ case "$PROFILE" in
         echo "local gate: pre-existing Compose stack retained (not started by this gate)" | tee -a "$LOG_FILE"
       elif [ "$RUNTIME_COMPOSE_STARTED" -eq 1 ]; then
         echo "local gate: --keep-stack set; runtime Compose stack retained" | tee -a "$LOG_FILE"
+      fi
+      if [ "$RUNTIME_GATE_DB" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]; then
+        bash "$REPO_ROOT/scripts/gate_runtime_db.sh" down 2>&1 | tee -a "$LOG_FILE" || true
       fi
       if momo_guard_validate_marker "${MOMO_GATE_RUN_MARKER:-}"; then
         momo_cleanup_gate_marker "$MOMO_GATE_RUN_MARKER" "local gate emergency cleanup" || true
@@ -631,8 +650,20 @@ add_static_commands() {
   add_cmd_once "Centrifugo exact credential metadata contract" 'test "$(jq -r ".channel.proxy.subscribe.include_connection_meta" infra/centrifugo.json)" = "true"; grep -Fq "\"include_connection_meta\": true" scripts/local_alpha_runner.sh'
   # #1254: CLAUDE.md makes design-review a hard rule for every UI change, so the
   # loop pointing at deleted client trees was a rule that could not be followed.
+  add_cmd_once "removed-tree script lint (SEC-07 #4245): no script may launch the deleted Swift server" 'scripts/tests/test_removed_tree_refs_gate.sh && scripts/check_removed_tree_refs.sh'
   add_cmd_once "design review loop wiring contract" 'scripts/check_design_review_wiring.sh'
   add_note_once coverage "#1254 design review loop wiring via scripts/check_design_review_wiring.sh: the files the loop is made of must exist (router skill, web dialect, rubric, canonical design-system page, web pre-flight, both token files), every clients/<tree> named in an agent's or skill's frontmatter description must exist, and the router must still delegate web/desktop to momo-design-taste-web while saying what governs clients/mobile. The frontmatter is checked and the body prose deliberately is not: a description is what routes work to a reviewer (the #1254 defect was design-review's own description aiming at clients/macOS and clients/Core weeks after they were deleted), while writing \"clients/macOS was deleted\" in the body is the correct sentence and must stay legal."
+  # #4246 SEC-08: the compiler enforces `[workspace.lints.rust] unsafe_code = "forbid"`
+  # (clippy/test already build every member); this gate and its red proofs close the one
+  # hole the compiler cannot see — a crate that never opted in, or an allowlist drifting.
+  add_cmd_once "unsafe_code policy gate regression (red proofs)" 'scripts/tests/test_unsafe_policy_gate.sh'
+  add_cmd_once "unsafe_code policy gate (every member forbids or is allowlisted with a reason)" 'python3 scripts/check_unsafe_policy.py'
+  add_note_once coverage "#4246 SEC-08 via scripts/check_unsafe_policy.py: server-rust/Cargo.toml forbids unsafe_code workspace-wide, every crates/* and bins/* member inherits it (or sets forbid) unless server-rust/unsafe-allowlist.tsv lists it with a reason and the crate itself sets allow; stale rows, missing rows, weakened levels and new crates without [lints] are red. The compiler half (unsafe block in an inheriting crate fails; #![allow(unsafe_code)] cannot override forbid) is proven by test_unsafe_policy_gate.sh --compile, not by the default gate run. clients/desktop is its own cargo workspace and is recorded in the allowlist only."
+  # #4224 SEC-02 / ADR-0214: a security claim without a test is red. The lint reads files only
+  # (no compiler, no database); the regression script proves each red on a fixture repo.
+  add_cmd_once "security claims lint regression (red proofs)" 'bash scripts/tests/test_security_claims.sh'
+  add_cmd_once "security claims lint (every claim has a proof that resolves and runs where it says)" 'python3 scripts/check_security_claims.py'
+  add_note_once coverage "#4224 SEC-02 via scripts/check_security_claims.py: docs/security/claims.yaml maps each public security claim to proofs (path.rs#fn, path.test.ts::title, script:path). Red when a claim has no proof (E1), a selector matches nothing, is not a real #[test]/exact it() title or is an uninvoked script (E2), runs: promises a lane the proof does not run in (E3: PR CI = non-ignored server-rust tests, selection.txt PG targets, vitest/jest, scripts named in pr-ci.yml), a P0 claim has no sabotage evidence (E4), or a limits: marker is missing from SECURITY.md or docs/security/README.ko.md (E5). It checks that a test exists and where it runs, not what it asserts: P0 claims therefore name a negative control in the repo. Not wired into PR CI yet (ADR-0214 D6, policy-file PR)."
   # #1525: SELF_HOST.md, the runbooks and AGENTS.md are executed verbatim — AGENTS.md
   # §3 says "copy-paste, 그대로 실행" in so many words. #1472 measured what one
   # wrong command costs there: `cargo fmt --check --manifest-path
@@ -656,12 +687,13 @@ add_static_commands() {
   add_note_once coverage "#1329 Rust/public-edge Centrifugo boundary: infra/rust/Caddyfile must terminate /v1/centrifugo/* with an exclusive 403 before the general /v1 proxy; API and Centrifugo must require the same CENT_PROXY_SECRET source; mutation fixtures prove missing/reordered deny, header drift, public 401/401/400, hash mismatch, current-secret 401, and any raw-secret evidence are RED. H1 fixtures additionally prove the runtime accepts only the exact HTTPS origin derived from the canonical Caddy site; attacker/typo/port/userinfo/path/query/fragment/punycode and ambiguous Caddy inputs produce zero secret reads, Docker execs, curl/network calls, or evidence, production/staging cannot enable the synthetic-only loopback escape, and 3xx is never followed."
   add_note_once not_covered "#1329 public app.oor7.com reload/recreate, real host/API/Centrifugo SHA-256 equality, and old-secret rotation evidence remain runtime-unverified(public host) until the attended public-edge runbook step executes scripts/verify_public_edge_centrifugo_boundary.sh."
   add_cmd_once "Rust image publication contract" 'python3 scripts/tests/test_publish_images_contract.py'
+  add_cmd_once "PostgreSQL >=18.6 pin consistency (SEC-06 #4244; registry/runtime modes run in the PR gate)" 'python3 scripts/tests/test_postgres_version_floor.py'
   add_cmd_once "self-host image day-2 tools syntax (#2346)" 'bash -n scripts/tests/test_image_day2_tools.sh'
   add_cmd_once "self-host local-build/published-digest mode contract" 'scripts/tests/test_self_host_env_modes.sh'
   add_cmd_once "livekit node_ip knob contract (#1856)" 'bash -n scripts/tests/test_livekit_node_ip.sh && scripts/tests/test_livekit_node_ip.sh'
   add_cmd_once "self-host pg_dump operator contract" 'bash -n scripts/lib/pg_dump_custom.sh scripts/self_host_pg_dump.sh scripts/self_host_pg_restore.sh scripts/verify_self_host_pg_dump_restore.sh scripts/tests/test_self_host_pg_dump.sh && scripts/tests/test_self_host_pg_dump.sh'
   add_cmd_once "pgBackRest/PITR verifier shell syntax" 'bash -n scripts/verify_pgbackrest_pitr.sh scripts/verify_pgbackrest_pitr_e2e.sh scripts/pgbackrest_pitr_restore.sh scripts/run_pitr_gated_migrate.sh scripts/tests/test_pgbackrest_pitr_contract.sh scripts/tests/test_run_pitr_gated_migrate.sh'
-  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/oort scripts/lib/oort_common.sh scripts/lib/oort_day2.sh scripts/lib/oort_doctor.sh scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_track_alignment.sh scripts/github_track_guardrails.sh scripts/verify_policy_integrity.sh scripts/check_migration_numbers.sh scripts/check_cargo_licenses.sh scripts/check_secrets.sh scripts/check_compose_env_templates.sh scripts/check_design_review_wiring.sh scripts/check_release_manifest.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/fixtures/pre-push-branch-skew-v1 scripts/tests/test_license_gate.sh scripts/tests/test_secrets_gate.sh scripts/tests/test_track_alignment_guard.sh scripts/tests/test_github_track_guardrails.sh scripts/tests/test_pr_ci_guardrails.sh scripts/tests/test_policy_integrity_gate.sh scripts/tests/test_compose_env_template_gate.sh scripts/tests/test_docs_commands_gate.sh scripts/tests/test_oort_day2.sh scripts/tests/test_oort_doctor.sh scripts/tests/test_release_manifest.sh scripts/tests/test_self_host_env_modes.sh scripts/tests/test_public_edge_centrifugo_boundary.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_local_gate_lint_timeout.sh scripts/tests/test_goal_claim_base_resolution.sh scripts/tests/test_legacy_term_gate.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/local_alpha_runner.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_owner_bootstrap_rust.sh scripts/design_preflight_web.sh scripts/verify_public_edge_centrifugo_contract.sh scripts/verify_public_edge_centrifugo_boundary.sh scripts/verify_rls.sh scripts/verify_roster.sh scripts/verify_channel_list.sh scripts/verify_channel_management.sh scripts/verify_join.sh scripts/verify_platform_admin.sh scripts/verify_approval_decision.sh scripts/verify_auth_hardening.sh scripts/verify_push_relay.sh scripts/verify_huddle_lifecycle.sh scripts/verify_t3_migration_repair.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_path_equivalence.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_hermes_verifier_bootstrap.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_adapter.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_backup_restore_rehearsal.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f" || { echo "bash -n failed: $f"; exit 1; }; done'
+  add_cmd_once "shell syntax" 'for f in .conductor/setup.sh adapters/prime/run.sh adapters/prime/container/entrypoint.sh adapters/prime/tests/tenancy_probe.sh scripts/momo scripts/oort scripts/lib/oort_common.sh scripts/lib/oort_day2.sh scripts/lib/oort_doctor.sh scripts/local_gate.sh scripts/planning_context.sh scripts/self_host_env.sh scripts/runtime_process_guard.sh scripts/ensure_runtime_env.sh scripts/check_branch_skew.sh scripts/check_track_alignment.sh scripts/github_track_guardrails.sh scripts/verify_policy_integrity.sh scripts/check_migration_numbers.sh scripts/check_cargo_licenses.sh scripts/check_secrets.sh scripts/check_compose_env_templates.sh scripts/check_design_review_wiring.sh scripts/check_removed_tree_refs.sh scripts/tests/test_removed_tree_refs_gate.sh scripts/check_release_manifest.sh scripts/write_sha256_manifest.sh scripts/install_branch_skew_hook.sh scripts/hooks/pre-push scripts/tests/fixtures/pre-push-branch-skew-v1 scripts/tests/test_license_gate.sh scripts/tests/test_secrets_gate.sh scripts/tests/test_track_alignment_guard.sh scripts/tests/test_github_track_guardrails.sh scripts/tests/test_pr_ci_guardrails.sh scripts/tests/test_policy_integrity_gate.sh scripts/tests/test_compose_env_template_gate.sh scripts/tests/test_docs_commands_gate.sh scripts/tests/test_oort_day2.sh scripts/tests/test_oort_doctor.sh scripts/tests/test_release_manifest.sh scripts/tests/test_self_host_env_modes.sh scripts/tests/test_public_edge_centrifugo_boundary.sh scripts/tests/test_local_gate_hardening.sh scripts/tests/test_local_gate_drift_guard.sh scripts/tests/test_local_gate_lint_timeout.sh scripts/tests/test_goal_claim_base_resolution.sh scripts/tests/test_legacy_term_gate.sh scripts/cleanup_dogfood_seed_agents.sh scripts/local_soak_monitor.sh scripts/collect_diagnostics.sh scripts/compose_janitor.sh scripts/local_alpha_runner.sh scripts/goal_claim.sh scripts/goal_status.sh scripts/goal_release.sh scripts/github_bootstrap.sh scripts/github/bootstrap.sh scripts/migrate.sh scripts/verify_owner_bootstrap_rust.sh scripts/design_preflight_web.sh scripts/verify_public_edge_centrifugo_contract.sh scripts/verify_public_edge_centrifugo_boundary.sh scripts/gate_runtime_db.sh scripts/tests/test_runtime_db_gate_bootstrap.sh scripts/verify_rls.sh scripts/verify_sec07_ported_claims.sh scripts/verify_push_relay.sh scripts/verify_huddle_lifecycle.sh scripts/verify_t3_migration_repair.sh scripts/verify_openapi_contract_rust.sh scripts/openapi_spec_to_json.sh scripts/verify_agent_worker_bootstrap.sh scripts/verify_agent_context_bootstrap.sh scripts/verify_agent_live_channel_bootstrap.sh scripts/verify_local_hermes_bridge.sh scripts/verify_hermes_gateway_real_smoke.sh scripts/verify_local_hermes_credentialed_smoke.sh scripts/verify_backup_restore_rehearsal.sh; do [ -e "$f" ] || { echo "missing shell script: $f"; exit 1; }; bash -n "$f" || { echo "bash -n failed: $f"; exit 1; }; done'
   add_cmd_once "oort dispatcher/day-2 bash -n + shellcheck (#2124)" 'for f in scripts/oort scripts/lib/oort_common.sh scripts/lib/oort_day2.sh scripts/lib/oort_doctor.sh; do bash -n "$f" || { echo "bash -n failed: $f"; exit 1; }; done && if command -v shellcheck >/dev/null 2>&1; then shellcheck -x scripts/oort scripts/lib/oort_common.sh scripts/lib/oort_day2.sh scripts/lib/oort_doctor.sh; else echo "[local-gate] shellcheck not installed; bash -n held for oort dispatcher/day-2 (#2124)"; fi'
   add_cmd_once "python syntax" 'PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 -m py_compile adapters/hermes/momo_adapter.py adapters/hermes/provider_chain.py adapters/hermes/adapter.py scripts/mock_hermes.py scripts/openapi_shape_check.py scripts/check_docs_commands.py scripts/tests/test_openapi_shape_oneof.py scripts/terminal_attach_probe.py scripts/terminal_attach_tls_proxy.py adapters/hermes/tests/test_momo_adapter_contract.py adapters/hermes/tests/test_provider_chain_contract.py adapters/hermes/tests/smoke_momo_adapter.py adapters/prime/__init__.py adapters/prime/adapter.py adapters/prime/prime_adapter.py adapters/prime/oort_client.py adapters/prime/stream_relay.py adapters/prime/refine.py adapters/prime/rpc.py adapters/prime/tests/fake_oort.py adapters/prime/tests/fake_prime.py adapters/prime/tests/mock_provider.py adapters/prime/tests/auto_refine_probe.py adapters/prime/tests/rpc_probe.py adapters/prime/tests/harness_probe.py adapters/prime/tests/test_prime_adapter_contract.py adapters/prime/tests/smoke_prime_adapter.py scripts/tests/test_agent_seed_policy_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_openapi_shape_oneof.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_momo_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/test_provider_chain_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/hermes/tests/smoke_momo_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/prime/tests/test_prime_adapter_contract.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 adapters/prime/tests/smoke_prime_adapter.py && PYTHONPYCACHEPREFIX="${TMPDIR:-/tmp}/momo-pycache" python3 scripts/tests/test_agent_seed_policy_contract.py'
   add_note_once coverage "#1266/#1643 Rust publish/self-host security contract: the manual workflow must reject non-main refs before publishing, cross the release Environment on every push/attest job, use full-SHA actions, build server-rust/Dockerfile on native linux/amd64 and linux/arm64 runners, push each platform by digest, attest those digests and the imagetools manifest-list digest, and never install QEMU; mutation fixtures turn each boundary red and a fake gh locks deploy-lib to the repository plus SLSA v1. The behavioral self-host fixture proves both image modes stay separate, all eight rendered Compose consumers use the exact published digest despite ambient overrides, env-file newline/duplicate injection fails without secret output, and ports are strict decimal before arithmetic."
@@ -700,6 +732,7 @@ add_static_commands() {
   add_cmd_once "Rust agent credential verifier shell syntax" "bash -n scripts/verify_agent_credentials_rust.sh scripts/tests/test_agent_credentials_verifier_safety.sh"
   add_cmd_once "Rust agent credential verifier ownership regression" "scripts/tests/test_agent_credentials_verifier_safety.sh"
   add_cmd_once "local gate drift guard isolated regression" 'scripts/tests/test_local_gate_drift_guard.sh'
+  add_cmd_once "runtime-db gate bootstrap isolated regression" 'scripts/tests/test_runtime_db_gate_bootstrap.sh'
   add_cmd_once "local gate hardening isolated regression" 'scripts/tests/test_local_gate_hardening.sh'
   add_cmd_once "local gate ambient-toolchain timeout/fallback regression" 'scripts/tests/test_local_gate_lint_timeout.sh'
   add_note_once coverage "#1376 ambient-toolchain hardening: the actionlint step now runs under a bg+kill hard timeout (MOMO_GATE_ACTIONLINT_TIMEOUT, default 120s — macOS has no coreutils timeout) that reaps the linter and its shellcheck grandchildren, then retries exactly once with -shellcheck= and prints a DEGRADED notice naming what the retry no longer covers; a genuine actionlint finding is still a hard failure and is never retried into green, and the not-installed branch still fails closed when workflow files changed. Both YAML parse steps now resolve a psych-capable Ruby by capability probe (a colon-scoped flow scalar, the exact shape of the HAP scope enums at docs/api/openapi.yaml:6771) instead of trusting ambient PATH, so a worker shell that resolves macOS system Ruby 2.6 gets an actionable Homebrew-path message instead of a Psych::SyntaxError blaming a healthy line. scripts/tests/test_local_gate_lint_timeout.sh proves each edge with stub toolchains: spin-then-recover, spin-in-both-modes, real finding not laundered, both not-installed branches, 2.6-only rejection, capability-based selection over a stale candidate, and no leaked spinner or watchdog processes."
@@ -713,6 +746,15 @@ add_static_commands() {
   add_cmd_once "local alpha Centrifugo agent proxy contract" 'agent_block="$(awk '\''/"name": "agent"/,/},/'\'' scripts/local_alpha_runner.sh)"; work_block="$(awk '\''/"name": "agentwork"/,/},/'\'' scripts/local_alpha_runner.sh)"; printf "%s\n" "$agent_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$agent_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""; printf "%s\n" "$work_block" | grep -F "\"subscribe_proxy_enabled\": true"; printf "%s\n" "$work_block" | grep -F "\"channel_regex\": \"^ws[0-9A-Fa-f-]{36}\\\\\\\\.[0-9A-Fa-f-]{36}$\""'
   add_note_once coverage "#1194 자동 refine 유래·범위·적용 여부: refine_complete에는 트리거 필드가 없어(실측 §3.2) 어댑터가 상수 command를 박고 있었다 — 이제 유래는 관측(호스트 refine 명령의 in-flight 창 · 성공한 compaction_end)에서 정하고, 자동 경로가 실제로 쓰는 session-artifacts/<sid>/harness 파일까지 스캔하며, applied:false 편집은 업스트림(agent-session.js:6283)과 동형으로 걸러낸다. 결함당 red proof 1개가 AutoRefineRedProofs에 있고(수리 되돌리면 각각 빨강), 컨테이너 회귀는 adapters/prime/run.sh auto-refine{,-rejected} — 실제 prime-agent v0.7.0에 세션 ON(프로브 자신의 OORT_PRIME_NO_SESSION=0, 출고 기본값 불변)·--network none·자격증명 0. 목 프로바이더는 리뷰 게이트와 플랜 패스를 구분하지 못해 모든 자동 refine을 조용히 거부하고 있었으므로(실측 §4.5) 그 수리가 이 회귀의 선행 조건이다."
   add_note_once coverage "#1190 uuid5 파생 크로스체크: refine 멱등 키 uuid5(momo.harnessRefi, refinementId)는 Rust(momo-messaging)·Python(adapters/prime) 양측 사본이라, 기대 uuid는 docs/api/harness-refine-client-msg-id.golden.json 한 파일에만 있고 양쪽 테스트가 그 같은 경로를 읽어 대조한다(사본 없음 — Rust는 include_str!이라 파일이 사라지면 빌드가 깨진다). 벡터는 실측 RPC id·observed-drift id에 더해 빈 문자열·한글·BMP 밖·200자 상한·양끝 공백 엣지를 포함하고, 파생 바이트(utf8Hex)를 uuid보다 먼저 대조해 실패가 '인코딩'인지 '파생'인지 구분한다."
+}
+
+add_runtime_gate_db_up_command() {
+  # Must precede add_runtime_env_guard_command: the guard reads ENV_FILE, which
+  # this step writes. Only the labelled container of this run is ever removed.
+  add_cmd_once "$RUNTIME_GATE_DB_UP_LABEL" "bash scripts/gate_runtime_db.sh up"
+  add_final_cleanup_cmd "remove gate-owned runtime DB" "bash scripts/gate_runtime_db.sh down$([ "$KEEP_STACK" -eq 1 ] && printf ' --keep')"
+  add_note_once coverage "#4386 runtime-db bootstrap: scripts/gate_runtime_db.sh starts a disposable PG18 (same pinned digest as the compose stack) on a random free loopback port with a generated password, writes the env file every later step reads via ENV_FILE, and removes only its own run-labelled container. It replaces the old make up -> make migrate pair, whose host psql dialed a Postgres port the self-host compose never publishes."
+  add_note_once not_covered "runtime-db no longer starts the self-host compose stack (no Centrifugo/api/relay containers); compose-stack boot is covered by verify_owner_bootstrap_rust.sh and the host-runtime profile. Profiles all/runtime-relay/runtime-live/runtime-agent still use make up (not repaired by #4386)."
 }
 
 add_runtime_env_guard_command() {
@@ -760,8 +802,16 @@ add_runtime_bootstrap_commands() {
   # MOMO-316: make up은 `compose up -d --wait`(postgres/centrifugo healthcheck
   # healthy까지 대기), make migrate는 단일 실행 안에서 apply→verify 2패스를 돌아
   # IDEMPOTENCY_OK 마커를 남긴다(기존 migrate 2회 호출과 동일 판정 경로 + 강한 단정).
-  add_cmd "docker compose up (--wait healthy)" "make up"
-  add_cmd "Centrifugo post-start running-config verification" "bash scripts/ensure_runtime_env.sh"
+  if [ "$RUNTIME_GATE_DB" -eq 1 ]; then
+    # #4386: the gate-owned DB is already up (add_runtime_gate_db_up_command ran
+    # before the env guard). There is no compose stack here, so no `make up` and
+    # no Centrifugo running-config check — migrate/verify_rls reach the DB over
+    # the loopback port recorded in ENV_FILE.
+    :
+  else
+    add_cmd "docker compose up (--wait healthy)" "make up"
+    add_cmd "Centrifugo post-start running-config verification" "bash scripts/ensure_runtime_env.sh"
+  fi
   # env 파일/프로파일이 MIGRATE_IDEMPOTENCY_CHECK=0을 품고 있어도 게이트 단정이
   # 조용히 꺼지지 않도록(리뷰 high) env를 강제하고 IDEMPOTENCY_OK 마커를 직접 단정한다.
   add_cmd "migrate apply + idempotency verify (single run)" "out=\"\$(MOMO_AGENT_SEED_MODE=e2e MIGRATE_IDEMPOTENCY_CHECK=1 make migrate 2>&1)\"; status=\$?; printf '%s\n' \"\$out\"; [ \$status -eq 0 ] && printf '%s\n' \"\$out\" | grep -F '[migrate] IDEMPOTENCY_OK second-pass applied=0'"
@@ -774,13 +824,7 @@ add_runtime_db_commands() {
   add_cmd "First-owner claim-token bootstrap verification (#1651 / ADR-0166)" "scripts/verify_owner_claim.sh"
   add_cmd "RLS runtime verification" "scripts/verify_rls.sh"
   add_note_once coverage "#1651 / ADR-0166 first-owner claim via scripts/verify_owner_claim.sh: isolated PG18 plus the real Rust/Axum router prove issue → unconsumed login 401 → POST /v1/claim password set → login 200 → reuse 409 → TTL 410 → DB hash-only → server logs omit the raw token, FORCE RLS definer lookup granted to momo_app only. #1673 adds the real momo-migrate MOMO_BOOTSTRAP_CLAIM=1 path (claim-pending owner + owner_claim row) so SELECT INTO ambiguity cannot land behind the route-only cargo test."
-  add_cmd "Workspace roster runtime verification" "scripts/verify_roster.sh"
-  add_cmd "Workspace channel list runtime verification" "scripts/verify_channel_list.sh"
-  add_cmd "Workspace channel management runtime verification" "scripts/verify_channel_management.sh"
-  add_cmd "Public join runtime verification" "scripts/verify_join.sh"
-  add_cmd "Platform admin read-only runtime verification" "scripts/verify_platform_admin.sh"
-  add_cmd "Approval decision endpoint runtime verification" "scripts/verify_approval_decision.sh"
-  add_cmd "Auth hardening runtime verification (MOMO-300)" "scripts/verify_auth_hardening.sh"
+  add_cmd "SEC-07 ported claims: roster/channels/join/channel-management/auth/approval/gateway Rust tests on isolated PG18 (#4245)" "scripts/verify_sec07_ported_claims.sh"
   add_cmd "Hosted Agent Port dual-era runtime verification (#1363)" "scripts/verify_agent_port.sh"
   add_note_once coverage "#1363 Hosted Agent Port via scripts/verify_agent_port.sh: isolated PostgreSQL 18 and the real Rust/Axum router verify modern 2026-07-28 plus legacy 2025-11-25 negotiation, agent-only bearer scope/revoke/expiry/FORCE-RLS boundaries, bounded audit provenance, stateless POST-only transport, empty discovery/tool inventory, token/agent/socket-peer abuse axes, zero product writes, and a source-checkout-free deploy-image smoke."
   add_cmd "Hosted agent durable inbox verification (#1365)" "scripts/verify_hosted_agent_inbox.sh"
@@ -804,7 +848,7 @@ add_runtime_db_commands() {
   add_cmd_once "Agent Port OAuth authorization server verification (#1368)" "scripts/verify_agent_port_oauth.sh"
   add_cmd_once "T3 display attach verification (#1409)" "scripts/verify_display_attach.sh"
   add_note_once coverage "#1358 Rust agent credential lifecycle via scripts/verify_agent_credentials_rust.sh: a fresh pinned PG18 database plus the real Axum router running as momo_app verifies owner/admin issue-list-rotate-revoke, one-time no-store reveal and digest-only persistence, closed/non-default scopes, agent/human/tenant/target fail-closed authorization, expiry and revoke authentication, idempotent revoke audit, no secret-shaped response/audit projection, no-expiry-extension, and serialized concurrent rotation. Its adversarial ownership fixture independently proves high-entropy per-invocation naming and fail-closed cleanup across id, name, label, and create-collision takeovers without deleting a foreign container."
-  add_note_once coverage "MOMO-300 auth hardening via scripts/verify_auth_hardening.sh: subscribe proxy shared-secret 401/allow boundary, session token persistence, logout revocation (revoked-token 401, idempotent + auth.logout audit), refresh rotation replay 401, and per-member rate limit 429 + Retry-After + rate_limit.exceeded audit."
+  add_note_once coverage "SEC-07 (#4245): the retired Swift verifiers verify_roster/channel_list/channel_management/join/platform_admin/approval_decision/auth_hardening/hermes_gateway_adapter are gone. Their surviving claims run as Rust PG tests (server-rust/bins/momo-server/tests/sec07_*_pg.rs) via scripts/verify_sec07_ported_claims.sh on an isolated PG18; the per-assertion table lives in the PR body. Not ported (feature absent in Rust, tracked separately): per-member 429 + Retry-After + rate_limit.exceeded audit, auth.logout audit row, REST gateway approval_request/tool_call, /v1/platform/* admin routes."
 }
 
 add_runtime_relay_commands() {
@@ -841,13 +885,9 @@ add_runtime_agent_commands() {
   add_cmd "AgentWorker fresh DB bootstrap, rollback, and persistent repeat verification" "scripts/verify_agent_worker_bootstrap.sh"
   add_cmd "Agent context verifier bootstrap rollback" "scripts/verify_agent_context_bootstrap.sh"
   add_cmd "Agent live channel verifier bootstrap rollback" "scripts/verify_agent_live_channel_bootstrap.sh"
-  add_cmd "Hermes bridge/gateway verifier bootstrap rollback" "scripts/verify_hermes_verifier_bootstrap.sh"
   add_cmd "Local Hermes bridge verification" "scripts/verify_local_hermes_bridge.sh"
-  add_cmd "Hermes gateway native platform verification" "scripts/verify_hermes_gateway_adapter.sh"
-  add_cmd "Agent worker/gateway path equivalence verification" "scripts/verify_agent_path_equivalence.sh"
   add_note_once coverage "MOMO-256/MOMO-346 Local Hermes Bridge: scripts/verify_local_hermes_bridge.sh runs the external-hermes verifier against a loopback OpenAI-compatible SSE provider in a marker/OID-owned migrated DB with marker-bound app/worker/relay roles, self-seeds Hermes/#agent-lab, verifies @hermes -> agent_job -> AgentWorker -> durable channel message.new, and enforces the source DB digest unchanged on exit."
-  add_note_once coverage "MOMO-325/MOMO-337/MOMO-338/MOMO-346 Hermes gateway path: scripts/verify_hermes_gateway_adapter.sh uses its own marker/OID-owned migrated DB and marker-bound NOBYPASSRLS app role, self-seeds Hermes/#agent-lab, runs AGENT_GATEWAY_MODE=gateway, mints sha256-only per-agent bearer credentials, proves self-only agentwork: job delivery is isolated from observable agent: progress, verifies scoped pending/message/callback routes, actor binding, 24h rotation overlap, revoke fail-closed, audit_log.via_token_id, durable final message/usage/job completion, and separately proves the deprecated shared secret works only with MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1 while enforcing the source DB digest unchanged."
-  add_note_once coverage "MOMO-352 ADR-0102 path equivalence: scripts/verify_agent_path_equivalence.sh runs the worker and gateway authoritative fixtures in fresh marker/OID-owned databases with per-run uppercase transport channels, proves exit-96 pre-marker rollback and source digest preservation, then compares run-state, approval, usage/audit, durable-message, and realtime-publication guarantees after an explicit timing/provider/lease allowlist."
+  add_note_once coverage "Hermes gateway REST door (bearer scope/rotation/revoke, actor binding, callback/message/usage routes): covered by server-rust/bins/momo-server/tests/sec07_gateway_pg.rs plus agent_port_tools_conformance_pg.rs, run by scripts/verify_sec07_ported_claims.sh (SEC-07 #4245). scripts/verify_hermes_gateway_adapter.sh was retired with the Swift server."
 }
 
 add_external_agent_provider_commands() {
@@ -950,7 +990,7 @@ add_m3_dbc_commands() {
   add_runtime_env_guard_command
   add_runtime_bootstrap_commands
   add_runtime_host_api_cleanup_command "Cleanup host MomoServer after D/B verifier"
-  add_cmd "M3 C approval decision runtime evidence" "scripts/verify_approval_decision.sh"
+  add_cmd "M3 C approval decision runtime evidence (Rust, SEC-07 #4245)" "scripts/verify_sec07_ported_claims.sh"
   add_runtime_host_api_cleanup_command "Cleanup host MomoServer after C verifier"
   add_note_once coverage "M3 D evidence: repo-local OpenAI-compatible SSE mock emits agent.partial text plus tool_call_name/tool_call_args progress; AgentWorker reconciles to final tool_result/message.new with outbox version equal to message.seq."
   add_note_once coverage "M3 B evidence: AgentWorker reserve/reconcile writes usage_ledger and budget_window, then MomoServer /cost-snapshots exposes the server-owned CostSnapshot projection."
@@ -1006,6 +1046,7 @@ case "$PROFILE" in
     ;;
   runtime-db)
     add_static_commands
+    add_runtime_gate_db_up_command
     add_runtime_env_guard_command
     add_runtime_db_commands
     ;;
@@ -1139,6 +1180,12 @@ run_cmd() {
   if [ "$code" -eq 0 ]; then
     CMD_STATUS[index]="pass"
     echo "PASS: $label" | tee -a "$LOG_FILE"
+    if [ "$RUNTIME_GATE_DB" -eq 1 ] && [ "$label" = "$RUNTIME_GATE_DB_UP_LABEL" ]; then
+      if [ -n "${ENV_FILE:-}" ] && [ "$ENV_FILE" != "$RUNTIME_GATE_DB_ENV_FILE" ]; then
+        echo "local gate: replacing caller ENV_FILE with the gate-owned runtime DB env for the remaining steps" | tee -a "$LOG_FILE" >&2
+      fi
+      export ENV_FILE="$RUNTIME_GATE_DB_ENV_FILE"
+    fi
   else
     CMD_STATUS[index]="fail"
     FAILED_INDEX="$index"

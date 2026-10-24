@@ -357,6 +357,24 @@ pub struct Liveness {
     pub last_tool_error_code: Option<String>,
 }
 
+/// The skew allowance in [`collected_since`]: a ring is timestamped AFTER its HTTP
+/// response returns, so an agent that woke instantly can have read its inbox a moment
+/// before the stamp.
+pub const COLLECTED_SKEW_SECONDS: i64 = 30;
+
+/// ONE definition of "the agent collected since the doorbell rang at `t`" (ADR-0200
+/// 증보 3 E1-4, E8): its newest inbox read or claim is at or after `t − 30 s`. D4's
+/// `woken_not_collected` label and the sweep's `woken_uncollected_verdict` both call
+/// this — they differ only in WHICH ring time they pass (D4: the connection's last fire;
+/// the sweep: this run's first uncollected ring row).
+pub fn collected_since(t: DateTime<Utc>, row: &LivenessRow) -> bool {
+    [row.last_inbox_read_at, row.last_claim_at]
+        .into_iter()
+        .flatten()
+        .max()
+        .is_some_and(|read| read >= t - Duration::seconds(COLLECTED_SKEW_SECONDS))
+}
+
 /// Decide the label. Order matters and is the ADR's:
 /// inactive, then error, then woken-not-collected and work-waiting (alive but not
 /// taking work is the headline even when a ping or an inbox read is fresh), then
@@ -402,13 +420,9 @@ pub fn derive_liveness(
         && doorbell
             .last_fired_at
             .is_some_and(|fired| now - fired >= thresholds.woken_grace)
-        && doorbell.last_fired_at.is_some_and(|fired| {
-            [row.last_inbox_read_at, row.last_claim_at]
-                .into_iter()
-                .flatten()
-                .max()
-                .is_none_or(|read| read < fired)
-        })
+        && doorbell
+            .last_fired_at
+            .is_some_and(|fired| !collected_since(fired, row))
     {
         LivenessState::WokenNotCollected
     } else if within(signal, thresholds.quiet)
@@ -597,6 +611,84 @@ mod tests {
             derive(&row, &failed, true),
             LivenessState::WokenNotCollected
         );
+    }
+
+    /// ADR-0200 증보 3 E8: the shared comparison carries the 30-second skew allowance into
+    /// D4 as well — a read 29 s BEFORE the ring counts as collected, 31 s before does not.
+    #[test]
+    fn d4_reads_the_shared_collected_since_with_its_thirty_second_skew() {
+        let now = Utc::now();
+        let fired = now - Duration::minutes(11);
+        let doorbell = DoorbellFact {
+            last_fired_at: Some(fired),
+            last_status: Some("ok_200".into()),
+        };
+        let state = |read: DateTime<Utc>| {
+            let row = LivenessRow {
+                last_inbox_read_at: Some(read),
+                ..Default::default()
+            };
+            derive_liveness(
+                now,
+                true,
+                Some(&row),
+                &doorbell,
+                Some(now - Duration::minutes(11)),
+                &LivenessThresholds::default(),
+            )
+            .state
+        };
+        assert_ne!(
+            state(fired - Duration::seconds(29)),
+            LivenessState::WokenNotCollected
+        );
+        assert_eq!(
+            state(fired - Duration::seconds(31)),
+            LivenessState::WokenNotCollected
+        );
+    }
+
+    #[test]
+    fn collected_since_compares_the_newest_read_or_claim_against_t_minus_thirty_seconds() {
+        let t = Utc::now();
+        let row = |read: Option<DateTime<Utc>>, claim: Option<DateTime<Utc>>| LivenessRow {
+            last_inbox_read_at: read,
+            last_claim_at: claim,
+            ..Default::default()
+        };
+        assert!(collected_since(
+            t,
+            &row(Some(t + Duration::seconds(1)), None)
+        ));
+        assert!(collected_since(
+            t,
+            &row(Some(t - Duration::seconds(29)), None)
+        ));
+        assert!(collected_since(
+            t,
+            &row(None, Some(t - Duration::seconds(30)))
+        ));
+        assert!(!collected_since(
+            t,
+            &row(Some(t - Duration::seconds(31)), None)
+        ));
+        // the newer of the two decides
+        assert!(collected_since(
+            t,
+            &row(
+                Some(t - Duration::minutes(5)),
+                Some(t - Duration::seconds(10))
+            )
+        ));
+        // nothing ever read or claimed: not collected
+        assert!(!collected_since(t, &row(None, None)));
+        // a run event and a ping are NOT collection
+        let busy = LivenessRow {
+            last_run_event_at: Some(t),
+            last_ping_at: Some(t),
+            ..Default::default()
+        };
+        assert!(!collected_since(t, &busy));
     }
 
     /// A refusal is `error` only until the next accepted call of ANY kind: the throttle on

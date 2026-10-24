@@ -28,7 +28,7 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同一個頻道的四種主題：Dawn sky、Sunset band、Catppuccin 與 Gruvbox Hard" width="100%"></a><br><sub><strong>在我們自有的三個主題之外，還有 57 個目錄主題</strong>（淺色與深色分開計算）：這裡是 Dawn sky、Sunset band、Catppuccin 與 Gruvbox Hard。<em>已合併，尚未發布。</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="同一個頻道的四種主題：Dawn sky、Sunset band、Catppuccin 與 Gruvbox Hard" width="100%"></a><br><sub><strong>在我們自有的三個主題之外，還有 57 個目錄主題</strong>（淺色與深色分開計算）：這裡是 Dawn sky、Sunset band、Catppuccin 與 Gruvbox Hard。</sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="iPhone 應用程式的首次啟動步驟「想收到哪些通知？」：附有「核准」與「拒絕」按鈕的核准請求、工作完成與提及的預覽" width="100%"></a><br><sub><strong>在手機上。</strong> 首次啟動的步驟會預覽每一類通知：核准請求與提及一律會送達，「工作完成」有一個開關。iOS 測試建置版本發給一個小型 TestFlight 內部群組。</sub></td>
 </tr></table>
 
@@ -47,7 +47,7 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 
 ## 現已可用 · 接線中 · 主張已定，程式未到
 
-✅ **現已可用** — 在 [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) 中（伺服器與 Web 映像檔；桌面版與 iOS 應用程式另外建置）
+✅ **現已可用** — 在 [v0.1.36](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.36) 中（伺服器與 Web 映像檔；桌面版與 iOS 應用程式另外建置）
 
 - 頻道、討論串、私訊、引用、輸入中提示、釘選與搜尋——支援 Web、桌面版（Tauri，macOS）與 iOS（React Native）
 - 作為成員的代理：@ 它，看它的執行以誠實的狀態流入頻道，可隨時中途停止
@@ -57,13 +57,15 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 - 附件：檔案存放在你伺服器自己的磁碟區上（自架預設），或你自己的 Google 共用雲端硬碟裡；下載要通過伺服器的頻道成員資格檢查，使用 Google 後端時上傳直接送往 Drive
 - 經過實測的自架路徑——clone → env 指令碼 → compose up → 登入——以及依 digest 固定、附有 SLSA provenance 的多架構映像檔（[詳情](SECURITY.md#security-posture)）
 - 由測試守住對比規則的設計系統（「Oort cloud」），支援淺色與深色
+- 可以自訂的外觀：在我們自有的三個主題之外，還有 57 個目錄主題與主題庫、文字大小與聊天密度，以及 macOS 桌面版的毛玻璃背景（可調整不透明度）
+- 手機端附件選單（從 + 圓鈕展開的卡片：相機、最近照片格狀檢視、檔案），以及在桌面版用預設瀏覽器建立 GitHub App
 
 🚧 **接線中**
 
 - iPhone 鎖定畫面上的核准／拒絕——已在 v0.1.30 實作；實機驗證仍未完成（[裝置檢查](docs/cicd/11-ios-push-device-check.md)）
 - 團隊記憶（摘要、決定、事實、承諾；瀏覽、編輯、遺忘）——已隨 v0.1.15 發布；其摘要需要團隊預設的 AI 連線，發布說明仍把真實模型下的摘要品質列為未驗證
 - 頻道裡的 GitHub App 事件——已隨 v0.1.32 發布，在維運者設定 App 金鑰之前保持關閉
-- 已合併、尚未發布：57 個目錄主題與主題庫、文字大小與聊天密度、桌面版毛玻璃背景、手機端附件選單（最近照片格狀檢視與相機）、從桌面版建立 GitHub App，以及排程訊息的伺服器端（畫面仍在製作中）
+- 排程訊息——伺服器端已隨 v0.1.36 發布，畫面仍在製作中
 - 桌面版與 iOS 應用程式目前仍是提供給維護者自己的裝置與小型 TestFlight 內部群組的測試建置版本；要推出給整個團隊，得等內部關卡（[M7](docs/cicd/03-store-readiness-gate.md)），目前沒有受支援的公開下載
 
 💭 **主張已定，程式未到**
@@ -96,7 +98,7 @@ PostgreSQL 是 oort 的事實來源。工作區成員關係、頻道訊息、核
 
 ### 我只想試試應用程式
 
-目前還沒有受支援的公開下載，也沒有公開託管的實例。我們自己的團隊優先（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）：macOS 與 iOS 應用程式的測試建置版本只發給維護者自己的裝置和一個小型 TestFlight 內部群組，App Store、公開 DMG 與外部 TestFlight 要等[商店關卡](docs/cicd/03-store-readiness-gate.md)。（8 月的一個早期 macOS DMG 仍附在 v0.1.1 發布上，但它早於目前的應用程式。）Web 用戶端就在伺服器映像檔裡，所以最快看到 oort 的辦法是下一條路徑。
+目前還沒有受支援的公開下載，也沒有公開託管的實例。我們自己的團隊優先（[目標 A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)）：macOS 與 iOS 應用程式的測試建置版本只發給維護者自己的裝置和一個小型 TestFlight 內部群組，App Store、公開 DMG 與外部 TestFlight 要等[商店關卡](docs/cicd/03-store-readiness-gate.md)。Web 用戶端就在伺服器映像檔裡，所以最快看到 oort 的辦法是下一條路徑。
 
 ### 我想放在自己的伺服器上
 

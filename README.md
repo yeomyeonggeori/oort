@@ -27,7 +27,7 @@ The name is the [Oort cloud](https://en.wikipedia.org/wiki/Oort_cloud): a quiet 
 </tr></table>
 
 <table><tr>
-<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="The same channel in four themes: Dawn sky, Sunset band, Catppuccin and Gruvbox Hard" width="100%"></a><br><sub><strong>57 catalog themes beside our own three</strong> (light and dark counted separately): Dawn sky, Sunset band, Catppuccin and Gruvbox Hard here. <em>Merged — not released yet.</em></sub></td>
+<td width="62%" valign="top"><a href="docs/assets/readme/themes.png"><img src="docs/assets/readme/themes.png" alt="The same channel in four themes: Dawn sky, Sunset band, Catppuccin and Gruvbox Hard" width="100%"></a><br><sub><strong>57 catalog themes beside our own three</strong> (light and dark counted separately): Dawn sky, Sunset band, Catppuccin and Gruvbox Hard here.</sub></td>
 <td width="38%" valign="top"><a href="docs/assets/readme/phone.png"><img src="docs/assets/readme/phone.png" alt="The iPhone app's first-run step “What notifications do you want?”: previews of an approval request with Approve and Deny buttons, finished work and mentions" width="100%"></a><br><sub><strong>On the phone.</strong> The first-run step previews each kind of notification: approval requests and mentions always arrive, and finished work has a switch. iOS test builds go to a small internal TestFlight group.</sub></td>
 </tr></table>
 
@@ -46,7 +46,7 @@ One database. One write path. People and agents on the same roster, with the sam
 
 ## Works today · Being wired up · Strong opinions, pending code
 
-✅ **Works today** — in [v0.1.35](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.35) (the server and web image; the desktop and iOS apps are built separately)
+✅ **Works today** — in [v0.1.36](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.36) (the server and web image; the desktop and iOS apps are built separately)
 
 - Channels, threads, DMs, quotes, typing, pins and search — on web, desktop (Tauri, macOS) and iOS (React Native)
 - Agents as members: mention one, watch its run stream into the channel with an honest status, stop it mid-flight
@@ -56,13 +56,15 @@ One database. One write path. People and agents on the same roster, with the sam
 - Attachments: files live on your server's own volume (the self-host default) or in a Google shared drive you own; downloads pass the server's channel-membership check, and with the Google backend uploads go straight to Drive
 - A measured self-host path — clone → env script → compose up → logged in — and multi-arch images pinned by digest with SLSA provenance ([details](SECURITY.md#security-posture))
 - A design system (「Oort cloud」) whose contrast rules are enforced by tests, in light and dark
+- Looks you can change: 57 catalog themes beside our own three, with a gallery; text size and chat density; and a glass background with an opacity slider in the macOS desktop app
+- A phone attach menu that opens from the + circle (camera, a grid of recent photos, files), and creating the GitHub App from the desktop app in your default browser
 
 🚧 **Being wired up**
 
 - Lock-screen Approve/Deny on iPhone — implemented in v0.1.30; the real-device check is still open ([device check](docs/cicd/11-ios-push-device-check.md))
 - Team memory (summaries, decisions, facts, promises; browse, edit, forget) — shipped in v0.1.15; its summaries need a team default AI connection, and the release notes still list real-model summary quality as unverified
 - GitHub App events in channels — shipped in v0.1.32, off until the operator sets the App key
-- Merged, not released yet: the 57-theme catalog and gallery, text size and chat density, the desktop glass background, the phone attach menu with a recent-photos grid and camera, creating the GitHub App from the desktop, and the scheduled-message server (its screens are in progress)
+- Scheduled messages — the server shipped in v0.1.36; the screens are in progress
 - Desktop and iOS apps are still test builds for the maintainers' own devices and a small internal TestFlight group; wider team rollout waits for the internal gate ([M7](docs/cicd/03-store-readiness-gate.md)), and there is no supported public download
 
 💭 **Strong opinions, pending code**
@@ -95,7 +97,7 @@ An optional **work host** lets agents run governed CLI code sessions on infrastr
 
 ### I want to use the app
 
-There is no supported public download and no public hosted instance yet. Our own team comes first ([goal A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)): test builds of the macOS and iOS apps go to the maintainers' own devices and a small internal TestFlight group, and the App Store, a public DMG and external TestFlight wait for the [store gate](docs/cicd/03-store-readiness-gate.md). (An early macOS DMG from August is still attached to the v0.1.1 release; it predates the current app.) The web client ships inside the server image, so the quickest way to see oort is the next path.
+There is no supported public download and no public hosted instance yet. Our own team comes first ([goal A](docs/adr/0187-goal-a-team-daily-desktop-ios.md)): test builds of the macOS and iOS apps go to the maintainers' own devices and a small internal TestFlight group, and the App Store, a public DMG and external TestFlight wait for the [store gate](docs/cicd/03-store-readiness-gate.md). The web client ships inside the server image, so the quickest way to see oort is the next path.
 
 ### I want it on my own server
 

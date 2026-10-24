@@ -30,3 +30,6 @@ base64.workspace = true
 # CSPRNG. This crate is already present in the workspace dependency graph; using
 # it directly keeps credential generation seedless and narrowly scoped.
 getrandom = "0.2"
+
+[lints]
+workspace = true

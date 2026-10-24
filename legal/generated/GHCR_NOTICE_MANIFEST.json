@@ -7,15 +7,15 @@
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "f5831df181ac3e5cc6ba4c57ee8b4e23500b0e78e04520e3fba6bccf469ca22a",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "cbbcbd1e30a09e8f6222f68d93a3cfd9babccd53b28d0600b1bcdbdbf6f671b3",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "9cf9d9ee4d11959ba3499ac2c8f88f6fe41608f8369997110f19220359185598",
-    "THIRD_PARTY_NOTICES.md": "64b8310834e92f777cddd477497f2aec633316eede2702c7c9796b89404e3a98"
+    "THIRD_PARTY_NOTICES.md": "9e44a2137e02ca98de95b0278a41abe6430c3b584ff6526063758e53790fe501"
   },
   "inputs": {
     "clarify_sha256": "366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3",
-    "clients_web_package_lock_sha256": "3fe4cf55556ea18354f1024dfe564626553ceacb9310b290404e9e2af5ee736a",
-    "server_rust_cargo_lock_sha256": "d507da131484c1548df451211a61b8d654d43ecb1983fea8a8d956867128e132",
+    "clients_web_package_lock_sha256": "f1bc70d19c96ea279755dc0abb0c4315e65b9f4cfd1243b9b06d9f9306d02b68",
+    "server_rust_cargo_lock_sha256": "f077d25781f098941c9bd0e46ba3eef359dd14dd3782d78b17ee866adc85437e",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "f5831df181ac3e5cc6ba4c57ee8b4e23500b0e78e04520e3fba6bccf469ca22a",
-    "sha256_manifest_sha256": "10cbba0510338bd143f0017295b85de574b8577a471323bf8d79216c12628a4b"
+    "bundle_sha256": "cbbcbd1e30a09e8f6222f68d93a3cfd9babccd53b28d0600b1bcdbdbf6f671b3",
+    "sha256_manifest_sha256": "2a66d4c888293f88634ef8cfd382af903c8532f9cf97b5a16dd28d4b8c582753"
   },
   "packages": [
     {
@@ -1066,7 +1066,7 @@
       "repository": "https://github.com/RustCrypto/crypto-bigint",
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
-      "version": "0.7.5"
+      "version": "0.7.6"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -1150,7 +1150,7 @@
       "repository": "https://github.com/RustCrypto/utils",
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
-      "version": "0.4.2"
+      "version": "0.4.5"
     },
     {
       "copyright": "Copyright (c) 2016-2021 isis agora lovecruft. All rights reserved.; Copyright (c) 2016-2021 Henry de Valence. All rights reserved.; Copyright (c) 2012 The Go Authors. All rights reserved.; copyright notice, this list of conditions and the following disclaimer",
@@ -2281,7 +2281,7 @@
       "repository": "https://github.com/hyperium/h2",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "0.4.15"
+      "version": "0.4.16"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -4547,7 +4547,7 @@
       "repository": "https://github.com/quinn-rs/quinn",
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
-      "version": "0.11.16"
+      "version": "0.11.18"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -5242,7 +5242,7 @@
       "repository": "https://github.com/rustls/rustls",
       "source": "package-tree",
       "spdx": "Apache-2.0 OR ISC OR MIT",
-      "version": "0.23.43"
+      "version": "0.23.46"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2023 Dirkjan Ochtman",
@@ -5279,7 +5279,7 @@
       "repository": "https://github.com/rustls/webpki",
       "source": "package-tree",
       "spdx": "ISC",
-      "version": "0.103.13"
+      "version": "0.103.16"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -6495,7 +6495,7 @@
       "repository": "https://github.com/tokio-rs/tokio",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "1.53.1"
+      "version": "1.53.3"
     },
     {
       "copyright": "Copyright (c) 2019 Yoshua Wuyts; Copyright (c) Tokio Contributors",
@@ -7384,7 +7384,7 @@
       "repository": "https://github.com/rustls/webpki-roots",
       "source": "package-tree",
       "spdx": "CDLA-Permissive-2.0",
-      "version": "1.0.9"
+      "version": "1.0.10"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -10757,7 +10757,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "1.23.3"
+      "version": "1.23.4"
     },
     {
       "copyright": "Copyright (c) 2024-present VoidZero Inc. & Contributors",
@@ -12298,7 +12298,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "1.1.16"
+      "version": "1.1.21"
     },
     {
       "copyright": "Copyright Julian Gruber <julian@juliangruber.com>",
@@ -12314,7 +12314,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "5.0.8"
+      "version": "5.0.12"
     },
     {
       "copyright": "Copyright 2014 Andrey Sitnik <andrey@sitnik.es> and other contributors; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
@@ -13690,7 +13690,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "4.3.0"
+      "version": "4.3.2"
     },
     {
       "copyright": "Copyright (c) 2010 Elijah Insua",
@@ -14314,7 +14314,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "3.3.16"
+      "version": "3.3.20"
     },
     {
       "copyright": "copyright not stated in license file",
@@ -14596,7 +14596,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "8.5.22"
+      "version": "8.5.31"
     },
     {
       "copyright": "Copyright (c) George Zahariev",
@@ -14772,7 +14772,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "6.30.4"
+      "version": "6.30.6"
     },
     {
       "copyright": "Copyright (c) React Training LLC 2015-2019; Copyright (c) Remix Software Inc. 2020-2021; Copyright (c) Shopify Inc. 2022-2023",
@@ -14788,7 +14788,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
-      "version": "6.30.4"
+      "version": "6.30.6"
     },
     {
       "copyright": "Copyright (c) 2017 Anton Korzunov",
@@ -15060,7 +15060,7 @@
       "repository": "",
       "source": "package-tree",
       "spdx": "BSD-3-Clause",
-      "version": "1.2.1"
+      "version": "1.2.2"
     },
     {
       "copyright": "copyright not stated in license file",

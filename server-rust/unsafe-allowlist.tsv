@@ -1,0 +1,11 @@
+# SEC-08 (#4246) unsafe_code allowlist. Format: <crate dir relative to repo root><TAB><reason>.
+# Every workspace member NOT listed here must inherit `[workspace.lints.rust] unsafe_code = "forbid"`;
+# a listed one must carry `unsafe_code = "allow"` in its own Cargo.toml. scripts/check_unsafe_policy.py enforces both.
+# Reason = why unsafe is needed and why a safe replacement does not exist. clients/desktop is its own cargo
+# workspace (cannot inherit server-rust lints); it is listed so the exception is recorded in one place.
+server-rust/bins/momo-box-agent	Linux syscalls (prctl/setrlimit/fcntl/poll/socketpair/pipe/ioctl, OwnedFd::from_raw_fd, pre_exec capability clearing) that form the in-box sandbox boundary; std has no safe equivalent
+server-rust/bins/momo-workd	host process control and peer credentials (geteuid/getpeereid/kill/killpg/getpgid/proc_listchildpids, O_NOFOLLOW, Security.framework reads, volatile zeroing); std has no safe equivalent
+server-rust/crates/momo-embed	libloading::Library::new/get to load the ONNX Runtime shared library; loading a native library is unsafe by definition
+server-rust/bins/momo-box-runner	single libc::geteuid() root check; std has no safe euid API, replacing it needs a new dependency (follow-up candidate)
+server-rust/bins/momo-migrate	single libc::geteuid() root check for the PITR runbook; same as momo-box-runner (follow-up candidate)
+clients/desktop/src-tauri	Secure Enclave/Security.framework FFI (device_key/enclave.rs) and PTY/process libc calls; separate cargo workspace, outside the server-rust lint

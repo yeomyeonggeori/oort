@@ -46,3 +46,14 @@ uuid.workspace = true
 # The tests play the owner's device (P-256) exactly as momo-blind-pty's harness does.
 p256.workspace = true
 libc.workspace = true
+
+# unsafe-allowlist (SEC-08, #4246): Linux syscalls with no safe std/crate equivalent in the
+# dependency set: libc prctl/setrlimit/fcntl/poll/socketpair/pipe/ioctl(TIOCSWINSZ),
+# OwnedFd::from_raw_fd on fds the agent just created, and pre_exec capability clearing in the
+# PTY spawn helper. This is the in-box sandbox boundary itself; the unsafe is the point of the
+# crate and cannot be replaced by a safe wrapper without adding an FFI dependency (nix/rustix)
+# that is itself unsafe inside.
+# Adding a crate here needs a reason row in server-rust/unsafe-allowlist.tsv; scripts/check_unsafe_policy.py
+# keeps this table and the workspace forbid in sync.
+[lints.rust]
+unsafe_code = "allow"

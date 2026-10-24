@@ -33,3 +33,11 @@ sha2.workspace = true
 # The migrate binary prints the raw token once; Postgres stores only the hash.
 getrandom = "0.2"
 base64.workspace = true
+
+# unsafe-allowlist (SEC-08, #4246): one call, libc::geteuid() (pitr.rs, the PITR runbook's must-
+# not-be-root check). Same reason as momo-box-runner: no safe std API, and a new dependency for
+# one line is out of scope (candidate follow-up: remove this entry then).
+# Adding a crate here needs a reason row in server-rust/unsafe-allowlist.tsv; scripts/check_unsafe_policy.py
+# keeps this table and the workspace forbid in sync.
+[lints.rust]
+unsafe_code = "allow"

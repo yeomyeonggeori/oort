@@ -874,8 +874,17 @@ async fn only_a_human_who_can_read_the_channel_may_decide() {
             "reject by {who}"
         );
     }
-    // A BYPASSRLS login (momo_worker) cannot decide by setting the viewer GUC itself.
+    // A BYPASSRLS login (momo_worker) cannot decide by setting the viewer GUC itself. (#4381: it also has
+    // no EXECUTE on either function; the session_user guard behind that wall is exercised in `red` below.)
     for f in ["mem_accept_proposal", "mem_reject_proposal"] {
+        let may: bool = sqlx::query_scalar(
+            "SELECT has_function_privilege('momo_worker', ('public.' || $1 || '(uuid)')::regprocedure, 'EXECUTE')",
+        )
+        .bind(f)
+        .fetch_one(&su)
+        .await
+        .expect("has_function_privilege");
+        assert!(!may, "momo_worker must not EXECUTE {f}");
         assert_eq!(
             decide(&plain_worker, w.ws, Some(w.bob), f, pid).await,
             Err("42501".into()),
@@ -937,7 +946,17 @@ async fn only_a_human_who_can_read_the_channel_may_decide() {
         let su = su.clone();
         let ws = w.ws;
         async move {
-            let tx = sabotage_tx(&su, DECIDER_FN, &edits).await;
+            let mut tx = sabotage_tx(&su, DECIDER_FN, &edits).await;
+            if session.is_some() {
+                // #4381: EXECUTE on mem_accept_proposal is momo_app only; grant it to the worker login inside
+                // this rolled-back transaction so the decider's session_user guard is what is under test.
+                sqlx::query(&format!(
+                    "GRANT EXECUTE ON FUNCTION {ACCEPT_FN} TO momo_worker"
+                ))
+                .execute(&mut *tx)
+                .await
+                .expect("grant (rolled back with the transaction)");
+            }
             let out = decide_in(tx, ws, Some(viewer), "mem_accept_proposal", pid, session).await;
             eprintln!("RED {label}: accept returns {out:?}");
             out
@@ -1004,9 +1023,16 @@ async fn only_a_human_who_can_read_the_channel_may_decide() {
     )
     .await;
     assert!(leaked.is_ok(), "sabotaged: {leaked:?}");
-    // ... and with the guard in place the very same session is refused.
+    // ... and with the guard in place the very same session is refused (EXECUTE granted inside the
+    // transaction, so the guard and not the #4381 EXECUTE wall is what refuses).
     let refused = {
-        let tx = su.begin().await.expect("begin");
+        let mut tx = su.begin().await.expect("begin");
+        sqlx::query(&format!(
+            "GRANT EXECUTE ON FUNCTION {ACCEPT_FN} TO momo_worker"
+        ))
+        .execute(&mut *tx)
+        .await
+        .expect("grant (rolled back with the transaction)");
         decide_in(
             tx,
             w.ws,

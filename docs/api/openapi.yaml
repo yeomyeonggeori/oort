@@ -10360,6 +10360,16 @@ paths:
       description: >
         ADR-0109 read surface. One entry per active membership on a
         non-archived channel, bound to the authenticated principal.
+        ADR-0177 amendment (#4227) adds two fields to every row, both always
+        present: `latest_readable_seq` (the newest seq worth reading - tool
+        calls, system lines and work-session cards do not count) and
+        `closed_at_seq` (the **caller's own** DM-closure watermark, JSON null
+        when this member has not closed the channel and for every non-DM).
+        Another member's closure is never in this response. A client decides
+        whether a DM shows by comparing the two; nothing is written when a DM
+        revives. The `PUT .../read-state` response and the realtime
+        `read_state` frame do not carry them (ADR-0177 D10: no closure event);
+        other devices pick a closure up on their next read of this list.
       security:
         - bearerAuth: []
       parameters:
@@ -10423,6 +10433,121 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Not a member of this channel, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/channels/{channelId}/closure:
+    put:
+      tags: [dms]
+      operationId: closeDm
+      summary: Close a DM in the caller's own list, having seen up to `seenSeq`.
+      description: >
+        ADR-0177 amendment D6/D7 (#4227). Closing a DM is the member's own
+        fact, kept on the server so every device agrees and a reinstall does
+        not forget it. `seenSeq` is the last seq the client **saw** for this DM
+        (the `latest_seq` of the read-state row it was looking at), not a server
+        time. The server stores
+        `GREATEST(existing, LEAST(seenSeq, channel head))`: a message that
+        arrived between the projection and this request is above `seenSeq` and
+        is not buried; a retransmit changes nothing; a late retransmit cannot
+        lower the watermark; a value past the head is clamped to it. The same
+        request twice leaves the same row and gets the same `204`. Accepted
+        limit: a delayed request processed after the user's `DELETE` (reopen)
+        closes the DM again - reopening once more fixes it and nothing is lost.
+        Only an unarchived DM the caller is a live participant of can be
+        closed; every other channel id (a public or private channel, a DM the
+        caller is not part of, an archived DM, an unknown id) is the same `404`,
+        so the answer never reveals whether another member's DM exists. The
+        owner is always the authenticated principal; there is no member id in
+        the path or body. Human bearers only: the path is absent from every
+        agent bearer's route allow-list, and the handler refuses a non-human
+        principal again. No event and no outbox row are produced (D10).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutDmClosureRequest"
+      responses:
+        "204":
+          description: Recorded (or already at least this far).
+        "400":
+          description: >
+            `seenSeq` is missing, negative, not an integer or past int64, the
+            body has an unknown key or is not JSON, or an id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            An agent bearer or any other non-human credential (human bearers
+            only), or workspace scope mismatch. A signed work host never gets
+            this far: its allow-list has no such path, so the middleware
+            answers `401` first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Not an unarchived DM the caller is a live participant of (any other
+            channel kind, a DM of other members, an archived DM, an unknown id).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [dms]
+      operationId: reopenDm
+      summary: Reopen a DM the caller closed (drop the caller's own closure).
+      description: >
+        ADR-0177 amendment D7 (#4227). Removes the caller's own closure row for
+        this DM; it never touches another member's. `204` whether or not a
+        closure existed. `404` exactly where `PUT` is `404`. Same credential
+        rules and the same absence of any event as `PUT`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      responses:
+        "204":
+          description: Reopened (or it was not closed).
+        "400":
+          description: An id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            An agent bearer or any other non-human credential (human bearers
+            only), or workspace scope mismatch. A signed work host never gets
+            this far: its allow-list has no such path, so the middleware
+            answers `401` first.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Not an unarchived DM the caller is a live participant of.
           content:
             application/json:
               schema:
@@ -10797,14 +10922,16 @@ paths:
     get:
       tags: [approvals]
       operationId: getApprovalAvatarPreview
-      summary: The image a pending `agent.profile.update` card proposes as an avatar.
+      summary: The image a pending `agent.profile.update` or `member.avatar.set` card proposes as an avatar.
       description: >
         ADR-0186 addendum 2026-10-13 (v3) V3-2a. The approval card's `action.preview`
         block (`kind: avatar_image`) names a staged image and its `sha256`; this is
         where the approver reads those bytes **before** deciding. They are the
         server's re-encoded PNG/JPEG (at most 512x512 and 512 KiB), never the
         proposer's bytes. Readable only by a person who could decide the card — the
-        target agent's owner or a workspace admin; every other caller (another
+        target agent's owner or a workspace admin — and, for a `member.avatar.set`
+        card (ADR-0186 addendum 2026-10-25, v4), **only the person the picture is
+        for** (not an admin, not the agent's owner); every other caller (another
         channel member, an unknown approval, an approval with no staged avatar) gets
         the same 404, so the route is neither a preview for onlookers nor an oracle.
         `v` must be the image's sha256 (64 hex characters); another value is a 404.
@@ -14832,7 +14959,17 @@ components:
         authority — the install carries no grant and no token (D1-A, D2); each
         member connects for themselves. Its result `ref` is the same
         `{type: workspace_settings, id: <workspace id>}`.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+        `member.avatar.set` (`{attachmentId}`, `requesting_member`; ADR-0186
+        증보 2026-10-25 v4, #4385) lets an agent propose that **the person who
+        called it** wear a picture **that person attached in the same
+        conversation** as their own profile picture. There is no target
+        argument: the person is the author of the message that started the
+        run, derived by the server. Only that person can approve it (not an
+        admin, not the agent's owner); the card shows the staged image
+        (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
+        that person only) and its result `ref` is `{type: member, id: <the
+        person>}`.
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
 
     SuggestableCommandId:
       type: string
@@ -14889,10 +15026,12 @@ components:
         **target agent's** owner or a workspace admin — the same judgement as
         editing that agent's profile, made against the agent the proposal
         names rather than against the proposer. `workspace_operator` is a
-        workspace owner/admin or a platform operator. The canonical list is
-        `momo_agent::actions::RequiredRole`; held equal by
+        workspace owner/admin or a platform operator. `requesting_member` is
+        **the person the action changes and nobody else** (`member.avatar.set`:
+        the human who called the agent, derived by the server from the run).
+        The canonical list is `momo_agent::actions::RequiredRole`; held equal by
         `routes::actions::the_required_roles_are_one_list_in_two_places`.
-      enum: ["admin", "agent_editor", "workspace_operator"]
+      enum: ["admin", "agent_editor", "requesting_member", "workspace_operator"]
 
     ListWorkspaceActionsResponse:
       type: object
@@ -20252,6 +20391,73 @@ components:
             client can tell "no mark" from "this server is too old to have
             the concept".
 
+    # One row of `GET read-state`: every `ReadState` field plus the two ADR-0177 additions. It is
+    # a separate schema from `ReadState` (the `PUT read-state` response, which does not carry the
+    # additions) and repeats the shared fields instead of `allOf`: the drift gate refuses a
+    # multi-branch `allOf`, and a closed object is what makes an undeclared key a failure.
+    ReadStateRow:
+      type: object
+      required:
+        - channel_id
+        - last_read_seq
+        - latest_seq
+        - unread_count
+        - mention_count
+        - marked_unread_before_seq
+        - latest_readable_seq
+        - closed_at_seq
+      properties:
+        channel_id:
+          type: string
+          format: uuid
+        last_read_seq:
+          type: integer
+          format: int64
+        latest_seq:
+          type: integer
+          format: int64
+          description: >
+            The channel head (`channel_seq.last_seq`), counting every message
+            including machine ones.
+        unread_count:
+          type: integer
+          format: int64
+          description: >
+            `latest_seq - last_read_seq`, floored at zero (see `ReadState`).
+        mention_count:
+          type: integer
+        marked_unread_before_seq:
+          type: integer
+          format: int64
+          nullable: true
+          description: See `ReadState.marked_unread_before_seq` (ADR-0178 D2).
+        latest_readable_seq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0177 amendment D9 (#4227). The newest `seq` worth reading:
+            `tool_call`, `tool_result`, `system` and work-session
+            (`props.kind = work_session`) messages do not count, a message
+            without `props.kind` does. Raised by a database trigger in the same
+            transaction as the message insert, so it is exact for every sender.
+            Monotonic: a message deleted later does not lower it (wrong only in
+            the direction of "visible"). `0` when nothing readable was ever
+            sent. Compare it with `closed_at_seq` to decide whether a closed DM
+            has something new.
+        closed_at_seq:
+          type: integer
+          format: int64
+          minimum: 0
+          nullable: true
+          description: >
+            ADR-0177 amendment D6/D8 (#4227). The **requesting member's own**
+            DM-closure watermark - "I closed this having seen up to here" - or
+            JSON null when this member has not closed the channel (and for
+            every channel that is not a DM). Always present. Another member's
+            closure is never returned. Reviving writes nothing: the stored value
+            stays and the client compares it with `latest_readable_seq`.
+
     ReadStateListResponse:
       type: object
       required: [read_states]
@@ -20259,7 +20465,22 @@ components:
         read_states:
           type: array
           items:
-            $ref: "#/components/schemas/ReadState"
+            $ref: "#/components/schemas/ReadStateRow"
+
+    PutDmClosureRequest:
+      type: object
+      required: [seenSeq]
+      additionalProperties: false
+      properties:
+        seenSeq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: >
+            ADR-0177 amendment D7 (#4227). The last seq the client saw for this
+            DM (the `latest_seq` of its read-state row). Zero or more; a missing,
+            negative, non-integer or `null` value, or a key other than this one,
+            is 400. Stored as `GREATEST(existing, LEAST(seenSeq, head))`.
 
     # ---- DMs ----------------------------------------------------------------------
     OpenDirectMessageRequest:
@@ -21296,7 +21517,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent, hosted_connection, workspace_settings]
+          enum: [invite, channel, agent, hosted_connection, workspace_settings, member]
         id:
           type: string
           format: uuid

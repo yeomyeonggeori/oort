@@ -467,6 +467,31 @@ for protected_contract in AGENTS.md CONTRIBUTING.md docs/GITHUB_OPS.md \
     || fail "protected contract was not classified: $protected_contract"
 done
 
+# The dependency-advisory gate (#4243) is only as strong as who can edit its exceptions:
+# the ledgers, the checker, its sabotage test and the vulnerable-version fixtures are policy.
+write_pr kwakseongjae 6 '[{"name":"policy-change-approved"}]'
+jq -n '[[
+  {filename: "deny.toml", status: "modified"},
+  {filename: "osv-scanner.toml", status: "modified"},
+  {filename: ".github/dependabot.yml", status: "modified"},
+  {filename: "scripts/check_advisories.py", status: "modified"},
+  {filename: "scripts/tests/test_advisory_gate.sh", status: "modified"},
+  {filename: "scripts/tests/fixtures/advisories/smallvec-1.6.0.Cargo.lock.fixture", status: "modified"}
+]]' >"$STATE/files.json"
+write_valid_audit
+run_evaluate >"$SANDBOX/out" || fail "protected advisory-gate manifest failed: $(cat "$SANDBOX/out")"
+for protected_advisory in deny.toml osv-scanner.toml .github/dependabot.yml \
+  scripts/check_advisories.py scripts/tests/test_advisory_gate.sh \
+  scripts/tests/fixtures/advisories/smallvec-1.6.0.Cargo.lock.fixture; do
+  grep -Fxq "[policy-integrity]   $protected_advisory" "$SANDBOX/out" \
+    || fail "advisory gate input was not classified as policy: $protected_advisory"
+done
+
+# Without owner-authorized evidence, editing the OSV exception ledger alone is red.
+write_pr attacker 1 '[]'
+printf '%s\n' '[[{"filename":"osv-scanner.toml","status":"modified"}]]' >"$STATE/files.json"
+expect_evaluate_red advisory-ledger-self-change 'protected policy changes require designated policy-owner author kwakseongjae/87296259'
+
 # Candidate workflow self-change without owner-authorized evidence is red.
 write_pr attacker 1 '[]'
 printf '%s\n' '[[{"filename":".github/workflows/policy-integrity.yml","status":"modified"}]]' >"$STATE/files.json"

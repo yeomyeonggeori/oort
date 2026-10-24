@@ -24,11 +24,13 @@ use axum::extract::{Path, State};
 use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
-    active_workspace_role, list_read_state, update_read_cursor_with_intent_in_tx, MarkUnreadWrite,
-    ReadCursorOutcome, ReadIntent, ReadState,
+    active_workspace_role, list_read_state_projection, update_read_cursor_with_intent_in_tx,
+    MarkUnreadWrite, ReadCursorOutcome, ReadIntent, ReadState, ReadStateProjection,
 };
 
-use crate::dto::{ReadStateDto, ReadStateListResponseDto, UpdateReadStateRequestDto};
+use crate::dto::{
+    ReadStateDto, ReadStateListResponseDto, ReadStateRowDto, UpdateReadStateRequestDto,
+};
 use crate::error::ApiError;
 use crate::routes::shared::{agent_tenant_tx, path_uuid, settle_db, workspace_scope, DbRejectable};
 use crate::AppState;
@@ -41,6 +43,16 @@ fn read_state_dto(state: &ReadState) -> ReadStateDto {
         unread_count: state.unread_count,
         mention_count: state.mention_count,
         marked_unread_before_seq: state.marked_unread_before_seq,
+    }
+}
+
+/// A `GET` row: the cursor fields plus ADR-0177 증보 D8's `latest_readable_seq` and the caller's own
+/// `closed_at_seq` (#4227). The `PUT` response stays a plain [`ReadStateDto`].
+fn read_state_row_dto(row: &ReadStateProjection) -> ReadStateRowDto {
+    ReadStateRowDto {
+        state: read_state_dto(&row.state),
+        latest_readable_seq: row.latest_readable_seq,
+        closed_at_seq: row.closed_at_seq,
     }
 }
 
@@ -65,7 +77,7 @@ pub async fn list(
 ) -> Result<Json<ReadStateListResponseDto>, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
 
-    let outcome: DbRejectable<Vec<ReadState>> =
+    let outcome: DbRejectable<Vec<ReadStateProjection>> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 if active_workspace_role(conn, workspace_id, principal.member_id)
@@ -74,16 +86,19 @@ pub async fn list(
                 {
                     return Ok(Err(ApiError::forbidden("not a workspace member")));
                 }
-                Ok(Ok(
-                    list_read_state(conn, workspace_id, principal.member_id).await?
-                ))
+                Ok(Ok(list_read_state_projection(
+                    conn,
+                    workspace_id,
+                    principal.member_id,
+                )
+                .await?))
             })
         })
         .await;
 
-    let states = settle_db("read_state.list", outcome)?;
+    let rows = settle_db("read_state.list", outcome)?;
     Ok(Json(ReadStateListResponseDto {
-        read_states: states.iter().map(read_state_dto).collect(),
+        read_states: rows.iter().map(read_state_row_dto).collect(),
     }))
 }
 

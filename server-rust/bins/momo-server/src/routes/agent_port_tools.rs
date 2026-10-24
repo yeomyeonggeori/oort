@@ -1913,7 +1913,7 @@ async fn action_propose(
     // happens** (ADR-0186 증보 v3 V3-2a): decoded and re-encoded under a timeout, off
     // the async threads, and — for a workspace file — fetched from Drive *outside*
     // any database transaction. Nothing the agent sent survives this step.
-    let prepared_avatar = prepare_avatar(state, caller, &pure.args).await?;
+    let prepared_avatar = prepare_avatar(state, caller, &pure.args, &raw_handle).await?;
 
     let secret = state.agent_port.envelope_secret().to_string();
     let now = chrono::Utc::now();
@@ -2066,6 +2066,9 @@ async fn action_propose(
                 conn,
                 caller.workspace_id,
                 caller.agent_member_id,
+                // The run the card is raised in: `member.avatar.set` derives the person
+                // it is about from it (and from nothing the agent typed).
+                Some(handle.run_id),
                 action,
                 &raw_args,
                 proposed_at_ms,
@@ -2094,7 +2097,9 @@ async fn action_propose(
             // A second rename of the same agent while one waits is refused
             // (증보 V4-M-9): the target's row is locked first so two simultaneous
             // proposals cannot both see "none".
-            if let crate::routes::actions::GateSubject::Agent(target) = resolved.subject {
+            if let crate::routes::actions::GateSubject::Agent(target)
+            | crate::routes::actions::GateSubject::Member(target) = resolved.subject
+            {
                 if momo_agent::lock_target_and_find_pending_action_in_tx(
                     conn,
                     caller.workspace_id,
@@ -2117,8 +2122,19 @@ async fn action_propose(
             let mut avatar_preview: Option<Value> = None;
             let mut staged_image_id: Option<Uuid> = None;
             if let Some(prepared) = &prepared_avatar {
-                let crate::routes::actions::GateSubject::Agent(target) = resolved.subject else {
-                    return Ok(Err(ToolFailure::InvalidArguments));
+                // The image is staged for the **subject** the resolver named: the target
+                // agent (`agent.profile.update`) or the person the run was raised by
+                // (`member.avatar.set`). The bytes were prepared for one of the two, and a
+                // mismatch (the run's requester changed between the two transactions) is a
+                // refusal, never a re-aim.
+                let target = match (resolved.subject, prepared.for_member) {
+                    (crate::routes::actions::GateSubject::Agent(target), None) => target,
+                    (crate::routes::actions::GateSubject::Member(target), Some(prepared_for))
+                        if target == prepared_for =>
+                    {
+                        target
+                    }
+                    _ => return Ok(Err(ToolFailure::InvalidArguments)),
                 };
                 momo_messaging::purge_stale_staged_avatar_images_in_tx(conn, caller.workspace_id)
                     .await?;
@@ -2286,6 +2302,44 @@ async fn action_propose(
                 {
                     return Err(DbError::from(momo_db::sqlx::Error::RowNotFound));
                 }
+                // A `member.avatar.set` proposal is on the record the moment it is staged
+                // (ids, origin, measured size, a sha256 prefix — never the bytes).
+                if action.id == momo_agent::actions::ACTION_MEMBER_AVATAR_SET {
+                    if let (Some(preview), crate::routes::actions::GateSubject::Member(person)) =
+                        (&avatar_preview, resolved.subject)
+                    {
+                        let mut detail = preview.clone();
+                        if let Some(object) = detail.as_object_mut() {
+                            object.remove("kind");
+                            if let Some(sha) = object.get("sha256").and_then(Value::as_str) {
+                                let prefix = sha.chars().take(12).collect::<String>();
+                                object.remove("sha256");
+                                object.insert("sha256_prefix".into(), json!(prefix));
+                            }
+                            object.insert("approval_id".into(), json!(approval_id.to_string()));
+                            object.insert(
+                                "via_agent".into(),
+                                json!(caller.agent_member_id.to_string()),
+                            );
+                        }
+                        momo_db::audit::write_audit(
+                            conn,
+                            &momo_db::audit::AuditEntry::new(
+                                caller.workspace_id,
+                                momo_agent::actions::AUDIT_MEMBER_AVATAR_STAGED,
+                            )
+                            .by(caller.agent_member_id)
+                            .about(person)
+                            .target("member", person)
+                            .run(handle.run_id)
+                            .with_schema(
+                                momo_agent::actions::AUDIT_MEMBER_AVATAR_STAGED_SCHEMA,
+                                detail,
+                            ),
+                        )
+                        .await?;
+                    }
+                }
             }
             Ok(Ok(json!({
                 "approvalId": approval_id,
@@ -2310,14 +2364,18 @@ struct PreparedAvatar {
     image: momo_messaging::ProcessedAvatar,
     /// `attachment` or `generated` (`agent_avatar_source_ck`).
     origin: &'static str,
+    /// The person the bytes were prepared for (`member.avatar.set`: the human the run was
+    /// raised by), or `None` for an agent's own picture. The staging step requires the
+    /// resolver's subject to be this very person.
+    for_member: Option<Uuid>,
 }
 
 /// The longest the decode-and-re-encode may run.
 const AVATAR_PROCESS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// How many image decodes may run at once, process-wide. A decode of a tiny file can
-/// peak at tens of MiB (the security review of #3799 measured 160–310 MB before the
-/// input cap came down to 2048 px), and `spawn_blocking` is not cancelled by the
+/// peak at tens of MiB (the security review of #3799 measured 160–310 MB at 4096² before the
+/// shrink-then-rotate order; #4385 measured the 4096 px / 16 MP ceiling), and `spawn_blocking` is not cancelled by the
 /// timeout, so without this several agents — or one agent retrying — would multiply
 /// that. Two at a time; a third caller waits (still inside the timeout) or is refused.
 static AVATAR_DECODE_PERMITS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
@@ -2344,23 +2402,70 @@ async fn process_avatar_bytes(
     bytes: Vec<u8>,
     max_input: usize,
 ) -> Result<momo_messaging::ProcessedAvatar, ToolFailure> {
+    process_avatar_bytes_coded(bytes, max_input)
+        .await
+        .map_err(|_| ToolFailure::InvalidArguments)
+}
+
+/// [`process_avatar_bytes`] with the **reason** kept, for the audit row only. The code
+/// is one of [`momo_messaging::AvatarImageRejected::code`] or `timeout`/`busy`; it is
+/// written to `member.avatar.refused` and never returned to the agent.
+async fn process_avatar_bytes_coded(
+    bytes: Vec<u8>,
+    max_input: usize,
+) -> Result<momo_messaging::ProcessedAvatar, &'static str> {
     // The permit is taken **inside** the timeout and moved into the blocking task,
     // so it is released when the decode actually ends — not when the caller gives up.
     let work = async move {
-        let permit = AVATAR_DECODE_PERMITS
-            .acquire()
-            .await
-            .map_err(|_| ToolFailure::InvalidArguments)?;
+        let permit = AVATAR_DECODE_PERMITS.acquire().await.map_err(|_| "busy")?;
         let task = tokio::task::spawn_blocking(move || {
             let _held = permit;
             momo_messaging::process_avatar_image(&bytes, max_input)
         });
-        task.await.map_err(|_| ToolFailure::InvalidArguments)
+        task.await.map_err(|_| "busy")
     };
     match tokio::time::timeout(AVATAR_PROCESS_TIMEOUT, work).await {
         Ok(Ok(Ok(image))) => Ok(image),
-        _ => Err(ToolFailure::InvalidArguments),
+        Ok(Ok(Err(rejected))) => Err(rejected.code()),
+        Ok(Err(code)) => Err(code),
+        Err(_) => Err("timeout"),
     }
+}
+
+/// Record that a `member.avatar.set` proposal was refused **before anything was staged**
+/// (ADR-0186 증보 v4): who proposed, whom it was about when that is known, and a reason
+/// code — never the input. Best effort: the refusal the agent sees does not depend on it.
+async fn audit_member_avatar_refused(
+    state: &AppState,
+    caller: HostedCaller,
+    person: Option<Uuid>,
+    reason: &'static str,
+) {
+    let _ = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let mut entry = momo_db::audit::AuditEntry::new(
+                caller.workspace_id,
+                momo_agent::actions::AUDIT_MEMBER_AVATAR_REFUSED,
+            )
+            .by(caller.agent_member_id);
+            if let Some(person) = person {
+                entry = entry.about(person).target("member", person);
+            }
+            momo_db::audit::write_audit(
+                conn,
+                &entry.with_schema(
+                    momo_agent::actions::AUDIT_MEMBER_AVATAR_REFUSED_SCHEMA,
+                    json!({
+                        "reason": reason,
+                        "via_agent": caller.agent_member_id.to_string(),
+                    }),
+                ),
+            )
+            .await?;
+            Ok(())
+        })
+    })
+    .await;
 }
 
 /// Turn the proposal's avatar input, if it has any, into server-made bytes.
@@ -2376,8 +2481,16 @@ async fn prepare_avatar(
     state: &AppState,
     caller: HostedCaller,
     args: &crate::routes::actions::ActionArgs,
+    raw_handle: &str,
 ) -> Result<Option<PreparedAvatar>, ToolFailure> {
     use base64::Engine as _;
+    if let crate::routes::actions::ActionArgs::MemberAvatarSet {
+        avatar: crate::routes::actions::AvatarIntent::Attachment(attachment_id),
+        ..
+    } = args
+    {
+        return prepare_member_avatar(state, caller, raw_handle, *attachment_id).await;
+    }
     let crate::routes::actions::ActionArgs::AgentProfileUpdate { avatar, .. } = args else {
         return Ok(None);
     };
@@ -2411,6 +2524,7 @@ async fn prepare_avatar(
             Ok(Some(PreparedAvatar {
                 image,
                 origin: "generated",
+                for_member: None,
             }))
         }
         crate::routes::actions::AvatarIntent::Attachment(attachment_id) => {
@@ -2459,9 +2573,141 @@ async fn prepare_avatar(
             Ok(Some(PreparedAvatar {
                 image,
                 origin: "attachment",
+                for_member: None,
             }))
         }
         _ => Ok(None),
+    }
+}
+
+/// `member.avatar.set`: find the person the run was raised by and **their** attachment in
+/// the conversation the run is in, fetch the file from Drive (outside any transaction) and
+/// turn it into server-made bytes.
+///
+/// What is checked here, before a decoder runs, and answered as the one opaque
+/// `InvalidArguments` (each refusal also leaves a reason code in the audit log):
+/// the handle is this agent's and its run is live; the run was raised by a live human; the
+/// attachment is complete, an allowed type, within 5 MiB, **written by that human, in the
+/// run's own channel**. A file somebody else attached, or one from another conversation,
+/// does not exist as far as this call can tell.
+async fn prepare_member_avatar(
+    state: &AppState,
+    caller: HostedCaller,
+    raw_handle: &str,
+    attachment_id: Uuid,
+) -> Result<Option<PreparedAvatar>, ToolFailure> {
+    let max = momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT;
+    let secret = state.agent_port.envelope_secret().to_string();
+    let raw_handle = raw_handle.to_string();
+    let looked_up = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+        Box::pin(async move {
+            let identity =
+                match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
+                    Ok(identity) => identity,
+                    Err(failure) => return Ok(Err((failure, None, "not_authorized"))),
+                };
+            let handle = match bound_handle(&identity, caller, &raw_handle, &secret) {
+                Ok(handle) => handle,
+                Err(failure) => return Ok(Err((failure, None, "handle_refused"))),
+            };
+            let Some(run) =
+                momo_agent::lock_gateway_run_in_tx(conn, caller.workspace_id, handle.run_id)
+                    .await?
+            else {
+                return Ok(Err((ToolFailure::Unavailable, None, "run_unavailable")));
+            };
+            let Some((person, channel_id)) = momo_messaging::requester_of_run_in_tx(
+                conn,
+                caller.workspace_id,
+                handle.run_id,
+                run.agent_member_id,
+            )
+            .await?
+            else {
+                return Ok(Err((ToolFailure::InvalidArguments, None, "no_requester")));
+            };
+            // Per-person hourly ceiling, before a byte is fetched or decoded. Counts the
+            // proposals that were staged or refused for this person (not the rate-limit
+            // refusals themselves, so the window drains as the hour passes).
+            let recent: i64 = momo_db::sqlx::query_scalar(
+                "SELECT count(*) FROM audit_log \
+                  WHERE workspace_id = $1 AND subject_member_id = $2 \
+                    AND action IN ($3, $4) \
+                    AND detail->>'reason' IS DISTINCT FROM $5 \
+                    AND created_at > now() - interval '1 hour'",
+            )
+            .bind(caller.workspace_id)
+            .bind(person)
+            .bind(momo_agent::actions::AUDIT_MEMBER_AVATAR_STAGED)
+            .bind(momo_agent::actions::AUDIT_MEMBER_AVATAR_REFUSED)
+            .bind(momo_agent::actions::MEMBER_AVATAR_RATE_LIMITED_REASON)
+            .fetch_one(&mut *conn)
+            .await?;
+            if recent >= momo_agent::actions::MEMBER_AVATAR_PROPOSALS_PER_HOUR {
+                return Ok(Err((
+                    ToolFailure::InvalidArguments,
+                    Some(person),
+                    momo_agent::actions::MEMBER_AVATAR_RATE_LIMITED_REASON,
+                )));
+            }
+            let source = momo_messaging::find_requester_attachment_in_tx(
+                conn,
+                caller.workspace_id,
+                person,
+                channel_id,
+                attachment_id,
+                max as i64,
+            )
+            .await?;
+            Ok(match source {
+                Some(source) => Ok((person, source)),
+                None => Err((
+                    ToolFailure::InvalidArguments,
+                    Some(person),
+                    "attachment_not_available",
+                )),
+            })
+        })
+    })
+    .await
+    .map_err(|error| internal("agent_port.member_avatar_attachment", error))?;
+    let (person, source) = match looked_up {
+        Ok(found) => found,
+        Err((failure, person, reason)) => {
+            if matches!(failure, ToolFailure::InvalidArguments) {
+                audit_member_avatar_refused(state, caller, person, reason).await;
+            }
+            return Err(failure);
+        }
+    };
+    let fetched = async {
+        let content = state
+            .drive
+            .file_content(&source.drive_file_id, source.size_bytes)
+            .await
+            .map_err(|_| "drive_unavailable")?;
+        // One byte more than the ceiling: a longer stream than the row claimed is
+        // refused, not truncated into something that decodes.
+        let bytes = content
+            .read_prefix(max + 1)
+            .await
+            .map_err(|_| "drive_unavailable")?;
+        if bytes.len() > max {
+            return Err("too_large");
+        }
+        process_avatar_bytes_coded(bytes, max).await
+    }
+    .await;
+    match fetched {
+        Ok(image) => Ok(Some(PreparedAvatar {
+            image,
+            origin: "attachment",
+            for_member: Some(person),
+        })),
+        Err(reason) => {
+            audit_member_avatar_refused(state, caller, Some(person), reason).await;
+            Err(ToolFailure::InvalidArguments)
+        }
     }
 }
 

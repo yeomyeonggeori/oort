@@ -134,6 +134,7 @@
   - 사람 멘션·DM에는 이 창을 적용하지 않는다(현행 그대로).
 - `work_run_done`(type=work)은 그대로 둔다. 같은 메시지·같은 사람에는 이유가 하나만 붙는다. 답 팔은 기존 이유(작업 이유, `approval_request`, `mention`, `dm`) 뒤에 둔다. 그래서 DM의 에이전트 답은 `dm`으로 남아 창 없이 간다(증보 1 정정. 처음 문구의 「mention > dm」을 DM 답에 적용하면 보고 있을 때 DM 답이 사라진다).
 - 세부(표식·서버 소유 props 키·요청자 설정·스트리밍 답의 닫힘 판정)는 「증보 1」의 D8 항목을 따른다.
+- 역방향(ADR-0200 증보 3, 2026-10-24): 수령 전 멈춤 코드에 `woken_not_collected`가 더해졌다. 사람이 부른 run의 멈춤 줄과 이 D8 푸시 판정은 그대로다. 환영 run은 세 멈춤 코드 모두 줄 없이 끝나므로 이 D8 푸시도 없다.
 
 ### D9. 죽은 토큰을 걷는다 (ADR-0120 D4 이행)
 - APNs 410, 400 `BadDeviceToken`, `DeviceTokenNotForTopic`을 받으면 그 `push_token`을 무효화한다(`invalidated_at`).
