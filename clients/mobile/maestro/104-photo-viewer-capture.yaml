@@ -1,0 +1,45 @@
+appId: app.momo.ios
+name: "104-photo-viewer-capture"
+---
+# 104-photo-viewer-capture — 대화의 사진을 눌러 연 뷰어의 위쪽 단추가 안전 영역 안에 서고, 실제로 눌리는가 (#4293).
+#
+# 표면 `-momoMeasure PHOTO-VIEWER-SOLO`(다크) · `LIGHT-PHOTO-VIEWER-SOLO`(라이트)는 진짜 머리·타임라인·
+# 컴포저가 선 대화에 사진 한 장짜리 메시지를 세운다(`measure/photoViewer.tsx`). 사진 바이트는 스텁이
+# 대신 답한다(`measure/photo-stub.mjs`, 단색 PNG). 뷰어를 여는 것도, 닫기를 누르는 것도 **정말로 누르는**
+# 이 흐름의 탭이다.
+#
+#   node clients/mobile/measure/photo-stub.mjs &
+#   xcrun simctl launch <udid> app.momo.ios --args \
+#     -momoMeasure PHOTO-VIEWER-SOLO -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=viewer-dark clients/mobile/maestro/104-photo-viewer-capture.yaml
+#   # 사진: --test-output-dir 아래 takeScreenshot/ (`${SHOT}-chat` · `-viewer` · `-after-close-tap`)
+#
+# 같은 흐름을 고치기 전·후 판에 돌린다. 고치기 전에는 닫기·공유가 상태 막대 높이(위쪽 44pt)에 깔려
+# `-viewer` 사진에서 다이내믹 아일랜드·시계와 겹친다. `-after-close-tap` 은 닫기 탭 뒤의 화면이다.
+- extendedWaitUntil:
+    visible:
+      id: "attachment-item"
+    timeout: 60000
+# 디버그 빌드의 LogBox 띠가 컴포저 위를 덮고 탭을 먹는다(`subflows/dismiss-dev-logbox.yaml`).
+- runFlow: subflows/dismiss-dev-logbox.yaml
+# 단색 PNG 를 내려받아 타일에 그릴 때까지(스텁 응답은 즉시이고, 그림이 그려져야 사진이 대화 속에 선다).
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- takeScreenshot: ${SHOT}-chat
+- tapOn:
+    id: "attachment-item"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-viewer
+- tapOn:
+    id: "attachment-viewer-close"
+- waitForAnimationToEnd
+# 닫기 탭이 **닫았는가**를 단정한다(고치기 전 다이내믹 아일랜드 기기에서는 탭이 상태 막대에 먹혀 뷰어가 남는다).
+- assertNotVisible:
+    id: "attachment-viewer"
+- takeScreenshot: ${SHOT}-after-close-tap

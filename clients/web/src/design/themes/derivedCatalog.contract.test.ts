@@ -1,6 +1,8 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { THEME_CATALOG } from "@momo/core/design/themeCatalog.generated";
 import { deriveCatalogMode } from "@momo/core/design/deriveCatalog";
+import { mixOklab } from "@momo/core/design/color";
 import { THEMES, THEME_IDS, type Mode } from "@momo/core/design/themes";
 import {
   CHIP_VESSEL_MIN_CONTRAST,
@@ -194,5 +196,101 @@ describe("대조군: 첫 파티 6행의 잔량 (카탈로그가 더 강하게 �
     expect(rest.length).toBeGreaterThan(0);
     expect(rest.length).toBeLessThanOrEqual(VESSEL_FIRST_PARTY_RESIDUE);
     expect(FIRST_PARTY_ROWS.filter((row) => row.name.startsWith("dawnsky")).flatMap(vesselMisses)).toEqual([]);
+  });
+});
+
+// =============================================================================
+// 메시지 줄의 옅은 호버 면 (#4324). `tokens.css`의 `row-hover` 유틸은 `--surface-hover`를 `--row-hover-strength`만 섞는다.
+// 57행 전부에서 그 면이 (1) 본문 판과 눈에 띄게 다르고 (2) 가리킨 행(`--surface-hover` 100%)보다 옅고 (3) 그 위 글자 대비가
+// 살아 있어야 한다. 강도는 CSS에서 읽는다 — 시험이 자기 숫자를 들고 있으면 CSS를 바꿔도 초록이다.
+// =============================================================================
+
+const TOKENS_CSS = readFileSync(new URL("../tokens.css", import.meta.url), "utf8");
+const ROW_HOVER_STRENGTH = Number(/--row-hover-strength:\s*(\d+)%/.exec(TOKENS_CSS)?.[1] ?? "NaN") / 100;
+
+const channel = (hex: string, i: number) => parseInt(hex.slice(1 + i * 2, 3 + i * 2), 16);
+/** `fg`를 불투명도 `alpha`로 `bg` 위에 얹은 색(sRGB 합성, 브라우저의 투명 위 `color-mix` + 위 칠과 같다). */
+function over(fg: string, bg: string, alpha: number): string {
+  const mixed = [0, 1, 2].map((i) => Math.round(channel(fg, i) * alpha + channel(bg, i) * (1 - alpha)));
+  return `#${mixed.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/**
+ * 옅은 호버 면과 본문 판의 거리(OKLab) 범위. 본문 판 57행을 실측한 값은 0.0239~0.0360이고(2026-10-25), 하한은 그보다 조금
+ * 아래(사람이 가려낼 수 있는 단계: 첫 파티의 상태 채움 하한이 0.02), 상한은 「튀지 않는다」(가리킨 행 100%의 최소 0.0479 아래).
+ */
+const ROW_HOVER_MIN_DISTANCE = 0.02;
+const ROW_HOVER_MAX_DISTANCE = 0.045;
+
+describe("옅은 줄 호버 면은 57행 모두에서 보이되 튀지 않는다 (#4324)", () => {
+  it("강도를 CSS에서 읽었다(0 초과 1 미만)", () => {
+    expect(ROW_HOVER_STRENGTH).toBeGreaterThan(0);
+    expect(ROW_HOVER_STRENGTH).toBeLessThan(1);
+  });
+
+  it.each(CATALOG_ROWS.map((row) => [row.name, row] as const))("%s: 본문 판 위에서 보이고, 가리킨 행보다 옅고, 글자 대비 4.5를 지킨다", (_name, row) => {
+    const S = row.surfaces;
+    const out: string[] = [];
+    // 줄이 서는 바닥은 본문 판이다(타임라인·스레드 패널 `bg-pane`, 인박스 목록). 카드 면(`surface`) 위의 줄은 없다.
+    for (const host of ["pane"] as const) {
+      const soft = over(S["surface-hover"], S[host], ROW_HOVER_STRENGTH);
+      const seen = Number(deltaE(S[host], soft).toFixed(4));
+      const full = Number(deltaE(S[host], S["surface-hover"]).toFixed(4));
+      if (seen < ROW_HOVER_MIN_DISTANCE) out.push(`${host} 위 옅은 호버 거리 ${seen} < ${ROW_HOVER_MIN_DISTANCE}`);
+      if (seen > ROW_HOVER_MAX_DISTANCE) out.push(`${host} 위 옅은 호버 거리 ${seen} > ${ROW_HOVER_MAX_DISTANCE} (튄다)`);
+      if (seen >= full) out.push(`${host} 위 옅은 호버 ${seen}가 가리킨 행 ${full}보다 옅지 않다`);
+      for (const fg of ["ink", "ink-muted"] as const) {
+        const ratio = Number(contrast(row.color[fg], soft).toFixed(2));
+        if (ratio < 4.5) out.push(`${fg} on 옅은 호버(${host}) ${ratio} < 4.5`);
+      }
+    }
+    expect(out).toEqual([]);
+  });
+
+  it("사보타주: 강도 100%면 가리킨 행과 같아져 「옅다」 단정이 붉다(자가 점검)", () => {
+    const row = CATALOG_ROWS[0];
+    const full = over(row.surfaces["surface-hover"], row.surfaces.pane, 1);
+    expect(deltaE(row.surfaces.pane, full)).toBeCloseTo(deltaE(row.surfaces.pane, row.surfaces["surface-hover"]), 6);
+    const weak = over(row.surfaces["surface-hover"], row.surfaces.pane, 0.02);
+    expect(deltaE(row.surfaces.pane, weak)).toBeLessThan(ROW_HOVER_MIN_DISTANCE);
+  });
+});
+
+// =============================================================================
+// 줄 착지 면 (#4324 결정 2). `landed-surface` 유틸 = `--warn-soft` 바탕 + `--warn`을 OKLab으로 N% 섞은 1px 테두리(폰 #4300의
+// `warnSurface`·`warnBorder`와 같은 말). 57행 전부에서 (1) 그 위 글자 대비가 4.5 이상이고 (2) 테두리가 바탕과 눈에 띄게 다르며
+// (3) 착지 면이 본문 판과 눈에 띄게 다르다. 섞는 비율은 CSS에서 읽는다 — 시험이 자기 숫자를 들고 있으면 CSS를 바꿔도 초록이다.
+// =============================================================================
+
+const LANDED_BORDER_MIX = Number(/@utility landed-surface[\s\S]*?color-mix\(in oklab,\s*var\(--warn-soft\),\s*var\(--warn\)\s+(\d+)%\)/.exec(TOKENS_CSS)?.[1] ?? "NaN") / 100;
+const LANDED_BORDER_MIN_DISTANCE = 0.04;
+const LANDED_FACE_MIN_DISTANCE = 0.02;
+
+describe("줄 착지 면은 57행 모두에서 읽히고 보인다 (#4324)", () => {
+  it("테두리 섞는 비율을 CSS에서 읽었다(0 초과 1 미만)", () => {
+    expect(LANDED_BORDER_MIX).toBeGreaterThan(0);
+    expect(LANDED_BORDER_MIX).toBeLessThan(1);
+  });
+
+  it.each(CATALOG_ROWS.map((row) => [row.name, row] as const))("%s: 글자 대비 4.5, 테두리·면이 눈에 띈다", (_name, row) => {
+    const S = row.surfaces;
+    const out: string[] = [];
+    const face = S["warn-soft"];
+    const border = mixOklab(face, row.color.warn, LANDED_BORDER_MIX);
+    for (const fg of ["ink", "ink-muted"] as const) {
+      const ratio = Number(contrast(row.color[fg], face).toFixed(2));
+      if (ratio < 4.5) out.push(`${fg} on 착지 면 ${ratio} < 4.5`);
+    }
+    const edge = Number(deltaE(face, border).toFixed(4));
+    if (edge < LANDED_BORDER_MIN_DISTANCE) out.push(`테두리-면 거리 ${edge} < ${LANDED_BORDER_MIN_DISTANCE}`);
+    const seen = Number(deltaE(S.pane, face).toFixed(4));
+    if (seen < LANDED_FACE_MIN_DISTANCE) out.push(`본문 판-착지 면 거리 ${seen} < ${LANDED_FACE_MIN_DISTANCE}`);
+    expect(out).toEqual([]);
+  });
+
+  it("사보타주: 테두리를 0%로 섞으면 면과 같아져 「테두리가 보인다」 단정이 붉다(자가 점검)", () => {
+    const row = CATALOG_ROWS[0];
+    const none = mixOklab(row.surfaces["warn-soft"], row.color.warn, 0);
+    expect(deltaE(row.surfaces["warn-soft"], none)).toBeLessThan(LANDED_BORDER_MIN_DISTANCE);
   });
 });

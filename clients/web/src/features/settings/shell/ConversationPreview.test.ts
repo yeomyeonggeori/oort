@@ -62,7 +62,8 @@ describe("대화 미리보기가 타임라인과 같은 값을 읽는다", () =>
   });
 
   it("아바타와 본문 사이는 타임라인 행과 같은 gap-2이고, 머리/이어지는 행 분기가 타임라인과 같은 방향이다", () => {
-    expect(messageRow).toContain("flex gap-2 px-4");
+    // #4324: 줄 가로 여백이 바깥 4 + 안쪽 12(합 16)로 바뀌었다. 이 단정이 지키는 것은 아바타·본문 사이 gap-2다.
+    expect(messageRow).toMatch(/"group relative flex gap-2 mx-1 rounded-lg px-3 /);
     // 묶음 머리 행은 위가 열린 상수, 이어지는 행은 대칭 상수다. 두 상수를 맞바꾸면 미리보기가 묶음 사이를 12로 그린다.
     expect(preview).toMatch(
       /cn\(\s*"flex gap-2",\s*startsGroup\s*\?\s*ROW_GROUP_START_PAD_CLASS\s*:\s*ROW_CONTINUATION_PAD_CLASS\s*\)/

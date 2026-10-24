@@ -1,0 +1,37 @@
+appId: app.momo.ios
+name: 105-typing-capture
+---
+# 105-typing-capture — 에이전트 DM 에서 키보드를 올리고 3줄을 친 채 서 있는 사진 (#4331). 활동 줄이 선 도크가 3줄 입력창과 함께 자란 모양.
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure DM-STEADY-LIVE -RCT_jsLocation 127.0.0.1:$PORT -momoGapSink 127.0.0.1:$SINK
+#   maestro --device <udid> test clients/mobile/maestro/105-typing-capture.yaml
+#   # 사진: Maestro 가 시험 출력 폴더에 둔다 — ~/.maestro/tests/<시각>/105-typing-capture/takeScreenshot/typing-3.png
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 7000
+    optional: true
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    when:
+      visible: "지금 안 함"
+    commands:
+      - tapOn: "지금 안 함"
+- tapOn:
+    id: "composer-input"
+- inputText: "금요일 배포는 오후로 미룰게요"
+- pressKey: Enter
+- inputText: "그 전에 시안부터 확인해 주세요"
+- pressKey: Enter
+- inputText: "끝나면 여기에 남겨 둘게요"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 1500
+    optional: true
+- takeScreenshot: typing-3

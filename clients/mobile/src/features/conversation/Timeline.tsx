@@ -435,6 +435,8 @@ export interface PillState {
   /** `seen@<offset>` = 창 안에서 봤다 · `pressed` = 위 필을 눌렀다. */
   latchNote: string | null;
   settled: boolean;
+  /** 떠 있는 날짜 알약이 지금 서 있다 (#4331 — 프로그램이 낸 스크롤에는 서지 않는지 재는 seam). */
+  day: boolean;
 }
 
 /** 아직 아무 행도 보고되지 않았다. 빈 배열 하나를 모두가 나눠 쓴다. */
@@ -523,6 +525,12 @@ export function floatingDayFor(
  * 어디까지 왔는지 읽을 틈이다.
  */
 export const DAY_PILL_LINGER_MS = 1200;
+
+/**
+ * 손가락이 뗀 뒤 관성이 시작하기를 기다리는 시간(ms, #4331). UIKit 은 `scrollViewDidEndDragging` 직후 같은 호출 안에서
+ * `scrollViewWillBeginDecelerating` 을 보내므로 두 이벤트는 사실상 붙어 온다 — 이 시간은 JS 가 바쁜 순간의 여유일 뿐이다.
+ */
+export const DRAG_MOMENTUM_GRACE_MS = 150;
 
 function sameFloatingDay(
   a: {key: string} | null,
@@ -792,6 +800,7 @@ function TimelineInner({
   pillsRef,
   tailRef,
   tailGap,
+  topPillInset = 0,
   metricsRef,
   listRef: externalListRef,
 }: {
@@ -975,6 +984,14 @@ function TimelineInner({
    * 이음매 노드는 높이가 0 이어도 **그대로 서 있다** — `tailRef` 가 답하는 것은 높이가 아니라 위치다.
    */
   tailGap?: number;
+  /**
+   * 위쪽 떠 있는 필(날짜 · 「안 읽은 곳으로」)을 목록 위 가장자리에서 얼마나 내려 세우는가(pt, #4292).
+   *
+   * 대화 머리의 연결 띠는 목록 위에 **뜬다**(흐름에 끼면 띠가 설 때마다 목록의 보이는 높이가 바뀐다). 띠와 이 필들은
+   * 같은 자리(목록 위 가운데)를 쓰므로, 띠가 서 있는 동안 필은 그 밑에 쌓인다 — 아니면 필이 띠 뒤에 숨은 채 눌리는
+   * 컨트롤이 된다. 띠가 없으면 0. 필은 목록 위에 떠 있으므로 이 값은 목록의 배치를 바꾸지 않는다.
+   */
+  topPillInset?: number;
   /**
    * Same seam, for the geometry: the list's own last scroll report, written
    * without a re-render. What a harness wants to know after a send is how far
@@ -1171,9 +1188,53 @@ function TimelineInner({
       setDayPillLive(false);
     }, DAY_PILL_LINGER_MS);
   }, []);
+  // ## 알약은 **손가락이 끈 스크롤**에만 선다 (#4331)
+  //
+  // `onMomentumScrollBegin` 은 UIKit 이 **감속을 시작할 때마다** 온다. 손가락이 끈 뒤의 관성이 그 대부분이지만, 이 목록이 스스로 낸 이동
+  // (입력창이 자라고 줄어 창이 변할 때의 바닥 맞춤 · 새 줄을 따라가는 활강 · 보낸 뒤의 끝 쫓기)이 낳은 감속도 같은 신호를 낸다.
+  // 그 신호로 알약을 세우면 입력하는 동안 알약이 떴다 사라진다(실기 3053: 「채팅을 치면 … 위에 날짜가 뜨고 안뜨고 하면서 채팅이
+  // 이동해」). 그래서 관성은 **직전에 손가락이 끈 것일 때만** 알약을 세운다:
+  //
+  //   `onScrollBeginDrag`(손가락이 잡음) → 자격이 선다.
+  //   `onScrollEndDrag`(손가락이 뗌) → 관성이 이어지면 곧바로 `onMomentumScrollBegin` 이 온다. `DRAG_MOMENTUM_GRACE_MS` 안에
+  //     안 오면 관성 없이 멈춘 것이라 자격을 거둔다(그 뒤의 감속은 손가락의 것이 아니다).
+  //   `onMomentumScrollEnd` → 자격을 거둔다.
+  const dragOwnsScrollRef = useRef(false);
+  const momentumAfterDragRef = useRef(false);
+  const dragGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearDragGrace = useCallback(() => {
+    if (dragGraceTimerRef.current !== null) clearTimeout(dragGraceTimerRef.current);
+    dragGraceTimerRef.current = null;
+  }, []);
+  const grabDayPill = useCallback(() => {
+    clearDragGrace();
+    dragOwnsScrollRef.current = true;
+    momentumAfterDragRef.current = false;
+    holdDayPill();
+  }, [clearDragGrace, holdDayPill]);
+  const letGoDayPill = useCallback(() => {
+    releaseDayPill();
+    clearDragGrace();
+    dragGraceTimerRef.current = setTimeout(() => {
+      dragGraceTimerRef.current = null;
+      if (!momentumAfterDragRef.current) dragOwnsScrollRef.current = false;
+    }, DRAG_MOMENTUM_GRACE_MS);
+  }, [clearDragGrace, releaseDayPill]);
+  const onMomentumScrollBegin = useCallback(() => {
+    if (!dragOwnsScrollRef.current) return;
+    momentumAfterDragRef.current = true;
+    holdDayPill();
+  }, [holdDayPill]);
+  const onMomentumScrollEnd = useCallback(() => {
+    clearDragGrace();
+    dragOwnsScrollRef.current = false;
+    momentumAfterDragRef.current = false;
+    releaseDayPill();
+  }, [clearDragGrace, releaseDayPill]);
   useEffect(
     () => () => {
       if (dayPillTimerRef.current !== null) clearTimeout(dayPillTimerRef.current);
+      if (dragGraceTimerRef.current !== null) clearTimeout(dragGraceTimerRef.current);
     },
     [],
   );
@@ -1428,6 +1489,7 @@ function TimelineInner({
       latched: unreadLatched,
       latchNote: unreadLatched ? latchNoteRef.current : null,
       settled: entrySettledRef.current,
+      day: dayPillLive && floatingDay !== null && !showJumpUnread,
     };
   }
 
@@ -2191,23 +2253,23 @@ function TimelineInner({
     // is the likeliest prelude to them scrolling UP into history, which is the
     // one thing that must never move under them.
     setChasingTail(false);
-    // 떠 있는 날짜 알약은 손가락이 목록을 잡는 순간 선다(DS2-4 B-1).
-    holdDayPill();
+    // 떠 있는 날짜 알약은 손가락이 목록을 잡는 순간 선다(DS2-4 B-1). 관성이 이어져도 그 손가락의 것이다(#4331).
+    grabDayPill();
   }, [
     cancelConvergence,
     cancelFocus,
     cancelJumpTravel,
     settleEntry,
     onReaderTookList,
-    holdDayPill,
+    grabDayPill,
   ]);
 
   /** 손가락이 떨어졌다 — 그 뒤의 따라가기 활강은 다시 제 핀을 건다 (#2686). */
   const onScrollEndDrag = useCallback(() => {
     fingerOnListRef.current = false;
-    // 관성이 이어지면 `onMomentumScrollBegin` 이 다시 붙잡는다.
-    releaseDayPill();
-  }, [releaseDayPill]);
+    // 관성이 이어지면 `onMomentumScrollBegin` 이 다시 붙잡는다(곧바로 오지 않으면 관성 없이 멈춘 것이다).
+    letGoDayPill();
+  }, [letGoDayPill]);
 
   // ===========================================================================
   // ## 따라가기 활강도 이 목록이 낸 이동이다 (#2686, 실측)
@@ -2975,8 +3037,8 @@ function TimelineInner({
       onScrollBeginDrag={onScrollBeginDrag}
       onScrollEndDrag={onScrollEndDrag}
       // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
-      onMomentumScrollBegin={jumpPills ? holdDayPill : undefined}
-      onMomentumScrollEnd={jumpPills ? releaseDayPill : undefined}
+      onMomentumScrollBegin={jumpPills ? onMomentumScrollBegin : undefined}
+      onMomentumScrollEnd={jumpPills ? onMomentumScrollEnd : undefined}
       scrollEventThrottle={16}
       onContentSizeChange={onContentSizeChange}
       onLayout={onLayout}
@@ -3042,22 +3104,26 @@ function TimelineInner({
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
       {motionScope}
-      {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
-          서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
-      {dayPillLive && floatingDay !== null && !showJumpUnread ? (
-        <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
-      ) : null}
-      {showJumpUnread ? (
-        <JumpPillDock side="top">
-          <JumpPill
-            direction="up"
-            testID="jump-unread"
-            segments={jumpUnreadSegments(unreadJumpCount)}
-            accessibilityLabel={jumpUnreadAccessibilityLabel(unreadJumpCount)}
-            onPress={jumpToUnread}
-          />
-        </JumpPillDock>
-      ) : null}
+      {/* 위쪽 필 둘의 자리. 연결 띠가 목록 위에 뜨면 `topPillInset` 만큼 내려 띠 밑에 쌓인다(#4292). 필 둘은 이
+          틀의 위 가장자리에서 각자 `top` 을 지므로, 틀을 내리면 둘이 함께 내려간다. 틀은 손을 받지 않는다. */}
+      <View pointerEvents="box-none" style={[styles.topPills, {top: topPillInset}]} testID="timeline-top-pills">
+        {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
+            서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
+        {dayPillLive && floatingDay !== null && !showJumpUnread ? (
+          <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
+        ) : null}
+        {showJumpUnread ? (
+          <JumpPillDock side="top">
+            <JumpPill
+              direction="up"
+              testID="jump-unread"
+              segments={jumpUnreadSegments(unreadJumpCount)}
+              accessibilityLabel={jumpUnreadAccessibilityLabel(unreadJumpCount)}
+              onPress={jumpToUnread}
+            />
+          </JumpPillDock>
+        ) : null}
+      </View>
       {showJumpLatest ? (
         <JumpPillDock side="bottom">
           <JumpPill
@@ -3099,4 +3165,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   footer: {height: space.sm},
   /** 필이 떠 있을 틀. 목록과 같은 자리·같은 크기다. */
   pillFrame: {flex: 1},
+  /** 위쪽 필 둘의 틀. 틀의 `top` 이 연결 띠 밑으로 내려가는 양이고(#4292), 필은 이 틀 안에서 자기 `top` 을 진다. */
+  topPills: {position: 'absolute', left: 0, right: 0, bottom: 0},
 });

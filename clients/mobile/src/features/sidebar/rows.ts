@@ -1,10 +1,8 @@
 import {uuidEq, type Channel, type ReadState, type RosterMember} from '@momo/core/lib/api';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
-  dmHiddenAsGone,
   goneUnreadProbeAfterSeq,
   rosterIsComplete,
-  type GoneUnreadVerdict,
   type ReadProjectionPhase,
 } from '@momo/core/features/sidebar/goneDm';
 import {
@@ -17,6 +15,7 @@ import {
   type Directory,
 } from '@momo/core/features/workspace/directory';
 import type {ChannelGroups} from '../workspace/queries';
+import type {DmVerdict} from './dmVerdicts';
 
 /**
  * 대화 목록을 못 불러왔을 때 목록 자리의 `ErrorState` 가 드는 머리줄.
@@ -59,12 +58,11 @@ export const CHANNEL_LIST_FAILED = '채널을 불러오지 못했습니다.';
 //      for one row.
 //   3. **the search filter.** Substring, case-folded, over the text that is
 //      actually on the row. See the note on `matches` for why it is not fuzzier.
-//   4. **「나간 멤버와의 대화」는 기본으로 접는다** (#4252). 상대가 명부에 없고 안 읽은
-//      것이 없는 DM 은 DM 섹션의 `data` 가 아니라 `tucked` 로 간다. 판정은 코어
-//      `dmHiddenAsGone` 한 함수이고 웹 사이드바와 같다(이 파일은 그 입력을 모아 줄 뿐
-//      이다). **검색 중에는 접지 않는다**: 이름으로 찾는 것은 접힌 대화를 찾겠다는
-//      뜻이고, 웹도 ⌘K 와 검색으로는 접힌 대화를 연다. 열려 있는 DM 은 접지 않는다. 안 읽음이 있는 DM 은
-//      그 안 읽음이 기계 메시지뿐이면(훅이 안 읽은 쪽을 읽어 가른다, `goneUnreadVerdicts`) 접힌다.
+//   4. **닫은 대화와 나간 멤버와의 대화는 목록에 서지 않는다** (#4367, ADR-0177 증보 D8). 한 DM 이
+//      서는가는 코어 `dmVisibility` 한 함수가 정하고 웹 사이드바와 같다. 이 파일은 그 판정을
+//      (`dmVerdicts.ts` 가 입력을 모아 만든) `dmVerdicts` 로 받아 행을 거를 뿐이다. 숨은 DM 은
+//      「⋯ › 닫은 대화」 시트가 연다. **검색 중에는 거르지 않는다**: 이름으로 찾는 것은 숨은 대화를
+//      찾겠다는 뜻이고, 닫기는 지우기가 아니다. 열려 있는 DM 은 언제나 선다.
 //
 // ## The count is the COMPOSED one (ADR-0178 D3, #1964)
 //
@@ -143,25 +141,7 @@ export interface SidebarSection {
   key: 'channels' | 'dms';
   label: string;
   data: SidebarRow[];
-  /**
-   * DM 섹션만: 「나간 멤버와의 대화」로 접힌 줄들(#4252). 화면이 섹션 끝의 한 줄로 수를 세고,
-   * 펼치면 그 줄 아래에 그린다. 검색 중에는 비어 있다(일치하는 줄은 `data` 로 온다).
-   */
-  tucked?: SidebarRow[];
 }
-
-/**
- * 목록 안에서 접힌 대화를 펼치는 줄. `SectionList` 가 한 항목으로 그리므로 행과 같은 목록에 선다
- * (펼치면 접힌 행이 이 줄 **아래**에 오고, 줄은 손가락 밑에 그대로 있다).
- */
-export interface GoneToggleItem {
-  key: 'gone-toggle';
-  kind: 'goneToggle';
-  count: number;
-  expanded: boolean;
-}
-
-export type HomeListItem = SidebarRow | GoneToggleItem;
 
 export interface SidebarInput {
   groups: ChannelGroups;
@@ -184,11 +164,9 @@ export interface SidebarInput {
    */
   rosterReady?: boolean;
   /**
-   * 안 읽음이 있는 나간 멤버 DM 의 안 읽음이 사람이 읽을 것인지의 판정(소문자 id -> 판정, `useGoneUnreadVerdicts`). 기계
-   * 메시지(작업 상태·영수증)뿐이면 사람이 읽을 것이 없다(이슈 AC 「안 읽은 사람 메시지」). 생략하거나 없는 id 는 모른다:
-   * 안 읽음이 있으면 보인다.
+   * DM 마다의 보임 판정(소문자 id -> 판정, `dmVerdicts`). 생략하거나 없는 id 는 보인다: 모를 때 숨기는 쪽이 최악이다.
    */
-  goneUnreadVerdicts?: ReadonlyMap<string, GoneUnreadVerdict>;
+  dmVerdicts?: ReadonlyMap<string, DmVerdict>;
 }
 
 /**
@@ -366,28 +344,13 @@ export function buildSidebarSections(input: SidebarInput): SidebarSection[] {
     .map(channel => channelRow(channel, input, 'channel'))
     .filter(row => matches(row, needle));
   const dmRows = input.groups.dms.map(channel => channelRow(channel, input, 'dm'));
-  // 나간 멤버와의 대화(#4252): 검색 중에는 접지 않는다.
-  const phase = input.readPhase ?? 'ready';
-  const rosterComplete = rosterIsComplete(input.directory.members.length);
-  const tucked =
-    needle !== ''
-      ? []
-      : dmRows.filter(row =>
-          dmHiddenAsGone({
-            labelKind: row.labelKind,
-            rosterComplete,
-            unreadCount: row.unreadCount,
-            mentionCount: row.mentionCount,
-            isOpen:
-              input.openChannelId !== null &&
-              uuidEq(row.targetId, input.openChannelId),
-            phase,
-            unreadVerdict: input.goneUnreadVerdicts?.get(idKey(row.targetId)),
-          }),
-        );
-  const tuckedSet = new Set(tucked);
+  // 닫은 대화·나간 멤버와의 대화(#4367): 검색 중에는 거르지 않는다.
   const dms = dmRows
-    .filter(row => !tuckedSet.has(row))
+    .filter(
+      row =>
+        needle !== '' ||
+        (input.dmVerdicts?.get(idKey(row.targetId))?.shown ?? true),
+    )
     .filter(row => matches(row, needle));
   const agents = agentsWithoutDm(
     input.agents,
@@ -409,17 +372,23 @@ export function buildSidebarSections(input: SidebarInput): SidebarSection[] {
   // An empty section is dropped rather than rendered with a header and nothing
   // under it. A heading over a void reads as "something failed to load here",
   // which is a different and untrue statement from "you have no DMs".
-  // 접힌 줄만 남은 DM 섹션도 선다: 섹션 끝의 한 줄이 그 줄들의 문이다.
+  // 숨은 DM 만 남은 DM 섹션도 선다: 「⋯ › 닫은 대화」가 그 대화들의 문이고, 문은 섹션 머리에 있다(웹의 DM 구역 머리도 그대로 선다).
+  // 닫은 대화만 있는 사람에게 「참여한 채널이 없다」고 말하면 거짓이고 돌아올 길도 없다.
+  const hasHiddenDm =
+    needle === '' &&
+    dmRows.some(row => !(input.dmVerdicts?.get(idKey(row.targetId))?.shown ?? true));
   return [
-    {key: 'channels' as const, label: '채널', data: channels, tucked: []},
-    {key: 'dms' as const, label: 'DM', data: dmSection, tucked},
-  ].filter(section => section.data.length > 0 || section.tucked.length > 0);
+    {key: 'channels' as const, label: '채널', data: channels},
+    {key: 'dms' as const, label: 'DM', data: dmSection},
+  ].filter(
+    section => section.data.length > 0 || (section.key === 'dms' && hasHiddenDm),
+  );
 }
 
 /** Total rows across sections. Drives "search found nothing" vs "no channels". */
 export function rowCount(sections: SidebarSection[]): number {
   return sections.reduce(
-    (total, section) => total + section.data.length + (section.tucked?.length ?? 0),
+    (total, section) => total + section.data.length,
     0,
   );
 }

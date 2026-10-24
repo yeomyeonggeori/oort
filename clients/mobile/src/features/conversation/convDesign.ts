@@ -51,6 +51,16 @@ export const CONV = {
   /** `.a-m p{margin-top:2px}`. */
   bodyGapAbove: 2,
 
+  // ---- 말풍선 (#4300, owner 2026-10-24 — Buzz 식) ---------------------------------
+  // 색·글자색은 코어 외양 토큰(`bubble.ts` `bubbleFor`)이 정하고, 여기는 **모양** 기본값이다.
+  // 한 줄 높이 = 23 + 2 × 8 = 39 → 반경 18 은 한 줄에서 거의 알약, 여러 줄에서는 둥근 상자다.
+  /** 말풍선 좌우 안쪽 여백. */
+  bubblePadX: 12,
+  /** 말풍선 위아래 안쪽 여백. */
+  bubblePadY: 8,
+  /** 말풍선 기본 반경 — 행 강조 면(`ROW_FACE.radius`)과 **따로** 읽는다(#4307). */
+  bubbleRadius: 18,
+
   // ---- 멘션 (`.a-mention`) --------------------------------------------------
   /** `.a-mention{border-radius:6px;padding:0 4px}`. */
   mentionRadius: 6,

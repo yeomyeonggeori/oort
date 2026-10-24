@@ -126,6 +126,27 @@ describe("저장: v2 하나만 쓰고 v1·옛 키는 그대로 둔다 (롤백 �
   });
 });
 
+describe("말풍선 덮어쓰기(#4383): 웹이 쓸 때 폰이 쓴 bubble을 지우지 않는다", () => {
+  const bubble = { mine: { bg: hex("112233") }, radius: 12, layout: "row" };
+
+  it("bubble이 든 저장 레코드에 웹이 다른 필드를 써도 bubble이 그대로 남는다", () => {
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, record({ bubble }));
+    reloadAppearanceForTest();
+    expect(getAppearance().bubble).toEqual(bubble);
+
+    setTheme("dark");
+    updateAppearance({ density: "compact", fontSize: "larger" });
+    const stored = JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}");
+    expect(stored).toMatchObject({ scheme: "dark", density: "compact", fontSize: "larger" });
+    expect(stored.bubble).toEqual(bubble);
+  });
+
+  it("bubble이 없던 레코드에는 키를 만들지 않는다", () => {
+    setTheme("dark");
+    expect(JSON.parse(localStorage.getItem(APPEARANCE_STORAGE_KEY) ?? "{}")).not.toHaveProperty("bubble");
+  });
+});
+
 describe("루트 스탬프: 표 한 곳에서 나온 것만 찍힌다", () => {
   it("initTheme는 저장된 레코드의 표를 그대로 찍는다", () => {
     localStorage.setItem(

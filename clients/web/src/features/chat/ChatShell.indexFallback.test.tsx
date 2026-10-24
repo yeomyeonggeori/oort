@@ -365,3 +365,32 @@ describe("ChatShell · 인덱스 라우트가 여는 대화 (design-review R1 H1
   });
 });
 
+
+describe("ChatShell · 인덱스 라우트와 서버가 기억하는 닫기 (ADR-0177 D8, #4228)", () => {
+  /** 새 서버의 행: 읽을 seq 와 내가 닫은 seq 를 싣는다. */
+  const serverState = (channelId: string, latestSeq: number, closedAt: number | null): ReadState => ({
+    ...readState(channelId, latestSeq),
+    latestReadableSeq: latestSeq,
+    closedAtSeq: closedAt,
+  });
+
+  it("서버가 닫았다고 말한 첫 DM 을 `/` 가 도로 열지 않는다 - 사이드바와 같은 훅이 같은 판정을 낸다", async () => {
+    setReadStates([serverState(DM_ONE, 7, 7), serverState(DM_TWO, 3, null)]);
+    const host = await mountAt("/");
+    expect(header(host)).toContain("박서연");
+    expect(header(host)).not.toContain("이도현");
+  });
+
+  it("닫은 뒤 읽을 메시지가 온 DM 은 다시 후보다(8번)", async () => {
+    setReadStates([serverState(DM_ONE, 8, 7), serverState(DM_TWO, 3, null)]);
+    const host = await mountAt("/");
+    expect(header(host)).toContain("이도현");
+  });
+
+  it("옛 서버의 원장은 서버 갈래에서 읽지 않는다: 서버가 안 닫았다고 말하면 원장 항목이 남아 있어도 후보다", async () => {
+    closeDmOnDevice(WS, DM_ONE, 7);
+    setReadStates([serverState(DM_ONE, 7, null), serverState(DM_TWO, 3, null)]);
+    const host = await mountAt("/");
+    expect(header(host)).toContain("이도현");
+  });
+});

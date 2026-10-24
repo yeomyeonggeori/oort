@@ -14,6 +14,8 @@ import {
   __resetMemberAvatarCache,
   clearMemberAvatarCache,
   loadMemberAvatar,
+  memberAvatarGeneration,
+  seedMemberAvatar,
 } from '../src/features/conversation/memberAvatarImage';
 import {__resetSessionStore} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
@@ -191,6 +193,51 @@ describe('멤버 아바타 받기 — 디스크 파일 캐시', () => {
     expect(fsMock.__files.has(uri as string)).toBe(false);
     await loadMemberAvatar(PATH_A);
     expect(downloads()).toHaveLength(2);
+  });
+});
+
+describe('업로드 직후 시드 (#4384)', () => {
+  // 모의 디스크가 주소를 정규화하므로 같은 File 로 만든 주소를 쓴다.
+  const {File: MockFile} = jest.requireMock('expo-file-system') as {
+    File: new (...parts: string[]) => {uri: string};
+  };
+  const LOCAL = new MockFile('file:///cache', 'shrunk.jpg').uri;
+
+  it('시드한 주소는 내려받지 않고 첫 프레임부터 이미지이며, 시드 파일은 원본과 별개다', async () => {
+    fsMock.__files.add(LOCAL);
+    expect(seedMemberAvatar(PATH_A, LOCAL)).toBe(true);
+    const view = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    // 이니셜 프레임 없이 곧바로 이미지(깜빡임 없음).
+    expect(view.queryByTestId('avatar-initial', {includeHiddenElements: true})).toBeNull();
+    const uri = view.getByTestId('avatar-image', {includeHiddenElements: true}).props.source.uri;
+    expect(isFile(uri)).toBe(true);
+    expect(uri).not.toBe(LOCAL);
+    expect(downloads()).toHaveLength(0);
+    // 임시 파일을 지워도 캐시 파일은 남는다.
+    fsMock.__files.delete(LOCAL);
+    expect(fsMock.__files.has(uri)).toBe(true);
+  });
+
+  it('올리는 사이 캐시가 비워졌으면(로그아웃·계정 교체) 시드하지 않고 디스크에 남기지 않는다', () => {
+    fsMock.__files.add(LOCAL);
+    const started = memberAvatarGeneration();
+    clearMemberAvatarCache();
+    const before = [...fsMock.__files].length;
+    expect(seedMemberAvatar(PATH_A, LOCAL, started)).toBe(false);
+    expect([...fsMock.__files].length).toBe(before);
+  });
+
+  it('?v= 가 다른 주소는 시드를 쓰지 않고 새로 받는다', async () => {
+    fsMock.__files.add(LOCAL);
+    seedMemberAvatar(PATH_A, LOCAL);
+    await loadMemberAvatar(PATH_B);
+    expect(downloads()).toHaveLength(1);
+  });
+
+  it('원본이 없거나 아바타 경로가 아니면 시드하지 않는다', () => {
+    expect(seedMemberAvatar(PATH_A, new MockFile('file:///cache', 'none.jpg').uri)).toBe(false);
+    fsMock.__files.add(LOCAL);
+    expect(seedMemberAvatar('https://evil.example/x.jpg', LOCAL)).toBe(false);
   });
 });
 

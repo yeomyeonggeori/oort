@@ -2412,6 +2412,30 @@ export async function fetchReadStates(
 }
 
 /**
+ * 이 DM 을 닫는다 (ADR-0177 증보 D7, #4227). `seenSeq` 는 **화면이 본** 마지막 seq(읽음 투영의 `latestSeq`)다.
+ * 서버는 `GREATEST(기존 값, LEAST(seenSeq, 채널의 마지막 seq))` 로 저장해서, 투영과 이 호출 사이에 온 메시지는 묻히지
+ * 않고 같은 호출의 재전송은 결과가 같다. 204 - 본문이 없다. 참여자가 아니거나 보관된 DM 이면 404.
+ */
+export async function closeDm(
+  workspaceId: string,
+  channelId: string,
+  seenSeq: number
+): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "PUT", body: JSON.stringify({ seenSeq }) }
+  );
+}
+
+/** 닫은 DM 을 다시 연다 (D7·D8). 행이 없어도 204, 참여자가 아니거나 보관된 DM 이면 404. */
+export async function reopenDm(workspaceId: string, channelId: string): Promise<void> {
+  await authedRequest(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels/${encodeURIComponent(channelId)}/closure`,
+    { method: "DELETE" }
+  );
+}
+
+/**
  * Advance the caller's read cursor. The server clamps to
  * `max(current, min(requested, latestSeq))`, so it can never regress.
  *

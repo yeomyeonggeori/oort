@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
+import { GITHUB_IDENTITY_CHECK_SENTENCE } from "@momo/core/features/github/model";
 import { expressionForState, type GuideState } from "@momo/core/features/onboarding/guide";
 import { Button } from "@/design/ui/button";
 import { KeyValueRows } from "@/features/settings/SettingsFields";
@@ -159,6 +160,9 @@ function HandoffForm({
       />
       <p className="break-keep text-meta text-ink-muted">
         {minutes}분 안에 <NoBreak>마쳐야 해요.</NoBreak> 화면이 넘어가지 않으면 아래 버튼을 눌러 주세요.
+      </p>
+      <p className="break-keep text-meta text-ink-muted" data-testid="github-handoff-identity">
+        {GITHUB_IDENTITY_CHECK_SENTENCE}
       </p>
       {/* 온보딩 틀의 버튼 예외(`.onboarding-action`)는 온보딩 안에서만 유효하다(design-system §2.4). 이 페이지는
           온보딩 단계가 아니라서 제품의 채움 알약 그대로다. */}

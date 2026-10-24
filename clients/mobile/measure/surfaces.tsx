@@ -130,9 +130,12 @@ import {
 import {AiSheet} from '../src/shell/AiSheet';
 import {AskMacSheet, type AskMacPreview} from '../src/shell/AskMacSheet';
 import NetInfo from '@react-native-community/netinfo';
+import {File as FsFile, Paths} from 'expo-file-system';
+import * as ImagePicker from 'expo-image-picker';
 import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
+import {seedMemberAvatar} from '../src/features/conversation/memberAvatarImage';
 import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
@@ -181,12 +184,16 @@ import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
+import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
+import {ComposerNewlineSurface} from './composerNewline';
+import {SteadySurface, seedSteady} from './steady';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
+import {PhotoViewerSurface} from './photoViewer';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -2189,13 +2196,23 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('apps-tail')) {
     return <AppsTailSurface which={name.slice('apps-tail'.length).replace(/^-/, '')} />;
   }
+  // #4300: 말풍선 대화 + 눌림·착지 강조 면(실제 MessageRow).
+  if (name.startsWith('bubble-')) return <BubbleSurface which={name.slice('bubble-'.length)} />;
   // #4016: DM 대화 화면(실제 머리·레이아웃·타임라인·컴포저).
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
+  if (name.startsWith('dm-steady')) {
+    return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
+  }
   // #4264: 마지막 행 아래 → 알약 위 간격. 대화 화면의 도크 스택 그대로 + 레이아웃 값 계측.
   if (name === 'gap' || name.startsWith('gap-')) {
     return <DockGapSurface which={name.slice('gap'.length).replace(/^-/, '')} />;
+  }
+  // #4321: 「가 ⏎ 나」를 보내면 줄바꿈이 어느 단계에서 사라지는가. 배송되는 컴포저 + 맨 입력창 + 모의 API.
+  if (name === 'composer-newline' || name.startsWith('composer-newline-')) {
+    return <ComposerNewlineSurface which={name.slice('composer-newline'.length).replace(/^-/, '')} />;
   }
   // #4181: 사진 카드(첨부 메뉴가 변신해 도착하는 최근 사진 그리드). 실제 카드·진짜 PhotoKit 포트.
   if (name.startsWith('photo-card')) {
@@ -2222,6 +2239,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
   if (name.startsWith('attach-menu')) {
     return <AttachMenuSurface which={name.slice('attach-menu'.length).replace(/^-/, '')} />;
+  }
+
+  // #4293: 사진 뷰어(안전 영역·아래로 쓸어 닫기). 실제 대화에 사진 메시지, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('photo-viewer')) {
+    return <PhotoViewerSurface which={name.slice('photo-viewer'.length).replace(/^-/, '')} />;
   }
 
   switch (name) {
@@ -4709,6 +4731,39 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4384: 프로필 사진 장. 진짜 셸 위의 진짜 프로필 시트가 사진 장으로 열린다(`initialPage="avatar"`).
+    // `-photo` 는 내 사진이 있는 사람(지우기 줄이 선다), `-offline` 은 연결이 끊긴 때(세 줄 잠김),
+    // `-denied` 는 사진 접근이 꺼진 때(고르기를 누르면 문장 + 「설정 열기」 — Maestro 가 누른다).
+    // 시뮬레이터에는 카메라가 없어 「사진 찍기」 줄은 서지 않는다(의도).
+    case 'shell-avatar-sheet':
+    case 'shell-avatar-sheet-photo':
+    case 'shell-avatar-sheet-offline':
+    case 'shell-avatar-sheet-denied':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <ProfileSheet
+            initialPage="avatar"
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={HARNESS_MEMBER}
+            directory={makeDirectory(
+              name === 'shell-avatar-sheet-photo'
+                ? SHELL_ROSTER.map(member =>
+                    member.id === SELF
+                      ? {
+                          ...member,
+                          avatarUrl: `/v1/workspaces/${ADE_WS}/members/${SELF}/avatar/content?v=media-1`,
+                        }
+                      : member,
+                  )
+                : SHELL_ROSTER,
+            )}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
@@ -4846,9 +4901,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'dm-status-dots-member':
     case 'dm-status-dots-states':
     case 'dm-status-dots-states-member':
-    // #4252: 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 ·
-    // 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트 「kwak의 Claude」 포함)이 한 목록에 선다. 접힌 줄은
-    // `maestro/102-gone-dm-capture.yaml` 이 눌러 펼친다. 수리 전 코드로 띄우면 나간 멤버 넷이 모두 목록에 선다.
+    // #4252·#4367: 「닫은 대화」와 「나간 멤버와의 대화」. 사이드바를 **그대로** 세운다. 서버가 닫기를 싣는 투영 위에서, 내가 닫은 DM
+    // 하나·나간 멤버 DM 넷(안 읽음 없음 둘 · 안 읽은 사람 메시지 하나 · 기계 메시지뿐인 안 읽음 하나)과 명부에 있는 DM(꺼진 에이전트
+    // 꺼진 개인 에이전트 포함)이 한 목록에 선다. 숨은 DM 은 `maestro/102-gone-dm-capture.yaml` 이 DM 섹션 ⋯ 의 「닫은 대화」로 열고,
+    // `maestro/104-dm-close-capture.yaml` 이 행을 길게 눌러 「대화 닫기」를 찍는다. 수리 전 코드로 띄우면 닫은 DM 이 목록에 그대로 선다.
     case 'gone-dm-home':
       return (
         <View style={styles.fill}>
@@ -5402,7 +5458,9 @@ export default function SurfacesHarness({
   // 사람의 선택이 사진에 새어 들어오고, 시스템 추종에 맡기면 시뮬레이터 설정이
   // 새어 들어온다. 사진은 인자가 말한 것만 찍는다.
   return (
-    <FixedScheme scheme={scheme}>
+    <FixedScheme
+      scheme={scheme}
+      bubble={name.startsWith('bubble-row') || name.startsWith('bubble-arrive-row') ? {layout: 'row'} : undefined}>
       <SafeAreaProvider>
         <QueryClientProvider client={harnessClient}>
           <SessionProvider member={HARNESS_MEMBER}>
@@ -6013,23 +6071,27 @@ function seedDmStatusDots(surface: string): void {
 }
 
 /**
- * #4252 사이드바 「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
- * `read-state`·`agent-liveness`)에 답을 **미리 꽂는다** - 화면은 배송되는 `SidebarScreen` 그대로다.
+ * #4252·#4367 사이드바 「닫은 대화」·「나간 멤버와의 대화」 장의 씨앗. 서버가 없는 하네스라 화면이 읽는 질의 키(`roster`·`channels`·
+ * `read-state`·`agent-liveness`)에 답을 **미리 꽂는다** - 화면은 배송되는 `SidebarScreen` 그대로다. 읽음 투영은 서버가 닫기를 싣는
+ * 형상(`latestReadableSeq`·`closedAtSeq` 가 모든 행에 있다)이라 보임 판정이 코어 `dmVisibility` 한 함수로 돈다.
  *
- *   이도현   안 읽음 2                    박서연   다 읽음
- *   kwak의 Claude  꺼진 에이전트(명부에 **있다** - 접지 않는 쪽)       grok   응답함
- *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(접힌다), 하나는 안 읽은 사람 메시지 1(접히지 않는다), 하나는 안 읽음 4 가
- *                 전부 기계 메시지(작업 상태·시스템 줄)라 사람이 읽을 것이 없다(접힌다, 이슈 AC 「안 읽은 사람 메시지」)
+ *   이도현   안 읽음 2                    박서연   다 읽음(닫기를 내민다)
+ *   꺼진 개인 에이전트(명부에 **있다** - 숨지 않는 쪽)       grok   응답함
+ *   최민수   내가 닫은 DM(closedAtSeq = 읽을 seq) - 목록에 없고 「닫은 대화」 시트에 「내가 닫았어요」로 선다
+ *   나간 멤버 ×4  명부에 없는 상대. 둘은 다 읽음(숨는다), 하나는 안 읽은 사람 메시지 1(보인다), 하나는 안 읽음 4 가 전부 기계
+ *                 메시지(작업 상태·시스템 줄)라 서버가 읽을 seq 를 읽은 자리에 둔다(숨는다, 이슈 AC 「안 읽은 사람 메시지」)
  *
- * 안 읽은 쪽을 읽어 가르는 질의(`['gone-unread', ws, id, after, latest]`, `useGoneUnreadVerdicts`)도 **미리 꽂는다**: 이 하네스의
- * `fetch` 는 끝나지 않는 약속이라 판정이 영영 오는 중이고, 그러면 안 읽은 사람 메시지가 있는 DM 도 접힌 채 남는다. 값은 「사람이
- * 읽을 메시지가 있는가」(`pageHasHumanMessage`)다.
+ * 닫기·다시 열기(`PUT`·`DELETE …/closure`)는 204 로 답한다: 나머지 요청은 끝나지 않는 약속이라 투영은 씨앗 그대로 남고, 닫은 기기가
+ * 쓰는 캐시 반영(`applyClosureToReadStates`)만 화면을 바꾼다.
  */
 function seedGoneDmHome(): void {
   // 서버가 없는 하네스: 질의가 다시 나가도 끝나지 않는 약속으로 둔다(실패하면 세션 만료로 읽혀 캐시가 지워진다).
   void globalThis.fetch;
   void globalThis.Headers;
-  globalThis.fetch = (() => new Promise<Response>(() => {})) as typeof fetch;
+  globalThis.fetch = ((url: string) =>
+    /\/channels\/[^/]+\/closure$/.test(String(url))
+      ? Promise.resolve(new Response(null, {status: 204}))
+      : new Promise<Response>(() => {})) as typeof fetch;
   resetAgentWorking();
   harnessClient.setQueryDefaults(['agent-liveness', ADE_WS], {gcTime: Infinity});
   harnessClient.setQueryData(['settings', 'workspace', ADE_WS], {
@@ -6059,9 +6121,10 @@ function seedGoneDmHome(): void {
   const viewer = {...humanTemplate, workspaceId: ADE_WS, role: 'owner'};
   const dohyun = person('11', '이도현', 'dohyun');
   const seoyeon = person('12', '박서연', 'seoyeon');
+  const minsu = person('13', '최민수', 'minsu');
   const claude = agent('14', 'kwak의 Claude', 'kwak-claude', {hostOnline: false});
   const grok = agent('15', 'grok', 'grok', {hostOnline: true});
-  harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, claude, grok]);
+  harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, minsu, claude, grok]);
   harnessClient.setQueryData(['agent-liveness', ADE_WS, claude.id.toLowerCase()], {
     agentMemberId: claude.id,
     state: 'inactive',
@@ -6081,6 +6144,7 @@ function seedGoneDmHome(): void {
     {id: 'ch-general', workspaceId: ADE_WS, kind: 'public' as const, name: '일반', muted: false},
     dm('dohyun', dohyun.id),
     dm('seoyeon', seoyeon.id),
+    dm('minsu', minsu.id),
     dm('claude', claude.id),
     dm('grok', grok.id),
     // 명부에 없는 상대(나감·정지·꺼 둔 개인 에이전트).
@@ -6089,28 +6153,36 @@ function seedGoneDmHome(): void {
     dm('gone-b', id('99')),
     dm('gone-machine', id('96')),
   ]);
-  const read = (channelId: string, lastReadSeq: number, latestSeq: number) => ({
+  const read = (
+    channelId: string,
+    lastReadSeq: number,
+    latestSeq: number,
+    closedAtSeq: number | null = null,
+    latestReadableSeq: number = latestSeq,
+  ) => ({
     channelId,
     lastReadSeq,
     latestSeq,
     unreadCount: latestSeq - lastReadSeq,
     mentionCount: 0,
     markedUnreadBeforeSeq: null,
+    latestReadableSeq,
+    closedAtSeq,
   });
   harnessClient.setQueryData(['read-state', ADE_WS], [
     read('ch-general', 20, 20),
     read('dm-dohyun', 10, 12),
     read('dm-seoyeon', 5, 5),
+    // 내가 닫았다: 닫을 때 seq 가 읽을 seq 와 같다(7번).
+    read('dm-minsu', 8, 8, 8),
     read('dm-claude', 9, 9),
     read('dm-grok', 4, 4),
     read('dm-gone-a', 6, 6),
     read('dm-gone-unread', 3, 4),
     read('dm-gone-b', 3, 3),
-    read('dm-gone-machine', 2, 6),
+    // 안 읽음 4 는 전부 기계 메시지: 서버가 읽을 seq 를 읽은 자리(2)에 둔다.
+    read('dm-gone-machine', 2, 6, null, 2),
   ]);
-  // 안 읽은 쪽의 판정: 사람 메시지가 있는 쪽은 true(보인다), 기계 메시지뿐인 쪽은 false(접힌다).
-  harnessClient.setQueryData(['gone-unread', ADE_WS, 'dm-gone-unread', 3, 4], true);
-  harnessClient.setQueryData(['gone-unread', ADE_WS, 'dm-gone-machine', 2, 6], false);
 }
 
 /**
@@ -6610,6 +6682,43 @@ function seedPause(surface: string): void {
       );
     }) as typeof fetch;
   }
+}
+
+/**
+ * #4384: 프로필 사진 장의 씨앗. 연결 신호를 못 박고(`-offline` 만 끊김), `-denied` 는 사진 접근이 꺼진
+ * 기기를 만든다 — 고르기가 실패하고 권한 상태가 「거부」로 읽힌다. 시스템 편집기는 시뮬레이터에서
+ * 사람이 닫아야 하므로 이 표면은 그것을 띄우지 않는다.
+ */
+const SEED_PNG_B64 =
+  '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';
+
+function seedAvatarSheet(surface: string): void {
+  forceNetwork(surface !== 'shell-avatar-sheet-offline');
+  if (surface === 'shell-avatar-sheet-photo') {
+    // 내려받을 서버가 없다 — 올린 직후와 같은 길(`seedMemberAvatar`)로 캐시를 채워 사진이 서 있게 한다.
+    try {
+      const file = new FsFile(Paths.cache, 'measure-avatar-seed.png');
+      if (file.exists) file.delete();
+      file.create();
+      file.write(Uint8Array.from(atob(SEED_PNG_B64), c => c.charCodeAt(0)));
+      seedMemberAvatar(`/v1/workspaces/${ADE_WS}/members/${SELF}/avatar/content?v=media-1`, file.uri);
+    } catch {
+      // 시드가 실패하면 이니셜이 찍힌다 — 캡처를 읽을 때 드러난다.
+    }
+  }
+  if (surface !== 'shell-avatar-sheet-denied') return;
+  const picker = ImagePicker as unknown as Record<string, unknown>;
+  const override = (key: string, value: unknown) =>
+    Object.defineProperty(picker, key, {value, configurable: true, writable: true});
+  override('launchImageLibraryAsync', async () => {
+    throw new Error('denied');
+  });
+  override('getMediaLibraryPermissionsAsync', async () => ({
+    status: 'denied',
+    granted: false,
+    canAskAgain: false,
+    expires: 'never',
+  }));
 }
 
 function seedShell(surface: string): void {
@@ -7359,10 +7468,18 @@ if (
 if (
   LAUNCHED !== null &&
   LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('dm-steady')
+) {
+  seedSteady();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
   if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
   seedShell(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-avatar-')) seedAvatarSheet(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);

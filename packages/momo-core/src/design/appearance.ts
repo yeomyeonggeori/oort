@@ -30,6 +30,7 @@
 //   glass         AP-3(#4190)    `{on, opacity?}` (속성 `data-glass`는 AP-3가 찍는다)
 //   wallpaper     AP-4(#4191)    참조만(`kind`가 `data-wallpaper`). 사진 바이트는 IndexedDB
 //   fontSans·fontMono            글꼴 이름(#3774). v1에서 그대로 이어받는다
+//   bubble        #4383(#4307)   말풍선 개인 덮어쓰기: 색·모서리·`layout: 'row'`(줄 보기)
 // `overrides`(AP-5)는 그 이슈가 더한다.
 // =============================================================================
 
@@ -80,6 +81,28 @@ export const THREAD_LAYOUT_IDS = ["split", "focus"] as const;
 export type ThreadLayoutId = (typeof THREAD_LAYOUT_IDS)[number];
 export const DEFAULT_THREAD_LAYOUT_ID: ThreadLayoutId = "split";
 
+/**
+ * 말풍선 개인 덮어쓰기(#4383, 설정 화면·에이전트 명령 `appearance.bubble`은 #4307이 이 모양을 쓴다).
+ * 폰 `bubble.ts` 의 `BubbleOverrides` 와 같은 모양이다 — 저장은 **값**(hex·숫자)이고, 「팔레트
+ * 이름 → hex」 같은 설정층의 매핑은 #4307 몫이다. 빈 값은 「기본」이라 레코드에 두지 않는다.
+ * 대비 판정(4.5:1)은 여기서 하지 않는다: 대비는 테마(바닥색)에 달려 있어 그리는 쪽
+ * (`bubbleFor`)이 팔레트를 알 때만 판정할 수 있다. 여기는 **모양**만 지킨다.
+ */
+export interface BubbleSide {
+  bg?: string;
+  fg?: string;
+}
+export interface BubbleChoice {
+  mine?: BubbleSide;
+  other?: BubbleSide;
+  /** 모서리 반경(0~28 정수). 기본값은 그리는 쪽이 안다. */
+  radius?: number;
+  /** `'row'`(줄 보기, 예전 평면 행)만 저장한다. 말풍선이 기본이라 `'bubble'` 은 키를 두지 않는다. */
+  layout?: "row";
+}
+
+export const BUBBLE_RADIUS_MAX = 28;
+
 /** 유리 배경(증보 1 D4). `opacity`는 0~100의 정수 퍼센트이고 하한 풀이는 AP-3가 한다. */
 export interface GlassChoice {
   on: boolean;
@@ -113,6 +136,7 @@ export interface AppearanceV2<T extends string = ThemeId> {
   wallpaper?: WallpaperRef;
   fontSans?: string;
   fontMono?: string;
+  bubble?: BubbleChoice;
 }
 
 /** 웹의 레코드: 테마가 첫 파티 id뿐 아니라 `catalog:`·`user:` 참조도 될 수 있다. */
@@ -160,6 +184,37 @@ export function normalizeGlass(raw: unknown): GlassChoice | undefined {
       : undefined;
   if (!on && opacity === undefined) return undefined;
   return opacity === undefined ? { on } : { on, opacity };
+}
+
+function normalizeBubbleSide(raw: unknown): BubbleSide | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as { bg?: unknown; fg?: unknown };
+  const side: BubbleSide = {};
+  // `signal.custom` 과 같은 규칙: 읽히는 `#RRGGBB` 만, 대문자로.
+  if (typeof record.bg === "string" && parseHex(record.bg)) side.bg = record.bg.trim().toUpperCase();
+  if (typeof record.fg === "string" && parseHex(record.fg)) side.fg = record.fg.trim().toUpperCase();
+  return side.bg === undefined && side.fg === undefined ? undefined : side;
+}
+
+/** 말풍선 덮어쓰기. 모르는 값은 그 필드만 버린다. 남은 것이 없으면 `undefined`(레코드에 키를 두지 않는다). */
+export function normalizeBubble(raw: unknown): BubbleChoice | undefined {
+  if (raw == null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const record = raw as Record<string, unknown>;
+  const out: BubbleChoice = {};
+  const mine = normalizeBubbleSide(record.mine);
+  if (mine) out.mine = mine;
+  const other = normalizeBubbleSide(record.other);
+  if (other) out.other = other;
+  if (
+    typeof record.radius === "number" &&
+    Number.isInteger(record.radius) &&
+    record.radius >= 0 &&
+    record.radius <= BUBBLE_RADIUS_MAX
+  ) {
+    out.radius = record.radius;
+  }
+  if (record.layout === "row") out.layout = "row";
+  return Object.keys(out).length === 0 ? undefined : out;
 }
 
 const WALLPAPER_ID_RE = /^[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -236,6 +291,8 @@ export function normalizeAppearance<T extends string>(state: AppearanceV2<T>): A
   if (fontSans !== undefined) out.fontSans = fontSans;
   const fontMono = normalizeFontName(state.fontMono);
   if (fontMono !== undefined) out.fontMono = fontMono;
+  const bubble = normalizeBubble(state.bubble);
+  if (bubble) out.bubble = bubble;
   return out;
 }
 
@@ -268,6 +325,7 @@ function fromV2Record<T extends string>(
     wallpaper: normalizeWallpaper(record.wallpaper),
     fontSans: normalizeFontName(record.fontSans),
     fontMono: normalizeFontName(record.fontMono),
+    bubble: normalizeBubble(record.bubble),
   });
 }
 
@@ -356,5 +414,6 @@ export function serializeAppearance<T extends string>(state: AppearanceV2<T>): s
     wallpaper: s.wallpaper,
     fontSans: s.fontSans,
     fontMono: s.fontMono,
+    bubble: s.bubble,
   });
 }

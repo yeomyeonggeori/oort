@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { channelShareUrlFromServerBase } from "@momo/core/features/channels/shareLink";
 import {
   anchorMissKind,
   channelPath,
@@ -92,6 +93,18 @@ describe("messageShareUrl", () => {
 
 describe("channelShareUrl", () => {
   const CHANNEL = "00000000-0000-7000-8000-000000000201";
+
+  it("폰 채널 링크(코어)와 한 글자도 다르지 않다 — 붙여넣은 사람이 웹에서 그 채널로 착지한다 (#4229)", () => {
+    for (const base of ["https://app.oor7.com", "https://app.oor7.com/"]) {
+      expect(channelShareUrlFromServerBase(base, CHANNEL)).toBe(
+        channelShareUrl(CHANNEL, { origin: "https://app.oor7.com", pathname: "/" })
+      );
+    }
+    // 특수문자가 든 id 도 같은 인코딩이다.
+    expect(channelShareUrlFromServerBase("https://a.b", "x y/z")).toBe(
+      channelShareUrl("x y/z", { origin: "https://a.b", pathname: "/" })
+    );
+  });
 
   it("자리 없는 채널 링크: `#/c/{id}` 하나만 싣는다", () => {
     expect(
@@ -362,10 +375,12 @@ describe("watchForMessage", () => {
     });
     expect(row.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
     expect(row.classList.add).toHaveBeenCalled();
+    // #4324: 착지 면은 폰과 같은 말(`--warn-soft` + 1px 테두리, tokens.css `landed-surface`)이다. 앰버 accent 면이 아니다.
+    expect(row.classList.add).toHaveBeenCalledWith("landed-surface");
     // The only thing still queued is the highlight teardown.
     expect(queued).toHaveLength(1);
     queued[0]();
-    expect(row.classList.remove).toHaveBeenCalled();
+    expect(row.classList.remove).toHaveBeenCalledWith("landed-surface");
   });
 
   it("gives up quietly once the watch window is spent", () => {

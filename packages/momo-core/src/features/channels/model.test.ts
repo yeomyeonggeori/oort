@@ -365,13 +365,13 @@ describe("읽지 않음으로 표시 · DM 닫기 낱말", () => {
   });
 
   it("DM 닫기는 삭제가 아니라 사이드바에서 닫는 것이라고 말한다", () => {
-    expect(DM_CLOSE_LABEL).toBe("사이드바에서 닫기");
+    expect(DM_CLOSE_LABEL).toBe("대화 닫기");
     expect(DM_CLOSE_LABEL).not.toContain("삭제");
     expect(DM_CLOSE_LABEL).not.toContain("나가기");
   });
 
   it("호버 X 의 이름은 어느 대화인지 말한다(행의 링크 이름 꼴: 이름, 뜻)", () => {
-    expect(dmCloseButtonLabel("이도현")).toBe("이도현, 사이드바에서 닫기");
-    expect(dmCloseButtonLabel("kwak의 Claude")).toBe("kwak의 Claude, 사이드바에서 닫기");
+    expect(dmCloseButtonLabel("이도현")).toBe("이도현, 대화 닫기");
+    expect(dmCloseButtonLabel("하윤의 Claude")).toBe("하윤의 Claude, 대화 닫기");
   });
 });

@@ -1,4 +1,5 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
+import {ROW_FACE} from '../src/features/conversation/rowFace';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {
   PendingMessage,
@@ -268,19 +269,25 @@ describe('M-12 — 낙관적 메아리도 같은 여백을 진다', () => {
     // 확정 행의 것과 같아야 한다 — 「같은 규율」이 이 단정의 전부다.
     interface Walkable {
       parent: Walkable | null;
-      props: {style?: unknown};
+      props: {style?: unknown; testID?: string};
     }
     let node: Walkable | null = body as unknown as Walkable;
     let gutter: number | undefined;
     while (node) {
       const style = flatten(node.props?.style);
-      if (style.paddingHorizontal !== undefined) {
+      // 말풍선(#4300)의 안쪽 여백은 행 거터가 아니다 — 그 위의 그릇을 찾는다.
+      if (
+        style.paddingHorizontal !== undefined &&
+        node.props?.testID !== 'message-bubble'
+      ) {
         gutter = Number(style.paddingHorizontal);
         break;
       }
       node = node.parent;
     }
-    expect(gutter).toBe(SAFE_GUTTER);
+    // 안쪽 패딩은 확정 행과 같은 값이고, 바깥 마진(행 그릇)을 더하면 옛 거터다 (#4300).
+    expect(gutter).toBe(ROW_FACE.inner);
+    expect(ROW_FACE.outer + Number(gutter)).toBe(SAFE_GUTTER);
   });
 
   it('시각 칸은 예약하지 않는다 — 이 행에는 시각이 없다', () => {

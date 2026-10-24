@@ -9,12 +9,17 @@ import {
   GITHUB_FACES,
   GITHUB_FEATURES,
   GITHUB_FEATURE_IDS,
+  GITHUB_IDENTITY_CHECK_SENTENCE,
+  GITHUB_ORG_EMPTY_SENTENCE,
+  GITHUB_ORG_EXAMPLE,
+  GITHUB_PERMISSIONS_SENTENCE,
   GITHUB_RECEIVE_FAILED_SENTENCE,
   featuresSummary,
   githubErrorCode,
   githubFailureMessage,
   githubNoticeFor,
   githubNoticeLabel,
+  githubOrgProblem,
   githubPublicReturnSentence,
   githubReturnFromSearch,
   githubReturnSentence,
@@ -523,5 +528,45 @@ describe("다시 확인 필요 구독 (#4084)", () => {
     const sentence = reconfirmSentence("마케팅", "acme/web", ["pulls", "checks"]);
     expect(sentence).toContain("마케팅 채널이 공개 채널이 됐어요");
     expect(sentence).toContain("PR, 체크");
+  });
+});
+
+describe("GitHub 앱 만들기 문장 (#4333)", () => {
+  it("권한 문장은 코드 읽기를 받는 까닭을 말하고 스스로 어긋나지 않는다", () => {
+    expect(GITHUB_PERMISSIONS_SENTENCE).toContain("코드(contents)");
+    expect(GITHUB_PERMISSIONS_SENTENCE).toContain("push·release");
+    // 「받아요」와 따로 서는 「코드는 읽지 않아요」가 모순처럼 읽혔다.
+    expect(GITHUB_PERMISSIONS_SENTENCE).not.toContain("코드는 읽지 않아요");
+    expect(GITHUB_PERMISSIONS_SENTENCE).toContain("알림을 위해 코드를 읽지 않아요");
+  });
+
+  it("본인 확인 예고가 한 곳에 있다", () => {
+    expect(GITHUB_IDENTITY_CHECK_SENTENCE).toContain("본인 확인");
+  });
+
+  it("조직 이름: 비면 적어 달라고, 맞으면 통과", () => {
+    expect(githubOrgProblem("")).toBe(GITHUB_ORG_EMPTY_SENTENCE);
+    expect(githubOrgProblem("   ")).toBe(GITHUB_ORG_EMPTY_SENTENCE);
+    expect(githubOrgProblem(" dalmuri-studio ")).toBeNull();
+    expect(githubOrgProblem("a-b-1")).toBeNull();
+    expect(githubOrgProblem("x".repeat(39))).toBeNull();
+  });
+
+  it("조직 이름: 무엇이 틀렸는지 입력값에 맞춰 말한다", () => {
+    expect(githubOrgProblem("x".repeat(40))).toContain("39자까지");
+    expect(githubOrgProblem("x".repeat(40))).toContain("40자");
+    expect(githubOrgProblem("dalmuri studio")).toContain("공백");
+    expect(githubOrgProblem("github.com/dalmuri")).toContain("「.」");
+    expect(githubOrgProblem("달무리")).toContain("「달」");
+    expect(githubOrgProblem("-dalmuri")).toContain("하이픈");
+    expect(githubOrgProblem("dalmuri-")).toContain("하이픈");
+  });
+
+  it("오류 문장은 칸의 예시 글자를 되풀이하지 않는다", () => {
+    for (const raw of ["", "a b", "x".repeat(50), "-a", "a/b"]) {
+      const problem = githubOrgProblem(raw) ?? "";
+      expect(problem).not.toContain(GITHUB_ORG_EXAMPLE);
+      expect(problem).not.toContain("yeomyeonggeori");
+    }
   });
 });

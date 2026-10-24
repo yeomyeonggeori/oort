@@ -1,0 +1,110 @@
+appId: app.momo.ios
+name: 70-composer-newline
+# No `env:` block — see the note at the top of 00-login.yaml.
+#   SERVER_URL EMAIL PASSWORD GENERAL_CHANNEL_ID
+---
+# 70-composer-newline — 「가 ⏎ 나」를 보내면 줄바꿈이 남고 말풍선이 두 줄이다 (#4321).
+#
+# 폰에서 줄을 바꿔 쓴 메시지가 줄바꿈 없이 한 줄로 저장된다는 보고(owner 10-24)의 실기 증거 흐름.
+# 입력 → 보내기 → 서버 → 말풍선을 **진짜 앱·진짜 서버**로 한 번에 지난다. 세 자판을 각각 지난다:
+#
+#   1. 영문 소프트 자판   a ⏎ b   — 리턴 키를 **눌러서**(폰에서 줄바꿈이 오는 유일한 길)
+#   2. 하드웨어식 입력    c ⏎ d   — `inputText` + `pressKey: Enter` (XCTest 가 키 이벤트를 합성한다)
+#   3. 한글 2벌식         ㄱㅏ ⏎ ㄴㅏ — 조합 중인 글자 뒤의 리턴
+#
+# 단정은 **말풍선의 접근성 텍스트**다: 메시지 행의 접근성 글이 `이름, 시각, A\nB` 로 줄바꿈 글자를 든 채
+# 노출된다. 그래서 단정은 `.*A\\nB` 이다 — YAML 의 `\\n` 이 정규식 `\n`(줄바꿈 글자)이 된다.
+# **쓰는 법이 요점이다.** 패턴에 줄바꿈을 직접 넣은 `"A\nB"` 는 줄바꿈이 든 글에도 안 맞았고(Maestro 가
+# 글의 줄바꿈을 공백으로 바꿔 비교한다), 공백으로 쓴 `A B` 는 줄바꿈이 든 글에 맞는다 — 둘 다 실측했다.
+# 정규식 이스케이프만 줄바꿈 글자를 요구한다. 보내기 전에 줄바꿈이 사라지면(리턴이 보내기·무시로
+# 동작하는 경우 포함) 말풍선은 `AB` 가 되어 이 단정이 빨강이다.
+#
+# 이 단정이 **실제로 빨강이 되는지**는 PR 본문의 사보타주 표가 든다(`submitBehavior="submit"` 로 되돌리면
+# 첫 단정에서 멈춘다). 단정이 깨지지 않는 가드는 가드가 아니다.
+#
+# 시뮬레이터에서 물을 수 있는 것은 여기까지다: 소프트 자판의 리턴 키 → UIKit → RN → 코어 → 서버 →
+# 말풍선. 실기기 Release 빌드·블루투스 하드웨어 키보드는 이 흐름 밖이다.
+#
+# 손으로 돌리는 법(레인 밖):
+#   1. 로그인할 수 있는 멤버가 든 격리 스택을 띄우고, **새 채널 하나**를 만들어 그 id 를 GENERAL_CHANNEL_ID 로
+#      준다. 옛 메시지에 같은 글(`A\nB`)이 남아 있으면 단정이 거짓으로 통과한다.
+#   2. 앱이 이 체크아웃의 Metro 를 보게 한다. `launchApp` 은 `-RCT_jsLocation` 을 못 넘기므로(00-login 머리말)
+#      포트가 8081 이 아니면 시뮬레이터 앱의 Preferences 에 `RCT_jsLocation` 을 적고 시뮬레이터를 다시 켠다.
+#   3. cd clients/mobile && maestro --udid <udid> test -e SERVER_URL=… -e EMAIL=… -e PASSWORD=… \
+#        -e GENERAL_CHANNEL_ID=<새 채널 id> maestro/70-composer-newline.yaml
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+
+- tapOn:
+    id: "sidebar-row-channel:${GENERAL_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 첫 방문의 코치마크가 입력창 탭을 먹는다 (10-mention-working 의 같은 자리 참고).
+- runFlow:
+    when:
+      visible:
+        id: "long-press-hint"
+    commands:
+      - tapOn:
+          id: "long-press-hint-dismiss"
+- runFlow: subflows/dismiss-dev-logbox.yaml
+
+# ---- 1. 영문 소프트 자판: 리턴 키를 누른다 ---------------------------------------
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    file: subflows/pick-keyboard.yaml
+    env:
+      KEY: "(?i)q"
+# 첫 글자는 대문자(문장 첫머리 자동 대문자)이고 리턴 뒤 첫 글자도 그렇다 — 그래서 `A\nB` 다.
+- tapOn: "(?i)a"
+- tapOn:
+    id: "Return"
+- tapOn: "(?i)b"
+- takeScreenshot: 70-en-soft-typed
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      text: ".*A\\nB"
+    timeout: 15000
+- takeScreenshot: 70-en-soft-sent
+
+# ---- 2. 하드웨어식: 한 번에 넣은 글 + Enter 키 이벤트 ----------------------------
+- tapOn:
+    id: "composer-input"
+- inputText: "c"
+- pressKey: Enter
+- inputText: "d"
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      text: ".*c\\nd"
+    timeout: 15000
+- takeScreenshot: 70-enter-key-sent
+
+# ---- 3. 한글 2벌식: 조합 중인 글자 뒤의 리턴 --------------------------------------
+- tapOn:
+    id: "composer-input"
+- runFlow:
+    file: subflows/pick-keyboard.yaml
+    env:
+      KEY: "ㄱ"
+- tapOn: "ㄱ"
+- tapOn: "ㅏ"
+- tapOn:
+    id: "Return"
+- tapOn: "ㄴ"
+- tapOn: "ㅏ"
+- takeScreenshot: 70-ko-soft-typed
+- tapOn:
+    id: "composer-send"
+- extendedWaitUntil:
+    visible:
+      text: ".*가\\n나"
+    timeout: 15000
+- takeScreenshot: 70-ko-soft-sent
