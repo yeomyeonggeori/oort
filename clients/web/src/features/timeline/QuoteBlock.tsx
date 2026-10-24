@@ -240,14 +240,20 @@ export function QuoteChip({
   block,
   directory,
   onCancel,
+  attached = false,
 }: {
   block: QuoteBlockModel;
   directory: Directory;
   onCancel: () => void;
+  /** 입력창 카드의 맥락 띠 안에 선다(#4317): 띠가 구분선을 지므로 자기 윗선은 없다. */
+  attached?: boolean;
 }) {
   return (
     <div
-      className="flex items-start gap-2 border-t border-line px-4 py-2"
+      className={cn(
+        "flex gap-2 px-4 py-2",
+        attached ? "items-center" : "items-start border-t border-line"
+      )}
       data-testid="composer-quote"
       data-target-id={block.targetId.toLowerCase()}
     >
