@@ -18,7 +18,7 @@ p256 = { workspace = true, features = ["ecdh"] }
 ed25519-dalek.workspace = true
 sha2.workspace = true
 aes-gcm = "0.10"
-hkdf = "0.12"
+hkdf = "0.13"
 getrandom = "0.2"
 thiserror.workspace = true
 tracing.workspace = true
