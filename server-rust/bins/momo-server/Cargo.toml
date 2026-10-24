@@ -165,3 +165,6 @@ momo-agent-worker = { path = "../momo-agent-worker" }
 # links nor starts a notifier, and the two processes still meet through nothing
 # but the ledger.
 momo-notifier = { path = "../momo-notifier" }
+
+[lints]
+workspace = true

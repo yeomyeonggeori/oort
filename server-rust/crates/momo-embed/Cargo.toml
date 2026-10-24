@@ -36,3 +36,12 @@ tracing.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+
+# unsafe-allowlist (SEC-08, #4246): dynamically loads the ONNX Runtime shared library via
+# libloading::Library::new / Library::get. Loading a native library and resolving a C symbol is
+# unsafe by definition in libloading and has no safe replacement; the crate exists to contain
+# that single FFI boundary.
+# Adding a crate here needs a reason row in server-rust/unsafe-allowlist.tsv; scripts/check_unsafe_policy.py
+# keeps this table and the workspace forbid in sync.
+[lints.rust]
+unsafe_code = "allow"

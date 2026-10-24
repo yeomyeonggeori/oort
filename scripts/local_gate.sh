@@ -633,6 +633,12 @@ add_static_commands() {
   # loop pointing at deleted client trees was a rule that could not be followed.
   add_cmd_once "design review loop wiring contract" 'scripts/check_design_review_wiring.sh'
   add_note_once coverage "#1254 design review loop wiring via scripts/check_design_review_wiring.sh: the files the loop is made of must exist (router skill, web dialect, rubric, canonical design-system page, web pre-flight, both token files), every clients/<tree> named in an agent's or skill's frontmatter description must exist, and the router must still delegate web/desktop to momo-design-taste-web while saying what governs clients/mobile. The frontmatter is checked and the body prose deliberately is not: a description is what routes work to a reviewer (the #1254 defect was design-review's own description aiming at clients/macOS and clients/Core weeks after they were deleted), while writing \"clients/macOS was deleted\" in the body is the correct sentence and must stay legal."
+  # #4246 SEC-08: the compiler enforces `[workspace.lints.rust] unsafe_code = "forbid"`
+  # (clippy/test already build every member); this gate and its red proofs close the one
+  # hole the compiler cannot see — a crate that never opted in, or an allowlist drifting.
+  add_cmd_once "unsafe_code policy gate regression (red proofs)" 'scripts/tests/test_unsafe_policy_gate.sh'
+  add_cmd_once "unsafe_code policy gate (every member forbids or is allowlisted with a reason)" 'python3 scripts/check_unsafe_policy.py'
+  add_note_once coverage "#4246 SEC-08 via scripts/check_unsafe_policy.py: server-rust/Cargo.toml forbids unsafe_code workspace-wide, every crates/* and bins/* member inherits it (or sets forbid) unless server-rust/unsafe-allowlist.tsv lists it with a reason and the crate itself sets allow; stale rows, missing rows, weakened levels and new crates without [lints] are red. The compiler half (unsafe block in an inheriting crate fails; #![allow(unsafe_code)] cannot override forbid) is proven by test_unsafe_policy_gate.sh --compile, not by the default gate run. clients/desktop is its own cargo workspace and is recorded in the allowlist only."
   # #1525: SELF_HOST.md, the runbooks and AGENTS.md are executed verbatim — AGENTS.md
   # §3 says "copy-paste, 그대로 실행" in so many words. #1472 measured what one
   # wrong command costs there: `cargo fmt --check --manifest-path
