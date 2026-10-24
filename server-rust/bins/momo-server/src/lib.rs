@@ -1203,6 +1203,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/viewing",
             put(routes::viewing::touch),
         )
+        // DM closure (ADR-0177 증보 D7, #4227): the caller's own "I closed this DM" watermark.
+        // Human-only twice over — the path is absent from `required_agent_scope` and the handlers
+        // `require_human` first. The owner is the bearer; there is no member in the request. No event
+        // (D10): other devices converge on the next `GET read-state`.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/closure",
+            put(routes::dm_closure::put).delete(routes::dm_closure::delete),
+        )
         // inbox (ADR-0199, #3681): the member's own "to me" list. Humans only;
         // the member is the bearer, never a request field.
         .route("/v1/workspaces/{ws}/inbox", get(routes::inbox::list))

@@ -3545,10 +3545,40 @@ pub struct ReadStateDto {
     pub marked_unread_before_seq: Option<i64>,
 }
 
+/// One row of `GET read-state` (ADR-0177 증보 D8, #4227): everything [`ReadStateDto`] says plus
+/// the two fields the client needs to decide whether a DM shows.
+///
+/// Both keys are **always present**, like `marked_unread_before_seq`: `latest_readable_seq` is a
+/// `NOT NULL` column (`0` = nothing readable yet) and `closed_at_seq` is `null` when the caller has
+/// not closed the channel (and for every non-DM). A client that sees neither key is talking to a
+/// server older than this. They are not on [`ReadStateDto`] itself because that type is also the
+/// `PUT read-state` response, which does not carry them (see `ReadStateProjection`).
+#[derive(Debug, Serialize)]
+pub struct ReadStateRowDto {
+    #[serde(flatten)]
+    pub state: ReadStateDto,
+    pub latest_readable_seq: i64,
+    /// The **caller's own** closure watermark, never another member's.
+    pub closed_at_seq: Option<i64>,
+}
+
 /// Swift `ReadStateListResponseDTO` (:317-322).
 #[derive(Debug, Serialize)]
 pub struct ReadStateListResponseDto {
-    pub read_states: Vec<ReadStateDto>,
+    pub read_states: Vec<ReadStateRowDto>,
+}
+
+/// `PUT …/channels/{ch}/closure` request (ADR-0177 증보 D7, #4227).
+///
+/// **camelCase `seenSeq`**, the one spelling D7 names — unlike the snake_case read-state island next
+/// to it. It is the last seq the client *saw* for this DM (the projection's `latest_seq`), not a
+/// server timestamp: the server stores `GREATEST(existing, LEAST(seenSeq, last_seq))`. A missing
+/// field, a negative or non-integer value, or an unknown key is a 400 (the route maps every
+/// rejection of this body to 400, never Axum's 422).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutDmClosureRequestDto {
+    pub seen_seq: i64,
 }
 
 // ---------------------------------------------------------------------------
@@ -6386,13 +6416,17 @@ mod tests {
     #[test]
     fn read_state_dtos_stay_snake_case() {
         let json = serde_json::to_value(ReadStateListResponseDto {
-            read_states: vec![ReadStateDto {
-                channel_id: "c".into(),
-                last_read_seq: 1,
-                latest_seq: 2,
-                unread_count: 1,
-                mention_count: 0,
-                marked_unread_before_seq: None,
+            read_states: vec![ReadStateRowDto {
+                state: ReadStateDto {
+                    channel_id: "c".into(),
+                    last_read_seq: 1,
+                    latest_seq: 2,
+                    unread_count: 1,
+                    mention_count: 0,
+                    marked_unread_before_seq: None,
+                },
+                latest_readable_seq: 2,
+                closed_at_seq: None,
             }],
         })
         .expect("serialize");
@@ -6407,6 +6441,41 @@ mod tests {
             "the mark key is always present: {json}"
         );
         assert!(json["read_states"][0]["marked_unread_before_seq"].is_null());
+        // ADR-0177 증보 D8 (#4227): the two additions keep the island's snake_case and are always
+        // present — `closed_at_seq` is an explicit null, not an omitted key.
+        assert_eq!(json["read_states"][0]["latest_readable_seq"], 2);
+        assert!(
+            json["read_states"][0].get("closed_at_seq").is_some(),
+            "closed_at_seq is a key even when the caller has not closed the DM: {json}"
+        );
+        assert!(json["read_states"][0]["closed_at_seq"].is_null());
+        assert!(json["read_states"][0].get("closedAtSeq").is_none(), "{json}");
+        // `flatten` keeps the row flat: the cursor fields are siblings, not nested under `state`.
+        assert!(json["read_states"][0].get("state").is_none(), "{json}");
+    }
+
+    /// ADR-0177 증보 D7 (#4227): the closure body is exactly `{ "seenSeq": <integer> }`.
+    #[test]
+    fn dm_closure_request_takes_only_a_camel_case_integer_seen_seq() {
+        let ok: PutDmClosureRequestDto =
+            serde_json::from_value(serde_json::json!({"seenSeq": 7})).expect("decode");
+        assert_eq!(ok.seen_seq, 7);
+        let zero: PutDmClosureRequestDto =
+            serde_json::from_value(serde_json::json!({"seenSeq": 0})).expect("decode");
+        assert_eq!(zero.seen_seq, 0);
+        for bad in [
+            serde_json::json!({}),
+            serde_json::json!({"seen_seq": 7}),
+            serde_json::json!({"seenSeq": "7"}),
+            serde_json::json!({"seenSeq": 1.5}),
+            serde_json::json!({"seenSeq": null}),
+            serde_json::json!({"seenSeq": 7, "channelId": "x"}),
+        ] {
+            assert!(
+                serde_json::from_value::<PutDmClosureRequestDto>(bad.clone()).is_err(),
+                "{bad} must not decode"
+            );
+        }
     }
 
     #[test]

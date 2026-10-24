@@ -54,6 +54,8 @@ pub mod avatar_reclaim;
 pub mod channel;
 pub mod channel_viewing;
 pub mod dm;
+/// ADR-0177 증보 D6·D7 / #4227 — a member's own DM closure watermark (no outbox fan-out, D10).
+pub mod dm_closure;
 pub mod error;
 pub mod hosted_inbox;
 pub mod huddle;
@@ -120,6 +122,7 @@ pub use dm::{
     open_direct_message_in_tx, validate_direct_message_target, DirectMessage,
     DirectMessageTargetInvalid, OpenedDirectMessage, DM_LIST_LIMIT,
 };
+pub use dm_closure::{close_dm_in_tx, reopen_dm_in_tx, DmClosureOutcome};
 pub use error::{MessagingError, ProvenanceRejected};
 pub use hosted_inbox::{
     append_job_reference_in_tx, append_message_reference_in_tx, append_run_reference_in_tx,
@@ -217,9 +220,10 @@ pub use presence::{
 };
 pub use read_state::{
     build_read_state_payload, contains_mention, contains_mention_with_aliases, effective_cursor,
-    list_read_state, mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
-    update_read_cursor_in_tx, update_read_cursor_with_intent_in_tx, MarkUnreadWrite,
-    ReadCursorOutcome, ReadCursorUpdate, ReadIntent, ReadState, MENTION_PROPS_KEY,
+    list_read_state, list_read_state_projection, mention_id_token, read_state_channel,
+    record_mentions_in_tx, unread_count, update_read_cursor_in_tx,
+    update_read_cursor_with_intent_in_tx, MarkUnreadWrite, ReadCursorOutcome, ReadCursorUpdate,
+    ReadIntent, ReadState, ReadStateProjection, MENTION_PROPS_KEY,
 };
 pub use refine::{
     harness_refine_client_msg_id, harness_refine_input_props, validate_harness_refine,

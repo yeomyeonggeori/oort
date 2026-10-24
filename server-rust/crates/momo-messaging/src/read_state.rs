@@ -76,6 +76,26 @@ pub struct ReadState {
     pub marked_unread_before_seq: Option<i64>,
 }
 
+/// One row of `GET read-state`: the member's [`ReadState`] plus what ADR-0177 증보 D8 adds so the
+/// client can decide whether a DM shows (#4227).
+///
+/// A separate type, not two more fields on [`ReadState`], on purpose: `ReadState` is also the
+/// `PUT read-state` result and the realtime `read_state` frame, and ADR-0177 D10 forbids a closure
+/// event — a frame that carried `closed_at_seq` would be a closure event by the back door, and a PUT
+/// response without it would read as "not closed". Only the list projection says these two things.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadStateProjection {
+    pub state: ReadState,
+    /// `channel_seq.last_readable_seq` (D9): the newest seq worth reading — tool calls, system lines
+    /// and work-session cards do not count. `0` when nothing readable has been sent. The head the
+    /// client compares the watermark against; `state.latest_seq` still counts everything.
+    pub latest_readable_seq: i64,
+    /// The **requester's own** `dm_closure.closed_at_seq` (D6/D8), or `None` when this member has not
+    /// closed the channel (and for every non-DM channel). The join that fills it carries
+    /// `member_id = <requester>`; another member's closure is never visible here.
+    pub closed_at_seq: Option<i64>,
+}
+
 /// Why a read-state advertisement was sent (ADR-0178 D4).
 ///
 /// ## This enum exists because the seq alone cannot tell you
@@ -251,11 +271,33 @@ fn decode_read_state(row: &sqlx::postgres::PgRow) -> Result<ReadState, sqlx::Err
 ///
 /// A channel with no `read_state` row reads as cursor 0 — i.e. everything
 /// unread — rather than being omitted, so a client's first sync is complete.
+///
+/// This is the cursor-only view; the route serves [`list_read_state_projection`], which adds the
+/// two ADR-0177 D8 fields on top of exactly these rows.
 pub async fn list_read_state(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<Vec<ReadState>, DbError> {
+    Ok(list_read_state_projection(conn, workspace_id, member_id)
+        .await?
+        .into_iter()
+        .map(|row| row.state)
+        .collect())
+}
+
+/// [`list_read_state`] plus `latest_readable_seq` and the requester's own `closed_at_seq`
+/// (ADR-0177 증보 D8, #4227).
+///
+/// The `dm_closure` join is a `LEFT JOIN` on (workspace, channel, member = the requester). RLS
+/// only separates workspaces, so that member predicate is the whole of the member boundary: without
+/// it one member's closure would ride another member's rows (and a second closer would duplicate the
+/// row). `dm_closure`'s primary key `(member_id, channel_id)` makes the join at most one row.
+pub async fn list_read_state_projection(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<Vec<ReadStateProjection>, DbError> {
     let rows = sqlx::query(
         "SELECT c.id AS channel_id, \
                 COALESCE(rs.last_read_seq, 0)::bigint AS last_read_seq, \
@@ -263,7 +305,9 @@ pub async fn list_read_state(
                 GREATEST(COALESCE(cs.last_seq, 0) - COALESCE(rs.last_read_seq, 0), 0)::bigint \
                   AS unread_count, \
                 COALESCE(rs.mention_count, 0)::int AS mention_count, \
-                rs.marked_unread_before_seq \
+                rs.marked_unread_before_seq, \
+                COALESCE(cs.last_readable_seq, 0)::bigint AS latest_readable_seq, \
+                dc.closed_at_seq \
            FROM membership ms \
            JOIN channel c \
              ON c.id = ms.channel_id \
@@ -276,6 +320,10 @@ pub async fn list_read_state(
              ON rs.channel_id = c.id \
             AND rs.member_id = $2 \
             AND rs.workspace_id = $1 \
+           LEFT JOIN dm_closure dc \
+             ON dc.channel_id = c.id \
+            AND dc.member_id = $2 \
+            AND dc.workspace_id = $1 \
           WHERE ms.member_id = $2 \
             AND ms.left_at IS NULL \
           ORDER BY ms.joined_at, c.id",
@@ -285,8 +333,14 @@ pub async fn list_read_state(
     .fetch_all(&mut *conn)
     .await?;
     rows.iter()
-        .map(decode_read_state)
-        .collect::<Result<_, _>>()
+        .map(|row| {
+            Ok(ReadStateProjection {
+                state: decode_read_state(row)?,
+                latest_readable_seq: row.try_get("latest_readable_seq")?,
+                closed_at_seq: row.try_get("closed_at_seq")?,
+            })
+        })
+        .collect::<Result<_, sqlx::Error>>()
         .map_err(DbError::from)
 }
 
