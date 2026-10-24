@@ -3581,25 +3581,46 @@ pub struct PutDmClosureRequestDto {
 }
 
 impl<'de> Deserialize<'de> for PutDmClosureRequestDto {
-    /// A JSON **object** with exactly `seenSeq`, never a positional array. A derived struct
-    /// deserializes from `[1]` as well (serde reads a struct from a sequence), which the OpenAPI
-    /// contract (`type: object`) does not allow: the body is first read as a map, which is what
-    /// refuses an array, and only then checked for its one key (independent review r1, Low).
+    /// A JSON **object** with exactly one key, `seenSeq`, written once. Three things a derived struct
+    /// would let through are refused here: a positional array (`[1]` - serde reads a struct from a
+    /// sequence), a repeated key (`{"seenSeq":1,"seenSeq":2}` - a map read first keeps the last), and
+    /// a second key. Each is a visitor decision, so `deserialize_map` is the entry point: serde_json
+    /// refuses an array before the visitor runs (independent review r1: Low, then its follow-up).
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase", deny_unknown_fields)]
-        struct Fields {
-            seen_seq: i64,
+        struct ClosureVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for ClosureVisitor {
+            type Value = PutDmClosureRequestDto;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("an object with exactly one key, seenSeq")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: serde::de::MapAccess<'de>,
+            {
+                const FIELD: &str = "seenSeq";
+                let mut seen_seq: Option<i64> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if key != FIELD {
+                        return Err(serde::de::Error::unknown_field(&key, &[FIELD]));
+                    }
+                    if seen_seq.is_some() {
+                        return Err(serde::de::Error::duplicate_field(FIELD));
+                    }
+                    seen_seq = Some(map.next_value::<i64>()?);
+                }
+                seen_seq
+                    .map(|seen_seq| PutDmClosureRequestDto { seen_seq })
+                    .ok_or_else(|| serde::de::Error::missing_field(FIELD))
+            }
         }
-        let map = serde_json::Map::<String, Value>::deserialize(deserializer)?;
-        let fields: Fields =
-            serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom)?;
-        Ok(PutDmClosureRequestDto {
-            seen_seq: fields.seen_seq,
-        })
+
+        deserializer.deserialize_map(ClosureVisitor)
     }
 }
 
@@ -6506,6 +6527,25 @@ mod tests {
                 "{bad} must not decode"
             );
         }
+        // A `Value` cannot hold two equal keys, so the repeated key is a text case.
+        for bad in [
+            r#"{"seenSeq":1,"seenSeq":2}"#,
+            r#"{"seenSeq":1,"seenSeq":1}"#,
+            r#"[1]"#,
+            r#"{"seenSeq":5.0}"#,
+            r#"{"seenSeq":1e2}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<PutDmClosureRequestDto>(bad).is_err(),
+                "{bad} must not decode"
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<PutDmClosureRequestDto>(r#"{"seenSeq":9223372036854775807}"#)
+                .expect("i64::MAX decodes")
+                .seen_seq,
+            i64::MAX
+        );
     }
 
     #[test]

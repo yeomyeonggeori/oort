@@ -1444,6 +1444,18 @@ async fn the_catalog_registers_dm_closure_as_a_forced_rls_tenant_table() {
         "the trigger function pins its search_path: {config:?}"
     );
 
+    let channel_index: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM pg_indexes \
+          WHERE tablename = 'dm_closure' AND indexname = 'dm_closure_channel_idx')",
+    )
+    .fetch_one(&w.su)
+    .await
+    .expect("index probe");
+    assert!(
+        channel_index,
+        "channel delete cascades must not scan dm_closure"
+    );
+
     let (nullable, default): (String, Option<String>) = sqlx::query_as(
         "SELECT is_nullable, column_default FROM information_schema.columns \
           WHERE table_name = 'channel_seq' AND column_name = 'last_readable_seq'",

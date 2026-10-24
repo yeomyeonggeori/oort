@@ -10492,8 +10492,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: >
-            Agent or work-host credential (human bearers only), or workspace
-            scope mismatch.
+            An agent bearer or any other non-human credential (human bearers
+            only), or workspace scope mismatch. A signed work host never gets
+            this far: its allow-list has no such path, so the middleware
+            answers `401` first.
           content:
             application/json:
               schema:
@@ -10535,8 +10537,10 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: >
-            Agent or work-host credential (human bearers only), or workspace
-            scope mismatch.
+            An agent bearer or any other non-human credential (human bearers
+            only), or workspace scope mismatch. A signed work host never gets
+            this far: its allow-list has no such path, so the middleware
+            answers `401` first.
           content:
             application/json:
               schema:

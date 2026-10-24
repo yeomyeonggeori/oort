@@ -146,6 +146,10 @@ CREATE TABLE dm_closure (
   CONSTRAINT dm_closure_closed_at_seq_nonneg_ck CHECK (closed_at_seq >= 0)
 );
 
+-- 채널·워크스페이스 삭제의 캐스케이드가 이 표를 훑지 않게 한다(PK 는 member_id 가 앞이라 channel_id 로는
+-- 쓸 수 없다). 표는 작지만 채널 삭제마다 순차 스캔이 한 번 도는 것은 값싸게 피할 수 있다.
+CREATE INDEX dm_closure_channel_idx ON dm_closure (channel_id);
+
 COMMENT ON TABLE dm_closure IS
   'ADR-0177 D6 (#4227): member-owned "I closed this DM" fact. One row per (member, channel). No outbox fan-out (D10): other devices converge on the next read-state projection.';
 COMMENT ON COLUMN dm_closure.member_id IS
