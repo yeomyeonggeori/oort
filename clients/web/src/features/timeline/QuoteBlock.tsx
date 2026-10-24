@@ -251,8 +251,8 @@ export function QuoteChip({
   return (
     <div
       className={cn(
-        "flex items-start gap-2 px-4 py-2",
-        !attached && "border-t border-line"
+        "flex gap-2 px-4 py-2",
+        attached ? "items-center" : "items-start border-t border-line"
       )}
       data-testid="composer-quote"
       data-target-id={block.targetId.toLowerCase()}

@@ -229,7 +229,7 @@ async function scene(browser, origin, scheme, width) {
     await settle(page);
     let f = await toolFacts(page);
     check(`${tag} 채널: 도구 순서 + 멘션 이모지 서식 보내기`, [0, 1, 2, 4].every((i) => f.xs[i] !== null) && f.xs.filter((x) => x !== null).every((x, i, a) => i === 0 || x > a[i - 1]), JSON.stringify(f.xs));
-    check(`${tag} 채널: 서식 단추는 카드가 240px보다 좁을 때만 접힌다(폭 ${f.frameWidth})`, (f.frameWidth < 240) === (f.xs[3] === null), JSON.stringify(f.xs));
+    check(`${tag} 채널: 서식 단추는 카드가 320px보다 좁을 때만 접힌다(폭 ${f.frameWidth})`, (f.frameWidth < 320) === (f.xs[3] === null), JSON.stringify(f.xs));
     check(`${tag} 채널: 마이크 자리는 DOM 에 없다`, f.mic === false);
     check(`${tag} 채널: 띠가 없다`, f.band === false);
     check(`${tag} 채널: 카드·문서 가로 넘침 0`, f.frameOverflow <= 0 && f.docOverflow <= 0, JSON.stringify(f));
