@@ -20,7 +20,7 @@ import {
   View,
 } from 'react-native';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
-import {usePalette, useStyles} from '../../design/theme';
+import {useBubbleChoice, usePalette, useStyles} from '../../design/theme';
 import {bubbleFor} from './bubble';
 import {COPY_RECEIPT_MS, copyText} from './copy';
 
@@ -547,7 +547,9 @@ export function MessageBody({
     [body],
   );
   const palette = usePalette();
-  const tokens = useMemo(() => bubbleFor(palette), [palette]);
+  const bubbleChoice = useBubbleChoice();
+  // 개인 덮어쓰기(#4383): 줄 보기(`layout: 'row'`)·색·모서리. 대비가 모자란 색은 `bubbleFor` 가 버린다.
+  const tokens = useMemo(() => bubbleFor(palette, bubbleChoice), [palette, bubbleChoice]);
   const tone = bubble !== null && tokens.layout === 'bubble' ? tokens[bubble] : null;
   const ink = useMemo(
     () => (tone !== null && bubble !== null ? {fg: tone.fg, mine: bubble === 'mine'} : null),

@@ -4,7 +4,7 @@ import React, {useEffect, useState} from 'react';
 import {ScrollView, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
-import {MessageRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
+import {MessageRow, PendingRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
 import {ROW_FACE} from '../src/features/conversation/rowFace';
 
 // =============================================================================
@@ -20,6 +20,9 @@ import {ROW_FACE} from '../src/features/conversation/rowFace';
 //   landed   착지해 서 있는 행(`landed`) — 실제 `rowLanded` + 테두리.
 //   fade     착지가 풀리는 순간(`landed` true → false) 이후 덮개가 녹는 중. 풀리는 시각은 로그 없이
 //            실행 3초 뒤이고, 240ms 동안 녹는다 — 캡처는 연속으로 찍는다.
+//   row      줄 보기(`layout:'row'`, 예전 평면 행) — 같은 대화를 `FixedScheme bubble` 로 못 박아 찍는다(#4383).
+//   arrive   보낸 글이 올라오는 등장(#4383) — 실행 1.5초 뒤 낙관적 메아리 하나가 마운트되고 180ms 동안
+//            올라온다. 녹화(`simctl io recordVideo`)로 찍는다. `arrive-row` 는 줄 보기에서 같은 장면.
 //
 // 이름·문구는 가상이다(달무리 스튜디오).
 // =============================================================================
@@ -99,12 +102,18 @@ export function BubbleSurface({which}: {which: string}): React.JSX.Element {
     const t = setTimeout(() => setLandedOn(false), 3000);
     return () => clearTimeout(t);
   }, [which]);
+  const [sentOn, setSentOn] = useState(false);
+  useEffect(() => {
+    if (!which.startsWith('arrive')) return undefined;
+    const t = setTimeout(() => setSentOn(true), 1500);
+    return () => clearTimeout(t);
+  }, [which]);
   const pressIdx = which === 'press' ? [2] : which === 'press-pair' ? [2, 3] : [];
   const landIdx = which === 'landed' || which === 'fade' ? 2 : -1;
   return (
     <Screen>
       <ScrollView>
-        {ENTRIES.map((e, i) => {
+        {(which.startsWith('arrive') ? ENTRIES.slice(-3) : ENTRIES).map((e, i) => {
           const row = (
             <MessageRow
               key={e.m.id}
@@ -125,6 +134,19 @@ export function BubbleSurface({which}: {which: string}): React.JSX.Element {
           );
           return pressIdx.includes(i) ? <Press key={e.m.id}>{row}</Press> : row;
         })}
+        {sentOn ? (
+          <PendingRow
+            pending={
+              {
+                clientMsgId: 'c-4383-arrive', channelId: 'ch', authorMemberId: ME,
+                body: '방금 보낸 글이에요. 입력창에서 올라와 자리에 앉아요.',
+                createdAtMs: NOW, sinceSeq: 7, status: 'sending',
+              } as never
+            }
+            startsGroup
+            directory={DIRECTORY}
+          />
+        ) : null}
       </ScrollView>
     </Screen>
   );
