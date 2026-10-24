@@ -152,7 +152,7 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
         tenant_tables > 0,
         "no workspace_id table found: the invariant check is blind"
     );
-    let rls = common::tenant_rls_violations(&pool, None).await;
+    let rls = common::tenant_rls_violations(&pool, None, "momo_app").await;
     assert!(
         rls.is_empty(),
         "tenant tables without RLS+FORCE+policy (D2 #6): {rls:?}"
