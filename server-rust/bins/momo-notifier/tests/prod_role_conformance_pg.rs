@@ -929,8 +929,9 @@ async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
     let db = ProdDb::create().await;
-    // `mem_*` tables (#3161), the migration-owned `plugin_registry` (revoked from
-    // momo_app on purpose), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
+    // `mem_*` tables (#3161), the migration-owned read-only catalogs (`plugin_registry`,
+    // `schema_migrations`, `work_cloud_host_transition`: #4372, see
+    // `migration_owned_catalogs_are_read_only_for_every_runtime_role`), the `cloud_box*` tables (ADR-0197 D10 lockdown, see
     // below) and the `scheduled_message*` tables (ADR-0208 D3 lockdown, see below) are
     // the only tables outside the rule; everything else must be readable and writable
     // by the three ALL-TABLES roles.
@@ -940,7 +941,7 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
            CROSS JOIN (VALUES ('momo_app'), ('momo_relay'), ('momo_worker')) AS r(rolname) \
            CROSS JOIN (VALUES ('SELECT'), ('INSERT'), ('UPDATE'), ('DELETE')) AS p(priv) \
           WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') \
-            AND c.relname NOT LIKE 'mem\\_%' AND c.relname <> 'plugin_registry' \
+            AND c.relname NOT LIKE 'mem\\_%' AND c.relname NOT IN ('plugin_registry', 'schema_migrations', 'work_cloud_host_transition') \
             AND c.relname NOT LIKE 'cloud\\_box%' \
             AND c.relname NOT LIKE 'scheduled\\_message%' \
             AND NOT has_table_privilege(r.rolname, c.oid, p.priv) \
@@ -1011,6 +1012,125 @@ async fn the_other_runtime_roles_reach_every_table_the_migrations_created() {
         schedule_drift.is_empty(),
         "scheduled_message* privileges drifted from the lockdown: {schedule_drift:?}"
     );
+}
+
+/// The three tables only a migration (the schema owner) writes. #4372 (SEC-04 follow-up):
+/// no runtime role may write them, whatever the ALL TABLES grant or DEFAULT PRIVILEGES say.
+const MIGRATION_OWNED_CATALOGS: [&str; 3] = [
+    "plugin_registry",
+    "schema_migrations",
+    "work_cloud_host_transition",
+];
+
+/// A real column of each catalog, for the UPDATE probe (a system column or a typo would die in
+/// parse analysis, before the permission check, and prove nothing).
+fn probe_column(table: &str) -> &'static str {
+    match table {
+        "plugin_registry" => "plugin_id",
+        "schema_migrations" => "version",
+        "work_cloud_host_transition" => "from_state",
+        other => panic!("no probe column for {other}"),
+    }
+}
+
+/// Each statement would succeed, or die on a constraint, never on permission, if the role held
+/// the verb: `DEFAULT VALUES` on a NOT NULL table fails with 23502 only after the permission
+/// check passed. So `42501` is the proof that the privilege itself is gone.
+fn write_probes(table: &str) -> [(&'static str, String); 4] {
+    [
+        ("INSERT", format!("INSERT INTO public.{table} DEFAULT VALUES")),
+        ("UPDATE", {
+                let c = probe_column(table);
+                format!("UPDATE public.{table} SET {c} = {c} WHERE false")
+            }),
+        ("DELETE", format!("DELETE FROM public.{table} WHERE false")),
+        ("TRUNCATE", format!("TRUNCATE public.{table}")),
+    ]
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn migration_owned_catalogs_are_read_only_for_every_runtime_role() {
+    let db = ProdDb::create().await;
+    let mut failures: Vec<String> = Vec::new();
+    for (role, password) in [
+        ("momo_app", "momo_app_dev_pw"),
+        ("momo_relay", "momo_relay_dev_pw"),
+        ("momo_worker", "momo_worker_dev_pw"),
+        ("momo_notifier", "momo_notifier_dev_pw"),
+    ] {
+        let pool = db.role(role, password).await;
+        for table in MIGRATION_OWNED_CATALOGS {
+            for (verb, sql) in write_probes(table) {
+                match sqlx::query(&sql).execute(&pool).await {
+                    Ok(_) => failures.push(format!("{role}: {verb} {table} succeeded")),
+                    Err(sqlx::Error::Database(error))
+                        if error.code().as_deref() == Some("42501") => {}
+                    Err(error) => failures.push(format!(
+                        "{role}: {verb} {table} failed for a reason other than permission: {error}"
+                    )),
+                }
+            }
+        }
+        pool.close().await;
+    }
+    // The revoke must not take reads with it: the API/relay/worker roles read the catalog and
+    // the migration ledger, and the notifier's T3 trigger reads the transition table.
+    let mut read_failures: Vec<String> = Vec::new();
+    for (role, password, tables) in [
+        ("momo_app", "momo_app_dev_pw", &MIGRATION_OWNED_CATALOGS[..]),
+        ("momo_relay", "momo_relay_dev_pw", &MIGRATION_OWNED_CATALOGS[..]),
+        ("momo_worker", "momo_worker_dev_pw", &MIGRATION_OWNED_CATALOGS[..]),
+        ("momo_notifier", "momo_notifier_dev_pw", &MIGRATION_OWNED_CATALOGS[2..]),
+    ] {
+        let pool = db.role(role, password).await;
+        for table in tables {
+            let rows: Result<i64, _> =
+                sqlx::query_scalar(&format!("SELECT count(*) FROM public.{table}"))
+                    .fetch_one(&pool)
+                    .await;
+            match rows {
+                Ok(n) if n > 0 => {}
+                Ok(_) => read_failures.push(format!("{role}: {table} reads zero rows")),
+                Err(error) => read_failures.push(format!("{role}: SELECT {table}: {error}")),
+            }
+        }
+        pool.close().await;
+    }
+    db.finish().await;
+    assert!(
+        failures.is_empty(),
+        "runtime roles can still write a migration-owned catalog: {failures:?}"
+    );
+    assert!(
+        read_failures.is_empty(),
+        "the lockdown took a needed read away: {read_failures:?}"
+    );
+}
+
+/// The lockdown block is the same text in the dev and prod bootstrap files and names all three
+/// tables, so the CI posture (`bootstrap_roles.sql`) cannot drift from production.
+#[test]
+fn catalog_readonly_lockdown_block_is_identical_in_both_bootstrap_files() {
+    fn block(relative: &str) -> String {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../..")
+            .join(relative);
+        let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{path:?}: {e}"));
+        assert_eq!(text.matches("-- BEGIN catalog-readonly-lockdown").count(), 1, "{relative}");
+        assert_eq!(text.matches("-- END catalog-readonly-lockdown").count(), 1, "{relative}");
+        let begin = text.find("-- BEGIN catalog-readonly-lockdown").unwrap();
+        let end = text.find("-- END catalog-readonly-lockdown").unwrap();
+        assert!(begin < end, "{relative}: markers out of order");
+        text[begin..end].to_string()
+    }
+    let dev = block("infra/rust/sql/bootstrap_roles.sql");
+    let prod = block("infra/rust/sql/bootstrap_runtime_roles.sql");
+    assert_eq!(dev, prod, "catalog-readonly-lockdown differs between dev and prod bootstrap");
+    for table in MIGRATION_OWNED_CATALOGS {
+        assert!(prod.contains(&format!("'{table}'")), "lockdown must name {table}");
+    }
+    assert!(!prod.contains("GRANT "), "the lockdown revokes only");
 }
 
 /// Seed one workspace with an owner and a personal agent, as the superuser.

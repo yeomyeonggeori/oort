@@ -36,7 +36,7 @@ pub const NON_TENANT_TABLES: &[(&str, &str)] = &[
     ),
     (
         "public.plugin_registry",
-        "physical plugin catalog shared by every workspace, no secrets (013); RLS is off and momo_app can write it today (KNOWN_UNPROTECTED_NON_TENANT)",
+        "physical plugin catalog shared by every workspace, no secrets (013); RLS is off, so writes are revoked from every runtime role instead (catalog-readonly-lockdown, #4372)",
     ),
     (
         "public.provider_default_ai",
@@ -60,11 +60,11 @@ pub const NON_TENANT_TABLES: &[(&str, &str)] = &[
     ),
     (
         "public.schema_migrations",
-        "the migration runner's own tracking table (momo_db::migrate), no tenant data; RLS is off and momo_app can write it today (KNOWN_UNPROTECTED_NON_TENANT)",
+        "the migration runner's own tracking table (momo_db::migrate), no tenant data; RLS is off, so writes are revoked from every runtime role instead (catalog-readonly-lockdown, #4372)",
     ),
     (
         "public.work_cloud_host_transition",
-        "static lifecycle transition lookup (053), no per-tenant rows; RLS is off and momo_app can write it today (KNOWN_UNPROTECTED_NON_TENANT)",
+        "static lifecycle transition lookup (053), no per-tenant rows; RLS is off, so writes are revoked from every runtime role instead (catalog-readonly-lockdown, #4372)",
     ),
     (
         "public.workspace",
@@ -90,15 +90,11 @@ pub const PUBLIC_DEFINER_FUNCTIONS: &[&str] = &[
 ];
 
 /// Non-tenant tables (see [`NON_TENANT_TABLES`]) on which RLS is off while
-/// `momo_app` can still write. Baseline 2026-10-24, found by the SEC-04
-/// review: these three are shared catalogs the API role should only read.
-/// The list pins today's gap so a *new* unprotected, writable table fails;
-/// revoking the writes (follow-up issue) empties it.
-pub const KNOWN_UNPROTECTED_NON_TENANT: &[&str] = &[
-    "public.plugin_registry",
-    "public.schema_migrations",
-    "public.work_cloud_host_transition",
-];
+/// `momo_app` can still write. Baseline 2026-10-24 held three (`plugin_registry`,
+/// `schema_migrations`, `work_cloud_host_transition`); #4372 revoked their writes
+/// (`catalog-readonly-lockdown` in both bootstrap files), so the list is empty and any
+/// new unprotected, writable table fails the test.
+pub const KNOWN_UNPROTECTED_NON_TENANT: &[&str] = &[];
 
 /// SQL that renders an expression the way the fingerprints below were taken:
 /// `pg_get_expr` with whitespace collapsed, `NULL` for an absent expression.
