@@ -1121,6 +1121,80 @@ async fn the_trigger_follows_the_golden_shape_by_shape() {
 }
 
 // ---------------------------------------------------------------------------
+// D9 「단조 증가예요」: the readable head only moves forward
+// ---------------------------------------------------------------------------
+
+/// The send path hands out seqs in order, so a lower seq never arrives through it. Anything that
+/// fills a hole out of order (a repair, an import, a manual fix) does arrive that way, and the
+/// trigger's `GREATEST(last_readable_seq, NEW.seq)` is the only thing standing between that and a
+/// readable head that moves backwards — which would hide a message the member has not read from a
+/// DM they closed. Punch a hole at seq 2, fill it again, and the head must stay at 3.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_readable_head_never_moves_backwards() {
+    let _guard = test_lock().await;
+    let w = World::new().await;
+    let ws = w.workspace("monotone").await;
+    let a = w.human(ws, "a").await;
+    let b = w.human(ws, "b").await;
+    let dm = w.dm(ws, &[a.id, b.id], false).await;
+    for _ in 0..3 {
+        w.say(ws, dm, b.id).await;
+    }
+    assert_eq!(w.readable_head(dm).await, 3);
+
+    sqlx::query("DELETE FROM message WHERE channel_id = $1 AND seq = 2")
+        .bind(dm)
+        .execute(&w.su)
+        .await
+        .expect("punch a hole at seq 2");
+    assert_eq!(
+        w.readable_head(dm).await,
+        3,
+        "removing a row does not lower the head either"
+    );
+
+    sqlx::query(
+        "INSERT INTO message (workspace_id, channel_id, seq, hlc_ts, author_member_id, type, props) \
+         VALUES ($1, $2, 2, 2, $3, 'text', '{}')",
+    )
+    .bind(ws)
+    .bind(dm)
+    .bind(b.id)
+    .execute(&w.su)
+    .await
+    .expect("fill the hole out of order");
+    assert_eq!(
+        w.readable_head(dm).await,
+        3,
+        "a readable message below the head must not lower last_readable_seq (GREATEST)"
+    );
+
+    // Control: the same insert at a seq ABOVE the head still raises it, so the assertion above is
+    // about the GREATEST and not about the trigger having stopped firing.
+    sqlx::query("UPDATE channel_seq SET last_seq = 4 WHERE channel_id = $1")
+        .bind(dm)
+        .execute(&w.su)
+        .await
+        .expect("advance the head");
+    sqlx::query(
+        "INSERT INTO message (workspace_id, channel_id, seq, hlc_ts, author_member_id, type, props) \
+         VALUES ($1, $2, 4, 4, $3, 'text', '{}')",
+    )
+    .bind(ws)
+    .bind(dm)
+    .bind(b.id)
+    .execute(&w.su)
+    .await
+    .expect("insert above the head");
+    assert_eq!(
+        w.readable_head(dm).await,
+        4,
+        "control: the trigger still raises it"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // the numbers a client compares (D8), and what revives a closed DM
 // ---------------------------------------------------------------------------
 
