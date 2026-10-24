@@ -98,7 +98,10 @@ struct ScratchDb {
 impl ScratchDb {
     async fn create(label: &str) -> ScratchDb {
         let admin = admin_pool().await;
-        let name = format!("bf4227_{label}_{}", &Uuid::new_v4().simple().to_string()[..8]);
+        let name = format!(
+            "bf4227_{label}_{}",
+            &Uuid::new_v4().simple().to_string()[..8]
+        );
         sqlx::query(&format!("CREATE DATABASE {name}"))
             .execute(&admin)
             .await
@@ -119,10 +122,13 @@ impl ScratchDb {
     }
 
     async fn drop_it(self) {
-        sqlx::query(&format!("DROP DATABASE IF EXISTS {} WITH (FORCE)", self.name))
-            .execute(&self.admin)
-            .await
-            .expect("DROP DATABASE");
+        sqlx::query(&format!(
+            "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+            self.name
+        ))
+        .execute(&self.admin)
+        .await
+        .expect("DROP DATABASE");
     }
 }
 
@@ -242,7 +248,11 @@ fn scenario() -> Vec<Channel> {
             label: "ws2-mixed-machine-tail",
             workspace: 1,
             // The other tenant: must be filled in the same pass (the migration walks all tenants).
-            messages: vec![text(1), (2, "tool_result", json!({}), "sent"), work_session(3)],
+            messages: vec![
+                text(1),
+                (2, "tool_result", json!({}), "sent"),
+                work_session(3),
+            ],
             expected_readable_seq: 1,
         },
         Channel {
@@ -365,8 +375,11 @@ async fn the_backfill_fills_each_channel_with_its_newest_readable_seq() {
     let (db, pool, seeded, dir) = prepared("fill").await;
 
     // The real runner, the real file.
-    std::fs::copy(migrations_dir().join(MIGRATION_146), dir.join(MIGRATION_146))
-        .expect("copy 146");
+    std::fs::copy(
+        migrations_dir().join(MIGRATION_146),
+        dir.join(MIGRATION_146),
+    )
+    .expect("copy 146");
     let report = run_migrations(&db.url(), &dir, SeedMode::None).expect("apply 146 on seeded data");
     assert_eq!(
         report.applied,
@@ -417,12 +430,16 @@ async fn the_backfill_fills_each_channel_with_its_newest_readable_seq() {
     }
     // Row-count assertion (the test-side twin of the migration's own `GET DIAGNOSTICS` check): the
     // channels with something readable are exactly the ones that moved off 0.
-    let moved: i64 = sqlx::query_scalar("SELECT count(*) FROM channel_seq WHERE last_readable_seq > 0")
-        .fetch_one(&pool)
-        .await
-        .expect("count moved");
+    let moved: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM channel_seq WHERE last_readable_seq > 0")
+            .fetch_one(&pool)
+            .await
+            .expect("count moved");
     assert_eq!(moved, updated_channels);
-    assert_eq!(moved, 6, "six of the eight seeded channels hold something readable");
+    assert_eq!(
+        moved, 6,
+        "six of the eight seeded channels hold something readable"
+    );
     let untouched: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM channel_seq cs JOIN channel c ON c.id = cs.channel_id \
           WHERE cs.last_readable_seq = 0 AND c.name IN ('ws1-machine-only', 'ws1-empty')",
@@ -448,7 +465,8 @@ async fn the_backfill_fills_each_channel_with_its_newest_readable_seq() {
             .fetch_one(&pool)
             .await
             .expect("channel owner");
-    for (seq, message_type, expected) in [(6_i64, "text", 6_i64), (7, "system", 6), (8, "text", 8)] {
+    for (seq, message_type, expected) in [(6_i64, "text", 6_i64), (7, "system", 6), (8, "text", 8)]
+    {
         sqlx::query("UPDATE channel_seq SET last_seq = $2 WHERE channel_id = $1")
             .bind(mixed)
             .bind(seq)
@@ -491,8 +509,8 @@ async fn the_backfill_fills_each_channel_with_its_newest_readable_seq() {
 async fn the_row_count_assertion_fails_the_migration_when_the_filter_drifts() {
     let (db, pool, _seeded, dir) = prepared("drift").await;
 
-    let original = std::fs::read_to_string(migrations_dir().join(MIGRATION_146))
-        .expect("read migration 146");
+    let original =
+        std::fs::read_to_string(migrations_dir().join(MIGRATION_146)).expect("read migration 146");
     // The backfill's LATERAL filter is the first use of the alias `m.props`; the trigger body uses
     // `NEW.props` and the recount uses `m.props` a second time. Drop only the first.
     let needle = "AND (m.props->>'kind') IS DISTINCT FROM 'work_session'";
@@ -506,7 +524,10 @@ async fn the_row_count_assertion_fails_the_migration_when_the_filter_drifts() {
     std::fs::write(&sabotaged, &drifted).expect("write the sabotaged copy");
 
     let (ok, stderr) = apply_sql(&db.url(), &sabotaged);
-    assert!(!ok, "a backfill whose filter drifted must abort the migration");
+    assert!(
+        !ok,
+        "a backfill whose filter drifted must abort the migration"
+    );
     assert!(
         stderr.contains("146 backfill: updated"),
         "the failure is the row-count assertion, not an unrelated error: {stderr}"

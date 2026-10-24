@@ -150,7 +150,10 @@ async fn layer_two_the_handlers_refuse_a_non_human_principal_before_anything_els
         )
         .await;
         assert_eq!(status, 403, "{kind:?} PUT: {message}");
-        assert_eq!(message, "dm closure requires a human bearer", "{kind:?} PUT");
+        assert_eq!(
+            message, "dm closure requires a human bearer",
+            "{kind:?} PUT"
+        );
 
         let (status, message) = message_of(http.delete(&url).send().await.expect("DELETE")).await;
         assert_eq!(status, 403, "{kind:?} DELETE: {message}");
@@ -194,7 +197,11 @@ async fn a_bad_body_is_a_400_and_costs_no_connection() {
             r#"{"seenSeq": 9223372036854775808}"#,
         ),
         ("not json", Some("application/json"), "seenSeq=3"),
-        ("wrong content type", Some("text/plain"), r#"{"seenSeq": 3}"#),
+        (
+            "wrong content type",
+            Some("text/plain"),
+            r#"{"seenSeq": 3}"#,
+        ),
         ("no body, no content type", None, ""),
     ];
     for (label, content_type, raw) in cases {
@@ -203,7 +210,10 @@ async fn a_bad_body_is_a_400_and_costs_no_connection() {
             request = request.header("content-type", content_type);
         }
         let (status, message) = message_of(request.send().await.expect("PUT")).await;
-        assert_eq!(status, 400, "{label}: expected 400, got {status} ({message})");
+        assert_eq!(
+            status, 400,
+            "{label}: expected 400, got {status} ({message})"
+        );
         assert_eq!(
             message, "seenSeq must be a non-negative integer",
             "{label}: one message for every refusal of the body"

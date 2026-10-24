@@ -6449,7 +6449,10 @@ mod tests {
             "closed_at_seq is a key even when the caller has not closed the DM: {json}"
         );
         assert!(json["read_states"][0]["closed_at_seq"].is_null());
-        assert!(json["read_states"][0].get("closedAtSeq").is_none(), "{json}");
+        assert!(
+            json["read_states"][0].get("closedAtSeq").is_none(),
+            "{json}"
+        );
         // `flatten` keeps the row flat: the cursor fields are siblings, not nested under `state`.
         assert!(json["read_states"][0].get("state").is_none(), "{json}");
     }

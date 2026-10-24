@@ -435,7 +435,10 @@ impl World {
     async fn rows(&self, who: &Person, workspace: Uuid) -> Vec<Value> {
         let response = self
             .http
-            .get(format!("{}/v1/workspaces/{workspace}/read-state", self.base))
+            .get(format!(
+                "{}/v1/workspaces/{workspace}/read-state",
+                self.base
+            ))
             .bearer_auth(&who.token)
             .send()
             .await
@@ -605,7 +608,10 @@ async fn a_closure_is_invisible_to_another_workspace() {
         })
     })
     .await;
-    assert!(plant.is_err(), "WITH CHECK refuses a row for another workspace");
+    assert!(
+        plant.is_err(),
+        "WITH CHECK refuses a row for another workspace"
+    );
     let deleted = with_tenant_tx(&w.app, ws_a, move |conn| {
         Box::pin(async move {
             let done = sqlx::query("DELETE FROM dm_closure WHERE workspace_id = $1")
@@ -666,8 +672,7 @@ async fn a_closure_is_only_the_requesters() {
         w.rows(&b, ws)
             .await
             .iter()
-            .filter(|row| row["channel_id"].as_str().map(str::to_lowercase)
-                == Some(dm.to_string()))
+            .filter(|row| row["channel_id"].as_str().map(str::to_lowercase) == Some(dm.to_string()))
             .count(),
         1,
         "two closers must not duplicate the row in a projection"
@@ -758,7 +763,10 @@ async fn an_agent_bearer_cannot_close_or_reopen_a_dm() {
         )
         .await;
         assert_eq!(put.0, 403, "{label} PUT: {}", put.1);
-        assert_eq!(put.1, AGENT_NOT_ALLOWED, "{label} PUT: refused for the route");
+        assert_eq!(
+            put.1, AGENT_NOT_ALLOWED,
+            "{label} PUT: refused for the route"
+        );
         let delete = error_status_message(
             w.http
                 .delete(w.closure_url(ws, dm))
@@ -769,16 +777,26 @@ async fn an_agent_bearer_cannot_close_or_reopen_a_dm() {
         )
         .await;
         assert_eq!(delete.0, 403, "{label} DELETE: {}", delete.1);
-        assert_eq!(delete.1, AGENT_NOT_ALLOWED, "{label} DELETE: refused for the route");
+        assert_eq!(
+            delete.1, AGENT_NOT_ALLOWED,
+            "{label} DELETE: refused for the route"
+        );
     }
-    assert_eq!(w.stored_count(agent).await, 0, "a refused agent wrote nothing");
+    assert_eq!(
+        w.stored_count(agent).await,
+        0,
+        "a refused agent wrote nothing"
+    );
     assert_eq!(w.stored_count(owner.id).await, 0);
 
     // Control: the same bearer is valid — it posts a message in that DM (an open route) — so the
     // refusals above are the route's, not a bad credential's.
     let posted = w
         .http
-        .post(format!("{}/v1/workspaces/{ws}/channels/{dm}/messages", w.base))
+        .post(format!(
+            "{}/v1/workspaces/{ws}/channels/{dm}/messages",
+            w.base
+        ))
         .bearer_auth(&bearer)
         .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "에이전트의 보통 답"}))
         .send()
@@ -851,7 +869,10 @@ async fn closure_on_anything_but_a_live_dm_of_the_caller_is_404() {
     for (label, channel) in cases {
         let put = w.put_closure(&a, ws, channel, 1).await;
         assert_eq!(put.0, 404, "PUT on {label}: {}", put.1);
-        assert_eq!(put.1, "dm not found", "PUT on {label}: one answer for all of them");
+        assert_eq!(
+            put.1, "dm not found",
+            "PUT on {label}: one answer for all of them"
+        );
         let delete = w.delete_closure(&a, ws, channel).await;
         assert_eq!(delete.0, 404, "DELETE on {label}: {}", delete.1);
         assert_eq!(delete.1, "dm not found", "DELETE on {label}");
@@ -866,10 +887,18 @@ async fn closure_on_anything_but_a_live_dm_of_the_caller_is_404() {
     // Control: the same caller, same verbs, on the one live DM — so the 404s are about the channel.
     assert_eq!(w.put_closure(&a, ws, live, 1).await.0, 204, "control PUT");
     assert!(w.stored(a.id, live).await.is_some());
-    assert_eq!(w.delete_closure(&a, ws, live).await.0, 204, "control DELETE");
+    assert_eq!(
+        w.delete_closure(&a, ws, live).await.0,
+        204,
+        "control DELETE"
+    );
     assert!(w.stored(a.id, live).await.is_none());
     // DELETE of a DM that was never closed is 204 as well (the end state is what was asked for).
-    assert_eq!(w.delete_closure(&a, ws, live).await.0, 204, "idempotent DELETE");
+    assert_eq!(
+        w.delete_closure(&a, ws, live).await.0,
+        204,
+        "idempotent DELETE"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -898,7 +927,11 @@ async fn the_watermark_is_the_clients_seen_seq_and_only_moves_forward() {
     // be buried: the stored watermark is what A *saw* (3), not the head at PUT time (4).
     assert_eq!(w.say(ws, dm, b.id).await, 4);
     assert_eq!(w.put_closure(&a, ws, dm, seen).await.0, 204);
-    assert_eq!(w.stored(a.id, dm).await.expect("row").0, 3, "watermark = what A saw");
+    assert_eq!(
+        w.stored(a.id, dm).await.expect("row").0,
+        3,
+        "watermark = what A saw"
+    );
     let after = w.row(&a, ws, dm).await;
     assert_eq!(after["closed_at_seq"], 3);
     assert_eq!(after["latest_readable_seq"], 4);
@@ -912,7 +945,10 @@ async fn the_watermark_is_the_clients_seen_seq_and_only_moves_forward() {
     let before_retransmit = w.stored(a.id, dm).await.expect("row");
     assert_eq!(w.put_closure(&a, ws, dm, seen).await.0, 204);
     let after_retransmit = w.stored(a.id, dm).await.expect("row");
-    assert_eq!(after_retransmit.0, 3, "a retransmit does not jump to the head");
+    assert_eq!(
+        after_retransmit.0, 3,
+        "a retransmit does not jump to the head"
+    );
     assert_eq!(
         after_retransmit.1, before_retransmit.1,
         "an identical PUT leaves the row (including closed_at) untouched"
@@ -995,7 +1031,10 @@ async fn the_trigger_follows_the_golden_shape_by_shape() {
     // shape most messages have, and the one a `<>` comparison silently drops.
     let response = w
         .http
-        .post(format!("{}/v1/workspaces/{ws}/channels/{dm}/messages", w.base))
+        .post(format!(
+            "{}/v1/workspaces/{ws}/channels/{dm}/messages",
+            w.base
+        ))
         .bearer_auth(&b.token)
         .json(&json!({"clientMsgId": Uuid::new_v4(), "body": "보통 메시지"}))
         .send()
@@ -1097,7 +1136,9 @@ async fn machine_messages_do_not_revive_but_readable_ones_do() {
     w.say(ws, dm, agent).await;
     w.say(ws, dm, agent).await;
 
-    let head = w.row(&owner, ws, dm).await["latest_seq"].as_i64().expect("head");
+    let head = w.row(&owner, ws, dm).await["latest_seq"]
+        .as_i64()
+        .expect("head");
     assert_eq!(w.put_closure(&owner, ws, dm, head).await.0, 204);
     let closed = w.row(&owner, ws, dm).await;
     assert_eq!(
@@ -1106,8 +1147,16 @@ async fn machine_messages_do_not_revive_but_readable_ones_do() {
     );
 
     // An agent's work-state noise piles up after the close...
-    w.send(ws, dm, agent, MessageType::ToolCall, json!({})).await;
-    w.send(ws, dm, agent, MessageType::Text, json!({"kind": "work_session"})).await;
+    w.send(ws, dm, agent, MessageType::ToolCall, json!({}))
+        .await;
+    w.send(
+        ws,
+        dm,
+        agent,
+        MessageType::Text,
+        json!({"kind": "work_session"}),
+    )
+    .await;
     w.send(ws, dm, agent, MessageType::System, json!({})).await;
     let noisy = w.row(&owner, ws, dm).await;
     assert!(
@@ -1155,7 +1204,10 @@ async fn read_state_rows_carry_both_fields_and_the_put_response_does_not() {
     for row in w.rows(&a, ws).await {
         assert!(row["latest_readable_seq"].is_i64(), "{row}");
         assert!(row.get("closed_at_seq").is_some(), "{row}");
-        assert!(row["closed_at_seq"].is_null(), "nothing is closed yet: {row}");
+        assert!(
+            row["closed_at_seq"].is_null(),
+            "nothing is closed yet: {row}"
+        );
         assert!(row.get("closedAtSeq").is_none(), "{row}");
     }
     assert_eq!(w.row(&a, ws, public).await["latest_readable_seq"], 1);
@@ -1175,7 +1227,10 @@ async fn read_state_rows_carry_both_fields_and_the_put_response_does_not() {
     // The PUT read-state response keeps its old shape: it does not say anything about closure.
     let put = w
         .http
-        .put(format!("{}/v1/workspaces/{ws}/channels/{dm}/read-state", w.base))
+        .put(format!(
+            "{}/v1/workspaces/{ws}/channels/{dm}/read-state",
+            w.base
+        ))
         .bearer_auth(&a.token)
         .json(&json!({"last_read_seq": 1}))
         .send()
@@ -1185,7 +1240,10 @@ async fn read_state_rows_carry_both_fields_and_the_put_response_does_not() {
     let body: Value = put.json().await.expect("PUT read-state body");
     assert!(body.get("latest_readable_seq").is_none(), "{body}");
     assert!(body.get("closed_at_seq").is_none(), "{body}");
-    assert_eq!(body["latest_seq"], 1, "the rest of the response is unchanged");
+    assert_eq!(
+        body["latest_seq"], 1,
+        "the rest of the response is unchanged"
+    );
 }
 
 #[tokio::test]
@@ -1201,7 +1259,10 @@ async fn the_catalog_registers_dm_closure_as_a_forced_rls_tenant_table() {
     .fetch_one(&w.su)
     .await
     .expect("dm_closure in the catalog");
-    assert!(rls && forced, "dm_closure is ENABLE + FORCE row level security");
+    assert!(
+        rls && forced,
+        "dm_closure is ENABLE + FORCE row level security"
+    );
 
     let policy: (String, String) = sqlx::query_as(
         "SELECT pg_get_expr(polqual, polrelid), pg_get_expr(polwithcheck, polrelid) \
@@ -1236,9 +1297,14 @@ async fn the_catalog_registers_dm_closure_as_a_forced_rls_tenant_table() {
     .fetch_one(&w.su)
     .await
     .expect("the trigger function exists");
-    assert!(!definer, "the trigger function is SECURITY INVOKER, never DEFINER");
     assert!(
-        config.iter().any(|setting| setting.starts_with("search_path=")),
+        !definer,
+        "the trigger function is SECURITY INVOKER, never DEFINER"
+    );
+    assert!(
+        config
+            .iter()
+            .any(|setting| setting.starts_with("search_path=")),
         "the trigger function pins its search_path: {config:?}"
     );
 

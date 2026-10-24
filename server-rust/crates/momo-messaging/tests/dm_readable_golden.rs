@@ -42,11 +42,18 @@ fn str_of<'a>(shape: &'a Value, key: &str) -> &'a str {
 #[test]
 fn every_shape_is_well_formed() {
     let shapes = shapes();
-    assert!(shapes.len() >= 10, "the golden lost shapes: {}", shapes.len());
+    assert!(
+        shapes.len() >= 10,
+        "the golden lost shapes: {}",
+        shapes.len()
+    );
     let mut names = std::collections::BTreeSet::new();
     for shape in &shapes {
         let name = str_of(shape, "name");
-        assert!(names.insert(name.to_string()), "duplicate shape name {name}");
+        assert!(
+            names.insert(name.to_string()),
+            "duplicate shape name {name}"
+        );
         assert!(
             MessageType::from_db_label(str_of(shape, "type")).is_some(),
             "{name}: `type` is not a message_type label"
@@ -129,17 +136,21 @@ fn the_shapes_the_rule_is_easy_to_get_wrong_stay() {
     // Every ambient `type` the trigger names is covered, and one readable `type` of each family.
     for ambient_type in ["system", "tool_call", "tool_result"] {
         assert!(
-            shapes.iter().any(|shape| str_of(shape, "type") == ambient_type
-                && str_of(shape, "state") == "sent"
-                && str_of(shape, "trigger") == "ambient"),
+            shapes
+                .iter()
+                .any(|shape| str_of(shape, "type") == ambient_type
+                    && str_of(shape, "state") == "sent"
+                    && str_of(shape, "trigger") == "ambient"),
             "no ambient shape for type {ambient_type}"
         );
     }
     for readable_type in ["text", "diff", "artifact", "approval_request"] {
         assert!(
-            shapes.iter().any(|shape| str_of(shape, "type") == readable_type
-                && str_of(shape, "state") == "sent"
-                && str_of(shape, "trigger") == "readable"),
+            shapes
+                .iter()
+                .any(|shape| str_of(shape, "type") == readable_type
+                    && str_of(shape, "state") == "sent"
+                    && str_of(shape, "trigger") == "readable"),
             "no readable shape for type {readable_type}"
         );
     }
