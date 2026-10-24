@@ -1,7 +1,7 @@
 //! #3172 / ADR-0196 D4·D6·D10 — the consolidation job (duplicate merge, decision-interval closing, decay,
 //! source-death retirement, retention, proposal purge, forget → stale digests) against a real Postgres.
 //!
-//! `#[ignore]`d like its siblings; run against an isolated `pgvector/pgvector:0.8.5-pg18-trixie`
+//! `#[ignore]`d like its siblings; run against an isolated `pgvector/pgvector:0.8.7-pg18-trixie`
 //! (container name `3172-pg`, removed with `docker rm -f -v` afterwards):
 //!
 //! ```text

@@ -389,16 +389,50 @@ BEGIN
   END LOOP;
 END $$;
 
--- The global catalog is migration-owned. API routes may read it but may mutate
--- only tenant-scoped install/grant rows. Keep this revoke here as well as in 037:
--- a later role-password rotation must not restore broad table writes.
+-- #4381 (migration 147): the ten API-side mem_* definer functions (six API entry points and the four RLS
+-- policy helpers) are executable by momo_app only, not PUBLIC. Migration 147 can run before the runtime roles exist,
+-- so reassert the grant here.
 DO $$
+DECLARE f text;
 BEGIN
-  IF to_regclass('public.plugin_registry') IS NOT NULL THEN
-    REVOKE INSERT, UPDATE, DELETE ON TABLE plugin_registry FROM momo_app;
-  END IF;
-END
-$$;
+  FOREACH f IN ARRAY ARRAY[
+    'mem_accept_proposal(uuid)', 'mem_digest_evidence_ok(uuid)', 'mem_edit_item(uuid,text,text)',
+    'mem_forget_item(uuid)', 'mem_item_evidence_ok(uuid)', 'mem_proposal_evidence_ok(uuid)',
+    'mem_reject_proposal(uuid)', 'mem_revert_consolidation(uuid)',
+    'mem_search_items(text,integer,uuid,text)', 'mem_topic_summary_ok(uuid)'
+  ] LOOP
+    IF to_regprocedure('public.' || f) IS NOT NULL THEN
+      EXECUTE format('REVOKE ALL ON FUNCTION public.%s FROM PUBLIC', f);
+      EXECUTE format('GRANT EXECUTE ON FUNCTION public.%s TO momo_app', f);
+    END IF;
+  END LOOP;
+END $$;
+
+-- BEGIN catalog-readonly-lockdown (#4372; SEC-04 follow-up). Identical in bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; tests compare the text between the markers.
+-- plugin_registry (013), schema_migrations (momo_db::migrate / migrate.sh) and work_cloud_host_transition
+-- (053/057) carry no tenant rows and no RLS, and only migrations (the schema owner) ever write them: the
+-- routes read plugin_registry, the T3 trigger only SELECTs the transition table. The ALL TABLES grant above
+-- (and DEFAULT PRIVILEGES for tables a migration creates later) hands every runtime role DML on them, so a
+-- compromised API session could add a plugin, rewrite the migration ledger or open an illegal host
+-- transition. Revoke every write-class verb; SELECT stays. Reasserted on both passes of momo-migrate.
+DO $$
+DECLARE
+  r text;
+  t text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY['plugin_registry', 'schema_migrations', 'work_cloud_host_transition'] LOOP
+    IF to_regclass('public.' || t) IS NULL THEN
+      CONTINUE;
+    END IF;
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END catalog-readonly-lockdown
 
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply
@@ -601,8 +635,37 @@ BEGIN
   IF to_regclass('public.workspace') IS NOT NULL THEN
     GRANT SELECT (avatar_media_id) ON workspace TO momo_notifier;
   END IF;
+  --  * woken-not-collected verdict (ADR-0200 증보 3 E7, #4284): the run stall sweep reads,
+  --    per candidate run and ONLY as column grants, what `woken_uncollected_verdict`
+  --    needs. No write, no DELETE.
+  --      hosted_agent_connection: `id`, `status` (active connection), `approved_scopes`
+  --        (the job's `agent:jobs:read`), and `approved_channel_ids`,
+  --        `approved_dm_channel_ids`, `confirmed_by`, which the INVOKER function
+  --        `hosted_connection_channel_ids()` reads for the run's channel.
+  --      hosted_agent_liveness: the work signals and the last refusal. Not
+  --        `agent_member_id`, `last_tool_call_at`, `last_tool_error_code`.
+  --      hosted_agent_doorbell_ring: when a person last asked to wake the agent again.
+  --      agent_provider_pin: `kind` (the trial stop clause, `trial_members_stop_sql!`).
+  --    NOT granted, on purpose: `token` (a BYPASSRLS role never reads a credential — the
+  --    verdict drops the token conditions of the claim predicate for this reason) and
+  --    `hosted_agent_doorbell` (`url`, `secret_sealed`; the verdict needs no fire time).
   IF to_regclass('public.hosted_agent_connection') IS NOT NULL THEN
-    GRANT SELECT (workspace_id, agent_member_id) ON hosted_agent_connection TO momo_notifier;
+    GRANT SELECT (workspace_id, agent_member_id, id, status, approved_scopes,
+                  approved_channel_ids, approved_dm_channel_ids, confirmed_by)
+      ON hosted_agent_connection TO momo_notifier;
+  END IF;
+  IF to_regclass('public.hosted_agent_liveness') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, connection_id, last_inbox_read_at, last_claim_at,
+                  last_run_event_at, last_ping_at, last_ping_state, last_tool_error_at)
+      ON hosted_agent_liveness TO momo_notifier;
+  END IF;
+  IF to_regclass('public.hosted_agent_doorbell_ring') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, connection_id, requested_at)
+      ON hosted_agent_doorbell_ring TO momo_notifier;
+  END IF;
+  IF to_regclass('public.agent_provider_pin') IS NOT NULL THEN
+    GRANT SELECT (workspace_id, agent_member_id, kind)
+      ON agent_provider_pin TO momo_notifier;
   END IF;
   -- ADR-0204 D7 / #3928: an approval's push goes to the people who MAY approve it,
   -- and "may" starts with the workspace role. `momo_messaging::active_workspace_role`

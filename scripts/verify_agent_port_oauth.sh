@@ -64,7 +64,7 @@ fi
 export PATH="$PSQL_DIR:$PATH"
 
 DOCKER_BIN="${DOCKER_BIN:-docker}"
-PG_IMAGE="pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
+PG_IMAGE="pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0"
 PG_PORT="${AGENT_PORT_OAUTH_PG_PORT:-24569}"
 NAME_PREFIX="${AGENT_PORT_OAUTH_PROJECT:-w1368-agent-port-oauth}"
 OWNERSHIP_LABEL=com.momo.agent-port-oauth.invocation

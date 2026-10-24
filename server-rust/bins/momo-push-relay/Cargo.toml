@@ -43,3 +43,6 @@ reqwest = { workspace = true, features = ["http2"] }
 [dev-dependencies]
 ed25519-dalek.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+
+[lints]
+workspace = true

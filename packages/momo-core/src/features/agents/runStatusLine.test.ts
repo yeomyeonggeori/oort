@@ -184,6 +184,20 @@ describe("원장: 깨우는 신호와 모르는 종류 (#3824)", () => {
     ).toThrow();
   });
 
+  it("timed_out + woken_not_collected 행을 받아들이고 끝 사유 문장을 만든다 (ADR-0200 증보 3 E6)", () => {
+    const ledger = agentRunLedgerFromWire({
+      runId: RUN,
+      events: [
+        { ordinal: 1, kind: "queued", createdAtMs: T },
+        { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: T + 1 },
+        { ordinal: 3, kind: "timed_out", code: "woken_not_collected", createdAtMs: T + 30 * MIN },
+      ],
+    });
+    expect(ledger.events.map((e) => e.kind)).toEqual(["queued", "doorbell_rung", "timed_out"]);
+    expect(ledger.events[2]?.code).toBe("woken_not_collected");
+    expect(ledger.events[2]?.rawKind).toBeUndefined();
+  });
+
   it("doorbell_rung을 아는 종류로 읽는다", () => {
     const ledger = agentRunLedgerFromWire({
       runId: RUN,

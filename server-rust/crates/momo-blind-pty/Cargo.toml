@@ -32,4 +32,5 @@ tokio = { workspace = true, features = ["net", "io-util", "time", "sync"] }
 # the AEAD into the identity function. Only the spike's sabotage run sets it:
 #   RUSTFLAGS="--cfg sabotage_null_cipher" cargo test -p momo-blind-pty
 [lints.rust]
+unsafe_code = "forbid"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(sabotage_null_cipher)"] }

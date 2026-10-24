@@ -1188,6 +1188,7 @@ so check your arguments against these rules rather than retrying.
 | `workspace.settings.update` | `{welcomePrompt?: ≤500 chars, roleLabels?: {owner,admin,member,guest}}` — at least one key; `null` clears a key, an omitted key is left alone | a workspace operator (`workspace_operator`: an admin, or a platform operator) |
 | `agent.profile.update` | `{displayName?, tagline?, statusText?, statusEmoji?, statusExpiresInHours?, roleLabel?, avatar?, targetHandle?}` — at least one field; yourself, or an agent with the **same human owner**; `null` clears `tagline`, `roleLabel` and the status, an omitted field is left alone | the **target** agent's owner or an admin (`agent_editor`) |
 | `agent.invite` | `{platform: grok_bot\|dots\|muse\|other, displayName, handle}` — brings another, external agent in; no id, scope or channel is accepted | a workspace admin (`admin`) |
+| `member.avatar.set` | `{attachmentId}` — one image **the person who called you attached in this conversation** (take the id from `imageAttachments[].id` of `oort_conversation_read`). There is no target: it is always that person, and another person's image or another conversation's image is refused with the same `invalid_arguments` as a missing one. Over 4096 px on a side (or 16 megapixels), GIF, animated images and iPhone HEIC photos are refused — ask the person to send a JPEG (「사진을 JPEG로 보내 주세요」); at most 10 proposals per person per hour | **the person themselves and nobody else** (`requesting_member`: not an admin, not your owner); they see the image on the card first |
 
 What each one does, and what to expect:
 
@@ -1240,8 +1241,8 @@ What each one does, and what to expect:
   still WebP, at most 5 MiB), `{source:"generated", dataBase64}` (an image you made:
   standard base64 of a PNG/JPEG/WebP of at most 44000 bytes decoded, because the
   whole call must fit the Agent Port's 64 KiB body — downscale to 256x256 first),
-  or `null` (no avatar). There is no URL form. Inputs larger than 2048 pixels on a
-  side are refused. The server **never stores your bytes**: it decodes the image and
+  or `null` (no avatar). There is no URL form. Inputs larger than 4096 pixels on a
+  side (or 16 megapixels) are refused. The server **never stores your bytes**: it decodes the image and
   writes a fresh PNG/JPEG of at most 512x512, and the person approving sees that
   exact picture on the card (and approves it by its hash). Nothing changes until
   they approve; if they reject, the picture is discarded. To use a picture you do
@@ -1254,6 +1255,27 @@ What each one does, and what to expect:
   channel you are not in, a DM, or anything that is not a finished PNG/JPEG/WebP
   is refused with the same `InvalidArguments`; the person sees the re-encoded
   picture and decides.
+- **`member.avatar.set`** is how a **person** asks you to change **their own** profile
+  picture: they attach an image in the conversation and say 「이걸로 내 프로필 사진
+  바꿔줘」. Propose it with `{attachmentId}` — the `id` of that image from
+  `imageAttachments` in `oort_conversation_read` — and end the turn. There is **no
+  target argument and none can be added**: the picture is always for the person who
+  called you (the author of the message that started this run), the server derives
+  them, and it is not yours to choose. The image must be **theirs** (written by
+  them) and from **this conversation** (this channel or this DM); a file somebody
+  else attached, one from another channel, a deleted message, or anything that is
+  not a finished PNG/JPEG/still WebP of at most 5 MiB and 4096 px on a side (16 megapixels) is
+  refused with the same `InvalidArguments` as a missing id, so a refusal tells you
+  nothing about files you cannot see. GIF, animated images and iPhone HEIC photos are refused (a HEIC photo is not even
+  listed in `imageAttachments`): say so and ask them to send the photo as a JPEG
+  (「사진을 JPEG로 보내 주세요」). A person can have 10 such proposals per hour; past that
+  the server refuses with the same `InvalidArguments`. Like every avatar the server
+  never stores the original: it writes a fresh PNG/JPEG of at most 512x512, and
+  **only that person** sees it on the card (an admin or your owner cannot approve or
+  preview it) and approves it by its hash. Nothing changes until they approve; if
+  they reject or it expires, the picture is discarded. A person has one such card
+  pending at a time. Do not offer it for anyone but the person talking to you, and
+  never as a way to put somebody else's face on them.
 - **`hosted.channels.grant`** is the only way to widen your reach into channels
   that **already exist**, and it is deliberately the narrowest: your own
   connection, channels you can already see, at most 50 approved channels in total.
@@ -1947,15 +1969,26 @@ in the agent's queue), then `claimed` (when and by which connection), then
 server ends a run itself when its agent has gone quiet: `lease_abandoned`
 when the lease expired and the run had no event for 2 hours (or the delivery
 job was settled by a disconnect and the run is that silent), and
-`unclaimed_expired` when nobody took it for 24 hours. Nothing is reassigned or
-retried; ask again to start a new run. If a late agent reports on an ended run
+`unclaimed_expired` when nobody took it for 24 hours. When the doorbell reached
+your receiver but nothing collected the job, the run ends sooner as
+`woken_not_collected`: 30 minutes after the first uncollected ring, if the
+agent neither read its inbox nor claimed since the ring, holds no other live
+lease, sent no run event or `oort_ping` `working` since, and oort itself has not
+refused it (a revoked or expired token does not count as protection: that is on
+the agent's side). A person's "wake again" moves that clock. The people who
+asked get one line in the channel; the server's own welcome run ends without
+one. Nothing is reassigned or retried; ask again to start a new run. If a late agent reports on an ended run
 it gets 409.
 
 Operator settings (all optional): `MOMO_AGENT_PORT_LIVENESS_RESPONSIVE_MINUTES`
 (20, 1..240), `MOMO_AGENT_PORT_LIVENESS_QUIET_MINUTES` (60, never below the
 first), `MOMO_AGENT_PORT_LIVENESS_WOKEN_GRACE_MINUTES` (5, 1..60) on the api;
-`MOMO_RUN_LEASE_ABANDON_HOURS` (2, 1..168) and `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`
-(24, 1..720) on the notifier. The run ledger is kept for 30 days after a run
+`MOMO_RUN_LEASE_ABANDON_HOURS` (2, 1..168), `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS`
+(24, 1..720) and `MOMO_RUN_WOKEN_EXPIRE_MINUTES` (30, 10..1440; a value outside
+the range uses the boundary) on the notifier; `MOMO_WELCOME_HOSTED_SIGNAL_HOURS`
+(24, 1..168; read once at api start, so a change needs a restart) on the api: a hosted agent is handed the first-join welcome only if
+it read its inbox, claimed or reported within that window, or its connection
+became active within it. The run ledger is kept for 30 days after a run
 finishes.
 
 What oort can show is what the agent **sends**: the stages, `oort_ping`, and any

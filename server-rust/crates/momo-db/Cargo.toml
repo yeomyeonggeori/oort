@@ -22,3 +22,6 @@ tracing.workspace = true
 # of the D5 conformance suite. Orchestrator-added B0 docker gate.
 tokio = { workspace = true }
 uuid = { workspace = true }
+
+[lints]
+workspace = true

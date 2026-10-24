@@ -39,3 +39,6 @@ url = "2"
 [dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
 axum.workspace = true
+
+[lints]
+workspace = true

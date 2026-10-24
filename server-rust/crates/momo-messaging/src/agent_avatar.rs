@@ -56,11 +56,15 @@ pub const AGENT_AVATAR_OUT_MAX_BYTES: usize = 512 * 1024;
 pub const AGENT_AVATAR_IN_MAX_BYTES_GENERATED: usize = 44_000;
 /// An image already uploaded to the workspace (V3-2a: ≤5 MiB, like member avatars).
 pub const AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT: usize = 5 * 1024 * 1024;
-/// The longest side of an **input** image. The stored result is at most 512, so an
-/// input beyond 2048 buys nothing and costs memory: a 2048×2048 16-bit RGBA frame is
-/// 32 MiB. (Security review of #3799 measured 160–310 MB of RSS for 4096² inputs;
-/// 2048² is a quarter of that.)
-pub const AGENT_AVATAR_IN_MAX_DIM: u32 = 2048;
+/// The longest side of an **input** image (ADR-0186 증보 v4 V4-10 2: 2048 → 4096, so a
+/// phone photo of 4032×3024 is accepted). The stored result is at most 512, so the
+/// extra pixels only cost memory; they are bounded by [`AGENT_AVATAR_IN_MAX_PIXELS`]
+/// and the caller's decode concurrency, and the shrink happens before the rotation.
+pub const AGENT_AVATAR_IN_MAX_DIM: u32 = 4096;
+/// The most pixels (width × height) an **input** may claim, read from the header before
+/// any decoder allocates. 16 000 000 keeps a 12 MP phone photo (and 4096×3906) and
+/// refuses a 4096×4096 frame; an 8-bit RGB decode of the maximum is 48 MB.
+pub const AGENT_AVATAR_IN_MAX_PIXELS: u64 = 16_000_000;
 /// The decoder's allocation ceiling. What it actually bounds is the decoder's
 /// **scratch** — the PNG `iCCP`/`zTXt` inflation and similar — not the decoded frame
 /// (a 2048² 16-bit frame is 32 MiB and decodes fine with this set far lower; the
@@ -86,6 +90,10 @@ pub enum AvatarImageRejected {
     TooLarge,
     #[error("image type is not allowed (PNG, JPEG or still WebP only)")]
     UnsupportedType,
+    #[error(
+        "HEIC/HEIF photos are not supported: 사진을 JPEG로 보내 주세요 (send the photo as JPEG)"
+    )]
+    Heic,
     #[error("animated images are not allowed")]
     Animated,
     #[error("image dimensions could not be read")]
@@ -105,6 +113,7 @@ impl AvatarImageRejected {
             AvatarImageRejected::Empty => "empty",
             AvatarImageRejected::TooLarge => "too_large",
             AvatarImageRejected::UnsupportedType => "unsupported_type",
+            AvatarImageRejected::Heic => "heic_unsupported",
             AvatarImageRejected::Animated => "animated",
             AvatarImageRejected::DimensionsUnreadable => "dimensions_unreadable",
             AvatarImageRejected::DimensionsOutOfRange => "dimensions_out_of_range",
@@ -122,6 +131,17 @@ pub struct ProcessedAvatar {
     pub width: u32,
     pub height: u32,
     pub sha256: [u8; 32],
+}
+
+/// Whether the bytes are an ISO-BMFF `ftyp` box with a HEIC/HEIF brand (an iPhone's
+/// default photo format). Refused by name so the person is told what to do.
+fn is_heif(prefix: &[u8]) -> bool {
+    prefix.len() >= 12
+        && &prefix[4..8] == b"ftyp"
+        && matches!(
+            &prefix[8..12],
+            b"heic" | b"heix" | b"hevc" | b"hevx" | b"heim" | b"heis" | b"mif1" | b"msf1" | b"heif"
+        )
 }
 
 /// Whether a WebP is animated: the `VP8X` extended header's animation flag
@@ -179,6 +199,7 @@ pub fn process_with_all_limits(
             }
             ImageFormat::WebP
         }
+        _ if is_heif(prefix) => return Err(AvatarImageRejected::Heic),
         _ => return Err(AvatarImageRejected::UnsupportedType),
     };
     let mime = match format {
@@ -195,6 +216,7 @@ pub fn process_with_all_limits(
         || height == 0
         || width > AGENT_AVATAR_IN_MAX_DIM
         || height > AGENT_AVATAR_IN_MAX_DIM
+        || u64::from(width) * u64::from(height) > AGENT_AVATAR_IN_MAX_PIXELS
     {
         return Err(AvatarImageRejected::DimensionsOutOfRange);
     }
@@ -512,13 +534,55 @@ pub async fn apply_avatar_image_in_tx(
     image_id: Uuid,
     approval_id: Uuid,
 ) -> Result<Option<Option<Uuid>>, DbError> {
+    apply_avatar_image_for_kind_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        image_id,
+        approval_id,
+        "agent",
+    )
+    .await
+}
+
+/// [`apply_avatar_image_in_tx`] for a **person** (ADR-0186 증보 v4 `member.avatar.set`):
+/// the same staged → applied move, but the target must be a live human member. The two
+/// wrappers differ in exactly one word, so an agent's profile card can never apply an
+/// image onto a person and a person's card can never apply one onto an agent.
+pub async fn apply_human_avatar_image_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    image_id: Uuid,
+    approval_id: Uuid,
+) -> Result<Option<Option<Uuid>>, DbError> {
+    apply_avatar_image_for_kind_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        image_id,
+        approval_id,
+        "human",
+    )
+    .await
+}
+
+async fn apply_avatar_image_for_kind_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    image_id: Uuid,
+    approval_id: Uuid,
+    kind: &str,
+) -> Result<Option<Option<Uuid>>, DbError> {
     let member = sqlx::query(
         "SELECT avatar_image_id FROM member \
-          WHERE workspace_id = $1 AND id = $2 AND kind = 'agent' AND status = 'active' \
+          WHERE workspace_id = $1 AND id = $2 AND kind = $3::member_kind AND status = 'active' \
             AND deleted_at IS NULL FOR UPDATE",
     )
     .bind(workspace_id)
     .bind(member_id)
+    .bind(kind)
     .fetch_optional(&mut *conn)
     .await?;
     let Some(member) = member else {
@@ -685,6 +749,82 @@ pub async fn find_visible_image_attachment_in_tx(
     .bind(attachment_id)
     .bind(approved_channels)
     .bind(proposer_member_id)
+    .bind(max_bytes)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else { return Ok(None) };
+    Ok(Some(AvatarAttachmentSource {
+        id: row.try_get("id")?,
+        channel_id: row.try_get("channel_id")?,
+        drive_file_id: row.try_get("drive_file_id")?,
+        size_bytes: row.try_get("size_bytes")?,
+    }))
+}
+
+/// The person an agent run was **raised by**, and the conversation the run is in: the author
+/// of the run's trigger message, when that author is a live human member (ADR-0186 증보 v4
+/// `member.avatar.set`), with the run's channel.
+///
+/// The run must belong to `agent_member_id` — the proposer — so one agent's proposal
+/// can never be attributed to a run of another. Everything else (a run nobody
+/// addressed, a trigger written by an agent, a departed or deleted author, a missing
+/// run) is the same `None`: the caller answers one `InvalidArguments`.
+pub async fn requester_of_run_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    run_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<Option<(Uuid, Uuid)>, DbError> {
+    Ok(sqlx::query_as(
+        "SELECT h.id, r.channel_id \
+           FROM agent_run r \
+           JOIN message t ON t.workspace_id = r.workspace_id AND t.id = r.trigger_message_id \
+           JOIN member h ON h.workspace_id = t.workspace_id AND h.id = t.author_member_id \
+          WHERE r.workspace_id = $1 AND r.id = $2 AND r.agent_member_id = $3 \
+            AND h.kind = 'human' AND h.status = 'active' AND h.deleted_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .bind(agent_member_id)
+    .fetch_optional(&mut *conn)
+    .await?)
+}
+
+/// The attachment a person may turn into **their own** avatar through an agent: complete,
+/// a PNG/JPEG/WebP within `max_bytes`, on a live message **written by `requester`** in
+/// **`channel_id`** — the conversation the agent was called in. Anything else (a file
+/// somebody else attached, one from another channel or a DM the run is not in, a deleted
+/// message, a pending upload, a missing id) is the same `None`, so a refusal cannot be
+/// used to learn that a file exists.
+///
+/// Unlike [`find_visible_image_attachment_in_tx`] this does not exclude DMs: the person
+/// talks to their agent in a DM as often as in a channel, and the conversation **is** the
+/// boundary here (the run's own channel), not the agent's approved-channel set.
+pub async fn find_requester_attachment_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    requester: Uuid,
+    channel_id: Uuid,
+    attachment_id: Uuid,
+    max_bytes: i64,
+) -> Result<Option<AvatarAttachmentSource>, DbError> {
+    let row = sqlx::query(
+        "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
+           FROM attachment a \
+           JOIN channel c ON c.workspace_id = a.workspace_id AND c.id = a.channel_id \
+           JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+          WHERE a.workspace_id = $1 AND a.id = $2 AND a.status = 'complete' \
+            AND a.drive_file_id IS NOT NULL \
+            AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
+            AND a.size_bytes BETWEEN 1 AND $5 \
+            AND m.state <> 'deleted' \
+            AND m.author_member_id = $4 \
+            AND a.channel_id = $3 AND c.archived_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(attachment_id)
+    .bind(channel_id)
+    .bind(requester)
     .bind(max_bytes)
     .fetch_optional(&mut *conn)
     .await?;
@@ -888,14 +1028,54 @@ mod tests {
     }
 
     #[test]
-    fn the_input_dimension_ceiling_is_the_one_documented() {
-        assert_eq!(AGENT_AVATAR_IN_MAX_DIM, 2048);
+    fn the_input_ceilings_are_the_ones_documented() {
+        assert_eq!(AGENT_AVATAR_IN_MAX_DIM, 4096);
+        assert_eq!(AGENT_AVATAR_IN_MAX_PIXELS, 16_000_000);
+    }
+
+    #[test]
+    fn a_phone_photo_size_is_accepted_and_shrunk() {
+        // 4032x3024 (12 MP): the size that V4-4 (A) refused.
+        let photo = jpeg_of(4032, 3024);
+        let out = process_avatar_image(&photo, 5 << 20).expect("a phone-size photo");
+        assert_eq!((out.width, out.height), (512, 384));
+    }
+
+    #[test]
+    fn a_frame_over_the_pixel_budget_is_refused_from_the_header() {
+        // 4096x4096 is inside the per-side limit but over 16 MP.
+        let mut png = png_of(8, 8, [0, 0, 0, 255]);
+        png[16..20].copy_from_slice(&4096u32.to_be_bytes());
+        png[20..24].copy_from_slice(&4096u32.to_be_bytes());
+        assert_eq!(
+            process_avatar_image(&png, 1 << 20).unwrap_err(),
+            AvatarImageRejected::DimensionsOutOfRange
+        );
+    }
+
+    #[test]
+    fn a_heic_photo_is_refused_by_name_with_the_instruction() {
+        let mut heic = vec![0, 0, 0, 24];
+        heic.extend_from_slice(b"ftypheic");
+        heic.extend_from_slice(&[0; 32]);
+        let rejected = process_avatar_image(&heic, 1 << 20).unwrap_err();
+        assert_eq!(rejected, AvatarImageRejected::Heic);
+        assert_eq!(rejected.code(), "heic_unsupported");
+        assert!(rejected.to_string().contains("사진을 JPEG로 보내 주세요"));
+        // Any other box is still the generic refusal.
+        let mut other = vec![0, 0, 0, 24];
+        other.extend_from_slice(b"ftypmp42");
+        other.extend_from_slice(&[0; 32]);
+        assert_eq!(
+            process_avatar_image(&other, 1 << 20).unwrap_err(),
+            AvatarImageRejected::UnsupportedType
+        );
     }
 
     #[test]
     fn a_header_that_claims_a_huge_canvas_never_reaches_the_decoder() {
-        // A real PNG header (IHDR) claiming 2049 and then 4097 wide, then nothing.
-        for claimed in [2049u32, 4097] {
+        // A real PNG header (IHDR) claiming 4097 and then 70000 wide, then nothing.
+        for claimed in [4097u32, 70_000] {
             let mut png = png_of(8, 8, [0, 0, 0, 255]);
             png[16..20].copy_from_slice(&claimed.to_be_bytes());
             assert_eq!(

@@ -14,7 +14,7 @@
 
 - **D1 오프너는 실제 에이전트 run이다.** 서버가 시스템 라인을 꽂지 않는다. 신규 `RunTrigger::Welcome { member_id, agent_member_id, channel_id }`를 **agent-worker가 소비**해 웰컴 채널에 오프너 턴을 스트리밍한다(ADR-0158 문법 그대로 — "자라는 메시지 하나"). 오프너의 작성자는 `member.kind='agent'`이고 원장에 기록된다(D6).
 - **D2 트리거 = 사람 멤버의 첫 합류.** `POST /v1/join`·claim 완주·초대 redeem이 **사람 멤버를 새로 만든 트랜잭션**에서 `agent_gateway` 잡을 넣는다(멘션 경로가 같은 tx에서 run을 만드는 것과 동형). 재가입(`createdMember:false`)은 트리거하지 않는다.
-- **D3 대상 채널·에이전트.** 채널 = 워크스페이스 **기본 채널**(`#general`, 신규 채널 생성 없음 — v1). 에이전트 = 워크스페이스의 **웰컴 에이전트**: 운영자가 workspace settings(`#1800` 표면)에 `welcome_agent_member_id`로 지정, 미지정이면 첫 활성 네이티브 에이전트(김인턴/hermes), 그것도 없으면 오프너 없음(조용히 — 시스템 라인 대체 금지).
+- **D3 대상 채널·에이전트.** 채널 = 워크스페이스 **기본 채널**(`#general`, 신규 채널 생성 없음 — v1). 에이전트 = 워크스페이스의 **웰컴 에이전트**: 운영자가 workspace settings(`#1800` 표면)에 `welcome_agent_member_id`로 지정, 미지정이면 첫 활성 네이티브 에이전트(김인턴/hermes), 그것도 없으면 오프너 없음(조용히 — 시스템 라인 대체 금지). → 2026-10-24 [ADR-0200](0200-honest-agent-run-state-and-liveness.md) 증보 3 E5: 호스티드 후보는 최근 24시간 안에 일 신호(받은편지함 읽기·claim·run 보고)가 있거나 연결이 막 활성됐을 때만 대상이다. 지정 에이전트가 탈락하면 지금처럼 오프너가 없고, 지정이 없으면 다음 후보를 같은 검사로 본다.
 - **D4 멱등 마커.** `agent_run.idempotency_key = welcome:{workspace}:{member}:opener:v1`(UNIQUE 제약이 중복 게시를 구조적으로 막는다). 마커 종류 3: `opener`·`provider-required`·`closer`(첫 사람 응답 뒤 1회, 선택). 마커 버전은 카피 개정 시 올린다.
 - **D5 provider 미구성 분기.** run 시작 시 provider가 없으면 worker는 실패 대신 **`provider-required` 오프너**를 게시한다 — 단 이것도 에이전트 명의여야 하므로, provider 없이 게시 가능한 **정적 카피 경로**(모델 호출 0, 원장 0)를 worker에 둔다: "설정 › AI 연결에서 연결하고 돌아오면 시작해요". 연결이 생기면 다음 진입 시 `opener` 마커가 없으므로 정상 오프너가 1회 게시된다(`provider-required` 마커는 opener를 막지 않는다).
 - **D6 비용·경계.** 오프너 run은 `usage_ledger`에 정상 귀속(무료 아님 — 원장 정직성). A2A 게이트·step cap 적용. 오프너는 채널 멘션 없이 시작하므로 `a2a_depth=0`·사람 트리거 취급(G2 연속 자동응답 streak 카운트 제외).

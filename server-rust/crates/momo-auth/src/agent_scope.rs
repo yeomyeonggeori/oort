@@ -627,6 +627,31 @@ mod tests {
         assert_ne!(SCOPE_WORKSPACE_PROPOSE, SCOPE_WORK_CONTROL);
     }
 
+    /// ADR-0177 증보 D7 (#4227): closing a DM is a person tidying their own list, not an act an agent
+    /// has. The path is absent from the table for every verb, so the middleware refuses an agent
+    /// bearer before routing — the *first* of the route's two layers (the handler's `require_human`
+    /// is the second, with its own test in `momo-server/tests/dm_closure_gates.rs`).
+    #[test]
+    fn the_dm_closure_route_is_closed_to_agents() {
+        let path = format!("/v1/workspaces/{WS}/channels/{RUN}/closure");
+        for method in ["PUT", "DELETE", "POST", "GET", "PATCH"] {
+            assert_eq!(
+                required_agent_scope(method, &path),
+                None,
+                "{method} {path} must stay closed to agents"
+            );
+        }
+        // Control: the open sibling with the same six-segment shape resolves, so the `None`s above
+        // are the table's answer for `closure`, not a shape the matcher can no longer read.
+        assert_eq!(
+            required_agent_scope(
+                "POST",
+                &format!("/v1/workspaces/{WS}/channels/{RUN}/messages")
+            ),
+            Some(SCOPE_MESSAGES_WRITE)
+        );
+    }
+
     #[test]
     fn the_method_comparison_is_case_insensitive_like_swift() {
         assert_eq!(

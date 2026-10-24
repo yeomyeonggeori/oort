@@ -1,0 +1,133 @@
+{
+  "_comment": "#4227 — ADR-0177 증보 D9 「읽을 메시지」와 「기계 메시지」의 규칙 드리프트 골든. 같은 규칙이 두 곳에 한 벌씩 있다: 코어 `isAmbientMessage`(packages/momo-core/src/features/sidebar/ambientMessage.ts, 클라이언트가 메시지를 읽어 가르는 쪽)와 Postgres 트리거 `message_last_readable_seq_trg`(server/Migrations/146_dm_closure.sql, 서버가 channel_seq.last_readable_seq 를 올리는 쪽). 한쪽만 바뀌면 보임 판정이 기기마다 어긋난다. 이 파일이 그 둘이 공유하는 단 하나의 기대값이며 **사본은 없다**: 웹 시험 clients/web/src/features/sidebar/ambientMessage.golden.test.ts 가 `core` 칸을(골든은 repo 문서라 코어 순수 게이트가 읽을 수 없어 웹 시험이 맡는다 — commandSuggest.settingsOpenGolden.test.ts 와 같다), Rust 격리 PG 시험 server-rust/bins/momo-server/tests/dm_closure_conformance_pg.rs 가 `trigger` 칸을 각자 이 경로에서 읽어 대조하고, 구조·불변식은 server-rust/crates/momo-messaging/tests/dm_readable_golden.rs 가 DB 없이 잰다. 값을 고치는 일은 규칙을 바꾸는 일이다.",
+  "issue": 4227,
+  "adr": "ADR-0177 증보 D9",
+  "fields": {
+    "name": "모양의 이름. 시험 실패 메시지에 나온다.",
+    "why": "이 모양이 목록에 있는 이유.",
+    "type": "message.type (enum message_type).",
+    "state": "message.state (enum message_state). 코어는 'deleted' 를 기계로 본다. 트리거는 INSERT 시점이라 삭제를 볼 수 없다.",
+    "props": "message.props (JSON). 클라이언트가 보낸 type·props.kind 가 그대로 들어온다(routes/messages.rs).",
+    "core": "코어 isAmbientMessage 의 기대: 'readable' | 'ambient'.",
+    "trigger": "INSERT 트리거의 기대: 'readable'(last_readable_seq 를 올린다) | 'ambient'(안 올린다) | 'n/a(insert-time)'(INSERT 시점에 존재할 수 없는 모양 — 삭제됨)."
+  },
+  "shapes": [
+    {
+      "name": "plain-text-without-kind",
+      "why": "가장 흔한 사람 메시지. props 에 kind 가 없어 `props->>'kind'` 가 NULL 이다 — `<>` 로 비교하면 NULL 이 되어 아무것도 올리지 못한다(IS DISTINCT FROM 이어야 하는 이유). 필수 모양.",
+      "type": "text",
+      "state": "sent",
+      "props": {},
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "text-with-an-unrelated-kind",
+      "why": "work_session 이 아닌 kind 는 그대로 읽을 메시지다.",
+      "type": "text",
+      "state": "sent",
+      "props": { "kind": "note" },
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "text-with-numeric-kind",
+      "why": "kind 가 문자열이 아니어도 work_session 이 아니다. `->>` 는 숫자를 '5' 로 읽는다.",
+      "type": "text",
+      "state": "sent",
+      "props": { "kind": 5 },
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "text-with-null-kind",
+      "why": "JSON null 은 `->>` 에서 NULL 이다 — kind 없음과 같다.",
+      "type": "text",
+      "state": "sent",
+      "props": { "kind": null },
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "text-with-work-session-kind",
+      "why": "작업 세션 상태 카드·영수증. 에이전트 DM 에 쌓이는 기계 메시지의 본체.",
+      "type": "text",
+      "state": "sent",
+      "props": { "kind": "work_session" },
+      "core": "ambient",
+      "trigger": "ambient"
+    },
+    {
+      "name": "text-with-uppercase-work-session-kind",
+      "why": "비교는 대소문자를 가린다. 양쪽 다 정확히 'work_session' 만 기계로 본다.",
+      "type": "text",
+      "state": "sent",
+      "props": { "kind": "WORK_SESSION" },
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "system-line",
+      "why": "시스템 줄(입장·설정 변경 알림 등).",
+      "type": "system",
+      "state": "sent",
+      "props": {},
+      "core": "ambient",
+      "trigger": "ambient"
+    },
+    {
+      "name": "tool-call",
+      "why": "도구 호출 — 에이전트가 일하는 중의 기계 메시지.",
+      "type": "tool_call",
+      "state": "sent",
+      "props": {},
+      "core": "ambient",
+      "trigger": "ambient"
+    },
+    {
+      "name": "tool-result",
+      "why": "도구 결과.",
+      "type": "tool_result",
+      "state": "sent",
+      "props": {},
+      "core": "ambient",
+      "trigger": "ambient"
+    },
+    {
+      "name": "diff",
+      "why": "코드 diff 는 사람이 읽을 산출물이다.",
+      "type": "diff",
+      "state": "sent",
+      "props": {},
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "artifact",
+      "why": "산출물 카드.",
+      "type": "artifact",
+      "state": "sent",
+      "props": {},
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "approval-request",
+      "why": "승인 요청은 사람이 답해야 하는 메시지다.",
+      "type": "approval_request",
+      "state": "sent",
+      "props": {},
+      "core": "readable",
+      "trigger": "readable"
+    },
+    {
+      "name": "deleted-text",
+      "why": "알려진 차이. 코어는 삭제된 글을 기계로 본다. 트리거는 INSERT 시점에 일어나 삭제를 볼 수 없고, 나중에 삭제돼도 값을 내리지 않는다(단조) — 틀려도 「보임」 쪽이라 받아들인다(D9). 그래서 이 모양의 트리거 기대는 시험하지 않고 'n/a(insert-time)' 로 적는다. 격리 PG 시험은 대신 「읽을 메시지를 올린 뒤 삭제해도 내려가지 않는다」를 단정해 이 차이를 시험 안에 둔다.",
+      "type": "text",
+      "state": "deleted",
+      "props": {},
+      "core": "ambient",
+      "trigger": "n/a(insert-time)"
+    }
+  ]
+}

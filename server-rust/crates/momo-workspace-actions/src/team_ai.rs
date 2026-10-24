@@ -861,6 +861,11 @@ async fn requester_could_approve_in_tx(
                 false
             }
         }
+        // Only the person the action changes (the team AI cannot propose it today — it is
+        // not on `TEAM_AI_ACTION_IDS` — but the match stays exhaustive and fail-closed).
+        RequiredRole::RequestingMember => {
+            matches!(subject, GateSubject::Member(target) if target == requester)
+        }
     })
 }
 
@@ -958,6 +963,9 @@ pub async fn propose_in_tx(
         conn,
         workspace_id,
         context.agent_member_id,
+        // The team AI answers a person in a thread, not inside a hosted agent run:
+        // an action about "whoever called the agent" has no subject here.
+        None,
         action,
         raw_args,
         context.now_ms,

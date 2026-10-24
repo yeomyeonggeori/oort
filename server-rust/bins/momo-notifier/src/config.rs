@@ -169,6 +169,9 @@ pub struct NotifierConfig {
     /// one re-claimed it and the run has had no event. `MOMO_RUN_UNCLAIMED_EXPIRE_HOURS` (24,
     /// clamped 1..=720): a queued run nobody took. Both end the run as `timed_out` with a closed
     /// code (`lease_abandoned` / `unclaimed_expired`); nothing is reassigned or retried.
+    /// ADR-0200 증보 3 (#4284): `MOMO_RUN_WOKEN_EXPIRE_MINUTES` (30, clamped 10..=1440) is how
+    /// long after the FIRST uncollected doorbell ring a hosted run is ended as
+    /// `woken_not_collected` (two 15-minute sweeps; an out-of-range value takes the boundary).
     pub run_stall: momo_outbox::StallPolicy,
 }
 
@@ -252,6 +255,10 @@ impl NotifierConfig {
                 unclaimed_seconds: env_number("MOMO_RUN_UNCLAIMED_EXPIRE_HOURS", 24i64)?
                     .clamp(1, 720)
                     * 3600,
+                woken_expire_seconds: momo_outbox::woken_expire_seconds_from_minutes(env_number(
+                    "MOMO_RUN_WOKEN_EXPIRE_MINUTES",
+                    momo_outbox::DEFAULT_WOKEN_EXPIRE_MINUTES,
+                )?),
             },
         })
     }

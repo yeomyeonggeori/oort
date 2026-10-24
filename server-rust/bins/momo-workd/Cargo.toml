@@ -70,3 +70,13 @@ axum.workspace = true
 # R2 invariants (#3024): the tests play the owner's Secure Enclave devices with
 # fixed P-256 keys. Already a workspace dependency via momo-wire.
 p256.workspace = true
+
+# unsafe-allowlist (SEC-08, #4246): host-process control with no safe std API: libc
+# geteuid/getpeereid (control-socket peer credentials), kill/killpg/getpgid and macOS
+# proc_listchildpids (process-tree teardown), O_NOFOLLOW opens, Security.framework code-signing
+# reads, and write_volatile secret zeroing. Each is a plain syscall or OS-framework FFI call;
+# std exposes none of them.
+# Adding a crate here needs a reason row in server-rust/unsafe-allowlist.tsv; scripts/check_unsafe_policy.py
+# keeps this table and the workspace forbid in sync.
+[lints.rust]
+unsafe_code = "allow"
