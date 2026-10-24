@@ -72,36 +72,11 @@ def main() -> None:
     require(rust_compose, "MOMO_AGENT_SEED_MODE")
     require(rust_compose, "${MOMO_AGENT_SEED_MODE:-none}")
 
-    isolated_verifiers = [
-        "scripts/verify_hermes_gateway_adapter.sh",
-    ]
-    for verifier in isolated_verifiers:
-        require(read(verifier), 'MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh"')
-
-    fixed_seed_member_fixtures = {
-        "scripts/verify_hermes_gateway_adapter.sh": (
-            "('${HUMAN_MEMBER_ID}', '${WORKSPACE_ID}', 'human', 'active'",
-            "('${AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active'",
-        ),
-    }
-    for verifier, member_rows in fixed_seed_member_fixtures.items():
-        require(read(verifier), "INSERT INTO member", *member_rows)
-
-    digest_verifiers = [
-        "scripts/verify_hermes_gateway_adapter.sh",
-    ]
-    for verifier in digest_verifiers:
-        require(
-            read(verifier),
-            "VERIFIER_DB_CREATED_OID",
-            "SOURCE_DIGEST_BEFORE",
-            "source_digest()",
-            "exit 96",
-        )
-
     # LS-1 (#2165) retired the Swift-host isolated verifiers (agent_worker /
-    # agent_context / agent_live_channel / external_agent_provider). Seed-none
-    # + marker/OID + source-digest stays on the remaining Rust-host verifier.
+    # agent_context / agent_live_channel / external_agent_provider). SEC-07
+    # (#4245) retired the last one (verify_hermes_gateway_adapter.sh); its
+    # seed-none/marker/digest assertions went with it. The migration seed-none,
+    # compose mode and cleanup-script assertions below remain.
 
     cleanup = read("scripts/cleanup_dogfood_seed_agents.sh")
     require(
