@@ -1188,6 +1188,7 @@ so check your arguments against these rules rather than retrying.
 | `workspace.settings.update` | `{welcomePrompt?: ≤500 chars, roleLabels?: {owner,admin,member,guest}}` — at least one key; `null` clears a key, an omitted key is left alone | a workspace operator (`workspace_operator`: an admin, or a platform operator) |
 | `agent.profile.update` | `{displayName?, tagline?, statusText?, statusEmoji?, statusExpiresInHours?, roleLabel?, avatar?, targetHandle?}` — at least one field; yourself, or an agent with the **same human owner**; `null` clears `tagline`, `roleLabel` and the status, an omitted field is left alone | the **target** agent's owner or an admin (`agent_editor`) |
 | `agent.invite` | `{platform: grok_bot\|dots\|muse\|other, displayName, handle}` — brings another, external agent in; no id, scope or channel is accepted | a workspace admin (`admin`) |
+| `member.avatar.set` | `{attachmentId}` — one image **the person who called you attached in this conversation** (take the id from `imageAttachments[].id` of `oort_conversation_read`). There is no target: it is always that person, and another person's image or another conversation's image is refused with the same `invalid_arguments` as a missing one. Over 2048 px on a side, GIF and animated images are refused — ask the person to send a smaller one | **the person themselves and nobody else** (`requesting_member`: not an admin, not your owner); they see the image on the card first |
 
 What each one does, and what to expect:
 
@@ -1254,6 +1255,25 @@ What each one does, and what to expect:
   channel you are not in, a DM, or anything that is not a finished PNG/JPEG/WebP
   is refused with the same `InvalidArguments`; the person sees the re-encoded
   picture and decides.
+- **`member.avatar.set`** is how a **person** asks you to change **their own** profile
+  picture: they attach an image in the conversation and say 「이걸로 내 프로필 사진
+  바꿔줘」. Propose it with `{attachmentId}` — the `id` of that image from
+  `imageAttachments` in `oort_conversation_read` — and end the turn. There is **no
+  target argument and none can be added**: the picture is always for the person who
+  called you (the author of the message that started this run), the server derives
+  them, and it is not yours to choose. The image must be **theirs** (written by
+  them) and from **this conversation** (this channel or this DM); a file somebody
+  else attached, one from another channel, a deleted message, or anything that is
+  not a finished PNG/JPEG/still WebP of at most 5 MiB and 2048 px on a side is
+  refused with the same `InvalidArguments` as a missing id, so a refusal tells you
+  nothing about files you cannot see. GIF and animated images are refused: say so
+  and ask them to send a still image or a smaller one. Like every avatar the server
+  never stores the original: it writes a fresh PNG/JPEG of at most 512x512, and
+  **only that person** sees it on the card (an admin or your owner cannot approve or
+  preview it) and approves it by its hash. Nothing changes until they approve; if
+  they reject or it expires, the picture is discarded. A person has one such card
+  pending at a time. Do not offer it for anyone but the person talking to you, and
+  never as a way to put somebody else's face on them.
 - **`hosted.channels.grant`** is the only way to widen your reach into channels
   that **already exist**, and it is deliberately the narrowest: your own
   connection, channels you can already see, at most 50 approved channels in total.

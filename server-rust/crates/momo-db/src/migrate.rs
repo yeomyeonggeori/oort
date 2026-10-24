@@ -667,12 +667,16 @@ mod tests {
     /// `AFTER INSERT ON message` trigger that raises it (SECURITY INVOKER, `IS DISTINCT FROM`), the
     /// backfill that follows the trigger (`row_security = off`, a `GET DIAGNOSTICS` row-count
     /// assertion), and the member-owned `dm_closure` table (ENABLE + FORCE + `ws_isolation`).
+    ///
+    /// 147 is #4385's `member.avatar.set` (ADR-0186 증보 2026-10-25 v4): only the INSERT guard of
+    /// `agent_avatar_image` changes — the image's owner may be the person who asked the agent, the
+    /// proposer must be an agent.
     #[test]
-    fn discovers_contiguous_migrations_001_to_146() {
+    fn discovers_contiguous_migrations_001_to_147() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=146).collect();
+        let expected: Vec<i64> = (1..=147).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -680,7 +684,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=146 under {}",
+            "expected contiguous 001..=147 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -688,7 +692,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("146_dm_closure"));
+            .starts_with("147_member_avatar_set_by_agent"));
     }
 
     #[test]

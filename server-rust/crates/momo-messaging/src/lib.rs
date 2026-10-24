@@ -85,8 +85,9 @@ pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
 pub use agent_avatar::{
-    apply_avatar_image_in_tx, bind_staged_image_to_approval_in_tx, clear_avatar_image_in_tx,
-    delete_staged_avatar_image_in_tx, find_visible_image_attachment_in_tx,
+    apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, bind_staged_image_to_approval_in_tx,
+    clear_avatar_image_in_tx, delete_staged_avatar_image_in_tx, find_requester_attachment_in_tx,
+    find_visible_image_attachment_in_tx, requester_of_run_in_tx,
     image_attachments_for_messages_in_tx, is_avatar_preset, process_avatar_image,
     purge_stale_staged_avatar_images_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
     read_current_avatar_image_in_tx, stage_avatar_image_in_tx, staged_image_matches_pin_in_tx,

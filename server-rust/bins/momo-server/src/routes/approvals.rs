@@ -83,6 +83,7 @@ use momo_agent::actions::{
     AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
     AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
     LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
+    REF_TYPE_MEMBER,
     REF_TYPE_INVITE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
     SECRET_ONCE_PAIRING,
 };
@@ -98,7 +99,8 @@ use momo_agent::approval::{
 use momo_agent::decider::{action_required_role, decider_gate, GatePlan};
 use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
 use momo_agent::{
-    end_parked_run_in_tx, requeue_run_from_approval_in_tx, succeed_parked_run_in_tx, RunStatus,
+    end_parked_run_in_tx, pinned_target_member, requeue_run_from_approval_in_tx,
+    succeed_parked_run_in_tx, RunStatus,
 };
 use momo_auth::{
     append_approved_channels_in_tx, grant_hosted_channels_in_tx,
@@ -108,7 +110,8 @@ use momo_auth::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
 use momo_messaging::{
-    add_channel_member_in_tx, apply_agent_card_in_tx, apply_avatar_image_in_tx, cent_channel,
+    add_channel_member_in_tx, apply_agent_card_in_tx, apply_avatar_image_in_tx,
+    apply_human_avatar_image_in_tx, cent_channel,
     clear_avatar_image_in_tx, create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx,
     emit_message_edited_in_tx, lock_agent_card_in_tx, normalize_channel_kind,
     patch_and_prune_message_props_in_tx, patch_message_props_in_tx, read_avatar_image_bytes_in_tx,
@@ -161,7 +164,8 @@ pub struct AvatarPreviewQuery {
 /// the one place those bytes can be read before the decision. Who may read them:
 /// the people who may *decide* the card — a human who is the target agent's owner
 /// or a workspace admin (`require_profile_editor_in_tx`, the very judgment the
-/// decision applies). Everybody else — a channel member who is not the owner, a
+/// decision applies); for a `member.avatar.set` card, the person the picture is for
+/// and nobody else (ADR-0186 증보 v4). Everybody else — a channel member who is not the owner, a
 /// stranger, an agent, an unknown approval id, an approval with no staged avatar —
 /// gets the same 404, so the route is neither a preview for onlookers nor an oracle
 /// for which approvals carry an image.
@@ -216,8 +220,20 @@ pub async fn avatar_preview(
                 else {
                     return Ok(Ok(None));
                 };
-                // The decider's own judgment, answered as "not found" on any no.
-                if require_profile_editor_in_tx(conn, workspace_id, target, viewer)
+                // The decider's own judgment, answered as "not found" on any no. For a
+                // `member.avatar.set` card the decider is the person the picture is for
+                // and nobody else (ADR-0186 증보 v4): not an admin, not the agent's owner,
+                // not another member of the room.
+                let is_member_avatar_card = payload
+                    .get("action")
+                    .and_then(|action| action.get("id"))
+                    .and_then(Value::as_str)
+                    == Some(momo_agent::actions::ACTION_MEMBER_AVATAR_SET);
+                if is_member_avatar_card {
+                    if target != viewer {
+                        return Ok(Ok(None));
+                    }
+                } else if require_profile_editor_in_tx(conn, workspace_id, target, viewer)
                     .await?
                     .is_err()
                 {
@@ -1340,6 +1356,9 @@ async fn role_required_refusal(
             Some(RequiredRole::AgentEditor) => {
                 "this workspace action must be approved by the target agent's owner or a workspace admin"
             }
+            Some(RequiredRole::RequestingMember) => {
+                "this workspace action must be approved by the member it changes"
+            }
             Some(RequiredRole::WorkspaceOperator) => {
                 "this workspace action must be approved by a workspace operator"
             }
@@ -1444,6 +1463,8 @@ async fn execute_workspace_action(
         }
         // Judged against the target agent, which step 2 resolves.
         GatePlan::TargetAgent => None,
+        // Judged against the person the run was raised by, which step 2 resolves too.
+        GatePlan::RequestingMember => None,
         GatePlan::Operator => Some(if input.operator_scope {
             Ok(())
         } else {
@@ -1499,6 +1520,7 @@ async fn execute_workspace_action(
         conn,
         input.workspace_id,
         approval.requested_by,
+        Some(approval.run_id),
         action,
         proposed_args(&approval.payload),
         now_ms,
@@ -1520,6 +1542,14 @@ async fn execute_workspace_action(
                 .and_then(|pins| pins.get("target"))
                 .and_then(Value::as_str)
                 .and_then(|id| Uuid::parse_str(id).ok());
+            // A picture that is no longer what a `member.avatar.set` card showed is told
+            // to the person it was drawn for, and to nobody else.
+            if required_role == Some(RequiredRole::RequestingMember) {
+                if pinned_target == Some(input.member_id) {
+                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                }
+                return role_required_refusal(conn, approval, input, now, required_role).await;
+            }
             if let Some(target) = pinned_target {
                 if require_profile_editor_in_tx(conn, input.workspace_id, target, input.member_id)
                     .await?
@@ -1540,6 +1570,13 @@ async fn execute_workspace_action(
                 && require_admin(conn, input.workspace_id, input.member_id)
                     .await?
                     .is_err()
+            {
+                return role_required_refusal(conn, approval, input, now, required_role).await;
+            }
+            // The same for the person-judged role: only the person the card was drawn for
+            // may learn that it went stale (an admin may not — an admin is not who decides).
+            if required_role == Some(RequiredRole::RequestingMember)
+                && pinned_target_member(&approval.payload) != Some(input.member_id)
             {
                 return role_required_refusal(conn, approval, input, now, required_role).await;
             }
@@ -1583,6 +1620,22 @@ async fn execute_workspace_action(
             Err(_) => {
                 return role_required_refusal(conn, approval, input, now, required_role).await;
             }
+        }
+    }
+
+    if required_role == Some(RequiredRole::RequestingMember) {
+        // Fail closed: a `requesting_member` action whose resolver named no person has
+        // nobody to judge the decider against.
+        let GateSubject::Member(person) = resolved.subject else {
+            return Err(protocol_error(
+                "requesting_member action resolved without a person",
+            ));
+        };
+        // **Only the person the picture is for.** Not an admin, not the agent's owner:
+        // `person` is the human the server derived from the run, so this one comparison
+        // is the whole of "you may only change your own face".
+        if person != input.member_id {
+            return role_required_refusal(conn, approval, input, now, required_role).await;
         }
     }
 
@@ -1781,6 +1834,16 @@ async fn execute_workspace_action(
                 Execution::Ran(executed) => executed,
                 Execution::Refused(decision) => return Ok(Ok(decision)),
             }
+        }
+        ActionArgs::MemberAvatarSet {
+            avatar,
+            target: Some(person),
+        } => match execute_member_avatar_set(conn, approval, input, now, avatar, person).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        ActionArgs::MemberAvatarSet { target: None, .. } => {
+            return Err(protocol_error("member.avatar.set resolved without a person"));
         }
         ActionArgs::PluginInstall {
             plugin_id,
@@ -3091,6 +3154,93 @@ async fn execute_agent_profile_update(
             &target.handle,
             &changes,
         ),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `member.avatar.set` (ADR-0186 증보 v4): put the staged image on the **decider's own**
+/// profile, as the decider. The role gate already proved the decider is the person the
+/// resolver named; the image is verified against its pin **again** here, under the member
+/// lock `apply_human_avatar_image_in_tx` takes, and the previous image row (if any) is
+/// deleted in the same transaction.
+async fn execute_member_avatar_set(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    avatar: &AvatarIntent,
+    person: &crate::routes::actions::ResolvedPerson,
+) -> Result<Execution, momo_db::DbError> {
+    let AvatarIntent::Staged {
+        image_id,
+        sha256,
+        origin,
+    } = avatar
+    else {
+        return Err(protocol_error("an unstaged avatar reached the executor"));
+    };
+    // Backstop for the gate above: the only person this ever writes to is the decider.
+    if person.id != input.member_id {
+        return Err(protocol_error(
+            "member.avatar.set reached the executor for someone else",
+        ));
+    }
+    let pin =
+        decode_pin_hex(sha256).ok_or_else(|| protocol_error("avatar pin is not a sha256"))?;
+    if !staged_image_matches_pin_in_tx(
+        conn,
+        input.workspace_id,
+        *image_id,
+        person.id,
+        approval.id,
+        &pin,
+    )
+    .await?
+    {
+        return Ok(Execution::Refused(args_invalid_refusal(
+            approval, input, now,
+        )));
+    }
+    let meta = read_avatar_image_in_tx(conn, input.workspace_id, *image_id)
+        .await?
+        .ok_or_else(|| protocol_error("the staged avatar vanished"))?;
+    apply_human_avatar_image_in_tx(conn, input.workspace_id, person.id, *image_id, approval.id)
+        .await?
+        .ok_or_else(|| protocol_error("the staged avatar could not be applied"))?;
+    let detail = json!({
+        "image_id": image_id.to_string(),
+        "origin": origin,
+        "mime": meta.mime,
+        "width": meta.width,
+        "height": meta.height,
+        "size_bytes": meta.size_bytes,
+        // A prefix is enough to find the row; the bytes never go in a log.
+        "sha256_prefix": &sha256[..12],
+        "via_agent": approval.requested_by.to_string(),
+        "approval_id": approval.id.to_string(),
+    });
+    Ok(Execution::Ran(Executed {
+        audits: vec![AuditEntry::new(
+            input.workspace_id,
+            momo_agent::actions::AUDIT_MEMBER_AVATAR_SET,
+        )
+        .by(input.member_id)
+        .about(person.id)
+        .target("member", person.id)
+        .via_token(input.via_token_id)
+        .run(approval.run_id)
+        .with_schema(momo_agent::actions::AUDIT_MEMBER_AVATAR_SET_SCHEMA, detail)],
+        ref_type: REF_TYPE_MEMBER,
+        ref_id: person.id,
+        result_body: momo_agent::actions::member_avatar_set_result_body(),
+        result_rows: vec![
+            momo_agent::actions::action_row(
+                "대상",
+                momo_agent::actions::member_card_label(&person.display_name, &person.handle, false),
+            ),
+            momo_agent::actions::action_row("프로필 사진", "카드에 보인 이미지로 바뀌었어요"),
+        ],
         secret_once: None,
         next: None,
     }))

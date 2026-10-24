@@ -92,6 +92,14 @@ pub struct ValidatedActionArgs {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionArgs {
+    /// `member.avatar.set` (ADR-0186 증보 v4, #4385). `avatar` is the proposal's
+    /// [`AvatarIntent::Attachment`] and, after the handler stages it, the stored
+    /// [`AvatarIntent::Staged`]; `target` is filled by [`resolve_action_in_tx`] from the run
+    /// (never from an argument).
+    MemberAvatarSet {
+        avatar: AvatarIntent,
+        target: Option<ResolvedPerson>,
+    },
     InviteCreate {
         /// `momo_settings::normalized_invite_role`'s canonical spelling.
         role: &'static str,
@@ -206,6 +214,18 @@ pub struct ResolvedPlugin {
     pub digest: String,
     pub egress_domains: Vec<String>,
     pub before: PluginInstallBefore,
+}
+
+/// The person a `member.avatar.set` is about, read from the member row (never from an
+/// argument): the human who raised the agent run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedPerson {
+    pub id: Uuid,
+    pub display_name: String,
+    pub handle: String,
+    /// Whether they wear a picture now (an upload, an approved image or a legacy URL) —
+    /// the card says 「현재 사진」 or 「없음」 from this.
+    pub had_avatar: bool,
 }
 
 /// Where a set of action arguments came from. **A proposal comes from an agent; a
@@ -393,6 +413,7 @@ pub fn validated_action_args_from(
         actions::ACTION_HOSTED_CHANNELS_GRANT => hosted_channels_grant_args(args),
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args, origin),
+        actions::ACTION_MEMBER_AVATAR_SET => member_avatar_set_args(args, origin),
         actions::ACTION_AGENT_INVITE => agent_invite_args(args),
         actions::ACTION_WORKSPACE_UNFURL_UPDATE => workspace_unfurl_update_args(args),
         actions::ACTION_WORKSPACE_MEMORY_UPDATE => workspace_memory_update_args(args),
@@ -1332,6 +1353,63 @@ pub fn agent_profile_update_args(
     })
 }
 
+/// `member.avatar.set` (ADR-0186 증보 v4): the **proposal** is `{attachmentId}` and nothing
+/// else — no target, no URL, no bytes, no preset. The **stored** form is `{avatar:
+/// {source:"staged", …}}`, which only this server writes; the proposal parser refuses it
+/// and the stored parser refuses the raw `attachmentId`, exactly as for the agent's own
+/// profile.
+pub fn member_avatar_set_args(
+    args: &Value,
+    origin: ArgsOrigin,
+) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    let avatar = match origin {
+        ArgsOrigin::Proposal => {
+            closed_keys(object, &["attachmentId"])?;
+            let raw = match object.get("attachmentId") {
+                Some(Value::String(raw)) => raw.as_str(),
+                Some(_) => return Err(ActionRejection::new("attachmentId must be a string")),
+                None => return Err(ActionRejection::new("attachmentId is required")),
+            };
+            if raw.len() as u64 > actions::AVATAR_ID_TEXT_MAX_CHARS {
+                return Err(ActionRejection::new("attachmentId is not allowed"));
+            }
+            let id = Uuid::parse_str(raw)
+                .map_err(|_| ActionRejection::new("attachmentId must be an id"))?;
+            AvatarIntent::Attachment(id)
+        }
+        ArgsOrigin::Stored => {
+            closed_keys(object, &["avatar"])?;
+            match avatar_intent(object, origin)? {
+                staged @ AvatarIntent::Staged { .. } => staged,
+                _ => return Err(ActionRejection::new("avatar is not allowed")),
+            }
+        }
+    };
+    let normalized = match &avatar {
+        AvatarIntent::Attachment(_) => json!({"avatar": {"source": "attachment"}}),
+        AvatarIntent::Staged {
+            image_id,
+            sha256,
+            origin,
+        } => json!({"avatar": {"source": "staged", "imageId": image_id.to_string(),
+                               "sha256": sha256, "origin": origin}}),
+        _ => return Err(ActionRejection::new("avatar is not allowed")),
+    };
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized,
+        // Rows need the person the run was raised by: the resolver builds them.
+        rows: Vec::new(),
+        args: ActionArgs::MemberAvatarSet {
+            avatar,
+            target: None,
+        },
+    })
+}
+
 /// The `avatar` argument. Closed shapes only; a URL, a mime, a size or any other
 /// key is refused, and so is every shape the **origin** may not carry.
 pub fn avatar_intent(
@@ -1760,6 +1838,9 @@ pub enum GateSubject {
     /// The target agent's `member.id` (ADR-0186 증보 V4-M: the target, never the
     /// proposer).
     Agent(Uuid),
+    /// The **person** the action changes (`member.avatar.set`): the human who raised the
+    /// run, derived by the server — the role gate is "the decider is this member".
+    Member(Uuid),
 }
 
 /// A proposal after the database has agreed to it (ADR-0186 증보 V1-a/d).
@@ -1790,10 +1871,16 @@ pub struct ResolvedAction {
 ///
 /// Called with the stored payload at decision time too, so a card is re-proved
 /// against the workspace as it is now (D2: 「저장값을 신뢰하지 않는다」).
+///
+/// `run_id` is the agent run the proposal was raised in, when there is one: an action
+/// whose subject is *the person who called the agent* (`member.avatar.set`) derives that
+/// person from it and refuses without one. The team AI has no run, so it passes `None`.
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_action_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     proposer_member_id: Uuid,
+    run_id: Option<Uuid>,
     action: &WorkspaceAction,
     args: &Value,
     now_ms: i64,
@@ -1802,6 +1889,7 @@ pub async fn resolve_action_in_tx(
         conn,
         workspace_id,
         proposer_member_id,
+        run_id,
         action,
         args,
         now_ms,
@@ -1813,10 +1901,12 @@ pub async fn resolve_action_in_tx(
 
 /// [`resolve_action_in_tx`] for the arguments the **server stored** at proposal
 /// time (the decision route): the one place [`ArgsOrigin::Stored`] is used.
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_stored_action_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     proposer_member_id: Uuid,
+    run_id: Option<Uuid>,
     action: &WorkspaceAction,
     args: &Value,
     now_ms: i64,
@@ -1826,6 +1916,7 @@ pub async fn resolve_stored_action_in_tx(
         conn,
         workspace_id,
         proposer_member_id,
+        run_id,
         action,
         args,
         now_ms,
@@ -1840,6 +1931,7 @@ pub async fn resolve_action_with_origin_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     proposer_member_id: Uuid,
+    run_id: Option<Uuid>,
     action: &WorkspaceAction,
     args: &Value,
     now_ms: i64,
@@ -2309,6 +2401,113 @@ pub async fn resolve_action_with_origin_in_tx(
             *before = Some(card);
             subject
         }
+        ActionArgs::MemberAvatarSet { avatar, target } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            // **The person is the one who called this agent, found from the run — never
+            // from an argument.** No run (the team AI), another agent's run, a run nobody
+            // addressed, a trigger an agent wrote: the same refusal.
+            let Some(run_id) = run_id else {
+                return Ok(Err(ActionRejection::new("avatar target did not resolve")));
+            };
+            let Some((requester, run_channel)) =
+                momo_messaging::requester_of_run_in_tx(
+                    conn,
+                    workspace_id,
+                    run_id,
+                    proposer_member_id,
+                )
+                .await?
+            else {
+                return Ok(Err(ActionRejection::new("avatar target did not resolve")));
+            };
+            let person = momo_db::sqlx::query(
+                "SELECT display_name, handle, \
+                        (avatar_media_id IS NOT NULL OR avatar_image_id IS NOT NULL \
+                         OR avatar_url IS NOT NULL) AS had_avatar \
+                   FROM member WHERE workspace_id = $1 AND id = $2",
+            )
+            .bind(workspace_id)
+            .bind(requester)
+            .fetch_optional(&mut *conn)
+            .await?;
+            let Some(person) = person else {
+                return Ok(Err(ActionRejection::new("avatar target did not resolve")));
+            };
+            let person = {
+                use momo_db::sqlx::Row;
+                ResolvedPerson {
+                    id: requester,
+                    display_name: person.try_get("display_name")?,
+                    handle: person.try_get("handle")?,
+                    had_avatar: person.try_get("had_avatar")?,
+                }
+            };
+            match avatar {
+                // A proposal: the file must be one **this person** attached **in the
+                // conversation the agent was called in** (the same query the handler's
+                // download used). The handler stages it; this proves it again in the
+                // transaction that writes the card.
+                AvatarIntent::Attachment(attachment_id) => {
+                    let found = momo_messaging::find_requester_attachment_in_tx(
+                        conn,
+                        workspace_id,
+                        requester,
+                        run_channel,
+                        *attachment_id,
+                        momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT as i64,
+                    )
+                    .await?;
+                    if found.is_none() {
+                        return Ok(Err(ActionRejection::new("avatar is not allowed")));
+                    }
+                }
+                // A decision: the image the person was shown must still be the proposer's
+                // own staging for **this person**, still `staged`, bound to the approval
+                // being decided, and its stored bytes must still hash to the pin.
+                AvatarIntent::Staged {
+                    image_id, sha256, ..
+                } => {
+                    let pin = decode_sha256_hex(sha256);
+                    let row = momo_messaging::read_avatar_image_in_tx(conn, workspace_id, *image_id)
+                        .await?;
+                    let bound = row.is_some_and(|row| {
+                        row.member_id == requester
+                            && row.proposed_by == proposer_member_id
+                            && row.status == "staged"
+                            && decision_approval_id.is_some()
+                            && row.approval_id == decision_approval_id
+                    });
+                    let intact = match (&pin, bound, decision_approval_id) {
+                        (Some(pin), true, Some(approval_id)) => {
+                            momo_messaging::staged_image_matches_pin_in_tx(
+                                conn,
+                                workspace_id,
+                                *image_id,
+                                requester,
+                                approval_id,
+                                pin,
+                            )
+                            .await?
+                        }
+                        _ => false,
+                    };
+                    if !intact {
+                        return Ok(Err(ActionRejection::new(AVATAR_UNRESOLVED)));
+                    }
+                }
+                _ => return Ok(Err(ActionRejection::new("avatar is not allowed"))),
+            }
+            validated.rows = actions::member_avatar_set_rows(
+                &person.display_name,
+                &person.handle,
+                person.had_avatar,
+            );
+            let subject = GateSubject::Member(requester);
+            *target = Some(person);
+            subject
+        }
         ActionArgs::PluginInstall { plugin_id, plugin } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
@@ -2433,6 +2632,13 @@ pub async fn resolve_action_with_origin_in_tx(
             })),
             "avatar": avatar_pin(avatar),
         }),
+        // The person the run was raised by and the picture they were shown. What the
+        // card said 「현재」 was is deliberately not pinned: the person may have changed
+        // their own picture meanwhile and still be approving the one they were shown.
+        ActionArgs::MemberAvatarSet { avatar, target } => json!({
+            "target": target.as_ref().map(|person| person.id.to_string()),
+            "avatar": avatar_pin(avatar),
+        }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.
         ActionArgs::WorkspaceUnfurlUpdate { before, .. } => json!({"enabled": before}),
@@ -2495,6 +2701,96 @@ pub fn bounded_integer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `member.avatar.set` (ADR-0186 증보 v4): the proposal is the attachment id and
+    /// nothing else. Every spelling of "who", "from where" or "what bytes" is refused —
+    /// the person is derived from the run, never named.
+    #[test]
+    fn member_avatar_set_proposal_is_one_attachment_id_and_names_no_person() {
+        let id = Uuid::from_u128(0x0190_d3a0_0000_7000_8000_0000_0000_0001);
+        let ok = member_avatar_set_args(
+            &json!({ "attachmentId": id.to_string() }),
+            ArgsOrigin::Proposal,
+        )
+        .expect("a proposal");
+        assert_eq!(ok.normalized, json!({"avatar": {"source": "attachment"}}));
+        assert!(
+            !ok.normalized.to_string().contains(&id.to_string()),
+            "the attachment id never reaches the stored form"
+        );
+        assert!(matches!(
+            ok.args,
+            ActionArgs::MemberAvatarSet {
+                avatar: AvatarIntent::Attachment(found),
+                target: None,
+            } if found == id
+        ));
+        let some_member = Uuid::from_u128(9).to_string();
+        for bad in [
+            json!({}),
+            json!({"attachmentId": null}),
+            json!({"attachmentId": 7}),
+            json!({"attachmentId": "not-a-uuid"}),
+            json!({"attachmentId": "A".repeat(37)}),
+            // Whose picture, spelled every way the other actions spell a target.
+            json!({"attachmentId": id.to_string(), "memberId": some_member}),
+            json!({"attachmentId": id.to_string(), "targetHandle": "someone"}),
+            json!({"attachmentId": id.to_string(), "target": some_member}),
+            json!({"attachmentId": id.to_string(), "forMemberId": some_member}),
+            // What picture, spelled as the agent's own avatar forms.
+            json!({"attachmentId": id.to_string(), "url": "https://evil.example/x.png"}),
+            json!({"attachmentId": id.to_string(), "dataBase64": "AAAA"}),
+            json!({"attachmentId": id.to_string(), "presetId": "comet"}),
+            json!({"avatar": {"source": "attachment", "attachmentId": id.to_string()}}),
+            json!({"avatar": {"source": "staged", "imageId": id.to_string(),
+                              "sha256": "0".repeat(64), "origin": "attachment"}}),
+            json!(id.to_string()),
+            json!([id.to_string()]),
+        ] {
+            assert!(
+                member_avatar_set_args(&bad, ArgsOrigin::Proposal).is_err(),
+                "{bad}"
+            );
+        }
+    }
+
+    /// The **stored** form is only ever the server's `staged` shape: a raw
+    /// `attachmentId` is a proposal's, and a row that carries one has been tampered with.
+    #[test]
+    fn member_avatar_set_stored_form_is_only_the_staged_image() {
+        let id = Uuid::from_u128(0x0190_d3a0_0000_7000_8000_0000_0000_0002);
+        let sha = "ab".repeat(32);
+        let staged = json!({"avatar": {"source": "staged", "imageId": id.to_string(),
+                                        "sha256": sha, "origin": "attachment"}});
+        let parsed = member_avatar_set_args(&staged, ArgsOrigin::Stored).expect("stored");
+        assert_eq!(parsed.normalized, staged);
+        assert_eq!(
+            avatar_pin(match &parsed.args {
+                ActionArgs::MemberAvatarSet { avatar, .. } => avatar,
+                other => panic!("{other:?}"),
+            }),
+            json!({"imageId": id.to_string(), "sha256": sha})
+        );
+        for bad in [
+            json!({"attachmentId": id.to_string()}),
+            json!({"avatar": {"source": "attachment", "attachmentId": id.to_string()}}),
+            json!({"avatar": {"source": "generated", "dataBase64": "AAAA"}}),
+            json!({"avatar": {"source": "preset", "presetId": "comet"}}),
+            json!({"avatar": null}),
+            json!({"avatar": {"source": "staged", "imageId": id.to_string(),
+                              "sha256": sha, "origin": "url"}}),
+            json!({"avatar": {"source": "staged", "imageId": id.to_string(),
+                              "sha256": sha, "origin": "attachment", "bytes": "AA"}}),
+            json!({"avatar": {"source": "staged", "imageId": id.to_string(),
+                              "sha256": sha, "origin": "attachment"}, "memberId": id.to_string()}),
+            json!({}),
+        ] {
+            assert!(
+                member_avatar_set_args(&bad, ArgsOrigin::Stored).is_err(),
+                "{bad}"
+            );
+        }
+    }
 
     /// `plugin.install` (H7, #3889): the pure stage takes exactly the official four
     /// by id and keeps the static table's own string; everything else is refused
