@@ -1,0 +1,36 @@
+appId: app.momo.ios
+name: pick-keyboard
+---
+# Cycles the globe key until the layout that owns ${KEY} is on screen (#4321).
+#
+#   - runFlow:
+#       file: subflows/pick-keyboard.yaml
+#       env:
+#         KEY: "(?i)q"        # English QWERTY — `(?i)` because the label follows shift
+#   - runFlow:
+#       file: subflows/pick-keyboard.yaml
+#       env:
+#         KEY: "ㄱ"           # Korean 2-set
+#
+# The simulator's enabled keyboards are machine state (this repo's lane does not
+# set them), so a flow that tapped letters without choosing a layout would type
+# whatever the last run left up. The first globe tap on a fresh simulator also
+# raises iOS's own 「Quickly Change Keyboards」 tip, whose 「Continue」 sits OVER
+# the keys and makes every key tap after it a no-op — dismissed here, once, where
+# the globe is tapped. When the layout is already the right one the loop body
+# never runs.
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- repeat:
+    while:
+      notVisible: ${KEY}
+    commands:
+      - tapOn: "Next keyboard"
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"

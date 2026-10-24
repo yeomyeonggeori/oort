@@ -340,22 +340,30 @@ export function MessageActionSheet({
   );
 }
 
-function SheetRow({
+/**
+ * 시트의 한 줄. 채널 행 시트(`ChannelActionSheet`, #4229)도 같은 줄을 쓴다 — 두 시트가 같은 재질이어야 하고,
+ * 그 재질을 한 벌 더 만들지 않는다.
+ */
+export function SheetRow({
   label,
   onPress,
   tone = 'default',
   testID,
+  busy = false,
 }: {
   label: string;
   onPress: () => void;
   tone?: 'default' | 'danger' | 'muted';
   testID?: string;
+  /** 왕복이 도는 중. 잠그지 않고 낱말과 `busy` 가 진행을 말한다(웹 메뉴와 같다). */
+  busy?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
+      accessibilityState={busy ? {busy: true} : undefined}
       onPress={onPress}
       style={({pressed}) => [styles.sheetRow, pressed && styles.pressed]}
       testID={testID}>

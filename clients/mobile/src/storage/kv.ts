@@ -119,6 +119,12 @@ export const NON_SECRET_KEYS = {
    */
   homeCollapsedSections: 'momo.mobile.home.collapsed.v1',
   /**
+   * 마지막 읽음 투영에서 「닫힘」이던 DM 의 id (#4367). 워크스페이스 id → DM id 목록의 JSON. **원장이 아니다**: 판정은
+   * 언제나 서버 투영이고, 이 값은 다음 투영이 오기 전 첫 프레임에 닫은 DM 이 잠깐 보이지 않게 하는 캐시일 뿐이다(웹 D8 캐시와 같은
+   * 원칙). 투영이 올 때마다 통째로 덮어쓰고, 잃으면 첫 프레임에 한 번 보였다 사라질 뿐이다.
+   */
+  dmClosedCache: 'momo.mobile.sidebar.dm-closed-cache.v1',
+  /**
    * 「작업 맡기기」 시트가 마지막에 쓴 에이전트·채널 (#3588). 워크스페이스 id → {에이전트 id,
    * 채널 id}의 JSON — **id 둘뿐**이다. 제목·설명 같은 글은 여기에 쓰지 않는다(그 글은 같은
    * 앱 실행 안의 메모리에서만 산다). 잃으면 처음처럼 아무것도 미리 고르지 않을 뿐이다.

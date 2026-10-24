@@ -82,10 +82,19 @@ import {
 } from '@momo/core/features/timeline/actionCopy';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
+  Animated,
   Image,
   Keyboard,
   Pressable,
@@ -96,6 +105,7 @@ import {
   type TextStyle,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
 import {CONV_ICONS, CONV_ICON_SIZE} from '../../design/icons';
 import {COPY_RECEIPT_MS, copyText} from './copy';
@@ -158,7 +168,9 @@ import {
   type ApprovalGate,
   type ApprovalReceipt,
 } from './approvalGate';
-import {LandedTintFade} from './LandedTintFade';
+import {LandedTintFade, ReduceMotionRefContext} from './LandedTintFade';
+import {EASE_OUT, SEND_ARRIVE_MS, SEND_ARRIVE_RISE} from '../../design/motion';
+import {hasArrived, markArrived} from './sendArrival';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
@@ -2834,9 +2846,10 @@ function MessageRowInner({
       style={[
         styles.row,
         startsGroup && styles.rowStartsGroup,
-        // 착지 틴트는 **그릇**이 입는다: 안쪽(`rowInner`)에 걸면 좌우
-        // `SAFE_GUTTER` 만큼이 물들지 않아, 화면 너비를 가로지르는 한 줄이 아니라
-        // 가운데 떠 있는 상자가 된다 — 그것은 「여기다」가 아니라 카드다.
+        // 착지 틴트는 **그릇**이 입는다. 그릇 상자가 곧 강조 면이다 — 화면 끝에서
+        // `ROW_FACE.outer` 떨어지고 모서리가 둥글다(눌림 면·물러나는 덮개와 같은 상자,
+        // `rowFace.ts`). 옛 근거(「안쪽에 걸면 좌우가 안 물든다」)는 owner 2026-10-24 가
+        // 「각지다」고 짚어 대체됐다.
         landed && styles.rowLanded,
       ]}
       testID="message-row"
@@ -2844,6 +2857,11 @@ function MessageRowInner({
       {/* 틴트가 **물러나는 순간**의 덮개 (#3921). 서 있는 동안은 아무것도 그리지 않는다 —
           위 그릇이 배경으로 입는다. 첫 자식이라 내용 뒤에 깔린다. */}
       <LandedTintFade landed={landed === true} />
+      {/* 서 있는 착지의 테두리(`warnBorder` 1px). 면만으로는 라이트에서 경계가 안 선다 —
+          덮개(`LandedTintFade`)도 같은 테두리를 들고 녹는다. 절대 배치라 레이아웃 불변. */}
+      {landed ? (
+        <View pointerEvents="none" style={styles.rowLandedEdge} testID="message-row-landed-edge" />
+      ) : null}
       <Pressable
         // The tap rule is above. The row stays pressable even when it has no
         // door and no actions (a tombstone), because with the keyboard up every
@@ -2865,7 +2883,7 @@ function MessageRowInner({
         {/* 왼쪽 칸. **묶음의 머리에만** 그려지고, 칸 자체는 모든 행이 비워 둔다 —
             그래야 한 묶음의 본문이 같은 x 에서 시작한다 (감사 H-11). */}
         {startsGroup ? (
-          <View style={styles.rowAvatar}>
+          <View style={styles.rowAvatar} testID="message-avatar-slot">
             {actions?.onOpenProfile ? (
               <Pressable
                 accessibilityRole="button"
@@ -3001,6 +3019,14 @@ function MessageRowInner({
                 // 「보내는 중엔 선택되고 확인되면 꺼진다」가 이제 뜻을 갖는다.
                 // ===================================================
                 selectable={!actionable}
+                // 말풍선 (#4300): 내 글은 신호색, 남·에이전트 글은 표면. 카드·첨부는 아래에서
+                // 말풍선 밖 전체 폭으로 선다.
+                bubble={
+                  actions?.myMemberId !== undefined &&
+                  message.authorMemberId === actions.myMemberId
+                    ? 'mine'
+                    : 'other'
+                }
               />
             ) : null}
 
@@ -3539,13 +3565,13 @@ MessageRow.displayName = 'MessageRow';
  * 색을 **베껴 적으면** 그 사진은 증거가 아니게 된다. 같은 심볼을 들면 이 값이
  * 바뀌는 순간 사진도 함께 틀린 것이 된다.
  *
- * 그리고 이것이 M-2 의 실체다: 이 값은 코드 상자의 채움과 **같은 `color.surface`**
- * 라서, 행을 누르는 동안 상자의 고도가 사라진다(1.000:1). 값 공간을 가르는 것은
- * 토큰 체계 결정이라 U2 소관이고, 여기서는 그 사실을 **사진과 단정으로 붙잡아
- * 둔다**.
+ * 값은 **강조색 10%**(Buzz `highlightColor: primary 10%`, #4300)이고, 그 면이 바닥에서 안
+ * 보이는 테마만 `surface` 로 물러난다(`rowFace.ts` `pressFace`). 예전 값(`surface`)은 코드
+ * 상자의 채움과 같아 눌리는 동안 상자의 고도가 사라졌다(M-2, 1.000:1) — 틴트는 그 일치를
+ * 깬다. 알파 hex 라 아래 바닥이 비치므로 상자 채움과 같은 값이 될 일이 없다.
  */
 export function rowPressedBackground(color: Palette): string {
-  return color.surface;
+  return pressFace(color).color;
 }
 
 export function rowAccessibilityLabel({
@@ -3730,9 +3756,49 @@ export function PendingRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const failed = pending.status === 'failed';
+
+  // 등장 (#4383): 입력창에서 올라와 자리에 앉는다 — **이 메아리가 마운트되는 한 번**만. 서버
+  // 사본(`MessageRow`)이 대체할 때는 움직이지 않고, 가상화로 다시 마운트돼도 장부가 막는다.
+  // 오름·불투명도만 건드린다(높이·여백은 바닥 추적의 측정 대상이다). 「동작 줄이기」·이미 실패한
+  // 행은 처음부터 자리에 선다. 햅틱은 더하지 않는다(보내기 햅틱은 컴포저의 것이다).
+  const reduceMotionRef = useContext(ReduceMotionRefContext);
+  const [arrive] = useState(() =>
+    pending.status === 'failed' ||
+    reduceMotionRef?.current === true ||
+    hasArrived(pending.clientMsgId)
+      ? null
+      : new Animated.Value(0),
+  );
+  useLayoutEffect(() => {
+    markArrived(pending.clientMsgId);
+    if (arrive === null) return undefined;
+    const run = Animated.timing(arrive, {
+      toValue: 1,
+      duration: SEND_ARRIVE_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    });
+    run.start();
+    return () => run.stop();
+  }, [arrive, pending.clientMsgId]);
+
   return (
-    <View
-      style={[styles.row, startsGroup && styles.rowStartsGroup]}
+    <Animated.View
+      style={[
+        styles.row,
+        startsGroup && styles.rowStartsGroup,
+        arrive !== null && {
+          opacity: arrive,
+          transform: [
+            {
+              translateY: arrive.interpolate({
+                inputRange: [0, 1],
+                outputRange: [SEND_ARRIVE_RISE, 0],
+              }),
+            },
+          ],
+        },
+      ]}
       testID="pending-row">
       {/* 시각 칸은 안 쓰고(이 행에는 시각이 없다) **아바타 칸은 쓴다** — 이
           행의 존재 이유가 「서버 사본이 대체할 때 글이 다시 흐르지 않게」이고,
@@ -3765,6 +3831,8 @@ export function PendingRow({
           muted
           selectable
           selfMemberId={pending.authorMemberId}
+          // 낙관적 메아리는 언제나 내 글이다 — 서버 사본이 대체할 때 모양이 안 바뀌어야 한다.
+          bubble="mine"
         />
         {pending.attachments && pending.attachments.length > 0 ? (
           <AttachmentList
@@ -3793,16 +3861,19 @@ export function PendingRow({
           </Text>
         )}
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  // The padding lives on the inner pressable so the press highlight covers the
-  // whole row rather than a box floating inside it.
-  row: {},
+  // 행 그릇 = 강조 면의 상자 (`rowFace.ts`). 화면 끝에서 `outer` 띄우고 모서리를 둥글게
+  // 한다 — 서 있는 착지 틴트(`rowLanded`)와 물러나는 덮개가 이 상자를 입는다. 눌림 면은
+  // 안쪽 Pressable(`rowInner`)이 같은 상자를 꽉 채워 입는다. (옛 주석 「눌림 면이 행 전체를
+  // 덮는다 — 안에 뜬 상자가 아니라」는 owner 2026-10-24 로 대체됐다.)
+  row: {marginHorizontal: ROW_FACE.outer, borderRadius: ROW_FACE.radius},
   rowInner: {
-    paddingHorizontal: SAFE_GUTTER,
+    borderRadius: ROW_FACE.radius,
+    paddingHorizontal: ROW_FACE.inner,
     // 3pt 였다 — 한 사람이 연달아 쓴 다섯 줄이 한 덩이 문단으로 읽혔다(감사
     // H-7). 값은 **코어가 정한다**: 두 행 사이에 실제로 남는 거리가
     // `CONTINUATION_GAP` 이 되도록 절반씩 나눠 문다. 웹은 같은 값을
@@ -3828,7 +3899,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    *
    * ## 값
    *
-   * `SAFE_GUTTER`(그릇 자신의 여백) + `CONV.avatar`(40, owner 표) + `CONV.avatarGap`
+   * `ROW_FACE.inner`(면 안쪽 여백; 바깥 6 은 그릇 마진 — 합이 옛 `SAFE_GUTTER`) + `CONV.avatar`(40, owner 표) + `CONV.avatarGap`
    * (10, 시안 `.a-m{gap:10px}`). 아바타는 화면 왼쪽에서 `SAFE_GUTTER` 만큼 떨어져
    * 서므로(`rowAvatar.left`), 아바타의 오른쪽 끝과 내용의 왼쪽 끝 사이에 정확히
    * `avatarGap` 이 남는다.
@@ -3840,14 +3911,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 넣으면 감사 M-3 이 이미 「5조각 과적재」로 센 줄에 여섯 번째가 붙고, 32pt 가
    * 13pt 글자 옆 흐름에 들어가 머리 행이 한 줄만큼 자란다(묶음마다 반복된다).
    */
-  rowAvatarReserve: {paddingLeft: SAFE_GUTTER + CONV.avatar + CONV.avatarGap},
+  rowAvatarReserve: {paddingLeft: ROW_FACE.inner + CONV.avatar + CONV.avatarGap},
   /**
    * 아바타가 앉는 자리. 규칙: **이 메시지의
    * 맨 위 왼쪽**이고, 그 y 는 그릇의 위쪽 패딩과 **같은 곳**에서 온다.
    */
   rowAvatar: {
     position: 'absolute',
-    left: SAFE_GUTTER,
+    left: ROW_FACE.inner,
     top: CONTINUATION_GAP / 2,
   },
   // Feedback that the row is interactive at all. On a phone this is one of the
@@ -3954,7 +4025,18 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 물러나는 모양은 `LandedTintFade` 가 든다: 그릇이 배경을 벗는 그 커밋에 같은 색의
    * 덮개가 불투명도 1 에서 0 으로 녹는다. 「동작 줄이기」면 덮개 없이 즉시다.
    */
+  // 모서리는 그릇(`row`)이 이미 든다 — 서 있는 착지는 그 상자에 색만 입힌다.
   rowLanded: {backgroundColor: color.warnSurface},
+  rowLandedEdge: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: ROW_FACE.radius,
+    borderWidth: ROW_FACE.edge,
+    borderColor: color.warnBorder,
+  },
   // 그룹 사이는 `CONV.groupGap`. 안쪽이 이미 절반씩 물고 있으므로 차이만 더한다.
   /**
    * 작성자가 바뀌는 자리의 틈. 시안 `.a-m{margin-bottom:16px}` — 두 행의 안쪽 패딩

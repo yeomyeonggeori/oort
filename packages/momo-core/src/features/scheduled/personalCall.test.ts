@@ -34,7 +34,7 @@ function member(fields: Partial<RosterMember> & { id: string; handle: string }):
 }
 
 const MEMBERS: RosterMember[] = [
-  member({ id: ME, handle: "seongjae" }),
+  member({ id: ME, handle: "seoyeon" }),
   member({ id: TEAMMATE, handle: "mate" }),
   member({ id: MY_AGENT, kind: "agent", handle: "my-claude", aliases: ["claude", "클로드"] }),
   member({ id: THEIR_AGENT, kind: "agent", handle: "mate-claude" }),

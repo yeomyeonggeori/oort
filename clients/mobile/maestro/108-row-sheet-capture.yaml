@@ -1,0 +1,58 @@
+appId: app.momo.ios
+name: 108-row-sheet-capture
+---
+# 108-row-sheet-capture - 사이드바 행을 길게 누르면 열리는 시트 (#4229).
+#
+# 표면 `-momoMeasure GONE-DM-HOME`(다크), `LIGHT-GONE-DM-HOME`(라이트)은 진짜 `SidebarScreen` 을 하네스의 씨앗 위에 세운다.
+# 이 흐름이 **실제 길게 누르기**로 시트를 연다(시트를 따로 그리지 않는다): 채널 행 · 사람 DM 행 · 나간 멤버 DM 행 ·
+# 나가기 확인 단계. 서버가 없는 하네스라 항목을 눌러도 요청은 끝나지 않는다 — 열린 모양만 찍는다.
+#
+#   xcrun simctl launch booted app.momo.ios --args \
+#     -momoMeasure GONE-DM-HOME -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <UDID> test -e SHOT=row-sheet-dark clients/mobile/maestro/108-row-sheet-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-list"
+    timeout: 60000
+- longPressOn:
+    id: "sidebar-row-channel:ch-general"
+- extendedWaitUntil:
+    visible:
+      id: "channel-sheet-title"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-channel
+- tapOn:
+    id: "channel-sheet-leave"
+- extendedWaitUntil:
+    visible:
+      id: "channel-leave-confirm-button"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-leave-confirm
+- tapOn:
+    id: "channel-leave-cancel"
+- tapOn:
+    id: "channel-sheet-close"
+- longPressOn:
+    id: "sidebar-row-dm:dm-dohyun"
+- extendedWaitUntil:
+    visible:
+      id: "channel-sheet-title"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-dm
+- tapOn:
+    id: "channel-sheet-close"
+- tapOn:
+    id: "sidebar-gone-toggle"
+- extendedWaitUntil:
+    visible:
+      id: "sidebar-row-dm:dm-gone-a"
+    timeout: 10000
+- longPressOn:
+    id: "sidebar-row-dm:dm-gone-a"
+- extendedWaitUntil:
+    visible:
+      id: "channel-sheet-title"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-gone-dm
+- tapOn:
+    id: "channel-sheet-close"

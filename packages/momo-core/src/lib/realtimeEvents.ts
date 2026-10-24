@@ -1,4 +1,5 @@
 import type { InboxEvent } from "../features/inbox/serverInbox";
+import type { ScheduledMessageFrame } from "../features/scheduled/events";
 import type { Message, MessageAttachment, PinnedMessageWire } from "./api";
 import {
   messageUnfurlFromWire,
@@ -1222,6 +1223,20 @@ export interface RealtimeHandle {
   subscribeInbox?: (
     memberId: string,
     handlers: { onEvent: (event: InboxEvent) => void; onResync: () => void }
+  ) => () => void;
+  /**
+   * The signed-in member's scheduled-message signals (ADR-0208 D12, #4215):
+   * `scheduled_message.updated` on the same personal channel as the inbox signals
+   * (`user:read-state#<MEMBER>`). A frame holds ids, status and time only (never the text), so the
+   * list is read again for the body; `onResync` fires on (re)subscribe because a missed frame is
+   * repaired by the next read (PG is the source of truth).
+   *
+   * Optional like `subscribeInbox`: the phone does not wire it in v1 and refreshes on focus, on
+   * pull-to-refresh and 35 seconds after a send time instead (UI spec 0.6).
+   */
+  subscribeScheduled?: (
+    memberId: string,
+    handlers: { onEvent: (frame: ScheduledMessageFrame) => void; onResync: () => void }
   ) => () => void;
   /**
    * Re-dial now, on a person's request (goal B8 B2).

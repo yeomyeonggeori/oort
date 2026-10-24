@@ -133,7 +133,9 @@ describe("채널 만들기 오버레이 스코프 (R2-1)", () => {
     const dmBlock = sidebarSource.split("sectionId={dmSection.id}")[1] ?? "";
     const dmHeader = dmBlock.slice(0, dmBlock.indexOf("</SidebarSection>"));
     expect(dmHeader).not.toBe("");
-    expect(dmHeader).not.toContain("overlayOpen");
+    // DM 구역은 자기 「⋯」 메뉴의 열림(`openDmMenu`)만 붙든다 - 채널 만들기의 전역 열림은 아니다(#4228).
+    expect(dmHeader).not.toContain("createChannelOpen");
+    expect(dmHeader).toContain("overlayOpen={openDmMenu}");
   });
 });
 

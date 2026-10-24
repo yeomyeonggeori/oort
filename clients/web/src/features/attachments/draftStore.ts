@@ -350,6 +350,30 @@ export function takeSent(key: string): {
   return { attachmentIds, attachments };
 }
 
+/**
+ * 예약이 점유한 첨부**만** 트레이에서 뺀다 (ADR-0208 D11·D16).
+ *
+ * 보내기는 트레이를 통째로 비우지만(`takeSent`) 예약은 요청이 나는 동안 새로 붙인 파일이 있을 수 있어
+ * **스냅샷에 든 것만** 뺀다. 예약이 첨부를 점유하므로(서버가 `attachment_reserved`로 지킨다) 남겨 두고
+ * 그대로 보내면 `attachment_unavailable`이 된다. 서버가 201을 준 **뒤에만** 부른다. 파일 자체는 서버에
+ * 남는다(초안과 같은 상태).
+ *
+ * id는 서버가 대소문자를 섞어 줄 수 있어 접어서 비교한다.
+ */
+export function dropClaimed(key: string, attachmentIds: readonly string[]): void {
+  const claimed = new Set(attachmentIds.map((id) => id.toLowerCase()));
+  if (claimed.size === 0) return;
+  const isClaimed = (draft: { attachmentId?: string }): boolean =>
+    draft.attachmentId !== undefined && claimed.has(draft.attachmentId.toLowerCase());
+  for (const draft of read(key).drafts) {
+    if (!isClaimed(draft)) continue;
+    inflight.get(draft.localId)?.abort();
+    inflight.delete(draft.localId);
+    files.delete(draft.localId);
+  }
+  update(key, (list) => list.filter((draft) => !isClaimed(draft)));
+}
+
 /** 테스트 전용 초기화. 모듈 전역이 테스트 사이를 넘어가지 않게 한다. */
 export function resetAttachmentDraftsForTest(): void {
   for (const handle of inflight.values()) handle.abort();

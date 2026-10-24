@@ -99,19 +99,18 @@ import {
   scheduleSidebarChannelRowFocus,
 } from "./sidebarRowFocus";
 import {
-  closeDmOnDevice,
-  dmCloseOffered,
-  closedAtSeqOf,
-  dmHiddenByClosure,
   indexFallbackChannelId,
   readProjectionPhase,
   reopenDmOnDevice,
-  useClosedDms,
 } from "./sidebarDmClosure";
-import { useDmRevival } from "./dmRevival";
-import { goneDmIds } from "./goneDmHiding";
-import { useGoneUnreadVerdicts } from "./goneUnreadVerdicts";
-import { GoneDmFold } from "./GoneDmFold";
+import {
+  dmShownNow,
+  useDmClosureActions,
+  useDmLedgerMigration,
+  useDmVisibility,
+} from "./useDmVisibility";
+import { DmClosedMenu } from "./DmClosedList";
+import { dmCloseOffered } from "@momo/core/features/sidebar/dmVisibility";
 import { rosterLoaded } from "@momo/core/features/sidebar/goneDm";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
@@ -132,9 +131,6 @@ import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
 import { DmAvatar, DmStatusText } from "./DmAvatar";
-
-/** 펼친 「나간 멤버와의 대화」 목록의 id (펼침 단추의 `aria-controls`). */
-const GONE_DM_LIST_ID = "sidebar-gone-dm-list";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -346,138 +342,72 @@ export function Sidebar({
   // 숨김을 유지하고 못 읽었으면 보인다. 걸러내는 자리는 파생 **앞**이라 ⌥↑↓ 순회와 접힌 머리의
   // 합산이 보이는 행만 센다. 에이전트 구독(`agentCoverage`)과 ⌘K 목록은 닫은 DM 도 그대로 든다 -
   // 닫는 것은 목록의 진열이지 대화의 존재가 아니다.
-  const closedDms = useClosedDms(workspaceId);
   const readPhase = readProjectionPhase(readStates);
+  // 서버에 닫지 못했다는 말은 DM 구역 안에서 한 번 한다(되돌린 행이 다시 서 있는 이유). 다음 닫기가 지운다.
+  const [dmCloseFailed, setDmCloseFailed] = useState(false);
+  const [openDmMenu, setOpenDmMenu] = useState(false);
   const routePath = useLocation().pathname;
-  // 닫은 DM 의 되살아남은 「사람이 읽을 새 메시지」로만 정한다(#4142, `dmRevival.ts`).
-  const latestSeqForClosure = useDmRevival({
-    workspaceId,
-    dms,
-    closed: closedDms,
-    byChannel: readStates.byChannel,
-    phase: readPhase,
-  });
-  // 나간 멤버와의 대화(#4252, 코어 `dmHiddenAsGone`)로 접히는 DM 은 `/` 가 열어 주는 대화의 후보도 아니다
-  // (`ChatShell` 이 같은 집합으로 폴백을 고른다).
   const rosterReady = rosterLoaded(directoryQuery);
-  // 안 읽음이 있는 나간 멤버 DM 은 그 안 읽음이 사람이 읽을 것인지 한 번 읽어 가른다(`goneUnreadVerdicts.ts`). `ChatShell` 이 같은
-  // 훅을 부른다(키가 같아 한 번만 읽는다).
-  const goneVerdicts = useGoneUnreadVerdicts({
+  // 사이드바 조직화 (ADR-0177 / BT-4 #1932). 별표·섹션 배치는 DM 보임 판정(코어 `dmVisibility` 4번)의 입력이라 여기서 먼저 읽는다.
+  const sidebarPrefs = useSidebarPrefs(workspaceId);
+  // DM 이 서는가는 **코어 함수 하나**(`dmVisibility`, ADR-0177 증보 D8)가 정하고, 이 훅이 입력(읽음 투영의 닫힘·읽을 seq, 명부, 별표,
+  // 첫 페인트 사본, 옛 서버의 원장)을 모아 준다. `ChatShell` 의 인덱스 폴백이 **같은 훅**을 부른다: 둘이 다르면 사이드바는 숨기는데
+  // 본문은 연다(design-review #3963 R1 H1). 걸러내는 자리는 파생 **앞**이라 ⌥↑↓ 순회와 접힌 머리의 합산이 보이는 행만 센다.
+  // 에이전트 구독(`agentCoverage`)과 ⌘K 목록은 닫은 DM 도 그대로 든다 - 닫는 것은 목록의 진열이지 대화의 존재가 아니다.
+  const dmVisibility = useDmVisibility({
     workspaceId,
     dms,
     directory: directoryQuery.directory,
     selfMemberId: session.member.id,
     rosterReady,
-    byChannel: readStates.byChannel,
-    phase: readPhase,
-    closed: closedDms,
-    closureLatestSeqOf: latestSeqForClosure,
+    readStates,
+    prefs: sidebarPrefs.status === "ready" ? sidebarPrefs.prefs : undefined,
   });
-  const foldedGoneForFallback = useMemo(
-    () =>
-      goneDmIds({
-        dms,
-        directory: directoryQuery.directory,
-        selfMemberId: session.member.id,
-        rosterReady,
-        byChannel: readStates.byChannel,
-        openId: null,
-        phase: readPhase,
-        verdicts: goneVerdicts,
-      }),
-    [dms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, readPhase, goneVerdicts]
-  );
+  // 옛 원장의 숨은 항목을 서버로 옮긴다(D12). 서버가 닫기를 기억할 때만, (기기, 워크스페이스)마다 한 번.
+  useDmLedgerMigration({
+    workspaceId,
+    mode: dmVisibility.mode,
+    phase: dmVisibility.phase,
+    rows: readStates.data,
+  });
+  const dmClosure = useDmClosureActions({
+    workspaceId,
+    mode: dmVisibility.mode,
+    byChannel: readStates.byChannel,
+  });
   const openId = openChannelId(
     routePath,
     indexFallbackChannelId({
       channels,
       dms,
-      closed: closedDms,
-      latestSeqOf: latestSeqForClosure,
-      phase: readPhase,
-      foldedGone: foldedGoneForFallback,
+      shown: (channelId) => dmVisibility.verdictOf(channelId).state === "shown",
     })
   );
-  // 닫기는 행마다 `dmCloseOffered` 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된
-  // 뒤에만**(design-review R1 M1: 닫을 때 워터마크로 서버의 최신 seq 를 적는데, 투영이 오기 전에는 그 기준이
-  // 없다 - 0 으로 적으면 투영이 도착하는 순간 방금 닫은 대화가 되살아난다) 그리고 **안 읽은 메시지(멘션 포함)가
-  // 없을 때만**(소유자 결정 2026-10-17 「안 읽음 있으면 X 숨김」). 읽고 나면 다시 보인다.
-  const visibleDms = useMemo(
-    () =>
-      dms.filter(
-        (channel) =>
-          !dmHiddenByClosure({
-            closedAtSeq: closedAtSeqOf(closedDms, channel.id),
-            latestSeq: latestSeqForClosure(channel.id),
-            isOpen: openId !== null && uuidEq(channel.id, openId),
-            phase: readPhase,
-          })
-      ),
-    [dms, closedDms, latestSeqForClosure, openId, readPhase]
-  );
-  const closedDmCount = dms.length - visibleDms.length;
-  // 나간 멤버와의 대화(#4252): 닫기 원장이 거르고 **남은** DM 중 상대가 명부에 없고 안 읽은 것이 없는 것은 목록에서
-  // 접고, DM 구역 끝의 한 줄이 그 수를 센다. 열려 있는 DM 은 접히지 않는다. ⌘K 는 `groups.dms` 를 그대로 읽어
-  // 접힌 대화도 연다. 원장이 숨긴 것은 이 수에 들지 않는다(`closedDmCount` 는 원장만 센다).
-  //
-  // 펼침은 들여다보는 동작이지 설정이 아니다: 저장하지 않는다. 펼쳐 둔 동안은 열린 나간 멤버 DM 도 접힌 목록의 제자리에 머문다
-  // (`foldOpen`): 펼친 목록에서 행을 열 때 행이 위 목록으로 옮겨 가면 눌린 링크가 사라져 키보드 캐럿을 잃고 포인터는 점프를 본다.
-  const [goneOpen, setGoneOpen] = useState(false);
-  const foldedGone = useMemo(
-    () =>
-      goneDmIds({
-        dms: visibleDms,
-        directory: directoryQuery.directory,
-        selfMemberId: session.member.id,
-        rosterReady,
-        byChannel: readStates.byChannel,
-        openId,
-        phase: readPhase,
-        foldOpen: goneOpen,
-        verdicts: goneVerdicts,
-      }),
-    [visibleDms, directoryQuery.directory, session.member.id, rosterReady, readStates.byChannel, openId, readPhase, goneOpen, goneVerdicts]
-  );
+  // 닫기는 행마다 `dmCloseOffered`(코어) 가 정한다(호버 X 와 메뉴 항목이 같은 함수를 읽는다): **읽음 투영이 준비된 뒤에만**(닫을
+  // 때 `seenSeq` 로 서버의 최신 seq 를 적는데, 투영이 오기 전에는 그 기준이 없다), **안 읽은 메시지(멘션 포함)가 없을 때만**(소유자
+  // 결정 2026-10-17), **별표·섹션 DM 이 아닐 때만**(ADR-0177 D7). 읽고 나면 다시 보인다.
   const shownDms = useMemo(
-    () => visibleDms.filter((channel) => !foldedGone.has(channel.id.toLowerCase())),
-    [visibleDms, foldedGone]
+    () =>
+      dms.filter((channel) =>
+        dmShownNow(dmVisibility.verdictOf(channel.id), channel.id, openId)
+      ),
+    [dms, dmVisibility, openId]
   );
-  const goneDms = useMemo(
-    () => visibleDms.filter((channel) => foldedGone.has(channel.id.toLowerCase())),
-    [visibleDms, foldedGone]
+  // 「⋯ › 닫은 대화」 목록(D11): 내가 닫았거나 상대가 나간 DM. 지금 열려 있는 DM 은 보이는 대화라 넣지 않는다.
+  const closedListItems = useMemo(
+    () =>
+      dmVisibility.closedList
+        .filter(({ channel }) => openId === null || !uuidEq(channel.id, openId))
+        .map(({ channel, reason }) => ({
+          id: channel.id,
+          reason,
+          name: channelLabelParts(channel, directoryQuery.directory, session.member.id, {
+            rosterReady,
+            selfName,
+          }).text,
+        })),
+    [dmVisibility.closedList, openId, directoryQuery.directory, session.member.id, rosterReady, selfName]
   );
-  // 접힌 대화가 없어지면 펼침은 닫힌 채로 돌아간다.
-  useEffect(() => {
-    if (goneDms.length === 0) setGoneOpen(false);
-  }, [goneDms.length]);
-  // 줄은 목록 맨 끝이라 펼친 결과가 스크롤 밖에 서기 쉽다(design-review #4252 M1: 줄을 찾으려고 이미 맨 아래까지 내린 사람이
-  // 누르면 셰브론만 바뀌고 행은 보이지 않았다). 펼치는 순간 접힌 목록이 보이게 가장 가까운 끝으로 맞춘다. 키보드는 ↓ 포커스가
-  // 스크롤을 따라가 이미 보인다. 기본(`auto`)은 즉시 이동이라 움직임 줄이기와 부딪히지 않는다.
-  useEffect(() => {
-    if (goneOpen) {
-      document.getElementById(GONE_DM_LIST_ID)?.scrollIntoView?.({ block: "nearest" });
-    }
-  }, [goneOpen]);
-  // 줄이 눌린 채 사라질 때(접힌 대화가 0 이 됐다: 접힌 대화가 하나뿐이고 그것이 열려 있을 때 줄을 접으면 그 행이 위 목록으로
-  // 올라간다) 캐럿이 `<body>` 로 떨어지지 않게 가장 가까운 정거장으로 넘긴다(design-review #4252 H1). 갈 곳은 ①줄을 접어 위로
-  // 올라온 열린 행 ②줄 바로 위의 행 ③DM 구획 머리글 순이다. 불리는 시점의 클로저는 줄이 마지막으로 그려진 렌더의 것이다.
-  const handOffFromGoneFold = () => {
-    const target =
-      goneDms.find((channel) => openId !== null && uuidEq(channel.id, openId))?.id ??
-      shownDms[shownDms.length - 1]?.id ??
-      null;
-    if (target !== null) {
-      scheduleSidebarChannelRowFocus(target);
-      return;
-    }
-    if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => {
-        navRef.current
-          ?.querySelector<HTMLElement>('[data-testid="section-collapse-dms"]')
-          ?.focus();
-      });
-    }
-  };
   // 명부·읽음 투영이 **한 번도 못 온 채 실패했을 때** 사람에게 이유를 말한다(design-review #4252 H2·M1): 전자는 상대가 있는 DM
   // 도 「불러오는 중」으로 남고, 후자는 접어야 할 나간 멤버 DM 이 도로 보인다. 말은 영향을 받는 DM 구역에만 선다(영향받는 DM 이
   // 없으면 말할 일도 없다). 폰은 명부 실패를 목록 실패로, 읽음 실패를 고지로 이미 말한다.
@@ -507,23 +437,33 @@ export function Sidebar({
       ),
     [readPhase, rosterReady, dms, directoryQuery.directory, session.member.id, selfName]
   );
-  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM)이 곧 다시 연다는 뜻이다. 원장에서 지우지
-  // 않으면 사람이 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 효과는 `openId` 가
-  // **바뀔 때만** 돈다(deps): 열린 DM 을 X 로 닫으면 `closeDmRow` 가 원장을 쓴 뒤 `/` 로 착지시키고,
-  // 그 DM 은 이미 열린 것이 아니므로 이 효과가 닫기를 되돌릴 틈이 없다.
+  // 닫아 둔 DM 이 **열리는** 순간(주소 · ⌘K · 새 DM · 「닫은 대화」)이 곧 다시 연다는 뜻이다(ADR-0177 D8). 다시 열지 않으면 사람이
+  // 일부러 연 대화가 다른 곳으로 옮겨 가는 순간 도로 사라진다. 서버가 닫기를 기억하면 `DELETE` 를 보내고(**닫은 적이 있을 때만**:
+  // 나간 상대의 DM 은 연다고 아무것도 쓰지 않는다 - 열려 있는 동안만 보인다), 옛 서버에서는 원장 항목을 지운다.
   //
-  // **주소가 정한 열림만** 다시 연다(#4142): `/` 의 폴백이 고른 대화는 사람이 연 것이 아니다. 투영을 못 읽은
-  // 동안(`error`)에는 닫은 DM 이 폴백 후보가 되는데, 그걸 「열림」으로 세면 일시 오류 한 번에 원장 항목이
-  // 영구히 지워져 닫은 DM 이 오류가 풀린 뒤에도 돌아온다.
+  // **주소가 정한 열림만** 다시 연다(#4142): `/` 의 폴백이 고른 대화는 사람이 연 것이 아니다. 투영을 못 읽은 동안(`error`)에는 닫은 DM 이
+  // 폴백 후보가 되는데, 그걸 「열림」으로 세면 일시 오류 한 번에 닫힘이 영구히 지워져 닫은 DM 이 오류가 풀린 뒤에도 돌아온다.
+  // 서버 갈래는 투영이 **준비된 뒤**에 열림 하나당 한 번만 보낸다: 다른 기기가 지금 보는 DM 을 닫았다고 그 닫기를 되돌리지 않는다.
   const explicitOpenId = openChannelId(routePath, null);
+  const handledOpenRef = useRef<string | null>(null);
+  const { mode: dmClosureMode, phase: dmReadPhase } = dmVisibility;
+  const reopenDm = dmClosure.reopen;
   useEffect(() => {
-    if (explicitOpenId !== null) reopenDmOnDevice(workspaceId, explicitOpenId);
-  }, [explicitOpenId, workspaceId]);
+    if (explicitOpenId === null) {
+      handledOpenRef.current = null;
+      return;
+    }
+    if (dmClosureMode !== "server") reopenDmOnDevice(workspaceId, explicitOpenId);
+    if (dmReadPhase !== "ready") return;
+    const key = `${workspaceId}:${explicitOpenId}`.toLowerCase();
+    if (handledOpenRef.current === key) return;
+    handledOpenRef.current = key;
+    if (dmClosureMode === "server") void reopenDm(explicitOpenId);
+  }, [explicitOpenId, workspaceId, dmClosureMode, dmReadPhase, reopenDm]);
 
   // 사이드바 조직화 (ADR-0177 / BT-4 #1932). 부트스트랩 GET 이 도착하기 전에는
   // 배치가 비어 있고, 그때 파생은 오늘까지의 두 섹션과 정확히 같은 것을 돌려준다
   // - 그래서 로딩 중에도 목록이 흔들리지 않는다.
-  const sidebarPrefs = useSidebarPrefs(workspaceId);
   const derived = useMemo(
     () =>
       deriveSidebarSections({
@@ -713,13 +653,12 @@ export function Sidebar({
   }, []);
 
   /**
-   * DM 을 이 기기의 사이드바에서 닫는다 (#3963). 호버 X 와 행 메뉴의 「사이드바에서 닫기」가 이
-   * 한 길을 지난다.
+   * DM 을 닫는다 (#3963, ADR-0177 D7). 호버 X 와 행 메뉴의 「대화 닫기」가 이 한 길을 지난다. 서버가 닫기를 기억하면 서버에 쓰고(그
+   * 기기에서 닫으면 모든 기기에서 닫힌다), 옛 서버에서는 이 기기의 원장에 쓴다.
    *
-   * 순서가 일이다. ①이웃 행은 **지우기 전에** 잡는다(지운 뒤에는 DOM 에서 자리를 못 찾는다)
-   * ②원장에 닫을 때의 최신 seq 를 적는다 ③지금 보고 있는 DM 이면 `/` 로 착지한다(채널 나가기와
-   * 같은 착지: 보고 있던 대화가 사라진 자리에 머물지 않는다) ④다음 프레임에 캐럿을 이웃 행으로
-   * 넘긴다 - 이 행의 트리거가 함께 언마운트되므로 Radix 의 닫힘 복귀가 돌려줄 곳이 없고, 그대로
+   * 순서가 일이다. ①이웃 행은 **지우기 전에** 잡는다(지운 뒤에는 DOM 에서 자리를 못 찾는다) ②닫을 때의 최신 seq(`seenSeq`: 화면이
+   * 본 seq)를 적는다 ③지금 보고 있는 DM 이면 `/` 로 착지한다(채널 나가기와 같은 착지: 보고 있던 대화가 사라진 자리에 머물지 않는다)
+   * ④다음 프레임에 캐럿을 이웃 행으로 넘긴다 - 이 행의 트리거가 함께 언마운트되므로 Radix 의 닫힘 복귀가 돌려줄 곳이 없고, 그대로
    * 두면 캐럿은 `<body>` 에 떨어진다(`sidebarRowFocus.ts`, design-review #1933 H-1 과 같은 구멍).
    */
   const closeDmRow = (channel: Channel) => {
@@ -727,13 +666,20 @@ export function Sidebar({
       navRef.current === null
         ? null
         : neighborSidebarChannelRowId(navRef.current, channel.id);
-    closeDmOnDevice(
-      workspaceId,
-      channel.id,
-      unreadFor(readStates.byChannel, channel.id)?.latestSeq ?? 0
-    );
+    setDmCloseFailed(false);
+    void dmClosure
+      .close(channel.id, unreadFor(readStates.byChannel, channel.id)?.latestSeq ?? 0)
+      .then((ok) => {
+        if (!ok) setDmCloseFailed(true);
+      });
     if (openId !== null && uuidEq(openId, channel.id)) navigate("/");
     if (neighborId !== null) scheduleSidebarChannelRowFocus(neighborId);
+  };
+
+  /** 「닫은 대화」 목록의 「다시 열기」: 서버에 닫힘이 있으면 풀고, 그 대화를 연다. 나간 상대의 DM 은 쓰는 것 없이 연다(D8). */
+  const reopenClosedDm = (item: { id: string }) => {
+    void dmClosure.reopen(item.id);
+    navigate(`/c/${item.id}`);
   };
 
   /**
@@ -758,6 +704,10 @@ export function Sidebar({
         phase: readPhase,
         unreadCount: counts.unreadCount,
         mentionCount: counts.mentionCount,
+        // 별표했거나 커스텀 섹션에 넣은 DM 에는 닫기를 내밀지 않는다(D7). 웹은 DM 에 별표 문을 열지 않으므로(`channelActionAvailability`)
+        // 이 값은 다른 클라이언트가 적은 배치에서만 참이 된다.
+        starredOrSectioned:
+          sidebarPrefs.isStarred(channel.id) || sidebarPrefs.sectionIdFor(channel.id) !== null,
       });
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
@@ -1396,18 +1346,27 @@ export function Sidebar({
                 }
                 unreadCount={sectionUnread(dmSection.id).unreadCount}
                 mentionCount={sectionUnread(dmSection.id).mentionCount}
+                overlayOpen={openDmMenu}
                 action={
-                  <button
-                    type="button"
-                    aria-label="새 다이렉트 메시지 시작"
-                    title="새 다이렉트 메시지 (⌘⇧K)"
-                    data-testid="new-dm"
-                    data-section-action=""
-                    onClick={(event) => openNewDm(event.currentTarget)}
-                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-                  >
-                    <Plus className="size-4" aria-hidden="true" />
-                  </button>
+                  <>
+                    {/* 「⋯ › 닫은 대화」(ADR-0177 D11): 닫은 대화와 나간 멤버와의 대화를 다시 열 문. 닫은 대화가 없으면 문이 서지 않는다. */}
+                    <DmClosedMenu
+                      items={closedListItems}
+                      onOpenChange={setOpenDmMenu}
+                      onReopen={reopenClosedDm}
+                    />
+                    <button
+                      type="button"
+                      aria-label="새 다이렉트 메시지 시작"
+                      title="새 다이렉트 메시지 (⌘⇧K)"
+                      data-testid="new-dm"
+                      data-section-action=""
+                      onClick={(event) => openNewDm(event.currentTarget)}
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+                    >
+                      <Plus className="size-4" aria-hidden="true" />
+                    </button>
+                  </>
                 }
               >
                 {/* 명부를 못 받으면 DM 이름이 전부 「불러오는 중」으로 남는다. 이유와 다시 시도를 구역 안에서 말한다(#4252). */}
@@ -1424,13 +1383,13 @@ export function Sidebar({
                     />
                   </li>
                 )}
-                {/* 안 읽음 표시를 못 받으면 나간 멤버와의 대화를 접을 근거가 없어 도로 보인다(안 읽은 것이 있는지 모를 때 숨기는
+                {/* 안 읽음 표시를 못 받으면 나간 멤버와의 대화를 숨길 근거가 없어 도로 보인다(안 읽은 것이 있는지 모를 때 숨기는
                     쪽이 최악이다). 그 이유를 말한다(#4252). */}
                 {goneUnfoldedByReadFailure && (
                   <li>
                     <InlineBanner
                       tone="neutral"
-                      message="안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 접지 못했어요."
+                      message="안 읽음 표시를 불러오지 못해 나간 멤버와의 대화를 숨기지 못했어요."
                       actionLabel="다시 시도"
                       onAction={() => void readStates.refetch()}
                       separator={false}
@@ -1439,46 +1398,42 @@ export function Sidebar({
                     />
                   </li>
                 )}
+                {/* 서버에 닫지 못했다: 되돌려진 대화가 다시 서 있는 이유를 구역 안에서 말한다. */}
+                {dmCloseFailed && (
+                  <li>
+                    <InlineBanner
+                      tone="neutral"
+                      message="대화를 닫지 못했어요. 잠시 뒤에 다시 시도해 주세요."
+                      actionLabel="확인"
+                      onAction={() => setDmCloseFailed(false)}
+                      separator={false}
+                      className="px-2"
+                      testId="dm-close-error"
+                    />
+                  </li>
+                )}
                 {dmSection.channels.map((channel) => rowFor(channel))}
-                {/* 접힌 나간 멤버 대화만 남은 구역이 「아직 대화가 없습니다」라고 말하면 바로 아래 「나간 멤버와의 대화 2개」와
-                    모순이다(#4252). 닫은 DM 의 힌트(#3963)는 접힌 줄과 모순이 아니라 그대로 선다. */}
+                {/* 재설치 직후처럼 마지막 투영의 사본이 없으면 닫은 대화를 가리지 못한다: 투영이 올 때까지 판정을 미룬다(ADR-0177 D8, 골격).
+                    목록이 한 번 비었다 채워지는 깜빡임보다 두 줄의 골격이 조용하다. */}
+                {dmVisibility.anyPending && dmSection.channels.length === 0 && (
+                  <li data-testid="dm-section-pending">
+                    <Skeleton ready={false} rows={2} />
+                  </li>
+                )}
                 {dmSection.channels.length === 0 &&
                   !channelsQuery.isLoading &&
                   !channelsQuery.error &&
-                  (closedDmCount > 0 || goneDms.length === 0) && (
+                  !dmVisibility.anyPending && (
                     <li
                       className="px-2 py-1 text-meta text-ink-muted"
                       data-testid="dm-section-empty"
                     >
-                      {/* 닫은 DM 이 있으면 「아직 대화가 없습니다」는 거짓이다(#3963). */}
-                      {closedDmCount > 0
+                      {/* 닫은 대화가 있으면 「아직 대화가 없습니다」는 거짓이다(#3963). */}
+                      {closedListItems.length > 0
                         ? SIDEBAR_DMS_ALL_CLOSED_HINT
                         : "아직 대화가 없습니다. ⌘⇧K로 시작하세요."}
                     </li>
                   )}
-                {/* 나간 멤버와의 대화(#4252): 구역 맨 끝의 조용한 줄. 펼치면 접힌 대화가 이 줄 아래에 선다. */}
-                {goneDms.length > 0 && (
-                  <>
-                    <GoneDmFold
-                      count={goneDms.length}
-                      expanded={goneOpen}
-                      onToggle={() => setGoneOpen((open) => !open)}
-                      listId={GONE_DM_LIST_ID}
-                      onVanishWhileFocused={handOffFromGoneFold}
-                    />
-                    {goneOpen && (
-                      <li>
-                        <ul
-                          id={GONE_DM_LIST_ID}
-                          className="sidebar-stack"
-                          data-testid="gone-dm-list"
-                        >
-                          {goneDms.map((channel) => rowFor(channel))}
-                        </ul>
-                      </li>
-                    )}
-                  </>
-                )}
               </SidebarSection>
 
               {/* The turn pill covers a bounded number of (channel, agent) pairs.

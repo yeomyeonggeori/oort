@@ -1,4 +1,4 @@
-import { Bot, Inbox, ListChecks, Sparkles, Users } from "lucide-react";
+import { Bot, Clock, Inbox, ListChecks, Sparkles, Users } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
 import type { NeedsMe } from "@momo/core/features/inbox/needsMe";
@@ -7,7 +7,10 @@ import {
   WORK_NAV,
   WORK_PATH,
 } from "@momo/core/features/workbench/workTab";
+import { SCHEDULED_COPY } from "@momo/core/features/scheduled/copy";
+import { scheduledNavEntry } from "@momo/core/features/scheduled/model";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
+import { useScheduled } from "@/features/scheduled/useScheduled";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { AGENTS_NAV, AI_HUB_NAV } from "./workspaceNav";
@@ -22,7 +25,7 @@ import {
 // =============================================================================
 // 목록 열의 머리(#3334): 「검색과 이동」 바로 아래의 목적지 두 구획.
 //
-//   구획 A  인박스 · 멤버(초안이 있으면 초안) — 「대화」 줄은 #3662로 없앴다: 채널·DM 목록이
+//   구획 A  인박스 · 멤버(초안이 있으면 초안, 예약이 있으면 예약됨) — 「대화」 줄은 #3662로 없앴다: 채널·DM 목록이
 //           바로 아래에 서 있어 `/`로 가는 두 번째 문은 쓸모가 없었다(성재 2026-10-10)
 //   구획 B  「에이전트·작업」 — AI(허브, AIH-3) · 에이전트 · 작업 · 지금 도는 세션 줄
 //           (ADR-0202 D6: 내 작업·팀 작업·활동·작업 콘솔·작업 흐름 다섯 줄이 「작업」 한 줄이 됐다.
@@ -62,10 +65,14 @@ export function SidebarDestinations({
   const waitingPanes = paneEntries.filter((e) => e.status === "waiting" && needsMe.panes > 0);
   // 아직 안 본 끝남(「끝남」은 칸을 보면 내려간다, `paneAttention`). 웹에는 칸이 없어 비어 있다.
   const donePanes = paneEntries.filter((e) => e.status === "done");
+  // 「예약됨」 줄(ADR-0208): 보낼 예정 또는 보내지 못함이 있을 때만 선다. 알약은 보내지 못한 예약의 수다.
+  const scheduled = useScheduled();
+  const scheduledNav = scheduledNavEntry(scheduled.surface === "absent" ? [] : scheduled.rows);
   const marks = destinationMarks({
     needsMe,
     unreadChannels,
     doneUnseen: donePanes.length > 0,
+    scheduledFailed: scheduledNav.failedCount,
   });
   // 구획 B의 지금 도는 세션 줄: 응답 필요가 먼저, 안 본 끝남이 뒤. 최대 셋.
   const liveRows = [...waitingPanes, ...donePanes].slice(0, 3);
@@ -84,6 +91,16 @@ export function SidebarDestinations({
           />
           <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" isActive={active.directory} />
           <DraftsNavItem />
+          {scheduledNav.visible && (
+            <SidebarRow
+              to="/scheduled"
+              icon={<Clock className="size-4" />}
+              label={SCHEDULED_COPY.nav.label}
+              testId="nav-scheduled"
+              mentionCount={marks.scheduled.pill?.count ?? 0}
+              badgeLabel={scheduledNav.badgeLabel ?? undefined}
+            />
+          )}
         </ul>
       </nav>
       <SidebarSection

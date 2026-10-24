@@ -371,3 +371,17 @@ describe('「작업 끝남」 알림 입구 (#3342)', () => {
     expect(toHome).toMatchObject({tab: 'home', workSession: null, workList: false});
   });
 });
+
+describe('열려 있는 채널을 내가 나갔다 (#4229)', () => {
+  it('그 대화 층을 걷어 아래 화면(사이드바)으로 돌아간다 — 대소문자가 달라도 같은 채널이다', () => {
+    const next = navReducer(nav({conversation: OPEN}), {type: 'channelLeft', channelId: 'ch-1'});
+    expect(next.conversation).toBeNull();
+    expect(next.tab).toBe('home');
+  });
+
+  it('다른 채널이 열려 있거나 아무것도 안 열렸으면 상태를 건드리지 않는다', () => {
+    const open = nav({conversation: OPEN});
+    expect(navReducer(open, {type: 'channelLeft', channelId: 'CH-2'})).toBe(open);
+    expect(navReducer(INITIAL_NAV, {type: 'channelLeft', channelId: 'CH-1'})).toBe(INITIAL_NAV);
+  });
+});

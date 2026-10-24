@@ -6,6 +6,7 @@ import {bootSpawnPort} from './src/boot/spawnPort';
 import {PrimaryButton} from './src/design/atoms';
 import {OortLoader} from './src/design/brand/OortLoader';
 import {font, SAFE_GUTTER, space, type Palette} from './src/design/tokens';
+import {useRetainReduceMotion} from './src/lib/useReduceMotion';
 import {BrandAppearance, ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
@@ -58,6 +59,10 @@ function AppChrome(): React.JSX.Element {
   const {scheme} = useTheme();
   const queryClient = useMemo(() => createQueryClient(), []);
   const [booted, setBooted] = useState(false);
+
+  // 「동작 줄이기」를 앱이 시작할 때 한 번 읽어 앱이 사는 동안 간직한다(#4293 M-1). 새로 서는 화면(사진
+  // 뷰어 Modal 은 첫 렌더의 값으로 이미 떠 버린다)이 모르는 채로 시작하지 않는다.
+  useRetainReduceMotion();
 
   useEffect(() => {
     const teardown = installReactQueryBridges();

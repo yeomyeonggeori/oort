@@ -59,7 +59,14 @@ function fileCode(path: string): string {
 const HEADER = "features/chat/ChannelHeaderMenu.tsx";
 const ROW = "features/sidebar/SidebarRowContextMenu.tsx";
 const CANON = "features/chat/channelActions.tsx";
-const MODEL = "features/chat/channelActionModel.ts";
+// 모델은 코어로 올라갔다(#4229): 폰이 같은 표를 쓴다. 웹 소스를 훑는 이 게이트는 호출자만 세고,
+// 모델 본문은 코어 파일을 직접 읽는다 — 파일이 옮겨지면 읽기가 던져 게이트가 조용히 비지 않는다.
+const MODEL_CODE = codeOnly(
+  readFileSync(
+    join(SRC, "..", "..", "..", "packages", "momo-core", "src", "features", "channels", "actionModel.ts"),
+    "utf8"
+  )
+);
 
 describe("실행부는 한 벌이다", () => {
   it("알림 PUT 을 부르는 자리는 정본 하나뿐이다", () => {
@@ -152,20 +159,22 @@ describe("두 표면이 같은 모델을 소비한다", () => {
   });
 
   it("표면별 차이는 모델의 표 하나에만 있다", () => {
-    const model = fileCode(MODEL);
-    expect(model).toMatch(/SURFACE_KEYS/);
+    expect(MODEL_CODE).toMatch(/SURFACE_KEYS/);
     // 표면 이름이 모델 밖에서 분기를 만들면 그 표는 정본이 아니다.
     expect(fileCode(HEADER)).toMatch(/surface="header"/);
     expect(fileCode(ROW)).toMatch(/surface="row"/);
   });
 
   it("인벤토리를 부르는 곳은 모델과 정본뿐이다", () => {
-    expect(callers("channelActionItemsForSurface").sort()).toEqual(
-      [MODEL, CANON].sort()
-    );
-    expect(callers("channelActionAvailability").sort()).toEqual(
-      [MODEL, CANON].sort()
-    );
+    // 웹에서 부르는 자리는 정본 하나다(모델의 내부 호출은 코어 파일 안이라 이 훑기 밖이다).
+    expect(callers("channelActionItemsForSurface")).toEqual([CANON]);
+    expect(callers("channelActionAvailability")).toEqual([CANON]);
+    // 그리고 정의는 코어에 있다 — 웹에 두 번째 정의가 생기면 폰과 표가 갈라진다.
+    expect(MODEL_CODE).toMatch(/export function channelActionAvailability\(/);
+    expect(MODEL_CODE).toMatch(/export function channelActionItemsForSurface\(/);
+    expect(
+      FILES.filter((file) => /function channelActionAvailability\(/.test(file.code))
+    ).toEqual([]);
   });
 });
 
@@ -191,15 +200,19 @@ describe("#3963: 새 낱말과 새 쓰기 길도 한 곳이다", () => {
     }
   });
 
-  it("DM 닫기 원장에 쓰는 자리는 사이드바 한 곳이다(모듈 정의는 제외)", () => {
-    // 행 메뉴·호버 X 가 각자 원장을 만지면 닫는 순서(이웃 → 원장 → 착지 → 캐럿)가 갈라진다.
-    // 두 입구는 사이드바의 `closeDmRow` 하나를 지난다.
+  it("DM 닫기가 쓰는 자리는 한 훅이다: 서버 쓰기와 옛 원장은 `useDmVisibility` 를 지난다(모듈 정의는 제외)", () => {
+    // 행 메뉴·호버 X 가 각자 쓰면 닫는 순서(이웃 → 쓰기 → 착지 → 캐럿)와 서버·원장 갈래가 갈라진다.
+    // 두 입구는 사이드바의 `closeDmRow` 하나를 지나고, 그 안의 쓰기는 `useDmClosureActions` 하나가 서버/원장을 고른다.
     const sidebar = "features/sidebar/Sidebar.tsx";
     const module = "features/sidebar/sidebarDmClosure.ts";
-    expect(callers("closeDmOnDevice").sort()).toEqual([module, sidebar].sort());
-    expect(callers("reopenDmOnDevice").sort()).toEqual([module, sidebar].sort());
+    const hook = "features/sidebar/useDmVisibility.ts";
+    expect(callers("closeDmOnDevice").sort()).toEqual([module, hook].sort());
+    // 다시 열기는 훅(액션·이전)과 사이드바의 「열림」 효과(옛 서버의 원장 항목 지우기)다.
+    expect(callers("reopenDmOnDevice").sort()).toEqual([module, hook, sidebar].sort());
+    expect(callers("closeDm").sort()).toContain(hook);
+    expect(callers("closeDm")).not.toContain(sidebar);
     for (const path of [HEADER, ROW, "features/sidebar/SidebarRow.tsx"]) {
-      expect(fileCode(path)).not.toMatch(/closeDmOnDevice|reopenDmOnDevice|localStorage/);
+      expect(fileCode(path)).not.toMatch(/closeDmOnDevice|reopenDmOnDevice|localStorage|\bcloseDm\(/);
     }
   });
 });
@@ -213,6 +226,10 @@ describe("#3963 H1: `/` 가 여는 대화는 한 함수가 고른다", () => {
     expect(callers("indexFallbackChannelId").sort()).toEqual(
       ["features/sidebar/sidebarDmClosure.ts", shell, sidebar].sort()
     );
+    // 그 함수에 건네는 판정도 한 훅이다(코어 `dmVisibility` 한 함수가 그 뒤에 선다).
+    expect(callers("useDmVisibility").sort()).toEqual(
+      ["features/sidebar/useDmVisibility.ts", shell, sidebar].sort()
+    );
     for (const path of [sidebar, shell]) {
       expect(fileCode(path)).not.toMatch(/dms\[0\]/);
     }
@@ -225,7 +242,7 @@ describe("게이트가 실제로 파일을 읽고 있다", () => {
     expect(paths).toContain(HEADER);
     expect(paths).toContain(ROW);
     expect(paths).toContain(CANON);
-    expect(paths).toContain(MODEL);
+    expect(MODEL_CODE.length).toBeGreaterThan(1000);
     // 시험 파일은 세지 않는다: 시험이 코어 함수를 모킹하는 것은 이중화가 아니다.
     expect(paths.filter((path) => /\.test\./.test(path))).toEqual([]);
   });
@@ -247,7 +264,7 @@ describe("게이트가 실제로 파일을 읽고 있다", () => {
 
 describe("섹션 이동 무리의 그릇", () => {
   it("`surface` 로 그릇을 고르고, 컨텍스트 메뉴를 하드코딩하지 않는다", () => {
-    // `channelActionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·SURFACE_KEYS
+    // 코어 `channels/actionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·SURFACE_KEYS
     // 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 `move-to-section` 을 넣는
     // 사람이 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하면, 광고한 확장점이
     // 실제로는 그것보다 비쌌던 것이다.

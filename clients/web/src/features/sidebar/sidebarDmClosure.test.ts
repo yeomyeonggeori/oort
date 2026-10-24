@@ -5,7 +5,6 @@ import {
   closeDmOnDevice,
   closedAtSeqOf,
   closedDmsFor,
-  dmCloseOffered,
   dmHiddenByClosure,
   indexFallbackChannelId,
   parseClosedDmLedger,
@@ -77,36 +76,7 @@ describe("dmHiddenByClosure: 새 메시지가 오면 다시 나타난다", () =>
   });
 });
 
-describe("dmCloseOffered: 안 읽음이 있으면 닫기를 내밀지 않는다 (소유자 결정 2026-10-17)", () => {
-  const ready = { phase: "ready" as const, unreadCount: 0, mentionCount: 0 };
-
-  it("읽을 것이 없고 투영이 준비됐을 때만 내민다", () => {
-    expect(dmCloseOffered(ready)).toBe(true);
-  });
-
-  it("안 읽은 메시지가 있으면 내밀지 않는다", () => {
-    expect(dmCloseOffered({ ...ready, unreadCount: 1 })).toBe(false);
-    expect(dmCloseOffered({ ...ready, unreadCount: 40 })).toBe(false);
-  });
-
-  it("멘션이 있으면 안 읽음 수가 0 이어도 내밀지 않는다(멘션 포함)", () => {
-    expect(dmCloseOffered({ ...ready, mentionCount: 1 })).toBe(false);
-  });
-
-  it("읽고 나면(둘 다 0) 다시 내민다", () => {
-    expect(dmCloseOffered({ ...ready, unreadCount: 2, mentionCount: 1 })).toBe(false);
-    expect(dmCloseOffered({ ...ready, unreadCount: 0, mentionCount: 0 })).toBe(true);
-  });
-
-  it("읽음 투영이 오는 중이거나 못 읽었으면 안 읽음이 없어도 내밀지 않는다(기준 seq 가 없다)", () => {
-    expect(dmCloseOffered({ ...ready, phase: "loading" })).toBe(false);
-    expect(dmCloseOffered({ ...ready, phase: "error" })).toBe(false);
-  });
-
-  it("음수로 들어온 이상한 값은 읽은 것으로 본다(0 이하)", () => {
-    expect(dmCloseOffered({ ...ready, unreadCount: -1, mentionCount: -3 })).toBe(true);
-  });
-});
+// `dmCloseOffered` 는 코어로 옮겼다(ADR-0177 D7, `packages/momo-core/.../dmVisibility.ts`): 웹·폰이 같은 함수를 읽는다.
 
 describe("readProjectionPhase", () => {
   it("한 번도 못 읽은 것만 error 다 — 읽은 뒤의 배경 실패는 손에 든 투영이 있어 ready 다", () => {
@@ -274,68 +244,31 @@ describe("외부 저장소: 영속과 새로고침", () => {
 
 describe("indexFallbackChannelId: `/` 가 여는 대화 (design-review R1 H1)", () => {
   const dms = [{ id: dm(1) }, { id: dm(2) }, { id: dm(3) }];
-  const none = () => undefined;
+  const all = () => true;
 
-  it("채널이 있으면 첫 채널이다 — 닫은 DM 은 상관이 없다", () => {
+  it("채널이 있으면 첫 채널이다 - DM 이 보이든 안 보이든 상관이 없다", () => {
     expect(
-      indexFallbackChannelId({
-        channels: [{ id: "ch-1" }],
-        dms,
-        closed: { [dm(1)]: 5 },
-        latestSeqOf: () => 5,
-        phase: "ready",
-      })
+      indexFallbackChannelId({ channels: [{ id: "ch-1" }], dms, shown: () => false })
     ).toBe("ch-1");
   });
 
-  it("채널이 없으면 첫 DM 이다", () => {
-    expect(
-      indexFallbackChannelId({ channels: [], dms, closed: {}, latestSeqOf: none, phase: "ready" })
-    ).toBe(dm(1));
+  it("채널이 없으면 보이는 첫 DM 이다", () => {
+    expect(indexFallbackChannelId({ channels: [], dms, shown: all })).toBe(dm(1));
   });
 
-  it("닫은 DM 은 후보에서 빠진다 — 닫은 첫 DM 을 `/` 가 도로 열지 않는다", () => {
+  it("숨은 DM(닫음·나간 상대·판정 미룸)은 후보에서 빠진다 - 닫은 첫 DM 을 `/` 가 도로 열지 않는다", () => {
     expect(
-      indexFallbackChannelId({
-        channels: [],
-        dms,
-        closed: { [dm(1)]: 5 },
-        latestSeqOf: (id) => (id === dm(1) ? 5 : undefined),
-        phase: "ready",
-      })
+      indexFallbackChannelId({ channels: [], dms, shown: (id) => id !== dm(1) })
     ).toBe(dm(2));
+    expect(
+      indexFallbackChannelId({ channels: [], dms, shown: (id) => id === dm(3) })
+    ).toBe(dm(3));
   });
 
-  it("새 메시지로 돌아온 DM 은 다시 후보다", () => {
+  it("남은 것이 없으면 null - 본문은 빈 상태를 그린다", () => {
     expect(
-      indexFallbackChannelId({
-        channels: [],
-        dms,
-        closed: { [dm(1)]: 5 },
-        latestSeqOf: (id) => (id === dm(1) ? 6 : undefined),
-        phase: "ready",
-      })
-    ).toBe(dm(1));
-  });
-
-  it("남은 것이 없으면 null — 본문은 빈 상태를 그린다", () => {
-    expect(
-      indexFallbackChannelId({
-        channels: [],
-        dms: [{ id: dm(1) }],
-        closed: { [dm(1)]: 0 },
-        latestSeqOf: none,
-        phase: "ready",
-      })
+      indexFallbackChannelId({ channels: [], dms: [{ id: dm(1) }], shown: () => false })
     ).toBeNull();
-    expect(
-      indexFallbackChannelId({ channels: [], dms: [], closed: {}, latestSeqOf: none, phase: "ready" })
-    ).toBeNull();
-  });
-
-  it("투영이 오는 중이면 닫은 DM 은 후보가 아니고, 못 읽었으면 후보다(사이드바와 같은 판정)", () => {
-    const base = { channels: [], dms, closed: { [dm(1)]: 5 }, latestSeqOf: none };
-    expect(indexFallbackChannelId({ ...base, phase: "loading" })).toBe(dm(2));
-    expect(indexFallbackChannelId({ ...base, phase: "error" })).toBe(dm(1));
+    expect(indexFallbackChannelId({ channels: [], dms: [], shown: all })).toBeNull();
   });
 });
