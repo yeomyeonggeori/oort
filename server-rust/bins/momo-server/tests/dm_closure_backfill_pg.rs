@@ -25,7 +25,7 @@
 //! `#[ignore]` — needs a real Postgres (pgvector/pg18) and a role that may `CREATE DATABASE`:
 //!
 //! ```text
-//! DATABASE_URL=postgres://momo:momo@127.0.0.1:20252/momo \
+//! DATABASE_URL=postgres://momo:momo@127.0.0.1:15432/momo \
 //!   cargo test -p momo-server --test dm_closure_backfill_pg \
 //!   -- --ignored --test-threads=1 --nocapture
 //! ```
