@@ -1,6 +1,6 @@
 # ADR-0214: 보안 주장은 시험이 없으면 공개하지 않는다 (claims.yaml · CI 린트 · 「하지 않는 것」)
 
-- Status: **Proposed** (2026-10-25). Accepted 전환은 성재 결재 뒤(공개 약속·정책 변경, ADR-0100). 근거 결정: 성재 2026-10-21 「보안 = 자체 테스트 + 공개 증거」, 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 → 리서치 D6 「하지 않는 것」 절 공개.
+- Status: **Proposed** (2026-10-25). 독립 보안 검수 PASS(Blocker 0·High 0) 뒤 Accepted로 올린다. 근거 결정: 성재 2026-10-21 「보안 = 자체 테스트 + 공개 증거」, 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 → 리서치 D6 「하지 않는 것」 절 공개.
 - Date: 2026-10-25
 - Deciders: 성재
 - 기안: Sonnet 5.5 엔진 워커 (#4224, SEC-02). 리서치 r1 §5-A·§5-B.
@@ -24,11 +24,12 @@ Slack의 신뢰는 다년 인증 이력이고 oort는 그것을 시간 없이 �
 
 | 코드 | 빨강 조건 |
 |---|---|
+| E0 | 형식 문제: 중복 id·중복 yaml 키(PyYAML이 있어도 거부), 알 수 없는 최상위 키(오타로 절이 조용히 사라지는 것 방지), 알 수 없는 priority·runs |
 | E1 | 증명 선택자가 하나도 없다 |
-| E2 | 선택자가 가리키는 것이 없다. Rust는 `fn NAME(` 줄 위에 `#[test]`/`#[tokio::test]`/`#[sqlx::test]`가 있어야 한다(주석에 이름만 있는 것은 통과하지 못한다). TS는 `it`/`test`의 **정확한 제목**이고 `skip`/`todo`가 아니어야 한다. 스크립트는 non-comment 줄로 pr-ci.yml이나 local_gate.sh가 부르는 것이어야 한다 |
+| E2 | 선택자가 가리키는 것이 없다. Rust는 `fn NAME(` 줄 위에 `#[test]`/`#[tokio::test]`/`#[sqlx::test]`가 있어야 한다(줄 주석·블록 주석·문자열·raw string 안의 이름, `#[cfg(any())]`·never-enabled feature로 컴파일에서 빠진 시험은 통과하지 못한다). TS는 `it`/`test`의 **정확한 제목**이고(주석·문자열 안은 제외) `skip`/`todo`·`describe.skip`·`xdescribe` 안이 아니어야 한다. 스크립트는 non-comment·non-echo 줄에서 경로 전체가 단어 경계로 pr-ci.yml이나 local_gate.sh에 나타나야 한다 |
 | E3 | `runs:` 약속보다 약한 레인에서만 도는 증명이 있다(아래 레인 표) |
-| E4 | P0 주장에 `sabotage.how`·`sabotage.evidence`가 없거나, 증거 경로·시험이 없다 |
-| E5 | `limits:` 항목의 표식 `<!-- limit:ID -->`가 지정 문서에 없다 |
+| E4 | P0 주장에 `sabotage.how`·`sabotage.evidence`가 없다. 증거는 음성 대조 이름(control/red/sabotage/negative)의 시험 선택자이거나 `scripts/tests/`의 회귀 스크립트여야 하고, 증거가 도는 레인이 주장의 `runs:`보다 약하면 안 된다(저장소의 아무 파일이나 적는 것을 막는다) |
+| E5 | `limits:` 항목의 표식 `<!-- limit:ID -->`가 지정 문서에 없거나 코드 블록 안이거나 뒤에 문장이 없다. 필수 LIM-1~4가 파일에서 빠져도 빨강이다 |
 
 레인(강→약): **pr-ci** = `server-rust/` 아래 `#[ignore]` 아닌 Rust 시험(`cargo test --workspace`), `#[ignore]`이면 `(패키지, tests/<타깃>)`이 `infra/security-pack/selection.txt`에 있는 것(Security pack 잡), core·web·mobile의 vitest/jest, pr-ci.yml이 부르는 스크립트. **nightly** = 그 밖의 `#[ignore]` Rust 시험(security-nightly.yml이 전부 돈다). **local** = local_gate만 부르는 스크립트, `server-rust/` 밖 Rust. 참고: pr-ci의 Rust·TS 레인은 변경 경로로 선택된다(`pr-ci`의 「변경 경로로 레인 선택」). 린트는 그 선택을 모사하지 않으므로 「PR이 그 경로를 안 건드리면 안 돈다」는 남는 한계다.
 
@@ -38,9 +39,9 @@ Slack의 신뢰는 다년 인증 이력이고 oort는 그것을 시간 없이 �
 - 하지 않는 것(문서 `SECURITY.md`·`docs/security/README.ko.md`, 표식 LIM-1~4): E2EE가 아니다(서버는 내용을 읽는다) · 외부 감사·침투 시험 없음 · SOC 2 등 인증 없음 · 서버 운영자는 평문을 볼 수 있다. 비교 근거 [V 2026-10-25]: Slack 보안 페이지는 TLS 1.2+·저장 암호화를 설명하고 종단 간 주장이 없다(slack.com/resources/why-use-slack/security-at-slack). Zulip 보안 모델은 root 권한자가 「메시지를 읽고 기록을 고칠 수 있다」고 적는다(zulip.readthedocs.io/en/latest/production/security-model.html).
 - 공개하지 않는 것: 수정 전 취약점 세부 · 운영 인스턴스 설정값·시크릿 · 공격 단계 수준의 위협 모델(요약만) · 프롬프트 인젝션 공격 코퍼스(방법·통계만) · 운영 환경 스캔 결과. 공개하는 것: 통제 목록, 시험 이름, CI 링크, 수정이 끝난 GHSA.
 
-**D6. 정책 파일 취급.** `docs/security/claims.yaml`·`scripts/check_security_claims.py`·`scripts/tests/test_security_claims.sh`는 `verify_policy_integrity.sh`의 정책 경로다(지정 owner exact-head audit 규칙, GITHUB_OPS). 린트와 그 적색 시험은 `local_gate.sh` 정적 단계에 있다. **PR CI 잡 편입(`.github/`)은 이 ADR의 1단계가 하지 않았다**: 정책 PR 절차를 따르는 2단계 몫이며, 편입 전까지 이 장치는 local gate에서만 막는다.
+**D6. 정책 파일 취급.** `docs/security/claims.yaml`·`scripts/check_security_claims.py`·`scripts/tests/test_security_claims.sh`는 `verify_policy_integrity.sh`의 정책 경로다(지정 owner exact-head audit 규칙, GITHUB_OPS). 린트와 그 적색 시험은 `local_gate.sh` 정적 단계에 있다. **PR CI 잡 편입(`.github/`)은 이 PR이 하지 않는다**: `.github` 정책 PR 절차를 따르는 후속 이슈의 몫이며, 편입 전까지 이 장치는 local gate에서만 막는다. SECURITY.md가 이 사실을 그대로 적는다(공개 문서가 PR CI가 막는다고 읽히지 않게).
 
-**D7. selection.txt 파생은 미결.** SEC-03(#4378)이 말한 「selection.txt를 claims.yaml에서 파생」은 지금 하지 않는다. 이유: ① 시험 선택자는 함수 단위이고 selection은 타깃 단위라 파생하면 claims 한 줄이 CI 범위를 바꾼다 ② selection에는 주장 없는 타깃 15개가 있다(린트가 note로 출력) ③ `momo-agent/approval_pg`처럼 낡아서 뺀 타깃을 주장이 가리킬 수 있어야 한다(AGT-1은 nightly로 둠). 대신 린트가 한 방향을 강제한다: `runs: pr-ci`인 `#[ignore]` 증명은 selection에 있어야 한다(E3). 완전한 파생 또는 동등성 검사는 결정 사항으로 남긴다.
+**D7. selection.txt 파생은 보류.** SEC-03(#4378)이 말한 「selection.txt를 claims.yaml에서 파생」은 지금 하지 않는다. 이유: ① 시험 선택자는 함수 단위이고 selection은 타깃 단위라 파생하면 claims 한 줄이 CI 범위를 바꾼다 ② selection에는 주장 없는 타깃 15개가 있다(린트가 note로 출력) ③ `momo-agent/approval_pg`처럼 낡아서 뺀 타깃을 주장이 가리킬 수 있어야 한다(AGT-1은 nightly로 둠). 대신 린트가 한 방향을 강제한다: `runs: pr-ci`인 `#[ignore]` 증명은 selection에 있어야 한다(E3). **결정(2026-10-25): 파생은 보류하고 한 방향 강제(E3)를 유지한다.** 완전한 파생 또는 동등성 검사는 selection 정리(`approval_pg` 복귀)가 끝난 뒤 다시 본다.
 
 ## 결과와 한계 [V = 로컬 실행]
 
@@ -51,6 +52,7 @@ Slack의 신뢰는 다년 인증 이력이고 oort는 그것을 시간 없이 �
 ## 후속
 
 1. PR CI 편입(`pr-ci.yml`의 lint 단계 또는 docs 레인) + `Policy integrity` 승인.
-2. D7 결정, 그리고 `approval_pg` 수리 뒤 selection 복귀(AGT-1을 pr-ci로).
+2. `approval_pg` 수리 뒤 selection 복귀(AGT-1을 pr-ci로)와 그때 D7 재검토.
 3. 문서의 주장 문장마다 claim ID를 다는 역방향 검사.
 4. P1→P0 승격 대조 추가(웹훅 위조·refresh 재사용 등).
+5. 린트의 알려진 한계: 시험 본문이 비어 있어도(assert 삭제) 초록이다. P0는 저장소 안 음성 대조가 덮고, P1은 검수가 본다.

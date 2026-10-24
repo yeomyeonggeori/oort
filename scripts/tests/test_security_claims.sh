@@ -13,7 +13,7 @@ fail=0
 
 fresh() {
   rm -rf "$T/f"; local f="$T/f"
-  mkdir -p "$f/docs/security" "$f/infra/security-pack" "$f/.github/workflows" "$f/scripts" \
+  mkdir -p "$f/scripts/tests" "$f/docs/security" "$f/infra/security-pack" "$f/.github/workflows" "$f/scripts" \
     "$f/server-rust/crates/foo/src" "$f/server-rust/crates/foo/tests" "$f/packages/momo-core/src"
   printf '[package]\nname = "foo"\nversion = "0.0.0"\n' > "$f/server-rust/crates/foo/Cargo.toml"
   cat > "$f/server-rust/crates/foo/src/lib.rs" <<'RS'
@@ -38,13 +38,13 @@ describe('x', () => {
 });
 TS
   printf '#!/bin/sh\nexit 0\n' > "$f/scripts/gate.sh"
-  printf '#!/bin/sh\nexit 0\n' > "$f/scripts/negative_control.sh"
+  printf '#!/bin/sh\nexit 0\n' > "$f/scripts/tests/test_control.sh"
   printf 'tenant-isolation foo iso_pg\n' > "$f/infra/security-pack/selection.txt"
-  printf 'name: pr-ci\njobs:\n  x:\n    steps:\n      - run: scripts/gate.sh\n      # scripts/only_in_comment.sh\n' > "$f/.github/workflows/pr-ci.yml"
+  printf 'name: pr-ci\njobs:\n  x:\n    steps:\n      - run: scripts/gate.sh\n      - run: scripts/tests/test_control.sh\n      # scripts/only_in_comment.sh\n' > "$f/.github/workflows/pr-ci.yml"
   printf 'name: nightly\n' > "$f/.github/workflows/security-nightly.yml"
   printf '#!/bin/sh\nscripts/local_only.sh\n' > "$f/scripts/local_gate.sh"
   printf '#!/bin/sh\n' > "$f/scripts/local_only.sh"; printf '#!/bin/sh\n' > "$f/scripts/only_in_comment.sh"
-  printf '<!-- limit:LIM-1 --> not E2EE\n' > "$f/SECURITY.md"
+  printf -- '- <!-- limit:LIM-1 -->**Not end-to-end encrypted.** The server reads message content.\n' > "$f/SECURITY.md"
   cat > "$f/docs/security/claims.yaml" <<'Y'
 version: 1
 claims:
@@ -57,7 +57,7 @@ claims:
       - "server-rust/crates/foo/src/lib.rs#a_unit_test"
     sabotage:
       how: "Break the assertion and the unit test goes red."
-      evidence: "scripts/negative_control.sh"
+      evidence: "scripts/tests/test_control.sh"
   - id: T-2
     claim: "An ignored PG test in the Security pack selection proves this."
     scope: "Fixture claim, selected PG target, pr-ci lane."
@@ -90,7 +90,7 @@ Y
 expect() { # name want needle [extra gate args...]
   local name="$1" want="$2" needle="$3"; shift 3
   local out rc
-  out="$(python3 "$GATE" --root "$T/f" "$@" 2>&1)"; rc=$?
+  out="$(python3 "$GATE" --root "$T/f" --require-limits LIM-1 "$@" 2>&1)"; rc=$?
   if [ "$rc" -ne "$want" ] || { [ -n "$needle" ] && ! grep -qF -- "$needle" <<<"$out"; }; then
     echo "FAIL $name (rc=$rc, wanted $want, needle: ${needle:-none})"; echo "$out" | sed 's/^/    /'; fail=1
   else echo "ok   $name"; fi
@@ -114,7 +114,7 @@ fresh; ed "$(C)" "#a_unit_test" "#a_test_that_does_not_exist"
 expect "E2 selector matches no test" 1 "E2 T-1"
 fresh; printf '' > "$T/f/infra/security-pack/selection.txt"
 expect "E3 pr-ci claim whose ignored PG test left the selection" 1 "E3 T-2"
-fresh; ed "$(C)" $'    sabotage:\n      how: "Break the assertion and the unit test goes red."\n      evidence: "scripts/negative_control.sh"\n' ''
+fresh; ed "$(C)" $'    sabotage:\n      how: "Break the assertion and the unit test goes red."\n      evidence: "scripts/tests/test_control.sh"\n' ''
 expect "E4 P0 claim without sabotage evidence" 1 "E4 T-1"
 
 # --- spoofs the lint must not accept ---
@@ -130,7 +130,7 @@ fresh; ed "$(C)" "script:scripts/gate.sh" "script:scripts/only_in_comment.sh"
 expect "E2 a script named only in a pr-ci.yml comment" 1 "E2 T-3"
 fresh; ed "$(C)" $'runs: pr-ci\n    proofs:\n      - "script:scripts/gate.sh"' $'runs: pr-ci\n    proofs:\n      - "script:scripts/local_only.sh"' 2>/dev/null || ed "$(C)" '"script:scripts/gate.sh"' '"script:scripts/local_only.sh"'
 expect "E3 runs: pr-ci but the script is local_gate only" 1 "E3 T-3"
-fresh; ed "$(C)" "scripts/negative_control.sh" "scripts/no_such_control.sh"
+fresh; ed "$(C)" "scripts/tests/test_control.sh" "scripts/tests/no_such_control.sh"
 expect "E4 sabotage evidence path does not exist" 1 "E4 T-1"
 fresh; printf 'nothing here\n' > "$T/f/SECURITY.md"
 expect "E5 limit marker missing from the document" 1 "E5 LIM-1"
@@ -145,6 +145,53 @@ fresh; ed "$(C)" "priority: P1
       - \"server-rust/crates/foo/tests"
 expect "E0 unknown priority" 1 "E0 T-2: priority"
 
+# --- review r1 (#4224): spoofs and holes the first lint let through ---
+RS="$T/f/server-rust/crates/foo/src/lib.rs"
+TSF="$T/f/packages/momo-core/src/x.test.ts"
+fresh; printf '/* #[test]\nfn ghost() {} */\n' >> "$RS"; ed "$(C)" "#a_unit_test" "#ghost"
+expect "E2 a test that exists only in a block comment" 1 "E2 T-1"
+fresh; printf 'const S: &str = r#"\n#[test]\nfn ghost() {}\n"#;\n' >> "$RS"; ed "$(C)" "#a_unit_test" "#ghost"
+expect "E2 a test that exists only inside a raw string" 1 "E2 T-1"
+fresh; printf '#[cfg(any())]\n#[test]\nfn ghost() {}\n' >> "$RS"; ed "$(C)" "#a_unit_test" "#ghost"
+expect "E2 a test compiled out by cfg(any())" 1 "E2 T-1"
+fresh; printf '#[cfg(feature = "never")]\n#[test]\nfn ghost() {}\n' >> "$RS"; ed "$(C)" "#a_unit_test" "#ghost"
+expect "E2 a test behind a never-enabled feature" 1 "E2 T-1"
+fresh; printf '// it("ghost", () => {});\n' >> "$TSF"; ed "$(C)" "::refuses the bad thing" "::ghost"
+expect "E2 a TS test that is only a // comment" 1 "E2 T-3"
+fresh; printf '/* it("ghost", () => {}); */\n' >> "$TSF"; ed "$(C)" "::refuses the bad thing" "::ghost"
+expect "E2 a TS test that is only a block comment" 1 "E2 T-3"
+fresh; printf 'const s = `it("ghost", () => {})`;\n' >> "$TSF"; ed "$(C)" "::refuses the bad thing" "::ghost"
+expect "E2 a TS test that is only inside a string" 1 "E2 T-3"
+fresh; printf 'describe.skip("off", () => { it("ghost", () => {}); });\n' >> "$TSF"; ed "$(C)" "::refuses the bad thing" "::ghost"
+expect "E2 a TS test inside describe.skip" 1 "E2 T-3"
+fresh; ed "$(C)" "scripts/tests/test_control.sh" "SECURITY.md"
+expect "E4 sabotage evidence that is just any file" 1 "E4 T-1"
+fresh; ed "$(C)" "scripts/tests/test_control.sh" "server-rust/crates/foo/src/lib.rs#a_unit_test"
+expect "E4 sabotage evidence selector not named like a negative control" 1 "E4 T-1"
+fresh; printf 'name: pr-ci\njobs:\n  x:\n    steps:\n      - run: scripts/gate.sh\n' > "$T/f/.github/workflows/pr-ci.yml"; printf '#!/bin/sh\nscripts/tests/test_control.sh\n' >> "$T/f/scripts/local_gate.sh"
+expect "E4 sabotage evidence weaker than the claim's lane" 1 "only runs in the local lane"
+fresh; ed "$(C)" "script:scripts/gate.sh" "script:scripts/gate.sh.bak"; printf '#!/bin/sh\n' > "$T/f/scripts/gate.sh.bak"
+expect "E2 a suffix of an invoked script name is not an invocation" 1 "E2 T-3"
+fresh; python3 - "$(C)" <<'P'
+import sys
+p=sys.argv[1]; s=open(p).read(); i=s.index("limits:")
+open(p,"w").write(s[:i])
+P
+expect "E5 the limits section deleted" 1 "E5 required limit LIM-1"
+fresh; ed "$(C)" "limits:" "limitz:"
+expect "E0 a typo'd top-level key" 1 "E0 unknown top-level key"
+fresh; printf -- '- <!-- limit:LIM-1 -->\n' > "$T/f/SECURITY.md"
+expect "E5 the marker left behind without its sentence" 1 "without a sentence"
+fresh; printf '```\n<!-- limit:LIM-1 -->\n```\n' > "$T/f/SECURITY.md"
+expect "E5 the marker only inside a code block" 1 "code block"
+fresh; ed "$(C)" "priority: P1
+    runs: local" "priority: P1
+    priority: P0
+    runs: local"
+expect "E0 a duplicate yaml key (PyYAML would keep the last silently)" 1 "duplicate key"
+fresh; ed "$(C)" "server-rust/crates/foo/src/lib.rs#a_unit_test" "server-rust/crates/foo/../foo/src/lib.rs#a_unit_test"
+expect "green: a ../ path is normalised, not misjudged" 0 "green"
+
 # --- the honest limit: the lint checks that a test exists and where it runs, not what it asserts ---
 fresh; ed "$T/f/server-rust/crates/foo/src/lib.rs" "assert_eq!(1 + 1, 2);" ""
 expect "LIMIT gutted test body stays green (P0 sabotage evidence, not this lint, covers it)" 0 "green"
@@ -156,7 +203,7 @@ fresh
 out="$(python3 -c "
 import sys, runpy
 sys.modules['yaml'] = None
-sys.argv = ['$GATE', '--root', '$T/f']
+sys.argv = ['$GATE', '--root', '$T/f', '--require-limits', 'LIM-1']
 runpy.run_path('$GATE', run_name='__main__')" 2>&1)"; rc=$?
 if [ "$rc" -eq 0 ] && grep -qF "green: 4 claims" <<<"$out"; then echo "ok   fallback parser (no PyYAML) green"; else echo "FAIL fallback parser rc=$rc"; echo "$out"; fail=1; fi
 
@@ -176,5 +223,13 @@ open(p,'w').write(s.replace(old,'      evidence: "server-rust/crates/momo-db/tes
 P
 out="$(python3 "$GATE" --root "$ROOT" --claims "$T/claims.yaml" 2>&1)"; rc=$?
 if [ "$rc" -eq 1 ] && grep -qF "E4 TEN-1" <<<"$out"; then echo "ok   real tree: TEN-1 sabotage control renamed away -> red"; else echo "FAIL real claims sabotage rc=$rc"; echo "$out"|tail -3; fail=1; fi
+
+python3 - "$T/claims.yaml" "$ROOT/docs/security/claims.yaml" <<'P'
+import sys
+s=open(sys.argv[2]).read(); i=s.index("\nlimits:")
+open(sys.argv[1],'w').write(s[:i]+"\n")
+P
+out="$(python3 "$GATE" --root "$ROOT" --claims "$T/claims.yaml" 2>&1)"; rc=$?
+if [ "$rc" -eq 1 ] && grep -qF "E5 required limit LIM-1" <<<"$out"; then echo "ok   real tree: limits section deleted -> red"; else echo "FAIL real limits sabotage rc=$rc"; echo "$out"|tail -3; fail=1; fi
 
 [ "$fail" -eq 0 ] && echo "security claims lint: all red proofs hold" || { echo "security claims lint regression FAILED"; exit 1; }

@@ -58,11 +58,17 @@ until a coordinated disclosure or explicit permission to publish.
 
 ## Security posture
 
-What the code and deployment files enforce today. Every security claim is mapped
-to the tests that prove it in [`docs/security/claims.yaml`](docs/security/claims.yaml);
-`scripts/check_security_claims.py` turns a claim with no test, a test selector that
-matches nothing, or a lane promise the test does not keep into a red check
-([ADR-0214](docs/adr/0214-security-claims-need-tests.md)). The Korean document
+What the code and deployment files enforce today. The claims listed in
+[`docs/security/claims.yaml`](docs/security/claims.yaml) are each mapped to the
+tests that prove them; `scripts/check_security_claims.py` turns a listed claim
+with no test, a test selector that matches nothing, or a lane promise the test
+does not keep into a red check
+([ADR-0214](docs/adr/0214-security-claims-need-tests.md)). **Today that check runs
+in the maintainers' local gate, not yet in public PR CI**; wiring it into PR CI is
+a follow-up. Bullets below that carry no claim ID (for example the separated
+database roles and the image provenance) are descriptions, not yet mapped to a
+test, and nothing yet checks a sentence in this page against the claims file. The
+Korean document
 linked above gives the file, line and test name behind each item. Tests marked
 (PG) need a real PostgreSQL and are `#[ignore]`d in a plain `cargo test`. The
 tenant-isolation, auth, push, attachment and webhook suites listed in
@@ -73,8 +79,9 @@ tenant-isolation, auth, push, attachment and webhook suites listed in
 - **Forced tenant isolation.** Tenant tables use PostgreSQL RLS with
   `ENABLE ROW LEVEL SECURITY` and `FORCE ROW LEVEL SECURITY`; API transactions
   set `app.workspace_id` locally (`server/Migrations/001_init.sql`,
-  `server-rust/crates/momo-db/src/tenant.rs`, test
-  `with_tenant_tx_sets_the_rls_guc` (PG)). The catalog test `tenant_catalog_pg`
+  `server-rust/crates/momo-db/src/tenant.rs`; test
+  `with_tenant_tx_sets_the_rls_guc` (PG) reads the value back inside the
+  transaction and does not test that it is gone afterwards). The catalog test `tenant_catalog_pg`
   asserts, table by table, that every table with a `workspace_id` column has forced
   RLS and a policy on `app.workspace_id`; it runs in PR CI's Security pack (claims
   TEN-1 to TEN-3 in `docs/security/claims.yaml`).
@@ -135,8 +142,8 @@ only lists strengths is not evidence.
   end-to-end claim
   ([slack.com/resources/why-use-slack/security-at-slack](https://slack.com/resources/why-use-slack/security-at-slack)).
 - <!-- limit:LIM-2 -->**No external security audit or penetration test** has been
-  done. Everything on this page is the maintainers' own testing, published with its
-  proof.
+  done. The tests this page cites are the maintainers' own testing, and claims
+  with an ID are published with their proof.
 - <!-- limit:LIM-3 -->**No SOC 2, ISO 27001 or similar certification.**
 - <!-- limit:LIM-4 -->**Whoever operates a server can read its plaintext messages and
   its database.** Zulip's security model says the same of its own servers: anyone
@@ -178,7 +185,7 @@ amendments, by kind:
   plaintext; a personal key also keeps a keyed HMAC fingerprint that detects
   reuse. The API shows back at most the last four characters of a team key and
   nothing of a personal key. When a provider echoes a key back in an error, the
-  key reaches no stored row (tests
+  key reaches none of the tables those tests scan (tests
   `anth_3_the_key_never_reaches_a_durable_row_even_when_echoed`, which also
   scans TRACE logs, `b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error`
   and `no_row_carries_the_key`, all (PG)). A bearer you supply through the

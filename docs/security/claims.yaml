@@ -32,7 +32,7 @@ claims:
       how: "A tenant table created without FORCE (or without a policy, or with a policy that ignores workspace_id) turns the catalog test red; the control_* tests feed each broken shape to the same checks, and security_pack.sh negative runs a migration fixture in CI."
       evidence: "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#control_force_missing_is_red"
   - id: TEN-2
-    claim: "The runtime API role momo_app has no DML privilege on a tenant table that is not forced, cannot bypass row-level security, and sees no view or foreign table outside the boundary."
+    claim: "The runtime API role momo_app has no DML privilege on a tenant table that is not forced, cannot bypass row-level security, and sees no plain view (one without security_invoker) or foreign table outside the boundary."
     scope: "Catalog checks on the migrated test database. Does not prove that every deployment connects as momo_app: the API does not check its own role at start-up (SECURITY.md describes the deploy-time checks)."
     priority: P0
     runs: pr-ci
@@ -56,8 +56,8 @@ claims:
       how: "A definer without a pinned search_path, or an unlisted public definer (including a new overload of an allowlisted name), turns the matching test red."
       evidence: "server-rust/crates/momo-db/tests/tenant_catalog_pg.rs#control_definer_without_search_path_is_red"
   - id: TEN-4
-    claim: "A tenant transaction sets the row-level-security workspace variable locally, so the policies see the caller's workspace."
-    scope: "Real PostgreSQL. Covers the helper every tenant route uses, not each route individually."
+    claim: "Inside a tenant transaction the row-level-security workspace variable holds the caller's workspace id."
+    scope: "Real PostgreSQL, read back through a superuser pool. Covers the helper every tenant route uses, not each route individually. It does not test that the value is gone after the transaction ends (SET LOCAL versus SET), nor that a policy then filters rows; the catalog and isolation tests carry the policy side."
     priority: P1
     runs: pr-ci
     proofs:
@@ -73,8 +73,8 @@ claims:
 
   # ---- 인증·세션 -------------------------------------------------------------------
   - id: AUTH-1
-    claim: "Presenting an already-used refresh token ends the whole session lineage of that device."
-    scope: "Real PostgreSQL, device-key sessions. Not a claim about access tokens already issued, which live until they expire."
+    claim: "Presenting an already-used refresh token after the reuse window has passed ends the whole session lineage of that device."
+    scope: "Real PostgreSQL, device-key sessions. A resend inside the reuse window returns the same token pair and keeps the lineage (a retry after a lost response). Not a claim about access tokens already issued, which live until they expire."
     priority: P1
     runs: pr-ci
     proofs:
@@ -105,8 +105,8 @@ claims:
 
   # ---- 웹훅 · 바깥으로 나가는 요청 --------------------------------------------------
   - id: WH-1
-    claim: "An inbound webhook with a forged signature, an expired timestamp, a replayed delivery or an unknown endpoint is rejected."
-    scope: "Native oort webhook format; signature comparison is constant time. Each third-party provider's own format is not covered by this claim."
+    claim: "An inbound webhook with a forged signature or an expired timestamp is rejected with 401, an unknown endpoint gets 404, and a replayed delivery id is acknowledged as a duplicate without creating a second message."
+    scope: "Native oort webhook format. The signature comparison is written to be constant time (code review); no test measures timing, the unit test only checks equality, mismatch and the v1= prefix. Each third-party provider's own format is not covered by this claim."
     priority: P1
     runs: pr-ci
     proofs:
@@ -120,8 +120,8 @@ claims:
     proofs:
       - "server-rust/crates/momo-webhook/src/crypto.rs#the_delivery_signature_binds_the_timestamp_to_the_body"
   - id: NET-1
-    claim: "Outbound webhook delivery refuses a loopback or private target URL before any request leaves."
-    scope: "The shared SSRF guard on the delivery path."
+    claim: "Outbound webhook delivery refuses a loopback target URL (127.0.0.1)."
+    scope: "The shared SSRF guard on the delivery path. The test feeds one loopback address; other private ranges and the absence of a connection attempt are not asserted here (the link-preview claim NET-2 covers private literals for that fetcher)."
     priority: P1
     runs: pr-ci
     proofs:
@@ -145,7 +145,7 @@ claims:
   # ---- 첨부 · 푸시 -----------------------------------------------------------------
   - id: ATT-1
     claim: "Attachment bytes are served with Content-Disposition attachment and X-Content-Type-Options nosniff, and an anonymous request for them gets 401."
-    scope: "Real PostgreSQL with the local archive backend. There is no malware scan (see the limits)."
+    scope: "Real PostgreSQL with the local archive backend. There is no malware scan (see the Korean trust document, current limits)."
     priority: P1
     runs: pr-ci
     proofs:
@@ -176,7 +176,7 @@ claims:
 
   # ---- 에이전트 · 승인 --------------------------------------------------------------
   - id: AGT-1
-    claim: "An approval from another workspace can be neither locked nor decided, a decision replay is idempotent, and an approval-gated tool does not run without a decision."
+    claim: "A run that needs an approval waits for a decision (it does not complete), an approval from another workspace can be neither locked nor listed in the other tenant's inbox, and a decision replay is idempotent."
     scope: "The agent runtime's approval tables on a real PostgreSQL. This suite is not in the PR Security pack selection yet (it is stale there, see selection.txt) and runs in the nightly lane."
     priority: P1
     runs: nightly
@@ -192,7 +192,7 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/tests/mem_proposal_conformance_pg.rs#only_a_human_who_can_read_the_channel_may_decide"
   - id: AGT-3
-    claim: "Channel or memory text inserted into the team-AI prompt cannot close the data fence around it."
+    claim: "Text passed through the team-AI data fence cannot close that fence (tested with a triple-backtick and control-character input)."
     scope: "Prompt construction for the team-AI tools. It reduces, and does not eliminate, prompt injection: model behaviour is not tested."
     priority: P1
     runs: pr-ci
@@ -209,8 +209,8 @@ claims:
 
   # ---- 자격증명 ---------------------------------------------------------------------
   - id: CRED-1
-    claim: "A provider API key reaches no durable row, message or error even when the provider echoes it back, and a personal key is stored without any row carrying the plaintext."
-    scope: "Real PostgreSQL with canary keys; the Anthropic adapter, the Hermes bearer and personal keys. Nightly lane."
+    claim: "A provider API key does not appear in the scanned tables, messages, errors or trace logs even when the provider echoes it back, and a personal key is stored without any scanned row carrying the plaintext."
+    scope: "Real PostgreSQL with canary keys; the Anthropic adapter, the Hermes bearer and personal keys. The scan covers message, outbox, agent_run, usage_ledger, audit_log, the provider-link fields and trace logs for the first two, and a fixed list of six tables for personal keys; a table outside those lists is not scanned. Nightly lane."
     priority: P1
     runs: nightly
     proofs:
@@ -241,8 +241,8 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/src/config.rs#a_placeholder_proxy_secret_is_a_boot_error_only_in_strict_environments"
   - id: CFG-2
-    claim: "momo-server refuses to start when the provider master key, the GitHub App master key or a webhook master key reuses another root secret."
-    scope: "Configuration parsing. A legacy install may still hold webhook keys copied from the JWT secret (doctor warns); that case is documented, not claimed."
+    claim: "momo-server refuses to start when the provider master key reuses a webhook key, the GitHub App master key reuses another root secret, or two rotated webhook keys land on one value."
+    scope: "Configuration parsing. A webhook key equal to the JWT secret is not refused: a legacy install may still hold webhook keys copied from it (doctor warns); that case is documented, not claimed."
     priority: P1
     runs: pr-ci
     proofs:
@@ -259,13 +259,14 @@ claims:
 
   # ---- 클라이언트 -------------------------------------------------------------------
   - id: CLI-1
-    claim: "A message body links only to an allowlist of schemes: schemes that can execute or embed, a scheme split by a control character, and relative hrefs are refused."
-    scope: "The shared markdown parser used by web, desktop and phone. Does not cover content rendered outside the message body."
+    claim: "A message body does not link to schemes that can execute or embed (javascript, data, vbscript, file), to a scheme split by a control character, or to a relative href."
+    scope: "The shared markdown parser in packages/momo-core. It refuses the listed schemes; an unlisted unusual scheme is not tested here, and which surfaces use the parser is not asserted by these tests. Does not cover content rendered outside the message body."
     priority: P1
     runs: pr-ci
     proofs:
       - "packages/momo-core/src/features/timeline/markdown.test.ts::refuses every scheme that can execute or embed"
       - "packages/momo-core/src/features/timeline/markdown.test.ts::refuses a scheme split by a control character"
+      - "packages/momo-core/src/features/timeline/markdown.test.ts::refuses a relative href: a message body has no base to resolve against"
   - id: CLI-2
     claim: "The desktop shell keeps the session token in the OS keychain and out of web storage; if the keychain refuses a write the session stays in web storage instead of being lost."
     scope: "The browser build always uses web storage; this claim is the desktop shell's. XSS exposure of web storage is a stated limit."
@@ -284,8 +285,8 @@ claims:
 
   # ---- 공급망 -----------------------------------------------------------------------
   - id: SUP-1
-    claim: "A pull request cannot merge while a dependency has an unexcepted known advisory: cargo-deny, npm audit and OSV-Scanner run in PR CI, and exceptions expire."
-    scope: "Known advisories only, against the databases at run time. Not a claim about unknown vulnerabilities."
+    claim: "The pull-request CI job fails while a dependency has an unexcepted known advisory: cargo-deny, npm audit and OSV-Scanner run in PR CI, and exceptions expire."
+    scope: "Known advisories only, against the databases at run time. Not a claim about unknown vulnerabilities. Whether a failing job blocks the merge depends on branch protection requiring it, which a repository setting holds and no test here checks."
     priority: P0
     runs: pr-ci
     proofs:

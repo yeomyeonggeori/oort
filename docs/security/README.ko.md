@@ -2,7 +2,7 @@
 
 이 문서는 조직이 oort를 도입할지 판단할 때 읽는, 구현과 결정 기록에 연결된 한국어 자료다. 취약점 신고 절차와 지원 범위는 영문 [Security Policy](../../SECURITY.md)를 따른다. 여기서 말하는 경계는 현재 저장소의 코드와 ADR에 근거하며, 인증·심사·무결함을 보증하지 않는다.
 
-**읽는 규칙.** 줄 번호는 `track/engine` `6b786885f` 위에서 2026-10-22에 쓴 것이라 코드가 바뀌면 어긋난다. 그래서 가능한 곳에는 함수·시험 이름을 함께 적었다. 시험 이름 뒤의 (PG)는 격리 PostgreSQL이 필요한 `#[ignore]` 시험이다. 공개 PR CI의 「Security pack」 잡은 `infra/security-pack/selection.txt`에 적힌 타깃만 돌리고, 나머지는 야간 워크플로나 수동 실행이다. [근거: `pr-ci.yml` 378–380행](../../.github/workflows/pr-ci.yml#L378-L380) 사람이 격리 PostgreSQL에 대해 `cargo test … -- --ignored`로 돌리고(대부분의 시험 파일 머리말에 실행 명령이 있다) 결과는 그 시험을 건드린 PR 본문에 남긴다. 일부 묶음만 `scripts/verify_*.sh`나 로컬 게이트 프로파일이 따로 돌린다. (스크립트)는 `scripts/tests/`의 셸·파이썬 시험으로, 로컬 게이트의 docs 프로파일이 돌린다. 표시가 없는 시험은 PR CI의 `cargo test --workspace`·vitest·jest가 돌리는 단위 시험이다.
+**읽는 규칙.** 줄 번호는 `track/engine` `6b786885f` 위에서 2026-10-22에 쓴 것이라 코드가 바뀌면 어긋난다. 그래서 가능한 곳에는 함수·시험 이름을 함께 적었다. 시험 이름 뒤의 (PG)는 격리 PostgreSQL이 필요한 `#[ignore]` 시험이다. 공개 PR CI의 「Security pack」 잡은 `infra/security-pack/selection.txt`에 적힌 타깃만 돌리고, 나머지는 야간 워크플로나 수동 실행이다. 사람이 격리 PostgreSQL에 대해 `cargo test … -- --ignored`로 돌리고(대부분의 시험 파일 머리말에 실행 명령이 있다) 결과는 그 시험을 건드린 PR 본문에 남긴다. 일부 묶음만 `scripts/verify_*.sh`나 로컬 게이트 프로파일이 따로 돌린다. (스크립트)는 `scripts/tests/`의 셸·파이썬 시험으로, 로컬 게이트의 docs 프로파일이 돌린다. 표시가 없는 시험은 PR CI의 `cargo test --workspace`·vitest·jest가 돌리는 단위 시험이다. `docs/security/claims.yaml`의 주장↔시험 매핑을 검사하는 린트(`scripts/check_security_claims.py`)는 현재 관리자의 로컬 게이트에서만 강제되고 공개 PR CI에는 아직 없다(후속 편입 예정).
 
 ## 신뢰 경계
 

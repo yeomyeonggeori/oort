@@ -19,11 +19,20 @@ absence red. It reads files only (no compiler, no database) and checks, per clai
         nightly  any other #[ignore] Rust test (security-nightly.yml runs them all)
         local    a script named in local_gate.sh only, or Rust outside server-rust/
   E4  a P0 claim has no sabotage evidence: `sabotage.how` (what was broken) and
-      `sabotage.evidence` (a repo path or path#fn that exists and is a negative
-      control)
+      `sabotage.evidence`: a Rust/TS test selector, or a `scripts/tests/` script,
+      that resolves like a proof, runs in a lane at least as strong as the claim's
+      `runs:`, and (for a selector) is named like a negative control
+      (control / red / sabotage / negative)
   E5  a `limits:` entry (an honest "oort does not do this") is missing its marker
-      `<!-- limit:ID -->` in a document it names
-  E0  schema/format problem (duplicate id, unknown field value, unreadable file)
+      `<!-- limit:ID -->` in a document it names, the marker sits in a code block
+      or has no sentence after it, or a required limit id (LIM-1..LIM-4 by default,
+      --require-limits) is absent from the file
+  E0  schema/format problem (duplicate id or yaml key, unknown top-level key or
+      field value, unreadable file)
+
+Selector matching ignores comments and string contents: a name that appears only in
+a comment, a block comment, a raw string, or behind #[cfg(any())] / a never-enabled
+feature, or an it() inside describe.skip, is not a test.
 
 Selector forms (always quoted in the yaml):
   path/to/file.rs#test_fn_name        Rust test
@@ -37,6 +46,7 @@ an error (deriving selection.txt from this file is a separate decision, ADR-0214
 """
 import argparse
 import os
+import posixpath
 import re
 import sys
 
@@ -149,10 +159,23 @@ def load_yaml(path):
     text = open(path, encoding="utf-8").read()
     try:
         import yaml  # noqa: PLC0415  (optional; the fallback is the same subset)
-
-        return yaml.safe_load(text)
     except ImportError:
         return mini_yaml(text)
+
+    class Strict(yaml.SafeLoader):
+        pass
+
+    def no_dup(loader, node, deep=False):
+        seen = set()
+        for k, _ in node.value:
+            key = loader.construct_object(k, deep=deep)
+            if key in seen:
+                raise ValueError(f"duplicate key {key!r} (line {k.start_mark.line + 1})")
+            seen.add(key)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+    Strict.add_constructor(yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, no_dup)
+    return yaml.load(text, Loader=Strict)  # noqa: S506  (SafeLoader subclass)
 
 
 # ----------------------------------------------------------------------- resolvers
@@ -208,8 +231,77 @@ class Repo:
         return None, None
 
 
+def _scan(text, line_comments=("//",), block=True, rust=False):
+    """Blank comments (and, with rust=True, string/raw-string contents) while keeping
+    every newline, and return (blanked_text, code_mask): code_mask[i] is False inside
+    a comment or inside the content of a string literal."""
+    n, out, mask, i = len(text), [], [], 0
+
+    def emit(ch, code):
+        out.append(ch)
+        mask.append(code)
+
+    def blank(chunk, code=False):
+        for c in chunk:
+            emit("\n" if c == "\n" else " ", code)
+
+    while i < n:
+        c = text[i]
+        if text.startswith("//", i):
+            j = text.find("\n", i)
+            j = n if j < 0 else j
+            blank(text[i:j])
+            i = j
+        elif block and text.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif text.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            blank(text[i:j])
+            i = j
+        elif rust and c == "r" and re.match(r'r#*"', text[i:i + 8]) and (i == 0 or not (text[i - 1].isalnum() or text[i - 1] == "_")):
+            hashes = len(re.match(r"r(#*)\"", text[i:]).group(1))
+            end = text.find('"' + "#" * hashes, i + 2 + hashes)
+            end = n if end < 0 else end + 1 + hashes
+            emit("r", True)
+            blank(text[i + 1:end])
+            i = end
+        elif c in "\"'`":
+            if c == "'" and rust:
+                m = re.match(r"'(?:\\.|[^\\'\n])'", text[i:])
+                if not m:
+                    emit(c, True)  # a lifetime
+                    i += 1
+                    continue
+            j = i + 1
+            while j < n and text[j] != c:
+                j += 2 if text[j] == "\\" else 1
+            j = min(j, n - 1)
+            emit(c, True)
+            if rust:
+                blank(text[i + 1:j])
+            else:
+                for ch in text[i + 1:j]:
+                    emit(ch, False)
+            emit(text[j], True)
+            i = j + 1
+        else:
+            emit(c, True)
+            i += 1
+    return "".join(out), mask
+
+
+# `#[cfg(...)]` shapes that compile a test out for good
+RUST_CFG_OFF = re.compile(r"#\[\s*cfg\s*\(\s*(?:any\s*\(\s*\)|feature\b|not\s*\(\s*test\b|false\b)")
+
+
 def rust_test(text, name):
     """(found, ignored) for a real test fn called `name`."""
+    text, _ = _scan(text, rust=True)
     lines = text.split("\n")
     pat = re.compile(r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+" + re.escape(name) + r"\s*[(<]")
     for i, line in enumerate(lines):
@@ -227,6 +319,8 @@ def rust_test(text, name):
                 break
             j -= 1
         joined = " ".join(attrs)
+        if RUST_CFG_OFF.search(joined):
+            continue
         if RUST_TEST_ATTR.search(joined):
             return True, bool(RUST_IGNORE_ATTR.search(joined))
     return False, False
@@ -235,7 +329,12 @@ def rust_test(text, name):
 def ts_test(text, title):
     """(found, skipped) for an exact it()/test() title."""
     found, skipped = False, False
-    for m in TS_CALL.finditer(text):
+    stripped, mask = _scan(text)
+    if re.search(r"\b(?:x?describe\.(?:skip|todo)|xdescribe|xit|xtest)\s*[(.]", stripped):
+        return False, True  # a skipped suite: nothing inside it is a running test
+    for m in TS_CALL.finditer(stripped):
+        if not mask[m.start()]:
+            continue  # inside a string literal
         if m.group(4) == title:
             found = True
             if m.group(2) in (".skip", ".todo"):
@@ -245,15 +344,41 @@ def ts_test(text, title):
     return found, skipped
 
 
+def norm_selector(sel):
+    for sep in ("::", "#"):
+        if sep in sel:
+            rel, rest = sel.split(sep, 1)
+            break
+    else:
+        if not sel.startswith("script:"):
+            return sel
+        sep, rel, rest = "", sel[len("script:"):], ""
+        rel = posixpath.normpath(rel)
+        return None if rel.startswith("..") or rel.startswith("/") else "script:" + rel
+    rel = posixpath.normpath(rel)
+    if rel.startswith("..") or rel.startswith("/"):
+        return None
+    return rel + sep + rest
+
+
+def invoked(rel, text):
+    """The script's whole path appears in a non-comment line that is not a bare echo."""
+    pat = re.compile(r"(?<![\w./-])" + re.escape(rel) + r"(?![\w./-])")
+    return any(pat.search(l) and not l.lstrip().startswith("echo ") for l in text.split("\n"))
+
+
 def resolve(repo, sel):
     """-> (error or None, lane or None, cited selection pair or None)."""
+    sel = norm_selector(sel)
+    if sel is None:
+        return "selector path escapes the repository", None, None
     if sel.startswith("script:"):
         rel = sel[len("script:"):].strip()
         if repo.read(rel) is None:
             return f"script {rel} does not exist", None, None
-        if rel in repo.pr_ci_text:
+        if invoked(rel, repo.pr_ci_text):
             return None, "pr-ci", None
-        if rel in repo.local_gate_text:
+        if invoked(rel, repo.local_gate_text):
             return None, "local", None
         if rel.startswith(".github/workflows/"):
             return None, "release", None
@@ -294,12 +419,30 @@ def resolve(repo, sel):
     return f"unrecognised selector form: {sel!r}", None, None
 
 
-def resolve_evidence(repo, ev):
-    """A sabotage evidence is a repo path, or path#fn / path::title that resolves."""
+CONTROL_NAME = re.compile(r"control|red|sabotage|negative", re.I)
+
+
+def resolve_evidence(repo, ev, runs):
+    """Sabotage evidence is a test selector named like a negative control, or a
+    scripts/tests/ regression script that something invokes; it must run in a lane at
+    least as strong as the claim's `runs:`. -> error or None."""
     if "#" in ev or "::" in ev:
-        err, _, _ = resolve(repo, ev)
-        return err
-    return None if repo.read(ev) is not None else f"{ev} does not exist"
+        err, lane, _ = resolve(repo, ev)
+        if err:
+            return err
+        name = re.split(r"#|::", ev, 1)[1]
+        if not CONTROL_NAME.search(name):
+            return f"{ev} is not named like a negative control (control/red/sabotage/negative)"
+    else:
+        rel = posixpath.normpath(ev)
+        if not rel.startswith("scripts/tests/"):
+            return f"{ev} is neither a test selector nor a scripts/tests/ regression script"
+        err, lane, _ = resolve(repo, "script:" + rel)
+        if err:
+            return err
+    if runs in LANE_RANK and LANE_RANK[lane] < LANE_RANK[runs]:
+        return f"{ev} only runs in the {lane} lane but the claim promises {runs}"
+    return None
 
 
 # ------------------------------------------------------------------------- checks
@@ -322,6 +465,14 @@ def lint(args):
 
     if not isinstance(doc, dict) or not isinstance(doc.get("claims"), list) or not doc["claims"]:
         return ["E0 claims.yaml needs a non-empty `claims:` list"], 0, repo
+
+    for key in doc:
+        if key not in ("version", "claims", "limits"):
+            errors.append(f"E0 unknown top-level key {key!r} (a typo would silently drop the section)")
+    ids = {l.get("id") for l in (doc.get("limits") or []) if isinstance(l, dict)}
+    for need in args.require_limits:
+        if need not in ids:
+            errors.append(f"E5 required limit {need} is missing from `limits:`")
 
     seen = set()
     for idx, claim in enumerate(doc["claims"]):
@@ -366,7 +517,7 @@ def lint(args):
             if not isinstance(ev, str) or not ev.strip():
                 errors.append(f"E4 {cid}: P0 claim has no sabotage.evidence")
             else:
-                err = resolve_evidence(repo, ev.strip())
+                err = resolve_evidence(repo, ev.strip(), runs)
                 if err:
                     errors.append(f"E4 {cid}: sabotage evidence: {err}")
 
@@ -382,9 +533,30 @@ def lint(args):
             text = repo.read(rel)
             if text is None:
                 errors.append(f"E5 {lid}: document {rel} does not exist")
-            elif f"<!-- limit:{lid} -->" not in text:
-                errors.append(f"E5 {lid}: {rel} lacks the marker <!-- limit:{lid} -->")
+            else:
+                err = limit_marker_problem(text, lid)
+                if err:
+                    errors.append(f"E5 {lid}: {rel} {err}")
     return errors, len(doc["claims"]), repo, cited
+
+
+def limit_marker_problem(text, lid):
+    """The marker must stand in prose (not a code fence) with a real sentence after it."""
+    marker = f"<!-- limit:{lid} -->"
+    fenced = False
+    lines = text.split("\n")
+    for i, line in enumerate(lines):
+        if line.lstrip().startswith("```"):
+            fenced = not fenced
+        if marker in line:
+            if fenced:
+                return f"has the marker <!-- limit:{lid} --> only inside a code block"
+            body = " ".join(lines[i:i + 4]).split(marker, 1)[1]
+            body = re.sub(r"<[^>]*>|[*_`>#\-]", "", body.split("\n\n")[0]).strip()
+            if len(body) < 30:
+                return f"has the marker <!-- limit:{lid} --> without a sentence after it"
+            return None
+    return f"lacks the marker <!-- limit:{lid} -->"
 
 
 def main():
@@ -392,7 +564,10 @@ def main():
     ap.add_argument("--root", default=os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     for opt in ("claims", "selection", "pr-ci", "local-gate", "nightly"):
         ap.add_argument(f"--{opt}", default=None)
+    ap.add_argument("--require-limits", default="LIM-1,LIM-2,LIM-3,LIM-4",
+                    help="comma-separated limit ids that must exist (default: the four published ones)")
     args = ap.parse_args()
+    args.require_limits = [x for x in args.require_limits.split(",") if x]
     result = lint(args)
     errors, n = result[0], result[1]
     if errors:
