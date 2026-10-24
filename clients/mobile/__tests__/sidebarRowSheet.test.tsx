@@ -387,6 +387,10 @@ describe('채널 나가기는 확인 단계를 지난다', () => {
     longPress('sidebar-row-channel:ch-general');
     fireEvent.press(screen.getByTestId('channel-sheet-leave'));
     fireEvent.press(screen.getByTestId('channel-leave-confirm-button'));
+    // DELETE 가 나간 뒤에 걷힘을 기다린다. 확인 버튼 직후 곧장 「걷힘」 만 기다리면 waitFor 가 그 조건이
+    // 첫 검사에서 거짓인 채 제한 시간 끝의 마지막 검사에서야 참이 되어(로컬에서도 ~1.1s), 부하가 걸린 CI 에서는
+    // 그 마지막 검사마저 넘긴다. 같은 파일의 형제 시험처럼 요청 발송을 먼저 기다리면 즉시 걷힌다.
+    await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
   });
 
