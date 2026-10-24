@@ -175,7 +175,7 @@ async fn a_bad_body_is_a_400_and_costs_no_connection() {
     let url = closure_url(&base, &WORKSPACE.to_string(), &CHANNEL.to_string());
 
     // (label, content-type, raw body)
-    let cases: [(&str, Option<&str>, &str); 11] = [
+    let cases: [(&str, Option<&str>, &str); 14] = [
         ("missing seenSeq", Some("application/json"), "{}"),
         ("negative", Some("application/json"), r#"{"seenSeq": -1}"#),
         ("string", Some("application/json"), r#"{"seenSeq": "7"}"#),
@@ -197,6 +197,13 @@ async fn a_bad_body_is_a_400_and_costs_no_connection() {
             r#"{"seenSeq": 9223372036854775808}"#,
         ),
         ("not json", Some("application/json"), "seenSeq=3"),
+        (
+            "top-level array read positionally",
+            Some("application/json"),
+            "[1]",
+        ),
+        ("empty array", Some("application/json"), "[]"),
+        ("bare number", Some("application/json"), "7"),
         (
             "wrong content type",
             Some("text/plain"),

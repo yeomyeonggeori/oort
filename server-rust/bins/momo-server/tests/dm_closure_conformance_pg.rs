@@ -629,6 +629,70 @@ async fn a_closure_is_invisible_to_another_workspace() {
     );
 }
 
+/// Defence in depth under the route's own checks (independent review r1, Low): even a write that
+/// skips the route cannot make `dm_closure` point across workspaces. RLS `WITH CHECK` pins only
+/// `workspace_id`; the two composite foreign keys pin the member and the channel to that same
+/// workspace. Run as the superuser so RLS is out of the picture and only the constraints speak.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_database_itself_refuses_a_closure_that_mixes_workspaces() {
+    let _guard = test_lock().await;
+    let w = World::new().await;
+    let ws_a = w.workspace("fk-a").await;
+    let ws_b = w.workspace("fk-b").await;
+    let a1 = w.human(ws_a, "a1").await;
+    let a2 = w.human(ws_a, "a2").await;
+    let b1 = w.human(ws_b, "b1").await;
+    let b2 = w.human(ws_b, "b2").await;
+    let dm_a = w.dm(ws_a, &[a1.id, a2.id], false).await;
+    let dm_b = w.dm(ws_b, &[b1.id, b2.id], false).await;
+
+    let insert = |workspace: Uuid, member: Uuid, channel: Uuid| {
+        let su = w.su.clone();
+        async move {
+            sqlx::query(
+                "INSERT INTO dm_closure (workspace_id, member_id, channel_id, closed_at_seq) \
+                 VALUES ($1, $2, $3, 0)",
+            )
+            .bind(workspace)
+            .bind(member)
+            .bind(channel)
+            .execute(&su)
+            .await
+        }
+    };
+
+    for (what, member, channel) in [
+        ("a member of another workspace", b1.id, dm_a),
+        ("a channel of another workspace", a1.id, dm_b),
+        ("both of another workspace", b1.id, dm_b),
+    ] {
+        let error = insert(ws_a, member, channel)
+            .await
+            .expect_err("a row that names another workspace's rows must be refused");
+        let code = error
+            .as_database_error()
+            .and_then(|db| db.code().map(|c| c.to_string()));
+        assert_eq!(
+            code.as_deref(),
+            Some("23503"),
+            "{what}: expected a foreign_key_violation, got {error}"
+        );
+    }
+    assert_eq!(w.stored_count(a1.id).await + w.stored_count(b1.id).await, 0);
+
+    // Control: the same statement with a consistent triple goes in, so the refusals above are the
+    // foreign keys' and not a broken statement.
+    insert(ws_a, a1.id, dm_a)
+        .await
+        .expect("a consistent row is accepted");
+    insert(ws_b, b1.id, dm_b)
+        .await
+        .expect("a consistent row is accepted");
+    assert_eq!(w.stored_count(a1.id).await, 1);
+    assert_eq!(w.stored_count(b1.id).await, 1);
+}
+
 // ---------------------------------------------------------------------------
 // 2. member boundary
 // ---------------------------------------------------------------------------

@@ -3575,10 +3575,32 @@ pub struct ReadStateListResponseDto {
 /// server timestamp: the server stores `GREATEST(existing, LEAST(seenSeq, last_seq))`. A missing
 /// field, a negative or non-integer value, or an unknown key is a 400 (the route maps every
 /// rejection of this body to 400, never Axum's 422).
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[derive(Debug)]
 pub struct PutDmClosureRequestDto {
     pub seen_seq: i64,
+}
+
+impl<'de> Deserialize<'de> for PutDmClosureRequestDto {
+    /// A JSON **object** with exactly `seenSeq`, never a positional array. A derived struct
+    /// deserializes from `[1]` as well (serde reads a struct from a sequence), which the OpenAPI
+    /// contract (`type: object`) does not allow: the body is first read as a map, which is what
+    /// refuses an array, and only then checked for its one key (independent review r1, Low).
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Fields {
+            seen_seq: i64,
+        }
+        let map = serde_json::Map::<String, Value>::deserialize(deserializer)?;
+        let fields: Fields =
+            serde_json::from_value(Value::Object(map)).map_err(serde::de::Error::custom)?;
+        Ok(PutDmClosureRequestDto {
+            seen_seq: fields.seen_seq,
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -6473,6 +6495,11 @@ mod tests {
             serde_json::json!({"seenSeq": 1.5}),
             serde_json::json!({"seenSeq": null}),
             serde_json::json!({"seenSeq": 7, "channelId": "x"}),
+            // A struct derived from serde reads a sequence positionally: `[1]` must not become 1.
+            serde_json::json!([1]),
+            serde_json::json!([]),
+            serde_json::json!([1, 2]),
+            serde_json::json!(7),
         ] {
             assert!(
                 serde_json::from_value::<PutDmClosureRequestDto>(bad.clone()).is_err(),

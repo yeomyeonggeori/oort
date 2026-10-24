@@ -126,16 +126,23 @@ SET LOCAL row_security = on;
 -- (GREATEST(기존, LEAST(seenSeq, channel_seq.last_seq))).
 --
 -- DM 만 받는다는 규칙(channel.kind = 'dm'·보관되지 않음·요청자가 참여자)은 라우트가 확인한다.
--- 멤버·채널의 워크스페이스 일치도 라우트가 확인하고, RLS WITH CHECK 가 workspace_id 를 고정한다.
--- channel 에는 (workspace_id, id) 유니크가 없어서 복합 FK 를 걸려면 핵심 표를 건드려야 하므로
--- 단일 FK 로 둔다(084 와 같은 판단).
+-- 테넌트 일치는 라우트와 DB 가 이중으로 지킨다: RLS WITH CHECK 가 workspace_id 를 현재 테넌트로 고정하고,
+-- 아래 두 **복합 외래 키**가 (workspace_id, member_id)·(workspace_id, channel_id) 가 같은 워크스페이스의
+-- 행을 가리키는지 DB 가 확인한다(member_workspace_id_uniq 003, channel_workspace_id_uniq 027 이 이미 있는
+-- 유일 인덱스를 쓰므로 새 인덱스도 핵심 표 변경도 없다). 그래서 다른 워크스페이스의 멤버·채널을 이 표에
+-- 끼워 넣는 쓰기는 라우트가 틀려도 외래 키 위반으로 거절된다(독립 검토 r1 Low). 084 는 이 방어를 두지
+-- 않았다.
 CREATE TABLE dm_closure (
   workspace_id  uuid NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
-  member_id     uuid NOT NULL REFERENCES member(id) ON DELETE CASCADE,
-  channel_id    uuid NOT NULL REFERENCES channel(id) ON DELETE CASCADE,
+  member_id     uuid NOT NULL,
+  channel_id    uuid NOT NULL,
   closed_at_seq bigint NOT NULL,
   closed_at     timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (member_id, channel_id),
+  CONSTRAINT dm_closure_member_workspace_fk
+    FOREIGN KEY (workspace_id, member_id) REFERENCES member (workspace_id, id) ON DELETE CASCADE,
+  CONSTRAINT dm_closure_channel_workspace_fk
+    FOREIGN KEY (workspace_id, channel_id) REFERENCES channel (workspace_id, id) ON DELETE CASCADE,
   CONSTRAINT dm_closure_closed_at_seq_nonneg_ck CHECK (closed_at_seq >= 0)
 );
 
