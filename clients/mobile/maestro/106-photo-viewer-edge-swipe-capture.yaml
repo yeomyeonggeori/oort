@@ -1,0 +1,41 @@
+appId: app.momo.ios
+name: "106-photo-viewer-edge-swipe-capture"
+---
+# 106-photo-viewer-edge-swipe-capture — 뷰어를 연 채 좌측 가장자리에서 쓸어도 「돌아가기」가 그대로 산다 (#4293).
+#
+# 이슈 #4293: 「돌아가기 제스처(가장자리 쓸기)는 그대로 둬요」. 뷰어의 쓸어 닫기는 닿는 순간 응답을 쥐므로(뒤의
+# 메시지 행이 뷰어 안의 터치를 가져가지 못하게), 가장자리 뒤로가기가 응답을 달라고 할 때 내주는지가 질문이다.
+# 표면 `-momoMeasure PHOTO-VIEWER-SOLO` 는 앱의 셸처럼 대화를 `EdgeSwipeBack` 으로 감싼다
+# (`measure/photoViewer.tsx`). 뒤로 가면 대화 화면이 닫히고 뷰어도 함께 사라진다.
+#
+#   node clients/mobile/measure/photo-stub.mjs &
+#   xcrun simctl launch <udid> app.momo.ios --args \
+#     -momoMeasure PHOTO-VIEWER-SOLO -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=edge-dark clients/mobile/maestro/106-photo-viewer-edge-swipe-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-item"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- tapOn:
+    id: "attachment-item"
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer"
+    timeout: 10000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-viewer
+# 좌측 가장자리(24pt 안)에서 시작해 오른쪽으로 쓴다.
+- swipe:
+    start: 2%, 50%
+    end: 75%, 50%
+    duration: 300
+- extendedWaitUntil:
+    visible:
+      id: "harness-went-back"
+    timeout: 5000
+- takeScreenshot: ${SHOT}-went-back

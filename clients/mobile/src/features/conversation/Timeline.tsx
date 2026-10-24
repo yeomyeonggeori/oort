@@ -792,6 +792,7 @@ function TimelineInner({
   pillsRef,
   tailRef,
   tailGap,
+  topPillInset = 0,
   metricsRef,
   listRef: externalListRef,
 }: {
@@ -975,6 +976,14 @@ function TimelineInner({
    * 이음매 노드는 높이가 0 이어도 **그대로 서 있다** — `tailRef` 가 답하는 것은 높이가 아니라 위치다.
    */
   tailGap?: number;
+  /**
+   * 위쪽 떠 있는 필(날짜 · 「안 읽은 곳으로」)을 목록 위 가장자리에서 얼마나 내려 세우는가(pt, #4292).
+   *
+   * 대화 머리의 연결 띠는 목록 위에 **뜬다**(흐름에 끼면 띠가 설 때마다 목록의 보이는 높이가 바뀐다). 띠와 이 필들은
+   * 같은 자리(목록 위 가운데)를 쓰므로, 띠가 서 있는 동안 필은 그 밑에 쌓인다 — 아니면 필이 띠 뒤에 숨은 채 눌리는
+   * 컨트롤이 된다. 띠가 없으면 0. 필은 목록 위에 떠 있으므로 이 값은 목록의 배치를 바꾸지 않는다.
+   */
+  topPillInset?: number;
   /**
    * Same seam, for the geometry: the list's own last scroll report, written
    * without a re-render. What a harness wants to know after a send is how far
@@ -3042,22 +3051,26 @@ function TimelineInner({
     // 픽셀도 바뀌지 않는다 — `measure/` 의 앵커 이동 두 줄이 그것을 잰다.
     <View style={styles.pillFrame}>
       {motionScope}
-      {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
-          서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
-      {dayPillLive && floatingDay !== null && !showJumpUnread ? (
-        <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
-      ) : null}
-      {showJumpUnread ? (
-        <JumpPillDock side="top">
-          <JumpPill
-            direction="up"
-            testID="jump-unread"
-            segments={jumpUnreadSegments(unreadJumpCount)}
-            accessibilityLabel={jumpUnreadAccessibilityLabel(unreadJumpCount)}
-            onPress={jumpToUnread}
-          />
-        </JumpPillDock>
-      ) : null}
+      {/* 위쪽 필 둘의 자리. 연결 띠가 목록 위에 뜨면 `topPillInset` 만큼 내려 띠 밑에 쌓인다(#4292). 필 둘은 이
+          틀의 위 가장자리에서 각자 `top` 을 지므로, 틀을 내리면 둘이 함께 내려간다. 틀은 손을 받지 않는다. */}
+      <View pointerEvents="box-none" style={[styles.topPills, {top: topPillInset}]} testID="timeline-top-pills">
+        {/* 떠 있는 날짜 알약(DS2-4). 위 필(「안 읽은 곳으로」)과 같은 자리라, 그 필이
+            서 있는 동안은 물러난다 — 할 일이 있는 필이 날짜보다 앞선다. */}
+        {dayPillLive && floatingDay !== null && !showJumpUnread ? (
+          <FloatingDayPill atMs={floatingDay.atMs} nowMs={nowMs} />
+        ) : null}
+        {showJumpUnread ? (
+          <JumpPillDock side="top">
+            <JumpPill
+              direction="up"
+              testID="jump-unread"
+              segments={jumpUnreadSegments(unreadJumpCount)}
+              accessibilityLabel={jumpUnreadAccessibilityLabel(unreadJumpCount)}
+              onPress={jumpToUnread}
+            />
+          </JumpPillDock>
+        ) : null}
+      </View>
       {showJumpLatest ? (
         <JumpPillDock side="bottom">
           <JumpPill
@@ -3099,4 +3112,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   footer: {height: space.sm},
   /** 필이 떠 있을 틀. 목록과 같은 자리·같은 크기다. */
   pillFrame: {flex: 1},
+  /** 위쪽 필 둘의 틀. 틀의 `top` 이 연결 띠 밑으로 내려가는 양이고(#4292), 필은 이 틀 안에서 자기 `top` 을 진다. */
+  topPills: {position: 'absolute', left: 0, right: 0, bottom: 0},
 });

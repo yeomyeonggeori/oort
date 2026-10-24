@@ -183,11 +183,13 @@ import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {DockGapSurface} from './dockGap';
 import {ComposerNewlineSurface} from './composerNewline';
+import {SteadySurface, seedSteady} from './steady';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
+import {PhotoViewerSurface} from './photoViewer';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -2194,6 +2196,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
+  if (name.startsWith('dm-steady')) {
+    return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
+  }
   // #4264: 마지막 행 아래 → 알약 위 간격. 대화 화면의 도크 스택 그대로 + 레이아웃 값 계측.
   if (name === 'gap' || name.startsWith('gap-')) {
     return <DockGapSurface which={name.slice('gap'.length).replace(/^-/, '')} />;
@@ -2227,6 +2233,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4180: 첨부 메뉴(+ 원에서 펼쳐지는 카드). 실제 머리·타임라인·컴포저, 여는 것은 Maestro 의 실제 탭.
   if (name.startsWith('attach-menu')) {
     return <AttachMenuSurface which={name.slice('attach-menu'.length).replace(/^-/, '')} />;
+  }
+
+  // #4293: 사진 뷰어(안전 영역·아래로 쓸어 닫기). 실제 대화에 사진 메시지, 여는 것은 Maestro 의 실제 탭.
+  if (name.startsWith('photo-viewer')) {
+    return <PhotoViewerSurface which={name.slice('photo-viewer'.length).replace(/^-/, '')} />;
   }
 
   switch (name) {
@@ -7360,6 +7371,13 @@ if (
   LAUNCHED.name === 'gone-dm-home'
 ) {
   seedGoneDmHome();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  LAUNCHED.name.startsWith('dm-steady')
+) {
+  seedSteady();
 }
 if (
   LAUNCHED !== null &&
