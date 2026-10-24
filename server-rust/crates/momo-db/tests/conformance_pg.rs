@@ -21,6 +21,8 @@
 //! Full cross-tenant *data* red (as `momo_app` with seeded rows) is a B1
 //! conformance concern (needs multi-table seed); B0 proves apply + GUC wiring.
 
+mod common;
+
 use std::sync::OnceLock;
 
 use momo_db::migrate::{default_migrations_dir, discover_migrations, run_migrations, SeedMode};
@@ -139,17 +141,33 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
             .unwrap();
     assert!(channel_seq, "channel_seq table must exist");
 
-    // invariant #6 backstop lives in the DB: many tables carry FORCE RLS
+    // invariant #6 backstop lives in the DB. #4242 (SEC-04): not a count floor
+    // (`forced >= 30` stayed green while a new tenant table shipped without
+    // FORCE) but the property itself, every `workspace_id` table RLS-enabled,
+    // FORCEd and policied, every SECURITY DEFINER with a pinned search_path.
+    // The role-dependent checks (momo_app DML, PUBLIC definer allowlist) live
+    // in `tenant_catalog_pg.rs`, which runs after bootstrap_roles.sql.
+    let tenant_tables = common::tenant_table_count(&pool, None).await;
+    assert!(
+        tenant_tables > 0,
+        "no workspace_id table found: the invariant check is blind"
+    );
+    let rls = common::tenant_rls_violations(&pool, None).await;
+    assert!(
+        rls.is_empty(),
+        "tenant tables without RLS+FORCE+policy (D2 #6): {rls:?}"
+    );
+    let definers = common::definer_search_path_violations(&pool, None).await;
+    assert!(
+        definers.is_empty(),
+        "SECURITY DEFINER without pinned search_path: {definers:?}"
+    );
     let forced: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pg_class WHERE relkind='r' AND relforcerowsecurity",
     )
     .fetch_one(&mut *conn)
     .await
     .unwrap();
-    assert!(
-        forced >= 30,
-        "expected many FORCE-RLS tables (D2 #6), got {forced}"
-    );
 
     // #3167 / ADR-0196 D11: migration 099 removed the first-generation Memory
     // Plane (027/028/030/035). Nothing may bring an old object back, and the
