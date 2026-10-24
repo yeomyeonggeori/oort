@@ -21,6 +21,6 @@ name: 102-gone-dm-capture
 - tapOn: "닫은 대화"
 - extendedWaitUntil:
     visible:
-      id: "dm-closed-sheet"
+      id: "dm-closed-hint"
     timeout: 10000
 - takeScreenshot: ${SHOT}-closed-sheet

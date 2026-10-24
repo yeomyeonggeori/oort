@@ -116,9 +116,13 @@ export function DmClosedSheet({
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel={`${name}, ${action}`}
-                    accessibilityState={{busy}}
+                    accessibilityState={{busy, disabled: busy}}
+                    disabled={busy}
                     onPress={() => onReopen(entry)}
-                    style={({pressed}) => [styles.action, pressed && styles.pressed]}
+                    style={({pressed}) => [
+                      styles.action,
+                      (pressed || busy) && styles.pressed,
+                    ]}
                     testID={`dm-closed-reopen-${id}`}>
                     <Text style={styles.actionLabel}>{action}</Text>
                   </Pressable>
@@ -200,6 +204,7 @@ const buildStyles = (color: Palette) =>
     reason: {fontSize: font.meta, color: color.textMuted, lineHeight: line.label},
     action: {
       minHeight: TOUCH_TARGET,
+      minWidth: 88,
       paddingHorizontal: space.md,
       alignItems: 'center',
       justifyContent: 'center',

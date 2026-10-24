@@ -44,8 +44,11 @@ export function useDmReopen(
     [],
   );
 
+  const pendingRef = useRef(false);
   const reopen = useCallback(
     (entry: DmClosedEntry) => {
+      // 서버 답을 기다리는 동안의 두 번째 탭은 무시한다(대화를 두 번 열지 않게).
+      if (pendingRef.current) return;
       const id = entry.channel.id;
       if (entry.reason === 'gone') {
         onOpened(entry);
@@ -56,6 +59,7 @@ export function useDmReopen(
         onOpened(entry);
         return;
       }
+      pendingRef.current = true;
       setPendingId(id);
       setError(null);
       void reopenDm(workspaceId, id)
@@ -64,6 +68,7 @@ export function useDmReopen(
           (cause: unknown) => cause instanceof ApiError && cause.status === 404,
         )
         .then(ok => {
+          pendingRef.current = false;
           if (!mounted.current) return;
           setPendingId(null);
           if (!ok) {

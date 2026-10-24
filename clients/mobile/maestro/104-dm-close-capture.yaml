@@ -15,7 +15,7 @@ name: 104-dm-close-capture
     id: "sidebar-row-dm:dm-dohyun"
 - extendedWaitUntil:
     visible:
-      id: "channel-action-sheet"
+      id: "channel-sheet-title"
     timeout: 10000
 - takeScreenshot: ${SHOT}-unread-no-close
 - tapOn:

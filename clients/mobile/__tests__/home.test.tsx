@@ -1380,6 +1380,37 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.queryByTestId('conversation-pane')).toBeNull();
   });
 
+  it('「다시 열기」 답을 기다리는 동안 같은 버튼·다른 행의 탭은 대화를 열지 않는다 (이중 탭 방지)', async () => {
+    await mountHome({channels: withGone, readStates: serverRows(4)});
+    await settledHidden();
+    const inner = globalThis.fetch as unknown as (url: string, init?: {method?: string}) => Promise<Response>;
+    let release: (() => void) | undefined;
+    globalThis.fetch = jest.fn(async (url: string, init?: {method?: string}) => {
+      if (init?.method === 'DELETE') {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+        return jsonResponse(204, {});
+      }
+      return inner(url, init);
+    }) as unknown as typeof fetch;
+    openClosedSheet();
+    const human = await screen.findByTestId('dm-closed-reopen-ch-dm-human');
+    fireEvent.press(human);
+    expect(screen.getByTestId('dm-closed-reopen-ch-dm-human').props.accessibilityState).toMatchObject({busy: true});
+    fireEvent.press(screen.getByTestId('dm-closed-reopen-ch-dm-human'));
+    fireEvent.press(screen.getByTestId('dm-closed-reopen-ch-dm-gone'));
+    expect(screen.queryByTestId('conversation-pane')).toBeNull();
+    const deletes = (globalThis.fetch as jest.Mock).mock.calls.filter(
+      call => (call[1] as {method?: string} | undefined)?.method === 'DELETE',
+    );
+    expect(deletes).toHaveLength(1);
+    await act(async () => {
+      release?.();
+    });
+    await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
+  });
+
   it('시트가 열린 채 목록이 비면(다른 기기에서 다시 열었다) 빈 상태를 말한다', async () => {
     const routes: Routes = {channels: [CHANNELS[1], CHANNELS[3], CHANNELS[4]], readStates: serverRows(4)};
     await mountHome(routes);
