@@ -668,6 +668,9 @@ mod tests {
     /// backfill that follows the trigger (`row_security = off`, a `GET DIAGNOSTICS` row-count
     /// assertion), and the member-owned `dm_closure` table (ENABLE + FORCE + `ws_isolation`).
     ///
+    /// 147 is #4381's EXECUTE lockdown: ten API-side `mem_*` definer functions (six entry points, four RLS
+    /// policy helpers) go from PUBLIC to `momo_app` only (also reasserted in both bootstrap SQL files).
+    ///
     /// 148 is #4385's `member.avatar.set` (ADR-0186 증보 2026-10-25 v4): only the INSERT guard of
     /// `agent_avatar_image` changes — the image's owner may be the person who asked the agent, the
     /// proposer must be an agent.

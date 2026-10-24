@@ -24,7 +24,7 @@ use common::{
     table_policy_fingerprint, tenant_rls_violations, tenant_rls_violations_against,
     tenant_table_count, unforced_dml_violations, unprotected_write_violations,
     untracked_table_violations, GUC_GATED_POLICIES, NON_TENANT_POLICY_PINS, NON_TENANT_TABLES,
-    PG_CATALOG_ONLY_DEFINERS, PUBLIC_DEFINER_FUNCTIONS,
+    PG_CATALOG_ONLY_DEFINERS,
 };
 use momo_db::sqlx;
 use momo_db::PgPool;
@@ -169,7 +169,6 @@ async fn the_real_database_pins_search_path_on_every_security_definer() {
 async fn the_real_database_public_security_definers_equal_the_allowlist() {
     let _guard = lock().await;
     let pool = pool().await;
-    assert!(!PUBLIC_DEFINER_FUNCTIONS.is_empty());
     let violations = public_definer_violations(&pool, None).await;
     assert!(
         violations.is_empty(),
