@@ -19,7 +19,19 @@ cd "$REPO_ROOT"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "[huddle] missing $1" >&2; exit 1; }; }
 need docker
 need cargo
-need psql
+# The conformance test resolves psql PATH-or-Homebrew-libpq (`resolve_psql`),
+# and Homebrew keeps libpq off PATH, so a bare `need psql` refused a machine
+# that can run this (#4386). Same check, same fallback locations.
+if ! command -v psql >/dev/null 2>&1; then
+  psql_found=0
+  for candidate in ${MOMO_LIBPQ_BIN_DIRS:-/opt/homebrew/opt/libpq/bin /usr/local/opt/libpq/bin}; do
+    [ -x "$candidate/psql" ] && { psql_found=1; break; }
+  done
+  [ "$psql_found" = "1" ] || {
+    echo "[huddle] psql not found on PATH or in the Homebrew libpq locations the test falls back to" >&2
+    exit 1
+  }
+fi
 
 PG_IMAGE="pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0"
 PROJECT="${HUDDLE_GATE_PROJECT:-hd1-huddle-pg}"
