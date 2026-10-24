@@ -144,6 +144,8 @@ describe("InboxDetail", () => {
   it("멘션: 그 메시지를 강조하고, 보내면 그 메시지를 인용(replyToId)해 보낸다", async () => {
     const h = await mount(entry({ key: "mention:m5", kind: "mention", messageId: "m5", typeLabel: "멘션 · #w" }));
     expect(h.querySelector('[data-highlighted="true"]')?.textContent).toContain("첫째");
+    // #4324: 착지 면은 폰과 같은 `landed-surface`(--warn-soft + 1px 테두리)다.
+    expect(h.querySelector('[data-highlighted="true"]')?.classList.contains("landed-surface")).toBe(true);
     expect(api.fetchMessages).toHaveBeenCalledWith(WS, CH, { limit: 20, before: 8 });
     const input = h.querySelector<HTMLTextAreaElement>('[data-testid="inbox-reply-input"]')!;
     await act(async () => {

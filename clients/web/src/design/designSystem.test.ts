@@ -253,6 +253,7 @@ describe("타이포 축", () => {
 const FONT_SIZE_ALLOW: Array<{ decl: RegExp; why: string }> = [
   { decl: /^font-size:\s*40px;/, why: "S0 환영 화면 워드마크(스케일 밖 의도된 예외, ADR-0193)" },
   { decl: /^font-size:\s*calc\(var\(--spacing-avatar-hero\)/, why: "히어로 아바타 이니셜은 아바타 크기의 비율" },
+  { decl: /^font-size:\s*calc\(var\(--text-title\) \* 20 \/ 17\);/, why: "줄 도구 막대의 빠른 반응 이모지 20px(#4324): 역할을 늘리지 않고 --text-title의 20/17배" },
   { decl: /^font-size:\s*clamp\(/, why: "S0 워드마크 유동 크기(--font-onboarding-wordmark)" },
   { decl: /^font-size:\s*var\(--field-text-floor\);/, why: "입력 칸 16px 바닥(플랫폼 문턱, 롤 아님)" },
   { decl: /^font-size:\s*var\(--session-text-/, why: "세션 목록 지역 별칭, 값은 --text-*에 묶인다(아래 별도 시험)" },
@@ -383,6 +384,7 @@ const CONTAINER_PRIMITIVES = [
   "dialog.tsx",
   "dropdown-menu.tsx",
   "popover.tsx",
+  "tooltip.tsx",
 ] as const;
 
 /**

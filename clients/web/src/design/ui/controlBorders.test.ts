@@ -72,6 +72,8 @@ const ROLE: Record<string, "control" | "filled" | "container"> = {
   "context-menu.tsx": "container",
   // 담는 것. 트리거에 붙는 떠 있는 판이고, 안의 검색/그리드가 자기 경계를 진다.
   "popover.tsx": "container",
+  // 작은 안내 면. 눌리지도 값을 받지도 않고(`pointer-events: none`), 경계는 면을 나누는 선이다(#4324).
+  "tooltip.tsx": "container",
 };
 
 /** 클래스 문자열 안의 `border-line` (뒤에 `-strong` 이 붙지 않은 것). */

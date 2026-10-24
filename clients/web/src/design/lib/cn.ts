@@ -57,6 +57,8 @@ export const NAMED_MEASURES = [
   "control-sm",
   "control",
   "control-lg",
+  "toolbar",
+  "tooltip-y",
   "action-sm",
   "avatar-action",
   "avatar-hero",
