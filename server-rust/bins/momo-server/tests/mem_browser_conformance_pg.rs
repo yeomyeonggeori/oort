@@ -1903,6 +1903,26 @@ async fn guard_cases(su: PgPool, worker: PgPool, app: PgPool, w: World) {
             })
         }
     };
+    // #4381: EXECUTE on both functions is momo_app only. Check that wall, then grant EXECUTE to the role this
+    // worker connection acts as (`momo_memory`, see `worker_pool`) for this section (revoked again after the edit
+    // sabotage below) so the in-function session_user guard is what refuses.
+    for sig in [forget_sig, edit_sig] {
+        for role in ["momo_worker", "momo_memory"] {
+            let may: bool = sqlx::query_scalar(
+                "SELECT has_function_privilege($1, $2::regprocedure, 'EXECUTE')",
+            )
+            .bind(role)
+            .bind(sig)
+            .fetch_one(&su)
+            .await
+            .expect("has_function_privilege");
+            assert!(!may, "{role} must not EXECUTE {sig}");
+        }
+        sqlx::raw_sql(&format!("GRANT EXECUTE ON FUNCTION {sig} TO momo_memory"))
+            .execute(&su)
+            .await
+            .expect("grant");
+    }
     assert_eq!(run_as_worker().await, Err("42501".to_string()));
     let original = sabotage(
         &su,
@@ -1941,6 +1961,12 @@ async fn guard_cases(su: PgPool, worker: PgPool, app: PgPool, w: World) {
     };
     restore(&su, &original).await;
     println!("RED [edit: session_user guard]: sabotaged momo_worker edit -> {acted:?}");
+    for sig in [forget_sig, edit_sig] {
+        sqlx::raw_sql(&format!("REVOKE ALL ON FUNCTION {sig} FROM momo_memory"))
+            .execute(&su)
+            .await
+            .expect("revoke");
+    }
     assert!(acted.is_ok());
 
     // evidence copy: without it the new item has no evidence and the read rule hides it. (#3172 L-6: a definer
