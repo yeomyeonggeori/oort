@@ -133,7 +133,7 @@ SET LOCAL row_security = on;
 -- DM 만 받는다는 규칙(channel.kind = 'dm'·보관되지 않음·요청자가 참여자)은 라우트가 확인한다.
 -- 테넌트 일치는 라우트와 DB 가 이중으로 지킨다: RLS WITH CHECK 가 workspace_id 를 현재 테넌트로 고정하고,
 -- 아래 두 **복합 외래 키**가 (workspace_id, member_id)·(workspace_id, channel_id) 가 같은 워크스페이스의
--- 행을 가리키는지 DB 가 확인한다(member_workspace_id_uniq 003, channel_workspace_id_uniq 027 이 이미 있는
+-- 행을 가리키는지 DB 가 확인한다(member_workspace_id_id_uniq 003, channel_workspace_id_uniq 027 이 이미 있는
 -- 유일 인덱스를 쓰므로 새 인덱스도 핵심 표 변경도 없다). 그래서 다른 워크스페이스의 멤버·채널을 이 표에
 -- 끼워 넣는 쓰기는 라우트가 틀려도 외래 키 위반으로 거절된다(독립 검토 r1 Low). 084 는 이 방어를 두지
 -- 않았다.
