@@ -47,8 +47,8 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::{Extension, Json};
 use momo_auth::{
-    has_active_realtime_credential, sign_centrifugo_connection, Principal, PrincipalKind,
-    SCOPE_REALTIME_SUBSCRIBE,
+    bound_connection_ttl, credential_remaining_seconds, has_active_realtime_credential,
+    sign_centrifugo_connection, Principal, PrincipalKind, SCOPE_REALTIME_SUBSCRIBE,
 };
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{can_observe_agent, get_member, is_active_agent, is_channel_member};
@@ -128,11 +128,31 @@ pub async fn issue_token(
         .token_id
         .ok_or_else(|| ApiError::forbidden("credential cannot be bound to a realtime session"))?;
 
+    // #4311: a connection token must not outlive the access-token row the
+    // subscribe proxy re-checks, or the last minutes of every session leave a
+    // connected client whose every new subscribe is a 403. Humans only: an agent
+    // bearer keeps the configured TTL.
+    let mut ttl_seconds = state.realtime.connection_token_ttl_seconds;
+    if principal.kind == PrincipalKind::Human {
+        let remaining = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                credential_remaining_seconds(conn, credential_token_id, member_id, workspace_id)
+                    .await
+                    .map_err(DbError::from)
+            })
+        })
+        .await
+        .map_err(|error| ApiError::internal("realtime.credential_expiry", error))?;
+        ttl_seconds = bound_connection_ttl(ttl_seconds, remaining).map_err(|_| {
+            ApiError::unauthorized("access token is about to expire; refresh the session")
+        })?;
+    }
+
     let issued = sign_centrifugo_connection(
         member_id,
         workspace_id,
         credential_token_id,
-        state.realtime.connection_token_ttl_seconds,
+        ttl_seconds,
         &cent_token_hmac,
     )
     .map_err(|error| ApiError::internal("realtime.sign", error))?;

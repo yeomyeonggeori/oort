@@ -191,24 +191,25 @@ pub use push_fetch_token::{
     SCOPE_PUSH_FETCH, SESSION_LABEL_PUSH_FETCH, TYP_PUSH_FETCH,
 };
 pub use realtime::{
-    realtime_info_string, sign_centrifugo_connection, CentrifugoConnectionClaims,
-    IssuedRealtimeToken, RealtimeTokenMeta, CONNECTION_TOKEN_TTL_SECONDS, REALTIME_INFO_SCHEMA,
+    bound_connection_ttl, realtime_info_string, sign_centrifugo_connection,
+    CentrifugoConnectionClaims, CredentialExpiringSoon, IssuedRealtimeToken, RealtimeTokenMeta,
+    CONNECTION_TOKEN_TTL_SECONDS, MIN_BOUND_CONNECTION_TTL_SECONDS, REALTIME_INFO_SCHEMA,
     REALTIME_META_SCHEMA,
 };
 pub use refresh_proof::{
     judge_refresh_proof, PresentedRefreshProof, ProofInput, ProofVerdict, RefreshProofMode,
 };
 pub use token_store::{
-    carries_privileged_scope, has_active_realtime_credential, lock_live_session_lineage,
-    lock_member_live_session_rows_in_tx, lock_member_session_tokens_by_ids,
-    lock_member_wide_sweep_in_tx, lock_session_for_registration, lock_session_rows_in_tx,
-    new_session_id, record_session_token, record_session_token_with_device,
-    revoke_member_session_tokens, revoke_member_session_tokens_by_ids,
-    revoke_privileged_session_tokens, revoke_session_lineage_tokens, revoke_token,
-    session_device_label, session_id_of, token_state, without_privileged_scopes,
-    DeviceSessionRecord, LockedSessionRow, RegistrationSession, RevokeOutcome, TokenRejection,
-    TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS,
-    SESSION_LABEL_REFRESH,
+    carries_privileged_scope, credential_remaining_seconds, has_active_realtime_credential,
+    lock_live_session_lineage, lock_member_live_session_rows_in_tx,
+    lock_member_session_tokens_by_ids, lock_member_wide_sweep_in_tx, lock_session_for_registration,
+    lock_session_rows_in_tx, new_session_id, record_session_token,
+    record_session_token_with_device, revoke_member_session_tokens,
+    revoke_member_session_tokens_by_ids, revoke_privileged_session_tokens,
+    revoke_session_lineage_tokens, revoke_token, session_device_label, session_id_of, token_state,
+    without_privileged_scopes, DeviceSessionRecord, LockedSessionRow, RegistrationSession,
+    RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE,
+    SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{
     consume_work_host_request_id, load_work_host_signing_credential, WorkHostSigningCredential,

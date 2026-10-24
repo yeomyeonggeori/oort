@@ -41,6 +41,10 @@ pub const REALTIME_INFO_SCHEMA: &str = "momo.realtime.connection.v0";
 pub const REALTIME_META_SCHEMA: &str = "momo.realtime.credential.v1";
 /// Swift `Config.centConnectionTokenTTL` default (`CENT_CONNECTION_TOKEN_TTL_SECONDS`, 5m).
 pub const CONNECTION_TOKEN_TTL_SECONDS: i64 = 5 * 60;
+/// Below this much remaining access-token life a connection token is refused
+/// (#4311): the client must refresh the session first. A token minted for a
+/// 5s window would only make the client re-fetch in a loop.
+pub const MIN_BOUND_CONNECTION_TTL_SECONDS: i64 = 30;
 /// The `kid` Swift signs Centrifugo tokens under (`JWTService.centKID`).
 const CENT_KID: &str = "cent";
 
@@ -110,6 +114,29 @@ pub fn realtime_info_string(member_id: Uuid, workspace_id: Uuid) -> String {
     // Infallible for this struct (three owned strings); a `to_string` fallback
     // would be dead code with a wrong shape, so the expect names the invariant.
     serde_json::to_string(&info).expect("RealtimeTokenInfo is always serializable")
+}
+
+/// The bound credential is too close to expiry to carry a connection token.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CredentialExpiringSoon;
+
+/// The connection-token lifetime for a credential with `remaining_seconds` of
+/// life left (`None` = the credential never expires, e.g. an agent bearer).
+///
+/// `min(configured, remaining)` so a connection token never outlives the row the
+/// subscribe proxy re-checks (#4311). It can only shorten a token, never extend
+/// one. Under [`MIN_BOUND_CONNECTION_TTL_SECONDS`] it refuses instead.
+pub fn bound_connection_ttl(
+    configured_ttl_seconds: i64,
+    remaining_seconds: Option<i64>,
+) -> Result<i64, CredentialExpiringSoon> {
+    match remaining_seconds {
+        None => Ok(configured_ttl_seconds),
+        Some(remaining) if remaining < MIN_BOUND_CONNECTION_TTL_SECONDS => {
+            Err(CredentialExpiringSoon)
+        }
+        Some(remaining) => Ok(configured_ttl_seconds.min(remaining)),
+    }
 }
 
 /// Sign a short-lived Centrifugo connection token for an authenticated member.
@@ -247,5 +274,44 @@ mod tests {
         let header = jsonwebtoken::decode_header(&issued.token).expect("header");
         assert_eq!(header.kid.as_deref(), Some(CENT_KID));
         assert_eq!(header.alg, Algorithm::HS256);
+    }
+
+    #[test]
+    fn a_connection_token_never_outlives_its_credential() {
+        // 3 minutes of access-token life left, 5 minute configured TTL.
+        assert_eq!(bound_connection_ttl(300, Some(180)), Ok(180));
+        // Plenty of life: the configured TTL wins.
+        assert_eq!(bound_connection_ttl(300, Some(900)), Ok(300));
+        // Never-expiring credential (agent bearer): unchanged rule.
+        assert_eq!(bound_connection_ttl(300, None), Ok(300));
+        // Too short to be useful: refuse so the client refreshes first.
+        assert_eq!(
+            bound_connection_ttl(300, Some(MIN_BOUND_CONNECTION_TTL_SECONDS - 1)),
+            Err(CredentialExpiringSoon)
+        );
+        assert_eq!(
+            bound_connection_ttl(300, Some(-5)),
+            Err(CredentialExpiringSoon)
+        );
+        assert_eq!(
+            bound_connection_ttl(300, Some(MIN_BOUND_CONNECTION_TTL_SECONDS)),
+            Ok(MIN_BOUND_CONNECTION_TTL_SECONDS)
+        );
+    }
+
+    #[test]
+    fn the_signed_exp_follows_the_bound_ttl() {
+        let ttl = bound_connection_ttl(300, Some(180)).expect("ttl");
+        let issued = sign_centrifugo_connection(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            ttl,
+            "cent-secret",
+        )
+        .expect("sign");
+        let claims = decode_claims(&issued.token, "cent-secret");
+        assert_eq!(issued.ttl_seconds, 180);
+        assert!(claims.exp as i64 <= now_unix_seconds() + 180);
     }
 }
