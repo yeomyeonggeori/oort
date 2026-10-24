@@ -389,16 +389,31 @@ BEGIN
   END LOOP;
 END $$;
 
--- The global catalog is migration-owned. API routes may read it but may mutate
--- only tenant-scoped install/grant rows. Keep this revoke here as well as in 037:
--- a later role-password rotation must not restore broad table writes.
+-- BEGIN catalog-readonly-lockdown (#4372; SEC-04 follow-up). Identical in bootstrap_roles.sql and
+-- bootstrap_runtime_roles.sql; tests compare the text between the markers.
+-- plugin_registry (013), schema_migrations (momo_db::migrate / migrate.sh) and work_cloud_host_transition
+-- (053/057) carry no tenant rows and no RLS, and only migrations (the schema owner) ever write them: the
+-- routes read plugin_registry, the T3 trigger only SELECTs the transition table. The ALL TABLES grant above
+-- (and DEFAULT PRIVILEGES for tables a migration creates later) hands every runtime role DML on them, so a
+-- compromised API session could add a plugin, rewrite the migration ledger or open an illegal host
+-- transition. Revoke every write-class verb; SELECT stays. Reasserted on both passes of momo-migrate.
 DO $$
+DECLARE
+  r text;
+  t text;
 BEGIN
-  IF to_regclass('public.plugin_registry') IS NOT NULL THEN
-    REVOKE INSERT, UPDATE, DELETE ON TABLE plugin_registry FROM momo_app;
-  END IF;
-END
-$$;
+  FOREACH t IN ARRAY ARRAY['plugin_registry', 'schema_migrations', 'work_cloud_host_transition'] LOOP
+    IF to_regclass('public.' || t) IS NULL THEN
+      CONTINUE;
+    END IF;
+    FOREACH r IN ARRAY ARRAY['momo_app', 'momo_relay', 'momo_worker', 'momo_notifier', 'momo_platform_admin'] LOOP
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
+        EXECUTE format('REVOKE INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER ON TABLE public.%I FROM %I', t, r);
+      END IF;
+    END LOOP;
+  END LOOP;
+END $$;
+-- END catalog-readonly-lockdown
 
 -- momo_notifier: table-scoped GRANTs only (no ALL TABLES, no DELETE).
 -- Relations are absent on the pre-migrate pass; the post-migrate re-apply
