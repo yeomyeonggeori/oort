@@ -82,6 +82,13 @@ describe("member.avatar.set 카드의 action.preview (#4394)", () => {
       `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}&x=1`,
       `/v1/workspaces/${WS}/approvals/a/b/avatar-preview?v=${SHA}`,
       `https://evil.example/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}`,
+      // 점 세그먼트: 정규화되면 같은 서버의 다른 GET 경로로 베어러가 간다(보안 검수 L1).
+      `/v1/workspaces/${WS}/approvals/../avatar-preview?v=${SHA}`,
+      `/v1/workspaces/${WS}/approvals/./avatar-preview?v=${SHA}`,
+      `/v1/workspaces/${WS}/approvals/%2e%2e/avatar-preview?v=${SHA}`,
+      `/v1/workspaces/${WS}/approvals/%2E%2E/avatar-preview?v=${SHA}`,
+      `/v1/workspaces/../approvals/${APPROVAL}/avatar-preview?v=${SHA}`,
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}\\x/avatar-preview?v=${SHA}\n`,
     ]) {
       expect(isApprovalAvatarPreviewPath(bad)).toBe(false);
     }
@@ -109,5 +116,54 @@ describe("member.avatar.set 카드의 action.preview (#4394)", () => {
   it("인박스 줄이 내부 낱말 대신 행동 이름을 말한다", () => {
     expect(workspaceActionLabel("member.avatar.set")).toBe("내 프로필 사진 바꾸기");
     expect(workspaceActionLabel("member.unknown")).toBe("워크스페이스 변경");
+  });
+});
+
+// 실물 표본: track/engine(#4398 머지 7acf9fec) 의 `agent_port_tools_conformance_pg`
+// `member_avatar_set_only_the_pictured_person_decides_and_previews` 를 격리 PG18 에서 돌려
+// `message.props` 의 `action` 블록을 그대로 덤프한 것이다(이름은 시험이 만든 가상 값).
+// 손으로 쓴 픽스처가 아니라 서버가 실제로 쓴 바이트를 파서가 읽는지 잠근다(#4394 2단계).
+const REAL_SERVER_ACTION = {
+  "id": "member.avatar.set",
+  "preview": {
+    "height": 1,
+    "imageId": "01a16f31-c50b-7d1a-bafa-5dba7c42167f",
+    "kind": "avatar_image",
+    "mime": "image/png",
+    "origin": "attachment",
+    "sha256": "1c3feb3a916f942faf308069ca6145a1bd5c32aef1938501a010c1ed8bcb5f16",
+    "sizeBytes": 73,
+    "width": 1
+  },
+  "rationale": null,
+  "required_role": "requesting_member",
+  "rows": [
+    {
+      "label": "대상",
+      "value": "Person req (@req-e33ecce9)"
+    },
+    {
+      "label": "프로필 사진",
+      "value": "없음 → 카드에 보이는 새 이미지"
+    },
+    {
+      "label": "사진 출처",
+      "value": "내가 이 대화에 보낸 첨부"
+    }
+  ]
+};
+
+describe("서버 실물 표본 (격리 PG18, #4398)", () => {
+  it("실제 카드의 action 블록이 preview·역할·행을 잃지 않고 읽힌다", () => {
+    const action = parseApprovalAction(REAL_SERVER_ACTION);
+    expect(action?.id).toBe("member.avatar.set");
+    expect(action?.requiredRole).toBe("requesting_member");
+    expect(action?.rows).toHaveLength(3);
+    expect(action?.preview?.kind).toBe("avatar_image");
+    expect(action?.preview?.sha256).toMatch(/^[0-9a-f]{64}$/);
+    expect(action?.preview?.sizeBytes).toBe(73);
+    expect(
+      approvalAvatarPreviewPath(WS, APPROVAL, action?.preview ?? null)
+    ).toMatch(/avatar-preview\?v=[0-9a-f]{64}$/);
   });
 });

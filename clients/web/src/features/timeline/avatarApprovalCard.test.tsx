@@ -10,8 +10,10 @@ import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
 import { AgentCard } from "./AgentCard";
 import { resetSettledApprovalsForTest } from "./settledApprovals";
-import { resetApprovalAvatarPreviewsForTest } from "./useApprovalAvatarPreview";
+import { clearApprovalAvatarPreviews, resetApprovalAvatarPreviewsForTest } from "./useApprovalAvatarPreview";
 import { applyLogin, clearSession } from "@/lib/session";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 // =============================================================================
 // #4394: `member.avatar.set` 승인 카드 — 한 문장 · 제안된 사진 · 사진 주인 본인 문구.
@@ -330,5 +332,59 @@ describe("member.avatar.set 결과 카드 (#4394)", () => {
     expect(byTestId(host, "action-result-note")[0]?.textContent).toBe("실행을 마쳤어요.");
     expect(host.textContent ?? "").toContain("카드에 보인 이미지로 바뀌었어요");
   });
-});
 
+  it("사진 칸의 크기 클래스는 닫힌 스케일에 정의된 토큰이다 (미정의 size-20 은 CSS 가 생기지 않아 원본 크기로 퍼졌다)", () => {
+    const tokens = readFileSync(resolve(process.cwd(), "src/design/tokens.css"), "utf8");
+    const source = readFileSync(resolve(process.cwd(), "src/features/timeline/AvatarPreviewBlock.tsx"), "utf8");
+    const used = [...source.matchAll(/\bsize-([a-z][a-z-]*)\b/g)].map((m) => m[1]).filter((n) => n !== "full");
+    expect(used).toContain("avatar-preview");
+    for (const name of used) expect(tokens).toContain(`--spacing-${name}:`);
+  });
+
+  it("로그아웃·계정 교체 뒤에는 같은 카드가 서버에 다시 묻는다 — 앞 계정의 사진이 남지 않는다 (보안 검수 H1)", async () => {
+    const fetchMock = stubPreviewFetch(200);
+    const host = await mountCard(avatarProps());
+    expect(byTestId(host, "approval-avatar-image")).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    // 주인 A 가 나가고 다른 사람 B 가 같은 카드를 연다: 서버는 B 에게 404 를 준다.
+    clearApprovalAvatarPreviews();
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountHost?.remove();
+    const notMine = stubPreviewFetch(404);
+    const next = await mountCard(avatarProps());
+
+    expect(notMine).toHaveBeenCalledTimes(1);
+    expect(byTestId(next, "approval-avatar-image")).toHaveLength(0);
+    expect(byTestId(next, "approval-avatar-frame")[0]?.dataset.state).toBe("unavailable");
+  });
+
+  it("비우는 사이에 끝난 요청은 캐시를 채우지 않는다 (보안 검수 H1)", async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const slow = vi.fn(async (_url: unknown, _init?: unknown) => {
+      await gate;
+      return new Response(PNG, { status: 200, headers: { "content-type": "image/png" } });
+    });
+    vi.stubGlobal("fetch", slow);
+    const pending = mountCard(avatarProps());
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 20));
+    });
+    clearApprovalAvatarPreviews(); // 로그아웃 — 요청은 아직 날아가는 중
+    release?.();
+    const host = await pending;
+    // 앞 계정의 응답은 버려진다: 사진이 서지 않는다.
+    expect(byTestId(host, "approval-avatar-image")).toHaveLength(0);
+    // 같은 경로를 다시 열면 서버에 다시 묻는다(캐시가 채워지지 않았다).
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountHost?.remove();
+    const again = stubPreviewFetch(200);
+    await mountCard(avatarProps());
+    expect(again).toHaveBeenCalledTimes(1);
+  });
+});

@@ -17,6 +17,8 @@ export type ApprovalAvatarPreview =
 const CACHE_LIMIT = 32;
 const cache = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
+/** 비우기 세대 — 비우는 사이 끝난 요청은 캐시를 채우지 않는다(앞 사람의 얼굴이 남지 않게). */
+let generation = 0;
 
 function readAsDataUrl(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -35,9 +37,12 @@ function load(path: string): Promise<string> {
   if (hit !== undefined) return Promise.resolve(hit);
   let request = inflight.get(path);
   if (request === undefined) {
+    const started = generation;
     request = fetchApprovalAvatarPreview(path)
       .then(readAsDataUrl)
       .then((url) => {
+        // 로그아웃·계정 교체가 사이에 있었다면 이 사진은 앞 계정의 것이다: 담지 않고, 보여 주지도 않는다.
+        if (started !== generation) throw new Error("avatar preview");
         cache.set(path, url);
         while (cache.size > CACHE_LIMIT) {
           const oldest = cache.keys().next();
@@ -46,7 +51,9 @@ function load(path: string): Promise<string> {
         }
         return url;
       })
-      .finally(() => inflight.delete(path));
+      .finally(() => {
+        if (inflight.get(path) === request) inflight.delete(path);
+      });
     inflight.set(path, request);
   }
   return request;
@@ -84,8 +91,18 @@ export function useApprovalAvatarPreview(previewPath: string | null): ApprovalAv
   return known === "unavailable" ? { state: "unavailable" } : { state: "ready", src: known };
 }
 
-/** 테스트 전용. */
-export function resetApprovalAvatarPreviewsForTest(): void {
+/**
+ * 로그아웃·세션 교체 때 부른다(`app/session.tsx`). 이 사진은 사진 주인 본인에게만 읽히므로,
+ * 캐시가 계정 경계를 넘어 남으면 서버가 404 로 막은 사람에게 남의 얼굴이 그려진다(보안 검수 H1).
+ * 진행 중이던 요청도 세대로 버린다.
+ */
+export function clearApprovalAvatarPreviews(): void {
+  generation += 1;
   cache.clear();
   inflight.clear();
+}
+
+/** 테스트 전용. */
+export function resetApprovalAvatarPreviewsForTest(): void {
+  clearApprovalAvatarPreviews();
 }

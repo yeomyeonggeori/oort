@@ -7,8 +7,9 @@ import {
 } from '@momo/core/features/approvals/avatarPreview';
 import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardModel';
 import React, {useEffect, useState} from 'react';
-import {Image, StyleSheet, Text, View} from 'react-native';
+import {Image, StyleSheet, View} from 'react-native';
 import {font, line, radius, space, type Palette} from '../../design/tokens';
+import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {useSession} from '../../session/useSession';
 import {loadMemberAvatar, memberAvatarCacheKey, peekMemberAvatar} from './memberAvatarImage';
@@ -67,9 +68,9 @@ export function ApprovalAvatarPreview({
 
   return (
     <View style={styles.box} testID="approval-avatar-preview">
-      <Text style={styles.headline} testID="approval-avatar-headline">
+      <Sentence style={styles.headline} testID="approval-avatar-headline">
         {headline}
-      </Text>
+      </Sentence>
       <View style={styles.row}>
         <View
           style={styles.frame}
@@ -84,9 +85,9 @@ export function ApprovalAvatarPreview({
             />
           ) : null}
         </View>
-        <Text style={styles.caption} testID="approval-avatar-caption">
+        <Sentence style={styles.caption} testID="approval-avatar-caption">
           {unavailable ? AVATAR_PREVIEW_UNAVAILABLE : AVATAR_PREVIEW_CAPTION}
-        </Text>
+        </Sentence>
       </View>
     </View>
   );
@@ -107,7 +108,8 @@ const buildStyles = (color: Palette) =>
       height: PREVIEW_SIZE,
       borderRadius: radius.pill,
       overflow: 'hidden',
-      borderWidth: StyleSheet.hairlineWidth,
+      // 사진이 없는 자리(받는 중·본인 아님)도 다크 바탕에서 보이도록 1px 선을 둔다(리뷰 M2).
+      borderWidth: 1,
       borderColor: color.border,
       backgroundColor: color.surfacePressed,
     },

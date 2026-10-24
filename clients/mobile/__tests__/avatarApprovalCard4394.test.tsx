@@ -9,7 +9,10 @@ import '../src/boot/coreHost';
 
 import {
   __resetMemberAvatarCache,
+  clearMemberAvatarCache,
   loadMemberAvatar,
+  memberAvatarCacheKey,
+  peekMemberAvatar,
 } from '../src/features/conversation/memberAvatarImage';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
@@ -251,6 +254,31 @@ describe('#4394 — member.avatar.set 승인 카드 (폰)', () => {
       `/v1/workspaces/${WS}/approvals/${APPROVAL_ID}/avatar-preview`,
       `/v1/workspaces/${WS}/approvals/${APPROVAL_ID}/attachments/x?v=${SHA}`,
       `https://evil.example/v1/workspaces/${WS}/approvals/${APPROVAL_ID}/avatar-preview?v=${SHA}`,
+    ]) {
+      await expect(loadMemberAvatar(bad)).resolves.toBeNull();
+    }
+    expect(downloads()).toHaveLength(0);
+  });
+});
+
+describe('#4394 — 계정 경계 (보안 검수)', () => {
+  it('로그아웃 비우기는 승인 미리보기 사진도 지운다 — 다음 사람 기기에 앞 사람의 얼굴이 남지 않는다', async () => {
+    const uri = await loadMemberAvatar(PREVIEW_PATH);
+    expect(uri).not.toBeNull();
+    expect(peekMemberAvatar(memberAvatarCacheKey(PREVIEW_PATH))).toBe(uri);
+
+    clearMemberAvatarCache();
+
+    expect(peekMemberAvatar(memberAvatarCacheKey(PREVIEW_PATH))).toBeNull();
+    // 같은 경로는 서버에 다시 묻는다(본인이 아니면 서버가 404 를 준다).
+    await loadMemberAvatar(PREVIEW_PATH);
+    expect(downloads()).toHaveLength(2);
+  });
+
+  it('점 세그먼트가 낀 주소에는 베어러를 싣지 않는다', async () => {
+    for (const bad of [
+      `/v1/workspaces/${WS}/approvals/../avatar-preview?v=${SHA}`,
+      `/v1/workspaces/${WS}/approvals/%2e%2e/avatar-preview?v=${SHA}`,
     ]) {
       await expect(loadMemberAvatar(bad)).resolves.toBeNull();
     }

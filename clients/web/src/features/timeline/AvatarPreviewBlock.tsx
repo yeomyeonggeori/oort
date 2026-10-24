@@ -42,7 +42,7 @@ export function AvatarPreviewBlock({
       </p>
       <div className="mt-2 flex items-center gap-3">
         <span
-          className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-full border border-line bg-pane text-ink-muted"
+          className="flex size-avatar-preview shrink-0 items-center justify-center overflow-hidden rounded-full border border-line bg-pane text-ink-muted"
           data-testid="approval-avatar-frame"
           data-state={image.state}
         >
