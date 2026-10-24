@@ -73,3 +73,6 @@ chrono.workspace = true
 ed25519-dalek.workspace = true
 futures.workspace = true
 sqlx.workspace = true
+
+[lints]
+workspace = true

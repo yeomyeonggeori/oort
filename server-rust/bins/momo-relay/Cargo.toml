@@ -37,3 +37,6 @@ momo-messaging = { path = "../../crates/momo-messaging" }
 axum.workspace = true
 chrono.workspace = true
 uuid.workspace = true
+
+[lints]
+workspace = true

@@ -48,3 +48,6 @@ momo-outbox = { path = "../momo-outbox" }
 momo-messaging = { path = "../momo-messaging" }
 chrono.workspace = true
 sqlx.workspace = true
+
+[lints]
+workspace = true

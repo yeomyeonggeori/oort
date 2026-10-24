@@ -54,3 +54,6 @@ tracing.workspace = true
 tokio = { workspace = true, features = ["net"] }
 futures = { workspace = true }
 axum = { workspace = true }
+
+[lints]
+workspace = true
