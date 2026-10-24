@@ -2232,7 +2232,7 @@ export function Composer({
                 onPress={insertMention}
                 style={({pressed}) => [styles.tool, pressed && styles.pressed]}
                 testID="composer-tool-mention">
-                <Text style={styles.toolGlyph}>@</Text>
+                <Text allowFontScaling={false} style={styles.toolGlyph}>@</Text>
               </Pressable>
             ) : null}
           </Animated.View>

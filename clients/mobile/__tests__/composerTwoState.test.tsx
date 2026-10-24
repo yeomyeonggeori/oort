@@ -113,6 +113,16 @@ describe('접힘 ↔ 펼침', () => {
   });
 });
 
+describe('큰 글자 — 「@」 도구 글리프는 36pt 원 안에 머문다 (실측: accessibility-extra-large 에서 아래가 잘렸다)', () => {
+  it('글리프는 글자 배수를 따르지 않는다', () => {
+    mount();
+    fireEvent.changeText(input(), '가');
+    const tool = screen.getByTestId('composer-tool-mention');
+    const glyph = tool.findByType(require('react-native').Text);
+    expect(glyph.props.allowFontScaling).toBe(false);
+  });
+});
+
 describe('햅틱 — 전이는 0번, 보내기 = light 1회', () => {
   it('첫 글자·펼친 채 치기·지워서 비기까지 0번(전이 햅틱 없음)', () => {
     mount();
