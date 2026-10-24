@@ -181,3 +181,30 @@
     --motion-modal-close: 0ms;
   }
 }
+
+/* 공용 툴팁 (#4324). fade + 95%→100% + 방향별 2px 이동. 이동 방향은 트리거에서 멀어지는 쪽이다
+ * (위에 서면 아래 2px에서 올라온다). 이동 거리는 이 이름 하나다. */
+:root {
+  --motion-distance-tooltip: 2px;
+}
+
+@keyframes motion-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translate(var(--tooltip-dx, 0), var(--tooltip-dy, 0)) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@utility motion-tooltip-enter {
+  animation: motion-tooltip-in var(--motion-fast) var(--motion-ease-standard) both;
+  &[data-side="top"] {
+    --tooltip-dy: var(--motion-distance-tooltip);
+  }
+  &[data-side="bottom"] {
+    --tooltip-dy: calc(var(--motion-distance-tooltip) * -1);
+  }
+}

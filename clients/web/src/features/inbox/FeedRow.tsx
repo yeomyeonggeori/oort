@@ -61,7 +61,7 @@ export function FeedRow({
     item.managedBy !== undefined;
 
   return (
-    <li className={actions ? "border-b border-line" : undefined}>
+    <li className="border-b border-line">
       <Link
         to={inboxTargetPath(item)}
         onClick={() => {
@@ -74,8 +74,8 @@ export function FeedRow({
         data-channel-id={item.channelId}
         {...seqAttrs}
         className={cn(
-          "flex gap-3 px-4 py-2 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
-          !actions && "border-b border-line"
+          // #4324: 메시지 줄과 같은 면 규칙. 구분선은 `<li>`가 진다(둥근 모서리에 선이 휘지 않게).
+          "flex gap-3 py-2 mx-1 rounded-lg px-3 row-hover active:bg-surface-pressed focus-visible:focus-ring"
         )}
       >
         <span className="shrink-0 pt-1" aria-hidden="true">

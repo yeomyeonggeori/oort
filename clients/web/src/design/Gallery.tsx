@@ -60,6 +60,7 @@ import {
 } from "@/design/ui/popover";
 import { ListboxSelect } from "@/design/ui/listbox-select";
 import { Select } from "@/design/ui/select";
+import { Tooltip } from "@/design/ui/tooltip";
 import { SegmentedControl } from "@/design/ui/segmented-control";
 import { Slider } from "@/design/ui/slider";
 import { Switch } from "@/design/ui/switch";
@@ -532,6 +533,17 @@ function OverlayExamples() {
                 )}
               </OverlayCell>
             </Popover>
+          </Export>
+        </div>
+
+        <div className="flex w-max max-w-full flex-col gap-2 pb-10">
+          <p className="text-meta text-ink-muted">Tooltip</p>
+          <Export name="Tooltip">
+            <Tooltip label="답글 달기" side="bottom" defaultOpen>
+              <Button type="button" variant="outline" size="sm">
+                가리키면 이름이 떠요
+              </Button>
+            </Tooltip>
           </Export>
         </div>
 

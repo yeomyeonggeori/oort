@@ -793,7 +793,9 @@ export function MessageRow({
         // non-hovered row contributes zero toolbar tab stops.
         // `press` scales on :active and empties a body drag-select (#1743 B-4).
         // Active fill is `--surface-pressed`, one step from hover, not a transform.
-        "group relative flex gap-2 px-4 hover:bg-surface-hover active:bg-surface-pressed",
+        // #4324: 바깥 4 + 안쪽 12 = 글자 들임 16(이전 `px-4`와 같다), 모서리 `--radius-lg`(14),
+        // 호버·키보드 초점은 `row-hover`(--surface-hover 50%). 눌림은 `active:`가 이긴다.
+        "group relative flex gap-2 mx-1 rounded-lg px-3 row-hover active:bg-surface-pressed",
         // actionable 행의 rest 정거장은 행 자신이다 (rowFocus.ts, 리뷰 W-4,
         // #1743 B-2). 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에
         // 그린다 — 행은 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은
