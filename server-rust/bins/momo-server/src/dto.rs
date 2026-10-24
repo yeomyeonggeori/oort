@@ -2479,6 +2479,23 @@ pub struct AgentGatewayUsageDto {
     pub cost_micro_usd: Option<i64>,
     #[serde(default, alias = "wasEstimated")]
     pub was_estimated: Option<bool>,
+    /// Keys this contract does not know. Still ignored (the public API stays
+    /// tolerant; no `deny_unknown_fields`), but kept by *name only* so the route
+    /// can say that a sender's usage was not read instead of billing 0 in silence.
+    #[serde(flatten)]
+    unknown_keys: std::collections::BTreeMap<String, serde::de::IgnoredAny>,
+}
+
+impl AgentGatewayUsageDto {
+    /// Unknown usage key names, at most `limit`, each cut to 40 chars. Names
+    /// come from the sender, so the log line stays bounded.
+    pub fn unknown_key_names(&self, limit: usize) -> Vec<String> {
+        self.unknown_keys
+            .keys()
+            .take(limit)
+            .map(|key| key.chars().take(40).collect())
+            .collect()
+    }
 }
 
 /// Swift `AgentGatewayCompleteResponse` (:2355-2360).
@@ -6026,6 +6043,23 @@ mod tests {
             serde_json::from_value::<AgentGatewayUsageDto>(serde_json::json!({ key: "11" }))
                 .expect_err(key);
         }
+    }
+
+    /// #4375 — an unrecognised usage key stays accepted (public contract) but is
+    /// reported by name, never by value.
+    #[test]
+    fn gateway_usage_unknown_keys_are_ignored_but_named() {
+        let usage: AgentGatewayUsageDto = serde_json::from_value(serde_json::json!({
+            "promptTokens": 11, "inputTokens": 99, "output_tokens": "secret-value",
+        }))
+        .expect("unknown keys do not reject");
+        assert_eq!(usage.prompt_tokens, Some(11));
+        assert_eq!(usage.completion_tokens, None);
+        assert_eq!(usage.unknown_key_names(8), ["inputTokens", "output_tokens"]);
+        assert_eq!(usage.unknown_key_names(1), ["inputTokens"]);
+        let known: AgentGatewayUsageDto =
+            serde_json::from_value(serde_json::json!({"promptTokens": 1})).expect("known");
+        assert!(known.unknown_key_names(8).is_empty());
     }
 
     /// The complete request carries the usage block through the same two spellings.

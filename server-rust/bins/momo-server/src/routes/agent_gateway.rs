@@ -520,6 +520,16 @@ pub async fn complete(
             }
         })?;
     let safe_error = sanitized_gateway_error(request.error.as_deref(), &state.agent_gateway.secret);
+    if let Some(unknown) = request
+        .usage
+        .as_ref()
+        .map(|dto| dto.unknown_key_names(8))
+        .filter(|keys| !keys.is_empty())
+    {
+        // #4375 — names only, never values: these keys were not read, so that
+        // part of the usage is billed as reported-nothing.
+        tracing::warn!(?unknown, "agent gateway usage carried unknown keys; ignored");
+    }
     let usage = request.usage.as_ref().map(usage_report);
     let via_token_id = principal.as_ref().and_then(|p| p.token_id);
     let actor_member_id = principal.as_ref().map(|p| p.member_id);
