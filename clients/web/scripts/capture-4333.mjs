@@ -211,7 +211,6 @@ function check(name, ok, detail = "") {
   if (!ok) failures.push(name);
 }
 const overflowX = (page) => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-const textOf = async (page, testId) => ((await page.getByTestId(testId).first().textContent()) ?? "").replace(/\s+/g, " ").trim();
 
 async function open(browser, origin, scheme, viewport, hash, search = "", desktop = false) {
   const context = await browser.newContext({ viewport, colorScheme: scheme, reducedMotion: "reduce", serviceWorkers: "block", deviceScaleFactor: 2 });
@@ -245,12 +244,6 @@ function resetWorld() {
   writes.length = 0;
 }
 
-async function openGithubDialog(page) {
-  await page.getByTestId("channel-title-menu").waitFor({ timeout: 25_000 });
-  await page.getByTestId("channel-title-menu").click();
-  await page.getByTestId("channel-github-notifications").click();
-  await page.getByTestId("channel-github-dialog").waitFor({ timeout: 10_000 });
-}
 
 
 
