@@ -182,7 +182,7 @@ guard_n="$(printf '%s\n' "$block" | grep -n '^    add_runtime_env_guard_command$
 upfn="$(printf '%s\n' "$GATE_CODE" | awk '/^add_runtime_gate_db_up_command\(\) \{$/{f=1} f{print} f&&/^}$/{f=0}')"
 printf '%s\n' "$upfn" | qgrep -F 'add_cmd_once "$RUNTIME_GATE_DB_UP_LABEL" "bash scripts/gate_runtime_db.sh up"' \
   || fail "D: the up step is not exactly 'bash scripts/gate_runtime_db.sh up'"
-printf '%s\n' "$upfn" | qgrep -F 'add_final_cleanup_cmd "remove gate-owned runtime DB" "bash scripts/gate_runtime_db.sh down' \
+printf '%s\n' "$upfn" | qgrep -E '^  add_final_cleanup_cmd "remove gate-owned runtime DB" "bash scripts/gate_runtime_db.sh down\$\(\[ "\$KEEP_STACK" -eq 1 \] && printf '"' --keep'"'\)"$' \
   || fail "D: no final cleanup step removes the gate-owned DB"
 printf '%s\n' "$GATE_CODE" | qgrep -Fx '[ "$PROFILE" = "runtime-db" ] && RUNTIME_GATE_DB=1' \
   || fail "D: RUNTIME_GATE_DB is not switched on exactly for the runtime-db profile"
@@ -209,7 +209,7 @@ printf '%s\n' "$GATE_CODE" | qgrep -Fx 'export LOCAL_GATE_OUTPUT_DIR="$RUN_ARTIF
 cleanup_fn="$(printf '%s\n' "$GATE_CODE" | awk '/local_gate_emergency_cleanup\(\) \{$/{f=1} f{print} f&&/^    }$/{f=0}')"
 printf '%s\n' "$cleanup_fn" | qgrep -F 'if [ "$RUNTIME_GATE_DB" -eq 1 ] && [ "$KEEP_STACK" -eq 0 ]; then' \
   || fail "D: emergency cleanup does not tear the gate DB down when it is not kept"
-printf '%s\n' "$cleanup_fn" | qgrep -F 'gate_runtime_db.sh" down' || fail "D: emergency cleanup never calls gate_runtime_db.sh down"
+printf '%s\n' "$cleanup_fn" | qgrep -E '^[[:space:]]+bash "\$REPO_ROOT/scripts/gate_runtime_db.sh" down 2>&1 \| tee -a "\$LOG_FILE" \|\| true$' || fail "D: emergency cleanup never calls gate_runtime_db.sh down"
 printf '%s\n' "$GATE_CODE" | qgrep -Fx '    trap local_gate_emergency_cleanup EXIT' || fail "D: emergency cleanup is not installed on EXIT"
 pass "D local_gate wiring: DB up before env guard, no make up on runtime-db, single scoped ENV_FILE export, shared env filename, interrupt teardown"
 
