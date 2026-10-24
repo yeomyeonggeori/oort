@@ -1,6 +1,6 @@
 # ADR-0214: 보안 주장은 시험이 없으면 공개하지 않는다 (claims.yaml · CI 린트 · 「하지 않는 것」)
 
-- Status: **Proposed** (2026-10-25). 독립 보안 검수 PASS(Blocker 0·High 0) 뒤 Accepted로 올린다. 근거 결정: 성재 2026-10-21 「보안 = 자체 테스트 + 공개 증거」, 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 → 리서치 D6 「하지 않는 것」 절 공개.
+- Status: **Accepted (2026-10-25, planner 위임 결정 — owner 10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐」)**. 독립 보안 검수 r2 PASS(Blocker 0·High 0) 뒤 올렸다. 근거 결정: 성재 2026-10-21 「보안 = 자체 테스트 + 공개 증거」, 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 → 리서치 D6 「하지 않는 것」 절 공개.
 - Date: 2026-10-25
 - Deciders: 성재
 - 기안: Sonnet 5.5 엔진 워커 (#4224, SEC-02). 리서치 r1 §5-A·§5-B.
@@ -26,7 +26,7 @@ Slack의 신뢰는 다년 인증 이력이고 oort는 그것을 시간 없이 �
 |---|---|
 | E0 | 형식 문제: 중복 id·중복 yaml 키(PyYAML이 있어도 거부), 알 수 없는 최상위 키(오타로 절이 조용히 사라지는 것 방지), 알 수 없는 priority·runs |
 | E1 | 증명 선택자가 하나도 없다 |
-| E2 | 선택자가 가리키는 것이 없다. Rust는 `fn NAME(` 줄 위에 `#[test]`/`#[tokio::test]`/`#[sqlx::test]`가 있어야 한다(줄 주석·블록 주석·문자열·raw string 안의 이름, `#[cfg(any())]`·never-enabled feature로 컴파일에서 빠진 시험은 통과하지 못한다). TS는 `it`/`test`의 **정확한 제목**이고(주석·문자열 안은 제외) `skip`/`todo`·`describe.skip`·`xdescribe` 안이 아니어야 한다. 스크립트는 non-comment·non-echo 줄에서 경로 전체가 단어 경계로 pr-ci.yml이나 local_gate.sh에 나타나야 한다 |
+| E2 | 선택자가 가리키는 것이 없다. Rust는 `fn NAME(` 줄 위에 `#[test]`/`#[tokio::test]`/`#[sqlx::test]`가 있어야 한다(줄 주석·블록 주석·문자열·raw string 안의 이름, fn 자신의 속성에 붙은 `#[cfg(any())]`·never-enabled feature로 컴파일에서 빠진 시험은 통과하지 못한다. 모듈 단위 cfg·`cfg_attr(…, ignore)`는 못 본다). TS는 `it`/`test`의 **정확한 제목**이고(주석·문자열 안은 제외) `skip`/`todo`·`describe.skip`·`xdescribe` 안이 아니어야 한다. 스크립트는 non-comment·non-echo 줄에서 경로 전체가 단어 경계로 pr-ci.yml이나 local_gate.sh에 나타나야 한다 |
 | E3 | `runs:` 약속보다 약한 레인에서만 도는 증명이 있다(아래 레인 표) |
 | E4 | P0 주장에 `sabotage.how`·`sabotage.evidence`가 없다. 증거는 음성 대조 이름(control/red/sabotage/negative)의 시험 선택자이거나 `scripts/tests/`의 회귀 스크립트여야 하고, 증거가 도는 레인이 주장의 `runs:`보다 약하면 안 된다(저장소의 아무 파일이나 적는 것을 막는다) |
 | E5 | `limits:` 항목의 표식 `<!-- limit:ID -->`가 지정 문서에 없거나 코드 블록 안이거나 뒤에 문장이 없다. 필수 LIM-1~4가 파일에서 빠져도 빨강이다 |
@@ -55,4 +55,4 @@ Slack의 신뢰는 다년 인증 이력이고 oort는 그것을 시간 없이 �
 2. `approval_pg` 수리 뒤 selection 복귀(AGT-1을 pr-ci로)와 그때 D7 재검토.
 3. 문서의 주장 문장마다 claim ID를 다는 역방향 검사.
 4. P1→P0 승격 대조 추가(웹훅 위조·refresh 재사용 등).
-5. 린트의 알려진 한계: 시험 본문이 비어 있어도(assert 삭제) 초록이다. P0는 저장소 안 음성 대조가 덮고, P1은 검수가 본다.
+5. 린트의 알려진 한계(검수 r2가 실측): 시험 본문이 비어 있어도(assert 삭제) 초록이다. P0는 저장소 안 음성 대조가 덮고, P1은 검수가 본다. 그 밖에 TS 정규식 리터럴 속 따옴표, 모듈 단위 cfg·`cfg_attr(ignore)`, limits 표식을 HTML 주석에 숨기거나 문장 뜻을 뒤집는 것, 워크플로의 `run: echo …`·`if: false`·`|| true`로 스크립트 「호출」을 흉내 내는 것, E4 증거를 주장과 무관한 pr-ci 스크립트로 바꾸는 것은 통과한다. 이 입력은 PR diff에서 사람이 보이는 변경이고 정책 파일 audit이 본다. 강화는 후속 이슈.

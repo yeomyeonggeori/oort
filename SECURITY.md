@@ -65,9 +65,11 @@ with no test, a test selector that matches nothing, or a lane promise the test
 does not keep into a red check
 ([ADR-0214](docs/adr/0214-security-claims-need-tests.md)). **Today that check runs
 in the maintainers' local gate, not yet in public PR CI**; wiring it into PR CI is
-a follow-up. Bullets below that carry no claim ID (for example the separated
-database roles and the image provenance) are descriptions, not yet mapped to a
-test, and nothing yet checks a sentence in this page against the claims file. The
+a follow-up. Only some bullets below name a claim ID (the tenant-isolation bullet
+names TEN-1 to TEN-3); the others cite tests by name but are not yet cross-referenced
+to the claims file, and the separated-roles and image-provenance bullets have no
+automated test at all. Nothing yet checks a sentence in this page against the
+claims file. The
 Korean document
 linked above gives the file, line and test name behind each item. Tests marked
 (PG) need a real PostgreSQL and are `#[ignore]`d in a plain `cargo test`. The
