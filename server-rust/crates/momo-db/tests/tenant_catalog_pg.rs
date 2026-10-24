@@ -1023,3 +1023,57 @@ async fn control_column_level_write_on_an_unprotected_table_is_red() {
     .await;
     assert!(names_only(&found, "sec04_neg.cols:"), "got {found:#?}");
 }
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_fingerprint_covers_command_and_target_roles() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = table_with_select_policy("true");
+    let found = in_scratch(&pool, &ddl, |p, _s| async move {
+        let before = policy_fingerprint(&p, "sec04_neg.t", "p").await;
+        let tbl_before = table_policy_fingerprint(&p, "sec04_neg.t").await;
+        sqlx::raw_sql("DROP ROLE IF EXISTS sec04_neg_fp; CREATE ROLE sec04_neg_fp NOLOGIN; ALTER POLICY p ON sec04_neg.t TO sec04_neg_fp")
+            .execute(&p).await.expect("to role");
+        let to_role = policy_fingerprint(&p, "sec04_neg.t", "p").await;
+        let tbl_to_role = table_policy_fingerprint(&p, "sec04_neg.t").await;
+        sqlx::raw_sql("ALTER POLICY p ON sec04_neg.t TO PUBLIC; DROP POLICY p ON sec04_neg.t; CREATE POLICY p ON sec04_neg.t FOR ALL USING (true)")
+            .execute(&p).await.expect("for all");
+        let for_all = policy_fingerprint(&p, "sec04_neg.t", "p").await;
+        let tbl_for_all = table_policy_fingerprint(&p, "sec04_neg.t").await;
+        sqlx::raw_sql("DROP POLICY p ON sec04_neg.t; DROP ROLE sec04_neg_fp")
+            .execute(&p).await.expect("cleanup");
+        vec![
+            (before != to_role).to_string(),
+            (before != for_all).to_string(),
+            (tbl_before != tbl_to_role).to_string(),
+            (tbl_before != tbl_for_all).to_string(),
+        ]
+    })
+    .await;
+    assert_eq!(
+        found,
+        vec!["true"; 4],
+        "TO-role and command changes must move both fingerprints"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a migrated pgvector/pg18 DB"]
+async fn control_search_path_pg_temp_must_be_a_whole_last_element() {
+    let _guard = lock().await;
+    let pool = pool().await;
+    let ddl = "CREATE FUNCTION sec04_neg.fake_temp() RETURNS int LANGUAGE sql SECURITY DEFINER
+           SET search_path = public, xpg_temp AS 'SELECT 1';
+         CREATE FUNCTION sec04_neg.real_temp() RETURNS int LANGUAGE sql SECURITY DEFINER
+           SET search_path = public, pg_temp AS 'SELECT 1';
+         REVOKE ALL ON FUNCTION sec04_neg.fake_temp(), sec04_neg.real_temp() FROM PUBLIC;";
+    let found = in_scratch(&pool, ddl, |p, s| async move {
+        definer_search_path_violations(&p, Some(s)).await
+    })
+    .await;
+    assert!(
+        names_only(&found, "sec04_neg.fake_temp():"),
+        "got {found:#?}"
+    );
+}

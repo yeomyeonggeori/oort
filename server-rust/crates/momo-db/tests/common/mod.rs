@@ -104,12 +104,16 @@ pub const KNOWN_UNPROTECTED_NON_TENANT: &[&str] = &[
 /// `pg_get_expr` with whitespace collapsed, `NULL` for an absent expression.
 const NORM_Q: &str =
     "coalesce(regexp_replace(pg_get_expr(p.polqual, p.polrelid), '\\s+', ' ', 'g'), 'NULL')";
+/// The roles a policy is `TO`, sorted, `PUBLIC` for oid 0.
+const ROLES_TXT: &str =
+    "array_to_string(ARRAY(SELECT CASE WHEN o = 0 THEN 'PUBLIC' ELSE o::regrole::text END \
+     FROM unnest(p.polroles) AS o ORDER BY 1), ',')";
 const NORM_WC: &str =
     "coalesce(regexp_replace(pg_get_expr(p.polwithcheck, p.polrelid), '\\s+', ' ', 'g'), 'NULL')";
 
 /// Permissive policies on a `workspace_id` table that apply to `momo_app` yet
 /// are deliberately not a plain `workspace_id = app.workspace_id` conjunct.
-/// Entry = `schema.table.policy`, `md5(USING || '||' || WITH CHECK)` of the
+/// Entry = `schema.table.policy`, `md5(cmd:permissive:TO roles:USING||WITH CHECK)` of the
 /// whitespace-collapsed `pg_get_expr` text, reason. The fingerprint pins the
 /// *content*: editing an allowlisted policy (say to `true`) turns the test red
 /// and forces a re-review, instead of the name alone keeping it exempt.
@@ -118,32 +122,32 @@ const NORM_WC: &str =
 pub const GUC_GATED_POLICIES: &[(&str, &str, &str)] = &[
     (
         "public.github_app_installation.github_app_installation_insert",
-        "e0351cfd1fb472c888045d8543104899",
+        "36b0d476d6b4bc0c2b20d4cf000b7cb3",
         "webhook ingress inserts the installation before it is bound to a workspace; gated on app.github_ingress (140/142)",
     ),
     (
         "public.github_app_installation.github_app_installation_select",
-        "e12486138bcee348d8d080e29991e98f",
+        "012c7ad4d91477f450740ed4989079f4",
         "ingress/admin/link flows read installations across workspaces; a workspace session sees only its own rows (140/142)",
     ),
     (
         "public.github_app_installation.github_app_installation_update",
-        "9adfe81fe0013f64893c5c91f8492562",
+        "f47fe2e0cadcfa0c228e490660a79a85",
         "ingress/admin updates and the link flow binding a workspace-less installation; gated on app.github_* (140/142)",
     ),
     (
         "public.github_link_claim.github_link_claim_link_select",
-        "6362d9fcd578a356a96c3c62335779bc",
+        "ad2e743ee79e9f9ff19c20c1c0565968",
         "install-link callback reads a purpose='install' claim before the workspace is known; gated on app.github_link (140/142)",
     ),
     (
         "public.github_link_claim.github_link_claim_link_update",
-        "d9ee52def7cc2880407973821f0b93aa",
+        "f984858dc5f36ed95d64cbb46c8e83bd",
         "install-link callback consumes the claim; gated on app.github_link and purpose='install' (140/142)",
     ),
     (
         "public.model_pricing.ws_isolation",
-        "b648fb2ec17d9ab10d87451e152e85a1",
+        "4ce0895bd1edbee14b01393345361e2c",
         "workspace_id IS NULL rows are the shared default price list every workspace reads; writes stay workspace-bound via WITH CHECK",
     ),
 ];
@@ -154,30 +158,30 @@ pub const GUC_GATED_POLICIES: &[(&str, &str, &str)] = &[
 /// must also have RLS enabled and FORCEd; a changed policy set (say
 /// `github_app_operator` turned into `USING (true)`) turns the test red.
 pub const NON_TENANT_POLICY_PINS: &[(&str, &str)] = &[
-    ("public.github_app", "aa87d647c41272f63e4a19aa8a38c85a"),
+    ("public.github_app", "091f5ebbdb18d05463aaea7f8b7174fb"),
     (
         "public.github_app_public",
-        "d7e701eaa5eaeee119124aff7c59d686",
+        "2f12f6973b4d060568f3b707dc5b9622",
     ),
     (
         "public.github_installation_repository",
-        "fb58f838a407a3451aa5b2eae319a86b",
+        "493d4f3cb9addbbab1bcbcb0cb6f1b52",
     ),
     (
         "public.provider_default_ai",
-        "6d483744024adf956f7ea81afbdfcfd7",
+        "9568566d2083e855dee267dda2ebf2cd",
     ),
     (
         "public.provider_key_budget",
-        "02e9705224a65294bc5936d1eb3488d4",
+        "687e90fd8ddfd6fe3ab71d9cb066144b",
     ),
-    ("public.provider_link", "6895408ae264bb143f5d19ae85dd5245"),
+    ("public.provider_link", "2fd91a3412c17a40f532b50bbcd2f779"),
     (
         "public.provider_link_chain",
-        "0d5f42ee6035573349c5eed3304b6283",
+        "e9150e2548eabea4ebb4637c85e6b7da",
     ),
-    ("public.quota_snapshot", "7640e9c7f4aecef32702c4d30ec3827f"),
-    ("public.workspace", "d964332dcea90820b1cc0a9594fe8ab1"),
+    ("public.quota_snapshot", "20bb5cd78ea0d0c3a24b6240e8731732"),
+    ("public.workspace", "e435c9abcb23d0e40611dc8749018dc4"),
 ];
 
 /// Every SECURITY DEFINER function `momo_app` can execute, exact signature.
@@ -249,7 +253,7 @@ type PolicyRow = (
 /// [`GUC_GATED_POLICIES`] fingerprints are taken from.
 pub async fn policy_fingerprint(pool: &PgPool, qualified_table: &str, polname: &str) -> String {
     let sql = format!(
-        "SELECT md5({NORM_Q} || '||' || {NORM_WC}) FROM pg_policy p \
+        "SELECT md5(p.polcmd::text || ':' || p.polpermissive::text || ':' || {ROLES_TXT} || ':' || {NORM_Q} || '||' || {NORM_WC}) FROM pg_policy p \
           WHERE p.polrelid = $1::regclass AND p.polname = $2"
     );
     sqlx::query_scalar(&sql)
@@ -400,7 +404,7 @@ pub async fn tenant_rls_violations_against(
     let sql = format!(
         "SELECT n.nspname || '.' || c.relname, p.polname, p.polcmd::text, \
                 pg_get_expr(p.polqual, p.polrelid), pg_get_expr(p.polwithcheck, p.polrelid), \
-                md5({NORM_Q} || '||' || {NORM_WC}) \
+                md5(p.polcmd::text || ':' || p.polpermissive::text || ':' || {ROLES_TXT} || ':' || {NORM_Q} || '||' || {NORM_WC}) \
            FROM pg_policy p JOIN pg_class c ON c.oid = p.polrelid \
                 JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE c.relkind IN ('r','p') AND {SCOPE} AND {HAS_WORKSPACE_ID} AND p.polpermissive \
@@ -462,7 +466,7 @@ pub async fn tenant_rls_violations_against(
 pub async fn table_policy_fingerprint(pool: &PgPool, qualified: &str) -> String {
     let sql = format!(
         "SELECT coalesce(md5(string_agg(p.polname || ':' || p.polcmd::text || ':' || p.polpermissive::text \
-                || ':' || {NORM_Q} || '||' || {NORM_WC}, ';;' ORDER BY p.polname)), 'none') \
+                || ':' || {ROLES_TXT} || ':' || {NORM_Q} || '||' || {NORM_WC}, ';;' ORDER BY p.polname)), 'none') \
            FROM pg_policy p WHERE p.polrelid = $1::regclass"
     );
     sqlx::query_scalar(&sql)
@@ -632,7 +636,7 @@ pub async fn definer_search_path_violations_against(
                 CASE WHEN sp.cfg IS NULL THEN 'SECURITY DEFINER without a pinned search_path' \
                      ELSE 'search_path must name pg_temp explicitly and last: ' || sp.cfg END \
          {from} \
-           AND ((sp.cfg IS NULL) OR (sp.cfg !~ 'pg_temp\\s*$')) \
+           AND ((sp.cfg IS NULL) OR (sp.cfg !~ '(^|,)\\s*pg_temp\\s*$')) \
            AND NOT (sp.cfg = 'pg_catalog' AND EXISTS ( \
                  SELECT 1 FROM unnest($2::text[], $3::text[]) AS a(sig, h) \
                   WHERE a.sig = ({FN_SIG}) AND a.h = md5(p.prosrc))) \
@@ -792,7 +796,7 @@ pub async fn role_boundary_violations(
     let mut out: Vec<String> = sqlx::query_scalar(
         "SELECT CASE WHEN r.rolname = $1 THEN $1::text ELSE $1::text || ' (via role ' || r.rolname || ')' END \
                 || ': ' || CASE WHEN r.rolsuper THEN 'is a superuser' ELSE 'has BYPASSRLS' END \
-           FROM pg_roles r WHERE (r.rolsuper OR r.rolbypassrls) AND pg_has_role($1, r.oid, 'USAGE') \
+           FROM pg_roles r WHERE (r.rolsuper OR r.rolbypassrls) AND (pg_has_role($1, r.oid, 'USAGE') OR pg_has_role($1, r.oid, 'SET')) \
           ORDER BY 1",
     )
     .bind(role)
@@ -801,12 +805,12 @@ pub async fn role_boundary_violations(
     .expect("role attribute query");
     let sql = format!(
         "SELECT n.nspname || '.' || c.relname || ': ' || $2::text || ' ' || \
-                CASE WHEN pg_has_role($2::text, c.relowner, 'USAGE') \
+                CASE WHEN (pg_has_role($2::text, c.relowner, 'USAGE') OR pg_has_role($2::text, c.relowner, 'SET')) \
                      THEN 'owns a tenant table (can disable RLS)' \
                      ELSE 'can TRUNCATE a tenant table (TRUNCATE ignores RLS)' END \
            FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace \
           WHERE c.relkind IN ('r','p') AND {SCOPE} AND {HAS_WORKSPACE_ID} \
-            AND (pg_has_role($2::text, c.relowner, 'USAGE') \
+            AND ((pg_has_role($2::text, c.relowner, 'USAGE') OR pg_has_role($2::text, c.relowner, 'SET')) \
                  OR has_table_privilege($2::text, c.oid, 'TRUNCATE')) \
           ORDER BY 1"
     );
