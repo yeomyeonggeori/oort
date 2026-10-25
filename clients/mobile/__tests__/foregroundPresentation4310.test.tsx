@@ -229,15 +229,34 @@ describe('결정: 보고 있는 대화의 알림만 숨긴다', () => {
     ).toEqual({show: true, why: 'other-workspace'});
   });
 
-  it('id 의 대소문자가 달라도 같은 방이다(봉투는 소문자로 접힌다)', () => {
-    const shouting = {
-      workspaceId: WS.toUpperCase(),
-      channelId: DESIGN.toUpperCase(),
+  // 위의 `WS`·`DESIGN` 은 숫자뿐이라 `toUpperCase()` 해도 그대로다 — 그 id 로 대소문자를 재면 단정이
+  // 헛돈다(처음 판이 그랬고, 비교를 `===` 로 바꾸는 변조가 초록으로 지나갔다). 16진 글자가 든 id 를 쓴다.
+  describe('id 의 대소문자가 달라도 같은 방이다', () => {
+    const CASE_WS = 'abcdef01-2222-4222-8222-abcdefabcdef';
+    const CASE_CH = 'fedcba98-3333-4333-8333-fedcbafedcba';
+    const lower = {workspaceId: CASE_WS, channelId: CASE_CH, threadRootId: null};
+    const upper = {
+      workspaceId: CASE_WS.toUpperCase(),
+      channelId: CASE_CH.toUpperCase(),
       threadRootId: null,
     };
-    expect(decideForeground(relayPayload({channelId: DESIGN}), shouting)).toEqual({
-      show: false,
-      why: 'viewing',
+
+    it('이 fixture 는 대소문자를 실제로 가른다 — 아래 두 단정이 헛돌지 않는다', () => {
+      expect(CASE_WS.toUpperCase()).not.toBe(CASE_WS);
+      expect(CASE_CH.toUpperCase()).not.toBe(CASE_CH);
+    });
+
+    it('화면의 id 가 대문자여도 숨긴다(봉투는 소문자로 접힌다)', () => {
+      const push = relayPayload({workspaceId: CASE_WS, channelId: CASE_CH});
+      expect(decideForeground(push, upper)).toEqual({show: false, why: 'viewing'});
+    });
+
+    it('봉투의 id 가 대문자여도 숨긴다', () => {
+      const push = relayPayload({
+        workspaceId: CASE_WS.toUpperCase(),
+        channelId: CASE_CH.toUpperCase(),
+      });
+      expect(decideForeground(push, lower)).toEqual({show: false, why: 'viewing'});
     });
   });
 
@@ -264,7 +283,8 @@ describe('결정: 보고 있는 대화의 알림만 숨긴다', () => {
       ).toEqual({show: true, why: 'other-thread'});
     });
 
-    it('스레드 id 의 대소문자가 달라도 같은 스레드다', () => {
+    it('스레드 id 의 대소문자가 달라도 같은 스레드다 (ROOT_ID 는 16진 글자를 든다)', () => {
+      expect(ROOT_ID.toUpperCase()).not.toBe(ROOT_ID);
       expect(
         decideForeground(reply, {
           ...VIEWING_DESIGN_THREAD,

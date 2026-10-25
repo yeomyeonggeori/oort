@@ -67,8 +67,8 @@ function AppChrome(): React.JSX.Element {
 
   useEffect(() => {
     // 앱이 앞에 떠 있는 동안 온 푸시를 어떻게 보일지 (#4310). 세션과 무관하게 **시작 경로에서 먼저**
-    // 건다: 처리기가 없거나 늦으면 iOS 는 그 푸시를 배너도 목록도 없이 버린다. 이 앱에서
-    // `setNotificationHandler` 를 부르는 곳은 여기 하나뿐이다(`foregroundPresentation.ts` 머리말).
+    // 건다: 처리기가 없거나 늦으면 iOS 는 그 푸시를 배너도 목록도 없이 버린다. 이 앱에서 처리기를
+    // 거는 곳은 이 한 줄뿐이다(`foregroundPresentation.ts` 머리말).
     const stopPresenting = installForegroundNotificationHandler();
     const teardown = installReactQueryBridges();
     bootSpawnPort();
