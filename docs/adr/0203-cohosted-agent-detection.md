@@ -10,7 +10,9 @@
 - 증보: **2026-10-19 Hermes의 모델 인증에 구독 OAuth 허용**(#4071, owner 결정) — Hermes가 자기 볼륨에 Codex·Claude 구독 OAuth를 보관해 모델 인증에 쓴다. 파일 끝. D1~D9는 바뀌지 않는다.
 - 증보(**Accepted** 2026-10-20, owner 승인 인용): **2026-10-20 같은 서버 Hermes의 모델 고르기** (#4143) — 파일 끝. 핀에 Hermes 제공자(`provider`)와 모델을 한 쌍으로 저장하고, 서버가 Hermes `/api/model/options`의 「로그인된 제공자」 목록 안으로 선택을 제한하며, 워커가 `/v1/chat/completions`에 둘을 함께 보낸다. D2의 고정 요청 목록에 읽기 GET 하나가 늘고, migration 144가 핀 표에 열 두 개를 더한다. D1·D3~D9·K1~K7은 바뀌지 않는다.
 - 증보(**Accepted** 2026-10-25, planner 위임 결정 — owner 10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐」): **2026-10-25 환경 사실 읽기(platform·loginRelay)와 호스팅 제안 문구** (#4336, 온보딩 r2 R2-00) — 파일 끝. 운영자 전용 상태 읽기(`GET …/cohosted-agent`)에 닫힌 열거형 `environment{platform, loginRelay}`를 더하고, 「선언 없음」에서 운영자에게 계획 표시 카드를 여는 것까지 정한다. D1의 마지막 문장(「아무것도 보이지 않는다」)만 좁혀지고, 나머지 D·K·A·L·M과 D2의 요청 목록은 바뀌지 않는다. 구현은 #4337·#4338·#4339·#4340과 새 이슈(제안 카드 등)다.
+- 증보(**Accepted** 2026-10-26, owner 결정 「권장으로 승인」 — 시크릿 출력 범위가 옵트인 한정으로 넓어진다): **2026-10-25 Railway 생성기의 Hermes 공유 변수 출력(옵트인), A4′** (#4461, 온보딩 r2 R2-11) — 파일 끝. 옵트인 플래그(`--platform railway --with-agents`)가 있을 때만 T2 stdout에 정본 키 집합 밖의 공유 변수 둘(`HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY`)을 새로 만들어 더한다. A4의 「정본 키 집합에 넣지 않고 T2 stdout 불변」 중 「운영자가 손으로 만든다」와 `self_host_env.sh:277-278`(T2와 `--with-agents` 동시 금지)만 이 옵트인 경로에 한해 바뀌고, 기본 출력은 바이트 단위로 같다. 카탈로그의 서비스·변수·compose·서버는 바뀌지 않는다. D·K·A1·A2·A5·L·M·F(F3 마지막 항·F6 railway 계획 문구 제외)는 바뀌지 않고, A3의 「출력에 값을 내지 않는다」는 이 증보가 Accepted된 뒤 T1(compose 파일 경로) 한정으로 읽는다.
 - 역방향: 2026-10-25 D6(Hermes 도구 잠금)은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)이 바꾸지 않는다. 팀 박스는 Hermes와 별개의 컴퓨터이고 Hermes 컨테이너(`/opt/data`)에는 셸을 붙이지 않으며 Hermes `terminal` 백엔드를 박스로 향하게 하지 않는다. 본문 결정은 바꾸지 않았다.
+- 역방향: 2026-10-25 A4′(Accepted 2026-10-26)는 [ADR-0184](0184-platform-neutral-agent-driven-selfhost.md) D3의 「정본 키에서만」을 옵트인 경로에 한해 좁힌다. Accepted 전에는 0184 본문을 고치지 않고, Accepted 뒤 구현 이슈가 D3에 한 줄 역참조를 더한다. 10-25 증보(#4336)의 「바뀌지 않는 것」이 적은 A4 불변은 그 증보 시점의 서술이고, A4′가 Accepted되면 A4의 해당 문장은 이 절이 대체한다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
@@ -736,3 +738,190 @@ D1·D3~D9, K1~K7, `HERMES_API_KEY` 의미, 게이트웨이 SSE 경로(D5), oort�
 ### 바뀌지 않는 것
 
 D1(마지막 문장만 F6으로 좁혀진다)·D2(고정 두 요청 + 요청 시 toolsets + M2의 옵션 읽기 하나)·D3 인스턴스 운영자만·D4·D5·D6·D7·D8·D9, owner 결정 질문 1~7(위임 결재 2026-10-16, Q2 (b) 포함), K1~K7, A1~A5(특히 A4: 「`HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변)」), L0~L6과 L절의 owner 결정 Q1~Q3(중계 허용·Claude 중계·설치 스크립트로 켠다), M1~M5, `HERMES_API_KEY`의 의미, oort가 구독 OAuth 토큰·원본 키를 받지도 저장하지도 않는다는 불변식, 온보딩의 구독 로그인 순서(#4338의 몫), DB·마이그레이션·서버 코드(이 PR은 문서만).
+
+## 증보 2026-10-25 — Railway 생성기의 Hermes 공유 변수 출력(옵트인), A4′ (#4461)
+
+- Status: **Accepted** (2026-10-26, owner 결정 「권장으로 승인」 — G6 질문 (a) 승인, 부가 질문은 권장대로 「아니오」). 옵트인 플래그가 있을 때 생성기가 낼 수 있는 비밀의 집합이 둘 늘어나는 경계 확대라 owner가 직접 정했다(이슈 #4461 기준). 구현은 이 증보의 구현 슬라이스 이슈가 맡는다.
+- 독립 설계 검토: r1 FAIL(High 2·Medium 12·Low 9) → r2 **PASS**(Blocker 0·High 0·Medium 4·Low 15). r2의 Medium 4와 Low 15는 이 절에 반영했다. 남긴 것은 한계로 적었다: 11자 미만의 접두 누출을 시험이 단정하지 않는 것(수용 기준 3), 픽스처 디렉터리 밖에 쓰는 변형(수용 기준 2). 반영한 변경분은 3회차 검토 없이 작성자가 코드와 실행으로 대조했다. 검토 보고서는 로컬 자료(레포 밖)이고 요약은 PR 본문에 있다.
+- 기안: Sonnet 5.5 엔진 워커 (#4461, 온보딩 r2 R2-11). 근거: 리서치 r2 온보딩 보고서 §5 R2-11(로컬 자료, 레포 밖), 이 문서의 A4와 10-25 증보의 「새 이슈 2」. 이 PR은 문서 한 파일만 바꾼다. 결정 번호 G1~G9의 G는 생성기(generator)다.
+- owner 결정(원문 인용):
+  - 성재 2026-10-21(로드맵 #4349 본문): 「…사용자의 사용 부담이나 설정 부담을 확 낮추고 싶어.」
+  - 위임 2026-10-22: 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 — 아래 **[권장]**은 이 위임에 따른 planner 결정이고 owner에게 보고된다. 시크릿 출력 범위를 넓히는 부분(G1·G2)은 이슈 #4461이 위임 밖의 owner 결정으로 남겼다(G6).
+  - 성재 2026-10-19(이 문서 「Hermes 로그인 중계」의 Q3 「설치 스크립트로 켠다」): 설치 스크립트가 `HERMES_LOGIN_RELAY_KEY`를 자동 생성해 Hermes 서비스와 `api`에 같은 값을 넣는다. 「수동 설치는 기존 동작 그대로」이고, compose 경로에서 이미 승인된 일이며, 이 증보는 같은 생성을 Railway 생성기의 선택 경로로 넓힌다.
+- 표기: [V] 이 세션에서 직접 확인(코드·문서는 `track/engine` `2a2300a63` 기준 파일:줄, 실행은 더미 환경) · [추정] 해석 · [권장] 위임 결정 · `runtime-unverified` 실행 안 함. 이 증보는 설계이고 이 PR은 문서만 바꾼다.
+
+### 비교 참조 (ADR-0100)
+
+- [리서치 r2 §2.3, 2026-10-21 확인] Railway·Render·Coolify·Umbrel은 템플릿·한 줄 설치가 시크릿을 **자동 생성**한다(10-25 증보의 「비교 참조」와 같은 출처). 가장 강한 모양은 Railway 템플릿의 `${{secret(length, alphabet)}}`이고, Railway가 배포 시 만들어서 값이 운영자 기계를 지나지 않는다. 이 레포의 카탈로그는 템플릿이 아니라 손으로 타이핑하는 서비스 목록이고(`infra/railway/railway.json`의 `notes.variables`) `secret(` 표현이 0건이라 [V] 그 모양은 지금 쓸 수 없다(기각 대안 E). 이 증보는 한 단계 아래의 모양을 고른다: 생성기가 만든 값을 운영자가 한 번 붙인다 — 이미 다른 비밀 17개가 가는 길이다(사실 2).
+
+### 확인한 사실 [V]
+
+1. **기본 출력.** `emit_managed_platform_env`(`scripts/self_host_env.sh:1673-1777`)는 정본 키(`oort_emit_canonical_keys`, `:1755-1762`)를 `KEY=value`로, 그다음 도장 한 줄(`:1764-1765`)을 stdout에 쓰고 파일은 쓰지 않는다. 정본 키는 생성기 heredoc의 키와 공개 엣지 키의 합집합이다(`:412-414`). 이 세션이 `--platform railway --claim`을 더미 환경(`RAILWAY_PUBLIC_DOMAIN`·`DATABASE_URL`·이미지 digest)으로 실행해 보니 stdout은 **47줄이고 전부 `KEY=value`이며 주석·빈 줄이 0**이다(정본 46 + 도장 1). 그래서 Raw Editor에 그대로 붙는다(`infra/railway/README.md:106`).
+   - 숫자는 시험이 같은 값을 단정한다: 정본 46(`scripts/tests/test_self_host_env_modes.sh:1098-1103`; `scripts/tests/test_self_host_build_sha.sh:201`·`:240`도 단정하지만 `.github/`·`local_gate.sh`에 이름이 0건이라 어느 게이트에도 연결돼 있지 않다), stdout 47과 stderr 문구 「키 47개를 stdout에 썼다」(`test_self_host_env_modes.sh:1473`·`:1508-1512`), `scripts/tests/test_railway_template.sh:204-205`. **A4의 「45」는 작성 시점(10-19)의 값**이고 #3947(`GITHUB_APP_MASTER_KEY`, 시험 주석 `test_self_host_env_modes.sh:1109`)이 46으로 올렸다. 낡은 표기가 남아 있다: `infra/railway/README.md:85`·`:102`와 `infra/railway/railway.json`의 `notes.platformStamp`(45), `scripts/self_host_env.sh:216-217`·`:408`·`:411`·`:764`·`:1671`·`:2328`(43·44), `docs/SELF_HOST_AGENT.md:98`·`docs/SELF_HOST.md:559`·`:1024`·`:1027`·`docs/SELF_HOST.ko.md:512`·`:890`·`:892`(43~45), `scripts/tests/test_railway_template.sh:116`의 주석(45). 이 증보는 46/47로 쓴다.
+2. **같은 stdout에 이미 있는 비밀.** 그 47줄 중 이름에 `PASSWORD`·`SECRET`·`_KEY`·`HMAC`·`DATABASE_URL`이 든 것이 **17개**다(claim 변형 기준, 이름 패턴으로 센 것이고 값은 읽지 않았다. 비밀번호 변형은 `MOMO_INITIAL_OWNER_PASSWORD`가 더해져 18). `JWT_HMAC`(토큰 위조)·`PROVIDER_LINK_MASTER_KEY`·`MIGRATE_DATABASE_URL`(슈퍼유저 DSN, `infra/railway/README.md:74-77`)이 들어 있다. 이 집합은 두 번 넓어진 이력이 있고 둘 다 기본 경로에 들어갔다: 웹훅 마스터 키 둘(#2066, ADR-0004 증보 4)과 `GITHUB_APP_MASTER_KEY`(#3947, ADR-0205 D1). 기본 스택이 그 키를 쓰기 때문이다. Hermes는 선택 기능이라 A4가 기본 경로에서 뺐고, 원문이 밝힌 이유는 「T2 stdout 불변」이다.
+3. **Hermes 비밀 둘의 현재 경로.** 카탈로그는 이미 두 공유 변수를 **참조**한다. `HERMES_API_KEY`: api(`infra/railway/railway.json:111`)·agent-worker(`:153`)·hermes의 `API_SERVER_KEY`(`:171`). `HERMES_LOGIN_RELAY_KEY`: api(`:116`)·hermes(`:174`)이고 agent-worker는 갖지 않는다. 생성기는 이 둘을 내지 않으므로 운영자가 손으로 만든다(`infra/railway/README.md:195-198`의 `openssl rand -hex 32`, 릴레이 키는 `:159`). 검증기는 이 둘을 「생성기가 내지 않는 공유 변수」로 허용목록에 둔다(`scripts/tests/check_railway_catalog.py:92-95`의 `OPERATOR_SHARED`, 적용 `:1006`; 같은 파일 머리말 `:16`의 규칙 「`${{shared.KEY}}` must name a key the generator writes」의 예외). 그 밖에 `hermes` 서비스 전용의 `<operator: …>` 값 네 개(`HERMES_CONFIG_B64`·`HERMES_LOCKGATE_B64`·`HERMES_LOGIN_RELAY_B64`·`HERMES_LOGIN_PROBE_B64`, `railway.json:172-176`)와 서비스별 리터럴 배선(`HERMES_BASE_URL` 등)이 손으로 들어간다. 카탈로그의 공유 참조 39개 중 claim 변형 기본 출력에 없는 것은 정확히 이 두 이름이다(이 세션이 계산).
+4. **T2와 `--with-agents`의 동시 금지.** `validate_platform_request`의 T2 갈래(`scripts/self_host_env.sh:265-280`)가 이미지 모드(`:271-272`)·`--public-origin`(`:273-274`)·로컬 provider(`:275-276`)와 나란히 `--with-agents`를 거절한다(`:277-278`, 메시지 「Railway는 infra/railway/railway.json 의 hermes 서비스를 쓴다」). `--compose`는 T2 갈래 앞에서 거절된다(`:263-264`). 사용법도 같은 말이다(`:567` 「Local-install only — not for a T2 platform」). T2는 `emit_managed_platform_env`에서 끝나므로(`:2081-2084`) compose 경로의 `ensure_cohosted_agent_env`(`:1418-1483`)에 닿지 않는다. 시험은 이 거절이 일어남을 단정하고(`test_self_host_env_modes.sh:2106-2111`) T2 조합 거절 목록(`:1561-1582`)에는 `--with-agents`가 없다.
+5. **compose 경로의 Hermes 키 규칙(참고).** `ensure_cohosted_agent_env`는 두 키를 각자 `gen`으로 뽑고(`:1440`·`:1455`; `gen`은 `openssl rand -hex 24` = 48자, `:159`), 이미 있는 API 키는 비어 있을 때만 바꾸며(`:1437-1441`), 릴레이 키는 `^[A-Za-z0-9._~+/=-]{32,256}$`가 아니면 새로 만든다(`:1453-1456`). 값은 stdout·stderr에 쓰지 않고(시험 `:1945-1966`), 독립은 정적으로 단정한다(`:1953-1962`) — 시험의 fake openssl이 모든 호출에 같은 문자열 「a…a」를 돌려주기 때문이다(`:136-148`). compose는 0600 env 파일이 상태이고 T2는 파일이 없다.
+6. **키의 요건.** API 키는 Hermes 잠금 게이트가 32자 미만이면 거절한다(`infra/hermes/lockgate.py:198-199`, 볼륨 `.env`는 `:175-176`). 릴레이 키는 서버가 32~256자·`[A-Za-z0-9._~+/=-]`만 받고 어긋나면 중계를 **조용히 끈다**(`server-rust/bins/momo-server/src/config.rs:1858-1874` — 어긋난 키는 `LoginRelayConfig::default()`가 되어 `409 login_relay_off`; 미해결 `${{shared.X}}` 잔존도 같은 규칙으로 거절된다고 `:1812`가 적는다). 사이드카도 같은 정규식을 쓴다(`infra/hermes/login_relay.py:66`·`:1040`, 키가 없거나 짧으면 꺼짐 `:25`). 릴레이 키는 채팅 키와 별개의 비밀이어야 하고 「256비트 이상 무작위」다(이 문서 L2).
+7. **T2 재렌더의 값 규칙.** 생성기는 주변 env에 값이 있으면 그대로 다시 내고 없을 때만 `gen`으로 만든다(`platform_secret`, `:1564-1572`; 비밀번호 넷은 `${VAR:-$(gen)}`, `:1716-1719`). README는 이 때문에 「이미 도는 프로젝트 위에서 생성기를 다시 돌려 붙이지 마라 — export하지 않은 비밀이 전부 새로 만들어져 돌고 있는 인스턴스의 비밀이 회전한다. 생성기는 새 프로젝트용이다」(`infra/railway/README.md:583-588`, 원문 「Do not re-render the generator over live variables … The generator is for a new project.」)라고 적는다. `docs/SELF_HOST.md:1158-1181`(「플랫폼(T2: Railway 등)에는 env 파일이 없다」)은 이 재렌더를 **지원되는 절차**로 적고 「이미 회전해 둔 키를 export해 두면 그 값이 그대로 유지된다」(`:1174`)고 한다.
+8. **비밀 취급 문서.** README는 stdout을 `umask 077` 아래 `~/.momo-secrets/railway-oort.env`로 리다이렉트하게 하고(`:90-94`) Raw Editor에 붙인다(`:106`). `docs/SELF_HOST_AGENT.md`의 §3.4 스니펫은 리다이렉트를 보이지 않는다(`:2261`, 한국어판 `:1895`, `docs/SELF_HOST.md:1078`·`docs/SELF_HOST.ko.md:940`도 같다). 그 문서의 §0은 비밀을 채팅에 붙이지 못하게 한다(`:31-34`). 설치 에이전트가 스니펫대로 돌리면 stdout이 에이전트 기록에 남을 수 있으므로, stderr는 이름·개수만 담아야 한다(현행 `:1766-1769`가 그렇다).
+9. **어디서 시험이 도는가.** 생성기 시험은 `local_gate.sh`의 `add_static_commands`(`:627`, 시험 줄 `:692`) 안에 있어 docs·staging-smoke·all 등 이 함수를 부르는 프로파일에서 돈다(`secrets`·`web` 등은 부르지 않는다, `:1008-1093`). Railway 시험은 docs 프로파일이다(`:1016`). `--auto`는 `scripts/self_host_env.sh` 변경을 staging-smoke로 고른다(`:173-174`)이므로 구현 PR은 프로파일을 명시한다. `.github/` 아래에는 두 시험의 이름이 0건이다 — **PR CI는 이 시험들을 돌리지 않고** local gate에서만 막힌다.
+10. **doctor.** 필수 키 판정은 생성기 heredoc의 키가 env 파일에 다 있는지만 보고(`scripts/lib/oort_doctor.sh:38-47`·`:325-353`) 초과 키를 거르지 않는다. 저장한 T2 파일에 줄이 더 있어도 판정은 같다 [V, 코드 읽기, 실행하지 않음].
+11. **Railway 공유 변수의 도달.** 공유 변수는 서비스가 참조 변수를 만들어야 닿는다(10-25 증보 사실 5가 인용한 `https://docs.railway.com/variables`). 카탈로그가 서비스별로 정확히 이 참조만 둔다(사실 3).
+12. **기준선.** 변경 전 HEAD에서 `check_railway_catalog.py … --prove-mutations`를 위 47키 목록으로 실행하니 exit 0, RED 77건이고 committed 카탈로그가 복원돼 통과한다(`scripts/tests/test_railway_template.sh:249-251`의 호출과 같은 모양). A4가 적은 「14건」은 낡았다.
+13. **릴레이 키는 base64 둘과 묶여 있다.** hermes 시작 명령은 `set -eu` 아래에서 `[ -z "${HERMES_LOGIN_RELAY_KEY:-}" ] || { : "${HERMES_LOGIN_RELAY_B64:?}" "${HERMES_LOGIN_PROBE_B64:?}"; … }`를 실행한다(`infra/railway/railway.json:161`, 모양은 `check_railway_catalog.py:286-287`이 고정). 키가 비어 있지 않은데 base64 둘이 없으면 hermes가 기동하지 않는다(fail-closed). README도 두 base64를 「needed only with the relay key」라고 적는다(`:160-161`).
+14. **기본 출력은 결정적이다 — 환경을 비운 실행에서.** 이 세션이 기본 출력(비밀번호·claim 변형)을 `env -i`로 허용목록 환경(`HOME`·`PATH`와 시험의 fake openssl — `rand -hex N` → `a`×2N —, `RAILWAY_PUBLIC_DOMAIN`·`DATABASE_URL`·`MOMO_RUST_IMAGE`)에서 두 번씩 실행해 stdout·stderr가 바이트 동일함을 `cmp`로 확인했다. 그러나 **주변 환경 변수에는 의존한다**: 같은 실행에 `COMPOSE_PROJECT_NAME`·`MOMO_INITIAL_OWNER_EMAIL`·`MOMO_APP_POSTGRES_PASSWORD`를 더하면 stdout이, `JWT_HMAC`을 더하면 stdout·stderr가 달라지고 `HERMES_*`는 달라지지 않는다(이 세션이 확인; 생성기가 그 이름들을 읽는다 — `infra/railway/README.md:92`의 `MOMO_INITIAL_OWNER_EMAIL` export가 그 예다). 그래서 해시·골든 고정은 허용목록 환경에서만 안정적이다(G7). 기본 stderr의 가장 긴 `[A-Za-z0-9]` 연속은 10자(`CENTRIFUGO`)다.
+15. **같은 이름을 쓰는 도구가 이 레포에 있다.** 시험 도우미 `run_platform_stdout`은 환경을 비우지 않고 변수 셋을 더할 뿐이고(`test_self_host_env_modes.sh:1442-1453`), `run_generator`(`:154-165`)는 stdout·stderr를 한 파일로 합치며 `RAILWAY_*`를 주지 않는다. `HERMES_API_KEY`를 쓰는 곳: `infra/.env.example:217`(env 파일 예시, `change-me-hermes-bearer`), `scripts/local_alpha_runner.sh:228`·`:242`(자기 프로세스에서 export), `scripts/gate_runtime_db.sh:134`(env 파일 생성), `docs/external-agent-provider/README.md:59`·`:72`(예시 문서).
+
+### 바뀌는 기존 결정
+
+아래는 이 증보가 Accepted될 때 바뀌는 것이다. Accepted 전에는 기존 본문이 그대로 정본이다.
+
+- **A4(이 문서 「A4. Railway 카탈로그」)의 한 문장.** 「`HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변) 프로젝트 shared variable로 운영자가 한 번 만든다」에서 **「정본 집합에 넣지 않는다」와 「기본 T2 stdout 불변」은 그대로**이고, 「운영자가 만든다」만 옵트인 경로에 한해 「생성기가 만들어 stdout에 더한다」로 바뀐다(손으로 만드는 길도 그대로 유효하다). 숫자는 45가 아니라 46이다(사실 1).
+- **A3의 「응답·로그·출력에 값을 내지 않는다」와 「이미 있으면 다시 만들지 않는다」**(HERMES_API_KEY 줄)는 **T1(compose 파일 경로) 한정**으로 읽는다. T2 stdout은 다른 모든 T2 비밀처럼 의도적으로 값을 내고(사실 2), T2에는 「이미 있는」 파일이 없다. 로그·stderr·응답에 값을 내지 않는다는 쪽은 T2에도 그대로다(G5).
+- **`self_host_env.sh:277-278`** — T2 갈래의 `--with-agents` 거절을 지우고 사용법 `:567`·`:552-570`을 고친다. 다른 T2 거절(이미지 모드·`--public-origin`·로컬 provider·`--compose`)은 그대로다.
+- **ADR-0184 D3의 「정본 키 `oort_canonical_env_keys`에서만」**(`docs/adr/0184-platform-neutral-agent-driven-selfhost.md:27`)은 기본 경로의 규칙으로 남는다. 옵트인 경로만 정본 밖의 두 키를 도장과 같은 방식(heredoc 밖)으로 더한다. 도장은 비밀이 아니고 이 둘은 비밀이라는 점이 다르다 — G6이 그 때문에 있다.
+- **10-25 증보의 사실 8(「`--platform railway`와 함께 쓸 수 없다」)·F3의 마지막 항(「Railway에서 `--with-agents`를 안내하면 그 플래그는 거절된다」)·F6의 railway 계획 문구(「Railway는 `--with-agents`를 쓰지 못한다」)** 는 이 증보가 Accepted되고 구현되면 낡는다. 그 증보의 본문은 역사로 두고 이 절이 정본이다. 그때까지 제안 카드(#4460)는 Railway 계획에 `--with-agents`를 쓰지 않고, 구현 뒤 문구 갱신은 카드 쪽 이슈의 몫이다(구현 슬라이스).
+- D6-2(oort 비밀을 Hermes에 주지 않는다)·D6-5(attest의 의미)·A1·A2·A5·K·L·M은 바뀌지 않는다. F도 바뀌지 않는다 — 위의 F3 마지막 항·F6 railway 문구만 예외다.
+
+### G1. 옵트인 플래그는 `--with-agents`를 T2에서도 받는 것이다 [권장]
+
+- T2 갈래의 `[ "$WITH_AGENTS" -eq 0 ] || fail`(`:277-278`)을 지운다. 뜻은 tier를 따른다: T1은 기존 그대로(프로파일·배선 키를 env 파일에 쓴다), T2는 **stdout에 공유 변수 둘을 더한다**(G2). 다른 T2 거절은 그대로라서 `--platform railway --with-agents --local-build`·`--public-origin`·`--allow-local-provider`·`--compose`는 여전히 거절된다.
+- 플래그가 없으면 stdout·stderr·종료 코드가 모두 바이트 단위로 같다(G7). `--claim`과 서로 독립으로 조합된다(팀 인스턴스가 `--claim`을 쓴다, `infra/railway/README.md:90-94`).
+- 이유: 하나의 개념(「Hermes까지 설치」)에 하나의 플래그다. 문서의 두 자리(README Hermes 절, `SELF_HOST_AGENT.md` §3.4.1 「Zero-base shortcut」)가 compose 줄과 Railway 줄을 나란히 두므로 같은 플래그면 두 줄이 같은 문장이 된다. T2가 파일 쓰기 플래그를 거절하는 이유는 「stdout만 쓴다」는 계약이고(`:272`) 이 플래그는 파일을 쓰지 않아 그 계약과 부딪히지 않는다.
+- 반대 견해와 완화: 뜻이 tier마다 달라 「Hermes 서비스를 만든다」로 읽힐 수 있다(기각 대안 A). 사용법 문구와 stderr 한 줄이 「공유 변수 두 줄만 더한다, 서비스는 카탈로그가 만든다」고 말한다.
+
+### G2. 더하는 변수는 정확히 둘이다 [권장]
+
+- **`HERMES_API_KEY`와 `HERMES_LOGIN_RELAY_KEY`**. 카탈로그가 이미 참조하는 공유 변수 전부이고(사실 3) 검증기가 이미 이름으로 고정한 집합이다(`OPERATOR_SHARED`). 새 이름이 없고 `railway.json`의 서비스·변수를 바꾸지 않는다.
+- **더하지 않는 것**과 이유:
+  1. 서비스별 리터럴 배선(`HERMES_BASE_URL`·`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK`·`AGENT_PROVIDER_LOCAL_HOSTS`·`HERMES_LOGIN_RELAY_URL`·`API_SERVER_*`) — 카탈로그에서 서비스마다 리터럴로 들어가고 공유 변수가 아니다. 공유로 내보내면 아무도 참조하지 않는 변수가 생긴다.
+  2. **`OORT_COHOSTED_AGENT_TOOLS_LOCKED`** — api 전용 리터럴이고 검증기가 agent-worker에 없음을 고정한다(`api-hermes-attest-dropped`·`worker-hermes-attest`). Railway에서 선언을 기록하는 쪽은 카탈로그이고, 생성기가 공유 변수로 선언을 대신 쓰면 attest의 기록 주체가 둘이 된다(A3).
+  3. **`HERMES_*_B64` 네 개** — hermes 서비스 전용 `<operator: …>` 값이다. stdout에 섞으면 붙여넣을 대상이 둘(공유 변수·hermes 서비스)이 되고, 공유 변수로 올리려면 카탈로그가 `${{shared.…_B64}}`를 참조하도록 바뀌어야 한다 — 카탈로그 배선은 이슈 #4461의 범위 밖이고 해시 고정 검증기(`check_railway_catalog.py`)의 계약도 바꾼다. **리서치 R2-11의 목표(키 2 + base64 4)에서 base64를 뺀 것이다. 조용히 좁히지 않고 PR 본문의 「권장으로 정한 것」에 적는다.** 후속 후보는 구현 슬라이스의 새 이슈 2다.
+  4. `COMPOSE_PROFILES` — compose 전용이다.
+- **릴레이 키를 내면 base64 둘이 필수가 된다(사실 13).** 플래그 출력은 릴레이 키를 항상 내므로, 플래그를 쓰는 운영자는 hermes에 `HERMES_LOGIN_RELAY_B64`·`HERMES_LOGIN_PROBE_B64`까지 넣어야 hermes가 기동한다 — 합치면 base64 손 단계는 4개다. 이것은 로그인 중계 사이드카를 켜는 것과 같고(hermes 시작 명령이 키가 있을 때만 사이드카를 띄운다, `infra/railway/README.md:209-215`) 위 Q3(「설치 스크립트로 켠다」)와 같은 선택이다. 수동 경로(플래그 없음)는 기존 동작 그대로 키 없이 시작한다(Q3).
+- **끄는 길**: 그 줄을 붙여넣지 않고 api·hermes 서비스에도 `HERMES_LOGIN_RELAY_KEY`를 만들지 않는다(README `:159`: 공유 변수를 만들지 않으면 사이드카가 뜨지 않는다 — 키 없음 = 꺼짐, 서비스 쪽 참조 줄까지 함께 없어야 한다). 공유 변수만 지우고 서비스의 참조를 남기면 참조가 리터럴 `${{shared.…}}` 문자열(비어 있지 않음)로 남는다고 서버 주석(`config.rs:1812`)이 적고 [추정 — Railway 실측 없음], 그러면 시작 명령의 `-z` 검사가 키가 있다고 보고 base64가 없을 때 `${…:?}`에서 종료한다(사실 13, 셸 의미는 sh·dash·bash에서 재현됨). base64가 있으면 사이드카의 형식 검사가 거절해 꺼진다(사실 6). 그 길을 안내하지 않는다.
+
+### G3. 출력 위치와 모양 [권장]
+
+- Hermes 줄은 **도장 줄 뒤**에 `HERMES_API_KEY=…`, `HERMES_LOGIN_RELAY_KEY=…` 순으로 쓴다. 정본 키(정렬된 heredoc·공개 엣지 키)와 도장은 그대로 앞에 있다. 모든 줄이 `KEY=value`이고 주석·빈 줄이 없다(사실 1의 순수 dotenv 계약). 값은 정본 키와 같은 `quote_env_file_value`를 지난다(허용 문자에 따옴표가 없어 그대로 나간다, G4).
+- 그래서 결정적인 시험 차선(fake openssl)에서 플래그 출력의 앞 47줄이 플래그 없는 출력과 **바이트 동일**하고 뒤 두 줄이 Hermes 줄이다(`head -n 47`·`tail -n 2`로 시험한다, 수용 기준 2; 실제 openssl에서는 비밀이 실행마다 달라 값까지 같을 수 없다). 정본 키 중 `HERMES_`로 시작하는 것은 없다.
+- 두 키는 heredoc **밖**에서 쓴다(도장과 같다). heredoc에 넣으면 heredoc을 읽는 여섯 파일 — 생성기의 정본 집합(`:396-414`), `oort doctor`의 필수 키(`scripts/lib/oort_doctor.sh:38-47`), 시험 네 개(`test_self_host_env_modes.sh:174`·`:1621`, `test_railway_template.sh:92`, `test_self_host_build_sha.sh:155`, `scripts/tests/test_oort_upgrade_localbuild.sh:320`) — 이 모두 정본 46을 48로 읽어 기본 출력과 doctor 판정이 바뀐다.
+
+### G4. 두 값은 항상 새로 만든다 — 환경의 같은 이름 변수는 읽지 않는다 [권장]
+
+1. 각 값은 **자기 `openssl rand -hex 32` 호출**로 만든다(64자 hex, 256비트). `gen`(`-hex 24`)이 아니다: 릴레이 키는 L2가 「256비트 이상」으로 정했고 README의 수동 명령도 `-hex 32`다(사실 3). compose 경로가 `gen`(192비트)을 쓰는 것은 기존 편차이고 이 증보는 고치지 않는다. 두 호출은 서로 다른 변수에 담는다. 릴레이 키는 채팅 키·`JWT_HMAC`·다른 어떤 값에서도 파생하지 않는다(L2). 웹훅 키의 「이행 복사」 갈래(`:1596-1615`)에는 들어가지 않는다.
+2. 값은 첫 stdout 바이트 앞에서, 기존 비밀을 만드는 블록(`:1716-1744`)과 같은 자리에서 만든다. 생성이 실패하면 stdout은 0바이트다(정본 47줄만 남는 부분 출력이 없다).
+3. 64자 hex는 세 소비자의 요건을 구조로 만족한다: 잠금 게이트의 32자 하한, 서버·사이드카의 `[A-Za-z0-9._~+/=-]{32,256}`(사실 6). 그래서 형식 검사 코드는 필요 없고, 시험이 정규식 일치와 길이로 단정한다.
+4. **주변 env의 `HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY`는 읽지 않는다**(`platform_secret`의 재사용 의미를 쓰지 않는다, 기각 대안 L). 이름이 환경에 있으면 stderr에 이름만 말한다(G5). 이유: 이 플래그는 새 프로젝트용이라(G9) 지킬 기존 값이 없고, 재사용이 하는 일은 **다른 곳의 값이 들어오는 길**을 여는 것뿐이다. 이 레포의 다른 도구가 같은 이름을 쓰고(사실 15) 형식 검증은 값이 이 인스턴스의 것인지 알지 못한다 — 재사용을 막으면 그 오염 경로와, 검증·동치 거절·출처 표시라는 결정 셋이 함께 사라진다.
+5. 새로 만든 비밀이 나가는 곳은 stdout 한 곳뿐이다. 파일을 쓰지 않는다(T2 계약, `:272`).
+6. **구현 주의.** `test_self_host_env_modes.sh:1959`의 정적 가드는 주석이 아닌 줄에서 `HERMES_LOGIN_RELAY_KEY` 뒤에 `HERMES_API_KEY`·`API_SERVER_KEY`가 한 줄에 오면 빨개진다. 코드·메시지 어디서든 한 줄에서 API 키 이름을 먼저 쓰거나 줄을 나눈다. 그 가드는 고치지 않는다.
+
+### G5. 값은 stderr·로그에 나가지 않는다 [권장]
+
+- stderr의 새 줄은 이름·개수만 담는다. 첫 줄의 개수는 플래그가 있을 때 **49**(정본 46 + 도장 + 둘)로 말하고, 플래그가 없을 때의 문구는 한 글자도 바뀌지 않는다(「키 47개를 stdout에 썼다」, 시험이 grep한다 `:1473`·`:1512`).
+- 플래그 경로의 새 줄(시험이 grep하는 고정 문구): ① 「새로 만들어 stdout 끝에 더했다」가 든 한 줄 — 두 이름, 「값은 쓰지 않는다」, 「서비스는 카탈로그가 만든다」 ② 환경에 두 이름 중 비어 있지 않은 것이 있으면 그 이름마다 「읽지 않았다」가 든 한 줄 ③ 서비스 변수(`HERMES_*_B64`·배선 리터럴)는 내지 않고 릴레이 키를 붙였다면 `HERMES_LOGIN_RELAY_B64`·`HERMES_LOGIN_PROBE_B64`가 필요하다는 안내와 가리킬 문서(`infra/railway/README.md` Hermes 절)를 든 한 줄. 값(전체)은 어느 줄에도 없고, 값에서 나온 11자 이상의 연속도 없다(수용 기준 3의 임계 — 그보다 짧은 접두·지문은 단정하지 않는다, 한계). 이 고정 문구들도 11자 이상의 영숫자 연속을 담지 않는다(그래야 수용 기준 3의 단정이 문구와 값을 구분한다).
+- 이유: 설치 에이전트가 이 명령을 돌릴 때 stdout을 파일로 보내도 stderr는 에이전트가 읽는다. 값이 stderr에 한 번이라도 나가면 §0(비밀을 채팅에 붙이지 않는다)이 깨진다. 이 규칙은 이슈 #4461의 「비밀값은 생성만 하고 로그에 남기지 않아요」를 시험 가능한 말로 옮긴 것이다(수용 기준 3).
+
+### G6. 경계 판정 — 시크릿 출력 범위는 옵트인 한정으로 넓어진다 → owner 결정
+
+판별 기준을 둘로 나눠 적는다. 둘 다 본문에 남겨서, owner가 어느 기준을 택하든 Status 한 줄만 바꾸면 되게 한다.
+
+| 비밀 | 받는 서비스(카탈로그, 불변) | 기본 stdout | 플래그 stdout | 운영자 캡처 파일 |
+|---|---|---|---|---|
+| `HERMES_API_KEY` | api · agent-worker · hermes(`API_SERVER_KEY`) | 없음 | 있음 | 플래그 때만 있음 |
+| `HERMES_LOGIN_RELAY_KEY` | api · hermes | 없음 | 있음 | 플래그 때만 있음 |
+
+- **보유자 기준(「어느 서비스가 어떤 비밀을 들고 있나」): 바뀌지 않는다.** `railway.json`의 서비스·변수가 그대로이고 검증기가 행렬을 이미 고정한다(G8). **새 서비스 수신자는 없다**: Railway 쪽 끝 상태는 수동 경로와 같다 — 운영자가 `openssl rand`로 만든 같은 두 값이 같은 공유 변수에 같은 서비스 참조로 들어간다(`README.md:195-198`).
+- **생성기 쪽 경로는 이 두 값에 새로 생긴다.** 수동 경로는 값을 운영자 셸에서 만들어 곧바로 붙이는 것이 일반적이고(파일 저장을 요구하는 것은 `GITHUB_APP_MASTER_KEY` 절뿐이다, `README.md:590-596`) [추정], 플래그 경로는 값이 생성기 프로세스·stdout·운영자 캡처 파일(`README.md:90-94`)·터미널·설치 에이전트 기록에 존재한다. 그 파일은 이미 비밀 17개를 담고 `JWT_HMAC`처럼 이 둘보다 센 권한을 가진 값도 담는다(사실 2) — 파일이 털릴 때의 폭발 반경은 한계적으로만 는다. 다만 이것은 비밀의 강도만 비교한 말이다: 릴레이 키는 이 문서 L2의 보안 검수 H1이 에이전트조차 못 읽게 uid 분리까지 한 종류의 키라, 캡처 파일·설치 에이전트 기록에 놓이는 것은 종류가 다른 노출이다(owner 질문의 (b)가 이 점을 고른다). 기본 출력은 바뀌지 않는다.
+- **출력 범위 기준(「생성기가 낼 수 있는 비밀의 집합」): 옵트인 때 +2로 넓어진다.** 이슈 #4461은 판단 기준을 「시크릿 출력 범위」로 적었으므로 이 기준이 적용된다 → **Proposed, owner 결정 필요.**
+- **[권장]은 승인이다.** 이유: ① 보유자 행렬 불변·`railway.json` 서비스·변수 무변경 ② compose 경로에서는 생성기가 두 값을 이미 만든다(A3, Q3) ③ 기본 출력 불변·옵트인 ④ 운영자 기계 밖의 새 위치 0 ⑤ 값이 stderr에 나가지 않음을 생성 분기에서 시험이 증명한다(수용 기준 3) ⑥ 새 프로젝트에만 쓴다(G9). **남는 한계**: 설치 에이전트가 stdout을 리다이렉트하지 않으면 값이 기록에 남는다 — 기본 경로의 17개 비밀과 같은 위험이고 코드 가드는 기각했다(기각 대안 F·K). [추정] 수동 경로에서도 설치 에이전트가 `openssl rand`를 돌리면 값이 기록에 남을 수 있어 증가분은 이 문장이 쓰는 것보다 작다.
+
+**owner 결정 필요 — 질문 하나.** Railway 생성기가 옵트인 플래그(`--platform railway --with-agents`)로 `HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY` 두 비밀을 stdout에 더해도 되는가?
+- (a) **승인 — G1~G9대로 [권장].** 이득: 공유 변수 손 단계 2 → 0. 대가: 릴레이 키가 항상 나오므로 hermes에 base64 둘(`HERMES_LOGIN_RELAY_B64`·`HERMES_LOGIN_PROBE_B64`)이 필수이고 없으면 hermes가 기동하지 않는다(사실 13, fail-closed). 사이드카를 켜는 선택이다(Q3).
+- (b) 승인하되 릴레이 키는 뺀다(`HERMES_API_KEY` 하나만). 릴레이는 지금처럼 운영자가 손으로 켠다(사이드카 기본 꺼짐, base64 둘 불필요). 로그인 결합 권한을 가진 키가 캡처 파일에 있는 것을 피하는 쪽이다. (b)면 이 증보를 개정해 다시 검토한다 — G2·G3·G4·G5(49→48)·G6 표·G7·G8(드리프트 가드의 집합)·G9(손 단계 계수·base64 문장)·수용 기준 2~6·8·사실 13·남는 위험이 함께 바뀐다.
+- (c) 거절 — 지금처럼 운영자가 두 개를 `openssl rand`로 만든다. 이 증보는 Rejected로 닫고 코드는 바뀌지 않는다.
+- 부가(선택, 기본 아니오): 플래그 경로에서만 stdout이 정규 파일이 아니면 거절할까요? [권장] 아니오 — 같은 위험이 기본 경로의 47줄에도 있어 T2 전체의 별도 결정이 맞다(기각 대안 K, 후속 후보 새 이슈 4).
+
+owner의 답이 오면 Status 줄만 `Accepted (날짜, owner 결정 인용)`로 바꾼다.
+
+### G7. 기본 경로는 바이트 단위로 같고, 시험이 그것을 증명한다 [권장]
+
+- 플래그가 없으면 stdout·stderr·종료 코드가 변경 전과 같다. 환경에 `HERMES_*`가 있어도 같다(사실 15). 증명은 저장소 시험 다섯 겹과 PR 증거 하나다: (a) 키 집합 == 정본 + 도장(기존 diff) (b) 줄 수 47 (c) `HERMES_` 이름 0건 (d) 기본 stdout·stderr의 **고정** — **허용목록 환경**(`env -i`로 `HOME`·`PATH`·`RAILWAY_PUBLIC_DOMAIN`·`DATABASE_URL`·`MOMO_RUST_IMAGE`만 둔다)에서 fake openssl 아래 결정적이므로(사실 14) password·claim 두 변형의 sha256을 시험에 상수로 두거나 골든 파일을 `cmp`한다(골든 파일은 `KEY=aaaa…` 줄이 많아 gitleaks 비밀 검사 — `add_secrets_commands`, `add_static_commands` 안(`local_gate.sh:630-634`) — 에 걸릴 수 있으니 먼저 확인하고, 걸리면 sha256 상수를 쓴다). 주변 환경을 비우지 않으면 올바른 구현도 개발자 셸에 따라 빨개진다(사실 14). 정본 키나 문구가 바뀌면 이 값도 의도적으로 고쳐야 하므로 「T2 stdout 불변」이 기계로 지켜진다 (e) 환경 세 구성(더하지 않음·표식 둘·자리 표시자와 공백 값)은 그 허용목록 환경에 `HERMES_*`만 더해 만들고 결과가 같다. PR 증거: 변경 전 커밋의 생성기와 변경 후 생성기의 기본 출력(stdout·stderr)을 같은 허용목록 환경에서 `cmp`한 원문과 고정값 계산 원문(수용 기준 1·10).
+- 기존 시험이 바뀌는 곳은 하나다: `--platform railway --with-agents`가 실패해야 한다는 단정(`test_self_host_env_modes.sh:2106-2111`)이 「성공하고 정확히 두 줄이 더해진다」로 바뀐다. T2 조합 거절 목록(`:1561-1582`)은 그대로 모두 실패한다.
+
+### G8. 카탈로그·검증기·doctor의 규칙은 바뀌지 않는다 [권장]
+
+- `railway.json`의 서비스·변수·시작 명령은 바뀌지 않는다(`notes`의 문장 — `platformStamp`의 낡은 수치와 `hermes`(`:25`)의 「운영자가 손으로 만든다·생성기가 내지 않는다」 — 만 고친다). 서비스별 보유 행렬은 검증기가 이미 고정한다: agent-worker가 릴레이 키를 가지면 RED(`worker-relay-key`), 릴레이 키가 채팅 키 참조면 RED(`api-relay-key-chat-key`·`hermes-relay-key-chat-key`), hermes가 oort 비밀을 가지면 RED(`hermes-oort-secret`), hermes의 키 집합 허용목록(`hermes-extra-key`) — 이름은 사실 12의 기준선 실행 출력이다.
+- `OPERATOR_SHARED`(`check_railway_catalog.py:95`)는 **유지한다**. 「`${{shared.X}}`가 정본 출력에 없어도 유효하다」는 예외는 기본 경로(플래그 없음)의 사실이다. 바뀌는 것은 검증기의 주석(`:92-93`)과 README `:156`·`:159`·`:195-198`의 「생성기가 내지 않는다/손으로 만든다」가 「기본 경로는 내지 않고 `--with-agents`(T2)가 낸다」로 고쳐지는 것뿐이다(검증기의 규칙·mutation은 불변).
+- **드리프트 가드**(수용 기준 8): 입력은 `--claim` 변형(카탈로그가 claim 모양이다)의 기본 출력 키·플래그 출력 키·카탈로그 **서비스 `variables`**의 `${{shared.X}}` 참조 집합(`notes.variables` 같은 설명 문자열까지 잡는 파일 전체 grep은 40개가 되어 거짓 RED)이고, `OPERATOR_SHARED`는 `python3`로 검증기 모듈을 경로로 import해 읽는다(검증기 파일을 고치지 않는다). 세 집합의 차이 — 플래그 출력 − 기본 출력 == 카탈로그 참조 − 기본 출력 == `OPERATOR_SHARED` — 가 어긋나면 RED다. 비밀번호 변형은 카탈로그가 참조하는 `MOMO_BOOTSTRAP_CLAIM`이 더해져 같지 않으므로 입력으로 쓰지 않는다(이 세션이 두 변형을 비교해 확인).
+- doctor는 영향이 없다(사실 10).
+
+### G9. 문서와 사용 범위 — 새 프로젝트용이다 [권장]
+
+- 고칠 곳(구현이 `grep -rnE '\b(43|44|45)\b'`로 목록을 다시 만든다, 아래는 알려진 곳): `infra/railway/README.md`의 Hermes 절(`:195-198`)·릴레이 키 행(`:159`)·공유 변수 행(`:156`)·낡은 수치(`:85`·`:102`)·재렌더 경고(`:583-588`, 「Hermes 두 값은 export해도 새로 만들어진다」 한 문장), `infra/railway/railway.json`의 `notes`(사실 3·G8), `docs/SELF_HOST_AGENT.md` §3.4 2단계 스니펫(`:2261`)·§3.4.1 「Zero-base shortcut」의 Railway 줄(`:2364-2366`)과 한국어판(`:1895`·`:1985`), `docs/SELF_HOST.md`의 Hermes 절(`:436-471`, 플래그의 T2 의미 한 줄)·Railway 스니펫(`:1078`)·T2 재렌더 절차(`:1158-1181`, 같은 문장; `:1167`의 `> railway.env`는 `umask 077`·`~/.momo-secrets/` 형태로 통일)와 한국어판(`:399`·`:940`), 생성기 사용법(`:536-542`·`:552-570`)과 낡은 주석(사실 1). `SELF_HOST_AGENT(.ko).md`·`SELF_HOST(.ko).md`는 명령 블록을 영문과 같게 둔다.
+- 문서가 보이는 명령은 모두 리다이렉트 형태다:
+  ```sh
+  umask 077; scripts/self_host_env.sh --platform railway --claim --with-agents > ~/.momo-secrets/railway-oort.env
+  ```
+  지금 `SELF_HOST_AGENT.md:2261`의 스니펫은 리다이렉트가 없다(사실 8). 이 증보가 만든 위험은 아니지만 stdout에 두 줄이 더 얹히므로 구현 PR이 함께 고치고 기계로 지킨다(수용 기준 9).
+- **릴레이 키를 붙였다면 hermes에 base64 둘도 넣는다**는 문장을 README Hermes 절에 둔다(사실 13). 이 문장이 없으면 플래그 사용자가 「붙여넣고 서비스를 만들었는데 hermes가 안 뜬다」를 만난다.
+- **사용 범위**: README `:583-588`의 「생성기는 새 프로젝트용」이 그대로 적용된다. 이미 도는 프로젝트에 Hermes를 더하려면 지금처럼 두 공유 변수를 손으로 만든다 — 재렌더한 전체를 다시 붙이면 export하지 않은 비밀이 전부 회전한다(사실 7). **이 플래그는 재렌더 절차(`SELF_HOST.md:1158-1181`)에 붙이지 않는다: Hermes 두 값은 export해도 보존되지 않고 새로 만들어지므로(G4-4) 그 절차의 「export하면 값이 유지된다」는 정본 키에만 해당한다.** 이 플래그는 그 길을 열지 않는다(기각 대안 G).
+- **손 단계 계수**(리서치 R2-11 수용 기준 ③): 릴레이를 쓰는 최대 구성은 공유 변수(손) 2 → 0, base64(손) 4 → 4다. 릴레이를 안 쓰던 최소 구성(공유 변수 1 + base64 2)은 합 3 → 4로 는다 — 플래그가 릴레이 키를 항상 내서 릴레이용 base64 둘이 필수가 되기 때문이다(사실 13). README 갱신과 구현 PR 본문에 이 숫자를 기록한다.
+
+### 기각한 대안
+
+표의 알파벳은 이 절 안에서만 쓴다(10-25 증보의 기각 대안 A~P와 별개이고, 본문의 「기각 대안 X」는 이 절의 표를 가리킨다).
+
+| 대안 | 기각 이유 |
+|---|---|
+| A. 새 플래그(예: `--hermes-vars`) | 뜻이 정확하다는 장점이 있으나 같은 개념에 플래그가 둘이 되고 문서의 compose 줄과 Railway 줄이 다른 문장이 된다. G1의 완화(사용법·stderr)로 충분하다고 본다. |
+| B. 정본 키 집합에 넣는다(기본 stdout에 Hermes 두 줄) | Hermes 없는 배포도 비밀 둘을 받는다. #2066·#3947은 기본 스택이 그 키를 쓰므로 기본 경로에 들어갔지만 Hermes는 선택 기능이다. A4의 「T2 stdout 불변」을 깬다. |
+| C. `HERMES_*_B64` 네 개도 출력한다 | 붙여넣을 대상이 둘이 되고, 공유 변수로 올리려면 카탈로그 배선과 해시 고정 검증기 계약이 바뀐다(#4461 범위 밖). 후속 이슈 2. |
+| D. 배선 리터럴과 `OORT_COHOSTED_AGENT_TOOLS_LOCKED`도 출력한다 | 서비스별 리터럴을 공유 변수로 내보내면 참조하는 쪽이 없고, attest의 기록 주체가 카탈로그와 생성기 둘이 된다(A3). |
+| E. 생성기가 `${{secret(length, alphabet)}}`를 출력해 Railway가 값을 만든다 | 비밀이 운영자 기계를 지나지 않아 가장 안전하다. 그러나 프로젝트 공유 변수(Raw Editor)에서 이 함수가 풀리는지 확인하지 못했다 [확인 필요 — 리서치는 템플릿 기능으로만 적는다]. 풀리지 않으면 리터럴 문자열이 키로 남는다. 릴레이 키는 서버·사이드카의 형식 검사가 거절하지만(사실 6, `config.rs:1812`가 같은 실패 모드를 적는다) **API 키는 길이(>32)만 보는 잠금 게이트를 통과한다** — 알려진 상수가 비밀이 되는 fail-open이다. 실측이 되면 별도 증보(후속 이슈 3). |
+| F. stdout이 TTY면 비밀 출력을 거절한다 | 설치 에이전트의 도구는 stdout을 TTY가 아닌 **파이프**로 받아 에이전트 기록을 막지 못한다. 모든 키의 기본 경로 동작도 바꾼다. |
+| G. Hermes 두 줄만 내는 모드(`--hermes-only`) | 이미 도는 프로젝트에 더하는 길을 연다. README는 그 경우를 손으로 하라고 적는다(사실 7). 필요가 생기면 별도 결정. |
+| H. 값을 0600 파일로 쓴다 | T2는 파일을 쓰지 않는 계약이다(`:272`). |
+| I. stderr에 값의 지문(해시 앞 몇 자)을 보여 줘 붙여넣은 값과 대조하게 한다 | 지문도 값에서 나온 정보이고 이슈가 「로그에 남기지 않는다」고 했다. 수용 기준 3은 값 전체와 값에서 나온 11자 이상의 연속을 막는다 — 그보다 짧은 접두·지문은 단정하지 않는다(한계). 붙여넣은 값의 확인은 Railway 화면에서 한다. |
+| J. 릴레이 키를 하위 플래그로 따로 켠다 | Q3(「설치 스크립트로 켠다」)와 반대이고 플래그가 늘어난다. 끄는 길은 G2에 있고, owner 질문의 (b)가 같은 효과를 낸다. |
+| K. 옵트인 경로에서만 stdout이 정규 파일이 아니면 거절한다 | 에이전트 기록을 코드로 막는 유일한 길이고 옵트인 경로는 새 경로라 깨질 흐름이 없다. 그러나 (1) 같은 위험이 기본 경로의 47줄에도 있어 「Hermes를 켜야 더 안전해지는」 비대칭이 생긴다 (2) 플랫폼 CLI로 stdout을 넘기는 흐름을 막는다(`SELF_HOST_AGENT.md` §3.4 2단계가 stdout을 공유 변수로 적용하라고 한다) (3) 이슈 범위 밖이다. T2 전체에 적용할지는 별도 결정(후속 후보 새 이슈 4). |
+| L. 환경 값을 재사용한다(`platform_secret` 의미, 검증·동치 거절·출처 표시 포함) | 새 프로젝트용(G9)에는 지킬 값이 없고, 이 레포의 다른 도구가 같은 이름을 쓰므로(사실 15) 재사용은 다른 곳의 값이 새 프로젝트의 비밀로 들어오는 길만 연다. 검증은 값이 이 인스턴스의 것인지 알지 못한다. 재사용을 빼면 검증·동치 거절·출처 표시가 함께 사라져 결정과 시험이 줄어든다. 재렌더로 값을 지키려는 운영자는 기존 정본 키의 export 규칙(`README.md:583-588`)이 있고, 그것은 이 두 값의 몫이 아니다. |
+
+### 구현 슬라이스 (Accepted 후, 별도 이슈)
+
+- **새 이슈 1 — [engine][selfhost] R2-11 구현: Railway 생성기 `--with-agents`(T2)가 Hermes 공유 변수 두 줄을 더한다.** **Accepted 뒤에 발행한다**(ADR-0100). 범위: G1~G9, 수용 기준 1~10(11은 `runtime-unverified` 기록), 문서(G9)와 낡은 수치 정정(사실 1). 함께 바꿀 것: `scripts/self_host_env.sh`(T2 갈래 `:277-278`·`emit_managed_platform_env`·사용법·주석), `scripts/tests/test_self_host_env_modes.sh`(`:2106-2111` 뒤집기·신규 단정), `scripts/tests/test_railway_template.sh`(드리프트 가드·실제 openssl 시험·문서 명령 모양), `scripts/tests/check_railway_catalog.py` 주석, `infra/railway/railway.json`의 `notes` 문장(서비스·변수는 그대로), 문서(G9). 구현 뒤 ADR-0184 D3에 한 줄 역참조를 더한다. 검증: `scripts/local_gate.sh --profile docs`(+`--auto`가 고르는 staging-smoke), 사보타주 원문, 기본 출력 `cmp`·해시 원문. 규모 S~M. 트랙 engine.
+- **새 이슈 2 (후속, 선택) — [docs][engine] 「base64 4종·hermes 서비스 변수」일괄 붙여넣기**: 카탈로그가 `${{shared.…_B64}}`를 참조하도록 바꾸는 배선 변경과 해시 고정 검증기 계약 변경이라 별도 증보가 먼저다(기각 대안 C).
+- **새 이슈 3 (후속, 선택) — [engine][spike] Railway `${{secret(…)}}`가 Raw Editor·CLI의 프로젝트 변수에서 풀리는지 실측**(임시 환경, owner 승인 필요): 풀리면 비밀이 운영자 기계를 지나지 않는 길을 별도 증보로 연다(기각 대안 E).
+- **새 이슈 4 (후속, 선택) — [engine][docs] T2 stdout이 정규 파일이 아닐 때의 처리**: 기본 경로의 동작 변경이라 별도 결정이다(기각 대안 F·K).
+- 기존 이슈: 로드맵 #4349의 `## 항목`에 R2-11 줄을 올린다(그 본문의 목록은 지금 비어 있다. planner). #4460(R2-10 제안 카드)은 이 증보와 독립이고, 카드의 Railway 계획 문구는 이 증보가 구현되기 전에는 `--with-agents`를 말하지 않는다(10-25 증보 F6 그대로). 구현 뒤 그 문구를 고치는 것은 카드 쪽 이슈의 몫이다. owner 결정 대기는 `scripts/planning_context.sh`가 줄 맨 앞의 `Status: Proposed`만 읽어(`:136-139`) 이 증보처럼 불릿 안의 Proposed를 드러내지 못하므로, 로드맵 #4349에 「owner 결정 대기: ADR-0203 증보 A4′」 줄을 올린다(planner).
+
+### 수용 기준 (red proof — 해당 분기를 지우면 실패해야 한다)
+
+레인: **[local gate]** `scripts/tests/test_self_host_env_modes.sh`(`add_static_commands`) · **[docs gate]** `scripts/tests/test_railway_template.sh`(docs 프로파일, 실제 openssl) — **PR CI는 둘 다 돌리지 않는다**(사실 9). 새 시험은 모두 **허용목록 환경**(`env -i HOME=… PATH=… RAILWAY_PUBLIC_DOMAIN=… DATABASE_URL=… MOMO_RUST_IMAGE=…`, 필요한 시험만 `HERMES_*`를 더한다)으로 돌린다 — 생성기는 주변 env의 `COMPOSE_PROJECT_NAME`·`MOMO_INITIAL_OWNER_*`·`JWT_HMAC` 등을 읽어 출력이 달라지고(사실 14) `run_platform_stdout`은 환경을 비우지 않는다(사실 15). 번호 1~10이 시험·증거이고 11은 `runtime-unverified` 기록이다.
+
+1. **[local gate]** (기본 경로 불변) 플래그 없는 `--platform railway`·`--platform railway --claim`을 허용목록 환경에 `HERMES_*`만 달리 더한 세 구성에서 돌린다: ⓐ 더하지 않음 ⓑ 40자 이상의 `[A-Za-z0-9]` 표식 값 둘 ⓒ 자리 표시자(`change-me-hermes-bearer`)와 공백이 든 값. 세 구성 모두 종료 코드 0, stdout·stderr가 서로 같고 고정값(sha256 또는 골든, G7)과 같으며, 키 집합 == 정본 + 도장, 줄 수 47, stderr에 「키 47개를 stdout에 썼다」, stdout·stderr에 `HERMES_` 이름과 표식 0건. 사보타주: Hermes 줄을 플래그와 무관하게 내면 고정값·집합·47이, 환경 값을 플래그 밖에서 읽으면 ⓑ가, 플래그 밖에서 `HERMES_*` 환경을 검증해 실패시키면 ⓒ가 빨개진다. Hermes 키를 heredoc에 넣으면 정본 46 단정(`test_self_host_env_modes.sh:1098`·`test_railway_template.sh:204-205`)이 빨개진다.
+2. **[local gate]** (플래그 = 기본 + 두 줄) `--platform railway --with-agents [--claim]`: 키 집합 == 기본 ∪ {두 키}, **줄 수 49**(중복 줄 방지), `head -n 47`이 플래그 없는 출력과 바이트 동일, `tail -n 2`가 정확히 `HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY` 줄 순서, 모든 줄이 `KEY=value`(주석·빈 줄 0), 정본 키 중 `HERMES_`로 시작하는 것 0, 실행 뒤 fixture에 새 파일이 없다(픽스처 디렉터리 밖에 쓰는 변형은 못 잡는다 — 한계). stderr: 첫 줄 「키 49개를 stdout에 썼다」, G5의 ①·③ 고정 문구(① 「새로 만들어 stdout 끝에 더했다」·「값은 쓰지 않는다」·「서비스는 카탈로그가 만든다」, ③ `HERMES_LOGIN_RELAY_B64`·`HERMES_LOGIN_PROBE_B64`). 사보타주: 키 하나를 빼면 집합·줄 수가, Hermes 줄을 도장 앞이나 정본 사이로 옮기면 `head -n 47` 비교가, 순서를 바꾸면 `tail -n 2`가, 주석 줄을 더하면 모양 단정이, 값을 파일로 쓰면 새 파일 단정이, 개수를 47로 두거나 ①·③을 지우면 stderr 단정이 빨개진다.
+3. **[local gate]+[docs gate]** (값 비노출, 생성 분기) 환경에 `HERMES_*`를 두지 않고 플래그를 켠 실행: stdout에서 뽑은 두 값이 stderr에 0건이고 stderr에 길이 **11 이상**의 `[A-Za-z0-9]` 연속이 0건이다(기본 stderr의 최장 연속은 10자 `CENTRIFUGO`, 사실 14; fake lane의 모든 비밀이 `a` 연속이라 어떤 비밀이 새도 걸린다). docs gate는 실제 openssl로 같은 단정을 한 번 더 한다(값이 무작위라 우연 일치가 불가능하다). 사보타주: 생성 분기에서만 stderr 요약에 값을 찍거나(예: 「새로 만들었다: <값>」) 값 앞 12자를 찍으면 빨개진다. 11자 미만의 접두는 단정하지 않는다(한계).
+4. **[local gate]+[docs gate]** (환경 무시) 환경에 표식 `HERMES_API_KEY`·`HERMES_LOGIN_RELAY_KEY`를 두고 플래그를 켠 실행(둘 다·API만·릴레이만·빈 값 네 구성): stdout의 두 값은 표식과 다르고 표식은 stdout·stderr에 0건이며, stderr의 「읽지 않았다」 줄은 비어 있지 않은 이름마다 정확히 하나다(빈 값·없는 이름은 0). 사보타주: 두 값을 `platform_secret`로 만들면 표식이 stdout에 나와 빨개진다. 「읽지 않았다」 줄을 지우거나 빈 값에도 내면 빨개진다.
+5. **[local gate]+[docs gate]** (독립·형식) 정적: 두 값이 서로 다른 변수·서로 다른 `openssl rand -hex 32` 호출에서 나온다 — 웹훅 두 키와 같은 방식이다(`test_self_host_env_modes.sh:1188-1203`, fake openssl가 모든 호출에 같은 문자열을 돌려줘 동적으로는 못 잰다). 동적(docs gate, 실제 openssl, `JWT_HMAC`을 환경에 둔 실행 포함): 두 값이 서로 다르고 `JWT_HMAC`·다른 생성값과도 다르며 각각 64자 hex(= `^[A-Za-z0-9._~+/=-]{32,256}$`와 일치, 32자 이상). 사보타주: 릴레이 키를 API 키 변수나 `JWT_HMAC`에서 복사하면 둘 다 빨개진다. 구현 주의(G4-6): 한 줄에 릴레이 이름 뒤 API 이름을 쓰지 않는다.
+6. **[local gate]** (부분 출력 방지) `rand -hex 32`만 실패하는 fake openssl(`-hex 12`·`-hex 24`는 정상 — 비밀번호 변형이 `-hex 12`를 쓴다, `:1712`)로 password·claim 두 변형에서 플래그를 켠 실행: 종료 코드가 0이 아니고 **stdout이 0바이트**다. 사보타주: Hermes 값을 출력 루프 뒤에 만들면 정본 47줄이 남아 빨개진다.
+7. **[local gate]** (거절 목록) `--platform railway --with-agents`와 별칭 `--railway --with-agents`가 성공하고 정확히 두 줄이 더해진다. 기존 `:2106-2111`은 `run_generator`(stdout·stderr를 한 파일로 합치고 `RAILWAY_*`를 주지 않는다, `:154-165`)를 쓰므로 뒤집을 때 `run_platform_stdout` 계열로 바꾼다 — 바꾸지 않으면 `RAILWAY_PUBLIC_DOMAIN` 부재로 계속 실패해 옛 「실패해야 한다」 단정이 엉뚱한 이유로 통과한다. 같은 플래그에 이미지 모드·`--public-origin`·`--allow-local-provider`·`--compose` 중 하나를 더한 조합은 모두 실패하고 stdout이 0바이트다(`:1561-1582` 루프가 거절별로 이미 덮으므로 거기에 `--with-agents`를 더한 줄을 넣는다). 사보타주: T2 갈래의 다른 거절 하나를 지우면 그 조합이 빨개진다.
+8. **[docs gate]** (카탈로그 일치·드리프트 가드) `--claim` 변형에서 `OPERATOR_SHARED`(검증기 모듈을 경로로 import) == 플래그 출력 키 − 기본 출력 키 == 카탈로그 서비스 `variables`의 `${{shared.X}}` 참조 − 기본 출력 키. `check_railway_catalog.py … --prove-mutations`와 그 mutation 이름 루프(`test_railway_template.sh:249-278`)는 그대로 통과한다. 사보타주: 플래그 아래에서만 세 번째 `HERMES_*` 키를 내면, 또는 `OPERATOR_SHARED`에서 한 이름을 지우면, 또는 카탈로그에 공유 Hermes 참조를 하나 더하면 이 대조가 빨개진다.
+9. **[docs gate]** (문서 명령 모양) README·`SELF_HOST_AGENT(.ko).md`·`SELF_HOST(.ko).md`의 sh·bash 블록에서 `self_host_env.sh`와 `--platform railway`(또는 `--railway`)가 든 줄은 모두 `umask 077;`과 `> ~/.momo-secrets/…` 리다이렉트를 포함하고, 문서마다 맞는 줄이 1개 이상 있어야 통과한다(없으면 공허). 사보타주: 한 줄에서 `>`나 `umask 077`을 지우면 빨개진다. (`scripts/check_docs_commands.py`는 명령이 트리에서 풀리는지만 보고 리다이렉트도 영문·한국어 동일성도 보지 않는다 — `GATED_DOCS`의 「명령 블록은 …와 같다」는 사유 문자열이다. 두 언어판의 일치는 수동 대조다.)
+10. **[PR 증거]** 변경 전 커밋의 생성기와 변경 후 생성기의 기본 출력(stdout·stderr)을 같은 fake openssl 환경에서 `cmp`한 원문과 sha256 계산 원문(저장소 시험이 아니라 일회 증거). 손 단계 계수(G9) 기록.
+11. **[runtime-unverified]** 플래그 출력으로 만든 공유 변수로 실제 Railway에서 hermes가 `LOCKGATE ok`까지 가고 api가 `409 login_relay_off`를 내지 않는 것. 수동 경로의 같은 모양은 `hermes-kwak`(#3952)가 실측했고(A5), 이 템플릿의 `hermes` 새 배포는 A5가 이미 미실측으로 남겼다. 구현 PR은 못 하면 `runtime-unverified`로 적고, 하게 되면 owner 승인 뒤 임시 환경에서 한다.
+
+### 남는 위험
+
+- 이미 도는 프로젝트 위에서 이 플래그로 전체를 다시 붙이면 비밀이 회전한다(사실 7). 문서가 「새 프로젝트용」이라고 쓰는 것으로만 막는다.
+- 설치 에이전트가 stdout을 리다이렉트하지 않으면 49개 줄(그중 이름으로 센 비밀 19개)이 에이전트 기록에 남는다. 이 증보 이전부터 있던 위험(47개)이고, 문서를 고치고(G9, 수용 기준 9) 코드 가드는 후속 결정으로 둔다(기각 대안 F·K).
+- 재렌더 문서(`SELF_HOST.md:1158-1181`·README `:583-588`)가 「export하면 값이 유지된다」고 쓴다. Hermes 두 값은 예외라는 문장을 G9가 더하지만, 그 문장을 읽지 않고 재렌더한 출력을 붙이면 두 값이 회전한다(세 서비스가 같은 공유 변수를 참조하므로 재배포 뒤 일관은 유지된다).
+- 붙여넣는 목록에 oort 비밀과 Hermes 비밀이 섞여 있어서, 운영자가 서비스에 「공유 변수 전부」를 참조시키는 UI 실수를 할 수 있다(D6-2 위반). 카탈로그는 검증기가 지키지만 Railway 화면의 실수는 막지 못한다. 문서 문구(`SELF_HOST_AGENT.md` §3.4.1 3단계의 「oort 서비스의 어떤 공유 변수도 참조하지 않는다」)로 낮춘다. 이 위험은 지금의 47줄에도 있다(사실 2).
+- 릴레이 키를 붙이고 base64 둘을 빠뜨리면 hermes가 기동하지 않는다(사실 13). fail-closed이고 문서 문장(G9)으로 낮춘다.
+- 두 값은 실행마다 달라진다(G4-4, 재현되지 않는다): 붙이기 전에 출력을 잃으면 새 프로젝트 전제에서 다시 실행하면 되고(그 시점에 어디에도 쓰이지 않았다), 붙인 뒤에는 Railway 공유 변수가 값을 가진다.
+- `runtime-unverified`: 수용 기준 11, 그리고 Raw Editor가 두 줄을 공유 변수로 만드는 것은 기존 47줄과 같은 동작이라 새 가정은 없다 [추정].
+
+### 바뀌지 않는 것
+
+D1~D9·K1~K7·A1·A2·A5·L0~L6(Q1~Q3 포함)·M1~M5·F1~F9(F3 마지막 항·F6 railway 계획 문구 제외), 기본(플래그 없음) T2 stdout·stderr·종료 코드와 정본 키 집합 46, compose의 `--with-agents` 동작, `infra/railway/railway.json`의 서비스·변수·시작 명령과 `check_railway_catalog.py`의 규칙·mutation, `infra/hermes/`의 게이트·사이드카, `--claim`, T2의 다른 거절들, `OORT_COHOSTED_AGENT_TOOLS_LOCKED`가 api 전용 리터럴이라는 것, 서버 코드, oort가 구독 OAuth 토큰·원본 provider 키를 받지도 저장하지도 않는다는 불변식.
