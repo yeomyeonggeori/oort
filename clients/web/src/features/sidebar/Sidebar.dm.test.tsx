@@ -174,6 +174,13 @@ const revival = vi.hoisted(() => ({
   /** 채널 id(소문자) -> 쪽. 함수면 요청의 `after` 로 쪽을 고른다(같은 DM 을 되살림과 안 읽음 판정이 다른 `after` 로 읽을 때). */
   pages: new Map<string, "fail" | "pending" | RevivalPage | ((after: number | undefined) => RevivalPage)>(),
   calls: [] as Array<{ channelId: string; after?: number; limit?: number }>,
+  /**
+   * 채널 id(소문자) -> 문(#4273). 문이 닫혀 있는 동안 그 DM 의 읽기는 요청은 나가도(`calls` 에 남는다) 응답이 오지 않고, 시험이
+   * `holdRevivalRead` 가 돌려준 함수로 열면 그때 적어 둔 쪽으로 끝난다. `"pending"` 은 영영 오지 않지만 이 문은 시험이 연다.
+   * 「읽는 중」을 시간이 아니라 시험이 정한다: 응답이 마이크로태스크로 끝나는 대역에서는 `await rerender()` 가 돌아온 시점에
+   * 읽기가 끝났는지가 이벤트 루프의 사정(react-query 알림 타이머와 `act` 복귀의 앞뒤)에 달려 부하에서 뒤집힌다.
+   */
+  holds: new Map<string, Promise<void>>(),
 }));
 /** DM 닫기 경로의 대역(ADR-0177 D7, #4228). `fail` 이 상태 코드면 그 코드로 거절하고, 네트워크 실패면 `"network"`. */
 const closure = vi.hoisted(() => ({
@@ -198,6 +205,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     },
     fetchMessages: async (_ws: string, channelId: string, query: { after?: number; limit?: number } = {}) => {
       revival.calls.push({ channelId: channelId.toLowerCase(), after: query.after, limit: query.limit });
+      const hold = revival.holds.get(channelId.toLowerCase());
+      if (hold !== undefined) await hold;
       const entry = revival.pages.get(channelId.toLowerCase()) ?? [{ type: "text" }];
       const page = typeof entry === "function" ? entry(query.after) : entry;
       if (page === "fail") throw new actual.ApiError(500, "boom");
@@ -370,6 +379,7 @@ beforeEach(() => {
   liveness.byAgent.clear();
   revival.pages.clear();
   revival.calls.length = 0;
+  revival.holds.clear();
   closure.calls.length = 0;
   closure.fail = null;
   resetDmClosureFoldForTest();
@@ -991,6 +1001,18 @@ async function flush(): Promise<void> {
   }
 }
 
+/** 그 DM 의 「닫은 뒤 메시지 읽기」 응답을 붙든다(#4273). 돌려준 함수를 부르면 붙든 읽기가 끝난다. */
+function holdRevivalRead(channelId: string): () => void {
+  let open: () => void = () => undefined;
+  revival.holds.set(
+    channelId.toLowerCase(),
+    new Promise<void>((resolve) => {
+      open = resolve;
+    })
+  );
+  return open;
+}
+
 describe("닫은 DM 은 사람이 읽을 새 메시지가 올 때만 돌아온다 (#4142)", () => {
   const WORK_CARD = { type: "text", props: { kind: "work_session" } };
 
@@ -1016,10 +1038,17 @@ describe("닫은 DM 은 사람이 읽을 새 메시지가 올 때만 돌아온�
 
   it("읽는 동안에는 깜빡이며 나타나지 않는다(숨은 채 기다린다)", async () => {
     const host = await closeDm2();
+    // 읽기를 시험이 붙든다. 예전에는 응답이 마이크로태스크로 곧장 끝나서, `await rerender()` 가 돌아온 시점에 「아직 읽는 중」인지가
+    // react-query 알림 타이머(setTimeout 0)와 `act` 복귀 중 누가 먼저 도는지에 달려 있었다(#4273): 부하에서 타이머가 먼저면 행이 이미 돌아와 있었다.
+    const finishRead = holdRevivalRead(DM_ID(2));
     setReadStates([readState(DM_ID(2), 10, 9)]);
     await rerender();
-    // 첫 프레임: 읽기가 아직 끝나지 않았다.
+    await flush();
+    // 읽기는 나갔고(닫은 뒤 9부터) 끝나지 않았다. 이벤트 루프가 몇 바퀴를 돌았든 숨은 채다.
+    // 요청이 나갔다는 단정이 「읽는 중이라서 숨었다」를 「읽기 후보가 아니라서 숨었다」와 가른다.
+    expect(revival.calls).toContainEqual({ channelId: DM_ID(2), after: 9, limit: 50 });
     expect(rowIds(host)).not.toContain(DM_ID(2));
+    finishRead();
     await flush();
     // 기본 대역은 사람이 쓴 글 한 건: 이제 돌아온다.
     expect(rowIds(host)).toContain(DM_ID(2));
