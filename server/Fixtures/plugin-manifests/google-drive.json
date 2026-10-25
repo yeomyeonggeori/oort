@@ -18,7 +18,24 @@
       "sourceURL": "https://developers.google.com/workspace/guides/configure-mcp-servers",
       "releaseRef": "hosted",
       "verified": true
-    }
+    },
+    "logoKey": "google-drive",
+    "category": "files",
+    "websiteURL": "https://drive.google.com",
+    "starterPrompts": [
+      {
+        "text": "내 드라이브에서 지난달에 만든 문서를 찾아 줘요.",
+        "tool": "google-drive.search_files"
+      },
+      {
+        "text": "최근에 연 파일을 목록으로 보여 줘요.",
+        "tool": "google-drive.list_recent_files"
+      },
+      {
+        "text": "찾은 문서를 읽고 핵심만 세 줄로 요약해 줘요.",
+        "tool": "google-drive.read_file_content"
+      }
+    ]
   },
   "mcp": {
     "protocolVersion": "2025-06-18",
