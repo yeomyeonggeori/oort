@@ -615,10 +615,10 @@ const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + CONV.composerTopAir;
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
 const SEND_SLOP = slopTo(CONV.composerCircle);
 
-// ---- 두 상태 (#4305 → #4456) --------------------------------------------------
+// ---- 두 상태 (#4305 → #4456 → #4518) ------------------------------------------
 // 입력창은 **접힘**(한 줄 알약: + · 글 · 보내기)과 **펼침**(글 칸 위, 도구 줄 아래: + 가 왼쪽 아래,
-// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **포커스가 있다**
-// 또는 **글이 있다**(`focused || text !== ''`)다.
+// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **누르는 중** 또는
+// **포커스가 있다** 또는 **글이 있다**(`pressing || focused || text !== ''`)다.
 //
 // #4305 는 글이 있을 때만 펼쳤다: 「포커스로 펼치면 보내서 비는 순간 같은 프레임에 한 줄로 돌아오는 것이
 // 키보드가 떠 있는 동안 성립하지 않는다」(owner 10-24, iOS 3053 실기 — 보낸 직후에도 포커스는 그대로다).
@@ -633,7 +633,14 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 // 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다. 키보드만 내려가고 포커스가 남는 길(앱이 백그라운드로
 // 갔다 옴·하드웨어 키보드)은 일부러 듣지 않는다: 포커스가 곧 「입력 중」이고, iOS 는 돌아올 때 자판을 되살린다.
 //
-// 접힘의 **움직임**은 이유에 따라 갈린다. 포커스를 잃어서 접힐 때는 펼침과 같은 스프링으로 줄어든다(자판이 내려가기
+// **누르는 순간 시작한다**(#4518, owner 10-25 「누르는 순간 바로」). 포커스 이벤트는 손을 뗀 뒤 RN 의 `onPress → focus()` · 네이티브를 돌아 JS 에 닿아서
+// 첫 포커스에서 `keyboardWillShow` 보다도 39~120ms 늦었다(#4456 실측) — 펼침이 키보드를 뒤따랐다. 그래서 손가락이 입력창에 닿는 순간(`composer-field` 의
+// `touchStart`)에 펼침을 시작한다. 단 **누름은 약속이지 사실이 아니다**: 탭이 포커스로 이어지지 않으면 되돌린다 — 손가락이 `PRESS_DRAG_SLOP_PT` 를 넘게
+// 움직임(끌기) · 터치 취소 · 손을 뗀 뒤 `PRESS_FOCUS_GRACE_MS` 안에 `onFocus` 가 안 옴. 손이 닿아 있는 동안에는 시간이 흘러도 되돌리지 않는다(길게 누르면
+// 포커스는 손을 뗄 때 온다). 포커스가 오면 `pressing` 이 `focused` 로 **한 묶음**에 넘어가 스프링이 끊기지 않고, 이미 포커스이거나 글이 있어 펼쳐져 있으면
+// 누름은 아무것도 하지 않는다(렌더·타이머·스프링 0). 햅틱은 없다(#4331).
+//
+// 접힘의 **움직임**은 이유에 따라 갈린다. 포커스를 잃어서(또는 누름이 포커스로 이어지지 않아 되돌릴 때) 접힐 때는 펼침과 같은 스프링으로 줄어든다(자판이 내려가기
 // 시작하는 프레임에 알약이 44pt 한 번에 줄면 그 위 대화가 통째로 튄다 — 녹화 프레임으로 확인). 포커스 없이 글이 비어서
 // 접힐 때(포커스 없이 보냄·지움)는 같은 프레임이다 — 위 owner 10-24 결함을 애니메이션으로 가리지 않는다.
 //
@@ -651,6 +658,19 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 // 맞대어 잰 숫자와 고른 근거가 그 절에 있다.
 /** 끌어 내리기: 이만큼(pt) 내려가고 세로가 가로의 두 배를 넘으면 자판을 내린다(Buzz `Listener`). */
 const DISMISS_DRAG_PT = 28;
+/**
+ * 누름 (#4518): 누른 손가락이 이만큼(pt) 넘게 움직이면 탭이 아니라 끌기다 — 앞당겨 편 입력창을 거둔다. RN `Pressability` 가 「가만히 누른
+ * 손」의 경계로 쓰는 `longPressDeactivationDistance`(10)와 같은 값이다. 이 입력창은 이미 그 눌림 처리 위에 서 있다: RN `TextInput` 은 손을 뗄
+ * 때 `onPress → focus()` 를 부른다.
+ */
+const PRESS_DRAG_SLOP_PT = 10;
+/**
+ * 누름 (#4518): 손을 뗀 뒤 `onFocus` 를 기다리는 시간(ms). 정상 경로는 손 뗌 → RN `onPress → focus()` → 네이티브 → `onFocus` 이고, 포커스 이벤트가 JS 에
+ * 닿는 것은 키보드(`keyboardWillShow`)보다도 39~120ms 늦었다(시뮬레이터 실측, #4456). 그 위에 첫 키보드가 늦게 뜨는 때·JS 가 바쁠 때의 꼬리를 얹은 값이다.
+ * **짧으면 정상 경로의 탭이 접혔다 되살아나고, 길면 포커스가 안 오는 드문 탭이 펼친 채 머무는 시간이 늘 뿐이다** — 그래서 길 쪽으로 잡았다.
+ * 손이 닿아 있는 동안에는 이 시계가 돌지 않는다(길게 누르면 포커스는 손을 뗄 때 온다).
+ */
+export const PRESS_FOCUS_GRACE_MS = 500;
 /** 도구 줄에 서는 도구들. 마이크(#4306)·예약 보내기(#4216)·사진 여러 장(#4296)은 여기에 붙는다. */
 const TOOL_SLOTS: readonly 'mention'[] = ['mention'];
 const TOOL_COPY = {mention: '@로 부르기'} as const;
@@ -1469,14 +1489,35 @@ export function Composer({
   // `onFocus`/`onBlur` 이고 다른 곳에서 쓰지 않는다: 보낸 뒤에도 포커스는 그대로이므로 보내기가 이 값을
   // 건드리면 안 된다(건드리면 보낸 직후 자판은 떠 있는데 한 줄 알약이 된다 — #4456 이 고친 바로 그 모양이다).
   const [focused, setFocused] = useState(false);
+  // 포커스를 쥐었는가의 **동기** 사본 — 터치 처리기(`onFieldTouchStart`)가 「이미 포커스」를 렌더 없이 읽는다.
+  const focusedRef = useRef(false);
+  // 누르는 중 (#4518). 손가락이 입력창에 닿은 순간부터 포커스가 와서 넘겨받거나 되돌릴 때까지 true 다 — 펼침의 조건 하나다(아래 `expanded`).
+  // 포커스는 손을 뗀 뒤에야 오므로 이 값이 펼침을 그만큼 앞당긴다. 손을 뗀 뒤 포커스를 기다리는 유예도 이 값이 참인 동안이다.
+  const [pressing, setPressing] = useState(false);
+  const pressingRef = useRef(false);
+  const pressOriginRef = useRef({x: 0, y: 0});
+  const pressGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPressGrace = useCallback(() => {
+    if (pressGraceRef.current === null) return;
+    clearTimeout(pressGraceRef.current);
+    pressGraceRef.current = null;
+  }, []);
+  // 언마운트: 기다리던 유예가 사라진 화면을 되돌리려 하지 않게.
+  useEffect(() => () => clearPressGrace(), [clearPressGrace]);
 
   // 안내를 읽은 뒤 고치러 돌아왔다 — 자판이 다시 오르면 안내가 한 화면을 넘는다
   // (R3-B1). 안내는 alert 로 이미 읽혔고, 키가 남아 있으면 다음 전송이 다시 막는다.
   const onInputFocus = useCallback(() => {
     setKeyBlocked(false);
     // 햅틱은 없다 — 포커스·펼침은 소리 없이 온다(#4331: 입력 길의 햅틱은 보내기 light 한 번뿐).
+    focusedRef.current = true;
+    // 누름이 포커스로 이어졌다(#4518): 펼침을 `pressing` 에서 `focused` 가 넘겨받는다. **한 묶음**이므로 `expanded` 는 한 번도 거짓이 되지 않고
+    // 누름이 건 스프링은 끊기지 않고 이어진다. 유예 시계도 여기서 멈춘다.
+    pressingRef.current = false;
+    clearPressGrace();
+    setPressing(false);
     setFocused(true);
-  }, [setKeyBlocked]);
+  }, [setKeyBlocked, clearPressGrace]);
 
   const onSelectionChange = useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1646,11 +1687,11 @@ export function Composer({
     offline !== true &&
     attachmentSurface.drafts.length < MAX_ATTACHMENTS_PER_MESSAGE;
 
-  // ---- 두 상태 (#4305 → #4456) ----------------------------------------------
-  // 포커스 **또는** 글. 포커스를 받는 렌더(`onFocus` 가 `focused` 를 올린 그 커밋)가 펼침의 첫 프레임이고, 아래
-  // 효과가 같은 커밋에서 스프링을 건다. 시작은 포커스 이벤트가 JS 에 닿는 때라서 첫 포커스에서는 `keyboardWillShow` 보다
-  // 39~120ms 늦다(시뮬레이터 실측, #4456) — 곡선이 아니라 이벤트 도달 지연이다.
-  const expanded = focused || text !== '';
+  // ---- 두 상태 (#4305 → #4456 → #4518) -------------------------------------
+  // 누르는 중 **또는** 포커스 **또는** 글. 펼침의 첫 프레임은 이 조건이 처음 참이 되는 렌더이고, 아래 효과가 같은 커밋에서 스프링을 건다.
+  // 누르는 중(`pressing`)이 있는 까닭은 **시작 시각**이다: 포커스 이벤트는 손을 뗀 뒤 RN `onPress → focus()` · 네이티브 · JS 를 돌아 와서 첫 포커스에서
+  // `keyboardWillShow` 보다도 39~120ms 늦게 닿았다(시뮬레이터 실측, #4456). 손이 닿는 순간 시작하면(owner 10-25 「누르는 순간 바로」) 그 지연이 없다.
+  const expanded = pressing || focused || text !== '';
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const expandedRef = useRef(expanded);
@@ -1662,18 +1703,23 @@ export function Composer({
     });
     return () => progress.removeListener(id);
   }, [progress]);
-  // 접히는 중 (#4456): **포커스를 잃어서** 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 포커스를 잃는 그
-  // 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
-  // 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다. 그래서 `onBlur` 처리기가 `focused` 와 한 묶음으로 올린다.
+  // 접히는 중 (#4456): **포커스를 잃어서**(또는 #4518: 누름이 포커스로 이어지지 않아서) 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 펼침의
+  // 마지막 이유가 사라지는 그 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
+  // 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다. 그래서 `onBlur`·`releasePress` 처리기가 `focused`·`pressing` 과 한 묶음으로 올린다.
   const [collapsing, setCollapsing] = useState(false);
   const shown = expanded || collapsing;
-  const onInputBlur = useCallback(() => {
-    // 움직이며 접히는 것은 **펼친 알약이 포커스만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
+  // 펼친 알약이 글 없이 접힐 때의 움직임을 연다. 포커스를 잃어서(`onInputBlur`)와 누름이 포커스로 이어지지 않아서(`releasePress`)가 **같은 판정**이다.
+  // 움직이며 접히는 것은 **펼친 알약이 펼침의 이유(포커스·누름)만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
+  const collapseWithMotion = useCallback(() => {
     if (expandedRef.current && currentTextRef.current === '' && !reduceMotion.current) {
       setCollapsing(true);
     }
-    setFocused(false);
   }, [reduceMotion]);
+  const onInputBlur = useCallback(() => {
+    focusedRef.current = false;
+    collapseWithMotion();
+    setFocused(false);
+  }, [collapseWithMotion]);
   useEffect(() => {
     if (expandedRef.current === expanded) return;
     expandedRef.current = expanded;
@@ -1697,8 +1743,8 @@ export function Composer({
       return;
     }
     // 접힘은 두 갈래다.
-    //  - 포커스를 잃어서(`collapsing`): 키보드가 내려가기 시작하는 프레임에 알약이 44pt 한 번에 줄면 알약 윗면과 그 위 대화가 통째로
-    //    튄다(시뮬레이터 녹화 프레임으로 확인, #4456). 같은 스프링으로 줄인다.
+    //  - 포커스를 잃어서·누름이 포커스로 이어지지 않아서(`collapsing`): 키보드가 내려가기 시작하는 프레임에 알약이 44pt 한 번에 줄면 알약 윗면과 그 위 대화가
+    //    통째로 튄다(시뮬레이터 녹화 프레임으로 확인, #4456). 앞당겨 펼친 알약을 되돌릴 때도 펼침과 같은 스프링으로 거꾸로 줄인다(#4518).
     //  - 포커스 없이 글이 비어서(포커스 없이 보냄·지움): **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다). 보낸 뒤에도 높이가 늘어난 채
     //    남던 실기 결함(owner 10-24)을 애니메이션으로 가리지 않는다. 보낸 뒤 포커스가 남아 있으면 `expanded` 가 안 바뀌므로 여기에 오지도
     //    않는다(빈 펼침 높이로 남는다 — 글 칸을 한 줄로 못 박는 것은 아래 `TextInput` 의 `height`).
@@ -1709,6 +1755,59 @@ export function Composer({
     progress.setValue(0);
     if (collapsing) setCollapsing(false);
   }, [expanded, collapsing, progress, reduceMotion]);
+
+  // ---- 누름 (#4518) ----------------------------------------------------------
+  // 손가락이 입력창에 닿는 순간 펼침을 시작하고, 그 탭이 포커스로 이어지지 않으면 되돌린다. 신호는 `composer-field`(입력창만 감싼 상자)에 건 **날 터치 이벤트**다.
+  // RN `TextInput` 의 `onPressIn`/`onPressOut` 은 같은 터치를 `Pressability` 가 가공한 것이라 `onPressOut` 이 손을 뗄 때와 영역을 벗어날 때를 가르지 못하고
+  // 130ms 까지 늦춰진다 — 끌기 문턱은 날 터치로만 잰다. 아래 처리기는 위쪽 끌어 내리기(`onDrag*`)처럼 **관찰만** 한다: 응답자를 잡지 않으므로 글자 선택·캐럿·포커스는
+  // 그대로 입력창이 받는다.
+  //
+  // 되돌림의 길은 셋이고 모두 `releasePress` 하나로 모인다.
+  //  - 끌기: 누른 자리에서 `PRESS_DRAG_SLOP_PT` 를 넘게 움직였다(탭이 아니다).
+  //  - 취소: 시스템이 터치를 가져갔다(`touchCancel`).
+  //  - 유예: 손을 뗐는데 `PRESS_FOCUS_GRACE_MS` 안에 `onFocus` 가 안 왔다. 손이 닿아 있는 동안에는 시계가 돌지 않는다.
+  // 포커스가 오면 `onInputFocus` 가 누름을 넘겨받아(`pressingRef` 를 내린다) 이 길들은 모두 아무 일도 안 한다.
+  const releasePress = useCallback(() => {
+    if (!pressingRef.current) return;
+    pressingRef.current = false;
+    clearPressGrace();
+    // `collapsing` 은 `pressing` 과 **같은 핸들러에서** 올려야 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다(위 `collapsing` 머리말).
+    collapseWithMotion();
+    setPressing(false);
+  }, [clearPressGrace, collapseWithMotion]);
+  const onFieldTouchStart = useCallback(
+    (event: GestureResponderEvent) => {
+      const {pageX, pageY} = event.nativeEvent;
+      if (pressingRef.current) {
+        // 손을 뗀 뒤 포커스를 기다리는 중에 다시 눌렀다(포커스가 늦어 한 번 더 누른 손) — 유예를 멈추고 이 손가락으로 이어 간다.
+        clearPressGrace();
+        pressOriginRef.current = {x: pageX, y: pageY};
+        return;
+      }
+      // 이미 포커스이거나 이미 펼침(글이 있음)이면 아무것도 하지 않는다 — 렌더도 타이머도 스프링도 없다.
+      if (focusedRef.current || expandedRef.current) return;
+      pressingRef.current = true;
+      pressOriginRef.current = {x: pageX, y: pageY};
+      setPressing(true);
+    },
+    [clearPressGrace],
+  );
+  const onFieldTouchMove = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!pressingRef.current) return;
+      const {pageX, pageY} = event.nativeEvent;
+      const origin = pressOriginRef.current;
+      if (Math.hypot(pageX - origin.x, pageY - origin.y) > PRESS_DRAG_SLOP_PT) {
+        releasePress();
+      }
+    },
+    [releasePress],
+  );
+  const onFieldTouchEnd = useCallback(() => {
+    if (!pressingRef.current) return;
+    clearPressGrace();
+    pressGraceRef.current = setTimeout(releasePress, PRESS_FOCUS_GRACE_MS);
+  }, [clearPressGrace, releasePress]);
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
   // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
@@ -2192,7 +2291,12 @@ export function Composer({
         )}
         <Animated.View
           style={{marginLeft: inputInset, marginRight: inputInset}}
-          testID="composer-field">
+          testID="composer-field"
+          // 누름 (#4518): 입력창에 닿는 터치만 듣는다 — 이 상자는 입력창만 감싼다(+ · 보내기 · 도구 줄은 형제다). 관찰만 하고 응답자를 잡지 않는다.
+          onTouchStart={onFieldTouchStart}
+          onTouchMove={onFieldTouchMove}
+          onTouchEnd={onFieldTouchEnd}
+          onTouchCancel={releasePress}>
         <TextInput
           ref={inputRef}
           // 글이 비면 높이를 **명시**한다 (#4305, owner 10-24): 값만 비우면 iOS(Fabric)가 멀티라인 입력창의
