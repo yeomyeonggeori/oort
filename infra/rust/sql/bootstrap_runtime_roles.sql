@@ -641,7 +641,14 @@ BEGIN
   --    scheduled_message_attachment, timestamps) — not drive_file_id, name, mime or the
   --    uploader: the momo_app row transaction re-reads what it deletes. The reservation
   --    table itself stays sealed from this role (ADR-0208 D3).
-  IF to_regclass('public.attachment') IS NOT NULL THEN
+  --    This file also runs BEFORE a release's migrations (Railway pre-deploy, compose
+  --    `runtime-roles`), and `reserved` / `unreserved_at` arrive in migration 150: on an
+  --    upgrade that first pass finds the table but not the columns, and naming them would
+  --    stop the whole file (ON_ERROR_STOP). So the grant waits for the columns; migration
+  --    150 grants them as it adds them, and the second pass repeats it.
+  IF EXISTS (SELECT 1 FROM pg_attribute
+              WHERE attrelid = to_regclass('public.attachment')
+                AND attname = 'unreserved_at' AND NOT attisdropped) THEN
     GRANT SELECT (id, workspace_id, status, message_id, reserved, unreserved_at, created_at)
       ON attachment TO momo_notifier;
   END IF;

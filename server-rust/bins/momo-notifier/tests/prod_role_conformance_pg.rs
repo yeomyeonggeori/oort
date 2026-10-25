@@ -177,8 +177,39 @@ struct ProdDb {
     su: PgPool,
 }
 
+/// Copy the migration files numbered below `first_new` into a scratch directory, so that
+/// `run_migrations` can lay down "the previous release's schema" before this release's own.
+fn migrations_before(first_new: i64) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "momo-migrations-before-{first_new}-{}",
+        Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch migrations dir");
+    for entry in std::fs::read_dir(default_migrations_dir()).expect("read migrations") {
+        let entry = entry.expect("migration entry");
+        let name = entry.file_name().to_string_lossy().to_string();
+        let number: Option<i64> = name.split('_').next().and_then(|n| n.parse().ok());
+        if name.ends_with(".sql") && matches!(number, Some(n) if n < first_new) {
+            std::fs::copy(entry.path(), dir.join(&name)).expect("copy migration");
+        }
+    }
+    dir
+}
+
 impl ProdDb {
     async fn create() -> ProdDb {
+        Self::create_with(None).await
+    }
+
+    /// An **upgrade**: the previous release's schema (every migration below `first_new`)
+    /// is already there when this release's roles file runs — before its own migrations,
+    /// which is the order Railway's api pre-deploy and the compose `runtime-roles` service
+    /// use — and then the rest of the migrations and the roles file again.
+    async fn create_upgrading_from_before(first_new: i64) -> ProdDb {
+        Self::create_with(Some(first_new)).await
+    }
+
+    async fn create_with(upgrade_from_before: Option<i64>) -> ProdDb {
         assert_disposable_cluster();
         let admin = PgPoolOptions::new()
             .max_connections(2)
@@ -201,6 +232,14 @@ impl ProdDb {
         let url = url_for(&name);
         // Same order as Railway's api pre-deploy: roles, migrate, roles again.
         apply_runtime_roles(&url);
+        if let Some(first_new) = upgrade_from_before {
+            let previous = migrations_before(first_new);
+            run_migrations(&url, &previous, SeedMode::None)
+                .expect("apply the previous release's migrations");
+            let _ = std::fs::remove_dir_all(&previous);
+            // This release's pre-deploy runs the roles file on the OLD schema.
+            apply_runtime_roles(&url);
+        }
         run_migrations(&url, &default_migrations_dir(), SeedMode::None)
             .expect("apply all migrations");
         apply_runtime_roles(&url);
@@ -573,6 +612,38 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     assert_eq!(
         attachments_left, 0,
         "the idle unbound attachment was reclaimed (candidate read as the notifier, delete as momo_app)"
+    );
+}
+
+/// **Upgrade order (#4443, migration 150).** The roles file runs before a release's
+/// migrations as well as after them, and migration 150 adds `attachment.reserved` /
+/// `unreserved_at` — columns the notifier's grant names. On an upgrade the first pass
+/// sees the table without the columns; a grant that named them anyway stopped the whole
+/// file (`column "reserved" of relation "attachment" does not exist`, ON_ERROR_STOP) and
+/// with it the deploy. Every other suite here builds its database from nothing, where the
+/// table does not exist yet on the first pass, so none of them could see it.
+///
+/// Take the existence guard off the grant in `bootstrap_runtime_roles.sql` and this
+/// goes red inside `create_upgrading_from_before` (the pre-migrate pass fails).
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attachment_grant() {
+    let db = ProdDb::create_upgrading_from_before(150).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let reads = sqlx::query("SELECT reserved, unreserved_at FROM attachment LIMIT 1")
+        .fetch_all(&notifier)
+        .await;
+    let name = sqlx::query("SELECT name FROM attachment LIMIT 1")
+        .fetch_all(&notifier)
+        .await;
+    db.finish().await;
+    assert!(
+        reads.is_ok(),
+        "after the upgrade the notifier reads the candidate columns: {reads:?}"
+    );
+    assert!(
+        name.is_err(),
+        "…and still not the file name: the grant is the seven candidate columns only"
     );
 }
 
