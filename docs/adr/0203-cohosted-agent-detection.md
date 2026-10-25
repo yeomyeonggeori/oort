@@ -9,6 +9,7 @@
 - 증보(**Accepted** 2026-10-19, 통합자): **2026-10-19 설치 한 번에 Hermes까지** (#4072, 성재 2026-10-19 「제로 베이스 온보딩 개선 묶음도 진행」) — 파일 끝. D8을 구현 이름으로 확정하고, 생성기의 `HERMES_*`·로컬 opt-in·`OORT_COHOSTED_AGENT_TOOLS_LOCKED` 자동 주입과 Railway 카탈로그의 `hermes` 서비스를 더한다. D6-5 attest의 의미가 번들 배포 모양에 한해 바뀐다. D1~D5·D7·K1~K7은 바뀌지 않는다.
 - 증보: **2026-10-19 Hermes의 모델 인증에 구독 OAuth 허용**(#4071, owner 결정) — Hermes가 자기 볼륨에 Codex·Claude 구독 OAuth를 보관해 모델 인증에 쓴다. 파일 끝. D1~D9는 바뀌지 않는다.
 - 증보(**Accepted** 2026-10-20, owner 승인 인용): **2026-10-20 같은 서버 Hermes의 모델 고르기** (#4143) — 파일 끝. 핀에 Hermes 제공자(`provider`)와 모델을 한 쌍으로 저장하고, 서버가 Hermes `/api/model/options`의 「로그인된 제공자」 목록 안으로 선택을 제한하며, 워커가 `/v1/chat/completions`에 둘을 함께 보낸다. D2의 고정 요청 목록에 읽기 GET 하나가 늘고, migration 144가 핀 표에 열 두 개를 더한다. D1·D3~D9·K1~K7은 바뀌지 않는다.
+- 증보(**Proposed** 2026-10-25, 독립 설계 검토 r2 지적 반영 — r3 대기): **2026-10-25 환경 사실 읽기(platform·loginRelay)와 호스팅 제안 문구** (#4336, 온보딩 r2 R2-00) — 파일 끝. 운영자 전용 상태 읽기(`GET …/cohosted-agent`)에 닫힌 열거형 `environment{platform, loginRelay}`를 더하고, 「선언 없음」에서 운영자에게 계획 표시 카드를 여는 것까지 정한다. D1의 마지막 문장(「아무것도 보이지 않는다」)만 좁혀지고, 나머지 D·K·A·L·M과 D2의 요청 목록은 바뀌지 않는다. 구현은 #4337·#4338·#4339·#4340과 새 이슈(제안 카드 등)다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
@@ -551,3 +552,185 @@ D1~D9, K1~K7, 게이트웨이 `/v1/chat/completions` SSE 경로(D5), `HERMES_API
 ### 바뀌지 않는 것
 
 D1·D3~D9, K1~K7, `HERMES_API_KEY` 의미, 게이트웨이 SSE 경로(D5), oort가 토큰을 소유·저장하지 않는다는 불변식, `lockgate`(도구 잠금) 규칙, `probe`가 보내는 요청(두 개 + 요청 시 toolsets), Hermes 설정(`hermes-kwak` 포함)과 `garam-api`.
+
+## 증보 2026-10-25 — 환경 사실 읽기(platform·loginRelay)와 호스팅 제안 문구 (#4336)
+
+- Status: **Proposed** (2026-10-25, 독립 설계 검토 r1 FAIL → r2 FAIL(High 1) 지적 반영 판 — r3 대기)
+- 기안: Sonnet 5.5 엔진 워커 (#4336, 온보딩 r2 R2-00). 근거: 리서치 r2 온보딩 보고서 §2·§3.5·§5.0·§5 P0(로컬 자료, 레포 밖). 이슈 #4336이 이 증보를 ADR로 지정한다: 운영자 전용 읽기 필드 추가는 공개 API 변경이라 이 증보의 Accepted가 #4337의 머지 조건이고(ADR-0100), 경계는 바뀌지 않으므로 새 ADR은 두지 않는다.
+- owner 결정(원문 인용):
+  - 성재 2026-10-21: 「VM에 헤르메스가 없다면 헤르메스를 호스팅할지 물어보고, 헤르메스를 호스팅하고 연동한 경우엔 GUI로 온보딩 레벨에서 헤르메스의 구독계정을 연동하고 기본 모델을 선택하고 그런 UXUI를 포함하고 싶어.」 · 「온보딩에서는 기본으로 OpenAI」
+  - 같은 날 AskUserQuestion: 대상 환경 「둘 다 한 틀로」(Railway와 일반 VM(Docker Compose)을 한 틀로, 실측은 Railway부터) · 호스트 셸 권한 「박스 안만」(oort 본체는 타입 있는 동작만). 호스트 실행 기반은 ADR-0210(#4347, 작성 전)이 정하고 이 증보는 정하지 않는다.
+  - 위임 2026-10-22: 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 — 아래 **[권장]** 표시는 모두 이 위임에 따른 planner 결정이고 owner에게 보고된다.
+- 표기: [V] 이 세션에서 직접 확인(코드·문서는 `track/engine` `5bdecd348` 기준 파일:줄, 외부 문서는 2026-10-25 받음) · [추정] 해석 · [권장] 위임 결정 · `runtime-unverified` 실행 안 함. 이 증보는 설계이고 이 PR은 문서만 바꾼다.
+
+### 비교 참조 (ADR-0100)
+
+- [리서치 r2 §2.1, 2026-10-21 확인] Pickle·Muse·Grok Bot·dots는 가입하면 벤더 클라우드 컴퓨터가 생겨 첫 실행에 호스팅 질문이 없다. oort는 운영자가 직접 호스팅하므로 질문이 남는다 — 그래서 「계획을 보여 주되 실행은 사람이 한다」로 부담을 줄인다(F6).
+- [리서치 r2 §2.3] Railway·Render·Coolify·Umbrel은 템플릿·한 줄 설치로 시크릿을 자동 생성하고 완료를 헬스체크 같은 **실제 응답**으로 알린다. 이 증보도 「설치했어요」를 단정하지 않고 이후 상태 읽기가 선언을 돌려줄 때만 전환한다(F6).
+- Railway는 시스템 변수를 모든 배포에 주입한다(사실 6). 환경 사실을 API 호출 없이 알 수 있는 근거다.
+
+### 확인한 사실 [V]
+
+1. 상태 읽기는 네트워크를 쓰지 않는다. `routes/cohosted_agent.rs:1-9`(모듈 머리말), `:244-267` `status()`는 `workspace_scope` → `require_instance_operator_write`(`:251`) → `declaration()` 순이고, 선언됐을 때만 핀 조회가 하나 더 든다(`:253-257`). 응답 `StatusResponse`(`:226-242`)의 키는 `schema`·`declaration`·`endpointLabel?`·`toolsLockAttested`·`connectable`·`connectedAgentId?`다. 스키마 문자열은 `momo.cohosted_agent.status.v0`(`:80`), `declaration`은 `not_declared|key_missing|url_refused|ready` 넷(`:134-153`). `endpointLabel`은 선언 주소의 가린 origin이다(`:232-234`).
+2. 선언과 중계 설정은 부팅 때 한 번 읽는다: `Config::from_env`가 `CohostedAgentConfig::from_env()`(`server-rust/bins/momo-server/src/config.rs:2431`)와 `LoginRelayConfig::from_env()`(`:2432`)를 부르고, 프로세스당 한 번 불린다(`main.rs:25`). 두 파서는 조회 함수를 주입받아(`from_lookup`, `config.rs:1790`·`:1854`) 프로세스 env를 건드리지 않고 시험할 수 있다. `env()`는 빈 값·공백만인 값을 없는 것으로 걸러내고 나머지는 원문 그대로(trim 없이) 돌려준다(`:2361-2366`).
+3. 로그인 중계의 「켜짐」은 두 단계다. `LoginRelayConfig::configured()`(`config.rs:1889`)는 URL과 키(32~256자, 문자 집합 제한)가 있는지만 보고, `target(&settings)`(`:1896`)는 거기에 쓰기 게이트(`validated_base_url`, 호출마다 프로세스 env `AGENT_PROVIDER_LOCAL_HOSTS`를 읽는다 — `server-rust/crates/momo-settings/src/provider.rs:284-290`)와 「경로 없음」을 더한다. 열 개 중계 라우트 메서드(모델 5·앱 5)는 다섯 공유 본문을 거쳐 모두 `authorize`(운영자 게이트) 뒤 `prepare()`를 지나고, `409 login_relay_off`는 거기서 `target(...)`이 `None`일 때만 난다(`routes/login_relay.rs:398-410`, 핸들러 `:587-760`). 본문이 있는 둘(`start_of`·`complete_of`)은 본문 파싱이 `prepare()`보다 앞이라 형식이 틀린 본문은 중계가 꺼져 있어도 `400`이 먼저 난다(`:632-640`·`:689-695`). 같은 파일 머리말의 규칙 1: 「so a stranger learns nothing — not even whether the relay is configured」(`:19-20`).
+4. 화면 쪽 현재 모양. 클라이언트는 중계가 꺼진 것을 그 409로 알아낸다(`packages/momo-core/src/features/settings/loginRelay.ts:149`). 문구는 Railway로 고정이다: `MODEL_SHELL_COMMANDS`(`loginRelay.ts:262-266`), `appShellCommand`(`:279-283`), `MODEL_LOGIN_COPY.shellLead`·`APP_LOGIN_COPY.shellLead`(`:332`·`:352`), `COHOSTED_COPY.volumeNote`(`cohostedAgent.ts:209`). 상태 파서는 `schema`가 `.v0`가 아니면 응답 전체를 버리고(`cohostedAgent.ts:90`), 읽기 결과는 `not_declared`를 `hidden`, 연결 오류(비-`ApiError`)를 `hidden`, 5xx를 `unknown`으로 접는다(`:142-156`). 이 읽기(`fetchCohostedStatus`, 같은 질문 키 `["cohosted-agent", ws]`)를 네 곳이 나눈다: `CohostedAgentCard.tsx:52-57`, `ModelLoginPanel.tsx:405-420`, `AgentProviderPinSection.tsx:71-75`(`:111`의 `envLinkAvailable: kind === "ready"`는 `ready`를 「선언됨」으로 읽는다), `PluginAppLogin.tsx:38-45`.
+5. 플랫폼 도장. 생성기 표 `platform_profiles()`는 `railway`(T2)와 `fly`·`aws-lightsail`·`gcp-vm`·`host-network`(T1) 다섯 행이다(`scripts/self_host_env.sh:219-226`). 셸 `oort_env_tier`는 도장이 없으면 T1이고, 이름은 trim 없이 정확 일치로 찾으며, 모르는 이름은 실패다(`scripts/lib/oort_common.sh:46-73`). **이 도장은 `api` 프로세스 env에 배선되지 않는다.** compose `api` 서비스의 `environment`(`infra/rust/docker-compose.rust.yml:252-468`, `env_file` 없음)에도 Railway 카탈로그 `api` 변수(`infra/railway/railway.json`)에도 `MOMO_SELF_HOST_PLATFORM`이 없고, Railway 공유 변수는 서비스에 참조 변수를 만들어야 닿는다(「Adding a shared variables to a service creates a Reference Variable」, `https://docs.railway.com/variables`, 2026-10-25 받음. `infra/railway/README.md:168-169`는 도장이 공유 변수로 남고 doctor가 env 파일에서 읽는다고 적는다). 서버 Rust 코드는 도장도 이 표도 읽지 않는다(탐색 결과 0건). 지금 배선에서 서버가 도장을 보게 되는 경우는 운영자가 `api` env에 직접 넣었을 때뿐이다.
+6. Railway 시스템 변수: 「Railway provides the following additional system environment variables to all builds and deployments.」 — 표의 `RAILWAY_ENVIRONMENT_ID | The environment id of the service instance.`(`https://docs.railway.com/reference/variables`, 2026-10-25 받음). 레포에는 이 변수를 읽은 곳이 없다(셸 doctor가 보는 `RAILWAY_ENVIRONMENT`는 다른 이름이다 — `scripts/lib/oort_doctor.sh:1628`). 실제 Railway `api` 프로세스에서 보이는지는 `runtime-unverified`.
+7. 운영자 스펙 `docs/api/openapi.operator.yaml`에는 `/cohosted-agent/models`·`/model`만 있고(`:589`·`:619`) 상태·probe·connect 라우트는 없다. 이 파일과 응답 모양을 대조하는 검사도 없다(스크립트·시험 중 파일명을 읽는 곳 0건. 머리말이 이유를 적는다: 게이트 스택이 운영자 범위를 제공하지 않는다, `:6-10`).
+8. Hermes 번들(compose): `hermes`는 `mem_limit ${MOMO_HERMES_MEM_LIMIT:-2g}`·`cpus: 1`(`docker-compose.rust.yml:610-611`). `--with-agents`는 이미 있는 비밀(`HERMES_API_KEY`, 형식이 맞는 `HERMES_LOGIN_RELAY_KEY`)을 보존하고, 선언 키(`HERMES_BASE_URL`·`HERMES_LOGIN_RELAY_URL`·`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK`·`OORT_COHOSTED_AGENT_TOOLS_LOCKED`)는 번들 값으로 다시 쓰고, 두 목록(`AGENT_PROVIDER_LOCAL_HOSTS`·`COMPOSE_PROFILES`)에는 항목을 합치며, 다른 `HERMES_BASE_URL`이 이미 있으면 거절한다(`self_host_env.sh:1418-1478`). 문서의 절차는 두 명령이다: 플래그로 env를 쓰고 `--compose up -d --wait`로 올리며, 이미 떠 있는 스택은 api·agent-worker를 다시 만들어야 반영된다(`docs/SELF_HOST.md:436-470`). `--platform railway`와 함께 쓸 수 없다(`self_host_env.sh:277-278` — Railway는 카탈로그의 `hermes` 서비스를 쓴다, `docs/SELF_HOST_AGENT.md` §3.4.1). `docker-compose.host-network.yml`에는 `hermes` 항목이 없고 최상위 `networks: !reset {}`로 `private` 망을 없앤다(`:1-30`) — `host-network`에서 `--with-agents`가 뜨는지는 `runtime-unverified`.
+9. 「선언」의 모양. `declared`는 `HERMES_BASE_URL`이 있고 공백만이 아닐 때다(`config.rs:1793`). compose 기본 스택은 이 변수를 `${HERMES_BASE_URL:-}`(빈 값)로 배선하므로(`docker-compose.rust.yml:385`) Hermes 없는 기본 스택은 늘 `not_declared`다. **Railway 카탈로그는 `api`에 `HERMES_BASE_URL=http://hermes.railway.internal:8642/v1`과 `HERMES_LOGIN_RELAY_URL`을 고정 변수로 넣고 `hermes` 서비스를 함께 싣는다**(`infra/railway/railway.json` api 변수, `infra/railway/README.md:143-148`·`:188-190`·`:494-495`). 카탈로그로 올린 인스턴스는 `not_declared`가 아니라 `key_missing`/`ready`로 시작하고, `not_declared`+`railway`는 카탈로그 이전이거나 수기로 구성한 인스턴스에서만 나온다.
+
+### 바뀌는 기존 결정
+
+- **D1의 마지막 문장**(「운영자가 선언한 호스트가 없으면 이 기능 전체가 꺼진 상태이고 아무것도 보이지 않는다」)을 좁힌다. 꺼진 것(프로브·연결·네트워크 요청 0)은 그대로이고, 인스턴스 운영자 한 사람에게는 「선언 없음」과 계획을 보이는 카드가 열린다(F6). 근거: 성재 「VM에 헤르메스가 없다면 헤르메스를 호스팅할지 물어보고」. 클라이언트의 같은 규칙(`cohostedAgent.ts` 머리말 규칙 1, `:146`)과 서버 설정의 주석(`config.rs:1762-1766`의 「shows nothing」)은 구현이 고친다(슬라이스).
+- **Q2 (b)**(위임 결재 「attest 뒤에만 카드」, 원문 「attest 전에는 체크리스트 링크만 보인다」)는 `declaration ≠ not_declared`인 단계의 규칙으로 그대로다. `not_declared`의 제안 카드는 준비됨을 암시하지 않는 범위에서 D1 좁힘의 일부다(F6).
+- 그 밖의 결정은 바뀌지 않는다(아래 「바뀌지 않는 것」).
+
+### F1. 환경 사실은 프로세스 env만 읽는다 — env는 부팅 때 한 번, 판정은 파싱된 설정에서 (D1 불변)
+
+- 서버가 운영자에게 알려 주는 환경 사실은 셋이다: 선언 단계(기존 `declaration` — 이 증보가 바꾸지 않는다), `platform`, `loginRelay`. 뒤의 둘을 새 필드 `environment`에 담는다.
+- D1의 금지는 그대로다. 원문: 「내부망을 훑지 않는다. 후보 이름을 추측하지 않는다(`hermes.railway.internal`을 기본값으로 찍어 보지 않는다). Railway API 토큰을 oort에 저장하지 않으며 Railway API를 부르지 않는다.」 이 증보는 여기에 파일시스템·cgroup·`/proc`·DNS로 환경을 추정하지 않는다는 것을 더한다. 새 입력 둘(`RAILWAY_ENVIRONMENT_ID`·`MOMO_SELF_HOST_PLATFORM`)은 D1의 에이전트 감지 입력(선언 호스트 `HERMES_BASE_URL` 한 줄)이 아니라 안내 문구용 환경 사실이고, 호스트를 찾거나 호출하는 데 쓰이지 않는다. 읽는 곳은 `api` 프로세스가 이미 가진 env와 이미 파싱된 설정뿐이다.
+- **시점**: env는 부팅 때 한 번 읽는다(사실 2). `platform`은 파싱 시점에 열거형으로 분류해 **열거형만 보관한다** — 원문 문자열을 `Config`·`AppState`에 두지 않는다(둘 다 `derive(Debug)`라 `{:?}`가 원문을 찍을 수 있다, `config.rs:54-55`·`:1769`) [권장]. `loginRelay`는 요청마다 `state.login_relay.config.target(&state.settings).is_some()`을 부른다. 라우트도 요청마다 같은 호출을 하므로 같은 값이다(F4). 이 호출은 파싱된 설정에 더해 쓰기 게이트가 호출마다 읽는 프로세스 env `AGENT_PROVIDER_LOCAL_HOSTS`에 기댄다(`server-rust/crates/momo-settings/src/provider.rs:284-290`·`:381-391`) — 실행 중 프로세스의 env는 바뀌지 않으므로 상태와 라우트가 어긋나지 않는다 [추정]. env가 바뀌는 사건은 **`api` 재시작**이다: 운영자가 env를 바꾸거나 Hermes를 올려도 `api`가 새 env로 다시 뜨기 전에는 화면이 이전 값을 말한다 [추정: 두 플랫폼 모두 프로세스 env는 기동 때 고정된다].
+- `status()`는 계속 네트워크 0이고(사실 1), D2의 요청 목록은 늘지 않는다. D2의 「백그라운드 폴링·부팅 시 자동 프로브 없음」은 **프로브**(Hermes로 나가는 요청)의 말이고, 이 증보의 상태 읽기(F6의 폴링)는 Hermes로 나가는 요청이 0이라 그 규칙에 걸리지 않는다. 새 표·열·감사 행·시크릿·egress 면제 입력이 없다.
+
+### F2. `environment`는 닫힌 열거형 둘이다 — 문자열을 되돌리지 않는다
+
+- `GET /v1/workspaces/{ws}/cohosted-agent`에 `environment: { platform, loginRelay }`를 더한다. `platform ∈ {railway, compose, unknown}`, `loginRelay ∈ {on, off}`. 키 집합은 정확히 이 둘이고 둘 다 항상 있다(생략·`null` 없음). `environment`는 **`declaration` 값과 무관하게 항상 있다** — 가장 필요한 때가 `not_declared`이기 때문이다 [권장]. probe·connect 응답에는 싣지 않는다(상태 읽기 한 곳).
+- 값은 서버 코드의 열거형 변종에서만 나온다. 이 증보가 **새로** 내보내는 env 문자열은 0이다: 도장 문자열·Railway 환경 id·중계 URL·키는 응답·로그·감사·오류 어디에도 나가지 않고, 열거형 밖의 값은 `unknown`으로 접힌다. (기존 `endpointLabel`은 선언 주소의 가린 origin으로 지금도 나가고 바뀌지 않는다.)
+- 인스턴스 운영자 전용(D3 불변)이다. `require_instance_operator_write`가 첫 게이트라 비운영자는 403이고 본문에 `environment`가 없다 — 중계 라우트의 규칙 1(사실 3)과 같은 선이다.
+- `environment`는 권한·egress·연결 가능 판정에 쓰이지 않는다. `declaration`·`connectable`·`connectedAgentId`는 `environment`와 무관하게 같은 값이다 [권장]. 값을 속여도 바뀌는 것은 안내 문구뿐이게 못박는다.
+- **스키마 문자열은 `momo.cohosted_agent.status.v0`로 두고 필드만 더한다** [권장]. 이유 [V]: 클라이언트 파서가 `.v0`만 읽고 다른 값이면 상태 전체를 버리며 소비자가 넷이다(사실 4). 서버는 운영자가, 클라이언트는 앱 업데이트가 따로 올리므로 [추정] 올리면 옛 클라이언트가 상태를 통째로 잃는다.
+- **클라이언트 호환 규칙** [권장]: `environment`가 없거나 객체가 아니면(옛 서버·깨진 답) 없는 것으로 읽는다. 필드 단위로 접는다: 없거나 허용 목록 밖인 필드만 `platform`은 `unknown`, `loginRelay`는 「모름」(지금처럼 로그인을 시작해 409로 안다)이 되고, 상태 읽기 전체를 버리지 않는다.
+
+### F3. `platform` 판정 규칙
+
+입력은 `api` 프로세스 env의 두 변수뿐이다. 위에서부터 처음 맞는 줄이 이긴다. 「비어 있다」는 `env()`의 규칙이다(길이 0이거나 공백만, 사실 2).
+
+| 순서 | 조건 | `platform` |
+|---|---|---|
+| 1 | `RAILWAY_ENVIRONMENT_ID`가 비어 있지 않다 | `railway` (도장 값과 무관) |
+| 2 | `MOMO_SELF_HOST_PLATFORM`이 비어 있다(없음 포함) | `compose` |
+| 3 | 도장이 `railway` | `railway` |
+| 4 | 도장이 `fly`·`aws-lightsail`·`gcp-vm`·`host-network` (생성기 표의 T1 행) | `compose` |
+| 5 | 그 밖의 모든 값 | `unknown` |
+
+- 도장은 **trim하지 않고 정확 일치·대소문자 구분으로** 비교한다 [권장]: `" railway"`(앞뒤 공백)는 5(`unknown`)다. 셸도 trim하지 않고 같은 값을 모르는 이름으로 거절한다(사실 5; 생성기는 `^[a-z0-9-]+$`만 쓴다, `self_host_env.sh:247`). 단 공백만인 도장은 셸이 모르는 이름으로 거절하지만 서버는 `env()`가 없는 것으로 걸러 `compose`로 읽는다(생성기는 그 값을 쓰지 않는다). 2는 `oort_env_tier`의 「도장 없음 = T1」과 같은 규칙이고, 5는 그 함수가 모르는 이름을 오류로 내는 자리의 부드러운 짝이다(서버는 죽지 않고 `unknown`).
+- 시스템 변수가 도장을 이긴다 [권장]. 시스템 변수는 플랫폼이 주입하는 값이고 도장은 운영자가 쓴 값이라, 다른 곳에서 옮겨 온 env의 도장(T1 이름)이 실제 Railway 위치를 가리지 못하게 한다. 반대 방향은 막지 못한다: 도장 `railway`가 Railway 밖에서 `api` env에 직접 들어오면(운영자가 넣거나 옮겨 온 env) 3으로 `railway`가 된다 — 운영자의 선언이고 바뀌는 것은 안내 문구뿐이라 막지 않는다.
+- **현행 배선에서 닿는 줄**: 도장이 `api` env에 배선되지 않는다 [V](사실 5). 그래서 표준 배포에서 Railway는 1로, compose는 2로 판정될 것이다 [추정 — 1은 `runtime-unverified`]. 3~5는 운영자가 도장을 `api` env에 직접 넣었을 때만 닿는다. 이 증보는 **배선을 더하지 않는다**(#4337 ④ 「추가 배선 0」, 기각 대안 F). 운영자가 직접 넣는 길은 오판의 복구 수단이다: Railway `api`에서 1이 닿지 않으면 `MOMO_SELF_HOST_PLATFORM=railway`를 `api` 서비스 변수로 넣고 재배포하면 3으로 같은 결과가 난다.
+- **한계 [추정]**: `compose`는 「Railway 신호가 없고 도장이 없거나 T1 행」이지 「docker compose가 도는 것을 확인했다」가 아니다. ADR-0184 D1이 T2로 둔 다른 관리형 플랫폼(AWS ECS/Fargate·Cloud Run)은 도장 행이 없어 `compose`로 읽힌다 — 셸 규칙과 같은 한계다. 그래서 `compose` 문구는 조건형으로 쓴다(F7). `host-network`도 `compose`로 읽히지만 그 오버레이에서 `--with-agents` 계획이 성립하는지는 `runtime-unverified`다(사실 8). 환경을 더 정확히 알아내는 길(기각 대안 B)은 D1의 「추측 금지」라 열지 않는다.
+- T1 이름 목록은 서버 코드에 복제된다. 서버 이미지가 `self_host_env.sh`를 싣고 있지만(`server-rust/Dockerfile:361`) 서버 경로에 셸 표 파서를 들이지 않는다(기각 대안 N). 표와 코드가 어긋나지 않게 **드리프트 시험**이 지킨다(수용 기준 8).
+- **`RAILWAY_ENVIRONMENT_ID`가 실제 Railway `api`에서 보이는지는 `runtime-unverified`다**(문서는 「all builds and deployments」, 사실 6). 안 보이면 Railway가 `compose`로 읽혀 `platform`으로 고르는 문구 전부가 틀려진다 — 대체 명령·삭제 안내·호스팅 제안 카드의 계획(Railway에서 `--with-agents`를 안내하면 그 플래그는 거절된다, 사실 8)이다. 그래서 확인 항목이다 [권장]: 머지 전에 Railway에 접근할 수 있는 PR 작성자가 owner 승인 뒤 임시 서비스로 실측할 수 있으면 그쪽을 우선하고 PR 본문에 적는다(값이 아니라 판정만). 못 하면 이 변경이 실린 릴리스의 첫 운영 확인에서, Railway에 올라 있는 인스턴스의 운영자가 자기 토큰으로 `GET …/cohosted-agent`를 읽어 `environment.platform`이 `railway`인지 본다(읽기 전용). 아니면 위 복구 수단으로 즉시 고치고, 도장 배선을 더하는 후속 증보를 낸다. 복구는 설정만으로 되고 퇴행은 문구에 한정된다.
+
+### F4. `loginRelay` 판정 — 라우트와 같은 술어
+
+- `on` ⇔ 중계 라우트가 쓰는 판정과 같다: `LoginRelayConfig::target(&settings)`가 `Some`일 때(사실 3). 아니면 `off`. **같은 함수를 부르고 복제하지 않는다.** [권장 — `configured()`가 아니라 `target()`] 이유 [V]: `configured()`는 URL이 쓰기 게이트를 넘지 못하거나 경로를 달고 있어도 참이다. 그 값을 쓰면 화면은 「켜짐」인데 열 개 라우트가 모두 `409 login_relay_off`를 내는 어긋남이 생긴다.
+- 선언 상태와 무관한 설정 사실이다(Hermes가 선언되지 않아도 값이 있다). 이 필드가 필요한 이유: 중계 라우트는 연결된 에이전트 id가 있어야 부를 수 있어(`…/agents/{agent}/model-login`, L4) 연결 전에는 화면이 켜짐 여부를 알 길이 없다.
+- **한계**: `on`은 「설정이 있고 주소가 게이트를 통과한다」이지 「사이드카가 살아 있다」가 아니다. 상태 읽기는 네트워크 0이라 중계에 묻지 않는다(F1). 사이드카가 죽었거나 키가 맞지 않으면 로그인 시작이 기존 오류 분기로 실패한다. 화면은 `on`을 「지금 로그인할 수 있다」로 단정하지 않는다.
+- `off`일 때 화면은 L1 (c)의 셸 명령 대체 경로를 보인다(불변). 명령의 문구는 F7이 정한다.
+
+### F5. 서버는 화면 단계를 내려주지 않는다 [권장]
+
+「선언 단계」는 기존 `declaration`·`toolsLockAttested`·`connectable`·`connectedAgentId`다. 온보딩에서 보이는 단계(없음 → 찾음 → 연결됨 → 모델 인증 → 모델 고르기)는 클라이언트가 이 필드와 `environment`, 모델 라우트(M3)·로그인 라우트(L4)의 응답으로 **파생**한다. 서버에 `stage` 같은 필드를 두면 화면이 개편될 때마다 공개 API가 바뀐다.
+
+### F6. 호스팅 제안은 「계획 표시」까지다
+
+- **보이는 조건**: 상태 읽기가 200이고 `declaration = not_declared`일 때, 인스턴스 운영자에게만(비운영자는 403이라 카드가 없다). 준비됨을 암시하는 말(「찾았어요」·「연결할 수 있어요」)은 쓰지 않는다(Q2 (b)): 「이 서버에는 Hermes가 아직 없어요. 같이 설치할까요?」 수준의 질문과 계획만 말한다. 선언이 일부인 상태(`key_missing`·`url_refused`·잠금 선언 없음)는 기존 문구의 몫이고 이 카드가 아니다. 어디에 놓는지(온보딩 AI 단계·AI 허브)는 새 이슈가 정한다. [권장]
+- **닿는 배포 [V]**(사실 9): 카드는 Hermes 없는 compose 기본 스택에서 늘 뜬다. Railway 카탈로그로 올린 인스턴스는 `HERMES_BASE_URL`이 고정돼 있어 `not_declared`가 아니므로 이 카드를 보지 못한다. 그 인스턴스에서 `hermes` 서비스가 없거나 죽은 상태는 `declaration`이 `ready`/`key_missing`이고 프로브가 `unreachable`로 말한다(D3 그대로: 「주소를 확인해 주세요」 한 줄). 이 증보는 그 화면을 바꾸지 않는다: `unreachable`은 「서비스가 없다」의 증명이 아니라서(잠금 게이트가 거절해 리스너가 없는 경우도 같다, A5) 「호스팅 제안」 문구를 붙일 수 없다. 그 상태를 위한 안내는 새 이슈 후보다.
+- **카드가 하는 일** [권장]: `environment.platform`으로 고르는 **정적** 계획을 보인다.
+  - `compose`: ① `scripts/self_host_env.sh --with-agents`(+ 설치 모드 플래그)로 env에 선언 키를 쓴다 — 이미 있는 비밀은 그대로 두고 선언 키는 번들 값으로 쓰며, 다른 `HERMES_BASE_URL`이 이미 있으면 거절한다(사실 8). ② `scripts/self_host_env.sh --compose up -d --wait`로 hermes를 올리고 `api`·`agent-worker`를 다시 만든다 — 다시 뜬 뒤에야 선언이 보인다(F1).
+  - `railway`: 단계 목록과 문서 링크(`docs/SELF_HOST_AGENT.md` §3.4.1 — Railway는 `--with-agents`를 쓰지 못한다, 사실 8).
+  - `unknown`: 명령 없는 일반 문장.
+  - 그리고 (선택) 운영자가 **자기 설치 에이전트에 붙여 넣는 복사 프롬프트** 한 덩어리.
+  - 계획에는 결정에 필요한 사실을 같이 적는다 [권장]: 자원 요구(compose `hermes` `mem_limit 2g`·`cpus 1`, 사실 8), 대화 기록이 Hermes 볼륨에 남는다는 것(D7), 도구가 잠겨 채팅 모델 게이트웨이로 쓴다는 것(D6). compose 계획은 「기본 compose 스택 기준」이라고 쓴다 — `host-network` 오버레이도 서버에는 `compose`로 읽히고(F3) 그 오버레이에서 `--with-agents`가 뜨는지는 `runtime-unverified`다(사실 8). 카드는 host-network를 판별하지 못한다.
+- **카드가 하지 않는 일(불변)**:
+  1. 서버로 가는 쓰기 요청 0건(읽기 GET만). [권장 — D1·D3의 연장]
+  2. 서버가 호스트에서 아무것도 실행하지 않는다 — 셸·Docker·Railway API·토큰 없음. [권장 — D1의 연장]
+  3. 성공을 단정하지 않는다. 「찾았어요」로 바뀌는 것은 이후 상태 읽기가 `declaration ≠ not_declared`를 돌려줄 때뿐이다. [권장]
+  4. 복사 프롬프트의 가변 부분은 `platform` 열거형의 고정 라벨뿐이고(고정 표에서 조립) URL·키·환경 id·이메일을 싣지 않는다. 문장은 `SELF_HOST_AGENT.md` §0 규율(승인 지점에서 멈춰 화면을 사람에게 넘긴다, 비밀값을 채팅에 붙이지 않는다)을 담는다. [권장]
+  5. **oort가 승인받아 대신 설치하는 단추를 두지 않는다.** 그 경로는 성재 결재 「박스 안만」과 ADR-0210(#4347, 작성 전)이 정한다. 그 ADR이 Accepted되기 전에는 이 카드에 서버가 실행하는 동작이 없다. [owner 결재 + #4347]
+- **클라이언트 상태** [권장]: 기존 읽기 종류의 뜻은 바꾸지 않는다 — `ready` = 선언됨, `hidden` = 숨김(사실 4). 카드는 `not_declared`를 위한 **새 읽기 종류**(예: `undeclared`, `environment` 포함)로 받는다. `not_declared`를 `ready`로 올리면 `AgentProviderPinSection`의 `envLinkAvailable`(`:111`)이 선언 없는 서버에서 env 링크 선택지를 연다. 기존 `fetchCohostedStatus`의 매핑과 질문 키(`["cohosted-agent", ws]`)는 바꾸지 않는다. 카드는 전송 오류·502/503/504를 구분하는 별도 읽기(별도 질문 키)를 쓰고 기존 `ready` 소비자와 캐시를 공유하지 않는다 — 그래야 기존 소비자의 오프라인 동작(연결 끊김 = `hidden`, 5xx = `unknown`)이 그대로다.
+- **소음과 기억** [권장]: 카드는 모달이 아니다. 「나중에」는 어느 상태에서도 누를 수 있고 어디서 이어 가는지를 문구가 말한다. 거절의 기억은 브라우저에만 둔다(`cohostedPrompt.ts` 머리말과 같은 이유) — 서버에 저장하지 않는다(새 표·열 없음). 다른 기기에서 한 번 더 묻는 것은 허용한다.
+- **감지 폴링** [권장]: 카드가 열려 있는 동안 상태 읽기를 되풀이해 선언이 생기면 「찾았어요」로 넘길 수 있다. 읽기는 Hermes로 나가는 요청이 0이지만 운영자 게이트가 요청마다 DB 트랜잭션 하나를 쓰므로(`shared.rs:407-437`, 선언됐을 때는 핀 조회가 하나 더, 사실 1) 간격은 기존 `DETECT_*`를 재사용해 묶는다: 2초에서 시작해 두 배씩 늘려 최대 30초, 5분에서 멈춘다(`clients/web/src/features/welcome/firstAgent.ts:31-33`). **선언은 기동 때 읽히므로(F1) 설치 뒤 `api`가 새 env로 다시 뜨기 전에는 바뀌지 않는다.** 재시작 중의 전송 오류와 502/503/504는 실패가 아니라 기다림이다: 이전 상태를 유지한다(기존 읽기는 전송 오류를 `hidden`, 5xx를 `unknown`으로 접으므로 그대로 쓰면 카드가 사라지거나 오류가 보인다, 사실 4).
+
+### F7. 문구는 클라이언트의 정적 표다 — 서버가 문장을 내려주지 않는다 [권장]
+
+- 플랫폼별 대체 명령·삭제 안내·계획 문장은 `environment.platform`으로 고르는 클라이언트(공유 core)의 표다. 서버가 문장을 내려주면 문구가 서버 배포에 묶이고 F2의 「문자열을 되돌리지 않는다」와 어긋난다.
+- 규칙(#4339 수용 기준을 문구 전체로 넓힌다): `compose`일 때 사용자에게 보이는 **모든** 문구 — 대체 명령·`shellLead`(「Railway 터미널에서」)·삭제 안내·계획 문장 — 에 `railway`(대소문자 무시)가 0 · `railway`는 현행 문구 유지 · `unknown`(과 `environment` 없음)은 명령 없이 일반 문장.
+- `compose` 문구는 조건형으로 쓴다(「docker compose로 돌리는 서버라면」). F3의 한계 때문이다.
+- compose의 대체 명령은 구현 이슈가 실제 compose 스택에서 한 번 실행해 확인한다(`runtime-unverified` 해소): 서비스 이름(`hermes`)·실행 사용자(토큰 파일이 root 소유가 되면 안 된다, L2)·프로파일·env 파일 인자.
+- 삭제 안내는 데이터를 지우는 동작이므로 oort가 대신하지 않는다고 말하고(D7) 실행 단추를 두지 않는다.
+
+### F8. 보안 경계 대조
+
+- 새로 나가는 정보는 닫힌 열거형 둘이고 인스턴스 운영자에게만 간다. 새 자격·저장·네트워크·egress 면제 입력·감사 행이 없다(ADR-0004 불변).
+- env는 운영자가 쓰는 값이라 값을 속여도 바뀌는 것은 안내 문구뿐이다(F2: 권한·egress·연결 판정에 쓰이지 않는다).
+- 비운영자 403은 운영자 게이트가 첫 줄이라 본문에 `environment`가 없다(사실 1). 게이트를 지우면 비운영자가 200과 `environment`를 받는다 — 수용 기준 4가 그 회귀를 잡는다.
+- 이 증보가 **새로** 되돌리는 env 문자열은 0이다(F2). 중계 URL·키는 `on`/`off` 한 낱말로만 나간다.
+
+### F9. 배포 순서 — 서버를 먼저 올린다 [권장]
+
+서버(#4337)와 클라이언트(#4338·#4339·새 이슈)는 따로 배포될 수 있고 클라이언트는 `environment` 없음을 견딘다(F2). 다만 옛 서버 + 새 클라이언트에서는 Railway 운영자도 일반 문장을 본다 — 지금 보던 `railway ssh …` 명령과 「Railway에서 삭제」 안내가 사라지는 정보 후퇴다(틀린 문구는 아니다). 앱은 자동 업데이트되고 서버는 운영자가 올리므로 창이 생길 수 있어, 서버 변경을 같은 릴리스나 먼저 싣는다. 이 후퇴는 수용한 비용이다(기각 대안 O).
+
+### 기각한 대안
+
+| 대안 | 기각 이유 |
+|---|---|
+| A. 서버가 Railway API·플랫폼 메타데이터를 불러 알아낸다 | D1: 토큰 저장 금지·새 외부 호출. 환경 사실은 이미 가진 env로 충분하다. |
+| B. 파일시스템·cgroup·`/proc`·컨테이너 라벨로 compose 여부를 추정한다 | D1 「추측 금지」. Railway도 컨테이너라 오탐하고 새 읽기 경로가 생긴다. |
+| C. 클라이언트가 공개 도메인(`*.up.railway.app` 등)으로 추측한다 | 커스텀 도메인에서 깨지고 서버 사실이 아니다. |
+| D. `platform`을 도장 원문 문자열로 내려준다 | 문자열을 되돌린다. 임의 값이 화면·로그로 흐른다. 닫힌 열거형만. |
+| E. 새 환경 변수(예: `OORT_PLATFORM`)를 만든다 | 같은 사실을 말하는 이름이 둘이면 어긋난다. 도장과 Railway 시스템 변수가 이미 있다. |
+| F. 도장을 compose·Railway 카탈로그의 `api` env에 배선한다 | #4337 ④(추가 배선 0). 풀리지 않은 공유 변수 참조가 `${{…}}` 문자열로 남는 실패 모드가 있고(중계 키 검사가 같은 실패를 막아야 했다, `config.rs:1812`) 카탈로그 검증기의 키 집합이 같이 바뀐다. 필요하면 후속 증보. |
+| G. 도장이 없으면 `unknown`으로 한다 | 이슈 R2-00의 결정은 `oort_env_tier`의 「도장 없음 = T1」과 같은 규칙이다. compose가 기본 배포 모양이다. 한계는 F3에 적었다. |
+| H. 서버가 명령·문장을 내려준다 | F7. 문구가 서버 배포에 묶이고 「문자열을 되돌리지 않는다」에 어긋난다. |
+| I. 서버가 `stage`(없음/찾음/연결됨…)를 계산해 내려준다 | F5. 서버가 화면 상태기계를 갖게 된다. |
+| J. 제안 카드에서 oort가 승인받아 대신 설치한다 | 「박스 안만」과 ADR-0210 전에는 새 보안 경계다. F6의 5. |
+| K. `schema`를 `.v1`로 올린다 | 옛 클라이언트가 상태 전체를 읽지 못한다(`cohostedAgent.ts:90`). |
+| L. `environment`를 probe·connect 응답에도 싣는다 | 상태 읽기 한 곳이면 충분하다. 두 곳이면 어긋난다. |
+| M. 선언 없음에서 계속 숨긴다(현행) | 성재가 「호스팅할지 물어보고」를 요구했다. 숨기면 운영자는 Hermes를 올릴 수 있다는 것조차 알 길이 없다. |
+| N. 서버가 런타임에 이미지 안의 `self_host_env.sh`의 `platform_profiles()`를 파싱해 T1/T2를 판정한다 | 서버 경로에 셸 표 파서를 들이게 되고, 파일이 바뀌면 판정이 조용히 바뀐다. 코드의 닫힌 목록 + 드리프트 시험(수용 기준 8)이 더 단순하다. |
+| O. `environment`가 없으면 현행 Railway 문구를 그대로 둔다 | 옛 서버의 compose 운영자는 지금처럼 틀린 Railway 명령을 계속 본다. 알 수 없는 것을 단정하지 않는 쪽(F2·F7)을 택했고, 후퇴 창은 서버 먼저 배포로 줄인다(F9). |
+| P. Rust 시험이 운영자 스펙·셸 표 파일을 직접 읽는다 | pr-ci의 rust 필터(`.github/workflows/pr-ci.yml:190-191`)와 `scripts/tests/test_pr_ci_guardrails.sh`가 그 경로를 요구해 정책 파일 변경이 따라온다. 정책 PR 절차(ADR-0100·GITHUB_OPS)로 택할 수는 있으나, 이 증보는 그 변경을 요구하지 않는 설계(골든 + local gate 시험, 수용 기준 6·8)를 권장한다. |
+
+### 구현 슬라이스
+
+- **#4337 (engine, R2-01)** — F1~F4·F8: `environment` 필드, 분류 함수(열거형만 보관), 상태 본문 조립을 DB 없이 시험하도록 핸들러가 부르는 순수 함수로 분리, 시험(수용 기준 1~11), 골든 `docs/api/cohosted-agent-status.golden.json`과 그 고정 시험, 운영자 스펙에 상태 라우트·`environment` 문서화(사실 7), 클라이언트 wire 파서(`packages/momo-core/src/features/settings/cohostedAgent.ts`의 `statusFromWire`가 `environment`를 필드 단위로 읽는다, F2·수용 기준 11 — `docs/TRACKS.md`의 「최소 diff + 상대 트랙에 로그」 규율), 도장 표 드리프트 가드(수용 기준 8). 함께 바꿀 것: 낡아지는 서버 쪽 문장 — `config.rs:1762-1766`(「shows nothing」), 운영자 스펙의 `info.description`(provider link만 말한다). 이슈 본문 ⑤의 「드리프트 시험」은 골든 고정(수용 기준 6)과 shell 가드(수용 기준 8)로 대체하고 스펙 ↔ 골든 기계 대조는 후속(새 이슈 3)이다 — 이슈 본문·규모(S~M) 조정은 planner 몫이다. `packages/momo-core`를 건드리므로 해당 트리 typecheck/test와 `scripts/verify_merge_tree.sh`(AGENTS 검증표)도 함께 돌린다. 의존: 이 증보 Accepted(ADR-0100).
+- **#4339 (uxui·core, R2-03)** — F7 문구 표(수용 기준 12). 파서는 #4337이 더하므로 이 이슈는 파서가 머지된 뒤 `environment`를 읽는다. 의존: #4337.
+- **#4338 (uxui, R2-02)** — 온보딩 AI 단계의 `declaration ≠ not_declared` 갈래(찾음 → 연결 → 모델 인증 → 모델 고르기). `environment`는 플랫폼별 문구에만 쓴다. **`not_declared`에서는 새 이슈(제안 카드)가 들어오기 전까지 기존대로 `hidden`(아무것도 그리지 않음)이다**: 이슈 본문 수용 기준 2의 「선언 없음」은 그 `hidden` 시험이고, 카드가 들어오면 새 이슈가 그 시험을 바꾼다(이슈 문구 조정은 planner).
+- **#4340 (engine·docs, R2-04)** — 설치가 Hermes를 한 번 묻는 갈래. 이 증보와의 접점은 F6 카드의 compose 계획이 가리키는 두 명령(사실 8)뿐이다. 기본 스택은 달라지지 않는다(A2).
+- **새 이슈(번호 미정)**
+  1. 호스팅 제안 카드(R2-10, UXUI, 로드맵 #4349의 항목): F6, 수용 기준 13. 의존: #4337·#4339. 함께 바꿀 것: 클라이언트의 「선언 없음 = 숨김」 규칙(`cohostedAgent.ts:9-12`·`:146`)과 `AgentProviderPinSection` 회귀.
+  2. (선택) Railway 생성기가 Hermes 변수를 출력(R2-11): A4(「`HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변)」)와 `self_host_env.sh:277-278`(Railway와 `--with-agents` 동시 금지)을 바꾸므로 **별도 증보가 먼저**다. 이 증보는 A4를 바꾸지 않는다.
+  3. 운영자 스펙 ↔ 골든 기계 검사(수용 기준 7의 후속): 신규 검사의 gate 편입은 `scripts/local_gate.sh`(정책 파일) 변경이라 정책 PR 절차를 따른다.
+  4. 선언은 있으나 Hermes가 응답하지 않을 때(프로브 `unreachable`)의 안내 — Railway 카탈로그 인스턴스의 기본 경로다(F6의 「닿는 배포」).
+
+### 수용 기준 (red proof — 해당 분기를 지우면 실패해야 한다)
+
+레인 표기: **[rust]** PR CI `rust` 레인의 `cargo test --workspace`(`#[ignore]` 아님, `server-rust/` 변경으로 선택된다) · **[pack]** Security pack(`infra/security-pack/selection.txt`의 `#[ignore]` PG 타깃 — `login_relay_conformance_pg`가 들어 있다) · **[nightly]** 그 밖의 `#[ignore]` PG 시험(`security-nightly.yml`; `cohosted_agent_conformance_pg`는 selection에 없다) · **[local gate]** `scripts/local_gate.sh --profile docs`(PR CI가 아니다 — ADR-0214 D6과 같은 한계) · **[node]** PR CI `node` 레인 · **[release]** 릴리스 확인. Rust 시험이 `server-rust/` 밖 파일을 읽으면 pr-ci의 `rust=true` 필터(`.github/workflows/pr-ci.yml:190-191`)와 `scripts/tests/test_pr_ci_guardrails.sh`가 그 경로를 요구한다(둘 다 정책 파일, `scripts/verify_policy_integrity.sh:225-262`). 아래 시험은 그 변경을 요구하지 않게 짠다: Rust 시험은 `server-rust/` 안 입력과 이미 필터가 덮는 `docs/api/*.golden.json`만 읽는다. 파일을 읽는 모든 가드는 파일·상수를 못 찾으면 건너뛰지 않고 실패한다. 수용 기준 2·5·6의 [rust] 시험은 핸들러가 실제로 부르는 순수 조립 함수(`declared`·`label`·`attested`·`connected`·`environment` → 응답 본문)를 대상으로 한다 — `StatusResponse` 필드가 private이라 같은 모듈의 시험이고, 핸들러가 그 함수를 쓰지 않으면 시험이 죽은 코드를 지키는 가드가 되므로 4([nightly])가 핸들러 조립을 함께 덮는다 [권장]. PG 시험(2의 [nightly] 절반·4)은 PR 시점 증거로 로컬 `--ignored` 실행 원문을 PR 본문에 남기고, 팩에 더할지는 #4337이 팩 시간을 재서 정한다(`infra/security-pack/`는 정책 경로가 아니다).
+
+**#4337**
+
+1. **[rust]** (판정표) 조회 함수를 주입해 행마다 한 입력만 다르게 한다: `RAILWAY_ENVIRONMENT_ID` 있음 → `railway` · 도장 `railway` → `railway` · 둘 다 없음 → `compose` · 도장 `fly`·`aws-lightsail`·`gcp-vm`·`host-network` 각각 → `compose` · 도장 `bogus` → `unknown` · 충돌(시스템 변수 있음 + 도장 `fly`) → `railway` · **시스템 변수 있음 + 도장 `bogus` → `railway`** · 공백만인 시스템 변수 → 없는 것 · **공백만인 도장 → `compose`** · **`" railway"`(앞뒤 공백) → `unknown`** · `Railway`(대문자) → `unknown`. 사보타주: 우선순위를 뒤집으면 충돌 행 둘이, 2번 줄의 「비어 있음」 처리를 지우면 공백만인 도장 행이, trim을 넣으면 `" railway"` 행이, T1 이름 하나를 지우면 그 행이, 5번 분기를 `compose`로 바꾸면 `bogus` 행이 빨개진다.
+2. **[rust]** (문자열을 되돌리지 않는다) env에 표식 `MARKER-PLATFORM-…`(도장)·`MARKER-RWENV-…`(Railway id)·`marker-relayurl-…`(공개 https 호스트라 쓰기 게이트를 통과해 `on`이 되는 중계 URL — **소문자·숫자·`-`만** 쓴다: 호스트는 `split_url`이 소문자로 정규화하므로 `provider.rs:539-540` 대문자 표식은 정규화된 값에서 찾을 수 없다. 표식 검색은 대소문자를 무시한다)·`MARKER-RELAYKEY-…`(32자 이상·허용 문자의 중계 키)를 넣는다. **`from_lookup` 호출과 상태 본문 직렬화를 같은 `tracing` 캡처 구독 아래에서 돌린다.** 직렬화한 본문과 캡처한 로그에 표식 4종이 0건이고, `environment`의 키 집합은 정확히 `{platform, loginRelay}`이며 값은 열거형 안이다. 범위는 새 필드와 비밀 표식이다(기존 `endpointLabel`은 바뀌지 않는다). **[nightly]** 같은 구성의 200 본문과 403 본문에서도 0건. 표식을 넣은 설정에 `format!("{:?}")`를 해도 표식 0건이다(원문 비보관). probe·connect 응답에 `environment` 키가 없다(별도 시험). 사보타주: `loginRelay`에 정규화된 URL(`target().base_url`)이나 라벨을 싣거나, 파서가 값을 `warn!`으로 찍거나, 원문을 그대로 직렬화하거나, `Debug` 출력에 원문을 넣으면 빨개진다.
+3. (`loginRelay`는 라우트와 같은 술어) **[rust]** 판정 함수 하나(`target(&settings).is_some()` 호출)를 표로 시험한다: URL 없음·키 없음·키 형식 불량(31자·257자·문자 집합 밖·`${{shared.X}}` 잔존)·URL이 쓰기 게이트에 거절됨·URL에 경로·정상(env에 기대지 않는 공개 https). 내부 호스트(`http://hermes:8643` 등)는 `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK`과 `AGENT_PROVIDER_LOCAL_HOSTS`가 있을 때만 `on`이 되므로 프로세스 env를 심어야 한다 — 병렬 시험의 전역 상태를 피하려고 그 행은 env를 직렬화해 넣는 시험(또는 [pack]의 한 구성)으로 따로 둔다. **[pack]** `login_relay_conformance_pg`에 같은 구성별로, 열 개 라우트·메서드 각각(본문이 필요한 넷 — 모델·앱 각 시작·완료 — 은 올바른 본문으로)에서 `409 login_relay_off`가 나는 것과 상태의 `loginRelay: off`가 일치함을 더한다(`on`일 때는 `409 login_relay_off`가 아님만 단정한다 — 그 뒤 404 등은 허용). 사보타주: 상태가 `configured()`를 쓰면 게이트 거절·경로 행이 빨개지고, 라우트 하나가 `prepare()`를 우회하면 그 라우트 행이 빨개진다.
+4. **[nightly]** (네트워크 0·권한) `cohosted_agent_conformance_pg`: 선언 없음 + 운영자 → 200이고 `environment`가 있으며 모의 에이전트와 모의 중계(계수 클라이언트를 `with_login_relay`로 꽂는다)의 요청이 0건이다(기존 `undeclared_means_zero_requests_even_with_a_live_agent_at_the_env_url` 확장). 비운영자(워크스페이스 admin·타 테넌트) → 403이고 본문에 `environment`가 없다. 사보타주: `require_instance_operator_write` 줄을 지우면 비운영자가 200과 `environment`를 받아 빨개진다.
+5. **[rust]** (판정에 안 쓰임) 두 기준 상태 — `ready`+attest+미연결(`connectable=true`)과 연결됨(`connectedAgentId` 있음) — 각각에서 `platform`×`loginRelay` 전 조합의 `declaration`·`connectable`·`connectedAgentId`가 같다. 사보타주: `connectable`에 `platform`을 섞으면 빨개진다.
+6. **[rust]** (호환·모양 고정) 상태 응답을 직렬화한 본문이 골든 `docs/api/cohosted-agent-status.golden.json`과 같다(기존 키 그대로 + `environment`만 더해짐, `schema`는 `momo.cohosted_agent.status.v0`). 열거형 값 전체(`railway|compose|unknown`, `on|off`)는 변종마다 직렬화해 고정한다. 골든은 이미 필터가 덮는 경로다(`docs/api/[^/]+\.golden\.json$`). 사보타주: 키 이름이나 열거형 값을 바꾸면 빨개진다.
+7. (운영자 스펙) 스펙에 상태 라우트와 `environment`(열거형 값 고정)를 문서화한다. **스펙 본문 ↔ 골든의 기계 대조는 이 증보가 요구하지 않는다** — 운영자 스펙에는 검사 기반이 없고(사실 7) 새 검사의 gate 편입은 정책 파일 변경이다(기각 대안 P). 한계로 적고 검수가 대조한다. 후속은 새 이슈 3.
+8. **[local gate]**+**[rust]** (도장 표 드리프트) `scripts/tests/test_self_host_env_modes.sh`(docs 프로파일의 기존 단계, 이미 `platform_profiles`를 다룬다)에 단정을 더한다: `platform_profiles()`의 T2 이름 집합이 `{railway}`이고 T1 이름 집합이 서버 소스의 이름 고정 상수(위치·이름은 #4337이 정하고 시험이 그 이름으로 찾는다)와 같다. 이름은 한 줄에 하나씩 앵커 주석이 붙은 상수로 두고(`cargo fmt`가 펴도 한 줄에 하나), shell은 추출한 개수 = T1 이름 개수와 이름 집합 일치를 단정한다 — 같은 파일의 시험 리터럴과 구분하려고 앵커 주석을 쓴다. Rust 쪽은 같은 상수를 리터럴로 고정하는 단위 시험을 둔다. 새 행(예: `render`)이나 이름 변경은 shell 시험이 잡는다. **한계**: PR CI는 shell 쪽 대조를 돌리지 않는다 — `self_host_env.sh`나 Rust 상수만 바꾸는 PR은 local gate에서만 막힌다.
+9. **[rust]** (`Default`) 시험이 `..Default::default()`로 만드는 설정의 `platform` 판정이 빈 조회(`from_lookup(|_| None)`)와 같다.
+10. **[release]** 실제 Railway `api`에서 `platform: railway`가 나오는지 확인해 기록한다(방법과 실패 시 복구는 F3).
+11. **[node]** (클라이언트 파서) 옛 서버(`environment` 없음)·깨진 답(객체 아님)·미래 서버(허용 목록 밖 값)·한쪽만 있는 경우 fixture로, 없거나 밖의 필드만 `unknown`/「모름」으로 접히고 상태 읽기 전체는 유지된다. 사보타주: 밖의 값에서 `null`을 돌려주면(응답 전체 버림) 빨개진다.
+
+**#4339 (클라이언트 문구)**
+
+12. **[node]** `compose`: 사용자에게 보이는 모든 문구(대체 명령·`shellLead`·삭제 안내·계획 문장, 사실 4의 일곱 위치를 포함한 문구 표 전체)에 `railway`(대소문자 무시) 0건(표 전체를 훑는 시험) · `railway`: 현행 문구와 바이트까지 같음(회귀) · `unknown`·`environment` 없음: `railway ssh`·`docker compose` 명령 문자열 0이고 일반 문장 · 문구 스냅샷. 사보타주: `compose` 표에 `railway ssh`나 「Railway 터미널에서」를 되돌려 넣으면 훑는 시험이 빨개진다.
+
+**새 이슈 (제안 카드, F6)**
+
+13. **[node]** 카드가 부르는 요청은 상태 읽기 GET 하나이고 쓰기 요청이 0건이다(계수; 사보타주: 카드가 `connectCohosted`/`probeCohosted`를 한 번 부르면 빨개진다) · `not_declared` + 운영자에서만 카드, 비운영자는 카드 없음(사보타주: 게이트 분기를 지우면 비운영자 fixture에서 빨개진다) · 복사 프롬프트에 URL·키·환경 id·이메일 표식 0건이고 §0 규율 문장 포함(사보타주: 프롬프트에 표식을 끼우면 빨개진다) · 폴링: 간격·5분 상한, 전송 오류와 502/503/504에서 이전 상태 유지(사보타주: 오류를 `hidden`으로 접으면 빨개진다) · `AgentProviderPinSection` 회귀: `not_declared`에서 `envLinkAvailable`이 거짓(사보타주: `not_declared`를 `ready`로 올리면 빨개진다) · 기존 소비자의 오프라인·5xx 동작이 그대로(`cohostedAgent.test.ts`의 TypeError → `hidden` 유지) · compose 계획 문장에 「기본 compose 스택 기준」 문구가 있음 · 서버가 실행하는 동작이 없음은 소스 grep이 아니라 카드 모듈이 쓰는 요청 함수 집합을 GET 상태 읽기 하나로 단정하는 import 그래프 시험과 위의 쓰기 계수 시험으로 증명한다 · design-review Blocker 0·High 0.
+
+### 바뀌지 않는 것
+
+D1(마지막 문장만 F6으로 좁혀진다)·D2(고정 두 요청 + 요청 시 toolsets + M2의 옵션 읽기 하나)·D3 인스턴스 운영자만·D4·D5·D6·D7·D8·D9, owner 결정 질문 1~7(위임 결재 2026-10-16, Q2 (b) 포함), K1~K7, A1~A5(특히 A4: 「`HERMES_API_KEY`는 생성기 정본 키 집합(45)에 넣지 않고(T2 stdout 불변)」), L0~L6과 L절의 owner 결정 Q1~Q3(중계 허용·Claude 중계·설치 스크립트로 켠다), M1~M5, `HERMES_API_KEY`의 의미, oort가 구독 OAuth 토큰·원본 키를 받지도 저장하지도 않는다는 불변식, 온보딩의 구독 로그인 순서(#4338의 몫), DB·마이그레이션·서버 코드(이 PR은 문서만).
