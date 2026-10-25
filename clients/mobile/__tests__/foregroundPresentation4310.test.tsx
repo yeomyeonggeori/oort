@@ -516,6 +516,24 @@ describe('처리기: expo-notifications 에 건네는 것', () => {
     expect(await handler.handleNotification(localResultLine(undefined))).toStrictEqual(SHOWN);
   });
 
+  // 결과 줄은 실제로는 승인 알림에서만 나온다(네이티브 처리기가 잠금 화면 승인 뒤에 올린다). 그래서 origin 은
+  // 늘 승인 봉투이고, 결정 1(승인은 행동이 필요한 알림)이 그대로 걸린다: 같은 방을 보고 있어도 보인다.
+  it('결과 줄의 origin 이 승인 봉투면 같은 방을 보고 있어도 보인다 (결정 1)', async () => {
+    installForegroundNotificationHandler();
+    publishViewedConversation(VIEWING_DESIGN);
+    for (const category of ['momo.approval', 'momo.approval.open']) {
+      const origin = relayPayload({
+        channelId: DESIGN,
+        category,
+        reason: 'approval_request',
+        approvalId: APPROVAL_ID,
+      });
+      expect(
+        await registeredHandler().handleNotification(localResultLine(origin)),
+      ).toStrictEqual(SHOWN);
+    }
+  });
+
   describe('던지지도 기다리지도 않는다 — 던지면 expo 가 그 알림을 버린다', () => {
     it('요청 자체가 깨진 알림에도 거부하지 않고 「보임」으로 답한다', async () => {
       installForegroundNotificationHandler();
