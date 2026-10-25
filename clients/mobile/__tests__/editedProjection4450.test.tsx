@@ -282,7 +282,10 @@ function installFetch(opts: {
 function makeRail(): {
   rail: ChannelRail;
   subscription: () => {
-    __subscribed: (options?: {recovered?: boolean}) => void;
+    __subscribed: (options?: {
+      recovered?: boolean;
+      publications?: unknown[];
+    }) => void;
     __emit: (event: string, ctx: unknown) => void;
   };
 } {
