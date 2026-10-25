@@ -8,12 +8,13 @@ name: 109-focus-steady
 #     -RCT_jsLocation 127.0.0.1:$PORT -momoGapSink 127.0.0.1:$SINK
 #   maestro --device <udid> test clients/mobile/maestro/109-focus-steady.yaml
 #
-# 장면은 100초 재고 끝난다. 이 흐름은 그 안에 끝나야 한다(앞 6초는 목록이 끝에 앉는 시간이라 기다린다).
+# 장면은 140초 재고 끝난다(Maestro 가 부하로 늦게 시작해도 흐름이 장면 안에 끝나도록 넉넉히). 이 흐름은 그 안에 끝나야 한다(앞 6초는 목록이 끝에 앉는 시간이라 기다린다).
 # 시뮬레이터는 키보드가 처음 오를 때 받아쓰기 설정을 물을 수 있고 그 알림이 앱 트리를 가린다 — 잴 기기에서 한 번 미리 눌러 두고
 # (`103-input-steady` 의 앞 두 탭이 같은 일을 한다) 이 흐름은 그 뒤에 돌린다. 안 그러면 첫 포커스가 알림에 먹힌다.
 #
-# 끌어 내리기는 도구 줄의 「@」 에서 시작한다. 글 칸(`composer-input`) 위에서 시작하면 시뮬레이터(Maestro 의 합성 터치)에서는 손을 뗄 때 입력창이
-# 다시 포커스를 받아 자판이 되살아난다(#4456 에서 기준 코드도 같음을 확인) — 이 흐름이 재려는 것은 접힘이라 그 길은 피한다.
+# 끌어 내리기는 **도구 줄의 빈 자리**(`composer-tools` 의 가운데)에서 시작한다. 글 칸(`composer-input`) 위에서 시작하면 시뮬레이터(Maestro 의 합성 터치)에서는
+# 손을 뗄 때 입력창이 다시 포커스를 받아 자판이 되살아나고(#4456 에서 기준 코드도 같음을 확인), 「@」 에서 시작하면 손을 뗄 때 누름으로 읽혀 「@」 가 들어가고
+# 멘션 시트가 열리며 입력창이 포커스를 되찾는다(`insertMention` 이 `focus()` 를 부른다). 이 흐름이 재려는 것은 접힘이라 그 길들은 피한다.
 #
 # 순서 (「가만히」 = 아무것도 안 하고 1.5~3초 — 그 사이 목록이 움직이면 안 된다):
 #   A 누른다(글 0자)      → 포커스 순간 펼침(빈 펼침)이 자판과 함께 선다. 가만히.
@@ -77,7 +78,7 @@ name: 109-focus-steady
 # D — 아래로 끌어 자판을 내린다(#4305). 포커스를 잃고 글이 없으니 접힌다.
 - swipe:
     from:
-      id: "composer-tool-mention"
+      id: "composer-tools"
     direction: DOWN
     duration: 400
 - extendedWaitUntil:
@@ -101,7 +102,7 @@ name: 109-focus-steady
     optional: true
 - swipe:
     from:
-      id: "composer-tool-mention"
+      id: "composer-tools"
     direction: DOWN
     duration: 400
 - extendedWaitUntil:
@@ -125,7 +126,7 @@ name: 109-focus-steady
     optional: true
 - swipe:
     from:
-      id: "composer-tool-mention"
+      id: "composer-tools"
     direction: DOWN
     duration: 400
 - extendedWaitUntil:
