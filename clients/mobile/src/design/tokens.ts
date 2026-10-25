@@ -701,3 +701,51 @@ export const line = {
   /** Menlo 12 코드 — `meta`(16)와 뜻이 다르다: 고정폭이라 한 단 더 숨 쉰다. */
   code: 17,
 } as const;
+
+// =============================================================================
+// 시트·페이지 머리와 묶음 부품의 치수 (#4318).
+//
+// Buzz(Apache-2.0)의 `buzz_sheet_header.dart`·`buzz_navigation_metrics.dart`·
+// `app_list_card.dart`·`app_list.dart`·`buzz_action_tile.dart`·`modal_presentation.dart` 에서
+// 구조와 값만 읽어 우리 눈금으로 옮겼다(RN 으로 다시 짠다, 코드는 가져오지 않는다). 값은 이
+// 한 곳에서 이름으로 나가고, 부품(`SheetChrome`·`sheetParts`)은 숫자를 새로 쓰지 않는다 —
+// 간격·반경 스윕(`designSystem.test.ts`)이 새 파일의 격자 밖 리터럴을 0 으로 둔다.
+//
+// 색은 한 줄도 없다. 부품이 읽는 역할은 전부 `Palette` 다: 시트 바탕 `sheet` 위에 카드·입력·
+// 원형 단추가 `surface` 로 선다(Buzz `utilitySurfaceThemeData` 가 시트와 컨테이너의 두 면을
+// 맞바꾸는 것과 같은 구조).
+// =============================================================================
+export const SHEET = {
+  /**
+   * 머리 줄 높이. Buzz `buzzNavigationRowHeight` 56 에서 손잡이 띠(`PageSheet` 의 위 여백)가 이미
+   * 들고 있는 몫을 덜어 `TOUCH_TARGET + space.sm`(52). 단추 40 이 줄 가운데에 선다.
+   */
+  headerRow: TOUCH_TARGET + space.sm,
+  /** 원형 단추의 눈에 보이는 지름 — Buzz `IosGlassNavigationButton.controlSize` 40. 눌림 영역은 44. */
+  circle: 40,
+  /** 단추 안 글리프 — Buzz 22. 래스터도 22pt 로 구웠다(`icons/index.ts` `SHEET_ICONS`). */
+  glyph: 22,
+  /** 제목이 단추에 겹치지 않게 양쪽에서 비우는 폭 — Buzz 64(단추 44 + 여백 20). */
+  titleInset: 64,
+  /** 카드 안쪽 가로 여백 — Buzz `AppListCard._inset` 16. 우리 공용 여백과 같은 값이다. */
+  cardInset: SAFE_GUTTER,
+  /** 행 앞 아이콘 칸의 폭 — Buzz 22. 이모지도 같은 칸에 선다. */
+  iconSlot: 22,
+  /** 아이콘 칸과 글자 사이 — Buzz `Grid.xs` 16. */
+  iconGap: space.lg,
+  /**
+   * 행의 최소 높이. Buzz 는 위아래 16 + 글자 한 줄이고, 우리는 본문 한 줄(23)에 위아래 12 를
+   * 주고 `TOUCH_TARGET + space.sm` 아래로는 내려가지 않게 한다 — 실측 캡처의 한 줄 행(≈52pt).
+   */
+  rowMinHeight: TOUCH_TARGET + space.sm,
+  /** 큰 행동 타일 최소 높이 — Buzz `BuzzActionTile` `68 + 8·2`. */
+  tileMinHeight: 84,
+  /** 입력 알약의 최소 높이 — Buzz 검색 칸 45, 우리는 눌림 최소 44. */
+  pillMinHeight: TOUCH_TARGET,
+  /** 안쪽 구분선 알파(16진 두 자리, 12%) — Buzz `onSurface.withValues(alpha: 0.12)`. 글자색에 얹어 두 모드에서 읽힌다. */
+  dividerAlpha: '1f',
+  /** 내용 맞춤 시트의 최대 높이(화면 비율) — 두 옛 시트가 쓰던 0.85. 넘치면 안에서 스크롤한다. */
+  fitMaxRatio: 0.85,
+  /** 중간 단의 높이(화면 비율) — Buzz `scrollControlDisabledMaxHeightRatio` 9/16. */
+  mediumRatio: 9 / 16,
+} as const;

@@ -762,6 +762,18 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
     });
   }, 15000);
 
+  it('새 DM 시트의 닫기는 머리 오른쪽의 원형 X 이고 누르면 닫힌다 (#4318)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    fireEvent.press(screen.getByTestId('plus-menu-dm'));
+    expect(screen.getByTestId('new-dm-close').props.accessibilityLabel).toBe('새 DM 닫기');
+    fireEvent.press(screen.getByTestId('new-dm-close'));
+    await waitFor(() => expect(screen.queryByTestId('new-dm-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 15000);
+
   it('탭 목록의 끝이 탭바 밑에 숨지 않는다 — 시안 .a-scroll 의 140', async () => {
     installFetch();
     await renderReady();

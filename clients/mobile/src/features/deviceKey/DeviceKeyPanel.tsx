@@ -8,12 +8,8 @@ import {
   View,
 } from 'react-native';
 
-import {
-  GroupSection,
-  OutlineButton,
-  PrimaryButton,
-  Sentence,
-} from '../../design/atoms';
+import {OutlineButton, PrimaryButton, Sentence} from '../../design/atoms';
+import {GroupCard} from '../../design/sheetParts';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   font,
@@ -145,7 +141,7 @@ export function DeviceKeyPanel({
 
   return (
     <View style={styles.root} testID={testID}>
-      <GroupSection>
+      <GroupCard>
         <View
           accessible
           accessibilityLabel={`${DEVICE_KEY_TITLE}: ${copy.badge}. ${copy.headline} ${copy.detail}${
@@ -232,7 +228,7 @@ export function DeviceKeyPanel({
             </View>
           </View>
         ) : null}
-      </GroupSection>
+      </GroupCard>
 
       {primary ? (
         <View style={styles.actions}>
@@ -378,8 +374,6 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: space.lg,
       paddingVertical: space.md,
       gap: space.xs,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: color.border,
     },
     fingerprintLabel: {
       fontSize: font.label,

@@ -8,6 +8,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 import {Linking} from 'react-native';
@@ -398,7 +399,9 @@ describe('M-7 — 접근성 글꼴에서도 「닫기」에 닿는다', () => {
     fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
     fireEvent(screen.getByTestId('message-press'), 'longPress');
     expect(screen.getByTestId('sheet-scroll')).toBeTruthy();
-    // 「닫기」가 그 스크롤 안에 있다 — 밖에 두면 스크롤이 그것을 못 데려온다.
+    // 닫기(원형 X, #4318)는 스크롤 **밖의 머리**에 고정이다 — 큰 글씨로 내용이 길어져 스크롤이 생겨도
+    // 밀려나지 않는다. 예전에는 「닫기」 줄이 스크롤 안의 맨 끝이라 스크롤이 데려와야만 닿았다.
     expect(screen.getByTestId('sheet-close')).toBeTruthy();
+    expect(within(screen.getByTestId('sheet-scroll')).queryByTestId('sheet-close')).toBeNull();
   });
 });

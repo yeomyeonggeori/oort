@@ -3,7 +3,7 @@ import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {MOVE_TOLERANCE_PX} from '@momo/core/features/timeline/longPressModel';
 import type {ReactionChip} from '@momo/core/features/timeline/reactions';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 
 import {
@@ -208,6 +208,18 @@ describe('행이 내놓는 것 — 서버 규칙을 화면이 되풀이하지 �
     longPress();
     expect(screen.getByTestId('sheet-close')).toBeTruthy();
   });
+
+  it('닫기는 글자 줄이 아니라 머리의 원형 X 이고, 누르면 시트가 닫힌다 (#4318)', async () => {
+    renderRow();
+    longPress();
+    expect(screen.queryByText('닫기')).toBeNull();
+    expect(screen.getByTestId('sheet-close').props.accessibilityLabel).toBe('메시지 액션 닫기');
+    fireEvent.press(screen.getByTestId('sheet-close'));
+    // 미끄러져 나간 뒤에 사라진다(공용 그릇 `PageSheet`).
+    await waitFor(() => expect(screen.queryByTestId('message-action-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 15000);
 });
 
 describe('행당 접근성 요소는 하나다', () => {
