@@ -6,9 +6,14 @@
 //! The four contracts the Swift original establishes, all preserved:
 //!
 //! 1. **Actor binding** — a member may only touch their own device and their
-//!    own active token. Another member's device, or another member's *active*
-//!    token, is a hard 403. An *invalidated* token is reclaimable, which is the
-//!    account-switch-on-the-same-phone path.
+//!    own active token. Another member's *active* token is a hard 403, and so is
+//!    another member's device **while it still holds a live registration** (an
+//!    active token on it). A registration that is dead — signed out, revoked, or
+//!    retired by APNs — frees what it held: an *invalidated* token is
+//!    reclaimable, and so is a device whose tokens are all invalidated (#3978).
+//!    That is the account-switch-on-the-same-phone path, and it needs both: the
+//!    phone keeps one `deviceId` and one APNs token per install, so the second
+//!    member presents the very ids the first one left behind.
 //! 2. **Idempotent upsert** — re-registering a client-stable `deviceId`
 //!    refreshes liveness and rotates the token. Every other still-active token
 //!    on the same `(device, env)` is invalidated **in the same transaction and
@@ -31,6 +36,21 @@
 //!    invalidates all of the member's ([`invalidate_member_push_tokens_in_tx`]).
 //!    Rotating a session ends nothing. The judgment SQL is untouched: it already
 //!    skips invalidated rows, and the notifier gains no access to `token`.
+//!
+//! And one more from #3978:
+//!
+//! 6. **A handed-over device is the new owner's alone.** Taking over a dormant
+//!    device (contract 1) moves the `device` row. The previous owner's dead
+//!    token rows stay theirs — kept, never deleted (contract 3); only a token
+//!    the new owner presents again is reclaimed, as ever — and the new owner is
+//!    not shown them ([`load_tokens_in_tx`] reads a device's tokens only where
+//!    the token's member is the device's member). The device row is locked
+//!    *before* the dormancy test, so two sign-ins racing for one dormant device
+//!    take turns and the second sees the first's live token. A device id taken
+//!    by a row in **another workspace** cannot be moved from here — row-level
+//!    security hides that row from this transaction, and the id is a global
+//!    primary key — so it is a deliberate rejection
+//!    ([`DeviceRejection::DeviceInAnotherWorkspace`]), never an RLS error.
 
 use chrono::{DateTime, Utc};
 use momo_auth::{lock_session_for_registration, RegistrationSession};
@@ -198,11 +218,16 @@ async fn load_tokens_in_tx(
 ) -> Result<Vec<PushTokenRecord>, DbError> {
     // `right(apns_token, 8)` is the only projection of the token column that
     // ever leaves the database.
+    //
+    // The join to `device` on the token's member is #3978 contract 6: a device
+    // that changed hands keeps the previous owner's dead rows (never deleted),
+    // and those are not the new owner's to see.
     let rows = sqlx::query(
         "SELECT t.id, t.device_id, t.env::text AS env, t.topic, \
                 right(t.apns_token, 8) AS apns_token_suffix, \
                 t.invalidated_at, t.created_at, t.updated_at \
            FROM push_token t \
+           JOIN device d ON d.id = t.device_id AND d.member_id = t.member_id \
           WHERE t.device_id = ANY($1) \
           ORDER BY t.created_at, t.id",
     )
@@ -344,20 +369,36 @@ pub async fn register_device(
             };
 
             // 1) Actor binding on the device row. `deviceId` is client-stable,
-            //    so an existing row must already belong to the caller.
+            //    so an existing row must already belong to the caller — or be
+            //    dormant (#3978, contract 1): a phone that one member signed
+            //    out of keeps its `deviceId`, and the next member signing in on
+            //    it presents that same id. Dormant means no active token on it;
+            //    a live registration is never taken, only a dead one.
+            //
+            //    The row is LOCKED here, not just read, and the dormancy test
+            //    below is a separate statement. Both matter: two sign-ins racing
+            //    for one dormant device must take turns, and the second must
+            //    then see the first one's token — which a snapshot taken before
+            //    the wait would not (READ COMMITTED takes one per statement).
             let existing = sqlx::query(
-                "SELECT member_id, platform::text AS platform FROM device WHERE id = $1",
+                "SELECT member_id, platform::text AS platform \
+                   FROM device WHERE id = $1 FOR UPDATE",
             )
             .bind(registration.device_id)
             .fetch_optional(&mut *conn)
             .await
             .map_err(DbError::from)?;
 
+            let device_visible = existing.is_some();
+            let mut previous_owner: Option<Uuid> = None;
             if let Some(row) = existing {
                 let owner: Uuid = row.get("member_id");
                 let platform: String = row.get("platform");
                 if owner != member_id {
-                    return Ok(Err(DeviceRejection::DeviceOwnedByAnotherMember));
+                    if device_has_live_token(conn, registration.device_id).await? {
+                        return Ok(Err(DeviceRejection::DeviceOwnedByAnotherMember));
+                    }
+                    previous_owner = Some(owner);
                 }
                 if platform != registration.platform {
                     return Ok(Err(DeviceRejection::PlatformImmutable));
@@ -390,35 +431,71 @@ pub async fn register_device(
 
             // ---- first write ----------------------------------------------
             // Past this line every failure rolls back; no rejection may be
-            // returned in the Ok channel.
+            // returned in the Ok channel. The one exception is the insert just
+            // below finding its id taken: `DO NOTHING` has written nothing, so
+            // the transaction is still clean and that outcome may still commit
+            // as a rejection.
 
-            // 2) Idempotent device upsert. `xmax = 0` distinguishes a fresh
-            //    insert from an update, which is what drives 201 vs 200.
-            let upsert = sqlx::query(
-                "INSERT INTO device (id, workspace_id, member_id, platform, app_build) \
-                 VALUES ($1, $2, $3, $4::device_platform, $5) \
-                 ON CONFLICT (id) DO UPDATE \
-                    SET app_build = EXCLUDED.app_build, \
-                        last_seen_at = now() \
-                 RETURNING (xmax = 0) AS created, member_id",
-            )
-            .bind(registration.device_id)
-            .bind(workspace_id)
-            .bind(member_id)
-            .bind(&registration.platform)
-            .bind(&registration.app_build)
-            .fetch_one(&mut *conn)
-            .await
-            .map_err(classify_registration_write)?;
-
-            let created: bool = upsert.get("created");
-            let owner_after: Uuid = upsert.get("member_id");
-            // The pre-check above races a concurrent first registration.
-            // Re-verify ownership on the row the upsert actually touched, so a
-            // mixed-owner device/token pair can never commit (review #422 M1).
-            if owner_after != member_id {
-                return Err(PushError::RegistrationConflict);
-            }
+            // 2) The device row. 201 vs 200 is "this id was new to the server".
+            let created = if device_visible {
+                // The row is locked above, and it is the caller's or dormant and
+                // being taken over — nothing can have made a token live on it
+                // since: a token insert needs a key-share lock on this very row
+                // (the FK), and every registration of this id starts at the lock.
+                // That is what keeps a mixed-owner device/token pair from ever
+                // committing (review #422 M1), now that ownership can move.
+                sqlx::query(
+                    "UPDATE device \
+                        SET member_id = $2, app_build = $3, last_seen_at = now() \
+                      WHERE id = $1",
+                )
+                .bind(registration.device_id)
+                .bind(member_id)
+                .bind(&registration.app_build)
+                .execute(&mut *conn)
+                .await
+                .map_err(classify_registration_write)?;
+                false
+            } else {
+                // `DO NOTHING`, not `DO UPDATE`: the id is a global primary key,
+                // and `DO UPDATE` over a row that row-level security hides from
+                // this tenant is a 42501 — a 500 for the caller. `DO NOTHING`
+                // reports the clash as an empty result instead.
+                let inserted = sqlx::query(
+                    "INSERT INTO device (id, workspace_id, member_id, platform, app_build) \
+                     VALUES ($1, $2, $3, $4::device_platform, $5) \
+                     ON CONFLICT (id) DO NOTHING \
+                     RETURNING id",
+                )
+                .bind(registration.device_id)
+                .bind(workspace_id)
+                .bind(member_id)
+                .bind(&registration.platform)
+                .bind(&registration.app_build)
+                .fetch_optional(&mut *conn)
+                .await
+                .map_err(classify_registration_write)?;
+                if inserted.is_none() {
+                    // Taken by a row the first look did not see. Look again, with
+                    // a fresh snapshot: if it is visible now, a concurrent
+                    // registration of this id in this workspace committed in
+                    // between — retry and the normal path decides. If not, the
+                    // row is in another workspace (#3978 contract 6).
+                    let in_this_workspace = sqlx::query_scalar::<_, bool>(
+                        "SELECT EXISTS (SELECT 1 FROM device WHERE id = $1)",
+                    )
+                    .bind(registration.device_id)
+                    .fetch_one(&mut *conn)
+                    .await
+                    .map_err(DbError::from)?;
+                    return if in_this_workspace {
+                        Err(PushError::RegistrationConflict)
+                    } else {
+                        Ok(Err(DeviceRejection::DeviceInAnotherWorkspace))
+                    };
+                }
+                true
+            };
 
             // 4) Rotate: invalidate every other still-active token on this
             //    (device, env) BEFORE upserting the incoming one. Rows are kept
@@ -507,7 +584,9 @@ pub async fn register_device(
                      'topic', $7::text, \
                      'apns_token_suffix', right($8::text, 8), \
                      'device_created', $9::boolean, \
-                     'tokens_rotated', $10::bigint \
+                     'tokens_rotated', $10::bigint, \
+                     'device_transferred', $11::boolean, \
+                     'previous_member_id', $12::uuid \
                    ))",
             )
             .bind(workspace_id)
@@ -520,6 +599,8 @@ pub async fn register_device(
             .bind(&registration.apns_token)
             .bind(created)
             .bind(rotated as i64)
+            .bind(previous_owner.is_some())
+            .bind(previous_owner)
             .execute(&mut *conn)
             .await
             .map_err(DbError::from)?;
@@ -699,6 +780,22 @@ where
         body,
     )
     .await
+}
+
+/// Does any registration on this device still count — an active
+/// (`invalidated_at IS NULL`) token, whoever's it is?
+///
+/// A statement of its own, after the row lock, on purpose: under READ COMMITTED
+/// each statement takes a fresh snapshot, so a registration that committed while
+/// this transaction waited for the lock is visible here (#3978).
+async fn device_has_live_token(conn: &mut PgConnection, device_id: Uuid) -> Result<bool, DbError> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM push_token \
+                         WHERE device_id = $1 AND invalidated_at IS NULL)",
+    )
+    .bind(device_id)
+    .fetch_one(&mut *conn)
+    .await?)
 }
 
 /// The workspace-membership gate every device handler runs first.
