@@ -21,6 +21,7 @@ version: 2
 updates:
   # ---- Rust ---------------------------------------------------------------
   - package-ecosystem: cargo
+    target-branch: track/engine
     directory: /server-rust
     schedule:
       interval: weekly
@@ -32,6 +33,7 @@ updates:
       semver-patch-days: 3
 
   - package-ecosystem: cargo
+    target-branch: track/engine
     directory: /clients/desktop/src-tauri
     schedule:
       interval: weekly
@@ -47,6 +49,7 @@ updates:
 
   # ---- npm ----------------------------------------------------------------
   - package-ecosystem: npm
+    target-branch: track/engine
     directories:
       # ADR-0133 canonical UI (promoted from the P0 spike by MOMO-596).
       - /clients/web
@@ -62,6 +65,7 @@ updates:
       semver-patch-days: 3
 
   - package-ecosystem: npm
+    target-branch: track/engine
     directory: /clients/mobile
     schedule:
       interval: weekly
@@ -87,6 +91,7 @@ updates:
   # docker-compose reads infra/rust/docker-compose*.yml (image: ...@sha256:...);
   # docker reads the Dockerfiles that carry FROM pins.
   - package-ecosystem: docker-compose
+    target-branch: track/engine
     directory: /infra/rust
     schedule:
       interval: weekly
@@ -95,6 +100,7 @@ updates:
       default-days: 7
 
   - package-ecosystem: docker
+    target-branch: track/engine
     directories:
       - /infra/rust/postgres-pgbackrest
       - /infra/railway
@@ -106,6 +112,7 @@ updates:
 
   # ---- GitHub Actions (all uses: are pinned to commit SHAs, see pr-ci.yml) ---
   - package-ecosystem: github-actions
+    target-branch: track/engine
     directory: /
     schedule:
       interval: weekly

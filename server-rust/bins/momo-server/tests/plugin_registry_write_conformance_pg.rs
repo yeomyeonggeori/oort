@@ -2287,6 +2287,13 @@ async fn the_domain_function_refuses_a_member_that_is_not_a_human() {
 /// Migration 143 (#3944) re-run: idempotent, and it rebuilds the capability projection of an
 /// existing active grant from the new manifest (a stale renamed tool and a missing new tool
 /// are both healed), without touching a grant of another app.
+///
+/// #4313: migration 149 patches the four display keys onto 143's manifests, so 143 re-run **after**
+/// 149 puts the pre-149 text back — that is what a seed is. The realistic 「run it all again」 is
+/// therefore 143 then 149, and that is what is asserted: 143 alone restores exactly its own manifest
+/// (a second run changes nothing, not even `updated_at`), and 149 on top brings the 149 state back. 149
+/// is re-applied **before** any assertion, so a failure here cannot leave the shared registry without
+/// its display fields for the next suite.
 #[tokio::test]
 #[ignore]
 async fn migration_143_is_idempotent_and_rebuilds_existing_projections() {
@@ -2324,14 +2331,60 @@ async fn migration_143_is_idempotent_and_rebuilds_existing_projections() {
         repo_root().join("server/Migrations/143_official_catalog_c_s1b.sql"),
     )
     .expect("migration 143");
+    let sql_149 = std::fs::read_to_string(
+        repo_root().join("server/Migrations/149_official_catalog_display_fields.sql"),
+    )
+    .expect("migration 149");
     let before = manifest_value(&env.su, GITHUB).await;
-    for _ in 0..2 {
-        sqlx::raw_sql(&sql)
-            .execute(&env.su)
-            .await
-            .expect("143 re-runs cleanly");
+    sqlx::raw_sql(&sql)
+        .execute(&env.su)
+        .await
+        .expect("143 re-runs cleanly");
+    let after_first: (String, String, String) = sqlx::query_as(
+        "SELECT manifest::text, manifest_digest, updated_at::text FROM plugin_registry WHERE plugin_id = $1",
+    )
+    .bind(GITHUB)
+    .fetch_one(&env.su)
+    .await
+    .expect("registry row after the first re-run");
+    sqlx::raw_sql(&sql)
+        .execute(&env.su)
+        .await
+        .expect("143 re-runs cleanly (again)");
+    let after_second: (String, String, String) = sqlx::query_as(
+        "SELECT manifest::text, manifest_digest, updated_at::text FROM plugin_registry WHERE plugin_id = $1",
+    )
+    .bind(GITHUB)
+    .fetch_one(&env.su)
+    .await
+    .expect("registry row after the second re-run");
+    // 149 on top, always, before anything is asserted.
+    sqlx::raw_sql(&sql_149)
+        .execute(&env.su)
+        .await
+        .expect("149 re-applies cleanly after 143");
+
+    assert_eq!(
+        after_second, after_first,
+        "143 is idempotent: the second run writes nothing"
+    );
+    let mut legacy = before.clone();
+    for key in ["logoKey", "category", "websiteURL", "starterPrompts"] {
+        legacy["plugin"]
+            .as_object_mut()
+            .expect("plugin object")
+            .remove(key);
     }
-    assert_eq!(manifest_value(&env.su, GITHUB).await, before, "idempotent");
+    let after_143: Value = serde_json::from_str(&after_first.0).expect("manifest json");
+    assert_eq!(
+        after_143, legacy,
+        "143 alone restores exactly its own, pre-149 manifest"
+    );
+    assert_eq!(
+        manifest_value(&env.su, GITHUB).await,
+        before,
+        "143 then 149 is the state 149 left"
+    );
     let digest_ok: bool = sqlx::query_scalar(
         "SELECT manifest_digest = 'sha256:' || encode(sha256(convert_to(manifest::text, 'UTF8')), 'hex') \
            FROM plugin_registry WHERE plugin_id = $1",
