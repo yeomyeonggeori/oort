@@ -25,6 +25,10 @@ import {__setNonSecretStore} from '../src/storage/kv';
 // 포커스 없는 쪽(자판을 내린 채 글이 생기고 사라지는 길 — 초안 복원·보내기)은 #4305 의 시험 그대로 남아 있다:
 // 이 파일에서 `focus()` 를 부르지 않는 시험이 그 길이다.
 //
+// 접힘의 **움직임**은 이유에 따라 갈린다(#4456 D1): 포커스를 잃어서 접힐 때는 펼침과 같은 스프링이 거꾸로 돌고(자판이 내려가기 시작하는
+// 프레임에 알약이 44pt 한 번에 줄어 대화가 튀지 않게), 포커스 없이 글이 비어서 접힐 때는 같은 프레임이다(owner 10-24 결함을 애니메이션으로 가리지
+// 않게). 「동작 줄이기」면 둘 다 즉시다.
+//
 // 이 파일의 단정은 전부 **렌더 결과**(도구 줄이 있나, 입력창의 명시 높이, 햅틱 대역의 호출, `Animated.spring`
 // 호출, 프레임마다 읽은 도구 줄 높이·글 칸 여백, `Keyboard.dismiss` 호출)를 읽는다. 사보타주 표는 PR 본문.
 // =============================================================================
@@ -57,6 +61,28 @@ const hasTools = () => screen.queryByTestId('composer-tools') !== null;
 const focus = () => fireEvent(input(), 'focus');
 const blur = () => fireEvent(input(), 'blur');
 const sendButton = () => screen.getByTestId('composer-send');
+/** 스프링이 끝나도록 시간을 흘린다(넘침 잠금이면 ≈245ms 에 끝난다). */
+const settle = () =>
+  act(() => {
+    jest.advanceTimersByTime(500);
+  });
+const FRAME_MS = 16;
+/** 16ms 한 프레임(여럿)을 흘린다. */
+const advance = (count = 1) =>
+  act(() => {
+    jest.advanceTimersByTime(FRAME_MS * count);
+  });
+/** Buzz 스프링(220ms · bounce 0.08, 질량 1)의 해석해 — 0 에서 정지 출발해 1 로. 시험이 상수에서 읽지 않고 따로 도출한다. */
+const buzzSpring = (seconds: number) => {
+  const zeta = 1 - 0.08;
+  const omega = (2 * Math.PI) / 0.22;
+  const damped = omega * Math.sqrt(1 - zeta * zeta);
+  return (
+    1 -
+    Math.exp(-zeta * omega * seconds) *
+      (Math.cos(damped * seconds) + ((zeta * omega) / damped) * Math.sin(damped * seconds))
+  );
+};
 const toolsStyle = () => flat(screen.getByTestId('composer-tools').props.style);
 const fieldStyle = () => flat(screen.getByTestId('composer-field').props.style);
 /** 시험이 독립적으로 도출한 접힘 높이 — 글자 배수 곱한 한 줄 + 세로 크롬, 엄지 바닥 이상. */
@@ -158,14 +184,31 @@ describe('포커스 (#4456) — 포커스만으로 펼치고, 포커스를 잃�
     expect(inputHeight()).toBe(collapsed());
   });
 
-  it('포커스를 잃으면 접힌다: 도구 줄이 사라지고 글 칸은 한 줄 그대로다', () => {
+  it('포커스를 잃으면 접힌다: 움직임이 끝나면 도구 줄이 사라지고 글 칸은 한 줄 그대로다', () => {
     mount();
     focus();
-    // 전제: 접힐 펼침이 실제로 서 있다 — 없으면 아래 단정은 블러 없이도 통과한다.
+    settle();
+    // 전제: 접힐 펼침이 실제로 끝값으로 서 있다 — 없으면 아래 단정은 블러 없이도 통과한다.
     expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
     blur();
+    settle();
     expect(hasTools()).toBe(false);
     expect(inputHeight()).toBe(collapsed());
+  });
+
+  it('포커스를 잃는 그 렌더는 아직 펼친 모양이다 — 접힌 모양이 한 프레임 그려졌다 되살아나지 않는다 (#4456 D1)', () => {
+    mount();
+    focus();
+    settle();
+    blur();
+    // 시간을 흘리기 전, 블러가 끝난 직후의 렌더. 여기서 도구 줄이 없거나 여백이 접힌 값이면 키보드가 내려가기 시작하는 프레임에 알약이
+    // 44pt 한 번에 줄고 다음 프레임에 되살아나는 모양이다(처리기가 `collapsing` 을 `focused` 와 한 묶음으로 올리지 않았다는 뜻).
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle()).toMatchObject({height: TOUCH_TARGET, opacity: 1});
+    expect(fieldStyle()).toMatchObject({marginLeft: 0, marginRight: 0});
+    settle();
+    expect(hasTools()).toBe(false);
   });
 
   it('글이 남아 있으면 포커스를 잃어도 펼친 채다 — 그 글을 비우면 그때 접힌다', () => {
@@ -173,8 +216,10 @@ describe('포커스 (#4456) — 포커스만으로 펼치고, 포커스를 잃�
     focus();
     fireEvent.changeText(input(), '쓰던 글');
     blur();
+    settle();
     expect(hasTools()).toBe(true);
     expect(inputHeight()).toBeUndefined();
+    // 포커스 없이 글이 비는 접힘은 **같은 프레임**이다(움직임 없음, 시간을 흘리지 않았다).
     fireEvent.changeText(input(), '');
     expect(hasTools()).toBe(false);
     expect(inputHeight()).toBe(collapsed());
@@ -210,10 +255,14 @@ describe('포커스 (#4456) — 포커스만으로 펼치고, 포커스를 잃�
   it('포커스 → 블러 → 포커스: 다시 펼쳐진다(한 번 접힌 채 굳지 않는다)', () => {
     mount();
     focus();
+    settle();
     blur();
+    settle();
     expect(hasTools()).toBe(false);
     focus();
+    settle();
     expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
     expect(inputHeight()).toBe(collapsed());
   });
 
@@ -297,6 +346,7 @@ describe('햅틱 — 전이는 0번, 보내기 = light 1회', () => {
     // 전제: 포커스로 실제로 펼쳐졌다 — 안 펼쳐졌다면 「울리지 않는다」는 아무것도 안 잰 것이다.
     expect(hasTools()).toBe(true);
     blur();
+    settle();
     expect(hasTools()).toBe(false);
     focus();
     fireEvent.changeText(input(), '가');
@@ -328,7 +378,7 @@ async function mountSettled(onSend?: (body: string) => void) {
   return view;
 }
 
-describe('애니메이션 — 펼침은 Buzz 스프링, 접힘은 같은 프레임, 동작 줄이기면 즉시', () => {
+describe('애니메이션 — 펼침과 포커스를 잃어서 접히는 것은 Buzz 스프링, 포커스 없이 비는 접힘은 같은 프레임, 동작 줄이기면 즉시', () => {
   // 화면의 다른 부품(첨부 메뉴의 380/680 스프링 등)도 `Animated.spring` 을 부른다 — 이 입력창의 것(강성 816 · JS 구동)만 센다.
   const ours = (spring: jest.SpyInstance) =>
     spring.mock.calls.filter(
@@ -336,11 +386,6 @@ describe('애니메이션 — 펼침은 Buzz 스프링, 접힘은 같은 프레�
         call[1]?.stiffness === COMPOSER_EXPAND_SPRING.stiffness &&
         call[1]?.useNativeDriver === false,
     );
-  /** 스프링이 끝나도록 시간을 흘린다(넘침 잠금이면 ≈245ms 에 끝난다). */
-  const settle = () =>
-    act(() => {
-      jest.advanceTimersByTime(500);
-    });
 
   it('스프링 값은 Buzz 의 220ms · bounce 0.08 을 옮긴 것이다: 고유 주기 220ms, 감쇠비 0.92', () => {
     const {stiffness, damping, mass} = COMPOSER_EXPAND_SPRING;
@@ -429,27 +474,64 @@ describe('애니메이션 — 펼침은 Buzz 스프링, 접힘은 같은 프레�
     expect(toolsStyle().height).toBe(TOUCH_TARGET);
   });
 
-  it('접힘은 애니메이션이 아니다: 포커스를 잃어도 · 포커스 없이 보내도 스프링이 안 돌고 같은 렌더에서 접힌다', async () => {
+  it('포커스를 잃어서 접힐 때는 **같은 스프링이 거꾸로** 한 번 돈다 — toValue 0, 넘침 잠금, JS 구동 (#4456 D1)', async () => {
     const spring = jest.spyOn(Animated, 'spring');
     await mountSettled();
     focus();
     settle();
-    expect(ours(spring)).toHaveLength(1);
+    expect(ours(spring)).toHaveLength(1); // 전제: 펼침이 한 번 걸었다
     blur();
-    expect(hasTools()).toBe(false);
-    expect(ours(spring)).toHaveLength(1);
-    // 포커스 없이 보낸다(자판을 내린 채 남은 글).
+    expect(ours(spring)).toHaveLength(2);
+    expect(ours(spring)[1]?.[1]).toMatchObject({
+      toValue: 0,
+      ...COMPOSER_EXPAND_SPRING,
+      overshootClamping: true,
+      useNativeDriver: false,
+    });
+    settle();
+    // 끝난 뒤에는 더 안 건다(접힘이 끝났다고 다시 펼침을 걸지 않는다).
+    expect(ours(spring)).toHaveLength(2);
+  });
+
+  it('포커스 없이 글이 비어서 접힐 때(포커스 없이 보냄)는 스프링이 안 돌고 같은 렌더에서 접힌다 (owner 10-24)', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    // 포커스 없이 글이 생겨 펼침(자판을 내린 채 남은 글).
     fireEvent.changeText(input(), '가');
     settle();
-    expect(ours(spring)).toHaveLength(2);
+    expect(ours(spring)).toHaveLength(1);
     fireEvent.press(sendButton());
     expect(hasTools()).toBe(false);
-    expect(ours(spring)).toHaveLength(2);
+    expect(inputHeight()).toBe(collapsed());
+    expect(ours(spring)).toHaveLength(1);
+  });
+
+  it('글이 남은 채 포커스를 잃으면 접히지도 스프링이 돌지도 않는다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    focus();
+    settle();
+    fireEvent.changeText(input(), '쓰던 글');
+    blur();
+    settle();
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(ours(spring)).toHaveLength(1);
+  });
+
+  it('동작 줄이기: 포커스를 잃어도 움직임 없이 즉시 접힌다 — 같은 렌더에서', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    focus();
+    expect(hasTools()).toBe(true); // 전제: 즉시 펼쳐졌다
+    blur();
+    expect(hasTools()).toBe(false);
+    expect(ours(spring)).toHaveLength(0);
   });
 });
 
 describe('펼치는 동안 — 프레임마다 읽은 값 (대화 목록이 출렁이지 않는 길의 컴포넌트 몫)', () => {
-  const FRAME_MS = 16;
   /** 포커스를 세우고 16ms 씩 `frames` 번 흘리며 도구 줄 높이·글 칸 왼쪽 여백·도구 줄 불투명도를 읽는다. */
   async function sample(frames: number) {
     await mountSettled();
@@ -467,18 +549,6 @@ describe('펼치는 동안 — 프레임마다 읽은 값 (대화 목록이 출�
     }
     return {heights, insets, opacities};
   }
-
-  /** Buzz 스프링(220ms · bounce 0.08, 질량 1)의 해석해 — 0 에서 정지 출발해 1 로. 시험이 상수에서 읽지 않고 따로 도출한다. */
-  const buzzSpring = (seconds: number) => {
-    const zeta = 1 - 0.08;
-    const omega = (2 * Math.PI) / 0.22;
-    const damped = omega * Math.sqrt(1 - zeta * zeta);
-    return (
-      1 -
-      Math.exp(-zeta * omega * seconds) *
-        (Math.cos(damped * seconds) + ((zeta * omega) / damped) * Math.sin(damped * seconds))
-    );
-  };
 
   it('도구 줄 높이는 0 에서 TOUCH_TARGET 까지 단조롭게 오르고 한 번도 넘치지 않는다 · 글 칸 여백은 36 에서 0 으로 내려가 음수가 없다', async () => {
     const {heights, insets, opacities} = await sample(40);
@@ -511,6 +581,114 @@ describe('펼치는 동안 — 프레임마다 읽은 값 (대화 목록이 출�
   });
 });
 
+describe('접히는 동안 — 프레임마다 읽은 값 (포커스를 잃어서 접힐 때, #4456 D1)', () => {
+  /** 펼침을 끝값에 앉히고 블러한 뒤 16ms 씩 `frames` 번 흘리며 읽는다. 도구 줄이 내려간 뒤는 높이 0 · 불투명 0 · 여백 36 이다. */
+  async function sample(frames: number) {
+    await mountSettled();
+    focus();
+    settle();
+    blur();
+    const heights: number[] = [];
+    const insets: number[] = [];
+    const opacities: number[] = [];
+    const mounted: boolean[] = [];
+    for (let index = 0; index < frames; index += 1) {
+      advance();
+      mounted.push(hasTools());
+      heights.push(hasTools() ? Number(toolsStyle().height) : 0);
+      opacities.push(hasTools() ? Number(toolsStyle().opacity) : 0);
+      insets.push(Number(fieldStyle().marginLeft));
+    }
+    return {heights, insets, opacities, mounted};
+  }
+
+  it('도구 줄 높이는 TOUCH_TARGET 에서 0 까지 단조롭게 내려가고 음수가 없다 · 글 칸 여백은 0 에서 36 으로 올라 넘지 않는다', async () => {
+    const {heights, insets, opacities, mounted} = await sample(40);
+    // 움직인다: 첫 프레임은 끝값(0)이 아니고 처음값(44)도 아니다 — 즉시 접히면 아래 「음수 없음」이 아무것도 안 잰다.
+    expect(heights[0]).toBeLessThan(TOUCH_TARGET);
+    expect(heights[0]).toBeGreaterThan(0);
+    expect(heights.some(height => height > 0 && height < TOUCH_TARGET)).toBe(true);
+    // 단조 감소.
+    heights.forEach((height, index) => {
+      if (index > 0) expect(height).toBeLessThanOrEqual(heights[index - 1] as number);
+    });
+    insets.forEach((inset, index) => {
+      if (index > 0) expect(inset).toBeGreaterThanOrEqual(insets[index - 1] as number);
+    });
+    // 넘침 0 — 알약 윗면이 목표 아래로 내려갔다 올라올 길이 없다(대화 목록이 출렁일 길도 없다).
+    expect(Math.min(...heights)).toBeGreaterThanOrEqual(0);
+    expect(Math.max(...insets)).toBeLessThanOrEqual(CONV.composerCircle);
+    expect(Math.min(...opacities)).toBeGreaterThanOrEqual(0);
+    // 끝: 도구 줄이 내려가고(0 에 닿은 뒤 한 번 더 렌더) 여백은 접힘 값, 글 칸은 한 줄로 못 박힌 채다.
+    expect(mounted[mounted.length - 1]).toBe(false);
+    expect(heights[heights.length - 1]).toBe(0);
+    expect(insets[insets.length - 1]).toBe(CONV.composerCircle);
+    expect(inputHeight()).toBe(collapsed());
+    // 움직이는 동안은 도구 줄이 서 있다(0 에 닿기 전에 내려가지 않는다).
+    const lastMounted = mounted.lastIndexOf(true);
+    expect(lastMounted).toBeGreaterThan(5);
+    expect(heights[lastMounted]).toBeLessThan(1);
+  });
+
+  it('곡선은 펼침의 거울이다 — Buzz 스프링의 해석해 1 − x(t) 를 따른다(스냅이 아니다)', async () => {
+    const {heights} = await sample(10);
+    heights.slice(0, 8).forEach((height, index) => {
+      const expected = TOUCH_TARGET * (1 - buzzSpring(((index + 1) * FRAME_MS) / 1000));
+      expect(Math.abs(height - expected)).toBeLessThan(0.75);
+    });
+    // 첫 프레임이 44 에서 ~3.5pt 만 내려왔다(스냅이면 44pt 가 한 번에 0 으로 간다).
+    expect(heights[0]).toBeGreaterThan(TOUCH_TARGET * 0.85);
+  });
+
+  it('접히는 도중에 다시 포커스가 오면 그 자리에서 이어 펼친다 — 0 이나 끝값으로 튀지 않는다', async () => {
+    await mountSettled();
+    focus();
+    settle();
+    blur();
+    advance(4); // 접히는 중간(64ms)
+    const before = Number(toolsStyle().height);
+    expect(before).toBeGreaterThan(0);
+    expect(before).toBeLessThan(TOUCH_TARGET);
+    focus();
+    advance();
+    const after = Number(toolsStyle().height);
+    // 한 프레임에 스프링이 움직이는 몫 안이다(0 으로 튀거나 44 로 튀지 않는다).
+    expect(Math.abs(after - before)).toBeLessThan(6);
+    settle();
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(fieldStyle().marginLeft).toBe(0);
+    // 접히는 중이라는 표지가 다시 펼친 뒤에도 남지 않는다: 글을 쓰고 포커스 없이 비우면 **같은 렌더에** 접힌다(움직이며 접히지 않는다).
+    fireEvent.changeText(input(), '가');
+    blur();
+    settle();
+    fireEvent.changeText(input(), '');
+    expect(hasTools()).toBe(false);
+  });
+
+  it('접히는 도중에 재는 글 칸 폭은 자리표시 폭이 되지 않는다 — 접힌 폭에 닿은 뒤에만 잰다', async () => {
+    await mountSettled();
+    const layout = (width: number) =>
+      fireEvent(input(), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width, height: 44}}});
+    const probeWidth = () =>
+      flat(
+        screen.queryAllByTestId('composer-placeholder-probe', {includeHiddenElements: true})[0]?.props.style,
+      ).width;
+    layout(358); // 접힌 폭
+    const base = probeWidth();
+    expect(base).toBeDefined();
+    focus();
+    settle();
+    blur();
+    advance(4); // 접히는 중간 — 글 칸 폭이 접힌 폭이 아니다
+    layout(300);
+    expect(probeWidth()).toBe(base);
+    settle(); // 접힘이 끝났다
+    layout(340);
+    expect(probeWidth()).toBe(Number(base) - 18);
+  });
+});
+
 describe('아래로 끌어 자판 내리기', () => {
   const touch = (pageX: number, pageY: number) => ({nativeEvent: {pageX, pageY}});
   const bar = () => screen.getByTestId('composer-bar');
@@ -539,6 +717,7 @@ describe('아래로 끌어 자판 내리기', () => {
     // 않는다(#4456 2단계 실기 확인 항목). 이 시험은 그 `onBlur` 가 오면 접히는 데까지를 잠근다.
     expect(hasTools()).toBe(true);
     blur();
+    settle();
     expect(hasTools()).toBe(false);
   });
 

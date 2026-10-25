@@ -630,7 +630,12 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 //
 // 접힘은 포커스를 잃고(`onBlur` — 끌어 내리기·`Keyboard.dismiss`·다른 화면으로 감이 모두 이 길이다) 글도 없을
 // 때다. 글이 남아 있으면 포커스를 잃어도 펼친 채다. 펼침은 **입력창이 포커스를 쥔 동안**이지 키보드가 보이는
-// 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다.
+// 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다. 키보드만 내려가고 포커스가 남는 길(앱이 백그라운드로
+// 갔다 옴·하드웨어 키보드)은 일부러 듣지 않는다: 포커스가 곧 「입력 중」이고, iOS 는 돌아올 때 자판을 되살린다.
+//
+// 접힘의 **움직임**은 이유에 따라 갈린다. 포커스를 잃어서 접힐 때는 펼침과 같은 스프링으로 줄어든다(자판이 내려가기
+// 시작하는 프레임에 알약이 44pt 한 번에 줄면 그 위 대화가 통째로 튄다 — 녹화 프레임으로 확인). 포커스 없이 글이 비어서
+// 접힐 때(포커스 없이 보냄·지움)는 같은 프레임이다 — 위 owner 10-24 결함을 애니메이션으로 가리지 않는다.
 //
 // 두 원은 어느 상태에서도 **알약 바닥에서 같은 자리**에 선다(절대 배치). 알약이 위로 자라고 도구 줄이
 // 그 아래 원 곁에 생기므로 「+ 가 왼쪽 아래로 내려간다」는 인상은 글 칸이 원 위로 넓게 펼쳐지는
@@ -1472,7 +1477,6 @@ export function Composer({
     // 햅틱은 없다 — 포커스·펼침은 소리 없이 온다(#4331: 입력 길의 햅틱은 보내기 light 한 번뿐).
     setFocused(true);
   }, [setKeyBlocked]);
-  const onInputBlur = useCallback(() => setFocused(false), []);
 
   const onSelectionChange = useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1649,31 +1653,65 @@ export function Composer({
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const expandedRef = useRef(expanded);
+  // 진행값의 지금 값. 글 칸 폭을 재는 쪽(`onInputLayout`)이 「접힌 폭에 닿았나」를 알려고 읽는다.
+  const progressRef = useRef(expanded ? 1 : 0);
+  useEffect(() => {
+    const id = progress.addListener(({value}) => {
+      progressRef.current = value;
+    });
+    return () => progress.removeListener(id);
+  }, [progress]);
+  // 접히는 중 (#4456): **포커스를 잃어서** 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 포커스를 잃는 그
+  // 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
+  // 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다. 그래서 `onBlur` 처리기가 `focused` 와 한 묶음으로 올린다.
+  const [collapsing, setCollapsing] = useState(false);
+  const shown = expanded || collapsing;
+  const onInputBlur = useCallback(() => {
+    // 움직이며 접히는 것은 **펼친 알약이 포커스만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
+    if (expandedRef.current && currentTextRef.current === '' && !reduceMotion.current) {
+      setCollapsing(true);
+    }
+    setFocused(false);
+  }, [reduceMotion]);
   useEffect(() => {
     if (expandedRef.current === expanded) return;
     expandedRef.current = expanded;
     progress.stopAnimation();
-    // 접힘(포커스를 잃고 글도 없다)은 **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다): 보낸 뒤에도 높이가
-    // 늘어난 채 남던 실기 결함(owner 10-24)을 애니메이션으로 가리지 않는다. 펼침만 움직이고, 「동작 줄이기」
-    // 에서는 그것도 즉시다. 보낸 뒤 포커스가 남아 있으면 `expanded` 가 안 바뀌므로 여기에 오지도 않는다
-    // (빈 펼침 높이로 남는다 — 글 칸을 한 줄로 못 박는 것은 아래 `TextInput` 의 `height`).
-    if (!expanded || reduceMotion.current) {
-      progress.setValue(expanded ? 1 : 0);
+    // 곡선은 Buzz 스프링이고 **양쪽 방향이 같다**(Buzz `composerExpansionController` 는 펼침도 접힘도 같은 스프링이다; 근거: `design/motion.ts`
+    // 의 「입력창 펼침」). `overshootClamping` — 진행값이 범위를 넘으면 도구 줄이 제 높이보다 커지고 글 칸 양옆 여백이 음수가 된다.
+    // 레이아웃 속성을 움직이므로 JS 구동이다. 접히는 도중에 다시 포커스가 오면 `stopAnimation` 이 현재 값에서 멈추고 거기서 다시 펼친다.
+    const spring = (toValue: 0 | 1, done?: () => void) =>
+      Animated.spring(progress, {
+        toValue,
+        ...COMPOSER_EXPAND_SPRING,
+        overshootClamping: true,
+        useNativeDriver: false,
+      }).start(result => {
+        if (result.finished) done?.();
+      });
+    if (expanded) {
+      setCollapsing(false);
+      if (reduceMotion.current) progress.setValue(1);
+      else spring(1);
       return;
     }
-    // 곡선은 Buzz 스프링이다(근거: `design/motion.ts` 의 「입력창 펼침」). `overshootClamping` — 진행값이 1 을 넘으면
-    // 도구 줄이 제 높이보다 커지고 글 칸 양옆 여백이 음수가 된다. 레이아웃 속성을 움직이므로 JS 구동이다.
-    Animated.spring(progress, {
-      toValue: 1,
-      ...COMPOSER_EXPAND_SPRING,
-      overshootClamping: true,
-      useNativeDriver: false,
-    }).start();
-  }, [expanded, progress, reduceMotion]);
+    // 접힘은 두 갈래다.
+    //  - 포커스를 잃어서(`collapsing`): 키보드가 내려가기 시작하는 프레임에 알약이 44pt 한 번에 줄면 알약 윗면과 그 위 대화가 통째로
+    //    튄다(시뮬레이터 녹화 프레임으로 확인, #4456). 같은 스프링으로 줄인다.
+    //  - 포커스 없이 글이 비어서(포커스 없이 보냄·지움): **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다). 보낸 뒤에도 높이가 늘어난 채
+    //    남던 실기 결함(owner 10-24)을 애니메이션으로 가리지 않는다. 보낸 뒤 포커스가 남아 있으면 `expanded` 가 안 바뀌므로 여기에 오지도
+    //    않는다(빈 펼침 높이로 남는다 — 글 칸을 한 줄로 못 박는 것은 아래 `TextInput` 의 `height`).
+    if (collapsing && !reduceMotion.current) {
+      spring(0, () => setCollapsing(false));
+      return;
+    }
+    progress.setValue(0);
+    if (collapsing) setCollapsing(false);
+  }, [expanded, collapsing, progress, reduceMotion]);
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
-  // 펼침일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
-  const inputInset = expanded
+  // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
+  const inputInset = shown
     ? progress.interpolate({
         inputRange: [0, 1],
         outputRange: [CONV.composerCircle, 0],
@@ -1732,8 +1770,9 @@ export function Composer({
   // 그 답은 이 상자에 대한 답이 아니다.
   const [inputWidth, setInputWidth] = useState<number | null>(null);
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
-    // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305).
-    if (expandedRef.current) return;
+    // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305). 펼치는 중·접히는 중의 폭도 아니므로
+    // 진행값이 0 에 닿은 뒤(접힌 폭)에서만 잰다(#4456).
+    if (expandedRef.current || progressRef.current > 0) return;
     const {width} = event.nativeEvent.layout;
     setInputWidth(previous => (previous === width ? previous : width));
   }, []);
@@ -2257,7 +2296,7 @@ export function Composer({
           testID="composer-input"
         />
         </Animated.View>
-        {expanded ? (
+        {shown ? (
           <Animated.View
             style={[styles.tools, {height: toolsHeight, opacity: progress}]}
             testID="composer-tools">
