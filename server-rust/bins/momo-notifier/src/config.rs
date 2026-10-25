@@ -45,7 +45,9 @@
 //!   `MOMO_AVATAR_RECLAIM_DATABASE_URL`, then `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the
 //!   RLS-bound `momo_app` connection). The idle time before a file is reclaimed is a
 //!   constant (30 days), not an environment variable. On the default `local` backend
-//!   (self-host, Railway) this sweep does not run.
+//!   (self-host, Railway) this sweep does not run. `MOMO_ATTACHMENT_RECLAIM=0` turns it
+//!   off (it deletes files; the first ticks after an upgrade collect everything that has
+//!   piled up) without touching the Drive credentials the avatar reclaim shares.
 //!
 //! * `MOMO_SHARE_RETENTION_DATABASE_URL` (default `MOMO_HUDDLE_SWEEP_DATABASE_URL`)
 //!   — the RLS-bound `momo_app` connection the shared-session retention sweep
@@ -263,6 +265,7 @@ impl NotifierConfig {
             avatar_reclaim_database_url: env("MOMO_AVATAR_RECLAIM_DATABASE_URL")
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
             attachment_reclaim: AttachmentReclaimConfig::parse(
+                env("MOMO_ATTACHMENT_RECLAIM").as_deref(),
                 env("MOMO_DRIVE_ARCHIVE_BACKEND")
                     .or_else(|| env("MOMO_DRIVE_BACKEND"))
                     .as_deref(),

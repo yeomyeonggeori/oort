@@ -78,13 +78,26 @@ pub struct AttachmentReclaimConfig {
 impl AttachmentReclaimConfig {
     /// Both Drive values present and the backend unset / `google` / `sa`, or `None`.
     /// A `stub` or `local` backend is deliberately `None` (see the module docs).
+    ///
+    /// `switch` is the raw `MOMO_ATTACHMENT_RECLAIM`: **this sweep deletes files**, so an
+    /// operator can turn it off without touching the Drive credentials the avatar reclaim
+    /// shares (`0`, `false`, `off` or `no`, any case). Unset means on.
     pub fn parse(
+        switch: Option<&str>,
         backend: Option<&str>,
         sa_key_path: Option<&str>,
         shared_drive_id: Option<&str>,
         interval: Duration,
         batch: i64,
     ) -> Option<AttachmentReclaimConfig> {
+        if switch.is_some_and(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "0" | "false" | "off" | "no"
+            )
+        }) {
+            return None;
+        }
         let drive =
             AvatarReclaimConfig::parse(backend, sa_key_path, shared_drive_id, interval, batch)?;
         Some(AttachmentReclaimConfig {
@@ -220,8 +233,9 @@ mod tests {
 
     #[test]
     fn only_a_complete_google_drive_configuration_enables_the_reclaim() {
-        let parse =
-            |backend, key, drive| AttachmentReclaimConfig::parse(backend, key, drive, TICK, 50);
+        let parse = |backend, key, drive| {
+            AttachmentReclaimConfig::parse(None, backend, key, drive, TICK, 50)
+        };
         assert!(parse(None, Some("/k.json"), Some("0ABC")).is_some());
         assert!(parse(Some("google"), Some("/k.json"), Some("0ABC")).is_some());
         assert!(parse(Some(" SA "), Some("/k.json"), Some("0ABC")).is_some());
@@ -234,9 +248,26 @@ mod tests {
         assert!(parse(Some("stub"), Some("/k.json"), Some("0ABC")).is_none());
     }
 
+    /// The sweep deletes files, so it has its own off switch (`MOMO_ATTACHMENT_RECLAIM`),
+    /// separate from the Drive credentials the avatar reclaim needs. Unset or anything else
+    /// leaves it on.
+    #[test]
+    fn an_operator_can_switch_the_sweep_off_without_touching_the_drive_credentials() {
+        let parse = |switch| {
+            AttachmentReclaimConfig::parse(switch, None, Some("/k.json"), Some("0ABC"), TICK, 50)
+        };
+        assert!(parse(None).is_some(), "unset is on");
+        assert!(parse(Some("1")).is_some());
+        assert!(parse(Some("yes")).is_some());
+        for off in ["0", "false", "FALSE", " off ", "No"] {
+            assert!(parse(Some(off)).is_none(), "{off:?} turns it off");
+        }
+    }
+
     #[test]
     fn the_batch_is_at_least_one_and_debug_never_prints_the_key_path_or_drive_id() {
         let config = AttachmentReclaimConfig::parse(
+            None,
             None,
             Some("/secrets/sa-visible-nowhere.json"),
             Some("0DriveIdVisibleNowhere"),

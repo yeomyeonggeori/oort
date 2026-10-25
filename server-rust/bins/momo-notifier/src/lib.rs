@@ -952,8 +952,9 @@ impl Notifier {
         ) {
             (None, _) => {
                 tracing::info!(
-                    "attachment reclaim disabled (no Google Drive configured for the notifier; \
-                     local/stub archives are not reachable from this process)"
+                    "attachment reclaim disabled (MOMO_ATTACHMENT_RECLAIM=0, or no Google Drive \
+                     configured for the notifier: local/stub archives are not reachable from this \
+                     process)"
                 );
                 None
             }
