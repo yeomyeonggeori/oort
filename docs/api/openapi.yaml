@@ -4483,7 +4483,10 @@ paths:
         process has no relay client), `last_delivery_failed`. `ok` is true when
         there is no blocker. That means the server holds nothing back, not that
         the device shows it: the OS permission, the per-device switch and Focus
-        modes are known only to the client. `lastTest` is the latest test push
+        modes are known only to the client. Not codes: the phone delay while the
+        desktop is in use, the channel level and the server-wide budget drops
+        (ADR-0206 D11). `kind_off` and `quiet_hours` are served once the
+        kind-switch and work-hours slices land. `lastTest` is the latest test push
         the caller sent, if any.
       security:
         - bearerAuth: []
@@ -4492,7 +4495,9 @@ paths:
         - name: channelId
           in: query
           required: false
-          description: Also evaluate `channel_muted` for this channel.
+          description: >
+            Also evaluate `channel_muted` for this channel. A channel the caller
+            cannot see, or that does not exist, is a 404.
           schema:
             type: string
             format: uuid
@@ -4519,6 +4524,12 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: A `channelId` the caller cannot see or that does not exist (existence is not disclosed).
           content:
             application/json:
               schema:
@@ -4612,10 +4623,15 @@ paths:
         Changing the phone push of `approval` from on to off needs `confirm:
         ["approval_push_off"]`; without it 400 `confirmation_required`. With it the
         response carries `warnings: ["approval_push_off"]` and the write is
-        audited. `schedule.tz` must be an
-        a zone name in the database's `pg_timezone_names` (400 `invalid_time_zone`); a sound id
-        must be known (400 `unknown_sound`). `schedule: null` removes the
-        schedule. Human bearer only (an agent bearer is 403).
+        audited. `schedule.tz` must be a zone name in the database's
+        `pg_timezone_names` (400 `invalid_time_zone`; an abbreviation such as `PST`
+        or a POSIX form such as `UTC+9` is refused). A window with `start == end` is
+        400 `invalid_schedule`. A sound id must be known (400 `unknown_sound`). A
+        surface that does not apply to the kind (`desktop` of `agentAnswer`,
+        `keyword`, `scheduledFailed`) is a 400. `kinds` merges per cell and
+        `presentation.sounds` per kind; a `null` value resets to the default.
+        `schedule` is replaced whole and `schedule: null` removes it. Human bearer
+        only (an agent bearer is 403).
       security:
         - bearerAuth: []
       parameters:
@@ -4635,8 +4651,9 @@ paths:
                 $ref: "#/components/schemas/NotificationPrefsResponse"
         "400":
           description: >
-            Empty body, `confirmation_required`, `invalid_time_zone` or
-            `unknown_sound`. An unknown field is a 422 from the JSON extractor.
+            Empty body, `confirmation_required`, `invalid_time_zone`,
+            `invalid_schedule`, `unknown_sound` or a surface that does not apply to
+            the kind. An unknown field is a 422 from the JSON extractor.
           content:
             application/json:
               schema:
@@ -16378,7 +16395,8 @@ components:
       required: [phone]
       description: >
         One kind on the two surfaces. `desktop` is absent where the surface does
-        not apply to the kind (`agentAnswer`, `scheduledFailed`).
+        not apply to the kind (`agentAnswer`, `keyword`, `scheduledFailed`); a
+        PATCH that sets it is a 400.
       properties:
         phone:
           type: boolean
@@ -16449,6 +16467,22 @@ components:
           additionalProperties:
             type: string
             maxLength: 80
+
+    PatchNotificationPresentation:
+      type: object
+      additionalProperties: false
+      required: [sounds]
+      description: >
+        Merged per kind into the stored sounds; a `null` value resets that kind
+        to its default sound.
+      properties:
+        sounds:
+          type: object
+          minProperties: 1
+          additionalProperties:
+            type: string
+            maxLength: 80
+            nullable: true
 
     NotificationEffective:
       type: object
@@ -16547,7 +16581,7 @@ components:
             channelAll: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
             scheduledFailed: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
         presentation:
-          $ref: "#/components/schemas/NotificationPresentation"
+          $ref: "#/components/schemas/PatchNotificationPresentation"
         schedule:
           allOf:
             - $ref: "#/components/schemas/NotificationSchedule"
@@ -16614,9 +16648,13 @@ components:
           type: string
           enum: [queued, stalled, sent, failed, relay_outdated]
           description: >
-            `queued` younger than 30 s; `stalled` waiting longer (the notifier may
-            be off); `sent` APNs answered 200; `failed` any other status;
-            `relay_outdated` an old relay refused the new vocabulary (not retried).
+            Read from the dispatch records of the test's collapse id. `queued`: no
+            record, or only an unsettled one, and younger than 30 s; `stalled`: the
+            same but older (the notifier may be off, or the device vanished before it
+            ran); `sent`: APNs answered 200 for a device; `failed`: settled records
+            without a 200 (APNs refusal, environment mismatch, relay 429);
+            `relay_outdated`: every settled record was an old relay refusing the new
+            vocabulary (not retried).
         atMs:
           type: integer
           format: int64
