@@ -1,19 +1,12 @@
 import React, {useEffect, useRef, useState, useSyncExternalStore} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {ScrollView, StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {BAR_CONTROL_MAX_SCALE, PrimaryButton, Sentence} from '../../design/atoms';
+import {PrimaryButton, Sentence} from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
+import {SheetHeader} from '../../design/SheetChrome';
 import {useStyles} from '../../design/theme';
-import {
-  font,
-  line,
-  radius,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-  type Palette,
-} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {usePushPrompt} from '../../push/PushProvider';
 import {useSession} from '../../session/useSession';
 import {
@@ -126,34 +119,13 @@ export function LinkSheetBody({
   const slideClose = usePageSheetClose() ?? onClose;
   return (
     <View style={styles.root}>
-      <View style={styles.nav}>
-        <View style={styles.navSide} />
-        <Text
-          accessibilityRole="header"
-          style={styles.navTitle}
-          numberOfLines={1}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-        >
-          {DEVICE_KEY_TITLE}
-        </Text>
-        <View style={[styles.navSide, styles.navSideEnd]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${DEVICE_KEY_TITLE} 닫기`}
-            onPress={slideClose}
-            style={({pressed}) => [styles.navButton, pressed && styles.pressed]}
-            testID="device-key-link-close"
-          >
-            <Text
-              style={styles.navButtonLabel}
-              numberOfLines={1}
-              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-            >
-              닫기
-            </Text>
-          </Pressable>
-        </View>
-      </View>
+      {/* 머리는 공용 `SheetHeader`(#4318): 글자 「닫기」 대신 오른쪽 원형 X. 이름은 「지시 기기 닫기」 그대로다. */}
+      <SheetHeader
+        title={DEVICE_KEY_TITLE}
+        closeLabel={`${DEVICE_KEY_TITLE} 닫기`}
+        closeTestID="device-key-link-close"
+        onClose={slideClose}
+      />
       <ScrollView
         contentOffset={initialScrollY ? {x: 0, y: initialScrollY} : undefined}
         contentContainerStyle={[
@@ -185,37 +157,7 @@ export function LinkSheetBody({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {flex: 1},
-    // 프로필 시트의 머리와 같은 모양(`ProfileSheet` `nav`).
-    nav: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: TOUCH_TARGET + space.md,
-      paddingHorizontal: space.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: color.border,
-    },
-    navSide: {flex: 1, flexDirection: 'row'},
-    navSideEnd: {justifyContent: 'flex-end'},
-    navTitle: {
-      flexShrink: 1,
-      fontSize: font.body,
-      fontWeight: '600',
-      color: color.text,
-      textAlign: 'center',
-    },
-    navButton: {
-      minHeight: TOUCH_TARGET,
-      justifyContent: 'center',
-      paddingHorizontal: space.sm,
-      borderRadius: radius.sm,
-    },
-    navButtonLabel: {
-      fontSize: font.body,
-      color: color.accentText,
-      fontWeight: '600',
-    },
-    pressed: {backgroundColor: color.surfacePressed},
-    content: {paddingTop: space.xl, gap: space.xl},
+    content: {paddingTop: space.md, gap: space.xl},
     intro: {
       fontSize: font.body,
       color: color.text,

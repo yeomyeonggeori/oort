@@ -495,13 +495,11 @@ describe('간격 스윕 — 격자 밖 여백이 늘지 않는다', () => {
   const REMAINING: Readonly<Record<string, number>> = {
     'design/atoms.tsx': 3,
     // 시안 A 값 그대로 (DS2-2 #2714): 시트 손잡이 위 여백 10(`.a-grab` 위
-    // `.a-sheet{padding:10px 16px 0}`), 「받는 사람」 머리글 왼쪽 22(시트 여백 16 +
-    // `.a-glabel{margin:20px 0 8px 6px}` 의 6). 시안을 그대로 옮기라는 결정이 격자보다 앞선다.
+    // `.a-sheet{padding:10px 16px 0}`). 시안을 그대로 옮기라는 결정이 격자보다 앞선다.
+    // (「받는 사람」 머리글 왼쪽 22 는 #4318 이 새 섹션 라벨로 옮기며 없어졌다.)
     'design/PageSheet.tsx': 1,
-    'shell/NewMessageSheet.tsx': 1,
     'features/ade/AdeControlPanel.tsx': 1,
     'features/agents/turnSurfaces.tsx': 2,
-    'features/conversation/MessageActionSheet.tsx': 1,
     'features/conversation/MessageRow.tsx': 8,
     'screens/AgentDetailScreen.tsx': 1,
     'screens/AgentsScreen.tsx': 2,
@@ -527,7 +525,6 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
    * 허용 목록은 짧고, 각 줄이 근거를 든다. 줄어드는 것은 언제나 통과한다.
    *
    *   `atoms.tsx` 1          `backGlyph` 30 — 뒤로 가기 셰브런 **글리프**(글자가 아니라 도형).
-   *   `MessageActionSheet` 1 `reactionGlyph` 24 — 이모지 한 글자의 도형 크기.
    *   `Avatar.tsx` 1         이니셜은 `font.label` 을 아바타 크기에 비례해 줄인다(계산식).
    *   `ConnectScreen.tsx` 2  `WELCOME.wordmark` 36 (로고 글자 — 역할 표에 없는 마크 크기)와
    *                          `SAS.digit` 40 (두 화면이 소리 내어 맞춰 보는 숫자 — `display`
@@ -535,7 +532,6 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
    */
   const FONT_REMAINING: Readonly<Record<string, number>> = {
     'design/atoms.tsx': 1,
-    'features/conversation/MessageActionSheet.tsx': 1,
     'features/conversation/Avatar.tsx': 1,
     'screens/ConnectScreen.tsx': 2,
   };
@@ -547,7 +543,6 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
    */
   const LINE_REMAINING: Readonly<Record<string, number>> = {
     'design/atoms.tsx': 3,
-    'features/conversation/MessageActionSheet.tsx': 2,
     'features/conversation/MessageEditorSheet.tsx': 2,
     'screens/AgentDetailScreen.tsx': 2,
     'screens/InboxScreen.tsx': 1,

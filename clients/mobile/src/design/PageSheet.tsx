@@ -21,6 +21,12 @@ import {
 } from 'react-native-safe-area-context';
 
 import {useReduceMotionRef} from '../lib/useReduceMotion';
+import {
+  SHEET_TOP,
+  sheetFrame,
+  shouldDismissSheet,
+  type SheetHeight,
+} from './sheetModel';
 import {useStyles} from './theme';
 import {ds2Radius, type Palette} from './tokens';
 
@@ -41,17 +47,20 @@ import {ds2Radius, type Palette} from './tokens';
 //   - 동작 줄이기가 켜져 있으면 미끄러지지 않고 바로 서고 바로 사라진다.
 //
 // 내용은 이 파일의 일이 아니다. 프로필 시트(#2702)와 FAB 시트가 자식으로 준다.
+//
+// ## 높이 세 단 (#4318)
+//
+// `height` 가 시트가 화면을 얼마나 차지하는지 정한다 — `large`(위 58 에서 바닥까지, 기본이고
+// 지금까지의 모양), `fit`(내용 높이, 화면의 85% 위로는 안에서 스크롤), `medium`(화면의 9/16 고정).
+// 단계별 상자와 끌어 닫기의 문턱은 `sheetModel.ts` 의 순수 함수다. 머리(오른쪽 원형 X·제목·
+// 선택적 ✓)는 `SheetChrome.tsx` 의 `SheetHeader` 를 자식 맨 위에 둔다 — 이 파일은 그릇이다.
 // =============================================================================
 
-/** 시안 `.a-sheet{top:58px}` — 상태 막대 바로 아래. */
-export const SHEET_TOP = 58;
+export {SHEET_TOP};
 /** 시안 `border-radius:30px 30px 0 0` — 폰 반경 사다리의 맨 위(themes-2.0 §5). */
 export const SHEET_RADIUS = ds2Radius.sheet;
 /** 시안 `.a-grab` 38×5. */
 const GRAB = {width: 38, height: 5} as const;
-/** 이만큼 끌어내리면 닫는다. 손잡이 높이의 몇 배가 아니라 「절반쯤 내렸다」의 체감값. */
-const DISMISS_DISTANCE = 120;
-const DISMISS_VELOCITY = 1.1;
 const SLIDE_MS = 260;
 
 const SheetCloseContext = createContext<(() => void) | null>(null);
@@ -69,12 +78,21 @@ export function PageSheet({
   accessibilityLabel,
   children,
   testID,
+  height = 'large',
+  scrimTestID = 'page-sheet-scrim',
+  scrimLabel = '시트 닫기',
 }: {
   onClose: () => void;
   /** 시트가 무엇인지. 보조기술이 모달에 들어설 때 읽는다. */
   accessibilityLabel: string;
   children: React.ReactNode;
   testID?: string;
+  /** 화면을 얼마나 차지하는가. 기본 `large` 는 이 그릇이 처음부터 그리던 모양이다. */
+  height?: SheetHeight;
+  /** 스크림(배경)의 testID — 옛 시트들이 제 이름으로 쓰던 것을 이어받는다. */
+  scrimTestID?: string;
+  /** 스크림의 보조기술 이름. 「… 닫기」 문장은 시트마다 다르다(「대화 액션 닫기」). */
+  scrimLabel?: string;
 }): React.JSX.Element {
   return (
     <Modal
@@ -86,7 +104,12 @@ export function PageSheet({
       onDismiss={onClose}
       testID={testID}>
       <SafeAreaProvider>
-        <SheetFrame onClose={onClose} accessibilityLabel={accessibilityLabel}>
+        <SheetFrame
+          onClose={onClose}
+          accessibilityLabel={accessibilityLabel}
+          height={height}
+          scrimTestID={scrimTestID}
+          scrimLabel={scrimLabel}>
           {children}
         </SheetFrame>
       </SafeAreaProvider>
@@ -97,10 +120,16 @@ export function PageSheet({
 function SheetFrame({
   onClose,
   accessibilityLabel,
+  height: sheetHeight,
+  scrimTestID,
+  scrimLabel,
   children,
 }: {
   onClose: () => void;
   accessibilityLabel: string;
+  height: SheetHeight;
+  scrimTestID: string;
+  scrimLabel: string;
   children: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -110,10 +139,9 @@ function SheetFrame({
   const travel = useRef(new Animated.Value(height)).current;
   const closing = useRef(false);
 
-  // 상태 막대가 58보다 깊은 기기(다이내믹 아일랜드)에서는 그 아래 4pt에서 시작한다.
-  // 58은 시안 기기(390×844, 상태 막대 54)의 값이라, 그보다 깊은 막대 위에 시트를
-  // 올리면 시계와 겹친다.
-  const top = Math.max(SHEET_TOP, insets.top + 4);
+  // 단계별 상자. 큰 단은 상태 막대가 58보다 깊은 기기(다이내믹 아일랜드)에서 그 아래 4pt 에서
+  // 시작한다 — 58 은 시안 기기(390×844, 상태 막대 54)의 값이라 그 위에 올리면 시계와 겹친다.
+  const frame = sheetFrame(sheetHeight, height, insets.top);
 
   useEffect(() => {
     if (reduceMotion.current) {
@@ -148,7 +176,7 @@ function SheetFrame({
           g.dy > 6 && Math.abs(g.dy) > Math.abs(g.dx),
         onPanResponderMove: (_e, g) => travel.setValue(Math.max(0, g.dy)),
         onPanResponderRelease: (_e, g) => {
-          if (g.dy > DISMISS_DISTANCE || g.vy > DISMISS_VELOCITY) {
+          if (shouldDismissSheet(g.dy, g.vy)) {
             close();
             return;
           }
@@ -173,23 +201,25 @@ function SheetFrame({
       <Animated.View style={[StyleSheet.absoluteFill, {opacity: scrimOpacity}]}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="시트 닫기"
+          accessibilityLabel={scrimLabel}
           onPress={close}
           style={[StyleSheet.absoluteFill, styles.scrim]}
-          testID="page-sheet-scrim"
+          testID={scrimTestID}
         />
       </Animated.View>
       <Animated.View
         accessibilityViewIsModal
         accessibilityLabel={accessibilityLabel}
         onAccessibilityEscape={close}
-        style={[styles.sheet, {top, transform: [{translateY: travel}]}]}
+        style={[styles.sheet, frame, {transform: [{translateY: travel}]}]}
         testID="page-sheet">
         <View {...pan.panHandlers} style={styles.handleZone} testID="page-sheet-handle">
           <View style={styles.grab} />
         </View>
         <SheetCloseContext.Provider value={close}>
-          <View style={styles.body}>{children}</View>
+          <View style={sheetHeight === 'fit' ? styles.bodyFit : styles.body}>
+            {children}
+          </View>
         </SheetCloseContext.Provider>
       </Animated.View>
     </View>
@@ -231,4 +261,7 @@ const buildStyles = (color: Palette) =>
     // `SAFE_GUTTER`(16)가 이미 들고 있고, 여기서 한 번 더 주면 묶음 카드가 32 로
     // 들어간다(design-review M1).
     body: {flex: 1},
+    // 내용 맞춤 단은 높이가 정해져 있지 않다 — `flex: 1` 은 바탕 0 이라 내용이 0 으로 접힌다.
+    // 줄어들 수만 있으면(스크롤뷰가 최대 높이 안으로 들어온다) 된다.
+    bodyFit: {flexShrink: 1},
   });
