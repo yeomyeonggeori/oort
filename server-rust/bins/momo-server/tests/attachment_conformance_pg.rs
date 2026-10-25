@@ -1496,6 +1496,145 @@ async fn a_draft_and_a_carried_attachment_stay_inside_their_tenant_and_channel()
     assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
+/// **Red proof (#4233, ADR-0208 남는 위험 8).** The exposure this issue was opened
+/// for: a file a scheduled message holds is a draft for as long as the schedule
+/// holds it (a deadline up to 120 days away) and stays its author's alone; the
+/// moment the message goes out it is the room's.
+///
+/// Make the read uploader-free again and Bob reads the held file the day it was
+/// uploaded; drop the `message_id IS NOT NULL` term and the room cannot read the
+/// file even after the message went out.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_scheduled_messages_file_is_its_authors_alone_until_the_message_goes_out() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let (base, reads) = start_counting_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    const BYTES: &[u8] = "예약해 둔 파일의 바이트".as_bytes();
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    // The schedule routes also ask for a live workspace membership, which this
+    // file's fixture does not seed.
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, 'member'::membership_role)",
+    )
+    .bind(ws)
+    .bind(fixture.alice.member)
+    .execute(&su)
+    .await
+    .expect("alice's workspace membership");
+
+    let id = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "scheduled.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+    let url = content_url(&base, ws, ch, &id);
+
+    // Alice schedules a message with the file for tomorrow.
+    let scheduled = http
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/channels/{ch}/scheduled-messages"
+        ))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "body": "내일 보낼 자료",
+            "sendAtMs": chrono::Utc::now().timestamp_millis() + 24 * 3_600_000,
+            "attachmentIds": [id],
+            "clientRequestId": Uuid::new_v4(),
+        }))
+        .send()
+        .await
+        .expect("schedule");
+    let scheduled_status = scheduled.status();
+    let scheduled: Value = scheduled.json().await.expect("body");
+    assert_eq!(
+        scheduled_status, 201,
+        "the schedule is accepted: {scheduled}"
+    );
+    let schedule_id = scheduled["scheduledMessage"]["id"]
+        .as_str()
+        .expect("scheduled message id")
+        .to_string();
+
+    // The premise: the schedule holds the file, and no message carries it.
+    let attachment = Uuid::parse_str(&id).expect("uuid");
+    let held: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM scheduled_message_attachment WHERE attachment_id = $1",
+    )
+    .bind(attachment)
+    .fetch_one(&su)
+    .await
+    .expect("held");
+    let carried_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT message_id FROM attachment WHERE id = $1")
+            .bind(attachment)
+            .fetch_one(&su)
+            .await
+            .expect("attachment row");
+    assert_eq!(held, 1, "the schedule holds the file");
+    assert!(
+        carried_by.is_none(),
+        "holding a file is not carrying it: no message exists yet"
+    );
+
+    // While it is held: the author reads it, the room does not.
+    let (status, body) = content_response(&http, &url, &alice).await;
+    assert_eq!(status, 200, "the author reads what she is holding");
+    assert_eq!(body, BYTES, "byte for byte");
+    let never_existed = content_url(&base, ws, ch, &Uuid::new_v4().to_string());
+    let (_, missing_body) = content_response(&http, &never_existed, &bob).await;
+    let (status, body) = content_response(&http, &url, &bob).await;
+    assert_eq!(status, 404, "a held file is not the room's to read");
+    assert_eq!(
+        body, missing_body,
+        "and the room cannot tell it from an id that never existed"
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+    // The message goes out (the same delivery the tick runs): the room reads it.
+    let sent = http
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/scheduled-messages/{schedule_id}/send-now"
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("send now");
+    assert_eq!(sent.status(), 200, "the schedule is sent");
+    let sent: Value = sent.json().await.expect("body");
+    assert_eq!(sent["scheduledMessage"]["status"], json!("sent"));
+    let carried_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT message_id FROM attachment WHERE id = $1")
+            .bind(attachment)
+            .fetch_one(&su)
+            .await
+            .expect("attachment row");
+    assert_eq!(
+        carried_by.map(|message| message.to_string()).as_deref(),
+        sent["scheduledMessage"]["sentMessageId"].as_str(),
+        "the file is on the message that went out"
+    );
+    let (status, body) = content_response(&http, &url, &bob).await;
+    assert_eq!(
+        status, 200,
+        "once the message is out the room reads its file"
+    );
+    assert_eq!(body, BYTES, "byte for byte");
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+}
+
 /// Shape refusals, all of them before a connection is taken.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
