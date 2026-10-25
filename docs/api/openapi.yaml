@@ -9871,6 +9871,13 @@ paths:
       tags: [attachments]
       operationId: getAttachmentContent
       summary: Stream complete attachment bytes from Drive after channel membership validation.
+      description: >
+        An active member of the channel reads a completed attachment that a message carries
+        (`messageId` is set). A completed attachment that no message carries yet (a draft in a
+        composer tray, or a file a scheduled message is holding) is read by its uploader alone;
+        every other member of the channel gets the same 404 an unknown id gets, so the route does
+        not reveal whose drafts exist (ADR-0208 remaining risk 8). The caller must be an active
+        member of the channel in every case, the uploader included.
       security:
         - bearerAuth: []
       parameters:
@@ -9894,7 +9901,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Completed attachment not found.
+          description: >
+            Completed attachment not found: unknown id, pending or failed upload, another
+            channel's or tenant's attachment, or a draft (no message carries it) that the caller
+            did not upload. All of these answer identically.
           content:
             application/json:
               schema:
