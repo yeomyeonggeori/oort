@@ -180,7 +180,13 @@ import {
   SEND_ARRIVE_RISE_FACTOR_HEAD,
   SEND_ARRIVE_UNMEASURED_HEIGHT,
 } from '../../design/motion';
-import {hasArrived, holdArrival, markArrived, withinArrivalWindow} from './sendArrival';
+import {
+  ARRIVAL_SURFACE_CHANNEL,
+  hasArrived,
+  holdArrival,
+  markArrived,
+  withinArrivalWindow,
+} from './sendArrival';
 import {useSlowSend} from './sendSlow';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
@@ -3811,10 +3817,16 @@ export function PendingRow({
   quote,
   quoteAttachmentCount,
   onResend,
+  arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
   directory: Directory;
+  /**
+   * 이 메아리를 그리는 `Timeline` 의 표면(`sendArrival.ts`). 오름이 도는 동안 확정본 자리를 지키는 보류가 **같은 표면의 목록에서만**
+   * 읽히도록 장부에 함께 적는다(#4455 design-review r2 M4). 채널 목록은 기본값이다.
+   */
+  arrivalSurface?: string;
   /**
    * 이 전송이 인용을 걸고 나갔다면 그 블록 (ADR-0148).
    *
@@ -3859,13 +3871,13 @@ export function PendingRow({
     return {factor, remaining, offset, translateY: Animated.multiply(remaining, offset)};
   });
   // 마운트 때의 모습. 확정본이 등장 도중에 와도 이 메아리를 자리에 두려고 장부에 적는 사본이다(아래 효과).
-  const [mounted] = useState(() => ({pending, startsGroup}));
+  const [mounted] = useState(() => ({pending, startsGroup, surface: arrivalSurface}));
   useLayoutEffect(() => {
     markArrived(pending.clientMsgId);
     if (arrival === null) return undefined;
     // 오름이 도는 동안은 확정본이 와도 이 메아리를 그 자리에 둔다 — 키가 갈려 transform 이 한 번에 사라지는 것을
     // 막는다(`sendArrival.ts`, design-review r1 H1). 오름이 없는 행(동작 줄이기·자격 창 밖·실패)은 적지 않는다.
-    holdArrival(mounted.pending, mounted.startsGroup);
+    holdArrival(mounted.pending, mounted.startsGroup, undefined, mounted.surface);
     const run = Animated.timing(arrival.remaining, {
       toValue: 0,
       duration: SEND_ARRIVE_MS,

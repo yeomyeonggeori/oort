@@ -21,6 +21,67 @@ const PREVIEW_CACHE_LIMIT = 60;
 const cached = new Map<string, File>();
 const inflight = new Map<string, Promise<File>>();
 
+// =============================================================================
+// 첨부 그림의 **잰 크기** (#4455 design-review r2 H2).
+//
+// 한 장짜리 사진 타일(`AttachmentList` 의 `ImageTile`)은 마운트 때 비율을 모른다. 그래서 폭 280 · 16:9 자리표시로 서고,
+// `Image.getSize` 가 돌아온 뒤에야 실제 비율(가로 4:3 은 280x210, 세로 3:4 는 240x320)이 된다. 같은 사진을 그리는 **새 마운트**는
+// 전부 이 한 걸음을 다시 밟는다 — 보낸 사진의 메아리가 서버 사본으로 교체될 때(키가 `p-…` → `m-…` 라 새 마운트다), 기록을 읽다가
+// 화면 밖에서 돌아온 행, 방에 다시 들어왔을 때. 메아리 타일이 이미 잰 크기를 서버 사본이 이어받지 못하면 교체 순간 행이
+// 53~163pt 줄었다가(목록이 꼬리에 붙어 있으면 스크롤 오프셋이 되감긴다) 약 300ms 뒤 다시 자란다.
+//
+// 그래서 잰 크기를 **첨부 id 별로** 모듈에 둔다. 새 마운트는 첫 프레임부터 그 크기로 선다(`ImageTile` 의 `useState` 초기값).
+// 미리보기 캐시(`cached`)와 같은 수명이다(앱이 사는 동안, 시험은 `resetAttachmentContentForTest`).
+//
+// - 키는 **첨부 id 의 소문자**다. 첨부 id 는 서버가 만든 uuid 라 워크스페이스·채널 없이도 유일하고, 코어의 `confirmsPending` 이 id 를
+//   소문자로 맞춰 대조하는 것처럼(대소문자가 갈려도 같은 첨부다) 같은 규칙을 따른다. 메아리의 채널 id 와 서버 사본의 채널 id 는 쓰는 쪽이
+//   다르니(경로 인자 대 서버 응답) 키에 넣지 않는다.
+// - 항목은 숫자 두 개라 미리보기 캐시(파일 60개)보다 훨씬 넉넉히 둔다. 오래된 것부터 잊는다 — 잊히면 한 번 더 재면 되는 값이다.
+// - 실패는 적지 않는다. 못 잰 그림은 다음 마운트가 다시 시도한다.
+// =============================================================================
+
+/** 잰 크기 저장소의 상한(항목은 숫자 둘이라 미리보기 캐시보다 넉넉하다). 시험이 경계를 읽는다. */
+export const MEASURED_SIZE_LIMIT = 500;
+
+export interface MeasuredSize {
+  readonly width: number;
+  readonly height: number;
+}
+
+const measuredSizes = new Map<string, MeasuredSize>();
+
+const sizeKey = (attachmentId: string): string => attachmentId.toLowerCase();
+
+/** 이 첨부의 잰 크기. 아직 못 쟀으면 `null`. 같은 크기는 **같은 객체**를 돌려준다(상태 갱신이 비교만으로 끝난다). */
+export function measuredAttachmentSize(attachmentId: string): MeasuredSize | null {
+  return measuredSizes.get(sizeKey(attachmentId)) ?? null;
+}
+
+/** 잰 크기를 적는다. 유한하고 0보다 큰 가로·세로만 받는다(그림이 아닌 값이 자리를 굳히지 않게). */
+export function rememberAttachmentSize(
+  attachmentId: string,
+  width: number,
+  height: number,
+): MeasuredSize | null {
+  if (!(Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0)) {
+    return null;
+  }
+  const key = sizeKey(attachmentId);
+  const earlier = measuredSizes.get(key);
+  if (earlier !== undefined && earlier.width === width && earlier.height === height) {
+    return earlier;
+  }
+  const size: MeasuredSize = { width, height };
+  measuredSizes.delete(key);
+  measuredSizes.set(key, size);
+  while (measuredSizes.size > MEASURED_SIZE_LIMIT) {
+    const oldest = measuredSizes.keys().next();
+    if (oldest.done) break;
+    measuredSizes.delete(oldest.value);
+  }
+  return size;
+}
+
 export type PreviewState =
   | { status: 'loading' }
   | { status: 'ready'; uri: string }
@@ -221,4 +282,5 @@ export function useAttachmentPreview(
 export function resetAttachmentContentForTest(): void {
   cached.clear();
   inflight.clear();
+  measuredSizes.clear();
 }

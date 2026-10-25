@@ -63,7 +63,8 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         옵션(`+` 뒤): `d<ms>` 가짜 서버가 보내기에 답하는 데 걸리는 시간(기본 250 — 확정이 등장 도중에 오는 조건을 재려고 0·80·150·
 //                         400 으로 바꾼다, design-review r1 H1) · `relay<ms>` 실시간 프레임(`message.new`)이 POST 응답보다 <ms> 먼저 온다(코어가
 //                         말하는 선착 경로) · `anchor` 보낼 때마다 새 확정본 행에 앵커를 옮겨 **확정본 행이 마운트되는 때**를 프레임에 남긴다
-//                         (`anchor` 칸이 null 이 아니게 되는 때 — 보류가 있으면 등장이 끝난 뒤, 없으면 확정 즉시).
+//                         (`anchor` 칸이 null 이 아니게 되는 때 — 보류가 있으면 등장이 끝난 뒤, 없으면 확정 즉시). `rec+anchor` 는 사진 두 번만
+//                         앵커를 건다(#4455 r3 H2: 사진 행의 교체 이음매를 서버 사본 행이 마운트된 때 기준으로 잰다).
 //             namefit     시계 상자가 이름 줄 끝에서 **혼자 줄바꿈**되는 폭 창을 찾는다(design-review r1 M2). 목록 폭을 한 칸씩 줄이며(`NAMEFIT_*`)
 //                         머리 행 느린 전송을 하나씩 보낸다 — 이름·시각이 줄을 꼭 채우는 폭에서 시계가 이름 밑으로 내려서는가를 사진으로 본다.
 //             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
@@ -735,9 +736,13 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     c.mark('rec-3-peer');
     c.say(PEER_LINES[2], true);
     await wait(1_200);
+    // `+anchor` 가 켜져 있으면 사진을 보내기 직전에 앵커를 새 확정본의 seq 로 옮긴다(#4455 r3 H2 — 사진 행의 교체 이음매를
+    // **서버 사본 행이 마운트된 때**를 기준으로 재려고). 꺼져 있으면 아무 일도 안 한다.
+    if (c.watchNext()) await wait(250);
     c.mark('rec-3-send-landscape');
     c.send('', [PHOTOS['photo-a']]);
     await wait(3_000);
+    if (c.watchNext()) await wait(250);
     c.mark('rec-3-send-portrait');
     c.send('', [PHOTOS['photo-solo']]);
     await wait(3_000);

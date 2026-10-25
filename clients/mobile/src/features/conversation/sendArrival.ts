@@ -37,6 +37,17 @@
 //
 // 보류는 시간으로만 끝난다(`SEND_ARRIVE_MS + SEND_ARRIVE_HOLD_SLACK_MS`). 메아리가 가상화로 언마운트돼도, 실패해도
 // 끝나므로 확정본이 영영 가려지지 않는다.
+//
+// ## 보류는 메아리를 그린 표면에서만 읽는다 (#4455, design-review r2 M4)
+//
+// 장부는 모듈 전역이고 `Timeline` 은 여럿이다(채널 목록 하나, 그 위에 얹힌 스레드 패널 하나). 스레드 답글은 **스레드 목록에만**
+// 메아리가 서고(코어 `useTimeline` 의 `channelPending` 이 채널 목록에서 거른다) 확정되면 채널 목록에도 평범한 행으로 선다 — 그런데
+// 보류가 표면을 가리지 않으면 스레드에서 적힌 항목을 채널 목록도 읽어서, 확정된 답글을 약 360ms 동안 메아리로 한 번 더 그린다.
+// 패널 뒤라 안 보이지만 코어가 지킨다고 적은 불변식(「채널 목록은 답글의 메아리를 그리지 않는다」)을 깨고, 패널을 360ms 안에
+// 닫으면 채널 꼬리에서 답글 표식 줄이 생기는 높이 변화가 보일 수 있다.
+//
+// 그래서 항목에 **그린 표면**을 적는다(채널 목록 `'channel'`, 스레드는 루트마다 `'thread:<루트 id>'`). 메아리가 마운트될 때 자기를
+// 그리는 `Timeline` 의 표면을 받아 적고, `Timeline` 은 **자기 표면의 항목만** 읽는다(`holdSettledArrivals` 의 세 번째 인자).
 // =============================================================================
 
 import {
@@ -50,6 +61,14 @@ import {
   SEND_ARRIVE_MS,
   SEND_ARRIVE_WINDOW_MS,
 } from '../../design/motion';
+
+/** 메아리를 그린 표면의 이름 — 채널 목록. 안 정하면 이 표면이다(메아리가 서는 `Timeline` 의 기본). */
+export const ARRIVAL_SURFACE_CHANNEL = 'channel';
+
+/** 스레드 패널의 표면. 루트 하나가 표면 하나다 — 두 스레드가 같은 보류를 읽지 않는다. */
+export function threadArrivalSurface(rootId: string): string {
+  return `thread:${rootId}`;
+}
 
 const MAX_REMEMBERED = 256;
 
@@ -90,6 +109,8 @@ export interface ArrivalInFlight {
   readonly startsGroup: boolean;
   /** 이 시각(벽시계 ms)까지는 확정본이 와도 메아리를 둔다. */
   readonly untilMs: number;
+  /** 메아리를 그린 표면(`ARRIVAL_SURFACE_CHANNEL` · `threadArrivalSurface`). 같은 표면의 `Timeline` 만 이 항목을 읽는다. */
+  readonly surface: string;
 }
 
 const NO_ARRIVALS: readonly ArrivalInFlight[] = [];
@@ -111,18 +132,19 @@ function releaseArrival(clientMsgId: string): void {
 
 /**
  * 오름이 시작된 메아리를 적는다 — 효과에서 부른다. 같은 `clientMsgId` 를 다시 적으면 시계가 새로 시작한다.
- * `nowMs` 는 시험이 시계를 고정하려고 받는다.
+ * `nowMs` 는 시험이 시계를 고정하려고 받는다. `surface` 는 이 메아리를 그리는 `Timeline` 의 표면이다(기본: 채널 목록).
  */
 export function holdArrival(
   pending: PendingMessage,
   startsGroup: boolean,
   nowMs: number = Date.now(),
+  surface: string = ARRIVAL_SURFACE_CHANNEL,
 ): void {
   const id = pending.clientMsgId;
   const holdMs = SEND_ARRIVE_MS + SEND_ARRIVE_HOLD_SLACK_MS;
   const earlier = releaseTimers.get(id);
   if (earlier !== undefined) clearTimeout(earlier);
-  inFlight.set(id, {pending, startsGroup, untilMs: nowMs + holdMs});
+  inFlight.set(id, {pending, startsGroup, untilMs: nowMs + holdMs, surface});
   releaseTimers.set(
     id,
     setTimeout(() => releaseArrival(id), holdMs),
@@ -151,16 +173,19 @@ const HOLD_LOOKBACK = 64;
  *
  * - 메아리 하나는 확정본 하나만 대신한다(코어 `unsettledPending` 과 같은 규칙: 보낸 순서대로, 한 번씩).
  * - 이미 자기 키로 서 있는 메아리(아직 미정착)는 건드리지 않는다.
+ * - **자기 표면의 항목만** 읽는다(`surface`, 기본: 채널 목록) — 스레드에서 적힌 메아리를 채널 목록이 또 그리지 않는다(M4).
  * - 바꿀 것이 없으면 **받은 배열을 그대로** 돌려준다(호출자의 memo 를 지킨다 — `withTurnPlaceholders` 와 같다).
  */
 export function holdSettledArrivals(
   items: TimelineItem[],
   arrivals: readonly ArrivalInFlight[],
+  surface: string = ARRIVAL_SURFACE_CHANNEL,
 ): TimelineItem[] {
   if (arrivals.length === 0) return items;
   let out: TimelineItem[] | null = null;
   const taken = new Set<number>();
   for (const arrival of arrivals) {
+    if (arrival.surface !== surface) continue;
     const key = `p-${arrival.pending.clientMsgId}`;
     if (items.some(item => item.key === key)) continue;
     const lowest = Math.max(0, items.length - HOLD_LOOKBACK);

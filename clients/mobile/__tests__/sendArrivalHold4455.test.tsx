@@ -18,6 +18,7 @@ import {ReduceMotionRefContext} from '../src/features/conversation/LandedTintFad
 import {PendingRow, slowMarkGutterTop} from '../src/features/conversation/MessageRow';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {
+  ARRIVAL_SURFACE_CHANNEL,
   arrivalsInFlight,
   holdArrival,
   holdSettledArrivals,
@@ -143,6 +144,8 @@ describe('holdSettledArrivals — 짝 짓기', () => {
     pending,
     startsGroup,
     untilMs: NOW + SEND_ARRIVE_MS + SEND_ARRIVE_HOLD_SLACK_MS,
+    // 표면은 채널 목록이다(스레드 표면은 `sendArrivalSurface4455.test.tsx`).
+    surface: ARRIVAL_SURFACE_CHANNEL,
   });
 
   it('오름이 도는 메아리가 없으면 받은 배열을 그대로 돌려준다(참조 동일 — memo 를 지킨다)', () => {

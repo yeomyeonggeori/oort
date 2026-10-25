@@ -29,7 +29,12 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
-import {arrivalsInFlight, holdSettledArrivals, subscribeArrivals} from './sendArrival';
+import {
+  ARRIVAL_SURFACE_CHANNEL,
+  arrivalsInFlight,
+  holdSettledArrivals,
+  subscribeArrivals,
+} from './sendArrival';
 import {
   countNewerThan,
   countUnreadJump,
@@ -791,6 +796,7 @@ function TimelineInner({
   selfSendToken,
   markReplies = true,
   showRollup = true,
+  arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
   anchorSeq,
   anchorRef,
   jumpTarget,
@@ -909,6 +915,14 @@ function TimelineInner({
    * `rollup` 하나였기 때문이다. 여기서 끊는 것은 그 조건이다.
    */
   showRollup?: boolean;
+  /**
+   * 이 목록이 메아리(`PendingRow`)를 그리는 **표면**의 이름 (#4455 design-review r2 M4). 채널 목록은 안 줘도 된다(기본 `'channel'`).
+   * 스레드 패널은 루트마다 `threadArrivalSurface(root.id)` 를 준다.
+   *
+   * 보낸 메시지의 등장 보류(`sendArrival.ts`)는 모듈 전역 장부에 **메아리를 그린 표면**을 적고, 목록은 자기 표면의 항목만 읽는다.
+   * 이름이 없으면 채널 목록 아래 깔린 채 서 있는 목록이 스레드 답글의 메아리를 확정 뒤 약 360ms 동안 한 번 더 그린다.
+   */
+  arrivalSurface?: string;
   /**
    * Measurement seam (`measure/ScrollMeasure.tsx`), inert in the app.
    *
@@ -1110,8 +1124,8 @@ function TimelineInner({
   // 오름이 끊기지 않는다. 바꿀 것이 없으면 `built` 그대로다. 자세한 까닭은 `sendArrival.ts`.
   const arrivals = useSyncExternalStore(subscribeArrivals, arrivalsInFlight, arrivalsInFlight);
   const stream = useMemo(
-    () => withTurnPlaceholders(holdSettledArrivals(built, arrivals), working),
-    [built, arrivals, working],
+    () => withTurnPlaceholders(holdSettledArrivals(built, arrivals, arrivalSurface), working),
+    [built, arrivals, arrivalSurface, working],
   );
 
   // One pass over the array this list is already rendering, so that a row can
@@ -2548,6 +2562,7 @@ function TimelineInner({
                 : 0
             }
             onResend={onResendPending}
+            arrivalSurface={arrivalSurface}
           />
         );
       }
@@ -2637,6 +2652,7 @@ function TimelineInner({
       threads,
       markReplies,
       showRollup,
+      arrivalSurface,
       quoteLookup,
       // 승인 표가 바뀌면 `renderItem` 의 동일성도 바뀌어야 한다 — 안 그러면
       // 결정한 뒤에도 목록이 옛 표를 든 클로저를 계속 쓴다. 붙어 있는 행이
