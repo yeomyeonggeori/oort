@@ -3,13 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { cancelAgentRun } from "@momo/core/lib/api";
 import {
-  CANCEL_ACTION_LABEL,
-  CANCEL_BUSY_LABEL,
-  CANCEL_COMMIT_LABEL,
-  CANCEL_CONFIRM_SENTENCE,
-  cancelFailureOutcome,
   cancelSucceeded,
+  STOP_WORDING,
   type CancelOutcome,
+  type CancelWording,
 } from "@momo/core/features/agents/runCancel";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
@@ -40,13 +37,14 @@ import { cn } from "@/design/lib/cn";
 // =============================================================================
 
 /** 화면을 보지 않는 사람에게 첫 클릭이 묻기만 한다는 것을 말하는 이름. 보이는 낱말을 품는다. */
-export const STOP_ARM_NAME = `실행 ${CANCEL_ACTION_LABEL}, 확인 필요`;
+export const STOP_ARM_NAME = STOP_WORDING.armName;
 
 export function StopRunControl({
   runId,
   agentName,
   open,
   live,
+  wording = STOP_WORDING,
 }: {
   runId: string;
   /** 영수증이 부를 이름. 여러 에이전트의 일 옆에 서므로 누구의 실행인지 말한다. */
@@ -55,6 +53,11 @@ export function StopRunControl({
   open: boolean;
   /** 실시간 연결이 살아 있는가. */
   live: boolean;
+  /**
+   * 낱말·문장 한 벌(`cancelWordingFor`). 아직 아무도 가져가지 않은 요청은 「취소」, 가져간 뒤는
+   * 「중단」이다(#4285). 호출·한 겹의 확인·409와 오류를 읽는 규칙은 둘이 같다.
+   */
+  wording?: CancelWording;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -114,11 +117,12 @@ export function StopRunControl({
       const result = await cancelAgentRun(workspaceId, runId);
       focusOutcome.current = caretInside();
       setArmed(false);
-      setOutcome(cancelSucceeded(result, agentName));
+      setOutcome(cancelSucceeded(result, agentName, wording));
       // 원장의 「취소됐어요」 줄을 바로 읽는다.
       rereadLedger();
     } catch (error) {
-      const next = cancelFailureOutcome(error);
+      // 실패 문장도 낱말 한 벌을 따른다: 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다.
+      const next = wording.failure(error);
       if (next.kind === "alreadyOver") {
         // 이미 끝난 실행에는 더 물을 것이 없다. 확인 줄을 접는다. 칩이 「작업 중」에
         // 머문 채 「이미 끝났어요」와 나란히 서지 않게 원장도 다시 읽는다.
@@ -131,7 +135,7 @@ export function StopRunControl({
       sending.current = false;
       setBusy(false);
     }
-  }, [agentName, armed, client, runId, workspaceId]);
+  }, [agentName, armed, client, runId, wording, workspaceId]);
 
   // 이 버튼이 이미 답을 받았으면(중단됨·이미 끝남) 서버 칩이 따라오기 전이라도 다시
   // 권하지 않는다. 실패(`error`)만 다시 누를 수 있다.
@@ -142,7 +146,7 @@ export function StopRunControl({
   return (
     <section
       ref={sectionRef}
-      aria-label="실행 중단"
+      aria-label={wording.regionName}
       className="flex flex-col gap-2 border-b border-line px-4 py-2"
       data-testid="agent-work-panel-stop"
     >
@@ -154,17 +158,17 @@ export function StopRunControl({
               type="button"
               variant="secondary"
               size="sm"
-              aria-label={STOP_ARM_NAME}
+              aria-label={wording.armName}
               onClick={() => setArmed(true)}
               data-testid="agent-work-panel-stop-arm"
             >
-              {CANCEL_ACTION_LABEL}
+              {wording.action}
             </Button>
           </div>
         ) : (
           <div className="flex flex-col gap-2" data-testid="agent-work-panel-stop-confirm">
             <p className="break-keep text-meta text-ink" id={`stop-consequence-${runId}`}>
-              {CANCEL_CONFIRM_SENTENCE}
+              {wording.consequence(undefined)}
             </p>
             <div className="flex flex-wrap items-center gap-2">
               <Button
@@ -193,7 +197,7 @@ export function StopRunControl({
                 data-testid="agent-work-panel-stop-commit"
               >
                 {busy && <Loader2 aria-hidden="true" className="spinner-busy" />}
-                {busy ? CANCEL_BUSY_LABEL : CANCEL_COMMIT_LABEL}
+                {busy ? wording.busy : wording.commit}
               </Button>
             </div>
           </div>
