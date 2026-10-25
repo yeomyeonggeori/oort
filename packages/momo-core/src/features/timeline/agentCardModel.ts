@@ -1,5 +1,9 @@
 import type { Message } from "../../lib/api";
 import {
+  parseAvatarImagePreview,
+  type AvatarImagePreview,
+} from "../approvals/avatarPreview";
+import {
   parseExecutionPlan,
   type SpawnExecutionPlan,
 } from "../../lib/executionPlan";
@@ -465,6 +469,12 @@ export interface AgentApprovalAction {
   rationale: string | null;
   /** 이 행동을 승인할 수 있는 역할. 없으면 `null`. */
   requiredRole: string | null;
+  /**
+   * 승인 전에 보여 줄 이미지(`action.preview`, kind `avatar_image`). 서버가 만든 값만이다.
+   * 없거나 모양이 어긋나면 **키 자체가 없고** 카드는 사진 없이 행만 그린다 (#4394). 키를
+   * 비워 두는 이유: 사진이 없는 압도적 다수 카드의 모델이 한 글자도 달라지지 않는다.
+   */
+  preview?: AvatarImagePreview;
 }
 
 /** 승인 카드가 그리는 행동 행의 상한. 결과 카드와 같은 자(`MAX_ACTION_RESULT_ROWS`). */
@@ -507,6 +517,7 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
     rows.push(row);
   }
 
+  const preview = parseAvatarImagePreview(raw.preview);
   return {
     id,
     rows,
@@ -519,6 +530,7 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
       typeof raw.required_role === "string" && raw.required_role !== ""
         ? raw.required_role
         : null,
+    ...(preview !== null ? { preview } : {}),
   };
 }
 
