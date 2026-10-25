@@ -682,14 +682,20 @@ describe('design-review r1 수리: 큰 글씨 머리·낭독·run을 넘는 상�
     layout(30);
     expect(scrollTo).not.toHaveBeenCalled();
 
+    // 목록은 이미 300pt 내려와 있다: 상대 거리를 절대 오프셋으로 바꾸려면 현재 오프셋을 알아야 한다(목록의 `onScroll`이
+    // 당김의 것과 합쳐져 닿는다 — 끊기면 오프셋이 0으로 남아 엉뚱한 곳으로 간다).
+    fireEvent.scroll(screen.getByTestId('sidebar-list'), {
+      nativeEvent: {contentOffset: {x: 0, y: 300}, contentSize: {width: 300, height: 3000}, layoutMeasurement: {width: 300, height: 800}},
+    });
+
     // 확인 줄이 열려 컨트롤 줄이 자랐다.
     layout(400);
     await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(1));
     const arg = scrollTo.mock.calls[0][0] as {y: number; animated: boolean};
-    expect(arg.y).toBeGreaterThan(0);
-    // 넘친 만큼만 내린다: y = 카드 아래 끝(1500) + 숨(`space.md`) − 보이는 아래 끝(창 높이 − 탭바 자리).
+    expect(arg.y).toBeGreaterThan(300);
+    // 넘친 만큼만 내린다: y = 지금 오프셋(300) + [카드 아래 끝(1500) + 숨(`space.md`) − 보이는 아래 끝(창 높이 − 탭바 자리)].
     // 거꾸로 풀어 탭바 자리가 사리에 맞는 값(0 이상, 수십 pt)인지 본다.
-    const tabBarClearance = Dimensions.get('window').height - (1500 + space.md - arg.y);
+    const tabBarClearance = Dimensions.get('window').height - (1500 + space.md - (arg.y - 300));
     expect(tabBarClearance).toBeGreaterThanOrEqual(0);
     expect(tabBarClearance).toBeLessThan(200);
     expect(measure).toHaveBeenCalled();

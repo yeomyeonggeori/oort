@@ -491,7 +491,13 @@ export default function SidebarScreen({
   const refetchChannels = channelsQuery.refetch;
   const refetchDirectory = directoryQuery.refetch;
   const refetchReadStates = readStates.refetch;
-  const {refreshControl, scrollProps, notice} = usePullRefresh(
+  // 목록의 현재 오프셋을 따라간다: 「취소」의 확인 줄이 열려 카드가 자라면 결정 단추까지 내릴 때 상대 거리를 절대 오프셋으로
+  // 바꾸는 데 쓴다(아래 `revealCardEnd`, design-review #4285 r1 H1). 당김의 `onScroll`과 `withPullScroll`로 합친다.
+  const scrollYRef = useRef(0);
+  const trackScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollYRef.current = event.nativeEvent.contentOffset.y;
+  }, []);
+  const {refreshControl, scrollProps: pullScrollProps, notice} = usePullRefresh(
     useCallback(
       () =>
         Promise.all([
@@ -503,6 +509,11 @@ export default function SidebarScreen({
     ),
     'sidebar-refresh',
     {active},
+  );
+  // 두 목록은 합친 `scrollProps`를 그대로 펼친다(`pullRefresh.test.tsx`가 모양을 하나로 둔다).
+  const scrollProps = useMemo(
+    () => withPullScroll(trackScroll, pullScrollProps),
+    [trackScroll, pullScrollProps],
   );
 
   const rememberOpenedDm = useRememberOpenedDm(workspaceId);
@@ -647,12 +658,8 @@ export default function SidebarScreen({
   // #4285 r1 H1). 사람이 컨트롤을 건드렸을 때만 부른다(`WorkingCardStop.onGrow`).
   const listRef = useRef<SectionList<SidebarRow, (typeof shownSections)[number]>>(null);
   const cardBlockRef = useRef<View>(null);
-  const scrollYRef = useRef(0);
   const reduceMotionHome = useReduceMotion();
   const {height: windowHeight} = useWindowDimensions();
-  const trackScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    scrollYRef.current = event.nativeEvent.contentOffset.y;
-  }, []);
   const revealCardEnd = useCallback(() => {
     const node = cardBlockRef.current;
     if (node === null || typeof node.measureInWindow !== 'function') return;
@@ -925,7 +932,7 @@ export default function SidebarScreen({
           keyboardDismissMode="on-drag"
           contentContainerStyle={[styles.listContent, {paddingBottom: HOME.scrollBottom + clearance}]}
           refreshControl={refreshControl}
-          {...withPullScroll(trackScroll, scrollProps)}
+          {...scrollProps}
           testID="sidebar-list"
         />
       )}

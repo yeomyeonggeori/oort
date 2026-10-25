@@ -50,6 +50,9 @@ import {useSession} from '../../session/useSession';
 // 이미 이긴 경주를 다시 뛰라고 시키는 것이다.
 // =============================================================================
 
+// 컨트롤(첫 탭 낱말·「그대로 두기」·「취소 확정」)의 글자는 바 단추의 상한(`BAR_CONTROL_MAX_SCALE`)을 지킨다: 가장 큰 글씨(AX5)에서
+// 단추가 3배로 자라 「취소 확 / 정」으로 꺾이고 결정 줄이 화면 밖으로 밀려나던 것(design-review #4285 r1 H1 — 홈 카드와 대화 아래
+// 활동 줄이 같은 컨트롤을 쓴다). **읽는 글자인 확인 문장은 상한 밖이다**(`BAR_CONTROL_MAX_SCALE` 주석: 본문은 끝까지 자란다).
 export function StopTurnControl({
   runId,
   agentName,
@@ -60,7 +63,6 @@ export function StopTurnControl({
   wording = STOP_WORDING,
   armStyle,
   confirmStyle,
-  controlMaxFontScale = BAR_CONTROL_MAX_SCALE,
 }: {
   runId: string;
   /**
@@ -92,13 +94,6 @@ export function StopTurnControl({
   armStyle?: StyleProp<ViewStyle>;
   /** 확인 줄(문장·두 단추)의 상자에 더하는 스타일. 줄이 서는 자리가 아래 여백을 정할 때 쓴다(홈 카드, #4285). */
   confirmStyle?: StyleProp<ViewStyle>;
-  /**
-   * 컨트롤(첫 탭 낱말·두 단추의 글자)의 글자 배율 상한. 기본은 바 단추의 상한(`BAR_CONTROL_MAX_SCALE`)이다 —
-   * 가장 큰 글씨(AX5)에서 단추가 3배로 자라 「취소 확 / 정」으로 꺾이고 결정 줄이 화면 밖으로 밀려나던 것
-   * (design-review #4285 r1 H1; 홈 카드와 대화 아래 활동 줄이 같은 컨트롤을 쓴다). **읽는 글자인 확인 문장은 상한
-   * 밖이다**(`BAR_CONTROL_MAX_SCALE` 주석: 본문은 끝까지 자란다).
-   */
-  controlMaxFontScale?: number;
   /**
    * 확인 단계에서 시작한다. **`measure/` 하네스 전용** — 근거와 규칙은
    * `features/inbox/ApprovalDecision.tsx` 의 같은 이름 prop 주석에 있고,
@@ -172,7 +167,7 @@ export function StopTurnControl({
         hitSlop={8}
         style={({pressed}) => [styles.quiet, armStyle, pressed && styles.pressed]}
         testID={`${testIDPrefix}-arm`}>
-        <Text style={styles.quietLabel} maxFontSizeMultiplier={controlMaxFontScale}>
+        <Text style={styles.quietLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
           {wording.action}
         </Text>
       </Pressable>
@@ -199,7 +194,7 @@ export function StopTurnControl({
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-dismiss`}>
-          <Text style={styles.quietLabel} maxFontSizeMultiplier={controlMaxFontScale}>
+          <Text style={styles.quietLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
             그대로 두기
           </Text>
         </Pressable>
@@ -216,7 +211,7 @@ export function StopTurnControl({
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-commit`}>
-          <Text style={styles.commitLabel} maxFontSizeMultiplier={controlMaxFontScale}>
+          <Text style={styles.commitLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
             {busy ? wording.busy : wording.commit}
           </Text>
         </Pressable>
