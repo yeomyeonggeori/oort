@@ -36,10 +36,11 @@
 //!    history, to the send echo, and to the realtime rail alike — and a message
 //!    that was deleted projects **no** attachments at all (rule 5).
 //! 4. **A file no message carries is its uploader's alone to read.** The content
-//!    route's load ([`load_readable_attachment_in_tx`]) requires
-//!    `message_id IS NOT NULL` *or* the reader to be the uploader, so a draft in a
-//!    composer tray — or one a scheduled message holds until its deadline — is not
-//!    open to the channel before it is sent (ADR-0208 남는 위험 8, #4233).
+//!    route's load ([`load_readable_attachment_in_tx`]) requires a **live** message to
+//!    carry the file (rule 5) *or* the reader to be the uploader of a file **no**
+//!    message carries, so a draft in a composer tray — or one a scheduled message
+//!    holds until its deadline — is not open to the channel before it is sent
+//!    (ADR-0208 남는 위험 8, #4233).
 //! 5. **A file a deleted message carried is nobody's to read or to see listed.**
 //!    The tombstone keeps `message_id`, so the content load and every projection
 //!    join the message and require it to be alive (`state <> 'deleted' AND

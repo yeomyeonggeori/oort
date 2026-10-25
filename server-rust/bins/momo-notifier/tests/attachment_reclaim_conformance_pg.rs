@@ -14,11 +14,11 @@
 //! |---|---|
 //! | `old_unbound_complete_attachments_are_reclaimed_and_everything_else_is_kept` | drop `status = 'complete'` (pending/failed go), `message_id IS NULL` (the carried one goes), `NOT a.reserved` (the held one goes), the `unreserved_at` term of the `GREATEST` (the just-released one goes) or the age term (the young one goes) from `eligible_sql` |
 //! | `a_drive_failure_writes_nothing_and_the_next_tick_retries` | take the row delete / audit row out of the savepoint, or skip `ROLLBACK TO SAVEPOINT` on `DriveDelete::Failed` |
-//! | `a_drive_404_is_success_and_a_second_sweep_calls_drive_zero_times` | count `Gone` as a failure, or keep the row after a 404 |
+//! | `a_drive_404_is_success_and_a_second_sweep_calls_drive_zero_times` | count `Gone` as a failure |
 //! | `a_refused_delete_leaves_the_row_and_the_object` | commit the row delete on `DriveDelete::Refused` |
 //! | `a_bind_or_a_hold_that_commits_while_the_reclaim_waits_beats_it` | drop the eligibility predicate from the statement after the `FOR UPDATE` (decide from the candidate list or from the lock alone) |
-//! | `the_drive_call_runs_inside_the_row_lock_so_a_bind_waits_and_finds_the_row_gone` | run the Drive call before the lock or after the commit |
-//! | `the_reclaim_cannot_reach_another_tenants_row` | drop `workspace_id = $…` from the lock/eligibility statements (the second mode runs without RLS, so this predicate alone has to hold) |
+//! | `the_drive_call_runs_inside_the_row_lock_so_a_bind_waits_and_finds_the_row_gone` | call Drive before any lock is taken (no `FOR UPDATE`, Drive answers first) |
+//! | `the_reclaim_cannot_reach_another_tenants_row` | drop the workspace predicate from all three statements (lock, eligibility, delete; any one of them suffices on its own, by design). The first mode stays green because RLS covers it too; the second mode, run without RLS, goes red |
 //! | `a_write_pool_that_bypasses_rls_is_refused` | drop `ensure_write_pool_rls_bound` from `sweep_once` |
 
 use std::collections::HashMap;

@@ -2594,10 +2594,10 @@ async fn a_restored_drive_volume_does_not_reopen_a_completed_upload_url() {
 //
 // | test | revert that makes it red |
 // |---|---|
-// | `a_deleted_messages_attachment_is_nobodys_to_read` | drop `m.state <> 'deleted'` from the content load → the room, the author and the admin read 200; write the predicate as `(carried AND alive) OR uploader` → only the author's read answers 200 (her step is the one that names this); drop `m.deleted_at IS NULL` → the half-tombstone step (deleted_at only) answers 200 |
-// | `a_deleted_messages_attachments_are_not_listed_anywhere` | drop the tombstone term from `PAGED_ATTACHMENT_JOIN` → history and the thread page list the card; from `message_attachments_in_tx` → the retried send echoes it; from `image_attachments_for_messages_in_tx` → the direct call returns the image |
+// | `a_deleted_messages_attachment_is_nobodys_to_read` | drop `m.state <> 'deleted'` from the content load → the half-tombstone with only `state` set answers 200; drop `m.deleted_at IS NULL` → the one with only `deleted_at` set answers 200; drop both → the room, the author and the admin read 200 (step 3); write the predicate as `(carried AND alive) OR uploader` → the author's own read answers 200 |
+// | `a_deleted_messages_attachments_are_not_listed_anywhere` | drop the tombstone term from `PAGED_ATTACHMENT_JOIN` → the channel page lists the card (the thread page reads the same constant); from `message_attachments_in_tx` → the retried send echoes it; from `image_attachments_for_messages_in_tx` → the direct call returns the image |
 // | `the_audit_trail_never_holds_a_file_name` | put `"name": name` back into the `attachment.upload_started` detail |
-// | `a_held_file_is_never_reclaimed_and_a_released_one_is_a_draft_for_a_full_ttl` | drop `NOT a.reserved` from the eligibility → step 2; drop `unreserved_at` from the `GREATEST` → step 3; drop the trigger's INSERT branch → step 1; drop its DELETE branch → steps 3, 4 and 6 |
+// | `a_held_file_is_never_reclaimed_and_a_released_one_is_a_draft_for_a_full_ttl` | drop `NOT a.reserved` from the eligibility → step 2; drop `unreserved_at` from the `GREATEST` → step 3; make the trigger's INSERT branch a no-op → step 1; its DELETE branch → step 3 (steps 4 and 6 sit behind it) |
 
 /// Make `person` a member of the room with a workspace role, for the tests that need
 /// an admin to show a role is no way around a refusal.

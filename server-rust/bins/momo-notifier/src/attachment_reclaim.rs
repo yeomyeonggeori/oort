@@ -107,7 +107,6 @@ pub struct AttachmentReclaimStats {
 pub struct AttachmentReclaimer {
     drive: Arc<dyn DriveArchive>,
     batch: i64,
-    ttl: Duration,
 }
 
 impl AttachmentReclaimer {
@@ -115,16 +114,7 @@ impl AttachmentReclaimer {
         AttachmentReclaimer {
             drive,
             batch: batch.max(1),
-            ttl: UNBOUND_TTL,
         }
-    }
-
-    /// Another idle time than [`UNBOUND_TTL`]. For tests only: nothing in the
-    /// configuration reaches it, so an operator cannot shorten the TTL of a running
-    /// instance.
-    pub fn with_ttl(mut self, ttl: Duration) -> AttachmentReclaimer {
-        self.ttl = ttl;
-        self
     }
 
     /// Build the Google archive named by `config`. `None` when the service account
@@ -144,7 +134,7 @@ impl AttachmentReclaimer {
         write_pool: &PgPool,
     ) -> Result<AttachmentReclaimStats, DbError> {
         ensure_write_pool_rls_bound(write_pool).await?;
-        let candidates = attachment_reclaim_candidates(read_pool, self.batch, self.ttl).await?;
+        let candidates = attachment_reclaim_candidates(read_pool, self.batch, UNBOUND_TTL).await?;
 
         let mut per_workspace: HashMap<Uuid, AttachmentReclaimCounts> = HashMap::new();
         let mut stats = AttachmentReclaimStats::default();
@@ -164,14 +154,13 @@ impl AttachmentReclaimer {
             }
             let drive = Arc::clone(&self.drive);
             let flag = Arc::clone(&drive_unavailable);
-            let ttl = self.ttl;
             let result = with_tenant_tx(write_pool, candidate.workspace_id, move |conn| {
                 Box::pin(async move {
                     reclaim_unbound_attachment_in_tx(
                         conn,
                         candidate.workspace_id,
                         candidate.attachment_id,
-                        ttl,
+                        UNBOUND_TTL,
                         move |file_id| {
                             Box::pin(async move { delete_outcome(&*drive, file_id, &flag).await })
                         },
