@@ -20,8 +20,8 @@
 //! * the Swift **global** per-member axis (`RATE_LIMIT_PER_MEMBER`, every
 //!   authenticated route). What replaced it is narrower on purpose: the per-member
 //!   **write** budget at the bottom of this file (#4234, ADR-0208 D10 증보), mounted
-//!   on the four write routes a member can flood. Reads and the streaming `PATCH`
-//!   have no per-member budget;
+//!   on the five write endpoints (three surfaces) a member can flood. Reads and the
+//!   streaming `PATCH` have no per-member budget;
 //! * the per-IP `audit_log` row. Swift never writes it for the per-IP axis either
 //!   (:186-195), because that axis runs before any principal exists and
 //!   `audit_log.workspace_id` is `NOT NULL`: a per-IP violation is a server log
@@ -596,8 +596,8 @@ async fn gate_per_ip(
 // #4234 — the per-member write budget (ADR-0208 D10 증보)
 // ---------------------------------------------------------------------------
 //
-// Four write routes are mounted behind `require_principal` and each does work
-// out of proportion to its request line: a message send is a channel-seq bump + a
+// Five write endpoints (three surfaces) are mounted behind `require_principal` and each does
+// work out of proportion to its request line: a message send is a channel-seq bump + a
 // message row + an outbox row (+ mention routing) in one transaction, an upload
 // start is a Google Drive API call plus a `pending` row, and a scheduled-message
 // create/edit is a transaction that locks the member's session and schedule rows

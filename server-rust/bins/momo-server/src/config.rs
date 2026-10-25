@@ -349,9 +349,10 @@ impl DriveSettings {
 /// every authenticated route, default 600) is still not ported and the field is
 /// deliberately absent rather than present-and-ignored — a knob that does
 /// nothing is worse documentation than no knob. What exists instead is the
-/// per-member **write** budget below (ADR-0208 D10 증보, #4234): four knobs, one
-/// per write surface a member can flood, each read by a middleware that is
-/// mounted on exactly that route (`rate_limit::member_write`).
+/// per-member **write** budget below (ADR-0208 D10 증보, #4234): four knobs for the
+/// three write surfaces a member can flood (the send surface has one for people and one
+/// for agents), each read by a middleware that is mounted on exactly those routes
+/// (`rate_limit::member_write`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimitConfig {
     /// `RATE_LIMIT_WINDOW_SECONDS`, floor 1 (default 60).
@@ -394,11 +395,16 @@ pub struct RateLimitConfig {
     /// The same send surface for an **agent** (or work-host) credential. Higher
     /// because an adapter posts one `tool_call` and one `tool_result` per tool
     /// execution (the Prime adapter, `adapters/prime/prime_adapter.py`), so a busy
-    /// run is bursty by construction: 600 is 200 tool executions a minute from one
-    /// agent identity, and it is never stricter than the Agent Port's own per-agent
-    /// ceiling (`MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT`, 480), so a REST-only adapter
-    /// is not throttled harder than the MCP path that does the same job. Streaming
-    /// slices are `PATCH …/messages/{id}` and are deliberately **not** on this axis.
+    /// run is bursty by construction. A run's steps are capped by `agent.max_run_steps`
+    /// (schema default 50) and an agent's concurrent runs by `agent.max_concurrent_runs`
+    /// (default 1), so one run posts at most ~100 of them and four concurrent runs ~400;
+    /// 600 is 200 tool executions a minute from one agent identity, above that, and never
+    /// stricter than the Agent Port's own per-agent ceiling
+    /// (`MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT`, 480), so a REST-only adapter is not
+    /// throttled harder than the MCP path that does the same job. Adapters retry a 429 for
+    /// about a second and do not read `Retry-After`, which is why this is the number to
+    /// raise, not to tighten, if a real run ever meets it. Streaming slices are
+    /// `PATCH …/messages/{id}` and are deliberately **not** on this axis.
     pub message_send_per_agent_limit: u32,
     /// `RATE_LIMIT_SCHEDULED_WRITE_PER_MEMBER` (default 60 per window). 0 disables.
     /// Creating and editing a scheduled message (`POST …/channels/{ch}/scheduled-messages`,
@@ -3255,6 +3261,19 @@ mod tests {
     #[test]
     fn the_member_write_defaults_admit_ordinary_use_with_headroom() {
         let defaults = RateLimitConfig::default();
+        // The numbers ADR-0208 증보 1, the openapi `RateLimited` response and `.env.example`
+        // quote, pinned by value: the relations below leave room, so without this a default could
+        // move and leave those documents saying something else (sabotage E22/E35-E37).
+        assert_eq!(
+            (
+                defaults.message_send_per_member_limit,
+                defaults.message_send_per_agent_limit,
+                defaults.scheduled_write_per_member_limit,
+                defaults.upload_start_per_member_limit,
+            ),
+            (120, 600, 60, 60),
+            "a default changed: update ADR-0208 증보 1, docs/api/openapi.yaml and infra/.env.example with it"
+        );
         for (name, limit) in [
             (
                 "message send, human",

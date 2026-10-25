@@ -1120,7 +1120,14 @@ async fn zero_turns_each_axis_off_and_no_row_is_written() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn the_shipped_defaults_pass_ordinary_use_and_stop_at_the_documented_numbers() {
+    // The numbers the docs quote (ADR-0208 증보 1, openapi `RateLimited`, `.env.example`) are
+    // pinned here **by value**. Reading them back from the config would make the boundary below
+    // follow whatever the default is, and a changed default would pass (sabotage E22).
+    const DOCUMENTED_HUMAN: u32 = 120;
+    const DOCUMENTED_AGENT: u32 = 600;
     let defaults = RateLimitConfig::default();
+    assert_eq!(defaults.message_send_per_member_limit, DOCUMENTED_HUMAN);
+    assert_eq!(defaults.message_send_per_agent_limit, DOCUMENTED_AGENT);
     let rig = Rig::new(RateLimitConfig {
         window_seconds: 3600,
         ..defaults
@@ -1190,7 +1197,7 @@ async fn the_shipped_defaults_pass_ordinary_use_and_stop_at_the_documented_numbe
     );
 
     // the first refusal is exactly where the documented numbers say
-    for index in 100..i64::from(defaults.message_send_per_member_limit) {
+    for index in 100..i64::from(DOCUMENTED_HUMAN) {
         assert_eq!(
             rig.send(&human, fx.workspace, fx.channel, &format!("계속 {index}"))
                 .await
@@ -1204,10 +1211,9 @@ async fn the_shipped_defaults_pass_ordinary_use_and_stop_at_the_documented_numbe
             .await
             .status,
         429,
-        "the human budget is {} per window",
-        defaults.message_send_per_member_limit
+        "the human budget is {DOCUMENTED_HUMAN} per window"
     );
-    for index in 300..i64::from(defaults.message_send_per_agent_limit) {
+    for index in 300..i64::from(DOCUMENTED_AGENT) {
         assert_eq!(
             rig.send_typed(
                 &bearer,
@@ -1227,7 +1233,6 @@ async fn the_shipped_defaults_pass_ordinary_use_and_stop_at_the_documented_numbe
             .await
             .status,
         429,
-        "the agent budget is {} per window",
-        defaults.message_send_per_agent_limit
+        "the agent budget is {DOCUMENTED_AGENT} per window"
     );
 }
