@@ -318,7 +318,7 @@ Required.
 
 - 자기 줄을 갖는 터치 컨트롤은 44px, 본문 안 링크는 최소 24px target을 가진다.
 
-- cached content는 offline에도 남고, reconnect가 다른 사람(또는 에이전트)의 새 메시지를 들였을 때만 복구 지점을 인라인으로 알린다.
+- cached content는 offline에도 남고, reconnect 뒤 복구가 다른 사람(또는 에이전트)의 새 메시지를 들였을 때만 복구 지점을 인라인으로 알린다.
 
 ### Platform: web
 

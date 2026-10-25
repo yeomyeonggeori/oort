@@ -124,7 +124,7 @@ export interface UseTimelineResult {
   state: TimelineState;
   status: "loading" | "ready" | "error";
   resume: ResumeInfo;
-  /** Reconnect markers, rendered inline as "재연결됨, seq N까지 복구". */
+  /** Reconnect markers, rendered inline as "재연결됨, 여기까지 복구" — one per recovery that brought in someone else's new messages (#4328). */
   recoveryMarkers: RecoveryMarker[];
   /** Local echoes awaiting their server seq (M10). Never inside `state`. */
   pending: PendingMessage[];

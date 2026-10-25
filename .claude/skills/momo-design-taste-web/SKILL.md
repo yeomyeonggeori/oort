@@ -82,7 +82,7 @@ Every surface ships **empty / loading / error / offline**:
 - **empty** = an invitation to act: one line of copy + one action. Not an illustration poster, not centered art. A quiet inbox is framed as designed ("조용한 게 정상입니다"), not as failure.
 - **loading** = height-preserving neutral skeleton bars (no shimmer), or an in-button spinner for actions.
 - **error** = states what happened and what to do next, inline in context. Never a toast, never an apology, never vague.
-- **offline** = a single inline banner (WS disconnect), cached content keeps rendering (durability layer, P15). On reconnect, show the recovery marker ("재연결됨, 여기까지 복구") only when the recovery brought in other people's (or agents') new messages; an empty gap or only my own lines gets none (core `judgeRecoveryMarker`, #4328).
+- **offline** = a single inline banner (WS disconnect), cached content keeps rendering (durability layer, P15). On reconnect, show the recovery marker ("재연결됨, 여기까지 복구") only when the recovery brought in other people's (or agents') new messages; an empty gap or only my own lines (from any device) gets none (core `judgeRecoveryMarker`, #4328).
 
 ## 6. Interaction, keyboard, focus, a11y
 
