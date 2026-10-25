@@ -51,6 +51,11 @@
 //!    security hides that row from this transaction, and the id is a global
 //!    primary key — so it is a deliberate rejection
 //!    ([`DeviceRejection::DeviceInAnotherWorkspace`]), never an RLS error.
+//!    [`revoke_device`] takes the same row lock before it reads the owner, so a
+//!    previous owner's late sign-out waits behind a takeover instead of hitting
+//!    the new owner's registration, and it answers 404 — not 403 — for a device
+//!    that someone else holds without a live registration: nobody's to revoke,
+//!    and no hint to a caller who merely knows the id that such a device exists.
 
 use chrono::{DateTime, Utc};
 use momo_auth::{lock_session_for_registration, RegistrationSession};
@@ -623,6 +628,20 @@ pub async fn register_device(
 ///
 /// Never `DELETE` — `push_dispatch_log.push_token_id` must keep resolving
 /// (ADR-0120 D4). Idempotent: revoking twice reports `0` the second time.
+///
+/// Since #3978 a device can change hands, so this is also where the previous
+/// owner's late sign-out must not reach the next owner's registration:
+///
+/// * the row is **locked** while ownership is read, the same lock a takeover
+///   takes first ([`register_device`]). A sign-out that read "mine" and then
+///   waited behind a takeover would otherwise run its token `UPDATE` on a fresh
+///   snapshot and invalidate the new owner's live registration (and return the
+///   new owner's device record). Behind the lock it reads the new owner instead.
+/// * a device someone else holds **without a live registration** answers as if
+///   the server had never seen the id (404), not 403: it is nobody's to revoke,
+///   the first register of that id would take it, and a 403 would tell a
+///   caller that merely knows an id that a device exists (the same
+///   non-disclosure as #4233). A device with a live registration is still 403.
 pub async fn revoke_device(
     pool: &PgPool,
     workspace_id: Uuid,
@@ -636,17 +655,25 @@ pub async fn revoke_device(
                 return Ok(Err(rejection));
             }
 
-            let owner = sqlx::query_scalar::<_, Uuid>("SELECT member_id FROM device WHERE id = $1")
-                .bind(device_id)
-                .fetch_optional(&mut *conn)
-                .await
-                .map_err(DbError::from)?;
+            let owner = sqlx::query_scalar::<_, Uuid>(
+                "SELECT member_id FROM device WHERE id = $1 FOR UPDATE",
+            )
+            .bind(device_id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(DbError::from)?;
 
             let Some(owner) = owner else {
                 return Ok(Err(DeviceRejection::DeviceNotFound));
             };
             if owner != member_id {
-                return Ok(Err(DeviceRejection::DeviceOwnedByAnotherMember));
+                // The liveness test is its own statement, after the lock (see
+                // `device_has_live_token`). Nothing is written on either answer.
+                return Ok(Err(if device_has_live_token(conn, device_id).await? {
+                    DeviceRejection::DeviceOwnedByAnotherMember
+                } else {
+                    DeviceRejection::DeviceNotFound
+                }));
             }
 
             let invalidated = sqlx::query(

@@ -78,7 +78,9 @@ pub enum DeviceRejection {
     DeviceInAnotherWorkspace,
     /// A device's platform is immutable once registered. 409.
     PlatformImmutable,
-    /// No such device in this tenant. 404.
+    /// No such device in this tenant — or, for a revoke, one that another member
+    /// holds without any live registration (#3978): nothing there is the
+    /// caller's to switch off, and a 403 would confirm the id exists. 404.
     DeviceNotFound,
     /// The session this registration was made under ended after the auth
     /// middleware accepted it (#2677) — a logout, disconnect or password change

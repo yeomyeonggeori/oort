@@ -34,6 +34,7 @@
 //! | `a_second_member_signing_in_on_the_same_phone_takes_the_registration_over` | refuse every device whose owner differs (the pre-#3978 check), or leave `session_id` out of the reclaim UPDATE |
 //! | `a_live_registration_cannot_be_taken_by_a_second_sign_in` | take a device over without the "no active token" test |
 //! | `a_device_id_registered_in_another_workspace_is_a_403_not_a_500` | go back to `ON CONFLICT (id) DO UPDATE` on the device insert, or map the rejection to a 409 |
+//! | `switching_push_off_on_a_phone_the_first_member_left_is_a_404_not_a_403` | answer 403 for every device another member holds (the pre-#3978 revoke), or answer 404 for the ones with a live registration too |
 //!
 //! The two `the_upgrade…`/`…across_the_upgrade…` tests and the set-owner test
 //! each run in a database of their own ([`ScratchDb`]): the first two must put
@@ -938,6 +939,27 @@ impl World {
         .expect("read the live registration's owner")
     }
 
+    /// `DELETE /v1/workspaces/{ws}/devices/{id}` — what the phone sends to
+    /// switch its own push off (`clients/mobile/src/push/devices.ts`
+    /// `revokeOwnDevice`), with the status and the body as the answer.
+    async fn delete_device(&self, session: &Session, device_id: Uuid) -> (u16, Value) {
+        let response = self
+            .http
+            .delete(format!(
+                "{}/v1/workspaces/{}/devices/{}",
+                self.base, self.workspace, device_id
+            ))
+            .bearer_auth(&session.access)
+            .send()
+            .await
+            .expect("revoke device");
+        let status = response.status().as_u16();
+        (
+            status,
+            response.json::<Value>().await.unwrap_or(Value::Null),
+        )
+    }
+
     /// Whom the notifier has dispatched to in this workspace, in order.
     async fn dispatched_members(&self) -> Vec<Uuid> {
         sqlx::query_scalar(
@@ -1075,6 +1097,66 @@ async fn a_live_registration_cannot_be_taken_by_a_second_sign_in() {
     assert!(
         sent.iter().all(|d| d.apns_token != intruder.apns_token),
         "nothing was sent to the token B presented"
+    );
+}
+
+/// The second member can switch push off on a phone the first one left, even
+/// before the registration reaches the server: the phone's `DELETE` (its own
+/// push switch) answers 404 — the same answer, byte for byte, as an id the
+/// server never saw, which the phone reads as "already off" — and not the 403
+/// that would confirm the id exists and make the switch fail. The refusal
+/// writes nothing, and the device is still B's to take afterwards. A live
+/// registration is a different matter: once B holds the phone, A signing in
+/// again cannot switch it off (403) and B's registration is untouched.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn switching_push_off_on_a_phone_the_first_member_left_is_a_404_not_a_403() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let b = w.second_person().await;
+
+    let a_session = w.person_login().await;
+    w.register(&a_session, &phone).await;
+    w.logout(&a_session).await;
+
+    let b_session = w.neighbour_login(&b).await;
+    let (status, body) = w.delete_device(&b_session, phone.device_id).await;
+    assert_eq!(
+        status, 404,
+        "A's phone has nothing alive on it to switch off"
+    );
+    assert_eq!(body["error"]["message"], "device not found");
+    let unknown = w.delete_device(&b_session, Uuid::new_v4()).await;
+    assert_eq!(
+        (status, body),
+        unknown,
+        "indistinguishable from an id the server never saw"
+    );
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        None,
+        "the refusal wrote nothing"
+    );
+
+    w.register(&b_session, &phone).await;
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        Some(b.id),
+        "the device was still B's to take"
+    );
+
+    let a_again = w.person_login().await;
+    let (status, body) = w.delete_device(&a_again, phone.device_id).await;
+    assert_eq!(
+        status, 403,
+        "B's registration is live: not A's to switch off"
+    );
+    assert_eq!(body["error"]["message"], "device belongs to another member");
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        Some(b.id),
+        "B's registration is untouched"
     );
 }
 

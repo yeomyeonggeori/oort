@@ -1,6 +1,6 @@
 # ADR-0204: 폰 알림 v2 — 확실히 오고, 누르면 그 자리, 잠금 화면에서 바로 승인
 
-- Status: **Accepted** (2026-10-16. 성재 요청 세 건과 위임 원문은 「owner 결정」에 인용. 새 자격 증명(D6)과 그 영향 범위는 같은 날 성재에게 보고에서 따로 밝힌다) · **증보 1** (2026-10-17, 구현 검수에 따른 정정·증보, 「증보 1」 절) · **증보 2** (2026-10-18, 「거부」 문구 통일·스트림 표식·취소된 스트림 푸시, 「증보 2」 절) · **증보 3** (2026-10-19 Accepted, 존재 신호 하트비트, #4018, 「증보 3」 절)
+- Status: **Accepted** (2026-10-16. 성재 요청 세 건과 위임 원문은 「owner 결정」에 인용. 새 자격 증명(D6)과 그 영향 범위는 같은 날 성재에게 보고에서 따로 밝힌다) · **증보 1** (2026-10-17, 구현 검수에 따른 정정·증보, 「증보 1」 절) · **증보 2** (2026-10-18, 「거부」 문구 통일·스트림 표식·취소된 스트림 푸시, 「증보 2」 절) · **증보 3** (2026-10-19 Accepted, 존재 신호 하트비트, #4018, 「증보 3」 절) · **증보 4** (2026-10-25 Proposed, 같은 폰 설치에서 다음 멤버가 로그인할 때의 기기 이전, #3978, 「증보 4」 절)
 - Date: 2026-10-16
 - Deciders: 성재
 - 기안: Opus 5.5 planner (#3922)
@@ -299,6 +299,38 @@
 
 ### 클라이언트(이 증보 밖, UXUI 후속)
 - 폰·웹·데스크탑이 채널 화면이 앞에 있는 동안 15초 주기로 보낸다. 서버 계약은 위와 같고 클라이언트가 안 보내면 영향이 없다.
+
+## 증보 4 (2026-10-25 기안, **Proposed**) — 같은 폰 설치에서 다음 멤버가 로그인할 때의 기기 이전 (#3978)
+- 기안: Sonnet 5.5 엔진 워커 (#3978). 증보 1~3과 같은 방식으로 D1(기기 등록 수명주기)을 증보한다. 새 자격 증명·새 공개 API 형상은 없다. 인가 규칙을 한 곳 완화(휴면 기기 이전)하고 한 곳 좁힌다(휴면 타인 기기의 존재 비노출)하므로 보안 경계 변경이다(ADR-0100).
+- 문제 [V: 격리 PG에서 재현]. 폰의 `pushDeviceId`는 설치 단위로 고정이고 로그아웃해도 남는다(`registration.ts`). 서버 `device` 행은 멤버 소유다. 한 설치에서 멤버 A가 로그아웃하고 멤버 B가 로그인해 같은 device id·같은 APNs 토큰을 등록하면, 토큰 쪽은 「invalidated 행은 되찾는다」(`device.rs` 계약 1)로 풀리지만 **device 행 검사가 먼저** `DeviceOwnedByAnotherMember`(403)로 막았다. 폰은 403을 재시도하지 않으므로 B는 푸시를 못 받고, 등록이 닿기 전에 스위치를 끄는 `DELETE`도 403이라 스위치도 못 끈다.
+
+### 결정 제안
+1. **이전 조건은 「그 device에 살아 있는 `push_token`이 없음」이다.** 로그아웃·`DELETE /devices/{id}`·APNs 410/400 어느 쪽으로 죽었든 같다(상태이지 사건이 아니다). 살아 있는 등록은 누구에게도 넘기지 않는다: 그 device의 토큰이 하나라도 `invalidated_at IS NULL`이면 지금처럼 403 `device belongs to another member`다.
+2. **경주는 행 잠금으로 막는다.** `register_device`는 device 행을 `FOR UPDATE`로 읽고, 휴면 검사는 **별도 문장**으로 한다(READ COMMITTED는 문장마다 스냅샷을 잡으므로, 잠금을 기다리는 동안 먼저 커밋된 등록의 토큰이 검사에 보인다). 한 휴면 device를 두 로그인이 동시에 노리면 순서대로 처리되고 두 번째는 첫 번째의 살아 있는 토큰을 본다. **`revoke_device`도 소유자를 읽기 전에 같은 잠금을 건다.** 소유가 옮겨 갈 수 있게 된 뒤에는 이전 소유자의 늦은 로그아웃 `DELETE`(폰의 로그아웃은 best-effort·재시도)가 「내 것」을 읽은 채 인수 커밋 뒤에 토큰 `UPDATE`를 돌려 새 소유자의 살아 있는 등록을 죽이고 새 소유자의 device 기록을 돌려받을 수 있기 때문이다. 잠금 뒤에는 새 소유자를 읽어 403을 받는다.
+3. **이전 소유자의 죽은 토큰 행은 그대로 둔다**(계약 3: 삭제 없음, `push_dispatch_log` 참조 유지). 새 소유자에게는 **자기 토큰만** 보인다(토큰 읽기가 토큰의 멤버 = device의 멤버인 행만 낸다).
+4. **감사.** `device.registered` 행의 `detail`에 `device_transferred`(불리언)와 `previous_member_id`(UUID 또는 null)를 더한다(`schema`는 `momo.device.registered.v1` 그대로, 가산).
+5. **다른 워크스페이스의 device id는 이전하지 않는다.** `device.id`는 전역 PK이고 RLS가 그 행을 이 트랜잭션에서 숨겨 옮기지도 덮지도 못한다(쓰기 경로 BYPASSRLS 금지). 수리 전에는 업서트의 `42501`이 500으로 나갔다. 이제 결정적 403 `device is registered in another workspace`다(폰은 409만 재시도하므로 409가 아니다).
+6. **살아 있는 등록이 없는 타인 기기의 `DELETE`는 404다.** 그 기기는 누구의 것도 끌 수 없고(끌 등록이 없다), 같은 id의 다음 등록이 가져가는 기기다. 403이면 id만 아는 호출자에게 그런 기기가 있다는 사실이 새므로 서버가 한 번도 못 본 id와 같은 `device not found`로 답한다(#4233의 존재 비노출과 같은 원칙). 살아 있는 타인 등록이 있는 기기는 403 그대로다. 폰은 404를 `gone`(이미 꺼짐)으로 읽으므로(`revokeOwnDevice`) B가 등록 전에 스위치를 꺼도 성공으로 보이고, 이는 사실이다.
+
+### 경계
+- 푸시 대상은 `push_token.member_id`로 가려진다(`judge_targets`). device 행의 소유 이전은 푸시 경로를 바꾸지 않고, B가 A의 푸시를 받을 길도 만들지 않는다. 막는 것은 「살아 있는 타인 등록을 지우거나 끄는」 길이다(이전하면 `revoke_device`·회전이 그 device의 모든 활성 토큰을 건드린다).
+- 인증 없는 경로·새 자격 증명·새 공개 API 형상은 없다. `/v1/workspaces/{ws}/devices`는 `openapi.yaml`에 없다(변경 없음).
+- 새로 드러나는 정보는 없다. 403과 404의 구분이 알려 주는 것은 「그 기기에 살아 있는 타인 등록이 있다」 하나이고, 이는 `POST`가 이미 보이는 신호(403과 인수의 차이)와 같다. 이전에는 `DELETE`가 모든 타인 기기의 존재를 403으로 드러냈으므로 정보는 줄었다.
+- **전제(코드로 확인).** 휴면 device를 넘겨받으려면 그 device id를 알아야 한다. id는 폰이 만든 122비트 UUID이고 폰·서버(와 relay 페이로드)만 안다: `GET /devices`는 호출자 본인 것만 돌려주고, `audit_log`를 멤버에게 읽어 주는 API는 없다(읽기는 내부 count·EXISTS뿐). 이 전제가 깨지면(예: 운영자가 감사 행을 읽는 경로가 생기면) 아는 사람이 남의 **휴면** device를 가져가 그 폰의 원래 주인의 재등록을 막을 수 있다. 잃는 푸시는 없다(휴면이라 살아 있는 등록이 없다). 주인이 다시 로그인하면 가져간 쪽의 등록이 죽을 때까지 403이고, 앱을 다시 설치하면 새 id로 풀린다.
+
+### 수용하는 한계 (후속)
+- A의 로그아웃이 서버에 닿지 못해 등록이 살아 있으면 B는 계속 403이다. 세션 계보가 끝난 등록을 죽은 것으로 볼지는 별도 결정이다(#4445).
+- 워크스페이스를 넘나드는 폰은 `push_token_uniq (apns_token, env)` 전역 유니크 때문에 새 device id로도 409다. 풀려면 invalidated 행의 유니크 완화(새 migration)와 device 키 범위 결정이 필요하고, DB 계약 변경이라 별도 ADR이다(#4444). 같은 사람이 한 폰에서 워크스페이스 A를 로그아웃하고 B에 로그인하는 모양이 가장 흔할 수 있으므로 우선순위를 낮게 보지 않는다. 이 증보는 그 경우를 500에서 결정적 403으로만 바꾼다.
+
+### 증명
+- 공개 주장은 `docs/security/claims.yaml`의 `PUSH-3`이다(ADR-0214). 증명 시험: `device_conformance_pg.rs`의 `another_members_device_is_refused`·`a_live_registration_is_not_taken_over_with_another_token`·`a_device_left_dormant_by_logout_is_reclaimable_by_the_next_member`·`a_takeover_waits_for_the_device_row_lock`·`a_device_id_registered_in_another_workspace_is_a_rejection_not_a_500`·`revoking_a_device_nobody_holds_alive_is_a_404_for_anyone_else`·`a_previous_owners_late_sign_out_waits_for_a_takeover_in_flight`, `push_session_end_conformance_pg.rs`의 `a_live_registration_cannot_be_taken_by_a_second_sign_in`. 모두 `momo_app`(NOBYPASSRLS, RLS FORCE)으로 도는 실제 PG 시험이고 PR CI의 Security pack 선택에 들어 있다.
+
+### 기각한 대안
+- 로그아웃 때 device 행(과 토큰 행) 삭제: 「revocation은 `invalidated_at`, 삭제 없음」과 `push_dispatch_log.push_token_id` 해소를 깬다.
+- 폰이 로그인마다 새 device id: 토큰 충돌은 그대로고, 폰 변경이 필요하며, 죽은 device 행이 쌓인다.
+- 증명 없이 살아 있는 등록을 회수: 다른 멤버의 푸시를 id 하나로 끄는 길이다.
+- SECURITY DEFINER·BYPASSRLS로 교차 테넌트 이전: 쓰기 경로 BYPASSRLS 금지(AGENTS 계약).
+- 모든 타인 기기의 `DELETE`를 404로: 살아 있는 타인 등록이 있다는 신호까지 없애지만, 계약된 403(`another_members_device_is_refused`)을 바꾸고 `POST`가 어차피 보이는 같은 신호를 숨기지 못한다. 휴면 기기만 가린다.
 
 ## owner 결정 (인용)
 - 2026-10-16 성재: 「…알림에서 눌러서 관련위치 이동 및 알림에서 승인 바로 때려버리는 그런 기능들도 설계해서 작업해줘.」

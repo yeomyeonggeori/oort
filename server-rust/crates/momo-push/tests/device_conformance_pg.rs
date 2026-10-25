@@ -37,6 +37,8 @@
 //! | `losing_a_race_for_a_new_device_id_is_retryable` | answer every taken id with the cross-workspace rejection |
 //! | `a_device_id_registered_in_another_workspace_is_a_rejection_not_a_500` | go back to `ON CONFLICT (id) DO UPDATE` |
 //! | `a_token_registered_in_another_workspace_is_still_a_conflict` | (pins a known limit — see the test) |
+//! | `revoking_a_device_nobody_holds_alive_is_a_404_for_anyone_else` | answer 403 for every device someone else holds (the pre-#3978 revoke), or answer 404 for the ones with a live registration too |
+//! | `a_previous_owners_late_sign_out_waits_for_a_takeover_in_flight` | read the owner in `revoke_device` without `FOR UPDATE` |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -1393,5 +1395,235 @@ async fn a_token_registered_in_another_workspace_is_still_a_conflict() {
     assert!(
         matches!(outcome, Err(PushError::RegistrationConflict)),
         "the same APNs token in another workspace is a conflict, got {outcome:?}"
+    );
+}
+
+/// Revoking a device that is not yours. With a live registration on it the
+/// answer is the 403 it always was. With none (its owner has signed out) it is
+/// the 404 an id the server never saw gets (#3978): there is nothing there to
+/// switch off, the next register of that id would take the device, and a 403
+/// would tell a caller who merely knows an id that such a device exists — the
+/// non-disclosure #4233 asks of attachments. The phone reads that 404 as
+/// "already off" (`revokeOwnDevice` → `gone`), which is true. Nothing is written
+/// either way.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn revoking_a_device_nobody_holds_alive_is_a_404_for_anyone_else() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let device_id = Uuid::new_v4();
+    let token = hex_token(0x93);
+
+    register_device(
+        &app,
+        tenant.workspace_id,
+        tenant.member_a,
+        None,
+        &registration(device_id, &token),
+    )
+    .await
+    .expect("member A registers")
+    .expect("not rejected");
+
+    // A is signed in: the device is live, and B is told it is not his.
+    let live = revoke_device(&app, tenant.workspace_id, tenant.member_b, None, device_id)
+        .await
+        .expect("the call itself succeeds")
+        .expect_err("B must not revoke A's live device");
+    assert_eq!(live, DeviceRejection::DeviceOwnedByAnotherMember);
+
+    revoke_device(&app, tenant.workspace_id, tenant.member_a, None, device_id)
+        .await
+        .expect("member A signs out")
+        .expect("not rejected");
+
+    let dormant = revoke_device(&app, tenant.workspace_id, tenant.member_b, None, device_id)
+        .await
+        .expect("the call itself succeeds")
+        .expect_err("nothing of A's is live: not B's to revoke");
+    let unknown = revoke_device(
+        &app,
+        tenant.workspace_id,
+        tenant.member_b,
+        None,
+        Uuid::new_v4(),
+    )
+    .await
+    .expect("the call itself succeeds")
+    .expect_err("an id the server never saw");
+    assert_eq!(dormant, DeviceRejection::DeviceNotFound);
+    assert_eq!(
+        dormant, unknown,
+        "B cannot tell a dormant device from an id the server never saw"
+    );
+
+    // Nothing moved and nothing was written for B.
+    assert_eq!(device_owner(&su, device_id).await, tenant.member_a);
+    assert_eq!(token_rows(&su, device_id).await, 1);
+    let revokes_by_b: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'device.revoked' AND actor_member_id = $2",
+    )
+    .bind(tenant.workspace_id)
+    .bind(tenant.member_b)
+    .fetch_one(&su)
+    .await
+    .expect("count B's revoke audit rows");
+    assert_eq!(revokes_by_b, 0, "a refused revoke leaves no audit row");
+
+    // The refusal follows liveness, not history: once B holds the device with a
+    // registration of his own, A — its former owner — is the one told no.
+    register_device(
+        &app,
+        tenant.workspace_id,
+        tenant.member_b,
+        None,
+        &registration(device_id, &token),
+    )
+    .await
+    .expect("member B registers the same install")
+    .expect("a device with no live registration is reclaimable");
+    let former_owner = revoke_device(&app, tenant.workspace_id, tenant.member_a, None, device_id)
+        .await
+        .expect("the call itself succeeds")
+        .expect_err("A must not revoke the device B now holds alive");
+    assert_eq!(former_owner, DeviceRejection::DeviceOwnedByAnotherMember);
+}
+
+/// Is some backend queued behind `holder_pid` on a lock? Polled for up to ten
+/// seconds, so that "the request is waiting" is *observed* in `pg_stat_activity`
+/// and not guessed from a sleep.
+async fn a_backend_waits_for(su: &PgPool, holder_pid: i32) -> bool {
+    for _ in 0..100 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity WHERE $1 = ANY (pg_blocking_pids(pid))",
+        )
+        .bind(holder_pid)
+        .fetch_one(su)
+        .await
+        .expect("read pg_stat_activity");
+        if waiting > 0 {
+            return true;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    false
+}
+
+/// Ownership can move now, and a sign-out is a *read* of the owner followed by a
+/// *write* to the tokens. The previous owner's sign-out request arriving late
+/// (the phone's `DELETE` is best-effort and retried) must not run that write on
+/// the registration of the member who took the device in between.
+///
+/// Made deterministic: a transaction holds the device row lock — "member C,
+/// mid-takeover" — and A's late sign-out is sent while C holds it. As far as the
+/// committed rows go the device is still A's. A's sign-out must queue behind C
+/// (checked in `pg_stat_activity`, not by a sleep) and, once C's takeover
+/// commits, read the owner again: C, with a live registration, so A is refused
+/// and C's registration is untouched. Without the row lock A's owner check
+/// passes at once, its token `UPDATE` runs on a snapshot taken after C
+/// commits, and it invalidates C's live token while answering with C's device.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_previous_owners_late_sign_out_waits_for_a_takeover_in_flight() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let member_c = seed_member(&su, tenant.workspace_id).await;
+    let device_id = Uuid::new_v4();
+
+    register_device(
+        &app,
+        tenant.workspace_id,
+        tenant.member_a,
+        None,
+        &registration(device_id, &hex_token(0x94)),
+    )
+    .await
+    .expect("member A registers")
+    .expect("not rejected");
+    revoke_device(&app, tenant.workspace_id, tenant.member_a, None, device_id)
+        .await
+        .expect("member A signs out")
+        .expect("not rejected");
+
+    // C is mid-takeover: holds the device row.
+    let mut holder = su.begin().await.expect("open C's transaction");
+    let holder_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *holder)
+        .await
+        .expect("read C's backend pid");
+    sqlx::query("SELECT 1 FROM device WHERE id = $1 FOR UPDATE")
+        .bind(device_id)
+        .fetch_one(&mut *holder)
+        .await
+        .expect("C locks the device row");
+
+    // A's sign-out arrives late.
+    let a = tokio::spawn({
+        let app = app.clone();
+        let workspace_id = tenant.workspace_id;
+        let member_a = tenant.member_a;
+        async move { revoke_device(&app, workspace_id, member_a, None, device_id).await }
+    });
+    assert!(
+        a_backend_waits_for(&su, holder_pid).await,
+        "A's sign-out must queue behind C's row lock, not read an owner that is about to change"
+    );
+    assert!(!a.is_finished(), "and it has not decided anything yet");
+
+    // C finishes: the device is C's and C's registration is live.
+    sqlx::query("UPDATE device SET member_id = $2 WHERE id = $1")
+        .bind(device_id)
+        .bind(member_c)
+        .execute(&mut *holder)
+        .await
+        .expect("C takes the device");
+    sqlx::query(
+        "INSERT INTO push_token (workspace_id, device_id, member_id, apns_token, env, topic) \
+         VALUES ($1, $2, $3, $4, 'sandbox'::push_env, $5)",
+    )
+    .bind(tenant.workspace_id)
+    .bind(device_id)
+    .bind(member_c)
+    .bind(hex_token(0x95))
+    .bind(TOPIC)
+    .execute(&mut *holder)
+    .await
+    .expect("C's token goes live");
+    holder.commit().await.expect("C commits");
+
+    let outcome = a
+        .await
+        .expect("A's task finishes")
+        .expect("the call itself succeeds");
+    assert_eq!(
+        outcome.err(),
+        Some(DeviceRejection::DeviceOwnedByAnotherMember),
+        "A arrived after C's live registration committed and must not touch it"
+    );
+    assert_eq!(
+        live_token_owners(&su, device_id).await,
+        vec![member_c],
+        "C's registration survived A's late sign-out"
+    );
+    assert_eq!(device_owner(&su, device_id).await, member_c);
+    let revokes_by_a: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'device.revoked' \
+            AND target_id = $2 AND actor_member_id = $3",
+    )
+    .bind(tenant.workspace_id)
+    .bind(device_id)
+    .bind(tenant.member_a)
+    .fetch_one(&su)
+    .await
+    .expect("count A's revoke audit rows");
+    assert_eq!(
+        revokes_by_a, 1,
+        "only A's real sign-out is on the record; the late one wrote nothing"
     );
 }
