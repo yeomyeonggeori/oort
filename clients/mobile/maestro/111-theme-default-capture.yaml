@@ -1,0 +1,39 @@
+appId: app.momo.ios
+name: "111-theme-default-capture"
+---
+# 111-theme-default-capture — 폰의 기본은 라이트이고, 「시스템」을 고르면 다크 기기를 따르는가 (#4526, ADR-0189 증보 5).
+#
+# 표면 `-momoMeasure THEME-LIVE` 는 안쪽에 **진짜** ThemeProvider(진짜 MMKV·진짜 시스템 추종)를 세운다
+# (`measure/themeLive.tsx`). 다른 표면은 FixedScheme 으로 스킴을 못 박아 기본·저장을 못 찍는다. 그래서 이 사진의
+# 증거는 기기 상태다: 시뮬레이터를 다크로 두고, 앱을 지운 직후(저장 없음)에 띄운다.
+#
+#   xcrun simctl ui <udid> appearance dark
+#   xcrun simctl uninstall <udid> app.momo.ios && xcrun simctl install <udid> <MomoMobile.app>
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure THEME-LIVE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=theme --test-output-dir <dir> clients/mobile/maestro/111-theme-default-capture.yaml
+#
+# 다 돌고 나면 저장에 「시스템」이 남는다. 앱을 끄고 다시 띄워(`simctl terminate` → `launch`)
+# `111-theme-default-relaunch-capture.yaml` 로 그 선택이 다음 실행에도 남는지 찍는다.
+- extendedWaitUntil:
+    visible:
+      id: "theme-live-caption"
+    timeout: 120000
+- waitForAnimationToEnd
+# 아무것도 안 골랐다 — 기기는 다크인데 화면은 라이트다.
+- takeScreenshot: ${SHOT}-1-first-run
+- tapOn:
+    id: "theme-system"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-2-system
+- tapOn:
+    id: "theme-dark"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-3-dark
+- tapOn:
+    id: "theme-light"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-4-light
+# 마지막은 「시스템」으로 둔다 — 다음 실행에서 이 선택이 남는지 본다.
+- tapOn:
+    id: "theme-system"
+- waitForAnimationToEnd

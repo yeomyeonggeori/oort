@@ -1,0 +1,16 @@
+appId: app.momo.ios
+name: "111-theme-default-relaunch-capture"
+---
+# 111-theme-default-relaunch-capture — 「시스템」을 고른 폰은 앱을 다시 켜도 시스템이다(라이트 기본으로 돌아가지 않는다) (#4526).
+#
+# `111-theme-default-capture.yaml` 을 돌린 뒤 앱을 끄고(`xcrun simctl terminate <udid> app.momo.ios`) 같은 표면을 다시 띄운다.
+# 저장이 남아 있으므로 다크 기기에서 화면은 다크이고 캡션은 「저장: 있음(system)」이다.
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure THEME-LIVE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=theme --test-output-dir <dir> clients/mobile/maestro/111-theme-default-relaunch-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "theme-live-caption"
+    timeout: 120000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-5-relaunch-kept
