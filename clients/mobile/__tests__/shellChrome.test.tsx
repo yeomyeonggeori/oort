@@ -420,6 +420,18 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     for (const avatar of avatars) expect(avatar.props.ground).toBe('muted');
   });
 
+  it('새 DM 의 빈 상태 문장은 문장이라 어절 단위로 접힌다 (design-review #4318 r4 M3)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    fireEvent.press(screen.getByTestId('plus-menu-dm'));
+    await waitFor(() => expect(screen.getByTestId('new-dm-person-seeun')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('new-dm-search'), '없는사람');
+    await waitFor(() => expect(screen.getByTestId('new-dm-empty')).toBeTruthy());
+    expect(screen.getByTestId('new-dm-empty').props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(screen.getByTestId('new-dm-empty')).toHaveTextContent("'없는사람'에 맞는 사람이 없습니다.");
+  });
+
   it('+ → 「새 DM」 → 사람을 고르면 DM 을 열고 그 대화로 간다', async () => {
     const fetchMock = installFetch();
     await renderReady();

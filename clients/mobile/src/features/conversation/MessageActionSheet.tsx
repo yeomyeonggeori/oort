@@ -244,7 +244,10 @@ function SheetBody({
           <ConfirmStep
             testID="delete-confirm"
             headline="메시지를 지울까요?"
-            detail="지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」가 남고, 달려 있던 반응도 함께 지워집니다."
+            // 「…」 바로 뒤에 조사를 붙이지 않는다(「…」가 → 「…」 표시가): `hangul-word` 줄바꿈은 닫는 괄호 뒤의 조사를
+            // 못 붙잡아 SE 폭에서 줄 머리에 「가」가 떨어졌다(design-review #4318 r4 H1). 웹 `MessageActions.tsx` 의
+            // 같은 문장은 브라우저가 어절을 지켜 그대로다.
+            detail="지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」 표시가 남고, 달려 있던 반응도 함께 지워집니다."
             confirmLabel="지우기"
             pendingLabel="지우는 중…"
             pending={deletePending === true}

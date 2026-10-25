@@ -1,7 +1,9 @@
 import {contrast} from '@momo/core/design/color';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
+import {channelLeaveFailureMessage} from '@momo/core/features/channels/model';
 import {QUICK_REACTIONS} from '@momo/core/features/timeline/reactions';
-import type {Message} from '@momo/core/lib/api';
+import {ApiError, type Message} from '@momo/core/lib/api';
+import {NetworkError, REQUEST_TIMEOUT_MS} from '@momo/core/lib/http';
 import {
   act,
   cleanup,
@@ -18,12 +20,13 @@ import {
   Dimensions,
   Keyboard,
   Pressable,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
 } from 'react-native';
 
-import {REACTION_GLYPH_MAX_SCALE} from '../src/design/atoms';
+import {REACTION_GLYPH_MAX_SCALE, ROW_GLYPH_MAX_SCALE} from '../src/design/atoms';
 import {PageSheet, usePageSheetAction, usePageSheetClose} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {sheetFrame, sheetTop, type SheetHeight} from '../src/design/sheetModel';
@@ -32,6 +35,7 @@ import {
   ConfirmStep,
   InputPill,
   ListRow,
+  RowEmoji,
   SheetScroll,
 } from '../src/design/sheetParts';
 import {THEME_IDS} from '../src/design/ds2Tokens';
@@ -45,6 +49,7 @@ import {
   TOUCH_TARGET,
 } from '../src/design/tokens';
 import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
+import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
@@ -334,7 +339,7 @@ describe('키보드 - 시트에 배선', () => {
     expect(flat('page-sheet').bottom).toBe(0);
   });
 
-  it('몸의 스크롤은 키보드가 올라오면 홈 인디케이터 여백을 걷는다 - 키보드가 그 자리를 이미 덮는다', async () => {
+  it('몸의 스크롤은 키보드가 올라오면 홈 인디케이터 여백을 걷고 끝 카드 아래 숨 쉴 틈 16 만 남긴다 - 키보드가 그 자리를 이미 덮는다', async () => {
     useInsets(0, 34);
     await mount(
       <Sheet height="medium" onClose={() => {}}>
@@ -350,11 +355,61 @@ describe('키보드 - 시트에 배선', () => {
     act(() => {
       emitter().emit('keyboardWillShow', keyboardFrame(336, BASE_WINDOW.height));
     });
-    expect(padding()).toBe(space.lg + space.lg);
+    // 「안전 영역 또는 16 중 큰 값 + 16」(32)이 남으면 내용이 다 보이는 SE 의 「상태 설정」(카드 아랫선 383.5 + 32 >
+    // 키보드 윗면 407)이 9pt 헛스크롤한다(design-review r4 L1). 키보드 위에는 숨 쉴 틈 16 만 남는다.
+    expect(padding()).toBe(space.lg);
     act(() => {
       emitter().emit('keyboardWillHide', keyboardFrame(0, BASE_WINDOW.height));
     });
     expect(padding()).toBe(34 + space.lg);
+  });
+
+  it('홈 인디케이터가 없는 기기(안전 영역 0)는 키보드가 없어도 16 + 16 이다 - 키보드 규칙이 이 값을 줄이지 않는다', async () => {
+    useInsets(20, 0);
+    await mount(
+      <Sheet height="medium" onClose={() => {}}>
+        <SheetScroll testID="scroll">
+          <Text>내용</Text>
+        </SheetScroll>
+      </Sheet>,
+      true,
+    );
+    expect(
+      StyleSheet.flatten(screen.getByTestId('scroll').props.contentContainerStyle).paddingBottom,
+    ).toBe(space.lg + space.lg);
+  });
+
+  it('시트가 키보드에 앉으면 키보드 모서리 뒤로 시트 바탕이 더 깔린다 - 스크림 쐐기를 가린다 (design-review r3 L1·r4 L2)', async () => {
+    const se = DEVICES[1];
+    setWindow(se.width, se.height);
+    useInsets(se.insetTop, 0);
+    await mount(<Sheet height="medium" onClose={() => {}} />, true);
+    expect(screen.queryByTestId('page-sheet-keyboard-corner')).toBeNull();
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(se.keyboard, se.height));
+    });
+    const corner = flat('page-sheet-keyboard-corner');
+    // 시트 바닥 아래(키보드 뒤)로 나가 있고, 시트와 같은 바탕이며, 키보드의 둥근 모서리(실측 쐐기 24)보다 깊다.
+    expect(corner.bottom).toBe(-SHEET.keyboardCorner);
+    expect(corner.height).toBe(SHEET.keyboardCorner);
+    expect(SHEET.keyboardCorner).toBeGreaterThanOrEqual(24);
+    expect(corner.backgroundColor).toBe(paletteFor('light').sheet);
+    expect(screen.getByTestId('page-sheet-keyboard-corner').props.pointerEvents).toBe('none');
+    act(() => {
+      emitter().emit('keyboardWillHide', keyboardFrame(0, se.height));
+    });
+    expect(screen.queryByTestId('page-sheet-keyboard-corner')).toBeNull();
+  });
+
+  it('큰 단은 올라가지 않으니 모서리 바탕도 깔지 않는다 - 시트가 키보드 아래까지 이어져 쐐기가 없다', async () => {
+    const se = DEVICES[1];
+    setWindow(se.width, se.height);
+    useInsets(se.insetTop, 0);
+    await mount(<Sheet height="large" onClose={() => {}} />, true);
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(se.keyboard, se.height));
+    });
+    expect(screen.queryByTestId('page-sheet-keyboard-corner')).toBeNull();
   });
 
   it('큰 단의 몸 스크롤은 키보드가 올라와도 안전 영역 여백을 그대로 둔다 - 시트가 올라가지 않았으니 걷을 이유가 없다', async () => {
@@ -771,6 +826,66 @@ describe('SheetScroll · InputPill 의 기본값', () => {
     expect((SHEET.headerRow - SHEET.circle) / 2 + SHEET.bodyTop).toBe(18);
   });
 
+  describe('내용이 시트를 넘치면 스크롤 막대를 한 번 보인다 (접힌 행의 단서, design-review r4 M1)', () => {
+    // RN 의 jest ScrollView 는 `flashScrollIndicators` 를 프로토타입에 공유 jest.fn 으로 갖는다 — 호출 수의 증가분을 본다.
+    const flashCalls = () =>
+      (ScrollView.prototype as unknown as {flashScrollIndicators: jest.Mock}).flashScrollIndicators.mock
+        .calls.length;
+    const layout = (viewport: number) =>
+      fireEvent(screen.getByTestId('scroll'), 'layout', {
+        nativeEvent: {layout: {x: 0, y: 0, width: 375, height: viewport}},
+      });
+    const content = (height: number) =>
+      fireEvent(screen.getByTestId('scroll'), 'contentSizeChange', 375, height);
+    const sheet = (props: React.ComponentProps<typeof SheetScroll> = {children: null}) => (
+      <Sheet height="medium" onClose={() => {}}>
+        <SheetScroll testID="scroll" {...props}>
+          <Text>내용</Text>
+        </SheetScroll>
+      </Sheet>
+    );
+
+    it('넘치면 한 번만 보인다 - 크기가 다시 와도 되풀이하지 않는다', async () => {
+      await mount(sheet(), true);
+      const before = flashCalls();
+      layout(400);
+      expect(flashCalls()).toBe(before);
+      content(700);
+      expect(flashCalls()).toBe(before + 1);
+      content(900);
+      layout(380);
+      expect(flashCalls()).toBe(before + 1);
+    });
+
+    it('내용이 먼저 와도 같다 - 두 크기가 모두 알려진 순간에 한 번', async () => {
+      await mount(sheet(), true);
+      const before = flashCalls();
+      content(700);
+      expect(flashCalls()).toBe(before);
+      layout(400);
+      expect(flashCalls()).toBe(before + 1);
+    });
+
+    it('내용이 시트 안에 들어가면 보이지 않는다 - 넘치지 않는 시트에 막대를 깜빡이지 않는다', async () => {
+      await mount(sheet(), true);
+      const before = flashCalls();
+      layout(400);
+      content(400);
+      content(401); // 1pt 의 반올림 오차는 넘침이 아니다
+      expect(flashCalls()).toBe(before);
+    });
+
+    it('호출자가 준 onLayout·onContentSizeChange 도 그대로 불린다', async () => {
+      const onLayout = jest.fn();
+      const onContentSizeChange = jest.fn();
+      await mount(sheet({onLayout, onContentSizeChange, children: null}), true);
+      layout(400);
+      content(700);
+      expect(onLayout).toHaveBeenCalledTimes(1);
+      expect(onContentSizeChange).toHaveBeenCalledWith(375, 700);
+    });
+  });
+
   it('InputPill 은 호출자의 style 을 덮지 않고 이어 붙인다 (알약 입력 스타일의 flex 가 남는다)', async () => {
     await mount(
       <InputPill accessibilityLabel="이름" style={{color: 'red'}} testID="pill" />,
@@ -779,6 +894,19 @@ describe('SheetScroll · InputPill 의 기본값', () => {
     const input = StyleSheet.flatten(screen.getByLabelText('이름').props.style);
     expect(input.color).toBe('red');
     expect(input.flex).toBe(1);
+  });
+});
+
+describe('RowEmoji — 앞 칸 이모지는 22pt 칸을 넘지 않는다 (design-review r4 M2)', () => {
+  it('글자 배율을 따라가지 않고, 그 상한의 이모지 폭이 아이콘 칸 안이다', async () => {
+    await mount(<RowEmoji emoji="📅" />, true);
+    const glyph = screen.getByText('📅', {includeHiddenElements: true});
+    expect(glyph.props.maxFontSizeMultiplier).toBe(ROW_GLYPH_MAX_SCALE);
+    // 이모지의 폭은 글리프 크기의 1.25배쯤이다(어림이고, 상한을 올리면 이 부등식이 먼저 깨진다). AX5 캡처에서 상한이 없던
+    // 때 「📅 회의 중」의 이모지가 22pt 칸 오른쪽에서 잘려 조각만 남았다.
+    expect(Math.ceil(font.heading * ROW_GLYPH_MAX_SCALE * 1.25)).toBeLessThanOrEqual(SHEET.iconSlot);
+    // 대조: 글자 배율 1.5 를 허용했다면 칸을 넘는다.
+    expect(Math.ceil(font.heading * 1.5 * 1.25)).toBeGreaterThan(SHEET.iconSlot);
   });
 });
 
@@ -808,6 +936,8 @@ describe('ConfirmStep — 시트 안의 확인 단계', () => {
     const {ui, onCancel, onConfirm} = step();
     await mount(ui, true);
     expect(screen.getByText('메시지를 지울까요?')).toBeTruthy();
+    // 머리말도 설명도 어절 단위 줄바꿈 전략을 든다(렌더된 줄바꿈은 캡처가 잰다 - 아래 문구 훑기가 못 잡는 것).
+    expect(screen.getByTestId('confirm-headline').props.lineBreakStrategyIOS).toBe('hangul-word');
     expect(screen.getByTestId('confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
     fireEvent.press(screen.getByTestId('cancel'));
     expect(onCancel).toHaveBeenCalledTimes(1);
@@ -816,11 +946,32 @@ describe('ConfirmStep — 시트 안의 확인 단계', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('실패 문장은 확인 단계 안에 alert 로 선다', async () => {
+  it('실패 문장은 확인 단계 안에 alert 로 서고 어절 단위로 접힌다', async () => {
     const {ui} = step({error: '지우지 못했습니다.'});
     await mount(ui, true);
     expect(screen.getByTestId('err').props.accessibilityRole).toBe('alert');
+    expect(screen.getByTestId('err').props.lineBreakStrategyIOS).toBe('hangul-word');
     expect(screen.getByTestId('err')).toHaveTextContent('지우지 못했습니다.');
+  });
+
+  it('실패가 새로 서면 보조기술이 읽어 준다 - 같은 문장이 남아 있는 동안은 되풀이하지 않고, 없으면 읽을 것도 없다 (iOS 는 alert 역할만으로는 낭독하지 않는다)', async () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    // RN 의 jest 목은 이미 `jest.fn()` 이라 앞 시험의 호출이 남아 있다 - 이 시험의 호출만 센다.
+    announce.mockClear();
+    const view = await mount(step({error: null}).ui, true);
+    const show = (error: string | null) =>
+      view.rerender(<FixedScheme scheme="light">{step({error}).ui}</FixedScheme>);
+    expect(announce).not.toHaveBeenCalled();
+    show('지우지 못했습니다.');
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenLastCalledWith('지우지 못했습니다.');
+    show('지우지 못했습니다.');
+    expect(announce).toHaveBeenCalledTimes(1);
+    show(null);
+    expect(announce).toHaveBeenCalledTimes(1);
+    show('연결이 끊겼습니다. 잠시 뒤에 다시 시도하세요.');
+    expect(announce).toHaveBeenCalledTimes(2);
+    expect(announce).toHaveBeenLastCalledWith('연결이 끊겼습니다. 잠시 뒤에 다시 시도하세요.');
   });
 
   it('실패가 없으면 그 줄도 없다', async () => {
@@ -855,6 +1006,32 @@ describe('지시 기기 패널의 카드는 바깥 가로 여백을 스스로 �
       true,
     );
     // 이 PR 이 `GroupSection`(스스로 16 을 졌다) → `GroupCard`(안 진다)로 바꾸며 카드만 화면 가장자리까지 번졌다.
+    expect(flat('device-key-card').paddingHorizontal).toBe(SAFE_GUTTER);
+  });
+
+  it('호스트(지시 기기 시트의 몸)는 가로 여백을 더하지 않는다 - 패널과 호스트가 둘 다 지면 카드가 32pt 로 이중 인셋된다 (design-review r3 L9)', async () => {
+    useInsets(0, 0);
+    await mount(
+      <LinkSheetBody
+        onClose={() => {}}
+        state={{
+          view: {kind: 'unsupported'},
+          enroll: () => {},
+          replace: () => {},
+          refresh: () => {},
+          busy: false,
+          failure: null,
+        }}
+      />,
+      true,
+    );
+    const content = StyleSheet.flatten(
+      screen.getByTestId('device-key-link-scroll').props.contentContainerStyle,
+    );
+    // 카드의 16 은 패널이 진다. 호스트가 또 주면 패널 단독 시험(위)은 초록인 채 화면만 32 로 좁아진다.
+    expect(content.paddingHorizontal).toBeUndefined();
+    expect(content.paddingLeft).toBeUndefined();
+    expect(content.paddingRight).toBeUndefined();
     expect(flat('device-key-card').paddingHorizontal).toBe(SAFE_GUTTER);
   });
 });
@@ -942,12 +1119,13 @@ describe('메시지 행동 시트: 고르면 곧 닫히는 행동은 슬라이�
     expect(calls).toEqual(['close', name]);
   });
 
-  it('미리보기와 삭제 확인 설명은 문장이라 어절 가운데서 끊기지 않는다', async () => {
+  it('미리보기와 삭제 확인의 머리말·설명이 `hangul-word` 줄바꿈 전략을 든다 (렌더된 줄바꿈과 조사 고아는 캡처와 아래 문구 훑기가 잰다)', async () => {
     const calls: string[] = [];
     const {ui} = messageSheet(calls);
     await mount(ui, true);
     expect(screen.getByTestId('sheet-preview-body').props.lineBreakStrategyIOS).toBe('hangul-word');
     fireEvent.press(screen.getByTestId('sheet-delete'));
+    expect(screen.getByTestId('delete-confirm-headline').props.lineBreakStrategyIOS).toBe('hangul-word');
     expect(screen.getByTestId('delete-confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
   });
 
@@ -1056,7 +1234,7 @@ describe('대화 행 시트에는 앞 아이콘이 없다 — 글리프 여덟�
     }
   });
 
-  it('나가기 확인 설명은 문장이라 어절 가운데서 끊기지 않는다', async () => {
+  it('나가기 확인의 머리말·설명이 `hangul-word` 줄바꿈 전략을 든다 (렌더된 줄바꿈은 캡처가 잰다)', async () => {
     await mount(
       <ChannelActionSheet
         target={TARGET}
@@ -1072,6 +1250,111 @@ describe('대화 행 시트에는 앞 아이콘이 없다 — 글리프 여덟�
       />,
       true,
     );
+    expect(screen.getByTestId('channel-leave-confirm-headline').props.lineBreakStrategyIOS).toBe('hangul-word');
     expect(screen.getByTestId('channel-leave-confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('행 시트의 오류 띠는 문장이라 어절 단위로 접힌다 (design-review r4 M3)', async () => {
+    await mount(
+      <ChannelActionSheet
+        target={TARGET}
+        items={ITEMS}
+        confirmingLeave={false}
+        isPending={() => false}
+        error="읽음 처리를 하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+        leave={{pending: false, error: null}}
+        onRun={() => {}}
+        onConfirmLeave={() => {}}
+        onCancelLeave={() => {}}
+        onClose={() => {}}
+      />,
+      true,
+    );
+    expect(screen.getByTestId('channel-sheet-error').props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(screen.getByTestId('channel-sheet-error').props.accessibilityRole).toBe('alert');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 문구 훑기 — 「닫는 괄호 + 조사」 조합이 확인 단계 어디에도 없다 (design-review r4 H1)
+//
+// `hangul-word` 줄바꿈은 어절 **가운데** 끊김을 막지만 닫는 괄호 뒤의 조사는 못 붙잡는다(UAX #14 가 괄호 뒤를 끊김
+// 자리로 본다): SE 폭(글자 열 311pt)에서 「…「삭제된 메시지」」 줄 다음 줄이 「가 남고, …」 로 시작했다. 그래서 이
+// 단정은 prop 이 아니라 **렌더된 문장**을 훑는다 - 문구가 바뀌면 줄바꿈 위치가 다 바뀌므로 이 조합이 다시 생기는 날
+// 가장 먼저 빨개져야 한다. 렌더된 폭에서 실제로 접히는 모양은 여전히 캡처만이 잰다.
+// ---------------------------------------------------------------------------
+
+/** 줄 머리로 떨어질 수 있는 닫는 괄호 바로 뒤의 한글(조사). 따옴표 `'`·`”` 는 줄을 끊지 않으므로 넣지 않는다. */
+const BRACKET_PARTICLE = /[」』)\]）］〉》】〕｝][가-힣]/;
+
+function sentencesOf(root: ReturnType<typeof within> | typeof screen): string[] {
+  return root
+    .UNSAFE_getAllByType(Text)
+    .map(node =>
+      React.Children.toArray(node.props.children as React.ReactNode)
+        .map(child => (typeof child === 'string' || typeof child === 'number' ? String(child) : ''))
+        .join(''),
+    )
+    .filter(text => text !== '');
+}
+
+describe('확인 단계의 문구에는 닫는 괄호 바로 뒤의 조사가 없다', () => {
+  it('규칙 자체: 옛 삭제 확인 문장을 잡고, 고친 문장·괄호 없는 문장·따옴표 뒤 조사는 지나간다', () => {
+    // 이 정규식이 아무것도 못 잡으면 아래 훑기는 영원히 초록이다 - 옛 문장으로 먼저 증명한다.
+    expect(BRACKET_PARTICLE.test('자리에는 「삭제된 메시지」가 남고, 달려 있던 반응도')).toBe(true);
+    expect(BRACKET_PARTICLE.test('이름(선택)을 적어요')).toBe(true);
+    expect(BRACKET_PARTICLE.test('자리에는 「삭제된 메시지」 표시가 남고, 달려 있던 반응도')).toBe(false);
+    expect(BRACKET_PARTICLE.test("'세은'에 맞는 사람이 없습니다.")).toBe(false);
+    expect(BRACKET_PARTICLE.test('채널에서 나가지 못했습니다.')).toBe(false);
+  });
+
+  it('메시지 시트: 목록 상태와 삭제 확인 단계 모두', async () => {
+    const calls: string[] = [];
+    const {ui} = messageSheet(calls);
+    await mount(ui, true);
+    const listing = sentencesOf(screen);
+    expect(listing.length).toBeGreaterThan(3);
+    expect(listing.filter(text => BRACKET_PARTICLE.test(text))).toEqual([]);
+    fireEvent.press(screen.getByTestId('sheet-delete'));
+    const confirm = sentencesOf(within(screen.getByTestId('delete-confirm')));
+    // 머리말·설명·「취소」·「지우기」 - 훑은 문장에 설명이 실제로 들어 있다.
+    expect(confirm.some(text => text.includes('되돌릴 수 없습니다'))).toBe(true);
+    expect(confirm.filter(text => BRACKET_PARTICLE.test(text))).toEqual([]);
+  });
+
+  // 코어가 나가기 실패에 주는 문장 전부 — 실제 문구가 훑기 대상이다(문구가 늘면 이 표도 는다).
+  const LEAVE_FAILURES: [name: string, error: unknown][] = [
+    ['403 권한 없음', new ApiError(403, 'forbidden')],
+    ['404 이미 멤버가 아님', new ApiError(404, 'gone')],
+    ['시간 초과', new NetworkError('timeout', REQUEST_TIMEOUT_MS)],
+    ['연결 불가', new NetworkError('unreachable', REQUEST_TIMEOUT_MS)],
+    ['그 밖의 실패', new Error('boom')],
+  ];
+
+  it('표의 실패 문장은 서로 다르다 - 같은 문장을 다섯 번 훑는 표가 아니다', () => {
+    const texts = LEAVE_FAILURES.map(([, error]) => channelLeaveFailureMessage(error));
+    expect(new Set(texts).size).toBe(LEAVE_FAILURES.length);
+  });
+
+  it.each(LEAVE_FAILURES)('대화 행 시트: 나가기 확인 + 코어의 실패 문장(%s)', async (_name, error) => {
+    const failure = channelLeaveFailureMessage(error);
+    await mount(
+      <ChannelActionSheet
+        target={TARGET}
+        items={ITEMS}
+        confirmingLeave
+        isPending={() => false}
+        error={null}
+        leave={{pending: false, error: failure}}
+        onRun={() => {}}
+        onConfirmLeave={() => {}}
+        onCancelLeave={() => {}}
+        onClose={() => {}}
+      />,
+      true,
+    );
+    const confirm = sentencesOf(within(screen.getByTestId('channel-leave-confirm')));
+    expect(confirm).toContain(failure);
+    expect(confirm.filter(text => BRACKET_PARTICLE.test(text))).toEqual([]);
   });
 });

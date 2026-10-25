@@ -750,4 +750,9 @@ export const SHEET = {
   fitMaxRatio: 0.85,
   /** 중간 단의 높이(화면 비율) — Buzz `scrollControlDisabledMaxHeightRatio` 9/16. */
   mediumRatio: 9 / 16,
+  /**
+   * 키보드 윗변의 둥근 모서리 반경보다 큰 값(실측 쐐기가 24 에 맞는다, design-review #4318 r3 L1·r4 L2). 키보드 위에 앉은 시트는
+   * 이만큼 더 아래(키보드 뒤)까지 `sheet` 색을 깐다 — 안 그러면 키보드 모서리 바깥으로 스크림이 쐐기 모양으로 비친다.
+   */
+  keyboardCorner: 28,
 } as const;

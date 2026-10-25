@@ -10,7 +10,8 @@ import {
   channelLeaveConfirmBody,
 } from '@momo/core/features/channels/model';
 import React from 'react';
-import {StyleSheet, Text} from 'react-native';
+import {StyleSheet} from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {ConfirmStep, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
@@ -120,9 +121,9 @@ export function ChannelActionSheet({
         ) : (
           <>
             {error !== null ? (
-              <Text accessibilityRole="alert" style={styles.error} testID="channel-sheet-error">
+              <Sentence accessibilityRole="alert" style={styles.error} testID="channel-sheet-error">
                 {error}
-              </Text>
+              </Sentence>
             ) : null}
             {groupItems(items).map(group => (
               <GroupCard key={group.key} label={group.title}>

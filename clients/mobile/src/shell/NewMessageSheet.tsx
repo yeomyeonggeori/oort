@@ -8,6 +8,7 @@ import {FlatList, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {
   BAR_CONTROL_MAX_SCALE,
   FailureBanner,
+  Sentence,
 } from '../design/atoms';
 import {PageSheet} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
@@ -146,11 +147,11 @@ function SheetBody({
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          <Text style={styles.empty} testID="new-dm-empty">
+          <Sentence style={styles.empty} testID="new-dm-empty">
             {query.trim() === ''
               ? '말을 걸 수 있는 사람이 아직 없습니다.'
               : `'${query.trim()}'에 맞는 사람이 없습니다.`}
-          </Text>
+          </Sentence>
         }
         renderItem={({item, index}) => {
           const busy = openDm.isPending && openDm.variables === item.id;

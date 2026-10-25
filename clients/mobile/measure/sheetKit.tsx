@@ -7,7 +7,7 @@ import React, {useEffect, useMemo, useState} from 'react';
 import {ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {HOME_ICONS, MENU_ICONS, SHEET_ICONS, SHELL_ICONS} from '../src/design/icons';
+import {ATTACH_MENU_ICONS, HOME_ICONS, MENU_ICONS, SHEET_ICONS, SHELL_ICONS} from '../src/design/icons';
 import {PageSheet} from '../src/design/PageSheet';
 import {PageHeader, SheetHeader} from '../src/design/SheetChrome';
 import {
@@ -48,8 +48,11 @@ import {NewMessageSheet} from '../src/shell/NewMessageSheet';
 //
 //   -momoMeasure SHEETKIT-PAGE · LIGHT-SHEETKIT-PAGE …
 //
-//   page            페이지 머리(왼쪽 X) · 큰 행동 타일 · 묶음 카드(값/셰브론/펼침/복사/토글/보조 줄/위험)
-//                   · 입력 알약 · 시트 머리 ✓ 비활성/활성 — 한 장에 모든 부품
+//   page            **앞 칸 없는 쪽**(설정 페이지의 문법): 페이지 머리(왼쪽 X) · 큰 행동 타일 · 묶음 카드(값/셰브론/펼침/
+//                   복사/토글/보조 줄/위험) · 입력 알약 — 이름 + 오른쪽 한 요소뿐이고 앞 칸이 한 카드에도 없다
+//   page-lead       **앞 칸 있는 쪽**: 같은 부품인데 **모든 카드**가 앞 칸을 든다 — 고른 상태는 이모지(데이터),
+//                   이동·연결 행은 선 글리프(기능). 한 표면 안에서는 이 둘을 섞지 않는다(글자 열이 카드 사이로 점프한다)
+//   headers         시트 머리 ✓ 비활성/활성 · 확정 없음 · 페이지 머리 오른쪽 자리
 //   status          중간 단 시트 + 입력 알약 + ✓ 비활성(입력 전). autoFocus 라 소프트 키보드가 올라온다 —
 //                   시트가 키보드 위에 앉고 입력 칸이 가려지지 않는지 본다
 //   status-ready    같은 시트, 입력 뒤(✓ 활성)
@@ -85,7 +88,13 @@ function Backdrop({children}: {children?: React.ReactNode}): React.JSX.Element {
 
 // ---- 페이지: 모든 부품 -----------------------------------------------------
 
-function PageKit(): React.JSX.Element {
+/**
+ * 한 페이지는 **앞 칸 문법을 하나만 쓴다** — 모든 카드가 앞 칸을 들거나(`lead`) 한 카드도 안 든다. 섞으면 글자 열이
+ * 카드 사이에서 38pt 점프한다(design-review #4318 r1 이 시트에서, r3 M1 이 이 전시에서 잰 값). 이모지는 **데이터**
+ * (고른 상태)에만 쓰고, 기능을 말하는 앞 칸은 22pt 로 구운 선 글리프다(18pt 로 구운 `user`·`bot` 은 22 칸에서 확대돼
+ * 흐려진다).
+ */
+function PageKit({lead}: {lead: boolean}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const [push, setPush] = useState(true);
@@ -111,70 +120,112 @@ function PageKit(): React.JSX.Element {
           />
         </ActionTileRow>
 
-        {/* 한 카드는 이모지 앞 칸이거나 아이콘 앞 칸이거나 둘 중 하나다(섞지 않는다). 아이콘은 22pt 로 구운 것만 — 18pt 로 구운
-            `user`·`bot` 은 22 칸에서 확대돼 흐려진다. */}
-        <GroupCard label="계정" inset="icon">
-          <ListRow
-            leading={<RowEmoji emoji="🌙" />}
-            title="상태"
-            value="회의 중"
-            accessory="chevron"
-            onPress={noop}
-          />
-          <ListRow
-            leading={<RowEmoji emoji="🕘" />}
-            title="알림 시간대"
-            value="오전 9시 – 오후 6시"
-            accessory="expand"
-            onPress={noop}
-          />
-          <ListRow
-            leading={<RowEmoji emoji="🌐" />}
-            title="언어"
-            detail="앱이 쓰는 말을 바꿔요"
-            value="한국어"
-            accessory="chevron"
-            onPress={noop}
-          />
-        </GroupCard>
+        {lead ? (
+          <>
+            {/* 앞 칸 있는 쪽 — 한 카드는 이모지(고른 상태 = 데이터)이거나 선 글리프(기능)이거나 둘 중 하나다. */}
+            <GroupCard label="상태" inset="icon">
+              <ListRow
+                leading={<RowEmoji emoji="📅" />}
+                title="회의 중"
+                value="오후 3시까지"
+                accessory="chevron"
+                onPress={noop}
+              />
+              <ListRow leading={<RowEmoji emoji="🍚" />} title="점심 먹는 중" onPress={noop} />
+            </GroupCard>
 
-        <GroupCard label="연결" inset="icon">
-          <ListRow
-            leading={<RowIcon source={MENU_ICONS.agent} />}
-            title="도우미"
-            detail="달무리 도우미와 대화해요"
-            accessory="chevron"
-            onPress={noop}
-          />
-          <ListRow
-            leading={<RowIcon source={HOME_ICONS.hash} />}
-            title="기본 채널"
-            value="# 디자인"
-            accessory="expand"
-            onPress={noop}
-          />
-          <ListRow
-            leading={<RowIcon source={MENU_ICONS.work} />}
-            title="작업 기록"
-            accessory="chevron"
-            onPress={noop}
-          />
-        </GroupCard>
+            <GroupCard label="연결" inset="icon">
+              <ListRow
+                leading={<RowIcon source={MENU_ICONS.agent} />}
+                title="도우미"
+                detail="달무리 도우미와 대화해요"
+                accessory="chevron"
+                onPress={noop}
+              />
+              <ListRow
+                leading={<RowIcon source={HOME_ICONS.hash} />}
+                title="기본 채널"
+                value="# 디자인"
+                accessory="expand"
+                onPress={noop}
+              />
+              <ListRow
+                leading={<RowIcon source={MENU_ICONS.work} />}
+                title="작업 기록"
+                accessory="chevron"
+                onPress={noop}
+              />
+            </GroupCard>
 
-        <GroupCard label="알림">
-          <ListRow
-            title="푸시 알림"
-            accessory="toggle"
-            toggle={{value: push, onValueChange: setPush}}
-          />
-          <ListRow
-            title="방해 금지"
-            detail="정해 둔 시간에는 알림을 받지 않아요"
-            accessory="toggle"
-            toggle={{value: quiet, onValueChange: setQuiet}}
-          />
-          <ListRow title="초대 링크" value="oort.app/i/dalmuri" accessory="copy" onPress={noop} />
-        </GroupCard>
+            <GroupCard label="첨부" inset="icon">
+              <ListRow
+                leading={<RowIcon source={ATTACH_MENU_ICONS.photo} />}
+                title="사진 보관함"
+                accessory="chevron"
+                onPress={noop}
+              />
+              <ListRow
+                leading={<RowIcon source={ATTACH_MENU_ICONS.camera} />}
+                title="카메라"
+                accessory="chevron"
+                onPress={noop}
+              />
+              <ListRow
+                leading={<RowIcon source={ATTACH_MENU_ICONS.file} />}
+                title="파일"
+                detail="기기에 있는 파일을 골라요"
+                accessory="chevron"
+                onPress={noop}
+              />
+            </GroupCard>
+          </>
+        ) : (
+          <>
+            {/* 앞 칸 없는 쪽 — 설정 페이지의 문법(Buzz 설정 페이지): 이름 + 오른쪽 한 요소. */}
+            <GroupCard label="계정">
+              <ListRow title="상태" value="회의 중" accessory="chevron" onPress={noop} />
+              <ListRow
+                title="알림 시간대"
+                value="오전 9시 – 오후 6시"
+                accessory="expand"
+                onPress={noop}
+              />
+              <ListRow
+                title="언어"
+                detail="앱이 쓰는 말을 바꿔요"
+                value="한국어"
+                accessory="chevron"
+                onPress={noop}
+              />
+            </GroupCard>
+
+            <GroupCard label="연결">
+              <ListRow
+                title="도우미"
+                detail="달무리 도우미와 대화해요"
+                accessory="chevron"
+                onPress={noop}
+              />
+              <ListRow title="기본 채널" value="# 디자인" accessory="expand" onPress={noop} />
+              <ListRow title="작업 기록" accessory="chevron" onPress={noop} />
+            </GroupCard>
+
+            <GroupCard label="알림">
+              <ListRow
+                title="푸시 알림"
+                accessory="toggle"
+                toggle={{value: push, onValueChange: setPush}}
+              />
+              <ListRow
+                title="방해 금지"
+                detail="정해 둔 시간에는 알림을 받지 않아요"
+                accessory="toggle"
+                toggle={{value: quiet, onValueChange: setQuiet}}
+              />
+              <ListRow title="초대 링크" value="oort.app/i/dalmuri" accessory="copy" onPress={noop} />
+            </GroupCard>
+          </>
+        )}
 
         {/* 입력 알약은 채움이 없다 — 바탕 위에 직접 놓는다(카드 안에 넣지 않는다). */}
         <View style={styles.pillGroup}>
@@ -186,10 +237,12 @@ function PageKit(): React.JSX.Element {
           />
         </View>
 
-        <GroupCard>
-          <ListRow title="로그아웃" tone="danger" onPress={noop} />
-        </GroupCard>
-
+        {/* 위험 행도 앞 칸이 필요한 쪽(lead)에는 두지 않는다 — 우리 글리프 세트에 맞는 선이 없다. */}
+        {lead ? null : (
+          <GroupCard>
+            <ListRow title="로그아웃" tone="danger" onPress={noop} />
+          </GroupCard>
+        )}
       </ScrollView>
     </View>
   );
@@ -635,6 +688,8 @@ function ProfileDeviceSurface(): React.JSX.Element {
 
 export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
   switch (which) {
+    case 'page-lead':
+      return <PageKit lead />;
     case 'headers':
       return <HeadersKit />;
     case 'status':
@@ -668,7 +723,7 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
     case 'newdm-empty':
       return <NewDmSurface people={false} />;
     default:
-      return <PageKit />;
+      return <PageKit lead={false} />;
   }
 }
 

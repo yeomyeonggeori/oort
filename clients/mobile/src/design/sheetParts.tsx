@@ -1,5 +1,6 @@
-import React from 'react';
+import React, {useEffect, useRef} from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   Image,
   Pressable,
@@ -10,6 +11,7 @@ import {
   TextInput,
   View,
   type ImageSourcePropType,
+  type LayoutChangeEvent,
   type ScrollViewProps,
   type StyleProp,
   type TextInputProps,
@@ -17,7 +19,7 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {Sentence} from './atoms';
+import {ROW_GLYPH_MAX_SCALE, Sentence} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
@@ -163,11 +165,19 @@ export function RowIcon({source}: {source: ImageSourcePropType}): React.JSX.Elem
   return <Image source={source} style={styles.rowIcon} accessibilityElementsHidden />;
 }
 
-/** 행 앞 칸의 이모지. 보조기술에는 이름이 이미 있으므로 읽히지 않는다. */
+/**
+ * 행 앞 칸의 이모지 — **데이터**(고른 상태·반응)에만 쓴다. 기능을 말하는 앞 칸은 선 글리프(`RowIcon`)다.
+ * 보조기술에는 이름이 이미 있으므로 읽히지 않는다. 칸이 22pt 로 고정이라 글자 배율을 따라가지 않는다
+ * (`ROW_GLYPH_MAX_SCALE`) — 따라가면 AX5 에서 글리프가 칸에 잘린다.
+ */
 export function RowEmoji({emoji}: {emoji: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <Text style={styles.rowEmoji} accessibilityElementsHidden importantForAccessibility="no">
+    <Text
+      style={styles.rowEmoji}
+      maxFontSizeMultiplier={ROW_GLYPH_MAX_SCALE}
+      accessibilityElementsHidden
+      importantForAccessibility="no">
       {emoji}
     </Text>
   );
@@ -406,9 +416,11 @@ export function ActionTileRow({children}: {children: React.ReactNode}): React.JS
  *
  * 카드(머리말 + 설명 + 실패 한 줄) 아래에 「취소」와 위험 단추가 한 줄로 선다. 두 시트(메시지 행동·대화 행 행동)에
  * 같은 블록이 복사돼 있던 것을 부품으로 모았다 — 확인 단계는 #4458 이 더 만난다. 규칙:
- *   - **실패는 확인 단계 안에서 말한다**(`error`, 시트를 닫지 않는다). 토스트가 아니다.
+ *   - **실패는 확인 단계 안에서 말한다**(`error`, 시트를 닫지 않는다). 토스트가 아니다. 새로 서면 보조기술이 읽어
+ *     준다(iOS 는 `alert` 역할만으로는 나타날 때 낭독하지 않는다).
  *   - 왕복 중에는 위험 단추가 잠기고 낱말(`pendingLabel`)과 `accessibilityState.busy` 가 진행을 말한다.
- *   - 설명은 문장이라 어절 가운데서 끊기지 않는다(`Sentence`).
+ *   - 머리말·설명·실패는 모두 문장이라 어절 가운데서 끊기지 않는다(`Sentence`). 단 `hangul-word` 는 **닫는 괄호 뒤의
+ *     조사**를 못 붙잡는다(「…」가 → 줄 머리의 「가」) — 문구에 「괄호 + 조사」 조합을 쓰지 않는다(시험이 렌더된 문장을 훑는다).
  */
 export function ConfirmStep({
   headline,
@@ -444,20 +456,27 @@ export function ConfirmStep({
   confirmTestID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 실패 문장이 새로 서면 읽어 준다. iOS 에는 live region 이 없어 `accessibilityRole="alert"` 만으로는 나타날 때
+  // 낭독되지 않는다(`DeviceKeyPanel` 이 같은 이유로 같은 호출을 한다). 같은 문장이 남아 있는 동안은 다시 읽지 않는다.
+  useEffect(() => {
+    if (error) AccessibilityInfo.announceForAccessibility(error);
+  }, [error]);
   return (
     <>
       <GroupCard testID={testID}>
         <View style={styles.confirmBody}>
-          <Text style={styles.confirmHeadline}>{headline}</Text>
+          <Sentence style={styles.confirmHeadline} testID={testID ? `${testID}-headline` : undefined}>
+            {headline}
+          </Sentence>
           <Sentence
             style={styles.confirmDetail}
             testID={testID ? `${testID}-detail` : undefined}>
             {detail}
           </Sentence>
           {error ? (
-            <Text accessibilityRole="alert" style={styles.confirmError} testID={errorTestID}>
+            <Sentence accessibilityRole="alert" style={styles.confirmError} testID={errorTestID}>
               {error}
-            </Text>
+            </Sentence>
           ) : null}
         </View>
       </GroupCard>
@@ -488,29 +507,56 @@ export function ConfirmStep({
 /**
  * 시트 몸의 스크롤. 안전 영역(홈 인디케이터) 아래까지 여백을 주고, 입력에서 탭이 키보드를 접지 않으며,
  * 큰 글씨에서 내용이 시트 높이를 넘어도 스크롤로 끝까지 닿는다 — 머리의 X 는 스크롤 밖이라 언제나 보인다.
- * 키보드가 올라와 시트 바닥이 키보드 윗면에 앉으면 홈 인디케이터는 이미 키보드 뒤라서 안전 영역 여백을
- * 걷는다(또 주면 입력과 키 사이에 죽은 띠가 생긴다 — `useKeyboard` 머리말).
+ *
+ * - 키보드가 올라와 시트 바닥이 키보드 윗면에 앉으면 홈 인디케이터는 이미 키보드 뒤라서 안전 영역 여백을 걷는다
+ *   (또 주면 입력과 키 사이에 죽은 띠가 생긴다 — `useKeyboard` 머리말). 남는 것은 끝 카드 아래 숨 쉴 틈 16 뿐이다:
+ *   「안전 영역 또는 16 중 큰 값 + 16」(32)을 그대로 두면 내용이 다 보이는 중간 단 시트가 키보드 위 칸에 안 들어가
+ *   9pt 헛스크롤했다(design-review #4318 r4 L1).
+ * - **내용이 시트를 넘치면** 처음 선 직후 스크롤 막대를 한 번 보인다(`flashScrollIndicators`). 접힌 행(SE 기본 크기의
+ *   메시지 시트의 「지우기」)이 있다는 단서가 접힘선이 카드 모서리에 우연히 걸리는 데만 달려 있지 않게 한다(r4 M1).
+ *   시트마다 한 번이고, 넘치지 않으면 부르지 않는다.
  */
 export function SheetScroll({
   children,
   testID,
+  onLayout,
+  onContentSizeChange,
   ...scroll
 }: ScrollViewProps & {children: React.ReactNode; testID?: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const keyboardHeight = usePageSheetKeyboard();
-  const bottomInset = keyboardHeight > 0 ? 0 : insets.bottom;
+  const bottom =
+    (keyboardHeight > 0 ? 0 : Math.max(insets.bottom, space.lg)) + space.lg;
+  const ref = useRef<ScrollView>(null);
+  const measured = useRef({viewport: 0, content: 0, flashed: false});
+  const flashWhenCut = () => {
+    const sizes = measured.current;
+    if (sizes.flashed || sizes.viewport <= 0 || sizes.content <= sizes.viewport + 1) return;
+    sizes.flashed = true;
+    ref.current?.flashScrollIndicators?.();
+  };
+  const handleLayout = (event: LayoutChangeEvent) => {
+    measured.current.viewport = event.nativeEvent.layout.height;
+    flashWhenCut();
+    onLayout?.(event);
+  };
+  const handleContentSize = (width: number, height: number) => {
+    measured.current.content = height;
+    flashWhenCut();
+    onContentSizeChange?.(width, height);
+  };
   return (
     <ScrollView
+      ref={ref}
       bounces={false}
       showsVerticalScrollIndicator
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={[
-        styles.scrollContent,
-        {paddingBottom: Math.max(bottomInset, space.lg) + space.lg},
-      ]}
+      contentContainerStyle={[styles.scrollContent, {paddingBottom: bottom}]}
       testID={testID}
-      {...scroll}>
+      {...scroll}
+      onLayout={handleLayout}
+      onContentSizeChange={handleContentSize}>
       {children}
     </ScrollView>
   );

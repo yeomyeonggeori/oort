@@ -30,7 +30,7 @@ import {
   type SheetHeight,
 } from './sheetModel';
 import {useStyles} from './theme';
-import {ds2Radius, type Palette} from './tokens';
+import {ds2Radius, SHEET, type Palette} from './tokens';
 
 // =============================================================================
 // 페이지 시트 — 셸의 세 번째 부품 (ADR-0189 D1, DS2-2 #2714).
@@ -325,6 +325,11 @@ function SheetFrame({
             {children}
           </View>
         </SheetControlContext.Provider>
+        {lifted > 0 ? (
+          // 키보드 윗변은 모서리가 둥글다 — 시트 바닥(= 키보드 윗면) 바깥 좌우로 스크림이 쐐기 모양으로 비친다.
+          // 시트 바탕을 키보드 뒤로 더 깔아 가린다(시트와 같이 미끄러져 나가도록 시트의 자식이다).
+          <View pointerEvents="none" style={styles.keyboardCorner} testID="page-sheet-keyboard-corner" />
+        ) : null}
       </Animated.View>
     </View>
   );
@@ -368,4 +373,13 @@ const buildStyles = (color: Palette) =>
     // 내용 맞춤 단은 높이가 정해져 있지 않다 — `flex: 1` 은 바탕 0 이라 내용이 0 으로 접힌다.
     // 줄어들 수만 있으면(스크롤뷰가 최대 높이 안으로 들어온다) 된다.
     bodyFit: {flexShrink: 1},
+    // 시트 바닥 아래(키보드 뒤)로 나가 있다 — 키보드가 덮으므로 모서리 쐐기 말고는 보이지 않는다.
+    keyboardCorner: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: -SHEET.keyboardCorner,
+      height: SHEET.keyboardCorner,
+      backgroundColor: color.sheet,
+    },
   });
