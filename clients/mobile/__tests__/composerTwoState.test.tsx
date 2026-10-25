@@ -1381,13 +1381,52 @@ describe('도크가 자라는 프레임에 목록에게 알린다 (#4518, design
     expect(follow).toHaveBeenCalledTimes(updates());
   });
 
-  it('동작 줄이기면 스프링이 없으니 알릴 프레임도 없다', async () => {
+  // 동작 줄이기: 값이 한 번에 바뀌어 스프링의 프레임별 알림이 없다. 앱을 켜고 처음 누른 짧은 탭에서는 키보드 준비가 메인 스레드를 막는 동안 목록의 `onLayout` 길이 늦어서 마지막 말풍선의
+  // 아랫줄이 가려졌다(시뮬레이터: 커밋 코드 8/8번 잘림 1~8프레임, 값을 바꾼 직후 한 번 알리면 0/8번 — 리뷰 R3 M3 를 측정으로 닫은 것).
+  it('동작 줄이기: 스프링이 없으니 프레임별 알림은 없고, 값이 한 번에 바뀐 직후 한 번 알린다 — 목록이 onLayout 길만 기다리지 않게', async () => {
     a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const spring = jest.spyOn(Animated, 'spring');
     const {follow} = await mountWithBridgeSettled();
-    touchDown();
-    settle();
-    expect(hasTools()).toBe(true); // 전제: 펼쳤다
     expect(follow).not.toHaveBeenCalled();
+    touchDown();
+    expect(hasTools()).toBe(true); // 전제: 같은 틱에 펼쳐졌다
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(follow).toHaveBeenCalledTimes(1);
+    settle();
+    wait(500);
+    expect(follow).toHaveBeenCalledTimes(1); // 움직임이 없으니 프레임별로는 안 부른다
+    expect(ourSprings(spring)).toHaveLength(0);
+  });
+
+  it('동작 줄이기: 알림은 값을 바꾼 뒤에 간다 — 목록의 명령이 레이아웃 커밋 뒤에 줄을 서도록', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const order: string[] = [];
+    const realSetValue = Animated.Value.prototype.setValue;
+    jest.spyOn(Animated.Value.prototype, 'setValue').mockImplementation(function (
+      this: Animated.Value,
+      value: number,
+    ) {
+      order.push(`값 ${value}`);
+      realSetValue.call(this, value);
+    });
+    const {follow} = await mountWithBridgeSettled();
+    follow.mockImplementation(() => {
+      order.push('알림');
+    });
+    order.length = 0; // 마운트가 남긴 기록은 버린다
+    touchDown();
+    const notified = order.indexOf('알림');
+    expect(notified).toBeGreaterThan(0); // 전제: 알렸다
+    expect(order[notified - 1]).toBe('값 1'); // 바로 앞이 펼침 값이다
+    expect(order.filter(entry => entry === '알림')).toHaveLength(1);
+  });
+
+  it('동작 줄이기여도 다리가 없는 곳에서는 그대로 펼친다 — 알릴 곳이 없다고 터지지 않는다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    await mountSettled();
+    touchDown();
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
   });
 
   it('다리가 없는 곳에서도 그대로 돈다 — 컨텍스트가 비어 있어도 펼치고 접힌다', async () => {

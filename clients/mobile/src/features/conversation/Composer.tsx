@@ -1772,8 +1772,14 @@ export function Composer({
     };
     if (expanded) {
       setCollapsing(false);
-      if (reduceMotion.current) progress.setValue(1);
-      else spring(1);
+      if (reduceMotion.current) {
+        // 동작 줄이기: 값이 한 번에 바뀌어 스프링의 프레임별 알림이 없다. 그러면 목록은 `onLayout` 길(네이티브 → JS → 네이티브)로만 따라오는데, 앱을 켜고 처음 누른 탭에서는
+        // 키보드 준비가 메인 스레드를 막는 동안 그 길이 늦어서 마지막 말풍선의 아랫줄이 도크에 가려졌다(#4518 시뮬레이터: 8/8번, 1~8프레임). `setValue` 가 레이아웃을 곧바로
+        // 커밋하므로 **그 직후** 한 번 알리면 목록의 `scrollToEnd` 명령이 커밋 뒤에 줄을 서서 둘이 한꺼번에 적용된다 — 값을 바꾼 **뒤에** 알리는 순서를 지킨다(시험이 잠근다).
+        // 접힘 쪽은 알리지 않는다: 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있고, 동작 줄이기의 접힘은 간격이 변하지 않았다(녹화 6번, 변화 ≤1px).
+        progress.setValue(1);
+        dockFollow?.notify();
+      } else spring(1);
       return;
     }
     // 접힘은 두 갈래다.
