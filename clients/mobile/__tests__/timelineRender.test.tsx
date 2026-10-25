@@ -205,7 +205,9 @@ describe('네 가지 상태', () => {
     renderTimeline({messages: [], status: 'ready', pending});
     expect(screen.queryByTestId('timeline-empty')).toBeNull();
     expect(screen.getByTestId('pending-row')).toBeTruthy();
-    expect(screen.getByText('전송 중')).toBeTruthy();
+    // 본문이 그려졌다 — 「전송 중」 줄은 더는 없다(#4455: 정상 전송에는 아무 글자도 깜빡이지 않는다).
+    expect(screen.getByText('첫 마디')).toBeTruthy();
+    expect(screen.queryByText('전송 중')).toBeNull();
   });
 });
 

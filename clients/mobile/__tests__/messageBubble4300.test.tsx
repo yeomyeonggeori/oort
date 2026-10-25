@@ -389,7 +389,7 @@ describe('말풍선 — 토큰으로만 그린다', () => {
     expect(code).not.toMatch(/<(AgentCard|ArtifactCard|AttachmentList)[^>]*bubble/);
   });
 
-  it('낙관적 메아리는 내 말풍선이다(서버 사본이 대체해도 모양이 안 바뀐다)', () => {
+  it('낙관적 메아리는 내 말풍선이다(서버 사본이 대체해도 모양이 안 바뀐다 — 흐리지 않는다, #4455)', () => {
     render(
       <PendingRow
         pending={{
@@ -398,6 +398,26 @@ describe('말풍선 — 토큰으로만 그린다', () => {
           authorMemberId: SELF,
           body: '보내는 중',
           status: 'sending',
+        } as never}
+        startsGroup
+        directory={DIRECTORY}
+      />,
+    );
+    const style = flat(screen.getByTestId('message-bubble').props.style);
+    expect(style.backgroundColor).toBe(color.accent);
+    // 정상 전송의 메아리는 서버 사본과 같은 불투명도다 — 0.6 에서 1.0 으로 튀면 그것이 곧 색 깜빡임이다.
+    expect(style.opacity).toBeUndefined();
+  });
+
+  it('실패한 메아리만 흐리다 (실패 줄은 예전 그대로)', () => {
+    render(
+      <PendingRow
+        pending={{
+          clientMsgId: 'c-1',
+          channelId: 'ch',
+          authorMemberId: SELF,
+          body: '못 보낸 글',
+          status: 'failed',
         } as never}
         startsGroup
         directory={DIRECTORY}
