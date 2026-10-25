@@ -175,9 +175,14 @@ export function installForegroundNotificationHandler(): () => void {
   try {
     setNotificationHandler({
       handleNotification: presentForeground,
-      // 알림 본문이 실릴 수 있어 오류 객체째 남기지 않는다(`NotificationTimeoutError.info`).
+      // 알림 본문이 실릴 수 있어 오류 객체째 남기지 않는다(`NotificationTimeoutError.info`). 오류 자리에
+      // 무엇이 와도 이 줄이 던지지 않는다(`handleError` 가 던지면 로그 한 줄 때문에 또 하나의 실패가 된다).
       handleError: (_id, error) =>
-        console.warn(`${LOG} foreground notification was not presented: ${error.message}`),
+        console.warn(
+          `${LOG} foreground notification was not presented: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        ),
     });
   } catch (cause) {
     console.error(`${LOG} foreground notification handler not installed`, cause);

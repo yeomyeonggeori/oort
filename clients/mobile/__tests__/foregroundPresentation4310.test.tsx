@@ -357,6 +357,23 @@ describe('결정: 보고 있는 대화의 알림만 숨긴다', () => {
       ).toEqual({show: false, why: 'viewing'});
     });
 
+    // 승인 여부는 `reason` 문자열이 아니라 **승인 id** 로 가린다. 서버 계약에서는 둘이 늘 함께 가지만, 파서는 둘을 따로
+    // 받아들이므로 어느 쪽이 판별자인지가 이 시험이 못박는 선택이다.
+    it('reason 이 승인이 아니어도 승인 id 가 있으면 승인이다', () => {
+      expect(
+        decideForeground(approvalIn('momo.approval', {reason: 'mention'}), VIEWING_DESIGN),
+      ).toEqual({show: true, why: 'approval'});
+    });
+
+    it('reason 이 승인이어도 승인 id 가 없으면(승인 카테고리가 아니면) 승인이 아니다', () => {
+      expect(
+        decideForeground(
+          relayPayload({channelId: DESIGN, category: 'momo.message', reason: 'approval_request'}),
+          VIEWING_DESIGN,
+        ),
+      ).toEqual({show: false, why: 'viewing'});
+    });
+
     // 예외는 숨길 뻔한 경우에만 이유를 바꾼다: 어차피 보였을 승인은 원래 이유로 보인다(로그가 흐려지지 않는다).
     it('다른 방의 승인·앞에 아무것도 없을 때의 승인은 원래 이유로 보인다', () => {
       expect(
@@ -592,6 +609,18 @@ describe('처리기: expo-notifications 에 건네는 것', () => {
     }
   });
 
+  it('handleError 는 던지지 않고 메시지만 남긴다 — 오류 자리에 무엇이 와도', () => {
+    installForegroundNotificationHandler();
+    const warn = jest.mocked(console.warn);
+    const {handleError} = registeredHandler();
+    expect(() => handleError?.('collapse-1', new Error('timed out'))).not.toThrow();
+    expect(() => handleError?.('collapse-1', undefined as unknown as Error)).not.toThrow();
+    expect(() => handleError?.('collapse-1', 'boom' as unknown as Error)).not.toThrow();
+    const lines = warn.mock.calls.map(call => String(call[0]));
+    expect(lines).toContain('[push] foreground notification was not presented: timed out');
+    expect(lines).toContain('[push] foreground notification was not presented: boom');
+  });
+
   it('설치가 터져도 앱 시작을 막지 않는다', () => {
     setHandler.mockImplementationOnce(() => {
       throw new Error('native module missing');
@@ -740,7 +769,10 @@ describe('시작 경로 — 처리기는 index.js 에서, 루트를 등록하기
         }
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) walk(full);
-        else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) files.push(full);
+        // `jest.setup.js` 는 expo-notifications 목을 만드는 시험 인프라라 앱 소스가 아니다.
+        else if (/\.(ts|tsx|js|jsx)$/.test(entry.name) && entry.name !== 'jest.setup.js') {
+          files.push(full);
+        }
       }
     };
     walk(APP_ROOT);
@@ -752,8 +784,9 @@ describe('시작 경로 — 처리기는 index.js 에서, 루트를 등록하기
     expect(callers(/(?<!function\s)\binstallForegroundNotificationHandler\s*\(/)).toEqual([
       'index.js',
     ]);
-    // expo 에 실제로 거는 곳은 그 함수 안의 한 줄이다.
-    expect(callers(/\bsetNotificationHandler\s*\(/)).toEqual([
+    // expo 의 `setNotificationHandler` 를 **언급하는** 파일은 하나다. 호출만이 아니라 식별자 자체를 세므로
+    // `import {setNotificationHandler as x}` 같은 별칭이나 `Notifications.setNotificationHandler(…)` 도 잡힌다.
+    expect(callers(/\bsetNotificationHandler\b/)).toEqual([
       path.join('src', 'push', 'foregroundPresentation.ts'),
     ]);
   });
