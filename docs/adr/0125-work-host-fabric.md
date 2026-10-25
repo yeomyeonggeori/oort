@@ -3,6 +3,7 @@
 - Status: **Accepted** (2026-07-19, 성재 — D1~D8 권고안 전체 승인. 파생 487~490은 0114 v0 배치(483~486) 랜딩 후 순차 발급)
 - 증보: 2026-09-26 — 원격 호스트 등록 경로(한 줄 설치·QR 페어링, 페어링 코드 초안, 설정 묶음)는 ADR-0192가 정한다. 팀 샌드박스 호스트(scope=workspace)는 목표 A 뒤 A4 ADR로 미룬다(ADR-0192 D7)
 - 역방향: [ADR-0197](0197-personal-cloud-workspace.md)(Proposed, #3395)이 D10(서버는 터미널 바이트를 싣지 않는다)에 「평문 없는 암호문 중계」 좁은 예외를 제안한다. Accepted 전에는 D10이 그대로다.
+- 역방향: 2026-10-25 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)의 팀 박스(`type='ops'`)에는 D8 중 비특권 유저·sudo 금지와 D10(서버는 raw 터미널 바이트를 싣지 않는다 — Ops 박스는 PTY가 아닌 exec 채널이고 서버가 영속하는 것은 명령 줄·발췌·해시뿐이고 결과 전문은 소비 또는 5분까지만 일시 열에 머문다, WAL·백업은 제외)이 그대로 적용된다. D8의 마지막 항(agent 단계 기본 네트워크 제한)은 Ops 박스에서 **이탈**한다: Railway는 `egress=advisory`, VM도 공용 인터넷은 열려 있다(ADR-0157 D3와 같은 이유, ADR-0210 D8·RISK-2). 이 ADR의 본문 결정은 바꾸지 않았다.
 - 관련: ADR-0114(Accepted — D8 host_id 훅이 본 ADR의 접합점), ADR-0121(Accepted — D1-C oort Cloud 범위 제외분을 본 ADR이 인수, D5-A "운영을 판다" BM 승계), ADR-0004·MOMO-234(자격증명 비유입 — 전 계층 불변), ADR-0120(PushRelay — 호스트 등록·outbound 다이얼 패턴의 원형), research/17-work-host-fabric/00(레퍼런스 실사·비용 모델·성재 보정 2건)
 - 발단: 성재 숙원 — "0114 v0 한계(세션=맥 앱 수명)를 뚫는다. 셀프호스팅 또는 유료 cloud, SSH 베이스, 로컬 있으면 물어보고 로컬."
 
