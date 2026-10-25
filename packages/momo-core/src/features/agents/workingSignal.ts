@@ -96,6 +96,13 @@ export interface ServerRunFacts {
   startedAtMs?: number;
   /** When the run ended (server clock). Absent on an open run. */
   finishedAtMs?: number;
+  /**
+   * A job the server made with nobody calling it (the welcome run, ADR-0181), as
+   * `AgentRunProgress.system` read it off the wire. The home 「작업 중」 card does not
+   * carry such a run: a person who sees 「대기 1번째」 for a job they never asked for
+   * assumes they are the one being waited on (#4285).
+   */
+  system?: true;
 }
 
 export interface AgentWorkingSignal {

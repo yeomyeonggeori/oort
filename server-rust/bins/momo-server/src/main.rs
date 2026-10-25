@@ -58,6 +58,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // B4.3: what guards the one unauthenticated write (`POST /v1/join`).
         rate_limit_per_ip = config.rate_limit.per_ip_limit,
         rate_limit_window_seconds = config.rate_limit.window_seconds,
+        // #4234: the per-member write budget, per window. Numbers only.
+        rate_limit_message_send_per_member = config.rate_limit.message_send_per_member_limit,
+        rate_limit_message_send_per_agent = config.rate_limit.message_send_per_agent_limit,
+        rate_limit_scheduled_write_per_member = config.rate_limit.scheduled_write_per_member_limit,
+        rate_limit_upload_start_per_member = config.rate_limit.upload_start_per_member_limit,
         agent_port_rate_limit_per_token = config.agent_port.per_token_limit,
         agent_port_rate_limit_per_agent = config.agent_port.per_agent_limit,
         agent_port_rate_limit_per_ip = config.agent_port.per_ip_limit,
@@ -125,6 +130,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "RATE_LIMIT_DRIVE_UPLOAD_PER_IP=0 disables the per-IP limiter on the public \
              upload PUT (/__momo_stub/drive/uploads/…); that route answers anyone"
         );
+    }
+    // #4234: each member-write axis that is off is said once, by its own name — an operator who
+    // turned one off for a load test should not find out from an incident.
+    for (name, limit, what) in [
+        (
+            "RATE_LIMIT_MESSAGE_SEND_PER_MEMBER",
+            config.rate_limit.message_send_per_member_limit,
+            "message sends by human members",
+        ),
+        (
+            "RATE_LIMIT_MESSAGE_SEND_PER_AGENT",
+            config.rate_limit.message_send_per_agent_limit,
+            "message sends by agent credentials",
+        ),
+        (
+            "RATE_LIMIT_SCHEDULED_WRITE_PER_MEMBER",
+            config.rate_limit.scheduled_write_per_member_limit,
+            "scheduled-message creates and edits",
+        ),
+        (
+            "RATE_LIMIT_UPLOAD_START_PER_MEMBER",
+            config.rate_limit.upload_start_per_member_limit,
+            "attachment upload starts (each one is a Google Drive API call)",
+        ),
+    ] {
+        if limit == 0 {
+            tracing::warn!("{name}=0 removes the per-member budget on {what}");
+        }
     }
     if config.realtime.cent_token_hmac.is_none() || config.realtime.cent_proxy_secret.is_none() {
         tracing::warn!(

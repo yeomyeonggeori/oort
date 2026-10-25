@@ -166,8 +166,54 @@ function lowerBound(messages: Message[], seq: number): number {
 }
 
 /**
+ * 같은 seq 의 옛 행 위로 새 행이 덮일 때, 새 행이 첨부를 **말하지 않았다면** 옛 행의
+ * 첨부를 잇는다 (#4441).
+ *
+ * 편집이 내는 두 투영 — `message.edited` 프레임과 `PATCH` 응답 — 은 첨부를 싣지
+ * 않는다. 서버가 그렇게 쓴 이유는 둘 다 자기 자리에 적혀 있다: 「Editing a body
+ * cannot change what is bound to the message, so the client keeps the file cards it
+ * already drew」(`routes/messages.rs` `edit`), 「both clients merge it by seq over
+ * the row they hold」(`interaction.rs` `emit_message_edited_in_tx`). 첨부 행은
+ * complete 된 뒤 불변이고 다른 메시지로 옮겨 붙지도 못하므로(`build_broadcast_payload`)
+ * 편집 투영에 첨부가 없다는 것은 「없어졌다」가 아니라 「이 투영은 그것을 말하지
+ * 않는다」이다. 덮어쓰기가 그 침묵을 삭제로 읽어서, 고친 사람과 그 줄을 열어 둔 모든
+ * 화면에서 사진 카드가 사라졌다.
+ *
+ * 규칙은 **이 방향 하나**다.
+ * - 들어온 행이 첨부를 한 건이라도 말하면 그 말이 이긴다. 합치지 않는다.
+ * - 말하지 않으면(키가 없거나 빈 배열 — 서버는 빈 배열의 키를 뺀다) 같은 메시지의
+ *   옛 첨부가 남는다.
+ * - 「편집」인지를 `state`·`editedAtMs` 로 가리지 않는다. 스트림 조각과 props 만 바꾼
+ *   갱신도 같은 `message.edited` 이고(프레임은 행의 현재 값을 그대로 싣는다 — 고친 적
+ *   없는 행이면 `state` 는 `sent`, `edited_at_ms` 는 null), 같은 침묵이다.
+ * - 묘비는 첨부를 주고받지 않는다. 들어온 행이 묘비면 옛 첨부를 잇지 않고, 든 행이
+ *   묘비면 그 첨부를 새 행에 잇지 않는다. 실시간 묘비(`applyTombstone`)와 기록 페이지의
+ *   묘비는 첨부를 그대로 들고 있을 수 있다(화면은 `deleted` 에서 카드를 그리지 않는다).
+ *   늦게 온 편집 프레임이 그것을 새 행으로 되살리면 안 된다. 이 함수가 바꾸는 것은
+ *   「편집 투영의 침묵」 하나뿐이고, 묘비가 낀 길의 동작은 수리 전과 같다.
+ * - seq 가 같아도 id 가 다르면 다른 메시지다. 물려받지 않는다.
+ *
+ * 이 규칙은 서버에 **살아 있는 메시지에서 첨부를 떼는 길이 없다**는 사실에 서 있다
+ * (첨부 라우트는 uploads·complete·content 셋뿐이고, 삭제도 첨부 행은 건드리지 않는다).
+ * 그런 길(「파일 빼기」)이 생기면 「말하지 않음」과 「없어짐」을 가를 명시 신호가
+ * 필요하다.
+ */
+function keepHeldAttachments(held: Message, incoming: Message): Message {
+  // `?.length ?? 0`·`!heldFiles`: 타입 밖 입력(null)에도 던지지 않는다. 모든 실시간
+  // 프레임이 지나는 리듀서에 이 수리가 새 던질 자리를 만들지 않으려는 방어다.
+  if ((incoming.attachments?.length ?? 0) > 0) return incoming;
+  const heldFiles = held.attachments;
+  if (!heldFiles || heldFiles.length === 0) return incoming;
+  if (incoming.state === "deleted" || held.state === "deleted") return incoming;
+  if (!uuidEq(held.id, incoming.id)) return incoming;
+  return { ...incoming, attachments: heldFiles };
+}
+
+/**
  * Merge a batch (any order, may overlap existing) into ascending-by-seq order.
- * Last write wins per seq (realtime edits/tombstones replace history rows).
+ * Last write wins per seq (realtime edits/tombstones replace history rows) —
+ * except the attachments an edit projection does not carry
+ * ({@link keepHeldAttachments}).
  *
  * Canonical name per R-1 §공통계약: history pages, realtime publications and
  * `?after` backfill all land here, so a reconnect reconciles by seq instead of
@@ -182,7 +228,8 @@ export function reconcileMessages(
   for (const msg of batch) {
     const idx = lowerBound(next, msg.seq);
     if (idx < next.length && next[idx].seq === msg.seq) {
-      next[idx] = msg; // replace duplicate seq (edit/tombstone/re-fetch)
+      // replace duplicate seq (edit/tombstone/re-fetch)
+      next[idx] = keepHeldAttachments(next[idx], msg);
     } else {
       next.splice(idx, 0, msg);
     }

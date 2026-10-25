@@ -1,4 +1,5 @@
 import type {Message} from '@momo/core/lib/api';
+import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
 import {pinActionLabel} from '@momo/core/features/timeline/pins';
@@ -160,7 +161,9 @@ export function MessageActionSheet({
     [chips],
   );
 
-  const preview = (message.body ?? '').trim();
+  // 글 없이 사진·파일만 보낸 메시지는 「내용 없는 메시지」가 아니라 개수로 말한다 (#4294).
+  const preview =
+    (message.body ?? '').trim() || (attachmentPreviewLine(message.attachments) ?? '');
 
   return (
     <Modal
