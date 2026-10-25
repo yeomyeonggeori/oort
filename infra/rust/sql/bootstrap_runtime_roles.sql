@@ -635,6 +635,16 @@ BEGIN
   IF to_regclass('public.workspace') IS NOT NULL THEN
     GRANT SELECT (avatar_media_id) ON workspace TO momo_notifier;
   END IF;
+  --  * attachment reclaim (#4443, ADR-0151 증보 2): attachment_reclaim_candidates scans
+  --    `attachment` for completed files no message and no schedule holds (ids, status, the
+  --    two reservation columns migration 150 mirrors from the owner-scoped
+  --    scheduled_message_attachment, timestamps) — not drive_file_id, name, mime or the
+  --    uploader: the momo_app row transaction re-reads what it deletes. The reservation
+  --    table itself stays sealed from this role (ADR-0208 D3).
+  IF to_regclass('public.attachment') IS NOT NULL THEN
+    GRANT SELECT (id, workspace_id, status, message_id, reserved, unreserved_at, created_at)
+      ON attachment TO momo_notifier;
+  END IF;
   --  * woken-not-collected verdict (ADR-0200 증보 3 E7, #4284): the run stall sweep reads,
   --    per candidate run and ONLY as column grants, what `woken_uncollected_verdict`
   --    needs. No write, no DELETE.

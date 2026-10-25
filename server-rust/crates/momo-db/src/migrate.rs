@@ -678,12 +678,18 @@ mod tests {
     /// 149 is #4313's display fields (ADR-0113 증보 3 F1): a jsonb patch on the seven official
     /// `plugin_registry` manifests (`logoKey`, `category`, `websiteURL`, `starterPrompts`) with the
     /// digest rewritten in the same statement.
+    ///
+    /// 150 is #4443's attachment reclaim (ADR-0151 증보 2): `attachment.reserved` / `unreserved_at`
+    /// mirrored from the owner-scoped `scheduled_message_attachment` by a `SECURITY INVOKER` trigger
+    /// (with a `row_security = off` backfill and a row-count assertion), the partial index the reclaim
+    /// sweep reads, and the notifier's column-level `SELECT` on `attachment`. No new table, no new
+    /// definer.
     #[test]
-    fn discovers_contiguous_migrations_001_to_149() {
+    fn discovers_contiguous_migrations_001_to_150() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=149).collect();
+        let expected: Vec<i64> = (1..=150).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -691,7 +697,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=149 under {}",
+            "expected contiguous 001..=150 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -699,7 +705,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("149_official_catalog_display_fields"));
+            .starts_with("150_attachment_reclaim"));
     }
 
     #[test]

@@ -53,6 +53,7 @@ use momo_messaging::{
     opening_stream_props, send_message_in_tx, stream_message_body_in_tx, MessageType, NewMessage,
     StreamEdit, STREAM_PROPS_KEY,
 };
+use momo_notifier::attachment_reclaim::AttachmentReclaimer;
 use momo_notifier::avatar_reclaim::AvatarReclaimer;
 use momo_notifier::inbox_retention_sweep::sweep_read_inbox_items;
 use momo_notifier::push::PushDrain;
@@ -382,6 +383,22 @@ async fn seed_work(su: &PgPool) {
     .execute(su)
     .await
     .expect("avatar row");
+    // #4443: a completed attachment nothing carries and nothing holds, idle for 40 days —
+    // the reclaim's candidate read (column-scoped, as the notifier) and its row delete
+    // (as momo_app) both have to run for it to go.
+    sqlx::query(
+        "INSERT INTO attachment \
+           (workspace_id, channel_id, uploader_member_id, drive_file_id, name, mime, size_bytes, \
+            status, created_at) \
+         VALUES ($1, $2, $3, 'attachment-file-1', 'secret-name.pdf', 'application/pdf', 10, \
+                 'complete', now() - interval '40 days')",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("attachment row");
 }
 
 #[tokio::test]
@@ -454,6 +471,15 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "momo_notifier + momo_app",
         reclaimer.sweep_once(&notifier, &app).await,
     );
+    // loop 2f — attachment reclaim (#4443): candidate read (notifier, column-scoped
+    // GRANT) + row delete and audit (app).
+    let attachment_reclaimer =
+        AttachmentReclaimer::new(Arc::new(StubDriveArchive::new("http://drive.invalid")), 10);
+    report.check(
+        "attachment reclaim",
+        "momo_notifier + momo_app",
+        attachment_reclaimer.sweep_once(&notifier, &app).await,
+    );
     // loop 4 — push drain: claim, and the judgment queries on an unknown message.
     let drain = PushDrain::new(notifier.clone(), PushConfig::for_target(), Arc::new(NoPush));
     report.check(
@@ -489,7 +515,51 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     .fetch_one(&db.su)
     .await
     .expect("count avatars");
+    let attachments_left: i64 = sqlx::query_scalar("SELECT count(*) FROM attachment")
+        .fetch_one(&db.su)
+        .await
+        .expect("count attachments");
+    // The notifier's grant on `attachment` is column-scoped (#4443): the candidate columns
+    // are readable, the Drive id, the file name, the mime and the uploader are not — and
+    // the dev bootstrap, which holds table-level grants, cannot show that.
+    let readable = sqlx::query(
+        "SELECT id, workspace_id, status, message_id, reserved, unreserved_at, created_at \
+           FROM attachment LIMIT 1",
+    )
+    .fetch_all(&notifier)
+    .await;
+    let mut unreadable = Vec::new();
+    for column in [
+        "drive_file_id",
+        "name",
+        "mime",
+        "uploader_member_id",
+        "channel_id",
+        "size_bytes",
+    ] {
+        let attempt = sqlx::query(&format!("SELECT {column} FROM attachment LIMIT 1"))
+            .fetch_all(&notifier)
+            .await;
+        if attempt.is_ok() {
+            unreadable.push(column);
+        }
+    }
+    let sealed = sqlx::query("SELECT attachment_id FROM scheduled_message_attachment LIMIT 1")
+        .fetch_all(&notifier)
+        .await;
     db.finish().await;
+    assert!(
+        readable.is_ok(),
+        "the production notifier reads the candidate columns of attachment: {readable:?}"
+    );
+    assert!(
+        unreadable.is_empty(),
+        "the production notifier must NOT read these attachment columns: {unreadable:?}"
+    );
+    assert!(
+        sealed.is_err(),
+        "the reservation table stays sealed from the notifier (ADR-0208 D3)"
+    );
     assert!(
         report.failures.is_empty(),
         "notifier jobs failed as their production role:\n  {}",
@@ -500,6 +570,10 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "the expired share payload was deleted by the sweep"
     );
     assert_eq!(unreclaimed, 0, "the abandoned avatar row was reclaimed");
+    assert_eq!(
+        attachments_left, 0,
+        "the idle unbound attachment was reclaimed (candidate read as the notifier, delete as momo_app)"
+    );
 }
 
 /// A hosted agent's finished `type=work` run, seeded as the production code

@@ -38,6 +38,15 @@
 //!   through `MOMO_AVATAR_RECLAIM_DATABASE_URL` (default
 //!   `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the RLS-bound `momo_app` connection).
 //!
+//! * The same Drive variables also enable the attachment Drive reclaim (#4443,
+//!   ADR-0151 증보 2), every `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS` (600000, floored at
+//!   10000), at most `MOMO_ATTACHMENT_RECLAIM_BATCH` (50, 1..=500) attachments per tick,
+//!   writing through `MOMO_ATTACHMENT_RECLAIM_DATABASE_URL` (default
+//!   `MOMO_AVATAR_RECLAIM_DATABASE_URL`, then `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the
+//!   RLS-bound `momo_app` connection). The idle time before a file is reclaimed is a
+//!   constant (30 days), not an environment variable. On the default `local` backend
+//!   (self-host, Railway) this sweep does not run.
+//!
 //! * `MOMO_SHARE_RETENTION_DATABASE_URL` (default `MOMO_HUDDLE_SWEEP_DATABASE_URL`)
 //!   — the RLS-bound `momo_app` connection the shared-session retention sweep
 //!   (#2862) deletes through (#3377: the notifier role has no DELETE).
@@ -49,6 +58,7 @@
 
 use std::time::Duration;
 
+use crate::attachment_reclaim::AttachmentReclaimConfig;
 use crate::avatar_reclaim::AvatarReclaimConfig;
 use crate::huddle_sweep::HuddleSweepConfig;
 
@@ -155,6 +165,15 @@ pub struct NotifierConfig {
     /// `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the same RLS-bound `momo_app`
     /// connection). Every reclaim write goes through it; never logged.
     pub avatar_reclaim_database_url: Option<String>,
+    /// #4443 attachment Drive reclaim (ADR-0151 증보 2). `None` unless a **Google** Drive
+    /// is configured — the same condition, and the same credentials, as
+    /// [`NotifierConfig::avatar_reclaim`].
+    pub attachment_reclaim: Option<AttachmentReclaimConfig>,
+    /// `MOMO_ATTACHMENT_RECLAIM_DATABASE_URL`, falling back to
+    /// `MOMO_AVATAR_RECLAIM_DATABASE_URL` and then `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the
+    /// same RLS-bound `momo_app` connection). Every reclaim write goes through it;
+    /// never logged.
+    pub attachment_reclaim_database_url: Option<String>,
     /// #3377: `MOMO_SHARE_RETENTION_DATABASE_URL`, falling back to
     /// `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the same RLS-bound `momo_app`
     /// connection). The shared-session retention sweep deletes through it and
@@ -243,6 +262,20 @@ impl NotifierConfig {
             ),
             avatar_reclaim_database_url: env("MOMO_AVATAR_RECLAIM_DATABASE_URL")
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
+            attachment_reclaim: AttachmentReclaimConfig::parse(
+                env("MOMO_DRIVE_ARCHIVE_BACKEND")
+                    .or_else(|| env("MOMO_DRIVE_BACKEND"))
+                    .as_deref(),
+                env("MOMO_DRIVE_SA_KEY_PATH").as_deref(),
+                env("MOMO_DRIVE_SHARED_DRIVE_ID").as_deref(),
+                Duration::from_millis(
+                    env_number("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS", 600_000u64)?.max(10_000),
+                ),
+                env_number("MOMO_ATTACHMENT_RECLAIM_BATCH", 50i64)?.clamp(1, 500),
+            ),
+            attachment_reclaim_database_url: env("MOMO_ATTACHMENT_RECLAIM_DATABASE_URL")
+                .or_else(|| env("MOMO_AVATAR_RECLAIM_DATABASE_URL"))
+                .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
             share_retention_database_url: env("MOMO_SHARE_RETENTION_DATABASE_URL")
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
             share_retention_interval: Duration::from_millis(
@@ -280,6 +313,8 @@ impl NotifierConfig {
             huddle_sweep_database_url: None,
             avatar_reclaim: None,
             avatar_reclaim_database_url: None,
+            attachment_reclaim: None,
+            attachment_reclaim_database_url: None,
             share_retention_database_url: None,
             share_retention_interval: Duration::from_millis(300),
             run_stall: momo_outbox::StallPolicy::default(),

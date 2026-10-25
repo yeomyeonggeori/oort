@@ -30,6 +30,10 @@
 //!    object of a replaced, removed, `failed` or abandoned-`pending` member or
 //!    workspace avatar, never a current one. Google Drive only, and only with the
 //!    RLS-bound connection. One iteration is [`avatar_reclaim::AvatarReclaimer::sweep_once`].
+//! 7. **attachment Drive reclaim** (#4443, ADR-0151 증보 2) — deletes the Drive object
+//!    (and the row) of a completed attachment that no message and no schedule holds,
+//!    once it has been idle for 30 days. Same limits as 6: Google Drive only, RLS-bound
+//!    writes only. One iteration is [`attachment_reclaim::AttachmentReclaimer::sweep_once`].
 //!
 //! The drain holds **no APNs key and contains no APNs code**: a self-hosted
 //! server cannot have one, so it hands an id-only dispatch to the relay that
@@ -58,6 +62,7 @@
 //! `settled_at`, so even a duplicated convergence bills once.
 
 pub mod approval_sweep;
+pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod backoff;
 pub mod config;
@@ -935,6 +940,68 @@ impl Notifier {
             }
         };
 
+        // ---- loop 2f: the attachment Drive reclaim (#4443, ADR-0151 증보 2) ----
+        //
+        // Its own task: each row is a Drive call. Same conditions as the avatar
+        // reclaim — a Google Drive and the RLS-bound connection — or it is not
+        // spawned at all (on the default `local` backend the bytes belong to the api
+        // process's volume and are not reachable from here).
+        let attachment_reclaim_task = match (
+            self.config.attachment_reclaim.clone(),
+            self.config.attachment_reclaim_database_url.as_deref(),
+        ) {
+            (None, _) => {
+                tracing::info!(
+                    "attachment reclaim disabled (no Google Drive configured for the notifier; \
+                     local/stub archives are not reachable from this process)"
+                );
+                None
+            }
+            (Some(_), None) => {
+                tracing::warn!(
+                    "attachment reclaim disabled: MOMO_ATTACHMENT_RECLAIM_DATABASE_URL (or \
+                     MOMO_AVATAR_RECLAIM_DATABASE_URL / MOMO_HUDDLE_SWEEP_DATABASE_URL), the \
+                     RLS-bound momo_app connection, is not set; unbound attachments will not \
+                     be reclaimed"
+                );
+                None
+            }
+            (Some(config), Some(url)) => {
+                match momo_db::sqlx::postgres::PgPoolOptions::new()
+                    .max_connections(2)
+                    .connect_lazy(url)
+                {
+                    Err(error) => {
+                        tracing::error!(
+                            error = %error,
+                            "attachment reclaim disabled: the RLS-bound database URL does not parse"
+                        );
+                        None
+                    }
+                    Ok(write_pool) => {
+                        match attachment_reclaim::AttachmentReclaimer::from_config(&config) {
+                            None => {
+                                tracing::error!(
+                                    "attachment reclaim disabled: the Drive service account is unusable"
+                                );
+                                None
+                            }
+                            Some(reclaimer) => {
+                                let read_pool = self.pool.clone();
+                                let interval = config.interval;
+                                Some(tokio::spawn(async move {
+                                    backoff::supervise("attachment reclaim", interval, || {
+                                        reclaimer.sweep_once(&read_pool, &write_pool)
+                                    })
+                                    .await;
+                                }))
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
         // ---- loop 4: ADR-0120 push-candidate drain -------------------------
         let (push_task, push_listener) = match self.push.clone() {
             None => {
@@ -1005,6 +1072,9 @@ impl Notifier {
             task.abort();
         }
         if let Some(task) = avatar_reclaim_task {
+            task.abort();
+        }
+        if let Some(task) = attachment_reclaim_task {
             task.abort();
         }
         if let Some(task) = push_task {
