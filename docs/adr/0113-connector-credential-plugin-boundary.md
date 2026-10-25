@@ -374,7 +374,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - 카테고리·예시 문장·로고 자리는 없어요.
 - **새 키를 담은 시드는 옛 서버에서 거절돼요.** 거절된 항목은 카탈로그에서 빠지고(`routes/plugins.rs:640-644`), 설치·grant도 막혀요. 시드 migration은 `manifest`와 `manifest_digest`를 함께 바꿔야 해요(`plugin_manifest.rs:140`).
 - **MCP 판과 원격 이미지**:
-  - 검증기는 MCP 프로토콜 세 판(`2025-03-26`·`2025-06-18`·`2025-11-25`)을 받아요(`:25`). 최신 판의 아이콘 메타는 [확인 필요: #4313]이에요. 있더라도 원격 이미지라 F1의 이유로 쓰지 않아요.
+  - 검증기는 MCP 프로토콜 세 판(`2025-03-26`·`2025-06-18`·`2025-11-25`)을 받아요(`:25`). 최신 판에는 아이콘 메타가 있어요 [V, 2026-10-25, #4313: 변경 기록의 「Allow servers to expose icons as additional metadata for tools, resources, resource templates, and prompts」(SEP-973)]. 원격 이미지 주소라서 F1의 이유로 쓰지 않아요(매니페스트의 도구 키 집합이 정확해서 `icons` 키가 들어 있으면 거절해요).
   - 데스크탑 CSP는 `img-src 'self' data:`라 원격 이미지를 그리지 않아요(`clients/desktop/src-tauri/tauri.conf.json:32`).
 - **앱 화면과 진입**:
   - 앱 화면(`clients/web/src/features/plugins/PluginSection.tsx`, 1,415줄)은 글자 타일과 2단 목록·상세예요. 검색·보기 컨트롤은 앱 10개 이상일 때만 서요(`model.ts:510` `PLUGIN_CONTROLS_MAX_GLANCEABLE = 9`).
@@ -588,6 +588,5 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### 아직 열려 있는 것
 
 - 로고별 브랜드 가이드라인 판단(#4314). 불분명하면 글자 타일이에요.
-- MCP `2025-11-25` 판의 아이콘 메타 유무(#4313, 기록만).
 - 내 맥 경로의 F8 모양(`mac`)은 ADR-0188 §8.9가 열릴 때 정해요.
 - 폰 컴포저의 앱 피커 자리(#4305 이후).

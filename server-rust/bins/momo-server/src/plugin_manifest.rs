@@ -8,6 +8,12 @@
 //! manifest cannot silently widen an older server's authority, and a manifest
 //! that grew a credential-shaped key is refused before it can be echoed.
 //!
+//! ADR-0113 증보 3 F1 (#4313) adds four optional display keys to `plugin` — `logoKey`
+//! (a client-bundled asset's name), `category` (a closed list), `starterPrompts` (0~3
+//! example sentences, plain text, whose `tool` must be a read (R) or approval-required
+//! write (A) tool of the same manifest) and `websiteURL` (HTTPS). Remote image URL keys
+//! (`iconURL`, `logoURL`, `imageURL`, …) stay refused — by the exact key set, on purpose.
+//!
 //! Pure: no SQL, no HTTP, no clock. The digest is computed **in SQL** by the
 //! caller (`'sha256:' || encode(sha256(convert_to(manifest::text,'UTF8')),'hex')`,
 //! the same expression migrations 013/015/031/059 used to seed it) because only

@@ -28,6 +28,12 @@
 //!   key sets, allowlisted vocabularies, no credential-shaped key) and its
 //!   registry id must equal the manifest id. The catalog omits a row that
 //!   fails; the detail and every creating write answer 409, as Swift did.
+//! * **Display fields (ADR-0113 증보 3 F1, #4313).** The list row and the detail carry
+//!   `publisherName` (the manifest's own `publisher.name` — the one developer column)
+//!   and, when the manifest declares them, `logoKey`, `category`, `starterPrompts` and
+//!   `websiteURL`; an undeclared field is an absent key (never `null`, never `[]`). Both
+//!   DTOs are built from the validated manifest, so what the validator admits is all that
+//!   can reach the wire, and no remote image key exists to echo.
 //! * **No credential, anywhere.** `plugin_registry` holds policy metadata only
 //!   (013, ADR-0113 D1 custody A) and `momo_app` cannot write it (037). The
 //!   writes touch only install / grant / projection / audit rows, accept a body
