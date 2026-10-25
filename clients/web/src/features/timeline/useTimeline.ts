@@ -354,8 +354,9 @@ export function useTimeline(
       }
       // Same-tick Centrifugo bursts call applyBatch once per publication
       // before React commits. Cap only live `message.new` batches — REST
-      // head / load-more / backfill / own-send / edit never issue grants
-      // and must not touch the grant set. Do not use
+      // head / load-more / backfill / own-send never issue grants (an edit
+      // does not come through here at all: `applyEdited`, #4450) and must
+      // not touch the grant set. Do not use
       // MAX_PENDING_ARRIVAL_GRANTS (1) here: that is the scrolled-up
       // leftover sweep. Consume evicts a grant on mount; Timeline sweeps
       // leftovers when the reader is scrolled up.

@@ -14,7 +14,12 @@ import { uuidEq } from "../../lib/api";
 
 export type MessageArrivalProvenance = "live" | "rest" | "replay";
 
-export type ArrivalEventType = "message.new" | "message.edited" | "rest";
+/**
+ * 도착 판정이 받는 입구 종류. 편집(`message.edited` 프레임·`PATCH` 응답)은 도착이 아니라서 여기에
+ * 없다 — 두 클라는 편집을 `applyEditedMessage`(든 줄만 갱신, 도착 장부를 지나지 않는다)로 보내고
+ * 이 판정을 부르지 않는다(#4450). 이 타입은 와이어 계약이 아니라 이 판정의 입력 어휘일 뿐이다.
+ */
+export type ArrivalEventType = "message.new" | "rest";
 
 /** Unmounted live grants kept for first mount. Older ones drop so a
  *  scrolled-up backlog cannot cascade on jump-to-bottom. */

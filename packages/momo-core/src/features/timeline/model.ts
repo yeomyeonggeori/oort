@@ -221,6 +221,8 @@ function lowerBound(messages: Message[], seq: number): number {
  *   장식을 새 행에 잇지 않는다. 실시간 묘비(`applyTombstone`)와 기록 페이지의 묘비는 장식을 그대로
  *   들 수 있다(화면은 `deleted` 에서 그리지 않는다). 늦게 온 편집 프레임이 그것을 되살리면 안 된다.
  *   이 함수가 바꾸는 것은 「편집 투영의 침묵」 하나뿐이고, 묘비가 낀 길의 동작은 수리 전과 같다.
+ *   (편집 프레임·PATCH 응답이 지나는 문 {@link applyEditedMessage} 는 한 걸음 더 간다 — 든 줄이
+ *   묘비면 그 편집을 아예 받지 않는다. 그 가드는 이 병합이 아니라 그 문에만 있다.)
  * - seq 가 같아도 id 가 다르면 다른 메시지다. 물려받지 않는다.
  *
  * 이 규칙은 서버에 **살아 있는 메시지에서 이 넷을 떼는 길이 없다**는 사실에 서 있다(첨부 라우트는
@@ -320,6 +322,18 @@ export const mergeMessages = reconcileMessages;
  * 페이지에는 그 표지를 달고 오고, 그 줄은 들어와야 한다. 그래서 가드는 `reconcileMessages` 가
  * 아니라 편집 투영만 지나는 이 문에 있다. 든 줄에 대한 적용은 `reconcileMessages` 그대로라
  * 보존 규칙({@link keepHeldProjection})이 같이 선다.
+ *
+ * ## 든 줄이 묘비면 묘비가 이긴다 (planner 결정, #4450)
+ * 든 줄이 이미 지워졌다면(`state: "deleted"`) 늦게 온 편집은 무시한다 — 같은 state 를 돌려준다.
+ * 서버는 지운 메시지를 사람이 고치게 두지 않는다: `PATCH` 는 `EditDeleted`(400)로 거절하고 스트림
+ * 조각의 쓰기도 같은 가드를 지난다(`edit_message_in_tx`·`stream_message_body_in_tx`). 그러니
+ * 「지운 뒤에 고친」 순서는 서버에 없고, 묘비 위에 편집 프레임이 도착한다면 재생·되쏘기 순서가
+ * 어긋나 지우기 전의 프레임이 늦게 온 것이다. 그것이 마지막 쓰기 우선으로 본문을 되살리면 사람이
+ * 지운 글이 화면에 다시 서는데, 무시해서 잃는 것은 없다 — 지운 줄은 그려지지 않는다. (서버가 스스로
+ * 다시 쓴 카드를 알리는 props 프레임 `emit_message_edited_in_tx` 는 지워진 행도 현재 모양, 곧
+ * `state: "deleted"` 로 싣는다. 든 줄이 이미 묘비라면 그것도 같은 말이다.)
+ * 이 규칙도 편집 문에만 있다. `reconcileMessages`(기록 페이지·`message.new`·꼬리 되읽기)는 여전히
+ * seq 로 접는 마지막 쓰기 우선이고, 묘비가 낀 그 길의 동작은 수리 전과 같다.
  */
 export function applyEditedMessage(
   state: TimelineState,
@@ -328,6 +342,7 @@ export function applyEditedMessage(
   const held = state.messages[lowerBound(state.messages, edited.seq)];
   if (held === undefined || held.seq !== edited.seq) return state;
   if (!uuidEq(held.id, edited.id)) return state;
+  if (held.state === "deleted") return state;
   return reconcileMessages(state, [edited]);
 }
 

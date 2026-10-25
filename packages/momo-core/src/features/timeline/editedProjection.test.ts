@@ -541,8 +541,10 @@ describe("편집 투영이 말하지 않는 장식은 이미 든 것을 지킨�
       ]);
 
       expect(after.messages).toHaveLength(1);
-      // 본문이 마지막 쓰기로 돌아오는 것은 수리 전부터의 동작이다(#4441 과 같다). 이 단정은
-      // 늦은 프레임이 **적용됐다**는 증거이고, 못 박는 것은 아래 둘이다.
+      // 이 시험은 **병합 문**(`reconcileMessages`)을 직접 지난다. 본문이 마지막 쓰기로 돌아오는
+      // 것은 병합의 수리 전부터의 동작이다(#4441 과 같다). 편집 프레임·PATCH 응답이 지나는 문
+      // (`applyEditedMessage`)은 묘비 위의 편집을 아예 받지 않는다 — 아래 3절. 이 단정은 늦은
+      // 프레임이 **적용됐다**는 증거이고, 못 박는 것은 아래 둘이다.
       expect(after.messages[0].body).toBe(QUOTING_EDITED_BODY);
       expect("thread" in after.messages[0]).toBe(false);
       expect("replyTo" in after.messages[0]).toBe(false);
@@ -757,4 +759,140 @@ describe("편집은 행을 만들지 않는다 — 든 행만 갱신한다 (#445
     expect(after.messages.map((m) => m.seq)).toEqual([3, 10, 11]);
     expect(after.oldestSeq).toBe(3);
   });
+});
+
+// ---------------------------------------------------------------------------
+// 3. 든 줄이 묘비면 묘비가 이긴다 — 편집 문의 가드 (`applyEditedMessage`, planner 결정)
+// ---------------------------------------------------------------------------
+
+describe("든 줄이 묘비면 늦게 온 편집은 묘비를 되살리지 않는다 — 편집 문의 가드 (#4450)", () => {
+  const DELETED_AT = 1_700_000_300_000;
+  const LATE_BODY = "지우기 전에 고친 글";
+
+  /** 롤업·인용을 든 seq 10 이 실시간 묘비(`message.deleted` → `applyTombstone`)로 지워진 창. */
+  function tombstonedWindow(): TimelineState {
+    return applyTombstone(
+      fold([
+        tailRow(11),
+        tailRow(10, { thread: ROLLUP, replyToId: QUOTED_ID, replyTo: QUOTE }),
+      ]),
+      tailRow(10).id,
+      DELETED_AT
+    );
+  }
+
+  it("전제: 묘비는 본문이 없고 장식을 든다 — 아래 단정이 헛돌지 않는다", () => {
+    const state = tombstonedWindow();
+
+    expect(state.messages.map((m) => m.seq)).toEqual([10, 11]);
+    expect(state.messages[0].state).toBe("deleted");
+    expect(state.messages[0].body).toBeUndefined();
+    expect(state.messages[0].replyTo).toEqual(QUOTE);
+    expect(threadRollup(state.messages[0])?.replyCount).toBe(3);
+  });
+
+  it("지운 줄 위에 늦게 온 message.edited 프레임은 무시된다 — 같은 state 이고 본문은 돌아오지 않는다", () => {
+    const state = tombstonedWindow();
+
+    const after = applyEditedMessage(state, editOf(10, LATE_BODY));
+
+    expect(after).toBe(state);
+    expect(after.messages[0].state).toBe("deleted");
+    expect(after.messages[0].body).toBeUndefined();
+    expect(after.messages[0].deletedAtMs).toBe(DELETED_AT);
+  });
+
+  it("수정 표시가 없는 늦은 프레임(스트림 조각·props 만 바꾼 갱신)도 같다 — 「수정됨」으로 가리지 않는다", () => {
+    const state = tombstonedWindow();
+    const late = payloadToMessage(
+      editedFrame({ id: tailRow(10).id, seq: 10 }, LATE_BODY, {
+        state: "sent",
+        edited_at_ms: null,
+        created_at_ms: tailRow(10).createdAtMs,
+      })
+    );
+    // 전제: 이 프레임은 편집 표지가 없다(그래도 가드는 「줄이 묘비인가」만 본다).
+    expect(late.state).toBe("sent");
+    expect(late.editedAtMs).toBeUndefined();
+
+    const after = applyEditedMessage(state, late);
+
+    expect(after).toBe(state);
+    expect(after.messages[0].body).toBeUndefined();
+  });
+
+  it("지운 뒤에 PATCH 응답이 닿아도 같다 — 다른 기기가 지웠고 내 편집 응답이 늦게 돌아온 경우", () => {
+    const state = tombstonedWindow();
+    const response = patchResponse(tailRow(10), LATE_BODY);
+    // 전제: 서버가 돌려주는 응답 모양(장식 키 없음, 수정됨 표지)이다.
+    expect(response.state).toBe("edited");
+    expect("thread" in response).toBe(false);
+
+    const after = applyEditedMessage(state, response);
+
+    expect(after).toBe(state);
+    expect(after.messages[0].state).toBe("deleted");
+    expect(after.messages[0].body).toBeUndefined();
+  });
+
+  it("기록 페이지가 실어 온 묘비도 같다 — 실시간 묘비만 막는 가드가 아니다", () => {
+    const tombstone: Message = {
+      ...tailRow(10, { thread: ROLLUP, replyToId: QUOTED_ID, replyTo: QUOTE }),
+      state: "deleted",
+      body: undefined,
+      deletedAtMs: DELETED_AT,
+    };
+    const state = fold([tailRow(11), tombstone]);
+    expect(state.messages[0].state).toBe("deleted");
+
+    const after = applyEditedMessage(state, editOf(10, LATE_BODY));
+
+    expect(after).toBe(state);
+    expect(after.messages[0].body).toBeUndefined();
+  });
+
+  it("대조: 같은 프레임이 병합 문을 직접 지나면 본문이 돌아온다 — 가드는 병합이 아니라 편집 문에 있다", () => {
+    // 병합(`reconcileMessages`)은 기록 페이지·`message.new`·꼬리 되읽기가 지나는 길이고 seq 로 접는
+    // 마지막 쓰기 우선이다(수리 전과 같다). 가드를 거기에 두면 그 길이 같이 막힌다.
+    const merged = reconcileMessages(tombstonedWindow(), [editOf(10, LATE_BODY)]);
+
+    expect(merged.messages[0].body).toBe(LATE_BODY);
+  });
+
+  it("묘비만 막는다 — 이미 고친 줄은 또 고쳐진다", () => {
+    const state = fold([
+      tailRow(11),
+      tailRow(10, {
+        state: "edited",
+        editedAtMs: 1_700_000_050_000,
+        body: "한 번 고친 글",
+      }),
+    ]);
+
+    const after = applyEditedMessage(state, editOf(10, "두 번째로 고친 글"));
+
+    expect(after).not.toBe(state);
+    expect(after.messages[0].body).toBe("두 번째로 고친 글");
+    expect(after.messages[0].state).toBe("edited");
+  });
+
+  it.each([
+    { tombstoned: 10, edited: 11, label: "묘비가 앞 줄, 편집이 뒤 줄" },
+    { tombstoned: 11, edited: 10, label: "묘비가 뒤 줄, 편집이 앞 줄" },
+  ])(
+    "지워진 줄 하나만 무시한다 — 같은 창의 다른 줄의 편집은 적용된다 ($label)",
+    ({ tombstoned, edited }) => {
+      const state = applyTombstone(window10to11(), tailRow(tombstoned).id, DELETED_AT);
+
+      const after = applyEditedMessage(state, editOf(edited, "산 줄의 편집"));
+
+      expect(after.messages.map((m) => m.seq)).toEqual([10, 11]);
+      const dead = after.messages.find((m) => m.seq === tombstoned);
+      const live = after.messages.find((m) => m.seq === edited);
+      expect(dead?.state).toBe("deleted");
+      expect(dead?.body).toBeUndefined();
+      expect(live?.state).toBe("edited");
+      expect(live?.body).toBe("산 줄의 편집");
+    }
+  );
 });
