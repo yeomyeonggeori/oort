@@ -24,7 +24,7 @@
 //!  POST …/messages { attachmentIds } → message_id set    (link_attachments_in_tx)
 //! ```
 //!
-//! Three properties the DB — not the client — owns:
+//! Four properties the DB — not the client — owns:
 //!
 //! 1. **Only the uploader can complete or bind.** Both statements scope on
 //!    `uploader_member_id`, so a member who learns another's attachment id can
@@ -34,6 +34,11 @@
 //! 3. **Only `complete` rows are ever projected.** Every read filters
 //!    `status = 'complete'`, so a pending or failed upload is invisible to
 //!    history, to the send echo, and to the realtime rail alike.
+//! 4. **A file no message carries is its uploader's alone to read.** The content
+//!    route's load ([`load_readable_attachment_in_tx`]) requires
+//!    `message_id IS NOT NULL` *or* the reader to be the uploader, so a draft in a
+//!    composer tray — or one a scheduled message holds until its deadline — is not
+//!    open to the channel before it is sent (ADR-0208 남는 위험 8, #4233).
 //!
 //! RLS FORCE (migration 017) is the tenant boundary underneath all of it: every
 //! function here takes a connection whose `app.workspace_id` GUC was bound by
@@ -270,45 +275,76 @@ pub async fn create_pending_upload_in_tx(
     Ok(id)
 }
 
-/// Read one attachment, optionally scoped to its uploader and optionally locked.
+/// Read one attachment **as its uploader**, optionally locked: the write-side
+/// load (the `complete` route), where the attachment has to be the caller's own.
 ///
-/// `uploader_member_id` is `Some` for the write-side routes (complete, link) and
-/// `None` for the read-side one (content), which is the whole authorization
-/// difference between them: **anyone in the channel may download a completed
-/// attachment; only the uploader may finish or bind one.**
+/// The uploader scope is required, not optional: there is no mode of this
+/// function that reads someone else's attachment. Reading it *to see it* is a
+/// different question with a different rule —
+/// [`load_readable_attachment_in_tx`].
 pub async fn load_attachment_in_tx(
     conn: &mut PgConnection,
     attachment_id: Uuid,
     channel_id: Uuid,
-    uploader_member_id: Option<Uuid>,
+    uploader_member_id: Uuid,
     for_update: bool,
 ) -> Result<Option<Attachment>, DbError> {
     let lock = if for_update { " FOR UPDATE" } else { "" };
-    let row = match uploader_member_id {
-        Some(uploader) => {
-            let sql = format!(
-                "SELECT {ATTACHMENT_COLS} FROM attachment \
-                  WHERE id = $1 AND channel_id = $2 AND uploader_member_id = $3{lock}"
-            );
-            sqlx::query(&sql)
-                .bind(attachment_id)
-                .bind(channel_id)
-                .bind(uploader)
-                .fetch_optional(&mut *conn)
-                .await?
-        }
-        None => {
-            let sql = format!(
-                "SELECT {ATTACHMENT_COLS} FROM attachment \
-                  WHERE id = $1 AND channel_id = $2{lock}"
-            );
-            sqlx::query(&sql)
-                .bind(attachment_id)
-                .bind(channel_id)
-                .fetch_optional(&mut *conn)
-                .await?
-        }
-    };
+    let sql = format!(
+        "SELECT {ATTACHMENT_COLS} FROM attachment \
+          WHERE id = $1 AND channel_id = $2 AND uploader_member_id = $3{lock}"
+    );
+    let row = sqlx::query(&sql)
+        .bind(attachment_id)
+        .bind(channel_id)
+        .bind(uploader_member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(decode_attachment)
+        .transpose()
+        .map_err(DbError::from)
+}
+
+/// Read one attachment on behalf of the member asking to **see** it — the
+/// content route's load (ADR-0208 남는 위험 8, #4233).
+///
+/// **An attachment is readable when a message carries it, or when the reader is
+/// the one who uploaded it.** `message_id IS NOT NULL` is "carried": a file a
+/// message carries belongs to the conversation, and the channel-membership check
+/// that precedes this call decides who the conversation is. A file **no** message
+/// carries is a draft — in a composer tray, or held by a scheduled message until
+/// its deadline (up to 120 days) — and it belongs to whoever is still writing the
+/// message: its uploader reads it, and no one else does, a workspace owner
+/// included. Before this narrowing every active member of the channel read a
+/// completed draft the moment it finished uploading.
+///
+/// The uploader's own read is not a courtesy. The sender's pending row (the web's
+/// `PendingRow`, the phone's optimistic echo) opens its attachment cards while the
+/// send is still in flight, and the send is what carries them.
+///
+/// A refusal is an absent row, so the caller answers the same flat 404 it gives an
+/// id that never existed and the route is no oracle for other people's drafts.
+/// `status` is deliberately **not** filtered here: whether the file is `complete`
+/// is the caller's answer to give (`pending` and `failed` are not content for
+/// anyone, their uploader included).
+pub async fn load_readable_attachment_in_tx(
+    conn: &mut PgConnection,
+    attachment_id: Uuid,
+    channel_id: Uuid,
+    reader_member_id: Uuid,
+) -> Result<Option<Attachment>, DbError> {
+    let sql = format!(
+        "SELECT {ATTACHMENT_COLS} FROM attachment \
+          WHERE id = $1 AND channel_id = $2 \
+            AND (message_id IS NOT NULL OR uploader_member_id = $3)"
+    );
+    let row = sqlx::query(&sql)
+        .bind(attachment_id)
+        .bind(channel_id)
+        .bind(reader_member_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     row.as_ref()
         .map(decode_attachment)
         .transpose()

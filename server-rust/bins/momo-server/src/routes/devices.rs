@@ -44,6 +44,7 @@ fn rejection(rejection: DeviceRejection) -> ApiError {
     let status = match rejection {
         DeviceRejection::NotActiveMember
         | DeviceRejection::DeviceOwnedByAnotherMember
+        | DeviceRejection::DeviceInAnotherWorkspace
         | DeviceRejection::TokenOwnedByAnotherMember => StatusCode::FORBIDDEN,
         DeviceRejection::PlatformImmutable => StatusCode::CONFLICT,
         DeviceRejection::DeviceNotFound => StatusCode::NOT_FOUND,
@@ -171,6 +172,16 @@ mod tests {
         assert_eq!(
             rejection(DeviceRejection::TokenOwnedByAnotherMember).status,
             StatusCode::FORBIDDEN
+        );
+        // #3978: terminal for the phone (it retries only a 409), so never a 409.
+        assert_eq!(
+            rejection(DeviceRejection::DeviceInAnotherWorkspace).status,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            rejection(DeviceRejection::DeviceInAnotherWorkspace).message,
+            "device is registered in another workspace",
+            "the wording the phone logs and the ADR draft quotes"
         );
         assert_eq!(
             rejection(DeviceRejection::NotActiveMember).status,

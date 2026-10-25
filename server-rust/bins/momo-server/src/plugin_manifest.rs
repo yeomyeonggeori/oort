@@ -8,6 +8,12 @@
 //! manifest cannot silently widen an older server's authority, and a manifest
 //! that grew a credential-shaped key is refused before it can be echoed.
 //!
+//! ADR-0113 증보 3 F1 (#4313) adds four optional display keys to `plugin` — `logoKey`
+//! (a client-bundled asset's name), `category` (a closed list), `starterPrompts` (0~3
+//! example sentences, plain text, whose `tool` must be a read (R) or approval-required
+//! write (A) tool of the same manifest) and `websiteURL` (HTTPS). Remote image URL keys
+//! (`iconURL`, `logoURL`, `imageURL`, …) stay refused — by the exact key set, on purpose.
+//!
 //! Pure: no SQL, no HTTP, no clock. The digest is computed **in SQL** by the
 //! caller (`'sha256:' || encode(sha256(convert_to(manifest::text,'UTF8')),'hex')`,
 //! the same expression migrations 013/015/031/059 used to seed it) because only
@@ -60,6 +66,23 @@ pub const ALLOWED_APPROVAL_POLICIES: [&str; 4] = ["none", "require_approval", "a
 pub const ALLOWED_APPROVAL_TIERS: [&str; 3] = ["read_only", "workspace_write", "network_write"];
 pub const ALLOWED_INSTALL_ROLES: [&str; 2] = ["owner", "admin"];
 
+/// ADR-0113 증보 3 F1 — the closed `plugin.category` list. A new category is an
+/// ADR change, not a manifest edit, so an unknown value is refused.
+pub const ALLOWED_CATEGORIES: [&str; 5] = [
+    "communication",
+    "productivity",
+    "developer",
+    "files",
+    "project",
+];
+/// ADR-0113 증보 3 F1 — `plugin.logoKey` is `[a-z0-9-]{1,32}`: the name of a
+/// client-bundled asset, never a URL.
+pub const MAX_LOGO_KEY_BYTES: usize = 32;
+/// ADR-0113 증보 3 F1 — `plugin.starterPrompts` holds 0~3 entries …
+pub const MAX_STARTER_PROMPTS: usize = 3;
+/// … each `text` 1~140 characters (counted as characters, not bytes).
+pub const MAX_STARTER_PROMPT_CHARS: usize = 140;
+
 /// A key whose lower-cased name contains any of these is refused anywhere in
 /// the manifest (ADR-0113 D1 custody A: the server never holds a provider
 /// credential, so a manifest has no business naming one).
@@ -86,15 +109,36 @@ pub struct ValidatedPluginTool {
     pub schema_digest: String,
 }
 
+/// One `plugin.starterPrompts[]` entry (ADR-0113 증보 3 F1/F7), already checked:
+/// plain text, and a `tool` that is a read (R) or approval-required write (A) tool
+/// of the same manifest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidatedStarterPrompt {
+    pub text: String,
+    pub tool: String,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ValidatedPluginManifest {
     pub plugin_id: String,
     pub name: String,
     pub version: String,
     pub description: String,
+    /// `plugin.publisher.name` — the one developer field (ADR-0113 증보 3 F1: no
+    /// second developer key is added, so the list and the detail cannot disagree
+    /// with the manifest).
+    pub publisher_name: String,
     pub terms_url: Option<String>,
     pub privacy_policy_url: Option<String>,
     pub icon_text: Option<String>,
+    /// ADR-0113 증보 3 F1 — the name of a client-bundled logo asset.
+    pub logo_key: Option<String>,
+    /// ADR-0113 증보 3 F1 — one of [`ALLOWED_CATEGORIES`].
+    pub category: Option<String>,
+    /// ADR-0113 증보 3 F1 — 0~3 example sentences (empty = none declared).
+    pub starter_prompts: Vec<ValidatedStarterPrompt>,
+    /// ADR-0113 증보 3 F1 — an HTTPS link, navigation only.
+    pub website_url: Option<String>,
     pub mcp_url: String,
     pub mcp_transport: String,
     pub hosted: bool,
@@ -179,7 +223,19 @@ pub fn validate_manifest(manifest_text: &str) -> Checked<ValidatedPluginManifest
         "license",
         "provenance",
     ];
-    let optional_plugin_keys = ["termsURL", "privacyPolicyURL", "iconText"];
+    // ADR-0113 증보 3 F1: four more optional display keys. Remote image URLs
+    // (`iconURL`, `logoURL`, `imageURL`, …) are deliberately **not** here — the
+    // exact key set below refuses them (a vendor URL would leak who looks at the
+    // catalog and breaks under the desktop CSP's `img-src 'self' data:`).
+    let optional_plugin_keys = [
+        "termsURL",
+        "privacyPolicyURL",
+        "iconText",
+        "logoKey",
+        "category",
+        "starterPrompts",
+        "websiteURL",
+    ];
     let has_all_required = required_plugin_keys
         .iter()
         .all(|key| plugin.contains_key(*key));
@@ -202,11 +258,17 @@ pub fn validate_manifest(manifest_text: &str) -> Checked<ValidatedPluginManifest
     let terms_url = optional_https_url(plugin, "termsURL", "plugin")?;
     let privacy_policy_url = optional_https_url(plugin, "privacyPolicyURL", "plugin")?;
     let icon_text = optional_icon_text(plugin, "iconText", "plugin")?;
+    let logo_key = optional_logo_key(plugin, "logoKey", "plugin")?;
+    let category = optional_category(plugin, "category", "plugin")?;
+    let website_url = optional_https_url(plugin, "websiteURL", "plugin")?;
+    // Shape and text rules here; the `tool` of each prompt is judged after the
+    // tools below, because it needs their grades.
+    let starter_prompts = optional_starter_prompts(plugin, "starterPrompts", "plugin")?;
 
     let publisher = object(plugin, "publisher", "plugin")?;
     require_keys(publisher, &["id", "name", "verified"], "plugin.publisher")?;
     nonempty(string(publisher, "id", "plugin.publisher")?, "publisher id")?;
-    nonempty(
+    let publisher_name = nonempty(
         string(publisher, "name", "plugin.publisher")?,
         "publisher name",
     )?;
@@ -431,14 +493,36 @@ pub fn validate_manifest(manifest_text: &str) -> Checked<ValidatedPluginManifest
         return rejected("approvalTier must map exactly the declared tools");
     }
 
+    // ADR-0113 증보 3 F1/F7: a starter prompt is an example the member taps to fill
+    // the composer, so the tool it names must be one this manifest declares and
+    // one that can be tried without a second person seeing it: a read (R) or an
+    // approval-required write (A). A grade-B tool (always-ask, others see the
+    // effect) or an admin tool would turn a decorative card into a nudge toward
+    // the riskiest call.
+    for prompt in &starter_prompts {
+        let Some(tool) = tools.iter().find(|tool| tool.name == prompt.tool) else {
+            return rejected("starter prompt tool is not a tool of this manifest");
+        };
+        if !is_starter_prompt_grade(tool) {
+            return rejected(
+                "starter prompt tool must be a read (R) or approval-required write (A) tool",
+            );
+        }
+    }
+
     Ok(ValidatedPluginManifest {
         plugin_id: plugin_id.to_string(),
         name: name.to_string(),
         version: version.to_string(),
         description: description.to_string(),
+        publisher_name: publisher_name.to_string(),
         terms_url,
         privacy_policy_url,
         icon_text,
+        logo_key,
+        category,
+        starter_prompts,
+        website_url,
         mcp_url: mcp_url.to_string(),
         mcp_transport: mcp_transport.to_string(),
         hosted,
@@ -719,6 +803,102 @@ fn optional_icon_text(object: &Object, key: &str, path: &str) -> Checked<Option<
     }
 }
 
+/// `^[a-z0-9-]{1,32}$` — ADR-0113 증보 3 F1 `plugin.logoKey`, the name of a
+/// client-bundled asset. Not a path and not a URL: nothing here may carry a `.`
+/// or a `/`.
+pub fn is_logo_key(value: &str) -> bool {
+    (1..=MAX_LOGO_KEY_BYTES).contains(&value.len())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn optional_logo_key(object: &Object, key: &str, path: &str) -> Checked<Option<String>> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(Value::String(value)) if is_logo_key(value) => Ok(Some(value.clone())),
+        Some(_) => rejected(format!(
+            "{path}.{key} must be 1...{MAX_LOGO_KEY_BYTES} lowercase letters, digits or hyphens"
+        )),
+    }
+}
+
+fn optional_category(object: &Object, key: &str, path: &str) -> Checked<Option<String>> {
+    match object.get(key) {
+        None => Ok(None),
+        Some(Value::String(value)) if ALLOWED_CATEGORIES.contains(&value.as_str()) => {
+            Ok(Some(value.clone()))
+        }
+        Some(_) => rejected(format!("{path}.{key} is not a known category")),
+    }
+}
+
+/// The text rules of one starter prompt (ADR-0113 증보 3 F1): 1~140 characters,
+/// no control character, nothing shaped like a URL. The renderer draws it as plain
+/// text (no markdown), so the URL ban is what keeps a manifest from smuggling a
+/// remote image or a link through an example sentence.
+fn check_starter_prompt_text(text: &str) -> Checked<()> {
+    let characters = text.chars().count();
+    if text.trim() != text || characters == 0 || characters > MAX_STARTER_PROMPT_CHARS {
+        return rejected(format!(
+            "starter prompt text must be 1...{MAX_STARTER_PROMPT_CHARS} characters"
+        ));
+    }
+    if text.chars().any(char::is_control) {
+        return rejected("starter prompt text must not contain control characters");
+    }
+    let lowered = text.to_lowercase();
+    if ["://", "//", "www."]
+        .iter()
+        .any(|shape| lowered.contains(shape))
+    {
+        return rejected("starter prompt text must not look like a URL");
+    }
+    Ok(())
+}
+
+/// `plugin.starterPrompts`: absent or an array of 0~3 exact `{text, tool}` objects.
+/// The `tool` is only shape-checked here (a non-empty string); membership and grade
+/// need the parsed tools and are judged by the caller.
+fn optional_starter_prompts(
+    object: &Object,
+    key: &str,
+    path: &str,
+) -> Checked<Vec<ValidatedStarterPrompt>> {
+    if !object.contains_key(key) {
+        return Ok(Vec::new());
+    }
+    let entries = array(object, key, path)?;
+    if entries.len() > MAX_STARTER_PROMPTS {
+        return rejected(format!(
+            "{path}.{key} must have at most {MAX_STARTER_PROMPTS} entries"
+        ));
+    }
+    let mut prompts = Vec::with_capacity(entries.len());
+    for (index, entry) in entries.iter().enumerate() {
+        let entry_path = format!("{path}.{key}[{index}]");
+        let Some(entry) = entry.as_object() else {
+            return rejected(format!("{entry_path} must be an object"));
+        };
+        require_keys(entry, &["text", "tool"], &entry_path)?;
+        let text = string(entry, "text", &entry_path)?;
+        check_starter_prompt_text(text)?;
+        let tool = nonempty(string(entry, "tool", &entry_path)?, "starter prompt tool")?;
+        prompts.push(ValidatedStarterPrompt {
+            text: text.to_string(),
+            tool: tool.to_string(),
+        });
+    }
+    Ok(prompts)
+}
+
+/// ADR-0113 증보 2 E4 grades R and A: `read`, or a `write` that asks every time
+/// (`require_approval`). Grade B (`always`) and `admin` are not starter-prompt
+/// material.
+fn is_starter_prompt_grade(tool: &ValidatedPluginTool) -> bool {
+    tool.risk == "read" || (tool.risk == "write" && tool.approval_policy == "require_approval")
+}
+
 /// `^sha256:[0-9a-f]{64}$`
 pub fn is_sha256_digest(value: &str) -> bool {
     value.strip_prefix("sha256:").is_some_and(|hex| {
@@ -855,6 +1035,41 @@ mod tests {
     /// Migration 143 (#3944): the seeded manifests, one `$manifest$ … $manifest$` block each.
     const MIGRATION_143: &str =
         include_str!("../../../../server/Migrations/143_official_catalog_c_s1b.sql");
+
+    /// Migration 015: the team drive's seed (its publisher name is what 149 renames).
+    const MIGRATION_015: &str =
+        include_str!("../../../../server/Migrations/015_drive_mcp_plugin.sql");
+
+    /// Migration 149 (#4313): the display-field patches, one `$display$ … $display$` block each.
+    const MIGRATION_149: &str =
+        include_str!("../../../../server/Migrations/149_official_catalog_display_fields.sql");
+
+    /// The four `plugin` keys migration 149 adds (ADR-0113 증보 3 F1).
+    const DISPLAY_KEYS: [&str; 4] = ["logoKey", "category", "websiteURL", "starterPrompts"];
+
+    /// `manifest` with the four display keys removed from `plugin`: what 143 (or 015, for the team
+    /// drive) seeded before 149 patched it.
+    fn without_display_keys(mut manifest: Value) -> Value {
+        let plugin = manifest["plugin"].as_object_mut().expect("plugin object");
+        for key in DISPLAY_KEYS {
+            plugin.remove(key);
+        }
+        manifest
+    }
+
+    /// The team drive before 149. 015 seeded it and 059 later translated its tool texts, so the 015
+    /// file is not the seed byte for byte: this is the fixture minus the four display keys, with the
+    /// publisher name 015 wrote ("momo", the repository codename) put back. The literal is anchored to
+    /// 015's own text, so it is not invented here.
+    fn team_drive_before_149(fixture: &Value) -> Value {
+        assert!(
+            MIGRATION_015.contains(r#""publisher":{"id":"momo","name":"momo","verified":true}"#),
+            "015 seeded the team drive's publisher name as momo"
+        );
+        let mut seeded = without_display_keys(fixture.clone());
+        seeded["plugin"]["publisher"]["name"] = json!("momo");
+        seeded
+    }
 
     fn github() -> Value {
         serde_json::from_str(FIXTURES[0].1).expect("github fixture parses")
@@ -1390,6 +1605,10 @@ mod tests {
 
     /// #3944: the migration seeds exactly the fixtures it claims to (the fixture is canon,
     /// `Fixtures/plugin-manifests/` is also what the read conformance test compares to).
+    ///
+    /// #4313: since 149 the fixtures carry the four display keys 143 never had, so 143 is held to
+    /// the fixture **without** them, and 149's patch is held to the keys themselves
+    /// ([`migration_149_display_patch_turns_the_seeds_into_the_fixtures`]).
     #[test]
     fn migration_143_seeds_equal_the_fixtures() {
         let seeded = migration_143_manifests();
@@ -1402,9 +1621,83 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture for {id}"));
             let fixture: Value = serde_json::from_str(text).expect("fixture");
             assert_eq!(
-                manifest, fixture,
+                manifest,
+                without_display_keys(fixture),
                 "{id}: migration 143 drifted from its fixture"
             );
+        }
+    }
+
+    /// `(plugin id, patch)` for every `$display$` block of migration 149, in file order.
+    fn migration_149_patches() -> Vec<(String, Value)> {
+        let parts: Vec<&str> = MIGRATION_149.split("$display$").collect();
+        parts
+            .chunks(2)
+            .filter(|pair| pair.len() == 2)
+            .map(|pair| {
+                let id = pair[0]
+                    .rsplit('\'')
+                    .nth(1)
+                    .expect("a quoted plugin id precedes each $display$ block")
+                    .to_string();
+                (
+                    id,
+                    serde_json::from_str(pair[1]).expect("display patch parses"),
+                )
+            })
+            .collect()
+    }
+
+    /// #4313 (ADR-0113 증보 3 수용 3): migration 149 is a jsonb patch over the seeds, so the three
+    /// artefacts that must agree are held together here without a database: the seed 143 (or 015) wrote,
+    /// the patch 149 applies (`plugin || patch`, what `jsonb_set(manifest, '{plugin}', …)` does), and the
+    /// fixture the read conformance test and the web suite share. The registry half (the real UPDATE and
+    /// its digest) is `the_display_patch_*` in `plugin_registry_read_conformance_pg.rs`.
+    #[test]
+    fn migration_149_display_patch_turns_the_seeds_into_the_fixtures() {
+        let patches = migration_149_patches();
+        assert_eq!(patches.len(), FIXTURES.len(), "one patch per official app");
+        let mut patched_ids: Vec<&str> = patches.iter().map(|(id, _)| id.as_str()).collect();
+        let mut fixture_ids: Vec<&str> = FIXTURES.iter().map(|(id, _)| *id).collect();
+        patched_ids.sort_unstable();
+        fixture_ids.sort_unstable();
+        assert_eq!(patched_ids, fixture_ids, "149 patches exactly the seven");
+
+        let seeded_143 = migration_143_manifests();
+        for (id, patch) in patches {
+            let patch = patch.as_object().expect("a patch is an object");
+            for key in patch.keys() {
+                // The four display keys, and — for the oort-hosted team drive only — the publisher
+                // object, whose name 015 seeded as the repository codename (planner 결정 3).
+                let allowed = DISPLAY_KEYS.contains(&key.as_str())
+                    || (key == "publisher" && id == "com.momo.plugins.drive");
+                assert!(allowed, "{id}: {key} is not a display key");
+            }
+            let (_, text) = FIXTURES
+                .iter()
+                .find(|(fixture_id, _)| *fixture_id == id)
+                .unwrap_or_else(|| panic!("no fixture for {id}"));
+            let fixture: Value = serde_json::from_str(text).expect("fixture");
+            // The seed this patch lands on: 143's block when 143 seeded the app, else (the team
+            // drive, 015) what it looked like before 149.
+            let mut seeded = seeded_143
+                .iter()
+                .find(|manifest| manifest["plugin"]["id"] == json!(id))
+                .cloned()
+                .unwrap_or_else(|| team_drive_before_149(&fixture));
+            let plugin = seeded["plugin"].as_object_mut().expect("plugin");
+            for (key, value) in patch {
+                plugin.insert(key.clone(), value.clone());
+            }
+            assert_eq!(seeded, fixture, "{id}: seed + migration 149 != fixture");
+            // The developer column never shows the repository codename (planner 결정 3).
+            assert_ne!(
+                fixture["plugin"]["publisher"]["name"],
+                json!("momo"),
+                "{id}: publisher.name"
+            );
+            // …and the result is admitted: the patch cannot ship a manifest the validator refuses.
+            validate_manifest(text).unwrap_or_else(|error| panic!("{id}: {error}"));
         }
     }
 
@@ -1492,5 +1785,498 @@ mod tests {
             Value::Array(items) => items.iter().any(is_secret_like_key_anywhere),
             _ => false,
         }
+    }
+
+    // ---- ADR-0113 증보 3 F1: display fields (#4313) ----------------------------------------------
+
+    fn gmail() -> Value {
+        serde_json::from_str(FIXTURES[4].1).expect("gmail fixture parses")
+    }
+
+    /// The github fixture without its display keys, so a test starts from the pre-F1 shape and adds
+    /// only the field it is about.
+    fn plain_github() -> Value {
+        without_display_keys(github())
+    }
+
+    fn prompt(text: &str, tool: &str) -> Value {
+        json!({ "text": text, "tool": tool })
+    }
+
+    /// 수용 1: the four fields are admitted inside their limits — and the boundaries are exact
+    /// (32 bytes of logoKey, 3 prompts, 140 characters counted as characters, not bytes).
+    #[test]
+    fn display_fields_are_admitted_within_their_limits() {
+        let mut manifest = plain_github();
+        manifest["plugin"]["logoKey"] = json!("a".repeat(MAX_LOGO_KEY_BYTES));
+        manifest["plugin"]["category"] = json!("developer");
+        manifest["plugin"]["websiteURL"] = json!("https://github.com");
+        // 140 Korean characters = 420 bytes: the limit is characters.
+        let longest = "가".repeat(MAX_STARTER_PROMPT_CHARS);
+        manifest["plugin"]["starterPrompts"] = json!([
+            prompt(&longest, "github.get_commit"),
+            prompt("저장소의 열린 이슈를 정리해 줘요.", "github.list_issues"),
+            prompt("a", "github.search_issues"),
+        ]);
+        let admitted = validate_manifest(&manifest.to_string()).expect("display fields admitted");
+        assert_eq!(admitted.logo_key.as_deref(), Some("a".repeat(32).as_str()));
+        assert_eq!(admitted.category.as_deref(), Some("developer"));
+        assert_eq!(admitted.website_url.as_deref(), Some("https://github.com"));
+        assert_eq!(admitted.starter_prompts.len(), 3);
+        assert_eq!(admitted.starter_prompts[0].text.chars().count(), 140);
+        assert_eq!(admitted.starter_prompts[2].tool, "github.search_issues");
+        // The developer column is the existing publisher name, not a second field.
+        assert_eq!(admitted.publisher_name, "GitHub");
+
+        // Every closed-list category is admitted; zero prompts is a valid list; every field is optional.
+        for category in ALLOWED_CATEGORIES {
+            let mut each = plain_github();
+            each["plugin"]["category"] = json!(category);
+            validate_manifest(&each.to_string())
+                .unwrap_or_else(|error| panic!("{category}: {error}"));
+        }
+        let mut empty = plain_github();
+        empty["plugin"]["starterPrompts"] = json!([]);
+        assert!(validate_manifest(&empty.to_string())
+            .expect("an empty list is admitted")
+            .starter_prompts
+            .is_empty());
+        let bare = validate_manifest(&plain_github().to_string()).expect("no display field at all");
+        assert_eq!(bare.logo_key, None);
+        assert_eq!(bare.category, None);
+        assert_eq!(bare.website_url, None);
+        assert!(bare.starter_prompts.is_empty());
+    }
+
+    /// 수용 1, the other side of every limit: each is refused with its own reason.
+    #[test]
+    fn display_fields_outside_their_limits_are_refused() {
+        let too_long = "가".repeat(MAX_STARTER_PROMPT_CHARS + 1);
+        let cases: Vec<(&str, Value, &str)> = vec![
+            (
+                "/plugin/logoKey",
+                json!("a".repeat(MAX_LOGO_KEY_BYTES + 1)),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!(""),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!("GitHub"),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!("git_hub"),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!("github.svg"),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!("../github"),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!("https://cdn.example.com/github.svg"),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/logoKey",
+                json!(7),
+                "plugin.logoKey must be 1...32 lowercase letters, digits or hyphens",
+            ),
+            (
+                "/plugin/category",
+                json!("Developer"),
+                "plugin.category is not a known category",
+            ),
+            (
+                "/plugin/category",
+                json!("tools"),
+                "plugin.category is not a known category",
+            ),
+            (
+                "/plugin/category",
+                json!(["developer"]),
+                "plugin.category is not a known category",
+            ),
+            (
+                "/plugin/websiteURL",
+                json!("http://github.com"),
+                "plugin.websiteURL must be an HTTPS URL",
+            ),
+            (
+                "/plugin/websiteURL",
+                json!("javascript:alert(1)"),
+                "plugin.websiteURL must be an HTTPS URL",
+            ),
+            (
+                "/plugin/websiteURL",
+                json!("https://user@github.com"),
+                "plugin.websiteURL must be an HTTPS URL",
+            ),
+            (
+                "/plugin/websiteURL",
+                json!("github.com"),
+                "plugin.websiteURL must be an HTTPS URL",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!("hi"),
+                "plugin.starterPrompts must be an array",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([
+                    prompt("하나", "github.get_commit"),
+                    prompt("둘", "github.get_commit"),
+                    prompt("셋", "github.get_commit"),
+                    prompt("넷", "github.get_commit"),
+                ]),
+                "plugin.starterPrompts must have at most 3 entries",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!(["hi"]),
+                "plugin.starterPrompts[0] must be an object",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([{ "text": "안녕", "tool": "github.get_commit", "url": "https://x.example" }]),
+                "unknown or missing field at plugin.starterPrompts[0]",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([{ "text": "안녕" }]),
+                "unknown or missing field at plugin.starterPrompts[0]",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([{ "text": 1, "tool": "github.get_commit" }]),
+                "plugin.starterPrompts[0].text must be a string",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([prompt("", "github.get_commit")]),
+                "starter prompt text must be 1...140 characters",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([prompt("   ", "github.get_commit")]),
+                "starter prompt text must be 1...140 characters",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([prompt(" 앞에 공백", "github.get_commit")]),
+                "starter prompt text must be 1...140 characters",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([prompt(&too_long, "github.get_commit")]),
+                "starter prompt text must be 1...140 characters",
+            ),
+            (
+                "/plugin/starterPrompts",
+                json!([{ "text": "안녕", "tool": "" }]),
+                "starter prompt tool must not be empty",
+            ),
+        ];
+        for (path, value, expected) in cases {
+            let mut manifest = plain_github();
+            let (parent, leaf) = path.rsplit_once('/').expect("path");
+            manifest
+                .pointer_mut(parent)
+                .and_then(Value::as_object_mut)
+                .expect("parent object")
+                .insert(leaf.to_string(), value);
+            assert_eq!(reason(&manifest), expected, "{path}");
+        }
+    }
+
+    /// 수용 1: **no remote image URL key is admitted** (`iconURL`, `logoURL`, `imageURL` and their
+    /// spellings): the exact `plugin` key set refuses all of them, whatever the value. The sabotage
+    /// for this test is adding any of them to the optional key list — then an `https` image URL would
+    /// be admitted and echoed to every client, which the desktop CSP cannot draw and the vendor could
+    /// watch.
+    #[test]
+    fn a_remote_image_url_key_is_refused() {
+        for key in [
+            "iconURL",
+            "logoURL",
+            "imageURL",
+            "iconUrl",
+            "logoUrl",
+            "icon",
+            "logo",
+            "image",
+            "imageUrl",
+            "logo_url",
+            "avatarURL",
+            "bannerURL",
+            "thumbnailURL",
+        ] {
+            for value in [
+                json!("https://cdn.example.com/logo.svg"),
+                json!("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="),
+                json!(""),
+            ] {
+                let mut manifest = plain_github();
+                manifest["plugin"][key] = value;
+                assert_eq!(
+                    reason(&manifest),
+                    "unknown or missing field at plugin",
+                    "{key} must not be an admitted plugin key"
+                );
+            }
+        }
+        // A starter prompt cannot carry one either (exact `{text, tool}` keys).
+        let mut nested = plain_github();
+        nested["plugin"]["starterPrompts"] = json!([{ "text": "안녕", "tool": "github.get_commit", "imageURL": "https://x.example/a.png" }]);
+        assert_eq!(
+            reason(&nested),
+            "unknown or missing field at plugin.starterPrompts[0]"
+        );
+    }
+
+    /// 수용 1: the text of a prompt is plain text — nothing URL-shaped (`://`, `//`, `www.`, any case)
+    /// and no control character. This is what stops a markdown image or link from riding an example
+    /// sentence: the renderer does not interpret markdown, but a client that ever did would find nothing
+    /// here to load.
+    #[test]
+    fn a_starter_prompt_text_cannot_carry_a_url_or_a_control_character() {
+        for text in [
+            "https://example.com 을 열어 줘요",
+            "http://example.com",
+            "![로고](//evil.example/x.png)",
+            "//evil.example/x.png",
+            "여기 가 줘요 www.example.com",
+            "여기 가 줘요 WWW.Example.com",
+            "ftp://x.example",
+        ] {
+            let mut manifest = plain_github();
+            manifest["plugin"]["starterPrompts"] = json!([prompt(text, "github.get_commit")]);
+            assert_eq!(
+                reason(&manifest),
+                "starter prompt text must not look like a URL",
+                "{text}"
+            );
+        }
+        // A control character inside the sentence …
+        for text in [
+            "두 줄\n입니다",
+            "탭\t입니다",
+            "\u{7f}",
+            "널\u{0}문자",
+            "가운데\r입니다",
+        ] {
+            let mut manifest = plain_github();
+            manifest["plugin"]["starterPrompts"] = json!([prompt(text, "github.get_commit")]);
+            assert_eq!(
+                reason(&manifest),
+                "starter prompt text must not contain control characters",
+                "{text:?}"
+            );
+        }
+        // … and one at the edge is whitespace the trim rule refuses first.
+        for text in ["끝에\r", "끝에\n", "\t앞에"] {
+            let mut manifest = plain_github();
+            manifest["plugin"]["starterPrompts"] = json!([prompt(text, "github.get_commit")]);
+            assert_eq!(
+                reason(&manifest),
+                "starter prompt text must be 1...140 characters",
+                "{text:?}"
+            );
+        }
+        // A single slash is ordinary prose and stays admitted.
+        let mut slash = plain_github();
+        slash["plugin"]["starterPrompts"] =
+            json!([prompt("이슈/PR 목록을 보여 줘요.", "github.list_issues")]);
+        validate_manifest(&slash.to_string()).expect("a single slash is not a URL");
+    }
+
+    /// 수용 2: `starterPrompts.tool` must be a tool of **this** manifest and grade R or A.
+    /// The sabotages: delete the membership check (the missing-tool case goes green-through) or make
+    /// `is_starter_prompt_grade` accept everything (the B and admin cases go green-through).
+    #[test]
+    fn a_starter_prompt_tool_must_be_a_read_or_approval_required_write_tool_of_this_manifest() {
+        // R and A are admitted: gmail.search_threads is R, gmail.create_draft is A.
+        let mut gmail_ok = without_display_keys(gmail());
+        gmail_ok["plugin"]["starterPrompts"] = json!([
+            prompt("메일을 찾아 줘요.", "gmail.search_threads"),
+            prompt("초안을 만들어 줘요.", "gmail.create_draft"),
+        ]);
+        validate_manifest(&gmail_ok.to_string()).expect("R and A tools are admitted");
+
+        // Not a tool of this manifest: another app's tool, a made-up name, and a bare vendor name.
+        for tool in [
+            "gmail.search_threads",
+            "github.nonexistent",
+            "get_commit",
+            "GITHUB.get_commit",
+        ] {
+            let mut manifest = plain_github();
+            manifest["plugin"]["starterPrompts"] = json!([prompt("안녕", tool)]);
+            assert_eq!(
+                reason(&manifest),
+                "starter prompt tool is not a tool of this manifest",
+                "{tool}"
+            );
+        }
+
+        // Grade B (write + always): github.add_issue_comment and gmail.label_thread.
+        let mut b_github = plain_github();
+        b_github["plugin"]["starterPrompts"] =
+            json!([prompt("댓글을 달아 줘요.", "github.add_issue_comment")]);
+        let mut b_gmail = without_display_keys(gmail());
+        b_gmail["plugin"]["starterPrompts"] =
+            json!([prompt("라벨을 붙여 줘요.", "gmail.label_thread")]);
+        for manifest in [b_github, b_gmail] {
+            assert_eq!(
+                reason(&manifest),
+                "starter prompt tool must be a read (R) or approval-required write (A) tool"
+            );
+        }
+
+        // Admin tools (always-or-deny, network_write) are not starter material either.
+        let mut admin = plain_github();
+        admin["mcp"]["tools"][0]["risk"] = json!("admin");
+        admin["mcp"]["tools"][0]["approvalPolicy"] = json!("deny");
+        admin["momo"]["approvalTier"]["github.get_commit"] = json!("network_write");
+        admin["plugin"]["starterPrompts"] = json!([prompt("안녕", "github.get_commit")]);
+        assert_eq!(
+            reason(&admin),
+            "starter prompt tool must be a read (R) or approval-required write (A) tool"
+        );
+
+        // The grade is the tool's own, whatever order the prompts name them in: the second prompt's
+        // tool is judged too, not only the first.
+        let mut second = plain_github();
+        second["plugin"]["starterPrompts"] = json!([
+            prompt("읽기", "github.get_commit"),
+            prompt("댓글", "github.add_issue_comment"),
+        ]);
+        assert_eq!(
+            reason(&second),
+            "starter prompt tool must be a read (R) or approval-required write (A) tool"
+        );
+    }
+
+    /// The display fields do not weaken any existing gate: a secret-shaped key is still refused
+    /// inside a starter prompt object, and the fixtures with display fields still pass the digest gate.
+    #[test]
+    fn display_fields_do_not_open_the_secret_key_gate() {
+        let mut manifest = plain_github();
+        manifest["plugin"]["starterPrompts"] =
+            json!([{ "text": "안녕", "tool": "github.get_commit", "api_key": "x" }]);
+        assert!(reason(&manifest).starts_with("secret-like manifest field is forbidden"));
+        let (id, text) = FIXTURES[0];
+        validate_registry_manifest(id, text, digest_ok(), digest_ok()).expect("fixture admitted");
+    }
+
+    /// ADR-0113 증보 3 F1/F2: what the seven official apps actually declare. The logo keys are the
+    /// contract with the clients' bundled assets (#4314's test reads the same fixtures and holds them
+    /// to the bundle ∪ the text-tile list), so a rename here is a visible diff in this test.
+    #[test]
+    fn the_official_apps_declare_their_display_fields() {
+        let expected: [(&str, &str, &str, Option<&str>); 7] = [
+            ("com.momo.plugins.drive", "google-drive", "files", None),
+            (
+                "com.momo.plugins.github",
+                "github",
+                "developer",
+                Some("https://github.com"),
+            ),
+            (
+                "com.momo.plugins.gmail",
+                "gmail",
+                "communication",
+                Some("https://mail.google.com"),
+            ),
+            (
+                "com.momo.plugins.google-calendar",
+                "google-calendar",
+                "productivity",
+                Some("https://calendar.google.com"),
+            ),
+            (
+                "com.momo.plugins.google-drive",
+                "google-drive",
+                "files",
+                Some("https://drive.google.com"),
+            ),
+            (
+                "com.momo.plugins.linear",
+                "linear",
+                "project",
+                Some("https://linear.app"),
+            ),
+            (
+                "com.momo.plugins.notion",
+                "notion",
+                "productivity",
+                Some("https://www.notion.com"),
+            ),
+        ];
+        for (id, logo, category, website) in expected {
+            let (_, text) = FIXTURES
+                .iter()
+                .find(|(fixture_id, _)| *fixture_id == id)
+                .unwrap_or_else(|| panic!("no fixture for {id}"));
+            let manifest = validate_manifest(text).unwrap_or_else(|error| panic!("{id}: {error}"));
+            assert_eq!(manifest.logo_key.as_deref(), Some(logo), "{id} logoKey");
+            assert_eq!(
+                manifest.category.as_deref(),
+                Some(category),
+                "{id} category"
+            );
+            assert_eq!(manifest.website_url.as_deref(), website, "{id} websiteURL");
+            assert_eq!(manifest.starter_prompts.len(), 3, "{id} starterPrompts");
+            assert!(!manifest.publisher_name.is_empty(), "{id} publisher");
+            assert_ne!(
+                manifest.publisher_name, "momo",
+                "{id}: the developer column shows the product name, not the repository codename"
+            );
+            // Every example is a sentence the app can really act on: a tool it declares (admission
+            // checked the grade), and none of the apps' examples promises a send.
+            for starter in &manifest.starter_prompts {
+                assert!(
+                    manifest.tools.iter().any(|tool| tool.name == starter.tool),
+                    "{id}: {}",
+                    starter.tool
+                );
+                assert!(
+                    !starter.tool.to_lowercase().contains("send"),
+                    "{id}: {} names a send tool",
+                    starter.tool
+                );
+            }
+        }
+        // The oort-hosted team drive names its developer by the product (planner 결정 3).
+        assert_eq!(
+            validate_manifest(FIXTURES[3].1)
+                .expect("team drive")
+                .publisher_name,
+            "oort"
+        );
+        // Gmail has no send: its draft example says the person sends it themselves.
+        let gmail = validate_manifest(FIXTURES[4].1).expect("gmail");
+        let draft = gmail
+            .starter_prompts
+            .iter()
+            .find(|starter| starter.tool == "gmail.create_draft")
+            .expect("the Gmail draft example");
+        assert!(
+            draft.text.contains("초안") && draft.text.contains("직접"),
+            "{}",
+            draft.text
+        );
     }
 }
