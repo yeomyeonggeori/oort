@@ -244,8 +244,10 @@ END $$;
 -- -----------------------------------------------------------------------------
 -- ROLLBACK (manual; run BEFORE rolling the server image back to a build older than #4313).
 -- Removes exactly the four keys this migration added and re-derives the digest, which restores
--- the pre-149 manifest and digest byte for byte (jsonb text is canonical). Do not delete the
--- `149_...` row from the migration ledger unless you also want it to run again on the next boot.
+-- the pre-149 manifest and digest byte for byte (jsonb text is canonical). The ledger row of this
+-- file stays, so the next boot does NOT re-apply 149: to roll forward again later, run this file
+-- once more (it is idempotent) or delete its ledger row before that boot
+-- (`DELETE FROM schema_migrations WHERE version = '149_official_catalog_display_fields.sql'`).
 --
 --   UPDATE plugin_registry r
 --      SET manifest = s.manifest,
