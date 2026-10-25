@@ -1648,7 +1648,8 @@ export function Composer({
 
   // ---- 두 상태 (#4305 → #4456) ----------------------------------------------
   // 포커스 **또는** 글. 포커스를 받는 렌더(`onFocus` 가 `focused` 를 올린 그 커밋)가 펼침의 첫 프레임이고, 아래
-  // 효과가 같은 커밋에서 스프링을 건다 — 키보드가 오르는 것과 함께 시작한다.
+  // 효과가 같은 커밋에서 스프링을 건다. 시작은 포커스 이벤트가 JS 에 닿는 때라서 첫 포커스에서는 `keyboardWillShow` 보다
+  // 39~120ms 늦다(시뮬레이터 실측, #4456) — 곡선이 아니라 이벤트 도달 지연이다.
   const expanded = focused || text !== '';
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
