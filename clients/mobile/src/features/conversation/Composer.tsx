@@ -39,7 +39,7 @@ import {
   mentionHandleLabel,
   preferredMentionName,
 } from '@momo/core/features/routing/helperAliases';
-import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -67,6 +67,7 @@ import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV, composerFloat} from './convDesign';
+import {DockFollowContext} from './dockFollow';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {Avatar} from './Avatar';
 import {
@@ -1718,6 +1719,7 @@ export function Composer({
   const expanded = pressing || focused || text !== '';
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  const dockFollow = useContext(DockFollowContext);
   const expandedRef = useRef(expanded);
   // 접히는 중 (#4456): **포커스를 잃어서**(또는 #4518: 누름이 포커스로 이어지지 않아서) 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 펼침의
   // 마지막 이유가 사라지는 그 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
@@ -1751,15 +1753,22 @@ export function Composer({
     // 곡선은 Buzz 스프링이고 **양쪽 방향이 같다**(Buzz `composerExpansionController` 는 펼침도 접힘도 같은 스프링이다; 근거: `design/motion.ts`
     // 의 「입력창 펼침」). `overshootClamping` — 진행값이 범위를 넘으면 도구 줄이 제 높이보다 커지고 글 칸 양옆 여백이 음수가 된다.
     // 레이아웃 속성을 움직이므로 JS 구동이다. 접히는 도중에 다시 포커스가 오면 `stopAnimation` 이 현재 값에서 멈추고 거기서 다시 펼친다.
-    const spring = (toValue: 0 | 1, done?: () => void) =>
+    //
+    // 도크가 자라거나 주는 **프레임마다** 목록에게 바닥을 따라가라고 알린다(#4518, `dockFollow.ts`). 값이 바뀔 때 레이아웃을 미는 같은 JS 틱 안이라, 목록의 `onLayout` 이벤트(네이티브 → JS → 네이티브)를
+    // 기다리지 않는다. 키보드 준비로 메인 스레드가 막혔다 풀려도 레이아웃 커밋과 목록의 `scrollToEnd` 가 한꺼번에 적용돼서 마지막 말풍선이 도크에 가려졌다 돌아오지 않는다.
+    // 리스너는 스프링이 끝나거나 끊길 때 거둔다.
+    const spring = (toValue: 0 | 1, done?: () => void) => {
+      const followId = dockFollow === null ? null : progress.addListener(() => dockFollow.notify());
       Animated.spring(progress, {
         toValue,
         ...COMPOSER_EXPAND_SPRING,
         overshootClamping: true,
         useNativeDriver: false,
       }).start(result => {
+        if (followId !== null) progress.removeListener(followId);
         if (result.finished) done?.();
       });
+    };
     if (expanded) {
       setCollapsing(false);
       if (reduceMotion.current) progress.setValue(1);
@@ -1778,7 +1787,7 @@ export function Composer({
     }
     progress.setValue(0);
     if (collapsing) setCollapsing(false);
-  }, [expanded, collapsing, progress, reduceMotion]);
+  }, [expanded, collapsing, progress, reduceMotion, dockFollow]);
 
   // ---- 누름 (#4518) ----------------------------------------------------------
   // 손가락이 입력창에 닿는 순간 펼침을 시작하고, 그 탭이 포커스로 이어지지 않으면 되돌린다. 신호는 `composer-field`(입력창만 감싼 상자)에 건 **날 터치 이벤트**다.

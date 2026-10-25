@@ -11,6 +11,7 @@ import {
   PRESS_FOCUS_GRACE_MS,
 } from '../src/features/conversation/Composer';
 import {COMPOSER_EXPAND_SPRING} from '../src/design/motion';
+import {createDockFollow, DockFollowContext} from '../src/features/conversation/dockFollow';
 import {line, TOUCH_TARGET} from '../src/design/tokens';
 import {CONV} from '../src/features/conversation/convDesign';
 import {channelDraftKey} from '../src/features/conversation/drafts';
@@ -1289,6 +1290,114 @@ describe('누름 (#4518 D2) — 끌기는 포커스로 이어지지 않는다: �
     view.unmount();
     wait(1);
     expect(jest.getTimerCount()).toBe(idle);
+  });
+});
+
+describe('도크가 자라는 프레임에 목록에게 알린다 (#4518, design-review R2 B1)', () => {
+  // 펼침은 JS 가 프레임마다 도크 높이를 정해 넘기고, 목록이 그 높이를 따라가는 길(`onLayout` → `scrollToEnd`)은 네이티브 → JS → 네이티브를 한 바퀴 돌아서 키보드 준비로 메인 스레드가
+  // 막혔다 풀리면 2~3프레임 늦는다 — 그 사이 마지막 말풍선의 아랫줄이 도크에 가려졌다 돌아왔다(짧은 탭: 틈 편차 −22pt·3프레임). 그래서 컴포저는 자라거나 주는 **프레임마다**
+  // 컨텍스트의 다리(`dockFollow`)로 목록에게 바닥을 따라가라고 알린다. 목록의 답은 `dockFollow4518.test.tsx` 가 잠근다.
+  function mountWithBridge() {
+    const bridge = createDockFollow();
+    const follow = jest.fn();
+    bridge.register(follow);
+    const view = render(
+      <DockFollowContext.Provider value={bridge}>
+        <Composer
+          recipient="place"
+          channelLabel="배포"
+          directory={makeDirectory([])}
+          attachmentTarget={{workspaceId: 'ws', channelId: 'ch'}}
+          onSend={() => {}}
+        />
+      </DockFollowContext.Provider>,
+    );
+    return {view, follow};
+  }
+  async function mountWithBridgeSettled() {
+    jest.useRealTimers();
+    const mounted = mountWithBridge();
+    await act(async () => {});
+    jest.useFakeTimers();
+    return mounted;
+  }
+
+  /**
+   * 이 입력창의 진행값(`Animated.Value`)에 **시험이 따로 세는 리스너**를 건다 — 값이 바뀐 횟수다. 다리의 알림이 「값이 바뀔 때마다 정확히 한 번」인지(빠짐도 겹침도 없는지) 이 숫자와 맞대어 본다.
+   * (jest 의 가짜 타이머에서는 한 프레임에 값이 여러 번 바뀌어서 프레임 수로는 못 센다.)
+   */
+  function countValueUpdates(spring: jest.SpyInstance) {
+    const value = ourSprings(spring).at(-1)?.[0] as Animated.Value;
+    expect(value).toBeDefined(); // 전제: 입력창의 스프링이 실제로 걸렸다
+    let updates = 0;
+    value.addListener(() => {
+      updates += 1;
+    });
+    return () => updates;
+  }
+
+  it('닿아서 펼치는 동안 값이 바뀔 때마다 한 번씩 알리고, 스프링이 끝나면 멈춘다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    expect(follow).not.toHaveBeenCalled();
+    touchDown();
+    follow.mockClear(); // 스프링이 걸리는 첫 값은 시험의 리스너가 붙기 전에 지나갔다 — 여기서부터 같이 센다
+    const updates = countValueUpdates(spring);
+    advance(4);
+    expect(updates()).toBeGreaterThan(0); // 전제: 실제로 자라고 있다
+    expect(follow).toHaveBeenCalledTimes(updates());
+    settle();
+    expect(follow).toHaveBeenCalledTimes(updates());
+    const total = follow.mock.calls.length;
+    wait(500);
+    expect(follow.mock.calls.length).toBe(total); // 끝난 뒤에는 더 안 부른다
+  });
+
+  it('포커스를 잃어 접히는 동안에도 값이 바뀔 때마다 알린다 — 줄어드는 도크 위로 목록이 따라 내려오게', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    focus();
+    settle();
+    follow.mockClear();
+    blur();
+    follow.mockClear();
+    const updates = countValueUpdates(spring);
+    advance(4);
+    expect(updates()).toBeGreaterThan(0);
+    expect(follow).toHaveBeenCalledTimes(updates());
+  });
+
+  it('앞 스프링의 리스너가 남아 겹쳐 부르지 않는다 — 두 번째 스프링도 값이 바뀔 때마다 정확히 한 번이다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    touchDown();
+    settle(); // 첫 스프링이 끝났다(그 리스너는 거둬졌다)
+    touchMoveTo(100, 140); // 끌기로 되돌림 → 두 번째 스프링
+    follow.mockClear();
+    const updates = countValueUpdates(spring);
+    advance(4);
+    expect(updates()).toBeGreaterThan(0);
+    // 앞 스프링의 리스너가 새면 값이 바뀔 때마다 두 번씩 불러 숫자가 두 배가 된다.
+    expect(follow).toHaveBeenCalledTimes(updates());
+  });
+
+  it('동작 줄이기면 스프링이 없으니 알릴 프레임도 없다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const {follow} = await mountWithBridgeSettled();
+    touchDown();
+    settle();
+    expect(hasTools()).toBe(true); // 전제: 펼쳤다
+    expect(follow).not.toHaveBeenCalled();
+  });
+
+  it('다리가 없는 곳에서도 그대로 돈다 — 컨텍스트가 비어 있어도 펼치고 접힌다', async () => {
+    await mountSettled();
+    touchDown();
+    settle();
+    expect(hasTools()).toBe(true);
+    touchMoveTo(100, 140);
+    settle();
+    expect(hasTools()).toBe(false);
   });
 });
 
