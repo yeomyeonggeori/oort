@@ -14,7 +14,7 @@
 //! * the status body is the whole expected JSON for each configuration (platform x relay x declared), so the
 //!   handler is tied to the assembly by value; neither the agent mock nor a counting relay client is reached;
 //! * a stranger's 403 carries no `environment`; probe and connect answers carry none either;
-//! * no env string (stamp, Railway id, relay URL, relay key) reaches a 200 body, a 403 body or the log.
+//! * no env string (stamp, Railway id, relay URL, relay key) reaches a 200 body, a 403 body, an audit row or the log.
 //!
 //! `#[ignore]`: needs a real Postgres, same harness as `agent_provider_pin_conformance_pg.rs`.
 
@@ -1915,7 +1915,7 @@ async fn the_status_is_the_expected_body_with_the_environment_and_dials_nothing(
 /// 수용 기준 4 (403) + 수용 기준 2 ([nightly] 절반): a workspace admin who is not a listed operator and
 /// another tenant's operator get 403 and a body without `environment`; the probe and connect answers carry
 /// none either; and no env string — the stamp, the Railway id, the relay URL, the relay key — reaches a 200
-/// body, a 403 body or the log, in each of the three platform-marker configurations (see the unit test
+/// body, a 403 body, an audit row or the log, in each of the three platform-marker configurations (see the unit test
 /// `no_env_string_reaches_the_body_or_the_logs` for why they are split).
 ///
 /// Sabotage: delete the operator gate line in `status` (the 403 rows go red); serialize any env string
@@ -2034,6 +2034,27 @@ async fn a_stranger_gets_no_environment_and_no_env_string_leaves_the_server() {
             "{name}: connect carries environment"
         );
         bodies.push(("connect".to_string(), text));
+
+        // The audit rows this workspace has by now (`connect` wrote its three): no env string may be in them
+        // either (ADR F2: response, log, audit, error). Positive control: the connect row exists, so an
+        // empty read cannot pass the scan.
+        let audit: Vec<(String, Value)> = sqlx::query_as(
+            "SELECT action, detail FROM audit_log WHERE workspace_id = $1 ORDER BY created_at",
+        )
+        .bind(f.workspace)
+        .fetch_all(&su)
+        .await
+        .unwrap();
+        assert!(
+            audit
+                .iter()
+                .any(|(action, _)| action == "agent.cohosted.connected"),
+            "{name}: positive control: the connect audit row must exist for the audit scan to mean anything"
+        );
+        bodies.push((
+            "audit rows".to_string(),
+            serde_json::to_string(&audit).unwrap(),
+        ));
 
         let log_text = String::from_utf8_lossy(&logs.lock().unwrap()).to_ascii_lowercase();
         let mut markers = vec![RELAY_HOST_MARKER, RELAY_KEY_MARKER];
