@@ -119,6 +119,7 @@ import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {visitFlushReason} from '../features/readState/advertise';
 import {useViewingBeat} from '../features/readState/useViewingBeat';
+import {useReportViewedConversation} from '../push/viewedConversation';
 import {
   foldVisitBoundary,
   type VisitBoundary,
@@ -840,6 +841,10 @@ export default function ConversationScreen({
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
+  // 앞에 떠 있는 동안 온 푸시가 「지금 보는 대화」를 읽는 자리 (#4310). 방과, 열려 있는 스레드가
+  // 있으면 그 루트를 올린다 — 알림 처리기(`push/foregroundPresentation.ts`)가 같은 방·같은
+  // 스레드의 알림만 숨기려면 둘 다 필요하다.
+  useReportViewedConversation(workspaceId, channelId, thread?.id ?? null);
   /**
    * 알림이 연 스레드 안에서 착지할 답글 (#2569). 사람이 스레드를 직접 열거나
    * 닫으면 비운다 — 그때는 알림이 가리킨 자리로 끌려갈 이유가 없다.

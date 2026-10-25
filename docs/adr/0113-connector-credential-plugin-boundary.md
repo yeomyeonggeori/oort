@@ -374,7 +374,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - 카테고리·예시 문장·로고 자리는 없어요.
 - **새 키를 담은 시드는 옛 서버에서 거절돼요.** 거절된 항목은 카탈로그에서 빠지고(`routes/plugins.rs:640-644`), 설치·grant도 막혀요. 시드 migration은 `manifest`와 `manifest_digest`를 함께 바꿔야 해요(`plugin_manifest.rs:140`).
 - **MCP 판과 원격 이미지**:
-  - 검증기는 MCP 프로토콜 세 판(`2025-03-26`·`2025-06-18`·`2025-11-25`)을 받아요(`:25`). 최신 판의 아이콘 메타는 [확인 필요: #4313]이에요. 있더라도 원격 이미지라 F1의 이유로 쓰지 않아요.
+  - 검증기는 MCP 프로토콜 세 판(`2025-03-26`·`2025-06-18`·`2025-11-25`)을 받아요(`:25`). 최신 판에는 아이콘 메타가 있어요 [V, 2026-10-25, #4313: 변경 기록의 「Allow servers to expose icons as additional metadata for tools, resources, resource templates, and prompts」(SEP-973)]. 원격 이미지 주소라서 F1의 이유로 쓰지 않아요(매니페스트의 도구 키 집합이 정확해서 `icons` 키가 들어 있으면 거절해요).
   - 데스크탑 CSP는 `img-src 'self' data:`라 원격 이미지를 그리지 않아요(`clients/desktop/src-tauri/tauri.conf.json:32`).
 - **앱 화면과 진입**:
   - 앱 화면(`clients/web/src/features/plugins/PluginSection.tsx`, 1,415줄)은 글자 타일과 2단 목록·상세예요. 검색·보기 컨트롤은 앱 10개 이상일 때만 서요(`model.ts:510` `PLUGIN_CONTROLS_MAX_GLANCEABLE = 9`).
@@ -408,7 +408,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 | `starterPrompts` | 0~3개. 각 `{ "text": 1~140자, "tool": "<이 매니페스트의 도구 이름>" }`이에요. 검증기는 `tool`이 이 매니페스트에 있고 등급이 R 또는 A(E4)인지 확인해요. `text`에는 URL 모양(`://`·`//`·`www.`)과 제어문자를 넣을 수 없어요 | 상세 예시 카드(F7) |
 | `websiteURL` | https만(`termsURL`과 같은 검사) | 상세 「웹사이트」 |
 
-- **개발자 칸은 새로 만들지 않아요.** 기존 `publisher.name`을 목록·상세 DTO에 실어요(이중 값이 어긋나는 것을 막아요).
+- **개발자 칸은 새로 만들지 않아요.** 기존 `publisher.name`을 목록·상세 DTO에 실어요(이중 값이 어긋나는 것을 막아요). 와이어 키는 `publisherName`이고 둘 다 항상 있어요. 표시 필드 넷(`logoKey`·`category`·`starterPrompts`·`websiteURL`)은 매니페스트에 없으면 키 자체가 없어요(`null`·빈 배열을 만들지 않아요).
 - **원격 이미지 URL은 받지 않아요.** `iconURL`·`logoURL`·`imageURL`은 정확한 키 집합 밖이라 지금처럼 거절돼요. 근거는 셋이에요.
   - 데스크탑 CSP와 오프라인에서 깨져요.
   - 벤더 서버로 열람이 새요.
@@ -485,9 +485,9 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - 내 에이전트와의 1:1 DM이면 경고하지 않아요.
   - 채널인데 인원을 모르면(`ChannelAudienceContext`가 `null`) 숫자 없이 「답이 이 채널에 보여요」를 보여요.
 - **요청 필드 `apps`** (가산, 공개 API): send 요청 본문의 새 필드 `apps: ["<pluginId>"…]`예요. `harnessRefine` 선례대로 전용 필드로 받고, 평평한 `props` 맵에 싣지 않아요.
-  - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요.
+  - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요. 중복을 빼기 **전의** 원본 목록도 16개 이하여야 해요(`MAX_REQUESTED_APPS_INPUT` — 중복 제거 비용을 묶는 입력 상한이에요. 넘으면 같은 400이고, 목록을 정리하거나 연결을 잡기 전에 거절해요. #4313 검수 r1 H1).
     - 어기면 코드 달린 400 `apps_unavailable`이에요(`ApiError::coded`). 클라이언트는 칩을 지우고 앱 목록을 새로 받고, 초안 본문은 남겨요. 조용히 버리지 않아서 클라이언트 버그를 숨기지 않아요.
-    - 검증은 send tx 안에서 **새 INSERT일 때만** 돌아요. 같은 `client_msg_id`의 재전송(`deduped`)은 `apps` 검증과 무관하게 저장본을 201로 돌려줘요(`routing` 허용목록 선례, `routes/messages.rs` 「201 in both the insert and the idempotent-retry case」). 그래서 첫 요청 뒤 앱이 해제돼도 재전송이 중복 전송을 만들지 않아요.
+    - 검증은 send tx 안에서 **새 INSERT일 때만** 돌아요. 같은 `client_msg_id`의 재전송(`deduped`)은 `apps` 검증과 무관하게 저장본을 201로 돌려줘요(`routing` 허용목록 선례, `routes/messages.rs` 「201 in both the insert and the idempotent-retry case」). 그래서 첫 요청 뒤 앱이 해제돼도 재전송이 중복 전송을 만들지 않아요. 단 하나의 예외가 원본 목록 상한(16개)이에요 - 이 상한은 tx 밖에서 먼저 보므로, 16개를 넘기는 `apps`를 단 재전송은 저장본이 아니라 400이에요(정상 클라이언트는 칩 3개 이하라 닿지 않아요).
   - **저장**: 통과한 목록을 서버 소유 키 `props.requestedApps`(JSON 배열)로 써요. 이 키는 `momo_agent::SERVER_OWNED_APP_PROPS_KEYS`(`app_notice.rs`)에 더해요. 보내기·웹훅 수신·게이트웨이 답이 함께 읽는 목록이라, 클라이언트 `props` 맵·외부 웹훅 발신자·게이트웨이 어느 쪽이 보낸 같은 이름의 키도 버려져요.
   - 클라이언트는 **사람이 작성한 메시지에만** `requestedApps` 칩을 그려요(`appsTail.ts`가 반대 방향으로 이미 하는 방어와 같은 원칙).
   - **뜻**: 「요청자가 고른 앱」 표시예요.
@@ -512,7 +512,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### F8. 내 앱 실행 장소 투영 — 소유자에게만 (새 읽기 API)
 
 - `GET /v1/workspaces/{ws}/members/me/app-runtimes`(`require_human`)예요. 요청자가 소유한 에이전트 가운데 아래 판별식에 맞는 것만 돌려줘요.
-  - 모양: `[{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" }]`
+  - 모양: `{ runtimes: [{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" }] }` — 다른 읽기 API처럼 **객체**예요(최상위 배열은 필드를 더 얹을 수 없어요). 키가 `apps`가 아니라 `runtimes`인 까닭은 항목마다 이미 `apps`(플러그인 id들)가 있어서예요. 실행 장소가 없으면 `{ runtimes: [] }`예요.
 - **공통 술어**: `member.kind = 'agent' AND status = 'active' AND deleted_at IS NULL`(표시를 켜는 PUT과 같아요), `connector_owner_human_id = 요청자`예요.
   - 「활성 grant」는 요청자의 `plugin_grant` ⋈ `workspace_plugin_install`(설치 `enabled AND revoked_at IS NULL`)이에요. `TRIAL_FACTS_SQL`(`connector_trial.rs`)과 같은 조인이에요.
 - **`path` 판별식**:
@@ -520,16 +520,19 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
     - `apps` = 서버 환경변수 `OORT_COHOSTED_AGENT_CONNECTOR_APPS`의 앱 id ∩ 요청자 활성 grant예요. **언제나 요청자 활성 grant의 부분집합**이라 운영자 설정 전체가 드러나지 않아요. 앱 id는 공개 카탈로그 id라 비밀이 아니에요.
   - `hosted_vendor` = 공통 술어 AND 호스팅 연결이 있음 AND personal agent 아님 AND 구독 하네스 아님이에요. `enforced: false`이고, `apps` = 요청자 활성 grant예요.
     - 화면은 칩 피커에 E3 문장 「앱 권한은 ○○가 관리해요. oort는 허용 기록만 남겨요」를 그대로 보여요.
-  - 그 밖은 v1 응답에 없어요. 표시를 켠 personal agent(내 맥 하네스 — 서버가 메시지로 시작하지 않음)와 구독 하네스가 여기에 들어요. 내 맥 경로(`mac`)는 `PLUGIN_MAC_APP_USE_READY`가 참이 될 때(ADR-0188 §8.9) 더해요.
+  - 그 밖은 v1 응답에 없어요. 표시를 켠 personal agent(내 맥 하네스 — 서버가 메시지로 시작하지 않음)와 구독 하네스가 여기에 들어요. `owner_only` 에이전트(구독 하네스·개인 키 에이전트)는 모두 여기예요 — `owner_only_gate`가 판정하는 별도 단계라서요. 내 맥 경로(`mac`)는 `PLUGIN_MAC_APP_USE_READY`가 참이 될 때(ADR-0188 §8.9) 더해요.
 - **`blocked` — 「능력」이 아니라 「지금 배달되나」**: 배달 관문(`agent_mentions.rs` `delivery_gate`)의 **에이전트 단 단계**를 관문과 같은 순서로 평가하는 순수 함수로 채워요. 첫 막힘 하나만 실어요. `null`이 아니면 F5에서 그 에이전트는 자격이 없고, 칩 피커는 이유를 사람 말로 보여요.
   - `hermes_trial`: 먼저 `connector_trial_stop`의 결과예요. `attest`(선언 불완전), `members`(활성 사람 ≠ 1), `apps`(운영자가 켠 앱 중 소유자 grant가 없는 것이 있음 — 배달은 「켠 앱 ⊆ grant」)가 있어요. 그다음 `paused`예요.
   - `hosted_vendor`: `hosted_off` → `connection` → `paused` 순서예요.
     - `hosted_off`는 인스턴스의 호스팅 배달 스위치(`MOMO_HOSTED_DELIVERY_ENABLED`, 관문의 `HostedDeliveryNotEnabled`)가 꺼진 경우예요. 기본값이 꺼짐(`config.rs` `hosted_delivery_enabled: false`)이라, 이 값이 없으면 기본 설정 서버의 호스팅 에이전트가 전부 `null`(배달됨)로 잘못 나가요.
     - `connection`은 활성 연결이 없는 경우예요(`HostedConnectionUnavailable`).
+  - 시험 핀에 호스팅 연결 행도 있는 **혼성 에이전트**(운영자가 이미 연결된 에이전트에 핀을 건 드문 조합)는 `path`가 `hermes_trial`이지만, 관문이 시험 정지를 본 뒤 호스팅 단계로 이어 가요. 그래서 `blocked`도 시험 정지 → `hosted_off` → `connection` → `paused` 순서로 이어 평가해요(#4313 검수 r1 M2 — 시험만 보고 `null`을 주면 관문이 버릴 메시지를 칩이 보내요). 얼굴(`path`·`enforced`·`apps`)은 시험의 사실 그대로이고, `blocked`가 `null`이면 메시지는 호스팅 연결의 받은편지함으로 가요(그 앱 목록은 oort가 강제하지 못해요). 핀을 거는 PUT이 호스팅 연결 행이 있는 에이전트를 막을지는 후속 결정이에요(검수 r2 M-r2-1).
   - `paused`는 관문의 마지막 단계라서 두 경로 모두에 걸려요.
   - **대화마다 다른 사실은 싣지 않아요.** F8은 `channelId`를 받지 않아요.
     - 대화 멤버 여부(`NotChannelMember`)는 F5 자격 3이 로스터로 판정해요.
-    - 호스팅 연결의 채널 승인(`HostedChannelUnapproved`)은 피커가 막지 않아요. 보낸 뒤 기존 관문이 그 자리에서 「이 채널에서 쓰기」 카드(ADR-0162 증보 5 G1)로 처리해요.
+    - 호스팅 연결의 채널 승인(`HostedChannelUnapproved`)은 피커가 막지 않아요. 보낸 뒤 기존 관문이 그 자리에서 「이 채널에서 쓰기」 카드(ADR-0162 증보 5 G1) 또는 기존 안내 줄로 처리해요.
+      - 카드는 사람이 명시 멘션한 비-DM 채널 + 활성 연결 + `MOMO_HOSTED_INPLACE_GRANT_ENABLED` 켜짐 + 대기 카드 상한 아래일 때만 서요.
+      - 그룹 DM·스위치 끔·상한 초과는 기존 안내 줄이에요.
   - 문장은 소유자(팀원)에게 맞는 말로 써요. 운영자용 문장(「Hermes의 앱 연결을 지우거나…」)을 그대로 보이지 않아요.
 - **가시성**: 요청자 본인 소유 에이전트만 실어요. 남의 에이전트와 남의 grant는 이 응답에 절대 없어요. 로스터·에이전트 DTO에는 싣지 않아요. 실으면 모든 멤버가 「누구의 에이전트에 어떤 개인 앱이 붙었나」를 보게 되기 때문이에요.
 - **권한 층**: 이 경로는 에이전트 경로 허용목록(`momo-auth/src/agent_scope.rs`)에 넣지 않아서 에이전트 bearer는 403이에요. `require_human`이 두 번째 층이에요.
@@ -561,7 +564,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 3. 시드 migration이 `manifest`와 `manifest_digest`를 함께 갱신해요(기존 `computed_digest` 시험).
 4. 시드 `logoKey` ⊆ 번들 자산 ∪ 글자 타일 목록이에요(클라이언트 시험, 서버 픽스처 공유). 모르는 `logoKey`는 글자 타일로 그려요.
 5. `apps` 요청 필드:
-   - 사람 아닌 작성자·미설치·비공식·중복 뺀 뒤 4개 이상이면 `apps_unavailable` 400이에요.
+   - 사람 아닌 작성자·미설치·비공식·중복 뺀 뒤 4개 이상이면 `apps_unavailable` 400이에요. 중복을 빼기 전의 원본 목록이 17개 이상이어도 같은 400이에요(입력 상한 16개 - 호출 지점은 DB 없는 시험 `requested_apps_input_gate.rs`가 묶어요).
    - 설치 해제 뒤 같은 `client_msg_id`로 재전송하면 201이고 `requestedApps`가 첫 저장본과 같아요.
    - 웹훅 수신·게이트웨이 답이 실은 `requestedApps`도 버려져요.
    - 통과하면 `props.requestedApps`에 중복 없이 저장돼요.
@@ -572,6 +575,8 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
    - `hermes_trial.apps` ⊆ 요청자 활성 grant예요.
    - 표시를 켠 personal agent는 응답에 없어요.
    - `blocked`가 `null`이 아닌 경우를 각각 재요: 정지된 시험(`attest`·`members`·`apps`), 연결 없는 호스팅 에이전트(`connection`), 호스팅 배달 스위치가 꺼진 서버(기본 설정)의 호스팅 에이전트(`hosted_off`), 두 경로의 일시정지(`paused`). 사보타주: `hosted_off` 단계를 빼면 기본 설정 픽스처에서 빨개요.
+     - `hosted_off`가 먼저 걸리므로 `connection`·호스팅 `paused` 픽스처는 호스팅 배달 스위치가 켜진 서버에서 재요.
+     - 관문(`delivery_gate`)에 새 변형이 생기면 F8 매핑 시험이 빨개지는 대응 시험 한 줄도 둬요(변형 전부를 와일드카드 없이 `match`로 받는 한 줄 — 새 변형은 컴파일이 멈춰요).
    - 에이전트 bearer는 403이에요(경로 허용목록·`require_human` 두 층 각각).
 8. 해석(UI 시험):
    - 실행 장소가 있지만 대화 멤버가 아니면 메시지 POST가 0이고 「DM에서 쓰기」가 서요.
@@ -584,6 +589,5 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### 아직 열려 있는 것
 
 - 로고별 브랜드 가이드라인 판단(#4314). 불분명하면 글자 타일이에요.
-- MCP `2025-11-25` 판의 아이콘 메타 유무(#4313, 기록만).
 - 내 맥 경로의 F8 모양(`mac`)은 ADR-0188 §8.9가 열릴 때 정해요.
 - 폰 컴포저의 앱 피커 자리(#4305 이후).

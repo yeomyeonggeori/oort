@@ -1,6 +1,7 @@
 {
   "plugins": [
     {
+      "category": "files",
       "description": "Official momo-hosted read-only MCP for an operator-configured shared drive",
       "egressDomains": [
         "www.googleapis.com",
@@ -8,117 +9,241 @@
       ],
       "enabled": false,
       "installed": false,
+      "logoKey": "google-drive",
       "name": "Google Drive",
       "official": true,
       "pluginId": "com.momo.plugins.drive",
+      "publisherName": "oort",
       "recommended": true,
       "recommendedFor": [
         "knowledge-management",
         "shared-drive-search"
       ],
+      "starterPrompts": [
+        {
+          "text": "공유 드라이브에서 이번 분기 기획 문서를 찾아 줘요.",
+          "tool": "drive.search_files"
+        },
+        {
+          "text": "공유 드라이브 파일이 마지막으로 바뀐 때를 알려 줘요.",
+          "tool": "drive.get_file_metadata"
+        },
+        {
+          "text": "공유 드라이브 문서를 텍스트로 읽고 핵심만 정리해 줘요.",
+          "tool": "drive.export_text"
+        }
+      ],
       "version": "1.0.0"
     },
     {
+      "category": "developer",
       "description": "Official GitHub hosted MCP integration",
       "egressDomains": [
         "api.githubcopilot.com"
       ],
       "enabled": true,
       "installed": true,
+      "logoKey": "github",
       "name": "GitHub",
       "official": true,
       "pluginId": "com.momo.plugins.github",
+      "publisherName": "GitHub",
       "recommended": true,
       "recommendedFor": [
         "software-development",
         "work-tracking"
       ],
-      "version": "1.1.0"
+      "starterPrompts": [
+        {
+          "text": "내가 올린 풀 리퀘스트 중 아직 열려 있는 것을 찾아 줘요.",
+          "tool": "github.search_pull_requests"
+        },
+        {
+          "text": "저장소의 열린 이슈를 최근에 바뀐 순서로 정리해 줘요.",
+          "tool": "github.list_issues"
+        },
+        {
+          "text": "저장소의 최신 릴리스에 어떤 변경이 담겼는지 알려 줘요.",
+          "tool": "github.get_latest_release"
+        }
+      ],
+      "version": "1.1.0",
+      "websiteURL": "https://github.com"
     },
     {
+      "category": "communication",
       "description": "Official Google Gmail remote MCP (Developer Preview): read mail, create drafts, label. No send.",
       "egressDomains": [
         "gmailmcp.googleapis.com"
       ],
       "enabled": false,
       "installed": false,
+      "logoKey": "gmail",
       "name": "Gmail",
       "official": true,
       "pluginId": "com.momo.plugins.gmail",
+      "publisherName": "Google",
       "recommended": false,
       "recommendedFor": [
         "communication",
         "productivity"
       ],
-      "version": "1.0.0"
+      "starterPrompts": [
+        {
+          "text": "받은편지함에서 이번 주에 온 메일을 찾아서 요약해 줘요.",
+          "tool": "gmail.search_threads"
+        },
+        {
+          "text": "방금 이야기한 내용으로 팀에 보낼 메일 초안을 만들어 줘요. 보내기는 제가 직접 할게요.",
+          "tool": "gmail.create_draft"
+        },
+        {
+          "text": "내 Gmail 라벨 목록을 보여 줘요.",
+          "tool": "gmail.list_labels"
+        }
+      ],
+      "version": "1.0.0",
+      "websiteURL": "https://mail.google.com"
     },
     {
+      "category": "productivity",
       "description": "Official Google Calendar remote MCP (Developer Preview)",
       "egressDomains": [
         "calendarmcp.googleapis.com"
       ],
       "enabled": false,
       "installed": false,
+      "logoKey": "google-calendar",
       "name": "Google Calendar",
       "official": true,
       "pluginId": "com.momo.plugins.google-calendar",
+      "publisherName": "Google",
       "recommended": false,
       "recommendedFor": [
         "scheduling",
         "productivity"
       ],
-      "version": "1.0.0"
+      "starterPrompts": [
+        {
+          "text": "오늘 일정을 시간 순서대로 알려 줘요.",
+          "tool": "google-calendar.list_events"
+        },
+        {
+          "text": "이번 주에 팀원들이 모두 비는 시간을 찾아 줘요.",
+          "tool": "google-calendar.suggest_time"
+        },
+        {
+          "text": "다음 주에 잡힌 회의를 찾아서 정리해 줘요.",
+          "tool": "google-calendar.search_events"
+        }
+      ],
+      "version": "1.0.0",
+      "websiteURL": "https://calendar.google.com"
     },
     {
+      "category": "files",
       "description": "Official Google Drive remote MCP (Developer Preview), the signed-in person's own Drive",
       "egressDomains": [
         "drivemcp.googleapis.com"
       ],
       "enabled": false,
       "installed": false,
+      "logoKey": "google-drive",
       "name": "Google 내 드라이브",
       "official": true,
       "pluginId": "com.momo.plugins.google-drive",
+      "publisherName": "Google",
       "recommended": false,
       "recommendedFor": [
         "knowledge-management",
         "productivity"
       ],
-      "version": "1.0.0"
+      "starterPrompts": [
+        {
+          "text": "내 드라이브에서 지난달에 만든 문서를 찾아 줘요.",
+          "tool": "google-drive.search_files"
+        },
+        {
+          "text": "최근에 연 파일을 목록으로 보여 줘요.",
+          "tool": "google-drive.list_recent_files"
+        },
+        {
+          "text": "찾은 문서를 읽고 핵심만 세 줄로 요약해 줘요.",
+          "tool": "google-drive.read_file_content"
+        }
+      ],
+      "version": "1.0.0",
+      "websiteURL": "https://drive.google.com"
     },
     {
+      "category": "project",
       "description": "Official Linear hosted MCP integration",
       "egressDomains": [
         "mcp.linear.app"
       ],
       "enabled": false,
       "installed": true,
+      "logoKey": "linear",
       "name": "Linear",
       "official": true,
       "pluginId": "com.momo.plugins.linear",
+      "publisherName": "Linear",
       "recommended": false,
       "recommendedFor": [
         "work-tracking",
         "product-development"
       ],
-      "version": "1.1.0"
+      "starterPrompts": [
+        {
+          "text": "나에게 배정된 Linear 이슈를 우선순위 순서로 보여 줘요.",
+          "tool": "linear.list_issues"
+        },
+        {
+          "text": "진행 중인 프로젝트를 한눈에 정리해 줘요.",
+          "tool": "linear.list_projects"
+        },
+        {
+          "text": "내 Linear 알림을 최근 순서로 보여 줘요.",
+          "tool": "linear.get_notifications"
+        }
+      ],
+      "version": "1.1.0",
+      "websiteURL": "https://linear.app"
     },
     {
+      "category": "productivity",
       "description": "Official Notion hosted MCP integration",
       "egressDomains": [
         "mcp.notion.com"
       ],
       "enabled": false,
       "installed": false,
+      "logoKey": "notion",
       "name": "Notion",
       "official": true,
       "pluginId": "com.momo.plugins.notion",
+      "publisherName": "Notion",
       "recommended": false,
       "recommendedFor": [
         "knowledge-management",
         "documentation"
       ],
-      "version": "1.1.0"
+      "starterPrompts": [
+        {
+          "text": "Notion에서 지난주 회의록을 찾아 줘요.",
+          "tool": "notion.notion-search"
+        },
+        {
+          "text": "최근에 열어 본 Notion 페이지를 목록으로 보여 줘요.",
+          "tool": "notion.notion-list-recent-pages"
+        },
+        {
+          "text": "오늘 회의 내용을 새 Notion 페이지로 정리해 줘요.",
+          "tool": "notion.notion-create-pages"
+        }
+      ],
+      "version": "1.1.0",
+      "websiteURL": "https://www.notion.com"
     }
   ],
   "toolPolicy": {
