@@ -1,12 +1,17 @@
 // @vitest-environment jsdom
 // #4438 — 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기(`?after=`)는 새 채널에 섞이지 않는다.
 //
-// 재연결(복구 없이 다시 붙은 구독) 뒤의 꼬리 읽기는 한 번에 끝나지 않고 페이지를 이어 읽는다. 그 답이 오는 동안 사람이 다른 채널로
-// 옮기면 훅은 옛 구독을 놓지만(효과 정리), 이미 떠난 요청의 답은 그래도 돌아온다. 같은 훅 인스턴스가 채널을 바꿔 가며 쓰이므로
-// (`c/:channelId` 라우트는 `ChatShell` 을 다시 만들지 않는다) 그 답이 새 채널의 병합 문(`applyBatch`)에 닿으면
+// 구독이 (복구 없이) 붙은 직후의 꼬리 읽기 — 채널을 처음 열 때도, 끊겼다 다시 붙을 때도 같은 길(`onSubscribed` 의 `!recovered`)이다 —
+// 는 한 번에 끝나지 않고 페이지를 이어 읽는다. 그 답이 오는 동안 사람이 다른 채널로 옮기면 훅은 옛 구독을 놓지만(효과 정리), 이미 떠난
+// 요청의 답은 그래도 돌아온다. 같은 훅 인스턴스가 채널을 바꿔 가며 쓰이므로(`c/:channelId` 라우트는 `ChatShell` 을 다시 만들지
+// 않는다) 그 답이 새 채널의 병합 문(`applyBatch`)에 닿으면
 //   (a) 옛 채널의 줄이 새 채널 목록에 서고,
 //   (b) 새 채널의 「가장 새 seq」 기준이 옛 채널의 값으로 올라가, 새 채널의 다음 꼬리 읽기가 그 아래 행을 영영 건너뛴다.
 // 폰은 같은 자리에 `stillCurrent` 가드가 있다(`pushTap.test.tsx` O-2). 웹엔 없었다.
+//
+// 가드의 술어는 「지금 채널이 같은가」(`channelRef`)가 아니라 「이 효과가 아직 살아 있는가」(`!cancelled`)여야 한다. 둘은 다르다:
+// A→B→A 로 빨리 돌아오거나 같은 채널에서 `reload()` 로 효과가 다시 돌면 채널은 그대로 A 인데 옛 효과의 느린 답은 새 효과보다 **옛 스냅샷**이고,
+// 같은 seq 면 나중 것이 이기는 병합 문에서 새 본문을 옛 본문으로 되돌린다. 그 갈래는 마지막 두 시험이 지킨다.
 //
 // 서버는 채널마다 행 목록을 쥔 작은 모형이다. 꼬리 읽기(`after`)의 답은 요청 시각의 행으로 정해지고, 붙들어 둔 채널은 시험이 풀 때까지
 // 돌아오지 않는다 — 「느린 응답」이다.
@@ -96,12 +101,16 @@ const realtime = {
   dispose: () => undefined,
 } as unknown as RealtimeHandle;
 
-const out: { messages: Message[] } = { messages: [] };
+const out: { messages: Message[]; reload: () => void } = {
+  messages: [],
+  reload: () => undefined,
+};
 
 function Probe({ channelId }: { channelId: string }): ReactElement {
   const t = useTimeline(realtime, WS, channelId, ME);
   useEffect(() => {
     out.messages = t.state.messages;
+    out.reload = t.reload;
   });
   return createElement("div");
 }
@@ -136,6 +145,7 @@ beforeEach(() => {
   net.tailReads.length = 0;
   rail.handlers.clear();
   out.messages = [];
+  out.reload = () => undefined;
 });
 
 afterEach(() => {
@@ -198,8 +208,11 @@ async function show(channelId: string): Promise<void> {
   await settle();
 }
 
-/** 그 채널의 레일이 (복구 없이) 다시 붙었다 — 훅은 꼬리를 읽으러 간다. */
-async function railResubscribed(channelId: string): Promise<void> {
+/**
+ * 그 채널의 레일이 (복구 없이) 붙었다 — 훅은 꼬리를 읽으러 간다. 훅 입장에서는 이 효과 인스턴스의 첫 구독 사건이다(`isFirst`).
+ * 꼬리 읽기 루프는 첫 구독이든 재구독이든 같으므로 경주도 같다.
+ */
+async function railSubscribed(channelId: string): Promise<void> {
   await act(async () => {
     rail.handlers.get(channelId)?.onSubscribed({ recovered: false });
   });
@@ -214,6 +227,20 @@ async function answer(index: number): Promise<void> {
   });
 }
 
+/** 화면에 선 그 seq 줄의 본문. */
+const bodyOf = (seq: number): string | undefined =>
+  out.messages.find((m) => m.seq === seq)?.body;
+
+/** 읽기가 떠난 **뒤에** 서버가 A 의 seq 100 을 고쳤다. 떠난 읽기의 답은 요청 시각의 행(옛 본문)으로 이미 정해져 있다. */
+function editA100(): void {
+  net.rows.set(
+    CH_A,
+    (net.rows.get(CH_A) ?? []).map((r) =>
+      r.seq === 100 ? { ...(r as Message), body: "고침" } : r
+    )
+  );
+}
+
 describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 (#4438)", () => {
   it("대조군: 옮기지 않으면 느린 꼬리 읽기도 제자리(그 채널)에 든다", async () => {
     commit(CH_A, span(CH_A, 98, 99));
@@ -222,7 +249,7 @@ describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 
 
     commit(CH_A, span(CH_A, 100, 101));
     net.hold.add(CH_A);
-    await railResubscribed(CH_A);
+    await railSubscribed(CH_A);
     expect(net.held.map((h) => h.after)).toEqual([99]); // 꼬리 읽기가 떠났다 — 답은 아직이다
     expect(shown()).toEqual(["A98", "A99"]);
 
@@ -237,7 +264,7 @@ describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 
 
     commit(CH_A, span(CH_A, 100, 101));
     net.hold.add(CH_A);
-    await railResubscribed(CH_A);
+    await railSubscribed(CH_A);
     expect(net.held.map((h) => h.channel)).toEqual([CH_A]);
 
     await show(CH_B); // 사람이 다른 채널로 갔다 — 그 채널의 머리가 선다
@@ -255,7 +282,7 @@ describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 
 
     commit(CH_A, span(CH_A, 4, 5));
     net.hold.add(CH_A);
-    await railResubscribed(CH_A);
+    await railSubscribed(CH_A);
     await show(CH_B);
     expect(shown()).toEqual(labels("B", 1, 5));
 
@@ -270,13 +297,13 @@ describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 
 
     commit(CH_A, span(CH_A, 100, 101));
     net.hold.add(CH_A);
-    await railResubscribed(CH_A);
+    await railSubscribed(CH_A);
     await show(CH_B);
     await answer(0); // 옛 채널의 seq 101 이 돌아온다
 
     // 새 채널에 그 사이 새 메시지(seq 6)가 하나 커밋됐고, 그 채널의 레일이 붙는다.
     commit(CH_B, [row(CH_B, 6)]);
-    await railResubscribed(CH_B);
+    await railSubscribed(CH_B);
 
     // 새 채널의 읽기는 새 채널의 가장 새 줄(5) 뒤에서 시작한다 — 옛 채널의 101 이 아니다.
     expect(
@@ -296,7 +323,7 @@ describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 
     // 꼬리가 두 페이지(100..149, 150..199)보다 길다 — 가득 찬 페이지는 다음 페이지를 부른다.
     commit(CH_A, span(CH_A, 100, 199));
     net.hold.add(CH_A);
-    await railResubscribed(CH_A);
+    await railSubscribed(CH_A);
     expect(net.held.map((h) => h.after)).toEqual([99]);
 
     await answer(0); // 첫 페이지는 아직 이 채널에 있는 동안 돌아와 든다 → 두 번째 페이지를 읽으러 간다
@@ -312,5 +339,63 @@ describe("useTimeline · 채널을 옮긴 직후 늦게 돌아온 꼬리 읽기 
     expect(
       net.tailReads.filter((r) => r.channel === CH_A).map((r) => r.after)
     ).toEqual([99, 149]);
+  });
+
+  it("대조군: 옮기지 않으면 페이지를 이어 읽는 꼬리도 끝까지 제자리에 든다", async () => {
+    // 「둘째 페이지부터 버린다」는 과차단을 이 파일 안에서 잡는다 — 위 시험들의 둘째 페이지는 옮긴 **뒤에** 풀려 과차단과 구별되지 않는다.
+    commit(CH_A, span(CH_A, 98, 99));
+    await show(CH_A);
+
+    commit(CH_A, span(CH_A, 100, 174)); // 한 페이지(50)보다 길다 — 가득 찬 첫 페이지는 다음 페이지를 부른다
+    net.hold.add(CH_A);
+    await railSubscribed(CH_A);
+    await answer(0);
+    expect(net.held.map((h) => h.after)).toEqual([99, 149]);
+    expect(shown()).toContain("A149");
+
+    await answer(1); // 마지막(25줄) 페이지도 옮기지 않았으니 든다
+    expect(shown()).toEqual(labels("A", 98, 174));
+  });
+
+  it("A→B→A 로 빨리 돌아와도 — 첫 방문에서 떠난 느린 답이 두 번째 방문의 새 본문을 옛 본문으로 되돌리지 않는다", async () => {
+    // 채널이 같은지(`channelRef`)로 물으면 이 시험이 빨개진다: 돌아온 채널은 A 라서 옛 방문의 답이 통과해, 같은 seq 면 나중 것이 이기는
+    // 병합 문에서 두 번째 방문이 막 가져온 새 본문(「고침」)을 옛 본문으로 되돌린다. 효과 인스턴스가 살아 있는지(`!cancelled`)로 물어야 한다.
+    commit(CH_A, span(CH_A, 98, 99));
+    commit(CH_B, span(CH_B, 1, 5));
+    await show(CH_A);
+
+    commit(CH_A, span(CH_A, 100, 101));
+    net.hold.add(CH_A);
+    await railSubscribed(CH_A); // 답은 요청 시각의 행(100 = 옛 본문)으로 정해졌다
+    expect(net.held.map((h) => h.after)).toEqual([99]);
+    editA100();
+
+    await show(CH_B);
+    await show(CH_A); // 두 번째 방문: 머리가 고친 본문을 가져온다
+    expect(bodyOf(100)).toBe("고침");
+
+    await answer(0); // 첫 방문의 답이 이제 온다
+    expect(bodyOf(100)).toBe("고침");
+  });
+
+  it("같은 채널에서 효과가 다시 돌아도(reload) — 옛 효과의 느린 답이 새 효과의 새 본문을 옛 본문으로 되돌리지 않는다", async () => {
+    // 위와 같은 갈래의 다른 문: 채널은 그대로(A)인데 효과만 다시 돈다.
+    commit(CH_A, span(CH_A, 98, 99));
+    await show(CH_A);
+
+    commit(CH_A, span(CH_A, 100, 101));
+    net.hold.add(CH_A);
+    await railSubscribed(CH_A);
+    expect(net.held.map((h) => h.after)).toEqual([99]);
+    editA100();
+
+    await act(async () => {
+      out.reload();
+    });
+    await settle(); // 새 효과의 머리가 고친 본문을 가져온다
+    expect(bodyOf(100)).toBe("고침");
+
+    await answer(0); // 옛 효과의 답이 이제 온다
+    expect(bodyOf(100)).toBe("고침");
   });
 });
