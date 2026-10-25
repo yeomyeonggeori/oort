@@ -10,12 +10,19 @@
 //!   memory or connection grant (row counts compared);
 //! * neither responses, logs nor audit rows carry `HERMES_API_KEY` or the agent's body.
 //!
+//! #4337 (ADR-0203 증보 2026-10-25 수용 기준 2·4, `[nightly]`):
+//! * the status body is the whole expected JSON for each configuration (platform x relay x declared), so the
+//!   handler is tied to the assembly by value; neither the agent mock nor a counting relay client is reached;
+//! * a stranger's 403 carries no `environment`; probe and connect answers carry none either;
+//! * no env string (stamp, Railway id, relay URL, relay key) reaches a 200 body, a 403 body or the log.
+//!
 //! `#[ignore]`: needs a real Postgres, same harness as `agent_provider_pin_conformance_pg.rs`.
 
 use std::io::{self, Write};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::http::{HeaderMap, StatusCode};
@@ -26,8 +33,12 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
-use momo_provider_probe::GuardedProviderProbe;
-use momo_server::config::{CohostedAgentConfig, SettingsConfig};
+use momo_provider_probe::{
+    GuardedProviderProbe, LoginRelayClient, Pasted, RelayFailure, RelayKind, RelayTarget,
+    StartReply, StatusReply, TargetStatus,
+};
+use momo_server::config::{CohostedAgentConfig, LoginRelayConfig, SettingsConfig};
+use momo_server::host_platform::HostPlatform;
 use momo_server::{build_app, AppState};
 use momo_settings::{EgressPolicy, ProviderConfig, ProviderMode};
 use serde_json::{json, Value};
@@ -41,6 +52,8 @@ const TEST_PASSWORD: &str = "cohosted-conformance-password";
 const ENV_KEY: &str = "sk-cohost-env-3883-0002";
 /// Text the mock agent puts in every body: it must never reach a client, a log or an audit row.
 const BODY_MARKER: &str = "agent-body-marker-3883";
+/// A well-formed login relay key (32-256 characters of `[A-Za-z0-9._~+/=-]`).
+const RELAY_KEY: &str = "relay-key-4337-0123456789abcdef0123456789abcdef";
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a pgvector/pg18 superuser DB")
@@ -295,7 +308,82 @@ struct Declared<'a> {
     tools_locked: bool,
 }
 
+/// A relay client that only counts. The status read asks the parsed config whether the relay is on and
+/// never the sidecar, so every call here is a request the test must not see; the answer is a refusal that
+/// dials nothing.
+#[derive(Default)]
+struct CountingRelay(AtomicUsize);
+
+impl CountingRelay {
+    fn calls(&self) -> usize {
+        self.0.load(Ordering::SeqCst)
+    }
+
+    fn hit<T>(&self) -> Result<T, RelayFailure> {
+        self.0.fetch_add(1, Ordering::SeqCst);
+        Err(RelayFailure::Unreachable)
+    }
+}
+
+#[async_trait::async_trait]
+impl LoginRelayClient for CountingRelay {
+    async fn start(
+        &self,
+        _target: &RelayTarget,
+        _kind: RelayKind,
+        _name: &str,
+        _operator: &str,
+    ) -> Result<StartReply, RelayFailure> {
+        self.hit()
+    }
+    async fn complete(
+        &self,
+        _target: &RelayTarget,
+        _login_id: &str,
+        _operator: &str,
+        _pasted: &Pasted,
+    ) -> Result<StatusReply, RelayFailure> {
+        self.hit()
+    }
+    async fn poll(
+        &self,
+        _target: &RelayTarget,
+        _login_id: &str,
+        _operator: &str,
+    ) -> Result<StatusReply, RelayFailure> {
+        self.hit()
+    }
+    async fn cancel(
+        &self,
+        _target: &RelayTarget,
+        _login_id: &str,
+        _operator: &str,
+    ) -> Result<StatusReply, RelayFailure> {
+        self.hit()
+    }
+    async fn status(&self, _target: &RelayTarget) -> Result<Vec<TargetStatus>, RelayFailure> {
+        self.hit()
+    }
+}
+
+/// What #4337 adds to a started server (ADR-0203 증보 2026-10-25): the platform the process says it runs
+/// on, and the login relay's config with the client that would dial it.
+struct Environment {
+    platform: HostPlatform,
+    relay: LoginRelayConfig,
+    relay_client: Arc<dyn LoginRelayClient>,
+}
+
 async fn start_server(pool: PgPool, d: Declared<'_>) -> String {
+    let environment = Environment {
+        platform: HostPlatform::default(),
+        relay: LoginRelayConfig::default(),
+        relay_client: Arc::new(CountingRelay::default()),
+    };
+    start_server_in(pool, d, environment).await
+}
+
+async fn start_server_in(pool: PgPool, d: Declared<'_>, environment: Environment) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -316,6 +404,7 @@ async fn start_server(pool: PgPool, d: Declared<'_>) -> String {
         CohostedAgentConfig {
             declared: d.declared,
             tools_locked: d.tools_locked,
+            platform: environment.platform,
             ..Default::default()
         },
         Arc::new(GuardedProviderProbe::new(
@@ -326,7 +415,8 @@ async fn start_server(pool: PgPool, d: Declared<'_>) -> String {
             },
             std::time::Duration::from_secs(5),
         )),
-    );
+    )
+    .with_login_relay(environment.relay, environment.relay_client);
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -1690,4 +1780,279 @@ async fn the_models_throttle_is_checked_before_any_database_read() {
         .await;
     assert_eq!(code, 429, "PUT shares the budget");
     assert_eq!(hits.count(), 0);
+}
+
+// ---------------------------------------------------------------------------
+// #4337 — the environment facts in the status (ADR-0203 증보 2026-10-25 수용 기준 2·4)
+// ---------------------------------------------------------------------------
+
+/// 수용 기준 4: the 200 body is the **whole** expected JSON for each configuration, so the handler is tied
+/// to the assembly by value (a handler that stops calling it, or an assembly that empties `environment`,
+/// is a different body). Four configurations: declared x platform x relay. Nothing is dialled: neither the
+/// live agent mock nor the counting relay client sees a request, through status, probe and connect on an
+/// undeclared instance.
+///
+/// Sabotage: delete the `require_instance_operator_write` line in `status` (the stranger test below goes
+/// red); make `assemble_status` blank or change `environment` (the body comparison goes red).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_status_is_the_expected_body_with_the_environment_and_dials_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let http = reqwest::Client::new();
+    struct Case {
+        name: &'static str,
+        declared: bool,
+        platform: HostPlatform,
+        platform_word: &'static str,
+        relay_on: bool,
+    }
+    let cases = [
+        Case {
+            name: "undeclared, compose, relay off",
+            declared: false,
+            platform: HostPlatform::Compose,
+            platform_word: "compose",
+            relay_on: false,
+        },
+        Case {
+            name: "undeclared, railway, relay on",
+            declared: false,
+            platform: HostPlatform::Railway,
+            platform_word: "railway",
+            relay_on: true,
+        },
+        Case {
+            name: "declared, unknown, relay off",
+            declared: true,
+            platform: HostPlatform::Unknown,
+            platform_word: "unknown",
+            relay_on: false,
+        },
+        Case {
+            name: "declared, railway, relay on",
+            declared: true,
+            platform: HostPlatform::Railway,
+            platform_word: "railway",
+            relay_on: true,
+        },
+    ];
+    for case in cases {
+        let f = seed(&su, "cohost-env").await;
+        let (port, hits) = mock_agent(true, None).await;
+        let relay_client = Arc::new(CountingRelay::default());
+        let relay = if case.relay_on {
+            LoginRelayConfig::new("https://relay.example.com", RELAY_KEY)
+        } else {
+            LoginRelayConfig::default()
+        };
+        let base = start_server_in(
+            momo_app_pool().await,
+            Declared {
+                operator_email: &f.email,
+                env_url: format!("http://127.0.0.1:{port}/v1"),
+                bearer: ENV_KEY,
+                declared: case.declared,
+                tools_locked: true,
+            },
+            Environment {
+                platform: case.platform,
+                relay,
+                relay_client: relay_client.clone(),
+            },
+        )
+        .await;
+        let api = Api {
+            http: &http,
+            base: &base,
+            workspace: f.workspace,
+        };
+        let op = login(&http, &base, f.workspace, &f.email).await;
+
+        let mut expected = json!({
+            "schema": "momo.cohosted_agent.status.v0",
+            "declaration": if case.declared { "ready" } else { "not_declared" },
+            "toolsLockAttested": true,
+            "connectable": case.declared,
+            "environment": {
+                "platform": case.platform_word,
+                "loginRelay": if case.relay_on { "on" } else { "off" },
+            },
+        });
+        if case.declared {
+            expected["endpointLabel"] = json!(format!("http://127.0.0.1:{port}/v1"));
+        }
+        let (code, body, text) = api.status(&op).await;
+        assert_eq!(code, 200, "{}: {text}", case.name);
+        assert_eq!(body, expected, "{}", case.name);
+
+        if !case.declared {
+            // The whole family on an undeclared instance: still nothing leaves the server.
+            let (code, probe, _) = api
+                .post(&op, "/probe", Some(json!({"checkToolsets": true})))
+                .await;
+            assert_eq!(code, 200, "{}: {probe}", case.name);
+            assert_eq!(probe["requestsSent"], 0, "{}", case.name);
+            let (code, _, _) = api.post(&op, "/connect", None).await;
+            assert_eq!(code, 409, "{}", case.name);
+        }
+        assert_eq!(
+            hits.count(),
+            0,
+            "{}: a request reached the agent mock: {:?}",
+            case.name,
+            hits.paths()
+        );
+        assert_eq!(
+            relay_client.calls(),
+            0,
+            "{}: a request reached the relay client",
+            case.name
+        );
+    }
+}
+
+/// 수용 기준 4 (403) + 수용 기준 2 ([nightly] 절반): a workspace admin who is not a listed operator and
+/// another tenant's operator get 403 and a body without `environment`; the probe and connect answers carry
+/// none either; and no env string — the stamp, the Railway id, the relay URL, the relay key — reaches a 200
+/// body, a 403 body or the log, in each of the three platform-marker configurations (see the unit test
+/// `no_env_string_reaches_the_body_or_the_logs` for why they are split).
+///
+/// Sabotage: delete the operator gate line in `status` (the 403 rows go red); serialize any env string
+/// (a stamp, a relay label) into `environment`, or `warn!` it in the parser (the marker scans go red);
+/// add `environment` to the probe or connect answer (the key check goes red).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_stranger_gets_no_environment_and_no_env_string_leaves_the_server() {
+    ensure_schema_and_roles();
+    const PLATFORM_MARKER: &str = "MARKER-PLATFORM-4337-pg";
+    const RWENV_MARKER: &str = "MARKER-RWENV-4337-pg";
+    const RELAY_HOST_MARKER: &str = "marker-relayurl-4337-pg";
+    const RELAY_KEY_MARKER: &str = "MARKER-RELAYKEY-4337-pg-0123456789abcdef";
+    let logs = Arc::new(Mutex::new(Vec::<u8>::new()));
+    let _guard = tracing_subscriber::fmt()
+        .with_writer(BufferWriter(logs.clone()))
+        .with_max_level(tracing::Level::TRACE)
+        .set_default();
+    let su = superuser_pool().await;
+    let http = reqwest::Client::new();
+    let configurations: [(&str, Option<&str>, Option<&str>); 3] = [
+        ("railway id only", Some(RWENV_MARKER), None),
+        ("stamp only", None, Some(PLATFORM_MARKER)),
+        ("both", Some(RWENV_MARKER), Some(PLATFORM_MARKER)),
+    ];
+    for (name, railway_id, stamp) in configurations {
+        let lookup = |key: &str| -> Option<String> {
+            match key {
+                "RAILWAY_ENVIRONMENT_ID" => railway_id.map(str::to_string),
+                "MOMO_SELF_HOST_PLATFORM" => stamp.map(str::to_string),
+                "HERMES_LOGIN_RELAY_URL" => {
+                    Some(format!("https://{RELAY_HOST_MARKER}.example.com"))
+                }
+                "HERMES_LOGIN_RELAY_KEY" => Some(RELAY_KEY_MARKER.to_string()),
+                _ => None,
+            }
+        };
+        let platform = CohostedAgentConfig::from_lookup(lookup).platform;
+        let relay = LoginRelayConfig::from_lookup(lookup);
+
+        let f = seed(&su, "cohost-env-leak").await;
+        let (_, admin_email) = seed_human(&su, f.workspace, "admin", "cohost-env-admin").await;
+        let stranger = seed(&su, "cohost-env-stranger").await;
+        let (port, _hits) = mock_agent(true, None).await;
+        let base = start_server_in(
+            momo_app_pool().await,
+            Declared {
+                operator_email: &f.email,
+                env_url: format!("http://127.0.0.1:{port}/v1"),
+                bearer: ENV_KEY,
+                declared: true,
+                tools_locked: true,
+            },
+            Environment {
+                platform,
+                relay,
+                relay_client: Arc::new(CountingRelay::default()),
+            },
+        )
+        .await;
+        let api = Api {
+            http: &http,
+            base: &base,
+            workspace: f.workspace,
+        };
+        let op = login(&http, &base, f.workspace, &f.email).await;
+        let admin = login(&http, &base, f.workspace, &admin_email).await;
+        let other = login(&http, &base, stranger.workspace, &stranger.email).await;
+
+        let mut bodies: Vec<(String, String)> = Vec::new();
+        let (code, body, text) = api.status(&op).await;
+        assert_eq!(code, 200, "{name}: {text}");
+        assert_eq!(
+            body["environment"]["loginRelay"], "on",
+            "{name}: the relay markers must make the relay on, or the scan proves nothing"
+        );
+        let mut keys: Vec<&str> = body["environment"]
+            .as_object()
+            .expect("environment is an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        keys.sort_unstable();
+        assert_eq!(keys, ["loginRelay", "platform"], "{name}");
+        bodies.push(("200 status".to_string(), text));
+
+        for (who, token) in [("admin", &admin), ("other tenant", &other)] {
+            let (code, body, text) = api.status(token).await;
+            assert_eq!(code, 403, "{name}: {who}: {text}");
+            assert!(
+                body.get("environment").is_none() && !text.contains("environment"),
+                "{name}: {who}: a 403 body carries environment: {text}"
+            );
+            bodies.push((format!("403 status ({who})"), text));
+        }
+
+        let (code, body, text) = api.post(&op, "/probe", None).await;
+        assert_eq!(code, 200, "{name}: {text}");
+        assert!(
+            body.get("environment").is_none(),
+            "{name}: probe carries environment"
+        );
+        bodies.push(("probe".to_string(), text));
+        let (code, body, text) = api
+            .post(
+                &op,
+                "/connect",
+                Some(json!({"displayName": "Hermes", "handle": "hermes"})),
+            )
+            .await;
+        assert_eq!(code, 201, "{name}: {text}");
+        assert!(
+            body.get("environment").is_none(),
+            "{name}: connect carries environment"
+        );
+        bodies.push(("connect".to_string(), text));
+
+        let log_text = String::from_utf8_lossy(&logs.lock().unwrap()).to_ascii_lowercase();
+        let mut markers = vec![RELAY_HOST_MARKER, RELAY_KEY_MARKER];
+        markers.extend(railway_id);
+        markers.extend(stamp);
+        for marker in markers {
+            let marker = marker.to_ascii_lowercase();
+            for (what, text) in &bodies {
+                assert!(
+                    !text.to_ascii_lowercase().contains(&marker),
+                    "{name}: {marker} leaked into the {what}: {text}"
+                );
+            }
+            assert!(
+                !log_text.contains(&marker),
+                "{name}: {marker} leaked into the log"
+            );
+        }
+        assert!(
+            log_text.contains("cohosted agent connect probe"),
+            "{name}: positive control: the log capture must hear the server"
+        );
+    }
 }

@@ -12,6 +12,10 @@
 //   3. 도구 잠금은 운영자의 선언이다. 문장은 oort가 확인했다고 말하지 않는다(D6-5).
 //   4. `/v1/toolsets` 는 주의 신호일 뿐 증명이 아니다(`proof:false`).
 //   5. 서버 답에서 키·본문은 오지 않는다. 이 파일은 분류 낱말과 숫자만 읽는다.
+//   6. `environment`(서버가 부팅 때 알아낸 플랫폼, 로그인 중계가 켜졌는지)는 안내 문구를 고르는
+//      값일 뿐이다(ADR-0203 증보 2026-10-25 F2). 없거나(옛 서버) 객체가 아니거나(깨진 답) 허용 목록
+//      밖이면(미래 서버) **그 필드만** 「모름」으로 접고 상태 읽기 전체는 버리지 않는다. 문자열은
+//      그대로 넘기지 않는다: 열거형 낱말만 통과한다.
 // =============================================================================
 
 import { ApiError } from "../../lib/api";
@@ -35,6 +39,17 @@ export type ToolsetsSignal =
   | "none_listed"
   | "dangerous_listed";
 
+/** 서버가 부팅 때 env에서 접은 플랫폼. `compose`는 「Railway 신호가 없다」이지 docker compose를 확인한 것이 아니다. */
+export type HostPlatform = "railway" | "compose" | "unknown";
+/** 로그인 중계 라우트가 쓰는 판정과 같은 값(`on`/`off`). `unknown`은 서버가 말해 주지 않은 때의 「모름」(로그인을 시작해 409로 안다). */
+export type LoginRelayFact = "on" | "off" | "unknown";
+
+/** 안내 문구를 고르는 환경 사실. 권한·연결 가능 판정에 쓰지 않는다. */
+export interface CohostedEnvironment {
+  readonly platform: HostPlatform;
+  readonly loginRelay: LoginRelayFact;
+}
+
 export interface CohostedStatus {
   readonly declaration: Declaration;
   readonly endpointLabel: string | null;
@@ -42,6 +57,8 @@ export interface CohostedStatus {
   readonly toolsLockAttested: boolean;
   readonly connectable: boolean;
   readonly connectedAgentId: string | null;
+  /** 항상 있다: 서버가 안 보냈거나 읽을 수 없으면 필드마다 `unknown`. */
+  readonly environment: CohostedEnvironment;
 }
 
 export interface CohostedProbe {
@@ -81,8 +98,19 @@ const SIGNALS: readonly ToolsetsSignal[] = [
   "dangerous_listed",
 ];
 
+const PLATFORMS: readonly HostPlatform[] = ["railway", "compose", "unknown"];
+const RELAY_WORDS: readonly Exclude<LoginRelayFact, "unknown">[] = ["on", "off"];
+
 function oneOf<T extends string>(value: string | undefined, allowed: readonly T[]): T | null {
   return allowed.find((candidate) => candidate === value) ?? null;
+}
+
+/** 필드 단위로 접는다. 허용 목록에 있는 낱말만 통과하고, 나머지는 「모름」이다. */
+function environmentFromWire(value: unknown): CohostedEnvironment {
+  return {
+    platform: oneOf(str(value, "platform"), PLATFORMS) ?? "unknown",
+    loginRelay: oneOf(str(value, "loginRelay"), RELAY_WORDS) ?? "unknown",
+  };
 }
 
 export function statusFromWire(value: unknown): CohostedStatus | null {
@@ -98,6 +126,7 @@ export function statusFromWire(value: unknown): CohostedStatus | null {
     toolsLockAttested: attested,
     connectable,
     connectedAgentId: str(body, "connectedAgentId") ?? null,
+    environment: environmentFromWire(body.environment),
   };
 }
 

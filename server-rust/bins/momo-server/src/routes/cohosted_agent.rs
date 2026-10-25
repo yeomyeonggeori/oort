@@ -37,6 +37,12 @@
 //! 6. **No secret, no body.** Responses and audit rows carry the redacted
 //!    endpoint label, counts and fixed vocabulary; `HERMES_API_KEY` and anything
 //!    the agent sent back never leave the probe crate.
+//! 7. **The status adds two environment facts, as closed words** (#4337, ADR-0203
+//!    증보 2026-10-25 F2): `environment { platform, loginRelay }`, always present
+//!    whatever `declaration` says. `platform` was classified once at boot
+//!    ([`crate::host_platform::HostPlatform`]); `loginRelay` is the very predicate the
+//!    relay routes answer `409 login_relay_off` by. No env string is returned, and
+//!    nothing here reads either value to decide anything but the screen's wording.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
@@ -68,8 +74,9 @@ use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
 
-use crate::config::CohostedAgentConfig;
+use crate::config::{CohostedAgentConfig, LoginRelayConfig, SettingsConfig};
 use crate::error::ApiError;
+use crate::host_platform::HostPlatform;
 use crate::rate_limit::{too_many_requests, SlidingWindowRateLimiter};
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, require_instance_operator_write, settle_db,
@@ -239,6 +246,69 @@ pub struct StatusResponse {
     connectable: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     connected_agent_id: Option<String>,
+    /// #4337 (ADR-0203 증보 2026-10-25 F2): always present, whatever `declaration` is.
+    environment: EnvironmentDto,
+}
+
+/// Whether the Hermes login relay is switched on, as a closed word (F4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum RelaySwitch {
+    On,
+    Off,
+}
+
+/// The environment facts the screen picks its wording by (F2). Two closed enums and nothing else: no
+/// stamp, no Railway id, no relay address or key ever goes out through here. Neither field is read by a
+/// permission, egress or connectability decision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EnvironmentDto {
+    /// `railway` | `compose` | `unknown` — classified at boot (F3).
+    platform: HostPlatform,
+    /// `on` | `off` — the relay routes' own predicate (F4).
+    login_relay: RelaySwitch,
+}
+
+/// F4 — `on` exactly when the relay routes would not answer `409 login_relay_off`. It calls
+/// [`LoginRelayConfig::target`], the call `login_relay::prepare` makes before that refusal, and **not**
+/// `configured()`: that one is true for a URL the write gate refuses or one that carries a path, which
+/// would put "on" on the screen above ten routes that all refuse. `on` means "configured and the address
+/// passes the gate", not "the sidecar is alive" — nothing is dialled here.
+fn login_relay_switch(config: &LoginRelayConfig, settings: &SettingsConfig) -> RelaySwitch {
+    if config.target(settings).is_some() {
+        RelaySwitch::On
+    } else {
+        RelaySwitch::Off
+    }
+}
+
+fn environment_of(state: &AppState) -> EnvironmentDto {
+    EnvironmentDto {
+        platform: state.cohosted.config.platform,
+        login_relay: login_relay_switch(&state.login_relay.config, &state.settings),
+    }
+}
+
+/// The status body from its already-decided inputs. The handler's only job after the gate and the one pin
+/// lookup is to call this, so the body's shape (and what the facts may influence) is testable without a
+/// database.
+fn assemble_status(
+    declared: Declaration,
+    label: Option<String>,
+    attested: bool,
+    connected: Option<Uuid>,
+    environment: EnvironmentDto,
+) -> StatusResponse {
+    StatusResponse {
+        schema: STATUS_SCHEMA,
+        declaration: declared.as_str(),
+        endpoint_label: label,
+        tools_lock_attested: attested,
+        connectable: declared == Declaration::Ready && attested && connected.is_none(),
+        connected_agent_id: connected.map(|id| id.to_string()),
+        environment,
+    }
 }
 
 /// `GET /v1/workspaces/{ws}/cohosted-agent` — no network, ever.
@@ -255,15 +325,13 @@ pub async fn status(
     } else {
         connected_agent(&state, workspace_id).await?
     };
-    let attested = state.cohosted.config.tools_locked;
-    Ok(Json(StatusResponse {
-        schema: STATUS_SCHEMA,
-        declaration: declared.as_str(),
-        endpoint_label: label,
-        tools_lock_attested: attested,
-        connectable: declared == Declaration::Ready && attested && connected.is_none(),
-        connected_agent_id: connected.map(|id| id.to_string()),
-    }))
+    Ok(Json(assemble_status(
+        declared,
+        label,
+        state.cohosted.config.tools_locked,
+        connected,
+        environment_of(&state),
+    )))
 }
 
 // ---------------------------------------------------------------------------
@@ -1408,5 +1476,495 @@ mod tests {
         };
         let dto = provider_models_dto(&report, Some(&other));
         assert_eq!(featured(&dto), vec!["a", "b", "c"]);
+    }
+
+    // -----------------------------------------------------------------------
+    // #4337 — the environment facts in the status body (ADR-0203 증보 2026-10-25).
+    // None of these needs a database: the handler's work after the gate is
+    // `assemble_status`, and `loginRelay` is one call on parsed config.
+    // -----------------------------------------------------------------------
+
+    use serde_json::{json, Value};
+    use std::io::{self, Write};
+    use std::sync::Mutex;
+    use tracing_subscriber::fmt::MakeWriter;
+
+    const PLATFORMS: [HostPlatform; 3] = [
+        HostPlatform::Railway,
+        HostPlatform::Compose,
+        HostPlatform::Unknown,
+    ];
+    const SWITCHES: [RelaySwitch; 2] = [RelaySwitch::On, RelaySwitch::Off];
+
+    /// The wire word of each variant, spelled out by hand. A `match` with no wildcard: a new variant
+    /// does not compile until this (and so the lists above and the golden) learns it.
+    fn platform_word(platform: HostPlatform) -> &'static str {
+        match platform {
+            HostPlatform::Railway => "railway",
+            HostPlatform::Compose => "compose",
+            HostPlatform::Unknown => "unknown",
+        }
+    }
+
+    fn switch_word(switch: RelaySwitch) -> &'static str {
+        match switch {
+            RelaySwitch::On => "on",
+            RelaySwitch::Off => "off",
+        }
+    }
+
+    fn relay(url: Option<&str>, key: Option<&str>) -> LoginRelayConfig {
+        LoginRelayConfig::from_lookup(|name| match name {
+            "HERMES_LOGIN_RELAY_URL" => url.map(str::to_string),
+            "HERMES_LOGIN_RELAY_KEY" => key.map(str::to_string),
+            _ => None,
+        })
+    }
+
+    const GOOD_KEY: &str = "relay-key-4337-0123456789abcdef0123456789abcdef";
+
+    /// (name, url, key, what `configured()` says, the expected switch)
+    type RelayRow<'a> = (&'a str, Option<&'a str>, Option<&'a str>, bool, RelaySwitch);
+
+    /// ADR-0203 증보 2026-10-25 수용 기준 3 ([rust] 절반): `loginRelay` is the routes' predicate, table by table.
+    /// The `configured` column is what `LoginRelayConfig::configured()` says for the same input: the rows
+    /// where it is true and the answer is still `off` are the ones that tell `target()` from `configured()`.
+    ///
+    /// Env-free on purpose: an internal host (`http://hermes:8643`) is `on` only with the process env
+    /// `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` + `AGENT_PROVIDER_LOCAL_HOSTS`, which would be global state in
+    /// a parallel test run; that row is the PG pack's (`login_relay_conformance_pg`).
+    ///
+    /// Sabotage: make `login_relay_switch` call `configured()` -> the `write gate refuses`, `private
+    /// literal` and `path` rows go red; drop the key/URL half of `target()` -> the missing rows go red.
+    #[test]
+    fn login_relay_is_on_exactly_when_the_routes_would_not_refuse() {
+        let long_key = "k".repeat(257);
+        let short_key = "k".repeat(31);
+        let settings = SettingsConfig::default();
+        let rows: [RelayRow; 12] = [
+            ("nothing set", None, None, false, RelaySwitch::Off),
+            (
+                "url without key",
+                Some("https://relay.example.com"),
+                None,
+                false,
+                RelaySwitch::Off,
+            ),
+            (
+                "key without url",
+                None,
+                Some(GOOD_KEY),
+                false,
+                RelaySwitch::Off,
+            ),
+            (
+                "key of 31 characters",
+                Some("https://relay.example.com"),
+                Some(short_key.as_str()),
+                false,
+                RelaySwitch::Off,
+            ),
+            (
+                "key of 257 characters",
+                Some("https://relay.example.com"),
+                Some(long_key.as_str()),
+                false,
+                RelaySwitch::Off,
+            ),
+            (
+                "key outside the character set",
+                Some("https://relay.example.com"),
+                Some("relay key with spaces 0123456789abcdef0123456789"),
+                false,
+                RelaySwitch::Off,
+            ),
+            (
+                "unresolved shared-variable reference as the key",
+                Some("https://relay.example.com"),
+                Some("${{shared.HERMES_LOGIN_RELAY_KEY}}"),
+                false,
+                RelaySwitch::Off,
+            ),
+            (
+                "write gate refuses plain http to a remote host",
+                Some("http://relay.example.com"),
+                Some(GOOD_KEY),
+                true,
+                RelaySwitch::Off,
+            ),
+            (
+                "write gate refuses a private literal",
+                Some("https://10.0.0.5"),
+                Some(GOOD_KEY),
+                true,
+                RelaySwitch::Off,
+            ),
+            (
+                "url with a path",
+                Some("https://relay.example.com/v1"),
+                Some(GOOD_KEY),
+                true,
+                RelaySwitch::Off,
+            ),
+            (
+                "public https origin",
+                Some("https://relay.example.com"),
+                Some(GOOD_KEY),
+                true,
+                RelaySwitch::On,
+            ),
+            (
+                "public https origin with a port",
+                Some("https://relay.example.com:8443"),
+                Some(GOOD_KEY),
+                true,
+                RelaySwitch::On,
+            ),
+        ];
+        // Every row is judged before the test fails, so the failure names all the rows a change breaks.
+        let mut wrong: Vec<String> = Vec::new();
+        for (name, url, key, configured, expected) in rows {
+            let config = relay(url, key);
+            if config.configured() != configured {
+                wrong.push(format!("{name}: configured() is not {configured}"));
+            }
+            let got = login_relay_switch(&config, &settings);
+            if got != expected {
+                wrong.push(format!("{name}: expected {expected:?}, got {got:?}"));
+            }
+            // The status and the routes ask one question.
+            if (expected == RelaySwitch::On) != config.target(&settings).is_some() {
+                wrong.push(format!(
+                    "{name}: target() disagrees with the expected switch"
+                ));
+            }
+        }
+        assert!(
+            wrong.is_empty(),
+            "rows that disagree:\n{}",
+            wrong.join("\n")
+        );
+    }
+
+    /// ADR-0203 증보 2026-10-25 수용 기준 5 ([rust]): the environment is wording only. Two reference states
+    /// (and the undeclared one, where the field must still be there), every `platform` x `loginRelay`
+    /// combination: everything but `environment` is the same.
+    ///
+    /// Sabotage: let `connectable` read the platform (`&& platform != Unknown`) -> red.
+    #[test]
+    fn the_environment_decides_nothing_but_wording() {
+        let agent = Uuid::from_u128(0x4337);
+        let label = || Some("http://hermes.railway.internal:8642/v1".to_string());
+        let states = [
+            (
+                "ready, attested, not connected",
+                Declaration::Ready,
+                true,
+                None,
+                true,
+            ),
+            ("connected", Declaration::Ready, true, Some(agent), false),
+            ("not declared", Declaration::NotDeclared, false, None, false),
+        ];
+        for (name, declared, attested, connected, connectable) in states {
+            let mut reference: Option<Value> = None;
+            for platform in PLATFORMS {
+                for login_relay in SWITCHES {
+                    let mut body = serde_json::to_value(assemble_status(
+                        declared,
+                        label(),
+                        attested,
+                        connected,
+                        EnvironmentDto {
+                            platform,
+                            login_relay,
+                        },
+                    ))
+                    .unwrap();
+                    let environment = body
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("environment")
+                        .unwrap_or_else(|| panic!("{name}: environment is missing"));
+                    assert_eq!(
+                        environment,
+                        json!({"platform": platform_word(platform), "loginRelay": switch_word(login_relay)}),
+                        "{name}"
+                    );
+                    match &reference {
+                        None => reference = Some(body),
+                        Some(first) => assert_eq!(
+                            &body, first,
+                            "{name}: {platform:?}/{login_relay:?} changed more than `environment`"
+                        ),
+                    }
+                }
+            }
+            let reference = reference.unwrap();
+            assert_eq!(reference["connectable"], connectable, "{name}");
+            assert_eq!(
+                reference["connectedAgentId"],
+                connected.map_or(Value::Null, |id| json!(id.to_string())),
+                "{name}"
+            );
+        }
+    }
+
+    /// The golden wire (`docs/api/cohosted-agent-status.golden.json`), read at compile time: a missing file
+    /// is a build failure, never a skipped check.
+    const GOLDEN: &str = include_str!("../../../../../docs/api/cohosted-agent-status.golden.json");
+
+    /// ADR-0203 증보 2026-10-25 수용 기준 6 ([rust]): the serialized status equals the golden, case by case;
+    /// the golden names every enum word and the exact `environment` key set; and the golden carries no case
+    /// this test does not build (so neither side can grow alone).
+    ///
+    /// Sabotage: rename `login_relay` on the wire, rename a variant word, drop `environment` from the
+    /// assembled body, or change the schema string -> red.
+    #[test]
+    fn the_serialized_status_is_the_golden() {
+        let golden: Value = serde_json::from_str(GOLDEN).expect("golden parses");
+        assert_eq!(golden["schema"], STATUS_SCHEMA);
+        assert_eq!(
+            golden["environment"]["keys"],
+            json!(["platform", "loginRelay"])
+        );
+        assert_eq!(
+            golden["environment"]["platform"],
+            json!(PLATFORMS.map(platform_word)),
+            "golden platform words"
+        );
+        assert_eq!(
+            golden["environment"]["loginRelay"],
+            json!(SWITCHES.map(switch_word)),
+            "golden loginRelay words"
+        );
+        // Every variant, serialized, is its word.
+        for platform in PLATFORMS {
+            assert_eq!(
+                serde_json::to_value(platform).unwrap(),
+                platform_word(platform)
+            );
+        }
+        for switch in SWITCHES {
+            assert_eq!(serde_json::to_value(switch).unwrap(), switch_word(switch));
+        }
+
+        let agent = Uuid::parse_str("00000000-0000-7000-8000-0000000000aa").unwrap();
+        let hermes = || Some("http://hermes:8642/v1".to_string());
+        let railway = || Some("http://hermes.railway.internal:8642/v1".to_string());
+        let built: Vec<(&str, StatusResponse)> = vec![
+            (
+                "not_declared_compose_relay_off",
+                assemble_status(
+                    Declaration::NotDeclared,
+                    None,
+                    false,
+                    None,
+                    EnvironmentDto {
+                        platform: HostPlatform::Compose,
+                        login_relay: RelaySwitch::Off,
+                    },
+                ),
+            ),
+            (
+                "not_declared_railway_relay_on",
+                assemble_status(
+                    Declaration::NotDeclared,
+                    None,
+                    false,
+                    None,
+                    EnvironmentDto {
+                        platform: HostPlatform::Railway,
+                        login_relay: RelaySwitch::On,
+                    },
+                ),
+            ),
+            (
+                "key_missing_unknown_relay_off",
+                assemble_status(
+                    Declaration::KeyMissing,
+                    hermes(),
+                    true,
+                    None,
+                    EnvironmentDto {
+                        platform: HostPlatform::Unknown,
+                        login_relay: RelaySwitch::Off,
+                    },
+                ),
+            ),
+            (
+                "ready_attested_compose_relay_on",
+                assemble_status(
+                    Declaration::Ready,
+                    hermes(),
+                    true,
+                    None,
+                    EnvironmentDto {
+                        platform: HostPlatform::Compose,
+                        login_relay: RelaySwitch::On,
+                    },
+                ),
+            ),
+            (
+                "connected_railway_relay_on",
+                assemble_status(
+                    Declaration::Ready,
+                    railway(),
+                    true,
+                    Some(agent),
+                    EnvironmentDto {
+                        platform: HostPlatform::Railway,
+                        login_relay: RelaySwitch::On,
+                    },
+                ),
+            ),
+        ];
+        let cases = golden["cases"].as_array().expect("golden cases");
+        assert_eq!(
+            cases.len(),
+            built.len(),
+            "the golden and this test list different cases"
+        );
+        for (name, status) in built {
+            let case = cases
+                .iter()
+                .find(|case| case["name"] == name)
+                .unwrap_or_else(|| panic!("golden has no case {name}"));
+            assert_eq!(
+                serde_json::to_value(status).unwrap(),
+                case["body"],
+                "case {name}"
+            );
+        }
+    }
+
+    #[derive(Clone)]
+    struct Capture(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for Capture {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl<'a> MakeWriter<'a> for Capture {
+        type Writer = Capture;
+        fn make_writer(&'a self) -> Self::Writer {
+            self.clone()
+        }
+    }
+
+    /// ADR-0203 증보 2026-10-25 수용 기준 2 ([rust] 절반): an arbitrary env string never comes back out.
+    /// The markers go into the stamp, the Railway id, the relay URL (a public https host, so the relay is
+    /// `on` and its address is really in play) and the relay key. The parse **and** the body's
+    /// serialization run under one `tracing` capture. The configurations are split by which platform
+    /// marker is present, because with both set the classifier ends at row 1 and never reaches the stamp:
+    /// a logger of the stamp would show only in the stamp-only configuration.
+    ///
+    /// Sabotage: `warn!` the stamp in the parser (stamp-only goes red); put `settings`-normalised relay
+    /// URL or label into `EnvironmentDto` (all go red, and the key-set check does too); serialize a raw
+    /// env string as `platform`; hold the raw stamp in `CohostedAgentConfig` (the `{:?}` check).
+    #[test]
+    fn no_env_string_reaches_the_body_or_the_logs() {
+        const PLATFORM_MARKER: &str = "MARKER-PLATFORM-4337-body";
+        const RWENV_MARKER: &str = "MARKER-RWENV-4337-body";
+        const RELAY_HOST_MARKER: &str = "marker-relayurl-4337-body";
+        const RELAY_KEY_MARKER: &str = "MARKER-RELAYKEY-4337-body-0123456789abcdef";
+        let configurations: [(&str, Option<&str>, Option<&str>); 3] = [
+            ("railway id only", Some(RWENV_MARKER), None),
+            ("stamp only", None, Some(PLATFORM_MARKER)),
+            ("both", Some(RWENV_MARKER), Some(PLATFORM_MARKER)),
+        ];
+        let settings = SettingsConfig::default();
+        for (name, railway_id, stamp) in configurations {
+            let logs = Arc::new(Mutex::new(Vec::<u8>::new()));
+            let subscriber = tracing_subscriber::fmt()
+                .with_writer(Capture(logs.clone()))
+                .with_max_level(tracing::Level::TRACE)
+                .finish();
+            let lookup = |key: &str| -> Option<String> {
+                match key {
+                    "RAILWAY_ENVIRONMENT_ID" => railway_id.map(str::to_string),
+                    "MOMO_SELF_HOST_PLATFORM" => stamp.map(str::to_string),
+                    "HERMES_LOGIN_RELAY_URL" => {
+                        Some(format!("https://{RELAY_HOST_MARKER}.example.com"))
+                    }
+                    "HERMES_LOGIN_RELAY_KEY" => Some(RELAY_KEY_MARKER.to_string()),
+                    _ => None,
+                }
+            };
+            let (body, debug) = tracing::subscriber::with_default(subscriber, || {
+                let cohosted = CohostedAgentConfig::from_lookup(lookup);
+                let relay_config = LoginRelayConfig::from_lookup(lookup);
+                let environment = EnvironmentDto {
+                    platform: cohosted.platform,
+                    login_relay: login_relay_switch(&relay_config, &settings),
+                };
+                assert_eq!(
+                    environment.login_relay,
+                    RelaySwitch::On,
+                    "{name}: the relay markers must make the relay `on`, or the check proves nothing"
+                );
+                let body = serde_json::to_string(&assemble_status(
+                    Declaration::Ready,
+                    Some("http://hermes:8642/v1".to_string()),
+                    true,
+                    None,
+                    environment,
+                ))
+                .unwrap();
+                // Positive control: the capture hears this thread.
+                tracing::warn!("capture-control-4337");
+                (body, format!("{cohosted:?}"))
+            });
+            let logs = String::from_utf8_lossy(&logs.lock().unwrap()).to_ascii_lowercase();
+            assert!(
+                logs.contains("capture-control-4337"),
+                "{name}: capture is deaf"
+            );
+
+            let mut markers = vec![RELAY_HOST_MARKER, RELAY_KEY_MARKER];
+            markers.extend(railway_id);
+            markers.extend(stamp);
+            for marker in markers {
+                let marker = marker.to_ascii_lowercase();
+                assert!(
+                    !body.to_ascii_lowercase().contains(&marker),
+                    "{name}: body has {marker}: {body}"
+                );
+                assert!(
+                    !logs.contains(&marker),
+                    "{name}: logs have {marker}: {logs}"
+                );
+            }
+            assert!(
+                !debug.to_ascii_lowercase().contains("marker-"),
+                "{name}: Debug has a marker: {debug}"
+            );
+
+            let parsed: Value = serde_json::from_str(&body).unwrap();
+            let environment = parsed["environment"]
+                .as_object()
+                .expect("environment is an object");
+            let mut keys: Vec<&str> = environment.keys().map(String::as_str).collect();
+            keys.sort_unstable();
+            assert_eq!(keys, ["loginRelay", "platform"], "{name}");
+            assert!(
+                PLATFORMS
+                    .map(platform_word)
+                    .contains(&environment["platform"].as_str().unwrap()),
+                "{name}: platform outside the enum"
+            );
+            assert!(
+                SWITCHES
+                    .map(switch_word)
+                    .contains(&environment["loginRelay"].as_str().unwrap()),
+                "{name}: loginRelay outside the enum"
+            );
+        }
     }
 }

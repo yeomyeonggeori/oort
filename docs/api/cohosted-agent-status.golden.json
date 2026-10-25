@@ -1,0 +1,70 @@
+{
+  "_comment": "#4337 — ADR-0203 증보 2026-10-25 F2의 상태 읽기 응답 골든. `GET /v1/workspaces/{workspaceId}/cohosted-agent`(인스턴스 운영자 전용, 네트워크 0)의 본문 모양이 한 벌이다: 기존 키 그대로 + 항상 있는 `environment`(키는 정확히 platform·loginRelay, 값은 닫힌 열거형)이고 `schema`는 `.v0`을 유지한다(옛 클라이언트가 `.v0`만 읽는다). 서버(momo-server routes::cohosted_agent 단위 시험 the_serialized_status_is_the_golden)가 사례마다 직렬화한 본문을 이 파일과 대조하고, 이 파일이 가진 사례와 시험이 만드는 사례가 같은 집합이어야 한다. 값의 뜻: platform은 부팅 때 env 두 변수(RAILWAY_ENVIRONMENT_ID, MOMO_SELF_HOST_PLATFORM)에서 열거형으로만 접은 값이고 안내 문구를 고르는 데만 쓴다(권한·egress·연결 가능 판정과 무관). loginRelay는 로그인 중계 라우트가 409 login_relay_off를 내는 판정과 같은 술어이며 `on`은 「설정이 있고 주소가 게이트를 통과한다」이지 사이드카가 살아 있다는 뜻이 아니다. 문자열(도장 원문·Railway 환경 id·중계 주소·키)은 이 응답 어디에도 나가지 않는다. 클라이언트는 environment가 없거나 객체가 아니거나 허용 목록 밖이면 필드 단위로 platform=unknown·loginRelay=모름으로 읽고 상태 전체를 버리지 않는다(packages/momo-core cohostedAgent.ts statusFromWire). 운영자 스펙(openapi.operator.yaml)과 이 파일의 기계 대조는 아직 없다(후속 이슈).",
+  "route": {
+    "method": "GET",
+    "path": "/v1/workspaces/{workspaceId}/cohosted-agent",
+    "auth": "인스턴스 운영자 전용(PLATFORM_ADMIN_EMAILS에 오른 사람). 비운영자는 403이고 본문에 environment가 없다."
+  },
+  "schema": "momo.cohosted_agent.status.v0",
+  "environment": {
+    "keys": ["platform", "loginRelay"],
+    "platform": ["railway", "compose", "unknown"],
+    "loginRelay": ["on", "off"]
+  },
+  "cases": [
+    {
+      "name": "not_declared_compose_relay_off",
+      "body": {
+        "schema": "momo.cohosted_agent.status.v0",
+        "declaration": "not_declared",
+        "toolsLockAttested": false,
+        "connectable": false,
+        "environment": { "platform": "compose", "loginRelay": "off" }
+      }
+    },
+    {
+      "name": "not_declared_railway_relay_on",
+      "body": {
+        "schema": "momo.cohosted_agent.status.v0",
+        "declaration": "not_declared",
+        "toolsLockAttested": false,
+        "connectable": false,
+        "environment": { "platform": "railway", "loginRelay": "on" }
+      }
+    },
+    {
+      "name": "key_missing_unknown_relay_off",
+      "body": {
+        "schema": "momo.cohosted_agent.status.v0",
+        "declaration": "key_missing",
+        "endpointLabel": "http://hermes:8642/v1",
+        "toolsLockAttested": true,
+        "connectable": false,
+        "environment": { "platform": "unknown", "loginRelay": "off" }
+      }
+    },
+    {
+      "name": "ready_attested_compose_relay_on",
+      "body": {
+        "schema": "momo.cohosted_agent.status.v0",
+        "declaration": "ready",
+        "endpointLabel": "http://hermes:8642/v1",
+        "toolsLockAttested": true,
+        "connectable": true,
+        "environment": { "platform": "compose", "loginRelay": "on" }
+      }
+    },
+    {
+      "name": "connected_railway_relay_on",
+      "body": {
+        "schema": "momo.cohosted_agent.status.v0",
+        "declaration": "ready",
+        "endpointLabel": "http://hermes.railway.internal:8642/v1",
+        "toolsLockAttested": true,
+        "connectable": false,
+        "connectedAgentId": "00000000-0000-7000-8000-0000000000aa",
+        "environment": { "platform": "railway", "loginRelay": "on" }
+      }
+    }
+  ]
+}

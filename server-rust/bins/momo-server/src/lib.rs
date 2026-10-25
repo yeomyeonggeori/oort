@@ -33,6 +33,8 @@ pub mod config;
 pub mod cors;
 pub mod dto;
 pub mod error;
+/// ADR-0203 증보 2026-10-25 (#4337): which platform this process runs on, as a closed enum.
+pub mod host_platform;
 pub mod human_control;
 mod livekit;
 /// ADR-0113 D6 manifest admission (port of the retired Swift validator, #3859).
