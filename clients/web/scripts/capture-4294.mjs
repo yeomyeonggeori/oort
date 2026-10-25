@@ -158,6 +158,16 @@ const json = (route, body, status = 200) =>
 async function installRoutes(context, scene) {
   const items = serverItems();
   const unread = () => items.filter((i) => i.readAt === null).length;
+  // 읽음 커서: 사진만 보낸 DM 한 건(그리고 파일만 보낸 DM·멘션 한 건)만 안 읽은 상태로 연다.
+  const cursors = { [STUDIO]: 1, [DM_SEO]: 2, [DM_MIN]: 1 };
+  const readStateOf = (c) => {
+    const latest = (byChannel[c.id] ?? []).length;
+    const last = cursors[c.id] ?? 0;
+    return {
+      channel_id: c.id, last_read_seq: last, latest_seq: latest, unread_count: Math.max(0, latest - last),
+      mention_count: 0, marked_unread_before_seq: null,
+    };
+  };
   await context.route("**/v1/**", async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -191,15 +201,13 @@ async function installRoutes(context, scene) {
     }
     if (path.endsWith("/channels")) return json(route, { channels });
     if (path.endsWith("/roster")) return json(route, { members: roster });
-    if (path.endsWith("/read-state") && method === "GET") {
-      return json(route, {
-        read_states: channels.map((c) => ({
-          channel_id: c.id, last_read_seq: 0, latest_seq: (byChannel[c.id] ?? []).length, unread_count: 0,
-          mention_count: 0, marked_unread_before_seq: null,
-        })),
-      });
+    if (path.endsWith("/read-state") && method === "GET") return json(route, { read_states: channels.map(readStateOf) });
+    if (/\/channels\/[^/]+\/read-state$/.test(path) && method === "PUT") {
+      const id = path.split("/channels/")[1].split("/")[0];
+      const requested = JSON.parse(route.request().postData() ?? "{}").last_read_seq ?? 0;
+      cursors[id] = Math.max(cursors[id] ?? 0, requested);
+      return json(route, readStateOf(chById(id)));
     }
-    if (/\/channels\/[^/]+\/read-state$/.test(path) && method === "PUT") return json(route, {});
     if (path.endsWith("/approvals")) return json(route, { approvals: [] });
     if (path.endsWith("/agent-runs")) return json(route, { runs: [] });
     if (path.endsWith("/huddles/active")) return json(route, { huddle: null });
@@ -257,6 +265,8 @@ function note(name, detail) {
   console.log(`note ${name}: ${detail}`);
 }
 const squash = (text) => (text ?? "").replace(/\s+/g, " ").trim();
+/** 증거 사진에 모의 서버의 응답 모양 탓에 생긴 오류 띠가 끼어들지 않았는지. */
+const noFailureBanner = async (page) => !(await page.locator("body").innerText()).includes("하지 못했어요");
 
 async function open(browser, origin, scheme, scene) {
   const context = await browser.newContext({
@@ -310,8 +320,10 @@ async function scenes(browser, origin, scheme) {
     check(`${tag} server 상세: 사진만 보낸 맥락 줄이 「사진 2장」이다`, squash(await line.first().innerText().catch(() => "")) === "사진 2장", squash(await target.innerText().catch(() => "")));
     const muted = await line.first().evaluate((el) => el.parentElement?.className.includes("text-ink-muted") ?? false).catch(() => false);
     check(`${tag} server 상세: 그 줄은 본문이 아니라 muted 로 선다`, muted);
-    const rowText = squash(await target.innerText().catch(() => ""));
-    check(`${tag} server 상세: 대상 행이 이름만 있는 빈 칸이 아니다`, rowText.replace("박서연", "").replace(/\d{1,2}:\d{2}|방금|분 전/g, "").trim().length > 0, rowText);
+    // 이름·시각 줄 아래 본문 칸(font-semibold 가 아닌 text-body)이 비어 있지 않다 — 수리 전에는 이 칸이 빈 줄이었다.
+    const bodyText = squash(await target.locator("span.text-body:not(.font-semibold)").first().innerText().catch(() => ""));
+    check(`${tag} server 상세: 대상 행의 본문 칸이 비어 있지 않다`, bodyText.length > 0, JSON.stringify(bodyText));
+    check(`${tag} server 상세: 화면에 실패 띠가 없다`, await noFailureBanner(page));
     await shot(page, "inbox-server");
     await context.close();
   }
@@ -330,6 +342,7 @@ async function scenes(browser, origin, scheme) {
     await page.waitForTimeout(500);
     const line = page.getByTestId("inbox-detail").locator("[data-testid='inbox-context-attachments']");
     check(`${tag} legacy 상세: 맥락 줄이 「사진 2장」이다`, squash(await line.first().innerText().catch(() => "")) === "사진 2장");
+    check(`${tag} legacy 상세: 화면에 실패 띠가 없다`, await noFailureBanner(page));
     await shot(page, "inbox-legacy");
     await context.close();
   }
@@ -354,8 +367,8 @@ async function scenes(browser, origin, scheme) {
     );
     await row.scrollIntoViewIfNeeded();
     await page.waitForTimeout(500);
-    check(`${tag} 대화: 사진만 보낸 행에 사진 카드 2장이 선다`, (await row.locator("[data-testid='attachment-image']").count()) === 2);
-    check(`${tag} 대화: 그 행에 「내용 없는 메시지」가 없다`, !(await row.innerText()).includes("내용 없는 메시지"));
+    check(`${tag} 대화(대조, 수리 전에도 정상): 사진만 보낸 행에 사진 카드 2장이 선다`, (await row.locator("[data-testid='attachment-image']").count()) === 2);
+    check(`${tag} 대화(대조, 수리 전에도 정상): 그 행에 「내용 없는 메시지」가 없다`, !(await row.innerText()).includes("내용 없는 메시지"));
     await shot(page, "conversation");
 
     await row.hover();
