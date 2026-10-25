@@ -55,7 +55,7 @@ import {setServerBase} from '../src/storage/serverBase';
 //
 //   #4456 「포커스 먼저」 — 입력창을 **누르는 순간**(글자 0개) 넓은 편집기로 자라고, 포커스를 잃으면(글이 없을 때) 접힌다.
 //             focus       140초 동안 재기만 한다 — 사람(Maestro)이 누르고·가만히 있고·치고·보내고(포커스가 남는다)·끌어 내리고·다시 누르고·
-//                         글을 남긴 채 내리고·지운 채 내린다(`maestro/106-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
+//                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
 //                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
 //                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
 //

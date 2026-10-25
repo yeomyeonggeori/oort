@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * `measure/steady.tsx` 의 `focus` 장면(`DM-STEADY-FOCUS`, 흐름 `maestro/109-focus-steady.yaml`)이 `-momoGapSink` 로 보낸 프레임을
+ * `measure/steady.tsx` 의 `focus` 장면(`DM-STEADY-FOCUS`, 흐름 `maestro/110-focus-steady.yaml`)이 `-momoGapSink` 로 보낸 프레임을
  * 사건(포커스·블러·보냄·초안·자판) 둘레의 **창**으로 잘라 「맨 아래 행이 입력창 높이가 바뀐 만큼만 움직였는가」를 숫자로 낸다 (#4456).
  *
  *   node measure/focus-windows.mjs <sink.jsonl> [--tag <태그>] [--table <사건 이름 앞부분, 예: focus>] [--json]
