@@ -39,7 +39,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Request, State};
@@ -55,7 +55,7 @@ use uuid::Uuid;
 use crate::config::RateLimitConfig;
 use crate::error::ApiError;
 use crate::routes::shared::{agent_tenant_tx, audit_via_token_id};
-use crate::AppState;
+use crate::{AppState, RateLimitState};
 
 /// How many `check` calls pass before expired buckets are swept (Swift :79).
 const SWEEP_INTERVAL: u32 = 4096;
@@ -613,8 +613,13 @@ async fn gate_per_ip(
 // **Why a `route_layer` middleware and not a call in each handler.**
 //
 // * It runs before the handler's extractors, so a refused request costs neither a
-//   JSON parse of up to 2 MiB nor a database connection — and the upload gate is
-//   structurally ahead of the Drive call, which is the expensive part.
+//   JSON parse of up to 2 MiB nor the handler's own database work (the message
+//   transaction, the outbox row) — and the upload gate is structurally ahead of the
+//   Drive call, which is the expensive part. It does **not** run ahead of
+//   authentication: `require_principal` is the outer layer, so a refused request still
+//   pays what that layer pays (a `token_state` read for a person; for an agent bearer
+//   also the `last_used_at` touch and an `auth.agent_bearer.used` audit row). A cheaper
+//   rejection ahead of authentication is a follow-up (ADR-0208 증보 1).
 // * `ApiError` has no header slot, so a handler cannot answer a 429 with the
 //   `Retry-After` the contract promises (`password::admit_password_change` cannot,
 //   today). A middleware returns the whole `Response`.
@@ -781,13 +786,12 @@ async fn record_member_write_denial(
         );
     entry.target_type = Some("route".to_string());
     let (pool, workspace_id) = (state.pool.clone(), principal.workspace_id);
-    audit_denial_once(
-        &state.rate_limit.member_writes,
-        key,
+    audit_denial_detached(
+        state.rate_limit.clone(),
+        key.to_string(),
         reservation,
         Duration::from_secs(window_seconds),
-        Instant::now(),
-        || async move {
+        move || async move {
             agent_tenant_tx(&pool, workspace_id, move |conn| {
                 Box::pin(async move { write_audit(conn, &entry).await.map(|_| ()) })
             })
@@ -795,6 +799,52 @@ async fn record_member_write_denial(
         },
     )
     .await;
+}
+
+/// [`audit_denial_once`] on a task of its own, awaited by the request that asked for it.
+///
+/// A server drops the future of a request whose client went away, and does so while the
+/// request is parked on the database. If the audit write were part of that future, a hang-up
+/// would cancel it at an arbitrary point: before the `COMMIT` is answered, the row is rolled
+/// back and the caller who keeps hanging up is never audited; after the `COMMIT` but before
+/// the answer arrives, the row is committed while the dropped guard reports "not written" and
+/// reopens the slot, so the next refusal of the same window writes a second row (#4234 review
+/// r1, H-1; both reproduced against a real database). On its own task the claim, the write and
+/// the commit run to the end whatever the request does. The request still waits for the task,
+/// so the 429 follows the row and a test can read it right after; a request that was dropped
+/// simply is not there to see the result.
+///
+/// A task that panics gives the slot and the marker back while it unwinds (its guard), and
+/// counts as "not written".
+async fn audit_denial_detached<W, Fut>(
+    state: Arc<RateLimitState>,
+    key: String,
+    reservation: u64,
+    window: Duration,
+    write: W,
+) -> bool
+where
+    W: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<(), DbError>> + Send + 'static,
+{
+    let task = tokio::spawn(async move {
+        audit_denial_once(
+            &state.member_writes,
+            &key,
+            reservation,
+            window,
+            Instant::now(),
+            write,
+        )
+        .await
+    });
+    match task.await {
+        Ok(written) => written,
+        Err(error) => {
+            tracing::error!(error = %error, "rate limit audit task did not finish");
+            false
+        }
+    }
 }
 
 /// Spend the one audit row a burst of denials may carry. Returns whether this call wrote it.
@@ -817,10 +867,11 @@ async fn record_member_write_denial(
 ///
 /// A row that did not get written gives the slot back, so the next denial can try
 /// again: the burst's marker is handed back with it (the Agent Port and webhook
-/// budgets do the same). "Did not get written" includes the future being dropped
-/// mid-write, which is what a client that goes away does to a request in flight — see
-/// [`SlotClaim`]. Without that, one dropped connection at the first denial would close
-/// the slot and silence the audit for a whole window.
+/// budgets do the same). "Did not get written" includes this future being dropped
+/// mid-write — see [`SlotClaim`]. The middleware never lets that happen to a request's
+/// audit: it runs this on a task of its own ([`audit_denial_detached`]), because a dropped
+/// guard cannot tell a write that never reached the database from one that committed and
+/// whose answer had not arrived yet.
 ///
 /// `write` is the database half, injected so this bookkeeping can be tested with an
 /// injected clock and without a database.
@@ -865,7 +916,7 @@ where
 }
 
 /// The audit slot a denial holds while its row is being written. Unless the row was
-/// written, dropping it — on a failed write, and equally when the future is dropped
+/// written, dropping it — on a failed write, on a panic, or when the future is dropped
 /// mid-write — reopens the slot and hands the burst's marker back.
 struct SlotClaim<'a> {
     limiter: &'a SlidingWindowRateLimiter,
@@ -1363,6 +1414,109 @@ mod tests {
             );
         }
         assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    fn rate_limit_state() -> Arc<RateLimitState> {
+        Arc::new(RateLimitState {
+            config: RateLimitConfig::default(),
+            limiter: SlidingWindowRateLimiter::new(),
+            member_writes: SlidingWindowRateLimiter::new(),
+        })
+    }
+
+    /// The request that asked for the row can be dropped (its client hung up) at any point
+    /// after the write started, and the write must not notice: the row, its commit and the
+    /// slot bookkeeping go on without it. (#4234 review r1, H-1: inline, a drop before the
+    /// `COMMIT` answer lost the row, and a drop after it reopened the slot for a second row.)
+    #[tokio::test]
+    async fn a_dropped_request_does_not_cancel_the_audit_write() {
+        let state = rate_limit_state();
+        let window = Duration::from_secs(60);
+        let key = "write:send:m";
+        assert!(state.member_writes.check(key, 1, window).allowed);
+        let denied = state.member_writes.check(key, 1, window);
+        let reservation = denied
+            .log_reservation
+            .expect("the first denial owns the marker");
+
+        let (answer, answered) = tokio::sync::oneshot::channel::<()>();
+        let committed = Arc::new(AtomicUsize::new(0));
+        {
+            let committed = committed.clone();
+            let request = audit_denial_detached(
+                state.clone(),
+                key.to_string(),
+                reservation,
+                window,
+                move || async move {
+                    let _ = answered.await; // the database answers late
+                    committed.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            );
+            tokio::pin!(request);
+            run_to_first_wait(&mut request).await;
+            // `request` is dropped here, with its row still being written.
+        }
+        answer.send(()).expect("the write is still waiting");
+        for _ in 0..100 {
+            if committed.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            committed.load(Ordering::SeqCst),
+            1,
+            "the write ran to its end although the request that asked for it was gone"
+        );
+
+        // It counted as written: the slot stays closed for the window, so the next denial of a
+        // restarted burst writes nothing. (A guard that had been dropped with the request would
+        // have reopened it.)
+        let slot = format!("audit:{key}");
+        assert!(
+            !state.member_writes.check(&slot, 1, window).allowed,
+            "a row that committed keeps its slot closed"
+        );
+    }
+
+    /// A request that is *not* dropped gets the result back, and a failed write still hands the
+    /// slot and the marker back through the detached task.
+    #[tokio::test]
+    async fn the_detached_audit_reports_the_result_and_a_failure_gives_the_slot_back() {
+        let state = rate_limit_state();
+        let window = Duration::from_secs(60);
+        let key = "write:upload:m";
+        assert!(state.member_writes.check(key, 1, window).allowed);
+        let denied = state.member_writes.check(key, 1, window);
+        let reservation = denied.log_reservation.expect("first denial");
+
+        let failed = audit_denial_detached(
+            state.clone(),
+            key.to_string(),
+            reservation,
+            window,
+            || async { Err(db_failure()) },
+        )
+        .await;
+        assert!(!failed, "a failed write is reported as not written");
+
+        let retry = state.member_writes.check(key, 1, window);
+        assert!(retry.should_log, "the marker came back through the task");
+        let written = audit_denial_detached(
+            state.clone(),
+            key.to_string(),
+            retry.log_reservation.expect("a marker"),
+            window,
+            || async { Ok(()) },
+        )
+        .await;
+        assert!(written, "the slot came back too, so the retry wrote");
+        assert!(
+            !state.member_writes.check(key, 1, window).should_log,
+            "a committed row keeps its marker"
+        );
     }
 
     /// A client that goes away drops the request future wherever it is. If that is the audit

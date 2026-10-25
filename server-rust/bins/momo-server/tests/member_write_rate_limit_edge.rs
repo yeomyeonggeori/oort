@@ -22,9 +22,9 @@
 //! | `a_work_host_is_held_to_the_agent_budget_not_the_human_one` | a machine credential is not held to a person's number | `WorkHost` falls into the human arm |
 //! | `members_and_surfaces_have_separate_budgets` | one member cannot spend another's, one surface cannot spend another's | the key loses the member id or the surface prefix |
 //! | `the_window_is_the_configured_one_and_retry_after_follows_it` | `Retry-After` is measured against `RATE_LIMIT_WINDOW_SECONDS`, not a constant | the window is hard-coded |
-//! | `zero_means_no_budget` | the operator's off switch | the `limit == 0` early return is removed |
+//! | `zero_means_no_budget` | the operator's off switch | 0 no longer meaning "off" end to end (clamped to 1, say). The early return in `member_write` and the limiter's own 0 handling cover for each other, so removing either one alone is not seen here (the limiter's is pinned by the unit test `a_zero_limit_disables_the_axis`) |
 //! | `a_request_with_no_principal_is_passed_on_and_spends_nothing` | a caller the limiter cannot name is not limited and does not eat a member's budget | the missing principal is refused or counted under a shared key |
-//! | `the_gate_covers_only_the_method_it_is_mounted_on` | the route wiring `build_app` relies on: a verb chained after `route_layer` is outside it | the layer is attached after the second verb is chained |
+//! | `the_gate_covers_only_the_method_it_is_mounted_on` | the axum semantics `build_app`'s wiring relies on: a verb chained after `route_layer` is outside it. It builds its own router, so only a framework change can turn it red; `build_app`'s own wiring is pinned by the real-route tests in `member_write_rate_limit_pg.rs` | axum's `route_layer` covering a verb chained after it |
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

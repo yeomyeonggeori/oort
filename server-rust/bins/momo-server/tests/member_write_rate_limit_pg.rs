@@ -15,13 +15,14 @@
 //! | `a_refusal_is_answered_before_the_body_is_read` | the gate runs ahead of the JSON extractor: a refused request with a malformed body is a 429, not a 4xx parse error | the check moved into the handler (after the extractors) |
 //! | `an_agent_has_its_own_send_budget` | the limit follows `Principal::kind` on the real route (a real `agent_bearer`) | the kind branch removed |
 //! | `a_burst_leaves_one_audit_row_of_the_documented_shape` | one `rate_limit.exceeded` row per burst with exactly the documented detail, attributed to the member and the credential, inside the member's workspace | the audit write removed; `should_log` ignored (a row per refusal); the detail gains a field |
-//! | `a_flood_of_parallel_refusals_writes_one_audit_row` | forty refusals at the same instant are one writer, not forty: only the first denial of a burst owns the marker | the marker ignored (`verdict.log_reservation` not consulted) |
-//! | `budgets_are_per_member_and_per_surface` | spending one member's / one surface's budget refuses nobody else | the key loses the member id or the surface prefix |
+//! | `a_flood_of_parallel_refusals_writes_one_audit_row` | forty refusals at the same instant leave one row, not forty | the burst marker **and** the audit slot both ignored (either one alone still leaves one row; the marker's own job — one log line and one trip to the database per burst — is pinned by `member_write_rate_limit_audit_retry.rs`) |
+//! | `a_client_that_hangs_up_while_its_refusal_is_recorded_still_leaves_exactly_one_row` | the audit write is not part of the request: a client that hangs up while the INSERT waits (here: behind a table lock) neither cancels the row nor, by being dropped, leaves a slot that lets a second row in | the write run inline in the request future again (`audit_denial_detached` replaced by `audit_denial_once`) |
+//! | `budgets_are_per_member_and_per_surface` | spending one member's / one surface's budget refuses nobody else (the other surfaces have the same small limit, so a shared bucket cannot hide) | the key loses the member id or the surface prefix |
 //! | `a_schedule_create_and_edit_spend_the_schedule_budget_and_cancel_never_does` | create + edit are budgeted, cancel and list are not, and a spent schedule budget does not touch sending | `DELETE` gets the layer (the layer attached after the second verb); `update` loses its layer |
 //! | `send_now_spends_the_send_budget` | the canonical send has one budget however it is reached | `send-now` mounted with `ScheduledWrite`, or not at all |
 //! | `upload_starts_are_refused_before_the_drive_is_called` | a refused start costs no Drive session and no `pending` row | the gate moved after `create_resumable_upload` |
 //! | `streaming_edits_and_reads_are_outside_the_budget` | `PATCH …/messages/{id}` (the stream slices) and history are never budgeted | the layer attached to the whole message path |
-//! | `zero_turns_each_axis_off_and_no_row_is_written` | the operator's off switch, per axis | the `limit == 0` early return removed |
+//! | `zero_turns_each_axis_off_and_no_row_is_written` | the operator's off switch, per axis | 0 no longer meaning "off" end to end (clamped to 1, say). The two layers that implement it — the early return in `member_write` and the limiter's own 0 handling — cover for each other, so removing either one alone is not seen here (the limiter's is pinned by the unit test `a_zero_limit_disables_the_axis`) |
 //! | `the_shipped_defaults_pass_ordinary_use_and_stop_at_the_documented_numbers` | **the measurement**: 100 human sends and 300 tool_call/tool_result sends from one agent all pass at the defaults; the 121st / 601st in a window is the first refusal | a default changed |
 //!
 //! `#[ignore]` — needs a real PG18 superuser DB plus the runtime roles:
@@ -41,7 +42,7 @@ use std::path::PathBuf;
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
@@ -807,7 +808,9 @@ async fn a_flood_of_parallel_refusals_writes_one_audit_row() {
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn budgets_are_per_member_and_per_surface() {
-    let rig = Rig::new(limits(2, 50, 50, 50)).await;
+    // The schedule and upload budgets are as small as the send budget on purpose: with a larger
+    // one a shared bucket would still have room for the single request each makes below.
+    let rig = Rig::new(limits(2, 50, 2, 2)).await;
     let fx = fixture(&rig.su).await;
     let dohyun = rig.login(fx.workspace, &fx.dohyun).await;
     let seoyeon = rig.login(fx.workspace, &fx.seoyeon).await;
@@ -1215,6 +1218,110 @@ async fn what_the_auth_layer_refuses_is_never_a_429_and_spends_no_budget() {
     assert!(
         rig.audit_rows(fx.workspace, agent).await.len() <= 1,
         "the agent's one audit row is for its own spent send budget, not for the 403s"
+    );
+}
+
+/// Send a request on a raw socket and hand the socket back, so the test decides when the client
+/// goes away. `Connection: close` and a body the gate never reads: the server learns of the
+/// hang-up the way it does from a real client.
+fn raw_post(address: &str, path: &str, token: &str, body: &str) -> std::net::TcpStream {
+    use std::io::Write;
+    let mut stream = std::net::TcpStream::connect(address).expect("connect");
+    let _ = stream.set_nodelay(true);
+    let request = format!(
+        "POST {path} HTTP/1.1\r\nHost: test\r\nAuthorization: Bearer {token}\r\n\
+         Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    stream
+        .write_all(request.as_bytes())
+        .expect("write the request");
+    stream
+}
+
+/// Independent security review r1, H-1 (#4234). A server drops the future of a request whose
+/// client went away. With the audit write inside that future, a hang-up while the INSERT is
+/// still waiting rolled the row back (a caller that always hangs up was never audited), and a
+/// hang-up between the COMMIT and its answer committed a row whose guard then reopened the slot
+/// for a second one. Here the INSERT is held behind a table lock, the client hangs up while it
+/// waits, and the lock is released: the row must still arrive, exactly once, and a patient
+/// refusal of the same window must add nothing.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_client_that_hangs_up_while_its_refusal_is_recorded_still_leaves_exactly_one_row() {
+    let rig = Rig::new(limits(1, 50, 50, 50)).await;
+    let fx = fixture(&rig.su).await;
+    let token = rig.login(fx.workspace, &fx.dohyun).await;
+    assert_eq!(
+        rig.send(&token, fx.workspace, fx.channel, "첫 글")
+            .await
+            .status,
+        201,
+        "the budget of 1 is spent"
+    );
+
+    // Keep the audit table busy: the refusal's INSERT has to queue behind this lock, which holds
+    // the write in flight for as long as the test wants.
+    let mut blocker = rig.su.begin().await.expect("begin");
+    sqlx::query("LOCK TABLE audit_log IN SHARE ROW EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .expect("lock the audit table");
+
+    let address = rig.base.trim_start_matches("http://").to_string();
+    let path = format!(
+        "/v1/workspaces/{}/channels/{}/messages",
+        fx.workspace, fx.channel
+    );
+    let body =
+        json!({"clientMsgId": Uuid::new_v4(), "type": "text", "body": "예산 밖"}).to_string();
+    let stream = raw_post(&address, &path, &token, &body);
+
+    // The server is parked in the audit INSERT: it shows up as a lock wait.
+    let mut parked = false;
+    for _ in 0..400 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE wait_event_type = 'Lock' AND query LIKE 'INSERT INTO audit_log%'",
+        )
+        .fetch_one(&rig.su)
+        .await
+        .expect("read activity");
+        if waiting > 0 {
+            parked = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        parked,
+        "the refusal reached its audit INSERT and is waiting for the table"
+    );
+
+    // The client hangs up. A server that ties the write to the request drops it here.
+    drop(stream);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    blocker.commit().await.expect("release the audit table");
+
+    let mut rows = Vec::new();
+    for _ in 0..200 {
+        rows = rig.audit_rows(fx.workspace, fx.dohyun.id).await;
+        if !rows.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert_eq!(rows.len(), 1, "the hung-up refusal still left its row");
+
+    assert_refused(
+        &rig.send(&token, fx.workspace, fx.channel, "참을성 있는 요청")
+            .await,
+        "a patient refusal inside the same window",
+    );
+    assert_eq!(
+        rig.audit_rows(fx.workspace, fx.dohyun.id).await.len(),
+        1,
+        "one row per member and surface per window, hang-up or not"
     );
 }
 
