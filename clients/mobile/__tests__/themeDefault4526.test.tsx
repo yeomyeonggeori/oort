@@ -214,6 +214,16 @@ describe('한 번도 안 고른 폰은 라이트로 시작한다', () => {
     await act(async () => {});
   });
 
+  it('두 키가 빈 문자열이어도 안 고른 폰이다 — core 읽기와 같은 기준', () => {
+    // 비운 값은 저장이 아니다(core 는 `""` 를 키 없음으로 읽는다). 이것을 「남긴 흔적」으로 세면
+    // 지워진 키가 폰을 영영 시스템에 붙들어 둔다.
+    store.map.set(NON_SECRET_KEYS.appearance, '');
+    store.map.set(NON_SECRET_KEYS.themeChoice, '');
+    mount();
+    expect(who()).toBe('light/light/dark');
+    expect(ink()).toBe(lightPalette.text);
+  });
+
   it('저장소를 읽을 수 없는 환경(MMKV 없음)에서도 라이트다', () => {
     __setNonSecretStore({
       getString: () => {
