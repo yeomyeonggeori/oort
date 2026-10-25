@@ -465,10 +465,17 @@ export interface Message {
   /**
    * ADR-0151 — 이 메시지에 묶인 첨부. 완료된 것만, 만들어진 순서로.
    *
-   * **모든 투영에 실린다**: 전송 응답, 히스토리, 답글, 실시간 프레임까지
-   * (`message_dto` 주석: 실시간 프레임에서만 첨부를 배우는 클라는 새로고침 한
-   * 번에 파일 없는 메시지를 그린다). 그래서 `replyTo`와 달리 이 배열은 어느
-   * 경로로 들어온 행에도 있고, 비어 있다는 것은 첨부가 없다는 뜻이다.
+   * **편집이 내는 두 투영만 빼고 모든 투영에 실린다**: 전송 응답, 히스토리, 답글,
+   * `message.new` 프레임까지(`message_dto` 주석: 실시간 프레임에서만 첨부를 배우는
+   * 클라는 새로고침 한 번에 파일 없는 메시지를 그린다). 그래서 `replyTo`와 달리 이
+   * 배열은 그 경로들로 들어온 행에는 있고, 거기서 비어 있다는 것은 첨부가 없다는
+   * 뜻이다.
+   *
+   * **예외는 편집이다**(#4441): `PATCH` 응답과 `message.edited` 프레임은 첨부를 싣지
+   * 않는다(편집은 묶인 첨부를 바꾸지 못한다). 거기서 없다는 것은 「없음」이 아니라
+   * 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 첨부를 잇는다. 이 읽기는
+   * 서버에 살아 있는 메시지에서 첨부를 떼는 길이 없다는 사실에 서 있다 — 그런 길이
+   * 생기면 명시 신호가 필요하다(`keepHeldAttachments` 주석).
    *
    * 업로드 capability URL도 Drive file id도 여기 없다. 바이트로 가는 유일한 길은
    * 인가 프록시(`GET …/attachments/{id}/content`)다.
@@ -2034,6 +2041,29 @@ export async function setChannelNotificationPref(
 // declared scopes and publisher metadata stay in the manifest detail. Keep
 // that split here instead of inferring a grant from an installation.
 
+/**
+ * 앱 카탈로그 `category`의 닫힌 목록(ADR-0113 증보 3 F1). 서버 검증기(`ALLOWED_CATEGORIES`)와 같은 다섯이다.
+ * 새 서버가 여섯째를 더해도 이 클라이언트는 그 값을 읽지 않는다(`undefined`) - 모르는 분류로 화면이 갈라지지 않게.
+ */
+export type PluginCategory = "communication" | "productivity" | "developer" | "files" | "project";
+
+const PLUGIN_CATEGORIES: readonly PluginCategory[] = [
+  "communication",
+  "productivity",
+  "developer",
+  "files",
+  "project",
+];
+
+/**
+ * 앱 상세의 예시 카드 한 장(ADR-0113 증보 3 F1·F7). `tool`은 같은 매니페스트의 읽기(R)·승인 필요 쓰기(A) 도구다.
+ * 텍스트로만 그린다: 마크다운도 링크도 아니다.
+ */
+export interface PluginStarterPrompt {
+  text: string;
+  tool: string;
+}
+
 export interface PluginCatalogItem {
   pluginId: string;
   name: string;
@@ -2048,6 +2078,22 @@ export interface PluginCatalogItem {
   termsURL?: string;
   privacyPolicyURL?: string;
   iconText?: string;
+  /**
+   * 매니페스트 `plugin.publisher.name` - 「개발자」 칸의 유일한 출처(ADR-0113 증보 3 F1: 칸을 따로 두지 않는다).
+   * 필드가 없는 옛 서버는 `undefined`.
+   */
+  publisherName?: string;
+  /**
+   * 클라이언트 번들 로고 자산의 이름(`[a-z0-9-]{1,32}`, ADR-0113 증보 3 F1·F2). URL도 경로도 아니다: 번들에서
+   * 이 이름으로 찾고, 없으면 `iconText`/이름의 첫 글자 타일로 돌아간다. 모양이 어긋난 값은 읽지 않는다.
+   */
+  logoKey?: string;
+  /** 닫힌 목록 중 하나(위 `PluginCategory`). 모르는 값은 `undefined`. */
+  category?: PluginCategory;
+  /** 예시 카드 0~3장. 없으면 키 자체가 없다(빈 배열을 만들지 않는다). */
+  starterPrompts?: PluginStarterPrompt[];
+  /** 개발자 웹사이트(https만, 이동 전용). */
+  websiteURL?: string;
 }
 
 export interface PluginPolicyTool {
@@ -2089,6 +2135,12 @@ export interface PluginDetail {
   termsURL?: string;
   privacyPolicyURL?: string;
   iconText?: string;
+  /** 목록과 같은 표시 필드(ADR-0113 증보 3 F1). 뜻은 `PluginCatalogItem`의 같은 이름과 같다. */
+  logoKey?: string;
+  category?: PluginCategory;
+  starterPrompts?: PluginStarterPrompt[];
+  websiteURL?: string;
+  /** DTO의 `publisherName`, 없으면(옛 서버) 매니페스트 `plugin.publisher.name`. */
   publisherName?: string;
   publisherVerified?: boolean;
   license?: string;
@@ -2126,6 +2178,45 @@ function httpsURL(value: string | undefined): string | undefined {
   }
 }
 
+// 서버 `plugin_manifest::is_logo_key`와 같다: `^[a-z0-9-]{1,32}$`.
+const LOGO_KEY = /^[a-z0-9-]{1,32}$/;
+const STARTER_PROMPT_MAX_CHARS = 140;
+const STARTER_PROMPT_MAX_COUNT = 3;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f]/;
+
+function logoKeyOf(value: unknown): string | undefined {
+  const key = str(value, "logoKey");
+  return key !== undefined && LOGO_KEY.test(key) ? key : undefined;
+}
+
+function categoryOf(value: unknown): PluginCategory | undefined {
+  const category = str(value, "category");
+  return PLUGIN_CATEGORIES.find((known) => known === category);
+}
+
+/**
+ * 예시 카드. 서버(`optional_starter_prompts`)의 모양 한도만 같은 값으로 걸러 읽는다: 문자열 둘(`text` 1~140자·제어문자
+ * 없음, `tool`), 3장까지. 서버 검증기가 더 하는 검사 - `text`에 URL 모양(`://`·`//`·`www.`) 금지, `tool`이 그 매니페스트의
+ * R·A 등급 도구인지 - 는 여기서 되풀이하지 않는다(공식 매니페스트는 서버가 이미 거른 값이다). 어긋난 카드는 건너뛴다 -
+ * 카드 하나가 틀렸다고 앱 전체를 못 그리지는 않는다. 하나도 남지 않으면 `undefined`(빈 배열을 만들지 않는다).
+ */
+function starterPromptsOf(value: unknown): PluginStarterPrompt[] | undefined {
+  const entries = arrayField(value, "starterPrompts");
+  if (entries === null) return undefined;
+  const prompts: PluginStarterPrompt[] = [];
+  for (const entry of entries.slice(0, STARTER_PROMPT_MAX_COUNT)) {
+    const text = str(entry, "text");
+    const tool = str(entry, "tool");
+    if (text === undefined || tool === undefined || tool === "") continue;
+    const length = Array.from(text).length;
+    if (length === 0 || length > STARTER_PROMPT_MAX_CHARS || text.trim() !== text) continue;
+    if (CONTROL_CHARACTER.test(text)) continue;
+    prompts.push({ text, tool });
+  }
+  return prompts.length > 0 ? prompts : undefined;
+}
+
 function requiredPluginItem(value: unknown): PluginCatalogItem | null {
   const pluginId = str(value, "pluginId");
   const name = str(value, "name");
@@ -2149,6 +2240,11 @@ function requiredPluginItem(value: unknown): PluginCatalogItem | null {
     termsURL: httpsURL(str(value, "termsURL")),
     privacyPolicyURL: httpsURL(str(value, "privacyPolicyURL")),
     iconText: str(value, "iconText"),
+    publisherName: str(value, "publisherName"),
+    logoKey: logoKeyOf(value),
+    category: categoryOf(value),
+    starterPrompts: starterPromptsOf(value),
+    websiteURL: httpsURL(str(value, "websiteURL")),
   };
 }
 
@@ -2222,7 +2318,7 @@ export function pluginDetailFromWire(value: unknown): PluginDetail {
   if (parsedTools.some((tool) => tool === null)) throw new WireShapeError();
   return {
     ...item,
-    publisherName: str(publisher, "name"),
+    publisherName: item.publisherName ?? str(publisher, "name"),
     publisherVerified: bool(publisher, "verified"),
     license: str(license, "spdx"),
     provenanceURL: httpsURL(str(provenance, "sourceURL")),
@@ -2262,6 +2358,92 @@ export async function listPlugins(workspaceId: string): Promise<PluginCatalog> {
 export async function getPlugin(workspaceId: string, pluginId: string): Promise<PluginDetail> {
   return pluginDetailFromWire(await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/plugins/${encodeURIComponent(pluginId)}`
+  ));
+}
+
+// ---- 내 앱 실행 장소: GET …/members/me/app-runtimes (ADR-0113 증보 3 F8) -----------------
+//
+// 컴포저의 앱 칩이 보내기 전에 묻는 읽기다: 내 에이전트 가운데 내 앱이 도는 곳이 어디이고, 지금 그곳에 보내면
+// 배달되는가. 요청자 본인 소유 에이전트만 오고(남의 에이전트·남의 grant는 응답에 없다), 로스터·에이전트 DTO에는
+// 싣지 않는다. 최상위는 다른 읽기 API처럼 **객체** `{ runtimes: [...] }`다(항목마다 이미 `apps`가 있어 키 이름은
+// `runtimes`; ADR의 모양 그대로, planner 결정 1).
+
+/** 실행 장소의 얼굴. 모르는 값(새 서버의 새 경로)은 항목째 읽지 않는다 - 그 경로의 규칙을 이 클라이언트는 모른다. */
+export type AppRuntimePath = "hermes_trial" | "hosted_vendor";
+
+/**
+ * 지금 배달되지 않는 이유 - 배달 관문의 에이전트 단 단계 중 **처음 막히는 하나**. `null`이면 배달된다.
+ * `unknown`은 이 클라이언트가 모르는 이유(새 서버)이고, 모르는 이유도 **막힘**이다(배달된다고 읽지 않는다).
+ */
+export type AppRuntimeBlocked =
+  | "hosted_off"
+  | "connection"
+  | "attest"
+  | "members"
+  | "apps"
+  | "paused"
+  | "unknown";
+
+export interface AppRuntime {
+  agentId: string;
+  path: AppRuntimePath;
+  /** 요청자 본인의 활성 grant의 부분집합인 플러그인 id들(Hermes 시험은 운영자가 켠 앱과의 교집합). */
+  apps: string[];
+  /** `true`면 oort가 그 목록을 강제한다(Hermes 시험). `false`면 허용 기록만 남긴다(호스팅 벤더). */
+  enforced: boolean;
+  blocked: AppRuntimeBlocked | null;
+}
+
+const APP_RUNTIME_PATHS: readonly AppRuntimePath[] = ["hermes_trial", "hosted_vendor"];
+const APP_RUNTIME_BLOCKED: readonly AppRuntimeBlocked[] = [
+  "hosted_off",
+  "connection",
+  "attest",
+  "members",
+  "apps",
+  "paused",
+];
+
+function appRuntimeFromWire(value: unknown): AppRuntime | null {
+  const agentId = str(value, "agentId");
+  const path = APP_RUNTIME_PATHS.find((known) => known === str(value, "path"));
+  const apps = stringArrayField(value, "apps");
+  const enforced = bool(value, "enforced");
+  if (agentId === undefined || path === undefined || apps === null || enforced === undefined) {
+    return null;
+  }
+  const source = record(value);
+  // `blocked`는 **키가 있어야** 한다: `null`(배달됨)과 키 없음(모르는 모양)은 다른 말이다.
+  if (source === null || !("blocked" in source)) return null;
+  const rawBlocked = source.blocked;
+  let blocked: AppRuntimeBlocked | null;
+  if (rawBlocked === null) blocked = null;
+  else if (typeof rawBlocked === "string") {
+    blocked = APP_RUNTIME_BLOCKED.find((known) => known === rawBlocked) ?? "unknown";
+  } else return null;
+  return { agentId, path, apps, enforced, blocked };
+}
+
+/**
+ * 와이어를 읽는다. 최상위가 객체가 아니거나 `runtimes`가 배열이 아니면 `WireShapeError`(옛 최상위 배열도 모양
+ * 오류다). 항목이 어긋나면(필수 키 없음·모르는 경로) **그 항목만** 건너뛴다 - 읽지 못한 에이전트는 칩 후보가
+ * 아닐 뿐 다른 에이전트까지 막지 않는다.
+ */
+export function appRuntimesFromWire(value: unknown): AppRuntime[] {
+  const raws = arrayField(responseRecord(value), "runtimes");
+  if (raws === null) throw new WireShapeError();
+  const runtimes: AppRuntime[] = [];
+  for (const raw of raws) {
+    const runtime = appRuntimeFromWire(raw);
+    if (runtime !== null) runtimes.push(runtime);
+  }
+  return runtimes;
+}
+
+/** GET …/members/me/app-runtimes: 요청자 본인의 앱 실행 장소들(없으면 빈 배열). */
+export async function listAppRuntimes(workspaceId: string): Promise<AppRuntime[]> {
+  return appRuntimesFromWire(await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me/app-runtimes`
   ));
 }
 
@@ -2801,6 +2983,17 @@ export interface SendMessageOptions {
    * 첨부 없는 전송은 이 티켓 이전과 **바이트 단위로 같은 요청**이어야 한다.
    */
   attachmentIds?: string[];
+  /**
+   * ADR-0113 증보 3 F5 - 컴포저에서 고른 공식 앱의 id들(앱 칩). 서버가 전송 트랜잭션 안에서 검증한다: 사람이
+   * 쓴 메시지, 이 워크스페이스에 설치된 활성 공식 앱, 중복을 뺀 3개 이하. 어기면 코드 달린 400
+   * `apps_unavailable`이고, 그때 클라이언트는 칩을 지우고 앱 목록을 새로 받는다(초안 본문은 남긴다).
+   * 통과한 목록은 서버 소유 키 `props.requestedApps`로 저장된다(`requestedAppsFromWire`).
+   *
+   * **표시일 뿐 허가가 아니다** - 배달과 `tool_grants`는 이 필드를 읽지 않는다. 없거나 비어 있으면 키 자체가 빠진다.
+   * 옛 서버의 전송 요청은 closed-world라 이 키를 400으로 거절하므로, `listAppRuntimes`가 표면을 확인해 주기 전에는
+   * 보내지 않는다.
+   */
+  apps?: string[];
 }
 
 export function sendMessage(
@@ -2822,6 +3015,9 @@ export function sendMessage(
   if (options?.replyToId !== undefined) body.replyToId = options.replyToId;
   if (options?.attachmentIds !== undefined && options.attachmentIds.length > 0) {
     body.attachmentIds = options.attachmentIds;
+  }
+  if (options?.apps !== undefined && options.apps.length > 0) {
+    body.apps = options.apps;
   }
   return request<Message>(
     `/v1/workspaces/${encodeURIComponent(
@@ -5302,6 +5498,35 @@ export function appsUsedFromWire(value: unknown): AppsUsedEntry[] | null {
   return entries;
 }
 
+const REQUESTED_APPS_MAX = 3;
+
+/**
+ * `message.props.requestedApps`(ADR-0113 증보 3 F5): 요청자가 컴포저에서 고른 공식 앱의 id들. 서버
+ * (`routes::requested_apps`)는 중복 없는 3개 이하의 플러그인 id 배열만 쓴다. **모르는 모양이면 통째로 무시한다**
+ * (`null`): 배열이 아니거나, 비었거나, 4개 이상이거나, 문자열이 아닌 항목·id 문법에 안 맞는 항목·중복이 하나라도
+ * 있으면 서버가 쓴 값이 아니다. 던지지 않는다.
+ *
+ * 이 키는 **표시용 표식**이다 - 허가도 배달 판정도 아니다. 칩은 사람이 쓴 메시지에만 그린다(그 판단은 호출부).
+ */
+export function requestedAppsFromWire(value: unknown): string[] | null {
+  if (!Array.isArray(value) || value.length === 0 || value.length > REQUESTED_APPS_MAX) {
+    return null;
+  }
+  const ids: string[] = [];
+  for (const raw of value as unknown[]) {
+    if (typeof raw !== "string" || !APPS_USED_PLUGIN_ID.test(raw) || ids.includes(raw)) {
+      return null;
+    }
+    ids.push(raw);
+  }
+  return ids;
+}
+
+/** 메시지의 `props.requestedApps`를 읽는다. 없거나 모르는 모양이면 빈 배열. */
+export function requestedAppsOfMessage(message: Pick<Message, "props">): string[] {
+  return requestedAppsFromWire(message.props?.["requestedApps"]) ?? [];
+}
+
 export interface AgentRunSummary {
   id: string;
   channelId: string;
@@ -5458,6 +5683,17 @@ export interface AgentRunProgress {
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+  /**
+   * 부른 사람이 없는 시스템 작업(환영 run, ADR-0181)인가. **서버가 보낸 값이 아니다.**
+   * 진행 읽기에는 환영 표지(`welcome_kind`)가 없고 ADR-0200 증보 3 E6은 새 필드를 만들지
+   * 않았다. 그래서 와이어 경계(`agentRunProgressFromWire`)가 「트리거 메시지도 사람이 쓴
+   * 작업 제목도 없다」로 가른다. 서버의 트리거는 넷이고(멘션·스레드 답글은 메시지 id,
+   * 작업은 필수 제목, 환영만 둘 다 없다) 그 밖의 모양은 만들지 않는다 — 사람이 부른 run이
+   * 둘 다 없이 오는 길은 없다(`RunTrigger::trigger_message_id`, `validated_work_input`의
+   * `required_string`, `trigger_summary`; 시험 「서버가 만드는 네 트리거의 와이어 모양」).
+   * 서버가 새 트리거를 더하면 이 판별을 서버의 명시 표지로 바꾼다(#4442).
+   */
+  system?: true;
 }
 
 const AGENT_RUN_PHASES = new Set<AgentRunPhase>([
@@ -5537,6 +5773,14 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
   const startedAtMs = optionalFiniteNumber(source, "startedAtMs");
   const finishedAtMs = optionalFiniteNumber(source, "finishedAtMs");
+  // 「부른 사람이 없다」: 메시지도, 사람이 쓴 작업 제목·멘션 발췌도 없다(`AgentRunProgress.system`).
+  // 비었는지는 **글자 그대로** 본다(`=== ""`). 서버가 이미 다듬어(Rust `trim()`) 보내고 빈 것은
+  // 싣지 않는다(`trigger_summary`) — 여기서 JS `trim()`으로 한 번 더 다듬으면 서버는 제목으로 센
+  // 글자(U+FEFF만 있는 제목)를 우리는 「제목 없음」으로 읽어, 사람이 부른 작업이 홈 카드에서
+  // 사라진다. 의심스러우면 숨기지 않는 쪽으로 틀린다(#4285 planner 결정 1).
+  const system =
+    (triggerMessageId === undefined || triggerMessageId === "") &&
+    (triggerSummary === undefined || triggerSummary === "");
   return {
     id: id.toLowerCase(),
     channelId: channelId.toLowerCase(),
@@ -5548,6 +5792,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ahead,
     createdAtMs,
     updatedAtMs,
+    ...(system ? { system: true as const } : {}),
     ...(triggerMessageId === undefined
       ? {}
       : { triggerMessageId: triggerMessageId.toLowerCase() }),

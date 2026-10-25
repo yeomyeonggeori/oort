@@ -1,15 +1,21 @@
 import {cancelAgentRun} from '@momo/core/lib/api';
 import {
-  CANCEL_ACTION_LABEL,
-  CANCEL_BUSY_LABEL,
-  CANCEL_COMMIT_LABEL,
-  cancelConfirmSentence,
-  cancelFailureOutcome,
   cancelSucceeded,
+  STOP_WORDING,
   type CancelOutcome,
+  type CancelWording,
 } from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useRef, useState} from 'react';
-import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  AccessibilityInfo,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {CONFIRM_GUARD_MS} from '../inbox/ApprovalDecision';
@@ -44,6 +50,9 @@ import {useSession} from '../../session/useSession';
 // 이미 이긴 경주를 다시 뛰라고 시키는 것이다.
 // =============================================================================
 
+// 컨트롤(첫 탭 낱말·「그대로 두기」·「취소 확정」)의 글자는 바 단추의 상한(`BAR_CONTROL_MAX_SCALE`)을 지킨다: 가장 큰 글씨(AX5)에서
+// 단추가 3배로 자라 「취소 확 / 정」으로 꺾이고 결정 줄이 화면 밖으로 밀려나던 것(design-review #4285 r1 H1 — 홈 카드와 대화 아래
+// 활동 줄이 같은 컨트롤을 쓴다). **읽는 글자인 확인 문장은 상한 밖이다**(`BAR_CONTROL_MAX_SCALE` 주석: 본문은 끝까지 자란다).
 export function StopTurnControl({
   runId,
   agentName,
@@ -51,6 +60,9 @@ export function StopTurnControl({
   onOutcome,
   testIDPrefix = 'turn-stop',
   initialArmed = false,
+  wording = STOP_WORDING,
+  armStyle,
+  confirmStyle,
 }: {
   runId: string;
   /**
@@ -70,6 +82,19 @@ export function StopTurnControl({
   onOutcome: (outcome: CancelOutcome) => void;
   testIDPrefix?: string;
   /**
+   * 낱말·문장 한 벌(`cancelWordingFor`). 아직 아무도 가져가지 않은 요청은 「취소」, 가져간 뒤는
+   * 「중단」이다(#4285). 보내는 호출과 409·오류를 읽는 규칙은 둘이 같다.
+   */
+  wording?: CancelWording;
+  /**
+   * 첫 탭(묻는 단추)의 상자에 더하는 스타일. 단추의 글자가 가로 여백 `space.sm`을 갖고 있어 글자 기둥에
+   * 맞추려면 상자를 그만큼 왼쪽으로 밀어야 하는 자리(홈 카드, #4285)가 쓴다 — 밀리는 것은 상자뿐이고
+   * 확인 줄(문장·두 단추)은 기둥에 그대로 선다.
+   */
+  armStyle?: StyleProp<ViewStyle>;
+  /** 확인 줄(문장·두 단추)의 상자에 더하는 스타일. 줄이 서는 자리가 아래 여백을 정할 때 쓴다(홈 카드, #4285). */
+  confirmStyle?: StyleProp<ViewStyle>;
+  /**
    * 확인 단계에서 시작한다. **`measure/` 하네스 전용** — 근거와 규칙은
    * `features/inbox/ApprovalDecision.tsx` 의 같은 이름 prop 주석에 있고,
    * `__tests__/fillTokens.test.ts` 가 `src/` 전수에서 사용을 0 으로 단정한다.
@@ -84,7 +109,7 @@ export function StopTurnControl({
   const [tooFast, setTooFast] = useState(false);
   const armedAtMs = useRef(0);
 
-  const consequence = cancelConfirmSentence(runCount);
+  const consequence = wording.consequence(runCount);
 
   const arm = useCallback(() => {
     setArmed(true);
@@ -92,10 +117,8 @@ export function StopTurnControl({
     armedAtMs.current = Date.now();
     // 엄지 밑의 버튼이 방금 의미를 바꿨다. 화면을 보지 않는 사람에게 그 변화는
     // 소리로만 전달된다 — RN에는 포커스를 옮길 웹의 `focus()`가 없다.
-    AccessibilityInfo.announceForAccessibility(
-      `${consequence} 중단할지 물어요.`,
-    );
-  }, [consequence]);
+    AccessibilityInfo.announceForAccessibility(wording.announce(consequence));
+  }, [consequence, wording]);
 
   const commit = useCallback(async () => {
     // 무장하지 않은 중단은 전송되지 않는다. `armed`가 false면 확정 버튼이
@@ -113,17 +136,24 @@ export function StopTurnControl({
     try {
       const result = await cancelAgentRun(workspaceId, runId);
       setArmed(false);
-      onOutcome(cancelSucceeded(result, agentName));
+      const receipt = cancelSucceeded(result, agentName, wording);
+      // 결과는 말로도 알린다: iOS VoiceOver는 `accessibilityLiveRegion`을 읽지 않고(Android 전용), 성공하면 눌린
+      // 컨트롤이 사라져 포커스가 갈 곳을 잃는다. 컨트롤 한 곳에서 낭독하므로 홈 카드와 대화 아래 활동 줄이 같다
+      // (design-review #4285 r1 H2·r2 N3; 확인 문장은 첫 탭이 낭독한다).
+      AccessibilityInfo.announceForAccessibility(receipt.sentence);
+      onOutcome(receipt);
     } catch (error) {
-      const outcome = cancelFailureOutcome(error);
+      // 실패 문장도 낱말 한 벌을 따른다: 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다.
+      const outcome = wording.failure(error);
       // 이미 끝난 실행은 더 물어볼 것이 없다. 확인 단계를 접는다 — 남겨 두면
       // 존재하지 않는 실행을 다시 멈추라고 권하는 버튼이 화면에 남는다.
       if (outcome.kind === 'alreadyOver') setArmed(false);
+      AccessibilityInfo.announceForAccessibility(outcome.sentence);
       onOutcome(outcome);
     } finally {
       setBusy(false);
     }
-  }, [agentName, armed, busy, onOutcome, runId, workspaceId]);
+  }, [agentName, armed, busy, onOutcome, runId, wording, workspaceId]);
 
   if (!armed) {
     return (
@@ -131,24 +161,29 @@ export function StopTurnControl({
         accessibilityRole="button"
         // 이 탭은 중단하지 않는다 — 중단할지 묻는다. 라벨이 행동을 약속하면
         // 화면을 보지 않는 사람은 이미 멈춘 줄 알고 손을 뗀다.
-        accessibilityLabel="실행 중단, 확인 필요"
-        accessibilityHint="누르면 중단할지 물어요."
+        accessibilityLabel={wording.armName}
+        accessibilityHint={wording.armHint}
         onPress={arm}
         hitSlop={8}
-        style={({pressed}) => [styles.quiet, pressed && styles.pressed]}
+        style={({pressed}) => [styles.quiet, armStyle, pressed && styles.pressed]}
         testID={`${testIDPrefix}-arm`}>
-        <Text style={styles.quietLabel}>{CANCEL_ACTION_LABEL}</Text>
+        <Text style={styles.quietLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {wording.action}
+        </Text>
       </Pressable>
     );
   }
 
   return (
-    <View style={styles.confirm} testID={`${testIDPrefix}-confirm`}>
-      <Text style={styles.consequence}>{consequence}</Text>
+    <View style={[styles.confirm, confirmStyle]} testID={`${testIDPrefix}-confirm`}>
+      {/* 문장이라 어절에서 끊는다(`Sentence`): 좁은 카드에서 「있어 / 요.」로 끊기지 않게. */}
+      <Sentence style={styles.consequence} testID={`${testIDPrefix}-consequence`}>
+        {consequence}
+      </Sentence>
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="중단하지 않기"
+          accessibilityLabel={wording.dismissName}
           accessibilityState={{disabled: busy}}
           disabled={busy}
           onPress={() => setArmed(false)}
@@ -159,11 +194,13 @@ export function StopTurnControl({
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-dismiss`}>
-          <Text style={styles.quietLabel}>그대로 두기</Text>
+          <Text style={styles.quietLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+            그대로 두기
+          </Text>
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={CANCEL_COMMIT_LABEL}
+          accessibilityLabel={wording.commit}
           accessibilityState={{disabled: busy, busy}}
           disabled={busy}
           onPress={() => void commit()}
@@ -174,16 +211,16 @@ export function StopTurnControl({
             pressed && !busy && styles.pressed,
           ]}
           testID={`${testIDPrefix}-commit`}>
-          <Text style={styles.commitLabel}>
-            {busy ? CANCEL_BUSY_LABEL : CANCEL_COMMIT_LABEL}
+          <Text style={styles.commitLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+            {busy ? wording.busy : wording.commit}
           </Text>
         </Pressable>
       </View>
       {tooFast ? (
-        <Text style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
+        <Sentence style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
           방금 누른 탭과 이어진 동작이라 보내지 않았어요. 문장을 확인하고 다시
           눌러 주세요.
-        </Text>
+        </Sentence>
       ) : null}
     </View>
   );

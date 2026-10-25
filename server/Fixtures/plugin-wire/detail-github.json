@@ -1,11 +1,13 @@
 {
   "plugin": {
+    "category": "developer",
     "description": "Official GitHub hosted MCP integration",
     "egressDomains": [
       "api.githubcopilot.com"
     ],
     "enabled": true,
     "installed": true,
+    "logoKey": "github",
     "manifest": {
       "mcp": {
         "protocolVersion": "2025-06-18",
@@ -2097,12 +2099,14 @@
         }
       },
       "plugin": {
+        "category": "developer",
         "description": "Official GitHub hosted MCP integration",
         "id": "com.momo.plugins.github",
         "license": {
           "kind": "open_source",
           "spdx": "MIT"
         },
+        "logoKey": "github",
         "name": "GitHub",
         "provenance": {
           "releaseRef": "hosted",
@@ -2114,7 +2118,22 @@
           "name": "GitHub",
           "verified": true
         },
-        "version": "1.1.0"
+        "starterPrompts": [
+          {
+            "text": "내가 올린 풀 리퀘스트 중 아직 열려 있는 것을 찾아 줘요.",
+            "tool": "github.search_pull_requests"
+          },
+          {
+            "text": "저장소의 열린 이슈를 최근에 바뀐 순서로 정리해 줘요.",
+            "tool": "github.list_issues"
+          },
+          {
+            "text": "저장소의 최신 릴리스에 어떤 변경이 담겼는지 알려 줘요.",
+            "tool": "github.get_latest_release"
+          }
+        ],
+        "version": "1.1.0",
+        "websiteURL": "https://github.com"
       },
       "schemaVersion": "momo.plugin.v1",
       "skill": {
@@ -2125,10 +2144,26 @@
     "name": "GitHub",
     "official": true,
     "pluginId": "com.momo.plugins.github",
+    "publisherName": "GitHub",
     "recommendedFor": [
       "software-development",
       "work-tracking"
     ],
-    "version": "1.1.0"
+    "starterPrompts": [
+      {
+        "text": "내가 올린 풀 리퀘스트 중 아직 열려 있는 것을 찾아 줘요.",
+        "tool": "github.search_pull_requests"
+      },
+      {
+        "text": "저장소의 열린 이슈를 최근에 바뀐 순서로 정리해 줘요.",
+        "tool": "github.list_issues"
+      },
+      {
+        "text": "저장소의 최신 릴리스에 어떤 변경이 담겼는지 알려 줘요.",
+        "tool": "github.get_latest_release"
+      }
+    ],
+    "version": "1.1.0",
+    "websiteURL": "https://github.com"
   }
 }

@@ -67,7 +67,7 @@ export const BAR_CONTROL_MAX_SCALE = 1.6;
 export const HEAD_MAX_SCALE = 1.3;
 /** 접힌 줄 — 제 줄에 혼자 서므로 바 컨트롤과 같은 값(#2988, R6 M1). */
 export const FOLDED_MAX_SCALE = BAR_CONTROL_MAX_SCALE;
-/** 이 배수부터 AI 카드의 알약이 이름 아래로 내려간다(상한이 아니라 줄바꿈 문턱). */
+/** 이 배수부터 AI 카드의 알약, 홈 「작업 중」 카드의 상태 낱말, 대화 아래 활동 줄의 「이름: 낱말」이 줄을 바꾼다(상한이 아니라 줄바꿈 문턱). */
 export const STACK_PILL_SCALE = 1.5;
 /** SAS 숫자는 이미 크다(40). 큰 글씨에서 네 칸이 375 폭을 넘지 않게 멈춘다. */
 export const SAS_MAX_SCALE = 1.35;

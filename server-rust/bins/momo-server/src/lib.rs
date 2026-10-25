@@ -846,6 +846,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/members/me",
             delete(routes::workspaces::leave).patch(routes::self_profile::rename_self),
         )
+        // ADR-0113 증보 3 F8 (#4313) — which of the caller's own agents run the caller's apps,
+        // and whether a message to each would be delivered right now. Human-only and
+        // `/me`-addressed like the sidebar prefs below: the path is absent from the agent
+        // allowlist (layer one) and the handler calls `require_human` (layer two).
+        .route(
+            "/v1/workspaces/{ws}/members/me/app-runtimes",
+            get(routes::app_runtimes::list),
+        )
         // ADR-0177 / #1932 — the caller's own sidebar organization (custom
         // sections + channel placement + stars). Human-only and member-owned:
         // `/me` is the entire addressing scheme, so no request can name another

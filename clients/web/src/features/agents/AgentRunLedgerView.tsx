@@ -10,10 +10,10 @@ import {
 } from "@momo/core/features/agents/runLedger";
 import {
   runPhaseDetail,
-  runPhaseLabel,
   serverFactsOf,
   turnStateOfPhase,
 } from "@momo/core/features/agents/runPhase";
+import { runStateWord } from "@momo/core/features/agents/runWaiting";
 import { channelLabelParts } from "@/features/workspace/useWorkspace";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
@@ -113,7 +113,9 @@ export function RunListView({
                             chipClass(progress)
                           )}
                         >
-                          {runPhaseLabel(facts)}
+                          {/* 머리 칩·홈 카드와 같은 낱말 고르기(`runStateWord`): 같은 run을 한 패널에서 두 낱말로
+                              말하지 않는다(design-review #4285 r1 H5). */}
+                          {runStateWord(facts, nowMs)}
                         </span>
                       </span>
                       {detail !== undefined && (

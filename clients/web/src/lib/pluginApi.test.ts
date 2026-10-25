@@ -169,6 +169,39 @@ describe("plugin API wire boundary", () => {
     expect(policy.map((tool) => tool.name)).not.toContain("github.list_repositories");
   });
 
+  // ADR-0113 증보 3 F1 (#4313): the display fields in the bytes the Rust server answered (the PG suite pins
+  // them), read by the deployed core parser. Not a lookalike - the fixture is regenerated from the server.
+  it("reads the display fields of every app from the Rust server's catalog bytes", () => {
+    const catalog = pluginCatalogFromWire(rustCatalog);
+    expect(
+      catalog.plugins.map((plugin) => [plugin.pluginId, plugin.logoKey, plugin.category, plugin.publisherName])
+    ).toEqual([
+      ["com.momo.plugins.drive", "google-drive", "files", "oort"],
+      ["com.momo.plugins.github", "github", "developer", "GitHub"],
+      ["com.momo.plugins.gmail", "gmail", "communication", "Google"],
+      ["com.momo.plugins.google-calendar", "google-calendar", "productivity", "Google"],
+      ["com.momo.plugins.google-drive", "google-drive", "files", "Google"],
+      ["com.momo.plugins.linear", "linear", "project", "Linear"],
+      ["com.momo.plugins.notion", "notion", "productivity", "Notion"],
+    ]);
+    for (const plugin of catalog.plugins) {
+      expect(plugin.starterPrompts?.length, plugin.pluginId).toBe(3);
+      for (const prompt of plugin.starterPrompts ?? []) {
+        // Plain text with a tool of the same app (`<app>.<vendor tool>`), never a URL.
+        expect(prompt.text).not.toMatch(/:\/\/|\/\/|www\./i);
+        expect(prompt.tool.startsWith(`${plugin.pluginId.replace("com.momo.plugins.", "")}.`)).toBe(true);
+      }
+    }
+    // The team drive is oort-hosted: no vendor website. Every other app links to its own.
+    const websites = Object.fromEntries(catalog.plugins.map((plugin) => [plugin.pluginId, plugin.websiteURL]));
+    expect(websites["com.momo.plugins.drive"]).toBeUndefined();
+    expect(websites["com.momo.plugins.github"]).toBe("https://github.com");
+    // The detail carries the same fields, and its developer column is the manifest's.
+    const detail = pluginDetailFromWire(rustGithubDetail);
+    expect(detail).toMatchObject({ logoKey: "github", category: "developer", publisherName: "GitHub" });
+    expect(detail.starterPrompts).toHaveLength(3);
+  });
+
   it("accepts the Rust server's manifest detail response", () => {
     const detail = pluginDetailFromWire(rustGithubDetail);
     expect(detail).toMatchObject({

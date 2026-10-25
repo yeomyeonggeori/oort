@@ -1,5 +1,7 @@
+import type { AgentLiveness } from "../../lib/api";
 import { particleFor } from "../../lib/koreanParticle";
 import { runPhaseDetail, runPhaseLabel } from "./runPhase";
+import { isUncollected, queuedWaitCopy, UNCOLLECTED_WORD } from "./runWaiting";
 import type {
   AgentTurnState,
   AgentWorkingSignal,
@@ -75,6 +77,12 @@ export interface AgentActivityLine {
   startedAtMs?: number;
   /** The server's own answer for this run (ADR-0200), when it gave one. */
   server?: ServerRunFacts;
+  /**
+   * The server's liveness answer for this agent (ADR-0200 D4), when the surface read
+   * it: `undefined` = not read (yet), `null` = not a hosted agent. It only matters
+   * for a run nobody has taken (`runWaiting`, #4285); every other line ignores it.
+   */
+  liveness?: AgentLiveness | null;
 }
 
 export interface AgentActivityList {
@@ -128,12 +136,17 @@ export function isRespondingLine(line: AgentActivityLine): boolean {
  * 알약·작업 패널은 계속 「작업 중」이다. 줄임표는 이 문장에 없다: 화면이 점으로
  * 그리고(움직이거나, 동작 줄이기에서는 멈춘 채로), 보조기술은 문장만 읽는다.
  */
-export function activitySuffix(line: AgentActivityLine): string {
+export function activitySuffix(line: AgentActivityLine, nowMs?: number): string {
   if (line.state === "awaiting_approval") {
     return `${particleFor(line.name.name)} 승인을 기다립니다`;
   }
   if (isRespondingLine(line)) {
     return `${particleFor(line.name.name)} 답하는 중`; // design-preflight-allow: 성재가 #4020에서 정한 문장(「grok이 답하는 중…」). 「명사 + 중」 규칙은 진행 라벨 자리용이고 이것은 주어가 있는 문장 조각이다.
+  }
+  // 사람이 부른 요청을 아무도 가져가지 않은 채 N분이 넘었다(`runWaiting`, #4285). 「대기 n번째」는
+  // 곧 가져간다는 말로 읽힌다. 시계가 없는 호출(접근성 이름 등)은 기존 말 그대로다.
+  if (nowMs !== undefined && line.state === "queued" && isUncollected(line.server, nowMs)) {
+    return `: ${UNCOLLECTED_WORD}`;
   }
   // 아직 시작하지 않은 run에는 「작업 중」이라는 낱말을 쓰지 않는다(ADR-0200).
   // 서버가 말해 준 단계(대기 n번째·가져감)가 있으면 그대로, 없으면 대기 중이다.
@@ -153,6 +166,21 @@ export function activityDetail(
   nowMs: number
 ): string | undefined {
   if (line.state === "awaiting_approval") return undefined;
+  // 아직 아무도 가져가지 않은 사람 요청: 에이전트의 서버 생존 경고(D4)가 있으면 맨 앞에 서고,
+  // 경과 시간이 그 뒤를 따른다. N을 넘었고 근거가 있으면 이유 한 문장이 끝에 붙는다(#4285).
+  if (line.state === "queued") {
+    const wait = queuedWaitCopy({
+      facts: line.server,
+      nowMs,
+      liveness: line.liveness,
+    });
+    if (wait !== null) {
+      const text = [wait.detail, wait.reason]
+        .filter((piece): piece is string => piece !== undefined && piece !== "")
+        .join(" · ");
+      return text === "" ? undefined : text;
+    }
+  }
   const parts: string[] = [];
   if (line.headline !== undefined && line.headline !== "") parts.push(line.headline);
   const server =
@@ -162,15 +190,22 @@ export function activityDetail(
 }
 
 /** The whole line as one string (titles, tests, accessible names). */
-export function activityText(line: AgentActivityLine): string {
-  return `${agentLabel(line.name)}${activitySuffix(line)}`;
+export function activityText(line: AgentActivityLine, nowMs?: number): string {
+  return `${agentLabel(line.name)}${activitySuffix(line, nowMs)}`;
 }
+
+/** 에이전트의 서버 생존 판정을 찾는 함수. 읽지 않았으면 undefined, 호스티드가 아니면 null. */
+export type AgentLivenessLookup = (
+  memberId: string
+) => AgentLiveness | null | undefined;
 
 function lineFor(
   signal: AgentWorkingSignal,
-  nameFor: AgentNameLookup
+  nameFor: AgentNameLookup,
+  livenessFor?: AgentLivenessLookup
 ): AgentActivityLine {
   const name = nameFor(signal.memberId);
+  const liveness = livenessFor?.(signal.memberId);
   return {
     key: signal.memberId,
     memberId: signal.memberId,
@@ -186,6 +221,7 @@ function lineFor(
       ? { startedAtMs: signal.startedAtMs }
       : {}),
     ...(signal.server !== undefined ? { server: signal.server } : {}),
+    ...(liveness !== undefined ? { liveness } : {}),
   };
 }
 
@@ -201,9 +237,12 @@ function lineFor(
 export function activityLines(
   turns: readonly AgentWorkingSignal[],
   nameFor: AgentNameLookup,
-  limit: number = MAX_ACTIVITY_LINES
+  limit: number = MAX_ACTIVITY_LINES,
+  livenessFor?: AgentLivenessLookup
 ): AgentActivityList {
-  const lines = turns.slice(0, limit).map((signal) => lineFor(signal, nameFor));
+  const lines = turns
+    .slice(0, limit)
+    .map((signal) => lineFor(signal, nameFor, livenessFor));
   return {
     lines,
     overflowCount: Math.max(0, turns.length - lines.length),

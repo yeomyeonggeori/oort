@@ -17,7 +17,9 @@
 //! content route reads the bytes itself, *after* the same channel-membership
 //! check every other read on this server makes — so a Drive URL never reaches a
 //! client, and the only way to an attachment's bytes is an authenticated request
-//! that RLS and the membership predicate both agreed to.
+//! that RLS and the membership predicate both agreed to, for a file a message
+//! carries or one the caller uploaded herself (a draft is its uploader's alone,
+//! ADR-0208 남는 위험 8).
 //!
 //! ## What is *not* here
 //!
@@ -51,7 +53,8 @@ use momo_drive::{
 };
 use momo_messaging::{
     create_pending_upload_in_tx, is_attachment_channel_member, load_attachment_in_tx,
-    settle_upload_in_tx, validate_attachment_mime, validate_attachment_name, Attachment,
+    load_readable_attachment_in_tx, settle_upload_in_tx, validate_attachment_mime,
+    validate_attachment_name, Attachment,
 };
 use uuid::Uuid;
 
@@ -220,7 +223,7 @@ pub async fn complete(
                 }
                 // Scoped to the uploader: an attachment someone else started is
                 // indistinguishable from one that does not exist.
-                match load_attachment_in_tx(conn, attachment_id, channel_id, Some(member_id), false)
+                match load_attachment_in_tx(conn, attachment_id, channel_id, member_id, false)
                     .await?
                 {
                     None => Ok(Err(ApiError::not_found("attachment not found"))),
@@ -273,8 +276,7 @@ pub async fn complete(
                     return Ok(Err(not_a_member()));
                 }
                 let locked =
-                    load_attachment_in_tx(conn, attachment_id, channel_id, Some(member_id), true)
-                        .await?;
+                    load_attachment_in_tx(conn, attachment_id, channel_id, member_id, true).await?;
                 let Some(mut locked) = locked else {
                     return Ok(Err(ApiError::not_found("attachment not found")));
                 };
@@ -329,13 +331,18 @@ pub async fn complete(
 
 /// `GET /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/content`
 ///
-/// The authorization proxy. Any **active member of the channel** may read a
-/// completed attachment — not only its uploader, because a file posted to a room
-/// belongs to the conversation.
+/// The authorization proxy. An **active member of the channel** may read a
+/// completed attachment **a message carries** — not only its uploader, because a
+/// file posted to a room belongs to the conversation. A completed attachment **no
+/// message carries yet** (a draft in a composer tray, or a file a scheduled
+/// message is holding for up to 120 days) is its uploader's alone to read
+/// (ADR-0208 남는 위험 8, #4233); the uploader still passes the membership check
+/// first, so leaving the channel ends her access like everyone else's.
 ///
-/// Anything that is not a completed attachment of this channel is a flat 404:
-/// pending, failed, another channel's, another tenant's (invisible under RLS)
-/// all answer identically, so the route cannot be used to enumerate what exists.
+/// Anything that is not a completed attachment this member may read is a flat
+/// 404: pending, failed, **another member's draft**, another channel's, another
+/// tenant's (invisible under RLS) all answer identically, so the route cannot be
+/// used to enumerate what exists — or whose drafts do.
 pub async fn content(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -351,9 +358,11 @@ pub async fn content(
             if !is_attachment_channel_member(conn, workspace_id, channel_id, member_id).await? {
                 return Ok(Err(not_a_member()));
             }
-            // `None` uploader scope: this is the one attachment read that is not
-            // restricted to whoever uploaded it.
-            match load_attachment_in_tx(conn, attachment_id, channel_id, None, false).await? {
+            // Carried by a message, or uploaded by this very member: nothing else is
+            // readable, and what is not is the same `None` as an id that never
+            // existed (`load_readable_attachment_in_tx`).
+            match load_readable_attachment_in_tx(conn, attachment_id, channel_id, member_id).await?
+            {
                 Some(attachment) => Ok(Ok(attachment)),
                 None => Ok(Err(ApiError::not_found("completed attachment not found"))),
             }

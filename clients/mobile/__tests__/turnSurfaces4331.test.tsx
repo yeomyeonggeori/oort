@@ -82,8 +82,8 @@ describe('활동 줄의 높이는 글자와 무관하다 (#4331)', () => {
 
   it('줄의 글자들은 줄 높이를 고정으로 든다 — 글자에 따라 줄 상자가 달라지지 않는다', () => {
     render(bar());
-    // 이름 + 단계 글자(「: 대기 1번째」)와 근거 글자(「17시간째 기다려요」)가 갱신되는 두 글자다.
-    const main = screen.getByLabelText('hermes: 대기 1번째');
+    // 이름 + 단계 글자(「: 아직 받지 않았어요」 — 5분을 넘은 사람 요청, #4285)와 근거 글자(「17시간째 기다려요」)가 갱신되는 두 글자다.
+    const main = screen.getByLabelText('hermes: 아직 받지 않았어요');
     const detail = screen.getByTestId('activity-detail');
     expect(flat(main).lineHeight).toBe(line.meta);
     expect(flat(detail).lineHeight).toBe(line.meta);

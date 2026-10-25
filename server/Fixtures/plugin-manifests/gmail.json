@@ -18,7 +18,24 @@
       "sourceURL": "https://developers.google.com/workspace/guides/configure-mcp-servers",
       "releaseRef": "hosted",
       "verified": true
-    }
+    },
+    "logoKey": "gmail",
+    "category": "communication",
+    "websiteURL": "https://mail.google.com",
+    "starterPrompts": [
+      {
+        "text": "받은편지함에서 이번 주에 온 메일을 찾아서 요약해 줘요.",
+        "tool": "gmail.search_threads"
+      },
+      {
+        "text": "방금 이야기한 내용으로 팀에 보낼 메일 초안을 만들어 줘요. 보내기는 제가 직접 할게요.",
+        "tool": "gmail.create_draft"
+      },
+      {
+        "text": "내 Gmail 라벨 목록을 보여 줘요.",
+        "tool": "gmail.list_labels"
+      }
+    ]
   },
   "mcp": {
     "protocolVersion": "2025-06-18",
