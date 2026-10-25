@@ -190,9 +190,9 @@ describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 �
 
   it("수정 표시가 없는 message.edited(스트림 조각·props 만 바꾼 갱신)도 첨부를 지우지 않는다", () => {
     // `stream_message_body_in_tx`·`emit_message_edited_in_tx` 는 같은 `message.edited`
-    // 를 사람 편집 표지 없이 낸다: `state` 는 행의 현재 값(`sent`) 그대로이고
-    // `edited_at_ms` 는 null 이다. 「수정됨」 표지에 걸어서 지키면 이 프레임들이 같은
-    // 병을 그대로 앓는다.
+    // 를 사람 편집 표지를 더하지 않고 낸다: 프레임은 행의 현재 값을 그대로 싣는다(고친
+    // 적 없는 행이면 `state` 는 `sent`, `edited_at_ms` 는 null). 「수정됨」 표지에 걸어서
+    // 지키면 이 프레임들이 같은 병을 그대로 앓는다.
     const state = fold(
       [historyRow()],
       [
@@ -270,32 +270,54 @@ describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 �
   // (화면은 `deleted` 에서 카드를 그리지 않는다). 그 첨부를 늦게 온 편집 프레임이 새
   // 행으로 되살리면 안 된다 — 본문이 마지막 쓰기로 돌아오는 것은 수리 전부터의 동작이고,
   // 이 수리가 그 경로에 더하는 것은 0 이어야 한다.
-  it("실시간 묘비가 든 첨부를, 늦게 온 편집 프레임이 되살리지 않는다", () => {
-    const tombstoned = applyTombstone(fold([historyRow()]), ID, 1_700_000_300_000);
-    // 전제: 이 묘비는 첨부를 들고 있다. 이 단정이 없으면 아래 단정이 헛돈다.
-    expect(tombstoned.messages[0].state).toBe("deleted");
-    expect(tombstoned.messages[0].attachments).toEqual([PHOTO]);
+  //
+  // 아래 시험들이 못 박는 것은 「묘비에 첨부가 되살아나지 않는다」 하나다. `body` 복귀
+  // 단정은 늦은 프레임이 **적용됐다**는 증거(무시됐다면 묘비의 첨부가 남아 어차피
+  // 빨개진다)이자 수리 전 마지막 쓰기 우선을 그대로 잰 것이라, 훗날 묘비를 고정하는 수리가
+  // 들어오면 본문 단정만 지우고 첨부 단정은 남기면 된다.
+  const lateFrames = [
+    { label: "편집 프레임", frame: () => editedFrame() },
+    {
+      // 서버는 묘비에 이런 프레임을 못 만들지만(편집·스트림 모두 거절), 가드가 `edited`
+      // 표지에 걸려 있지 않다는 것을 못 박는다.
+      label: "수정 표시 없는 갱신 프레임",
+      frame: () => editedFrame({ state: "sent", edited_at_ms: null }),
+    },
+  ];
 
-    const after = reconcileMessages(tombstoned, [payloadToMessage(editedFrame())]);
+  it.each(lateFrames)(
+    "실시간 묘비가 든 첨부를, 늦게 온 $label 이 되살리지 않는다",
+    ({ frame }) => {
+      const tombstoned = applyTombstone(fold([historyRow()]), ID, 1_700_000_300_000);
+      // 전제: 이 묘비는 첨부를 들고 있다. 이 단정이 없으면 아래 단정이 헛돈다.
+      expect(tombstoned.messages[0].state).toBe("deleted");
+      expect(tombstoned.messages[0].attachments).toEqual([PHOTO]);
 
-    expect(after.messages).toHaveLength(1);
-    expect(after.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
-    expect("attachments" in after.messages[0]).toBe(false);
-  });
+      const after = reconcileMessages(tombstoned, [payloadToMessage(frame())]);
 
-  it("기록 페이지가 첨부를 실어 온 묘비도 마찬가지다", () => {
-    const heldTombstone = historyRow({
-      state: "deleted",
-      body: undefined,
-      deletedAtMs: 1_700_000_300_000,
-    });
-    expect(heldTombstone.attachments).toEqual([PHOTO]);
+      expect(after.messages).toHaveLength(1);
+      expect(after.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+      expect("attachments" in after.messages[0]).toBe(false);
+    }
+  );
 
-    const state = fold([heldTombstone], [payloadToMessage(editedFrame())]);
+  it.each(lateFrames)(
+    "기록 페이지가 첨부를 실어 온 묘비도 마찬가지다 — 늦게 온 $label",
+    ({ frame }) => {
+      const heldTombstone = historyRow({
+        state: "deleted",
+        body: undefined,
+        deletedAtMs: 1_700_000_300_000,
+      });
+      expect(heldTombstone.attachments).toEqual([PHOTO]);
 
-    expect(state.messages).toHaveLength(1);
-    expect("attachments" in state.messages[0]).toBe(false);
-  });
+      const state = fold([heldTombstone], [payloadToMessage(frame())]);
+
+      expect(state.messages).toHaveLength(1);
+      expect(state.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+      expect("attachments" in state.messages[0]).toBe(false);
+    }
+  );
 
   // 글 없이 사진만 보낸 메시지(#4294)는 카드가 사라지면 메시지가 통째로 빈다 — 가장
   // 아픈 경우다. 「본문이 없으면 묘비」 같은 그럴듯한 오구현이 여기서 잡힌다.

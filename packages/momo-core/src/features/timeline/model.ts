@@ -184,8 +184,8 @@ function lowerBound(messages: Message[], seq: number): number {
  * - 말하지 않으면(키가 없거나 빈 배열 — 서버는 빈 배열의 키를 뺀다) 같은 메시지의
  *   옛 첨부가 남는다.
  * - 「편집」인지를 `state`·`editedAtMs` 로 가리지 않는다. 스트림 조각과 props 만 바꾼
- *   갱신도 같은 `message.edited` 이고(`state` 는 행의 현재 값 그대로, `edited_at_ms` 는
- *   null 로 나간다), 같은 침묵이다.
+ *   갱신도 같은 `message.edited` 이고(프레임은 행의 현재 값을 그대로 싣는다 — 고친 적
+ *   없는 행이면 `state` 는 `sent`, `edited_at_ms` 는 null), 같은 침묵이다.
  * - 묘비는 첨부를 주고받지 않는다. 들어온 행이 묘비면 옛 첨부를 잇지 않고, 든 행이
  *   묘비면 그 첨부를 새 행에 잇지 않는다. 실시간 묘비(`applyTombstone`)와 기록 페이지의
  *   묘비는 첨부를 그대로 들고 있을 수 있다(화면은 `deleted` 에서 카드를 그리지 않는다).
@@ -194,7 +194,7 @@ function lowerBound(messages: Message[], seq: number): number {
  * - seq 가 같아도 id 가 다르면 다른 메시지다. 물려받지 않는다.
  *
  * 이 규칙은 서버에 **살아 있는 메시지에서 첨부를 떼는 길이 없다**는 사실에 서 있다
- * (첨부 라우트는 uploads·complete·content 셋뿐이고, 삭제는 message 행만 고친다).
+ * (첨부 라우트는 uploads·complete·content 셋뿐이고, 삭제도 첨부 행은 건드리지 않는다).
  * 그런 길(「파일 빼기」)이 생기면 「말하지 않음」과 「없어짐」을 가를 명시 신호가
  * 필요하다.
  */
