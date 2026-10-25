@@ -2474,6 +2474,46 @@ mod tests {
             }
         }
 
+        // hermes_trial that ALSO has a hosted connection row (review r1 M2: the operator pinned a
+        // connected agent to the env link). The gate reads the trial first and then goes on to the
+        // hosted stages, so F8 has to follow it there: attestation × people × the hosted switch ×
+        // the live connection × paused.
+        for attest in &attests {
+            for humans in [1, 2] {
+                for hosted_enabled in [true, false] {
+                    for connection in [None, Some(Uuid::from_u128(9))] {
+                        for paused in [false, true] {
+                            let mut agent = candidate(Uuid::from_u128(4), "mixed");
+                            agent.connector_owner = owned(Some(ConnectorTrialFacts {
+                                active_humans: humans,
+                                granted_apps: vec![GMAIL.to_string()],
+                            }));
+                            agent.hosted_delivery_disabled = true;
+                            agent.hosted_active_connection_id = connection;
+                            agent.paused = paused;
+                            let agent = in_the_room(agent);
+                            let send = MentionSend {
+                                hosted_delivery_enabled: hosted_enabled,
+                                connector_trial: attest,
+                                ..send_for(owner)
+                            };
+                            let path = runtime_path(&agent, owner).expect("an F8 trial agent");
+                            assert_eq!(path, RuntimePath::HermesTrial);
+                            let view = f8_view(delivery_gate(&agent, &send));
+                            assert_eq!(
+                                f8_answer(blocked(path, &agent, hosted_enabled, attest)),
+                                view,
+                                "mixed: attest={attest:?} humans={humans} hosted_enabled={hosted_enabled} \
+                                 connection={connection:?} paused={paused}"
+                            );
+                            checked += 1;
+                            seen.push(view);
+                        }
+                    }
+                }
+            }
+        }
+
         // The grid is not vacuous: it reached deliverable and every blocked value at least once.
         assert!(checked >= 100, "{checked}");
         for expected in [

@@ -35,12 +35,21 @@
 //!   more than three, not an official app id, not installed or switched off all
 //!   look the same to the caller, who clears the chips and re-reads the catalog.
 //!   It is never silently dropped — a dropped chip would hide a client bug.
+//! * **A bound on the list as received.** The limit of three counts *distinct* ids,
+//!   so the list has to be de-duplicated before it can be counted — and a list of
+//!   any length would make that work unbounded (review r1 H1). A request whose raw
+//!   list is longer than [`momo_agent::MAX_REQUESTED_APPS_INPUT`] is refused with the
+//!   same 400 before the list is normalised or a connection is taken
+//!   ([`within_input_limit`]); [`normalize`] is linear besides.
 
+use axum::http::StatusCode;
 use momo_db::sqlx;
 use momo_db::{DbError, PgConnection};
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use uuid::Uuid;
 
+use crate::error::ApiError;
 use crate::plugin_manifest::is_plugin_id;
 use crate::routes::plugins::OFFICIAL_PLUGIN_IDS;
 
@@ -55,6 +64,9 @@ pub(crate) const REFUSAL_MESSAGE: &str =
 /// split exists so the tests can say which rule fired.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AppsRefusal {
+    /// The list as received is longer than [`momo_agent::MAX_REQUESTED_APPS_INPUT`], repeats
+    /// included. Judged before the list is normalised.
+    TooLong,
     /// The author is not a person (an agent, a work host, a system author).
     NotAPerson,
     /// More than [`momo_agent::MAX_REQUESTED_APPS`] distinct ids.
@@ -65,14 +77,35 @@ pub(crate) enum AppsRefusal {
     NotInstalled,
 }
 
+/// The cheapest judgement of all, and the first: the list **as received** is no longer than
+/// [`momo_agent::MAX_REQUESTED_APPS_INPUT`]. It needs no database and no normalising, so it runs
+/// before either (the handler calls it ahead of [`normalize`]).
+pub(crate) fn within_input_limit(requested: &[String]) -> Result<(), AppsRefusal> {
+    if requested.len() > momo_agent::MAX_REQUESTED_APPS_INPUT {
+        return Err(AppsRefusal::TooLong);
+    }
+    Ok(())
+}
+
+/// The one response every refusal answers with: `400` and the code `apps_unavailable`. The rule
+/// that fired stays in the debug log (it names no id), never in the answer. The REST handler
+/// (for [`within_input_limit`]) and the delivery refusal mapping (for the in-transaction
+/// judgement) both build it here, so the two cannot drift.
+pub(crate) fn refusal_error(reason: AppsRefusal) -> ApiError {
+    tracing::debug!(?reason, "send refused: apps_unavailable");
+    ApiError::coded(StatusCode::BAD_REQUEST, REFUSAL_CODE, REFUSAL_MESSAGE)
+}
+
 /// The request list as it will be stored: distinct ids in first-seen order.
 /// Exact strings — `Com.Momo.Plugins.GitHub` is not `com.momo.plugins.github`, so
 /// a client that spells an id differently is refused by [`judge_shape`] rather
-/// than quietly corrected.
+/// than quietly corrected. Linear in the length of the list (a hash set remembers
+/// what was seen); the handler has already bounded that length.
 pub(crate) fn normalize(requested: &[String]) -> Vec<String> {
+    let mut seen: HashSet<&str> = HashSet::with_capacity(requested.len());
     let mut distinct: Vec<String> = Vec::with_capacity(requested.len());
     for id in requested {
-        if !distinct.contains(id) {
+        if seen.insert(id.as_str()) {
             distinct.push(id.clone());
         }
     }
@@ -178,6 +211,56 @@ mod tests {
             ids(&[GMAIL, GITHUB, DRIVE])
         );
         assert!(normalize(&[]).is_empty());
+    }
+
+    /// Review r1 H1: the list is bounded **as received**, before anything is normalised. The bound
+    /// sits above the distinct limit (a retrying client may repeat itself) and the refusal is the same
+    /// 400 every other `apps` refusal answers with.
+    #[test]
+    fn the_list_as_received_is_bounded_before_it_is_normalised() {
+        let limit = momo_agent::MAX_REQUESTED_APPS_INPUT;
+        let at_the_limit: Vec<String> = (0..limit)
+            .map(|index| [GMAIL, GITHUB, DRIVE][index % 3].to_string())
+            .collect();
+        assert_eq!(within_input_limit(&at_the_limit), Ok(()));
+        assert_eq!(
+            normalize(&at_the_limit).len(),
+            3,
+            "repeats collapse as before"
+        );
+        assert_eq!(within_input_limit(&[]), Ok(()));
+
+        let one_over: Vec<String> = (0..=limit).map(|_| GMAIL.to_string()).collect();
+        assert_eq!(within_input_limit(&one_over), Err(AppsRefusal::TooLong));
+        // Far over: the guard is a length comparison, however long (and however distinct) the list.
+        let huge: Vec<String> = (0..50_000)
+            .map(|index| format!("com.momo.plugins.p{index}"))
+            .collect();
+        assert_eq!(within_input_limit(&huge), Err(AppsRefusal::TooLong));
+
+        // The same body as every other refusal: status, code and sentence, naming nothing.
+        let error = refusal_error(AppsRefusal::TooLong);
+        assert_eq!(error.status, StatusCode::BAD_REQUEST);
+        assert_eq!(error.code, Some(REFUSAL_CODE));
+        assert_eq!(error.message, REFUSAL_MESSAGE);
+        assert_eq!(
+            refusal_error(AppsRefusal::NotInstalled).message,
+            error.message,
+            "the rule that fired is not in the answer"
+        );
+    }
+
+    /// `normalize` is linear: a long list of distinct ids comes back whole and in order, and a long list
+    /// of one id comes back as one. (The handler never feeds it more than the input bound; this keeps it
+    /// honest for any other caller.)
+    #[test]
+    fn normalize_keeps_first_seen_order_over_a_long_list() {
+        let distinct: Vec<String> = (0..20_000)
+            .map(|index| format!("com.momo.plugins.p{index}"))
+            .collect();
+        assert_eq!(normalize(&distinct), distinct);
+        let repeated: Vec<String> = (0..20_000).map(|_| GMAIL.to_string()).collect();
+        assert_eq!(normalize(&repeated), ids(&[GMAIL]));
     }
 
     /// 수용 5 (the limit, counted **after** de-duplication): three distinct apps are fine however many

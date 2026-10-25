@@ -387,14 +387,7 @@ fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
         // ADR-0113 증보 3 F5: one coded 400 whichever rule fired — the caller clears the chips and
         // re-reads the catalog. The sentence names no id and not the word `routing`.
         // The rule that fired stays in the debug log (it names no id), never in the answer.
-        DeliverRefusal::Apps(reason) => {
-            tracing::debug!(?reason, "send refused: apps_unavailable");
-            ApiError::coded(
-                StatusCode::BAD_REQUEST,
-                crate::routes::requested_apps::REFUSAL_CODE,
-                crate::routes::requested_apps::REFUSAL_MESSAGE,
-            )
-        }
+        DeliverRefusal::Apps(reason) => crate::routes::requested_apps::refusal_error(reason),
     }
 }
 
@@ -646,8 +639,14 @@ pub async fn send(
     // written unjudged and judged inside the transaction on a new insert only
     // (`deliver_message_in_tx`): a refusal rolls the whole message back, and a deduped retry
     // answers the stored row, so an unjudged value is never committed.
-    let requested_apps =
-        crate::routes::requested_apps::normalize(request.apps.as_deref().unwrap_or_default());
+    //
+    // The list is bounded as received FIRST (review r1 H1): the limit of three counts distinct ids,
+    // so de-duplicating comes before counting, and an unbounded list would make that work unbounded.
+    // The same coded 400, before the list is normalised and before any connection is taken.
+    let raw_apps = request.apps.as_deref().unwrap_or_default();
+    crate::routes::requested_apps::within_input_limit(raw_apps)
+        .map_err(crate::routes::requested_apps::refusal_error)?;
+    let requested_apps = crate::routes::requested_apps::normalize(raw_apps);
     crate::routes::requested_apps::stamp_props(&mut props, &requested_apps);
     let requested_run_id = request.run_id;
     let new_message = NewMessage {
@@ -2019,6 +2018,7 @@ mod tests {
     fn every_apps_refusal_is_the_one_coded_400() {
         use crate::routes::requested_apps::AppsRefusal;
         for refusal in [
+            AppsRefusal::TooLong,
             AppsRefusal::NotAPerson,
             AppsRefusal::TooMany,
             AppsRefusal::NotAnOfficialApp,

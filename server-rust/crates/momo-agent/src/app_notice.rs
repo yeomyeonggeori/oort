@@ -63,6 +63,14 @@ pub const PROP_APPS_USED_ALIAS: &str = "apps_used";
 pub const PROP_REQUESTED_APPS: &str = "requestedApps";
 /// The most apps one message may request (ADR-0113 증보 3 F5), after de-duplication.
 pub const MAX_REQUESTED_APPS: usize = 3;
+/// The longest `apps` list a send request may carry **as received**, repeats included. The limit
+/// above counts distinct ids, so the server has to de-duplicate before it can count - and a list of
+/// any length is work a single request could multiply (#4313 review r1 H1: tens of thousands of ids
+/// held a worker for seconds). Past this bound the request is refused, with the same coded 400 as any
+/// other `apps` refusal, before the list is normalised and before a connection is taken. Chips are
+/// distinct and at most three, so no client sends more than a handful; the room above three is for a
+/// retrying client that repeats itself.
+pub const MAX_REQUESTED_APPS_INPUT: usize = 16;
 
 /// Every props key this module owns. A caller-supplied props map loses these.
 pub const SERVER_OWNED_APP_PROPS_KEYS: [&str; 4] = [
@@ -419,5 +427,8 @@ mod tests {
         expected.sort_unstable();
         assert_eq!(keys, expected);
         assert_eq!(MAX_REQUESTED_APPS, 3);
+        // The input bound is a ceiling over the distinct limit, never below it.
+        assert_eq!(MAX_REQUESTED_APPS_INPUT, 16);
+        assert!(MAX_REQUESTED_APPS_INPUT > MAX_REQUESTED_APPS);
     }
 }

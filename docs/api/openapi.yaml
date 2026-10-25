@@ -19433,17 +19433,20 @@ components:
             a structured block cannot be sent through it at all.
         apps:
           type: array
-          maxItems: 3
+          maxItems: 16
           items:
             type: string
             pattern: "^[a-z0-9][a-z0-9._-]{2,127}$"
           description: >
             ADR-0113 증보 3 F5 (#4313) — the official apps the sender picked in the
-            composer (ids as the catalog lists them). Validated **inside the send
-            transaction, on a new insert only**: the sender is a person, every id
-            is an installed and enabled official app of this workspace, and at
-            most three remain after duplicates are dropped. Anything else is a
-            `400` with `error.code = apps_unavailable` — the client clears the
+            composer (ids as the catalog lists them). The list **as sent** is at
+            most 16 long, repeats included (a bound on the work of de-duplicating
+            it; a longer list is the same `400` before anything else is read).
+            Validated **inside the send transaction, on a new insert only**: the
+            sender is a person, every id is an installed and enabled official app
+            of this workspace, and at most three remain after duplicates are
+            dropped. Anything else is a `400` with
+            `error.code = apps_unavailable` — the client clears the
             chips, re-reads the catalog and keeps the draft; it is never dropped
             silently. A passing list is stored, de-duplicated in first-seen order,
             under the server-owned `props.requestedApps` (a JSON array). An

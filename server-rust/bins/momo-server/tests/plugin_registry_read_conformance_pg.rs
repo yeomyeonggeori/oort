@@ -1229,6 +1229,59 @@ async fn migration_149_patched_all_seven_with_matching_digests_and_is_idempotent
     );
 }
 
+/// Review r1 L2: the DO block at the end of 149 is the migration's only alarm. The idempotent UPDATE
+/// leaves an already-patched row alone, so a stale digest on one is never repaired by a re-run - only
+/// the block notices - and nothing else checks the team drive's developer name after the patch. Each
+/// failure runs inside a transaction that is always rolled back, so the shared registry is never left
+/// broken. Replacing both conditions with `IF false` (or deleting the block) turns this red.
+#[tokio::test]
+#[ignore]
+async fn migration_149_fails_loudly_when_a_seeded_row_is_not_what_it_promises() {
+    let _guard = test_lock().await;
+    let env = env().await;
+
+    // (a) An already-patched row whose digest no longer matches its manifest: 6 of 7 are whole.
+    let mut tx = env.su.begin().await.expect("begin");
+    sqlx::query("UPDATE plugin_registry SET manifest_digest = 'sha256:' || repeat('0', 64) WHERE plugin_id = $1")
+        .bind(GITHUB)
+        .execute(&mut *tx)
+        .await
+        .expect("corrupt one digest");
+    let stale = sqlx::raw_sql(&migration_149_sql()).execute(&mut *tx).await;
+    tx.rollback().await.expect("roll back the corruption");
+    let error = stale
+        .expect_err("a stale digest must stop the migration")
+        .to_string();
+    assert!(
+        error.contains("149: expected 7 official manifests") && error.contains("found 6"),
+        "{error}"
+    );
+
+    // (b) A patch that would leave the codename as the team drive's developer name: the UPDATE writes
+    // it (the manifest differs from the current one) and the block's second condition refuses it.
+    let text = migration_149_sql();
+    assert_eq!(
+        text.matches("\"name\": \"oort\"").count(),
+        1,
+        "the patch names the team drive's developer exactly once"
+    );
+    let sabotaged = text.replacen("\"name\": \"oort\"", "\"name\": \"momo\"", 1);
+    let mut tx = env.su.begin().await.expect("begin");
+    let codename = sqlx::raw_sql(&sabotaged).execute(&mut *tx).await;
+    tx.rollback().await.expect("roll back the codename patch");
+    let error = codename
+        .expect_err("the codename as a developer name must stop the migration")
+        .to_string();
+    assert!(error.contains("publisher.name = oort"), "{error}");
+
+    // Control: the real file still runs, and nothing above leaked out of the rolled-back transactions.
+    assert!(digests_match_their_manifests(&env.su).await.is_empty());
+    sqlx::raw_sql(&text)
+        .execute(&env.su)
+        .await
+        .expect("the real migration still applies");
+}
+
 /// The rollback SQL in the migration's last comment block (the one the PR description carries) actually runs,
 /// restores what an older server admits — the four display keys gone, every other byte of the manifest
 /// untouched, the digest re-derived — and re-applying 149 afterwards brings back exactly the 149 state.

@@ -3,9 +3,10 @@
 //!
 //! | test | proves | goes red if |
 //! |---|---|---|
-//! | `a_valid_apps_list_is_stored_once_per_app_and_read_back` | 3 distinct installed apps (repeats collapsed) → 201, `props.requestedApps` is the de-duplicated array on the echo, in the row and on the history page | the stamp is dropped, or de-duplication is |
-//! | `every_refusal_is_one_coded_400_and_leaves_nothing_behind` | not installed, installed-but-off, uninstalled, unknown id, one bad id among good ones, four distinct apps, an **agent** author → 400 `apps_unavailable`; no message row, no outbox row | any rule is dropped from `judge_in_tx`; the check runs after commit instead of before |
+//! | `a_valid_apps_list_is_stored_once_per_app_and_read_back` | 3 distinct installed apps (repeats collapsed, up to the 16-entry input bound) → 201, `props.requestedApps` is the de-duplicated array on the echo, in the row and on the history page | the stamp is dropped, or de-duplication is |
+//! | `every_refusal_is_one_coded_400_and_leaves_nothing_behind` | not installed, installed-but-off, uninstalled, unknown id, one bad id among good ones, four distinct apps, a list one longer than the input bound (review r1 H1), an **agent** author → 400 `apps_unavailable`; no message row, no outbox row | any rule is dropped from `judge_in_tx`; the check runs after commit instead of before; `within_input_limit` is dropped from the handler |
 //! | `a_props_map_requested_apps_is_dropped_whatever_apps_says` | a forged `props.requestedApps` is stripped with and without `apps`, and with `apps` the stored value is the validated array, not the forged string | `requestedApps` leaves `SERVER_OWNED_APP_PROPS_KEYS` |
+//! | `an_app_the_registry_revoked_is_refused_though_it_is_still_installed` | an app installed and enabled in the workspace but revoked in `plugin_registry` (the operator's global kill switch) → the same 400 and no message/outbox row; restored → 201 again (review r1 L1) | the judgement drops `pr.revoked_at IS NULL` |
 //! | `an_idempotent_retry_after_uninstall_is_201_with_the_first_saved_marker` | first send with an installed app → 201; the app is uninstalled through the real route; the **same `clientMsgId`** answers 201, the same message id and the first marker (even when the retry names other apps); a **new** `clientMsgId` with the same app is now 400 | validation runs before the dedupe check (the retry turns into a 400) |
 //! | `requested_apps_change_neither_delivery_nor_grants` | a non-owner who attaches `apps` to a mention of someone's connector agent is refused exactly like one who does not (0 jobs, 1 skipped-mention audit row each); the owner's job carries the same `tool_grants` with and without `apps` | the owner/connector guard consults `requestedApps` (the sabotage: skip the owner check when the marker is present) |
 //!
@@ -224,6 +225,24 @@ async fn a_valid_apps_list_is_stored_once_per_app_and_read_back() {
         echo["props"]["requestedApps"],
         json!([GMAIL, GITHUB, LINEAR])
     );
+    // Control for the bound on the list as received (review r1 H1): it is a ceiling over the raw
+    // length, not a count of distinct ids - sixteen entries over three apps are at the bound and pass.
+    let at_the_bound: Vec<&str> = (0..momo_agent::MAX_REQUESTED_APPS_INPUT)
+        .map(|index| [GMAIL, GITHUB, LINEAR][index % 3])
+        .collect();
+    let (status, echo) = post(
+        &client,
+        &base,
+        &f,
+        &f.author_jwt,
+        send_body(Uuid::new_v4(), Some(json!(at_the_bound))),
+    )
+    .await;
+    assert_eq!(status, 201, "{echo}");
+    assert_eq!(
+        echo["props"]["requestedApps"],
+        json!([GMAIL, GITHUB, LINEAR])
+    );
 }
 
 #[tokio::test]
@@ -265,6 +284,14 @@ async fn every_refusal_is_one_coded_400_and_leaves_nothing_behind() {
             "an agent author, even with a valid app",
             agent_bearer.as_str(),
             json!([GMAIL]),
+        ),
+        // Review r1 H1: one past the bound on the list as received. Every entry is an installed app
+        // and the list collapses to ONE distinct id, so without the bound this would be a 201 - the
+        // refusal can only be the bound's.
+        (
+            "one more than the input bound, all one installed app",
+            f.author_jwt.as_str(),
+            json!(vec![GMAIL; momo_agent::MAX_REQUESTED_APPS_INPUT + 1]),
         ),
     ];
     for (label, bearer, apps) in cases {
@@ -324,6 +351,71 @@ async fn a_props_map_requested_apps_is_dropped_whatever_apps_says() {
     assert_eq!(status, 201, "{echo}");
     let stored = stored_props(&su, echo["id"].as_str().expect("message id")).await;
     assert_eq!(stored["requestedApps"], json!([GMAIL]));
+}
+
+/// Review r1 L1: `plugin_registry.revoked_at` is the operator's global kill switch for an official app.
+/// An app that is still installed and enabled in the workspace but revoked in the registry is not
+/// available - the same 400, nothing stored. Dropping `pr.revoked_at IS NULL` from the judgement turns
+/// the middle step into a 201.
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#4313)"]
+async fn an_app_the_registry_revoked_is_refused_though_it_is_still_installed() {
+    let _guard = test_lock().await;
+    let (su, f, base, client) = setup(ServerOptions::hosted_open()).await;
+
+    // Control: installed, enabled and not revoked → delivered.
+    let (status, body) = post(
+        &client,
+        &base,
+        &f,
+        &f.author_jwt,
+        send_body(Uuid::new_v4(), Some(json!([NOTION]))),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
+
+    sqlx::query("UPDATE plugin_registry SET revoked_at = now() WHERE plugin_id = $1")
+        .bind(NOTION)
+        .execute(&su)
+        .await
+        .expect("revoke notion in the registry");
+    let messages_before = message_rows(&su, &f).await;
+    let outbox_before = outbox_rows(&su, &f).await;
+    let (revoked_status, revoked_body) = post(
+        &client,
+        &base,
+        &f,
+        &f.author_jwt,
+        send_body(Uuid::new_v4(), Some(json!([NOTION]))),
+    )
+    .await;
+    let messages_after = message_rows(&su, &f).await;
+    let outbox_after = outbox_rows(&su, &f).await;
+    // Restore before asserting: the registry is shared by every test of this database.
+    sqlx::query("UPDATE plugin_registry SET revoked_at = NULL WHERE plugin_id = $1")
+        .bind(NOTION)
+        .execute(&su)
+        .await
+        .expect("restore notion in the registry");
+
+    assert_eq!(revoked_status, 400, "{revoked_body}");
+    assert_eq!(revoked_body["error"]["code"], "apps_unavailable");
+    assert_eq!(
+        messages_after, messages_before,
+        "the refused message is not stored"
+    );
+    assert_eq!(outbox_after, outbox_before, "and leaves no outbox row");
+
+    // Restored: the same request is delivered again.
+    let (status, body) = post(
+        &client,
+        &base,
+        &f,
+        &f.author_jwt,
+        send_body(Uuid::new_v4(), Some(json!([NOTION]))),
+    )
+    .await;
+    assert_eq!(status, 201, "{body}");
 }
 
 #[tokio::test]

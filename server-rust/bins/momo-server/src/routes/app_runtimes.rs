@@ -43,8 +43,9 @@
 //! [`blocked`] is a pure function over the facts `agent_mentions::delivery_gate` reads, in
 //! the order it reads them: for the co-hosted Hermes the trial's own stop
 //! (`attest` → `members` → `apps`, [`momo_agent::connector_trial_stop`]) and then `paused`;
-//! for a hosted vendor agent `hosted_off` → `connection` → `paused`. Only the **first**
-//! blocker is reported. The candidate comes from [`momo_agent::load_mention_candidates_in_tx`]
+//! for a hosted vendor agent `hosted_off` → `connection` → `paused`; for the rare agent that is
+//! both (a pinned trial that also has a hosted connection row) the trial's stop first and then the
+//! hosted stages and `paused`. Only the **first** blocker is reported. The candidate comes from [`momo_agent::load_mention_candidates_in_tx`]
 //! — the loader the delivery path itself uses — so the definitions of 「활성 연결」 and
 //! 「한 사람」 are not copied. A test in `agent_mentions.rs` drives the real `delivery_gate`
 //! over a grid of facts and requires the two to agree, and maps every `DeliveryGate`
@@ -153,7 +154,10 @@ pub(crate) fn runtime_path(candidate: &MentionCandidate, requester: Uuid) -> Opt
         return None;
     }
     // `trial` is `Some` exactly when the agent is marked AND pinned to the operator's env link.
-    // It wins over a hosted connection row: the delivery gate judges the trial first.
+    // It wins over a hosted connection row as the agent's FACE (`path`, `enforced`, `apps`): the
+    // delivery gate judges the trial first. It does not end the chain - an agent that also has a hosted
+    // connection row (the operator pinned it after the connection was made) goes on to the hosted
+    // stages, and [`blocked`] follows it there.
     if connector.trial.is_some() {
         return Some(RuntimePath::HermesTrial);
     }
@@ -169,29 +173,35 @@ pub(crate) fn runtime_path(candidate: &MentionCandidate, requester: Uuid) -> Opt
 /// from the agent's owner, or `None` when nothing does. Same order as `delivery_gate`
 /// (trial stop → hosted switch → active connection → paused), minus the stages that depend on
 /// the conversation or on who is calling (see the module docs).
+///
+/// The hosted stages run for **every** agent that has a hosted connection row, whichever face
+/// ([`RuntimePath`]) it shows: the gate reads the trial first and then goes on to
+/// `hosted_delivery_disabled`, so a pinned trial agent that also has a connection row is judged by
+/// both (review r1 M2 - the first version stopped after the trial and said `null` for a message the
+/// gate then refused). For a plain trial agent and a plain hosted agent nothing changes.
 pub(crate) fn blocked(
     path: RuntimePath,
     candidate: &MentionCandidate,
     hosted_delivery_enabled: bool,
     attest: &ConnectorTrialAttest,
 ) -> Option<Blocked> {
-    match path {
-        RuntimePath::HermesTrial => {
-            let trial = candidate
-                .connector_owner
-                .as_ref()
-                .and_then(|connector| connector.trial.as_ref());
-            if let Some(stop) = connector_trial_stop(trial, attest) {
-                return Some(stop.into());
-            }
+    if path == RuntimePath::HermesTrial {
+        let trial = candidate
+            .connector_owner
+            .as_ref()
+            .and_then(|connector| connector.trial.as_ref());
+        if let Some(stop) = connector_trial_stop(trial, attest) {
+            return Some(stop.into());
         }
-        RuntimePath::HostedVendor => {
-            if !hosted_delivery_enabled {
-                return Some(Blocked::HostedOff);
-            }
-            if candidate.hosted_active_connection_id.is_none() {
-                return Some(Blocked::Connection);
-            }
+    }
+    // Not owner-only (the common predicate excluded those), so `hosted_delivery_disabled` is exactly
+    // "has a hosted connection row of any status" (`load_mention_candidates_in_tx`).
+    if candidate.hosted_delivery_disabled {
+        if !hosted_delivery_enabled {
+            return Some(Blocked::HostedOff);
+        }
+        if candidate.hosted_active_connection_id.is_none() {
+            return Some(Blocked::Connection);
         }
     }
     candidate.paused.then_some(Blocked::Paused)
@@ -423,6 +433,172 @@ mod tests {
             uses_owner_key,
             personal_agent: personal,
         }
+    }
+
+    /// Review r1 M1: the owner predicate is F8's central security line, so it is pinned across the
+    /// SHAPES an agent can have - not only the few the first test sets out. Every shape is built twice:
+    /// owned by someone else (it must never be projected, whatever its connection, pause, trial or
+    /// `owner_only` state) and owned by me (a control: the shapes that ARE app runtimes show up, so the
+    /// grid is not vacuously empty). A predicate that is loosened for one shape - say, "someone else's
+    /// hosted agent with no live connection" - turns the first loop red for exactly that shape.
+    #[test]
+    fn another_members_agent_is_never_projected_in_any_shape() {
+        type Shape = (&'static str, fn(u128, Uuid) -> MentionCandidate, bool);
+        fn paused(mut agent: MentionCandidate) -> MentionCandidate {
+            agent.paused = true;
+            agent
+        }
+        fn with_hosted_row(mut agent: MentionCandidate, connected: bool) -> MentionCandidate {
+            agent.hosted_delivery_disabled = true;
+            agent.hosted_active_connection_id = connected.then(|| Uuid::from_u128(77));
+            agent
+        }
+        fn harness(owner: Uuid, personal: bool, uses_owner_key: bool) -> MentionCandidate {
+            let mut agent = marked(candidate(9), owner);
+            agent.owner_only = Some(owner_only(owner, personal, uses_owner_key));
+            agent
+        }
+        // (label, builder(id, owner), is an app runtime when the owner is the requester)
+        let shapes: Vec<Shape> = vec![
+            ("hosted, connected", |id, o| hosted(id, o, true), true),
+            (
+                "hosted, no live connection",
+                |id, o| hosted(id, o, false),
+                true,
+            ),
+            (
+                "hosted, connected, paused",
+                |id, o| paused(hosted(id, o, true)),
+                true,
+            ),
+            (
+                "hosted, no live connection, paused",
+                |id, o| paused(hosted(id, o, false)),
+                true,
+            ),
+            ("trial", |id, o| hermes(id, o, 1, &[GMAIL]), true),
+            (
+                "trial, stopped (two people)",
+                |id, o| hermes(id, o, 2, &[GMAIL]),
+                true,
+            ),
+            ("trial, no grants", |id, o| hermes(id, o, 1, &[]), true),
+            (
+                "trial, paused",
+                |id, o| paused(hermes(id, o, 1, &[GMAIL])),
+                true,
+            ),
+            (
+                "trial with a hosted row, connected",
+                |id, o| with_hosted_row(hermes(id, o, 1, &[GMAIL]), true),
+                true,
+            ),
+            (
+                "trial with a hosted row, no connection",
+                |id, o| with_hosted_row(hermes(id, o, 1, &[GMAIL]), false),
+                true,
+            ),
+            ("personal agent", |_, o| harness(o, true, false), false),
+            (
+                "subscription harness",
+                |_, o| harness(o, false, false),
+                false,
+            ),
+            ("owner-key agent", |_, o| harness(o, false, true), false),
+            (
+                "marked, neither trial nor hosted",
+                |id, o| marked(candidate(id), o),
+                false,
+            ),
+            (
+                "unmarked agent with a hosted row",
+                |id, _| with_hosted_row(candidate(id), true),
+                false,
+            ),
+        ];
+        let granted = ids(&[GMAIL]);
+        let attest = attest(&[GMAIL]);
+        for (label, build, is_runtime) in &shapes {
+            for switch in [true, false] {
+                let theirs = build(5, OTHER);
+                assert!(
+                    project(&[theirs], ME, &granted, switch, &attest).is_empty(),
+                    "{label} (hosted switch {switch}): someone else's agent must never be projected"
+                );
+                let mine = build(6, ME);
+                let answer = project(&[mine], ME, &granted, switch, &attest);
+                assert_eq!(
+                    answer.len(),
+                    usize::from(*is_runtime),
+                    "{label} (hosted switch {switch}): my own agent of this shape - {answer:?}"
+                );
+            }
+        }
+        // Mixed: someone else's and mine side by side - only mine, whichever comes first.
+        let both = [hosted(1, OTHER, false), hosted(2, ME, false)];
+        let answer = project(&both, ME, &granted, true, &attest);
+        assert_eq!(answer.len(), 1, "{answer:?}");
+        assert_eq!(answer[0].agent_id, Uuid::from_u128(2).to_string());
+    }
+
+    /// Review r1 M2: an agent can be BOTH a pinned trial and a hosted connection (the operator pinned it
+    /// after the connection was made). The gate reads the trial first and then goes on to the hosted
+    /// stages, so a message to it is refused by `HostedDeliveryNotEnabled` / `HostedConnectionUnavailable`
+    /// even when the trial itself is whole - and F8 must say so instead of `null`. The face stays the
+    /// trial's (`hermes_trial`, enforced, the operator's list ∩ my grants).
+    #[test]
+    fn a_pinned_trial_that_also_has_a_hosted_connection_row_is_judged_by_both() {
+        let complete = attest(&[GMAIL]);
+        let mixed = |connected: bool| {
+            let mut agent = hermes(1, ME, 1, &[GMAIL]);
+            agent.hosted_delivery_disabled = true;
+            agent.hosted_active_connection_id = connected.then(|| Uuid::from_u128(901));
+            agent
+        };
+        // The whole trial is `null` on its own...
+        assert_eq!(
+            blocked(
+                RuntimePath::HermesTrial,
+                &hermes(1, ME, 1, &[GMAIL]),
+                true,
+                &complete
+            ),
+            None
+        );
+        // ...but the hosted row is judged after it: the switch, then the live connection.
+        assert_eq!(
+            blocked(RuntimePath::HermesTrial, &mixed(true), false, &complete),
+            Some(Blocked::HostedOff)
+        );
+        assert_eq!(
+            blocked(RuntimePath::HermesTrial, &mixed(false), true, &complete),
+            Some(Blocked::Connection)
+        );
+        assert_eq!(
+            blocked(RuntimePath::HermesTrial, &mixed(true), true, &complete),
+            None,
+            "switch on and connected: nothing agent-level refuses"
+        );
+        // The trial's own stop still outranks the hosted stages (the gate's order).
+        let stopped = {
+            let mut agent = mixed(false);
+            agent.connector_owner.as_mut().expect("marked").trial = Some(ConnectorTrialFacts {
+                active_humans: 2,
+                granted_apps: vec![GMAIL.to_string()],
+            });
+            agent
+        };
+        assert_eq!(
+            blocked(RuntimePath::HermesTrial, &stopped, false, &complete),
+            Some(Blocked::Members)
+        );
+        // Through the projection: the face is the trial's, the reason is the hosted stage's.
+        let answer = project(&[mixed(false)], ME, &ids(&[GMAIL]), true, &complete);
+        assert_eq!(answer.len(), 1, "{answer:?}");
+        assert_eq!(answer[0].path, RuntimePath::HermesTrial);
+        assert!(answer[0].enforced);
+        assert_eq!(answer[0].apps, ids(&[GMAIL]));
+        assert_eq!(answer[0].blocked, Some(Blocked::Connection));
     }
 
     /// 수용 7: a marked **personal agent** (the owner's Mac harness) and a subscription harness or

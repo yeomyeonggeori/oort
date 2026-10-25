@@ -7,7 +7,8 @@
 //! |---|---|---|
 //! | `only_my_app_runtimes_are_listed_and_never_anyone_elses` | next to mine sit another member's connector agent, co-hosted trial and `owner_only` harness (all marked) and my own personal agent, harness and managed agent: the answer is exactly my hosted vendor agent and my trial (a stopped trial **stays**, with `blocked: "members"`), `apps` ⊆ my grants, and nothing of the other member (ids, grants) is on the wire; the other member sees exactly theirs | the owner predicate is deleted from `runtime_path`; `apps` reads another member's grants |
 //! | `blocked_is_the_reason_a_message_would_not_be_delivered` | every `blocked` value (`hosted_off` on the default server, `connection`, `paused`, `attest`, `members`, `apps`) and `null`, one at a time, and **for each, an owner mention in a shared channel is delivered exactly when `blocked` is `null`** | a stage is dropped or reordered in `blocked`; the candidate loader and the route drift apart |
-//! | `an_agent_bearer_is_refused_by_the_middleware` | hosted-class and generic agent bearers get 403 on the route (layer one with a real credential); no credential is 401 | the path enters `required_agent_scope` |
+//! | `an_agent_bearer_is_refused_by_the_middleware` | hosted-class and generic agent bearers get 403 on the route (layer one with a real credential); no credential is 401; the body is the middleware's sentence, not the handler's (review r1 L3) | the path enters `required_agent_scope` |
+//! | `a_former_member_is_refused_though_the_token_still_verifies` | the membership ends while the token still verifies → 403 "active human membership required" naming nothing of the agent; before it ends the agent is listed (review r1 M3) | the handler's `active_workspace_role` check is deleted |
 //!
 //! `#[ignore]` — needs a real PostgreSQL 18 + pgvector (superuser URL); run on an isolated database:
 //!
@@ -496,6 +497,13 @@ async fn an_agent_bearer_is_refused_by_the_middleware() {
     ] {
         let (status, body) = runtimes(&client, &base, workspace, &bearer).await;
         assert_eq!(status, 403, "{label}: {body}");
+        // Review r1 L3: say WHICH layer answered. The middleware's sentence is not the handler's
+        // (`require_human`: "app runtimes require a human bearer"), so opening the route in the agent
+        // allow-list - which the handler would still refuse with its own 403 - turns this red.
+        assert_eq!(
+            body["error"]["message"], "agent bearer is not allowed for this route",
+            "{label}: layer one (the middleware), not layer two (the handler): {body}"
+        );
     }
     // No credential at all.
     let response = client
@@ -504,4 +512,47 @@ async fn an_agent_bearer_is_refused_by_the_middleware() {
         .await
         .expect("GET without a credential");
     assert_eq!(response.status().as_u16(), 401);
+}
+
+/// Review r1 M3: the middleware verifies the token and its row, not the member's standing, so the
+/// handler's own `active_workspace_role` check is the only thing between a former member's still-valid
+/// token and the list of their agents. Ending the membership (the same move `a_former_member_gets_404…`
+/// makes for the catalog) turns the answer into a 403 that names nothing of the agent; deleting the
+/// check from the handler turns this red.
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (#4313)"]
+async fn a_former_member_is_refused_though_the_token_still_verifies() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let workspace = seed_workspace(&su).await;
+    let (me, me_jwt) = seed_human(&su, workspace, "member", "이도현").await;
+    let room = seed_channel(&su, workspace, "public", &[me]).await;
+    let agent = seed_hosted_agent(&su, workspace, me, "mine", &[room], true, false).await;
+    mark_connector_owner(&su, workspace, agent.id, me).await;
+    let base = start_server(momo_app_pool().await, ServerOptions::hosted_open()).await;
+    let client = reqwest::Client::new();
+
+    // Control: while the membership stands, the agent is listed.
+    let (status, body) = runtimes(&client, &base, workspace, &me_jwt).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(entry(&body, agent.id).is_some(), "{body}");
+
+    // The membership ends; the token (a signed JWT with a live token row) does not.
+    sqlx::query("DELETE FROM workspace_membership WHERE workspace_id = $1 AND member_id = $2")
+        .bind(workspace)
+        .bind(me)
+        .execute(&su)
+        .await
+        .expect("end the membership");
+    let (status, body) = runtimes(&client, &base, workspace, &me_jwt).await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(
+        body["error"]["message"], "active human membership required",
+        "the handler's own check answered: {body}"
+    );
+    assert!(
+        !body.to_string().contains(&agent.id.to_string()),
+        "the refusal names nothing of the agent: {body}"
+    );
 }

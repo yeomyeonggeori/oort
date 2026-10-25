@@ -485,7 +485,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - 내 에이전트와의 1:1 DM이면 경고하지 않아요.
   - 채널인데 인원을 모르면(`ChannelAudienceContext`가 `null`) 숫자 없이 「답이 이 채널에 보여요」를 보여요.
 - **요청 필드 `apps`** (가산, 공개 API): send 요청 본문의 새 필드 `apps: ["<pluginId>"…]`예요. `harnessRefine` 선례대로 전용 필드로 받고, 평평한 `props` 맵에 싣지 않아요.
-  - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요.
+  - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요. 중복을 빼기 **전의** 원본 목록도 16개 이하여야 해요(`MAX_REQUESTED_APPS_INPUT` — 중복 제거 비용을 묶는 입력 상한이에요. 넘으면 같은 400이고, 목록을 정리하거나 연결을 잡기 전에 거절해요. #4313 검수 r1 H1).
     - 어기면 코드 달린 400 `apps_unavailable`이에요(`ApiError::coded`). 클라이언트는 칩을 지우고 앱 목록을 새로 받고, 초안 본문은 남겨요. 조용히 버리지 않아서 클라이언트 버그를 숨기지 않아요.
     - 검증은 send tx 안에서 **새 INSERT일 때만** 돌아요. 같은 `client_msg_id`의 재전송(`deduped`)은 `apps` 검증과 무관하게 저장본을 201로 돌려줘요(`routing` 허용목록 선례, `routes/messages.rs` 「201 in both the insert and the idempotent-retry case」). 그래서 첫 요청 뒤 앱이 해제돼도 재전송이 중복 전송을 만들지 않아요.
   - **저장**: 통과한 목록을 서버 소유 키 `props.requestedApps`(JSON 배열)로 써요. 이 키는 `momo_agent::SERVER_OWNED_APP_PROPS_KEYS`(`app_notice.rs`)에 더해요. 보내기·웹훅 수신·게이트웨이 답이 함께 읽는 목록이라, 클라이언트 `props` 맵·외부 웹훅 발신자·게이트웨이 어느 쪽이 보낸 같은 이름의 키도 버려져요.
@@ -526,6 +526,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - `hosted_vendor`: `hosted_off` → `connection` → `paused` 순서예요.
     - `hosted_off`는 인스턴스의 호스팅 배달 스위치(`MOMO_HOSTED_DELIVERY_ENABLED`, 관문의 `HostedDeliveryNotEnabled`)가 꺼진 경우예요. 기본값이 꺼짐(`config.rs` `hosted_delivery_enabled: false`)이라, 이 값이 없으면 기본 설정 서버의 호스팅 에이전트가 전부 `null`(배달됨)로 잘못 나가요.
     - `connection`은 활성 연결이 없는 경우예요(`HostedConnectionUnavailable`).
+  - 시험 핀에 호스팅 연결 행도 있는 **혼성 에이전트**(운영자가 이미 연결된 에이전트에 핀을 건 드문 조합)는 `path`가 `hermes_trial`이지만, 관문이 시험 정지를 본 뒤 호스팅 단계로 이어 가요. 그래서 `blocked`도 시험 정지 → `hosted_off` → `connection` → `paused` 순서로 이어 평가해요(#4313 검수 r1 M2 — 시험만 보고 `null`을 주면 관문이 버릴 메시지를 칩이 보내요).
   - `paused`는 관문의 마지막 단계라서 두 경로 모두에 걸려요.
   - **대화마다 다른 사실은 싣지 않아요.** F8은 `channelId`를 받지 않아요.
     - 대화 멤버 여부(`NotChannelMember`)는 F5 자격 3이 로스터로 판정해요.

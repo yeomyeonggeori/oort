@@ -2188,9 +2188,10 @@ function categoryOf(value: unknown): PluginCategory | undefined {
 }
 
 /**
- * 예시 카드. 서버(`optional_starter_prompts`)와 같은 규칙으로 걸러 읽는다: 문자열 둘(`text` 1~140자·제어문자 없음,
- * `tool`), 3장까지. 어긋난 카드는 건너뛴다 - 카드 하나가 틀렸다고 앱 전체를 못 그리지는 않는다.
- * 하나도 남지 않으면 `undefined`(빈 배열을 만들지 않는다).
+ * 예시 카드. 서버(`optional_starter_prompts`)의 모양 한도만 같은 값으로 걸러 읽는다: 문자열 둘(`text` 1~140자·제어문자
+ * 없음, `tool`), 3장까지. 서버 검증기가 더 하는 검사 - `text`에 URL 모양(`://`·`//`·`www.`) 금지, `tool`이 그 매니페스트의
+ * R·A 등급 도구인지 - 는 여기서 되풀이하지 않는다(공식 매니페스트는 서버가 이미 거른 값이다). 어긋난 카드는 건너뛴다 -
+ * 카드 하나가 틀렸다고 앱 전체를 못 그리지는 않는다. 하나도 남지 않으면 `undefined`(빈 배열을 만들지 않는다).
  */
 function starterPromptsOf(value: unknown): PluginStarterPrompt[] | undefined {
   const entries = arrayField(value, "starterPrompts");

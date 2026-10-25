@@ -235,11 +235,26 @@ fn the_spec_documents_the_limits_the_validator_enforces() {
         property_names(&spec, "PluginStarterPrompt"),
         as_set(&["text", "tool"])
     );
-    // F5: the request field's limit is the server's.
+    // F5: the request field's limit is the server's. The spec bounds the list **as sent**
+    // (`MAX_REQUESTED_APPS_INPUT`, the work of de-duplicating it); the three-distinct limit
+    // (`MAX_REQUESTED_APPS`) is counted after de-duplication and is stated in the description.
     assert_eq!(
         number_of(&spec, "SendMessageRequest", "apps", "maxItems"),
-        momo_agent::MAX_REQUESTED_APPS
+        momo_agent::MAX_REQUESTED_APPS_INPUT
     );
+    let apps_description = property_lines(&spec, "SendMessageRequest", "apps")
+        .iter()
+        .map(|line| line.trim())
+        .collect::<Vec<_>>()
+        .join(" ");
+    assert!(
+        apps_description.contains(&format!(
+            "at most {} long",
+            momo_agent::MAX_REQUESTED_APPS_INPUT
+        )) && apps_description.contains("at most three remain after duplicates are dropped"),
+        "the description states both limits: {apps_description}"
+    );
+    assert_eq!(momo_agent::MAX_REQUESTED_APPS, 3, "the words say three");
     assert!(
         spec.contains("apps_unavailable"),
         "the 400 code is documented"
