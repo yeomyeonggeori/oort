@@ -240,17 +240,25 @@ describe('홈 카드: 아무도 가져가지 않은 채 5분을 넘은 사람 �
     expect(model?.reason).toBeNull();
   });
 
-  it('5분 안의 요청은 서버가 말한 「대기 n번째」 그대로이고 취소가 서지 않는다', () => {
+  it('5분 안의 요청은 서버가 말한 「대기 n번째」 그대로이고 이유 문장도 취소도 서지 않는다', () => {
     const young = signalOf({
       queuePosition: 2,
       aheadTotal: 1,
       createdAtMs: Date.now() - 2 * MIN,
     });
-    const model = card(mapOf(young), {liveness: liveness('responsive')});
-    expect(model?.uncollected).toBe(false);
-    expect(model?.liveText).toBe('대기 2번째');
-    expect(model?.detail).toBe('2분째 기다려요 · 에이전트 앞에 1건');
-    expect(model?.reason).toBeNull();
+    // 경고가 없는 에이전트: 근거 줄은 전과 같다.
+    const calm = card(mapOf(young), {liveness: liveness('responsive')});
+    expect(calm?.uncollected).toBe(false);
+    expect(calm?.liveText).toBe('대기 2번째');
+    expect(calm?.detail).toBe('2분째 기다려요 · 에이전트 앞에 1건');
+    expect(calm?.reason).toBeNull();
+    // 경고 라벨은 N과 무관하게 근거 줄 맨 앞에 선다(E6). 이유 문장은 5분을 넘어야 선다 — 지우면 여기서 빨개진다.
+    const warned = card(mapOf(young), {liveness: liveness('woken_not_collected')});
+    expect(warned?.uncollected).toBe(false);
+    expect(warned?.liveText).toBe('대기 2번째');
+    expect(warned?.detail).toBe('깨웠지만 아직 안 가져감 · 2분째 기다려요 · 에이전트 앞에 1건');
+    expect(warned?.reason).toBeNull();
+    expect(cardCancelRunId(warned!)).toBeNull();
   });
 
   it('가져간(claimed) run은 「받지 않았어요」가 아니다', () => {
