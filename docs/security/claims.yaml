@@ -157,6 +157,15 @@ claims:
     runs: pr-ci
     proofs:
       - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#another_members_attachment_cannot_be_bound_and_the_message_rolls_back_with_it"
+  - id: ATT-3
+    claim: "An attachment that no message carries yet (a draft in a composer tray, or a file a scheduled message is holding) is readable by its uploader alone: every other member of the channel gets the same 404 an unknown id gets, and once a message carries it the channel's members can read it."
+    scope: "Real PostgreSQL, through the content route. The uploader has to be an active member of the channel too. The 404 is compared by status and body, not by headers. The tests read as a plain channel member and as an outsider: that no workspace role (owner, admin) is an exception is read from the code, not tested. An attachment a deleted message carried stays readable by the channel (follow-up #4443)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#an_unbound_attachment_is_its_uploaders_alone_until_a_message_carries_it"
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_draft_and_a_carried_attachment_stay_inside_their_tenant_and_channel"
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_scheduled_messages_file_is_its_authors_alone_until_the_message_goes_out"
   - id: PUSH-1
     claim: "The push dispatch payload carries identifiers only: no message body, and no content-shaped key."
     scope: "Payload construction in momo-push and the relay's closed dispatch (static placeholder text). The notification the phone shows is built on the device after a separate authenticated fetch."
