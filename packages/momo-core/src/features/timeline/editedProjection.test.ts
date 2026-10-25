@@ -702,6 +702,44 @@ describe("편집은 행을 만들지 않는다 — 든 행만 갱신한다 (#445
     expect(after.newestSeq).toBeNull();
   });
 
+  it.each([
+    {
+      label: "스트림 조각 — 아직 못 본 줄(seq 12)의 자란 본문",
+      seq: 12,
+      body: "조각이 자란 본문",
+      props: { "momo.stream": { rev: 3, streaming: true } },
+    },
+    {
+      label: "카드 props 프레임 — 오래된 카드(seq 3)의 승인 결정",
+      seq: 3,
+      body: "배포 승인 요청",
+      props: { card: "approval_request", status: "approved" },
+    },
+  ])(
+    "안 든 줄의 수정 표시 없는 프레임도 끼지 않는다 — 문은 프레임의 모양(state)으로 안 든 줄을 가리지 않는다 ($label)",
+    ({ seq, body, props }) => {
+      const state = window10to11();
+      const frame = payloadToMessage(
+        editedFrame({ id: tailRow(seq).id, seq }, body, {
+          state: "sent",
+          edited_at_ms: null,
+          props,
+          created_at_ms: tailRow(seq).createdAtMs,
+        })
+      );
+      // 전제: 서버가 스트림 조각·카드 props 갱신에 싣는 모양이다(수정 표시 없음).
+      expect(frame.state).toBe("sent");
+      expect(frame.editedAtMs).toBeUndefined();
+
+      const after = applyEditedMessage(state, frame);
+
+      expect(after).toBe(state);
+      expect(after.messages.map((m) => m.seq)).toEqual([10, 11]);
+      expect(after.oldestSeq).toBe(10);
+      expect(after.newestSeq).toBe(11);
+    }
+  );
+
   it("seq 는 같지만 id 가 다른 줄의 편집은 든 줄을 덮지 않는다", () => {
     const state = window10to11();
     const stranger = payloadToMessage(
