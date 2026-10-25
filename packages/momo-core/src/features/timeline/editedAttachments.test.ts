@@ -1,0 +1,286 @@
+import { describe, expect, it } from "vitest";
+import type { Message, MessageAttachment } from "../../lib/api";
+import { payloadToMessage } from "../../lib/realtimeEvents";
+import { emptyTimeline, isStrictlyOrdered, reconcileMessages } from "./model";
+
+// =============================================================================
+// #4441 — 사진 달린 메시지의 글을 고치면 사진 카드가 사라지던 길.
+//
+// 서버는 편집이 첨부를 건드리지 않는다는 이유로 **편집이 내는 두 투영 모두에서
+// 첨부를 뺀다**:
+//   - `PATCH …/messages/{id}` 응답 (`routes/messages.rs` `edit`: "Editing a body
+//     cannot change what is bound to the message, so the client keeps the file
+//     cards it already drew.")
+//   - `message.edited` 프레임 (`interaction.rs` `build_message_edited_payload` 에는
+//     `attachments` 키가 아예 없다. `emit_message_edited_in_tx` 주석: "both clients
+//     merge it by seq over the row they hold")
+// 그런데 `reconcileMessages` 는 같은 seq 를 **통째로 덮어쓴다**. 서버가 「클라가
+// 이미 그린 카드를 유지한다」고 가정한 자리에서 클라는 덮어써서, 고친 사람의 화면과
+// 그 줄을 열어 둔 모든 사람의 화면에서 사진 카드가 사라졌다(새로 고침하면 돌아온다 —
+// 기록 페이지는 첨부를 싣는다).
+//
+// 아래 프레임·응답은 서버가 실제로 내는 키 그대로다. 합성한 `Message` 한 벌로는
+// 이 시험이 증명할 것이 없다: 버그는 「키가 없다」는 서버의 사실에 있다.
+// =============================================================================
+
+const CH = "00000000-0000-4000-8000-0000000000c1";
+const AUTHOR = "00000000-0000-4000-8000-0000000000a1";
+const OTHER_AUTHOR = "00000000-0000-4000-8000-0000000000a2";
+const ID = "0199aaaa-0000-7000-8000-000000000041";
+const ID_OTHER = "0199aaaa-0000-7000-8000-000000000042";
+
+const PHOTO: MessageAttachment = {
+  id: "0199aaaa-0000-7000-8000-0000000000f1",
+  name: "IMG_0412.jpg",
+  mime: "image/jpeg",
+  sizeBytes: 183_204,
+};
+const PHOTO_2: MessageAttachment = {
+  id: "0199aaaa-0000-7000-8000-0000000000f2",
+  name: "IMG_0413.jpg",
+  mime: "image/jpeg",
+  sizeBytes: 201_377,
+};
+
+/** `build_broadcast_payload` 가 쓰는 `message.new` 의 안쪽 — 첨부는 있을 때만 실린다. */
+function newFrame(
+  over: Record<string, unknown> = {}
+): Parameters<typeof payloadToMessage>[0] {
+  return {
+    id: ID,
+    channel_id: CH,
+    seq: 7,
+    type: "text",
+    body: "점심 먹은 곳 사진이에요",
+    author_member_id: AUTHOR,
+    hlc_ts: 1_700_000_007_000,
+    hlc_count: 0,
+    root_id: null,
+    reply_to_id: null,
+    attachments: [PHOTO],
+    ...over,
+  } as Parameters<typeof payloadToMessage>[0];
+}
+
+/**
+ * `build_message_edited_payload` 가 쓰는 `message.edited` 의 안쪽 키 전부.
+ * **`attachments` 가 없다** — 이 시험 전체가 그 한 줄의 부재에 대한 것이다.
+ */
+function editedFrame(
+  over: Record<string, unknown> = {}
+): Parameters<typeof payloadToMessage>[0] {
+  return {
+    id: ID,
+    channel_id: CH,
+    seq: 7,
+    hlc_ts: 1_700_000_007_000,
+    hlc_count: 0,
+    author_member_id: AUTHOR,
+    type: "text",
+    state: "edited",
+    body: "점심 먹은 곳 사진이에요 (가게 이름 추가)",
+    props: {},
+    root_id: null,
+    reply_to_id: null,
+    run_id: null,
+    client_msg_id: "0199aaaa-0000-7000-8000-0000000000c1",
+    created_at_ms: 1_700_000_007_000,
+    edited_at_ms: 1_700_000_099_000,
+    deleted_at_ms: null,
+    ...over,
+  } as Parameters<typeof payloadToMessage>[0];
+}
+
+/** 기록 페이지가 싣는 행 — 첨부가 있으면 `attachments` 가 실린다. */
+function historyRow(over: Partial<Message> = {}): Message {
+  return {
+    id: ID,
+    channelId: CH,
+    seq: 7,
+    hlcTs: 1_700_000_007_000,
+    hlcCount: 0,
+    authorMemberId: AUTHOR,
+    type: "text",
+    body: "점심 먹은 곳 사진이에요",
+    state: "sent",
+    createdAtMs: 1_700_000_007_000,
+    attachments: [PHOTO],
+    ...over,
+  };
+}
+
+/** 첨부 키가 아예 없는 행 — DTO 가 빈 배열의 키를 빼는 모양 그대로. */
+function withoutAttachments(row: Message): Message {
+  const { attachments: _attachments, ...rest } = row;
+  return rest;
+}
+
+/** `PATCH` 응답 — 서버가 `attachments` 에 `&[]` 를 넘기고 DTO 가 빈 배열의 키를 뺀다. */
+function patchResponse(over: Partial<Message> = {}): Message {
+  return {
+    ...withoutAttachments(historyRow()),
+    body: "점심 먹은 곳 사진이에요 (가게 이름 추가)",
+    state: "edited",
+    editedAtMs: 1_700_000_099_000,
+    ...over,
+  };
+}
+
+function fold(...batches: Message[][]) {
+  return batches.reduce(
+    (state, batch) => reconcileMessages(state, batch),
+    emptyTimeline()
+  );
+}
+
+describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 지킨다 (#4441)", () => {
+  it("message.edited 프레임에 첨부 키가 없어도 사진은 남고, 글과 수정 표시는 새것이 된다", () => {
+    const state = fold(
+      [payloadToMessage(newFrame())],
+      [payloadToMessage(editedFrame())]
+    );
+
+    expect(state.messages).toHaveLength(1);
+    const row = state.messages[0];
+    // 사진: 이 시험이 잡는 버그.
+    expect(row.attachments).toEqual([PHOTO]);
+    // 글·표시: 「들어온 행을 통째로 무시」하는 가짜 수리를 막는다. 편집이 실제로
+    // 적용됐다는 증거가 같은 단정 안에 있어야 사진이 남은 것이 「편집이 안 먹어서」가
+    // 아니게 된다.
+    expect(row.body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+    expect(row.state).toBe("edited");
+    expect(row.editedAtMs).toBe(1_700_000_099_000);
+  });
+
+  it("기록 페이지로 읽은 사진 행에 편집 프레임이 와도 같다 — 그 줄을 열어 둔 다른 기기", () => {
+    const state = fold([historyRow()], [payloadToMessage(editedFrame())]);
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].attachments).toEqual([PHOTO]);
+    expect(state.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+  });
+
+  it("PATCH 응답이 덮어써도 같다 — 고친 사람 자신의 화면", () => {
+    const state = fold([historyRow()], [patchResponse()]);
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].attachments).toEqual([PHOTO]);
+    expect(state.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+    expect(state.messages[0].state).toBe("edited");
+  });
+
+  it("두 번 고쳐도, 응답과 프레임이 같은 편집을 두 번 알려도 남는다", () => {
+    const second = "점심 먹은 곳 사진이에요 (가게 이름·층 추가)";
+    const state = fold(
+      [historyRow()],
+      [patchResponse()],
+      [payloadToMessage(editedFrame())],
+      [payloadToMessage(editedFrame({ body: second, edited_at_ms: 1_700_000_199_000 }))]
+    );
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].attachments).toEqual([PHOTO]);
+    expect(state.messages[0].body).toBe(second);
+  });
+
+  it("수정 표시가 없는 message.edited(스트림 조각·props 만 바꾼 갱신)도 첨부를 지우지 않는다", () => {
+    // `stream_message_body_in_tx`·`emit_message_edited_in_tx` 는 같은 `message.edited`
+    // 를 `state`·`edited_at` 없이 낸다. 「수정됨」 표지에 걸어서 지키면 이 프레임들이
+    // 같은 병을 그대로 앓는다.
+    const state = fold(
+      [historyRow()],
+      [
+        payloadToMessage(
+          editedFrame({ state: "sent", edited_at_ms: null, props: { note: "갱신" } })
+        ),
+      ]
+    );
+
+    expect(state.messages[0].attachments).toEqual([PHOTO]);
+    expect(state.messages[0].props).toEqual({ note: "갱신" });
+  });
+
+  it("들어온 행이 첨부를 직접 말하면 그 말이 이긴다 — 합치지 않는다", () => {
+    const state = fold([historyRow()], [historyRow({ attachments: [PHOTO_2] })]);
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].attachments).toEqual([PHOTO_2]);
+  });
+
+  it("빈 배열은 첨부를 말한 것이 아니다 — 키를 빼는 서버와 같은 답", () => {
+    const state = fold([historyRow()], [patchResponse({ attachments: [] })]);
+
+    expect(state.messages[0].attachments).toEqual([PHOTO]);
+  });
+
+  it("첨부가 없던 행은 편집 뒤에도 첨부가 없다 — 없는 것을 만들어 내지 않는다", () => {
+    const state = fold(
+      [withoutAttachments(historyRow())],
+      [payloadToMessage(editedFrame())]
+    );
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+    expect("attachments" in state.messages[0]).toBe(false);
+  });
+
+  it("seq 가 같아도 id 가 다른 메시지면 첨부를 물려받지 않는다", () => {
+    const state = fold(
+      [historyRow()],
+      [payloadToMessage(editedFrame({ id: ID_OTHER, author_member_id: OTHER_AUTHOR }))]
+    );
+
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0].id).toBe(ID_OTHER);
+    expect("attachments" in state.messages[0]).toBe(false);
+  });
+
+  it("id 의 대소문자가 달라도 같은 메시지다", () => {
+    const state = fold(
+      [historyRow()],
+      [payloadToMessage(editedFrame({ id: ID.toUpperCase() }))]
+    );
+
+    expect(state.messages[0].attachments).toEqual([PHOTO]);
+  });
+
+  it("삭제 묘비는 첨부를 내려놓는다 — 지워진 행에 파일 정보를 남기지 않는다", () => {
+    // DELETE 응답은 본문도 첨부도 없는 묘비다. 편집 보존은 편집에만 해당한다.
+    const tombstone: Message = {
+      ...withoutAttachments(historyRow()),
+      state: "deleted",
+      body: undefined,
+      deletedAtMs: 1_700_000_300_000,
+    };
+    const state = fold([historyRow()], [tombstone]);
+
+    expect(state.messages[0].state).toBe("deleted");
+    expect("attachments" in state.messages[0]).toBe(false);
+  });
+
+  it("순서·중복의 불변식은 그대로다 — 편집 묶음이 와도 한 줄이고 seq 오름차순이다", () => {
+    const rows = [6, 7, 8].map((seq) => {
+      const row = historyRow({
+        id: `0199aaaa-0000-7000-8000-00000000006${seq}`,
+        seq,
+        body: `메시지 ${seq}`,
+      });
+      return seq === 7 ? row : withoutAttachments(row);
+    });
+    const state = fold(
+      rows,
+      // 편집 프레임이 순서를 뒤섞어 한꺼번에 온다.
+      [
+        payloadToMessage(editedFrame({ id: rows[2].id, seq: 8, body: "고침 8" })),
+        payloadToMessage(editedFrame({ id: rows[1].id, seq: 7, body: "고침 7" })),
+      ]
+    );
+
+    expect(state.messages.map((m) => m.seq)).toEqual([6, 7, 8]);
+    expect(isStrictlyOrdered(state.messages)).toBe(true);
+    expect(state.messages.map((m) => m.body)).toEqual(["메시지 6", "고침 7", "고침 8"]);
+    expect(state.messages[1].attachments).toEqual([PHOTO]);
+    expect(state.oldestSeq).toBe(6);
+    expect(state.newestSeq).toBe(8);
+  });
+});

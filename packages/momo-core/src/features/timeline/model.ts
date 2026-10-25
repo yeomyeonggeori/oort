@@ -166,8 +166,46 @@ function lowerBound(messages: Message[], seq: number): number {
 }
 
 /**
+ * 같은 seq 의 옛 행 위로 새 행이 덮일 때, 새 행이 첨부를 **말하지 않았다면** 옛 행의
+ * 첨부를 잇는다 (#4441).
+ *
+ * 편집이 내는 두 투영 — `message.edited` 프레임과 `PATCH` 응답 — 은 첨부를 싣지
+ * 않는다. 서버가 그렇게 쓴 이유는 둘 다 자기 자리에 적혀 있다: 「Editing a body
+ * cannot change what is bound to the message, so the client keeps the file cards it
+ * already drew」(`routes/messages.rs` `edit`), 「both clients merge it by seq over
+ * the row they hold」(`interaction.rs` `emit_message_edited_in_tx`). 첨부 행은
+ * complete 된 뒤 불변이고 다른 메시지로 옮겨 붙지도 못하므로(`build_broadcast_payload`)
+ * 편집 투영에 첨부가 없다는 것은 「없어졌다」가 아니라 「이 투영은 그것을 말하지
+ * 않는다」이다. 덮어쓰기가 그 침묵을 삭제로 읽어서, 고친 사람과 그 줄을 열어 둔 모든
+ * 화면에서 사진 카드가 사라졌다.
+ *
+ * 규칙은 **이 방향 하나**다.
+ * - 들어온 행이 첨부를 한 건이라도 말하면 그 말이 이긴다. 합치지 않는다.
+ * - 말하지 않으면(키가 없거나 빈 배열 — 서버는 빈 배열의 키를 뺀다) 같은 메시지의
+ *   옛 첨부가 남는다.
+ * - 「편집」인지를 `state`·`editedAtMs` 로 가리지 않는다. 스트림 조각과 props 만 바꾼
+ *   갱신도 같은 `message.edited` 이고, `state`·`edited_at` 없이 나가며, 같은 침묵이다.
+ * - 묘비는 이어받지 않는다. 지운 행에는 파일 정보를 남기지 않는다. (실시간 묘비는
+ *   `applyTombstone` 이 따로 접고, 이 함수는 그 길을 바꾸지 않는다.)
+ * - seq 가 같아도 id 가 다르면 다른 메시지다. 물려받지 않는다.
+ */
+function keepHeldAttachments(held: Message, incoming: Message): Message {
+  if (incoming.attachments !== undefined && incoming.attachments.length > 0) {
+    return incoming;
+  }
+  if (held.attachments === undefined || held.attachments.length === 0) {
+    return incoming;
+  }
+  if (incoming.state === "deleted") return incoming;
+  if (!uuidEq(held.id, incoming.id)) return incoming;
+  return { ...incoming, attachments: held.attachments };
+}
+
+/**
  * Merge a batch (any order, may overlap existing) into ascending-by-seq order.
- * Last write wins per seq (realtime edits/tombstones replace history rows).
+ * Last write wins per seq (realtime edits/tombstones replace history rows) —
+ * except the attachments an edit projection does not carry
+ * ({@link keepHeldAttachments}).
  *
  * Canonical name per R-1 §공통계약: history pages, realtime publications and
  * `?after` backfill all land here, so a reconnect reconciles by seq instead of
@@ -182,7 +220,8 @@ export function reconcileMessages(
   for (const msg of batch) {
     const idx = lowerBound(next, msg.seq);
     if (idx < next.length && next[idx].seq === msg.seq) {
-      next[idx] = msg; // replace duplicate seq (edit/tombstone/re-fetch)
+      // replace duplicate seq (edit/tombstone/re-fetch)
+      next[idx] = keepHeldAttachments(next[idx], msg);
     } else {
       next.splice(idx, 0, msg);
     }
