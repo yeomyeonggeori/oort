@@ -26,6 +26,7 @@ import {
 } from "@/lib/realtime";
 import {
   addPending,
+  applyEditedMessage,
   applyTombstone,
   emptyTimeline,
   failPending,
@@ -163,7 +164,11 @@ export interface UseTimelineResult {
    * implementation for why a pin waits for the server.
    */
   togglePin: (message: Message) => Promise<void>;
-  /** Rewrite my own message. The server's row replaces the local one. */
+  /**
+   * Rewrite my own message. The answer is an edit projection: it updates the row
+   * I hold in place (the read decorations it does not carry stay) and is dropped
+   * if I do not hold that row (#4450).
+   */
   editMessage: (message: Message, body: string) => Promise<void>;
   /** Soft-delete my own message. The tombstone replaces the local row. */
   deleteMessage: (message: Message) => Promise<void>;
@@ -353,8 +358,9 @@ export function useTimeline(
       }
       // Same-tick Centrifugo bursts call applyBatch once per publication
       // before React commits. Cap only live `message.new` batches — REST
-      // head / load-more / backfill / own-send / edit never issue grants
-      // and must not touch the grant set. Do not use
+      // head / load-more / backfill / own-send never issue grants (an edit
+      // does not come through here at all: `applyEdited`, #4450) and must
+      // not touch the grant set. Do not use
       // MAX_PENDING_ARRIVAL_GRANTS (1) here: that is the scrolled-up
       // leftover sweep. Consume evicts a grant on mount; Timeline sweeps
       // leftovers when the reader is scrolled up.
@@ -382,6 +388,14 @@ export function useTimeline(
     },
     [authorMemberId]
   );
+
+  // 편집 투영(`message.edited` 프레임·PATCH 응답)은 도착이 아니다(#4450). 이미 든 줄을 다시
+  // 투영할 뿐 줄을 들이지 않으므로 `applyBatch` 의 도착 장부(`newestSeqRef` 커서·든 줄 id·도착
+  // 연출·복구 표지 판정)를 지나지 않는다. 지나면 못 찾은 줄의 편집이 꼬리 커서를 앞세우고 「든
+  // 줄」로 등록된다. 든 줄에 대한 장부는 모두 이미 되어 있다. 판정은 코어 한 곳이다.
+  const applyEdited = useCallback((edited: Message) => {
+    setState((s) => applyEditedMessage(s, edited));
+  }, []);
 
   const markerTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
   const addMarker = useCallback((source: RecoveryMarker["source"]) => {
@@ -733,10 +747,15 @@ export function useTimeline(
       },
       onMessage: (event) => {
         if (cancelled) return;
-        applyBatch([payloadToMessage(event.payload)], {
+        const message = payloadToMessage(event.payload);
+        // 편집 투영은 든 줄만 갱신한다(#4450): `applyEdited` 가 코어 판정을 지난다.
+        if (event.type === "message.edited") {
+          applyEdited(message);
+          return;
+        }
+        applyBatch([message], {
           provenance: replayGate.isReplaying() ? "replay" : "live",
-          eventType:
-            event.type === "message.edited" ? "message.edited" : "message.new",
+          eventType: "message.new",
         });
       },
       // B11 — a tombstone marks the row it names in place. It cannot go through
@@ -809,6 +828,7 @@ export function useTimeline(
     channelId,
     backfillAfter,
     applyBatch,
+    applyEdited,
     applyReaction,
     applyPins,
     applyUnfurls,
@@ -933,9 +953,11 @@ export function useTimeline(
   const editMessage = useCallback(
     async (message: Message, body: string) => {
       const updated = await editMessageRequest(workspaceId, message.id, body);
-      applyBatch([updated]);
+      // 응답은 편집 투영이다(롤업·풀린 인용·첨부가 없다). 든 줄만 갱신한다 — 방을 옮긴 뒤 도착한
+      // 응답이 지금 방의 타임라인에 끼지 않는다(#4450).
+      applyEdited(updated);
     },
-    [workspaceId, applyBatch]
+    [workspaceId, applyEdited]
   );
 
   /** Soft-delete my own message; the returned tombstone replaces the row. */

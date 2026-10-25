@@ -145,3 +145,25 @@ export const ATTACH_MENU_ICONS = {
 } as const;
 
 export type AttachMenuIconName = keyof typeof ATTACH_MENU_ICONS;
+
+// ---- 시트·페이지 머리와 행 아이콘 넷 (#4318) ----------------------------------
+// 같은 레시피(viewBox 24, round, 1·2·3배)이고 경로의 출처도 Lucide(ISC)다. 머리 단추의 닫기·확정
+// (`x22`·`check22`)은 Buzz 실측에 맞춰 선을 2.0 으로 한 단 굵게 굽고, 복사·셰브론은 1.8 이다. 14pt
+// 로 구운 `check`(대화 단계 표지)를 키우면 흐려지므로(위 `bot22` 사례) 22pt 로 따로 굽는다.
+
+export const SHEET_ICONS = {
+  close: require('./x22.png') as ImageSourcePropType,
+  check: require('./check22.png') as ImageSourcePropType,
+  copy: require('./copy22.png') as ImageSourcePropType,
+  chevron: require('./chevron18.png') as ImageSourcePropType,
+} as const;
+
+export type SheetIconName = keyof typeof SHEET_ICONS;
+
+/** 머리 단추 글리프(닫기·확정) 22 — Buzz 22, 행 오른쪽 복사 22, 셰브론 18. */
+export const SHEET_ICON_SIZE: Readonly<Record<SheetIconName, number>> = {
+  close: 22,
+  check: 22,
+  copy: 22,
+  chevron: 18,
+};
