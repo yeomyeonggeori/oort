@@ -5475,6 +5475,17 @@ export interface AgentRunProgress {
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+  /**
+   * 부른 사람이 없는 시스템 작업(환영 run, ADR-0181)인가. **서버가 보낸 값이 아니다.**
+   * 진행 읽기에는 환영 표지(`welcome_kind`)가 없고 ADR-0200 증보 3 E6은 새 필드를 만들지
+   * 않았다. 그래서 와이어 경계(`agentRunProgressFromWire`)가 「트리거 메시지도 사람이 쓴
+   * 작업 제목도 없다」로 가른다. 서버의 트리거는 넷이고(멘션·스레드 답글은 메시지 id,
+   * 작업은 필수 제목, 환영만 둘 다 없다) 그 밖의 모양은 만들지 않는다 — 사람이 부른 run이
+   * 둘 다 없이 오는 길은 없다(`RunTrigger::trigger_message_id`, `validated_work_input`의
+   * `required_string`, `trigger_summary`; 시험 「서버가 만드는 네 트리거의 와이어 모양」).
+   * 서버가 새 트리거를 더하면 이 판별을 서버의 명시 표지로 바꾼다(#4442).
+   */
+  system?: true;
 }
 
 const AGENT_RUN_PHASES = new Set<AgentRunPhase>([
@@ -5554,6 +5565,14 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
   const startedAtMs = optionalFiniteNumber(source, "startedAtMs");
   const finishedAtMs = optionalFiniteNumber(source, "finishedAtMs");
+  // 「부른 사람이 없다」: 메시지도, 사람이 쓴 작업 제목·멘션 발췌도 없다(`AgentRunProgress.system`).
+  // 비었는지는 **글자 그대로** 본다(`=== ""`). 서버가 이미 다듬어(Rust `trim()`) 보내고 빈 것은
+  // 싣지 않는다(`trigger_summary`) — 여기서 JS `trim()`으로 한 번 더 다듬으면 서버는 제목으로 센
+  // 글자(U+FEFF만 있는 제목)를 우리는 「제목 없음」으로 읽어, 사람이 부른 작업이 홈 카드에서
+  // 사라진다. 의심스러우면 숨기지 않는 쪽으로 틀린다(#4285 planner 결정 1).
+  const system =
+    (triggerMessageId === undefined || triggerMessageId === "") &&
+    (triggerSummary === undefined || triggerSummary === "");
   return {
     id: id.toLowerCase(),
     channelId: channelId.toLowerCase(),
@@ -5565,6 +5584,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ahead,
     createdAtMs,
     updatedAtMs,
+    ...(system ? { system: true as const } : {}),
     ...(triggerMessageId === undefined
       ? {}
       : { triggerMessageId: triggerMessageId.toLowerCase() }),

@@ -82,8 +82,9 @@ describe("여러 run 목록", () => {
   const rows = [
     run("r-run-a", { phase: "running", status: "running", leaseState: "live", triggerSummary: "채널 정리", startedAtMs: T - 5 * MIN, lastEventAtMs: T - MIN }),
     run("r-run-b", { phase: "awaiting_approval", status: "awaiting_approval", leaseState: "live", triggerSummary: "설정 변경", startedAtMs: T - 4 * MIN }),
-    run("r-q1", { queuePosition: 1, triggerSummary: "릴리스 노트", aheadTotal: 0 }),
-    run("r-q2", { queuePosition: 2, triggerSummary: "회의록", aheadTotal: 1 }),
+    // 5분 안의 요청이다(「대기 n번째」 그대로). 5분을 넘은 요청의 낱말은 아래 「같은 낱말」 시험이 잰다.
+    run("r-q1", { queuePosition: 1, triggerSummary: "릴리스 노트", aheadTotal: 0, createdAtMs: T - 3 * MIN, updatedAtMs: T - 3 * MIN }),
+    run("r-q2", { queuePosition: 2, triggerSummary: "회의록", aheadTotal: 1, createdAtMs: T - 3 * MIN, updatedAtMs: T - 3 * MIN }),
     run("r-done", { phase: "timed_out", status: "timed_out", finishedAtMs: T - 2 * MIN, endReason: "approval_expired", triggerSummary: "채널 만들기" }),
   ];
 
@@ -109,6 +110,30 @@ describe("여러 run 목록", () => {
     expect(labels(2)[0]).toContain("시간 초과");
     expect(labels(2)[0]).toContain("승인이 만료됐어요");
     expect(el.querySelector('[data-selected]')?.getAttribute("data-run-id")).toBe("r-q1");
+  });
+
+  it("5분을 넘게 아무도 가져가지 않은 요청의 칩은 머리 칩·홈 카드와 같은 「아직 받지 않았어요」다 — 목록만 「대기 n번째」로 말하지 않는다", () => {
+    // design-review #4285 r1 H5: 패널의 머리 칩은 「아직 받지 않았어요」인데 같은 패널의 목록 칩이 「대기 1번째」이던 것.
+    const stale = [
+      run("r-q-old", { queuePosition: 1, triggerSummary: "릴리스 노트", createdAtMs: T - 17 * 60 * MIN, updatedAtMs: T - 17 * 60 * MIN }),
+      run("r-q-new", { queuePosition: 2, triggerSummary: "회의록", createdAtMs: T - 2 * MIN, updatedAtMs: T - 2 * MIN }),
+      run("r-q-sys", { queuePosition: 3, createdAtMs: T - 17 * 60 * MIN, updatedAtMs: T - 17 * 60 * MIN, system: true }),
+    ];
+    const el = render(
+      createElement(RunListView, {
+        entries: runList(stale, AGENT),
+        selectedRunId: "r-q-old",
+        nowMs: T,
+        onSelect: () => undefined,
+      })
+    );
+    const row = (id: string) => el.querySelector(`[data-run-id="${id}"]`)?.textContent ?? "";
+    expect(row("r-q-old")).toContain("아직 받지 않았어요");
+    expect(row("r-q-old")).not.toContain("대기 1번째");
+    expect(row("r-q-new")).toContain("대기 2번째");
+    // 부른 사람이 없는 시스템 작업은 「받지 않았어요」가 아니다(기다리는 사람이 없다) — 서버의 낱말 그대로.
+    expect(row("r-q-sys")).toContain("대기 3번째");
+    expect(row("r-q-sys")).not.toContain("아직 받지 않았어요");
   });
 
   it("행을 누르면 그 run을 고른다", () => {
