@@ -1,11 +1,11 @@
-import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Settings, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Animated, Settings, StyleSheet, Text, TextInput, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
@@ -15,6 +15,7 @@ import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {CONV} from '../src/features/conversation/convDesign';
+import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {clearDraft, readDraft} from '../src/features/conversation/drafts';
 import {Timeline, type PillState, type TimelineGeometry} from '../src/features/conversation/Timeline';
@@ -53,6 +54,15 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         높이가 한 걸음 늦게 따라와서 실제 입력의 레이아웃이 아니다.)
 //             `+nobar`    활동 줄 없이(대조군). 예: `DM-STEADY-TYPE+NOBAR`.
 //
+//   #4455 「보낼 때 깜빡이지 않는가 · 쫀득하게 올라오는가」 — 같은 틀에서 **내가 보낸다**(`Composer` 의 `onSend` 가 부르는 같은 `onSend(body)` 길:
+//             `selfSendToken` 으로 목록이 끝을 따라가고 `useTimeline.send` 가 메아리를 세운다. 입력창 글자·키보드는 거치지 않는다).
+//             send20      20번 보낸다. 4번에 한 번(0·4·8·12·16번째)은 상대 말이 먼저 와서 내 글이 머리 행이 되고, 나머지 15번은 이어지는 행.
+//                         7번째·15번째는 긴 글. 보낼 때마다 ~1.5초 쉰다. 프레임마다 목록 내용 높이(`content`)·스크롤 오프셋·도크 윗면·메아리
+//                         개수를 남기고, 등장 애니메이션은 `Animated.timing` 을 감싸 네이티브 구동값(JS 가 transform 을 못 읽는다)을 프레임별로
+//                         받는다(`anim`). 교체 때의 내용 높이 변화 · 메아리가 서 있던 프레임 수 · 등장이 처음 보이는 때를 이 기록에서 뽑는다.
+//             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
+//                         2.6초 — 시계가 서는 장면). 사진 바이트는 `measure/photo-stub.mjs` 가 답한다(`-momoPhotoStub 127.0.0.1:<포트>`).
+//
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
 // (`fetch` 는 메시지·반응·고정 읽기에 답하고, 레일은 이 파일이 구독 핸들러를 쥐고 직접 부른다). 그래서 표지·띠가 서는
@@ -72,6 +82,17 @@ const PEER = '00000000-0000-7000-8000-0000000000e2';
 const CHANNEL = '00000000-0000-7000-8000-0000000000e3';
 const NO_TOP = {paddingTop: 0} as const;
 const DRAFT_KEY = 'measure:dm-steady';
+/**
+ * 보내기 장면(#4455)의 행 동작. 서버 사본이 **내 글이면 말풍선을 신호색(`mine`)으로** 그리는 근거가 `actions.myMemberId` 라서
+ * (`MessageRow` `bubble`), 이것 없이는 메아리(언제나 `mine`)가 교체 때 「남의 글」 모양으로 바뀐다 — 앱에는 없는 하네스만의 색 튐이다.
+ * 옛 장면(#4292·#4331)은 이 값 없이 재 왔으므로 건드리지 않는다.
+ */
+const SEND_ACTIONS: MessageRowActions = {
+  myMemberId: SELF,
+  onToggleReaction: async () => {},
+  onEdit: async () => {},
+  onDelete: async () => {},
+};
 const TARGET = {workspaceId: WS, channelId: CHANNEL};
 
 function member(over: Partial<RosterMember> & {id: string}): RosterMember {
@@ -172,6 +193,22 @@ function wireMessage(seq: number, author: string, body: string): Message {
 /** 서버가 가진 메시지. 스크립트가 덧붙이고, REST 읽기는 여기서 답한다. */
 const server: {messages: Message[]} = {messages: []};
 
+/**
+ * 가짜 서버가 보내기에 답하는 데 걸리는 시간(ms). 평소 250 — 운영 서버의 지연이 아니라 #4331 이 정한 하네스 값이다(운영 POST
+ * 응답 시간은 이 하네스가 모른다). `rec` 의 느린 전송이 잠깐 늘린다(#4455).
+ */
+let postDelayMs = 250;
+
+export function setPostDelay(ms: number): void {
+  postDelayMs = ms;
+}
+
+/** 사진 스텁(`photo-stub.mjs`)이 답하는 그림과 같은 id — 가로 4:3 · 세로 3:4. 사진·글자 없는 단색 그림이다. */
+const PHOTOS: Readonly<Record<string, MessageAttachment>> = {
+  'photo-a': {id: 'photo-a', name: '시안 가로.png', mime: 'image/png', sizeBytes: 48_000},
+  'photo-solo': {id: 'photo-solo', name: '시안 세로.png', mime: 'image/png', sizeBytes: 48_000},
+};
+
 function resetServer(agentDm = false): void {
   if (agentDm) {
     // 12시간 간격 — 날짜 구분선이 여럿 서고 떠 있는 날짜 알약에 날이 있다.
@@ -209,6 +246,23 @@ function json(body: unknown): Response {
 let realFetch: typeof fetch | null = null;
 let fakeFetch: typeof fetch | null = null;
 
+/** `-momoPhotoStub host:port` — 있으면 서버 주소를 겸한다(`seedSteady`). */
+function photoStubHost(): string | null {
+  const value = Settings.get('momoPhotoStub');
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * 호스트(Metro·싱크)로 가는 요청은 진짜로 보낸다. 사진 스텁이 서버 주소를 겸하면 같은 주소로 API 도 오므로
+ * **첨부 바이트 길만** 진짜로 두고 나머지는 가짜가 답한다.
+ */
+function reachesHost(url: string): boolean {
+  if (!(url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost'))) return false;
+  const stub = photoStubHost();
+  if (stub !== null && url.startsWith(`http://${stub}`)) return /\/attachments\/[^/]+\/content/.test(url);
+  return true;
+}
+
 export function ensureFakeFetch(): void {
   if (fakeFetch !== null && globalThis.fetch === fakeFetch) return;
   if (fakeFetch === null) {
@@ -217,17 +271,19 @@ export function ensureFakeFetch(): void {
     realFetch = globalThis.fetch.bind(globalThis);
     fakeFetch = (async (input: unknown, init?: RequestInit) => {
       const url = String(input);
-      if (url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost')) {
+      if (reachesHost(url)) {
         return (realFetch as typeof fetch)(input as RequestInfo, init);
       }
       if (url.includes('/messages') && init?.method === 'POST') {
         // 보내기: 서버가 줄을 받아 확정본을 돌려준다(응답이 곧 실시간 프레임과 같은 확정본 — `useTimeline.post`).
-        const request = JSON.parse(String(init.body ?? '{}')) as {body?: string};
+        const request = JSON.parse(String(init.body ?? '{}')) as {body?: string; attachmentIds?: string[]};
         const seq = (server.messages[server.messages.length - 1]?.seq ?? 0) + 1;
         const message = wireMessage(seq, SELF, request.body ?? '');
         message.createdAtMs = Date.now();
+        const files = (request.attachmentIds ?? []).flatMap(id => (PHOTOS[id] === undefined ? [] : [PHOTOS[id]]));
+        if (files.length > 0) message.attachments = files;
         server.messages.push(message);
-        await wait(250);
+        await wait(postDelayMs);
         return json(message);
       }
       if (url.includes('/messages')) {
@@ -259,7 +315,8 @@ export function ensureFakeFetch(): void {
 
 /** 서버 주소·네트워크 도달성 설정. 모듈 몸통에서 한 번(`surfaces.tsx`). */
 export function seedSteady(): void {
-  setServerBase('https://oort.example');
+  const stub = photoStubHost();
+  setServerBase(stub !== null ? `http://${stub}` : 'https://oort.example');
   const metro = String(Settings.get('RCT_jsLocation') ?? '127.0.0.1:8081');
   // 시뮬레이터의 NetInfo 는 바깥 도달성 검사에 실패해 오프라인으로 읽힌다(컴포저가 잠긴다) — 이 기기가 늘 닿는 곳으로 돌린다.
   NetInfo.configure({
@@ -341,9 +398,32 @@ function rectOf(
   });
 }
 
+/**
+ * 등장 애니메이션 한 번의 기록(#4455): `Animated.timing`(네이티브 구동, 길이 180·300)을 감싸 값이 바뀔 때마다 받은 값.
+ * 네이티브 구동은 JS 가 transform 을 못 읽으므로(`measureInWindow` 는 커밋된 속성만 본다) 이 값이 유일한 프레임별 증거다.
+ * `samples` 는 [만든 때부터의 ms, 값]. 수리 뒤 코드는 남은 비율 1→0(`toValue` 0), 수리 전 코드는 진행값 0→1(`toValue` 1).
+ */
+interface AnimTrace {
+  /** 장면 시작으로부터의 ms (애니메이션을 만든 때). */
+  at: number;
+  toValue: number;
+  duration: number;
+  samples: [number, number][];
+}
+
 interface Frame {
   /** 장면 시작으로부터의 ms. */
   t: number;
+  /** 메아리(아직 서버 사본이 없는 내 글) 개수. */
+  pend: number;
+  /** 서버 사본이 들어온 메시지 개수. */
+  rows: number;
+  /**
+   * 「전송 중」 줄이 마운트돼 있으면 1. 수리 **전** 트리에만 박는 seam(`globalThis.__momoSendingLine` 을 줄의 마운트·언마운트가 올리고
+   * 내린다 — PR 본문의 3줄 패치)이다. 수리 뒤 트리에는 그 줄이 없으므로 언제나 0 이다(그래서 이 칸 하나로는 「0 이 나왔다」가
+   * 증거가 못 된다 — 영상 프레임 대조가 짝이다).
+   */
+  sendingLine: number;
   anchor: number | null;
   tail: number | null;
   dock: number | null;
@@ -413,7 +493,19 @@ export function summarize(values: readonly (number | null)[]): Summary | null {
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-type ScenarioName = 'idle' | 'peer' | 'blip' | 'outage' | 'gap' | 'hold' | 'own' | 'tick' | 'bar' | 'live';
+type ScenarioName =
+  | 'idle'
+  | 'peer'
+  | 'blip'
+  | 'outage'
+  | 'gap'
+  | 'hold'
+  | 'own'
+  | 'tick'
+  | 'bar'
+  | 'live'
+  | 'send20'
+  | 'rec';
 /** #4331: 에이전트 DM 에 활동 줄이 서는 장면들. */
 const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live'];
 /** `hold` 는 연결 띠를 세운 채 90초 머문다 — 사진용이고 `all` 에 들지 않는다. */
@@ -427,7 +519,32 @@ interface Controls {
   mark: (what: string) => void;
   /** 활동 줄의 run 들을 갈아 끼운다(#4331). */
   setTurns: (turns: readonly AgentWorkingSignal[]) => void;
+  /** 내가 보낸다(#4455) — `Composer` 의 `onSend` 와 같은 길. 사진·파일만 보내려면 본문을 비우고 첨부를 준다. */
+  send: (body: string, attachments?: MessageAttachment[]) => void;
 }
+
+// #4455 보내기 장면의 문구. 가상의 대화다 — 실제 대화 문구·이름을 쓰지 않는다.
+const PEER_LINES: readonly string[] = [
+  '시안 확인했어요',
+  '점심 먹고 이어서 볼게요',
+  '마감 전에 한 번 더 맞춰 봐요',
+  '답이 늦어도 괜찮아요',
+  '수정본 올려 둘게요',
+];
+const SHORT_BODIES: readonly string[] = [
+  '네, 확인했어요',
+  '지금 정리해서 보낼게요',
+  '조금만 기다려 주세요',
+  '네트워크가 느린 곳이에요',
+  '조금 걸릴 수 있어요',
+  '파일은 공유 폴더에 있어요',
+  '알겠어요, 그렇게 할게요',
+  '고마워요',
+  '이따 다시 확인할게요',
+  '그럼 내일 아침에 봐요',
+];
+const LONG_BODY =
+  '이번 주 일정을 정리했어요. 월요일에는 디자인 리뷰, 수요일에는 배포 리허설, 금요일에는 회고가 있어요. 리허설 전에 체크리스트를 한 번 더 돌려 보고, 막히는 곳이 있으면 스레드에 남겨 주세요.';
 
 /** 4초 유예(`DISPLAY_GRACE_MS`) 뒤에 띠가 선다 — 앱의 `connectionDisplay` 가 하는 일을 시간표대로 옮긴 것이다. */
 const GRACE_MS = 4_000;
@@ -512,6 +629,69 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     }
     return;
   }
+  if (name === 'send20') {
+    // 20번 보낸다. 4번에 한 번은 상대 말이 먼저 와서 내 글이 작성자 머리가 서는 행이 되고, 나머지는 이어지는 행이다.
+    for (let index = 0; index < 20; index += 1) {
+      if (index % 4 === 0) {
+        c.mark(`peer-${index / 4}`);
+        c.say(PEER_LINES[index / 4], true);
+        // 상대 말이 내려앉을 시간 — 내 글의 등장과 겹치지 않게 한다.
+        await wait(900);
+      }
+      const long = index === 7 || index === 15;
+      c.mark(`send-${index}:${index % 4 === 0 ? 'head' : 'cont'}:${long ? 'long' : 'short'}`);
+      c.send(long ? LONG_BODY : SHORT_BODIES[index % SHORT_BODIES.length]);
+      // 확정본(가짜 서버 250ms) · 등장(300ms) · 목록 글라이드가 모두 끝나고도 남는 시간.
+      await wait(1_500);
+    }
+    await wait(1_000);
+    return;
+  }
+  if (name === 'rec') {
+    // 녹화용. 장면 사이를 충분히 쉰다 — 영상에서 장면을 가르는 일은 표식의 시각으로 한다.
+    await wait(2_000);
+    // (1) 연속 3번 보내기: 상대 말 뒤라 첫 줄은 머리 행, 이어 두 줄은 이어지는 행. 450ms 간격.
+    c.mark('rec-1-peer');
+    c.say(PEER_LINES[0], true);
+    await wait(1_200);
+    for (let index = 0; index < 3; index += 1) {
+      c.mark(`rec-1-send-${index}`);
+      c.send(SHORT_BODIES[index]);
+      await wait(450);
+    }
+    await wait(2_500);
+    // (2) 긴 글.
+    c.mark('rec-2-peer');
+    c.say(PEER_LINES[1], true);
+    await wait(1_200);
+    c.mark('rec-2-send');
+    c.send(LONG_BODY);
+    await wait(3_000);
+    // (3) 사진 메시지: 가로 → 세로. 글 없이 사진만 보낸다(#4294).
+    c.mark('rec-3-peer');
+    c.say(PEER_LINES[2], true);
+    await wait(1_200);
+    c.mark('rec-3-send-landscape');
+    c.send('', [PHOTOS['photo-a']]);
+    await wait(3_000);
+    c.mark('rec-3-send-portrait');
+    c.send('', [PHOTOS['photo-solo']]);
+    await wait(3_000);
+    // (4) 느린 전송: 서버가 2.6초 뒤에 답한다 — 1.5초에 시계가 서고, 답이 오면 시계만 사라진다. 머리 행과 이어지는 행 하나씩.
+    setPostDelay(2_600);
+    c.mark('rec-4-peer');
+    c.say(PEER_LINES[3], true);
+    await wait(1_200);
+    c.mark('rec-4-send-head');
+    c.send(SHORT_BODIES[3]);
+    await wait(600);
+    c.mark('rec-4-send-cont');
+    c.send(SHORT_BODIES[4]);
+    await wait(4_300);
+    setPostDelay(250);
+    await wait(1_500);
+    return;
+  }
   if (name === 'own') {
     for (let index = 0; index < 2; index += 1) {
       // (a) 되쏘기: 같은 구독이 복구돼 돌아오며 끊긴 사이 내가 보낸 두 줄이 실려 온다(`subscribed` 직후 같은 틱에 flush).
@@ -548,8 +728,46 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
   }
 }
 
+// ---- 등장 애니메이션 관측 (#4455) --------------------------------------------------
+//
+// 보낸 메시지의 등장은 네이티브 구동이라 JS 가 transform 을 읽을 수 없다. 그래서 `Animated.timing` 을 감싸 길이 180·300 인
+// 네이티브 구동 애니메이션마다 값 리스너를 달고, 받은 값을 프레임별로 모은다. 감싸는 것은 이 하네스뿐이고 앱 코드에는 틈을 내지
+// 않았다 — 앱이 부르는 `Animated.timing(값, 설정)` 은 그대로 돈다.
+let animProbeOn = false;
+let sceneBegin = 0;
+const animLog: AnimTrace[] = [];
+
+function installAnimProbe(): void {
+  if (animProbeOn) return;
+  animProbeOn = true;
+  const original = Animated.timing;
+  (Animated as unknown as {timing: typeof Animated.timing}).timing = ((
+    value: Animated.Value,
+    config: Animated.TimingAnimationConfig,
+  ) => {
+    const run = original(value, config);
+    const duration = config.duration ?? 500;
+    if (config.useNativeDriver === true && (duration === 180 || duration === 300)) {
+      const born = Date.now();
+      const trace: AnimTrace = {
+        at: born - sceneBegin,
+        toValue: typeof config.toValue === 'number' ? config.toValue : Number.NaN,
+        duration,
+        samples: [],
+      };
+      animLog.push(trace);
+      value.addListener(({value: current}) => {
+        trace.samples.push([Date.now() - born, Math.round(current * 1000) / 1000]);
+      });
+    }
+    return run;
+  }) as typeof Animated.timing;
+}
+
 interface Result {
   scenario: ScenarioName;
+  /** 장면이 시작된 시각(호스트와 같은 시계의 epoch ms) — 녹화 영상(`recordVideo`)과 표식을 맞출 때 쓴다. */
+  beginMs: number;
   durationMs: number;
   frames: number;
   anchor: Summary | null;
@@ -565,6 +783,8 @@ interface Result {
   hiddenMax: number;
   hiddenFrames: number;
   events: {t: number; what: string}[];
+  /** 등장 애니메이션 기록(#4455) — `send20`·`rec` 에서만 채운다. */
+  anim: AnimTrace[];
 }
 
 export function SteadySurface({which}: {which: string}): React.JSX.Element {
@@ -578,10 +798,19 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     ? ['hold']
     : agentDm
       ? [base as ScenarioName]
-      : (ALL as readonly string[]).includes(which) || which === 'hold' || which === 'own'
+      : (ALL as readonly string[]).includes(which) ||
+          which === 'hold' ||
+          which === 'own' ||
+          which === 'send20' ||
+          which === 'rec'
         ? [which as ScenarioName]
         : ALL;
   ensureFakeFetch();
+  // #4455: 등장 애니메이션 관측은 보내기 장면에서만 건다.
+  useState(() => {
+    if (which === 'send20' || which === 'rec') installAnimProbe();
+    return null;
+  });
   // 에이전트 DM 은 자기 대화 기록으로 연다 — 첫 렌더 한 번, `useTimeline` 이 읽기 전.
   useState(() => {
     if (agentDm) resetServer(true);
@@ -612,6 +841,25 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     },
     [sendMessage],
   );
+  // #4455: 장면이 부르는 보내기. `onSend`(컴포저)와 같은 길이고 사진·파일 첨부를 더 받는다. 장면은 한 번 만든 `Controls` 를 끝까지 쓰므로 ref 로 최신을 부른다.
+  const sendWithRef = useRef<(body: string, attachments?: MessageAttachment[]) => void>(() => {});
+  sendWithRef.current = (body, attachments) => {
+    setSelfSendToken(token => token + 1);
+    void sendMessage(body, undefined, attachments);
+  };
+  // 메아리·서버 사본 개수(프레임에 남긴다)와 그 변화 표식(`pending-add`·`pending-remove` = 교체 시각).
+  const pendCountRef = useRef(0);
+  pendCountRef.current = timeline.pending.length;
+  const rowsRef = useRef(0);
+  rowsRef.current = timeline.state.messages.length;
+  const markRef = useRef<((what: string) => void) | null>(null);
+  const seenPendingRef = useRef(0);
+  const pendingNow = timeline.pending.length;
+  useEffect(() => {
+    if (pendingNow === seenPendingRef.current) return;
+    markRef.current?.(pendingNow > seenPendingRef.current ? 'pending-add' : 'pending-remove');
+    seenPendingRef.current = pendingNow;
+  }, [pendingNow]);
   const pillsRef = useRef<PillState | null>(null);
   const barRef = useRef<View | null>(null);
   const palette = usePalette();
@@ -672,11 +920,16 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         const frames: Frame[] = [];
         const events: {t: number; what: string}[] = [];
         const begin = Date.now();
+        sceneBegin = begin;
+        animLog.length = 0;
         let sampling = true;
         const sample = () => {
           if (!sampling) return;
           const frame: Frame = {
             t: Date.now() - begin,
+            pend: pendCountRef.current,
+            rows: rowsRef.current,
+            sendingLine: (globalThis as {__momoSendingLine?: number}).__momoSendingLine ?? 0,
             anchor: null,
             tail: null,
             dock: null,
@@ -719,16 +972,20 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           },
           mark: what => events.push({t: Date.now() - begin, what}),
           setTurns,
+          send: (body, attachments) => sendWithRef.current(body, attachments),
         };
+        markRef.current = controls.mark;
         requestAnimationFrame(sample);
         await runScenario(name, controls);
         sampling = false;
+        markRef.current = null;
         await wait(200);
         const hidden = frames.map(frame =>
           frame.anchor !== null && frame.bar !== null ? frame.anchor - frame.bar : 0,
         );
         const result: Result = {
           scenario: name,
+          beginMs: begin,
           durationMs: Date.now() - begin,
           frames: frames.length,
           anchor: summarize(frames.map(frame => frame.anchor)),
@@ -742,6 +999,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           hiddenMax: Math.round(Math.max(0, ...hidden) * 10) / 10,
           hiddenFrames: hidden.filter(value => value > 1).length,
           events,
+          anim: animLog.map(item => ({...item, samples: item.samples.slice()})),
         };
         console.log(`STEADY4292 ${JSON.stringify(result)}`);
         if (typeof sink === 'string' && sink !== '') {
@@ -799,6 +1057,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             lastReadSeq={unread ? 1 : null}
             unreadCount={unread ? HISTORY_BODIES.length - 1 : 0}
             pending={timeline.pending}
+            actions={which === 'send20' || which === 'rec' ? SEND_ACTIONS : undefined}
             reactions={timeline.reactions}
             pins={timeline.pins}
             loadingOlder={timeline.loadingOlder}

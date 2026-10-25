@@ -115,10 +115,13 @@ export const VIEWER_SNAP_SPRING = {stiffness: 584, damping: 41.6, mass: 1} as co
 // 않다가 솟아오른다 — 페이드를 따로 두지 않는다(#4383 의 0→1 페이드는 14pt 짜리 짧은 오름을
 // 가리려던 것이었다).
 //
-// **이 300ms 는 사다리 밖 값이다.** 위 `LANDED_TINT_FADE_MS` 는 사다리 칸(standard 240)이라고
-// 밝혔지만 이 값은 아니다 — 이슈 #4455 가 Buzz 값을 기준으로 지시했다. 같은 곡선에 사다리 칸을
-// 쓰면 standard 240(끝에 닿는 때 ≈ 185ms)이다. 칸을 더할지는 디자인 시스템 결정(README §6)이라
-// 여기서 정하지 않는다.
+// **이 300ms 는 사다리의 전용 칸이다** (planner 결정 2026-10-25, #4455). 사다리의 `standard` 240
+// (상태 변화)과 `arrival` 500(합성 도착) 사이에 「보낸 메시지 등장」 칸 `send-arrive` 를 더했다
+// (README §2.6 표). 근거: 기준 Buzz 의 300ms easeOutCubic, 텔레그램 iOS 기본값도 300ms, 그리고
+// owner 의 「쫀득한」 — 같은 곡선을 standard 240 에 얹으면 끝에 닿는 때가 ≈ 185ms 로 빨라져 쫀득함이
+// 줄어든다. 웹에는 짝 토큰이 없다(웹·데스크탑 등장은 후속): README §6 「폰에 값을 더할 때」대로 값이
+// 아니라 **관계**를 단정한다 — standard < 300 < arrival, 등장 < 자격 창 < 느린 전송 기준
+// (`sendArrival4455.test.tsx`).
 //
 // ## 곡선인가 스프링인가 — 재서 골랐다 (이어지는 행 52pt × 1.5 = 78pt 기준. 머리 행 76pt × 2.5 =
 // 190pt 는 넘침·속도가 2.4배)
@@ -144,7 +147,7 @@ export const VIEWER_SNAP_SPRING = {stiffness: 584, damping: 41.6, mass: 1} as co
 // 「동작 줄이기」면 움직이지 않고 처음부터 자리에 선다(사다리 D9, 「0 으로 만든다, 상태는 착지한다」).
 // =============================================================================
 
-/** 등장 길이. Buzz `localMessageSendTransitionDuration`. */
+/** 등장 길이. 사다리 전용 칸 `send-arrive` — Buzz `localMessageSendTransitionDuration`(위 설명). */
 export const SEND_ARRIVE_MS = 300;
 
 /** 등장 곡선. Flutter `Curves.easeOutCubic` = `cubic-bezier(0.215, 0.61, 0.355, 1)` 그대로. */

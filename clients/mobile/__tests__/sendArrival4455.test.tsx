@@ -1,6 +1,8 @@
 import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, renderHook, screen} from '@testing-library/react-native';
+import fs from 'node:fs';
+import path from 'node:path';
 import React from 'react';
 import {Animated, StyleSheet} from 'react-native';
 
@@ -168,6 +170,26 @@ function findByTestId(node: unknown, id: string): Json | null {
   }
   return null;
 }
+/** `id` 를 testID 로 든 자식의 **부모** 노드. */
+function parentOfTestId(node: unknown, id: string): Json | null {
+  if (node === null || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = parentOfTestId(child, id);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  const n = node as Json;
+  for (const child of n.children ?? []) {
+    if (typeof child !== 'string' && child.props?.testID === id) return n;
+  }
+  for (const child of n.children ?? []) {
+    const hit = parentOfTestId(child, id);
+    if (hit) return hit;
+  }
+  return null;
+}
 function contentColumn(kind: 'echo' | 'server') {
   const root = findByTestId(screen.toJSON(), kind === 'echo' ? 'pending-row' : 'message-press');
   if (root === null) throw new Error(`${kind} row not rendered`);
@@ -240,12 +262,40 @@ describe('정상 전송 — 글자·높이·색 변화 0 (구조 대조)', () =>
     },
   );
 
-  it('머리 행: 서버 사본에만 생기는 글자는 시각 하나뿐이다 (#1083 — 높이는 안 바뀐다)', () => {
-    const view = render(<FixedScheme scheme="dark">{echo({}, true)}</FixedScheme>);
+  // planner 결정(#4455): #1083 「지어내지 않는다」를 메아리 **머리 행에 한해** 뒤집었다. 서버 사본이 올 때
+  // 시각 글자가 새로 생기는 것도 「보낼 때 잠깐 생겼다 사라지는 글자」와 같은 종류의 깜빡임이다.
+  it('머리 행: 메아리가 기기 시계의 시각을 그려서 서버 사본과 글자 모음이 같다 (같은 분 — 글자 변화 0)', () => {
+    const view = render(<FixedScheme scheme="dark">{echo({createdAtMs: NOW}, true)}</FixedScheme>);
     const mine = textsOf();
+    // 짝 단정: 시각이 실제로 그려졌다(비어 있어서 같은 것이 아니다).
+    expect(mine).toContain(timeLabel(NOW));
+    expect(screen.getAllByTestId('row-time', {includeHiddenElements: true})).toHaveLength(1);
     view.unmount();
     render(<FixedScheme scheme="dark">{server({}, true)}</FixedScheme>);
-    expect(textsOf()).toEqual([...mine, timeLabel(NOW)].sort());
+    expect(textsOf()).toEqual(mine);
+  });
+
+  it('머리 행: 분이 다르면(분 경계·기기 시계 오차) 교체 때 시각 글자만 서버 시각으로 바뀐다 — 알려진 위험', () => {
+    const view = render(<FixedScheme scheme="dark">{echo({createdAtMs: NOW}, true)}</FixedScheme>);
+    const mine = textsOf();
+    view.unmount();
+    const later = NOW + 61_000; // 61초 뒤 = 언제나 다른 분
+    expect(timeLabel(later)).not.toBe(timeLabel(NOW));
+    render(<FixedScheme scheme="dark">{server({createdAtMs: later}, true)}</FixedScheme>);
+    expect(textsOf()).toEqual(
+      mine.filter(text => text !== timeLabel(NOW)).concat(timeLabel(later)).sort(),
+    );
+  });
+
+  it('이어지는 행의 메아리는 시각을 그리지 않는다 (서버 사본의 연속 행과 같다)', () => {
+    render(<FixedScheme scheme="dark">{echo({createdAtMs: NOW}, false)}</FixedScheme>);
+    expect(screen.queryByTestId('row-time', {includeHiddenElements: true})).toBeNull();
+  });
+
+  it('보낸 시각을 알 수 없으면 시각을 지어내지 않는다 (「NaN:NaN」을 그리지 않는다)', () => {
+    render(<FixedScheme scheme="dark">{echo({createdAtMs: Number.NaN}, true)}</FixedScheme>);
+    expect(screen.queryByTestId('row-time', {includeHiddenElements: true})).toBeNull();
+    expect(textsOf().some(text => text.includes('NaN'))).toBe(false);
   });
 
   it.each(['dark', 'light'] as const)(
@@ -292,7 +342,9 @@ describe('정상 전송 — 글자·높이·색 변화 0 (구조 대조)', () =>
 
   it('사진·파일만 보낸 메아리는 빈 말풍선을 세우지 않는다 (서버 사본이 본문 칸을 접는다)', () => {
     const view = render(
-      <FixedScheme scheme="dark">{echo({body: '', attachments: [FILE]})}</FixedScheme>,
+      <FixedScheme scheme="dark">
+        {echo({body: '', attachments: [FILE], createdAtMs: NOW})}
+      </FixedScheme>,
     );
     expect(screen.queryAllByTestId('message-bubble')).toHaveLength(0);
     expect(screen.getByTestId('attachment-list')).toBeTruthy();
@@ -304,8 +356,8 @@ describe('정상 전송 — 글자·높이·색 변화 0 (구조 대조)', () =>
       </FixedScheme>,
     );
     expect(screen.queryAllByTestId('message-bubble')).toHaveLength(0);
-    // 서버 사본의 머리 행 글자 = 메아리의 것 + 시각.
-    expect(textsOf()).toEqual([...mine, timeLabel(NOW)].sort());
+    // 서버 사본의 머리 행 글자 = 메아리의 것(같은 분의 시각 포함).
+    expect(textsOf()).toEqual(mine);
   });
 });
 
@@ -340,18 +392,39 @@ describe('느린 전송 — 기준 시간 뒤에만 시계 하나', () => {
     jest.setSystemTime(NOW);
   });
 
-  it('SEND_SLOW_MS - 1 까지는 없고, SEND_SLOW_MS 에 선다', () => {
+  it('SEND_SLOW_MS - 1 까지는 없고, SEND_SLOW_MS 에 선다 — 낭독도 그때부터만 「전송 중」', () => {
     render(<FixedScheme scheme="dark">{echo({createdAtMs: NOW})}</FixedScheme>);
     expect(screen.queryByTestId('pending-slow')).toBeNull();
+    // 정상 전송에는 낭독이 없다(planner 결정 3).
+    expect(screen.queryByLabelText('전송 중')).toBeNull();
     act(() => {
       jest.advanceTimersByTime(SEND_SLOW_MS - 1);
     });
     expect(screen.queryByTestId('pending-slow')).toBeNull();
+    expect(screen.queryByLabelText('전송 중')).toBeNull();
     act(() => {
       jest.advanceTimersByTime(1);
     });
     expect(screen.getByTestId('pending-slow')).toBeTruthy();
-    expect(screen.getByLabelText('전송이 오래 걸리고 있어요')).toBeTruthy();
+    expect(screen.getByLabelText('전송 중')).toBeTruthy();
+    // 옛 라벨은 없다.
+    expect(screen.queryByLabelText('전송이 오래 걸리고 있어요')).toBeNull();
+  });
+
+  it('실패한 행의 낭독은 기존 그대로다 — 「전송 실패」·「다시 보내기」, 「전송 중」은 없다', () => {
+    render(
+      <FixedScheme scheme="dark">
+        <PendingRow
+          pending={pendingMsg({status: 'failed', createdAtMs: NOW - 10 * SEND_SLOW_MS})}
+          startsGroup
+          directory={DIRECTORY}
+          onResend={jest.fn()}
+        />
+      </FixedScheme>,
+    );
+    expect(screen.queryByLabelText('전송 중')).toBeNull();
+    expect(screen.getByText('전송 실패')).toBeTruthy();
+    expect(screen.getByTestId('pending-resend')).toBeTruthy();
   });
 
   it('이미 기준을 넘긴 채 마운트되면(가상화 재마운트) 첫 렌더부터 서 있다', () => {
@@ -481,8 +554,34 @@ describe('느린 전송 — 기준 시간 뒤에만 시계 하나', () => {
       style => style.width === 0 && style.height === 0,
     );
     expect(host).not.toBeNull();
-    // 시각 글자는 여전히 없다(#1083).
-    expect(screen.queryByTestId('row-time', {includeHiddenElements: true})).toBeNull();
+    // 시각 글자는 메아리도 그린다(planner 결정 — #1083 을 머리 행에 한해 뒤집음).
+    expect(screen.getByTestId('row-time', {includeHiddenElements: true})).toBeTruthy();
+  });
+
+  it('머리 행: 시계는 시각 바로 오른쪽 형제(폭·높이 0 상자)에 선다 — 서버 사본이 오면 시계만 사라진다', () => {
+    const view = render(
+      <FixedScheme scheme="dark">{echo({createdAtMs: NOW - SEND_SLOW_MS}, true)}</FixedScheme>,
+    );
+    const line = parentOfTestId(screen.toJSON(), 'row-time');
+    expect(line).not.toBeNull();
+    const kids = ((line as Json).children ?? []).filter(
+      (child): child is Json => typeof child !== 'string',
+    );
+    const at = kids.findIndex(child => child.props?.testID === 'row-time');
+    expect(at).toBeGreaterThanOrEqual(0);
+    const next = kids[at + 1];
+    expect(next).toBeDefined();
+    expect(flat(next.props.style)).toMatchObject({width: 0, height: 0});
+    expect(findByTestId(next, 'pending-slow')).not.toBeNull();
+    // 서버 사본의 같은 줄에는 시각만 있고 시계 상자는 없다.
+    view.unmount();
+    render(<FixedScheme scheme="dark">{server({}, true)}</FixedScheme>);
+    expect(screen.queryByTestId('pending-slow')).toBeNull();
+    const copyLine = parentOfTestId(screen.toJSON(), 'row-time') as Json;
+    const copyKids = (copyLine.children ?? []).filter(
+      (child): child is Json => typeof child !== 'string',
+    );
+    expect(copyKids.some(child => flat(child.props?.style).width === 0)).toBe(false);
   });
 
   it('시계는 서버 사본의 시각 글자와 같은 색이다 (시각이 그 자리를 이어받는다)', () => {
@@ -673,5 +772,43 @@ describe('보낸 메시지 등장 — 실제로 앉는다 (가짜 시계로 끝�
       jest.advanceTimersByTime(SEND_ARRIVE_MS);
     });
     expect(y()).toBe(0);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 사다리 전용 칸 `send-arrive` — 웹에 짝이 없으므로 값이 아니라 **관계**를 단정한다
+// (README §6 「폰에 값을 더할 때」: 값이 아니라 관계여야 웹이 다시 움직여도 산다).
+// -----------------------------------------------------------------------------
+describe('사다리 전용 칸 send-arrive — 값이 아니라 관계 (planner 결정 2)', () => {
+  const MOTION_CSS = fs.readFileSync(
+    path.join(__dirname, '../../web/src/design/motion.css'),
+    'utf8',
+  );
+  const README = fs.readFileSync(
+    path.join(__dirname, '../../../docs/design-system/README.md'),
+    'utf8',
+  );
+  /** 웹 사다리(`motion.css` :root 의 첫 정의)에서 칸의 ms 를 읽는다. 기대값을 베끼지 않는다. */
+  const rung = (name: string): number => {
+    const match = new RegExp(`--motion-${name}:\\s*(\\d+)ms`).exec(MOTION_CSS);
+    if (match === null) throw new Error(`--motion-${name} 을 motion.css 에서 못 찾았다`);
+    return Number(match[1]);
+  };
+
+  it('standard < send-arrive < arrival — 웹 사다리의 이웃 칸 사이에 선다', () => {
+    expect(rung('standard')).toBeLessThan(SEND_ARRIVE_MS);
+    expect(SEND_ARRIVE_MS).toBeLessThan(rung('arrival'));
+  });
+
+  it('등장 < 자격 창 < 느린 전송 기준 — 시계는 등장이 끝난 뒤에만 선다', () => {
+    expect(SEND_ARRIVE_MS).toBeLessThan(SEND_ARRIVE_WINDOW_MS);
+    expect(SEND_ARRIVE_WINDOW_MS).toBeLessThan(SEND_SLOW_MS);
+  });
+
+  it('README 사다리 표의 `send-arrive` 행이 코드의 값과 같다 (문서와 코드가 어긋나면 붉다)', () => {
+    const row = /\|\s*`send-arrive`[^|]*\|\s*(\d+)ms\s*\|/.exec(README);
+    expect(row).not.toBeNull();
+    expect(Number((row as RegExpExecArray)[1])).toBe(SEND_ARRIVE_MS);
+    expect(README).toContain('SEND_ARRIVE_');
   });
 });
