@@ -3,12 +3,7 @@ import {
   type CancelOutcome,
 } from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useRef, useState} from 'react';
-import {
-  AccessibilityInfo,
-  StyleSheet,
-  View,
-  type LayoutChangeEvent,
-} from 'react-native';
+import {StyleSheet, View, type LayoutChangeEvent} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {font, space, type Palette} from '../../design/tokens';
@@ -58,10 +53,8 @@ export function WorkingCardStop({
   const onOutcome = useCallback(
     (next: CancelOutcome) => {
       setOutcome(next);
-      // iOS VoiceOver는 `accessibilityLiveRegion`을 읽지 않는다(Android 전용). 성공하면 눌린 컨트롤이 사라지고
-      // 서버가 끝낸 run은 카드째 사라지므로(영수증도 함께), 결과는 말로 알려야 들린다(`StopWorkControl`과 같은
-      // 규칙, design-review #4285 r1 H2). 확인 문장은 첫 탭이 이미 낭독한다(`StopTurnControl.arm`).
-      AccessibilityInfo.announceForAccessibility(next.sentence);
+      // 결과의 낭독은 컨트롤이 한다(`StopTurnControl.commit`): 서버가 끝낸 run은 카드째 사라지므로(영수증도 함께)
+      // 결과는 말로 알려야 들린다(design-review #4285 r1 H2).
       if (next.kind !== 'error') {
         nudgeRunProgress(channelId);
       }

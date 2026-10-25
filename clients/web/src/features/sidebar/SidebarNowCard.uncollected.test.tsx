@@ -86,13 +86,13 @@ function keyed(...signals: AgentWorkingSignal[]) {
   return new Map(signals.map((s) => [`${s.channelId}|${s.memberId}|${s.runId}`, s]));
 }
 
-function mount(signals: AgentWorkingSignal[], liveness?: AgentLiveness | null) {
+function mount(signals: AgentWorkingSignal[], liveness?: AgentLiveness | null, live = true) {
   return render(
     <MemoryRouter>
       <SidebarNowCard
         signals={keyed(...signals)}
         nowMs={NOW}
-        live
+        live={live}
         directory={directory}
         channels={channels}
         selfMemberId="me"
@@ -175,6 +175,19 @@ describe("부른 사람이 없는 시스템 작업(환영)은 카드가 아니�
 });
 
 describe("아무도 가져가지 않은 채 5분을 넘은 사람 요청", () => {
+  it("끊긴 레일에서는 이유 줄이 서지 않는다 — 폰 카드와 같은 규칙이다 (design-review #4285 r1 M2·r2 N2)", () => {
+    mount([queued()], liveness("woken_not_collected"), false);
+    const card = screen.getByTestId("sidebar-now-card");
+    // 낱말과 근거 문구는 마지막으로 확인된 사실 그대로 남고, 끊김은 카드가 따로 말한다.
+    expect(screen.getByTestId("sidebar-now-state").textContent).toBe("아직 받지 않았어요");
+    expect(screen.queryByTestId("sidebar-now-reason")).toBeNull();
+    expect(card.getAttribute("aria-label")).not.toContain("연결이 꺼져 있을 수 있어요");
+    // 살아 있을 때는 같은 입력에서 이유가 선다(대조).
+    cleanup();
+    mount([queued()], liveness("woken_not_collected"), true);
+    expect(screen.getByTestId("sidebar-now-reason").textContent).toBe("연결이 꺼져 있을 수 있어요");
+  });
+
   it("낱말은 한 덩어리로 서고(줄바꿈·줄어듦 없음) 좁은 열에서는 이름이 줄임표를 받는다 — 「아직 받지 않았어 / 요」로 꺾이지 않는다", () => {
     // design-review #4285 r1 H3. jsdom은 배치를 재지 못하므로 클래스를 잠그고, 실제 Chromium 폭 측정은
     // `scripts/capture-4285.mjs`의 긴 이름 장면이 한다(상태 낱말이 한 줄, 이름이 줄임표).

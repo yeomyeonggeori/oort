@@ -553,6 +553,23 @@ describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
       ),
     );
   });
+
+  it('N3 대화 아래 활동 줄에서도 취소 결과를 말로 알린다 — 낭독은 컨트롤 한 곳에서 하므로 홈 카드와 같다 (design-review r2)', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    const log = await openGeneral();
+    act(() => markAgentWorking(waiting()));
+    const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
+    fireEvent.press(arm);
+    await waitFor(() => expect(screen.getByTestId(`turn-stop-${BOT_ID}-commit`)).toBeTruthy());
+    announce.mockClear();
+    pressAfterGuard(`turn-stop-${BOT_ID}-commit`);
+    await waitFor(() => expect(log.cancelCalls()).toHaveLength(1));
+    await waitFor(() => expect(announce).toHaveBeenCalledWith('달무리봇의 요청을 취소했어요.'));
+    // 같은 문장을 두 번 읽지 않는다(컨트롤 한 곳에서만).
+    expect(announce.mock.calls.filter(([said]) => said === '달무리봇의 요청을 취소했어요.')).toHaveLength(1);
+  });
 });
 
 describe('design-review r1 수리: 큰 글씨 머리·낭독·run을 넘는 상태 (#4285)', () => {

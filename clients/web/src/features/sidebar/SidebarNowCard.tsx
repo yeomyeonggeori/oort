@@ -122,7 +122,10 @@ export function SidebarNowCard({
     lead.state === "queued" && isUntakenHumanRun(lead.server)
       ? waitingLead(liveness, nowMs, "short")
       : undefined;
-  const reason = uncollected ? uncollectedReason(liveness) : undefined;
+  // 끊긴 레일(`live` false)에서는 이유 줄을 싣지 않는다: 카드가 이미 「마지막으로 확인된 상태」라고 말하는데 그 위에
+  // 「연결이 꺼져 있을 수 있어요」(에이전트의 연결)가 서면 어느 연결인지 가려지지 않고 마지막으로 읽은 판정이 단정처럼
+  // 읽힌다(폰 `buildWorkingCard`와 같은 규칙 — design-review #4285 r1 M2·r2 N2).
+  const reason = uncollected && live ? uncollectedReason(liveness) : undefined;
   const stateText = uncollected ? UNCOLLECTED_WORD : (copy?.text ?? "작업 중");
   const accessible = [
     agentLabel(name),

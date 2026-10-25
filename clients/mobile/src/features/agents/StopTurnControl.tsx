@@ -141,13 +141,19 @@ export function StopTurnControl({
     try {
       const result = await cancelAgentRun(workspaceId, runId);
       setArmed(false);
-      onOutcome(cancelSucceeded(result, agentName, wording));
+      const receipt = cancelSucceeded(result, agentName, wording);
+      // 결과는 말로도 알린다: iOS VoiceOver는 `accessibilityLiveRegion`을 읽지 않고(Android 전용), 성공하면 눌린
+      // 컨트롤이 사라져 포커스가 갈 곳을 잃는다. 컨트롤 한 곳에서 낭독하므로 홈 카드와 대화 아래 활동 줄이 같다
+      // (design-review #4285 r1 H2·r2 N3; 확인 문장은 첫 탭이 낭독한다).
+      AccessibilityInfo.announceForAccessibility(receipt.sentence);
+      onOutcome(receipt);
     } catch (error) {
       // 실패 문장도 낱말 한 벌을 따른다: 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다.
       const outcome = wording.failure(error);
       // 이미 끝난 실행은 더 물어볼 것이 없다. 확인 단계를 접는다 — 남겨 두면
       // 존재하지 않는 실행을 다시 멈추라고 권하는 버튼이 화면에 남는다.
       if (outcome.kind === 'alreadyOver') setArmed(false);
+      AccessibilityInfo.announceForAccessibility(outcome.sentence);
       onOutcome(outcome);
     } finally {
       setBusy(false);
