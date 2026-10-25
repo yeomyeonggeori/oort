@@ -655,6 +655,20 @@ mod tests {
         assert!(props.get("github_url").is_none(), "{props}");
     }
 
+    /// ADR-0113 증보 3 F5 (#4313): the requested-apps marker is on the same list, and this test names
+    /// the key **literally** — the sibling test below iterates the constant, so a key removed from the
+    /// constant would pass it silently. An external sender cannot draw 「요청한 앱」 chips under a message
+    /// it posted into a channel.
+    #[test]
+    fn a_webhook_cannot_forge_the_requested_apps_marker() {
+        let mut client = BTreeMap::new();
+        client.insert("keep".to_string(), "me".to_string());
+        client.insert("requestedApps".to_string(), "forged".to_string());
+        let props = webhook_props(Uuid::nil(), WebhookMode::Native, "label", &client);
+        assert_eq!(props["keep"], json!("me"));
+        assert!(props.get("requestedApps").is_none(), "{props}");
+    }
+
     #[test]
     fn a_webhook_cannot_forge_the_app_notice_or_the_apps_used_receipt() {
         let mut client = BTreeMap::new();

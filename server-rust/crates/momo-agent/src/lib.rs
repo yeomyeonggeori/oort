@@ -238,8 +238,9 @@ pub use a2a::{
 pub use app_notice::{
     app_result_policy, attach_app_result_policy, connection_unavailable_app_notice, is_notice_host,
     stall_app_notice, AppNotice, AppNoticeKind, AppNoticeSite, APP_RESULT_POLICY_KEY,
-    MAX_NOTICE_HOST_BYTES, PERSONAL_APP_PLUGIN_IDS, PROP_APPS_USED, PROP_APPS_USED_ALIAS,
-    PROP_APP_NOTICE, SERVER_OWNED_APP_PROPS_KEYS, SUMMARY_ONLY_INSTRUCTION,
+    MAX_NOTICE_HOST_BYTES, MAX_REQUESTED_APPS, MAX_REQUESTED_APPS_INPUT, PERSONAL_APP_PLUGIN_IDS,
+    PROP_APPS_USED, PROP_APPS_USED_ALIAS, PROP_APP_NOTICE, PROP_REQUESTED_APPS,
+    SERVER_OWNED_APP_PROPS_KEYS, SUMMARY_ONLY_INSTRUCTION,
 };
 pub use app_tool_grants::{
     attach_tool_grants, granted_apps_from_payload, host_app_tools, load_app_tool_grants_in_tx,

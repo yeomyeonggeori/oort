@@ -2154,6 +2154,56 @@ mod tests {
         vec!["github.com".to_string()]
     }
 
+    fn run_snapshot() -> GatewayRunSnapshot {
+        GatewayRunSnapshot {
+            agent_member_id: Uuid::from_u128(1),
+            channel_id: Uuid::from_u128(2),
+            status: momo_agent::RunStatus::Running,
+            trigger_message_id: None,
+            model: "hermes-agent".to_string(),
+            requested_effort: None,
+            profile_effort_pref: None,
+            started_at: None,
+            observed_at: chrono::Utc::now(),
+        }
+    }
+
+    /// ADR-0113 증보 3 F5 (#4313): a gateway completion cannot put `requestedApps` on its answer. The
+    /// answer's props are **built by the server** from validated reports only (`appsUsed`, `app_notice`),
+    /// so a runtime that reports the key — inside its usage block, which is the one free-form place — gets
+    /// it nowhere near the top level a client reads, and the requested-apps marker stays the send
+    /// route's alone.
+    #[test]
+    fn a_gateway_answer_never_carries_the_requested_apps_marker() {
+        let props = timeline_props(
+            &run_snapshot(),
+            Uuid::from_u128(3),
+            true,
+            Some(json!({
+                "requestedApps": ["com.momo.plugins.gmail"],
+                "prompt_tokens": 1,
+            })),
+            None,
+            None,
+            None,
+        );
+        assert!(props.get("requestedApps").is_none(), "{props}");
+        assert!(props.get("requested_apps").is_none(), "{props}");
+        // The only app keys that can appear are the two validated ones, and only when reported.
+        let keys: Vec<&str> = props
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        for key in keys {
+            assert!(
+                !momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key),
+                "no server-owned app key without a report: {key}"
+            );
+        }
+    }
+
     /// D11 — the stage rule is the share's rule, not a copy of it: the same
     /// inputs the share test refuses are refused here, and a Korean marker of 80
     /// characters (more than 80 bytes) is accepted.
