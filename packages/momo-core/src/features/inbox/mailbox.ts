@@ -1,6 +1,7 @@
 import type { Message, ReadState } from "../../lib/api";
 import { threadRollup, uuidEq } from "../../lib/api";
 import { effectiveUnreadStartSeq } from "../readState/model";
+import { attachmentPreviewLine } from "../attachments/model";
 import type { FilterTabsSpec } from "../common/filterTabs";
 import type { InboxWireKind, ServerInboxItem } from "./serverInbox";
 import {
@@ -168,8 +169,8 @@ function bodyLine(message: Message): string {
   if (message.state === "deleted") return "삭제된 메시지예요.";
   const body = (message.body ?? "").trim().replace(/\s+/g, " ");
   if (body.length > 0) return body;
-  if ((message.attachments?.length ?? 0) > 0) return "첨부 파일을 보냈어요.";
-  return "내용 없는 메시지예요.";
+  // 글 없이 사진·파일만 보낸 메시지(#4294): 「내용 없는 메시지」가 아니라 무엇이 왔는지 말한다.
+  return attachmentPreviewLine(message.attachments) ?? "내용 없는 메시지예요.";
 }
 
 function isConversational(message: Message): boolean {

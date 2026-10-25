@@ -2410,6 +2410,9 @@ function MessageRowInner({
   // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
   // 때문에(본문 칸 · 「내용 없는 메시지」 · 시트의 복사) 이름을 한 번만 짓는다.
   const hasBody = hasRenderableBody(body);
+  // 글 없이 사진·파일만 보낸 메시지는 본문이 비어도 **비어 있지 않다** — 첨부 목록이 그 메시지의
+  // 내용이다(#4294). 아래 「내용 없는 메시지」 줄은 이 물음이 아니오일 때만 선다.
+  const hasAttachments = (message.attachments?.length ?? 0) > 0;
   // A reply, on a surface that marks them. The parent may still be unknown.
   const isMarkedReply =
     replyParent !== undefined && message.rootId !== undefined;
@@ -3114,7 +3117,8 @@ function MessageRowInner({
             {presentation.keepsBody &&
             !hasBody &&
             !presentation.card &&
-            !presentation.artifact ? (
+            !presentation.artifact &&
+            !hasAttachments ? (
               <Text style={styles.tombstone}>{appNote('내용 없는 메시지')}</Text>
             ) : null}
           </>

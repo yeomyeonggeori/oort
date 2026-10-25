@@ -1,5 +1,6 @@
 import { uuidEq, type Message } from "../../lib/api";
 import { payloadToMessage, type MessageNewEvent } from "../../lib/realtimeEvents";
+import { attachmentPreviewLine } from "../attachments/model";
 import { mentionsMember } from "../inbox/model";
 import { agentCardModel } from "../timeline/agentCardModel";
 
@@ -283,7 +284,11 @@ export function notifyDecision(
   };
   // 「무엇이 일어났나 + 어디서」 순서(#3339 시안): 승인은 종류 이름이 먼저다.
   if (kind === "approval") notification.title = `승인 필요 · ${notification.title}`;
-  const body = notificationBody(approvalTitle(message, kind) ?? message.body);
+  const body =
+    notificationBody(approvalTitle(message, kind) ?? message.body) ??
+    // 글 없이 사진·파일만 보낸 DM·멘션(#4294): 제목만 있는 배너가 되지 않게 개수로 말한다.
+    // 본문이 있으면 본문이 이긴다(위 식이 이미 답했다). 승인 카드에는 첨부가 없다.
+    (kind === "approval" ? undefined : (attachmentPreviewLine(message.attachments) ?? undefined));
   if (body !== undefined) notification.body = body;
   return { show: true, notification };
 }

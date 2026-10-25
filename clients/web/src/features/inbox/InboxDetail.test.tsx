@@ -297,3 +297,61 @@ describe("InboxDetail", () => {
     expect(row.textContent).not.toContain("grok배포");
   });
 });
+
+describe("InboxDetail: 글 없이 첨부만 보낸 메시지의 맥락 줄 (#4294)", () => {
+  const att = (n: number, mime = "image/png") =>
+    Array.from({ length: n }, (_, i) => ({ id: `att-${mime}-${i}`, name: `파일${i}`, mime, sizeBytes: 2048 }));
+  const contextRows = (h: HTMLElement) =>
+    Array.from(h.querySelectorAll('[data-testid="inbox-context-row"]'));
+
+  it("사진만 보낸 줄은 빈 칸이 아니라 「사진 2장」으로 말하고, 옆 줄은 그대로다", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [msg(6, "", { attachments: att(2) }), msg(5, "첫째")],
+    });
+    const h = await mount(entry({}));
+    const rows = contextRows(h);
+    expect(rows).toHaveLength(2);
+    // 오래된 순: [첫째, 사진 2장]. 둘 다 서야 「행을 통째로 비워도 통과」가 막힌다.
+    expect(rows[0].textContent).toContain("첫째");
+    expect(rows[1].textContent).toContain("사진 2장");
+    expect(rows[1].querySelector('[data-testid="inbox-context-attachments"]')).not.toBeNull();
+    expect(rows[0].querySelector('[data-testid="inbox-context-attachments"]')).toBeNull();
+  });
+
+  it("사진과 파일이 섞이면 사진이 먼저다", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [msg(5, "", { attachments: [...att(1, "application/pdf"), ...att(1)] })],
+    });
+    const h = await mount(entry({}));
+    expect(contextRows(h)[0].textContent).toContain("사진 1장, 파일 1개");
+  });
+
+  it("글이 있으면 글이 이긴다 (첨부는 문구가 되지 않는다)", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [msg(5, "자료 올려요", { attachments: att(1) })],
+    });
+    const h = await mount(entry({}));
+    const row = contextRows(h)[0];
+    expect(row.textContent).toContain("자료 올려요");
+    expect(row.textContent).not.toContain("사진 1장");
+    expect(row.querySelector('[data-testid="inbox-context-attachments"]')).toBeNull();
+  });
+
+  it("지워진 줄은 첨부가 남아 있어도 삭제 문장이다", async () => {
+    api.fetchMessages.mockResolvedValue({
+      messages: [msg(5, "", { state: "deleted", attachments: att(1) })],
+    });
+    const h = await mount(entry({}));
+    const row = contextRows(h)[0];
+    expect(row.textContent).toContain("삭제된 메시지예요.");
+    expect(row.textContent).not.toContain("사진 1장");
+  });
+
+  it("대조: 글도 첨부도 없으면 문구를 지어내지 않는다", async () => {
+    api.fetchMessages.mockResolvedValue({ messages: [msg(5, "", { attachments: [] })] });
+    const h = await mount(entry({}));
+    const row = contextRows(h)[0];
+    expect(row.querySelector('[data-testid="inbox-context-attachments"]')).toBeNull();
+    expect(row.textContent).not.toMatch(/사진|파일/);
+  });
+});
