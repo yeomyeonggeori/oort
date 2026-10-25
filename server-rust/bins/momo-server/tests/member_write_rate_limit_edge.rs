@@ -1,7 +1,7 @@
 //! #4234 / ADR-0208 D10 증보 — the per-member write budget's mechanics, over real HTTP and
 //! **without Postgres**.
 //!
-//! `rate_limit::member_write` is mounted by `build_app` on four write routes. What it does to a
+//! `rate_limit::member_write` is mounted by `build_app` on five write endpoints. What it does to a
 //! request does not depend on which route that is, so the mechanics are proved here once, on a
 //! stand-in router that mounts the real middleware exactly the way `build_app` does
 //! (`route_layer`, inside a layer that plays `auth::require_principal` by putting a `Principal`
