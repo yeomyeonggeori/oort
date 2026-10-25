@@ -473,7 +473,9 @@ export interface Message {
    *
    * **예외는 편집이다**(#4441): `PATCH` 응답과 `message.edited` 프레임은 첨부를 싣지
    * 않는다(편집은 묶인 첨부를 바꾸지 못한다). 거기서 없다는 것은 「없음」이 아니라
-   * 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 첨부를 잇는다.
+   * 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 첨부를 잇는다. 이 읽기는
+   * 서버에 살아 있는 메시지에서 첨부를 떼는 길이 없다는 사실에 서 있다 — 그런 길이
+   * 생기면 명시 신호가 필요하다(`keepHeldAttachments` 주석).
    *
    * 업로드 capability URL도 Drive file id도 여기 없다. 바이트로 가는 유일한 길은
    * 인가 프록시(`GET …/attachments/{id}/content`)다.

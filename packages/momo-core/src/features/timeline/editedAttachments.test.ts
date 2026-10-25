@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Message, MessageAttachment } from "../../lib/api";
 import { payloadToMessage } from "../../lib/realtimeEvents";
-import { emptyTimeline, isStrictlyOrdered, reconcileMessages } from "./model";
+import {
+  applyTombstone,
+  emptyTimeline,
+  isStrictlyOrdered,
+  reconcileMessages,
+} from "./model";
 
 // =============================================================================
 // #4441 — 사진 달린 메시지의 글을 고치면 사진 카드가 사라지던 길.
@@ -185,8 +190,9 @@ describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 �
 
   it("수정 표시가 없는 message.edited(스트림 조각·props 만 바꾼 갱신)도 첨부를 지우지 않는다", () => {
     // `stream_message_body_in_tx`·`emit_message_edited_in_tx` 는 같은 `message.edited`
-    // 를 `state`·`edited_at` 없이 낸다. 「수정됨」 표지에 걸어서 지키면 이 프레임들이
-    // 같은 병을 그대로 앓는다.
+    // 를 사람 편집 표지 없이 낸다: `state` 는 행의 현재 값(`sent`) 그대로이고
+    // `edited_at_ms` 는 null 이다. 「수정됨」 표지에 걸어서 지키면 이 프레임들이 같은
+    // 병을 그대로 앓는다.
     const state = fold(
       [historyRow()],
       [
@@ -244,8 +250,9 @@ describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 �
     expect(state.messages[0].attachments).toEqual([PHOTO]);
   });
 
-  it("삭제 묘비는 첨부를 내려놓는다 — 지워진 행에 파일 정보를 남기지 않는다", () => {
-    // DELETE 응답은 본문도 첨부도 없는 묘비다. 편집 보존은 편집에만 해당한다.
+  it("DELETE 응답 묘비는 옛 첨부를 이어받지 않는다 — 들어온 행이 묘비면 편집 보존은 해당 없다", () => {
+    // DELETE 응답은 본문도 첨부도 없는 묘비다(`routes/messages.rs` `delete_message`:
+    // "A tombstone names no files"). 편집 보존은 편집에만 해당한다.
     const tombstone: Message = {
       ...withoutAttachments(historyRow()),
       state: "deleted",
@@ -258,6 +265,112 @@ describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 �
     expect("attachments" in state.messages[0]).toBe(false);
   });
 
+  // 든 행이 묘비일 때 — 실시간 묘비(`applyTombstone`)는 `...existing` 이라 첨부를 그대로
+  // 들고, 기록 페이지의 묘비도 서버 조인에 메시지 상태 조건이 없어 첨부를 싣고 온다
+  // (화면은 `deleted` 에서 카드를 그리지 않는다). 그 첨부를 늦게 온 편집 프레임이 새
+  // 행으로 되살리면 안 된다 — 본문이 마지막 쓰기로 돌아오는 것은 수리 전부터의 동작이고,
+  // 이 수리가 그 경로에 더하는 것은 0 이어야 한다.
+  it("실시간 묘비가 든 첨부를, 늦게 온 편집 프레임이 되살리지 않는다", () => {
+    const tombstoned = applyTombstone(fold([historyRow()]), ID, 1_700_000_300_000);
+    // 전제: 이 묘비는 첨부를 들고 있다. 이 단정이 없으면 아래 단정이 헛돈다.
+    expect(tombstoned.messages[0].state).toBe("deleted");
+    expect(tombstoned.messages[0].attachments).toEqual([PHOTO]);
+
+    const after = reconcileMessages(tombstoned, [payloadToMessage(editedFrame())]);
+
+    expect(after.messages).toHaveLength(1);
+    expect(after.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+    expect("attachments" in after.messages[0]).toBe(false);
+  });
+
+  it("기록 페이지가 첨부를 실어 온 묘비도 마찬가지다", () => {
+    const heldTombstone = historyRow({
+      state: "deleted",
+      body: undefined,
+      deletedAtMs: 1_700_000_300_000,
+    });
+    expect(heldTombstone.attachments).toEqual([PHOTO]);
+
+    const state = fold([heldTombstone], [payloadToMessage(editedFrame())]);
+
+    expect(state.messages).toHaveLength(1);
+    expect("attachments" in state.messages[0]).toBe(false);
+  });
+
+  // 글 없이 사진만 보낸 메시지(#4294)는 카드가 사라지면 메시지가 통째로 빈다 — 가장
+  // 아픈 경우다. 「본문이 없으면 묘비」 같은 그럴듯한 오구현이 여기서 잡힌다.
+  describe("글 없이 사진만 보낸 메시지", () => {
+    const photoOnly = () => historyRow({ body: undefined });
+
+    it("나중에 글을 달아 고쳐도 사진이 남는다", () => {
+      const state = fold([photoOnly()], [payloadToMessage(editedFrame())]);
+
+      expect(state.messages).toHaveLength(1);
+      expect(state.messages[0].body).toBe("점심 먹은 곳 사진이에요 (가게 이름 추가)");
+      expect(state.messages[0].state).toBe("edited");
+      expect(state.messages[0].attachments).toEqual([PHOTO]);
+    });
+
+    it("본문이 비어 나오는 갱신 프레임(props 만 바뀜)도 사진을 지우지 않는다 — 본문 없음은 묘비가 아니다", () => {
+      const state = fold(
+        [photoOnly()],
+        [
+          payloadToMessage(
+            editedFrame({
+              state: "sent",
+              body: null,
+              edited_at_ms: null,
+              props: { note: "갱신" },
+            })
+          ),
+        ]
+      );
+
+      expect(state.messages).toHaveLength(1);
+      expect(state.messages[0].state).toBe("sent");
+      expect(state.messages[0].body).toBeUndefined();
+      expect(state.messages[0].props).toEqual({ note: "갱신" });
+      expect(state.messages[0].attachments).toEqual([PHOTO]);
+    });
+  });
+
+  it("타입 밖 입력(attachments: null)에도 던지지 않는다 — null 도 말하지 않은 것이다", () => {
+    // 이 입력을 만드는 생산자는 없다(DTO 는 빈 배열의 키를 빼고 `attachmentsFromWire` 는
+    // 배열만 낸다). 그래도 접기는 모든 실시간 프레임이 지나는 리듀서라서, 수리가
+    // 거기에 새 던질 자리를 만들지 않는다는 것을 못 박는다.
+    const nullIncoming = {
+      ...withoutAttachments(historyRow()),
+      attachments: null,
+    } as unknown as Message;
+    const nullHeld = {
+      ...withoutAttachments(historyRow()),
+      attachments: null,
+    } as unknown as Message;
+
+    expect(() => fold([historyRow()], [nullIncoming])).not.toThrow();
+    expect(fold([historyRow()], [nullIncoming]).messages[0].attachments).toEqual([PHOTO]);
+
+    expect(() => fold([nullHeld], [payloadToMessage(editedFrame())])).not.toThrow();
+    expect(
+      "attachments" in fold([nullHeld], [payloadToMessage(editedFrame())]).messages[0]
+    ).toBe(false);
+  });
+
+  it("들어온 행과 이전 state 를 바꾸지 않는다 — 새 행을 만든다", () => {
+    const before = fold([historyRow()]);
+    const incoming = patchResponse();
+    const snapshot = JSON.stringify({ before, incoming });
+
+    const after = reconcileMessages(before, [incoming]);
+
+    expect(JSON.stringify({ before, incoming })).toBe(snapshot);
+    expect("attachments" in incoming).toBe(false);
+    expect(after).not.toBe(before);
+    expect(after.messages[0]).not.toBe(incoming);
+    // 전제: 위 불변 단정이 지나간 길이 「잇는 길」이다.
+    expect(after.messages[0].attachments).toEqual([PHOTO]);
+  });
+
   it("순서·중복의 불변식은 그대로다 — 편집 묶음이 와도 한 줄이고 seq 오름차순이다", () => {
     const rows = [6, 7, 8].map((seq) => {
       const row = historyRow({
@@ -268,8 +381,10 @@ describe("편집은 첨부를 건드리지 않는다 — 이미 든 첨부를 �
       return seq === 7 ? row : withoutAttachments(row);
     });
     const state = fold(
-      rows,
-      // 편집 프레임이 순서를 뒤섞어 한꺼번에 온다.
+      // 첫 묶음부터 뒤섞여 온다(접기는 「어떤 순서든」 받는다). 이미 오름차순인 묶음으로는
+      // 아래 오름차순 단정이 실패할 수 없다.
+      [rows[1], rows[2], rows[0]],
+      // 편집 프레임도 순서를 뒤섞어 한꺼번에 온다.
       [
         payloadToMessage(editedFrame({ id: rows[2].id, seq: 8, body: "고침 8" })),
         payloadToMessage(editedFrame({ id: rows[1].id, seq: 7, body: "고침 7" })),
