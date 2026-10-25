@@ -52,18 +52,25 @@ export function WorkingCardStop({
     },
     [channelId],
   );
+  // 답을 받았으면(취소됨·이미 끝남) 더 권하지 않는다 — 「취소했어요」 바로 옆에 「취소」가 남지 않는다.
+  // 실패(`error`)만 다시 누를 수 있다. 웹의 `StopRunControl`과 같은 규칙이다(`settled`).
+  const settled = outcome !== null && outcome.kind !== 'error';
   return (
     // 한 줄에 감겨 서는 행이다: 확인 줄(`flexBasis: '100%'`)이 열리면 자기 줄을 통째로 받는다. 활동
     // 줄과 같은 모양이다(`turnSurfaces` 의 `activityRow` 주석).
-    <View style={styles.stop} testID="home-working-stop">
-      <StopTurnControl
-        runId={runId}
-        agentName={agentName}
-        runCount={runCount}
-        wording={UNTAKEN_WORDING}
-        onOutcome={onOutcome}
-        testIDPrefix="home-working-stop"
-      />
+    <View style={[styles.stop, settled && styles.stopSettled]} testID="home-working-stop">
+      {settled ? null : (
+        <StopTurnControl
+          runId={runId}
+          agentName={agentName}
+          runCount={runCount}
+          wording={UNTAKEN_WORDING}
+          onOutcome={onOutcome}
+          armStyle={styles.armFlush}
+          confirmStyle={styles.confirmFlush}
+          testIDPrefix="home-working-stop"
+        />
+      )}
       {outcome !== null ? (
         <Sentence
           style={[styles.outcome, outcome.kind === 'error' && styles.outcomeError]}
@@ -84,12 +91,23 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       gap: space.xs,
     },
-    // 컨트롤보다 넓은 자리: 한 줄을 통째로 받는다.
+    // 첫 탭의 글자가 가로 여백 `space.sm`을 가지므로 상자를 그만큼 밀어 글자가 본문 글자 기둥에 선다.
+    // 확인 줄(문장·두 단추)은 밀리지 않고 기둥에 그대로 선다.
+    // 세로 숨 `space.sm`은 보통 크기에서는 보이지 않고(상자가 44pt 바닥을 지킨다) 가장 큰 글씨(AX5)에서 글자가
+    // 위의 진행 막대·아래의 카드 모서리와 붙지 않게 한다 — 캡처에서 「취소」가 막대와 모서리 사이에 낀 채 찍혔다.
+    armFlush: {marginLeft: -space.sm, paddingVertical: space.sm},
+    // 확인 줄 아래: 카드의 아래 여백(`HOME.cardPadBottom` 13)과 같은 숨. 첫 탭은 44pt 상자 안에서 글자가 가운데에
+    // 앉아 그 숨이 이미 있다.
+    confirmFlush: {paddingBottom: space.md},
+    // 컨트롤 없이 문장만 서는 때(취소됨·이미 끝남)의 위아래 숨.
+    stopSettled: {paddingTop: space.xs},
+    // 컨트롤보다 넓은 자리: 한 줄을 통째로 받는다. 카드의 아래 모서리와 붙지 않게 아래에 숨을 둔다.
     outcome: {
       flexBasis: '100%',
       fontSize: font.meta,
       lineHeight: 18,
       color: color.textMuted,
+      paddingBottom: space.sm,
     },
     // 「이미 끝났어요」는 이 색을 쓰지 않는다. 실패가 아니라 답이다.
     outcomeError: {color: color.danger},

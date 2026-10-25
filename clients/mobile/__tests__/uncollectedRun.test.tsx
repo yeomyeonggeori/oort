@@ -205,6 +205,28 @@ describe('홈 카드: 누가 기다리는 일만 싣는다 (#4285)', () => {
     expect(model?.uncollected).toBe(true);
     expect(model?.runId).toBe(RUN);
   });
+
+  it('제목이 U+FEFF뿐인 작업도 숨지 않는다 — 서버가 제목으로 센 글자를 우리가 「없음」으로 읽으면 사람의 요청이 홈에서 사라진다 (planner 결정 1)', () => {
+    // 서버의 `trim()`은 U+FEFF를 글자로 세어 이 제목을 받아들이고(`required_string`), JS의 `trim()`은
+    // 지운다. 와이어 경계가 글자 그대로 비었는지만 보므로 이 run은 사람이 부른 run으로 남는다.
+    const work = agentRunProgressFromWire({
+      id: RUN,
+      channelId: CH,
+      agentMemberId: AGENT,
+      triggerSummary: '\uFEFF',
+      status: 'queued',
+      phase: 'queued',
+      leaseState: 'none',
+      stepCount: 0,
+      createdAtMs: Date.now() - 10 * MIN,
+      updatedAtMs: Date.now() - 10 * MIN,
+    });
+    expect(work.system).toBeUndefined();
+    const model = card(mapOf(signalFromProgress(work) as AgentWorkingSignal));
+    expect(model).not.toBeNull();
+    expect(model?.uncollected).toBe(true);
+    expect(cardCancelRunId(model!)).toBe(RUN);
+  });
 });
 
 describe('홈 카드: 아무도 가져가지 않은 채 5분을 넘은 사람 요청', () => {

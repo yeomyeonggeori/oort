@@ -1,0 +1,34 @@
+appId: app.momo.ios
+name: 109-uncollected-capture
+---
+# 109-uncollected-capture - 홈 「작업 중」 카드의 「취소」: 첫 탭은 묻기만 하고, 확정은 한 번 더 눌러야 나간다 (#4285).
+#
+# 표면은 `-momoMeasure UNCOLLECTED-HOME`(라이트: `LIGHT-UNCOLLECTED-HOME`)이고 하네스의 `POST …/cancel` 이 200 으로 답한다.
+# `UNCOLLECTED-HOME-FAIL` 은 같은 카드에서 500 으로 답한다(OUTCOME=error: 「취소하지 못했어요」가 선다).
+#
+#   maestro test -e SHOT=uncollected-dark -e OUTCOME=cancelled clients/mobile/maestro/109-uncollected-capture.yaml
+#   maestro test -e SHOT=uncollected-fail-dark -e OUTCOME=error clients/mobile/maestro/109-uncollected-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "home-working-stop-arm"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-idle
+- tapOn:
+    id: "home-working-stop-arm"
+- extendedWaitUntil:
+    visible:
+      id: "home-working-stop-confirm"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-confirm
+# 가장 큰 글씨(AX5)에서는 확정 단추가 화면 밖으로 밀려난다 — 목록을 내려 그 단추까지 간다(보통 크기에서는 이미 보여 그대로다).
+- scrollUntilVisible:
+    element:
+      id: "home-working-stop-commit"
+- takeScreenshot: ${SHOT}-confirm-buttons
+- tapOn:
+    id: "home-working-stop-commit"
+- extendedWaitUntil:
+    visible:
+      id: "home-working-stop-outcome-${OUTCOME}"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-${OUTCOME}

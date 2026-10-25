@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 import {
   agentRunProgressFromWire,
+  ApiError,
   type AgentLiveness,
   type AgentLivenessState,
   type AgentRunProgress,
 } from "../../lib/api";
+import { NetworkError } from "../../lib/http";
 import {
   CANCEL_CONFIRM_SENTENCE,
   cancelConfirmSentence,
+  cancelFailureOutcome,
   cancelReceipt,
   cancelSucceeded,
   cancelUntakenConfirmSentence,
@@ -16,6 +19,7 @@ import {
   UNTAKEN_WORDING,
 } from "./runCancel";
 import { runPhaseDetail, runPhaseLabel, serverFactsOf, signalFromProgress } from "./runPhase";
+import { openWorkLog, workLogStateLabel } from "./workLog";
 import { runStatusLine, runStatusText } from "./runStatusLine";
 import {
   CONNECTION_MAYBE_OFF_SENTENCE,
@@ -271,9 +275,75 @@ describe("와이어 경계: 부른 사람이 없는 run(환영) 판별", () => {
     expect(run.system).toBeUndefined();
   });
 
-  it("빈 제목은 제목이 아니다", () => {
-    expect(agentRunProgressFromWire(wire({ triggerSummary: "   " })).system).toBe(true);
+  it("빈 글자는 제목이 아니다 — 서버는 빈 것을 싣지 않으니 이 둘은 손으로 만든 모양이다", () => {
+    expect(agentRunProgressFromWire(wire({ triggerSummary: "" })).system).toBe(true);
     expect(agentRunProgressFromWire(wire({ triggerMessageId: "" })).system).toBe(true);
+  });
+
+  it("공백뿐인 발췌는 숨기지 않는다 — 의심스러우면 사람이 부른 run으로 둔다 (planner 결정 1)", () => {
+    // 서버는 다듬고 거른다(`trigger_summary`의 `trim`·`filter`). 그래도 이 모양이 오면 「제목 없음」이라고
+    // 단정하지 않는다: 틀리는 쪽이 「환영 작업이 카드에 선다」(전의 상태)이지 「사람의 요청이 사라진다」가 아니다.
+    for (const triggerSummary of ["   ", "\n", "\u00a0"]) {
+      expect(agentRunProgressFromWire(wire({ triggerSummary })).system, JSON.stringify(triggerSummary)).toBeUndefined();
+    }
+  });
+});
+
+describe("서버가 만드는 네 트리거의 와이어 모양 (#4285 planner 결정 1: 사람이 부른 run을 숨길 수 있는가)", () => {
+  // 서버의 run은 네 트리거에서만 만들어진다(`RunTrigger`: Mention·ThreadReply·Work·Welcome,
+  // `create_agent_run_in_tx`·`create_held_agent_run_in_tx`가 INSERT의 전부). 진행 읽기는 두 필드를
+  // `skip_serializing_if = "Option::is_none"`으로 싣는다(`progress_dto`):
+  //
+  //   Mention·ThreadReply  trigger_message_id = Some(메시지 id), 발췌 = input.prompt를 다듬은 것(없을 수 있다)
+  //   Work                 trigger_message_id = None, 발췌 = input.title — `validated_work_input`이 다듬은 뒤
+  //                        빈 제목을 400으로 거절하므로 언제나 있다
+  //   Welcome              trigger_message_id = None, input.surface="welcome"이라 발췌도 None
+  //
+  // 아래 표는 그 직렬화를 그대로 옮긴 것이다. 환영만 「부른 사람 없음」이고, 사람이 부른 run은 어느 모양이든
+  // 숨지 않는다. 서버가 새 트리거를 더하면 이 표가 아니라 서버의 명시 표지(#4442)가 판별한다.
+  const base = {
+    id: "0199aa11-2222-7000-8000-0000000000b1",
+    channelId: CH,
+    agentMemberId: AGENT,
+    status: "queued",
+    phase: "queued",
+    leaseState: "none",
+    stepCount: 0,
+    createdAtMs: NOW - 10 * MIN,
+    updatedAtMs: NOW - 10 * MIN,
+  };
+  const MSG = "0199aa11-2222-7000-8000-0000000000c1";
+
+  const SHAPES: ReadonlyArray<{ name: string; wire: Record<string, unknown>; human: boolean }> = [
+    { name: "멘션(메시지 id + 본문 발췌)", wire: { triggerMessageId: MSG, triggerSummary: "이거 고쳐줘" }, human: true },
+    { name: "멘션(본문이 첨부뿐이라 발췌 없음)", wire: { triggerMessageId: MSG }, human: true },
+    { name: "스레드 답글(메시지 id + 답글 발췌)", wire: { triggerMessageId: MSG, triggerSummary: "네, 그렇게 해 주세요" }, human: true },
+    { name: "작업(메시지 없이 제목만)", wire: { triggerSummary: "배포 점검표 만들기" }, human: true },
+    { name: "작업(제목이 U+FEFF뿐 — 서버의 trim은 글자로 세고 JS의 trim은 지운다)", wire: { triggerSummary: "\uFEFF" }, human: true },
+    { name: "작업(제목이 공백 문자 사이에 낀 글자)", wire: { triggerSummary: "  \u00a0배포\u00a0 " }, human: true },
+    { name: "환영(메시지도 제목도 없다)", wire: {}, human: false },
+  ];
+
+  for (const shape of SHAPES) {
+    it(`${shape.name}: ${shape.human ? "사람이 부른 run — 카드에 서고 5분이 지나면 「아직 받지 않았어요」" : "시스템 작업 — 카드에 서지 않는다"}`, () => {
+      const run = agentRunProgressFromWire({ ...base, ...shape.wire });
+      const server = serverFactsOf(run);
+      expect(isSystemRun(server)).toBe(!shape.human);
+      const copy = queuedWaitCopy({ facts: server, nowMs: NOW, liveness: undefined });
+      if (shape.human) {
+        expect(copy?.uncollected).toBe(true);
+        expect(copy?.word).toBe(UNCOLLECTED_WORD);
+      } else {
+        expect(copy).toBeNull();
+      }
+    });
+  }
+
+  it("사람이 부른 모양 여섯 중 어느 것도 숨지 않고, 환영 하나만 숨는다", () => {
+    const hidden = SHAPES.filter(
+      (shape) => agentRunProgressFromWire({ ...base, ...shape.wire }).system === true
+    ).map((shape) => shape.name);
+    expect(hidden).toEqual(["환영(메시지도 제목도 없다)"]);
   });
 });
 
@@ -425,5 +495,120 @@ describe("취소·중단 낱말 한 벌 (#4285)", () => {
       kind: "cancelled",
       sentence: "달무리봇의 요청을 취소했어요.",
     });
+  });
+});
+
+describe("실패 문장도 낱말 한 벌을 따른다 (#4285, planner 결정 3)", () => {
+  // 「취소」 버튼을 누르고 서버가 거절했는데 「중단하지 못했어요」가 서면, 사람은 누른 것과 다른
+  // 일이 실패했다고 읽는다. 짜임(어느 상태 코드가 어느 문장인가)은 둘이 같고 낱말만 한 벌을 따른다.
+  const ERRORS: ReadonlyArray<readonly [string, unknown]> = [
+    ["401", new ApiError(401, "unauthorized")],
+    ["403", new ApiError(403, "active human channel member required")],
+    ["404", new ApiError(404, "agent run not found")],
+    ["405", new ApiError(405, "method not allowed")],
+    ["429", new ApiError(429, "slow down")],
+    ["500", new ApiError(500, "boom")],
+    ["503", new ApiError(503, "unavailable")],
+    ["연결 실패", new NetworkError("unreachable", 15_000)],
+    ["시간 초과", new NetworkError("timeout", 15_000)],
+    ["알 수 없는 오류", new Error("?")],
+  ];
+
+  it("「취소」 한 벌의 실패는 모두 「취소하지 못했어요」로 시작하고 「중단」이 한 글자도 없다", () => {
+    for (const [label, error] of ERRORS) {
+      const outcome = UNTAKEN_WORDING.failure(error);
+      expect(outcome.kind, label).toBe("error");
+      expect(outcome.sentence.startsWith("취소하지 못했어요."), label).toBe(true);
+      expect(outcome.sentence, label).not.toContain("중단");
+    }
+  });
+
+  it("기존 「중단」 한 벌의 실패는 바뀌지 않았다 — 읽는 함수 그대로이고 「취소」가 없다", () => {
+    for (const [label, error] of ERRORS) {
+      const outcome = STOP_WORDING.failure(error);
+      expect(outcome, label).toEqual(cancelFailureOutcome(error));
+      expect(outcome.sentence.startsWith("중단하지 못했어요."), label).toBe(true);
+      expect(outcome.sentence, label).not.toContain("취소");
+    }
+    expect(STOP_WORDING.failure(new ApiError(500, "boom")).sentence).toBe(
+      "중단하지 못했어요. 서버가 오류로 답했어요."
+    );
+  });
+
+  it("문장마다 낱말이 맞다 — 거절은 이 요청의 채널 멤버만 취소할 수 있다고 말한다", () => {
+    expect(UNTAKEN_WORDING.failure(new ApiError(403, "x")).sentence).toBe(
+      "취소하지 못했어요. 이 요청이 있는 채널의 멤버만 취소할 수 있어요."
+    );
+    expect(UNTAKEN_WORDING.failure(new ApiError(404, "x")).sentence).toBe(
+      "취소하지 못했어요. 그 요청이 이미 없어졌거나, 이 서버가 요청 취소를 아직 받지 않아요."
+    );
+    expect(UNTAKEN_WORDING.failure(new ApiError(429, "x")).sentence).toBe(
+      "취소하지 못했어요. 전송이 너무 잦아요. 잠시 뒤에 다시 해 주세요."
+    );
+    expect(UNTAKEN_WORDING.failure(new ApiError(500, "x")).sentence).toBe(
+      "취소하지 못했어요. 서버가 오류로 답했어요."
+    );
+    expect(UNTAKEN_WORDING.failure(new Error("?")).sentence).toBe(
+      "취소하지 못했어요. 잠시 뒤에 다시 해 주세요."
+    );
+  });
+
+  it("보내지 못한 실패는 무엇이 그대로인지 대상의 낱말로 말한다 (취소=요청, 중단=실행)", () => {
+    const offline = new NetworkError("unreachable", 15_000);
+    expect(UNTAKEN_WORDING.failure(offline).sentence).toBe(
+      "취소하지 못했어요. 서버에 닿지 못했어요. 주소와 네트워크를 확인하고 다시 시도해 주세요. 요청은 그대로예요."
+    );
+    expect(STOP_WORDING.failure(offline).sentence).toBe(
+      "중단하지 못했어요. 서버에 닿지 못했어요. 주소와 네트워크를 확인하고 다시 시도해 주세요. 실행은 그대로예요."
+    );
+  });
+
+  it("409는 실패가 아니라 답이라 두 한 벌이 같은 말을 한다 (alreadyOver, 어떻게 끝났는지까지)", () => {
+    const over = new ApiError(409, "agent run is already succeeded");
+    expect(UNTAKEN_WORDING.failure(over)).toEqual(STOP_WORDING.failure(over));
+    expect(UNTAKEN_WORDING.failure(over)).toEqual({
+      kind: "alreadyOver",
+      sentence: "이 실행은 이미 끝났어요. 에이전트가 먼저 마쳤어요.",
+    });
+  });
+
+  it("어떤 실패도 상태 코드나 합쇼체를 화면에 올리지 않는다 (두 한 벌 모두)", () => {
+    for (const wording of [STOP_WORDING, UNTAKEN_WORDING]) {
+      for (const [label, error] of ERRORS) {
+        const { sentence } = wording.failure(error);
+        expect(sentence, label).not.toMatch(/\b\d{3}\b/);
+        expect(sentence, label).not.toMatch(/니다/);
+      }
+    }
+  });
+
+  it("컨트롤이 선 영역의 이름도 한 벌이다 — 「취소」 버튼이 「실행 중단」 영역 안에 서지 않는다", () => {
+    expect(STOP_WORDING.regionName).toBe("실행 중단");
+    expect(UNTAKEN_WORDING.regionName).toBe("요청 취소");
+  });
+});
+
+describe("작업 패널의 상태 칩도 같은 낱말이다 (#4285)", () => {
+  // 「취소」가 서는 패널이 카드·활동 줄과 다른 말(「대기 1번째」)을 하면 사람은 다른 일로 읽는다.
+  const log = openWorkLog({ runId: "0199aa11-2222-7000-8000-0000000000b1", memberId: AGENT, channelId: CH }, NOW);
+
+  it("5분을 넘은 사람 요청은 「아직 받지 않았어요」, 5분 안은 서버의 「대기 n번째」 그대로다", () => {
+    const old = facts({ queuePosition: 1, queuedAtMs: NOW - 17 * 60 * MIN });
+    expect(workLogStateLabel(log, "live", old, NOW)).toBe(UNCOLLECTED_WORD);
+    const young = facts({ queuePosition: 1, queuedAtMs: NOW - 2 * MIN });
+    expect(workLogStateLabel(log, "live", young, NOW)).toBe("대기 1번째");
+    // 경계는 카드와 같다: 5분 정각부터.
+    expect(workLogStateLabel(log, "live", facts({ queuePosition: 1, queuedAtMs: NOW - 5 * MIN }), NOW)).toBe(
+      UNCOLLECTED_WORD
+    );
+  });
+
+  it("시계를 주지 않으면 서버의 낱말 그대로, 가져간 run·시스템 작업도 바뀌지 않는다", () => {
+    const old = facts({ queuePosition: 1, queuedAtMs: NOW - 17 * 60 * MIN });
+    expect(workLogStateLabel(log, "live", old)).toBe("대기 1번째");
+    const claimed = facts({ phase: "claimed", leaseState: "live", claimedAtMs: NOW - MIN, queuedAtMs: NOW - 17 * 60 * MIN });
+    expect(workLogStateLabel(log, "live", claimed, NOW)).toBe(runPhaseLabel(claimed));
+    const system = facts({ queuePosition: 1, queuedAtMs: NOW - 17 * 60 * MIN, system: true });
+    expect(workLogStateLabel(log, "live", system, NOW)).toBe("대기 1번째");
   });
 });

@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
 import { cancelAgentRun } from "@momo/core/lib/api";
 import {
-  cancelFailureOutcome,
   cancelSucceeded,
   STOP_WORDING,
   type CancelOutcome,
@@ -122,7 +121,8 @@ export function StopRunControl({
       // 원장의 「취소됐어요」 줄을 바로 읽는다.
       rereadLedger();
     } catch (error) {
-      const next = cancelFailureOutcome(error);
+      // 실패 문장도 낱말 한 벌을 따른다: 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다.
+      const next = wording.failure(error);
       if (next.kind === "alreadyOver") {
         // 이미 끝난 실행에는 더 물을 것이 없다. 확인 줄을 접는다. 칩이 「작업 중」에
         // 머문 채 「이미 끝났어요」와 나란히 서지 않게 원장도 다시 읽는다.
@@ -146,7 +146,7 @@ export function StopRunControl({
   return (
     <section
       ref={sectionRef}
-      aria-label="실행 중단"
+      aria-label={wording.regionName}
       className="flex flex-col gap-2 border-b border-line px-4 py-2"
       data-testid="agent-work-panel-stop"
     >

@@ -375,7 +375,7 @@ function PanelHeader({
             data-testid="agent-work-panel-state"
             data-state={liveness === "live" ? (turnState ?? log.state) : liveness}
           >
-            {workLogStateLabel(log, liveness, server)}
+            {workLogStateLabel(log, liveness, server, nowMs)}
           </span>
         )}
         {/* 근거 한 줄: 서버가 준 사실(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이

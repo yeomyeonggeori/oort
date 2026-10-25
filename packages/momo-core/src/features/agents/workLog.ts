@@ -12,6 +12,7 @@ import {
   turnStateOf,
 } from "./agentRail";
 import { isOpenRunPhase, runPhaseLabel, turnStateOfPhase } from "./runPhase";
+import { isUncollected, UNCOLLECTED_WORD } from "./runWaiting";
 import {
   IDLE_CUTOFF_MS,
   type AgentTurnState,
@@ -614,12 +615,22 @@ export const WORK_LOG_CLIPPED_SENTENCE =
 export function workLogStateLabel(
   log: WorkLog,
   liveness: WorkLogLiveness,
-  server?: ServerRunFacts | null
+  server?: ServerRunFacts | null,
+  /**
+   * 시계. 주면 사람이 부른 요청이 아무도 가져가지 않은 채 N분을 넘었을 때 「대기 n번째」 대신 홈 카드·활동
+   * 줄과 같은 낱말(「아직 받지 않았어요」)로 말한다(#4285). 같은 run을 한 화면에서 두 낱말로 말하지
+   * 않게 하려는 것이다 — 「취소」가 서는 패널이 카드와 다른 말을 하면 사람은 다른 일로 읽는다. 생략하면
+   * 서버의 낱말 그대로다.
+   */
+  nowMs?: number
 ): string {
   // 서버가 답한 run은 서버의 낱말을 그대로 쓴다(ADR-0200 D1): 대기 n번째 /
   // 가져감 / 진행 중 / 승인 대기 / 끝. 이 클라이언트가 프레임에서 접은 것과
   // 서버가 아는 것이 다르면 서버가 이긴다.
-  if (server !== undefined && server !== null) return runPhaseLabel(server);
+  if (server !== undefined && server !== null) {
+    if (nowMs !== undefined && isUncollected(server, nowMs)) return UNCOLLECTED_WORD;
+    return runPhaseLabel(server);
+  }
   if (liveness === "closed") {
     switch (log.closed?.runStatus) {
       case "succeeded":

@@ -1430,7 +1430,9 @@ export function WorkingCard({
           testID="home-working-card">
           {body}
         </Pressable>
-        <View style={styles.cardStop}>{stop}</View>
+        <View style={styles.cardStop} testID="home-working-card-stop">
+          {stop}
+        </View>
       </GlassSurface>
     </View>
   );
@@ -1809,11 +1811,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderTopLeftRadius: HOME.cardRadius,
     borderTopRightRadius: HOME.cardRadius,
   },
-  // 컨트롤의 글자가 본문 글자 기둥(`HOME.indent`)에 맞는다: 누르는 상자가 가로 여백 `space.sm`을 갖는다.
+  // 컨트롤 줄이 본문 글자 기둥(`HOME.indent`)에서 시작한다: 확인 문장과 두 단추가 기둥에 서고, 첫 탭의
+  // 글자는 상자를 `space.sm` 밀어(`WorkingCardStop` 의 `armFlush`) 같은 기둥에 선다.
   cardStop: {
     paddingRight: HOME.cardPadX,
-    paddingLeft: HOME.cardPadX + HOME.indent - space.sm,
-    paddingBottom: space.xs,
+    paddingLeft: HOME.cardPadX + HOME.indent,
   },
   prog: {
     marginLeft: HOME.indent,

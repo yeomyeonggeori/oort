@@ -10,6 +10,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -19,7 +20,9 @@ import {
   markAgentWorking,
   resetAgentWorking,
 } from '../src/features/agents/workingSignal';
+import {space} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
+import {HOME} from '../src/screens/SidebarScreen';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -352,6 +355,9 @@ describe('홈 카드의 취소: 한 겹의 확인, 같은 호출, 같은 규칙'
         '달무리봇의 요청을 취소했어요.',
       ),
     );
+    // 「취소했어요」 바로 옆에 「취소」가 남지 않는다 — 답을 받았으면 더 권하지 않는다(웹의 `settled`와 같다).
+    expect(screen.queryByTestId(ARM)).toBeNull();
+    expect(screen.queryByTestId(COMMIT)).toBeNull();
   });
 
   it('409(이미 끝났다)는 오류가 아니라 답이다 — 어떻게 끝났는지 말하고 확인 단계를 접는다', async () => {
@@ -371,6 +377,7 @@ describe('홈 카드의 취소: 한 겹의 확인, 같은 호출, 같은 규칙'
     );
     // 이미 끝난 일을 다시 멈추라고 권하지 않는다.
     expect(screen.queryByTestId(COMMIT)).toBeNull();
+    expect(screen.queryByTestId(ARM)).toBeNull();
   });
 
   it('서버 오류는 문장으로 말하고 확인 단계가 남아 다시 누를 수 있다', async () => {
@@ -383,10 +390,40 @@ describe('홈 카드의 취소: 한 겹의 확인, 같은 호출, 같은 규칙'
     await waitFor(() => expect(log.cancelCalls()).toHaveLength(1));
     await waitFor(() =>
       expect(screen.getByTestId('home-working-stop-outcome-error')).toHaveTextContent(
-        '중단하지 못했어요. 서버가 오류로 답했어요.',
+        '취소하지 못했어요. 서버가 오류로 답했어요.',
       ),
     );
+    // 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다 — 실패 문장도 낱말 한 벌을 따른다.
+    expect(screen.getByTestId('home-working-stop-outcome-error')).not.toHaveTextContent('중단');
     expect(screen.getByTestId(COMMIT)).toBeTruthy();
+  });
+
+  it('「취소」 줄이 본문 글자 기둥에 선다 — 첫 탭의 글자도 확인 줄도 같은 x다 (캡처에서 8pt 어긋났던 것)', async () => {
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    const flat = (testID: string) =>
+      StyleSheet.flatten(screen.getByTestId(testID).props.style) as Record<string, number>;
+    // 본문 글자 기둥: 눌리는 면의 가로 여백 + 줄의 들여쓰기.
+    const column = flat('home-working-card').paddingHorizontal + flat('home-working-line').marginLeft;
+    expect(column).toBe(HOME.cardPadX + HOME.indent);
+    // 컨트롤 줄은 기둥에서 시작한다 → 확인 문장과 두 단추가 기둥에 선다.
+    expect(flat('home-working-card-stop').paddingLeft).toBe(column);
+    // 첫 탭은 글자가 가로 여백 space.sm 를 가지므로 상자를 그만큼 밀어 글자가 같은 기둥에 선다.
+    const arm = flat(ARM);
+    expect(arm.paddingHorizontal).toBe(space.sm);
+    expect(arm.marginLeft + arm.paddingHorizontal).toBe(0);
+  });
+
+  it('확인 문장은 어절에서 끊긴다 — 좁은 카드에서 「있어 / 요.」로 끊기지 않는다', async () => {
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    expect(screen.getByTestId('home-working-stop-consequence').props.lineBreakStrategyIOS).toBe(
+      'hangul-word',
+    );
   });
 
   it('카드 본문을 누르면 취소가 있어도 그 대화가 열린다 — 취소 컨트롤은 누르는 면 밖이다', async () => {

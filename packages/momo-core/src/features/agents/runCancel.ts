@@ -165,6 +165,43 @@ export function alreadyOverSentence(message: string): string {
  *        the same rule `unreadableAnswerOutcome` follows for approvals.
  */
 export function cancelFailureOutcome(error: unknown): CancelOutcome {
+  return cancelFailureOutcomeWith(error, STOP_FAILURE_WORDS);
+}
+
+/**
+ * 실패 문장의 낱말. 문장의 짜임(어느 상태 코드가 어느 문장인가)은 「중단」과 「취소」가 같고
+ * 동작·대상의 낱말만 다르다(#4285): 「취소」 버튼 뒤에 「중단하지 못했어요」가 서면 사람은 방금
+ * 누른 것과 다른 일이 실패했다고 읽는다. 409(`alreadyOver`)는 실패가 아니라 답이라 두 한 벌이
+ * 같은 말을 한다.
+ */
+export interface CancelFailureWords {
+  forbidden: string;
+  gone: string;
+  tooMany: string;
+  server: string;
+  /** 보내지 못했다. 아무것도 나가지 않았으므로 그 사실을 대상의 낱말로 말한다. */
+  network: (message: string) => string;
+  other: string;
+}
+
+/** 기존의 「중단」 실패 문장 여섯 개. 글자 하나도 바뀌지 않았다. */
+const STOP_FAILURE_WORDS: CancelFailureWords = {
+  forbidden: "중단하지 못했어요. 이 실행이 있는 채널의 멤버만 중단할 수 있어요.",
+  gone: "중단하지 못했어요. 그 실행이 이미 없어졌거나, 이 서버가 실행 중단을 아직 받지 않아요.",
+  tooMany: "중단하지 못했어요. 요청이 너무 잦아요. 잠시 뒤에 다시 해 주세요.",
+  server: "중단하지 못했어요. 서버가 오류로 답했어요.",
+  network: (message) => `중단하지 못했어요. ${message} 실행은 그대로예요.`,
+  other: "중단하지 못했어요. 잠시 뒤에 다시 해 주세요.",
+};
+
+/**
+ * 읽는 규칙은 하나이고 낱말만 받는다. 상태 코드를 화면에 올리지 않고, 409는 오류가 아닌 답으로
+ * 읽는다(`cancelFailureOutcome`의 주석).
+ */
+export function cancelFailureOutcomeWith(
+  error: unknown,
+  words: CancelFailureWords
+): CancelOutcome {
   if (error instanceof ApiError) {
     if (error.status === 409) {
       return {
@@ -173,44 +210,24 @@ export function cancelFailureOutcome(error: unknown): CancelOutcome {
       };
     }
     if (error.status === 401 || error.status === 403) {
-      return {
-        kind: "error",
-        sentence:
-          "중단하지 못했어요. 이 실행이 있는 채널의 멤버만 중단할 수 있어요.",
-      };
+      return { kind: "error", sentence: words.forbidden };
     }
     if (error.status === 404 || error.status === 405) {
-      return {
-        kind: "error",
-        sentence:
-          "중단하지 못했어요. 그 실행이 이미 없어졌거나, 이 서버가 실행 중단을 아직 받지 않아요.",
-      };
+      return { kind: "error", sentence: words.gone };
     }
     if (error.status === 429) {
-      return {
-        kind: "error",
-        sentence: "중단하지 못했어요. 요청이 너무 잦아요. 잠시 뒤에 다시 해 주세요.",
-      };
+      return { kind: "error", sentence: words.tooMany };
     }
     if (error.status >= 500) {
-      return {
-        kind: "error",
-        sentence: "중단하지 못했어요. 서버가 오류로 답했어요.",
-      };
+      return { kind: "error", sentence: words.server };
     }
   }
   if (error instanceof NetworkError) {
     // The run is untouched — nothing was sent, so nothing half-happened. Saying
     // so is what stops someone from assuming it stopped anyway.
-    return {
-      kind: "error",
-      sentence: `중단하지 못했어요. ${error.message} 실행은 그대로예요.`,
-    };
+    return { kind: "error", sentence: words.network(error.message) };
   }
-  return {
-    kind: "error",
-    sentence: "중단하지 못했어요. 잠시 뒤에 다시 해 주세요.",
-  };
+  return { kind: "error", sentence: words.other };
 }
 
 // ---- 아직 아무도 가져가지 않은 요청의 말 (#4285) ------------------------------
@@ -244,6 +261,13 @@ export interface CancelWording {
   consequence: (runCount: number | undefined) => string;
   /** 200 뒤의 영수증. */
   receipt: (result: AgentRunCancelResult, agentName: string) => string;
+  /**
+   * 실패·거절을 읽은 문장. 상태 코드와 문장의 짜임은 같고 동작·대상의 낱말만 한 벌을 따른다 —
+   * 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다. 409는 실패가 아니라 답이라 같다.
+   */
+  failure: (error: unknown) => CancelOutcome;
+  /** 컨트롤이 선 영역의 이름(웹의 랜드마크). 버튼이 말하는 동작과 같은 낱말이다. */
+  regionName: string;
 }
 
 /** 기존의 「중단」. 돌고 있는(가져간) 실행에 쓴다. */
@@ -257,6 +281,8 @@ export const STOP_WORDING: CancelWording = {
   announce: (consequence) => `${consequence} 중단할지 물어요.`,
   consequence: cancelConfirmSentence,
   receipt: cancelReceipt,
+  failure: cancelFailureOutcome,
+  regionName: "실행 중단",
 };
 
 /** 아직 아무도 가져가지 않은 요청의 확인 문장. */
@@ -288,6 +314,19 @@ export function cancelUntakenReceipt(
   return `${agentName}의 요청을 취소했어요.`;
 }
 
+/**
+ * 아직 아무도 가져가지 않은 요청의 실패 문장. 대상은 「실행」이 아니라 「요청」이고(영수증과 같은
+ * 낱말), 「요청이 너무 잦아요」는 이 자리에서 사람이 보낸 요청과 헷갈려 「전송」으로 말한다.
+ */
+export const UNTAKEN_FAILURE_WORDS: CancelFailureWords = {
+  forbidden: "취소하지 못했어요. 이 요청이 있는 채널의 멤버만 취소할 수 있어요.",
+  gone: "취소하지 못했어요. 그 요청이 이미 없어졌거나, 이 서버가 요청 취소를 아직 받지 않아요.",
+  tooMany: "취소하지 못했어요. 전송이 너무 잦아요. 잠시 뒤에 다시 해 주세요.",
+  server: "취소하지 못했어요. 서버가 오류로 답했어요.",
+  network: (message) => `취소하지 못했어요. ${message} 요청은 그대로예요.`,
+  other: "취소하지 못했어요. 잠시 뒤에 다시 해 주세요.",
+};
+
 /** 아직 아무도 가져가지 않은 요청의 「취소」. */
 export const UNTAKEN_WORDING: CancelWording = {
   action: "취소",
@@ -299,6 +338,8 @@ export const UNTAKEN_WORDING: CancelWording = {
   announce: (consequence) => `${consequence} 취소할지 물어요.`,
   consequence: cancelUntakenConfirmSentence,
   receipt: cancelUntakenReceipt,
+  failure: (error) => cancelFailureOutcomeWith(error, UNTAKEN_FAILURE_WORDS),
+  regionName: "요청 취소",
 };
 
 /**

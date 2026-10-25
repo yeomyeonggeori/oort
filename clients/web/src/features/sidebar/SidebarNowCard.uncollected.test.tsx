@@ -4,7 +4,13 @@ import { resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { AgentLiveness, AgentRunProgress, Channel, RosterMember } from "@momo/core/lib/api";
+import {
+  agentRunProgressFromWire,
+  type AgentLiveness,
+  type AgentRunProgress,
+  type Channel,
+  type RosterMember,
+} from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { signalFromProgress } from "@momo/core/features/agents/runPhase";
 import type { AgentWorkingSignal } from "@/features/agents/agentWorkingSignal";
@@ -102,6 +108,27 @@ describe("부른 사람이 없는 시스템 작업(환영)은 카드가 아니�
   it("5시간째 대기여도 카드를 그리지 않는다", () => {
     const { container } = mount([queued({ id: RUN, triggerMessageId: undefined, system: true })]);
     expect(container.innerHTML).toBe("");
+  });
+
+  it("제목이 U+FEFF뿐인 작업도 카드에 선다 — 서버가 제목으로 센 글자를 「없음」으로 읽으면 사람의 요청이 사라진다 (planner 결정 1)", () => {
+    const work = signalFromProgress(
+      agentRunProgressFromWire({
+        id: RUN,
+        channelId: CH,
+        agentMemberId: AGENT,
+        triggerSummary: "\uFEFF",
+        status: "queued",
+        phase: "queued",
+        leaseState: "none",
+        stepCount: 0,
+        queuePosition: 1,
+        createdAtMs: NOW - 10 * MIN,
+        updatedAtMs: NOW - 10 * MIN,
+      })
+    );
+    if (work === null) throw new Error("signal");
+    mount([work]);
+    expect(screen.getByTestId("sidebar-now-card").textContent).toContain("아직 받지 않았어요");
   });
 
   it("카드는 사람이 부른 요청이고 「외 n건」도 숨은 일을 세지 않는다", () => {

@@ -157,6 +157,60 @@ describe("아직 아무도 가져가지 않은 요청: 「취소」 한 벌", ()
   });
 });
 
+describe("실패 문장도 「취소」 한 벌이다 (planner 결정 3)", () => {
+  it.each([
+    [403, { error: { message: "active human channel member required" } }, "취소하지 못했어요. 이 요청이 있는 채널의 멤버만 취소할 수 있어요."],
+    [404, { error: { message: "agent run not found" } }, "취소하지 못했어요. 그 요청이 이미 없어졌거나, 이 서버가 요청 취소를 아직 받지 않아요."],
+    [500, { error: { message: "boom" } }, "취소하지 못했어요. 서버가 오류로 답했어요."],
+  ])("%i → 문장이 「취소하지 못했어요」이고 「중단」이 없다", async (status, body, sentence) => {
+    fetchMock.mockImplementation(async () => answer(status as number, body));
+    mount(UNTAKEN_WORDING);
+    await click("agent-work-panel-stop-arm");
+    await click("agent-work-panel-stop-commit");
+    await settle();
+    const outcome = q("agent-work-panel-stop-outcome");
+    expect(outcome?.getAttribute("data-kind")).toBe("error");
+    expect(outcome?.textContent).toBe(sentence);
+    expect(outcome?.textContent).not.toContain("중단");
+    // 실패는 다시 누를 수 있다: 확인 줄은 그대로다.
+    expect(q("agent-work-panel-stop-commit")).not.toBeNull();
+  });
+
+  it("보내지 못했을 때도 무엇이 그대로인지 「요청」이라고 말한다", async () => {
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    mount(UNTAKEN_WORDING);
+    await click("agent-work-panel-stop-arm");
+    await click("agent-work-panel-stop-commit");
+    await settle();
+    const text = q("agent-work-panel-stop-outcome")?.textContent ?? "";
+    expect(text.startsWith("취소하지 못했어요.")).toBe(true);
+    expect(text.endsWith("요청은 그대로예요.")).toBe(true);
+    expect(text).not.toContain("중단");
+  });
+
+  it("가져간 뒤의 「중단」은 전과 같은 문장이다", async () => {
+    fetchMock.mockImplementation(async () => answer(500, { error: { message: "boom" } }));
+    mount();
+    await click("agent-work-panel-stop-arm");
+    await click("agent-work-panel-stop-commit");
+    await settle();
+    expect(q("agent-work-panel-stop-outcome")?.textContent).toBe(
+      "중단하지 못했어요. 서버가 오류로 답했어요."
+    );
+  });
+
+  it("컨트롤이 선 영역의 이름이 버튼의 동작과 같다 (취소 ↔ 요청 취소, 중단 ↔ 실행 중단)", async () => {
+    mount(UNTAKEN_WORDING);
+    expect(host?.querySelector("section")?.getAttribute("aria-label")).toBe("요청 취소");
+    act(() => root?.unmount());
+    host?.remove();
+    mount();
+    expect(host?.querySelector("section")?.getAttribute("aria-label")).toBe("실행 중단");
+  });
+});
+
 describe("낱말을 고르는 규칙", () => {
   it("생략하면 기존 「중단」이다 (가져간 뒤의 run·서버가 모르는 run)", () => {
     mount();
@@ -168,6 +222,14 @@ describe("낱말을 고르는 규칙", () => {
     for (const phase of ["claimed", "running", "awaiting_approval", "paused"] as const) {
       expect(cancelWordingFor({ phase }).action).toBe("중단");
     }
+  });
+
+  it("작업 패널의 상태 칩이 시계를 넘겨 카드·활동 줄과 같은 낱말을 말한다 (배선)", () => {
+    // 같은 run을 한 화면에서 두 낱말(「아직 받지 않았어요」 / 「대기 1번째」)로 말하지 않는다. 칩의 낱말은
+    // 코어 `workLogStateLabel`이 고르고(시험은 `runWaiting.test.ts`), 패널이 시계를 넘기지 않으면 코어는
+    // 서버의 낱말 그대로 말한다 — 그 한 줄의 배선을 소스에서 잠근다.
+    const panel = readFileSync(resolve(__dirname, "AgentWorkPanel.tsx"), "utf8");
+    expect(panel).toMatch(/workLogStateLabel\(log, liveness, server, nowMs\)/);
   });
 
   it("작업 패널이 서버의 run 사실로 낱말을 고른다 (배선)", () => {

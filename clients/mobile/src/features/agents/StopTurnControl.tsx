@@ -1,13 +1,21 @@
 import {cancelAgentRun} from '@momo/core/lib/api';
 import {
-  cancelFailureOutcome,
   cancelSucceeded,
   STOP_WORDING,
   type CancelOutcome,
   type CancelWording,
 } from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useRef, useState} from 'react';
-import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  AccessibilityInfo,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {CONFIRM_GUARD_MS} from '../inbox/ApprovalDecision';
@@ -50,6 +58,8 @@ export function StopTurnControl({
   testIDPrefix = 'turn-stop',
   initialArmed = false,
   wording = STOP_WORDING,
+  armStyle,
+  confirmStyle,
 }: {
   runId: string;
   /**
@@ -73,6 +83,14 @@ export function StopTurnControl({
    * 「중단」이다(#4285). 보내는 호출과 409·오류를 읽는 규칙은 둘이 같다.
    */
   wording?: CancelWording;
+  /**
+   * 첫 탭(묻는 단추)의 상자에 더하는 스타일. 단추의 글자가 가로 여백 `space.sm`을 갖고 있어 글자 기둥에
+   * 맞추려면 상자를 그만큼 왼쪽으로 밀어야 하는 자리(홈 카드, #4285)가 쓴다 — 밀리는 것은 상자뿐이고
+   * 확인 줄(문장·두 단추)은 기둥에 그대로 선다.
+   */
+  armStyle?: StyleProp<ViewStyle>;
+  /** 확인 줄(문장·두 단추)의 상자에 더하는 스타일. 줄이 서는 자리가 아래 여백을 정할 때 쓴다(홈 카드, #4285). */
+  confirmStyle?: StyleProp<ViewStyle>;
   /**
    * 확인 단계에서 시작한다. **`measure/` 하네스 전용** — 근거와 규칙은
    * `features/inbox/ApprovalDecision.tsx` 의 같은 이름 prop 주석에 있고,
@@ -117,7 +135,8 @@ export function StopTurnControl({
       setArmed(false);
       onOutcome(cancelSucceeded(result, agentName, wording));
     } catch (error) {
-      const outcome = cancelFailureOutcome(error);
+      // 실패 문장도 낱말 한 벌을 따른다: 「취소」 버튼 뒤에 「중단하지 못했어요」가 서지 않는다.
+      const outcome = wording.failure(error);
       // 이미 끝난 실행은 더 물어볼 것이 없다. 확인 단계를 접는다 — 남겨 두면
       // 존재하지 않는 실행을 다시 멈추라고 권하는 버튼이 화면에 남는다.
       if (outcome.kind === 'alreadyOver') setArmed(false);
@@ -137,7 +156,7 @@ export function StopTurnControl({
         accessibilityHint={wording.armHint}
         onPress={arm}
         hitSlop={8}
-        style={({pressed}) => [styles.quiet, pressed && styles.pressed]}
+        style={({pressed}) => [styles.quiet, armStyle, pressed && styles.pressed]}
         testID={`${testIDPrefix}-arm`}>
         <Text style={styles.quietLabel}>{wording.action}</Text>
       </Pressable>
@@ -145,8 +164,11 @@ export function StopTurnControl({
   }
 
   return (
-    <View style={styles.confirm} testID={`${testIDPrefix}-confirm`}>
-      <Text style={styles.consequence}>{consequence}</Text>
+    <View style={[styles.confirm, confirmStyle]} testID={`${testIDPrefix}-confirm`}>
+      {/* 문장이라 어절에서 끊는다(`Sentence`): 좁은 카드에서 「있어 / 요.」로 끊기지 않게. */}
+      <Sentence style={styles.consequence} testID={`${testIDPrefix}-consequence`}>
+        {consequence}
+      </Sentence>
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"
@@ -182,10 +204,10 @@ export function StopTurnControl({
         </Pressable>
       </View>
       {tooFast ? (
-        <Text style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
+        <Sentence style={styles.hint} testID={`${testIDPrefix}-too-fast`}>
           방금 누른 탭과 이어진 동작이라 보내지 않았어요. 문장을 확인하고 다시
           눌러 주세요.
-        </Text>
+        </Sentence>
       ) : null}
     </View>
   );
