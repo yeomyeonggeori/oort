@@ -8,12 +8,8 @@ import {
   View,
 } from 'react-native';
 
-import {
-  GroupSection,
-  OutlineButton,
-  PrimaryButton,
-  Sentence,
-} from '../../design/atoms';
+import {OutlineButton, PrimaryButton, Sentence} from '../../design/atoms';
+import {GroupCard} from '../../design/sheetParts';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   font,
@@ -145,7 +141,10 @@ export function DeviceKeyPanel({
 
   return (
     <View style={styles.root} testID={testID}>
-      <GroupSection>
+      {/* 가로 여백은 이 패널이 진다 — `GroupCard` 는 폭 전체로 서고 바깥 16 은 호스트의 몫인데, 이 패널의 두 호스트
+          (지시 기기 시트의 날 ScrollView·프로필 시트의 안쪽 장)는 그 여백을 주지 않는다. 옛 `GroupSection` 은 카드가
+          스스로 졌다. 아래 `actions`·`failure` 도 같은 이유로 제 여백을 든다. */}
+      <GroupCard style={styles.cardGutter} testID="device-key-card">
         <View
           accessible
           accessibilityLabel={`${DEVICE_KEY_TITLE}: ${copy.badge}. ${copy.headline} ${copy.detail}${
@@ -232,7 +231,7 @@ export function DeviceKeyPanel({
             </View>
           </View>
         ) : null}
-      </GroupSection>
+      </GroupCard>
 
       {primary ? (
         <View style={styles.actions}>
@@ -378,8 +377,6 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: space.lg,
       paddingVertical: space.md,
       gap: space.xs,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      borderTopColor: color.border,
     },
     fingerprintLabel: {
       fontSize: font.label,
@@ -398,6 +395,7 @@ const buildStyles = (color: Palette) =>
       fontWeight: '600',
       color: color.text,
     },
+    cardGutter: {paddingHorizontal: SAFE_GUTTER},
     actions: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
     failure: {
       fontSize: font.label,
