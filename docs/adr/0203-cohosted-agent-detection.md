@@ -9,6 +9,7 @@
 - 증보(**Accepted** 2026-10-19, 통합자): **2026-10-19 설치 한 번에 Hermes까지** (#4072, 성재 2026-10-19 「제로 베이스 온보딩 개선 묶음도 진행」) — 파일 끝. D8을 구현 이름으로 확정하고, 생성기의 `HERMES_*`·로컬 opt-in·`OORT_COHOSTED_AGENT_TOOLS_LOCKED` 자동 주입과 Railway 카탈로그의 `hermes` 서비스를 더한다. D6-5 attest의 의미가 번들 배포 모양에 한해 바뀐다. D1~D5·D7·K1~K7은 바뀌지 않는다.
 - 증보: **2026-10-19 Hermes의 모델 인증에 구독 OAuth 허용**(#4071, owner 결정) — Hermes가 자기 볼륨에 Codex·Claude 구독 OAuth를 보관해 모델 인증에 쓴다. 파일 끝. D1~D9는 바뀌지 않는다.
 - 증보(**Accepted** 2026-10-20, owner 승인 인용): **2026-10-20 같은 서버 Hermes의 모델 고르기** (#4143) — 파일 끝. 핀에 Hermes 제공자(`provider`)와 모델을 한 쌍으로 저장하고, 서버가 Hermes `/api/model/options`의 「로그인된 제공자」 목록 안으로 선택을 제한하며, 워커가 `/v1/chat/completions`에 둘을 함께 보낸다. D2의 고정 요청 목록에 읽기 GET 하나가 늘고, migration 144가 핀 표에 열 두 개를 더한다. D1·D3~D9·K1~K7은 바뀌지 않는다.
+- 역방향: 2026-10-25 D6(Hermes 도구 잠금)은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)이 바꾸지 않는다. 팀 박스는 Hermes와 별개의 컴퓨터이고 Hermes 컨테이너(`/opt/data`)에는 셸을 붙이지 않으며 Hermes `terminal` 백엔드를 박스로 향하게 하지 않는다. 본문 결정은 바꾸지 않았다.
 - 표기: [V] 직접 확인(저장소 코드·문서 또는 이 세션에서 받은 공식 문서 원문) · **[추정]** 해석·계산 · [확인 필요] 구현 전 확인 · `runtime-unverified` 실행 안 함. 이 문서는 설계이고 코드·인프라를 바꾸지 않았다.
 
 ## 맥락
