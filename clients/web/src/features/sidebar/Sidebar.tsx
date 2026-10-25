@@ -57,6 +57,8 @@ import { openChannelId } from "./openChannel";
 import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail, type RailDestination } from "./WorkspaceRail";
 import { SidebarNowCard } from "./SidebarNowCard";
+import { nowCardWaitingAgentId } from "./nowCardLiveness";
+import { useAgentLiveness } from "@/features/agents/useAgentLiveness";
 import { SidebarDestinations } from "./SidebarDestinations";
 import { destinationMarks } from "./sidebarBadge";
 import { useLocalPaneAttention } from "@/features/workbench/local/paneAttention";
@@ -301,6 +303,10 @@ export function Sidebar({
   const approvalWaits = useApprovalWaits();
   const railLive = connStatus === "connected";
   const nowMs = Date.now();
+  // 작업 중 카드가 아무도 가져가지 않은 사람 요청을 말하면 그 에이전트의 서버 생존 판정(D4)을 읽어
+  // 카드에 싣는다(#4285). 다른 상태의 카드는 쿼리를 세우지 않는다.
+  const nowCardAgentId = nowCardWaitingAgentId(turnSignals, nowMs);
+  const nowCardLiveness = useAgentLiveness(nowCardAgentId);
 
   // What the subscription cap left out (agentRail MAX_AGENT_SUBSCRIPTIONS).
   // Same pure function and the same inputs the rail subscribes with, so the two
@@ -983,6 +989,7 @@ export function Sidebar({
                     directory={directoryQuery.directory}
                     channels={[...channels, ...dms]}
                     selfMemberId={session.member.id}
+                    liveness={nowCardAgentId === null ? undefined : nowCardLiveness.liveness}
                   />
                 }
               />

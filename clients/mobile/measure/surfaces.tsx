@@ -188,11 +188,13 @@ import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
+import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
 import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
+import {AvatarApprovalSurface} from './avatarApproval';
 import {PhotoViewerSurface} from './photoViewer';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2244,6 +2246,16 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4293: 사진 뷰어(안전 영역·아래로 쓸어 닫기). 실제 대화에 사진 메시지, 여는 것은 Maestro 의 실제 탭.
   if (name.startsWith('photo-viewer')) {
     return <PhotoViewerSurface which={name.slice('photo-viewer'.length).replace(/^-/, '')} />;
+  }
+
+  // #4394: member.avatar.set 승인 카드(제안된 사진·본인만 볼 수 있다는 줄). 사진은 avatar-stub.mjs 가 답한다.
+  if (name.startsWith('avatar-approval')) {
+    return <AvatarApprovalSurface which={name.slice('avatar-approval'.length).replace(/^-/, '')} />;
+  }
+
+  // #4285: 아무도 가져가지 않은 요청 — 홈 「작업 중」 카드와 대화 아래 활동 줄(「아직 받지 않았어요」·「취소」).
+  if (isUncollectedSurface(name)) {
+    return <UncollectedSurface name={name} />;
   }
 
   switch (name) {
@@ -7471,6 +7483,13 @@ if (
   LAUNCHED.name.startsWith('dm-steady')
 ) {
   seedSteady();
+}
+if (
+  LAUNCHED !== null &&
+  LAUNCHED.kind === 'surface' &&
+  isUncollectedSurface(LAUNCHED.name)
+) {
+  seedUncollected(harnessClient, LAUNCHED.name);
 }
 if (
   LAUNCHED !== null &&

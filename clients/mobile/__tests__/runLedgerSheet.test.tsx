@@ -130,6 +130,42 @@ describe('폰 기록 시트 (#3824)', () => {
     );
   });
 
+  // 낱말을 고르는 규칙은 코어 `runStateWord` 하나다(홈 카드·웹 패널 머리 칩·목록 칩과 같다). 시트의 칩이 그것을 부르는지
+  // 세 장면으로 잰다(#4285 design-review r1 H5: 시트만 「대기 1번째」로 말하던 것).
+  it.each([
+    ['가져가는 이 없이 5분을 넘은 사람 요청은 「아직 받지 않았어요」', 17 * 60 * MIN, {}, '아직 받지 않았어요'],
+    ['5분 안의 요청은 서버의 낱말 그대로 「대기 1번째」', 2 * MIN, {}, '대기 1번째'],
+    [
+      '부른 사람이 없는 시스템 작업은 오래 기다려도 「대기 1번째」 그대로',
+      17 * 60 * MIN,
+      {triggerMessageId: undefined, triggerSummary: undefined, system: true},
+      '대기 1번째',
+    ],
+  ] as const)('시트의 상태 칩: %s', async (_name, waited, extra, word) => {
+    const now = Date.now();
+    mockFetchEvents.mockResolvedValue(
+      jest.requireActual('@momo/core/lib/api').agentRunLedgerFromWire({
+        runId: RUN,
+        events: [{ordinal: 1, kind: 'queued', createdAtMs: now - waited}],
+      }),
+    );
+    const queued = progress({
+      status: 'queued',
+      phase: 'queued',
+      leaseState: 'none',
+      claimedAtMs: undefined,
+      startedAtMs: undefined,
+      finishedAtMs: undefined,
+      queuePosition: 1,
+      createdAtMs: now - waited,
+      updatedAtMs: now - waited,
+      ...extra,
+    });
+    render(wrap(<RunLedgerSheet progress={queued} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+    expect(screen.getByTestId('run-ledger-phase').props.children).toBe(word);
+  });
+
   it('읽지 못하면 침묵하지 않고 다시 시도를 준다', async () => {
     mockFetchEvents.mockRejectedValue(new Error('network'));
     render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));

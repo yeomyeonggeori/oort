@@ -74,6 +74,30 @@ function message(overrides: Partial<Message> = {}): Message {
   };
 }
 
+describe("승인 알림 문구: member.avatar.set (#4394)", () => {
+  it("OS 배너는 서버가 정한 행동 이름을 말하고 원문 id 를 내지 않는다", () => {
+    const decision = notifyDecision(
+      event({
+        type: "approval_request",
+        author_member_id: AGENT,
+        body: "승인 요청: 내 프로필 사진 바꾸기",
+        props: {
+          approval_id: "019F8338-025E-7873-93A3-C1FBA9149185",
+          status: "pending",
+          title: "내 프로필 사진 바꾸기",
+          action: { id: "member.avatar.set", rows: [], required_role: "requesting_member" },
+        },
+      }),
+      context()
+    );
+    expect(decision.show).toBe(true);
+    if (!decision.show) return;
+    expect(decision.notification.title).toBe("승인 필요 · @hermes");
+    expect(decision.notification.body).toBe("내 프로필 사진 바꾸기");
+    expect(JSON.stringify(decision.notification)).not.toContain("member.avatar.set");
+  });
+});
+
 describe("notifiableKind", () => {
   it("reads the server's own mention decision, not the body text", () => {
     expect(
@@ -589,5 +613,76 @@ describe("알림이 카드로 착지한다 (#3738)", () => {
       NOW + 500
     );
     expect(openTarget(armed, NOW + 600)).toBe(`/c/${CHANNEL}`);
+  });
+});
+
+describe("사진만 보낸 DM·멘션의 배너 본문 (#4294)", () => {
+  const wire = (n: number, mime = "image/jpeg") =>
+    Array.from({ length: n }, (_, i) => ({ id: `att-${mime}-${i}`, name: `파일${i}`, mime, sizeBytes: 2048 }));
+  const dm = (over: Partial<NotifyContext> = {}) =>
+    context({ isDirect: () => true, actorFor: () => "서연", ...over });
+  const shown = (decision: ReturnType<typeof notifyDecision>) => {
+    expect(decision.show).toBe(true);
+    if (!decision.show) throw new Error("expected a banner");
+    return decision.notification;
+  };
+
+  it("글 없는 DM은 제목만 있는 배너가 아니라 「사진 1장」을 본문으로 한다", () => {
+    const n = shown(notifyDecision(event({ props: {}, body: "", attachments: wire(1) }), dm()));
+    expect(n).toMatchObject({ kind: "dm", title: "서연", body: "사진 1장" });
+  });
+
+  it("본문 키 자체가 null로 와도 같다 (서버는 빈 본문을 null로 싣는다)", () => {
+    const n = shown(
+      notifyDecision(event({ props: {}, body: null, attachments: wire(3) }), dm())
+    );
+    expect(n.body).toBe("사진 3장");
+  });
+
+  it("멘션도 파일만 있으면 개수로 말한다", () => {
+    const n = shown(
+      notifyDecision(event({ body: "", attachments: wire(2, "application/pdf") }), context())
+    );
+    expect(n).toMatchObject({ kind: "mention", body: "파일 2개" });
+  });
+
+  it("사진과 파일이 섞이면 사진이 먼저다", () => {
+    const n = shown(
+      notifyDecision(
+        event({ props: {}, body: "", attachments: [...wire(1, "application/pdf"), ...wire(2)] }),
+        dm()
+      )
+    );
+    expect(n.body).toBe("사진 2장, 파일 1개");
+  });
+
+  it("글이 있으면 글이 이긴다", () => {
+    const n = shown(
+      notifyDecision(event({ props: {}, body: "회의 자료예요", attachments: wire(1) }), dm())
+    );
+    expect(n.body).toBe("회의 자료예요");
+  });
+
+  it("코드뿐인 글도 글이다: 「코드」가 첨부 문구보다 앞선다", () => {
+    const n = shown(
+      notifyDecision(event({ props: {}, body: "```\nls -la\n```", attachments: wire(1) }), dm())
+    );
+    expect(n.body).toBe("코드");
+  });
+
+  it("글도 첨부도 없으면 예전처럼 본문을 싣지 않는다", () => {
+    const n = shown(notifyDecision(event({ props: {}, body: "" }), dm()));
+    expect(n).not.toHaveProperty("body");
+  });
+
+  it("파일 이름은 배너에 싣지 않는다", () => {
+    const n = shown(
+      notifyDecision(
+        event({ props: {}, body: "", attachments: [{ id: "a", name: "급여명세서-비공개.png", mime: "image/png", sizeBytes: 1 }] }),
+        dm()
+      )
+    );
+    expect(n.body).toBe("사진 1장");
+    expect(JSON.stringify(n)).not.toContain("급여명세서");
   });
 });

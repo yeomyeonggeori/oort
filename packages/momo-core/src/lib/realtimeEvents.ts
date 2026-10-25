@@ -74,6 +74,10 @@ export interface MessageNewEvent {
      *
      * 안쪽 키는 REST 와 같은 camelCase 다(서버 테스트가 그것을 단정한다).
      * 첨부가 없는 메시지에는 키 자체가 없다.
+     *
+     * **`message.edited` 는 이 키를 싣지 않는다**(편집은 묶인 첨부를 바꾸지 못한다 —
+     * `build_message_edited_payload`). 그 침묵은 삭제가 아니므로 `reconcileMessages`
+     * 가 이미 든 행의 첨부로 메운다(#4441).
      */
     attachments?: unknown;
   };

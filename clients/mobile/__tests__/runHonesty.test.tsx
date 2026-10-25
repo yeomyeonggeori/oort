@@ -148,7 +148,9 @@ describe('홈 카드: 서버가 말한 단계 그대로', () => {
 
     const model = card(signal);
     expect(model).not.toBeNull();
-    expect(model?.liveText).toBe('대기 2번째');
+    // 5분을 넘긴 사람 요청이라 「대기 2번째」가 아니라 「아직 받지 않았어요」다(#4285). 순번은 근거 줄의
+    // 「에이전트 앞에 1건」이 이어 말한다.
+    expect(model?.liveText).toBe('아직 받지 않았어요');
     expect(model?.detail).toBe('11분째 기다려요 · 에이전트 앞에 1건');
     expect(model?.state).toBe('queued');
     expect(model?.accessibilityLabel).not.toMatch(/작업 중|신호 소실|끊/);
@@ -226,11 +228,13 @@ describe('홈 카드 본문', () => {
 
 describe('대화 위 활동 줄', () => {
   it('대기 run은 「대기 2번째」와 근거 줄을 말하고 「작업 중」이라 하지 않는다', () => {
+    // 5분이 안 된 요청이다: 5분을 넘으면 「아직 받지 않았어요」로 바뀐다(#4285, `uncollectedRun.test.tsx`).
+    const now = Date.now();
     render(
       <AgentActivityBar
-        turns={[signalOf({queuePosition: 2, aheadTotal: 1})]}
+        turns={[signalOf({queuePosition: 2, aheadTotal: 1, createdAtMs: now - 3 * MIN})]}
         directory={DIRECTORY}
-        nowMs={Date.now()}
+        nowMs={now}
         live
       />,
     );
@@ -238,7 +242,7 @@ describe('대화 위 활동 줄', () => {
     expect(bar).toHaveTextContent(/그록봇.*대기 2번째/);
     expect(bar).not.toHaveTextContent(/작업 중/);
     expect(screen.getByTestId('activity-detail')).toHaveTextContent(
-      '11분째 기다려요 · 에이전트 앞에 1건',
+      '3분째 기다려요 · 에이전트 앞에 1건',
     );
   });
 

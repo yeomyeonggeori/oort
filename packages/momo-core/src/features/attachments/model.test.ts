@@ -9,6 +9,7 @@ import {
   draftStatusLine,
   attachmentIdsOf,
   attachmentMetaLine,
+  attachmentPreviewLine,
   beginUpload,
   completeUpload,
   draftFor,
@@ -17,6 +18,7 @@ import {
   formatMimeLabel,
   hasPdfSignature,
   isPdfAttachment,
+  isPhotoAttachment,
   INLINE_PREVIEW_MAX_BYTES,
   isRetryableIssue,
   issueForStatus,
@@ -538,5 +540,54 @@ describe("attachmentDisplayName (#3820)", () => {
   });
   it("picks grid columns by count", () => {
     expect([1, 2, 4, 5, 9].map(imageGridColumns)).toEqual([1, 2, 2, 3, 3]);
+  });
+});
+
+describe("attachmentPreviewLine (#4294) - 글 없이 첨부만 보낸 메시지의 한 줄", () => {
+  const photo = (mime = "image/jpeg") => ({ mime });
+  const file = (mime = "application/pdf") => ({ mime });
+
+  it("names photos by count", () => {
+    expect(attachmentPreviewLine([photo()])).toBe("사진 1장");
+    expect(attachmentPreviewLine([photo(), photo("image/heic"), photo("image/png")])).toBe("사진 3장");
+  });
+
+  it("names every other kind by count as 파일", () => {
+    expect(attachmentPreviewLine([file()])).toBe("파일 1개");
+    expect(
+      attachmentPreviewLine([file(), file("application/zip"), file("video/mp4"), file("audio/mpeg")])
+    ).toBe("파일 4개");
+  });
+
+  it("puts photos first when the two are mixed, whatever order they were attached in", () => {
+    expect(attachmentPreviewLine([file(), photo(), photo()])).toBe("사진 2장, 파일 1개");
+    expect(attachmentPreviewLine([photo(), file(), file()])).toBe("사진 1장, 파일 2개");
+  });
+
+  it("counts an SVG as a file: the timeline stands it up as a card, not a picture", () => {
+    expect(attachmentPreviewLine([photo("image/svg+xml")])).toBe("파일 1개");
+    expect(attachmentPreviewLine([photo("image/svg+xml"), photo("image/png")])).toBe("사진 1장, 파일 1개");
+    expect(isPhotoAttachment({ mime: "image/svg+xml" })).toBe(false);
+  });
+
+  it("reads a mime the way isImageMime does: case and padding do not matter", () => {
+    expect(attachmentPreviewLine([photo("  IMAGE/PNG ")])).toBe("사진 1장");
+  });
+
+  it("says nothing (null, not an empty string) when there is nothing attached", () => {
+    expect(attachmentPreviewLine([])).toBeNull();
+    expect(attachmentPreviewLine(undefined)).toBeNull();
+    expect(attachmentPreviewLine(null)).toBeNull();
+  });
+
+  it("never throws on a malformed entry: it counts as a file", () => {
+    const broken = { mime: undefined } as unknown as { mime: string };
+    expect(attachmentPreviewLine([broken])).toBe("파일 1개");
+    expect(attachmentPreviewLine([null as unknown as { mime: string }, photo()])).toBe("사진 1장, 파일 1개");
+  });
+
+  it("never carries a file name: the line is a count, not content", () => {
+    const named = [{ mime: "image/png", name: "급여명세서-비공개.png" }];
+    expect(attachmentPreviewLine(named)).toBe("사진 1장");
   });
 });

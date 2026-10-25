@@ -866,3 +866,50 @@ export function imageGridColumns(count: number): 1 | 2 | 3 {
   if (count <= 1) return 1;
   return count <= 4 ? 2 : 3;
 }
+
+// ---- 글 없이 첨부만 보낸 메시지의 한 줄 (#4294) -------------------------------
+//
+// 사진만 보낸 메시지는 `body`가 비어 있다. 본문으로 한 줄을 짓는 자리(인박스 줄, 데스크탑·
+// 브라우저 배너, 액션 시트)는 그 빈 문자열을 그대로 말하거나 「내용 없는 메시지」라고 했다 —
+// 사진이 달려 있는데도. 이 한 곳이 그 자리들의 답이다: **빈 본문 갈래에서 이 함수를 먼저
+// 묻는다.** 본문이 있으면 본문이 이기고(첨부는 카드가 그려 준다), 첨부도 없으면 `null`이라
+// 「내용 없는 메시지」 같은 자리마다 다른 문장은 호출하는 쪽이 그대로 쓴다.
+//
+// 파일 이름은 싣지 않는다. 이름은 사람이 지은 글이라 잠금 화면·배너에 그대로 뜨면 본문과
+// 같은 무게의 노출이고, 개수는 「무엇이 왔나」에 필요한 전부다. 폰 알림 확장(Swift
+// `PushAttachmentCopy`)이 같은 문장을 낸다 — 두 언어가 같은 표를 읽게 폰 시험이 둘을 맞댄다.
+
+/** 7개 언어 계획(ADR-0213) 전이라 한국어 상수다. 사진이 먼저, 섞이면 쉼표로 잇는다. */
+export const ATTACH_PREVIEW_COPY = {
+  photos: (count: number) => `사진 ${count}장`,
+  files: (count: number) => `파일 ${count}개`,
+  separator: ", ",
+} as const;
+
+/**
+ * 「사진」으로 세는가: 사진으로 그려지는 래스터 이미지. SVG는 타임라인이 카드로 세우므로
+ * (`showsInlinePreview`) 「파일」이다 — 문구가 화면에 선 것과 같은 말을 해야 한다.
+ */
+export function isPhotoAttachment(attachment: Pick<MessageAttachment, "mime">): boolean {
+  // 선언 타입은 런타임 값을 막지 못한다. 모양이 어긋난 첨부는 던지지 않고 「파일」로 센다 —
+  // 이 함수는 실시간 프레임마다 도는 알림 판정 안에서도 불린다.
+  const mime =
+    typeof attachment?.mime === "string" ? attachment.mime.trim().toLowerCase() : "";
+  return isImageMime(mime) && !mime.startsWith("image/svg");
+}
+
+/**
+ * 첨부 한 묶음의 한 줄: 「사진 1장」, 「사진 3장」, 「파일 2개」, 「사진 1장, 파일 1개」.
+ * 첨부가 없으면 `null`.
+ */
+export function attachmentPreviewLine(
+  attachments: readonly Pick<MessageAttachment, "mime">[] | null | undefined
+): string | null {
+  if (!attachments || attachments.length === 0) return null;
+  const photos = attachments.filter(isPhotoAttachment).length;
+  const files = attachments.length - photos;
+  const parts: string[] = [];
+  if (photos > 0) parts.push(ATTACH_PREVIEW_COPY.photos(photos));
+  if (files > 0) parts.push(ATTACH_PREVIEW_COPY.files(files));
+  return parts.join(ATTACH_PREVIEW_COPY.separator);
+}
