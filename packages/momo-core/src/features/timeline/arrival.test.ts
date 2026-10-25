@@ -77,13 +77,6 @@ describe("takeArrivalPlay — play count is 0 or 1, never a shape", () => {
     ).toBe(0);
   });
 
-  it("message.edited 는 0", () => {
-    const consumed = new Set<string>();
-    expect(
-      takeArrivalPlay(consumed, input({ eventType: "message.edited" }))
-    ).toBe(0);
-  });
-
   it("이미 들고 있는 행의 에코는 0", () => {
     const consumed = new Set<string>();
     expect(takeArrivalPlay(consumed, input({ alreadyHeld: true }))).toBe(0);

@@ -22,7 +22,10 @@ pub enum PushError {
     /// A concurrent registration committed an active token for the same
     /// `(device, env)` (010 `push_token_device_env_active_uniq`) or the same
     /// `(apns_token, env)` (schema_v0 `push_token_uniq`). Retryable: `409`,
-    /// never `500` (review #422 L1).
+    /// never `500` (review #422 L1). Also the outcome when this registration
+    /// lost a race for a *new* `deviceId`: a concurrent registration of the same
+    /// id in the same workspace committed between its first look and its insert
+    /// (#3978).
     #[error("concurrent registration for this device — retry")]
     RegistrationConflict,
 }
@@ -58,15 +61,26 @@ pub(crate) fn classify_registration_write(error: sqlx::Error) -> PushError {
 pub enum DeviceRejection {
     /// The principal has no active membership in this workspace. 403.
     NotActiveMember,
-    /// The `device` row exists and belongs to someone else. 403.
+    /// The `device` row exists, belongs to someone else, and that registration
+    /// is still live (an active token on it). 403. A device whose tokens are all
+    /// invalidated is reclaimable instead (#3978): the second member signing in
+    /// on the same phone presents the `deviceId` the first one left behind.
     DeviceOwnedByAnotherMember,
     /// An **active** `push_token` with this `(apns_token, env)` belongs to
     /// someone else. 403. An *invalidated* row is reclaimable — that is the
     /// account-switch-on-the-same-phone path.
     TokenOwnedByAnotherMember,
+    /// The `deviceId` is already registered, but under a workspace this
+    /// transaction cannot see (#3978). Row-level security hides that row, so it
+    /// can be neither moved nor overwritten from here, and the id is a global
+    /// primary key — a first registration here cannot take it either. 403, not
+    /// 409: the phone retries a 409, and retrying cannot change this.
+    DeviceInAnotherWorkspace,
     /// A device's platform is immutable once registered. 409.
     PlatformImmutable,
-    /// No such device in this tenant. 404.
+    /// No such device in this tenant — or, for a revoke, one that another member
+    /// holds without any live registration (#3978): nothing there is the
+    /// caller's to switch off, and a 403 would confirm the id exists. 404.
     DeviceNotFound,
     /// The session this registration was made under ended after the auth
     /// middleware accepted it (#2677) — a logout, disconnect or password change
@@ -83,6 +97,9 @@ impl DeviceRejection {
             DeviceRejection::DeviceOwnedByAnotherMember => "device belongs to another member",
             DeviceRejection::TokenOwnedByAnotherMember => {
                 "push token is registered to another member"
+            }
+            DeviceRejection::DeviceInAnotherWorkspace => {
+                "device is registered in another workspace"
             }
             DeviceRejection::PlatformImmutable => "device platform cannot change",
             DeviceRejection::DeviceNotFound => "device not found",

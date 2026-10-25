@@ -31,6 +31,10 @@
 //! | `the_upgrade_silences_a_phone_that_signed_out_before_it` | drop the 088 backfill |
 //! | `a_phone_signed_in_across_the_upgrade_rebinds_on_its_next_launch` | drop the 088 backfill, or narrow it to members with no live session |
 //! | `set_owner_ends_the_owners_registrations_and_only_theirs` | drop the `push_token` UPDATE from `set_initial_owner.sql` |
+//! | `a_second_member_signing_in_on_the_same_phone_takes_the_registration_over` | refuse every device whose owner differs (the pre-#3978 check), or leave `session_id` out of the reclaim UPDATE |
+//! | `a_live_registration_cannot_be_taken_by_a_second_sign_in` | take a device over without the "no active token" test |
+//! | `a_device_id_registered_in_another_workspace_is_a_403_not_a_500` | go back to `ON CONFLICT (id) DO UPDATE` on the device insert, or map the rejection to a 409 |
+//! | `switching_push_off_on_a_phone_the_first_member_left_is_a_404_not_a_403` | answer 403 for every device another member holds (the pre-#3978 revoke), or answer 404 for the ones with a live registration too |
 //!
 //! The two `the_upgrade…`/`…across_the_upgrade…` tests and the set-owner test
 //! each run in a database of their own ([`ScratchDb`]): the first two must put
@@ -658,12 +662,24 @@ impl World {
     /// `POST /v1/workspaces/{ws}/devices` — exactly the body the phone sends
     /// (`clients/mobile/src/push/devices.ts` `registerDevice`).
     async fn register(&self, session: &Session, phone: &Phone) {
+        let status = self.register_status(session, phone).await;
+        assert!(
+            status == 200 || status == 201,
+            "device registration answered {status}"
+        );
+    }
+
+    /// The same request, with the status as the answer instead of an assertion
+    /// (#3978: a refusal is what some tests are about).
+    async fn register_status(&self, session: &Session, phone: &Phone) -> u16 {
+        self.register_status_in(self.workspace, session, phone)
+            .await
+    }
+
+    async fn register_status_in(&self, workspace: Uuid, session: &Session, phone: &Phone) -> u16 {
         let response = self
             .http
-            .post(format!(
-                "{}/v1/workspaces/{}/devices",
-                self.base, self.workspace
-            ))
+            .post(format!("{}/v1/workspaces/{}/devices", self.base, workspace))
             .bearer_auth(&session.access)
             .json(&json!({
                 "deviceId": phone.device_id.to_string(),
@@ -676,11 +692,7 @@ impl World {
             .send()
             .await
             .expect("register device");
-        let status = response.status().as_u16();
-        assert!(
-            status == 200 || status == 201,
-            "device registration answered {status}"
-        );
+        response.status().as_u16()
     }
 
     /// `POST /v1/auth/logout` with the refresh half, as `@momo/core` sends it.
@@ -856,6 +868,346 @@ impl World {
 
 fn is_for(dispatch: &PushDispatch, phone: &Phone) -> bool {
     dispatch.device_id == phone.device_id.to_string()
+}
+
+// ---------------------------------------------------------------------------
+// #3978 — a second member signing in on the same phone
+// ---------------------------------------------------------------------------
+
+/// The person who signs in on the phone after the first one: their own login
+/// and their own DM with the owner, so a message to them is exactly one
+/// judgment for them.
+struct Neighbour {
+    id: Uuid,
+    email: String,
+    dm: Uuid,
+}
+
+impl World {
+    async fn second_person(&self) -> Neighbour {
+        let owner: Uuid = sqlx::query_scalar(
+            "SELECT member_id FROM membership WHERE channel_id = $1 AND member_id <> $2",
+        )
+        .bind(self.dm)
+        .bind(self.person_id)
+        .fetch_one(&self.su)
+        .await
+        .expect("the owner is the other member of the DM");
+        let (id, email) = seed_human(&self.su, self.workspace, "member").await;
+        let dm = seed_dm(&self.su, self.workspace, [owner, id]).await;
+        Neighbour { id, email, dm }
+    }
+
+    async fn neighbour_login(&self, who: &Neighbour) -> Session {
+        login(
+            &self.http,
+            &self.base,
+            self.workspace,
+            &who.email,
+            TEST_PASSWORD,
+        )
+        .await
+    }
+
+    /// The owner speaks in `dm` through the real send route.
+    async fn send_to(&self, dm: Uuid, body: &str) {
+        let response = self
+            .http
+            .post(format!(
+                "{}/v1/workspaces/{}/channels/{}/messages",
+                self.base, self.workspace, dm
+            ))
+            .bearer_auth(&self.sender.access)
+            .json(&json!({ "clientMsgId": Uuid::new_v4(), "body": body }))
+            .send()
+            .await
+            .expect("send message");
+        let status = response.status().as_u16();
+        assert!(status == 200 || status == 201, "send answered {status}");
+    }
+
+    /// Whose live registration is on the phone's device row (the table the
+    /// judgment reads)?
+    async fn registration_owner(&self, phone: &Phone) -> Option<Uuid> {
+        sqlx::query_scalar(
+            "SELECT member_id FROM push_token \
+              WHERE device_id = $1 AND invalidated_at IS NULL",
+        )
+        .bind(phone.device_id)
+        .fetch_optional(&self.su)
+        .await
+        .expect("read the live registration's owner")
+    }
+
+    /// `DELETE /v1/workspaces/{ws}/devices/{id}` — what the phone sends to
+    /// switch its own push off (`clients/mobile/src/push/devices.ts`
+    /// `revokeOwnDevice`), with the status and the body as the answer.
+    async fn delete_device(&self, session: &Session, device_id: Uuid) -> (u16, Value) {
+        let response = self
+            .http
+            .delete(format!(
+                "{}/v1/workspaces/{}/devices/{}",
+                self.base, self.workspace, device_id
+            ))
+            .bearer_auth(&session.access)
+            .send()
+            .await
+            .expect("revoke device");
+        let status = response.status().as_u16();
+        (
+            status,
+            response.json::<Value>().await.unwrap_or(Value::Null),
+        )
+    }
+
+    /// Whom the notifier has dispatched to in this workspace, in order.
+    async fn dispatched_members(&self) -> Vec<Uuid> {
+        sqlx::query_scalar(
+            "SELECT member_id FROM push_dispatch_log \
+              WHERE workspace_id = $1 ORDER BY created_at, id",
+        )
+        .bind(self.workspace)
+        .fetch_all(&self.su)
+        .await
+        .expect("read the dispatch log")
+    }
+}
+
+/// #3978, end to end: the issue's own scenario through the real routes. One
+/// phone, one `deviceId`, one APNs token. A signs in, registers and signs out
+/// (`POST /v1/auth/logout` ends the lineage and the registration with it); B
+/// signs in on the same install and registers the same ids — a 403
+/// `DeviceOwnedByAnotherMember` before #3978, and B's pushes never came. Then
+/// the notifier says who is notified: B on that phone, nobody for A, and each
+/// sign-out silences the phone again — the handover bound the registration to
+/// B's own session, so B's logout ends it too.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_second_member_signing_in_on_the_same_phone_takes_the_registration_over() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let b = w.second_person().await;
+
+    let a_session = w.person_login().await;
+    w.register(&a_session, &phone).await;
+    w.send("for A, signed in").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        1,
+        "control: A's phone is notified of A's DM"
+    );
+    w.logout(&a_session).await;
+    assert!(
+        !w.registration_live(&phone).await,
+        "control: A's logout ended the registration"
+    );
+
+    let b_session = w.neighbour_login(&b).await;
+    w.register(&b_session, &phone).await;
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        Some(b.id),
+        "the live registration on the phone is B's now"
+    );
+
+    w.send_to(b.dm, "for B").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        1,
+        "B is notified on the phone A left"
+    );
+    assert_eq!(
+        w.dispatched_members().await,
+        vec![w.person_id, b.id],
+        "the first dispatch was A's, the second B's"
+    );
+    w.send("for A, after A left").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "A is signed out: nothing of A's reaches the phone B holds"
+    );
+
+    w.logout(&b_session).await;
+    assert!(
+        !w.registration_live(&phone).await,
+        "B's logout ends the registration B took over"
+    );
+    w.send_to(b.dm, "for B, after B left").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        0,
+        "a phone both of them have left is silent"
+    );
+
+    let a_again = w.person_login().await;
+    w.register(&a_again, &phone).await;
+    assert_eq!(w.registration_owner(&phone).await, Some(w.person_id));
+    w.send("A is back").await;
+    assert_eq!(
+        w.drain_to(&phone).await,
+        1,
+        "and it flips back when A signs in again"
+    );
+}
+
+/// The boundary of the above: only a *dead* registration changes hands. A is
+/// signed in on the phone and live; B, signed in on another install, presents
+/// A's `deviceId` — with his own APNs token, then with A's. Both are refused
+/// (403) and A's pushes keep landing on A's token, none on B's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_live_registration_cannot_be_taken_by_a_second_sign_in() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let b = w.second_person().await;
+    let a_session = w.person_login().await;
+    w.register(&a_session, &phone).await;
+
+    let b_session = w.neighbour_login(&b).await;
+    let intruder = Phone {
+        device_id: phone.device_id,
+        ..Phone::new()
+    };
+    assert_eq!(
+        w.register_status(&b_session, &intruder).await,
+        403,
+        "B's own token on A's live device is refused"
+    );
+    assert_eq!(
+        w.register_status(&b_session, &phone).await,
+        403,
+        "A's own token on A's live device is refused too"
+    );
+
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        Some(w.person_id),
+        "A's registration is untouched"
+    );
+    w.send("for A").await;
+    let sent = w.drain().await;
+    assert_eq!(
+        sent.iter().filter(|d| is_for(d, &phone)).count(),
+        1,
+        "A is still notified on the phone"
+    );
+    assert!(
+        sent.iter().all(|d| d.apns_token != intruder.apns_token),
+        "nothing was sent to the token B presented"
+    );
+}
+
+/// The second member can switch push off on a phone the first one left, even
+/// before the registration reaches the server: the phone's `DELETE` (its own
+/// push switch) answers 404 — the same answer, byte for byte, as an id the
+/// server never saw, which the phone reads as "already off" — and not the 403
+/// that would confirm the id exists and make the switch fail. The refusal
+/// writes nothing, and the device is still B's to take afterwards. A live
+/// registration is a different matter: once B holds the phone, A signing in
+/// again cannot switch it off (403) and B's registration is untouched.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn switching_push_off_on_a_phone_the_first_member_left_is_a_404_not_a_403() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let b = w.second_person().await;
+
+    let a_session = w.person_login().await;
+    w.register(&a_session, &phone).await;
+    w.logout(&a_session).await;
+
+    let b_session = w.neighbour_login(&b).await;
+    let (status, body) = w.delete_device(&b_session, phone.device_id).await;
+    assert_eq!(
+        status, 404,
+        "A's phone has nothing alive on it to switch off"
+    );
+    assert_eq!(body["error"]["message"], "device not found");
+    let unknown = w.delete_device(&b_session, Uuid::new_v4()).await;
+    assert_eq!(
+        (status, body),
+        unknown,
+        "indistinguishable from an id the server never saw"
+    );
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        None,
+        "the refusal wrote nothing"
+    );
+
+    w.register(&b_session, &phone).await;
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        Some(b.id),
+        "the device was still B's to take"
+    );
+
+    let a_again = w.person_login().await;
+    let (status, body) = w.delete_device(&a_again, phone.device_id).await;
+    assert_eq!(
+        status, 403,
+        "B's registration is live: not A's to switch off"
+    );
+    assert_eq!(body["error"]["message"], "device belongs to another member");
+    assert_eq!(
+        w.registration_owner(&phone).await,
+        Some(b.id),
+        "B's registration is untouched"
+    );
+}
+
+/// The phone signs out of one workspace and into another, on the same install.
+/// `device.id` is a global primary key and row-level security hides the first
+/// workspace's row from the second's transaction, so the device cannot move.
+/// That used to reach the caller as a bare 500 (`42501` from the upsert); it is
+/// a 403 now — terminal for the phone, which retries only a 409. The first
+/// workspace's rows are untouched. Moving a phone across workspaces needs the
+/// token's global uniqueness relaxed as well (see the pinned limit in
+/// `device_conformance_pg.rs`), which is a separate decision.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_device_id_registered_in_another_workspace_is_a_403_not_a_500() {
+    let _lock = test_lock().await;
+    let w = world().await;
+    let phone = Phone::new();
+    let a_session = w.person_login().await;
+    w.register(&a_session, &phone).await;
+    w.logout(&a_session).await;
+
+    let other = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(other)
+        .bind(format!("pse-{other}"))
+        .execute(&w.su)
+        .await
+        .expect("seed the second workspace");
+    let (_, email) = seed_human(&w.su, other, "member").await;
+    let session = login(&w.http, &w.base, other, &email, TEST_PASSWORD).await;
+
+    assert_eq!(
+        w.register_status_in(other, &session, &phone).await,
+        403,
+        "another workspace's device id is a rejection, not a server error"
+    );
+    let rows_in_other: i64 = sqlx::query_scalar(
+        "SELECT (SELECT count(*) FROM device WHERE workspace_id = $1) \
+              + (SELECT count(*) FROM push_token WHERE workspace_id = $1)",
+    )
+    .bind(other)
+    .fetch_one(&w.su)
+    .await
+    .expect("count rows written in the second workspace");
+    assert_eq!(rows_in_other, 0, "nothing was written there");
+    let owner: Uuid = sqlx::query_scalar("SELECT member_id FROM device WHERE id = $1")
+        .bind(phone.device_id)
+        .fetch_one(&w.su)
+        .await
+        .expect("the first workspace's device row is still there");
+    assert_eq!(owner, w.person_id, "and it is still the first member's");
 }
 
 // ---------------------------------------------------------------------------

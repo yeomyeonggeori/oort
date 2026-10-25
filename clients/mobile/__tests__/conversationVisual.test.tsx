@@ -3,7 +3,7 @@ import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen, within} from './fixtures/darkWorld';
+import {cleanup, fireEvent, render, screen, waitFor, within} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
@@ -268,12 +268,11 @@ describe('M-3 — 같은 동사에 같은 계약', () => {
     fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
     fireEvent(screen.getByTestId('message-press'), 'longPress');
     fireEvent.press(screen.getByTestId('sheet-copy'));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByTestId('message-copy-receipt').props.children).toBe(
-      '복사됨',
+    // 복사는 시트가 미끄러져 내린 뒤에 불린다(#4318).
+    await waitFor(() =>
+      expect(screen.getByTestId('message-copy-receipt').props.children).toBe(
+        '복사됨',
+      ),
     );
   });
 

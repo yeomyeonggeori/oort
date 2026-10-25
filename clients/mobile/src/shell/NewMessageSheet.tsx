@@ -1,32 +1,20 @@
 import {openDirectMessage, uuidEq} from '@momo/core/lib/api';
+import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useMemo, useState} from 'react';
-import {
-  FlatList,
-  Image,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import {FlatList, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {
   BAR_CONTROL_MAX_SCALE,
   FailureBanner,
+  Sentence,
 } from '../design/atoms';
-import {PageSheet, usePageSheetClose} from '../design/PageSheet';
+import {PageSheet} from '../design/PageSheet';
+import {SheetHeader} from '../design/SheetChrome';
+import {GroupCardItem, GroupLabel, InputPill, ListRow} from '../design/sheetParts';
 import {usePalette, useStyles} from '../design/theme';
-import {
-  ds2Radius,
-  font,
-  SAFE_GUTTER,
-  slopTo,
-  space,
-  TOUCH_TARGET,
-  type Palette,
-} from '../design/tokens';
+import {font, SAFE_GUTTER, SHEET, slopTo, space, type Palette} from '../design/tokens';
 import {SHELL_ICONS, SHELL_ICON_SIZE} from '../design/icons';
 import {Avatar} from '../features/conversation/Avatar';
 import {useDirectory, useRememberOpenedDm} from '../features/workspace/queries';
@@ -46,6 +34,14 @@ import {useSession} from '../session/useSession';
 // 받는 사람: 워크스페이스의 사람과 에이전트. 누르면 서버가 그 둘의 DM 을 열어 주고
 // (없으면 만든다) 그 대화로 간다. 폰에서 **아직 DM 이 없는 사람**에게 말을 걸 수 있는
 // 문이다.
+//
+// ## 공용 부품으로 (#4318)
+//
+// 머리는 오른쪽 원형 X 의 `SheetHeader` 이고 목록 밖에 고정이다. 검색은 앞 아이콘이 선 입력
+// 알약(`InputPill`), 사람은 묶음 카드의 줄(`GroupCardItem` + `ListRow`)이다. 긴 목록이지만
+// 「고르면 곧 닫히는」 선택기라 페이지가 아니라 큰 단의 시트다(`docs/design-system/phone-sheets.md`).
+// 아래 `SheetTitleRow`(왼쪽 원형 X 의 옛 머리)는 아직 옮기지 않은 시트들이 쓰므로 남겨 둔다 —
+// #4458 이 그 시트들을 옮기는 날 함께 지운다.
 // =============================================================================
 
 export function NewMessageSheet({
@@ -56,7 +52,11 @@ export function NewMessageSheet({
   onClose: () => void;
 }): React.JSX.Element {
   return (
-    <PageSheet onClose={onClose} accessibilityLabel="새 DM" testID="new-dm-sheet">
+    <PageSheet
+      onClose={onClose}
+      accessibilityLabel="새 DM"
+      scrimLabel="새 DM 닫기"
+      testID="new-dm-sheet">
       <SheetBody
         onOpenConversation={onOpenConversation}
         onClose={onClose}
@@ -73,10 +73,8 @@ function SheetBody({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
   const {member, workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
-  const slideClose = usePageSheetClose() ?? onClose;
   const [query, setQuery] = useState('');
 
   const people = useMemo(() => {
@@ -108,24 +106,16 @@ function SheetBody({
     },
   });
 
-  const header = (
-    <View>
-      <SheetTitleRow
-        title="새 DM"
-        closeLabel="새 DM 닫기"
-        onClose={slideClose}
-        testID="new-dm"
-      />
-
-      <Text accessibilityRole="header" style={styles.label}>
-        받는 사람
-      </Text>
-      <TextInput
-        style={styles.search}
+  // 머리(원형 X·제목)는 목록 밖에 고정이다 — 목록이 스크롤돼도 닫기가 사라지지 않는다.
+  // 검색 칸과 오류는 목록의 머리라 목록과 함께 스크롤한다.
+  const listHeader = (
+    <View style={styles.listHeader}>
+      <GroupLabel>받는 사람</GroupLabel>
+      <InputPill
+        icon={SHELL_ICONS.search}
         value={query}
         onChangeText={setQuery}
         placeholder="이름이나 @핸들"
-        placeholderTextColor={palette.textFaint}
         autoCapitalize="none"
         autoCorrect={false}
         clearButtonMode="while-editing"
@@ -147,47 +137,53 @@ function SheetBody({
   );
 
   return (
-    <FlatList
-      data={people}
-      keyExtractor={candidate => candidate.id}
-      ListHeaderComponent={header}
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      contentContainerStyle={styles.list}
-      ListEmptyComponent={
-        <Text style={styles.empty} testID="new-dm-empty">
-          {query.trim() === ''
-            ? '말을 걸 수 있는 사람이 아직 없습니다.'
-            : `'${query.trim()}'에 맞는 사람이 없습니다.`}
-        </Text>
-      }
-      renderItem={({item}) => {
-        const busy = openDm.isPending && openDm.variables === item.id;
-        const kind = item.kind === 'agent' ? '에이전트' : '사람';
-        return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${item.displayName}, @${item.handle}, ${kind}`}
-            accessibilityHint="대화를 엽니다."
-            accessibilityState={{busy}}
-            disabled={openDm.isPending}
-            onPress={() => openDm.mutate(item.id)}
-            style={({pressed}) => [styles.person, pressed && styles.personPressed]}
-            testID={`new-dm-person-${item.handle}`}>
-            <Avatar directory={directoryQuery.directory} memberId={item.id} />
-            <View style={styles.personText}>
-              <Text style={styles.personName} numberOfLines={1}>
-                {item.displayName}
-              </Text>
-              <Text style={styles.personHandle} numberOfLines={1}>
-                @{item.handle} · {kind}
-              </Text>
-            </View>
-          </Pressable>
-        );
-      }}
-      testID="new-dm-list"
-    />
+    <View style={styles.body}>
+      <SheetHeader title="새 DM" closeLabel="새 DM 닫기" closeTestID="new-dm-close" />
+      <FlatList
+        data={people}
+        keyExtractor={candidate => candidate.id}
+        ListHeaderComponent={listHeader}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        contentContainerStyle={styles.list}
+        ListEmptyComponent={
+          <Sentence style={styles.empty} testID="new-dm-empty">
+            {query.trim() === ''
+              ? '말을 걸 수 있는 사람이 아직 없습니다.'
+              : `'${query.trim()}'에 맞는 사람이 없습니다.`}
+          </Sentence>
+        }
+        renderItem={({item, index}) => {
+          const busy = openDm.isPending && openDm.variables === item.id;
+          const kind = item.kind === 'agent' ? '에이전트' : '사람';
+          return (
+            <GroupCardItem index={index} count={people.length} inset={AVATAR_SIZE}>
+              <ListRow
+                // 카드(`surface`) 위의 아바타 — 기본 `ground='surface'` 는 카드에 녹아 이니셜만 떠 보인다
+                // (`Avatar.ground` 주석이 말한 그 실패). `muted` 로 원이 선다.
+                leading={
+                  <Avatar
+                    directory={directoryQuery.directory}
+                    memberId={item.id}
+                    ground="muted"
+                  />
+                }
+                leadingWidth={AVATAR_SIZE}
+                title={item.displayName}
+                detail={`@${item.handle} · ${kind}`}
+                accessibilityLabel={`${item.displayName}, @${item.handle}, ${kind}`}
+                accessibilityHint="대화를 엽니다."
+                busy={busy}
+                disabled={openDm.isPending}
+                onPress={() => openDm.mutate(item.id)}
+                testID={`new-dm-person-${item.handle}`}
+              />
+            </GroupCardItem>
+          );
+        }}
+        testID="new-dm-list"
+      />
+    </View>
   );
 }
 
@@ -246,9 +242,21 @@ export function SheetTitleRow({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    list: {paddingBottom: space.xl * 2},
-    // 시트 몸은 가로 여백을 주지 않는다(`PageSheet`). 줄마다 여기서 같은 16 을
-    // 든다 — 왼쪽 가장자리가 하나다.
+    body: {flex: 1},
+    // 카드·입력은 가로 여백을 목록이 준다 — 시트 몸은 여백이 없다(`PageSheet`).
+    list: {
+      paddingHorizontal: SAFE_GUTTER,
+      // 머리 줄 아래 숨 쉴 틈(`SheetScroll` 과 같은 값).
+      paddingTop: SHEET.bodyTop,
+      paddingBottom: space.xl * 2,
+    },
+    listHeader: {gap: space.sm, paddingBottom: space.lg},
+    empty: {
+      paddingVertical: space.lg,
+      fontSize: font.body,
+      color: color.textMuted,
+    },
+    // ---- `SheetTitleRow` — 옛 머리(왼쪽 원형 X). #4458 이 나머지 시트를 새 `SheetHeader` 로 옮기면 지운다.
     titleRow: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -274,47 +282,4 @@ const buildStyles = (color: Palette) =>
     },
     closeBalance: {width: CLOSE_SIZE},
     pressed: {opacity: 0.6},
-    label: {
-      marginTop: space.lg,
-      marginBottom: space.sm,
-      // 시트 여백 16 + 시안 `.a-glabel{margin-left:6px}`. 격자 밖 값이라 잔량 목록에
-      // 올라 있다(`designSystem.test.ts`) — 식으로 감춰 스윕을 피하지 않는다.
-      marginLeft: 22,
-      fontSize: font.label,
-      fontWeight: '700',
-      color: color.textMuted,
-    },
-    // 입력 그릇만 선을 든다(ADR-0189 D6: outline 은 텍스트 입력에만).
-    search: {
-      minHeight: TOUCH_TARGET,
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-      fontSize: font.body,
-      color: color.text,
-      marginBottom: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-    },
-    person: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.md,
-      minHeight: 54,
-      paddingVertical: space.xs,
-      marginHorizontal: SAFE_GUTTER - space.sm,
-      paddingHorizontal: space.sm,
-      borderRadius: ds2Radius.row,
-    },
-    personPressed: {backgroundColor: color.surfacePressed},
-    personText: {flex: 1, minWidth: 0},
-    personName: {fontSize: font.body, color: color.text, fontWeight: '600'},
-    personHandle: {fontSize: font.label, color: color.textMuted},
-    empty: {
-      paddingVertical: space.lg,
-      paddingHorizontal: SAFE_GUTTER,
-      fontSize: font.body,
-      color: color.textMuted,
-    },
   });
