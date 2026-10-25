@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 import {
@@ -20,6 +21,7 @@ import {
   Text,
 } from 'react-native';
 
+import {REACTION_GLYPH_MAX_SCALE} from '../src/design/atoms';
 import {PageSheet, usePageSheetAction} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {sheetFrame, sheetTop, type SheetHeight} from '../src/design/sheetModel';
@@ -30,7 +32,7 @@ import {
   SheetScroll,
 } from '../src/design/sheetParts';
 import {FixedScheme} from '../src/design/theme';
-import {space} from '../src/design/tokens';
+import {font, SAFE_GUTTER, space, TOUCH_TARGET} from '../src/design/tokens';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
@@ -594,12 +596,29 @@ describe('메시지 행동 시트: 고르면 곧 닫히는 행동은 슬라이�
   });
 });
 
+describe('메시지 시트의 빠른 반응은 접근성 가장 큰 글씨에서도 한 줄에 닿는다', () => {
+  it('이모지 글리프가 배율 상한을 갖고, 그 상한에서 여섯이 SE 카드 안쪽 폭에 들어간다', async () => {
+    const {ui} = messageSheet([]);
+    await mount(ui, true);
+    for (const emoji of QUICK_REACTIONS) {
+      const glyph = within(screen.getByTestId(`quick-reaction-${emoji}`)).getByText(emoji);
+      expect(glyph.props.maxFontSizeMultiplier).toBe(REACTION_GLYPH_MAX_SCALE);
+    }
+    // AX5 캡처에서 상한이 없던 때 5·6번째가 카드 밖으로 밀려 닿지 않았다. 이모지의 폭은 글리프 크기의 1.25배쯤이다
+    // (어림이고, 상한을 올리면 아래 부등식이 먼저 깨진다). 눌림 상자는 44 아래로 줄지 않는다.
+    const glyphWidth = Math.ceil(font.title * REACTION_GLYPH_MAX_SCALE * 1.25);
+    const buttonWidth = Math.max(TOUCH_TARGET, glyphWidth);
+    const seCardInner = 375 - 2 * SAFE_GUTTER - 2 * space.sm;
+    expect(QUICK_REACTIONS.length * buttonWidth).toBeLessThanOrEqual(seCardInner);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // ChannelActionSheet - 닫는 길로 보내지 않는다 + 앞 아이콘은 복사 무리만
 // ---------------------------------------------------------------------------
 
 const TARGET = {
-  channel: {id: 'ch-4318', kind: 'channel' as const, topic: ''},
+  channel: {id: 'ch-4318', kind: 'public' as const, topic: ''},
   title: '배포',
   muted: false,
   selfRole: 'member' as const,

@@ -10,6 +10,7 @@ import {
 } from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {REACTION_GLYPH_MAX_SCALE} from '../../design/atoms';
 import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
@@ -295,7 +296,11 @@ function SheetBody({
                           pressed && styles.pressed,
                         ]}
                         testID={`quick-reaction-${emoji}`}>
-                        <Text style={styles.reactionGlyph}>{emoji}</Text>
+                        <Text
+                          style={styles.reactionGlyph}
+                          maxFontSizeMultiplier={REACTION_GLYPH_MAX_SCALE}>
+                          {emoji}
+                        </Text>
                       </Pressable>
                     );
                   })}

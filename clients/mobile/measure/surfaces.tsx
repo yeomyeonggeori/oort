@@ -122,6 +122,7 @@ import {
 import {noteConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
+import {SheetKitSurface} from './sheetKit';
 import {
   DelegateWorkSheet,
   type DelegatePreview,
@@ -2188,6 +2189,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   }
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
+  }
+  // #4318: 공용 시트·페이지 부품 전시 + 이전한 시트(`measure/sheetKit.tsx`, 고정 데이터·가상 인물).
+  if (name === 'sheetkit' || name.startsWith('sheetkit-')) {
+    return <SheetKitSurface which={name.slice('sheetkit'.length).replace(/^-/, '')} />;
   }
   // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
   if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {

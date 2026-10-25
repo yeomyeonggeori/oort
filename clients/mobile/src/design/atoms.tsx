@@ -73,6 +73,12 @@ export const STACK_PILL_SCALE = 1.5;
 export const SAS_MAX_SCALE = 1.35;
 /** 아바타 이니셜 — 32 상자에 13pt 한 글자가 여백을 지키는 끝. */
 export const AVATAR_INITIAL_MAX_SCALE = 1.3;
+/**
+ * 빠른 반응 이모지(`MessageActionSheet`) — 여섯 개가 한 줄에 서는 끝(#4318). 이모지는 읽는 글자가 아니라 표식이다.
+ * 이 위로 자라면 SE 폭(카드 안쪽 327)에서 5·6번째가 카드 밖으로 밀려 닿지 않았다(AX5 캡처): 22 × 1.5 = 33pt 글리프
+ * 여섯이 눌림 44 상자에 들어가 264 로 선다.
+ */
+export const REACTION_GLYPH_MAX_SCALE = 1.5;
 
 /** Every tappable thing in this app is at least this tall. */
 const hitStyle = {minHeight: TOUCH_TARGET, justifyContent: 'center'} as const;

@@ -1,0 +1,24 @@
+appId: app.momo.ios
+name: 109-sheet-kit-capture
+---
+# 109-sheet-kit-capture - 새 DM 시트의 실패 단계 (#4318).
+#
+# 표면 `-momoMeasure SHEETKIT-NEWDM`(다크), `LIGHT-SHEETKIT-NEWDM`(라이트)은 배송되는 `NewMessageSheet` 를 씨앗을 뿌린
+# 명부 위에 세운다(`measure/sheetKit.tsx`, 가상 인물). 서버가 없는 하네스에서 사람을 누르면 DM 열기가 실패하고
+# 시트 안에 실패 띠가 선다 - 이 흐름이 **실제 탭**으로 그 단계를 찍는다(스크립트는 시뮬레이터를 누를 수 없어
+# 표면만으로는 닿지 않는 단계다).
+#
+#   xcrun simctl launch <UDID> app.momo.ios --args \
+#     -momoMeasure SHEETKIT-NEWDM -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <UDID> test -e SHOT=newdm-error-dark clients/mobile/maestro/109-sheet-kit-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 60000
+- tapOn:
+    id: "new-dm-person-seoyeon"
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-error"
+    timeout: 20000
+- takeScreenshot: ${SHOT}
