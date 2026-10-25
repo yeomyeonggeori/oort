@@ -221,6 +221,13 @@ describe('사진 메아리를 남기는 순수 함수', () => {
     expect(settledEchoes([orphan], items)).toEqual([]);
   });
 
+  it('settledEchoes: 다른 채널의 같은 글은 짝이 아니다 — 확정본의 채널이 메아리의 채널과 같아야 한다', () => {
+    const lingering = echoItem(echo({clientMsgId: 'c-1'}));
+    const otherChannel = [item(message(1)), item(message(2)), item(mine(3, {channelId: 'other-channel'}))];
+    expect(settledEchoes([lingering], otherChannel)).toEqual([]);
+    expect(withLingeringEchoes(otherChannel, [lingering])).toBe(otherChannel);
+  });
+
   it('settledEchoes: 확정본 하나는 메아리 하나만 짝짓는다 — 같은 사진 두 장은 보낸 순서대로 하나씩', () => {
     const first = echoItem(echo({clientMsgId: 'c-1'}));
     const second = echoItem(echo({clientMsgId: 'c-2', createdAtMs: NOW + 50}));
@@ -469,21 +476,25 @@ describe('Timeline — 서버 사본이 서는 커밋에 메아리가 남고 서
     await settle();
   });
 
-  it('언마운트하면 타이머가 걷힌다 — 남은 타이머가 없다', async () => {
+  it('언마운트하면 창을 닫는 타이머를 걷는다 — setTimeout 이 돌려준 그 id 를 clearTimeout 이 받는다', async () => {
     spyTiming();
     markArrived('c-1');
+    // 창을 여는 타이머(ECHO_LINGER_MS)의 id 를 붙잡는다.
+    const lingerTimers: unknown[] = [];
+    const realSetTimeout = global.setTimeout;
+    jest.spyOn(global, 'setTimeout').mockImplementation(((handler: () => void, ms?: number, ...rest: unknown[]) => {
+      const id = (realSetTimeout as (...args: unknown[]) => unknown)(handler, ms, ...rest);
+      if (ms === ECHO_LINGER_MS) lingerTimers.push(id);
+      return id;
+    }) as never);
+    const clearSpy = jest.spyOn(global, 'clearTimeout');
     const view = render(tl(history, [echo()]));
     view.rerender(tl([...history, mine(3)], []));
     expect(keys()).toEqual(['m-1', 'm-2', 'p-c-1', 'm-3*']);
-    // 창을 닫는 타이머가 하나 걸려 있다.
-    const withTimer = jest.getTimerCount();
-    expect(withTimer).toBeGreaterThan(0);
+    expect(lingerTimers).toHaveLength(1);
     view.unmount();
-    // 언마운트가 그 타이머를 걷는다 — React 19 는 언마운트 뒤 setState 에 경고하지 않으니 남은 타이머 수로 본다.
-    expect(jest.getTimerCount()).toBeLessThan(withTimer);
-    act(() => {
-      jest.advanceTimersByTime(ECHO_LINGER_MS * 2);
-    });
+    // 언마운트가 그 타이머를 걷는다. 안 걷으면 닫힌 컴포넌트의 상태를 150ms 뒤 건드린다(React 19 는 그때 경고하지 않으니 호출로 본다).
+    expect(clearSpy).toHaveBeenCalledWith(lingerTimers[0]);
     await settle();
   });
 });
