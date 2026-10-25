@@ -60,6 +60,10 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         7번째·15번째는 긴 글. 보낼 때마다 ~1.5초 쉰다. 프레임마다 목록 내용 높이(`content`)·스크롤 오프셋·도크 윗면·메아리
 //                         개수를 남기고, 등장 애니메이션은 `Animated.timing` 을 감싸 네이티브 구동값(JS 가 transform 을 못 읽는다)을 프레임별로
 //                         받는다(`anim`). 교체 때의 내용 높이 변화 · 메아리가 서 있던 프레임 수 · 등장이 처음 보이는 때를 이 기록에서 뽑는다.
+//                         옵션(`+` 뒤): `d<ms>` 가짜 서버가 보내기에 답하는 데 걸리는 시간(기본 250 — 확정이 등장 도중에 오는 조건을 재려고 0·80·150·
+//                         400 으로 바꾼다, design-review r1 H1) · `relay<ms>` 실시간 프레임(`message.new`)이 POST 응답보다 <ms> 먼저 온다(코어가
+//                         말하는 선착 경로) · `anchor` 보낼 때마다 새 확정본 행에 앵커를 옮겨 **확정본 행이 마운트되는 때**를 프레임에 남긴다
+//                         (`anchor` 칸이 null 이 아니게 되는 때 — 보류가 있으면 등장이 끝난 뒤, 없으면 확정 즉시).
 //             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
 //                         2.6초 — 시계가 서는 장면). 사진 바이트는 `measure/photo-stub.mjs` 가 답한다(`-momoPhotoStub 127.0.0.1:<포트>`).
 //
@@ -203,6 +207,13 @@ export function setPostDelay(ms: number): void {
   postDelayMs = ms;
 }
 
+/**
+ * 실시간 프레임이 POST 응답보다 먼저 오는 조건(#4455 H1): 값이 있으면 가짜 서버가 이 시간(ms) 뒤에 확정본을 레일로 먼저
+ * 쏘고, 나머지 시간을 기다렸다가 응답한다. 코어 `model.ts` 가 「실시간 프레임이 POST 응답을 앞설 수 있다」고 적는 경로다.
+ */
+let relayAtMs: number | null = null;
+let relayFirst: ((message: Message) => void) | null = null;
+
 /** 사진 스텁(`photo-stub.mjs`)이 답하는 그림과 같은 id — 가로 4:3 · 세로 3:4. 사진·글자 없는 단색 그림이다. */
 const PHOTOS: Readonly<Record<string, MessageAttachment>> = {
   'photo-a': {id: 'photo-a', name: '시안 가로.png', mime: 'image/png', sizeBytes: 48_000},
@@ -283,7 +294,13 @@ export function ensureFakeFetch(): void {
         const files = (request.attachmentIds ?? []).flatMap(id => (PHOTOS[id] === undefined ? [] : [PHOTOS[id]]));
         if (files.length > 0) message.attachments = files;
         server.messages.push(message);
-        await wait(postDelayMs);
+        if (relayAtMs !== null && relayFirst !== null) {
+          await wait(relayAtMs);
+          relayFirst(message);
+          await wait(Math.max(0, postDelayMs - relayAtMs));
+        } else {
+          await wait(postDelayMs);
+        }
         return json(message);
       }
       if (url.includes('/messages')) {
@@ -521,6 +538,11 @@ interface Controls {
   setTurns: (turns: readonly AgentWorkingSignal[]) => void;
   /** 내가 보낸다(#4455) — `Composer` 의 `onSend` 와 같은 길. 사진·파일만 보내려면 본문을 비우고 첨부를 준다. */
   send: (body: string, attachments?: MessageAttachment[]) => void;
+  /**
+   * 다음에 보낼 글의 seq 로 앵커를 옮긴다(`+anchor`). 그 확정본 행이 마운트돼야 `anchor` 칸이 채워진다. 옵션이 꺼져 있으면 아무것도
+   * 안 하고 거짓을 돌려준다 — 참이면 앞 보내기의 앵커가 걷히도록 장면이 잠깐 쉰다.
+   */
+  watchNext: () => boolean;
 }
 
 // #4455 보내기 장면의 문구. 가상의 대화다 — 실제 대화 문구·이름을 쓰지 않는다.
@@ -639,6 +661,9 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
         await wait(900);
       }
       const long = index === 7 || index === 15;
+      // 앞 보내기의 앵커(확정본 행)가 걷히고 새 seq 의 앵커가 빈 채 서도록 잠깐 쉰다 — 그래야 `anchor` 가 채워지는 때가
+      // 곧 새 확정본 행이 마운트된 때다.
+      if (c.watchNext()) await wait(250);
       c.mark(`send-${index}:${index % 4 === 0 ? 'head' : 'cont'}:${long ? 'long' : 'short'}`);
       c.send(long ? LONG_BODY : SHORT_BODIES[index % SHORT_BODIES.length]);
       // 확정본(가짜 서버 250ms) · 등장(300ms) · 목록 글라이드가 모두 끝나고도 남는 시간.
@@ -794,6 +819,8 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // `hold-unread`: 같은 `hold` 장면에 안 읽은 줄이 있는 대화(위쪽 필이 서는 대화)로 연다.
   const unread = which === 'hold-unread';
   const panelOpen = which === 'panel' || which === 'panel-flat';
+  // #4455 보내기 장면. `send20+d80+relay60+anchor` 처럼 옵션이 붙을 수 있다.
+  const sendScene = base === 'send20' || base === 'rec';
   const scenarios: readonly ScenarioName[] = unread || panelOpen
     ? ['hold']
     : agentDm
@@ -801,14 +828,22 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
       : (ALL as readonly string[]).includes(which) ||
           which === 'hold' ||
           which === 'own' ||
-          which === 'send20' ||
-          which === 'rec'
-        ? [which as ScenarioName]
+          sendScene
+        ? [(sendScene ? base : which) as ScenarioName]
         : ALL;
   ensureFakeFetch();
   // #4455: 등장 애니메이션 관측은 보내기 장면에서만 건다.
   useState(() => {
-    if (which === 'send20' || which === 'rec') installAnimProbe();
+    if (sendScene) installAnimProbe();
+    // 옵션: 확정 지연·선착 프레임. 모듈 수준 값이라 장면이 끝나도 남으므로 매번 정한다.
+    postDelayMs = 250;
+    relayAtMs = null;
+    for (const mod of mods) {
+      const delay = /^d(\d+)$/.exec(mod);
+      if (delay !== null) postDelayMs = Number(delay[1]);
+      const relay = /^relay(\d+)$/.exec(mod);
+      if (relay !== null) relayAtMs = Number(relay[1]);
+    }
     return null;
   });
   // 에이전트 DM 은 자기 대화 기록으로 연다 — 첫 렌더 한 번, `useTimeline` 이 읽기 전.
@@ -973,7 +1008,13 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           mark: what => events.push({t: Date.now() - begin, what}),
           setTurns,
           send: (body, attachments) => sendWithRef.current(body, attachments),
+          watchNext: () => {
+            if (!mods.includes('anchor')) return false;
+            setAnchorSeq((server.messages[server.messages.length - 1]?.seq ?? 0) + 1);
+            return true;
+          },
         };
+        relayFirst = message => (fake.current as FakeRail).message(message);
         markRef.current = controls.mark;
         requestAnimationFrame(sample);
         await runScenario(name, controls);
@@ -1057,7 +1098,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             lastReadSeq={unread ? 1 : null}
             unreadCount={unread ? HISTORY_BODIES.length - 1 : 0}
             pending={timeline.pending}
-            actions={which === 'send20' || which === 'rec' ? SEND_ACTIONS : undefined}
+            actions={sendScene ? SEND_ACTIONS : undefined}
             reactions={timeline.reactions}
             pins={timeline.pins}
             loadingOlder={timeline.loadingOlder}

@@ -101,6 +101,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
   type LayoutChangeEvent,
   type StyleProp,
@@ -179,7 +180,7 @@ import {
   SEND_ARRIVE_RISE_FACTOR_HEAD,
   SEND_ARRIVE_UNMEASURED_HEIGHT,
 } from '../../design/motion';
-import {hasArrived, markArrived, withinArrivalWindow} from './sendArrival';
+import {hasArrived, holdArrival, markArrived, withinArrivalWindow} from './sendArrival';
 import {useSlowSend} from './sendSlow';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
@@ -291,6 +292,19 @@ import {MessageRunStatus} from '../agents/MessageRunStatus';
  * 패딩이 절반씩 문다. 시험이 상한(8)을 지킨다 — 다시 벌어지면 빨개진다.
  */
 const CONTINUATION_GAP = 6;
+
+/**
+ * 이어지는 행의 느린 전송 시계가 아바타 칸에서 서는 높이(#4455): 말풍선 첫 줄의 가운데. 본문 줄 높이는 글자 배율
+ * (Dynamic Type — 메시지 본문은 상한이 없다, `atoms.tsx`)을 곱해서 자라므로 배율을 받는다. 배율 없이 `line.body` 로
+ * 잡으면 배율 2 에서 시계가 첫 줄 가운데보다 ≈ 11pt 위에 선다(design-review r1 M3).
+ */
+export function slowMarkGutterTop(fontScale: number): number {
+  return (
+    CONTINUATION_GAP / 2 +
+    CONV.bubblePadY +
+    (line.body * fontScale - CONV_ICON_SIZE.clock) / 2
+  );
+}
 
 /**
  * 반응 칩의 레이아웃 변. 두 축 모두 이 값이고, 두 축 모두 슬롭이 44 로 채운다.
@@ -3844,9 +3858,14 @@ export function PendingRow({
     const offset = new Animated.Value(factor * SEND_ARRIVE_UNMEASURED_HEIGHT);
     return {factor, remaining, offset, translateY: Animated.multiply(remaining, offset)};
   });
+  // 마운트 때의 모습. 확정본이 등장 도중에 와도 이 메아리를 자리에 두려고 장부에 적는 사본이다(아래 효과).
+  const [mounted] = useState(() => ({pending, startsGroup}));
   useLayoutEffect(() => {
     markArrived(pending.clientMsgId);
     if (arrival === null) return undefined;
+    // 오름이 도는 동안은 확정본이 와도 이 메아리를 그 자리에 둔다 — 키가 갈려 transform 이 한 번에 사라지는 것을
+    // 막는다(`sendArrival.ts`, design-review r1 H1). 오름이 없는 행(동작 줄이기·자격 창 밖·실패)은 적지 않는다.
+    holdArrival(mounted.pending, mounted.startsGroup);
     const run = Animated.timing(arrival.remaining, {
       toValue: 0,
       duration: SEND_ARRIVE_MS,
@@ -3855,7 +3874,7 @@ export function PendingRow({
     });
     run.start();
     return () => run.stop();
-  }, [arrival, pending.clientMsgId]);
+  }, [arrival, mounted, pending.clientMsgId]);
   const onArriveLayout = useCallback(
     (event: LayoutChangeEvent) => {
       arrival?.offset.setValue(arrival.factor * event.nativeEvent.layout.height);
@@ -3865,6 +3884,7 @@ export function PendingRow({
 
   // VoiceOver (planner 결정 3): 정상 전송에는 낭독이 없다(곧 서버 사본으로 교체된다). 기준 시간을
   // 넘긴 전송에서만 이 시계가 「전송 중」으로 읽힌다. 실패는 기존 줄(「전송 실패」·「다시 보내기」)이다.
+  const {fontScale} = useWindowDimensions();
   const slowMark = slow ? (
     <Image
       accessible
@@ -3954,7 +3974,9 @@ export function PendingRow({
         ) : null}
         {/* 이어지는 행에는 시각이 없다 — 시계는 아바타 칸에 절대 배치로 앉는다(레이아웃 비용 0). */}
         {!startsGroup && slowMark !== null ? (
-          <View pointerEvents="none" style={styles.slowMarkGutter}>
+          <View
+            pointerEvents="none"
+            style={[styles.slowMarkGutter, {top: slowMarkGutterTop(fontScale)}]}>
             {slowMark}
           </View>
         ) : null}
@@ -4249,7 +4271,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     tintColor: color.textMuted,
   },
   // 머리 행: 이름 줄의 폭·높이 0 상자(`authorMarkHost`) 안에서 절대 배치 — 줄 가운데에 세운다.
-  slowMarkInline: {position: 'absolute', left: 0, top: -CONV_ICON_SIZE.clock / 2},
+  // `left` 는 상자가 시각 오른쪽 끝에 붙는 대신(아래 `authorMarkHost` 의 음수 마진) 시계가 그 간격만큼 띄워 서게 한다.
+  slowMarkInline: {position: 'absolute', left: CONV.whoGap, top: -CONV_ICON_SIZE.clock / 2},
   // 이어지는 행: 아바타 칸(폭 `CONV.avatar`)의 오른쪽 끝, 말풍선 첫 줄 가운데. 칸은 이 행들에서
   // 비어 있다. 절대 배치라 세로 비용이 0 이다. 말풍선 위쪽 안쪽 여백(`CONV.bubblePadY`)과 본문 줄
   // 높이로 첫 줄의 가운데를 잡는다(줄 보기 레이아웃은 안쪽 여백이 없어 그만큼 아래다).
@@ -4257,12 +4280,23 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     position: 'absolute',
     left: ROW_FACE.inner,
     width: CONV.avatar,
-    top: CONTINUATION_GAP / 2 + CONV.bubblePadY + (line.body - CONV_ICON_SIZE.clock) / 2,
+    top: slowMarkGutterTop(1),
     alignItems: 'flex-end',
   },
-  // 머리 행 이름 줄에서 표지를 매다는 상자. 폭 0·높이 0 이라 흐름에 자리가 없고(줄바꿈·줄 높이 불변),
+  // 머리 행 이름 줄에서 표지를 매다는 상자. 폭 0·높이 0 이라 흐름에 자리가 없고(줄 높이 불변),
   // `alignSelf: 'center'` 로 줄 상자의 가운데에 선다.
-  authorMarkHost: {width: 0, height: 0, alignSelf: 'center', overflow: 'visible'},
+  //
+  // **줄바꿈도 막는다**(design-review r1 M2): 이 줄은 `flexWrap: 'wrap'` + `columnGap` 이라 Yoga 가 항목을 줄에 넣을지를
+  // `이미 쓴 폭 + 항목 폭 + 항목 마진 + 앞 간격 > 줄 폭` 으로 가른다(`FlexLine.cpp`). 폭 0 이어도 앞 간격(`whoGap`)이
+  // 더해져서, 이름·핸들·시각이 줄을 그만큼 안쪽까지 채우면 상자만 높이 0 의 새 줄로 넘어가 시계가 이름 밑·말풍선
+  // 모서리에 걸린다. 음수 마진이 그 간격을 되돌려 항목의 몫이 0 이 되므로 시각이 들어간 줄에는 언제나 들어간다.
+  authorMarkHost: {
+    width: 0,
+    height: 0,
+    alignSelf: 'center',
+    overflow: 'visible',
+    marginLeft: -CONV.whoGap,
+  },
   // 본문 크기의 자리를 차지하되 본문의 무게는 갖지 않는다 — 이것은 메시지에
   // **대한** 서술이지 메시지가 아니다(묘비와 같은 규칙).
   //

@@ -10,7 +10,7 @@ import {
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -29,6 +29,7 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
+import {arrivalsInFlight, holdSettledArrivals, subscribeArrivals} from './sendArrival';
 import {
   countNewerThan,
   countUnreadJump,
@@ -1094,18 +1095,23 @@ function TimelineInner({
     [metricsRef],
   );
 
-  const stream = useMemo(
+  const built = useMemo(
     () =>
-      withTurnPlaceholders(
-        buildTimelineItems(messages, {
-          lastReadSeq,
-          unreadCount,
-          recoveryMarkers,
-          pending,
-        }),
-        working,
-      ),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, working],
+      buildTimelineItems(messages, {
+        lastReadSeq,
+        unreadCount,
+        recoveryMarkers,
+        pending,
+      }),
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending],
+  );
+  // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
+  // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
+  // 오름이 끊기지 않는다. 바꿀 것이 없으면 `built` 그대로다. 자세한 까닭은 `sendArrival.ts`.
+  const arrivals = useSyncExternalStore(subscribeArrivals, arrivalsInFlight, arrivalsInFlight);
+  const stream = useMemo(
+    () => withTurnPlaceholders(holdSettledArrivals(built, arrivals), working),
+    [built, arrivals, working],
   );
 
   // One pass over the array this list is already rendering, so that a row can

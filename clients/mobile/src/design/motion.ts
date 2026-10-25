@@ -171,6 +171,13 @@ export const SEND_ARRIVE_RISE_FACTOR_HEAD = 2.5;
 export const SEND_ARRIVE_WINDOW_MS = 1000;
 
 /**
+ * 확정본이 등장 도중에 와도 메아리를 자리에 두는 시간 = `SEND_ARRIVE_MS` + 이 값(ms) (#4455 H1, `sendArrival.ts`).
+ * 네이티브 구동 애니메이션은 마운트보다 5~25ms 늦게 시작하고 마지막 프레임이 프레임 간격(≈17ms)에 걸려서 정확히
+ * 300ms 에 끝나지 않는다. 이 여유가 끝난 뒤에야 서버 사본으로 바뀌므로, 바뀌는 순간 transform 은 이미 0 이다.
+ */
+export const SEND_ARRIVE_HOLD_SLACK_MS = 60;
+
+/**
  * 첫 레이아웃 이벤트가 오기 전(한두 프레임)에 오프셋을 계산하는 **가정 높이**(pt). 목록의 어느
  * 행보다 크게 잡아, 높이를 재기 전에 행이 자리에 선 채 한 프레임 보이는 일이 없게 한다. 가림은
  * 스크롤뷰의 아래 가장자리가 한다. 재고 나면 실제 높이로 바뀐다.
