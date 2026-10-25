@@ -395,7 +395,7 @@ jobs:
           node-version: '24'
 
       - name: cargo-deny 설치
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-deny@0.20.2
 
@@ -479,7 +479,7 @@ jobs:
         run: cargo test --workspace --locked --manifest-path server-rust/Cargo.toml
 
       - name: cargo-deny 설치
-        uses: taiki-e/install-action@7f4eb899022d8fe70b20c4f3de697aa85c309026 # v2
+        uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283 # v2
         with:
           tool: cargo-deny@0.20.2
 
