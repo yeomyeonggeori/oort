@@ -22,6 +22,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -579,7 +580,9 @@ async fn the_three_routes_round_trip_and_bind_to_a_message() {
         "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/content",
         fixture.workspace, fixture.channel
     );
-    // Bob did not upload it, but he is in the room.
+    // Bob did not upload it, but he is in the room and step 5's message carries
+    // it (before a message does, only Alice reads it: #4233, see
+    // `an_unbound_attachment_is_its_uploaders_alone_until_a_message_carries_it`).
     let downloaded = http
         .get(&content_url)
         .bearer_auth(&bob)
@@ -589,7 +592,7 @@ async fn the_three_routes_round_trip_and_bind_to_a_message() {
     assert_eq!(
         downloaded.status(),
         200,
-        "any active member of the channel may read a completed attachment"
+        "any active member of the channel may read an attachment a message carries"
     );
     let headers = downloaded.headers().clone();
     assert_eq!(
@@ -704,17 +707,40 @@ async fn another_members_attachment_cannot_be_bound_and_the_message_rolls_back_w
         .expect("attachment row");
     assert!(bound.is_none(), "the refused binding left no mark");
 
-    // Bob CAN download it — reading and binding are different authorizations.
-    let readable = http
-        .get(format!(
-            "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/content",
-            fixture.workspace, fixture.channel
-        ))
+    // Reading and binding are different authorizations, and Bob holds neither
+    // yet: nothing carries Alice's file, so it is hers alone to read (#4233 — this
+    // used to be a 200, the exposure ADR-0208 남는 위험 8 closes). He still may
+    // not bind it afterwards; he may read it once Alice's own message carries it.
+    let content = content_url(&base, fixture.workspace, fixture.channel, &attachment_id);
+    let before = http
+        .get(&content)
         .bearer_auth(&bob)
         .send()
         .await
-        .expect("content");
-    assert_eq!(readable.status(), 200);
+        .expect("content before the post");
+    assert_eq!(
+        before.status(),
+        404,
+        "a file no message carries is not Bob's to read"
+    );
+    let posted = http
+        .post(messages_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "제 파일입니다",
+            "attachmentIds": [attachment_id],
+        }))
+        .send()
+        .await
+        .expect("alice's send");
+    assert_eq!(posted.status(), 201, "the owner binds her own file");
+    assert_eq!(
+        read_content(&http, &content, &bob).await,
+        b"alice's bytes",
+        "once a message carries it the room reads it"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1069,6 +1095,405 @@ async fn the_channel_boundary_holds_on_every_route() {
         missing.json::<Value>().await.expect("body")["error"]["message"],
         json!("completed attachment not found")
     );
+}
+
+// ---------------------------------------------------------------------------
+// red proof 3 — a file no message carries is its uploader's alone (#4233)
+// ---------------------------------------------------------------------------
+
+/// The stub archive, counting every content read it is asked for.
+///
+/// A refused read must never reach the archive, and a status code cannot show
+/// that on its own: Drive's own "file not found" is a 404 too
+/// (`routes::attachments::drive_error`), so a 404 that came from the archive
+/// looks exactly like one that came from the authorization. The counter tells
+/// the two apart.
+#[derive(Debug)]
+struct CountingArchive {
+    inner: StubDriveArchive,
+    content_reads: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl DriveArchive for CountingArchive {
+    fn accepts_stub_uploads(&self) -> bool {
+        true
+    }
+
+    async fn create_resumable_upload(
+        &self,
+        channel_id: Uuid,
+        name: &str,
+        mime: &str,
+        size_bytes: i64,
+    ) -> Result<DriveUploadSession, DriveError> {
+        self.inner
+            .create_resumable_upload(channel_id, name, mime, size_bytes)
+            .await
+    }
+
+    async fn file_metadata(&self, file_id: &str) -> Result<DriveFile, DriveError> {
+        self.inner.file_metadata(file_id).await
+    }
+
+    async fn file_content(
+        &self,
+        file_id: &str,
+        max_bytes: i64,
+    ) -> Result<DriveContent, DriveError> {
+        self.content_reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.file_content(file_id, max_bytes).await
+    }
+
+    async fn accept_stub_upload(
+        &self,
+        token: &str,
+        mime: Option<&str>,
+        content_length: Option<u64>,
+        body: UploadBody,
+    ) -> Result<(), DriveError> {
+        self.inner
+            .accept_stub_upload(token, mime, content_length, body)
+            .await
+    }
+}
+
+/// A server whose archive counts content reads; the counter is the second value.
+async fn start_counting_server(pool: PgPool) -> (String, Arc<AtomicUsize>) {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let counter = reads.clone();
+    let (base, _archive) = start_server_with(pool, move |base| {
+        Arc::new(CountingArchive {
+            inner: StubDriveArchive::new(&base),
+            content_reads: counter,
+        })
+    })
+    .await;
+    (base, reads)
+}
+
+/// One GET of the content route: its status and its exact body bytes.
+async fn content_response(http: &reqwest::Client, url: &str, token: &str) -> (u16, Vec<u8>) {
+    let response = http
+        .get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("content");
+    let status = response.status().as_u16();
+    (status, response.bytes().await.expect("body").to_vec())
+}
+
+/// `error.message` of a refusal's body (empty when the body is not an error).
+fn refusal_of(body: &[u8]) -> String {
+    serde_json::from_slice::<Value>(body)
+        .ok()
+        .and_then(|parsed| parsed["error"]["message"].as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// The sentence every refusal to *show* an attachment answers (never a reason).
+const CONTENT_NOT_FOUND: &str = "completed attachment not found";
+
+/// **Red proof (#4233, ADR-0208 남는 위험 8).** A file that no message carries
+/// yet — a draft in a composer tray, or a file a scheduled message holds for up
+/// to 120 days — is read by whoever uploaded it and by no one else; the moment a
+/// message carries it, the channel reads it as before.
+///
+/// Make the read uploader-free again (`load_readable_attachment_in_tx` without
+/// its reader term) and step 3 goes red: Bob's read answers 200, and the archive
+/// counter moves. Drop its `message_id IS NOT NULL` term and step 4 goes red (the
+/// room cannot read what a message carries). Drop its `uploader_member_id` term
+/// and step 2 goes red — and with it the sender's own pending row (web
+/// `PendingRow`, the phone's optimistic echo), which opens its card while its
+/// message is still in flight and so carries nothing yet.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn an_unbound_attachment_is_its_uploaders_alone_until_a_message_carries_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let (base, reads) = start_counting_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    let outsider = login(&http, &base, fixture.workspace, &fixture.outsider).await;
+    const BYTES: &[u8] = "초안 첨부의 바이트".as_bytes();
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+
+    // ---- 0. an upload that has not completed is nobody's content ----------
+    let session = http
+        .post(uploads_url(&base, ws, ch))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "pending.txt", "mime": "text/plain", "size": 3}))
+        .send()
+        .await
+        .expect("create upload");
+    assert_eq!(session.status(), 201);
+    let pending_id = session.json::<Value>().await.expect("body")["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    let (status, body) =
+        content_response(&http, &content_url(&base, ws, ch, &pending_id), &alice).await;
+    assert_eq!(
+        status, 404,
+        "pending is not content, even for the member who started it"
+    );
+    assert_eq!(refusal_of(&body), CONTENT_NOT_FOUND);
+
+    // ---- 1. a completed upload that no message carries --------------------
+    let id = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "draft.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+    let url = content_url(&base, ws, ch, &id);
+    let carried_by: Option<Uuid> =
+        sqlx::query_scalar("SELECT message_id FROM attachment WHERE id = $1")
+            .bind(Uuid::parse_str(&id).expect("uuid"))
+            .fetch_one(&su)
+            .await
+            .expect("attachment row");
+    assert!(
+        carried_by.is_none(),
+        "the premise of everything below: complete, and carried by no message"
+    );
+
+    // ---- 2. the uploader reads her own draft ------------------------------
+    // This is the sender's own pending row: its message is still in flight, so
+    // nothing carries the file, and the card must open it all the same.
+    let (status, body) = content_response(&http, &url, &alice).await;
+    assert_eq!(status, 200, "the uploader always reads what she uploaded");
+    assert_eq!(body, BYTES, "byte for byte");
+    assert_eq!(reads.load(Ordering::SeqCst), 1);
+
+    // ---- 3. another member of the room reads nothing ----------------------
+    let never_existed = content_url(&base, ws, ch, &Uuid::new_v4().to_string());
+    let (missing_status, missing_body) = content_response(&http, &never_existed, &bob).await;
+    assert_eq!(missing_status, 404);
+    let (status, body) = content_response(&http, &url, &bob).await;
+    assert_eq!(status, 404, "Bob is in the room, but no message carries it");
+    assert_eq!(
+        body, missing_body,
+        "a draft that exists must answer byte for byte what an id that never \
+         existed answers, or the route tells Bob which drafts exist"
+    );
+    assert_eq!(refusal_of(&body), CONTENT_NOT_FOUND);
+    let (status, body) = content_response(&http, &url, &outsider).await;
+    assert_eq!(status, 403, "the membership gate still comes first");
+    assert_eq!(refusal_of(&body), "active channel membership required");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        1,
+        "a refused read never reaches the archive"
+    );
+
+    // ---- 4. a message carries it: the room reads it as before -------------
+    let posted = http
+        .post(messages_url(&base, ws, ch))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "자료 올립니다",
+            "attachmentIds": [id],
+        }))
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(posted.status(), 201);
+    let (status, body) = content_response(&http, &url, &bob).await;
+    assert_eq!(status, 200, "a carried attachment is the room's");
+    assert_eq!(body, BYTES, "byte for byte");
+    let (status, body) = content_response(&http, &url, &alice).await;
+    assert_eq!(status, 200, "and still its uploader's");
+    assert_eq!(body, BYTES);
+    let (status, body) = content_response(&http, &url, &outsider).await;
+    assert_eq!(status, 403, "carrying it opens nothing to a non-member");
+    assert_eq!(refusal_of(&body), "active channel membership required");
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        3,
+        "exactly the three reads that were allowed reached the archive"
+    );
+
+    // ---- 5. a member who left reads nothing — her own draft included -------
+    let second = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "second.txt",
+        "text/plain",
+        b"second draft",
+    )
+    .await;
+    sqlx::query(
+        "UPDATE membership SET left_at = now() \
+          WHERE channel_id = $1 AND member_id = $2 AND left_at IS NULL",
+    )
+    .bind(ch)
+    .bind(fixture.alice.member)
+    .execute(&su)
+    .await
+    .expect("alice leaves the channel");
+    let (status, body) =
+        content_response(&http, &content_url(&base, ws, ch, &second), &alice).await;
+    assert_eq!(
+        status, 403,
+        "being the uploader is not a way around channel membership"
+    );
+    assert_eq!(refusal_of(&body), "active channel membership required");
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
+}
+
+/// **Guard (#4233).** Narrowing the read to "carried, or yours" must not widen it
+/// anywhere else: a draft and a carried attachment both stay inside their tenant
+/// and their channel, and the status and sentence of each refusal say which
+/// guard stopped the request.
+///
+/// Parenthesize the new predicate wrongly (`… channel_id = $2 AND message_id IS
+/// NOT NULL OR uploader_member_id = $3`) and the uploader reads her draft under the
+/// wrong channel; drop `channel_id = $2` and every wrong-channel row below answers
+/// 200, the carried file included.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_draft_and_a_carried_attachment_stay_inside_their_tenant_and_channel() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let home = seed(&su, &app_pool).await;
+    // Another tenant with its own people and channels. `eve` is its channel
+    // owner: a member of the other tenant's channels, of none of `home`'s.
+    let away = seed(&su, &app_pool).await;
+    let (base, reads) = start_counting_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, home.workspace, &home.alice).await;
+    let bob = login(&http, &base, home.workspace, &home.bob).await;
+    let eve = login(&http, &base, away.workspace, &away.alice).await;
+    const BYTES: &[u8] = b"inside-its-tenant-and-channel";
+
+    let draft = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        home.workspace,
+        home.channel,
+        "draft.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+    let carried = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        home.workspace,
+        home.channel,
+        "carried.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+    let posted = http
+        .post(messages_url(&base, home.workspace, home.channel))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "한 장만 올립니다",
+            "attachmentIds": [carried],
+        }))
+        .send()
+        .await
+        .expect("post the carried one");
+    assert_eq!(posted.status(), 201);
+
+    for (what, id) in [("a draft", &draft), ("a carried attachment", &carried)] {
+        // The right id under the other channel of the same tenant: a flat 404 for
+        // the uploader and for a member of both channels alike.
+        let wrong_channel = content_url(&base, home.workspace, home.other_channel, id);
+        for (who, token) in [("its uploader", &alice), ("a member of both", &bob)] {
+            let (status, body) = content_response(&http, &wrong_channel, token).await;
+            assert_eq!(
+                status, 404,
+                "{what}, under the wrong channel, read by {who}"
+            );
+            assert_eq!(refusal_of(&body), CONTENT_NOT_FOUND);
+        }
+
+        // Another tenant, addressing this one: the scope guard answers before any
+        // row is looked at (it is not RLS that stops this one).
+        let (status, body) = content_response(
+            &http,
+            &content_url(&base, home.workspace, home.channel, id),
+            &eve,
+        )
+        .await;
+        assert_eq!(
+            status, 403,
+            "{what}, another tenant's token on this tenant's path"
+        );
+        assert_eq!(refusal_of(&body), "workspace scope mismatch");
+
+        // Her own workspace in the path, this tenant's channel: the channel is not
+        // hers, so the membership gate answers (RLS hides the channel from her).
+        let (status, body) = content_response(
+            &http,
+            &content_url(&base, away.workspace, home.channel, id),
+            &eve,
+        )
+        .await;
+        assert_eq!(status, 403, "{what}, another tenant's channel id");
+        assert_eq!(refusal_of(&body), "active channel membership required");
+
+        // Everything hers except the attachment id: her own channel passes the
+        // gate, and RLS plus the channel term leave no row to read.
+        let (status, body) = content_response(
+            &http,
+            &content_url(&base, away.workspace, away.channel, id),
+            &eve,
+        )
+        .await;
+        assert_eq!(status, 404, "{what}, another tenant's attachment id");
+        assert_eq!(refusal_of(&body), CONTENT_NOT_FOUND);
+    }
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        0,
+        "not one of those refusals reached the archive"
+    );
+
+    // Controls: the same two files ARE readable where they belong, so the
+    // refusals above are the guards' and not an archive that cannot be read.
+    let (status, body) = content_response(
+        &http,
+        &content_url(&base, home.workspace, home.channel, &draft),
+        &alice,
+    )
+    .await;
+    assert_eq!((status, body.as_slice()), (200, BYTES), "her draft, to her");
+    let (status, body) = content_response(
+        &http,
+        &content_url(&base, home.workspace, home.channel, &carried),
+        &bob,
+    )
+    .await;
+    assert_eq!(
+        (status, body.as_slice()),
+        (200, BYTES),
+        "the carried one, to the room"
+    );
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
 }
 
 /// Shape refusals, all of them before a connection is taken.
