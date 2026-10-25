@@ -23,7 +23,7 @@ import {ROW_GLYPH_MAX_SCALE, Sentence} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
-import {usePalette, useStyles, useTheme} from './theme';
+import {useKeyboardAppearance, usePalette, useStyles, useTheme} from './theme';
 import {
   ds2Radius,
   font,
@@ -335,7 +335,7 @@ export function InputPill({
   accessibilityLabel,
   style,
   ...input
-}: TextInputProps & {
+}: Omit<TextInputProps, 'keyboardAppearance'> & {
   /** 앞 아이콘(PNG, 글자 없는 아이콘 색으로 칠한다). */
   icon?: ImageSourcePropType;
   /** 입력 칸의 이름 — 플레이스홀더만으로는 이름이 되지 않는다. */
@@ -343,6 +343,7 @@ export function InputPill({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   return (
     <View style={styles.pill} testID={input.testID ? `${input.testID}-pill` : undefined}>
       {icon ? <Image source={icon} style={styles.pillIcon} accessibilityElementsHidden /> : null}
@@ -352,6 +353,8 @@ export function InputPill({
         {...input}
         // 호출자의 `style` 은 알약 입력 스타일(`flex: 1` 포함)을 **덮지 않고 이어 붙는다**.
         style={[styles.pillInput, style]}
+        // 키보드 모양은 앱의 스킴이 정한다(#4526). 펼친 props 뒤에 두고 타입에서도 뺐다 — 호출자가 바꿀 수 없다.
+        keyboardAppearance={keyboardAppearance}
       />
     </View>
   );

@@ -2,7 +2,8 @@ import { execFileSync, execSync } from 'child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs';
 import { join, resolve } from 'path';
 import * as ts from 'typescript';
-import { darkPalette, lightPalette } from '../src/design/tokens';
+import { DEFAULT_THEME_CHOICE } from '../src/design/theme';
+import { lightPalette } from '../src/design/tokens';
 import { NSE_KEYCHAIN_ACCESS_GROUP } from '../src/storage/secureSession';
 
 // =============================================================================
@@ -1029,6 +1030,20 @@ describe('the launch screen is the boot background and nothing else (#2668)', ()
   // `bg`). One named colour feeds the first two and has to equal the token that
   // feeds the third, or opening the app blinks. Every assertion below is on a
   // file, because a blink is invisible to every test that renders React.
+  //
+  // #4526 (ADR-0189 amendment 5, owner 2026-10-26) changed what "equal" means.
+  // The colour used to have a light and a dark variant, each equal to the
+  // palette `bg` of the same name, on the premise that the variant iOS picks (the
+  // device's appearance) is the scheme the app boots in. That held only while
+  // the phone's default was "follow the system". Once the default became light, a
+  // dark device that never chose opened on a dark launch screen and then flipped
+  // to the light app — and this suite stayed green, because it only compared
+  // each variant with its palette and never looked at the premise. The decision
+  // is that the launch screen is LIGHT whatever the device says, so the asset is
+  // now ONE colour with no appearance variant, equal to the light `bg` (what a
+  // phone that never chose boots in), and the premise is asserted below. The
+  // mirror cost is accepted: a phone that chose dark (or follows a dark system)
+  // sees one light surface before its first dark frame.
   const IOS_APP = join(APP_ROOT, 'ios/MomoMobile');
   const COLOR_NAME = 'LaunchBackground';
   const plist = readFileSync(join(IOS_APP, 'Info.plist'), 'utf8');
@@ -1081,7 +1096,16 @@ describe('the launch screen is the boot background and nothing else (#2668)', ()
     expect(backgrounds[0]).not.toContain('systemColor=');
   });
 
-  it('is the boot background in both schemes, byte for byte', () => {
+  it('stands on the phone booting light when nothing was chosen', () => {
+    // The asset below is pinned light BECAUSE the phone's default is light. If
+    // the default moves, this colour has to move with it, and so does the
+    // decision recorded in ADR-0189 amendment 5. Without this line the next
+    // change of default would leave the suite green over a launch screen that
+    // contradicts it — the state #4526 started from.
+    expect(DEFAULT_THEME_CHOICE).toBe('light');
+  });
+
+  it('is one light colour with no variant for the device appearance, byte for byte', () => {
     const colors = JSON.parse(
       readFileSync(
         join(IOS_APP, `Images.xcassets/${COLOR_NAME}.colorset/Contents.json`),
@@ -1092,25 +1116,49 @@ describe('the launch screen is the boot background and nothing else (#2668)', ()
       appearances?: Array<{ appearance: string; value: string }>;
       color: { 'color-space': string; components: Record<string, string> };
     }>;
-    // Two entries, because the boot screen has two palettes. A high-contrast
-    // variant here would have nothing on the JS side to match.
-    expect(colors).toHaveLength(2);
-    const any = colors.find(entry => entry.appearances === undefined);
-    const dark = colors.find(entry =>
-      entry.appearances?.some(
-        a => a.appearance === 'luminosity' && a.value === 'dark',
-      ),
-    );
+    // ONE entry, and no `appearances` key on it. iOS picks a dark (or high
+    // contrast) variant on a device in that mode: that is the dark launch screen
+    // over a light app this asset used to cause. The count alone would not say
+    // so, because a lone dark variant is also one entry; the second check does.
+    expect(colors).toHaveLength(1);
+    expect(colors.every(entry => entry.appearances === undefined)).toBe(true);
+    const only = colors[0];
     // sRGB, because that is how React Native reads a hex string
     // (RCTDefaultReactNativeFactoryDelegate.defaultColorSpace). The same bytes
     // in Display P3 would be a different colour on this phone's screen.
-    for (const entry of [any, dark]) {
-      expect(entry?.idiom).toBe('universal');
-      expect(entry?.color['color-space']).toBe('srgb');
-      expect(componentByte(entry!.color.components.alpha)).toBe(255);
-    }
-    expect(hex(any!.color.components)).toBe(lightPalette.bg);
-    expect(hex(dark!.color.components)).toBe(darkPalette.bg);
+    expect(only.idiom).toBe('universal');
+    expect(only.color['color-space']).toBe('srgb');
+    expect(componentByte(only.color.components.alpha)).toBe(255);
+    expect(hex(only.color.components)).toBe(lightPalette.bg);
+  });
+
+  it('is not undone by pinning the whole app to one interface style', () => {
+    // The tempting way to "always light" is UIUserInterfaceStyle = Light in
+    // Info.plist, overrideUserInterfaceStyle (or traitOverrides) on the window,
+    // or Appearance.setColorScheme('light') from JS. Each gives a light launch
+    // screen, and each also freezes React Native's `Appearance` at light for the
+    // whole app: the 「시스템」 choice stops following the device and 「지금 이
+    // 기기의 시스템은 …」 becomes false. The asset is the whole fix; these four
+    // shapes must stay absent. (Anything else that pins the style is not seen
+    // here — the guard names what it holds.)
+    //
+    // An XML comment is not a key: a note in Info.plist may name the key it forbids.
+    const plistKeys = plist.replace(/<!--[\s\S]*?-->/g, '');
+    expect(plistKeys).not.toContain('UIUserInterfaceStyle');
+    const swift = readFileSync(join(IOS_APP, 'AppDelegate.swift'), 'utf8');
+    // A statement, not a comment: `[^/\n]*` cannot reach past a `//`.
+    expect(swift).not.toMatch(/^[^/\n]*(overrideUserInterfaceStyle|traitOverrides)/m);
+    const callers = [
+      join(APP_ROOT, 'App.tsx'),
+      join(APP_ROOT, 'index.js'),
+      ...sourceFiles(join(APP_ROOT, 'src')),
+    ]
+      .filter(file => existsSync(file))
+      .filter(file =>
+        /\bsetColorScheme\s*\(/.test(stripComments(file, readFileSync(file, 'utf8'))),
+      )
+      .map(file => file.slice(APP_ROOT.length + 1));
+    expect(callers).toEqual([]);
   });
 
   it('is what the React root view paints until the first frame', () => {

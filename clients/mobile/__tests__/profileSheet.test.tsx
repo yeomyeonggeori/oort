@@ -232,7 +232,7 @@ describe('프로필 시트', () => {
 
   it('테마 줄이 선택지를 열고, 고른 것이 저장되며 줄의 값이 바뀐다', async () => {
     await openSheet();
-    expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/새벽하늘 · 시스템/);
+    expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/새벽하늘 · 라이트/);
     // 선택지는 줄을 누르기 전에는 없다.
     expect(screen.queryByTestId('theme-control')).toBeNull();
 

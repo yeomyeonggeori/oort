@@ -7,7 +7,7 @@ import {
   fireEvent,
   render,
   screen,
-} from '@testing-library/react-native';
+} from './fixtures/darkWorld';
 import React, {Profiler} from 'react';
 import {AccessibilityInfo, Animated, FlatList, StyleSheet} from 'react-native';
 
