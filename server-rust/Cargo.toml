@@ -83,7 +83,7 @@ p256 = { version = "0.14", default-features = false, features = ["ecdsa"] }
 unicode-normalization = "0.1"
 
 # auth
-jsonwebtoken = "9"
+jsonwebtoken = "11"
 
 # HTTP (B1.5 binaries)
 #   axum   — momo-server's router/middleware (D1 §1 stack decision).
