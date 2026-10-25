@@ -487,7 +487,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 - **요청 필드 `apps`** (가산, 공개 API): send 요청 본문의 새 필드 `apps: ["<pluginId>"…]`예요. `harnessRefine` 선례대로 전용 필드로 받고, 평평한 `props` 맵에 싣지 않아요.
   - **서버 검증**: 작성자가 사람이고, 각 id가 이 워크스페이스에 설치된 활성 공식 앱이고, 중복을 뺀 뒤 3개 이하여야 해요. 중복을 빼기 **전의** 원본 목록도 16개 이하여야 해요(`MAX_REQUESTED_APPS_INPUT` — 중복 제거 비용을 묶는 입력 상한이에요. 넘으면 같은 400이고, 목록을 정리하거나 연결을 잡기 전에 거절해요. #4313 검수 r1 H1).
     - 어기면 코드 달린 400 `apps_unavailable`이에요(`ApiError::coded`). 클라이언트는 칩을 지우고 앱 목록을 새로 받고, 초안 본문은 남겨요. 조용히 버리지 않아서 클라이언트 버그를 숨기지 않아요.
-    - 검증은 send tx 안에서 **새 INSERT일 때만** 돌아요. 같은 `client_msg_id`의 재전송(`deduped`)은 `apps` 검증과 무관하게 저장본을 201로 돌려줘요(`routing` 허용목록 선례, `routes/messages.rs` 「201 in both the insert and the idempotent-retry case」). 그래서 첫 요청 뒤 앱이 해제돼도 재전송이 중복 전송을 만들지 않아요.
+    - 검증은 send tx 안에서 **새 INSERT일 때만** 돌아요. 같은 `client_msg_id`의 재전송(`deduped`)은 `apps` 검증과 무관하게 저장본을 201로 돌려줘요(`routing` 허용목록 선례, `routes/messages.rs` 「201 in both the insert and the idempotent-retry case」). 그래서 첫 요청 뒤 앱이 해제돼도 재전송이 중복 전송을 만들지 않아요. 단 하나의 예외가 원본 목록 상한(16개)이에요 - 이 상한은 tx 밖에서 먼저 보므로, 16개를 넘기는 `apps`를 단 재전송은 저장본이 아니라 400이에요(정상 클라이언트는 칩 3개 이하라 닿지 않아요).
   - **저장**: 통과한 목록을 서버 소유 키 `props.requestedApps`(JSON 배열)로 써요. 이 키는 `momo_agent::SERVER_OWNED_APP_PROPS_KEYS`(`app_notice.rs`)에 더해요. 보내기·웹훅 수신·게이트웨이 답이 함께 읽는 목록이라, 클라이언트 `props` 맵·외부 웹훅 발신자·게이트웨이 어느 쪽이 보낸 같은 이름의 키도 버려져요.
   - 클라이언트는 **사람이 작성한 메시지에만** `requestedApps` 칩을 그려요(`appsTail.ts`가 반대 방향으로 이미 하는 방어와 같은 원칙).
   - **뜻**: 「요청자가 고른 앱」 표시예요.
@@ -526,7 +526,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
   - `hosted_vendor`: `hosted_off` → `connection` → `paused` 순서예요.
     - `hosted_off`는 인스턴스의 호스팅 배달 스위치(`MOMO_HOSTED_DELIVERY_ENABLED`, 관문의 `HostedDeliveryNotEnabled`)가 꺼진 경우예요. 기본값이 꺼짐(`config.rs` `hosted_delivery_enabled: false`)이라, 이 값이 없으면 기본 설정 서버의 호스팅 에이전트가 전부 `null`(배달됨)로 잘못 나가요.
     - `connection`은 활성 연결이 없는 경우예요(`HostedConnectionUnavailable`).
-  - 시험 핀에 호스팅 연결 행도 있는 **혼성 에이전트**(운영자가 이미 연결된 에이전트에 핀을 건 드문 조합)는 `path`가 `hermes_trial`이지만, 관문이 시험 정지를 본 뒤 호스팅 단계로 이어 가요. 그래서 `blocked`도 시험 정지 → `hosted_off` → `connection` → `paused` 순서로 이어 평가해요(#4313 검수 r1 M2 — 시험만 보고 `null`을 주면 관문이 버릴 메시지를 칩이 보내요).
+  - 시험 핀에 호스팅 연결 행도 있는 **혼성 에이전트**(운영자가 이미 연결된 에이전트에 핀을 건 드문 조합)는 `path`가 `hermes_trial`이지만, 관문이 시험 정지를 본 뒤 호스팅 단계로 이어 가요. 그래서 `blocked`도 시험 정지 → `hosted_off` → `connection` → `paused` 순서로 이어 평가해요(#4313 검수 r1 M2 — 시험만 보고 `null`을 주면 관문이 버릴 메시지를 칩이 보내요). 얼굴(`path`·`enforced`·`apps`)은 시험의 사실 그대로이고, `blocked`가 `null`이면 메시지는 호스팅 연결의 받은편지함으로 가요(그 앱 목록은 oort가 강제하지 못해요). 핀을 거는 PUT이 호스팅 연결 행이 있는 에이전트를 막을지는 후속 결정이에요(검수 r2 M-r2-1).
   - `paused`는 관문의 마지막 단계라서 두 경로 모두에 걸려요.
   - **대화마다 다른 사실은 싣지 않아요.** F8은 `channelId`를 받지 않아요.
     - 대화 멤버 여부(`NotChannelMember`)는 F5 자격 3이 로스터로 판정해요.
@@ -564,7 +564,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 3. 시드 migration이 `manifest`와 `manifest_digest`를 함께 갱신해요(기존 `computed_digest` 시험).
 4. 시드 `logoKey` ⊆ 번들 자산 ∪ 글자 타일 목록이에요(클라이언트 시험, 서버 픽스처 공유). 모르는 `logoKey`는 글자 타일로 그려요.
 5. `apps` 요청 필드:
-   - 사람 아닌 작성자·미설치·비공식·중복 뺀 뒤 4개 이상이면 `apps_unavailable` 400이에요.
+   - 사람 아닌 작성자·미설치·비공식·중복 뺀 뒤 4개 이상이면 `apps_unavailable` 400이에요. 중복을 빼기 전의 원본 목록이 17개 이상이어도 같은 400이에요(입력 상한 16개 - 호출 지점은 DB 없는 시험 `requested_apps_input_gate.rs`가 묶어요).
    - 설치 해제 뒤 같은 `client_msg_id`로 재전송하면 201이고 `requestedApps`가 첫 저장본과 같아요.
    - 웹훅 수신·게이트웨이 답이 실은 `requestedApps`도 버려져요.
    - 통과하면 `props.requestedApps`에 중복 없이 저장돼요.

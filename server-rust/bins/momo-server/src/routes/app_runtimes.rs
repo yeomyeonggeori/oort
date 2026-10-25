@@ -45,7 +45,12 @@
 //! (`attest` → `members` → `apps`, [`momo_agent::connector_trial_stop`]) and then `paused`;
 //! for a hosted vendor agent `hosted_off` → `connection` → `paused`; for the rare agent that is
 //! both (a pinned trial that also has a hosted connection row) the trial's stop first and then the
-//! hosted stages and `paused`. Only the **first** blocker is reported. The candidate comes from [`momo_agent::load_mention_candidates_in_tx`]
+//! hosted stages and `paused`. Only the **first** blocker is reported. That mixed agent keeps the
+//! trial's face (`path`, `enforced` and `apps` describe the trial's facts), but when nothing blocks
+//! it the gate hands the message to the hosted connection's inbox, where oort cannot enforce the
+//! app list - a rare operator-made state (the pin was set after the connection), documented in the
+//! ADR and left as it is (review r2 M-r2-1). The candidate comes from
+//! [`momo_agent::load_mention_candidates_in_tx`]
 //! — the loader the delivery path itself uses — so the definitions of 「활성 연결」 and
 //! 「한 사람」 are not copied. A test in `agent_mentions.rs` drives the real `delivery_gate`
 //! over a grid of facts and requires the two to agree, and maps every `DeliveryGate`
@@ -592,8 +597,11 @@ mod tests {
             blocked(RuntimePath::HermesTrial, &stopped, false, &complete),
             Some(Blocked::Members)
         );
-        // Through the projection: the face is the trial's, the reason is the hosted stage's.
-        let answer = project(&[mixed(false)], ME, &ids(&[GMAIL]), true, &complete);
+        // Through the projection: the face is the trial's, the reason is the hosted stage's. The
+        // requester also holds a grant the operator did NOT switch on (calendar): the trial's `apps` is
+        // the operator's list ∩ my grants, so calendar is absent - a hosted face (my grants whole)
+        // would list it (review r2 L-r2-1).
+        let answer = project(&[mixed(false)], ME, &ids(&[GMAIL, GCAL]), true, &complete);
         assert_eq!(answer.len(), 1, "{answer:?}");
         assert_eq!(answer[0].path, RuntimePath::HermesTrial);
         assert!(answer[0].enforced);

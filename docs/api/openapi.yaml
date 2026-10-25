@@ -4476,7 +4476,11 @@ paths:
         for `hermes_trial` the trial's own stop (`attest`, `members`, `apps`) then
         `paused`; for `hosted_vendor` `hosted_off` (the instance's hosted delivery
         switch is closed — the default configuration), `connection` (no active,
-        proved connection), then `paused`. It carries nothing that differs per
+        proved connection), then `paused`. An agent that is both (a pinned trial
+        that also has a hosted connection) shows the `hermes_trial` face and is
+        judged by both: the trial's stop first, then `hosted_off` and
+        `connection`, then `paused`; when nothing blocks it the message goes to
+        the hosted connection's inbox, where the app list is not enforced. It carries nothing that differs per
         conversation: channel membership is judged by the client from the roster,
         and the hosted connection's per-channel approval is answered by the
         existing gate after the send.
@@ -10262,7 +10266,8 @@ paths:
             signature was made), or — with `error.code = apps_unavailable`
             (ADR-0113 증보 3 F5) — an `apps` list the sender may not use: an
             agent or system author, an app that is not an installed and enabled
-            official app, or more than three distinct ids. Nothing is stored.
+            official app, more than three distinct ids, or a list longer than 16
+            entries as sent (repeats included). Nothing is stored.
           content:
             application/json:
               schema:
@@ -19452,7 +19457,10 @@ components:
             under the server-owned `props.requestedApps` (a JSON array). An
             idempotent retry (same `clientMsgId`) answers the stored message with
             201 whatever `apps` says now, so an app uninstalled after the first
-            request cannot turn a harmless retry into a refusal.
+            request cannot turn a harmless retry into a refusal. The one
+            exception is the 16-entry bound on the list as sent: it is checked
+            before anything is read, so a retry that carries a longer list is the
+            same `400`.
 
             **A marker, not a grant:** delivery, the owner-only and connector-owner
             guards and `tool_grants` never read it — a message carrying `apps` is

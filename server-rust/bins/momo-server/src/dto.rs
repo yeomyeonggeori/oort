@@ -380,7 +380,9 @@ pub struct SendMessageRequest {
     /// enabled official apps, at most three — and stores the result under the
     /// server-owned `props.requestedApps` (`routes::requested_apps`). A refusal is a
     /// coded 400 `apps_unavailable`; an idempotent retry answers the stored message
-    /// whatever this field says. **A marker, not a grant:** delivery and
+    /// whatever this field says - except that the list **as sent** is bounded first,
+    /// repeats included (`momo_agent::MAX_REQUESTED_APPS_INPUT`, 16): a longer list is
+    /// the same 400 before anything is read, retries too. **A marker, not a grant:** delivery and
     /// `tool_grants` never read it. An older server's closed-world request refuses
     /// the unknown key, so a client sends it only once `GET …/members/me/app-runtimes`
     /// has proved the surface.
