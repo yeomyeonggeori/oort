@@ -442,6 +442,10 @@ export interface Message {
    * (서버가 그 둘에서 일부러 뺀다 — 쓰기 경로 안에서 읽기를 한 번 더 하지 않기
    * 위해서다). 그래서 실시간으로 온 인용 답글은 이 값이 없고, 클라가 화면에 이미
    * 들고 있는 행에서 푼다 (`features/timeline/quote.ts` resolveQuote).
+   *
+   * `message.edited` 프레임과 `PATCH` 응답에도 없다(서버: 「the quote id rides along, the
+   * rendered quote comes from the next read」). 거기서 없다는 것은 「인용 없음」이 아니라 「말하지
+   * 않음」이므로, `reconcileMessages`가 이미 든 행의 풀린 인용을 잇는다(#4450, `keepHeldProjection`).
    */
   replyTo?: QuotedMessage;
   seq: number;
@@ -475,13 +479,19 @@ export interface Message {
    * 않는다(편집은 묶인 첨부를 바꾸지 못한다). 거기서 없다는 것은 「없음」이 아니라
    * 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 첨부를 잇는다. 이 읽기는
    * 서버에 살아 있는 메시지에서 첨부를 떼는 길이 없다는 사실에 서 있다 — 그런 길이
-   * 생기면 명시 신호가 필요하다(`keepHeldAttachments` 주석).
+   * 생기면 명시 신호가 필요하다(`keepHeldProjection` 주석).
    *
    * 업로드 capability URL도 Drive file id도 여기 없다. 바이트로 가는 유일한 길은
    * 인가 프록시(`GET …/attachments/{id}/content`)다.
    */
   attachments?: MessageAttachment[];
-  /** 2-hop closure: the reply rollup rides the page, no extra round trip. */
+  /**
+   * 2-hop closure: the reply rollup rides the page, no extra round trip.
+   *
+   * 편집 투영(`message.edited` 프레임·`PATCH` 응답)에는 없다. 거기서 없다는 것은 「답글 없음」이
+   * 아니라 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 롤업을 잇는다(#4450,
+   * `keepHeldProjection`). 롤업은 실시간으로 갱신되지 않고 페이지 읽기에서만 바뀐다.
+   */
   thread?: {
     reply_count: number;
     last_reply_seq: number;
