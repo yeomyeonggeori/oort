@@ -64,7 +64,9 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         400 으로 바꾼다, design-review r1 H1) · `relay<ms>` 실시간 프레임(`message.new`)이 POST 응답보다 <ms> 먼저 온다(코어가
 //                         말하는 선착 경로) · `anchor` 보낼 때마다 새 확정본 행에 앵커를 옮겨 **확정본 행이 마운트되는 때**를 프레임에 남긴다
 //                         (`anchor` 칸이 null 이 아니게 되는 때 — 보류가 있으면 등장이 끝난 뒤, 없으면 확정 즉시). `rec+anchor` 는 사진 두 번만
-//                         앵커를 건다(#4455 r3 H2: 사진 행의 교체 이음매를 서버 사본 행이 마운트된 때 기준으로 잰다).
+//                         앵커를 건다(#4455 r3 H2: 사진 행의 교체 이음매를 서버 사본 행이 마운트된 때 기준으로 잰다). `rec+tail` 은 가로 사진 120ms 뒤에
+//                         글을 이어 보내고, `rec+working` 은 스트림 맨 끝에 「작업 중」 자리를 세운다 — 사진 **뒤에 서 있는 행**이 서버 사본이 서는 때에
+//                         새 인스턴스로 다시 서지 않는지 본다(#4455 r4 H4).
 //             namefit     시계 상자가 이름 줄 끝에서 **혼자 줄바꿈**되는 폭 창을 찾는다(design-review r1 M2). 목록 폭을 한 칸씩 줄이며(`NAMEFIT_*`)
 //                         머리 행 느린 전송을 하나씩 보낸다 — 이름·시각이 줄을 꼭 채우는 폭에서 시계가 이름 밑으로 내려서는가를 사진으로 본다.
 //             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
@@ -560,7 +562,12 @@ interface Controls {
   setNarrow: (by: number | null) => void;
   /** 입력창이 지금 포커스를 쥐고 있는가(#4456). */
   isFocused: () => boolean;
+  /** 장면 이름의 `+` 옵션이 켜져 있는가(#4455 r4 — `rec+tail`·`rec+working`). */
+  hasMod: (name: string) => boolean;
 }
+
+/** `rec+working` 의 「작업 중」 자리(상대 한 명). 모듈 상수여야 목록이 매 렌더 새 배열을 받지 않는다. */
+const WORKING_PEER: readonly {memberId: string}[] = [{memberId: PEER}];
 
 // #4455 보내기 장면의 문구. 가상의 대화다 — 실제 대화 문구·이름을 쓰지 않는다.
 const PEER_LINES: readonly string[] = [
@@ -741,6 +748,13 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     if (c.watchNext()) await wait(250);
     c.mark('rec-3-send-landscape');
     c.send('', [PHOTOS['photo-a']]);
+    // `+tail`: 사진 **뒤에 서 있는 행**을 만든다(#4455 r4 H4) — 사진 메아리가 서 있는 동안 글을 이어 보내면 글 메아리가 사진 메아리 뒤에 선다.
+    // 서버 사본(사진)이 서는 때에 목록이 한 칸 늘어도 이 행이 새 인스턴스로 다시 서면 안 된다.
+    if (c.hasMod('tail')) {
+      await wait(120);
+      c.mark('rec-3-send-tail');
+      c.send(SHORT_BODIES[2]);
+    }
     await wait(3_000);
     if (c.watchNext()) await wait(250);
     c.mark('rec-3-send-portrait');
@@ -1102,6 +1116,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             return true;
           },
           isFocused: () => inputRef.current?.isFocused() === true,
+          hasMod: modName => mods.includes(modName),
         };
         relayFirst = message => (fake.current as FakeRail).message(message);
         markRef.current = controls.mark;
@@ -1188,6 +1203,8 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             lastReadSeq={unread ? 1 : null}
             unreadCount={unread ? HISTORY_BODIES.length - 1 : 0}
             pending={timeline.pending}
+            // `+working`: 스트림 맨 끝에 「작업 중」 자리를 세운다(#4455 r4 H4 — 사진 뒤에 서 있는 행). 에이전트가 일하는 대화에서 사진을 보내는 경우다.
+            working={mods.includes('working') ? WORKING_PEER : undefined}
             actions={sendScene ? SEND_ACTIONS : undefined}
             reactions={timeline.reactions}
             pins={timeline.pins}

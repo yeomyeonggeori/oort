@@ -19,7 +19,7 @@ import {
   resetArrivedForTest,
   sameEchoes,
   settledEchoes,
-  withLingeringEchoes,
+  swapLingeringEchoes,
 } from '../src/features/conversation/sendArrival';
 
 // =============================================================================
@@ -27,8 +27,9 @@ import {
 //
 // 서버 사본은 새 마운트라 사진 타일의 `<Image>` 도 새로 서고, 새 네이티브 이미지 뷰는 첫 프레임에 안 그려져 타일이 한 프레임
 // (8~23ms) 빈 면으로 번쩍였다(레이아웃 지표 0 — 칠만 빈다). JS 에서 첫 페인트를 앞당길 길이 없으니 **새 뷰가 보이기 전에 미리
-// 마운트해 그려 둔다**: 메아리는 그 항목 그대로(같은 키·인덱스·인스턴스) `ECHO_LINGER_MS` 더 남고, 확정본은 그 뒤에 대기 상태
-// (`standby`: 높이 0 · 투명 · 눌림·낭독 없음)로 서 있다가, 창이 끝나는 한 커밋에 메아리가 걷히며 드러난다. 여기서 재는 것:
+// 마운트해 그려 둔다**: 메아리는 확정본의 자리에 그대로(같은 키·인덱스·인스턴스) `ECHO_LINGER_MS` 더 남고, 확정본은 **스트림 맨 끝**에
+// 대기 상태(`standby`: 높이 0 · 투명 · 눌림·낭독 없음)로 서 있다가, 창이 끝나는 한 커밋에 메아리가 걷히며 제 자리로 드러난다(꼬리 행이
+// 재마운트되지 않는 것은 `sendArrivalStandbyTail4455.test.tsx`). 여기서 재는 것:
 //   1. 순수 함수(사진 판정·짝 짓기·끼워 넣는 자리·확정본 없는 것은 버림·참조 보존)
 //   2. `MessageRow` 의 대기 모드(레이아웃 0·투명·눌림/낭독 없음·위 여백 없음, 보통 행은 그대로, 인스턴스가 드러남으로 이어짐)
 //   3. `Timeline`: 보류가 풀리는 **그 커밋에** 메아리가 남고 서버 사본이 대기로 선다(보류 경로·보류 없는 경로·느린 확정),
@@ -202,6 +203,12 @@ describe('사진 메아리를 남기는 순수 함수', () => {
     expect(isStandbyItem(null)).toBe(false);
   });
 
+  it('photoEchoesOf: 실패한 사진 메아리는 모으지 않는다 — 서버 사본과 모양이 달라 겹쳐 둘 이유가 없다(r4 L15)', () => {
+    const failed = echoItem(echo({clientMsgId: 'c-failed', status: 'failed'}));
+    const sending = echoItem(echo({clientMsgId: 'c-sending'}));
+    expect(photoEchoesOf([failed, sending])).toEqual([sending]);
+  });
+
   it('sameEchoes: 키와 보낸 사본의 동일성으로 같은 목록을 가린다', () => {
     const a = echoItem(echo({clientMsgId: 'c-1'}));
     const b = echoItem(echo({clientMsgId: 'c-2'}));
@@ -225,7 +232,7 @@ describe('사진 메아리를 남기는 순수 함수', () => {
     const lingering = echoItem(echo({clientMsgId: 'c-1'}));
     const otherChannel = [item(message(1)), item(message(2)), item(mine(3, {channelId: 'other-channel'}))];
     expect(settledEchoes([lingering], otherChannel)).toEqual([]);
-    expect(withLingeringEchoes(otherChannel, [lingering])).toBe(otherChannel);
+    expect(swapLingeringEchoes(otherChannel, [lingering]).items).toBe(otherChannel);
   });
 
   it('settledEchoes: 확정본 하나는 메아리 하나만 짝짓는다 — 같은 사진 두 장은 보낸 순서대로 하나씩', () => {
@@ -236,24 +243,47 @@ describe('사진 메아리를 남기는 순수 함수', () => {
     expect(settledEchoes([first, second], [...one, item(mine(4), false)])).toEqual([first, second]);
   });
 
-  it('withLingeringEchoes: 메아리를 확정본 바로 앞에 **그대로** 끼우고 확정본에 standby 를 붙인다', () => {
+  it('swapLingeringEchoes: 메아리를 확정본의 자리에 **그대로** 놓고 확정본은 standby 로 따로 돌려준다 — 어떤 행의 인덱스도 안 바뀐다', () => {
     const lingering = echoItem(echo({clientMsgId: 'c-1'}));
     const items = [item(message(1)), item(message(2)), item(mine(3)), item(message(4))];
-    const out = withLingeringEchoes(items, [lingering]);
-    expect(out.map(entry => entry.key)).toEqual(['m-1', 'm-2', 'p-c-1', 'm-3', 'm-4']);
+    const split = swapLingeringEchoes(items, [lingering]);
+    // 길이가 같고(뒤 행이 안 밀린다) 메아리가 확정본의 자리에 서 있다.
+    expect(split.items).toHaveLength(items.length);
+    expect(split.items.map(entry => entry.key)).toEqual(['m-1', 'm-2', 'p-c-1', 'm-4']);
     // 메아리 항목은 받은 그대로다(같은 객체 — 같은 키·같은 모양이라 인스턴스가 이어진다).
-    expect(out[2]).toBe(lingering);
-    expect(isStandbyItem(out[3])).toBe(true);
-    expect(isStandbyItem(out[4])).toBe(false);
+    expect(split.items[2]).toBe(lingering);
+    // 뒤 행은 같은 항목이다.
+    expect(split.items[3]).toBe(items[3]);
+    // 확정본은 standby 표지만 더한 사본으로 따로 나온다 — 호출자가 맨 끝에 붙인다.
+    expect(split.standby).toHaveLength(1);
+    expect(split.standby[0].key).toBe('m-3');
+    expect(isStandbyItem(split.standby[0])).toBe(true);
     // 원본 배열과 확정본 항목은 건드리지 않는다.
-    expect(items).toHaveLength(4);
+    expect(items.map(entry => entry.key)).toEqual(['m-1', 'm-2', 'm-3', 'm-4']);
     expect(isStandbyItem(items[2])).toBe(false);
   });
 
-  it('withLingeringEchoes: 바꿀 것이 없으면 받은 배열 그대로(참조) — 남길 메아리 없음·확정본을 못 찾음', () => {
+  it('swapLingeringEchoes: 바꿀 것이 없으면 받은 배열 그대로(참조) — 남길 메아리 없음·확정본을 못 찾음', () => {
     const items = [item(message(1)), item(message(2))];
-    expect(withLingeringEchoes(items, [])).toBe(items);
-    expect(withLingeringEchoes(items, [echoItem(echo({clientMsgId: 'c-lost'}))])).toBe(items);
+    expect(swapLingeringEchoes(items, []).items).toBe(items);
+    expect(swapLingeringEchoes(items, []).standby).toHaveLength(0);
+    const lost = swapLingeringEchoes(items, [echoItem(echo({clientMsgId: 'c-lost'}))]);
+    expect(lost.items).toBe(items);
+    expect(lost.standby).toHaveLength(0);
+  });
+
+  it('swapLingeringEchoes: 사진 둘이면 메아리도 각자 자기 확정본의 자리에, 대기 사본은 보낸 순서대로', () => {
+    const first = echoItem(echo({clientMsgId: 'c-1', attachments: [photo('photo-a')]}));
+    const second = echoItem(echo({clientMsgId: 'c-2', attachments: [photo('photo-b')], createdAtMs: NOW + 40}));
+    const items = [
+      item(message(1)),
+      item(mine(3, {attachments: [photo('photo-a')]})),
+      item(message(4)),
+      item(mine(5, {attachments: [photo('photo-b')]})),
+    ];
+    const split = swapLingeringEchoes(items, [first, second]);
+    expect(split.items.map(entry => entry.key)).toEqual(['m-1', 'p-c-1', 'm-4', 'p-c-2']);
+    expect(split.standby.map(entry => entry.key)).toEqual(['m-3', 'm-5']);
   });
 });
 
@@ -441,6 +471,15 @@ describe('Timeline — 서버 사본이 서는 커밋에 메아리가 남고 서
     }
   });
 
+  it('이미 실패한 사진 메아리는 서버 사본이 와도 남기지 않는다 — 「전송 실패」 줄이 150ms 더 서 있지 않는다', async () => {
+    spyTiming();
+    const view = render(tl(history, [echo({status: 'failed'})]));
+    view.rerender(tl([...history, mine(3)], []));
+    expect(keys()).toEqual(['m-1', 'm-2', 'm-3']);
+    expect(echoes()).toBe(0);
+    await settle();
+  });
+
   it('확정본 없이 사라진 사진 메아리(전송이 지워짐)는 남기지 않는다', async () => {
     spyTiming();
     markArrived('c-1');
@@ -452,7 +491,7 @@ describe('Timeline — 서버 사본이 서는 커밋에 메아리가 남고 서
     await settle();
   });
 
-  it('사진 둘을 잇달아 보내면 메아리도 각자 자기 확정본 앞에 남고 함께 걷힌다', async () => {
+  it('사진 둘을 잇달아 보내면 메아리도 각자 자기 확정본의 자리에 남고 대기 사본 둘은 맨 끝에 서며 함께 걷힌다', async () => {
     spyTiming();
     markArrived('c-1');
     markArrived('c-2');
@@ -468,7 +507,7 @@ describe('Timeline — 서버 사본이 서는 커밋에 메아리가 남고 서
         [],
       ),
     );
-    expect(keys()).toEqual(['m-1', 'm-2', 'p-c-1', 'm-3*', 'p-c-2', 'm-4*']);
+    expect(keys()).toEqual(['m-1', 'm-2', 'p-c-1', 'p-c-2', 'm-3*', 'm-4*']);
     act(() => {
       jest.advanceTimersByTime(ECHO_LINGER_MS);
     });

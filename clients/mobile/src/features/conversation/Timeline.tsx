@@ -39,7 +39,7 @@ import {
   sameEchoes,
   settledEchoes,
   subscribeArrivals,
-  withLingeringEchoes,
+  swapLingeringEchoes,
   type EchoItem,
 } from './sendArrival';
 import {
@@ -1137,9 +1137,9 @@ function TimelineInner({
     [built, arrivals, arrivalSurface],
   );
   // 사진 메아리가 서버 사본에 자리를 내줄 때 타일이 한 프레임 빈 면으로 번쩍이지 않게 한다(#4455 design-review r3 H3). 서버 사본은
-  // 새 마운트라 사진의 `<Image>` 도 새로 서고, 새 네이티브 이미지 뷰는 첫 프레임에 안 그려진다(8~23ms). 그래서 메아리를 그 항목
-  // 그대로 `ECHO_LINGER_MS` 더 남기고 서버 사본은 그 뒤에 **눈에 안 보이는 채 미리 마운트**한다(`sendArrival.ts` 「사진은 서버 사본을
-  // 먼저 마운트해 두고」). 창이 끝나는 한 커밋에서 메아리가 걷히며 서버 사본이 드러난다.
+  // 새 마운트라 사진의 `<Image>` 도 새로 서고, 새 네이티브 이미지 뷰는 첫 프레임에 안 그려진다(8~23ms). 그래서 메아리를 확정본의
+  // 자리에 그대로 `ECHO_LINGER_MS` 더 남기고 서버 사본은 **스트림 맨 끝에 눈에 안 보이는 채 미리 마운트**한다(`sendArrival.ts` 「사진은
+  // 서버 사본을 먼저 마운트해 두고」). 창이 끝나는 한 커밋에서 메아리가 걷히며 서버 사본이 제 자리로 드러난다.
   //
   // **렌더 중 파생 상태**다: 서 있던 사진 메아리가 사라졌고 그 확정본이 이미 목록에 있다는 것을 **같은 렌더에서** 알아야 서버 사본이
   // 마운트되는 그 커밋에 메아리가 함께 남는다(효과로 정하면 한 프레임 늦는다). 비교는 지난 렌더의 목록과 하므로 조건이 참일 때만 상태를
@@ -1158,10 +1158,13 @@ function TimelineInner({
     const timer = setTimeout(() => setLingering(NO_ECHOES), ECHO_LINGER_MS);
     return () => clearTimeout(timer);
   }, [lingering]);
-  const stream = useMemo(
-    () => withTurnPlaceholders(withLingeringEchoes(afterHold, lingering), working),
-    [afterHold, lingering, working],
-  );
+  const stream = useMemo(() => {
+    const split = swapLingeringEchoes(afterHold, lingering);
+    const placed = withTurnPlaceholders(split.items, working);
+    // 대기 서버 사본은 **맨 끝**(자리표시 뒤)이다 — 기존 행의 인덱스가 하나도 안 바뀌어서 `VirtualizedList` 가 꼬리 행을 재마운트하지 않는다
+    // (design-review r4 H4, `sendArrival.ts` 「왜 맨 끝인가」).
+    return split.standby.length === 0 ? placed : [...placed, ...split.standby];
+  }, [afterHold, lingering, working]);
 
   // One pass over the array this list is already rendering, so that a row can
   // answer two questions it cannot answer alone: "what does this reply answer"

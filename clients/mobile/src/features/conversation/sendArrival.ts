@@ -56,11 +56,17 @@
 // 한 번 번쩍인다. 크기·자리는 맞아서(H2 수리) 레이아웃 지표는 0 이고 칠만 비는 사건이다. 글자 행에는 없다. JS 에서 첫 페인트를
 // 앞당길 길은 없으므로, **새 뷰가 보이기 전에 미리 마운트해 그려 둔다**.
 //
-// 서 있던 사진 메아리가 사라지면(`holdSettledArrivals` 가 보류를 풀거나, 보류 없이 확정본이 오거나) 그 메아리를 **같은 항목 그대로**
-// (같은 키·같은 인덱스 — 인스턴스와 그 안의 `<Image>` 가 손도 안 닿는다) `ECHO_LINGER_MS` 동안 더 남기고, 확정본(서버 사본)은 그 바로
-// 뒤에 **대기 상태**(`standby`: 높이 0 · 투명 · 눌림·낭독 없음 — `MessageRow`)로 미리 마운트한다. 서버 사본의 이미지가 그동안 눈에
-// 안 보이는 채 그려지고, 창이 끝나는 **한 커밋**에서 메아리가 걷히며 서버 사본이 드러난다 — 같은 내용·같은 크기·같은 자리라 눈에는
-// 아무 일도 안 일어난다. 사진이 없는 행(글자·파일 카드)은 이 일이 없으므로 대기도 없다.
+// 서 있던 사진 메아리가 사라지면(`holdSettledArrivals` 가 보류를 풀거나, 보류 없이 확정본이 오거나) 그 메아리를 **확정본의 자리에 그대로**
+// (같은 키·같은 인덱스 — 인스턴스와 그 안의 `<Image>` 가 손도 안 닿는다) `ECHO_LINGER_MS` 동안 더 남기고, 확정본(서버 사본)은 **스트림
+// 맨 끝**에 **대기 상태**(`standby`: 높이 0 · 투명 · 눌림·낭독 없음 — `MessageRow`)로 미리 마운트한다. 서버 사본의 이미지가 그동안 눈에
+// 안 보이는 채 그려지고, 창이 끝나는 **한 커밋**에서 메아리가 걷히며 서버 사본이 제 자리로 드러난다 — 같은 키(`m-<seq>`)가 끝에서 제 자리로
+// 옮겨 갈 뿐이라 React 가 인스턴스를 그대로 잇는다. 같은 내용·같은 크기·같은 자리라 눈에는 아무 일도 안 일어난다. 사진이 없는 행(글자·
+// 파일 카드)은 이 일이 없으므로 대기도 없다.
+//
+// **왜 맨 끝인가.** 대기 사본을 메아리 바로 뒤에 끼우면 목록이 한 칸 늘면서 **메아리 뒤에 서 있던 행들의 인덱스가 한 칸씩 밀린다**
+// (에이전트 「작업 중」 자리는 항상 스트림 맨 끝에 붙고, 사진 뒤에 이어 보낸 메아리도 뒤에 선다). `VirtualizedList` 는 항목이 늘어난 커밋에서
+// 렌더 창의 끝을 그대로 두므로 가장 뒤 행이 창 밖으로 나갔다가 새 인스턴스로 다시 선다 — 아래 「유령」을 버리게 한 바로 그 기전이 메아리
+// 셀에서 꼬리 셀로 옮겨 간다(design-review r4 H4). 맨 끝에 새로 느는 쪽을 서버 사본으로 하면 기존 행의 인덱스가 하나도 안 바뀐다.
 //
 // (처음에는 메아리를 서버 사본 **위에** 겹쳐 두는 쪽을 시도했다. 그 길은 목록이 한 칸 늘면서 메아리 셀의 인덱스가 밀리는데,
 // `VirtualizedList` 는 늘어난 꼬리의 렌더 창을 다음 업데이트에서야 넓혀서 그 커밋에 메아리 셀이 창 밖으로 나가 언마운트됐다가 한
@@ -257,11 +263,14 @@ export function isStandbyItem(item: unknown): boolean {
   return (item as {standby?: unknown} | null)?.standby === true;
 }
 
-/** 지금 서 있는 사진 메아리들. */
+/**
+ * 지금 서 있는 사진 메아리들. **실패한 메아리는 뺀다**(design-review r4 L15) — 실패 메아리는 흐린 본문 + 「전송 실패」 줄이라 서버 사본과 모양이
+ * 달라서 겹쳐 둘 이유가 없고, 150ms 더 남으면 이미 처리된 전송에 「다시 보내기」가 더 서 있게 된다.
+ */
 export function photoEchoesOf(items: readonly TimelineItem[]): EchoItem[] {
   const out: EchoItem[] = [];
   for (const item of items) {
-    if (item.kind === 'pending' && carriesInlinePhoto(item.pending)) out.push(item);
+    if (item.kind === 'pending' && item.pending.status !== 'failed' && carriesInlinePhoto(item.pending)) out.push(item);
   }
   return out;
 }
@@ -300,31 +309,39 @@ export function settledEchoes(departed: readonly EchoItem[], items: readonly Tim
   return out;
 }
 
+/** `swapLingeringEchoes` 의 결과 — 메아리를 확정본의 자리에 둔 목록과, 맨 끝에 붙일 대기 서버 사본들. */
+export interface LingeringSplit {
+  /** 확정본이 있던 자리에 메아리를 **그대로** 둔 목록(길이는 받은 목록과 같다 — 어떤 행의 인덱스도 안 바뀐다). */
+  readonly items: TimelineItem[];
+  /** 스트림 **맨 끝**(자리표시 뒤)에 붙일 대기 서버 사본들 — 확정본에 `standby` 표지만 더한 것. */
+  readonly standby: readonly StandbyItem[];
+}
+
+const NO_STANDBY: readonly StandbyItem[] = [];
+
 /**
- * 남기는 메아리를 각자의 확정본 **바로 앞**에 그대로 끼워 넣고(같은 키·같은 항목 — 보류 중 그 자리에 있던 그 인덱스다), 확정본에는
- * `standby` 를 붙인다. 확정본을 못 찾은 메아리는 버린다. 바꿀 것이 없으면 **받은 배열을 그대로** 돌려준다(호출자의 memo 를 지킨다).
+ * 남기는 메아리를 각자의 확정본 **자리에 그대로** 놓고(같은 키·같은 항목 — 보류 중 그 자리에 있던 그 인덱스다), 확정본은 `standby` 를 붙여
+ * 따로 돌려준다 — 호출자가 스트림 **맨 끝**에 붙인다(`Timeline`, 위 「왜 맨 끝인가」). 확정본을 못 찾은 메아리는 버린다. 바꿀 것이 없으면
+ * **받은 배열을 그대로** 돌려준다(호출자의 memo 를 지킨다).
  */
-export function withLingeringEchoes(items: TimelineItem[], lingering: readonly EchoItem[]): TimelineItem[] {
-  if (lingering.length === 0) return items;
+export function swapLingeringEchoes(items: TimelineItem[], lingering: readonly EchoItem[]): LingeringSplit {
+  if (lingering.length === 0) return {items, standby: NO_STANDBY};
   const taken = new Set<number>();
-  const before = new Map<number, EchoItem>();
+  const swapped = new Map<number, EchoItem>();
   for (const echo of lingering) {
     const at = twinIndex(items, echo.pending, taken);
     if (at < 0) continue;
     taken.add(at);
-    before.set(at, echo);
+    swapped.set(at, echo);
   }
-  if (before.size === 0) return items;
-  const out: TimelineItem[] = [];
-  items.forEach((item, index) => {
-    const echo = before.get(index);
-    if (echo === undefined) {
-      out.push(item);
-      return;
-    }
-    out.push(echo, {...(item as Extract<TimelineItem, {kind: 'message'}>), standby: true} as StandbyItem);
+  if (swapped.size === 0) return {items, standby: NO_STANDBY};
+  const out = items.slice();
+  const standby: StandbyItem[] = [];
+  swapped.forEach((echo, at) => {
+    standby.push({...(items[at] as Extract<TimelineItem, {kind: 'message'}>), standby: true} as StandbyItem);
+    out[at] = echo;
   });
-  return out;
+  return {items: out, standby};
 }
 
 /** 시험 전용. */
