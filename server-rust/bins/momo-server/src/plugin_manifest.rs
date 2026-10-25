@@ -1036,6 +1036,10 @@ mod tests {
     const MIGRATION_143: &str =
         include_str!("../../../../server/Migrations/143_official_catalog_c_s1b.sql");
 
+    /// Migration 015: the team drive's seed (its publisher name is what 149 renames).
+    const MIGRATION_015: &str =
+        include_str!("../../../../server/Migrations/015_drive_mcp_plugin.sql");
+
     /// Migration 149 (#4313): the display-field patches, one `$display$ … $display$` block each.
     const MIGRATION_149: &str =
         include_str!("../../../../server/Migrations/149_official_catalog_display_fields.sql");
@@ -1051,6 +1055,20 @@ mod tests {
             plugin.remove(key);
         }
         manifest
+    }
+
+    /// The team drive before 149. 015 seeded it and 059 later translated its tool texts, so the 015
+    /// file is not the seed byte for byte: this is the fixture minus the four display keys, with the
+    /// publisher name 015 wrote ("momo", the repository codename) put back. The literal is anchored to
+    /// 015's own text, so it is not invented here.
+    fn team_drive_before_149(fixture: &Value) -> Value {
+        assert!(
+            MIGRATION_015.contains(r#""publisher":{"id":"momo","name":"momo","verified":true}"#),
+            "015 seeded the team drive's publisher name as momo"
+        );
+        let mut seeded = without_display_keys(fixture.clone());
+        seeded["plugin"]["publisher"]["name"] = json!("momo");
+        seeded
     }
 
     fn github() -> Value {
@@ -1649,10 +1667,11 @@ mod tests {
         for (id, patch) in patches {
             let patch = patch.as_object().expect("a patch is an object");
             for key in patch.keys() {
-                assert!(
-                    DISPLAY_KEYS.contains(&key.as_str()),
-                    "{id}: {key} is not a display key"
-                );
+                // The four display keys, and — for the oort-hosted team drive only — the publisher
+                // object, whose name 015 seeded as the repository codename (planner 결정 3).
+                let allowed = DISPLAY_KEYS.contains(&key.as_str())
+                    || (key == "publisher" && id == "com.momo.plugins.drive");
+                assert!(allowed, "{id}: {key} is not a display key");
             }
             let (_, text) = FIXTURES
                 .iter()
@@ -1660,17 +1679,23 @@ mod tests {
                 .unwrap_or_else(|| panic!("no fixture for {id}"));
             let fixture: Value = serde_json::from_str(text).expect("fixture");
             // The seed this patch lands on: 143's block when 143 seeded the app, else (the team
-            // drive, 013/015) the fixture itself minus the display keys.
+            // drive, 015) what it looked like before 149.
             let mut seeded = seeded_143
                 .iter()
                 .find(|manifest| manifest["plugin"]["id"] == json!(id))
                 .cloned()
-                .unwrap_or_else(|| without_display_keys(fixture.clone()));
+                .unwrap_or_else(|| team_drive_before_149(&fixture));
             let plugin = seeded["plugin"].as_object_mut().expect("plugin");
             for (key, value) in patch {
                 plugin.insert(key.clone(), value.clone());
             }
             assert_eq!(seeded, fixture, "{id}: seed + migration 149 != fixture");
+            // The developer column never shows the repository codename (planner 결정 3).
+            assert_ne!(
+                fixture["plugin"]["publisher"]["name"],
+                json!("momo"),
+                "{id}: publisher.name"
+            );
             // …and the result is admitted: the patch cannot ship a manifest the validator refuses.
             validate_manifest(text).unwrap_or_else(|error| panic!("{id}: {error}"));
         }
@@ -2215,6 +2240,10 @@ mod tests {
             assert_eq!(manifest.website_url.as_deref(), website, "{id} websiteURL");
             assert_eq!(manifest.starter_prompts.len(), 3, "{id} starterPrompts");
             assert!(!manifest.publisher_name.is_empty(), "{id} publisher");
+            assert_ne!(
+                manifest.publisher_name, "momo",
+                "{id}: the developer column shows the product name, not the repository codename"
+            );
             // Every example is a sentence the app can really act on: a tool it declares (admission
             // checked the grade), and none of the apps' examples promises a send.
             for starter in &manifest.starter_prompts {
@@ -2230,6 +2259,13 @@ mod tests {
                 );
             }
         }
+        // The oort-hosted team drive names its developer by the product (planner 결정 3).
+        assert_eq!(
+            validate_manifest(FIXTURES[3].1)
+                .expect("team drive")
+                .publisher_name,
+            "oort"
+        );
         // Gmail has no send: its draft example says the person sends it themselves.
         let gmail = validate_manifest(FIXTURES[4].1).expect("gmail");
         let draft = gmail

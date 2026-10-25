@@ -4458,8 +4458,9 @@ paths:
       description: >
         ADR-0113 증보 3 F8 (#4313). The composer's app chip asks this before it
         sends: which of **my** agents is a place where my apps run (증보 2 E1/E3), and
-        would a message to it be thrown away at the door. The answer is a bare JSON
-        array.
+        would a message to it be thrown away at the door. The answer is an object with
+        one key, `runtimes` (an array of `AppRuntime`), like the other reads of this
+        API; the key is not `apps` because every entry already has its own `apps`.
 
         **Only the caller's own agents** (the agent's connector owner is the caller):
         another member's agent, and anyone else's grants, are absent from the
@@ -4493,13 +4494,17 @@ paths:
         - $ref: "#/components/parameters/WorkspaceId"
       responses:
         "200":
-          description: The caller's own app runtimes (an empty array when there are none).
+          description: The caller's own app runtimes (`runtimes` is an empty array when there are none).
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/AppRuntime"
+                type: object
+                required: [runtimes]
+                properties:
+                  runtimes:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/AppRuntime"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

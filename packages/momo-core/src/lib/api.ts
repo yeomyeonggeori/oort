@@ -2356,7 +2356,8 @@ export async function getPlugin(workspaceId: string, pluginId: string): Promise<
 //
 // 컴포저의 앱 칩이 보내기 전에 묻는 읽기다: 내 에이전트 가운데 내 앱이 도는 곳이 어디이고, 지금 그곳에 보내면
 // 배달되는가. 요청자 본인 소유 에이전트만 오고(남의 에이전트·남의 grant는 응답에 없다), 로스터·에이전트 DTO에는
-// 싣지 않는다. 최상위가 객체가 아니라 **배열**이다(ADR의 모양 그대로).
+// 싣지 않는다. 최상위는 다른 읽기 API처럼 **객체** `{ runtimes: [...] }`다(항목마다 이미 `apps`가 있어 키 이름은
+// `runtimes`; ADR의 모양 그대로, planner 결정 1).
 
 /** 실행 장소의 얼굴. 모르는 값(새 서버의 새 경로)은 항목째 읽지 않는다 - 그 경로의 규칙을 이 클라이언트는 모른다. */
 export type AppRuntimePath = "hermes_trial" | "hosted_vendor";
@@ -2415,30 +2416,26 @@ function appRuntimeFromWire(value: unknown): AppRuntime | null {
 }
 
 /**
- * 와이어를 읽는다. 최상위가 배열이 아니면 `WireShapeError`. 항목이 어긋나면(필수 키 없음·모르는 경로) **그 항목만**
- * 건너뛴다 - 읽지 못한 에이전트는 칩 후보가 아닐 뿐 다른 에이전트까지 막지 않는다.
+ * 와이어를 읽는다. 최상위가 객체가 아니거나 `runtimes`가 배열이 아니면 `WireShapeError`(옛 최상위 배열도 모양
+ * 오류다). 항목이 어긋나면(필수 키 없음·모르는 경로) **그 항목만** 건너뛴다 - 읽지 못한 에이전트는 칩 후보가
+ * 아닐 뿐 다른 에이전트까지 막지 않는다.
  */
 export function appRuntimesFromWire(value: unknown): AppRuntime[] {
-  if (!Array.isArray(value)) throw new WireShapeError();
+  const raws = arrayField(responseRecord(value), "runtimes");
+  if (raws === null) throw new WireShapeError();
   const runtimes: AppRuntime[] = [];
-  for (const raw of value as unknown[]) {
+  for (const raw of raws) {
     const runtime = appRuntimeFromWire(raw);
     if (runtime !== null) runtimes.push(runtime);
   }
   return runtimes;
 }
 
-/**
- * GET …/members/me/app-runtimes: 요청자 본인의 앱 실행 장소들(없으면 빈 배열).
- *
- * 최상위가 배열이라 **객체만 받는 `request` 깔때기를 거치지 않는다**(그 깔때기는 객체가 아닌 JSON을 모양 오류로
- * 거절한다). 회전·오류 처리는 같은 `authedRequest`가 한다.
- */
+/** GET …/members/me/app-runtimes: 요청자 본인의 앱 실행 장소들(없으면 빈 배열). */
 export async function listAppRuntimes(workspaceId: string): Promise<AppRuntime[]> {
-  const res = await authedRequest(
+  return appRuntimesFromWire(await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me/app-runtimes`
-  );
-  return appRuntimesFromWire(res.json<unknown>());
+  ));
 }
 
 export async function installPlugin(workspaceId: string, pluginId: string): Promise<PluginMutation> {

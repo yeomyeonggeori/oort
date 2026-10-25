@@ -297,7 +297,8 @@ fn the_app_runtime_schema_is_the_projection_the_server_answers() {
     assert_eq!(enum_of(&spec, "AppRuntime", "path"), paths);
 }
 
-/// F8: the operation exists, is a GET on the documented path, is a bare array, and says who may call it.
+/// F8: the operation exists, is a GET on the documented path, answers an **object** `{runtimes: [AppRuntime]}`
+/// (planner 결정 1: not a bare array), and says who may call it.
 #[test]
 fn the_app_runtimes_operation_is_documented() {
     let spec = spec();
@@ -309,9 +310,18 @@ fn the_app_runtimes_operation_is_documented() {
         .collect();
     let text = block.join("\n");
     assert!(text.contains("operationId: listMyAppRuntimes"));
+    // The 200 schema: an object that requires `runtimes`, an array of `AppRuntime`. Order matters: the
+    // `type: array` that counts is the one under `runtimes:`, not a top-level one.
+    let object = text
+        .find("type: object\n                required: [runtimes]")
+        .expect("the answer is an object that requires `runtimes` (ADR F8 「모양」)");
+    let array = text
+        .find("runtimes:\n                    type: array")
+        .expect("`runtimes` is an array");
+    assert!(object < array, "the array sits under `runtimes`");
     assert!(
-        text.contains("type: array"),
-        "the answer is a bare array (ADR F8 「모양」)"
+        !text.contains("schema:\n                type: array"),
+        "the 200 schema is not a bare array any more"
     );
     assert!(text.contains("$ref: \"#/components/schemas/AppRuntime\""));
     assert!(

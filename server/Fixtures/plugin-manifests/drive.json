@@ -5,7 +5,7 @@
     "name": "Google Drive",
     "version": "1.0.0",
     "description": "Official momo-hosted read-only MCP for an operator-configured shared drive",
-    "publisher": { "id": "momo", "name": "momo", "verified": true },
+    "publisher": { "id": "momo", "name": "oort", "verified": true },
     "license": { "spdx": "Apache-2.0", "kind": "open_source" },
     "provenance": {
       "sourceURL": "https://github.com/Dawn-kim-official/momo",

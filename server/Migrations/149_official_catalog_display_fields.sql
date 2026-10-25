@@ -12,6 +12,11 @@
 --                          app can really do: every `tool` is a read (R) or approval-required write (A)
 --                          tool of the same manifest (Gmail has no send: draft and label only).
 --
+-- One more key, for the oort-hosted team drive only: `plugin.publisher`. The detail page shows the
+-- manifest's own `publisher.name` as the developer, and 015 seeded the repository codename "momo".
+-- The product is called oort, so the patch replaces the publisher object with the same `id` and
+-- `verified` and `name` "oort" (the id is an identifier no client shows; it stays).
+--
 -- A jsonb patch, not a re-seed: the tools, schemas, policy and version of each manifest are
 -- untouched (143's tools are measured vendor output; `capability_version` and every capability
 -- projection key on `version`, so no version bump and no projection rebuild). The manifest AND its
@@ -41,6 +46,11 @@ WITH display(plugin_id, patch) AS (
     {
       "logoKey": "google-drive",
       "category": "files",
+      "publisher": {
+        "id": "momo",
+        "name": "oort",
+        "verified": true
+      },
       "starterPrompts": [
         {
           "text": "공유 드라이브에서 이번 분기 기획 문서를 찾아 줘요.",
@@ -239,12 +249,22 @@ BEGIN
   IF patched <> 7 THEN
     RAISE EXCEPTION '149: expected 7 official manifests with display fields and a matching digest, found %', patched;
   END IF;
+  -- The team drive's developer column must read the product name, never the repository codename.
+  IF NOT EXISTS (
+    SELECT 1
+      FROM plugin_registry
+     WHERE plugin_id = 'com.momo.plugins.drive'
+       AND manifest #>> '{plugin,publisher,name}' = 'oort'
+  ) THEN
+    RAISE EXCEPTION '149: the team drive manifest must carry publisher.name = oort';
+  END IF;
 END $$;
 
 -- -----------------------------------------------------------------------------
 -- ROLLBACK (manual; run BEFORE rolling the server image back to a build older than #4313).
--- Removes exactly the four keys this migration added and re-derives the digest, which restores
--- the pre-149 manifest and digest byte for byte (jsonb text is canonical). The ledger row of this
+-- Removes exactly the four keys this migration added, puts the team drive's `publisher.name` back
+-- to "momo", and re-derives the digest, which restores the pre-149 manifest and digest byte for
+-- byte (jsonb text is canonical). One statement, so a copy-paste is atomic. The ledger row of this
 -- file stays, so the next boot does NOT re-apply 149: to roll forward again later, run this file
 -- once more (it is idempotent) or delete its ledger row before that boot
 -- (`DELETE FROM schema_migrations WHERE version = '149_official_catalog_display_fields.sql'`).
@@ -254,18 +274,22 @@ END $$;
 --          manifest_digest = 'sha256:' || encode(sha256(convert_to(s.manifest::text, 'UTF8')), 'hex'),
 --          updated_at = now()
 --     FROM (SELECT plugin_id,
---                  jsonb_set(manifest, '{plugin}',
---                            (manifest -> 'plugin') - 'logoKey' - 'category' - 'websiteURL' - 'starterPrompts') AS manifest
---             FROM plugin_registry
---            WHERE plugin_id IN (
---              'com.momo.plugins.drive',
---              'com.momo.plugins.github',
---              'com.momo.plugins.gmail',
---              'com.momo.plugins.google-calendar',
---              'com.momo.plugins.google-drive',
---              'com.momo.plugins.linear',
---              'com.momo.plugins.notion'
---            )) s
+--                  CASE WHEN plugin_id = 'com.momo.plugins.drive'
+--                       THEN jsonb_set(stripped, '{plugin,publisher,name}', '"momo"')
+--                       ELSE stripped END AS manifest
+--             FROM (SELECT plugin_id,
+--                          jsonb_set(manifest, '{plugin}',
+--                                    (manifest -> 'plugin') - 'logoKey' - 'category' - 'websiteURL' - 'starterPrompts') AS stripped
+--                     FROM plugin_registry
+--                    WHERE plugin_id IN (
+--                      'com.momo.plugins.drive',
+--                      'com.momo.plugins.github',
+--                      'com.momo.plugins.gmail',
+--                      'com.momo.plugins.google-calendar',
+--                      'com.momo.plugins.google-drive',
+--                      'com.momo.plugins.linear',
+--                      'com.momo.plugins.notion'
+--                    )) t) s
 --    WHERE r.plugin_id = s.plugin_id
 --      AND r.manifest IS DISTINCT FROM s.manifest;
 -- -----------------------------------------------------------------------------

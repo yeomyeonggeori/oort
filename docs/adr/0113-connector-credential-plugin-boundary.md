@@ -512,7 +512,7 @@ SE-04A(manifest registry — D6 계약으로 확장) → SE-04B(signed webhook +
 ### F8. 내 앱 실행 장소 투영 — 소유자에게만 (새 읽기 API)
 
 - `GET /v1/workspaces/{ws}/members/me/app-runtimes`(`require_human`)예요. 요청자가 소유한 에이전트 가운데 아래 판별식에 맞는 것만 돌려줘요.
-  - 모양: `[{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" }]`
+  - 모양: `{ runtimes: [{ agentId, path: "hermes_trial" | "hosted_vendor", apps: [pluginId…], enforced: boolean, blocked: null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" }] }` — 다른 읽기 API처럼 **객체**예요(최상위 배열은 필드를 더 얹을 수 없어요). 키가 `apps`가 아니라 `runtimes`인 까닭은 항목마다 이미 `apps`(플러그인 id들)가 있어서예요. 실행 장소가 없으면 `{ runtimes: [] }`예요.
 - **공통 술어**: `member.kind = 'agent' AND status = 'active' AND deleted_at IS NULL`(표시를 켜는 PUT과 같아요), `connector_owner_human_id = 요청자`예요.
   - 「활성 grant」는 요청자의 `plugin_grant` ⋈ `workspace_plugin_install`(설치 `enabled AND revoked_at IS NULL`)이에요. `TRIAL_FACTS_SQL`(`connector_trial.rs`)과 같은 조인이에요.
 - **`path` 판별식**:

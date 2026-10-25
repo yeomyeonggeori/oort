@@ -53,10 +53,24 @@ async fn runtimes(
     (status, response.json().await.unwrap_or(Value::Null))
 }
 
-fn entry(answer: &Value, agent: Uuid) -> Option<&Value> {
-    answer
+/// The entries of the answer. The answer is an **object** with the one key `runtimes` (planner 결정 1: not a
+/// bare array, and not `apps`, which every entry already has).
+fn runtime_entries(answer: &Value) -> &Vec<Value> {
+    let object = answer
+        .as_object()
+        .expect("the answer is an object, not a bare array");
+    assert_eq!(
+        object.keys().collect::<Vec<_>>(),
+        ["runtimes"],
+        "the answer has exactly one key: {answer}"
+    );
+    object["runtimes"]
         .as_array()
-        .expect("the answer is a bare array")
+        .expect("`runtimes` is an array")
+}
+
+fn entry(answer: &Value, agent: Uuid) -> Option<&Value> {
+    runtime_entries(answer)
         .iter()
         .find(|entry| entry["agentId"] == json!(agent.to_string()))
 }
@@ -118,9 +132,7 @@ async fn only_my_app_runtimes_are_listed_and_never_anyone_elses() {
 
     let (status, answer) = runtimes(&client, &base, workspace, &me_jwt).await;
     assert_eq!(status, 200, "{answer}");
-    let found: Vec<String> = answer
-        .as_array()
-        .expect("bare array")
+    let found: Vec<String> = runtime_entries(&answer)
         .iter()
         .map(|entry| entry["agentId"].as_str().expect("agentId").to_string())
         .collect();
@@ -172,9 +184,7 @@ async fn only_my_app_runtimes_are_listed_and_never_anyone_elses() {
     // The other member's own answer is exactly theirs, and mine is not in it.
     let (status, theirs) = runtimes(&client, &base, workspace, &other_jwt).await;
     assert_eq!(status, 200, "{theirs}");
-    let theirs_ids: Vec<&str> = theirs
-        .as_array()
-        .expect("bare array")
+    let theirs_ids: Vec<&str> = runtime_entries(&theirs)
         .iter()
         .map(|entry| entry["agentId"].as_str().expect("agentId"))
         .collect();

@@ -3,12 +3,16 @@
 //!
 //! ```text
 //! GET /v1/workspaces/{ws}/members/me/app-runtimes        (require_human)
-//!   → [ { "agentId": "<uuid>",
-//!         "path": "hermes_trial" | "hosted_vendor",
-//!         "apps": ["<pluginId>", …],
-//!         "enforced": true | false,
-//!         "blocked": null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" } ]
+//!   → { "runtimes": [ { "agentId": "<uuid>",
+//!                       "path": "hermes_trial" | "hosted_vendor",
+//!                       "apps": ["<pluginId>", …],
+//!                       "enforced": true | false,
+//!                       "blocked": null | "hosted_off" | "connection" | "attest" | "members" | "apps" | "paused" } ] }
 //! ```
+//!
+//! The answer is an **object** like every other read of this API (a bare array cannot grow a
+//! field later, and the core `request()` funnel refuses anything that is not an object). The key
+//! is `runtimes`, not `apps`, because each entry already carries its own `apps`.
 //!
 //! The composer's 「앱」 chip (#4315) needs two facts before it may send to an agent: that
 //! agent is a *place where my apps run* (ADR-0113 증보 2 E1/E3), and a message to it would
@@ -129,6 +133,12 @@ pub struct AppRuntimeDto {
     pub blocked: Option<Blocked>,
 }
 
+/// The whole answer: `{ "runtimes": [ … ] }` (an empty array when the caller has none).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct AppRuntimesDto {
+    pub runtimes: Vec<AppRuntimeDto>,
+}
+
 /// The face `candidate` has **for `requester`**, or `None` when it is not one of the
 /// requester's app runtimes (v1). The common predicate first — the requester must be the
 /// agent's connector owner — so nothing about another member's agent leaves this function.
@@ -230,7 +240,7 @@ pub async fn list(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
-) -> Result<Json<Vec<AppRuntimeDto>>, ApiError> {
+) -> Result<Json<AppRuntimesDto>, ApiError> {
     require_human(&principal, HUMAN_ONLY)?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let member_id = principal.member_id;
@@ -265,13 +275,15 @@ pub async fn list(
         .await;
 
     let (candidates, granted) = settle_db("app_runtimes.list", outcome)?;
-    Ok(Json(project(
-        &candidates,
-        member_id,
-        &granted,
-        hosted_delivery_enabled,
-        &attest,
-    )))
+    Ok(Json(AppRuntimesDto {
+        runtimes: project(
+            &candidates,
+            member_id,
+            &granted,
+            hosted_delivery_enabled,
+            &attest,
+        ),
+    }))
 }
 
 #[cfg(test)]
@@ -614,7 +626,8 @@ mod tests {
     }
 
     /// The wire: camelCase keys, snake_case values, `blocked` always present (`null` when the agent
-    /// is deliverable), the top level a bare array (ADR-0113 증보 3 F8 「모양」).
+    /// is deliverable), the top level an **object** with the one key `runtimes` (ADR-0113 증보 3 F8
+    /// 「모양」; planner 결정 1 — not a bare array, and not `apps`, which every entry already has).
     #[test]
     fn the_wire_shape_is_the_adr_shape() {
         let answer = project(
@@ -624,25 +637,35 @@ mod tests {
             true,
             &attest(&[GMAIL]),
         );
-        let wire = serde_json::to_value(&answer).expect("serialise");
+        let wire = serde_json::to_value(AppRuntimesDto { runtimes: answer }).expect("serialise");
         assert_eq!(
             wire,
-            json!([
-                {
-                    "agentId": Uuid::from_u128(1).to_string(),
-                    "path": "hosted_vendor",
-                    "apps": [GMAIL],
-                    "enforced": false,
-                    "blocked": null
-                },
-                {
-                    "agentId": Uuid::from_u128(2).to_string(),
-                    "path": "hermes_trial",
-                    "apps": [GMAIL],
-                    "enforced": true,
-                    "blocked": "members"
-                }
-            ])
+            json!({
+                "runtimes": [
+                    {
+                        "agentId": Uuid::from_u128(1).to_string(),
+                        "path": "hosted_vendor",
+                        "apps": [GMAIL],
+                        "enforced": false,
+                        "blocked": null
+                    },
+                    {
+                        "agentId": Uuid::from_u128(2).to_string(),
+                        "path": "hermes_trial",
+                        "apps": [GMAIL],
+                        "enforced": true,
+                        "blocked": "members"
+                    }
+                ]
+            })
+        );
+        // Nothing to list is still an object: `{"runtimes": []}`.
+        assert_eq!(
+            serde_json::to_value(AppRuntimesDto {
+                runtimes: Vec::new()
+            })
+            .expect("serialise"),
+            json!({ "runtimes": [] })
         );
         for blocked in [
             Blocked::HostedOff,

@@ -292,27 +292,30 @@ describe("appRuntimesFromWire (ADR-0113 증보 3 F8)", () => {
     blocked: "members",
   };
 
-  it("최상위 배열을 그대로 읽는다 - blocked는 null(배달됨) 또는 이유", () => {
-    expect(appRuntimesFromWire([hosted, trial])).toEqual([hosted, trial]);
-    expect(appRuntimesFromWire([])).toEqual([]);
+  const wire = (...entries: unknown[]) => ({ runtimes: entries });
+
+  it("최상위 객체의 runtimes를 읽는다 - blocked는 null(배달됨) 또는 이유", () => {
+    expect(appRuntimesFromWire(wire(hosted, trial))).toEqual([hosted, trial]);
+    expect(appRuntimesFromWire(wire())).toEqual([]);
     for (const reason of ["hosted_off", "connection", "attest", "members", "apps", "paused"]) {
-      expect(appRuntimesFromWire([{ ...hosted, blocked: reason }])[0]?.blocked).toBe(reason);
+      expect(appRuntimesFromWire(wire({ ...hosted, blocked: reason }))[0]?.blocked).toBe(reason);
     }
   });
 
-  it("최상위가 배열이 아니면 모양 오류다", () => {
-    for (const bad of [null, {}, { runtimes: [] }, "x", 3]) {
+  it("객체가 아니거나 runtimes가 배열이 아니면 모양 오류다 - 옛 최상위 배열도 거절한다", () => {
+    // 서버는 이제 `{ runtimes: [...] }`만 보낸다(planner 결정 1). 최상위 배열을 계속 받아 주면 옛 모양이 조용히 살아남는다.
+    for (const bad of [null, {}, [], [hosted, trial], { runtimes: {} }, { runtimes: "x" }, "x", 3]) {
       expect(() => appRuntimesFromWire(bad)).toThrow(WireShapeError);
     }
   });
 
   it("모르는 이유도 막힘으로 읽는다 - 배달된다고 읽지 않는다", () => {
-    expect(appRuntimesFromWire([{ ...hosted, blocked: "quota" }])[0]?.blocked).toBe("unknown");
+    expect(appRuntimesFromWire(wire({ ...hosted, blocked: "quota" }))[0]?.blocked).toBe("unknown");
     // 키가 없는 항목은 「배달됨」이 아니라 모르는 모양이라 건너뛴다.
     const withoutBlocked = { agentId: "a1", path: "hosted_vendor", apps: [GMAIL], enforced: false };
-    expect(appRuntimesFromWire([withoutBlocked, trial])).toEqual([trial]);
+    expect(appRuntimesFromWire(wire(withoutBlocked, trial))).toEqual([trial]);
     // blocked가 문자열도 null도 아니면 건너뛴다.
-    expect(appRuntimesFromWire([{ ...hosted, blocked: 3 }, trial])).toEqual([trial]);
+    expect(appRuntimesFromWire(wire({ ...hosted, blocked: 3 }, trial))).toEqual([trial]);
   });
 
   it("어긋난 항목만 건너뛴다 - 모르는 경로·필수 키 없음·배열이 아닌 apps", () => {
@@ -324,14 +327,14 @@ describe("appRuntimesFromWire (ADR-0113 증보 3 F8)", () => {
       "x",
       null,
     ];
-    expect(appRuntimesFromWire([...bad, trial])).toEqual([trial]);
+    expect(appRuntimesFromWire(wire(...bad, trial))).toEqual([trial]);
   });
 
   it("listAppRuntimes는 /members/me/app-runtimes를 GET으로 부른다", async () => {
     installHost();
     const fetchMock = vi.fn(
       async (_url: string, _init?: RequestInit) =>
-        new Response(JSON.stringify([hosted]), {
+        new Response(JSON.stringify(wire(hosted)), {
           status: 200,
           headers: { "content-type": "application/json" },
         })

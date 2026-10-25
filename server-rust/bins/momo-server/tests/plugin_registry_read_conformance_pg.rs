@@ -1199,6 +1199,18 @@ async fn migration_149_patched_all_seven_with_matching_digests_and_is_idempotent
                 "{plugin}: {key} is patched in"
             );
         }
+        // The developer column shows the product name (planner 결정 3): 015 seeded the team drive's
+        // publisher name as the repository codename, and 149 replaces it.
+        let developer = manifest["plugin"]["publisher"]["name"]
+            .as_str()
+            .expect("publisher name");
+        assert_ne!(
+            developer, "momo",
+            "{plugin}: the codename is not a developer"
+        );
+        if plugin == DRIVE {
+            assert_eq!(developer, "oort", "the team drive's developer");
+        }
     }
     assert!(
         digests_match_their_manifests(&env.su).await.is_empty(),
@@ -1247,7 +1259,8 @@ async fn the_rollback_sql_restores_the_legacy_manifests_and_a_reapply_restores_1
                 problems.push(format!("{plugin}: {key} survived the rollback"));
             }
         }
-        // Nothing but the four keys moved.
+        // Nothing but the four keys moved — and the team drive's developer name, which goes back to
+        // what 015 seeded.
         let mut expected = patched.clone();
         for key in DISPLAY_KEYS {
             expected["plugin"]
@@ -1255,9 +1268,20 @@ async fn the_rollback_sql_restores_the_legacy_manifests_and_a_reapply_restores_1
                 .expect("plugin")
                 .remove(key);
         }
+        if plugin == DRIVE {
+            expected["plugin"]["publisher"]["name"] = json!("momo");
+            // An independent literal, whatever the patch says: the pre-149 publisher object.
+            let pre_149 = json!({"id": "momo", "name": "momo", "verified": true});
+            if legacy["plugin"]["publisher"] != pre_149 {
+                problems.push(format!(
+                    "{plugin}: the rollback left publisher {}",
+                    legacy["plugin"]["publisher"]
+                ));
+            }
+        }
         if legacy != expected {
             problems.push(format!(
-                "{plugin}: the rollback changed more than the four keys"
+                "{plugin}: the rollback changed more than the four keys (and the team drive's publisher name)"
             ));
         }
     }
