@@ -1830,10 +1830,16 @@ impl std::fmt::Debug for SettingsConfig {
 ///   so no second egress-exempt input). [`momo_settings::ProviderConfig`] fills
 ///   a localhost default when it is unset, so that default must never be read as
 ///   a declaration: with `declared == false` the feature makes **zero** network
-///   calls and shows nothing.
+///   calls. What the screen may show then is only a plan for the instance
+///   operator, never a finding about an agent (ADR-0203 증보 2026-10-25 F6).
 /// * `tools_locked`: `OORT_COHOSTED_AGENT_TOOLS_LOCKED` — the operator's own
 ///   statement that they followed the tool-lock checklist (D6). It is an
 ///   attestation, not a verification; the server cannot see the agent's tools.
+/// * `platform`: #4337 (ADR-0203 증보 2026-10-25 F1·F3) — which host the process
+///   runs on, **classified once at boot into a closed enum**. The raw
+///   `MOMO_SELF_HOST_PLATFORM` / `RAILWAY_ENVIRONMENT_ID` strings are not kept
+///   (this struct derives `Debug`); the value only picks wording on the operator's
+///   screen and decides nothing else.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CohostedAgentConfig {
     pub declared: bool,
@@ -1846,6 +1852,8 @@ pub struct CohostedAgentConfig {
     /// #3948: `OORT_COHOSTED_AGENT_CONNECTOR_APPS` — the app ids the operator
     /// switched on in Hermes. Empty when unset or when any entry is malformed.
     pub connector_apps: Vec<String>,
+    /// #4337: where this process runs, classified at boot (see the struct doc).
+    pub platform: crate::host_platform::HostPlatform,
 }
 
 impl CohostedAgentConfig {
@@ -1862,6 +1870,7 @@ impl CohostedAgentConfig {
             tools_locked: attest.tools_locked,
             connectors_locked: attest.connectors_locked,
             connector_apps: attest.apps,
+            platform: crate::host_platform::HostPlatform::classify(&lookup),
         }
     }
 

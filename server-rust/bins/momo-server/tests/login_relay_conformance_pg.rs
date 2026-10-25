@@ -12,6 +12,7 @@
 //! | `an_app_login_needs_one_person_and_a_sole_pinned_hermes` | a second active person → `409 connector_trial_members`, another agent pinned to the same Hermes → `409 connector_trial_shared`, the sidecar untouched; one person → 200 | the K2 rules on the app family |
 //! | `a_refused_paste_and_malformed_ids_surface_fixed_errors` | state mismatch → 400 with no echo of the pasted value; newline / empty / oversize / unknown-field bodies 400 before the sidecar; a login id that is not the sidecar's shape → 404; the second `complete` → 409; another operator cannot reach the login | the shape checks, the error mapping, the operator header |
 //! | `starts_are_throttled_and_every_call_leaves_one_closed_audit_line` | the 7th start in a minute is 429 with no sidecar call; audit detail holds only `kind/target/result` | the throttle, the audit shape |
+//! | `the_status_and_the_ten_routes_agree_on_whether_the_relay_is_on` | #4337 (ADR-0203 증보 2026-10-25 수용 기준 3, `[pack]`): for each relay configuration — nothing, url or key missing, a key of the wrong shape, a URL the write gate refuses (plain http to a remote host, a private literal, loopback without the operator flag), a URL with a path, a public https origin, loopback with the operator flag, a compose-style internal host (`http://hermes:8643`) with and without the exact host in `AGENT_PROVIDER_LOCAL_HOSTS` — the status' `environment.loginRelay` is `off` exactly when each of the ten route-methods answers `409 login_relay_off` (when `on`, only "not `login_relay_off`" is asserted: an unknown agent is refused after the switch) | the status calls `configured()` instead of the routes' own `target()`, a route skips `prepare()`, the switch moves in only one of the two |
 //!
 //! Isolated database only:
 //!
@@ -1979,4 +1980,316 @@ async fn starts_are_throttled_and_every_call_leaves_one_closed_audit_line() {
             (Some("provider"), Some("anthropic"))
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// #4337 — the status and the ten routes ask one question (ADR-0203 증보 2026-10-25 수용 기준 3)
+// ---------------------------------------------------------------------------
+
+/// A server that has only what the question needs: the operator allow-list, the relay config and the
+/// write-gate flag. No Hermes and no agent: the relay switch is decided before any agent is looked up, so a
+/// route that is `on` answers 404 for an agent that does not exist and never dials anything.
+async fn start_relay_switch_server(
+    pool: PgPool,
+    operator_email: &str,
+    relay: LoginRelayConfig,
+    allow_local_loopback: bool,
+) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_settings(SettingsConfig {
+        provider_link_master_key: Some(TEST_PROVIDER_MASTER_KEY.to_string()),
+        env_provider: ProviderConfig {
+            mode: ProviderMode::ExternalHermes,
+            base_url: "http://127.0.0.1:9/v1".to_string(),
+            bearer: HERMES_KEY.to_string(),
+            allow_local_loopback,
+        },
+        platform_admin_emails: vec![operator_email.to_ascii_lowercase()],
+        environment: "local".to_string(),
+    })
+    .with_login_relay(
+        relay,
+        Arc::new(GuardedLoginRelay::new(
+            EgressPolicy {
+                allow_local: true,
+                local_hosts: Vec::new(),
+                operator_hosts: Vec::new(),
+            },
+            std::time::Duration::from_secs(2),
+        )),
+    );
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+/// Sabotage: make the status read `configured()` (the "write gate refuses", "private literal", "path" and
+/// "loopback without the flag" rows go red: `configured()` is true there while all ten routes refuse); let
+/// one route skip `prepare()` (that route's cell goes red for every `off` row).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_status_and_the_ten_routes_agree_on_whether_the_relay_is_on() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let http = reqwest::Client::new();
+    let from = |url: Option<&str>, key: Option<&str>| {
+        LoginRelayConfig::from_lookup(|name| match name {
+            "HERMES_LOGIN_RELAY_URL" => url.map(str::to_string),
+            "HERMES_LOGIN_RELAY_KEY" => key.map(str::to_string),
+            _ => None,
+        })
+    };
+    let public = "https://relay.example.com";
+    let short_key = "k".repeat(31);
+    let long_key = "k".repeat(257);
+    /// One configuration of the question. `local_hosts` is the process env `AGENT_PROVIDER_LOCAL_HOSTS`, which
+    /// the write gate reads on every call (so the row plants it for its own requests and takes it away again).
+    struct Row {
+        name: &'static str,
+        relay: LoginRelayConfig,
+        allow_local_loopback: bool,
+        local_hosts: Option<&'static str>,
+        expect_on: bool,
+    }
+    let row = |name: &'static str,
+               relay: LoginRelayConfig,
+               allow_local_loopback: bool,
+               local_hosts: Option<&'static str>,
+               expect_on: bool| Row {
+        name,
+        relay,
+        allow_local_loopback,
+        local_hosts,
+        expect_on,
+    };
+    let rows: Vec<Row> = vec![
+        row("nothing set", from(None, None), false, None, false),
+        row(
+            "url without key",
+            from(Some(public), None),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "key without url",
+            from(None, Some(RELAY_KEY)),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "key of 31 characters",
+            from(Some(public), Some(short_key.as_str())),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "key of 257 characters",
+            from(Some(public), Some(long_key.as_str())),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "key outside the character set",
+            from(
+                Some(public),
+                Some("relay key with spaces 0123456789abcdef0123456789"),
+            ),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "unresolved shared-variable reference as the key",
+            from(Some(public), Some("${{shared.HERMES_LOGIN_RELAY_KEY}}")),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "plain http to a remote host (the write gate refuses)",
+            from(Some("http://relay.example.com"), Some(RELAY_KEY)),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "private literal (the write gate refuses)",
+            from(Some("https://10.0.0.5"), Some(RELAY_KEY)),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "url with a path",
+            from(Some("https://relay.example.com/v1"), Some(RELAY_KEY)),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "loopback without the operator flag (the write gate refuses)",
+            from(Some("http://127.0.0.1:9"), Some(RELAY_KEY)),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "public https origin",
+            from(Some(public), Some(RELAY_KEY)),
+            false,
+            None,
+            true,
+        ),
+        row(
+            "loopback with the operator flag",
+            from(Some("http://127.0.0.1:9"), Some(RELAY_KEY)),
+            true,
+            None,
+            true,
+        ),
+        // The compose stack's own shape (`--with-agents`): the sidecar is a sibling service on a plain-http
+        // internal name, which the gate admits only with the flag AND the exact host in the list.
+        row(
+            "internal host, flag on, host listed",
+            from(Some("http://hermes:8643"), Some(RELAY_KEY)),
+            true,
+            Some("hermes"),
+            true,
+        ),
+        row(
+            "internal host, flag on, host not listed",
+            from(Some("http://hermes:8643"), Some(RELAY_KEY)),
+            true,
+            None,
+            false,
+        ),
+        row(
+            "internal host, host listed, flag off",
+            from(Some("http://hermes:8643"), Some(RELAY_KEY)),
+            false,
+            Some("hermes"),
+            false,
+        ),
+    ];
+    // A login id of the sidecar's shape, so only the relay switch can decide the answer.
+    let id = "LOGIN00000000001-mockrelay";
+    for Row {
+        name,
+        relay,
+        allow_local_loopback,
+        local_hosts,
+        expect_on,
+    } in rows
+    {
+        match local_hosts {
+            Some(hosts) => std::env::set_var("AGENT_PROVIDER_LOCAL_HOSTS", hosts),
+            None => std::env::remove_var("AGENT_PROVIDER_LOCAL_HOSTS"),
+        }
+        let f = seed(&su, "relay-switch").await;
+        let base =
+            start_relay_switch_server(momo_app_pool().await, &f.email, relay, allow_local_loopback)
+                .await;
+        let op = login(&http, &base, f.workspace, &f.email).await;
+        let seen = Seen::default();
+        let api = Api {
+            http: &http,
+            base: &base,
+            workspace: f.workspace,
+            seen: &seen,
+        };
+
+        let status = http
+            .get(format!(
+                "{base}/v1/workspaces/{}/cohosted-agent",
+                f.workspace
+            ))
+            .bearer_auth(&op)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(status.status().as_u16(), 200, "{name}: status");
+        let status: Value = status.json().await.unwrap();
+        assert_eq!(
+            status["environment"]["loginRelay"],
+            if expect_on { "on" } else { "off" },
+            "{name}: the status"
+        );
+
+        let agent = Uuid::new_v4();
+        let replies: Vec<(&str, Reply)> = vec![
+            ("GET model-login", api.get(&op, agent, "model-login").await),
+            (
+                "POST model-login",
+                api.post(&op, agent, "model-login", json!({"provider": "anthropic"}))
+                    .await,
+            ),
+            (
+                "POST model-login/{id}/complete",
+                api.post(
+                    &op,
+                    agent,
+                    &format!("model-login/{id}/complete"),
+                    json!({"pasted": "c#s"}),
+                )
+                .await,
+            ),
+            (
+                "GET model-login/{id}",
+                api.get(&op, agent, &format!("model-login/{id}")).await,
+            ),
+            (
+                "DELETE model-login/{id}",
+                api.delete(&op, agent, &format!("model-login/{id}")).await,
+            ),
+            ("GET app-login", api.get(&op, agent, "app-login").await),
+            (
+                "POST app-login",
+                api.post(&op, agent, "app-login", json!({"app": "gmail"}))
+                    .await,
+            ),
+            (
+                "POST app-login/{id}/complete",
+                api.post(
+                    &op,
+                    agent,
+                    &format!("app-login/{id}/complete"),
+                    json!({"pasted": "c#s"}),
+                )
+                .await,
+            ),
+            (
+                "GET app-login/{id}",
+                api.get(&op, agent, &format!("app-login/{id}")).await,
+            ),
+            (
+                "DELETE app-login/{id}",
+                api.delete(&op, agent, &format!("app-login/{id}")).await,
+            ),
+        ];
+        assert_eq!(replies.len(), 10);
+        for (route, reply) in replies {
+            let refused_as_off =
+                reply.code == 409 && reply.body["error"]["code"] == "login_relay_off";
+            assert_eq!(
+                refused_as_off, !expect_on,
+                "{name}: {route} answered {} {}",
+                reply.code, reply.text
+            );
+        }
+    }
+    std::env::remove_var("AGENT_PROVIDER_LOCAL_HOSTS");
 }
