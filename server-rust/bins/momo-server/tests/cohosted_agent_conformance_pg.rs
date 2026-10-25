@@ -1936,12 +1936,13 @@ async fn a_stranger_gets_no_environment_and_no_env_string_leaves_the_server() {
         .set_default();
     let su = superuser_pool().await;
     let http = reqwest::Client::new();
-    let configurations: [(&str, Option<&str>, Option<&str>); 3] = [
-        ("railway id only", Some(RWENV_MARKER), None),
-        ("stamp only", None, Some(PLATFORM_MARKER)),
-        ("both", Some(RWENV_MARKER), Some(PLATFORM_MARKER)),
+    // (name, Railway id, stamp, the platform word the status must carry): a stamp that no table names is `unknown`.
+    let configurations: [(&str, Option<&str>, Option<&str>, &str); 3] = [
+        ("railway id only", Some(RWENV_MARKER), None, "railway"),
+        ("stamp only", None, Some(PLATFORM_MARKER), "unknown"),
+        ("both", Some(RWENV_MARKER), Some(PLATFORM_MARKER), "railway"),
     ];
-    for (name, railway_id, stamp) in configurations {
+    for (name, railway_id, stamp, platform_word) in configurations {
         let lookup = |key: &str| -> Option<String> {
             match key {
                 "RAILWAY_ENVIRONMENT_ID" => railway_id.map(str::to_string),
@@ -1992,6 +1993,7 @@ async fn a_stranger_gets_no_environment_and_no_env_string_leaves_the_server() {
             body["environment"]["loginRelay"], "on",
             "{name}: the relay markers must make the relay on, or the scan proves nothing"
         );
+        assert_eq!(body["environment"]["platform"], platform_word, "{name}");
         let mut keys: Vec<&str> = body["environment"]
             .as_object()
             .expect("environment is an object")
