@@ -71,6 +71,8 @@ pub const MAX_REQUESTED_APPS: usize = 3;
 /// distinct and at most three, so no client sends more than a handful; the room above three is for a
 /// retrying client that repeats itself.
 pub const MAX_REQUESTED_APPS_INPUT: usize = 16;
+// A ceiling over the distinct limit, never below it - checked when the crate compiles.
+const _: () = assert!(MAX_REQUESTED_APPS_INPUT > MAX_REQUESTED_APPS);
 
 /// Every props key this module owns. A caller-supplied props map loses these.
 pub const SERVER_OWNED_APP_PROPS_KEYS: [&str; 4] = [
@@ -427,8 +429,7 @@ mod tests {
         expected.sort_unstable();
         assert_eq!(keys, expected);
         assert_eq!(MAX_REQUESTED_APPS, 3);
-        // The input bound is a ceiling over the distinct limit, never below it.
+        // The input bound (a compile-time `const _` asserts it stays above the distinct limit).
         assert_eq!(MAX_REQUESTED_APPS_INPUT, 16);
-        assert!(MAX_REQUESTED_APPS_INPUT > MAX_REQUESTED_APPS);
     }
 }
