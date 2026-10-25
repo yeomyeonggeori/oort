@@ -1068,6 +1068,156 @@ async fn streaming_edits_and_reads_are_outside_the_budget() {
     }
 }
 
+/// The gate sits inside `require_principal`: whatever the auth layer refuses is its 401 or 403,
+/// however often it is asked, and it costs no budget and leaves no audit row. Only a caller
+/// the server can name is ever counted — which is also why the key can never be anything the
+/// request chose.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn what_the_auth_layer_refuses_is_never_a_429_and_spends_no_budget() {
+    let rig = Rig::new(limits(2, 2, 2, 2)).await;
+    let fx = fixture(&rig.su).await;
+    let agent = seed_agent(&rig.su, fx.workspace, fx.dohyun.id, "prime").await;
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member')",
+    )
+    .bind(fx.workspace)
+    .bind(fx.channel)
+    .bind(agent)
+    .execute(&rig.su)
+    .await
+    .expect("agent joins the channel");
+    let (bearer, _) = agent_bearer(&rig.su, fx.workspace, agent).await;
+    let human = rig.login(fx.workspace, &fx.dohyun).await;
+
+    // The five budgeted endpoints. The ids in the paths need not exist: the auth layer answers
+    // before any handler looks at them.
+    let ghost = Uuid::new_v4();
+    let channel = fx.channel;
+    let message = json!({"clientMsgId": Uuid::new_v4(), "type": "text", "body": "x"});
+    let schedule = json!({
+        "body": "x",
+        "sendAtMs": chrono::Utc::now().timestamp_millis() + 3_600_000,
+        "clientRequestId": Uuid::new_v4(),
+    });
+    let routes: Vec<(&str, reqwest::Method, String, Value)> = vec![
+        (
+            "send",
+            reqwest::Method::POST,
+            rig.url(fx.workspace, &format!("/channels/{channel}/messages")),
+            message,
+        ),
+        (
+            "upload start",
+            reqwest::Method::POST,
+            rig.url(
+                fx.workspace,
+                &format!("/channels/{channel}/attachments/uploads"),
+            ),
+            json!({"name": "x.txt", "mime": "text/plain", "size": 1}),
+        ),
+        (
+            "schedule create",
+            reqwest::Method::POST,
+            rig.url(
+                fx.workspace,
+                &format!("/channels/{channel}/scheduled-messages"),
+            ),
+            schedule,
+        ),
+        (
+            "schedule edit",
+            reqwest::Method::PATCH,
+            rig.url(fx.workspace, &format!("/scheduled-messages/{ghost}")),
+            json!({"body": "y"}),
+        ),
+        (
+            "send-now",
+            reqwest::Method::POST,
+            rig.url(
+                fx.workspace,
+                &format!("/scheduled-messages/{ghost}/send-now"),
+            ),
+            json!({}),
+        ),
+    ];
+
+    // Four rounds against budgets of two: if any of these were counted, round three would
+    // already be a 429.
+    for round in 0..4 {
+        for (name, method, url, body) in &routes {
+            let anonymous = rig
+                .http
+                .request(method.clone(), url.clone())
+                .json(body)
+                .send()
+                .await
+                .expect("request");
+            assert_eq!(
+                anonymous.status().as_u16(),
+                401,
+                "{name}, round {round}: no credential at all is the auth layer's 401"
+            );
+            let not_a_token = rig
+                .call(
+                    method.clone(),
+                    url.clone(),
+                    "not.a.token",
+                    Some(body.clone()),
+                )
+                .await;
+            assert_eq!(
+                not_a_token.status, 401,
+                "{name}, round {round}: a bearer that is not a token is a 401"
+            );
+            if *name != "send" {
+                let agent_reply = rig
+                    .call(method.clone(), url.clone(), &bearer, Some(body.clone()))
+                    .await;
+                assert_eq!(
+                    agent_reply.status, 403,
+                    "{name}, round {round}: an agent bearer off its allow-list is the auth \
+                     layer's 403, not a budget refusal"
+                );
+            }
+        }
+    }
+
+    // Nothing above was counted or recorded: both credentials still have their whole budget.
+    for index in 0..2 {
+        assert_eq!(
+            rig.send(&human, fx.workspace, fx.channel, &format!("확인 {index}"))
+                .await
+                .status,
+            201,
+            "the person's send {index} is inside a budget that was never touched"
+        );
+    }
+    assert_refused(
+        &rig.send(&human, fx.workspace, fx.channel, "세 번째").await,
+        "the person's 3rd send: the budget of 2 is exact, so nothing above was counted",
+    );
+    for index in 0..2 {
+        assert_eq!(
+            rig.send_typed(&bearer, fx.workspace, fx.channel, "tool_call", "도구")
+                .await
+                .status,
+            201,
+            "the agent's send {index} is inside a budget that was never touched"
+        );
+    }
+    assert_refused(
+        &rig.send_typed(&bearer, fx.workspace, fx.channel, "tool_call", "도구")
+            .await,
+        "the agent's 3rd send",
+    );
+    assert!(
+        rig.audit_rows(fx.workspace, agent).await.len() <= 1,
+        "the agent's one audit row is for its own spent send budget, not for the 403s"
+    );
+}
+
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn zero_turns_each_axis_off_and_no_row_is_written() {
