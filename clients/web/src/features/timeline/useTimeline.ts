@@ -537,7 +537,7 @@ export function useTimeline(
   );
 
   const backfillAfter = useCallback(
-    async (channel: string) => {
+    async (channel: string, stillCurrent: () => boolean) => {
       let after = newestSeqRef.current ?? 0;
       let total = 0;
       // Loop ascending pages until the server returns fewer than requested.
@@ -546,6 +546,12 @@ export function useTimeline(
           after,
           limit: PAGE_LIMIT,
         });
+        // 답이 돌아온 **뒤에** 묻는다(#4438). 읽는 사이 채널을 옮겼다면(효과 정리) 이 페이지는 떠난 채널의 것이다 — 병합 문은 seq 로만
+        // 맞추므로 들이면 옛 채널의 줄이 새 목록에 서거나 같은 seq 의 새 채널 줄을 갈아 끼우고, `newestSeqRef` 가 옛 채널의 값으로
+        // 올라가 새 채널의 다음 꼬리 읽기가 그 아래 행을 건너뛴다. 읽기를 보내기 전이나 병합 뒤에 물으면 늦다. 폰
+        // (`conversation/useTimeline.ts`)의 같은 가드와 같은 자리·같은 뜻이다. 인자가 필수인 것은 일부러다 — 빼먹을 수 있는 가드는
+        // 가드가 아니다.
+        if (!stillCurrent()) break;
         if (page.messages.length === 0) break;
         total += page.messages.length;
         applyBatch(page.messages);
@@ -662,7 +668,7 @@ export function useTimeline(
         if (!recovered) {
           // A non-recovered (re)subscribe may have missed publications: pull
           // the authoritative tail from PG. (Also safe on first subscribe.)
-          backfillAfter(channelId).then((count) => {
+          backfillAfter(channelId, () => !cancelled).then((count) => {
             if (cancelled || isFirst) return;
             setResume((r) => ({ ...r, lastBackfillCount: count }));
             addMarker("backfill");
