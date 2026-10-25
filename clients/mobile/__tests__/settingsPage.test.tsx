@@ -35,18 +35,22 @@ import {
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
 // =============================================================================
-// #2702 — 내 계정은 머리의 아바타에서 열린다 (Buzz 식 프로필 시트).
+// #2702 · #4457 — 내 계정은 머리의 아바타에서 열린다 (Buzz 식 설정 페이지).
 //
 // 성재 피드백(2026-09-25): 「버즈처럼 프로필 위치를 바꿔주고, 누르면 안에서 테마나
 // 로그아웃이나 그런걸 할 수 있는 구조… 지금 화면 하단 UI랑 UX가 너무 구려」.
+// 2026-10-25: 「버즈 기준으로 홈의 우측 위 프로필을 누르면 저런식으로 보여… 닫기 텍스트 대신에
+// x버튼」 — 시트였던 프로필이 **전체 화면 설정 페이지**(셸의 층)가 되었다.
 //
 // 이 파일이 지는 것은 **구조**다:
 //   1. 대화 목록 발치에 계정 줄·테마 칸·로그아웃이 더는 없다
-//   2. 머리 오른쪽 아바타가 시트를 연다 — 이름·@핸들·상태가 그 안에 있다
-//   3. 테마는 시트 안 한 줄에서 열리는 선택지이고, 고른 것이 저장된다
-//   4. 로그아웃은 시트 안의 파괴 행이고, 한 번 확인한 뒤에만 세션을 지운다
-//   5. 알림 권한이 꺼져 있으면 그렇게 말하고, 스위치를 누르면 설정이 열린다 (#3924)
-//   6. 서버 주소와 앱 버전·빌드가 보인다
+//   2. 머리 오른쪽 아바타가 설정 페이지를 연다 — 머리는 왼쪽 원형 X + 가운데 「설정」, 이름·@핸들·상태가 그 안에 있다
+//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 X 는 한 겹만 벗긴다
+//   4. 테마는 「테마 ›」 행이 여는 안쪽 장이고, 고른 것이 저장된다
+//   5. 로그아웃은 마지막 카드의 위험 행이고, 한 번 확인한 뒤에만 세션을 지운다
+//   6. 알림 권한이 꺼져 있으면 그렇게 말하고, 스위치를 누르면 설정이 열린다 (#3924)
+//   7. 서버 주소와 앱 버전·빌드가 보인다
+//   8. **기능 손실 0** — 옛 프로필 시트가 하던 일(전수 표)이 모두 이 페이지에 있다
 //
 // 서버 뒤는 `shell.test.tsx` 와 같은 방식으로 fetch 하나만 가짜다.
 // =============================================================================
@@ -59,8 +63,8 @@ const SELF: Member = {
   id: SELF_ID,
   workspaceId: WS,
   kind: 'human',
-  displayName: '곽성재',
-  handle: 'seongjae',
+  displayName: '이도현',
+  handle: 'dohyun',
 };
 
 const LOGIN_BODY = {
@@ -76,8 +80,8 @@ const ROSTER = [
     workspaceId: WS,
     kind: 'human',
     status: 'active',
-    displayName: '곽성재',
-    handle: 'seongjae',
+    displayName: '이도현',
+    handle: 'dohyun',
     channelCount: 0,
     channelIds: [],
     capabilities: [],
@@ -111,6 +115,23 @@ function installFetch(): void {
     if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
     throw new Error(`unrouted request: ${url}`);
   }) as unknown as typeof fetch;
+}
+
+/** 렌더 트리를 문서 순서의 testID·글자 목록으로 편다. */
+function flatten(node: unknown, out: string[] = []): string[] {
+  if (node === null || node === undefined) return out;
+  if (Array.isArray(node)) {
+    node.forEach(child => flatten(child, out));
+    return out;
+  }
+  if (typeof node === 'string') {
+    out.push(node);
+    return out;
+  }
+  const el = node as {props?: {testID?: string}; children?: unknown};
+  if (el.props?.testID) out.push(el.props.testID);
+  flatten(el.children, out);
+  return out;
 }
 
 let queryClient: QueryClient | null = null;
@@ -159,11 +180,11 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-async function openSheet() {
+async function openPage() {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   fireEvent.press(screen.getByTestId('profile-avatar'));
-  return screen.getByTestId('profile-sheet');
+  return screen.getByTestId('settings-page');
 }
 
 describe('대화 목록 발치가 비었다 (#2702)', () => {
@@ -173,8 +194,8 @@ describe('대화 목록 발치가 비었다 (#2702)', () => {
 
     expect(screen.queryByTestId('sign-out')).toBeNull();
     expect(screen.queryByTestId('theme-control')).toBeNull();
-    expect(screen.queryByText('@seongjae')).toBeNull();
-    expect(screen.queryByTestId('profile-sheet')).toBeNull();
+    expect(screen.queryByText('@dohyun')).toBeNull();
+    expect(screen.queryByTestId('settings-page')).toBeNull();
   });
 
   it('머리 오른쪽의 아바타가 이름을 가진 버튼이다', async () => {
@@ -183,7 +204,7 @@ describe('대화 목록 발치가 비었다 (#2702)', () => {
 
     const avatar = screen.getByTestId('profile-avatar');
     expect(avatar.props.accessibilityRole).toBe('button');
-    expect(avatar.props.accessibilityLabel).toContain('곽성재');
+    expect(avatar.props.accessibilityLabel).toContain('이도현');
     // DS2-3(#2715): 머리는 시안 A 그대로 로고·큰 제목·아바타 셋이다. 메시지 검색의
     // 문은 떠 있는 탭바의 검색 탭이다.
     expect(screen.getByTestId('home-title')).toBeTruthy();
@@ -191,49 +212,163 @@ describe('대화 목록 발치가 비었다 (#2702)', () => {
   });
 });
 
-describe('프로필 시트', () => {
+describe('설정 페이지', () => {
   it('아바타를 누르면 열리고, 이름·@핸들·상태가 있다', async () => {
-    const sheet = await openSheet();
-    expect(within(sheet).getByTestId('self-profile-name')).toHaveTextContent('곽성재');
-    expect(within(sheet).getByTestId('self-profile-handle')).toHaveTextContent(
-      '@seongjae',
+    const page = await openPage();
+    expect(within(page).getByTestId('self-profile-name')).toHaveTextContent('이도현');
+    expect(within(page).getByTestId('self-profile-handle')).toHaveTextContent(
+      '@dohyun',
     );
     // 선언된 상태(dnd)는 연결과 무관하게 참이다 — 코어의 낱말로 말한다.
     await waitFor(() =>
-      expect(within(sheet).getByTestId('self-profile-presence')).toHaveTextContent(
+      expect(within(page).getByTestId('self-profile-presence')).toHaveTextContent(
         '방해 금지',
       ),
     );
   });
 
-  it('닫기로 닫힌다', async () => {
-    await openSheet();
-    fireEvent.press(screen.getByTestId('profile-close'));
-    // 셸의 페이지 시트(#2714)는 닫기에서도 미끄러져 나간 뒤 사라진다.
-    await waitFor(() => expect(screen.queryByTestId('profile-sheet')).toBeNull(), {
-      timeout: 8000,
-    });
-  }, 15000);
-
-  it('시트를 끌어내려 닫으면(onRequestClose/onDismiss) 아바타가 다시 연다', async () => {
-    // pageSheet 의 끌어내림은 네이티브가 닫고 RN 이 알린다. 알림이 부모의 「열림」을
-    // 내리지 못하면 아바타가 죽는다 — 두 경로를 각각 흘려 본다.
-    await openSheet();
-    for (const signal of ['onRequestClose', 'onDismiss'] as const) {
-      const sheet = screen.getByTestId('profile-sheet');
-      act(() => {
-        sheet.props[signal]();
-      });
-      expect(screen.queryByTestId('profile-sheet')).toBeNull();
+  it('머리의 원형 X 가 페이지를 닫고 홈이 그대로 드러나며, 아바타가 다시 연다', async () => {
+    await openPage();
+    expect(screen.getByTestId('settings-pane')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('settings-close'));
+    // 설정은 셸의 층이라 슬라이드 없이 걷힌다(시트가 아니다).
+    expect(screen.queryByTestId('settings-page')).toBeNull();
+    expect(screen.queryByTestId('settings-pane')).toBeNull();
+    expect(screen.getByTestId('sidebar-list')).toBeTruthy();
+    // 두 번 더 — 닫힘 뒤 부모의 「열림」이 남아 아바타가 죽는 일이 없다.
+    for (let i = 0; i < 2; i += 1) {
       fireEvent.press(screen.getByTestId('profile-avatar'));
-      expect(screen.getByTestId('profile-sheet')).toBeTruthy();
+      expect(screen.getByTestId('settings-page')).toBeTruthy();
+      fireEvent.press(screen.getByTestId('settings-close'));
+      expect(screen.queryByTestId('settings-page')).toBeNull();
     }
   });
 
-  it('테마 줄이 선택지를 열고, 고른 것이 저장되며 줄의 값이 바뀐다', async () => {
-    await openSheet();
+  it('닫기는 글자가 아니라 머리 왼쪽의 원형 X 다 — 가운데는 「설정」이다', async () => {
+    const page = await openPage();
+    const close = within(page).getByTestId('settings-close');
+    expect(close.props.accessibilityRole).toBe('button');
+    expect(close.props.accessibilityLabel).toBe('설정 닫기');
+    expect(within(page).queryByText('닫기')).toBeNull();
+    expect(within(page).getByTestId('settings-title')).toHaveTextContent('설정');
+    // 트리 순서가 곧 왼쪽·가운데다: X 가 제목보다 앞이다.
+    const order = flatten(screen.toJSON());
+    const closeAt = order.indexOf('settings-close');
+    const titleAt = order.indexOf('settings-title');
+    expect(closeAt).toBeGreaterThan(-1);
+    expect(titleAt).toBeGreaterThan(closeAt);
+  });
+
+  it('설정이 VoiceOver 의 모달 경계다 — 밑의 홈 목록은 읽히지 않는다', async () => {
+    await openPage();
+    expect(screen.getByTestId('settings-pane').props.accessibilityViewIsModal).toBe(true);
+  });
+
+  it('설정이 열리면 탭바도 보조기술에서 가려진다 — 닫으면 다시 읽힌다', async () => {
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    // 탭 줄(`accessibilityRole="tablist"`)은 접근성 요소가 아니라 역할 질의에 안 잡힌다 — 캡슐에서 올라가 찾는다.
+    const tabs = () => {
+      let node = screen.getByTestId('tab-capsule', {includeHiddenElements: true}).parent;
+      while (node && node.props?.accessibilityRole !== 'tablist') node = node.parent;
+      if (!node) throw new Error('tablist not found');
+      return node;
+    };
+    expect(tabs().props.accessibilityElementsHidden).not.toBe(true);
+    fireEvent.press(screen.getByTestId('profile-avatar'));
+    expect(tabs().props.accessibilityElementsHidden).toBe(true);
+    fireEvent.press(screen.getByTestId('settings-close'));
+    expect(tabs().props.accessibilityElementsHidden).not.toBe(true);
+  });
+
+  it('얼굴 영역의 순서: 큰 아바타 → 이름 → 상태 알약', async () => {
+    const page = await openPage();
+    await waitFor(() => expect(within(page).getByTestId('self-profile-presence')).toBeTruthy());
+    const order = flatten(screen.toJSON());
+    const at = (id: string) => order.indexOf(id);
+    expect(at('self-profile-avatar')).toBeGreaterThan(at('settings-title'));
+    expect(at('self-profile-name')).toBeGreaterThan(at('self-profile-avatar'));
+    expect(at('self-profile-presence')).toBeGreaterThan(at('self-profile-name'));
+    // 묶음 카드는 얼굴 영역 다음이다.
+    expect(at('settings-status-card')).toBeGreaterThan(at('self-profile-presence'));
+  });
+
+  it('묶음 순서: 상태 설정 → 내 상태 → 프로필 → 알림 → 기억 → 보기 → 연결 → 계정 (Buzz 문법, 우리 항목)', async () => {
+    const page = await openPage();
+    await waitFor(() => expect(within(page).getByTestId('settings-presence-card')).toBeTruthy());
+    const order = flatten(screen.toJSON());
+    const cards = [
+      'settings-status-card',
+      'settings-presence-card',
+      'settings-profile-card',
+      'settings-notify-card',
+      'memory-section',
+      'settings-view-card',
+      'settings-connect-card',
+      'settings-account-card',
+    ];
+    const positions = cards.map(id => order.indexOf(id));
+    expect(positions.every(position => position > -1)).toBe(true);
+    expect([...positions].sort((a, b) => a - b)).toEqual(positions);
+  });
+
+  it('로그아웃은 마지막 카드의 빨강 위험 행이다 — 그 뒤에는 버전 줄뿐이다', async () => {
+    const page = await openPage();
+    const order = flatten(screen.toJSON());
+    const signOutAt = order.indexOf('sign-out');
+    expect(signOutAt).toBeGreaterThan(-1);
+    for (const id of [
+      'profile-status-row',
+      'presence-option-auto',
+      'profile-push-row',
+      'profile-pause-row',
+      'memory-pause-row',
+      'profile-theme-row',
+      'profile-server-row',
+      'profile-device-key-row',
+    ]) {
+      expect(order.indexOf(id)).toBeGreaterThan(-1);
+      expect(order.indexOf(id)).toBeLessThan(signOutAt);
+    }
+    expect(order.indexOf('profile-version')).toBeGreaterThan(signOutAt);
+    const color = StyleSheet.flatten(within(page).getByText('로그아웃').props.style).color;
+    expect([darkPalette.danger, lightPalette.danger]).toContain(color);
+  });
+
+  it('VoiceOver 두 손가락 문지르기(escape)로도 닫힌다 — 안쪽 장에서는 한 겹만', async () => {
+    await openPage();
+    fireEvent.press(screen.getByTestId('profile-theme-row'));
+    act(() => {
+      screen.getByTestId('settings-sub-page').props.onAccessibilityEscape();
+    });
+    expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    act(() => {
+      screen.getByTestId('settings-page').props.onAccessibilityEscape();
+    });
+    expect(screen.queryByTestId('settings-page')).toBeNull();
+  });
+
+  it('안쪽 장의 원형 X 는 한 겹만 벗긴다 — 설정 페이지는 남는다', async () => {
+    await openPage();
+    expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+    fireEvent.press(screen.getByTestId('profile-theme-row'));
+    expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
+    expect(screen.getByTestId('settings-sub-title')).toHaveTextContent('테마');
+    // 설정 페이지는 밑에 마운트된 채다(읽던 값·스크롤이 그대로) — 한 겹 위에 쌓였을 뿐 갈아 끼우지 않았다.
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    expect(screen.getByTestId('self-profile-name', {includeHiddenElements: true})).toBeTruthy();
+    expect(screen.getByTestId('settings-scroll', {includeHiddenElements: true})).toBeTruthy();
+    fireEvent.press(screen.getByTestId('settings-back'));
+    expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    expect(screen.getByTestId('settings-close')).toBeTruthy();
+  });
+
+  it('테마 행이 안쪽 장을 열고, 고른 것이 저장되며 행의 값이 바뀐다', async () => {
+    await openPage();
     expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/새벽하늘 · 시스템/);
-    // 선택지는 줄을 누르기 전에는 없다.
+    // 선택지는 행을 누르기 전에는 없다.
     expect(screen.queryByTestId('theme-control')).toBeNull();
 
     fireEvent.press(screen.getByTestId('profile-theme-row'));
@@ -245,12 +380,12 @@ describe('프로필 시트', () => {
       true,
     );
 
-    fireEvent.press(screen.getByTestId('profile-back'));
+    fireEvent.press(screen.getByTestId('settings-back'));
     expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/다크/);
   });
 
-  it('로그아웃은 시트 안에서, 확인한 뒤에만 세션을 지운다', async () => {
-    await openSheet();
+  it('로그아웃은 페이지의 마지막 위험 행이고, 확인한 뒤에만 세션을 지운다', async () => {
+    await openPage();
     expect(getPersistedSession()).not.toBeNull();
 
     fireEvent.press(screen.getByTestId('sign-out'));
@@ -276,7 +411,7 @@ describe('프로필 시트', () => {
     setBackground({kind: 'photo', file: 'bg-1760600000000.jpg', width: 1600, height: 1200});
     expect(mmkvStore.get(NON_SECRET_KEYS.background)).toContain('bg-1760600000000.jpg');
 
-    await openSheet();
+    await openPage();
     fireEvent.press(screen.getByTestId('sign-out'));
     fireEvent.press(screen.getByTestId('sign-out-confirm'));
 
@@ -293,7 +428,7 @@ describe('프로필 시트', () => {
       clearAll: () => {},
     });
     setBackground({kind: 'solid', id: 'sage'});
-    await openSheet();
+    await openPage();
     fireEvent.press(screen.getByTestId('sign-out'));
     fireEvent.press(screen.getByTestId('sign-out-confirm'));
     expect(getBackground()).toEqual({kind: 'solid', id: 'sage'});
@@ -303,7 +438,7 @@ describe('프로필 시트', () => {
     // U2·#1155 에서 발치의 로그아웃 버튼이 지던 규칙을 시트로 옮긴다: 채움도 강조도
     // 없는 버튼은 테두리 하나가 「여기가 버튼이다」의 전부이므로 hairline `border`
     // (바탕 위 3:1 아래) 가 아니라 `textFaint`(웹 `--line-strong`)를 쓴다.
-    await openSheet();
+    await openPage();
     fireEvent.press(screen.getByTestId('sign-out'));
     const style = (id: string) =>
       StyleSheet.flatten(screen.getByTestId(id).props.style) ?? {};
@@ -319,7 +454,7 @@ describe('프로필 시트', () => {
   });
 
   it('알림이 허용돼 있으면 스위치가 켜져 있고 이 폰으로 받는다고 말한다 (#3924)', async () => {
-    await openSheet();
+    await openPage();
     await waitFor(() =>
       expect(screen.getByTestId('profile-push-row')).toHaveTextContent(
         /이 폰으로 알림을 받아요/,
@@ -343,7 +478,7 @@ describe('프로필 시트', () => {
       .spyOn(Linking, 'openSettings')
       .mockResolvedValue(undefined);
 
-    await openSheet();
+    await openPage();
     await waitFor(() =>
       expect(screen.getByTestId('profile-push-row')).toHaveTextContent(
         /iOS 설정에서 알림이 꺼져 있어요/,
@@ -359,7 +494,7 @@ describe('프로필 시트', () => {
   });
 
   it('연결한 서버 주소와 앱 버전·빌드가 보인다', async () => {
-    await openSheet();
+    await openPage();
     expect(screen.getByTestId('profile-server-row')).toHaveTextContent(
       /api\.example\.com/,
     );
@@ -372,7 +507,7 @@ describe('프로필 시트', () => {
       __box: {value: string | null};
     };
     clipboard.__box.value = null;
-    await openSheet();
+    await openPage();
     await act(async () => {
       fireEvent(screen.getByTestId('profile-version'), 'longPress');
     });

@@ -225,6 +225,18 @@ export interface NavState {
    * 에이전트 쪽 층이 열리면 이 층은 닫히고, 이 층이 열리면 그쪽이 닫힌다.
    */
   apps: AppsNav;
+  /**
+   * 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 10-25).
+   *
+   * 시트였던 프로필(`ProfileSheet`)이 페이지가 된 것이다. `docs/design-system/phone-sheets.md` §1:
+   * 여러 묶음의 설정은 **페이지**이고, 페이지는 화면 스택에 쌓여 가장자리 밀기로 닫힌다. 새 필드는
+   * 이 하나(`boolean`)뿐이다 — 이 파일 머리 주석이 말한 「필드 하나 추가」의 범위 안이다.
+   *
+   * 층 중 **가장 아래**다(탭이 홈일 때만 문이 있고, 그 위에 다른 층이 서면 문이 가려진다). 그래서
+   * `back` 에서는 맨 마지막에 벗겨진다. 안쪽 장(테마·지시 기기 등)은 설정 화면이 스스로 쥔다 —
+   * 다른 층과 엮이지 않는 지역 상태라 여기에 싣지 않는다.
+   */
+  settings: boolean;
 }
 
 /** 탭 위에 아무 층도 없는 상태. 탭 전환과 알림 입구가 이것으로 시작한다. */
@@ -236,6 +248,7 @@ const NO_LAYERS = {
   workSession: null,
   hosted: null,
   apps: null,
+  settings: false,
 } as const;
 
 export const INITIAL_NAV: NavState = {
@@ -258,6 +271,7 @@ export type NavAction =
   | {type: 'openHostedConnection'; connection: OpenHostedConnection}
   | {type: 'openAppsList'}
   | {type: 'openApp'; pluginId: string; name: string}
+  | {type: 'openSettings'}
   | {type: 'channelLeft'; channelId: string}
   | {type: 'back'}
   | {type: 'reset'};
@@ -270,7 +284,8 @@ function hasLayers(state: NavState): boolean {
     state.workList ||
     state.workSession !== null ||
     state.hosted !== null ||
-    state.apps !== null
+    state.apps !== null ||
+    state.settings
   );
 }
 
@@ -394,6 +409,11 @@ export function navReducer(state: NavState, action: NavAction): NavState {
         ...state,
         apps: {kind: 'detail', pluginId: action.pluginId, name: action.name},
       };
+    case 'openSettings':
+      // 홈 머리의 얼굴이 연다. 다른 층을 걷지 않는다 — 문이 서 있는 곳은 층이 없는 홈 탭뿐이고,
+      // 층이 이미 있으면 그 층이 문을 가린다. 같은 값이면 상태를 그대로 돌려 불필요한 렌더를 막는다.
+      if (state.settings) return state;
+      return {...state, settings: true};
     case 'channelLeft':
       // 열려 있는 채널을 **내가 나갔다** (#4229). 웹은 `/` 로 착지한다. 폰의 같은 자리는 그 대화 층을 걷어
       // 아래 화면(사이드바)으로 돌아가는 것이다. 다른 채널이 열려 있으면 건드리지 않는다.
@@ -420,6 +440,8 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       if (state.workSession !== null) return {...state, workSession: null};
       if (state.agentList) return {...state, agentList: false};
       if (state.workList) return {...state, workList: false};
+      // 설정은 가장 아래 층이다 — 위에 무엇이 얹혀 있든 그것들이 먼저 벗겨진 뒤에 닫힌다.
+      if (state.settings) return {...state, settings: false};
       return state;
     case 'reset':
       // Sign-out. The next person to sign in must not land in the previous

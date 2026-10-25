@@ -8,13 +8,13 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
-import {ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {SettingsPage} from '../src/features/profile/SettingsPage';
 
 // =============================================================================
-// #4384 — 프로필 시트에서 사진 장으로 가는 길
+// #4384 · #4457 — 설정 페이지에서 사진 장으로 가는 길
 //
-// 머리의 큰 얼굴과 그 밑의 「사진 바꾸기」가 **같은 장**(「프로필 사진」)을 연다. 얼굴만 누르게
-// 두면 바꿀 수 있다는 것을 아는 사람만 바꾼다. 시트의 다른 훅(푸시·상태·기기 키·업데이트)은 이
+// 머리의 큰 얼굴과 「프로필」 카드의 「사진 바꾸기」 행이 **같은 장**(「프로필 사진」)을 연다. 얼굴만 누르게
+// 두면 바꿀 수 있다는 것을 아는 사람만 바꾼다. 페이지의 다른 훅(푸시·상태·기기 키·업데이트)은 이
 // 시험의 관심이 아니라 가짜로 바꾼다.
 // =============================================================================
 
@@ -75,7 +75,7 @@ function mount() {
   return render(
     <ThemeProvider>
       <QueryClientProvider client={client}>
-        <ProfileSheet
+        <SettingsPage
           workspaceId={WS}
           member={SELF}
           directory={makeDirectory([ROW])}
@@ -90,14 +90,16 @@ function mount() {
 
 afterEach(cleanup);
 
-describe('프로필 시트 → 프로필 사진 장', () => {
-  it('큰 얼굴을 누르면 사진 장이 열리고, 「‹ 프로필」로 돌아온다', () => {
+describe('설정 페이지 → 프로필 사진 장', () => {
+  it('큰 얼굴을 누르면 사진 장이 한 겹 더 쌓이고, 머리의 원형 X 가 설정으로 돌려보낸다', () => {
     mount();
     expect(screen.queryByTestId('avatar-page')).toBeNull();
     fireEvent.press(screen.getByTestId('self-profile-avatar', {includeHiddenElements: true}));
     expect(screen.getByTestId('avatar-page')).toBeTruthy();
-    expect(screen.getByText('프로필 사진')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('profile-back'));
+    expect(screen.getByTestId('settings-sub-title')).toHaveTextContent('프로필 사진');
+    // 설정 페이지는 밑에 마운트된 채 남는다 — 닫히는 것은 한 겹뿐이다.
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('settings-back'));
     expect(screen.queryByTestId('avatar-page')).toBeNull();
     expect(screen.getByTestId('self-profile-name')).toBeTruthy();
   });

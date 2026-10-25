@@ -975,12 +975,12 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     expect(hapticCalls).toEqual(['impact:light']);
   });
 
-  it('프로필 아바타는 light 한 번, 시트는 같은 누름에 열린다', async () => {
+  it('프로필 아바타는 light 한 번, 설정 페이지는 같은 누름에 열린다', async () => {
     installFetch();
     await renderReady();
     fireEvent.press(screen.getByTestId('profile-avatar'));
     expect(hapticCalls).toEqual(['impact:light']);
-    await waitFor(() => expect(screen.getByTestId('profile-sheet')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('settings-page')).toBeTruthy());
   });
 
   it('사이드바 섹션 접기·펴기는 누를 때마다 selection 한 번', async () => {

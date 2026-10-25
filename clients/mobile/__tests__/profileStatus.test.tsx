@@ -23,21 +23,22 @@ import {
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
 // =============================================================================
-// #2848 — 프로필 시트에서 상태와 알림을 바로 바꾼다.
+// #2848 · #4457 — 설정 페이지에서 상태와 알림을 바로 바꾼다.
 //
 // 성재 요청(2026-09-27): 「모바일에서 알림이나 상태변경같은거만 일단 프로필에서
 // 바로 할 수 있게」. 이 파일이 지는 것:
-//   1. 온라인·자리 비움·방해 금지를 시트에서 고르면 `PUT /presence` 가 그 상태
+//   1. 온라인·자리 비움·방해 금지를 페이지에서 고르면 `PUT /presence` 가 그 상태
 //      **하나만** 싣고 나간다(상태 글 키는 건드리지 않는다). 알약은 바로 바뀌고,
 //      실패하면 되돌아가며 그렇게 말한다.
 //   2. 알림 일시 중지는 `PATCH /notification-rules {dnd, dndUntilMs}` 이고, **멘션
 //      예외를 싣지 않는다**(#3042) — 통째 PUT 은 읽은 뒤 웹이 바꾼 예외를 지운다. 읽기
 //      전·읽기 실패 때는 스위치가 잠긴다. 켜는 쓰기는 **기한을 고른 뒤에만** 나간다
 //      (ADR-0204 D2, #2899) — 기한을 고르는 장과 방해 금지 묶음은 `profilePauseUntil.test.tsx`.
-//   3. 상태 글은 시트 안의 한 장에서 이모지·글·지우기 시간을 고르고, 선언 상태는
-//      그대로 둔 채 저장한다. 저장된 만료는 「지금대로」로 남길 수 있다.
+//   3. 상태 글은 「상태 설정」 바텀시트에서 이모지·글·지우기 시간을 고르고(#4457: 머리의
+//      ✓ 는 바뀐 것이 있을 때만 눌린다), 선언 상태는 그대로 둔 채 저장한다. 저장된 만료는
+//      「지금대로」로 남길 수 있다.
 //
-// 서버 뒤는 `profileSheet.test.tsx` 와 같이 fetch 하나만 가짜다 — 다만 여기의
+// 서버 뒤는 `settingsPage.test.tsx` 와 같이 fetch 하나만 가짜다 — 다만 여기의
 // 가짜는 상태를 **기억한다**: PUT 뒤의 명부 재조회가 쓴 값을 돌려줘야 「서버 값으로
 // 다시 읽었다」가 참인지 잴 수 있다.
 // =============================================================================
@@ -242,7 +243,7 @@ async function openSheet() {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   fireEvent.press(screen.getByTestId('profile-avatar'));
-  const sheet = screen.getByTestId('profile-sheet');
+  const sheet = screen.getByTestId('settings-page');
   await waitFor(() =>
     expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy(),
   );
@@ -253,7 +254,7 @@ const presencePuts = () => server.puts.filter(p => p.path === 'presence');
 const rulesPuts = () => server.puts.filter(p => p.path === 'notification-rules');
 const kindsPuts = () => server.puts.filter(p => p.path === 'push-kinds');
 
-describe('상태를 시트에서 바로 바꾼다 (#2848)', () => {
+describe('상태를 페이지에서 바로 바꾼다 (#2848)', () => {
   it('세 줄이 코어 순서·낱말로 서고, 지금 선언이 선택돼 있다', async () => {
     const sheet = await openSheet();
     const labels = ['auto', 'away', 'dnd'].map(
@@ -457,7 +458,7 @@ describe('알림 일시 중지 (#2848)', () => {
       ),
     );
     expect(within(sheet).getByTestId('pause-until-page')).toBeTruthy();
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     expect(
       within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
     ).toMatchObject({checked: false});
@@ -546,16 +547,45 @@ describe('알림 일시 중지는 다른 기기의 변경을 지우지 않는다
   });
 });
 
-describe('상태 글 (#2848, ADR-0176)', () => {
-  it('프리셋·1시간을 골라 저장하면 선언 상태를 그대로 싣고, 시트로 돌아와 알약에 보인다', async () => {
+describe('상태 설정 바텀시트 (#2848, ADR-0176, #4457)', () => {
+  /** ✓ 는 머리의 확정 단추다. 비활성이면 `accessibilityState.disabled` 가 말한다(색이 아니다). */
+  const confirm = (sheet: ReturnType<typeof within>) => sheet.getByTestId('status-save');
+  const confirmDisabled = (sheet: ReturnType<typeof within>) =>
+    confirm(sheet).props.accessibilityState?.disabled === true;
+  /** 시트는 닫히는 길 어디서든 미끄러져 나간 뒤 사라진다(#2714). */
+  const sheetGone = () =>
+    waitFor(() => expect(screen.queryByTestId('status-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+
+  it('행을 누르면 시트가 열리고, 입력 전에는 ✓ 가 회색이라 눌러도 아무것도 쓰지 않는다', async () => {
+    const sheet = await openSheet();
+    expect(screen.queryByTestId('status-sheet')).toBeNull();
+    fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    expect(within(sheet).getByTestId('status-sheet')).toBeTruthy();
+    // 설정 페이지는 시트 뒤에 그대로 남는다.
+    expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy();
+    expect(confirmDisabled(within(sheet))).toBe(true);
+    fireEvent.press(confirm(within(sheet)));
+    await new Promise(resolve => setTimeout(resolve, 20));
+    expect(presencePuts()).toHaveLength(0);
+  });
+
+  it('프리셋·1시간을 골라 저장하면 선언 상태를 그대로 싣고, 시트가 닫히며 알약에 보인다', async () => {
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-status-row'));
-    expect(within(sheet).getByTestId('status-page')).toBeTruthy();
+    expect(confirmDisabled(within(sheet))).toBe(true);
 
     fireEvent.press(within(sheet).getByTestId('status-preset-meeting'));
+    // 글을 채우자 ✓ 가 눌린다.
+    expect(confirmDisabled(within(sheet))).toBe(false);
+    // 기간은 한 줄로 접혀 있다 — 누르면 그 자리에서 고른다(시트 위 시트 없음).
+    expect(within(sheet).queryByTestId('status-expiry-1h')).toBeNull();
+    fireEvent.press(within(sheet).getByTestId('status-expiry-row'));
     fireEvent.press(within(sheet).getByTestId('status-expiry-1h'));
+    expect(within(sheet).getByTestId('status-expiry-row')).toHaveTextContent(/1시간/);
     const before = Date.now();
-    fireEvent.press(within(sheet).getByTestId('status-save'));
+    fireEvent.press(confirm(within(sheet)));
 
     await waitFor(() => expect(presencePuts()).toHaveLength(1));
     const body = presencePuts()[0].body as Record<string, unknown>;
@@ -573,8 +603,8 @@ describe('상태 글 (#2848, ADR-0176)', () => {
         /📅 회의 중 · .*까지/,
       ),
     );
-    expect(within(sheet).queryByTestId('status-page')).toBeNull();
-  });
+    await sheetGone();
+  }, 20000);
 
   it('저장된 만료는 「지금대로」가 기본이고, 글만 고쳐 저장하면 만료 키를 보내지 않는다', async () => {
     server.self = {
@@ -585,18 +615,66 @@ describe('상태 글 (#2848, ADR-0176)', () => {
     };
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    // 바뀐 것이 없으면 ✓ 는 회색이다.
+    expect(confirmDisabled(within(sheet))).toBe(true);
+    expect(within(sheet).getByTestId('status-expiry-row')).toHaveTextContent(/지금대로/);
+    fireEvent.press(within(sheet).getByTestId('status-expiry-row'));
     expect(
       within(sheet).getByTestId('status-expiry-keep').props.accessibilityState,
     ).toMatchObject({selected: true});
 
     fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '재택 근무');
-    fireEvent.press(within(sheet).getByTestId('status-save'));
+    expect(confirmDisabled(within(sheet))).toBe(false);
+    fireEvent.press(confirm(within(sheet)));
 
     await waitFor(() => expect(presencePuts()).toHaveLength(1));
     expect(JSON.stringify(presencePuts()[0].body)).toBe(
       '{"status":"dnd","statusEmoji":"🏠","statusText":"재택 근무"}',
     );
+    await sheetGone();
+  }, 20000);
+
+  it('고쳤다가 처음 값으로 되돌리면 다시 바뀐 것이 없다 — ✓ 가 다시 회색이다', async () => {
+    server.self = {...baseSelf(), statusEmoji: '🏠', statusText: '재택'};
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    expect(confirmDisabled(within(sheet))).toBe(true);
+    fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '재택 근무');
+    expect(confirmDisabled(within(sheet))).toBe(false);
+    fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '재택');
+    expect(confirmDisabled(within(sheet))).toBe(true);
+    // 공백만 덧붙인 것은 같은 글이다 — 서버로 갈 때 잘리는 값으로 잰다.
+    fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '재택  ');
+    expect(confirmDisabled(within(sheet))).toBe(true);
   });
+
+  it('비운 입력은 지울 상태가 있을 때만 저장이다 — 없으면 기간만 바꿔도 ✓ 는 회색이다', async () => {
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    fireEvent.press(within(sheet).getByTestId('status-expiry-row'));
+    fireEvent.press(within(sheet).getByTestId('status-expiry-30m'));
+    expect(confirmDisabled(within(sheet))).toBe(true);
+    // 보이는 상태가 없으니 「상태 지우기」 줄도 없다.
+    expect(within(sheet).queryByTestId('status-clear')).toBeNull();
+  });
+
+  it('다 지운 채 ✓ 를 누르면 상태 지우기와 같은 쓰기다', async () => {
+    server.self = {...baseSelf(), statusEmoji: '🌴', statusText: '휴가'};
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    fireEvent.changeText(within(sheet).getByTestId('status-emoji-input'), '');
+    fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '');
+    expect(confirmDisabled(within(sheet))).toBe(false);
+    fireEvent.press(confirm(within(sheet)));
+    await waitFor(() => expect(presencePuts()).toHaveLength(1));
+    expect(presencePuts()[0].body).toEqual({
+      status: 'dnd',
+      statusEmoji: null,
+      statusText: null,
+      statusExpiresAtMs: null,
+    });
+    await sheetGone();
+  }, 20000);
 
   it('상태 지우기는 세 키를 모두 null 로 보낸다', async () => {
     server.self = {...baseSelf(), statusEmoji: '🌴', statusText: '휴가'};
@@ -614,30 +692,33 @@ describe('상태 글 (#2848, ADR-0176)', () => {
     await waitFor(() =>
       expect(within(sheet).queryByTestId('self-profile-custom-status')).toBeNull(),
     );
-  });
+    await sheetGone();
+  }, 20000);
 
-  it('저장이 실패하면 그 장에 남아 그렇게 말한다', async () => {
+  it('저장이 실패하면 시트에 남아 그렇게 말하고 ✓ 는 다시 눌린다', async () => {
     server.presenceFails = true;
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-status-row'));
     fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '집중');
-    fireEvent.press(within(sheet).getByTestId('status-save'));
+    fireEvent.press(confirm(within(sheet)));
     await waitFor(() =>
       expect(within(sheet).getByTestId('status-failure')).toHaveTextContent(
         '상태를 저장하지 못했습니다. 다시 시도하세요.',
       ),
     );
-    expect(within(sheet).getByTestId('status-page')).toBeTruthy();
+    expect(within(sheet).getByTestId('status-sheet')).toBeTruthy();
+    await waitFor(() => expect(confirmDisabled(within(sheet))).toBe(false));
   });
 
-  it('뒤로(‹ 프로필)는 저장하지 않고 돌아간다', async () => {
+  it('원형 X 는 저장하지 않고 시트만 닫는다 — 설정 페이지는 남는다', async () => {
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-status-row'));
     fireEvent.changeText(within(sheet).getByTestId('status-text-input'), '집중');
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('status-sheet-close'));
+    await sheetGone();
     expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy();
     expect(presencePuts()).toHaveLength(0);
-  });
+  }, 20000);
 });
 
 // =============================================================================
@@ -730,5 +811,239 @@ describe('푸시 종류 — 작업 끝남 (#3342)', () => {
     await new Promise(resolve => setTimeout(resolve, 30));
     expect(within(sheet).queryByTestId('profile-work-complete-row')).toBeNull();
     expect(within(sheet).queryByTestId('profile-always-row')).toBeNull();
+  });
+});
+
+// =============================================================================
+// #4457 — 각 행은 **해당** 시트나 안쪽 장을 연다
+//
+// 설정 페이지의 행은 세 가지 목적지로 갈린다(`phone-sheets.md` §1): 짧은 편집은 **바텀시트**,
+// 여러 묶음·더 들어가는 행은 **안쪽 장**(설정 위에 한 겹 더 쌓이고 머리의 원형 X 가 설정으로
+// 돌려보낸다). 이 표가 행마다 어디로 가는지를 못 박는다 — 행을 엉뚱한 곳에 잇거나 시트였던 것이
+// 페이지가 되어 버려도(또는 그 반대) 여기가 빨개진다.
+// =============================================================================
+describe('각 행은 해당 시트나 안쪽 장을 연다 (#4457)', () => {
+  type Dest =
+    | {kind: 'sheet'; testID: string; close: string}
+    | {kind: 'sub'; title: string; body: string};
+  const TABLE: readonly {row: string; hidden?: boolean; dest: Dest}[] = [
+    {
+      row: 'profile-status-row',
+      dest: {kind: 'sheet', testID: 'status-sheet', close: 'status-sheet-close'},
+    },
+    {
+      row: 'presence-option-dnd',
+      dest: {kind: 'sub', title: '방해 금지', body: 'pause-until-page'},
+    },
+    {
+      row: 'profile-dnd-until-row',
+      dest: {kind: 'sub', title: '방해 금지', body: 'pause-until-page'},
+    },
+    {
+      row: 'profile-pause-row',
+      dest: {kind: 'sub', title: '알림 일시 중지', body: 'pause-until-page'},
+    },
+    {
+      row: 'profile-theme-row',
+      dest: {kind: 'sub', title: '테마', body: 'theme-control'},
+    },
+    {
+      row: 'profile-device-key-row',
+      dest: {kind: 'sub', title: '지시 기기', body: 'settings-sub-scroll'},
+    },
+    {
+      row: 'self-profile-avatar-change',
+      dest: {kind: 'sub', title: '프로필 사진', body: 'avatar-page'},
+    },
+    {
+      // 큰 얼굴은 보조기술에서 숨는다(낭독은 「사진 바꾸기」 행이 맡는다) — 눈으로 누르는 길.
+      row: 'self-profile-avatar',
+      hidden: true,
+      dest: {kind: 'sub', title: '프로필 사진', body: 'avatar-page'},
+    },
+  ];
+
+  it.each(TABLE.map(entry => [entry.row, entry] as const))(
+    '%s → 목적지가 맞고, 닫으면 설정 페이지로 돌아온다',
+    async (_row, entry) => {
+      const page = await openSheet();
+      // 일시 중지 행은 규칙을 읽은 뒤에야 눌린다.
+      await waitFor(() =>
+        expect(
+          within(page).getByTestId('profile-pause-row').props.accessibilityState,
+        ).toMatchObject({disabled: false}),
+      );
+      fireEvent.press(
+        within(page).getByTestId(entry.row, {includeHiddenElements: entry.hidden}),
+      );
+      if (entry.dest.kind === 'sheet') {
+        expect(within(page).getByTestId(entry.dest.testID)).toBeTruthy();
+        // 시트는 안쪽 장이 아니다 — 한 겹 쌓이지 않는다.
+        expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+        fireEvent.press(within(page).getByTestId(entry.dest.close));
+        await waitFor(
+          () => expect(screen.queryByTestId('status-sheet')).toBeNull(),
+          {timeout: 8000},
+        );
+      } else {
+        expect(within(page).getByTestId('settings-sub-pane')).toBeTruthy();
+        expect(within(page).getByTestId('settings-sub-title')).toHaveTextContent(
+          entry.dest.title,
+        );
+        expect(within(page).getByTestId(entry.dest.body)).toBeTruthy();
+        // 시트가 아니다 — 상태 시트가 함께 뜨지 않는다.
+        expect(screen.queryByTestId('status-sheet')).toBeNull();
+        fireEvent.press(within(page).getByTestId('settings-back'));
+        expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+      }
+      expect(within(page).getByTestId('presence-option-auto')).toBeTruthy();
+    },
+    20000,
+  );
+});
+
+// =============================================================================
+// #4457 — 기능 손실 0 (전수 표)
+//
+// 옛 프로필 시트와 그 하위 쪽이 하던 일이 설정 페이지에 **모두** 있다. 표의 한 줄 = 사람이 하던 일
+// 하나(`scratchpad/4457/inventory.md`). 조건부 줄(방해 금지 기한 · 일시 중지 기한 · 다시 불러오기 ·
+// 보이는 상태 글)은 그 조건을 세운 서버로 따로 세운다 — 한 서버로는 절반을 못 본다.
+//
+// 행 하나를 지우면(또는 testID 가 바뀌면) 여기가 빨개진다. 숨은 원소(스위치·큰 얼굴)는
+// `includeHiddenElements` 로 찾는다.
+// =============================================================================
+describe('기능 손실 0 — 옛 프로필 시트가 하던 일이 설정 페이지에 모두 있다 (#4457)', () => {
+  const present = (page: ReturnType<typeof within>, ids: readonly string[]) => {
+    for (const id of ids) {
+      expect({id, found: page.queryByTestId(id, {includeHiddenElements: true}) !== null}).toEqual({
+        id,
+        found: true,
+      });
+    }
+  };
+  const absent = (page: ReturnType<typeof within>, ids: readonly string[]) => {
+    for (const id of ids) {
+      expect({id, found: page.queryByTestId(id, {includeHiddenElements: true}) !== null}).toEqual({
+        id,
+        found: false,
+      });
+    }
+  };
+
+  /** 머리·얼굴·카드의 늘 서는 줄. */
+  const ALWAYS = [
+    'settings-header',
+    'settings-close',
+    'settings-title',
+    'self-profile-avatar',
+    'self-profile-avatar-change',
+    'self-profile-name',
+    'self-profile-handle',
+    'self-profile-presence',
+    'profile-status-row',
+    'presence-option-auto',
+    'presence-option-away',
+    'presence-option-dnd',
+    'profile-push-row',
+    'profile-pause-row',
+    'profile-work-complete-row',
+    'profile-always-row',
+    'memory-section',
+    'memory-pause-row',
+    'memory-admin-row',
+    'profile-theme-row',
+    'profile-server-row',
+    'profile-device-key-row',
+    'sign-out',
+    'profile-version',
+  ] as const;
+
+  it('늘 서는 줄이 전부 있다 — 방해 금지를 고른 사람', async () => {
+    const page = await openSheet();
+    await waitFor(() =>
+      expect(
+        within(page).getByTestId('profile-pause-row').props.accessibilityState,
+      ).toMatchObject({disabled: false}),
+    );
+    // 값을 읽은 뒤에만 서는 스위치.
+    await waitFor(() =>
+      expect(
+        within(page).getByTestId('profile-push-switch', {includeHiddenElements: true}),
+      ).toBeTruthy(),
+    );
+    present(within(page), [
+      ...ALWAYS,
+      'profile-push-switch',
+      'profile-pause-switch',
+      'profile-work-complete-switch',
+      // 선언 상태가 방해 금지라 선택 ✓ 와 기한 줄이 선다.
+      'presence-dnd-check',
+      'profile-dnd-until-row',
+    ]);
+    // 선택되지 않은 줄에는 ✓ 가 없다.
+    absent(within(page), ['presence-auto-check', 'presence-away-check']);
+    // 켜지지 않은 것들의 줄은 없다.
+    absent(within(page), [
+      'profile-pause-until-row',
+      'profile-pause-retry',
+      'profile-work-complete-retry',
+      'self-profile-custom-status',
+      'sign-out-confirm-block',
+      'presence-failure',
+    ]);
+  });
+
+  it('조건부 줄 — 일시 중지가 켜져 있고 보이는 상태 글이 있는 사람(온라인)', async () => {
+    server.self = {
+      ...baseSelf(),
+      presenceStatus: 'auto',
+      statusEmoji: '🏠',
+      statusText: '재택',
+    };
+    server.rules = {dnd: true, mentionOverridesMute: true, dndUntilMs: Date.now() + 2 * 60 * 60_000};
+    const page = await openSheet();
+    await waitFor(() =>
+      expect(within(page).getByTestId('profile-pause-until-row')).toBeTruthy(),
+    );
+    present(within(page), [
+      ...ALWAYS,
+      'profile-pause-until-row',
+      'self-profile-custom-status',
+      'presence-auto-check',
+    ]);
+    // 방해 금지가 아니니 방해 금지 기한 줄은 없다.
+    absent(within(page), ['profile-dnd-until-row', 'presence-dnd-check']);
+    expect(within(page).getByTestId('profile-status-row')).toHaveTextContent(/🏠 재택/);
+  });
+
+  it('조건부 줄 — 읽기에 실패하면 「다시 불러오기」가 둘 서고 스위치는 없다', async () => {
+    server.rulesRead = 'fail';
+    server.kindsRead = 'fail';
+    const page = await openSheet();
+    await waitFor(() =>
+      expect(within(page).getByTestId('profile-pause-retry')).toBeTruthy(),
+    );
+    // 종류 질의는 한 번 다시 시도한 뒤(react-query 기본 지연 1초) 실패로 선다.
+    await waitFor(
+      () => expect(within(page).getByTestId('profile-work-complete-retry')).toBeTruthy(),
+      {timeout: 4000},
+    );
+    present(within(page), ALWAYS);
+    // 모르는 것은 말하지 않는다 — 읽지 못한 값 위에 「꺼짐」 스위치를 그리지 않는다.
+    absent(within(page), ['profile-pause-switch', 'profile-work-complete-switch']);
+  });
+
+  it('로그아웃 확인 블록은 같은 카드 안에서 행을 대신한다', async () => {
+    const page = await openSheet();
+    fireEvent.press(within(page).getByTestId('sign-out'));
+    present(within(page), [
+      'sign-out-confirm-block',
+      'sign-out-cancel',
+      'sign-out-confirm',
+    ]);
+    absent(within(page), ['sign-out']);
+    fireEvent.press(within(page).getByTestId('sign-out-cancel'));
+    present(within(page), ['sign-out']);
+    absent(within(page), ['sign-out-confirm-block']);
   });
 });

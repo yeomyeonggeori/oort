@@ -252,7 +252,7 @@ async function openSheet() {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   fireEvent.press(screen.getByTestId('profile-avatar'));
-  const sheet = screen.getByTestId('profile-sheet');
+  const sheet = screen.getByTestId('settings-page');
   await waitFor(() =>
     expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy(),
   );
@@ -294,7 +294,7 @@ describe('방해 금지 — 기한을 고르고서야 켜진다 (ADR-0204 D2)', 
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(server.writes).toEqual([]);
     // 고르지 않고 돌아오면 상태는 그대로 온라인이다.
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     expect(
       within(sheet).getByTestId('presence-option-auto').props.accessibilityState,
     ).toMatchObject({selected: true});
@@ -456,7 +456,7 @@ describe('방해 금지 — 기한을 고르고서야 켜진다 (ADR-0204 D2)', 
       ),
     );
     expect(within(sheet).getByTestId('pause-until-page')).toBeTruthy();
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     await waitFor(() =>
       expect(
         within(sheet).getByTestId('presence-option-auto').props.accessibilityState,
@@ -562,7 +562,7 @@ describe('기한 장 — 목록과 「직접 끌 때까지」의 부재', () => 
         '알림 설정을 바꾸지 못했어요. 다시 시도하세요.',
       ),
     );
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     expect(
       within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
     ).toMatchObject({checked: false});
@@ -798,7 +798,7 @@ describe('기한이 지나면 시트가 서버에 다시 묻는다 (design-revie
     queryClient!.setQueryData(['roster', WS], cache.roster);
     queryClient!.setQueryData(['settings', 'notification-rules', WS], cache.rules);
     fireEvent.press(screen.getByTestId('profile-avatar'));
-    const sheet = screen.getByTestId('profile-sheet');
+    const sheet = screen.getByTestId('settings-page');
     await waitFor(() =>
       expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy(),
     );
@@ -956,7 +956,7 @@ describe('기한 장 — 읽어 주는 힌트', () => {
 });
 
 describe('직접 고르기 블록 — 열릴 때 한 번만 시트를 내린다', () => {
-  // 시트(`ProfileSheet`)는 `onReveal` 로 스크롤한다. 블록의 높이가 바뀔 때마다(지난 시각 오류문이
+  // 설정 페이지의 안쪽 장(`SettingsPage` 의 `SubPage`)은 `onReveal` 로 스크롤한다. 블록의 높이가 바뀔 때마다(지난 시각 오류문이
   // 뜨거나 달을 넘길 때) `onLayout` 이 다시 오는데 그때마다 내리면 고르던 자리에서 시트가 튄다.
   const layout = (y: number, height: number) => ({
     nativeEvent: {layout: {x: 0, y, width: 390, height}},

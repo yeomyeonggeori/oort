@@ -136,7 +136,7 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {seedMemberAvatar} from '../src/features/conversation/memberAvatarImage';
-import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {SettingsContent, SettingsPage} from '../src/features/profile/SettingsPage';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {pushDeviceId} from '../src/push/registration';
@@ -179,7 +179,7 @@ import {
   composerPlaceholder,
   composerPlaceholderClauses,
 } from '@momo/core/features/chat/composerCopy';
-import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
+import {FixedScheme, usePalette, useStyles, type ColorScheme} from '../src/design/theme';
 import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
@@ -195,6 +195,21 @@ import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
 import {PhotoViewerSurface} from './photoViewer';
+
+/**
+ * #4457: 옛 `ProfileSheet` 의 자리. 「설정」은 셸의 층(`nav.settings`)이라 하네스는 셸 위에 전체 화면을
+ * 불투명하게 덮어 세운다(층의 `overlay` 와 같은 모양). 앱의 층은 `EdgeSwipeBack` 이 이 자리를 맡는다.
+ */
+function SettingsOverlay(
+  props: React.ComponentProps<typeof SettingsPage>,
+): React.JSX.Element {
+  const palette = usePalette();
+  return (
+    <View style={[StyleSheet.absoluteFill, {backgroundColor: palette.bg}]}>
+      <SettingsPage {...props} />
+    </View>
+  );
+}
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -3951,8 +3966,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'memory-pause': {
       harnessClient.setQueryData(memoryKeys.settings(MEMORY_WS), MEMORY_SETTINGS);
       return (
-        <Frame label="프로필 시트 — 기억 (#3166)">
-          <ScrollView>
+        <Frame label="설정 페이지 — 기억 (#3166 → #4457)">
+          <ScrollView contentContainerStyle={styles.settingsBody}>
             <MemoryPauseSection workspaceId={MEMORY_WS} />
           </ScrollView>
         </Frame>
@@ -4710,7 +4725,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
             member={HARNESS_MEMBER}
             directory={makeDirectory(SHELL_ROSTER)}
@@ -4748,7 +4763,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             initialPage="avatar"
             workspaceId={HARNESS_MEMBER.workspaceId}
             member={HARNESS_MEMBER}
@@ -4774,7 +4789,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
             member={HARNESS_MEMBER}
             directory={makeDirectory(SHELL_ROSTER)}
@@ -4790,19 +4805,21 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
             <View style={{marginTop: -560, height: 3000}}>
-              <ProfilePage
-                workspaceId={HARNESS_MEMBER.workspaceId}
-                member={HARNESS_MEMBER}
-                directory={makeDirectory(SHELL_ROSTER)}
-                connected
-                onOpenTheme={() => {}}
-                onOpenStatus={() => {}}
-                onOpenDeviceKey={() => {}}
-                onOpenPauseUntil={() => {}}
-                onOpenDndUntil={() => {}}
-                onSignOut={() => {}}
-                onRevealEnd={() => {}}
-              />
+              <View style={styles.settingsBody}>
+                <SettingsContent
+                  workspaceId={HARNESS_MEMBER.workspaceId}
+                  member={HARNESS_MEMBER}
+                  directory={makeDirectory(SHELL_ROSTER)}
+                  connected
+                  onOpenTheme={() => {}}
+                  onOpenStatus={() => {}}
+                  onOpenDeviceKey={() => {}}
+                  onOpenPauseUntil={() => {}}
+                  onOpenDndUntil={() => {}}
+                  onSignOut={() => {}}
+                  onRevealEnd={() => {}}
+                />
+              </View>
             </View>
           </View>
         </Screen>
@@ -4821,7 +4838,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
             member={HARNESS_MEMBER}
             directory={makeDirectory(pauseRoster(name))}
@@ -4833,7 +4850,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 ? 'dndUntil'
                 : name.startsWith('shell-pause-until')
                   ? 'pauseUntil'
-                  : 'profile'
+                  : 'main'
             }
           />
         </View>
@@ -4866,19 +4883,21 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                   : PUSH_CAPTURE_SCROLL),
                 height: 6000,
               }}>
-              <ProfilePage
-                workspaceId={HARNESS_MEMBER.workspaceId}
-                member={HARNESS_MEMBER}
-                directory={makeDirectory(SHELL_ROSTER)}
-                connected
-                onOpenTheme={() => {}}
-                onOpenStatus={() => {}}
-                onOpenDeviceKey={() => {}}
-                onOpenPauseUntil={() => {}}
-                onOpenDndUntil={() => {}}
-                onSignOut={() => {}}
-                onRevealEnd={() => {}}
-              />
+              <View style={styles.settingsBody}>
+                <SettingsContent
+                  workspaceId={HARNESS_MEMBER.workspaceId}
+                  member={HARNESS_MEMBER}
+                  directory={makeDirectory(SHELL_ROSTER)}
+                  connected
+                  onOpenTheme={() => {}}
+                  onOpenStatus={() => {}}
+                  onOpenDeviceKey={() => {}}
+                  onOpenPauseUntil={() => {}}
+                  onOpenDndUntil={() => {}}
+                  onSignOut={() => {}}
+                  onRevealEnd={() => {}}
+                />
+              </View>
             </View>
           </View>
         </Screen>
@@ -5327,7 +5346,7 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     return (
       <View style={styles.fill}>
         <Shell />
-        <ProfileSheet
+        <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
           member={HARNESS_MEMBER}
           directory={makeDirectory(SHELL_ROSTER)}
@@ -5347,7 +5366,7 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     return (
       <View style={styles.fill}>
         <Shell />
-        <ProfileSheet
+        <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
           member={HARNESS_MEMBER}
           directory={makeDirectory(SHELL_ROSTER)}
@@ -5371,7 +5390,7 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     return (
       <View style={styles.fill}>
         <Shell />
-        <ProfileSheet
+        <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
           member={HARNESS_MEMBER}
           directory={makeDirectory(SHELL_ROSTER)}
@@ -7301,6 +7320,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     conversationFloorMid: {flex: 1, justifyContent: 'center'},
     /** 제 `Screen` 을 든 화면을 통째로 세울 때 (#1964). */
     fill: {flex: 1, backgroundColor: color.bg},
+    // #4457: `SettingsContent` 는 스크롤 안쪽이라 가로 여백과 카드 사이 간격을 페이지의 스크롤이 준다 — 하네스가 대신 준다.
+    settingsBody: {paddingHorizontal: SAFE_GUTTER, gap: space.lg},
     /** 그런 화면 아래의 캡션 — 홈 인디케이터를 비켜 선다. */
     captionBottom: {paddingTop: 8, paddingBottom: 34},
     label: {

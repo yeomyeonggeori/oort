@@ -1,0 +1,238 @@
+import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import React from 'react';
+import {StyleSheet} from 'react-native';
+
+import {ListRow} from '../src/design/sheetParts';
+import {FixedScheme, paletteFor, type ColorScheme} from '../src/design/theme';
+import {SHEET, space} from '../src/design/tokens';
+import {
+  ChoiceRow,
+  SettingsNote,
+  SwitchRow,
+} from '../src/features/profile/settingsRows';
+
+// =============================================================================
+// #4457 — 설정 페이지의 얇은 행 부품(`settingsRows.tsx`).
+//
+// 이 부품들은 `design/sheetParts.tsx` 의 `ListRow` 가 갖지 못한 세 가지(라디오 · 읽는 중의 오른쪽
+// 자리 · 접근성으로만 잠기는 상태)를 같은 토큰으로 얇게 더한 것이다. 시험이 지키는 약속은 둘:
+//   1. **모양이 `ListRow` 와 갈라지지 않는다** — 한 카드 안에서 두 가족의 행이 섞여 서므로, 치수가
+//      한 칸이라도 어긋나면 행 높이가 들쭉날쭉해진다(값이 아니라 관계를 잰다).
+//   2. **모르는 값을 말하지 않는다** — 읽는 중·못 읽음에는 스위치를 그리지 않는다.
+// =============================================================================
+
+afterEach(cleanup);
+
+function mount(ui: React.ReactElement, scheme: ColorScheme = 'light') {
+  return render(<FixedScheme scheme={scheme}>{ui}</FixedScheme>);
+}
+
+const flat = (testID: string) =>
+  StyleSheet.flatten(screen.getByTestId(testID, {includeHiddenElements: true}).props.style);
+
+/** 행 상자의 치수만 뽑는다 — 색·눌림 같은 상태 스타일은 빼고. */
+const BOX = [
+  'minHeight',
+  'flexDirection',
+  'alignItems',
+  'gap',
+  'paddingHorizontal',
+  'paddingVertical',
+] as const;
+const box = (testID: string) => {
+  const style = flat(testID);
+  return Object.fromEntries(BOX.map(key => [key, style[key]]));
+};
+const type = (text: string) => {
+  const style = StyleSheet.flatten(screen.getByText(text).props.style);
+  return {fontSize: style.fontSize, lineHeight: style.lineHeight, color: style.color};
+};
+
+describe.each(['light', 'dark'] as const)('행 모양은 ListRow 와 같다 (%s)', scheme => {
+  it('스위치 행·라디오 행의 상자가 ListRow 의 상자와 같다', () => {
+    mount(
+      <>
+        <ListRow title="기준" detail="기준 설명" onPress={() => {}} testID="base" />
+        <SwitchRow
+          title="스위치"
+          detail="스위치 설명"
+          checked
+          control={{kind: 'none'}}
+          onPress={() => {}}
+          testID="switch"
+        />
+        <ChoiceRow title="라디오" detail="라디오 설명" selected={false} onPress={() => {}} testID="choice" />
+      </>,
+      scheme,
+    );
+    // 기준이 비어 있지 않다 — 둘 다 undefined 여서 맞는 헛단정을 막는다.
+    expect(box('base')).toEqual({
+      minHeight: SHEET.rowMinHeight,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: space.sm,
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+    });
+    expect(box('switch')).toEqual(box('base'));
+    // 설명 줄이 있으면 라디오 행만 위로 붙는다(점·✓ 가 제목 첫 줄 옆에 서도록) — 나머지 치수는 같다.
+    expect({...box('choice'), alignItems: 'center'}).toEqual(box('base'));
+    expect(box('choice').alignItems).toBe('flex-start');
+  });
+
+  it('이름·설명 글자가 ListRow 와 같은 크기·줄 높이·색이다', () => {
+    mount(
+      <>
+        <ListRow title="기준" detail="기준 설명" onPress={() => {}} />
+        <SwitchRow title="스위치" detail="스위치 설명" checked={false} control={{kind: 'none'}} onPress={() => {}} />
+        <ChoiceRow title="라디오" detail="라디오 설명" selected={false} onPress={() => {}} />
+      </>,
+      scheme,
+    );
+    expect(type('스위치')).toEqual(type('기준'));
+    expect(type('라디오')).toEqual(type('기준'));
+    expect(type('스위치 설명')).toEqual(type('기준 설명'));
+    expect(type('라디오 설명')).toEqual(type('기준 설명'));
+    expect(type('기준').color).toBe(paletteFor(scheme).text);
+    expect(type('기준 설명').color).toBe(paletteFor(scheme).textMuted);
+  });
+});
+
+describe('ChoiceRow', () => {
+  it('라디오로 읽히고, 선택된 줄에만 ✓ 가 있다', () => {
+    mount(
+      <>
+        <ChoiceRow title="온라인" selected onPress={() => {}} testID="a" checkTestID="a-check" />
+        <ChoiceRow title="자리 비움" selected={false} onPress={() => {}} testID="b" checkTestID="b-check" />
+      </>,
+    );
+    expect(screen.getByTestId('a').props.accessibilityRole).toBe('radio');
+    expect(screen.getByTestId('a').props.accessibilityState).toMatchObject({selected: true});
+    expect(screen.getByTestId('b').props.accessibilityState).toMatchObject({selected: false});
+    expect(screen.queryByTestId('a-check', {includeHiddenElements: true})).not.toBeNull();
+    expect(screen.queryByTestId('b-check', {includeHiddenElements: true})).toBeNull();
+  });
+
+  it('누르면 onPress 이고, 비활성이면 눌러도 아무 일이 없고 접근성이 잠겼다고 말한다', () => {
+    const onPress = jest.fn();
+    mount(
+      <>
+        <ChoiceRow title="켬" selected={false} onPress={onPress} testID="on" />
+        <ChoiceRow title="잠김" selected={false} disabled onPress={onPress} testID="off" />
+      </>,
+    );
+    fireEvent.press(screen.getByTestId('on'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+    fireEvent.press(screen.getByTestId('off'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('off').props.accessibilityState).toMatchObject({disabled: true});
+    // 켜진 줄은 잠겼다고 말하지 않는다.
+    expect(screen.getByTestId('on').props.accessibilityState.disabled).not.toBe(true);
+  });
+
+  it('앞 표지는 장식이라 낭독에서 빠지고, 설명 줄이 있으면 제목 첫 줄 높이를 지킨다', () => {
+    mount(
+      <ChoiceRow
+        title="방해 금지"
+        detail="알림도 함께 멈춰요"
+        selected
+        leading={<></>}
+        onPress={() => {}}
+        testID="row"
+      />,
+    );
+    expect(screen.getByTestId('row-lead', {includeHiddenElements: true}).props.importantForAccessibility).toBe(
+      'no',
+    );
+    // 점 칸의 폭은 아이콘 칸 — 카드의 inset="icon" 구분선이 글자 열에 맞는 근거다.
+    expect(flat('row-lead').width).toBe(SHEET.iconSlot);
+  });
+});
+
+describe('SwitchRow', () => {
+  it('스위치가 있으면 값을 보이고, 컨트롤을 돌리면 onValueChange, 행을 누르면 onPress', () => {
+    const onPress = jest.fn();
+    const onValueChange = jest.fn();
+    mount(
+      <SwitchRow
+        title="푸시 알림"
+        checked
+        control={{kind: 'switch', value: true, onValueChange, testID: 'sw'}}
+        onPress={onPress}
+        testID="row"
+      />,
+    );
+    const row = screen.getByTestId('row');
+    expect(row.props.accessibilityRole).toBe('switch');
+    expect(row.props.accessibilityState).toMatchObject({checked: true, disabled: false});
+    const control = screen.getByTestId('sw', {includeHiddenElements: true});
+    // 컨트롤은 보조기술에서 숨는다 — 한 행에 요소가 하나다.
+    expect(control.props.accessibilityElementsHidden).toBe(true);
+    fireEvent(control, 'valueChange', false);
+    expect(onValueChange).toHaveBeenCalledWith(false);
+    fireEvent.press(row);
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+
+  it('읽는 중에는 스피너만 서고 스위치는 없다 — 모르는 값을 「꺼짐」으로 그리지 않는다', () => {
+    mount(
+      <SwitchRow
+        title="푸시 알림"
+        checked={false}
+        a11yDisabled
+        control={{kind: 'loading', testID: 'spinner'}}
+        onPress={() => {}}
+        testID="row"
+      />,
+    );
+    expect(screen.queryByTestId('spinner', {includeHiddenElements: true})).not.toBeNull();
+    // `Switch` 호스트가 하나도 없다(이 행은 testID 없는 스위치도 그리지 않는다).
+    expect(screen.UNSAFE_queryAllByType(require('react-native').Switch)).toHaveLength(0);
+    expect(screen.getByTestId('row').props.accessibilityState).toMatchObject({disabled: true});
+  });
+
+  it('못 읽은 행은 오른쪽이 비어 있다', () => {
+    mount(
+      <SwitchRow
+        title="푸시 알림"
+        checked={false}
+        a11yDisabled
+        control={{kind: 'none'}}
+        onPress={() => {}}
+        testID="row"
+      />,
+    );
+    expect(screen.UNSAFE_queryAllByType(require('react-native').Switch)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(require('react-native').ActivityIndicator)).toHaveLength(0);
+  });
+
+  it('접근성 잠김은 눌림을 막지 않는다 — 막는 것은 쓰기를 쥔 훅이다(옛 줄과 같은 약속)', () => {
+    const onPress = jest.fn();
+    mount(
+      <SwitchRow title="작업 끝남" checked a11yDisabled control={{kind: 'none'}} onPress={onPress} testID="row" />,
+    );
+    fireEvent.press(screen.getByTestId('row'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('SettingsNote', () => {
+  it('실패는 위험색이고 나타나는 순간 읽힌다(라이브 영역), 안내는 아니다', () => {
+    mount(
+      <>
+        <SettingsNote tone="danger" testID="bad">
+          저장하지 못했습니다.
+        </SettingsNote>
+        <SettingsNote testID="hint">팀 설정이 꺼져 있습니다.</SettingsNote>
+      </>,
+    );
+    expect(screen.getByTestId('bad').props.accessibilityLiveRegion).toBe('polite');
+    expect(StyleSheet.flatten(screen.getByTestId('bad').props.style).color).toBe(
+      paletteFor('light').dangerText,
+    );
+    expect(screen.getByTestId('hint').props.accessibilityLiveRegion).toBeUndefined();
+    expect(StyleSheet.flatten(screen.getByTestId('hint').props.style).color).toBe(
+      paletteFor('light').textMuted,
+    );
+  });
+});
