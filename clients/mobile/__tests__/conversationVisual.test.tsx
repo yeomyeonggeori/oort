@@ -3,7 +3,7 @@ import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
@@ -11,7 +11,7 @@ import React from 'react';
 import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
 import {CONV} from '../src/features/conversation/convDesign';
 import {ROW_FACE} from '../src/features/conversation/rowFace';
-import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
+import {MessageActionSheet, timeLabel} from '../src/features/conversation/MessageActionSheet';
 import {MessageBody} from '../src/features/conversation/MessageBody';
 import {
   DayDivider,
@@ -268,12 +268,11 @@ describe('M-3 — 같은 동사에 같은 계약', () => {
     fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
     fireEvent(screen.getByTestId('message-press'), 'longPress');
     fireEvent.press(screen.getByTestId('sheet-copy'));
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(screen.getByTestId('message-copy-receipt').props.children).toBe(
-      '복사됨',
+    // 복사는 시트가 미끄러져 내린 뒤에 불린다(#4318).
+    await waitFor(() =>
+      expect(screen.getByTestId('message-copy-receipt').props.children).toBe(
+        '복사됨',
+      ),
     );
   });
 
@@ -882,32 +881,65 @@ describe('#1092 M-1 — 하네스가 그 경로를 실제로 세운다', () => {
   });
 });
 
-describe('#1083 — 아직 서버 시계가 없는 행은 시각을 지어내지 않는다', () => {
-  it('보내는 중인 메아리는 시각 대신 「전송 중」을 든다', () => {
-    // `Author` 가 시각을 들고 있을 때 낙관적 메아리도 **기기 시계**를 그렸다.
-    // 그건 이 행의 머리말이 스스로 적은 규율("no seq and no clock")과 어긋나고,
-    // 서버가 찍을 시각과 다를 수 있다. 시각이 행으로 옮겨가면서 이 행에는
-    // 붙지 않게 됐고, 그 자리는 이미 「전송 중」이 갖고 있다.
+describe('#1083 → #4455 — 보내는 중인 메아리 머리 행은 기기 시계의 시각을 그린다', () => {
+  // #1083 은 「서버 시계가 없는 행은 시각을 지어내지 않는다」였다. #4455 가 그것을 **메아리 머리
+  // 행에 한해** 뒤집었다(planner 결정): 이슈가 문제 삼은 것이 「보낼 때 잠깐 생겼다 사라지는 글자」인데,
+  // 서버 사본이 올 때 시각 글자가 새로 생기는 것도 같은 종류의 깜빡임이다. 같은 분이면 교체 때 글자
+  // 변화 0 이고, 분 경계·기기 시계 오차는 서버 시각으로 한 번 바뀐다(PR 본문의 위험). 연속 행은 그대로다.
+  const HIDDEN = {includeHiddenElements: true} as const;
+  const pending = (over: Record<string, unknown> = {}) =>
+    ({
+      clientMsgId: 'c1',
+      channelId: 'ch',
+      authorMemberId: OTHER,
+      body: '보내는 중입니다',
+      createdAtMs: BASE_MS,
+      state: 'sending',
+      ...over,
+    }) as never;
+
+  it('머리 행 메아리는 보낸 시각(기기 시계)을 시각 칸에 그리고 「전송 중」 글자는 그리지 않는다', () => {
+    // 예전에는 그 자리를 「전송 중」 줄이 갖고 있었다. 정상 전송에는 그 줄이 잠깐 서고 사라지며
+    // 행이 14.7pt 줄었으므로 #4455 가 걷었다.
     const view = render(
-      <PendingRow
-        pending={
-          {
-            clientMsgId: 'c1',
-            channelId: 'ch',
-            authorMemberId: OTHER,
-            body: '보내는 중입니다',
-            createdAtMs: BASE_MS,
-            state: 'sending',
-          } as never
-        }
+      <PendingRow pending={pending()} startsGroup directory={DIRECTORY} />,
+    );
+    expect(view.getByText('보내는 중입니다')).toBeTruthy();
+    expect(view.queryByTestId('pending-sending')).toBeNull();
+    expect(view.queryByText('전송 중')).toBeNull();
+    const time = view.getByTestId('row-time', HIDDEN);
+    expect(view.getAllByTestId('row-time', HIDDEN)).toHaveLength(1);
+    expect(time.props.children).toBe(timeLabel(BASE_MS));
+  });
+
+  it('서버 사본의 시각 칸과 같은 모양이다 (같은 분이면 글자도 같다)', () => {
+    const echo = render(
+      <PendingRow pending={pending()} startsGroup directory={DIRECTORY} />,
+    );
+    const mine = echo.getByTestId('row-time', HIDDEN);
+    const mineText = mine.props.children;
+    const mineStyle = flatten(mine.props.style);
+    echo.unmount();
+    const copy = render(
+      <MessageRow
+        message={message({body: '보내는 중입니다', createdAtMs: BASE_MS})}
         startsGroup
         directory={DIRECTORY}
+        chips={[]}
+        nowMs={BASE_MS}
       />,
     );
-    expect(view.getByTestId('pending-sending')).toBeTruthy();
-    expect(
-      view.queryByTestId('row-time', {includeHiddenElements: true}),
-    ).toBeNull();
+    const theirs = copy.getByTestId('row-time', HIDDEN);
+    expect(theirs.props.children).toBe(mineText);
+    expect(flatten(theirs.props.style)).toEqual(mineStyle);
+  });
+
+  it('연속 행 메아리는 시각을 그리지 않는다 (서버 사본의 연속 행과 같다)', () => {
+    const view = render(
+      <PendingRow pending={pending()} startsGroup={false} directory={DIRECTORY} />,
+    );
+    expect(view.queryAllByTestId('row-time', HIDDEN)).toHaveLength(0);
+    expect(view.queryAllByText(/^\d\d:\d\d$/, HIDDEN)).toHaveLength(0);
   });
 });
 

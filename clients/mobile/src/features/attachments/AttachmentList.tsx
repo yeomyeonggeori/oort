@@ -30,7 +30,12 @@ import { usePalette, useStyles } from '../../design/theme';
 import { CONV_ICONS, CONV_ICON_SIZE } from '../../design/icons';
 import { CONV } from '../conversation/convDesign';
 import { useSession } from '../../session/useSession';
-import { useAttachmentPreview } from './content';
+import {
+  measuredAttachmentSize,
+  rememberAttachmentSize,
+  useAttachmentPreview,
+  type MeasuredSize,
+} from './content';
 import { AttachmentViewer } from './AttachmentViewer';
 import { useShareAttachment, type DownloadState } from './useShareAttachment';
 
@@ -47,7 +52,9 @@ import { useShareAttachment, type DownloadState } from './useShareAttachment';
 // 이름은 `attachmentDisplayName` 만 거친다: 무작위 토큰 같은 이름은 「이미지」
 // 「PDF 문서」 「파일」로 갈음한다. 웹의 같은 이슈(#3820)와 같은 규칙이다.
 //
-// 앞 판의 16:9 고정 프레임은 **받는 동안의 자리**로만 남는다(도착하면 그림의 비율).
+// 앞 판의 16:9 고정 프레임은 **받는 동안의 자리**로만 남는다(도착하면 그림의 비율). 한 번 잰 그림은 새 마운트가 첫
+// 프레임부터 그 비율로 선다 — 보낸 사진의 메아리가 서버 사본으로 바뀌는 순간 행이 줄었다 자라지 않게(`content.ts` 의
+// 「잰 크기」, #4455).
 // =============================================================================
 
 const PREVIEW_ASPECT_RATIO = 16 / 9;
@@ -110,19 +117,37 @@ function ImageTile({
     attachment,
     true,
   );
-  const [natural, setNatural] = useState<{
-    width: number;
-    height: number;
-  } | null>(null);
+  // 비율은 **첫 프레임부터** 알아야 한다(#4455 design-review r2 H2). 이 그림을 이미 잰 마운트가 있으면(보낸 사진의 메아리가
+  // 서버 사본으로 바뀔 때, 화면 밖에서 돌아온 행, 다시 들어온 방) 그 크기로 곧바로 서고, 못 쟀을 때만 16:9 자리표시로 선다.
+  // 효과에서 읽으면 한 프레임 늦어서 새 마운트가 16:9 로 한 번 선다 — 그 한 프레임이 곧 행이 53~163pt 줄었다 자라는 이음매다.
+  const [natural, setNatural] = useState<MeasuredSize | null>(() =>
+    measuredAttachmentSize(attachment.id),
+  );
   const uri = preview.status === 'ready' ? preview.uri : null;
   React.useEffect(() => {
-    if (uri === null || layout !== 'single') return;
+    if (uri === null || layout !== 'single') return undefined;
+    const known = measuredAttachmentSize(attachment.id);
+    if (known !== null) {
+      // 잰 값이 있으면 다시 재지 않는다 — 같은 그림의 크기는 바뀌지 않는다. 마운트 뒤에 다른 타일이 먼저 쟀을 수도 있어서
+      // 상태는 맞춰 둔다(같은 객체면 갱신이 곧 끝난다).
+      setNatural(known);
+      return undefined;
+    }
+    let live = true;
     Image.getSize(
       uri,
-      (width, height) => setNatural({ width, height }),
-      () => setNatural(null),
+      (width, height) => {
+        const size = rememberAttachmentSize(attachment.id, width, height);
+        if (live) setNatural(size);
+      },
+      () => {
+        if (live) setNatural(null);
+      },
     );
-  }, [uri, layout]);
+    return () => {
+      live = false;
+    };
+  }, [uri, layout, attachment.id]);
 
   const tile =
     layout === 'grid-3'
@@ -395,7 +420,9 @@ const buildStyles = (color: Palette) =>
     pressed: { backgroundColor: color.surfacePressed },
     imageGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
     imageItem: { borderRadius: radius.md },
-    // 테두리 없음: 그림이 곧 내용이다(Buzz). 받는 동안만 중립 면이 자리를 지킨다.
+    // 테두리 없음: 그림이 곧 내용이다(Buzz). 중립 면은 그림이 서기 전의 자리를 지킨다 — 받는 동안, 그리고 **새로 마운트된 이미지 뷰의 첫
+    // 프레임**(네이티브 첫 페인트는 한 프레임 늦다, 8~23ms). 보낸 사진이 서버 사본으로 바뀔 때 눈에 보이는 프레임에 이 면이 드러나지 않게
+    // 서버 사본을 먼저 마운트해 둔다(`sendArrival.ts` 「사진은 서버 사본을 먼저 마운트해 두고」, #4455).
     previewFrame: {
       alignItems: 'center',
       justifyContent: 'center',

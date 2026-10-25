@@ -10,7 +10,7 @@ import {
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useContext, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -30,6 +30,19 @@ import {DockFollowContext} from './dockFollow';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
+import {
+  ARRIVAL_SURFACE_CHANNEL,
+  arrivalsInFlight,
+  ECHO_LINGER_MS,
+  holdSettledArrivals,
+  isStandbyItem,
+  photoEchoesOf,
+  sameEchoes,
+  settledEchoes,
+  subscribeArrivals,
+  swapLingeringEchoes,
+  type EchoItem,
+} from './sendArrival';
 import {
   countNewerThan,
   countUnreadJump,
@@ -421,6 +434,8 @@ function TimelineCell({
 const NO_REACTIONS: ReactionMap = {};
 /** 같은 이유의 상수 (이슈 #1112). */
 const NO_PINS: PinMap = {};
+/** 남는 메아리가 없는 상태 — 매번 새 빈 배열이면 효과가 매 렌더 다시 걸린다. */
+const NO_ECHOES: readonly EchoItem[] = [];
 
 /** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
 export interface PillState {
@@ -791,6 +806,7 @@ function TimelineInner({
   selfSendToken,
   markReplies = true,
   showRollup = true,
+  arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
   anchorSeq,
   anchorRef,
   jumpTarget,
@@ -909,6 +925,14 @@ function TimelineInner({
    * `rollup` 하나였기 때문이다. 여기서 끊는 것은 그 조건이다.
    */
   showRollup?: boolean;
+  /**
+   * 이 목록이 메아리(`PendingRow`)를 그리는 **표면**의 이름 (#4455 design-review r2 M4). 채널 목록은 안 줘도 된다(기본 `'channel'`).
+   * 스레드 패널은 루트마다 `threadArrivalSurface(root.id)` 를 준다.
+   *
+   * 보낸 메시지의 등장 보류(`sendArrival.ts`)는 모듈 전역 장부에 **메아리를 그린 표면**을 적고, 목록은 자기 표면의 항목만 읽는다.
+   * 이름이 없으면 채널 목록 아래 깔린 채 서 있는 목록이 스레드 답글의 메아리를 확정 뒤 약 360ms 동안 한 번 더 그린다.
+   */
+  arrivalSurface?: string;
   /**
    * Measurement seam (`measure/ScrollMeasure.tsx`), inert in the app.
    *
@@ -1095,19 +1119,53 @@ function TimelineInner({
     [metricsRef],
   );
 
-  const stream = useMemo(
+  const built = useMemo(
     () =>
-      withTurnPlaceholders(
-        buildTimelineItems(messages, {
-          lastReadSeq,
-          unreadCount,
-          recoveryMarkers,
-          pending,
-        }),
-        working,
-      ),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, working],
+      buildTimelineItems(messages, {
+        lastReadSeq,
+        unreadCount,
+        recoveryMarkers,
+        pending,
+      }),
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending],
   );
+  // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
+  // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
+  // 오름이 끊기지 않는다. 바꿀 것이 없으면 `built` 그대로다. 자세한 까닭은 `sendArrival.ts`.
+  const arrivals = useSyncExternalStore(subscribeArrivals, arrivalsInFlight, arrivalsInFlight);
+  const afterHold = useMemo(
+    () => holdSettledArrivals(built, arrivals, arrivalSurface),
+    [built, arrivals, arrivalSurface],
+  );
+  // 사진 메아리가 서버 사본에 자리를 내줄 때 타일이 한 프레임 빈 면으로 번쩍이지 않게 한다(#4455 design-review r3 H3). 서버 사본은
+  // 새 마운트라 사진의 `<Image>` 도 새로 서고, 새 네이티브 이미지 뷰는 첫 프레임에 안 그려진다(8~23ms). 그래서 메아리를 확정본의
+  // 자리에 그대로 `ECHO_LINGER_MS` 더 남기고 서버 사본은 **스트림 맨 끝에 눈에 안 보이는 채 미리 마운트**한다(`sendArrival.ts` 「사진은
+  // 서버 사본을 먼저 마운트해 두고」). 창이 끝나는 한 커밋에서 메아리가 걷히며 서버 사본이 제 자리로 드러난다.
+  //
+  // **렌더 중 파생 상태**다: 서 있던 사진 메아리가 사라졌고 그 확정본이 이미 목록에 있다는 것을 **같은 렌더에서** 알아야 서버 사본이
+  // 마운트되는 그 커밋에 메아리가 함께 남는다(효과로 정하면 한 프레임 늦는다). 비교는 지난 렌더의 목록과 하므로 조건이 참일 때만 상태를
+  // 바꾸고(React 가 이 렌더를 버리고 곧바로 다시 그린다) 무한 루프가 없다.
+  const photoEchoes = useMemo(() => photoEchoesOf(afterHold), [afterHold]);
+  const [seenEchoes, setSeenEchoes] = useState<readonly EchoItem[]>(photoEchoes);
+  const [lingering, setLingering] = useState<readonly EchoItem[]>(NO_ECHOES);
+  if (!sameEchoes(seenEchoes, photoEchoes)) {
+    setSeenEchoes(photoEchoes);
+    const departed = seenEchoes.filter(echo => !photoEchoes.some(now => now.key === echo.key));
+    const settled = settledEchoes(departed, afterHold);
+    if (settled.length > 0) setLingering(current => [...current, ...settled]);
+  }
+  useEffect(() => {
+    if (lingering.length === 0) return undefined;
+    const timer = setTimeout(() => setLingering(NO_ECHOES), ECHO_LINGER_MS);
+    return () => clearTimeout(timer);
+  }, [lingering]);
+  const stream = useMemo(() => {
+    const split = swapLingeringEchoes(afterHold, lingering);
+    const placed = withTurnPlaceholders(split.items, working);
+    // 대기 서버 사본은 **맨 끝**(자리표시 뒤)이다 — 기존 행의 인덱스가 하나도 안 바뀌어서 `VirtualizedList` 가 꼬리 행을 재마운트하지 않는다
+    // (design-review r4 H4, `sendArrival.ts` 「왜 맨 끝인가」).
+    return split.standby.length === 0 ? placed : [...placed, ...split.standby];
+  }, [afterHold, lingering, working]);
 
   // One pass over the array this list is already rendering, so that a row can
   // answer two questions it cannot answer alone: "what does this reply answer"
@@ -2561,6 +2619,7 @@ function TimelineInner({
                 : 0
             }
             onResend={onResendPending}
+            arrivalSurface={arrivalSurface}
           />
         );
       }
@@ -2607,6 +2666,8 @@ function TimelineInner({
           // 필이 착지한 행에 초점을 줄 때만 읽는다(R1 M-3). 필이 없는 표면에서는
           // 모을 이유가 없다.
           registerRowNode={jumpPills ? registerRowNode : undefined}
+          // 사진 메아리가 서버 사본에 자리를 내줄 때 서버 사본을 눈에 안 보이는 채 미리 마운트한다(#4455 r3 H3). 아닌 행은 `undefined`.
+          standby={isStandbyItem(item) ? true : undefined}
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {
@@ -2650,6 +2711,7 @@ function TimelineInner({
       threads,
       markReplies,
       showRollup,
+      arrivalSurface,
       quoteLookup,
       // 승인 표가 바뀌면 `renderItem` 의 동일성도 바뀌어야 한다 — 안 그러면
       // 결정한 뒤에도 목록이 옛 표를 든 클로저를 계속 쓴다. 붙어 있는 행이
