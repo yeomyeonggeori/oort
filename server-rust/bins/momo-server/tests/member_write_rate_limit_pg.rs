@@ -14,7 +14,7 @@
 //! | `a_human_is_refused_after_the_send_budget_and_nothing_is_stored` | N sends pass, the N+1st is 429 + `Retry-After` + the standard envelope, the refused message is not in the table, reads are untouched | `route_layer(member_write(MessageSend))` removed from `POST …/messages`; the `Retry-After` header dropped |
 //! | `a_refusal_is_answered_before_the_body_is_read` | the gate runs ahead of the JSON extractor: a refused request with a malformed body is a 429, not a 4xx parse error | the check moved into the handler (after the extractors) |
 //! | `an_agent_has_its_own_send_budget` | the limit follows `Principal::kind` on the real route (a real `agent_bearer`) | the kind branch removed |
-//! | `a_burst_leaves_one_audit_row_of_the_documented_shape` | one `rate_limit.exceeded` row per burst with exactly the documented detail, attributed to the member and the credential, inside the member's workspace | the audit write removed; `should_log` ignored (a row per refusal); the detail gains a field |
+//! | `a_burst_leaves_one_audit_row_of_the_documented_shape` | one `rate_limit.exceeded` row per burst with exactly the documented detail, attributed to the member and the credential, inside the member's workspace | the audit write removed; the burst marker **and** the audit slot both ignored (a row per refusal; the marker alone is seen by `member_write_rate_limit_audit_retry.rs`); the detail gains a field |
 //! | `a_flood_of_parallel_refusals_writes_one_audit_row` | forty refusals at the same instant leave one row, not forty | the burst marker **and** the audit slot both ignored (either one alone still leaves one row; the marker's own job — one log line and one trip to the database per burst — is pinned by `member_write_rate_limit_audit_retry.rs`) |
 //! | `a_client_that_hangs_up_while_its_refusal_is_recorded_still_leaves_exactly_one_row` | the audit write is not part of the request: a client that hangs up while the INSERT waits (here: behind a table lock) neither cancels the row nor, by being dropped, leaves a slot that lets a second row in | the write run inline in the request future again (`audit_denial_detached` replaced by `audit_denial_once`) |
 //! | `budgets_are_per_member_and_per_surface` | spending one member's / one surface's budget refuses nobody else (the other surfaces have the same small limit, so a shared bucket cannot hide) | the key loses the member id or the surface prefix |
@@ -801,7 +801,7 @@ async fn a_flood_of_parallel_refusals_writes_one_audit_row() {
     assert_eq!(
         rig.audit_rows(fx.workspace, fx.dohyun.id).await.len(),
         1,
-        "the burst's marker belongs to one request, so forty parallel refusals are one database write"
+        "forty parallel refusals leave one row: the burst marker and the audit slot each hold the rest back"
     );
 }
 

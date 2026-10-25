@@ -1481,6 +1481,51 @@ mod tests {
         );
     }
 
+    /// A write that panics gives the slot and the marker back while its task unwinds, and is
+    /// reported as not written (#4234 review r2, N-2): the claim in `audit_denial_detached`'s
+    /// docs, which no other test reaches.
+    #[tokio::test]
+    async fn a_panicking_audit_write_gives_the_slot_and_the_marker_back() {
+        let state = rate_limit_state();
+        let window = Duration::from_secs(60);
+        let key = "write:send:m";
+        assert!(state.member_writes.check(key, 1, window).allowed);
+        let reservation = state
+            .member_writes
+            .check(key, 1, window)
+            .log_reservation
+            .expect("first denial");
+
+        let written = audit_denial_detached(
+            state.clone(),
+            key.to_string(),
+            reservation,
+            window,
+            || async {
+                if true {
+                    panic!("the write blew up");
+                }
+                Ok(())
+            },
+        )
+        .await;
+        assert!(!written, "a panicked task is reported as not written");
+
+        let retry = state.member_writes.check(key, 1, window);
+        assert!(retry.should_log, "the marker came back after the panic");
+        assert!(
+            audit_denial_detached(
+                state.clone(),
+                key.to_string(),
+                retry.log_reservation.expect("a marker"),
+                window,
+                || async { Ok(()) },
+            )
+            .await,
+            "the slot came back after the panic, so the retry wrote"
+        );
+    }
+
     /// A request that is *not* dropped gets the result back, and a failed write still hands the
     /// slot and the marker back through the detached task.
     #[tokio::test]
