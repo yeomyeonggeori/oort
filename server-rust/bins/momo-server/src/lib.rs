@@ -78,6 +78,10 @@ use crate::rate_limit::SlidingWindowRateLimiter;
 pub struct RateLimitState {
     pub config: RateLimitConfig,
     pub limiter: SlidingWindowRateLimiter,
+    /// The per-member write budget's own counters (#4234, [`rate_limit::member_write`]).
+    /// Separate from `limiter` because that map is shared by axes with other windows and
+    /// its sweep forgets whatever is older than the window of the call that triggers it.
+    pub member_writes: SlidingWindowRateLimiter,
 }
 
 /// Agent Port's own bounded process-local limiter and trusted-origin config.
@@ -538,6 +542,7 @@ impl AppState {
         self.rate_limit = Arc::new(RateLimitState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
+            member_writes: SlidingWindowRateLimiter::new(),
         });
         self
     }
@@ -651,10 +656,21 @@ impl std::fmt::Debug for AppState {
 ///
 /// Everything else this batch mounts sits behind [`auth::require_principal`].
 pub fn build_app(state: AppState) -> Router {
+    // #4234 — the per-member write budget (ADR-0208 D10 증보). One gate per write surface, attached
+    // with `route_layer` to the verb that does the write *before* any other verb is chained on:
+    // a layer covers only the handlers its method router already holds, which is what keeps
+    // `DELETE …/scheduled-messages/{id}` (cancelling, the safety action) and `PATCH …/messages/{id}`
+    // (streaming slices) outside the budget. The gate sits inside `require_principal`, which
+    // wraps the whole `protected` router below.
+    let member_write = |surface: rate_limit::MemberWrite| {
+        axum::middleware::from_fn_with_state((state.clone(), surface), rate_limit::member_write)
+    };
     let protected = Router::new()
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
-            post(routes::messages::send).get(routes::messages::history),
+            post(routes::messages::send)
+                .route_layer(member_write(rate_limit::MemberWrite::MessageSend))
+                .get(routes::messages::history),
         )
         // B4.1 — one level of threads, the way the client already asks for them:
         // replies are read here and written through the send above with a
@@ -722,7 +738,8 @@ pub fn build_app(state: AppState) -> Router {
         // URL it can read a file from.
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/uploads",
-            post(routes::attachments::create_upload),
+            post(routes::attachments::create_upload)
+                .route_layer(member_write(rate_limit::MemberWrite::UploadStart)),
         )
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/complete",
@@ -1086,7 +1103,8 @@ pub fn build_app(state: AppState) -> Router {
         // `sendAtMs`. Human-only, owner scoped (an agent bearer is not on the allow-list).
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/scheduled-messages",
-            post(routes::scheduled_messages::create),
+            post(routes::scheduled_messages::create)
+                .route_layer(member_write(rate_limit::MemberWrite::ScheduledWrite)),
         )
         .route(
             "/v1/workspaces/{ws}/scheduled-messages",
@@ -1094,11 +1112,15 @@ pub fn build_app(state: AppState) -> Router {
         )
         .route(
             "/v1/workspaces/{ws}/scheduled-messages/{id}",
-            patch(routes::scheduled_messages::update).delete(routes::scheduled_messages::delete),
+            patch(routes::scheduled_messages::update)
+                .route_layer(member_write(rate_limit::MemberWrite::ScheduledWrite))
+                .delete(routes::scheduled_messages::delete),
         )
+        // `send-now` is the canonical send, so it spends the send budget — not the schedule one.
         .route(
             "/v1/workspaces/{ws}/scheduled-messages/{id}/send-now",
-            post(routes::scheduled_messages::send_now),
+            post(routes::scheduled_messages::send_now)
+                .route_layer(member_write(rate_limit::MemberWrite::MessageSend)),
         )
         // ADR-0186 D1 — the action catalog an agent proposes from and a
         // person's palette merges in. Read-only: proposing is the Agent Port's
