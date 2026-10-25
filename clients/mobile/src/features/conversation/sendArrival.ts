@@ -9,7 +9,17 @@
 //
 // 상한이 있는 이유: 앱이 사는 동안 쌓이면 새는 것이다. 메아리는 서버 사본이 오면 사라지므로 오래된
 // 것부터 잊어도 다시 마운트될 일이 없다.
+//
+// ## 자격 창 (#4455, Buzz `isRecentLocalMessageSendAnimation`)
+//
+// 「한 번만」은 두 번째 마운트를 막는다. 첫 마운트가 **너무 늦은** 경우는 다른 물음이다 — 복원된
+// 전송이나 방을 늦게 열어 처음 그려진 내 메시지가 방금 보낸 것처럼 올라오면 안 된다. 그래서 보낸
+// 지 `SEND_ARRIVE_WINDOW_MS` 안에 그려진 메아리만 움직인다. 기준은 마운트 시각이 아니라 **보낸
+// 시각**(`PendingMessage.createdAtMs`)이다 — 마운트 시각을 기준으로 삼으면 늦게 그려진 행도 그려진
+// 순간부터 세어 항상 자격이 있다.
 // =============================================================================
+
+import {SEND_ARRIVE_WINDOW_MS} from '../../design/motion';
 
 const MAX_REMEMBERED = 256;
 
@@ -28,6 +38,17 @@ export function markArrived(clientMsgId: string): void {
     const oldest = arrived.values().next().value;
     if (oldest !== undefined) arrived.delete(oldest);
   }
+}
+
+/**
+ * 보낸 지 자격 창 안인가. 보낸 시각을 알 수 없으면(유한한 수가 아니면) **아니오** — 모르는 행을
+ * 방금 보낸 것으로 읽어 움직이느니 가만히 서는 쪽이 안전하다. `nowMs` 는 시험이 시계를 고정하려고 받는다.
+ */
+export function withinArrivalWindow(
+  createdAtMs: number,
+  nowMs: number = Date.now(),
+): boolean {
+  return Number.isFinite(createdAtMs) && nowMs - createdAtMs <= SEND_ARRIVE_WINDOW_MS;
 }
 
 /** 시험 전용. */

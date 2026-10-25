@@ -883,11 +883,14 @@ describe('#1092 M-1 — 하네스가 그 경로를 실제로 세운다', () => {
 });
 
 describe('#1083 — 아직 서버 시계가 없는 행은 시각을 지어내지 않는다', () => {
-  it('보내는 중인 메아리는 시각 대신 「전송 중」을 든다', () => {
+  it('보내는 중인 메아리는 시각도 「전송 중」 글자도 그리지 않는다 (#4455)', () => {
     // `Author` 가 시각을 들고 있을 때 낙관적 메아리도 **기기 시계**를 그렸다.
     // 그건 이 행의 머리말이 스스로 적은 규율("no seq and no clock")과 어긋나고,
     // 서버가 찍을 시각과 다를 수 있다. 시각이 행으로 옮겨가면서 이 행에는
-    // 붙지 않게 됐고, 그 자리는 이미 「전송 중」이 갖고 있다.
+    // 붙지 않게 됐다.
+    //
+    // 예전에는 그 자리를 「전송 중」 줄이 갖고 있었다. 정상 전송에는 그 줄이 잠깐 서고 사라지며
+    // 행이 14.7pt 줄었으므로 #4455 가 걷었다 — 시각은 여전히 지어내지 않는다.
     const view = render(
       <PendingRow
         pending={
@@ -904,7 +907,9 @@ describe('#1083 — 아직 서버 시계가 없는 행은 시각을 지어내지
         directory={DIRECTORY}
       />,
     );
-    expect(view.getByTestId('pending-sending')).toBeTruthy();
+    expect(view.getByText('보내는 중입니다')).toBeTruthy();
+    expect(view.queryByTestId('pending-sending')).toBeNull();
+    expect(view.queryByText('전송 중')).toBeNull();
     expect(
       view.queryByTestId('row-time', {includeHiddenElements: true}),
     ).toBeNull();
