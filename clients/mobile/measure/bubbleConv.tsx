@@ -1,11 +1,13 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useEffect, useState} from 'react';
-import {ScrollView, View} from 'react-native';
+import {ScrollView, Settings, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
+import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {MessageRow, PendingRow, rowPressedBackground} from '../src/features/conversation/MessageRow';
 import {ROW_FACE} from '../src/features/conversation/rowFace';
+import {setServerBase} from '../src/storage/serverBase';
 
 // =============================================================================
 // 말풍선 대화 + 눌림·착지 강조 면 캡처 표면 (#4300). 실제 `MessageRow` 를 세운다.
@@ -23,6 +25,12 @@ import {ROW_FACE} from '../src/features/conversation/rowFace';
 //   row      줄 보기(`layout:'row'`, 예전 평면 행) — 같은 대화를 `FixedScheme bubble` 로 못 박아 찍는다(#4383).
 //   arrive   보낸 글이 올라오는 등장(#4383) — 실행 1.5초 뒤 낙관적 메아리 하나가 마운트되고 180ms 동안
 //            올라온다. 녹화(`simctl io recordVideo`)로 찍는다. `arrive-row` 는 줄 보기에서 같은 장면.
+//   photo    글 없이 사진만 보낸 메시지(#4294): 사진 1장 · 사진 3장.
+//            받는 쪽 행이 사진 아래에 「※ 내용 없는 메시지」를 같이 세우는가(수리 전) 세우지 않는가(수리 후).
+//            첨부 바이트는 `measure/photo-stub.mjs` 가 답한다 — 서버 주소는 `-momoPhotoStub 127.0.0.1:<포트>`
+//            (없으면 스텁의 기본 포트 18993). 포트를 인자로 받는 것은 같은 Mac 의 다른 캡처와 포트가 겹치지
+//            않게 하려는 것이다.
+//   photo-sheet  같은 대화 위에 「사진만 보낸 메시지」(둘째 행)의 액션 시트를 연 상태 — 시트 미리보기 한 줄.
 //
 // 이름·문구는 가상이다(달무리 스튜디오).
 // =============================================================================
@@ -79,6 +87,37 @@ const ENTRIES: Entry[] = [
   },
 ];
 
+// ---- 사진만 보낸 메시지 (#4294) ---------------------------------------------------------------
+//
+// 글이 비어 있고(`body: ''`) 첨부만 있다. 사진 바이트는 `photo-stub.mjs` 가 대신 답한다(단색 PNG,
+// 사진 속 사람·글자 없음). 사진만 보낸 메시지는 **자기 머리(이름·시각)를 가진 별개의 메시지**로 세운다 —
+// 앞 메시지에 묶이면 사진 아래의 한 줄이 어느 메시지의 것인지 사진만 봐서는 가려지지 않는다.
+// 글도 첨부도 없는 행(대조: 예전 문장이 그대로 서야 한다)은 시험이 지키고, 이 표면에는 세우지 않는다.
+const PHOTO_STUB_DEFAULT = 'http://127.0.0.1:18993';
+
+function photoStubBase(): string {
+  const value = Settings.get('momoPhotoStub');
+  return typeof value === 'string' && value !== '' ? `http://${value}` : PHOTO_STUB_DEFAULT;
+}
+
+function attachment(id: string, name: string, mime = 'image/png') {
+  return {id, name, mime, sizeBytes: 48_000};
+}
+
+const PHOTO_ENTRIES: Entry[] = [
+  {m: msg(1, DOHYUN, '오픈 준비 사진 보내요'), head: true},
+  {m: msg(2, DOHYUN, '', {attachments: [attachment('photo-a', '입구.png')]} as never), head: true},
+  {m: msg(3, ME, '잘 나왔네요'), head: true},
+  {
+    m: msg(4, SEOYEON, '', {
+      attachments: [attachment('photo-b', '내부1.png'), attachment('photo-c', '내부2.png'), attachment('photo-a', '내부3.png')],
+    } as never),
+    head: true,
+  },
+];
+
+const SHEET_AVAILABILITY = {reply: true, quote: true, react: true, pin: true, edit: false, delete: false};
+
 function Press({children}: {children: React.ReactNode}) {
   const color = usePalette();
   return (
@@ -110,10 +149,23 @@ export function BubbleSurface({which}: {which: string}): React.JSX.Element {
   }, [which]);
   const pressIdx = which === 'press' ? [2] : which === 'press-pair' ? [2, 3] : [];
   const landIdx = which === 'landed' || which === 'fade' ? 2 : -1;
+  const photo = which === 'photo' || which === 'photo-sheet';
+  // 첫 렌더 전에 한 번: 사진 타일은 마운트 직후 내려받기를 시작한다. 주소는 MMKV 에 남으므로 내려갈 때 지운다.
+  useState(() => {
+    if (photo) setServerBase(photoStubBase());
+    return null;
+  });
+  useEffect(
+    () => () => {
+      if (photo) setServerBase(null);
+    },
+    [photo],
+  );
+  const entries = photo ? PHOTO_ENTRIES : which.startsWith('arrive') ? ENTRIES.slice(-3) : ENTRIES;
   return (
     <Screen>
       <ScrollView>
-        {(which.startsWith('arrive') ? ENTRIES.slice(-3) : ENTRIES).map((e, i) => {
+        {entries.map((e, i) => {
           const row = (
             <MessageRow
               key={e.m.id}
@@ -148,6 +200,22 @@ export function BubbleSurface({which}: {which: string}): React.JSX.Element {
           />
         ) : null}
       </ScrollView>
+      {which === 'photo-sheet' ? (
+        <MessageActionSheet
+          message={PHOTO_ENTRIES[1].m}
+          chips={[]}
+          availability={SHEET_AVAILABILITY}
+          authorLabel="이도현"
+          onClose={() => {}}
+          onToggleReaction={() => {}}
+          onReply={() => {}}
+          onQuote={() => {}}
+          onCopy={() => {}}
+          onPin={() => {}}
+          onEdit={() => {}}
+          onDelete={() => {}}
+        />
+      ) : null}
     </Screen>
   );
 }

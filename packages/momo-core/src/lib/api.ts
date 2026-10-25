@@ -69,6 +69,7 @@ import {
   type AgentToolCatalogEntry,
 } from "../features/agents/toolCatalog";
 import { normalizeWorkRunInput, type WorkRunDraft } from "../features/agents/workRunRequest";
+import { APPROVAL_AVATAR_PREVIEW_PATH } from "../features/approvals/avatarPreview";
 import { parseAliases } from "../features/routing/helperAliases";
 
 export type { AgentToolCatalogEntry };
@@ -464,10 +465,17 @@ export interface Message {
   /**
    * ADR-0151 — 이 메시지에 묶인 첨부. 완료된 것만, 만들어진 순서로.
    *
-   * **모든 투영에 실린다**: 전송 응답, 히스토리, 답글, 실시간 프레임까지
-   * (`message_dto` 주석: 실시간 프레임에서만 첨부를 배우는 클라는 새로고침 한
-   * 번에 파일 없는 메시지를 그린다). 그래서 `replyTo`와 달리 이 배열은 어느
-   * 경로로 들어온 행에도 있고, 비어 있다는 것은 첨부가 없다는 뜻이다.
+   * **편집이 내는 두 투영만 빼고 모든 투영에 실린다**: 전송 응답, 히스토리, 답글,
+   * `message.new` 프레임까지(`message_dto` 주석: 실시간 프레임에서만 첨부를 배우는
+   * 클라는 새로고침 한 번에 파일 없는 메시지를 그린다). 그래서 `replyTo`와 달리 이
+   * 배열은 그 경로들로 들어온 행에는 있고, 거기서 비어 있다는 것은 첨부가 없다는
+   * 뜻이다.
+   *
+   * **예외는 편집이다**(#4441): `PATCH` 응답과 `message.edited` 프레임은 첨부를 싣지
+   * 않는다(편집은 묶인 첨부를 바꾸지 못한다). 거기서 없다는 것은 「없음」이 아니라
+   * 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 첨부를 잇는다. 이 읽기는
+   * 서버에 살아 있는 메시지에서 첨부를 떼는 길이 없다는 사실에 서 있다 — 그런 길이
+   * 생기면 명시 신호가 필요하다(`keepHeldAttachments` 주석).
    *
    * 업로드 capability URL도 Drive file id도 여기 없다. 바이트로 가는 유일한 길은
    * 인가 프록시(`GET …/attachments/{id}/content`)다.
@@ -3203,6 +3211,21 @@ export async function fetchMemberAvatar(avatarUrl: string): Promise<Blob> {
   );
 }
 
+/**
+ * 승인 카드가 제안하는 사진의 바이트 (`GET …/approvals/{approval}/avatar-preview?v={sha256}`,
+ * ADR-0186 증보 v3 V3-2a · v4 V4-2, #4394). 베어러가 있어야 읽히므로 `<img src>` 에 그대로 실을 수
+ * 없다 — 호스트가 이 함수로 받아 실을 수 있는 스킴으로 바꾼다. 읽을 수 있는 사람은 서버가 정하고
+ * (`member.avatar.set` 은 사진 주인 본인뿐) 나머지는 모두 같은 404 다. 경로가 그 모양이 아니면
+ * 베어러를 싣지 않고 거절한다(임의 주소로 토큰이 새지 않게).
+ */
+export async function fetchApprovalAvatarPreview(previewPath: string): Promise<Blob> {
+  return fetchAvatarBlob(
+    previewPath,
+    APPROVAL_AVATAR_PREVIEW_PATH,
+    "not an approval avatar preview path"
+  );
+}
+
 // ---- 자기 표시 이름 (#1873 / BZ-4e) ----------------------------------------
 // PATCH /v1/workspaces/{ws}/members/me `{displayName}` and/or `{handle}`
 // 사람 본인만. 표시명 정규화는 join과 같고, 위반은 400 `displayName is required`.
@@ -5442,6 +5465,17 @@ export interface AgentRunProgress {
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+  /**
+   * 부른 사람이 없는 시스템 작업(환영 run, ADR-0181)인가. **서버가 보낸 값이 아니다.**
+   * 진행 읽기에는 환영 표지(`welcome_kind`)가 없고 ADR-0200 증보 3 E6은 새 필드를 만들지
+   * 않았다. 그래서 와이어 경계(`agentRunProgressFromWire`)가 「트리거 메시지도 사람이 쓴
+   * 작업 제목도 없다」로 가른다. 서버의 트리거는 넷이고(멘션·스레드 답글은 메시지 id,
+   * 작업은 필수 제목, 환영만 둘 다 없다) 그 밖의 모양은 만들지 않는다 — 사람이 부른 run이
+   * 둘 다 없이 오는 길은 없다(`RunTrigger::trigger_message_id`, `validated_work_input`의
+   * `required_string`, `trigger_summary`; 시험 「서버가 만드는 네 트리거의 와이어 모양」).
+   * 서버가 새 트리거를 더하면 이 판별을 서버의 명시 표지로 바꾼다(#4442).
+   */
+  system?: true;
 }
 
 const AGENT_RUN_PHASES = new Set<AgentRunPhase>([
@@ -5521,6 +5555,14 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
   const startedAtMs = optionalFiniteNumber(source, "startedAtMs");
   const finishedAtMs = optionalFiniteNumber(source, "finishedAtMs");
+  // 「부른 사람이 없다」: 메시지도, 사람이 쓴 작업 제목·멘션 발췌도 없다(`AgentRunProgress.system`).
+  // 비었는지는 **글자 그대로** 본다(`=== ""`). 서버가 이미 다듬어(Rust `trim()`) 보내고 빈 것은
+  // 싣지 않는다(`trigger_summary`) — 여기서 JS `trim()`으로 한 번 더 다듬으면 서버는 제목으로 센
+  // 글자(U+FEFF만 있는 제목)를 우리는 「제목 없음」으로 읽어, 사람이 부른 작업이 홈 카드에서
+  // 사라진다. 의심스러우면 숨기지 않는 쪽으로 틀린다(#4285 planner 결정 1).
+  const system =
+    (triggerMessageId === undefined || triggerMessageId === "") &&
+    (triggerSummary === undefined || triggerSummary === "");
   return {
     id: id.toLowerCase(),
     channelId: channelId.toLowerCase(),
@@ -5532,6 +5574,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ahead,
     createdAtMs,
     updatedAtMs,
+    ...(system ? { system: true as const } : {}),
     ...(triggerMessageId === undefined
       ? {}
       : { triggerMessageId: triggerMessageId.toLowerCase() }),

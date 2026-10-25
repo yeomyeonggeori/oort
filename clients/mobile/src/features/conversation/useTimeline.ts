@@ -32,6 +32,12 @@ import {
   RECOVERY_MARKER_TTL_MS,
 } from '@momo/core/features/timeline/divider';
 import {
+  judgeRecoveryMarker,
+  messageIdKey,
+  NO_RECOVERY,
+  type RecoveryMarkerVerdict,
+} from '@momo/core/features/timeline/recoveryMarker';
+import {
   addPending,
   applyTombstone,
   emptyTimeline,
@@ -231,9 +237,6 @@ export interface UseTimelineResult {
 
 export {RECOVERY_MARKER_TTL_MS};
 
-/** 메시지 id 를 집합의 열쇠로 접는다 — UUID 는 설계상 섞인 대소문자로 오간다(`uuidEq`). */
-const idKey = (id: string): string => id.toLowerCase();
-
 export function useTimeline(
   rail: ChannelRail | null,
   workspaceId: string,
@@ -276,32 +279,33 @@ export function useTimeline(
   // 복구 표지는 「복구가 **다른 사람(또는 에이전트)의 새 메시지**를 들여왔다」는 말이다(#4292). 그러니 「새것」은 seq 가 아니라 **id** 로,
   // 「남」은 작성자로 가린다 — seq 로 가리면 REST 응답이 먼저 들어와 seq 를 올려 둔 내 줄과, 더 작은 seq 로 뒤늦게 닿은 남의 줄을
   // 구별하지 못한다. 내가 방금 보낸 줄은 되쏘기·꼬리 읽기에도 실려 오지만(내 REST 응답보다 먼저 올 수도, 뒤에 올 수도 있다) 복구한 것이
-  // 아니다.
+  // 아니다. 판정은 코어의 것이고(#4328 — 웹·데스크탑과 같은 함수) 이 훅은 이미 든 줄 id 의 집합과 복구를 지켜보는 창만 쥔다.
   const knownIdsRef = useRef<Set<string>>(new Set());
   const authorRef = useRef(authorMemberId);
   authorRef.current = authorMemberId;
-  /** 지금 병합하려는 줄이 타임라인에 처음 들어오는 **남의** 줄인가. 병합 **전**에 물어야 한다(병합하면 id 가 든다). */
-  const isFreshFromOthers = useCallback(
-    (message: Message) =>
-      !knownIdsRef.current.has(idKey(message.id)) &&
-      !uuidEq(message.authorMemberId, authorRef.current),
-    [],
-  );
   /**
-   * 레일이 끊긴 구간을 되쏘는 동안(`subscribed` 직후 동기 flush ~ 그 뒤 마이크로태스크) 병합되는 「남이 새로 보낸 줄」의 수. null 이면 세지
-   * 않는다. 되쏜 줄도 실시간 줄과 같은 문(`applyBatch`)을 지나므로 그 문이 센다.
+   * 레일이 끊긴 구간을 되쏘는 동안(`subscribed` 직후 동기 flush ~ 그 뒤 마이크로태스크) 병합되는 「남이 새로 보낸 줄」에 대한 코어 판정.
+   * null 이면 세지 않는다. 되쏜 줄도 실시간 줄과 같은 문(`applyBatch`)을 지나므로 그 문이 이어 받는다.
    */
-  const replayWatchRef = useRef<{fresh: number} | null>(null);
+  const replayWatchRef = useRef<{verdict: RecoveryMarkerVerdict} | null>(null);
 
   const applyBatch = useCallback((batch: Message[]) => {
     if (batch.length === 0) return;
+    // 판정은 **병합 전에** 묻는다 — 아래 루프가 이 줄들의 id 를 든 줄로 등록하면 「새것」이 사라진다.
     const watch = replayWatchRef.current;
+    if (watch !== null) {
+      watch.verdict = judgeRecoveryMarker(
+        batch,
+        knownIdsRef.current,
+        authorRef.current,
+        watch.verdict,
+      );
+    }
     for (const message of batch) {
       if (newestSeqRef.current === null || message.seq > newestSeqRef.current) {
         newestSeqRef.current = message.seq;
       }
-      if (watch !== null && isFreshFromOthers(message)) watch.fresh += 1;
-      knownIdsRef.current.add(idKey(message.id));
+      knownIdsRef.current.add(messageIdKey(message.id));
     }
     // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
     // 넷(첫 화면·위로 더 읽기·재연결 백필·스레드 답글)이고, 그 넷이 전부 이 문을
@@ -314,7 +318,7 @@ export function useTimeline(
     // 할 일을 마쳤으므로 걷는다 — 상시로 남으면 지난 일을 계속 말하는 줄이 된다. 같은 배치로 표지가
     // 서는 순서는 `addMarker` 가 배치 **뒤**에 부르므로 이 줄이 방금 선 표지를 지우지 않는다.
     setRecoveryMarkers(markers => pruneRecoveryMarkers(markers, batch));
-  }, [isFreshFromOthers]);
+  }, []);
 
   // 새 메시지가 오지 않아도 표지는 오래 남지 않는다 — 일정 시간 뒤에 스스로 걷힌다.
   const markerTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
@@ -673,7 +677,7 @@ export function useTimeline(
       let after =
         from === undefined ? (newestSeqRef.current ?? 0) : (from ?? 0);
       let total = 0;
-      let fresh = 0;
+      let verdict = NO_RECOVERY;
       for (;;) {
         const page = await fetchMessages(workspaceId, channel, {
           after,
@@ -682,18 +686,23 @@ export function useTimeline(
         if (!stillCurrent()) break;
         if (page.messages.length === 0) break;
         total += page.messages.length;
-        // 이 읽기가 **새로** 들여온 남의 줄 — 병합 **전**에 센다. 읽는 사이 이미 들어온 줄(내 REST 응답, 레일)과 내 줄은 복구한 것이
-        // 아니다(#4292).
-        fresh += page.messages.filter(isFreshFromOthers).length;
+        // 이 읽기가 **새로** 들여온 남의 줄 — 병합 **전**에 코어가 판정한다. 읽는 사이 이미 들어온 줄(내 REST 응답, 레일)과 내 줄은
+        // 복구한 것이 아니다(#4292).
+        verdict = judgeRecoveryMarker(
+          page.messages,
+          knownIdsRef.current,
+          authorRef.current,
+          verdict,
+        );
         applyBatch(page.messages);
         const maxSeq = page.messages.reduce((m, x) => Math.max(m, x.seq), after);
         if (maxSeq <= after) break;
         after = maxSeq;
         if (page.messages.length < PAGE_LIMIT) break;
       }
-      return {fetched: total, fresh};
+      return {fetched: total, verdict};
     },
-    [workspaceId, applyBatch, isFreshFromOthers],
+    [workspaceId, applyBatch],
   );
 
   useEffect(() => {
@@ -750,14 +759,14 @@ export function useTimeline(
     let backfillOnHead: 'first' | 'resubscribe' | null = null;
     const healTail = (isFirst: boolean, from?: number | null) => {
       backfillAfter(channelId, () => !cancelled, from)
-        .then(({fetched, fresh}) => {
+        .then(({fetched, verdict}) => {
           if (cancelled || isFirst) return;
           setResume(r => ({...r, lastBackfillCount: fetched}));
           // 표지는 「끊겼던 구간이 있었고, 다른 사람(또는 에이전트)의 새 메시지로 그것을 메웠다」는 말이다. 꼬리를 읽었더니 빈손이거나
           // 온 것이 전부 이미 든 줄·내 줄이면 메운 것이 없으므로 할 말도 없다 — 그 줄을 세우면 메시지가 하나도 안 왔는데(또는 방금 내가
           // 보낸 줄 아래에) 행이 붙었다 12초 뒤 걷히며 목록이 그만큼 미끄러졌다 돌아온다. 소켓이 흔들리는 서버 쪽 사고는 모든 기기에
           // **한꺼번에** 닿으므로, 같은 DM 을 연 두 사람이 같은 시각에 대화 화면이 흔들리는 것을 본다(#4292).
-          if (fresh > 0) addMarker('backfill');
+          if (verdict.show) addMarker('backfill');
         })
         .catch(() => {
           /* the rail is live again; the next resubscribe heals it */
@@ -845,12 +854,12 @@ export function useTimeline(
           // 있었다」일 뿐 그 구간에 무엇이 있었다는 말이 아니다 — 비어 있던 구간(아무도 말하지 않았다)의 복구에도 참이다. 되쏜 것이
           // 전부 이미 든 줄(내 REST 응답이 먼저 왔다)이거나 내 줄뿐이어도 복구한 것이 없다. 그때 표지를 세우면 행이 하나 붙었다 걷힌다.
           // 되쏜 줄은 이 동기 flush 안에서 `applyBatch` 를 지나므로 그 문이 센다.
-          const watch = {fresh: 0};
+          const watch = {verdict: NO_RECOVERY};
           replayWatchRef.current = watch;
           queueMicrotask(() => {
             if (replayWatchRef.current === watch) replayWatchRef.current = null;
             if (cancelled) return;
-            if (watch.fresh > 0) addMarker('replay');
+            if (watch.verdict.show) addMarker('replay');
           });
         }
       },
@@ -941,7 +950,7 @@ export function useTimeline(
         limit: PAGE_LIMIT,
       });
       // 위로 읽은 쪽은 `applyBatch` 를 지나지 않는다 — 그 줄의 id 도 「이미 든 줄」이다(끊긴 사이 그 오래된 줄이 수정돼 되쏘기로 오면 새 줄이 아니다).
-      for (const message of page.messages) knownIdsRef.current.add(idKey(message.id));
+      for (const message of page.messages) knownIdsRef.current.add(messageIdKey(message.id));
       setState(s => reconcileMessages(s, page.messages));
       if (page.nextBefore === undefined) setReachedStart(true);
     } catch {

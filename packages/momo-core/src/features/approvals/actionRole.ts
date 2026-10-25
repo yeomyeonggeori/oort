@@ -52,6 +52,11 @@ function isKnownRole(role: string): boolean {
 const COMPOSITE_ROLE_NAMES: Readonly<Record<string, string>> = {
   agent_editor: "대상 에이전트의 소유자 또는 관리자",
   workspace_operator: "워크스페이스 운영자(관리자)",
+  // ADR-0186 증보 2026-10-25 v4 V4-3·V4-7 (#4385·#4394): 「그 행동이 바꾸는 사람 본인」.
+  // 관리자도 에이전트 소유자도 아니다 — 지금은 `member.avatar.set`만 쓴다. 권고 문구는
+  // 서버 ADR이 정했다. 이 낱말이 표에 없으면 카드가 「requesting_member만 승인할 수
+  // 있어요」라는 원문 토큰을 읽는다.
+  requesting_member: "사진 주인 본인",
 };
 
 function isCompositeRole(role: string): boolean {

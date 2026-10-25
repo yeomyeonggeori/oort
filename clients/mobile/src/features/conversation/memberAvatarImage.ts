@@ -1,3 +1,4 @@
+import {isApprovalAvatarPreviewPath} from '@momo/core/features/approvals/avatarPreview';
 import {memberAvatarContentPath} from '@momo/core/features/workspace/avatar';
 import {rotateAfterUnauthorized} from '@momo/core/lib/api';
 import {apiBase, coreSession} from '@momo/core/runtime/host';
@@ -213,9 +214,19 @@ async function download(path: string, destination: File): Promise<File> {
   }
 }
 
+/**
+ * 베어러를 실어도 되는 경로인가: 멤버 아바타 content 이거나, 승인 카드가 제안하는 사진의
+ * 미리보기(`avatar-preview?v={sha256}`, #4394)다. 두 모양 밖의 주소로는 토큰이 나가지 않는다.
+ * 미리보기 키에는 해시가 들어 있어 바이트가 바뀌면 새 파일이 되고, 로그아웃 때 비우기는
+ * 두 가지를 같은 디렉터리에서 함께 지운다.
+ */
+function isBearerAvatarPath(path: string): boolean {
+  return memberAvatarContentPath(path) !== null || isApprovalAvatarPreviewPath(path);
+}
+
 /** 같은 경로는 한 번만 받는다. 실패하면 `null`(이니셜이 선다). */
 export function loadMemberAvatar(path: string): Promise<string | null> {
-  if (memberAvatarContentPath(path) === null) return Promise.resolve(null);
+  if (!isBearerAvatarPath(path)) return Promise.resolve(null);
   const key = memberAvatarCacheKey(path);
   adoptExisting(); // 렌더 밖(첫 사용)에서 한 번
   const known = peekMemberAvatar(key);
