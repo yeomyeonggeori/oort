@@ -16407,11 +16407,14 @@ components:
       type: object
       additionalProperties: false
       minProperties: 1
+      description: A `null` resets that cell to the kind's default (ADR-0206 D13).
       properties:
         phone:
           type: boolean
+          nullable: true
         desktop:
           type: boolean
+          nullable: true
 
     NotificationSchedule:
       type: object
