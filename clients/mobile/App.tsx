@@ -8,6 +8,7 @@ import {OortLoader} from './src/design/brand/OortLoader';
 import {font, SAFE_GUTTER, space, type Palette} from './src/design/tokens';
 import {useRetainReduceMotion} from './src/lib/useReduceMotion';
 import {BrandAppearance, ThemeProvider, usePalette, useStyles, useTheme} from './src/design/theme';
+import {installForegroundNotificationHandler} from './src/push/foregroundPresentation';
 import {createQueryClient, installReactQueryBridges} from './src/query/queryClient';
 import ConnectScreen from './src/screens/ConnectScreen';
 import {RESTORE_UNREACHABLE_NOTICE} from './src/session/authGate';
@@ -65,6 +66,10 @@ function AppChrome(): React.JSX.Element {
   useRetainReduceMotion();
 
   useEffect(() => {
+    // 앱이 앞에 떠 있는 동안 온 푸시를 어떻게 보일지 (#4310). 세션과 무관하게 **시작 경로에서 먼저**
+    // 건다: 처리기가 없거나 늦으면 iOS 는 그 푸시를 배너도 목록도 없이 버린다. 이 앱에서
+    // `setNotificationHandler` 를 부르는 곳은 여기 하나뿐이다(`foregroundPresentation.ts` 머리말).
+    const stopPresenting = installForegroundNotificationHandler();
     const teardown = installReactQueryBridges();
     bootSpawnPort();
     let cancelled = false;
@@ -76,6 +81,7 @@ function AppChrome(): React.JSX.Element {
     return () => {
       cancelled = true;
       teardown();
+      stopPresenting();
     };
   }, []);
 
