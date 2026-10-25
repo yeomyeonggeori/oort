@@ -54,7 +54,7 @@ use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::sqlx::Row;
 use momo_db::PgPool;
-use momo_server::config::{DeviceKeySettings, SchedulerSettings};
+use momo_server::config::{DeviceKeySettings, RateLimitConfig, SchedulerSettings};
 use momo_server::scheduler::{run_tick, TickMemory, TickReport};
 use momo_server::{build_app, AppState, RealtimeAdvert};
 use serde_json::{json, Value};
@@ -549,7 +549,16 @@ impl Rig {
             RealtimeAdvert::SameOrigin,
         )
         .with_scheduler(settings)
-        .with_device_keys(device_keys);
+        .with_device_keys(device_keys)
+        // #4234: this suite drives the 50-schedule cap (`the_cap_holds_under_concurrency` makes
+        // 60 creates and then edits for one member inside a window), which is exactly the
+        // traffic the per-member write budget exists to refuse. The budget has its own suite
+        // (`member_write_rate_limit_pg.rs`); here the schedule axis is off so the cap is judged
+        // by the cap.
+        .with_rate_limit(RateLimitConfig {
+            scheduled_write_per_member_limit: 0,
+            ..RateLimitConfig::default()
+        });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind momo-server");

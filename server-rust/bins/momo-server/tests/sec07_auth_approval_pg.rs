@@ -16,9 +16,11 @@
 //! the approval JSON is camelCase (`approvalId`, `decidedBy`, `workspaceId`,
 //! `channelId`), so the scripts' snake_case `jq` never matched.
 //!
-//! Not here, on purpose: per-member 429 + `rate_limit.exceeded` and the
-//! `auth.logout` audit row are **not implemented** in the Rust server (see the
-//! map's G2/G3), so a test for them could only be red.
+//! Not here, on purpose: the `auth.logout` audit row is **not implemented** in the Rust
+//! server (see the map's G3), so a test for it could only be red. The per-member 429 +
+//! `rate_limit.exceeded` row of the map's G2 now exists for five write endpoints (#4234,
+//! ADR-0208 D10 증보) and is tested in `member_write_rate_limit_pg.rs`; the Swift *global*
+//! per-member axis (every route) is still not implemented.
 //!
 //! `#[ignore]` because every test needs a real Postgres. Run:
 //!
