@@ -49,7 +49,10 @@ import {retainReduceMotion} from '../src/lib/useReduceMotion';
 const a11y = AccessibilityInfo as unknown as {isReduceMotionEnabled: jest.Mock};
 const BASE_WINDOW = Dimensions.get('window');
 
-/** 대표 기기. 키보드 높이는 대표값이고, 규칙은 어떤 값이어도 같은 관계(바닥 = 키보드 윗면)를 말한다. */
+/**
+ * 대표 기기. 키보드 높이는 시뮬레이터 실측이다(iOS 26.5, 예측 줄 포함: 16 Pro 336 · SE 260). 규칙은 어떤 값이어도
+ * 같은 관계(바닥 = 키보드 윗면)를 말한다.
+ */
 const DEVICES = [
   {name: '16 Pro', width: 402, height: 874, insetTop: 62, keyboard: 336},
   {name: 'SE', width: 375, height: 667, insetTop: 20, keyboard: 260},
@@ -163,7 +166,7 @@ describe('키보드가 올라오면 시트의 바닥이 키보드 윗면에 앉�
     });
   });
 
-  it('SE 의 중간 단: 9/16 = 375 에 키보드가 더해지면 667 을 넘으므로 키보드 위 칸으로 줄어든다', () => {
+  it('SE 의 중간 단: 9/16 = 375 가 키보드 위 칸(349)보다 커서 그 칸으로 줄어든다', () => {
     const se = DEVICES[1];
     expect(Math.floor(se.height * (9 / 16)) + se.keyboard).toBeGreaterThan(se.height - sheetTop(se.insetTop));
     expect(sheetFrame('medium', se.height, se.insetTop, se.keyboard)).toEqual({

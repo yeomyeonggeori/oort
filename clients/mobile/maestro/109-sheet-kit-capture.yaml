@@ -1,16 +1,19 @@
 appId: app.momo.ios
 name: 109-sheet-kit-capture
 ---
-# 109-sheet-kit-capture - 새 DM 시트의 실패 단계 (#4318).
+# 109-sheet-kit-capture - 새 DM 시트의 「여는 중」 단계 (#4318).
 #
 # 표면 `-momoMeasure SHEETKIT-NEWDM`(다크), `LIGHT-SHEETKIT-NEWDM`(라이트)은 배송되는 `NewMessageSheet` 를 씨앗을 뿌린
-# 명부 위에 세운다(`measure/sheetKit.tsx`, 가상 인물). 서버가 없는 하네스에서 사람을 누르면 DM 열기가 실패하고
-# 시트 안에 실패 띠가 선다 - 이 흐름이 **실제 탭**으로 그 단계를 찍는다(스크립트는 시뮬레이터를 누를 수 없어
-# 표면만으로는 닿지 않는 단계다).
+# 명부 위에 세운다(`measure/sheetKit.tsx`, 가상 인물). 사람을 누르면 DM 열기가 시작돼 행이 모두 흐려지는 「여는
+# 중」(pending)이 선다 - 이 흐름이 **실제 탭**으로 그 단계를 찍는다(스크립트는 시뮬레이터를 누를 수 없어 표면만으로는
+# 닿지 않는 단계다).
+#
+# 실패 띠(`new-dm-error`)는 이 하네스에서 **찍지 못했다**: 서버가 없어 요청이 150초가 지나도 끝나지 않는다. 그 띠는
+# 이 PR 이 건드리지 않은 공용 `FailureBanner` 이고 위치만 목록 머리 안으로 옮겼다(미검증으로 PR 본문에 적는다).
 #
 #   xcrun simctl launch <UDID> app.momo.ios --args \
 #     -momoMeasure SHEETKIT-NEWDM -RCT_jsLocation 127.0.0.1:$PORT
-#   maestro --device <UDID> test -e SHOT=newdm-error-dark clients/mobile/maestro/109-sheet-kit-capture.yaml
+#   maestro --device <UDID> test -e SHOT=16pro-dark-newdm clients/mobile/maestro/109-sheet-kit-capture.yaml
 - extendedWaitUntil:
     visible:
       id: "new-dm-list"
@@ -19,6 +22,6 @@ name: 109-sheet-kit-capture
     id: "new-dm-person-seoyeon"
 - extendedWaitUntil:
     visible:
-      id: "new-dm-error"
-    timeout: 20000
-- takeScreenshot: ${SHOT}
+      id: "new-dm-person-minsu"
+    timeout: 5000
+- takeScreenshot: ${SHOT}-pending
