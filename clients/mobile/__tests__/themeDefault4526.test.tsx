@@ -76,6 +76,7 @@ function record(patch: Record<string, unknown> = {}): string {
 }
 
 beforeEach(() => {
+  RENDERED.length = 0;
   store = memoryStore();
   __setNonSecretStore(store);
   __resetSessionStore();
@@ -117,6 +118,19 @@ function Who(): React.JSX.Element {
 
 const HIDDEN = {includeHiddenElements: true} as const;
 
+/**
+ * 프로바이더가 **렌더마다** 말한 스킴의 기록. 끝 상태(`render()` 가 돌려준 뒤의 화면)는 이펙트가 다 비워진
+ * 뒤라서 「기본으로 한 번 그리고 이펙트에서 저장값으로 뒤집는」 회귀를 못 본다. 렌더 본문에서 적어야
+ * 그 한 프레임이 남는다.
+ */
+const RENDERED: string[] = [];
+
+function RenderLog(): React.JSX.Element {
+  const {scheme} = useTheme();
+  RENDERED.push(scheme);
+  return <Text>{scheme}</Text>;
+}
+
 const ink = () => StyleSheet.flatten(screen.getByTestId('probe-ink').props.style).color;
 const who = () => screen.getByTestId('who').props.children as string;
 
@@ -133,11 +147,21 @@ function mount(extra: React.ReactNode = null) {
 // =============================================================================
 
 describe('한 번도 안 고른 폰은 라이트로 시작한다', () => {
-  it('기기가 다크여도 첫 렌더가 라이트다 — 다크 한 프레임이 없다', () => {
+  it('기기가 다크여도 라이트로 선다', () => {
     mount();
     expect(ink()).toBe(lightPalette.text);
     // 고른 것 · 풀린 스킴 · 시스템이 지금 말하는 것. 시스템은 다크라고 말하지만 화면은 라이트다.
     expect(who()).toBe('light/light/dark');
+  });
+
+  it('첫 렌더부터 라이트다 — 렌더가 본 스킴에 다크가 한 번도 없다', () => {
+    render(
+      <ThemeProvider>
+        <RenderLog />
+      </ThemeProvider>,
+    );
+    expect(RENDERED.length).toBeGreaterThan(0);
+    expect(RENDERED).toEqual(RENDERED.map(() => 'light'));
   });
 
   it('첫 실행은 저장소에 아무것도 쓰지 않는다 — 「안 고름」이 안 고름으로 남는다', () => {
@@ -246,6 +270,20 @@ describe('이미 고른 선택은 그대로다 — 시스템도 라이트로 덮
     expect(ink()).toBe(paletteFrom(theme, scheme as 'light' | 'dark').text);
   });
 
+  it('저장된 다크는 첫 렌더부터 다크다 — 기본(라이트)을 먼저 그리지 않는다', () => {
+    // 기기는 라이트, 저장은 다크라 「다크」는 저장에서만 올 수 있다. 저장 읽기를 이펙트로 미루면
+    // 첫 렌더가 기본(라이트)이라 기록의 앞에 'light' 가 남는다.
+    store.map.set(NON_SECRET_KEYS.appearance, record({scheme: 'dark'}));
+    setSystem('light');
+    render(
+      <ThemeProvider>
+        <RenderLog />
+      </ThemeProvider>,
+    );
+    expect(RENDERED.length).toBeGreaterThan(0);
+    expect(RENDERED).toEqual(RENDERED.map(() => 'dark'));
+  });
+
   it('마운트는 저장된 것을 건드리지 않는다 — 시스템 레코드가 그대로 남는다', () => {
     const seeded = record({scheme: 'system'});
     store.map.set(NON_SECRET_KEYS.appearance, seeded);
@@ -324,11 +362,16 @@ describe('프로바이더 밖의 기본도 라이트다', () => {
     expect(who()).toBe('light/light/dark');
   });
 
-  it('시스템이 바뀌어도 따라가지 않는다', () => {
-    render(<Probe />);
+  it('시스템이 바뀌어도 따라가지 않는다 — 뒤집힌 뒤 새로 그려도 라이트다', () => {
+    const view = render(<Probe />);
+    expect(ink()).toBe(lightPalette.text);
+    // 프로바이더 밖에는 구독이 없어 저절로는 다시 그려지지 않는다. 그래서 뒤집을 때마다 새로 그려
+    // 「기본이 시스템이었다면 여기서 바뀌었을」 값을 실제로 읽는다.
     setSystem('light');
+    view.rerender(<Probe />);
     expect(ink()).toBe(lightPalette.text);
     setSystem('dark');
+    view.rerender(<Probe />);
     expect(ink()).toBe(lightPalette.text);
   });
 });

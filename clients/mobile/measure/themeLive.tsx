@@ -68,7 +68,7 @@ function message(id: string, seq: number, author: string, body: string): Message
 }
 
 const MESSAGES: readonly Message[] = [
-  message('m1', 1, OTHER, '달무리 스튜디오 주간 회의록 정리해서 올렸어요.'),
+  message('m1', 1, OTHER, '스튜디오 회의록 정리해서 올렸어요.'),
   message('m2', 2, SELF, '확인했어요. 오후에 이어서 볼게요.'),
 ];
 

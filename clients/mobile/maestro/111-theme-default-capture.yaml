@@ -33,6 +33,22 @@ name: "111-theme-default-capture"
     id: "theme-light"
 - waitForAnimationToEnd
 - takeScreenshot: ${SHOT}-4-light
+# OS 크롬: 라이트 앱 위로 올라오는 키보드가 앱이 아니라 기기(다크)를 따르는지 본다. 「직접 입력」 칸(강조색)을 누른다.
+- scrollUntilVisible:
+    element:
+      id: "appearance-signal-input"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "appearance-signal-input"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-4b-keyboard-on-light-app
+- hideKeyboard
+- scrollUntilVisible:
+    element:
+      id: "theme-system"
+    direction: UP
+    timeout: 30000
 # 마지막은 「시스템」으로 둔다 — 다음 실행에서 이 선택이 남는지 본다.
 - tapOn:
     id: "theme-system"
