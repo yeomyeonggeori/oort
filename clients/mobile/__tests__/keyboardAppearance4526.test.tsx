@@ -25,24 +25,25 @@ import {__resetServerBaseCache} from '../src/storage/serverBase';
 // #4526 — OS 가 그리는 키보드는 **앱이 서 있는 스킴**을 따른다 (planner 2026-10-26).
 //
 // 폰의 기본이 라이트가 된 뒤(ADR-0189 증보 5) 아무것도 안 고른 다크 기기는 라이트 앱 위로 **다크 키보드**를
-// 올렸다(design-review R2 캡처 09). 키보드는 OS 가 그리고, 알려 주지 않으면 기기 외양을 따르기 때문이다.
+// 올렸다. 키보드는 OS 가 그리고, 알려 주지 않으면 기기 외양을 따르기 때문이다.
 // `TextInput.keyboardAppearance` 로 앱이 알려 준다. 그 값은 `useKeyboardAppearance()` 한 곳이 정하고(풀린
 // 스킴 — 고른 것이 아니다), 앱의 입력창은 **하나도 빠짐없이** 그 값을 든다.
 //
 // 이 파일이 재는 것은 세 층이다:
 //   A. 값 — 훅이 어느 스킴에서 무엇을 돌려주는가(안 고름 · 라이트 · 다크 · 시스템 × 기기 라이트/다크)
 //   B. 실제 입력창 — 그 값이 진짜 컴포넌트의 호스트 입력에 닿는가(강조색 입력 · 공용 `InputPill` · 로그인 화면)
-//   C. 전수 — 소스에 있는 모든 JSX 입력창이 그 값을 든다(새 입력창이 빠지면 붉다)
+//   C. 전수 — `src/**` 의 `.tsx` 에 있는 모든 JSX 입력창이 그 값을 든다(새 입력창이 빠지면 붉다). JSX 가 아닌
+//      모양(별칭 import · `createElement(TextInput)` · 애니메이션 래퍼)과 `measure/` 하네스는 안 본다 — 지금 앱에는 없다
 //
 // 시험은 **다크 기기**에서 잰다(`jest.setup.js` 가 시스템을 다크로 둔다). 기기가 라이트이면 「앱 스킴을 따른다」와
 // 「기기를 따른다」가 같은 값이라 아무것도 가리지 못한다. 그래서 가장 날카로운 쌍이 둘이다:
-//   - 안 고른 다크 기기 → 'light' (기기를 따르면 'dark' 가 된다 — 캡처 09 의 결함 그 자체)
+//   - 안 고른 다크 기기 → 'light' (기기를 따르면 'dark' 가 된다 — 이 변경 전의 결함 그 자체)
 //   - 다크를 고른 라이트 기기 → 'dark' (기기를 따르면 'light' 가 된다 — 「고른 스킴」이 아니라 「시스템」을 읽는 배선을 가른다)
 //
 // red proof (PR 본문의 사보타주 표에 실제 실행 결과가 있다):
 //   - 훅이 상수를 돌려주면 / 시스템 스킴을 돌려주면 / 뒤집어 돌려주면 → A·B 가 붉다
 //   - 입력창 하나에서 속성을 빼면 / 값을 'dark' 로 못 박으면 / 훅이 아닌 상수를 쓰면 → C 가 그 파일:줄을 말하며 붉다
-//   - 공용 부품(`InputPill`) · 강조색 입력에서 속성을 빼면 → B 도 붉다
+//   - 공용 부품(`InputPill`) · 강조색 입력에서 속성을 빼면 → B 도 붉다. `InputPill` 이 호출자의 값을 이기게 되면 → B 의 불변식 시험이 붉다
 // =============================================================================
 
 const systemHandle = useColorScheme as unknown as {
@@ -109,7 +110,7 @@ describe('A. 키보드 모양은 앱이 서 있는 스킴이다', () => {
   const CASES: ReadonlyArray<
     readonly [string, 'light' | 'dark' | 'system' | null, 'light' | 'dark', 'light' | 'dark']
   > = [
-    // 캡처 09 의 결함: 앱은 라이트인데 키보드가 기기를 따라 다크였다.
+    // 이 변경 전의 결함: 앱은 라이트인데 키보드가 기기를 따라 다크였다.
     ['안 고른 폰 · 다크 기기 → 라이트 앱 위에 라이트 키보드', null, 'dark', 'light'],
     ['안 고른 폰 · 라이트 기기', null, 'light', 'light'],
     ['라이트를 고른 폰 · 다크 기기', 'light', 'dark', 'light'],
@@ -235,6 +236,18 @@ describe('B. 실제 입력창이 그 값을 든다', () => {
     expect(screen.getByTestId('pill-input').props.keyboardAppearance).toBe('dark');
   });
 
+  it('공용 입력 알약은 호출자가 키보드 모양을 못 바꾼다 — 불변식은 부품 한 곳이 지킨다', async () => {
+    // 타입이 먼저 막는다(`Omit<TextInputProps, 'keyboardAppearance'>`). 그 타입을 우회해 넘겨도 값은 앱 스킴이다 —
+    // 부품이 호출자의 props 를 펼친 **뒤에** 값을 둔다.
+    await mount(
+      <ThemeProvider>
+        {/* @ts-expect-error — `keyboardAppearance` 는 InputPill 의 props 가 아니다 */}
+        <InputPill accessibilityLabel="이름 검색" testID="pill-input" keyboardAppearance="dark" />
+      </ThemeProvider>,
+    );
+    expect(screen.getByTestId('pill-input').props.keyboardAppearance).toBe('light');
+  });
+
   const LOGIN_INPUTS = ['server-url-input', 'email-input', 'password-input'] as const;
 
   async function openLoginForm() {
@@ -300,6 +313,10 @@ function declaresHookValue(fn: ts.FunctionLikeDeclaration, sf: ts.SourceFile): b
 /**
  * 소스 안의 모든 **JSX** 입력창(`TextInput`, `Animated.TextInput`, `…TextInput`)을 찾아, 각각이
  * `keyboardAppearance={keyboardAppearance}` 를 들고 그 값이 같은 컴포넌트의 최상위에서 훅으로 만들어졌는지 본다.
+ *
+ * 보는 것: `.tsx` 의 JSX 태그. 안 보는 것: 별칭 import(`TextInput as Field`) · `createElement(TextInput, …)` ·
+ * `createAnimatedComponent(TextInput)` · `.ts` 파일 · 루트 `App.tsx` · `measure/` 하네스. 지금 앱에 그 모양은 없고,
+ * 생기면 이 스윕을 넓혀야 한다(그 전에는 조용히 초록이다).
  *
  * 문자열 훑기가 아니라 구문 트리를 쓰는 이유: 입력창 태그는 화살표 함수(`=>`)·긴 주석·문자열 속의 `>` 를 속성
  * 사이에 든다. 정규식은 그 셋에서 태그의 끝이나 주석 속 이름을 잘못 집는다(`conversationHygiene` 의 #1422 스윕이

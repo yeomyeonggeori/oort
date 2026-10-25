@@ -335,7 +335,7 @@ export function InputPill({
   accessibilityLabel,
   style,
   ...input
-}: TextInputProps & {
+}: Omit<TextInputProps, 'keyboardAppearance'> & {
   /** 앞 아이콘(PNG, 글자 없는 아이콘 색으로 칠한다). */
   icon?: ImageSourcePropType;
   /** 입력 칸의 이름 — 플레이스홀더만으로는 이름이 되지 않는다. */
@@ -350,10 +350,11 @@ export function InputPill({
       <TextInput
         accessibilityLabel={accessibilityLabel}
         placeholderTextColor={palette.textMuted}
-        keyboardAppearance={keyboardAppearance}
         {...input}
         // 호출자의 `style` 은 알약 입력 스타일(`flex: 1` 포함)을 **덮지 않고 이어 붙는다**.
         style={[styles.pillInput, style]}
+        // 키보드 모양은 앱의 스킴이 정한다(#4526). 펼친 props 뒤에 두고 타입에서도 뺐다 — 호출자가 바꿀 수 없다.
+        keyboardAppearance={keyboardAppearance}
       />
     </View>
   );

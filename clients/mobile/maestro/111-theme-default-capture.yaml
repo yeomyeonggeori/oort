@@ -22,7 +22,7 @@ name: "111-theme-default-capture"
 # 아무것도 안 골랐다 — 기기는 다크인데 화면은 라이트다.
 - takeScreenshot: ${SHOT}-1-first-run
 # OS 크롬: 한 번도 안 고른 폰(저장 없음, 캡션이 그렇게 적는다)에서 입력칸을 눌러 키보드를 올린다. 「직접 입력」 칸(강조색).
-# 수리 전에는 키보드를 OS 가 그려서 기기(다크)를 따랐고 라이트 앱 위에 다크 키보드가 올라왔다(design-review R2 캡처 09).
+# 수리 전에는 키보드를 OS 가 그려서 기기(다크)를 따랐고 라이트 앱 위에 다크 키보드가 올라왔다.
 # 지금은 모든 입력창이 `keyboardAppearance` 로 앱의 스킴을 알려 준다(`useKeyboardAppearance`) — 라이트 앱 위에 라이트 키보드.
 # 반대쪽(다크를 고른 폰)은 `112-keyboard-dark-chosen-capture.yaml` 이 찍는다.
 - scrollUntilVisible:

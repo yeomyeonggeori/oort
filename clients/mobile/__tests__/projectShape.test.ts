@@ -1134,15 +1134,31 @@ describe('the launch screen is the boot background and nothing else (#2668)', ()
 
   it('is not undone by pinning the whole app to one interface style', () => {
     // The tempting way to "always light" is UIUserInterfaceStyle = Light in
-    // Info.plist, or overrideUserInterfaceStyle on the window. Either gives a
-    // light launch screen, and either also freezes React Native's `Appearance`
-    // at light for the whole app: the 「시스템」 choice stops following the
-    // device and 「지금 이 기기의 시스템은 …」 becomes false. The asset is the
-    // whole fix; these must stay absent.
-    expect(plist).not.toContain('UIUserInterfaceStyle');
+    // Info.plist, overrideUserInterfaceStyle (or traitOverrides) on the window,
+    // or Appearance.setColorScheme('light') from JS. Each gives a light launch
+    // screen, and each also freezes React Native's `Appearance` at light for the
+    // whole app: the 「시스템」 choice stops following the device and 「지금 이
+    // 기기의 시스템은 …」 becomes false. The asset is the whole fix; these four
+    // shapes must stay absent. (Anything else that pins the style is not seen
+    // here — the guard names what it holds.)
+    //
+    // An XML comment is not a key: a note in Info.plist may name the key it forbids.
+    const plistKeys = plist.replace(/<!--[\s\S]*?-->/g, '');
+    expect(plistKeys).not.toContain('UIUserInterfaceStyle');
     const swift = readFileSync(join(IOS_APP, 'AppDelegate.swift'), 'utf8');
     // A statement, not a comment: `[^/\n]*` cannot reach past a `//`.
-    expect(swift).not.toMatch(/^[^/\n]*overrideUserInterfaceStyle/m);
+    expect(swift).not.toMatch(/^[^/\n]*(overrideUserInterfaceStyle|traitOverrides)/m);
+    const callers = [
+      join(APP_ROOT, 'App.tsx'),
+      join(APP_ROOT, 'index.js'),
+      ...sourceFiles(join(APP_ROOT, 'src')),
+    ]
+      .filter(file => existsSync(file))
+      .filter(file =>
+        /\bsetColorScheme\s*\(/.test(stripComments(file, readFileSync(file, 'utf8'))),
+      )
+      .map(file => file.slice(APP_ROOT.length + 1));
+    expect(callers).toEqual([]);
   });
 
   it('is what the React root view paints until the first frame', () => {

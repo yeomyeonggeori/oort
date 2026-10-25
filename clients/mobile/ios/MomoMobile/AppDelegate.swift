@@ -131,9 +131,10 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
   // follows a dark system) sees this light surface until JS paints its first
   // frame in dark. Reading the stored choice natively to shorten that step is a
   // follow-up, not done here. Do not hand the asset a dark variant back, and do
-  // not pin the whole app's interface style (UIUserInterfaceStyle) to get the
-  // same effect: that would freeze React Native's `Appearance` at light and make
-  // the 「시스템」 choice a lie. projectShape.test.ts holds both.
+  // not pin the whole app's interface style (UIUserInterfaceStyle in Info.plist,
+  // overrideUserInterfaceStyle or traitOverrides here, Appearance.setColorScheme
+  // in JS) to get the same effect: that would freeze React Native's `Appearance`
+  // at light and make the 「시스템」 choice a lie. projectShape.test.ts holds these.
   //
   // `super` first: Expo hands this call on to its subscribers.
   override func customize(_ rootView: UIView) {
