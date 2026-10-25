@@ -18,7 +18,24 @@
       "sourceURL": "https://developers.google.com/workspace/guides/configure-mcp-servers",
       "releaseRef": "hosted",
       "verified": true
-    }
+    },
+    "logoKey": "google-calendar",
+    "category": "productivity",
+    "websiteURL": "https://calendar.google.com",
+    "starterPrompts": [
+      {
+        "text": "오늘 일정을 시간 순서대로 알려 줘요.",
+        "tool": "google-calendar.list_events"
+      },
+      {
+        "text": "이번 주에 팀원들이 모두 비는 시간을 찾아 줘요.",
+        "tool": "google-calendar.suggest_time"
+      },
+      {
+        "text": "다음 주에 잡힌 회의를 찾아서 정리해 줘요.",
+        "tool": "google-calendar.search_events"
+      }
+    ]
   },
   "mcp": {
     "protocolVersion": "2025-06-18",

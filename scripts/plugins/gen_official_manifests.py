@@ -14,6 +14,13 @@ VENDOR tool exactly as measured (vendor name, vendor schema). The manifest's `in
 projection of it into the closed subset the validator admits (plugin_manifest.rs
 validate_input_schema): unknown keywords ($schema, default, format, pattern, anyOf, ...) are
 dropped, root `additionalProperties` is forced to false, secret-shaped property names are dropped.
+
+NOT generated here: the four display keys of `plugin` (`logoKey`, `category`, `websiteURL`,
+`starterPrompts`; ADR-0113 add. 3 F1, #4313). They belong to migration 149, which patches them onto
+these manifests, and the fixtures under server/Fixtures/plugin-manifests/ carry them. Running this
+script rewrites the fixtures WITHOUT them; the unit tests `migration_149_display_patch_turns_the_seeds_
+into_the_fixtures` and `the_official_apps_declare_their_display_fields` (plugin_manifest.rs) then go
+red. Re-apply the patch (migration 149's `$display$` blocks) to the fixtures before committing.
 """
 import hashlib
 import json
