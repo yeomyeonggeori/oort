@@ -313,20 +313,60 @@ describe('결정: 보고 있는 대화의 알림만 숨긴다', () => {
     ).toEqual({show: false, why: 'viewing'});
   });
 
-  // 이슈 #4310 의 문면에는 승인 예외가 없다(결정 이슈 #2592 권고안 A 는 「승인은 항상 배너」). 문면대로
-  // 숨기고, 예외를 둘지는 기획의 결정 대기다(진행 기록).
-  it('같은 방의 승인 요청도 숨긴다 (미결 결정 — #2592 권고안 A 와 다름)', () => {
-    const approval = relayPayload({
-      channelId: DESIGN,
-      category: 'momo.approval',
-      reason: 'approval_request',
-      approvalId: APPROVAL_ID,
+  // 기획 결정 1 (#2592 권고안 A): 승인 요청은 행동이 필요한 알림이라 같은 방을 보고 있어도 배너로 보인다.
+  // 승인 카테고리는 둘이다 — 잠금 화면에서 결정하는 `momo.approval` 과 앱에서 열어 결정하는
+  // `momo.approval.open`. 하나만 빼면 그쪽 승인이 보고 있는 방에서 소리 없이 묻힌다.
+  describe('승인 요청은 같은 방을 보고 있어도 보인다 (행동이 필요한 알림)', () => {
+    const APPROVAL_CATEGORIES = ['momo.approval', 'momo.approval.open'];
+    const approvalIn = (category: string, over: Partial<PayloadOver> = {}) =>
+      relayPayload({
+        channelId: DESIGN,
+        category,
+        reason: 'approval_request',
+        approvalId: APPROVAL_ID,
+        ...over,
+      });
+
+    it.each(APPROVAL_CATEGORIES)('같은 방 본류를 보는 중에도 보인다 — %s', category => {
+      expect(decideForeground(approvalIn(category), VIEWING_DESIGN)).toEqual({
+        show: true,
+        why: 'approval',
+      });
     });
-    expect(decideForeground(approval, VIEWING_DESIGN)).toEqual({
-      show: false,
-      why: 'viewing',
+
+    it.each(APPROVAL_CATEGORIES)('같은 스레드가 열려 있어도 보인다 — %s', category => {
+      expect(
+        decideForeground(
+          approvalIn(category, {threadId: ROOT_ID}),
+          VIEWING_DESIGN_THREAD,
+        ),
+      ).toEqual({show: true, why: 'approval'});
     });
-    expect(decideForeground(approval, null)).toEqual({show: true, why: 'not-viewing'});
+
+    // 예외가 승인에만 걸려 있다: 같은 방의 멘션·DM·작업 알림은 그대로 숨는다.
+    it.each([
+      ['momo.message', 'dm'],
+      ['momo.mention', 'mention'],
+      ['momo.work', 'work_session_idle'],
+    ])('대조: 같은 방의 승인 아닌 알림은 숨는다 — %s', (category, reason) => {
+      expect(
+        decideForeground(
+          relayPayload({channelId: DESIGN, category, reason}),
+          VIEWING_DESIGN,
+        ),
+      ).toEqual({show: false, why: 'viewing'});
+    });
+
+    // 예외는 숨길 뻔한 경우에만 이유를 바꾼다: 어차피 보였을 승인은 원래 이유로 보인다(로그가 흐려지지 않는다).
+    it('다른 방의 승인·앞에 아무것도 없을 때의 승인은 원래 이유로 보인다', () => {
+      expect(
+        decideForeground(approvalIn('momo.approval', {channelId: NOTICE}), VIEWING_DESIGN),
+      ).toEqual({show: true, why: 'other-conversation'});
+      expect(decideForeground(approvalIn('momo.approval'), null)).toEqual({
+        show: true,
+        why: 'not-viewing',
+      });
+    });
   });
 });
 
@@ -392,6 +432,22 @@ describe('처리기: expo-notifications 에 건네는 것', () => {
   it('같은 채널을 보는 중에는 아무것도 하지 않는다 — 배너도 목록도 소리도 배지도', async () => {
     installForegroundNotificationHandler();
     publishViewedConversation(VIEWING_DESIGN);
+    expect(await present(relayPayload({channelId: DESIGN}))).toStrictEqual(HIDDEN);
+  });
+
+  it('같은 채널을 보는 중에도 승인 요청은 배너 + 목록 + 소리로 답한다 — 행동이 필요한 알림', async () => {
+    installForegroundNotificationHandler();
+    publishViewedConversation(VIEWING_DESIGN);
+    for (const category of ['momo.approval', 'momo.approval.open']) {
+      const approval = relayPayload({
+        channelId: DESIGN,
+        category,
+        reason: 'approval_request',
+        approvalId: APPROVAL_ID,
+      });
+      expect(await present(approval)).toStrictEqual(SHOWN);
+    }
+    // 같은 방의 일반 메시지는 그 옆에서 여전히 숨는다.
     expect(await present(relayPayload({channelId: DESIGN}))).toStrictEqual(HIDDEN);
   });
 
@@ -500,9 +556,18 @@ describe('처리기: expo-notifications 에 건네는 것', () => {
     await present(relayPayload({channelId: NOTICE}));
     publishViewedConversation(VIEWING_DESIGN);
     await present(relayPayload({channelId: DESIGN}));
+    await present(
+      relayPayload({
+        channelId: DESIGN,
+        category: 'momo.approval',
+        reason: 'approval_request',
+        approvalId: APPROVAL_ID,
+      }),
+    );
     const lines = log.mock.calls.map(call => String(call[0]));
     expect(lines).toContain('[push] foreground notification -> shown (not-viewing)');
     expect(lines).toContain('[push] foreground notification -> hidden (viewing)');
+    expect(lines).toContain('[push] foreground notification -> shown (approval)');
     for (const line of lines) {
       expect(line).not.toContain(DESIGN);
       expect(line).not.toContain(WS);
@@ -587,7 +652,13 @@ describe('보는 대화를 올리고 내린다', () => {
 // 4. 앱 시작 경로 — 처리기는 앱 어디에서도 한 번만 걸린다
 // =============================================================================
 
-describe('앱 시작 경로', () => {
+// 처리기는 `index.js` 의 모듈 평가 시점, `AppRegistry.registerComponent` 보다 앞에서 걸린다(기획 결정 6:
+// 시작 직후에 온 푸시가 사라지는 틈을 줄이려고 `App.tsx` 의 시작 effect 에서 옮겼다). 세 가지를 잰다:
+//   1. 실제로 `index.js` 를 평가해 본다 — 한 번 걸리고, 루트를 등록하기 **전**이다.
+//   2. 호출 자리를 소스에서 센다 — `index.js` 하나, `App.tsx` 에는 없다.
+//   3. 앱 트리를 그려도 처리기를 다시 걸지 않는다(두 번째 호출은 첫 처리기를 조용히 갈아 끼운다).
+
+describe('시작 경로 — 처리기는 index.js 에서, 루트를 등록하기 전에 한 번만 걸린다', () => {
   beforeEach(() => {
     __resetSessionStore();
     __resetServerBaseCache();
@@ -597,20 +668,52 @@ describe('앱 시작 경로', () => {
     cleanup();
   });
 
-  it('앱을 띄우면 세션이 없어도 처리기가 한 번 걸리고, 앱이 내려가면 거둔다', async () => {
-    const view = render(<App />);
-    await act(async () => {});
-    expect(setHandler).toHaveBeenCalledTimes(1);
-    expect(typeof registeredHandler().handleNotification).toBe('function');
+  const APP_ROOT = path.resolve(__dirname, '..');
+  const codeOnly = (source: string) =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
-    view.unmount();
-    expect(setHandler).toHaveBeenLastCalledWith(null);
+  it('index.js 를 평가하는 그 순간에 처리기가 한 번 걸리고, 그것은 루트 등록보다 앞이다', () => {
+    let handlerCalls = -1;
+    let registerCalls = -1;
+    let handlerOrder = 0;
+    let registerOrder = Number.POSITIVE_INFINITY;
+    jest.isolateModules(() => {
+      // 격리된 모듈 레지스트리: index.js 와 이 시험이 같은 `react-native`·`expo-notifications` 를 본다.
+      const {AppRegistry} = require('react-native');
+      const notifications = require('expo-notifications');
+      const register = jest
+        .spyOn(AppRegistry, 'registerComponent')
+        .mockImplementation(() => 'MomoMobile');
+      const handler = notifications.setNotificationHandler as jest.Mock;
+      handler.mockClear();
+      require('../index');
+      handlerCalls = handler.mock.calls.length;
+      registerCalls = register.mock.calls.length;
+      handlerOrder = handler.mock.invocationCallOrder[0] ?? 0;
+      registerOrder = register.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY;
+    });
+    expect(handlerCalls).toBe(1);
+    expect(registerCalls).toBe(1);
+    expect(handlerOrder).toBeGreaterThan(0);
+    expect(handlerOrder).toBeLessThan(registerOrder);
+  });
+
+  it('index.js 소스에서도 호출이 두 boot import 뒤, registerComponent 앞에 있다', () => {
+    const source = codeOnly(fs.readFileSync(path.join(APP_ROOT, 'index.js'), 'utf8'));
+    const at = (needle: string) => {
+      const index = source.indexOf(needle);
+      expect(index).toBeGreaterThanOrEqual(0);
+      return index;
+    };
+    const install = at('installForegroundNotificationHandler();');
+    expect(install).toBeGreaterThan(at("'./src/boot/polyfills'"));
+    expect(install).toBeGreaterThan(at("'./src/boot/coreHost'"));
+    expect(install).toBeLessThan(at('AppRegistry.registerComponent('));
   });
 
   // `setNotificationHandler` 는 부를 때마다 앞의 처리기를 갈아 끼운다. 이 앱 소스에 호출 자리가 둘이
   // 되면 나중 것이 이긴다 — 이 파일의 규칙이 조용히 꺼질 수 있어서, 호출 자리를 소스에서 센다.
-  it('setNotificationHandler 를 부르는 곳은 앱 소스 전체에서 한 곳이다', () => {
-    const root = path.resolve(__dirname, '..');
+  it('처리기를 거는 곳은 앱 소스 전체에서 index.js 한 곳이다 (App.tsx·PushProvider 는 걸지 않는다)', () => {
     const files: string[] = [];
     const walk = (dir: string) => {
       for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
@@ -622,13 +725,27 @@ describe('앱 시작 경로', () => {
         else if (/\.(ts|tsx|js|jsx)$/.test(entry.name)) files.push(full);
       }
     };
-    walk(root);
-    const codeOnly = (source: string) =>
-      source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
-    const callers = files
-      .filter(file => /\bsetNotificationHandler\s*\(/.test(codeOnly(fs.readFileSync(file, 'utf8'))))
-      .map(file => path.relative(root, file));
-    expect(callers).toEqual([path.join('src', 'push', 'foregroundPresentation.ts')]);
+    walk(APP_ROOT);
+    const callers = (pattern: RegExp) =>
+      files
+        .filter(file => pattern.test(codeOnly(fs.readFileSync(file, 'utf8'))))
+        .map(file => path.relative(APP_ROOT, file));
+    // 전달 함수 호출은 index.js 하나(정의 자체는 세지 않는다).
+    expect(callers(/(?<!function\s)\binstallForegroundNotificationHandler\s*\(/)).toEqual([
+      'index.js',
+    ]);
+    // expo 에 실제로 거는 곳은 그 함수 안의 한 줄이다.
+    expect(callers(/\bsetNotificationHandler\s*\(/)).toEqual([
+      path.join('src', 'push', 'foregroundPresentation.ts'),
+    ]);
+  });
+
+  it('앱 트리를 그려도 처리기를 다시 걸지 않는다 — 걸 자리는 index.js 하나다', async () => {
+    const view = render(<App />);
+    await act(async () => {});
+    expect(setHandler).not.toHaveBeenCalled();
+    view.unmount();
+    expect(setHandler).not.toHaveBeenCalled();
   });
 });
 
@@ -800,6 +917,17 @@ describe('실제 화면: 진짜 AppShell 의 대화 화면이 올린 값을 처�
     expect(viewedConversation()).toEqual(VIEWING_DESIGN);
     expect(await present(relayPayload({channelId: DESIGN}))).toStrictEqual(HIDDEN);
     expect(await present(relayPayload({channelId: NOTICE}))).toStrictEqual(SHOWN);
+    // 열려 있는 방이어도 승인 요청은 보인다(행동이 필요한 알림).
+    expect(
+      await present(
+        relayPayload({
+          channelId: DESIGN,
+          category: 'momo.approval',
+          reason: 'approval_request',
+          approvalId: APPROVAL_ID,
+        }),
+      ),
+    ).toStrictEqual(SHOWN);
 
     // 대화 목록으로 돌아왔다: 더는 보는 대화가 없다.
     fireEvent.press(screen.getByTestId('header-back'));

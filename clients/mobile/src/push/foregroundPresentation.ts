@@ -19,16 +19,27 @@ import {viewedConversation, type ViewedConversation} from './viewedConversation'
 // 델리게이트에 붙는다(`HandlerModule.OnStartObserving`). 그래서 이 앱은 열려 있는 동안 온 푸시를
 // 배너도 목록도 소리도 없이 잃었다 — 다른 대화를 보고 있어도 마찬가지다.
 //
-// 그래서 이 파일의 `installForegroundNotificationHandler` 는 **세션과 무관하게 앱 시작 경로에서**
-// (`App.tsx`) 한 번 건다. `PushProvider` 는 로그인 복원이 끝난 뒤에야 서므로, 거기에 두면
-// 콜드 스타트 중 도착한 푸시가 처리기보다 먼저 와서 같은 증상으로 사라진다. `setNotificationHandler`
-// 는 부를 때마다 앞의 처리기를 **갈아 끼우므로** 다른 곳에서 한 번 더 부르면 이 규칙이 조용히 꺼진다 —
-// 호출 자리가 이 앱에 하나뿐임을 `foregroundPresentation4310.test.tsx` 가 소스에서 센다.
+// 그래서 이 파일의 `installForegroundNotificationHandler` 는 **세션·화면과 무관하게, JS 가 도는 가장
+// 이른 자리에서** 한 번 건다: `index.js` 의 모듈 평가 시점, `AppRegistry.registerComponent` 보다 앞이다.
+// React 트리가 서기 전이고 첫 렌더나 `useEffect` 를 기다리지도 않는다. (1단계에서는 `App.tsx` 의 시작
+// effect 에 있었다 — 첫 렌더가 커밋된 뒤라서 그 사이에 도착한 푸시는 같은 증상으로 사라질 수 있었다.
+// `PushProvider` 는 로그인 복원이 끝난 뒤에야 서므로 더 늦다.) 하네스 루트(`-momoMeasure`·`-momoSessionGate`)도
+// 같은 `index.js` 를 거치므로 거기서도 같은 처리기가 걸린다.
 //
-// ## 규칙: 보고 있는 대화의 알림만 숨긴다
+// **그래도 남는 틈:** JS 번들이 로드되기 **전**에 도착한 푸시는 이 처리기가 아직 없어서 iOS 기본(`[]`)으로
+// 사라진다. 그 틈은 네이티브 쪽 기본 처리기가 있어야 닫히며 이 변경의 범위 밖이다(별도 이슈).
+//
+// `setNotificationHandler` 는 부를 때마다 앞의 처리기를 **갈아 끼우므로** 다른 곳에서 한 번 더 부르면 이
+// 규칙이 조용히 꺼진다 — 호출 자리가 이 앱에 하나뿐(`index.js`)임을 `foregroundPresentation4310.test.tsx`
+// 가 소스에서 센다.
+//
+// ## 규칙: 보고 있는 대화의 알림만 숨긴다 — 승인 요청은 빼고
 //
 //   - 같은 워크스페이스·같은 채널을 보고 있고, 알림이 스레드 답글이면 **같은 스레드** 가 열려
 //     있을 때만 숨긴다(배너·소리·알림 센터 목록 모두 없음).
+//   - **승인 요청(`momo.approval`·`momo.approval.open`)은 같은 방을 보고 있어도 보인다.** 행동이 필요한
+//     알림이라 예외다(#2592 권고안 A, 기획 결정 1). 숨기는 규칙은 이미 눈앞에 있는 것을 겹쳐 띄우지 않으려는
+//     것인데, 승인은 누군가 결정해야 끝나는 일이다.
 //   - 그 밖에는 iOS 배너 + 알림 센터 목록으로 보이고, 소리는 페이로드의 `aps.sound` 를 따른다.
 //   - **봉투를 못 읽으면 보인다.** 숨기는 쪽으로 실패하지 않는다.
 //
@@ -82,13 +93,15 @@ export type ForegroundDecision =
        *   other-workspace     다른 워크스페이스의 알림이다.
        *   other-conversation  다른 채널의 알림이다.
        *   other-thread        같은 채널이지만 열려 있지 않은 스레드의 답글이다.
+       *   approval            승인 요청이다 — 같은 방을 보고 있어도 보인다(행동이 필요한 알림).
        */
       why:
         | 'unreadable'
         | 'not-viewing'
         | 'other-workspace'
         | 'other-conversation'
-        | 'other-thread';
+        | 'other-thread'
+        | 'approval';
     }
   | {show: false; why: 'viewing'};
 
@@ -119,6 +132,10 @@ export function decideForeground(
   ) {
     return {show: true, why: 'other-thread'};
   }
+  // 여기까지 오면 보고 있는 대화다. 단 승인 요청은 예외로 보인다 — 행동이 필요한 알림이다(#2592 권고안 A).
+  // `approvalId` 는 승인 카테고리 둘(`momo.approval`·`momo.approval.open`)에만 실리고 그 밖의 카테고리에
+  // 실려 있으면 파서가 봉투째 거절한다(`parsePushEnvelope` 의 쌍조건). 그래서 승인 id 가 있다 = 승인 요청이다.
+  if (envelope.approvalId !== null) return {show: true, why: 'approval'};
   return {show: false, why: 'viewing'};
 }
 
@@ -149,7 +166,8 @@ export async function presentForeground(
 }
 
 /**
- * 처리기를 건다. 앱 시작 경로(`App.tsx`)에서 **한 번** 부르고, 돌려받은 함수로 거둔다.
+ * 처리기를 건다. `index.js` 의 모듈 평가 시점에 **한 번** 부른다(머리말). 돌려주는 함수는 처리기를
+ * 거두는 쪽이며, 앱 수명과 같은 `index.js` 는 쓰지 않는다 — 시험이 쓴다.
  *
  * 거는 데 실패해도 앱 시작을 막지 않는다 — 배너를 못 띄우는 것이 앱을 못 여는 것보다 낫다.
  */
