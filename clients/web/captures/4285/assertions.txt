@@ -1,0 +1,55 @@
+ok   1440-light uncollected: 카드 낱말
+ok   1440-light uncollected: 장소 줄에 짧은 경고 문구
+ok   1440-light uncollected: 이유 줄
+ok   1440-light uncollected: 카드 안에 취소가 없다(링크 안에 누르는 면을 두지 않는다)
+ok   1440-light uncollected: 활동 줄 꼬리·경고·이유
+ok   1440-light panel: 첫 단추는 「취소」이고 이름은 요청 취소
+ok   1440-light panel: 영역 이름도 요청 취소
+ok   1440-light panel: 상태 칩도 카드·활동 줄과 같은 낱말
+ok   1440-light panel: 누르기 전에는 취소 요청이 0건
+ok   1440-light confirm: 첫 클릭은 묻기만 한다
+ok   1440-light confirm: 확인 문장
+ok   1440-light cancelled: 취소 요청 한 번
+ok   1440-light cancelled: 영수증
+ok   1440-light cancelled: 답을 받으면 취소 단추가 사라진다
+ok   1440-light failed: 「취소하지 못했어요」이고 「중단」이 없다
+ok   1440-light failed: 확인 줄이 남아 다시 누를 수 있다
+ok   1440-light young: 5분 안은 「대기 1번째」 그대로
+ok   1440-light young: 이유 줄이 없다
+ok   1440-light system: 서버가 5시간 기다렸다고 해도 카드가 없다
+ok   1440-light longname: 상태 낱말이 온전하다
+ok   1440-light longname: 상태 낱말이 한 줄이다(「아직 받지 않았어 / 요」로 꺾이지 않는다)
+ok   1440-light longname: 이름이 줄임표를 받는다(낱말을 밀어내지 않는다)
+ok   1440-light longname: 이름과 낱말이 겹치지 않는다
+ok   1440-light tworuns: 목록에 요청이 둘 선다
+ok   1440-light tworuns: 머리 칩은 「아직 받지 않았어요」
+ok   1440-light tworuns: 목록의 첫 요청 칩도 같은 낱말이고 「대기 1번째」가 아니다
+ok   1440-light tworuns: 5분 안의 둘째 요청은 「대기 2번째」 그대로다
+ok   1440-dark uncollected: 카드 낱말
+ok   1440-dark uncollected: 장소 줄에 짧은 경고 문구
+ok   1440-dark uncollected: 이유 줄
+ok   1440-dark uncollected: 카드 안에 취소가 없다(링크 안에 누르는 면을 두지 않는다)
+ok   1440-dark uncollected: 활동 줄 꼬리·경고·이유
+ok   1440-dark panel: 첫 단추는 「취소」이고 이름은 요청 취소
+ok   1440-dark panel: 영역 이름도 요청 취소
+ok   1440-dark panel: 상태 칩도 카드·활동 줄과 같은 낱말
+ok   1440-dark panel: 누르기 전에는 취소 요청이 0건
+ok   1440-dark confirm: 첫 클릭은 묻기만 한다
+ok   1440-dark confirm: 확인 문장
+ok   1440-dark cancelled: 취소 요청 한 번
+ok   1440-dark cancelled: 영수증
+ok   1440-dark cancelled: 답을 받으면 취소 단추가 사라진다
+ok   1440-dark failed: 「취소하지 못했어요」이고 「중단」이 없다
+ok   1440-dark failed: 확인 줄이 남아 다시 누를 수 있다
+ok   1440-dark young: 5분 안은 「대기 1번째」 그대로
+ok   1440-dark young: 이유 줄이 없다
+ok   1440-dark system: 서버가 5시간 기다렸다고 해도 카드가 없다
+ok   1440-dark longname: 상태 낱말이 온전하다
+ok   1440-dark longname: 상태 낱말이 한 줄이다(「아직 받지 않았어 / 요」로 꺾이지 않는다)
+ok   1440-dark longname: 이름이 줄임표를 받는다(낱말을 밀어내지 않는다)
+ok   1440-dark longname: 이름과 낱말이 겹치지 않는다
+ok   1440-dark tworuns: 목록에 요청이 둘 선다
+ok   1440-dark tworuns: 머리 칩은 「아직 받지 않았어요」
+ok   1440-dark tworuns: 목록의 첫 요청 칩도 같은 낱말이고 「대기 1번째」가 아니다
+ok   1440-dark tworuns: 5분 안의 둘째 요청은 「대기 2번째」 그대로다
+capture exit 0

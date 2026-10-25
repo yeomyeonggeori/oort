@@ -27,7 +27,11 @@ import {
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
-import type {CancelOutcome} from '@momo/core/features/agents/runCancel';
+import type {
+  CancelOutcome,
+  CancelWording,
+} from '@momo/core/features/agents/runCancel';
+import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -135,7 +139,10 @@ import {
   type NotificationLanding,
 } from '../push/tapArrival';
 import {useRealtime} from '../realtime/RealtimeProvider';
-import {useAgentLiveness} from '../features/agents/useAgentLiveness';
+import {
+  useAgentLiveness,
+  useAgentLivenessLookup,
+} from '../features/agents/useAgentLiveness';
 import {ChannelAudienceContext} from '../features/conversation/appsTail';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
@@ -482,6 +489,18 @@ export default function ConversationScreen({
       ),
     [signals, channelId, staleBucket],
   );
+
+  // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
+  // 경고(D4)를 싣고, 5분을 넘으면 「아직 받지 않았어요」로 말한다(#4285). 같은 쿼리 키라 DM 머리의
+  // 상태 점(`peerLiveness`)과 요청을 나눠 쓴다.
+  const waitingAgentIds = useMemo(
+    () =>
+      turns
+        .filter(turn => isUntakenHumanRun(turn.server))
+        .map(turn => turn.memberId),
+    [turns],
+  );
+  const livenessFor = useAgentLivenessLookup(waitingAgentIds);
 
   // ---- 답이 나타날 자리 (#999) ---------------------------------------------
   //
@@ -1368,11 +1387,13 @@ export default function ConversationScreen({
       memberId: string;
       name: string;
       runCount?: number;
+      wording: CancelWording;
     }) => (
       <StopTurnControl
         runId={turn.runId}
         agentName={turn.name}
         runCount={turn.runCount}
+        wording={turn.wording}
         onOutcome={outcome =>
           setStopOutcome({
             runId: turn.runId,
@@ -1865,6 +1886,7 @@ export default function ConversationScreen({
               nowMs={turnNowMs}
               live={railLive}
               renderStop={renderStop}
+              livenessFor={livenessFor}
             />
             {/* ===================================================
                 「작업 중」 **바로 아래** (design-review M-5).

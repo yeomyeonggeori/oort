@@ -11,9 +11,9 @@ import {runDurationBreakdown} from '@momo/core/features/agents/runDuration';
 import {
   isOpenRunPhase,
   runPhaseDetail,
-  runPhaseLabel,
   serverFactsOf,
 } from '@momo/core/features/agents/runPhase';
+import {runStateWord} from '@momo/core/features/agents/runWaiting';
 import {agentLabel, UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCopy';
 import {memberNameParts, type Directory} from '@momo/core/features/workspace/directory';
 import {useQuery} from '@tanstack/react-query';
@@ -163,7 +163,8 @@ export function SheetBody({
                   progress.phase === 'awaiting_approval' && styles.chipWaitingText,
                 ]}
                 testID="run-ledger-phase">
-                {runPhaseLabel(facts)}
+                {/* 홈 카드·웹 패널 머리 칩과 같은 낱말 고르기(`runStateWord`, design-review #4285 r1 H5). */}
+                {runStateWord(facts, nowMs)}
               </Text>
             </View>
             {detail !== undefined ? (
