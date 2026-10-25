@@ -1,9 +1,9 @@
 # ADR-0206: 알림 설정 v2 — 전달·표면·표현을 갈라 두고, 진단·채널 단계·키워드·데스크탑 활성 시 폰 지연·알림음을 한 계약으로
 
-- Status: **Proposed** (독립 설계 검토 r1 FAIL(23건)과 r2 FAIL(High 2·Medium 17·Low 6)의 지적을 반영한 판이에요. 검토가 통과하면 Accepted로 올려요)
+- Status: **Accepted** (2026-10-25, planner 위임 결정 — owner 10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐」 + owner 10-21 「직접 넣어서」). 독립 설계 검토를 세 번 거쳤어요: r1 FAIL(Blocker 0·High 4·Medium 16·Low 3)과 r2 FAIL(High 2·Medium 17·Low 6)의 지적을 반영하고 r3에서 PASS(Blocker 0·High 0)를 받았어요. r3의 Medium 7·Low 15는 PASS 뒤에 별도 커밋으로 반영했어요. [권장]으로 정한 결정(D11~D20과 「리서치와 달라진 곳」)은 PR 본문 「권장으로 정한 것」 표에 모두 있어요
 - Date: 2026-10-25
 - Deciders: 성재
-- 기안: Sonnet 5.5 엔진 워커 (#4223). 리서치 r7(로컬 기록 `claudedocs/resume-2026-09-23/handoff-1021/research-1021/r7-notifications-report.md`, 레포 미추적)의 §6 권장안 D1~D10을 이슈 #4223이 확정한 대로 받고, 코드로 다시 확인해 달라진 곳은 「리서치와 달라진 곳」에 모았어요.
+- 기안: Sonnet 5.5 엔진 워커 (#4223, 검토 r1~r3 수리 포함). 리서치 r7(로컬 기록 `claudedocs/resume-2026-09-23/handoff-1021/research-1021/r7-notifications-report.md`, 레포 미추적)의 §6 권장안 D1~D10을 이슈 #4223이 확정한 대로 받고, 코드로 다시 확인해 달라진 곳은 「리서치와 달라진 곳」에 모았어요.
 - 관계
   - ADR-0120(푸시 경계, 부록 A): **어휘 증보**예요. reason 4종·category 1종·선택 키 1종을 더하고 D2의 id-only는 그대로예요. 본문 결정은 바꾸지 않아요.
   - ADR-0124(알림 음소거, 증보 1~3): **증보**예요. 증보 2가 열어 둔 `muted_until`을 API로 쓰고 읽게 하고(D12), 증보 1 D4가 「후속 ADR」로 미룬 키워드(D3)와 「DND 스케줄/조용한 시간」(D13)을 정해요. 멘션 예외·일시 중지의 뜻은 그대로예요.
