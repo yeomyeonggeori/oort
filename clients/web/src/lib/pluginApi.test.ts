@@ -176,7 +176,7 @@ describe("plugin API wire boundary", () => {
     expect(
       catalog.plugins.map((plugin) => [plugin.pluginId, plugin.logoKey, plugin.category, plugin.publisherName])
     ).toEqual([
-      ["com.momo.plugins.drive", "google-drive", "files", "momo"],
+      ["com.momo.plugins.drive", "google-drive", "files", "oort"],
       ["com.momo.plugins.github", "github", "developer", "GitHub"],
       ["com.momo.plugins.gmail", "gmail", "communication", "Google"],
       ["com.momo.plugins.google-calendar", "google-calendar", "productivity", "Google"],
