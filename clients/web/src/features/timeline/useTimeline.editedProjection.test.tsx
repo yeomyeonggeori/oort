@@ -646,6 +646,11 @@ describe("useTimeline — 버린 편집은 꼬리 되읽기가 완전한 투영�
     expect(threadRollup(row)?.replyCount).toBe(3);
     expect(row.replyTo).toEqual(QUOTE);
     expect(row.attachments).toEqual([PHOTO]);
+    // 버린 편집은 도착 장부에도 흔적을 남기지 않았다 — 이 줄은 이 타임라인에 **처음** 든 남의
+    // 줄이라 복구 표지가 선다. (편집 프레임이 줄 id 를 「이미 든 줄」로 등록했다면 여기서 표지가
+    // 사라진다.)
+    expect(out.markers).toHaveLength(1);
+    expect(out.markers[0]).toMatchObject({ source: "backfill", seq: 12 });
   });
 });
 
