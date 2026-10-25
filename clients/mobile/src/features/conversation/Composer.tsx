@@ -43,7 +43,6 @@ import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   Animated,
-  Easing,
   Image,
   Keyboard,
   Platform,
@@ -99,7 +98,10 @@ import {
 } from '../attachments/picker';
 import {photoRoom} from '../attachments/photoLibrary';
 import {nativePhotoPorts} from '../attachments/photosNative';
-import {MENU_CLOSE_WATCHDOG_MS} from '../../design/motion';
+import {
+  COMPOSER_EXPAND_SPRING,
+  MENU_CLOSE_WATCHDOG_MS,
+} from '../../design/motion';
 import {haptics} from '../../lib/haptics';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 
@@ -613,11 +615,22 @@ const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + CONV.composerTopAir;
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
 const SEND_SLOP = slopTo(CONV.composerCircle);
 
-// ---- 두 상태 (#4305) ----------------------------------------------------------
+// ---- 두 상태 (#4305 → #4456) --------------------------------------------------
 // 입력창은 **접힘**(한 줄 알약: + · 글 · 보내기)과 **펼침**(글 칸 위, 도구 줄 아래: + 가 왼쪽 아래,
-// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **글이 있다**
-// 하나다 — 포커스가 아니다. 포커스로 펼치면 「보내서 비면 같은 프레임에 한 줄로 돌아온다」(owner 10-24,
-// iOS 3053 실기)가 키보드가 떠 있는 동안 성립하지 않는다(보낸 직후에도 포커스는 그대로다).
+// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **포커스가 있다**
+// 또는 **글이 있다**(`focused || text !== ''`)다.
+//
+// #4305 는 글이 있을 때만 펼쳤다: 「포커스로 펼치면 보내서 비는 순간 같은 프레임에 한 줄로 돌아오는 것이
+// 키보드가 떠 있는 동안 성립하지 않는다」(owner 10-24, iOS 3053 실기 — 보낸 직후에도 포커스는 그대로다).
+// owner 10-25 가 그 결정을 뒤집었다(「치기 시작해야 바뀌는 게 아니라 포커싱만 돼도」). 그 근거가 풀리는 까닭은
+// **두 축이 갈라져 있어서**다. 알약이 펼쳐지는가(`expanded` — 포커스 또는 글)와 글 칸의 높이를 한 줄로 못 박는가
+// (`text === ''` — 아래 `TextInput` 의 `height`)는 다른 문제고, 보낸 뒤 두 줄 높이가 남던 결함을 고친 것은 뒤쪽의
+// 못 박기다. 그래서 포커스가 남은 채 보내면 글 칸은 한 줄로 못 박힌 채 도구 줄만 남는다 — **빈 펼침 높이**
+// (한 줄 + 도구 줄)다. 여러 줄 높이는 남지 않는다.
+//
+// 접힘은 포커스를 잃고(`onBlur` — 끌어 내리기·`Keyboard.dismiss`·다른 화면으로 감이 모두 이 길이다) 글도 없을
+// 때다. 글이 남아 있으면 포커스를 잃어도 펼친 채다. 펼침은 **입력창이 포커스를 쥔 동안**이지 키보드가 보이는
+// 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다.
 //
 // 두 원은 어느 상태에서도 **알약 바닥에서 같은 자리**에 선다(절대 배치). 알약이 위로 자라고 도구 줄이
 // 그 아래 원 곁에 생기므로 「+ 가 왼쪽 아래로 내려간다」는 인상은 글 칸이 원 위로 넓게 펼쳐지는
@@ -629,8 +642,8 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 // 입력창이 이미 가진 멘션 후보를 연다). 이모지는 자판의 지구본으로 이미 되고(앱에 따로 고르개가 없다),
 // 서식은 이 입력창이 마크다운을 그대로 쓰는 곳이라 할 일이 없다. 마이크는 #4306 이 `TOOL_SLOTS` 에
 // 붙는다 — 눌러서 아무 일도 안 하는 버튼은 두지 않는다.
-const EXPAND_MS = 160;
-const EXPAND_EASING = Easing.out(Easing.cubic);
+// 펼침 곡선은 `design/motion.ts` 의 `COMPOSER_EXPAND_SPRING` 이다 — 160ms ease-out 과 Buzz 스프링을 키보드 곡선에
+// 맞대어 잰 숫자와 고른 근거가 그 절에 있다.
 /** 끌어 내리기: 이만큼(pt) 내려가고 세로가 가로의 두 배를 넘으면 자판을 내린다(Buzz `Listener`). */
 const DISMISS_DRAG_PT = 28;
 /** 도구 줄에 서는 도구들. 마이크(#4306)·예약 보내기(#4216)·사진 여러 장(#4296)은 여기에 붙는다. */
@@ -642,6 +655,9 @@ const TOOL_COPY = {mention: '@로 부르기'} as const;
  * 배수를 곱한 줄 상자 + 세로 크롬) 중 큰 쪽이다. 글이 비면 RN iOS(Fabric)가 멀티라인 입력창의 내재
  * 크기를 다시 재지 않아 두 줄 높이로 남던 것(owner 10-24)을, 높이를 이 값으로 못 박아 같은 프레임에
  * 돌려놓는다.
+ *
+ * 이름은 접힘이지만 값은 「글이 빈 한 줄」의 높이다(#4456). 포커스로 펼친 **빈** 입력창도 같은 값이다 —
+ * 빈 펼침 높이는 이 값 + 도구 줄(`TOUCH_TARGET`)이다.
  */
 export function composerCollapsedHeight(fontScale: number): number {
   return Math.max(TOUCH_TARGET, Math.ceil(line.body * fontScale) + INPUT_CHROME);
@@ -1444,9 +1460,19 @@ export function Composer({
     onTypingRef.current?.();
   }, [setKeyBlocked]);
 
+  // 포커스 (#4456). 입력창이 캐럿을 쥔 동안 true — 펼침의 조건 하나다(아래 `expanded`). 정본은 네이티브의
+  // `onFocus`/`onBlur` 이고 다른 곳에서 쓰지 않는다: 보낸 뒤에도 포커스는 그대로이므로 보내기가 이 값을
+  // 건드리면 안 된다(건드리면 보낸 직후 자판은 떠 있는데 한 줄 알약이 된다 — #4456 이 고친 바로 그 모양이다).
+  const [focused, setFocused] = useState(false);
+
   // 안내를 읽은 뒤 고치러 돌아왔다 — 자판이 다시 오르면 안내가 한 화면을 넘는다
   // (R3-B1). 안내는 alert 로 이미 읽혔고, 키가 남아 있으면 다음 전송이 다시 막는다.
-  const onInputFocus = useCallback(() => setKeyBlocked(false), [setKeyBlocked]);
+  const onInputFocus = useCallback(() => {
+    setKeyBlocked(false);
+    // 햅틱은 없다 — 포커스·펼침은 소리 없이 온다(#4331: 입력 길의 햅틱은 보내기 light 한 번뿐).
+    setFocused(true);
+  }, [setKeyBlocked]);
+  const onInputBlur = useCallback(() => setFocused(false), []);
 
   const onSelectionChange = useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1616,8 +1642,10 @@ export function Composer({
     offline !== true &&
     attachmentSurface.drafts.length < MAX_ATTACHMENTS_PER_MESSAGE;
 
-  // ---- 두 상태 (#4305) ------------------------------------------------------
-  const expanded = text !== '';
+  // ---- 두 상태 (#4305 → #4456) ----------------------------------------------
+  // 포커스 **또는** 글. 포커스를 받는 렌더(`onFocus` 가 `focused` 를 올린 그 커밋)가 펼침의 첫 프레임이고, 아래
+  // 효과가 같은 커밋에서 스프링을 건다 — 키보드가 오르는 것과 함께 시작한다.
+  const expanded = focused || text !== '';
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const expandedRef = useRef(expanded);
@@ -1625,17 +1653,20 @@ export function Composer({
     if (expandedRef.current === expanded) return;
     expandedRef.current = expanded;
     progress.stopAnimation();
-    // 접힘은 **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다): 보낸 뒤에도 키보드가 떠 있는 동안 높이가
+    // 접힘(포커스를 잃고 글도 없다)은 **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다): 보낸 뒤에도 높이가
     // 늘어난 채 남던 실기 결함(owner 10-24)을 애니메이션으로 가리지 않는다. 펼침만 움직이고, 「동작 줄이기」
-    // 에서는 그것도 즉시다.
+    // 에서는 그것도 즉시다. 보낸 뒤 포커스가 남아 있으면 `expanded` 가 안 바뀌므로 여기에 오지도 않는다
+    // (빈 펼침 높이로 남는다 — 글 칸을 한 줄로 못 박는 것은 아래 `TextInput` 의 `height`).
     if (!expanded || reduceMotion.current) {
       progress.setValue(expanded ? 1 : 0);
       return;
     }
-    Animated.timing(progress, {
+    // 곡선은 Buzz 스프링이다(근거: `design/motion.ts` 의 「입력창 펼침」). `overshootClamping` — 진행값이 1 을 넘으면
+    // 도구 줄이 제 높이보다 커지고 글 칸 양옆 여백이 음수가 된다. 레이아웃 속성을 움직이므로 JS 구동이다.
+    Animated.spring(progress, {
       toValue: 1,
-      duration: EXPAND_MS,
-      easing: EXPAND_EASING,
+      ...COMPOSER_EXPAND_SPRING,
+      overshootClamping: true,
       useNativeDriver: false,
     }).start();
   }, [expanded, progress, reduceMotion]);
@@ -2127,6 +2158,11 @@ export function Composer({
           // 글이 비면 높이를 **명시**한다 (#4305, owner 10-24): 값만 비우면 iOS(Fabric)가 멀티라인 입력창의
           // 내재 크기를 다시 재지 않아 두 줄 높이가 다시 칠 때까지 남았다. 글이 있을 때는 예전처럼 콘텐츠가
           // 정한다(`maxHeight` 까지).
+          //
+          // **조건은 `text === ''` 이지 「접힘」이 아니다** (#4456). 포커스로 펼친 빈 입력창도, 포커스가 남은 채
+          // 보내서 빈 입력창도 같은 한 줄로 못 박힌다 — 그래서 보낸 뒤의 높이는 한 줄 + 도구 줄(빈 펼침 높이)이고
+          // 여러 줄 높이가 남지 않는다. 여기를 `!expanded` 로 바꾸면 보낸 직후(포커스가 남은 펼침)가 못 박히지
+          // 않아 owner 10-24 의 결함이 그대로 돌아온다.
           style={[
             styles.input,
             {maxHeight},
@@ -2141,6 +2177,7 @@ export function Composer({
           onChangeText={onChangeText}
           onSelectionChange={onSelectionChange}
           onFocus={onInputFocus}
+          onBlur={onInputBlur}
           // 문장은 코어가 든다 (#1384). 이 두 줄은 웹 `chat/Composer.tsx` 와
           // **같은 문자열을 각자 짓고** 있었다: 값이 같아서 안 보였을 뿐,
           // 한쪽을 고치는 날 갈라진다. 오프라인 문장이 이미 걸어 둔 길이다.
