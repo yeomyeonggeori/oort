@@ -26,6 +26,7 @@ export {
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
   type AgentActivityList,
+  type AgentLivenessLookup,
   type AgentNameLookup,
   type AgentNameParts,
   type AgentTurnBadgeCopy,

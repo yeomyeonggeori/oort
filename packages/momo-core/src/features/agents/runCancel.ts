@@ -1,5 +1,6 @@
 import { ApiError, type AgentRunCancelResult } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import type { ServerRunFacts } from "./workingSignal";
 
 // =============================================================================
 // 「멈춰라」 — what a human's stop actually does, and what it does not (goal
@@ -107,9 +108,10 @@ export function cancelReceipt(
 /** 200 → the receipt, as an outcome. */
 export function cancelSucceeded(
   result: AgentRunCancelResult,
-  agentName: string
+  agentName: string,
+  wording: CancelWording = STOP_WORDING
 ): CancelOutcome {
-  return { kind: "cancelled", sentence: cancelReceipt(result, agentName) };
+  return { kind: "cancelled", sentence: wording.receipt(result, agentName) };
 }
 
 /**
@@ -210,3 +212,102 @@ export function cancelFailureOutcome(error: unknown): CancelOutcome {
     sentence: "중단하지 못했어요. 잠시 뒤에 다시 해 주세요.",
   };
 }
+
+// ---- 아직 아무도 가져가지 않은 요청의 말 (#4285) ------------------------------
+//
+// 같은 호출(`POST …/agent-runs/{run}/cancel`)이고 같은 규칙(채널의 사람 멤버만, 한 겹의
+// 확인, 409는 오류가 아니라 답)이다. 달라지는 것은 **낱말뿐**이다. 아직 시작하지 않은 일에
+// 「중단」은 돌고 있는 것을 세운다는 말이라 거짓이다: 이 요청은 에이전트가 받은 적이 없고
+// 취소하면 그냥 끝난다. 그래서 `queued`(아무도 가져가지 않음)인 run은 「취소」로 말한다.
+// 가져간(`claimed`) 뒤부터는 에이전트가 일을 잡았으므로 「중단」이다.
+//
+// 두 낱말을 컨트롤마다 고르게 하면 같은 run이 홈 카드에서는 「취소」, 대화 아래에서는
+// 「중단」이 된다. 그래서 고르는 규칙(`cancelWordingFor`)과 문장을 한 벌로 묶어 둔다.
+
+/** 컨트롤이 쓰는 낱말·문장 한 벌. `STOP_WORDING`이 기존 「중단」이다. */
+export interface CancelWording {
+  /** 첫 탭(묻는 단추). */
+  action: string;
+  /** 두 번째 탭(보내는 단추). */
+  commit: string;
+  /** 보내는 동안. */
+  busy: string;
+  /** 보조기술이 첫 탭에서 읽는 이름. 이 탭은 보내지 않고 묻는다는 것을 이름이 말한다. */
+  armName: string;
+  /** 첫 탭의 보조기술 힌트. 라벨이 행동을 약속하지 않고 힌트가 「물어요」를 말한다. */
+  armHint: string;
+  /** 「그대로 두기」의 보조기술 이름. */
+  dismissName: string;
+  /** 첫 탭이 확인 줄로 바뀐 것을 화면을 보지 않는 사람에게 알리는 한 문장. */
+  announce: (consequence: string) => string;
+  /** 확인 문장. 한 줄에 합쳐진 동시 실행이 둘 이상이면 그 사실을 미리 말한다. */
+  consequence: (runCount: number | undefined) => string;
+  /** 200 뒤의 영수증. */
+  receipt: (result: AgentRunCancelResult, agentName: string) => string;
+}
+
+/** 기존의 「중단」. 돌고 있는(가져간) 실행에 쓴다. */
+export const STOP_WORDING: CancelWording = {
+  action: CANCEL_ACTION_LABEL,
+  commit: CANCEL_COMMIT_LABEL,
+  busy: CANCEL_BUSY_LABEL,
+  armName: `실행 ${CANCEL_ACTION_LABEL}, 확인 필요`,
+  armHint: "누르면 중단할지 물어요.",
+  dismissName: "중단하지 않기",
+  announce: (consequence) => `${consequence} 중단할지 물어요.`,
+  consequence: cancelConfirmSentence,
+  receipt: cancelReceipt,
+};
+
+/** 아직 아무도 가져가지 않은 요청의 확인 문장. */
+export const CANCEL_UNTAKEN_CONFIRM_SENTENCE =
+  "취소하면 이 요청은 여기서 끝나요. 같은 일은 다시 시킬 수 있어요.";
+
+/**
+ * 확인 문장에 합쳐진 동시 요청의 수를 덧붙인다. 합쳐진 줄이 「대기」인 것은 모두 대기일 때뿐이고
+ * (`mergeAgentWorkingSignals`: 일하는 run이 하나라도 있으면 줄이 일하는 쪽으로 합쳐진다), 그때
+ * 줄이 쥔 run은 줄의 맨 앞(`queuePosition`이 가장 작은 것)이다.
+ */
+export function cancelUntakenConfirmSentence(runCount: number | undefined): string {
+  if (runCount === undefined || runCount <= 1) return CANCEL_UNTAKEN_CONFIRM_SENTENCE;
+  return `${CANCEL_UNTAKEN_CONFIRM_SENTENCE} 이 에이전트는 이 대화에서 요청 ${runCount}개가 기다리고 있고, 그중 맨 앞의 하나만 취소해요.`;
+}
+
+/**
+ * 영수증. 가져간 적 없는 run에는 이어진 작업 세션이 없으므로 요청을 취소했다고만 말한다. 그래도
+ * 세션이 이어져 있다면(서버가 그렇게 답했다면) 「중단」의 영수증이 그 사실을 말한다 — 답이 말한 것을
+ * 줄이지 않는다.
+ */
+export function cancelUntakenReceipt(
+  result: AgentRunCancelResult,
+  agentName: string
+): string {
+  if (result.workSessionsTerminated || result.linkedWorkSessionIds.length > 0) {
+    return cancelReceipt(result, agentName);
+  }
+  return `${agentName}의 요청을 취소했어요.`;
+}
+
+/** 아직 아무도 가져가지 않은 요청의 「취소」. */
+export const UNTAKEN_WORDING: CancelWording = {
+  action: "취소",
+  commit: "취소 확정",
+  busy: "취소 중",
+  armName: "요청 취소, 확인 필요",
+  armHint: "누르면 취소할지 물어요.",
+  dismissName: "취소하지 않기",
+  announce: (consequence) => `${consequence} 취소할지 물어요.`,
+  consequence: cancelUntakenConfirmSentence,
+  receipt: cancelUntakenReceipt,
+};
+
+/**
+ * 어느 낱말을 쓰는가: 서버가 「아무도 가져가지 않았다」(`queued`)고 답한 run만 「취소」다.
+ * 서버가 모르는 run(관리형·옛 서버)은 알 수 없으므로 기존 「중단」이다.
+ */
+export function cancelWordingFor(
+  facts: Pick<ServerRunFacts, "phase"> | null | undefined
+): CancelWording {
+  return facts?.phase === "queued" ? UNTAKEN_WORDING : STOP_WORDING;
+}
+

@@ -5458,6 +5458,15 @@ export interface AgentRunProgress {
   finishedAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
+  /**
+   * 부른 사람이 없는 시스템 작업(환영 run, ADR-0181)인가. **서버가 보낸 값이 아니다.**
+   * 진행 읽기에는 환영 표지(`welcome_kind`)가 없고 ADR-0200 증보 3 E6은 새 필드를 만들지
+   * 않았다. 그래서 와이어 경계(`agentRunProgressFromWire`)가 「트리거 메시지도 사람이 쓴
+   * 작업 제목도 없다」로 가른다. 서버의 트리거는 넷이고(멘션·스레드 답글은 메시지 id,
+   * 작업은 필수 제목, 환영만 둘 다 없다) 그 밖의 모양은 만들지 않는다. 서버가 새 트리거를
+   * 더하면 이 판별을 서버의 명시 표지로 바꾼다(#4285 미결 결정).
+   */
+  system?: true;
 }
 
 const AGENT_RUN_PHASES = new Set<AgentRunPhase>([
@@ -5537,6 +5546,10 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
   const aheadTotal = optionalPositiveInt(source, "aheadTotal");
   const startedAtMs = optionalFiniteNumber(source, "startedAtMs");
   const finishedAtMs = optionalFiniteNumber(source, "finishedAtMs");
+  // 「부른 사람이 없다」: 메시지도, 사람이 쓴 작업 제목·멘션 발췌도 없다(`AgentRunProgress.system`).
+  const system =
+    (triggerMessageId === undefined || triggerMessageId === "") &&
+    (triggerSummary === undefined || triggerSummary.trim() === "");
   return {
     id: id.toLowerCase(),
     channelId: channelId.toLowerCase(),
@@ -5548,6 +5561,7 @@ export function agentRunProgressFromWire(value: unknown): AgentRunProgress {
     ahead,
     createdAtMs,
     updatedAtMs,
+    ...(system ? { system: true as const } : {}),
     ...(triggerMessageId === undefined
       ? {}
       : { triggerMessageId: triggerMessageId.toLowerCase() }),

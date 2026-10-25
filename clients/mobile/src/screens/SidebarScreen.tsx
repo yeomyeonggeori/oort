@@ -6,6 +6,7 @@ import {channelLabel, channelLabelParts, idKey, memberFor} from '@momo/core/feat
 import {readProjectionPhase, rosterLoaded} from '@momo/core/features/sidebar/goneDm';
 import {DM_CLOSED_LIST_LABEL, dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
 import {mayActOnLiveness} from '@momo/core/features/agents/liveness';
+import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {
   dmPeerStatusDot,
   type StatusDot as StatusDotModel,
@@ -56,7 +57,13 @@ import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {useAgentWorkingSignals} from '../features/agents/workingSignal';
 import {StatusDot} from '../features/presence/StatusDot';
 import {useCollapsedSections, visibleRows} from '../features/home/collapsedSections';
-import {buildWorkingCard, type WorkingCardModel} from '../features/home/workingCard';
+import {
+  buildWorkingCard,
+  cardCancelRunId,
+  leadWorkingTurn,
+  type WorkingCardModel,
+} from '../features/home/workingCard';
+import {WorkingCardStop} from '../features/home/WorkingCardStop';
 import {workspaceHeading, type WorkspaceLogo} from '../features/home/workspaceLogo';
 import {
   buildSidebarSections,
@@ -448,14 +455,27 @@ export default function SidebarScreen({
     () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
     [channelsQuery.groups],
   );
+  // 카드가 아무도 가져가지 않은 사람 요청을 말하면, 그 에이전트의 서버 생존 판정(D4)을 읽어 근거
+  // 줄 맨 앞에 싣는다(#4285). 누구를 읽을지는 카드를 만들기 전에 알아야 한다. 읽지 않는 때(다른
+  // 상태의 카드)는 쿼리가 서지 않는다.
+  const cardNowMs = Date.now();
+  const leadTurn = leadWorkingTurn(signals, cardNowMs);
+  const waitingAgentId =
+    leadTurn !== undefined && isUntakenHumanRun(leadTurn.server)
+      ? leadTurn.memberId
+      : null;
+  const waitingLiveness = useAgentLiveness(waitingAgentId);
   const card = buildWorkingCard({
     signals,
-    nowMs: Date.now(),
+    nowMs: cardNowMs,
     directory: directoryQuery.directory,
     channels: allChannels,
     selfMemberId: member.id,
     live: railLive,
+    liveness: waitingAgentId === null ? undefined : waitingLiveness.liveness,
   });
+  // 「취소」를 내는 카드(아무도 가져가지 않은 채 N분을 넘은 요청, 연결이 살아 있을 때)와 그 실행.
+  const cardCancelId = card === null ? null : cardCancelRunId(card);
 
   // 당겨서 새로고침 (goal RN-B4b / #1026). 채널·명부·읽음 상태 — 이 목록이 그리는
   // 세 가지 전부다. 안 읽음 배지만 30초 폴링을 갖고 있는데(`useReadStates`), 당긴
@@ -798,6 +818,17 @@ export default function SidebarScreen({
                     directory={directoryQuery.directory}
                     onPress={() =>
                       onOpenConversation(card.channelId, card.conversationTitle)
+                    }
+                    // 아무도 가져가지 않은 채 N분을 넘은 요청에만 「취소」가 선다(`cardCancelRunId`).
+                    stop={
+                      cardCancelId !== null ? (
+                        <WorkingCardStop
+                          runId={cardCancelId}
+                          channelId={card.channelId}
+                          agentName={card.name}
+                          runCount={card.runCount ?? undefined}
+                        />
+                      ) : undefined
                     }
                   />
                 </>
@@ -1273,11 +1304,18 @@ export function WorkingCard({
   card,
   directory,
   onPress,
+  stop,
 }: {
   card: WorkingCardModel;
   /** 있으면 에이전트의 프로필 사진이 서고, 없거나 사진이 없으면 로봇 사각이 선다. */
   directory?: Directory;
   onPress: () => void;
+  /**
+   * 카드 아래에 서는 「취소」 컨트롤 (#4285). 카드는 만들지 않고 자리만 내준다 — 취소는 워크스페이스와
+   * react-query를 아는 화면의 일이다(`AgentActivityBar.renderStop`과 같은 이유). 있으면 카드 본문만
+   * 대화를 여는 면이 되고, 컨트롤은 그 면 **밖**에 선다(누르는 면 안에 누르는 면을 겹치지 않는다).
+   */
+  stop?: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
@@ -1292,77 +1330,109 @@ export function WorkingCard({
         ? palette.textMuted
         : palette.agent;
   const pulse = card.live && card.state === 'working' && !reduceMotion;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={card.accessibilityLabel}
-      accessibilityHint="그 대화를 엽니다."
-      onPress={onPress}
-      style={({pressed}) => [styles.cardPress, pressed && styles.rowPressed]}
-      testID="home-working-card">
-      <GlassSurface radius={HOME.cardRadius} style={styles.card}>
-        <View style={styles.cardTop}>
-          {directory ? (
-            <Avatar directory={directory} memberId={card.memberId} size={HOME.cardFace} />
-          ) : (
-            <AgentSquare size={HOME.cardFace} corner={HOME.cardAgentCorner} glyph={HOME_ICON_SIZE.bot} />
-          )}
-          <Text
-            style={styles.cardName}
-            numberOfLines={1}
-            // 카드의 머리 줄은 이름 · 태그 · 상태 셋이 한 줄에 선다. 큰 글씨에서 이름만
-            // 끝없이 자라면 「김…」 한 글자로 잘린다(AX 캡처) — 바의 글자와 같은 상한.
-            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-            {card.name}
-            {card.handle ? <Text style={styles.rowHandle}> {card.handle}</Text> : null}
-          </Text>
-          <View style={styles.tag}>
-            <Text style={styles.tagText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-              에이전트
-            </Text>
-          </View>
-          <View style={styles.live}>
-            <LiveDot pulse={pulse} color={tone} />
-            <Text
-              style={[styles.liveText, {color: tone}]}
-              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-              testID="home-working-state">
-              {card.liveText}
-            </Text>
-          </View>
-        </View>
-        {/* 문장이라 어절에서 끊는다(`Sentence`, 리뷰 H1 — 「…상태입 / 니다」). 큰
-            글씨에서 한 줄이 두 줄로 잘려 할 일이 사라지지 않게 넷까지 연다(M4). */}
-        <Sentence
-          style={[styles.cardLine, !card.live && styles.cardLineStale]}
-          numberOfLines={4}
-          testID="home-working-line">
-          {card.place ? <Text style={styles.cardPlace}>{card.place}</Text> : null}
-          {card.place && card.headline ? ' · ' : null}
-          {card.headline ?? (card.place ? null : '대화')}
-          {/* 앞에는 언제나 무엇인가 선다(장소·한 줄, 둘 다 없으면 「대화」). */}
-          {card.detail ? ` · ${card.detail}` : null}
-          {card.others > 0 ? ` · 그 밖에 ${card.others}건` : null}
-        </Sentence>
-        {card.live ? null : (
-          <Sentence style={styles.cardStale} testID="home-working-stale">
-            {TURN_STALE_SENTENCE}
-          </Sentence>
+  const body = (
+    <>
+      <View style={styles.cardTop}>
+        {directory ? (
+          <Avatar directory={directory} memberId={card.memberId} size={HOME.cardFace} />
+        ) : (
+          <AgentSquare size={HOME.cardFace} corner={HOME.cardAgentCorner} glyph={HOME_ICON_SIZE.bot} />
         )}
-        <View style={styles.prog} testID={`home-working-steps-${card.step}`}>
-          {([1, 2, 3] as const).map(step => (
-            <View
-              key={step}
-              style={[
-                styles.progStep,
-                !card.live && styles.progStepStale,
-                step <= card.step && (card.live ? styles.progStepOn : styles.progStepOnStale),
-              ]}
-            />
-          ))}
+        <Text
+          style={styles.cardName}
+          numberOfLines={1}
+          // 카드의 머리 줄은 이름 · 태그 · 상태 셋이 한 줄에 선다. 큰 글씨에서 이름만
+          // 끝없이 자라면 「김…」 한 글자로 잘린다(AX 캡처) — 바의 글자와 같은 상한.
+          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {card.name}
+          {card.handle ? <Text style={styles.rowHandle}> {card.handle}</Text> : null}
+        </Text>
+        <View style={styles.tag}>
+          <Text style={styles.tagText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+            에이전트
+          </Text>
         </View>
+        <View style={styles.live}>
+          <LiveDot pulse={pulse} color={tone} />
+          <Text
+            style={[styles.liveText, {color: tone}]}
+            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+            testID="home-working-state">
+            {card.liveText}
+          </Text>
+        </View>
+      </View>
+      {/* 문장이라 어절에서 끊는다(`Sentence`, 리뷰 H1 — 「…상태입 / 니다」). 큰
+          글씨에서 한 줄이 두 줄로 잘려 할 일이 사라지지 않게 넷까지 연다(M4). */}
+      <Sentence
+        style={[styles.cardLine, !card.live && styles.cardLineStale]}
+        numberOfLines={4}
+        testID="home-working-line">
+        {card.place ? <Text style={styles.cardPlace}>{card.place}</Text> : null}
+        {card.place && card.headline ? ' · ' : null}
+        {card.headline ?? (card.place ? null : '대화')}
+        {/* 앞에는 언제나 무엇인가 선다(장소·한 줄, 둘 다 없으면 「대화」). */}
+        {card.detail ? ` · ${card.detail}` : null}
+        {card.others > 0 ? ` · 그 밖에 ${card.others}건` : null}
+      </Sentence>
+      {/* 아무도 가져가지 않은 채 N분을 넘은 요청의 이유 한 문장(#4285). 서버 판정에 근거가 있을
+          때만 선다 — 근거 없이 「연결이 꺼져 있을 수 있어요」를 말하지 않는다. */}
+      {card.reason !== null ? (
+        <Sentence style={styles.cardReason} testID="home-working-reason">
+          {card.reason}
+        </Sentence>
+      ) : null}
+      {card.live ? null : (
+        <Sentence style={styles.cardStale} testID="home-working-stale">
+          {TURN_STALE_SENTENCE}
+        </Sentence>
+      )}
+      <View style={styles.prog} testID={`home-working-steps-${card.step}`}>
+        {([1, 2, 3] as const).map(step => (
+          <View
+            key={step}
+            style={[
+              styles.progStep,
+              !card.live && styles.progStepStale,
+              step <= card.step && (card.live ? styles.progStepOn : styles.progStepOnStale),
+            ]}
+          />
+        ))}
+      </View>
+    </>
+  );
+  if (stop === undefined || stop === null) {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={card.accessibilityLabel}
+        accessibilityHint="그 대화를 엽니다."
+        onPress={onPress}
+        style={({pressed}) => [styles.cardPress, pressed && styles.rowPressed]}
+        testID="home-working-card">
+        <GlassSurface radius={HOME.cardRadius} style={styles.card}>
+          {body}
+        </GlassSurface>
+      </Pressable>
+    );
+  }
+  // 「취소」가 있는 카드: 본문만 대화를 여는 면이고, 컨트롤은 그 면 밖(같은 유리 안, 본문 아래)에
+  // 선다. 누르는 면 안에 누르는 면을 겹치면 컨트롤 탭이 대화를 여는 탭과 겨룬다.
+  return (
+    <View style={styles.cardPress}>
+      <GlassSurface radius={HOME.cardRadius} style={[styles.card, styles.cardSplit]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={card.accessibilityLabel}
+          accessibilityHint="그 대화를 엽니다."
+          onPress={onPress}
+          style={({pressed}) => [styles.cardBody, pressed && styles.rowPressed]}
+          testID="home-working-card">
+          {body}
+        </Pressable>
+        <View style={styles.cardStop}>{stop}</View>
       </GlassSurface>
-    </Pressable>
+    </View>
   );
 }
 
@@ -1721,6 +1791,29 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     color: color.textMuted,
     marginLeft: HOME.indent,
     marginBottom: HOME.lineBottom,
+  },
+  // 아무도 가져가지 않은 요청의 이유 한 문장(#4285). 끊긴 레일의 문장(`cardStale`)과 같은 자리·같은 글자다.
+  cardReason: {
+    fontSize: font.meta,
+    color: color.textMuted,
+    marginLeft: HOME.indent,
+    marginBottom: HOME.lineBottom,
+  },
+  // 「취소」가 있는 카드(#4285): 유리의 안쪽 여백을 본문과 컨트롤 줄이 나눠 갖는다. 본문만 눌리는
+  // 면이라 눌림 배경이 카드의 윗모서리를 따른다.
+  cardSplit: {paddingTop: 0, paddingHorizontal: 0, paddingBottom: 0},
+  cardBody: {
+    paddingTop: HOME.cardPadTop,
+    paddingHorizontal: HOME.cardPadX,
+    paddingBottom: space.xs,
+    borderTopLeftRadius: HOME.cardRadius,
+    borderTopRightRadius: HOME.cardRadius,
+  },
+  // 컨트롤의 글자가 본문 글자 기둥(`HOME.indent`)에 맞는다: 누르는 상자가 가로 여백 `space.sm`을 갖는다.
+  cardStop: {
+    paddingRight: HOME.cardPadX,
+    paddingLeft: HOME.cardPadX + HOME.indent - space.sm,
+    paddingBottom: space.xs,
   },
   prog: {
     marginLeft: HOME.indent,

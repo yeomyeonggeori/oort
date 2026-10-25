@@ -47,6 +47,7 @@ import {
   runList,
 } from "@momo/core/features/agents/runLedger";
 import type { AgentRunProgress, Channel, RosterMember } from "@momo/core/lib/api";
+import { cancelWordingFor } from "@momo/core/features/agents/runCancel";
 import { isOpenRunPhase } from "@momo/core/features/agents/runPhase";
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
@@ -260,6 +261,8 @@ export function AgentWorkPanel() {
         agentName={name}
         open={server !== null && isOpenRunPhase(server.phase)}
         live={railLive}
+        // 아직 아무도 가져가지 않은 요청은 「취소」, 가져간 뒤는 「중단」(#4285).
+        wording={cancelWordingFor(server)}
       />
       <PanelBody
         log={log}

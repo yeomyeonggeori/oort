@@ -1,12 +1,10 @@
 import {cancelAgentRun} from '@momo/core/lib/api';
 import {
-  CANCEL_ACTION_LABEL,
-  CANCEL_BUSY_LABEL,
-  CANCEL_COMMIT_LABEL,
-  cancelConfirmSentence,
   cancelFailureOutcome,
   cancelSucceeded,
+  STOP_WORDING,
   type CancelOutcome,
+  type CancelWording,
 } from '@momo/core/features/agents/runCancel';
 import React, {useCallback, useRef, useState} from 'react';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
@@ -51,6 +49,7 @@ export function StopTurnControl({
   onOutcome,
   testIDPrefix = 'turn-stop',
   initialArmed = false,
+  wording = STOP_WORDING,
 }: {
   runId: string;
   /**
@@ -70,6 +69,11 @@ export function StopTurnControl({
   onOutcome: (outcome: CancelOutcome) => void;
   testIDPrefix?: string;
   /**
+   * 낱말·문장 한 벌(`cancelWordingFor`). 아직 아무도 가져가지 않은 요청은 「취소」, 가져간 뒤는
+   * 「중단」이다(#4285). 보내는 호출과 409·오류를 읽는 규칙은 둘이 같다.
+   */
+  wording?: CancelWording;
+  /**
    * 확인 단계에서 시작한다. **`measure/` 하네스 전용** — 근거와 규칙은
    * `features/inbox/ApprovalDecision.tsx` 의 같은 이름 prop 주석에 있고,
    * `__tests__/fillTokens.test.ts` 가 `src/` 전수에서 사용을 0 으로 단정한다.
@@ -84,7 +88,7 @@ export function StopTurnControl({
   const [tooFast, setTooFast] = useState(false);
   const armedAtMs = useRef(0);
 
-  const consequence = cancelConfirmSentence(runCount);
+  const consequence = wording.consequence(runCount);
 
   const arm = useCallback(() => {
     setArmed(true);
@@ -92,10 +96,8 @@ export function StopTurnControl({
     armedAtMs.current = Date.now();
     // 엄지 밑의 버튼이 방금 의미를 바꿨다. 화면을 보지 않는 사람에게 그 변화는
     // 소리로만 전달된다 — RN에는 포커스를 옮길 웹의 `focus()`가 없다.
-    AccessibilityInfo.announceForAccessibility(
-      `${consequence} 중단할지 물어요.`,
-    );
-  }, [consequence]);
+    AccessibilityInfo.announceForAccessibility(wording.announce(consequence));
+  }, [consequence, wording]);
 
   const commit = useCallback(async () => {
     // 무장하지 않은 중단은 전송되지 않는다. `armed`가 false면 확정 버튼이
@@ -113,7 +115,7 @@ export function StopTurnControl({
     try {
       const result = await cancelAgentRun(workspaceId, runId);
       setArmed(false);
-      onOutcome(cancelSucceeded(result, agentName));
+      onOutcome(cancelSucceeded(result, agentName, wording));
     } catch (error) {
       const outcome = cancelFailureOutcome(error);
       // 이미 끝난 실행은 더 물어볼 것이 없다. 확인 단계를 접는다 — 남겨 두면
@@ -123,7 +125,7 @@ export function StopTurnControl({
     } finally {
       setBusy(false);
     }
-  }, [agentName, armed, busy, onOutcome, runId, workspaceId]);
+  }, [agentName, armed, busy, onOutcome, runId, wording, workspaceId]);
 
   if (!armed) {
     return (
@@ -131,13 +133,13 @@ export function StopTurnControl({
         accessibilityRole="button"
         // 이 탭은 중단하지 않는다 — 중단할지 묻는다. 라벨이 행동을 약속하면
         // 화면을 보지 않는 사람은 이미 멈춘 줄 알고 손을 뗀다.
-        accessibilityLabel="실행 중단, 확인 필요"
-        accessibilityHint="누르면 중단할지 물어요."
+        accessibilityLabel={wording.armName}
+        accessibilityHint={wording.armHint}
         onPress={arm}
         hitSlop={8}
         style={({pressed}) => [styles.quiet, pressed && styles.pressed]}
         testID={`${testIDPrefix}-arm`}>
-        <Text style={styles.quietLabel}>{CANCEL_ACTION_LABEL}</Text>
+        <Text style={styles.quietLabel}>{wording.action}</Text>
       </Pressable>
     );
   }
@@ -148,7 +150,7 @@ export function StopTurnControl({
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="중단하지 않기"
+          accessibilityLabel={wording.dismissName}
           accessibilityState={{disabled: busy}}
           disabled={busy}
           onPress={() => setArmed(false)}
@@ -163,7 +165,7 @@ export function StopTurnControl({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={CANCEL_COMMIT_LABEL}
+          accessibilityLabel={wording.commit}
           accessibilityState={{disabled: busy, busy}}
           disabled={busy}
           onPress={() => void commit()}
@@ -175,7 +177,7 @@ export function StopTurnControl({
           ]}
           testID={`${testIDPrefix}-commit`}>
           <Text style={styles.commitLabel}>
-            {busy ? CANCEL_BUSY_LABEL : CANCEL_COMMIT_LABEL}
+            {busy ? wording.busy : wording.commit}
           </Text>
         </Pressable>
       </View>

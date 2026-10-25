@@ -4,14 +4,20 @@ import {
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
 import {
+  cancelWordingFor,
+  type CancelWording,
+} from '@momo/core/features/agents/runCancel';
+import {
   activityDetail,
   activityLines,
   activitySuffix,
   activityText,
   isRespondingLine,
+  MAX_ACTIVITY_LINES,
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
+  type AgentLivenessLookup,
 } from '@momo/core/features/agents/turnCopy';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
@@ -109,6 +115,7 @@ export function AgentActivityBar({
   nowMs,
   live,
   renderStop,
+  livenessFor,
   testID = 'composer-working',
 }: {
   turns: readonly AgentWorkingSignal[];
@@ -116,6 +123,13 @@ export function AgentActivityBar({
   nowMs: number;
   /** The realtime rail is connected, so a clock is measuring something. */
   live: boolean;
+  /**
+   * 에이전트의 서버 생존 판정(D4)을 찾는 함수. 아무도 가져가지 않은 요청의 근거 줄 맨 앞에 경고 라벨이
+   * 서고 「연결이 꺼져 있을 수 있어요」가 붙는 데에만 쓴다(#4285). 이 컴포넌트는 읽지 않고 받는다 —
+   * 읽기는 워크스페이스와 react-query를 아는 화면의 일이다(`renderStop`과 같은 이유). 생략하면 판정
+   * 없이 말한다.
+   */
+  livenessFor?: AgentLivenessLookup;
   /**
    * 이 턴을 멈추는 컨트롤 (goal RN-C1). 줄마다 하나이고, 이 컴포넌트는 그것을
    * **만들지 않고 자리만 내준다** — cancel은 워크스페이스와 react-query를 아는
@@ -129,16 +143,21 @@ export function AgentActivityBar({
     name: string;
     /** 이 줄로 합쳐진 동시 실행의 수 (2R M3). */
     runCount?: number;
+    /** 이 줄의 실행에 맞는 낱말: 아직 아무도 가져가지 않았으면 「취소」, 가져간 뒤는 「중단」 (#4285). */
+    wording: CancelWording;
   }) => React.ReactNode;
   testID?: string;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const {lines, overflowCount} = useMemo(
     () =>
-      activityLines(turns, memberId =>
-        memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+      activityLines(
+        turns,
+        memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+        MAX_ACTIVITY_LINES,
+        livenessFor,
       ),
-    [turns, directory],
+    [turns, directory, livenessFor],
   );
   /**
    * 줄에서 다시 찾을 수 있게, memberId → (runId, 합쳐진 실행 수). 병합 뒤에도
@@ -146,12 +165,17 @@ export function AgentActivityBar({
    * 접었는지이고, `runId`는 그중 가장 먼저 시작한 하나다 (2R M3).
    */
   const stops = useMemo(() => {
-    const out = new Map<string, {runId: string; runCount?: number}>();
+    const out = new Map<
+      string,
+      {runId: string; runCount?: number; wording: CancelWording}
+    >();
     for (const turn of turns) {
       if (turn.runId === undefined) continue;
       out.set(turn.memberId, {
         runId: turn.runId,
         ...(turn.runCount === undefined ? {} : {runCount: turn.runCount}),
+        // 아직 아무도 가져가지 않은 실행은 「취소」, 가져간 뒤는 「중단」(#4285).
+        wording: cancelWordingFor(turn.server),
       });
     }
     return out;
@@ -296,7 +320,7 @@ function ActivityRow({
         </View>
       ) : null}
       <Text
-        accessibilityLabel={activityText(line)}
+        accessibilityLabel={activityText(line, nowMs)}
         numberOfLines={1}
         ellipsizeMode="tail"
         style={[styles.activityText, styles.activityTextFlex]}>
@@ -309,7 +333,7 @@ function ActivityRow({
         {line.name.handle ? (
           <Text style={styles.activityText}>({line.name.handle})</Text>
         ) : null}
-        {activitySuffix(line)}
+        {activitySuffix(line, nowMs)}
       </Text>
       {responding ? <RespondingDots /> : null}
       {detail !== undefined ? (
