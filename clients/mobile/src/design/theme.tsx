@@ -90,6 +90,13 @@ import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
 // **한 번도 고른 적 없는 폰**뿐이다 — 저장된 선택은 그대로다(`readStoredAppearance`). 프로바이더
 // 밖(`DETACHED`)의 기본도 라이트다. 웹·데스크탑은 이번 범위가 아니라 기본이 시스템인 채다
 // (core `DEFAULT_APPEARANCE` 를 고치지 않고 폰의 기본만 여기서 따로 둔다).
+//
+// **OS 가 먼저 그리는 면도 같은 말을 해야 한다** (owner·planner 2026-10-26). 앱이 칠하는 면은 위의 스킴이
+// 정하지만, OS 가 칠하는 면은 알려 주지 않으면 기기 외양을 따른다.
+//   - 런치 화면·그 뒤 JS 첫 프레임까지의 루트 뷰: `LaunchBackground` 는 **라이트 한 색**이다(다크 변형 없음).
+//     기기가 다크여도 라이트로 뜬다. 다크를 고른 폰은 JS 첫 프레임에서 다크로 바뀌는 한 걸음을 진다(수용).
+//     `projectShape.test.ts` 의 #2668 묶음이 지킨다.
+//   - 키보드: `useKeyboardAppearance()` 가 풀린 스킴을 돌려주고 모든 `<TextInput>` 이 든다.
 // =============================================================================
 
 /** 실제로 화면에 서는 두 스킴. `null`(모름)은 여기까지 오지 않는다. */
@@ -309,6 +316,25 @@ export function usePalette(): Palette {
 /** 말풍선 개인 덮어쓰기(#4383). 말풍선을 그리는 자리가 읽는다. 프로바이더 밖이면 `undefined`(기본). */
 export function useBubbleChoice(): BubbleChoice | undefined {
   return useContext(ThemeContext).bubble;
+}
+
+/**
+ * OS 가 그리는 키보드의 모양(`TextInput.keyboardAppearance`). **앱이 지금 서 있는 스킴**을 따른다
+ * (#4526 · planner 2026-10-26).
+ *
+ * 키보드는 앱이 아니라 OS 가 그리고, 알려 주지 않으면 **기기 외양**을 따른다. 폰의 기본이 라이트가 된
+ * 뒤로(ADR-0189 증보 5) 아무것도 안 고른 다크 기기는 라이트 앱 위로 다크 키보드를 올렸다. 앱이 입히는
+ * 면은 앱의 스킴이 정하고, OS 가 입히는 이 면은 이 값이 맞춘다.
+ *
+ * 값은 고른 것(`choice`)이 아니라 **풀린 스킴**(`scheme`)이다 — 「시스템」을 고른 폰은 기기를 따라
+ * 풀리고, 다크를 고른 폰은 기기가 라이트여도 다크다. 이미 떠 있는 키보드가 즉시 바뀌는지는 OS 몫이다
+ * (다음에 올라올 때 맞는다).
+ *
+ * 앱의 입력창(`<TextInput>`)은 **하나도 빠짐없이** 이 값을 든다. 하나라도 빠지면 그 입력창만 기기 외양을
+ * 따른다. 그 전수는 `__tests__/conversationHygiene.test.tsx` 가 소스를 훑어 지킨다.
+ */
+export function useKeyboardAppearance(): ColorScheme {
+  return useContext(ThemeContext).scheme;
 }
 
 /**

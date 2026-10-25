@@ -37,6 +37,7 @@ import {
   THEME_CHOICES,
   themeChoiceLabel,
   themeIdLabel,
+  useKeyboardAppearance,
   usePalette,
   useStyles,
   useTheme,
@@ -292,6 +293,7 @@ function Dot({color, testID}: {color: string; testID: string}): React.JSX.Elemen
 function SignalGroup(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const {themeId, scheme, signal, signalState, setSignal} = useTheme();
   const [draft, setDraft] = useState(signal && 'custom' in signal ? signal.custom : '');
   // 직접 입력이 **거절된** 이유(저장하지 않았다). 보정 안내는 저장된 상태에서 읽는다.
@@ -397,6 +399,7 @@ function SignalGroup(): React.JSX.Element {
             onSubmitEditing={apply}
             placeholder="#RRGGBB"
             placeholderTextColor={palette.textMuted}
+            keyboardAppearance={keyboardAppearance}
             autoCapitalize="characters"
             autoCorrect={false}
             maxLength={7}

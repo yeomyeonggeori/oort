@@ -26,7 +26,7 @@ import {
   GroupSection,
 } from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {usePalette, useStyles} from '../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {
   ds2Radius,
   font,
@@ -94,6 +94,7 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const {workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
@@ -195,6 +196,7 @@ function SheetBody({
           onSubmitEditing={() => void submit()}
           placeholder="product-planning"
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           autoCapitalize="none"
           autoCorrect={false}
           // 이름은 영문 소문자·숫자·하이픈·밑줄뿐이다 — 한글 자판으로 열면 첫 글자부터

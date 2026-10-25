@@ -23,7 +23,7 @@ import {ROW_GLYPH_MAX_SCALE, Sentence} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
-import {usePalette, useStyles, useTheme} from './theme';
+import {useKeyboardAppearance, usePalette, useStyles, useTheme} from './theme';
 import {
   ds2Radius,
   font,
@@ -343,12 +343,14 @@ export function InputPill({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   return (
     <View style={styles.pill} testID={input.testID ? `${input.testID}-pill` : undefined}>
       {icon ? <Image source={icon} style={styles.pillIcon} accessibilityElementsHidden /> : null}
       <TextInput
         accessibilityLabel={accessibilityLabel}
         placeholderTextColor={palette.textMuted}
+        keyboardAppearance={keyboardAppearance}
         {...input}
         // 호출자의 `style` 은 알약 입력 스타일(`flex: 1` 포함)을 **덮지 않고 이어 붙는다**.
         style={[styles.pillInput, style]}
