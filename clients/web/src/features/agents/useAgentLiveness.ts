@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMemo } from "react";
+import { useQueries, useQuery } from "@tanstack/react-query";
 import { ApiError, fetchAgentLiveness, type AgentLiveness } from "@momo/core/lib/api";
+import type { AgentLivenessLookup } from "@momo/core/features/agents/turnCopy";
 import { serverSaysAbsent } from "@momo/core/features/capabilities/serverSurfaces";
 import { useSession } from "@/app/session";
 
@@ -62,3 +64,44 @@ export function useAgentLiveness(
   void query.dataUpdatedAt;
   return { liveness: query.data, nowMs: Date.now() };
 }
+
+/**
+ * 여러 에이전트의 생존 판정을 한 번에 찾는 함수 (#4285: 대화 아래 활동 줄이 아무도 가져가지 않은
+ * 요청의 근거 줄 맨 앞에 서버의 경고 라벨을 싣는다). 같은 쿼리(`agentLivenessQuery`)를 쓰므로 멤버
+ * 목록·헤더·사이드바가 이미 읽은 답을 다시 묻지 않는다. 호스티드가 아니면(404) null, 아직 읽는 중이면
+ * undefined다 — 지어내지 않는다.
+ */
+export function useAgentLivenessLookup(
+  agentIds: readonly string[]
+): AgentLivenessLookup {
+  const { workspaceId } = useSession();
+  const key = [...new Set(agentIds.map((id) => id.toLowerCase()))].sort().join("|");
+  const ids = useMemo(() => (key === "" ? [] : key.split("|")), [key]);
+  const results = useQueries({
+    queries: ids.map((id) => ({
+      ...agentLivenessQuery(workspaceId, id),
+      gcTime: ABSENT_STALE_MS,
+    })),
+  });
+  // 답의 지문: 상태와 마지막 신호 시각. 같으면 같은 함수를 돌려준다.
+  const fingerprint = results
+    .map((result) =>
+      result.data === undefined
+        ? "u"
+        : result.data === null
+          ? "n"
+          : `${result.data.state}:${result.data.lastSignalAtMs ?? ""}`
+    )
+    .join("|");
+  return useMemo(() => {
+    const byId = new Map<string, AgentLiveness | null>();
+    ids.forEach((id, index) => {
+      const data = results[index]?.data;
+      if (data !== undefined) byId.set(id, data);
+    });
+    return (memberId: string) => byId.get(memberId.toLowerCase());
+    // `results`는 렌더마다 새 배열이다. 지문이 같으면 담긴 답도 같다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ids, fingerprint]);
+}
+

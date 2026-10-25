@@ -21,6 +21,8 @@
 //      계약이다          표지와도 에이전트 정체와도 위험과도 다르다.
 //   7. 복구 표지가       화면에 seq가 없고, 낭독은 「이 줄 위까지」로 그 자리를
 //      내부 어휘를 안 쓴다  말로 되돌려 받는다. 진단 값(`data-seq`)은 남는다.
+//      남의 새 줄에만 선다  그리고 표지는 복구가 **남의 새 줄**을 들였을 때만 선다:
+//      (#4328)            되쏠 것이 없는 재구독과 내 줄만 되쏜 재연결에는 서지 않는다.
 //   8. 지워진 것들이     연속 묘비는 한 줄로 접히고 그 줄이 몇 개를 대신하는지
 //      자리를 덜 먹는다  말한다. 그리고 접힌 원본을 겨눈 인용은 **그것을 대신해
 //                        서 있는 행**에 착지한다 (이슈 1105가 고친 거짓 지시).
@@ -128,10 +130,31 @@ function emptyActionLabels() {
   };
 }
 
+/**
+ * 앵커 착지 행에 붙는 클래스. 정본은 `inbox/anchor.ts` 의 `HIGHLIGHT_CLASS` 다.
+ *
+ * 이 게이트는 그 이름을 `bg-accent-soft` 로 손수 적고 있었고, #4324 2단계가 착지 면을
+ * `landed-surface` 로 바꿨을 때 게이트는 따라가지 않아 8b가 base 에서 이미 빨갰다
+ * (착지는 멀쩡한데 낡은 이름을 찾았다). 값을 베껴 적으면 두 벌이 조용히 갈라진다는
+ * 위 세 함수의 이유가 그대로 이 이름에도 맞는다 — 같은 방법으로 읽는다.
+ */
+function landingClass() {
+  const source = readFileSync(
+    resolve(webRoot, "src/features/inbox/anchor.ts"),
+    "utf8"
+  );
+  const match = source.match(/const HIGHLIGHT_CLASS = "([^"]+)";/);
+  if (match === null) {
+    throw new Error("inbox/anchor.ts 의 HIGHLIGHT_CLASS 를 읽지 못했다");
+  }
+  return match[1];
+}
+
 const TOUCH_TARGET = touchTargetPx();
 const AVATAR_SIZE = avatarSizePx();
 const COMPOSER_OFFLINE_COPY = composerOfflineCopy();
 const EMPTY_ACTIONS = emptyActionLabels();
+const LANDING_CLASS = landingClass();
 
 const port = Number(process.env.COMPOSER_GATE_PORT || 5198);
 const origin = `http://127.0.0.1:${port}`;
@@ -162,6 +185,9 @@ const QUOTING_MSG = "0199cccc-0000-7000-8000-0000000000c9";
 const LONG_MSG = "0199cccc-0000-7000-8000-0000000000d1";
 const APPROVAL_MSG = "0199cccc-0000-7000-8000-0000000000e1";
 const FOLDABLE_MSG = "0199cccc-0000-7000-8000-0000000000e2";
+// 7번이 끊긴 구간에서 되쏘는 줄 둘: 내 줄(7b)과 남의 줄(7c). 이 판의 어느 페이지에도 없는 새 id다.
+const REPLAYED_OWN_MSG = "0199cccc-0000-7000-8000-0000000000f2";
+const REPLAYED_PEER_MSG = "0199cccc-0000-7000-8000-0000000000f3";
 
 /** 접기 예산을 넘기는 답변 하나. 9번(터치 타깃)이 겨누는 컨트롤이 여기서 난다. */
 const FOLDABLE_BODY = [
@@ -415,7 +441,27 @@ function wait(ms) {
 async function installRealtimeSocket(page) {
   await page.addInitScript(() => {
     const sockets = new Set();
+    // 스트림 위치. 되쏜 줄마다 하나씩 오르고, 구독 응답이 그 꼭대기를 말한다.
     let offset = 0;
+    // 다음 재구독 응답에 실어 되쏠 줄(`__composerGateQueueReplay`). 진짜 서버가 `recovered: true`
+    // 와 함께 끊긴 구간의 줄을 구독 응답의 `publications` 로 돌려주는 모양 그대로다 — 복구 표지의
+    // 판정(#4328)이 기대는 경계(centrifuge-js 가 이 줄들을 `subscribed` 직후 동기로 흘린다)가
+    // 가짜 소켓이 아니라 진짜 클라이언트 라이브러리 위에서 재어진다. 채널마다 따로 쌓는다:
+    // 같은 연결에 `ch:` 구독이 여럿일 수 있어 채널 A의 줄이 다른 채널의 응답에 실리면 안 된다.
+    const replayQueue = [];
+    // 채널별 구독 응답 횟수. 재구독이 **실제로** 있었는지 세는 쪽이 이 숫자라서, 「표지가 없다」를
+    // 단정하는 판이 재구독이 아직 오지 않아서 비어 있는 것과 구별된다.
+    const subscribeCounts = new Map();
+
+    function takeReplay(channel) {
+      const name = channel.toUpperCase();
+      const mine = replayQueue.filter((entry) => name.endsWith(`.${entry.channelId}`));
+      for (const entry of mine) {
+        replayQueue.splice(replayQueue.indexOf(entry), 1);
+      }
+      return mine.map((entry) => ({ data: entry.frame, offset: ++offset }));
+    }
+
     class GateWebSocket {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -443,7 +489,11 @@ async function installRealtimeSocket(page) {
               connect: { client: "composer-gate", version: "6" },
             });
           } else if (command.subscribe) {
-            this.subscriptions.add(command.subscribe.channel);
+            const channel = command.subscribe.channel;
+            this.subscriptions.add(channel);
+            subscribeCounts.set(channel, (subscribeCounts.get(channel) ?? 0) + 1);
+            // 응답의 `offset` 이 되쏜 줄의 offset 을 포함하도록 먼저 비운다.
+            const publications = takeReplay(channel);
             replies.push({
               id: command.id,
               subscribe: {
@@ -452,6 +502,8 @@ async function installRealtimeSocket(page) {
                 recovered: true,
                 epoch: "composer-gate",
                 offset,
+                // 서버는 되쏠 것이 없으면 이 키를 싣지 않는다.
+                ...(publications.length > 0 ? { publications } : {}),
               },
             });
           } else if (command.unsubscribe) {
@@ -492,7 +544,19 @@ async function installRealtimeSocket(page) {
       }
       return false;
     };
-    void offset;
+    // 끊긴 구간에서 놓친 줄을 **다음 재구독 응답**에 실어 되쏜다(`recovered: true` + `publications`).
+    // `frame` 은 서버가 채널에 싣는 프레임(`message.new`)이다.
+    window.__composerGateQueueReplay = (channelId, frame) => {
+      replayQueue.push({ channelId: String(channelId).toUpperCase(), frame });
+    };
+    window.__composerGateSubscribeCount = (channelId) => {
+      const suffix = `.${String(channelId).toUpperCase()}`;
+      let total = 0;
+      for (const [name, count] of subscribeCounts) {
+        if (name.toUpperCase().endsWith(suffix)) total += count;
+      }
+      return total;
+    };
   });
 }
 
@@ -607,6 +671,59 @@ async function openChannel(page, channelId) {
     timeout: 15_000,
   });
   await wait(400);
+}
+
+/**
+ * 서버가 채널에 싣는 `message.new` 프레임 한 줄. 모양은 `MessageNewEvent`(코어
+ * `realtimeEvents.ts`)이고, 이 판의 어느 페이지에도 없는 새 id만 쓴다 — 되쏜 줄이
+ * 「이미 든 줄」이면 새것으로 세지지 않아 판정이 아니라 우연을 재게 된다.
+ */
+function replayFrame({ id, seq, authorMemberId, body }) {
+  const at = Date.now();
+  return {
+    type: "message.new",
+    v: 1,
+    ts: at,
+    seq,
+    payload: {
+      id,
+      channel_id: channelA,
+      seq,
+      type: "text",
+      body,
+      author_member_id: authorMemberId,
+      hlc_ts: at,
+      hlc_count: 0,
+      created_at_ms: at,
+      state: "sent",
+    },
+  };
+}
+
+/** 다음 재구독 응답에 실을 줄을 큐에 넣는다. */
+function queueReplay(page, channelId, frame) {
+  return page.evaluate(
+    ([id, queued]) => window.__composerGateQueueReplay(id, queued),
+    [channelId, frame]
+  );
+}
+
+/**
+ * 소켓을 비정상 종료(1006)로 끊고, centrifuge가 그 채널을 **다시** 구독해 응답이 나갈
+ * 때까지 기다린다. 응답 횟수를 세므로 「표지가 없다」는 단정이 재구독이 아직 오지
+ * 않아서 비어 있는 것과 구별된다.
+ */
+async function dropAndWaitResubscribe(page, channelId) {
+  const before = await page.evaluate(
+    (id) => window.__composerGateSubscribeCount(id),
+    channelId
+  );
+  await page.evaluate(() => window.__composerGateDropSocket());
+  await page.waitForFunction(
+    ([id, seen]) => window.__composerGateSubscribeCount(id) > seen,
+    [channelId, before],
+    { timeout: 20_000 }
+  );
 }
 
 function boxHeight(locator) {
@@ -973,8 +1090,9 @@ async function exerciseTimeline(browser) {
   await rowLocator(page, QUOTING_MSG).getByTestId("quote-block").click();
   await wait(800);
   const missed = await page.getByTestId("anchor-missed").count();
-  const tinted = await headRow.evaluate((node) =>
-    node.classList.contains("bg-accent-soft")
+  const tinted = await headRow.evaluate(
+    (node, landing) => node.classList.contains(landing),
+    LANDING_CLASS
   );
   console.log(`[standin] 착지 틴트 ${tinted} · 「못 찾음」 고지 ${missed}건`);
   if (!tinted || missed !== 0) {
@@ -1045,19 +1163,79 @@ async function exerciseTimeline(browser) {
     );
   }
 
-  // ---- 7. 복구 표지는 내부 어휘를 쓰지 않는다 (design-review C-1) ------------
+  // ---- 7. 복구 표지는 남의 새 줄에만 서고, 내부 어휘를 쓰지 않는다 ------------
+  //     (design-review C-1 · #4328)
   //
   // 표지는 레일이 한 번 끊겼다 붙어야 생긴다. 소켓을 비정상 종료로 닫으면
-  // centrifuge가 다시 붙고, 이 판의 스텁은 `recovered: true`로 답하므로
-  // `replay` 표지가 선다 — 실제 경로 그대로다.
-  await page.evaluate(() => window.__composerGateDropSocket());
+  // centrifuge가 다시 붙고, 이 판의 스텁은 `recovered: true`로 답하며 큐에 둔 줄을
+  // 구독 응답의 `publications`로 되쏜다 — 실제 경로 그대로다. 「복구했다」는 말이
+  // 참이려면 복구가 **남의 새 줄**을 들였어야 한다(`judgeRecoveryMarker`):
+  //
+  //   7a 되쏠 것이 없다 (백그라운드에서 돌아와 재구독만 했다)      → 표지 없음
+  //   7b 되쏘기에 내 줄만 있다 (내가 방금 보낸 직후의 재연결)       → 줄은 들어오고 표지 없음
+  //   7c 되쏘기에 남의 새 줄이 있다                               → 표지가 선다 (아래 문구 검사)
+  //
+  // 7a·7b의 「표지 없음」이 헛돌지 않게 두 가지가 받친다: 재구독 응답이 실제로
+  // 나갔고(응답 횟수), 7b는 되쏜 줄이 화면에 섰다(되쏘기가 훅의 병합 문을 지났다).
+  // 7c가 같은 흐름에서 표지가 서는 대조군이다.
   const recovery = page.getByTestId("recovery-divider");
+  const settle = 1_500;
+
+  await dropAndWaitResubscribe(page, channelA);
+  await wait(settle);
+  if ((await recovery.count()) !== 0) {
+    throw new Error(
+      "재구독이 아무것도 되쏘지 않았는데 복구 표지가 섰다: 메운 것이 없는 복구는 " +
+        "「여기까지 복구」라고 말할 거리가 없고, 행 하나가 붙었다 걷히며 목록이 " +
+        "미끄러진다 (#4328)"
+    );
+  }
+  console.log("[recovery] 7a 되쏠 것 없는 재구독 -> 표지 0");
+
+  await queueReplay(
+    page,
+    channelA,
+    replayFrame({
+      id: REPLAYED_OWN_MSG,
+      seq: 265,
+      authorMemberId: memberId,
+      body: "시안 확인했어요. 오후 리뷰에서 이어서 얘기해요.",
+    })
+  );
+  await dropAndWaitResubscribe(page, channelA);
+  await rowLocator(page, REPLAYED_OWN_MSG).waitFor({
+    state: "attached",
+    timeout: 10_000,
+  });
+  await wait(settle);
+  if ((await recovery.count()) !== 0) {
+    throw new Error(
+      "되쏘기에 내가 쓴 줄만 있었는데 복구 표지가 섰다: 내가 방금 보낸 줄 아래에 " +
+        "「여기까지 복구」가 서면 아무것도 놓치지 않았는데 놓친 것을 되찾았다고 " +
+        "말하는 셈이다 (#4328, owner 10-24 실기)"
+    );
+  }
+  console.log("[recovery] 7b 내 줄만 되쏜 재연결 -> 줄 들어옴, 표지 0");
+
+  await queueReplay(
+    page,
+    channelA,
+    replayFrame({
+      id: REPLAYED_PEER_MSG,
+      seq: 266,
+      authorMemberId: peerId,
+      body: "스테이징 배포 끝났어요. 확인 부탁드려요.",
+    })
+  );
+  await dropAndWaitResubscribe(page, channelA);
   await recovery.first().waitFor({ timeout: 20_000 });
   {
     const text = ((await recovery.first().textContent()) ?? "").trim();
     const label = await recovery.first().getAttribute("aria-label");
     const seq = await recovery.first().getAttribute("data-seq");
-    console.log(`[recovery] 화면 "${text}" · 낭독 "${label}" · 진단 seq=${seq}`);
+    console.log(
+      `[recovery] 7c 남의 새 줄을 되쏜 재연결 -> 표지 ${await recovery.count()} · 화면 "${text}" · 낭독 "${label}" · 진단 seq=${seq}`
+    );
     if (text.includes("seq") || /\d/.test(text)) {
       throw new Error(
         `복구 구분선이 내부 어휘를 화면에 쓴다 ("${text}"): 읽는 사람에게 seq가 ` +
@@ -1104,12 +1282,11 @@ async function exerciseTimeline(browser) {
   );
   await context.setOffline(false);
   await wait(600);
-  // 결정한다 → 영수증. 격이 올라가야 한다.
+  // 결정한다 → 영수증. 격이 올라가야 한다. 승인은 한 번 누르면 결정된다(#3819가 확정
+  // 단계를 걷어냈다) — 이 판은 그 뒤에도 `approval-commit` 을 기다리고 있어 base 에서
+  // 이미 빨갰다. 누른 자리를 영수증 줄이 잇는다.
   await card.getByTestId("approval-approve").click();
-  await wait(200);
-  await card.getByTestId("approval-commit").waitFor({ timeout: 5_000 });
-  await wait(500);
-  await card.getByTestId("approval-commit").click();
+  await card.getByTestId("approval-note-receipt").waitFor({ timeout: 5_000 });
   await wait(800);
   const receipt = card.getByTestId("approval-note-receipt");
   if ((await receipt.count()) !== 1) {
@@ -1452,7 +1629,9 @@ async function main() {
   console.log("           막고 이유를 말했고, 감긴 한 문단이 상자를 키웠고, ↵를");
   console.log("           배운 사람에게 설명이 사라졌고, 카드의 영수증이 안내보다");
   console.log("           앞에 섰고, 경계의 색이 조용한 표지·에이전트와 갈렸고,");
-  console.log("           복구 표지에서 seq가 사라지고 낭독이 자리를 되찾았고,");
+  console.log("           복구 표지는 남의 새 줄에만 섰고(빈 재구독·내 줄만 되쏜");
+  console.log("           재연결에는 안 섰다) 서도 seq가 사라지고 낭독이 자리를");
+  console.log("           되찾았고,");
   console.log("           묘비 넷이 한 줄로 접히고도 그 줄이 몇 개를 대신하는지");
   console.log("           말했으며 그 줄이 인용의 착지점이 되었고, 손가락 타깃과");
   console.log("           아바타가 각자의 바닥선을 넘었으며, 빈 채널의 맨 앞에 선");

@@ -1,0 +1,36 @@
+appId: app.momo.ios
+name: 109-uncollected-capture
+---
+# 109-uncollected-capture - 홈 「작업 중」 카드의 「취소」: 첫 탭은 묻기만 하고, 확정은 한 번 더 눌러야 나간다 (#4285).
+#
+# 표면은 `-momoMeasure UNCOLLECTED-HOME`(라이트: `LIGHT-UNCOLLECTED-HOME`)이고 하네스의 `POST …/cancel` 이 200 으로 답한다.
+# `UNCOLLECTED-HOME-FAIL` 은 같은 카드에서 500 으로 답한다(OUTCOME=error: 「취소하지 못했어요」가 선다).
+#
+#   maestro test -e SHOT=uncollected-dark -e OUTCOME=cancelled clients/mobile/maestro/109-uncollected-capture.yaml
+#   maestro test -e SHOT=uncollected-fail-dark -e OUTCOME=error clients/mobile/maestro/109-uncollected-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "home-working-stop-arm"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-idle
+- tapOn:
+    id: "home-working-stop-arm"
+- extendedWaitUntil:
+    visible:
+      id: "home-working-stop-confirm"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-confirm
+# 확인 줄이 열려 카드가 자라면 목록이 결정 단추까지 알아서 내려간다(`WorkingCardStop.onGrow` → `SidebarScreen.revealCardEnd`, 가장 큰 글씨
+# AX5에서도). 위 `-confirm` 사진이 그 증거다 — 사진을 이 줄 앞에서 찍는 이유다. 아래 `scrollUntilVisible`은 단추가 정말 있는지만 확인하고,
+# 자동 스크롤이 망가져도 이후 사진은 멀쩡해 보이므로(design-review #4285 r2 L4) 「보이는가」는 `-confirm` 사진으로 읽는다.
+- scrollUntilVisible:
+    element:
+      id: "home-working-stop-commit"
+- takeScreenshot: ${SHOT}-confirm-buttons
+- tapOn:
+    id: "home-working-stop-commit"
+- extendedWaitUntil:
+    visible:
+      id: "home-working-stop-outcome-${OUTCOME}"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-${OUTCOME}

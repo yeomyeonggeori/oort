@@ -13,7 +13,9 @@ import {
   contextWindow,
   type MailboxEntry,
 } from "@momo/core/features/inbox/mailbox";
+import { attachmentPreviewLine } from "@momo/core/features/attachments/model";
 import { isComposingEvent } from "@momo/core/features/chat/composerKeys";
+import { hasRenderableBody } from "@momo/core/features/timeline/bodySlot";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
@@ -89,6 +91,12 @@ function ContextRow({
   const isAgent = actor.isAgent;
   const body =
     message.state === "deleted" ? "삭제된 메시지예요." : (message.body ?? "");
+  // 글 없이 사진·파일만 보낸 메시지(#4294)는 이 줄이 빈 칸이 아니라 개수로 말한다. 본문이 있으면
+  // 본문이 이기고, 지워진 줄은 첨부가 남아 있어도 위의 삭제 문장이 이긴다.
+  const attachmentLine =
+    message.state === "deleted" || hasRenderableBody(message.body)
+      ? null
+      : attachmentPreviewLine(message.attachments);
   return (
     <li
       ref={isTarget ? targetRef : undefined}
@@ -121,15 +129,21 @@ function ContextRow({
         <span
           className={cn(
             "text-body",
-            message.state === "deleted" ? "text-ink-muted" : "text-ink"
+            message.state === "deleted" || attachmentLine !== null
+              ? "text-ink-muted"
+              : "text-ink"
           )}
         >
-          <MessageBody
-            body={body}
-            directory={directory}
-            selfMemberId={selfMemberId}
-            foldKey={message.id}
-          />
+          {attachmentLine !== null ? (
+            <span data-testid="inbox-context-attachments">{attachmentLine}</span>
+          ) : (
+            <MessageBody
+              body={body}
+              directory={directory}
+              selfMemberId={selfMemberId}
+              foldKey={message.id}
+            />
+          )}
         </span>
       </span>
     </li>

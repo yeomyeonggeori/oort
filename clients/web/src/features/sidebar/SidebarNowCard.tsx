@@ -1,5 +1,13 @@
 import { Link } from "react-router-dom";
-import { uuidEq, type Channel } from "@momo/core/lib/api";
+import { uuidEq, type AgentLiveness, type Channel } from "@momo/core/lib/api";
+import {
+  isSystemRun,
+  isUncollected,
+  isUntakenHumanRun,
+  UNCOLLECTED_WORD,
+  uncollectedReason,
+  waitingLead,
+} from "@momo/core/features/agents/runWaiting";
 import {
   byOldestTurn,
   isStaleSignal,
@@ -36,6 +44,15 @@ import { MemberAvatar } from "@/features/common/MemberAvatar";
 //
 // 열린 턴이 여럿이면 가장 오래된 하나를 싣고 나머지는 수로 센다. 카드 전체가
 // 그 채널로 가는 링크다. 열린 턴이 없으면 아무것도 그리지 않는다.
+//
+// ## 누가 기다리는 일만 싣는다 (#4285)
+//
+// 부른 사람이 없는 시스템 작업(환영 run)은 싣지 않는다 — 폰 홈 카드(`buildWorkingCard`)와 같은
+// 규칙이다(성재 2026-10-23: 환영 작업이 「대기 1번째 · 5시간째 기다려요」로 홈에 떠 있었다). 사람이
+// 부른 요청을 아무도 가져가지 않은 채 5분이 넘으면 낱말이 「아직 받지 않았어요」로 바뀌고, 에이전트에게
+// 서버의 생존 경고(D4)가 있으면 짧은 문구가 장소 줄에 붙는다. 사이드바에는 시계가 없으므로 경과
+// 시간은 싣지 않는다(「5시간째」는 대화 아래 활동 줄이 말한다). 「취소」는 카드(링크) 안에 둘 수
+// 없어 이 카드에는 없다: 대화 아래 활동 줄에서 작업 패널을 열면 있다(`StopRunControl`).
 // =============================================================================
 
 export function openTurns(
@@ -45,9 +62,26 @@ export function openTurns(
   const out: AgentWorkingSignal[] = [];
   for (const signal of signals.values()) {
     if (isStaleSignal(signal, nowMs)) continue;
+    // 부른 사람이 없는 시스템 작업은 카드의 말이 아니다. 「외 n건」도 숨은 일을 세지 않는다.
+    if (isSystemRun(signal.server)) continue;
     out.push(signal);
   }
   return out.sort(byOldestTurn);
+}
+
+export interface SidebarNowCardProps {
+  signals: ReadonlyMap<string, AgentWorkingSignal>;
+  nowMs: number;
+  /** The realtime rail is connected, so the claim is confirmed, not remembered. */
+  live: boolean;
+  directory: Directory;
+  channels: readonly Channel[];
+  selfMemberId: string;
+  /**
+   * 카드 에이전트의 서버 생존 판정(D4). 아직 읽는 중이면 undefined, 호스티드가 아니면 null. 아무도
+   * 가져가지 않은 요청의 짧은 경고 문구와 이유 문장만 이것을 읽는다. 카드는 읽지 않고 받는다.
+   */
+  liveness?: AgentLiveness | null;
 }
 
 export function SidebarNowCard({
@@ -57,15 +91,8 @@ export function SidebarNowCard({
   directory,
   channels,
   selfMemberId,
-}: {
-  signals: ReadonlyMap<string, AgentWorkingSignal>;
-  nowMs: number;
-  /** The realtime rail is connected, so the claim is confirmed, not remembered. */
-  live: boolean;
-  directory: Directory;
-  channels: readonly Channel[];
-  selfMemberId: string;
-}) {
+  liveness,
+}: SidebarNowCardProps) {
   const turns = openTurns(signals, nowMs);
   if (turns.length === 0) return null;
   const lead = turns[0];
@@ -87,12 +114,26 @@ export function SidebarNowCard({
       ? lead.headlines[0]
       : null;
   const more = turns.length - 1;
-  const stateText = copy?.text ?? "작업 중";
+  // 사람이 부른 요청을 아무도 가져가지 않았다(#4285): 5분을 넘으면 「대기 n번째」 대신 「아직 받지
+  // 않았어요」, 서버의 생존 경고가 있으면 짧은 문구가 장소 줄에 붙는다(숫자 없는 낱말 — 사이드바에는
+  // 시계가 없다). 이유 문장은 근거가 있을 때만 둘째 줄에 선다.
+  const uncollected = lead.state === "queued" && isUncollected(lead.server, nowMs);
+  const waitLead =
+    lead.state === "queued" && isUntakenHumanRun(lead.server)
+      ? waitingLead(liveness, nowMs, "short")
+      : undefined;
+  // 끊긴 레일(`live` false)에서는 이유 줄을 싣지 않는다: 카드가 이미 「마지막으로 확인된 상태」라고 말하는데 그 위에
+  // 「연결이 꺼져 있을 수 있어요」(에이전트의 연결)가 서면 어느 연결인지 가려지지 않고 마지막으로 읽은 판정이 단정처럼
+  // 읽힌다(폰 `buildWorkingCard`와 같은 규칙 — design-review #4285 r1 M2·r2 N2).
+  const reason = uncollected && live ? uncollectedReason(liveness) : undefined;
+  const stateText = uncollected ? UNCOLLECTED_WORD : (copy?.text ?? "작업 중");
   const accessible = [
     agentLabel(name),
     stateText,
     placeText,
     headline,
+    waitLead,
+    reason,
     more > 0 ? `외 ${more}건` : null,
     live ? null : TURN_STALE_SENTENCE,
   ]
@@ -105,6 +146,7 @@ export function SidebarNowCard({
       className="glass band-surface sidebar-now press focus-visible:focus-ring"
       data-testid="sidebar-now-card"
       data-state={lead.state}
+      data-uncollected={uncollected ? "" : undefined}
       data-live={live ? "" : undefined}
       aria-label={accessible}
     >
@@ -115,7 +157,9 @@ export function SidebarNowCard({
         </span>
         <span
           className={cn(
-            "sidebar-now-state",
+            // 낱말은 한 덩어리로 선다: 줄바꿈하지 않고 줄지도 않는다. 좁은 열에서는 이름이 줄임표를
+            // 받는다(「아직 받지 않았어 / 요」로 꺾이던 것, design-review #4285 r1 H3).
+            "sidebar-now-state shrink-0 whitespace-nowrap",
             !live
               ? "text-ink-muted"
               : lead.state === "working"
@@ -130,14 +174,23 @@ export function SidebarNowCard({
           {stateText}
         </span>
       </span>
-      {(placeText || headline || more > 0) && (
+      {(placeText || headline || waitLead || more > 0) && (
         <span
           className="sidebar-now-line block min-w-0 truncate"
           aria-hidden="true"
           data-testid="sidebar-now-line"
         >
-          {[placeText, headline].filter(Boolean).join(" · ")}
+          {[placeText, headline, waitLead].filter(Boolean).join(" · ")}
           {more > 0 ? ` · 외 ${more}건` : null}
+        </span>
+      )}
+      {reason !== undefined && (
+        <span
+          className="sidebar-now-line block min-w-0 truncate"
+          aria-hidden="true"
+          data-testid="sidebar-now-reason"
+        >
+          {reason}
         </span>
       )}
     </Link>

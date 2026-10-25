@@ -4,19 +4,26 @@ import {
   type AgentWorkingSignal,
 } from '@momo/core/features/agents/workingSignal';
 import {
+  cancelWordingFor,
+  type CancelWording,
+} from '@momo/core/features/agents/runCancel';
+import {
   activityDetail,
   activityLines,
   activitySuffix,
   activityText,
   isRespondingLine,
+  MAX_ACTIVITY_LINES,
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
+  type AgentLivenessLookup,
 } from '@momo/core/features/agents/turnCopy';
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {Sentence, STACK_PILL_SCALE} from '../../design/atoms';
 import {font, line as lineHeightToken, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {Avatar} from '../conversation/Avatar';
@@ -109,6 +116,7 @@ export function AgentActivityBar({
   nowMs,
   live,
   renderStop,
+  livenessFor,
   testID = 'composer-working',
 }: {
   turns: readonly AgentWorkingSignal[];
@@ -116,6 +124,13 @@ export function AgentActivityBar({
   nowMs: number;
   /** The realtime rail is connected, so a clock is measuring something. */
   live: boolean;
+  /**
+   * 에이전트의 서버 생존 판정(D4)을 찾는 함수. 아무도 가져가지 않은 요청의 근거 줄 맨 앞에 경고 라벨이
+   * 서고 「연결이 꺼져 있을 수 있어요」가 붙는 데에만 쓴다(#4285). 이 컴포넌트는 읽지 않고 받는다 —
+   * 읽기는 워크스페이스와 react-query를 아는 화면의 일이다(`renderStop`과 같은 이유). 생략하면 판정
+   * 없이 말한다.
+   */
+  livenessFor?: AgentLivenessLookup;
   /**
    * 이 턴을 멈추는 컨트롤 (goal RN-C1). 줄마다 하나이고, 이 컴포넌트는 그것을
    * **만들지 않고 자리만 내준다** — cancel은 워크스페이스와 react-query를 아는
@@ -129,16 +144,21 @@ export function AgentActivityBar({
     name: string;
     /** 이 줄로 합쳐진 동시 실행의 수 (2R M3). */
     runCount?: number;
+    /** 이 줄의 실행에 맞는 낱말: 아직 아무도 가져가지 않았으면 「취소」, 가져간 뒤는 「중단」 (#4285). */
+    wording: CancelWording;
   }) => React.ReactNode;
   testID?: string;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const {lines, overflowCount} = useMemo(
     () =>
-      activityLines(turns, memberId =>
-        memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+      activityLines(
+        turns,
+        memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+        MAX_ACTIVITY_LINES,
+        livenessFor,
       ),
-    [turns, directory],
+    [turns, directory, livenessFor],
   );
   /**
    * 줄에서 다시 찾을 수 있게, memberId → (runId, 합쳐진 실행 수). 병합 뒤에도
@@ -146,12 +166,17 @@ export function AgentActivityBar({
    * 접었는지이고, `runId`는 그중 가장 먼저 시작한 하나다 (2R M3).
    */
   const stops = useMemo(() => {
-    const out = new Map<string, {runId: string; runCount?: number}>();
+    const out = new Map<
+      string,
+      {runId: string; runCount?: number; wording: CancelWording}
+    >();
     for (const turn of turns) {
       if (turn.runId === undefined) continue;
       out.set(turn.memberId, {
         runId: turn.runId,
         ...(turn.runCount === undefined ? {} : {runCount: turn.runCount}),
+        // 아직 아무도 가져가지 않은 실행은 「취소」, 가져간 뒤는 「중단」(#4285).
+        wording: cancelWordingFor(turn.server),
       });
     }
     return out;
@@ -285,6 +310,11 @@ function ActivityRow({
     line.state === 'working' &&
     line.startedAtMs !== undefined;
   const detail = activityDetail(line, nowMs);
+  // 큰 글씨(`STACK_PILL_SCALE`부터)에서는 「이름: 상태 낱말」이 한 줄에 다 들어가지 않는다. 한 줄로 자르면 새 낱말
+  // 「아직 받지 않았어요」가 「아직 받지…」로 잘려 핵심이 사라진다(design-review #4285 r1 H1과 같은 폭의 문제) —
+  // 큰 글씨에서는 줄을 바꿔 다 말한다.
+  const {fontScale} = useWindowDimensions();
+  const wrapLead = fontScale >= STACK_PILL_SCALE;
   // 에이전트가 요청을 가져가 답을 쓰는 중이면 얼굴과 점이 붙는다(#4020). 끊긴 레일에서는
   // 둘 다 뺀다: 아무도 일하는 중이 아닌 줄에 움직임을 두지 않는다.
   const responding = live && isRespondingLine(line);
@@ -296,10 +326,11 @@ function ActivityRow({
         </View>
       ) : null}
       <Text
-        accessibilityLabel={activityText(line)}
-        numberOfLines={1}
+        accessibilityLabel={activityText(line, nowMs)}
+        numberOfLines={wrapLead ? undefined : 1}
         ellipsizeMode="tail"
-        style={[styles.activityText, styles.activityTextFlex]}>
+        style={[styles.activityText, styles.activityTextFlex]}
+        testID="activity-lead">
         {/* Offline the name drops to the row's own muted ink: agent identity is
             a claim about who is acting right now, and nobody is acting right
             now. */}
@@ -309,16 +340,18 @@ function ActivityRow({
         {line.name.handle ? (
           <Text style={styles.activityText}>({line.name.handle})</Text>
         ) : null}
-        {activitySuffix(line)}
+        {activitySuffix(line, nowMs)}
       </Text>
       {responding ? <RespondingDots /> : null}
       {detail !== undefined ? (
         // 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이
         // 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은 하지 않는다 — 「끊김」은 서버가
         // 알릴 때만 나온다.
-        <Text style={styles.activityDetail} testID="activity-detail">
+        // 근거 글은 세 토막(생존 문구 · 경과 · 이유)까지 길어진다(#4285): 어절에서 끊는다(`Sentence`) — 좁은
+        // 폭에서 글자 단위로 꺾여 한 음절이 홀로 남지 않게(design-review r1 M7).
+        <Sentence style={styles.activityDetail} testID="activity-detail">
           {detail}
-        </Text>
+        </Sentence>
       ) : null}
       {showClock ? (
         <Text style={styles.activityClock}>

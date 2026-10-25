@@ -745,6 +745,27 @@ describe('받기 — 실시간과 리플레이', () => {
       expect(result.current.recoveryMarkers).toEqual([]);
     });
 
+    it('줄 id 가 대문자로 든 뒤 소문자로 되쏘여 와도 이미 든 줄이다 — 등록도 같은 접기로 한다 (#4328)', async () => {
+      installFetch({messages: head});
+      const {rail, subscription} = makeRail();
+      const {result} = renderTimeline(rail);
+      await waitFor(() => expect(result.current.status).toBe('ready'));
+      act(() => {
+        subscription().__subscribed({recovered: false});
+      });
+      // 실시간으로 남의 줄이 **대문자 id** 로 먼저 왔다 — 병합 문이 이 id 를 접어서 등록해야 한다.
+      act(() => {
+        subscription().__emit('publication', {data: frame(2, {id: 'MSG-2'})});
+      });
+
+      await act(async () => {
+        subscription().__subscribed({recovered: true, publications: [frame(2)]});
+      });
+      await tick();
+
+      expect(result.current.recoveryMarkers).toEqual([]);
+    });
+
     it('남의 줄이 함께 오면 표지가 선다 — 그 줄이 내 줄보다 작은 seq 로 뒤늦게 닿아도 (seq 가 아니라 id 로 새것을 가린다)', async () => {
       installFetch({messages: head});
       const {rail, subscription} = makeRail();
@@ -771,6 +792,53 @@ describe('받기 — 실시간과 리플레이', () => {
       expect(result.current.state.messages.map(m => m.seq)).toEqual([1, 99, 100]);
       expect(result.current.recoveryMarkers).toHaveLength(1);
       expect(result.current.recoveryMarkers[0].source).toBe('replay');
+    });
+  });
+
+  // 꼬리 읽기는 한 페이지(50줄)가 가득 차면 다음 페이지를 이어 읽는다. 「남의 새 줄이 있었는가」의 판정은 코어(`judgeRecoveryMarker`,
+  // #4328)가 하고, 페이지를 가로지르는 누계는 훅이 앞선 판정을 코어에 넘겨 잇는다 — 그 이음이 끊기면 마지막 페이지의 판정만 남는다.
+  it('꼬리가 두 페이지로 와도 첫 페이지의 남의 새 줄이 지워지지 않는다 — 앞선 판정을 이어 누계한다 (#4328)', async () => {
+    let call = 0;
+    installFetch({
+      messages: () => {
+        call += 1;
+        if (call === 1) return jsonResponse(200, {messages: [message(1)]});
+        // 세 번째 읽기(재구독의 꼬리, 첫 페이지): 가득 찬 한 페이지 — 남의 새 줄은 이 페이지의 첫 줄뿐이고 나머지는 내 줄이다.
+        if (call === 3) {
+          return jsonResponse(200, {
+            messages: Array.from({length: 50}, (_, i) =>
+              message(100 + i, i === 0 ? {} : {authorMemberId: SELF_ID}),
+            ),
+          });
+        }
+        // 네 번째 읽기(둘째 페이지): 내 줄뿐이다.
+        if (call === 4) {
+          return jsonResponse(200, {
+            messages: [message(200, {authorMemberId: SELF_ID})],
+          });
+        }
+        return jsonResponse(200, {messages: []});
+      },
+    });
+    const {rail, subscription} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+    act(() => {
+      subscription().__subscribed({recovered: false});
+    });
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+
+    await act(async () => {
+      subscription().__subscribed({recovered: false});
+    });
+
+    await waitFor(() => expect(result.current.recoveryMarkers.length).toBe(1));
+    expect(result.current.resume.lastBackfillCount).toBe(51);
+    expect(result.current.recoveryMarkers[0]).toMatchObject({
+      source: 'backfill',
+      seq: 200,
     });
   });
 
