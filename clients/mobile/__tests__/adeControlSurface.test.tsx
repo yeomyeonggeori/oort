@@ -14,7 +14,7 @@ import {
   screen,
   waitFor,
   within,
-} from '@testing-library/react-native';
+} from './fixtures/darkWorld';
 import React from 'react';
 
 import '../src/boot/polyfills';

@@ -15,11 +15,13 @@ import {
 import {ThemeProvider} from '../src/design/theme';
 import {paletteFrom} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
+import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {
   __resetSessionStore,
   sessionPort,
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {DARK_CHOSEN_RECORD} from './fixtures/darkWorld';
 
 // =============================================================================
 // ADR-0189 증보 2 — 배경이 **홈과 대화 둘 다** 뒤에 깔리고, 접근성 설정이 이긴다 (#3907).
@@ -118,6 +120,8 @@ function renderShell() {
 
 beforeEach(() => {
   mmkvStore.clear();
+  // 다크 팔레트의 scrim·바닥 색을 단정하는 시험이다. 폰의 기본이 라이트가 된 뒤(#4526)에는 다크를 고른 폰으로 세운다.
+  mmkvStore.set(NON_SECRET_KEYS.appearance, DARK_CHOSEN_RECORD);
   __resetBackgroundStoreForTests();
   __setDiskPort({
     uri: name => `file:///document/oort-background/${name}`,

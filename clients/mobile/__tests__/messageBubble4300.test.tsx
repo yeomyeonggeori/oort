@@ -3,7 +3,7 @@ import {contrast} from '@momo/core/design/color';
 import {catalogEntries, deriveCatalogMode} from '@momo/core/design/deriveCatalog';
 import {SIGNAL_PRESETS} from '@momo/core/design/signal';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, render, screen} from '@testing-library/react-native';
+import {act, cleanup, render, screen} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
