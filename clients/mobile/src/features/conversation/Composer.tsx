@@ -39,7 +39,7 @@ import {
   mentionHandleLabel,
   preferredMentionName,
 } from '@momo/core/features/routing/helperAliases';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -1715,19 +1715,19 @@ export function Composer({
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const expandedRef = useRef(expanded);
-  // 진행값의 지금 값. 글 칸 폭을 재는 쪽(`onInputLayout`)이 「접힌 폭에 닿았나」를 알려고 읽는다.
-  const progressRef = useRef(expanded ? 1 : 0);
-  useEffect(() => {
-    const id = progress.addListener(({value}) => {
-      progressRef.current = value;
-    });
-    return () => progress.removeListener(id);
-  }, [progress]);
   // 접히는 중 (#4456): **포커스를 잃어서**(또는 #4518: 누름이 포커스로 이어지지 않아서) 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 펼침의
   // 마지막 이유가 사라지는 그 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
   // 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다. 그래서 `onBlur`·`releasePress` 처리기가 `focused`·`pressing` 과 한 묶음으로 올린다.
   const [collapsing, setCollapsing] = useState(false);
   const shown = expanded || collapsing;
+  // `shown` 의 **동기** 사본 — `onInputLayout` 이 「접힌 폭에 닿았나」를 렌더 없이 읽는다. 진행값의 리스너(`progress.addListener`)로 읽으면 안 된다: Animated 는 값에 달린
+  // 마지막 자식(도구 줄·글 칸 여백)이 떨어지면 그 값의 리스너를 **모두 지운다**(`AnimatedNode.__detach`). 그래서 첫 접힘이 끝난 뒤에는 진행값 사본이 0 에 멈추고, 그 뒤 접힘마다
+  // 접히는 도중의 넓은 폭이 자리표시 폭으로 새어 들어가 자리표시 문장이 몇 프레임 길게 바뀌었다(#4518 시뮬레이터 실측: 폭 281→247 동안 문장 16→25자). 접히는 도중에 누름이
+  // 되돌려지는 길(`releasePress`)이 생기면서 눈에 띄었다.
+  const shownRef = useRef(shown);
+  useLayoutEffect(() => {
+    shownRef.current = shown;
+  }, [shown]);
   // 펼친 알약이 글 없이 접힐 때의 움직임을 연다. 포커스를 잃어서(`onInputBlur`)와 누름이 포커스로 이어지지 않아서(`releasePress`)가 **같은 판정**이다.
   // 움직이며 접히는 것은 **펼친 알약이 펼침의 이유(포커스·누름)만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
   const collapseWithMotion = useCallback(() => {
@@ -1915,8 +1915,8 @@ export function Composer({
   const [inputWidth, setInputWidth] = useState<number | null>(null);
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
     // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305). 펼치는 중·접히는 중의 폭도 아니므로
-    // 진행값이 0 에 닿은 뒤(접힌 폭)에서만 잰다(#4456).
-    if (expandedRef.current || progressRef.current > 0) return;
+    // 접힘이 끝나 도구 줄이 내려간 뒤(`shown` 이 거짓, 접힌 폭)에서만 잰다(#4456 → #4518: 진행값 리스너는 첫 접힘 뒤 사라진다, 위 `shownRef`).
+    if (shownRef.current) return;
     const {width} = event.nativeEvent.layout;
     setInputWidth(previous => (previous === width ? previous : width));
   }, []);

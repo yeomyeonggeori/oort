@@ -695,6 +695,55 @@ describe('접히는 동안 — 프레임마다 읽은 값 (포커스를 잃어�
   });
 });
 
+describe('접히는 도중의 폭은 두 번째 접힘부터도 자리표시 폭이 되지 않는다 (#4518 — 진행값 리스너는 첫 접힘 뒤 사라진다)', () => {
+  // Animated 는 값에 달린 마지막 자식(도구 줄 · 글 칸 여백)이 떨어지면 그 값의 리스너를 모두 지운다. 접힘이 한 번 끝나 도구 줄이 내려가면 진행값 사본(`progress.addListener`)이
+  // 0 에 멈추므로, 폭 가드를 그 사본에 걸면 **두 번째** 접힘부터 넓은 폭이 자리표시 폭으로 샌다(시뮬레이터에서 문장이 몇 프레임 길게 바뀐 모양). 위 시험은 첫 접힘만 본다.
+  const layout = (width: number) =>
+    fireEvent(input(), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width, height: 44}}});
+  const probeWidth = () =>
+    flat(
+      screen.queryAllByTestId('composer-placeholder-probe', {includeHiddenElements: true})[0]?.props.style,
+    ).width;
+
+  it('한 번 펼쳤다 접은 뒤 다시 펼치고 도중에 되돌려도(누름 → 끌기) 접히는 도중의 폭은 안 잰다', async () => {
+    await mountSettled();
+    layout(358); // 접힌 폭
+    const base = probeWidth();
+    expect(base).toBeDefined();
+    // 첫 주기: 펼치고 접는다 — 도구 줄이 내려가며 진행값에 달린 자식이 모두 떨어진다.
+    focus();
+    settle();
+    blur();
+    settle();
+    expect(hasTools()).toBe(false);
+    // 둘째 주기: 누르고, 펼침이 진행되는 도중에 끌어 되돌린다.
+    touchDown(100, 100);
+    advance(6);
+    touchMoveTo(100, 125);
+    advance(4); // 접히는 중간
+    layout(300); // 접힌 폭이 아니다
+    expect(probeWidth()).toBe(base);
+    settle(); // 접힘이 끝났다
+    layout(340); // 접힌 폭에 닿은 뒤에는 잰다
+    expect(probeWidth()).toBe(Number(base) - 18);
+  });
+
+  it('한 번 펼쳤다 접은 뒤 포커스로 다시 펼쳤다 블러로 접힐 때도 같다', async () => {
+    await mountSettled();
+    layout(358);
+    const base = probeWidth();
+    for (let cycle = 0; cycle < 2; cycle += 1) {
+      focus();
+      settle();
+      blur();
+      advance(4); // 접히는 중간
+      layout(300);
+      expect([cycle, probeWidth()]).toEqual([cycle, base]);
+      settle();
+    }
+  });
+});
+
 describe('아래로 끌어 자판 내리기', () => {
   const touch = (pageX: number, pageY: number) => ({nativeEvent: {pageX, pageY}});
   const bar = () => screen.getByTestId('composer-bar');
