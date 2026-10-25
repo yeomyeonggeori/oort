@@ -1,0 +1,22 @@
+appId: app.momo.ios
+name: 110-sheet-action-live
+---
+# 110-sheet-action-live - 메시지 행동 시트가 진짜 손가락에 닫히고, 행동이 슬라이드 뒤에 한 번 불린다 (#4318).
+#
+# 표면 `-momoMeasure SHEETKIT-MESSAGE-LIVE` 는 배송되는 `MessageActionSheet` 를 실제로 닫히는 부모(`useState`) 위에
+# 세운다(`measure/sheetKit.tsx`, 가상 인물). 시트가 걷히면 뒤 화면의 기록 줄이 `onClose`·행동의 순서와 횟수를 말한다:
+#   「기록: close,reply」 = 슬라이드가 끝난 뒤 onClose, 이어서 답글 달기 **한 번**.
+# jest 의 `fireEvent` 는 히트 테스트(눌림 영역)를 건너뛰므로, 이 흐름이 실제 탭으로 X 와 행을 누른다.
+#
+#   xcrun simctl launch <UDID> app.momo.ios --args \
+#     -momoMeasure SHEETKIT-MESSAGE-LIVE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <UDID> test clients/mobile/maestro/110-sheet-action-live.yaml
+- extendedWaitUntil:
+    visible:
+      id: "sheet-reply"
+    timeout: 60000
+- tapOn:
+    id: "sheet-reply"
+- extendedWaitUntil:
+    visible: "기록: close,reply"
+    timeout: 10000

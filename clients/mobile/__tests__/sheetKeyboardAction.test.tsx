@@ -314,6 +314,22 @@ describe('키보드 - 시트에 배선', () => {
     expect(dismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('시트가 서기 전에 올라와 있던 키보드(대화 입력창의 것)는 닫아도 접지 않는다', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    // 키보드가 이미 올라온 채 시트가 선다 — Keyboard 모듈은 did 이벤트로 「보이는 중」을 기억한다.
+    act(() => {
+      emitter().emit('keyboardDidShow', keyboardFrame(336, BASE_WINDOW.height));
+    });
+    await mount(<Sheet height="medium" onClose={() => {}} />, true);
+    // 처음부터 키보드 위에 선다(올라온 뒤에 따라 올리지 않는다).
+    expect(flat('page-sheet').bottom).toBe(336);
+    fireEvent.press(screen.getByTestId('close'));
+    expect(dismiss).not.toHaveBeenCalled();
+    act(() => {
+      emitter().emit('keyboardDidHide', keyboardFrame(0, BASE_WINDOW.height));
+    });
+  });
+
   it('키보드가 없으면 닫을 때 키보드를 건드리지 않는다', async () => {
     const dismiss = jest.spyOn(Keyboard, 'dismiss');
     await mount(<Sheet height="medium" onClose={() => {}} />, true);

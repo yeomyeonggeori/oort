@@ -290,6 +290,46 @@ function MessageSheetSurface({confirmDelete}: {confirmDelete: boolean}): React.J
   );
 }
 
+/**
+ * 살아 있는 메시지 행동 시트 — 누르면 **진짜로** 닫히고 행동이 기록된다. 실제 손가락 탭(maestro 110)이 「X 누름 →
+ * 닫힘」과 「행동 누름 → 슬라이드가 끝난 뒤 onClose → 행동이 한 번」을 런타임에서 확인한다(jest 의 `fireEvent`
+ * 는 히트 테스트를 건너뛴다). 기록은 시트가 걷힌 뒤에도 뒤 화면에 남는다.
+ */
+function MessageLiveSurface(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const [open, setOpen] = useState(true);
+  const [log, setLog] = useState<string[]>([]);
+  const note = (name: string) => () => setLog(previous => [...previous, name]);
+  return (
+    <Backdrop>
+      <View style={styles.liveLog}>
+        <Text style={styles.liveLogText} testID="sheetkit-live-log">
+          {`기록: ${log.length === 0 ? '없음' : log.join(',')}`}
+        </Text>
+      </View>
+      {open ? (
+        <MessageActionSheet
+          message={MESSAGE}
+          chips={CHIPS}
+          availability={AVAILABILITY}
+          authorLabel="이도현"
+          onClose={() => {
+            setOpen(false);
+            note('close')();
+          }}
+          onToggleReaction={note('react')}
+          onReply={note('reply')}
+          onQuote={note('quote')}
+          onCopy={note('copy')}
+          onPin={note('pin')}
+          onEdit={note('edit')}
+          onDelete={note('delete')}
+        />
+      ) : null}
+    </Backdrop>
+  );
+}
+
 const UNREAD: ReadState = {
   channelId: 'ch-design',
   lastReadSeq: 3,
@@ -532,6 +572,8 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <MessageSheetSurface confirmDelete={false} />;
     case 'message-delete':
       return <MessageSheetSurface confirmDelete />;
+    case 'message-live':
+      return <MessageLiveSurface />;
     case 'channel':
       return <ChannelSheetSurface target={CHANNEL_TARGET} confirmingLeave={false} />;
     case 'channel-leave':
@@ -572,5 +614,13 @@ const buildStyles = (color: Palette) =>
     // 시트 바탕(`sheet`) 위에 서는 머리 — 페이지 바탕(`bg`)이 아니라 시트 위에서 원이 떠 보여야 한다.
     sheetFloor: {flex: 1, backgroundColor: color.sheet, gap: space.sm},
     labelBox: {paddingHorizontal: SAFE_GUTTER, paddingTop: space.md},
+    liveLog: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: space.xl * 4,
+      paddingHorizontal: SAFE_GUTTER,
+    },
+    liveLogText: {fontSize: font.title, color: color.text},
     trailing: {fontSize: font.body, color: color.textMuted},
   });

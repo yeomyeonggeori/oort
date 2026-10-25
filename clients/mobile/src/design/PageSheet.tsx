@@ -63,7 +63,8 @@ import {ds2Radius, type Palette} from './tokens';
 // 입력 칸은 시트 바닥보다 아래일 수 없으니 키보드에 가리지 않는다. 시트가 위로 자라 머리의 X 가 시계
 // 뒤로 들어가지 않게 높이를 줄인다(큰 단의 위 끝이 상한). 키보드 높이는 `useKeyboardHeight`(숫자만)이고,
 // 시트는 이벤트에서 한 번에 선다 — 키보드의 곡선을 따라 미끄러지지 않는다(`MessageEditorSheet` 와 같은
-// 이유로, 입력이 있는 모달 하나는 한 번 늦거나 이른 것이 결함이 아니다). 닫을 때는 키보드도 같이 내린다.
+// 이유로, 입력이 있는 모달 하나는 한 번 늦거나 이른 것이 결함이 아니다). 시트 안의 입력이 부른 키보드는 닫을 때 같이
+// 내린다(시트가 서기 전에 올라와 있던 대화 입력창의 키보드는 건드리지 않는다).
 //
 // ## 행동은 닫은 뒤에 (#4318)
 //
@@ -192,6 +193,10 @@ function SheetFrame({
   const {height} = useWindowDimensions();
   const reduceMotion = useReduceMotionRef();
   const keyboardHeight = useKeyboardHeight();
+  // 시트가 서기 **전에** 이미 올라와 있던 키보드는 시트의 것이 아니다 — 대화 입력창이 키보드를 든 채 길게 눌러
+  // 연 시트다. 닫을 때 그것을 접으면 「답글 달기」를 누른 사람의 키보드를 닫아 주고 마는 화면이 된다
+  // (`messageTap.test`). 시트가 선 뒤에 올라온 키보드는 시트 안의 입력이 부른 것이라 시트와 같이 내린다.
+  const keyboardWasUp = useRef(keyboardHeight > 0);
   const travel = useRef(new Animated.Value(height)).current;
   const closing = useRef(false);
 
@@ -219,9 +224,9 @@ function SheetFrame({
     (after?: () => void) => {
       if (closing.current) return;
       closing.current = true;
-      // 키보드가 올라와 있으면 시트와 같이 내려간다. 안 그러면 시트가 다 나간 뒤에야(언마운트 때)
+      // 시트 안의 입력이 부른 키보드는 시트와 같이 내려간다. 안 그러면 시트가 다 나간 뒤에야(언마운트 때)
       // 키보드가 혼자 내려간다.
-      if (keyboardHeight > 0) Keyboard.dismiss();
+      if (keyboardHeight > 0 && !keyboardWasUp.current) Keyboard.dismiss();
       const finish = () => {
         // `onClose` 가 먼저다: 행동이 시트를 다시 열 수 있고, 그 말이 마지막이어야 한다.
         onClose();
