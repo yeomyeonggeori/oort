@@ -197,10 +197,10 @@ function SheetFrame({
   const {height} = useWindowDimensions();
   const reduceMotion = useReduceMotionRef();
   const keyboardHeight = useKeyboardHeight();
-  // 시트가 서기 **전에** 이미 올라와 있던 키보드는 시트의 것이 아니다 — 대화 입력창이 키보드를 든 채 길게 눌러
-  // 연 시트다. 닫을 때 그것을 접으면 「답글 달기」를 누른 사람의 키보드를 닫아 주고 마는 화면이 된다
-  // (`messageTap.test`). 시트가 선 뒤에 올라온 키보드는 시트 안의 입력이 부른 것이라 시트와 같이 내린다.
-  // 키보드가 한 번 내려가면 그 뒤에 올라오는 것은 더 이상 「서기 전부터」가 아니다.
+  // 시트가 서기 **전에** 이미 올라와 있던 키보드는 시트의 것이 아니다 — 대화 입력창의 키보드다. 닫을 때 그것을
+  // 접으면 「답글 달기」를 누른 사람의 키보드를 닫아 주고 마는 화면이 된다(`messageTap.test`). 시트가 선 뒤에
+  // 올라온 키보드는 시트 안의 입력이 부른 것이라 시트와 같이 내린다. 키보드가 한 번 내려가면 그 뒤에 올라오는 것은 더
+  // 이상 「서기 전부터」가 아니다. (iOS 는 Modal 을 띄울 때 보통 키보드를 접으므로 이 구분은 드문 경우의 안전망이다.)
   const keyboardWasUp = useRef(keyboardHeight > 0);
   useEffect(() => {
     if (keyboardHeight === 0) keyboardWasUp.current = false;

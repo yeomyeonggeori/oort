@@ -359,9 +359,10 @@ function MessageLiveSurface(): React.JSX.Element {
 }
 
 /**
- * 대화 입력창이 **키보드를 든 채** 길게 눌러 연 메시지 행동 시트. 시트가 서기 전부터 키보드가 올라와 있으므로 시트는
- * 처음부터 키보드 위에 서고(`useKeyboardHeight` 의 처음 값), 닫아도 그 키보드를 접지 않는다(`keyboardWasUp`).
- * 입력창 대역(`TextInput autoFocus`)이 키보드를 올리고 1.5초 뒤에 시트가 열린다.
+ * 대화 입력창이 **키보드를 든 채** 길게 눌러 연 메시지 행동 시트를 흉내 낸다. 입력창 대역(`TextInput autoFocus`)이
+ * 키보드를 올리고 1.5초 뒤에 시트가 열린다. **관찰된 사실: iOS 는 Modal 을 띄울 때 키보드를 접는다** — 시트가 서면
+ * 키보드가 없다(그래서 시트는 평소처럼 바닥에 선다). 시트가 서기 전의 키보드를 건드리지 않는 `keyboardWasUp` 은
+ * 접히지 않고 남는 드문 경우의 안전망이다.
  */
 function MessageKeyboardSurface(): React.JSX.Element {
   const styles = useStyles(buildStyles);
