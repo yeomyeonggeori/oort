@@ -5,7 +5,7 @@ import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Animated, Settings, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
+import {Animated, Keyboard, Settings, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
@@ -68,6 +68,12 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         머리 행 느린 전송을 하나씩 보낸다 — 이름·시각이 줄을 꼭 채우는 폭에서 시계가 이름 밑으로 내려서는가를 사진으로 본다.
 //             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
 //                         2.6초 — 시계가 서는 장면). 사진 바이트는 `measure/photo-stub.mjs` 가 답한다(`-momoPhotoStub 127.0.0.1:<포트>`).
+//
+//   #4456 「포커스 먼저」 — 입력창을 **누르는 순간**(글자 0개) 넓은 편집기로 자라고, 포커스를 잃으면(글이 없을 때) 접힌다.
+//             focus       140초 동안 재기만 한다 — 사람(Maestro)이 누르고·가만히 있고·치고·보내고(포커스가 남는다)·끌어 내리고·다시 누르고·
+//                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
+//                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
+//                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
@@ -459,6 +465,8 @@ interface Frame {
   day: boolean;
   /** 「최신으로」 필이 서 있다. */
   latest: boolean;
+  /** 입력창이 포커스를 쥐고 있다(#4456). 입력창이 없는 장면이면 false. */
+  focused: boolean;
 }
 
 interface Summary {
@@ -525,9 +533,10 @@ type ScenarioName =
   | 'live'
   | 'send20'
   | 'rec'
-  | 'namefit';
-/** #4331: 에이전트 DM 에 활동 줄이 서는 장면들. */
-const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live'];
+  | 'namefit'
+  | 'focus';
+/** #4331·#4456: 에이전트 DM 에 활동 줄이 서는 장면들. */
+const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live', 'focus'];
 /** `hold` 는 연결 띠를 세운 채 90초 머문다 — 사진용이고 `all` 에 들지 않는다. */
 const ALL: readonly ScenarioName[] = ['idle', 'peer', 'blip', 'outage', 'gap'];
 
@@ -548,6 +557,8 @@ interface Controls {
   watchNext: () => boolean;
   /** 목록 폭을 화면 폭보다 `by` pt 좁힌다(`namefit`). `null` 이면 원래대로. */
   setNarrow: (by: number | null) => void;
+  /** 입력창이 지금 포커스를 쥐고 있는가(#4456). */
+  isFocused: () => boolean;
 }
 
 // #4455 보내기 장면의 문구. 가상의 대화다 — 실제 대화 문구·이름을 쓰지 않는다.
@@ -743,6 +754,40 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     await wait(4_300);
     setPostDelay(250);
     await wait(1_500);
+    return;
+  }
+  if (name === 'focus') {
+    // 사람이 누르고 친다(#4456). 포커스·자판·초안·보냄이 바뀔 때마다 표식을 남겨 프레임과 맞춘다. 자판 표식에는 높이(pt)와 iOS 가
+    // 준 길이(ms)를 담는다 — 알약이 자판과 같은 박자로 오르내리는지 보는 근거다.
+    c.mark('focus-start');
+    const keyboardEvents = ['keyboardWillShow', 'keyboardDidShow', 'keyboardWillHide', 'keyboardDidHide'] as const;
+    const subscriptions = keyboardEvents.map(kind =>
+      Keyboard.addListener(kind, event =>
+        c.mark(`${kind}-h${Math.round(event.endCoordinates.height)}-d${Math.round(event.duration)}`),
+      ),
+    );
+    let lastDraft = readDraft(DRAFT_KEY);
+    let lastCount = server.messages.length;
+    let lastFocused = c.isFocused();
+    const until = Date.now() + 140_000;
+    while (Date.now() < until) {
+      const focused = c.isFocused();
+      if (focused !== lastFocused) {
+        lastFocused = focused;
+        c.mark(focused ? 'focus' : 'blur');
+      }
+      const draft = readDraft(DRAFT_KEY);
+      if (draft !== lastDraft) {
+        lastDraft = draft;
+        c.mark(`draft-${draft === '' ? 0 : draft.split('\n').length}-lines`);
+      }
+      if (server.messages.length !== lastCount) {
+        lastCount = server.messages.length;
+        c.mark('sent');
+      }
+      await wait(16);
+    }
+    for (const subscription of subscriptions) subscription.remove();
     return;
   }
   if (name === 'own') {
@@ -1012,6 +1057,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             barH: null,
             day: pillsRef.current?.day === true,
             latest: pillsRef.current?.latest === true,
+            focused: inputRef.current?.isFocused() === true,
           };
           frames.push(frame);
           void rectOf(anchorRef.current).then(rect => {
@@ -1050,6 +1096,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             setAnchorSeq((server.messages[server.messages.length - 1]?.seq ?? 0) + 1);
             return true;
           },
+          isFocused: () => inputRef.current?.isFocused() === true,
         };
         relayFirst = message => (fake.current as FakeRail).message(message);
         markRef.current = controls.mark;
