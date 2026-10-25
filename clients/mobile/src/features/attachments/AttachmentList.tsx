@@ -420,7 +420,9 @@ const buildStyles = (color: Palette) =>
     pressed: { backgroundColor: color.surfacePressed },
     imageGroup: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
     imageItem: { borderRadius: radius.md },
-    // 테두리 없음: 그림이 곧 내용이다(Buzz). 받는 동안만 중립 면이 자리를 지킨다.
+    // 테두리 없음: 그림이 곧 내용이다(Buzz). 중립 면은 그림이 서기 전의 자리를 지킨다 — 받는 동안, 그리고 **새로 마운트된 이미지 뷰의 첫
+    // 프레임**(네이티브 첫 페인트는 한 프레임 늦다, 8~23ms). 보낸 사진이 서버 사본으로 바뀔 때 눈에 보이는 프레임에 이 면이 드러나지 않게
+    // 서버 사본을 먼저 마운트해 둔다(`sendArrival.ts` 「사진은 서버 사본을 먼저 마운트해 두고」, #4455).
     previewFrame: {
       alignItems: 'center',
       justifyContent: 'center',
