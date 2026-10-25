@@ -58,6 +58,10 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
 //                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
 //                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
+//             `focus+T<초>` 는 재는 시간을 줄인다(기본 140초; 예: `DM-STEADY-FOCUS+T130`). #4518 부터 **손이 닿는 순간**의 표식도 남긴다 —
+//                         `touch-down-x<pageX>-y<pageY>` · `touch-drag-d<거리>`(끌기 문턱 10pt 를 처음 넘는 때) · `touch-up` · `touch-cancel`(입력창에 닿은
+//                         터치를 도크 상자가 위로 받는다) 과 컴포저가 다시 그려진 커밋의 `render-<phase>-<ms>ms`(React `Profiler`). 흐름은
+//                         `maestro/111-press-steady.yaml`(짧은 탭 · 길게 누름 · 끌기 4방향), 분석은 `focus-windows.mjs` 의 「누름→자판」 줄.
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
