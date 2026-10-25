@@ -7,6 +7,7 @@ import {
   Composer,
   composerCollapsedHeight,
   INPUT_CHROME,
+  PRESS_DRAG_LOCK_RELEASE_MS,
   PRESS_FOCUS_GRACE_MS,
 } from '../src/features/conversation/Composer';
 import {COMPOSER_EXPAND_SPRING} from '../src/design/motion';
@@ -777,11 +778,18 @@ describe('아래로 끌어 자판 내리기', () => {
 // =============================================================================
 
 const finger = (pageX: number, pageY: number) => ({nativeEvent: {pageX, pageY}});
+/**
+ * 터치를 쏘는 자리. 실기에서 RN 은 날 터치를 입력창에서 위로 올려 보낸다 — 입력창이 편집 불가(`editable={false}`, 끌기 잠금)여도 그대로 올라와서 잠긴 동안에도
+ * `touchEnd` 가 와야 잠금이 풀린다. 그런데 RNTL 은 편집 불가 입력창으로 쏜 이벤트를 **그 위 처리기까지** 막는다(`fire-event.js` `isEventEnabled`). 그래서 잠긴 동안만
+ * 같은 처리기를 가진 `composer-field` 에 쏜다(그 위는 입력창을 거치지 않으니 막히지 않는다).
+ */
+const touchSurface = () =>
+  input().props.editable === false ? screen.getByTestId('composer-field') : input();
 /** 손가락이 입력창에 닿는다. 포커스 이벤트는 **쏘지 않는다**. */
-const touchDown = (x = 100, y = 100) => fireEvent(input(), 'touchStart', finger(x, y));
-const touchMoveTo = (x: number, y: number) => fireEvent(input(), 'touchMove', finger(x, y));
-const touchUp = (x = 100, y = 100) => fireEvent(input(), 'touchEnd', finger(x, y));
-const touchCancelled = () => fireEvent(input(), 'touchCancel', finger(100, 100));
+const touchDown = (x = 100, y = 100) => fireEvent(touchSurface(), 'touchStart', finger(x, y));
+const touchMoveTo = (x: number, y: number) => fireEvent(touchSurface(), 'touchMove', finger(x, y));
+const touchUp = (x = 100, y = 100) => fireEvent(touchSurface(), 'touchEnd', finger(x, y));
+const touchCancelled = () => fireEvent(touchSurface(), 'touchCancel', finger(100, 100));
 /** 시간을 `ms` 만큼 흘린다. */
 const wait = (ms: number) =>
   act(() => {
@@ -1118,6 +1126,104 @@ describe('누름 (#4518) — 이미 펼쳐져 있으면 아무것도 하지 않�
     expect(jest.getTimerCount()).toBe(timers);
     expect(ourSprings(spring)).toHaveLength(1);
     expect(toolsStyle().height).toBe(TOUCH_TARGET);
+  });
+});
+
+describe('누름 (#4518 D2) — 끌기는 포커스로 이어지지 않는다: 문턱을 넘어 끌린 손이 닿아 있는 동안 입력창을 잠근다', () => {
+  // iOS 는 입력창을 누른 손을 **뗄 때** 포커스를 준다 — 끌었어도(시뮬레이터 실측, 네 방향 모두). 그래서 접힌 빈 입력창에서 문턱을 넘긴 끌기는
+  // 되돌린 입력창이 손을 뗄 때 다시 포커스돼 펼침이 깜빡였다. 네이티브가 포커스를 줄지 정하는 때에 입력창이 편집 불가(`editable={false}`)여야 막힌다.
+  // 이 시험은 그 **구성**(언제 잠기고 언제 풀리나)을 잠근다 — 실제로 포커스가 안 서는지는 시뮬레이터 실측이다(PR 본문).
+  const editable = () => input().props.editable as boolean;
+
+  it('문턱을 넘어 끌면 잠기고, 손을 뗀 뒤 PRESS_DRAG_LOCK_RELEASE_MS 가 지나서야 풀린다 — 닿기 전·손떨림은 잠그지 않는다', async () => {
+    await mountSettled();
+    expect(editable()).toBe(true); // 대조: 닿기 전
+    touchDown(100, 100);
+    expect(editable()).toBe(true); // 닿은 직후
+    touchMoveTo(104, 103); // 5pt — 손떨림은 탭이다
+    expect(editable()).toBe(true);
+    touchMoveTo(100, 125); // 25pt — 끌기
+    expect(editable()).toBe(false);
+    touchMoveTo(100, 160); // 더 끌어도 잠긴 채
+    expect(editable()).toBe(false);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS - 1);
+    expect(editable()).toBe(false); // 손을 뗀 순간을 네이티브가 정하는 동안은 잠긴 채다
+    wait(2);
+    expect(editable()).toBe(true);
+  });
+
+  it('시스템이 터치를 가져가도(취소) 같다: 손이 떨어진 뒤에 풀린다', async () => {
+    await mountSettled();
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    expect(editable()).toBe(false);
+    touchCancelled();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS - 1);
+    expect(editable()).toBe(false);
+    wait(2);
+    expect(editable()).toBe(true);
+  });
+
+  it('끌고 뗀 직후에 다시 누르면 그 순간 풀린다 — 잠금이 다음 탭을 먹지 않는다', async () => {
+    await mountSettled();
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    touchUp();
+    settle(); // 되돌림이 끝난다(500ms) — 잠금은 이미 풀렸으니 다시 잠글 수 있게 한 번 더 끈다
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    expect(editable()).toBe(false);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS / 2);
+    expect(editable()).toBe(false); // 아직 안 풀렸다
+    touchDown(100, 100); // 새 손
+    expect(editable()).toBe(true); // 닿는 그 순간 풀렸고
+    expect(hasTools()).toBe(true); // 새 누름은 새 누름으로 펼친다
+    wait(PRESS_DRAG_LOCK_RELEASE_MS * 2); // 옛 시계가 새 손 위에서 다시 잠그거나 푸는 일도 없다
+    expect(editable()).toBe(true);
+  });
+
+  it('이미 포커스면 잠그지 않는다 — 끌어 내리기·글자 선택은 지금 그대로 입력창이 받는다', async () => {
+    await mountSettled();
+    focus();
+    settle();
+    touchDown(100, 100);
+    touchMoveTo(100, 140); // 문턱을 넘는다
+    expect(editable()).toBe(true);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS * 2);
+    expect(editable()).toBe(true);
+  });
+
+  it('글이 있어 이미 펼쳐져 있으면 잠그지 않는다', async () => {
+    await mountSettled();
+    fireEvent.changeText(input(), '쓰던 글');
+    settle();
+    touchDown(100, 100);
+    touchMoveTo(100, 140);
+    expect(editable()).toBe(true);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS * 2);
+    expect(editable()).toBe(true);
+  });
+
+  it('언마운트하면 잠금을 풀 시계도 사라진다', async () => {
+    const view = await mountSettled();
+    const idle = jest.getTimerCount();
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    touchUp();
+    settle(); // 되돌림의 스프링은 끝났다
+    // 전제: 잠금이 실제로 걸렸다가 풀렸다 — 아니면 아래 「시계 0」은 아무것도 안 잰 것이다.
+    expect(editable()).toBe(true);
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    touchUp(); // 잠금을 풀 시계가 선다
+    expect(jest.getTimerCount()).toBeGreaterThan(idle);
+    view.unmount();
+    wait(1);
+    expect(jest.getTimerCount()).toBe(idle);
   });
 });
 

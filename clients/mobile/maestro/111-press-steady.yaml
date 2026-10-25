@@ -1,0 +1,240 @@
+appId: app.momo.ios
+name: 111-press-steady
+---
+# 111-press-steady — 입력창을 **누르는 순간** 펼침이 시작되고(#4518), 그 누름이 포커스로 이어지지 않으면 되돌리는 길들. 재는 것은 앱이 한다
+# (`measure/steady.tsx` 의 `focus` 장면 + 터치 표식 `touch-down/-drag/-up/-cancel`; 분석은 `measure/focus-windows.mjs` 의 「누름→자판」 줄).
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure DM-STEADY-FOCUS+T130 \
+#     -RCT_jsLocation 127.0.0.1:$PORT -momoGapSink 127.0.0.1:$SINK
+#   maestro --udid <udid> test clients/mobile/maestro/111-press-steady.yaml
+#
+# 장면 이름 뒤 `+T110` 은 장면이 재는 시간(초)이다. 이 흐름은 그 안에 끝나야 한다(앞 6초는 목록이 끝에 앉는 시간).
+# 끌기 좌표는 화면 비율이다(Maestro `swipe` 의 점은 `%` 만 받는다): 시작 `50%, 93%` 는 **접힌 입력창의 한가운데**다(16 Pro 402×874 → (201, 813), 입력창 경계 y 792~834).
+# 거기서 아래 2% ≈ 17pt(눌림 영역 안, 문턱 10pt 을 넘는다) · 아래 6% ≈ 52pt(눌림 영역 아래 끝 +30pt 밖) · 위 2% · 오른쪽 4% ≈ 16pt.
+# 시뮬레이터는 키보드가 처음 오를 때 받아쓰기 설정을 물을 수 있다 — 잴 기기에서 한 번 미리 눌러 두고 돌린다(`110-focus-steady` 머리말과 같다).
+#
+# 순서 (「가만히」 = 아무것도 안 하고 2.5~3.5초 — 그 사이 목록이 움직이면 안 된다):
+#   P1~P5 짧은 탭 다섯 번   닿는 순간 펼침이 시작되고 손을 떼면 포커스·자판이 온다. 사이마다 도구 줄에서 끌어 내려 접는다.
+#                           → 「닿음 → 펼침 첫 변화」와 「펼침 시작 − `keyboardWillShow`」 표본 다섯.
+#   L   길게 누름           손이 닿은 채 펼침이 끝나고, 손을 뗄 때 포커스·자판이 온다(목록이 두 구간으로 움직이는지).
+#   D2a 접힌 빈 입력창에서 아래로 2%(≈17pt) 끌고 뗀다   → 되돌림(끌기) 뒤 손을 뗄 때 다시 포커스돼 펼침이 깜빡이는가.
+#   D2b 아래로 6%(≈52pt, 눌림 영역 밖)                   → 같은 질문.
+#   D2c 위로 2% · D2d 오른쪽 4%                  → 같은 질문(방향 대조).
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 장면이 재기 시작할 때까지 기다린다(진입 수렴 4초 + 0.8초).
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 7000
+    optional: true
+# P1
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2500
+    optional: true
+- swipe:
+    from:
+      id: "composer-tools"
+    direction: DOWN
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+# P2
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2500
+    optional: true
+- swipe:
+    from:
+      id: "composer-tools"
+    direction: DOWN
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+# P3
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2500
+    optional: true
+- swipe:
+    from:
+      id: "composer-tools"
+    direction: DOWN
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+# P4
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2500
+    optional: true
+- swipe:
+    from:
+      id: "composer-tools"
+    direction: DOWN
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+# P5
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 2500
+    optional: true
+- swipe:
+    from:
+      id: "composer-tools"
+    direction: DOWN
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+# L — 길게 누른다(Maestro 기본 3초). 손이 닿은 채 펼침이 끝나고, 뗄 때 포커스가 온다.
+- longPressOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+- swipe:
+    from:
+      id: "composer-tools"
+    direction: DOWN
+    duration: 400
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3000
+    optional: true
+# D2a — 접힌 빈 입력창을 눌러 아래로 2%(≈17pt) 끌고 뗀다.
+- swipe:
+    start: 50%, 93%
+    end: 50%, 95%
+    duration: 600
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3500
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "composer-tools"
+    commands:
+      - swipe:
+          from:
+            id: "composer-tools"
+          direction: DOWN
+          duration: 400
+      - extendedWaitUntil:
+          visible:
+            id: "no-such-element"
+          timeout: 3000
+          optional: true
+# D2b — 아래로 6%(≈52pt, 눌림 영역 밖).
+- swipe:
+    start: 50%, 93%
+    end: 50%, 99%
+    duration: 600
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3500
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "composer-tools"
+    commands:
+      - swipe:
+          from:
+            id: "composer-tools"
+          direction: DOWN
+          duration: 400
+      - extendedWaitUntil:
+          visible:
+            id: "no-such-element"
+          timeout: 3000
+          optional: true
+# D2c — 위로 2%.
+- swipe:
+    start: 50%, 93%
+    end: 50%, 91%
+    duration: 600
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3500
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "composer-tools"
+    commands:
+      - swipe:
+          from:
+            id: "composer-tools"
+          direction: DOWN
+          duration: 400
+      - extendedWaitUntil:
+          visible:
+            id: "no-such-element"
+          timeout: 3000
+          optional: true
+# D2d — 오른쪽으로 4%.
+- swipe:
+    start: 50%, 93%
+    end: 54%, 93%
+    duration: 600
+- extendedWaitUntil:
+    visible:
+      id: "no-such-element"
+    timeout: 3500
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "composer-tools"
+    commands:
+      - swipe:
+          from:
+            id: "composer-tools"
+          direction: DOWN
+          duration: 400
+      - extendedWaitUntil:
+          visible:
+            id: "no-such-element"
+          timeout: 3000
+          optional: true

@@ -671,6 +671,11 @@ const PRESS_DRAG_SLOP_PT = 10;
  * 손이 닿아 있는 동안에는 이 시계가 돌지 않는다(길게 누르면 포커스는 손을 뗄 때 온다).
  */
 export const PRESS_FOCUS_GRACE_MS = 500;
+/**
+ * 끌기 잠금 (#4518 D2): 손을 뗀 뒤 입력창의 잠금(`editable={false}`)을 푸는 데까지 기다리는 시간(ms). 네이티브는 손을 **뗀 순간**에 포커스를 줄지 정하므로
+ * 잠금은 그 순간을 지나서 풀려야 하고, JS 가 손 뗌을 아는 것은 그보다 5~10ms 늦다 — 그 위에 한두 프레임의 여유를 얹은 값이다. 이 사이에 다시 누르면 그 순간 풀린다.
+ */
+export const PRESS_DRAG_LOCK_RELEASE_MS = 150;
 /** 도구 줄에 서는 도구들. 마이크(#4306)·예약 보내기(#4216)·사진 여러 장(#4296)은 여기에 붙는다. */
 const TOOL_SLOTS: readonly 'mention'[] = ['mention'];
 const TOOL_COPY = {mention: '@로 부르기'} as const;
@@ -1496,6 +1501,20 @@ export function Composer({
   const [pressing, setPressing] = useState(false);
   const pressingRef = useRef(false);
   const pressOriginRef = useRef({x: 0, y: 0});
+  // 끌기 잠금 (#4518 D2). 접힌 빈 입력창을 눌러 끌기 문턱을 넘은 손이 닿아 있는 동안 true — `TextInput` 의 `editable` 을 내려 손을 뗄 때 포커스가 안 서게 한다(아래 `onFieldTouchMove`).
+  const [focusLock, setFocusLock] = useState(false);
+  // 잠금의 **동기** 사본 — 터치 처리기가 렌더 없이 읽는다.
+  const focusLockRef = useRef(false);
+  const applyFocusLock = useCallback((next: boolean) => {
+    focusLockRef.current = next;
+    setFocusLock(next);
+  }, []);
+  const focusLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearFocusLockTimer = useCallback(() => {
+    if (focusLockTimerRef.current === null) return;
+    clearTimeout(focusLockTimerRef.current);
+    focusLockTimerRef.current = null;
+  }, []);
   const pressGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearPressGrace = useCallback(() => {
     if (pressGraceRef.current === null) return;
@@ -1504,6 +1523,7 @@ export function Composer({
   }, []);
   // 언마운트: 기다리던 유예가 사라진 화면을 되돌리려 하지 않게.
   useEffect(() => () => clearPressGrace(), [clearPressGrace]);
+  useEffect(() => () => clearFocusLockTimer(), [clearFocusLockTimer]);
 
   // 안내를 읽은 뒤 고치러 돌아왔다 — 자판이 다시 오르면 안내가 한 화면을 넘는다
   // (R3-B1). 안내는 alert 로 이미 읽혔고, 키가 남아 있으면 다음 전송이 다시 막는다.
@@ -1778,6 +1798,11 @@ export function Composer({
   const onFieldTouchStart = useCallback(
     (event: GestureResponderEvent) => {
       const {pageX, pageY} = event.nativeEvent;
+      // 새 손이 닿으면 잠금은 그 순간 푼다 — 끌고 뗀 직후의 탭이 잠금에 먹히지 않게(탭이 끝나는 것은 네이티브가 새 값을 받고도 남을 만큼 뒤다).
+      if (focusLockRef.current) {
+        clearFocusLockTimer();
+        applyFocusLock(false);
+      }
       if (pressingRef.current) {
         // 손을 뗀 뒤 포커스를 기다리는 중에 다시 눌렀다(포커스가 늦어 한 번 더 누른 손) — 유예를 멈추고 이 손가락으로 이어 간다.
         clearPressGrace();
@@ -1790,7 +1815,7 @@ export function Composer({
       pressOriginRef.current = {x: pageX, y: pageY};
       setPressing(true);
     },
-    [clearPressGrace],
+    [clearPressGrace, clearFocusLockTimer, applyFocusLock],
   );
   const onFieldTouchMove = useCallback(
     (event: GestureResponderEvent) => {
@@ -1798,16 +1823,35 @@ export function Composer({
       const {pageX, pageY} = event.nativeEvent;
       const origin = pressOriginRef.current;
       if (Math.hypot(pageX - origin.x, pageY - origin.y) > PRESS_DRAG_SLOP_PT) {
+        // 끌기는 포커스로 이어지지 않는다(#4518 D2, owner 위임: 끌기 = 대화 스크롤·끌어 내리기 의도). 그런데 iOS 는 이 손을 **뗄 때** 입력창에 포커스를 준다 — 끌었어도, 눌린 영역을 벗어났어도
+        // (시뮬레이터 실측: 문턱을 넘겨 끌고 뗀 네 방향 모두 손을 뗀 5~30ms 뒤 `onFocus`). RN 의 `onPress → focus()` 가 아니라 네이티브 길이라 응답자를 가져가도(JS 끌기 가져가기를 시험했다 —
+        // `onPress` 는 안 왔는데 포커스는 왔다) 막지 못했고, 네이티브가 포커스를 줄지 정하는 때에 입력창이 **편집 불가**여야 막힌다. 그래서 끌기를 알아챈 즉시 잠그고 손을 뗀 뒤 풀어 준다.
+        clearFocusLockTimer();
+        applyFocusLock(true);
         releasePress();
       }
     },
-    [releasePress],
+    [releasePress, clearFocusLockTimer, applyFocusLock],
   );
+  // 끌기 잠금을 손이 떨어진 뒤(`PRESS_DRAG_LOCK_RELEASE_MS`) 푼다. 손을 떼거나 시스템이 가져가는 두 길 모두.
+  const unlockFocusSoon = useCallback(() => {
+    if (!focusLockRef.current) return;
+    clearFocusLockTimer();
+    focusLockTimerRef.current = setTimeout(() => {
+      focusLockTimerRef.current = null;
+      applyFocusLock(false);
+    }, PRESS_DRAG_LOCK_RELEASE_MS);
+  }, [clearFocusLockTimer, applyFocusLock]);
   const onFieldTouchEnd = useCallback(() => {
+    unlockFocusSoon();
     if (!pressingRef.current) return;
     clearPressGrace();
     pressGraceRef.current = setTimeout(releasePress, PRESS_FOCUS_GRACE_MS);
-  }, [clearPressGrace, releasePress]);
+  }, [clearPressGrace, releasePress, unlockFocusSoon]);
+  const onFieldTouchCancel = useCallback(() => {
+    unlockFocusSoon();
+    releasePress();
+  }, [releasePress, unlockFocusSoon]);
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
   // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
@@ -2296,7 +2340,7 @@ export function Composer({
           onTouchStart={onFieldTouchStart}
           onTouchMove={onFieldTouchMove}
           onTouchEnd={onFieldTouchEnd}
-          onTouchCancel={releasePress}>
+          onTouchCancel={onFieldTouchCancel}>
         <TextInput
           ref={inputRef}
           // 글이 비면 높이를 **명시**한다 (#4305, owner 10-24): 값만 비우면 iOS(Fabric)가 멀티라인 입력창의
@@ -2337,6 +2381,9 @@ export function Composer({
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           accessibilityHint={droppedHint}
           multiline
+          // 끌기 잠금(#4518 D2): 접힌 빈 입력창을 눌러 끌기 문턱을 넘은 손이 닿아 있는 동안만 `false` 다 — 손을 뗄 때 네이티브가 포커스를 주지 못하게 한다(`onFieldTouchMove`).
+          // 그 밖에는 언제나 `true` 라서(기본값과 같다) 다른 터치·포커스·글자 선택은 지금 그대로다.
+          editable={!focusLock}
           // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).
           //
           // 웹의 같은 문장은 한 줄 상자(`rows=1`)라 넘친 절이 사라지고, 그래서
