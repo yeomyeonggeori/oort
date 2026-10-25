@@ -156,7 +156,7 @@ export const SHEET_ICONS = {
 
 export type SheetIconName = keyof typeof SHEET_ICONS;
 
-/** 머리 단추 글리프 22(= `SHEET.glyph`), 행 오른쪽 복사 22, 셰브론 18. */
+/** 머리 단추 글리프(닫기·확정) 22 — Buzz 22, 행 오른쪽 복사 22, 셰브론 18. */
 export const SHEET_ICON_SIZE: Readonly<Record<SheetIconName, number>> = {
   close: 22,
   check: 22,

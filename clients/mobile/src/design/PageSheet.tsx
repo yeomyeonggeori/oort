@@ -8,6 +8,7 @@ import React, {
 } from 'react';
 import {
   Animated,
+  Keyboard,
   Modal,
   PanResponder,
   Pressable,
@@ -20,6 +21,7 @@ import {
   useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 
+import {useKeyboardHeight} from '../lib/useKeyboardHeight';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {
   SHEET_TOP,
@@ -54,6 +56,20 @@ import {ds2Radius, type Palette} from './tokens';
 // 지금까지의 모양), `fit`(내용 높이, 화면의 85% 위로는 안에서 스크롤), `medium`(화면의 9/16 고정).
 // 단계별 상자와 끌어 닫기의 문턱은 `sheetModel.ts` 의 순수 함수다. 머리(오른쪽 원형 X·제목·
 // 선택적 ✓)는 `SheetChrome.tsx` 의 `SheetHeader` 를 자식 맨 위에 둔다 — 이 파일은 그릇이다.
+//
+// ## 키보드 (#4318)
+//
+// 소프트 키보드가 올라오면 시트의 바닥이 키보드 윗면에 앉는다(`sheetFrame` 의 `bottom`) — 시트 안의
+// 입력 칸은 시트 바닥보다 아래일 수 없으니 키보드에 가리지 않는다. 시트가 위로 자라 머리의 X 가 시계
+// 뒤로 들어가지 않게 높이를 줄인다(큰 단의 위 끝이 상한). 키보드 높이는 `useKeyboardHeight`(숫자만)이고,
+// 시트는 이벤트에서 한 번에 선다 — 키보드의 곡선을 따라 미끄러지지 않는다(`MessageEditorSheet` 와 같은
+// 이유로, 입력이 있는 모달 하나는 한 번 늦거나 이른 것이 결함이 아니다). 닫을 때는 키보드도 같이 내린다.
+//
+// ## 행동은 닫은 뒤에 (#4318)
+//
+// 닫는 길은 하나(`slideOut`)이고 X·스크림·끌기·escape·행동 누름이 모두 지난다. 행동 누름은
+// `usePageSheetAction()` 으로 「미끄러져 내린 뒤 `onClose`, 이어서 행동」을 한 번 부른다 — 부모가 행동
+// 안에서 곧바로 언마운트해 시트가 스냅으로 사라지는 것을 막는다.
 // =============================================================================
 
 export {SHEET_TOP};
@@ -63,14 +79,53 @@ export const SHEET_RADIUS = ds2Radius.sheet;
 const GRAB = {width: 38, height: 5} as const;
 const SLIDE_MS = 260;
 
-const SheetCloseContext = createContext<(() => void) | null>(null);
+/** 시트가 자식에게 쥐여 주는 것. 시트 밖에서는 `null` 이다. */
+interface SheetControl {
+  /** 미끄러져 내린 뒤 `onClose`. X·스크림·끌기와 같은 길이다. */
+  close: () => void;
+  /** 미끄러져 내린 뒤 `onClose` 를 부르고, 이어서 `action` 을 **한 번** 부른다. */
+  closeThen: (action: () => void) => void;
+  /** 소프트 키보드가 가린 높이(내려가 있으면 0). */
+  keyboardHeight: number;
+}
+
+const SheetControlContext = createContext<SheetControl | null>(null);
 
 /**
  * 시트 안의 「닫기」가 부를 것. 시트가 쥔 닫기를 부르면 스크림·끌기와 같이
  * 미끄러져 나간다. 시트 밖에서 부르면 `null`이다.
  */
 export function usePageSheetClose(): (() => void) | null {
-  return useContext(SheetCloseContext);
+  return useContext(SheetControlContext)?.close ?? null;
+}
+
+const runNow = (action: () => void): void => action();
+
+/**
+ * 시트 안의 **행동**이 부를 것: 시트를 미끄러뜨려 내린 **뒤에** 행동을 한 번 부른다(#4318).
+ *
+ * 행동 누름을 부모의 `setOpen(false)` 에 바로 맡기면 시트가 언마운트되며 스냅으로 사라진다 —
+ * 옛 `animationType="fade"` Modal 은 언마운트에도 부드럽게 나갔지만 이 그릇은 제 슬라이드가 닫는
+ * 길의 전부다. 그래서 행동 누름도 X·스크림·끌기와 같은 닫기 길로 보내고 슬라이드가 끝나면 부른다.
+ *
+ *   - 순서는 **`onClose` 먼저, 행동 나중**이다. 행동이 시트를 다시 열 수 있고(`setActive(target)`) 그
+ *     마지막 말이 `onClose` 에 지워지면 안 된다. `onClose` 를 건너뛰지도 않는다 — 행동 쪽이 시트를
+ *     닫지 않는 부모에서는 투명한 모달이 화면 위에 남아 손을 가로챈다.
+ *   - 이미 닫는 중이면(두 번 누름·끌기 도중의 누름) 아무것도 하지 않는다. 행동은 한 번이다.
+ *   - 동작 줄이기가 켜져 있으면 미끄러지지 않으므로 바로 부른다.
+ *   - 시트 **밖**에서 부르면 바로 부른다(닫을 시트가 없다).
+ *
+ * 쓰지 않는 때: 시트가 **진행·영수증·실패를 스스로 보이는** 행동(대화 행 시트의 읽음 처리·알림·복사,
+ * 지우기 확인). 그 면은 행동이 끝날 때까지 떠 있어야 한다 — 코어 `channelActionKeepsMenuOpen` 이
+ * 같은 이유로 그 항목들을 「열어 둔다」고 정한다.
+ */
+export function usePageSheetAction(): (action: () => void) => void {
+  return useContext(SheetControlContext)?.closeThen ?? runNow;
+}
+
+/** 키보드가 가린 높이. 시트 몸(`SheetScroll`)이 홈 인디케이터 여백을 걷을지 정한다. 시트 밖에서는 0. */
+export function usePageSheetKeyboard(): number {
+  return useContext(SheetControlContext)?.keyboardHeight ?? 0;
 }
 
 export function PageSheet({
@@ -136,12 +191,14 @@ function SheetFrame({
   const insets = useSafeAreaInsets();
   const {height} = useWindowDimensions();
   const reduceMotion = useReduceMotionRef();
+  const keyboardHeight = useKeyboardHeight();
   const travel = useRef(new Animated.Value(height)).current;
   const closing = useRef(false);
 
   // 단계별 상자. 큰 단은 상태 막대가 58보다 깊은 기기(다이내믹 아일랜드)에서 그 아래 4pt 에서
   // 시작한다 — 58 은 시안 기기(390×844, 상태 막대 54)의 값이라 그 위에 올리면 시계와 겹친다.
-  const frame = sheetFrame(sheetHeight, height, insets.top);
+  // 키보드가 올라와 있으면 시트의 바닥이 키보드 윗면에 앉는다(`sheetFrame` 머리말).
+  const frame = sheetFrame(sheetHeight, height, insets.top, keyboardHeight);
 
   useEffect(() => {
     if (reduceMotion.current) {
@@ -155,19 +212,42 @@ function SheetFrame({
     }).start();
   }, [travel, reduceMotion]);
 
-  const close = useCallback(() => {
-    if (closing.current) return;
-    closing.current = true;
-    if (reduceMotion.current) {
-      onClose();
-      return;
-    }
-    Animated.timing(travel, {
-      toValue: height,
-      duration: SLIDE_MS,
-      useNativeDriver: true,
-    }).start(() => onClose());
-  }, [height, onClose, reduceMotion, travel]);
+  // 닫는 길은 하나다 — X·스크림·끌기·escape·행동 누름이 전부 여기를 지난다. `after` 는 행동 누름만
+  // 싣는다. 이 함수를 `onPress` 에 직접 걸지 않는다(Pressable 이 첫 인자로 이벤트를 넘긴다):
+  // 아래 `close`·`closeThen` 이 인자를 못 박아 감싼다.
+  const slideOut = useCallback(
+    (after?: () => void) => {
+      if (closing.current) return;
+      closing.current = true;
+      // 키보드가 올라와 있으면 시트와 같이 내려간다. 안 그러면 시트가 다 나간 뒤에야(언마운트 때)
+      // 키보드가 혼자 내려간다.
+      if (keyboardHeight > 0) Keyboard.dismiss();
+      const finish = () => {
+        // `onClose` 가 먼저다: 행동이 시트를 다시 열 수 있고, 그 말이 마지막이어야 한다.
+        onClose();
+        after?.();
+      };
+      if (reduceMotion.current) {
+        finish();
+        return;
+      }
+      Animated.timing(travel, {
+        toValue: height,
+        duration: SLIDE_MS,
+        useNativeDriver: true,
+      }).start(finish);
+    },
+    [height, keyboardHeight, onClose, reduceMotion, travel],
+  );
+  const close = useCallback(() => slideOut(), [slideOut]);
+  const closeThen = useCallback(
+    (action: () => void) => slideOut(action),
+    [slideOut],
+  );
+  const control = useMemo<SheetControl>(
+    () => ({close, closeThen, keyboardHeight}),
+    [close, closeThen, keyboardHeight],
+  );
 
   const pan = useMemo(
     () =>
@@ -216,11 +296,11 @@ function SheetFrame({
         <View {...pan.panHandlers} style={styles.handleZone} testID="page-sheet-handle">
           <View style={styles.grab} />
         </View>
-        <SheetCloseContext.Provider value={close}>
+        <SheetControlContext.Provider value={control}>
           <View style={sheetHeight === 'fit' ? styles.bodyFit : styles.body}>
             {children}
           </View>
-        </SheetCloseContext.Provider>
+        </SheetControlContext.Provider>
       </Animated.View>
     </View>
   );

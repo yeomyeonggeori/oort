@@ -28,7 +28,7 @@ export function shouldDismissSheet(dy: number, vy: number): boolean {
 /** 내용 맞춤 · 중간 · 큰. 시트가 얼마나 화면을 차지하는가. */
 export type SheetHeight = 'fit' | 'medium' | 'large';
 
-/** 시트 상자의 세로 배치. 아래는 언제나 화면 바닥에 붙는다. */
+/** 시트 상자의 세로 배치. 아래는 화면 바닥에 붙고, 키보드가 올라와 있으면 키보드 윗면에 붙는다. */
 export interface SheetFrame {
   /** 큰 단: 위 끝 고정. */
   top?: number;
@@ -36,28 +36,56 @@ export interface SheetFrame {
   height?: number;
   /** 내용 맞춤 단: 내용 높이, 이 위로는 안에서 스크롤. */
   maxHeight?: number;
+  /** 키보드가 올라와 있을 때만 있다: 시트의 바닥이 화면 바닥에서 이만큼(= 키보드 높이) 떠 있다. */
+  bottom?: number;
+}
+
+/**
+ * 큰 단이 시작하는 위 끝(화면 위에서 pt). 상태 막대가 58보다 깊은 기기(다이내믹 아일랜드)에서는 그
+ * 아래 4pt — 58 은 시안 기기(상태 막대 54)의 값이라 그 위에 올리면 시계와 겹친다. 키보드로 올라온
+ * 시트도 이 선을 넘지 않는다(머리의 X 가 시계 뒤로 들어가면 닫을 수 없다).
+ */
+export function sheetTop(insetTop: number): number {
+  return Math.max(SHEET_TOP, insetTop + 4);
 }
 
 /**
  * 단계별 상자.
  *
- *   large   위 58 에서 바닥까지. 상태 막대가 58보다 깊은 기기(다이내믹 아일랜드)에서는 그 아래
- *           4pt — 58 은 시안 기기(상태 막대 54)의 값이라 그 위에 올리면 시계와 겹친다.
+ *   large   위 58 에서 바닥까지.
  *   medium  화면의 9/16(Buzz). 고정 높이.
  *   fit     내용 높이, 화면의 85% 위로는 안에서 스크롤. 배경 탭으로 닫는 길이 그 나머지로 남는다.
+ *
+ * ## 키보드 (`keyboardHeight` > 0)
+ *
+ * 시트의 **바닥이 키보드 윗면에 앉는다**(`bottom` = 키보드 높이). 그러면 시트 안의 입력 칸은 시트
+ * 바닥보다 아래일 수 없으니 키보드 위에 있다. 시트가 위로 자라지는 못하게 막는다: 중간·내용 맞춤은
+ * 높이(최대 높이)를 「키보드 위 ~ 큰 단의 위 끝」 사이(`room`)로 줄이고(SE 에서는 9/16 = 375 에
+ * 키보드 ~300 이 더해지면 667 을 넘는다), 큰 단은 위 끝이 고정이라 바닥만 올라가 줄어든다. 키보드가
+ * 없으면(0) 옛 상자 그대로다 — `bottom` 은 아예 없고, 그릇의 `bottom: 0` 이 그 자리를 지킨다.
  */
 export function sheetFrame(
   height: SheetHeight,
   windowHeight: number,
   insetTop: number,
+  keyboardHeight = 0,
 ): SheetFrame {
+  const top = sheetTop(insetTop);
+  const lift = keyboardHeight > 0 ? {bottom: keyboardHeight} : {};
+  const room = Math.max(0, windowHeight - keyboardHeight - top);
   switch (height) {
     case 'large':
-      return {top: Math.max(SHEET_TOP, insetTop + 4)};
+      return {top, ...lift};
     case 'medium':
-      return {height: Math.floor(windowHeight * SHEET.mediumRatio)};
+      return {
+        height: Math.min(Math.floor(windowHeight * SHEET.mediumRatio), room),
+        ...lift,
+      };
     case 'fit':
-      return {maxHeight: Math.floor(windowHeight * SHEET.fitMaxRatio)};
+      return {
+        maxHeight: Math.min(Math.floor(windowHeight * SHEET.fitMaxRatio), room),
+        ...lift,
+      };
   }
 }
 

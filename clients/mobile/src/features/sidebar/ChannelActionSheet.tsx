@@ -10,10 +10,17 @@ import {
   channelLeaveConfirmBody,
 } from '@momo/core/features/channels/model';
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type ImageSourcePropType,
+} from 'react-native';
+import {SHEET_ICONS} from '../../design/icons';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
+import {GroupCard, ListRow, RowIcon, SheetScroll} from '../../design/sheetParts';
 import {font, line, radius, SHEET, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import type {ChannelRowTarget} from './channelRowActions';
@@ -41,6 +48,27 @@ interface Group {
   key: string;
   title: string | undefined;
   items: ChannelActionItem[];
+}
+
+/**
+ * 앞 아이콘 — 우리 아이콘 세트에 **이미 맞는 글리프가 있는 항목만** 준다(#4318, 새 아이콘 자산은 만들지
+ * 않는다). 지금은 복사 셋뿐이다. 읽음·알림·나가기에 맞는 글리프(눈·종·나가기)가 세트에 없다.
+ *
+ * 한 카드는 **모든 줄이 글리프를 갖거나 하나도 갖지 않는다** — 앞 칸이 있는 줄과 없는 줄이 한 카드에 섞이면
+ * 글자 열이 어긋난다. 그래서 복사 무리(셋 다 있다)만 앞 아이콘 카드가 되고, 나머지 무리는 지금처럼 글자만이다.
+ */
+const ROW_GLYPH: Partial<Record<ChannelActionKey, ImageSourcePropType>> = {
+  'copy-name': SHEET_ICONS.copy,
+  'copy-link': SHEET_ICONS.copy,
+  'copy-id': SHEET_ICONS.copy,
+};
+
+/** 이 무리의 모든 줄에 글리프가 있으면 그 글리프들, 하나라도 없으면 `null`. */
+function groupGlyphs(group: Group): ImageSourcePropType[] | null {
+  const glyphs = group.items.map(item => ROW_GLYPH[item.key]);
+  return glyphs.every((glyph): glyph is ImageSourcePropType => glyph !== undefined)
+    ? glyphs
+    : null;
 }
 
 /** 코어가 준 차례를 카드 묶음으로 자른다 — 제목이 바뀌거나 `separatorBefore` 면 새 카드다. */
@@ -147,23 +175,33 @@ export function ChannelActionSheet({
                 {error}
               </Text>
             ) : null}
-            {groupItems(items).map(group => (
-              <GroupCard key={group.key} label={group.title}>
-                {group.items.map(item => {
-                  const busy = isPending(item.key);
-                  return (
-                    <ListRow
-                      key={item.key}
-                      title={busy && item.busyLabel ? item.busyLabel : item.label}
-                      tone={item.tone === 'danger' ? 'danger' : 'default'}
-                      busy={busy}
-                      onPress={() => onRun(item.key)}
-                      testID={`channel-sheet-${item.testKey}`}
-                    />
-                  );
-                })}
-              </GroupCard>
-            ))}
+            {groupItems(items).map(group => {
+              const glyphs = groupGlyphs(group);
+              return (
+                <GroupCard
+                  key={group.key}
+                  label={group.title}
+                  inset={glyphs ? 'icon' : 'plain'}>
+                  {group.items.map((item, index) => {
+                    const busy = isPending(item.key);
+                    return (
+                      <ListRow
+                        key={item.key}
+                        title={busy && item.busyLabel ? item.busyLabel : item.label}
+                        leading={glyphs ? <RowIcon source={glyphs[index]} /> : undefined}
+                        tone={item.tone === 'danger' ? 'danger' : 'default'}
+                        busy={busy}
+                        // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」·「복사됨」·실패를 스스로
+                        // 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다(코어 `channelActionKeepsMenuOpen`
+                        // 이 같은 이유로 이 항목들을 「열어 둔다」고 정한다).
+                        onPress={() => onRun(item.key)}
+                        testID={`channel-sheet-${item.testKey}`}
+                      />
+                    );
+                  })}
+                </GroupCard>
+              );
+            })}
           </>
         )}
       </SheetScroll>

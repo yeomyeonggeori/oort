@@ -723,10 +723,6 @@ export const SHEET = {
   headerRow: TOUCH_TARGET + space.sm,
   /** 원형 단추의 눈에 보이는 지름 — Buzz `IosGlassNavigationButton.controlSize` 40. 눌림 영역은 44. */
   circle: 40,
-  /** 단추 안 글리프 — Buzz 22. 래스터도 22pt 로 구웠다(`icons/index.ts` `SHEET_ICONS`). */
-  glyph: 22,
-  /** 제목이 단추에 겹치지 않게 양쪽에서 비우는 폭 — Buzz 64(단추 44 + 여백 20). */
-  titleInset: 64,
   /** 카드 안쪽 가로 여백 — Buzz `AppListCard._inset` 16. 우리 공용 여백과 같은 값이다. */
   cardInset: SAFE_GUTTER,
   /** 행 앞 아이콘 칸의 폭 — Buzz 22. 이모지도 같은 칸에 선다. */

@@ -16,6 +16,7 @@ import {
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
+import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
 import {usePalette, useStyles} from './theme';
 import {
@@ -177,6 +178,7 @@ export function ListRow({
   toggle,
   tone = 'default',
   onPress,
+  closesSheet = false,
   disabled = false,
   busy = false,
   accessibilityLabel,
@@ -198,6 +200,12 @@ export function ListRow({
   /** 파괴 행(나가기·지우기)은 글자가 위험색이다. */
   tone?: 'default' | 'danger';
   onPress?: () => void;
+  /**
+   * 누르면 시트를 **먼저 미끄러뜨려 내리고** 그 뒤에 `onPress` 를 한 번 부른다(`usePageSheetAction`).
+   * 「행동을 고르면 시트가 사라지는」 목록 행(메시지 행동·길게 누르기)이 쓴다. 시트가 진행·실패를
+   * 스스로 보이는 행에는 쓰지 않는다. 시트 밖(페이지)에서는 그냥 `onPress` 다. 토글 행에는 듣지 않는다.
+   */
+  closesSheet?: boolean;
   disabled?: boolean;
   busy?: boolean;
   accessibilityLabel?: string;
@@ -206,8 +214,13 @@ export function ListRow({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const afterClose = usePageSheetAction();
   const isToggle = accessory === 'toggle' && toggle !== undefined;
-  const press = isToggle ? () => toggle.onValueChange(!toggle.value) : onPress;
+  const press = isToggle
+    ? () => toggle.onValueChange(!toggle.value)
+    : onPress && closesSheet
+      ? () => afterClose(onPress)
+      : onPress;
   const body = (
     <>
       {leading ? (
@@ -322,6 +335,7 @@ export function ActionTile({
   icon,
   label,
   onPress,
+  closesSheet = false,
   disabled = false,
   busy = false,
   testID,
@@ -329,19 +343,22 @@ export function ActionTile({
   icon: React.ReactNode;
   label: string;
   onPress: () => void;
+  /** 누르면 시트를 먼저 내리고 `onPress` 를 한 번 부른다(`ListRow` 의 같은 이름). 프로필 시트의 「메시지」처럼 다른 화면으로 가는 타일. */
+  closesSheet?: boolean;
   disabled?: boolean;
   busy?: boolean;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const afterClose = usePageSheetAction();
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{disabled, busy}}
       disabled={disabled || busy}
-      onPress={onPress}
+      onPress={closesSheet ? () => afterClose(onPress) : onPress}
       style={({pressed}) => [
         styles.tile,
         pressed && styles.tilePressed,
@@ -364,6 +381,8 @@ export function ActionTileRow({children}: {children: React.ReactNode}): React.JS
 /**
  * 시트 몸의 스크롤. 안전 영역(홈 인디케이터) 아래까지 여백을 주고, 입력에서 탭이 키보드를 접지 않으며,
  * 큰 글씨에서 내용이 시트 높이를 넘어도 스크롤로 끝까지 닿는다 — 머리의 X 는 스크롤 밖이라 언제나 보인다.
+ * 키보드가 올라와 시트 바닥이 키보드 윗면에 앉으면 홈 인디케이터는 이미 키보드 뒤라서 안전 영역 여백을
+ * 걷는다(또 주면 입력과 키 사이에 죽은 띠가 생긴다 — `useKeyboard` 머리말).
  */
 export function SheetScroll({
   children,
@@ -372,6 +391,8 @@ export function SheetScroll({
 }: ScrollViewProps & {children: React.ReactNode; testID?: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
+  const keyboardHeight = usePageSheetKeyboard();
+  const bottomInset = keyboardHeight > 0 ? 0 : insets.bottom;
   return (
     <ScrollView
       bounces={false}
@@ -379,7 +400,7 @@ export function SheetScroll({
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={[
         styles.scrollContent,
-        {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
+        {paddingBottom: Math.max(bottomInset, space.lg) + space.lg},
       ]}
       testID={testID}
       {...scroll}>
