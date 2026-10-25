@@ -5,7 +5,7 @@ import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Animated, Settings, StyleSheet, Text, TextInput, View} from 'react-native';
+import {Animated, Settings, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
@@ -64,6 +64,8 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         400 으로 바꾼다, design-review r1 H1) · `relay<ms>` 실시간 프레임(`message.new`)이 POST 응답보다 <ms> 먼저 온다(코어가
 //                         말하는 선착 경로) · `anchor` 보낼 때마다 새 확정본 행에 앵커를 옮겨 **확정본 행이 마운트되는 때**를 프레임에 남긴다
 //                         (`anchor` 칸이 null 이 아니게 되는 때 — 보류가 있으면 등장이 끝난 뒤, 없으면 확정 즉시).
+//             namefit     시계 상자가 이름 줄 끝에서 **혼자 줄바꿈**되는 폭 창을 찾는다(design-review r1 M2). 목록 폭을 한 칸씩 줄이며(`NAMEFIT_*`)
+//                         머리 행 느린 전송을 하나씩 보낸다 — 이름·시각이 줄을 꼭 채우는 폭에서 시계가 이름 밑으로 내려서는가를 사진으로 본다.
 //             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
 //                         2.6초 — 시계가 서는 장면). 사진 바이트는 `measure/photo-stub.mjs` 가 답한다(`-momoPhotoStub 127.0.0.1:<포트>`).
 //
@@ -522,7 +524,8 @@ type ScenarioName =
   | 'bar'
   | 'live'
   | 'send20'
-  | 'rec';
+  | 'rec'
+  | 'namefit';
 /** #4331: 에이전트 DM 에 활동 줄이 서는 장면들. */
 const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live'];
 /** `hold` 는 연결 띠를 세운 채 90초 머문다 — 사진용이고 `all` 에 들지 않는다. */
@@ -543,6 +546,8 @@ interface Controls {
    * 안 하고 거짓을 돌려준다 — 참이면 앞 보내기의 앵커가 걷히도록 장면이 잠깐 쉰다.
    */
   watchNext: () => boolean;
+  /** 목록 폭을 화면 폭보다 `by` pt 좁힌다(`namefit`). `null` 이면 원래대로. */
+  setNarrow: (by: number | null) => void;
 }
 
 // #4455 보내기 장면의 문구. 가상의 대화다 — 실제 대화 문구·이름을 쓰지 않는다.
@@ -567,6 +572,11 @@ const SHORT_BODIES: readonly string[] = [
 ];
 const LONG_BODY =
   '이번 주 일정을 정리했어요. 월요일에는 디자인 리뷰, 수요일에는 배포 리허설, 금요일에는 회고가 있어요. 리허설 전에 체크리스트를 한 번 더 돌려 보고, 막히는 곳이 있으면 스레드에 남겨 주세요.';
+
+/** `namefit`: 목록 폭을 `FROM` 에서 `TO` 까지 `STEP` pt 씩 좁힌다. 이름(굵은 15pt 세 글자)+시각이 줄을 채우는 폭에 걸리도록 잡은 값이다. */
+const NAMEFIT_FROM = Number(Settings.get('momoNamefitFrom') ?? 200);
+const NAMEFIT_TO = Number(Settings.get('momoNamefitTo') ?? 260);
+const NAMEFIT_STEP = Number(Settings.get('momoNamefitStep') ?? 3);
 
 /** 4초 유예(`DISPLAY_GRACE_MS`) 뒤에 띠가 선다 — 앱의 `connectionDisplay` 가 하는 일을 시간표대로 옮긴 것이다. */
 const GRACE_MS = 4_000;
@@ -670,6 +680,24 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
       await wait(1_500);
     }
     await wait(1_000);
+    return;
+  }
+  if (name === 'namefit') {
+    // 시계 상자(폭 0)는 이름 줄의 마지막 항목이다. 이름·시각이 줄을 `whoGap` 안쪽까지 채우는 폭이면 상자가 혼자 새 줄로 넘어가
+    // 시계가 이름 밑에 선다. 폭을 좁혀 가며 그 창을 지난다. 느린 전송(응답 2.6초)이라 1.5초에 시계가 서 있다.
+    setPostDelay(2_600);
+    for (let by = NAMEFIT_FROM; by <= NAMEFIT_TO; by += NAMEFIT_STEP) {
+      c.setNarrow(by);
+      await wait(400);
+      c.say(PEER_LINES[0], true);
+      await wait(700);
+      c.mark(`namefit-${by}`);
+      c.send(SHORT_BODIES[0]);
+      await wait(3_300);
+    }
+    c.setNarrow(null);
+    setPostDelay(250);
+    await wait(500);
     return;
   }
   if (name === 'rec') {
@@ -812,6 +840,13 @@ interface Result {
   anim: AnimTrace[];
 }
 
+/** `namefit` 만 쓴다: 목록을 화면 폭보다 `by` pt 좁게 세운다. `by` 가 `null` 이면 아무 상자도 더하지 않는다(다른 장면의 레이아웃을 건드리지 않는다). */
+function Narrow({by, children}: {by: number | null; children: React.ReactNode}): React.JSX.Element {
+  const {width} = useWindowDimensions();
+  if (by === null) return <>{children}</>;
+  return <View style={[styles.column, {width: width - by}]}>{children}</View>;
+}
+
 export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // `type+nobar` 처럼 `+` 뒤는 옵션이다(#4331).
   const [base = '', ...mods] = which.split('+');
@@ -820,7 +855,8 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const unread = which === 'hold-unread';
   const panelOpen = which === 'panel' || which === 'panel-flat';
   // #4455 보내기 장면. `send20+d80+relay60+anchor` 처럼 옵션이 붙을 수 있다.
-  const sendScene = base === 'send20' || base === 'rec';
+  const sendScene = base === 'send20' || base === 'rec' || base === 'namefit';
+  const [narrowBy, setNarrowBy] = useState<number | null>(null);
   const scenarios: readonly ScenarioName[] = unread || panelOpen
     ? ['hold']
     : agentDm
@@ -1008,6 +1044,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           mark: what => events.push({t: Date.now() - begin, what}),
           setTurns,
           send: (body, attachments) => sendWithRef.current(body, attachments),
+          setNarrow: setNarrowBy,
           watchNext: () => {
             if (!mods.includes('anchor')) return false;
             setAnchorSeq((server.messages[server.messages.length - 1]?.seq ?? 0) + 1);
@@ -1087,6 +1124,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
       />
       <ConversationLayout
         list={
+          <Narrow by={base === 'namefit' ? narrowBy : null}>
           <Timeline
             messages={timeline.state.messages}
             directory={directory}
@@ -1116,6 +1154,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             pillsRef={pillsRef}
             selfSendToken={selfSendToken}
           />
+          </Narrow>
         }
         composer={
           <View ref={dockRef} collapsable={false}>

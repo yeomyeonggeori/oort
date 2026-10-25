@@ -168,10 +168,14 @@ describe('holdSettledArrivals — 짝 짓기', () => {
     expect(items[2].kind).toBe('message');
   });
 
-  it('메아리가 아직 자기 키로 서 있으면(미정착) 건드리지 않는다', () => {
+  it('메아리가 아직 자기 키로 서 있으면(미정착) 건드리지 않는다 — 같은 글의 남의 확정본을 가로채지 않는다', () => {
+    // 같은 글을 먼저 보낸 메아리(c-0, 오름 장부에 없음)의 확정본이 이미 와 있고, 폴드는 그 확정본을 c-0 에 주었다.
+    // c-1 은 미정착이라 자기 키로 서 있다. 이때 c-1 이 같은 내용이라는 이유로 확정본 자리를 가져가면 `p-c-1` 키가 둘이 된다.
     const own: TimelineItem = {kind: 'pending', key: 'p-c-1', pending: echo(), startsGroup: true};
-    const items = [item(message(1)), item(message(2)), own];
-    expect(holdSettledArrivals(items, [arrival(echo())])).toBe(items);
+    const items = [item(message(1)), item(message(2)), item(mine(3)), own];
+    const out = holdSettledArrivals(items, [arrival(echo())]);
+    expect(out).toBe(items);
+    expect(out.filter(entry => entry.key === 'p-c-1')).toHaveLength(1);
   });
 
   it('짝이 아닌 확정본은 그대로다 — 다른 사람·다른 글·sinceSeq 이하·다른 채널', () => {
