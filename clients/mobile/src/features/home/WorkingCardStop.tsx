@@ -2,8 +2,13 @@ import {
   UNTAKEN_WORDING,
   type CancelOutcome,
 } from '@momo/core/features/agents/runCancel';
-import React, {useCallback, useState} from 'react';
-import {StyleSheet, View} from 'react-native';
+import React, {useCallback, useRef, useState} from 'react';
+import {
+  AccessibilityInfo,
+  StyleSheet,
+  View,
+  type LayoutChangeEvent,
+} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {useStyles} from '../../design/theme';
 import {font, space, type Palette} from '../../design/tokens';
@@ -32,6 +37,7 @@ export function WorkingCardStop({
   channelId,
   agentName,
   runCount,
+  onGrow,
 }: {
   runId: string;
   /** 이 run의 채널. 취소가 끝나면 이 채널의 진행을 다시 읽는다. */
@@ -40,12 +46,22 @@ export function WorkingCardStop({
   agentName: string;
   /** 카드로 합쳐진 동시 요청의 수. 확인 문장이 둘 이상이면 그 사실을 미리 말한다. */
   runCount?: number;
+  /**
+   * 컨트롤 줄이 **자란** 뒤(확인 줄이 열림·오류 문장이 섬)에 부른다. 카드가 서는 목록이 결정 단추까지 내려가
+   * 보이게 하는 자리다(가장 큰 글씨에서 확인 줄이 카드를 한 화면보다 크게 늘린다). 처음 그려질 때는 부르지
+   * 않는다 — 사람이 건드리지 않은 카드를 스스로 스크롤하지 않는다.
+   */
+  onGrow?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const [outcome, setOutcome] = useState<CancelOutcome | null>(null);
   const onOutcome = useCallback(
     (next: CancelOutcome) => {
       setOutcome(next);
+      // iOS VoiceOver는 `accessibilityLiveRegion`을 읽지 않는다(Android 전용). 성공하면 눌린 컨트롤이 사라지고
+      // 서버가 끝낸 run은 카드째 사라지므로(영수증도 함께), 결과는 말로 알려야 들린다(`StopWorkControl`과 같은
+      // 규칙, design-review #4285 r1 H2). 확인 문장은 첫 탭이 이미 낭독한다(`StopTurnControl.arm`).
+      AccessibilityInfo.announceForAccessibility(next.sentence);
       if (next.kind !== 'error') {
         nudgeRunProgress(channelId);
       }
@@ -55,10 +71,23 @@ export function WorkingCardStop({
   // 답을 받았으면(취소됨·이미 끝남) 더 권하지 않는다 — 「취소했어요」 바로 옆에 「취소」가 남지 않는다.
   // 실패(`error`)만 다시 누를 수 있다. 웹의 `StopRunControl`과 같은 규칙이다(`settled`).
   const settled = outcome !== null && outcome.kind !== 'error';
+  const lastHeight = useRef<number | null>(null);
+  const onLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      const height = event.nativeEvent.layout.height;
+      const grew = lastHeight.current !== null && height > lastHeight.current;
+      lastHeight.current = height;
+      if (grew) onGrow?.();
+    },
+    [onGrow],
+  );
   return (
     // 한 줄에 감겨 서는 행이다: 확인 줄(`flexBasis: '100%'`)이 열리면 자기 줄을 통째로 받는다. 활동
     // 줄과 같은 모양이다(`turnSurfaces` 의 `activityRow` 주석).
-    <View style={[styles.stop, settled && styles.stopSettled]} testID="home-working-stop">
+    <View
+      style={[styles.stop, settled && styles.stopSettled]}
+      onLayout={onLayout}
+      testID="home-working-stop">
       {settled ? null : (
         <StopTurnControl
           runId={runId}

@@ -101,6 +101,21 @@ export function isUncollected(
 }
 
 /**
+ * 한 run의 상태 낱말 — 카드의 오른쪽 낱말·작업 패널의 머리 칩과 run 목록 칩·폰 기록 시트의 칩이 모두
+ * 이 함수 하나로 고른다. 사람이 부른 요청이 가져가는 이 없이 N분을 넘었으면 「아직 받지 않았어요」,
+ * 아니면 서버가 말한 낱말(`runPhaseLabel`: 대기 n번째 · 가져감 · 진행 중 · 승인 대기 · 끝).
+ * 시계(`nowMs`)를 안 주면 서버의 낱말 그대로다.
+ *
+ * 낱말을 고르는 자리를 하나로 둔 이유: 같은 run을 한 화면에서 두 낱말로 말하면 사람은 다른 일로
+ * 읽는다. 「취소」가 서는 패널의 머리 칩은 「아직 받지 않았어요」인데 바로 아래 목록 칩이 「대기 1번째」이던
+ * 것이 design-review #4285 r1 H5다.
+ */
+export function runStateWord(facts: ServerRunFacts, nowMs?: number): string {
+  if (nowMs !== undefined && isUncollected(facts, nowMs)) return UNCOLLECTED_WORD;
+  return runPhaseLabel(facts);
+}
+
+/**
  * 근거 줄 맨 앞에 서는 생존 문구. 서버의 경고 라벨(`livenessView`의 `warn`)과 연결이 꺼진
  * 상태(`inactive`: 「왜 안 가져가나」에 대한 가장 직접적인 답이다)만이다.
  *
@@ -163,7 +178,7 @@ export function queuedWaitCopy({
     .join(" · ");
   return {
     uncollected,
-    word: uncollected ? UNCOLLECTED_WORD : runPhaseLabel(facts),
+    word: runStateWord(facts, nowMs),
     detail: detail === "" ? undefined : detail,
     reason: uncollected ? uncollectedReason(liveness) : undefined,
   };

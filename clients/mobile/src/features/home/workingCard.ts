@@ -117,6 +117,26 @@ export function cardCancelRunId(card: WorkingCardModel): string | null {
   return card.uncollected && card.live ? card.runId : null;
 }
 
+/**
+ * 카드의 아래 끝이 보이는 영역 밖으로 얼마나 나갔는가(pt). 양수면 목록을 그만큼 내려 결정 단추까지 보이게 한다.
+ * 가장 큰 글씨(AX5)에서는 확인 문장(읽는 글자라 끝까지 자란다)이 카드를 한 화면보다 크게 늘려, 방금 누른 「취소」 아래에
+ * 열린 「그대로 두기」·「취소 확정」이 접힌 아래로 밀려난다(design-review #4285 r1 H1).
+ */
+export function revealOverflow({
+  cardBottom,
+  viewportBottom,
+  gap,
+}: {
+  /** 카드 아래 끝(창 기준 y). */
+  cardBottom: number;
+  /** 보이는 영역의 아래 끝(창 높이 − 탭바 자리). */
+  viewportBottom: number;
+  /** 카드 아래에 남길 숨. */
+  gap: number;
+}): number {
+  return cardBottom + gap - viewportBottom;
+}
+
 /** 관찰한 사실에서 단계를 고른다(파일 머리 주석). */
 export function workingStep(turn: AgentWorkingSignal): WorkingStep {
   if (turn.state === 'queued') return 0;
@@ -223,7 +243,10 @@ export function buildWorkingCard({
             },
             nowMs,
           ) ?? null);
-  const reason = wait?.reason ?? null;
+  // 끊긴 레일(`live` false)에서는 이유 줄을 싣지 않는다: 카드가 이미 「연결이 끊겨 갱신이 멈췄어요. 마지막으로
+  // 확인된 상태예요.」라고 말하는데, 바로 위에 「연결이 꺼져 있을 수 있어요」(에이전트의 연결)가 서면 어느
+  // 연결인지 가려지지 않고 마지막으로 읽은 판정이 단정처럼 읽힌다(design-review #4285 r1 M2).
+  const reason = live ? (wait?.reason ?? null) : null;
   const step = workingStep(turn);
   const others = open.length - 1;
 

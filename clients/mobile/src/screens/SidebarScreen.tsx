@@ -26,7 +26,10 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
 } from 'react-native';
 import {
   BAR_CONTROL_MAX_SCALE,
@@ -37,10 +40,11 @@ import {
   LoadingState,
   NoticeBlock,
   Screen,
+  STACK_PILL_SCALE,
 } from '../design/atoms';
 import {GlassSurface} from '../design/glass';
 import {HOME_ICONS, HOME_ICON_SIZE, type HomeIconName} from '../design/icons';
-import {PULL_FILL, usePullRefresh} from '../design/refresh';
+import {PULL_FILL, usePullRefresh, withPullScroll} from '../design/refresh';
 import {type Directory} from '@momo/core/features/workspace/directory';
 import {
   ds2Radius,
@@ -61,6 +65,7 @@ import {
   buildWorkingCard,
   cardCancelRunId,
   leadWorkingTurn,
+  revealOverflow,
   type WorkingCardModel,
 } from '../features/home/workingCard';
 import {WorkingCardStop} from '../features/home/WorkingCardStop';
@@ -637,6 +642,34 @@ export default function SidebarScreen({
     [sections, collapsed, openChannelId],
   );
 
+  // 「취소」의 확인 줄이 열리면(카드가 자라면) 결정 단추까지 목록을 내린다. 가장 큰 글씨(AX5)에서는 읽는 글자인 확인
+  // 문장이 카드를 한 화면보다 크게 늘려, 방금 누른 「취소」 아래의 단추가 접힌 아래로 밀려난다(design-review
+  // #4285 r1 H1). 사람이 컨트롤을 건드렸을 때만 부른다(`WorkingCardStop.onGrow`).
+  const listRef = useRef<SectionList<SidebarRow, (typeof shownSections)[number]>>(null);
+  const cardBlockRef = useRef<View>(null);
+  const scrollYRef = useRef(0);
+  const reduceMotionHome = useReduceMotion();
+  const {height: windowHeight} = useWindowDimensions();
+  const trackScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    scrollYRef.current = event.nativeEvent.contentOffset.y;
+  }, []);
+  const revealCardEnd = useCallback(() => {
+    const node = cardBlockRef.current;
+    if (node === null || typeof node.measureInWindow !== 'function') return;
+    node.measureInWindow((_x, y, _width, height) => {
+      const overflow = revealOverflow({
+        cardBottom: y + height,
+        viewportBottom: windowHeight - clearance,
+        gap: space.md,
+      });
+      if (overflow <= 0) return;
+      listRef.current?.getScrollResponder()?.scrollTo({
+        y: scrollYRef.current + overflow,
+        animated: !reduceMotionHome,
+      });
+    });
+  }, [clearance, reduceMotionHome, windowHeight]);
+
   // 읽음 투영을 한 번도 못 읽었으면 접을 근거가 없어 나간 멤버 DM 이 도로 보인다(코어 `dmVisibility` 2번: 모를 때 숨기는 쪽이 최악이다).
   // 그때 「목록은 그대로」라고 말하면 거짓이라 이유를 말한다(웹 DM 구역의 같은 안내와 같은 뜻, design-review #4252 Low).
   const goneUnfoldedByReadFailure =
@@ -789,6 +822,7 @@ export default function SidebarScreen({
         />
       ) : (
         <SectionList
+          ref={listRef}
           sections={shownSections}
           keyExtractor={row => row.key}
           ListHeaderComponent={
@@ -813,6 +847,7 @@ export default function SidebarScreen({
                   {onOpenWorkList && !searching ? (
                     <WorkSeeAllRow onPress={onOpenWorkList} />
                   ) : null}
+                  <View ref={cardBlockRef} collapsable={false}>
                   <WorkingCard
                     card={card}
                     directory={directoryQuery.directory}
@@ -823,14 +858,20 @@ export default function SidebarScreen({
                     stop={
                       cardCancelId !== null ? (
                         <WorkingCardStop
+                          // run마다 새로 선다: 앞 run을 취소하면 같은 카드가 다음 run으로 이어지는데(같은 에이전트·같은
+                          // 대화의 대기 요청은 한 카드로 합쳐진다), 상태가 남으면 앞 run의 영수증을 든 채 다음 요청의
+                          // 「취소」가 숨는다(design-review #4285 r1 H4). 웹 패널은 `key={runId}`다.
+                          key={cardCancelId}
                           runId={cardCancelId}
                           channelId={card.channelId}
                           agentName={card.name}
                           runCount={card.runCount ?? undefined}
+                          onGrow={revealCardEnd}
                         />
                       ) : undefined
                     }
                   />
+                  </View>
                 </>
               ) : null}
               {filterField}
@@ -884,7 +925,7 @@ export default function SidebarScreen({
           keyboardDismissMode="on-drag"
           contentContainerStyle={[styles.listContent, {paddingBottom: HOME.scrollBottom + clearance}]}
           refreshControl={refreshControl}
-          {...scrollProps}
+          {...withPullScroll(trackScroll, scrollProps)}
           testID="sidebar-list"
         />
       )}
@@ -1330,6 +1371,22 @@ export function WorkingCard({
         ? palette.textMuted
         : palette.agent;
   const pulse = card.live && card.state === 'working' && !reduceMotion;
+  // 큰 글씨(`STACK_PILL_SCALE`부터)에서는 상태 낱말이 이름 아래 제 줄로 내려간다. 한 줄에 아바타·이름·태그·
+  // 낱말이 같이 서면, 새 낱말 「아직 받지 않았어요」(9음절)가 폭을 먹어 이름이 「달…」 한 글자로
+  // 잘린다(design-review #4285 r1 H1 — 「김…」 절단을 막으려 건 `BAR_CONTROL_MAX_SCALE` 상한이 못 지킨 폭).
+  const {fontScale} = useWindowDimensions();
+  const stackLive = fontScale >= STACK_PILL_SCALE;
+  const liveNode = (
+    <View style={[styles.live, stackLive && styles.liveStacked]} testID="home-working-live">
+      <LiveDot pulse={pulse} color={tone} />
+      <Text
+        style={[styles.liveText, stackLive && styles.liveTextStacked, {color: tone}]}
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        testID="home-working-state">
+        {card.liveText}
+      </Text>
+    </View>
+  );
   const body = (
     <>
       <View style={styles.cardTop}>
@@ -1352,16 +1409,13 @@ export function WorkingCard({
             에이전트
           </Text>
         </View>
-        <View style={styles.live}>
-          <LiveDot pulse={pulse} color={tone} />
-          <Text
-            style={[styles.liveText, {color: tone}]}
-            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-            testID="home-working-state">
-            {card.liveText}
-          </Text>
-        </View>
+        {stackLive ? null : liveNode}
       </View>
+      {stackLive ? (
+        <View style={styles.liveRow} testID="home-working-live-stack">
+          {liveNode}
+        </View>
+      ) : null}
       {/* 문장이라 어절에서 끊는다(`Sentence`, 리뷰 H1 — 「…상태입 / 니다」). 큰
           글씨에서 한 줄이 두 줄로 잘려 할 일이 사라지지 않게 넷까지 연다(M4). */}
       <Sentence
@@ -1378,7 +1432,7 @@ export function WorkingCard({
       {/* 아무도 가져가지 않은 채 N분을 넘은 요청의 이유 한 문장(#4285). 서버 판정에 근거가 있을
           때만 선다 — 근거 없이 「연결이 꺼져 있을 수 있어요」를 말하지 않는다. */}
       {card.reason !== null ? (
-        <Sentence style={styles.cardReason} testID="home-working-reason">
+        <Sentence style={styles.cardStale} testID="home-working-reason">
           {card.reason}
         </Sentence>
       ) : null}
@@ -1447,7 +1501,13 @@ function WorkSeeAllRow({onPress}: {onPress: () => void}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.workHead}>
-      <Text accessibilityRole="header" style={styles.workHeadLabel} testID="home-work-head">
+      <Text
+        accessibilityRole="header"
+        style={styles.workHeadLabel}
+        // 컨트롤 줄이라 상한이 있다(`BAR_CONTROL_MAX_SCALE`): 가장 큰 글씨에서 「모두 보」로 잘리던 것(캡처가 드러낸 기존
+        // 머리 줄의 결함, design-review #4285 r1 M1 증거).
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        testID="home-work-head">
         에이전트 작업
       </Text>
       <Pressable
@@ -1457,7 +1517,9 @@ function WorkSeeAllRow({onPress}: {onPress: () => void}): React.JSX.Element {
         hitSlop={space.sm}
         style={({pressed}) => [styles.workSeeAll, pressed && styles.rowPressed]}
         testID="home-work-see-all">
-        <Text style={styles.workSeeAllLabel}>모두 보기 ›</Text>
+        <Text style={styles.workSeeAllLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          모두 보기 ›
+        </Text>
       </Pressable>
     </View>
   );
@@ -1778,6 +1840,10 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   liveDot: {width: HOME.liveDot, height: HOME.liveDot, borderRadius: HOME.liveDot / 2},
   liveText: {fontSize: font.meta, fontWeight: '600'},
+  // 큰 글씨: 낱말이 이름 아래 제 줄에 서고(본문 글자 기둥에 맞춘다), 폭이 모자라면 줄을 바꾼다.
+  liveRow: {marginLeft: HOME.indent, marginTop: space.xs, flexDirection: 'row'},
+  liveStacked: {marginLeft: 0, flexShrink: 1},
+  liveTextStacked: {flexShrink: 1},
   cardLine: {
     fontSize: font.label,
     lineHeight: HOME.lineBox,
@@ -1788,14 +1854,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   cardLineStale: {marginBottom: space.xs},
   cardPlace: {color: color.text, fontWeight: '600'},
+  // 끊긴 레일의 문장과 아무도 가져가지 않은 요청의 이유 한 문장(#4285)이 같은 자리·같은 글자를 쓴다.
   cardStale: {
-    fontSize: font.meta,
-    color: color.textMuted,
-    marginLeft: HOME.indent,
-    marginBottom: HOME.lineBottom,
-  },
-  // 아무도 가져가지 않은 요청의 이유 한 문장(#4285). 끊긴 레일의 문장(`cardStale`)과 같은 자리·같은 글자다.
-  cardReason: {
     fontSize: font.meta,
     color: color.textMuted,
     marginLeft: HOME.indent,

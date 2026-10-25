@@ -216,6 +216,9 @@ function UncollectedHome({kind}: {kind: string}): React.JSX.Element {
             openChannelId={null}
             onOpenConversation={() => {}}
             onOpenSearch={() => {}}
+            // 「에이전트 작업 · 모두 보기」 머리가 카드와 같이 서게 한다(design-review #4285 r1 M1). 시스템 작업뿐일 때는
+            // 카드가 없으므로 머리도 없다 — 그 증거가 캡처에 남는다.
+            onOpenWorkList={() => {}}
           />
         </View>
       </SessionProvider>

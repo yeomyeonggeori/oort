@@ -11,8 +11,8 @@ import {
   isRunOver,
   turnStateOf,
 } from "./agentRail";
-import { isOpenRunPhase, runPhaseLabel, turnStateOfPhase } from "./runPhase";
-import { isUncollected, UNCOLLECTED_WORD } from "./runWaiting";
+import { isOpenRunPhase, turnStateOfPhase } from "./runPhase";
+import { runStateWord } from "./runWaiting";
 import {
   IDLE_CUTOFF_MS,
   type AgentTurnState,
@@ -628,8 +628,7 @@ export function workLogStateLabel(
   // 가져감 / 진행 중 / 승인 대기 / 끝. 이 클라이언트가 프레임에서 접은 것과
   // 서버가 아는 것이 다르면 서버가 이긴다.
   if (server !== undefined && server !== null) {
-    if (nowMs !== undefined && isUncollected(server, nowMs)) return UNCOLLECTED_WORD;
-    return runPhaseLabel(server);
+    return runStateWord(server, nowMs);
   }
   if (liveness === "closed") {
     switch (log.closed?.runStatus) {

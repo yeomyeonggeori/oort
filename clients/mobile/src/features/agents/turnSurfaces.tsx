@@ -22,7 +22,8 @@ import {
 import {memberNameParts} from '@momo/core/features/workspace/directory';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, useWindowDimensions, View} from 'react-native';
+import {Sentence, STACK_PILL_SCALE} from '../../design/atoms';
 import {font, line as lineHeightToken, radius, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {Avatar} from '../conversation/Avatar';
@@ -309,6 +310,11 @@ function ActivityRow({
     line.state === 'working' &&
     line.startedAtMs !== undefined;
   const detail = activityDetail(line, nowMs);
+  // 큰 글씨(`STACK_PILL_SCALE`부터)에서는 「이름: 상태 낱말」이 한 줄에 다 들어가지 않는다. 한 줄로 자르면 새 낱말
+  // 「아직 받지 않았어요」가 「아직 받지…」로 잘려 핵심이 사라진다(design-review #4285 r1 H1과 같은 폭의 문제) —
+  // 큰 글씨에서는 줄을 바꿔 다 말한다.
+  const {fontScale} = useWindowDimensions();
+  const wrapLead = fontScale >= STACK_PILL_SCALE;
   // 에이전트가 요청을 가져가 답을 쓰는 중이면 얼굴과 점이 붙는다(#4020). 끊긴 레일에서는
   // 둘 다 뺀다: 아무도 일하는 중이 아닌 줄에 움직임을 두지 않는다.
   const responding = live && isRespondingLine(line);
@@ -321,9 +327,10 @@ function ActivityRow({
       ) : null}
       <Text
         accessibilityLabel={activityText(line, nowMs)}
-        numberOfLines={1}
+        numberOfLines={wrapLead ? undefined : 1}
         ellipsizeMode="tail"
-        style={[styles.activityText, styles.activityTextFlex]}>
+        style={[styles.activityText, styles.activityTextFlex]}
+        testID="activity-lead">
         {/* Offline the name drops to the row's own muted ink: agent identity is
             a claim about who is acting right now, and nobody is acting right
             now. */}
@@ -340,9 +347,11 @@ function ActivityRow({
         // 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤 n분째 소식이
         // 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은 하지 않는다 — 「끊김」은 서버가
         // 알릴 때만 나온다.
-        <Text style={styles.activityDetail} testID="activity-detail">
+        // 근거 글은 세 토막(생존 문구 · 경과 · 이유)까지 길어진다(#4285): 어절에서 끊는다(`Sentence`) — 좁은
+        // 폭에서 글자 단위로 꺾여 한 음절이 홀로 남지 않게(design-review r1 M7).
+        <Sentence style={styles.activityDetail} testID="activity-detail">
           {detail}
-        </Text>
+        </Sentence>
       ) : null}
       {showClock ? (
         <Text style={styles.activityClock}>

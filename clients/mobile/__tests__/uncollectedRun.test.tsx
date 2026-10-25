@@ -29,6 +29,7 @@ import {
   buildWorkingCard,
   cardCancelRunId,
   leadWorkingTurn,
+  revealOverflow,
 } from '../src/features/home/workingCard';
 
 // =============================================================================
@@ -297,6 +298,34 @@ describe('홈 카드: 아무도 가져가지 않은 채 5분을 넘은 사람 �
     );
     expect(model?.liveText).toBe('가져감');
     expect(model?.uncollected).toBe(false);
+  });
+});
+
+describe('카드가 자랄 때 보이는 영역 (design-review #4285 r1 H1)', () => {
+  it('카드 아래 끝이 보이는 영역 밖이면 그만큼, 안이면 0 이하다 — 숨(gap)까지 남긴다', () => {
+    // 가장 큰 글씨(AX5)의 확인 줄: 카드 아래 끝이 창 아래로 넘친다.
+    expect(revealOverflow({cardBottom: 1100, viewportBottom: 790, gap: 12})).toBe(322);
+    // 이미 보인다: 스크롤할 필요가 없다(0 이하).
+    expect(revealOverflow({cardBottom: 600, viewportBottom: 790, gap: 12})).toBeLessThanOrEqual(0);
+    // 딱 맞아도 숨은 남긴다: 단추가 탭바에 붙어 서지 않는다.
+    expect(revealOverflow({cardBottom: 778, viewportBottom: 790, gap: 12})).toBe(0);
+    expect(revealOverflow({cardBottom: 779, viewportBottom: 790, gap: 12})).toBe(1);
+  });
+});
+
+describe('끊긴 레일의 카드', () => {
+  it('이유 줄이 서지 않는다 — 「연결이 끊겨 갱신이 멈췄어요」 바로 위에 다른 연결 문장이 서면 어느 연결인지 가려지지 않는다 (design-review #4285 r1 M2)', () => {
+    const live = card(mapOf(signalOf({queuePosition: 1})), {liveness: liveness('woken_not_collected')});
+    expect(live?.reason).toBe('연결이 꺼져 있을 수 있어요');
+    const offline = card(mapOf(signalOf({queuePosition: 1})), {
+      liveness: liveness('woken_not_collected'),
+      live: false,
+    });
+    expect(offline?.reason).toBeNull();
+    expect(offline?.accessibilityLabel).not.toContain('연결이 꺼져 있을 수 있어요');
+    // 낱말과 근거 줄은 마지막으로 확인된 사실 그대로 남는다.
+    expect(offline?.liveText).toBe('아직 받지 않았어요');
+    expect(offline?.detail).toBe('깨웠지만 아직 안 가져감 · 17시간째 기다려요');
   });
 });
 

@@ -8,6 +8,8 @@
 //   failed             서버가 500 — 「취소하지 못했어요」(컨트롤은 남는다)
 //   young              2분 된 요청 — 「대기 1번째」 그대로, 이유 줄 없음
 //   system             환영 작업뿐(서버가 5시간 기다렸다고 해도) — 카드가 없다
+//   longname           7~9음절 한영 섞인 이름 — 상태 낱말은 한 줄로 온전하고 이름이 줄임표를 받는다(design-review r1 H3)
+//   tworuns            같은 에이전트·같은 대화의 요청이 둘 — 패널의 머리 칩과 run 목록 칩이 같은 낱말(r1 H5)
 //
 // 라이트·다크 × 1440×900. 백엔드는 없다: `/v1/**`는 고정 응답이고 소켓은 구독만 받는다. 이름은 가상 인물
 // (이도현·박서연·달무리봇, 달무리 스튜디오)이다. 사이드바에는 시계가 없으므로 경과 시간은 카드가 아니라
@@ -38,16 +40,18 @@ const agentId = "00000000-0000-7000-8000-000000000301";
 const CH = "00000000-0000-7000-8000-000000000201";
 const STUDIO = "00000000-0000-7000-8000-000000000202";
 const RUN = "0199aa11-2222-7000-8000-0000000000b1";
+const RUN2 = "0199aa11-2222-7000-8000-0000000000b2";
 const MSG = "00000000-0000-7000-8000-0000000a0001";
+const MSG2 = "00000000-0000-7000-8000-0000000a0002";
 
 const person = (id, kind, displayName, handle, extra = {}) => ({
   id, workspaceId, kind, status: "active", displayName, handle, channelCount: 2,
   channelIds: [CH, STUDIO], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
-const roster = [
+const rosterFor = (agentName) => [
   person(memberId, "human", "이도현", "dohyun", { role: "owner" }),
   person(seoyeonId, "human", "박서연", "seoyeon"),
-  person(agentId, "agent", "달무리봇", "dalmuri", { ownerHumanId: memberId }),
+  person(agentId, "agent", agentName, "dalmuri", { ownerHumanId: memberId }),
 ];
 const channels = [
   { id: CH, workspaceId, kind: "public", name: "general", muted: false },
@@ -64,11 +68,14 @@ const json = (route, body, status = 200) =>
   route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 
 /**
- * scene.waitedMs  서버가 말한 대기 시간
- * scene.system    환영 작업(트리거 메시지도 제목도 없다)
- * scene.cancel    취소 POST 의 답: 200 | 500
+ * scene.waitedMs   서버가 말한 대기 시간
+ * scene.system     환영 작업(트리거 메시지도 제목도 없다)
+ * scene.cancel     취소 POST 의 답: 200 | 500
+ * scene.agentName  에이전트의 표시 이름(기본 「달무리봇」)
+ * scene.secondRun  같은 에이전트·같은 대화의 둘째 요청(2분 된 요청, 대기 2번째)을 더한다
  */
 async function installRoutes(context, scene) {
+  const roster = rosterFor(scene.agentName ?? "달무리봇");
   const now = Date.now();
   const createdAtMs = now - scene.waitedMs;
   const runRow = {
@@ -77,11 +84,27 @@ async function installRoutes(context, scene) {
     status: "queued", phase: "queued", leaseState: "none", stepCount: 0,
     queuePosition: 1, aheadTotal: 0, ahead: [], createdAtMs, updatedAtMs: createdAtMs,
   };
+  const secondAtMs = now - 2 * MIN;
+  const secondRow = scene.secondRun
+    ? {
+        id: RUN2, channelId: CH, agentMemberId: agentId,
+        triggerMessageId: MSG2, triggerSummary: "다음 주 회의록 만들어 줄래요",
+        status: "queued", phase: "queued", leaseState: "none", stepCount: 0,
+        queuePosition: 2, aheadTotal: 1, ahead: [{ runId: RUN, channelId: CH }],
+        createdAtMs: secondAtMs, updatedAtMs: secondAtMs,
+      }
+    : null;
   const messageRows = [
     {
       id: MSG, channelId: CH, seq: 10, hlcTs: createdAtMs, hlcCount: 0, authorMemberId: memberId,
       type: "text", body: "@dalmuri 이번 주 일정 정리해 줄래요", state: "sent", createdAtMs,
     },
+    ...(secondRow
+      ? [{
+          id: MSG2, channelId: CH, seq: 11, hlcTs: secondAtMs, hlcCount: 0, authorMemberId: memberId,
+          type: "text", body: "@dalmuri 다음 주 회의록 만들어 줄래요", state: "sent", createdAtMs: secondAtMs,
+        }]
+      : []),
   ];
   const ledger = {
     runId: RUN,
@@ -107,12 +130,15 @@ async function installRoutes(context, scene) {
       return json(route, { read_states: channels.map((c) => ({ channel_id: c.id, last_read_seq: 99, latest_seq: 99, unread_count: 0, mention_count: 0, marked_unread_before_seq: null })) });
     }
     if (path.endsWith("/approvals")) return json(route, { approvals: [] });
-    if (path.endsWith(`/channels/${CH}/agent-runs/progress`)) return json(route, { runs: [runRow] });
+    if (path.endsWith(`/channels/${CH}/agent-runs/progress`)) return json(route, { runs: secondRow ? [runRow, secondRow] : [runRow] });
     if (path.endsWith("/agent-runs/progress")) return json(route, { runs: [] });
     if (path.endsWith(`/agents/${agentId}/liveness`)) {
       return json(route, { agentMemberId: agentId, state: "woken_not_collected", lastSignalAtMs: now - 3 * HOUR });
     }
     if (path.endsWith(`/agent-runs/${RUN}/events`)) return json(route, ledger);
+    if (path.endsWith(`/agent-runs/${RUN2}/events`)) {
+      return json(route, { runId: RUN2, events: [{ ordinal: 1, kind: "queued", createdAtMs: secondAtMs }] });
+    }
     if (path.endsWith(`/agent-runs/${RUN}/cancel`) && method === "POST") {
       cancelRequests.push(path);
       if (scene.cancel === 500) return json(route, { error: { code: "internal", message: "boom" } }, 500);
@@ -263,6 +289,44 @@ async function scenes(browser, origin, scheme) {
     await page.waitForTimeout(2500);
     check(`${tag} system: 서버가 5시간 기다렸다고 해도 카드가 없다`, (await page.getByTestId("sidebar-now-card").count()) === 0);
     await page.screenshot({ path: shot("system") });
+    await context.close();
+  }
+  // ---- 7~9음절 한영 섞인 이름: 낱말은 한 줄로 온전하고 이름이 줄임표를 받는다 (design-review r1 H3) -----
+  {
+    const { context, page } = await open(browser, origin, scheme, {
+      waitedMs: 17 * HOUR, cancel: 200, agentName: "프론트엔드 리뷰어 (Claude)",
+    });
+    await page.getByTestId("sidebar-now-card").waitFor({ timeout: 15_000 });
+    await page.waitForTimeout(800);
+    const state = page.getByTestId("sidebar-now-state");
+    const stateBox = await state.boundingBox();
+    const nameLoc = page.getByTestId("sidebar-now-card").locator(".sidebar-now-name");
+    const nameBox = await nameLoc.boundingBox();
+    const truncated = await nameLoc.evaluate((el) => el.scrollWidth > el.clientWidth);
+    check(`${tag} longname: 상태 낱말이 온전하다`, (await text(page, "sidebar-now-state")) === "아직 받지 않았어요", await text(page, "sidebar-now-state"));
+    check(`${tag} longname: 상태 낱말이 한 줄이다(「아직 받지 않았어 / 요」로 꺾이지 않는다)`, stateBox !== null && stateBox.height < 24, JSON.stringify(stateBox));
+    check(`${tag} longname: 이름이 줄임표를 받는다(낱말을 밀어내지 않는다)`, truncated === true);
+    check(`${tag} longname: 이름과 낱말이 겹치지 않는다`, nameBox !== null && stateBox !== null && nameBox.x + nameBox.width <= stateBox.x + 1, `${JSON.stringify(nameBox)} ${JSON.stringify(stateBox)}`);
+    await page.screenshot({ path: shot("longname") });
+    await context.close();
+  }
+  // ---- 같은 에이전트·같은 대화의 요청이 둘: 패널의 머리 칩과 목록 칩이 같은 낱말 (design-review r1 H5) -----
+  {
+    const { context, page } = await open(browser, origin, scheme, { waitedMs: 17 * HOUR, cancel: 200, secondRun: true });
+    await page.getByTestId("composer-working-open").waitFor({ timeout: 15_000 });
+    await page.getByTestId("composer-working-open").click();
+    await page.getByTestId("agent-work-panel-runs").waitFor({ timeout: 10_000 });
+    await page.waitForTimeout(600);
+    const head = await text(page, "agent-work-panel-state");
+    const rows = page.getByTestId("agent-work-panel-run");
+    const count = await rows.count();
+    const first = count > 0 ? ((await rows.nth(0).textContent()) ?? "") : "";
+    const second = count > 1 ? ((await rows.nth(1).textContent()) ?? "") : "";
+    check(`${tag} tworuns: 목록에 요청이 둘 선다`, count === 2, String(count));
+    check(`${tag} tworuns: 머리 칩은 「아직 받지 않았어요」`, head === "아직 받지 않았어요", head);
+    check(`${tag} tworuns: 목록의 첫 요청 칩도 같은 낱말이고 「대기 1번째」가 아니다`, first.includes("아직 받지 않았어요") && !first.includes("대기 1번째"), first);
+    check(`${tag} tworuns: 5분 안의 둘째 요청은 「대기 2번째」 그대로다`, second.includes("대기 2번째") && !second.includes("아직 받지 않았어요"), second);
+    await page.screenshot({ path: shot("tworuns") });
     await context.close();
   }
 }

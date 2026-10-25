@@ -175,6 +175,17 @@ describe("부른 사람이 없는 시스템 작업(환영)은 카드가 아니�
 });
 
 describe("아무도 가져가지 않은 채 5분을 넘은 사람 요청", () => {
+  it("낱말은 한 덩어리로 서고(줄바꿈·줄어듦 없음) 좁은 열에서는 이름이 줄임표를 받는다 — 「아직 받지 않았어 / 요」로 꺾이지 않는다", () => {
+    // design-review #4285 r1 H3. jsdom은 배치를 재지 못하므로 클래스를 잠그고, 실제 Chromium 폭 측정은
+    // `scripts/capture-4285.mjs`의 긴 이름 장면이 한다(상태 낱말이 한 줄, 이름이 줄임표).
+    mount([queued()], liveness("woken_not_collected"));
+    const state = screen.getByTestId("sidebar-now-state");
+    expect(state.className).toContain("shrink-0");
+    expect(state.className).toContain("whitespace-nowrap");
+    const name = screen.getByTestId("sidebar-now-card").querySelector(".sidebar-now-name");
+    expect(name?.className).toContain("truncate");
+  });
+
   it("낱말은 「아직 받지 않았어요」, 장소 줄에 서버의 경고가 짧은 낱말로 붙고, 이유 문장이 둘째 줄에 선다", () => {
     mount([queued()], liveness("woken_not_collected"));
     const card = screen.getByTestId("sidebar-now-card");

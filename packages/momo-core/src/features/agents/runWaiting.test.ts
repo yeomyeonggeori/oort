@@ -27,6 +27,7 @@ import {
   isUncollected,
   isUntakenHumanRun,
   queuedWaitCopy,
+  runStateWord,
   UNCOLLECTED_AFTER_MS,
   UNCOLLECTED_WORD,
   uncollectedReason,
@@ -610,5 +611,38 @@ describe("작업 패널의 상태 칩도 같은 낱말이다 (#4285)", () => {
     expect(workLogStateLabel(log, "live", claimed, NOW)).toBe(runPhaseLabel(claimed));
     const system = facts({ queuePosition: 1, queuedAtMs: NOW - 17 * 60 * MIN, system: true });
     expect(workLogStateLabel(log, "live", system, NOW)).toBe("대기 1번째");
+  });
+});
+
+describe("한 run의 상태 낱말은 한 함수가 고른다 (#4285 design-review r1 H5)", () => {
+  // 카드 오른쪽 낱말·작업 패널 머리 칩·run 목록 칩·폰 기록 시트의 칩이 모두 `runStateWord`를 부른다.
+  // 같은 run을 한 화면에서 두 낱말(「아직 받지 않았어요」 / 「대기 1번째」)로 말하지 않는다.
+  it("가져가는 이 없이 5분을 넘은 사람 요청은 「아직 받지 않았어요」, 5분 안은 서버의 낱말이다", () => {
+    expect(runStateWord(facts({ queuePosition: 2, queuedAtMs: NOW - 17 * 60 * MIN }), NOW)).toBe(UNCOLLECTED_WORD);
+    expect(runStateWord(facts({ queuePosition: 2, queuedAtMs: NOW - 2 * MIN }), NOW)).toBe("대기 2번째");
+    // 경계는 5분 정각부터(카드·패널 머리 칩과 같다).
+    expect(runStateWord(facts({ queuePosition: 1, queuedAtMs: NOW - UNCOLLECTED_AFTER_MS }), NOW)).toBe(UNCOLLECTED_WORD);
+    expect(runStateWord(facts({ queuePosition: 1, queuedAtMs: NOW - UNCOLLECTED_AFTER_MS + 1 }), NOW)).toBe("대기 1번째");
+  });
+
+  it("시계가 없으면 서버의 낱말 그대로다", () => {
+    expect(runStateWord(facts({ queuePosition: 1, queuedAtMs: NOW - 17 * 60 * MIN }))).toBe("대기 1번째");
+  });
+
+  it("가져간 run·시스템 작업은 서버의 낱말 그대로다 — 「받지 않았어요」는 기다리는 사람이 있고 아무도 안 가져갔을 때의 말이다", () => {
+    const claimed = facts({ phase: "claimed", leaseState: "live", claimedAtMs: NOW - MIN, queuedAtMs: NOW - 17 * 60 * MIN });
+    expect(runStateWord(claimed, NOW)).toBe(runPhaseLabel(claimed));
+    const system = facts({ queuePosition: 1, queuedAtMs: NOW - 17 * 60 * MIN, system: true });
+    expect(runStateWord(system, NOW)).toBe("대기 1번째");
+  });
+
+  it("카드의 낱말(queuedWaitCopy)·패널 머리 칩(workLogStateLabel)·목록 칩(runStateWord)이 같은 run에 같은 낱말이다", () => {
+    const log = openWorkLog({ runId: "0199aa11-2222-7000-8000-0000000000b1", memberId: AGENT, channelId: CH }, NOW);
+    for (const waited of [MIN, 4 * MIN, 5 * MIN, 17 * 60 * MIN]) {
+      const f = facts({ queuePosition: 1, queuedAtMs: NOW - waited });
+      const card = queuedWaitCopy({ facts: f, nowMs: NOW })?.word;
+      expect(card).toBe(runStateWord(f, NOW));
+      expect(workLogStateLabel(log, "live", f, NOW)).toBe(runStateWord(f, NOW));
+    }
   });
 });

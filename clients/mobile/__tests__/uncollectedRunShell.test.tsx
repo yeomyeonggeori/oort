@@ -8,9 +8,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, SectionList, StyleSheet, View} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -228,6 +229,20 @@ function pressAfterGuard(testID: string): void {
 const ARM = 'home-working-stop-arm';
 const COMMIT = 'home-working-stop-commit';
 const DISMISS = 'home-working-stop-dismiss';
+
+/**
+ * 접근성 글자 크기를 이 케이스의 것으로 바꾼다. RN은 글자 크기가 바뀔 때 같은 문(`Dimensions.set`)으로
+ * 새 `fontScale`을 내보내므로, 이것은 뒷문이 아니라 기기에서 실제로 일어나는 갱신이다
+ * (`composerDraftOffline.test.tsx`의 `setWindow`와 같다). 시험 기본값은 2라서 모든 케이스가 「큰 글씨」였다.
+ */
+const BASE_WINDOW = Dimensions.get('window');
+function setFontScale(fontScale: number): void {
+  const window = {...BASE_WINDOW, fontScale};
+  Dimensions.set({window, screen: window});
+}
+afterEach(() => {
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
+});
 
 describe('홈 카드: 아직 받지 않았어요', () => {
   it('5시간 넘게 가져가지 않은 요청: 낱말·경고 문구·경과 시간·이유·취소가 한 장에 선다', async () => {
@@ -452,6 +467,34 @@ describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
     return log;
   }
 
+  it.each([[1, 1], [1.49, 1], [1.5, undefined], [3.1, undefined]] as const)(
+    'H1 대화 아래 활동 줄(글자 배율 %s): 「이름: 상태 낱말」은 줄 수 %s — 큰 글씨에서는 줄을 바꿔 「아직 받지 않았어요」를 끝까지 말한다',
+    async (scale, lines) => {
+      setFontScale(scale);
+      await openGeneral({liveness: {[BOT_ID]: 'woken_not_collected'}});
+      act(() => markAgentWorking(waiting()));
+      await waitFor(() => expect(screen.getByTestId('activity-lead')).toBeTruthy());
+      expect(screen.getByTestId('activity-lead').props.numberOfLines).toBe(lines);
+    },
+  );
+
+  it('H1 대화 아래 활동 줄의 컨트롤도 글자 배율 상한(1.6)을 지킨다 — 「취소 확 / 정」으로 꺾이지 않고, 확인 문장은 끝까지 자란다', async () => {
+    await openGeneral();
+    act(() => markAgentWorking(waiting()));
+    const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
+    expect(within(arm).getByText('취소').props.maxFontSizeMultiplier).toBe(1.6);
+    fireEvent.press(arm);
+    const commit = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-commit`));
+    expect(within(commit).getByText('취소 확정').props.maxFontSizeMultiplier).toBe(1.6);
+    expect(
+      within(screen.getByTestId(`turn-stop-${BOT_ID}-dismiss`)).getByText('그대로 두기').props
+        .maxFontSizeMultiplier,
+    ).toBe(1.6);
+    expect(
+      screen.getByTestId(`turn-stop-${BOT_ID}-consequence`).props.maxFontSizeMultiplier,
+    ).toBeUndefined();
+  });
+
   it('아무도 가져가지 않은 요청: 낱말·경고 문구·이유가 서고, 멈추는 컨트롤은 「취소」 한 벌이다', async () => {
     await openGeneral({liveness: {[BOT_ID]: 'woken_not_collected'}});
     act(() => markAgentWorking(waiting()));
@@ -467,6 +510,9 @@ describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
       ),
     );
     expect(screen.getByTestId('composer-working')).not.toHaveTextContent(/대기 1번째/);
+    // 근거 글이 세 토막(생존 문구 · 경과 · 이유)까지 길어지므로 어절에서 끊는다 — 좁은 폭에서 글자 단위로 꺾여
+    // 한 음절이 홀로 남지 않게(design-review #4285 r1 M7).
+    expect(screen.getByTestId('activity-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
     const arm = await waitFor(() => screen.getByTestId(`turn-stop-${BOT_ID}-arm`));
     expect(arm).toHaveTextContent('취소');
     expect(arm.props.accessibilityLabel).toBe('요청 취소, 확인 필요');
@@ -509,3 +555,176 @@ describe('대화 아래 활동 줄 (대화 화면의 배선)', () => {
   });
 });
 
+describe('design-review r1 수리: 큰 글씨 머리·낭독·run을 넘는 상태 (#4285)', () => {
+  // 이름 아래로 내리는 문턱은 아이콘 알약과 같은 `STACK_PILL_SCALE`(1.5)이다. 아바타·이름·태그·낱말이 한 줄에 서면
+  // 가장 큰 글씨(AX5)에서 이름이 「달…」 한 글자로 잘렸다(design-review #4285 r1 H1).
+  it.each([[1], [1.3], [1.49]])('H1 글자 배율 %s: 상태 낱말이 이름 줄에 서고 내려가지 않는다', async scale => {
+    setFontScale(scale);
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId('home-working-state')).toBeTruthy());
+    expect(screen.queryByTestId('home-working-live-stack')).toBeNull();
+  });
+
+  it.each([[1.5], [2], [3.1]])('H1 글자 배율 %s: 상태 낱말이 이름 아래 제 줄로 내려가고 한 곳에만 선다', async scale => {
+    setFontScale(scale);
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId('home-working-live-stack')).toBeTruthy());
+    expect(
+      within(screen.getByTestId('home-working-live-stack')).getByTestId('home-working-state'),
+    ).toHaveTextContent('아직 받지 않았어요');
+    // 머리 줄에 한 번 더 그리지 않는다.
+    expect(screen.getAllByTestId('home-working-state')).toHaveLength(1);
+  });
+
+  it('H1 컨트롤의 글자 배율에만 상한이 걸린다 — 첫 탭·「그대로 두기」·「취소 확정」은 1.6배, 확인 문장은 끝까지 자란다', async () => {
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    const armLabel = within(screen.getByTestId(ARM)).getByText('취소');
+    expect(armLabel.props.maxFontSizeMultiplier).toBe(1.6);
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    expect(within(screen.getByTestId(DISMISS)).getByText('그대로 두기').props.maxFontSizeMultiplier).toBe(1.6);
+    expect(within(screen.getByTestId(COMMIT)).getByText('취소 확정').props.maxFontSizeMultiplier).toBe(1.6);
+    // 읽는 글자(확인 문장)는 상한 밖이다: 큰 글씨를 쓰는 사람이 이 문장을 못 읽게 하지 않는다.
+    expect(screen.getByTestId('home-working-stop-consequence').props.maxFontSizeMultiplier).toBeUndefined();
+  });
+
+  it('M1 「에이전트 작업 · 모두 보기」 머리의 글자는 컨트롤 줄이라 상한이 있다 — 가장 큰 글씨에서 「모두 보」로 잘리지 않는다', async () => {
+    // AX5 캡처(`ax-home-dark-idle`)가 드러낸 기존 머리 줄의 잘림이다. 카드 위에 같이 서는 한 묶음이다.
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId('home-work-head')).toBeTruthy());
+    expect(screen.getByTestId('home-work-head').props.maxFontSizeMultiplier).toBe(1.6);
+    expect(
+      within(screen.getByTestId('home-work-see-all')).getByText('모두 보기 ›').props.maxFontSizeMultiplier,
+    ).toBe(1.6);
+  });
+
+  it('H2 결과를 말로 알린다 — iOS VoiceOver는 accessibilityLiveRegion을 읽지 않고, 성공하면 눌린 컨트롤이 사라진다', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    const log = await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    // 확인 문장은 첫 탭이 이미 낭독한다.
+    expect(announce).toHaveBeenCalledWith(
+      expect.stringContaining('취소하면 이 요청은 여기서 끝나요'),
+    );
+    announce.mockClear();
+    pressAfterGuard(COMMIT);
+    await waitFor(() => expect(log.cancelCalls()).toHaveLength(1));
+    await waitFor(() => expect(announce).toHaveBeenCalledWith('달무리봇의 요청을 취소했어요.'));
+  });
+
+  it('H2 실패도 말로 알린다 — 컨트롤이 남아 다시 누를 수 있고, 그 사실을 소리로도 안다', async () => {
+    const announce = jest
+      .spyOn(AccessibilityInfo, 'announceForAccessibility')
+      .mockImplementation(() => {});
+    const log = await mountHome({cancel: () => jsonResponse(500, {}, 'boom')});
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    announce.mockClear();
+    pressAfterGuard(COMMIT);
+    await waitFor(() => expect(log.cancelCalls()).toHaveLength(1));
+    await waitFor(() =>
+      expect(announce).toHaveBeenCalledWith('취소하지 못했어요. 서버가 오류로 답했어요.'),
+    );
+  });
+
+  it('H1 확인 줄이 열려 카드가 자라면 결정 단추까지 목록을 내린다 — 처음 그려질 때와 자라지 않을 때는 스스로 스크롤하지 않는다', async () => {
+    // 목 `View`의 `measureInWindow`는 콜백을 부르지 않는다: 카드가 창 아래로 넘친 장면(아래 끝 y=1500)을 건넨다.
+    const measure = jest
+      .spyOn(
+        View.prototype as unknown as {measureInWindow: (cb: (...n: number[]) => void) => void},
+        'measureInWindow',
+      )
+      .mockImplementation(cb => cb(0, 700, 300, 800));
+    const scrollTo = jest.fn();
+    jest
+      .spyOn(SectionList.prototype, 'getScrollResponder')
+      .mockReturnValue({scrollTo} as unknown as ReturnType<SectionList['getScrollResponder']>);
+    await mountHome();
+    act(() => markAgentWorking(waiting()));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    const stop = screen.getByTestId('home-working-stop');
+    const layout = (height: number) =>
+      fireEvent(stop, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 300, height}}});
+
+    // 처음 그려질 때: 사람이 건드리지 않았다.
+    layout(44);
+    // 자라지 않음(같거나 줄어듦): 스크롤하지 않는다.
+    layout(44);
+    layout(30);
+    expect(scrollTo).not.toHaveBeenCalled();
+
+    // 확인 줄이 열려 컨트롤 줄이 자랐다.
+    layout(400);
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledTimes(1));
+    const arg = scrollTo.mock.calls[0][0] as {y: number; animated: boolean};
+    expect(arg.y).toBeGreaterThan(0);
+    // 넘친 만큼만 내린다: y = 카드 아래 끝(1500) + 숨(`space.md`) − 보이는 아래 끝(창 높이 − 탭바 자리).
+    // 거꾸로 풀어 탭바 자리가 사리에 맞는 값(0 이상, 수십 pt)인지 본다.
+    const tabBarClearance = Dimensions.get('window').height - (1500 + space.md - arg.y);
+    expect(tabBarClearance).toBeGreaterThanOrEqual(0);
+    expect(tabBarClearance).toBeLessThan(200);
+    expect(measure).toHaveBeenCalled();
+  });
+
+  it('H4 같은 에이전트·같은 대화의 요청이 둘이면, 앞 run을 취소한 뒤 같은 카드가 다음 요청의 「취소」를 다시 낸다 — 앞 run의 영수증을 든 채 컨트롤이 숨지 않는다', async () => {
+    const RUN2 = 'a3333333-3333-4333-8333-a33333333333';
+    const log = await mountHome();
+    // 같은 에이전트·같은 대화의 대기 요청은 진행 스토어가 앞 run 하나의 신호로 합친다(`runCount` 2, `runId`는 맨 앞).
+    act(() => markAgentWorking(waiting({runId: RUN, runCount: 2}, 17 * HOUR)));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    // 둘이 한 카드로 합쳐졌고, 확인 문장이 그 사실을 미리 말한다(맨 앞의 하나만 취소한다).
+    expect(screen.getByTestId('home-working-stop-consequence')).toHaveTextContent('맨 앞의 하나만', {exact: false});
+    pressAfterGuard(COMMIT);
+    await waitFor(() => expect(log.cancelCalls()).toHaveLength(1));
+    expect(String(log.cancelCalls()[0][0])).toContain(`/agent-runs/${RUN}/cancel`);
+    await waitFor(() =>
+      expect(screen.getByTestId('home-working-stop-outcome-cancelled')).toBeTruthy(),
+    );
+    expect(screen.queryByTestId(ARM)).toBeNull();
+
+    // 서버가 앞 run을 취소로 끝내서 알린다: 카드는 다음 요청(아직 받지 않았어요)으로 이어진다.
+    act(() => {
+      resetAgentWorking();
+      markAgentWorking(waiting({runId: RUN2}, 16 * HOUR));
+    });
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    // 앞 run의 영수증이 남지 않고, 남은 요청을 취소할 길이 있다.
+    expect(screen.queryByTestId('home-working-stop-outcome-cancelled')).toBeNull();
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    pressAfterGuard(COMMIT);
+    await waitFor(() => expect(log.cancelCalls()).toHaveLength(2));
+    expect(String(log.cancelCalls()[1][0])).toContain(`/agent-runs/${RUN2}/cancel`);
+  });
+
+  it('H4 확인을 열어 둔 채 앵커가 바뀌어도 남은 확인 상태로 다음 run을 취소하지 않는다', async () => {
+    const RUN2 = 'a3333333-3333-4333-8333-a33333333333';
+    const log = await mountHome();
+    act(() => markAgentWorking(waiting({runId: RUN, runCount: 2}, 17 * HOUR)));
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    fireEvent.press(screen.getByTestId(ARM));
+    await waitFor(() => expect(screen.getByTestId(COMMIT)).toBeTruthy());
+    // 확인이 열려 있는 동안 앞 run이 다른 길로 끝났다(예: 다른 기기에서 취소).
+    act(() => {
+      resetAgentWorking();
+      markAgentWorking(waiting({runId: RUN2}, 16 * HOUR));
+    });
+    await waitFor(() => expect(screen.getByTestId(ARM)).toBeTruthy());
+    expect(screen.queryByTestId(COMMIT)).toBeNull();
+    expect(log.cancelCalls()).toHaveLength(0);
+  });
+});

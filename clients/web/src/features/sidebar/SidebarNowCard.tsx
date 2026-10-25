@@ -154,7 +154,9 @@ export function SidebarNowCard({
         </span>
         <span
           className={cn(
-            "sidebar-now-state",
+            // 낱말은 한 덩어리로 선다: 줄바꿈하지 않고 줄지도 않는다. 좁은 열에서는 이름이 줄임표를
+            // 받는다(「아직 받지 않았어 / 요」로 꺾이던 것, design-review #4285 r1 H3).
+            "sidebar-now-state shrink-0 whitespace-nowrap",
             !live
               ? "text-ink-muted"
               : lead.state === "working"
