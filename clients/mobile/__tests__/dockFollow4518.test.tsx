@@ -219,13 +219,16 @@ describe('Timeline 이 도크 알림에 답한다', () => {
     expect(scrollToEnd).not.toHaveBeenCalled();
   });
 
-  it('언마운트하면 처리기가 풀린다 — 사라진 목록을 부르지 않는다', async () => {
-    const bridge = createDockFollow();
-    const {view, listRef} = mountTimeline(bridge);
+  it('언마운트하면 걸었던 처리기를 푼다 — 사라진 목록에 처리기가 남지 않는다', async () => {
+    // 풀었는지는 다리가 본 것으로 잰다: 목록이 사라지면 그 처리기가 불려도 `listRef` 가 비어 있어 **겉으로는** 아무 일도 안 일어나서, 부른 결과로는 풀었는지 못 가린다.
+    const release = jest.fn();
+    const register = jest.fn(() => release);
+    const bridge = {register, notify: jest.fn()};
+    const {view} = mountTimeline(bridge);
     await settleAtBottom();
-    const scrollToEnd = spyNativeScrollToEnd(listRef);
+    expect(register).toHaveBeenCalledTimes(1); // 전제: 실제로 걸었다
+    expect(release).not.toHaveBeenCalled();
     view.unmount();
-    act(() => bridge.notify());
-    expect(scrollToEnd).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 });
