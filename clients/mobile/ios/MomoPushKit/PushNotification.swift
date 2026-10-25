@@ -1,11 +1,19 @@
 // =============================================================================
-// INHERITED SOURCE — DO NOT EDIT HERE, AND DO NOT EDIT THE ORIGINAL EITHER.
+// INHERITED SOURCE — the origin is GONE: `clients/iOS` was deleted 2026-08-10 (W-S1, #1215),
+// so this file is now the ONLY copy and `scripts/verify_push_kit_inheritance.sh` SKIPs it.
+// Edit it here, and keep the SENTINEL line below (the verifier still requires it).
+//
+// Edited after the inheritance, on purpose (each is a behaviour the frozen kit never had):
+//   - #4294: a message sent with files and no text is announced by its attachment count
+//     (`PushAttachmentCopy`: 「사진 1장」, 「파일 2개」, same sentences as the core's
+//     `ATTACH_PREVIEW_COPY`), not left on the relay's 「새 알림」 placeholder. Only `dm` / `mention`
+//     pushes: an approval keeps ADR-0204 D7's rule (no body → no 승인·거절 buttons).
 //
 // Origin: clients/iOS/MomoiOSKit/Sources/MomoiOSPushKit/PushNotification.swift
 // Inherited by: goal RN-N1 (ADR-0137 이행 순서 5), 2026-08-03.
 //
-// Everything below the SENTINEL line is a BYTE-FOR-BYTE copy of the origin.
-// `scripts/verify_push_kit_inheritance.sh` fails the build if the two drift.
+// Everything below the SENTINEL line WAS a BYTE-FOR-BYTE copy of the origin
+// (`scripts/verify_push_kit_inheritance.sh` failed the build if the two drifted).
 //
 // Why copied rather than referenced as the `MomoiOSPushKit` SPM product
 // (audit 2026-08-02 §3.1 left the choice open; these are the reasons for copy):
@@ -346,6 +354,47 @@ public enum PushWorkRunDoneCopy {
     }
 }
 
+/// 글 없이 사진·파일만 보낸 메시지의 알림 본문 (#4294).
+///
+/// 서버는 푸시에 본문을 싣지 않고 확장이 REST 로 메시지를 읽어 짓는다(ADR-0204). 그런데 확장은 본문이
+/// 빈 메시지를 「읽을 수 없는 메시지」로 던져 relay 자리표시(「oort / 새 알림」)로 떨어졌고, 그러면 승인
+/// 버튼도 같이 뗐다. 첨부가 있으면 그 개수로 말한다: 코어 `attachmentPreviewLine` 과 **같은 문장**이다
+/// (`packages/momo-core/src/features/attachments/model.ts`). 폰 시험이 이 소스의 문구를 코어 출력과
+/// 맞대고, `sim-check` 가 이 함수와 REST 읽기를 실제로 돌린다. 파일 이름은 싣지 않는다: 이름은 사람이 쓴
+/// 글이라 잠금 화면에서 본문과 같은 노출이다.
+public enum PushAttachmentCopy {
+    public static func photos(_ count: Int) -> String { "사진 \(count)장" }
+    public static func files(_ count: Int) -> String { "파일 \(count)개" }
+    public static let separator = ", "
+
+    /// 어느 알림이 이 문구를 본문으로 쓰는가: 사람·에이전트가 보낸 메시지(`dm`·`mention`)뿐이다.
+    /// 승인 알림은 쓰지 않는다. 확장은 본문을 채우면 승인 버튼을 원래대로 되돌려 놓는데(`NotificationService`,
+    /// ADR-0204 D7), 「사진 1장」은 무엇을 승인하는지 말해 주지 않는다 — 무엇인지 모르는 것을 잠금 화면에서
+    /// 승인하게 두지 않는다는 D7 을 개수 문구가 새 입력으로 풀면 안 된다. 그래서 승인·재개·작업 알림의 빈
+    /// 본문은 예전처럼 자리표시로 남고 버튼은 떼어진다. 서버가 짝지은 카테고리가 승인이면 이유가 무엇이든
+    /// 같다(파서는 이유와 카테고리를 서로 묶지 않는다).
+    public static func announces(_ envelope: MomoPushEnvelope) -> Bool {
+        (envelope.reason == "dm" || envelope.reason == "mention") && !envelope.category.carriesApprovalID
+    }
+
+    /// 「사진」으로 세는 것: 사진으로 그려지는 래스터 이미지. SVG 는 타임라인이 카드로 세우므로 파일이다.
+    public static func isPhoto(mime: String) -> Bool {
+        let lowered = mime.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return lowered.hasPrefix("image/") && !lowered.hasPrefix("image/svg")
+    }
+
+    /// 첨부 한 묶음의 한 줄: 「사진 1장」, 「사진 3장」, 「파일 2개」, 「사진 1장, 파일 1개」. 없으면 nil.
+    public static func line(mimeTypes: [String]) -> String? {
+        guard !mimeTypes.isEmpty else { return nil }
+        let photoCount = mimeTypes.filter { isPhoto(mime: $0) }.count
+        let fileCount = mimeTypes.count - photoCount
+        var parts: [String] = []
+        if photoCount > 0 { parts.append(photos(photoCount)) }
+        if fileCount > 0 { parts.append(files(fileCount)) }
+        return parts.joined(separator: separator)
+    }
+}
+
 public actor MomoPushRESTFetcher: PushMessageFetching {
     private struct MessagePage: Decodable {
         let messages: [Message]
@@ -371,15 +420,55 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         }
     }
 
+    /// 첨부 목록에서 이 파일이 읽는 것은 종류(`mime`)뿐이다. 배열이 아니거나 항목이 깨져도 메시지 전체를
+    /// 버리지 않는다(`Props` 와 같은 규율): 깨진 항목은 종류를 모르는 파일 하나로 센다.
+    private struct Attachments: Decodable {
+        let mimeTypes: [String]
+
+        private struct Entry: Decodable {
+            let mime: String?
+
+            enum CodingKeys: String, CodingKey { case mime }
+
+            init(from decoder: Decoder) throws {
+                let container = try? decoder.container(keyedBy: CodingKeys.self)
+                mime = try? container?.decode(String.self, forKey: .mime)
+            }
+        }
+
+        init(from decoder: Decoder) throws {
+            var mimes: [String] = []
+            if var list = try? decoder.unkeyedContainer() {
+                while !list.isAtEnd {
+                    mimes.append(((try? list.decode(Entry.self))?.mime) ?? "")
+                }
+            }
+            mimeTypes = mimes
+        }
+    }
+
+    /// 문자열 한 칸을 읽되 모양이 어긋나도(숫자·객체) 던지지 않는다: 한 칸 때문에 메시지 페이지 전체를 잃지
+    /// 않는다(`Props`·`Attachments` 와 같은 규율).
+    private struct LenientText: Decodable {
+        let value: String?
+
+        init(from decoder: Decoder) throws {
+            value = try? decoder.singleValueContainer().decode(String.self)
+        }
+    }
+
     private struct Message: Decodable {
         let id: String
         let authorMemberID: String
         let body: String?
         let rootID: String?
         let props: Props?
+        let attachments: Attachments?
+        /// 「지워진 메시지」를 가리는 데만 쓴다(`"deleted"`). 서버는 삭제 때 글은 비우지만 첨부 목록은 그대로 싣는다.
+        let state: LenientText?
 
         enum CodingKeys: String, CodingKey {
-            case id, body, props
+            case id, body, props, attachments, state
             case authorMemberID = "authorMemberId"
             case rootID = "rootId"
         }
@@ -430,8 +519,7 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         }
         let roster = try decoder.decode(Roster.self, from: try await get(root + "/roster", fetchSession: fetchSession))
         guard let message = page.messages.first(where: { $0.id.lowercased() == envelope.messageID.lowercased() }),
-              let body = message.body?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !body.isEmpty,
+              let body = Self.displayBody(of: message, for: envelope),
               let author = roster.members.first(where: {
                   $0.id.lowercased() == message.authorMemberID.lowercased()
               }),
@@ -440,6 +528,17 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
             throw MomoPushError.messageUnavailable
         }
         return PushDisplayContent(title: author.displayName, body: body)
+    }
+
+    /// 알림 본문: 글이 있으면 글. 글 없이 첨부만 있으면 개수 문구(#4294) — `PushAttachmentCopy.announces`
+    /// 가 허락한 알림(`dm`·`mention`)에서만, 그리고 지워지지 않은 메시지에서만. 지워진 메시지는 서버가 첨부
+    /// 목록을 그대로 실어 보내도 개수를 말하지 않는다(보낸 사람이 거둔 것을 잠금 화면에 올리지 않는다; 코어의
+    /// 인박스·배너도 삭제를 먼저 본다). 그 밖이거나 첨부도 없으면 nil(자리표시로 남는다).
+    private static func displayBody(of message: Message, for envelope: MomoPushEnvelope) -> String? {
+        let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if !text.isEmpty { return text }
+        guard PushAttachmentCopy.announces(envelope), message.state?.value != "deleted" else { return nil }
+        return PushAttachmentCopy.line(mimeTypes: message.attachments?.mimeTypes ?? [])
     }
 
     private func get(_ path: String, fetchSession: PushFetchSession) async throws -> Data {

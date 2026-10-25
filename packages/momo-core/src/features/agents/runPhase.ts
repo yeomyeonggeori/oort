@@ -75,6 +75,7 @@ export function serverFactsOf(progress: AgentRunProgress): ServerRunFacts {
     ...(progress.finishedAtMs !== undefined
       ? { finishedAtMs: progress.finishedAtMs }
       : {}),
+    ...(progress.system === true ? { system: true as const } : {}),
   };
 }
 

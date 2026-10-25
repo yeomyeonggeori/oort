@@ -1172,5 +1172,138 @@ do {
     "the handler's placeholder is the kit's")
 }
 
+// ---- NSE body of a message sent with files and no text (#4294) -----------------------------------
+//
+// The extension rewrites the notification from what its REST read says (the push carries no content).
+// A message with attachments and no text used to throw `messageUnavailable` (empty body) and stay on the
+// relay's 「oort / 새 알림」 - with its buttons taken off. This runs the REAL `MomoPushRESTFetcher.fetch`
+// against a stubbed URLSession, so what is proven is the decode and the choice, not a copy of them.
+
+final class PushRESTStub: URLProtocol {
+  nonisolated(unsafe) static var messagesJSON = Data()
+  nonisolated(unsafe) static var rosterJSON = Data()
+  nonisolated(unsafe) static var requested: [String] = []
+
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let url = request.url!
+    PushRESTStub.requested.append(url.path + (url.query.map { "?" + $0 } ?? ""))
+    let data = url.path.hasSuffix("/roster") ? PushRESTStub.rosterJSON : PushRESTStub.messagesJSON
+    let response = HTTPURLResponse(
+      url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: data)
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
+
+do {
+  let authorID = "99999999-9999-4999-8999-999999999999"
+  let png = #"{"id":"a1","name":"급여명세서-비공개.png","mime":"image/png","sizeBytes":10}"#
+  let pdf = #"{"id":"f1","name":"견적.pdf","mime":"application/pdf","sizeBytes":20}"#
+  let svg = #"{"id":"s1","name":"도식.svg","mime":"image/svg+xml","sizeBytes":30}"#
+
+  /// The display the extension would show for one message, or nil when it falls back to the placeholder.
+  func restDisplay(
+    _ fields: String, reason: String = "dm", category: String = "momo.message", approval: String? = nil
+  ) async -> PushDisplayContent? {
+    PushRESTStub.requested = []
+    PushRESTStub.messagesJSON = Data(
+      #"{"messages":[{"id":"\#(messageID)","authorMemberId":"\#(authorID)"\#(fields)}]}"#.utf8)
+    PushRESTStub.rosterJSON = Data(#"{"members":[{"id":"\#(authorID)","displayName":"이도현"}]}"#.utf8)
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [PushRESTStub.self]
+    let fetcher = MomoPushRESTFetcher(session: URLSession(configuration: configuration))
+    guard let envelope = try? MomoPushParser.parse(
+      userInfo: payload(reason: reason, category: category, approval: approval))
+    else { return nil }
+    let session = PushFetchSession(
+      baseURL: URL(string: "https://oort.test")!, workspaceID: workspaceID, accessToken: "sim-check-token")
+    return try? await fetcher.fetch(envelope: envelope, session: session)
+  }
+
+  typealias C = PushAttachmentCopy
+  check(C.line(mimeTypes: []) == nil, "no attachment says nothing (nil, not an empty string)")
+  check(C.line(mimeTypes: ["image/jpeg"]) == "사진 1장", "one photo")
+  check(C.line(mimeTypes: ["image/jpeg", "image/heic", "image/png"]) == "사진 3장", "three photos")
+  check(C.line(mimeTypes: ["application/pdf", "video/mp4"]) == "파일 2개", "other kinds are 파일")
+  check(C.line(mimeTypes: ["application/pdf", "image/png", "image/png"]) == "사진 2장, 파일 1개",
+    "photos first when mixed, whatever order they were attached in")
+  check(C.line(mimeTypes: ["image/svg+xml"]) == "파일 1개", "an SVG is a file: the timeline stands it up as a card")
+  check(C.line(mimeTypes: ["  IMAGE/PNG "]) == "사진 1장", "case and padding do not matter")
+  check(C.line(mimeTypes: [""]) == "파일 1개", "a kind we could not read is one file")
+
+  let onlyPhoto = await restDisplay(#","body":null,"attachments":[\#(png)]"#)
+  check(onlyPhoto == PushDisplayContent(title: "이도현", body: "사진 1장"),
+    "photo only: 「이도현 / 사진 1장」, not the relay's placeholder")
+  check(PushRESTStub.requested.contains(where: { $0.hasSuffix("/messages?limit=200") })
+    && PushRESTStub.requested.contains(where: { $0.hasSuffix("/roster") }),
+    "the extension read the message page and the roster to build it")
+  check(onlyPhoto?.body.contains("급여명세서") == false, "the file name never reaches the lock screen")
+  check(await restDisplay(#","body":"","attachments":[\#(png),\#(png),\#(pdf)]"#)
+    == PushDisplayContent(title: "이도현", body: "사진 2장, 파일 1개"), "an empty-string body is no text")
+  check(await restDisplay(#","body":"   \n ","attachments":[\#(pdf),\#(pdf)]"#)
+    == PushDisplayContent(title: "이도현", body: "파일 2개"), "a whitespace-only body is no text")
+  check(await restDisplay(#","body":null,"attachments":[\#(svg)]"#)
+    == PushDisplayContent(title: "이도현", body: "파일 1개"), "an SVG-only message says 파일")
+  check(await restDisplay(#","body":"회의 자료예요","attachments":[\#(png)]"#)
+    == PushDisplayContent(title: "이도현", body: "회의 자료예요"), "text wins over attachments")
+  check(await restDisplay(#","body":null"#) == nil, "no text and no attachments stays on the placeholder")
+  check(await restDisplay(#","body":"","attachments":[]"#) == nil, "an empty attachment list stays on the placeholder")
+  check(await restDisplay(#","body":"안녕하세요","attachments":"oops""#)
+    == PushDisplayContent(title: "이도현", body: "안녕하세요"),
+    "a malformed attachments value does not cost the message its text")
+  check(await restDisplay(#","body":null,"attachments":[{"mime":7},null,"x"]"#)
+    == PushDisplayContent(title: "이도현", body: "파일 3개"),
+    "broken entries are counted as files, never thrown on")
+
+  // ---- ADR-0204 D7: the count line must not bring the approve/reject buttons back -----------------------
+  //
+  // `NotificationService` puts the original category (the buttons) back when the display differs from the
+  // placeholder. A line that is not about the approval ("사진 1장") must therefore never be the display of an
+  // approval push, or a lock screen could ask to approve something it never named.
+  let photoOnly = #","body":null,"attachments":[\#(png)]"#
+  check(await restDisplay(photoOnly, reason: "mention", category: "momo.mention")
+    == PushDisplayContent(title: "이도현", body: "사진 1장"), "a mention with only a photo says 사진 1장 too")
+  check(await restDisplay(photoOnly, reason: "approval_request", category: "momo.approval", approval: approvalID) == nil,
+    "an approval push with no text stays on the placeholder (buttons are taken off), whatever is attached")
+  check(await restDisplay(photoOnly, reason: "approval_request", category: "momo.approval.open", approval: approvalID) == nil,
+    "so does the open-in-app approval category")
+  check(await restDisplay(photoOnly, reason: "mention", category: "momo.approval", approval: approvalID) == nil,
+    "the category decides, not only the reason: an approval category with a mention reason is still an approval")
+  check(await restDisplay(photoOnly, reason: "resume_offer", category: "momo.work") == nil,
+    "a resume offer is not announced by its attachments either")
+  check(await restDisplay(photoOnly, reason: "work_session_idle", category: "momo.work") == nil,
+    "nor is an idle-session card")
+  check(await restDisplay(#","body":"배포 승인 요청","attachments":[\#(png)]"#,
+      reason: "approval_request", category: "momo.approval", approval: approvalID)
+    == PushDisplayContent(title: "이도현", body: "배포 승인 요청"),
+    "an approval with text is shown as before: the text, not the attachments")
+  func envelope(_ reason: String, _ category: String, _ approval: String?) -> MomoPushEnvelope? {
+    try? MomoPushParser.parse(userInfo: payload(reason: reason, category: category, approval: approval))
+  }
+  check(envelope("dm", "momo.message", nil).map(PushAttachmentCopy.announces) == true, "dm announces")
+  check(envelope("mention", "momo.mention", nil).map(PushAttachmentCopy.announces) == true, "mention announces")
+  check(envelope("approval_request", "momo.approval", approvalID).map(PushAttachmentCopy.announces) == false,
+    "approval_request does not announce")
+  check(envelope("mention", "momo.approval.open", approvalID).map(PushAttachmentCopy.announces) == false,
+    "an approval category does not announce, whatever the reason")
+
+  // ---- a message its sender took back: the server empties the text but still sends the attachment list ----
+  //
+  // The count must not reach the lock screen for a message that no longer exists (the core's inbox and banner
+  // look at deletion first; the extension read no `state` at all until #4294's review).
+  check(await restDisplay(#","body":null,"state":"deleted","deletedAtMs":1,"attachments":[\#(png)]"#) == nil,
+    "a deleted message with attachments stays on the placeholder: its count is not announced")
+  check(await restDisplay(#","body":null,"state":"sent","attachments":[\#(png)]"#)
+    == PushDisplayContent(title: "이도현", body: "사진 1장"),
+    "a live message says its count (control for the deleted one)")
+  check(await restDisplay(#","body":null,"state":7,"attachments":[\#(png)]"#)
+    == PushDisplayContent(title: "이도현", body: "사진 1장"),
+    "a state of the wrong type costs the message nothing: it is read as not deleted")
+}
+
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")
 exit(failures == 0 ? 0 : 1)
