@@ -283,11 +283,23 @@ fn login_relay_switch(config: &LoginRelayConfig, settings: &SettingsConfig) -> R
     }
 }
 
-fn environment_of(state: &AppState) -> EnvironmentDto {
-    EnvironmentDto {
-        platform: state.cohosted.config.platform,
-        login_relay: login_relay_switch(&state.login_relay.config, &state.settings),
+impl EnvironmentDto {
+    /// The one place the two facts are read from parsed config: the handler and the tests both come through
+    /// here, so nothing about the environment is decided anywhere a test cannot see.
+    fn read(platform: HostPlatform, relay: &LoginRelayConfig, settings: &SettingsConfig) -> Self {
+        EnvironmentDto {
+            platform,
+            login_relay: login_relay_switch(relay, settings),
+        }
     }
+}
+
+fn environment_of(state: &AppState) -> EnvironmentDto {
+    EnvironmentDto::read(
+        state.cohosted.config.platform,
+        &state.login_relay.config,
+        &state.settings,
+    )
 }
 
 /// The status body from its already-decided inputs. The handler's only job after the gate and the one pin
@@ -1900,10 +1912,7 @@ mod tests {
             let (body, debug) = tracing::subscriber::with_default(subscriber, || {
                 let cohosted = CohostedAgentConfig::from_lookup(lookup);
                 let relay_config = LoginRelayConfig::from_lookup(lookup);
-                let environment = EnvironmentDto {
-                    platform: cohosted.platform,
-                    login_relay: login_relay_switch(&relay_config, &settings),
-                };
+                let environment = EnvironmentDto::read(cohosted.platform, &relay_config, &settings);
                 assert_eq!(
                     environment.login_relay,
                     RelaySwitch::On,

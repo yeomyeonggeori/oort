@@ -12,7 +12,7 @@
 //! | `an_app_login_needs_one_person_and_a_sole_pinned_hermes` | a second active person → `409 connector_trial_members`, another agent pinned to the same Hermes → `409 connector_trial_shared`, the sidecar untouched; one person → 200 | the K2 rules on the app family |
 //! | `a_refused_paste_and_malformed_ids_surface_fixed_errors` | state mismatch → 400 with no echo of the pasted value; newline / empty / oversize / unknown-field bodies 400 before the sidecar; a login id that is not the sidecar's shape → 404; the second `complete` → 409; another operator cannot reach the login | the shape checks, the error mapping, the operator header |
 //! | `starts_are_throttled_and_every_call_leaves_one_closed_audit_line` | the 7th start in a minute is 429 with no sidecar call; audit detail holds only `kind/target/result` | the throttle, the audit shape |
-//! | `the_status_and_the_ten_routes_agree_on_whether_the_relay_is_on` | #4337 (ADR-0203 증보 2026-10-25 수용 기준 3, `[pack]`): for each relay configuration — nothing, url or key missing, a key of the wrong shape, a URL the write gate refuses (plain http to a remote host, a private literal, loopback without the operator flag), a URL with a path, a public https origin, loopback with the operator flag — the status' `environment.loginRelay` is `off` exactly when each of the ten route-methods answers `409 login_relay_off` (when `on`, only "not `login_relay_off`" is asserted: an unknown agent is refused after the switch) | the status calls `configured()` instead of the routes' own `target()`, a route skips `prepare()`, the switch moves in only one of the two |
+//! | `the_status_and_the_ten_routes_agree_on_whether_the_relay_is_on` | #4337 (ADR-0203 증보 2026-10-25 수용 기준 3, `[pack]`): for each relay configuration — nothing, url or key missing, a key of the wrong shape, a URL the write gate refuses (plain http to a remote host, a private literal, loopback without the operator flag), a URL with a path, a public https origin, loopback with the operator flag, a compose-style internal host (`http://hermes:8643`) with and without the exact host in `AGENT_PROVIDER_LOCAL_HOSTS` — the status' `environment.loginRelay` is `off` exactly when each of the ten route-methods answers `409 login_relay_off` (when `on`, only "not `login_relay_off`" is asserted: an unknown agent is refused after the switch) | the status calls `configured()` instead of the routes' own `target()`, a route skips `prepare()`, the switch moves in only one of the two |
 //!
 //! Isolated database only:
 //!
@@ -2052,78 +2052,153 @@ async fn the_status_and_the_ten_routes_agree_on_whether_the_relay_is_on() {
     let public = "https://relay.example.com";
     let short_key = "k".repeat(31);
     let long_key = "k".repeat(257);
-    // (name, relay config, the operator's loopback flag, the expected switch)
-    let rows: Vec<(&str, LoginRelayConfig, bool, bool)> = vec![
-        ("nothing set", from(None, None), false, false),
-        ("url without key", from(Some(public), None), false, false),
-        ("key without url", from(None, Some(RELAY_KEY)), false, false),
-        (
+    /// One configuration of the question. `local_hosts` is the process env `AGENT_PROVIDER_LOCAL_HOSTS`, which
+    /// the write gate reads on every call (so the row plants it for its own requests and takes it away again).
+    struct Row {
+        name: &'static str,
+        relay: LoginRelayConfig,
+        allow_local_loopback: bool,
+        local_hosts: Option<&'static str>,
+        expect_on: bool,
+    }
+    let row = |name: &'static str,
+               relay: LoginRelayConfig,
+               allow_local_loopback: bool,
+               local_hosts: Option<&'static str>,
+               expect_on: bool| Row {
+        name,
+        relay,
+        allow_local_loopback,
+        local_hosts,
+        expect_on,
+    };
+    let rows: Vec<Row> = vec![
+        row("nothing set", from(None, None), false, None, false),
+        row(
+            "url without key",
+            from(Some(public), None),
+            false,
+            None,
+            false,
+        ),
+        row(
+            "key without url",
+            from(None, Some(RELAY_KEY)),
+            false,
+            None,
+            false,
+        ),
+        row(
             "key of 31 characters",
             from(Some(public), Some(short_key.as_str())),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "key of 257 characters",
             from(Some(public), Some(long_key.as_str())),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "key outside the character set",
             from(
                 Some(public),
                 Some("relay key with spaces 0123456789abcdef0123456789"),
             ),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "unresolved shared-variable reference as the key",
             from(Some(public), Some("${{shared.HERMES_LOGIN_RELAY_KEY}}")),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "plain http to a remote host (the write gate refuses)",
             from(Some("http://relay.example.com"), Some(RELAY_KEY)),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "private literal (the write gate refuses)",
             from(Some("https://10.0.0.5"), Some(RELAY_KEY)),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "url with a path",
             from(Some("https://relay.example.com/v1"), Some(RELAY_KEY)),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "loopback without the operator flag (the write gate refuses)",
             from(Some("http://127.0.0.1:9"), Some(RELAY_KEY)),
             false,
+            None,
             false,
         ),
-        (
+        row(
             "public https origin",
             from(Some(public), Some(RELAY_KEY)),
             false,
+            None,
             true,
         ),
-        (
+        row(
             "loopback with the operator flag",
             from(Some("http://127.0.0.1:9"), Some(RELAY_KEY)),
             true,
+            None,
             true,
+        ),
+        // The compose stack's own shape (`--with-agents`): the sidecar is a sibling service on a plain-http
+        // internal name, which the gate admits only with the flag AND the exact host in the list.
+        row(
+            "internal host, flag on, host listed",
+            from(Some("http://hermes:8643"), Some(RELAY_KEY)),
+            true,
+            Some("hermes"),
+            true,
+        ),
+        row(
+            "internal host, flag on, host not listed",
+            from(Some("http://hermes:8643"), Some(RELAY_KEY)),
+            true,
+            None,
+            false,
+        ),
+        row(
+            "internal host, host listed, flag off",
+            from(Some("http://hermes:8643"), Some(RELAY_KEY)),
+            false,
+            Some("hermes"),
+            false,
         ),
     ];
     // A login id of the sidecar's shape, so only the relay switch can decide the answer.
     let id = "LOGIN00000000001-mockrelay";
-    for (name, relay, allow_local_loopback, expect_on) in rows {
+    for Row {
+        name,
+        relay,
+        allow_local_loopback,
+        local_hosts,
+        expect_on,
+    } in rows
+    {
+        match local_hosts {
+            Some(hosts) => std::env::set_var("AGENT_PROVIDER_LOCAL_HOSTS", hosts),
+            None => std::env::remove_var("AGENT_PROVIDER_LOCAL_HOSTS"),
+        }
         let f = seed(&su, "relay-switch").await;
         let base =
             start_relay_switch_server(momo_app_pool().await, &f.email, relay, allow_local_loopback)
@@ -2216,4 +2291,5 @@ async fn the_status_and_the_ten_routes_agree_on_whether_the_relay_is_on() {
             );
         }
     }
+    std::env::remove_var("AGENT_PROVIDER_LOCAL_HOSTS");
 }
