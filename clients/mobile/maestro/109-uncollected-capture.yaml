@@ -20,7 +20,9 @@ name: 109-uncollected-capture
       id: "home-working-stop-confirm"
     timeout: 10000
 - takeScreenshot: ${SHOT}-confirm
-# 가장 큰 글씨(AX5)에서는 확정 단추가 화면 밖으로 밀려난다 — 목록을 내려 그 단추까지 간다(보통 크기에서는 이미 보여 그대로다).
+# 확인 줄이 열려 카드가 자라면 목록이 결정 단추까지 알아서 내려간다(`WorkingCardStop.onGrow` → `SidebarScreen.revealCardEnd`, 가장 큰 글씨
+# AX5에서도). 위 `-confirm` 사진이 그 증거다 — 사진을 이 줄 앞에서 찍는 이유다. 아래 `scrollUntilVisible`은 단추가 정말 있는지만 확인하고,
+# 자동 스크롤이 망가져도 이후 사진은 멀쩡해 보이므로(design-review #4285 r2 L4) 「보이는가」는 `-confirm` 사진으로 읽는다.
 - scrollUntilVisible:
     element:
       id: "home-working-stop-commit"
