@@ -10,10 +10,10 @@ import {
 } from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {REACTION_GLYPH_MAX_SCALE} from '../../design/atoms';
+import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
 import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
+import {ConfirmStep, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
 import {
   font,
   line,
@@ -234,46 +234,26 @@ function SheetBody({
                 {timeLabel(message.createdAtMs)}
               </Text>
             </View>
-            <Text style={styles.previewBody} numberOfLines={2}>
+            <Sentence style={styles.previewBody} numberOfLines={2} testID="sheet-preview-body">
               {preview === '' ? '내용 없는 메시지' : preview}
-            </Text>
+            </Sentence>
           </View>
         </GroupCard>
 
         {confirmingDelete ? (
-          <>
-            <GroupCard testID="delete-confirm">
-              <View style={styles.confirm}>
-                <Text style={styles.confirmHeadline}>메시지를 지울까요?</Text>
-                <Text style={styles.confirmDetail}>
-                  지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」가 남고, 달려 있던
-                  반응도 함께 지워집니다.
-                </Text>
-              </View>
-            </GroupCard>
-            <View style={styles.confirmRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="취소"
-                onPress={() => setConfirmingDelete(false)}
-                style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-                testID="delete-cancel">
-                <Text style={styles.secondaryLabel}>취소</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="지우기"
-                accessibilityState={{disabled: deletePending === true}}
-                disabled={deletePending}
-                onPress={onDelete}
-                style={({pressed}) => [styles.destructive, pressed && styles.pressed]}
-                testID="delete-confirm-button">
-                <Text style={styles.destructiveLabel}>
-                  {deletePending ? '지우는 중…' : '지우기'}
-                </Text>
-              </Pressable>
-            </View>
-          </>
+          <ConfirmStep
+            testID="delete-confirm"
+            headline="메시지를 지울까요?"
+            detail="지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」가 남고, 달려 있던 반응도 함께 지워집니다."
+            confirmLabel="지우기"
+            pendingLabel="지우는 중…"
+            pending={deletePending === true}
+            onCancel={() => setConfirmingDelete(false)}
+            // 닫는 길로 보내지 않는다: 왕복 중 시트가 「지우는 중…」을 말하고, 성공 뒤에야 부모가 닫는다.
+            onConfirm={onDelete}
+            cancelTestID="delete-cancel"
+            confirmTestID="delete-confirm-button"
+          />
         ) : (
           <>
             {availability.react ? (
@@ -403,34 +383,5 @@ const buildStyles = (color: Palette) =>
     sheetRowLabel: {fontSize: font.body, color: color.text},
     sheetRowLabelDanger: {color: color.danger},
     sheetRowLabelMuted: {color: color.textMuted},
-    confirm: {
-      gap: space.sm,
-      paddingHorizontal: SHEET.cardInset,
-      paddingVertical: space.md,
-    },
-    confirmHeadline: {fontSize: font.body, color: color.text, fontWeight: '700'},
-    confirmDetail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
-    confirmRow: {flexDirection: 'row', gap: space.sm},
-    secondary: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: color.border,
-    },
-    secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
-    destructive: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: color.dangerBorder,
-      backgroundColor: color.dangerSurface,
-    },
-    destructiveLabel: {fontSize: font.label, color: color.danger, fontWeight: '700'},
     pressed: {opacity: 0.6},
   });

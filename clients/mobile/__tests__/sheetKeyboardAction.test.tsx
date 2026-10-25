@@ -1,3 +1,4 @@
+import {contrast} from '@momo/core/design/color';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
 import {QUICK_REACTIONS} from '@momo/core/features/timeline/reactions';
 import type {Message} from '@momo/core/lib/api';
@@ -18,21 +19,32 @@ import {
   Keyboard,
   Pressable,
   StyleSheet,
+  Switch,
   Text,
 } from 'react-native';
 
 import {REACTION_GLYPH_MAX_SCALE} from '../src/design/atoms';
-import {PageSheet, usePageSheetAction} from '../src/design/PageSheet';
+import {PageSheet, usePageSheetAction, usePageSheetClose} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {sheetFrame, sheetTop, type SheetHeight} from '../src/design/sheetModel';
 import {
   ActionTile,
+  ConfirmStep,
   InputPill,
   ListRow,
   SheetScroll,
 } from '../src/design/sheetParts';
-import {FixedScheme} from '../src/design/theme';
-import {font, SAFE_GUTTER, space, TOUCH_TARGET} from '../src/design/tokens';
+import {THEME_IDS} from '../src/design/ds2Tokens';
+import {FixedScheme, paletteFor} from '../src/design/theme';
+import {
+  font,
+  paletteFrom,
+  SAFE_GUTTER,
+  SHEET,
+  space,
+  TOUCH_TARGET,
+} from '../src/design/tokens';
+import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
@@ -57,12 +69,14 @@ const DEVICES = [
   {name: '16 Pro', width: 402, height: 874, insetTop: 62, keyboard: 336},
   {name: 'SE', width: 375, height: 667, insetTop: 20, keyboard: 260},
 ] as const;
-const HEIGHTS: SheetHeight[] = ['fit', 'medium', 'large'];
 
 let releaseReduceMotion: (() => void) | null = null;
 
 afterEach(() => {
   cleanup();
+  // Keyboard 모듈은 `keyboardDidShow` 로 「보이는 중」을 **파일 안에서 계속** 기억한다 — 실패한 시험이 남긴 키보드가 뒤 시험을
+  // 연쇄로 무너뜨리지 않게 매번 내린다.
+  emitter().emit('keyboardDidHide', keyboardFrame(0, BASE_WINDOW.height));
   releaseReduceMotion?.();
   releaseReduceMotion = null;
   Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
@@ -134,6 +148,34 @@ function RunAfterClose({action}: {action: () => void}) {
   );
 }
 
+type Handlers = Record<string, (event: unknown) => unknown>;
+
+/** `sheetKit.test.tsx` 의 응답자 이벤트와 같은 모양 — 손잡이 띠가 실제로 받는 것. */
+function touch(y: number, at: number, previousY: number = y) {
+  return {
+    nativeEvent: {touches: [{}], changedTouches: [{}], timestamp: at},
+    touchHistory: {
+      touchBank: [
+        {
+          touchActive: true,
+          startPageX: 0,
+          startPageY: 0,
+          startTimeStamp: 0,
+          currentPageX: 0,
+          currentPageY: y,
+          currentTimeStamp: at,
+          previousPageX: 0,
+          previousPageY: previousY,
+          previousTimeStamp: at - 16,
+        },
+      ],
+      numberActiveTouches: 1,
+      indexOfSingleActiveTouch: 0,
+      mostRecentTimeStamp: at,
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // 키보드 — 순수 상자
 // ---------------------------------------------------------------------------
@@ -146,23 +188,38 @@ describe('키보드가 올라오면 시트의 바닥이 키보드 윗면에 앉�
     const topY = frame.top ?? bottomY - (frame.height ?? frame.maxHeight ?? 0);
     return {frame, topY, bottomY};
   }
+  /** 키보드가 올리는 단. 큰 단은 올리지 않는다(아래 별도). */
+  const LIFTED: SheetHeight[] = ['fit', 'medium'];
 
   describe.each(DEVICES)('$name', device => {
-    it.each(HEIGHTS)('%s: 시트 바닥 = 키보드 윗면 - 입력 칸은 시트 안이라 키보드 위다', height => {
+    it.each(LIFTED)('%s: 시트 바닥 = 키보드 윗면 - 입력 칸은 시트 안이라 키보드 위다', height => {
       const {frame, bottomY} = box(height, device, device.keyboard);
       expect(frame.bottom).toBe(device.keyboard);
       expect(bottomY).toBe(device.height - device.keyboard);
     });
 
-    it.each(HEIGHTS)('%s: 시트가 큰 단의 위 끝보다 높이 올라가 머리가 시계 뒤로 가지 않는다', height => {
+    it.each(LIFTED)('%s: 시트가 큰 단의 위 끝보다 높이 올라가 머리가 시계 뒤로 가지 않는다', height => {
       const {topY} = box(height, device, device.keyboard);
       expect(topY).toBeGreaterThanOrEqual(sheetTop(device.insetTop));
     });
 
-    it.each(HEIGHTS)('%s: 키보드가 없으면 옛 상자 그대로다 - bottom 이 아예 없다', height => {
-      const frame = sheetFrame(height, device.height, device.insetTop, 0);
+    it('큰 단은 키보드가 올라와도 올리지 않는다 - 위 끝만 있고 bottom 이 없다 (제 키보드 처리를 가진 시트와 이중 보정을 피한다)', () => {
+      const frame = sheetFrame('large', device.height, device.insetTop, device.keyboard);
+      expect(frame).toEqual({top: sheetTop(device.insetTop)});
       expect(frame).not.toHaveProperty('bottom');
-      expect(frame).toEqual(sheetFrame(height, device.height, device.insetTop));
+    });
+
+    // 키보드 0 의 옛 상자는 **이 함수의 기본 인자와 비교하지 않고** 옛 식(상수)으로 대조한다.
+    it('키보드가 없으면 옛 상자 그대로다 - 단별 옛 식과 같고 bottom 이 아예 없다', () => {
+      expect(sheetFrame('large', device.height, device.insetTop, 0)).toEqual({
+        top: Math.max(58, device.insetTop + 4),
+      });
+      expect(sheetFrame('medium', device.height, device.insetTop, 0)).toEqual({
+        height: Math.floor(device.height * (9 / 16)),
+      });
+      expect(sheetFrame('fit', device.height, device.insetTop, 0)).toEqual({
+        maxHeight: Math.floor(device.height * 0.85),
+      });
     });
   });
 
@@ -188,14 +245,6 @@ describe('키보드가 올라오면 시트의 바닥이 키보드 윗면에 앉�
     expect(sheetFrame('medium', pro.height, pro.insetTop, 100)).toEqual({
       height: Math.floor(pro.height * (9 / 16)),
       bottom: 100,
-    });
-  });
-
-  it('큰 단은 위 끝이 그대로고 바닥만 올라간다', () => {
-    const se = DEVICES[1];
-    expect(sheetFrame('large', se.height, se.insetTop, se.keyboard)).toEqual({
-      top: sheetTop(se.insetTop),
-      bottom: se.keyboard,
     });
   });
 });
@@ -253,24 +302,25 @@ describe('키보드 - 시트에 배선', () => {
     expect(flat('page-sheet').maxHeight).toBe(se.height - se.keyboard - sheetTop(se.insetTop));
   });
 
-  it('큰 단: 위 끝은 그대로고 바닥만 올라간다', async () => {
+  it('큰 단: 키보드가 올라와도 시트는 그대로다 - 올리지 않는다(몸 스크롤이 제 키보드 처리를 한다)', async () => {
     const se = DEVICES[1];
     setWindow(se.width, se.height);
     useInsets(se.insetTop, 0);
     await mount(<Sheet height="large" onClose={() => {}} />, true);
-    const before = flat('page-sheet').top;
+    const before = flat('page-sheet');
     act(() => {
       emitter().emit('keyboardWillShow', keyboardFrame(se.keyboard, se.height));
     });
-    expect(flat('page-sheet').top).toBe(before);
-    expect(flat('page-sheet').bottom).toBe(se.keyboard);
+    const after = flat('page-sheet');
+    expect(after.top).toBe(before.top);
+    expect(after.bottom).toBe(0);
   });
 
   it('did 쌍이 높이가 다르다고 말하면 따른다(하드웨어 키보드·예측 줄), 내려가면 0', async () => {
     const se = DEVICES[1];
     setWindow(se.width, se.height);
     useInsets(se.insetTop, 0);
-    await mount(<Sheet height="large" onClose={() => {}} />, true);
+    await mount(<Sheet height="medium" onClose={() => {}} />, true);
     act(() => {
       emitter().emit('keyboardWillShow', keyboardFrame(se.keyboard, se.height));
     });
@@ -307,6 +357,24 @@ describe('키보드 - 시트에 배선', () => {
     expect(padding()).toBe(34 + space.lg);
   });
 
+  it('큰 단의 몸 스크롤은 키보드가 올라와도 안전 영역 여백을 그대로 둔다 - 시트가 올라가지 않았으니 걷을 이유가 없다', async () => {
+    useInsets(0, 34);
+    await mount(
+      <Sheet height="large" onClose={() => {}}>
+        <SheetScroll testID="scroll">
+          <Text>내용</Text>
+        </SheetScroll>
+      </Sheet>,
+      true,
+    );
+    const padding = () =>
+      StyleSheet.flatten(screen.getByTestId('scroll').props.contentContainerStyle).paddingBottom;
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(336, BASE_WINDOW.height));
+    });
+    expect(padding()).toBe(34 + space.lg);
+  });
+
   it('키보드가 올라온 채 닫으면 키보드도 같이 내린다 - 시트가 다 나간 뒤에야 혼자 내려가지 않는다', async () => {
     const dismiss = jest.spyOn(Keyboard, 'dismiss');
     await mount(<Sheet height="medium" onClose={() => {}} />, true);
@@ -328,6 +396,30 @@ describe('키보드 - 시트에 배선', () => {
     expect(flat('page-sheet').bottom).toBe(336);
     fireEvent.press(screen.getByTestId('close'));
     expect(dismiss).not.toHaveBeenCalled();
+    act(() => {
+      emitter().emit('keyboardDidHide', keyboardFrame(0, BASE_WINDOW.height));
+    });
+  });
+
+  it('시트가 선 뒤에 키보드가 한 번 내려갔다 시트 안 입력으로 다시 올라오면 그것은 시트의 것이다 - 닫을 때 같이 내린다', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    act(() => {
+      emitter().emit('keyboardDidShow', keyboardFrame(336, BASE_WINDOW.height));
+    });
+    await mount(<Sheet height="medium" onClose={() => {}} />, true);
+    // 처음엔 대화 입력창의 키보드(시트 것이 아니다). 그것이 내려갔다가
+    act(() => {
+      emitter().emit('keyboardWillHide', keyboardFrame(0, BASE_WINDOW.height));
+    });
+    act(() => {
+      emitter().emit('keyboardDidHide', keyboardFrame(0, BASE_WINDOW.height));
+    });
+    // 시트 안의 입력이 새로 부른 키보드가 올라온다.
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(336, BASE_WINDOW.height));
+    });
+    fireEvent.press(screen.getByTestId('close'));
+    expect(dismiss).toHaveBeenCalledTimes(1);
     act(() => {
       emitter().emit('keyboardDidHide', keyboardFrame(0, BASE_WINDOW.height));
     });
@@ -512,6 +604,262 @@ describe('ListRow · ActionTile 의 closesSheet', () => {
 });
 
 // ---------------------------------------------------------------------------
+// 닫는 길의 정체성·끼어들기 (코드 검수 L1·L2·L3)
+// ---------------------------------------------------------------------------
+
+describe('닫는 길은 부모가 리렌더돼도 키보드가 오르내려도 같은 함수다', () => {
+  it('usePageSheetClose() 의 정체성이 onClose 교체·키보드 이벤트에도 바뀌지 않는다', async () => {
+    const seen: Array<(() => void) | null> = [];
+    function Capture() {
+      seen.push(usePageSheetClose());
+      return null;
+    }
+    const first = jest.fn();
+    const utils = await mount(
+      <Sheet height="medium" onClose={first}>
+        <Capture />
+      </Sheet>,
+      true,
+    );
+    // 부모가 렌더마다 새 화살표를 준다(MessageRow 의 `onClose={() => setSheetOpen(false)}` 처럼).
+    utils.rerender(
+      <FixedScheme scheme="light">
+        <Sheet height="medium" onClose={() => {}}>
+          <Capture />
+        </Sheet>
+      </FixedScheme>,
+    );
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(336, BASE_WINDOW.height));
+    });
+    act(() => {
+      emitter().emit('keyboardWillHide', keyboardFrame(0, BASE_WINDOW.height));
+    });
+    const distinct = new Set(seen.filter(Boolean));
+    // 정체성이 바뀌면 끌기 응답자가 새 인스턴스로 갈려 끄는 도중의 제스처가 리셋되고, 이 함수를 의존성으로 든 소비자의
+    // 효과(`AskMacSheet` 의 대기 타이머)가 다시 돈다.
+    expect(distinct.size).toBe(1);
+  });
+
+  it('슬라이드가 도는 동안 부모가 새 onClose 로 리렌더하면 끝에서 부르는 것은 최신이다', async () => {
+    const stale = jest.fn();
+    const latest = jest.fn();
+    const utils = await mount(<Sheet onClose={stale} />, false);
+    fireEvent.press(screen.getByTestId('close'));
+    utils.rerender(
+      <FixedScheme scheme="light">
+        <Sheet onClose={latest} />
+      </FixedScheme>,
+    );
+    await waitFor(() => expect(latest).toHaveBeenCalledTimes(1), {timeout: 8000});
+    expect(stale).not.toHaveBeenCalled();
+  }, 15000);
+});
+
+describe('닫는 중에는 손잡이를 잡아도 시트가 끼어들지 않는다', () => {
+  it('슬라이드가 도는 중의 세로 끌기는 응답자를 가져가지 않는다 (끌기가 슬라이드를 끊어 행동을 앞당기지 않게)', async () => {
+    await mount(<Sheet onClose={() => {}} />, false);
+    fireEvent.press(screen.getByTestId('close')); // 슬라이드가 도는 중
+    const handlers = screen.getByTestId('page-sheet-handle').props as Handlers;
+    const drag = touch(20, 50, 0); // 세로로 6pt 를 넘는 첫 이동
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1));
+      handlers.onMoveShouldSetResponderCapture(drag);
+    });
+    expect(handlers.onMoveShouldSetResponder(drag)).toBe(false);
+  });
+
+  it('대조: 닫는 중이 아니면 같은 끌기를 잡는다', async () => {
+    await mount(<Sheet onClose={() => {}} />, false);
+    const handlers = screen.getByTestId('page-sheet-handle').props as Handlers;
+    const drag = touch(20, 50, 0);
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1));
+      handlers.onMoveShouldSetResponderCapture(drag);
+    });
+    expect(handlers.onMoveShouldSetResponder(drag)).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 공용 부품의 기본값 — 접근성 이름·문장·토글·머리 아래 여백 (design-review r1/r2)
+// ---------------------------------------------------------------------------
+
+describe('ListRow 의 기본 이름·보조 줄·토글 트랙', () => {
+  it('눌리는 행의 기본 이름은 제목·보조 줄·값을 이어 읽는다 (값 행이 낭독에서 빠지지 않게)', async () => {
+    await mount(
+      <ListRow
+        title="상태"
+        detail="회의 중에만 보여요"
+        value="회의 중"
+        accessory="chevron"
+        onPress={() => {}}
+        testID="row"
+      />,
+      true,
+    );
+    expect(screen.getByTestId('row').props.accessibilityLabel).toBe('상태, 회의 중에만 보여요, 회의 중');
+  });
+
+  it('값도 보조 줄도 없으면 제목뿐이고, 이름을 직접 주면 그것이 이긴다', async () => {
+    await mount(
+      <>
+        <ListRow title="로그아웃" onPress={() => {}} testID="plain" />
+        <ListRow
+          title="상태"
+          value="회의 중"
+          accessibilityLabel="내 상태 바꾸기"
+          onPress={() => {}}
+          testID="named"
+        />
+      </>,
+      true,
+    );
+    expect(screen.getByTestId('plain').props.accessibilityLabel).toBe('로그아웃');
+    expect(screen.getByTestId('named').props.accessibilityLabel).toBe('내 상태 바꾸기');
+  });
+
+  it('보조 줄은 문장이라 어절 가운데서 끊기지 않는다 (옛 GroupRow.detail 은 Sentence 였다)', async () => {
+    await mount(<ListRow title="방해 금지" detail="정해 둔 시간에는 알림을 받지 않아요" testID="row" />, true);
+    expect(screen.getByTestId('row-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('토글의 꺼짐 트랙은 컨트롤 경계라 카드 위에서 비텍스트 3:1 을 넘는다 — 모든 테마·모드', () => {
+    const weak: string[] = [];
+    for (const theme of THEME_IDS) {
+      for (const mode of ['light', 'dark'] as const) {
+        const palette = paletteFrom(theme, mode);
+        for (const ground of ['surface', 'sheet'] as const) {
+          const ratio = contrast(palette.textFaint, palette[ground]);
+          if (ratio < 3) weak.push(`${theme}/${mode}/${ground}: ${ratio.toFixed(2)}`);
+        }
+      }
+    }
+    expect(weak).toEqual([]);
+  });
+
+  it('렌더된 토글이 그 색을 쓴다 (꺼짐 = textFaint, 켜짐 = ok)', async () => {
+    await mount(
+      <ListRow
+        title="푸시"
+        accessory="toggle"
+        toggle={{value: false, onValueChange: () => {}}}
+        testID="row"
+      />,
+      true,
+    );
+    const palette = paletteFor('light');
+    const track = screen.UNSAFE_getByType(Switch).props.trackColor;
+    expect(track).toEqual({false: palette.textFaint, true: palette.ok});
+  });
+});
+
+describe('SheetScroll · InputPill 의 기본값', () => {
+  it('SheetScroll 은 머리 줄 아래 숨 쉴 틈을 준다 (원 아래 6 + 12 = 18)', async () => {
+    await mount(
+      <Sheet height="medium" onClose={() => {}}>
+        <SheetScroll testID="scroll">
+          <Text>내용</Text>
+        </SheetScroll>
+      </Sheet>,
+      true,
+    );
+    expect(StyleSheet.flatten(screen.getByTestId('scroll').props.contentContainerStyle).paddingTop).toBe(
+      SHEET.bodyTop,
+    );
+    // 머리 줄(52)에서 원(40)이 위아래로 남기는 6 과 더해 Buzz 의 약 19 에 닿는다.
+    expect((SHEET.headerRow - SHEET.circle) / 2 + SHEET.bodyTop).toBe(18);
+  });
+
+  it('InputPill 은 호출자의 style 을 덮지 않고 이어 붙인다 (알약 입력 스타일의 flex 가 남는다)', async () => {
+    await mount(
+      <InputPill accessibilityLabel="이름" style={{color: 'red'}} testID="pill" />,
+      true,
+    );
+    const input = StyleSheet.flatten(screen.getByLabelText('이름').props.style);
+    expect(input.color).toBe('red');
+    expect(input.flex).toBe(1);
+  });
+});
+
+describe('ConfirmStep — 시트 안의 확인 단계', () => {
+  const step = (override: Partial<React.ComponentProps<typeof ConfirmStep>> = {}) => {
+    const onCancel = jest.fn();
+    const onConfirm = jest.fn();
+    const ui = (
+      <ConfirmStep
+        testID="confirm"
+        headline="메시지를 지울까요?"
+        detail="지운 메시지는 되돌릴 수 없습니다."
+        confirmLabel="지우기"
+        pendingLabel="지우는 중…"
+        onCancel={onCancel}
+        onConfirm={onConfirm}
+        cancelTestID="cancel"
+        confirmTestID="ok"
+        errorTestID="err"
+        {...override}
+      />
+    );
+    return {ui, onCancel, onConfirm};
+  };
+
+  it('머리말·설명·단추 둘이 서고 각 단추가 제 일을 부른다', async () => {
+    const {ui, onCancel, onConfirm} = step();
+    await mount(ui, true);
+    expect(screen.getByText('메시지를 지울까요?')).toBeTruthy();
+    expect(screen.getByTestId('confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
+    fireEvent.press(screen.getByTestId('cancel'));
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onConfirm).not.toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('ok'));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+  });
+
+  it('실패 문장은 확인 단계 안에 alert 로 선다', async () => {
+    const {ui} = step({error: '지우지 못했습니다.'});
+    await mount(ui, true);
+    expect(screen.getByTestId('err').props.accessibilityRole).toBe('alert');
+    expect(screen.getByTestId('err')).toHaveTextContent('지우지 못했습니다.');
+  });
+
+  it('실패가 없으면 그 줄도 없다', async () => {
+    const {ui} = step({error: null});
+    await mount(ui, true);
+    expect(screen.queryByTestId('err')).toBeNull();
+  });
+
+  it('왕복 중에는 위험 단추가 잠기고 낱말과 busy 가 진행을 말한다', async () => {
+    const {ui, onConfirm} = step({pending: true});
+    await mount(ui, true);
+    expect(screen.getByText('지우는 중…')).toBeTruthy();
+    expect(screen.getByTestId('ok').props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    fireEvent.press(screen.getByTestId('ok'));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+});
+
+describe('지시 기기 패널의 카드는 바깥 가로 여백을 스스로 진다', () => {
+  it('GroupCard 는 폭 전체로 서므로, 호스트(날 ScrollView)가 안 주는 패널이 SAFE_GUTTER 를 든다', async () => {
+    await mount(
+      <DeviceKeyPanel
+        state={{
+          view: {kind: 'unsupported'},
+          enroll: () => {},
+          replace: () => {},
+          refresh: () => {},
+          busy: false,
+          failure: null,
+        }}
+      />,
+      true,
+    );
+    // 이 PR 이 `GroupSection`(스스로 16 을 졌다) → `GroupCard`(안 진다)로 바꾸며 카드만 화면 가장자리까지 번졌다.
+    expect(flat('device-key-card').paddingHorizontal).toBe(SAFE_GUTTER);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // MessageActionSheet - 닫는 길로 보내는 행동과 보내지 않는 행동
 // ---------------------------------------------------------------------------
 
@@ -594,6 +942,15 @@ describe('메시지 행동 시트: 고르면 곧 닫히는 행동은 슬라이�
     expect(calls).toEqual(['close', name]);
   });
 
+  it('미리보기와 삭제 확인 설명은 문장이라 어절 가운데서 끊기지 않는다', async () => {
+    const calls: string[] = [];
+    const {ui} = messageSheet(calls);
+    await mount(ui, true);
+    expect(screen.getByTestId('sheet-preview-body').props.lineBreakStrategyIOS).toBe('hangul-word');
+    fireEvent.press(screen.getByTestId('sheet-delete'));
+    expect(screen.getByTestId('delete-confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('「지우기」 행은 시트를 닫지 않고 확인 단계로 넘어갈 뿐이다', async () => {
     const calls: string[] = [];
     const {handlers, ui} = messageSheet(calls);
@@ -633,7 +990,7 @@ describe('메시지 시트의 빠른 반응은 접근성 가장 큰 글씨에서
 });
 
 // ---------------------------------------------------------------------------
-// ChannelActionSheet - 닫는 길로 보내지 않는다 + 앞 아이콘은 복사 무리만
+// ChannelActionSheet - 닫는 길로 보내지 않는다 · 앞 아이콘 없음
 // ---------------------------------------------------------------------------
 
 const TARGET = {
@@ -691,24 +1048,30 @@ describe('대화 행 시트: 행동을 닫는 길로 보내지 않는다 - 시�
   });
 });
 
-describe('대화 행 시트의 앞 아이콘: 맞는 글리프가 이미 있는 무리만, 한 카드는 전부 아니면 전무', () => {
-  it('복사 무리는 셋 다 앞 아이콘을 갖고, 알림·나가기는 갖지 않는다', async () => {
+describe('대화 행 시트에는 앞 아이콘이 없다 — 글리프 여덟이 구워질 때 두 시트의 모든 카드에 한 번에 준다', () => {
+  it('복사 무리에도 앞 칸이 없어 글자 열이 시트 전체에서 한 줄로 선다 (design-review r1 M2)', async () => {
     await mount(channelSheet(ITEMS, {onRun: jest.fn(), onClose: jest.fn()}), true);
-    for (const key of ['copy-name', 'copy-link', 'copy-id']) {
-      expect(screen.queryByTestId(`channel-sheet-${key}-lead`)).not.toBeNull();
+    for (const key of ['copy-name', 'copy-link', 'copy-id', 'mute-toggle', 'leave']) {
+      expect(screen.queryByTestId(`channel-sheet-${key}-lead`)).toBeNull();
     }
-    expect(screen.queryByTestId('channel-sheet-mute-toggle-lead')).toBeNull();
-    expect(screen.queryByTestId('channel-sheet-leave-lead')).toBeNull();
   });
 
-  it('글리프가 있는 줄과 없는 줄이 한 카드에 섞이면 아무도 아이콘을 갖지 않는다 (글자 열이 어긋나지 않게)', async () => {
-    const mixed: ChannelActionItem[] = [
-      {key: 'copy-name', cluster: 'copy', testKey: 'copy-name', label: '이름 복사하기'},
-      // 같은 무리 안에 글리프가 없는 항목이 끼었다.
-      {key: 'mute', cluster: 'copy', testKey: 'mute-toggle', label: '알림 끄기'},
-    ];
-    await mount(channelSheet(mixed, {onRun: jest.fn(), onClose: jest.fn()}), true);
-    expect(screen.queryByTestId('channel-sheet-copy-name-lead')).toBeNull();
-    expect(screen.queryByTestId('channel-sheet-mute-toggle-lead')).toBeNull();
+  it('나가기 확인 설명은 문장이라 어절 가운데서 끊기지 않는다', async () => {
+    await mount(
+      <ChannelActionSheet
+        target={TARGET}
+        items={ITEMS}
+        confirmingLeave
+        isPending={() => false}
+        error={null}
+        leave={{pending: false, error: null}}
+        onRun={() => {}}
+        onConfirmLeave={() => {}}
+        onCancelLeave={() => {}}
+        onClose={() => {}}
+      />,
+      true,
+    );
+    expect(screen.getByTestId('channel-leave-confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
   });
 });

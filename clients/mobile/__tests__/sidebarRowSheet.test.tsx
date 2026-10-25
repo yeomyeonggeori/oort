@@ -270,9 +270,7 @@ async function flush() {
 const sheetKeys = () =>
   screen
     .queryAllByTestId(/^channel-sheet-(copy|mark|mute|close-dm|leave)/)
-    .map(node => String(node.props.testID).replace('channel-sheet-', ''))
-    // 행 앞 아이콘 칸(`…-lead`, #4318)은 항목이 아니라 항목의 일부다.
-    .filter(key => !key.endsWith('-lead'));
+    .map(node => String(node.props.testID).replace('channel-sheet-', ''));
 
 describe('길게 누르기가 시트를 연다', () => {
   it('채널 행: 복사 셋 · 읽음 처리 · 알림 끄기 · 채널 나가기, 코어 표의 차례 그대로', async () => {

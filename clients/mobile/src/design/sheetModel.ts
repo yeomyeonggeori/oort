@@ -56,13 +56,17 @@ export function sheetTop(insetTop: number): number {
  *   medium  화면의 9/16(Buzz). 고정 높이.
  *   fit     내용 높이, 화면의 85% 위로는 안에서 스크롤. 배경 탭으로 닫는 길이 그 나머지로 남는다.
  *
- * ## 키보드 (`keyboardHeight` > 0)
+ * ## 키보드 (`keyboardHeight` > 0) — **중간·내용 맞춤 단만** 올린다
  *
- * 시트의 **바닥이 키보드 윗면에 앉는다**(`bottom` = 키보드 높이). 그러면 시트 안의 입력 칸은 시트
- * 바닥보다 아래일 수 없으니 키보드 위에 있다. 시트가 위로 자라지는 못하게 막는다: 중간·내용 맞춤은
- * 높이(최대 높이)를 「키보드 위 ~ 큰 단의 위 끝」 사이(`room`)로 줄이고(SE 에서는 9/16 = 375 에
- * 키보드 ~300 이 더해지면 667 을 넘는다), 큰 단은 위 끝이 고정이라 바닥만 올라가 줄어든다. 키보드가
- * 없으면(0) 옛 상자 그대로다 — `bottom` 은 아예 없고, 그릇의 `bottom: 0` 이 그 자리를 지킨다.
+ * 시트의 **바닥이 키보드 윗면에 앉는다**(`bottom` = 키보드 높이). 그러면 시트 안의 입력 칸은 시트 바닥보다
+ * 아래일 수 없으니 키보드 위에 있다. 시트가 위로 자라지는 못하게 막는다: 높이(최대 높이)를 「키보드 위 ~ 큰 단의
+ * 위 끝」 사이(`room`)로 줄인다(SE 에서는 9/16 = 375 의 중간 단이 키보드 260 위의 칸 349 로 줄어든다).
+ * 키보드가 없으면(0) 옛 상자 그대로다 — `bottom` 은 아예 없고, 그릇의 `bottom: 0` 이 그 자리를 지킨다.
+ *
+ * **큰 단은 올리지 않는다.** 큰 단의 몸은 스크롤이고 입력이 있는 큰 단은 이미 제 키보드 처리를 갖는다
+ * (`automaticallyAdjustKeyboardInsets` — 작업 맡기기·맥에 보내기). 거기에 시트 바닥까지 올리면 RN 이 알림 순간의
+ * 위치로 잡은 인셋이 시트가 올라간 뒤에도 남아 같은 키보드를 두 번 피한다(코드 검수 #4318 M1). 큰 단 시트를
+ * 옮기는 #4458 이 시트마다 정한다.
  */
 export function sheetFrame(
   height: SheetHeight,
@@ -71,11 +75,10 @@ export function sheetFrame(
   keyboardHeight = 0,
 ): SheetFrame {
   const top = sheetTop(insetTop);
+  if (height === 'large') return {top};
   const lift = keyboardHeight > 0 ? {bottom: keyboardHeight} : {};
   const room = Math.max(0, windowHeight - keyboardHeight - top);
   switch (height) {
-    case 'large':
-      return {top, ...lift};
     case 'medium':
       return {
         height: Math.min(Math.floor(windowHeight * SHEET.mediumRatio), room),

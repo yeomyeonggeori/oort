@@ -3,11 +3,11 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {Message, ReadState, RosterMember} from '@momo/core/lib/api';
 import {QUICK_REACTIONS, type ReactionChip} from '@momo/core/features/timeline/reactions';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import React, {useMemo, useState} from 'react';
-import {ScrollView, StyleSheet, Text, View} from 'react-native';
+import React, {useEffect, useMemo, useState} from 'react';
+import {ScrollView, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {HOME_ICONS, SHEET_ICONS, SHELL_ICONS} from '../src/design/icons';
+import {HOME_ICONS, MENU_ICONS, SHEET_ICONS, SHELL_ICONS} from '../src/design/icons';
 import {PageSheet} from '../src/design/PageSheet';
 import {PageHeader, SheetHeader} from '../src/design/SheetChrome';
 import {
@@ -22,8 +22,8 @@ import {
   SheetScroll,
   TileIcon,
 } from '../src/design/sheetParts';
-import {useStyles} from '../src/design/theme';
-import {ds2Radius, font, SAFE_GUTTER, space, type Palette} from '../src/design/tokens';
+import {usePalette, useStyles} from '../src/design/theme';
+import {ds2Radius, font, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../src/design/tokens';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import type {DeviceKeyView} from '../src/deviceKey/enrollment';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
@@ -111,6 +111,8 @@ function PageKit(): React.JSX.Element {
           />
         </ActionTileRow>
 
+        {/* 한 카드는 이모지 앞 칸이거나 아이콘 앞 칸이거나 둘 중 하나다(섞지 않는다). 아이콘은 22pt 로 구운 것만 — 18pt 로 구운
+            `user`·`bot` 은 22 칸에서 확대돼 흐려진다. */}
         <GroupCard label="계정" inset="icon">
           <ListRow
             leading={<RowEmoji emoji="🌙" />}
@@ -120,17 +122,41 @@ function PageKit(): React.JSX.Element {
             onPress={noop}
           />
           <ListRow
-            leading={<RowIcon source={HOME_ICONS.user} />}
-            title="프로필"
-            detail="이름과 사진을 고쳐요"
+            leading={<RowEmoji emoji="🕘" />}
+            title="알림 시간대"
+            value="오전 9시 – 오후 6시"
+            accessory="expand"
+            onPress={noop}
+          />
+          <ListRow
+            leading={<RowEmoji emoji="🌐" />}
+            title="언어"
+            detail="앱이 쓰는 말을 바꿔요"
+            value="한국어"
+            accessory="chevron"
+            onPress={noop}
+          />
+        </GroupCard>
+
+        <GroupCard label="연결" inset="icon">
+          <ListRow
+            leading={<RowIcon source={MENU_ICONS.agent} />}
+            title="도우미"
+            detail="달무리 도우미와 대화해요"
             accessory="chevron"
             onPress={noop}
           />
           <ListRow
-            leading={<RowIcon source={HOME_ICONS.lock} />}
-            title="알림 시간대"
-            value="오전 9시 – 오후 6시"
+            leading={<RowIcon source={HOME_ICONS.hash} />}
+            title="기본 채널"
+            value="# 디자인"
             accessory="expand"
+            onPress={noop}
+          />
+          <ListRow
+            leading={<RowIcon source={MENU_ICONS.work} />}
+            title="작업 기록"
+            accessory="chevron"
             onPress={noop}
           />
         </GroupCard>
@@ -150,13 +176,15 @@ function PageKit(): React.JSX.Element {
           <ListRow title="초대 링크" value="oort.app/i/dalmuri" accessory="copy" onPress={noop} />
         </GroupCard>
 
-        <GroupCard label="찾기">
+        {/* 입력 알약은 채움이 없다 — 바탕 위에 직접 놓는다(카드 안에 넣지 않는다). */}
+        <View style={styles.pillGroup}>
+          <GroupLabel>찾기</GroupLabel>
           <InputPill
             icon={SHELL_ICONS.search}
             accessibilityLabel="이름이나 핸들로 찾기"
             placeholder="이름이나 @핸들"
           />
-        </GroupCard>
+        </View>
 
         <GroupCard>
           <ListRow title="로그아웃" tone="danger" onPress={noop} />
@@ -223,7 +251,7 @@ function StatusSheet({ready}: {ready: boolean}): React.JSX.Element {
         />
         <SheetScroll>
           <InputPill
-            icon={HOME_ICONS.user}
+            icon={MENU_ICONS.work}
             accessibilityLabel="상태 한 줄"
             placeholder="무엇을 하고 있나요?"
             value={text}
@@ -324,6 +352,50 @@ function MessageLiveSurface(): React.JSX.Element {
           onPin={note('pin')}
           onEdit={note('edit')}
           onDelete={note('delete')}
+        />
+      ) : null}
+    </Backdrop>
+  );
+}
+
+/**
+ * 대화 입력창이 **키보드를 든 채** 길게 눌러 연 메시지 행동 시트. 시트가 서기 전부터 키보드가 올라와 있으므로 시트는
+ * 처음부터 키보드 위에 서고(`useKeyboardHeight` 의 처음 값), 닫아도 그 키보드를 접지 않는다(`keyboardWasUp`).
+ * 입력창 대역(`TextInput autoFocus`)이 키보드를 올리고 1.5초 뒤에 시트가 열린다.
+ */
+function MessageKeyboardSurface(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setOpen(true), 1500);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <Backdrop>
+      <View style={styles.composerStandIn}>
+        <TextInput
+          autoFocus
+          accessibilityLabel="메시지 보내기"
+          placeholder="메시지 보내기"
+          placeholderTextColor={palette.textMuted}
+          style={styles.composerStandInInput}
+        />
+      </View>
+      {open ? (
+        <MessageActionSheet
+          message={MESSAGE}
+          chips={CHIPS}
+          availability={AVAILABILITY}
+          authorLabel="이도현"
+          onClose={noop}
+          onToggleReaction={noop}
+          onReply={noop}
+          onQuote={noop}
+          onCopy={noop}
+          onPin={noop}
+          onEdit={noop}
+          onDelete={noop}
         />
       ) : null}
     </Backdrop>
@@ -574,6 +646,8 @@ export function SheetKitSurface({which}: {which: string}): React.JSX.Element {
       return <MessageSheetSurface confirmDelete />;
     case 'message-live':
       return <MessageLiveSurface />;
+    case 'message-keyboard':
+      return <MessageKeyboardSurface />;
     case 'channel':
       return <ChannelSheetSurface target={CHANNEL_TARGET} confirmingLeave={false} />;
     case 'channel-leave':
@@ -613,6 +687,22 @@ const buildStyles = (color: Palette) =>
     pageBody: {paddingHorizontal: SAFE_GUTTER, paddingTop: space.md, gap: space.lg},
     // 시트 바탕(`sheet`) 위에 서는 머리 — 페이지 바탕(`bg`)이 아니라 시트 위에서 원이 떠 보여야 한다.
     sheetFloor: {flex: 1, backgroundColor: color.sheet, gap: space.sm},
+    pillGroup: {gap: space.sm},
+    composerStandIn: {
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      top: '45%',
+      paddingHorizontal: SAFE_GUTTER,
+    },
+    composerStandInInput: {
+      minHeight: TOUCH_TARGET,
+      paddingHorizontal: space.lg,
+      borderRadius: ds2Radius.card,
+      backgroundColor: color.surface,
+      fontSize: font.body,
+      color: color.text,
+    },
     labelBox: {paddingHorizontal: SAFE_GUTTER, paddingTop: space.md},
     liveLog: {
       position: 'absolute',

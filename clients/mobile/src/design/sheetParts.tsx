@@ -11,10 +11,13 @@ import {
   View,
   type ImageSourcePropType,
   type ScrollViewProps,
+  type StyleProp,
   type TextInputProps,
+  type ViewStyle,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
+import {Sentence} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
@@ -27,14 +30,16 @@ import {
   SAFE_GUTTER,
   SHEET,
   space,
+  TOUCH_TARGET,
   type Palette,
 } from './tokens';
 
 // =============================================================================
 // 시트·페이지 안쪽 부품 (#4318, Buzz 「상태 설정」 시트·설정 페이지 비공개 캡처).
 //
-// 바탕(시트 `sheet`·페이지 `bg`) 위에 **카드·입력·원이 `surface` 로 선다.** 부품은 색을 새로 짓지
-// 않고 `Palette` 역할만 읽는다. 구조는 Buzz 의 `AppListCard`·`AppListRow`·`BuzzActionTile`·
+// 바탕(시트 `sheet`·페이지 `bg`) 위에 **카드·원이 `surface` 로 선다.** 입력 알약만 채움이 없이 외곽선
+// (`textFaint` 3:1, ADR-0189 D6)으로 선다 — 바탕 위에 직접 놓는다(카드 안에 넣지 않는다). 부품은 색을 새로
+// 짓지 않고 `Palette` 역할만 읽는다. 구조는 Buzz 의 `AppListCard`·`AppListRow`·`BuzzActionTile`·
 // `BuzzSearchField` 를 RN 으로 다시 짠 것이다(코드는 가져오지 않았다).
 //
 //   GroupLabel     섹션 라벨 — 회색 작은 글씨, 카드 위
@@ -43,10 +48,14 @@ import {
 //   ListRow        행: 앞 아이콘·이모지 · 이름 · 보조 줄 · 오른쪽 값 · 셰브론/펼침/복사/토글, 위험
 //   InputPill      입력 알약: 앞 아이콘 + 입력(ADR-0189 D6: 외곽선은 텍스트 입력에만 남는다)
 //   ActionTile     큰 행동 타일(아이콘 위, 이름 아래) · ActionTileRow 는 같은 폭으로 나란히
-//   SheetScroll    시트 몸의 스크롤 — 안전 영역·키보드 탭·큰 글씨에서도 끝까지 닿는다
+//   SheetScroll    시트 몸의 스크롤 — 머리 아래 숨 쉴 틈·안전 영역·키보드 탭·큰 글씨에서도 끝까지 닿는다
+//   ConfirmStep    시트 안의 확인 단계(되돌릴 수 없는 일 앞의 한 번 더): 카드 + 「취소」·위험 단추
 //
-// 낡은 `atoms.tsx` 의 `GroupSection`·`GroupRow`(반경 8·테두리 카드)는 프로필 시트·지시 기기 판이
-// 아직 쓴다. 여기가 새 가족이고, 옮기는 것은 #4457·#4458·#4319 의 일이다.
+// **가로 여백은 이 부품들이 주지 않는다.** `GroupCard`·`ListRow`·`InputPill`·`ActionTileRow` 는 폭 전체로 서고,
+// 바깥 16(`SAFE_GUTTER`)은 호스트가 진다 — `SheetScroll` 이 주고, 날 `ScrollView`·`FlatList` 는 제 콘텐츠 스타일에서
+// 준다(옛 `GroupSection` 은 스스로 졌다). 호스트가 안 주면 카드가 화면 가장자리까지 번진다.
+// 낡은 `atoms.tsx` 의 `GroupSection`·`GroupRow`(반경 8·테두리 카드)는 프로필 시트가 아직 쓴다(지시 기기 판은
+// 새 `GroupCard` 로 옮겼다). 여기가 새 가족이고, 옮기는 것은 #4457·#4458·#4319 의 일이다.
 // =============================================================================
 
 /** 섹션 라벨. 카드 위의 회색 작은 글씨 — `textMuted`(AA). `textFaint` 는 글자 대비 4.5 를 못 지난다. */
@@ -86,17 +95,20 @@ export function GroupCard({
   label,
   inset = 'plain',
   children,
+  style,
   testID,
 }: {
   label?: string;
   inset?: CardInset;
   children: React.ReactNode;
+  /** 바깥 상자의 스타일 — 호스트가 가로 여백을 주지 않는 자리에서 카드가 스스로 `SAFE_GUTTER` 를 질 때 쓴다. */
+  style?: StyleProp<ViewStyle>;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const items = React.Children.toArray(children);
   return (
-    <View style={styles.group} testID={testID}>
+    <View style={[styles.group, style]} testID={testID}>
       {label ? <GroupLabel>{label}</GroupLabel> : null}
       <View style={styles.card} testID={testID ? `${testID}-card` : undefined}>
         {items.map((child, index) => (
@@ -216,6 +228,9 @@ export function ListRow({
   const palette = usePalette();
   const afterClose = usePageSheetAction();
   const isToggle = accessory === 'toggle' && toggle !== undefined;
+  // 눌리는 행의 기본 이름: 제목만 읽으면 오른쪽 값(「회의 중」)과 보조 줄이 낭독에서 빠진다. 값 행투성이인 설정
+  // 페이지가 이 부품을 쓴다. 이름을 직접 주면 그것이 이긴다.
+  const spokenName = [title, detail, value].filter(Boolean).join(', ');
   const press = isToggle
     ? () => toggle.onValueChange(!toggle.value)
     : onPress && closesSheet
@@ -236,7 +251,12 @@ export function ListRow({
           style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
           {title}
         </Text>
-        {detail ? <Text style={styles.rowDetail}>{detail}</Text> : null}
+        {detail ? (
+          // 문장이다 — 어절 가운데서 끊기지 않는다(옛 `GroupRow.detail` 도 `Sentence` 였다).
+          <Sentence style={styles.rowDetail} testID={testID ? `${testID}-detail` : undefined}>
+            {detail}
+          </Sentence>
+        ) : null}
       </View>
       {value ? (
         <Text style={styles.rowValue} numberOfLines={1}>
@@ -258,8 +278,9 @@ export function ListRow({
             value={toggle.value}
             onValueChange={toggle.onValueChange}
             disabled={disabled}
-            trackColor={{false: palette.border, true: palette.ok}}
-            ios_backgroundColor={palette.border}
+            // 꺼짐 트랙은 컨트롤 경계라 비텍스트 3:1(`textFaint`) — `border` 는 카드 위에서 1.3~2.1:1 이었다.
+            trackColor={{false: palette.textFaint, true: palette.ok}}
+            ios_backgroundColor={palette.textFaint}
           />
         </View>
       ) : null}
@@ -275,7 +296,7 @@ export function ListRow({
   return (
     <Pressable
       accessibilityRole={isToggle ? 'switch' : 'button'}
-      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityLabel={accessibilityLabel ?? spokenName}
       accessibilityHint={accessibilityHint}
       accessibilityState={{
         disabled,
@@ -302,6 +323,7 @@ export function ListRow({
 export function InputPill({
   icon,
   accessibilityLabel,
+  style,
   ...input
 }: TextInputProps & {
   /** 앞 아이콘(PNG, 글자 없는 아이콘 색으로 칠한다). */
@@ -317,8 +339,9 @@ export function InputPill({
       <TextInput
         accessibilityLabel={accessibilityLabel}
         placeholderTextColor={palette.textMuted}
-        style={styles.pillInput}
         {...input}
+        // 호출자의 `style` 은 알약 입력 스타일(`flex: 1` 포함)을 **덮지 않고 이어 붙는다**.
+        style={[styles.pillInput, style]}
       />
     </View>
   );
@@ -376,6 +399,90 @@ export function ActionTile({
 export function ActionTileRow({children}: {children: React.ReactNode}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return <View style={styles.tileRow}>{children}</View>;
+}
+
+/**
+ * 시트 안의 **확인 단계** — 되돌릴 수 없는 일(지우기·나가기) 앞의 한 번 더 (#4318).
+ *
+ * 카드(머리말 + 설명 + 실패 한 줄) 아래에 「취소」와 위험 단추가 한 줄로 선다. 두 시트(메시지 행동·대화 행 행동)에
+ * 같은 블록이 복사돼 있던 것을 부품으로 모았다 — 확인 단계는 #4458 이 더 만난다. 규칙:
+ *   - **실패는 확인 단계 안에서 말한다**(`error`, 시트를 닫지 않는다). 토스트가 아니다.
+ *   - 왕복 중에는 위험 단추가 잠기고 낱말(`pendingLabel`)과 `accessibilityState.busy` 가 진행을 말한다.
+ *   - 설명은 문장이라 어절 가운데서 끊기지 않는다(`Sentence`).
+ */
+export function ConfirmStep({
+  headline,
+  detail,
+  error,
+  confirmLabel,
+  pendingLabel,
+  pending = false,
+  cancelLabel = '취소',
+  onCancel,
+  onConfirm,
+  testID,
+  errorTestID,
+  cancelTestID,
+  confirmTestID,
+}: {
+  headline: string;
+  detail: string;
+  /** 지난 시도의 실패 문장(코어가 옮긴 한국어). 없으면 줄이 없다. */
+  error?: string | null;
+  /** 위험 단추의 낱말(「지우기」·「채널 나가기」). */
+  confirmLabel: string;
+  /** 왕복 중의 낱말(「지우는 중…」). */
+  pendingLabel: string;
+  pending?: boolean;
+  cancelLabel?: string;
+  onCancel: () => void;
+  onConfirm: () => void;
+  /** 카드의 testID — 설명은 `<testID>-detail` 이다. */
+  testID?: string;
+  errorTestID?: string;
+  cancelTestID?: string;
+  confirmTestID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <>
+      <GroupCard testID={testID}>
+        <View style={styles.confirmBody}>
+          <Text style={styles.confirmHeadline}>{headline}</Text>
+          <Sentence
+            style={styles.confirmDetail}
+            testID={testID ? `${testID}-detail` : undefined}>
+            {detail}
+          </Sentence>
+          {error ? (
+            <Text accessibilityRole="alert" style={styles.confirmError} testID={errorTestID}>
+              {error}
+            </Text>
+          ) : null}
+        </View>
+      </GroupCard>
+      <View style={styles.confirmRow}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={cancelLabel}
+          onPress={onCancel}
+          style={({pressed}) => [styles.secondary, pressed && styles.confirmPressed]}
+          testID={cancelTestID}>
+          <Text style={styles.secondaryLabel}>{cancelLabel}</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={confirmLabel}
+          accessibilityState={{busy: pending, disabled: pending}}
+          disabled={pending}
+          onPress={onConfirm}
+          style={({pressed}) => [styles.destructive, pressed && styles.confirmPressed]}
+          testID={confirmTestID}>
+          <Text style={styles.destructiveLabel}>{pending ? pendingLabel : confirmLabel}</Text>
+        </Pressable>
+      </View>
+    </>
+  );
 }
 
 /**
@@ -541,8 +648,41 @@ const buildStyles = (color: Palette) =>
       tintColor: color.text,
     },
     tileLabel: {fontSize: font.label, fontWeight: '600', color: color.text},
+    confirmBody: {
+      gap: space.sm,
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+    },
+    confirmHeadline: {fontSize: font.body, color: color.text, fontWeight: '700'},
+    confirmDetail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
+    confirmError: {fontSize: font.label, color: color.danger, lineHeight: line.label},
+    confirmRow: {flexDirection: 'row', gap: space.sm},
+    secondary: {
+      flex: 1,
+      minHeight: TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: color.border,
+    },
+    secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
+    destructive: {
+      flex: 1,
+      minHeight: TOUCH_TARGET,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderRadius: radius.md,
+      borderWidth: 1,
+      borderColor: color.dangerBorder,
+      backgroundColor: color.dangerSurface,
+    },
+    destructiveLabel: {fontSize: font.label, color: color.danger, fontWeight: '700'},
+    confirmPressed: {opacity: 0.6},
     scrollContent: {
       paddingHorizontal: SAFE_GUTTER,
+      // 머리 줄 아래 숨 쉴 틈 — 원 아래 끝에서 첫 내용까지 6 + 12 = 18(`SHEET.bodyTop`).
+      paddingTop: SHEET.bodyTop,
       gap: space.lg,
     },
   });

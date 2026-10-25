@@ -723,6 +723,12 @@ export const SHEET = {
   headerRow: TOUCH_TARGET + space.sm,
   /** 원형 단추의 눈에 보이는 지름 — Buzz `IosGlassNavigationButton.controlSize` 40. 눌림 영역은 44. */
   circle: 40,
+  /**
+   * 머리 줄 아래에서 첫 내용까지 더하는 위 여백. 머리 줄(52)에서 원(40)이 위아래 6 만 남기므로 원 아래 끝에서 첫
+   * 내용까지는 6 + 12 = 18 이다(Buzz 약 19 · 페이지 전시의 머리→타일 18). 이 값이 없으면 6 이라 원이 첫 카드의
+   * 모서리에 닿을 듯했다(design-review #4318 r1 M1).
+   */
+  bodyTop: space.md,
   /** 카드 안쪽 가로 여백 — Buzz `AppListCard._inset` 16. 우리 공용 여백과 같은 값이다. */
   cardInset: SAFE_GUTTER,
   /** 행 앞 아이콘 칸의 폭 — Buzz 22. 이모지도 같은 칸에 선다. */

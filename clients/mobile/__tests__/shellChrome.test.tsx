@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 import {AccessibilityInfo, Animated, StyleSheet} from 'react-native';
@@ -19,6 +20,7 @@ import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
+import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
   lightPalette,
@@ -404,6 +406,18 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     // 명단이 도착한 뒤에도 없다.
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     expect(screen.queryByTestId('plus-menu-channel')).toBeNull();
+  });
+
+  it('새 DM 의 사람 아바타는 카드 위에서 원이 선다 — 바닥을 muted 로 준다 (카드와 같은 면이면 이니셜만 떠 보인다)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    fireEvent.press(screen.getByTestId('plus-menu-dm'));
+    await waitFor(() => expect(screen.getByTestId('new-dm-person-seeun')).toBeTruthy());
+    // 목록 안의 아바타만 본다(뒤 화면의 것은 이 시트의 일이 아니다).
+    const avatars = within(screen.getByTestId('new-dm-list')).UNSAFE_getAllByType(Avatar);
+    expect(avatars.length).toBeGreaterThan(0);
+    for (const avatar of avatars) expect(avatar.props.ground).toBe('muted');
   });
 
   it('+ → 「새 DM」 → 사람을 고르면 DM 을 열고 그 대화로 간다', async () => {
