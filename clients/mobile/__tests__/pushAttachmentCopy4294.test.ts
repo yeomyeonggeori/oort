@@ -69,6 +69,40 @@ describe('Swift 알림 확장의 첨부 문구는 코어 문구표와 같은 말
     }
   });
 
+  // 개수 문구가 승인 푸시의 본문이 되면 알림 확장이 승인·거절 버튼을 되돌려 놓는다(ADR-0204 D7: 무엇인지
+  // 모르는 것을 잠금 화면에서 승인하게 두지 않는다). 컴파일해 돌리는 `sim-check` 는 macOS 에서만 도므로
+  // (PR CI 의 폰 jest 는 리눅스다) 가드의 **글자 모양**을 여기서도 못 박는다: 약해지면 CI 가 빨개진다.
+  describe('승인 알림은 개수 문구로 본문이 채워지지 않는다 (D7)', () => {
+    const announces = SWIFT.match(
+      /static func announces\(_ envelope: MomoPushEnvelope\) -> Bool \{([\s\S]*?)\n    \}/,
+    );
+    const displayBody = SWIFT.match(
+      /private static func displayBody\(of message: Message, for envelope: MomoPushEnvelope\) -> String\? \{([\s\S]*?)\n    \}/,
+    );
+
+    it('허락하는 이유는 dm·mention 둘뿐이고 승인 카테고리는 이유와 무관하게 막힌다', () => {
+      if (!announces) throw new Error('no announces in the Swift source');
+      const expression = announces[1].replace(/\s+/g, ' ').trim();
+      const reasons = [...expression.matchAll(/envelope\.reason == "([a-z_]+)"/g)].map(m => m[1]).sort();
+      expect(reasons).toEqual(['dm', 'mention']);
+      // 이유 조건과 카테고리 조건은 AND 다: OR 로 풀리면 승인 카테고리가 다시 열린다.
+      expect(expression).toMatch(/\)\s*&&\s*!envelope\.category\.carriesApprovalID$/);
+    });
+
+    it('본문을 고르는 길이 이 가드와 지워진 메시지 판정을 개수 문구보다 먼저 거친다', () => {
+      if (!displayBody) throw new Error('no displayBody in the Swift source');
+      const body = displayBody[1];
+      const guardAt = body.indexOf('PushAttachmentCopy.announces(envelope)');
+      const lineAt = body.indexOf('PushAttachmentCopy.line(');
+      expect(guardAt).toBeGreaterThan(-1);
+      expect(lineAt).toBeGreaterThan(guardAt);
+      expect(body).toContain('message.state?.value != "deleted"');
+      // 글이 있으면 글이 이긴다(승인도 예전 그대로): 그 갈래가 가드보다 앞선다.
+      expect(body.indexOf('if !text.isEmpty { return text }')).toBeGreaterThan(-1);
+      expect(body.indexOf('if !text.isEmpty { return text }')).toBeLessThan(guardAt);
+    });
+  });
+
   it('사진 규칙(SVG 는 파일)을 Swift 도 글자로 갖고 있다', () => {
     const body = SWIFT.match(/static func isPhoto\(mime: String\) -> Bool \{([\s\S]*?)\n    \}/);
     if (!body) throw new Error('no isPhoto in the Swift source');

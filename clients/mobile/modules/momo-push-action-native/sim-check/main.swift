@@ -1290,6 +1290,19 @@ do {
     "approval_request does not announce")
   check(envelope("mention", "momo.approval.open", approvalID).map(PushAttachmentCopy.announces) == false,
     "an approval category does not announce, whatever the reason")
+
+  // ---- a message its sender took back: the server empties the text but still sends the attachment list ----
+  //
+  // The count must not reach the lock screen for a message that no longer exists (the core's inbox and banner
+  // look at deletion first; the extension read no `state` at all until #4294's review).
+  check(await restDisplay(#","body":null,"state":"deleted","deletedAtMs":1,"attachments":[\#(png)]"#) == nil,
+    "a deleted message with attachments stays on the placeholder: its count is not announced")
+  check(await restDisplay(#","body":null,"state":"sent","attachments":[\#(png)]"#)
+    == PushDisplayContent(title: "이도현", body: "사진 1장"),
+    "a live message says its count (control for the deleted one)")
+  check(await restDisplay(#","body":null,"state":7,"attachments":[\#(png)]"#)
+    == PushDisplayContent(title: "이도현", body: "사진 1장"),
+    "a state of the wrong type costs the message nothing: it is read as not deleted")
 }
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")

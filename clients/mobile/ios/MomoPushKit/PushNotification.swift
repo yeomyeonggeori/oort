@@ -447,6 +447,16 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         }
     }
 
+    /// 문자열 한 칸을 읽되 모양이 어긋나도(숫자·객체) 던지지 않는다: 한 칸 때문에 메시지 페이지 전체를 잃지
+    /// 않는다(`Props`·`Attachments` 와 같은 규율).
+    private struct LenientText: Decodable {
+        let value: String?
+
+        init(from decoder: Decoder) throws {
+            value = try? decoder.singleValueContainer().decode(String.self)
+        }
+    }
+
     private struct Message: Decodable {
         let id: String
         let authorMemberID: String
@@ -454,9 +464,11 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         let rootID: String?
         let props: Props?
         let attachments: Attachments?
+        /// 「지워진 메시지」를 가리는 데만 쓴다(`"deleted"`). 서버는 삭제 때 글은 비우지만 첨부 목록은 그대로 싣는다.
+        let state: LenientText?
 
         enum CodingKeys: String, CodingKey {
-            case id, body, props, attachments
+            case id, body, props, attachments, state
             case authorMemberID = "authorMemberId"
             case rootID = "rootId"
         }
@@ -519,11 +531,13 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
     }
 
     /// 알림 본문: 글이 있으면 글. 글 없이 첨부만 있으면 개수 문구(#4294) — `PushAttachmentCopy.announces`
-    /// 가 허락한 알림(`dm`·`mention`)에서만. 그 밖이거나 첨부도 없으면 nil(자리표시로 남는다).
+    /// 가 허락한 알림(`dm`·`mention`)에서만, 그리고 지워지지 않은 메시지에서만. 지워진 메시지는 서버가 첨부
+    /// 목록을 그대로 실어 보내도 개수를 말하지 않는다(보낸 사람이 거둔 것을 잠금 화면에 올리지 않는다; 코어의
+    /// 인박스·배너도 삭제를 먼저 본다). 그 밖이거나 첨부도 없으면 nil(자리표시로 남는다).
     private static func displayBody(of message: Message, for envelope: MomoPushEnvelope) -> String? {
         let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !text.isEmpty { return text }
-        guard PushAttachmentCopy.announces(envelope) else { return nil }
+        guard PushAttachmentCopy.announces(envelope), message.state?.value != "deleted" else { return nil }
         return PushAttachmentCopy.line(mimeTypes: message.attachments?.mimeTypes ?? [])
     }
 
