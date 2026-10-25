@@ -47,6 +47,12 @@ import {
 } from "@momo/core/features/timeline/arrival";
 import { createReplayGate } from "@momo/core/lib/realtimeEvents";
 import {
+  judgeRecoveryMarker,
+  messageIdKey,
+  NO_RECOVERY,
+  type RecoveryMarkerVerdict,
+} from "@momo/core/features/timeline/recoveryMarker";
+import {
   runPersonalAgentCall,
   type PersonalCallSpec,
 } from "@/features/work/personalAgentCalling";
@@ -118,7 +124,7 @@ export interface UseTimelineResult {
   state: TimelineState;
   status: "loading" | "ready" | "error";
   resume: ResumeInfo;
-  /** Reconnect markers, rendered inline as "재연결됨, seq N까지 복구". */
+  /** Reconnect markers, rendered inline as "재연결됨, 여기까지 복구" — one per recovery that brought in someone else's new messages (#4328). */
   recoveryMarkers: RecoveryMarker[];
   /** Local echoes awaiting their server seq (M10). Never inside `state`. */
   pending: PendingMessage[];
@@ -181,9 +187,14 @@ export interface UseTimelineResult {
  * `?after` backfill on a non-recovered resubscribe, and owns the send path.
  * `seq` is the sole ordering authority throughout (reconcileMessages).
  *
- * Every heal also records a RecoveryMarker so the timeline can state exactly
- * how far it was restored, which is only possible because the server issues a
- * monotonic seq (R-1 §3).
+ * A heal that brought in other people's (or agents') new messages also records
+ * a RecoveryMarker so the timeline can state exactly how far it was restored,
+ * which is only possible because the server issues a monotonic seq (R-1 §3).
+ * A heal that brought in nothing new from anyone else — an empty gap, only my
+ * own lines, or lines the timeline already held — records no marker: there is
+ * nothing to state, and the marker row would slide the list for 12 seconds and
+ * back. The judgement is core's (`judgeRecoveryMarker`, #4328), shared with the
+ * phone; this hook only keeps the ids it has held and the replay window.
  */
 export function useTimeline(
   realtime: RealtimeHandle | null,
@@ -276,7 +287,14 @@ export function useTimeline(
   const restOnlyChannelRef = useRef<string | null>(null);
   const firstSubscribeRef = useRef(true);
   const markerCounterRef = useRef(0);
+  // 이 채널 방문에서 타임라인에 든 줄 id(접은 열쇠, `messageIdKey`). 줄을 들이는 길은 `applyBatch` 하나라
+  // 위로 더 읽은 쪽·내 전송 확정·실시간·꼬리 읽기가 전부 여기에 등록된다. 도착 연출(`alreadyHeld`)과 복구
+  // 표지의 「이미 든 줄」(#4328)이 같은 집합을 쓴다.
   const heldIdsRef = useRef(new Set<string>());
+  // 복구 표지는 「복구가 **남의 새 메시지**를 들였다」는 말이다(#4328, 폰 #4292). 레일이 끊긴 구간을 되쏘는 동안
+  // (`subscribed` 직후 동기 flush ~ 그 뒤 마이크로태스크)에는 되쏜 줄도 실시간 줄과 같은 문(`applyBatch`)을
+  // 지나므로, 그 문이 코어 판정(`judgeRecoveryMarker`)을 이어 받는다. null 이면 세지 않는다.
+  const replayWatchRef = useRef<{ verdict: RecoveryMarkerVerdict } | null>(null);
   const consumedArrivalIdsRef = useRef(new Set<string>());
   const playOnMountRef = useRef(new Set<string>());
   const pendingRef = useRef<PendingMessage[]>([]);
@@ -301,6 +319,17 @@ export function useTimeline(
       } = { provenance: "rest", eventType: "rest" }
     ) => {
       if (batch.length === 0) return;
+      // 복구 표지의 판정은 **병합 전에** 묻는다 — 아래 루프가 이 줄들의 id 를 든 줄로 등록하면 「새것」이
+      // 사라진다.
+      const watch = replayWatchRef.current;
+      if (watch !== null) {
+        watch.verdict = judgeRecoveryMarker(
+          batch,
+          heldIdsRef.current,
+          authorMemberId,
+          watch.verdict
+        );
+      }
       const reducedMotion = prefersReducedMotion();
       for (const message of batch) {
         if (
@@ -309,7 +338,7 @@ export function useTimeline(
         ) {
           newestSeqRef.current = message.seq;
         }
-        const key = message.id.toLowerCase();
+        const key = messageIdKey(message.id);
         const play = takeArrivalPlay(consumedArrivalIdsRef.current, {
           messageId: message.id,
           authorMemberId: message.authorMemberId,
@@ -540,6 +569,9 @@ export function useTimeline(
     async (channel: string) => {
       let after = newestSeqRef.current ?? 0;
       let total = 0;
+      // 이 읽기가 **새로** 들인 남의 줄에 대한 코어 판정(#4328). 읽는 사이 이미 들어온 줄(내 REST 응답,
+      // 레일)과 내 줄은 복구한 것이 아니다 — 페이지마다 **병합 전에** 묻는다.
+      let verdict = NO_RECOVERY;
       // Loop ascending pages until the server returns fewer than requested.
       for (;;) {
         const page = await fetchMessages(workspaceId, channel, {
@@ -548,6 +580,12 @@ export function useTimeline(
         });
         if (page.messages.length === 0) break;
         total += page.messages.length;
+        verdict = judgeRecoveryMarker(
+          page.messages,
+          heldIdsRef.current,
+          authorMemberId,
+          verdict
+        );
         applyBatch(page.messages);
         hydrateUnfurls(page.messages, channel);
         const maxSeq = page.messages.reduce((m, x) => Math.max(m, x.seq), after);
@@ -555,9 +593,9 @@ export function useTimeline(
         after = maxSeq;
         if (page.messages.length < PAGE_LIMIT) break;
       }
-      return total;
+      return { fetched: total, verdict };
     },
-    [workspaceId, applyBatch, hydrateUnfurls]
+    [workspaceId, applyBatch, hydrateUnfurls, authorMemberId]
   );
 
   useEffect(() => {
@@ -587,6 +625,7 @@ export function useTimeline(
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
     heldIdsRef.current = new Set();
+    replayWatchRef.current = null;
     consumedArrivalIdsRef.current = new Set();
     playOnMountRef.current = new Set();
     updatePending(() => []);
@@ -662,17 +701,28 @@ export function useTimeline(
         if (!recovered) {
           // A non-recovered (re)subscribe may have missed publications: pull
           // the authoritative tail from PG. (Also safe on first subscribe.)
-          backfillAfter(channelId).then((count) => {
+          backfillAfter(channelId).then(({ fetched, verdict }) => {
             if (cancelled || isFirst) return;
-            setResume((r) => ({ ...r, lastBackfillCount: count }));
-            addMarker("backfill");
+            setResume((r) => ({ ...r, lastBackfillCount: fetched }));
+            // 표지는 「끊겼던 구간이 있었고, 다른 사람(또는 에이전트)의 새 메시지로 그것을 메웠다」는 말이다
+            // (#4328). 꼬리를 읽었더니 빈손이거나 온 것이 전부 이미 든 줄·내 줄이면 메운 것이 없으므로 할 말도
+            // 없다 — 읽어 온 수(`lastBackfillCount`)는 그대로 센다.
+            if (verdict.show) addMarker("backfill");
           });
         } else if (!isFirst) {
           // The transport replayed the gap. Let the recovered publications
           // land, then state how far the timeline was restored.
-          setTimeout(() => {
-            if (!cancelled) addMarker("replay");
-          }, 0);
+          //
+          // 되쏜 것이 **다른 사람(또는 에이전트)의 새 메시지**를 들여왔을 때만 선다(#4328). `recovered: true` 는
+          // 「끊긴 구간을 이을 수 있었다」일 뿐 그 구간에 무엇이 있었다는 말이 아니다 — 비어 있던 구간의 복구에도
+          // 참이다. centrifuge-js 는 되쏜 publication 을 `subscribed` 직후 **동기로** 흘리므로(`createReplayGate`
+          // 와 같은 근거) 창은 다음 마이크로태스크까지다: 되쏜 줄만 덮고, 그 뒤에 닿는 실시간 줄은 덮지 않는다.
+          const watch = { verdict: NO_RECOVERY };
+          replayWatchRef.current = watch;
+          queueMicrotask(() => {
+            if (replayWatchRef.current === watch) replayWatchRef.current = null;
+            if (!cancelled && watch.verdict.show) addMarker("replay");
+          });
         }
       },
       onMessage: (event) => {
