@@ -102,11 +102,11 @@ function useInsets(top: number, bottom: number) {
     .mockReturnValue({top, left: 0, right: 0, bottom});
 }
 
-async function mount(ui: React.ReactElement, reduceMotion = false) {
+async function mount(ui: React.ReactElement, reduceMotion = false, scheme: 'light' | 'dark' = 'light') {
   a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(reduceMotion));
   releaseReduceMotion ??= retainReduceMotion();
   await act(async () => {});
-  const utils = render(<FixedScheme scheme="light">{ui}</FixedScheme>);
+  const utils = render(<FixedScheme scheme={scheme}>{ui}</FixedScheme>);
   await act(async () => {});
   return utils;
 }
@@ -774,7 +774,7 @@ describe('ListRow 의 기본 이름·보조 줄·토글 트랙', () => {
     expect(screen.getByTestId('named').props.accessibilityLabel).toBe('내 상태 바꾸기');
   });
 
-  it('보조 줄은 문장이라 어절 가운데서 끊기지 않는다 (옛 GroupRow.detail 은 Sentence 였다)', async () => {
+  it('보조 줄이 `hangul-word` 줄바꿈 전략을 든다 (옛 GroupRow.detail 은 Sentence 였다 — 렌더된 줄바꿈은 캡처가 잰다)', async () => {
     await mount(<ListRow title="방해 금지" detail="정해 둔 시간에는 알림을 받지 않아요" testID="row" />, true);
     expect(screen.getByTestId('row-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
   });
@@ -875,6 +875,20 @@ describe('SheetScroll · InputPill 의 기본값', () => {
       expect(flashCalls()).toBe(before);
     });
 
+    it.each(['light', 'dark'] as const)(
+      '막대 색이 시스템이 아니라 앱의 %s 모양을 따른다 — 시스템 모양과 엇갈려도 시트 바탕 위에서 보인다 (design-review r6 M1)',
+      async scheme => {
+        await mount(sheet(), true, scheme);
+        // UIKit 은 막대 색을 시스템 모양으로 정한다 — 앱 다크 + 시스템 라이트면 검은 막대가 어두운 시트 위에 서 대비 1.07 이었다.
+        expect(screen.getByTestId('scroll').props.indicatorStyle).toBe(scheme === 'light' ? 'black' : 'white');
+      },
+    );
+
+    it('호출자가 indicatorStyle 을 주면 그것이 이긴다', async () => {
+      await mount(sheet({indicatorStyle: 'default', children: null}), true, 'dark');
+      expect(screen.getByTestId('scroll').props.indicatorStyle).toBe('default');
+    });
+
     it('호출자가 준 onLayout·onContentSizeChange 도 그대로 불린다', async () => {
       const onLayout = jest.fn();
       const onContentSizeChange = jest.fn();
@@ -946,7 +960,7 @@ describe('ConfirmStep — 시트 안의 확인 단계', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
-  it('실패 문장은 확인 단계 안에 alert 로 서고 어절 단위로 접힌다', async () => {
+  it('실패 문장은 확인 단계 안에 alert 로 서고 `hangul-word` 줄바꿈 전략을 든다', async () => {
     const {ui} = step({error: '지우지 못했습니다.'});
     await mount(ui, true);
     expect(screen.getByTestId('err').props.accessibilityRole).toBe('alert');
@@ -1254,7 +1268,7 @@ describe('대화 행 시트에는 앞 아이콘이 없다 — 글리프 여덟�
     expect(screen.getByTestId('channel-leave-confirm-detail').props.lineBreakStrategyIOS).toBe('hangul-word');
   });
 
-  it('행 시트의 오류 띠는 문장이라 어절 단위로 접힌다 (design-review r4 M3)', async () => {
+  it('행 시트의 오류 띠가 alert 이고 `hangul-word` 줄바꿈 전략을 든다 (design-review r4 M3)', async () => {
     await mount(
       <ChannelActionSheet
         target={TARGET}
@@ -1304,7 +1318,7 @@ describe('확인 단계의 문구에는 닫는 괄호 바로 뒤의 조사가 �
     expect(BRACKET_PARTICLE.test('자리에는 「삭제된 메시지」가 남고, 달려 있던 반응도')).toBe(true);
     expect(BRACKET_PARTICLE.test('이름(선택)을 적어요')).toBe(true);
     expect(BRACKET_PARTICLE.test('자리에는 「삭제된 메시지」 표시가 남고, 달려 있던 반응도')).toBe(false);
-    expect(BRACKET_PARTICLE.test("'세은'에 맞는 사람이 없습니다.")).toBe(false);
+    expect(BRACKET_PARTICLE.test("'서연'에 맞는 사람이 없습니다.")).toBe(false);
     expect(BRACKET_PARTICLE.test('채널에서 나가지 못했습니다.')).toBe(false);
   });
 

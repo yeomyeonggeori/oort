@@ -420,7 +420,7 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     for (const avatar of avatars) expect(avatar.props.ground).toBe('muted');
   });
 
-  it('새 DM 의 빈 상태 문장은 문장이라 어절 단위로 접힌다 (design-review #4318 r4 M3)', async () => {
+  it('새 DM 의 빈 상태 문장이 `hangul-word` 줄바꿈 전략을 든다 (design-review #4318 r4 M3)', async () => {
     installFetch();
     await renderReady();
     openMenu();

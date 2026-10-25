@@ -23,7 +23,7 @@ import {ROW_GLYPH_MAX_SCALE, Sentence} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
-import {usePalette, useStyles} from './theme';
+import {usePalette, useStyles, useTheme} from './theme';
 import {
   ds2Radius,
   font,
@@ -514,7 +514,10 @@ export function ConfirmStep({
  *   9pt 헛스크롤했다(design-review #4318 r4 L1).
  * - **내용이 시트를 넘치면** 처음 선 직후 스크롤 막대를 한 번 보인다(`flashScrollIndicators`). 접힌 행(SE 기본 크기의
  *   메시지 시트의 「지우기」)이 있다는 단서가 접힘선이 카드 모서리에 우연히 걸리는 데만 달려 있지 않게 한다(r4 M1).
- *   시트마다 한 번이고, 넘치지 않으면 부르지 않는다.
+ *   시트마다 한 번이고, 넘치지 않으면 부르지 않는다. 문턱(`레이아웃 > 0 && 내용 > 레이아웃 + 1`)은 사진 카드
+ *   (`photoCardDesign.scrollNeedsHint`)와 같다.
+ * - **막대의 색은 앱의 모양을 따른다.** UIKit 은 막대 색을 **시스템** 모양으로 정해서, 앱에서 다크를 고르고 시스템이
+ *   라이트면 어두운 시트에 검은 막대가 서 단서가 안 보인다(대비 1.07 — design-review r6 M1, 사진 카드가 먼저 푼 문제).
  */
 export function SheetScroll({
   children,
@@ -524,6 +527,7 @@ export function SheetScroll({
   ...scroll
 }: ScrollViewProps & {children: React.ReactNode; testID?: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const {scheme} = useTheme();
   const insets = useSafeAreaInsets();
   const keyboardHeight = usePageSheetKeyboard();
   const bottom =
@@ -551,6 +555,7 @@ export function SheetScroll({
       ref={ref}
       bounces={false}
       showsVerticalScrollIndicator
+      indicatorStyle={scheme === 'light' ? 'black' : 'white'}
       keyboardShouldPersistTaps="handled"
       contentContainerStyle={[styles.scrollContent, {paddingBottom: bottom}]}
       testID={testID}
