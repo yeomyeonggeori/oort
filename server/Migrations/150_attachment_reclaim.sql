@@ -83,8 +83,12 @@ CREATE TRIGGER scheduled_message_attachment_reserve_trg
 -- 건다. migration 은 정책을 우회하는 역할(슈퍼유저·BYPASSRLS)로 돌아서 이 줄은 우회 스위치가 아니라
 -- 안전망이다: 그런 권한이 없는 역할이면 정책에 걸려 조용히 0행이 되는 대신 오류로 멈춘다(088 실측).
 --
--- 아래 단정은 UPDATE 가 true 로 올린 행 수(GET DIAGNOSTICS)를, 점유 행 수를 따로 센 값과 맞춘다.
--- attachment_id 가 UNIQUE 라서 점유 행 하나는 첨부 하나다. 빈 DB(새 설치)는 0 = 0 이라 통과한다.
+-- 아래 단정은 UPDATE 가 true 로 올린 행 수를, 점유 행 수를 따로 센 값과 맞춘다. attachment_id 가
+-- UNIQUE 라서 점유 행 하나는 첨부 하나다. **두 수를 한 문장에서 센다**: 배포 중에는 이전 버전의 api 가 아직
+-- 예약을 만들고 있을 수 있어서, 문장을 둘로 가르면 그 사이에 들어온 점유 행이 「어긋남」으로 읽혀 마이그레이션이
+-- 거짓으로 멈춘다(READ COMMITTED 는 문장마다 스냅샷을 새로 잡는다. 그 점유 행은 트리거가 스스로 올린다).
+-- 빈 DB(새 설치)는 0 = 0 이라 통과한다. 값이 맞는지(true 로 올렸는지)는 이 단정이 아니라
+-- prod_role_conformance_pg 의 업그레이드 시험이 실제 점유 행으로 잰다.
 SET LOCAL row_security = off;
 
 DO $$
@@ -92,14 +96,17 @@ DECLARE
   flagged  bigint;
   expected bigint;
 BEGIN
-  UPDATE attachment a
-     SET reserved = true
-   WHERE EXISTS (SELECT 1
-                   FROM scheduled_message_attachment s
-                  WHERE s.attachment_id = a.id);
-  GET DIAGNOSTICS flagged = ROW_COUNT;
-
-  SELECT count(*) INTO expected FROM scheduled_message_attachment;
+  WITH touched AS (
+    UPDATE attachment a
+       SET reserved = true
+     WHERE EXISTS (SELECT 1
+                     FROM scheduled_message_attachment s
+                    WHERE s.attachment_id = a.id)
+    RETURNING a.id
+  )
+  SELECT (SELECT count(*) FROM touched),
+         (SELECT count(*) FROM scheduled_message_attachment)
+    INTO flagged, expected;
 
   IF flagged <> expected THEN
     RAISE EXCEPTION

@@ -198,18 +198,25 @@ fn migrations_before(first_new: i64) -> PathBuf {
 
 impl ProdDb {
     async fn create() -> ProdDb {
-        Self::create_with(None).await
+        Self::create_with(None, &[]).await
     }
 
     /// An **upgrade**: the previous release's schema (every migration below `first_new`)
-    /// is already there when this release's roles file runs — before its own migrations,
-    /// which is the order Railway's api pre-deploy and the compose `runtime-roles` service
-    /// use — and then the rest of the migrations and the roles file again.
-    async fn create_upgrading_from_before(first_new: i64) -> ProdDb {
-        Self::create_with(Some(first_new)).await
+    /// is already there — with `previous_release_rows` in it — when this release's roles
+    /// file runs, before its own migrations (the order Railway's api pre-deploy and the
+    /// compose `runtime-roles` service use), and then the rest of the migrations and the
+    /// roles file again.
+    async fn create_upgrading_from_before(
+        first_new: i64,
+        previous_release_rows: &[&str],
+    ) -> ProdDb {
+        Self::create_with(Some(first_new), previous_release_rows).await
     }
 
-    async fn create_with(upgrade_from_before: Option<i64>) -> ProdDb {
+    async fn create_with(
+        upgrade_from_before: Option<i64>,
+        previous_release_rows: &[&str],
+    ) -> ProdDb {
         assert_disposable_cluster();
         let admin = PgPoolOptions::new()
             .max_connections(2)
@@ -237,6 +244,20 @@ impl ProdDb {
             run_migrations(&url, &previous, SeedMode::None)
                 .expect("apply the previous release's migrations");
             let _ = std::fs::remove_dir_all(&previous);
+            if !previous_release_rows.is_empty() {
+                let previous_pool = PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&url)
+                    .await
+                    .expect("connect to the previous release's database");
+                for statement in previous_release_rows {
+                    sqlx::query(statement)
+                        .execute(&previous_pool)
+                        .await
+                        .unwrap_or_else(|error| panic!("seed {statement}: {error}"));
+                }
+                previous_pool.close().await;
+            }
             // This release's pre-deploy runs the roles file on the OLD schema.
             apply_runtime_roles(&url);
         }
@@ -623,12 +644,55 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
 /// with it the deploy. Every other suite here builds its database from nothing, where the
 /// table does not exist yet on the first pass, so none of them could see it.
 ///
-/// Take the existence guard off the grant in `bootstrap_runtime_roles.sql` and this
-/// goes red inside `create_upgrading_from_before` (the pre-migrate pass fails).
+/// The previous release's database also holds a schedule that holds one of two files, so
+/// the migration's backfill runs over a **real** reservation row (on an empty table its
+/// row-count assertion is 0 = 0 and proves nothing): afterwards the held file is
+/// `reserved` and the free one is not.
+///
+/// Take the existence guard off the grant in `bootstrap_runtime_roles.sql` and this goes
+/// red inside `create_upgrading_from_before` (the pre-migrate pass fails); make the
+/// backfill set `false`, or miss the row, and the flag assertion (or the migration's own
+/// count) goes red.
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attachment_grant() {
-    let db = ProdDb::create_upgrading_from_before(150).await;
+    const WS: &str = "00000000-0000-4000-8000-0000000000a0";
+    const MEMBER: &str = "00000000-0000-4000-8000-0000000000a1";
+    const CHANNEL: &str = "00000000-0000-4000-8000-0000000000a2";
+    const HELD: &str = "00000000-0000-4000-8000-0000000000a3";
+    const FREE: &str = "00000000-0000-4000-8000-0000000000a4";
+    const SCHEDULE: &str = "00000000-0000-4000-8000-0000000000a5";
+    let previous_release = [
+        format!("INSERT INTO workspace (id, slug, name) VALUES ('{WS}', 'upgrade-fixture', 'upgrade-fixture')"),
+        format!(
+            "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+             VALUES ('{MEMBER}', '{WS}', 'human', 'u', 'u-upgrade')"
+        ),
+        format!(
+            "INSERT INTO channel (id, workspace_id, kind, name, created_by) \
+             VALUES ('{CHANNEL}', '{WS}', 'public', 'upgrade', '{MEMBER}')"
+        ),
+        format!(
+            "INSERT INTO attachment (id, workspace_id, channel_id, uploader_member_id, drive_file_id, \
+                                    name, mime, size_bytes, status) \
+             VALUES ('{HELD}', '{WS}', '{CHANNEL}', '{MEMBER}', 'upgrade-held', 'a.txt', 'text/plain', 1, 'complete'), \
+                    ('{FREE}', '{WS}', '{CHANNEL}', '{MEMBER}', 'upgrade-free', 'b.txt', 'text/plain', 1, 'complete')"
+        ),
+        format!(
+            "INSERT INTO scheduled_message (id, workspace_id, channel_id, author_member_id, body, \
+                                            send_at, client_request_id) \
+             VALUES ('{SCHEDULE}', '{WS}', '{CHANNEL}', '{MEMBER}', 'later', now() + interval '2 days', \
+                     '00000000-0000-4000-8000-0000000000a6')"
+        ),
+        format!(
+            "INSERT INTO scheduled_message_attachment \
+               (scheduled_message_id, workspace_id, member_id, attachment_id, position) \
+             VALUES ('{SCHEDULE}', '{WS}', '{MEMBER}', '{HELD}', 0)"
+        ),
+    ];
+    let rows: Vec<&str> = previous_release.iter().map(String::as_str).collect();
+
+    let db = ProdDb::create_upgrading_from_before(150, &rows).await;
     let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
     let reads = sqlx::query("SELECT reserved, unreserved_at FROM attachment LIMIT 1")
         .fetch_all(&notifier)
@@ -636,6 +700,12 @@ async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attach
     let name = sqlx::query("SELECT name FROM attachment LIMIT 1")
         .fetch_all(&notifier)
         .await;
+    let flags: Vec<(String, bool, bool)> = sqlx::query_as(
+        "SELECT id::text, reserved, unreserved_at IS NOT NULL FROM attachment ORDER BY id",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("read the flags");
     db.finish().await;
     assert!(
         reads.is_ok(),
@@ -644,6 +714,14 @@ async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attach
     assert!(
         name.is_err(),
         "…and still not the file name: the grant is the seven candidate columns only"
+    );
+    assert_eq!(
+        flags,
+        vec![
+            (HELD.to_string(), true, false),
+            (FREE.to_string(), false, false)
+        ],
+        "the backfill flagged the file the previous release's schedule holds, and only it"
     );
 }
 
