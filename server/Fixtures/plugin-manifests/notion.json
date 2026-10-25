@@ -18,7 +18,24 @@
       "sourceURL": "https://github.com/makenotion/notion-mcp-server",
       "releaseRef": "hosted",
       "verified": true
-    }
+    },
+    "logoKey": "notion",
+    "category": "productivity",
+    "websiteURL": "https://www.notion.com",
+    "starterPrompts": [
+      {
+        "text": "Notion에서 지난주 회의록을 찾아 줘요.",
+        "tool": "notion.notion-search"
+      },
+      {
+        "text": "최근에 열어 본 Notion 페이지를 목록으로 보여 줘요.",
+        "tool": "notion.notion-list-recent-pages"
+      },
+      {
+        "text": "오늘 회의 내용을 새 Notion 페이지로 정리해 줘요.",
+        "tool": "notion.notion-create-pages"
+      }
+    ]
   },
   "mcp": {
     "protocolVersion": "2025-06-18",
