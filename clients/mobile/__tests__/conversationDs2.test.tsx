@@ -1,7 +1,7 @@
 import {contrast} from '@momo/core/design/color';
 import type {Member, Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen} from './fixtures/darkWorld';
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {AccessibilityInfo, ActionSheetIOS, Dimensions, StyleSheet} from 'react-native';

@@ -3,7 +3,7 @@ import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels
 import type {QuoteBlock as QuoteBlockModel} from '@momo/core/features/timeline/quote';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor, within} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';

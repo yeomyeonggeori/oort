@@ -61,7 +61,7 @@ import {
   type TextLayoutEventData,
 } from 'react-native';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
-import {usePalette, useStyles} from '../../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {GlassSurface, useGlassMaterial} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
@@ -1202,6 +1202,7 @@ export function Composer({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   // 성장 상한은 **스타일시트에 못 박히지 않는다** (#1443). 글자 배수와 창 높이가
   // 정하고, 둘 다 사람이 설정에서 바꾸는 값이라 렌더마다 다시 읽는다 —
   // `useWindowDimensions` 는 동적 타입이 바뀌는 순간에도 다시 그린다(RN 은
@@ -2391,6 +2392,7 @@ export function Composer({
           // 자리 글자가 이제 「@로 부르기」를 알리는 유일한 문장이다 — 시안의 @ 도구
           // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
           placeholderTextColor={palette.textMuted}
+          keyboardAppearance={keyboardAppearance}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           accessibilityHint={droppedHint}
           multiline
