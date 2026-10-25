@@ -680,3 +680,39 @@ describe("useTimeline — 복구 재생 구간의 편집은 복구 표지를 올
     }
   );
 });
+
+describe("useTimeline — 수정 표시 없는 투영(스트림 조각)도 같은 문을 지난다 (#4450 검수 r1 F1)", () => {
+  const STREAM_3 = { "momo.stream": { rev: 3, streaming: true } };
+  /** 서버가 스트림 조각에 싣는 모양: `state` 는 행의 현재 값(`sent`), `edited_at_ms` 는 null. */
+  const sliceOver = { state: "sent", edited_at_ms: null, props: STREAM_3 };
+
+  it("스트림 조각 프레임은 든 줄의 본문을 키운다 — 수정 표시가 없어도 편집 문이 받는다", async () => {
+    rest.head = [tailRow(10), tailRow(11)];
+    await mount();
+    await subscribeFirst();
+
+    await act(async () => {
+      rail.handlers?.onMessage(editedFrame(tailRow(10), "조각이 자란 본문", sliceOver));
+    });
+
+    expect(out.messages.map((m) => m.seq)).toEqual([10, 11]);
+    expect(out.messages[0].body).toBe("조각이 자란 본문");
+    expect(out.messages[0].state).toBe("sent");
+    expect(out.messages[0].props).toEqual(STREAM_3);
+  });
+
+  it("안 든 줄의 스트림 조각 프레임은 끼지 않는다 — 수정 표시가 없어도 편집 투영이다", async () => {
+    rest.head = [tailRow(10), tailRow(11)];
+    await mount();
+    await subscribeFirst();
+
+    await act(async () => {
+      rail.handlers?.onMessage(editedFrame(tailRow(12), "아직 못 본 줄의 조각", sliceOver));
+    });
+
+    // 줄도 끼지 않았고 꼬리 커서도 그대로다. (프레임을 `state` 로 가려 문으로 보내면 이 조각이
+    // 반쪽 행으로 끼고 커서가 12 로 앞선다.)
+    expect(out.messages.map((m) => m.seq)).toEqual([10, 11]);
+    expect(out.newestSeq).toBe(11);
+  });
+});

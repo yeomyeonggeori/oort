@@ -553,8 +553,15 @@ describe("편집 투영이 말하지 않는 장식은 이미 든 것을 지킨�
 
   it("프레임이 직접 말한 칸은 비어 있어도 프레임의 말이 이긴다 — 허용목록은 말하지 않는 네 칸뿐이다", () => {
     // 「들어온 값이 undefined 면 든 것을 유지」 같은 일반 규칙은 이 시험이 막는다: 본문이
-    // 비어 나오는 갱신(`body: null`)과 비워진 props(`props: {}`)는 프레임이 **말한 것**이다.
-    const held = rootRow({ body: "배포 일정 공유드려요", props: { note: "이전" } });
+    // 비어 나오는 갱신(`body: null`), 비워진 props(`props: {}`), 수정 표시를 거둔 `state`·
+    // `edited_at_ms` 는 프레임이 **말한 것**이다. 든 행은 일부러 모든 칸이 차 있다(고친 적 있고
+    // props 가 있다) — 비어 있는 든 행이면 「든 것 유지」 변이와 구별되지 않는다.
+    const held = rootRow({
+      body: "배포 일정 공유드려요",
+      state: "edited",
+      editedAtMs: 1_700_000_050_000,
+      props: { note: "이전" },
+    });
     const state = fold(
       [held],
       [
@@ -576,6 +583,22 @@ describe("편집 투영이 말하지 않는 장식은 이미 든 것을 지킨�
     expect(row.editedAtMs).toBeUndefined();
     // 같은 편집에서 말하지 않는 칸은 그대로다 — 둘은 같은 행에서 함께 일어난다.
     expect(threadRollup(row)?.replyCount).toBe(3);
+  });
+
+  it("PATCH 응답이 키를 뺀 칸(빈 props)도 응답의 말이 이긴다 — 든 props 를 되살리지 않는다", () => {
+    // DTO 는 비어 있는 `props` 의 키를 뺀다(`response_props`). 키가 없다는 것은 「말하지 않음」이
+    // 아니라 「비어 있음」이다: 서버가 지정 키를 지워 props 가 비었다면 든 행의 옛 props 가
+    // 살아나면 안 된다. 허용목록(attachments·thread·replyTo·runEnded)에 props 는 없다.
+    const held = rootRow({ props: { note: "이전" } });
+    const { props: _omitted, ...response } = patchResponse(held, ROOT_EDITED_BODY);
+    expect("props" in response).toBe(false);
+
+    const state = fold([held], [response as Message]);
+
+    expect(state.messages[0].props).toBeUndefined();
+    expect(state.messages[0].body).toBe(ROOT_EDITED_BODY);
+    // 허용목록의 칸은 그대로 지킨다.
+    expect(threadRollup(state.messages[0])?.replyCount).toBe(3);
   });
 
   it("들어온 행과 이전 state 를 바꾸지 않는다 — 새 행을 만든다", () => {
@@ -721,6 +744,71 @@ describe("편집은 행을 만들지 않는다 — 든 행만 갱신한다 (#445
     expect(after.oldestSeq).toBe(10);
     expect(after.newestSeq).toBe(11);
     expect(isStrictlyOrdered(after.messages)).toBe(true);
+  });
+
+  it("스트림 조각 프레임(수정 표시 없음, props 의 momo.stream 만 자람)도 든 줄이면 적용된다 — 문은 「사람이 고친 줄」만 받는 문이 아니다", () => {
+    // 에이전트 답 하나가 조각마다 내는 `message.edited` 다(`stream_message_body_in_tx`). `state` 는
+    // 행의 현재 값 그대로 `sent`, `edited_at_ms` 는 null — 서버는 스트림 조각에 「수정됨」을 찍지
+    // 않는다. 문이 `state`·`editedAtMs` 로 좁혀지면 스트리밍 답이 이 클라에서 멈춘다.
+    const STREAM_2 = { "momo.stream": { rev: 2, streaming: true } };
+    const STREAM_3 = { "momo.stream": { rev: 3, streaming: true } };
+    const GROWN = "배포 일정을 정리하는 중이에요. 금요일 오전으로";
+    const state = fold([
+      tailRow(11),
+      tailRow(10, { body: "배포 일정을 정리하는 중", props: STREAM_2, thread: ROLLUP }),
+    ]);
+    const slice = payloadToMessage(
+      editedFrame({ id: tailRow(10).id, seq: 10 }, GROWN, {
+        state: "sent",
+        edited_at_ms: null,
+        props: STREAM_3,
+        created_at_ms: tailRow(10).createdAtMs,
+      })
+    );
+    // 전제: 이 프레임에는 편집 표지가 없다.
+    expect(slice.state).toBe("sent");
+    expect(slice.editedAtMs).toBeUndefined();
+
+    const after = applyEditedMessage(state, slice);
+
+    expect(after).not.toBe(state);
+    expect(after.messages[0].body).toBe(GROWN);
+    expect(after.messages[0].props).toEqual(STREAM_3);
+    expect(after.messages[0].state).toBe("sent");
+    expect(after.messages[0].editedAtMs).toBeUndefined();
+    // 같은 투영에서 말하지 않는 칸은 그대로다.
+    expect(threadRollup(after.messages[0])?.replyCount).toBe(3);
+    expect(after.oldestSeq).toBe(10);
+    expect(after.newestSeq).toBe(11);
+  });
+
+  it("서버가 스스로 다시 쓴 카드의 props 프레임(글은 그대로, 수정 표시 없음)도 든 줄이면 적용된다", () => {
+    // 다른 기기의 승인 결정(#3771)이나 제어 창이 카드의 props 를 갈아 끼우는 길
+    // (`emit_message_edited_in_tx`)이다. `UPDATE message SET props` 뿐이라 `state` 는 `sent`,
+    // 글은 그대로다.
+    const PENDING = { card: "approval_request", status: "pending" };
+    const DECIDED = { card: "approval_request", status: "approved" };
+    const state = fold([
+      tailRow(11),
+      tailRow(10, { body: "배포 승인 요청", props: PENDING }),
+    ]);
+    const frame = payloadToMessage(
+      editedFrame({ id: tailRow(10).id, seq: 10 }, "배포 승인 요청", {
+        state: "sent",
+        edited_at_ms: null,
+        props: DECIDED,
+        created_at_ms: tailRow(10).createdAtMs,
+      })
+    );
+    expect(frame.state).toBe("sent");
+    expect(frame.editedAtMs).toBeUndefined();
+
+    const after = applyEditedMessage(state, frame);
+
+    expect(after).not.toBe(state);
+    expect(after.messages[0].props).toEqual(DECIDED);
+    expect(after.messages[0].body).toBe("배포 승인 요청");
+    expect(after.messages[0].state).toBe("sent");
   });
 
   it("id 의 대소문자가 달라도 같은 줄이다 — 든 줄은 갱신된다", () => {

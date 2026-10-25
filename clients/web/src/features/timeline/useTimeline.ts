@@ -164,7 +164,11 @@ export interface UseTimelineResult {
    * implementation for why a pin waits for the server.
    */
   togglePin: (message: Message) => Promise<void>;
-  /** Rewrite my own message. The server's row replaces the local one. */
+  /**
+   * Rewrite my own message. The answer is an edit projection: it updates the row
+   * I hold in place (the read decorations it does not carry stay) and is dropped
+   * if I do not hold that row (#4450).
+   */
   editMessage: (message: Message, body: string) => Promise<void>;
   /** Soft-delete my own message. The tombstone replaces the local row. */
   deleteMessage: (message: Message) => Promise<void>;

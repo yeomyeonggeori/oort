@@ -176,7 +176,7 @@ function lowerBound(messages: Message[], seq: number): number {
  * 읽기 장식을 다시 만들지 않는다. 서버 주석: 「An edit re-projects the row, not the
  * conversation around it」. `MessageDto.run_ended` 주석은 이 넷을 한 부류로 묶는다: 「a
  * projection beside the message — the same shape `thread`, `replyTo` and `attachments`
- * already take: a reader needs it, the row does not own it」.
+ * already take, for the same reason: a reader needs it, the row does not own it」.
  *
  *   칸           message.edited 프레임      PATCH 응답           서버가 싣지 않는 이유
  *   attachments  키 없음                    `&[]` (키 생략)      편집은 묶인 첨부를 바꾸지 못한다

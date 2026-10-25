@@ -490,7 +490,9 @@ export interface Message {
    *
    * 편집 투영(`message.edited` 프레임·`PATCH` 응답)에는 없다. 거기서 없다는 것은 「답글 없음」이
    * 아니라 「말하지 않음」이므로, `reconcileMessages`가 이미 든 행의 롤업을 잇는다(#4450,
-   * `keepHeldProjection`). 롤업은 실시간으로 갱신되지 않고 페이지 읽기에서만 바뀐다.
+   * `keepHeldProjection`). 서버는 답글마다 `thread.updated` 를 발행하지만 TS 클라는 그것을 소비하지
+   * 않는다(폰은 `threadContext` 가 본 답글 수를 따로 세어 렌더에서 합친다). 그래서 `message.thread`
+   * 는 페이지 읽기에서만 바뀐다.
    */
   thread?: {
     reply_count: number;
@@ -3462,8 +3464,11 @@ export function publishTyping(
  * 403 for anyone but the author — and the action bar's visibility rule is only
  * an affordance layered on top of that.
  *
- * Answers with the updated message so the caller replaces the row with what was
- * actually stored, rather than with what it hoped the edit did.
+ * Answers with the updated message so the caller applies what was actually stored,
+ * rather than what it hoped the edit did. The answer is an edit projection — it
+ * says the row, not the attachments, thread rollup, resolved quote or run verdict
+ * around it — so the caller updates the row it holds (`applyEditedMessage`), keeps
+ * those four, and drops the answer when it holds no such row (#4450).
  */
 export function editMessage(
   workspaceId: string,
