@@ -39,6 +39,7 @@
 //! | `a_token_registered_in_another_workspace_is_still_a_conflict` | (pins a known limit — see the test) |
 //! | `revoking_a_device_nobody_holds_alive_is_a_404_for_anyone_else` | answer 403 for every device someone else holds (the pre-#3978 revoke), or answer 404 for the ones with a live registration too |
 //! | `a_previous_owners_late_sign_out_waits_for_a_takeover_in_flight` | read the owner in `revoke_device` without `FOR UPDATE` |
+//! | `a_live_registration_blocks_the_takeover_whatever_the_env_or_platform_of_the_attempt` | count only the incoming token's env as live (a production-only device looks dormant to a sandbox attempt), or answer the platform mismatch before the liveness test |
 
 use std::path::PathBuf;
 use std::process::Command;
@@ -1490,6 +1491,92 @@ async fn revoking_a_device_nobody_holds_alive_is_a_404_for_anyone_else() {
         .expect("the call itself succeeds")
         .expect_err("A must not revoke the device B now holds alive");
     assert_eq!(former_owner, DeviceRejection::DeviceOwnedByAnotherMember);
+}
+
+/// "Live" is a live token in *any* env, whatever the platform or env of the
+/// attempt. The 010 index allows one active token per `(device, env)`, so a device
+/// can hold a sandbox and a production registration at once. A liveness test that
+/// looked only at the incoming token's env would call a production-only device
+/// dormant for a sandbox attempt and hand it over while its owner's registration
+/// is alive — after which the new holder's `DELETE` or rotation would switch the
+/// owner's push off. Likewise a platform mismatch is answered *after* the
+/// liveness test: a 409 would tell the caller the platform of a live device.
+/// Nothing is written for the attempt, and the attempt cannot revoke either.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn a_live_registration_blocks_the_takeover_whatever_the_env_or_platform_of_the_attempt() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+
+    let parse = |device_id: Uuid, platform: &str, token: &str, env: &str| {
+        DeviceRegistration::parse(&device_id.to_string(), platform, None, token, env, TOPIC)
+            .expect("valid input")
+    };
+    // (the env A's live registration is in, the platform and env of B's attempt)
+    let cases = [
+        ("production", "ios", "sandbox"),
+        ("sandbox", "ios", "production"),
+        ("sandbox", "macos", "sandbox"),
+    ];
+    for (n, (live_env, platform, attempt_env)) in cases.into_iter().enumerate() {
+        let case = format!("A live in {live_env}, B tries {platform}/{attempt_env}");
+        let device_id = Uuid::new_v4();
+        let (token_a, token_b) = (hex_token(0x96 + 2 * n as u8), hex_token(0x97 + 2 * n as u8));
+
+        register_device(
+            &app,
+            tenant.workspace_id,
+            tenant.member_a,
+            None,
+            &parse(device_id, "ios", &token_a, live_env),
+        )
+        .await
+        .expect("member A registers")
+        .expect("not rejected");
+
+        let rejection = register_device(
+            &app,
+            tenant.workspace_id,
+            tenant.member_b,
+            None,
+            &parse(device_id, platform, &token_b, attempt_env),
+        )
+        .await
+        .expect("the call itself succeeds")
+        .expect_err("a live registration is not taken over");
+        assert_eq!(
+            rejection,
+            DeviceRejection::DeviceOwnedByAnotherMember,
+            "{case}"
+        );
+        let revoke = revoke_device(&app, tenant.workspace_id, tenant.member_b, None, device_id)
+            .await
+            .expect("the call itself succeeds")
+            .expect_err("B must not switch A's registration off");
+        assert_eq!(
+            revoke,
+            DeviceRejection::DeviceOwnedByAnotherMember,
+            "{case}"
+        );
+
+        assert_eq!(
+            device_owner(&su, device_id).await,
+            tenant.member_a,
+            "{case}"
+        );
+        assert_eq!(
+            live_token_owners(&su, device_id).await,
+            vec![tenant.member_a],
+            "{case}: A's registration is untouched"
+        );
+        assert_eq!(
+            token_rows(&su, device_id).await,
+            1,
+            "{case}: nothing was written for B"
+        );
+    }
 }
 
 /// Is some backend queued behind `holder_pid` on a lock? Polled for up to ten
