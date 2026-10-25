@@ -43,6 +43,7 @@ jest.mock('../src/session/useSession', () => ({
 
 interface FileSystemMock {
   __reset: () => void;
+  __state: {downloads: unknown[]};
 }
 const fileSystem = jest.requireMock('expo-file-system') as FileSystemMock;
 
@@ -307,6 +308,20 @@ describe('사진 한 장 — 새 마운트는 첫 프레임부터 잰 크기로 
     render(<AttachmentList channelId="ch" attachments={[photo('photo-a')]} />);
     expect(frames[0]).toMatchObject({width: 280, height: 210});
     await ready();
+  });
+
+  it('미리보기 캐시도 대소문자를 가리지 않는다(L13) — 같은 첨부·채널이 대소문자만 달라도 한 번만 내려받고 서버 사본이 곧바로 ready 로 선다', async () => {
+    holdGetSize();
+    const first = render(<AttachmentList channelId="CH-1" attachments={[photo('PHOTO-A')]} />);
+    await ready();
+    expect(fileSystem.__state.downloads).toHaveLength(1);
+    first.unmount();
+    // 서버 사본: 같은 사진인데 채널·첨부 id 의 대소문자가 다르다.
+    render(<AttachmentList channelId="ch-1" attachments={[photo('photo-a')]} />);
+    // 첫 렌더부터 ready 다(받아 오는 칸으로 서지 않는다).
+    expect(screen.getAllByTestId('attachment-preview')[0].props.accessibilityValue.text).toBe('ready');
+    await ready();
+    expect(fileSystem.__state.downloads).toHaveLength(1);
   });
 
   it('잰 크기를 지우면(시험 사이·앱 재시작) 자리표시로 돌아간다', async () => {

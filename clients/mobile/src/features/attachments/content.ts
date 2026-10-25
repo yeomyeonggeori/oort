@@ -92,7 +92,11 @@ function cacheKey(
   channelId: string,
   attachmentId: string,
 ): string {
-  return `${workspaceId}:${channelId}:${attachmentId}`;
+  // 대소문자를 가리지 않는다(#4455 design-review r3 L13). 워크스페이스·채널·첨부 id 는 uuid 이고, 같은 사진을 그리는 두 마운트가 이 값을
+  // 서로 다른 곳에서 받는다 — 보낸 사진의 메아리는 화면의 경로 인자에서, 서버 사본은 서버 응답에서. 대소문자만 달라도 같은 파일이다
+  // (코어 `confirmsPending` 이 첨부 id 를 소문자로 맞춰 대조하는 것과 같은 규칙). 위 「잰 크기」 저장소의 키와 같은 정규화다 —
+  // 둘이 어긋나면 서버 사본은 크기만 이어받고 바이트는 못 찾아 「불러오는 중」 칸으로 서서 다시 내려받는다.
+  return `${workspaceId}:${channelId}:${attachmentId}`.toLowerCase();
 }
 
 function safeFileName(name: string): string {
