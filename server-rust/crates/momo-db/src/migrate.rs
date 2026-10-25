@@ -674,12 +674,16 @@ mod tests {
     /// 148 is #4385's `member.avatar.set` (ADR-0186 증보 2026-10-25 v4): only the INSERT guard of
     /// `agent_avatar_image` changes — the image's owner may be the person who asked the agent, the
     /// proposer must be an agent.
+    ///
+    /// 149 is #4313's display fields (ADR-0113 증보 3 F1): a jsonb patch on the seven official
+    /// `plugin_registry` manifests (`logoKey`, `category`, `websiteURL`, `starterPrompts`) with the
+    /// digest rewritten in the same statement.
     #[test]
-    fn discovers_contiguous_migrations_001_to_148() {
+    fn discovers_contiguous_migrations_001_to_149() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=148).collect();
+        let expected: Vec<i64> = (1..=149).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -687,7 +691,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=148 under {}",
+            "expected contiguous 001..=149 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -695,7 +699,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("148_member_avatar_set_by_agent"));
+            .starts_with("149_official_catalog_display_fields"));
     }
 
     #[test]

@@ -117,7 +117,8 @@ fn failure_of_refusal(refusal: &DeliverRefusal) -> ScheduleFailure {
         | DeliverRefusal::QuoteTarget(_)
         | DeliverRefusal::RunBinding(_)
         | DeliverRefusal::NoSigningKey
-        | DeliverRefusal::Routing(_) => ScheduleFailure::NotAllowed,
+        | DeliverRefusal::Routing(_)
+        | DeliverRefusal::Apps(_) => ScheduleFailure::NotAllowed,
     }
 }
 
@@ -187,6 +188,8 @@ pub(crate) async fn deliver_schedule_in_tx(
         author_is_agent: author.kind == MemberKind::Agent,
         author_is_human: author.kind == MemberKind::Human,
         requested_routing: None,
+        // A schedule is closed to `apps` like it is to `props` and `routing` (ADR-0113 증보 3 F5).
+        requested_apps: Vec::new(),
         gates: gates.clone(),
     };
     let outcome = deliver_message_in_tx(conn, request).await?;

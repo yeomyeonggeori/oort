@@ -2317,6 +2317,222 @@ mod tests {
         assert_eq!(DeliveryGate::Paused.skip_reason(), "agent_paused");
     }
 
+    /// What F8 (`GET …/members/me/app-runtimes`, ADR-0113 증보 3) says about one delivery-gate stage.
+    #[derive(Debug, PartialEq, Eq)]
+    enum F8View {
+        /// `blocked: null`.
+        Deliverable,
+        /// `blocked: <reason>`.
+        Blocked(crate::routes::app_runtimes::Blocked),
+        /// Differs per conversation (membership, the hosted connection's per-channel approval): F8
+        /// carries no `channelId`, so the client judges it from the roster / the gate answers after the
+        /// send (ADR-0113 증보 3 F8 「대화마다 다른 사실」).
+        PerConversation,
+        /// A stage that cannot refuse the caller of an F8 agent: F8 projects only the caller's own
+        /// non-`owner_only` agents, and the caller is its connector owner.
+        CannotApply,
+    }
+
+    /// **The one line that turns red when the gate grows a stage.** An exhaustive `match` — no wildcard
+    /// arm — over every [`DeliveryGate`] variant. Adding a variant to the gate does not compile here
+    /// until someone has decided what F8 says about it (a new agent-level stage almost certainly needs a
+    /// new `blocked` value, a new OpenAPI enum entry and a new client sentence, and a `null` that quietly
+    /// meant "deliverable" would send people messages the door throws away). The classification below is
+    /// ADR-0113 증보 3 F8, line for line.
+    fn f8_view(gate: DeliveryGate) -> F8View {
+        use crate::routes::app_runtimes::Blocked;
+        match gate {
+            DeliveryGate::Open { .. } => F8View::Deliverable,
+            DeliveryGate::ConnectorTrial(stop) => F8View::Blocked(Blocked::from(stop)),
+            DeliveryGate::HostedDeliveryNotEnabled => F8View::Blocked(Blocked::HostedOff),
+            DeliveryGate::HostedConnectionUnavailable => F8View::Blocked(Blocked::Connection),
+            DeliveryGate::Paused => F8View::Blocked(Blocked::Paused),
+            DeliveryGate::HostedChannelUnapproved | DeliveryGate::NotChannelMember => {
+                F8View::PerConversation
+            }
+            DeliveryGate::PersonalAgent(_)
+            | DeliveryGate::OwnerOnly(_)
+            | DeliveryGate::ConnectorOwner(_)
+            | DeliveryGate::ConnectorOwnerNonPerson => F8View::CannotApply,
+        }
+    }
+
+    fn f8_answer(blocked: Option<crate::routes::app_runtimes::Blocked>) -> F8View {
+        blocked.map_or(F8View::Deliverable, F8View::Blocked)
+    }
+
+    /// ADR-0113 증보 3 F8 수용 7 (#4313): `blocked` is the delivery gate's agent-level chain, not a
+    /// parallel opinion. The real [`delivery_gate`] is driven over every combination of the facts F8
+    /// reads — instance switch, attestation, trial facts, grants, connection, pause — for both paths,
+    /// as the agent's owner in a channel the agent belongs to and is approved for, and must agree with
+    /// `app_runtimes::blocked` on every one. The sabotages: drop a stage from `blocked` (or reorder two),
+    /// and the combinations where that stage decides disagree.
+    #[test]
+    fn app_runtimes_blocked_agrees_with_the_real_delivery_gate() {
+        use crate::routes::app_runtimes::{blocked, runtime_path, Blocked, RuntimePath};
+        use momo_agent::{ConnectorOwner, ConnectorTrialAttest, ConnectorTrialFacts};
+
+        const GMAIL: &str = "com.momo.plugins.gmail";
+        let owner = Uuid::from_u128(1);
+        let owned = |trial: Option<ConnectorTrialFacts>| {
+            Some(ConnectorOwner {
+                owner_member_id: owner,
+                owner_display_name: "이도현".into(),
+                trial,
+            })
+        };
+        // Everything the owner's call needs that F8 does not carry: member of the channel, and (hosted)
+        // approved for it.
+        let in_the_room = |mut agent: MentionCandidate| {
+            agent.is_channel_member = true;
+            agent.hosted_channel_approved = true;
+            agent
+        };
+        let attests = [
+            ConnectorTrialAttest::default(),
+            ConnectorTrialAttest {
+                tools_locked: true,
+                connectors_locked: false,
+                apps: vec![GMAIL.to_string()],
+            },
+            ConnectorTrialAttest {
+                tools_locked: true,
+                connectors_locked: true,
+                apps: Vec::new(),
+            },
+            ConnectorTrialAttest {
+                tools_locked: true,
+                connectors_locked: true,
+                apps: vec![GMAIL.to_string()],
+            },
+        ];
+        let mut seen: Vec<F8View> = Vec::new();
+        let mut checked = 0;
+
+        // hosted_vendor: switch × active connection × paused × attestation (which a hosted agent ignores).
+        for hosted_enabled in [true, false] {
+            for connection in [None, Some(Uuid::from_u128(9))] {
+                for paused in [false, true] {
+                    for attest in &attests {
+                        let mut agent = candidate(Uuid::from_u128(2), "hosted");
+                        agent.connector_owner = owned(None);
+                        agent.hosted_delivery_disabled = true;
+                        agent.hosted_active_connection_id = connection;
+                        agent.paused = paused;
+                        let agent = in_the_room(agent);
+                        let send = MentionSend {
+                            hosted_delivery_enabled: hosted_enabled,
+                            connector_trial: attest,
+                            ..send_for(owner)
+                        };
+                        let path = runtime_path(&agent, owner).expect("an F8 hosted agent");
+                        assert_eq!(path, RuntimePath::HostedVendor);
+                        let view = f8_view(delivery_gate(&agent, &send));
+                        assert_eq!(
+                            f8_answer(blocked(path, &agent, hosted_enabled, attest)),
+                            view,
+                            "hosted: enabled={hosted_enabled} connection={connection:?} paused={paused}"
+                        );
+                        checked += 1;
+                        seen.push(view);
+                    }
+                }
+            }
+        }
+
+        // hermes_trial: attestation × people × grants × paused × the hosted switch (which the trial ignores).
+        for attest in &attests {
+            for humans in [0, 1, 2] {
+                for granted in [vec![GMAIL.to_string()], Vec::new()] {
+                    for paused in [false, true] {
+                        for hosted_enabled in [true, false] {
+                            let mut agent = candidate(Uuid::from_u128(3), "hermes");
+                            agent.connector_owner = owned(Some(ConnectorTrialFacts {
+                                active_humans: humans,
+                                granted_apps: granted.clone(),
+                            }));
+                            agent.paused = paused;
+                            let agent = in_the_room(agent);
+                            let send = MentionSend {
+                                hosted_delivery_enabled: hosted_enabled,
+                                connector_trial: attest,
+                                ..send_for(owner)
+                            };
+                            let path = runtime_path(&agent, owner).expect("an F8 trial agent");
+                            assert_eq!(path, RuntimePath::HermesTrial);
+                            let view = f8_view(delivery_gate(&agent, &send));
+                            assert_eq!(
+                                f8_answer(blocked(path, &agent, hosted_enabled, attest)),
+                                view,
+                                "hermes: attest={attest:?} humans={humans} granted={granted:?} paused={paused}"
+                            );
+                            checked += 1;
+                            seen.push(view);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The grid is not vacuous: it reached deliverable and every blocked value at least once.
+        assert!(checked >= 100, "{checked}");
+        for expected in [
+            F8View::Deliverable,
+            F8View::Blocked(Blocked::HostedOff),
+            F8View::Blocked(Blocked::Connection),
+            F8View::Blocked(Blocked::Attest),
+            F8View::Blocked(Blocked::Members),
+            F8View::Blocked(Blocked::Apps),
+            F8View::Blocked(Blocked::Paused),
+        ] {
+            assert!(
+                seen.contains(&expected),
+                "the grid never produced {expected:?}"
+            );
+        }
+        assert!(
+            !seen.contains(&F8View::PerConversation) && !seen.contains(&F8View::CannotApply),
+            "as the owner, in the room, no non-F8 stage can refuse"
+        );
+    }
+
+    /// The stages F8 does not carry are exactly the ones the gate answers per conversation or per
+    /// caller — pinned by driving them, so the `PerConversation` / `CannotApply` classes in [`f8_view`] are
+    /// facts and not labels.
+    #[test]
+    fn the_stages_f8_leaves_out_are_per_conversation_or_per_caller() {
+        let owner = Uuid::from_u128(1);
+        let stranger = Uuid::from_u128(5);
+        let mut hosted = candidate(Uuid::from_u128(2), "hosted");
+        hosted.connector_owner = Some(momo_agent::ConnectorOwner {
+            owner_member_id: owner,
+            owner_display_name: "이도현".into(),
+            trial: None,
+        });
+        hosted.hosted_delivery_disabled = true;
+        hosted.hosted_active_connection_id = Some(Uuid::from_u128(9));
+        // Connected, but this channel is not approved for it: per conversation.
+        hosted.is_channel_member = true;
+        hosted.hosted_channel_approved = false;
+        assert_eq!(
+            f8_view(delivery_gate(&hosted, &send_for(owner))),
+            F8View::PerConversation
+        );
+        // Not in the channel at all: per conversation.
+        hosted.is_channel_member = false;
+        assert_eq!(
+            f8_view(delivery_gate(&hosted, &send_for(owner))),
+            F8View::PerConversation
+        );
+        // Someone other than the owner calls: per caller (F8 answers for the owner only).
+        hosted.is_channel_member = true;
+        hosted.hosted_channel_approved = true;
+        assert_eq!(
+            f8_view(delivery_gate(&hosted, &send_for(stranger))),
+            F8View::CannotApply
+        );
+    }
+
     /// ADR-0113 증보 2 E3 (#3938): an agent that runs its owner's apps is called
     /// by that human alone. A person other than the owner is told (one
     /// sentence); anyone who is not a person — an agent's A2A mention, a work

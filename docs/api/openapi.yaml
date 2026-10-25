@@ -4450,6 +4450,67 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/members/me/app-runtimes:
+    get:
+      tags: [plugins]
+      operationId: listMyAppRuntimes
+      summary: List the caller's own agents that can run the caller's apps, and whether a message to each would be delivered now.
+      description: >
+        ADR-0113 증보 3 F8 (#4313). The composer's app chip asks this before it
+        sends: which of **my** agents is a place where my apps run (증보 2 E1/E3), and
+        would a message to it be thrown away at the door. The answer is a bare JSON
+        array.
+
+        **Only the caller's own agents** (the agent's connector owner is the caller):
+        another member's agent, and anyone else's grants, are absent from the
+        answer — not filtered by the client, absent. `apps` is always a subset of
+        the caller's own active grants; for the co-hosted Hermes it is the
+        operator's switched-on list intersected with those grants, so the operator's
+        configuration is never exposed whole. It is not part of the roster or the
+        agent DTO, because that would show every member whose agent has which
+        personal app attached.
+
+        **`blocked`** is the first stage of the delivery gate's agent-level chain
+        that would refuse a message from the owner, or `null` when nothing does:
+        for `hermes_trial` the trial's own stop (`attest`, `members`, `apps`) then
+        `paused`; for `hosted_vendor` `hosted_off` (the instance's hosted delivery
+        switch is closed — the default configuration), `connection` (no active,
+        proved connection), then `paused`. It carries nothing that differs per
+        conversation: channel membership is judged by the client from the roster,
+        and the hosted connection's per-channel approval is answered by the
+        existing gate after the send.
+
+        Agents that are not app runtimes in v1 are absent: a marked personal agent
+        (the owner's Mac), a subscription harness, an owner-key agent, and a marked
+        agent that is neither the co-hosted Hermes nor a hosted vendor agent.
+
+        Human-only, in two layers: the path is not in the agent allowlist (an agent
+        bearer is refused with 403 by the middleware) and the handler requires a
+        human principal.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's own app runtimes (an empty array when there are none).
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AppRuntime"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Not a person (an agent or work-host credential), not an active member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/members/me/sidebar-prefs:
     get:
       tags: [sidebar]
@@ -10193,7 +10254,10 @@ paths:
             anything other than `rev: 0` / `streaming: true`, or a signed send
             that also opens a stream (the provenance digest binds the props as
             inserted, and the opening marker is written by the server after the
-            signature was made).
+            signature was made), or — with `error.code = apps_unavailable`
+            (ADR-0113 증보 3 F5) — an `apps` list the sender may not use: an
+            agent or system author, an app that is not an installed and enabled
+            official app, or more than three distinct ids. Nothing is stored.
           content:
             application/json:
               schema:
@@ -19358,8 +19422,35 @@ components:
             when its value is `github` (any case), and every key starting with
             `github_` - and are dropped, not refused, from this map and from
             webhook-ingress `props`; only the signed GitHub receiver writes them.
-            Because the map is flat, a structured block cannot be sent through
-            it at all.
+            ADR-0113 증보 3 F5 (#4313): `requestedApps` is server-owned too (the
+            composer's app chips — send the `apps` field instead), stripped from
+            this map and from webhook-ingress `props`. Because the map is flat,
+            a structured block cannot be sent through it at all.
+        apps:
+          type: array
+          maxItems: 3
+          items:
+            type: string
+            pattern: "^[a-z0-9][a-z0-9._-]{2,127}$"
+          description: >
+            ADR-0113 증보 3 F5 (#4313) — the official apps the sender picked in the
+            composer (ids as the catalog lists them). Validated **inside the send
+            transaction, on a new insert only**: the sender is a person, every id
+            is an installed and enabled official app of this workspace, and at
+            most three remain after duplicates are dropped. Anything else is a
+            `400` with `error.code = apps_unavailable` — the client clears the
+            chips, re-reads the catalog and keeps the draft; it is never dropped
+            silently. A passing list is stored, de-duplicated in first-seen order,
+            under the server-owned `props.requestedApps` (a JSON array). An
+            idempotent retry (same `clientMsgId`) answers the stored message with
+            201 whatever `apps` says now, so an app uninstalled after the first
+            request cannot turn a harmless retry into a refusal.
+
+            **A marker, not a grant:** delivery, the owner-only and connector-owner
+            guards and `tool_grants` never read it — a message carrying `apps` is
+            delivered or refused exactly like the same message without it. An
+            older server's request is closed-world and answers `400` for this key,
+            so send it only after `GET …/members/me/app-runtimes` has answered.
         runId:
           type: string
           format: uuid
@@ -20072,6 +20163,14 @@ components:
           description: >
             Arbitrary JSON object; includes the server-computed
             `mention_member_ids` array when the message mentions members.
+            ADR-0113 증보 3 F5 (#4313) adds the **server-owned** optional key
+            `requestedApps` on a *person's* message: the JSON array of distinct
+            official plugin ids (at most three) the sender picked in the composer
+            (the send request's `apps`, validated when the message was written).
+            It is a marker for logo chips — never a grant and never read by
+            delivery or by `tool_grants`; a client or agent cannot send it, and a
+            client draws the chips only on a person-authored message and ignores a
+            value that is not such an array.
             ADR-0113 증보 2 E8·E10 (#4054) adds two **server-owned** optional
             keys on an agent's answer (never present unless the server wrote
             them; a client or agent cannot send them): `appsUsed`, the answer's
@@ -20648,6 +20747,7 @@ components:
         - name
         - version
         - description
+        - publisherName
         - official
         - recommended
         - egressDomains
@@ -20671,6 +20771,39 @@ components:
           type: string
           maxLength: 8
           description: Optional short text icon. Remote image URLs are not supported; clients derive a character fallback from name when omitted.
+        publisherName:
+          type: string
+          description: >
+            ADR-0113 증보 3 F1 — the one developer field: the manifest's own
+            `plugin.publisher.name`, repeated here so a list row needs no manifest.
+            No second developer key exists, so the card and the manifest cannot disagree.
+        logoKey:
+          type: string
+          pattern: "^[a-z0-9-]{1,32}$"
+          description: >
+            ADR-0113 증보 3 F1 — the name of a client-bundled logo asset, never a URL or
+            a path. Omitted when the manifest declares none; a client that does not know
+            the key draws `iconText` / the first character of `name`. Remote image URL
+            keys (`iconURL`, `logoURL`, `imageURL`) are not accepted in a manifest, so
+            none ever appears here.
+        category:
+          type: string
+          enum: [communication, productivity, developer, files, project]
+          description: >
+            ADR-0113 증보 3 F1 — one of a closed list. A client that sees a value it does
+            not know should draw no category rather than guess.
+        starterPrompts:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/PluginStarterPrompt"
+          description: >
+            ADR-0113 증보 3 F1/F7 — up to three example sentences for the app's card.
+            Omitted (never `[]`) when the manifest declares none.
+        websiteURL:
+          type: string
+          format: uri
+          description: Optional HTTPS developer website (navigation only). Omitted when not declared.
         official: {type: boolean}
         recommended:
           type: boolean
@@ -20683,6 +20816,25 @@ components:
           items: {type: string}
         installed: {type: boolean}
         enabled: {type: boolean}
+
+    PluginStarterPrompt:
+      type: object
+      required: [text, tool]
+      additionalProperties: false
+      description: >
+        ADR-0113 증보 3 F1/F7 — one example sentence of an app card. Plain text only:
+        no markdown is interpreted and the text can hold no URL (`://`, `//`, `www.`)
+        and no control character.
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 140
+        tool:
+          type: string
+          description: >
+            A tool of the same manifest, of grade R (read) or A (a write that asks
+            every time). Never a grade B or admin tool.
 
     PluginPolicyTool:
       type: object
@@ -20741,6 +20893,7 @@ components:
         - name
         - version
         - description
+        - publisherName
         - official
         - egressDomains
         - recommendedFor
@@ -20764,6 +20917,39 @@ components:
           type: string
           maxLength: 8
           description: Optional short text icon. Remote image URLs are not supported; clients derive a character fallback from name when omitted.
+        publisherName:
+          type: string
+          description: >
+            ADR-0113 증보 3 F1 — the one developer field: the manifest's own
+            `plugin.publisher.name`, repeated here so a list row needs no manifest.
+            No second developer key exists, so the card and the manifest cannot disagree.
+        logoKey:
+          type: string
+          pattern: "^[a-z0-9-]{1,32}$"
+          description: >
+            ADR-0113 증보 3 F1 — the name of a client-bundled logo asset, never a URL or
+            a path. Omitted when the manifest declares none; a client that does not know
+            the key draws `iconText` / the first character of `name`. Remote image URL
+            keys (`iconURL`, `logoURL`, `imageURL`) are not accepted in a manifest, so
+            none ever appears here.
+        category:
+          type: string
+          enum: [communication, productivity, developer, files, project]
+          description: >
+            ADR-0113 증보 3 F1 — one of a closed list. A client that sees a value it does
+            not know should draw no category rather than guess.
+        starterPrompts:
+          type: array
+          maxItems: 3
+          items:
+            $ref: "#/components/schemas/PluginStarterPrompt"
+          description: >
+            ADR-0113 증보 3 F1/F7 — up to three example sentences for the app's card.
+            Omitted (never `[]`) when the manifest declares none.
+        websiteURL:
+          type: string
+          format: uri
+          description: Optional HTTPS developer website (navigation only). Omitted when not declared.
         official: {type: boolean}
         egressDomains:
           type: array
@@ -20784,6 +20970,51 @@ components:
       properties:
         plugin:
           $ref: "#/components/schemas/PluginDetail"
+
+    AppRuntime:
+      type: object
+      required: [agentId, path, apps, enforced, blocked]
+      description: >
+        ADR-0113 증보 3 F8 (#4313) — one of the caller's own agents that can run the
+        caller's apps. `blocked` is always present: `null` means a message from the
+        owner would be delivered now.
+      properties:
+        agentId:
+          type: string
+          format: uuid
+        path:
+          type: string
+          enum: [hermes_trial, hosted_vendor]
+          description: >
+            `hermes_trial` — the operator's co-hosted Hermes on a connector trial: the
+            server re-measures the trial at every delivery and the app list is
+            enforced. `hosted_vendor` — a hosted vendor agent: oort records the
+            grant but cannot enforce it on the vendor's side. A client that sees a
+            value it does not know should not offer that agent.
+        apps:
+          type: array
+          items: {type: string}
+          description: >
+            Plugin ids, always a subset of the caller's own active grants (an
+            installed, enabled app plus an unrevoked grant). For `hermes_trial` the
+            operator's switched-on apps intersected with those grants, in the
+            operator's order; for `hosted_vendor` the grants, in plugin-id order.
+        enforced:
+          type: boolean
+          description: True for `hermes_trial`, false for `hosted_vendor`.
+        blocked:
+          type: string
+          nullable: true
+          enum: [hosted_off, connection, attest, members, apps, paused, null]
+          description: >
+            The first delivery-gate stage that would refuse the owner, or `null`.
+            `hosted_off`: the instance's hosted delivery switch is closed.
+            `connection`: no active, proved hosted connection. `attest`: an operator
+            attestation (or the app list) is missing from the server environment.
+            `members`: the workspace does not have exactly one active person.
+            `apps`: an app the operator switched on in Hermes lost the owner's grant.
+            `paused`: the agent is paused. A client that sees a value it does not
+            know must treat it as blocked.
 
     PluginMutationResponse:
       type: object

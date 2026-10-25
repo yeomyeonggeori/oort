@@ -492,6 +492,57 @@ async fn the_wire_equals_the_fixture_the_core_parser_reads() {
         assert_eq!(body, &fixture, "{name} drifted from the server response");
     }
 
+    // ADR-0113 증보 3 F1 (#4313): every app of the list and of its detail carries the display fields
+    // 149 patched in, the developer column is the manifest's own `publisher.name`, and no remote image
+    // key exists anywhere on the wire.
+    let expected_display: [(&str, &str, &str, bool); 7] = [
+        (DRIVE, "google-drive", "files", false),
+        (GITHUB, "github", "developer", true),
+        (GMAIL, "gmail", "communication", true),
+        (GCAL, "google-calendar", "productivity", true),
+        (GDRIVE, "google-drive", "files", true),
+        (LINEAR, "linear", "project", true),
+        (NOTION, "notion", "productivity", true),
+    ];
+    for (index, (plugin, logo, category, has_website)) in expected_display.iter().enumerate() {
+        let item = &catalog["plugins"][index];
+        assert_eq!(item["pluginId"], *plugin);
+        assert_eq!(item["logoKey"], *logo, "{plugin} logoKey");
+        assert_eq!(item["category"], *category, "{plugin} category");
+        assert_eq!(
+            item["starterPrompts"].as_array().map(Vec::len),
+            Some(3),
+            "{plugin} starterPrompts"
+        );
+        assert_eq!(
+            item.get("websiteURL").is_some(),
+            *has_website,
+            "{plugin} websiteURL"
+        );
+        assert!(
+            item["publisherName"]
+                .as_str()
+                .is_some_and(|name| !name.is_empty()),
+            "{plugin} publisherName"
+        );
+        let (_, detail) = get(&env, &token, &detail_path(workspace, plugin)).await;
+        let plugin_manifest = &detail["plugin"]["manifest"]["plugin"];
+        assert_eq!(
+            detail["plugin"]["publisherName"], plugin_manifest["publisher"]["name"],
+            "{plugin}: one developer column, the manifest's"
+        );
+        for key in ["logoKey", "category", "websiteURL", "starterPrompts"] {
+            assert_eq!(
+                detail["plugin"].get(key),
+                item.get(key),
+                "{plugin} {key}: list and detail agree"
+            );
+        }
+        for remote in ["iconURL", "logoURL", "imageURL"] {
+            assert!(item.get(remote).is_none() && detail["plugin"].get(remote).is_none());
+        }
+    }
+
     // The fixture state is what it claims to be.
     let github = &catalog["plugins"][1];
     assert_eq!(github["installed"], true);
@@ -707,6 +758,14 @@ const STRUCTURAL_KEYS: &[&str] = &[
     "termsURL",
     "privacyPolicyURL",
     "iconText",
+    // ADR-0113 증보 3 F1 (#4313): the display fields, and the developer column.
+    "publisherName",
+    "logoKey",
+    "category",
+    "websiteURL",
+    "starterPrompts",
+    "text",
+    "tool",
     "official",
     "recommended",
     "egressDomains",
@@ -1051,4 +1110,175 @@ async fn a_former_member_gets_404_on_reads_and_403_on_writes() {
         assert_eq!(status, 404, "{path}: {body}");
         assert_eq!(body["error"]["message"], "plugin not found");
     }
+}
+
+// ---- ADR-0113 증보 3 F1 (#4313): migration 149 on a real registry ---------------------------------
+
+const OFFICIAL_SEVEN: [&str; 7] = [DRIVE, GITHUB, GMAIL, GCAL, GDRIVE, LINEAR, NOTION];
+const DISPLAY_KEYS: [&str; 4] = ["logoKey", "category", "websiteURL", "starterPrompts"];
+/// What an older server's validator admits in `plugin` (before F1): anything else is refused there.
+const LEGACY_PLUGIN_KEYS: [&str; 10] = [
+    "id",
+    "name",
+    "version",
+    "description",
+    "publisher",
+    "license",
+    "provenance",
+    "termsURL",
+    "privacyPolicyURL",
+    "iconText",
+];
+
+fn migration_149_sql() -> String {
+    std::fs::read_to_string(
+        repo_root().join("server/Migrations/149_official_catalog_display_fields.sql"),
+    )
+    .expect("migration 149")
+}
+
+/// The commented-out rollback statement at the bottom of the migration, as SQL (the text a person copies
+/// into the PR description and runs on the day the server image rolls back).
+fn migration_149_rollback_sql() -> String {
+    let text = migration_149_sql();
+    let mut lines = text
+        .lines()
+        .skip_while(|line| !line.starts_with("-- ROLLBACK"));
+    lines.next().expect("the ROLLBACK header");
+    let statement: Vec<String> = lines
+        .take_while(|line| !line.starts_with("-- ----"))
+        .filter_map(|line| line.strip_prefix("--   ").map(str::to_string))
+        .collect();
+    assert!(
+        statement
+            .first()
+            .is_some_and(|line| line.starts_with("UPDATE plugin_registry")),
+        "the rollback block must be the UPDATE: {statement:?}"
+    );
+    statement.join("\n")
+}
+
+async fn registry_state(su: &PgPool) -> Vec<(String, String, String, String)> {
+    sqlx::query_as(
+        "SELECT plugin_id, manifest::text, manifest_digest, updated_at::text \
+           FROM plugin_registry WHERE plugin_id = ANY($1) ORDER BY plugin_id",
+    )
+    .bind(OFFICIAL_SEVEN.map(String::from).to_vec())
+    .fetch_all(su)
+    .await
+    .expect("registry state")
+}
+
+async fn digests_match_their_manifests(su: &PgPool) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT plugin_id FROM plugin_registry WHERE plugin_id = ANY($1) \
+            AND manifest_digest <> 'sha256:' || encode(sha256(convert_to(manifest::text, 'UTF8')), 'hex')",
+    )
+    .bind(OFFICIAL_SEVEN.map(String::from).to_vec())
+    .fetch_all(su)
+    .await
+    .expect("digest check")
+}
+
+/// ADR-0113 증보 3 수용 3: the seed migration rewrote `manifest` **and** `manifest_digest` together — on the
+/// real registry, for all seven apps — and running it again changes nothing (not even `updated_at`: the
+/// UPDATE fires only where the patched manifest differs).
+#[tokio::test]
+#[ignore]
+async fn migration_149_patched_all_seven_with_matching_digests_and_is_idempotent() {
+    let _guard = test_lock().await;
+    let env = env().await;
+
+    let before = registry_state(&env.su).await;
+    assert_eq!(before.len(), 7);
+    for (plugin, manifest, _digest, _updated) in &before {
+        let manifest: Value = serde_json::from_str(manifest).expect("manifest json");
+        for key in ["logoKey", "category", "starterPrompts"] {
+            assert!(
+                manifest["plugin"].get(key).is_some(),
+                "{plugin}: {key} is patched in"
+            );
+        }
+    }
+    assert!(
+        digests_match_their_manifests(&env.su).await.is_empty(),
+        "every digest equals sha256 of its manifest text (a stale digest drops the app from the catalogue)"
+    );
+
+    // Again: the same statements, no row written.
+    sqlx::raw_sql(&migration_149_sql())
+        .execute(&env.su)
+        .await
+        .expect("re-run migration 149");
+    assert_eq!(
+        registry_state(&env.su).await,
+        before,
+        "a second run changes no manifest, digest or updated_at"
+    );
+}
+
+/// The rollback SQL in the migration's last comment block (the one the PR description carries) actually runs,
+/// restores what an older server admits — the four display keys gone, every other byte of the manifest
+/// untouched, the digest re-derived — and re-applying 149 afterwards brings back exactly the 149 state.
+/// Always re-applied, so a failing assertion cannot leave the shared registry rolled back for other tests.
+#[tokio::test]
+#[ignore]
+async fn the_rollback_sql_restores_the_legacy_manifests_and_a_reapply_restores_149() {
+    let _guard = test_lock().await;
+    let env = env().await;
+    let after_149 = registry_state(&env.su).await;
+    let mut problems: Vec<String> = Vec::new();
+
+    sqlx::query(&migration_149_rollback_sql())
+        .execute(&env.su)
+        .await
+        .expect("the documented rollback SQL runs");
+    let rolled_back = registry_state(&env.su).await;
+    for ((plugin, patched, _, _), (_, legacy, _, _)) in after_149.iter().zip(&rolled_back) {
+        let patched: Value = serde_json::from_str(patched).expect("patched json");
+        let legacy: Value = serde_json::from_str(legacy).expect("legacy json");
+        let keys: Vec<&String> = legacy["plugin"]
+            .as_object()
+            .expect("plugin")
+            .keys()
+            .collect();
+        for key in &keys {
+            if !LEGACY_PLUGIN_KEYS.contains(&key.as_str()) {
+                problems.push(format!("{plugin}: {key} survived the rollback"));
+            }
+        }
+        // Nothing but the four keys moved.
+        let mut expected = patched.clone();
+        for key in DISPLAY_KEYS {
+            expected["plugin"]
+                .as_object_mut()
+                .expect("plugin")
+                .remove(key);
+        }
+        if legacy != expected {
+            problems.push(format!(
+                "{plugin}: the rollback changed more than the four keys"
+            ));
+        }
+    }
+    let stale = digests_match_their_manifests(&env.su).await;
+    if !stale.is_empty() {
+        problems.push(format!("digests not re-derived by the rollback: {stale:?}"));
+    }
+
+    sqlx::raw_sql(&migration_149_sql())
+        .execute(&env.su)
+        .await
+        .expect("re-apply migration 149");
+    let reapplied = registry_state(&env.su).await;
+    for ((plugin, manifest, digest, _), (_, manifest_after, digest_after, _)) in
+        after_149.iter().zip(&reapplied)
+    {
+        if manifest != manifest_after || digest != digest_after {
+            problems.push(format!(
+                "{plugin}: re-applying 149 did not restore the 149 manifest and digest"
+            ));
+        }
+    }
+    assert!(problems.is_empty(), "{problems:#?}");
 }

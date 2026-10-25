@@ -370,6 +370,22 @@ pub struct SendMessageRequest {
     /// makes.
     #[serde(default)]
     pub harness_refine: Option<HarnessRefineRequest>,
+    /// ADR-0113 증보 3 F5 (#4313) — the official apps the requester picked in the
+    /// composer: `["com.momo.plugins.gmail", …]`.
+    ///
+    /// A dedicated field for the reason [`SendMessageRequest::props`] gives (a flat
+    /// string map cannot carry an array, and a client-writable key could forge a
+    /// chip). The server validates it **inside the send transaction, on a new insert
+    /// only** — a person wrote the message, the ids are distinct installed and
+    /// enabled official apps, at most three — and stores the result under the
+    /// server-owned `props.requestedApps` (`routes::requested_apps`). A refusal is a
+    /// coded 400 `apps_unavailable`; an idempotent retry answers the stored message
+    /// whatever this field says. **A marker, not a grant:** delivery and
+    /// `tool_grants` never read it. An older server's closed-world request refuses
+    /// the unknown key, so a client sends it only once `GET …/members/me/app-runtimes`
+    /// has proved the surface.
+    #[serde(default)]
+    pub apps: Option<Vec<String>>,
 }
 
 /// The `harnessRefine` block on [`SendMessageRequest`] (ADR-0158 D1~D4).

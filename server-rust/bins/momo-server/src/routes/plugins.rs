@@ -166,6 +166,25 @@ struct PolicyRow {
 
 // ---- wire (Swift PluginRoutes DTOs; camelCase; nil optionals omitted) -----
 
+/// ADR-0113 증보 3 F1/F7 — one example sentence of a catalogue card. Plain text; the
+/// `tool` is a tool of the same manifest (grade R or A, checked at admission).
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct StarterPromptDto {
+    pub text: String,
+    pub tool: String,
+}
+
+fn starter_prompt_dtos(manifest: &ValidatedPluginManifest) -> Vec<StarterPromptDto> {
+    manifest
+        .starter_prompts
+        .iter()
+        .map(|prompt| StarterPromptDto {
+            text: prompt.text.clone(),
+            tool: prompt.tool.clone(),
+        })
+        .collect()
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct PluginCatalogItemDto {
@@ -173,12 +192,28 @@ pub struct PluginCatalogItemDto {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// `plugin.publisher.name` — the one developer field (ADR-0113 증보 3 F1).
+    pub publisher_name: String,
     #[serde(rename = "termsURL", skip_serializing_if = "Option::is_none")]
     pub terms_url: Option<String>,
     #[serde(rename = "privacyPolicyURL", skip_serializing_if = "Option::is_none")]
     pub privacy_policy_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_text: Option<String>,
+    /// ADR-0113 증보 3 F1 — name of a client-bundled logo asset. Omitted when the
+    /// manifest declares none; a client that does not know the key draws `iconText`
+    /// / the name's first character instead.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo_key: Option<String>,
+    /// ADR-0113 증보 3 F1 — one of `communication` · `productivity` · `developer` ·
+    /// `files` · `project`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    /// ADR-0113 증보 3 F1/F7 — 0~3 example sentences; omitted when there are none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub starter_prompts: Vec<StarterPromptDto>,
+    #[serde(rename = "websiteURL", skip_serializing_if = "Option::is_none")]
+    pub website_url: Option<String>,
     pub official: bool,
     pub recommended: bool,
     pub egress_domains: Vec<String>,
@@ -229,12 +264,22 @@ pub struct PluginDetailDto {
     pub name: String,
     pub version: String,
     pub description: String,
+    /// `plugin.publisher.name` (see [`PluginCatalogItemDto::publisher_name`]).
+    pub publisher_name: String,
     #[serde(rename = "termsURL", skip_serializing_if = "Option::is_none")]
     pub terms_url: Option<String>,
     #[serde(rename = "privacyPolicyURL", skip_serializing_if = "Option::is_none")]
     pub privacy_policy_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub icon_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub logo_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub starter_prompts: Vec<StarterPromptDto>,
+    #[serde(rename = "websiteURL", skip_serializing_if = "Option::is_none")]
+    pub website_url: Option<String>,
     pub official: bool,
     pub egress_domains: Vec<String>,
     pub recommended_for: Vec<String>,
@@ -612,9 +657,14 @@ fn catalog_item(row: &RegistryRow, manifest: &ValidatedPluginManifest) -> Plugin
         name: manifest.name.clone(),
         version: manifest.version.clone(),
         description: manifest.description.clone(),
+        publisher_name: manifest.publisher_name.clone(),
         terms_url: manifest.terms_url.clone(),
         privacy_policy_url: manifest.privacy_policy_url.clone(),
         icon_text: manifest.icon_text.clone(),
+        logo_key: manifest.logo_key.clone(),
+        category: manifest.category.clone(),
+        starter_prompts: starter_prompt_dtos(manifest),
+        website_url: manifest.website_url.clone(),
         official: row.official,
         recommended: ONBOARDING_RECOMMENDED.contains(&manifest.plugin_id.as_str()),
         egress_domains: manifest.egress_domains.clone(),
@@ -693,14 +743,20 @@ fn catalog_response(
 }
 
 fn detail_dto(row: &RegistryRow, manifest: ValidatedPluginManifest) -> PluginDetailDto {
+    let starter_prompts = starter_prompt_dtos(&manifest);
     PluginDetailDto {
         plugin_id: manifest.plugin_id,
         name: manifest.name,
         version: manifest.version,
         description: manifest.description,
+        publisher_name: manifest.publisher_name,
         terms_url: manifest.terms_url,
         privacy_policy_url: manifest.privacy_policy_url,
         icon_text: manifest.icon_text,
+        logo_key: manifest.logo_key,
+        category: manifest.category,
+        starter_prompts,
+        website_url: manifest.website_url,
         official: row.official,
         egress_domains: manifest.egress_domains,
         recommended_for: manifest.recommended_for,
@@ -977,5 +1033,73 @@ mod tests {
     fn the_allowlist_is_the_seven_official_plugins() {
         assert_eq!(OFFICIAL_PLUGIN_IDS.len(), 7);
         assert!(OFFICIAL_PLUGIN_IDS.iter().all(|id| is_plugin_id(id)));
+    }
+
+    /// ADR-0113 증보 3 F1: the list and the detail both carry the display fields, camelCase, with the
+    /// two URL-ish keys spelled `websiteURL` (like `termsURL`), and the developer column is the manifest's
+    /// own `publisher.name` — one source, so the card and the manifest cannot disagree.
+    #[test]
+    fn the_catalog_and_the_detail_carry_the_display_fields() {
+        let github = row("com.momo.plugins.github", GITHUB, true, true);
+        let response = catalog_response(std::slice::from_ref(&github), &[], None);
+        let item = serde_json::to_value(&response.plugins[0]).expect("serialise item");
+        let detail = serde_json::to_value(detail_dto(&github, github.admit().expect("admitted")))
+            .expect("serialise detail");
+        for (label, wire) in [("list", &item), ("detail", &detail)] {
+            assert_eq!(wire["publisherName"], "GitHub", "{label}");
+            assert_eq!(wire["logoKey"], "github", "{label}");
+            assert_eq!(wire["category"], "developer", "{label}");
+            assert_eq!(wire["websiteURL"], "https://github.com", "{label}");
+            let prompts = wire["starterPrompts"].as_array().expect("starterPrompts");
+            assert_eq!(prompts.len(), 3, "{label}");
+            for prompt in prompts {
+                let keys: Vec<&str> = prompt
+                    .as_object()
+                    .expect("prompt object")
+                    .keys()
+                    .map(String::as_str)
+                    .collect();
+                assert_eq!(keys, ["text", "tool"], "{label}");
+            }
+            // No remote image key ever leaves the server, and nothing is credential-shaped.
+            for key in wire.as_object().expect("object").keys() {
+                assert!(
+                    !crate::plugin_manifest::is_secret_like_key(key),
+                    "{label}: {key}"
+                );
+                assert!(
+                    !["iconURL", "logoURL", "imageURL"].contains(&key.as_str()),
+                    "{label}: {key}"
+                );
+            }
+        }
+        // The detail still echoes the manifest verbatim, display fields included.
+        assert_eq!(detail["manifest"]["plugin"]["logoKey"], "github");
+    }
+
+    /// Additive and old-client-harmless: a manifest that declares none of the four display fields
+    /// serialises **without** the keys (never `null`, never `[]`), while the developer name — always
+    /// present in a manifest — is always on the wire.
+    #[test]
+    fn an_app_without_display_fields_omits_the_keys_and_keeps_the_developer() {
+        let mut manifest: Value = serde_json::from_str(GITHUB).expect("fixture");
+        for key in ["logoKey", "category", "websiteURL", "starterPrompts"] {
+            manifest["plugin"]
+                .as_object_mut()
+                .expect("plugin")
+                .remove(key);
+        }
+        let bare = row("com.momo.plugins.github", &manifest.to_string(), true, true);
+        let response = catalog_response(std::slice::from_ref(&bare), &[], None);
+        let item = serde_json::to_value(&response.plugins[0]).expect("serialise item");
+        let detail = serde_json::to_value(detail_dto(&bare, bare.admit().expect("admitted")))
+            .expect("serialise detail");
+        for (label, wire) in [("list", &item), ("detail", &detail)] {
+            let object = wire.as_object().expect("object");
+            for key in ["logoKey", "category", "websiteURL", "starterPrompts"] {
+                assert!(!object.contains_key(key), "{label}: {key} must be omitted");
+            }
+            assert_eq!(wire["publisherName"], "GitHub", "{label}");
+        }
     }
 }

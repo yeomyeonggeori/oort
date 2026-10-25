@@ -384,6 +384,17 @@ fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
         DeliverRefusal::NoSigningKey => no_signing_key(),
         DeliverRefusal::Send(rejected) => send_rejection(rejected),
         DeliverRefusal::Routing(message) => ApiError::bad_request(message),
+        // ADR-0113 증보 3 F5: one coded 400 whichever rule fired — the caller clears the chips and
+        // re-reads the catalog. The sentence names no id and not the word `routing`.
+        // The rule that fired stays in the debug log (it names no id), never in the answer.
+        DeliverRefusal::Apps(reason) => {
+            tracing::debug!(?reason, "send refused: apps_unavailable");
+            ApiError::coded(
+                StatusCode::BAD_REQUEST,
+                crate::routes::requested_apps::REFUSAL_CODE,
+                crate::routes::requested_apps::REFUSAL_MESSAGE,
+            )
+        }
     }
 }
 
@@ -624,12 +635,20 @@ pub async fn send(
     // The key it writes into is server-owned (`SERVER_OWNED_PROPS_KEYS`), so
     // `props_value` has already stripped any client attempt at it and this is
     // its only writer.
-    let props = match refine.as_ref() {
+    let mut props = match refine.as_ref() {
         None => props_value(request.props.as_ref()),
         Some(refine) => {
             momo_messaging::harness_refine_input_props(props_value(request.props.as_ref()), refine)
         }
     };
+    // ADR-0113 증보 3 F5 (#4313) — the `apps` marker. Stamped AFTER the props map was stripped of
+    // every server-owned key (`requestedApps` is one), so this is the key's only writer. It is
+    // written unjudged and judged inside the transaction on a new insert only
+    // (`deliver_message_in_tx`): a refusal rolls the whole message back, and a deduped retry
+    // answers the stored row, so an unjudged value is never committed.
+    let requested_apps =
+        crate::routes::requested_apps::normalize(request.apps.as_deref().unwrap_or_default());
+    crate::routes::requested_apps::stamp_props(&mut props, &requested_apps);
     let requested_run_id = request.run_id;
     let new_message = NewMessage {
         channel_id,
@@ -665,6 +684,7 @@ pub async fn send(
         author_is_agent,
         author_is_human,
         requested_routing,
+        requested_apps,
         gates,
     };
 
@@ -1894,6 +1914,7 @@ mod tests {
             signature: None,
             stream: None,
             harness_refine: None,
+            apps: None,
         }
     }
 
@@ -1989,6 +2010,74 @@ mod tests {
             assert_eq!(error.message, message, "{label}");
             assert_eq!(error.code, None, "{label}: REST never coded these");
         }
+    }
+
+    /// ADR-0113 증보 3 F5 (#4313): whichever rule refused the sender's `apps`, the caller sees the same
+    /// coded 400 — it clears its chips and re-reads the catalog. The sentence names no id and not the word
+    /// the web composer's `routing` probe reads refusals by.
+    #[test]
+    fn every_apps_refusal_is_the_one_coded_400() {
+        use crate::routes::requested_apps::AppsRefusal;
+        for refusal in [
+            AppsRefusal::NotAPerson,
+            AppsRefusal::TooMany,
+            AppsRefusal::NotAnOfficialApp,
+            AppsRefusal::NotInstalled,
+        ] {
+            let error = delivery_refusal(DeliverRefusal::Apps(refusal));
+            assert_eq!(error.status, StatusCode::BAD_REQUEST, "{refusal:?}");
+            assert_eq!(error.code, Some("apps_unavailable"), "{refusal:?}");
+            assert!(!error.message.contains("routing"), "{refusal:?}");
+            assert!(!error.message.contains("com.momo"), "{refusal:?}");
+        }
+    }
+
+    /// ADR-0113 증보 3 F5: the `apps` field decodes, an unknown sibling key is still a 400 (the request
+    /// stays closed-world), and `requestedApps` has exactly one writer — the validated field. A forged
+    /// `props.requestedApps` is stripped whether or not `apps` is present, and when `apps` is present the
+    /// stored value is its array, not the forged string.
+    #[test]
+    fn requested_apps_has_one_writer_and_it_is_the_apps_field() {
+        use crate::routes::requested_apps::{normalize, stamp_props};
+        let decoded: SendMessageRequest = serde_json::from_value(serde_json::json!({
+            "clientMsgId": Uuid::nil(),
+            "apps": ["com.momo.plugins.gmail", "com.momo.plugins.gmail", "com.momo.plugins.github"],
+            "props": { "requestedApps": "forged", "k": "v" }
+        }))
+        .expect("apps decodes");
+        let requested = normalize(decoded.apps.as_deref().unwrap_or_default());
+        assert_eq!(
+            requested,
+            vec!["com.momo.plugins.gmail", "com.momo.plugins.github"]
+        );
+        let mut with_apps = props_value(decoded.props.as_ref());
+        assert!(
+            with_apps.get("requestedApps").is_none(),
+            "stripped before the stamp"
+        );
+        stamp_props(&mut with_apps, &requested);
+        assert_eq!(
+            with_apps["requestedApps"],
+            serde_json::json!(["com.momo.plugins.gmail", "com.momo.plugins.github"])
+        );
+        assert_eq!(with_apps["k"], "v");
+
+        // Without `apps`, the forged prop vanishes and nothing replaces it.
+        let mut without_apps = props_value(decoded.props.as_ref());
+        stamp_props(&mut without_apps, &normalize(&[]));
+        assert!(
+            without_apps.get("requestedApps").is_none(),
+            "{without_apps}"
+        );
+
+        // Closed-world: an older client's typo is still refused, not ignored.
+        assert!(
+            serde_json::from_value::<SendMessageRequest>(serde_json::json!({
+                "clientMsgId": Uuid::nil(),
+                "appz": ["com.momo.plugins.gmail"]
+            }))
+            .is_err()
+        );
     }
 
     /// **The list of decoded-but-unserved keys is empty, and `runId` is why.**
