@@ -1003,6 +1003,42 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
       .map(call => ({url: String(call[0]), method: (call[1] as {method?: string} | undefined)?.method ?? 'GET'}))
       .filter(call => call.method !== 'GET' && call.url.includes('/closure'));
 
+  // ---- 읽음 투영이 바뀐 뒤의 기다림 (#4406) ---------------------------------------------------------
+  //
+  // 「다른 기기가 닫았다·열었다」는 서버의 다음 투영을 바꾸고 캐시를 무효화해 그것이 이 화면에 서는지 잰다. 답이 캐시에 들어온 뒤에도
+  // 화면까지 두 걸음이 남는다: react-query 가 구독자에게 알리는 `setTimeout(0)`, 그다음 React 가 다시 그리는 `setImmediate`.
+  // 무효화 직후 곧장 `waitFor` 로 행을 기다리면 이 두 걸음이 `waitFor` 의 1초 창 안에서 일어난다. 이벤트 루프가 창보다 길게 멈추면
+  // (부하가 걸린 CI) 창의 타이머(간격 검사·제한)가 그리기보다 먼저 한꺼번에 터져서, 캐시는 이미 닫힘인데 행이 남은 채 시간이
+  // 초과된다(#4405 CI). 제한을 늘리지 않는다: 두 걸음을 시간 제한이 없는 `act` 안에서 끝낸 뒤 곧장 단정한다.
+  /**
+   * `work` 가 바꾼 캐시가 화면에 그려진 채로 돌아온다. 끝의 `setTimeout(0)` 한 걸음이 react-query 의 알림을 `act` 안으로 끌어들인다
+   * (`act` 만으로는 알림이 그 뒤에 와서 `act` 밖에서 그려진다).
+   */
+  const settleAfter = async (work: () => void | Promise<unknown>) => {
+    await act(async () => {
+      await work();
+      await new Promise<void>(resolve => setTimeout(resolve, 0));
+    });
+  };
+  const projectionCalls = (fetchMock: jest.Mock) =>
+    fetchMock.mock.calls.filter(call => String(call[0]).includes('/read-state')).length;
+  /**
+   * 첫 읽음 투영 답이 캐시에 들어왔다. 「행이 보인다」는 오는 중(`hold`)에도 참이라 도착을 말해 주지 않는다. 답이 오기 전에 서버를 바꾸고
+   * 무효화하면 react-query 는 오는 중인 첫 요청을 이어받아(데이터가 아직 없으면 취소하지 않는다) 옛 답을 그린다: 행은 영영 안 사라진다.
+   */
+  const projectionLanded = () =>
+    waitFor(() => {
+      const state = queryClient!.getQueryState(workspaceKeys.readState(WS));
+      expect(state?.status).toBe('success');
+      expect(state?.fetchStatus).toBe('idle');
+    });
+  /** `routes.readStates` 를 바꾼 뒤 부른다: 투영을 다시 읽어 그 답이 그려진 채로 돌아온다(새 요청이 나갔는지도 본다). */
+  const reprojectReadStates = async (fetchMock: jest.Mock) => {
+    const before = projectionCalls(fetchMock);
+    await settleAfter(() => queryClient!.invalidateQueries({queryKey: workspaceKeys.readState(WS)}));
+    expect(projectionCalls(fetchMock)).toBeGreaterThan(before);
+  };
+
   it('나간 멤버 행은 목록에 없고, 접힌 줄도 없다: 문은 ⋯ 의 「닫은 대화」다', async () => {
     await mountHome({channels: withGone});
     await settledHidden();
@@ -1206,10 +1242,10 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
       await new Promise(resolve => setTimeout(resolve, 300));
     });
     await waitFor(() => expect(screen.getByTestId(GONE_ROW)).toBeTruthy());
-    act(() => {
+    await settleAfter(() => {
       queryClient!.setQueryData(workspaceKeys.readState(WS), projection(3, 3));
     });
-    await waitFor(() => expect(screen.queryByTestId(GONE_ROW)).toBeNull());
+    expect(screen.queryByTestId(GONE_ROW)).toBeNull();
     expect(hasClosedDoor()).toBe(true);
   });
 
@@ -1323,21 +1359,18 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
 
   it('다른 기기에서 닫은 DM 은 다음 읽음 투영에서 폰에서도 사라지고, 다시 열면 돌아온다 (#4367 AC)', async () => {
     const routes: Routes = {channels: withGone, readStates: serverRows(null)};
-    await mountHome(routes);
+    const fetchMock = await mountHome(routes);
     await waitFor(() => expect(screen.getByTestId(HUMAN_ROW)).toBeTruthy());
+    await projectionLanded();
     // 다른 기기가 닫았다: 서버의 다음 투영이 closed_at_seq 를 싣는다.
     routes.readStates = serverRows(4);
-    await act(async () => {
-      await queryClient!.invalidateQueries({queryKey: workspaceKeys.readState(WS)});
-    });
-    await waitFor(() => expect(screen.queryByTestId(HUMAN_ROW)).toBeNull());
+    await reprojectReadStates(fetchMock);
+    expect(screen.queryByTestId(HUMAN_ROW)).toBeNull();
     expect(hasClosedDoor()).toBe(true);
     // 다른 기기가 다시 열었다.
     routes.readStates = serverRows(null);
-    await act(async () => {
-      await queryClient!.invalidateQueries({queryKey: workspaceKeys.readState(WS)});
-    });
-    await waitFor(() => expect(screen.getByTestId(HUMAN_ROW)).toBeTruthy());
+    await reprojectReadStates(fetchMock);
+    expect(screen.getByTestId(HUMAN_ROW)).toBeTruthy();
   });
 
   it('「다시 열기」: 서버의 닫힘을 풀고(DELETE …/closure 한 번) 그 대화를 연다', async () => {
@@ -1413,15 +1446,13 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
 
   it('시트가 열린 채 목록이 비면(다른 기기에서 다시 열었다) 빈 상태를 말한다', async () => {
     const routes: Routes = {channels: [CHANNELS[1], CHANNELS[3], CHANNELS[4]], readStates: serverRows(4)};
-    await mountHome(routes);
+    const fetchMock = await mountHome(routes);
     await settledHidden();
     openClosedSheet();
     await screen.findByTestId('dm-closed-item-ch-dm-human');
     routes.readStates = serverRows(null);
-    await act(async () => {
-      await queryClient!.invalidateQueries({queryKey: workspaceKeys.readState(WS)});
-    });
-    expect(await screen.findByTestId('dm-closed-empty')).toHaveTextContent(/닫은 대화가 없어요\./);
+    await reprojectReadStates(fetchMock);
+    expect(screen.getByTestId('dm-closed-empty')).toHaveTextContent(/닫은 대화가 없어요\./);
   });
 
   it('닫은 DM 뿐이고 채널이 없어도 DM 섹션 머리가 서서 시트로 돌아갈 길이 있다', async () => {

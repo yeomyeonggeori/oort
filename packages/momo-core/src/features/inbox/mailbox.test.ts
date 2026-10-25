@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Channel, Message, ReadState, RosterMember } from "../../lib/api";
+import type { Channel, Message, MessageAttachment, ReadState, RosterMember } from "../../lib/api";
 import {
   composeMailbox,
   contextWindow,
@@ -336,5 +336,82 @@ describe("resolveActorNames: 목록과 패널이 쓰는 글쓴이 해석 한 곳
       actorToken(resolveActorNames({ kind: "human", displayName: "서연", handle: "seo" }, "x"))
     ).toBe("서연");
     expect(actorToken(resolveActorNames(null, "나간 멤버"))).toBe("나간 멤버");
+  });
+});
+
+describe("글 없이 첨부만 보낸 메시지의 줄 (#4294)", () => {
+  const attach = (n: number, mime = "image/jpeg"): MessageAttachment[] =>
+    Array.from({ length: n }, (_, i) => ({ id: `a-${mime}-${i}`, name: `파일${i}`, mime, sizeBytes: 1000 }));
+  const base = { channelId: DM, channelLabel: "서연", selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs() };
+  const dm = (over: Partial<Message> & { authorMemberId: string }) =>
+    dmEntry({ ...base, messages: [msg({ seq: 8, body: "", attachments: attach(2), ...over })] });
+
+  it("DM 줄은 「내용 없는 메시지」가 아니라 사진 개수로 말한다", () => {
+    const e = dm({ authorMemberId: SEO });
+    expect(e?.preview).toBe("사진 2장");
+    expect(e?.preview).not.toContain("내용 없는");
+  });
+
+  it("내가 보낸 DM은 「나:」가 앞선다", () => {
+    expect(dm({ authorMemberId: SELF })?.preview).toBe("나: 사진 2장");
+  });
+
+  it("사진과 파일이 섞이면 사진이 먼저다", () => {
+    const e = dm({ authorMemberId: SEO, attachments: [...attach(1, "application/pdf"), ...attach(1)] });
+    expect(e?.preview).toBe("사진 1장, 파일 1개");
+  });
+
+  it("공백뿐인 본문도 글이 없는 것이다", () => {
+    expect(dm({ authorMemberId: SEO, body: "  \n " })?.preview).toBe("사진 2장");
+    expect(dm({ authorMemberId: SEO, body: undefined })?.preview).toBe("사진 2장");
+  });
+
+  it("글이 있으면 글이 이긴다 (첨부는 카드가 그린다)", () => {
+    expect(dm({ authorMemberId: SEO, body: "회의 자료예요" })?.preview).toBe("회의 자료예요");
+  });
+
+  it("글도 첨부도 없으면 예전 문장 그대로다", () => {
+    expect(dm({ authorMemberId: SEO, body: "", attachments: [] })?.preview).toBe("내용 없는 메시지예요.");
+    expect(dm({ authorMemberId: SEO, body: "" , attachments: undefined })?.preview).toBe("내용 없는 메시지예요.");
+  });
+
+  it("지워진 메시지는 클라이언트 행에 첨부가 남아 있어도 삭제됐다고 말한다", () => {
+    expect(dm({ authorMemberId: SEO, state: "deleted" })?.preview).toBe("삭제된 메시지예요.");
+  });
+
+  it("멘션 줄도 같은 말을 한다", () => {
+    const e = mentionEntry(
+      msg({ seq: 4, authorMemberId: SEO, channelId: CH, body: "", attachments: attach(1) }),
+      actorFor(SEO),
+      "#workbench",
+      NOW
+    );
+    expect(e.preview).toBe("사진 1장");
+  });
+
+  // 서버 투영 줄(`serverEntry`)은 아직 못 고친다: 서버 항목은 `message.preview` 문자열만 싣고(`InboxMessageDto`),
+  // 서버가 그 문자열을 본문으로만 만든다(`make_preview(body)`). 첨부만 있는 메시지의 preview 는 빈 문자열이라
+  // 줄이 「내용 없는 메시지예요.」로 떨어진다. 항목에 첨부 개수(또는 서버가 지은 문구)가 실려야 닫힌다 - 엔진 후속.
+  it.todo("서버 투영 줄: 첨부만 있는 메시지는 「내용 없는 메시지예요.」가 아니라 사진·파일 개수로 말한다 (엔진: InboxMessageDto)");
+
+  it("스레드 줄은 마지막 답글과 루트 둘 다 같은 말을 한다", () => {
+    const root = msg({
+      seq: 3,
+      authorMemberId: SELF,
+      channelId: CH,
+      body: "",
+      attachments: attach(3),
+      thread: { reply_count: 2, last_reply_seq: 9, last_reply_at: NOW - 60_000 },
+    });
+    const common = { channelLabel: "#workbench", selfMemberId: SELF, actorFor, nowMs: NOW, readState: rs({ channelId: CH, lastReadSeq: 5 }) };
+    const withReply = threadEntry({
+      ...common,
+      root,
+      lastReply: msg({ seq: 9, authorMemberId: BOT, body: "", attachments: attach(1, "application/pdf") }),
+    });
+    expect(withReply?.preview).toBe("파일 1개");
+    expect(withReply?.rootPreview).toBe("사진 3장");
+    const withoutReply = threadEntry({ ...common, root, lastReply: undefined });
+    expect(withoutReply?.preview).toBe("내 글에 답글 2개: 사진 3장");
   });
 });
