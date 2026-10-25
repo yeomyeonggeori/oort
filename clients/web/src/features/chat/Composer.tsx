@@ -47,10 +47,14 @@ import {
   activitySuffix,
   activityText,
   isRespondingLine,
+  MAX_ACTIVITY_LINES,
   TURN_STALE_SENTENCE,
   UNKNOWN_AGENT_NAME,
   type AgentActivityLine,
+  type AgentLivenessLookup,
 } from "@/features/agents/turnCopy";
+import { isUntakenHumanRun } from "@momo/core/features/agents/runWaiting";
+import { useAgentLivenessLookup } from "@/features/agents/useAgentLiveness";
 import { RespondingAvatar, RespondingDots } from "@/features/agents/RespondingIndicator";
 import { memberFor, memberNameParts } from "@/features/workspace/useWorkspace";
 import { openWorkPanel } from "@/features/agents/workLogStore";
@@ -279,19 +283,29 @@ export function AgentActivityBar({
   directory,
   nowMs,
   live,
+  livenessFor,
 }: {
   turns: AgentWorkingSignal[];
   directory: Directory;
   nowMs: number;
   /** The realtime rail is connected, so a clock is measuring something. */
   live: boolean;
+  /**
+   * 에이전트의 서버 생존 판정(D4)을 찾는 함수. 아무도 가져가지 않은 요청의 근거 줄 맨 앞에 경고 라벨이
+   * 서고 「연결이 꺼져 있을 수 있어요」가 붙는 데에만 쓴다(#4285). 이 컴포넌트는 읽지 않고 받는다 —
+   * 읽기는 워크스페이스와 쿼리를 아는 `Composer`의 일이다. 생략하면 판정 없이 말한다.
+   */
+  livenessFor?: AgentLivenessLookup;
 }) {
   const { lines, overflowCount, summary } = useMemo(
     () =>
-      activityLines(turns, (memberId) =>
-        memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME)
+      activityLines(
+        turns,
+        (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+        MAX_ACTIVITY_LINES,
+        livenessFor
       ),
-    [turns, directory]
+    [turns, directory, livenessFor]
   );
 
   if (lines.length === 0) return null;
@@ -319,7 +333,7 @@ export function AgentActivityBar({
             {responding && (
               <RespondingAvatar directory={directory} memberId={line.memberId} />
             )}
-            <ActivityText line={line} live={live} />
+            <ActivityText line={line} live={live} nowMs={nowMs} />
             {responding && <RespondingDots />}
             {/* 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤
                 n분째 소식이 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은
@@ -374,7 +388,7 @@ export function AgentActivityBar({
                 }
                 // 이름을 명시한다. 자식에 맡기면 접근성 이름에 1초마다 바뀌는
                 // 시계가 들어가고, 보조기술이 그 줄을 초당 한 번 다시 읽는다.
-                aria-label={`${activityText(line)}. 진행 과정 열기`}
+                aria-label={`${activityText(line, nowMs)}. 진행 과정 열기`}
                 data-testid="composer-working-open"
                 className="flex min-w-0 items-baseline gap-2 rounded-sm text-left press hover:bg-surface-hover focus-visible:focus-ring"
               >
@@ -406,19 +420,21 @@ export function AgentActivityBar({
 function ActivityText({
   line,
   live,
+  nowMs,
 }: {
   line: AgentActivityLine;
   live: boolean;
+  nowMs: number;
 }) {
   return (
-    <span className="min-w-0 truncate" title={activityText(line)}>
+    <span className="min-w-0 truncate" title={activityText(line, nowMs)}>
       {/* Offline the name drops to the row's own ink-muted: agent identity is a
           claim about who is acting right now, and nobody is acting right now. */}
       <span className={live ? "text-agent" : undefined}>{line.name.name}</span>
       {line.name.handle && (
         <span className="text-ink-muted">({line.name.handle})</span>
       )}
-      {activitySuffix(line)}
+      {activitySuffix(line, nowMs)}
     </span>
   );
 }
@@ -620,6 +636,12 @@ export function Composer({
     channelId,
     approvalWaits,
     nowMs
+  );
+  // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
+  // 경고(D4)를 싣고, 5분을 넘으면 「아직 받지 않았어요」로 말한다(#4285). 같은 쿼리 키라 사이드바·
+  // 헤더가 이미 읽은 답을 나눠 쓴다.
+  const livenessFor = useAgentLivenessLookup(
+    turns.filter((turn) => isUntakenHumanRun(turn.server)).map((turn) => turn.memberId)
   );
 
   /**
@@ -1096,6 +1118,7 @@ export function Composer({
         directory={directory}
         nowMs={nowMs}
         live={railLive}
+        livenessFor={livenessFor}
       />
 
       {/* 예약 배너(ADR-0208, UI 명세 1.6): 입력창 바로 위, 시간으로 사라지지 않는 지속 카드다. */}
