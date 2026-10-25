@@ -50,6 +50,8 @@ import { DIVIDER_TONE_CLASS } from "./dividerTone";
 // 접기의 문구도 코어가 갖는다 — 폰이 자기 파일에서 조사를 붙이기 시작하면 같은
 // 접기가 두 얼굴을 갖는다(U1 M-2가 구분선에서 겪은 실패 양식).
 import { deletedFoldSegments } from "@momo/core/features/timeline/deletedFold";
+// 글 없이 사진·파일만 보낸 메시지를 가리키는 한 줄의 문구도 코어가 갖는다 (#4294).
+import { attachmentPreviewLine } from "@momo/core/features/attachments/model";
 // 아바타의 계약도 코어가 갖는다 (진단 H-11): 어떤 주소를 이미지로 믿는가,
 // 무엇을 이니셜로 삼는가, 사람과 에이전트를 무엇으로 가르는가.
 import { avatarIdentity } from "@momo/core/features/workspace/avatar";
@@ -490,6 +492,11 @@ export function MessageRow({
   // ADR-0151 — 서버가 완료된 것만 실어 준다. 없으면 빈 배열이고, 빈 배열은
   // `AttachmentList`가 아무것도 그리지 않는다.
   const attachments = message.attachments ?? [];
+  // 액션 시트·리마인더가 이 메시지를 가리킬 한 줄. 글이 없고 사진·파일만 있으면 개수로 말한다 (#4294):
+  // 「내용 없는 메시지」는 사진이 달린 메시지에게 하는 말이 아니다. 리마인더는 이 줄을 저장해 두고
+  // 목록에서 다시 보이므로 한 번 잘못 말하면 그 말이 남는다.
+  const previewText =
+    message.body?.trim() || attachmentPreviewLine(attachments) || PIN_EMPTY_BODY_TEXT;
   const rollup = showRollup ? threadRollup(message) : null;
   const showsEditedMark = message.state === "edited" && !editing;
   // 이슈 #1146 M3 — 이 행이 고정돼 있다는 흔적. 왜 그리는지·왜 이 줄인지·왜
@@ -1244,7 +1251,7 @@ export function MessageRow({
           <MessageActionSheet
             open={sheetOpen}
             onOpenChange={setSheetOpen}
-            preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
+            preview={previewText}
             available={available}
             copyState={copyState}
             callbacks={callbacks}
@@ -1284,7 +1291,7 @@ export function MessageRow({
               if (!open) setRemindError(null);
             }}
             mode="create"
-            preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
+            preview={previewText}
             pending={reminderMutations.create.isPending}
             error={remindError}
             onCommit={(dueAtMs, note) => {
@@ -1295,7 +1302,7 @@ export function MessageRow({
                   messageId: message.id,
                   dueAtMs,
                   note,
-                  messagePreview: message.body?.trim() || PIN_EMPTY_BODY_TEXT,
+                  messagePreview: previewText,
                 },
                 {
                   onSuccess: () => setRemindOpen(false),
