@@ -110,6 +110,29 @@ describe("부른 사람이 없는 시스템 작업(환영)은 카드가 아니�
     expect(container.innerHTML).toBe("");
   });
 
+  it("서버가 알린 환영 작업의 와이어 모양(트리거 메시지도 제목도 없음)도 카드를 그리지 않는다 — 와이어 경계가 system을 달아야 한다", () => {
+    // 위 시험은 `system: true`를 손으로 쥐여 준다. 이 시험은 서버가 실제로 보내는 모양을 와이어 경계
+    // (`agentRunProgressFromWire`)에 통과시켜, 경계가 환영 run을 시스템으로 가르지 않으면 카드가 서서
+    // 「아직 받지 않았어요」+이유를 말하게 되는 길(2026-10-23 폰 캡처의 5시간째 환영 작업)을 잠근다.
+    const welcome = signalFromProgress(
+      agentRunProgressFromWire({
+        id: RUN,
+        channelId: CH,
+        agentMemberId: AGENT,
+        status: "queued",
+        phase: "queued",
+        leaseState: "none",
+        stepCount: 0,
+        queuePosition: 1,
+        createdAtMs: NOW - 5 * HOUR,
+        updatedAtMs: NOW - 5 * HOUR,
+      })
+    );
+    if (welcome === null) throw new Error("signal");
+    const { container } = mount([welcome], liveness("woken_not_collected"));
+    expect(container.innerHTML).toBe("");
+  });
+
   it("제목이 U+FEFF뿐인 작업도 카드에 선다 — 서버가 제목으로 센 글자를 「없음」으로 읽으면 사람의 요청이 사라진다 (planner 결정 1)", () => {
     const work = signalFromProgress(
       agentRunProgressFromWire({
