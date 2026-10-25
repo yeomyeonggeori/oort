@@ -18,7 +18,24 @@
       "sourceURL": "https://linear.app/docs/mcp",
       "releaseRef": "hosted",
       "verified": true
-    }
+    },
+    "logoKey": "linear",
+    "category": "project",
+    "websiteURL": "https://linear.app",
+    "starterPrompts": [
+      {
+        "text": "나에게 배정된 Linear 이슈를 우선순위 순서로 보여 줘요.",
+        "tool": "linear.list_issues"
+      },
+      {
+        "text": "진행 중인 프로젝트를 한눈에 정리해 줘요.",
+        "tool": "linear.list_projects"
+      },
+      {
+        "text": "내 Linear 알림을 최근 순서로 보여 줘요.",
+        "tool": "linear.get_notifications"
+      }
+    ]
   },
   "mcp": {
     "protocolVersion": "2025-06-18",

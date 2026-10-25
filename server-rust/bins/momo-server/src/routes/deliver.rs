@@ -152,6 +152,11 @@ pub(crate) struct DeliverRequest {
     /// ADR-0134 D1's per-request tier, already shape-validated before the
     /// transaction opened. `None` = the sender chose nothing.
     pub requested_routing: Option<RequestedRouting>,
+    /// ADR-0113 증보 3 F5 (#4313): the distinct app ids the sender picked
+    /// ([`crate::routes::requested_apps::normalize`]), **already stamped** into
+    /// `message.props.requestedApps`. Judged here, after the insert and only when it
+    /// was new; empty for every sender that picked none (and for the scheduler).
+    pub requested_apps: Vec<String>,
     pub gates: DeliverGates,
 }
 
@@ -175,6 +180,10 @@ pub(crate) enum DeliverRefusal {
     /// The sender's own `routing` block was refused (ADR-0134 D1): the sentence the
     /// 400 carries. Arrives **after** the message insert.
     Routing(String),
+    /// The sender's `apps` were refused (ADR-0113 증보 3 F5): one coded 400,
+    /// `apps_unavailable`. Arrives **after** the message insert, and only for a new
+    /// insert (a `deduped` retry is never judged).
+    Apps(crate::routes::requested_apps::AppsRefusal),
 }
 
 /// Put one message into a channel, exactly as `POST …/messages` always did.
@@ -196,6 +205,7 @@ pub(crate) async fn deliver_message_in_tx(
         author_is_agent,
         author_is_human,
         requested_routing,
+        requested_apps,
         gates,
     } = request;
     let channel_id = message.channel_id;
@@ -275,6 +285,24 @@ pub(crate) async fn deliver_message_in_tx(
         Ok(sent) => sent,
         Err(rejected) => return Ok(Err(DeliverRefusal::Send(rejected))),
     };
+
+    // ADR-0113 증보 3 F5 (#4313) — the sender's `apps`, judged in THIS transaction and **only on a
+    // real insert**: a `deduped` retry answers the stored message (201) whatever `apps` says now,
+    // so an app uninstalled after the first request cannot turn a harmless retry into a refusal
+    // that invites a duplicate send. The refusal rolls the insert back with it, and it comes
+    // before the mention pass so a refused chip queues no run. Nothing below reads the marker.
+    if !sent.deduped && !requested_apps.is_empty() {
+        if let Err(refusal) = crate::routes::requested_apps::judge_in_tx(
+            conn,
+            workspace_id,
+            author_is_human,
+            &requested_apps,
+        )
+        .await?
+        {
+            return Ok(Err(DeliverRefusal::Apps(refusal)));
+        }
+    }
 
     // B5.2 — mention → agent run, in THIS transaction and only on a real insert.
     // Swift's guard is the same three conditions (`MessageRoutes.swift:284`, `if

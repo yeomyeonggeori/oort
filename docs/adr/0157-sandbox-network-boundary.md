@@ -2,6 +2,7 @@
 
 - Status: **Accepted** (기안 2026-08-08 Fable · 성재 승인 2026-08-09)
 - 관련: ADR-0156(D5 — CubeProxy/CubeEgress 유보) · ADR-0150(대화 유출 경계 — Proposed) · ADR-0144(샌드박스 자격증명=파일시스템 로컬) · `research/2026-08-08-cubesandbox-requirements-adapter-mapping.md`(CubeNet CIDR·CubeAPI 무인증 실측)
+- 역방향: 2026-10-25 D1~D3(샌드박스 → 내부망 차단·공개 REST 한 문·정직한 명제)는 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)의 팀 박스에도 적용된다(그 문서 D4 I2·I3·I7). 본문 결정은 바꾸지 않았다.
 
 ## Context
 
