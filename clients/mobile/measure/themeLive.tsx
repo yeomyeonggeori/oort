@@ -104,6 +104,8 @@ function Content(): React.JSX.Element {
         {`기기 ${name(systemScheme)} · 화면 ${name(scheme)} · 고른 것 ${themeChoiceLabel(choice)} · ${storedLine()}`}
       </Text>
       <ScrollView contentContainerStyle={styles.scroll}>
+        {/* 캡처 흐름이 목록을 맨 위로 되돌릴 때 찾는 표지다(Maestro `scrollUntilVisible`). 높이 1 — 안 보이면 못 찾는다. */}
+        <View testID="theme-live-top" style={styles.top} />
         {MESSAGES.map((item, index) => (
           <MessageRow
             key={item.id}
@@ -142,5 +144,6 @@ const buildStyles = (color: Palette) =>
       paddingBottom: space.sm,
     },
     scroll: {paddingBottom: 48},
+    top: {height: 1},
     control: {paddingHorizontal: space.lg, paddingTop: space.lg},
   });
