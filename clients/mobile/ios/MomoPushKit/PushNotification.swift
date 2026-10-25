@@ -6,7 +6,8 @@
 // Edited after the inheritance, on purpose (each is a behaviour the frozen kit never had):
 //   - #4294: a message sent with files and no text is announced by its attachment count
 //     (`PushAttachmentCopy`: 「사진 1장」, 「파일 2개」, same sentences as the core's
-//     `ATTACH_PREVIEW_COPY`), not left on the relay's 「새 알림」 placeholder.
+//     `ATTACH_PREVIEW_COPY`), not left on the relay's 「새 알림」 placeholder. Only `dm` / `mention`
+//     pushes: an approval keeps ADR-0204 D7's rule (no body → no 승인·거절 buttons).
 //
 // Origin: clients/iOS/MomoiOSKit/Sources/MomoiOSPushKit/PushNotification.swift
 // Inherited by: goal RN-N1 (ADR-0137 이행 순서 5), 2026-08-03.
@@ -366,6 +367,16 @@ public enum PushAttachmentCopy {
     public static func files(_ count: Int) -> String { "파일 \(count)개" }
     public static let separator = ", "
 
+    /// 어느 알림이 이 문구를 본문으로 쓰는가: 사람·에이전트가 보낸 메시지(`dm`·`mention`)뿐이다.
+    /// 승인 알림은 쓰지 않는다. 확장은 본문을 채우면 승인 버튼을 원래대로 되돌려 놓는데(`NotificationService`,
+    /// ADR-0204 D7), 「사진 1장」은 무엇을 승인하는지 말해 주지 않는다 — 무엇인지 모르는 것을 잠금 화면에서
+    /// 승인하게 두지 않는다는 D7 을 개수 문구가 새 입력으로 풀면 안 된다. 그래서 승인·재개·작업 알림의 빈
+    /// 본문은 예전처럼 자리표시로 남고 버튼은 떼어진다. 서버가 짝지은 카테고리가 승인이면 이유가 무엇이든
+    /// 같다(파서는 이유와 카테고리를 서로 묶지 않는다).
+    public static func announces(_ envelope: MomoPushEnvelope) -> Bool {
+        (envelope.reason == "dm" || envelope.reason == "mention") && !envelope.category.carriesApprovalID
+    }
+
     /// 「사진」으로 세는 것: 사진으로 그려지는 래스터 이미지. SVG 는 타임라인이 카드로 세우므로 파일이다.
     public static func isPhoto(mime: String) -> Bool {
         let lowered = mime.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -496,7 +507,7 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         }
         let roster = try decoder.decode(Roster.self, from: try await get(root + "/roster", fetchSession: fetchSession))
         guard let message = page.messages.first(where: { $0.id.lowercased() == envelope.messageID.lowercased() }),
-              let body = Self.displayBody(of: message),
+              let body = Self.displayBody(of: message, for: envelope),
               let author = roster.members.first(where: {
                   $0.id.lowercased() == message.authorMemberID.lowercased()
               }),
@@ -507,10 +518,12 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         return PushDisplayContent(title: author.displayName, body: body)
     }
 
-    /// 알림 본문: 글이 있으면 글, 글 없이 첨부만 있으면 개수 문구(#4294), 둘 다 없으면 nil(자리표시로 남는다).
-    private static func displayBody(of message: Message) -> String? {
+    /// 알림 본문: 글이 있으면 글. 글 없이 첨부만 있으면 개수 문구(#4294) — `PushAttachmentCopy.announces`
+    /// 가 허락한 알림(`dm`·`mention`)에서만. 그 밖이거나 첨부도 없으면 nil(자리표시로 남는다).
+    private static func displayBody(of message: Message, for envelope: MomoPushEnvelope) -> String? {
         let text = message.body?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         if !text.isEmpty { return text }
+        guard PushAttachmentCopy.announces(envelope) else { return nil }
         return PushAttachmentCopy.line(mimeTypes: message.attachments?.mimeTypes ?? [])
     }
 

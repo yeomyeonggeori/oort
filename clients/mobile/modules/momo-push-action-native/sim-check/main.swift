@@ -1206,7 +1206,9 @@ do {
   let svg = #"{"id":"s1","name":"도식.svg","mime":"image/svg+xml","sizeBytes":30}"#
 
   /// The display the extension would show for one message, or nil when it falls back to the placeholder.
-  func restDisplay(_ fields: String) async -> PushDisplayContent? {
+  func restDisplay(
+    _ fields: String, reason: String = "dm", category: String = "momo.message", approval: String? = nil
+  ) async -> PushDisplayContent? {
     PushRESTStub.requested = []
     PushRESTStub.messagesJSON = Data(
       #"{"messages":[{"id":"\#(messageID)","authorMemberId":"\#(authorID)"\#(fields)}]}"#.utf8)
@@ -1215,7 +1217,7 @@ do {
     configuration.protocolClasses = [PushRESTStub.self]
     let fetcher = MomoPushRESTFetcher(session: URLSession(configuration: configuration))
     guard let envelope = try? MomoPushParser.parse(
-      userInfo: payload(reason: "dm", category: "momo.message", approval: nil))
+      userInfo: payload(reason: reason, category: category, approval: approval))
     else { return nil }
     let session = PushFetchSession(
       baseURL: URL(string: "https://oort.test")!, workspaceID: workspaceID, accessToken: "sim-check-token")
@@ -1256,6 +1258,38 @@ do {
   check(await restDisplay(#","body":null,"attachments":[{"mime":7},null,"x"]"#)
     == PushDisplayContent(title: "이도현", body: "파일 3개"),
     "broken entries are counted as files, never thrown on")
+
+  // ---- ADR-0204 D7: the count line must not bring the approve/reject buttons back -----------------------
+  //
+  // `NotificationService` puts the original category (the buttons) back when the display differs from the
+  // placeholder. A line that is not about the approval ("사진 1장") must therefore never be the display of an
+  // approval push, or a lock screen could ask to approve something it never named.
+  let photoOnly = #","body":null,"attachments":[\#(png)]"#
+  check(await restDisplay(photoOnly, reason: "mention", category: "momo.mention")
+    == PushDisplayContent(title: "이도현", body: "사진 1장"), "a mention with only a photo says 사진 1장 too")
+  check(await restDisplay(photoOnly, reason: "approval_request", category: "momo.approval", approval: approvalID) == nil,
+    "an approval push with no text stays on the placeholder (buttons are taken off), whatever is attached")
+  check(await restDisplay(photoOnly, reason: "approval_request", category: "momo.approval.open", approval: approvalID) == nil,
+    "so does the open-in-app approval category")
+  check(await restDisplay(photoOnly, reason: "mention", category: "momo.approval", approval: approvalID) == nil,
+    "the category decides, not only the reason: an approval category with a mention reason is still an approval")
+  check(await restDisplay(photoOnly, reason: "resume_offer", category: "momo.work") == nil,
+    "a resume offer is not announced by its attachments either")
+  check(await restDisplay(photoOnly, reason: "work_session_idle", category: "momo.work") == nil,
+    "nor is an idle-session card")
+  check(await restDisplay(#","body":"배포 승인 요청","attachments":[\#(png)]"#,
+      reason: "approval_request", category: "momo.approval", approval: approvalID)
+    == PushDisplayContent(title: "이도현", body: "배포 승인 요청"),
+    "an approval with text is shown as before: the text, not the attachments")
+  func envelope(_ reason: String, _ category: String, _ approval: String?) -> MomoPushEnvelope? {
+    try? MomoPushParser.parse(userInfo: payload(reason: reason, category: category, approval: approval))
+  }
+  check(envelope("dm", "momo.message", nil).map(PushAttachmentCopy.announces) == true, "dm announces")
+  check(envelope("mention", "momo.mention", nil).map(PushAttachmentCopy.announces) == true, "mention announces")
+  check(envelope("approval_request", "momo.approval", approvalID).map(PushAttachmentCopy.announces) == false,
+    "approval_request does not announce")
+  check(envelope("mention", "momo.approval.open", approvalID).map(PushAttachmentCopy.announces) == false,
+    "an approval category does not announce, whatever the reason")
 }
 
 print(failures == 0 ? "PASS" : "FAILED (\(failures))")

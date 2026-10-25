@@ -394,8 +394,8 @@ const onMac = process.platform === 'darwin';
     }
     expect(output).toMatch(/^PASS$/m);
     expect(output).not.toMatch(/^FAIL:/m);
-    // 검사 수가 크게 줄었다면 누군가 검사를 지운 것이다. (#4294 가 알림 확장의 첨부 본문 19건을 더했다: 270 → 320)
-    expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(320);
+    // 검사 수가 크게 줄었다면 누군가 검사를 지운 것이다. (#4294 가 알림 확장의 첨부 본문·승인 알림 가드 30건을 더했다: 270 → 330)
+    expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(330);
   }, 180_000);
 });
 
