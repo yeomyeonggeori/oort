@@ -32,8 +32,15 @@ import {ReduceMotionRefContext} from './LandedTintFade';
 import {
   ARRIVAL_SURFACE_CHANNEL,
   arrivalsInFlight,
+  ECHO_LINGER_MS,
   holdSettledArrivals,
+  isStandbyItem,
+  photoEchoesOf,
+  sameEchoes,
+  settledEchoes,
   subscribeArrivals,
+  withLingeringEchoes,
+  type EchoItem,
 } from './sendArrival';
 import {
   countNewerThan,
@@ -426,6 +433,8 @@ function TimelineCell({
 const NO_REACTIONS: ReactionMap = {};
 /** 같은 이유의 상수 (이슈 #1112). */
 const NO_PINS: PinMap = {};
+/** 남는 메아리가 없는 상태 — 매번 새 빈 배열이면 효과가 매 렌더 다시 걸린다. */
+const NO_ECHOES: readonly EchoItem[] = [];
 
 /** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
 export interface PillState {
@@ -1123,9 +1132,35 @@ function TimelineInner({
   // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
   // 오름이 끊기지 않는다. 바꿀 것이 없으면 `built` 그대로다. 자세한 까닭은 `sendArrival.ts`.
   const arrivals = useSyncExternalStore(subscribeArrivals, arrivalsInFlight, arrivalsInFlight);
+  const afterHold = useMemo(
+    () => holdSettledArrivals(built, arrivals, arrivalSurface),
+    [built, arrivals, arrivalSurface],
+  );
+  // 사진 메아리가 서버 사본에 자리를 내줄 때 타일이 한 프레임 빈 면으로 번쩍이지 않게 한다(#4455 design-review r3 H3). 서버 사본은
+  // 새 마운트라 사진의 `<Image>` 도 새로 서고, 새 네이티브 이미지 뷰는 첫 프레임에 안 그려진다(8~23ms). 그래서 메아리를 그 항목
+  // 그대로 `ECHO_LINGER_MS` 더 남기고 서버 사본은 그 뒤에 **눈에 안 보이는 채 미리 마운트**한다(`sendArrival.ts` 「사진은 서버 사본을
+  // 먼저 마운트해 두고」). 창이 끝나는 한 커밋에서 메아리가 걷히며 서버 사본이 드러난다.
+  //
+  // **렌더 중 파생 상태**다: 서 있던 사진 메아리가 사라졌고 그 확정본이 이미 목록에 있다는 것을 **같은 렌더에서** 알아야 서버 사본이
+  // 마운트되는 그 커밋에 메아리가 함께 남는다(효과로 정하면 한 프레임 늦는다). 비교는 지난 렌더의 목록과 하므로 조건이 참일 때만 상태를
+  // 바꾸고(React 가 이 렌더를 버리고 곧바로 다시 그린다) 무한 루프가 없다.
+  const photoEchoes = useMemo(() => photoEchoesOf(afterHold), [afterHold]);
+  const [seenEchoes, setSeenEchoes] = useState<readonly EchoItem[]>(photoEchoes);
+  const [lingering, setLingering] = useState<readonly EchoItem[]>(NO_ECHOES);
+  if (!sameEchoes(seenEchoes, photoEchoes)) {
+    setSeenEchoes(photoEchoes);
+    const departed = seenEchoes.filter(echo => !photoEchoes.some(now => now.key === echo.key));
+    const settled = settledEchoes(departed, afterHold);
+    if (settled.length > 0) setLingering(current => [...current, ...settled]);
+  }
+  useEffect(() => {
+    if (lingering.length === 0) return undefined;
+    const timer = setTimeout(() => setLingering(NO_ECHOES), ECHO_LINGER_MS);
+    return () => clearTimeout(timer);
+  }, [lingering]);
   const stream = useMemo(
-    () => withTurnPlaceholders(holdSettledArrivals(built, arrivals, arrivalSurface), working),
-    [built, arrivals, arrivalSurface, working],
+    () => withTurnPlaceholders(withLingeringEchoes(afterHold, lingering), working),
+    [afterHold, lingering, working],
   );
 
   // One pass over the array this list is already rendering, so that a row can
@@ -2609,6 +2644,8 @@ function TimelineInner({
           // 필이 착지한 행에 초점을 줄 때만 읽는다(R1 M-3). 필이 없는 표면에서는
           // 모을 이유가 없다.
           registerRowNode={jumpPills ? registerRowNode : undefined}
+          // 사진 메아리가 서버 사본에 자리를 내줄 때 서버 사본을 눈에 안 보이는 채 미리 마운트한다(#4455 r3 H3). 아닌 행은 `undefined`.
+          standby={isStandbyItem(item) ? true : undefined}
         />
       );
       if (anchorSeq !== undefined && item.message.seq === anchorSeq) {

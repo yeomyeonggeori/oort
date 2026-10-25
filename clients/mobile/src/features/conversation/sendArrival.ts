@@ -48,8 +48,31 @@
 //
 // 그래서 항목에 **그린 표면**을 적는다(채널 목록 `'channel'`, 스레드는 루트마다 `'thread:<루트 id>'`). 메아리가 마운트될 때 자기를
 // 그리는 `Timeline` 의 표면을 받아 적고, `Timeline` 은 **자기 표면의 항목만** 읽는다(`holdSettledArrivals` 의 세 번째 인자).
+//
+// ## 사진은 서버 사본을 **먼저 마운트해 두고** 메아리를 잠깐 더 남긴다 (#4455, design-review r3 H3)
+//
+// 위 보류는 위치(transform)의 연속을 지킨다. 그런데 사진 행은 칠에 한 가지가 더 있다: 서버 사본은 **새 마운트**라 사진 타일의
+// `<Image>` 도 새로 만들어지고, 새 네이티브 이미지 뷰는 첫 프레임에 아직 안 그려진 채 서서(8~23ms, 한 프레임) 타일이 중립 면으로
+// 한 번 번쩍인다. 크기·자리는 맞아서(H2 수리) 레이아웃 지표는 0 이고 칠만 비는 사건이다. 글자 행에는 없다. JS 에서 첫 페인트를
+// 앞당길 길은 없으므로, **새 뷰가 보이기 전에 미리 마운트해 그려 둔다**.
+//
+// 서 있던 사진 메아리가 사라지면(`holdSettledArrivals` 가 보류를 풀거나, 보류 없이 확정본이 오거나) 그 메아리를 **같은 항목 그대로**
+// (같은 키·같은 인덱스 — 인스턴스와 그 안의 `<Image>` 가 손도 안 닿는다) `ECHO_LINGER_MS` 동안 더 남기고, 확정본(서버 사본)은 그 바로
+// 뒤에 **대기 상태**(`standby`: 높이 0 · 투명 · 눌림·낭독 없음 — `MessageRow`)로 미리 마운트한다. 서버 사본의 이미지가 그동안 눈에
+// 안 보이는 채 그려지고, 창이 끝나는 **한 커밋**에서 메아리가 걷히며 서버 사본이 드러난다 — 같은 내용·같은 크기·같은 자리라 눈에는
+// 아무 일도 안 일어난다. 사진이 없는 행(글자·파일 카드)은 이 일이 없으므로 대기도 없다.
+//
+// (처음에는 메아리를 서버 사본 **위에** 겹쳐 두는 쪽을 시도했다. 그 길은 목록이 한 칸 늘면서 메아리 셀의 인덱스가 밀리는데,
+// `VirtualizedList` 는 늘어난 꼬리의 렌더 창을 다음 업데이트에서야 넓혀서 그 커밋에 메아리 셀이 창 밖으로 나가 언마운트됐다가 한
+// 프레임 뒤 **새 인스턴스**로 다시 섰다 — 옛 이미지 뷰를 이어 가려던 목적이 사라졌다. 메아리는 가만히 두고 새로 느는 쪽을 서버 사본으로
+// 하면 메아리 셀의 인덱스가 안 변한다.)
+//
+// 이 상태는 장부가 아니라 **그 `Timeline` 의 렌더 중 파생 상태**다 — 「서 있던 사진 메아리가 사라졌고 그 확정본이 이미 목록에 있다」를
+// 같은 렌더에서 알아야 서버 사본이 마운트되는 바로 그 커밋에 메아리가 함께 남는다(효과에서 정하면 한 프레임 늦는다). 장부에 기대지
+// 않으므로 보류가 없는 경로(동작 줄이기·자격 창 밖·확정이 늦은 느린 전송)에서도 같다.
 // =============================================================================
 
+import {showsInlinePreview} from '@momo/core/features/attachments/model';
 import {
   confirmsPending,
   type PendingMessage,
@@ -211,6 +234,97 @@ export function holdSettledArrivals(
     };
   }
   return out ?? items;
+}
+
+// ---- 사진: 메아리를 남기고 서버 사본을 대기시킨다 -----------------------------------------------
+
+/** 메아리가 더 남는 시간(ms) = 서버 사본이 눈에 안 보이는 채 마운트돼 그려지는 시간. 새 `<Image>` 의 첫 페인트(한 프레임 — 시뮬레이터 8~23ms)보다 한참 길다. */
+export const ECHO_LINGER_MS = 150;
+
+/** 메아리 항목 — 코어 `TimelineItem` 의 `pending` 갈래. */
+export type EchoItem = Extract<TimelineItem, {kind: 'pending'}>;
+
+/** 대기 중인 서버 사본 — 같은 메시지 항목에 `standby` 표지 하나만 더한다. */
+export type StandbyItem = Extract<TimelineItem, {kind: 'message'}> & {readonly standby: true};
+
+/** 이 메아리가 인라인 사진을 달고 있는가 — 서버 사본이 새 `<Image>` 를 마운트하는 행이다(파일 카드는 이미지 뷰가 없다). */
+export function carriesInlinePhoto(pending: PendingMessage): boolean {
+  return (pending.attachments ?? []).some(showsInlinePreview);
+}
+
+/** 이 항목이 대기 중인 서버 사본인가. */
+export function isStandbyItem(item: unknown): boolean {
+  return (item as {standby?: unknown} | null)?.standby === true;
+}
+
+/** 지금 서 있는 사진 메아리들. */
+export function photoEchoesOf(items: readonly TimelineItem[]): EchoItem[] {
+  const out: EchoItem[] = [];
+  for (const item of items) {
+    if (item.kind === 'pending' && carriesInlinePhoto(item.pending)) out.push(item);
+  }
+  return out;
+}
+
+/** 같은 메아리 목록인가(키와 보낸 사본의 동일성). 렌더마다 새 배열이 나와도 상태가 매번 갱신되지 않게 한다. */
+export function sameEchoes(a: readonly EchoItem[], b: readonly EchoItem[]): boolean {
+  if (a.length !== b.length) return false;
+  return a.every((item, index) => item.key === b[index].key && item.pending === b[index].pending);
+}
+
+/** `pending` 의 확정본이 `items` 안에서 몇 번째인가. `taken` 은 이미 다른 메아리가 짝지은 자리다. 없으면 -1. */
+function twinIndex(items: readonly TimelineItem[], pending: PendingMessage, taken: ReadonlySet<number>): number {
+  const lowest = Math.max(0, items.length - HOLD_LOOKBACK);
+  for (let index = lowest; index < items.length; index += 1) {
+    const item = items[index];
+    if (item.kind !== 'message' || taken.has(index)) continue;
+    if (!uuidEq(item.message.channelId, pending.channelId)) continue;
+    if (confirmsPending(item.message, pending)) return index;
+  }
+  return -1;
+}
+
+/**
+ * 사라진 사진 메아리 중 **확정본이 이미 `items` 에 서 있는 것**만 — 그것이 서버 사본에 자리를 내주는 메아리다. 확정본이 없는 채
+ * 사라진 것(방을 옮김·전송이 지워짐)은 대기시킬 서버 사본이 없으니 남기지 않는다.
+ */
+export function settledEchoes(departed: readonly EchoItem[], items: readonly TimelineItem[]): EchoItem[] {
+  const taken = new Set<number>();
+  const out: EchoItem[] = [];
+  for (const echo of departed) {
+    const at = twinIndex(items, echo.pending, taken);
+    if (at < 0) continue;
+    taken.add(at);
+    out.push(echo);
+  }
+  return out;
+}
+
+/**
+ * 남기는 메아리를 각자의 확정본 **바로 앞**에 그대로 끼워 넣고(같은 키·같은 항목 — 보류 중 그 자리에 있던 그 인덱스다), 확정본에는
+ * `standby` 를 붙인다. 확정본을 못 찾은 메아리는 버린다. 바꿀 것이 없으면 **받은 배열을 그대로** 돌려준다(호출자의 memo 를 지킨다).
+ */
+export function withLingeringEchoes(items: TimelineItem[], lingering: readonly EchoItem[]): TimelineItem[] {
+  if (lingering.length === 0) return items;
+  const taken = new Set<number>();
+  const before = new Map<number, EchoItem>();
+  for (const echo of lingering) {
+    const at = twinIndex(items, echo.pending, taken);
+    if (at < 0) continue;
+    taken.add(at);
+    before.set(at, echo);
+  }
+  if (before.size === 0) return items;
+  const out: TimelineItem[] = [];
+  items.forEach((item, index) => {
+    const echo = before.get(index);
+    if (echo === undefined) {
+      out.push(item);
+      return;
+    }
+    out.push(echo, {...(item as Extract<TimelineItem, {kind: 'message'}>), standby: true} as StandbyItem);
+  });
+  return out;
 }
 
 /** 시험 전용. */

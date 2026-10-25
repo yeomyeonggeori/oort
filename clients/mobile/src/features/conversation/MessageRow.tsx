@@ -2285,6 +2285,14 @@ export interface MessageRowProps {
    * 맞는다.
    */
   registerRowNode?: (id: string, node: View) => () => void;
+  /**
+   * **대기 중인 서버 사본**이다(#4455 design-review r3 H3, `sendArrival.ts` 「사진은 서버 사본을 먼저 마운트해 두고」). 사진 메아리가
+   * 서버 사본에 자리를 내줄 때 새 `<Image>` 가 첫 프레임에 안 그려져 타일이 한 프레임 빈 면으로 번쩍이므로, 서버 사본을 **눈에 안 보이는
+   * 채 미리 마운트**해 이미지를 그려 두고 메아리가 걷히는 커밋에 드러낸다. 대기 중에는 높이 0 · 투명 · 위 여백 없음 · 눌림·낭독 없음 —
+   * 레이아웃에 자리를 안 차지하고(자식은 넘쳐 그려지지만 투명하다) 메아리가 아직 그 자리를 지킨다. **구조는 그대로 둔다**: 같은
+   * 인스턴스가 대기에서 드러남으로 이어져야 하므로 스타일·접근성 속성만 바꾼다.
+   */
+  standby?: boolean;
 }
 
 /**
@@ -2360,6 +2368,7 @@ function MessageRowInner({
   runEnded,
   runStatus,
   registerRowNode,
+  standby,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   rowRenders += 1;
@@ -2905,14 +2914,19 @@ function MessageRowInner({
       onAccessibilityAction={onAccessibilityAction}
       style={[
         styles.row,
-        startsGroup && styles.rowStartsGroup,
+        // 대기 중인 서버 사본은 위 여백도 지지 않는다 — 레이아웃에 0 을 낸다(메아리가 아직 그 자리를 지킨다).
+        startsGroup && !standby && styles.rowStartsGroup,
+        standby && styles.rowStandby,
         // 착지 틴트는 **그릇**이 입는다. 그릇 상자가 곧 강조 면이다 — 화면 끝에서
         // `ROW_FACE.outer` 떨어지고 모서리가 둥글다(눌림 면·물러나는 덮개와 같은 상자,
         // `rowFace.ts`). 옛 근거(「안쪽에 걸면 좌우가 안 물든다」)는 owner 2026-10-24 가
         // 「각지다」고 짚어 대체됐다.
         landed && styles.rowLanded,
       ]}
-      testID="message-row"
+      pointerEvents={standby ? 'none' : undefined}
+      accessibilityElementsHidden={standby ? true : undefined}
+      importantForAccessibility={standby ? 'no-hide-descendants' : undefined}
+      testID={standby ? 'message-row-standby' : 'message-row'}
       {...longPress.handlers}>
       {/* 틴트가 **물러나는 순간**의 덮개 (#3921). 서 있는 동안은 아무것도 그리지 않는다 —
           위 그릇이 배경으로 입는다. 첫 자식이라 내용 뒤에 깔린다. */}
@@ -3522,6 +3536,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   runEnded: true,
   runStatus: true,
   registerRowNode: true,
+  standby: true,
 };
 
 /**
@@ -3602,7 +3617,9 @@ export function sameMessageRowProps(
     // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 충분하다.
     // 빠지면 필이 켜진 표면으로 옮겨 온 행이 노드를 알리지 않아 초점이 그 행에
     // 가지 못한다.
-    a.registerRowNode === b.registerRowNode
+    a.registerRowNode === b.registerRowNode &&
+    // #4455 r3 H3. 대기에서 드러남으로 바뀔 때 이 행이 다시 그려져야 한다 — 빠지면 서버 사본이 투명한 채 남는다.
+    a.standby === b.standby
   );
 }
 
@@ -4176,6 +4193,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 2 좁다: 아바타가 40 으로 커져 묶음 경계가 얼굴로 먼저 읽힌다.
    */
   rowStartsGroup: {marginTop: CONV.groupGap - CONTINUATION_GAP},
+  /**
+   * 대기 중인 서버 사본(#4455 r3 H3): 레이아웃에 자리를 차지하지 않고(높이 0 — 자식은 넘쳐 그려진다, RN 의 `flexShrink` 기본은 0 이라
+   * 자식 높이가 줄지 않는다) 보이지 않는다. 투명한 채로도 이미지 뷰는 마운트되어 그려진다.
+   */
+  rowStandby: {height: 0, opacity: 0},
   // 시각 칸의 여백은 여기 없다 — 그릇(`rowTimeReserve`)이 진다. 이 줄에만
   // 걸어 두었던 것이 M-1 이 말한 구멍의 절반이었다: 예약이 자식에 붙어 있으면
   // **그 자식이 없는 행**은 예약도 없다.
