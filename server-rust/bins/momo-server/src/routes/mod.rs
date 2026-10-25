@@ -14,6 +14,9 @@ pub mod agent_provider_pin;
 pub mod agent_runs;
 pub mod agents;
 pub mod app_notice;
+/// ADR-0113 증보 3 F8 / #4313 — `GET …/members/me/app-runtimes`: which of my agents run my
+/// apps, and whether a message to each would be delivered right now (owner-only read).
+pub mod app_runtimes;
 pub mod approvals;
 pub mod apps_used;
 /// ADR-0151 — the Drive attachment surface: upload session, completion, and the
@@ -83,6 +86,9 @@ pub mod realtime;
 pub mod reattach;
 /// ADR-0175 / #1888 — personal message reminders (human-only, no outbox).
 pub mod reminders;
+/// ADR-0113 증보 3 F5 / #4313 — the send request's `apps` field and the server-owned
+/// `props.requestedApps` marker (a marker, never a grant).
+pub(crate) mod requested_apps;
 pub mod roster;
 /// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
 pub mod scheduled_messages;
