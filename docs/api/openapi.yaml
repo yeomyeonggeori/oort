@@ -127,6 +127,13 @@ tags:
     description: >
       ADR-0208 scheduled messages. Human-only, owner-scoped. The server keeps the
       message and sends it itself at `sendAtMs` through the `sendMessage` path.
+  - name: notifications
+    description: >
+      ADR-0206 notification settings v2: diagnostics and the test push, the
+      per-kind and per-surface switches with presentation and work hours,
+      keywords, and the desktop-activity signal. Human bearer only (an agent
+      bearer is 403). Contract draft: each route is served from the slice its
+      description names, until then it answers 404.
   - name: memory
     description: >
       ADR-0196 team memory v2 — channel/thread digests with evidence links,
@@ -4208,6 +4215,17 @@ paths:
         `muted: false` deletes the preference. Mute suppresses every push
         reason, including mentions and approval requests, without changing
         unread/read-state.
+
+        ADR-0206 D7 and D12 contract draft: the body may instead carry `level`
+        (`all`, `mentions` or `none`) and, with a mute (`muted: true` or `level:
+        none`), `mutedUntilMs` (epoch ms, in the future and within 366 days: 400
+        `muted_until_in_past` or `muted_until_too_far`). Exactly one of `muted`
+        and `level` is required. `level: all` is refused for a DM channel (400
+        `level_not_applicable`). The mute is a layer over the level, so a timed
+        mute returns to the earlier level when it ends, and the legacy `muted`
+        body touches only the mute layer. Until #4343 (`mutedUntilMs`) and the
+        channel-level slice land, the server accepts only `{muted}` and answers
+        422 to the new fields.
       security:
         - bearerAuth: []
       parameters:
@@ -4443,6 +4461,313 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/notification-diagnostics:
+    get:
+      tags: [notifications]
+      operationId: getNotificationDiagnostics
+      summary: Why a push might not arrive, as closed codes the server can know.
+      description: >
+        ADR-0206 D11 contract draft (served from #4341; 404 until then). The
+        caller's own state only; human bearer only (an agent bearer is 403).
+        `blockers` holds the closed codes the server can compute:
+        `paused`, `quiet_hours`, `channel_muted` (only with `channelId`),
+        `kind_off` (only with `kind`), `no_device`, `token_invalidated`,
+        `relay_unreachable` (inferred from recent dispatch records: the server
+        process has no relay client), `last_delivery_failed`. `ok` is true when
+        there is no blocker. That means the server holds nothing back, not that
+        the device shows it: the OS permission, the per-device switch and Focus
+        modes are known only to the client. `lastTest` is the latest test push
+        the caller sent, if any.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: channelId
+          in: query
+          required: false
+          description: Also evaluate `channel_muted` for this channel.
+          schema:
+            type: string
+            format: uuid
+        - name: kind
+          in: query
+          required: false
+          description: Also evaluate `kind_off` and the `quiet_hours` pass-through for this kind.
+          schema:
+            $ref: "#/components/schemas/NotificationKind"
+      responses:
+        "200":
+          description: The caller's current blockers.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationDiagnosticsResponse"
+        "400":
+          description: An invalid `channelId` or `kind`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/notification-diagnostics/test:
+    post:
+      tags: [notifications]
+      operationId: sendTestNotification
+      summary: Send a test push to the caller's own devices.
+      description: >
+        ADR-0206 D11 contract draft (served from #4341; 404 until then). A
+        separate path that **bypasses the push judgment**: its purpose is to
+        prove the delivery path, so it arrives even while the caller's
+        notifications are paused (the gates are what `getNotificationDiagnostics`
+        reports). It goes only to the caller's own active push tokens, as one
+        `push_system` outbox row (ADR-0206 D15) that the notifier signs and sends
+        with a static body. No request body. Human bearer only (an agent bearer is
+        403). 409 `no_device` when the caller has no active token. At most 3 per
+        minute per member: 429 `rate_limited`. The result is read from `lastTest`
+        of `getNotificationDiagnostics`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "202":
+          description: Queued for the notifier.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SendTestNotificationResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`no_device`: the caller has no active push token."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/notification-prefs:
+    get:
+      tags: [notifications]
+      operationId: getNotificationPrefs
+      summary: Read the caller's per-kind switches, presentation, work hours and delay.
+      description: >
+        ADR-0206 D13 contract draft (served from the slice that stores it; 404
+        until then). The caller's own settings only (never a memberId from the
+        request); human bearer only (an agent bearer is 403). Every kind is
+        present with the stored value or its default (no stored row answers
+        today's behavior). `effective` is the server's own evaluation of the
+        pause and the work-hours schedule, so a desktop client reads it instead
+        of redoing the time-zone math. There is no event: another device
+        converges on its next read.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's notification preferences.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    patch:
+      tags: [notifications]
+      operationId: patchNotificationPrefs
+      summary: Change only the named preferences.
+      description: >
+        ADR-0206 D5·D13 contract draft. Every field optional; an omitted one keeps
+        what is stored when the write lands (merged under the row lock). An empty
+        body is a 400; an unknown field is refused by the JSON extractor (422).
+        Changing the phone push of `approval` from on to off needs `confirm:
+        ["approval_push_off"]`; without it 400 `confirmation_required`. With it the
+        response carries `warnings: ["approval_push_off"]` and the write is
+        audited. `schedule.tz` must be an
+        IANA zone name the database knows (400 `invalid_time_zone`); a sound id
+        must be known (400 `unknown_sound`). `schedule: null` removes the
+        schedule. Human bearer only (an agent bearer is 403).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PatchNotificationPrefsRequest"
+      responses:
+        "200":
+          description: The stored preferences after the patch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationPrefsResponse"
+        "400":
+          description: >
+            Empty body, `confirmation_required`, `invalid_time_zone` or
+            `unknown_sound`. An unknown field is a 422 from the JSON extractor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/notification-keywords:
+    get:
+      tags: [notifications]
+      operationId: getNotificationKeywords
+      summary: Read the caller's own notification keywords.
+      description: >
+        ADR-0206 D3 contract draft (served from the keyword slice; 404 until
+        then). The caller's own list only; nobody else can read it. Keywords are
+        stored as plain text on the server (a substring match needs the text).
+        Human bearer only (an agent bearer is 403).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's keywords and the limit.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationKeywordsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [notifications]
+      operationId: putNotificationKeywords
+      summary: Replace the caller's whole keyword list.
+      description: >
+        ADR-0206 D3 contract draft. Replaces the list. Each keyword is normalized
+        (NFKC, lower case, trimmed) and must be 2 to 32 characters long after
+        that; duplicates collapse; at most 20. 400 `keyword_too_short`,
+        `keyword_too_long` or `too_many_keywords`. A keyword hit raises the
+        `keyword` push reason on messages in channels the caller is in; it adds
+        nothing to the mention badge. The audit row records the count, never the
+        text. Human bearer only (an agent bearer is 403).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PutNotificationKeywordsRequest"
+      responses:
+        "200":
+          description: The stored keywords.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationKeywordsResponse"
+        "400":
+          description: "`keyword_too_short`, `keyword_too_long` or `too_many_keywords`. An unknown field is a 422 from the JSON extractor."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/presence/activity:
+    put:
+      tags: [notifications]
+      operationId: touchPresenceActivity
+      summary: Presence heartbeat - "a desktop or web client of mine is in use".
+      description: >
+        ADR-0206 D4 contract draft (served from the activity slice; 404 until
+        then). A web or desktop client that is in front and was used in the last
+        5 minutes sends this at most every 20 seconds. The server treats a stamp
+        younger than 30 seconds as "my desktop is active" and, for the caller's
+        phone tokens only, holds the push reasons `mention`, `dm`,
+        `channel_message` and `keyword` for the caller's `phoneDelaySecs`
+        (default 60) and drops them if the message is read in that time.
+        Approval requests and the work reasons are never held. The phone does not
+        send this. No body and no member id: the owner is the bearer, no other
+        member can read the stamp, and a beat younger than 5 seconds after the
+        previous one is accepted and not rewritten. A client that never sends it
+        keeps today's behavior. Human bearer only (an agent bearer is 403).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "204":
+          description: Recorded.
+        "400":
+          description: The workspace id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or workspace scope mismatch.
           content:
             application/json:
               schema:
@@ -15808,6 +16133,19 @@ components:
         muted:
           type: boolean
           description: Whether push dispatch is suppressed for the authenticated member.
+        mutedUntilMs:
+          type: integer
+          format: int64
+          description: >
+            Epoch ms, present only while a timed mute is in progress (ADR-0206 D12
+            contract draft).
+        notificationLevel:
+          type: string
+          enum: [all, mentions, none]
+          description: >
+            The authenticated member's effective level for this channel (ADR-0206 D7
+            contract draft). `none` while a mute is in progress, else `all` when the
+            member opted in, else `mentions`.
 
     WorkspaceChannelsResponse:
       type: object
@@ -15820,10 +16158,29 @@ components:
 
     UpdateNotificationPrefRequest:
       type: object
-      required: [muted]
+      additionalProperties: false
+      description: >
+        Exactly one of `muted` and `level` (ADR-0206 D7, D12 contract draft; only
+        `muted` is accepted until the slices land).
+      oneOf:
+        - required: [muted]
+        - required: [level]
       properties:
         muted:
           type: boolean
+        level:
+          type: string
+          enum: [all, mentions, none]
+          description: >
+            `all` every new top-level message, `mentions` the default, `none` a
+            mute. A DM channel takes only `none` and `mentions`.
+        mutedUntilMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            Epoch ms when the mute ends. Only with `muted: true` or `level:
+            none`. Omitted or null is open-ended.
 
     NotificationPrefResponse:
       type: object
@@ -15831,6 +16188,15 @@ components:
       properties:
         muted:
           type: boolean
+          description: Effective now (a timed mute that has ended reads false).
+        level:
+          type: string
+          enum: [all, mentions, none]
+          description: Effective level (ADR-0206 D7 contract draft; served with the channel-level slice).
+        mutedUntilMs:
+          type: integer
+          format: int64
+          description: Epoch ms, present only while a timed mute is in progress (ADR-0206 D12 contract draft).
 
     PutAgentProviderPinRequest:
       type: object
@@ -16005,6 +16371,331 @@ components:
         workComplete:
           type: boolean
           description: Default true.
+
+    NotificationKind:
+      type: string
+      enum: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll]
+      description: >
+        ADR-0206 kind table. The server tags each push target with one of these
+        when it judges. The engine owns this list.
+
+    NotificationSurfaceSwitches:
+      type: object
+      additionalProperties: false
+      required: [phone]
+      description: >
+        One kind on the two surfaces. `desktop` is absent where the surface does
+        not apply to the kind (`agentAnswer`).
+      properties:
+        phone:
+          type: boolean
+        desktop:
+          type: boolean
+
+    PatchNotificationSurfaceSwitches:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        phone:
+          type: boolean
+        desktop:
+          type: boolean
+
+    NotificationSchedule:
+      type: object
+      additionalProperties: false
+      required: [enabled, tz, days, start, end, passThrough]
+      description: >
+        Work hours. Outside the window notifications behave like a pause, except
+        the kinds in `passThrough`. A pause always wins over the schedule.
+      properties:
+        enabled:
+          type: boolean
+        tz:
+          type: string
+          maxLength: 64
+          description: >
+            IANA zone name that the database knows (400 `invalid_time_zone`
+            otherwise). `human.tz` is not used as a default because the server
+            never validated it; the client sends its current zone.
+        days:
+          type: array
+          uniqueItems: true
+          items: {type: integer, minimum: 0, maximum: 6}
+          description: Days the window applies, 0 = Sunday to 6 = Saturday.
+        start:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Local `HH:MM`.
+        end:
+          type: string
+          pattern: "^([01][0-9]|2[0-3]):[0-5][0-9]$"
+          description: Local `HH:MM`. `end <= start` means the window crosses midnight.
+        passThrough:
+          type: array
+          uniqueItems: true
+          items:
+            $ref: "#/components/schemas/NotificationKind"
+          description: Kinds that still arrive outside the window. Default `[approval]`.
+
+    NotificationPresentation:
+      type: object
+      additionalProperties: false
+      required: [sounds]
+      properties:
+        sounds:
+          type: object
+          description: >
+            Sound slot per kind: a bundled id (`oort.message`, `oort.mention`,
+            `oort.dm`, `oort.approval`, `oort.work`, `oort.message.b`,
+            `oort.message.c`), `user:<sha256>` for a personal file (#4345) or
+            `none`. A kind that is absent plays its default. The phone maps by
+            push reason, so `mentionAgent` and `agentAnswer` sounds apply on the
+            desktop and web first.
+          additionalProperties:
+            type: string
+            maxLength: 80
+
+    NotificationEffective:
+      type: object
+      required: [paused, pausedUntilMs, quiet]
+      description: The server's own evaluation. A client reads it and never redoes the time-zone math.
+      properties:
+        paused:
+          type: boolean
+          description: A pause is running (the same value as `notification-rules`).
+        pausedUntilMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: Epoch ms while a timed pause is running, else null.
+        quiet:
+          type: object
+          required: [active, resumesAtMs]
+          properties:
+            active:
+              type: boolean
+              description: Outside the work-hours window right now.
+            resumesAtMs:
+              type: integer
+              format: int64
+              nullable: true
+              description: Epoch ms when the window next opens, else null.
+
+    NotificationPrefsResponse:
+      type: object
+      required: [kinds, presentation, schedule, phoneDelaySecs, keywordOverridesMute, approvalTimeSensitive, effective]
+      properties:
+        kinds:
+          type: object
+          required: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll]
+          properties:
+            dm: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            mentionHuman: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            mentionAgent: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            agentAnswer: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            approval: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            workDone: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            keyword: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            channelAll: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+          description: >
+            Defaults when nothing is stored: every phone switch on; desktop on
+            except `dm` (off). `workDone.phone` is the same value as
+            `push-kinds.workComplete`.
+        presentation:
+          $ref: "#/components/schemas/NotificationPresentation"
+        schedule:
+          allOf:
+            - $ref: "#/components/schemas/NotificationSchedule"
+          nullable: true
+          description: Null when no schedule was ever saved.
+        phoneDelaySecs:
+          type: integer
+          enum: [0, 60, 300]
+          description: >
+            How long a desktop-active signal holds the phone push of `mention`,
+            `dm`, `channel_message` and `keyword`. 0 turns the hold and the
+            read-cancel off (today's behavior). Default 60.
+        keywordOverridesMute:
+          type: boolean
+          description: A keyword hit passes a muted channel. Default true.
+        approvalTimeSensitive:
+          type: boolean
+          description: Ask the phone to deliver approval requests as Time Sensitive (D6). Default false.
+        effective:
+          $ref: "#/components/schemas/NotificationEffective"
+        warnings:
+          type: array
+          items:
+            type: string
+            enum: [approval_push_off]
+          description: Present only on a patch response.
+
+    PatchNotificationPrefsRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: "ADR-0206 D13. Every field optional; omitted = keep what is stored."
+      properties:
+        kinds:
+          type: object
+          additionalProperties: false
+          minProperties: 1
+          properties:
+            dm: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            mentionHuman: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            mentionAgent: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            agentAnswer: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            approval: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            workDone: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            keyword: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            channelAll: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+        presentation:
+          $ref: "#/components/schemas/NotificationPresentation"
+        schedule:
+          allOf:
+            - $ref: "#/components/schemas/NotificationSchedule"
+          nullable: true
+          description: Null removes the schedule.
+        phoneDelaySecs:
+          type: integer
+          enum: [0, 60, 300]
+        keywordOverridesMute:
+          type: boolean
+        approvalTimeSensitive:
+          type: boolean
+        confirm:
+          type: array
+          items:
+            type: string
+            enum: [approval_push_off]
+          description: Required when `kinds.approval.phone` changes from true to false (400 `confirmation_required` without it).
+
+    NotificationBlocker:
+      type: object
+      additionalProperties: false
+      required: [code]
+      properties:
+        code:
+          type: string
+          enum: [paused, quiet_hours, channel_muted, kind_off, no_device, token_invalidated, relay_unreachable, last_delivery_failed]
+        untilMs:
+          type: integer
+          format: int64
+          description: >
+            `paused`, `channel_muted`: epoch ms when it ends (absent = open-ended).
+            `quiet_hours`: epoch ms when the window next opens.
+        sinceMs:
+          type: integer
+          format: int64
+          description: "`token_invalidated`, `relay_unreachable`: epoch ms it started."
+        atMs:
+          type: integer
+          format: int64
+          description: "`last_delivery_failed`: epoch ms of the failed dispatch."
+        channelId:
+          type: string
+          format: uuid
+          description: "`channel_muted`."
+        kind:
+          $ref: "#/components/schemas/NotificationKind"
+        apnsStatus:
+          type: integer
+          description: "`last_delivery_failed`: the recorded HTTP status."
+        apnsReason:
+          type: string
+          description: "`last_delivery_failed`: the recorded reason code. Never message content."
+
+    NotificationLastTest:
+      type: object
+      additionalProperties: false
+      required: [id, status, atMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [queued, stalled, sent, failed, relay_outdated]
+          description: >
+            `queued` younger than 30 s; `stalled` waiting longer (the notifier may
+            be off); `sent` APNs answered 200; `failed` any other status;
+            `relay_outdated` an old relay refused the new vocabulary (not retried).
+        atMs:
+          type: integer
+          format: int64
+        apnsStatus:
+          type: integer
+
+    NotificationDiagnosticsResponse:
+      type: object
+      required: [checkedAtMs, ok, blockers, devices]
+      properties:
+        checkedAtMs:
+          type: integer
+          format: int64
+        ok:
+          type: boolean
+          description: No blocker. The server holds nothing back; the device may still not show it.
+        blockers:
+          type: array
+          items:
+            $ref: "#/components/schemas/NotificationBlocker"
+        devices:
+          type: object
+          required: [active, invalidated]
+          properties:
+            active:
+              type: integer
+              minimum: 0
+            invalidated:
+              type: integer
+              minimum: 0
+        lastTest:
+          $ref: "#/components/schemas/NotificationLastTest"
+
+    SendTestNotificationResponse:
+      type: object
+      required: [testId, deviceCount]
+      properties:
+        testId:
+          type: string
+          format: uuid
+        deviceCount:
+          type: integer
+          minimum: 1
+          description: Active tokens the test goes to.
+
+    NotificationKeywordsResponse:
+      type: object
+      required: [keywords, max]
+      properties:
+        keywords:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+          description: As the caller wrote them (the server matches on the normalized form).
+        max:
+          type: integer
+          description: The per-member limit (20).
+
+    PutNotificationKeywordsRequest:
+      type: object
+      additionalProperties: false
+      required: [keywords]
+      properties:
+        keywords:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            minLength: 1
+            maxLength: 128
+          description: >
+            Length is checked after normalization (NFKC, lower case, trimmed): 2 to
+            32 characters.
 
     SidebarSection:
       type: object

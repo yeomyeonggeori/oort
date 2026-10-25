@@ -1,0 +1,539 @@
+# ADR-0206: 알림 설정 v2 — 전달·표면·표현을 갈라 두고, 진단·채널 단계·키워드·데스크탑 활성 시 폰 지연·알림음을 한 계약으로
+
+- Status: **Proposed** (독립 설계 검토 전. 검토가 통과하면 Accepted로 올려요)
+- Date: 2026-10-25
+- Deciders: 성재
+- 기안: Sonnet 5.5 엔진 워커 (#4223). 리서치 r7(로컬 기록 `claudedocs/resume-2026-09-23/handoff-1021/research-1021/r7-notifications-report.md`, 레포 미추적)의 §6 권장안 D1~D10을 이슈 #4223이 확정한 대로 받고, 코드로 다시 확인해 달라진 곳은 「리서치와 달라진 곳」에 모았어요.
+- 관계
+  - ADR-0120(푸시 경계, 부록 A): **어휘 증보**예요. reason 4종·category 1종·선택 키 1종을 더하고 D2의 id-only는 그대로예요. 본문 결정은 바꾸지 않아요.
+  - ADR-0124(알림 음소거, 증보 1~3): **증보**예요. 증보 2가 열어 둔 `muted_until`을 API로 쓰고 읽게 하고(D12), 증보 1 D4가 「후속 ADR」로 미룬 키워드를 정해요(D3). 멘션 예외·일시 중지의 뜻은 그대로예요.
+  - ADR-0204(폰 알림 v2): **D8 부분 번복**(D4)이고 **D10 이행**(D11)이에요. 증보 3의 `channel_viewing` 위에 얹어요. D1~D3·D6·D7·D9와 D8-a는 그대로예요.
+  - ADR-0208(예약 메시지) D8: 미뤄 둔 **실패 푸시의 다섯 비용**을 여기서 정해요(D15).
+  - ADR-0188 §8.7: NSE `push_fetch` 허용 경로(읽기 둘)는 **바뀌지 않아요**.
+  - 이 ADR이 정하지 않는 것은 D20에 모았어요(규칙 빌더 ADR-0207, Apple capability 작업, 다이제스트, 허들 시작 푸시 #2767).
+  - ADR-0100(거버넌스), ADR-0177(설정은 이벤트 없이 다음 조회로 수렴하는 선례), ux-bible P8·P9·P10.
+- 번호 확인 [V, 2026-10-25]: `origin/main`·`origin/track/engine`·`origin/track/uxui`와 원격 브랜치 912개의 `docs/adr/`에 0206·0207 파일이 없고(마지막은 0214) 열린 PR 중 `docs/adr/02`를 만드는 것도 없어요. 0206·0207은 #4213이, 0209~0213은 열린 이슈(#4238·#4239·#4240 등)가 예약했어요. 이 ADR은 **0206**만 써요.
+- 표기: [V] 이 세션에서 저장소 코드·문서를 직접 읽어 확인(`파일:줄`, 기준 `track/engine` `5bdecd348`) · [외부] 공식 문서·공개 저장소(리서치 r7이 읽은 것, 이 세션에서 다시 열지 않음) · [추정] 해석 · [권장] 성재 위임(2026-10-22)으로 이 ADR이 고른 것(PR 본문 「권장으로 정한 것」에 모두 적었어요) · [확인 필요] 구현 전에 확인 · `runtime-unverified` 실행하지 않음. 이 문서는 설계예요. 코드·마이그레이션은 바꾸지 않았고, 함께 들어가는 것은 아래 둘뿐이에요.
+- 함께 들어가는 문서: `docs/api/openapi.yaml`의 계약 초안(부록 A, ADR-0208과 같은 방식) · ADR-0120·0124·0204 머리의 포인터 한 줄.
+
+## 맥락
+
+### owner 요청 (원문)
+- 2026-10-21 성재: 「버즈쪽에서 알림에서 에로사항을 엄청 느끼는 거 같아. 그 부분에 있어서 커스텀까지도 가능하게(직접 넣어서 말이야) 해줬으면 좋겠어.」 「직접 넣어서」는 알림음 파일(1차)과 사용자 규칙(2차)으로 읽고 둘 다 설계해요.
+- 2026-10-22 성재(위임): 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」
+- 2026-10-22 성재(소리 출처): 「기본 알림음은 너가 뭐 오픈소스같은걸로 만들거나 알림음을 찾아봐봐.」
+- 2026-10-22 planner 결정(#4223 코멘트): ADR-0208 D8이 푸시를 뺀 예약 실패를 이 ADR이 새 reason(`scheduled_failed`)과 다섯 비용으로 함께 정해요.
+
+### 리서치가 짚은 것 (요약, [외부])
+- Buzz의 불편은 「설정이 적다」보다 「왜 안 오는지 모르고(B1), 시끄러운데 놓치고(B3), 소리 스위치가 배너까지 끄고(B6), 설정이 기기에 묶인다(B8)」예요(r7 §2.1).
+- 사용자 파일 알림음을 하는 비교 제품은 Telegram뿐이에요(5초·307,200바이트·100개, 서버가 변환, 기기 간 동기화). 카카오톡 키워드는 알림을 끈 방도 뚫어요(r7 §2.2).
+- Slack은 모바일 푸시를 데스크탑이 비활성일 때만 보내요. 기본은 화면 잠금 1분 뒤 또는 커서 10분 정지 뒤예요(r7 §2.2).
+
+### 운영 사실
+- [V] 푸시가 15일 동안 0건이었고 사용자는 알 수 없었어요(ADR-0204 맥락 `:12-30`).
+- [V] 서버는 DM 두 건을 모두 보냈고 APNs가 200으로 받았는데 받는 사람은 못 봤다고 했어요. 서버 기록으로는 앱이 앞에 있었는지, iOS 설정·집중 모드였는지 가를 수 없었어요(#4295 진단 코멘트). 그래서 진단은 서버가 아는 코드와 기기만 아는 코드 두 갈래예요(D11).
+
+### 지금 있는 것 [V]
+
+| 영역 | 사실 | 근거 |
+|---|---|---|
+| 판정은 한 곳 | `judge_targets` 한 문장이 수신자와 reason을 고르고 본문을 읽지 않아요. reason 우선순위는 작업 세 가지(`resume_offer`·`work_session_idle`·`work_run_done`) > 승인 > 멘션 > DM > 에이전트의 답이에요 | `server-rust/crates/momo-push/src/judgment.rs:1-198`(머리말), `:312-402`(reason CASE) |
+| 억제 | 일시 중지(`dnd`, 기한은 판정 때 비교), 작업 끝남 스위치, 채널 음소거(기한이 지난 행은 풀림, 멘션 예외)가 AND로 걸려요 | `judgment.rs:462-473` |
+| 채널 음소거 | `notification_pref` 행이 있으면 음소거예요. 쓰는 쪽은 기한을 항상 NULL로 넣어요 | `server/Migrations/018_notification_pref.sql:9-17`, `server-rust/crates/momo-messaging/src/channel.rs:473-523` |
+| 기한 읽기 | 읽는 곳 다섯이 이미 `muted_until IS NULL OR muted_until > now()`를 평가해요 | `judgment.rs:469-473`, `momo-messaging/src/dm.rs:244-249`·`:309-314`, `channel.rs:658-663`, `inbox.rs:221-232` |
+| 음소거 API | 요청은 `{muted}` 하나(`deny_unknown_fields`), 응답도 `{muted}`예요 | `server-rust/bins/momo-server/src/dto.rs:2683-2694`, `routes/channels.rs:240-287` |
+| 폰 음소거 | 사이드바 길게 누르기에 **무기한** 켜고 끄기가 있어요. 기한 선택은 없고 채널 헤더에는 없어요 | `clients/mobile/src/features/sidebar/useChannelRowActions.ts:240-257` |
+| 푸시 어휘 | reason 6종, category 5종이고 키 집합은 정확히 일치해야 해요. UUID 형식은 `approval_id`만 검사해요 | relay `server-rust/bins/momo-push-relay/src/dispatch.rs:15-31`(키), `:43-50`, `:61-67`, `:188-250`(검사, UUID는 `:221`) |
+| 소리 | 폰은 모든 category가 `aps.sound="default"`예요. 데스크탑 배너는 소리가 없어요 | relay `dispatch.rs:100-106`, `clients/desktop/src-tauri/src/notification.rs:88-92` |
+| NSE | 어휘를 모르면 파싱이 실패해 relay의 정적 자리표시(「oort / 새 알림」)로 남아요(fail-open). 네트워크로 읽는 길은 둘뿐이에요(roster, 채널 messages) | `clients/mobile/ios/NotificationService/NotificationService.swift:36-48`, `clients/mobile/ios/MomoPushKit/PushNotification.swift:227-247`, `server-rust/crates/momo-auth/src/push_fetch_token.rs:199-215` |
+| 푸시 소비 | notifier가 `kind='push_candidate'`만 claim하고(claim이 `attempts`를 올려요) 후보 하나의 모든 대상을 한 번에 판정·발송해요. 미뤄 둔 대상이라는 개념이 없어요 | `server-rust/crates/momo-outbox/src/push.rs:125-155`, `server-rust/bins/momo-notifier/src/push.rs:131-190`·`:426-455` |
+| 발송 기록 | `push_dispatch_log.message_id`는 NULL을 허용하고 `(member, token, collapse_id)`가 유일해요. 그런데 `claim_dispatch`는 message id를 필수로 묶어요 | `001_init.sql:532-543`, `011_push_notifier.sql:71-73`, `server-rust/crates/momo-push/src/dispatch_log.rs:54-103` |
+| relay 키 | relay 서명 키는 notifier만 가져요(드레인은 `MOMO_PUSH_NOTIFIER_ENABLED=1`일 때만 서요). api 프로세스에는 relay 클라이언트가 없어요 | `server-rust/bins/momo-notifier/src/config.rs:83-104`·`:328-330`, `bins/momo-server/src`·`momo-messaging/src`에 `PUSH_RELAY`·`PushRelay` 0건 |
+| 데스크탑 배너 | 판정은 클라이언트가 해요. 일시 중지는 서버 값을 읽지만(#4197) 멘션 예외·종류 스위치·일정은 읽지 않아요. 종류 스위치는 이 기기 localStorage예요. 감시 채널은 비음소거 30개까지예요 | `packages/momo-core/src/features/notifications/model.ts:220`·`:240-258`, `clients/web/src/features/notifications/preference.ts:45-59`, `DesktopNotifications.tsx:57`·`:91-92` |
+| 보고 있음 | `channel_viewing` 하트비트(15초 주기·30초 창)는 「질문자 팔」에만 쓰여요. 사람 멘션·DM에는 창이 없어요 | `server/Migrations/141_channel_viewing.sql`, `judgment.rs:375-400`, ADR-0204 D8(`:133-134`)·증보 3 |
+| 데스크탑 활성 | 서버는 데스크탑이 지금 쓰이는지 몰라요 | `judgment.rs`의 입력에 없음 |
+| 진단·시험 | 없어요. ADR-0204가 후속으로 남겼어요 | ADR-0204 D10(`:143-147`) |
+| Time Sensitive | `interruption-level`을 서버·relay·앱 어디서도 안 넣고 앱 entitlement에도 없어요 | grep `interruption` 0건, `clients/mobile/ios/MomoMobile/MomoMobile.entitlements` |
+| 표준 시간대 | `human.tz`는 가입 때 클라이언트가 보낸 값이고 IANA 이름인지 검증하지 않아요(길이 64 이하만) | `001_init.sql:67`, `server-rust/crates/momo-settings/src/join.rs:235-243` |
+| 서버 소유 props | 클라이언트가 못 쓰는 props 키 목록이 한 곳이에요 | `server-rust/bins/momo-server/src/routes/messages.rs:97-111` |
+| message INSERT | INSERT는 한 함수예요. 멘션은 REST 경로(`MentionPolicy::Record`)에서만 기록하고 에이전트 worker·gateway의 줄은 기록하지 않아요 | `server-rust/crates/momo-messaging/src/message.rs:494`·`:571`·`:602`·`:739`·`:824` |
+
+## 리서치와 달라진 곳
+
+코드를 다시 읽어 리서치·이슈의 문장과 달라진 것이에요. 모두 [권장]이고 PR 본문 표에 있어요.
+
+1. **채널 단계는 새 표에 둬요.** 리서치는 `notification_pref.level` 컬럼을 제안했어요. 「행이 있으면 음소거」를 읽는 곳이 다섯이라(위 표) `all` 행이 하나만 있어도 음소거로 읽히고, 롤백한 서버도 그렇게 읽어요(D7).
+2. **키워드 투영은 `props`가 아니라 별도 표에 둬요.** 리서치는 `props.keyword_member_ids`를 제안했어요. props는 채널 멤버가 모두 읽어서 남의 키워드를 알아낼 수 있어요. 투영 지점도 REST 한 곳이 아니라 둘이에요: 모든 보내기 경로와 스트림이 끝나는 쓰기(D3).
+3. **시험 알림 피드는 `push_system`으로 일반화해요.** 이슈 #4341은 `push_test`예요. 메시지 행이 없는 푸시가 시험 알림·예약 실패(ADR-0208 D8)·다이제스트로 셋이라 한 길에 모아요(D15).
+4. **발송 기록은 `message_id NULL`로 남겨요.** 리서치는 nil-UUID 센티널만 적었어요. 기록 FK와 `claim_dispatch`의 필수 인자를 풀어야 해요(D15).
+5. **폰 채널 음소거 쓰기 길이 이미 있어요.** 리서치 H2(「쓰기 경로 없음」)는 낡았어요. 무기한 토글이 길게 누르기에 있어요. #4344의 「폰 신설」은 「폰 기한 선택」으로 줄어요(구현 슬라이스 표).
+6. **사용자 알림음의 크기와 표본률**: 이슈의 「≤300KB」를 307,200바이트(300KiB)로 못박고, 표본률 상한 24kHz는 5초·300KiB 산술에서 나와요(D2). 리서치 P2-1E에는 있고 D2 요약에는 없었어요.
+7. **일정의 기본 시간대는 `human.tz`가 아니에요.** 검증하지 않는 문자열이라서 클라이언트의 현재 시간대를 기본값으로 보내요(D13).
+8. **어휘 증보는 한 번에 relay 먼저 내요.** 이유마다 relay를 따로 배포하면 호스티드 relay 배포가 네 번이에요(D14).
+9. **D10은 이슈를 따라요.** 리서치 §6은 「성재 제작·선정」이었고 이슈 #4223·#4222는 성재 10-22 원문대로 planner 합성이에요.
+10. **relay의 정적 문구는 reason별 표가 돼요.** 지금은 상수 한 쌍이에요(`dispatch.rs:300-301`). 시험·예약 실패 문구를 따로 실어야 해요(D14).
+
+## 세 축과 불변식
+
+한 줄의 설정이 세 가지를 한꺼번에 바꾸면 Buzz의 B6(소리 스위치가 배너까지 끔)이 생겨요. 설정을 세 축으로 갈라요.
+
+| 축 | 묻는 것 | 판정하는 곳 | 입력 | 저장 |
+|---|---|---|---|---|
+| **전달** | 누구에게·무엇을·언제 보내나 | 폰 푸시는 **서버** judgment 한 곳(P9). 데스크탑·웹 배너는 클라이언트가 **서버 값을 입력으로** 판정해요(D17) | 일시 중지, 근무 시간, 채널 단계·음소거, 종류×표면 스위치, 키워드, 발신자 규칙, 데스크탑 활성 | (워크스페이스, 멤버) 서버 |
+| **표면** | 어디에 나타나나 | 폰 푸시 / 데스크탑·웹 배너 / 배지 / 앱 안 | 종류×표면 표(D5) | 서버 동기 |
+| **표현** | 어떻게 들리고 보이나 | 기기가 재생해요. 서버는 우선순위(D6)만 와이어에 실어요 | 소리 매핑, 사용자 파일, Time Sensitive | 서버 동기 JSON + 기기 캐시 |
+
+배지(`mention_count`·unread)는 별개 원장이고 이 ADR이 건드리지 않아요(ADR-0124 D2).
+
+**불변식**
+
+- **I1** 표현은 전달을 끄지 않아요. 소리를 끄면 배너는 남고, 배너가 억제되면 소리도 없어요.
+- **I2** 판정은 본문을 읽지 않아요. 키워드는 삽입 때 서버가 투영해요(D3).
+- **I3** 와이어는 id-only이고 어휘는 닫혀 있어요. 새 reason·category는 relay 먼저 배포해요(D14).
+- **I4** 설정은 (워크스페이스, 멤버) 단위예요. 계정 단위 새 테이블은 만들지 않아요(D9).
+- **I5** 모든 migration은 「행 부재 = 오늘의 동작」이에요. 롤백한 서버는 새 설정을 몰라서 오늘의 동작으로 돌아가고, 알림이 **음소거로 둔갑해 사라지지는 않아요**.
+- **I6** 사용자가 멈춘 것은 멈춰요. 일시 중지가 가장 위이고 근무 시간 밖·채널 음소거가 그 아래예요. Time Sensitive·VIP·키워드는 일시 중지를 뚫지 못해요. 예외는 사용자가 직접 누른 시험 알림뿐이에요(D11).
+
+### 종류 표 (전달 × 표면)
+
+종류는 서버가 판정할 때 대상마다 붙이는 이름이에요(D5). 와이어 reason과 반드시 일대일은 아니에요.
+
+| 종류(API) | 와이어 reason · category | 폰 기본 | 데스크탑 기본 | 지연(D4) | 폰 소리 키 |
+|---|---|---|---|---|---|
+| `dm` | `dm` · `momo.message` | 켬 | **끔**(성재 2026-10-02, `preference.ts:53`·`:56`) | 예 | `dm` |
+| `mentionHuman` | `mention` · `momo.mention` | 켬 | 켬 | 예 | `mention` |
+| `mentionAgent` | `mention` · `momo.mention` | 켬 | 켬 | 예 | `mention` |
+| `agentAnswer` | `mention` · `momo.mention` | 켬 | 해당 없음 | 예 | `mention` |
+| `approval` | `approval_request` · `momo.approval`(`.open`) | 켬 | 켬 | 아니오 | `approval_request` |
+| `workDone` | `work_session_idle`·`work_run_done` · `momo.work` | 켬 | 켬 | 아니오 | `work` |
+| `keyword` | `keyword` · `momo.mention` | 켬 | 켬 | 예 | `keyword` |
+| `channelAll` | `channel_message` · `momo.message` | 켬(단계가 `all`일 때만 의미) | 켬(단계가 `all`일 때만 의미) | 예 | `channel_message` |
+| (이어받기) | `resume_offer` · `momo.work` | 항상 | 해당 없음 | 아니오 | `work` |
+| (시스템) | `test_notification`·`scheduled_failed` · `momo.system` | 항상(예약 실패는 일시 중지를 따라요) | 해당 없음 | 아니오 | `system` |
+
+「행 부재 = 오늘」이에요. 위 기본값은 오늘 폰이 보내는 것(작업 끝남은 `work_complete_push` 기본 true, `115_work_complete_push.sql`)과 오늘 데스크탑이 띄우는 것(`preference.ts:49-59`)과 같아요. 새 종류(`keyword`·`channelAll`)는 사람이 키워드를 넣거나 채널을 `all`로 바꿔야 의미가 생겨요.
+
+## 결정
+
+D1~D10은 이슈 #4223이 리서치 §6 권장안으로 확정한 것(성재 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」, D4는 같은 날 성재에게 구체 설명)이고, 이 ADR이 계약으로 풀어 써요. D11 이후는 이 ADR이 [권장]으로 고른 기술 결정이에요.
+
+### D1. 순서: 신뢰 복구 → 전달 세밀도와 표현 → 직접 넣기
+1. **신뢰 복구**: 진단·시험 알림(D11, #4341·#4342), 채널 음소거 기한(D12, #4343·#4344), 푸시 어휘 증보(D14), 데스크탑 배너 판정 일원화(D17, #4197은 끝남·#4212가 후속).
+2. **전달 세밀도와 표현**: 채널 단계(D7)·종류×표면(D5, D13)·키워드(D3)·근무 시간(D13)·데스크탑 활성 시 폰 지연(D4)·번들 소리와 매핑(D10, D18).
+3. **직접 넣기와 관통**: 사용자 알림음 파일(D2, #4345)·VIP(D19)·규칙 빌더(ADR-0207, #4345)·Time Sensitive(D6).
+- 이유: 파일 업로드는 번들 소리 경로(매핑·재생·NSE)를 그대로 써서 이 순서가 재작업 0이에요. 규칙 빌더는 키워드·일정·발신자 규칙이 먼저 있어야 해요. 「직접 넣어서」가 알림음인지 규칙인지 원문이 갈려서 둘 다 설계해 두고 순서만 정했어요.
+
+### D2. 사용자 알림음 파일은 개인 전용이에요
+- **범위**: 개인 전용이에요. 팀 공유 라이브러리는 만들지 않아요(불쾌한 소리가 팀에 퍼져요).
+- **정본 형식**: WAV, PCM 16비트, 모노, **표본률 8000~24000Hz**, 길이 **5.0초 이하**, 파일 **307,200바이트(300KiB) 이하**, 멤버당 **20개 이하**예요. 표본률 상한은 산술이에요: 24kHz × 2바이트 × 5초 = 240,000바이트라 300KiB 안에 5초가 들어가고, 32kHz는 320,000바이트라 안 들어가요. 번들 소리(D10)는 이 규격과 별개예요.
+- **저장** [권장]: PG `bytea`예요. id는 내용의 sha256이라 같은 파일은 한 행이에요. 소유자 범위 RLS FORCE(리마인더·예약과 같은 모양, `momo-messaging/src/owner_scope.rs`)로 워크스페이스 owner도 남의 파일을 못 읽어요. 삭제하면 이 소리를 가리키던 매핑은 기본음으로 퇴화하고, 멤버를 지우면 CASCADE예요.
+- **검증**: 서버는 RIFF 헤더만 읽어요. `fmt `·`data` 청크만 허용하고 PCM(1)·모노·16비트·표본률 범위·길이·크기를 봐요. 디코더·ffmpeg는 서버에 두지 않아요(permissive 라이선스 규칙, 이미지 의존, 공격면). 변환(mp3·m4a·ogg → WAV)은 클라이언트가 해요(웹·데스크탑 Web Audio decode, iOS AVFoundation).
+- **API 초안** [권장]: `PUT /v1/workspaces/{ws}/notification-sounds/{sha256}`(본문이 WAV 바이트이고 경로의 해시가 본문 해시와 다르면 400), `GET …/notification-sounds`(id·길이·크기·이름 목록), `GET …/notification-sounds/{sha256}`(`Content-Type: audio/wav`, `X-Content-Type-Options: nosniff`), `DELETE`예요. 사람 bearer만 써요(에이전트 403). 3단계라 openapi 초안에는 넣지 않고 #4345가 착수할 때 넣어요.
+- **폰**: 앱이 받아서 App Group에 두고 NSE는 읽기만 해요(D18). 받기 전에는 기본음으로 와요(수용).
+- **보안**: 신뢰할 수 없는 바이너리를 재생하는 것은 **본인 기기의 오디오 스택뿐**이에요(공유가 없어요). 서버는 헤더만 검증해요. 남는 위험: 본인 세션을 가로챈 공격자가 본인 기기에 이상한 WAV를 심을 수 있어요. 같은 세션으로 할 수 있는 다른 일보다 작아서 수용해요.
+
+### D3. 키워드 알림이에요
+- **와이어와 의미**: 새 reason `keyword`(category `momo.mention`)예요. reason을 거짓으로 만들지 않아요(ADR-0120 A-6). `mention_count` 배지에는 더하지 않아요(멘션 배지의 뜻을 지켜요). **채널 음소거는 관통하는 것이 기본**이고 스위치(`keywordOverridesMute`)로 꺼요. 일시 중지·근무 시간 밖은 관통하지 못해요(I6). 사용자가 단어를 직접 넣은 것이라 소음 책임이 사용자에게 있어요(카카오톡 공식 동작과 같아요, [외부]).
+- **저장**: `notification_keyword (workspace_id, member_id, keyword_norm, keyword, created_at)`, PK `(workspace_id, member_id, keyword_norm)`, 멤버당 **20개 이하**예요. 정규화는 NFKC → 소문자 → 앞뒤 공백 제거 → **2~32글자**예요. 이미 직접 의존인 `unicode-normalization`(`server-rust/Cargo.toml:83`, 선례 `momo-messaging/src/name_guard.rs:138`)을 써서 새 의존이 없어요. 매치는 **부분 문자열**·대소문자 무시예요(한국어는 띄어쓰기로 단어를 못 잘라요).
+- **투영(삽입 때 서버가 풀어요)**: 별도 표 `message_keyword_hit (workspace_id, message_id, member_id)`, PK `(message_id, member_id)`, 메시지가 지워지면 CASCADE예요. 판정은 본문 대신 이 표를 `EXISTS`로 읽어요(I2).
+  - **`message.props`에 두지 않아요.** props는 채널 멤버가 메시지 읽기·실시간 페이로드로 모두 받아요(멘션 목록도 그렇게 공개돼요, `messages.rs:97-111`가 클라이언트 쓰기만 막아요). 거기에 「누구의 키워드가 걸렸나」를 넣으면 다른 멤버가 메시지를 보내 보며 남의 키워드를 알아낼 수 있어요. 별도 표는 메시지 읽기 API가 건드리지 않고, 걸러야 할 클라이언트 입력도 없어요.
+  - **투영 지점은 둘이에요**(멘션은 REST 한 곳에서만 기록해서 에이전트 줄이 빠져요). ① `finish_send_in_tx`(`message.rs:571`)에서 멘션 기록(`:602`) 옆에, 멘션 정책(Record/Skip)과 무관하게 모든 보내기 경로(REST·에이전트 worker·gateway·예약 전송)가 한 번 지나가게 해요. ② 스트림이 끝나는 쓰기(`stream_message_body_in_tx`, `interaction.rs:928`)에서 **끝난 본문**으로 투영해요. 스트림 줄은 열려 있는 동안(첫 조각만 있어요) 투영하지 않고, 닫힐 때 투영한 뒤 같은 tx가 넣는 두 번째 후보로 판정해요(ADR-0204 증보 1 D8-a). 편집은 재투영하지 않아요(멘션과 같아요).
+  - **대상**: 채널의 활성 사람 멤버 중 작성자가 아닌 사람(`left_at IS NULL`·`status='active'`)이에요. `type='text'`이고 본문이 비지 않은 메시지만, 재시도로 겹친 보내기(`deduped`)와 DM 채널(`dm` reason이 이미 있어요)은 빼요.
+  - **에이전트 발화도 포함해요.** 에이전트가 1급 멤버이고 키워드의 주 쓰임이 「에이전트가 '배포 실패'라고 쓰면 알려줘」예요. `tool_call` 같은 진행 줄은 `type`이 달라 빠져요.
+- **판정**: 새 arm `keyword`가 에이전트의 답 arm 아래, `channel_message` 위에 와요(작업·승인 > 멘션 > DM > 에이전트의 답 > `keyword` > `channel_message`). 작성자 제외는 멤버 조인이 이미 해요(`judgment.rs:413-416`).
+- **하이라이트**(키워드 화면, 슬라이스 N6)는 클라이언트가 같은 정규화로 **표시용**으로만 맞춰 봐요(권위 없음).
+- **사생활**: 키워드는 서버에 평문으로 저장돼요(부분 문자열 매치에 필요해요). 감사 로그에는 개수만 남기고 문구는 props·감사·로그 어디에도 남기지 않아요. `notification_keyword`는 키워드 API와 투영 모듈만 읽어요(정적 시험). 화면은 「서버에 저장돼요」를 알려요.
+- **받는 쪽 권한**: 투영은 보내는 사람의 tx에서 같은 채널 멤버들의 키워드를 읽어요. 그래서 `notification_keyword`는 워크스페이스 범위 RLS(`ws_isolation`)이고 소유자 범위가 아니에요. `momo_app` 자격이 SQL 수준으로 새면 키워드가 드러난다는 위험은 ADR-0208 남는 위험 3과 같은 종류로 수용해요.
+
+### D4. 데스크탑이 쓰이는 중이면 폰 푸시를 늦춰요: C(지연)
+- **결재(이슈 #4223)**: A(적용 안 함, 현행) · B(억제, Buzz 초안: 재전송 없음) · C(지연, Slack: 안 읽으면 발송) 중 **C**예요. 승인 요청·작업 끝남은 지연 없음, 신호를 안 보내는 구 클라이언트는 현행이에요. B는 자리를 비운 사람이 놓치고(Buzz도 인정), C는 결국 도착해요.
+- **ADR-0204 D8의 부분 번복이에요.** D8은 「사람 멘션·DM에는 이 창을 적용하지 않는다(현행 그대로)」(`0204:134`)로 정했어요. 이 결정은 (a) 멤버의 데스크탑·웹이 활성 신호를 보내고 있고 (b) 받는 토큰이 폰(`device.platform='ios'`)이고 (c) 멤버 설정의 지연이 0보다 클 때에 한해 사람 멘션·DM에도 지연과 읽음 취소를 적용해요. 신호가 없으면(구 클라이언트·폰만 쓰는 사람) D8의 문장은 그대로 유효해요. D8-a·증보 3(`channel_viewing` 30초 창)·「에이전트의 답」 arm의 30초 창은 그대로예요. 창이 먼저 대상을 거르고(NULL), 창을 통과한 대상에 지연이 얹혀요.
+- **신호**: `PUT /v1/workspaces/{ws}/presence/activity`(본문 없음, 204)예요. 소유자는 항상 bearer이고 다른 멤버가 읽는 API는 없어요. 사람 bearer만 써요(에이전트 403).
+  - 웹·데스크탑이 「활성」인 동안 **20초 이하** 주기로 보내요. 활성 [권장]: 창이 앞에 있고 마지막 사용자 입력이 5분 이내예요. 잠금·절전·종료면 보내지 않아요. 폰은 보내지 않아요(앞에 있는 폰 앱은 OS가 배너를 안 내요, #2592·#4310).
+  - 서버는 **30초** 안의 신호를 「활성」으로 읽어요. 마지막 값이 5초보다 어리면 행을 다시 쓰지 않아요(쓰기 상한, `channel_viewing`과 같아요: `momo-messaging/src/channel_viewing.rs:19-80`).
+  - 저장 [권장]: 새 표 `member_activity (workspace_id, member_id, seen_at)`, PK `(workspace_id, member_id)`, RLS ENABLE+FORCE `ws_isolation`, 트리거·아웃박스·브로드캐스트 없음이에요. `momo_app`이 쓰고 `momo_notifier`는 SELECT만 해요(`bootstrap_runtime_roles.sql`의 `channel_viewing` 줄(`:507-508`)과 같은 GRANT를 더하고 역할 권한 시험의 `column_reads`·표 목록에도 올려요).
+  - 서버가 아는 것은 「이 사람의 마지막 활동 시각」 하나예요. 다른 멤버에게 보이지 않아요. 행은 (워크스페이스, 멤버)당 하나라 정리 작업이 없어요.
+- **지연 대상**: 와이어 reason이 `mention`·`dm`·`channel_message`·`keyword`인 폰 대상이에요(이슈의 「사람 멘션·DM·channel_message·keyword」. reason이 하나라서 `mention`에는 「에이전트의 답」 arm도 들어가요). `approval_request`·`work_*`·`resume_offer`·`scheduled_failed`·`test_notification`은 지연하지 않아요.
+- **멤버 설정**: `phoneDelaySecs` ∈ {0, 60, 300}이고 기본 60이에요. 0이면 지연도 읽음 취소도 없어요(= 오늘).
+- **판정**(후단, D16): SQL이 reason과 대상을 고른 뒤 Rust 후단이 멤버 id 목록으로 한 번 조회해 활동 신호와 읽음 커서를 읽고 대상을 셋으로 나눠요.
+  1. **취소**: 활동 `seen_at >= T − 30초`이고 그 채널 `read_state.last_read_seq >= message.seq`이면 푸시도 기록도 없어요(읽었다는 뜻이에요. 첫 판정이든 재판정이든 같아요).
+  2. **보류**: 활동 `seen_at >= now() − 30초`이고 읽지 않았고 `now() < T + 지연`이면 이번엔 보내지 않아요. 기록도 남기지 않아요(억제와 같아요).
+  3. **발송**: 그 밖에는 지금 보내요(오늘과 같아요). 만기 뒤 재판정은 활동을 다시 보지 않으므로 **한 번만** 지연돼요.
+  - `T`는 후보 행(outbox)의 `created_at`이에요. 일반 메시지는 삽입 시각이고, 스트림 줄은 닫힌 시각(두 번째 후보가 만들어진 때)이라 오래 이어진 스트림도 닫힌 때부터 센다는 뜻이에요(ADR-0204 증보 1 D8-a가 창을 닫힌 시각 기준으로 읽는 것과 같아요).
+- **후보 처리**: 보류가 있으면 후보를 `defer`해요. `status='pending'`, `available_at = 가장 이른 만기`, 그리고 **`attempts`를 claim 이전으로 되돌려요**(`GREATEST(attempts − 1, 0)`). claim이 `attempts`를 올리고(`momo-outbox/src/push.rs:139-141`) 재시도 예산이 그 값을 `max_attempts`와 비교하므로(`momo-notifier/src/push.rs:432`, 기본 8은 `config.rs:344`), 되돌리지 않으면 지연이 실패 예산을 갉아 후보가 `failed`로 접혀요. 다시 잡힌 후보는 이미 보낸 대상을 `claim_dispatch`의 유일 인덱스로 건너뛰어요(`momo-notifier/src/push.rs:182-189`의 기존 재전달 경로와 같아요). 만기가 다른 대상이 남으면 한 번 더 `defer`해요(`phoneDelaySecs` 값이 셋뿐이라 후보당 많아야 3번이에요).
+- **시계**: 만기는 `T + phoneDelaySecs`예요(판정 시각이 아니에요). notifier가 밀려도 만기는 밀리지 않고, 만기 뒤에 처리되면 읽음만 확인하고 바로 보내요.
+- **받아들이는 근사**: 자리를 비운 사람은 최대 지연만큼 늦게 받아요(Slack도 같아요). 활동 신호는 시선이 아니라 입력 기반 근사예요. 만기 재판정에서 일시 중지·음소거가 그 사이 바뀌었으면 바뀐 값을 따라서 보류가 억제를 우회하지 못해요.
+- **측정**: `push_dispatch_log`에는 활동 상태가 없어요. notifier가 보류·취소·보류 뒤 발송을 로그 카운터로 남겨요. 「데스크탑 활성 중 폰 푸시 50% 이상 감소」는 가설이에요 [추정].
+
+### D5. 「항상 오는 알림」을 종류별로 끌 수 있어요
+- **결재(이슈 #4223)**: 종류별 끄기를 허용하고, 승인은 끌 때 명시 경고와 대기 승인 표시를 두고, 승인 끄기는 폰 표면에서만 허용해요.
+- **종류(닫힌 집합)**: `dm`·`mentionHuman`·`mentionAgent`·`agentAnswer`·`approval`·`workDone`·`keyword`·`channelAll` × 표면 `phone`·`desktop`이에요(종류 표). 판정 SQL이 대상마다 종류를 붙여요. 명시 멘션은 작성자 종류로 `mentionHuman`/`mentionAgent`, 「에이전트의 답」 arm은 `agentAnswer`예요(`judgment.rs:273-274`가 이미 `author_kind`를 읽어요). 승인·멘션·DM을 포함해 모두 끌 수 있어요.
+- **승인 푸시를 끄는 쓰기에는 확인 토큰이 필요해요** [권장]: `approval.phone`을 `true`에서 `false`로 바꾸는 PATCH에 `confirm: ["approval_push_off"]`가 없으면 400 `confirmation_required`예요(이미 꺼진 값을 다시 쓰는 것은 확인이 필요 없어요). 응답에 `warnings: ["approval_push_off"]`를 싣고 감사 `notification_prefs.approval_push_off`를 남겨요. 승인은 1시간 만료이고 15일 0건 사고(ADR-0204)가 있었으니, 끄는 길이 경고 문구를 거치도록 서버가 확인을 요구해요.
+- **승인 끄기의 조작은 폰의 알림 설정에만 있어요**(이슈의 「폰 표면에서만」을 이렇게 읽어요 [권장]). 웹·데스크탑은 그 칸을 읽기 전용으로 보이고 「폰에서 바꿀 수 있어요」로 안내해요. 일시 중지 중에는 「승인 N건이 기다려요」를 인박스 투영(ADR-0199)으로 보여요(#4342). `desktop` 표면의 승인 배너 스위치는 지금처럼 이 기기에서 끌 수 있고(서버로 동기돼요) 확인 규칙은 폰 푸시에만 적용돼요.
+- **`workDone.phone`은 기존 `notification_rule.work_complete_push`와 같은 값이에요**(별칭이고 저장은 한 곳). `PATCH …/notification-rules/push-kinds`는 그대로 남아요(`lib.rs:987-989`).
+- 기본값은 종류 표예요(「행 부재 = 오늘」). 저장은 D13이에요.
+
+### D6. 승인 Time Sensitive는 첫 실행 안내에서 묻고 기본은 꺼요
+- **결재(이슈 #4223)**: 첫 실행 안내에서 묻고 기본 끔이에요. capability 추가는 owner Apple 작업이고 증거 빌드 승인이 필요해서 별도예요.
+- 켜면 relay가 `aps.interruption-level = "time-sensitive"`를 싣는 **선택 키 `priority`**(`normal`/`time_sensitive`)를 더해요(relay 먼저, D14). 승인 요청 reason이고 사용자가 켰을 때(`approvalTimeSensitive = true`)만이에요. `priority`는 판정을 통과한 푸시의 **표현**만 바꿔요. 일시 중지·근무 시간 밖은 그대로 우선이에요(I6).
+- Apple HIG는 「지금 또는 한 시간 안의 일」·정직한 긴급도만 허용하고 사용자가 앱 단위로 끌 수 있어요 [외부]. 승인은 1시간에 만료돼서 맞아요. Critical Alerts는 쓰지 않아요(신청·승인이 필요하고 DND·무음을 뚫어 메신저에 맞지 않아요).
+- capability 「Time Sensitive Notifications」 추가와 프로비저닝 갱신은 owner 작업이에요(이 ADR 밖). 구 relay는 새 키에 400을 돌려주고(어휘 증보와 같은 relay 먼저), 구 앱은 영향이 없어요.
+
+### D7. 채널 「모든 새 글」 단계를 도입해요(분당 6건 묶음, 에이전트 많은 채널 경고)
+- **결재(이슈 #4223)**: 도입이에요. 기본은 오늘의 동작(= 멘션만)이에요.
+- **단계**: `all`(모든 새 글) · `mentions`(멘션만, 기본) · `none`(끔, 기존 음소거)이에요. DM 채널은 이미 모든 메시지가 `dm` reason이라(`judgment.rs:374`) `none`·`mentions`만 받아요(`all`은 400 `level_not_applicable`).
+- **저장** [권장]: 새 표 `notification_channel_level (workspace_id, member_id, channel_id, level, updated_at)`, PK `(workspace_id, member_id, channel_id)`, `level text NOT NULL CHECK (level = 'all')`예요(`mentions`는 행이 없는 것), RLS ENABLE+FORCE `ws_isolation`이에요. **`notification_pref`는 음소거 원장 그대로** 두어요(행이 있으면 음소거, 기한 포함).
+  - 리서치의 `notification_pref.level` 컬럼 안은 기각해요. 「행이 있으면 음소거」를 가정하는 읽는 곳이 다섯이라(`judgment.rs:469-473`, `dm.rs:244`·`:309`, `channel.rs:658`, `inbox.rs:221`) `all` 행이 하나만 있어도 음소거로 읽혀요. 롤백한 서버도 같아서, 사용자의 `all` 선택이 **음소거로 둔갑**해 알림이 사라져요(ADR-0124 증보 2 D9가 롤백에서 해제 쓰기를 지키려 CHECK를 뺀 것과 같은 주의예요). 새 표는 구 서버가 모르는 행이라 `mentions`로 떨어질 뿐이에요.
+- **효과 단계(읽기 모델)**: 음소거 행이 진행 중(`muted_until IS NULL OR > now()`)이면 `none`, 아니면 단계 행이 있으면 `all`, 아니면 `mentions`예요. 음소거는 단계 **위의 덮개**라서 기한이 지난 음소거(「1시간만 끄기」)는 이전 단계로 돌아가요.
+- **쓰기**(`PUT …/channels/{ch}/notification-pref`, 본문은 D12):
+
+  | 본문 | 음소거 행 | 단계 행 |
+  |---|---|---|
+  | `{level:"all"}` | 지움 | 만듦 |
+  | `{level:"mentions"}` | 지움 | 지움 |
+  | `{level:"none", mutedUntilMs?}` | 만듦(기한 없으면 NULL) | **그대로** |
+  | `{muted:true, mutedUntilMs?}`(구 본문) | `{level:"none"}`과 같아요 | 그대로 |
+  | `{muted:false}`(구 본문) | 지움 | **그대로** |
+
+  구 클라이언트의 `muted` 쓰기는 음소거 층만 건드려요. 그래서 `all`을 고른 사람이 구 앱에서 음소거를 풀어도 `all`이 지워지지 않아요.
+- **판정**: 새 arm `channel_message`예요. 단계 행이 있고, 채널이 `dm`이 아니고, 메시지가 `type='text'`·최상위(`root_id IS NULL`)이고, 스트리밍 중이 아니고(열린 동안 보류, 닫힐 때 두 번째 후보로 판정), 「보고 있음」이 아닐 때(`read_state.last_read_at` 30초 창 또는 `channel_viewing` 30초 창, 질문자 arm과 같은 OR, `judgment.rs:375-400`)예요. 본인 글은 멤버 조인이 이미 빼요(`judgment.rs:413-416`). 스레드 답·`tool_call` 같은 진행 줄은 대상이 아니에요.
+- **억제 우선순위**: 일시 중지·근무 시간 > 채널 음소거(진행 중) > 종류 스위치 > 지연(D4)이에요.
+- **폭주 상한**: (멤버, 채널)당 60초 창에 `channel_message` 푸시는 개별 **6건**까지이고, 그 창의 7번째부터는 **합쳐서 1건**이에요. 대표 한 건의 collapse id(`o:<channel_id>:<창 번호>`)로 `claim_dispatch`의 유일 인덱스가 나머지를 건너뛰어요. 개별 푸시를 세는 방법(예: collapse id 접두 `c:<message_id>`)은 구현이 정하고 시험이 「20건 → 7건」을 고정해요.
+- **경고**: 에이전트가 많이 말하는 채널을 `all`로 고르면 화면이 경고 문구를 보여요(P8, Buzz B4). 사이드바 점·배지의 뜻은 바뀌지 않아요.
+
+### D8. ADR 구조는 새 ADR-0206 하나예요(규칙 빌더는 ADR-0207)
+- 세 ADR(0120·0124·0204)에 흩으면 관계가 읽히지 않아요. 옛 ADR 머리에 포인터 한 줄을 달았어요. 규칙 빌더의 스키마·평가기는 ADR-0207이고(#4345 착수 때), 이 ADR은 그 경계(D16)만 정해요.
+
+### D9. 설정 저장 범위는 (워크스페이스, 멤버)예요
+- 계정 단위 새 테이블은 새 테넌트 경계라 RLS·ADR 비용이 커서 만들지 않아요. 사람은 워크스페이스마다 별도 `member`·`device`예요(`001_init.sql:61-70`).
+- 여러 워크스페이스에 같은 설정을 쓰는 사람은 클라이언트의 「모든 워크스페이스에 적용」이 속한 워크스페이스마다 같은 PATCH를 보내요. 서버는 모르고, 부분 실패는 워크스페이스별로 알려요.
+
+### D10. 번들 소리는 planner 자체 합성이에요
+- **결재(성재 2026-10-22)**: 「기본 알림음은 너가 뭐 오픈소스같은걸로 만들거나 알림음을 찾아봐봐.」 → 리서치 §6의 「성재 제작·선정」을 planner 합성으로 바꿔요(#4222).
+- **규격**: WAV PCM16 모노 44.1kHz, 1.5초 이하, 각 300KB 이하예요. 생성 스크립트를 커밋하고(같은 입력이면 같은 바이트), 산출 WAV를 소스 자산으로 커밋하고, NOTICE에 출처 한 줄을 남겨요. 합성이 마음에 안 들면 CC0만 쓰고(재배포 제한이 있는 무료 라이선스 금지) 원문을 NOTICE에 남겨요. 생산은 #4222예요.
+- **소리 슬롯 어휘(닫힌 집합)**: `oort.message`·`oort.mention`·`oort.dm`·`oort.approval`·`oort.work`와 기본 메시지 후보 `oort.message.b`·`oort.message.c`예요(후보 수는 #4222가 정해요). 목록을 바꾸면 이 ADR 증보예요. 사용자 파일은 `user:<sha256>`(D2)예요.
+- **종류별 기본 소리는 서로 달라요**(DM·멘션·승인·작업 끝남). 「기본값이 전부 같다」(Buzz B7)를 피해요. `keyword`의 기본은 `oort.mention`, `channelAll`의 기본은 `oort.message`예요.
+- 소리 선택 UI·폰 소리 교체·사용자 파일은 이 ADR 뒤예요(#4222 「범위 밖」).
+
+### D11. 진단과 시험 알림이에요 (ADR-0204 D10 이행) [권장]
+- **두 갈래**: 서버가 아는 코드는 `GET`이 돌려주고, 기기만 아는 코드(OS 권한 거부 #2684, 이 기기 스위치 꺼짐, 집중 모드는 앱이 알 수 없다는 안내)는 클라이언트가 판정해요(#4342). 서버 기록으로는 기기 쪽을 가를 수 없었어요(#4295).
+- **`GET /v1/workspaces/{ws}/notification-diagnostics?channelId=&kind=`**: 응답은 `{checkedAtMs, ok, blockers[], devices{active, invalidated}, lastTest?}`예요. `blockers[].code`는 닫힌 8종이에요.
+
+  | 코드 | 조건 | 덧붙는 값 |
+  |---|---|---|
+  | `paused` | `notification_rule.dnd`이고 기한이 없거나 미래 | `untilMs?` |
+  | `quiet_hours` | 일정이 켜져 있고 지금 창 밖이고 `kind`가 관통 종류가 아님 | `untilMs`(다시 시작할 때) |
+  | `channel_muted` | `channelId`가 있고 음소거 행이 진행 중 | `channelId`, `untilMs?` |
+  | `kind_off` | `kind`가 있고 그 종류의 `phone` 스위치가 꺼짐 | `kind` |
+  | `no_device` | 이 멤버의 `push_token` 행이 하나도 없음 | 없음 |
+  | `token_invalidated` | 행은 있는데 전부 `invalidated_at`이 있음 | `sinceMs` |
+  | `relay_unreachable` | 최근 15분 안 이 멤버의 `push_dispatch_log`에 `apns_status IS NULL`인 채 2분이 넘은 행이 있거나, 마지막 시험이 30초 넘게 처리되지 않음(notifier가 꺼진 경우 포함) | `sinceMs` |
+  | `last_delivery_failed` | 가장 최근에 정산된 `push_dispatch_log` 행의 `apns_status`가 400 이상 | `atMs`, `apnsStatus`, `apnsReason?` |
+
+  - `ok`는 「서버가 막은 것이 없다」예요. 기기가 보여 주는지는 몰라서(#4295) 화면은 「서버 쪽은 문제 없어요 · 시험 알림으로 확인해 보세요」로 말해야 해요.
+  - 읽는 표는 `momo_app`이 이미 읽어요(`infra/rust/sql/bootstrap_runtime_roles.sql:52-53`의 ALL TABLES 부여 + RLS, 멤버 조건은 쿼리가 걸어요). api에는 relay 클라이언트가 없어서 `relay_unreachable`은 기록에서 **추론**해요(위 조건). [확인 필요] 추론의 오탐은 #4341이 격리 PG로 재현해서 조정해요.
+- **`POST /v1/workspaces/{ws}/notification-diagnostics/test`** → 202 `{testId, deviceCount}`예요.
+  - **판정(`judge_targets`)을 우회해요.** 목적이 「전송 경로 자체가 되는가」라서 일시 중지 중에도 시험은 가요(관문은 `GET`이 말해요). 호출자 본인의 활성 토큰에만 가요.
+  - 같은 tx에서 `push_system` 행 1건(D15)을 써요. notifier가 relay 서명 키로 보내요. 토큰이 없으면 409 `no_device`, 분당 3회를 넘으면 429 `rate_limited`, 에이전트 bearer는 403이에요. 서버에는 per-member 속도 제한 장치가 없어서(ADR-0208 남는 위험 · #4234) 같은 tx에서 `push_system` 행을 세어 막고 멤버 단위 advisory 잠금으로 직렬화해요.
+  - 결과는 `GET`의 `lastTest {id, status, atMs, apnsStatus?}`로 읽어요. `status`는 `queued`(30초 미만) · `stalled`(30초 넘게 대기, notifier 꺼짐 포함) · `sent`(APNs 200) · `failed`(그 밖의 상태) · `relay_outdated`(구 relay가 새 어휘에 400, 재시도 없음)예요.
+
+### D12. 채널 음소거에 기한을 줘요 (`mutedUntilMs`) [권장]
+- `PUT …/channels/{ch}/notification-pref`의 본문은 `deny_unknown_fields`를 유지하고 `muted`(bool)와 `level`(`all|mentions|none`) 중 **하나**(둘 다·둘 다 없음은 400)에 선택 `mutedUntilMs`(int64, epoch ms)를 더해요.
+- `mutedUntilMs`는 `muted:true`·`level:"none"`일 때만 받아요(아니면 400). **지금보다 미래이고 366일 이내**여야 해요(400 `muted_until_in_past`·`muted_until_too_far`). 생략·null은 기한 없음이고 구 본문 `{muted:true}`는 오늘처럼 기한 없는 음소거로 덮어써요.
+- 응답은 `{muted, level, mutedUntilMs?}`예요. `muted`·`level`은 **효과값**(진행 중인 기한만 음소거)이고 `mutedUntilMs`는 진행 중일 때만 값이 있어요. 채널 읽기 모델 `Channel`에 `mutedUntilMs`(진행 중일 때만, #4343)와 `notificationLevel`(효과값, 채널 단계 슬라이스 N1)을 더해요. 같은 이유로 요청의 `level`도 N1이 열어요. 채널·DM 목록을 읽는 곳 셋(`channel.rs:658-663`, `dm.rs:244-249`·`:309-314`)에 같은 조인을 더하고 `muted` 계산은 지금 그대로예요.
+- 만료는 서버가 판정·읽기 때 다시 평가해요(스위퍼 없음, 읽는 곳 다섯이 이미 해요). 클라이언트는 기한이 지나면 서버를 **다시 읽을** 뿐 타이머로 풀지 않아요(ADR-0204 D3).
+- 감사 `notification_pref.updated`에 `level`·`mutedUntilMs`를 더해요(additive, `momo.notification_pref.updated.v1`). 억제된 대상은 `push_dispatch_log`에 행을 남기지 않아요(ADR-0124 D2).
+
+### D13. `notification-prefs`: 종류×표면·표현·근무 시간·지연·관통 스위치를 서버에 저장해요 [권장]
+- `GET`·`PATCH /v1/workspaces/{ws}/notification-prefs`는 본인 것만, 사람 bearer만 써요(에이전트 403). PATCH는 필드 단위예요(생략 = 유지, 빈 본문 400, 모르는 필드는 JSON 추출기가 422, 동시 PATCH는 행 잠금 뒤 병합이에요. `notification-rules` PATCH와 같아요, ADR-0124 증보 3).
+- **저장**: `notification_rule`(066)에 컬럼을 더해요. 새 표가 아니고 RLS는 상속이에요.
+
+  | 컬럼 | 타입 | 뜻 | 행 부재·NULL |
+  |---|---|---|---|
+  | `kinds` | jsonb NULL | 종류×표면 스위치(셀 단위로 저장, 없는 셀은 기본값) | 종류 표의 기본값 |
+  | `presentation` | jsonb NULL | 종류별 소리 슬롯(값은 소리 id 또는 `"none"`) | 종류별 기본 소리(D10) |
+  | `schedule` | jsonb NULL | 근무 시간 | 없음(꺼짐) |
+  | `phone_delay_secs` | smallint NULL | D4 | 60 |
+  | `keyword_overrides_mute` | boolean NOT NULL DEFAULT true | D3 | true |
+  | `approval_time_sensitive` | boolean NOT NULL DEFAULT false | D6 | false |
+
+  jsonb 컬럼에는 DB CHECK를 걸지 않아요(ADR-0124 증보 2 D9와 같은 이유: 롤백한 서버의 해제 쓰기가 막히면 안 돼요). 검증은 API가 하고(8KB 이하, 알려진 종류·표면·소리 id만) 읽는 쪽은 모르는 키를 무시해요. `workDone.phone`은 저장하지 않고 `work_complete_push`를 그대로 읽고 써요(D5).
+- 응답에는 효과값 블록 `effective {paused, pausedUntilMs?, quiet {active, resumesAtMs?}}`가 함께 와요. 데스크탑 배너는 이 값을 읽을 뿐 일정·시간대 계산을 다시 하지 않아요(D17).
+- 이벤트는 없어요. 다른 기기는 다음 조회(앱 전경 복귀·새로고침)에서 같은 값으로 수렴해요(ADR-0177·ADR-0204 D3와 같은 방식).
+- **근무 시간(일정)의 의미**
+  - `schedule = {enabled, tz, days, start, end, passThrough}`예요. `tz`는 IANA 이름이고 쓸 때 DB로 검증해 400 `invalid_time_zone`이에요. `human.tz`는 검증하지 않는 가입 때 문자열이라(`join.rs:235-243`) 기본값으로 쓰지 않고 클라이언트가 현재 시간대를 채워 보내요. `days`는 0(일)~6(토), `start`·`end`는 `HH:MM`이고 `end <= start`이면 자정을 넘는 창이에요.
+  - 창 밖은 **일시 중지처럼** 동작해요(그 종류의 푸시와 배너가 안 와요). `passThrough`에 든 종류만 와요. 기본은 `["approval"]`이에요(승인은 1시간에 만료되고 「항상 오는 알림」이 기본이라서요, D5·D6). **일시 중지는 항상 이겨요**(I6).
+  - 판정 후단(D16)이 보조 조회 한 번으로 `now() AT TIME ZONE tz`를 평가해요. 시각 계산은 Postgres에 맡기고 Rust에 시간대 DB 의존을 새로 들이지 않아요. 저장된 zone 이름이 읽을 때 틀렸으면(tzdata 변경) 일정이 없는 것으로 보고 로그 한 줄을 남겨요. 판정을 깨지 않아야 해서 오류를 NULL로 바꾸는 DB 함수 하나를 써요(모양은 구현이 정해요).
+  - 진단 코드 `quiet_hours`와 `effective.quiet`가 같은 평가를 써요.
+
+### D14. 푸시 어휘를 한 번에 증보하고 relay부터 배포해요 (ADR-0120 A-6) [권장]
+- **더하는 것**(슬라이스 N0 한 번)
+
+  | 면 | 더하는 것 |
+  |---|---|
+  | reason | `channel_message`·`keyword`·`test_notification`·`scheduled_failed` |
+  | category | `momo.system`(액션 없음). `channel_message`는 `momo.message`, `keyword`는 `momo.mention`, 시스템 둘은 `momo.system`이에요 |
+  | 정적 본문 | reason별 표로 바꿔요. 기본 「새 알림」, `test_notification` 「시험 알림이에요」, `scheduled_failed` 「예약한 메시지를 보내지 못했어요」. 제목은 「oort」예요. 사용자 내용·이름은 없어요(id-only 유지) |
+  | category 소리 | `momo.system` → `default` 행 |
+  | 선택 키 `priority` | D6(슬라이스 N16)에서 더해요. 그때도 relay 먼저예요 |
+
+- **고칠 면**(빠뜨리지 않게 나열해요)
+  - relay: `ALLOWED_REASONS`(`dispatch.rs:43`)·`ALLOWED_CATEGORIES`(`:61`)·`CATEGORY_SOUNDS`(`:100`, category마다 소리 행이 있어야 고정 시험이 통과해요)·정적 본문(`:300-301`).
+  - 서버: `PushReason`(`momo-push/src/dispatch.rs:40`)·`PushCategory`(`:81`)·`category_for`(`:127`).
+  - 앱: Swift reason 목록(`MomoPushKit/PushNotification.swift:239`)·`MomoPushCategory`(`:108-117`), RN `PUSH_REASONS`(`clients/mobile/src/push/contract.ts:101`)·`PUSH_CATEGORY`(`:57-62`).
+  - 검증: `scripts/verify_push_relay.sh`(`:156-192`의 「다섯」 문구와 불량 사례), relay 단위 시험, `pushContract.test.ts`, notifier `push_conformance_pg`, 어휘 일치 정적 시험.
+- **배포 순서는 relay → migrate → notifier → api → 앱**이에요. relay가 먼저인 이유는 ADR-0120 A-6과 같아요: 구 relay는 모르는 어휘에 400을 돌려주고 그 400은 영구 실패로 정산돼 푸시가 사라져요(`momo-notifier/src/push_relay.rs:133-140`). notifier가 api보다 먼저인 이유는 `push_system` 소비자가 먼저 있어야 생산자(시험·예약 실패)가 쌓이지 않아서예요. 구 앱은 새 reason에서 파싱이 실패해 relay의 정적 문구로 떨어져요(fail-open). 문구만 일반형으로 퇴화하고 알림은 와요. 구 앱에는 `momo.system`이 없어 버튼 없이 떠요.
+- **한 번에 묶는 이유**: reason마다 relay를 따로 배포하면 호스티드 relay 배포가 네 번이에요. N0 한 PR이 relay와 어휘 목록·시험을 내서 먼저 배포하고 다른 슬라이스는 N0에 의존해요.
+- 배포 순서를 어긴 셀프호스트(구 relay에 새 reason)는 400 → 영구 실패 정산 → 푸시 유실이에요. 시험 알림은 이를 `relay_outdated`로 알리고(D11), 일반 푸시는 감사 한 줄(`push.relay.refused`, 토큰당 1시간에 1회, ADR-0204 D9)만 남아요. 수용해요.
+
+### D15. 메시지 없는 푸시는 `push_system` 한 길로 보내요: 시험 알림과 예약 실패 (ADR-0208 D8의 다섯 비용) [권장]
+- **문제**: 메시지 행이 없는 푸시가 셋이에요(시험 알림, 예약 실패, 다이제스트). `push_candidate`는 메시지를 가리키고 판정이 그 메시지를 읽어서 맞지 않아요. 이슈 #4341은 시험 알림만 `push_test`로 적었어요.
+- **결정**: 새 outbox kind `push_system`과 닫힌 reason 집합으로 한 길을 만들어요.
+  - **kind**: `ALTER TYPE outbox_kind ADD VALUE 'push_system'`은 그 값을 쓰지 않는 migration 파일에 둬요(011이 한 방식이에요, `011_push_notifier.sql:42-44`. 한 파일이 한 tx라 같은 파일에서 새 값을 쓰면 안 돼요).
+  - **생산자는 둘**이에요. ① 시험 알림 라우트(D11, api의 `momo_app` tx). ② 예약 메시지가 `failed`로 넘어가는 지점(`momo-messaging/src/scheduled.rs`의 `mark_failed_in_tx`(`:1007-1030`)와 `sessions_ended` 보류 둘, `hold_member_schedules_in_tx`·`hold_lineage_schedules_in_tx`(`:1262-1330`)). 둘 다 상태 전이와 **같은 tx**에서 `momo_outbox::emit_outbox`(`emit.rs`, outbox INSERT의 유일한 곳)로 써요. 보류가 여럿이어도 호출당 1건이에요(멤버당 최대 50건이 한꺼번에 푸시되지 않게요).
+  - **페이로드(id만)**: `{schema:"momo.push_system.v1", reason, member_id, channel_id?, ref_id}`예요. 본문·이름·예약 본문이 없어요. `reason`은 Rust enum의 닫힌 집합(`test_notification`·`scheduled_failed`)이고 모르는 값은 `failed`로 접어요.
+  - **소비자**: notifier의 둘째 드레인이에요(`kind='push_system'`만 claim·reclaim, 첫째 드레인과 같은 틱, 같은 `MOMO_PUSH_NOTIFIER_ENABLED` 스위치). `push_candidate`의 hot path와 실패 영역이 갈려요. `OutboxKind` 변종과 `db_labels_match_enum` 시험(`emit.rs:108`), 피드 배타성 표(`momo-outbox/src/push.rs:10-18`)를 같이 고쳐요.
+  - **`push_candidate` 생산자는 늘지 않아요.** 「세 번째 생산자는 Accepted ADR」(`emit.rs:31-46`, `docs/architecture/overview.md:51`)는 그대로이고, 이 ADR이 새 kind `push_system`의 Accepted ADR이에요. 다이제스트(셋째 생산자)는 증보가 필요해요(D20).
+- **발송(소비자)**
+  - 대상은 `member_id`의 활성 토큰(`push_token`·`device`, `invalidated_at IS NULL`, 멤버가 `active`인 사람)이에요. 토큰이 없으면 done으로 끝나요(기록 없음).
+  - 게이트: `test_notification`은 없어요(D11). `scheduled_failed`는 **일시 중지(`dnd`)만** 따라요. 진행 중이면 조용히 done이에요(기록 없음). 채널 음소거·종류 스위치는 적용하지 않아요. 사용자 자신의 행동이 어긋난 알림이지 채널 소식이 아니라서요.
+  - 발송 기록은 `push_dispatch_log` 행을 **`message_id = NULL`**로 써요(컬럼이 NULL 허용이에요, `001_init.sql:535`). `claim_dispatch`(`dispatch_log.rs:54-103`)는 `Option<Uuid>`를 받는 짝을 두거나 인자를 풀어요(구현이 정해요. 시험은 FK 위반 없이 행이 남는 것을 고정해요). 유일 인덱스는 `(member, token, collapse_id)`라 영향이 없어요(`011_push_notifier.sql:71-73`).
+  - collapse id는 `t:<testId>`(시험), `s:<예약 id>`(예약 실패 한 건), `sh:<member_id>:<분 번호>`(보류 일괄)예요. 모두 64바이트 이하예요.
+  - 봉투의 닫힌 키 집합은 그대로예요. 대상이 없는 id는 nil-UUID 센티널을 써요. 시험은 `channel_id`·`message_id`·`thread_id`가 모두 nil이고, 예약 실패는 `channel_id`가 실제 값·`message_id`가 nil·`thread_id`가 `channel_id`예요. relay는 비어 있지 않은지만 보고 UUID 형식은 `approval_id`만 봐서 통과해요(`dispatch.rs:188-221`). Swift 파서는 UUID 형식을 요구하는데 nil UUID도 형식은 유효해요(`PushNotification.swift:231-235`).
+  - 구 relay의 400은 `relay_outdated`로 분류하고 재시도하지 않아요(시험 알림).
+- **ADR-0208 D8의 다섯 비용에 대한 답**
+
+  | # | ADR-0208 D8이 적은 비용 | 결정 |
+  |---|---|---|
+  | ① | reason 1종 추가(relay·서버·앱 상수) | `scheduled_failed`와 category `momo.system`을 D14의 한 번의 증보에 넣어요 |
+  | ② | `message_id` 자리에 올 값, 또는 새 키(키 집합 변경은 ADR-0120 변경) | **키 집합을 바꾸지 않아요.** `message_id`는 nil-UUID 센티널이고 채널 이동에 필요한 `channel_id`는 실제 값이에요. 예약 id는 collapse id에만 써요 |
+  | ③ | NSE가 무엇을 가져와 그릴지 | **아무것도 가져오지 않아요.** relay의 정적 본문을 쓰고 새 NSE는 reason으로 자기 로케일 문구를 써요. `push_fetch`의 읽기 둘은 불변이에요(`push_fetch_token.rs:199-215`). 탭하면 그 채널로 가고 거기서 「예약됨」 배너가 실패를 보여줘요(ADR-0208 D8 앱 안 알림) |
+  | ④ | `push_candidate`의 새 생산자(ADR-0204 D8-a) | `push_candidate`에 생산자를 더하지 않아요. 새 kind `push_system`이고 이 ADR이 그 Accepted ADR이에요 |
+  | ⑤ | relay 먼저 → 서버 → 앱 순서 | relay → migrate → notifier → api → 앱(D14) |
+
+  푸시 문구에는 실패 사유(`missed`·`not_member` …)를 싣지 않아요(정적 한 줄). 사유는 앱 안 목록이 보여줘요. 예약 실패의 정본은 계속 `scheduled_message`예요.
+
+### D16. 판정 구조는 SQL이 고르고 Rust 후단이 시간·상태를 다뤄요 [권장]
+- `judge_targets`는 지금 한 문장이 약 220줄이에요(`judgment.rs:250-474`). 새 arm과 조건을 계속 얹으면 가독성·성능·`judgment_projection` 시험이 무너져요.
+- **SQL**: 수신자·reason·종류를 고르고 일시 중지·채널 음소거·종류 스위치로 억제하는 일만 해요(본문 미독, I2). 새 arm(`keyword`·`channel_message`)과 새 조건은 **CTE 한 조각씩** 더하고 `tests/judgment_projection.rs`가 본문 미독을 계속 단정해요.
+- **Rust 후단**(`momo-push`의 새 함수, 가칭 `refine_targets`): SQL이 낸 대상 목록(많아야 수십 명) 위에서 멤버 id 목록으로 보조 조회를 **한 번** 해서 ① 근무 시간 억제(D13) ② 활성 지연·읽음 취소(D4) ③ 폭주 상한(D7)을 적용해요. 시간대·활동 신호처럼 시간에 기대는 판정이고, 진단·미리보기가 같은 함수를 불러야 해서예요(P9 「플랫폼별 재구현 금지」).
+- **규칙 빌더(ADR-0207)** 는 이 후단 위에 얹어요. SQL이 후보를 고른 뒤 Rust 해석기가 id·enum 사실만으로 평가해요(본문 미독). 평가기의 스키마·순서·상한은 ADR-0207이 정하고, 이 ADR은 「후단은 id·enum·시각 사실만 읽는다」는 경계만 정해요.
+
+### D17. 데스크탑·웹 배너 판정은 서버 값을 입력으로 일원화해요 [권장]
+- 지금: 일시 중지는 서버 값을 읽고(#4197, `model.ts:220`·`:258`, `serverPause.ts`) 멘션 예외·종류 스위치·일정은 읽지 않아요. 종류 스위치는 기기 localStorage(`preference.ts:45`)이고 폰은 서버(`work_complete_push`)예요.
+- 결정: **배너 판정은 클라이언트에 남기되(실시간 `message.new`로 바로 띄워야 해서요) 입력은 전부 서버 값**이에요. 입력은 일시 중지·근무 시간(`effective`, D13), 채널 음소거·단계(`Channel.muted`·`notificationLevel`, D12), 멘션 예외(`mentionOverridesMute`), 종류×`desktop` 스위치(`notification-prefs`, D5)예요. 클라이언트에 서버가 모르는 규칙을 새로 두지 않아요. 이 기기 스위치는 서버 값의 **캐시**예요.
+- 이전(N4): `momo.web.notifications.v1`에 로컬 값이 있고 서버 행이 없으면 PATCH 한 번으로 올리고 그 뒤 로컬은 캐시예요. 설정 표의 폰 열 「곧 열려요」는 0건이 돼요(`DesktopNotificationGroup.tsx:83-87`).
+- 멘션 예외가 켜져 있으면 음소거 채널도 멘션 구독에 포함해요. 감시 채널 상한 30은 유지하고(`DesktopNotifications.tsx:57`) 멘션 예외로 들어온 음소거 채널과 단계가 `all`인 채널은 뒤에 와요. 상한 정책을 문서화하는 것이 수용 기준이에요.
+- 일시 중지·근무 시간·채널 음소거 중에는 배너도 소리도 없어요(I1).
+
+### D18. 표현은 앱이 재생하고 iOS는 NSE가 읽기만 해서 소리를 덮어써요 [권장]
+- **재생**: 웹·데스크탑은 앱이 Web Audio(`AudioBufferSourceNode`)로 재생해요. `<audio>`는 쓰지 않아요(macOS 미디어 키를 가로채요, r7 B12 [외부]). **배너를 실제로 게시한 경우에만** 재생하고, 사용자 제스처 전 재생 실패는 조용히 배너만 보여요. macOS Tauri 배너의 기본 소리는 #4222가 붙여요(`notify-rust`의 기본 macOS 백엔드가 `NSUserNotification`이고 소리가 없으면 `soundName`을 안 정해요 [외부, `runtime-unverified`]).
+- **불변식 시험(I1)**: 소리 끔 → 배너 유지 / 배너 억제(일시 중지·음소거·근무 시간·창이 앞이고 그 채널을 봄) → 소리 없음 / 기본 소리가 종류마다 다름 / 재생은 `presentation`을 따름.
+- **iOS**: relay는 계속 `aps.sound="default"`를 보내서 NSE가 실패하면 기본음이에요(fail-open). NSE는 앱이 App Group에 써 둔 **매핑 JSON을 읽기만** 해서 `content.sound`를 덮어써요. 매핑 키는 와이어 reason(+category)이고, 소리 파일은 번들 소리는 앱 번들에, 사용자 파일은 App Group의 `Library/Sounds`에 있어요. 앱이 설정을 바꿀 때와 전경으로 돌아올 때 매핑 JSON과 사용자 파일을 쓰고, NSE는 네트워크로 소리를 받지 않아요(`push_fetch`의 읽기 둘 불변). 파일이 없거나 30초 이상이거나 형식이 틀리면 기본음이에요. App Group은 이미 앱·NSE 두 entitlement에 있어요(`MomoMobile.entitlements`, `MomoMobileNotificationService.entitlements`의 `group.app.momo.ios`).
+- **하위 종류**(사람/에이전트 멘션·에이전트의 답)는 reason이 같아 NSE가 가르지 못해요. 폰의 멘션 소리는 `mentionHuman`의 소리를 따르고, 하위 종류별 소리는 데스크탑·웹에서 먼저 돼요(NSE가 작성자 종류를 쓰는 확장은 D19와 함께 P2예요).
+- **기각**: `aps.sound`에 파일명을 싣는 안은 relay가 멤버별 선택을 알게 되고 어휘를 바꿔야 하고, 파일이 기기에 없을 때 동작이 불확실해요(r7 P1-10).
+- **스파이크**(슬라이스 N10의 첫 단계, `runtime-unverified`): ① NSE가 `content.sound`를 App Group 파일로 덮어써서 실제로 재생되는지 ② mp3·m4a가 `Library/Sounds`에서 재생되는지(Telegram은 쓰지만 Apple의 형식표에는 PCM·IMA4·µLaw·aLaw뿐이에요 [외부]) ③ 「소리 없이 배너만」이 NSE `sound=nil`로 되는지 relay `sound` 키가 필요한지. ③이 안 되면 폰은 「소리 끔」 선택지를 숨겨요(거짓 약속을 안 해요).
+- **NSE 소스 정리**: 「INHERITED SOURCE — DO NOT EDIT」 머리는 죽은 계약이에요(`NotificationService.swift:1-16`, 원본 `clients/iOS`는 삭제돼 검증기가 SKIP이에요). N10이 정리해요.
+
+### D19. 발신자 규칙(VIP·조용히)은 경계와 의미만 정해요 [권장]
+- 사람·에이전트 발신자를 지정해요(P2-2). 에이전트가 1급 멤버라 「에이전트 조용히」가 자연스러워요.
+- 저장: `notification_sender_rule (workspace_id, member_id, sender_member_id, mode)`, `mode ∈ {vip, quiet}`, 멤버당 50개 이하, RLS ENABLE+FORCE `ws_isolation`, 사람 bearer만 써요.
+- 판정(후단): `quiet` 발신자의 `dm`·`mention`·`channel_message`·`keyword`는 푸시하지 않아요(인박스·배지는 그대로, 승인 요청은 대상이 아니에요). 진단 코드 `sender_quiet`가 설명해요. `vip` 발신자의 같은 종류는 **채널 음소거와 근무 시간 밖을 관통**하고 별도 소리를 가질 수 있어요. **일시 중지는 관통하지 못해요**(I6).
+- VIP 별도 소리는 NSE가 작성자 id를 알아야 해서(fetch 응답) NSE 확장이 필요해요. 새 와이어 어휘는 없어요. 구체 화면과 상한 동작은 N14·N15가 정하고 시험으로 고정해요.
+
+### D20. 이 ADR이 정하지 않는 것
+- 규칙 빌더의 스키마·평가기(ADR-0207, #4345 착수 때) · Apple capability·프로비저닝·증거 빌드(owner) · **다이제스트 푸시**(P2-5, 슬라이스 N18. `push_system`의 셋째 생산자와 reason `digest`·판정이 필요해 증보가 먼저예요) · **허들 시작 푸시**(#2767. 새 reason·종류 표 등록·이 ADR의 어휘 규칙을 따라야 해요) · 스레드 팔로우·음소거 · Android/FCM · Critical Alerts(쓰지 않아요) · 푸시 도착 확인 관측 · 키워드 일치의 인박스 항목화(키워드는 푸시와 하이라이트만이에요).
+
+## 공개 API 초안 (요약)
+
+전부 `docs/api/openapi.yaml`에 「계약 초안」으로 들어갔어요(부록 A). 새 경로는 해당 슬라이스가 나올 때까지 404이고, 기존 경로의 새 필드는 그때까지 422(`deny_unknown_fields`)예요. 새 연산은 모두 사람 bearer만 쓰고 에이전트 bearer는 403이에요(`require_human`, `routes/notification_rules.rs:91` 모양).
+
+| 연산 | 경로 | 요청 | 성공 | 오류 | 슬라이스 |
+|---|---|---|---|---|---|
+| `getNotificationDiagnostics` | `GET …/notification-diagnostics?channelId=&kind=` | 없음 | 200 진단(D11) | 400 잘못된 id·kind, 401, 403, 429 | #4341 |
+| `sendTestNotification` | `POST …/notification-diagnostics/test` | 본문 없음 | 202 `{testId, deviceCount}` | 403 에이전트, 409 `no_device`, 429 `rate_limited` | #4341 |
+| `getNotificationPrefs` | `GET …/notification-prefs` | 없음 | 200 종류×표면·표현·일정·지연·스위치·`effective` | 401, 403 | N3 |
+| `patchNotificationPrefs` | `PATCH …/notification-prefs` | 필드 단위, `confirm?` | 200 (+`warnings`) | 400 빈 본문·`confirmation_required`·`invalid_time_zone`·모르는 소리 id(모르는 필드는 422), 403 | N3 |
+| `getNotificationKeywords` | `GET …/notification-keywords` | 없음 | 200 `{keywords, max}` | 401, 403 | N5 |
+| `putNotificationKeywords` | `PUT …/notification-keywords` | `{keywords:[…]}` 전체 교체 | 200 | 400 `keyword_too_short`·`keyword_too_long`·`too_many_keywords`, 403 | N5 |
+| `touchPresenceActivity` | `PUT …/presence/activity` | 본문 없음 | 204 | 401, 403 | N11 |
+| `updateChannelNotificationPref`(변경) | `PUT …/channels/{ch}/notification-pref` | `{muted}` 또는 `{level}` + `mutedUntilMs?` | 200 `{muted, level, mutedUntilMs?}` | 400 `muted_until_in_past`·`muted_until_too_far`·`level_not_applicable`, 403 | #4343(기한), N1(`level`) |
+| `Channel`(읽기 모델 변경) | 채널·DM 목록 | 없음 | `mutedUntilMs?`·`notificationLevel` 추가 | 없음 | #4343·N1 |
+
+사용자 알림음 API(D2)는 3단계라 초안에 넣지 않았어요.
+
+## DB 계약 (요약)
+
+| 객체 | 종류 | RLS·권한 | 행 부재·기본 | 결정 |
+|---|---|---|---|---|
+| `notification_channel_level` | 새 표 | ENABLE+FORCE `ws_isolation` · `momo_app` DML(기본 권한) · `momo_notifier` SELECT 추가 | 행 없음 = `mentions` | D7 |
+| `notification_rule` 컬럼 6개 | 컬럼 추가 | 기존 정책 상속 · 기존 SELECT | NULL·기본값 = 오늘 | D13 |
+| `notification_keyword` | 새 표 | `ws_isolation` · `momo_notifier` SELECT(notifier가 쓰는 줄도 투영을 지나요) | 행 없음 = 키워드 없음 | D3 |
+| `message_keyword_hit` | 새 표 | `ws_isolation` · `momo_notifier` SELECT(판정)·INSERT(notifier가 쓰는 줄의 투영), DELETE 없음 | 행 없음 = 일치 없음 | D3 |
+| `member_activity` | 새 표 | `ws_isolation` · `momo_notifier` SELECT | 행 없음·30초 지남 = 활성 아님 | D4 |
+| `outbox_kind` 라벨 `push_system` | enum 값 | 기존 outbox 권한 | — | D15 |
+| `member_sound`(P2) | 새 표 | 소유자 범위 FORCE · `momo_app`만 | 행 없음 = 기본음 | D2 |
+| `notification_sender_rule`(P2) | 새 표 | `ws_isolation` · `momo_notifier` SELECT | 행 없음 = 규칙 없음 | D19 |
+
+- 모든 새 표는 `workspace_id`를 갖고 RLS ENABLE+FORCE예요. `momo_notifier`는 표 단위 GRANT만 받고 DELETE가 없어요(`bootstrap_runtime_roles.sql:437-`의 규칙, 「표 하나에 GRANT 한 줄」을 `scripts/tests/test_notifier_role_grants.sh`가 읽어요). **투영 표 둘의 GRANT를 빼면 notifier의 메시지 쓰기(승인 만료·멈춤 줄)가 `permission denied`로 죽어요.** 같은 사고가 `inbox_item`에서 있었어요(`bootstrap_runtime_roles.sql:473-480`의 주석).
+- 새 표의 FK는 `workspace`·`member`(·`channel`)에 ON DELETE CASCADE예요(018·141과 같아요). `schema_v0.sql`은 건드리지 않아요. 새 migration은 `server/Migrations/`에 새로 두어요.
+- **migration 번호는 예약하지 않아요** [권장]. 지금 최신은 148이고 진행 중인 149 이상은 없어요([V] 2026-10-25, 원격 브랜치 912개). 여러 워커가 동시에 일하므로 번호는 착수한 PR이 그때의 최신 + 1을 쓰고 `scripts/check_migration_numbers.sh`가 충돌을 잡아요. 순서만 예약해요.
+
+  | 순서 | 이름(가칭) | 내용 | 슬라이스 |
+  |---|---|---|---|
+  | M-a | `outbox_kind_push_system` | `ALTER TYPE outbox_kind ADD VALUE`(값을 쓰지 않는 파일) | #4341 |
+  | M-b | `notification_rule_v2` | 컬럼 6개 | N3 (일정은 N7이 같은 컬럼을 써요) |
+  | M-c | `notification_channel_level` | 새 표 | N1 |
+  | M-d | `notification_keyword` | 표 둘(`notification_keyword`·`message_keyword_hit`)과 GRANT | N5 |
+  | M-e | `member_activity` | 새 표와 notifier SELECT | N11 |
+  | M-f | `member_sound` | P2 | #4345 |
+  | M-g | `notification_sender_rule` | P2 | N14 |
+
+## 호환·롤백
+
+| 변경 | 구 서버가 새 DB를 읽을 때(롤백 포함) | 구 앱 + 새 서버 | 구 relay + 새 서버 | 고정할 시험 |
+|---|---|---|---|---|
+| 새 표(`notification_channel_level`·`notification_keyword`·`message_keyword_hit`·`member_activity`) | 모르는 표라 무시해요. 새 설정이 없던 것처럼 오늘의 동작이에요(`all`·키워드는 꺼진 것처럼, 지연은 없는 것처럼). 음소거로 둔갑하지 않아요 | 영향 없음 | 영향 없음 | 행 부재 = 오늘 회귀 시험 |
+| `notification_rule` 새 컬럼 | 모르는 컬럼은 무시해요. 구 `PUT`·`PATCH`가 새 컬럼을 건드리지 않아요(쓰기가 컬럼을 명시해요) | 영향 없음 | 영향 없음 | 구 PUT 뒤 새 컬럼 보존 |
+| `push_system` kind | 구 notifier는 claim하지 않아 행이 쌓여요(시험 알림은 `stalled`) | 영향 없음 | 영향 없음 | 배포 순서(D14) |
+| 새 reason·category | — | NSE 파싱 실패 → relay 정적 문구(fail-open, 버튼 없음) | 400 → 영구 실패 정산 → 푸시 유실. **배포 순서로 막아요** | 구 relay 시험(D11) |
+| API의 새 필드·경로 | `level`·`mutedUntilMs`는 422, 새 경로는 404 | 구 앱은 `{muted}`만 보내서 그대로 돼요 | — | 구 본문 호환 시험 |
+| 활성 신호 | 구 notifier는 신호를 모름 | 구 클라이언트는 신호를 안 보내서 지연이 없어요(오늘) | — | 신호 없음 = 즉시 |
+
+## 보안·경계 요약
+
+- 새 자격 증명이 없어요. 새 공개 API는 모두 사람 bearer이고 에이전트는 403이에요. 새 BYPASSRLS 쓰기는 없어요: 모든 새 쓰기는 `momo_app` tx이고, notifier의 새 쓰기는 `push_dispatch_log`(기존 권한)와 `message_keyword_hit` INSERT(위 GRANT)뿐이에요.
+- **id-only 경계가 유지돼요**(ADR-0120 D2). 새 reason의 relay 문구는 정적 문자열이고 사용자 내용·이름이 없어요. 시험·예약 실패의 봉투는 nil-UUID 센티널이에요.
+- **키워드는 서버에 평문으로 저장돼요.** 문구는 props·감사·로그·응답에 남기지 않아요(D3). 일치 표는 메시지 읽기 API가 건드리지 않아요. `momo_app` 자격이 SQL 수준으로 새는 위험은 GUC 신뢰 모델 전체가 무너지는 사고와 같은 종류라 수용해요(ADR-0208 남는 위험 3과 같은 판단).
+- **시험 알림은 본인 토큰에만 가고** 분당 3회로 막아요. 판정을 우회하지만 대상은 호출자 하나뿐이라 남에게 푸시를 보내는 길이 아니에요.
+- **승인 푸시를 끄려면 확인 토큰이 필요해요**(D5). 클라이언트가 경고 화면을 건너뛰고 조용히 끌 수 없어요.
+- **활동 신호는 읽는 API가 없고** 위조해도 자기 푸시를 늦출 뿐이에요(남에게 영향이 없어요). 지연은 한 번이고 상한이 있어서(최대 300초) 푸시를 영구히 막을 수 없어요.
+- **NSE는 App Group을 읽기만 해요.** 새 네트워크 읽기 경로가 없어서 `push_fetch`의 읽기 둘은 그대로예요(ADR-0188 §8.7). 사용자 소리 파일은 본인 기기 밖으로 재생되지 않아요(D2).
+- 구 relay에 새 어휘가 가면 푸시가 사라지는 위험은 배포 순서와 진단(`relay_outdated`)으로 막아요(D14·D11).
+
+## 수용 기준 (red proof)
+
+구현 슬라이스가 지켜야 하는 시험이에요. 각 행은 **한 조건만 거짓**으로 만들어 빨강이 되는지(사보타주)를 PR 본문에 적어요. 모두 격리 PG·stub relay로 돌고 실제 APNs에는 닿지 않아요.
+
+| # | 슬라이스 | 고정할 것 | 사보타주(이렇게 깨면 빨강) |
+|---|---|---|---|
+| 1 | #4341 | 진단 코드 8종을 각각 격리 PG에서 재현해 돌려줘요(시험 8건). `ok`는 blockers가 없을 때만 true | 코드별 조건을 반대로 하면 그 코드의 시험이 빨개요 |
+| 2 | #4341 | `POST …/test`는 일시 중지 중에도 호출자 토큰에 `apns_status=200` 행을 5초 안에 남기고 그 행의 `message_id`는 NULL이에요 | 시험을 `judge_targets`로 돌리면 「일시 중지 중에도 도착」 시험이 빨개요 |
+| 3 | #4341 | 두 멤버가 있을 때 호출자만 받아요. 에이전트 bearer 403, 토큰 없음 409, 분당 3회 초과 429 | 멤버 필터를 지우면 두 번째 멤버가 받아 빨개요 |
+| 4 | #4341 | stub relay가 새 reason에 400을 주면 `lastTest.status='relay_outdated'`이고 재시도가 없어요 | 400을 일시 오류로 분류하면 재시도가 생겨 빨개요 |
+| 5 | N0 | 새 reason·category의 relay 출력은 정적 문구뿐이에요(`dispatch_payload_is_id_only`·`…has_no_content_shaped_key` 확장) | 문구에 채널 이름을 끼우면 빨개요 |
+| 6 | N0 | Rust·relay·Swift·RN의 reason·category 목록이 같고 category마다 `CATEGORY_SOUNDS` 행이 있어요 | 한 면에서 값 하나를 빼면 빨개요 |
+| 7 | #4343 | (이슈 본문) 구 본문 호환 · 과거 400 · `until = now+2s`면 t0 후보 0건·t0+3s의 새 후보 1건 · 목록의 `mutedUntilMs`는 진행 중일 때만 · audit · openapi. 더해서 366일 초과 400, `muted:false`+기한 400 | 만료 비교 방향을 뒤집으면 빨개요 |
+| 8 | N1 | `all` 수신자는 타인의 최상위 `text` 글 1건당 토큰별 1건이에요. 본인 글·스레드 답·`tool_call`·스트림 중 줄·DM 채널은 제외하고 스트림은 닫힐 때 1건이에요 | `root_id IS NULL` 조건을 지우면 스레드 답 시험이 빨개요 |
+| 9 | N1 | 단계 `all` + 기한 음소거는 기한이 지나면 `all`로 돌아와요. `{level:"mentions"}`는 두 행을 지우고, 구 `{muted:false}`는 단계 행을 남겨요 | 음소거가 단계 행을 지우면 빨개요 |
+| 10 | N1 | 단계 행이 있는 채널·DM이 **읽는 곳 다섯 모두**에서 `muted=false`예요(판정 포함) | 단계를 `notification_pref`에 넣는 구현이면 빨개요 |
+| 11 | N1 | 같은 채널에 20건이 연달아 오면 한 멤버의 `push_dispatch_log`가 7건이에요 | 상한을 7로 올리면 빨개요 |
+| 12 | N5 | 일치하는 멤버에게만 hit가 생기고 작성자·퇴장·비멤버·DM 채널은 빠져요. 에이전트 worker 줄(`send_message_in_tx`)도 투영되고, 스트림은 열린 동안 0건·닫힐 때 1건이에요. 편집은 재투영하지 않아요 | 투영을 REST 경로에만 두면 에이전트 시험이 빨개요 |
+| 13 | N5 | 정규화: 전각·대소문자·한국어 부분 문자열이 맞고, 1글자·33글자·21번째 키워드는 400이에요 | 정규화를 빼면 전각 시험이 빨개요 |
+| 14 | N5 | 메시지 읽기 API·실시간 페이로드·감사·응답에 hit와 키워드 문구가 없어요 | hit를 `props`에 쓰면 빨개요 |
+| 15 | N5 | `keyword` arm: 음소거 관통은 기본 켬이고 스위치를 끄면 억제돼요. 일시 중지·근무 시간 밖은 관통하지 못해요. `judgment_projection.rs`(본문 미독)가 통과해요 | 관통 조건에서 일시 중지 검사를 빼면 빨개요 |
+| 16 | N5 | 채널 100명·키워드 20개에서 INSERT p95 증가가 5ms 이하예요(격리 PG 측정) | — (수치는 PR 본문에 기록) |
+| 17 | N11 | 활성 신호가 있는 멤버의 DM은 즉시 0건이에요. 지연 안에 읽으면 끝까지 0건이고, 안 읽으면 `created_at + 60초`에 1건이에요 | 취소 조건을 빼면 읽은 DM이 가서 빨개요 |
+| 18 | N11 | 신호 없음·`phoneDelaySecs=0`·승인·작업 끝남·`macos` 토큰은 지연이 없어요(오늘과 같아요) | 승인을 지연하면 빨개요 |
+| 19 | N11 | 지연을 네 번 겪어도 후보가 `failed`가 되지 않아요(`attempts` 복원). 한 번만 지연돼요(만기 뒤 활동이 남아도 재보류 없음). 대상이 섞인 후보(A 즉시·B 지연)에서 A가 중복되지 않아요 | `attempts` 복원을 빼면 빨개요 |
+| 20 | N11 | 경계: 만기 직전·직후, 활동 29초·31초, 읽음 커서 경계. 다른 워크스페이스의 활동은 영향이 없어요. 에이전트 bearer 403 | — |
+| 21 | N3 | 종류 8개를 각각 꺼서 그 종류의 폰 푸시가 0건이에요. `approval.phone=false`는 `confirm` 없이 400이고 있으면 200과 `warnings`·감사예요. `workDone.phone`은 `work_complete_push`와 같은 값이에요. 행 부재 = 오늘 기본값(데스크탑 DM 끔 포함) | `confirm` 검사를 빼면 빨개요 |
+| 22 | N7 | 창 밖 푸시는 0건(승인만 통과)이고 일시 중지가 `passThrough`를 이겨요. DST 2건(Asia/Seoul·America/Los_Angeles), 자정을 넘는 창, 쓸 때 잘못된 zone 400, **저장된 잘못된 zone이 판정을 깨지 않아요** | 일시 중지 우선순위를 뒤집으면 빨개요 |
+| 23 | N13 | 예약이 `failed`로 넘어가는 tx를 롤백하면 푸시 행도 없어요. 전이마다 정확히 1건이고 보류 일괄은 호출당 1건이에요. 일시 중지 중이면 조용히 done이에요. `message_id NULL` 기록 | 푸시를 tx 밖에서 쓰면 롤백 시험이 빨개요 |
+| 24 | #4341·N5 | notifier prod-role 시험(`scripts/verify_notifier_prod_roles.sh`)에서 만료·멈춤 줄 쓰기가 GRANT로 통과해요. `push_system` claim은 `push_candidate`를 가져가지 않아요 | GRANT를 빼면 빨개요 |
+| 25 | #4345 | 5초 초과 400 · PCM16 외 400 · 300KiB 초과 400 · 21번째 400 · 교차 테넌트 404 · 에이전트 403 · 해시 불일치 400 · 삭제 뒤 매핑이 기본음 · 멤버 제거 CASCADE | — |
+| 26 | N4 | 일시 중지·근무 시간 중 배너 0건이에요. 멘션 예외 on이면 음소거 채널의 멘션 배너가 뜨고 off면 안 떠요. 서버 값에 없는 클라이언트 규칙이 없어요 | 멘션 예외 입력을 지우면 빨개요 |
+| 27 | N9·N10 | 소리 끔 → 배너 유지 / 배너 억제 → 소리 없음 / 기본 소리가 종류마다 다름. NSE는 파일 없음·30초 이상·네트워크 없음에서 기본음이에요. 스파이크 3건의 결과를 기록해요 | — |
+
+## 구현 슬라이스와 이슈 편성안 (보고서 §5의 28건을 이 ADR 기준으로 다시 묶음)
+
+N-번호는 아직 발행하지 않은 새 이슈예요(발행은 planner, 초안은 PR 본문 「새 이슈 초안」). 이미 있는 이슈는 번호를 적었어요.
+
+| 묶음 | 보고서 항목 | 이슈 | 트랙 | 의존 | 규모 | 결정 |
+|---|---|---|---|---|---|---|
+| **A 신뢰 복구** | P0-1 ADR | #4223(이 PR) | 엔진(docs) | — | M | 전부 |
+| | P0-2 진단·시험 | #4341 | 엔진 | N0 | M | D11·D15 |
+| | P0-3 상태·시험 화면 | #4342 | UXUI | #4341, #3923, #2684 | M | D11 |
+| | P0-4 음소거 기한 | #4343 | 엔진 | — | S | D12 |
+| | P0-5 채널 음소거 기한 화면 | #4344 | UXUI | #4343 | M | D12 |
+| | P0-6 배너 일원화 1단계 | #4197(끝남)·후속 #4212 | UXUI | — | S | D17 |
+| | (새) 푸시 어휘 증보, relay 먼저 | N0 | 엔진 | — | M | D14·D15 |
+| **B 전달 세밀도** | P1-1 채널 단계 | N1 | 엔진 | N0, #4343 | L | D7 |
+| | P1-2 채널 알림 시트 | N2 | UXUI | N1, #4344 | M | D7·D12 |
+| | P1-3 종류×표면 저장 | N3 | 엔진 | — | M | D5·D13 |
+| | P1-4 설정 매트릭스 화면 | N4 | UXUI | N3 | L | D5·D17 |
+| | P1-5 키워드 | N5 | 엔진 | N0, N3 | L | D3 |
+| | P1-6 키워드 화면 | N6 | UXUI | N5 | M | D3 |
+| | P1-7 근무 시간 | N7 | 엔진 | N3 | M | D13 |
+| | P1-8 근무 시간 화면 | N8 | UXUI | N7, #3923 | M | D13 |
+| **C 표현** | P1-9 번들 소리·재생 | #4222(자산·macOS 기본음) + N9(선택·미리 듣기·재생) | UXUI | N3, #4222 | L | D10·D18 |
+| | P1-10 iOS 소리 | N10 | UXUI(iOS) | N9 | L | D18 |
+| | P1-11 앱이 앞에 있을 때 | #4310 | UXUI | N9 | M | #2592 |
+| **D 타이밍** | P1-12 데스크탑 활성 시 폰 지연 | N11(서버) + N12(클라이언트 신호·지연 설정) | 엔진·UXUI | N0, N3 | L·S | D4 |
+| **E 직접 넣기** | P2-1E·1U 사용자 알림음 | #4345 | 엔진·UXUI | N9, N10 | L·L | D2 |
+| | P2-3E·3U 규칙 빌더 | #4345 + ADR-0207 | 엔진·UXUI | N3, N5, N7, N14 | L·L | D16·D20 |
+| **F 관통·우선순위** | P2-2E·2U 발신자 규칙 | N14·N15 | 엔진·UXUI | N3, N9 | M·M | D19 |
+| | P2-4E·4U Time Sensitive | N16·N17 | 엔진·UXUI(iOS) | N0, owner Apple 작업 | M·M | D6 |
+| | P2-6 Focus Filter 스파이크 | N19 | UXUI(iOS) | N17 | S | 스파이크 |
+| **G 시스템 푸시** | (새) 예약 실패 푸시 | N13 | 엔진 | N0, #4341 | M | D15 |
+| | P2-5 다이제스트 | N18 | 엔진 | ADR 증보, N3, N7 | L | D20 |
+
+- **새 슬라이스 셋**(보고서 28건에 없던 것): N0(어휘 증보를 relay 먼저 한 번에), N12(웹·데스크탑이 활성 신호를 보내는 클라이언트와 지연 설정 화면 — 보고서 P1-12는 서버만 적었어요), N13(ADR-0208 D8의 예약 실패 푸시).
+- **기존 이슈 정정 제안**: #4341은 `push_test` → `push_system`·어휘는 N0로 분리·경로를 `…/notification-diagnostics/test`로·의존에 N0 추가. #4344는 폰에 무기한 토글이 이미 있으니(`useChannelRowActions.ts:240-257`) 「폰 신설」을 「폰 기한 선택·채널 헤더·3표면 프리셋」으로. #4343은 의존을 「ADR-0124 증보 4」 대신 이 ADR(D12)로. #4222는 소리 슬롯 이름을 D10에 맞춰요. #4353은 「## 항목」 체크리스트가 비어 있어 위 표로 채워요.
+- 각 슬라이스의 완료는 위 「수용 기준」 행과 해당 표면 게이트(폰·웹·Rust)예요. UI 슬라이스는 design-review Blocker 0·High 0이에요. 어느 슬라이스든 구현 PR은 이 ADR이 Accepted인 뒤에만 머지해요(ADR-0100).
+- 함께 고칠 문서: `docs/architecture/overview.md:51`(푸시 후보 서술에 `push_system` 한 줄), `docs/api/openapi.yaml`(초안을 실제 서버에 맞춰 확정), `docs/cicd/11-ios-push-device-check.md`(소리·시험 알림 실기기 칸).
+
+## 기각한 대안
+
+| 결정 | 대안 | 기각 이유 |
+|---|---|---|
+| D7 | `notification_pref.level` 컬럼(리서치) | 「행이 있으면 음소거」를 읽는 곳이 다섯이고 롤백한 서버가 `all`을 음소거로 읽어요 |
+| D7 | 음소거가 단계 행을 지워요 | 「1시간만 끄기」가 끝나도 이전 단계(`all`)를 영영 잃어요 |
+| D3 | `props.keyword_member_ids`(리서치) | props는 채널 멤버가 읽어서 남의 키워드를 알아낼 수 있어요 |
+| D3 | notifier가 판정 때 본문을 읽어 매치 | I2 위반이고 BYPASSRLS 읽기 범위가 커져요 |
+| D3 | REST 경로에서만 투영(멘션과 같게) | 에이전트 발화(키워드의 주 쓰임)가 빠져요 |
+| D3 | 키워드를 해시로 저장 | 부분 문자열 매치가 안 돼요 |
+| D4 | A 적용 안 함 · B 억제(Buzz 초안) | 이슈 결재. B는 자리를 비운 사람이 놓쳐요 |
+| D4 | 지연을 SQL 한 문장에 넣어요 | 문장이 더 비대해지고 활동·읽음 보조 조회가 필요하며 진단이 재사용하지 못해요 |
+| D4 | 보류를 `push_dispatch_log` 행으로 기록해요 | 억제는 기록을 남기지 않는다는 규칙(ADR-0124 D2)과 어긋나고 정리가 필요해요 |
+| D4 | 지연마다 `attempts`를 써요 | 실패 예산이 지연에 먹혀 후보가 `failed`로 접혀요 |
+| D15 | 시험 전용 `push_test` kind + 예약 실패 별도 kind | kind가 늘어 claim·reclaim·문서가 세 벌이에요 |
+| D15 | `push_candidate`에 `source` 키로 얹기(스트림 닫힘 선례) | 판정이 메시지를 읽는 hot path에 메시지 없는 후보가 섞이고 D8-a 생산자 규칙이 발동해요 |
+| D15 | api가 relay에 직접 보내기 | api에는 relay 키·클라이언트가 없고 서명 키 노출면이 넓어져요 |
+| D15 | `message_id` 자리에 예약 id | NSE·앱이 메시지 id로 오해해요 |
+| D15 | 새 선택 키 `subject_id` | ADR-0120 변경이고 relay 먼저예요. 채널 이동에는 `channel_id`로 충분해요 |
+| D13 | 일정 시각을 Rust(`chrono-tz`)로 계산 | 새 의존이고 시간대 DB가 둘이 돼요 |
+| D13 | 새 표 `notification_prefs` | `notification_rule`이 이미 (워크스페이스, 멤버) 행이에요 |
+| D2 | 서버 ffmpeg 변환 | permissive 라이선스 규칙·이미지 의존·공격면 |
+| D2 | Drive 저장 · 팀 공유 라이브러리 | 외부 의존·권한 복잡 · 불쾌한 소리 문제 |
+| D18 | `aps.sound`에 파일명 | relay가 멤버별 선택을 알게 되고 파일이 없을 때 동작이 불확실해요 |
+| D5 | 승인은 끄지 못하게 유지(C) | 세밀도 요구에 어긋나요. 경고와 확인 토큰으로 보완해요 |
+| D6 | A 기본 켬 · C 도입 안 함 | 이슈 결재. HIG상 남용하면 앱 단위로 꺼져요 |
+| D9 | 계정 단위 새 표 | 새 테넌트 경계라 RLS·ADR 비용이 커요 |
+| D14 | reason마다 relay 배포 | 호스티드 relay 배포가 네 번이에요 |
+| D17 | 서버가 데스크탑 배너도 푸시로 판정 | 데스크탑은 푸시가 없고 실시간 이벤트로 바로 띄워야 해요 |
+
+## 남는 위험
+
+1. **키워드 평문 저장과 SQL 수준 유출**(D3). 화면 고지와 문구 비노출로 줄였고 `momo_app` 자격 유출은 GUC 신뢰 모델 전체의 사고라 수용해요.
+2. **활성 신호는 입력 기반 근사**예요(D4). 자리를 비운 사람은 최대 지연만큼 늦게 받아요. 목표 감소율은 가설이에요.
+3. **구 relay + 새 reason은 푸시 유실**이에요(D14). 배포 순서와 `relay_outdated` 진단으로 알리지만 순서를 어긴 셀프호스트는 막지 못해요.
+4. **`relay_unreachable`은 추론**이라 오탐이 있을 수 있어요(D11). 슬라이스가 격리 PG로 조정해요.
+5. **iOS 소리 덮어쓰기·macOS 배너 소리·집중 모드 중 앱 재생은 `runtime-unverified`**예요(D18). 스파이크가 먼저예요.
+6. **음소거 아래 단계가 숨어 있어요**(D7). 「끔」 아래의 `all`은 기한이 끝나야 드러나요. 읽기 모델의 `level`은 효과값이고 화면이 「~까지」 칩으로 설명해요.
+7. **`message_keyword_hit`은 정리 작업이 없어요.** 메시지 수명을 따르고 행은 일치 건수만큼이에요(약 100바이트). 하루 수만 건이 되면 inbox 보존 소탕(`inbox_retention_sweep.rs`)과 같은 두 풀 모양의 소탕을 후속으로 둬요.
+8. **notifier는 self-host 기본 스택에 없어요**(ADR-0208 남는 위험 7). `push_system`·지연·시험 알림은 그 스택에서 동작하지 않아요. 시험 알림은 `stalled`로 알려요.
+9. **「모든 새 글」로 에이전트 소음이 생길 수 있어요.** 분당 6건 상한과 경고로 줄였고 소음 책임은 선택한 사람에게 있어요.
+10. **설정은 이벤트 없이 다음 조회에서 수렴해요.** 다른 기기가 바로 반영하지 않아요(ADR-0177 방식).
+11. **허들 시작 푸시(#2767)** 같은 새 푸시가 이 ADR의 종류 표·어휘 규칙을 무시하고 들어올 수 있어요. D20이 규칙을 남겨요.
+
+## owner 결정 (인용)
+
+- 2026-10-21 성재: 「버즈쪽에서 알림에서 에로사항을 엄청 느끼는 거 같아. 그 부분에 있어서 커스텀까지도 가능하게(직접 넣어서 말이야) 해줬으면 좋겠어.」
+- 2026-10-22 성재(위임): 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 D1~D10은 리서치 §6 권장안으로 확정했고(이슈 #4223), D4는 같은 날 성재에게 구체 설명을 드렸어요. D11~D20과 「리서치와 달라진 곳」은 이 위임에 따라 이 ADR이 고른 [권장]이고, planner가 PR 본문 「권장으로 정한 것」 표로 성재에게 보고해요.
+- 2026-10-22 성재(소리 출처): 「기본 알림음은 너가 뭐 오픈소스같은걸로 만들거나 알림음을 찾아봐봐.」 → D10.
+- 2026-10-22 planner 결정(#4223 코멘트): 예약 실패 푸시의 새 reason과 다섯 비용을 이 ADR이 정해요 → D15.
+
+## 부록 A. openapi 계약 초안
+
+`docs/api/openapi.yaml`에 「계약 초안」으로 들어갔어요(ADR-0208과 같은 방식). 태그 `notifications`, 새 연산 7개(진단 2·설정 2·키워드 2·활동 1), 새 스키마, 그리고 기존 `updateChannelNotificationPref`와 `Channel`의 추가 필드예요. 해당 슬라이스가 나올 때까지 새 경로는 404이고 기존 경로의 새 필드는 422예요. enum 값은 엔진이 소유해요(`docs/TRACKS.md:23`): UXUI PR은 서버 등록표가 랜딩한 뒤에 따라 넣어요. openapi만 바뀐 PR도 PR CI의 cargo 레인을 켜요(같은 줄).
