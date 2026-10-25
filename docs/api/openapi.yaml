@@ -4523,8 +4523,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/notification-diagnostics/test:
     post:
@@ -4603,8 +4601,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          $ref: "#/components/responses/RateLimited"
     patch:
       tags: [notifications]
       operationId: patchNotificationPrefs
@@ -4617,7 +4613,7 @@ paths:
         ["approval_push_off"]`; without it 400 `confirmation_required`. With it the
         response carries `warnings: ["approval_push_off"]` and the write is
         audited. `schedule.tz` must be an
-        IANA zone name the database knows (400 `invalid_time_zone`); a sound id
+        a zone name in the database's `pg_timezone_names` (400 `invalid_time_zone`); a sound id
         must be known (400 `unknown_sound`). `schedule: null` removes the
         schedule. Human bearer only (an agent bearer is 403).
       security:
@@ -4653,8 +4649,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/notification-keywords:
     get:
@@ -4685,8 +4679,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          $ref: "#/components/responses/RateLimited"
     put:
       tags: [notifications]
       operationId: putNotificationKeywords
@@ -4730,8 +4722,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/presence/activity:
     put:
@@ -4772,8 +4762,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "429":
-          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/members/me/sidebar-prefs:
     get:
@@ -13182,7 +13170,12 @@ components:
                 send-now (409),
                 the failure reason that the row now carries: `author_inactive`,
                 `not_member`, `root_unavailable`, `attachment_unavailable`,
-                `send_error`, `not_allowed`.
+                `send_error`, `not_allowed`; ADR-0206 (contract draft, notification
+                settings v2): 400 `confirmation_required`, `invalid_time_zone`,
+                `invalid_schedule`, `unknown_sound`, `muted_until_in_past`,
+                `muted_until_too_far`, `level_not_applicable`, `keyword_too_short`,
+                `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
+                `rate_limited` (the test push only).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -16374,7 +16367,7 @@ components:
 
     NotificationKind:
       type: string
-      enum: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll]
+      enum: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll, scheduledFailed]
       description: >
         ADR-0206 kind table. The server tags each push target with one of these
         when it judges. The engine owns this list.
@@ -16385,7 +16378,7 @@ components:
       required: [phone]
       description: >
         One kind on the two surfaces. `desktop` is absent where the surface does
-        not apply to the kind (`agentAnswer`).
+        not apply to the kind (`agentAnswer`, `scheduledFailed`).
       properties:
         phone:
           type: boolean
@@ -16489,7 +16482,7 @@ components:
       properties:
         kinds:
           type: object
-          required: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll]
+          required: [dm, mentionHuman, mentionAgent, agentAnswer, approval, workDone, keyword, channelAll, scheduledFailed]
           properties:
             dm: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             mentionHuman: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
@@ -16499,6 +16492,7 @@ components:
             workDone: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             keyword: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
             channelAll: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
+            scheduledFailed: {$ref: "#/components/schemas/NotificationSurfaceSwitches"}
           description: >
             Defaults when nothing is stored: every phone switch on; desktop on
             except `dm` (off). `workDone.phone` is the same value as
@@ -16551,6 +16545,7 @@ components:
             workDone: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
             keyword: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
             channelAll: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
+            scheduledFailed: {$ref: "#/components/schemas/PatchNotificationSurfaceSwitches"}
         presentation:
           $ref: "#/components/schemas/NotificationPresentation"
         schedule:
