@@ -75,6 +75,7 @@ pub mod human_control;
 pub mod issue;
 pub mod jwt;
 pub mod owner_claim;
+pub mod password_rules;
 pub mod push_action_token;
 pub mod push_fetch_token;
 pub mod realtime;
@@ -173,11 +174,15 @@ pub use jwt::{
 };
 pub use owner_claim::{
     change_own_password_in_tx, consume_claim_in_tx, issue_password_reset_in_tx,
-    mint_owner_claim_token, normalized_claim_password, normalized_claim_token,
-    resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
-    IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
-    CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET, OWNER_CLAIM_TOKEN_LEN,
-    OWNER_CLAIM_TTL_SECONDS,
+    mint_owner_claim_token, normalized_claim_token, resolve_claim_workspace, ClaimInputError,
+    ClaimMutation, ClaimOutcome, ClaimSpecInvalid, IssuedPasswordReset, PasswordChangeMutation,
+    PasswordResetIssueError, CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET,
+    OWNER_CLAIM_TOKEN_LEN, OWNER_CLAIM_TTL_SECONDS,
+};
+pub use password_rules::{
+    normalized_current_password, normalized_new_password, CurrentPasswordInvalid,
+    NewPasswordInvalid, CURRENT_PASSWORD_MAX_CHARS, NEW_PASSWORD_MAX_BYTES, NEW_PASSWORD_MIN_CHARS,
+    PASSWORD_INVALID_CHAR_CODE, PASSWORD_TOO_LONG_CODE, PASSWORD_TOO_SHORT_CODE,
 };
 pub use push_action_token::{
     live_push_action_count, lock_push_action_mints_in_tx, push_action_route_allowed,

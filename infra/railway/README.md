@@ -305,7 +305,7 @@ Wi-Fi and a phone hotspot); bogus claims only ever get 400 or 429.
    ```sh
    for i in $(seq 31); do
      curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
-       --data '{"token":"not-a-claim-token","password":"x"}' "https://$RAILWAY_PUBLIC_DOMAIN/v1/claim"
+       --data '{"token":"not-a-claim-token","password":"bogus-claim-password"}' "https://$RAILWAY_PUBLIC_DOMAIN/v1/claim"
    done | sort | uniq -c        # expect 30 × 400 and 1 × 429
    ```
 3. In the api logs (`railway logs --service api`, or the api service's Deploy

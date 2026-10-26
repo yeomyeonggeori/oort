@@ -126,6 +126,7 @@
 //! for an address with no `@`) and it still decides what a *new* row stores. What
 //! changed is that the reads no longer depend on it having run.
 
+use momo_auth::{normalized_new_password, NewPasswordInvalid};
 use momo_db::DbError;
 use sqlx::PgConnection;
 use uuid::Uuid;
@@ -153,10 +154,15 @@ pub enum JoinSpecInvalid {
     DerivedHandle,
     #[error("timeZone is too long")]
     TimeZone,
+    /// No password at all (absent or empty): the sentence this route has always
+    /// answered, with no `error.code`.
     #[error("password is required")]
     PasswordMissing,
-    #[error("password is too long")]
-    PasswordTooLong,
+    /// A password that is present but breaks the ADR-0215 D2 rule: too short,
+    /// too long, or holding a NUL. Never [`NewPasswordInvalid::Missing`] (that is
+    /// [`Self::PasswordMissing`]): the route puts the wire `error.code` on it.
+    #[error(transparent)]
+    NewPassword(NewPasswordInvalid),
 }
 
 /// Swift `InviteRoutes.normalizedCode` (:492-498). Trimmed, non-empty, ≤256.
@@ -276,19 +282,26 @@ pub fn normalized_join_time_zone(raw: Option<&str>) -> Result<String, JoinSpecIn
     Ok(value.to_string())
 }
 
-/// Swift `normalizedPassword` (:790-798): required, non-empty, ≤1024 characters.
+/// Swift `normalizedPassword` (:790-798), tightened by ADR-0215 D2 (#4593): the
+/// joining human is *choosing* a password, so it must be at least 10 characters
+/// and at most 72 bytes of UTF-8 — the one rule
+/// [`momo_auth::normalized_new_password`] holds for every path that sets one.
 ///
 /// The ceiling matters for a bcrypt-backed column: `momo_password_hash` runs
 /// `crypt()` inside Postgres, so an unbounded password field would be an
-/// unbounded amount of DB CPU an unauthenticated caller can ask for.
+/// unbounded amount of DB CPU an unauthenticated caller can ask for. 72 bytes
+/// is also all bcrypt reads, and is far below the 1024 characters this used to
+/// allow.
+///
+/// Absent and empty stay the code-less "password is required" they always were.
 pub fn normalized_join_password(raw: Option<&str>) -> Result<String, JoinSpecInvalid> {
     let Some(value) = raw.filter(|value| !value.is_empty()) else {
         return Err(JoinSpecInvalid::PasswordMissing);
     };
-    if value.chars().count() > 1024 {
-        return Err(JoinSpecInvalid::PasswordTooLong);
-    }
-    Ok(value.to_string())
+    normalized_new_password(value).map_err(|invalid| match invalid {
+        NewPasswordInvalid::Missing => JoinSpecInvalid::PasswordMissing,
+        other => JoinSpecInvalid::NewPassword(other),
+    })
 }
 
 /// Swift `isValidHandle` (:800-804): 2..=32 characters of `[a-z0-9_-]`.
@@ -1330,10 +1343,10 @@ mod tests {
     }
 
     #[test]
-    fn the_password_is_required_and_capped_because_bcrypt_runs_in_postgres() {
+    fn the_password_is_required_and_held_to_the_new_password_rule() {
         assert_eq!(
-            normalized_join_password(Some("hunter2")).expect("ok"),
-            "hunter2"
+            normalized_join_password(Some("hunter2-hunter2")).expect("ok"),
+            "hunter2-hunter2"
         );
         assert_eq!(
             normalized_join_password(None),
@@ -1345,8 +1358,43 @@ mod tests {
         );
         assert_eq!(
             normalized_join_password(Some(&"a".repeat(1025))),
-            Err(JoinSpecInvalid::PasswordTooLong),
+            Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooLong)),
             "an unauthenticated caller must not be able to ask for unbounded crypt() work"
+        );
+    }
+
+    /// ADR-0215 D2 on the join path: nine characters are refused, ten pass;
+    /// 72 bytes pass and 73 do not, even when those 73 bytes are only 25
+    /// characters. The shared rule is tested in `momo_auth::password_rules`;
+    /// this pins that join actually asks it.
+    #[test]
+    fn join_holds_the_new_password_to_ten_characters_and_seventy_two_bytes() {
+        assert_eq!(
+            normalized_join_password(Some("abcdefghi")),
+            Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooShort))
+        );
+        assert_eq!(
+            normalized_join_password(Some("abcdefghij")).expect("ten characters pass"),
+            "abcdefghij"
+        );
+        let seventy_two = "\u{D55C}".repeat(24);
+        assert_eq!(seventy_two.len(), 72);
+        assert_eq!(
+            normalized_join_password(Some(&seventy_two)).expect("72 bytes pass"),
+            seventy_two
+        );
+        assert_eq!(
+            normalized_join_password(Some(&format!("{seventy_two}a"))),
+            Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooLong)),
+            "73 bytes, 25 characters: the ceiling is bytes"
+        );
+        // Ten characters, the tenth a NUL: long enough and short enough, refused
+        // for the NUL alone.
+        assert_eq!(
+            normalized_join_password(Some("abcdefghi\0")),
+            Err(JoinSpecInvalid::NewPassword(
+                NewPasswordInvalid::InvalidChar
+            ))
         );
     }
 
@@ -1509,7 +1557,7 @@ mod tests {
             display_name: "Ada".into(),
             requested_handle: Some("ada-l".into()),
             fallback_handle: "ada".into(),
-            password: "hunter2".into(),
+            password: "hunter2-hunter2".into(),
             time_zone: "UTC".into(),
         };
         assert_eq!(values.handle(), "ada-l");
