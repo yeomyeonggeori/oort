@@ -4937,31 +4937,32 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-profile-push-failed-ax':
       return (
         <Screen>
-          <View style={{flex: 1, overflow: 'hidden'}}>
-            <View
-              style={{
-                marginTop: -(name.endsWith('-ax')
-                  ? PUSH_CAPTURE_SCROLL_AX
-                  : PUSH_CAPTURE_SCROLL),
-                height: 6000,
-              }}>
-              <View style={styles.settingsBody}>
-                <SettingsContent
-                  workspaceId={HARNESS_MEMBER.workspaceId}
-                  member={SETTINGS_ME}
-                  directory={settingsDirectory(SHELL_ROSTER)}
-                  connected
-                  onOpenTheme={() => {}}
-                  onOpenStatus={() => {}}
-                  onOpenDeviceKey={() => {}}
-                  onOpenPauseUntil={() => {}}
-                  onOpenDndUntil={() => {}}
-                  onSignOut={() => {}}
-                  onRevealEnd={() => {}}
-                />
-              </View>
+          <ScrollView
+            // 고정 오프셋에서 시작하되 **스크롤은 살아 있다**: 접근성 최대 글씨에서는 알림 카드가 1000pt 넘게 커져 실패 문장이 접힘선
+            // 한참 아래에 선다 — 99번 흐름이 `scrollUntilVisible` 로 내려가야 닿는다(옛 판은 위를 잘라 둔 정지 상자라 스크롤이 없었다).
+            contentOffset={{
+              x: 0,
+              y: name.endsWith('-ax') ? PUSH_CAPTURE_SCROLL_AX : PUSH_CAPTURE_SCROLL,
+            }}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            style={styles.fill}>
+            <View style={styles.settingsBody}>
+              <SettingsContent
+                workspaceId={HARNESS_MEMBER.workspaceId}
+                member={SETTINGS_ME}
+                directory={settingsDirectory(SHELL_ROSTER)}
+                connected
+                onOpenTheme={() => {}}
+                onOpenStatus={() => {}}
+                onOpenDeviceKey={() => {}}
+                onOpenPauseUntil={() => {}}
+                onOpenDndUntil={() => {}}
+                onSignOut={() => {}}
+                onRevealEnd={() => {}}
+              />
             </View>
-          </View>
+          </ScrollView>
         </Screen>
       );
     case 'mark-unread-sidebar':
@@ -6524,14 +6525,15 @@ function SettingsBottomSurface(): React.JSX.Element {
  * 「알림」 묶음의 첫 줄(푸시 스위치)이 화면 위쪽(상태 막대 아래)에 오도록 설정 내용을 끌어올리는 만큼(pt).
  * 기준은 99번 흐름이 누르는 자리다: 줄 `profile-push-row` 의 윗변이 y≈83 이라야 스위치 탭 지점(84%,13%)이 스위치 안에 든다.
  *
- * #4457 이 설정 본 페이지의 구성(얼굴 → 상태 설정 → 내 상태 → 프로필 → 알림)을 바꿔 다시 쟀다 — iPhone 16 Pro(402×874pt),
+ * #4457 이 설정 본 페이지의 구성(얼굴 → 상태 설정 → 내 상태 → 프로필 → 알림)을 바꿔 다시 쟀다(design-review r1 수리 뒤 한 번 더 —
+ * 얼굴 96→112 와 「내 상태」의 앞 칸 제거로 기본 글자 크기는 44pt 아래로, AX5 는 글이 덜 접혀 41pt 위로 옮겨 483→527·1295→1254) — iPhone 16 Pro(402×874pt),
  * `maestro hierarchy` 의 `profile-push-row` bounds(윗변이 83 으로 선다; 높이는 상태 문구 줄 수에 따라 다르다): 기본 글자
  * 크기 `shell-profile-push-off` [16,83][385,170], 접근성 최대(AX5, `accessibility-extra-extra-extra-large`)
  * `shell-profile-push-off-ax` [16,83][385,515]. AX 에서는 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로
  * 끌어올림이 다르다. AX 판의 스위치는 줄 가운데에 서므로 흐름은 줄을 누른다(`TAP=row`).
  */
-const PUSH_CAPTURE_SCROLL = 483;
-const PUSH_CAPTURE_SCROLL_AX = 1295;
+const PUSH_CAPTURE_SCROLL = 527;
+const PUSH_CAPTURE_SCROLL_AX = 1254;
 
 function seedPush(surface: string): void {
   const denied = surface.startsWith('shell-profile-push-denied');

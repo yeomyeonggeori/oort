@@ -584,7 +584,7 @@ export function SettingsContent({
             accessory="chevron"
             onPress={onOpenStatus}
             accessibilityLabel={`${CUSTOM_STATUS_MENU_LABEL}, ${customLine ?? '없음'}`}
-            accessibilityHint="이모지와 짧은 글, 지울 시간을 고릅니다."
+            accessibilityHint="이모지와 짧은 글, 사라질 때를 고릅니다."
             testID="profile-status-row"
           />
         </GroupCard>
