@@ -4,10 +4,7 @@ import {
   RUN_STATUS_WORKING,
   type DoorbellFact,
 } from "./runStatusLine";
-import {
-  isUncollectedPastGrace,
-  type RoutineHint,
-} from "./runException";
+import { isUncollected, type RoutineHint } from "./runWaiting";
 import {
   agentLabel,
   turnHubSentence,
@@ -37,8 +34,9 @@ import type { AgentTurnState, AgentWorkingSignal } from "./workingSignal";
 //     에이전트는 읽는 사람에게 바라는 것이 없고, 승인에 선 에이전트는 읽는 사람 없이는 못 움직인다).
 //     합친 줄에서도 `needsHuman`이 서므로 표면이 색으로 말할 수 있다.
 //
-// 못 가져감 유예를 넘은 run은 레일에서 **빠진다**: 그 run은 `runException`이 타임라인 예외 줄로
-// 말하고, 같은 run을 두 자리가 서로 다르게 말하지 않게 한다. 끝난 run은 열린 턴이 아니므로 입력에
+// 「아직 받지 않았어요」 유예를 넘은 run은 레일에서 **빠진다**: 그 run은 `runException`이 타임라인 예외 줄로
+// 말하고, 같은 run을 두 자리가 서로 다르게 말하지 않게 한다. 유예는 홈 카드·예외 줄·칩과 같은 함수
+// (`runWaiting.isUncollected`)가 정한다. 끝난 run은 열린 턴이 아니므로 입력에
 // 없다 — 그래서 끝나면 레일은 null이다.
 // =============================================================================
 
@@ -122,7 +120,7 @@ export interface ActivityRail {
 }
 
 export interface ActivityRailOptions {
-  /** 못 가져감 유예. 생략하면 `UNCOLLECTED_GRACE_MS`. */
+  /** 「아직 받지 않았어요」 유예. 생략하면 `UNCOLLECTED_AFTER_MS`(5분). */
   graceMs?: number;
   /** 에이전트별 확인 박자(#4621). 모르면 undefined. */
   routineFor?: (memberId: string) => RoutineHint | undefined;
@@ -229,9 +227,9 @@ export function activityRail(
 ): ActivityRail | null {
   const entries: { agent: RailAgent; order: number }[] = [];
   for (const turn of turns) {
-    // 못 가져감 유예를 넘은 run은 예외 줄이 말한다. 레일은 「일이 진행 중」만 말한다.
+    // 「아직 받지 않았어요」 유예를 넘은 run은 예외 줄이 말한다. 레일은 「일이 진행 중」만 말한다.
     if (
-      isUncollectedPastGrace(
+      isUncollected(
         turn.server,
         nowMs,
         options.routineFor?.(turn.memberId),

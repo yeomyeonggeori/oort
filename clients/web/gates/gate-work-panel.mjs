@@ -538,8 +538,10 @@ async function panelText(page) {
 }
 
 async function openPanelFromComposer(page) {
+  // #4619: 입력창 레일의 줄은 팝오버를 연다(일하는 에이전트 목록 + 「활동 보기」). 에이전트 행이 그 run의 작업 패널을 연다.
   await page.getByTestId("composer-working-open").first().waitFor();
   await page.getByTestId("composer-working-open").first().click();
+  await page.getByTestId("composer-working-agent").first().click();
   await page.getByTestId("agent-work-panel").waitFor();
 }
 

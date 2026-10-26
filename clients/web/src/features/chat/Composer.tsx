@@ -31,10 +31,8 @@ import {
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
 import { useFittedComposerPlaceholder } from "@/features/chat/placeholderFit";
-import {
-  channelHasAgent,
-  ComposerActivityRail,
-} from "@/features/agents/ActivityRail";
+import { ComposerActivityRail } from "@/features/agents/ActivityRail";
+import { isRailReserved } from "@/features/agents/railReservation";
 import { memberFor } from "@/features/workspace/useWorkspace";
 import {
   MENTION_ROUTING_ROW_CLASS,
@@ -420,7 +418,7 @@ export function Composer({
   const typingThreshold = useTypingThreshold();
   // 에이전트가 있는 채널은 입력창 위에 레일 칸을 **미리** 잡는다(#4619): 줄이 서고 사라져도 타임라인이
   // 밀리지 않으려면 칸이 먼저 있어야 한다. 칸이 폼의 윗 여백을 대신하므로 폼에 `data-rail`을 달아 `pt-0`이 되게 한다.
-  const railReserved = dmAgent !== null || channelHasAgent(directory, channelId);
+  const railReserved = isRailReserved({ dmAgent, directory, channelId });
 
   /**
    * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).

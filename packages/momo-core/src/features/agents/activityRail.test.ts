@@ -6,14 +6,14 @@ import {
   RAIL_WORD_RECEIVED,
   RAIL_WORD_WOKEN,
 } from "./activityRail";
-import { UNCOLLECTED_GRACE_MS } from "./runException";
 import { runPhaseLabel, signalFromProgress } from "./runPhase";
 import { RUN_STATUS_CLAIMED, RUN_STATUS_WORKING } from "./runStatusLine";
+import { UNCOLLECTED_AFTER_MS } from "./runWaiting";
 import type { AgentNameLookup, AgentNameParts } from "./turnCopy";
 import type { AgentWorkingSignal } from "./workingSignal";
 
 // =============================================================================
-// 입력창 레일의 모델 (#4619 A): 국면별 문구, 합치기, 끝나면 사라짐, 못 가져감 유예를 넘은 run의 퇴장,
+// 입력창 레일의 모델 (#4619 A): 국면별 문구, 합치기, 끝나면 사라짐, 「아직 받지 않았어요」 유예를 넘은 run의 퇴장,
 // 팝오버의 1분 단위 근거, 그리고 어디에도 초 단위 숫자가 없다는 것.
 // =============================================================================
 
@@ -249,12 +249,12 @@ describe("끝나면 사라진다", () => {
   });
 });
 
-describe("못 가져감 유예를 넘은 run은 레일에서 빠진다(예외 줄이 말한다)", () => {
+describe("「아직 받지 않았어요」 유예를 넘은 run은 레일에서 빠진다(예외 줄이 말한다)", () => {
   it("유예 안에서는 「받음」, 마감부터는 레일에서 빠진다(경계 ±1ms)", () => {
     const queued = turn();
-    expect(activityRail([queued], nameFor, T + UNCOLLECTED_GRACE_MS - 1)?.text).toBe("달무리봇 · 받음");
-    expect(activityRail([queued], nameFor, T + UNCOLLECTED_GRACE_MS)).toBeNull();
-    expect(activityRail([queued], nameFor, T + UNCOLLECTED_GRACE_MS + 1)).toBeNull();
+    expect(activityRail([queued], nameFor, T + UNCOLLECTED_AFTER_MS - 1)?.text).toBe("달무리봇 · 받음");
+    expect(activityRail([queued], nameFor, T + UNCOLLECTED_AFTER_MS)).toBeNull();
+    expect(activityRail([queued], nameFor, T + UNCOLLECTED_AFTER_MS + 1)).toBeNull();
   });
 
   it("다른 에이전트가 일하는 중이면 그 줄만 남는다(합치지 않는다)", () => {
@@ -270,6 +270,15 @@ describe("못 가져감 유예를 넘은 run은 레일에서 빠진다(예외 �
     const queued = turn();
     expect(activityRail([queued], nameFor, T + 10 * MIN, { routineFor })?.text).toBe("달무리봇 · 받음");
     expect(activityRail([queued], nameFor, T + 14 * MIN, { routineFor })).toBeNull();
+  });
+
+  it("예상 확인 시각이 5분보다 빠르면 그 시각이 이긴다(기본 유예를 기다리지 않는다)", () => {
+    const routineFor = () => ({ typicalMinutes: 1, expectedCheckAtMs: T + 90 * SEC });
+    const queued = turn();
+    expect(activityRail([queued], nameFor, T + 90 * SEC - 1, { routineFor })?.text).toBe("달무리봇 · 받음");
+    expect(activityRail([queued], nameFor, T + 90 * SEC, { routineFor })).toBeNull();
+    // 박자를 모르면 같은 시각에도 아직 「받음」이다.
+    expect(activityRail([queued], nameFor, T + 90 * SEC)?.text).toBe("달무리봇 · 받음");
   });
 
   it("사람이 부르지 않은 시스템 작업(환영)은 몇 시간이 지나도 레일에 남는다", () => {

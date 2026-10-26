@@ -10,12 +10,12 @@ import type { AgentRunProgress, RosterMember } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { activityRail } from "@momo/core/features/agents/activityRail";
 import { signalFromProgress } from "@momo/core/features/agents/runPhase";
+import { UNCOLLECTED_AFTER_MS } from "@momo/core/features/agents/runWaiting";
 import { TURN_STALE_SENTENCE } from "@momo/core/features/agents/turnCopy";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { adeDrawerSnapshot, resetAdeDrawer } from "@/features/ade/adeDrawerStore";
 import {
   ActivityRailView,
-  channelHasAgent,
   ComposerActivityRail,
 } from "./ActivityRail";
 import {
@@ -23,6 +23,7 @@ import {
   markAgentWorking,
   resetAgentWorking,
 } from "./agentWorkingSignal";
+import { channelHasAgent, isRailReserved } from "./railReservation";
 import { closeWorkPanel, workPanelSnapshot } from "./workLogStore";
 
 const api = vi.hoisted(() => ({ fetchApprovals: vi.fn() }));
@@ -373,11 +374,15 @@ describe("컴포저가 꽂는 레일: 신호 스토어를 읽는다", () => {
     expect(q(el, "composer-working-text")?.textContent).toContain("달무리봇 · 작업 중");
   });
 
-  it("못 가져감 유예를 넘은 대기 run은 레일에서 빠진다(예외 줄이 말한다)", () => {
+  it("「아직 받지 않았어요」 유예(5분)를 넘은 대기 run은 레일에서 빠진다(예외 줄이 말한다)", () => {
     const el = mountRail({ reserved: true });
     act(() =>
       markAgentWorking(
-        turn({ createdAtMs: Date.now() - 3 * MIN, updatedAtMs: Date.now() - 3 * MIN, queuePosition: 1 })
+        turn({
+          createdAtMs: Date.now() - UNCOLLECTED_AFTER_MS,
+          updatedAtMs: Date.now() - UNCOLLECTED_AFTER_MS,
+          queuePosition: 1,
+        })
       )
     );
     expect(q(el, "composer-working-text")).toBeNull();
@@ -405,5 +410,22 @@ describe("레일 칸을 미리 잡는 판정", () => {
     const suspended = { ...agent(A, "정지", "paused"), status: "suspended" } as RosterMember;
     expect(channelHasAgent(makeDirectory([suspended]), CH)).toBe(false);
     expect(channelHasAgent(makeDirectory([]), CH)).toBe(false);
+  });
+
+  it("예약은 에이전트가 있는 대화에서만이다(planner 결정 4): 에이전트 DM, 에이전트 멤버가 있는 채널. 사람만 있는 대화는 아니다", () => {
+    const bot = agent(A, "달무리봇", "dalmuri-bot");
+    const human = { ...agent(B, "박서연", "seoyeon"), kind: "human" } as RosterMember;
+    const reserved = (dmAgent: RosterMember | null, members: RosterMember[], channelId = CH) =>
+      isRailReserved({ dmAgent, directory: makeDirectory(members), channelId });
+    // 에이전트가 있는 대화.
+    expect(reserved(null, [bot, human])).toBe(true);
+    expect(reserved(bot, [])).toBe(true);
+    expect(reserved(bot, [human])).toBe(true);
+    // 사람만 있는 대화(DM이든 채널이든): 칸이 없다.
+    expect(reserved(null, [human])).toBe(false);
+    expect(reserved(null, [])).toBe(false);
+    // 다른 채널의 에이전트·활동 중이 아닌 에이전트는 이 대화의 에이전트가 아니다.
+    expect(reserved(null, [bot], "00000000-0000-7000-8000-0000000002ff")).toBe(false);
+    expect(reserved(null, [{ ...bot, status: "suspended" } as RosterMember, human])).toBe(false);
   });
 });

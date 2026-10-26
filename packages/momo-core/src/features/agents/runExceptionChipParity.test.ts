@@ -1,23 +1,38 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRunPhase, AgentRunProgress } from "../../lib/api";
+import { activityRail } from "./activityRail";
+import { runException, UNCLAIMED_END_REASONS } from "./runException";
+import { serverFactsOf, signalFromProgress } from "./runPhase";
+import { RUN_STATUS_WOKEN_FAILED } from "./runStatusLine";
 import {
-  runException,
-  UNCLAIMED_END_REASONS,
-  UNCOLLECTED_GRACE_MS,
-  UNCOLLECTED_HEADLINE,
-} from "./runException";
+  isUncollected,
+  queuedWaitCopy,
+  runStateWord,
+  UNCOLLECTED_AFTER_MS,
+  UNCOLLECTED_WORD,
+  type RoutineHint,
+} from "./runWaiting";
 import { CHIP_WORD_UNCOLLECTED, triggerChip } from "./triggerChip";
 
 // =============================================================================
-// 같은 행에 서는 두 표면의 낱말 (#4619). 메시지 머리의 칩(`triggerChip`)과 그 아래의 예외 줄(`runException`)은
-// 한 행에 함께 서므로, 같은 run을 서로 다른 낱말로 부르면 읽는 사람은 두 사건으로 읽는다. 두 모듈의 단위 시험은
-// 서로를 보지 않아서 한쪽 낱말만 바뀌어도 둘 다 초록이다(이 시험이 생기기 전에 실제로 그랬다: 칩 「못 가져감」 대
-// 줄 「시간 초과」). 여기서는 같은 run 하나를 두 모듈에 넣어 낱말과 존재 여부를 함께 붙든다.
+// 같은 run을 부르는 표면들의 판정과 낱말 (#4619 planner 결정 1: 유예 하나로·낱말 하나로).
 //
-// 규칙 셋:
-//   1. 예외 줄이 「못 가져감」이면 칩도 같은 낱말이다(열려 있든 서버가 그래서 끝냈든).
-//   2. 칩이 「못 가져감」이면 예외 줄이 있다(줄 없이 칩만 「못 가져감」이면 행동이 갈 곳이 없다).
+// 한 run은 한 화면에 여러 자리에서 동시에 말해진다:
+//   홈 카드·작업 패널   `queuedWaitCopy` / `runStateWord`   (#4285, 폰도 같은 함수)
+//   대화 아래 예외 줄   `runException`
+//   메시지 머리의 칩    `triggerChip`
+//   입력창 레일         `activityRail`  (유예를 넘은 run을 레일에서 뺀다)
+// 각 모듈의 단위 시험은 서로를 보지 않아서 한쪽 판정·낱말만 바뀌어도 모두 초록이다(이 시험이 생기기 전에
+// 실제로 그랬다: 줄·칩은 2분·「못 가져감」, 카드는 5분·「아직 받지 않았어요」). 여기서는 **같은 run 하나를 같은
+// 시각에** 네 자리에 넣어 판정과 낱말을 함께 붙든다. 시각·박자(없음/늦음/빠름)·phase·종료 코드를 전수로 돈다.
+//
+// 규칙:
+//   1. 예외 줄이 「아직 받지 않았어요」이면 칩도 같은 낱말이다(열려 있든 서버가 그래서 끝냈든).
+//   2. 칩이 「아직 받지 않았어요」이면 예외 줄이 있다(줄 없이 칩만 서면 행동이 갈 곳이 없다).
 //   3. 예외 줄이 「실패」이면 칩도 같은 낱말이다.
+//   4. 열린 대기 run은 같은 시각에 카드·줄·칩이 **같은 판정**을 내리고 **같은 낱말**을 쓴다.
+//   5. 같은 시각에 레일은 그 run을 정확히 그때 뺀다(줄·칩이 이어받는다).
+//   6. 깨우는 신호가 닿지 않은 줄의 칩은 아직 진행 낱말이다(경보 낱말이 아니다).
 // 가져간 뒤의 시간 초과·신호 소실은 칩이 큰 범주(「실패」)로, 줄이 구체 낱말로 말한다 — 일부러 다르고 아래에서 못 박는다.
 // =============================================================================
 
@@ -67,15 +82,34 @@ const END_REASONS: (string | undefined)[] = [
   "human_cancelled",
   "a_code_from_a_newer_server",
 ];
-const OFFSETS = [0, 10 * SEC, UNCOLLECTED_GRACE_MS - 1, UNCOLLECTED_GRACE_MS, 5 * MIN, HOUR, 17 * HOUR];
-const ROUTINES = [undefined, { typicalMinutes: 15, expectedCheckAtMs: T + 14 * MIN }] as const;
+// 기본 유예 경계, 두 박자(늦음 14분·빠름 90초) 경계 앞뒤를 모두 지나도록 잡는다.
+const OFFSETS = [
+  0,
+  10 * SEC,
+  90 * SEC - 1,
+  90 * SEC,
+  2 * MIN,
+  UNCOLLECTED_AFTER_MS - 1,
+  UNCOLLECTED_AFTER_MS,
+  14 * MIN - 1,
+  14 * MIN,
+  HOUR,
+  17 * HOUR,
+];
+const LATE: RoutineHint = { typicalMinutes: 15, expectedCheckAtMs: T + 14 * MIN };
+const SOON: RoutineHint = { typicalMinutes: 1, expectedCheckAtMs: T + 90 * SEC };
+const ROUTINES: (RoutineHint | undefined)[] = [undefined, LATE, SOON];
 
-describe("칩과 예외 줄이 같은 run을 같은 낱말로 부른다", () => {
-  const rows: {
+describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말로 부른다", () => {
+  interface Row {
     where: string;
+    run: AgentRunProgress;
+    now: number;
+    routine: RoutineHint | undefined;
     exception: ReturnType<typeof runException>;
     chip: ReturnType<typeof triggerChip>;
-  }[] = [];
+  }
+  const rows: Row[] = [];
   for (const phase of PHASES) {
     for (const endReason of END_REASONS) {
       for (const dt of OFFSETS) {
@@ -88,7 +122,12 @@ describe("칩과 예외 줄이 같은 run을 같은 낱말로 부른다", () => 
           } as Partial<AgentRunProgress>);
           const now = T + dt;
           rows.push({
-            where: `${phase}/${endReason ?? "-"}/+${dt}ms/${routine === undefined ? "no-routine" : "routine"}`,
+            where: `${phase}/${endReason ?? "-"}/+${dt}ms/${
+              routine === undefined ? "no-routine" : routine === LATE ? "late" : "soon"
+            }`,
+            run: r,
+            now,
+            routine,
             exception: runException(r, now, routine === undefined ? {} : { routine }),
             chip: triggerChip([r], nameFor, now, {
               ...(routine === undefined ? {} : { routineFor: () => routine }),
@@ -99,24 +138,24 @@ describe("칩과 예외 줄이 같은 run을 같은 낱말로 부른다", () => 
     }
   }
 
-  it("전수 반복이 비어 있지 않다(예외 줄이 선 경우·못 가져감 칩이 선 경우가 모두 많다)", () => {
+  it("전수 반복이 비어 있지 않다(예외 줄이 선 경우·아직 받지 않았어요 칩이 선 경우가 모두 많다)", () => {
     expect(rows.length).toBe(PHASES.length * END_REASONS.length * OFFSETS.length * ROUTINES.length);
     expect(rows.filter((r) => r.exception?.kind === "uncollected").length).toBeGreaterThan(20);
     expect(rows.filter((r) => r.exception?.kind === "failed").length).toBeGreaterThan(20);
     expect(rows.filter((r) => r.chip?.kind === "uncollected").length).toBeGreaterThan(20);
   });
 
-  it("1. 예외 줄이 「못 가져감」이면 칩도 같은 낱말이다", () => {
+  it("1. 예외 줄이 「아직 받지 않았어요」이면 칩도 같은 낱말이다", () => {
     for (const { where, exception, chip } of rows) {
       if (exception?.kind !== "uncollected") continue;
       expect(chip, where).not.toBeNull();
       expect(chip!.kind, where).toBe("uncollected");
       expect(chip!.word, where).toBe(exception.headline);
-      expect(chip!.word, where).toBe(UNCOLLECTED_HEADLINE);
+      expect(chip!.word, where).toBe(UNCOLLECTED_WORD);
     }
   });
 
-  it("2. 칩이 「못 가져감」이면 예외 줄이 있다 — 줄 없이 칩만 서지 않는다", () => {
+  it("2. 칩이 「아직 받지 않았어요」이면 예외 줄이 있다 — 줄 없이 칩만 서지 않는다", () => {
     for (const { where, exception, chip } of rows) {
       if (chip?.kind !== "uncollected") continue;
       expect(exception, where).not.toBeNull();
@@ -134,13 +173,82 @@ describe("칩과 예외 줄이 같은 run을 같은 낱말로 부른다", () => 
     }
   });
 
-  it("서버가 아무도 가져가지 않아 끝낸 두 코드는 열린 못 가져감과 칩·줄 모두 같은 낱말이다", () => {
+  it("4. 열린 대기 run은 같은 시각에 카드·줄·칩이 같은 판정을 내리고 같은 낱말을 쓴다(박자 없음·늦음·빠름 모두)", () => {
+    let checked = 0;
+    let uncollected = 0;
+    for (const { where, run: r, now, routine, exception, chip } of rows) {
+      if (r.phase !== "queued") continue;
+      const facts = serverFactsOf(r);
+      const card = queuedWaitCopy({ facts, nowMs: now, ...(routine !== undefined ? { routine } : {}) });
+      expect(card, where).not.toBeNull();
+      checked += 1;
+      // 판정: 카드가 「받지 않았어요」이면 줄도 칩도 그렇다(그 반대도).
+      const cardSays = card!.uncollected;
+      expect(isUncollected(facts, now, routine), where).toBe(cardSays);
+      expect(exception?.kind === "uncollected", where).toBe(cardSays);
+      expect(chip?.kind === "uncollected", where).toBe(cardSays);
+      if (cardSays) {
+        uncollected += 1;
+        // 낱말: 셋이 글자까지 같다.
+        expect(card!.word, where).toBe(UNCOLLECTED_WORD);
+        expect(exception!.headline, where).toBe(card!.word);
+        expect(chip!.word, where).toBe(card!.word);
+        expect(runStateWord(facts, now, routine), where).toBe(card!.word);
+      } else {
+        // 유예 안에서는 카드가 서버의 낱말(「대기 n번째」 따위) 그대로이고 줄은 없으며 칩은 진행 낱말이다.
+        expect(card!.word, where).not.toBe(UNCOLLECTED_WORD);
+        expect(exception, where).toBeNull();
+        expect(chip!.word, where).not.toBe(UNCOLLECTED_WORD);
+      }
+    }
+    expect(checked).toBe(OFFSETS.length * ROUTINES.length * END_REASONS.length);
+    expect(uncollected).toBeGreaterThan(20);
+  });
+
+  it("5. 레일은 그 run을 정확히 「아직 받지 않았어요」가 되는 시각에 뺀다", () => {
+    let dropped = 0;
+    let kept = 0;
+    for (const { where, run: r, now, routine } of rows) {
+      if (r.phase !== "queued" || r.endReason !== undefined) continue;
+      const signal = signalFromProgress(r);
+      expect(signal, where).not.toBeNull();
+      const rail = activityRail([signal!], nameFor, now, {
+        ...(routine !== undefined ? { routineFor: () => routine } : {}),
+      });
+      const uncollected = isUncollected(serverFactsOf(r), now, routine);
+      expect(rail === null, where).toBe(uncollected);
+      if (uncollected) dropped += 1;
+      else kept += 1;
+    }
+    expect(dropped).toBeGreaterThan(5);
+    expect(kept).toBeGreaterThan(5);
+  });
+
+  it("6. 깨우는 신호가 닿지 않은 줄의 칩은 아직 진행 낱말이다 — 경보 낱말은 유예를 넘고서야 선다", () => {
+    const r = run({});
+    const doorbell = { lastAtMs: T + SEC, failed: true, count: 2 } as const;
+    const early = T + MIN;
+    const line = runException(r, early, { doorbell });
+    expect(line).toMatchObject({ kind: "wake_failed", headline: RUN_STATUS_WOKEN_FAILED });
+    const chip = triggerChip([r], nameFor, early);
+    expect(chip?.kind).toBe("received");
+    expect(chip?.word).not.toBe(UNCOLLECTED_WORD);
+    // 유예를 넘으면 줄도 칩도 같은 「아직 받지 않았어요」가 되고, 신호 실패는 줄의 이유로 남는다.
+    const late = T + UNCOLLECTED_AFTER_MS;
+    expect(runException(r, late, { doorbell })).toMatchObject({
+      kind: "uncollected",
+      headline: UNCOLLECTED_WORD,
+    });
+    expect(triggerChip([r], nameFor, late)?.word).toBe(UNCOLLECTED_WORD);
+  });
+
+  it("서버가 아무도 가져가지 않아 끝낸 두 코드는 열린 「아직 받지 않았어요」와 칩·줄 모두 같은 낱말이다", () => {
     for (const endReason of UNCLAIMED_END_REASONS) {
       const r = run({ phase: "timed_out", status: "timed_out", endReason });
       const exception = runException(r, T + HOUR);
       const chip = triggerChip([r], nameFor, T + HOUR);
-      expect(exception?.headline, endReason).toBe(UNCOLLECTED_HEADLINE);
-      expect(chip?.word, endReason).toBe(UNCOLLECTED_HEADLINE);
+      expect(exception?.headline, endReason).toBe(UNCOLLECTED_WORD);
+      expect(chip?.word, endReason).toBe(UNCOLLECTED_WORD);
     }
   });
 

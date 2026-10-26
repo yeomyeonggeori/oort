@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRunProgress, Message } from "../../lib/api";
-import { UNCOLLECTED_GRACE_MS } from "./runException";
+import { UNCOLLECTED_AFTER_MS, UNCOLLECTED_WORD } from "./runWaiting";
 import type { AgentNameLookup, AgentNameParts } from "./turnCopy";
 import {
   answerMessageFor,
@@ -85,19 +85,19 @@ describe("run 하나 → 칩", () => {
       tone: "warn",
     },
     { name: "완료", extra: DONE, kind: "answered", word: CHIP_WORD_ANSWERED, mark: "check", tone: "ok" },
-    { name: "실패", extra: FAILED, kind: "failed", word: CHIP_WORD_FAILED, mark: "alert", tone: "danger" },
+    { name: "실패", extra: FAILED, kind: "failed", word: CHIP_WORD_FAILED, mark: "cross", tone: "danger" },
     {
       name: "소식 끊겨 끝남",
       extra: { phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" },
       kind: "failed",
       word: "실패",
-      mark: "alert",
+      mark: "cross",
       tone: "danger",
     },
     {
       name: "유예를 넘은 대기",
       extra: {},
-      now: T + UNCOLLECTED_GRACE_MS,
+      now: T + UNCOLLECTED_AFTER_MS,
       kind: "uncollected",
       word: CHIP_WORD_UNCOLLECTED,
       mark: "alert",
@@ -107,7 +107,7 @@ describe("run 하나 → 칩", () => {
       name: "아무도 가져가지 않아 끝남",
       extra: { phase: "timed_out", status: "timed_out", endReason: "unclaimed_expired" },
       kind: "uncollected",
-      word: "못 가져감",
+      word: UNCOLLECTED_WORD,
       mark: "alert",
       tone: "warn",
     },
@@ -115,7 +115,7 @@ describe("run 하나 → 칩", () => {
       name: "깨웠지만 가져가지 않아 끝남",
       extra: { phase: "timed_out", status: "timed_out", endReason: "woken_not_collected" },
       kind: "uncollected",
-      word: "못 가져감",
+      word: UNCOLLECTED_WORD,
       mark: "alert",
       tone: "warn",
     },
@@ -128,16 +128,16 @@ describe("run 하나 → 칩", () => {
     });
   }
 
-  it("유예 경계 ±1ms: 마감 1ms 전은 「받음」, 마감부터 「못 가져감」", () => {
-    expect(triggerChip([run()], nameFor, T + UNCOLLECTED_GRACE_MS - 1)?.word).toBe("받음");
-    expect(triggerChip([run()], nameFor, T + UNCOLLECTED_GRACE_MS)?.word).toBe("못 가져감");
-    expect(triggerChip([run()], nameFor, T + UNCOLLECTED_GRACE_MS + 1)?.word).toBe("못 가져감");
+  it("유예 경계 ±1ms: 마감 1ms 전은 「받음」, 마감부터 「아직 받지 않았어요」", () => {
+    expect(triggerChip([run()], nameFor, T + UNCOLLECTED_AFTER_MS - 1)?.word).toBe("받음");
+    expect(triggerChip([run()], nameFor, T + UNCOLLECTED_AFTER_MS)?.word).toBe(UNCOLLECTED_WORD);
+    expect(triggerChip([run()], nameFor, T + UNCOLLECTED_AFTER_MS + 1)?.word).toBe(UNCOLLECTED_WORD);
   });
 
   it("루틴 박자를 알면 예상 확인 시각 전에는 「받음」으로 남는다", () => {
     const routineFor = () => ({ typicalMinutes: 15, expectedCheckAtMs: T + 14 * MIN });
     expect(triggerChip([run()], nameFor, T + 10 * MIN, { routineFor })?.word).toBe("받음");
-    expect(triggerChip([run()], nameFor, T + 14 * MIN, { routineFor })?.word).toBe("못 가져감");
+    expect(triggerChip([run()], nameFor, T + 14 * MIN, { routineFor })?.word).toBe(UNCOLLECTED_WORD);
   });
 
   it("취소는 사람이 직접 한 일이라 칩이 없다", () => {
@@ -156,7 +156,7 @@ describe("한 메시지가 여러 에이전트를 불렀을 때: 가장 급한 �
   const NOW = T + 30 * SEC;
   const pick = (runs: AgentRunProgress[], now = NOW) => triggerChip(runs, nameFor, now);
 
-  it("실패 > 못 가져감 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함", () => {
+  it("실패 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함", () => {
     expect(pick([run(DONE), run(FAILED)])?.kind).toBe("failed");
     expect(pick([run(FAILED), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("failed");
     expect(pick([run(RUNNING), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("uncollected");
@@ -241,7 +241,7 @@ describe("칩이 입을 수 있는 낱말 전부(폭을 고정하는 표면이 �
       const chip = triggerChip([run(extra)], nameFor, T + 30 * SEC);
       expect(faces, JSON.stringify(extra)).toContain(`${chip!.word}|${chip!.mark}`);
     }
-    // 못 가져감도 같은 목록에 있다.
+    // 「아직 받지 않았어요」도 같은 목록에 있다.
     const stuck = triggerChip([run()], nameFor, T + 10 * MIN);
     expect(faces).toContain(`${stuck!.word}|${stuck!.mark}`);
     expect(new Set(faces).size).toBe(faces.length);

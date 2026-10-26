@@ -1,22 +1,27 @@
 import { describe, expect, it } from "vitest";
 import type { AgentRunProgress } from "../../lib/api";
 import {
-  isUncollectedPastGrace,
   nextUncollectedDeadlineMs,
-  routineWaitText,
   runException,
   runExceptionText,
   UNCLAIMED_END_REASONS,
-  UNCOLLECTED_GRACE_MS,
-  UNCOLLECTED_HEADLINE,
-  uncollectedDeadlineMs,
 } from "./runException";
+import { DOORBELL_FAILED_TEXT } from "./runLedger";
 import { serverFactsOf } from "./runPhase";
-import { UNCOLLECTED_AFTER_MS, UNCOLLECTED_WORD } from "./runWaiting";
+import { RUN_STATUS_WOKEN_FAILED } from "./runStatusLine";
+import {
+  isUncollected,
+  routineWaitText,
+  UNCOLLECTED_AFTER_MS,
+  UNCOLLECTED_WORD,
+  uncollectedDeadlineMs,
+} from "./runWaiting";
 
 // =============================================================================
-// 타임라인 예외 줄의 판정 (#4619 D). 못 가져감 유예(예상 확인 시각이 있으면 그것, 없으면 2분)의
-// 경계, 이유 문장의 순서, 예외가 아닌 상태, 초 단위 숫자가 없다는 것을 잰다.
+// 타임라인 예외 줄의 판정 (#4619 D). 「아직 받지 않았어요」 유예(기본 5분, 예상 확인 시각이 있으면 그 시각)의
+// 경계, 이유 문장의 순서, 깨우는 신호가 닿지 않은 예외, 예외가 아닌 상태, 초 단위 숫자가 없다는 것을 잰다.
+// 유예 계산 자체(`uncollectedDeadlineMs`·`isUncollected`)는 홈 카드와 같은 함수라 `runWaiting.test`가 따로 재고,
+// 여기서는 이 줄이 그 함수를 그대로 쓴다는 것을 함께 붙든다.
 // =============================================================================
 
 const T = 1_800_000_000_000;
@@ -50,87 +55,103 @@ const ENDED = {
   finishedAtMs: T + 3 * MIN + 12 * SEC,
 } as const;
 
-describe("못 가져감 유예 (#4619: 예상 확인 시각이 있으면 그것, 없으면 2분)", () => {
-  it("기본 유예는 2분이고, 홈 카드의 5분(서버 woken_grace)과 다른 값이다", () => {
-    expect(UNCOLLECTED_GRACE_MS).toBe(2 * MIN);
-    expect(UNCOLLECTED_GRACE_MS).not.toBe(UNCOLLECTED_AFTER_MS);
+describe("유예 (#4619 planner 결정 1: 기본 5분 — 홈 카드와 같은 값, 예상 확인 시각이 있으면 그 시각)", () => {
+  it("기본 유예는 홈 카드의 5분(서버 woken_grace) 하나다 — 이 줄만 다른 값을 쓰지 않는다", () => {
+    expect(UNCOLLECTED_AFTER_MS).toBe(5 * MIN);
+    const run = progress();
+    // 2분(옛 값)에는 줄이 없고, 5분 정각에 선다.
+    expect(runException(run, T + 2 * MIN)).toBeNull();
+    expect(runException(run, T + UNCOLLECTED_AFTER_MS - 1)).toBeNull();
+    expect(runException(run, T + UNCOLLECTED_AFTER_MS)?.kind).toBe("uncollected");
   });
 
   it("경계 ±1ms: 마감 1ms 전은 예외가 아니고, 마감과 그 뒤는 예외다", () => {
     const run = progress();
-    expect(runException(run, T + UNCOLLECTED_GRACE_MS - 1)).toBeNull();
-    expect(runException(run, T + UNCOLLECTED_GRACE_MS)?.kind).toBe("uncollected");
-    expect(runException(run, T + UNCOLLECTED_GRACE_MS + 1)?.kind).toBe("uncollected");
+    expect(runException(run, T + UNCOLLECTED_AFTER_MS - 1)).toBeNull();
+    expect(runException(run, T + UNCOLLECTED_AFTER_MS)?.kind).toBe("uncollected");
+    expect(runException(run, T + UNCOLLECTED_AFTER_MS + 1)?.kind).toBe("uncollected");
     // 방금 들어온 요청은 당연히 아니다.
     expect(runException(run, T)).toBeNull();
   });
 
-  it("유예는 파라미터다: 생략하면 2분, 주면 그 값", () => {
+  it("이 줄의 판정은 홈 카드의 판정(isUncollected)과 같다 — 모든 시각에서", () => {
+    const run = progress();
+    for (const dt of [0, MIN, 4 * MIN, UNCOLLECTED_AFTER_MS - 1, UNCOLLECTED_AFTER_MS, 9 * MIN, HOUR]) {
+      expect(runException(run, T + dt) !== null, `+${dt}ms`).toBe(
+        isUncollected(serverFactsOf(run), T + dt)
+      );
+    }
+  });
+
+  it("유예는 파라미터다: 생략하면 5분, 주면 그 값", () => {
     const run = progress();
     expect(runException(run, T + 60 * SEC, { graceMs: 30 * SEC })?.kind).toBe("uncollected");
     expect(runException(run, T + 60 * SEC)).toBeNull();
   });
 
-  it("예상 확인 시각이 유예보다 뒤면 그 시각까지 기다린다(경계 ±1ms)", () => {
+  it("예상 확인 시각이 있으면 그 시각이 이긴다 — 5분보다 뒤여도 그 시각까지 기다린다(경계 ±1ms)", () => {
     const expectedCheckAtMs = T + 14 * MIN;
     const routine = { typicalMinutes: 15, expectedCheckAtMs };
     const run = progress();
-    // 2분이 훨씬 지나도 예상 시각 전에는 예외가 아니다.
-    expect(runException(run, T + 5 * MIN, { routine })).toBeNull();
+    // 5분이 훨씬 지나도 예상 시각 전에는 예외가 아니다.
+    expect(runException(run, T + 6 * MIN, { routine })).toBeNull();
     expect(runException(run, expectedCheckAtMs - 1, { routine })).toBeNull();
     expect(runException(run, expectedCheckAtMs, { routine })?.kind).toBe("uncollected");
     expect(runException(run, expectedCheckAtMs + 1, { routine })?.kind).toBe("uncollected");
   });
 
-  it("예상 시각이 유예보다 빨라도 유예 전에는 올리지 않는다(지터 때문에 매번 깜박이지 않게)", () => {
-    const routine = { typicalMinutes: 15, expectedCheckAtMs: T + 30 * SEC };
+  it("예상 확인 시각이 5분보다 빠르면 그 시각이 이긴다(하한 없음 — 1분 박자 에이전트를 5분 동안 조용히 두지 않는다)", () => {
+    const routine = { typicalMinutes: 1, expectedCheckAtMs: T + 90 * SEC };
     const run = progress();
-    expect(runException(run, T + 31 * SEC, { routine })).toBeNull();
-    expect(runException(run, T + UNCOLLECTED_GRACE_MS - 1, { routine })).toBeNull();
-    expect(runException(run, T + UNCOLLECTED_GRACE_MS, { routine })?.kind).toBe("uncollected");
+    expect(runException(run, T + 90 * SEC - 1, { routine })).toBeNull();
+    expect(runException(run, T + 90 * SEC, { routine })?.kind).toBe("uncollected");
+    // 같은 run이 박자를 모르면 5분이다.
+    expect(runException(run, T + 90 * SEC)).toBeNull();
   });
 
-  it("run이 들어오기 전의 낡은 예상 시각은 쓰지 않는다 — 유예로 돌아간다", () => {
+  it("run이 들어오기 전의 낡은 예상 시각은 쓰지 않는다 — 기본 유예로 돌아간다", () => {
     const stale = { typicalMinutes: 15, expectedCheckAtMs: T - 3 * MIN };
-    expect(uncollectedDeadlineMs(T, stale)).toBe(T + UNCOLLECTED_GRACE_MS);
+    expect(uncollectedDeadlineMs(T, stale)).toBe(T + UNCOLLECTED_AFTER_MS);
     // 들어온 시각과 같은 값도 그 run이 기다린 박자가 아니다.
-    expect(uncollectedDeadlineMs(T, { expectedCheckAtMs: T })).toBe(T + UNCOLLECTED_GRACE_MS);
-    expect(runException(progress(), T + UNCOLLECTED_GRACE_MS - 1, { routine: stale })).toBeNull();
-    expect(runException(progress(), T + UNCOLLECTED_GRACE_MS, { routine: stale })?.kind).toBe(
+    expect(uncollectedDeadlineMs(T, { expectedCheckAtMs: T })).toBe(T + UNCOLLECTED_AFTER_MS);
+    // 유한하지 않은 값도 쓰지 않는다.
+    expect(uncollectedDeadlineMs(T, { expectedCheckAtMs: Number.NaN })).toBe(T + UNCOLLECTED_AFTER_MS);
+    expect(runException(progress(), T + UNCOLLECTED_AFTER_MS - 1, { routine: stale })).toBeNull();
+    expect(runException(progress(), T + UNCOLLECTED_AFTER_MS, { routine: stale })?.kind).toBe(
       "uncollected"
     );
   });
 
   it("사람이 부르지 않은 시스템 작업(환영)은 몇 시간이 지나도 예외가 아니다", () => {
     const welcome = progress({ triggerMessageId: undefined, system: true });
-    expect(isUncollectedPastGrace(serverFactsOf(welcome), T + 17 * HOUR)).toBe(false);
+    expect(isUncollected(serverFactsOf(welcome), T + 17 * HOUR)).toBe(false);
     expect(runException(welcome, T + 17 * HOUR)).toBeNull();
+    // 깨우는 신호가 닿지 않았어도 부른 사람이 없으니 줄이 없다.
+    expect(
+      runException(welcome, T + 17 * HOUR, { doorbell: { lastAtMs: T, failed: true, count: 1 } })
+    ).toBeNull();
   });
 });
 
 describe("예외 줄의 말: 낱말·이유·행동", () => {
   const LATE = T + 10 * MIN;
 
-  it("못 가져감: 낱말은 「못 가져감」, 행동 후보는 다시 깨우기·취소·설정, 열린 run이다", () => {
+  it("아직 받지 않았어요: 낱말은 홈 카드와 같은 상수, 행동 후보는 다시 깨우기·취소·설정, 열린 run이다", () => {
     const e = runException(progress(), LATE);
     expect(e).toMatchObject({
       kind: "uncollected",
       runId: RUN,
       triggerMessageId: MSG,
-      headline: UNCOLLECTED_HEADLINE,
+      headline: UNCOLLECTED_WORD,
       open: true,
       actions: ["wake", "cancel", "settings"],
     });
-    expect(UNCOLLECTED_HEADLINE).toBe("못 가져감");
-    expect(runExceptionText("달무리봇", e!)).toBe("달무리봇: 못 가져감");
+    // 낱말은 한 곳(runWaiting)에만 적혀 있다. 이 문자열은 그 상수의 값을 못 박는 단 하나의 자리다.
+    expect(UNCOLLECTED_WORD).toBe("아직 받지 않았어요");
+    expect(runExceptionText("달무리봇", e!)).toBe("달무리봇: 아직 받지 않았어요");
   });
 
-  it("홈 카드·작업 패널의 「아직 받지 않았어요」(5분, #4285)는 다른 표면의 말이라 이 줄의 낱말이 아니다", () => {
-    expect(UNCOLLECTED_HEADLINE).not.toBe(UNCOLLECTED_WORD);
-    expect(runException(progress(), LATE)?.headline).not.toBe(UNCOLLECTED_WORD);
-  });
-
-  it("서버가 아무도 가져가지 않아 끝낸 run(timed_out + unclaimed_expired·woken_not_collected)도 같은 「못 가져감」이다", () => {
+  it("서버가 아무도 가져가지 않아 끝낸 run(timed_out + unclaimed_expired·woken_not_collected)도 같은 낱말이다", () => {
     expect([...UNCLAIMED_END_REASONS].sort()).toEqual(["unclaimed_expired", "woken_not_collected"]);
     const cases: [string, string][] = [
       ["unclaimed_expired", "아무도 가져가지 않아 끝냈어요"],
@@ -143,13 +164,13 @@ describe("예외 줄의 말: 낱말·이유·행동", () => {
       );
       expect(e, endReason).toMatchObject({
         kind: "uncollected",
-        headline: UNCOLLECTED_HEADLINE,
+        headline: UNCOLLECTED_WORD,
         reason,
         open: false,
         // 끝난 run에는 되돌릴 행동이 없다.
         actions: [],
       });
-      expect(runExceptionText("달무리봇", e!)).toBe(`달무리봇: 못 가져감 · ${reason}`);
+      expect(runExceptionText("달무리봇", e!)).toBe(`달무리봇: ${UNCOLLECTED_WORD} · ${reason}`);
     }
   });
 
@@ -177,7 +198,7 @@ describe("예외 줄의 말: 낱말·이유·행동", () => {
     });
     expect(e?.reason).toBe("다음 확인 때 가져가요(보통 15분 안)");
     expect(runExceptionText("달무리봇", e!)).toBe(
-      "달무리봇: 못 가져감 · 다음 확인 때 가져가요(보통 15분 안)"
+      `달무리봇: ${UNCOLLECTED_WORD} · 다음 확인 때 가져가요(보통 15분 안)`
     );
     expect(e?.reason).not.toContain("연결이 꺼져 있을 수 있어요");
   });
@@ -261,6 +282,75 @@ describe("예외 줄의 말: 낱말·이유·행동", () => {
   });
 });
 
+describe("깨우는 신호가 닿지 않음 — 4번째 예외 (#4619 planner 결정 5)", () => {
+  const FAILED = { lastAtMs: T + SEC, failed: true, count: 2 } as const;
+  const OK = { lastAtMs: T + SEC, failed: false, count: 1 } as const;
+
+  it("아직 아무도 가져가지 않은 요청에 원장이 신호 실패를 말하면 유예를 기다리지 않고 바로 선다", () => {
+    const e = runException(progress(), T + 5 * SEC, { doorbell: FAILED });
+    expect(e).toMatchObject({
+      kind: "wake_failed",
+      runId: RUN,
+      triggerMessageId: MSG,
+      headline: RUN_STATUS_WOKEN_FAILED,
+      open: true,
+      // 줄의 행동은 「다시 깨우기」가 앞이다. 취소·설정은 다른 예외 줄과 같다.
+      actions: ["wake", "cancel", "settings"],
+    });
+    // 폰이 이미 쓰는 낱말 그대로다(폰의 상태 줄이 같은 상수를 읽는다).
+    expect(RUN_STATUS_WOKEN_FAILED).toBe("깨우는 신호가 닿지 않음");
+    expect(runExceptionText("달무리봇", e!)).toBe("달무리봇: 깨우는 신호가 닿지 않음");
+  });
+
+  it("신호가 닿았거나(failed=false), 원장을 못 읽었거나(null·undefined) 행이 없으면 줄이 없다 — 지어내지 않는다", () => {
+    for (const doorbell of [OK, null, undefined]) {
+      expect(runException(progress(), T + 5 * SEC, { doorbell }), String(doorbell)).toBeNull();
+    }
+  });
+
+  it("가져간 뒤에는 서지 않는다 — 에이전트가 일을 잡았으니 신호 실패는 이 run의 경보가 아니다", () => {
+    for (const extra of [
+      { phase: "claimed", leaseState: "live", claimedAtMs: T } as const,
+      { phase: "running", status: "running", leaseState: "live", startedAtMs: T } as const,
+      { phase: "awaiting_approval", status: "awaiting_approval" } as const,
+      { phase: "succeeded", status: "succeeded", finishedAtMs: T + MIN } as const,
+    ]) {
+      expect(
+        runException(progress(extra), T + 10 * SEC, { doorbell: FAILED }),
+        extra.phase
+      ).toBeNull();
+    }
+  });
+
+  it("유예를 넘으면 같은 run은 「아직 받지 않았어요」가 되고, 신호 실패는 이유 문장으로 남는다", () => {
+    const e = runException(progress(), T + UNCOLLECTED_AFTER_MS, { doorbell: FAILED });
+    expect(e).toMatchObject({
+      kind: "uncollected",
+      headline: UNCOLLECTED_WORD,
+      reason: DOORBELL_FAILED_TEXT,
+    });
+    // 루틴 박자를 알면 그 말이 앞서고(실시간이 아닌 에이전트에게 「연결 의심」은 사실이 아니다), 신호 실패보다 앞선다.
+    const routine = { typicalMinutes: 15, expectedCheckAtMs: T + 6 * MIN };
+    const routed = runException(progress(), T + 6 * MIN, { doorbell: FAILED, routine });
+    expect(routed?.reason).toBe(routineWaitText(routine));
+  });
+
+  it("신호 실패 줄의 이유: 박자를 알면 그 말, 아니면 서버 판정에 근거가 있을 때만 연결 의심, 없으면 없다", () => {
+    const routine = { typicalMinutes: 15, expectedCheckAtMs: T + 14 * MIN };
+    expect(
+      runException(progress(), T + MIN, { doorbell: FAILED, routine })?.reason
+    ).toBe("다음 확인 때 가져가요(보통 15분 안)");
+    expect(
+      runException(progress(), T + MIN, { doorbell: FAILED, liveness: { state: "woken_not_collected" } })
+        ?.reason
+    ).toBe("연결이 꺼져 있을 수 있어요");
+    expect(
+      runException(progress(), T + MIN, { doorbell: FAILED, liveness: { state: "responsive" } })
+        ?.reason
+    ).toBeUndefined();
+  });
+});
+
 describe("초 단위 숫자가 없다", () => {
   it("어떤 경과에서도 예외 줄의 글자에 「n초」가 없다", () => {
     const rows: Partial<AgentRunProgress>[] = [
@@ -275,6 +365,8 @@ describe("초 단위 숫자가 없다", () => {
         const e = runException(progress(extra), T + dt, {
           routine: { typicalMinutes: 15 },
           liveness: { state: "unresponsive" },
+          // 깨우는 신호가 닿지 않은 줄(`wake_failed`)과 그 이유 문장도 초 단위가 없다.
+          doorbell: { lastAtMs: T, failed: true, count: 3 },
         });
         if (e === null) continue;
         seen += 1;
@@ -293,14 +385,14 @@ describe("다시 그릴 시각", () => {
     const first = progress({ id: "r1", createdAtMs: T });
     const later = progress({ id: "r2", createdAtMs: T + 30 * SEC });
     expect(nextUncollectedDeadlineMs([later, first], T + 10 * SEC)).toBe(
-      T + UNCOLLECTED_GRACE_MS
+      T + UNCOLLECTED_AFTER_MS
     );
     // 첫 번째의 마감이 지났으면 다음 것의 마감이다.
-    expect(nextUncollectedDeadlineMs([first, later], T + UNCOLLECTED_GRACE_MS)).toBe(
-      T + 30 * SEC + UNCOLLECTED_GRACE_MS
+    expect(nextUncollectedDeadlineMs([first, later], T + UNCOLLECTED_AFTER_MS)).toBe(
+      T + 30 * SEC + UNCOLLECTED_AFTER_MS
     );
     // 마감 시각 그 자체는 이미 예외다: 다시 그릴 시각이 아니다.
-    expect(nextUncollectedDeadlineMs([first], T + UNCOLLECTED_GRACE_MS)).toBeNull();
+    expect(nextUncollectedDeadlineMs([first], T + UNCOLLECTED_AFTER_MS)).toBeNull();
     expect(
       nextUncollectedDeadlineMs(
         [
@@ -314,9 +406,11 @@ describe("다시 그릴 시각", () => {
     expect(nextUncollectedDeadlineMs([], T)).toBeNull();
   });
 
-  it("루틴 박자가 마감을 늦추면 그 시각이다", () => {
-    const routineFor = () => ({ expectedCheckAtMs: T + 14 * MIN });
-    expect(nextUncollectedDeadlineMs([progress()], T + 3 * MIN, routineFor)).toBe(T + 14 * MIN);
+  it("루틴 박자가 마감을 정하면 그 시각이다(늦춰도, 앞당겨도)", () => {
+    const later = () => ({ expectedCheckAtMs: T + 14 * MIN });
+    expect(nextUncollectedDeadlineMs([progress()], T + 3 * MIN, later)).toBe(T + 14 * MIN);
+    const sooner = () => ({ expectedCheckAtMs: T + 90 * SEC });
+    expect(nextUncollectedDeadlineMs([progress()], T + 10 * SEC, sooner)).toBe(T + 90 * SEC);
   });
 });
 

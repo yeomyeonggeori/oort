@@ -173,7 +173,8 @@ async function scene(browser, origin, scheme) {
     await page.waitForFunction(() => window.__socket !== undefined, null, { timeout: 15_000 });
     await page.evaluate(([channel, runId]) => window.__push(channel, { type: "agent.run.event", v: 1, ts: Date.now(), payload: { run_id: runId, channel_id: channel.split(".")[1].toLowerCase(), kind: "stage" } }),
       [`ch:ws${workspaceId.toUpperCase()}.${CH.toUpperCase()}`, RUN_C]);
-    await page.getByTestId("composer-working").waitFor({ timeout: 10_000 });
+    // #4619: `composer-working`은 예약된 칸이다(줄이 없어도 선다). 줄이 섰는지는 줄의 글이 말한다.
+    await page.getByTestId("composer-working-text").waitFor({ timeout: 10_000 });
     await page.waitForTimeout(400);
     const rv = await css(page.getByTestId("responding-avatar"));
     check(scheme, "5 「답하는 중」 얼굴: 1px 테두리", rv.bw === "1px", rv);

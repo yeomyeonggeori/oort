@@ -9,9 +9,10 @@ import type { AgentRunProgress, Message, RosterMember } from "@momo/core/lib/api
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
+import { UNCOLLECTED_WORD } from "@momo/core/features/agents/runWaiting";
 import { MessageRow } from "./MessageRow";
 
-const api = vi.hoisted(() => ({ fetchAgentLiveness: vi.fn() }));
+const api = vi.hoisted(() => ({ fetchAgentLiveness: vi.fn(), fetchAgentRunEvents: vi.fn() }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return { ...actual, ...api };
@@ -70,6 +71,8 @@ beforeEach(() => {
   }));
   api.fetchAgentLiveness.mockReset();
   api.fetchAgentLiveness.mockRejectedValue(new Error("no liveness in this test"));
+  api.fetchAgentRunEvents.mockReset();
+  api.fetchAgentRunEvents.mockResolvedValue({ runId: "0199aa11-2222-7000-8000-0000000000b1", events: [] });
 });
 afterEach(() => {
   if (mountedRoot) {
@@ -192,9 +195,17 @@ describe("머리 줄의 칩 (B)", () => {
     expect(time!.compareDocumentPosition(chip!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
-  it("헤더가 없는 이어지는 행: 칩이 없다(행 높이를 바꾸는 자리를 새로 내지 않는다). 예외 줄은 그대로 선다", () => {
+  it("헤더가 없는 이어지는 행: 머리 줄 칩 대신 시각이 서는 거터 칸에 아이콘 칩이 선다(#4619 planner 결정 2). 예외 줄은 그대로 선다", () => {
     const el = mount({ startsGroup: false, runStatus: [run()] });
-    expect(q(el, "trigger-chip")).toBeNull();
+    const chip = q(el, "trigger-chip");
+    expect(chip).not.toBeNull();
+    expect(chip?.getAttribute("data-variant")).toBe("mark");
+    expect(chip?.getAttribute("data-kind")).toBe("working");
+    // 칩은 거터 칸 안에, 그 행의 시각(hover로 서는 시계) 곁에 있다. 머리 줄도 낱말 칩도 없다.
+    const time = q(el, "row-time");
+    expect(time?.hasAttribute("data-row-clock")).toBe(true);
+    expect(chip?.closest("[data-row-chip]")?.parentElement).toBe(time?.parentElement);
+    expect(q(el, "trigger-chip-word")).toBeNull();
     // 평소의 진행에는 문장 행도 없다(칩·레일이 말한다).
     expect(q(el, "message-run-status-slot")?.childElementCount ?? 0).toBe(0);
     act(() => mountedRoot?.unmount());
@@ -204,8 +215,31 @@ describe("머리 줄의 칩 (B)", () => {
       startsGroup: false,
       runStatus: [run({ status: "failed", phase: "failed", endReason: "agent_error", finishedAtMs: T0 - 1_000 })],
     });
-    expect(q(failed, "trigger-chip")).toBeNull();
+    expect(q(failed, "trigger-chip")?.getAttribute("data-kind")).toBe("failed");
+    expect(q(failed, "trigger-chip")?.getAttribute("data-variant")).toBe("mark");
     expect(q(failed, "run-exception")?.getAttribute("data-kind")).toBe("failed");
+  });
+
+  it("머리 줄이 있는 행에는 거터 칩이 없다(아바타가 거터에 있다): 칩은 머리 줄에 하나뿐이다", () => {
+    const el = mount({ startsGroup: true, runStatus: [run()] });
+    expect(el.querySelectorAll('[data-testid="trigger-chip"]')).toHaveLength(1);
+    expect(el.querySelector("[data-row-chip]")).toBeNull();
+  });
+
+  it("칩이 서는 머리 줄은 줄바꿈이 없고(@container) 시각은 줄지 않는다 — 칩이 없는 줄은 그대로 flex-wrap이다", () => {
+    const withChip = mount({ startsGroup: true, runStatus: [run()] });
+    const head = q(withChip, "row-time")?.parentElement;
+    expect(head?.className).toContain("@container");
+    expect(head?.className).not.toContain("flex-wrap");
+    expect(q(withChip, "row-time")?.className).toContain("shrink-0");
+    expect(q(withChip, "row-time")?.className).toContain("whitespace-nowrap");
+    act(() => mountedRoot?.unmount());
+    host?.remove();
+    const without = mount({ startsGroup: true });
+    const plainHead = q(without, "row-time")?.parentElement;
+    expect(plainHead?.className).toContain("flex-wrap");
+    expect(plainHead?.className).not.toContain("@container");
+    expect(q(without, "row-time")?.className).not.toContain("shrink-0");
   });
 
   it("run을 주지 않은 행(남의 메시지·스레드 패널)과 run이 없는 행에는 칩도 칸도 없다", () => {
@@ -280,7 +314,7 @@ describe("스레드 요약 줄의 「작업 중」 칩 (E)", () => {
 });
 
 describe("한 행의 칩과 예외 줄은 같은 낱말이다 (#4619)", () => {
-  it("유예를 넘어 아무도 가져가지 않은 요청: 칩도 줄도 「못 가져감」", () => {
+  it("유예를 넘어 아무도 가져가지 않은 요청: 칩도 줄도 「아직 받지 않았어요」", () => {
     const el = mount({
       startsGroup: true,
       runStatus: [
@@ -294,9 +328,9 @@ describe("한 행의 칩과 예외 줄은 같은 낱말이다 (#4619)", () => {
         }),
       ],
     });
-    expect(q(el, "trigger-chip-word")?.textContent).toBe("못 가져감");
+    expect(q(el, "trigger-chip-word")?.textContent).toBe(UNCOLLECTED_WORD);
     expect(q(el, "run-exception")?.getAttribute("data-kind")).toBe("uncollected");
-    expect(q(el, "run-exception-text")?.textContent).toBe("달무리봇: 못 가져감");
+    expect(q(el, "run-exception-text")?.textContent).toBe(`달무리봇: ${UNCOLLECTED_WORD}`);
   });
 
   it("서버가 아무도 가져가지 않아 끝낸 요청(timed_out + woken_not_collected)도 같다 — 시간 초과가 아니다", () => {
@@ -312,9 +346,9 @@ describe("한 행의 칩과 예외 줄은 같은 낱말이다 (#4619)", () => {
         }),
       ],
     });
-    expect(q(el, "trigger-chip-word")?.textContent).toBe("못 가져감");
+    expect(q(el, "trigger-chip-word")?.textContent).toBe(UNCOLLECTED_WORD);
     expect(q(el, "run-exception-text")?.textContent).toBe(
-      "달무리봇: 못 가져감 · 깨웠지만 가져가지 않아 끝냈어요"
+      `달무리봇: ${UNCOLLECTED_WORD} · 깨웠지만 가져가지 않아 끝냈어요`
     );
     expect(q(el, "run-exception-text")?.textContent).not.toContain("시간 초과");
     // 끝난 run에는 되돌릴 행동이 없다.

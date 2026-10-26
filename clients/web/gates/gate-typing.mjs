@@ -1088,7 +1088,9 @@ async function exercise(browser) {
   await publishAgentTurn(page, "streaming", "running");
   await publishTyping(page, { memberId: dohyunId, ttlMs: 8_000 });
   await typingLine(page).waitFor({ timeout: 5_000 });
-  await page.getByTestId("composer-working").waitFor({ timeout: 5_000 });
+  // #4619: `composer-working`은 이제 **예약된 칸**이다(에이전트가 있는 채널이면 비어 있어도 서 있다). 줄이 섰는지는 칸이 아니라
+  // 줄의 글(`composer-working-text`)이 말한다 — 칸만 기다리면 줄이 서기 전의 빈 칸을 읽는다.
+  await page.getByTestId("composer-working-text").waitFor({ timeout: 5_000 });
 
   const typingText = (await visibleTypingText(page)) ?? "";
   const workingText =

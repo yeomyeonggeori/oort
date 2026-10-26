@@ -12,7 +12,8 @@ import {
   type RosterMember,
 } from "@momo/core/lib/api";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
-import { UNCOLLECTED_GRACE_MS } from "@momo/core/features/agents/runException";
+import { UNCOLLECTED_AFTER_MS, UNCOLLECTED_WORD } from "@momo/core/features/agents/runWaiting";
+import { RUN_STATUS_WOKEN_FAILED } from "@momo/core/features/agents/runStatusLine";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenAgentProfileContext } from "@/features/routing/useAgentProfile";
 import { MessageRunStatus } from "./MessageRunStatus";
@@ -20,6 +21,7 @@ import { closeWorkPanel, workPanelSnapshot } from "./workLogStore";
 
 const api = vi.hoisted(() => ({
   fetchAgentLiveness: vi.fn(),
+  fetchAgentRunEvents: vi.fn(),
   cancelAgentRun: vi.fn(),
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -45,8 +47,8 @@ vi.mock("./WakeAgentButton", async () => {
 
 // =============================================================================
 // 보낸 메시지 아래 **예외 줄** (#4619 D). 평소의 진행은 줄을 세우지 않는다(레일과 칩이 말한다). 줄이 서는 것은
-// 못 가져감(유예 뒤)·실패·시간 초과뿐이고, 행동은 기존 것(다시 깨우기·취소·에이전트 설정)이며, 줄은 가만히 있다가
-// 유예 마감에 **한 번만** 다시 그려진다.
+// 아직 받지 않았어요(유예 뒤)·깨우는 신호가 닿지 않음·실패·시간 초과뿐이고, 행동은 기존 것(다시 깨우기·취소·
+// 에이전트 설정)이며, 줄은 가만히 있다가 유예 마감에 **한 번만** 다시 그려진다.
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -146,8 +148,11 @@ beforeAll(() => {
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   api.fetchAgentLiveness.mockReset();
+  api.fetchAgentRunEvents.mockReset();
   api.cancelAgentRun.mockReset();
   api.fetchAgentLiveness.mockRejectedValue(new ApiError(404, "not found"));
+  // 원장(깨우는 신호 행): 기본은 행이 없다. 깨우는 신호가 닿지 않은 경우는 시험이 따로 채운다.
+  api.fetchAgentRunEvents.mockResolvedValue({ runId: RUN, events: [] });
   nudge.mockReset();
   closeWorkPanel();
 });
@@ -192,7 +197,7 @@ describe("예외 줄이 서는 때", () => {
     expect(api.fetchAgentLiveness).not.toHaveBeenCalled();
   });
 
-  it("못 가져감(유예 뒤): 낱말, 서버 판정에 근거가 있을 때만 이유, 행동 셋", async () => {
+  it("아직 받지 않았어요(유예 뒤): 낱말, 서버 판정에 근거가 있을 때만 이유, 행동 셋", async () => {
     api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
     const now = Date.now();
     mount([run(now)], { openProfile: () => undefined });
@@ -201,7 +206,7 @@ describe("예외 줄이 서는 때", () => {
     const line = q("run-exception");
     expect(line?.getAttribute("data-kind")).toBe("uncollected");
     expect(q("run-exception-text")?.textContent).toBe(
-      "달무리봇: 못 가져감 · 연결이 꺼져 있을 수 있어요"
+      `달무리봇: ${UNCOLLECTED_WORD} · 연결이 꺼져 있을 수 있어요`
     );
     // 행동: 다시 깨우기(생존 판정이 있을 때), 취소(StopRunControl), 에이전트 설정 열기.
     expect(q("wake-stub")?.getAttribute("data-state")).toBe("woken_not_collected");
@@ -214,7 +219,7 @@ describe("예외 줄이 서는 때", () => {
   it("생존 판정이 없으면(호스티드 아님) 이유도 다시 깨우기도 없다 — 지어내지 않는다", async () => {
     mount([run(Date.now())]);
     await settle();
-    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 못 가져감");
+    expect(q("run-exception-text")?.textContent).toBe(`달무리봇: ${UNCOLLECTED_WORD}`);
     expect(q("wake-stub")).toBeNull();
     // 취소는 생존 판정과 무관하다(요청이 열려 있으면 취소할 수 있다).
     expect(q("agent-work-panel-stop-arm")).not.toBeNull();
@@ -224,7 +229,7 @@ describe("예외 줄이 서는 때", () => {
     api.fetchAgentLiveness.mockResolvedValue(liveness("work_waiting"));
     mount([run(Date.now())]);
     await settle();
-    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 못 가져감");
+    expect(q("run-exception-text")?.textContent).toBe(`달무리봇: ${UNCOLLECTED_WORD}`);
   });
 
   it("실패·시간 초과: 낱말과 서버가 쓴 이유, 행동 없음(되돌릴 것이 없다), 색이 다르다", async () => {
@@ -267,6 +272,94 @@ describe("예외 줄이 서는 때", () => {
   });
 });
 
+describe("깨우는 신호가 닿지 않음 — 4번째 예외 (#4619 planner 결정 5)", () => {
+  const rung = (code: string, createdAtMs: number) => ({
+    runId: RUN,
+    events: [
+      { ordinal: 1, kind: "queued" as const, createdAtMs: createdAtMs - SEC },
+      { ordinal: 2, kind: "doorbell_rung" as const, code, createdAtMs },
+    ],
+  });
+
+  it("아직 아무도 가져가지 않은 요청에 신호가 닿지 않았으면 유예를 기다리지 않고 줄이 선다(낱말은 폰과 같은 것)", async () => {
+    const now = Date.now();
+    api.fetchAgentRunEvents.mockResolvedValue(rung("leading_failed", now - 10 * SEC));
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(now, { createdAtMs: now - 20 * SEC, updatedAtMs: now - 20 * SEC })], {
+      openProfile: () => undefined,
+    });
+    // 원장을 읽은 뒤에야 줄이 서고(첫 번째 정착), 그 줄의 에이전트 생존 판정을 읽는다(두 번째 정착).
+    await settle();
+    await settle();
+    expect(lines()).toHaveLength(1);
+    expect(q("run-exception")?.getAttribute("data-kind")).toBe("wake_failed");
+    expect(q("run-exception-text")?.textContent).toBe(
+      `달무리봇: ${RUN_STATUS_WOKEN_FAILED} · 연결이 꺼져 있을 수 있어요`
+    );
+    // 행동: 다시 깨우기(생존 판정이 있을 때)·취소·설정.
+    expect(q("wake-stub")?.getAttribute("data-state")).toBe("woken_not_collected");
+    expect(q("agent-work-panel-stop-arm")?.textContent).toBe("취소");
+    expect(q("run-exception-settings")).not.toBeNull();
+    // 원장은 작업 패널과 같은 캐시 키로 읽는다(`?include=doorbell`).
+    expect(api.fetchAgentRunEvents).toHaveBeenCalledWith(WS, RUN.toLowerCase(), { includeDoorbell: true });
+  });
+
+  it("생존 판정이 없어도(호스티드 아님) 줄은 서고, 이유와 다시 깨우기만 빠진다 — 지어내지 않는다", async () => {
+    const now = Date.now();
+    api.fetchAgentRunEvents.mockResolvedValue(rung("trailing_failed", now - 5 * SEC));
+    mount([run(now, { createdAtMs: now - 30 * SEC, updatedAtMs: now - 30 * SEC })]);
+    await settle();
+    expect(q("run-exception-text")?.textContent).toBe(`달무리봇: ${RUN_STATUS_WOKEN_FAILED}`);
+    expect(q("wake-stub")).toBeNull();
+    expect(q("agent-work-panel-stop-arm")).not.toBeNull();
+  });
+
+  it("신호가 닿았으면(ok) 줄이 없고 서버의 생존 판정도 읽지 않는다", async () => {
+    const now = Date.now();
+    api.fetchAgentRunEvents.mockResolvedValue(rung("leading_ok", now - 10 * SEC));
+    mount([run(now, { createdAtMs: now - 20 * SEC, updatedAtMs: now - 20 * SEC })]);
+    await settle();
+    expect(lines()).toHaveLength(0);
+    expect(api.fetchAgentLiveness).not.toHaveBeenCalled();
+  });
+
+  it("원장을 못 읽으면 줄을 지어내지 않는다", async () => {
+    const now = Date.now();
+    api.fetchAgentRunEvents.mockRejectedValue(new ApiError(404, "not found"));
+    mount([run(now, { createdAtMs: now - 20 * SEC, updatedAtMs: now - 20 * SEC })]);
+    await settle();
+    expect(lines()).toHaveLength(0);
+  });
+
+  it("가져간 run은 신호가 닿지 않았어도 줄이 없고 원장도 읽지 않는다(에이전트가 일을 잡았다)", async () => {
+    const now = Date.now();
+    api.fetchAgentRunEvents.mockResolvedValue(rung("leading_failed", now - 10 * SEC));
+    mount([run(now, { phase: "claimed", leaseState: "live", claimedAtMs: now - 5 * SEC })]);
+    await settle();
+    expect(lines()).toHaveLength(0);
+    expect(api.fetchAgentRunEvents).not.toHaveBeenCalled();
+  });
+
+  it("유예를 넘으면 같은 run은 「아직 받지 않았어요」가 되고 신호 실패는 이유로 남는다", async () => {
+    const now = Date.now();
+    api.fetchAgentRunEvents.mockResolvedValue(rung("leading_failed", now - 9 * MIN));
+    mount([run(now)]);
+    await settle();
+    expect(q("run-exception")?.getAttribute("data-kind")).toBe("uncollected");
+    expect(q("run-exception-text")?.textContent).toBe(
+      `달무리봇: ${UNCOLLECTED_WORD} · 깨우는 신호가 닿지 않았어요`
+    );
+  });
+
+  it("끝난 run(실패·시간 초과)은 원장을 읽지 않는다 — 줄에 필요한 사실은 진행 읽기에 다 있다", async () => {
+    const now = Date.now();
+    mount([run(now, { phase: "failed", status: "failed", endReason: "agent_error", finishedAtMs: now - SEC })]);
+    await settle();
+    expect(lines()).toHaveLength(1);
+    expect(api.fetchAgentRunEvents).not.toHaveBeenCalled();
+  });
+});
+
 describe("유예 마감에 한 번 다시 그린다", () => {
   // 시계가 필요한 시험: `Date`도 가짜로 돌려 타이머와 함께 흐르게 한다.
   beforeEach(() => {
@@ -277,7 +370,7 @@ describe("유예 마감에 한 번 다시 그린다", () => {
   it("마감 전에는 줄이 없고, 마감이 지난 뒤에 선다 — 매초 도는 시계 없이", async () => {
     const now = Date.now();
     // 마감까지 5초 남은 대기 run.
-    mount([run(now, { createdAtMs: now - (UNCOLLECTED_GRACE_MS - 5 * SEC) })]);
+    mount([run(now, { createdAtMs: now - (UNCOLLECTED_AFTER_MS - 5 * SEC) })]);
     await settle(1);
     expect(lines()).toHaveLength(0);
     await settle(4 * SEC);
@@ -289,7 +382,7 @@ describe("유예 마감에 한 번 다시 그린다", () => {
 
   it("가져가면(마감 전에 run이 바뀌면) 줄은 끝내 서지 않는다", async () => {
     const now = Date.now();
-    const waiting = run(now, { createdAtMs: now - (UNCOLLECTED_GRACE_MS - 5 * SEC) });
+    const waiting = run(now, { createdAtMs: now - (UNCOLLECTED_AFTER_MS - 5 * SEC) });
     mount([waiting]);
     await settle(1);
     act(() => root?.unmount());
@@ -312,7 +405,7 @@ describe("행동은 기존 것이다", () => {
       origin: "message",
     });
     expect(q("run-exception-open")?.getAttribute("aria-label")).toBe(
-      "달무리봇: 못 가져감. 진행 과정 열기"
+      `달무리봇: ${UNCOLLECTED_WORD}. 진행 과정 열기`
     );
   });
 

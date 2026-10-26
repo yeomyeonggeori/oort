@@ -27,9 +27,11 @@ import {
   isUncollected,
   isUntakenHumanRun,
   queuedWaitCopy,
+  routineWaitText,
   runStateWord,
   UNCOLLECTED_AFTER_MS,
   UNCOLLECTED_WORD,
+  uncollectedDeadlineMs,
   uncollectedReason,
   waitingLead,
 } from "./runWaiting";
@@ -115,6 +117,63 @@ describe("사람이 부른 run이 가져가는 이 없이 N분을 넘었는가",
     expect(isUncollected(undefined, NOW)).toBe(false);
     expect(isUncollected(null, NOW)).toBe(false);
     expect(queuedWaitCopy({ facts: undefined, nowMs: NOW })).toBeNull();
+  });
+});
+
+describe("마감은 한 함수가 정한다 — 기본 5분, 예상 확인 시각이 있으면 그 시각 (#4619 planner 결정 1)", () => {
+  const Q = NOW - 10 * MIN;
+
+  it("박자를 모르면 들어온 시각 + 5분이다", () => {
+    expect(uncollectedDeadlineMs(Q)).toBe(Q + UNCOLLECTED_AFTER_MS);
+    expect(uncollectedDeadlineMs(Q, undefined)).toBe(Q + UNCOLLECTED_AFTER_MS);
+    expect(uncollectedDeadlineMs(Q, {})).toBe(Q + UNCOLLECTED_AFTER_MS);
+  });
+
+  it("유예를 따로 주면 그 값이다(시험·특수 표면용)", () => {
+    expect(uncollectedDeadlineMs(Q, undefined, 30_000)).toBe(Q + 30_000);
+  });
+
+  it("예상 확인 시각이 있으면 5분보다 뒤든 앞이든 그 시각이 이긴다", () => {
+    expect(uncollectedDeadlineMs(Q, { expectedCheckAtMs: Q + 14 * MIN })).toBe(Q + 14 * MIN);
+    expect(uncollectedDeadlineMs(Q, { expectedCheckAtMs: Q + 90_000 })).toBe(Q + 90_000);
+  });
+
+  it("들어온 시각 이전·같은 값·유한하지 않은 값은 낡은 값이라 기본 유예로 돌아간다", () => {
+    for (const expectedCheckAtMs of [Q - 1, Q, Q - 5 * MIN, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(uncollectedDeadlineMs(Q, { expectedCheckAtMs }), String(expectedCheckAtMs)).toBe(
+        Q + UNCOLLECTED_AFTER_MS
+      );
+    }
+  });
+
+  it("isUncollected는 그 마감을 그대로 쓴다(경계 ±1ms, 박자 있음·없음)", () => {
+    const f = facts({ queuedAtMs: Q });
+    const routine = { expectedCheckAtMs: Q + 14 * MIN };
+    expect(isUncollected(f, Q + UNCOLLECTED_AFTER_MS - 1)).toBe(false);
+    expect(isUncollected(f, Q + UNCOLLECTED_AFTER_MS)).toBe(true);
+    // 박자가 5분보다 뒤면 5분이 지나도 아니고, 예상 시각부터 그렇다.
+    expect(isUncollected(f, Q + UNCOLLECTED_AFTER_MS, routine)).toBe(false);
+    expect(isUncollected(f, Q + 14 * MIN - 1, routine)).toBe(false);
+    expect(isUncollected(f, Q + 14 * MIN, routine)).toBe(true);
+  });
+
+  it("카드의 낱말과 이유도 박자를 따른다: 마감 전엔 서버의 낱말, 마감부터 같은 낱말, 이유는 「다음 확인 때 가져가요」", () => {
+    const f = facts({ queuePosition: 1, queuedAtMs: Q });
+    const routine = { typicalMinutes: 15, expectedCheckAtMs: Q + 14 * MIN };
+    const before = queuedWaitCopy({ facts: f, nowMs: Q + 13 * MIN, routine });
+    expect(before?.uncollected).toBe(false);
+    expect(before?.word).toBe("대기 1번째");
+    expect(before?.reason).toBeUndefined();
+    const after = queuedWaitCopy({ facts: f, nowMs: Q + 14 * MIN, routine, liveness: liveness("unresponsive") });
+    expect(after?.uncollected).toBe(true);
+    expect(after?.word).toBe(UNCOLLECTED_WORD);
+    expect(after?.reason).toBe(routineWaitText(routine));
+    expect(runStateWord(f, Q + 14 * MIN, routine)).toBe(UNCOLLECTED_WORD);
+    expect(runStateWord(f, Q + 14 * MIN - 1, routine)).toBe("대기 1번째");
+    // 박자를 모르는 카드(오늘의 웹·폰)는 전과 같다.
+    const plain = queuedWaitCopy({ facts: f, nowMs: Q + 6 * MIN, liveness: liveness("unresponsive") });
+    expect(plain?.uncollected).toBe(true);
+    expect(plain?.reason).toBe(CONNECTION_MAYBE_OFF_SENTENCE);
   });
 });
 

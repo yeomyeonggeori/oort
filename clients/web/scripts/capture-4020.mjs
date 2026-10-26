@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 // =============================================================================
-// #4020 캡처: 메시지마다 붙던 영수증 줄을 빼고, 컴포저 위에 「답하는 중」 한 줄.
+// #4020 캡처: 메시지마다 붙던 영수증 줄을 빼고, 컴포저 위에 한 줄. (#4619로 갱신: 「그록이 답하는 중」이
+// 입력창 레일의 「그록 · 작업 중」으로 바뀌었다. 얼굴·점·동작 줄이기 규칙은 그대로이고, 줄이 사라져도 레일 칸은
+// 남는다. 실패한 run의 영수증은 메시지 아래 예외 줄이 되었고, 메시지 머리에는 상태 칩이 선다.)
 //
-//   a. 답하는 중: 에이전트가 가져가 쓰는 동안. 타임라인에는 영수증 줄이 없고(끝난 run·
-//      진행 중 run 모두), 컴포저 위 줄이 「그록이 답하는 중」 + 얼굴 + 점이다.
-//   b. 실패·막힘은 남는다: 실패한 run의 영수증은 그 메시지 아래에 그대로 선다.
-//   c. 답이 오면(run이 끝나면) 줄이 사라진다.
+//   a. 일하는 중: 에이전트가 가져가 쓰는 동안. 타임라인에는 영수증 줄이 없고(끝난 run·
+//      진행 중 run 모두), 컴포저 위 레일이 「그록 · 작업 중」 + 얼굴 + 점이다.
+//   b. 실패·막힘은 남는다: 실패한 run은 그 메시지 아래 예외 줄(`run-exception`)과 머리 칩 「실패」로 선다.
+//   c. 답이 오면(run이 끝나면) 레일의 줄이 사라진다(칸은 비어 남는다: 목록이 움직이지 않는다).
 //   d. 동작 줄이기: 점에 애니메이션이 없다(computed animation-name none). 켜지 않은
 //      판에서는 점이 움직인다(animation-name momo-responding).
 //
@@ -281,13 +283,13 @@ async function scene(browser, origin, scheme, reduced) {
     run(RUN_C, 4, { phase: "running", status: "running", leaseState: "live", createdAtMs: now - 20_000, claimedAtMs: now - 15_000, startedAtMs: now - 14_000, lastEventAtMs: now - 3_000 }),
   ];
   await serverMoves(page, sc, sc.runs, "stage");
-  await page.getByTestId("composer-working").waitFor({ timeout: 10_000 });
+  await page.getByTestId("composer-working-text").waitFor({ timeout: 10_000 });
   await page.waitForTimeout(400);
 
-  // a. 답하는 중
+  // a. 일하는 중
   const line = ((await page.getByTestId("composer-working").textContent()) ?? "").replace(/\s+/g, " ");
-  check(`${tag} 컴포저 위 줄이 「그록이 답하는 중」`, line.includes("그록이 답하는 중"), line);
-  check(`${tag} 줄이 「작업 중」·「가져감」을 말하지 않는다`, !line.includes("작업 중") && !line.includes("가져감"), line);
+  check(`${tag} 컴포저 위 레일이 「그록 · 작업 중」`, line.includes("그록 · 작업 중"), line);
+  check(`${tag} 레일에 초 단위 숫자가 없다`, !/\d+\s*초/.test(line), line);
   check(`${tag} 얼굴이 선다`, (await page.getByTestId("responding-avatar").count()) === 1);
   const dots = page.getByTestId("responding-dots");
   check(`${tag} 점 셋이 선다`, (await dots.locator("span").count()) === 3);
@@ -299,20 +301,25 @@ async function scene(browser, origin, scheme, reduced) {
     check(`${tag} 점이 움직인다(momo-responding)`, animation === "momo-responding", animation);
     check(`${tag} data-motion=full`, (await dots.getAttribute("data-motion")) === "full");
   }
-  // 타임라인: 끝난 run·진행 중 run의 영수증 줄이 없다. 실패한 run만 남는다.
-  const rows = page.getByTestId("message-run-status-row");
-  check(`${tag} 영수증 줄은 실패한 run 하나뿐`, (await rows.count()) === 1, String(await rows.count()));
+  // 타임라인: 끝난 run·진행 중 run의 영수증 줄이 없다. 실패한 run의 예외 줄만 남는다.
+  const rows = page.getByTestId("run-exception");
+  check(`${tag} 예외 줄은 실패한 run 하나뿐`, (await rows.count()) === 1, String(await rows.count()));
   const rowText = ((await rows.first().textContent()) ?? "").replace(/\s+/g, " ");
   check(`${tag} 남은 줄이 「실패」를 말한다`, rowText.includes("실패"), rowText);
   check(`${tag} 「완료」·「걸림」 영수증이 없다`, !(await page.locator("body").textContent())?.includes("걸림") || rowText.includes("걸림"));
   check(`${tag} 실패 줄은 그 글 아래에 선다(진행 중 글 아래에는 없다)`, (await page.locator('[data-run-id="' + RUN_C + '"]').count()) === 0 && (await page.locator('[data-run-id="' + RUN_A + '"]').count()) === 1);
+  // 칩: 실패·답함·작업 중이 각자의 메시지에 선다(행 높이는 칩과 무관하다). 같은 사람의 연속 메시지(「ㅎㅇ」)에는 머리 줄이
+  // 없어 아이콘 칩이 거터에 선다(`data-variant=mark`).
+  const kinds = (await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => `${e.getAttribute("data-kind")}:${e.getAttribute("data-variant") ?? "word"}`))).sort();
+  check(`${tag} 칩 셋: 실패(머리)·작업 중(머리)·답함(거터 아이콘)`, JSON.stringify(kinds) === JSON.stringify(["answered:mark", "failed:word", "working:word"]), JSON.stringify(kinds));
   await page.screenshot({ path: shot("1-responding") });
 
   // c. 답이 오면 사라진다
   sc.runs = sc.runs.map((r) => (r.id === RUN_C ? { ...r, phase: "succeeded", status: "succeeded", leaseState: "none", finishedAtMs: Date.now() } : r));
   await serverMoves(page, sc, sc.runs, "succeeded");
-  await page.waitForFunction(() => document.querySelector('[data-testid="composer-working"]') === null, null, { timeout: 5_000 }).catch(() => {});
-  check(`${tag} run이 끝나면 줄이 사라진다`, (await page.getByTestId("composer-working").count()) === 0);
+  await page.waitForFunction(() => document.querySelector('[data-testid="composer-working-text"]') === null, null, { timeout: 5_000 }).catch(() => {});
+  check(`${tag} run이 끝나면 줄이 사라진다`, (await page.getByTestId("composer-working-text").count()) === 0);
+  check(`${tag} 줄이 사라져도 레일 칸은 남는다(목록이 움직이지 않는다)`, (await page.getByTestId("composer-working").getAttribute("data-state")) === "idle");
   check(`${tag} 끝난 뒤에도 성공 영수증은 없다`, (await page.locator('[data-run-id="' + RUN_C + '"]').count()) === 0);
   await page.screenshot({ path: shot("2-after-answer") });
   await context.close();

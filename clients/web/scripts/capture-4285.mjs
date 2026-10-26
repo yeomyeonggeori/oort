@@ -11,6 +11,9 @@
 //   longname           7~9음절 한영 섞인 이름 — 상태 낱말은 한 줄로 온전하고 이름이 줄임표를 받는다(design-review r1 H3)
 //   tworuns            같은 에이전트·같은 대화의 요청이 둘 — 패널의 머리 칩과 run 목록 칩이 같은 낱말(r1 H5)
 //
+// #4619로 갱신: 대화 아래의 「활동 줄」(composer-working 꼬리·경고·이유)은 없어졌다. 아무도 가져가지 않은 요청은 입력창 레일에서 빠지고
+// 메시지 아래 **예외 줄**(run-exception)이 말한다(낱말 「아직 받지 않았어요」는 카드·패널·줄·칩이 한 상수). 작업 패널은 그 줄의 글을 눌러 연다.
+//
 // 라이트·다크 × 1440×900. 백엔드는 없다: `/v1/**`는 고정 응답이고 소켓은 구독만 받는다. 이름은 가상 인물
 // (이도현·박서연·달무리봇, 달무리 스튜디오)이다. 사이드바에는 시계가 없으므로 경과 시간은 카드가 아니라
 // 활동 줄이 말한다.
@@ -207,6 +210,8 @@ async function open(browser, origin, scheme, scene) {
 }
 
 const text = async (page, id) => ((await page.getByTestId(id).first().textContent()) ?? "").replace(/\s+/g, " ").trim();
+/** 작업 패널 안으로 좁힌다: 예외 줄의 인라인 「취소」도 같은 testid(`agent-work-panel-stop-*`)를 쓰므로 패널을 열면 둘이 함께 있다. */
+const panel = (page) => page.getByTestId("agent-work-panel");
 
 async function scenes(browser, origin, scheme) {
   const tag = `1440-${scheme}`;
@@ -217,38 +222,42 @@ async function scenes(browser, origin, scheme) {
     const { context, page } = await open(browser, origin, scheme, { waitedMs: 17 * HOUR, cancel: 200 });
     await page.getByTestId("sidebar-now-card").waitFor({ timeout: 15_000 });
     await page.getByTestId("sidebar-now-reason").waitFor({ timeout: 15_000 });
-    await page.getByTestId("composer-working").waitFor({ timeout: 15_000 });
+    await page.getByTestId("run-exception").waitFor({ timeout: 15_000 });
     await page.waitForTimeout(600);
     const card = await text(page, "sidebar-now-card");
     check(`${tag} uncollected: 카드 낱말`, card.includes("아직 받지 않았어요") && !card.includes("대기 1번째"), card);
     check(`${tag} uncollected: 장소 줄에 짧은 경고 문구`, (await text(page, "sidebar-now-line")).includes("안 가져감"), await text(page, "sidebar-now-line"));
     check(`${tag} uncollected: 이유 줄`, (await text(page, "sidebar-now-reason")) === "연결이 꺼져 있을 수 있어요");
     check(`${tag} uncollected: 카드 안에 취소가 없다(링크 안에 누르는 면을 두지 않는다)`, (await page.getByTestId("sidebar-now-card").locator("button").count()) === 0);
-    const line = await text(page, "composer-working");
-    check(`${tag} uncollected: 활동 줄 꼬리·경고·이유`, line.includes("아직 받지 않았어요") && line.includes("깨웠지만 아직 안 가져감") && line.includes("연결이 꺼져 있을 수 있어요") && line.includes("17시간째"), line);
+    // 메시지 아래 예외 줄: 같은 낱말 + 서버 판정에 근거가 있을 때만 이유. 경과(「17시간째」)는 말하지 않는다(초·분 단위 없음).
+    const line = await text(page, "run-exception-text");
+    check(`${tag} uncollected: 예외 줄 낱말·이유`, line === "달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요", line);
+    check(`${tag} uncollected: 예외 줄에 경과 숫자가 없다`, !/\d+\s*(시간|분|초)/.test(line), line);
+    check(`${tag} uncollected: 머리 칩도 같은 낱말`, (await text(page, "trigger-chip-word")) === "아직 받지 않았어요", await text(page, "trigger-chip-word"));
+    check(`${tag} uncollected: 입력창 레일에서는 빠진다(줄이 두 군데서 말하지 않는다)`, (await page.getByTestId("composer-working-text").count()) === 0);
     await page.screenshot({ path: shot("uncollected") });
 
-    // 작업 패널의 「취소」
-    await page.getByTestId("composer-working-open").click();
-    await page.getByTestId("agent-work-panel-stop-arm").waitFor({ timeout: 10_000 });
-    const arm = page.getByTestId("agent-work-panel-stop-arm");
+    // 작업 패널의 「취소」: 예외 줄의 글이 그 run의 작업 패널 입구다.
+    await page.getByTestId("run-exception-open").click();
+    await panel(page).getByTestId("agent-work-panel-stop-arm").waitFor({ timeout: 10_000 });
+    const arm = panel(page).getByTestId("agent-work-panel-stop-arm");
     check(`${tag} panel: 첫 단추는 「취소」이고 이름은 요청 취소`, ((await arm.textContent()) ?? "").trim() === "취소" && (await arm.getAttribute("aria-label")) === "요청 취소, 확인 필요");
-    check(`${tag} panel: 영역 이름도 요청 취소`, (await page.getByTestId("agent-work-panel-stop").getAttribute("aria-label")) === "요청 취소");
+    check(`${tag} panel: 영역 이름도 요청 취소`, (await panel(page).getByTestId("agent-work-panel-stop").getAttribute("aria-label")) === "요청 취소");
     check(`${tag} panel: 상태 칩도 카드·활동 줄과 같은 낱말`, (await text(page, "agent-work-panel-state")) === "아직 받지 않았어요", await text(page, "agent-work-panel-state"));
     await page.waitForTimeout(500);
     await page.screenshot({ path: shot("panel") });
 
     check(`${tag} panel: 누르기 전에는 취소 요청이 0건`, cancelRequests.length === 0);
     await arm.click();
-    await page.getByTestId("agent-work-panel-stop-confirm").waitFor({ timeout: 5_000 });
+    await panel(page).getByTestId("agent-work-panel-stop-confirm").waitFor({ timeout: 5_000 });
     check(`${tag} confirm: 첫 클릭은 묻기만 한다`, cancelRequests.length === 0);
     check(`${tag} confirm: 확인 문장`, (await text(page, "agent-work-panel-stop-confirm")).includes("취소하면 이 요청은 여기서 끝나요. 같은 일은 다시 시킬 수 있어요."));
     await page.screenshot({ path: shot("confirm") });
-    await page.getByTestId("agent-work-panel-stop-commit").click();
-    await page.getByTestId("agent-work-panel-stop-outcome").waitFor({ timeout: 10_000 });
+    await panel(page).getByTestId("agent-work-panel-stop-commit").click();
+    await panel(page).getByTestId("agent-work-panel-stop-outcome").waitFor({ timeout: 10_000 });
     check(`${tag} cancelled: 취소 요청 한 번`, cancelRequests.length === 1, String(cancelRequests.length));
     check(`${tag} cancelled: 영수증`, (await text(page, "agent-work-panel-stop-outcome")) === "달무리봇의 요청을 취소했어요.");
-    check(`${tag} cancelled: 답을 받으면 취소 단추가 사라진다`, (await page.getByTestId("agent-work-panel-stop-arm").count()) === 0 && (await page.getByTestId("agent-work-panel-stop-commit").count()) === 0);
+    check(`${tag} cancelled: 답을 받으면 취소 단추가 사라진다`, (await panel(page).getByTestId("agent-work-panel-stop-arm").count()) === 0 && (await panel(page).getByTestId("agent-work-panel-stop-commit").count()) === 0);
     await page.waitForTimeout(400);
     await page.screenshot({ path: shot("cancelled") });
     await context.close();
@@ -257,15 +266,15 @@ async function scenes(browser, origin, scheme) {
   // ---- 서버가 500으로 답한다 --------------------------------------------------------
   {
     const { context, page } = await open(browser, origin, scheme, { waitedMs: 17 * HOUR, cancel: 500 });
-    await page.getByTestId("composer-working-open").waitFor({ timeout: 15_000 });
-    await page.getByTestId("composer-working-open").click();
-    await page.getByTestId("agent-work-panel-stop-arm").waitFor({ timeout: 10_000 });
-    await page.getByTestId("agent-work-panel-stop-arm").click();
-    await page.getByTestId("agent-work-panel-stop-commit").click();
-    await page.getByTestId("agent-work-panel-stop-outcome").waitFor({ timeout: 10_000 });
+    await page.getByTestId("run-exception-open").waitFor({ timeout: 15_000 });
+    await page.getByTestId("run-exception-open").click();
+    await panel(page).getByTestId("agent-work-panel-stop-arm").waitFor({ timeout: 10_000 });
+    await panel(page).getByTestId("agent-work-panel-stop-arm").click();
+    await panel(page).getByTestId("agent-work-panel-stop-commit").click();
+    await panel(page).getByTestId("agent-work-panel-stop-outcome").waitFor({ timeout: 10_000 });
     const sentence = await text(page, "agent-work-panel-stop-outcome");
     check(`${tag} failed: 「취소하지 못했어요」이고 「중단」이 없다`, sentence === "취소하지 못했어요. 서버가 오류로 답했어요.", sentence);
-    check(`${tag} failed: 확인 줄이 남아 다시 누를 수 있다`, (await page.getByTestId("agent-work-panel-stop-commit").count()) === 1);
+    check(`${tag} failed: 확인 줄이 남아 다시 누를 수 있다`, (await panel(page).getByTestId("agent-work-panel-stop-commit").count()) === 1);
     await page.waitForTimeout(400);
     await page.screenshot({ path: shot("failed") });
     await context.close();
@@ -313,8 +322,8 @@ async function scenes(browser, origin, scheme) {
   // ---- 같은 에이전트·같은 대화의 요청이 둘: 패널의 머리 칩과 목록 칩이 같은 낱말 (design-review r1 H5) -----
   {
     const { context, page } = await open(browser, origin, scheme, { waitedMs: 17 * HOUR, cancel: 200, secondRun: true });
-    await page.getByTestId("composer-working-open").waitFor({ timeout: 15_000 });
-    await page.getByTestId("composer-working-open").click();
+    await page.getByTestId("run-exception-open").waitFor({ timeout: 15_000 });
+    await page.getByTestId("run-exception-open").first().click();
     await page.getByTestId("agent-work-panel-runs").waitFor({ timeout: 10_000 });
     await page.waitForTimeout(600);
     const head = await text(page, "agent-work-panel-state");

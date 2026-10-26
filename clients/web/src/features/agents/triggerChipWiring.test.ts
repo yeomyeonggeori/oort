@@ -16,13 +16,16 @@ describe("트리거 칩·예외 줄 배선 (#4619)", () => {
     const timeline = source("../timeline/Timeline.tsx");
     expect(timeline).toContain("runAnswerMap(channelRuns, messages)");
     expect(timeline).toContain("runAnswers={runAnswers}");
-    // 나(내가 보낸 메시지)에게만 run을 넘기는 규칙은 그대로다.
-    expect(timeline).toContain("uuidEq(message.authorMemberId, myMemberIdForFold)");
+    // 행에 내려주는 run은 순수 함수 하나가 고른다(누가 불렀든 사람의 메시지면 선다, planner 결정 2): 타임라인은 그 함수를 부를 뿐이다.
+    expect(timeline).toContain("runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage })");
+    expect(timeline).not.toContain("uuidEq(message.authorMemberId, myMemberIdForFold)");
   });
 
   it("메시지 행은 머리 줄(MESSAGE_HEAD_CLASS)의 시각 뒤에 칩을, 꼬리 줄 요약 옆에 작업 중 칩을, 아래에 예외 줄을 세운다", () => {
     const row = source("../timeline/MessageRow.tsx");
-    const headStart = row.indexOf("<div className={MESSAGE_HEAD_CLASS}>");
+    // 칩이 있는 머리 줄은 줄바꿈이 없는 클래스를 쓰고(planner 결정 6), 칩이 없는 줄은 그대로 flex-wrap이다.
+    expect(row).toContain("<div className={hasRunChip ? MESSAGE_HEAD_CHIP_CLASS : MESSAGE_HEAD_CLASS}>");
+    const headStart = row.indexOf("<div className={hasRunChip ? MESSAGE_HEAD_CHIP_CLASS : MESSAGE_HEAD_CLASS}>");
     const headEnd = row.indexOf("{/* 본문 **위**", headStart);
     expect(headStart).toBeGreaterThan(0);
     expect(headEnd).toBeGreaterThan(headStart);
@@ -35,6 +38,13 @@ describe("트리거 칩·예외 줄 배선 (#4619)", () => {
     // 스레드 요약 줄의 칩은 답글(rollup)이 있을 때만이다.
     expect(row).toMatch(/\{rollup && runStatus !== undefined && runStatus\.length > 0 && \(\s*<ThreadWorkChip/);
     expect(row).toContain("<MessageRunStatus");
+    // 머리 줄이 없는 이어지는 행의 칩은 시각이 서는 거터 칸에 선다(시각 뒤, 거터 div 안): 행 높이를 움직이지 않는 자리다.
+    const gutterStart = row.indexOf('<div className={cn("relative shrink-0", MESSAGE_AVATAR_GUTTER_CLASS)}>');
+    const gutterEnd = row.indexOf("data-row-body is the box", gutterStart);
+    expect(gutterStart).toBeGreaterThan(0);
+    const gutter = row.slice(gutterStart, gutterEnd);
+    expect(gutter.indexOf("<GutterTriggerChip")).toBeGreaterThan(gutter.indexOf('data-testid="row-time"'));
+    expect(gutter).toContain("{hasRunChip && <GutterTriggerChip runs={runStatus} directory={directory} />}");
   });
 
   it("옛 문장 행의 자리(MessageRunStatus)는 예외 줄만 그리고, 평소의 진행은 core `runStatusLine`을 더 부르지 않는다", () => {

@@ -1,4 +1,4 @@
-import { Check, CircleAlert } from "lucide-react";
+import { Check, CircleAlert, CircleX, Eye, Hand, ShieldQuestion } from "lucide-react";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import { nextUncollectedDeadlineMs } from "@momo/core/features/agents/runException";
 import { UNKNOWN_AGENT_NAME } from "@momo/core/features/agents/turnCopy";
@@ -7,6 +7,7 @@ import {
   triggerChip,
   type AnswerRef,
   type TriggerChip,
+  type TriggerChipKind,
   type TriggerChipMark,
   type TriggerChipTone,
 } from "@momo/core/features/agents/triggerChip";
@@ -16,13 +17,13 @@ import { memberNameParts, type Directory } from "@/features/workspace/useWorkspa
 import { useRerenderAt } from "./useRerenderAt";
 
 // =============================================================================
-// 트리거 메시지의 상태 칩 (#4619, #4577 권장 B).
+// 에이전트를 부른 메시지의 상태 칩 (#4619, #4577 권장 B).
 //
-//   grok 오후 3:07  [받음]  →  [가져감]  →  [● 작업 중]  →  [✓ 답함]      [! 못 가져감]  [! 실패]
+//   이도현 오후 3:07  [받음]  →  [가져감]  →  [● 작업 중]  →  [✓ 답함]   [! 아직 받지 않았어요]  [✕ 실패]
 //
-// 에이전트를 부른 내 메시지의 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다. 문장 행(「받았어요
-// → 깨우는 신호 보냄 → 가져감 → …」)을 대신한다. 한 낱말이라 상태가 바뀌어도 줄의 높이도 칩의 폭도
-// 변하지 않는다.
+// 에이전트를 부른 사람의 메시지 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다. 문장 행(「받았어요
+// → 깨우는 신호 보냄 → 가져감 → …」)을 대신한다. 누가 불렀든 선다(planner 결정 2). 한 낱말이라 상태가
+// 바뀌어도 줄의 높이도 칩의 폭도 변하지 않는다.
 //
 // ## 크기 고정은 어떻게
 //
@@ -31,13 +32,24 @@ import { useRerenderAt } from "./useRerenderAt";
 // 낱말이 서 있든 가장 넓은 조합의 폭이고, 낱말이 번역으로 길어져도 따라간다(7개 언어, ADR-0213).
 // 높이는 칩 기하(`CHIP_CLASS`)가 정한다. 시험이 실제 엔진에서 낱말을 갈아 끼우며 폭·높이를 잰다.
 //
+// ## 두 모양: 낱말 칩과 아이콘 칩
+//
+// 낱말 칩이 기본이다. 자리가 모자라면 같은 칩이 **아이콘만** 남긴다(낱말은 보조기술 이름·툴팁으로 남는다):
+//   - 머리 줄이 좁을 때(`@max-sm`, 줄 자신의 폭 < 24rem): 이름이 칩 때문에 잘리지 않게. 머리 줄은 줄바꿈이
+//     없으므로(`MESSAGE_HEAD_CHIP_CLASS`) 칩이 클수록 이름이 줄어든다.
+//   - 머리 줄이 없는 **이어지는 행**(같은 사람의 연속 메시지)의 거터: 시각이 서는 그 자리에 선다(`GutterTriggerChip`).
+//     거터(32px + 행 여백 16px)에 낱말은 들어가지 않는다.
+// 아이콘 칩은 글자 없이 모양만으로 일곱 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
+// (`MarkGlyph`). 그릇 높이는 낱말 칩과 같다: 폭 0으로 접은 낱말이 줄 상자의 높이를 지킨다.
+//
 // ## 낱말과 모양
 //
 // 낱말과 상태 판정은 코어 `triggerChip`이 정한다(레일과 같은 낱말). 모양은 색에만 기대지 않는다:
-// 점(작업 중)·체크(답함)·느낌표(못 가져감·실패). 그릇은 칩 그릇 규칙(`chipVessel.test`)의 넷
+// 점(작업 중)·체크(답함)·느낌표(아직 받지 않았어요)·가위표(실패). 그릇은 칩 그릇 규칙(`chipVessel.test`)의 넷
 // (`muted/ok/warn/danger-soft`)만 쓴다.
 //
-// 「답함 ✓」은 답 메시지를 알 때만 눌리는 단추다(눌러도 갈 곳이 없는 단추를 세우지 않는다).
+// 「답함 ✓」은 답 메시지를 알 때만 눌리는 단추다(눌러도 갈 곳이 없는 단추를 세우지 않는다). 거터의 칩은
+// 눌리지 않는다: 행에 포인터가 오면 그 자리가 시각으로 바뀌므로(아래) 누를 수 있는 단추를 거기 둘 수 없다.
 // =============================================================================
 
 /** 톤 → 그릇과 글자. 짝은 `tokens.contrast.test`가 두 스킴에서 재는 것들이다. */
@@ -65,7 +77,69 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
       {mark === "dot" && <span aria-hidden="true" className="size-1 rounded-full bg-warn" />}
       {mark === "check" && <Check aria-hidden="true" className="size-3" />}
       {mark === "alert" && <CircleAlert aria-hidden="true" className="size-3" />}
+      {mark === "cross" && <CircleX aria-hidden="true" className="size-3" />}
       {word}
+    </span>
+  );
+}
+
+/**
+ * 아이콘 칩의 글리프: 일곱 상태가 **모양으로** 갈린다. 낱말 칩에서 표지가 없던 셋(받음·가져감·승인 대기)도 여기서는
+ * 하나씩 갖는다 — 글자 없는 빈 칩은 상태를 말하지 못하므로. 받음은 눈(요청이 닿아 눈에 띔, Buzz의 👀와 같은 뜻),
+ * 가져감은 손, 승인 대기는 사람에게 묻는 방패(작업 카드가 쓰는 그것).
+ */
+function MarkGlyph({ kind }: { kind: TriggerChipKind }) {
+  const icon = "size-3";
+  switch (kind) {
+    case "received":
+      return <Eye aria-hidden="true" className={icon} />;
+    case "claimed":
+      return <Hand aria-hidden="true" className={icon} />;
+    case "working":
+      // 점도 **SVG**다: 다른 글리프와 같은 대체 요소여야 줄 상자의 높이(기준선)가 같다. `<span>` 점은 기준선이 달라
+      // 칩이 2px 낮아졌다(실제 엔진에서 잰 값). 색은 칩 톤(`text-warn`)을 따른다.
+      return (
+        <svg aria-hidden="true" viewBox="0 0 12 12" className={cn(icon, "fill-current")}>
+          <circle cx="6" cy="6" r="3.5" />
+        </svg>
+      );
+    case "approval":
+      return <ShieldQuestion aria-hidden="true" className={icon} />;
+    case "answered":
+      return <Check aria-hidden="true" className={icon} />;
+    case "uncollected":
+      return <CircleAlert aria-hidden="true" className={icon} />;
+    case "failed":
+      return <CircleX aria-hidden="true" className={icon} />;
+  }
+}
+
+/**
+ * 아이콘만 서는 층. `title`이 낱말을 툴팁으로 남긴다.
+ *
+ * 구조가 낱말 층의 `Face`와 **같은 모양**이다(격자 칸 → 줄 상자 안의 `inline-flex`): 줄 상자의 높이는 이 모양이 같을
+ * 때만 같다(칩 높이 20 대 18을 실제 엔진에서 쟀다). 글리프는 한 변 12의 상자에 가운데로 앉아 점(8)과 아이콘(12)이
+ * 같은 폭이 되고, 폭 0으로 접어 둔 **낱말 하나**(`w-0 overflow-hidden`)가 글꼴의 줄 높이를 낱말 칩과 같게 지킨다
+ * (영폭 공백은 한글 글꼴의 줄 높이를 끌어오지 않는다). 글자는 보이지도 읽히지도 않는다.
+ */
+function MarkLayer({ chip, className }: { chip: TriggerChip; className: string }) {
+  return (
+    <span
+      aria-hidden="true"
+      title={chip.word}
+      data-testid="trigger-chip-mark"
+      className={cn("col-start-1 row-start-1", className)}
+    >
+      <span className="col-start-1 row-start-1 justify-self-center">
+        <span className="inline-flex items-center justify-center whitespace-nowrap">
+          <span className="inline-flex size-3 items-center justify-center">
+            <MarkGlyph kind={chip.kind} />
+          </span>
+          <span className="w-0 overflow-hidden" data-testid="trigger-chip-mark-height">
+            {chip.word}
+          </span>
+        </span>
+      </span>
     </span>
   );
 }
@@ -73,35 +147,50 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
 /**
  * 칩의 그림. 순수하다: 같은 입력이면 같은 마크업이고, 시험이 이 마크업을 그대로 실제 브라우저에
  * 올려 크기를 잰다.
+ *
+ * `variant`: `word`(기본)는 낱말 칩이고 `@container` 조상이 좁으면 아이콘만 남는다. `mark`는 처음부터
+ * 아이콘 칩이다(거터). `reserve`가 거짓이면 격자에 다른 낱말을 겹치지 않는다(폭이 고정되지 않는다):
+ * 스레드 요약 줄처럼 칩이 서고 지는 것이 이웃 글자를 움직이지 않는 자리에서만 쓴다.
  */
 export function TriggerChipView({
   chip,
   onJump,
+  variant = "word",
+  reserve = true,
 }: {
   chip: TriggerChip;
   onJump?: (answer: AnswerRef) => void;
+  variant?: "word" | "mark";
+  reserve?: boolean;
 }) {
   const className = cn(CHIP_CLASS, TRIGGER_CHIP_CLASS, TRIGGER_CHIP_TONE_CLASS[chip.tone]);
   const current = `${chip.word}|${chip.mark}`;
-  const faces = (
-    <>
-      <span className="col-start-1 row-start-1 justify-self-center" data-testid="trigger-chip-word">
-        <Face word={chip.word} mark={chip.mark} />
-      </span>
-      {TRIGGER_CHIP_FACES.filter((face) => `${face.word}|${face.mark}` !== current).map((face) => (
-        <span
-          key={`${face.word}|${face.mark}`}
-          aria-hidden="true"
-          className="invisible col-start-1 row-start-1 justify-self-center"
-          data-testid="trigger-chip-ghost"
-        >
-          <Face word={face.word} mark={face.mark} />
+  const faces =
+    variant === "mark" ? (
+      <MarkLayer chip={chip} className="inline-grid" />
+    ) : (
+      <>
+        <span className="col-start-1 row-start-1 inline-grid @max-sm:hidden">
+          <span className="col-start-1 row-start-1 justify-self-center" data-testid="trigger-chip-word">
+            <Face word={chip.word} mark={chip.mark} />
+          </span>
+          {reserve &&
+            TRIGGER_CHIP_FACES.filter((face) => `${face.word}|${face.mark}` !== current).map((face) => (
+              <span
+                key={`${face.word}|${face.mark}`}
+                aria-hidden="true"
+                className="invisible col-start-1 row-start-1 justify-self-center"
+                data-testid="trigger-chip-ghost"
+              >
+                <Face word={face.word} mark={face.mark} />
+              </span>
+            ))}
         </span>
-      ))}
-    </>
-  );
+        <MarkLayer chip={chip} className="hidden @max-sm:inline-grid" />
+      </>
+    );
   const answer = chip.answer;
-  if (answer !== undefined && onJump !== undefined) {
+  if (variant === "word" && answer !== undefined && onJump !== undefined) {
     return (
       <button
         type="button"
@@ -122,6 +211,7 @@ export function TriggerChipView({
       aria-label={chip.label}
       data-testid="trigger-chip"
       data-kind={chip.kind}
+      data-variant={variant}
       className={className}
     >
       {faces}
@@ -130,11 +220,26 @@ export function TriggerChipView({
 }
 
 /**
- * 한 메시지가 일으킨 run들 → 칩. 칩에 올릴 run이 없으면 아무것도 그리지 않는다.
+ * 한 메시지가 일으킨 run들 → 칩. 칩에 올릴 run이 없으면 null이다.
  *
- * 「받음」이 「못 가져감」으로 넘어가는 유예 마감에 **한 번만** 다시 그린다(`useRerenderAt`): 칩은
+ * 「받음」이 「아직 받지 않았어요」로 넘어가는 유예 마감에 **한 번만** 다시 그린다(`useRerenderAt`): 칩은
  * 경과를 말하지 않으므로 매초 도는 시계가 필요 없다.
  */
+function useTriggerChip(
+  runs: readonly AgentRunProgress[],
+  directory: Directory,
+  runAnswers?: ReadonlyMap<string, AnswerRef>
+): TriggerChip | null {
+  const nowMs = useRerenderAt(nextUncollectedDeadlineMs(runs, Date.now()));
+  return triggerChip(
+    runs,
+    (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+    nowMs,
+    runAnswers === undefined ? {} : { answerFor: (run) => runAnswers.get(run.id.toLowerCase()) }
+  );
+}
+
+/** 머리 줄(이름 · 시각 옆)의 칩. 좁은 줄에서는 아이콘만 남는다. */
 export function MessageTriggerChip({
   runs,
   directory,
@@ -148,13 +253,7 @@ export function MessageTriggerChip({
   /** 「답함」을 눌렀을 때 답 메시지로 간다(`onJumpToMessage`). */
   onJump?: (messageId: string, seq: number | null) => void;
 }) {
-  const nowMs = useRerenderAt(nextUncollectedDeadlineMs(runs, Date.now()));
-  const chip = triggerChip(
-    runs,
-    (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
-    nowMs,
-    { answerFor: (run) => runAnswers?.get(run.id.toLowerCase()) }
-  );
+  const chip = useTriggerChip(runs, directory, runAnswers);
   if (chip === null) return null;
   return (
     <TriggerChipView
@@ -167,9 +266,45 @@ export function MessageTriggerChip({
 }
 
 /**
+ * 머리 줄이 없는 **이어지는 행**의 칩 (#4619 planner 결정 2). 같은 사람의 연속 메시지에는 이름·시각 줄이 없어
+ * 칩이 설 머리가 없다. 그 행의 시각이 서는 거터 칸(hover하면 시각이 서는 그 자리)에 아이콘 칩을 둔다.
+ * 거터의 부모는 이미 `relative`이고 시각이 `absolute`로 거터 밖까지 흘러나가듯 이 칩도 `absolute`라서 **행의
+ * 높이도 본문의 자리도 한 픽셀 움직이지 않는다**. 거터는 칩 하나가 서기엔 충분하다(칩 28px < 거터 32px).
+ *
+ * 행에 포인터가 오거나 포커스가 들어오면 이 칩은 **시각에 자리를 내준다**(`group-hover:opacity-0`): 같은 자리에
+ * 서는 두 글자를 겹쳐 두면 둘 다 못 읽는다. 시각이 늘 서 있는 기기(hover 없음, `data-row-clock`)에서는
+ * 칩을 세우지 않는다(`tokens.css`의 `[data-row-chip]`): 자리가 하나뿐이고 그것은 시각의 것이다 — 그 행의
+ * 상태는 입력창 레일과 예외 줄이 말한다.
+ */
+export function GutterTriggerChip({
+  runs,
+  directory,
+}: {
+  runs: readonly AgentRunProgress[];
+  directory: Directory;
+}) {
+  const chip = useTriggerChip(runs, directory);
+  if (chip === null) return null;
+  return (
+    <span
+      data-row-chip=""
+      className={cn(
+        "absolute right-0 top-px",
+        "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
+        // 움직임을 줄여 달라고 한 사람에게는 페이드도 움직임이다.
+        "motion-reduce:transition-none"
+      )}
+    >
+      <TriggerChipView chip={chip} variant="mark" />
+    </span>
+  );
+}
+
+/**
  * 스레드 요약 줄(「답글 N개 · 마지막 …」) 곁의 「작업 중」 칩 (#4619 E). 같은 모델·같은 칩이다.
  * 일이 **진행 중**(가져감·작업 중)일 때만 선다: 끝난 일의 「답함」이나 실패는 머리 줄의 칩이 말하고,
- * 이 줄은 「이 스레드에서 지금 에이전트가 일하는 중」만 말한다. 누르는 것이 아니다.
+ * 이 줄은 「이 스레드에서 지금 에이전트가 일하는 중」만 말한다. 누르는 것이 아니다. 폭은 고정하지 않는다
+ * (`reserve={false}`): 이 줄의 칩은 맨 끝이라 서고 져도 이웃 글자가 움직이지 않는다.
  */
 export function ThreadWorkChip({
   runs,
@@ -178,16 +313,11 @@ export function ThreadWorkChip({
   runs: readonly AgentRunProgress[];
   directory: Directory;
 }) {
-  const nowMs = useRerenderAt(nextUncollectedDeadlineMs(runs, Date.now()));
-  const chip = triggerChip(
-    runs,
-    (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
-    nowMs
-  );
+  const chip = useTriggerChip(runs, directory);
   if (chip === null || (chip.kind !== "working" && chip.kind !== "claimed")) return null;
   return (
     <span data-testid="thread-work-chip">
-      <TriggerChipView chip={chip} />
+      <TriggerChipView chip={chip} reserve={false} />
     </span>
   );
 }

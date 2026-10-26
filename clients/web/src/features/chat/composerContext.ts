@@ -1,5 +1,5 @@
 import type { RosterMember } from "@momo/core/lib/api";
-import { routineWaitText, type RoutineHint } from "@momo/core/features/agents/runException";
+import { routineWaitText, type RoutineHint } from "@momo/core/features/agents/runWaiting";
 
 // 맥락 띠가 싣는 것 (#4317). 띠는 입력창 카드 맨 위에 붙어 **지금 이 글이 무엇에 딸린 것인지**를 말하고,
 // 실을 것이 없으면 서지 않는다. 이 파일은 순수 판정만 든다.

@@ -1,13 +1,9 @@
 import type { AgentRunProgress, Message } from "../../lib/api";
 import { turnRecordRunId } from "../timeline/cascadeModel";
 import { RAIL_WORD } from "./activityRail";
-import {
-  isUncollectedPastGrace,
-  UNCLAIMED_END_REASONS,
-  UNCOLLECTED_HEADLINE,
-  type RoutineHint,
-} from "./runException";
+import { UNCLAIMED_END_REASONS } from "./runException";
 import { runPhaseLabel, serverFactsOf } from "./runPhase";
+import { isUncollected, UNCOLLECTED_WORD, type RoutineHint } from "./runWaiting";
 import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 
 // =============================================================================
@@ -15,7 +11,7 @@ import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 //
 // 에이전트를 부른 사람의 메시지 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다:
 //
-//   받음 → 가져감 → 작업 중 → 답함 ✓      못 가져감 !      실패 !      승인 대기
+//   받음 → 가져감 → 작업 중 → 답함 ✓      아직 받지 않았어요 !      실패 !      승인 대기
 //
 // 칩은 문장 행(「받았어요 → 깨우는 신호 보냄 → 가져감 → …」)의 자리를 대신한다. 한 낱말이라
 // 행 높이가 변하지 않고, 상태가 바뀌어도 칩의 크기는 그대로다(크기는 표면의 몫, 낱말은 이 모델의
@@ -23,10 +19,11 @@ import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 //
 // 낱말은 레일(`activityRail`)과 같은 것이다. 레일은 채널 단위로 「지금 누가 일하나」를, 칩은
 // 메시지 단위로 「내가 부른 일이 어디까지 갔나」를 말하고, 두 자리가 같은 상태를 다른 낱말로
-// 부르지 않는다. 칩이 더 갖는 낱말은 끝난 뒤의 셋(답함·못 가져감·실패)뿐이다.
+// 부르지 않는다. 칩이 더 갖는 낱말은 끝난 뒤의 답함·실패와, 유예를 넘은 「아직 받지 않았어요」뿐이다
+// (그 낱말은 홈 카드·작업 패널·예외 줄과 같은 상수 `UNCOLLECTED_WORD`다).
 //
 // 한 메시지가 여러 에이전트를 불렀으면 **가장 사람에게 급한 상태 하나**가 칩이 된다
-// (실패 > 못 가져감 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함). 하나라도 아직 일하는 중이면
+// (실패 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함). 하나라도 아직 일하는 중이면
 // 「답함」이 아니다. 취소는 사람이 직접 한 일이라 알릴 새 소식이 아니므로 칩에 세지 않는다.
 // =============================================================================
 
@@ -39,15 +36,19 @@ export type TriggerChipKind =
   | "uncollected"
   | "failed";
 
-/** 칩 글자 곁의 표지. 모양이 뜻을 말한다(색에만 기대지 않는다). */
-export type TriggerChipMark = "none" | "dot" | "check" | "alert";
+/**
+ * 칩 글자 곁의 표지. 모양이 뜻을 말한다(색에만 기대지 않는다): 점(작업 중)·체크(답함)·느낌표(아직 받지
+ * 않았어요)·가위표(실패). 아직 받지 않았어요(주의)와 실패(오류)는 한때 같은 느낌표였고 색만 달랐다 —
+ * 색을 못 보는 사람에게 둘이 같은 말이 되므로 실패에 자기 모양을 줬다.
+ */
+export type TriggerChipMark = "none" | "dot" | "check" | "alert" | "cross";
 
 /** 칩 그릇의 톤. 표면이 토큰 클래스에 매긴다. */
 export type TriggerChipTone = "muted" | "working" | "ok" | "warn" | "danger";
 
 export const CHIP_WORD_ANSWERED = "답함";
-/** 예외 줄과 **같은 낱말**이다(`runException`의 머리말). 교차 시험이 둘을 함께 붙든다. */
-export const CHIP_WORD_UNCOLLECTED = UNCOLLECTED_HEADLINE;
+/** 예외 줄·홈 카드·작업 패널과 **같은 낱말**이다(`runWaiting.UNCOLLECTED_WORD`). 교차 시험이 함께 붙든다. */
+export const CHIP_WORD_UNCOLLECTED = UNCOLLECTED_WORD;
 export const CHIP_WORD_FAILED = runPhaseLabel({
   phase: "failed",
   leaseState: "none",
@@ -72,7 +73,7 @@ const MARK: Readonly<Record<TriggerChipKind, TriggerChipMark>> = {
   approval: "none",
   answered: "check",
   uncollected: "alert",
-  failed: "alert",
+  failed: "cross",
 };
 
 /**
@@ -134,7 +135,7 @@ function kindOf(
 ): TriggerChipKind | null {
   switch (run.phase) {
     case "queued":
-      return isUncollectedPastGrace(
+      return isUncollected(
         serverFactsOf(run),
         nowMs,
         context.routineFor?.(run.agentMemberId),

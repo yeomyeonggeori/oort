@@ -35,8 +35,10 @@ import { openWorkPanel } from "./workLogStore";
 //
 // 작성 중(사람)의 줄은 액션 행의 가로 슬롯으로 내려갔고 별도 세로 예약 행을 없앴다. 이 레일은 그
 // 판단을 **뒤집는다**: 타임라인을 미는 것(밀림)이 죽은 밴드보다 비싸다는 owner 결정(#4577 「ㄱㄱ」,
-// 2026-10-26)이 근거다. 대신 밴드가 죽어 보이지 않게, 에이전트가 있는 채널에만 서고 폼의 윗 여백을
-// 이 칸이 대신한다(폼의 `data-rail:pt-0`). 에이전트가 없는 채널에는 칸도 없다.
+// 2026-10-26)이 근거다. 대신 밴드가 죽어 보이지 않게, **에이전트가 있는 대화에서만** 서고(`isRailReserved`: 에이전트
+// DM·활동 중인 에이전트 멤버가 있는 채널, planner 결정 4) 폼의 윗 여백을 이 칸이 대신한다(폼의 `data-rail:pt-0`).
+// 사람만 있는 대화에는 칸도 없고 입력창 위 간격은 폼의 윗 여백뿐이다(#1749 그대로: 600px 이상 8, 폰 13).
+// 에이전트 대화의 간격은 24다(칸 24).
 //
 // ## 줄은 가만히 있는다
 //
@@ -53,7 +55,8 @@ import { openWorkPanel } from "./workLogStore";
 //
 // 「일하는 중」의 점 셋(`RespondingDots`)은 #4020에서 owner가 승인한 예외다(투명도만, 일하는 동안만,
 // 끊긴 레일에는 없고, 동작 줄이기에서는 멈춘다). 「답하는 중」이라는 문구는 이 레일의 「작업 중」으로
-// 대체됐다(#4577 A, 2026-10-26). 점을 남길지는 owner가 정한다(#4619의 미결 결정).
+// 대체됐다(#4577 A, 2026-10-26). 점은 이 레일 안의 **작은 생존 표지**로 남긴다(planner 결정 3): 「일하는 중」이라는
+// 사실을 낱말 없이 눈에 전하는 것이 점의 일이다. 동작 줄이기를 켜면 멈춘 채 선다.
 // =============================================================================
 
 /**
@@ -68,17 +71,6 @@ export const RAIL_SHELL_CLASS = "flex h-6 shrink-0 items-center px-6";
 /** 레일 줄(누르면 팝오버). 칸 안에서 한 줄을 넘지 않는다: 글은 줄어들고 점·얼굴은 줄지 않는다. */
 export const RAIL_LINE_CLASS =
   "flex min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta press hover:bg-surface-hover focus-visible:focus-ring";
-
-/** 에이전트가 이 채널의 활동 멤버인가(레일 칸을 미리 잡을지 정한다). */
-export function channelHasAgent(directory: Directory, channelId: string): boolean {
-  const key = channelId.toLowerCase();
-  return directory.members.some(
-    (member) =>
-      member.kind === "agent" &&
-      member.status === "active" &&
-      member.channelIds.some((id) => id.toLowerCase() === key)
-  );
-}
 
 function RailAgentRow({
   agent,
@@ -270,7 +262,7 @@ export function ActivityRailView({
  * 컴포저가 꽂는 레일. 이 채널의 열린 턴을 읽어 코어 모델로 한 줄을 만든다.
  *
  * 시계(`useTickingNow`)는 **이 컴포넌트 안에** 있다: 컴포저 전체가 매초 다시 그려지지 않는다.
- * 줄의 글자는 시간에 따라 바뀌지 않으므로 이 시계가 하는 일은 낡은 신호를 걷어내고 못 가져감
+ * 줄의 글자는 시간에 따라 바뀌지 않으므로 이 시계가 하는 일은 낡은 신호를 걷어내고 「아직 받지 않았어요」
  * 유예를 넘은 run을 레일에서 빼는 것뿐이다.
  *
  * `reserved`: 에이전트가 있는 채널이라 칸을 미리 잡는가(컴포저가 폼 여백을 맞추려고 같은 판정을
