@@ -463,10 +463,11 @@ the PR):
 - `xattr -l` on a saved file: `com.apple.quarantine: 0081;<hex time>;oort;`; a saved
   `.command` has no execute bit and `spctl --assess --type open` rejects it. The
   Gatekeeper dialog on a Finder double-click was not exercised.
-- Sixteen refusal probes (`../.zshrc`, `/etc/hosts`, `.command` / `.terminal` / `.pkg`
-  / `.HTML` open, an unknown `path` field, an empty or NUL name, a hidden file, 201
-  names) come back as code strings before anything is launched; ten hostile names
-  saved land inside the folder.
+- Sixteen negative probes (`../.zshrc`, `/etc/hosts`, `.command` / `.terminal` / `.pkg`
+  / `.HTML` / `a.pdf.command` open, an unknown `path` field, an empty or NUL name, a
+  hidden file, a missing file, a probe of names outside the folder, 201 names) come
+  back as code strings or `false` before anything is launched (14 refusals, one
+  `missing`, one probe answer); ten hostile names saved land inside the folder.
 - Transient memory for one 64 MiB file (RSS of the four processes, a fresh app):
   +569 MiB through `download_save` (shell +256, WebContent +200, Networking +112)
   against +242 MiB through the old anchor path. One IPC message holds the whole body
