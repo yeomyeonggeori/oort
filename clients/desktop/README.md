@@ -452,7 +452,9 @@ pins that set, that fence, and that no capability carries an `fs:` or `opener:`
 permission.
 
 macOS asks the person once for access to the Downloads folder (TCC); the sentence
-is `NSDownloadsFolderUsageDescription` in `Info.plist`. Saving there is wider than
+is `NSDownloadsFolderUsageDescription` in `Info.plist` (`runtime-unverified` until a
+real build shows the prompt; so is the quarantine attribute's effect on Gatekeeper).
+Saving there is wider than
 `open_pdf_attachment`'s app-cache copy: that is recorded in #4587 for the
 orchestrator to decide whether an ADR note is needed.
 
