@@ -738,6 +738,17 @@ describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)'
     expect(reference.detail.lineHeight).toBeGreaterThan(0);
   });
 
+  it('L2: 안쪽 장의 첫 요소 위 여백은 설정 첫 장과 같다 — 옛 시트의 24 가 남아 안쪽 장만 떨어져 보이지 않는다', async () => {
+    const page = await openPage();
+    const topOf = (testID: string) =>
+      StyleSheet.flatten(screen.getByTestId(testID, {includeHiddenElements: true}).props.contentContainerStyle)
+        .paddingTop;
+    const main = topOf('settings-scroll');
+    expect(main).toBeGreaterThan(0);
+    fireEvent.press(within(page).getByTestId('profile-theme-row'));
+    expect(topOf('settings-sub-scroll')).toBe(main);
+  });
+
   it('N1: 한 줄 문장의 줄 높이는 토큰이다 — 프로필 화면 네 파일에 lineHeight 18 리터럴이 없다', () => {
     const literal = /lineHeight:\s*18\b/;
     const dir = path.join(__dirname, '../src/features/profile');

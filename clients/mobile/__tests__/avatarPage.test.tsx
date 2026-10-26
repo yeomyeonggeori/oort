@@ -149,10 +149,10 @@ describe('세 줄', () => {
   it('파괴 행(사진 지우기)은 고르기·찍기와 다른 카드에 따로 선다 (design-review #4457 r1 L8, phone-sheets §5)', () => {
     const withPhoto = mount(ROWS_WITH_PHOTO());
     const choose = within(screen.getByTestId('avatar-card-card'));
-    const remove = within(screen.getByTestId('avatar-remove-card-card'));
     // 같은 카드에 섞이지 않는다 — 한 번 잘못 눌러 사진이 지워지지 않도록 위계(§3)가 카드 경계로도 선다.
     expect(choose.queryByTestId('avatar-remove')).toBeNull();
     expect(choose.getByTestId('avatar-choose-library')).toBeTruthy();
+    const remove = within(screen.getByTestId('avatar-remove-card-card'));
     expect(remove.getByTestId('avatar-remove')).toBeTruthy();
     expect(remove.queryByTestId('avatar-choose-library')).toBeNull();
     // 사진이 없으면 파괴 카드 자체가 없다(빈 카드가 남지 않는다).
