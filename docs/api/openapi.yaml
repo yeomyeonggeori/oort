@@ -2072,7 +2072,11 @@ paths:
     delete:
       tags: [membership-admin]
       operationId: deleteWorkspaceBan
-      summary: Delete a workspace ban and permit future rejoin.
+      summary: Delete a workspace ban so its email and handle pass the ban check again.
+      description: >
+        Only the ban check on invite redemption and public join is lifted. A
+        removed (`deleted`) account is not resumed by an invite code either way
+        (ADR-0215 증보 1 J7, follow-up #4627).
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
