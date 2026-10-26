@@ -358,6 +358,31 @@ SCAN_SCOPE = [
         ),
     },
     {
+        "path": "server-rust/crates/momo-messaging/src/attachment_reclaim.rs",
+        "mode": "symbols",
+        "symbols": ["workspaces_sql", "workspaces_with_reclaim_candidates"],
+        "column_reads": {
+            "attachment": [
+                "workspace_id", "status", "message_id", "reserved", "unreserved_at",
+                "created_at",
+            ],
+        },
+        "why": (
+            "notifier attachment_reclaim.rs: workspaces_with_reclaim_candidates on the notifier "
+            "pool (#4443, ADR-0151 증보 2) is the ONE cross-tenant statement of the attachment "
+            "reclaim and answers workspace ids only. workspaces_sql names exactly the columns "
+            "above — never the attachment id, drive_file_id, name, mime, size_bytes or the "
+            "uploader — and `eligible_core_sql`, the shared predicate fragment it embeds, holds "
+            "no relation. The other half of the definition (`NO_OTHER_HOLD_SQL`: huddle "
+            "transcript columns, avatar media Drive ids) is evaluated only by the momo_app "
+            "tenant transactions and is not scanned. The reservation fact is the `reserved` / "
+            "`unreserved_at` pair migration 150 mirrors from scheduled_message_attachment, "
+            "which stays sealed from this role (NEVER_GRANTED_TO_NOTIFIER below). "
+            "reclaim_candidate_ids_in_tx, reclaim_tally_in_tx, sweep_workspace and "
+            "reclaim_unbound_attachment_in_tx run on the momo_app pool and are not scanned."
+        ),
+    },
+    {
         "path": "server-rust/crates/momo-messaging/src/inbox.rs",
         "mode": "symbols",
         "symbols": ["workspaces_with_expired_inbox_items"],
@@ -1202,6 +1227,11 @@ print(
 NEVER_GRANTED_TO_NOTIFIER = {
     "token": "credentials (the woken verdict drops the claim predicate's token join for this reason)",
     "hosted_agent_doorbell": "url and secret_sealed (the verdict needs no fire time)",
+    "scheduled_message_attachment": (
+        "ADR-0208 D3: owner-scoped, sealed from the BYPASSRLS roles; the attachment reclaim "
+        "reads attachment.reserved, which a trigger mirrors from it (#4443)"
+    ),
+    "scheduled_message": "ADR-0208 D3: owner-scoped drafts, sealed from the BYPASSRLS roles",
 }
 ANY_NOTIFIER_GRANT_RE = re.compile(
     r'GRANT\s+[^;]*?\bON\s+(?:TABLE\s+)?([a-z][a-z0-9_]*)\s+TO\s+momo_notifier\b',
@@ -1261,6 +1291,39 @@ for col in ("id", "status", "approved_scopes", "approved_channel_ids",
 print(
     "[test-notifier-role-grants] ok: woken-verdict tables are column-scoped; table-level "
     "SELECT / dropped column / extra column → RED"
+)
+
+# (k) ADR-0151 증보 2 (#4443): the attachment reclaim's one cross-tenant read (workspace ids
+# only) is column-scoped on `attachment`. A table-level SELECT would hand a BYPASSRLS role the
+# attachment id, the Drive file id, the file name and the uploader (→ RED); a dropped column is a
+# missing grant production only notices at the first tick, because the dev bootstrap holds
+# table-level grants (→ RED); a column no statement reads is an over-grant (→ RED).
+if "attachment" not in COLUMN_READS or "attachment" not in COLUMN_GRANTS:
+    fail("attachment must be a column-scoped read (scan scope + bootstrap)")
+for col in ("id", "drive_file_id", "name", "mime", "uploader_member_id", "channel_id", "size_bytes"):
+    if col in COLUMN_GRANTS["attachment"]:
+        fail(f"attachment.{col} must not be granted to momo_notifier (the workspace id and the candidate predicate's own columns only)")
+for col in ("workspace_id", "status", "message_id", "reserved", "unreserved_at", "created_at"):
+    if col not in COLUMN_GRANTS["attachment"]:
+        fail(f"attachment.{col} missing from the notifier column grant")
+grants_k = {t: set(vs) for t, vs in grants.items()}
+grants_k["attachment"] = {"SELECT"}
+probs_k = compare(used_real, grants_k, real)
+if not any("table-level SELECT attachment" in p for p in probs_k):
+    fail(f"sabotage table-level SELECT attachment stayed GREEN (problems={probs_k})")
+col_k = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+col_k.pop("attachment", None)
+probs_k2 = compare(used_real, grants, real, col_grants=col_k)
+if not any("column read attachment." in p for p in probs_k2):
+    fail(f"sabotage drop attachment column GRANT stayed GREEN (problems={probs_k2})")
+col_k3 = {t: set(c) for t, c in COLUMN_GRANTS.items()}
+col_k3["attachment"].add("drive_file_id")
+probs_k3 = compare(used_real, grants, real, col_grants=col_k3)
+if not any("over-grant column attachment.drive_file_id" in p for p in probs_k3):
+    fail(f"sabotage over-granted attachment.drive_file_id stayed GREEN (problems={probs_k3})")
+print(
+    "[test-notifier-role-grants] ok: attachment is a column-scoped read; table-level SELECT / "
+    "dropped column / drive_file_id added → RED"
 )
 
 # (f) #3377: a share-retention DELETE in the scanned notifier source → RED.

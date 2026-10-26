@@ -4,8 +4,18 @@ import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal'
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
-import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Animated, Keyboard, Settings, StyleSheet, Text, TextInput, useWindowDimensions, View} from 'react-native';
+import React, {Profiler, useCallback, useEffect, useRef, useState, type ProfilerOnRenderCallback} from 'react';
+import {
+  Animated,
+  Keyboard,
+  Settings,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+  type GestureResponderEvent,
+} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
@@ -77,6 +87,10 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
 //                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
 //                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
+//             `focus+T<초>` 는 재는 시간을 줄인다(기본 140초; 예: `DM-STEADY-FOCUS+T130`). #4518 부터 **손이 닿는 순간**의 표식도 남긴다 —
+//                         `touch-down-x<pageX>-y<pageY>` · `touch-drag-d<거리>`(끌기 문턱 10pt 를 처음 넘는 때) · `touch-up` · `touch-cancel`(입력창에 닿은
+//                         터치를 도크 상자가 위로 받는다) 과 컴포저가 다시 그려진 커밋의 `render-<phase>-<ms>ms`(React `Profiler`). 흐름은
+//                         `maestro/111-press-steady.yaml`(짧은 탭 · 길게 누름 · 끌기 4방향), 분석은 `focus-windows.mjs` 의 「누름→자판」 줄.
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
@@ -562,6 +576,8 @@ interface Controls {
   setNarrow: (by: number | null) => void;
   /** 입력창이 지금 포커스를 쥐고 있는가(#4456). */
   isFocused: () => boolean;
+  /** `focus` 장면이 재는 시간(ms). 기본 140초, 장면 이름 뒤 `+t<초>` 로 줄인다(#4518 — 되돌림 길만 보는 짧은 흐름용). */
+  focusMs: number;
   /** 장면 이름의 `+` 옵션이 켜져 있는가(#4455 r4 — `rec+tail`·`rec+working`). */
   hasMod: (name: string) => boolean;
 }
@@ -788,7 +804,7 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     let lastDraft = readDraft(DRAFT_KEY);
     let lastCount = server.messages.length;
     let lastFocused = c.isFocused();
-    const until = Date.now() + 140_000;
+    const until = Date.now() + c.focusMs;
     while (Date.now() < until) {
       const focused = c.isFocused();
       if (focused !== lastFocused) {
@@ -1012,6 +1028,44 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const dockRef = useRef<View | null>(null);
   const metricsRef = useRef<TimelineGeometry | null>(null);
   const inputRef = useRef<TextInput | null>(null);
+  // #4518: 손이 닿고·끌려 나가고·떨어지고·빼앗기는 순간을 표식으로 남긴다. `dockRef` 상자가 입력창에 닿은 터치를 위로 받는다(날 터치 이벤트는 버블이다).
+  // 앱의 `onFieldTouch*` 와 같은 이벤트라서 「닿음 → 펼침 첫 변화」 지연(누름 시작의 렌더 비용)과 「닿음 → `keyboardWillShow`」 간격을 같은 시계로 잰다.
+  // (`markRef` 는 위 메아리·서버 사본 표식(#4455)과 같은 것이다 — 장면이 도는 동안 장면의 `mark` 를 가리킨다.)
+  const touchRef = useRef<{x: number; y: number; dragged: boolean} | null>(null);
+  const onDockTouchStart = useCallback((event: GestureResponderEvent) => {
+    const {pageX, pageY} = event.nativeEvent;
+    touchRef.current = {x: pageX, y: pageY, dragged: false};
+    markRef.current?.(`touch-down-x${Math.round(pageX)}-y${Math.round(pageY)}`);
+  }, []);
+  const onDockTouchMove = useCallback((event: GestureResponderEvent) => {
+    const origin = touchRef.current;
+    if (origin === null || origin.dragged) return;
+    const {pageX, pageY} = event.nativeEvent;
+    const distance = Math.hypot(pageX - origin.x, pageY - origin.y);
+    // 앱의 끌기 문턱(`PRESS_DRAG_SLOP_PT` = 10pt)을 처음 넘는 순간 한 번.
+    if (distance > 10) {
+      origin.dragged = true;
+      markRef.current?.(`touch-drag-d${Math.round(distance)}`);
+    }
+  }, []);
+  const onDockTouchEnd = useCallback(() => {
+    touchRef.current = null;
+    markRef.current?.('touch-up');
+  }, []);
+  const onDockTouchCancel = useCallback(() => {
+    touchRef.current = null;
+    markRef.current?.('touch-cancel');
+  }, []);
+  // 컴포저가 다시 그려질 때마다(커밋) 걸린 시간을 표식으로 남긴다(React `Profiler`): 누름 시작의 렌더 비용(#4518 D4)을 「닿음 → 그 커밋」 간격과 함께 본다.
+  // 0.3ms 미만은 남기지 않는다 — 스프링이 도는 동안은 컴포저가 아니라 스타일만 바뀌어 커밋이 없다.
+  const onComposerRender = useCallback<ProfilerOnRenderCallback>((_id, phase, actualDuration) => {
+    if (actualDuration >= 0.3) markRef.current?.(`render-${phase}-${actualDuration.toFixed(1)}ms`);
+  }, []);
+  // 장면 이름 뒤 `+t<초>` 는 `focus` 장면이 재는 시간(기본 140초).
+  const focusMs = (() => {
+    const seconds = mods.map(mod => /^t(\d+)$/.exec(mod)).find(match => match !== null);
+    return seconds ? Number(seconds[1]) * 1_000 : 140_000;
+  })();
   const [report, setReport] = useState<string[]>([]);
   const [finished, setFinished] = useState(false);
   // 지켜본다: 늦게 도착한 `fetch` 정의가 우리 가짜를 덮으면 다시 깐다.
@@ -1116,6 +1170,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             return true;
           },
           isFocused: () => inputRef.current?.isFocused() === true,
+          focusMs,
           hasMod: modName => mods.includes(modName),
         };
         relayFirst = message => (fake.current as FakeRail).message(message);
@@ -1226,7 +1281,13 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           </Narrow>
         }
         composer={
-          <View ref={dockRef} collapsable={false}>
+          <View
+            ref={dockRef}
+            collapsable={false}
+            onTouchStart={onDockTouchStart}
+            onTouchMove={onDockTouchMove}
+            onTouchEnd={onDockTouchEnd}
+            onTouchCancel={onDockTouchCancel}>
             <View ref={barRef} collapsable={false}>
               <AgentActivityBar
                 turns={turns}
@@ -1237,15 +1298,17 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
               />
             </View>
             <TypingBar segments={typingSegments([])} label={null} />
-            <Composer
-              recipient="person"
-              channelLabel={peerName}
-              directory={directory}
-              draftKey={DRAFT_KEY}
-              attachmentTarget={TARGET}
-              inputRef={inputRef}
-              onSend={onSend}
-            />
+            <Profiler id="composer" onRender={onComposerRender}>
+              <Composer
+                recipient="person"
+                channelLabel={peerName}
+                directory={directory}
+                draftKey={DRAFT_KEY}
+                attachmentTarget={TARGET}
+                inputRef={inputRef}
+                onSend={onSend}
+              />
+            </Profiler>
           </View>
         }
       />

@@ -46,7 +46,7 @@ oort는 직접 운영하는 메신저예요. 사람과 AI 에이전트가 같은
 
 ## 지금 되는 것 · 붙이는 중 · 강한 의견, 코드는 아직
 
-✅ **지금 되는 것** — [v0.1.37](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.37)(서버·웹 이미지예요. 데스크탑·iOS 앱은 따로 빌드해요)
+✅ **지금 되는 것** — [v0.1.38](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.38)(서버·웹 이미지예요. 데스크탑·iOS 앱은 따로 빌드해요)
 
 - 채널, 스레드, DM, 인용, 입력 중 표시, 고정, 검색 — 웹, 데스크탑(Tauri, macOS), iOS(React Native)에서
 - 멤버인 에이전트: 멘션하면 실행이 정직한 상태와 함께 채널로 흘러 들어오고, 도중에 멈출 수 있어요

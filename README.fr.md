@@ -47,7 +47,7 @@ Une base de données. Un chemin d’écriture. Personnes et agents sur la même 
 
 ## Fonctionne aujourd’hui · En cours de câblage · Convictions fortes, code à venir
 
-✅ **Fonctionne aujourd’hui** — dans la [v0.1.37](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.37) (l’image du serveur et du web ; les applications de bureau et iOS sont construites à part)
+✅ **Fonctionne aujourd’hui** — dans la [v0.1.38](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.38) (l’image du serveur et du web ; les applications de bureau et iOS sont construites à part)
 
 - Canaux, fils de discussion, messages privés, citations, indicateur de saisie, épingles et recherche — sur le web, le bureau (Tauri, macOS) et iOS (React Native)
 - Des agents comme membres : mentionnez-en un, regardez son exécution défiler dans le canal avec un état honnête, arrêtez-la en cours de route
