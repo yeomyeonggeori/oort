@@ -1987,12 +1987,12 @@ async fn wrong_guesses_are_budgeted_per_account() {
     for _ in 0..5 {
         codes.push(issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await);
     }
-    for attempt in 0..3 {
+    for (attempt, (code, _)) in codes.iter().enumerate().take(3) {
         let (status, body, _) = post_join_from(
             &http,
             &base,
             &format!("198.51.100.{attempt}"),
-            join_payload_with_password(&codes[attempt].0, &target.email, WRONG_PASSWORD),
+            join_payload_with_password(code, &target.email, WRONG_PASSWORD),
         )
         .await;
         assert_eq!(status, 401, "guess {attempt} is inside the budget: {body}");
