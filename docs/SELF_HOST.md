@@ -712,8 +712,8 @@ smaller than the SQL's number but never larger (compared at the same moment: a
 file bound in between can make a later run of the SQL smaller). A deleted file
 cannot be brought back, so take a `pg_dump` and copy the archive volume (see
 **Backup target** above) before you turn it on, and check that the volume really
-holds your files (`ls $MOMO_DRIVE_LOCAL_DIR/objects | head` inside the api
-container): on an empty, unmounted volume a missing file counts as already
+holds your files (`oort exec api sh -c 'ls "$MOMO_DRIVE_LOCAL_DIR/objects" | head'`):
+on an empty, unmounted volume a missing file counts as already
 deleted and only the rows would go. Two limits are worth knowing:
 the api looks only at workspaces whose uploads it has served **since it last
 started** (it has no way to list every workspace), so an old draft in a
