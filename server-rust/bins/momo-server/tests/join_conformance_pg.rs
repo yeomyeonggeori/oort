@@ -3234,30 +3234,31 @@ async fn parked_on_a_lock(su: &PgPool, fragment: &str) -> i64 {
     .expect("read pg_stat_activity")
 }
 
-/// How many backends of this database are waiting for an advisory lock — the
-/// membership lock, when a membership change is queued behind a join.
-async fn parked_on_an_advisory_lock(su: &PgPool) -> i64 {
-    sqlx::query_scalar(
-        "SELECT count(*)::bigint FROM pg_stat_activity \
-          WHERE datname = current_database() AND state = 'active' \
-            AND wait_event_type = 'Lock' AND wait_event = 'advisory'",
-    )
-    .fetch_one(su)
-    .await
-    .expect("read pg_stat_activity")
-}
-
-/// How many advisory locks of this database are in `mode` and `granted` (or still waiting
-/// for it). The membership lock is the only advisory lock the server takes in a test run,
-/// so a count of one is that lock.
-async fn advisory_locks(su: &PgPool, mode: &str, granted: bool) -> i64 {
+/// How many holders (`granted`) or waiters (`!granted`) there are of **this workspace's
+/// membership lock** in `mode`.
+///
+/// The lock is named by the same 64-bit key the server derives
+/// (`hashtextextended(workspace_id::text, 128)`); `pg_locks` shows a bigint advisory key
+/// as two halves (`classid` the high 32 bits, `objid` the low 32, `objsubid = 1`), so the
+/// key is split the same way here. Naming the key, rather than counting every advisory
+/// lock, keeps the answer about the lock under test and no other.
+async fn membership_lock_holders(su: &PgPool, workspace: Uuid, mode: &str, granted: bool) -> i64 {
+    let key: i64 = sqlx::query_scalar("SELECT hashtextextended($1::text, 128)")
+        .bind(workspace.to_string())
+        .fetch_one(su)
+        .await
+        .expect("derive the membership lock key");
+    let (high, low) = (((key >> 32) & 0xFFFF_FFFF), (key & 0xFFFF_FFFF));
     sqlx::query_scalar(
         "SELECT count(*)::bigint FROM pg_locks \
-          WHERE locktype = 'advisory' AND mode = $1 AND granted = $2 \
+          WHERE locktype = 'advisory' AND objsubid = 1 AND mode = $1 AND granted = $2 \
+            AND classid::bigint = $3 AND objid::bigint = $4 \
             AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
     )
     .bind(mode)
     .bind(granted)
+    .bind(high)
+    .bind(low)
     .fetch_one(su)
     .await
     .expect("read pg_locks")
@@ -3380,12 +3381,12 @@ async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_wor
         // that joins do not wait for each other (an exclusive hold would line every join
         // up behind the one in front), and held, so that a change has to wait for it.
         assert_eq!(
-            advisory_locks(&su, "ShareLock", true).await,
+            membership_lock_holders(&su, fixture.workspace, "ShareLock", true).await,
             1,
             "{scene}: the parked join holds the workspace membership lock in shared mode"
         );
         assert_eq!(
-            advisory_locks(&su, "ExclusiveLock", true).await,
+            membership_lock_holders(&su, fixture.workspace, "ExclusiveLock", true).await,
             0,
             "{scene}: no one holds it exclusively yet"
         );
@@ -3428,14 +3429,15 @@ async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_wor
             if change_task.is_finished() {
                 break;
             }
-            if parked_on_an_advisory_lock(&su).await > 0 {
+            if membership_lock_holders(&su, fixture.workspace, "ExclusiveLock", false).await > 0 {
                 waiting = true;
                 break;
             }
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         let finished_early = change_task.is_finished();
-        let queued_exclusive = advisory_locks(&su, "ExclusiveLock", false).await;
+        let queued_exclusive =
+            membership_lock_holders(&su, fixture.workspace, "ExclusiveLock", false).await;
         ledger.rollback().await.expect("release the ledger");
         let joined = join.await.expect("join task");
         let changed = change_task.await.expect("change task");
