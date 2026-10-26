@@ -86,8 +86,13 @@ import {ds2Radius, font, radius, space, type Palette} from './tokens';
 //
 // 세 묶음이다: 화면 모드(라이트·시스템·다크, #4526) / 테마(새벽하늘·흑연·노을띠) / 강조색
 // (기본·프리셋 4종·직접 입력). 미리보기는 따로 그리지 않는다 — 고르는 순간 프로바이더가
-// 앱 전체를 다시 칠하므로 지금 보고 있는 이 화면이 곧 미리보기다. 테마 타일과
+// 앱 전체를 다시 칠하므로 지금 보고 있는 이 화면이 곧 미리보기다(바탕·카드·강조색). **배경**만 예외다: 설정 페이지는
+// 불투명한 층(`bg`)이라 고른 배경이 이 화면 뒤로 비치지 않고 대화 화면에서 보인다(design-review #4457 r1 L9). 테마 타일과
 // 강조색 점은 **다른 선택지의 모습**을 보이려는 것이고, 그 값은 core 표에서 읽는다.
+//
+// **앞 표지는 고르는 값의 모습이다**(`phone-sheets.md` §4): 테마 견본(44)·강조색 점·사진 썸네일. 이 표지가 있는 카드끼리는
+// 같은 앞 칸 폭(`SWATCH_WIDTH`)을 써서 글자 열이 맞는다(테마·강조색). 표지 없는 「화면 모드」 카드와는 글자 시작이 달라도
+// 되는 것이 그 규칙의 예외다 — 표지는 장식 앞 칸이 아니라 값의 내용이라 뺄 수 없다.
 //
 // 강조색은 `signal` 네 값만 바꾼다. 주 버튼(잉크)은 그대로다(D3 「주 버튼 검정」).
 // 직접 입력은 core 규칙을 그대로 따른다 — 보정되면 「대비를 위해 조정됨」, 이 테마에서
@@ -350,14 +355,15 @@ function SignalGroup(): React.JSX.Element {
         accessibilityRole="radiogroup"
         accessibilityLabel="강조색"
         testID="appearance-signal-group">
-        {/* 색 점(20)은 아이콘 칸(22)에 가운데로 서서 구분선이 글자 열에서 시작한다(`inset="icon"`). */}
-        <GroupCard inset="icon" testID="appearance-signal-list">
+        {/* 색 점(20)은 견본 칸(44)과 같은 폭의 칸에 가운데로 선다 — 테마 카드와 글자 열이 맞고, 구분선이 그 열에서 시작한다. */}
+        <GroupCard inset={SWATCH_WIDTH} testID="appearance-signal-list">
           <ChoiceRow
             title="기본"
             selected={usingDefault}
             onPress={() => pick(null)}
             accessibilityLabel="기본, 강조색"
             leading={<Dot color={THEMES[themeId][scheme].color.signal} testID="appearance-dot-default" />}
+            leadingWidth={SWATCH_WIDTH}
             leadingAlign="center"
             testID="appearance-signal-default"
             checkTestID="appearance-signal-default-check"
@@ -377,6 +383,7 @@ function SignalGroup(): React.JSX.Element {
                     testID={`appearance-dot-${id}`}
                   />
                 }
+                leadingWidth={SWATCH_WIDTH}
                 leadingAlign="center"
                 testID={`appearance-signal-${id}`}
                 checkTestID={`appearance-signal-${id}-check`}

@@ -4,6 +4,7 @@ import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/
 
 import {
   SIGNAL_ADJUSTED_COPY,
+  SIGNAL_PRESET_IDS,
   SIGNAL_REJECTION_COPY,
   resolvePreset,
   resolveSignal,
@@ -297,18 +298,24 @@ describe('카드 구분선은 앞 칸을 비켜 글자 열에서 시작한다 (#
       .getAllByTestId('group-divider')
       .map(divider => StyleSheet.flatten(divider.props.style).marginLeft);
 
-  it('테마(견본)·강조색(점)·화면 모드(앞 칸 없음)가 각자의 글자 열에 선이 시작한다', () => {
+  it('테마(견본)·강조색(점)은 같은 글자 열이고, 화면 모드(앞 표지 없음)는 앞 칸 없는 열이다', () => {
     mount();
     // 견본의 실제 폭을 읽는다 — 카드의 `inset` 이 그 폭과 같아야 선이 글자 열에 맞는다.
     const swatch = StyleSheet.flatten(
       screen.getByTestId('appearance-swatch-dawnsky', {includeHiddenElements: true}).props.style,
     ).width as number;
     expect(swatch).toBeGreaterThan(0);
+    // 앞 표지가 있는 두 카드는 같은 폭의 앞 칸을 쓴다 — 글자 시작이 같다(design-review #4457 r1 H1: 세 카드가 모두 달랐다).
+    const leadWidth = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style).width;
+    expect(leadWidth('appearance-theme-dawnsky-lead')).toBe(swatch);
+    for (const id of ['default', ...SIGNAL_PRESET_IDS]) {
+      expect(leadWidth(`appearance-signal-${id}-lead`)).toBe(swatch);
+    }
     expect(new Set(indentsOf('appearance-theme-list-card'))).toEqual(new Set([dividerIndent(swatch)]));
-    expect(new Set(indentsOf('appearance-signal-list-card'))).toEqual(new Set([dividerIndent('icon')]));
+    expect(new Set(indentsOf('appearance-signal-list-card'))).toEqual(new Set([dividerIndent(swatch)]));
     expect(new Set(indentsOf('theme-scheme-card'))).toEqual(new Set([dividerIndent('plain')]));
-    // 세 값이 서로 다르다 — 모두 같으면 이 단정이 아무것도 가르지 못한다.
-    expect(new Set([dividerIndent(swatch), dividerIndent('icon'), dividerIndent('plain')]).size).toBe(3);
+    // 대조군: 앞 칸 있는 열과 없는 열은 다르다 — 같으면 위 단정이 아무것도 가르지 못한다.
+    expect(dividerIndent(swatch)).not.toBe(dividerIndent('plain'));
   });
 });
 
