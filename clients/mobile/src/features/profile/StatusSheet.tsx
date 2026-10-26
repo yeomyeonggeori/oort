@@ -1,6 +1,7 @@
 import {
   CUSTOM_STATUS_CLEAR_LABEL,
   CUSTOM_STATUS_DIALOG_TITLE,
+  CUSTOM_STATUS_EXPIRY_LABEL,
   CUSTOM_STATUS_PRESETS,
   CUSTOM_STATUS_SAVE_LABEL,
   CUSTOM_STATUS_SAVING_LABEL,
@@ -19,11 +20,12 @@ import type {PresenceStatus, RosterMember} from '@momo/core/lib/api';
 import React, {useState} from 'react';
 import {StyleSheet, TextInput, View} from 'react-native';
 
+import {ROW_GLYPH_MAX_SCALE} from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {ChoiceRow, GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
+import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
-import {font, radius, SHEET, space, type Palette} from '../../design/tokens';
+import {font, radius, SHEET, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useSetPresence} from './selfStatus';
 import {SettingsNote} from './settingsRows';
 import {initialExpiry, statusDraftVerdict, statusSeed} from './statusDraft';
@@ -36,8 +38,15 @@ import {initialExpiry, statusDraftVerdict, statusSeed} from './statusDraft';
 //
 //   머리   [✓] 상태 설정 [X]       ✓ = 확정(바뀐 것이 있을 때만 눌린다 — `statusDraft.ts`)
 //   입력   상태 입력 알약          앞 이모지 + 글 한 줄
-//   기간   「지우기」 행 한 줄     값 + 펼침 ⌄ → 누르면 그 자리에서 고른다(시트 위 시트 없음)
+//   기간   「만료」 행 한 줄       값 + 펼침 ⌄ → 누르면 그 자리에서 고른다(시트 위 시트 없음)
 //   빠른 상태   이모지 + 이름 목록   누르면 이모지와 글을 채운다(저장은 ✓)
+//
+// 행 이름은 코어의 낱말(`CUSTOM_STATUS_EXPIRY_LABEL`, 웹 `SetStatusDialog` 와 같다)이다. 「지우기」는 이 시트에서 파괴 행
+// (「상태 지우기」, 위험색) 하나만의 이름이다 — 중립 선택기가 같은 동사를 입으면 위계(`phone-sheets.md` §3)가 흐려지고
+// 접힌 행이 「지우기 … 지우지 않음」으로 같은 동사를 두 번 말한다(design-review #4457 r1 H2).
+//
+// 두 카드 모두 **앞 칸이 없다**(`phone-sheets.md` §4: 한 표면의 카드는 모두 앞 칸을 갖거나 모두 갖지 않는다). 빠른 상태의
+// 이모지는 이름 앞에 글자로 붙는다 — 따로 앞 칸을 주면 「기간」 카드와 제목 시작이 37pt 어긋난다(r1 H1).
 //
 // 쓰는 길은 옛 장과 **그대로**다 — 웹 `SetStatusDialog` 와 같은 `PUT /presence`, 같은 코어 낱말·
 // 프리셋·상한·저장 규칙(`customStatusDraftWrite`). 서버 계약을 더하지 않는다.
@@ -180,12 +189,13 @@ function StatusSheetBody({
 
         <GroupCard label="기간" testID="status-expiry-card">
           <ListRow
-            title="지우기"
+            title={CUSTOM_STATUS_EXPIRY_LABEL}
             value={expiryValue}
             accessory="expand"
+            expanded={expiryOpen}
             onPress={() => setExpiryOpen(open => !open)}
-            accessibilityLabel={`지우기, ${expiryValue}`}
-            accessibilityHint="지울 시간을 고릅니다."
+            accessibilityLabel={`${CUSTOM_STATUS_EXPIRY_LABEL}, ${expiryValue}`}
+            accessibilityHint="상태가 사라질 때를 고릅니다."
             testID="status-expiry-row"
           />
           {expiryOpen
@@ -204,12 +214,12 @@ function StatusSheetBody({
             : null}
         </GroupCard>
 
-        <GroupCard label="빠른 상태" inset="icon" testID="status-presets-card">
+        <GroupCard label="빠른 상태" testID="status-presets-card">
           {CUSTOM_STATUS_PRESETS.map(preset => (
             <ListRow
               key={preset.id}
-              title={preset.label}
-              leading={<RowEmoji emoji={preset.emoji} />}
+              // 이모지는 글자로 이름 앞에 붙는다(앞 칸 없음). 낭독에는 이름만 읽힌다(`accessibilityLabel`).
+              title={`${preset.emoji}  ${preset.label}`}
               onPress={() => {
                 setEmoji(preset.emoji);
                 setText(preset.label);
@@ -269,12 +279,15 @@ function StatusInputPill({
       <TextInput
         value={emoji}
         onChangeText={onEmojiChange}
-        // 이모지를 자리표시자로 두면 제 색으로 그려져 「골라 둔 값」처럼 보인다(옛 리뷰 M-2).
+        // 이모지를 자리표시자로 두면 제 색으로 그려져 「골라 둔 값」처럼 보인다(옛 리뷰 M-2). 「＋」 는 컨트롤 표지라
+        // 안내문(`textMuted`)이 아니라 셰브론과 같은 `icon` 색이다 — 같은 색이면 입력 칸이 아니라 목록 기호로 읽힌다(r1 M1).
         placeholder="＋"
-        placeholderTextColor={palette.textMuted}
+        placeholderTextColor={palette.icon}
         accessibilityLabel="상태 이모지"
         accessibilityHint="키보드의 이모지 판에서 고릅니다."
         keyboardAppearance={keyboardAppearance}
+        // 22pt 칸에 서는 글리프라 큰 글씨에서도 배율을 따라가지 않는다(행 이모지와 같은 상한). 따라가면 AX5 에서 칸을 넘는다.
+        maxFontSizeMultiplier={ROW_GLYPH_MAX_SCALE}
         style={styles.emojiInput}
         testID="status-emoji-input"
       />
@@ -296,18 +309,24 @@ function StatusInputPill({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
+    // 왼쪽 여백을 이모지 칸이 눌림 폭(44)으로 가져간다 — 칸 가운데의 글리프는 예전 자리(왼쪽 끝에서 약 19)에 그대로 선다.
     pill: {
       minHeight: SHEET.pillMinHeight,
       flexDirection: 'row',
       alignItems: 'center',
-      gap: space.md,
-      paddingHorizontal: space.lg,
+      gap: space.sm,
+      paddingLeft: space.sm,
+      paddingRight: space.lg,
       borderRadius: radius.pill,
       borderWidth: 1,
       borderColor: color.textFaint,
     },
+    // 이모지를 직접 넣는 유일한 길이다 — 눌림 영역이 글리프 크기(약 30×21)가 아니라 44×44 이상이다(r1 M1). 알약 높이(44)는
+    // 테두리까지 센 바깥 높이라 안쪽이 42 가 되므로 칸이 `minHeight` 를 직접 들어 알약이 테두리만큼(2pt) 자란다.
     emojiInput: {
-      minWidth: SHEET.iconSlot + space.sm,
+      alignSelf: 'stretch',
+      minWidth: TOUCH_TARGET,
+      minHeight: TOUCH_TARGET,
       textAlign: 'center',
       fontSize: font.heading,
       color: color.text,

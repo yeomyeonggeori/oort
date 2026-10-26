@@ -1,3 +1,8 @@
+import {
+  CUSTOM_STATUS_CLEAR_LABEL,
+  CUSTOM_STATUS_EXPIRY_LABEL,
+  CUSTOM_STATUS_PRESETS,
+} from '@momo/core/features/presence/customStatus';
 import type {Member} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -15,9 +20,11 @@ import {Dimensions, StyleSheet} from 'react-native';
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {ROW_GLYPH_MAX_SCALE} from '../src/design/atoms';
+import {dividerIndent} from '../src/design/sheetModel';
 import {ThemeProvider} from '../src/design/theme';
 import {pinReduceMotion} from './fixtures/reduceMotion';
-import {SHEET} from '../src/design/tokens';
+import {darkPalette, lightPalette, SHEET, TOUCH_TARGET} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -738,6 +745,99 @@ describe('상태 설정 바텀시트 (#2848, ADR-0176, #4457)', () => {
     expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy();
     expect(presencePuts()).toHaveLength(0);
   }, 20000);
+});
+
+// =============================================================================
+// design-review #4457 r1 — 상태 설정 시트가 고친 것 (H1 · H2 · M1 · M4 · M5).
+//   H1  두 카드 모두 앞 칸이 없다 — 빠른 상태의 이모지는 이름 앞 글자라 「기간」 카드와 제목 시작이 같다
+//   H2  둘째 줄의 이름은 코어의 만료 낱말이다 — 「지우기」는 파괴 행(「상태 지우기」) 하나만의 이름이다
+//   M1  이모지 칸의 눌림 영역이 44×44 이상이고 안내 「＋」 는 컨트롤 색이다
+//   M4  펼침 행이 펼침 상태를 말하고 ⌄ 가 뒤집힌다
+//   M5  접힌 행의 긴 값(「지금대로 · 10월 27일 …까지」)이 두 줄까지 읽힌다
+// =============================================================================
+describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
+  async function openStatusSheet() {
+    const page = await openSheet();
+    fireEvent.press(within(page).getByTestId('profile-status-row'));
+    return within(within(page).getByTestId('status-sheet'));
+  }
+
+  it('H2: 기간 행의 이름은 코어의 만료 낱말이고, 파괴 동사 「지우기」는 「상태 지우기」 한 곳에만 있다', async () => {
+    server.self = {...baseSelf(), statusEmoji: '🌴', statusText: '휴가'};
+    const sheet = await openStatusSheet();
+    const row = sheet.getByTestId('status-expiry-row');
+    expect(row).toHaveTextContent(new RegExp(CUSTOM_STATUS_EXPIRY_LABEL));
+    expect(row.props.accessibilityLabel).toBe(`${CUSTOM_STATUS_EXPIRY_LABEL}, 지우지 않음`);
+    // 시트 안에서 「지우기」가 들어간 글자는 파괴 행의 이름 하나뿐이다(대조: 그 행은 실제로 있다).
+    const withVerb = sheet.getAllByText(/지우기/);
+    expect(withVerb).toHaveLength(1);
+    expect(within(sheet.getByTestId('status-clear')).getByText(CUSTOM_STATUS_CLEAR_LABEL)).toBe(withVerb[0]);
+    // 접근성 이름도 같다 — 파괴 행 말고는 「지우기」로 시작하지 않는다.
+    expect(row.props.accessibilityLabel).not.toMatch(/지우기/);
+  });
+
+  it('H1: 두 카드 모두 앞 칸이 없다 — 이모지는 이름 앞에 글자로 붙고, 구분선은 한 열에서 시작한다', async () => {
+    const sheet = await openStatusSheet();
+    fireEvent.press(sheet.getByTestId('status-expiry-row')); // 기간 카드에도 구분선이 서게 연다
+    expect(sheet.queryAllByTestId(/-lead$/, {includeHiddenElements: true})).toEqual([]);
+    for (const preset of CUSTOM_STATUS_PRESETS) {
+      const row = sheet.getByTestId(`status-preset-${preset.id}`);
+      expect(row).toHaveTextContent(`${preset.emoji}  ${preset.label}`);
+      // 낭독에는 이모지 없이 이름만 읽힌다.
+      expect(row.props.accessibilityLabel).toBe(preset.label);
+    }
+    const indents = sheet
+      .getAllByTestId('group-divider')
+      .map(divider => StyleSheet.flatten(divider.props.style).marginLeft);
+    expect(indents.length).toBeGreaterThan(CUSTOM_STATUS_PRESETS.length - 1); // 두 카드의 선이 다 있다
+    expect(new Set(indents)).toEqual(new Set([dividerIndent('plain')]));
+  });
+
+  it('M1: 이모지 칸은 44×44 이상의 눌림 영역이고, 안내 「＋」 는 글 칸 안내문과 다른 컨트롤 색이다', async () => {
+    const sheet = await openStatusSheet();
+    const emoji = sheet.getByTestId('status-emoji-input');
+    const style = StyleSheet.flatten(emoji.props.style);
+    expect(style.minWidth).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    expect(style.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    expect(style.alignSelf).toBe('stretch'); // 알약 높이 전체를 쓴다
+    // 22pt 칸의 글리프라 큰 글씨에서도 배율을 따라가지 않는다.
+    expect(emoji.props.maxFontSizeMultiplier).toBe(ROW_GLYPH_MAX_SCALE);
+    const text = sheet.getByTestId('status-text-input');
+    expect([lightPalette.icon, darkPalette.icon]).toContain(emoji.props.placeholderTextColor);
+    expect(emoji.props.placeholderTextColor).not.toBe(text.props.placeholderTextColor);
+  });
+
+  it('M4: 기간 행은 펼침 상태를 말하고, 펼치면 ⌄ 가 뒤집히며 고르면 다시 접힌다', async () => {
+    const sheet = await openStatusSheet();
+    const row = () => sheet.getByTestId('status-expiry-row');
+    const flip = () =>
+      StyleSheet.flatten(sheet.getByTestId('status-expiry-row-expand', {includeHiddenElements: true}).props.style)
+        .transform;
+    expect(row().props.accessibilityState).toMatchObject({expanded: false});
+    expect(flip()).toBeUndefined();
+    fireEvent.press(row());
+    expect(row().props.accessibilityState).toMatchObject({expanded: true});
+    expect(flip()).toEqual([{rotate: '180deg'}]);
+    fireEvent.press(sheet.getByTestId('status-expiry-30m'));
+    expect(row().props.accessibilityState).toMatchObject({expanded: false});
+    expect(flip()).toBeUndefined();
+  });
+
+  it('M5: 접힌 행의 값은 두 줄까지 읽힌다 — 저장된 만료가 「지금대로 · …까지」로 길어져도', async () => {
+    server.self = {
+      ...baseSelf(),
+      statusEmoji: '🏠',
+      statusText: '재택',
+      statusExpiresAtMs: Date.now() + 30 * 60 * 60_000, // 내일이 아닌 다른 날
+    };
+    // 시험 환경의 창은 글자 배율 2 라 값이 제목 아래로 쌓인다(큰 글씨 배치) — 기본 글씨(오른쪽에 선 값)의 배치를 잰다.
+    const real = Dimensions.get('window');
+    jest.spyOn(Dimensions, 'get').mockImplementation(() => ({...real, fontScale: 1}) as never);
+    const sheet = await openStatusSheet();
+    const value = sheet.getByTestId('status-expiry-row-value');
+    expect(value).toHaveTextContent(/지금대로 · .+까지/);
+    expect(value.props.numberOfLines).toBe(2);
+  });
 });
 
 // =============================================================================
