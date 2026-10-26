@@ -5,7 +5,7 @@ import type {
   RequestRouting,
   RosterMember,
 } from "../../lib/api";
-import { uuidEq } from "../../lib/api";
+import { threadRollup, uuidEq } from "../../lib/api";
 
 // =============================================================================
 // Timeline ordering model (pure). `seq` is the ONLY ordering authority, never
@@ -166,54 +166,110 @@ function lowerBound(messages: Message[], seq: number): number {
 }
 
 /**
- * 같은 seq 의 옛 행 위로 새 행이 덮일 때, 새 행이 첨부를 **말하지 않았다면** 옛 행의
- * 첨부를 잇는다 (#4441).
+ * 같은 seq 의 옛 행 위로 새 행이 덮일 때, 새 행이 **말하지 않은** 읽기 장식을 옛 행에서
+ * 잇는다 (#4441 첨부, #4450 롤업·인용·run 종결).
  *
- * 편집이 내는 두 투영 — `message.edited` 프레임과 `PATCH` 응답 — 은 첨부를 싣지
- * 않는다. 서버가 그렇게 쓴 이유는 둘 다 자기 자리에 적혀 있다: 「Editing a body
- * cannot change what is bound to the message, so the client keeps the file cards it
- * already drew」(`routes/messages.rs` `edit`), 「both clients merge it by seq over
- * the row they hold」(`interaction.rs` `emit_message_edited_in_tx`). 첨부 행은
- * complete 된 뒤 불변이고 다른 메시지로 옮겨 붙지도 못하므로(`build_broadcast_payload`)
- * 편집 투영에 첨부가 없다는 것은 「없어졌다」가 아니라 「이 투영은 그것을 말하지
- * 않는다」이다. 덮어쓰기가 그 침묵을 삭제로 읽어서, 고친 사람과 그 줄을 열어 둔 모든
- * 화면에서 사진 카드가 사라졌다.
+ * ## 무엇을 말하지 않는가 — 서버 소스가 정한 허용목록 넷
  *
- * 규칙은 **이 방향 하나**다.
- * - 들어온 행이 첨부를 한 건이라도 말하면 그 말이 이긴다. 합치지 않는다.
- * - 말하지 않으면(키가 없거나 빈 배열 — 서버는 빈 배열의 키를 뺀다) 같은 메시지의
- *   옛 첨부가 남는다.
- * - 「편집」인지를 `state`·`editedAtMs` 로 가리지 않는다. 스트림 조각과 props 만 바꾼
- *   갱신도 같은 `message.edited` 이고(프레임은 행의 현재 값을 그대로 싣는다 — 고친 적
- *   없는 행이면 `state` 는 `sent`, `edited_at_ms` 는 null), 같은 침묵이다.
- * - 묘비는 첨부를 주고받지 않는다. 들어온 행이 묘비면 옛 첨부를 잇지 않고, 든 행이
- *   묘비면 그 첨부를 새 행에 잇지 않는다. 실시간 묘비(`applyTombstone`)와 기록 페이지의
- *   묘비는 첨부를 그대로 들고 있을 수 있다(화면은 `deleted` 에서 카드를 그리지 않는다).
- *   늦게 온 편집 프레임이 그것을 새 행으로 되살리면 안 된다. 이 함수가 바꾸는 것은
- *   「편집 투영의 침묵」 하나뿐이고, 묘비가 낀 길의 동작은 수리 전과 같다.
+ * 편집이 내는 두 투영 — `message.edited` 프레임(`build_message_edited_payload`)과 `PATCH`
+ * 응답(`routes/messages.rs` `edit` → `message_dto`) — 은 **행**을 다시 투영할 뿐 그 둘레의
+ * 읽기 장식을 다시 만들지 않는다. 서버 주석: 「An edit re-projects the row, not the
+ * conversation around it」. `MessageDto.run_ended` 주석은 이 넷을 한 부류로 묶는다: 「a
+ * projection beside the message — the same shape `thread`, `replyTo` and `attachments`
+ * already take, for the same reason: a reader needs it, the row does not own it」.
+ *
+ *   칸           message.edited 프레임      PATCH 응답           서버가 싣지 않는 이유
+ *   attachments  키 없음                    `&[]` (키 생략)      편집은 묶인 첨부를 바꾸지 못한다
+ *   thread       키 없음                    `None`               롤업은 읽을 때 붙는다(`PagedMessage`)
+ *   replyTo      `reply_to_id` 만           `None`               「a rendered quote inside it would
+ *                                                                be the snapshot 규칙 3 forbids」
+ *   runEnded     키 없음                    `false` (키 생략)    페이지 읽기에만 실린다(#1166)
+ *
+ * 프레임이 싣는 나머지 — id·channel_id·seq·hlc_*·author_member_id·type·state·body·props·
+ * root_id·reply_to_id·created_at_ms·edited_at_ms·deleted_at_ms — 는 프레임이 **직접 말한다**.
+ * 말한 칸은 비어 있어도(`body: null`, `props: {}`) 프레임의 말이 이긴다. 그래서 이 규칙은
+ * 「들어온 값이 undefined 면 든 것을 유지」가 아니라 위 넷만 고르는 허용목록이다. 일반 규칙으로
+ * 쓰면 본문을 비우는 갱신(props 만 바꾼 `message.edited`)이 본문을 되살린다.
+ *
+ * 덮어쓰기가 그 침묵을 삭제로 읽어서, 첨부(#4441)는 사진 카드가, 롤업(#4450)은 루트 밑의
+ * 「답글 N개」가, 풀린 인용은 인용 블록이 — 원본이 화면 창 밖이면 「불러오지 못함」으로 —
+ * 고친 사람과 그 줄을 열어 둔 모든 화면에서 사라졌다(새로 고침하면 돌아온다 — 기록 페이지는
+ * 넷을 싣는다).
+ *
+ * ## 칸마다 「말했다」의 뜻 — 들어온 행이 말하면 그 말이 이긴다. 합치지 않는다.
+ * - attachments: 한 건 이상. 키가 없거나 빈 배열이면 침묵이다(서버는 빈 배열의 키를 뺀다).
+ * - thread: `threadRollup(incoming) !== null`. 화면이 롤업을 읽는 그 함수와 같은 판정이라
+ *   `reply_count` 가 0 인 롤업은 「답글 없음」이지 말한 것이 아니다. 서버는 `reply_count > 0`
+ *   일 때만 싣는다. 서버에는 롤업을 줄이는 길도 없어서(`thread.reply_count` 는 +1 만 한다)
+ *   기록 페이지가 침묵하는데 든 롤업이 남는 경로가 없다.
+ * - replyTo: 있으면 말한 것이다. 침묵일 때 옛 행의 풀린 인용은 **이 행이 지금 가리키는 원본의
+ *   것일 때만**(`replyToId`) 잇는다. 한 메시지의 인용 대상은 바뀌지 않으니 서버가 못 만드는
+ *   입력이지만, 보존이 「든 것이 있으면 붙인다」가 아니라 「이 행이 가리키는 그 원본」임을 못 박는다.
+ * - runEnded: `true`. 서버는 `true` 일 때만 싣는다. 끝난 run 은 다시 열리지 않는다. 화면은 이
+ *   플래그를 행에서 다시 읽지 않고 도착 때 `endedStreamRunIds` 가 거두어 종결 기록에 심은 것을
+ *   읽는다 — 그래도 허용목록을 서버의 「읽기 장식」 부류와 같게 두려고 잇는다.
+ *
+ * ## 편집이 아닌 투영에도 같다 — 일부러
+ * 「편집인지」를 `state`·`editedAtMs` 로 가리지 않는다. 스트림 조각과 props 만 바꾼 갱신도 같은
+ * `message.edited` 이고(프레임은 행의 현재 값을 그대로 싣는다 — 고친 적 없는 행이면 `state` 는
+ * `sent`, `edited_at_ms` 는 null), `message.new`·전송 응답도 `replyTo` 와 롤업을 싣지 않는다
+ * (ADR-0148, `MessageDto` 주석). 기록으로 읽은 줄 위에 같은 줄의 라이브 프레임이 겹쳐 와도(되쏘기·
+ * 재구독) 같은 침묵이다.
+ *
+ * ## 묘비와 다른 메시지
+ * - 묘비는 장식을 주고받지 않는다. 들어온 행이 묘비면 옛 장식을 잇지 않고, 든 행이 묘비면 그
+ *   장식을 새 행에 잇지 않는다. 실시간 묘비(`applyTombstone`)와 기록 페이지의 묘비는 장식을 그대로
+ *   들 수 있다(화면은 `deleted` 에서 그리지 않는다). 늦게 온 편집 프레임이 그것을 되살리면 안 된다.
+ *   이 함수가 바꾸는 것은 「편집 투영의 침묵」 하나뿐이고, 묘비가 낀 길의 동작은 수리 전과 같다.
+ *   (편집 프레임·PATCH 응답이 지나는 문 {@link applyEditedMessage} 는 한 걸음 더 간다 — 든 줄이
+ *   묘비면 그 편집을 아예 받지 않는다. 그 가드는 이 병합이 아니라 그 문에만 있다.)
  * - seq 가 같아도 id 가 다르면 다른 메시지다. 물려받지 않는다.
  *
- * 이 규칙은 서버에 **살아 있는 메시지에서 첨부를 떼는 길이 없다**는 사실에 서 있다
- * (첨부 라우트는 uploads·complete·content 셋뿐이고, 삭제도 첨부 행은 건드리지 않는다).
- * 그런 길(「파일 빼기」)이 생기면 「말하지 않음」과 「없어짐」을 가를 명시 신호가
- * 필요하다.
+ * 이 규칙은 서버에 **살아 있는 메시지에서 이 넷을 떼는 길이 없다**는 사실에 서 있다(첨부 라우트는
+ * uploads·complete·content 셋뿐이고, 삭제도 첨부 행은 건드리지 않으며, 롤업은 늘기만 하고, 인용
+ * 대상은 불변이다). 그런 길이 생기면 「말하지 않음」과 「없어짐」을 가를 명시 신호가 필요하다.
  */
-function keepHeldAttachments(held: Message, incoming: Message): Message {
-  // `?.length ?? 0`·`!heldFiles`: 타입 밖 입력(null)에도 던지지 않는다. 모든 실시간
-  // 프레임이 지나는 리듀서에 이 수리가 새 던질 자리를 만들지 않으려는 방어다.
-  if ((incoming.attachments?.length ?? 0) > 0) return incoming;
-  const heldFiles = held.attachments;
-  if (!heldFiles || heldFiles.length === 0) return incoming;
+function keepHeldProjection(held: Message, incoming: Message): Message {
   if (incoming.state === "deleted" || held.state === "deleted") return incoming;
   if (!uuidEq(held.id, incoming.id)) return incoming;
-  return { ...incoming, attachments: heldFiles };
+
+  const kept: Partial<Message> = {};
+
+  // `?.length ?? 0`·`!heldFiles`: 타입 밖 입력(null)에도 던지지 않는다. 모든 실시간
+  // 프레임이 지나는 리듀서에 이 수리가 새 던질 자리를 만들지 않으려는 방어다.
+  const heldFiles = held.attachments;
+  if ((incoming.attachments?.length ?? 0) === 0 && heldFiles && heldFiles.length > 0) {
+    kept.attachments = heldFiles;
+  }
+  if (threadRollup(incoming) === null && threadRollup(held) !== null) {
+    kept.thread = held.thread;
+  }
+  const heldQuote = held.replyTo;
+  if (
+    !incoming.replyTo &&
+    heldQuote &&
+    incoming.replyToId !== undefined &&
+    uuidEq(heldQuote.id, incoming.replyToId)
+  ) {
+    kept.replyTo = heldQuote;
+  }
+  if (incoming.runEnded !== true && held.runEnded === true) {
+    kept.runEnded = true;
+  }
+
+  return Object.keys(kept).length === 0 ? incoming : { ...incoming, ...kept };
 }
 
 /**
  * Merge a batch (any order, may overlap existing) into ascending-by-seq order.
  * Last write wins per seq (realtime edits/tombstones replace history rows) —
- * except the attachments an edit projection does not carry
- * ({@link keepHeldAttachments}).
+ * except the four read decorations a projection may not carry: attachments,
+ * thread rollup, resolved quote, run-ended ({@link keepHeldProjection}).
+ *
+ * This is the **upsert**: a row that is not held is inserted wherever its seq
+ * falls. History pages, `?after` backfill, `message.new` and own-send echoes need
+ * exactly that. An edit projection must not — it goes through
+ * {@link applyEditedMessage}.
  *
  * Canonical name per R-1 §공통계약: history pages, realtime publications and
  * `?after` backfill all land here, so a reconnect reconciles by seq instead of
@@ -229,7 +285,7 @@ export function reconcileMessages(
     const idx = lowerBound(next, msg.seq);
     if (idx < next.length && next[idx].seq === msg.seq) {
       // replace duplicate seq (edit/tombstone/re-fetch)
-      next[idx] = keepHeldAttachments(next[idx], msg);
+      next[idx] = keepHeldProjection(next[idx], msg);
     } else {
       next.splice(idx, 0, msg);
     }
@@ -243,6 +299,52 @@ export function reconcileMessages(
 
 /** Live-append alias of {@link reconcileMessages} (R-1 §공통계약 vocabulary). */
 export const mergeMessages = reconcileMessages;
+
+/**
+ * 편집 투영(`message.edited` 프레임·`PATCH` 응답)을 **이미 든 줄에만** 적용한다 (#4450).
+ *
+ * 편집은 줄을 다시 투영할 뿐 줄을 만들지 않는다. 그런데 `reconcileMessages` 는 seq 로 접는
+ * 합류라서 없는 줄을 그 seq 자리에 끼워 넣는다. 서버는 이 클라가 들지 않은 줄의 편집도 알린다 —
+ * 다른 기기의 승인 결정이 오래된 카드를 갈아 끼우고(#3771), 제어 창이 열리면 옛 로그인 카드의
+ * props 를 갈아 끼우고(`emit_message_edited_in_tx`), 누군가 어제 쓴 글을 고친다. 그때 피해는 한
+ * 줄이 아니라 **커서**다.
+ * - 든 창보다 오래된 줄이 맨 위에 끼면 `oldestSeq` 가 내려가고, 「위로 더 읽기」(`before:
+ *   oldestSeq`)가 그 사이 기록을 영영 건너뛴다.
+ * - 든 창보다 새로운 줄이 끼면 `newestSeq`(꼬리 되읽기의 `after`)가 앞서가 그 앞을 건너뛴다.
+ * - 끼어든 줄은 첨부·롤업·인용이 없는 반쪽이다. 편집 투영은 그것들을 싣지 않는다.
+ *
+ * 못 찾으면 **같은 state** 를 돌려준다(`applyTombstone` 과 같다 — 렌더가 없다). 버려도 잃는 것이
+ * 없다: 그 줄이 창에 들어오는 길은 위로 더 읽기·꼬리 되읽기·`message.new` 이고, 앞의 둘은 기록
+ * 페이지라 완전한 투영(첨부·롤업·인용)을 싣고 오며, `message.new` 는 막 만들어진 줄이다.
+ *
+ * 「든 줄」은 seq 와 id 가 **둘 다** 같은 줄이다. 다른 방의 같은 seq 가 든 줄을 덮으면 안 된다.
+ * 편집인지는 줄의 모양(`state`·`editedAtMs`)으로 가릴 수 없다 — 고친 적 있는 오래된 줄도 기록
+ * 페이지에는 그 표지를 달고 오고, 그 줄은 들어와야 한다. 그래서 가드는 `reconcileMessages` 가
+ * 아니라 편집 투영만 지나는 이 문에 있다. 든 줄에 대한 적용은 `reconcileMessages` 그대로라
+ * 보존 규칙({@link keepHeldProjection})이 같이 선다.
+ *
+ * ## 든 줄이 묘비면 묘비가 이긴다 (planner 결정, #4450)
+ * 든 줄이 이미 지워졌다면(`state: "deleted"`) 늦게 온 편집은 무시한다 — 같은 state 를 돌려준다.
+ * 서버는 지운 메시지를 사람이 고치게 두지 않는다: `PATCH` 는 `EditDeleted`(400)로 거절하고 스트림
+ * 조각의 쓰기도 같은 가드를 지난다(`edit_message_in_tx`·`stream_message_body_in_tx`). 그러니
+ * 「지운 뒤에 고친」 순서는 서버에 없고, 묘비 위에 편집 프레임이 도착한다면 재생·되쏘기 순서가
+ * 어긋나 지우기 전의 프레임이 늦게 온 것이다. 그것이 마지막 쓰기 우선으로 본문을 되살리면 사람이
+ * 지운 글이 화면에 다시 서는데, 무시해서 잃는 것은 없다 — 지운 줄은 그려지지 않는다. (서버가 스스로
+ * 다시 쓴 카드를 알리는 props 프레임 `emit_message_edited_in_tx` 는 지워진 행도 현재 모양, 곧
+ * `state: "deleted"` 로 싣는다. 든 줄이 이미 묘비라면 그것도 같은 말이다.)
+ * 이 규칙도 편집 문에만 있다. `reconcileMessages`(기록 페이지·`message.new`·꼬리 되읽기)는 여전히
+ * seq 로 접는 마지막 쓰기 우선이고, 묘비가 낀 그 길의 동작은 수리 전과 같다.
+ */
+export function applyEditedMessage(
+  state: TimelineState,
+  edited: Message
+): TimelineState {
+  const held = state.messages[lowerBound(state.messages, edited.seq)];
+  if (held === undefined || held.seq !== edited.seq) return state;
+  if (!uuidEq(held.id, edited.id)) return state;
+  if (held.state === "deleted") return state;
+  return reconcileMessages(state, [edited]);
+}
 
 /**
  * Mark one message as deleted **in place** (B11).

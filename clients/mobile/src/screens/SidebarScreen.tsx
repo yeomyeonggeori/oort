@@ -56,7 +56,7 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../design/tokens';
-import {usePalette, useStyles} from '../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {useAgentLiveness} from '../features/agents/useAgentLiveness';
 import {useAgentWorkingSignals} from '../features/agents/workingSignal';
 import {StatusDot} from '../features/presence/StatusDot';
@@ -337,6 +337,7 @@ export default function SidebarScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const {member, workspaceId, signOut} = useSession();
   const realtime = useRealtime();
   const [profileOpen, setProfileOpen] = useState(false);
@@ -707,6 +708,7 @@ export default function SidebarScreen({
         onChangeText={setQuery}
         placeholder="채널·사람 이름"
         placeholderTextColor={palette.textMuted}
+        keyboardAppearance={keyboardAppearance}
         autoCapitalize="none"
         autoCorrect={false}
         autoFocus={filterOpen && query === ''}

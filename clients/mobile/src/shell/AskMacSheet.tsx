@@ -21,7 +21,7 @@ import {
   Sentence,
 } from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {usePalette, useStyles} from '../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {
   ds2Radius,
   font,
@@ -181,6 +181,7 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
@@ -609,6 +610,7 @@ function SheetBody({
               : '예: 로그인 버그를 찾아서 고쳐 줘.'
           }
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           multiline
           lineBreakStrategyIOS="hangul-word"
           textAlignVertical="top"

@@ -33,6 +33,17 @@ import App from './App';
 import {name as appName} from './app.json';
 import {measureMode} from './measure/root';
 import {sessionGateLaunch} from './gate/root';
+import {installForegroundNotificationHandler} from './src/push/foregroundPresentation';
+
+/**
+ * 앱이 앞에 떠 있는 동안 온 푸시를 어떻게 보일지 (#4310). 처리기가 없으면 iOS 는 그 푸시를 배너도
+ * 목록도 소리도 없이 버린다. 그래서 JS 가 도는 **가장 이른 자리**에서 건다: 이 모듈 평가 시점이라
+ * React 트리가 서기도 전이고 첫 렌더·`useEffect` 를 기다리지 않는다. `AppRegistry.registerComponent`
+ * 보다 앞이어야 하고, 아래 루트 바꿔치기(하네스)와 무관하게 걸린다. 이 앱에서 처리기를 거는 곳은
+ * 이 한 줄뿐이다 — `setNotificationHandler` 는 부를 때마다 앞의 처리기를 갈아 끼운다
+ * (`src/push/foregroundPresentation.ts` 머리말, 위치는 `foregroundPresentation4310.test.tsx` 가 잰다).
+ */
+installForegroundNotificationHandler();
 
 /**
  * Normally `App`. With the launch argument `-momoMeasure YES`, and only in a dev

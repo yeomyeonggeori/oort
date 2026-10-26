@@ -1,6 +1,6 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {contrast} from '@momo/core/design/color';
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor} from './fixtures/darkWorld';
 import React from 'react';
 import {AccessibilityInfo, Dimensions, Image, StyleSheet} from 'react-native';
 

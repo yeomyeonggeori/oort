@@ -122,6 +122,7 @@ import {
 import {noteConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
+import {SheetKitSurface} from './sheetKit';
 import {
   DelegateWorkSheet,
   type DelegatePreview,
@@ -195,6 +196,7 @@ import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
+import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
@@ -2190,6 +2192,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('device-key-')) {
     return <DeviceKeySurface which={name.slice('device-key-'.length)} />;
   }
+  // #4318: 공용 시트·페이지 부품 전시 + 이전한 시트(`measure/sheetKit.tsx`, 고정 데이터·가상 인물).
+  if (name === 'sheetkit' || name.startsWith('sheetkit-')) {
+    return <SheetKitSurface which={name.slice('sheetkit'.length).replace(/^-/, '')} />;
+  }
   // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
   if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {
     return <AppsSurface which={name.slice('apps-'.length)} />;
@@ -2252,6 +2258,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('avatar-approval')) {
     return <AvatarApprovalSurface which={name.slice('avatar-approval'.length).replace(/^-/, '')} />;
   }
+
+  // #4526: 화면 모드의 기본·저장·시스템 추종. 안쪽에 진짜 ThemeProvider 를 세운다(바깥 FixedScheme 을 이긴다).
+  if (name === 'theme-live') return <ThemeLiveSurface />;
 
   // #4285: 아무도 가져가지 않은 요청 — 홈 「작업 중」 카드와 대화 아래 활동 줄(「아직 받지 않았어요」·「취소」).
   if (isUncollectedSurface(name)) {

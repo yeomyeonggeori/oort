@@ -21,7 +21,8 @@ import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
 //
 //   1. 고른 것이 **저장**되고, 다음 실행이 그것으로 시작한다
 //   2. 고른 것이 **memo 를 통과해** 행 하나하나까지 간다
-//   3. 아무도 안 골랐으면 **시스템**을 따르고, 시스템이 바뀌면 함께 바뀐다
+//   3. 아무도 안 골랐으면 **라이트**(폰의 기본, #4526)이고, **시스템을 고른** 폰은 시스템을 따르며
+//      시스템이 바뀌면 함께 바뀐다. 프로바이더 밖의 기본도 라이트다
 //   4. `src/` 어디에도 정적 팔레트를 다시 들여오는 파일이 없다
 //
 // 2 번이 이 파일의 존재 이유다. 「프록시로 `styles` 를 감싸면 30 개 파일을 안
@@ -134,24 +135,26 @@ afterEach(() => {
 });
 
 describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
-  it('시스템 → 라이트 → 다크 → 시스템, 매번 행의 잉크가 따라간다', () => {
-    // 시스템은 다크다 (`jest.setup.js` 가 이 스위트의 기본을 그렇게 둔다).
+  it('라이트(기본) → 다크 → 라이트 → 시스템, 매번 행의 잉크가 따라간다', () => {
+    // 시스템은 다크다 (`jest.setup.js` 가 이 스위트의 기본을 그렇게 둔다). 그런데 첫 렌더가
+    // 라이트이므로 폰의 기본은 시스템이 아니다(#4526).
     render(
       <ThemeProvider>
         <ThemeControl />
         <Row />
       </ThemeProvider>,
     );
-    expect(renderedBodyInk()).toBe(darkPalette.text);
-
-    fireEvent.press(screen.getByTestId('theme-light'));
-    // **이 한 줄이 이 파일의 이유다.** 행은 `React.memo` 이고 props 는 하나도
-    // 바뀌지 않았다. 색이 컨텍스트를 구독하지 않았다면 여기서 다크가 남는다.
     expect(renderedBodyInk()).toBe(lightPalette.text);
 
     fireEvent.press(screen.getByTestId('theme-dark'));
+    // **이 한 줄이 이 파일의 이유다.** 행은 `React.memo` 이고 props 는 하나도
+    // 바뀌지 않았다. 색이 컨텍스트를 구독하지 않았다면 여기서 라이트가 남는다.
     expect(renderedBodyInk()).toBe(darkPalette.text);
 
+    fireEvent.press(screen.getByTestId('theme-light'));
+    expect(renderedBodyInk()).toBe(lightPalette.text);
+
+    // 라이트에서 시스템으로 옮겼는데 색이 바뀐다 — 「시스템」 줄이 실제로 기기(다크)를 따른다.
     fireEvent.press(screen.getByTestId('theme-system'));
     expect(renderedBodyInk()).toBe(darkPalette.text);
   });
@@ -161,6 +164,11 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
       <ThemeProvider>
         <ThemeControl />
       </ThemeProvider>,
+    );
+    // 기본이 라이트라서, 먼저 다크로 갔다가 돌아와야 「컨트롤이 다시 그려진다」가 시험된다.
+    fireEvent.press(screen.getByTestId('theme-dark'));
+    expect(flatten(screen.getByTestId('theme-control').props.style).backgroundColor).toBe(
+      darkPalette.surface,
     );
     fireEvent.press(screen.getByTestId('theme-light'));
     // 카드의 바탕과 고른 줄의 글자가 둘 다 라이트 팔레트에서 온다 (#2702 에서
@@ -209,7 +217,6 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
     // 3:1 위로 재야 했다(리뷰 M-1). #2702 의 선택지는 카드 안의 줄이라 누를 수 있다는
     // 것은 줄 자체가 말하고, 이 단정이 지는 것은 **어느 줄이 골라졌는가**가 체크
     // 하나에만 실려 있지 않다는 것이다 — 체크는 손가락이 덮는다.
-    act(() => setSystemColorScheme('light'));
     render(
       <ThemeProvider>
         <ThemeControl />
@@ -217,18 +224,19 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
     );
     const ink = (label: string) => flatten(screen.getByText(label).props.style);
 
-    // 기본 = 시스템. 체크는 그 줄에만 있고, 나머지 두 줄은 자리만 지킨다.
-    expect(screen.getByTestId('theme-system-check')).toBeTruthy();
-    expect(screen.queryByTestId('theme-light-check')).toBeNull();
-    expect(ink('시스템').color).toBe(lightPalette.accentText);
-    expect(ink('시스템').fontWeight).toBe('600');
-    expect(ink('라이트').color).toBe(lightPalette.text);
+    // 기본 = 라이트(#4526). 시스템은 다크(jest.setup)인데 라이트 줄이 서 있으므로 기본이
+    // 시스템이 아니다. 체크는 그 줄에만 있고, 나머지 두 줄은 자리만 지킨다.
+    expect(screen.getByTestId('theme-light-check')).toBeTruthy();
+    expect(screen.queryByTestId('theme-system-check')).toBeNull();
+    expect(ink('라이트').color).toBe(lightPalette.accentText);
+    expect(ink('라이트').fontWeight).toBe('600');
+    expect(ink('시스템').color).toBe(lightPalette.text);
 
     fireEvent.press(screen.getByTestId('theme-dark'));
     expect(screen.getByTestId('theme-dark-check')).toBeTruthy();
-    expect(screen.queryByTestId('theme-system-check')).toBeNull();
+    expect(screen.queryByTestId('theme-light-check')).toBeNull();
     expect(ink('다크').color).toBe(darkPalette.accentText);
-    expect(ink('시스템').color).toBe(darkPalette.text);
+    expect(ink('라이트').color).toBe(darkPalette.text);
   });
 
   it('고른 칸만 selected 다 — 셋 중 하나', () => {
@@ -237,11 +245,15 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
         <ThemeControl />
       </ThemeProvider>,
     );
-    fireEvent.press(screen.getByTestId('theme-light'));
     const state = (id: string) =>
       screen.getByTestId(id).props.accessibilityState?.selected;
+    // 처음에는 기본(라이트)이 서 있다. 눌러서 옮기면 그 칸만 따라온다.
     expect([state('theme-system'), state('theme-light'), state('theme-dark')]).toEqual(
       [false, true, false],
+    );
+    fireEvent.press(screen.getByTestId('theme-dark'));
+    expect([state('theme-system'), state('theme-light'), state('theme-dark')]).toEqual(
+      [false, false, true],
     );
   });
 });
@@ -253,6 +265,8 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
         <ThemeControl />
       </ThemeProvider>,
     );
+    // 기본(라이트)과 같은 값을 골라도 기록한다 — 고른 폰이 되는 것이 이 한 줄이고, 기본이
+    // 또 바뀌어도 그 폰의 선택은 그대로여야 한다(#4526).
     fireEvent.press(screen.getByTestId('theme-light'));
     expect(NON_SECRET_KEYS.appearance.startsWith('momo.')).toBe(true);
     // 외양 레코드(core `AppearanceV2`) — 스킴만 바뀌고 테마·신호는 기본 그대로다.
@@ -267,25 +281,36 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
     expect(store.map.has(NON_SECRET_KEYS.themeChoice)).toBe(false);
   });
 
-  it('새로 마운트하면 저장된 것으로 첫 렌더가 나온다 — 다크 한 프레임이 없다', () => {
-    store.map.set(NON_SECRET_KEYS.themeChoice, 'light');
+  it('새로 마운트하면 저장된 것으로 서 있다 (첫 렌더 기록은 themeDefault4526 이 잰다)', () => {
+    store.map.set(NON_SECRET_KEYS.themeChoice, 'dark');
+    // 시스템이 라이트라서 「다크」는 저장에서만 올 수 있다.
+    act(() => setSystemColorScheme('light'));
     render(
       <ThemeProvider>
         <Row />
       </ThemeProvider>,
     );
-    expect(renderedBodyInk()).toBe(lightPalette.text);
+    expect(renderedBodyInk()).toBe(darkPalette.text);
   });
 
-  it('옛 스킴 키(momo.mobile.theme.v1)만 있어도 그 스킴으로 시작한다 — 이행', () => {
-    store.map.set(NON_SECRET_KEYS.themeChoice, 'light');
-    render(
-      <ThemeProvider>
-        <Row />
-      </ThemeProvider>,
-    );
-    expect(renderedBodyInk()).toBe(lightPalette.text);
-  });
+  it.each([
+    // [옛 키 값, 시스템] — 둘 다 다크로 시작해야 한다. 기본(라이트)과 같은 결과가 나오는 조합은
+    // 이행을 못 가려서 뺐다: 옛 「시스템」은 **고른** 값이라 시스템이 다크면 다크가 남는다.
+    ['dark', 'light'],
+    ['system', 'dark'],
+  ] as const)(
+    '옛 스킴 키(momo.mobile.theme.v1)만 있어도 그 스킴으로 시작한다 — 이행: %s (시스템 %s)',
+    (legacy, system) => {
+      store.map.set(NON_SECRET_KEYS.themeChoice, legacy);
+      act(() => setSystemColorScheme(system));
+      render(
+        <ThemeProvider>
+          <Row />
+        </ThemeProvider>,
+      );
+      expect(renderedBodyInk()).toBe(darkPalette.text);
+    },
+  );
 
   it('새 키가 있으면 옛 키보다 먼저 읽는다', () => {
     store.map.set(NON_SECRET_KEYS.themeChoice, 'light');
@@ -301,9 +326,8 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
     expect(renderedBodyInk()).toBe(darkPalette.text);
   });
 
-  it('저장이 없거나 모르는 값이면 시스템을 따른다', () => {
-    store.map.set(NON_SECRET_KEYS.themeChoice, 'sepia');
-    act(() => setSystemColorScheme('light'));
+  it('저장이 하나도 없으면 폰의 기본 — 라이트다. 시스템이 다크여도 (#4526)', () => {
+    // 시스템은 다크다(jest.setup). 예전에는 여기서 다크가 나왔다(기본 = 시스템).
     render(
       <ThemeProvider>
         <ThemeControl />
@@ -311,6 +335,20 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
       </ThemeProvider>,
     );
     expect(renderedBodyInk()).toBe(lightPalette.text);
+    expect(screen.getByTestId('theme-light').props.accessibilityState?.selected).toBe(true);
+    expect(screen.getByTestId('theme-system').props.accessibilityState?.selected).toBe(false);
+  });
+
+  it('모르는 옛 값이면 전과 같이 시스템을 따른다 — 사람이 남긴 흔적이 있으면 건드리지 않는다', () => {
+    // 쓰레기 값은 「안 고름」(키 없음)이 아니다. 보수적으로 전과 같이 읽는다.
+    store.map.set(NON_SECRET_KEYS.themeChoice, 'sepia');
+    render(
+      <ThemeProvider>
+        <ThemeControl />
+        <Row />
+      </ThemeProvider>,
+    );
+    expect(renderedBodyInk()).toBe(darkPalette.text);
     expect(screen.getByTestId('theme-system').props.accessibilityState?.selected).toBe(
       true,
     );
@@ -318,7 +356,12 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
 });
 
 describe('시스템 추종', () => {
-  it('시스템이 바뀌면 화면이 따라간다 — 앱을 다시 열지 않아도', () => {
+  it('시스템을 고른 폰은 시스템이 바뀌면 화면이 따라간다 — 앱을 다시 열지 않아도', () => {
+    // 기본이 라이트가 됐으므로 시스템을 따르려면 **고른** 폰이어야 한다.
+    store.map.set(
+      NON_SECRET_KEYS.appearance,
+      JSON.stringify({v: 2, scheme: 'system', theme: 'dawnsky', signal: null, density: 'comfortable'}),
+    );
     render(
       <ThemeProvider>
         <Row />
@@ -341,8 +384,10 @@ describe('시스템 추종', () => {
     expect(renderedBodyInk()).toBe(darkPalette.text);
   });
 
-  it('프로바이더가 없어도 시스템을 따른다 — 하네스와 단위 테스트의 자리', () => {
-    act(() => setSystemColorScheme('light'));
+  it('프로바이더가 없으면 폰의 기본 — 라이트다. 시스템이 다크여도 (#4526)', () => {
+    // 시스템은 다크다(jest.setup). 예전에는 여기서 시스템을 따라 다크가 나왔다. 시스템이
+    // 라이트일 때 라이트를 단정하면 「시스템 추종」과 「라이트 고정」을 가르지 못하므로, 가를 수
+    // 있는 쪽(다크 기기)에서 잰다.
     render(<Row />);
     expect(renderedBodyInk()).toBe(lightPalette.text);
   });

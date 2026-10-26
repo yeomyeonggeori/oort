@@ -6,7 +6,7 @@ import {
   AVATAR_SHAPE,
   AVATAR_SIZE,
 } from '@momo/core/features/workspace/avatar';
-import {cleanup, render, within} from '@testing-library/react-native';
+import {cleanup, render, within} from './fixtures/darkWorld';
 import {CONV} from '../src/features/conversation/convDesign';
 import React from 'react';
 

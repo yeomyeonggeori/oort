@@ -172,6 +172,9 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
   // 비교자가 이것을 안 보면, 필이 켜진 표면에서 붙은 행이 노드를 알리지 않은 채
   // 남아 점프가 그 행에 초점을 주지 못한다.
   registerRowNode: {registerRowNode: () => () => {}},
+  // #4455 r3 H3. 대기 중인 서버 사본(사진 메아리가 걷히기 전에 눈에 안 보이는 채 미리 마운트된 행)이 드러남으로 바뀔 때 행이 다시 그려져야
+  // 한다. 스칼라라 동일성이 곧 값이다. 비교자가 이것을 안 보면 서버 사본이 투명한 채(높이 0) 남는다.
+  standby: {standby: true},
 };
 
 describe('memo 비교자는 모든 prop 을 본다', () => {
