@@ -1,7 +1,8 @@
 import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
-import {ActivityIndicator, StyleSheet, Text} from 'react-native';
+import {ActivityIndicator, Dimensions, StyleSheet, Text} from 'react-native';
 
+import {STACK_PILL_SCALE} from '../src/design/atoms';
 import {SHEET_ICONS} from '../src/design/icons';
 import {ConfirmCheck, SheetHeader} from '../src/design/SheetChrome';
 import {ListRow} from '../src/design/sheetParts';
@@ -20,8 +21,19 @@ import {imageSources} from './fixtures/sheetContract';
 // =============================================================================
 
 afterEach(cleanup);
+afterEach(() => jest.restoreAllMocks());
 
 const mount = (ui: React.ReactElement) => render(<FixedScheme scheme="light">{ui}</FixedScheme>);
+
+/**
+ * `useWindowDimensions` 가 읽는 창의 글자 배율만 바꾼다. **RN 의 jest 프리셋 기본 배율은 2** 라서(= `STACK_PILL_SCALE`
+ * 1.5 이상) 손대지 않으면 `ListRow` 의 값이 늘 제목 아래로 내려온 모습(#4457 의 값 쌓기)으로 그려진다 — 「오른쪽에 선 값」을
+ * 재는 시험은 배율 1 을 직접 고른다.
+ */
+function setFontScale(fontScale: number) {
+  const real = Dimensions.get('window');
+  jest.spyOn(Dimensions, 'get').mockImplementation(() => ({...real, fontScale}) as never);
+}
 
 const flat = (testID: string) =>
   StyleSheet.flatten(screen.getByTestId(testID, {includeHiddenElements: true}).props.style);
@@ -61,7 +73,8 @@ function drawnChildren(testID: string): string[] {
 }
 
 describe('행 — 오른쪽 임의 노드·역할·펼침 상태 (#4458)', () => {
-  it('trailing 은 값 뒤·셰브론 앞에 **그려지고**, 없으면 그 자리도 없다', () => {
+  it('trailing 은 값 뒤·셰브론 앞에 **그려지고**, 없으면 그 자리도 없다 (기본 글씨 — 값이 오른쪽에 선다)', () => {
+    setFontScale(1);
     const view = mount(
       <ListRow
         title="내 맥"
@@ -75,14 +88,32 @@ describe('행 — 오른쪽 임의 노드·역할·펼침 상태 (#4458)', () =>
     );
     expect(within(screen.getByTestId('row')).getByTestId('chip')).toHaveTextContent('내 맥 켜짐');
     // 이름 칸 → 값 → 표식 → 셰브론 순서로 서야 한다(표식이 셰브론 뒤로 가면 행의 오른쪽 끝이 어긋난다).
-    expect(drawnChildren('row')).toEqual(['View', 'Text', 'chip', 'Image']);
+    expect(drawnChildren('row')).toEqual(['View', 'row-value', 'chip', 'Image']);
     view.rerender(
       <FixedScheme scheme="light">
         <ListRow title="내 맥" detail="켜져 있어요" value="값" accessory="chevron" onPress={() => {}} testID="row" />
       </FixedScheme>,
     );
     expect(screen.queryByTestId('chip')).toBeNull();
-    expect(drawnChildren('row')).toEqual(['View', 'Text', 'Image']);
+    expect(drawnChildren('row')).toEqual(['View', 'row-value', 'Image']);
+  });
+
+  it('큰 글씨(STACK_PILL_SCALE 부터): 값은 이름 칸으로 내려오고 trailing 은 그대로 셰브론 앞에 선다 — #4457 의 값 쌓기와 #4458 의 trailing 이 만나는 자리', () => {
+    setFontScale(STACK_PILL_SCALE);
+    mount(
+      <ListRow
+        title="내 맥"
+        detail="켜져 있어요"
+        value="값"
+        accessory="chevron"
+        trailing={<Text testID="chip">내 맥 켜짐</Text>}
+        onPress={() => {}}
+        testID="row"
+      />,
+    );
+    // 행의 직계 자식에는 값이 없다(이름 칸 안으로 내려갔다) — 표식은 여전히 셰브론 바로 앞이다.
+    expect(drawnChildren('row')).toEqual(['View', 'chip', 'Image']);
+    expect(within(screen.getByTestId('row')).getByTestId('row-value')).toHaveTextContent('값');
   });
 
   it('trailing 은 눌리지 않는 행에도 서고, 기본 보조기술 이름(제목·보조 줄·값)에는 들어가지 않는다 — 이름은 호출자가 직접 준다', () => {

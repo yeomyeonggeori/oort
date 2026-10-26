@@ -30,7 +30,7 @@ import {
 } from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {SheetHeader, type SheetConfirm} from '../design/SheetChrome';
-import {GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
+import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {
   font,
@@ -70,13 +70,7 @@ import {useHostedConnections} from '../features/hostedAgents/queries';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
-import {
-  ChoiceRow,
-  Field,
-  FieldLabel,
-  SheetNotice,
-  TextArea,
-} from './sheetForm';
+import {Field, FieldLabel, SheetNotice, TextArea} from './sheetForm';
 
 // =============================================================================
 // 작업 맡기기 — 폰에서 에이전트에게 type=work 요청을 만든다 (#3588 N8, ADR-0198 D4 증보 1).

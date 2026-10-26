@@ -1,7 +1,6 @@
 import React, {forwardRef} from 'react';
 import {
   Image,
-  Pressable,
   StyleSheet,
   Text,
   TextInput,
@@ -11,18 +10,17 @@ import {
 } from 'react-native';
 
 import {Sentence} from '../design/atoms';
-import {SHEET_ICON_SIZE, SHEET_ICONS} from '../design/icons';
+import {SHEET_ICON_SIZE} from '../design/icons';
 import {GroupCard, GroupLabel} from '../design/sheetParts';
 import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {ds2Radius, font, line, radius, SHEET, space, type Palette} from '../design/tokens';
 
 // =============================================================================
 // 폼 시트의 **임시 부품** (#4458). 폼이 있는 큰 시트(새 채널·내 맥에 보내기·작업 맡기기)가 공용 시트 부품
-// (`design/sheetParts.tsx`)에서 못 찾은 것들이다. `design/` 의 부품 파일은 이 이슈가 고치지 않는다(#4457 이 같은
-// 파일을 고치는 중이라 소유가 겹친다) — 그래서 여기 두고, 정식 부품이 올라오면 한 줄 import 치환으로 지운다.
+// (`design/sheetParts.tsx`)에서 못 찾은 것들이다. `design/` 의 부품 파일은 이 이슈가 고치지 않는다 — 그래서 여기 두고,
+// 정식 부품이 올라오면 한 줄 import 치환으로 지운다. (라디오 행 `ChoiceRow` 는 여기 있다가 #4457 이 `sheetParts.tsx`
+// 에 올려서 그리로 갈아 끼우고 지웠다.)
 //
-//   ChoiceRow    라디오 행(오른쪽 ✓). #4457 이 `sheetParts.tsx` 에 올리는 **`ChoiceRow` 와 같은 props 이름**이다.
-//                착륙하면 `import {ChoiceRow} from '../design/sheetParts'` 로 바꾸고 이 함수를 지운다.
 //   SheetNotice  사실 한 문단(머리말 + 설명)을 카드로. 옛 `NoticeBlock` 은 가로 여백 16 을 스스로 들고 테두리 상자라
 //                `SheetScroll` 의 거터와 겹쳐 32 가 된다.
 //   FieldLabel   섹션 라벨 + 오른쪽의 한 마디(「조금 남았어요」). `GroupLabel` 은 문자열 하나뿐이다.
@@ -32,73 +30,6 @@ import {ds2Radius, font, line, radius, SHEET, space, type Palette} from '../desi
 //
 // 모두 `Palette` 역할과 토큰만 읽는다. 입력의 외곽선은 `textFaint`(3:1, ADR-0189 D6)이고 실패하면 `dangerText` 다.
 // =============================================================================
-
-/**
- * 라디오 행: 서로 배타적인 값을 한 줄씩 고른다. 오른쪽 ✓ 는 고른 줄에만 서고 자리는 늘 지킨다(고른 줄이 바뀔 때 글자가
- * 옆으로 움찔하지 않는다). **고른 줄은 세 신호가 함께 바뀐다 — 강조색 글자 · 굵기 · ✓.** 보조기술에는 `radio` +
- * `selected` 로 읽힌다.
- */
-export function ChoiceRow({
-  title,
-  detail,
-  selected,
-  onPress,
-  disabled = false,
-  accessibilityLabel,
-  accessibilityHint,
-  testID,
-  checkTestID,
-}: {
-  title: string;
-  detail?: string;
-  selected: boolean;
-  onPress: () => void;
-  disabled?: boolean;
-  accessibilityLabel?: string;
-  accessibilityHint?: string;
-  testID?: string;
-  /** 고른 줄의 ✓ 에만 붙는다 — 고르지 않은 줄에는 ✓ 가 그려지지 않는다. */
-  checkTestID?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityLabel={accessibilityLabel ?? title}
-      accessibilityHint={accessibilityHint}
-      // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞는다.
-      accessibilityState={disabled ? {selected, disabled: true} : {selected}}
-      disabled={disabled ? true : undefined}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.row,
-        detail ? styles.rowTop : null,
-        pressed && !disabled && styles.rowPressed,
-        disabled && styles.rowDisabled,
-      ]}
-      testID={testID}>
-      <View style={styles.rowText}>
-        <Text
-          lineBreakStrategyIOS="hangul-word"
-          style={[styles.rowTitle, selected && styles.rowTitleSelected]}>
-          {title}
-        </Text>
-        {detail ? <Sentence style={styles.rowDetail}>{detail}</Sentence> : null}
-      </View>
-      <View style={styles.checkSlot}>
-        {selected ? (
-          // 장식이다 — 행 자신이 접근성 요소(`radio`)라 안의 글리프는 따로 읽히지 않는다.
-          <Image
-            source={SHEET_ICONS.check}
-            style={styles.check}
-            importantForAccessibility="no"
-            testID={checkTestID}
-          />
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
 
 /** 사실 한 문단(머리말 + 설명) 카드. 재시도·위험색이 없는 말이다(`NoticeBlock` 과 같은 뜻). */
 export function SheetNotice({
@@ -195,38 +126,6 @@ export const TextArea = forwardRef<TextInput, FieldProps & {minHeight?: number}>
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    row: {
-      minHeight: SHEET.rowMinHeight,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.sm,
-      paddingHorizontal: SHEET.cardInset,
-      paddingVertical: space.md,
-    },
-    // 보조 줄이 붙은 행은 위로 붙인다 — ✓ 가 제목 첫 줄 옆에 선다(보조 줄 쪽으로 쏠리지 않게).
-    rowTop: {alignItems: 'flex-start'},
-    rowPressed: {backgroundColor: color.surfacePressed},
-    rowDisabled: {opacity: 0.55},
-    rowText: {flex: 1},
-    rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
-    rowTitleSelected: {color: color.accentText, fontWeight: '600'},
-    rowDetail: {
-      marginTop: space.xs,
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.textMuted,
-    },
-    checkSlot: {
-      width: SHEET_ICON_SIZE.check,
-      height: SHEET_ICON_SIZE.check,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    check: {
-      width: SHEET_ICON_SIZE.check,
-      height: SHEET_ICON_SIZE.check,
-      tintColor: color.accentText,
-    },
     notice: {
       gap: space.xs,
       paddingHorizontal: SHEET.cardInset,

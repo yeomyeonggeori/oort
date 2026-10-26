@@ -7,7 +7,7 @@ import {AccessibilityInfo, StyleSheet, Text, View} from 'react-native';
 import {FailureBanner, LoadingState, Sentence} from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {SheetHeader, type SheetConfirm} from '../design/SheetChrome';
-import {GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
+import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {font, line, SHEET, space, type Palette} from '../design/tokens';
 import {useWorkHosts, useWorkSessions} from '../features/agents/queries';
@@ -52,7 +52,7 @@ import {spawnPort, type SpawnOutcome, type SpawnPort} from '../features/work/ask
 import {useChannels} from '../features/workspace/queries';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
-import {ChoiceRow, FieldLabel, SheetNotice, TextArea} from './sheetForm';
+import {FieldLabel, SheetNotice, TextArea} from './sheetForm';
 
 // =============================================================================
 // 내 맥에 보내기 — 폰에서 하네스로 「물어보기」·작업 요청 (#3597 T6b, ADR-0198 D4·D7 증보 1).

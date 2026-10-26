@@ -164,21 +164,20 @@ describe('모든 바텀시트는 공용 그릇과 머리를 쓴다 (#4458)', () 
     expect(offenders).toEqual([]);
   });
 
-  it('옛 묶음(GroupSection·GroupRow)은 #4457 이 대체하는 설정 영역에만 남는다 — 시트에 되돌아오지 않는다', () => {
-    const settingsArea = new Set([
-      'design/atoms.tsx', // 정의
+  it('옛 묶음(GroupSection·GroupRow)은 정의 하나와 같은 이름의 로컬 함수 하나에만 남는다 — 시트·설정 어디에도 되돌아오지 않는다', () => {
+    // #4457 이 설정 영역(본 페이지·안쪽 장)을 새 묶음 카드로 모두 옮겼으니 프로덕션 사용처는 없다. 남은 둘은:
+    //   - `design/atoms.tsx`: 옛 부품의 **정의**. 시험들이 「옛 카드가 없다」를 재려고 컴포넌트 타입을 import 한다.
+    //   - `design/ThemeControl.tsx`: atoms 의 것이 아니라 같은 이름의 **로컬** 함수(머리글 + 내용, `GroupLabel`·`GroupCard`).
+    // 허용 목록이 옛 설정 파일(ProfileSheet·StatusPage·AvatarPage…)을 더 들고 있으면 그 파일에 옛 묶음이 되돌아와도 이 시험이
+    // 붉어지지 않는다 — 그래서 **지금 있는 둘만** 적는다.
+    const remaining = new Set([
+      'design/atoms.tsx',
       'design/ThemeControl.tsx',
-      'features/memory/MemoryPauseSection.tsx',
-      'features/profile/ProfileSheet.tsx',
-      'features/profile/StatusPage.tsx',
-      'features/profile/AvatarPage.tsx',
-      'features/profile/PauseUntilPage.tsx',
-      'features/profile/PauseUntilCustom.tsx',
     ]);
     const offenders = sources()
       .filter(file => /\b(GroupSection|GroupRow)\b/.test(code(file)))
       .map(rel)
-      .filter(name => !settingsArea.has(name));
+      .filter(name => !remaining.has(name));
     expect(offenders).toEqual([]);
     // 이 이슈가 옮긴 시트는 새 부품만 쓴다.
     for (const name of [

@@ -16,12 +16,11 @@ import {FailureBanner} from '../design/atoms';
 import {HOME_ICONS} from '../design/icons';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
-import {GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
+import {ChoiceRow, GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
 import {font, space, type Palette} from '../design/tokens';
 import {workspaceKeys} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
-import {ChoiceRow} from './sheetForm';
 
 // =============================================================================
 // 새 채널 시트 — + 메뉴의 「새 채널」 (DS2-2b #2750).
