@@ -94,8 +94,10 @@ export function SwitchRow({
           value={control.value}
           onValueChange={control.onValueChange}
           disabled={control.disabled}
-          trackColor={{false: palette.border, true: palette.ok}}
-          ios_backgroundColor={palette.border}
+          // 꺼짐 트랙은 컨트롤 경계라 비텍스트 3:1(`textFaint`) — `ListRow` 의 토글과 같은 값이다(`border` 는
+          // 카드 위에서 1.3~2.1:1 이라 꺼진 스위치가 안 보였다). 앱에 꺼짐 색이 둘이 되지 않게 한다.
+          trackColor={{false: palette.textFaint, true: palette.ok}}
+          ios_backgroundColor={palette.textFaint}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
           testID={control.testID}

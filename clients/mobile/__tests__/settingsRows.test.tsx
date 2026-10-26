@@ -1,6 +1,6 @@
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {StyleSheet, Switch} from 'react-native';
 
 import {ListRow} from '../src/design/sheetParts';
 import {FixedScheme, paletteFor, type ColorScheme} from '../src/design/theme';
@@ -95,6 +95,31 @@ describe.each(['light', 'dark'] as const)('행 모양은 ListRow 와 같다 (%s)
     expect(type('라디오 설명')).toEqual(type('기준 설명'));
     expect(type('기준').color).toBe(paletteFor(scheme).text);
     expect(type('기준 설명').color).toBe(paletteFor(scheme).textMuted);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('스위치 행의 꺼짐 트랙은 ListRow 의 토글과 같다 (%s)', scheme => {
+  it('꺼짐 트랙·iOS 바탕이 둘 다 textFaint 이고, border 가 아니다', () => {
+    const {UNSAFE_getAllByType} = mount(
+      <>
+        <ListRow title="기준" accessory="toggle" toggle={{value: false, onValueChange: () => {}}} />
+        <SwitchRow
+          title="스위치"
+          checked={false}
+          control={{kind: 'switch', value: false, onValueChange: () => {}}}
+          onPress={() => {}}
+        />
+      </>,
+      scheme,
+    );
+    const [base, mine] = UNSAFE_getAllByType(Switch);
+    const palette = paletteFor(scheme);
+    // 비교가 헛돌지 않게: 두 색이 실제로 다르다 — 되돌리면(border) 이 줄이 붉어진다.
+    expect(palette.textFaint).not.toBe(palette.border);
+    expect(base.props.trackColor.false).toBe(palette.textFaint);
+    expect(mine.props.trackColor.false).toBe(base.props.trackColor.false);
+    expect(mine.props.ios_backgroundColor).toBe(base.props.ios_backgroundColor);
+    expect(mine.props.trackColor.true).toBe(base.props.trackColor.true);
   });
 });
 

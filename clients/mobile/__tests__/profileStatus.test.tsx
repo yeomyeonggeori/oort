@@ -10,11 +10,13 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {Dimensions, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
+import {SHEET} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {
   __resetSessionStore,
@@ -571,6 +573,16 @@ describe('상태 설정 바텀시트 (#2848, ADR-0176, #4457)', () => {
     expect(presencePuts()).toHaveLength(0);
   });
 
+  it('내용 맞춤 높이로 선다 — 큰 단(위 58 에서 바닥까지)이 아니라서 뒤의 설정 페이지가 위쪽에 남는다', async () => {
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-status-row'));
+    const frame = StyleSheet.flatten(within(sheet).getByTestId('page-sheet').props.style);
+    // `fit` 의 상자: 최대 높이만 있고(내용이 정한다) 위 끝·고정 높이가 없다. 큰 단은 `top` 만 있다.
+    expect(frame.maxHeight).toBe(Math.floor(Dimensions.get('window').height * SHEET.fitMaxRatio));
+    expect(frame.top).toBeUndefined();
+    expect(frame.height).toBeUndefined();
+  });
+
   it('프리셋·1시간을 골라 저장하면 선언 상태를 그대로 싣고, 시트가 닫히며 알약에 보인다', async () => {
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-status-row'));
@@ -818,7 +830,7 @@ describe('푸시 종류 — 작업 끝남 (#3342)', () => {
 // #4457 — 각 행은 **해당** 시트나 안쪽 장을 연다
 //
 // 설정 페이지의 행은 세 가지 목적지로 갈린다(`phone-sheets.md` §1): 짧은 편집은 **바텀시트**,
-// 여러 묶음·더 들어가는 행은 **안쪽 장**(설정 위에 한 겹 더 쌓이고 머리의 원형 X 가 설정으로
+// 여러 묶음·더 들어가는 행은 **안쪽 장**(설정 위에 한 겹 더 쌓이고 머리의 ‹ 뒤로가 설정으로
 // 돌려보낸다). 이 표가 행마다 어디로 가는지를 못 박는다 — 행을 엉뚱한 곳에 잇거나 시트였던 것이
 // 페이지가 되어 버려도(또는 그 반대) 여기가 빨개진다.
 // =============================================================================

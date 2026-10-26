@@ -52,8 +52,13 @@ import {initialExpiry, statusDraftVerdict, statusSeed} from './statusDraft';
 // 날짜·시각 입력은 새 의존(datetimepicker) 없이는 폰에서 쓸 만하게 만들 수 없다. 대신 저장된 만료가
 // 있으면 「지금대로」를 첫 선택지로 둔다 — 글만 고친 사람의 만료가 저장 한 번에 사라지지 않게.
 //
-// 입력이 있는 시트라 큰 단(`large`)이다 — 키보드 올림이 아직 없는 fit·medium 은 입력을 갖지 않는다
-// (`phone-sheets.md` §2).
+// ## 높이는 내용 맞춤(`fit`)이다
+//
+// Buzz 의 이 시트는 내용만큼 서서 뒤의 설정 페이지가 위쪽에 남는다 — 큰 단(위 58 에서 바닥까지)으로 세우면 뒤가
+// 거의 가려진다. 1단계는 큰 단을 골랐는데, 그때는 fit·medium 에 키보드 올림이 없어서였다. #4318 이 그것을 넣었다:
+// 키보드가 올라오면 시트의 바닥이 키보드 윗면에 앉고 높이가 「키보드 위 ~ 큰 단의 위 끝」 안으로 줄며, 이 시트의
+// 입력이 위쪽(머리 바로 아래)에 있어 가려지지 않는다. 내용이 85% 를 넘거나(SE·큰 글씨) 키보드 때문에 줄면 몸이
+// 안에서 스크롤하고 머리의 X 와 ✓ 는 고정이다(`phone-sheets.md` §2).
 // =============================================================================
 
 const PHONE_EXPIRY: readonly Exclude<PhoneStatusExpiryChoice, 'keep'>[] = [
@@ -80,6 +85,7 @@ export function StatusSheet({
 }): React.JSX.Element {
   return (
     <PageSheet
+      height="fit"
       onClose={onClose}
       accessibilityLabel={CUSTOM_STATUS_DIALOG_TITLE}
       testID="status-sheet"
