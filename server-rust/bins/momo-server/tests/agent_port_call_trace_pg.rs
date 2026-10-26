@@ -14,6 +14,10 @@
 //! | `the_trace_holds_nothing_the_caller_sent` | 호출자가 보낸 표지 문자열(도구 이름·커서·인자·method·헤더)이 감사 로그 어디에도 없다 | 값이 한 글자라도 새어 들어감 |
 //! | `the_trace_stops_at_its_hourly_cap_and_the_answers_do_not_change` | 한 자격당 시간당 240행에서 멈추고 응답은 그대로, 다른 자격은 독립 | 상한이 없어져 감사 표가 무한히 자람 |
 //! | `a_failing_trace_write_never_changes_the_answer` | 기록 INSERT가 실패해도 도구 응답 200이고 다른 감사 행은 계속 쓰인다 | 기록 실패가 응답으로 번짐 |
+//! | `a_trace_write_that_outlasts_its_ceiling_is_abandoned_and_the_answer_is_unchanged` | 2초를 넘기는 기록은 포기된다: 응답 같음·행 없음·응답이 느린 쓰기(4초)를 기다리지 않음·취소된 tx가 풀을 망가뜨리지 않아 다음 호출은 기록됨 (거절 트리거 시험이 못 닿는 `timeout`의 `Err(_)` 경로) | 한도가 사라지거나 늘어나 느린 DB가 응답을 붙잡음 |
+//! | `a_call_the_admission_limiter_refused_leaves_no_trace_row` | 입장 제한이 거절한 429에는 이 행이 없고(거절은 기존 `rate_limit.denied`가 맡음) 통과한 호출만 기록 | 신원 없이 거절된 호출에 행이 붙음 |
+//!
+//! 그리고 위 시험 가운데 셋(`every_kind_of_call_leaves_one_exact_row` · `the_counts_tell_…` · `the_trace_stops_at_its_hourly_cap_…`)은 끝에서 **모든 행**의 열(토큰·대상·run 비어 있음, actor = subject, `route`)과 `detail` 키(닫힌 집합)를 확인한다(첫 행만 보던 검사의 빈틈, 검수 R1-05).
 //!
 //! 격리 DB에서만:
 //!
@@ -59,10 +63,14 @@ struct World {
 }
 
 async fn world() -> World {
+    world_with(ServerOptions::hosted_open()).await
+}
+
+async fn world_with(options: ServerOptions) -> World {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
-    let base = start_server(app, ServerOptions::hosted_open()).await;
+    let base = start_server(app, options).await;
     let workspace = seed_workspace(&su).await;
     let (owner, owner_jwt) = seed_human(&su, workspace, "member", "박서연").await;
     let public = seed_channel(&su, workspace, "public", &[owner]).await;
@@ -170,6 +178,69 @@ const MODERN_HEADERS: [(&str, &str); 2] = [
     ("mcp-protocol-version", MODERN),
     ("mcp-method", "tools/call"),
 ];
+
+/// Every trace row of the workspace — **all** of them, not the first one found — has the columns the
+/// ADR promises (a route row of the agent, naming no token, target or run) and only the closed `detail`
+/// key set. A path that stamps one extra column on just one kind of call is caught here and nowhere else.
+async fn assert_every_row_is_plain(su: &PgPool, workspace: Uuid) {
+    let total: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'agent_port.call'",
+    )
+    .bind(workspace)
+    .fetch_one(su)
+    .await
+    .expect("count trace rows");
+    assert!(
+        total > 0,
+        "nothing to check: the helper would pass vacuously"
+    );
+    let off_shape: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'agent_port.call' \
+            AND (via_token_id IS NOT NULL OR target_id IS NOT NULL OR run_id IS NOT NULL \
+                 OR target_type IS DISTINCT FROM 'route' \
+                 OR actor_member_id IS NULL OR actor_member_id IS DISTINCT FROM subject_member_id)",
+    )
+    .bind(workspace)
+    .fetch_one(su)
+    .await
+    .expect("count off-shape trace rows");
+    assert_eq!(
+        off_shape, 0,
+        "{off_shape} of {total} trace rows carry a token, target or run, or a different actor and subject"
+    );
+    let stray_keys: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT k FROM audit_log a, LATERAL jsonb_object_keys(a.detail) k \
+          WHERE a.workspace_id = $1 AND a.action = 'agent_port.call' \
+            AND k <> ALL($2::text[])",
+    )
+    .bind(workspace)
+    .bind(
+        [
+            "schema",
+            "method",
+            "tool",
+            "outcome",
+            "reason",
+            "status",
+            "rpc_code",
+            "era",
+            "tools_listed",
+            "events",
+            "agent_jobs",
+            "jobs",
+        ]
+        .map(str::to_string)
+        .to_vec(),
+    )
+    .fetch_all(su)
+    .await
+    .expect("read trace keys");
+    assert!(
+        stray_keys.is_empty(),
+        "a key outside the closed set reached a trace row: {stray_keys:?}"
+    );
+}
 
 fn tool_count(reply: &Reply) -> usize {
     reply.body["result"]["tools"].as_array().map_or(0, Vec::len)
@@ -590,6 +661,8 @@ async fn every_kind_of_call_leaves_one_exact_row() {
     );
     assert_eq!(target_type.as_deref(), Some("route"));
     assert_eq!((target_id, run_id), (None, None));
+    // … and that holds for every row, whatever kind of call left it.
+    assert_every_row_is_plain(&w.su, w.workspace).await;
     // And the pre-dispatch row is still written, once per admitted call.
     assert_eq!(
         w.count("auth.agent_bearer.used").await,
@@ -716,6 +789,7 @@ async fn the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not() {
         .expect("scan keys");
         assert_eq!(leaked, 0, "no `{key}` key in a call trace");
     }
+    assert_every_row_is_plain(&w.su, w.workspace).await;
 }
 
 #[tokio::test]
@@ -917,6 +991,41 @@ async fn the_trace_stops_at_its_hourly_cap_and_the_answers_do_not_change() {
     let other_wire = wire.with_bearer(other.bearer.as_deref().expect("bearer"));
     assert!(other_wire.ping().await.is_ok());
     assert_eq!(trace_rows(&w.su, w.workspace, other.id).await.len(), 1);
+    assert_every_row_is_plain(&w.su, w.workspace).await;
+}
+
+/// The admission limiter's own `429` leaves no trace row: it is answered before any identity is
+/// resolved, so there is nobody to attribute a row to. The refusal is recorded where it always was
+/// (`agent_port.rate_limit.denied`), and the calls that were admitted are traced as usual.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_call_the_admission_limiter_refused_leaves_no_trace_row() {
+    // Two calls per window per credential; the third inside the same 60 s is a 429.
+    let w = world_with(ServerOptions::hosted_open().with_agent_port_limits(2, 0)).await;
+    let wire = w.wire();
+    assert!(wire.ping().await.is_ok());
+    assert!(wire.ping().await.is_ok());
+    let refused = wire.ping().await;
+    assert_eq!(
+        refused.status, 429,
+        "the third call is over the limit: {refused:?}"
+    );
+    assert_eq!(
+        w.count("agent_port.call").await,
+        2,
+        "only the two admitted calls are traced"
+    );
+    assert_eq!(
+        w.count("agent_port.rate_limit.denied").await,
+        1,
+        "the refusal is recorded where it always was"
+    );
+    assert_eq!(
+        w.count("auth.agent_bearer.used").await,
+        2,
+        "a refused call writes no used row either"
+    );
+    assert_every_row_is_plain(&w.su, w.workspace).await;
 }
 
 #[tokio::test]
@@ -967,6 +1076,72 @@ async fn a_failing_trace_write_never_changes_the_answer() {
     assert_eq!(w.count("auth.agent_bearer.used").await, 3);
 
     // The injection is real: without it the very next call is recorded.
+    cleanup(w.su.clone()).await;
+    assert!(wire.ping().await.is_ok());
+    assert_eq!(w.count("agent_port.call").await, 1);
+}
+
+/// A write that outlasts its ceiling is abandoned, not waited for: the answer is the same, nothing is
+/// committed, the call is not held longer than the ceiling allows, and the cancelled transaction does
+/// not poison the pool — once the slowness is gone the very next call is recorded. This is the one
+/// failure path (`Err(_)` of the `timeout`) the refusing-trigger test above cannot reach.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_trace_write_that_outlasts_its_ceiling_is_abandoned_and_the_answer_is_unchanged() {
+    let w = world().await;
+    let wire = w.wire();
+    let cleanup = |su: PgPool| async move {
+        sqlx::query("DROP TRIGGER IF EXISTS test_4618_slow_call_trace ON audit_log")
+            .execute(&su)
+            .await
+            .expect("drop trigger");
+        sqlx::query("DROP FUNCTION IF EXISTS test_4618_slow_call_trace()")
+            .execute(&su)
+            .await
+            .expect("drop function");
+    };
+    cleanup(w.su.clone()).await;
+    // Well past the 2 s ceiling, so the timeout fires first.
+    sqlx::query(
+        "CREATE FUNCTION test_4618_slow_call_trace() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN PERFORM pg_sleep(4); RETURN NEW; END $$",
+    )
+    .execute(&w.su)
+    .await
+    .expect("create function");
+    // Scoped to THIS test's workspace, for the same reason as the refusing trigger above.
+    sqlx::query(&format!(
+        "CREATE TRIGGER test_4618_slow_call_trace BEFORE INSERT ON audit_log \
+           FOR EACH ROW WHEN (NEW.action = 'agent_port.call' AND NEW.workspace_id = '{}') \
+           EXECUTE FUNCTION test_4618_slow_call_trace()",
+        w.workspace
+    ))
+    .execute(&w.su)
+    .await
+    .expect("create trigger");
+
+    let started = std::time::Instant::now();
+    let ping = wire.ping().await;
+    let waited = started.elapsed();
+    assert!(ping.is_ok(), "{ping:?}");
+    assert_eq!(ping.structured()["status"], "ok");
+    assert!(
+        waited < std::time::Duration::from_secs(4),
+        "the answer is held for the ceiling (2 s), not for the slow write (4 s): {waited:?}"
+    );
+    assert_eq!(
+        w.count("agent_port.call").await,
+        0,
+        "the abandoned write committed nothing"
+    );
+    assert_eq!(
+        w.count("auth.agent_bearer.used").await,
+        1,
+        "the pre-dispatch row is untouched"
+    );
+
+    // The injection is real, and the pool survived the cancelled transaction: without the trigger the
+    // next call is recorded.
     cleanup(w.su.clone()).await;
     assert!(wire.ping().await.is_ok());
     assert_eq!(w.count("agent_port.call").await, 1);

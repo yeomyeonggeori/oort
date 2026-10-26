@@ -1646,6 +1646,16 @@ mod tests {
 
     // ---- CallTraceBudget (ADR-0200 증보 4, #4618) -------------------------------------------
 
+    /// The two numbers ADR-0200 증보 4 (A4) states: 240 rows an hour per credential. The test below
+    /// walks `PER_HOUR` whatever it is, so on its own it would follow a change; the PostgreSQL suite
+    /// pins 240 too but runs only where a database is. This line is the default lane's pin: changing
+    /// the number is an edit of this test and of the ADR together.
+    #[test]
+    fn the_call_trace_budget_is_the_number_the_adr_states() {
+        assert_eq!(CallTraceBudget::PER_HOUR, 240);
+        assert_eq!(CallTraceBudget::WINDOW, Duration::from_secs(3600));
+    }
+
     /// The budget is the cap, per credential, and an hour later it reopens.
     #[test]
     fn the_call_trace_budget_stops_at_its_cap_and_a_new_hour_reopens_it() {

@@ -535,6 +535,9 @@ pub const REFUSAL_REASONS: &[(&str, &str)] = &[
     ("secret was already claimed", "tool_already_claimed"),
     ("claim window has passed", "tool_claim_expired"),
     ("internal error", "tool_internal"),
+    // The adapter's own `429` sentence (`routes/agent_port.rs`). Kept so a refusal that says it maps to
+    // a token rather than `other`, but nothing reaches it today: the admission limiter answers before
+    // any identity exists, so a `429` is never traced (ADR-0200 증보 4, A1). A defensive row, not a live one.
     ("rate limit exceeded", "rate_limited"),
 ];
 /// The token for a refusal whose sentence has no row in [`REFUSAL_REASONS`].

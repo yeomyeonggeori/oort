@@ -9,6 +9,7 @@
 //! | `a_method_and_a_tool_are_only_ever_names_this_crate_owns` | every shape of body maps to a string from a fixed list; a hostile method or tool name becomes `other` / `unknown` | `call_shape` returns (part of) the caller's string, or matches loosely (case, spaces) |
 //! | `the_outcome_vocabulary_is_the_tool_failure_vocabulary` | for every `ToolFailure` the trace's outcome equals `ToolFailure::code()` | the mapping and the run ledger's `tool_call` codes drift apart |
 //! | `the_outcome_of_a_real_refusal_is_read_from_the_real_response` | the dispatcher's own answers (-32022, -32020, -32601, -32602, success) map to the documented outcome | `response_rpc_code` or `outcome_code` read the wrong field |
+//! | `every_listed_method_is_one_the_dispatcher_answers` | each name in `CALL_METHODS` gets a well-formed request the dispatcher answers (never `-32601`) and is classified as itself; a method outside the list is `-32601` and `other` | the hand-kept list and the dispatcher's own methods part ways, so a real method is recorded as `other` |
 //! | `a_trace_never_reads_a_value` | the shape of two bodies that differ only in argument values is equal | a value (cursor, handle, body text) starts to influence the shape |
 //! | `counts_come_only_from_a_success_of_the_three_tools` | `events` / `agent_jobs` / `jobs` are read from the server's own success body of `oort_inbox_read` / `oort_jobs_claim` / `oort_job_start`, and nowhere else | a count appears for another tool, an error body, or a malformed field; or `agent_job` is counted by something other than its `kind` |
 //! | `a_count_carries_no_text_from_the_answer` | whatever strings, ids and handles an answer holds, the counts are plain integers | the count type grows a string or id |
@@ -381,6 +382,92 @@ fn the_outcome_of_a_real_refusal_is_read_from_the_real_response() {
         assert_eq!(code, rpc, "case {index}");
         assert_eq!(outcome_code(code), outcome, "case {index}");
     }
+}
+
+/// A well-formed request for each method the trace names, in the era that method lives in.
+fn request_for(method: &str) -> (Value, Option<&'static str>, Option<&'static str>) {
+    match method {
+        // The legacy handshake: no protocol header yet, the version is proposed in the body.
+        "initialize" => (
+            json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{
+                "protocolVersion": LEGACY_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "probe", "version": "1"}}}),
+            None,
+            None,
+        ),
+        // Legacy follow-ups carry the negotiated version in the header.
+        "notifications/initialized" => (
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"}),
+            Some(LEGACY_PROTOCOL_VERSION),
+            None,
+        ),
+        "ping" => (
+            json!({"jsonrpc":"2.0","id":1,"method":"ping"}),
+            Some(LEGACY_PROTOCOL_VERSION),
+            None,
+        ),
+        "tools/list" => (
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+            Some(LEGACY_PROTOCOL_VERSION),
+            None,
+        ),
+        "tools/call" => (
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                   "params":{"name":TOOL_PING,"arguments":{}}}),
+            Some(LEGACY_PROTOCOL_VERSION),
+            None,
+        ),
+        // The modern discovery call: `_meta` in the body and the method named in a header.
+        "server/discover" => (
+            json!({"jsonrpc":"2.0","id":1,"method":"server/discover","params":{"_meta":{
+                "io.modelcontextprotocol/protocolVersion": MODERN_PROTOCOL_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {}}}}),
+            Some(MODERN_PROTOCOL_VERSION),
+            Some("server/discover"),
+        ),
+        other => panic!("CALL_METHODS names `{other}` and this test knows no request for it"),
+    }
+}
+
+/// `CALL_METHODS` is a hand-kept list beside the dispatcher's own `match`. If a listed name stops being
+/// one the dispatcher answers (a typo in the list, a rename on the dispatcher's side) the trace would
+/// label a real method `other` and the diagnosis would quietly lie. Every listed method must be one the
+/// dispatcher answers (anything but `-32601 method not found`) and be classified as itself, and a method
+/// that is not listed must still be refused as unknown.
+///
+/// What this cannot see: a method added to the dispatcher and not to the list. The dispatcher spells its
+/// methods in several `match`es and `if`s, so there is no honest scan for it; such a method is recorded
+/// as `other` — a closed value, visible as exactly that when the rows are read.
+#[test]
+fn every_listed_method_is_one_the_dispatcher_answers() {
+    assert_eq!(CALL_METHODS.len(), 6, "the list the ADR names");
+    for method in CALL_METHODS {
+        let (body, version, mcp_method) = request_for(method);
+        let response = answer(&body, version, mcp_method, None);
+        let code = response_rpc_code(response.body.as_deref());
+        assert_ne!(
+            code,
+            Some(-32601),
+            "`{method}` is in CALL_METHODS but the dispatcher does not know it: {:?}",
+            response.body.as_deref().map(String::from_utf8_lossy)
+        );
+        // And the shape of that very request is classified under its own name, not `other`.
+        assert_eq!(
+            shape(&body).method,
+            method,
+            "`{method}` is labelled as itself"
+        );
+    }
+    // The control: a name that is not listed is unknown to the dispatcher too.
+    let (unlisted, version, mcp_method) = (
+        json!({"jsonrpc":"2.0","id":1,"method":"resources/list"}),
+        Some(LEGACY_PROTOCOL_VERSION),
+        None,
+    );
+    let refused = answer(&unlisted, version, mcp_method, None);
+    assert_eq!(response_rpc_code(refused.body.as_deref()), Some(-32601));
+    assert_eq!(shape(&unlisted).method, CALL_METHOD_OTHER);
 }
 
 /// The MCP success envelope of a tool answer, as the server writes it.
