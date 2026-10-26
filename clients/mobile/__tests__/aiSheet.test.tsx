@@ -9,6 +9,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {Dimensions, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -24,7 +25,11 @@ import {
   registerSpawnPort,
   UNWIRED_SPAWN_PORT,
 } from '../src/features/work/ask/spawnPort';
+import {GroupRow, GroupSection} from '../src/design/atoms';
+import {SHEET_ICONS} from '../src/design/icons';
+import {GroupCard} from '../src/design/sheetParts';
 import AppShell from '../src/shell/AppShell';
+import {describeCloseContract, imageSources} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -181,6 +186,13 @@ async function renderReady() {
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
 }
 
+// 시험의 기본 창은 글자 배율 2(큰 글씨)다 — 칩이 오른쪽에 서는 보통 크기의 시험은 배율 1 로 연다(아래 큰 글씨 묶음이 올린다).
+const BASE_WINDOW = Dimensions.get('window');
+function setFontScale(fontScale: number) {
+  const window = {...BASE_WINDOW, fontScale};
+  Dimensions.set({window, screen: window});
+}
+
 const hapticCalls = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
 const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
@@ -201,6 +213,7 @@ beforeEach(() => {
   hostsWire = [];
   hapticCalls.length = 0;
   __resetSpawnPort();
+  setFontScale(1);
 });
 
 afterEach(() => {
@@ -208,6 +221,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   __resetSpawnPort();
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
 });
 
 /** 승격 뒤의 모습: 내 맥으로 보내는 길이 꽂혀 있다. */
@@ -263,7 +277,9 @@ describe('구획 노출 조건', () => {
     expect(screen.queryByTestId('ai-section-tools')).toBeNull();
     expect(screen.queryByTestId('ai-row-ask-mac')).toBeNull();
     expect(screen.queryByTestId('ai-section-personal')).toBeNull();
+    // 맥 칩은 어느 줄에도 새지 않는다(그려진 칩도, 그 글자도).
     expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
+    expect(screen.queryByText(/내 맥 (켜짐|꺼짐)/)).toBeNull();
   });
 
   it('게이트가 켜지면 「내 도구」가 서고, 개인 에이전트가 없으면 그 구획은 서지 않는다', async () => {
@@ -284,9 +300,12 @@ describe('구획 노출 조건', () => {
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
     await waitFor(() => expect(screen.getByTestId('ai-section-personal')).toBeTruthy());
-    expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy();
-    expect(screen.getByTestId(`ai-personal-${MINE}`)).toHaveTextContent('개인');
-    expect(within(screen.getByTestId(`ai-row-personal-${MINE}`)).getByText('내 Claude Code')).toBeTruthy();
+    const row = screen.getByTestId(`ai-row-personal-${MINE}`);
+    expect(within(row).getByText('내 Claude Code')).toBeTruthy();
+    // 「개인」 표식은 행의 오른쪽 임의 노드(`ListRow trailing`)다 — 행 **안에** 서고 맥이 등록돼 있지 않으면 표식만이다.
+    expect(within(row).getByTestId(`ai-personal-${MINE}`)).toHaveTextContent('개인');
+    expect(screen.queryByTestId(`ai-personal-mac-${MINE}`)).toBeNull();
+    expect(within(row).getByText('Claude Code · 나만 쓸 수 있어요.')).toBeTruthy();
   });
 });
 
@@ -299,9 +318,33 @@ describe('맥 칩', () => {
     await renderReady();
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
+    // 칩은 두 줄의 오른쪽 임의 노드이고(#4458 `ListRow trailing`) 글자가 켜짐을 말한다 — 색만으로 말하지 않는다.
     await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
     expect(screen.getByTestId('ai-mac-chip')).toHaveTextContent('내 맥 켜짐');
     expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 켜짐');
+    expect(within(screen.getByTestId('ai-row-ask-mac')).getByTestId('ai-mac-chip')).toBeTruthy();
+    // **그려진** 모양: 켜짐 칩은 채움이 있고(transparent 가 아니다) 점이 있다. 꺼짐 칩은 아래 시험이 채움 없음을 잰다.
+    const on = StyleSheet.flatten(screen.getByTestId('ai-mac-chip').props.style);
+    expect(on.backgroundColor).not.toBe('transparent');
+    expect(on.borderRadius).toBe(999);
+  });
+
+  it('칩의 글자는 행의 보조기술 이름에도 들어 있다 — `trailing` 은 기본 이름에 안 들어가므로 이름에 직접 잇는다', async () => {
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [host(true)];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
+    // 접었던 때(칩 글자 = 오른쪽 값)의 낭독 「이름, 보조 줄, 값」을 잃지 않는다. 눌리는 행의 이름이 칩 글자를 든다.
+    expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toBe(
+      '내 맥에 물어보기, 내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요., 내 맥 켜짐',
+    );
+    expect(screen.getByTestId(`ai-row-personal-${MINE}`).props.accessibilityLabel).toBe(
+      '내 Claude Code, Claude Code · 나만 쓸 수 있어요., 개인, 내 맥 켜짐',
+    );
   });
 
   it('맥이 꺼져 있으면 「내 맥 꺼짐」이다 — 줄은 그대로 눌린다 (T6b가 꺼짐을 안내한다)', async () => {
@@ -315,8 +358,13 @@ describe('맥 칩', () => {
     await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
     expect(screen.getByTestId('ai-mac-chip')).toHaveTextContent('내 맥 꺼짐');
     expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 꺼짐');
+    // **그려진** 모양: 꺼짐 칩은 채움이 없다(켜짐과 달리 transparent) — 글자만이 아니라 모양도 다르다.
+    expect(StyleSheet.flatten(screen.getByTestId('ai-mac-chip').props.style).backgroundColor).toBe(
+      'transparent',
+    );
+    expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toMatch(/, 내 맥 꺼짐$/);
     fireEvent.press(screen.getByTestId('ai-row-ask-mac'));
-    expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
   });
 
   it('등록된 맥이 없으면 칩이 없다 — 값이 없는 것을 「꺼짐」으로 말하지 않는다', async () => {
@@ -327,6 +375,11 @@ describe('맥 칩', () => {
     await openAi();
     await waitFor(() => expect(screen.getByTestId('ai-row-ask-mac')).toBeTruthy());
     expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
+    expect(within(screen.getByTestId('ai-row-ask-mac')).queryByText(/내 맥 (켜짐|꺼짐)/)).toBeNull();
+    // 칩이 없으면 이름에도 칩 글자가 없다(끝에 쉼표가 남지 않는다).
+    expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toBe(
+      '내 맥에 물어보기, 내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요.',
+    );
   });
 });
 
@@ -411,9 +464,14 @@ describe('행 선택', () => {
     await openAi();
     hapticCalls.length = 0;
     fireEvent.press(screen.getByTestId('ai-row-delegate'));
+    // 햅틱은 누르는 순간 동기로 한 번이고, 이동은 시트가 미끄러져 내려간 **뒤**다(#4458) — 누른 순간에는 AI 시트가
+    // 아직 서 있고 N8 은 없다.
     expect(hapticCalls).toEqual(['selection']);
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('delegate-sheet')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('delegate-sheet')).toBeTruthy(), {timeout: 8000});
     expect(screen.queryByTestId('ai-sheet')).toBeNull();
-    expect(screen.getByTestId('delegate-sheet')).toBeTruthy();
+    expect(hapticCalls).toEqual(['selection']); // 이동할 때 한 번 더 나지 않는다
     // 한 번에 시트 하나 — 다른 쪽이 함께 서 있으면 연결이 섞인 것이다.
     expect(screen.queryByTestId('ask-mac-sheet') !== null).toBe(false);
   });
@@ -426,8 +484,9 @@ describe('행 선택', () => {
     hapticCalls.length = 0;
     fireEvent.press(screen.getByTestId('ai-row-ask-mac'));
     expect(hapticCalls).toEqual(['selection']);
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
     expect(screen.queryByTestId('ai-sheet')).toBeNull();
-    expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
     expect(screen.queryByTestId('delegate-sheet') !== null).toBe(false);
   });
 
@@ -441,7 +500,7 @@ describe('행 선택', () => {
     await openAi();
     await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
     fireEvent.press(screen.getByTestId(`ai-row-personal-${MINE}`));
-    expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
     await waitFor(() => expect(screen.getByTestId('ask-mac-destination-line')).toBeTruthy());
     expect(screen.getByTestId('ask-mac-destination-line').props.children as string).toContain('Codex');
   });
@@ -451,7 +510,126 @@ describe('행 선택', () => {
     await renderReady();
     await openAi();
     fireEvent.press(screen.getByTestId('ai-row-agents'));
-    expect(screen.queryByTestId('ai-sheet')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('ai-sheet')).toBeNull(), {timeout: 8000});
     await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+describe('AI 시트 — 공용 부품', () => {
+  it('구획은 묶음 카드, 줄은 셰브론 행이다 — 옛 GroupSection·GroupRow 는 없고 칩은 행의 오른쪽 노드로 선다', async () => {
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [host(true)];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
+    expect(screen.UNSAFE_queryAllByType(GroupSection)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(GroupRow)).toHaveLength(0);
+    // 구획 셋(에이전트·내 도구·개인 에이전트 — 앱 줄은 서버가 플러그인 표면을 실을 때만)이 모두 카드다.
+    expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(3);
+    // 줄마다 **그려진** 오른쪽 셰브론이 하나씩 있다 — 「다른 곳으로 가는 문」이라는 말이 눈에도 선다.
+    for (const id of [
+      'ai-row-delegate',
+      'ai-row-agents',
+      'ai-row-ask-mac',
+      `ai-row-personal-${MINE}`,
+    ]) {
+      expect([id, imageSources(screen.getByTestId(id))]).toEqual([id, [SHEET_ICONS.chevron]]);
+    }
+    // 구분선은 카드마다 줄 수 − 1 이다: 에이전트 둘 → 1, 내 도구 하나 → 0, 개인 하나 → 0.
+    expect(within(screen.getByTestId('ai-section-agents')).getAllByTestId('group-divider')).toHaveLength(1);
+    expect(within(screen.getByTestId('ai-section-tools')).queryAllByTestId('group-divider')).toHaveLength(0);
+  });
+
+  it('행이 다섯 이하인 문 모음이라 내용 맞춤 단이다 — 큰 단(위 58 에서 바닥까지)이 아니다', async () => {
+    installFetch();
+    await renderReady();
+    await openAi();
+    const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
+    expect(sheet.top).toBeUndefined();
+    expect(sheet.maxHeight).toBeGreaterThan(0);
+  });
+});
+
+// ---- 큰 글씨: 표식은 오른쪽 칩이 아니라 보조 줄 아래로 (design-review AX5·SE) -----------------------------------------------
+//
+// 오른쪽 칩이 폭을 먹으면 이름 칸이 한 글자 폭으로 접혀 「에/물/어/보/기」로 세로로 쌓였다(AX5·SE 캡처). 이름 아래로 내리는
+// 문턱은 홈 카드·사이드바와 같은 `STACK_PILL_SCALE`(1.5)이다. Jest 는 레이아웃이 없어 **렌더된 구조**(칩 노드가 그려지는가,
+// 글자가 보조 줄에 서는가)와 보조기술 이름이 같은지를 잰다 — 폭이 정말 안 접히는지는 AX5 캡처가 잰다.
+
+describe('AI 시트 — 큰 글씨에서 표식이 보조 줄 아래로 내려간다 (#4458)', () => {
+  async function openWithMac(fontScale: number) {
+    setFontScale(fontScale);
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [host(true)];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
+  }
+
+  it.each([[1], [1.3], [1.49]])('글자 배율 %s: 칩과 「개인」 표식은 행 오른쪽의 그려진 노드다', async scale => {
+    await openWithMac(scale);
+    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
+    expect(screen.getByTestId(`ai-personal-${MINE}`)).toHaveTextContent('개인');
+    expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 켜짐');
+  });
+
+  it.each([[1.5], [2], [3.1]])(
+    '글자 배율 %s: 칩 노드는 그려지지 않고 그 글자가 보조 줄 아래 제 줄로 서며, 행 이름은 그대로다',
+    async scale => {
+      await openWithMac(scale);
+      await waitFor(() => expect(screen.getByTestId('ai-row-ask-mac')).toBeTruthy());
+      // 오른쪽 노드가 없다 — 이름 칸이 폭을 지킨다.
+      expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
+      expect(screen.queryByTestId(`ai-personal-${MINE}`)).toBeNull();
+      expect(screen.queryByTestId(`ai-personal-mac-${MINE}`)).toBeNull();
+      // 상태 글자는 보조 줄 아래에 남는다(글자가 상태를 말한다).
+      expect(screen.getByTestId('ai-row-ask-mac')).toHaveTextContent(/시켜요\.\s*내 맥 켜짐/);
+      expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toHaveTextContent(/나만 쓸 수 있어요\.\s*개인 · 내 맥 켜짐/);
+      // 보조기술 이름은 배율과 무관하게 같다.
+      expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toBe(
+        '내 맥에 물어보기, 내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요., 내 맥 켜짐',
+      );
+      expect(screen.getByTestId(`ai-row-personal-${MINE}`).props.accessibilityLabel).toBe(
+        '내 Claude Code, Claude Code · 나만 쓸 수 있어요., 개인, 내 맥 켜짐',
+      );
+    },
+  );
+
+  it('큰 글씨에서 맥이 등록되지 않았으면 「개인」 표식만 보조 줄 아래에 선다', async () => {
+    setFontScale(2);
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
+    expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toHaveTextContent(/나만 쓸 수 있어요\.\s*개인$/);
+    expect(screen.getByTestId(`ai-row-personal-${MINE}`).props.accessibilityLabel).toBe(
+      '내 Claude Code, Claude Code · 나만 쓸 수 있어요., 개인',
+    );
+  });
+});
+
+describeCloseContract({
+  name: 'AiSheet',
+  open: async () => {
+    installFetch();
+    await renderReady();
+    await openAi();
+  },
+  closedCount: () => (screen.queryByTestId('ai-sheet') === null ? 1 : 0),
+  closeTestID: 'ai-close',
+  closeLabel: 'AI 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: 'AI 닫기',
 });

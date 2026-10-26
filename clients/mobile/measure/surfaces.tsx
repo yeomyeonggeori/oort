@@ -190,6 +190,7 @@ import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
+import {ActivityRowsSurface} from './activityRows';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
@@ -381,7 +382,19 @@ import type {
 // =============================================================================
 LogBox.ignoreAllLogs(true);
 
-const ROSTER = makeStressRoster();
+// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 첫 두 사람(「나」와 첫 동료)은 실제 팀원 이름이라 하네스에서
+// 가상 인물로 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은
+// 변하지 않는다. 이름으로 짚지 않고 순서로 짚는다(`SELF` 도 「첫 사람」이다): 그래야 실명이 이 파일의 새 줄에 다시 적히지 않는다.
+const VIRTUAL_PEOPLE = [
+  {displayName: '이도현', handle: 'dohyun'},
+  {displayName: '박서연', handle: 'seoyeon'},
+];
+let virtualSeen = 0;
+const ROSTER = makeStressRoster().map(member => {
+  if (member.kind !== 'human') return member;
+  const virtual = VIRTUAL_PEOPLE[virtualSeen++];
+  return virtual ? {...member, ...virtual} : member;
+});
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
@@ -2212,6 +2225,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #4613: 활동 줄 높이 표 — 글자(N초째·생존 판정 라벨·앞에 m건)별 줄 수. 초가 바뀔 때 줄 수가 뒤집히는 글자가 있는가.
+  if (name === 'activity-rows' || name === 'activity-rows-wide') return <ActivityRowsSurface wide={name === 'activity-rows-wide'} />;
   // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
   if (name.startsWith('dm-steady')) {
     return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
@@ -6217,7 +6232,7 @@ function seedGoneDmHome(): void {
   const dohyun = person('11', '이도현', 'dohyun');
   const seoyeon = person('12', '박서연', 'seoyeon');
   const minsu = person('13', '최민수', 'minsu');
-  const claude = agent('14', 'kwak의 Claude', 'kwak-claude', {hostOnline: false});
+  const claude = agent('14', '달무리 Claude', 'dalmuri-claude', {hostOnline: false});
   const grok = agent('15', 'grok', 'grok', {hostOnline: true});
   harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, minsu, claude, grok]);
   harnessClient.setQueryData(['agent-liveness', ADE_WS, claude.id.toLowerCase()], {
@@ -6431,7 +6446,7 @@ function seedAsk(surface: string): void {
       scope: 'member',
       ownerMemberId: SELF,
       type: 'workd',
-      displayName: '성재의 MacBook Pro',
+      displayName: '달무리의 MacBook Pro',
       capabilities: {},
       createdAtMs: 0,
       lastSeenAtMs: Date.now(),
@@ -6473,7 +6488,7 @@ function seedAi(surface: string): void {
       scope: 'member',
       ownerMemberId: SELF,
       type: 'workd',
-      displayName: '성재의 MacBook Pro',
+      displayName: '달무리의 MacBook Pro',
       capabilities: {},
       createdAtMs: 0,
       lastSeenAtMs: Date.now(),
@@ -6648,7 +6663,7 @@ function seedCall(surface: string): void {
       scope: 'member',
       ownerMemberId: SELF,
       type: 'workd',
-      displayName: '성재의 MacBook Pro',
+      displayName: '달무리의 MacBook Pro',
       capabilities: {},
       createdAtMs: 0,
       lastSeenAtMs: Date.now(),
@@ -7055,7 +7070,7 @@ function tbRow(over: Partial<SharedWorkSession> & {sessionId: string}): SharedWo
     label: '작업',
     folderLabel: 'oort',
     status: 'running',
-    owner: {memberId: SELF, displayName: '곽성재'},
+    owner: {memberId: SELF, displayName: '이도현'},
     homeChannel: {id: 'ch-deploy', name: 'workbench'},
     startedAtMs: now - 3_600_000,
     endedAtMs: null,
@@ -7100,7 +7115,7 @@ const TEAM_BOARD_ROWS: SharedWorkSession[] = [
     folderLabel: null,
     repo: null,
     branch: null,
-    owner: {memberId: SELF, displayName: '곽성재'},
+    owner: {memberId: SELF, displayName: '이도현'},
     homeChannel: {id: 'ch-build', name: 'agent-lab'},
     state: 'running',
     lastActivityAt: TB_MIN(2),
@@ -7150,7 +7165,7 @@ const WORK_JOBS_ROWS: SharedWorkSession[] = [
     sessionId: '00000000-0000-7000-8000-0000000000c1',
     source: 'run',
     runId: '00000000-0000-7000-8000-0000000000c1',
-    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    requestedBy: {memberId: SELF, displayName: '이도현'},
     origin: 'agent_run',
     label: '#launch 채널에 v0.1.26 공지 올리기',
     folderLabel: null,
@@ -7169,7 +7184,7 @@ const WORK_JOBS_ROWS: SharedWorkSession[] = [
     sessionId: '00000000-0000-7000-8000-0000000000c2',
     source: 'run',
     runId: '00000000-0000-7000-8000-0000000000c2',
-    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    requestedBy: {memberId: SELF, displayName: '이도현'},
     origin: 'agent_run',
     label: '온보딩 문구 해요체로 다듬기',
     folderLabel: null,
@@ -7189,7 +7204,7 @@ const WORK_JOBS_ROWS: SharedWorkSession[] = [
     sessionId: '00000000-0000-7000-8000-0000000000c3',
     source: 'run',
     runId: '00000000-0000-7000-8000-0000000000c3',
-    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    requestedBy: {memberId: SELF, displayName: '이도현'},
     origin: 'agent_run',
     label: '푸시 알림이 두 번 오는 문제 고치기',
     folderLabel: null,
