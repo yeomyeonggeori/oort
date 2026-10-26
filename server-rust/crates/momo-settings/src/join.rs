@@ -87,7 +87,7 @@
 //! trying another code or another address does not buy a fresh one.
 //!
 //! **The order is enforced where a test cannot reach it.** The comparison takes a
-//! [`guess::Permit`], which only a successful spend from the budget can produce, so
+//! `guess::Permit` (private), which only a successful spend from the budget can produce, so
 //! "compare first, count afterwards" does not compile. The other two orders — the
 //! invite's own state and a ban before the gate — are held by conformance tests.
 //!
@@ -1031,7 +1031,7 @@ async fn find_human_by_email(
 
 /// Spending a guess, and the proof that one was spent.
 ///
-/// [`Permit`](guess::Permit) has no constructor outside this module, and
+/// `Permit` has no constructor outside this module, and
 /// [`password_matches`] will not run without one, so the order the ADR promises —
 /// the budget is asked **before** the comparison — is a property of the types
 /// rather than of a line order a later edit could swap.
