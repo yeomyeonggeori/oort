@@ -125,6 +125,8 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   window.location.hash = "";
+  // React 는 겹친 act 를 경고로만 알린다. 통과하는 실행에도 찍히던 그 경고를 시험이 붙든다(#4522).
+  vi.spyOn(console, "error");
   // 베어러는 코어 세션에서 온다(React 컨텍스트가 아니다).
   applyLogin({
     accessToken: "access",
@@ -134,6 +136,9 @@ beforeEach(() => {
   } as never);
 });
 afterEach(() => {
+  const overlapped = vi
+    .mocked(console.error)
+    .mock.calls.some((args) => String(args[0]).includes("overlapping act() calls"));
   clearSession();
   if (mountedRoot) act(() => mountedRoot?.unmount());
   mountedRoot = null;
@@ -141,9 +146,20 @@ afterEach(() => {
   mountHost = null;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
+  // 정리를 다 한 뒤에 단정한다: act 가 겹쳤다면 앞 act 를 await 한 뒤에 다음 act 를 열어야 한다.
+  expect(overlapped, "act 가 겹쳤다(React: overlapping act() calls)").toBe(false);
 });
 
-async function mountCard(props: Record<string, unknown>): Promise<HTMLElement> {
+// 기다림은 시간이 아니라 조건이다(#4522). 조건이 서기 전에는 act 하나씩 — 렌더·effect 를 비우고 이벤트 루프를
+// 한 바퀴 돌린다 — 양보하며 다시 본다. 고정 지연도 타이머도 없고, 부하로 느려져도 바퀴 수는 그대로다. 한도를
+// 넘기면 조용히 지나가지 않고 이유를 말하며 실패한다(조용히 지나가면 뒤 단정이 「아직 불러오는 중」을 빈 화면으로 통과한다).
+//
+// act 는 반드시 앞의 것이 풀린 뒤에 연다. 겹쳐 열면 React 의 act 깊이가 어긋나, 겹친 act 둘 중 어느 쪽이 먼저
+// 풀리느냐(= 실제 시간)에 따라 act 큐가 열린 채 굳고 그 뒤의 렌더·effect 는 영영 비워지지 않는다(#4522 의 실패 원인).
+const TURNS = 1000;
+
+/** 마운트까지만 — 첫 렌더와 effect 를 act 하나로 비운다. 미리보기 요청은 이 안에서 나가고, 응답은 기다리지 않는다. */
+async function mountCardOnly(props: Record<string, unknown>): Promise<HTMLElement> {
   const card = agentCardModel(message(props));
   if (card === null) throw new Error("no card for these props");
   mountHost = document.createElement("div");
@@ -157,15 +173,32 @@ async function mountCard(props: Record<string, unknown>): Promise<HTMLElement> {
   await act(async () => {
     mountedRoot?.render(tree);
   });
-  // 미리보기 fetch → FileReader 가 끝나 「불러오는 중」을 벗어날 때까지 기다린다(상한 2초).
-  for (let i = 0; i < 200; i += 1) {
-    const frame = byTestId(mountHost, "approval-avatar-frame")[0];
-    if (frame === undefined || frame.dataset.state !== "loading") break;
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 10));
-    });
-  }
   return mountHost;
+}
+
+/** 미리보기 fetch → FileReader 가 끝나 「불러오는 중」을 벗어날 때까지 기다린다. */
+async function settleCard(host: HTMLElement): Promise<void> {
+  const loading = () => byTestId(host, "approval-avatar-frame")[0]?.dataset.state === "loading";
+  for (let turn = 0; turn < TURNS && loading(); turn += 1) {
+    await act(async () => undefined);
+  }
+  if (loading()) throw new Error(`미리보기가 「불러오는 중」을 벗어나지 않았다(${TURNS}바퀴)`);
+}
+
+/** fetch 가 `times` 번 불릴 때까지 — 고정 시간이 아니라 spy 호출을 조건으로 기다린다. */
+async function untilCalled(spy: ReturnType<typeof vi.fn>, times: number): Promise<void> {
+  for (let turn = 0; turn < TURNS && spy.mock.calls.length < times; turn += 1) {
+    await act(async () => undefined);
+  }
+  if (spy.mock.calls.length < times) {
+    throw new Error(`fetch 가 ${times}번 불리지 않았다(${spy.mock.calls.length}번, ${TURNS}바퀴)`);
+  }
+}
+
+async function mountCard(props: Record<string, unknown>): Promise<HTMLElement> {
+  const host = await mountCardOnly(props);
+  await settleCard(host);
+  return host;
 }
 
 function byTestId(host: HTMLElement, id: string): HTMLElement[] {
@@ -370,21 +403,27 @@ describe("member.avatar.set 결과 카드 (#4394)", () => {
       return new Response(PNG, { status: 200, headers: { "content-type": "image/png" } });
     });
     vi.stubGlobal("fetch", slow);
-    const pending = mountCard(avatarProps());
-    await act(async () => {
-      await new Promise((r) => setTimeout(r, 20));
-    });
+    // 「요청이 날아가는 중」을 실제 시간이 아니라 시험이 붙든다(#4522). 마운트 act 하나가 풀리면 요청은 이미 나갔고
+    // 응답은 gate 가 쥐고 있다. mountCard 와 act 를 겹쳐 열지도, 20ms 를 기다리지도 않는다.
+    const host = await mountCardOnly(avatarProps());
+    await untilCalled(slow, 1);
+    expect(slow).toHaveBeenCalledTimes(1);
+    expect(byTestId(host, "approval-avatar-frame")[0]?.dataset.state).toBe("loading");
     clearApprovalAvatarPreviews(); // 로그아웃 — 요청은 아직 날아가는 중
     release?.();
-    const host = await pending;
+    await settleCard(host);
     // 앞 계정의 응답은 버려진다: 사진이 서지 않는다.
     expect(byTestId(host, "approval-avatar-image")).toHaveLength(0);
+    expect(byTestId(host, "approval-avatar-frame")[0]?.dataset.state).toBe("unavailable");
     // 같은 경로를 다시 열면 서버에 다시 묻는다(캐시가 채워지지 않았다).
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
     mountHost?.remove();
     const again = stubPreviewFetch(200);
-    await mountCard(avatarProps());
+    const reopened = await mountCardOnly(avatarProps());
+    await untilCalled(again, 1);
     expect(again).toHaveBeenCalledTimes(1);
+    await settleCard(reopened);
+    expect(byTestId(reopened, "approval-avatar-image")).toHaveLength(1);
   });
 });

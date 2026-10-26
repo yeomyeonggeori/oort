@@ -16,6 +16,7 @@ import {
 import {ThemeProvider} from '../src/design/theme';
 import {paletteFrom} from '../src/design/tokens';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
+import {DARK_CHOSEN_RECORD} from './fixtures/darkWorld';
 
 // =============================================================================
 // ADR-0189 증보 2 — 「배경」 묶음과 저장소 (#3907).
@@ -38,6 +39,8 @@ const disk = {
 
 beforeEach(() => {
   mmkvStore.clear();
+  // 다크 팔레트의 색을 단정하는 시험이다. 폰의 기본이 라이트가 된 뒤(#4526)에는 다크를 고른 폰으로 세운다.
+  mmkvStore.set(NON_SECRET_KEYS.appearance, DARK_CHOSEN_RECORD);
   __resetBackgroundStoreForTests();
   disk.removed = [];
   disk.cleared = 0;

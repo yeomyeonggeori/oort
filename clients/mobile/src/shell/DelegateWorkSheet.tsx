@@ -34,7 +34,7 @@ import {
   Sentence,
 } from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {usePalette, useStyles} from '../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {
   ds2Radius,
   font,
@@ -199,6 +199,7 @@ function SheetBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
@@ -795,6 +796,7 @@ function SheetBody({
           onChangeText={value => setField('title', value)}
           placeholder="예: 로그인 버그 고치기"
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           returnKeyType="next"
           editable={!mutation.isPending}
           accessibilityLabel="제목"
@@ -821,6 +823,7 @@ function SheetBody({
           onChangeText={value => setField('brief', value)}
           placeholder="무엇을, 어떻게 해 주면 좋을지 적어 주세요."
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           multiline
           lineBreakStrategyIOS="hangul-word"
           textAlignVertical="top"
@@ -856,6 +859,7 @@ function SheetBody({
               onChangeText={value => setField('repo', value)}
               placeholder="예: https://github.com/oort/app"
               placeholderTextColor={palette.textFaint}
+              keyboardAppearance={keyboardAppearance}
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="url"
@@ -877,6 +881,7 @@ function SheetBody({
               onChangeText={value => setField('branch', value)}
               placeholder="예: main"
               placeholderTextColor={palette.textFaint}
+              keyboardAppearance={keyboardAppearance}
               autoCapitalize="none"
               autoCorrect={false}
               editable={!mutation.isPending}

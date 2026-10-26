@@ -119,8 +119,22 @@ class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {
   // paints it `systemBackgroundColor` — pure white or pure black
   // (RCTRootViewFactory.mm) — between two surfaces painted the token `bg`, and
   // that gap is a blink on every launch. LaunchBackground is the colour asset
-  // LaunchScreen.storyboard paints; projectShape.test.ts holds it equal to `bg`
-  // in both schemes (#2668).
+  // LaunchScreen.storyboard paints; projectShape.test.ts holds it equal to the
+  // LIGHT `bg` (#2668).
+  //
+  // It is ONE colour with no dark variant, on purpose (#4526, ADR-0189 amendment
+  // 5, owner 2026-10-26): the phone's default scheme is light, and while this
+  // asset had a dark variant a dark device that never chose opened on a dark
+  // launch screen and then flipped to the light app. So neither the launch
+  // screen nor this root view follows the device's appearance any more. The
+  // cost is the mirror image and it is accepted: a phone that chose dark (or
+  // follows a dark system) sees this light surface until JS paints its first
+  // frame in dark. Reading the stored choice natively to shorten that step is a
+  // follow-up, not done here. Do not hand the asset a dark variant back, and do
+  // not pin the whole app's interface style (UIUserInterfaceStyle in Info.plist,
+  // overrideUserInterfaceStyle or traitOverrides here, Appearance.setColorScheme
+  // in JS) to get the same effect: that would freeze React Native's `Appearance`
+  // at light and make the 「시스템」 choice a lie. projectShape.test.ts holds these.
   //
   // `super` first: Expo hands this call on to its subscribers.
   override func customize(_ rootView: UIView) {

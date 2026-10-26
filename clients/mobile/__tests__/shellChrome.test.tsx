@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
 import {AccessibilityInfo, Animated, StyleSheet} from 'react-native';
@@ -19,6 +20,7 @@ import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
+import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
   lightPalette,
@@ -406,6 +408,30 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.queryByTestId('plus-menu-channel')).toBeNull();
   });
 
+  it('새 DM 의 사람 아바타는 카드 위에서 원이 선다 — 바닥을 muted 로 준다 (카드와 같은 면이면 이니셜만 떠 보인다)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    fireEvent.press(screen.getByTestId('plus-menu-dm'));
+    await waitFor(() => expect(screen.getByTestId('new-dm-person-seeun')).toBeTruthy());
+    // 목록 안의 아바타만 본다(뒤 화면의 것은 이 시트의 일이 아니다).
+    const avatars = within(screen.getByTestId('new-dm-list')).UNSAFE_getAllByType(Avatar);
+    expect(avatars.length).toBeGreaterThan(0);
+    for (const avatar of avatars) expect(avatar.props.ground).toBe('muted');
+  });
+
+  it('새 DM 의 빈 상태 문장이 `hangul-word` 줄바꿈 전략을 든다 (design-review #4318 r4 M3)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    fireEvent.press(screen.getByTestId('plus-menu-dm'));
+    await waitFor(() => expect(screen.getByTestId('new-dm-person-seeun')).toBeTruthy());
+    fireEvent.changeText(screen.getByTestId('new-dm-search'), '없는사람');
+    await waitFor(() => expect(screen.getByTestId('new-dm-empty')).toBeTruthy());
+    expect(screen.getByTestId('new-dm-empty').props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(screen.getByTestId('new-dm-empty')).toHaveTextContent("'없는사람'에 맞는 사람이 없습니다.");
+  });
+
   it('+ → 「새 DM」 → 사람을 고르면 DM 을 열고 그 대화로 간다', async () => {
     const fetchMock = installFetch();
     await renderReady();
@@ -757,6 +783,18 @@ describe('기하가 사양 표와 같다 — Buzz 크기, 시안 A 재질 (#2750
     );
     // 미끄러져 나가는 260ms 를 기다린다. 부하가 높은 러너에서 기본 1s 가 모자란
     // 적이 있어(부하 13, 1.8~4.1s) 넉넉히 준다 — 재는 것은 「닫힌다」이지 속도가 아니다.
+    await waitFor(() => expect(screen.queryByTestId('new-dm-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 15000);
+
+  it('새 DM 시트의 닫기는 머리 오른쪽의 원형 X 이고 누르면 닫힌다 (#4318)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    fireEvent.press(screen.getByTestId('plus-menu-dm'));
+    expect(screen.getByTestId('new-dm-close').props.accessibilityLabel).toBe('새 DM 닫기');
+    fireEvent.press(screen.getByTestId('new-dm-close'));
     await waitFor(() => expect(screen.queryByTestId('new-dm-sheet')).toBeNull(), {
       timeout: 8000,
     });

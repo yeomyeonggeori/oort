@@ -7,7 +7,7 @@ import React from 'react';
 import {Animated, Pressable, StyleSheet, Text} from 'react-native';
 
 import {FixedScheme, ThemeProvider, useTheme} from '../src/design/theme';
-import {SEND_ARRIVE_MS, SEND_ARRIVE_RISE} from '../src/design/motion';
+import {SEND_ARRIVE_EASE, SEND_ARRIVE_MS} from '../src/design/motion';
 import {ReduceMotionRefContext} from '../src/features/conversation/LandedTintFade';
 import {MessageRow, PendingRow} from '../src/features/conversation/MessageRow';
 import {resetArrivedForTest} from '../src/features/conversation/sendArrival';
@@ -105,6 +105,8 @@ const pendingMsg = (over: Record<string, unknown> = {}) =>
     authorMemberId: SELF,
     body: '보내는 중',
     status: 'sending',
+    // 자격 창(#4455)이 보낸 시각을 본다 — 방금 보낸 메아리.
+    createdAtMs: Date.now(),
     ...over,
   }) as never;
 
@@ -241,20 +243,27 @@ function spyTiming() {
 }
 
 describe('보낸 메시지 등장 — 입력창에서 올라온다', () => {
-  it('메아리가 마운트되면 한 번, 자리보다 아래·투명에서 시작해 180ms 에 앉는다 (네이티브 구동)', () => {
+  it('메아리가 마운트되면 한 번, 자리보다 아래에서 시작해 300ms 에 앉는다 (네이티브 구동, 페이드 없음)', () => {
     const timing = spyTiming();
     render(<PendingRow pending={pendingMsg()} startsGroup directory={DIRECTORY} />);
     expect(timing).toHaveBeenCalledTimes(1);
     const config = timing.mock.calls[0][1];
-    expect(config).toMatchObject({toValue: 1, duration: SEND_ARRIVE_MS, useNativeDriver: true});
-    expect(SEND_ARRIVE_MS).toBeLessThanOrEqual(200);
+    // #4455: 남은 오름의 비율을 1→0 으로 돌리고, Buzz 곡선(`easeOutCubic`)·300ms 다.
+    expect(config).toMatchObject({
+      toValue: 0,
+      duration: SEND_ARRIVE_MS,
+      easing: SEND_ARRIVE_EASE,
+      useNativeDriver: true,
+    });
 
     const style = flat(screen.getByTestId('pending-row').props.style);
-    expect(style.opacity).toBe(0);
-    expect(style.transform).toEqual([{translateY: SEND_ARRIVE_RISE}]);
-    // 움직임은 오름·불투명도뿐 — 높이·여백을 건드리면 바닥 추적의 측정이 흔들린다.
-    expect(Object.keys(flat(screen.getByTestId('pending-row').props.style)).sort()).toEqual(
-      expect.arrayContaining(['marginHorizontal', 'opacity', 'transform']),
+    // 불투명도는 건드리지 않는다 — 목록이 아래 가장자리에서 행을 자르므로 페이드가 필요 없다.
+    expect(style.opacity).toBeUndefined();
+    expect(style.transform).toHaveLength(1);
+    expect(style.transform[0].translateY).toBeGreaterThan(0);
+    // 움직임은 transform 뿐 — 높이·여백을 건드리면 바닥 추적의 측정이 흔들린다.
+    expect(Object.keys(style).sort()).toEqual(
+      expect.arrayContaining(['marginHorizontal', 'transform']),
     );
     expect(style.height).toBeUndefined();
     expect(style.maxHeight).toBeUndefined();

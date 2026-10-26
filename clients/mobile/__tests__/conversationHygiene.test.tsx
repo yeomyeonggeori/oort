@@ -12,7 +12,7 @@ import {
   render,
   screen,
   within,
-} from '@testing-library/react-native';
+} from './fixtures/darkWorld';
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

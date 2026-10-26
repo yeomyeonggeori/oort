@@ -1,11 +1,21 @@
-import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
-import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Keyboard, Settings, StyleSheet, Text, TextInput, View} from 'react-native';
+import React, {Profiler, useCallback, useEffect, useRef, useState, type ProfilerOnRenderCallback} from 'react';
+import {
+  Animated,
+  Keyboard,
+  Settings,
+  StyleSheet,
+  Text,
+  TextInput,
+  useWindowDimensions,
+  View,
+  type GestureResponderEvent,
+} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
@@ -15,6 +25,7 @@ import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {CONV} from '../src/features/conversation/convDesign';
+import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {clearDraft, readDraft} from '../src/features/conversation/drafts';
 import {Timeline, type PillState, type TimelineGeometry} from '../src/features/conversation/Timeline';
@@ -53,11 +64,33 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         높이가 한 걸음 늦게 따라와서 실제 입력의 레이아웃이 아니다.)
 //             `+nobar`    활동 줄 없이(대조군). 예: `DM-STEADY-TYPE+NOBAR`.
 //
+//   #4455 「보낼 때 깜빡이지 않는가 · 쫀득하게 올라오는가」 — 같은 틀에서 **내가 보낸다**(`Composer` 의 `onSend` 가 부르는 같은 `onSend(body)` 길:
+//             `selfSendToken` 으로 목록이 끝을 따라가고 `useTimeline.send` 가 메아리를 세운다. 입력창 글자·키보드는 거치지 않는다).
+//             send20      20번 보낸다. 4번에 한 번(0·4·8·12·16번째)은 상대 말이 먼저 와서 내 글이 머리 행이 되고, 나머지 15번은 이어지는 행.
+//                         7번째·15번째는 긴 글. 보낼 때마다 ~1.5초 쉰다. 프레임마다 목록 내용 높이(`content`)·스크롤 오프셋·도크 윗면·메아리
+//                         개수를 남기고, 등장 애니메이션은 `Animated.timing` 을 감싸 네이티브 구동값(JS 가 transform 을 못 읽는다)을 프레임별로
+//                         받는다(`anim`). 교체 때의 내용 높이 변화 · 메아리가 서 있던 프레임 수 · 등장이 처음 보이는 때를 이 기록에서 뽑는다.
+//                         옵션(`+` 뒤): `d<ms>` 가짜 서버가 보내기에 답하는 데 걸리는 시간(기본 250 — 확정이 등장 도중에 오는 조건을 재려고 0·80·150·
+//                         400 으로 바꾼다, design-review r1 H1) · `relay<ms>` 실시간 프레임(`message.new`)이 POST 응답보다 <ms> 먼저 온다(코어가
+//                         말하는 선착 경로) · `anchor` 보낼 때마다 새 확정본 행에 앵커를 옮겨 **확정본 행이 마운트되는 때**를 프레임에 남긴다
+//                         (`anchor` 칸이 null 이 아니게 되는 때 — 보류가 있으면 등장이 끝난 뒤, 없으면 확정 즉시). `rec+anchor` 는 사진 두 번만
+//                         앵커를 건다(#4455 r3 H2: 사진 행의 교체 이음매를 서버 사본 행이 마운트된 때 기준으로 잰다). `rec+tail` 은 가로 사진 120ms 뒤에
+//                         글을 이어 보내고, `rec+working` 은 스트림 맨 끝에 「작업 중」 자리를 세운다 — 사진 **뒤에 서 있는 행**이 서버 사본이 서는 때에
+//                         새 인스턴스로 다시 서지 않는지 본다(#4455 r4 H4).
+//             namefit     시계 상자가 이름 줄 끝에서 **혼자 줄바꿈**되는 폭 창을 찾는다(design-review r1 M2). 목록 폭을 한 칸씩 줄이며(`NAMEFIT_*`)
+//                         머리 행 느린 전송을 하나씩 보낸다 — 이름·시각이 줄을 꼭 채우는 폭에서 시계가 이름 밑으로 내려서는가를 사진으로 본다.
+//             rec         녹화용 시퀀스(`xcrun simctl io <udid> recordVideo`): 연속 3번 보내기 → 긴 글 → 사진(가로·세로) → 느린 전송(서버 응답
+//                         2.6초 — 시계가 서는 장면). 사진 바이트는 `measure/photo-stub.mjs` 가 답한다(`-momoPhotoStub 127.0.0.1:<포트>`).
+//
 //   #4456 「포커스 먼저」 — 입력창을 **누르는 순간**(글자 0개) 넓은 편집기로 자라고, 포커스를 잃으면(글이 없을 때) 접힌다.
 //             focus       140초 동안 재기만 한다 — 사람(Maestro)이 누르고·가만히 있고·치고·보내고(포커스가 남는다)·끌어 내리고·다시 누르고·
 //                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
 //                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
 //                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
+//             `focus+T<초>` 는 재는 시간을 줄인다(기본 140초; 예: `DM-STEADY-FOCUS+T130`). #4518 부터 **손이 닿는 순간**의 표식도 남긴다 —
+//                         `touch-down-x<pageX>-y<pageY>` · `touch-drag-d<거리>`(끌기 문턱 10pt 를 처음 넘는 때) · `touch-up` · `touch-cancel`(입력창에 닿은
+//                         터치를 도크 상자가 위로 받는다) 과 컴포저가 다시 그려진 커밋의 `render-<phase>-<ms>ms`(React `Profiler`). 흐름은
+//                         `maestro/111-press-steady.yaml`(짧은 탭 · 길게 누름 · 끌기 4방향), 분석은 `focus-windows.mjs` 의 「누름→자판」 줄.
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
@@ -78,6 +111,17 @@ const PEER = '00000000-0000-7000-8000-0000000000e2';
 const CHANNEL = '00000000-0000-7000-8000-0000000000e3';
 const NO_TOP = {paddingTop: 0} as const;
 const DRAFT_KEY = 'measure:dm-steady';
+/**
+ * 보내기 장면(#4455)의 행 동작. 서버 사본이 **내 글이면 말풍선을 신호색(`mine`)으로** 그리는 근거가 `actions.myMemberId` 라서
+ * (`MessageRow` `bubble`), 이것 없이는 메아리(언제나 `mine`)가 교체 때 「남의 글」 모양으로 바뀐다 — 앱에는 없는 하네스만의 색 튐이다.
+ * 옛 장면(#4292·#4331)은 이 값 없이 재 왔으므로 건드리지 않는다.
+ */
+const SEND_ACTIONS: MessageRowActions = {
+  myMemberId: SELF,
+  onToggleReaction: async () => {},
+  onEdit: async () => {},
+  onDelete: async () => {},
+};
 const TARGET = {workspaceId: WS, channelId: CHANNEL};
 
 function member(over: Partial<RosterMember> & {id: string}): RosterMember {
@@ -178,6 +222,29 @@ function wireMessage(seq: number, author: string, body: string): Message {
 /** 서버가 가진 메시지. 스크립트가 덧붙이고, REST 읽기는 여기서 답한다. */
 const server: {messages: Message[]} = {messages: []};
 
+/**
+ * 가짜 서버가 보내기에 답하는 데 걸리는 시간(ms). 평소 250 — 운영 서버의 지연이 아니라 #4331 이 정한 하네스 값이다(운영 POST
+ * 응답 시간은 이 하네스가 모른다). `rec` 의 느린 전송이 잠깐 늘린다(#4455).
+ */
+let postDelayMs = 250;
+
+export function setPostDelay(ms: number): void {
+  postDelayMs = ms;
+}
+
+/**
+ * 실시간 프레임이 POST 응답보다 먼저 오는 조건(#4455 H1): 값이 있으면 가짜 서버가 이 시간(ms) 뒤에 확정본을 레일로 먼저
+ * 쏘고, 나머지 시간을 기다렸다가 응답한다. 코어 `model.ts` 가 「실시간 프레임이 POST 응답을 앞설 수 있다」고 적는 경로다.
+ */
+let relayAtMs: number | null = null;
+let relayFirst: ((message: Message) => void) | null = null;
+
+/** 사진 스텁(`photo-stub.mjs`)이 답하는 그림과 같은 id — 가로 4:3 · 세로 3:4. 사진·글자 없는 단색 그림이다. */
+const PHOTOS: Readonly<Record<string, MessageAttachment>> = {
+  'photo-a': {id: 'photo-a', name: '시안 가로.png', mime: 'image/png', sizeBytes: 48_000},
+  'photo-solo': {id: 'photo-solo', name: '시안 세로.png', mime: 'image/png', sizeBytes: 48_000},
+};
+
 function resetServer(agentDm = false): void {
   if (agentDm) {
     // 12시간 간격 — 날짜 구분선이 여럿 서고 떠 있는 날짜 알약에 날이 있다.
@@ -215,6 +282,23 @@ function json(body: unknown): Response {
 let realFetch: typeof fetch | null = null;
 let fakeFetch: typeof fetch | null = null;
 
+/** `-momoPhotoStub host:port` — 있으면 서버 주소를 겸한다(`seedSteady`). */
+function photoStubHost(): string | null {
+  const value = Settings.get('momoPhotoStub');
+  return typeof value === 'string' && value !== '' ? value : null;
+}
+
+/**
+ * 호스트(Metro·싱크)로 가는 요청은 진짜로 보낸다. 사진 스텁이 서버 주소를 겸하면 같은 주소로 API 도 오므로
+ * **첨부 바이트 길만** 진짜로 두고 나머지는 가짜가 답한다.
+ */
+function reachesHost(url: string): boolean {
+  if (!(url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost'))) return false;
+  const stub = photoStubHost();
+  if (stub !== null && url.startsWith(`http://${stub}`)) return /\/attachments\/[^/]+\/content/.test(url);
+  return true;
+}
+
 export function ensureFakeFetch(): void {
   if (fakeFetch !== null && globalThis.fetch === fakeFetch) return;
   if (fakeFetch === null) {
@@ -223,17 +307,25 @@ export function ensureFakeFetch(): void {
     realFetch = globalThis.fetch.bind(globalThis);
     fakeFetch = (async (input: unknown, init?: RequestInit) => {
       const url = String(input);
-      if (url.startsWith('http://127.0.0.1') || url.startsWith('http://localhost')) {
+      if (reachesHost(url)) {
         return (realFetch as typeof fetch)(input as RequestInfo, init);
       }
       if (url.includes('/messages') && init?.method === 'POST') {
         // 보내기: 서버가 줄을 받아 확정본을 돌려준다(응답이 곧 실시간 프레임과 같은 확정본 — `useTimeline.post`).
-        const request = JSON.parse(String(init.body ?? '{}')) as {body?: string};
+        const request = JSON.parse(String(init.body ?? '{}')) as {body?: string; attachmentIds?: string[]};
         const seq = (server.messages[server.messages.length - 1]?.seq ?? 0) + 1;
         const message = wireMessage(seq, SELF, request.body ?? '');
         message.createdAtMs = Date.now();
+        const files = (request.attachmentIds ?? []).flatMap(id => (PHOTOS[id] === undefined ? [] : [PHOTOS[id]]));
+        if (files.length > 0) message.attachments = files;
         server.messages.push(message);
-        await wait(250);
+        if (relayAtMs !== null && relayFirst !== null) {
+          await wait(relayAtMs);
+          relayFirst(message);
+          await wait(Math.max(0, postDelayMs - relayAtMs));
+        } else {
+          await wait(postDelayMs);
+        }
         return json(message);
       }
       if (url.includes('/messages')) {
@@ -265,7 +357,8 @@ export function ensureFakeFetch(): void {
 
 /** 서버 주소·네트워크 도달성 설정. 모듈 몸통에서 한 번(`surfaces.tsx`). */
 export function seedSteady(): void {
-  setServerBase('https://oort.example');
+  const stub = photoStubHost();
+  setServerBase(stub !== null ? `http://${stub}` : 'https://oort.example');
   const metro = String(Settings.get('RCT_jsLocation') ?? '127.0.0.1:8081');
   // 시뮬레이터의 NetInfo 는 바깥 도달성 검사에 실패해 오프라인으로 읽힌다(컴포저가 잠긴다) — 이 기기가 늘 닿는 곳으로 돌린다.
   NetInfo.configure({
@@ -347,9 +440,32 @@ function rectOf(
   });
 }
 
+/**
+ * 등장 애니메이션 한 번의 기록(#4455): `Animated.timing`(네이티브 구동, 길이 180·300)을 감싸 값이 바뀔 때마다 받은 값.
+ * 네이티브 구동은 JS 가 transform 을 못 읽으므로(`measureInWindow` 는 커밋된 속성만 본다) 이 값이 유일한 프레임별 증거다.
+ * `samples` 는 [만든 때부터의 ms, 값]. 수리 뒤 코드는 남은 비율 1→0(`toValue` 0), 수리 전 코드는 진행값 0→1(`toValue` 1).
+ */
+interface AnimTrace {
+  /** 장면 시작으로부터의 ms (애니메이션을 만든 때). */
+  at: number;
+  toValue: number;
+  duration: number;
+  samples: [number, number][];
+}
+
 interface Frame {
   /** 장면 시작으로부터의 ms. */
   t: number;
+  /** 메아리(아직 서버 사본이 없는 내 글) 개수. */
+  pend: number;
+  /** 서버 사본이 들어온 메시지 개수. */
+  rows: number;
+  /**
+   * 「전송 중」 줄이 마운트돼 있으면 1. 수리 **전** 트리에만 박는 seam(`globalThis.__momoSendingLine` 을 줄의 마운트·언마운트가 올리고
+   * 내린다 — PR 본문의 3줄 패치)이다. 수리 뒤 트리에는 그 줄이 없으므로 언제나 0 이다(그래서 이 칸 하나로는 「0 이 나왔다」가
+   * 증거가 못 된다 — 영상 프레임 대조가 짝이다).
+   */
+  sendingLine: number;
   anchor: number | null;
   tail: number | null;
   dock: number | null;
@@ -421,7 +537,21 @@ export function summarize(values: readonly (number | null)[]): Summary | null {
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
-type ScenarioName = 'idle' | 'peer' | 'blip' | 'outage' | 'gap' | 'hold' | 'own' | 'tick' | 'bar' | 'live' | 'focus';
+type ScenarioName =
+  | 'idle'
+  | 'peer'
+  | 'blip'
+  | 'outage'
+  | 'gap'
+  | 'hold'
+  | 'own'
+  | 'tick'
+  | 'bar'
+  | 'live'
+  | 'send20'
+  | 'rec'
+  | 'namefit'
+  | 'focus';
 /** #4331·#4456: 에이전트 DM 에 활동 줄이 서는 장면들. */
 const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live', 'focus'];
 /** `hold` 는 연결 띠를 세운 채 90초 머문다 — 사진용이고 `all` 에 들지 않는다. */
@@ -435,9 +565,53 @@ interface Controls {
   mark: (what: string) => void;
   /** 활동 줄의 run 들을 갈아 끼운다(#4331). */
   setTurns: (turns: readonly AgentWorkingSignal[]) => void;
+  /** 내가 보낸다(#4455) — `Composer` 의 `onSend` 와 같은 길. 사진·파일만 보내려면 본문을 비우고 첨부를 준다. */
+  send: (body: string, attachments?: MessageAttachment[]) => void;
+  /**
+   * 다음에 보낼 글의 seq 로 앵커를 옮긴다(`+anchor`). 그 확정본 행이 마운트돼야 `anchor` 칸이 채워진다. 옵션이 꺼져 있으면 아무것도
+   * 안 하고 거짓을 돌려준다 — 참이면 앞 보내기의 앵커가 걷히도록 장면이 잠깐 쉰다.
+   */
+  watchNext: () => boolean;
+  /** 목록 폭을 화면 폭보다 `by` pt 좁힌다(`namefit`). `null` 이면 원래대로. */
+  setNarrow: (by: number | null) => void;
   /** 입력창이 지금 포커스를 쥐고 있는가(#4456). */
   isFocused: () => boolean;
+  /** `focus` 장면이 재는 시간(ms). 기본 140초, 장면 이름 뒤 `+t<초>` 로 줄인다(#4518 — 되돌림 길만 보는 짧은 흐름용). */
+  focusMs: number;
+  /** 장면 이름의 `+` 옵션이 켜져 있는가(#4455 r4 — `rec+tail`·`rec+working`). */
+  hasMod: (name: string) => boolean;
 }
+
+/** `rec+working` 의 「작업 중」 자리(상대 한 명). 모듈 상수여야 목록이 매 렌더 새 배열을 받지 않는다. */
+const WORKING_PEER: readonly {memberId: string}[] = [{memberId: PEER}];
+
+// #4455 보내기 장면의 문구. 가상의 대화다 — 실제 대화 문구·이름을 쓰지 않는다.
+const PEER_LINES: readonly string[] = [
+  '시안 확인했어요',
+  '점심 먹고 이어서 볼게요',
+  '마감 전에 한 번 더 맞춰 봐요',
+  '답이 늦어도 괜찮아요',
+  '수정본 올려 둘게요',
+];
+const SHORT_BODIES: readonly string[] = [
+  '네, 확인했어요',
+  '지금 정리해서 보낼게요',
+  '조금만 기다려 주세요',
+  '네트워크가 느린 곳이에요',
+  '조금 걸릴 수 있어요',
+  '파일은 공유 폴더에 있어요',
+  '알겠어요, 그렇게 할게요',
+  '고마워요',
+  '이따 다시 확인할게요',
+  '그럼 내일 아침에 봐요',
+];
+const LONG_BODY =
+  '이번 주 일정을 정리했어요. 월요일에는 디자인 리뷰, 수요일에는 배포 리허설, 금요일에는 회고가 있어요. 리허설 전에 체크리스트를 한 번 더 돌려 보고, 막히는 곳이 있으면 스레드에 남겨 주세요.';
+
+/** `namefit`: 목록 폭을 `FROM` 에서 `TO` 까지 `STEP` pt 씩 좁힌다. 이름(굵은 15pt 세 글자)+시각이 줄을 채우는 폭에 걸리도록 잡은 값이다. */
+const NAMEFIT_FROM = Number(Settings.get('momoNamefitFrom') ?? 200);
+const NAMEFIT_TO = Number(Settings.get('momoNamefitTo') ?? 260);
+const NAMEFIT_STEP = Number(Settings.get('momoNamefitStep') ?? 3);
 
 /** 4초 유예(`DISPLAY_GRACE_MS`) 뒤에 띠가 선다 — 앱의 `connectionDisplay` 가 하는 일을 시간표대로 옮긴 것이다. */
 const GRACE_MS = 4_000;
@@ -522,6 +696,101 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     }
     return;
   }
+  if (name === 'send20') {
+    // 20번 보낸다. 4번에 한 번은 상대 말이 먼저 와서 내 글이 작성자 머리가 서는 행이 되고, 나머지는 이어지는 행이다.
+    for (let index = 0; index < 20; index += 1) {
+      if (index % 4 === 0) {
+        c.mark(`peer-${index / 4}`);
+        c.say(PEER_LINES[index / 4], true);
+        // 상대 말이 내려앉을 시간 — 내 글의 등장과 겹치지 않게 한다.
+        await wait(900);
+      }
+      const long = index === 7 || index === 15;
+      // 앞 보내기의 앵커(확정본 행)가 걷히고 새 seq 의 앵커가 빈 채 서도록 잠깐 쉰다 — 그래야 `anchor` 가 채워지는 때가
+      // 곧 새 확정본 행이 마운트된 때다.
+      if (c.watchNext()) await wait(250);
+      c.mark(`send-${index}:${index % 4 === 0 ? 'head' : 'cont'}:${long ? 'long' : 'short'}`);
+      c.send(long ? LONG_BODY : SHORT_BODIES[index % SHORT_BODIES.length]);
+      // 확정본(가짜 서버 250ms) · 등장(300ms) · 목록 글라이드가 모두 끝나고도 남는 시간.
+      await wait(1_500);
+    }
+    await wait(1_000);
+    return;
+  }
+  if (name === 'namefit') {
+    // 시계 상자(폭 0)는 이름 줄의 마지막 항목이다. 이름·시각이 줄을 `whoGap` 안쪽까지 채우는 폭이면 상자가 혼자 새 줄로 넘어가
+    // 시계가 이름 밑에 선다. 폭을 좁혀 가며 그 창을 지난다. 느린 전송(응답 2.6초)이라 1.5초에 시계가 서 있다.
+    setPostDelay(2_600);
+    for (let by = NAMEFIT_FROM; by <= NAMEFIT_TO; by += NAMEFIT_STEP) {
+      c.setNarrow(by);
+      await wait(400);
+      c.say(PEER_LINES[0], true);
+      await wait(700);
+      c.mark(`namefit-${by}`);
+      c.send(SHORT_BODIES[0]);
+      await wait(3_300);
+    }
+    c.setNarrow(null);
+    setPostDelay(250);
+    await wait(500);
+    return;
+  }
+  if (name === 'rec') {
+    // 녹화용. 장면 사이를 충분히 쉰다 — 영상에서 장면을 가르는 일은 표식의 시각으로 한다.
+    await wait(2_000);
+    // (1) 연속 3번 보내기: 상대 말 뒤라 첫 줄은 머리 행, 이어 두 줄은 이어지는 행. 450ms 간격.
+    c.mark('rec-1-peer');
+    c.say(PEER_LINES[0], true);
+    await wait(1_200);
+    for (let index = 0; index < 3; index += 1) {
+      c.mark(`rec-1-send-${index}`);
+      c.send(SHORT_BODIES[index]);
+      await wait(450);
+    }
+    await wait(2_500);
+    // (2) 긴 글.
+    c.mark('rec-2-peer');
+    c.say(PEER_LINES[1], true);
+    await wait(1_200);
+    c.mark('rec-2-send');
+    c.send(LONG_BODY);
+    await wait(3_000);
+    // (3) 사진 메시지: 가로 → 세로. 글 없이 사진만 보낸다(#4294).
+    c.mark('rec-3-peer');
+    c.say(PEER_LINES[2], true);
+    await wait(1_200);
+    // `+anchor` 가 켜져 있으면 사진을 보내기 직전에 앵커를 새 확정본의 seq 로 옮긴다(#4455 r3 H2 — 사진 행의 교체 이음매를
+    // **서버 사본 행이 마운트된 때**를 기준으로 재려고). 꺼져 있으면 아무 일도 안 한다.
+    if (c.watchNext()) await wait(250);
+    c.mark('rec-3-send-landscape');
+    c.send('', [PHOTOS['photo-a']]);
+    // `+tail`: 사진 **뒤에 서 있는 행**을 만든다(#4455 r4 H4) — 사진 메아리가 서 있는 동안 글을 이어 보내면 글 메아리가 사진 메아리 뒤에 선다.
+    // 서버 사본(사진)이 서는 때에 목록이 한 칸 늘어도 이 행이 새 인스턴스로 다시 서면 안 된다.
+    if (c.hasMod('tail')) {
+      await wait(120);
+      c.mark('rec-3-send-tail');
+      c.send(SHORT_BODIES[2]);
+    }
+    await wait(3_000);
+    if (c.watchNext()) await wait(250);
+    c.mark('rec-3-send-portrait');
+    c.send('', [PHOTOS['photo-solo']]);
+    await wait(3_000);
+    // (4) 느린 전송: 서버가 2.6초 뒤에 답한다 — 1.5초에 시계가 서고, 답이 오면 시계만 사라진다. 머리 행과 이어지는 행 하나씩.
+    setPostDelay(2_600);
+    c.mark('rec-4-peer');
+    c.say(PEER_LINES[3], true);
+    await wait(1_200);
+    c.mark('rec-4-send-head');
+    c.send(SHORT_BODIES[3]);
+    await wait(600);
+    c.mark('rec-4-send-cont');
+    c.send(SHORT_BODIES[4]);
+    await wait(4_300);
+    setPostDelay(250);
+    await wait(1_500);
+    return;
+  }
   if (name === 'focus') {
     // 사람이 누르고 친다(#4456). 포커스·자판·초안·보냄이 바뀔 때마다 표식을 남겨 프레임과 맞춘다. 자판 표식에는 높이(pt)와 iOS 가
     // 준 길이(ms)를 담는다 — 알약이 자판과 같은 박자로 오르내리는지 보는 근거다.
@@ -535,7 +804,7 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     let lastDraft = readDraft(DRAFT_KEY);
     let lastCount = server.messages.length;
     let lastFocused = c.isFocused();
-    const until = Date.now() + 140_000;
+    const until = Date.now() + c.focusMs;
     while (Date.now() < until) {
       const focused = c.isFocused();
       if (focused !== lastFocused) {
@@ -592,8 +861,46 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
   }
 }
 
+// ---- 등장 애니메이션 관측 (#4455) --------------------------------------------------
+//
+// 보낸 메시지의 등장은 네이티브 구동이라 JS 가 transform 을 읽을 수 없다. 그래서 `Animated.timing` 을 감싸 길이 180·300 인
+// 네이티브 구동 애니메이션마다 값 리스너를 달고, 받은 값을 프레임별로 모은다. 감싸는 것은 이 하네스뿐이고 앱 코드에는 틈을 내지
+// 않았다 — 앱이 부르는 `Animated.timing(값, 설정)` 은 그대로 돈다.
+let animProbeOn = false;
+let sceneBegin = 0;
+const animLog: AnimTrace[] = [];
+
+function installAnimProbe(): void {
+  if (animProbeOn) return;
+  animProbeOn = true;
+  const original = Animated.timing;
+  (Animated as unknown as {timing: typeof Animated.timing}).timing = ((
+    value: Animated.Value,
+    config: Animated.TimingAnimationConfig,
+  ) => {
+    const run = original(value, config);
+    const duration = config.duration ?? 500;
+    if (config.useNativeDriver === true && (duration === 180 || duration === 300)) {
+      const born = Date.now();
+      const trace: AnimTrace = {
+        at: born - sceneBegin,
+        toValue: typeof config.toValue === 'number' ? config.toValue : Number.NaN,
+        duration,
+        samples: [],
+      };
+      animLog.push(trace);
+      value.addListener(({value: current}) => {
+        trace.samples.push([Date.now() - born, Math.round(current * 1000) / 1000]);
+      });
+    }
+    return run;
+  }) as typeof Animated.timing;
+}
+
 interface Result {
   scenario: ScenarioName;
+  /** 장면이 시작된 시각(호스트와 같은 시계의 epoch ms) — 녹화 영상(`recordVideo`)과 표식을 맞출 때 쓴다. */
+  beginMs: number;
   durationMs: number;
   frames: number;
   anchor: Summary | null;
@@ -609,6 +916,15 @@ interface Result {
   hiddenMax: number;
   hiddenFrames: number;
   events: {t: number; what: string}[];
+  /** 등장 애니메이션 기록(#4455) — `send20`·`rec` 에서만 채운다. */
+  anim: AnimTrace[];
+}
+
+/** `namefit` 만 쓴다: 목록을 화면 폭보다 `by` pt 좁게 세운다. `by` 가 `null` 이면 아무 상자도 더하지 않는다(다른 장면의 레이아웃을 건드리지 않는다). */
+function Narrow({by, children}: {by: number | null; children: React.ReactNode}): React.JSX.Element {
+  const {width} = useWindowDimensions();
+  if (by === null) return <>{children}</>;
+  return <View style={[styles.column, {width: width - by}]}>{children}</View>;
 }
 
 export function SteadySurface({which}: {which: string}): React.JSX.Element {
@@ -618,14 +934,34 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // `hold-unread`: 같은 `hold` 장면에 안 읽은 줄이 있는 대화(위쪽 필이 서는 대화)로 연다.
   const unread = which === 'hold-unread';
   const panelOpen = which === 'panel' || which === 'panel-flat';
+  // #4455 보내기 장면. `send20+d80+relay60+anchor` 처럼 옵션이 붙을 수 있다.
+  const sendScene = base === 'send20' || base === 'rec' || base === 'namefit';
+  const [narrowBy, setNarrowBy] = useState<number | null>(null);
   const scenarios: readonly ScenarioName[] = unread || panelOpen
     ? ['hold']
     : agentDm
       ? [base as ScenarioName]
-      : (ALL as readonly string[]).includes(which) || which === 'hold' || which === 'own'
-        ? [which as ScenarioName]
+      : (ALL as readonly string[]).includes(which) ||
+          which === 'hold' ||
+          which === 'own' ||
+          sendScene
+        ? [(sendScene ? base : which) as ScenarioName]
         : ALL;
   ensureFakeFetch();
+  // #4455: 등장 애니메이션 관측은 보내기 장면에서만 건다.
+  useState(() => {
+    if (sendScene) installAnimProbe();
+    // 옵션: 확정 지연·선착 프레임. 모듈 수준 값이라 장면이 끝나도 남으므로 매번 정한다.
+    postDelayMs = 250;
+    relayAtMs = null;
+    for (const mod of mods) {
+      const delay = /^d(\d+)$/.exec(mod);
+      if (delay !== null) postDelayMs = Number(delay[1]);
+      const relay = /^relay(\d+)$/.exec(mod);
+      if (relay !== null) relayAtMs = Number(relay[1]);
+    }
+    return null;
+  });
   // 에이전트 DM 은 자기 대화 기록으로 연다 — 첫 렌더 한 번, `useTimeline` 이 읽기 전.
   useState(() => {
     if (agentDm) resetServer(true);
@@ -656,6 +992,25 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     },
     [sendMessage],
   );
+  // #4455: 장면이 부르는 보내기. `onSend`(컴포저)와 같은 길이고 사진·파일 첨부를 더 받는다. 장면은 한 번 만든 `Controls` 를 끝까지 쓰므로 ref 로 최신을 부른다.
+  const sendWithRef = useRef<(body: string, attachments?: MessageAttachment[]) => void>(() => {});
+  sendWithRef.current = (body, attachments) => {
+    setSelfSendToken(token => token + 1);
+    void sendMessage(body, undefined, attachments);
+  };
+  // 메아리·서버 사본 개수(프레임에 남긴다)와 그 변화 표식(`pending-add`·`pending-remove` = 교체 시각).
+  const pendCountRef = useRef(0);
+  pendCountRef.current = timeline.pending.length;
+  const rowsRef = useRef(0);
+  rowsRef.current = timeline.state.messages.length;
+  const markRef = useRef<((what: string) => void) | null>(null);
+  const seenPendingRef = useRef(0);
+  const pendingNow = timeline.pending.length;
+  useEffect(() => {
+    if (pendingNow === seenPendingRef.current) return;
+    markRef.current?.(pendingNow > seenPendingRef.current ? 'pending-add' : 'pending-remove');
+    seenPendingRef.current = pendingNow;
+  }, [pendingNow]);
   const pillsRef = useRef<PillState | null>(null);
   const barRef = useRef<View | null>(null);
   const palette = usePalette();
@@ -673,6 +1028,44 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const dockRef = useRef<View | null>(null);
   const metricsRef = useRef<TimelineGeometry | null>(null);
   const inputRef = useRef<TextInput | null>(null);
+  // #4518: 손이 닿고·끌려 나가고·떨어지고·빼앗기는 순간을 표식으로 남긴다. `dockRef` 상자가 입력창에 닿은 터치를 위로 받는다(날 터치 이벤트는 버블이다).
+  // 앱의 `onFieldTouch*` 와 같은 이벤트라서 「닿음 → 펼침 첫 변화」 지연(누름 시작의 렌더 비용)과 「닿음 → `keyboardWillShow`」 간격을 같은 시계로 잰다.
+  // (`markRef` 는 위 메아리·서버 사본 표식(#4455)과 같은 것이다 — 장면이 도는 동안 장면의 `mark` 를 가리킨다.)
+  const touchRef = useRef<{x: number; y: number; dragged: boolean} | null>(null);
+  const onDockTouchStart = useCallback((event: GestureResponderEvent) => {
+    const {pageX, pageY} = event.nativeEvent;
+    touchRef.current = {x: pageX, y: pageY, dragged: false};
+    markRef.current?.(`touch-down-x${Math.round(pageX)}-y${Math.round(pageY)}`);
+  }, []);
+  const onDockTouchMove = useCallback((event: GestureResponderEvent) => {
+    const origin = touchRef.current;
+    if (origin === null || origin.dragged) return;
+    const {pageX, pageY} = event.nativeEvent;
+    const distance = Math.hypot(pageX - origin.x, pageY - origin.y);
+    // 앱의 끌기 문턱(`PRESS_DRAG_SLOP_PT` = 10pt)을 처음 넘는 순간 한 번.
+    if (distance > 10) {
+      origin.dragged = true;
+      markRef.current?.(`touch-drag-d${Math.round(distance)}`);
+    }
+  }, []);
+  const onDockTouchEnd = useCallback(() => {
+    touchRef.current = null;
+    markRef.current?.('touch-up');
+  }, []);
+  const onDockTouchCancel = useCallback(() => {
+    touchRef.current = null;
+    markRef.current?.('touch-cancel');
+  }, []);
+  // 컴포저가 다시 그려질 때마다(커밋) 걸린 시간을 표식으로 남긴다(React `Profiler`): 누름 시작의 렌더 비용(#4518 D4)을 「닿음 → 그 커밋」 간격과 함께 본다.
+  // 0.3ms 미만은 남기지 않는다 — 스프링이 도는 동안은 컴포저가 아니라 스타일만 바뀌어 커밋이 없다.
+  const onComposerRender = useCallback<ProfilerOnRenderCallback>((_id, phase, actualDuration) => {
+    if (actualDuration >= 0.3) markRef.current?.(`render-${phase}-${actualDuration.toFixed(1)}ms`);
+  }, []);
+  // 장면 이름 뒤 `+t<초>` 는 `focus` 장면이 재는 시간(기본 140초).
+  const focusMs = (() => {
+    const seconds = mods.map(mod => /^t(\d+)$/.exec(mod)).find(match => match !== null);
+    return seconds ? Number(seconds[1]) * 1_000 : 140_000;
+  })();
   const [report, setReport] = useState<string[]>([]);
   const [finished, setFinished] = useState(false);
   // 지켜본다: 늦게 도착한 `fetch` 정의가 우리 가짜를 덮으면 다시 깐다.
@@ -716,11 +1109,16 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         const frames: Frame[] = [];
         const events: {t: number; what: string}[] = [];
         const begin = Date.now();
+        sceneBegin = begin;
+        animLog.length = 0;
         let sampling = true;
         const sample = () => {
           if (!sampling) return;
           const frame: Frame = {
             t: Date.now() - begin,
+            pend: pendCountRef.current,
+            rows: rowsRef.current,
+            sendingLine: (globalThis as {__momoSendingLine?: number}).__momoSendingLine ?? 0,
             anchor: null,
             tail: null,
             dock: null,
@@ -764,17 +1162,30 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           },
           mark: what => events.push({t: Date.now() - begin, what}),
           setTurns,
+          send: (body, attachments) => sendWithRef.current(body, attachments),
+          setNarrow: setNarrowBy,
+          watchNext: () => {
+            if (!mods.includes('anchor')) return false;
+            setAnchorSeq((server.messages[server.messages.length - 1]?.seq ?? 0) + 1);
+            return true;
+          },
           isFocused: () => inputRef.current?.isFocused() === true,
+          focusMs,
+          hasMod: modName => mods.includes(modName),
         };
+        relayFirst = message => (fake.current as FakeRail).message(message);
+        markRef.current = controls.mark;
         requestAnimationFrame(sample);
         await runScenario(name, controls);
         sampling = false;
+        markRef.current = null;
         await wait(200);
         const hidden = frames.map(frame =>
           frame.anchor !== null && frame.bar !== null ? frame.anchor - frame.bar : 0,
         );
         const result: Result = {
           scenario: name,
+          beginMs: begin,
           durationMs: Date.now() - begin,
           frames: frames.length,
           anchor: summarize(frames.map(frame => frame.anchor)),
@@ -788,6 +1199,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           hiddenMax: Math.round(Math.max(0, ...hidden) * 10) / 10,
           hiddenFrames: hidden.filter(value => value > 1).length,
           events,
+          anim: animLog.map(item => ({...item, samples: item.samples.slice()})),
         };
         console.log(`STEADY4292 ${JSON.stringify(result)}`);
         if (typeof sink === 'string' && sink !== '') {
@@ -834,6 +1246,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
       />
       <ConversationLayout
         list={
+          <Narrow by={base === 'namefit' ? narrowBy : null}>
           <Timeline
             messages={timeline.state.messages}
             directory={directory}
@@ -845,6 +1258,9 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             lastReadSeq={unread ? 1 : null}
             unreadCount={unread ? HISTORY_BODIES.length - 1 : 0}
             pending={timeline.pending}
+            // `+working`: 스트림 맨 끝에 「작업 중」 자리를 세운다(#4455 r4 H4 — 사진 뒤에 서 있는 행). 에이전트가 일하는 대화에서 사진을 보내는 경우다.
+            working={mods.includes('working') ? WORKING_PEER : undefined}
+            actions={sendScene ? SEND_ACTIONS : undefined}
             reactions={timeline.reactions}
             pins={timeline.pins}
             loadingOlder={timeline.loadingOlder}
@@ -862,9 +1278,16 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             pillsRef={pillsRef}
             selfSendToken={selfSendToken}
           />
+          </Narrow>
         }
         composer={
-          <View ref={dockRef} collapsable={false}>
+          <View
+            ref={dockRef}
+            collapsable={false}
+            onTouchStart={onDockTouchStart}
+            onTouchMove={onDockTouchMove}
+            onTouchEnd={onDockTouchEnd}
+            onTouchCancel={onDockTouchCancel}>
             <View ref={barRef} collapsable={false}>
               <AgentActivityBar
                 turns={turns}
@@ -875,15 +1298,17 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
               />
             </View>
             <TypingBar segments={typingSegments([])} label={null} />
-            <Composer
-              recipient="person"
-              channelLabel={peerName}
-              directory={directory}
-              draftKey={DRAFT_KEY}
-              attachmentTarget={TARGET}
-              inputRef={inputRef}
-              onSend={onSend}
-            />
+            <Profiler id="composer" onRender={onComposerRender}>
+              <Composer
+                recipient="person"
+                channelLabel={peerName}
+                directory={directory}
+                draftKey={DRAFT_KEY}
+                attachmentTarget={TARGET}
+                inputRef={inputRef}
+                onSend={onSend}
+              />
+            </Profiler>
           </View>
         }
       />

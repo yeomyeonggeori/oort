@@ -77,7 +77,9 @@ export interface MessageNewEvent {
      *
      * **`message.edited` 는 이 키를 싣지 않는다**(편집은 묶인 첨부를 바꾸지 못한다 —
      * `build_message_edited_payload`). 그 침묵은 삭제가 아니므로 `reconcileMessages`
-     * 가 이미 든 행의 첨부로 메운다(#4441).
+     * 가 이미 든 행의 첨부로 메운다(#4441). 롤업(`thread`)·풀린 인용(`reply_to`)·
+     * `run_ended` 도 이 프레임은 싣지 않고, 같은 침묵을 같은 규칙이 메운다(#4450,
+     * `keepHeldProjection`).
      */
     attachments?: unknown;
   };

@@ -55,7 +55,7 @@ import {
 } from 'react-native';
 
 import {PrimaryButton, SectionLabel, Sentence} from '../../design/atoms';
-import {usePalette, useStyles} from '../../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
   font,
@@ -420,6 +420,7 @@ export function PermissionCard({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const [busy, setBusy] = useState<'once' | 'session' | 'reject' | null>(null);
   const [asking, setAsking] = useState(initial?.asking ?? false);
   const [note, setNote] = useState(initial?.rejectNote ?? '');
@@ -642,6 +643,7 @@ export function PermissionCard({
                       : '이 폰에서는 거부만 보낼 수 있어요'
                   }
                   placeholderTextColor={palette.textFaint}
+                  keyboardAppearance={keyboardAppearance}
                   accessibilityLabel="거부하면서 보낼 지시"
                   accessibilityLabelledBy="reject-note-label"
                   testID="work-permission-reject-note"
@@ -706,6 +708,7 @@ function InstructionBox({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const [text, setText] = useState(initial?.text ?? '');
   useEffect(() => {
     // A draft already in the box is kept: the undelivered text goes after it.
@@ -754,6 +757,7 @@ function InstructionBox({
           editable={ready && busy === null}
           placeholder={ready ? '다음 지시를 적어요' : '지금은 지시를 보낼 수 없어요'}
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           accessibilityLabel="다음 지시"
           testID="work-instruction-input"
         />

@@ -1,6 +1,6 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 import {Keyboard} from 'react-native';
 
@@ -261,7 +261,7 @@ describe('길게 누르기와 다투지 않는다', () => {
   // 지금까지 시트가 열린다는 것만 검사했지, 눌렀을 때 어디로 가는지는 아무도 재지
   // 않았다.
   // ===========================================================================
-  it('시트의 「답글 달기」는 그 메시지의 스레드를 연다', () => {
+  it('시트의 「답글 달기」는 그 메시지의 스레드를 연다', async () => {
     const openThread = jest.fn();
     const row = actions(openThread);
     renderTimeline([LONE], row);
@@ -269,11 +269,12 @@ describe('길게 누르기와 다투지 않는다', () => {
     longPressRow();
     fireEvent.press(screen.getByTestId('sheet-reply'));
 
-    expect(openThread).toHaveBeenCalledTimes(1);
+    // 행동은 시트가 미끄러져 내린 뒤에 불린다(#4318).
+    await waitFor(() => expect(openThread).toHaveBeenCalledTimes(1));
     expect(openThread.mock.calls[0][0].id).toBe(ROOT_ID);
   });
 
-  it('메뉴에서 고른 것은 키보드가 올라와 있어도 되해석되지 않는다', () => {
+  it('메뉴에서 고른 것은 키보드가 올라와 있어도 되해석되지 않는다', async () => {
     // 탭에는 판정이 붙지만 선택에는 붙지 않는다. 「답글 달기」를 누른 사람에게
     // 키보드를 닫아 주고 마는 화면은, 그 사람이 한 말을 못 들은 척하는 것이다.
     const openThread = jest.fn();
@@ -284,6 +285,6 @@ describe('길게 누르기와 다투지 않는다', () => {
     keyboardUp.mockReturnValue(true);
     fireEvent.press(screen.getByTestId('sheet-reply'));
 
-    expect(openThread).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(openThread).toHaveBeenCalledTimes(1));
   });
 });
