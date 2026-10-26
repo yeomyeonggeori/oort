@@ -16,7 +16,8 @@
 //! |---|---|
 //! | `the_tick_follows_the_workspaces_this_process_served_and_deletes_only_when_switched_on` | drop the `touch` in `create_upload` (nothing is looked at); let the switched-off tick reach the archive's delete (the dry run deletes); drop the age term or the `message_id` term from the shared predicate (see the notifier suite for those); look at every workspace instead of the touched ones (the untouched file goes); never `touch` the second workspace's upload (it is never swept) |
 //! | `a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_carries_on` | stop spending the budget as workspaces are listed (the first tick takes all four) |
-//! | `a_big_backlog_in_one_workspace_does_not_starve_the_next_one` | move the cursor to the last workspace of a tick that covered the whole set (the head never rotates, so the big backlog spends every tick's budget) |
+//! | `a_big_backlog_in_one_workspace_does_not_starve_the_next_one` | start the next tick at the head again instead of after the workspace that spent the budget (the big backlog spends every tick's budget) |
+//! | `a_set_bigger_than_one_tick_is_walked_in_windows` | never advance the cursor (every tick looks at the same first 100 workspaces and the last one is never reached) |
 //! | `the_running_tick_obeys_the_switch` | hand a switched-off tick the archive (`archive_for_tick` returns `Some` while off): the loop deletes; or never hand it to a switched-on tick: the loop never deletes |
 //! | `a_refused_upload_touches_nothing_and_a_pool_that_bypasses_rls_is_refused` | move the `touch` above the membership check (a 403 would touch); drop `ensure_write_pool_rls_bound` from `sweep_once` or `start` (a superuser pool runs the tick) |
 
@@ -585,8 +586,8 @@ async fn old_rows(su: &PgPool, t: &Tenant, count: i32) -> Vec<Uuid> {
     ids
 }
 
-/// A workspace with a big backlog must not spend every tick's budget: when one tick covers the
-/// whole set the head of the order moves on, so the next tick starts with the other workspace.
+/// A workspace with a big backlog must not spend every tick's budget: the next tick starts after
+/// the workspace whose turn ended the budget, so the other workspace is served first.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn a_big_backlog_in_one_workspace_does_not_starve_the_next_one() {
@@ -643,6 +644,54 @@ async fn a_big_backlog_in_one_workspace_does_not_starve_the_next_one() {
     );
 
     wipe(&su, &[&big, &small]).await;
+}
+
+/// A touched set bigger than one tick's limit (100 workspaces) is walked window by window: the
+/// workspace that falls in the second window is reached on the second tick. The first 150 ids do
+/// not exist (each is an empty tenant transaction) and sort before the real workspace.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_set_bigger_than_one_tick_is_walked_in_windows() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let real = seed_tenant(&su, &app).await;
+    let server = start_server(app.clone()).await;
+    let touched = TouchedWorkspaces::default();
+    for n in 1..=150u128 {
+        touched.touch(Uuid::from_u128(n));
+    }
+    touched.touch(real.workspace);
+    assert!(
+        real.workspace > Uuid::from_u128(150),
+        "the real workspace sorts after the 150 made-up ones"
+    );
+    let rows = old_rows(&su, &real, 1).await;
+    let drive = as_drive(&server);
+    let mut cursor = None;
+
+    let first = sweep_once(Some(&drive), &touched, &app, 50, &mut cursor)
+        .await
+        .expect("first tick");
+    assert_eq!(first.looked_at, 100, "one window of 100: {first:?}");
+    assert!(
+        row_exists(&su, rows[0]).await,
+        "the real workspace is in the second window"
+    );
+    let second = sweep_once(Some(&drive), &touched, &app, 50, &mut cursor)
+        .await
+        .expect("second tick");
+    assert_eq!(
+        second.looked_at, 100,
+        "the last 51 (the real one among them), then the walk wraps around to fill the window: {second:?}"
+    );
+    assert_eq!(second.counts.reclaimed, 1, "{second:?}");
+    assert!(
+        !row_exists(&su, rows[0]).await,
+        "the second window reaches the real workspace and its old file goes"
+    );
+
+    wipe(&su, &[&real]).await;
 }
 
 /// The loop itself — the timer, the switch it was started with and the archive it is handed —

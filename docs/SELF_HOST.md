@@ -708,13 +708,20 @@ writes one line per tick (every `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS`, default
 That is how many files and bytes it *would* delete. Before turning it on,
 run `infra/rust/sql/attachment_reclaim_check.sql` against the database as a
 superuser (it only reads; its header says how to compare). The log line may be
-smaller than the SQL's number but never larger. Two limits are worth knowing:
+smaller than the SQL's number but never larger (compared at the same moment: a
+file bound in between can make a later run of the SQL smaller). A deleted file
+cannot be brought back, so take a `pg_dump` and copy the archive volume (see
+**Backup target** above) before you turn it on, and check that the volume really
+holds your files (`ls $MOMO_DRIVE_LOCAL_DIR/objects | head` inside the api
+container): on an empty, unmounted volume a missing file counts as already
+deleted and only the rows would go. Two limits are worth knowing:
 the api looks only at workspaces whose uploads it has served **since it last
 started** (it has no way to list every workspace), so an old draft in a
 workspace nobody has uploaded to since the restart stays until somebody does;
 and a file a deleted message carried is unreadable but is not cleaned up (its
-row and bytes stay). The Google Drive backend does the same cleanup from the
-notifier instead of the api.
+row and bytes stay). On the Google Drive backend the notifier does the cleanup
+instead of the api; the compose notifier services do not receive these keys, so
+on a compose stack it runs only on the local volume.
 
 ## Link previews (unfurl)
 

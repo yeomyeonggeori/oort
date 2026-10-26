@@ -88,9 +88,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler_enabled = config.scheduler.enabled,
         scheduler_tick_ms = config.scheduler.tick_ms,
         scheduler_grace_seconds = config.scheduler.grace_seconds,
-        // #4443 (ADR-0151 증보 2 D4): whether the local-volume attachment reclaim deletes. It ships
-        // off (`MOMO_ATTACHMENT_RECLAIM` exactly `1` turns it on). A boolean and numbers only.
-        attachment_reclaim_delete_enabled = config.attachment_reclaim.delete_enabled,
+        // #4443 (ADR-0151 증보 2 D4): whether the attachment reclaim runs in THIS process (only on the
+        // local volume; with a Google Drive the notifier owns it) and whether it deletes. It ships off
+        // (`MOMO_ATTACHMENT_RECLAIM` exactly `1` turns it on). Booleans and numbers only.
+        attachment_reclaim_runs_here =
+            momo_server::attachment_reclaim::runs_in_this_process(&config.drive.backend),
+        attachment_reclaim_delete_enabled = config.attachment_reclaim.delete_enabled
+            && momo_server::attachment_reclaim::runs_in_this_process(&config.drive.backend),
         attachment_reclaim_interval_ms = config.attachment_reclaim.interval_ms,
         attachment_reclaim_batch = config.attachment_reclaim.batch,
         "momo-server starting"

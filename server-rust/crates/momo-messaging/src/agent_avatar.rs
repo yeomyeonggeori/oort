@@ -738,7 +738,7 @@ pub async fn find_visible_image_attachment_in_tx(
             AND a.drive_file_id IS NOT NULL \
             AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
             AND a.size_bytes BETWEEN 1 AND $5 \
-            AND m.state <> 'deleted' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND c.kind IN ('public', 'private') AND c.archived_at IS NULL \
             AND a.channel_id = ANY($3) \
             AND EXISTS (SELECT 1 FROM membership p \
@@ -817,7 +817,7 @@ pub async fn find_requester_attachment_in_tx(
             AND a.drive_file_id IS NOT NULL \
             AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
             AND a.size_bytes BETWEEN 1 AND $5 \
-            AND m.state <> 'deleted' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND m.author_member_id = $4 \
             AND a.channel_id = $3 AND c.archived_at IS NULL",
     )

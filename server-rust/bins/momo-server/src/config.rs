@@ -2843,7 +2843,6 @@ mod tests {
         }
     }
 
-    /// ADR-0208 D15 — four optional knobs, every one with a default, none required.
     /// #4443: the api process's reclaim tick reads the notifier's variable names with the
     /// notifier's defaults, and — like the notifier — deletes only on the exact text `1`.
     #[test]
@@ -2922,6 +2921,7 @@ mod tests {
         ));
     }
 
+    /// ADR-0208 D15 — four optional knobs, every one with a default, none required.
     #[test]
     fn the_scheduler_knobs_default_to_the_adr_and_clamp_to_its_ranges() {
         let default = SchedulerSettings::default();

@@ -201,17 +201,21 @@ claims:
       - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#the_reclaim_cannot_reach_another_tenants_row"
       - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_write_pool_that_bypasses_rls_is_refused"
       - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_and_deletes_nothing"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_hold_that_appears_after_the_listing_is_seen_by_the_recheck_under_the_lock"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#an_unknown_reference_stops_the_delete_before_any_byte_goes"
       - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_held_file_is_never_reclaimed_and_a_released_one_is_a_draft_for_a_full_ttl"
       - "server-rust/crates/momo-messaging/src/attachment_reclaim.rs#only_exactly_one_turns_the_delete_on"
   - id: ATT-8
     claim: "On the local volume the api process deletes unattached uploads only in workspaces whose uploads it has served since it started, deletes nothing unless MOMO_ATTACHMENT_RECLAIM is exactly 1, and refuses to run on a database role that bypasses row-level security."
-    scope: "Real PostgreSQL and the real local-volume archive, through the real upload routes. Switched off, the run counts what it would delete and leaves the volume and the rows alone. Switched on, the object and its sidecar leave the volume, the row goes, and the audit row says why without a file name. A workspace this process has not served an upload for since it started is not looked at, so its old unattached files stay until somebody uploads there; this is a gap in coverage, not a leak, because storage does not grow in a workspace that uploads nothing. A run deletes at most the batch size in total. A request that creates no upload remembers no workspace. Only the local backend runs this in the api process; with Google Drive the notifier runs the cleanup (ATT-7). Not covered: the process start-up wiring and the shutdown wait in main."
+    scope: "Real PostgreSQL and the real local-volume archive, through the real upload routes. Switched off, the run counts what it would delete and leaves the volume and the rows alone. Switched on, the object and its sidecar leave the volume, the row goes, and the audit row says why without a file name. A workspace this process has not served an upload for since it started is not looked at, so its old unattached files stay until somebody uploads there; this is a gap in coverage, not a leak, because storage does not grow in a workspace that uploads nothing. A run deletes at most the batch size in total. A request that creates no upload remembers no workspace. Only the local backend runs this in the api process; with Google Drive the notifier runs the cleanup (ATT-7). The real tick loop (timer, switch, archive) is run with a short interval to prove the switch holds. Not covered: the call in main that starts the tick and the shutdown wait."
     priority: P1
     runs: pr-ci
     proofs:
       - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#the_tick_follows_the_workspaces_this_process_served_and_deletes_only_when_switched_on"
       - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_refused_upload_touches_nothing_and_a_pool_that_bypasses_rls_is_refused"
       - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_carries_on"
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_big_backlog_in_one_workspace_does_not_starve_the_next_one"
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#the_running_tick_obeys_the_switch"
       - "server-rust/bins/momo-server/src/attachment_reclaim.rs#only_the_local_volume_is_reclaimed_by_the_api_process"
   - id: PUSH-1
     claim: "The push dispatch payload carries identifiers only: no message body, and no content-shaped key."

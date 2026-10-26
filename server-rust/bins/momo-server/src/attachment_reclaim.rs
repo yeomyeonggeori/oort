@@ -48,10 +48,11 @@
 //! failures, and the touched set itself is capped ([`MAX_TOUCHED_WORKSPACES`]).
 //!
 //! **Rotation** ([`cursor_after`]): a workspace with a big backlog spends the whole `batch` if it
-//! is looked at first, so the order rotates. A tick that looked at every touched workspace moves
-//! the head of the order on by one for the next tick; a tick that looked at only a window of a
-//! bigger set hands the next window the workspaces after it. Either way the workspace that spent
-//! the budget is not first again, so it cannot starve the others.
+//! is looked at first, so the next tick starts **after the last workspace this tick actually
+//! looked at** — the one whose turn ended the budget, or the last of the window when the budget
+//! held. That is a round robin over the touched set: a workspace that spent the budget goes to the
+//! back of the queue and cannot starve the others, and a set bigger than one tick's limit is
+//! walked window by window.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -115,8 +116,8 @@ impl TouchedWorkspaces {
     }
 
     /// Up to `limit` workspaces in id order, starting **after** `after` and wrapping around to
-    /// the start — each workspace at most once. A tick that remembers the last id it took walks
-    /// the whole set over successive ticks, so a set bigger than one tick's limit starves nobody.
+    /// the start — each workspace at most once. A tick that remembers the last workspace it looked
+    /// at ([`cursor_after`]) walks the whole set over successive ticks.
     pub fn next_batch(&self, after: Option<Uuid>, limit: usize) -> Vec<Uuid> {
         let all: Vec<Uuid> = self.lock().iter().copied().collect();
         let start = match after {
@@ -174,21 +175,21 @@ impl AttachmentDeleter for ArchiveDeleter {
     }
 }
 
-/// Where the next tick starts. A tick that looked at **every** touched workspace rotates the head
-/// of the order by one (the workspace that spent this tick's budget is not first next time, which
-/// is what keeps a big backlog from starving the others when the set fits in one tick); a tick
-/// that looked at a window of a bigger set hands the next tick the workspaces after the window.
-pub(crate) fn cursor_after(batch: &[Uuid], total: usize) -> Option<Uuid> {
-    if batch.len() >= total {
-        batch.first().copied()
-    } else {
-        batch.last().copied()
-    }
+/// Where the next tick starts: **after the last workspace this tick looked at** — the one whose
+/// turn ended the budget (it goes to the back of the queue, so a big backlog cannot starve the
+/// others), or the last of the window when the budget held. `looked_at` is how many of `batch`
+/// the pass examined ([`AttachmentReclaimStats::looked_at`]); `None` when it examined none, so the
+/// cursor stays where it was.
+pub(crate) fn cursor_after(batch: &[Uuid], looked_at: usize) -> Option<Uuid> {
+    looked_at
+        .checked_sub(1)
+        .and_then(|last| batch.get(last))
+        .copied()
 }
 
 /// One iteration. `drive = None` is the switched-off tick: it counts and returns the tally in
 /// [`AttachmentReclaimStats::dry_run`]; it owns no deleter and writes nothing. `cursor` is the
-/// last workspace the previous tick took (this tick starts after it).
+/// last workspace the previous tick looked at (this tick starts after it, [`cursor_after`]).
 ///
 /// `write_pool` must be RLS-bound or this refuses to run — it carries every statement.
 pub async fn sweep_once(
@@ -200,16 +201,18 @@ pub async fn sweep_once(
 ) -> Result<AttachmentReclaimStats, DbError> {
     ensure_write_pool_rls_bound(write_pool).await?;
     let workspaces = touched.next_batch(*cursor, MAX_WORKSPACES_PER_TICK as usize);
-    if let Some(next) = cursor_after(&workspaces, touched.len()) {
-        *cursor = Some(next);
-    }
+    let order = workspaces.clone();
     let deleter: Option<Arc<dyn AttachmentDeleter>> = drive.map(|drive| {
         Arc::new(ArchiveDeleter {
             drive: Arc::clone(drive),
             unavailable: AtomicBool::new(false),
         }) as Arc<dyn AttachmentDeleter>
     });
-    Ok(reclaim_pass(write_pool, workspaces, UNBOUND_TTL, batch, deleter.as_ref()).await)
+    let stats = reclaim_pass(write_pool, workspaces, UNBOUND_TTL, batch, deleter.as_ref()).await;
+    if let Some(next) = cursor_after(&order, stats.looked_at) {
+        *cursor = Some(next);
+    }
+    Ok(stats)
 }
 
 /// Whether **this process** reclaims the attachments of `backend`. Only the `local` volume: with a
@@ -401,32 +404,39 @@ mod tests {
         assert_eq!(set.next_batch(Some(id(99)), 2), vec![id(1), id(2)]);
     }
 
-    /// The cursor keeps a big backlog from starving the rest: when one tick covers the whole set
-    /// the head moves on by one, and when it covered only a window the next one follows it.
+    /// The next tick starts after the last workspace this tick looked at: a workspace that spent the
+    /// budget goes to the back of the queue (a big backlog cannot starve the others), and a set
+    /// bigger than one tick's limit is walked window by window.
     #[test]
-    fn the_cursor_rotates_the_head_over_a_whole_set_and_follows_a_window_over_a_bigger_one() {
+    fn the_cursor_continues_after_the_last_workspace_a_tick_looked_at() {
         let set = TouchedWorkspaces::default();
         for n in 1..=3u128 {
             set.touch(id(n));
         }
-        // Every workspace fits in one tick: the head is 1, then 2, then 3, then 1 again.
+        // The budget ends in the first workspace each tick looks at: the head moves on every time.
         let mut cursor = None;
         let mut heads = Vec::new();
         for _ in 0..4 {
             let batch = set.next_batch(cursor, 100);
             heads.push(batch[0]);
-            cursor = cursor_after(&batch, set.len());
+            cursor = cursor_after(&batch, 1);
         }
-        assert_eq!(heads, vec![id(1), id(2), id(3), id(1)], "the head rotates");
-        // A window of a bigger set: the next window starts after this one.
+        assert_eq!(
+            heads,
+            vec![id(1), id(2), id(3), id(1)],
+            "a workspace that spent the budget goes to the back"
+        );
+        // A window that was looked at in full hands the next tick what follows it.
         let big = TouchedWorkspaces::default();
         for n in 1..=5u128 {
             big.touch(id(n));
         }
         let first = big.next_batch(None, 2);
-        let cursor = cursor_after(&first, big.len());
+        let cursor = cursor_after(&first, first.len());
         assert_eq!(cursor, Some(id(2)), "after the window, not the head");
         assert_eq!(big.next_batch(cursor, 2), vec![id(3), id(4)]);
+        // Nothing looked at: the cursor does not move.
+        assert_eq!(cursor_after(&first, 0), None);
         assert_eq!(cursor_after(&[], 0), None);
     }
 
