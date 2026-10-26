@@ -1039,9 +1039,10 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.label,
     },
     confirmActions: {flexDirection: 'row', gap: space.sm},
-    // 쌓인 배치: 단추가 한 줄 전체를 쓴다(`flex: 1` 은 세로 방향에서 높이를 0 으로 눌러 버린다).
+    // 쌓인 배치: 단추가 한 줄 전체를 쓴다(`flex: 1` 은 세로 방향에서 높이를 0 으로 눌러 버린다). 큰 글씨의 한 줄이 단추 가장자리에
+    // 닿지 않게 위아래로 숨을 둔다(나란한 배치는 `minHeight` 44 가 숨을 준다 — 글씨가 작아서다).
     confirmActionsStacked: {flexDirection: 'column'},
-    confirmButtonStacked: {flex: 0},
+    confirmButtonStacked: {flex: 0, paddingVertical: space.sm},
     confirmButton: {
       flex: 1,
       minHeight: TOUCH_TARGET,

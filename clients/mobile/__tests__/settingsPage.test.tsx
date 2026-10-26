@@ -759,6 +759,10 @@ describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)'
       // 쌓인 단추는 `flex: 1` 을 버린다(세로 방향 flex 1 은 높이를 0 으로 눌러 버린다) — 나란한 단추는 반반이다.
       expect(style('sign-out-cancel').flex).toBe(flex);
       expect(style('sign-out-confirm').flex).toBe(flex);
+      // 쌓인 단추는 위아래 숨이 있다(큰 글씨 한 줄이 가장자리에 닿지 않게) — 나란한 단추는 minHeight 가 숨을 준다.
+      const breathing = direction === 'column' ? 8 : undefined;
+      expect(style('sign-out-cancel').paddingVertical).toBe(breathing);
+      expect(style('sign-out-confirm').paddingVertical).toBe(breathing);
     },
   );
 
