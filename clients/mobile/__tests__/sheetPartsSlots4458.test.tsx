@@ -1,18 +1,22 @@
-import {cleanup, render, screen, within} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet, Text} from 'react-native';
+import {ActivityIndicator, StyleSheet, Text} from 'react-native';
 
+import {SHEET_ICONS} from '../src/design/icons';
+import {ConfirmCheck, SheetHeader} from '../src/design/SheetChrome';
 import {ListRow} from '../src/design/sheetParts';
 import {FixedScheme} from '../src/design/theme';
+import {imageSources} from './fixtures/sheetContract';
 
 // =============================================================================
-// `ListRow` 의 세 슬롯 — 오른쪽 임의 노드(`trailing`) · 역할(`accessibilityRole`) · 펼침(`expanded`) (#4458 2단계).
+// `ListRow` 의 세 슬롯 — 오른쪽 임의 노드(`trailing`) · 역할(`accessibilityRole`) · 펼침(`expanded`) 과 확정 ✓ 의 진행 표시
+// (`ConfirmCheck busy`) (#4458 2단계).
 //
 // 1단계가 부품에 자리가 없어 접거나 잃었던 표시(AI 시트의 칩, PR 이동 행의 link, 작업 맡기기 펼침 행의 상태)를 되살리는
 // 부품 쪽 시험이다. 호스트 시트가 그 슬롯을 **실제로 쓰는가**는 각 시트의 시험이 잰다(`aiSheet`·`teamBoard`·`delegateWork`).
 // 이 파일은 `sheetKit.test.tsx` 와 따로 둔다 — #4457 이 같은 파일의 같은 자리에 시험을 더해서 병합이 겹쳤다.
 //
-// 각 단정은 일부러 되돌려 본 사보타주 표가 PR 에 있다(S1~S6).
+// 각 단정은 일부러 되돌려 본 사보타주 표가 PR 에 있다(S1~S6 · S21~S24).
 // =============================================================================
 
 afterEach(cleanup);
@@ -150,5 +154,48 @@ describe('행 — 오른쪽 임의 노드·역할·펼침 상태 (#4458)', () =>
     view.rerender(row(true));
     expect(screen.getByTestId('row').props.accessibilityState.expanded).toBe(true);
     expect(flat('row-expand').transform).toEqual([{rotate: '180deg'}]);
+  });
+});
+
+describe('확정 ✓ 의 진행 표시 — 왕복 중에는 ✓ 자리에 스피너가 선다 (#4458 보안 검수 M1)', () => {
+  it('진행 중이 아니면 ✓ 글리프가 서고 스피너는 없다', () => {
+    mount(<ConfirmCheck label="저장" onPress={() => {}} testID="check" />);
+    expect(imageSources(screen.getByTestId('check'))).toEqual([SHEET_ICONS.check]);
+    expect(screen.getByTestId('check').findAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(screen.getByTestId('check').props.accessibilityState).toMatchObject({busy: false, disabled: false});
+  });
+
+  it('진행 중이면 ✓ 글리프 대신 스피너가 서고, 눌려도 아무 일이 없고, 이름은 호출자의 것이며 상태는 busy·disabled 다', () => {
+    const onPress = jest.fn();
+    mount(<ConfirmCheck label="보내는 중" onPress={onPress} busy testID="check" />);
+    const check = screen.getByTestId('check');
+    // 그려진 모양: ✓ 글리프는 없고 스피너 하나가 선다.
+    expect(imageSources(check)).toEqual([]);
+    expect(within(check).UNSAFE_getAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(screen.getByTestId('check-busy')).toBeTruthy();
+    // 보조기술이 읽는 상태와 이름.
+    expect(check.props.accessibilityLabel).toBe('보내는 중');
+    expect(check.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    fireEvent.press(check);
+    expect(onPress).not.toHaveBeenCalled();
+  });
+
+  it('SheetHeader 는 confirm.busy 를 ✓ 에 전한다 — 머리의 오른쪽 X 는 진행 중에도 닫는다', () => {
+    const onClose = jest.fn();
+    const onPress = jest.fn();
+    mount(
+      <SheetHeader
+        title="시험 시트"
+        closeLabel="시험 시트 닫기"
+        onClose={onClose}
+        closeTestID="close"
+        confirm={{label: '보내는 중', onPress, busy: true, testID: 'check'}}
+      />,
+    );
+    expect(screen.getByTestId('check').props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    expect(screen.getByTestId('check-busy')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
   });
 });

@@ -665,6 +665,27 @@ describe('내 맥에 보내기 — 공용 부품 (#4458)', () => {
     });
   });
 
+  it('보내는 동안 ✓ 자리에 스피너가 서고 이름이 「보내는 중」이며, 다시 눌러도 전송은 한 번이다', async () => {
+    installFetch({});
+    // 포트가 끝내 답하지 않는다 — 보내는 중 상태를 붙든다.
+    const spawn = jest.fn(() => new Promise<SpawnOutcome>(() => {}));
+    mount({wired: true, spawn} as SpawnPort);
+    await screen.findByTestId('ask-mac-form');
+    await pickChannelAndType();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    await waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+    const send = screen.getByTestId('ask-mac-send');
+    expect(send.props.accessibilityLabel).toBe('보내는 중');
+    expect(send.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    // **그려진** 모양: ✓ 글리프는 없고 스피너가 선다.
+    expect(imageSources(send)).toEqual([]);
+    expect(screen.getByTestId('ask-mac-send-busy')).toBeTruthy();
+    fireEvent.press(send);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
   it('방식·도구·폴더·채널은 묶음 카드의 라디오 행이고 묶음마다 하나만 고른 상태다 — 옛 GroupSection·GroupRow·NoticeBlock 은 없다', async () => {
     installFetch({});
     mount(fakePort().port);

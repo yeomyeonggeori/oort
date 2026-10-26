@@ -702,6 +702,7 @@ function SheetBody({
       {header({
         label: mutation.isPending ? '보내는 중' : '맡기기',
         disabled: sendDisabled,
+        busy: mutation.isPending,
         onPress: () => submit(),
         testID: 'delegate-send',
       })}

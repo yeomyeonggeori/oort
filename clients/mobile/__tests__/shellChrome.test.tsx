@@ -123,7 +123,7 @@ function jsonResponse(status: number, body: unknown): Response {
 function installFetch(
   mentions = 0,
   selfRole?: 'owner' | 'admin' | 'member',
-  createStatus = 201,
+  createStatus: number | 'hang' = 201,
 ): jest.Mock {
   const roster = ROSTER.map(row =>
     (row as {id?: string}).id === SELF_ID && selfRole ? {...row, role: selfRole} : row,
@@ -136,6 +136,8 @@ function installFetch(
       return jsonResponse(200, {channel: DM_CHANNEL, created: true});
     }
     if (url.endsWith('/channels') && init?.method === 'POST') {
+      // 서버가 끝내 답하지 않는다 — 만드는 중 상태를 붙든다.
+      if (createStatus === 'hang') return new Promise<Response>(() => {});
       if (createStatus !== 201) {
         return jsonResponse(createStatus, {error: 'conflict', message: 'exists'});
       }
@@ -505,6 +507,28 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     // 새 채널이 목록 캐시에 바로 들어간다.
     const cached = queryClient?.getQueryData<Array<{id: string}>>(['channels', WS]);
     expect(cached?.some(channel => channel.id === 'ch-new')).toBe(true);
+  });
+
+  it('만드는 동안 ✓ 자리에 스피너가 서고 이름이 「채널 만드는 중」이며, 다시 눌러도 요청은 한 번이다', async () => {
+    const fetchMock = installFetch(0, undefined, 'hang');
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    const posts = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith(`/workspaces/${WS}/channels`) && init?.method === 'POST',
+      );
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    const create = screen.getByTestId('new-channel-create');
+    expect(create.props.accessibilityLabel).toBe('채널 만드는 중');
+    expect(create.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    expect(imageSources(create)).toEqual([]);
+    expect(screen.getByTestId('new-channel-create-busy')).toBeTruthy();
+    fireEvent.press(create);
+    expect(posts()).toHaveLength(1);
   });
 
   it('같은 이름이 있으면(409) 이름 칸 밑에 말하고 시트를 닫지 않는다', async () => {

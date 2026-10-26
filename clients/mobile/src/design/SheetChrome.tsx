@@ -1,11 +1,11 @@
 import React from 'react';
-import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {ActivityIndicator, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 
 import {BAR_CONTROL_MAX_SCALE} from './atoms';
 import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetClose} from './PageSheet';
 import {circleLook} from './sheetModel';
-import {useStyles} from './theme';
+import {usePalette, useStyles} from './theme';
 import {
   font,
   SAFE_GUTTER,
@@ -66,33 +66,45 @@ export function CloseCircle({
 /**
  * 확정 ✓ — 편집 시트의 왼쪽. `disabled`(입력 전·바뀐 것이 없음)이면 회색이고 눌리지 않는다.
  * 색이 아니라 `accessibilityState` 가 비활성을 말한다.
+ *
+ * `busy`(보내는 중·저장 중)면 ✓ 자리에 **스피너**가 서고 눌리지 않는다 — 옛 글자 단추는 라벨이 「보내는 중」으로 눈에 보이게
+ * 바뀌었는데, 글리프에는 그 자리가 없어 왕복(Face ID 뒤 POST) 동안 「눌렸는가」가 안 보였다(#4458 보안 검수 M1).
+ * 이름(`label`)에도 진행 낱말을 넣는 것은 호출자의 몫이다.
  */
 export function ConfirmCheck({
   label,
   onPress,
   disabled = false,
+  busy = false,
   testID,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  busy?: boolean;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const inert = disabled || busy;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{disabled}}
-      disabled={disabled}
+      accessibilityState={{disabled: inert, busy}}
+      disabled={inert}
       hitSlop={slopTo(SHEET.circle)}
       onPress={onPress}
       style={({pressed}) => [styles.check, pressed && styles.pressed]}
       testID={testID}>
-      <Image
-        source={SHEET_ICONS.check}
-        style={[styles.checkGlyph, disabled && styles.checkGlyphOff]}
-      />
+      {busy ? (
+        <ActivityIndicator color={palette.text} testID={testID ? `${testID}-busy` : undefined} />
+      ) : (
+        <Image
+          source={SHEET_ICONS.check}
+          style={[styles.checkGlyph, disabled && styles.checkGlyphOff]}
+        />
+      )}
     </Pressable>
   );
 }
@@ -101,6 +113,8 @@ export interface SheetConfirm {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  /** 왕복 중 — ✓ 자리에 스피너가 서고 눌리지 않는다(`ConfirmCheck`). */
+  busy?: boolean;
   testID?: string;
 }
 
@@ -131,6 +145,7 @@ export function SheetHeader({
             label={confirm.label}
             onPress={confirm.onPress}
             disabled={confirm.disabled}
+            busy={confirm.busy}
             testID={confirm.testID}
           />
         ) : null}

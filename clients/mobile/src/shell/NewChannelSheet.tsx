@@ -147,6 +147,7 @@ function SheetBody({
           label: pending ? '채널 만드는 중' : '채널 만들기',
           onPress: () => void submit(),
           disabled,
+          busy: pending,
           testID: 'new-channel-create',
         }}
       />

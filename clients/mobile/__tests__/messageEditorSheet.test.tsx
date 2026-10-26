@@ -58,12 +58,13 @@ describe('머리의 ✓ = 저장', () => {
     expect(save).toHaveBeenCalledWith('안녕하세요, 이도현 님');
   });
 
-  it('저장하는 동안은 이름이 「저장 중」이고 잠기며, 한 줄이 진행을 말한다 — ✓ 에는 진행 자리가 없다', () => {
+  it('저장하는 동안은 이름이 「저장 중」이고 잠기며, ✓ 자리의 스피너와 한 줄이 진행을 말한다', () => {
     mount({pending: true});
     fireEvent.changeText(screen.getByTestId('editor-input'), '다른 글');
     const confirm = screen.getByTestId('editor-save');
     expect(confirm.props.accessibilityLabel).toBe('저장 중');
-    expect(confirm.props.accessibilityState).toMatchObject({disabled: true});
+    expect(confirm.props.accessibilityState).toMatchObject({disabled: true, busy: true});
+    expect(screen.getByTestId('editor-save-busy')).toBeTruthy();
     expect(screen.getByTestId('editor-pending')).toHaveTextContent('저장 중');
     fireEvent.press(confirm);
     expect(save).not.toHaveBeenCalled();

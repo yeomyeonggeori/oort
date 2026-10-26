@@ -98,6 +98,7 @@ export function MessageEditorSheet({
           label: pending ? '저장 중' : '저장',
           onPress: () => onSave(trimmed),
           disabled: !canSave,
+          busy: pending,
           testID: 'editor-save',
         }}
       />
@@ -125,7 +126,7 @@ export function MessageEditorSheet({
         />
 
         {pending ? (
-          // ✓ 는 진행을 말하는 자리가 없다(회색은 「비활성」이다) — 저장하는 동안은 한 줄이 말한다.
+          // ✓ 자리의 스피너가 진행을 말하고(`busy`), 이 한 줄은 키보드 위에서 글을 보는 눈과 낭독에게 같은 말을 한 번 더 한다.
           <Text accessibilityLiveRegion="polite" style={styles.pending} testID="editor-pending">
             저장 중
           </Text>

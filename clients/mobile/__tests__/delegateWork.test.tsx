@@ -138,6 +138,8 @@ function runWire() {
 type RunAnswer =
   | {kind: 'ok'}
   | {kind: 'network'}
+  /** 서버가 끝내 답하지 않는다 — 보내는 중 상태를 붙든다. */
+  | {kind: 'hang'}
   | {kind: 'refuse'; status: number; code?: string; message: string};
 
 interface Posted {
@@ -180,6 +182,7 @@ function installFetch(options: {
     if (target.endsWith('/agent-runs') && init?.method === 'POST') {
       posted.push({url: target, body: JSON.parse(String(init.body))});
       const answer = answers.length > 1 ? answers.shift() : answers[0];
+      if (answer?.kind === 'hang') return new Promise<Response>(() => {});
       if (answer?.kind === 'network') throw new TypeError('Network request failed');
       if (answer?.kind === 'refuse') {
         return reply(answer.status, {
@@ -707,6 +710,24 @@ describe('작업 맡기기 — 공용 부품 (#4458)', () => {
     expect(screen.UNSAFE_queryAllByType(OutlineButton)).toHaveLength(0);
     expect(screen.UNSAFE_queryAllByType(NoticeBlock)).toHaveLength(0);
     expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('보내는 동안 ✓ 자리에 스피너가 서고 이름이 「보내는 중」이며, 다시 눌러도 요청은 한 번이다', async () => {
+    const fixture = installFetch({
+      members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})],
+      runs: [{kind: 'hang'}],
+    });
+    mount({agentMemberId: AGENT});
+    await fillAndSend();
+    await waitFor(() => expect(fixture.posted()).toHaveLength(1));
+    const send = screen.getByTestId('delegate-send');
+    expect(send.props.accessibilityLabel).toBe('보내는 중');
+    expect(send.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    // **그려진** 모양: ✓ 글리프는 없고 스피너가 선다.
+    expect(imageSources(send)).toEqual([]);
+    expect(screen.getByTestId('delegate-send-busy')).toBeTruthy();
+    fireEvent.press(send);
+    expect(fixture.posted()).toHaveLength(1);
   });
 
   it('검증이 막은 칸의 외곽선이 실패색이 된다 — 입력 부품이 invalid 를 받는다', async () => {

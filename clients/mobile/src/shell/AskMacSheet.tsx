@@ -527,6 +527,7 @@ function SheetBody({
       {header({
         label: sendLabel,
         disabled: !canSend,
+        busy: pending,
         onPress: () => {
           void submit();
         },
