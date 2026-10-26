@@ -883,8 +883,6 @@ export function SettingsContent({
   );
 }
 
-/** 페이지의 큰 얼굴. Buzz 의 97 에 가장 가까운 4 의 배수. */
-
 type Styles = ReturnType<typeof buildStyles>;
 
 function pillTone(styles: Styles, presence: EffectivePresence) {

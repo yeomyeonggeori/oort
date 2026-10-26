@@ -704,6 +704,19 @@ describe('행 — 값은 큰 글씨에서 제목 아래로 내려온다 (#4457)'
     expect(style.color).toBe(paletteFor('light').textMuted);
   });
 
+  it('한국어 줄바꿈은 어절 단위다 — 제목과 값(오른쪽에 선 것도 쌓인 것도)이 모두 hangul-word (design-review #4457 r2 H1)', async () => {
+    // 두 줄을 허용한 값이 이 규칙 없이 「온보/딩」 처럼 어절 가운데서 끊겼다. 줄 수만 재면 이 결함이 지나간다.
+    for (const fontScale of [1, STACK_PILL_SCALE]) {
+      setFontScale(fontScale);
+      const view = await mount(
+        <ListRow title="상태 설정" value="달무리 스튜디오 온보딩 자료" accessory="chevron" onPress={() => {}} testID="row" />,
+      );
+      expect(screen.getByTestId('row-value').props.lineBreakStrategyIOS).toBe('hangul-word');
+      expect(screen.getByText('상태 설정').props.lineBreakStrategyIOS).toBe('hangul-word');
+      view.unmount();
+    }
+  });
+
   it('경계: 문턱 바로 아래(1.49)는 아직 오른쪽, 문턱(1.5)부터 내려온다', async () => {
     setFontScale(STACK_PILL_SCALE - 0.01);
     const {unmount} = await mount(<ListRow title="a" value="b" testID="row" />);

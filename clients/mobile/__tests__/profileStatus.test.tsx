@@ -841,6 +841,8 @@ describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
     const value = sheet.getByTestId('status-expiry-row-value');
     expect(value).toHaveTextContent(/지금대로 · .+까지/);
     expect(value.props.numberOfLines).toBe(2);
+    // 두 줄을 허용한 값은 어절 단위로 줄을 바꾼다 — 그렇지 않으면 「온보/딩」 으로 어절 가운데서 끊긴다(r2 H1).
+    expect(value.props.lineBreakStrategyIOS).toBe('hangul-word');
   });
 });
 
