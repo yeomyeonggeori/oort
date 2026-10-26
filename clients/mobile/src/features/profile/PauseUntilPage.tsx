@@ -66,11 +66,11 @@ export function PauseUntilPage({
   workspaceId: string;
   selfId: string;
   self: RosterMember | undefined;
-  /** 쓰기가 성공하면 부른다 — 시트가 프로필로 돌아간다. */
+  /** 쓰기가 성공하면 부른다 — 이 장이 걷히고 설정 페이지로 돌아간다. */
   onDone: () => void;
   /**
-   * 「직접 고르기」가 열리면 그 블록의 윗변이 보이게 시트를 내린다. `y` 는 이 장의 윗변에서
-   * 잰 값이다(시트의 위쪽 여백은 시트가 더한다). 끝까지 내리면 달력을 지나쳐 확인 단추만 남는다.
+   * 「직접 고르기」가 열리면 그 블록의 윗변이 보이게 장의 스크롤을 내린다. `y` 는 이 장의 윗변에서
+   * 잰 값이다(장 앞의 위쪽 여백은 부르는 쪽이 더한다). 끝까지 내리면 달력을 지나쳐 확인 단추만 남는다.
    */
   onReveal: (y: number) => void;
 }): React.JSX.Element {
@@ -81,9 +81,9 @@ export function PauseUntilPage({
   const [customOpen, setCustomOpen] = useState(false);
   const [pendingId, setPendingId] = useState<PauseUntilPreset | 'custom' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  // 「직접 고르기」 블록이 **열릴 때 한 번만** 시트를 내린다. `onLayout` 은 블록의 높이가 바뀔
+  // 「직접 고르기」 블록이 **열릴 때 한 번만** 스크롤을 내린다. `onLayout` 은 블록의 높이가 바뀔
   // 때마다(지난 시각 오류문이 뜨거나 달이 넘어갈 때) 다시 오는데, 그때마다 내리면 고르던 자리에서
-  // 시트가 튄다. 열고 닫을 때마다 깃발을 내려 다음에 열 때 다시 한 번 내린다.
+  // 장이 튄다. 열고 닫을 때마다 깃발을 내려 다음에 열 때 다시 한 번 내린다.
   const revealedRef = useRef(false);
   const toggleCustom = () => {
     revealedRef.current = false;

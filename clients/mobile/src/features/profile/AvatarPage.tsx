@@ -52,7 +52,7 @@ export function AvatarPage({
   workspaceId: string;
   selfId: string;
   directory: Directory;
-  /** 바뀌었거나 지워졌으면 부른다 — 시트가 프로필로 돌아간다. */
+  /** 바뀌었거나 지워졌으면 부른다 — 이 장이 걷히고 설정 페이지로 돌아간다. */
   onDone: () => void;
   /** 시험이 바꿔 끼운다. 앱은 네이티브 포트다. */
   ports?: AvatarPhotoPorts;

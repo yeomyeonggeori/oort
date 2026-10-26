@@ -256,8 +256,8 @@ function StatusSheetBody({
 /**
  * 상태 입력 알약: 앞 이모지 칸 + 글 한 줄. `design/sheetParts.tsx` 의 `InputPill` 은 앞 자리가 아이콘
  * 하나뿐이라(입력을 둘 수 없다) 같은 윤곽을 이 시트에서 얇게 다시 짠다 — 외곽선은 `textFaint`(3:1,
- * ADR-0189 D6 이 값을 받는 그릇에만 남긴 선), 높이는 `SHEET.pillMinHeight`. #4318 이 `InputPill` 에
- * 앞 자리(`leading`)를 내면 이 함수는 지워진다.
+ * ADR-0189 D6 이 값을 받는 그릇에만 남긴 선), 높이는 `SHEET.pillMinHeight`. `InputPill` 에 앞 자리
+ * (`leading`)가 생기면(후속 — `phone-sheets.md` §4 얇은 부품 표) 이 함수는 지워진다.
  */
 function StatusInputPill({
   emoji,
