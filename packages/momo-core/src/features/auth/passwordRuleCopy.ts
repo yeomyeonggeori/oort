@@ -6,10 +6,17 @@
 // reasons, so they read the same sentences. Two copies of a rule drift, and a
 // person told the wrong thing fixes the wrong field.
 //
-// The numbers are the server's (`momo-auth` `password_rules.rs`:
-// `NEW_PASSWORD_MIN_CHARS`, `NEW_PASSWORD_MAX_BYTES`). The tests pin the
-// sentences as literals, so moving a number here without the server (or the
-// server without here) goes red in one place.
+// The numbers and codes are the server's (`momo-auth` `password_rules.rs`:
+// `NEW_PASSWORD_MIN_CHARS`, `NEW_PASSWORD_MAX_BYTES`, the two codes), declared
+// here a second time because core cannot read a Rust file (no `node:fs`,
+// `scripts/purity.mjs`). Two things guard them, and they guard different
+// halves:
+//   - `passwordRuleCopy.test.ts` (next to this file) pins the sentences and the
+//     constants as literals. It goes red when something changes *here*; it
+//     knows nothing about the server.
+//   - `clients/web/src/features/auth/passwordRuleDrift.test.ts` reads
+//     `password_rules.rs` and compares. That is the only thing that goes red
+//     when the *server's* number moves.
 // =============================================================================
 
 /** Fewest characters a new password may have (input as typed). */

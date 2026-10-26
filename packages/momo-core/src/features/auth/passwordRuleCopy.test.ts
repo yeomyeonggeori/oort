@@ -6,9 +6,11 @@ import {
   passwordRuleCopy,
 } from "./passwordRuleCopy";
 
-// ADR-0215 D2 (#4593). The numbers are the server's (`momo-auth`
-// `password_rules.rs`). The sentences are pinned as literals on purpose: a
-// number moved here without the server, or the server without here, goes red.
+// ADR-0215 D2 (#4593). The sentences and the numbers they print are pinned as
+// literals on purpose: a number or a sentence changed in this module goes red.
+// Whether they still match the server is not decided here (core cannot read the
+// server's file); `clients/web/src/features/auth/passwordRuleDrift.test.ts`
+// reads `password_rules.rs` and compares.
 describe("passwordRuleCopy", () => {
   it("says the minimum for a too-short password", () => {
     expect(passwordRuleCopy("password_too_short")).toBe(
@@ -43,7 +45,7 @@ describe("passwordRuleCopy", () => {
     expect(passwordRuleCopy("invalid_request")).toBeNull();
   });
 
-  it("keeps the numbers the server enforces, and the Hangul figure whole", () => {
+  it("pins the numbers its sentences print, and the Hangul figure whole", () => {
     expect(NEW_PASSWORD_MIN_CHARS).toBe(10);
     expect(NEW_PASSWORD_MAX_BYTES).toBe(72);
     // The sentence prints this number; a ceiling that is not a multiple of three
