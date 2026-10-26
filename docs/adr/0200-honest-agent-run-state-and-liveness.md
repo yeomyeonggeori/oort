@@ -630,6 +630,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | `method` | `initialize`·`notifications/initialized`·`ping`·`tools/list`·`tools/call`·`server/discover` / `other`(모르는 method) / `unparsed`(JSON 아님) / `no_method`(method 없음) | 호출자가 보낸 method 문자열은 어디에도 안 들어가요 |
 | `tool` | `tools/call`에서만. `momo_mcp::TOOL_CATALOG`의 13개 이름 / `unknown` | 카탈로그 이름은 이 호출자의 view가 못 부르는 도구여도 남겨요(「받지 못한 도구를 불렀다」가 진단이에요). 응답은 지금처럼 「unknown tool」이에요 |
 | `outcome` | `ok` / `invalid_arguments` · `not_authorized` · `unavailable` · `conflict` · `already_claimed` · `claim_expired` · `internal` / `protocol_error` | 앞의 일곱은 `ToolFailure::code()`와 같은 토큰이에요(`tool_call` 원장과 한 어휘). 시험이 `ToolFailure` 변종마다 대조해요 |
+| `reason` | 거절일 때만. 서버가 쓰는 고정 문장을 닫힌 토큰으로 옮긴 값 약 25가지(`parse_error` · `accept` · `content_type` · `version_header` · `version_mismatch` · `mcp_method_header` · `mcp_name_header` · `modern_meta` · `request_shape` · `unknown_tool` · `tool_arguments` …) / `other` | 하나의 코드 아래 원인이 여럿이라서 필요해요(`-32020`은 헤더·메타데이터 불일치 8가지, `-32600`은 봉투 결함 12가지). 아래 A3 |
 | `status`·`rpc_code` | HTTP 상태, JSON-RPC `error.code`(성공이면 없음) | |
 | `era` | `modern` · `legacy` · `other` · `none` | `MCP-Protocol-Version` 헤더가 말한 시대. 헤더 문자열은 안 남겨요 |
 | `tools_listed` | `tools/list` 성공 때 이 호출자의 view가 보여 준 도구 수 | 「목록이 비었나, 일부인가」를 가르는 숫자예요 |
@@ -638,6 +639,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 **A3. 싣지 않는 것 (T1·T3 규율 그대로).** 인자의 이름과 값, 커서, `leaseHandle`, 요청 `id`, 헤더 값, 채널·메시지·run id, 본문, 오류 문장, 토큰, 그리고 **호출자가 고른 문자열의 일부**(접두·자른 조각·해시 포함)예요.
 - `CallShape.method`·`tool`은 `&'static str`이에요. 호출자의 문자열은 타입 수준에서 이 행에 들어갈 길이 없어요.
+- `reason`은 응답의 `error.message`를 **정확히 일치하는 표(`momo_mcp::REFUSAL_REASONS`)에서만** 찾아 그 표의 토큰을 내보내요. 문장은 복사하지 않아요. 표에 없는 문장(새로 추가했는데 행을 안 단 문장, 앞으로 호출자 글이 섞일지도 모르는 메시지)은 `other`예요. 그래서 닫힘이 구성으로 보장되고, 행이 빠지면 누출이 아니라 `other`로 보여요. `src/lib.rs`의 모든 문장이 표에 있는지 소스 스캔 시험이 잠가요.
 - 개수(A2의 마지막 세 줄)는 호출자 입력이 아니라 서버 응답에서 세요. 이 값들이 2026-10-15 증보(T1)의 「싣지 않는 것: 결과 본문·채널/메시지 id」를 넘지 않는다는 근거예요. 세는 함수는 정수만 돌려주는 `ResultCounts`(`Copy`)예요.
 
 **A4. 상한 — 멈추고, 지우지 않아요(T3과 같은 규칙).** 자격(토큰 id)당 **시간당 240행**이에요. 넘으면 그 시간이 지날 때까지 이 행만 안 써요. 호출 자체는 제한하지 않고, 넘은 만큼을 따로 세지도 않아요.
@@ -654,7 +656,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | 보이는 것 | 뜻 | 다음 |
 |---|---|---|
 | 행이 없다 | 호출이 서버에 닿지 않았거나 인증 단계에서 거절(401/403/429) | 기존 `auth.agent_bearer.*`·`agent_port.rate_limit.denied` 감사 |
-| `protocol_error`(`-32700`·`-32600`·`-32601`·`-32020`·`-32022`) | 런타임이 JSON·헤더·버전을 잘못 만들었어요 | 서버 문제가 아니라 루틴 지시문·런타임 쪽이에요 |
+| `protocol_error` + `reason` | 런타임이 요청을 잘못 만들었어요. `parse_error`(JSON 깨짐: 문자열에 줄바꿈이 들어가는 쉘 보간 등) · `accept`(Accept에 `text/event-stream` 없음) · `content_type` · `version_header`(modern `_meta`인데 `MCP-Protocol-Version` 헤더 없음) · `version_mismatch` · `mcp_method_header`·`mcp_name_header`(헤더가 본문과 다름 — 이전 호출의 `curl`을 재사용할 때 흔해요) · `modern_meta` · `request_shape` · `method_not_found` | 서버 문제가 아니라 루틴 지시문·런타임 쪽이에요. 이유 토큰이 고칠 곳을 말해 줘요 |
 | `tools/list` `tools_listed` < 13 | 범위가 모자란 연결 | 승인 범위·토큰 범위 확인 |
 | `tools/call` `unknown` 또는 카탈로그 이름 + `invalid_arguments` | 없는 도구나, view가 못 쓰는 도구를 불렀어요 | 범위 또는 루틴이 부르는 이름 |
 | `oort_ping` ok 뒤 `oort_inbox_read` 행이 없다 | 루틴이 ping 뒤에 멈췄어요 | 루틴 지시문 |
@@ -681,5 +683,5 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 ### 구현 슬라이스
 
 - **#4618 (engine) 1단계.** `momo-mcp`의 `call_shape`·`outcome_code`·`response_rpc_code`·`result_counts`(순수 함수, 닫힌 어휘), `routes/agent_port.rs` `trace_call`, `rate_limit.rs` `CallTraceBudget`.
-- 시험: `momo-mcp/tests/call_trace.rs`(어휘가 닫혀 있다·`ToolFailure` 변종마다 결과 토큰이 같다) · `bins/momo-server/tests/agent_port_call_trace_pg.rs`(모든 종류의 호출이 정확히 한 행·값이 안 새요·상한·기록 실패가 응답을 못 바꿔요·개수) · `rate_limit.rs` 단위(시간 주입).
+- 시험: `momo-mcp/tests/call_trace.rs`(어휘가 닫혀 있다·`ToolFailure` 변종마다 결과 토큰이 같다·개수는 서버 응답에서만) · `momo-mcp/tests/refusal_reason.rs`(실제 거절 요청 40여 건이 각자의 토큰·상태·코드를 내요·`ToolFailure` 변종마다 토큰·디스패처의 모든 문장이 표에 있다·표에 없는 문장은 `other`) · `bins/momo-server/tests/agent_port_call_trace_pg.rs`(모든 종류의 호출이 정확히 한 행·값이 안 새요·상한·기록 실패가 응답을 못 바꿔요·개수가 「job을 봤는데 안 가져감」을 가려요) · `bins/momo-server/tests/grok_like_agent_flow_pg.rs`(현행 루틴대로 부르는 클라이언트의 DM·멘션·연속 DM 재현) · `rate_limit.rs` 단위(시간 주입).
 - 2단계는 workspace 게이트·보안 검수·PR이에요. 배포 뒤 운영 관찰은 planner가 해요.

@@ -576,11 +576,7 @@ fn literal_args(source: &str, callee: &str, index: usize) -> Vec<String> {
                     finish(arg, &mut literal, &mut other_tokens);
                     arg += 1;
                 }
-                c if !c.is_whitespace() => {
-                    if arg == index {
-                        other_tokens = true;
-                    }
-                }
+                c if !c.is_whitespace() && arg == index => other_tokens = true,
                 _ => {}
             }
         }
