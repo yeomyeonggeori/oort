@@ -192,11 +192,14 @@ struct SessionTokens {
 /// middleware's MOMO-300 revocation check meaningful — minting without a row
 /// would turn every subsequent request into a 401 `unknown token`.
 ///
-/// `pub(crate)` since B4.3 so `POST /v1/join` mints its session through this and
-/// not a copy: a joined session must be revocable exactly like a logged-in one.
+/// `pub(crate)` since B4.3 so the other doors that sign someone in (claim, password
+/// change) mint through this and not a copy: a session must be revocable exactly
+/// like a logged-in one. `POST /v1/join` signs in inside its own transaction
+/// ([`mint_and_record_session_in_tx`], #4625) and shares the recording with this
+/// function ([`record_session_pair`]), so what a session persists is still said once.
 ///
-/// Every caller of this name starts a NEW session (login, join, claim, password
-/// change), so it opens a fresh lineage (#2677). A refresh continues one and
+/// Every caller of this name starts a NEW session (login, claim, password change),
+/// so it opens a fresh lineage (#2677). A refresh continues one and
 /// goes through [`issue_and_record_session_in_lineage`] instead.
 pub(crate) async fn issue_and_record_session(
     state: &AppState,
