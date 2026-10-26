@@ -630,7 +630,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | `method` | `initialize`·`notifications/initialized`·`ping`·`tools/list`·`tools/call`·`server/discover` / `other`(모르는 method) / `unparsed`(JSON 아님) / `no_method`(method 없음) | 호출자가 보낸 method 문자열은 어디에도 안 들어가요 |
 | `tool` | `tools/call`에서만. `momo_mcp::TOOL_CATALOG`의 13개 이름 / `unknown` | 카탈로그 이름은 이 호출자의 view가 못 부르는 도구여도 남겨요(「받지 못한 도구를 불렀다」가 진단이에요). 응답은 지금처럼 「unknown tool」이에요 |
 | `outcome` | `ok` / `invalid_arguments` · `not_authorized` · `unavailable` · `conflict` · `already_claimed` · `claim_expired` · `internal` / `protocol_error` | 앞의 일곱은 `ToolFailure::code()`와 같은 토큰이에요(`tool_call` 원장과 한 어휘). 시험이 `ToolFailure` 변종마다 대조해요 |
-| `reason` | 거절일 때만. 서버가 쓰는 고정 문장을 닫힌 토큰으로 옮긴 값 약 25가지(`parse_error` · `accept` · `content_type` · `version_header` · `version_mismatch` · `mcp_method_header` · `mcp_name_header` · `modern_meta` · `request_shape` · `unknown_tool` · `tool_arguments` …) / `other` | 하나의 코드 아래 원인이 여럿이라서 필요해요(`-32020`은 헤더·메타데이터 불일치 8가지, `-32600`은 봉투 결함 12가지). 아래 A3 |
+| `reason` | 거절일 때만. 서버가 쓰는 고정 문장 48개를 닫힌 토큰 27가지로 옮긴 값(예: `parse_error` · `accept` · `content_type` · `version_header` · `version_mismatch` · `mcp_method_header` · `mcp_name_header` · `modern_meta` · `request_shape` · `unknown_tool` · `tool_arguments`)과 `tool_artifacts`, 표에 없는 문장의 `other` | 하나의 코드 아래 원인이 여럿이라서 필요해요(도달할 수 있는 문장이 `-32020` 아래 8가지, `-32600` 아래 10여 가지예요). 아래 A3 |
 | `status`·`rpc_code` | HTTP 상태, JSON-RPC `error.code`(성공이면 없음) | |
 | `era` | `modern` · `legacy` · `other` · `none` | `MCP-Protocol-Version` 헤더가 말한 시대. 헤더 문자열은 안 남겨요 |
 | `tools_listed` | `tools/list` 성공 때 이 호출자의 view가 보여 준 도구 수 | 「목록이 비었나, 일부인가」를 가르는 숫자예요 |

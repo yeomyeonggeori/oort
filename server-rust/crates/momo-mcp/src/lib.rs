@@ -428,8 +428,8 @@ pub fn outcome_code(rpc_code: Option<i64>) -> &'static str {
 
 /// The server's own refusal sentences, each mapped to a **closed reason token**.
 ///
-/// One JSON-RPC code covers many causes (`-32020` is eight different header/metadata
-/// mismatches, `-32600` is twelve different envelope faults), and which one a runtime hit is
+/// One JSON-RPC code covers many causes (`-32020` is eight different reachable header/metadata
+/// mismatches, `-32600` about a dozen envelope and transport faults), and which one a runtime hit is
 /// the whole diagnosis: "forgot the `Mcp-Name` header" and "sent a modern `_meta` with no
 /// protocol header" need different fixes in a routine. The sentence itself is
 /// server-authored, but a trace must not depend on that staying true, so it is never copied:
