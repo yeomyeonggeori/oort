@@ -49,7 +49,7 @@
 
 - 눈에 보이는 원 **40**, 눌림 영역 **44**(`slopTo` 가 채운다), 글리프 **22**, 머리 줄 높이 `TOUCH_TARGET + space.sm`. 값은 `tokens.ts` `SHEET` 한 곳이다.
 - **떠 보이는 근거는 토큰이다**(`sheetModel.circleLook`): 라이트는 `surface` 채움이 `sheet` 바탕 위에 서고 `elevationRest` 그림자가 띄운다. 다크는 그림자가 어두운 바닥 위에서 보이지 않고, 게다가 다크의 `surface` 는 `sheet` 와 새벽하늘 1.076 · 흑연 1.035 로 라이트의 1.109 · 1.083 보다 덜 갈린다. 그래서 다크는 한 단 위 `surfaceMuted`(1.234 · 1.119)와 가장자리 한 줄(`glassLine`)로 선다. **시험이 모든 테마에서 「다크의 원이 라이트의 원보다 바탕에서 덜 구분되지 않는다」를 잰다**(`sheetKit.test.tsx`).
-- ✓ 는 `confirm={{label, onPress, disabled}}`. 입력 전·바뀐 것이 없으면 `disabled`(회색 `textFaint`, `accessibilityState.disabled`).
+- ✓ 는 `confirm={{label, onPress, disabled, busy}}`. 입력 전·바뀐 것이 없으면 `disabled`(회색 `textFaint`, `accessibilityState.disabled`). **왕복 중(보내는 중·저장 중)이면 `busy`** — ✓ 자리에 스피너가 서고 눌리지 않으며 `accessibilityState.busy` 와 이름의 진행 낱말(「보내는 중」)이 말한다. 회색은 「지금은 보낼 수 없음」이라 진행과 눈으로 구별되지 않기 때문이다(#4458).
 
 ```tsx
 // 행동 목록 시트 — 고르면 곧 닫히는 행동은 closesSheet.
@@ -154,7 +154,7 @@ const afterClose = usePageSheetAction();
   - `__tests__/sheetKeyboardAction.test.tsx`: 두 기기(16 Pro·SE)의 내용 맞춤·중간 단에서 **시트 바닥 = 키보드 윗면, 시트 위 끝 ≥ 큰 단의 위 끝**, 큰 단은 올리지 않음, 키보드가 없으면 옛 단별 식(상수)과 같음 · 키보드 이벤트 배선(올라옴·내려감·did 쌍) · 몸 스크롤의 안전 영역 여백 · 시트 안 입력이 부른 키보드만 닫을 때 같이 내림(서기 전의 키보드는 건드리지 않음, 한 번 내려간 뒤에는 시트의 것) · `usePageSheetAction` 의 순서(onClose → 행동)·한 번·동작 줄이기·시트 밖 · 닫는 길의 정체성이 부모 리렌더·키보드에 안 바뀜 · 닫는 중에는 손잡이를 잡지 않음 · 누름 이벤트를 인자로 받는 X·스크림 · `closesSheet`(행·타일·토글) · 메시지 시트의 여섯 행동(슬라이드 뒤 / 동작 줄이기 즉시)과 지우기 둘(보내지 않음) · 대화 행 시트(보내지 않음, 앞 아이콘 없음) · `ListRow` 기본 이름·보조 줄 문장·토글 트랙 3:1(모든 테마) · `SheetScroll` 위 여백 · `ConfirmStep`(머리말·설명·실패의 `hangul-word`, 실패가 새로 설 때만 낭독) · 지시 기기 패널의 카드 가로 여백과 **호스트가 여백을 더하지 않음**(이중 인셋) · 미리보기·확인의 머리말·설명 `hangul-word` 와 **렌더된 확인 문장에 「닫는 괄호 + 조사」가 없음**(메시지 시트 두 상태, 대화 행 시트의 코어 실패 문장 전부) · 키보드 위 시트의 모서리 바탕(큰 단은 없음) · `SheetScroll` 의 키보드 위 바닥 여백 16·넘칠 때만 막대 한 번 · `RowEmoji` 의 배율 상한.
   - `__tests__/shellChrome.test.tsx`: 새 DM 의 사람 아바타 바닥이 `muted`(카드 위에서 원이 선다) · 빈 상태 문장의 `hangul-word`.
   - **시트마다 같은 계약**(#4458): `__tests__/fixtures/sheetContract.tsx` 의 `describeCloseContract` 가 시트별 시험 파일에서 머리 X(이름 「… 닫기」·공용 글리프·글자 「닫기」 없음) · X 즉시/슬라이드 뒤 · 스크림 이름·testID · escape · 끌어내리기를 같은 코드로 잰다. `__tests__/sheetInventory4458.test.ts` 는 소스를 훑어 「글자 닫기 단추 0」·「모든 `*Sheet.tsx` 는 `PageSheet`+`SheetHeader`」·「`<Modal` 은 그릇과 시트가 아닌 넷뿐」을 계속 센다.
-  - **2단계(#4458)**: `sheetKit.test.tsx` 「행 — 오른쪽 임의 노드·역할·펼침 상태」(값→표식→셰브론의 **그려진 순서** · `trailing` 이 기본 이름에 안 들어감 · 역할 기본/link/switch · `expanded` 미지정/false/true 와 ⌄ 의 뒤집힘) · `sheetKeyboardAction.test.tsx` 「ConfirmStep」(두 단추 라벨의 `hangul-word`·가운데 정렬·단추의 가로 여백) · `aiSheet.test.tsx`(칩·「개인」 표식이 행 안에 그려짐 · 켜짐/꺼짐 칩의 채움 · 행 이름에 칩 글자) · `delegateWork.test.tsx`(A 머리에 ✓ 없음·바닥 단추 「다음」, B 머리 ✓ + X, 펼침 행 상태) · `teamBoard.test.tsx`(PR 행 `link`).
+  - **2단계(#4458)**: `sheetPartsSlots4458.test.tsx` 「행 — 오른쪽 임의 노드·역할·펼침 상태」(값→표식→셰브론의 **그려진 순서** · `trailing` 이 기본 이름에 안 들어감 · 역할 기본/link/switch · `expanded` 미지정/false/true 와 ⌄ 의 뒤집힘)와 「확정 ✓ 의 진행 표시」(`busy` 면 ✓ 글리프 대신 스피너 · 눌려도 아무 일 없음 · 상태 busy·disabled · `SheetHeader` 가 `confirm.busy` 를 전함) · `askMac`·`delegateWork`·`shellChrome`(새 채널)·`messageEditorSheet` 의 진행 중 시험(스피너 · 이름 「보내는 중」 · 다시 눌러도 요청은 한 번) · `sheetKeyboardAction.test.tsx` 「ConfirmStep」(두 단추 라벨의 `hangul-word`·가운데 정렬·단추의 가로 여백) · `aiSheet.test.tsx`(칩·「개인」 표식이 행 안에 그려짐 · 켜짐/꺼짐 칩의 채움 · 행 이름에 칩 글자) · `delegateWork.test.tsx`(A 머리에 ✓ 없음·바닥 단추 「다음」, B 머리 ✓ + X, 펼침 행 상태) · `teamBoard.test.tsx`(PR 행 `link`).
   - 새 파일의 격자 밖 간격·반경·글자 크기는 `designSystem.test.ts` 스윕이 0 으로 둔다.
 - **재지 않는 것**: 실기기의 끌기 감촉 · 실제 VoiceOver 낭독 · **키보드가 올라올 때 시트가 도는 곡선의 느낌**(이벤트에서 한 번에 선다) · 스크롤 막대가 **눈에 보이는지**(호출만 잰다) · **렌더된 폭·여백·줄바꿈**(카드가 화면 가장자리까지 번지는지, 아바타 원이 카드에 녹는지, 한국어 어절이 갈리는지 — Jest 는 레이아웃 엔진이 없어 스타일 값과 시트 상자의 산수, 문구의 글자 조합만 잰다. 그 픽셀 증거는 캡처이고(`clients/mobile/measure/captures/4318/`, 전시 표면 `sheetkit-*`) design-review 가 사람의 눈으로 본다). 처음 한 번의 design-review 는 이 축에서 High 셋을 잡았다.
 - **전시 표면**(`clients/mobile/measure/sheetKit.tsx`, 가상 인물만): `-momoMeasure SHEETKIT-<이름>`(다크) · `LIGHT-SHEETKIT-<이름>`(라이트). `page`(앞 칸 없는 쪽) · `page-lead`(앞 칸 있는 쪽) · `headers` · `status`·`status-ready`(중간 단 + 입력 + 키보드) · `message`·`message-delete`·`message-live`·`message-keyboard` · `channel`·`channel-leave`·`channel-dm` · `newdm`·`newdm-empty` · `devicekey-pending|approved|unregistered` · `profile-device`.
@@ -162,7 +162,7 @@ const afterClose = usePageSheetAction();
 
 ## 7. 임시로 둔 것 — 부품이 모자라 #4458 이 `design/` 밖에 둔 것 (#4318 후속)
 
-1단계는 `design/` 의 부품 파일(`sheetParts`·`SheetChrome`·`PageSheet`·`sheetModel`)을 만지지 않았다(#4457 이 같은 시기에 고쳤다). 2단계(#4318 착륙 뒤 planner 허가)가 `sheetParts.tsx` 의 **`ListRow`(`trailing`·`accessibilityRole`·`expanded`)와 `ConfirmStep`(두 단추 라벨)만** 고쳤고 나머지 부품은 그대로다. 아직 모자란 것은 `src/shell/sheetForm.tsx` 에 같은 모양으로 두고, 정식 부품이 올라오면 한 줄 import 치환으로 지운다.
+1단계는 `design/` 의 부품 파일(`sheetParts`·`SheetChrome`·`PageSheet`·`sheetModel`)을 만지지 않았다(#4457 이 같은 시기에 고쳤다). 2단계(#4318 착륙 뒤 planner 허가, 보안 검수 M1 수리 지시)가 `sheetParts.tsx` 의 **`ListRow`(`trailing`·`accessibilityRole`·`expanded`)와 `ConfirmStep`(두 단추 라벨)**, `SheetChrome.tsx` 의 **`ConfirmCheck`(`busy`)만** 고쳤고 나머지 부품은 그대로다. 아직 모자란 것은 `src/shell/sheetForm.tsx` 에 같은 모양으로 두고, 정식 부품이 올라오면 한 줄 import 치환으로 지운다.
 
 | 임시 부품 | 모자란 것 | 정식 자리 |
 |---|---|---|
@@ -172,4 +172,4 @@ const afterClose = usePageSheetAction();
 | `TextArea` | 여러 줄 입력 — 알약은 여러 줄에서 모서리가 글자를 먹는다 | 공용 부품 후보 |
 | `FieldLabel` | 라벨 + 오른쪽 한 마디(「조금 남았어요」) | `GroupLabel` 에 보조 문자열 |
 
-그 밖의 공백: `ConfirmCheck` 에 **진행(busy)** 표시가 없어 메시지 고치기는 「저장 중」 한 줄이 말한다 · `ConfirmStep` 의 확인 단추 **모양**(반경 8 `radius.md` 외곽선 사각형이 카드 반경 20 가족 밖 — r3 M2·r4 M4)은 디자인 결정이라 정하지 않았다(옮긴 시트 중 `ConfirmStep` 사용처는 0이고, 쓰는 곳은 메시지·대화 행 두 시트다) · `atoms.tsx` 의 `GroupSection`·`GroupRow` 는 설정 영역(#4457)이 마지막 사용처라 #4457 착륙 뒤에 지운다 · **규칙상 페이지인 시트 다섯**(내 맥에 보내기·작업 맡기기·작업 기록·작업 상세·기억 목록)은 시트로 둔 채 머리·부품만 옮겼고 페이지 전환은 #4611 이다.
+그 밖의 공백: `ConfirmStep` 의 확인 단추 **모양**(반경 8 `radius.md` 외곽선 사각형이 카드 반경 20 가족 밖 — r3 M2·r4 M4)은 디자인 결정이라 정하지 않았다(옮긴 시트 중 `ConfirmStep` 사용처는 0이고, 쓰는 곳은 메시지·대화 행 두 시트다) · `atoms.tsx` 의 `GroupSection`·`GroupRow` 는 설정 영역(#4457)이 마지막 사용처라 #4457 착륙 뒤에 지운다 · **규칙상 페이지인 시트 다섯**(내 맥에 보내기·작업 맡기기·작업 기록·작업 상세·기억 목록)은 시트로 둔 채 머리·부품만 옮겼고 페이지 전환은 #4611 이다.
