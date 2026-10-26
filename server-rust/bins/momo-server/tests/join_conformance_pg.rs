@@ -59,6 +59,9 @@ use uuid::Uuid;
 // harness (same contract as settings_conformance_pg.rs)
 // ---------------------------------------------------------------------------
 
+#[path = "common/password_cases.rs"]
+mod password_cases;
+
 const TEST_JWT_SECRET: &str = "join-conformance-app-signing-secret";
 const OWNER_PASSWORD: &str = "join-conformance-owner-password";
 /// What a joining human types into the onboarding form.
@@ -871,6 +874,147 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
         .expect("used_count")
         .get(0);
     assert_eq!(spent, 0, "a refused join must not spend a use");
+}
+
+/// ADR-0215 D2 (#4593) on `POST /v1/join`: the joining human is choosing a
+/// password, so it must be at least 10 characters and at most 72 bytes.
+///
+/// The invite is single-use on purpose. A refusal is a coded 400 before any
+/// statement runs, so none of the refusals below spends it, creates a member, or
+/// leaves a row behind — and the very same code then takes a valid password.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_joining_password_is_held_to_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-rule").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+    let (code, invite_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+
+    let join = |email: String, password: Value| {
+        let mut payload = json!({
+            "code": code,
+            "email": email,
+            "displayName": "Joining Human",
+            "timeZone": "Asia/Seoul",
+        });
+        if !password.is_null() {
+            payload["password"] = password;
+        }
+        payload
+    };
+
+    let mut emails = Vec::new();
+    for (index, (case, password, expected)) in password_cases::refused().into_iter().enumerate() {
+        let email = format!("refused-{index}-{}@join.test", Uuid::new_v4());
+        let attempt = post_join(&http, &base, join(email.clone(), json!(password))).await;
+        assert_eq!(attempt.status, 400, "{case}: {}", attempt.body);
+        assert_eq!(
+            attempt.body["error"]["code"],
+            json!(expected),
+            "{case}: {}",
+            attempt.body
+        );
+        emails.push(email);
+    }
+    // Empty and absent keep the sentence they always had, with no code.
+    for (case, password) in [("empty", json!("")), ("absent", Value::Null)] {
+        let email = format!("blank-{case}-{}@join.test", Uuid::new_v4());
+        let attempt = post_join(&http, &base, join(email.clone(), password)).await;
+        assert_eq!(attempt.status, 400, "{case}: {}", attempt.body);
+        assert_eq!(
+            attempt.body["error"]["message"],
+            json!("password is required"),
+            "{case}: {}",
+            attempt.body
+        );
+        assert!(
+            attempt.body["error"].get("code").is_none(),
+            "{case}: a missing password has never carried an error.code: {}",
+            attempt.body
+        );
+        emails.push(email);
+    }
+
+    // Nothing was left behind, and the single use is intact.
+    for email in &emails {
+        let members: i64 = sqlx::query(
+            "SELECT count(*)::bigint FROM human WHERE workspace_id = $1 AND email = $2",
+        )
+        .bind(fixture.workspace)
+        .bind(email)
+        .fetch_one(&su)
+        .await
+        .expect("count humans")
+        .get(0);
+        assert_eq!(members, 0, "{email}: a refused join creates no member");
+    }
+    let spent: i32 = sqlx::query("SELECT used_count FROM invite_code WHERE id = $1")
+        .bind(Uuid::parse_str(&invite_id).expect("invite id"))
+        .fetch_one(&su)
+        .await
+        .expect("used_count")
+        .get(0);
+    assert_eq!(spent, 0, "a refused join must not spend a use");
+
+    // The same single-use code, ten characters: the shortest the rule accepts.
+    let email = format!("ten-{}@join.test", Uuid::new_v4());
+    let attempt = post_join(
+        &http,
+        &base,
+        join(email.clone(), json!(password_cases::TEN_CHARS)),
+    )
+    .await;
+    assert_eq!(attempt.status, 201, "{}", attempt.body);
+    let signed_in = login(
+        &http,
+        &base,
+        fixture.workspace,
+        &email,
+        password_cases::TEN_CHARS,
+    )
+    .await;
+    assert!(signed_in["accessToken"].is_string(), "{signed_in}");
+}
+
+/// The accepting side: every shape on the boundary joins, and signs in with
+/// exactly the string it joined with (nothing trimmed, nothing normalised).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn every_accepted_join_password_signs_in_exactly_as_typed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-rule-ok").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    for (case, password) in password_cases::accepted() {
+        let (code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+        let email = format!("accepted-{}@join.test", Uuid::new_v4());
+        let attempt = post_join(
+            &http,
+            &base,
+            json!({
+                "code": code,
+                "email": email,
+                "displayName": "Joining Human",
+                "password": password,
+            }),
+        )
+        .await;
+        assert_eq!(attempt.status, 201, "{case}: {}", attempt.body);
+        let signed_in = login(&http, &base, fixture.workspace, &email, &password).await;
+        assert!(
+            signed_in["accessToken"].is_string(),
+            "{case}: the stored password signs in with the bytes it was set with: {signed_in}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

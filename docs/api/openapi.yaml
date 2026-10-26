@@ -714,7 +714,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/JoinResponse"
         "400":
-          description: Invalid code/email/displayName/handle/password shape.
+          description: >
+            Invalid code/email/displayName/handle/password shape. A password
+            that breaks the ADR-0215 D2 rule answers `error.code`
+            `password_too_short` or `password_too_long`; an empty or absent one
+            is the code-less "password is required".
           content:
             application/json:
               schema:
@@ -1130,7 +1134,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "400":
-          description: Invalid token or password shape.
+          description: >
+            Invalid token or password shape. A password that breaks the
+            ADR-0215 D2 rule answers `error.code` `password_too_short` or
+            `password_too_long`, before any statement runs (the one-time token
+            is not spent); an empty one is the code-less "password is required".
           content:
             application/json:
               schema:
@@ -1757,7 +1765,11 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "400":
-          description: Password shape invalid, or new password equals current.
+          description: >
+            Password shape invalid, or new password equals current. A new
+            password that breaks the ADR-0215 D2 rule answers `error.code`
+            `password_too_short` or `password_too_long`; the current password is
+            only required and at most 1024 characters (code-less 400).
           content:
             application/json:
               schema:
@@ -13293,7 +13305,11 @@ components:
                 `invalid_schedule`, `unknown_sound`, `muted_until_in_past`,
                 `muted_until_too_far`, `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
-                `rate_limited` (the test push only).
+                `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
+                password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
+                `PATCH …/members/me/password`): 400 `password_too_short` (fewer
+                than 10 characters) and `password_too_long` (more than 72 bytes
+                of UTF-8).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -13559,7 +13575,16 @@ components:
             only sha256.
         password:
           type: string
-          description: Required, at most 1024 chars.
+          minLength: 10
+          description: >
+            The password being chosen (ADR-0215 D2, owner decision 2026-10-26):
+            at least 10 characters (Unicode scalar values, counted as sent) and
+            at most 72 bytes of UTF-8 — a Korean syllable is 3 bytes, so 24 fit
+            — because bcrypt reads no more than 72. Not trimmed, not normalised,
+            no composition rule. Over-short and over-long answer 400
+            `password_too_short` / `password_too_long`. Applies to the first
+            owner's bootstrap and to an operator-issued reset alike. Login does
+            not apply it: an existing password keeps working.
 
     ChangePasswordRequest:
       type: object
@@ -13568,10 +13593,20 @@ components:
       properties:
         currentPassword:
           type: string
-          description: The caller's current password. Reconfirm is mandatory.
+          description: >
+            The caller's current password. Reconfirm is mandatory. Required and
+            at most 1024 characters; it is not held to the new-password length
+            rule, so an account whose password predates that rule can still
+            change it.
         newPassword:
           type: string
-          description: Replacement password, at most 1024 chars, must differ.
+          minLength: 10
+          description: >
+            Replacement password, must differ from the current one. The
+            ADR-0215 D2 rule: at least 10 characters (Unicode scalar values,
+            counted as sent) and at most 72 bytes of UTF-8; not trimmed, not
+            normalised. Refusals answer 400 `password_too_short` /
+            `password_too_long`.
 
     RenameWorkspaceRequest:
       type: object
@@ -13968,7 +14003,15 @@ components:
           description: Optional; derived from the email local part when omitted.
         password:
           type: string
-          description: Required, at most 1024 chars.
+          minLength: 10
+          description: >
+            The password being chosen (ADR-0215 D2, owner decision 2026-10-26):
+            at least 10 characters (Unicode scalar values, counted as sent) and
+            at most 72 bytes of UTF-8 — a Korean syllable is 3 bytes, so 24 fit
+            — because bcrypt reads no more than 72. Not trimmed, not normalised,
+            no composition rule. Over-short and over-long answer 400
+            `password_too_short` / `password_too_long`; an empty or absent
+            password is the code-less 400 "password is required".
         timeZone:
           type: string
           description: Optional IANA time zone; defaults to UTC. Aliases `time_zone`, `tz`.
