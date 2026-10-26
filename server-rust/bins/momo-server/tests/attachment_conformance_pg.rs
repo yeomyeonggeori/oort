@@ -36,6 +36,10 @@ use momo_drive::{
     DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, LocalDriveArchive,
     StubDriveArchive, UploadBody, MAX_ATTACHMENT_BYTES,
 };
+use momo_messaging::attachment_reclaim::{
+    reclaim_unbound_attachment_in_tx, AttachmentReclaimOutcome, UNBOUND_TTL,
+};
+use momo_messaging::avatar_reclaim::DriveDelete;
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
@@ -421,7 +425,7 @@ async fn the_three_routes_round_trip_and_bind_to_a_message() {
     let started: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log \
           WHERE action = 'attachment.upload_started' AND target_id = $1 \
-            AND actor_member_id = $2 AND detail->>'schema' = 'momo.attachment.upload_started.v1'",
+            AND actor_member_id = $2 AND detail->>'schema' = 'momo.attachment.upload_started.v2'",
     )
     .bind(Uuid::parse_str(&attachment_id).expect("uuid"))
     .bind(fixture.alice.member)
@@ -2582,4 +2586,809 @@ async fn a_restored_drive_volume_does_not_reopen_a_completed_upload_url() {
          reads {read_status} {:?} under the completed attachment",
         String::from_utf8_lossy(&read_bytes),
     );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0151 증보 2 (#4443): what a deleted message leaves of its files
+// ---------------------------------------------------------------------------
+//
+// | test | revert that makes it red |
+// |---|---|
+// | `a_deleted_messages_attachment_is_nobodys_to_read` | drop `m.state <> 'deleted'` from the content load → the half-tombstone with only `state` set answers 200; drop `m.deleted_at IS NULL` → the one with only `deleted_at` set answers 200; drop both → the room, the author and the admin read 200 (step 3); write the predicate as `(carried AND alive) OR uploader` → the author's own read answers 200 |
+// | `a_deleted_messages_attachments_are_not_listed_anywhere` | drop the tombstone term from `PAGED_ATTACHMENT_JOIN` → the channel page lists the card (the thread page reads the same constant); from `message_attachments_in_tx` → the retried send echoes it; from `image_attachments_for_messages_in_tx` → the direct call returns the image |
+// | `the_audit_trail_never_holds_a_file_name` | put `"name": name` back into the `attachment.upload_started` detail |
+// | `a_held_file_is_never_reclaimed_and_a_released_one_is_a_draft_for_a_full_ttl` | drop `NOT a.reserved` from the eligibility → step 2; drop `unreserved_at` from the `GREATEST` → step 3; make the trigger's INSERT branch a no-op → step 1; its DELETE branch → step 3 (steps 4 and 6 sit behind it) |
+
+/// Make `person` a member of the room with a workspace role, for the tests that need
+/// an admin to show a role is no way around a refusal.
+async fn seed_room_member_with_role(su: &PgPool, fixture: &Fixture, person: &Person, role: &str) {
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, $3::membership_role)",
+    )
+    .bind(fixture.workspace)
+    .bind(person.member)
+    .bind(role)
+    .execute(su)
+    .await
+    .expect("workspace membership");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member')",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .bind(person.member)
+    .execute(su)
+    .await
+    .expect("channel membership");
+}
+
+/// Post a text message carrying `attachment_ids` (a thread reply when `root` is given);
+/// returns the message id and the `clientMsgId` it was sent under.
+#[allow(clippy::too_many_arguments)]
+async fn post_with_files(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    channel: Uuid,
+    body: &str,
+    root: Option<&str>,
+    attachment_ids: &[&str],
+) -> (String, Uuid) {
+    let client_msg_id = Uuid::new_v4();
+    let mut payload = json!({
+        "clientMsgId": client_msg_id,
+        "type": "text",
+        "body": body,
+        "attachmentIds": attachment_ids,
+    });
+    if let Some(root) = root {
+        payload["rootId"] = json!(root);
+    }
+    let sent = http
+        .post(messages_url(base, workspace, channel))
+        .bearer_auth(token)
+        .json(&payload)
+        .send()
+        .await
+        .expect("post");
+    assert_eq!(sent.status(), 201, "the post is accepted");
+    let sent: Value = sent.json().await.expect("post body");
+    (
+        sent["id"].as_str().expect("message id").to_string(),
+        client_msg_id,
+    )
+}
+
+/// The author deletes her own message (the route is author-only).
+async fn delete_message_as(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    message_id: &str,
+) {
+    let deleted = http
+        .delete(format!(
+            "{base}/v1/workspaces/{workspace}/messages/{message_id}"
+        ))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("delete");
+    assert!(
+        deleted.status().is_success(),
+        "the author deletes her own message: {}",
+        deleted.status()
+    );
+}
+
+/// The channel's history page as `token`'s owner.
+async fn history_as(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    channel: Uuid,
+) -> Value {
+    let page = http
+        .get(messages_url(base, workspace, channel))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("history");
+    assert_eq!(page.status(), 200);
+    page.json().await.expect("history body")
+}
+
+/// The row of `id` in a page's `messages` array.
+fn row_of<'a>(page: &'a Value, id: &str) -> &'a Value {
+    page["messages"]
+        .as_array()
+        .expect("messages array")
+        .iter()
+        .find(|row| row["id"] == json!(id))
+        .unwrap_or_else(|| panic!("message {id} is in the page: {page}"))
+}
+
+/// **Red proof (#4443, ADR-0151 증보 2 D1).** The soft delete leaves `message_id` on the
+/// file, so "a message carries it" is not enough: the message has to be alive. Once its
+/// author deletes it, **nobody** reads the file — not the room, not the author who is also
+/// the uploader, not a workspace admin who is in the channel — and the refusal is the flat
+/// 404 an id that never existed gets, byte for byte.
+///
+/// The predicate's shape is part of the proof: `(carried AND alive) OR uploader` would
+/// hand the file back to the very person who deleted the message, so the author's own read
+/// is a separate step.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_deleted_messages_attachment_is_nobodys_to_read() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let (base, reads) = start_counting_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    let admin_person = seed_person(&su, fixture.workspace).await;
+    seed_room_member_with_role(&su, &fixture, &admin_person, "admin").await;
+    let admin = login(&http, &base, fixture.workspace, &admin_person).await;
+    const BYTES: &[u8] = "곧 지워질 메시지의 첨부".as_bytes();
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+
+    let gone = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "gone.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+    let kept = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "kept.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+    let (gone_message, _) =
+        post_with_files(&http, &base, &alice, ws, ch, "곧 지울 글", None, &[&gone]).await;
+    post_with_files(&http, &base, &alice, ws, ch, "남길 글", None, &[&kept]).await;
+    let gone_url = content_url(&base, ws, ch, &gone);
+
+    // ---- 1. while the message lives, the whole room reads the file ---------
+    for (who, token) in [("alice", &alice), ("bob", &bob), ("the admin", &admin)] {
+        let (status, body) = content_response(&http, &gone_url, token).await;
+        assert_eq!(status, 200, "{who} reads a file a live message carries");
+        assert_eq!(body, BYTES);
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), 3);
+
+    // ---- 2. its author deletes it ------------------------------------------
+    delete_message_as(&http, &base, &alice, ws, &gone_message).await;
+    let still_pointing: Option<Uuid> =
+        sqlx::query_scalar("SELECT message_id FROM attachment WHERE id = $1")
+            .bind(Uuid::parse_str(&gone).expect("uuid"))
+            .fetch_one(&su)
+            .await
+            .expect("attachment row");
+    assert_eq!(
+        still_pointing.map(|id| id.to_string()).as_deref(),
+        Some(gone_message.as_str()),
+        "the premise: a soft delete leaves message_id on the file, so only the message's \
+         own state can close the read"
+    );
+
+    // ---- 3. nobody reads it, and nobody can tell it from an unknown id -----
+    let never_existed = content_url(&base, ws, ch, &Uuid::new_v4().to_string());
+    let (missing_status, missing_body) = content_response(&http, &never_existed, &bob).await;
+    assert_eq!(missing_status, 404);
+    for (who, token) in [
+        ("another member of the room", &bob),
+        ("the author, who is also the uploader", &alice),
+        ("a workspace admin who is in the channel", &admin),
+    ] {
+        let (status, body) = content_response(&http, &gone_url, token).await;
+        assert_eq!(status, 404, "{who} must not read a deleted message's file");
+        assert_eq!(
+            body, missing_body,
+            "{who}: the refusal is byte for byte the 404 of an id that never existed"
+        );
+        assert_eq!(refusal_of(&body), CONTENT_NOT_FOUND);
+    }
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        3,
+        "a refused read never reaches the archive"
+    );
+
+    // ---- 4. the message next to it is untouched -----------------------------
+    let (status, body) = content_response(&http, &content_url(&base, ws, ch, &kept), &bob).await;
+    assert_eq!(
+        status, 200,
+        "deleting one message closes only its own files"
+    );
+    assert_eq!(body, BYTES);
+    assert_eq!(reads.load(Ordering::SeqCst), 4);
+
+    // ---- 5. a half-tombstone is a tombstone, whichever half is written -----
+    // (Swift's own guards read `state == 'deleted' || deleted_at != nil`; a row written
+    // by an older code path can carry only one of them.)
+    for (half, set_clause) in [
+        ("deleted_at only", "deleted_at = now()"),
+        ("state only", "state = 'deleted'"),
+    ] {
+        let file = upload_and_complete(
+            &http,
+            &base,
+            &alice,
+            ws,
+            ch,
+            "half.txt",
+            "text/plain",
+            BYTES,
+        )
+        .await;
+        let (message, _) =
+            post_with_files(&http, &base, &alice, ws, ch, "반쪽 무덤", None, &[&file]).await;
+        sqlx::query(&format!("UPDATE message SET {set_clause} WHERE id = $1"))
+            .bind(Uuid::parse_str(&message).expect("uuid"))
+            .execute(&su)
+            .await
+            .expect("half-tombstone");
+        let (status, body) =
+            content_response(&http, &content_url(&base, ws, ch, &file), &bob).await;
+        assert_eq!(status, 404, "a message with {half} is deleted");
+        assert_eq!(refusal_of(&body), CONTENT_NOT_FOUND);
+    }
+    assert_eq!(reads.load(Ordering::SeqCst), 4);
+}
+
+/// **Red proof (#4443, ADR-0151 증보 2 D2).** The history page keeps a deleted message as
+/// a tombstone (so a reconnecting client converges on the deletion), but the tombstone
+/// lists none of the files its author removed: not on the channel page, not on the thread
+/// page, not in the echo of a retried send, and not in the agent port's image list.
+///
+/// The control rows (a live message and a live reply) keep their cards, so "lists nothing"
+/// cannot be a page that lost its attachments altogether. The assertions are made on the
+/// file's **name and id anywhere in the serialized page**, not only on the one key.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_deleted_messages_attachments_are_not_listed_anywhere() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let bob = login(&http, &base, fixture.workspace, &fixture.bob).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    const GONE_NAME: &str = "삭제될-첨부-이름.png";
+    const KEPT_NAME: &str = "남는-첨부-이름.png";
+    const REPLY_NAME: &str = "삭제될-답글-첨부-이름.png";
+    const BYTES: &[u8] = b"png-ish bytes";
+
+    // Image mimes, so the agent port's image projection has something to list.
+    let gone =
+        upload_and_complete(&http, &base, &alice, ws, ch, GONE_NAME, "image/png", BYTES).await;
+    let kept =
+        upload_and_complete(&http, &base, &alice, ws, ch, KEPT_NAME, "image/png", BYTES).await;
+    let reply_file =
+        upload_and_complete(&http, &base, &alice, ws, ch, REPLY_NAME, "image/png", BYTES).await;
+    let (gone_message, gone_client_msg_id) =
+        post_with_files(&http, &base, &alice, ws, ch, "지울 글", None, &[&gone]).await;
+    let (kept_message, _) =
+        post_with_files(&http, &base, &alice, ws, ch, "남길 글", None, &[&kept]).await;
+    let (reply_message, _) = post_with_files(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "지울 답글",
+        Some(&kept_message),
+        &[&reply_file],
+    )
+    .await;
+    let replies_url =
+        format!("{base}/v1/workspaces/{ws}/channels/{ch}/messages/{kept_message}/replies");
+    let replies_as = |token: String| {
+        let http = http.clone();
+        let url = replies_url.clone();
+        async move {
+            let page = http
+                .get(url)
+                .bearer_auth(token)
+                .send()
+                .await
+                .expect("replies");
+            assert_eq!(page.status(), 200);
+            page.json::<Value>().await.expect("replies body")
+        }
+    };
+    let image_ids = |ids: Vec<String>| {
+        let app_pool = app_pool.clone();
+        async move {
+            let ids: Vec<Uuid> = ids
+                .iter()
+                .map(|id| Uuid::parse_str(id).expect("uuid"))
+                .collect();
+            momo_db::with_tenant_tx(&app_pool, ws, move |conn| {
+                Box::pin(async move {
+                    momo_messaging::image_attachments_for_messages_in_tx(conn, ws, &ids).await
+                })
+            })
+            .await
+            .expect("image projection")
+            .into_iter()
+            .map(|(_, attachment, ..)| attachment.to_string())
+            .collect::<Vec<_>>()
+        }
+    };
+
+    // ---- 1. control: before any delete every surface lists the files -------
+    let page = history_as(&http, &base, &bob, ws, ch).await;
+    assert_eq!(
+        row_of(&page, &gone_message)["attachments"][0]["name"],
+        json!(GONE_NAME)
+    );
+    assert_eq!(
+        row_of(&page, &kept_message)["attachments"][0]["name"],
+        json!(KEPT_NAME)
+    );
+    let thread = replies_as(bob.clone()).await;
+    assert_eq!(
+        row_of(&thread, &reply_message)["attachments"][0]["name"],
+        json!(REPLY_NAME)
+    );
+    let listed = image_ids(vec![gone_message.clone(), kept_message.clone()]).await;
+    assert!(
+        listed.contains(&gone) && listed.contains(&kept),
+        "control: the agent port lists both images while both messages live: {listed:?}"
+    );
+
+    // ---- 2. the author deletes the message and the reply -------------------
+    delete_message_as(&http, &base, &alice, ws, &gone_message).await;
+    delete_message_as(&http, &base, &alice, ws, &reply_message).await;
+
+    // ---- 3. the channel page keeps the tombstone and lists nothing for it --
+    let page = history_as(&http, &base, &bob, ws, ch).await;
+    let tombstone = row_of(&page, &gone_message);
+    assert_eq!(
+        tombstone["state"],
+        json!("deleted"),
+        "the tombstone stays visible"
+    );
+    assert!(
+        tombstone.get("attachments").is_none(),
+        "a tombstone lists no files: {tombstone}"
+    );
+    let text = page.to_string();
+    assert!(
+        !text.contains(GONE_NAME) && !text.contains(&gone),
+        "the deleted file's name and id appear nowhere in the page: {text}"
+    );
+    assert_eq!(
+        row_of(&page, &kept_message)["attachments"][0]["name"],
+        json!(KEPT_NAME),
+        "control: the live message next to it still lists its card"
+    );
+
+    // ---- 4. the thread page does the same ----------------------------------
+    let thread = replies_as(bob.clone()).await;
+    let reply_row = row_of(&thread, &reply_message);
+    assert_eq!(reply_row["state"], json!("deleted"));
+    assert!(reply_row.get("attachments").is_none(), "{reply_row}");
+    let text = thread.to_string();
+    assert!(
+        !text.contains(REPLY_NAME) && !text.contains(&reply_file),
+        "the deleted reply's file appears nowhere in the thread page: {text}"
+    );
+
+    // ---- 5. a retried send echoes no card for a message since deleted ------
+    let retried = http
+        .post(messages_url(&base, ws, ch))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": gone_client_msg_id,
+            "type": "text",
+            "body": "지울 글",
+            "attachmentIds": [gone],
+        }))
+        .send()
+        .await
+        .expect("retried send");
+    assert!(
+        retried.status().is_success(),
+        "the retry is answered: {}",
+        retried.status()
+    );
+    let retried: Value = retried.json().await.expect("retry body");
+    assert_eq!(
+        retried["id"],
+        json!(gone_message),
+        "the retry is the same message"
+    );
+    assert!(
+        retried.get("attachments").is_none() && !retried.to_string().contains(GONE_NAME),
+        "the replay of a deleted message echoes no file card: {retried}"
+    );
+
+    // ---- 6. the agent port's image list ------------------------------------
+    let listed = image_ids(vec![gone_message.clone(), kept_message.clone()]).await;
+    assert_eq!(
+        listed,
+        vec![kept.clone()],
+        "the deleted message's image is not listed; the live one is"
+    );
+}
+
+/// **Red proof (#4443, ADR-0151 증보 2 D3).** The audit trail is read by admins and
+/// outlives the file (the reclaim sweep deletes the row), so a file name — which can be a
+/// person's — is in none of an attachment's audit rows. The id, the mime and the size are
+/// there; the schema is v2.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_audit_trail_never_holds_a_file_name() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    const NAME: &str = "급여명세서-이도현.pdf";
+    const BYTES: &[u8] = b"%PDF-1.4 fixture";
+
+    let id =
+        upload_and_complete(&http, &base, &alice, ws, ch, NAME, "application/pdf", BYTES).await;
+    post_with_files(&http, &base, &alice, ws, ch, "자료", None, &[&id]).await;
+    let attachment = Uuid::parse_str(&id).expect("uuid");
+
+    let rows = sqlx::query(
+        "SELECT action, detail FROM audit_log WHERE workspace_id = $1 AND target_id = $2 \
+          ORDER BY created_at, id",
+    )
+    .bind(ws)
+    .bind(attachment)
+    .fetch_all(&su)
+    .await
+    .expect("audit rows");
+    let actions: Vec<String> = rows
+        .iter()
+        .map(|row| row.get::<String, _>("action"))
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            "attachment.upload_started",
+            "attachment.upload_completed",
+            "attachment.message_linked"
+        ],
+        "the whole life of the file is audited"
+    );
+    for row in &rows {
+        let detail: Value = row.get("detail");
+        let text = detail.to_string();
+        assert!(
+            !text.contains("급여명세서") && !text.contains("이도현") && !text.contains(".pdf"),
+            "{}: no part of the file name is in the detail: {text}",
+            row.get::<String, _>("action")
+        );
+    }
+    let started: Value = rows[0].get("detail");
+    assert_eq!(
+        started["schema"],
+        json!("momo.attachment.upload_started.v2")
+    );
+    assert!(started.get("name").is_none(), "{started}");
+    assert_eq!(started["mime"], json!("application/pdf"));
+    assert_eq!(started["size_bytes"], json!(BYTES.len().to_string()));
+    assert_eq!(started["channel_id"], json!(ch.to_string()));
+
+    // …and nowhere else in the workspace's trail either.
+    let anywhere: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND detail::text LIKE '%급여명세서%'",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .expect("count");
+    assert_eq!(anywhere, 0, "the name is in no audit row of the workspace");
+}
+
+/// One reclaim transaction on the RLS-bound pool, with a Drive that answers `answer` and
+/// records the file ids it was asked to delete.
+async fn reclaim_once(
+    app: &PgPool,
+    workspace: Uuid,
+    attachment: Uuid,
+    answer: DriveDelete,
+    calls: &Arc<Mutex<Vec<String>>>,
+) -> AttachmentReclaimOutcome {
+    let calls = Arc::clone(calls);
+    momo_db::with_tenant_tx(app, workspace, move |conn| {
+        Box::pin(async move {
+            reclaim_unbound_attachment_in_tx(
+                conn,
+                workspace,
+                attachment,
+                UNBOUND_TTL,
+                move |file_id| {
+                    let file_id = file_id.to_string();
+                    Box::pin(async move {
+                        calls.lock().expect("calls").push(file_id);
+                        answer
+                    })
+                },
+            )
+            .await
+        })
+    })
+    .await
+    .expect("reclaim transaction")
+}
+
+/// **Red proof (#4443, ADR-0151 증보 2 D4), through the real schedule routes.** A schedule
+/// holds its files for up to 120 days, so the reclaim must never take one — and it can only
+/// know through `attachment.reserved`, which a trigger mirrors from the owner-scoped
+/// reservation table (the reclaim neither reads that table nor binds the author's scope).
+/// When the hold ends (cancel, send) the file is a draft again **for a full TTL from that
+/// moment** (ADR-0208 D11 「초안과 같은 상태」), not from its upload: a file uploaded 40 days
+/// ago and released today is not reclaimable today.
+///
+/// 1. the schedule holds the file → `reserved`; 2. 40 days on, a held file is not reclaimed;
+/// 3. cancel releases it → `unreserved_at` is stamped and the file is still not reclaimable;
+/// 4. a send-now releases a second file by binding it → not reserved, and bound wins;
+/// 5. 40 days after the release the draft is reclaimed: the row and its Drive object go, one
+///    audit row says so, and it carries no file name.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_held_file_is_never_reclaimed_and_a_released_one_is_a_draft_for_a_full_ttl() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+    let (ws, ch) = (fixture.workspace, fixture.channel);
+    // The schedule routes also ask for a live workspace membership.
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, 'member'::membership_role)",
+    )
+    .bind(ws)
+    .bind(fixture.alice.member)
+    .execute(&su)
+    .await
+    .expect("alice's workspace membership");
+    const NAME: &str = "예약해-둔-파일-이도현.txt";
+    let calls: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    let schedule = |file: String| {
+        let http = http.clone();
+        let url = format!("{base}/v1/workspaces/{ws}/channels/{ch}/scheduled-messages");
+        let token = alice.clone();
+        async move {
+            let created = http
+                .post(url)
+                .bearer_auth(token)
+                .json(&json!({
+                    "body": "내일 보낼 자료",
+                    "sendAtMs": chrono::Utc::now().timestamp_millis() + 24 * 3_600_000,
+                    "attachmentIds": [file],
+                    "clientRequestId": Uuid::new_v4(),
+                }))
+                .send()
+                .await
+                .expect("schedule");
+            assert_eq!(created.status(), 201);
+            let created: Value = created.json().await.expect("body");
+            created["scheduledMessage"]["id"]
+                .as_str()
+                .expect("schedule id")
+                .to_string()
+        }
+    };
+    let flags = |attachment: Uuid| {
+        let su = su.clone();
+        async move {
+            let row = sqlx::query("SELECT reserved, unreserved_at FROM attachment WHERE id = $1")
+                .bind(attachment)
+                .fetch_one(&su)
+                .await
+                .expect("attachment flags");
+            (
+                row.get::<bool, _>("reserved"),
+                row.get::<Option<chrono::DateTime<chrono::Utc>>, _>("unreserved_at"),
+            )
+        }
+    };
+    let age = |attachment: Uuid, column: &'static str| {
+        let su = su.clone();
+        async move {
+            sqlx::query(&format!(
+                "UPDATE attachment SET {column} = now() - interval '40 days' WHERE id = $1"
+            ))
+            .bind(attachment)
+            .execute(&su)
+            .await
+            .expect("age the file");
+        }
+    };
+    let exists = |attachment: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM attachment WHERE id = $1")
+                .bind(attachment)
+                .fetch_one(&su)
+                .await
+                .expect("count")
+                == 1
+        }
+    };
+
+    // ---- 1. the schedule holds the file; the trigger mirrors it ------------
+    let held = upload_and_complete(&http, &base, &alice, ws, ch, NAME, "text/plain", b"held").await;
+    let held_id = Uuid::parse_str(&held).expect("uuid");
+    let schedule_id = schedule(held.clone()).await;
+    assert_eq!(
+        flags(held_id).await,
+        (true, None),
+        "reserved, never released"
+    );
+
+    // ---- 2. 40 days on, a held file is not reclaimable ---------------------
+    age(held_id, "created_at").await;
+    let outcome = reclaim_once(&app_pool, ws, held_id, DriveDelete::Deleted, &calls).await;
+    assert_eq!(
+        outcome,
+        AttachmentReclaimOutcome::SkippedNotEligible,
+        "a schedule holds it"
+    );
+    assert!(calls.lock().unwrap().is_empty(), "Drive was never asked");
+    assert!(exists(held_id).await, "the row is untouched");
+
+    // ---- 3. cancelling releases it — and the file is a draft for a full TTL -
+    let cancelled = http
+        .delete(format!(
+            "{base}/v1/workspaces/{ws}/scheduled-messages/{schedule_id}"
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("cancel");
+    assert!(
+        cancelled.status().is_success(),
+        "cancel: {}",
+        cancelled.status()
+    );
+    let (reserved, released_at) = flags(held_id).await;
+    assert!(!reserved, "the hold ended");
+    assert!(released_at.is_some(), "…and the release is stamped");
+    let outcome = reclaim_once(&app_pool, ws, held_id, DriveDelete::Deleted, &calls).await;
+    assert_eq!(
+        outcome,
+        AttachmentReclaimOutcome::SkippedNotEligible,
+        "uploaded 40 days ago but released just now: still a draft for a full TTL"
+    );
+    assert!(calls.lock().unwrap().is_empty());
+    assert!(exists(held_id).await);
+
+    // ---- 4. a send-now releases a second file by binding it ----------------
+    let sent_file = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "sent.txt",
+        "text/plain",
+        b"sent",
+    )
+    .await;
+    let sent_id = Uuid::parse_str(&sent_file).expect("uuid");
+    let sent_schedule = schedule(sent_file.clone()).await;
+    assert!(flags(sent_id).await.0, "held until it goes out");
+    let went = http
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/scheduled-messages/{sent_schedule}/send-now"
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("send now");
+    assert_eq!(went.status(), 200);
+    assert!(!flags(sent_id).await.0, "the hold ended with the send");
+    age(sent_id, "created_at").await;
+    age(sent_id, "unreserved_at").await;
+    let outcome = reclaim_once(&app_pool, ws, sent_id, DriveDelete::Deleted, &calls).await;
+    assert_eq!(
+        outcome,
+        AttachmentReclaimOutcome::SkippedNotEligible,
+        "a file a message carries is never reclaimed, however old"
+    );
+    assert!(exists(sent_id).await);
+
+    // ---- 5. 40 days after the release the draft goes -----------------------
+    age(held_id, "unreserved_at").await;
+    let drive_file_id: String =
+        sqlx::query_scalar("SELECT drive_file_id FROM attachment WHERE id = $1")
+            .bind(held_id)
+            .fetch_one(&su)
+            .await
+            .expect("drive file id");
+    let outcome = reclaim_once(&app_pool, ws, held_id, DriveDelete::Deleted, &calls).await;
+    assert_eq!(outcome, AttachmentReclaimOutcome::Reclaimed);
+    assert_eq!(
+        *calls.lock().unwrap(),
+        vec![drive_file_id],
+        "exactly that Drive object"
+    );
+    assert!(!exists(held_id).await, "the row went with it");
+    let audit: Vec<Value> = sqlx::query_scalar(
+        "SELECT detail FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'attachment.expired' AND target_id = $2",
+    )
+    .bind(ws)
+    .bind(held_id)
+    .fetch_all(&su)
+    .await
+    .expect("expired audit");
+    assert_eq!(audit.len(), 1, "one audit row says so");
+    assert_eq!(audit[0]["schema"], json!("momo.attachment.expired.v1"));
+    assert_eq!(audit[0]["reason"], json!("unbound_ttl"));
+    assert_eq!(audit[0]["channel_id"], json!(ch.to_string()));
+    assert!(
+        !audit[0].to_string().contains("이도현") && audit[0].get("name").is_none(),
+        "the audit row of a deletion carries no file name: {}",
+        audit[0]
+    );
+
+    // ---- 6. the retention purge releases a hold by CASCADE, and the flag follows ----
+    // `purge_expired_schedule_in_tx` deletes the schedule row as `momo_app` under its
+    // author's scope; the reservation rows go with it by the foreign key's cascade, so this
+    // is the one release that never names the reservation table in a statement.
+    let cascaded = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        ws,
+        ch,
+        "cascaded.txt",
+        "text/plain",
+        b"cascade",
+    )
+    .await;
+    let cascaded_id = Uuid::parse_str(&cascaded).expect("uuid");
+    let cascaded_schedule = Uuid::parse_str(&schedule(cascaded.clone()).await).expect("uuid");
+    assert!(flags(cascaded_id).await.0, "held by its schedule");
+    let author = fixture.alice.member;
+    momo_db::with_tenant_tx(&app_pool, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::owner_scope::bind_owner_guc(conn, author).await?;
+            sqlx::query("DELETE FROM scheduled_message WHERE id = $1")
+                .bind(cascaded_schedule)
+                .execute(&mut *conn)
+                .await?;
+            Ok(())
+        })
+    })
+    .await
+    .expect("purge the schedule row");
+    let (reserved, released_at) = flags(cascaded_id).await;
+    assert!(!reserved, "the cascade released the hold");
+    assert!(released_at.is_some(), "…and stamped the release");
 }

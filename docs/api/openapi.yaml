@@ -9949,12 +9949,14 @@ paths:
       operationId: getAttachmentContent
       summary: Stream complete attachment bytes from Drive after channel membership validation.
       description: >
-        An active member of the channel reads a completed attachment that a message carries
-        (`messageId` is set). A completed attachment that no message carries yet (a draft in a
-        composer tray, or a file a scheduled message is holding) is read by its uploader alone;
-        every other member of the channel gets the same 404 an unknown id gets, so the route does
-        not reveal whose drafts exist (ADR-0208 remaining risk 8). The caller must be an active
-        member of the channel in every case, the uploader included.
+        An active member of the channel reads a completed attachment that a live message carries
+        (`messageId` is set and that message has not been deleted). A completed attachment that no
+        message carries yet (a draft in a composer tray, or a file a scheduled message is holding)
+        is read by its uploader alone; every other member of the channel gets the same 404 an
+        unknown id gets, so the route does not reveal whose drafts exist (ADR-0208 remaining risk
+        8). A file a deleted message carried is read by nobody - not the room, not the author
+        who uploaded it, not a workspace admin - and answers the same 404 (ADR-0151 amendment 2).
+        The caller must be an active member of the channel in every case, the uploader included.
       security:
         - bearerAuth: []
       parameters:
@@ -9980,8 +9982,8 @@ paths:
         "404":
           description: >
             Completed attachment not found: unknown id, pending or failed upload, another
-            channel's or tenant's attachment, or a draft (no message carries it) that the caller
-            did not upload. All of these answer identically.
+            channel's or tenant's attachment, a draft (no message carries it) that the caller
+            did not upload, or a file a deleted message carried. All of these answer identically.
           content:
             application/json:
               schema:
@@ -20997,8 +20999,10 @@ components:
             $ref: "#/components/schemas/MessageAttachment"
           description: >
             Completed attachments bound to this message, ordered by creation time.
-            Omitted when empty. Upload capability URLs and archive provider identifiers
-            are never included; download bytes through the authenticated content proxy.
+            Omitted when empty, and always omitted on a deleted message (a history
+            tombstone lists no files). Upload capability URLs and archive provider
+            identifiers are never included; download bytes through the authenticated
+            content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
         runEnded:

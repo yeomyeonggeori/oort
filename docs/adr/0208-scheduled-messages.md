@@ -29,14 +29,14 @@
 - **상주 BYPASSRLS 소비자는 relay·agent-worker·notifier(와 relay 자격을 쓰는 webhook-sender)다.** notifier의 정리 작업은 「BYPASSRLS 풀로 후보 읽기 + RLS 묶인 `momo_app` 풀로 쓰기」 두 풀 모양이다(`momo-notifier/src/inbox_retention_sweep.rs:1-60`, 쓰기 풀 검사 `momo-messaging/src/avatar_reclaim.rs:263-277`, `momo-notifier/src/lib.rs:751-823`). 그런데 **notifier는 self-host 기본 스택에 없다.** 기본 compose의 서비스는 postgres · centrifugo · runtime-roles · migrate · api · relay · agent-worker · webhook-sender이고 notifier는 푸시 오버레이로만 선다(`docker-compose.rust.yml:6-20`, 푸시 오버레이 `:19`, 팀 `huddle-notifier` 프로필 `:646-648`; doctor도 「푸시 드레인은 오버레이에만 있다」 `oort_doctor.sh:903`). Railway 팀 인스턴스에는 있다(`infra/railway/README.md` 서비스 표 notifier 행).
 - **푸시 어휘는 닫혀 있다.** reason 6종·category 5종은 relay가 모르는 값을 400으로 거절하고(`momo-push-relay/src/dispatch.rs:43-67`), 와이어는 id만 싣되 `channel_id`·`message_id`가 필수 키다(`momo-push/src/dispatch.rs:178-195`, 키 집합이 정확히 같아야 통과). 새 푸시는 relay 먼저 배포하는 순서가 있다(ADR-0204 D7). **보내지 못한 예약에는 메시지 행이 없다.**
 - **개인 채널과 이벤트 규약이 있다.** `user:read-state#<MEMBER>`(`read_state.rs:177`)에 `inbox_item.created`/`inbox_item.read`/`inbox.read_all`을 id·시각만, snake_case로 낸다(ADR-0199 `:84`·`:132`, `inbox.rs:549-565`, outbox 파티션 키 = member_id). 이벤트 유실은 다음 `GET`이 복구한다(정본은 PG).
-- **첨부 묶기 규칙.** `link_attachments_in_tx`(`attachment.rs:444-512`)는 `FOR UPDATE` 아래에서 `complete`·업로더 = 작성자·같은 채널·`message_id IS NULL`을 요구한다(`:476-487`), 한 메시지에 최대 20개(`:55`). 완료됐지만 묶이지 않은 첨부를 거두는 청소기는 없다: `attachment_pending_cleanup_idx`는 `pending`만 본다(`017_attachment.sql:36-39`).
+- **첨부 묶기 규칙.** `link_attachments_in_tx`(`attachment.rs:444-512`)는 `FOR UPDATE` 아래에서 `complete`·업로더 = 작성자·같은 채널·`message_id IS NULL`을 요구한다(`:476-487`), 한 메시지에 최대 20개(`:55`). 완료됐지만 묶이지 않은 첨부를 거두는 청소기는 없다: `attachment_pending_cleanup_idx`는 `pending`만 본다(`017_attachment.sql:36-39`). → [ADR-0151 증보 2](0151-attachments-v0-drive-contract-port.md#증보-2-2026-10-25-4443-첨부의-수명)(#4443)가 그 청소기를 만든다(기본 꺼짐, 점유는 마이그레이션 150이 attachment 행에 비춘다).
 - **보관 채널은 막히지 않는다.** 정본 send는 `archived_at`을 읽지 않는다(`messages.rs:694-845`). 채널을 보관으로 만드는 곳은 하나다: 비공개 채널의 마지막 멤버가 나가면 보관한다(`membership_lifecycle.rs:634-658`). 그 시점에 작성자는 이미 채널 멤버가 아니라서 예약은 `not_member`로 멈추고 보관 여부와 무관하다. DM 다시 열기(`dm.rs:213`)는 NULL로 되돌린다 [V: `archived_at =` grep].
 - **멤버 활성 판정의 선례.** `m.status = 'active' AND m.deleted_at IS NULL`(`dm.rs:160-170`). 사람 전용·살아 있는 멤버 전제는 리마인더 라우트와 같다(`reminders.rs:37`, `:68-89`).
 - **속도 제한은 per-IP뿐이었다.** per-member 축은 이식되지 않았다(`rate_limit.rs:15-22`). 본문 상한도 axum 기본 요청 크기(2 MiB)뿐이다. (2026-10-25: 쓰기 표면에는 증보 1이 per-member 예산을 정한다.)
 - **「세션만큼 사는 것」은 한 곳에서 끝낸다.** `session_end.rs:1-20`: 계열 하나를 끝내는 경로(로그아웃·기기 연결 해제·refresh 재사용)와 멤버 전체를 끝내는 경로(비밀번호 변경·재설정, 정지, 추방, 탈퇴)가 각각 함수 하나를 부르고, 새로 생기는 「세션에 매달린 것」은 호출부 일곱 곳이 아니라 거기에 더한다. 정지가 풀려도 되살아나면 안 된다(`member_lifecycle.rs:245-249`, #2677).
 - **정지·추방·탈퇴는 소유자 범위 정책 밖에서 돈다.** 추방과 정지는 워크스페이스 GUC만 거는 `agent_tenant_tx`(`shared.rs:262-273`)에서 돌고(`member_lifecycle.rs:236-251`, `:296-320`), 탈퇴는 `workspaces.rs:313-352`다. 멤버 전체의 세션 종료(`end_member_sessions_in_tx`)는 비밀번호 변경(`password.rs:196`)·재설정(`claim.rs:111`)·정지·추방·탈퇴가 모두 부른다.
 - **마이그레이션이 역할보다 먼저 돌 수 있다.** dev·CI는 마이그레이션 뒤에 `bootstrap_roles.sql`을 적용한다(`momo-migrate/src/main.rs:530-540`). 정의자 함수의 권한은 거기서 다시 부여하고 스스로 점검한다(`bootstrap_roles.sql:253-330`의 `momo_join_private` 블록과 DO 점검).
-- **첨부 내용은 업로드 순간부터 채널 멤버가 읽는다.** 완료된 첨부는 업로더가 아니어도 채널 활성 멤버 누구나 읽고 묶이지 않은 첨부도 같다(`attachments.rs:332-360`). 첨부 id·이름은 `attachment.upload_started` 감사 행 detail에 있다(`attachment.rs:251-266`).
+- **첨부 내용은 업로드 순간부터 채널 멤버가 읽는다.** 완료된 첨부는 업로더가 아니어도 채널 활성 멤버 누구나 읽고 묶이지 않은 첨부도 같다(`attachments.rs:332-360`). 첨부 id·이름은 `attachment.upload_started` 감사 행 detail에 있다(`attachment.rs:251-266`). → 이름은 [ADR-0151 증보 2](0151-attachments-v0-drive-contract-port.md#증보-2-2026-10-25-4443-첨부의-수명)(#4443)부터 싣지 않고, 이미 쓰인 행의 이름은 마이그레이션 151이 지운다.
 - **워크스페이스는 소프트 삭제다**(`deleted_at`, `identity.rs:104-116`). FK 연쇄가 일어나지 않는다.
 - **서버가 보낸 글은 작성자의 읽음 커서를 올리지 않는다.** 안 읽음은 `last_seq - last_read_seq`다(`read_state.rs:259-262`).
 - **멤버 시간대는 서버에 없다.** 마이그레이션에 멤버·프로필 시간대 컬럼이 없다(클라이언트가 `Intl`로 안다).
@@ -183,7 +183,7 @@ api 역할은 NOBYPASSRLS라 「지금 기한 된 예약이 어느 워크스페�
 - **예약 때** `link_attachments_in_tx`와 같은 술어를 미리 검증한다: `complete`, 업로더 = 작성자, 같은 채널, 묶이지 않음, 중복·20개 초과 없음. 오류 상태는 REST send와 같다(`messages.rs:388-402`: 400 중복·초과, 404 없음, 409 미완료·이미 묶임, 403 다른 업로더·다른 채널). 여기에 **다른 예약이 점유 중**이면 409 `attachment_reserved`.
 - 점유는 `scheduled_message_attachment.attachment_id` UNIQUE가 강제하고, 같은 첨부를 두 예약이 쥐는 것을 막는다. 즉시 보내기가 먼저 그 첨부를 쓰면 예약은 보낼 때 정본 규칙(`message_id IS NULL`)에 걸려 `attachment_unavailable`이 된다. REST send에 「점유 중」 거절을 더하는 것은 정본 경로를 바꾸는 일이라 하지 않는다.
 - **보낼 때** 정본 묶기가 같은 술어를 `FOR UPDATE` 아래에서 다시 판정한다. 어긋나면 `attachment_unavailable`.
-- 취소·삭제하면 점유를 풀고 파일은 남는다(초안과 같은 상태). 완료됐지만 묶이지 않은 첨부를 거두는 청소기는 지금도 없고(`017_attachment.sql:36-39`) 이 ADR이 만들지 않는다: 후속 후보.
+- 취소·삭제하면 점유를 풀고 파일은 남는다(초안과 같은 상태). 완료됐지만 묶이지 않은 첨부를 거두는 청소기는 지금도 없고(`017_attachment.sql:36-39`) 이 ADR이 만들지 않는다: 후속 후보. → [ADR-0151 증보 2](0151-attachments-v0-drive-contract-port.md#증보-2-2026-10-25-4443-첨부의-수명)(#4443)가 만들었다(30일, 취소로 풀린 파일은 풀린 때부터 센다).
 
 ### D12. 기기 간 동기화 · 개인 채널 이벤트
 - 모든 상태 전이(생성·수정·보냄·실패·취소)는 같은 tx에서 outbox 행을 쓴다(`emit_outbox`, 파티션 키 = member_id). 채널은 `user:read-state#<MEMBER_UPPER>`(ADR-0109 D3, `read_state.rs:177`).
@@ -341,10 +341,10 @@ idempotency_key: "<channel>:scheduled:<ID_UPPER>:<rev>"
 2. 푸시가 없는 동안 실패는 앱을 열어야 보인다. 후속: ADR-0206(#4223)이 새 reason과 D8의 다섯 비용을 함께 정한다.
 3. **id 열거 노출(D6)은 planner가 수용했다**(2026-10-22, 「owner 결정」 ⑤). 기한이 된 (워크스페이스, 멤버) 쌍은 GUC 신뢰 모델에서 그 테넌트·멤버의 소유자 범위 표를 여는 열쇠이고, `momo_app` 자격이 SQL 수준으로 새면 비밀 없이 드러난다. 소유자를 최소 권한 역할로 하고 한 번에 200행·기한 된 것만 돌려주는 것으로 줄였다.
 4. 정본 send가 바뀌면 예약에도 같은 변경이 즉시 적용된다(공유 함수의 값이자 위험). 이를 위해 적합성 시험이 REST와 스케줄러를 한 표로 덮는다.
-5. 완료·미묶임 첨부의 청소기는 없다(취소된 예약의 파일이 남는다). 후속 후보.
+5. 완료·미묶임 첨부의 청소기는 없다(취소된 예약의 파일이 남는다). 후속 후보. → [ADR-0151 증보 2](0151-attachments-v0-drive-contract-port.md#증보-2-2026-10-25-4443-첨부의-수명)(#4443)가 거둔다(기본 꺼짐).
 6. 받는 사람 현지 시각, 인용 답장 예약, 모델 지정 예약, 팔레트 명령 「예약해서 보내기」는 v1 밖이다.
 7. 기본 self-host 스택에 notifier가 없으므로 승인 만료 정리 같은 notifier 상주 작업도 그 스택에서는 돌지 않는다. 이 ADR의 범위 밖 관찰이라 별도 이슈 #4235에서 다룬다.
-8. **예약한 첨부는 마감 시각까지 채널 멤버에게 열려 있다.** 완료된 첨부는 업로더가 아니어도 채널 활성 멤버가 읽고(`attachments.rs:332-360`), id·이름은 `attachment.upload_started` 감사 detail에 있다(`attachment.rs:251-266`). 이것은 초안 첨부와 같은 기존 노출이고 예약이 그 기간을 최대 120일로 늘린다. 후속(보안, #4233): 내용 경로를 「메시지에 묶인 첨부 또는 업로더 본인」으로 좁힌다(초안 첨부도 닫힌다).
+8. **예약한 첨부는 마감 시각까지 채널 멤버에게 열려 있다.** 완료된 첨부는 업로더가 아니어도 채널 활성 멤버가 읽고(`attachments.rs:332-360`), id·이름은 `attachment.upload_started` 감사 detail에 있다(`attachment.rs:251-266`). → 이름은 [ADR-0151 증보 2](0151-attachments-v0-drive-contract-port.md#증보-2-2026-10-25-4443-첨부의-수명)(#4443)부터 싣지 않고, 이미 쓰인 행의 이름은 마이그레이션 151이 지운다. 이것은 초안 첨부와 같은 기존 노출이고 예약이 그 기간을 최대 120일로 늘린다. 후속(보안, #4233): 내용 경로를 「메시지에 묶인 첨부 또는 업로더 본인」으로 좁힌다(초안 첨부도 닫힌다).
 9. 서버가 보낸 예약은 작성자의 읽음 커서를 올리지 않아(`read_state.rs:259-262`) 작성자에게는 안 읽음 1로 센다(채널을 열면 정리된다). 서버가 작성자 커서를 올릴지는 후속 판단이다.
 10. 멤버 한 명이 쥘 수 있는 대기 본문은 최대 50 × 요청 본문 상한(2 MiB)이다. 본문 글자 상한은 정본 send에도 없어서 이 ADR이 따로 두지 않는다(공통 상한은 별도 결정).
 11. 계열 하나의 종료 중 로그아웃은 예약을 건드리지 않는다(부재 중에 나가게 하려는 쓰임). 로그아웃한 세션이 심은 예약은 그 계정의 다음 보안 사건(비밀번호 변경·기기 해제·재사용 탐지)에서야 멈춘다.
