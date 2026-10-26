@@ -15,8 +15,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import * as copy from '../src/features/memory/copy';
 import {MemoryPauseSection} from '../src/features/memory/MemoryPauseSection';
@@ -479,6 +481,16 @@ describe('개인 일시정지 (프로필 시트)', () => {
     await waitFor(() => expect(screen.getByTestId('memory-pause-retry')).toBeTruthy());
     expect(pauseSwitch(true)).toBeNull();
     expect(screen.getByText(copy.MEMORY_PAUSE_LOAD_FAILED)).toBeTruthy();
+    // 복구 길은 강조색 글자다(옛 판의 `tone="accent"`) — 눌리지 않는 안내 행과 갈린다(design-review #4457 r3 M1).
+    const retry = StyleSheet.flatten(
+      within(screen.getByTestId('memory-pause-retry')).getByText(copy.MEMORY_PAUSE_RETRY).props.style,
+    );
+    expect(retry).toMatchObject({fontWeight: '600'});
+    expect(retry.color).not.toBe(
+      StyleSheet.flatten(
+        within(screen.getByTestId('memory-admin-row')).getByText(copy.MEMORY_ADMIN_ROW).props.style,
+      ).color,
+    );
   });
 
   it('팀 설정이 꺼져 있으면 그 사실을 알리고, 관리자 설정은 데스크탑이라고 말한다', async () => {
