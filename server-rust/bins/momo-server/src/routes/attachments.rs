@@ -179,6 +179,10 @@ pub async fn create_upload(
     })
     .await;
     let attachment_id = crate::routes::shared::settle_db("attachments.create_upload", created)?;
+    // #4443: remember the workspace for the local-volume reclaim tick (this process cannot
+    // enumerate tenants itself). `workspace_id` is the principal's own, checked by
+    // `workspace_scope` above — never a request-supplied id. An id and nothing else.
+    state.attachment_reclaim_touched.touch(workspace_id);
 
     Ok((
         StatusCode::CREATED,

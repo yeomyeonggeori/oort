@@ -449,9 +449,7 @@ pub async fn sweep_workspace(
     consecutive_failures: &mut u32,
 ) -> Result<WorkspaceSweep, DbError> {
     let ids = with_tenant_tx(write_pool, workspace_id, move |conn| {
-        Box::pin(
-            async move { reclaim_candidate_ids_in_tx(conn, workspace_id, budget, ttl).await },
-        )
+        Box::pin(async move { reclaim_candidate_ids_in_tx(conn, workspace_id, budget, ttl).await })
     })
     .await?;
     let mut sweep = WorkspaceSweep {
@@ -506,16 +504,162 @@ pub async fn tally_workspace(
     .await
 }
 
+/// Where a tick's list of workspaces came from. It decides what the dry-run line's numbers
+/// *mean*, so the line names it ([`dry_run_line`]) — an operator who compares the line with
+/// `infra/rust/sql/attachment_reclaim_check.sql` must know whether the line was allowed to see
+/// every workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReclaimScope {
+    /// The notifier: one cross-tenant read ([`workspaces_with_reclaim_candidates`]) names the
+    /// workspaces that may hold a candidate, at most [`MAX_WORKSPACES_PER_TICK`] a tick (the
+    /// ones with the oldest candidate first). A tick that looked at exactly that many may have
+    /// left others unlooked-at.
+    AllWorkspaces,
+    /// The api process on the local volume: it has **no** cross-tenant read (a `momo_app`
+    /// connection without `app.workspace_id` sees no `workspace` row at all, and a new
+    /// `SECURITY DEFINER` to enumerate them was not made), so it looks only at the workspaces
+    /// whose uploads it has served since it started. A workspace nobody has uploaded to since
+    /// the last restart is not looked at until somebody does.
+    TouchedByThisProcess,
+}
+
+impl ReclaimScope {
+    fn as_str(self) -> &'static str {
+        match self {
+            ReclaimScope::AllWorkspaces => "all",
+            ReclaimScope::TouchedByThisProcess => "touched",
+        }
+    }
+}
+
+/// What one tick did. Counts only (no names, no member ids, no Drive ids).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct AttachmentReclaimStats {
+    /// Workspaces the tick examined (listed or counted a candidate in) — see
+    /// [`ReclaimScope`] for which workspaces it was allowed to look at.
+    pub looked_at: usize,
+    /// Of those, the ones that had at least one file to delete (or, switched off, to count).
+    pub workspaces: usize,
+    pub counts: AttachmentReclaimCounts,
+    /// Per-file or per-workspace transactions that failed in the database.
+    pub db_errors: u32,
+    /// The workspaces behind `db_errors` (at most [`MAX_REPORTED_FAILED_WORKSPACES`]): a UUID
+    /// names no person, and "which workspace is failing" is what an operator needs.
+    pub failed_workspaces: Vec<Uuid>,
+    /// Set on a switched-off tick: the files and bytes the delete would take. `None` when the
+    /// delete ran.
+    pub dry_run: Option<ReclaimTally>,
+}
+
+/// How many failing workspace ids one tick reports.
+pub const MAX_REPORTED_FAILED_WORKSPACES: usize = 20;
+
+impl AttachmentReclaimStats {
+    fn record_failure(&mut self, workspace_id: Uuid, db_errors: u32) {
+        self.db_errors += db_errors;
+        if self.failed_workspaces.len() < MAX_REPORTED_FAILED_WORKSPACES
+            && !self.failed_workspaces.contains(&workspace_id)
+        {
+            self.failed_workspaces.push(workspace_id);
+        }
+    }
+}
+
+/// One tick's work over `workspaces`, on the **RLS-bound** write pool — the part both runners
+/// share (the notifier over a Google Drive, the api process over the local volume), so the two
+/// cannot decide "what may be deleted" or "what the dry run counts" differently.
+///
+/// `deleter = None` is the switched-off tick: every workspace is counted with the delete's own
+/// predicate ([`tally_workspace`]) and nothing is written. `Some(deleter)` deletes up to
+/// `batch` files in total, workspace by workspace, and stops early after
+/// [`MAX_CONSECUTIVE_DRIVE_FAILURES`] failures in a row or when the archive says it is not
+/// configured at all. The caller has already checked that `write_pool` is RLS-bound
+/// ([`crate::avatar_reclaim::ensure_write_pool_rls_bound`]).
+pub async fn reclaim_pass(
+    write_pool: &PgPool,
+    workspaces: Vec<Uuid>,
+    ttl: Duration,
+    batch: i64,
+    deleter: Option<&Arc<dyn AttachmentDeleter>>,
+) -> AttachmentReclaimStats {
+    let mut stats = AttachmentReclaimStats::default();
+
+    let Some(deleter) = deleter else {
+        let mut total = ReclaimTally::default();
+        for workspace_id in workspaces {
+            stats.looked_at += 1;
+            match tally_workspace(write_pool, workspace_id, ttl).await {
+                Ok(tally) => {
+                    if tally.candidates > 0 {
+                        stats.workspaces += 1;
+                    }
+                    total.add(&tally);
+                }
+                Err(_) => stats.record_failure(workspace_id, 1),
+            }
+        }
+        stats.dry_run = Some(total);
+        return stats;
+    };
+
+    let mut budget = batch.max(1);
+    // A Drive that keeps failing (timeouts, 5xx) must not hold the tick for
+    // batch x timeout: stop after a few consecutive failures.
+    let mut consecutive_drive_failures = 0u32;
+    for workspace_id in workspaces {
+        if budget <= 0 {
+            break;
+        }
+        stats.looked_at += 1;
+        match sweep_workspace(
+            write_pool,
+            workspace_id,
+            ttl,
+            budget,
+            deleter,
+            &mut consecutive_drive_failures,
+        )
+        .await
+        {
+            Ok(sweep) => {
+                if sweep.listed > 0 {
+                    stats.workspaces += 1;
+                }
+                stats.counts.add(&sweep.counts);
+                if sweep.db_errors > 0 {
+                    stats.record_failure(workspace_id, sweep.db_errors);
+                }
+                budget -= i64::from(sweep.listed);
+                if sweep.stop {
+                    break;
+                }
+            }
+            Err(_) => stats.record_failure(workspace_id, 1),
+        }
+    }
+    stats
+}
+
 /// The line a switched-off tick writes. Fixed text, because an operator compares its
 /// numbers with `infra/rust/sql/attachment_reclaim_check.sql` before turning the delete
-/// on: `candidates` and `bytes` are what the enabled sweep would delete from the
-/// workspaces named in `workspaces` (every file the full predicate allows, not one
-/// batch). Counts only — no name, no id.
-pub fn dry_run_line(workspaces: usize, tally: &ReclaimTally) -> String {
+/// on. `candidates` and `bytes` are what the enabled sweep would delete from the
+/// `looked_at` workspaces the tick examined (every file the full predicate allows, not one
+/// batch), `workspaces` of which had at least one. `scope` says which workspaces the tick was
+/// allowed to look at ([`ReclaimScope`]): the line can only be **at most** what the check SQL
+/// counts over the whole database, never more. Counts only — no name, no id.
+pub fn dry_run_line(
+    scope: ReclaimScope,
+    looked_at: usize,
+    workspaces: usize,
+    tally: &ReclaimTally,
+) -> String {
     format!(
-        "attachment reclaim dry-run: delete_enabled=false workspaces={workspaces} \
-         candidates={} bytes={} (nothing is deleted; MOMO_ATTACHMENT_RECLAIM=1 turns the delete on)",
-        tally.candidates, tally.bytes
+        "attachment reclaim dry-run: delete_enabled=false scope={} looked_at={looked_at} \
+         workspaces={workspaces} candidates={} bytes={} \
+         (nothing is deleted; MOMO_ATTACHMENT_RECLAIM=1 turns the delete on)",
+        scope.as_str(),
+        tally.candidates,
+        tally.bytes
     )
 }
 
@@ -629,6 +773,57 @@ mod tests {
         assert!(!workspaces_sql().contains("NOT EXISTS"));
     }
 
+    /// The operator compares the sweep's dry-run line with `infra/rust/sql/attachment_reclaim_check.sql`,
+    /// so the SQL's candidate predicate must be the sweep's predicate **word for word** — only the
+    /// bound TTL is spelled out as a number. A change to one term in either place fails here, and
+    /// the PG suite then checks that the two count the same files.
+    #[test]
+    fn the_operators_check_sql_embeds_the_sweeps_predicate_word_for_word() {
+        let sql = include_str!("../../../../infra/rust/sql/attachment_reclaim_check.sql");
+        let normalize = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+        let wanted = eligible_sql(1).replace("$1", &UNBOUND_TTL.as_secs().to_string());
+        assert!(
+            normalize(sql).contains(&normalize(&wanted)),
+            "the check SQL's `cand` predicate drifted from `eligible_sql`:\n  wanted: {}\n",
+            normalize(&wanted)
+        );
+        // The TTL it names is the sweep's.
+        assert!(sql.contains(&format!("make_interval(secs => {})", UNBOUND_TTL.as_secs())));
+        // A read-only statement: no write verb appears in the code, once comments and the text
+        // inside string literals (which says things like "turning the delete on") are removed.
+        let mut code = String::new();
+        for line in sql
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("--"))
+        {
+            let mut in_literal = false;
+            for c in line.chars() {
+                if c == '\'' {
+                    in_literal = !in_literal;
+                } else if !in_literal {
+                    code.push(c);
+                }
+            }
+            code.push('\n');
+        }
+        let words: Vec<String> = code
+            .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .filter(|word| !word.is_empty())
+            .map(str::to_uppercase)
+            .collect();
+        for verb in [
+            "INSERT", "UPDATE", "DELETE", "TRUNCATE", "ALTER", "DROP", "CREATE", "GRANT", "REVOKE",
+            "COPY",
+        ] {
+            assert!(
+                !words.iter().any(|word| word == verb),
+                "the check SQL must not contain {verb} outside comments and string literals"
+            );
+        }
+        assert!(words.windows(3).any(|w| w == ["BEGIN", "READ", "ONLY"]));
+        assert!(words.iter().any(|word| word == "ROLLBACK"));
+    }
+
     #[test]
     fn the_ttl_is_thirty_days() {
         assert_eq!(UNBOUND_TTL.as_secs(), 30 * 24 * 60 * 60);
@@ -663,17 +858,48 @@ mod tests {
     /// numbers they compare against the check SQL, and the instruction that turns it on.
     #[test]
     fn the_dry_run_line_carries_the_numbers_an_operator_compares() {
-        let line = dry_run_line(
-            3,
-            &ReclaimTally {
-                candidates: 12,
-                bytes: 3405,
-            },
+        let tally = ReclaimTally {
+            candidates: 12,
+            bytes: 3405,
+        };
+        assert_eq!(
+            dry_run_line(ReclaimScope::AllWorkspaces, 5, 3, &tally),
+            "attachment reclaim dry-run: delete_enabled=false scope=all looked_at=5 workspaces=3 \
+             candidates=12 bytes=3405 \
+             (nothing is deleted; MOMO_ATTACHMENT_RECLAIM=1 turns the delete on)"
+        );
+        // The api process on the local volume can only look at what it has served; the line
+        // says so, because that is the number's meaning (never more than the check SQL's).
+        assert_eq!(
+            dry_run_line(ReclaimScope::TouchedByThisProcess, 1, 1, &tally),
+            "attachment reclaim dry-run: delete_enabled=false scope=touched looked_at=1 \
+             workspaces=1 candidates=12 bytes=3405 \
+             (nothing is deleted; MOMO_ATTACHMENT_RECLAIM=1 turns the delete on)"
+        );
+    }
+
+    #[test]
+    fn a_failing_workspace_is_reported_once_and_the_list_is_bounded() {
+        let mut stats = AttachmentReclaimStats::default();
+        let one = Uuid::from_u128(1);
+        stats.record_failure(one, 2);
+        stats.record_failure(one, 1);
+        assert_eq!(stats.db_errors, 3, "every failure is counted");
+        assert_eq!(
+            stats.failed_workspaces,
+            vec![one],
+            "a workspace is named once"
+        );
+        for n in 2..(MAX_REPORTED_FAILED_WORKSPACES as u128 + 10) {
+            stats.record_failure(Uuid::from_u128(n), 1);
+        }
+        assert_eq!(
+            stats.failed_workspaces.len(),
+            MAX_REPORTED_FAILED_WORKSPACES
         );
         assert_eq!(
-            line,
-            "attachment reclaim dry-run: delete_enabled=false workspaces=3 candidates=12 \
-             bytes=3405 (nothing is deleted; MOMO_ATTACHMENT_RECLAIM=1 turns the delete on)"
+            stats.db_errors,
+            3 + (MAX_REPORTED_FAILED_WORKSPACES as u32 + 8)
         );
     }
 

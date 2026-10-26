@@ -22,6 +22,7 @@
 //! | `the_drive_call_runs_inside_the_row_lock_so_a_bind_waits_and_finds_the_row_gone` | call Drive before any lock is taken (no `FOR UPDATE`, Drive answers first) |
 //! | `the_reclaim_cannot_reach_another_tenants_row` | drop the workspace predicate from all three statements (lock, eligibility, delete; any one of them suffices on its own, by design). The first mode stays green because RLS covers it too; the second mode, run without RLS, goes red |
 //! | `a_write_pool_that_bypasses_rls_is_refused` | drop `ensure_write_pool_rls_bound` from `sweep_once` (both the deleting and the switched-off reclaimer) |
+//! | `the_operators_check_sql_agrees_with_the_sweep_and_would_notice_a_reference_it_does_not_know` | change one term of the check SQL's `cand` predicate (its count stops equalling the sweep's tally and the reason split's `CANDIDATE`), drop a `NOT EXISTS` from the reason split, stop listing foreign keys (a new `attachment` FK would pass unseen), drop the `reserved` drift probe, or skip a json column in the soft-reference scan |
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -521,12 +522,14 @@ async fn huddle_transcription(su: &PgPool, t: &Tenant) -> Huddle {
 }
 
 async fn name_merged_transcript(su: &PgPool, huddle: &Huddle, attachment: Uuid) {
-    sqlx::query("UPDATE huddle_transcription_job SET merged_transcript_attachment_id = $2 WHERE id = $1")
-        .bind(huddle.job)
-        .bind(attachment)
-        .execute(su)
-        .await
-        .expect("merged transcript");
+    sqlx::query(
+        "UPDATE huddle_transcription_job SET merged_transcript_attachment_id = $2 WHERE id = $1",
+    )
+    .bind(huddle.job)
+    .bind(attachment)
+    .execute(su)
+    .await
+    .expect("merged transcript");
 }
 
 async fn name_track_source(su: &PgPool, huddle: &Huddle, attachment: Uuid) {
@@ -579,11 +582,13 @@ async fn workspace_avatar_naming(su: &PgPool, t: &Tenant, drive_file_id: &str) {
 }
 
 async fn tombstone(su: &PgPool, message: Uuid) {
-    sqlx::query("UPDATE message SET state = 'deleted', body = NULL, deleted_at = now() WHERE id = $1")
-        .bind(message)
-        .execute(su)
-        .await
-        .expect("tombstone");
+    sqlx::query(
+        "UPDATE message SET state = 'deleted', body = NULL, deleted_at = now() WHERE id = $1",
+    )
+    .bind(message)
+    .execute(su)
+    .await
+    .expect("tombstone");
 }
 
 struct Pools {
@@ -1035,8 +1040,7 @@ async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
     name_track_source(&p.su, &huddle, held_source).await;
     let held_transcript = attachment(&p.su, &t, "complete", Some(&f_transcript), 92).await;
     name_track_transcript(&p.su, &huddle, held_transcript).await;
-    let held_member_avatar =
-        attachment(&p.su, &t, "complete", Some(&f_member_avatar), 93).await;
+    let held_member_avatar = attachment(&p.su, &t, "complete", Some(&f_member_avatar), 93).await;
     member_avatar_naming(&p.su, &t, &f_member_avatar).await;
     let held_workspace_avatar =
         attachment(&p.su, &t, "complete", Some(&f_workspace_avatar), 94).await;
@@ -1064,9 +1068,7 @@ async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
     );
     let workspace = t.workspace_id;
     let listed = momo_db::with_tenant_tx(&p.write, workspace, move |conn| {
-        Box::pin(async move {
-            reclaim_candidate_ids_in_tx(conn, workspace, 50, UNBOUND_TTL).await
-        })
+        Box::pin(async move { reclaim_candidate_ids_in_tx(conn, workspace, 50, UNBOUND_TTL).await })
     })
     .await
     .expect("listing");
@@ -1091,10 +1093,7 @@ async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
     );
     assert_eq!(sweep.counts.skipped_not_eligible, 0, "{sweep:?}");
 
-    for (f, label) in [
-        (&f_free_old, "free, older"),
-        (&f_free_new, "free, newer"),
-    ] {
+    for (f, label) in [(&f_free_old, "free, older"), (&f_free_new, "free, newer")] {
         assert_eq!(drive.calls_for(f), 1, "{label} is deleted once");
     }
     for (f, label) in [
@@ -1102,7 +1101,10 @@ async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
         (&f_source, "named by a huddle track as its source"),
         (&f_transcript, "named by a huddle track as its transcript"),
         (&f_member_avatar, "the same Drive object as a member avatar"),
-        (&f_workspace_avatar, "the same Drive object as a workspace avatar"),
+        (
+            &f_workspace_avatar,
+            "the same Drive object as a workspace avatar",
+        ),
         (&f_tombstoned, "carried by a deleted message"),
     ] {
         assert_eq!(drive.calls_for(f), 0, "{label}: never deleted");
@@ -1141,7 +1143,11 @@ async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
         &f_workspace_avatar,
         &f_tombstoned,
     ] {
-        assert_eq!(drive.calls_for(f), 0, "a held file is skipped by the predicate, tick after tick");
+        assert_eq!(
+            drive.calls_for(f),
+            0,
+            "a held file is skipped by the predicate, tick after tick"
+        );
     }
     assert_eq!(
         tally_workspace(&p.write, workspace, UNBOUND_TTL)
@@ -1154,8 +1160,8 @@ async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) with bootstrap roles"]
-async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_and_deletes_nothing()
-{
+async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_and_deletes_nothing(
+) {
     let _guard = test_lock().await;
     let p = pools().await;
     wipe_test_tenants(&p.su).await;
@@ -1203,7 +1209,11 @@ async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_
     let c_tally = tally_workspace(&p.write, c.workspace_id, UNBOUND_TTL)
         .await
         .expect("tally c");
-    assert_eq!(c_tally, ReclaimTally::default(), "…but the full predicate counts nothing for it");
+    assert_eq!(
+        c_tally,
+        ReclaimTally::default(),
+        "…but the full predicate counts nothing for it"
+    );
 
     // The switched-off reclaimer: counts, deletes nothing, owns no Drive.
     let off = AttachmentReclaimer::dry_run(500);
@@ -1223,26 +1233,43 @@ async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_
             .await
             .unwrap_or_else(|e| panic!("dry run {tick}: {e}"));
         assert_eq!(stats.dry_run, Some(expected), "tick {tick}: {stats:?}");
-        assert_eq!(stats.counts, AttachmentReclaimCounts::default(), "{stats:?}");
+        assert_eq!(
+            stats.counts,
+            AttachmentReclaimCounts::default(),
+            "{stats:?}"
+        );
         assert_eq!(stats.db_errors, 0, "{stats:?}");
     }
     // Per workspace (no leftovers in the way): a and b have something to delete, c — whose
     // only old file a huddle names — has not.
     let per_workspace = |w: Uuid| {
         let write = p.write.clone();
-        async move { tally_workspace(&write, w, UNBOUND_TTL).await.expect("tally") }
+        async move {
+            tally_workspace(&write, w, UNBOUND_TTL)
+                .await
+                .expect("tally")
+        }
     };
     assert_eq!(
         per_workspace(a.workspace_id).await,
-        ReclaimTally { candidates: 2, bytes: 350 }
+        ReclaimTally {
+            candidates: 2,
+            bytes: 350
+        }
     );
     assert_eq!(
         per_workspace(b.workspace_id).await,
-        ReclaimTally { candidates: 1, bytes: 7 }
+        ReclaimTally {
+            candidates: 1,
+            bytes: 7
+        }
     );
     assert_eq!(per_workspace(c.workspace_id).await, ReclaimTally::default());
     for (id, label) in [(del_a1, "a1"), (del_a2, "a2"), (del_b, "b")] {
-        assert!(exists(&p.su, id).await, "switched off: {label} is still there");
+        assert!(
+            exists(&p.su, id).await,
+            "switched off: {label} is still there"
+        );
     }
     let audited: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM audit_log WHERE action = 'attachment.expired' \
@@ -1282,8 +1309,314 @@ async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_
     }
     // After the delete, the dry run has nothing left to report for these workspaces.
     for w in mine {
-        assert_eq!(per_workspace(w).await, ReclaimTally::default(), "after the delete");
+        assert_eq!(
+            per_workspace(w).await,
+            ReclaimTally::default(),
+            "after the delete"
+        );
     }
     let after = off.sweep_once(&p.read, &p.write).await.expect("after");
-    assert_eq!(after.dry_run, Some(foreign_tally(&p, &mine).await), "{after:?}");
+    assert_eq!(
+        after.dry_run,
+        Some(foreign_tally(&p, &mine).await),
+        "{after:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// the operator's check SQL (`infra/rust/sql/attachment_reclaim_check.sql`)
+// ---------------------------------------------------------------------------
+
+const CHECK_SQL: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../../infra/rust/sql/attachment_reclaim_check.sql"
+);
+
+/// Run the check SQL as the operator would (psql, superuser) and read its `section|key|n|bytes`
+/// lines. A line that does not parse is a failure, not a skipped row.
+fn run_check_sql() -> std::collections::BTreeMap<(String, String), (i64, i64)> {
+    let output = Command::new(resolve_psql())
+        .arg(database_url())
+        .args([
+            "-X",
+            "-A",
+            "-t",
+            "-F",
+            "|",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "--no-psqlrc",
+        ])
+        .arg("-f")
+        .arg(CHECK_SQL)
+        .output()
+        .expect("spawn psql for attachment_reclaim_check.sql");
+    assert!(
+        output.status.success(),
+        "the check SQL failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut rows = std::collections::BTreeMap::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        if matches!(line.trim(), "BEGIN" | "ROLLBACK" | "") {
+            continue;
+        }
+        let parts: Vec<&str> = line.split('|').collect();
+        assert_eq!(
+            parts.len(),
+            4,
+            "a check line is section|key|n|bytes: {line:?}"
+        );
+        let n: i64 = parts[2].parse().unwrap_or_else(|_| panic!("n in {line:?}"));
+        let bytes: i64 = parts[3]
+            .parse()
+            .unwrap_or_else(|_| panic!("bytes in {line:?}"));
+        rows.insert((parts[0].to_string(), parts[1].to_string()), (n, bytes));
+    }
+    rows
+}
+
+fn count_of(
+    rows: &std::collections::BTreeMap<(String, String), (i64, i64)>,
+    section: &str,
+    key: &str,
+) -> (i64, i64) {
+    rows.get(&(section.to_string(), key.to_string()))
+        .copied()
+        .unwrap_or((0, 0))
+}
+
+/// The operator turns the delete on after comparing the sweep's dry-run line with this SQL, so
+/// the SQL must count the same thing, and must say so when something new points at a file.
+///
+/// What it pins (each against rows this test seeds, as a **delta** from a run just before — the
+/// database is shared and other suites leave files behind):
+///
+/// * `candidates` equals what the sweep itself counts over every workspace (same predicate, other
+///   formulation) **and** equals the `CANDIDATE` row of the reason split (a second formulation of
+///   the same fact inside the SQL);
+/// * each seeded kind lands in its own reason: a live message, a deleted message, a schedule, a
+///   young file, a pending and a failed row, a huddle row, an avatar object;
+/// * every foreign key into `attachment` is one the SQL names `(known)` — a migration that adds a
+///   fifth turns this red until the reference table, the predicate and the SQL are updated;
+/// * the `reserved` mirror drifting from the real reservation rows (the trigger bypassed) is
+///   reported, so the check is not a mirror that agrees with itself;
+/// * a candidate's id sitting inside a json column (`message.props`) is reported by the
+///   soft-reference scan, so "0" there means something;
+/// * a Drive object shared with another attachment row (the one reference a tenant-bound sweep
+///   cannot see, because RLS hides the other workspace) is reported.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) with bootstrap roles"]
+async fn the_operators_check_sql_agrees_with_the_sweep_and_would_notice_a_reference_it_does_not_know(
+) {
+    let _guard = test_lock().await;
+    let p = pools().await;
+    wipe_test_tenants(&p.su).await;
+    let t = seed_tenant(&p.su, 1).await;
+    let other = seed_tenant(&p.su, 1).await;
+    let huddle = huddle_transcription(&p.su, &t).await;
+
+    let before = run_check_sql();
+
+    // Two candidates (the older one is also the soft-reference sample's first pick), and one
+    // example of every reason a file is not.
+    let (f_c1, f_c2) = (file_id(), file_id());
+    let _c1 = attachment(&p.su, &t, "complete", Some(&f_c1), 40).await;
+    let c2 = attachment(&p.su, &t, "complete", Some(&f_c2), 3_000).await;
+    set_size(&p.su, c2, 1_000).await;
+    let live = message(&p.su, &t).await;
+    let bound_live = attachment(&p.su, &t, "complete", Some(&file_id()), 40).await;
+    carry(&p.su, bound_live, live).await;
+    let dead = message(&p.su, &t).await;
+    let bound_dead = attachment(&p.su, &t, "complete", Some(&file_id()), 40).await;
+    carry(&p.su, bound_dead, dead).await;
+    tombstone(&p.su, dead).await;
+    let held = attachment(&p.su, &t, "complete", Some(&file_id()), 40).await;
+    hold(&p.su, held).await;
+    attachment(&p.su, &t, "complete", Some(&file_id()), 10).await; // young
+    attachment(&p.su, &t, "pending", Some(&file_id()), 40).await;
+    attachment(&p.su, &t, "failed", Some(&file_id()), 40).await;
+    let huddle_held = attachment(&p.su, &t, "complete", Some(&file_id()), 90).await;
+    name_merged_transcript(&p.su, &huddle, huddle_held).await;
+    let f_avatar = file_id();
+    attachment(&p.su, &t, "complete", Some(&f_avatar), 91).await;
+    member_avatar_naming(&p.su, &t, &f_avatar).await;
+
+    let after = run_check_sql();
+    let delta = |section: &str, key: &str| {
+        let (a, ab) = count_of(&after, section, key);
+        let (b, bb) = count_of(&before, section, key);
+        (a - b, ab - bb)
+    };
+
+    // 1. The SQL and the sweep count the same files and the same bytes.
+    let everyone = foreign_tally(&p, &[]).await;
+    let (sql_n, sql_bytes) = count_of(&after, "candidates", "all_workspaces");
+    assert_eq!(
+        (sql_n, sql_bytes),
+        (everyone.candidates, everyone.bytes),
+        "the check SQL's candidates are exactly what the sweep counts over every workspace"
+    );
+    assert_eq!(
+        delta("candidates", "all_workspaces"),
+        (2, 10 + 1_000),
+        "the two seeded candidates, with their bytes (10 and 1000)"
+    );
+    assert_eq!(
+        count_of(&after, "reason", "CANDIDATE"),
+        (sql_n, sql_bytes),
+        "the reason split's CANDIDATE row is the same fact written a second way"
+    );
+
+    // 2. Every seeded kind lands in its own reason.
+    for (reason, expected) in [
+        ("CANDIDATE", 2),
+        ("bound to a live message", 1),
+        ("bound to a deleted message (kept: message_id is set)", 1),
+        ("held by a scheduled message", 1),
+        (
+            "unbound, younger than 30 days (or released less than 30 days ago)",
+            1,
+        ),
+        ("pending (this sweep never touches it)", 1),
+        ("failed (this sweep never touches it)", 1),
+        ("held by a huddle transcription row", 1),
+        ("same Drive object as an avatar media row", 1),
+    ] {
+        assert_eq!(delta("reason", reason).0, expected, "reason {reason:?}");
+    }
+
+    // 3. Every foreign key into attachment is one the SQL knows. A new one would say UNKNOWN.
+    let fks: Vec<&String> = after
+        .keys()
+        .filter(|(section, _)| section == "incoming_fk")
+        .map(|(_, key)| key)
+        .collect();
+    assert_eq!(
+        fks.len(),
+        4,
+        "the four foreign keys into attachment: {fks:?}"
+    );
+    assert!(
+        fks.iter().all(|key| key.ends_with("(known)")),
+        "a foreign key into attachment that the check SQL does not know is a new reference \
+         kind: update the ADR-0151 증보 2 reference table, the sweep's predicate and this SQL: {fks:?}"
+    );
+
+    // 4. Nothing seeded is a candidate that something still points at, and no reservation row
+    //    exists without its flag.
+    for key in [
+        "message_id_set",
+        "reservation_row_exists",
+        "huddle_transcription_row",
+    ] {
+        assert_eq!(
+            delta("candidate_with_a_reference", key).0,
+            0,
+            "no candidate is referenced: {key}"
+        );
+    }
+    assert_eq!(
+        delta(
+            "flag_drift_all_attachments",
+            "reservation_row_without_reserved_flag"
+        )
+        .0,
+        0
+    );
+
+    // 5. The drift probe is not a mirror agreeing with itself: bypass the trigger (as a restore
+    //    or a bug would), add a reservation row for a file, and the SQL reports the lost flag.
+    let drifted = attachment(&p.su, &t, "complete", Some(&file_id()), 40).await;
+    let schedule = Uuid::new_v4();
+    let mut conn = p.su.acquire().await.expect("a superuser connection");
+    sqlx::query("SET session_replication_role = replica")
+        .execute(&mut *conn)
+        .await
+        .expect("bypass the reserve trigger");
+    sqlx::query(
+        "INSERT INTO scheduled_message (id, workspace_id, channel_id, author_member_id, body, \
+                                        send_at, client_request_id) \
+         VALUES ($1, $2, $3, $4, 'later', now() + interval '2 days', $5)",
+    )
+    .bind(schedule)
+    .bind(t.workspace_id)
+    .bind(t.channel_id)
+    .bind(t.members[0])
+    .bind(Uuid::new_v4())
+    .execute(&mut *conn)
+    .await
+    .expect("a schedule");
+    sqlx::query(
+        "INSERT INTO scheduled_message_attachment \
+           (scheduled_message_id, workspace_id, member_id, attachment_id, position) \
+         VALUES ($1, $2, $3, $4, 0)",
+    )
+    .bind(schedule)
+    .bind(t.workspace_id)
+    .bind(t.members[0])
+    .bind(drifted)
+    .execute(&mut *conn)
+    .await
+    .expect("a reservation row the flag does not know");
+    sqlx::query("RESET session_replication_role")
+        .execute(&mut *conn)
+        .await
+        .expect("restore triggers");
+    drop(conn);
+
+    // 6. A candidate's id inside a json column, and a Drive object shared with another row.
+    sqlx::query("UPDATE message SET props = jsonb_build_object('note', $2::text) WHERE id = $1")
+        .bind(live)
+        .bind(c2.to_string())
+        .execute(&p.su)
+        .await
+        .expect("a soft reference");
+    let shared = attachment(&p.su, &other, "complete", Some(&f_c1), 5).await;
+    assert!(exists(&p.su, shared).await);
+
+    let probed = run_check_sql();
+    let probe = |section: &str, key: &str| {
+        let (a, _) = count_of(&probed, section, key);
+        let (b, _) = count_of(&after, section, key);
+        a - b
+    };
+    assert_eq!(
+        probe(
+            "flag_drift_all_attachments",
+            "reservation_row_without_reserved_flag"
+        ),
+        1,
+        "a reservation row whose flag the trigger never set is reported"
+    );
+    assert_eq!(
+        probe("candidate_with_a_reference", "reservation_row_exists"),
+        1,
+        "the unflagged file is old, so the sweep's predicate calls it a candidate while a \
+         reservation row still holds it: the check reports exactly that contradiction"
+    );
+    assert!(
+        count_of(&probed, "soft_reference", "message.props").0 >= 1,
+        "the soft-reference scan sees a candidate's id inside message.props: {probed:?}"
+    );
+    assert_eq!(
+        probe("drive_object_shared_with", "another attachment row"),
+        1,
+        "a Drive object another attachment row also names is reported"
+    );
+    // The scan covers json columns the schema has today (32 at the time of writing): a column
+    // dropped from the scan would show up as a missing row for one that always exists.
+    for column in [
+        "message.props",
+        "approval.payload",
+        "audit_log.detail",
+        "outbox.payload",
+    ] {
+        assert!(
+            probed.contains_key(&("soft_reference".to_string(), column.to_string())),
+            "the soft-reference scan covers {column}"
+        );
+    }
+
+    wipe_test_tenants(&p.su).await;
 }

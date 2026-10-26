@@ -97,6 +97,10 @@ pub struct Config {
     pub mentions: MentionSettings,
     /// ADR-0208 D15 — the scheduled-message tick: on by default, four optional knobs.
     pub scheduler: SchedulerSettings,
+    /// #4443 / ADR-0151 증보 2 D4 — the attachment reclaim tick of the api process (the
+    /// local-volume half). **Ships off**: it deletes nothing unless `MOMO_ATTACHMENT_RECLAIM` is
+    /// exactly `1`. Runs only on the `local` backend (the notifier reclaims a Google Drive).
+    pub attachment_reclaim: AttachmentReclaimSettings,
     /// ADR-0146 개정 2026-09-28 (R2) — the server instance id signed statements
     /// echo, and whether a member-scoped host registration must carry its root
     /// key's `host_register` signature. **Off by default** (D-11 / Q11: the R2
@@ -1380,6 +1384,67 @@ impl SchedulerSettings {
     }
 }
 
+/// #4443 / ADR-0151 증보 2 D4 — the attachment reclaim tick that lives in the api process.
+///
+/// The same variable names and defaults as the notifier's Google-Drive sweep (an operator sets
+/// one spelling and whichever process owns the backend reads it):
+///
+/// * `MOMO_ATTACHMENT_RECLAIM` — **exactly `1` turns the delete on**; unset, empty, `0`, `true`,
+///   a typo all leave it looking only (`momo_messaging::attachment_reclaim::delete_switch_is_on`,
+///   the one definition both processes call). The job deletes files nobody can get back, so it
+///   ships off; switched off, every tick writes one dry-run line with what it *would* delete.
+/// * `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS` — 600000, floored at 10000. Unparsable → default.
+/// * `MOMO_ATTACHMENT_RECLAIM_BATCH` — files per tick, 50, clamped 1..=500. Unparsable → default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentReclaimSettings {
+    pub delete_enabled: bool,
+    pub interval_ms: u64,
+    pub batch: i64,
+}
+
+pub const ATTACHMENT_RECLAIM_INTERVAL_MS_DEFAULT: u64 = 600_000;
+pub const ATTACHMENT_RECLAIM_INTERVAL_MS_FLOOR: u64 = 10_000;
+pub const ATTACHMENT_RECLAIM_BATCH_DEFAULT: i64 = 50;
+pub const ATTACHMENT_RECLAIM_BATCH_MAX: i64 = 500;
+
+impl Default for AttachmentReclaimSettings {
+    fn default() -> Self {
+        AttachmentReclaimSettings {
+            delete_enabled: false,
+            interval_ms: ATTACHMENT_RECLAIM_INTERVAL_MS_DEFAULT,
+            batch: ATTACHMENT_RECLAIM_BATCH_DEFAULT,
+        }
+    }
+}
+
+pub fn parse_attachment_reclaim_interval_ms(raw: Option<&str>) -> u64 {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(ATTACHMENT_RECLAIM_INTERVAL_MS_DEFAULT, |ms| {
+            ms.max(ATTACHMENT_RECLAIM_INTERVAL_MS_FLOOR)
+        })
+}
+
+pub fn parse_attachment_reclaim_batch(raw: Option<&str>) -> i64 {
+    raw.and_then(|value| value.trim().parse::<i64>().ok())
+        .map_or(ATTACHMENT_RECLAIM_BATCH_DEFAULT, |batch| {
+            batch.clamp(1, ATTACHMENT_RECLAIM_BATCH_MAX)
+        })
+}
+
+impl AttachmentReclaimSettings {
+    pub fn from_env() -> AttachmentReclaimSettings {
+        AttachmentReclaimSettings {
+            delete_enabled: momo_messaging::attachment_reclaim::delete_switch_is_on(
+                env("MOMO_ATTACHMENT_RECLAIM").as_deref(),
+            ),
+            interval_ms: parse_attachment_reclaim_interval_ms(
+                env("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS").as_deref(),
+            ),
+            batch: parse_attachment_reclaim_batch(env("MOMO_ATTACHMENT_RECLAIM_BATCH").as_deref()),
+        }
+    }
+}
+
 /// Unset / blank / exact `true` = on; anything else = off (G5).
 fn hosted_inplace_grant_switch_on(value: Option<&str>) -> bool {
     match value.map(str::trim) {
@@ -2554,6 +2619,7 @@ impl Config {
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
             scheduler: SchedulerSettings::from_env(),
+            attachment_reclaim: AttachmentReclaimSettings::from_env(),
             device_keys,
             cloud_box: CloudBoxConfig::from_env(),
             // ADR-0149: never fatal. An instance that was not given the
@@ -2771,6 +2837,56 @@ mod tests {
     }
 
     /// ADR-0208 D15 — four optional knobs, every one with a default, none required.
+    /// #4443: the api process's reclaim tick reads the notifier's variable names with the
+    /// notifier's defaults, and — like the notifier — deletes only on the exact text `1`.
+    #[test]
+    fn the_attachment_reclaim_tick_ships_off_and_reads_the_notifiers_names() {
+        let default = AttachmentReclaimSettings::default();
+        assert!(!default.delete_enabled, "ships off");
+        assert_eq!(default.interval_ms, 600_000);
+        assert_eq!(default.batch, 50);
+
+        assert_eq!(parse_attachment_reclaim_interval_ms(None), 600_000);
+        assert_eq!(
+            parse_attachment_reclaim_interval_ms(Some("5")),
+            10_000,
+            "floor 10 s"
+        );
+        assert_eq!(parse_attachment_reclaim_interval_ms(Some("60000")), 60_000);
+        assert_eq!(
+            parse_attachment_reclaim_interval_ms(Some("soon")),
+            600_000,
+            "a typo keeps the default"
+        );
+        assert_eq!(parse_attachment_reclaim_batch(None), 50);
+        assert_eq!(parse_attachment_reclaim_batch(Some("0")), 1, "at least one");
+        assert_eq!(
+            parse_attachment_reclaim_batch(Some("9999")),
+            500,
+            "at most 500"
+        );
+        assert_eq!(parse_attachment_reclaim_batch(Some("lots")), 50);
+
+        // The one switch: only the exact text `1` (the messaging crate's definition).
+        for near_miss in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some("yes"),
+            Some(" 1"),
+            Some("01"),
+        ] {
+            assert!(
+                !momo_messaging::attachment_reclaim::delete_switch_is_on(near_miss),
+                "{near_miss:?}"
+            );
+        }
+        assert!(momo_messaging::attachment_reclaim::delete_switch_is_on(
+            Some("1")
+        ));
+    }
+
     #[test]
     fn the_scheduler_knobs_default_to_the_adr_and_clamp_to_its_ranges() {
         let default = SchedulerSettings::default();

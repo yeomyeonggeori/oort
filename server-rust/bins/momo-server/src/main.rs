@@ -88,6 +88,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         scheduler_enabled = config.scheduler.enabled,
         scheduler_tick_ms = config.scheduler.tick_ms,
         scheduler_grace_seconds = config.scheduler.grace_seconds,
+        // #4443 (ADR-0151 증보 2 D4): whether the local-volume attachment reclaim deletes. It ships
+        // off (`MOMO_ATTACHMENT_RECLAIM` exactly `1` turns it on). A boolean and numbers only.
+        attachment_reclaim_delete_enabled = config.attachment_reclaim.delete_enabled,
+        attachment_reclaim_interval_ms = config.attachment_reclaim.interval_ms,
+        attachment_reclaim_batch = config.attachment_reclaim.batch,
         "momo-server starting"
     );
     // MOMO-605: a refused entry is silent otherwise, and silence here reads as
@@ -380,6 +385,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         None
     };
+    // #4443 (ADR-0151 증보 2 D4): the attachment reclaim tick of the **local volume**. Only the api
+    // process can open that volume, so this is where it runs — and only on the `local` backend (with a
+    // Google Drive the notifier does it). **It ships off**: it deletes nothing unless
+    // `MOMO_ATTACHMENT_RECLAIM` is exactly `1`; switched off it writes one dry-run line per tick. Its
+    // own two-connection pool as `momo_app` (NOBYPASSRLS), like the scheduler's: it holds a row lock
+    // across an archive call, so it must never compete with requests, and `start` refuses a role
+    // that skips row-level security.
+    let (stop_reclaim, reclaim_stop) = tokio::sync::watch::channel(false);
+    let reclaim_task = if config.drive.backend == momo_drive::LOCAL_BACKEND {
+        let pool = momo_db::connect(&momo_db::PoolConfig {
+            max_connections: 2,
+            ..config.db.clone()
+        })
+        .await?;
+        momo_server::attachment_reclaim::start(
+            std::sync::Arc::clone(&state.drive),
+            std::sync::Arc::clone(&state.attachment_reclaim_touched),
+            pool,
+            config.attachment_reclaim,
+            reclaim_stop,
+        )
+        .await
+    } else {
+        None
+    };
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
@@ -399,6 +429,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The tick finishes the row it is on and stops; what it leaves is still `pending`, and
         // the next process (or another replica) sends it.
         let _ = stop_scheduler.send(true);
+        // The reclaim tick finishes the file it is on and stops; a file whose archive delete has not
+        // answered keeps its row (the savepoint is never committed), and the next process retries.
+        let _ = stop_reclaim.send(true);
     })
     .await?;
     if let Some(task) = scheduler_task {
@@ -407,6 +440,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .is_err()
         {
             tracing::warn!("the scheduled messages tick did not stop within 25 seconds");
+        }
+    }
+    if let Some(task) = reclaim_task {
+        // One archive call is bounded by 30 s (`attachment_reclaim::DELETE_TIMEOUT`).
+        if tokio::time::timeout(std::time::Duration::from_secs(35), task)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the attachment reclaim tick did not stop within 35 seconds");
         }
     }
     Ok(())

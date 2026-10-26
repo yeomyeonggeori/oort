@@ -684,12 +684,17 @@ mod tests {
     /// (with a `row_security = off` backfill and a row-count assertion), the partial index the reclaim
     /// sweep reads, and the notifier's column-level `SELECT` on `attachment`. No new table, no new
     /// definer.
+    ///
+    /// 151 is #4443's audit scrub (ADR-0151 증보 2 D3): it removes the top-level `name` key from the
+    /// `attachment.upload_started` rows written before schema v2 (a file name can be a person's), with
+    /// a `row_security = off` safety line and before/after row counts in a `NOTICE`. Data only: no
+    /// column, no function, no grant — and the only migration that edits audit rows.
     #[test]
-    fn discovers_contiguous_migrations_001_to_150() {
+    fn discovers_contiguous_migrations_001_to_151() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=150).collect();
+        let expected: Vec<i64> = (1..=151).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -697,7 +702,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=150 under {}",
+            "expected contiguous 001..=151 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -705,7 +710,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("150_attachment_reclaim"));
+            .starts_with("151_audit_attachment_name_scrub"));
     }
 
     #[test]

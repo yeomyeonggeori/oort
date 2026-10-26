@@ -985,7 +985,8 @@ impl Notifier {
                         None
                     }
                     Ok(write_pool) => {
-                        let reclaimer = attachment_reclaim::AttachmentReclaimer::from_config(&config);
+                        let reclaimer =
+                            attachment_reclaim::AttachmentReclaimer::from_config(&config);
                         if reclaimer.deletes() {
                             tracing::info!(
                                 batch = config.batch,

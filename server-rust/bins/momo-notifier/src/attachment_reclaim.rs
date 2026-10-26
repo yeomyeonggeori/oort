@@ -66,10 +66,10 @@ use std::time::Duration;
 
 use momo_db::{DbError, PgPool};
 use momo_drive::DriveArchive;
+pub use momo_messaging::attachment_reclaim::AttachmentReclaimStats;
 use momo_messaging::attachment_reclaim::{
-    delete_switch_is_on, dry_run_line, sweep_workspace, tally_workspace,
-    workspaces_with_reclaim_candidates, AttachmentDeleter, AttachmentReclaimCounts, ReclaimTally,
-    MAX_WORKSPACES_PER_TICK, UNBOUND_TTL,
+    delete_switch_is_on, dry_run_line, reclaim_pass, workspaces_with_reclaim_candidates,
+    AttachmentDeleter, ReclaimScope, MAX_WORKSPACES_PER_TICK, UNBOUND_TTL,
 };
 use momo_messaging::avatar_reclaim::{ensure_write_pool_rls_bound, DriveDeleteFuture};
 
@@ -113,19 +113,6 @@ impl AttachmentReclaimConfig {
             drive,
         })
     }
-}
-
-/// What one tick did. Counts only.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub struct AttachmentReclaimStats {
-    /// Workspaces that had at least one file to delete (or, switched off, to count).
-    pub workspaces: usize,
-    pub counts: AttachmentReclaimCounts,
-    /// Per-file or per-workspace transactions that failed in the database.
-    pub db_errors: u32,
-    /// Set on a switched-off tick: the files and bytes the delete would take. `None`
-    /// when the delete ran.
-    pub dry_run: Option<ReclaimTally>,
 }
 
 /// The Google Drive behind [`AttachmentDeleter`]. One per tick, so `unavailable` (the
@@ -209,7 +196,9 @@ impl AttachmentReclaimer {
 
     /// One iteration. `read_pool` is the BYPASSRLS notifier pool (it answers workspace
     /// ids and nothing else); `write_pool` must be RLS-bound or this refuses to run — it
-    /// carries every other statement, the dry-run count included.
+    /// carries every other statement, the dry-run count included. The two steps after the
+    /// workspace list are `momo_messaging::attachment_reclaim::reclaim_pass`, which the api
+    /// process's local-volume runner calls too.
     pub async fn sweep_once(
         &self,
         read_pool: &PgPool,
@@ -219,85 +208,43 @@ impl AttachmentReclaimer {
         let workspaces =
             workspaces_with_reclaim_candidates(read_pool, MAX_WORKSPACES_PER_TICK, UNBOUND_TTL)
                 .await?;
-        let mut stats = AttachmentReclaimStats::default();
 
-        let Some(drive) = &self.drive else {
-            // Switched off: the same predicate, no Drive.
-            let mut total = ReclaimTally::default();
-            for workspace_id in workspaces {
-                match tally_workspace(write_pool, workspace_id, UNBOUND_TTL).await {
-                    Ok(tally) => {
-                        if tally.candidates > 0 {
-                            stats.workspaces += 1;
-                        }
-                        total.add(&tally);
-                    }
-                    Err(_) => {
-                        stats.db_errors += 1;
-                        tracing::warn!(
-                            workspace_id = %workspace_id,
-                            "attachment reclaim dry-run could not count a workspace (database error)"
-                        );
-                    }
-                }
-            }
-            let line = dry_run_line(stats.workspaces, &total);
-            tracing::info!("{line}");
-            stats.dry_run = Some(total);
-            return Ok(stats);
-        };
-
-        let deleter: Arc<dyn AttachmentDeleter> = Arc::new(GoogleDeleter {
-            drive: Arc::clone(drive),
-            unavailable: AtomicBool::new(false),
+        let deleter: Option<Arc<dyn AttachmentDeleter>> = self.drive.as_ref().map(|drive| {
+            Arc::new(GoogleDeleter {
+                drive: Arc::clone(drive),
+                unavailable: AtomicBool::new(false),
+            }) as Arc<dyn AttachmentDeleter>
         });
-        let mut budget = self.batch;
-        // A Drive that keeps failing (timeouts, 5xx) must not hold the tick for
-        // batch x DELETE_TIMEOUT: stop after a few consecutive failures.
-        let mut consecutive_drive_failures = 0u32;
-        for workspace_id in workspaces {
-            if budget <= 0 {
-                break;
-            }
-            match sweep_workspace(
-                write_pool,
-                workspace_id,
-                UNBOUND_TTL,
-                budget,
-                &deleter,
-                &mut consecutive_drive_failures,
-            )
-            .await
-            {
-                Ok(sweep) => {
-                    if sweep.listed > 0 {
-                        stats.workspaces += 1;
-                    }
-                    stats.counts.add(&sweep.counts);
-                    stats.db_errors += sweep.db_errors;
-                    budget -= i64::from(sweep.listed);
-                    if sweep.db_errors > 0 {
-                        // Fixed text: a database error may echo relation/constraint
-                        // names, and nothing here needs them.
-                        tracing::warn!(
-                            workspace_id = %workspace_id,
-                            "attachment reclaim failed for an attachment (database error)"
-                        );
-                    }
-                    if sweep.stop {
-                        break;
-                    }
-                }
-                Err(_) => {
-                    stats.db_errors += 1;
-                    tracing::warn!(
-                        workspace_id = %workspace_id,
-                        "attachment reclaim could not list a workspace (database error)"
-                    );
-                }
-            }
-        }
+        let stats = reclaim_pass(
+            write_pool,
+            workspaces,
+            UNBOUND_TTL,
+            self.batch,
+            deleter.as_ref(),
+        )
+        .await;
 
+        if let Some(tally) = &stats.dry_run {
+            // Switched off: the same predicate, no Drive. One fixed line per tick.
+            tracing::info!(
+                "{}",
+                dry_run_line(
+                    ReclaimScope::AllWorkspaces,
+                    stats.looked_at,
+                    stats.workspaces,
+                    tally
+                )
+            );
+        }
+        if stats.db_errors > 0 {
+            // Fixed text: a database error may echo relation/constraint names, and
+            // nothing here needs them. The workspace ids say where to look.
+            tracing::warn!(
+                db_errors = stats.db_errors,
+                failed_workspaces = ?stats.failed_workspaces,
+                "attachment reclaim failed in the database for some workspaces or attachments"
+            );
+        }
         if stats.counts.reclaimed > 0 || stats.counts.refused > 0 || stats.counts.drive_failed > 0 {
             tracing::info!(
                 workspaces = stats.workspaces,
@@ -346,7 +293,9 @@ mod tests {
         };
         assert!(!parse(None).delete_enabled, "unset is off");
         assert!(parse(Some("1")).delete_enabled);
-        for near_miss in ["0", "", "true", "TRUE", "yes", "on", " 1", "1 ", "01", "enable"] {
+        for near_miss in [
+            "0", "", "true", "TRUE", "yes", "on", " 1", "1 ", "01", "enable",
+        ] {
             assert!(
                 !parse(Some(near_miss)).delete_enabled,
                 "{near_miss:?} must leave the delete off"
@@ -405,7 +354,11 @@ mod tests {
 
         let off = AttachmentReclaimer::from_config_with(&config(None), loader);
         assert!(!off.deletes(), "switched off: looking only");
-        assert_eq!(asked.load(Ordering::SeqCst), 0, "switched off: no archive is asked for");
+        assert_eq!(
+            asked.load(Ordering::SeqCst),
+            0,
+            "switched off: no archive is asked for"
+        );
 
         let near_miss = AttachmentReclaimer::from_config_with(&config(Some("true")), loader);
         assert!(!near_miss.deletes(), "`true` is not `1`");

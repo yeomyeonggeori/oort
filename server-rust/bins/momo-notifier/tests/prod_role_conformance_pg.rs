@@ -534,7 +534,9 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     // loop 2f — attachment reclaim (#4443). It ships off, so the production default is the
     // dry run: the one cross-tenant read of workspace ids (notifier, column-scoped GRANT)
     // plus the count over the full predicate (app) — and it must delete nothing.
-    let dry_run = AttachmentReclaimer::dry_run(10).sweep_once(&notifier, &app).await;
+    let dry_run = AttachmentReclaimer::dry_run(10)
+        .sweep_once(&notifier, &app)
+        .await;
     let dry_run_tally = dry_run.as_ref().ok().and_then(|stats| stats.dry_run);
     report.check(
         "attachment reclaim (dry run, the default)",
@@ -740,6 +742,189 @@ async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attach
             (FREE.to_string(), false, false)
         ],
         "the backfill flagged the file the previous release's schedule holds, and only it"
+    );
+}
+
+/// #4443 (owner 승인 2026-10-26, 조건 C): migration 151 removes the file **name** from the
+/// `attachment.upload_started` audit rows an older release wrote — and from nothing else.
+///
+/// The previous release's rows are seeded below schema 151 (the upgrade harness), the rest of the
+/// migrations run, and the rows are read back. What the proof pins:
+///
+/// * the named rows lose exactly the top-level `name` key — a schema-v1 row, a row from the old
+///   server that wrote no `schema` key at all, and one in **another workspace** (the scrub is
+///   cross-tenant: it runs as the migration role, not as a tenant);
+/// * every other key survives, the `schema` string is not rewritten;
+/// * rows that must not change do not: a v2 row (no name), another action that has a `name` key
+///   (`member.renamed`), another attachment action that happens to carry one, and a `name`
+///   nested below the top level (the scrub is top-level only, which is the v1 shape);
+/// * no row is lost;
+/// * **idempotent**: running the file again changes nothing — not even a row version (`xmin`),
+///   so an UPDATE that rewrites rows without a name is caught too.
+///
+/// Red proof: drop `action = 'attachment.upload_started'` from the UPDATE (`member.renamed` and the
+/// completed row lose their `name`); delete a different key than `name` (the named rows keep it);
+/// narrow the scrub to `detail->>'schema' = '…v1'` (the schema-less old row keeps its name); drop
+/// `detail ? 'name'` (the second run rewrites the v2 row: its `xmin` moves). **Not provable here:**
+/// the `SET LOCAL row_security = off` line — this harness connects as a superuser, which bypasses
+/// RLS anyway (it is a safety net for a migration role that cannot, exactly as in 150).
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_audit_scrub_removes_a_file_name_from_old_upload_rows_and_touches_nothing_else() {
+    const WS: &str = "00000000-0000-4000-8000-0000000000d0";
+    const WS2: &str = "00000000-0000-4000-8000-0000000000d1";
+    const V1: &str = "00000000-0000-4000-8000-0000000000e1";
+    const NO_SCHEMA: &str = "00000000-0000-4000-8000-0000000000e2";
+    const OTHER_WORKSPACE: &str = "00000000-0000-4000-8000-0000000000e3";
+    const V2: &str = "00000000-0000-4000-8000-0000000000e4";
+    const OTHER_ACTION: &str = "00000000-0000-4000-8000-0000000000e5";
+    const COMPLETED: &str = "00000000-0000-4000-8000-0000000000e6";
+    const NESTED: &str = "00000000-0000-4000-8000-0000000000e7";
+    const SECRET: &str = "private-payslip-name-visible-nowhere.pdf";
+
+    let audit = |id: &str, workspace: &str, action: &str, detail: &str| {
+        format!(
+            "INSERT INTO audit_log (id, workspace_id, action, target_type, detail) \
+             VALUES ('{id}', '{workspace}', '{action}', 'attachment', '{detail}'::jsonb)"
+        )
+    };
+    let v1_named = format!(
+        r#"{{"schema":"momo.attachment.upload_started.v1","channel_id":"c","name":"{SECRET}","mime":"text/plain","size_bytes":"1"}}"#
+    );
+    let schemaless_named =
+        r#"{"name":"old-server-name.pdf","mime":"text/plain","size_bytes":"2"}"#.to_string();
+    let v2 = r#"{"schema":"momo.attachment.upload_started.v2","channel_id":"c","mime":"text/plain","size_bytes":"3"}"#;
+    let other_action = r#"{"schema":"momo.member.renamed.v1","name":"keep-this-name"}"#;
+    let completed = r#"{"schema":"momo.attachment.upload_completed.v1","name":"keep-this-too","expected_mime":"text/plain"}"#;
+    let nested = r#"{"schema":"x","file":{"name":"nested-stays"},"mime":"text/plain"}"#;
+    let previous_release = [
+        format!("INSERT INTO workspace (id, slug, name) VALUES ('{WS}', 'scrub-a', 'scrub-a'), ('{WS2}', 'scrub-b', 'scrub-b')"),
+        audit(V1, WS, "attachment.upload_started", &v1_named),
+        audit(NO_SCHEMA, WS, "attachment.upload_started", &schemaless_named),
+        audit(OTHER_WORKSPACE, WS2, "attachment.upload_started", &v1_named),
+        audit(V2, WS, "attachment.upload_started", v2),
+        audit(OTHER_ACTION, WS, "member.renamed", other_action),
+        audit(COMPLETED, WS, "attachment.upload_completed", completed),
+        audit(NESTED, WS, "attachment.upload_started", nested),
+    ];
+    let rows: Vec<&str> = previous_release.iter().map(String::as_str).collect();
+
+    let db = ProdDb::create_upgrading_from_before(151, &rows).await;
+
+    let ids: Vec<Uuid> = [
+        V1,
+        NO_SCHEMA,
+        OTHER_WORKSPACE,
+        V2,
+        OTHER_ACTION,
+        COMPLETED,
+        NESTED,
+    ]
+    .iter()
+    .map(|id| id.parse().expect("uuid"))
+    .collect();
+    let read_state = |pool: PgPool| {
+        let ids = ids.clone();
+        async move {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT id::text, detail::text, xmin::text FROM audit_log \
+                  WHERE id = ANY($1) ORDER BY id",
+            )
+            .bind(ids)
+            .fetch_all(&pool)
+            .await
+            .expect("read the seeded audit rows")
+        }
+    };
+    let detail_is = |id: &'static str, expected: String| {
+        let pool = db.su.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT detail = $2::jsonb FROM audit_log WHERE id = $1::uuid",
+            )
+            .bind(id)
+            .bind(expected)
+            .fetch_one(&pool)
+            .await
+            .expect("compare a detail")
+        }
+    };
+
+    // 1. After the upgrade (migration 151 ran with the rest).
+    let first = read_state(db.su.clone()).await;
+    assert_eq!(first.len(), 7, "no audit row was lost");
+    let v1_scrubbed =
+        r#"{"schema":"momo.attachment.upload_started.v1","channel_id":"c","mime":"text/plain","size_bytes":"1"}"#
+            .to_string();
+    assert!(
+        detail_is(V1, v1_scrubbed.clone()).await,
+        "v1: only `name` is gone, the schema string and the other keys stay"
+    );
+    assert!(
+        detail_is(
+            NO_SCHEMA,
+            r#"{"mime":"text/plain","size_bytes":"2"}"#.into()
+        )
+        .await,
+        "the old server's row carried no schema key and lost its name anyway"
+    );
+    assert!(
+        detail_is(OTHER_WORKSPACE, v1_scrubbed).await,
+        "the scrub is cross-tenant: another workspace's row is cleaned too"
+    );
+    assert!(
+        detail_is(V2, v2.into()).await,
+        "a v2 row (no name) is unchanged"
+    );
+    assert!(
+        detail_is(OTHER_ACTION, other_action.into()).await,
+        "another action's `name` is not this scrub's business"
+    );
+    assert!(
+        detail_is(COMPLETED, completed.into()).await,
+        "another attachment action's row is unchanged"
+    );
+    assert!(
+        detail_is(NESTED, nested.into()).await,
+        "the scrub is top-level only (the v1 shape): a nested `name` stays"
+    );
+    let still_named: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'attachment.upload_started' AND detail ? 'name'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("count the rows still carrying a name");
+    assert_eq!(
+        still_named, 0,
+        "no upload_started row keeps a top-level name"
+    );
+    let secret_anywhere: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE detail::text LIKE '%' || $1 || '%'",
+    )
+    .bind(SECRET)
+    .fetch_one(&db.su)
+    .await
+    .expect("scan every audit detail for the secret name");
+    assert_eq!(
+        secret_anywhere, 0,
+        "the file name appears in no audit detail"
+    );
+
+    // 2. Idempotent: the same file again changes nothing — not even a row version.
+    let sql = std::fs::read_to_string(
+        default_migrations_dir().join("151_audit_attachment_name_scrub.sql"),
+    )
+    .expect("read migration 151");
+    sqlx::raw_sql(&sql)
+        .execute(&db.su)
+        .await
+        .expect("the scrub runs a second time");
+    let second = read_state(db.su.clone()).await;
+    db.finish().await;
+    assert_eq!(
+        first, second,
+        "a second run is a no-op: same details and the same row versions (an UPDATE that touches \
+         a row without a name would move its xmin)"
     );
 }
 
