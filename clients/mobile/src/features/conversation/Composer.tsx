@@ -631,7 +631,8 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 //
 // 접힘은 포커스를 잃고(`onBlur` — 끌어 내리기·`Keyboard.dismiss`·다른 화면으로 감이 모두 이 길이다) 글도 없을
 // 때다. 글이 남아 있으면 포커스를 잃어도 펼친 채다 — **단 하나의 길만 예외다(#4614, owner 10-26)**: 대화 목록을 눌러 입력창을 쉬게 하면(`dockFollow.rest`) 글이 있어도
-// 접힌다. 글은 지우지 않고(초안 유지) 접힌 알약이 첫 줄을 보인다. 그 글에 **한해서**다 — 한 글자라도 바뀌면 다시 이 규칙이다. 펼침은 **입력창이 포커스를 쥔 동안**이지 키보드가 보이는
+// 접힌다. 글은 지우지 않고(초안 유지) 접힌 알약이 첫 줄을 보인다. 쉬는 상태는 **사용자가 다시 닿을 때까지**(포커스)다 — 글이 그 사이에 바뀌어도 이어진다(자판을 내리며 iOS 가 자동 고침·조합 중인 글자를
+// 확정하는 `onChangeText` 가 쉬라는 알림 **뒤에** 도착한다: 시뮬레이터 실측 「Teh」→「The」). 펼침은 **입력창이 포커스를 쥔 동안**이지 키보드가 보이는
 // 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다. 키보드만 내려가고 포커스가 남는 길(앱이 백그라운드로
 // 갔다 옴·하드웨어 키보드)은 일부러 듣지 않는다: 포커스가 곧 「입력 중」이고, iOS 는 돌아올 때 자판을 되살린다.
 //
@@ -1264,11 +1265,13 @@ export function Composer({
   // depend on it — a changing identity there would rebuild the handler on every
   // keystroke, which is exactly the churn this file is careful about.
   const currentTextRef = useRef(text);
-  // 쉬는 초안 (#4614). 대화 목록을 눌러 입력창을 쉬게 했을 때의 **그 글**이다 — 글이 한 글자라도 바뀌면 같지 않으므로 저절로 풀리고(아래 `rested`), 포커스가 오면 `onInputFocus` 가 놓는다.
+  // 쉬는 초안 (#4614). 대화 목록을 눌러 입력창을 쉬게 한 뒤 **사용자가 다시 닿을 때까지** 이어지는 상태다 — 포커스가 오면 `onInputFocus` 가, 방이 바뀌면 `draftKey` 효과가, 글이 비면 아래 효과가 놓는다.
+  // 글이 **같은지는 보지 않는다**: 자판을 내리면 iOS 가 그 자리에서 자동 고침 후보·조합 중인 글자를 확정하고 그 `onChangeText` 는 쉬라는 알림 **뒤에** 온다(시뮬레이터 실측: 「Teh」→「The」가 목록을 누른 뒤
+  // 도착했다 — 글이 같아야 쉬는 것으로 보던 첫 판에서는 그 한 번에 입력창이 다시 펼쳐졌다). 포커스 없이 글을 바꾸는 것은 그 확정뿐이고, 글을 치는 손은 먼저 포커스를 준다.
   // 접힌 알약은 같은 `TextInput` 이 높이만 한 줄로 못 박힌 모양이라 글은 지워지지도 옮겨지지도 않는다.
-  const [restedText, setRestedText] = useState<string | null>(null);
+  const [restedFlag, setRestedFlag] = useState(false);
   // 위의 **동기** 사본 — `onBlur`·목록의 알림이 렌더 없이 읽는다(접히는 움직임을 열지 말지가 같은 핸들러 안에서 정해져야 한다, `collapseWithMotion`).
-  const restedTextRef = useRef<string | null>(null);
+  const restedRef = useRef(false);
   // 끌어 내리기가 읽는 것들 (#4305). 글자 범위를 잡고 있거나(선택 손잡이를 끄는 중) 글이 상한을 넘어 안에서
   // 스크롤되는 중이면 아래로 끄는 손가락은 자판을 내리려는 것이 아니다.
   const selectionRangeRef = useRef(false);
@@ -1377,9 +1380,9 @@ export function Composer({
     draftKeyRef.current = draftKey;
     const restored = draftKey === undefined ? '' : readDraft(draftKey);
     currentTextRef.current = restored;
-    // 다른 방의 초안은 그 방의 규칙으로 돌아온다 — 쉬던 글이 같은 글자로 복원돼도 접힌 채 오지 않는다(#4614).
-    restedTextRef.current = null;
-    setRestedText(null);
+    // 다른 방의 초안은 그 방의 규칙으로 돌아온다 — 쉬던 방의 표식이 따라오지 않는다(#4614).
+    restedRef.current = false;
+    setRestedFlag(false);
     setText(restored);
     setCaret(restored.length);
     setMentionOpen(false);
@@ -1551,8 +1554,8 @@ export function Composer({
     pressingRef.current = false;
     clearPressGrace();
     // 다시 눌러 포커스가 왔다: 쉬던 초안은 같은 자리에서 펼친다(#4614).
-    restedTextRef.current = null;
-    setRestedText(null);
+    restedRef.current = false;
+    setRestedFlag(false);
     setPressing(false);
     setFocused(true);
   }, [setKeyBlocked, clearPressGrace]);
@@ -1729,15 +1732,14 @@ export function Composer({
   // 누르는 중 **또는** 포커스 **또는** 글. 펼침의 첫 프레임은 이 조건이 처음 참이 되는 렌더이고, 아래 효과가 같은 커밋에서 스프링을 건다.
   // 누르는 중(`pressing`)이 있는 까닭은 **시작 시각**이다: 포커스 이벤트는 손을 뗀 뒤 RN `onPress → focus()` · 네이티브 · JS 를 돌아 와서 첫 포커스에서
   // `keyboardWillShow` 보다도 39~120ms 늦게 닿았다(시뮬레이터 실측, #4456). 손이 닿는 순간 시작하면(owner 10-25 「누르는 순간 바로」) 그 지연이 없다.
-  // 글이 있어도 **그 글이 쉬는 초안**이면 펼침의 이유가 아니다(위 `restedText`). 포커스·누름은 여전히 이유다.
-  const rested = restedText !== null && restedText === text;
-  // 글이 달라진 **그 순간** 표식을 걷는다 — 걷지 않으면 글이 바뀌었다가 같은 글자로 돌아왔을 때(포커스 이벤트 없이 글이 바뀌는 길: 초안 복원·붙여넣기) 낡은 표식이 그 글을 다시 쉬는 초안으로
-  // 되살린다(「그 글에 한해서」가 깨진다). 렌더는 위 `rested` 가 이미 맞게 그렸고, 이 효과는 낡은 표식(상태와 동기 사본)만 치운다.
+  // 글이 있어도 입력창이 **쉬는 중**이면 그 글은 펼침의 이유가 아니다(위 `restedFlag`). 포커스·누름은 여전히 이유다. 글이 없으면 쉴 것이 없으니 표식은 글이 있을 때만 읽는다.
+  const rested = restedFlag && text !== '';
+  // 글이 비면(보냄·명령) 표식을 걷는다 — 걷지 않으면 이 방에서 포커스 없이 글이 다시 채워지는 길이 생길 때 낡은 표식이 그 글을 쉬는 초안으로 되살린다. 지금 그런 길은 없어서(글을 치려면 포커스가 먼저다) 방어선이다.
   useEffect(() => {
-    if (restedText === null || restedText === text) return;
-    restedTextRef.current = null;
-    setRestedText(null);
-  }, [restedText, text]);
+    if (!restedFlag || text !== '') return;
+    restedRef.current = false;
+    setRestedFlag(false);
+  }, [restedFlag, text]);
   const expanded = pressing || focused || (text !== '' && !rested);
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
@@ -1760,8 +1762,7 @@ export function Composer({
   // 움직이며 접히는 것은 **펼친 알약이 펼침의 이유(포커스·누름)만 잃고 글이 없거나 글이 쉬는 초안일 때**뿐이다(#4614: 목록을 눌러 접는 길도 같은 스프링이다 — 자판이 내려가기 시작하는 프레임에
   // 알약이 한 번에 줄면 그 위 대화가 튄다). 그 밖에 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
   const collapseWithMotion = useCallback(() => {
-    const restingDraft = restedTextRef.current !== null && restedTextRef.current === currentTextRef.current;
-    if (expandedRef.current && (currentTextRef.current === '' || restingDraft) && !reduceMotion.current) {
+    if (expandedRef.current && (currentTextRef.current === '' || restedRef.current) && !reduceMotion.current) {
       setCollapsing(true);
     }
   }, [reduceMotion]);
@@ -1772,15 +1773,14 @@ export function Composer({
   }, [collapseWithMotion]);
   // 대화 목록을 눌렀다 (#4614, `tapDismiss.ts` → `dockFollow.rest`). 자판은 목록이 이미 내렸다(`Keyboard.dismiss`) — 여기서는 **글이 남은 입력창을 접는 것**만 한다. 글이 없으면 할 일이 없다:
   // 접힘은 포커스를 놓는 `onBlur` 가 그대로 맡는다. 포커스가 아직 안 풀렸어도(네이티브 `onBlur` 가 곧 온다) 지금 이 글을 쉬는 초안으로 적고 `collapsing` 을 같은 배치로 올린다 — 접히는 움직임을
-  // 열지 말지는 `onBlur` 가 읽는 동기 사본(`restedTextRef`)이 정하므로 **순서가 중요하다**: 사본을 먼저 쓰고, 그다음 `collapseWithMotion`, 그다음 상태.
+  // 열지 말지는 `onBlur` 가 읽는 동기 사본(`restedRef`)이 정하므로 **순서가 중요하다**: 사본을 먼저 쓰고, 그다음 `collapseWithMotion`, 그다음 상태.
   useEffect(() => {
     if (dockFollow === null) return undefined;
     return dockFollow.registerRest(() => {
-      const draft = currentTextRef.current;
-      if (draft === '' || restedTextRef.current === draft) return;
-      restedTextRef.current = draft;
+      if (currentTextRef.current === '' || restedRef.current) return;
+      restedRef.current = true;
       collapseWithMotion();
-      setRestedText(draft);
+      setRestedFlag(true);
     });
   }, [dockFollow, collapseWithMotion]);
   useEffect(() => {

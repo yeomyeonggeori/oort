@@ -14,7 +14,8 @@ import {__setNonSecretStore} from '../src/storage/kv';
 // 대화 목록을 눌러 입력창을 쉬게 한다 (#4614) — 입력창 쪽의 몫.
 //
 // 이 규칙은 #4456 이 정한 「글이 남아 있으면 포커스를 잃어도 펼친 채다」를 **한 길에서만** 깬다(owner 10-26): 목록을 눌러 쉬게 하면 글이 있어도 접힌다. 접힌 알약은 같은 입력창이
-// 첫 줄 하나만 보이는 모양이고, 글은 지워지지도 옮겨지지도 않는다. 그 글에 **한해서**다 — 한 글자라도 바뀌면 이 규칙이다. 포커스가 오면(다시 누르면) 같은 자리에서 펼친다.
+// 첫 줄 하나만 보이는 모양이고, 글은 지워지지도 옮겨지지도 않는다. 쉬는 상태는 **사용자가 다시 닿을 때까지**다 — 포커스가 오면(다시 누르면) 같은 자리에서 펼치고, 글이 그 사이에 바뀌어도(자판을
+// 내리며 iOS 가 확정하는 자동 고침·조합: 시뮬레이터 실측 「Teh」→「The」가 쉬라는 알림 **뒤에** 도착해, 글이 같아야 쉬는 걸로 보던 첫 판에서는 입력창이 도로 펼쳐졌다) 이어진다.
 //
 // 목록 쪽(탭 판정 → `Keyboard.dismiss()` → `dockFollow.rest()`)은 `listTapDismiss4614.test.tsx` 다. 여기서는 그 알림(`bridge.rest()`)을 직접 보낸다. 실제 길에서는 자판을 내리는
 // `Keyboard.dismiss()` 가 먼저 불리고 네이티브 `onBlur` 가 JS 에 닿는 것이 알림보다 **앞일 수도 뒤일 수도 있다**(행 탭은 손 뗌에서 이미 내렸다) — 두 순서를 다 잰다.
@@ -188,33 +189,46 @@ describe('쉬라는 알림 — 글이 있어도 접힌다 (#4456 의 「글이 �
   });
 });
 
-describe('그 글에 한해서다 · 다시 누르면 같은 자리에서 펼친다', () => {
-  it('쉰 뒤 글이 한 글자라도 바뀌면 다시 펼침이다 — 쉬는 상태가 다른 글로 새지 않는다', () => {
+describe('쉬는 상태는 사용자가 다시 닿을 때까지다 · 다시 누르면 같은 자리에서 펼친다', () => {
+  // 자판을 내리면 iOS 는 대기 중인 자동 고침 후보·조합 중인 글자를 **그 자리에서 확정**하고, 그 `onChangeText` 는 쉬라는 알림 뒤에 온다(시뮬레이터 실측). 두 도착 순서를 다 잰다.
+  it('쉬는 중에 글이 바뀌어도(자동 고침 확정이 알림 뒤에 도착) 접힌 채다 — 도로 펼쳐지지 않는다', () => {
     mount();
-    typeAndSettle();
+    typeAndSettle('Teh');
     rest();
+    fireEvent.changeText(input(), 'The'); // 포커스 이벤트 없이 글이 바뀐다: 블러보다 먼저 도착한 확정
     blur();
     settle();
-    expect(hasTools()).toBe(false); // 전제
-    fireEvent.changeText(input(), '쓰던 글!');
-    expect(hasTools()).toBe(true);
-    expect(inputStyle().height).toBeUndefined();
-    expect(input().props.scrollEnabled).not.toBe(false);
+    expect(hasTools()).toBe(false);
+    expect(input().props.value).toBe('The');
+    expect(inputStyle().height).toBe(firstLineBox());
+    expect(input().props.scrollEnabled).toBe(false);
   });
 
-  it('쉰 뒤 글이 바뀌었다가 같은 글자로 돌아와도 다시 쉬는 초안이 되지 않는다 — 「그 글」의 표식이 낡은 채 남지 않는다', () => {
+  it('확정이 블러 **뒤에** 도착해도 같다', () => {
     mount();
-    typeAndSettle();
+    typeAndSettle('Teh');
     rest();
     blur();
     settle();
-    expect(hasTools()).toBe(false); // 전제: 쉬는 중
-    fireEvent.changeText(input(), '쓰던 글!'); // 포커스 이벤트 없이 글이 바뀐다(초안 복원·붙여넣기 같은 길)
+    expect(hasTools()).toBe(false); // 전제: 이미 접혔다
+    fireEvent.changeText(input(), 'The'); // 블러 뒤에 도착한 확정
     settle();
-    expect(hasTools()).toBe(true);
-    fireEvent.changeText(input(), '쓰던 글'); // 같은 글자로 돌아왔다
+    expect(hasTools()).toBe(false);
+    expect(input().props.value).toBe('The');
+    expect(inputStyle().height).toBe(firstLineBox());
+  });
+
+  it('글이 비면(쉬는 입력창에서 보냄) 쉬는 상태가 풀린다 — 포커스 없이 글이 다시 채워져도 낡은 표식이 접힌 채 세우지 않는다', () => {
+    mount();
+    typeAndSettle('보낼 글');
+    rest();
+    blur();
     settle();
-    // 낡은 표식이 남아 있으면 이 글은 쉬는 초안으로 되살아나 접힌 높이·스크롤 잠금으로 선다.
+    fireEvent.press(screen.getByTestId('composer-send')); // 글이 빈다
+    settle();
+    expect(input().props.value).toBe('');
+    fireEvent.changeText(input(), '새 글'); // 포커스 없이 다시 채워진다
+    settle();
     expect(hasTools()).toBe(true);
     expect(inputStyle().height).toBeUndefined();
     expect(input().props.scrollEnabled).not.toBe(false);
