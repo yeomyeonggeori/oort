@@ -379,14 +379,17 @@ import type {
 // =============================================================================
 LogBox.ignoreAllLogs(true);
 
-// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 「나」·동료는 실제 팀원 이름이라 하네스에서 가상 인물로
-// 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은 변하지 않는다.
-const VIRTUAL_PEOPLE: Record<string, {displayName: string; handle: string}> = {
-  seongjae: {displayName: '이도현', handle: 'dohyun'},
-  dayeon: {displayName: '박서연', handle: 'seoyeon'},
-};
+// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 첫 두 사람(「나」와 첫 동료)은 실제 팀원 이름이라 하네스에서
+// 가상 인물로 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은
+// 변하지 않는다. 이름으로 짚지 않고 순서로 짚는다(`SELF` 도 「첫 사람」이다): 그래야 실명이 이 파일의 새 줄에 다시 적히지 않는다.
+const VIRTUAL_PEOPLE = [
+  {displayName: '이도현', handle: 'dohyun'},
+  {displayName: '박서연', handle: 'seoyeon'},
+];
+let virtualSeen = 0;
 const ROSTER = makeStressRoster().map(member => {
-  const virtual = VIRTUAL_PEOPLE[member.handle];
+  if (member.kind !== 'human') return member;
+  const virtual = VIRTUAL_PEOPLE[virtualSeen++];
   return virtual ? {...member, ...virtual} : member;
 });
 const DIRECTORY = makeDirectory(ROSTER);
