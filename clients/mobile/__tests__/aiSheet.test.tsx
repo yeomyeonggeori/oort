@@ -268,7 +268,8 @@ describe('구획 노출 조건', () => {
     expect(screen.queryByTestId('ai-section-tools')).toBeNull();
     expect(screen.queryByTestId('ai-row-ask-mac')).toBeNull();
     expect(screen.queryByTestId('ai-section-personal')).toBeNull();
-    // 맥 칩의 글자(#4458: 행의 오른쪽 값)는 어느 줄에도 새지 않는다.
+    // 맥 칩은 어느 줄에도 새지 않는다(그려진 칩도, 그 글자도).
+    expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
     expect(screen.queryByText(/내 맥 (켜짐|꺼짐)/)).toBeNull();
   });
 
@@ -292,8 +293,9 @@ describe('구획 노출 조건', () => {
     await waitFor(() => expect(screen.getByTestId('ai-section-personal')).toBeTruthy());
     const row = screen.getByTestId(`ai-row-personal-${MINE}`);
     expect(within(row).getByText('내 Claude Code')).toBeTruthy();
-    // 「개인」 표식은 행의 오른쪽 값에 선다(#4458: 공용 행에는 오른쪽 임의 노드 자리가 없다). 맥이 등록돼 있지 않으면 표식만이다.
-    expect(within(row).getByText('개인')).toBeTruthy();
+    // 「개인」 표식은 행의 오른쪽 임의 노드(`ListRow trailing`)다 — 행 **안에** 서고 맥이 등록돼 있지 않으면 표식만이다.
+    expect(within(row).getByTestId(`ai-personal-${MINE}`)).toHaveTextContent('개인');
+    expect(screen.queryByTestId(`ai-personal-mac-${MINE}`)).toBeNull();
     expect(within(row).getByText('Claude Code · 나만 쓸 수 있어요.')).toBeTruthy();
   });
 });
@@ -307,13 +309,33 @@ describe('맥 칩', () => {
     await renderReady();
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
-    // 칩의 글자는 행의 오른쪽 값이다(#4458): 내 도구 줄은 칩만, 개인 에이전트 줄은 「개인 · 칩」.
-    await waitFor(() =>
-      expect(within(screen.getByTestId('ai-row-ask-mac')).getByText('내 맥 켜짐')).toBeTruthy(),
+    // 칩은 두 줄의 오른쪽 임의 노드이고(#4458 `ListRow trailing`) 글자가 켜짐을 말한다 — 색만으로 말하지 않는다.
+    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
+    expect(screen.getByTestId('ai-mac-chip')).toHaveTextContent('내 맥 켜짐');
+    expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 켜짐');
+    expect(within(screen.getByTestId('ai-row-ask-mac')).getByTestId('ai-mac-chip')).toBeTruthy();
+    // **그려진** 모양: 켜짐 칩은 채움이 있고(transparent 가 아니다) 점이 있다. 꺼짐 칩은 아래 시험이 채움 없음을 잰다.
+    const on = StyleSheet.flatten(screen.getByTestId('ai-mac-chip').props.style);
+    expect(on.backgroundColor).not.toBe('transparent');
+    expect(on.borderRadius).toBe(999);
+  });
+
+  it('칩의 글자는 행의 보조기술 이름에도 들어 있다 — `trailing` 은 기본 이름에 안 들어가므로 이름에 직접 잇는다', async () => {
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [host(true)];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
+    // 접었던 때(칩 글자 = 오른쪽 값)의 낭독 「이름, 보조 줄, 값」을 잃지 않는다. 눌리는 행의 이름이 칩 글자를 든다.
+    expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toBe(
+      '내 맥에 물어보기, 내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요., 내 맥 켜짐',
     );
-    expect(
-      within(screen.getByTestId(`ai-row-personal-${MINE}`)).getByText('개인 · 내 맥 켜짐'),
-    ).toBeTruthy();
+    expect(screen.getByTestId(`ai-row-personal-${MINE}`).props.accessibilityLabel).toBe(
+      '내 Claude Code, Claude Code · 나만 쓸 수 있어요., 개인, 내 맥 켜짐',
+    );
   });
 
   it('맥이 꺼져 있으면 「내 맥 꺼짐」이다 — 줄은 그대로 눌린다 (T6b가 꺼짐을 안내한다)', async () => {
@@ -324,12 +346,14 @@ describe('맥 칩', () => {
     await renderReady();
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
-    await waitFor(() =>
-      expect(within(screen.getByTestId('ai-row-ask-mac')).getByText('내 맥 꺼짐')).toBeTruthy(),
+    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
+    expect(screen.getByTestId('ai-mac-chip')).toHaveTextContent('내 맥 꺼짐');
+    expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 꺼짐');
+    // **그려진** 모양: 꺼짐 칩은 채움이 없다(켜짐과 달리 transparent) — 글자만이 아니라 모양도 다르다.
+    expect(StyleSheet.flatten(screen.getByTestId('ai-mac-chip').props.style).backgroundColor).toBe(
+      'transparent',
     );
-    expect(
-      within(screen.getByTestId(`ai-row-personal-${MINE}`)).getByText('개인 · 내 맥 꺼짐'),
-    ).toBeTruthy();
+    expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toMatch(/, 내 맥 꺼짐$/);
     fireEvent.press(screen.getByTestId('ai-row-ask-mac'));
     await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
   });
@@ -341,7 +365,12 @@ describe('맥 칩', () => {
     await renderReady();
     await openAi();
     await waitFor(() => expect(screen.getByTestId('ai-row-ask-mac')).toBeTruthy());
+    expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
     expect(within(screen.getByTestId('ai-row-ask-mac')).queryByText(/내 맥 (켜짐|꺼짐)/)).toBeNull();
+    // 칩이 없으면 이름에도 칩 글자가 없다(끝에 쉼표가 남지 않는다).
+    expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toBe(
+      '내 맥에 물어보기, 내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요.',
+    );
   });
 });
 
@@ -480,7 +509,7 @@ describe('행 선택', () => {
 // ---- 공용 시트로 (#4458) ------------------------------------------------------------------
 
 describe('AI 시트 — 공용 부품', () => {
-  it('구획은 묶음 카드, 줄은 셰브론 행이다 — 옛 GroupSection·GroupRow·오른쪽 임의 칩은 없다', async () => {
+  it('구획은 묶음 카드, 줄은 셰브론 행이다 — 옛 GroupSection·GroupRow 는 없고 칩은 행의 오른쪽 노드로 선다', async () => {
     wirePort();
     rosterWire = [...HUMANS, personalAgent(MINE)];
     hostsWire = [host(true)];

@@ -28,7 +28,7 @@ import {GroupRow, GroupSection, NoticeBlock, OutlineButton} from '../src/design/
 import {GroupCard} from '../src/design/sheetParts';
 import {DelegateWorkSheet, type DelegatePrefill} from '../src/shell/DelegateWorkSheet';
 import {Field, TextArea} from '../src/shell/sheetForm';
-import {HOME_ICONS} from '../src/design/icons';
+import {HOME_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {lightPalette} from '../src/design/tokens';
 import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
@@ -616,17 +616,22 @@ describe('후보 판정(순수)', () => {
 // ---- 공용 시트로 (#4458) ------------------------------------------------------------------
 
 describe('작업 맡기기 — 공용 부품 (#4458)', () => {
-  it('A 단계: 머리의 왼쪽 ✓ 가 「다음」(고르기 전 회색), 에이전트는 라디오 행이다 — 옛 글자 「다음」·GroupRow 는 없다', async () => {
+  it('A 단계: 머리에는 ✓ 가 없고 X 뿐이다 — 「다음」은 시트 바닥의 기본 단추(고르기 전 비활성), 에이전트는 라디오 행이다', async () => {
     // 앞 시험이 마지막에 쓴 곳을 적어 두면 A 에 미리 찍힌다 — 이 시험은 아무것도 고르지 않은 채로 시작한다.
     nonSecretStore().remove(NON_SECRET_KEYS.delegateLastTarget);
     installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
     mount({});
     await screen.findByTestId('delegate-agent-grokbot');
+    // 머리: **그려진** 글리프로 본다 — 오른쪽 X 하나, ✓ 는 없다(✓ 는 마지막 확정에만 쓴다).
+    expect(imageSources(screen.getByTestId('delegate-header'))).toEqual([SHEET_ICONS.close]);
+    // 「다음」: 글자가 보이는 기본 단추이고(✓ 글리프가 아니다), 스크롤 몸 밖 시트 바닥(푸터)에 선다.
     const next = screen.getByTestId('delegate-next');
     expect(next.props.accessibilityRole).toBe('button');
-    expect(next.props.accessibilityLabel).toBe('다음');
+    expect(within(next).getByText('다음')).toBeTruthy();
+    expect(imageSources(next)).toEqual([]);
     expect(next.props.accessibilityState).toMatchObject({disabled: true});
-    expect(screen.queryByText('다음')).toBeNull();
+    expect(within(screen.getByTestId('delegate-footer')).getByTestId('delegate-next')).toBeTruthy();
+    expect(within(screen.getByTestId('delegate-step-a')).queryByTestId('delegate-next')).toBeNull();
     expect(screen.UNSAFE_queryAllByType(GroupSection)).toHaveLength(0);
     expect(screen.UNSAFE_queryAllByType(GroupRow)).toHaveLength(0);
     // **그려진** 상태로 본다: 아직 고르지 않았으니 selected 도 ✓ 도 없다 → 누르면 둘이 함께 선다.
@@ -637,6 +642,30 @@ describe('작업 맡기기 — 공용 부품 (#4458)', () => {
     expect(radioRows(within(screen.getByTestId('delegate-agents')))).toEqual([
       {testID: 'delegate-agent-grokbot', selected: true, checks: 1},
     ]);
+    expect(screen.getByTestId('delegate-next').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('✓ 는 마지막 확정에만 선다: B 단계 머리의 ✓ 는 「맡기기」이고, 「다음」 단추는 B 에 없다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({});
+    fireEvent.press(await screen.findByTestId('delegate-agent-grokbot'));
+    fireEvent.press(screen.getByTestId('delegate-next'));
+    await screen.findByTestId('delegate-step-b');
+    // 머리: 왼쪽 ✓ 와 오른쪽 X — 두 글리프가 **그려진다**.
+    expect(imageSources(screen.getByTestId('delegate-header'))).toEqual([
+      SHEET_ICONS.check,
+      SHEET_ICONS.close,
+    ]);
+    expect(screen.getByTestId('delegate-send').props.accessibilityLabel).toBe('맡기기');
+    // 바닥 단추는 A 의 것이다 — B 에는 「다음」도, 푸터도 없다.
+    expect(screen.queryByTestId('delegate-next')).toBeNull();
+    expect(screen.queryByTestId('delegate-footer')).toBeNull();
+    expect(screen.queryByText('다음')).toBeNull();
+    // 「바꾸기」로 A 로 돌아가면 다시 ✓ 가 없고 「다음」 단추가 선다(고른 곳은 그대로라 눌린다).
+    fireEvent.press(screen.getByTestId('delegate-change-target'));
+    expect(imageSources(screen.getByTestId('delegate-header'))).toEqual([SHEET_ICONS.close]);
     expect(screen.getByTestId('delegate-next').props.accessibilityState).toMatchObject({
       disabled: false,
     });
@@ -661,7 +690,17 @@ describe('작업 맡기기 — 공용 부품 (#4458)', () => {
     // 펼침 행: 누르면 저장소·브랜치 입력이 선다 — 옛 글자 단추가 아니다.
     expect(imageSources(screen.getByTestId('delegate-more'))).toEqual([HOME_ICONS.down]);
     expect(screen.queryByTestId('delegate-repo')).toBeNull();
+    // 펼침 상태는 보조기술이 읽는 `accessibilityState.expanded` 로 말한다(옛 단추가 그랬다) — 접힘 false → 펼침 true.
+    expect(screen.getByTestId('delegate-more').props.accessibilityState).toMatchObject({expanded: false});
+    const arrow = () =>
+      StyleSheet.flatten(
+        screen.getByTestId('delegate-more-expand', {includeHiddenElements: true}).props.style,
+      );
+    expect(arrow().transform).toBeUndefined();
     fireEvent.press(screen.getByTestId('delegate-more'));
+    expect(screen.getByTestId('delegate-more').props.accessibilityState).toMatchObject({expanded: true});
+    // 눈에도 말한다: 펼치면 ⌄ 가 뒤집힌다(⌃).
+    expect(arrow().transform).toEqual([{rotate: '180deg'}]);
     expect(screen.getByTestId('delegate-repo')).toBeTruthy();
     expect(screen.getByTestId('delegate-branch')).toBeTruthy();
     expect(screen.UNSAFE_getAllByType(Field)).toHaveLength(3);

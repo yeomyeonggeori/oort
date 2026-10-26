@@ -225,6 +225,8 @@ function SheetBody({
                 title={pr.number}
                 detail={pr.repo}
                 accessory="chevron"
+                // 이 앱 밖(브라우저)으로 나가는 행이라 「버튼」이 아니라 「링크」로 읽힌다(옛 줄과 같다).
+                accessibilityRole="link"
                 accessibilityLabel={`${pr.number}, ${pr.repo}, 브라우저에서 열기`}
                 onPress={() => void Linking.openURL(pr.href)}
                 testID="team-detail-pr"

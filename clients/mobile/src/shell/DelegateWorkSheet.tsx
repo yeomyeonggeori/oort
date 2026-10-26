@@ -20,13 +20,26 @@ import {
   type TextInput,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {FailureBanner, LoadingState, Sentence} from '../design/atoms';
+import {
+  FailureBanner,
+  LoadingState,
+  PrimaryButton,
+  Sentence,
+} from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
 import {SheetHeader, type SheetConfirm} from '../design/SheetChrome';
 import {GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
-import {font, line, SHEET, space, type Palette} from '../design/tokens';
+import {
+  font,
+  line,
+  SAFE_GUTTER,
+  SHEET,
+  space,
+  type Palette,
+} from '../design/tokens';
 import {
   delegateAgentFor,
   delegateAgents,
@@ -91,13 +104,13 @@ import {
 //
 // ## 공용 시트로 (#4458)
 //
-// 머리는 `SheetHeader`: **왼쪽 ✓**(A 단계는 「다음」, B 단계는 「맡기기」 — 보낼 수 없는 동안 회색·눌리지 않음), **오른쪽 원형
-// X = 닫기**. 옛 오른쪽 글자 단추(「다음」「맡기기」)와 글자 「더 보기」·외곽선 「바꾸기」 단추는 없다. 몸은 `SheetScroll` 의
-// 묶음 카드다: 누구에게·어느 채널은 라벨 + 라디오 행(`ChoiceRow`), 「보낼 곳」은 카드(「바꾸기」는 그 카드의 **행**), 제목·
-// 저장소·브랜치는 입력 알약, 설명은 여러 줄 입력 상자, 「저장소·브랜치」는 펼침 행이다. A 단계의 「다음」을 ✓ 로 둔 것은
-// ✓ 의 뜻(확정)을 한 칸 넓힌 것이다 — 머리에는 오른쪽 칸 하나가 X 에 묶여 있어 「다음」이 설 자리가 왼쪽뿐이다(design-review 가
-// 짚을 수 있다). 입력이 넷까지 서고 두 단계라 규칙상 페이지 후보다(`phone-sheets.md` §1·§5) — 이 이슈는 시트로 둔 채
-// 머리·부품만 옮겼고 페이지 전환은 별도 이슈다.
+// 머리는 `SheetHeader`: **오른쪽 원형 X = 닫기**, 그리고 **B 단계에만 왼쪽 ✓ = 「맡기기」**(보낼 수 없는 동안 회색·눌리지 않음).
+// ✓ 는 **마지막 확정에만** 쓴다 — 중간 단계인 A 의 「다음」은 머리가 아니라 **시트 아래의 기본 단추**(`PrimaryButton`)다
+// (2026-10-26 planner 결정: 1단계가 ✓ 의 뜻을 「다음」까지 넓혔던 것을 되돌렸다). 옛 오른쪽 글자 단추(「다음」「맡기기」)와 글자
+// 「더 보기」·외곽선 「바꾸기」 단추는 없다. 몸은 `SheetScroll` 의 묶음 카드다: 누구에게·어느 채널은 라벨 + 라디오 행
+// (`ChoiceRow`), 「보낼 곳」은 카드(「바꾸기」는 그 카드의 **행**), 제목·저장소·브랜치는 입력 알약, 설명은 여러 줄 입력 상자,
+// 「저장소·브랜치」는 펼침 행(`expanded` 상태를 보조기술에 말한다)이다. 입력이 넷까지 서고 두 단계라 규칙상 페이지 후보다
+// (`phone-sheets.md` §1·§5) — 이 이슈는 시트로 둔 채 머리·부품만 옮겼고 페이지 전환은 별도 이슈(#4611)다.
 // =============================================================================
 
 type Step = 'A' | 'B';
@@ -202,6 +215,7 @@ function SheetBody({
   const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
+  const insets = useSafeAreaInsets();
 
   const directoryQuery = useDirectory(workspaceId);
   const channelsQuery = useChannels(workspaceId);
@@ -504,6 +518,7 @@ function SheetBody({
       onClose={slideClose}
       closeTestID="delegate-close"
       confirm={confirm}
+      testID="delegate-header"
     />
   );
 
@@ -541,14 +556,8 @@ function SheetBody({
   if (effectiveStep === 'A') {
     return (
       <>
-        {header({
-          label: '다음',
-          disabled: !canGoToB,
-          onPress: () => {
-            if (canGoToB) setStep('B');
-          },
-          testID: 'delegate-next',
-        })}
+        {/* 머리에는 확정 ✓ 가 없다 — 「다음」은 중간 단계라 시트 아래의 기본 단추다(아래). */}
+        {header()}
         <SheetScroll testID="delegate-step-a">
           <Sentence style={styles.intro}>
             에이전트에게 일을 맡기면 작업 탭에서 진행을 볼 수 있어요.
@@ -650,6 +659,22 @@ function SheetBody({
             />
           ) : null}
         </SheetScroll>
+        {/* 스크롤 밖 시트 바닥에 붙는 기본 단추. 고를 수 없는 동안은 회색·눌리지 않는다(`canGoToB`). */}
+        <View
+          style={[
+            styles.footer,
+            {paddingBottom: Math.max(insets.bottom, space.lg)},
+          ]}
+          testID="delegate-footer">
+          <PrimaryButton
+            label="다음"
+            disabled={!canGoToB}
+            onPress={() => {
+              if (canGoToB) setStep('B');
+            }}
+            testID="delegate-next"
+          />
+        </View>
       </>
     );
   }
@@ -790,6 +815,7 @@ function SheetBody({
           <ListRow
             title={showMore ? '저장소·브랜치 접기' : '저장소·브랜치 더 보기'}
             accessory="expand"
+            expanded={showMore}
             onPress={() => setShowMore(current => !current)}
             testID="delegate-more"
           />
@@ -871,6 +897,8 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.label,
       color: color.textMuted,
     },
+    // A 단계 바닥의 「다음」 단추 — 스크롤 밖, 몸과 같은 가로 거터.
+    footer: {paddingHorizontal: SAFE_GUTTER, paddingTop: space.sm},
     // 입력 한 칸의 묶음: 라벨 · 입력 · 실패.
     field: {gap: space.sm},
     // 「보낼 곳」 카드의 안쪽(행 「바꾸기」가 그 아래 같은 카드에 선다).

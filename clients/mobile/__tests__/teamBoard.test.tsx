@@ -469,6 +469,10 @@ describe('읽기 전용 상세 시트', () => {
     for (const id of ['team-detail-pr', 'team-detail-open-channel']) {
       expect([id, imageSources(screen.getByTestId(id))]).toEqual([id, [SHEET_ICONS.chevron]]);
     }
+    // 이 앱 **밖**(브라우저)으로 나가는 PR 행은 「링크」로 읽히고(옛 줄과 같다), 앱 안 채널로 가는 행은 「버튼」이다.
+    expect(screen.getByTestId('team-detail-pr').props.accessibilityRole).toBe('link');
+    expect(screen.getByTestId('team-detail-pr').props.accessibilityLabel).toMatch(/, 브라우저에서 열기$/);
+    expect(screen.getByTestId('team-detail-open-channel').props.accessibilityRole).toBe('button');
     expect(screen.queryByText('닫기')).toBeNull();
     // 단계 셋 → 구분선 둘이 한 카드 안에 있다.
     expect(within(screen.getByTestId('team-detail-stages')).getAllByTestId('group-divider')).toHaveLength(2);

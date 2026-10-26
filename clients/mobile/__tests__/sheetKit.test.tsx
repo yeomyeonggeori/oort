@@ -622,6 +622,137 @@ describe('행', () => {
   });
 });
 
+/**
+ * 한 요소의 **그려진** 직계 자식 순서 — 각 자식의 `testID`, 없으면 호스트 종류(`View`·`Text`·`Image`). 값·표식·셰브론이 가로로
+ * 어떤 순서로 서는지(DOM 순서 = 그려지는 순서)를 jsdom 없이 잰다.
+ */
+interface RenderedNode {
+  type: string;
+  props: Record<string, unknown>;
+  children: Array<RenderedNode | string> | null;
+}
+
+function drawnChildren(testID: string): string[] {
+  const find = (node: unknown): RenderedNode | null => {
+    if (node === null || typeof node === 'string') return null;
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const hit = find(item);
+        if (hit !== null) return hit;
+      }
+      return null;
+    }
+    const json = node as RenderedNode;
+    if (json.props?.testID === testID) return json;
+    for (const child of json.children ?? []) {
+      const hit = find(child);
+      if (hit !== null) return hit;
+    }
+    return null;
+  };
+  const host = find(screen.toJSON());
+  return (host?.children ?? []).map((child: RenderedNode | string) =>
+    typeof child === 'string' ? child : String(child.props.testID ?? child.type),
+  );
+}
+
+describe('행 — 오른쪽 임의 노드·역할·펼침 상태 (#4458)', () => {
+  it('trailing 은 값 뒤·셰브론 앞에 **그려지고**, 없으면 그 자리도 없다', async () => {
+    const view = await mount(
+      <ListRow
+        title="내 맥"
+        detail="켜져 있어요"
+        value="값"
+        accessory="chevron"
+        trailing={<Text testID="chip">내 맥 켜짐</Text>}
+        onPress={() => {}}
+        testID="row"
+      />,
+    );
+    expect(within(screen.getByTestId('row')).getByTestId('chip')).toHaveTextContent('내 맥 켜짐');
+    // 이름 칸 → 값 → 표식 → 셰브론 순서로 서야 한다(표식이 셰브론 뒤로 가면 행의 오른쪽 끝이 어긋난다).
+    expect(drawnChildren('row')).toEqual(['View', 'Text', 'chip', 'Image']);
+    view.rerender(
+      <FixedScheme scheme="light">
+        <ListRow title="내 맥" detail="켜져 있어요" value="값" accessory="chevron" onPress={() => {}} testID="row" />
+      </FixedScheme>,
+    );
+    expect(screen.queryByTestId('chip')).toBeNull();
+    expect(drawnChildren('row')).toEqual(['View', 'Text', 'Image']);
+  });
+
+  it('trailing 은 눌리지 않는 행에도 서고, 기본 보조기술 이름(제목·보조 줄·값)에는 들어가지 않는다 — 이름은 호출자가 직접 준다', async () => {
+    await mount(
+      <>
+        <ListRow
+          title="내 맥"
+          detail="켜져 있어요"
+          value="값"
+          trailing={<Text testID="chip-a">내 맥 켜짐</Text>}
+          onPress={() => {}}
+          testID="press"
+        />
+        <ListRow
+          title="내 맥"
+          trailing={<Text testID="chip-b">내 맥 켜짐</Text>}
+          accessibilityLabel="내 맥, 내 맥 켜짐"
+          onPress={() => {}}
+          testID="named"
+        />
+        <ListRow title="안내" trailing={<Text testID="chip-c">표식</Text>} testID="inert" />
+      </>,
+    );
+    expect(screen.getByTestId('press').props.accessibilityLabel).toBe('내 맥, 켜져 있어요, 값');
+    expect(screen.getByTestId('named').props.accessibilityLabel).toBe('내 맥, 내 맥 켜짐');
+    // 눌리지 않는 행에도 그려진다.
+    expect(within(screen.getByTestId('inert')).getByTestId('chip-c')).toHaveTextContent('표식');
+  });
+
+  it('역할: 눌리는 행은 기본이 button 이고, 밖으로 나가는 행은 link 로 읽힌다 — 토글 행은 늘 switch', async () => {
+    await mount(
+      <>
+        <ListRow title="기본" onPress={() => {}} testID="plain" />
+        <ListRow title="링크" accessibilityRole="link" onPress={() => {}} testID="link" />
+        <ListRow
+          title="토글"
+          accessory="toggle"
+          accessibilityRole="link"
+          toggle={{value: false, onValueChange: () => {}}}
+          testID="toggle"
+        />
+      </>,
+    );
+    expect(screen.getByTestId('plain').props.accessibilityRole).toBe('button');
+    expect(screen.getByTestId('link').props.accessibilityRole).toBe('link');
+    expect(screen.getByTestId('toggle').props.accessibilityRole).toBe('switch');
+  });
+
+  it('펼침 상태: 주지 않으면 상태에 넣지 않고, 주면 보조기술에 말하며, 펼치면 ⌄ 가 뒤집힌다', async () => {
+    const row = (expanded?: boolean) => (
+      <FixedScheme scheme="light">
+        <ListRow
+          title="더 보기"
+          accessory="expand"
+          expanded={expanded}
+          onPress={() => {}}
+          testID="row"
+        />
+      </FixedScheme>
+    );
+    const view = await mount(row());
+    // 펼침이 아닌 행(주지 않음)은 `expanded` 를 말하지 않는다 — `false`(접힘)도 말이 되므로 둘은 다르다
+    // (RN 의 `Pressable` 은 키를 늘 싣고 값만 `undefined` 로 둔다).
+    expect(screen.getByTestId('row').props.accessibilityState.expanded).toBeUndefined();
+    expect(flat('row-expand').transform).toBeUndefined();
+    view.rerender(row(false));
+    expect(screen.getByTestId('row').props.accessibilityState.expanded).toBe(false);
+    expect(flat('row-expand').transform).toBeUndefined();
+    view.rerender(row(true));
+    expect(screen.getByTestId('row').props.accessibilityState.expanded).toBe(true);
+    expect(flat('row-expand').transform).toEqual([{rotate: '180deg'}]);
+  });
+});
+
 describe('입력 알약', () => {
   it('알약 반경 + 입력 그릇의 3:1 외곽선(textFaint)이고 이름은 필수다', async () => {
     const onChangeText = jest.fn();

@@ -98,6 +98,18 @@ const afterClose = usePageSheetAction();
 
 낡은 `atoms.tsx` 의 `GroupSection`·`GroupRow`(반경 8·테두리 카드)는 프로필 시트가 아직 쓴다. 새 화면은 위 가족만 쓴다.
 
+### `ListRow` 의 오른쪽 노드·역할·펼침 (#4458 2단계)
+
+1단계가 부품에 자리가 없어 접거나 잃었던 세 가지를 `ListRow` 가 갖는다. `__tests__/sheetKit.test.tsx` 의 「행 — 오른쪽 임의 노드·역할·펼침 상태」가 그려진 순서·상태로 잰다.
+
+| 슬롯 | 뜻 | 규칙 |
+|---|---|---|
+| `trailing` | 값(`value`) 뒤·셰브론 앞에 서는 임의 노드 — 칩·배지 같은 **표식** | **기본 보조기술 이름(제목·보조 줄·값)에 들어가지 않는다.** 표식의 글자를 읽혀야 하면 호출자가 `accessibilityLabel` 에 잇는다(AI 시트의 「개인」·「내 맥 켜짐」). 표식은 색만으로 말하지 않는다 — 글자가 상태를 말한다. 눌리지 않는 행에도 선다. 글자뿐이면 `value` 를 쓴다 |
+| `accessibilityRole` | 눌리는 행의 역할(기본 `button`) | 이 앱 **밖**(브라우저)으로 나가는 행은 `link` 다 — 세션 상세의 PR 행. 토글 행은 늘 `switch` 이고 이 값을 듣지 않는다 |
+| `expanded` | 제자리 펼침 행(`accessory="expand"`)이 보조기술에 말하는 상태 | 주지 않으면 상태에 넣지 않고(`false`=접힘과 다르다), 펼치면 ⌄ 가 ⌃ 로 뒤집힌다. 작업 맡기기의 「저장소·브랜치」 행. 구현 문장은 #4457 이 설정 페이지에서 올리는 것과 같다 |
+
+`ConfirmStep` 의 두 단추 라벨(「취소」·위험 단추)은 `Sentence`(어절 단위 줄바꿈)·가운데 정렬이고 단추 상자가 가로 여백 `space.sm` 을 준다 — AX5 에서 「채널 나 / 가기」로 어절 가운데서 끊기고 글자가 테두리에 붙던 것(design-review #4318 r6-M2)을 이 이슈가 닫았다. 확인 단추의 **모양**(반경 10 외곽선 사각형이 새 카드 가족 밖, r3 M2·r4 M4)은 디자인 결정이라 아직 정하지 않았다(§7).
+
 ### 행 앞 아이콘 — 규칙과 재고
 
 - **한 표면(시트·페이지) 안의 카드는 모두 앞 칸을 갖거나 모두 갖지 않는다.** 카드 안에서만 지키면 카드 사이로 글자 열이 점프한다(대화 행 시트의 복사 카드만 아이콘을 줬을 때, 전시 페이지의 앞 칸 있는 카드 아래에 앞 칸 없는 카드가 섰을 때 글자 시작이 38pt 어긋났다 — design-review #4318 r1·r3). 한 카드 안에서도 앞 칸이 있는 줄과 없는 줄을 섞지 않고, 아이콘 줄과 이모지 줄도 섞지 않는다. 갖는 카드는 `GroupCard inset="icon"` 으로 구분선이 글자 열에서 시작한다.
@@ -117,13 +129,13 @@ const afterClose = usePageSheetAction();
 | 새 DM | `NewMessageSheet` | `PageSheet` large | 입력 1칸 + 사람 고르기 | 시트(선택기 예외) | #4318 |
 | 지시 기기 | `DeviceKeyLinkSheet` | `PageSheet` large | QR 연결 직후 한 번 뜨는 상태 안내와 확인. `DeviceKeyPanel`(새 `GroupCard`)은 두 호스트를 가진다 | 시트 | #4318 |
 | 새 채널 | `NewChannelSheet` | `PageSheet` **medium** | 입력 1 + 라디오 1묶음(2행). ✓ = 채널 만들기 | 시트 | #4458 |
-| AI | `AiSheet` | `PageSheet` **fit** | 행 ≤ 5, 모두 「다른 곳으로 가는 문」 — 누르면 시트가 먼저 내려간 뒤 이동(`usePageSheetAction`). 칩·표식은 오른쪽 값 | 시트(문 모음) | #4458 |
+| AI | `AiSheet` | `PageSheet` **fit** | 행 ≤ 5, 모두 「다른 곳으로 가는 문」 — 누르면 시트가 먼저 내려간 뒤 이동(`usePageSheetAction`). 「개인」 표식·「내 맥 켜짐/꺼짐」 칩은 행의 오른쪽 노드(`ListRow trailing`)이고 글자는 행의 이름에도 든다 | 시트(문 모음) | #4458 |
 | 메시지 고치기 | `MessageEditorSheet` | `PageSheet` **medium** | 입력 1(여러 줄). ✓ = 저장, X = 고치기 취소 | 시트 | #4458 (자체 `Modal` → 공용) |
 | 닫은 대화 | `DmClosedSheet` | `PageSheet` **fit** | 목록(스크롤) · 대화 하나 = 행 하나(행 전체가 「다시 열기」·「열기」) | 시트(선택기) | #4458 (자체 `Modal` → 공용) |
 | 새 버전 안내 | `AppUpdateSheet`(`AppUpdateBanner.tsx`) | `PageSheet` **fit** | 행 1(스토어로 가기) + 안내 한 문단 | 시트 | #4458 (자체 `Modal` → 공용). 배너 자체에는 닫기가 없다 |
 | 기억 목록 | `MemoryDigestSheet` | `PageSheet` **fit** | 요약 목록(스크롤) · 근거 알약은 그 메시지로 가는 길 | 페이지 후보 — 시트로 둠 | #4458 (자체 `Modal` → 공용) |
 | 내 맥에 보내기 | `AskMacSheet` | `PageSheet` large | 글 입력 1(여러 줄) + 라디오 묶음 최대 5(방식 2·맥 n·도구 n·폴더 n·채널 n, 행 8~20+, 늘 스크롤) | **페이지** — 시트로 둠 | #4458 (머리·부품만) |
-| 작업 맡기기 | `DelegateWorkSheet` | `PageSheet` large | 단계 2 · 입력 2(펼치면 4) · 라디오 2묶음. A 단계의 ✓ = 「다음」(✓ 의 뜻을 한 칸 넓힘) | **페이지**(입력 4) — 시트로 둠 | #4458 (머리·부품만) |
+| 작업 맡기기 | `DelegateWorkSheet` | `PageSheet` large | 단계 2 · 입력 2(펼치면 4) · 라디오 2묶음. **✓ 는 마지막 확정(B 단계 「맡기기」)에만** — A 단계의 「다음」은 시트 아래의 기본 단추(`PrimaryButton`)다 | **페이지**(입력 4) — 시트로 둠 | #4458 (머리·부품만) |
 | run 기록 | `RunLedgerSheet` | `PageSheet` large | 읽기 전용 긴 목록 | **페이지** — 시트로 둠 | #4458 (머리·부품만) |
 | 세션 상세 | `TeamBoardDetailSheet` | `PageSheet` large | 읽기 전용 상세(구획 6) · 이동 행 2. X 의 이름은 「작업 상세 닫기」(코어 `drawerClose` 는 웹 공용인 맨 「닫기」) | 페이지(상세) — 시트로 둠 | #4458 (머리·부품만) |
 | 내 프로필·설정 | `ProfileSheet` | `PageSheet` large | 테마·알림·연결·계정 등 여러 묶음 설정 | **페이지**(설정 페이지) | #4457 |
@@ -142,6 +154,7 @@ const afterClose = usePageSheetAction();
   - `__tests__/sheetKeyboardAction.test.tsx`: 두 기기(16 Pro·SE)의 내용 맞춤·중간 단에서 **시트 바닥 = 키보드 윗면, 시트 위 끝 ≥ 큰 단의 위 끝**, 큰 단은 올리지 않음, 키보드가 없으면 옛 단별 식(상수)과 같음 · 키보드 이벤트 배선(올라옴·내려감·did 쌍) · 몸 스크롤의 안전 영역 여백 · 시트 안 입력이 부른 키보드만 닫을 때 같이 내림(서기 전의 키보드는 건드리지 않음, 한 번 내려간 뒤에는 시트의 것) · `usePageSheetAction` 의 순서(onClose → 행동)·한 번·동작 줄이기·시트 밖 · 닫는 길의 정체성이 부모 리렌더·키보드에 안 바뀜 · 닫는 중에는 손잡이를 잡지 않음 · 누름 이벤트를 인자로 받는 X·스크림 · `closesSheet`(행·타일·토글) · 메시지 시트의 여섯 행동(슬라이드 뒤 / 동작 줄이기 즉시)과 지우기 둘(보내지 않음) · 대화 행 시트(보내지 않음, 앞 아이콘 없음) · `ListRow` 기본 이름·보조 줄 문장·토글 트랙 3:1(모든 테마) · `SheetScroll` 위 여백 · `ConfirmStep`(머리말·설명·실패의 `hangul-word`, 실패가 새로 설 때만 낭독) · 지시 기기 패널의 카드 가로 여백과 **호스트가 여백을 더하지 않음**(이중 인셋) · 미리보기·확인의 머리말·설명 `hangul-word` 와 **렌더된 확인 문장에 「닫는 괄호 + 조사」가 없음**(메시지 시트 두 상태, 대화 행 시트의 코어 실패 문장 전부) · 키보드 위 시트의 모서리 바탕(큰 단은 없음) · `SheetScroll` 의 키보드 위 바닥 여백 16·넘칠 때만 막대 한 번 · `RowEmoji` 의 배율 상한.
   - `__tests__/shellChrome.test.tsx`: 새 DM 의 사람 아바타 바닥이 `muted`(카드 위에서 원이 선다) · 빈 상태 문장의 `hangul-word`.
   - **시트마다 같은 계약**(#4458): `__tests__/fixtures/sheetContract.tsx` 의 `describeCloseContract` 가 시트별 시험 파일에서 머리 X(이름 「… 닫기」·공용 글리프·글자 「닫기」 없음) · X 즉시/슬라이드 뒤 · 스크림 이름·testID · escape · 끌어내리기를 같은 코드로 잰다. `__tests__/sheetInventory4458.test.ts` 는 소스를 훑어 「글자 닫기 단추 0」·「모든 `*Sheet.tsx` 는 `PageSheet`+`SheetHeader`」·「`<Modal` 은 그릇과 시트가 아닌 넷뿐」을 계속 센다.
+  - **2단계(#4458)**: `sheetKit.test.tsx` 「행 — 오른쪽 임의 노드·역할·펼침 상태」(값→표식→셰브론의 **그려진 순서** · `trailing` 이 기본 이름에 안 들어감 · 역할 기본/link/switch · `expanded` 미지정/false/true 와 ⌄ 의 뒤집힘) · `sheetKeyboardAction.test.tsx` 「ConfirmStep」(두 단추 라벨의 `hangul-word`·가운데 정렬·단추의 가로 여백) · `aiSheet.test.tsx`(칩·「개인」 표식이 행 안에 그려짐 · 켜짐/꺼짐 칩의 채움 · 행 이름에 칩 글자) · `delegateWork.test.tsx`(A 머리에 ✓ 없음·바닥 단추 「다음」, B 머리 ✓ + X, 펼침 행 상태) · `teamBoard.test.tsx`(PR 행 `link`).
   - 새 파일의 격자 밖 간격·반경·글자 크기는 `designSystem.test.ts` 스윕이 0 으로 둔다.
 - **재지 않는 것**: 실기기의 끌기 감촉 · 실제 VoiceOver 낭독 · **키보드가 올라올 때 시트가 도는 곡선의 느낌**(이벤트에서 한 번에 선다) · 스크롤 막대가 **눈에 보이는지**(호출만 잰다) · **렌더된 폭·여백·줄바꿈**(카드가 화면 가장자리까지 번지는지, 아바타 원이 카드에 녹는지, 한국어 어절이 갈리는지 — Jest 는 레이아웃 엔진이 없어 스타일 값과 시트 상자의 산수, 문구의 글자 조합만 잰다. 그 픽셀 증거는 캡처이고(`clients/mobile/measure/captures/4318/`, 전시 표면 `sheetkit-*`) design-review 가 사람의 눈으로 본다). 처음 한 번의 design-review 는 이 축에서 High 셋을 잡았다.
 - **전시 표면**(`clients/mobile/measure/sheetKit.tsx`, 가상 인물만): `-momoMeasure SHEETKIT-<이름>`(다크) · `LIGHT-SHEETKIT-<이름>`(라이트). `page`(앞 칸 없는 쪽) · `page-lead`(앞 칸 있는 쪽) · `headers` · `status`·`status-ready`(중간 단 + 입력 + 키보드) · `message`·`message-delete`·`message-live`·`message-keyboard` · `channel`·`channel-leave`·`channel-dm` · `newdm`·`newdm-empty` · `devicekey-pending|approved|unregistered` · `profile-device`.
@@ -149,7 +162,7 @@ const afterClose = usePageSheetAction();
 
 ## 7. 임시로 둔 것 — 부품이 모자라 #4458 이 `design/` 밖에 둔 것 (#4318 후속)
 
-`design/` 의 부품 파일(`sheetParts`·`SheetChrome`·`PageSheet`·`sheetModel`)은 #4457 이 같은 시기에 고쳐서 #4458 이 만지지 않았다. 모자란 것은 `src/shell/sheetForm.tsx` 에 같은 모양으로 두고, 정식 부품이 올라오면 한 줄 import 치환으로 지운다.
+1단계는 `design/` 의 부품 파일(`sheetParts`·`SheetChrome`·`PageSheet`·`sheetModel`)을 만지지 않았다(#4457 이 같은 시기에 고쳤다). 2단계(#4318 착륙 뒤 planner 허가)가 `sheetParts.tsx` 의 **`ListRow`(`trailing`·`accessibilityRole`·`expanded`)와 `ConfirmStep`(두 단추 라벨)만** 고쳤고 나머지 부품은 그대로다. 아직 모자란 것은 `src/shell/sheetForm.tsx` 에 같은 모양으로 두고, 정식 부품이 올라오면 한 줄 import 치환으로 지운다.
 
 | 임시 부품 | 모자란 것 | 정식 자리 |
 |---|---|---|
@@ -159,4 +172,4 @@ const afterClose = usePageSheetAction();
 | `TextArea` | 여러 줄 입력 — 알약은 여러 줄에서 모서리가 글자를 먹는다 | 공용 부품 후보 |
 | `FieldLabel` | 라벨 + 오른쪽 한 마디(「조금 남았어요」) | `GroupLabel` 에 보조 문자열 |
 
-그 밖의 공백(코드로 임시 부품을 두지 않고 모양을 접은 것): `ListRow` 에 **오른쪽 임의 노드(trailing)** 가 없어 AI 시트의 칩·표식은 오른쪽 값 한 줄로 접었다 · `ListRow` 에 **`accessibilityRole`** 이 없어 PR 이동 행이 「링크」가 아니라 「버튼」으로 읽힌다(이름은 「…, 브라우저에서 열기」로 남는다) · `ListRow` 에 **`expanded`** 상태가 없어 작업 맡기기의 「저장소·브랜치」 펼침 행이 옛 `accessibilityState.expanded` 를 잃었다(이름이 「더 보기」/「접기」로 바뀌어 상태를 말한다 — #4457 이 올리는 `expanded` 가 착륙하면 `expanded={showMore}` 한 줄로 되돌린다) · `ConfirmCheck` 에 **진행(busy)** 표시가 없어 메시지 고치기는 「저장 중」 한 줄이 말한다 · `ConfirmStep` 의 AX5 위험 단추 라벨 끊김과 확인 단추 어휘(r6-M2·r3 M2) 는 `sheetParts.tsx` 소유 충돌로 이 이슈가 못 고쳤다(옮긴 시트 중 `ConfirmStep` 사용처는 0). `atoms.tsx` 의 `GroupSection`·`GroupRow` 는 설정 영역(#4457)이 마지막 사용처라 #4457 착륙 뒤에 지운다.
+그 밖의 공백: `ConfirmCheck` 에 **진행(busy)** 표시가 없어 메시지 고치기는 「저장 중」 한 줄이 말한다 · `ConfirmStep` 의 확인 단추 **모양**(반경 10 외곽선 사각형이 새 카드 가족 밖 — r3 M2·r4 M4)은 디자인 결정이라 정하지 않았다(옮긴 시트 중 `ConfirmStep` 사용처는 0이고, 쓰는 곳은 메시지·대화 행 두 시트다) · `atoms.tsx` 의 `GroupSection`·`GroupRow` 는 설정 영역(#4457)이 마지막 사용처라 #4457 착륙 뒤에 지운다 · **규칙상 페이지인 시트 다섯**(내 맥에 보내기·작업 맡기기·작업 기록·작업 상세·기억 목록)은 시트로 둔 채 머리·부품만 옮겼고 페이지 전환은 #4611 이다.

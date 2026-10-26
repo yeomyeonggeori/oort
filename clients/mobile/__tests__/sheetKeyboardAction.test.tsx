@@ -960,6 +960,22 @@ describe('ConfirmStep — 시트 안의 확인 단계', () => {
     expect(onConfirm).toHaveBeenCalledTimes(1);
   });
 
+  it('두 단추의 라벨은 어절 단위로 접히고(`hangul-word`) 가운데 정렬이며 단추에 가로 여백이 있다 — AX5 에서 어절이 가운데서 끊기고 글자가 테두리에 붙던 것 (design-review #4318 r6-M2)', async () => {
+    const {ui} = step({cancelLabel: '취소', confirmLabel: '채널 나가기'});
+    await mount(ui, true);
+    for (const [label, testID] of [
+      ['취소', 'cancel'],
+      ['채널 나가기', 'ok'],
+    ] as const) {
+      // 라벨은 문장 부품(`Sentence`)이라 줄바꿈이 어절 단위다 — 「채널 나/가기」로 어절 가운데서 끊기지 않는다.
+      const text = screen.getByText(label);
+      expect([label, text.props.lineBreakStrategyIOS]).toEqual([label, 'hangul-word']);
+      expect([label, StyleSheet.flatten(text.props.style).textAlign]).toEqual([label, 'center']);
+      // 단추 상자가 가로 여백을 준다 — 글자가 테두리에 붙지 않는다(두 줄이 되어도).
+      expect([testID, flat(testID).paddingHorizontal]).toEqual([testID, space.sm]);
+    }
+  });
+
   it('실패 문장은 확인 단계 안에 alert 로 서고 `hangul-word` 줄바꿈 전략을 든다', async () => {
     const {ui} = step({error: '지우지 못했습니다.'});
     await mount(ui, true);
