@@ -151,12 +151,19 @@ fn ensure_schema_and_roles() {
 /// this suite's batch and inflates its `DrainStats`. Same sweep, same reason, as
 /// `momo-agent-worker`'s own suite; every assertion below is additionally scoped
 /// to this test's fresh `workspace_id`.
+///
+/// The sweep must name every method the claim takes — `WORKER_JOB_METHODS`, i.e.
+/// `publish` **and** `resume_approval` — not just the one this suite enqueues:
+/// `sec07_gateway_pg` leaves a pending `resume_approval` row behind, and a sweep
+/// of `publish` alone let this suite's worker claim it (`claimed: 2` where the
+/// test enqueued one job, #4618). Same shape as `momo-agent`'s `approval_pg`.
 async fn settle_residual_worker_jobs(su: &PgPool) {
     sqlx::query(
         "UPDATE outbox SET status = 'done', processed_at = now() \
-          WHERE kind = 'agent_job' AND method = 'publish' \
+          WHERE kind = 'agent_job' AND method = ANY($1) \
             AND status IN ('pending', 'processing')",
     )
+    .bind(momo_outbox::WORKER_JOB_METHODS.map(str::to_string).to_vec())
     .execute(su)
     .await
     .expect("sweep residual worker agent_jobs");
