@@ -1,0 +1,85 @@
+appId: app.momo.ios
+name: 114-settings-shell-flow
+---
+# 114-settings-shell-flow — 진짜 셸 위에서 「설정」 층이 열리고 닫히는 길 전부 (#4457).
+#
+# 60번 흐름과 같은 약속을 **서버 없이** 확인한다. 60번은 로그인한 앱이 필요해서(`ensure-signed-in`) 서버가 없는
+# 자리에서는 돌 수 없다; 이 흐름은 하네스의 진짜 `AppShell`(서버 자리만 가짜 `fetch`) 위에서 같은 길을 누른다:
+#
+#   아바타 → 설정이 **올라온다** → 테마 장이 **밀려 들어온다** → ‹ 가 한 겹만 벗긴다 → 왼쪽 가장자리를 밀어 닫는다
+#   → 아바타가 **다시** 연다(밀기가 부모의 「열림」을 내리지 못하면 이 두 번째 탭에서만 죽는다) → 머리의 X 로 닫는다.
+#
+# jest 가 못 보는 것(진짜 가장자리 밀기·진짜 층 모션이 끝난 뒤의 상태)을 시뮬레이터가 본다. 모션의 **감촉**은 여전히
+# 실기기에서만 본다.
+#
+# **로그아웃은 누르지 않는다**(`sign-out`·`sign-out-confirm` 어느 것도). 하네스의 `SessionProvider` 는 진짜라서 확인까지 누르면
+# 진짜 `signOut` 이 돌아 그 기기의 세션·초안·지시 기기·배경 사진이 지워진다. 이 흐름을 늘릴 때도 그렇게 둔다.
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure shell-update-home -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test -e OUT=16pro-light clients/mobile/maestro/114-settings-shell-flow.yaml
+- extendedWaitUntil:
+    visible:
+      id: "profile-avatar"
+    timeout: 60000
+- tapOn:
+    id: "profile-avatar"
+- extendedWaitUntil:
+    visible:
+      id: "self-profile-name"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 3000
+# 열린 설정 페이지는 **찍지 않는다**: 이 흐름은 하네스의 진짜 `AppShell`·진짜 세션 위에서 돌고, 그 세션의 나(`HARNESS_MEMBER`)는
+# 코어 압박 명부의 첫 사람(실명 페르소나)이라 머리의 이름·아바타 글자가 사진에 박힌다(공개 레포에는 가상 인물만 — 2026-10-23
+# 규칙). 설정 페이지의 증거 사진은 가상 인물을 쓰는 표면(`shell-profile-sheet` 등)이 낸다. 이 흐름은 동작 검증이다.
+# 테마 장은 이름이 안 보여서 찍는다.
+# 테마는 설정 위에 한 겹 더 쌓이는 장이다: 「보기」 카드가 접힌 아래라 스크롤해서 들어갔다 머리의 ‹ 로 설정으로 돌아온다.
+- scrollUntilVisible:
+    element:
+      id: "profile-theme-row"
+    direction: DOWN
+    timeout: 20000
+- tapOn:
+    id: "profile-theme-row"
+- extendedWaitUntil:
+    visible:
+      id: "theme-control"
+    timeout: 10000
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: ${OUT}-flow-2-theme
+- tapOn:
+    id: "settings-back"
+- extendedWaitUntil:
+    notVisible:
+      id: "theme-control"
+    timeout: 10000
+# 설정 페이지는 마운트된 채 남아 스크롤 자리가 그대로다 — 방금 스크롤해 온 행이 다시 보인다(얼굴은 위로 올라가 있다).
+- extendedWaitUntil:
+    visible:
+      id: "profile-theme-row"
+    timeout: 10000
+# 왼쪽 가장자리를 밀어 닫는다 — 그리고 다시 열린다.
+- swipe:
+    start: 1%, 50%
+    end: 90%, 50%
+    duration: 400
+- extendedWaitUntil:
+    notVisible:
+      id: "profile-theme-row"
+    timeout: 10000
+- tapOn:
+    id: "profile-avatar"
+- extendedWaitUntil:
+    visible:
+      id: "self-profile-name"
+    timeout: 10000
+# 머리의 원형 X 로도 닫힌다.
+- tapOn:
+    id: "settings-close"
+- extendedWaitUntil:
+    notVisible:
+      id: "self-profile-name"
+    timeout: 10000
+- assertVisible:
+    id: "profile-avatar"

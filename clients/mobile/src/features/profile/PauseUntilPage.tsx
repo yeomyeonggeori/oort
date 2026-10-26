@@ -16,20 +16,22 @@ import {
 import {NOTIFICATION_PAUSE_SAVE_FAILED} from '@momo/core/features/settings/notificationRules';
 import type {RosterMember} from '@momo/core/lib/api';
 import React, {useRef, useState} from 'react';
-import {ActivityIndicator, StyleSheet, View} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 
-import {GroupRow, GroupSection, NoticeBlock, Sentence} from '../../design/atoms';
-import {usePalette, useStyles} from '../../design/theme';
-import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {NoticeBlock, Sentence} from '../../design/atoms';
+import {GroupCard} from '../../design/sheetParts';
+import {useStyles} from '../../design/theme';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
 import {useOnline} from '../inbox/useOnline';
 import {PauseUntilCustom} from './PauseUntilCustom';
 import {usePauseNotifications, useSetPresence} from './selfStatus';
+import {ActionRow} from './settingsRows';
 
 // =============================================================================
 // 기한 고르기 — 알림 일시 중지·방해 금지가 켜지는 유일한 길 (ADR-0204 D2, #2899).
 //
-// 프로필 시트 **안의 한 장**이다(테마·상태 글과 같은 문법 — 시트 위에 시트를 겹치지 않는다).
+// 설정 페이지 위의 **안쪽 장**이다(테마·프로필 사진과 같은 문법 — 시트 위에 시트를 겹치지 않는다).
 // 두 스위치가 이 장을 같이 쓴다:
 //
 //   * `kind="pause"` — `PATCH /notification-rules {dnd:true, dndUntilMs}`. 이 쓰기는 방해
@@ -64,25 +66,24 @@ export function PauseUntilPage({
   workspaceId: string;
   selfId: string;
   self: RosterMember | undefined;
-  /** 쓰기가 성공하면 부른다 — 시트가 프로필로 돌아간다. */
+  /** 쓰기가 성공하면 부른다 — 이 장이 걷히고 설정 페이지로 돌아간다. */
   onDone: () => void;
   /**
-   * 「직접 고르기」가 열리면 그 블록의 윗변이 보이게 시트를 내린다. `y` 는 이 장의 윗변에서
-   * 잰 값이다(시트의 위쪽 여백은 시트가 더한다). 끝까지 내리면 달력을 지나쳐 확인 단추만 남는다.
+   * 「직접 고르기」가 열리면 그 블록의 윗변이 보이게 장의 스크롤을 내린다. `y` 는 이 장의 윗변에서
+   * 잰 값이다(장 앞의 위쪽 여백은 부르는 쪽이 더한다). 끝까지 내리면 달력을 지나쳐 확인 단추만 남는다.
    */
   onReveal: (y: number) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
   const nowMs = useNow();
   const pause = usePauseNotifications(workspaceId);
   const setPresence = useSetPresence(workspaceId, selfId);
   const [customOpen, setCustomOpen] = useState(false);
   const [pendingId, setPendingId] = useState<PauseUntilPreset | 'custom' | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
-  // 「직접 고르기」 블록이 **열릴 때 한 번만** 시트를 내린다. `onLayout` 은 블록의 높이가 바뀔
+  // 「직접 고르기」 블록이 **열릴 때 한 번만** 스크롤을 내린다. `onLayout` 은 블록의 높이가 바뀔
   // 때마다(지난 시각 오류문이 뜨거나 달이 넘어갈 때) 다시 오는데, 그때마다 내리면 고르던 자리에서
-  // 시트가 튄다. 열고 닫을 때마다 깃발을 내려 다음에 열 때 다시 한 번 내린다.
+  // 장이 튄다. 열고 닫을 때마다 깃발을 내려 다음에 열 때 다시 한 번 내린다.
   const revealedRef = useRef(false);
   const toggleCustom = () => {
     revealedRef.current = false;
@@ -151,19 +152,18 @@ export function PauseUntilPage({
         </View>
       )}
 
-      <GroupSection label="기한">
-        {options.map((option, index) => {
+      <GroupCard label="기한" testID="pause-until-card">
+        {options.map(option => {
           const custom = option.id === 'custom';
           const hint =
             option.id === 'custom' ? undefined : pauseUntilHint(option.id, nowMs);
           return (
-            <GroupRow
+            <ActionRow
               key={option.id}
               title={option.label}
               detail={hint}
-              chevron={custom && pendingId !== 'custom'}
+              pending={pendingId === option.id}
               tone={custom && customOpen ? 'accent' : 'default'}
-              separated={index > 0}
               disabled={locked}
               onPress={() => {
                 if (option.id === 'custom') toggleCustom();
@@ -173,21 +173,12 @@ export function PauseUntilPage({
               accessibilityLabel={hint ? `${option.label}, ${hint}` : option.label}
               // 짧은 선택은 누르면 곧바로 켜진다 — 확인 단계가 없다는 것을 읽어 준다.
               accessibilityHint={custom ? undefined : pauseUntilPresetHint(kind)}
-              accessibilityState={custom ? {expanded: customOpen} : undefined}
-              trailing={
-                pendingId === option.id ? (
-                  <ActivityIndicator
-                    color={palette.textMuted}
-                    accessibilityElementsHidden
-                    importantForAccessibility="no-hide-descendants"
-                  />
-                ) : undefined
-              }
+              expanded={custom ? customOpen : undefined}
               testID={`pause-until-option-${option.id}`}
             />
           );
         })}
-      </GroupSection>
+      </GroupCard>
 
       {customOpen ? (
         <View
@@ -221,14 +212,14 @@ export function PauseUntilPage({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    page: {gap: space.xl},
-    intro: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
+    // 카드는 폭 전체로 서고 가로 여백은 호스트가 진다(`GroupCard`) — 이 장이 진다. 카드 사이 16(설정 본 페이지와 같다).
+    page: {gap: space.lg, paddingHorizontal: SAFE_GUTTER},
+    intro: {gap: space.sm},
     heading: {fontSize: font.heading, fontWeight: '600', color: color.text},
-    caption: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
+    caption: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
     failure: {
       fontSize: font.label,
       color: color.dangerText,
-      lineHeight: 18,
-      paddingHorizontal: SAFE_GUTTER,
+      lineHeight: line.label,
     },
   });
