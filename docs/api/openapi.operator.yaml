@@ -34,6 +34,12 @@ info:
     to env. The provider bearer is write-only: it is stored AES-GCM encrypted and
     never returned — reads expose only a boolean and a masked 4-char tail.
 
+    The same-server Hermes routes (`/cohosted-agent…`, ADR-0203) and the Hermes login relay routes
+    (`/model-login…`, `/app-login…`, ADR-0004 증보 7) are instance-operator only: a listed
+    `PLATFORM_ADMIN_EMAILS` owner/admin, and `platform:read` alone is not enough. The status read
+    (`GET /v1/workspaces/{ws}/cohosted-agent`) never touches the network and, besides what the operator
+    declared, reports two environment facts as closed words (`environment`, ADR-0203 증보 2026-10-25).
+
 servers:
   - url: /
     description: Same origin as the momo API host.
@@ -586,6 +592,33 @@ paths:
           description: Unknown or already-erased login.
         "409":
           description: '`already_submitted`, `not_paste_mode` (Codex), `login_not_pending`.'
+  /v1/workspaces/{ws}/cohosted-agent:
+    get:
+      operationId: getCohostedAgentStatus
+      summary: What the operator declared about a same-server Hermes, and two facts about the environment
+      description: >-
+        ADR-0203 (#3883) with the 증보 2026-10-25 (#4337). Instance operator only (a listed
+        `PLATFORM_ADMIN_EMAILS` owner/admin; `platform:read` alone is not enough). **Never touches the network**:
+        the answer comes from the env read once at boot and, when something is declared, one pin lookup.
+        `declaration` says how far the operator's `HERMES_BASE_URL` declaration goes; it is not a finding about
+        the agent. `environment` is always present, whatever `declaration` is (the instance with nothing
+        declared is exactly where the screen needs it), and holds two closed words and nothing else: no stamp,
+        no Railway environment id, no relay address or key is ever returned. `environment` only picks the
+        wording of the screen; it is never read by a permission, egress or connectability decision, so
+        `declaration`, `connectable` and `connectedAgentId` are the same for every `environment`. A non-operator
+        gets 403 and a body without `environment`. The probe and connect answers do not carry it. The schema
+        string stays `momo.cohosted_agent.status.v0` and a client that does not know `environment` ignores it.
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CohostedAgentStatus"
+        "403":
+          description: Not a listed instance operator (or a token for another workspace). The body carries no `environment`.
   /v1/workspaces/{ws}/cohosted-agent/models:
     get:
       operationId: getCohostedAgentModels
@@ -697,6 +730,58 @@ components:
         App access token for a human principal that carries the platform:read
         operator scope OR is a workspace owner/admin (ADR-0004 증보1 D3).
   schemas:
+    CohostedAgentStatus:
+      type: object
+      additionalProperties: false
+      required: [schema, declaration, toolsLockAttested, connectable, environment]
+      properties:
+        schema: { type: string, enum: ["momo.cohosted_agent.status.v0"] }
+        declaration:
+          type: string
+          enum: [not_declared, key_missing, url_refused, ready]
+          description: >-
+            `not_declared` (`HERMES_BASE_URL` never written; says nothing about whether a Hermes exists) |
+            `key_missing` (written, but `HERMES_API_KEY` is missing or a placeholder) | `url_refused` (written, but not
+            an address this server may dial) | `ready`.
+        endpointLabel:
+          type: string
+          description: The declared address with userinfo, query and fragment removed. Omitted when nothing is declared.
+        toolsLockAttested:
+          type: boolean
+          description: The operator's own statement that the tool-lock checklist was followed. Not verified by oort.
+        connectable:
+          type: boolean
+          description: Declared, `ready`, attested and not yet connected.
+        connectedAgentId:
+          type: string
+          format: uuid
+          description: The agent already connected in this workspace. Omitted when none.
+        environment:
+          $ref: "#/components/schemas/CohostedAgentEnvironment"
+    CohostedAgentEnvironment:
+      type: object
+      additionalProperties: false
+      required: [platform, loginRelay]
+      description: >-
+        Two closed words, always both present. Wording only: never an input to a permission, egress or
+        connectability decision.
+      properties:
+        platform:
+          type: string
+          enum: [railway, compose, unknown]
+          description: >-
+            Where this process says it runs, classified once at boot from `RAILWAY_ENVIRONMENT_ID` (a Railway system
+            variable, wins) and the `MOMO_SELF_HOST_PLATFORM` stamp (compared as written: no trim, case-sensitive).
+            `railway` | `compose` (no Railway signal and no stamp, or a stamp naming a compose-stack row; "no sign of
+            anything else", not "docker compose was observed") | `unknown` (a stamp in neither table).
+        loginRelay:
+          type: string
+          enum: ["on", "off"]
+          description: >-
+            The very predicate the ten relay routes (`/model-login…`, `/app-login…`) answer `409 login_relay_off` by:
+            `on` when `HERMES_LOGIN_RELAY_URL` and `HERMES_LOGIN_RELAY_KEY` are both well formed and the address passes
+            the write gate and carries no path. It means "configured", not "the sidecar is alive": nothing is dialled
+            to say it. The values are quoted because an unquoted `on`/`off` is a boolean to a YAML 1.1 parser.
     CohostedModelRef:
       type: object
       additionalProperties: false

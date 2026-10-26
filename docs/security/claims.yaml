@@ -260,6 +260,32 @@ claims:
     proofs:
       - "server-rust/bins/momo-server/tests/login_relay_conformance_pg.rs#markers_never_cross_oort_in_any_channel"
 
+  # ---- 남용 방지 ---------------------------------------------------------------------
+  - id: RATE-1
+    claim: "A signed-in member who sends messages, creates or edits scheduled messages, or starts attachment uploads faster than the per-member budget is answered 429 with Retry-After before the request body is read, before the message is stored and before any Google Drive call; the first refusal of a burst writes one rate_limit.exceeded audit row, which a client that hangs up while it is being written neither cancels nor doubles; cancelling a scheduled message, editing a streamed message and reading history are never counted."
+    scope: "Real PostgreSQL through the real routes as momo_app, for five endpoints only: POST channel messages and POST scheduled-messages/{id}/send-now (both spend the send budget), POST and PATCH scheduled-messages (the schedule budget), POST attachments/uploads (the upload budget). Counters key on the authenticated member id and the surface, never on anything the request carries, and a request the auth layer refuses (401 or 403) is never counted. The budget sits inside authentication, so a refused request still pays authentication's own database work (for an agent bearer that includes one auth.agent_bearer.used audit row per request). The counters live in the memory of one API process: a restart clears them and N replicas admit N times the limit. Defaults per 60-second window: 120 sends for a person, 600 for an agent or work-host credential, 60 scheduled writes, 60 upload starts; each is an environment setting and 0 turns it off. The bound of one audit row per member and surface per window is proven on the limiter bookkeeping with an injected clock and a stand-in database writer, and over HTTP for one burst including a client that hangs up mid-write; not over HTTP across a window boundary. A process that dies mid-write can still lose the row; if the database connection is lost just before the commit is acknowledged, the row is committed but counted as failed and the next refusal of the same window writes a second one (a write that outlasts the window can do the same). Not claimed: other writes (reactions, deletes, joins) and edits of a message (neither is counted; each edit writes an audit row and an outbox event), reads and search, per-IP, per-workspace or per-instance limits, or that a stolen token is stopped (it spends its owner's budget at the owner's rate)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#a_human_is_refused_after_the_send_budget_and_nothing_is_stored"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#a_refusal_is_answered_before_the_body_is_read"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#an_agent_has_its_own_send_budget"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#budgets_are_per_member_and_per_surface"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#what_the_auth_layer_refuses_is_never_a_429_and_spends_no_budget"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#a_schedule_create_and_edit_spend_the_schedule_budget_and_cancel_never_does"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#send_now_spends_the_send_budget"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#upload_starts_are_refused_before_the_drive_is_called"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#streaming_edits_and_reads_are_outside_the_budget"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#a_burst_leaves_one_audit_row_of_the_documented_shape"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#a_flood_of_parallel_refusals_writes_one_audit_row"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#a_client_that_hangs_up_while_its_refusal_is_recorded_still_leaves_exactly_one_row"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#zero_turns_each_axis_off_and_no_row_is_written"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_pg.rs#the_shipped_defaults_pass_ordinary_use_and_stop_at_the_documented_numbers"
+      - "server-rust/bins/momo-server/tests/member_write_rate_limit_edge.rs#a_work_host_is_held_to_the_agent_budget_not_the_human_one"
+      - "server-rust/bins/momo-server/src/rate_limit.rs#a_committed_audit_row_closes_the_slot_even_when_the_burst_restarts"
+      - "server-rust/bins/momo-server/src/rate_limit.rs#a_row_still_in_flight_holds_the_slot_against_a_burst_that_restarts_meanwhile"
+      - "server-rust/bins/momo-server/src/rate_limit.rs#a_dropped_request_does_not_cancel_the_audit_write"
+
   # ---- 기동 설정 --------------------------------------------------------------------
   - id: CFG-1
     claim: "momo-server refuses to start in staging, prod, production or internal-host with a missing or placeholder realtime proxy secret."

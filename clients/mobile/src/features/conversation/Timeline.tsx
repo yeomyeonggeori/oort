@@ -10,7 +10,7 @@ import {
 import {chipsFor, type ReactionMap} from '@momo/core/features/timeline/reactions';
 import {isPinned, type PinMap} from '@momo/core/features/timeline/pins';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
+import React, {useCallback, useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore} from 'react';
 import {
   AccessibilityInfo,
   ActivityIndicator,
@@ -26,6 +26,7 @@ import {
   type ViewToken,
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
+import {DockFollowContext} from './dockFollow';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
@@ -2473,6 +2474,24 @@ function TimelineInner({
     convergeToEnd('send');
   }, [selfSendToken, convergeToEnd]);
 
+
+  // 입력창(도크)이 자라는 프레임에 같이 바닥을 따라간다 (#4518, `dockFollow.ts`). 입력창을 누르는 순간 펼치기 시작하면 펼침이 키보드 준비(메인 스레드가 막히는 구간)와 겹쳐서,
+  // 아래 `onLayout` 의 따라가기(네이티브 → JS → 네이티브 한 바퀴)가 2~3프레임 늦고 그 사이 마지막 말풍선의 아랫줄이 도크에 가려졌다 돌아왔다. 컴포저가 자라는 프레임마다 이 처리기를
+  // 부른다: JS 가 아는 길이(`VirtualizedList.scrollToEnd` 는 어림이다)가 아니라 **네이티브 `scrollToEnd`** — 그 순간의 창과 콘텐츠 길이로 끝을 셈한다. 바닥을 따라가는 중이 아니면(과거를 읽는 중,
+  // 점프가 가는 중 — `beginJumpTravel` 이 따라가기를 붙든다) 아무것도 안 한다.
+  const dockFollow = useContext(DockFollowContext);
+  useEffect(() => {
+    if (dockFollow === null) return undefined;
+    return dockFollow.register(() => {
+      if (!followingRef.current) return;
+      // `getScrollResponder()` 는 ScrollView 인스턴스를 준다(타입은 `Element` 라 좁혀서 읽는다). 그 `scrollToEnd` 는 네이티브 명령이다.
+      const scroller = listRef.current?.getScrollResponder() as unknown as
+        | {scrollToEnd?: (options?: {animated?: boolean}) => void}
+        | null
+        | undefined;
+      scroller?.scrollToEnd?.({animated: false});
+    });
+  }, [dockFollow, listRef]);
 
   // The viewport changed size rather than the content growing. A reader who was
   // at the bottom stays at the bottom; one who was reading history is left
