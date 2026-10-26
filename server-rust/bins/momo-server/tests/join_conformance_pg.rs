@@ -59,6 +59,9 @@ use uuid::Uuid;
 // harness (same contract as settings_conformance_pg.rs)
 // ---------------------------------------------------------------------------
 
+#[path = "common/password_cases.rs"]
+mod password_cases;
+
 const TEST_JWT_SECRET: &str = "join-conformance-app-signing-secret";
 const OWNER_PASSWORD: &str = "join-conformance-owner-password";
 /// What a joining human types into the onboarding form.
@@ -871,6 +874,279 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
         .expect("used_count")
         .get(0);
     assert_eq!(spent, 0, "a refused join must not spend a use");
+}
+
+/// ADR-0215 D2 (#4593) on `POST /v1/join`: the joining human is choosing a
+/// password, so it must be at least 10 characters and at most 72 bytes.
+///
+/// The invite is single-use on purpose. A refusal is a coded 400 before any
+/// statement runs, so none of the refusals below spends it, creates a member, or
+/// leaves a row behind — and the very same code then takes a valid password.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_joining_password_is_held_to_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-rule").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+    let (code, invite_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+
+    let join = |email: String, password: Value| {
+        let mut payload = json!({
+            "code": code,
+            "email": email,
+            "displayName": "Joining Human",
+            "timeZone": "Asia/Seoul",
+        });
+        if !password.is_null() {
+            payload["password"] = password;
+        }
+        payload
+    };
+
+    let mut emails = Vec::new();
+    for (index, (case, password, expected)) in password_cases::refused().into_iter().enumerate() {
+        let email = format!("refused-{index}-{}@join.test", Uuid::new_v4());
+        let attempt = post_join(&http, &base, join(email.clone(), json!(password))).await;
+        assert_eq!(attempt.status, 400, "{case}: {}", attempt.body);
+        assert_eq!(
+            attempt.body["error"]["code"],
+            json!(expected),
+            "{case}: {}",
+            attempt.body
+        );
+        emails.push(email);
+    }
+    // Empty and absent keep the sentence they always had, with no code.
+    for (case, password) in [("empty", json!("")), ("absent", Value::Null)] {
+        let email = format!("blank-{case}-{}@join.test", Uuid::new_v4());
+        let attempt = post_join(&http, &base, join(email.clone(), password)).await;
+        assert_eq!(attempt.status, 400, "{case}: {}", attempt.body);
+        assert_eq!(
+            attempt.body["error"]["message"],
+            json!("password is required"),
+            "{case}: {}",
+            attempt.body
+        );
+        assert!(
+            attempt.body["error"].get("code").is_none(),
+            "{case}: a missing password has never carried an error.code: {}",
+            attempt.body
+        );
+        emails.push(email);
+    }
+
+    // Nothing was left behind, and the single use is intact.
+    for email in &emails {
+        let members: i64 = sqlx::query(
+            "SELECT count(*)::bigint FROM human WHERE workspace_id = $1 AND email = $2",
+        )
+        .bind(fixture.workspace)
+        .bind(email)
+        .fetch_one(&su)
+        .await
+        .expect("count humans")
+        .get(0);
+        assert_eq!(members, 0, "{email}: a refused join creates no member");
+    }
+    let spent: i32 = sqlx::query("SELECT used_count FROM invite_code WHERE id = $1")
+        .bind(Uuid::parse_str(&invite_id).expect("invite id"))
+        .fetch_one(&su)
+        .await
+        .expect("used_count")
+        .get(0);
+    assert_eq!(spent, 0, "a refused join must not spend a use");
+
+    // The same single-use code, ten characters: the shortest the rule accepts.
+    let email = format!("ten-{}@join.test", Uuid::new_v4());
+    let attempt = post_join(
+        &http,
+        &base,
+        join(email.clone(), json!(password_cases::TEN_CHARS)),
+    )
+    .await;
+    assert_eq!(attempt.status, 201, "{}", attempt.body);
+    let signed_in = login(
+        &http,
+        &base,
+        fixture.workspace,
+        &email,
+        password_cases::TEN_CHARS,
+    )
+    .await;
+    assert!(signed_in["accessToken"].is_string(), "{signed_in}");
+}
+
+/// The rule is judged **before the invite is looked up** (ADR-0215 D2, #4593
+/// security review L-1), so a refused password gets the same answer whatever
+/// state the invite is in, and nobody can tell from it which codes exist, are
+/// spent, have expired or were revoked.
+///
+/// The regression this holds is a reorder that looks the invite up first: it
+/// would answer 404 for an unknown code, 410 for an expired or revoked one and
+/// 409 for a spent one, and keep the 400 for the live one alone — turning the
+/// password check into an invite-existence oracle. Every other test in this file
+/// uses a live invite, so none of them would notice.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_refused_join_password_is_answered_the_same_whatever_state_the_invite_is_in() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-rule-order").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    // Five codes in five states: live, unknown, expired, revoked, spent.
+    let (live_code, live_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let unknown_code = "this-code-was-never-issued".to_string();
+
+    let (expired_code, expired_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    sqlx::query(
+        // invite_code_expires_ck(만료>생성)를 존중해 생성 시각도 함께 과거로 옮긴다.
+        "UPDATE invite_code SET created_at = now() - interval '2 hours', \
+         expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(Uuid::parse_str(&expired_id).expect("invite id"))
+    .execute(&su)
+    .await
+    .expect("expire the invite");
+
+    let (revoked_code, revoked_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    sqlx::query("UPDATE invite_code SET revoked_at = now(), revoked_by = $2 WHERE id = $1")
+        .bind(Uuid::parse_str(&revoked_id).expect("invite id"))
+        .bind(fixture.owner)
+        .execute(&su)
+        .await
+        .expect("revoke the invite");
+
+    let (spent_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+    let first = post_join(
+        &http,
+        &base,
+        join_payload(&spent_code, &format!("first-{}@join.test", Uuid::new_v4())),
+    )
+    .await;
+    assert_eq!(first.status, 201, "{}", first.body);
+
+    // The premise: with a password the rule accepts, the dead codes really do
+    // answer differently. Without this, "the same answer" would prove nothing.
+    for (state, code, expected) in [
+        ("unknown", &unknown_code, 404),
+        ("expired", &expired_code, 410),
+        ("revoked", &revoked_code, 410),
+        ("spent", &spent_code, 409),
+    ] {
+        let attempt = post_join(
+            &http,
+            &base,
+            join_payload(code, &format!("control-{}@join.test", Uuid::new_v4())),
+        )
+        .await;
+        assert_eq!(
+            attempt.status, expected,
+            "{state}: a valid password still meets the invite's own verdict: {}",
+            attempt.body
+        );
+    }
+
+    // The point: a refused password gets the live invite's 400 from all five.
+    let states = [
+        ("live", &live_code),
+        ("unknown", &unknown_code),
+        ("expired", &expired_code),
+        ("revoked", &revoked_code),
+        ("spent", &spent_code),
+    ];
+    for (case, password, expected) in password_cases::refused() {
+        let mut answers = Vec::new();
+        for (state, code) in states {
+            let attempt = post_join(
+                &http,
+                &base,
+                json!({
+                    "code": code,
+                    "email": format!("order-{}@join.test", Uuid::new_v4()),
+                    "displayName": "Joining Human",
+                    "password": password,
+                    "timeZone": "Asia/Seoul",
+                }),
+            )
+            .await;
+            assert_eq!(
+                attempt.status, 400,
+                "{case} / {state} invite: {}",
+                attempt.body
+            );
+            assert_eq!(
+                attempt.body["error"]["code"],
+                json!(expected),
+                "{case} / {state} invite: {}",
+                attempt.body
+            );
+            answers.push((state, attempt.body));
+        }
+        let (_, live_answer) = &answers[0];
+        for (state, answer) in &answers[1..] {
+            assert_eq!(
+                answer, live_answer,
+                "{case}: the {state} invite must be answered exactly like the live one"
+            );
+        }
+    }
+
+    // And none of it spent the live invite.
+    let spent: i32 = sqlx::query("SELECT used_count FROM invite_code WHERE id = $1")
+        .bind(Uuid::parse_str(&live_id).expect("invite id"))
+        .fetch_one(&su)
+        .await
+        .expect("used_count")
+        .get(0);
+    assert_eq!(spent, 0, "a refused join must not spend a use");
+}
+
+/// The accepting side: every shape on the boundary joins, and signs in with
+/// exactly the string it joined with (nothing trimmed, nothing normalised).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn every_accepted_join_password_signs_in_exactly_as_typed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-rule-ok").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    for (case, password) in password_cases::accepted() {
+        let (code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+        let email = format!("accepted-{}@join.test", Uuid::new_v4());
+        let attempt = post_join(
+            &http,
+            &base,
+            json!({
+                "code": code,
+                "email": email,
+                "displayName": "Joining Human",
+                "password": password,
+            }),
+        )
+        .await;
+        assert_eq!(attempt.status, 201, "{case}: {}", attempt.body);
+        let signed_in = login(&http, &base, fixture.workspace, &email, &password).await;
+        assert!(
+            signed_in["accessToken"].is_string(),
+            "{case}: the stored password signs in with the bytes it was set with: {signed_in}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

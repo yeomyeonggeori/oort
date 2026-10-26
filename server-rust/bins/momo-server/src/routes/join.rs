@@ -70,7 +70,12 @@ use crate::AppState;
 /// which matters more here than elsewhere: this handler is reachable without a
 /// credential, and `momo_password_hash` is bcrypt running inside Postgres.
 fn spec_error(error: JoinSpecInvalid) -> ApiError {
-    ApiError::bad_request(error.to_string())
+    match error {
+        // ADR-0215 D2: the length refusals and the NUL refusal name themselves on
+        // the wire.
+        JoinSpecInvalid::NewPassword(invalid) => ApiError::from(invalid),
+        other => ApiError::bad_request(other.to_string()),
+    }
 }
 
 /// [`JoinRejection`] → HTTP, using the status the domain type carries so the
@@ -366,5 +371,31 @@ mod tests {
             spec_error(JoinSpecInvalid::PasswordMissing).status,
             StatusCode::BAD_REQUEST
         );
+        assert_eq!(
+            spec_error(JoinSpecInvalid::PasswordMissing).code,
+            None,
+            "a missing password has never carried an error.code"
+        );
+    }
+
+    /// ADR-0215 D2: a join whose password is too short or too long is a 400 that
+    /// names its reason, so a client can say which rule it broke.
+    #[test]
+    fn a_refused_join_password_is_a_coded_400() {
+        let short = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::TooShort,
+        ));
+        assert_eq!(short.status, StatusCode::BAD_REQUEST);
+        assert_eq!(short.code, Some("password_too_short"));
+        let long = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::TooLong,
+        ));
+        assert_eq!(long.status, StatusCode::BAD_REQUEST);
+        assert_eq!(long.code, Some("password_too_long"));
+        let nul = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::InvalidChar,
+        ));
+        assert_eq!(nul.status, StatusCode::BAD_REQUEST);
+        assert_eq!(nul.code, Some("password_invalid_char"));
     }
 }

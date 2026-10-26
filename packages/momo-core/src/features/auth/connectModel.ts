@@ -1,5 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { passwordRuleCopy } from "./passwordRuleCopy";
 
 // =============================================================================
 // Connect-screen decisions, kept out of the component so they can be tested
@@ -100,6 +101,17 @@ function joinFailureCopyBody(cause: unknown): ConnectFailure {
   const transport = transportFailure(cause);
   if (transport) return transport;
   const failure = cause as ApiError;
+  // ADR-0215 D2 (#4593): the join password is held to the same new-password rule
+  // as the claim screen's, and the server names the rule it broke
+  // (`error.code`). Say it here, on the account step where the password is, not
+  // "ask an admin for a new invite": the refusal comes before the invite is read,
+  // so the invite is still good and the fix is the field the person just typed.
+  // A 400 that names no rule, or one this screen does not know, falls through to
+  // the generic line below.
+  if (failure.status === 400) {
+    const rule = passwordRuleCopy(failure.code);
+    if (rule) return { message: rule, suggestSignIn: false, retryable: false };
+  }
   const detail = failure.message.toLowerCase();
   switch (failure.status) {
     case 404:
