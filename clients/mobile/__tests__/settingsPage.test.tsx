@@ -30,7 +30,7 @@ import {dividerIndent} from '../src/design/sheetModel';
 import {ChoiceRow, ConfirmStep} from '../src/design/sheetParts';
 import {ThemeProvider} from '../src/design/theme';
 import {pinReduceMotion} from './fixtures/reduceMotion';
-import {GroupSection} from '../src/design/atoms';
+import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
 import {PROFILE_FACE} from '../src/features/profile/ProfileFace';
@@ -694,9 +694,9 @@ describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)'
       ]);
     const textOf = (text: string, keys: string[]) =>
       pick(StyleSheet.flatten(screen.getByText(text).props.style) ?? {}, keys);
-    const grammar = (ids: {cancel: string; confirm: string}, text: {confirm: string; headline: string; detail: string}) => ({
-      cancel: boxOf(ids.cancel),
-      confirm: boxOf(ids.confirm),
+    const grammar = (testIDs: {cancel: string; confirm: string}, text: {confirm: string; headline: string; detail: string}) => ({
+      cancel: boxOf(testIDs.cancel),
+      confirm: boxOf(testIDs.confirm),
       cancelLabel: textOf('취소', ['fontSize', 'fontWeight']),
       confirmLabel: textOf(text.confirm, ['fontSize', 'fontWeight']),
       headline: textOf(text.headline, ['fontSize', 'fontWeight']),
@@ -739,6 +739,36 @@ describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)'
     expect(reference.cancel.borderRadius).toBe(radius.md);
     expect(reference.headline.fontWeight).toBe('700');
     expect(reference.detail.lineHeight).toBeGreaterThan(0);
+  });
+
+  it.each([
+    [1, 'row', 1],
+    [STACK_PILL_SCALE - 0.01, 'row', 1],
+    [STACK_PILL_SCALE, 'column', 0],
+    [3.1, 'column', 0],
+  ] as const)(
+    'r2 증거 공백: 로그아웃 확인의 두 단추는 글자 배율 %s 에서 %s 로 선다 — 큰 글씨에서는 쌓여 「로그아웃」 이 어절 가운데서 끊기지 않는다',
+    async (fontScale, direction, flex) => {
+      // AX5 캡처가 「로그아/웃」 을 잡았다 — 반폭 단추 둘이 큰 글씨 한 낱말을 담지 못한다.
+      const real = Dimensions.get('window');
+      jest.spyOn(Dimensions, 'get').mockImplementation(() => ({...real, fontScale}) as never);
+      await openPage();
+      fireEvent.press(screen.getByTestId('sign-out'));
+      const style = (id: string) => StyleSheet.flatten(screen.getByTestId(id).props.style) ?? {};
+      expect(style('sign-out-confirm-actions').flexDirection).toBe(direction);
+      // 쌓인 단추는 `flex: 1` 을 버린다(세로 방향 flex 1 은 높이를 0 으로 눌러 버린다) — 나란한 단추는 반반이다.
+      expect(style('sign-out-cancel').flex).toBe(flex);
+      expect(style('sign-out-confirm').flex).toBe(flex);
+    },
+  );
+
+  it('r2: 확인의 머리말과 설명은 어절 단위로 줄을 바꾼다(hangul-word)', async () => {
+    await openPage();
+    fireEvent.press(screen.getByTestId('sign-out'));
+    expect(screen.getByText('로그아웃할까요?').props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(
+      screen.getByText('로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다.').props.lineBreakStrategyIOS,
+    ).toBe('hangul-word');
   });
 
   it('L2: 안쪽 장의 첫 요소 위 여백은 설정 첫 장과 같다 — 옛 시트의 24 가 남아 안쪽 장만 떨어져 보이지 않는다', async () => {

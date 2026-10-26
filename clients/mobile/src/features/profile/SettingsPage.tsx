@@ -36,10 +36,10 @@ import {
   type PresenceStatus,
 } from '@momo/core/lib/api';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
+import {Pressable, ScrollView, StyleSheet, Text, View, useWindowDimensions} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {Screen, Sentence} from '../../design/atoms';
+import {Screen, Sentence, STACK_PILL_SCALE} from '../../design/atoms';
 import {PageHeader} from '../../design/SheetChrome';
 import {ChoiceRow, GroupCard, ListRow} from '../../design/sheetParts';
 import {ThemeControl} from '../../design/ThemeControl';
@@ -431,6 +431,10 @@ export function SettingsContent({
   useEffect(() => {
     if (covered) setConfirming(false);
   }, [covered]);
+  // 큰 글씨(`STACK_PILL_SCALE` 부터)에서는 반폭 단추 둘이 「로그아/웃」 으로 어절 가운데서 끊긴다 — 위아래로 쌓아 한 줄 전체를 쓴다
+  // (AX5 캡처가 잡았다: design-review r2 의 증거 공백). `ListRow` 의 값 쌓기와 같은 문턱이다.
+  const {fontScale} = useWindowDimensions();
+  const stackConfirm = fontScale >= STACK_PILL_SCALE;
   const [diagCopied, setDiagCopied] = useState(false);
   // 새 버전 배너(#3905): 새 판이 있는 동안 상시 선다.
   const updateOffer = useAppUpdateOffer();
@@ -836,16 +840,22 @@ export function SettingsContent({
           <View style={styles.confirm} testID="sign-out-confirm-block">
             {/* 웹 `ProfileCard` 의 확인 대화상자와 같은 두 문장이다 (리뷰 M5). */}
             <View style={styles.confirmCopy}>
-              <Text style={styles.confirmTitle}>로그아웃할까요?</Text>
+              <Sentence style={styles.confirmTitle}>로그아웃할까요?</Sentence>
               <Sentence style={styles.confirmText}>
                 로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다.
               </Sentence>
             </View>
-            <View style={styles.confirmActions}>
+            <View
+              style={[styles.confirmActions, stackConfirm && styles.confirmActionsStacked]}
+              testID="sign-out-confirm-actions">
               <Pressable
                 accessibilityRole="button"
                 onPress={() => setConfirming(false)}
-                style={({pressed}) => [styles.confirmButton, pressed && styles.pressed]}
+                style={({pressed}) => [
+                  styles.confirmButton,
+                  stackConfirm && styles.confirmButtonStacked,
+                  pressed && styles.pressed,
+                ]}
                 testID="sign-out-cancel">
                 <Text style={styles.confirmCancelLabel}>취소</Text>
               </Pressable>
@@ -854,6 +864,7 @@ export function SettingsContent({
                 onPress={onSignOut}
                 style={({pressed}) => [
                   styles.confirmButton,
+                  stackConfirm && styles.confirmButtonStacked,
                   styles.confirmDanger,
                   pressed && styles.confirmDangerPressed,
                 ]}
@@ -1028,6 +1039,9 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.label,
     },
     confirmActions: {flexDirection: 'row', gap: space.sm},
+    // 쌓인 배치: 단추가 한 줄 전체를 쓴다(`flex: 1` 은 세로 방향에서 높이를 0 으로 눌러 버린다).
+    confirmActionsStacked: {flexDirection: 'column'},
+    confirmButtonStacked: {flex: 0},
     confirmButton: {
       flex: 1,
       minHeight: TOUCH_TARGET,
