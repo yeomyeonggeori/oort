@@ -11,6 +11,7 @@ import {
   restoreDialogOpenerFocus,
   useRestoreFocusOnClose,
 } from "@/design/ui/dialog";
+import { Tooltip } from "@/design/ui/tooltip";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
@@ -190,23 +191,25 @@ export function ChannelMemberPanel({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen(true)}
-        aria-label={label}
-        title={label}
-        data-testid="channel-member-count"
-        data-roster-status={status}
-        className={channelHeaderControlClass({ wide: true })}
-      >
-        <Users className="size-4" aria-hidden="true" />
-        {status === "ready" && (
-          <span data-numeric aria-label={`멤버 ${members.length}명`}>
-            {members.length}
-          </span>
-        )}
-      </button>
+      {/* 머리 단추의 툴팁은 디자인 시스템 `Tooltip`이다(#4591). 네이티브 `title`은 두지 않는다: 같은 말이 두 번 뜬다. */}
+      <Tooltip label={label} side="bottom">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={label}
+          data-testid="channel-member-count"
+          data-roster-status={status}
+          className={channelHeaderControlClass({ wide: true })}
+        >
+          <Users className="size-4" aria-hidden="true" />
+          {status === "ready" && (
+            <span data-numeric aria-label={`멤버 ${members.length}명`}>
+              {members.length}
+            </span>
+          )}
+        </button>
+      </Tooltip>
       <DialogContent
         opener={triggerRef.current}
         className="gap-0 overflow-hidden"

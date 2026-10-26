@@ -167,13 +167,13 @@ describe('스킴 왕복 — 세 값이 화면 끝까지 간다', () => {
     );
     // 기본이 라이트라서, 먼저 다크로 갔다가 돌아와야 「컨트롤이 다시 그려진다」가 시험된다.
     fireEvent.press(screen.getByTestId('theme-dark'));
-    expect(flatten(screen.getByTestId('theme-control').props.style).backgroundColor).toBe(
+    expect(flatten(screen.getByTestId('theme-scheme-card').props.style).backgroundColor).toBe(
       darkPalette.surface,
     );
     fireEvent.press(screen.getByTestId('theme-light'));
     // 카드의 바탕과 고른 줄의 글자가 둘 다 라이트 팔레트에서 온다 (#2702 에서
     // 세그먼트가 목록형 선택지로 바뀐 뒤의 두 신호).
-    expect(flatten(screen.getByTestId('theme-control').props.style).backgroundColor).toBe(
+    expect(flatten(screen.getByTestId('theme-scheme-card').props.style).backgroundColor).toBe(
       lightPalette.surface,
     );
     expect(flatten(screen.getByText('라이트').props.style).color).toBe(

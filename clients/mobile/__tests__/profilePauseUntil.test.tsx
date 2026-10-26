@@ -10,11 +10,15 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {Animated, Dimensions, StyleSheet, View} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {ThemeProvider} from '../src/design/theme';
+import {LAYER_POP_MS} from '../src/design/motion';
+import {paletteFor, ThemeProvider} from '../src/design/theme';
+import {ds2Radius, radius, SAFE_GUTTER} from '../src/design/tokens';
+import {pinReduceMotion} from './fixtures/reduceMotion';
 import {PauseUntilPage} from '../src/features/profile/PauseUntilPage';
 import AppShell from '../src/shell/AppShell';
 import {
@@ -219,7 +223,11 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
-beforeEach(() => {
+/** 이 시험들은 움직임이 주제가 아니다 — 층이 누르는 즉시 걷히도록 동작 줄이기를 켠 채 돈다(`layerMotion4457.test.tsx` 가 움직임을 잰다). */
+let releaseMotion: (() => void) | null = null;
+
+beforeEach(async () => {
+  releaseMotion = await pinReduceMotion(true);
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -243,6 +251,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  releaseMotion?.();
+  releaseMotion = null;
   queryClient?.clear();
   queryClient = null;
   jest.restoreAllMocks();
@@ -252,7 +262,7 @@ async function openSheet() {
   renderShell();
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
   fireEvent.press(screen.getByTestId('profile-avatar'));
-  const sheet = screen.getByTestId('profile-sheet');
+  const sheet = screen.getByTestId('settings-page');
   await waitFor(() =>
     expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy(),
   );
@@ -294,7 +304,7 @@ describe('방해 금지 — 기한을 고르고서야 켜진다 (ADR-0204 D2)', 
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(server.writes).toEqual([]);
     // 고르지 않고 돌아오면 상태는 그대로 온라인이다.
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     expect(
       within(sheet).getByTestId('presence-option-auto').props.accessibilityState,
     ).toMatchObject({selected: true});
@@ -456,13 +466,75 @@ describe('방해 금지 — 기한을 고르고서야 켜진다 (ADR-0204 D2)', 
       ),
     );
     expect(within(sheet).getByTestId('pause-until-page')).toBeTruthy();
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     await waitFor(() =>
       expect(
         within(sheet).getByTestId('presence-option-auto').props.accessibilityState,
       ).toMatchObject({selected: true}),
     );
     expect(rulesWrites()).toEqual([]);
+  });
+});
+
+describe('기한을 고른 뒤 돌아가는 길도 「‹ 뒤로」와 같은 길이다 (#4457)', () => {
+  it('움직임이 켜져 있으면 30분을 고른 뒤 오른쪽으로 물러난 다음에야 장이 걷힌다', async () => {
+    releaseMotion?.();
+    releaseMotion = await pinReduceMotion(false);
+    const timing = jest.spyOn(Animated, 'timing');
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    timing.mockClear();
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-30m'));
+    // 쓰기가 끝나면(`onDone`) 장이 오른쪽으로 물러난다 — 곧바로 사라지지 않는다.
+    await waitFor(
+      () =>
+        expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+          expect.objectContaining({toValue: Dimensions.get('window').width, duration: LAYER_POP_MS}),
+        ),
+      {timeout: 8000},
+    );
+    await waitFor(() => expect(within(sheet).queryByTestId('pause-until-page')).toBeNull(), {
+      timeout: 8000,
+    });
+  });
+});
+
+describe('기한 장 — 새 카드 가족 (#4457)', () => {
+  const cardOf = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style);
+
+  it('기한 목록·달력·시각 칩이 모두 새 카드다 — 반경 20·surface 채움, 옛 반경 8 카드가 아니다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-custom'));
+    const surface = paletteFor('light').surface;
+    for (const id of ['pause-until-card-card', 'pause-until-date-group-card', 'pause-until-time-group-card']) {
+      const card = cardOf(id);
+      expect([id, card.borderRadius, card.backgroundColor]).toEqual([id, ds2Radius.card, surface]);
+    }
+    expect(ds2Radius.card).not.toBe(radius.md); // 옛 `GroupSection` 의 반경 — 비교가 헛돌지 않는다
+    // 옛 카드의 지문(반경 8 + 가는 테두리 + surface 채움)이 이 장 어디에도 없다 — 목록·달력·시각 칩 전부.
+    const oldCards = screen.UNSAFE_getAllByType(View).filter(view => {
+      const style = StyleSheet.flatten(view.props.style);
+      return (
+        style?.borderRadius === radius.md &&
+        style?.borderWidth === StyleSheet.hairlineWidth &&
+        style?.backgroundColor === surface
+      );
+    });
+    expect(oldCards).toHaveLength(0);
+  });
+
+  it('가로 여백은 이 장이 한 번만 진다 — 직접 고르기 블록과 확인 줄이 여백을 또 더하지 않는다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-custom'));
+    expect(cardOf('pause-until-page').paddingHorizontal).toBe(SAFE_GUTTER);
+    // 블록 안쪽(루트·확인 줄)은 가로 여백이 0 이다 — 지면 이중 여백(32)이다.
+    expect(cardOf('pause-until-custom').paddingHorizontal).toBeUndefined();
+    expect(cardOf('pause-until-actions').paddingHorizontal).toBeUndefined();
   });
 });
 
@@ -562,7 +634,7 @@ describe('기한 장 — 목록과 「직접 끌 때까지」의 부재', () => 
         '알림 설정을 바꾸지 못했어요. 다시 시도하세요.',
       ),
     );
-    fireEvent.press(within(sheet).getByTestId('profile-back'));
+    fireEvent.press(within(sheet).getByTestId('settings-back'));
     expect(
       within(sheet).getByTestId('profile-pause-row').props.accessibilityState,
     ).toMatchObject({checked: false});
@@ -798,7 +870,7 @@ describe('기한이 지나면 시트가 서버에 다시 묻는다 (design-revie
     queryClient!.setQueryData(['roster', WS], cache.roster);
     queryClient!.setQueryData(['settings', 'notification-rules', WS], cache.rules);
     fireEvent.press(screen.getByTestId('profile-avatar'));
-    const sheet = screen.getByTestId('profile-sheet');
+    const sheet = screen.getByTestId('settings-page');
     await waitFor(() =>
       expect(within(sheet).getByTestId('presence-option-auto')).toBeTruthy(),
     );
@@ -956,7 +1028,7 @@ describe('기한 장 — 읽어 주는 힌트', () => {
 });
 
 describe('직접 고르기 블록 — 열릴 때 한 번만 시트를 내린다', () => {
-  // 시트(`ProfileSheet`)는 `onReveal` 로 스크롤한다. 블록의 높이가 바뀔 때마다(지난 시각 오류문이
+  // 설정 페이지의 안쪽 장(`SettingsPage` 의 `SubPage`)은 `onReveal` 로 스크롤한다. 블록의 높이가 바뀔 때마다(지난 시각 오류문이
   // 뜨거나 달을 넘길 때) `onLayout` 이 다시 오는데 그때마다 내리면 고르던 자리에서 시트가 튄다.
   const layout = (y: number, height: number) => ({
     nativeEvent: {layout: {x: 0, y, width: 390, height}},

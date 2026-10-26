@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type ImageSourcePropType,
   type LayoutChangeEvent,
   type ScrollViewProps,
@@ -19,7 +20,7 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {ROW_GLYPH_MAX_SCALE, Sentence} from './atoms';
+import {ROW_GLYPH_MAX_SCALE, Sentence, STACK_PILL_SCALE} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
@@ -48,6 +49,7 @@ import {
 //   GroupCard      둥근 묶음 카드, 행 사이는 안쪽으로 들여 쓴 구분선
 //   GroupCardItem  가상화 목록(FlatList)의 한 줄을 같은 카드로 보이게 하는 틀
 //   ListRow        행: 앞 아이콘·이모지 · 이름 · 보조 줄 · 오른쪽 값 · 셰브론/펼침/복사/토글, 위험
+//   ChoiceRow      라디오 행: 앞 표지 · 이름 · 보조 줄 · 오른쪽 ✓ — 고른 줄은 강조색·굵게·✓ 셋 (#4457 이 올렸다)
 //   InputPill      입력 알약: 앞 아이콘 + 입력(ADR-0189 D6: 외곽선은 텍스트 입력에만 남는다)
 //   ActionTile     큰 행동 타일(아이콘 위, 이름 아래) · ActionTileRow 는 같은 폭으로 나란히
 //   SheetScroll    시트 몸의 스크롤 — 머리 아래 숨 쉴 틈·안전 영역·키보드 탭·큰 글씨에서도 끝까지 닿는다
@@ -56,8 +58,8 @@ import {
 // **가로 여백은 이 부품들이 주지 않는다.** `GroupCard`·`ListRow`·`InputPill`·`ActionTileRow` 는 폭 전체로 서고,
 // 바깥 16(`SAFE_GUTTER`)은 호스트가 진다 — `SheetScroll` 이 주고, 날 `ScrollView`·`FlatList` 는 제 콘텐츠 스타일에서
 // 준다(옛 `GroupSection` 은 스스로 졌다). 호스트가 안 주면 카드가 화면 가장자리까지 번진다.
-// 낡은 `atoms.tsx` 의 `GroupSection`·`GroupRow`(반경 8·테두리 카드)는 프로필 시트가 아직 쓴다(지시 기기 판은
-// 새 `GroupCard` 로 옮겼다). 여기가 새 가족이고, 옮기는 것은 #4457·#4458·#4319 의 일이다.
+// 낡은 `atoms.tsx` 의 `GroupSection`·`GroupRow`(반경 8·테두리 카드)는 설정 페이지(본 페이지와 안쪽 장 다섯)가 모두 새
+// 가족으로 옮긴 뒤로 거기서는 쓰이지 않는다(#4457). 다른 화면은 #4458·#4319 가 옮기는 날 지운다. 여기가 새 가족이다.
 // =============================================================================
 
 /** 섹션 라벨. 카드 위의 회색 작은 글씨 — `textMuted`(AA). `textFaint` 는 글자 대비 4.5 를 못 지난다. */
@@ -257,6 +259,10 @@ export function ListRow({
   const palette = usePalette();
   const afterClose = usePageSheetAction();
   const isToggle = accessory === 'toggle' && toggle !== undefined;
+  // 큰 글씨(`STACK_PILL_SCALE` 부터)에서는 「제목 … 값」이 한 줄에 안 들어간다. 값이 오른쪽에서 50% 상한에 눌려 「지우…」로
+  // 잘리거나 제목 상자만 키가 커진다(#4457 AX5 캡처). iOS 접근성 레이아웃처럼 값을 제목 **아래**로 내려 한 줄 전체를 쓴다.
+  const {fontScale} = useWindowDimensions();
+  const stackValue = Boolean(value) && fontScale >= STACK_PILL_SCALE;
   // 눌리는 행의 기본 이름: 제목만 읽으면 오른쪽 값(「회의 중」)과 보조 줄이 낭독에서 빠진다. 값 행투성이인 설정
   // 페이지가 이 부품을 쓴다. 이름을 직접 주면 그것이 이긴다.
   const spokenName = [title, detail, value].filter(Boolean).join(', ');
@@ -280,6 +286,14 @@ export function ListRow({
           style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
           {title}
         </Text>
+        {stackValue ? (
+          <Text
+            lineBreakStrategyIOS="hangul-word"
+            style={styles.rowValueStacked}
+            testID={testID ? `${testID}-value` : undefined}>
+            {value}
+          </Text>
+        ) : null}
         {detail ? (
           // 문장이다 — 어절 가운데서 끊기지 않는다(옛 `GroupRow.detail` 도 `Sentence` 였다).
           <Sentence style={styles.rowDetail} testID={testID ? `${testID}-detail` : undefined}>
@@ -287,8 +301,15 @@ export function ListRow({
           </Sentence>
         ) : null}
       </View>
-      {value ? (
-        <Text style={styles.rowValue} numberOfLines={1}>
+      {value && !stackValue ? (
+        <Text
+          style={styles.rowValue}
+          // 두 줄까지 — 한 줄이면 「지금대로 · 10월 27일 16:11까지」 같은 긴 값이 50% 상한에서 말줄임으로 잘린다(r1 M5). 그보다
+          // 길면(80자 상태 글) 말줄임이고, 그 글은 호스트가 따로 전문을 보인다. **줄바꿈은 어절 단위다**(`hangul-word`) — 제목과
+          // 쌓인 값(아래)이 이미 그러하고, 두 줄을 허용한 값이 그 규칙 없이 「온보/딩」 으로 어절 가운데서 끊겼다(r2 H1).
+          lineBreakStrategyIOS="hangul-word"
+          numberOfLines={2}
+          testID={testID ? `${testID}-value` : undefined}>
           {value}
         </Text>
       ) : null}
@@ -348,6 +369,109 @@ export function ListRow({
       ]}
       testID={testID}>
       {body}
+    </Pressable>
+  );
+}
+
+/**
+ * 라디오 행: 서로 배타적인 **설정값**(테마·화면 모드·내 상태…)을 한 줄씩 고른다. 오른쪽 ✓ 는 고른 줄에만 서고 자리는
+ * 늘 지킨다(고른 줄이 바뀔 때 글자가 옆으로 움찔하지 않는다).
+ *
+ * **고른 줄은 세 신호가 함께 바뀐다 — 강조색 글자 · 굵기 · ✓.** ✓ 하나만 바꾸면 그것을 손가락이 덮는 동안 신호가 없다
+ * (`ThemeControl` 머리말, #2702). 앱의 라디오가 모두 이 규칙이었고(옛 `GroupRow tone="accent"`) 그래서 한 부품이 쥔다.
+ * 보조기술에는 `radio` + `selected` 로 읽힌다(「3개 중」은 부모의 `radiogroup`).
+ *
+ * `leading` 은 **고르는 값의 모습을 미리 보이는 표지**다(테마 견본·강조색 점·사진 썸네일 — 읽히지 않는다). 아이콘 같은 장식
+ * 앞 칸이 아니다: 앞 칸의 폭은 표지 종류가 정하고(견본 44·점 20·썸네일 36), 표지가 있는 카드가 한 표면에 둘 이상이면 같은 폭을
+ * 써서 한 열이 된다(테마 견본 44 에 강조색 점을 맞춘다 — `phone-sheets.md` §4 예외). 표지가 값에 따라 있을 때만 서는 줄(고른 사진의
+ * 썸네일)은 그 열 규칙에 못 든다. 기본은 제목 첫 줄 높이의 22pt 칸이고(설명 줄이 붙으면
+ * 행이 위로 붙어 점·✓ 가 제목 첫 줄 옆에 선다), 칸이 더 크면 `leadingWidth` 와 `leadingAlign="center"` 로 가운데에 세운다 —
+ * 이때 카드의 `inset` 은 같은 폭이어야 구분선이 글자 열에서 시작한다. **표지가 없는 값(상태 이름처럼 색이 이미 다른 곳에서
+ * 말해지는 것)에는 주지 않는다**(`phone-sheets.md` §4 의 앞 칸 규칙).
+ */
+export function ChoiceRow({
+  title,
+  detail,
+  selected,
+  leading,
+  leadingWidth = SHEET.iconSlot,
+  leadingAlign = 'first-line',
+  onPress,
+  disabled = false,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
+  checkTestID,
+}: {
+  title: string;
+  detail?: string;
+  selected: boolean;
+  /** 앞 표지(장식). 낭독에서 빠진다. */
+  leading?: React.ReactNode;
+  /** 앞 칸의 폭. 카드의 `inset`(숫자)과 같아야 구분선이 맞는다. */
+  leadingWidth?: number;
+  /** `first-line`: 제목 첫 줄 높이 칸(작은 점) · `center`: 행 가운데(견본·썸네일처럼 줄보다 큰 것). */
+  leadingAlign?: 'first-line' | 'center';
+  onPress: () => void;
+  /** 쓰는 중(다른 선택이 날아가는 동안). 눌리지 않고 흐려진다. */
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
+  /** 고른 줄의 ✓ 에만 붙는다 — 고르지 않은 줄에는 ✓ 가 그려지지 않는다. */
+  checkTestID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const firstLine = leadingAlign === 'first-line';
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞는다(옛 `GroupRow` 와 같은 관용구).
+      accessibilityState={disabled ? {selected, disabled: true} : {selected}}
+      disabled={disabled ? true : undefined}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.row,
+        // 설명 줄이 붙은 행은 위로 붙인다 — 점과 ✓ 가 제목 첫 줄 옆에 선다(설명 줄 쪽으로 쏠리지 않게).
+        detail && firstLine ? styles.rowTop : null,
+        pressed && !disabled && styles.rowPressed,
+        disabled && styles.rowDisabled,
+      ]}
+      testID={testID}>
+      {leading ? (
+        <View
+          style={[
+            styles.choiceLead,
+            {width: leadingWidth},
+            firstLine && styles.choiceLeadFirstLine,
+          ]}
+          importantForAccessibility="no"
+          testID={testID ? `${testID}-lead` : undefined}>
+          {leading}
+        </View>
+      ) : null}
+      <View style={styles.rowText}>
+        <Text
+          lineBreakStrategyIOS="hangul-word"
+          style={[styles.rowTitle, selected && styles.rowTitleSelected]}>
+          {title}
+        </Text>
+        {detail ? <Sentence style={styles.rowDetail}>{detail}</Sentence> : null}
+      </View>
+      <View style={styles.choiceCheckSlot}>
+        {selected ? (
+          // 장식이다 — 행 자신이 접근성 요소(`radio`)라 안의 글리프는 따로 읽히지 않는다. `accessibilityElementsHidden` 은
+          // 주지 않는다: 시험이 `getByTestId` 로 「고른 줄에만 ✓ 가 선다」를 잴 수 있어야 한다.
+          <Image
+            source={SHEET_ICONS.check}
+            style={styles.choiceCheck}
+            importantForAccessibility="no"
+            testID={checkTestID}
+          />
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -659,6 +783,27 @@ const buildStyles = (color: Palette) =>
     rowText: {flex: 1},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
     rowTitleDanger: {color: color.danger, fontWeight: '600'},
+    // 라디오 행(`ChoiceRow`): 고른 줄은 강조색 + 굵게(✓ 와 함께 세 신호).
+    rowTitleSelected: {color: color.accentText, fontWeight: '600'},
+    rowTop: {alignItems: 'flex-start'},
+    choiceLead: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: space.sm,
+    },
+    // 앞 칸은 제목 한 줄 높이라(`rowTop` 과 함께) 점이 설명 줄이 붙은 행에서도 제목 첫 줄 옆에 선다.
+    choiceLeadFirstLine: {height: line.body},
+    choiceCheckSlot: {
+      width: SHEET_ICON_SIZE.check,
+      height: SHEET_ICON_SIZE.check,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    choiceCheck: {
+      width: SHEET_ICON_SIZE.check,
+      height: SHEET_ICON_SIZE.check,
+      tintColor: color.accentText,
+    },
     rowDetail: {
       marginTop: space.xs,
       fontSize: font.label,
@@ -669,6 +814,12 @@ const buildStyles = (color: Palette) =>
       flexShrink: 1,
       maxWidth: '50%',
       textAlign: 'right',
+      fontSize: font.body,
+      color: color.textMuted,
+    },
+    // 큰 글씨에서 제목 아래로 내려온 값 — 오른쪽 상한도 말줄임도 없이 한 줄 전체를 쓴다.
+    rowValueStacked: {
+      marginTop: space.xs,
       fontSize: font.body,
       color: color.textMuted,
     },

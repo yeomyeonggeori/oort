@@ -7,6 +7,7 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 import { ChannelTopicDialog } from "@/features/channels/ChannelContextControls";
 import { ChannelMemoryDialog } from "@/features/memory/ChannelMemoryDialog";
 import { ChannelGithubDialog } from "@/features/github/ChannelGithubDialog";
@@ -122,18 +123,21 @@ export function ChannelHeaderMenu({
           if (!next) actions.clearError();
         }}
       >
-        <DropdownMenuTrigger asChild>
-          <button
-            ref={triggerRef}
-            type="button"
-            data-testid="channel-title-menu"
-            aria-label={menuLabel}
-            title={menuLabel}
-            className={channelHeaderControlClass()}
-          >
-            <EllipsisVertical className="size-4" aria-hidden="true" />
-          </button>
-        </DropdownMenuTrigger>
+        {/* 툴팁은 트리거 바깥, 방향은 아래(#4591). 이 단추는 머리의 맨 오른쪽 끝이고 라벨이 길어질 수 있어(`{이름} 채널 메뉴`)
+            오른쪽 끝을 맞춘다(`align="end"`): 가운데 정렬이면 판의 오른쪽 여백 18을 넘어 잘린다. */}
+        <Tooltip label={menuLabel} side="bottom" align="end">
+          <DropdownMenuTrigger asChild>
+            <button
+              ref={triggerRef}
+              type="button"
+              data-testid="channel-title-menu"
+              aria-label={menuLabel}
+              className={channelHeaderControlClass()}
+            >
+              <EllipsisVertical className="size-4" aria-hidden="true" />
+            </button>
+          </DropdownMenuTrigger>
+        </Tooltip>
         <DropdownMenuContent
           align="end"
           data-testid="channel-title-menu-content"
