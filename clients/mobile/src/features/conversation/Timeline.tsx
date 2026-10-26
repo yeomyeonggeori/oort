@@ -15,6 +15,7 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   FlatList,
+  Keyboard,
   StyleSheet,
   Text,
   View,
@@ -27,6 +28,7 @@ import {
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {DockFollowContext} from './dockFollow';
+import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
@@ -2525,6 +2527,14 @@ function TimelineInner({
     });
   }, [dockFollow, listRef]);
 
+  // 목록의 탭 = 자판을 내리고 입력창을 쉬게 한다 (#4614, `tapDismiss.ts`). 터치를 **관찰만** 한다 — 응답자를 잡지 않으므로 링크·칩·길게 누르기·행 탭의 스레드 열기는 그대로이고, 어느 요소의
+  // 탭이든(자기 동작이 있어도) 손을 뗀 뒤에 이 처리기가 나머지를 거둔다. 자판은 여기서 직접 내리고(`Keyboard.dismiss` — 입력창이 안 쥔 자판은 없다), 글이 남은 입력창을 접는 것은 다리(`dockFollow.rest`)가 맡는다.
+  const onListTap = useCallback(() => {
+    Keyboard.dismiss();
+    dockFollow?.rest();
+  }, [dockFollow]);
+  const tapTouch = useTapDismiss(onListTap);
+
   // The viewport changed size rather than the content growing. A reader who was
   // at the bottom stays at the bottom; one who was reading history is left
   // exactly where they were.
@@ -3147,6 +3157,11 @@ function TimelineInner({
       // to is still the same row (#2586 — `TimelineCell`).
       CellRendererComponent={TimelineCell}
       onScroll={onScroll}
+      // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
+      onTouchStart={tapTouch.onTouchStart}
+      onTouchMove={tapTouch.onTouchMove}
+      onTouchEnd={tapTouch.onTouchEnd}
+      onTouchCancel={tapTouch.onTouchCancel}
       onScrollBeginDrag={onScrollBeginDrag}
       onScrollEndDrag={onScrollEndDrag}
       // 떠 있는 날짜 알약만 관성을 본다(DS2-4 B-1) — 따라가기 판정은 여기 없다.
@@ -3189,6 +3204,9 @@ function TimelineInner({
       // where `__tests__/messageTap.test.tsx` can reach it. A tap landing on
       // nothing (the gap under a short conversation) still dismisses here, which
       // is the case a row cannot answer for.
+      //
+      // **`handled` 는 자기 동작이 있는 요소의 탭을 「처리된 탭」으로 세어 자판을 안 내린다** (#4614 실측: 링크·아바타·작성자 줄·답글 표식·반응 칩·스레드 롤업). 그 요소들은 응답자를 쥐고
+      // 자기 일만 하므로 위의 두 길(행 `onRowPress`·`ScrollView` 의 손 뗌)에 닿지 않는다. 그 몫은 위 `tapTouch` 가 거둔다 — `never` 로 바꾸면 이 요소들의 동작이 첫 탭에서 사라진다.
       keyboardShouldPersistTaps="handled"
       // The list is the only thing that scrolls, and only up and down: a row
       // that could drag sideways is how a horizontal scroll gets into an app
