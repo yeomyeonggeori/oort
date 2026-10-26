@@ -1,9 +1,10 @@
-import React from 'react';
+import React, {useRef} from 'react';
 import {StyleSheet, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {KeyboardPane} from '../../lib/keyboardPane';
+import {createDockFollow, DockFollowContext, type DockFollow} from './dockFollow';
 
 // =============================================================================
 // Timeline above, composer below, and the composer stays visible when the
@@ -152,29 +153,34 @@ export function ConversationLayout({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
+  // 입력창이 자라는 프레임에 목록이 같이 바닥을 따라가게 하는 다리(`dockFollow.ts`, #4518). 목록 자리의 `Timeline` 이 처리기를 걸고 도크 자리의 `Composer` 가 부른다.
+  const dockFollow = useRef<DockFollow | null>(null);
+  if (dockFollow.current === null) dockFollow.current = createDockFollow();
 
   return (
-    // The clip. Nothing else lives here: a transformed child draws outside its
-    // parent's bounds by default, and the child below is lifted by up to a
-    // keyboard's height — straight over the header.
-    <View style={styles.clip} testID="conversation-clip">
-      {/* The moving part, and it moves without asking JavaScript. `bottomInset`
-          is the only thing this side still decides: how much of the keyboard's
-          height is already paid for as padding. */}
-      <KeyboardPane
-        // 알약 컴포저가 키보드에 붙지 않게 틈을 남긴다(DS2-4 검수 M-1): 네이티브는
-        // `키보드 높이 - bottomInset` 만큼 올리므로, 인셋을 틈만큼 덜 넘기면 그만큼 더
-        // 올라간다. 쉬는 상태의 여백(패딩)은 그대로 상수다 — 두 규칙(움직이는 것은
-        // 변환, 안 움직이는 것은 상수)이 둘 다 산다.
-        bottomInset={Math.max(0, restingBottomPadding(insets.bottom) - KEYBOARD_GAP)}
-        style={[styles.root, {paddingBottom: restingBottomPadding(insets.bottom)}]}
-        testID="conversation-layout">
-        <View style={styles.list} testID="conversation-list">
-          {list}
-        </View>
-        <View testID="composer-dock">{composer}</View>
-      </KeyboardPane>
-    </View>
+    <DockFollowContext.Provider value={dockFollow.current}>
+      {/* The clip. Nothing else lives here: a transformed child draws outside its
+          parent's bounds by default, and the child below is lifted by up to a
+          keyboard's height — straight over the header. */}
+      <View style={styles.clip} testID="conversation-clip">
+        {/* The moving part, and it moves without asking JavaScript. `bottomInset`
+            is the only thing this side still decides: how much of the keyboard's
+            height is already paid for as padding. */}
+        <KeyboardPane
+          // 알약 컴포저가 키보드에 붙지 않게 틈을 남긴다(DS2-4 검수 M-1): 네이티브는
+          // `키보드 높이 - bottomInset` 만큼 올리므로, 인셋을 틈만큼 덜 넘기면 그만큼 더
+          // 올라간다. 쉬는 상태의 여백(패딩)은 그대로 상수다 — 두 규칙(움직이는 것은
+          // 변환, 안 움직이는 것은 상수)이 둘 다 산다.
+          bottomInset={Math.max(0, restingBottomPadding(insets.bottom) - KEYBOARD_GAP)}
+          style={[styles.root, {paddingBottom: restingBottomPadding(insets.bottom)}]}
+          testID="conversation-layout">
+          <View style={styles.list} testID="conversation-list">
+            {list}
+          </View>
+          <View testID="composer-dock">{composer}</View>
+        </KeyboardPane>
+      </View>
+    </DockFollowContext.Provider>
   );
 }
 

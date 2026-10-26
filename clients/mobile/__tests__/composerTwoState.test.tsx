@@ -7,8 +7,11 @@ import {
   Composer,
   composerCollapsedHeight,
   INPUT_CHROME,
+  PRESS_DRAG_LOCK_RELEASE_MS,
+  PRESS_FOCUS_GRACE_MS,
 } from '../src/features/conversation/Composer';
 import {COMPOSER_EXPAND_SPRING} from '../src/design/motion';
+import {createDockFollow, DockFollowContext} from '../src/features/conversation/dockFollow';
 import {line, TOUCH_TARGET} from '../src/design/tokens';
 import {CONV} from '../src/features/conversation/convDesign';
 import {channelDraftKey} from '../src/features/conversation/drafts';
@@ -28,6 +31,10 @@ import {__setNonSecretStore} from '../src/storage/kv';
 // 접힘의 **움직임**은 이유에 따라 갈린다(#4456 D1): 포커스를 잃어서 접힐 때는 펼침과 같은 스프링이 거꾸로 돌고(자판이 내려가기 시작하는
 // 프레임에 알약이 44pt 한 번에 줄어 대화가 튀지 않게), 포커스 없이 글이 비어서 접힐 때는 같은 프레임이다(owner 10-24 결함을 애니메이션으로 가리지
 // 않게). 「동작 줄이기」면 둘 다 즉시다.
+//
+// 펼침은 **손이 닿는 순간** 시작한다(#4518, owner 10-25 「누르는 순간 바로」): 조건은 `pressing || focused || text !== ''` 다. 그 탭이 포커스로
+// 이어지지 않으면(끌기·취소·손을 뗀 뒤 유예 안에 포커스가 안 옴) 같은 스프링으로 되돌린다. 이 파일 아래쪽 「누름」 절의 시험은 **`touchStart` 등 터치를
+// 실제로 입력창에 쏘고**(RN 이 터치 대상에서 위로 올리는 그 이벤트) 렌더 결과를 읽는다 — 포커스 이벤트는 쏘지 않거나 따로 쏜다. 그래서 누름 핸들러를 빼면 붉어진다.
 //
 // 이 파일의 단정은 전부 **렌더 결과**(도구 줄이 있나, 입력창의 명시 높이, 햅틱 대역의 호출, `Animated.spring`
 // 호출, 프레임마다 읽은 도구 줄 높이·글 칸 여백, `Keyboard.dismiss` 호출)를 읽는다. 사보타주 표는 PR 본문.
@@ -689,6 +696,71 @@ describe('접히는 동안 — 프레임마다 읽은 값 (포커스를 잃어�
   });
 });
 
+describe('접히는 도중의 폭 가드는 Animated 의 리스너 정리에 기대지 않는다 (#4518)', () => {
+  // RN `AnimatedNode.__detach` 는 값에 달린 마지막 자식(도구 줄 · 글 칸 여백)이 떨어질 때 그 값의 리스너를 **모두 지운다**. 시뮬레이터에서 첫 접힘이 끝난 뒤 진행값 사본(옛 가드가 읽던
+  // `progress.addListener`)이 0 에 멈췄고, 그 뒤 접힘마다 넓은 폭이 자리표시 폭으로 새어 자리표시 문장이 몇 프레임 길게 바뀌었다(폭 281→247 동안 16→25자). jest 의 Animated 는 같은
+  // 정리를 하지 않아서(리스너가 계속 산다) 옛 가드도 jest 에서는 통과한다 — 그래서 이 시험은 그 정리를 **그대로 모사한다**: 입력창의 진행값에 달린 리스너를 `removeAllListeners` 로 지운 채
+  // 같은 흐름을 돈다. 가드가 리스너에 기대면 붉어진다.
+  const layout = (width: number) =>
+    fireEvent(input(), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width, height: 44}}});
+  const probeWidth = () =>
+    flat(
+      screen.queryAllByTestId('composer-placeholder-probe', {includeHiddenElements: true})[0]?.props.style,
+    ).width;
+  /** 마운트하는 동안 리스너가 붙는 모든 `Animated.Value` 를 모은다 — 입력창의 진행값도 그중 하나다. */
+  async function mountCollectingValues() {
+    const values: Animated.Value[] = [];
+    const original = Animated.Value.prototype.addListener;
+    jest.spyOn(Animated.Value.prototype, 'addListener').mockImplementation(function (
+      this: Animated.Value,
+      callback: (state: {value: number}) => void,
+    ) {
+      values.push(this);
+      return original.call(this, callback);
+    });
+    await mountSettled();
+    return values;
+  }
+  const detachLikeAnimated = (values: Animated.Value[]) =>
+    act(() => {
+      values.forEach(value => value.removeAllListeners());
+    });
+
+  it('리스너가 지워진 뒤에도 접히는 도중의 폭은 안 잰다 — 포커스를 잃어 접힐 때', async () => {
+    const values = await mountCollectingValues();
+    // (지금 코드에는 입력창의 진행값 리스너가 없어 모을 것이 없다 — 옛 가드(사보타주 S38)에서는 진행값이 잡혀 아래 `detachLikeAnimated` 가 그 리스너를 지운다.)
+    layout(358); // 접힌 폭
+    const base = probeWidth();
+    expect(base).toBeDefined();
+    detachLikeAnimated(values);
+    focus();
+    settle();
+    blur();
+    advance(4); // 접히는 중간 — 글 칸 폭이 접힌 폭이 아니다
+    layout(300);
+    expect(probeWidth()).toBe(base);
+    settle(); // 접힘이 끝났다
+    layout(340); // 접힌 폭에 닿은 뒤에는 잰다
+    expect(probeWidth()).toBe(Number(base) - 18);
+  });
+
+  it('리스너가 지워진 뒤에도 접히는 도중의 폭은 안 잰다 — 펼치는 도중에 누름이 되돌려질 때(끌기)', async () => {
+    const values = await mountCollectingValues();
+    layout(358);
+    const base = probeWidth();
+    detachLikeAnimated(values);
+    touchDown(100, 100);
+    advance(6); // 펼치는 도중
+    touchMoveTo(100, 125); // 끌기로 되돌림
+    advance(4); // 접히는 중간
+    layout(300);
+    expect(probeWidth()).toBe(base);
+    settle();
+    layout(340);
+    expect(probeWidth()).toBe(Number(base) - 18);
+  });
+});
+
 describe('아래로 끌어 자판 내리기', () => {
   const touch = (pageX: number, pageY: number) => ({nativeEvent: {pageX, pageY}});
   const bar = () => screen.getByTestId('composer-bar');
@@ -759,5 +831,694 @@ describe('아래로 끌어 자판 내리기', () => {
       fireEvent(bar(), 'touchEnd', touch(100, 160));
     }
     expect(dismiss).toHaveBeenCalledTimes(2);
+  });
+});
+
+// =============================================================================
+// 누름 (#4518) — 손이 닿는 순간 펼치고, 그 탭이 포커스로 이어지지 않으면 되돌린다
+//
+// 아래 시험은 터치를 **실제로 입력창에** 쏜다: RN 이 터치 대상(`TextInput`)에서 위로 올려 보내는 `touchStart`·`touchMove`·`touchEnd`·`touchCancel` 이고,
+// `composer-field` 의 처리기가 그것을 받는다. 포커스 이벤트(`focus()`)는 **따로** 쏜다 — 실기에서 포커스는 손을 뗀 뒤 RN `onPress → focus()` 를 돌아 오기
+// 때문이다. 포커스가 안 오는 길은 그냥 안 쏘면 된다. 단정은 렌더 결과(도구 줄·스프링 호출·프레임 값·렌더 횟수·타이머 수)를 읽으므로 처리기를 빼거나 숫자를
+// 바꾸면 붉어진다(사보타주 표는 PR 본문).
+// =============================================================================
+
+const finger = (pageX: number, pageY: number) => ({nativeEvent: {pageX, pageY}});
+/**
+ * 터치를 쏘는 자리. 실기에서 RN 은 날 터치를 입력창에서 위로 올려 보낸다 — 입력창이 편집 불가(`editable={false}`, 끌기 잠금)여도 그대로 올라와서 잠긴 동안에도
+ * `touchEnd` 가 와야 잠금이 풀린다. 그런데 RNTL 은 편집 불가 입력창으로 쏜 이벤트를 **그 위 처리기까지** 막는다(`fire-event.js` `isEventEnabled`). 그래서 잠긴 동안만
+ * 같은 처리기를 가진 `composer-field` 에 쏜다(그 위는 입력창을 거치지 않으니 막히지 않는다).
+ */
+const touchSurface = () =>
+  input().props.editable === false ? screen.getByTestId('composer-field') : input();
+/** 손가락이 입력창에 닿는다. 포커스 이벤트는 **쏘지 않는다**. */
+const touchDown = (x = 100, y = 100) => fireEvent(touchSurface(), 'touchStart', finger(x, y));
+const touchMoveTo = (x: number, y: number) => fireEvent(touchSurface(), 'touchMove', finger(x, y));
+const touchUp = (x = 100, y = 100) => fireEvent(touchSurface(), 'touchEnd', finger(x, y));
+const touchCancelled = () => fireEvent(touchSurface(), 'touchCancel', finger(100, 100));
+/** 시간을 `ms` 만큼 흘린다. */
+const wait = (ms: number) =>
+  act(() => {
+    jest.advanceTimersByTime(ms);
+  });
+/** 이 입력창의 스프링(강성 816 · JS 구동)만 센다 — 위 애니메이션 절의 `ours` 와 같은 거름이다. */
+const ourSprings = (spring: jest.SpyInstance) =>
+  spring.mock.calls.filter(
+    call =>
+      call[1]?.stiffness === COMPOSER_EXPAND_SPRING.stiffness && call[1]?.useNativeDriver === false,
+  );
+
+/**
+ * `mountSettled` 에 **커밋 횟수를 세는** `Profiler` 를 더한 것 — 「아무것도 하지 않는다」는 다시 그리지도 않는다는 뜻이다. 동작 줄이기의 답이 도착한 뒤 가짜
+ * 타이머로 돌아온다.
+ */
+async function mountProfiled() {
+  const commits = {count: 0};
+  jest.useRealTimers();
+  const view = render(
+    <React.Profiler
+      id="composer"
+      onRender={() => {
+        commits.count += 1;
+      }}>
+      <Composer
+        recipient="place"
+        channelLabel="배포"
+        directory={makeDirectory([])}
+        attachmentTarget={{workspaceId: 'ws', channelId: 'ch'}}
+        onSend={() => {}}
+      />
+    </React.Profiler>,
+  );
+  await act(async () => {});
+  jest.useFakeTimers();
+  return {view, commits};
+}
+
+describe('누름 (#4518) — 손이 닿는 순간 펼친다', () => {
+  it('닿는 순간 펼친다: 포커스 이벤트가 오기 전에 도구 줄이 서고 스프링이 한 번 돈다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    // 대조: 닿기 전에는 접힘이고 스프링도 없다.
+    expect(hasTools()).toBe(false);
+    expect(inputHeight()).toBe(collapsed());
+    expect(ourSprings(spring)).toHaveLength(0);
+    touchDown();
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    expect(ourSprings(spring)[0]?.[1]).toMatchObject({
+      toValue: 1,
+      ...COMPOSER_EXPAND_SPRING,
+      overshootClamping: true,
+      useNativeDriver: false,
+    });
+    // 손이 닿은 채 시간이 흘러도(포커스는 아직 안 왔다) 펼침은 끝값에 앉아 서 있다.
+    settle();
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(fieldStyle().marginLeft).toBe(0);
+  });
+
+  it('빠른 탭(닿음 → 뗌 → 포커스): 포커스가 와도 스프링을 다시 걸지도 접지도 않는다 — 누름이 건 스프링이 이어진다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    advance(3);
+    const before = Number(toolsStyle().height);
+    // 전제: 포커스가 오기 전에 이미 펼치는 중이다.
+    expect(before).toBeGreaterThan(0);
+    expect(before).toBeLessThan(TOUCH_TARGET);
+    touchUp();
+    advance(2);
+    focus();
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    // 이어서 단조롭게 끝값까지 오른다 — 접혔다 되살아나지도 멈추지도 않는다.
+    let previous = Number(toolsStyle().height);
+    for (let frame = 0; frame < 20; frame += 1) {
+      advance();
+      const height = Number(toolsStyle().height);
+      expect(height).toBeGreaterThanOrEqual(previous);
+      previous = height;
+    }
+    expect(previous).toBe(TOUCH_TARGET);
+    // 유예 시계는 포커스가 멈췄다: 오래 지나도 펼친 채고 스프링은 한 번 그대로다.
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+  });
+
+  it('느린 탭(길게 누른 뒤 뗌): 손이 닿아 있는 동안은 시간이 흘러도 되돌리지 않고, 포커스가 뗄 때 와도 접히지 않는다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    wait(PRESS_FOCUS_GRACE_MS * 4); // 손이 닿아 있다 — 유예 시계는 아직 돌지 않는다
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(ourSprings(spring)).toHaveLength(1);
+    touchUp();
+    advance(2);
+    focus();
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(ourSprings(spring)).toHaveLength(1);
+  });
+
+  it('정상 경로의 포커스 지연에도 접혔다 되살아나지 않는다 — 손을 뗀 뒤 300ms(실측 39~120ms 의 2.5배)에 포커스가 와도 스프링은 한 번이다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    touchUp();
+    wait(300);
+    // 아직 되돌리지 않았다 — 기다리는 중이다.
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    focus();
+    settle();
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(ourSprings(spring)).toHaveLength(1);
+  });
+
+  it('포커스가 오면 누름이 풀린다 — 곧 블러하면 유예 시계를 기다리지 않고 접힌다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    touchUp(); // 유예 시계가 선다
+    focus(); // 포커스가 넘겨받는다 — 시계도 멈춘다
+    advance(2);
+    blur();
+    // 블러가 거꾸로 스프링을 건다 — 누름이 아직 쥐고 있다면 펼친 채라 걸릴 것이 없다.
+    expect(ourSprings(spring)).toHaveLength(2);
+    expect(ourSprings(spring)[1]?.[1]).toMatchObject({toValue: 0});
+    wait(300); // 접히는 스프링이 끝난 뒤(≈245ms), 유예(500ms)보다는 앞
+    expect(hasTools()).toBe(false);
+    expect(inputHeight()).toBe(collapsed());
+    // 포커스가 유예 시계를 멈췄다: 스프링도 끝난 지금 기다리는 타이머가 하나도 없다. (스프링이 끝난 직후에는 act 스케줄러의 잔재가 잠깐 남는다 — 1ms 를
+    // 흘려 비운 뒤에 센다.)
+    wait(1);
+    expect(jest.getTimerCount()).toBe(0);
+    // 멈춘 시계가 되살아나 다시 건드리지 않는다.
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(hasTools()).toBe(false);
+    expect(ourSprings(spring)).toHaveLength(2);
+  });
+
+  it('접히는 도중에 다시 누르면 그 자리에서 이어 펼친다 — 아직 보이는 중이어도 새 누름이다(0 이나 끝값으로 튀지 않는다)', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    focus();
+    settle();
+    blur();
+    advance(4); // 접히는 중간(64ms)
+    const before = Number(toolsStyle().height);
+    expect(before).toBeGreaterThan(0);
+    expect(before).toBeLessThan(TOUCH_TARGET);
+    expect(ourSprings(spring)).toHaveLength(2); // 펼침 한 번 + 접힘 한 번
+    touchDown();
+    advance();
+    expect(ourSprings(spring)).toHaveLength(3);
+    expect(ourSprings(spring)[2]?.[1]).toMatchObject({toValue: 1});
+    const after = Number(toolsStyle().height);
+    expect(Math.abs(after - before)).toBeLessThan(6);
+    settle();
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+  });
+});
+
+describe('누름 (#4518) — 탭이 포커스로 이어지지 않으면 같은 스프링으로 되돌린다', () => {
+  it('포커스가 안 오면: 손을 뗀 뒤 유예가 끝나는 때 거꾸로 돌아 접힌다 — 그 전에는 기다린다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    settle(); // 펼침이 끝값에 앉았다
+    touchUp();
+    wait(PRESS_FOCUS_GRACE_MS - 20);
+    expect(hasTools()).toBe(true); // 아직 기다리는 중이다
+    expect(ourSprings(spring)).toHaveLength(1);
+    wait(40); // 유예가 끝났다
+    expect(ourSprings(spring)).toHaveLength(2);
+    expect(ourSprings(spring)[1]?.[1]).toMatchObject({
+      toValue: 0,
+      ...COMPOSER_EXPAND_SPRING,
+      overshootClamping: true,
+      useNativeDriver: false,
+    });
+    expect(hasTools()).toBe(true); // 움직이며 접힌다 — 같은 프레임이 아니다
+    settle();
+    expect(hasTools()).toBe(false);
+    expect(inputHeight()).toBe(collapsed());
+    expect(ourSprings(spring)).toHaveLength(2); // 끝난 뒤 다시 걸지 않는다
+  });
+
+  it('끌기: 문턱 안의 떨림은 탭이고, 문턱을 넘으면 손을 떼기 전에 되돌린다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown(100, 100);
+    settle();
+    touchMoveTo(104, 103); // 5pt — 손떨림
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    touchMoveTo(100, 125); // 25pt — 끌기
+    expect(ourSprings(spring)).toHaveLength(2);
+    expect(ourSprings(spring)[1]?.[1]).toMatchObject({toValue: 0});
+    settle();
+    expect(hasTools()).toBe(false);
+    expect(inputHeight()).toBe(collapsed());
+    // 되돌린 뒤에는 더 끌거나 손을 떼도, 시간이 흘러도 다시 펼치거나 또 거두지 않는다.
+    touchMoveTo(100, 160);
+    touchUp();
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(hasTools()).toBe(false);
+    expect(ourSprings(spring)).toHaveLength(2);
+  });
+
+  it('취소: 시스템이 터치를 가져가면 손을 떼기를 기다리지 않고 되돌린다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    settle();
+    touchCancelled();
+    expect(ourSprings(spring)).toHaveLength(2);
+    expect(ourSprings(spring)[1]?.[1]).toMatchObject({toValue: 0});
+    settle();
+    expect(hasTools()).toBe(false);
+    expect(inputHeight()).toBe(collapsed());
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(ourSprings(spring)).toHaveLength(2);
+  });
+
+  it('되돌림은 펼치는 도중에도 현재 값에서 이어진다 — 0 이나 끝값으로 튀지 않는다', async () => {
+    await mountSettled();
+    touchDown();
+    advance(4); // 펼치는 중간(64ms)
+    const before = Number(toolsStyle().height);
+    expect(before).toBeGreaterThan(0);
+    expect(before).toBeLessThan(TOUCH_TARGET);
+    touchCancelled();
+    advance();
+    // 같은 스프링이 거꾸로 돈다 — 접힌 모양으로 스냅하지 않았다.
+    expect(hasTools()).toBe(true);
+    const after = Number(toolsStyle().height);
+    expect(Math.abs(after - before)).toBeLessThan(6);
+    settle();
+    expect(hasTools()).toBe(false);
+  });
+
+  it('유예 중에 다시 누르면 유예가 멈춘다 — 손이 닿아 있는 동안은 되돌리지 않는다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled();
+    touchDown();
+    touchUp();
+    wait(PRESS_FOCUS_GRACE_MS - 100); // 유예가 거의 찼다
+    touchDown(); // 포커스가 안 와서 한 번 더 누른다
+    wait(PRESS_FOCUS_GRACE_MS * 2); // 첫 유예였다면 이미 끝났다
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    touchUp();
+    focus(); // 이번에는 포커스가 온다
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+  });
+
+  it('언마운트하면 기다리던 유예 시계도 사라진다 — 사라진 화면을 되돌리려 하지 않는다', async () => {
+    const view = await mountSettled();
+    const idle = jest.getTimerCount();
+    touchDown();
+    settle();
+    touchUp();
+    // 전제: 유예 시계가 실제로 섰다.
+    expect(jest.getTimerCount()).toBe(idle + 1);
+    view.unmount();
+    // 언마운트 직후에는 act 스케줄러의 잔재가 잠깐 남는다(터치 없이 언마운트해도 같다) — 1ms 를 흘려 비운 뒤에 남은 시계가 유예 시계다.
+    wait(1);
+    expect(jest.getTimerCount()).toBe(idle);
+  });
+});
+
+describe('누름 (#4518) — 이미 펼쳐져 있으면 아무것도 하지 않는다', () => {
+  it('이미 포커스면: 렌더도 타이머도 스프링도 없고, 끌기·취소·유예가 지나도 펼친 채다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {commits} = await mountProfiled();
+    focus();
+    settle();
+    // 전제: 포커스가 펼쳤고 스프링이 한 번 걸렸다 — 안 펼쳤다면 아래 「그대로」는 아무것도 안 잰 것이다.
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    const renders = commits.count;
+    const timers = jest.getTimerCount();
+    touchDown();
+    touchMoveTo(100, 140); // 끌기 문턱을 넘는다
+    touchUp();
+    touchDown();
+    touchCancelled();
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(commits.count).toBe(renders);
+    expect(jest.getTimerCount()).toBe(timers);
+    expect(ourSprings(spring)).toHaveLength(1);
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+  });
+
+  it('포커스 이벤트와 같은 틱에 닿아도(렌더·효과가 아직 안 돈 때) 이미 포커스로 본다 — 유예 시계를 만들지 않는다', async () => {
+    await mountSettled();
+    const timers = jest.getTimerCount();
+    act(() => {
+      focus(); // `onFocus` 가 포커스를 동기로 적어 둔다 — 렌더·효과는 이 act 가 끝나야 돈다
+      touchDown();
+      touchUp(); // 누름이 섰다면 여기서 유예 시계가 선다
+    });
+    wait(PRESS_FOCUS_GRACE_MS - 100); // 스프링은 끝났고 유예는 아직 안 끝난 때
+    expect(hasTools()).toBe(true);
+    expect(jest.getTimerCount()).toBe(timers);
+  });
+
+  it('글이 있어 이미 펼쳐져 있으면: 렌더도 타이머도 스프링도 없다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {commits} = await mountProfiled();
+    fireEvent.changeText(input(), '쓰던 글');
+    settle();
+    // 전제: 글이 펼쳤고 스프링이 한 번 걸렸다.
+    expect(hasTools()).toBe(true);
+    expect(ourSprings(spring)).toHaveLength(1);
+    const renders = commits.count;
+    const timers = jest.getTimerCount();
+    touchDown();
+    touchUp();
+    wait(PRESS_FOCUS_GRACE_MS * 2);
+    expect(commits.count).toBe(renders);
+    expect(jest.getTimerCount()).toBe(timers);
+    expect(ourSprings(spring)).toHaveLength(1);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+  });
+});
+
+describe('누름 (#4518 D2) — 끌기는 포커스로 이어지지 않는다: 문턱을 넘어 끌린 손이 닿아 있는 동안 입력창을 잠근다', () => {
+  // iOS 는 입력창을 누른 손을 **뗄 때** 포커스를 준다 — 끌었어도(시뮬레이터 실측, 네 방향 모두). 그래서 접힌 빈 입력창에서 문턱을 넘긴 끌기는
+  // 되돌린 입력창이 손을 뗄 때 다시 포커스돼 펼침이 깜빡였다. 네이티브가 포커스를 줄지 정하는 때에 입력창이 편집 불가(`editable={false}`)여야 막힌다.
+  // 이 시험은 그 **구성**(언제 잠기고 언제 풀리나)을 잠근다 — 실제로 포커스가 안 서는지는 시뮬레이터 실측이다(PR 본문).
+  const editable = () => input().props.editable as boolean;
+
+  it('문턱을 넘어 끌면 잠기고, 손을 뗀 뒤 PRESS_DRAG_LOCK_RELEASE_MS 가 지나서야 풀린다 — 닿기 전·손떨림은 잠그지 않는다', async () => {
+    await mountSettled();
+    expect(editable()).toBe(true); // 대조: 닿기 전
+    touchDown(100, 100);
+    expect(editable()).toBe(true); // 닿은 직후
+    touchMoveTo(104, 103); // 5pt — 손떨림은 탭이다
+    expect(editable()).toBe(true);
+    touchMoveTo(100, 125); // 25pt — 끌기
+    expect(editable()).toBe(false);
+    touchMoveTo(100, 160); // 더 끌어도 잠긴 채
+    expect(editable()).toBe(false);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS - 1);
+    expect(editable()).toBe(false); // 손을 뗀 순간을 네이티브가 정하는 동안은 잠긴 채다
+    wait(2);
+    expect(editable()).toBe(true);
+  });
+
+  it('시스템이 터치를 가져가도(취소) 같다: 손이 떨어진 뒤에 풀린다', async () => {
+    await mountSettled();
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    expect(editable()).toBe(false);
+    touchCancelled();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS - 1);
+    expect(editable()).toBe(false);
+    wait(2);
+    expect(editable()).toBe(true);
+  });
+
+  it('끌고 뗀 직후에 다시 누르면 그 순간 풀린다 — 잠금이 다음 탭을 먹지 않는다', async () => {
+    await mountSettled();
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    touchUp();
+    settle(); // 되돌림이 끝난다(500ms) — 잠금은 이미 풀렸으니 다시 잠글 수 있게 한 번 더 끈다
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    expect(editable()).toBe(false);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS / 2);
+    expect(editable()).toBe(false); // 아직 안 풀렸다
+    touchDown(100, 100); // 새 손
+    expect(editable()).toBe(true); // 닿는 그 순간 풀렸고
+    expect(hasTools()).toBe(true); // 새 누름은 새 누름으로 펼친다
+    wait(PRESS_DRAG_LOCK_RELEASE_MS * 2); // 옛 시계가 새 손 위에서 다시 잠그거나 푸는 일도 없다
+    expect(editable()).toBe(true);
+  });
+
+  it('이미 포커스면 잠그지 않는다 — 끌어 내리기·글자 선택은 지금 그대로 입력창이 받는다', async () => {
+    await mountSettled();
+    focus();
+    settle();
+    touchDown(100, 100);
+    touchMoveTo(100, 140); // 문턱을 넘는다
+    expect(editable()).toBe(true);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS * 2);
+    expect(editable()).toBe(true);
+  });
+
+  it('글이 있어 이미 펼쳐져 있으면 잠그지 않는다', async () => {
+    await mountSettled();
+    fireEvent.changeText(input(), '쓰던 글');
+    settle();
+    touchDown(100, 100);
+    touchMoveTo(100, 140);
+    expect(editable()).toBe(true);
+    touchUp();
+    wait(PRESS_DRAG_LOCK_RELEASE_MS * 2);
+    expect(editable()).toBe(true);
+  });
+
+  it('언마운트하면 잠금을 풀 시계도 사라진다', async () => {
+    const view = await mountSettled();
+    const idle = jest.getTimerCount();
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    touchUp();
+    settle(); // 되돌림의 스프링은 끝났다
+    // 전제: 잠금이 실제로 걸렸다가 풀렸다 — 아니면 아래 「시계 0」은 아무것도 안 잰 것이다.
+    expect(editable()).toBe(true);
+    touchDown(100, 100);
+    touchMoveTo(100, 125);
+    touchUp(); // 잠금을 풀 시계가 선다
+    expect(jest.getTimerCount()).toBeGreaterThan(idle);
+    view.unmount();
+    wait(1);
+    expect(jest.getTimerCount()).toBe(idle);
+  });
+});
+
+describe('도크가 자라는 프레임에 목록에게 알린다 (#4518, design-review R2 B1)', () => {
+  // 펼침은 JS 가 프레임마다 도크 높이를 정해 넘기고, 목록이 그 높이를 따라가는 길(`onLayout` → `scrollToEnd`)은 네이티브 → JS → 네이티브를 한 바퀴 돌아서 키보드 준비로 메인 스레드가
+  // 막혔다 풀리면 2~3프레임 늦는다 — 그 사이 마지막 말풍선의 아랫줄이 도크에 가려졌다 돌아왔다(짧은 탭: 틈 편차 −22pt·3프레임). 그래서 컴포저는 자라거나 주는 **프레임마다**
+  // 컨텍스트의 다리(`dockFollow`)로 목록에게 바닥을 따라가라고 알린다. 목록의 답은 `dockFollow4518.test.tsx` 가 잠근다.
+  function mountWithBridge() {
+    const bridge = createDockFollow();
+    const follow = jest.fn();
+    bridge.register(follow);
+    const view = render(
+      <DockFollowContext.Provider value={bridge}>
+        <Composer
+          recipient="place"
+          channelLabel="배포"
+          directory={makeDirectory([])}
+          attachmentTarget={{workspaceId: 'ws', channelId: 'ch'}}
+          onSend={() => {}}
+        />
+      </DockFollowContext.Provider>,
+    );
+    return {view, follow};
+  }
+  async function mountWithBridgeSettled() {
+    jest.useRealTimers();
+    const mounted = mountWithBridge();
+    await act(async () => {});
+    jest.useFakeTimers();
+    return mounted;
+  }
+
+  /**
+   * 이 입력창의 진행값(`Animated.Value`)에 **시험이 따로 세는 리스너**를 건다 — 값이 바뀐 횟수다. 다리의 알림이 「값이 바뀔 때마다 정확히 한 번」인지(빠짐도 겹침도 없는지) 이 숫자와 맞대어 본다.
+   * (jest 의 가짜 타이머에서는 한 프레임에 값이 여러 번 바뀌어서 프레임 수로는 못 센다.)
+   */
+  function countValueUpdates(spring: jest.SpyInstance) {
+    const value = ourSprings(spring).at(-1)?.[0] as Animated.Value;
+    expect(value).toBeDefined(); // 전제: 입력창의 스프링이 실제로 걸렸다
+    let updates = 0;
+    value.addListener(() => {
+      updates += 1;
+    });
+    return () => updates;
+  }
+
+  it('닿아서 펼치는 동안 값이 바뀔 때마다 한 번씩 알리고, 스프링이 끝나면 멈춘다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    expect(follow).not.toHaveBeenCalled();
+    touchDown();
+    follow.mockClear(); // 스프링이 걸리는 첫 값은 시험의 리스너가 붙기 전에 지나갔다 — 여기서부터 같이 센다
+    const updates = countValueUpdates(spring);
+    advance(4);
+    expect(updates()).toBeGreaterThan(0); // 전제: 실제로 자라고 있다
+    expect(follow).toHaveBeenCalledTimes(updates());
+    settle();
+    expect(follow).toHaveBeenCalledTimes(updates());
+    const total = follow.mock.calls.length;
+    wait(500);
+    expect(follow.mock.calls.length).toBe(total); // 끝난 뒤에는 더 안 부른다
+  });
+
+  it('포커스를 잃어 접히는 동안에도 값이 바뀔 때마다 알린다 — 줄어드는 도크 위로 목록이 따라 내려오게', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    focus();
+    settle();
+    follow.mockClear();
+    blur();
+    follow.mockClear();
+    const updates = countValueUpdates(spring);
+    advance(4);
+    expect(updates()).toBeGreaterThan(0);
+    expect(follow).toHaveBeenCalledTimes(updates());
+  });
+
+  it('앞 스프링의 리스너가 남아 겹쳐 부르지 않는다 — 두 번째 스프링도 값이 바뀔 때마다 정확히 한 번이다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    touchDown();
+    settle(); // 첫 스프링이 끝났다(그 리스너는 거둬졌다)
+    touchMoveTo(100, 140); // 끌기로 되돌림 → 두 번째 스프링
+    follow.mockClear();
+    const updates = countValueUpdates(spring);
+    advance(4);
+    expect(updates()).toBeGreaterThan(0);
+    // 앞 스프링의 리스너가 새면 값이 바뀔 때마다 두 번씩 불러 숫자가 두 배가 된다.
+    expect(follow).toHaveBeenCalledTimes(updates());
+  });
+
+  // 동작 줄이기: 값이 한 번에 바뀌어 스프링의 프레임별 알림이 없다. 앱을 켜고 처음 누른 짧은 탭에서는 키보드 준비가 메인 스레드를 막는 동안 목록의 `onLayout` 길이 늦어서 마지막 말풍선의
+  // 아랫줄이 가려졌다(시뮬레이터: 알림 없는 코드 8/8번 잘림 1~8프레임, 값을 바꾼 직후 한 번 알리면 28번 중 2번(한가할 때 1번 68ms · 부하 속 1번 30ms) — 리뷰 R3 M3 를 측정으로 줄인 것).
+  it('동작 줄이기: 스프링이 없으니 프레임별 알림은 없고, 값이 한 번에 바뀐 직후 한 번 알린다 — 목록이 onLayout 길만 기다리지 않게', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const spring = jest.spyOn(Animated, 'spring');
+    const {follow} = await mountWithBridgeSettled();
+    expect(follow).not.toHaveBeenCalled();
+    touchDown();
+    expect(hasTools()).toBe(true); // 전제: 같은 틱에 펼쳐졌다
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+    expect(follow).toHaveBeenCalledTimes(1);
+    settle();
+    wait(500);
+    expect(follow).toHaveBeenCalledTimes(1); // 움직임이 없으니 프레임별로는 안 부른다
+    expect(ourSprings(spring)).toHaveLength(0);
+  });
+
+  it('동작 줄이기: 알림은 값을 바꾼 뒤에 간다 — 목록의 명령이 레이아웃 커밋 뒤에 줄을 서도록', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const order: string[] = [];
+    const realSetValue = Animated.Value.prototype.setValue;
+    jest.spyOn(Animated.Value.prototype, 'setValue').mockImplementation(function (
+      this: Animated.Value,
+      value: number,
+    ) {
+      order.push(`값 ${value}`);
+      realSetValue.call(this, value);
+    });
+    const {follow} = await mountWithBridgeSettled();
+    follow.mockImplementation(() => {
+      order.push('알림');
+    });
+    order.length = 0; // 마운트가 남긴 기록은 버린다
+    touchDown();
+    const notified = order.indexOf('알림');
+    expect(notified).toBeGreaterThan(0); // 전제: 알렸다
+    expect(order[notified - 1]).toBe('값 1'); // 바로 앞이 펼침 값이다
+    expect(order.filter(entry => entry === '알림')).toHaveLength(1);
+  });
+
+  it('동작 줄이기: 접힘은 목록에게 알리지 않는다 — 줄어드는 도크 위로 목록은 늘기만 하고(가려질 줄이 없고), 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const {follow} = await mountWithBridgeSettled();
+    touchDown();
+    expect(hasTools()).toBe(true); // 전제: 펼쳤다
+    follow.mockClear(); // 펼침의 알림 한 번은 위 시험이 잠근다
+    touchMoveTo(100, 130); // 끌기로 되돌림 — 동작 줄이기라 같은 렌더에서 즉시 접힌다
+    settle();
+    wait(500);
+    expect(hasTools()).toBe(false); // 전제: 접혔다
+    expect(follow).not.toHaveBeenCalled();
+  });
+
+  it('동작 줄이기여도 다리가 없는 곳에서는 그대로 펼친다 — 알릴 곳이 없다고 터지지 않는다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    await mountSettled();
+    touchDown();
+    expect(hasTools()).toBe(true);
+    expect(toolsStyle().height).toBe(TOUCH_TARGET);
+  });
+
+  it('다리가 없는 곳에서도 그대로 돈다 — 컨텍스트가 비어 있어도 펼치고 접힌다', async () => {
+    await mountSettled();
+    touchDown();
+    settle();
+    expect(hasTools()).toBe(true);
+    touchMoveTo(100, 140);
+    settle();
+    expect(hasTools()).toBe(false);
+  });
+});
+
+describe('누름 (#4518) — 동작 줄이기는 즉시, 햅틱은 0', () => {
+  it('동작 줄이기: 닿는 순간 움직임 없이 펼쳐지고, 되돌림의 세 길(끌기·취소·유예)도 움직임 없이 같은 렌더에서 접힌다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const spring = jest.spyOn(Animated, 'spring');
+    await mountSettled(); // 설정의 답이 도착한 뒤
+    // (대조) 같은 세 길에서 동작 줄이기가 아니면 스프링이 돈다 — 위 「끌기」「취소」「유예」 시험이 그것이다.
+    const revertPaths: Array<[string, () => void]> = [
+      ['끌기', () => touchMoveTo(100, 130)],
+      ['취소', () => touchCancelled()],
+      [
+        '유예',
+        () => {
+          touchUp();
+          wait(PRESS_FOCUS_GRACE_MS + 20);
+        },
+      ],
+    ];
+    for (const [name, revert] of revertPaths) {
+      touchDown();
+      expect([name, hasTools()]).toEqual([name, true]); // 닿는 순간 즉시 펼침
+      expect([name, toolsStyle().height]).toEqual([name, TOUCH_TARGET]);
+      expect(toolsStyle().opacity).toBe(1);
+      expect(fieldStyle()).toMatchObject({marginLeft: 0, marginRight: 0});
+      revert();
+      expect([name, hasTools()]).toEqual([name, false]); // 같은 렌더에서 접힘
+      expect(inputHeight()).toBe(collapsed());
+    }
+    expect(ourSprings(spring)).toHaveLength(0);
+  });
+
+  it('동작 줄이기: 글 칸 양옆 여백은 진행값이 아니라 상태가 정한다 — 진행값이 영영 안 따라와도 펼치고 되돌린 뒤 접힌 자리로 돌아온다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    // 시뮬레이터에서는 JS 구동 값이 `setNativeProps` 로 네이티브를 직접 고친다. 누름이 펼침 직후 되돌려지면(끌기·취소·유예) 리액트가 기억하는 여백(접힌 값)과 네이티브에 써 둔 여백(펼친 값)이 어긋나고
+    // 접힌 쪽 렌더가 「같은 값」이라며 아무것도 안 보내서 자리표시가 + 버튼 위에 겹쳐 남았다(16 Pro: 끌기 8번 모두). jest 는 그 어긋남을 못 만든다 — 대신 최악을 만든다: 진행값이
+    // 아예 안 바뀐다. 여백이 상태에서만 나오면(진행값을 안 거치면) 어긋날 곳이 없어서 이 시험이 선다.
+    jest.spyOn(Animated.Value.prototype, 'setValue').mockImplementation(() => {});
+    await mountSettled();
+    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle});
+    touchDown();
+    expect(hasTools()).toBe(true); // 전제: 상태는 펼침이다
+    expect(fieldStyle()).toMatchObject({marginLeft: 0, marginRight: 0});
+    touchMoveTo(100, 130); // 끌기로 되돌림
+    expect(hasTools()).toBe(false); // 전제: 접혔다
+    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle});
+  });
+
+  it('햅틱 0 — 닿고 · 떨고 · 끌고 · 취소하고 · 유예가 지나고 · 포커스가 넘겨받는 동안 한 번도 안 울린다(#4331)', async () => {
+    await mountSettled();
+    touchDown();
+    // 전제: 닿는 것만으로 실제로 펼쳐졌다 — 안 펼쳐졌다면 「울리지 않는다」는 아무것도 안 잰 것이다.
+    expect(hasTools()).toBe(true);
+    touchMoveTo(100, 130); // 끌기로 되돌림
+    touchDown();
+    touchCancelled(); // 취소로 되돌림
+    touchDown();
+    touchUp();
+    wait(PRESS_FOCUS_GRACE_MS + 20); // 유예로 되돌림
+    touchDown();
+    touchUp();
+    focus(); // 포커스가 넘겨받음
+    settle();
+    expect(hasTools()).toBe(true);
+    expect(hapticCalls).toEqual([]);
+    // 대조: 같은 대역이 보내기에서는 울린다.
+    fireEvent.changeText(input(), '보낼 글');
+    fireEvent.press(sendButton());
+    expect(hapticCalls).toEqual(['impact:light']);
   });
 });
