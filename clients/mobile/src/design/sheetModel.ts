@@ -11,18 +11,192 @@ import {SHEET, type Palette} from './tokens';
 /** 시안 `.a-sheet{top:58px}` — 상태 막대 바로 아래. 큰 단의 위 끝이다. */
 export const SHEET_TOP = 58;
 
-/** 이만큼(pt) 끌어내리면 놓는 순간 닫는다. 손잡이 높이의 배수가 아니라 「절반쯤 내렸다」의 체감값. */
-export const SHEET_DISMISS_DISTANCE = 120;
+// ---- 끌어 닫기 (#4612) ------------------------------------------------------
+//
+// 어디를 잡고 내려도 닫히는 시트의 **판정**: 누가 끌기를 가져가는가(머리·본문, 스크롤 넘겨받기), 손가락을 어떻게
+// 따라가는가(고무줄), 놓았을 때 닫는가(거리·속도), 스크림이 얼마나 옅은가. 배선(PanResponder·Animated)은
+// `PageSheet.tsx` 다.
 
-/** 이 속도(pt/ms)보다 빠르게 튕기면 거리가 모자라도 닫는다. */
-export const SHEET_DISMISS_VELOCITY = 1.1;
+/** 끌기를 가져가는 문턱(pt). 이보다 덜 움직인 손가락은 탭이거나 떨림이다 — 여기서 가져가면 머리 단추의 탭이 죽는다. */
+export const SHEET_CLAIM_SLOP = 6;
 
 /**
- * 손을 뗐을 때 시트를 닫는가. 거리와 속도 **어느 한쪽**이면 닫고, 둘 다 모자라면 제자리로 돌아온다.
- * 경계값 자체(120.0 · 1.1)는 닫지 않는다 — 「넘어야」 닫는다.
+ * 시트 **높이의 이 비율을 넘게** 끌어 내리고 놓으면 닫는다.
+ *
+ * 근거는 셋이고 서로 다른 종류다.
+ *   - 이슈 #4612 수용기준: 「시트 높이의 약 25~30%」. 이 값의 **출처는 이것**(작성자가 정한 값)이고, 25% 는 그 범위의
+ *     가벼운 쪽이다 — 이 이슈가 고치려는 불만이 「안 내려간다」이기 때문이다.
+ *   - Buzz(Flutter): `showBuzzModalBottomSheet` 는 `showModalBottomSheet` 의 기본값을 그대로 쓴다.
+ *     `_kCloseProgressThreshold = 0.5`(flutter `material/bottom_sheet.dart`) — 높이의 **절반**. 우리보다 두 배 엄격한 비교값이다.
+ *   - iOS `UISheetPresentationController`: 문턱 값을 **공개하지 않는다.** 그래서 이 주석은 「iOS 값」을 지어내지 않는다.
+ *     시스템 시트와 나란히 놓고 대조하는 일은 실기·시뮬레이터(2단계)의 몫이다.
+ *
+ * 알아 둘 것: 큰 단(16 Pro 에서 ≈808pt)은 25% 가 ≈200pt 라 천천히 끄는 길은 길다 — 그 길이 싫으면 튕긴다
+ * ({@link SHEET_DISMISS_VELOCITY}). 큰 단의 체감은 실기 확인 전까지 `runtime-unverified` 다.
  */
-export function shouldDismissSheet(dy: number, vy: number): boolean {
-  return dy > SHEET_DISMISS_DISTANCE || vy > SHEET_DISMISS_VELOCITY;
+export const SHEET_DISMISS_RATIO = 0.25;
+
+/**
+ * 작은 시트에서 손가락이 스치기만 해도 닫히지 않게 하는 바닥(pt). 눌림 영역(44)보다 크게, 머리 줄(52)보다 약간 크게 둔다.
+ * 25% 가 이보다 작은 시트(높이 256 미만)에만 닿는다.
+ */
+export const SHEET_DISMISS_MIN_DISTANCE = 64;
+
+/**
+ * 이 속도(**px/ms**)보다 빠르게 내려 튕기면 거리가 모자라도 닫는다.
+ *
+ * 단위가 함정이다. RN `PanResponder` 의 `vy` 와 이 파일의 속도는 px/ms 이고, Flutter 의 상수는 px/s 다:
+ * `_kMinFlingVelocity = 700.0`(px/s, `bottom_sheet.dart`) = 0.7 px/ms. Buzz 가 이 값 그대로다. 사진 뷰어
+ * (`viewerDismiss.ts`)가 같은 Buzz 값 700px/s 를 쓴다 — 앱의 「튕겨 닫기」가 한 가지 느낌이다. 옛 값 1.1(= 1100px/s)은
+ * 그보다 무거웠다.
+ *
+ * 이 값은 {@link releaseVelocity} 가 구한 속도와 짝이다: Flutter 도 마지막 한 구간이 아니라 100ms 창으로 속도를 잰다.
+ */
+export const SHEET_DISMISS_VELOCITY = 0.7;
+
+/** 시트를 이만큼(pt) **넘게** 내려 놓아야 거리로 닫힌다. 높이는 시트가 실제로 선 높이다. */
+export function sheetDismissDistance(sheetHeight: number): number {
+  return Math.max(SHEET_DISMISS_MIN_DISTANCE, sheetHeight * SHEET_DISMISS_RATIO);
+}
+
+/**
+ * 손을 뗐을 때 시트를 닫는가. 거리와 속도 **어느 한쪽**이면 닫고, 둘 다 모자라면 제자리로 돌아온다. 경계값 자체는
+ * 닫지 않는다 — 「넘어야」 닫는다.
+ *
+ * @param offset 시트가 가 있는 곳(pt, 아래가 양수). 손가락이 아니라 **시트**의 이동이다(고무줄은 음수).
+ * @param velocity 놓는 순간의 아래쪽 속도(px/ms). 위로 튕기면 음수다.
+ * @param sheetHeight 시트가 실제로 선 높이(pt).
+ */
+export function shouldDismissSheet(offset: number, velocity: number, sheetHeight: number): boolean {
+  return offset > sheetDismissDistance(sheetHeight) || velocity > SHEET_DISMISS_VELOCITY;
+}
+
+/** 시트가 위로 늘어나는 상한(pt). 시트 바닥 밑에 이만큼의 바탕을 깔아(`PageSheet`) 틈이 보이지 않게 한다. */
+export const SHEET_RUBBER_MAX = 24;
+
+/**
+ * iOS `UIScrollView` 고무줄 식: `(1 − 1 / (x·c/d + 1)) · d`, c = 0.55. 널리 쓰이는 **역공학 값**이지 Apple 이 공개한
+ * 식이 아니다. d 를 {@link SHEET_RUBBER_MAX} 로 두어 아무리 당겨도 그 위로 가지 않는다(점근선).
+ */
+export function rubberBand(distance: number): number {
+  if (!(distance > 0)) return 0;
+  return (1 - 1 / ((distance * 0.55) / SHEET_RUBBER_MAX + 1)) * SHEET_RUBBER_MAX;
+}
+
+/**
+ * 끌기가 시작된 뒤 손가락이 `dy` 만큼 움직였을 때 시트가 가 있을 곳(pt, 아래가 양수).
+ * 아래로는 **1:1**(손가락 이동 = 시트 이동), 위로는 고무줄 저항이다.
+ *
+ * 끌기를 가져가는 앞의 {@link SHEET_CLAIM_SLOP} 만큼은 흡수된다(UIScrollView 가 첫 문턱을 삼키는 것과 같다):
+ * 시트가 처음 움직일 때 튀지 않고, 대신 손가락이 시트보다 그만큼 앞서 있다.
+ */
+export function sheetFollow(dy: number): number {
+  return dy >= 0 ? dy : -rubberBand(-dy);
+}
+
+/** 이 이하(pt)면 스크롤이 맨 위다. iOS 는 소수 픽셀 위에서 쉬기도 한다. */
+export const SCROLL_TOP_EPSILON = 1;
+
+/** 스크롤이 맨 위인가. 모르는 값(NaN)은 맨 위가 **아니다** — 모르면 본문이 스크롤하게 둔다(fail-closed). */
+export function isScrolledToTop(offsetY: number): boolean {
+  return offsetY <= SCROLL_TOP_EPSILON;
+}
+
+/** 손가락이 닿은 곳: 머리(손잡이·제목 줄)는 늘 시트의 것이고, 본문은 스크롤이 맨 위일 때만이다. */
+export type DragZone = 'header' | 'body';
+
+/**
+ * 이 이동으로 시트가 끌기를 가져가는가(`onMoveShouldSetPanResponderCapture` 의 판정).
+ *
+ *   · 닫는 중이 아니다(슬라이드가 끊기면 행동이 앞당겨 불린다)
+ *   · 손가락이 하나다
+ *   · **아래로** 문턱({@link SHEET_CLAIM_SLOP})을 넘었고 세로가 가로보다 크다(가로 스와이프는 가져가지 않는다)
+ *   · 본문이면 — 등록된 세로 스크롤이 **하나 이상** 있고 **모두** 맨 위다.
+ *
+ * 마지막 조건이 스크롤 넘겨받기다: 스크롤이 중간이면 본문이 스크롤하고, 맨 위일 때 아래로 끌면 시트가 따라온다.
+ * 등록된 스크롤이 **없으면 가져가지 않는다**(fail-closed): 본문의 스크롤이 시트에 알려지지 않은 채(날 `FlatList`) 가져가면,
+ * 목록을 위로 되감던 손가락이 시트를 끌어 내리는 회귀가 생긴다. 알려진 것만 가져간다.
+ */
+export function claimsSheetDrag(args: {
+  zone: DragZone;
+  dx: number;
+  dy: number;
+  touches: number;
+  closing: boolean;
+  scrollOffsets: readonly number[];
+}): boolean {
+  if (args.closing || args.touches !== 1) return false;
+  if (!(args.dy > SHEET_CLAIM_SLOP) || !(Math.abs(args.dy) > Math.abs(args.dx))) return false;
+  if (args.zone === 'header') return true;
+  return args.scrollOffsets.length > 0 && args.scrollOffsets.every(isScrolledToTop);
+}
+
+/** 끌기 도중의 한 표본: 위치(pt)와 시각(ms). 시각은 터치 이벤트의 `timestamp` 다. */
+export interface DragSample {
+  y: number;
+  t: number;
+}
+
+/** 속도를 재는 창(ms). Flutter `VelocityTracker._horizonMilliseconds`. */
+export const VELOCITY_HORIZON_MS = 100;
+/** 이보다 오래 멈췄다 놓으면 속도는 0 이다(ms). Flutter `_assumePointerMoveStoppedMilliseconds`. */
+export const VELOCITY_STOPPED_MS = 40;
+/** 속도를 믿으려면 필요한 표본 수. Flutter `_minSampleSize`. */
+export const VELOCITY_MIN_SAMPLES = 3;
+
+/**
+ * 놓는 순간의 속도(px/ms, 아래가 양수).
+ *
+ * 왜 `PanResponder` 의 `vy` 가 아닌가: 그 값은 **마지막 move 한 구간**의 속도이고 놓을 때 다시 구하지 않는다
+ * (RN `PanResponder.js` `_updateGestureStateOnMove`). 그래서 (1) 멈췄다 놓아도 마지막 구간의 속도가 남아 튕김으로 읽히고,
+ * (2) 이벤트가 몰려 와 구간이 1~2ms 면 1pt 떨림이 1px/ms 가 된다. Flutter 의 `VelocityTracker` 는 그래서 창으로 잰다 —
+ * 같은 규칙: 마지막 표본이 놓은 때보다 40ms 넘게 전이면 0, 마지막 표본에서 100ms 안(표본 사이가 40ms 이하로 이어진 것만)의
+ * 표본 3개 이상으로 속도를 구한다. Flutter 는 2차 곡선을 맞추고 우리는 **1차(최소제곱 기울기)** 다 — 단순화이고, 두
+ * 값의 감각 차이는 2단계 실기 확인이다.
+ */
+export function releaseVelocity(samples: readonly DragSample[], releaseAt: number): number {
+  const newest = samples[samples.length - 1];
+  if (newest === undefined) return 0;
+  if (releaseAt - newest.t > VELOCITY_STOPPED_MS) return 0;
+  const window: DragSample[] = [newest];
+  for (let i = samples.length - 2; i >= 0; i--) {
+    const sample = samples[i];
+    const next = window[window.length - 1];
+    if (newest.t - sample.t > VELOCITY_HORIZON_MS || next.t - sample.t > VELOCITY_STOPPED_MS) break;
+    window.push(sample);
+  }
+  if (window.length < VELOCITY_MIN_SAMPLES) return 0;
+  const n = window.length;
+  const meanT = window.reduce((sum, s) => sum + s.t, 0) / n;
+  const meanY = window.reduce((sum, s) => sum + s.y, 0) / n;
+  let covariance = 0;
+  let variance = 0;
+  for (const s of window) {
+    covariance += (s.t - meanT) * (s.y - meanY);
+    variance += (s.t - meanT) ** 2;
+  }
+  return variance === 0 ? 0 : covariance / variance;
+}
+
+/**
+ * 스크림(배경)의 불투명도. 시트가 `travel`(pt) 내려간 만큼 **비례해** 옅어지고, 시트가 제 높이만큼 내려가 화면을 나가는
+ * 순간 0 이다. 고무줄로 위로 늘어난 때(음수)는 더 짙어지지 않는다.
+ *
+ * 화면 높이가 아니라 **시트 높이**로 나눈다: 짧은 시트를 화면 높이로 나누면 시트가 다 나가도록 스크림이 거의 그대로다.
+ * `PageSheet` 의 `Animated` 보간은 같은 두 점(`[0, 높이] → [1, 0]`)을 쓴다.
+ */
+export function scrimOpacity(travel: number, sheetHeight: number): number {
+  if (!(sheetHeight > 0)) return 1;
+  return Math.min(1, Math.max(0, 1 - travel / sheetHeight));
+}
+
+/**
+ * 시트가 실제로 선 높이를 아직 재지 못했을 때의 어림(pt): 큰 단은 위 끝에서 바닥까지, 중간 단은 고정 높이, 내용 맞춤은
+ * 그 위 끝(상한). 레이아웃 이벤트가 오면 잰 값이 이긴다. 시험이 레이아웃 없이도 같은 답을 내게 하는 값이기도 하다.
+ */
+export function estimatedSheetHeight(frame: SheetFrame, windowHeight: number): number {
+  if (frame.top !== undefined) return Math.max(0, windowHeight - frame.top);
+  return frame.height ?? frame.maxHeight ?? windowHeight;
 }
 
 /** 내용 맞춤 · 중간 · 큰. 시트가 얼마나 화면을 차지하는가. */
