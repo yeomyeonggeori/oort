@@ -6143,7 +6143,7 @@ function seedGoneDmHome(): void {
   const dohyun = person('11', '이도현', 'dohyun');
   const seoyeon = person('12', '박서연', 'seoyeon');
   const minsu = person('13', '최민수', 'minsu');
-  const claude = agent('14', 'kwak의 Claude', 'kwak-claude', {hostOnline: false});
+  const claude = agent('14', '달무리 Claude', 'dalmuri-claude', {hostOnline: false});
   const grok = agent('15', 'grok', 'grok', {hostOnline: true});
   harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, minsu, claude, grok]);
   harnessClient.setQueryData(['agent-liveness', ADE_WS, claude.id.toLowerCase()], {
