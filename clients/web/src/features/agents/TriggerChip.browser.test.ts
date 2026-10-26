@@ -247,6 +247,63 @@ describe("트리거 칩의 크기 고정 (#4619 B)", () => {
     240_000
   );
 
+  it.skipIf(ENGINES.length === 0)(
+    "「답함 ✓」 단추의 누르는 면은 그려진 칩보다 4px씩 크다(28 ≥ 24, WCAG 2.5.8): 낱말 칩·아이콘 칩 모두, 줄 높이는 그대로",
+    async () => {
+      const answered = FACES.find((f) => f.name.startsWith("답함"))!;
+      const html = markupOf(answered.chip);
+      const css = await compileTokensCss([
+        ...MESSAGE_HEAD_CHIP_CLASS.split(/\s+/),
+        ...NAME_CLASSES.split(/\s+/),
+        ...NAME_TEXT_CLASSES.split(/\s+/),
+        ...TIME_CLASSES.split(/\s+/),
+        ...classesOf(html),
+      ]);
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext({ viewport: { width: 800, height: 400 } });
+          try {
+            const p = await ctx.newPage();
+            for (const [label, width] of [["낱말 칩", 720], ["아이콘 칩", 368]] as const) {
+              await p.setContent(page(css, width, "정하윤", html));
+              const g = await p.evaluate(() => {
+                const chip = document.querySelector<HTMLElement>('[data-testid="trigger-chip"]')!;
+                const after = getComputedStyle(chip, "::after");
+                const r = chip.getBoundingClientRect();
+                return {
+                  tag: chip.tagName,
+                  chipW: r.width,
+                  chipH: r.height,
+                  hitW: Number.parseFloat(after.width),
+                  hitH: Number.parseFloat(after.height),
+                  position: after.position,
+                  headHeight: document.getElementById("head")!.getBoundingClientRect().height,
+                };
+              });
+              const at = `${engine} ${label}`;
+              if (g.tag !== "BUTTON") problems.push(`${at}: 답함 칩이 단추가 아니다(${g.tag})`);
+              if (g.position !== "absolute") problems.push(`${at}: 누르는 면이 absolute가 아니다(${g.position}) — 칩 상자를 키운다`);
+              if (!(g.hitH >= 24 && g.hitW >= 24)) problems.push(`${at}: 누르는 면 ${g.hitW}×${g.hitH}가 24에 못 미친다`);
+              if (Math.abs(g.hitH - (g.chipH + 8)) > 0.51 || Math.abs(g.hitW - (g.chipW + 8)) > 0.51) {
+                problems.push(`${at}: 누르는 면 ${g.hitW}×${g.hitH}이 칩 ${g.chipW}×${g.chipH}보다 4px씩 크지 않다`);
+              }
+              if (!(g.chipH < g.headHeight)) problems.push(`${at}: 칩(${g.chipH})이 머리 줄(${g.headHeight})을 키운다`);
+            }
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(problems).toEqual([]);
+    },
+    120_000
+  );
+
   it("경계 숫자 자체가 24rem이다(`@max-sm`): 시험의 384가 코드의 접힘 기준과 같은 값이다", () => {
     // `@max-sm`은 Tailwind 4의 컨테이너 `sm` = 24rem = 384px 미만이다. 시험이 CASES의 384·383을 이 값에서 잡는다.
     expect(384 / 16).toBe(24);

@@ -199,7 +199,9 @@ export function TriggerChipView({
         data-row-action=""
         aria-label={`${chip.label} 답 메시지로 이동`}
         onClick={() => onJump(answer)}
-        className={cn(className, "press hover:opacity-80 focus-visible:focus-ring")}
+        // 누를 수 있는 면적만 4px씩 키운다(`after`): 20px 칩이 머리 줄에 끼어 있어 칩 자체를 키우면 행 높이가 변한다.
+        // 28px로 WCAG 2.5.8의 24 바닥(웹 인라인 컨트롤)을 지키고, 그려지는 칩과 줄 높이는 그대로다.
+        className={cn(className, "relative after:absolute after:-inset-1", "press hover:opacity-80 focus-visible:focus-ring")}
       >
         {faces}
       </button>

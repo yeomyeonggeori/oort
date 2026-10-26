@@ -429,6 +429,28 @@ describe("행동은 기존 것이다", () => {
     expect(q("agent-work-panel-stop-outcome")?.textContent).toBe("달무리봇의 요청을 취소했어요.");
   });
 
+  it("취소 확인 줄·결과 문장은 같은 줄의 다른 행동 곁이 아니라 자기 줄을 쓴다(basis-full) — 쉬는 단추는 그렇지 않다", async () => {
+    api.cancelAgentRun.mockResolvedValue({
+      runId: RUN,
+      status: "cancelled",
+      linkedWorkSessionIds: [],
+      workSessionsTerminated: false,
+    } satisfies AgentRunCancelResult);
+    mount([run(Date.now())]);
+    await settle();
+    const section = () => q("agent-work-panel-stop");
+    expect(section()?.className).not.toContain("basis-full");
+    act(() => q("agent-work-panel-stop-arm")?.click());
+    expect(section()?.className).toContain("basis-full");
+    await act(async () => {
+      q("agent-work-panel-stop-commit")?.click();
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    // 결과 문장이 서도 자기 줄이다.
+    expect(q("agent-work-panel-stop-outcome")).not.toBeNull();
+    expect(section()?.className).toContain("basis-full");
+  });
+
   it("에이전트 설정 열기는 다이얼로그 열기 함수를 에이전트 id로 부른다. 그 함수가 없으면 단추도 없다", async () => {
     const open = vi.fn();
     mount([run(Date.now())], { openProfile: open });

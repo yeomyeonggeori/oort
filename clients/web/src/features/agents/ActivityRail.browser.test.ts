@@ -236,7 +236,7 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
   );
 
   it.skipIf(ENGINES.length === 0)(
-    "좁은 창(368)에서도 긴 단계는 줄 안에서 잘리고 칸 높이는 같다",
+    "좁은 창(400)에서도 긴 단계는 줄 안에서 잘리고 칸 높이는 같고, 줄의 누르는 면은 44까지 칸 밖으로 고르게 넘친다",
     async () => {
       const long = SCENARIOS.find((s) => s.name.startsWith("1명 작업 중, 아주 긴"))!;
       const html = markupOf(long);
@@ -253,15 +253,23 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
             const g = await p.evaluate(() => {
               const shell = document.querySelector<HTMLElement>('[data-testid="composer-working"]')!;
               const text = shell.querySelector<HTMLElement>('[data-testid="composer-working-text"]')!;
+              const button = shell.querySelector("button")!;
+              const b = button.getBoundingClientRect();
+              const sh = shell.getBoundingClientRect();
               return {
-                shellHeight: shell.getBoundingClientRect().height,
+                shellHeight: sh.height,
                 textTruncated: text.scrollWidth > text.clientWidth,
-                shellWidth: shell.getBoundingClientRect().width,
-                lineRight: shell.querySelector("button")!.getBoundingClientRect().right,
-                shellRight: shell.getBoundingClientRect().right,
+                shellWidth: sh.width,
+                lineRight: b.right,
+                shellRight: sh.right,
+                // 폰 폭(<600)에서 줄은 `tap-target`으로 44까지 자란다. 칸(24)은 그대로이고 줄은 칸의 가운데에서 위아래로 고르게 넘친다.
+                lineHeight: b.height,
+                centerOffset: Math.abs(b.top + b.height / 2 - (sh.top + sh.height / 2)),
               };
             });
             if (Math.abs(g.shellHeight - 24) > 0.51) problems.push(`${engine} 칸 높이 ${g.shellHeight}`);
+            if (g.lineHeight < 43.5) problems.push(`${engine} 폰 폭에서 줄의 누르는 면이 44에 못 미친다(${g.lineHeight})`);
+            if (g.centerOffset > 0.51) problems.push(`${engine} 줄이 칸의 가운데에서 넘치지 않는다(어긋남 ${g.centerOffset})`);
             if (!g.textTruncated) problems.push(`${engine} 긴 단계가 잘리지 않았다(한 줄을 넘는 글이 칸을 넘는다)`);
             if (g.lineRight > g.shellRight + 0.5) problems.push(`${engine} 줄이 칸 오른쪽을 넘친다`);
           } finally {

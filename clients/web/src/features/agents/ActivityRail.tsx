@@ -67,10 +67,12 @@ import { openWorkPanel } from "./workLogStore";
  * `px-6`은 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px이다. 레일은 textarea 텍스트 기둥에 선다.
  */
 export const RAIL_SHELL_CLASS = "flex h-6 shrink-0 items-center px-6";
+// 줄(누르는 단추)은 폰 폭(<600)에서 `tap-target`으로 44까지 **칸 밖으로 넘친다**: 칸은 `items-center`라 위아래로 고르게 넘치고, 칸의
+// 높이(타임라인이 보는 것)는 그대로다. 입력창 카드는 DOM 순서에서 뒤라 카드 위쪽 가장자리를 가로채지 않는다.
 
 /** 레일 줄(누르면 팝오버). 칸 안에서 한 줄을 넘지 않는다: 글은 줄어들고 점·얼굴은 줄지 않는다. */
 export const RAIL_LINE_CLASS =
-  "flex min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta press hover:bg-surface-hover focus-visible:focus-ring";
+  "tap-target flex min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta press hover:bg-surface-hover focus-visible:focus-ring";
 
 function RailAgentRow({
   agent,
@@ -101,7 +103,7 @@ function RailAgentRow({
     </>
   );
   const rowClass =
-    "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta text-ink";
+    "tap-target flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1 text-left text-meta text-ink";
   if (agent.runId === undefined) {
     return (
       <div className={rowClass} data-testid="composer-working-agent" data-member-id={agent.memberId}>
@@ -215,7 +217,7 @@ function RailLine({
           <button
             type="button"
             data-testid="composer-working-activity"
-            className="rounded-md px-2 py-1 text-meta font-medium text-ink press hover:bg-surface-hover focus-visible:focus-ring"
+            className="tap-target rounded-md px-2 py-1 text-meta font-medium text-ink press hover:bg-surface-hover focus-visible:focus-ring"
             onClick={() => {
               setOpen(false);
               openAdeDrawer(triggerRef.current);

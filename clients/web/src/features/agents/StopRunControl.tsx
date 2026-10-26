@@ -159,7 +159,9 @@ export function StopRunControl({
       aria-label={wording.regionName}
       className={
         variant === "inline"
-          ? "flex min-w-0 flex-col gap-2"
+          ? // 확인 줄·결과 문장이 서면 같은 줄의 다른 행동 곁이 아니라 **자기 줄**(`basis-full`)을 쓴다: 문장 위에 단추가 쌓인
+            // 두 겹 덩어리가 예외 줄 한가운데(`items-center`)에 떠 있으면 줄의 글이 그 덩어리의 한가운데로 밀려 어긋난다.
+            cn("flex min-w-0 flex-col gap-2", (armed || outcome !== null) && "basis-full")
           : "flex flex-col gap-2 border-b border-line px-4 py-2"
       }
       data-testid="agent-work-panel-stop"
