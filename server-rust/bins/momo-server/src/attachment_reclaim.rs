@@ -195,6 +195,24 @@ pub async fn sweep_once(
     Ok(reclaim_pass(write_pool, workspaces, UNBOUND_TTL, batch, deleter.as_ref()).await)
 }
 
+/// Whether **this process** reclaims the attachments of `backend`. Only the `local` volume: with a
+/// Google Drive (`google`, `sa`, or unset) the notifier does it, and `stub` is the test archive in
+/// the memory of whichever process holds it. Running both here and in the notifier would only make
+/// two processes look at the same rows.
+pub fn runs_in_this_process(backend: &str) -> bool {
+    backend == momo_drive::LOCAL_BACKEND
+}
+
+/// The archive a tick may delete through: `Some` only when the operator switched the delete on
+/// (`MOMO_ATTACHMENT_RECLAIM` exactly `1`, already parsed into `settings`). A switched-off tick is
+/// handed `None`, so it owns no deleter and cannot call the archive's delete at all.
+pub(crate) fn archive_for_tick<'a>(
+    settings: &AttachmentReclaimSettings,
+    drive: &'a Arc<dyn DriveArchive>,
+) -> Option<&'a Arc<dyn DriveArchive>> {
+    settings.delete_enabled.then_some(drive)
+}
+
 /// What a tick writes to the log: counts only (no name, no Drive id, no member id).
 fn log_tick(stats: &AttachmentReclaimStats) {
     if let Some(tally) = &stats.dry_run {
@@ -289,7 +307,7 @@ async fn run_loop(
         if *stop.borrow() {
             break;
         }
-        let archive = settings.delete_enabled.then_some(&drive);
+        let archive = archive_for_tick(&settings, &drive);
         match sweep_once(archive, &touched, &pool, settings.batch, &mut cursor).await {
             Ok(stats) => log_tick(&stats),
             Err(_) => tracing::warn!(
@@ -361,6 +379,33 @@ mod tests {
             .is_empty());
         // A cursor past the end starts over at the beginning.
         assert_eq!(set.next_batch(Some(id(99)), 2), vec![id(1), id(2)]);
+    }
+
+    /// Only the local volume is this process's to reclaim; a Google Drive is the notifier's.
+    #[test]
+    fn only_the_local_volume_is_reclaimed_by_the_api_process() {
+        assert!(runs_in_this_process("local"));
+        for other in ["google", "sa", "stub", "", "LOCAL", "local "] {
+            assert!(!runs_in_this_process(other), "{other:?}");
+        }
+    }
+
+    /// The switch decides whether a tick is handed an archive to delete through. Off (the
+    /// default) it is handed none: a switched-off tick cannot reach the archive's delete.
+    #[test]
+    fn a_tick_is_handed_the_archive_only_when_the_delete_is_switched_on() {
+        let drive: Arc<dyn DriveArchive> = Arc::new(momo_drive::UnavailableDriveArchive);
+        let off = AttachmentReclaimSettings::default();
+        assert!(!off.delete_enabled);
+        assert!(
+            archive_for_tick(&off, &drive).is_none(),
+            "ships off: no archive"
+        );
+        let on = AttachmentReclaimSettings {
+            delete_enabled: true,
+            ..off
+        };
+        assert!(archive_for_tick(&on, &drive).is_some());
     }
 
     /// The archive's answers, classified the way the notifier classifies Google's. The local

@@ -15,6 +15,7 @@
 //! | test | revert that makes it red |
 //! |---|---|
 //! | `the_tick_follows_the_workspaces_this_process_served_and_deletes_only_when_switched_on` | drop the `touch` in `create_upload` (nothing is looked at); let the switched-off tick reach the archive's delete (the dry run deletes); drop the age term or the `message_id` term from the shared predicate (see the notifier suite for those); look at every workspace instead of the touched ones (the untouched file goes); never `touch` the second workspace's upload (it is never swept) |
+//! | `a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_carries_on` | stop spending the budget as workspaces are listed (the first tick takes all four) |
 //! | `a_refused_upload_touches_nothing_and_a_pool_that_bypasses_rls_is_refused` | move the `touch` above the membership check (a 403 would touch); drop `ensure_write_pool_rls_bound` from `sweep_once` or `start` (a superuser pool runs the tick) |
 
 use std::net::SocketAddr;
@@ -488,6 +489,72 @@ async fn the_tick_follows_the_workspaces_this_process_served_and_deletes_only_wh
     assert!(!row_exists(&su, b_old).await);
     assert!(!on_volume(&server, &session.drive_file_id).await);
     assert!(row_exists(&su, b_new).await, "B's new upload stays");
+
+    wipe(&su, &[&a, &b]).await;
+}
+
+/// A tick deletes at most `batch` files **in total**, across the workspaces it looks at, and the
+/// next tick carries on with the rest (the rotation starts after the last workspace it took).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_carries_on() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let a = seed_tenant(&su, &app).await;
+    let b = seed_tenant(&su, &app).await;
+    let server = start_server(app.clone()).await;
+    let touched = TouchedWorkspaces::default();
+    touched.touch(a.workspace);
+    touched.touch(b.workspace);
+    // Two old files in each workspace (rows only: an object that is already gone is success
+    // for the local archive, so the delete still counts).
+    let mut ids = Vec::new();
+    for t in [&a, &b] {
+        for n in 0..2 {
+            let id: Uuid = sqlx::query_scalar(
+                "INSERT INTO attachment (workspace_id, channel_id, uploader_member_id, \
+                                         drive_file_id, name, mime, size_bytes, status, created_at) \
+                 VALUES ($1, $2, $3, $4, 'x.txt', 'text/plain', 1, 'complete', \
+                         now() - make_interval(days => $5)) RETURNING id",
+            )
+            .bind(t.workspace)
+            .bind(t.channel)
+            .bind(t.person.member)
+            .bind(format!("gone-{}", Uuid::new_v4().simple()))
+            .bind(40 + n)
+            .fetch_one(&su)
+            .await
+            .expect("seed an old file");
+            ids.push(id);
+        }
+    }
+    let drive = as_drive(&server);
+    let mut cursor = None;
+    let first = sweep_once(Some(&drive), &touched, &app, 3, &mut cursor)
+        .await
+        .expect("first tick");
+    assert_eq!(
+        first.counts.reclaimed, 3,
+        "batch 3 caps the tick across both workspaces: {first:?}"
+    );
+    let second = sweep_once(Some(&drive), &touched, &app, 3, &mut cursor)
+        .await
+        .expect("second tick");
+    assert_eq!(
+        second.counts.reclaimed, 1,
+        "the rest, on the next tick: {second:?}"
+    );
+    let third = sweep_once(Some(&drive), &touched, &app, 3, &mut cursor)
+        .await
+        .expect("third tick");
+    assert_eq!(third.counts.reclaimed, 0, "nothing left: {third:?}");
+    for id in ids {
+        assert!(
+            !row_exists(&su, id).await,
+            "every old file is gone in the end"
+        );
+    }
 
     wipe(&su, &[&a, &b]).await;
 }

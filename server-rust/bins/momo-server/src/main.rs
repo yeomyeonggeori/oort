@@ -393,23 +393,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // across an archive call, so it must never compete with requests, and `start` refuses a role
     // that skips row-level security.
     let (stop_reclaim, reclaim_stop) = tokio::sync::watch::channel(false);
-    let reclaim_task = if config.drive.backend == momo_drive::LOCAL_BACKEND {
-        let pool = momo_db::connect(&momo_db::PoolConfig {
-            max_connections: 2,
-            ..config.db.clone()
-        })
-        .await?;
-        momo_server::attachment_reclaim::start(
-            std::sync::Arc::clone(&state.drive),
-            std::sync::Arc::clone(&state.attachment_reclaim_touched),
-            pool,
-            config.attachment_reclaim,
-            reclaim_stop,
-        )
-        .await
-    } else {
-        None
-    };
+    let reclaim_task =
+        if momo_server::attachment_reclaim::runs_in_this_process(&config.drive.backend) {
+            let pool = momo_db::connect(&momo_db::PoolConfig {
+                max_connections: 2,
+                ..config.db.clone()
+            })
+            .await?;
+            momo_server::attachment_reclaim::start(
+                std::sync::Arc::clone(&state.drive),
+                std::sync::Arc::clone(&state.attachment_reclaim_touched),
+                pool,
+                config.attachment_reclaim,
+                reclaim_stop,
+            )
+            .await
+        } else {
+            None
+        };
     let app = build_app(state);
 
     let address: SocketAddr = format!("{}:{}", config.host, config.port).parse()?;
