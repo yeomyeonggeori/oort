@@ -182,7 +182,7 @@ pub use owner_claim::{
 pub use password_rules::{
     normalized_current_password, normalized_new_password, CurrentPasswordInvalid,
     NewPasswordInvalid, CURRENT_PASSWORD_MAX_CHARS, NEW_PASSWORD_MAX_BYTES, NEW_PASSWORD_MIN_CHARS,
-    PASSWORD_TOO_LONG_CODE, PASSWORD_TOO_SHORT_CODE,
+    PASSWORD_INVALID_CHAR_CODE, PASSWORD_TOO_LONG_CODE, PASSWORD_TOO_SHORT_CODE,
 };
 pub use push_action_token::{
     live_push_action_count, lock_push_action_mints_in_tx, push_action_route_allowed,

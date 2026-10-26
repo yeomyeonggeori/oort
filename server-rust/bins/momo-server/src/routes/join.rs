@@ -71,7 +71,8 @@ use crate::AppState;
 /// credential, and `momo_password_hash` is bcrypt running inside Postgres.
 fn spec_error(error: JoinSpecInvalid) -> ApiError {
     match error {
-        // ADR-0215 D2: the two length refusals name themselves on the wire.
+        // ADR-0215 D2: the length refusals and the NUL refusal name themselves on
+        // the wire.
         JoinSpecInvalid::NewPassword(invalid) => ApiError::from(invalid),
         other => ApiError::bad_request(other.to_string()),
     }
@@ -391,5 +392,10 @@ mod tests {
         ));
         assert_eq!(long.status, StatusCode::BAD_REQUEST);
         assert_eq!(long.code, Some("password_too_long"));
+        let nul = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::InvalidChar,
+        ));
+        assert_eq!(nul.status, StatusCode::BAD_REQUEST);
+        assert_eq!(nul.code, Some("password_invalid_char"));
     }
 }

@@ -32,10 +32,20 @@
 //!   Hangul typed as decomposed jamo (NFD) is one scalar value per jamo, so it
 //!   clears the minimum sooner and meets the byte ceiling sooner; refusing at the
 //!   ceiling is the safe side.
+//! * **One character is refused: NUL (U+0000).** It is not a composition rule, it
+//!   is a character the stack cannot carry. Postgres `text` cannot hold a NUL
+//!   (the hash is computed inside Postgres, so a NUL reaches the database and
+//!   becomes a 500), and bcrypt is a C-string function that reads up to the first
+//!   NUL, so a value that did get through would hash only the part before it —
+//!   two different passwords would be one. Refusing it is the safe side for both
+//!   (planner decision on #4593, 2026-10-26). `normalized_current_password` does
+//!   not look for it: a login or a current password containing NUL is a separate
+//!   path with its own answer (#4597).
 //!
 //! The check order is cheap-first: the byte length is read from the string
-//! header before any character is counted, so an oversized body never costs a
-//! scan.
+//! header before any character is counted, and the character scans (the count,
+//! then the NUL search) run only on a value already known to be at most 72 bytes,
+//! so an oversized body never costs a scan.
 
 /// Fewest characters (Unicode scalar values, input as sent) a newly chosen
 /// password may have. Owner decision 2026-10-26, ADR-0215 D2.
@@ -56,9 +66,12 @@ pub const PASSWORD_TOO_SHORT_CODE: &str = "password_too_short";
 /// `error.code` of a new password over [`NEW_PASSWORD_MAX_BYTES`].
 pub const PASSWORD_TOO_LONG_CODE: &str = "password_too_long";
 
+/// `error.code` of a new password that contains a NUL character (U+0000).
+pub const PASSWORD_INVALID_CHAR_CODE: &str = "password_invalid_char";
+
 /// Why a password somebody is choosing was refused.
 ///
-/// The two length refusals carry a stable machine code (the sentence may be
+/// The three real refusals carry a stable machine code (the sentence may be
 /// reworded, the code may not). [`Self::Missing`] is the empty string and keeps
 /// the code-less sentence every one of these routes answered before ADR-0215.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -69,6 +82,9 @@ pub enum NewPasswordInvalid {
     TooShort,
     #[error("password must be at most 72 bytes in UTF-8")]
     TooLong,
+    /// A NUL character (U+0000) anywhere in an otherwise acceptable password.
+    #[error("password must not contain a NUL character")]
+    InvalidChar,
 }
 
 impl NewPasswordInvalid {
@@ -78,6 +94,7 @@ impl NewPasswordInvalid {
             NewPasswordInvalid::Missing => None,
             NewPasswordInvalid::TooShort => Some(PASSWORD_TOO_SHORT_CODE),
             NewPasswordInvalid::TooLong => Some(PASSWORD_TOO_LONG_CODE),
+            NewPasswordInvalid::InvalidChar => Some(PASSWORD_INVALID_CHAR_CODE),
         }
     }
 }
@@ -93,7 +110,9 @@ pub enum CurrentPasswordInvalid {
 }
 
 /// Judge a password that is being **chosen** (ADR-0215 D2). Returns it
-/// unchanged: no trimming, no Unicode normalisation.
+/// unchanged: no trimming, no Unicode normalisation. Refuses the empty string,
+/// fewer than [`NEW_PASSWORD_MIN_CHARS`] characters, more than
+/// [`NEW_PASSWORD_MAX_BYTES`] bytes, and a NUL character, in that order.
 pub fn normalized_new_password(raw: &str) -> Result<String, NewPasswordInvalid> {
     if raw.is_empty() {
         return Err(NewPasswordInvalid::Missing);
@@ -105,6 +124,12 @@ pub fn normalized_new_password(raw: &str) -> Result<String, NewPasswordInvalid> 
     // Characters, not bytes. At most 72 bytes here, so this scan is bounded.
     if raw.chars().count() < NEW_PASSWORD_MIN_CHARS {
         return Err(NewPasswordInvalid::TooShort);
+    }
+    // The one character the stack cannot carry (see the module docs). Bounded
+    // for the same reason, and after the length checks so that a value which is
+    // wrong in two ways is told about its length first.
+    if raw.contains('\0') {
+        return Err(NewPasswordInvalid::InvalidChar);
     }
     Ok(raw.to_string())
 }
@@ -290,7 +315,7 @@ mod tests {
     }
 
     #[test]
-    fn the_two_length_refusals_name_themselves() {
+    fn the_three_refusals_name_themselves() {
         assert_eq!(
             NewPasswordInvalid::TooShort.code(),
             Some("password_too_short")
@@ -298,6 +323,92 @@ mod tests {
         assert_eq!(
             NewPasswordInvalid::TooLong.code(),
             Some("password_too_long")
+        );
+        assert_eq!(
+            NewPasswordInvalid::InvalidChar.code(),
+            Some("password_invalid_char")
+        );
+    }
+
+    /// A NUL is refused wherever it sits, and each of these is a password that
+    /// would be accepted if the NUL were any other character: ten or more
+    /// characters and at most 72 bytes. That is what makes the NUL the only
+    /// thing wrong — remove the NUL check and every row turns green.
+    #[test]
+    fn a_nul_character_is_refused_wherever_it_sits() {
+        let at_the_limit_of_the_bytes = format!("{}\0", "a".repeat(71));
+        assert_eq!(at_the_limit_of_the_bytes.len(), NEW_PASSWORD_MAX_BYTES);
+        let hangul_with_nul = format!("{}\0", repeat(NFC_HAN, 23));
+        assert_eq!(hangul_with_nul.len(), 70);
+        for (case, password) in [
+            ("the tenth character", "abcdefghi\0".to_string()),
+            ("the first character", "\0abcdefghij".to_string()),
+            ("the middle", "abcde\0fghij".to_string()),
+            ("the last of many", "abcdefghijklmnop\0".to_string()),
+            (
+                "where bcrypt would stop reading",
+                "ten-chars!\0and-then-some-more".to_string(),
+            ),
+            ("the 72nd byte", at_the_limit_of_the_bytes),
+            ("after Hangul", hangul_with_nul),
+        ] {
+            assert!(
+                password.chars().count() >= NEW_PASSWORD_MIN_CHARS
+                    && password.len() <= NEW_PASSWORD_MAX_BYTES,
+                "{case}: the row must be valid but for its NUL"
+            );
+            assert_eq!(
+                normalized_new_password(&password),
+                Err(NewPasswordInvalid::InvalidChar),
+                "{case}"
+            );
+        }
+    }
+
+    /// Only NUL is refused. Every other control character, and the characters a
+    /// terminal or a form might mangle, are ordinary password characters: this is
+    /// not a composition rule.
+    #[test]
+    fn only_nul_is_refused_not_other_control_characters() {
+        for (case, password) in [
+            ("tab", "abcde\tfghij"),
+            ("newline", "abcde\nfghij"),
+            ("carriage return", "abcde\rfghij"),
+            ("bell", "abcde\u{7}fghij"),
+            ("unit separator", "abcde\u{1F}fghij"),
+            ("delete", "abcde\u{7F}fghij"),
+            ("zero-width space", "abcde\u{200B}fghij"),
+        ] {
+            assert_eq!(
+                normalized_new_password(password),
+                Ok(password.to_string()),
+                "{case}"
+            );
+        }
+    }
+
+    /// A value that is wrong in two ways is told about its length: the NUL
+    /// search runs last, on a value already known to be small.
+    #[test]
+    fn a_wrong_length_is_reported_before_a_nul() {
+        // 9 characters, one of them NUL.
+        assert_eq!(
+            normalized_new_password("abcdefgh\0"),
+            Err(NewPasswordInvalid::TooShort)
+        );
+        // 73 bytes, one of them NUL.
+        let long = format!("{}\0", "a".repeat(72));
+        assert_eq!(
+            normalized_new_password(&long),
+            Err(NewPasswordInvalid::TooLong)
+        );
+    }
+
+    #[test]
+    fn the_nul_sentence_says_what_to_remove() {
+        assert_eq!(
+            NewPasswordInvalid::InvalidChar.to_string(),
+            "password must not contain a NUL character"
         );
     }
 

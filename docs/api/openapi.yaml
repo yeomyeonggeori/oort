@@ -717,8 +717,9 @@ paths:
           description: >
             Invalid code/email/displayName/handle/password shape. A password
             that breaks the ADR-0215 D2 rule answers `error.code`
-            `password_too_short` or `password_too_long`; an empty or absent one
-            is the code-less "password is required".
+            `password_too_short`, `password_too_long` or `password_invalid_char`
+            (a NUL character); an empty or absent one is the code-less
+            "password is required".
           content:
             application/json:
               schema:
@@ -1136,9 +1137,10 @@ paths:
         "400":
           description: >
             Invalid token or password shape. A password that breaks the
-            ADR-0215 D2 rule answers `error.code` `password_too_short` or
-            `password_too_long`, before any statement runs (the one-time token
-            is not spent); an empty one is the code-less "password is required".
+            ADR-0215 D2 rule answers `error.code` `password_too_short`,
+            `password_too_long` or `password_invalid_char` (a NUL character),
+            before any statement runs (the one-time token is not spent); an
+            empty one is the code-less "password is required".
           content:
             application/json:
               schema:
@@ -1768,8 +1770,9 @@ paths:
           description: >
             Password shape invalid, or new password equals current. A new
             password that breaks the ADR-0215 D2 rule answers `error.code`
-            `password_too_short` or `password_too_long`; the current password is
-            only required and at most 1024 characters (code-less 400).
+            `password_too_short`, `password_too_long` or `password_invalid_char`
+            (a NUL character); the current password is only required and at most
+            1024 characters (code-less 400).
           content:
             application/json:
               schema:
@@ -13308,8 +13311,8 @@ components:
                 `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
                 `PATCH …/members/me/password`): 400 `password_too_short` (fewer
-                than 10 characters) and `password_too_long` (more than 72 bytes
-                of UTF-8).
+                than 10 characters), `password_too_long` (more than 72 bytes of
+                UTF-8) and `password_invalid_char` (a NUL character, U+0000).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -13581,8 +13584,9 @@ components:
             at least 10 characters (Unicode scalar values, counted as sent) and
             at most 72 bytes of UTF-8 — a Korean syllable is 3 bytes, so 24 fit
             — because bcrypt reads no more than 72. Not trimmed, not normalised,
-            no composition rule. Over-short and over-long answer 400
-            `password_too_short` / `password_too_long`. Applies to the first
+            no composition rule; the one character refused is NUL (U+0000).
+            Over-short, over-long and NUL answer 400 `password_too_short` /
+            `password_too_long` / `password_invalid_char`. Applies to the first
             owner's bootstrap and to an operator-issued reset alike. Login does
             not apply it: an existing password keeps working.
 
@@ -13605,8 +13609,9 @@ components:
             Replacement password, must differ from the current one. The
             ADR-0215 D2 rule: at least 10 characters (Unicode scalar values,
             counted as sent) and at most 72 bytes of UTF-8; not trimmed, not
-            normalised. Refusals answer 400 `password_too_short` /
-            `password_too_long`.
+            normalised; no NUL (U+0000). Refusals answer 400
+            `password_too_short` / `password_too_long` /
+            `password_invalid_char`.
 
     RenameWorkspaceRequest:
       type: object
@@ -14009,8 +14014,9 @@ components:
             at least 10 characters (Unicode scalar values, counted as sent) and
             at most 72 bytes of UTF-8 — a Korean syllable is 3 bytes, so 24 fit
             — because bcrypt reads no more than 72. Not trimmed, not normalised,
-            no composition rule. Over-short and over-long answer 400
-            `password_too_short` / `password_too_long`; an empty or absent
+            no composition rule; the one character refused is NUL (U+0000).
+            Over-short, over-long and NUL answer 400 `password_too_short` /
+            `password_too_long` / `password_invalid_char`; an empty or absent
             password is the code-less 400 "password is required".
         timeZone:
           type: string

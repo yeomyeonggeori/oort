@@ -100,9 +100,10 @@ impl ApiError {
     }
 }
 
-/// A refused new password (ADR-0215 D2) is a 400. The two length refusals carry
-/// their stable `error.code` (`password_too_short` / `password_too_long`); the
-/// empty password keeps the code-less sentence it always had. `?` on
+/// A refused new password (ADR-0215 D2) is a 400. The three real refusals carry
+/// their stable `error.code` (`password_too_short` / `password_too_long` /
+/// `password_invalid_char`); the empty password keeps the code-less sentence it
+/// always had. `?` on
 /// `momo_auth::normalized_new_password` in a handler is this conversion, so
 /// every path that sets a password answers one way.
 impl From<NewPasswordInvalid> for ApiError {
@@ -154,8 +155,9 @@ mod tests {
         assert_eq!(body, serde_json::json!({"error": {"message": "nope"}}));
     }
 
-    /// ADR-0215 D2 on the wire: the two length refusals are 400s that name
-    /// themselves; the empty password is the code-less 400 it always was.
+    /// ADR-0215 D2 on the wire: the length refusals and the NUL refusal are
+    /// 400s that name themselves; the empty password is the code-less 400 it
+    /// always was.
     #[test]
     fn a_refused_new_password_is_a_400_that_names_its_reason() {
         let short = ApiError::from(NewPasswordInvalid::TooShort);
@@ -174,6 +176,15 @@ mod tests {
             serde_json::json!({"error": {
                 "message": "password must be at most 72 bytes in UTF-8",
                 "code": "password_too_long"
+            }})
+        );
+        let nul = ApiError::from(NewPasswordInvalid::InvalidChar);
+        assert_eq!(nul.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(nul.envelope()).unwrap(),
+            serde_json::json!({"error": {
+                "message": "password must not contain a NUL character",
+                "code": "password_invalid_char"
             }})
         );
         let empty = ApiError::from(NewPasswordInvalid::Missing);

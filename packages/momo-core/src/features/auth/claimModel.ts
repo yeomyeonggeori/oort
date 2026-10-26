@@ -29,6 +29,23 @@ function transportFailure(cause: unknown): ClaimFailure | null {
 }
 
 /**
+ * ADR-0215 D2 (#4593): the server names which rule a new password broke
+ * (`error.code`; the English message may be reworded, the code may not). Say the
+ * rule, so the person can fix the field. A 400 that names no rule, or one this
+ * screen does not know, keeps the generic line.
+ */
+function passwordRuleCopy(code: string | undefined): string | null {
+  switch (code) {
+    case "password_too_short":
+      return "비밀번호가 너무 짧습니다. 10자 이상으로 입력하세요.";
+    case "password_too_long":
+      return "비밀번호가 너무 깁니다. 72바이트 이하로 입력하세요. 한글은 24자, 영문은 72자까지입니다.";
+    default:
+      return null;
+  }
+}
+
+/**
  * Claim-token failures to distinct copy. Status is the split (404 invalid,
  * 410 expired, 409 used). Unrecognised messages fall back to per-status copy,
  * never a raw English string in front of the user.
@@ -62,7 +79,9 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
       };
     case 400:
       return {
-        message: "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다.",
+        message:
+          passwordRuleCopy(failure.code) ??
+          "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다.",
         suggestSignIn: false,
         retryable: false,
         keepForm: true,

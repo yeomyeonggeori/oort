@@ -124,9 +124,9 @@ pub enum JoinSpecInvalid {
     /// answered, with no `error.code`.
     #[error("password is required")]
     PasswordMissing,
-    /// A password that is present but breaks the ADR-0215 D2 length rule. Only
-    /// ever [`NewPasswordInvalid::TooShort`] / [`NewPasswordInvalid::TooLong`]:
-    /// the route puts the wire `error.code` on it.
+    /// A password that is present but breaks the ADR-0215 D2 rule: too short,
+    /// too long, or holding a NUL. Never [`NewPasswordInvalid::Missing`] (that is
+    /// [`Self::PasswordMissing`]): the route puts the wire `error.code` on it.
     #[error(transparent)]
     NewPassword(NewPasswordInvalid),
 }
@@ -1219,6 +1219,14 @@ mod tests {
             normalized_join_password(Some(&format!("{seventy_two}a"))),
             Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooLong)),
             "73 bytes, 25 characters: the ceiling is bytes"
+        );
+        // Ten characters, the tenth a NUL: long enough and short enough, refused
+        // for the NUL alone.
+        assert_eq!(
+            normalized_join_password(Some("abcdefghi\0")),
+            Err(JoinSpecInvalid::NewPassword(
+                NewPasswordInvalid::InvalidChar
+            ))
         );
     }
 

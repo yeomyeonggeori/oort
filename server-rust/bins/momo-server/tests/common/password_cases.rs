@@ -19,6 +19,8 @@ pub const EMOJI: &str = "\u{1F600}";
 pub const TEN_CHARS: &str = "abcdefghij";
 /// Nine characters: one short of the rule.
 pub const NINE_CHARS: &str = "abcdefghi";
+/// The NUL character (U+0000) — the one character the rule refuses outright.
+pub const NUL: &str = "\u{0}";
 
 /// `(case, password, error.code)` — every one of these is a 400 on every path
 /// that sets a password.
@@ -60,6 +62,35 @@ pub fn refused() -> Vec<(&'static str, String, &'static str)> {
             "1025 characters: over the old ceiling too",
             "a".repeat(1025),
             "password_too_long",
+        ),
+        // Each NUL row below is a password the rule would accept were the NUL any
+        // other character (ten characters or more, 72 bytes or fewer), so the NUL
+        // is the only thing wrong with it — a NUL check that is missing turns
+        // these rows, and only these rows, from 400 into the database's 500.
+        (
+            "the tenth of ten characters is a NUL",
+            format!("{}{NUL}", NINE_CHARS),
+            "password_invalid_char",
+        ),
+        (
+            "a NUL first",
+            format!("{NUL}{TEN_CHARS}"),
+            "password_invalid_char",
+        ),
+        (
+            "a NUL in the middle",
+            format!("abcde{NUL}fghij"),
+            "password_invalid_char",
+        ),
+        (
+            "ten characters, then a NUL where bcrypt would stop reading, then more",
+            format!("ten-chars!{NUL}and-then-some-more"),
+            "password_invalid_char",
+        ),
+        (
+            "71 ASCII bytes and a NUL: exactly 72 bytes",
+            format!("{}{NUL}", "a".repeat(71)),
+            "password_invalid_char",
         ),
     ]
 }
