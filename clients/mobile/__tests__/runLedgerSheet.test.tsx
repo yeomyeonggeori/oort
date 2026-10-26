@@ -1,13 +1,15 @@
 import type {AgentRunProgress} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {RunLedgerSheet} from '../src/features/agents/RunLedgerSheet';
+import {GroupCard} from '../src/design/sheetParts';
+import {describeCloseContract} from './fixtures/sheetContract';
 import {MessageRunStatus} from '../src/features/agents/MessageRunStatus';
 import {notifyRunLedgerFrame} from '../src/features/agents/agentRunProgressStore';
 
@@ -282,4 +284,118 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
     expect(screen.queryByTestId('message-run-status')).toBeNull();
     expect(mockFetchEvents).not.toHaveBeenCalled();
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+function ledgerOf(count: number) {
+  const at = Date.now() - 10 * MIN;
+  const kinds = ['queued', 'claimed', 'succeeded'].slice(0, count);
+  return jest.requireActual('@momo/core/lib/api').agentRunLedgerFromWire({
+    runId: RUN,
+    events: kinds.map((kind, index) => ({ordinal: index + 1, kind, createdAtMs: at + index * SEC})),
+  });
+}
+
+/** 그려진 트리에서 testID 를 **그려진 순서**(깊이 우선)대로 모은다 — 「무엇이 무엇보다 위에 서는가」를 재는 데 쓴다. */
+interface DrawNode {
+  props: {testID?: unknown};
+  children: Array<DrawNode | string> | null;
+}
+function testIDsInDrawOrder(node: DrawNode | DrawNode[] | string | null): string[] {
+  if (node === null || typeof node === 'string') return [];
+  if (Array.isArray(node)) return node.flatMap((child: DrawNode) => testIDsInDrawOrder(child));
+  const own = typeof node.props.testID === 'string' ? [node.props.testID] : [];
+  const kids: Array<DrawNode | string> = node.children ?? [];
+  return [...own, ...kids.flatMap((child: DrawNode | string) => testIDsInDrawOrder(child))];
+}
+
+describe('폰 기록 시트 — 공용 부품 (#4458)', () => {
+  it('한계·보관 문장은 「기록」 라벨 아래, 목록 위에 그려진다 — 스크롤을 내려야만 보이는 각주가 아니다 (ADR-0200 D5, design-review r1b M1)', async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(3));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+    const order = testIDsInDrawOrder(screen.toJSON());
+    const at = (id: string) => order.indexOf(id);
+    expect(at('run-ledger-limit')).toBeGreaterThan(-1);
+    // 그려진 순서: 한계 → 보관 → 목록. 목록 뒤에 서면(1단계의 각주) 붉어진다.
+    expect(at('run-ledger-limit')).toBeLessThan(at('run-ledger-kept'));
+    expect(at('run-ledger-kept')).toBeLessThan(at('run-ledger-rows'));
+    // 별도 푸터가 아니라 같은 스크롤 몸 안이고, 문장은 코어의 것 그대로다.
+    const scroll = within(screen.getByTestId('run-ledger-scroll'));
+    expect(scroll.getByTestId('run-ledger-limit')).toHaveTextContent(/에이전트가 보낸 만큼만 보여요/);
+    expect(scroll.getByTestId('run-ledger-kept')).toBeTruthy();
+  });
+
+  it('요약·기록 줄·한계 문장은 어절 단위로 접는다 — 「…으로 / 요.」처럼 한 음절이 줄 머리에 고아로 서지 않는다 (design-review r1b M2)', async () => {
+    const at = Date.now() - 10 * MIN;
+    mockFetchEvents.mockResolvedValue(
+      jest.requireActual('@momo/core/lib/api').agentRunLedgerFromWire({
+        runId: RUN,
+        events: [
+          {ordinal: 1, kind: 'queued', createdAtMs: at},
+          {ordinal: 2, kind: 'doorbell_rung', code: 'leading_ok', createdAtMs: at + SEC},
+        ],
+      }),
+    );
+    render(
+      wrap(
+        <RunLedgerSheet
+          progress={progress({triggerSummary: '채널 하나 만들어 줄래요? 이름은 grokbot-lab으로요.'})}
+          directory={directory}
+          onClose={() => {}}
+        />,
+      ),
+    );
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+    for (const id of ['run-ledger-summary', 'run-ledger-limit', 'run-ledger-kept']) {
+      expect(screen.getByTestId(id).props.lineBreakStrategyIOS).toBe('hangul-word');
+    }
+    // 기록 줄의 본문(시각 라벨이 아니라 글)도 같다.
+    expect(screen.getByText(/깨우는 신호를 보냈어요/).props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('빈 기록의 머리말·설명도 어절 단위로 접는다 — 같은 시트의 다른 문장과 같은 규칙이다 (design-review r2 L2)', async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(0));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-empty')).toBeTruthy());
+    for (const id of ['run-ledger-empty-headline', 'run-ledger-empty-detail']) {
+      expect(screen.getByTestId(id).props.lineBreakStrategyIOS).toBe('hangul-word');
+    }
+  });
+
+  it('요약은 카드 하나, 기록 줄은 묶음 카드의 줄이고 줄 사이는 카드의 구분선이다 — 글자 「닫기」·줄마다 아래 테두리는 없다', async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(3));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(2);
+    // 기록 셋 → 구분선 둘. 요약 카드는 자식이 하나라 구분선이 없다.
+    expect(screen.getAllByTestId('group-divider')).toHaveLength(2);
+    expect(screen.getAllByTestId(/^run-ledger-row-/)).toHaveLength(3);
+    expect(screen.queryByText('닫기')).toBeNull();
+  });
+
+  it('기록을 읽는 중·못 읽음도 카드 안에 선다 — 상태 블록의 가로 여백이 시트 몸의 거터와 겹치지 않는다', async () => {
+    mockFetchEvents.mockImplementation(() => new Promise(() => {}));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-loading')).toBeTruthy());
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(2);
+  });
+});
+
+const closed = jest.fn();
+beforeEach(() => closed.mockReset());
+
+describeCloseContract({
+  name: 'RunLedgerSheet',
+  open: async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(2));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={closed} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+  },
+  closedCount: () => closed.mock.calls.length,
+  closeTestID: 'run-ledger-close',
+  closeLabel: '작업 기록 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '작업 기록 닫기',
 });

@@ -18,19 +18,18 @@ import {agentLabel, UNKNOWN_AGENT_NAME} from '@momo/core/features/agents/turnCop
 import {memberNameParts, type Directory} from '@momo/core/features/workspace/directory';
 import {useQuery} from '@tanstack/react-query';
 import React, {useMemo} from 'react';
-import {Pressable, ScrollView, StyleSheet, Text, View} from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {BAR_CONTROL_MAX_SCALE, ErrorState, LoadingState} from '../../design/atoms';
+import {StyleSheet, Text, View} from 'react-native';
+import {ErrorState, LoadingState} from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
+import {SheetHeader} from '../../design/SheetChrome';
+import {GroupCard, GroupLabel, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
   font,
   line,
-  radius,
-  SAFE_GUTTER,
+  SHEET,
   space,
-  TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
 import {useSession} from '../../session/useSession';
@@ -50,9 +49,18 @@ import {useTickingNow} from './workingSignal';
 // 서버가 기억하는 것만 그린다. 원장은 닫아도·다른 기기에서 열어도 같다. 에이전트가 보낸
 // 단계 문자열은 일반 텍스트로만 그린다(서버도 80자·신뢰하지 않는 텍스트로 다룬다). 이
 // 앱이 모르는 종류의 줄이 와도 시트는 깨지지 않는다(core가 `unknown` 한 줄로 접는다).
+//
+// ## 공용 시트로 (#4458)
+//
+// 머리는 오른쪽 원형 X 의 `SheetHeader`(옛 직접 짠 머리의 글자 「닫기」는 없다 — 이름은 그대로 「작업 기록 닫기」)이고
+// 몸은 `SheetScroll` 이다. 요약(에이전트·요청·상태·시간)은 카드 하나, 기록 줄은 **묶음 카드의 줄**이고 줄 사이는 카드의
+// 구분선이다(옛 줄마다 아래 테두리 없음). 기록 한계·보관 문장은 「기록」 라벨 아래·목록 위다(ADR-0200 D5 — 스크롤을 내려야만
+// 보이는 자리의 한계는 사실상 숨기는 것이다). 읽기 전용의 긴 목록이라 규칙상 페이지
+// 후보다(`docs/design-system/phone-sheets.md` §1) — 이 이슈는 시트로 둔 채 머리·부품만 옮겼다.
 // =============================================================================
 
 export const RUN_LEDGER_SHEET_TITLE = '작업 기록';
+const RUN_LEDGER_CLOSE_LABEL = `${RUN_LEDGER_SHEET_TITLE} 닫기`;
 
 export function RunLedgerSheet({
   progress,
@@ -68,6 +76,7 @@ export function RunLedgerSheet({
     <PageSheet
       onClose={onClose}
       accessibilityLabel={RUN_LEDGER_SHEET_TITLE}
+      scrimLabel={RUN_LEDGER_CLOSE_LABEL}
       testID="run-ledger-sheet">
       <SheetBody progress={progress} directory={directory} onClose={onClose} />
     </PageSheet>
@@ -84,7 +93,6 @@ export function SheetBody({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const insets = useSafeAreaInsets();
   const slideClose = usePageSheetClose() ?? onClose;
   const {workspaceId} = useSession();
   const live = useRunRow(opened.id);
@@ -111,111 +119,124 @@ export function SheetBody({
 
   return (
     <View style={styles.root}>
-      <View style={styles.nav}>
-        <View style={styles.navSide} />
-        <Text
-          accessibilityRole="header"
-          style={styles.navTitle}
-          numberOfLines={1}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          {RUN_LEDGER_SHEET_TITLE}
-        </Text>
-        <View style={[styles.navSide, styles.navSideEnd]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="작업 기록 닫기"
-            onPress={slideClose}
-            style={({pressed}) => [styles.navButton, pressed && styles.pressed]}
-            testID="run-ledger-close">
-            <Text style={styles.navButtonLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-              닫기
-            </Text>
-          </Pressable>
-        </View>
-      </View>
+      <SheetHeader
+        title={RUN_LEDGER_SHEET_TITLE}
+        closeLabel={RUN_LEDGER_CLOSE_LABEL}
+        onClose={slideClose}
+        closeTestID="run-ledger-close"
+      />
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          {paddingBottom: insets.bottom + space.xl},
-        ]}
-        testID="run-ledger-scroll">
-        <View style={styles.head}>
-          <Text style={styles.agent} testID="run-ledger-agent">
-            {name}
-          </Text>
-          {summary !== undefined && summary !== '' ? (
-            <Text style={styles.summary} numberOfLines={3} testID="run-ledger-summary">
-              {summary}
+      <SheetScroll testID="run-ledger-scroll">
+        <GroupCard>
+          <View style={styles.head}>
+            <Text style={styles.agent} testID="run-ledger-agent">
+              {name}
             </Text>
-          ) : null}
-          <View style={styles.stateLine}>
-            <View
-              style={[
-                styles.chip,
-                progress.phase === 'running' && styles.chipWorking,
-                progress.phase === 'awaiting_approval' && styles.chipWaiting,
-              ]}>
+            {summary !== undefined && summary !== '' ? (
               <Text
-                style={[
-                  styles.chipText,
-                  progress.phase === 'running' && styles.chipWorkingText,
-                  progress.phase === 'awaiting_approval' && styles.chipWaitingText,
-                ]}
-                testID="run-ledger-phase">
-                {/* 홈 카드·웹 패널 머리 칩과 같은 낱말 고르기(`runStateWord`, design-review #4285 r1 H5). */}
-                {runStateWord(facts, nowMs)}
-              </Text>
-            </View>
-            {detail !== undefined ? (
-              <Text
-                style={styles.detail}
+                style={styles.summary}
+                numberOfLines={3}
                 lineBreakStrategyIOS="hangul-word"
-                testID="run-ledger-detail">
-                {detail}
+                testID="run-ledger-summary">
+                {summary}
               </Text>
             ) : null}
+            <View style={styles.stateLine}>
+              <View
+                style={[
+                  styles.chip,
+                  progress.phase === 'running' && styles.chipWorking,
+                  progress.phase === 'awaiting_approval' && styles.chipWaiting,
+                ]}>
+                <Text
+                  style={[
+                    styles.chipText,
+                    progress.phase === 'running' && styles.chipWorkingText,
+                    progress.phase === 'awaiting_approval' && styles.chipWaitingText,
+                  ]}
+                  testID="run-ledger-phase">
+                  {/* 홈 카드·웹 패널 머리 칩과 같은 낱말 고르기(`runStateWord`, design-review #4285 r1 H5). */}
+                  {runStateWord(facts, nowMs)}
+                </Text>
+              </View>
+              {detail !== undefined ? (
+                <Text
+                  style={styles.detail}
+                  lineBreakStrategyIOS="hangul-word"
+                  testID="run-ledger-detail">
+                  {detail}
+                </Text>
+              ) : null}
+            </View>
+            <Text
+              style={styles.durations}
+              lineBreakStrategyIOS="hangul-word"
+              testID="run-ledger-durations">
+              {runDurationBreakdown(facts, nowMs)}
+            </Text>
           </View>
-          <Text
-            style={styles.durations}
-            lineBreakStrategyIOS="hangul-word"
-            testID="run-ledger-durations">
-            {runDurationBreakdown(facts, nowMs)}
-          </Text>
-        </View>
+        </GroupCard>
 
         <View style={styles.section}>
-          <Text accessibilityRole="header" style={styles.sectionHeading}>
-            기록
-          </Text>
-          <Text style={styles.note} testID="run-ledger-limit">
-            {RUN_LEDGER_LIMIT_SENTENCE}
-          </Text>
-          <Text style={styles.note}>{RUN_LEDGER_KEPT_SENTENCE}</Text>
+          <GroupLabel>기록</GroupLabel>
+          {/* 한계·보관 문장은 행을 어떻게 읽을지 정하는 지시다(안 보이는 것은 안 한 일이 아니다). 목록 위, 스크롤 몸의 첫머리에 둔다 —
+              스크롤을 내려야만 보이는 자리의 한계는 사실상 숨기는 것이다(ADR-0200 D5, 웹 `PanelFooter` 주석과 같은 결정). 이 PR 의
+              1단계가 목록 아래 각주로 옮겼던 것을 design-review r1b M1 이 되돌렸다. */}
+          <View style={styles.limits}>
+            <Text
+              style={styles.note}
+              lineBreakStrategyIOS="hangul-word"
+              testID="run-ledger-limit">
+              {RUN_LEDGER_LIMIT_SENTENCE}
+            </Text>
+            <Text
+              style={styles.note}
+              lineBreakStrategyIOS="hangul-word"
+              testID="run-ledger-kept">
+              {RUN_LEDGER_KEPT_SENTENCE}
+            </Text>
+          </View>
+          {query.isLoading ? (
+            // 상태 블록은 가로 여백(16)을 스스로 든다 — 카드 안에 서야 시트 몸의 거터와 겹치지 않고 카드 행과 글자 열이 맞는다.
+            <GroupCard>
+              <LoadingState label="기록을 읽고 있어요" testID="run-ledger-loading" />
+            </GroupCard>
+          ) : query.isError && rows.length === 0 ? (
+            <GroupCard>
+              <ErrorState
+                headline="기록을 읽지 못했어요."
+                detail={open ? '잠시 뒤에 다시 읽어요.' : '다시 시도하거나 시트를 다시 열어 주세요.'}
+                onRetry={() => void query.refetch()}
+                testID="run-ledger-error"
+              />
+            </GroupCard>
+          ) : rows.length === 0 ? (
+            <GroupCard>
+              <View style={styles.emptyBlock} testID="run-ledger-empty">
+                {/* 어절 단위로 접는다 — 같은 시트의 요약·기록 줄·한계 문장과 같은 규칙(design-review r2 L2). */}
+                <Text
+                  style={styles.emptyHeadline}
+                  lineBreakStrategyIOS="hangul-word"
+                  testID="run-ledger-empty-headline">
+                  {empty.headline}
+                </Text>
+                <Text
+                  style={styles.note}
+                  lineBreakStrategyIOS="hangul-word"
+                  testID="run-ledger-empty-detail">
+                  {empty.detail}
+                </Text>
+              </View>
+            </GroupCard>
+          ) : (
+            <GroupCard testID="run-ledger-rows">
+              {rows.map(row => (
+                <LedgerRowView key={row.key} row={row} nowMs={nowMs} />
+              ))}
+            </GroupCard>
+          )}
         </View>
-
-        {query.isLoading ? (
-          <LoadingState label="기록을 읽고 있어요" testID="run-ledger-loading" />
-        ) : query.isError && rows.length === 0 ? (
-          <ErrorState
-            headline="기록을 읽지 못했어요."
-            detail={open ? '잠시 뒤에 다시 읽어요.' : '다시 시도하거나 시트를 다시 열어 주세요.'}
-            onRetry={() => void query.refetch()}
-            testID="run-ledger-error"
-          />
-        ) : rows.length === 0 ? (
-          <View style={styles.emptyBlock} testID="run-ledger-empty">
-            <Text style={styles.emptyHeadline}>{empty.headline}</Text>
-            <Text style={styles.note}>{empty.detail}</Text>
-          </View>
-        ) : (
-          <View style={styles.rows} testID="run-ledger-rows">
-            {rows.map(row => (
-              <LedgerRowView key={row.key} row={row} nowMs={nowMs} />
-            ))}
-          </View>
-        )}
-      </ScrollView>
+      </SheetScroll>
     </View>
   );
 }
@@ -238,7 +259,8 @@ function LedgerRowView({
             row.tone === 'neutral' && styles.rowTextNeutral,
             row.tone === 'action' && styles.rowTextAction,
             row.tone === 'end' && styles.rowTextEnd,
-          ]}>
+          ]}
+          lineBreakStrategyIOS="hangul-word">
           {row.text}
           {row.count !== undefined ? (
             <Text style={styles.rowTextNeutral}>{` · ${row.count}번`}</Text>
@@ -246,7 +268,9 @@ function LedgerRowView({
         </Text>
       </View>
       {row.reason !== undefined ? (
-        <Text style={styles.rowReason}>{row.reason}</Text>
+        <Text style={styles.rowReason} lineBreakStrategyIOS="hangul-word">
+          {row.reason}
+        </Text>
       ) : null}
     </View>
   );
@@ -255,33 +279,12 @@ function LedgerRowView({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {flex: 1},
-    nav: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: TOUCH_TARGET + space.md,
-      paddingHorizontal: space.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: color.border,
+    // 카드 안의 요약 — 안쪽 가로 여백은 카드 행과 같은 값이다.
+    head: {
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+      gap: space.sm,
     },
-    navSide: {flex: 1, flexDirection: 'row'},
-    navSideEnd: {justifyContent: 'flex-end'},
-    navTitle: {
-      flexShrink: 1,
-      fontSize: font.body,
-      fontWeight: '600',
-      color: color.text,
-      textAlign: 'center',
-    },
-    navButton: {
-      minHeight: TOUCH_TARGET,
-      justifyContent: 'center',
-      paddingHorizontal: space.sm,
-      borderRadius: radius.sm,
-    },
-    navButtonLabel: {fontSize: font.body, color: color.accentText, fontWeight: '600'},
-    pressed: {backgroundColor: color.surfacePressed},
-    content: {paddingTop: space.lg, gap: space.lg},
-    head: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
     agent: {fontSize: font.heading, lineHeight: line.body, fontWeight: '700', color: color.agent},
     summary: {fontSize: font.body, lineHeight: line.body, color: color.text},
     stateLine: {flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: space.sm},
@@ -304,22 +307,21 @@ const buildStyles = (color: Palette) =>
       color: color.text,
       fontVariant: ['tabular-nums'],
     },
-    section: {paddingHorizontal: SAFE_GUTTER, gap: space.xs},
-    sectionHeading: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      fontWeight: '600',
-      color: color.textMuted,
-    },
+    // 섹션 라벨과 그 아래 카드는 한 묶음이다(`GroupCard` 의 라벨과 같은 간격).
+    section: {gap: space.sm},
+    limits: {gap: space.xs, paddingHorizontal: space.xs},
     note: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
-    emptyBlock: {paddingHorizontal: SAFE_GUTTER, gap: space.xs},
-    emptyHeadline: {fontSize: font.body, lineHeight: line.body, color: color.text},
-    rows: {paddingHorizontal: SAFE_GUTTER},
-    row: {
-      paddingVertical: space.sm,
+    emptyBlock: {
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
       gap: space.xs,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: color.border,
+    },
+    emptyHeadline: {fontSize: font.body, lineHeight: line.body, color: color.text},
+    // 카드 안의 한 줄. 줄 사이는 카드의 구분선이 그린다.
+    row: {
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+      gap: space.xs,
     },
     rowLine: {flexDirection: 'row', alignItems: 'baseline', gap: space.sm},
     rowTime: {
