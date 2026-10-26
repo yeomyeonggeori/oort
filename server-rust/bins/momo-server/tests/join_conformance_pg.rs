@@ -1690,6 +1690,9 @@ fn assert_rejected(
 //   ban, gets the same answer whether or not the address has an account;
 // * `a_spent_budget_runs_no_comparison` — the budget is asked before bcrypt runs,
 //   told apart by the time a comparison costs;
+// * `a_joins_rows_and_session_are_written_by_one_transaction` — the redemption, the
+//   audit row and both session rows carry the same transaction id, which is what lets
+//   a membership change that waited for the join revoke the session it recorded;
 // * `a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_word` — the
 //   join stands in line with every membership change: a removal, suspension,
 //   self-leave or role change that arrives while a join is in flight waits for it,
@@ -2880,6 +2883,97 @@ async fn redeem_with_budget(
     .expect("the tenant transaction itself must not fail")
 }
 
+/// `xmin` of the row a token string was recorded as: the id of the transaction that wrote
+/// it. The route records a session under its hash only.
+async fn token_xmin(su: &PgPool, raw_token: &str) -> String {
+    sqlx::query_scalar("SELECT xmin::text FROM token WHERE token_hash = digest($1::text, 'sha256')")
+        .bind(raw_token)
+        .fetch_one(su)
+        .await
+        .expect("the session row the join answered with")
+}
+
+/// The session a join answers with is written by **the join's own transaction**: the
+/// redemption, the audit row and both token rows carry one transaction id, for an
+/// existing account that proves itself and for a new one alike.
+///
+/// This is the property that lets a suspension or removal that waited for the join revoke
+/// the pair it recorded — a pair written afterwards, by a transaction of its own, can be
+/// born just after that revocation ran and escape it. The membership-change test shows
+/// the consequence, but only by racing; this one states the cause and cannot miss.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_joins_rows_and_session_are_written_by_one_transaction() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-one-tx").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+    let existing = seed_account(
+        &su,
+        fixture.workspace,
+        "one-tx-existing",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let new_email = format!("one-tx-new-{}@join.test", Uuid::new_v4());
+
+    for (case, email, password, expected_status) in [
+        (
+            "an existing account",
+            existing.email.clone(),
+            MEMBER_PASSWORD,
+            200,
+        ),
+        ("a new account", new_email, JOIN_PASSWORD, 201),
+    ] {
+        let (code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+        let joined = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&code, &email, password),
+        )
+        .await;
+        assert_eq!(joined.status, expected_status, "{case}: {}", joined.body);
+        let member = uuid_of(joined.body["member"]["id"].as_str().expect("member id"));
+        let access = joined.body["accessToken"].as_str().expect("access token");
+        let refresh = joined.body["refreshToken"].as_str().expect("refresh token");
+
+        let redemption: String = sqlx::query_scalar(
+            "SELECT xmin::text FROM invite_code_redemption WHERE member_id = $1 \
+              ORDER BY redeemed_at DESC LIMIT 1",
+        )
+        .bind(member)
+        .fetch_one(&su)
+        .await
+        .expect("the redemption row");
+        let audit: String = sqlx::query_scalar(
+            "SELECT xmin::text FROM audit_log \
+              WHERE workspace_id = $1 AND action = 'invite.join' AND actor_member_id = $2 \
+              ORDER BY created_at DESC LIMIT 1",
+        )
+        .bind(fixture.workspace)
+        .bind(member)
+        .fetch_one(&su)
+        .await
+        .expect("the audit row");
+        let (access_tx, refresh_tx) = (
+            token_xmin(&su, access).await,
+            token_xmin(&su, refresh).await,
+        );
+        assert_eq!(
+            [&audit, &access_tx, &refresh_tx],
+            [&redemption, &redemption, &redemption],
+            "{case}: the redemption, the audit row and both session rows were written by one \
+             transaction (redemption {redemption}, audit {audit}, access {access_tx}, \
+             refresh {refresh_tx})"
+        );
+    }
+}
+
 /// A dead invite — revoked, expired, spent, or never issued — is answered by the invite
 /// alone: asking about an address that has an account, in any state, with a password
 /// that is not its, gets exactly what asking about an address that has none gets. The
@@ -3153,6 +3247,22 @@ async fn parked_on_an_advisory_lock(su: &PgPool) -> i64 {
     .expect("read pg_stat_activity")
 }
 
+/// How many advisory locks of this database are in `mode` and `granted` (or still waiting
+/// for it). The membership lock is the only advisory lock the server takes in a test run,
+/// so a count of one is that lock.
+async fn advisory_locks(su: &PgPool, mode: &str, granted: bool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM pg_locks \
+          WHERE locktype = 'advisory' AND mode = $1 AND granted = $2 \
+            AND database = (SELECT oid FROM pg_database WHERE datname = current_database())",
+    )
+    .bind(mode)
+    .bind(granted)
+    .fetch_one(su)
+    .await
+    .expect("read pg_locks")
+}
+
 /// What changes a member's standing while a join for them is in flight.
 #[derive(Clone, Copy, Debug)]
 enum Change {
@@ -3266,6 +3376,19 @@ async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_wor
             parked_on_a_lock(&su, "invite_code_redemption").await > 0
         })
         .await;
+        // The join holds the membership lock **shared** while it is parked: shared, so
+        // that joins do not wait for each other (an exclusive hold would line every join
+        // up behind the one in front), and held, so that a change has to wait for it.
+        assert_eq!(
+            advisory_locks(&su, "ShareLock", true).await,
+            1,
+            "{scene}: the parked join holds the workspace membership lock in shared mode"
+        );
+        assert_eq!(
+            advisory_locks(&su, "ExclusiveLock", true).await,
+            0,
+            "{scene}: no one holds it exclusively yet"
+        );
 
         let change_task = tokio::spawn({
             let (http, base) = (http.clone(), base.clone());
@@ -3312,6 +3435,7 @@ async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_wor
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
         let finished_early = change_task.is_finished();
+        let queued_exclusive = advisory_locks(&su, "ExclusiveLock", false).await;
         ledger.rollback().await.expect("release the ledger");
         let joined = join.await.expect("join task");
         let changed = change_task.await.expect("change task");
@@ -3321,6 +3445,10 @@ async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_wor
              (changed: {changed}, join: {} {})",
             joined.status,
             joined.body
+        );
+        assert_eq!(
+            queued_exclusive, 1,
+            "{scene}: the change was queued behind the join for the lock, exclusively"
         );
         assert_eq!(changed, 200, "{scene}: the change itself goes through");
         assert_eq!(
