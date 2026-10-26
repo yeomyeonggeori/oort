@@ -91,23 +91,23 @@
 //! "compare first, count afterwards" does not compile. The other two orders — the
 //! invite's own state and a ban before the gate — are held by conformance tests.
 //!
-//! **The account row is locked for the rest of the join.** The gate reads the
-//! member `FOR SHARE`, the same row an operator's suspend or removal takes `FOR
-//! UPDATE`, so the two line up instead of interleaving: an operator who is first
-//! makes the join see the new state (and refuse it), and a join that is first makes
-//! the operator wait and then undo everything the join wrote. Without the lock a
+//! **The join stands in line with every membership change.** The transaction's
+//! first statement takes the workspace's membership lock in shared mode
+//! ([`crate::share_membership_state`]), the lock every suspend, reinstatement,
+//! removal, self-leave and role change already takes exclusively as *its* first
+//! statement. A join therefore sees a workspace wholly before such a change or
+//! wholly after it: an operator who is first makes the join read the new state (and
+//! refuse it), and a join that is first makes the operator wait, then revoke the
+//! session the join just recorded and delete the rows it wrote. Without the lock a
 //! removal could land between the gate and the role-escalation check and leave the
-//! invite's role on the removed member.
+//! invite's role on the removed member. (A row lock on the member was tried first
+//! and deadlocked with self-leave, which deletes the membership rows before it
+//! touches the member; the advisory lock has no row order to get wrong.)
 //!
-//! What the lock does not cover is the session the route mints *after* this
-//! transaction commits, in a transaction of its own — the shape login has too. An
-//! operator who suspends or removes the member in that few-millisecond interval has
-//! already revoked the tokens that existed, so the pair minted next escapes the
-//! revocation. For a removed member it is inert for good (every workspace-scoped
-//! route and refresh re-reads `member.status`). For a suspended one it is refused
-//! until a reinstatement and then works — the pair of someone who had just shown
-//! the password, which a sign-in would give them anyway. Closing it means recording
-//! the session inside the transaction that holds the lock (a follow-up, with login).
+//! **The session is recorded in this same transaction** (the route does it, on the
+//! connection that holds the lock). If it were minted afterwards, a suspension or
+//! removal that arrives between the commit and the recording would have revoked only
+//! the tokens that existed and the pair minted next would escape it.
 //!
 //! This is a gate on **state and proof**, not a way to hide that an account exists:
 //! a join with an unused address creates an account, so "created" against "refused"
@@ -155,6 +155,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::invite::{read_invite, InviteCode};
+use crate::workspace::share_membership_state;
 
 // ---------------------------------------------------------------------------
 // request-shape validation (Swift `JoinRoutes` :724-819 + `InviteRoutes.normalizedCode`)
@@ -628,6 +629,11 @@ pub struct JoinOutcome {
 ///
 /// `guess_budget` is how the transport layer limits password guesses (see
 /// [`PasswordGuessBudget`]); it is a required argument, with no unbudgeted default.
+///
+/// The transaction holds the workspace's membership lock in shared mode from its
+/// first statement to its commit (see the module docs). A caller that goes on to
+/// mint a session for the member should record it **on this connection**, inside
+/// the same transaction, so that a suspension or removal that follows revokes it.
 pub async fn redeem_invite_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -636,6 +642,10 @@ pub async fn redeem_invite_in_tx(
     user_agent: Option<&str>,
     guess_budget: &dyn PasswordGuessBudget,
 ) -> Result<JoinOutcome, JoinError> {
+    // 0) Stand in line with the membership mutations (see the module's "the join
+    //    stands in line" paragraph). First, before any read the rest relies on.
+    share_membership_state(conn, workspace_id).await?;
+
     // 1) Resolve AND lock in one statement. Swift resolves unlocked
     //    (`findInvite` :216-267) and re-reads `FOR UPDATE` by id inside the
     //    transaction (`lockInvite` :333-359); one locked read by `code_hash`
@@ -992,9 +1002,7 @@ struct ExistingAccount {
     stored_email: String,
 }
 
-/// The account this address already belongs to in `workspace_id`, if any, **locked
-/// `FOR SHARE`** until the transaction ends (see the module's "the account row is
-/// locked" paragraph).
+/// The account this address already belongs to in `workspace_id`, if any.
 ///
 /// The parameter carries `lower(btrim(...))` for the reason in this module's
 /// "the lookups normalise their own argument" section: a miss here sends the
@@ -1002,6 +1010,9 @@ struct ExistingAccount {
 /// past the gate that only an existing account has to clear. The workspace is named
 /// in the statement as well as by the tenant GUC: the row-level policy is what
 /// keeps another tenant out, and this makes the statement say so too.
+///
+/// A plain read: what stops the answer from going stale before commit is the shared
+/// membership lock this transaction already holds, not a lock on the row.
 async fn find_human_by_email(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1014,8 +1025,7 @@ async fn find_human_by_email(
            JOIN member m ON m.id = h.member_id \
           WHERE h.workspace_id = $2 \
             AND h.email = lower(btrim($1)) \
-          LIMIT 1 \
-            FOR SHARE OF m",
+          LIMIT 1",
     )
     .bind(email)
     .bind(workspace_id)

@@ -71,14 +71,14 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_settings::{
     fallback_handle, normalized_invite_code, normalized_join_display_name, normalized_join_email,
     normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
-    redeem_invite_in_tx, resolve_invite_workspace, JoinError, JoinOutcome, JoinRejection,
-    JoinRequestValues, JoinSpecInvalid,
+    redeem_invite_in_tx, resolve_invite_workspace, JoinError, JoinRejection, JoinRequestValues,
+    JoinSpecInvalid,
 };
 
 use crate::dto::{InviteCodeDto, JoinMembershipDto, JoinRequest, JoinResponse, MemberDto};
 use crate::error::ApiError;
 use crate::rate_limit::{too_many_requests, AccountGuessBudget};
-use crate::routes::auth_routes::{base_scopes, issue_and_record_session};
+use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
 use crate::routes::shared::join_tenant_tx;
 use crate::AppState;
 
@@ -184,6 +184,7 @@ pub async fn join(
     // immediately before it compares a password, and only for an address that
     // already has an active account.
     let guess_budget = AccountGuessBudget::new(state.rate_limit.clone());
+    let jwt_secret = state.jwt_secret.clone();
     let joined = join_tenant_tx(&state.pool, workspace_id, {
         let values = values.clone();
         let code = code.clone();
@@ -235,13 +236,29 @@ pub async fn join(
                     )
                     .await?;
                 }
-                Ok(outcome)
+                // -- the session, in this same transaction ---------------------
+                // The same mint-and-record path login uses (so a joined session is
+                // revocable exactly like a logged-in one, MOMO-300), but on THIS
+                // connection: the transaction holds the workspace's membership lock
+                // (shared) from its first statement, so an operator's suspension or
+                // removal waits for the commit and then revokes the pair recorded
+                // here. Minted after the commit, the pair could be born just after
+                // that revocation ran and escape it.
+                let (access, refresh) = mint_and_record_session_in_tx(
+                    conn,
+                    &jwt_secret,
+                    workspace_id,
+                    outcome.member.id,
+                    base_scopes(),
+                )
+                .await?;
+                Ok((outcome, access, refresh))
             })
         }
     })
     .await;
-    let outcome: JoinOutcome = match joined {
-        Ok(outcome) => outcome,
+    let (outcome, access, refresh) = match joined {
+        Ok(joined) => joined,
         // A spent guess budget is the one refusal that needs a header: `ApiError` has
         // no slot for `Retry-After`, so it is answered here, as the per-IP gate does.
         Err(JoinError::Rejected(JoinRejection::PasswordGuessLimited {
@@ -249,19 +266,6 @@ pub async fn join(
         })) => return Ok(too_many_requests(retry_after_seconds)),
         Err(error) => return Err(join_error(error)),
     };
-
-    // -- 4. the session ----------------------------------------------------
-    // The same mint-and-record path login uses, so a joined session is revocable
-    // exactly like a logged-in one (MOMO-300). Reusing it rather than re-minting
-    // here is what keeps the two from drifting in what they persist.
-    let (access, refresh) = issue_and_record_session(
-        &state,
-        workspace_id,
-        outcome.member.id,
-        base_scopes(),
-        "join.session",
-    )
-    .await?;
 
     let status = if outcome.created_member {
         StatusCode::CREATED

@@ -1690,9 +1690,10 @@ fn assert_rejected(
 //   ban, gets the same answer whether or not the address has an account;
 // * `a_spent_budget_runs_no_comparison` — the budget is asked before bcrypt runs,
 //   told apart by the time a comparison costs;
-// * `an_operator_who_removes_a_member_mid_join_is_not_undone` — the account row
-//   is locked from the gate on, so a removal lined up with a join leaves no
-//   role or channel row behind.
+// * `a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_word` — the
+//   join stands in line with every membership change: a removal, suspension,
+//   self-leave or role change that arrives while a join is in flight waits for it,
+//   and then undoes what it wrote, session included.
 //
 // Fixture passwords are at least ten characters and carry no NUL, so they stay valid
 // when the stricter new-password rule (ADR-0215 D2) reaches the join path.
@@ -2958,11 +2959,12 @@ async fn the_invite_and_the_ban_are_judged_before_the_account() {
         ("spent", spent_code, 409),
         ("unknown", "this-code-was-never-issued".to_string(), 404),
     ];
-    for (kind, code, expected) in dead {
+    for (kind, code, expected) in &dead {
+        let (expected, code) = (*expected, code);
         let control = post_join(
             &http,
             &base,
-            join_payload(&code, &format!("dead-new-{}@join.test", Uuid::new_v4())),
+            join_payload(code, &format!("dead-new-{}@join.test", Uuid::new_v4())),
         )
         .await;
         assert_eq!(
@@ -2974,7 +2976,7 @@ async fn the_invite_and_the_ban_are_judged_before_the_account() {
             let asked = post_join(
                 &http,
                 &base,
-                join_payload_with_password(&code, &account.email, WRONG_PASSWORD),
+                join_payload_with_password(code, &account.email, WRONG_PASSWORD),
             )
             .await;
             assert_eq!(
@@ -3022,6 +3024,24 @@ async fn the_invite_and_the_ban_are_judged_before_the_account() {
         (without_account.status, &without_account.body),
         "a banned address is refused the same way whether or not it has an account"
     );
+
+    // …and the invite's own state comes before the ban: a dead link answers for itself,
+    // even to an address that is banned, so it cannot be used to read the ban list.
+    for (kind, code, expected) in &dead {
+        for email in [&banned_account.email, &banned_new] {
+            let asked = post_join(
+                &http,
+                &base,
+                join_payload_with_password(code, email, WRONG_PASSWORD),
+            )
+            .await;
+            assert_eq!(
+                asked.status, *expected,
+                "{kind} invite / banned address: the invite is judged before the ban: {}",
+                asked.body
+            );
+        }
+    }
 }
 
 /// The budget is asked before bcrypt runs, and a spent budget costs the caller no
@@ -3120,108 +3140,227 @@ async fn parked_on_a_lock(su: &PgPool, fragment: &str) -> i64 {
     .expect("read pg_stat_activity")
 }
 
-/// An operator's removal that lands while a join is in flight is not undone by it.
+/// How many backends of this database are waiting for an advisory lock — the
+/// membership lock, when a membership change is queued behind a join.
+async fn parked_on_an_advisory_lock(su: &PgPool) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM pg_stat_activity \
+          WHERE datname = current_database() AND state = 'active' \
+            AND wait_event_type = 'Lock' AND wait_event = 'advisory'",
+    )
+    .fetch_one(su)
+    .await
+    .expect("read pg_stat_activity")
+}
+
+/// What changes a member's standing while a join for them is in flight.
+#[derive(Clone, Copy, Debug)]
+enum Change {
+    /// The operator removes the member (`DELETE …/members/{id}`).
+    Remove,
+    /// The operator suspends the member.
+    Suspend,
+    /// The member leaves the workspace themself (`DELETE …/members/me`).
+    SelfLeave,
+    /// The operator demotes the member to guest.
+    Demote,
+}
+
+/// A membership change that meets a join in flight waits for it, and then has the
+/// last word.
 ///
-/// The join is parked just after the gate (a table lock on the redemption ledger holds
-/// its next read), the removal is sent while it waits, and the lock is released once the
-/// removal has either finished or is seen waiting on a lock. With the account row locked
-/// by the gate, the removal waits for the join, which then refuses the admin link (the
-/// member still holds the member role) and rolls back; the removal runs after it. With
-/// no lock, the removal finishes first, the escalation check finds no role to compare
-/// with, and the join writes the invite's role back for a member who has just been
-/// removed. Either way the removal must be the last word.
+/// The join is parked just after the gate (a table lock on the redemption ledger
+/// holds its next read) with the workspace's membership lock held in shared mode. The
+/// change is sent while it waits, and the test requires that it is **seen waiting for
+/// that lock** — a change that finished while the join was parked has not lined up
+/// with it. Then the ledger is released: the join finishes, and the change runs after
+/// it and undoes what it wrote.
+///
+/// Four changes, because they reach the member through different statements: removal
+/// and suspension lock the member first, self-leave deletes the membership rows first
+/// and only then touches the member (a row lock on the member deadlocked with it — the
+/// reason the join takes the workspace lock instead), and a role change writes the
+/// authority row. And two links for removal: with an admin link the escalation check
+/// is the one a removal that slipped in would have skipped.
+///
+/// What each leaves behind is the point. A removed or departed member has no role, no
+/// channel and no live token — **including the pair the join minted**, which is only
+/// revocable if it was recorded before the change took its turn. A suspended member's
+/// rows stay and every token is revoked, again the join's included.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
-async fn an_operator_who_removes_a_member_mid_join_is_not_undone() {
+async fn a_membership_change_that_meets_a_join_waits_for_it_and_has_the_last_word() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
-    let app_pool = momo_app_pool().await;
-    let fixture = seed(&su, "join-race").await;
-    let base = start_server(app_pool, RateLimitConfig::default()).await;
-    let http = reqwest::Client::new();
-    let token = owner_token(&http, &base, &fixture).await;
-    let target = seed_account(
-        &su,
-        fixture.workspace,
-        "race-target",
-        "member",
-        Stored::Password(MEMBER_PASSWORD),
-    )
-    .await;
-    // An admin link: it is the one the escalation check refuses while the member still
-    // holds the member role, and lets through once the role row is gone.
-    let (admin_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "admin", 5).await;
 
-    // Hold the redemption ledger, so the join stops at the read that follows the gate.
-    let mut ledger = su.begin().await.expect("begin the holding transaction");
-    sqlx::query("LOCK TABLE invite_code_redemption IN ACCESS EXCLUSIVE MODE")
-        .execute(&mut *ledger)
-        .await
-        .expect("lock the ledger");
-
-    let join = tokio::spawn({
-        let (http, base, email) = (http.clone(), base.clone(), target.email.clone());
-        async move {
-            post_join(
-                &http,
-                &base,
-                join_payload_with_password(&admin_code, &email, MEMBER_PASSWORD),
+    // (the change, the role the join's link grants, the join's expected answer)
+    let scenes = [
+        (Change::Remove, "member", 200),
+        (Change::Remove, "admin", 403),
+        (Change::Suspend, "member", 200),
+        (Change::SelfLeave, "member", 200),
+        (Change::Demote, "member", 200),
+    ];
+    for (change, invite_role, expected_join) in scenes {
+        let scene = format!("{change:?} / {invite_role} link");
+        let app_pool = momo_app_pool().await;
+        let fixture = seed(&su, "join-race").await;
+        let base = start_server(app_pool, RateLimitConfig::default()).await;
+        let http = reqwest::Client::new();
+        let token = owner_token(&http, &base, &fixture).await;
+        let target = seed_account(
+            &su,
+            fixture.workspace,
+            "race-target",
+            "member",
+            Stored::Password(MEMBER_PASSWORD),
+        )
+        .await;
+        // The member's own sign-in, before anything is held: self-leave needs a token.
+        let member_token = login(
+            &http,
+            &base,
+            fixture.workspace,
+            &target.email,
+            MEMBER_PASSWORD,
+        )
+        .await["accessToken"]
+            .as_str()
+            .expect("the member signs in")
+            .to_string();
+        let (code, _) = issue_invite(&http, &base, &token, fixture.workspace, invite_role, 5).await;
+        let live_tokens = || async {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT count(*)::bigint FROM token \
+                  WHERE actor_member_id = $1 AND kind = 'session' AND revoked_at IS NULL",
             )
+            .bind(target.id)
+            .fetch_one(&su)
             .await
-        }
-    });
-    wait_until("the join to park on the redemption ledger", || async {
-        parked_on_a_lock(&su, "invite_code_redemption").await > 0
-    })
-    .await;
-
-    let removal = tokio::spawn({
-        let (http, base, token) = (http.clone(), base.clone(), token.clone());
-        let uri = format!(
-            "{base}/v1/workspaces/{}/members/{}",
-            fixture.workspace, target.id
+            .expect("count live tokens")
+        };
+        assert_eq!(
+            live_tokens().await,
+            2,
+            "{scene}: the sign-in's pair is live"
         );
-        async move {
-            http.delete(uri)
-                .bearer_auth(token)
-                .send()
+
+        // Hold the redemption ledger, so the join stops at the read that follows the gate.
+        let mut ledger = su.begin().await.expect("begin the holding transaction");
+        sqlx::query("LOCK TABLE invite_code_redemption IN ACCESS EXCLUSIVE MODE")
+            .execute(&mut *ledger)
+            .await
+            .expect("lock the ledger");
+        let join = tokio::spawn({
+            let (http, base, email) = (http.clone(), base.clone(), target.email.clone());
+            async move {
+                post_join(
+                    &http,
+                    &base,
+                    join_payload_with_password(&code, &email, MEMBER_PASSWORD),
+                )
                 .await
-                .expect("remove the member")
-                .status()
-                .as_u16()
+            }
+        });
+        wait_until("the join to park on the redemption ledger", || async {
+            parked_on_a_lock(&su, "invite_code_redemption").await > 0
+        })
+        .await;
+
+        let change_task = tokio::spawn({
+            let (http, base) = (http.clone(), base.clone());
+            let (workspace, member) = (fixture.workspace, target.id);
+            let (owner_token, member_token) = (token.clone(), member_token.clone());
+            async move {
+                let request = match change {
+                    Change::Remove => http
+                        .delete(format!("{base}/v1/workspaces/{workspace}/members/{member}"))
+                        .bearer_auth(owner_token),
+                    Change::Suspend => http
+                        .post(format!(
+                            "{base}/v1/workspaces/{workspace}/members/{member}/suspend"
+                        ))
+                        .bearer_auth(owner_token),
+                    Change::SelfLeave => http
+                        .delete(format!("{base}/v1/workspaces/{workspace}/members/me"))
+                        .bearer_auth(member_token),
+                    Change::Demote => http
+                        .patch(format!(
+                            "{base}/v1/workspaces/{workspace}/members/{member}/role"
+                        ))
+                        .bearer_auth(owner_token)
+                        .json(&json!({ "role": "guest" })),
+                };
+                request
+                    .send()
+                    .await
+                    .expect("send the membership change")
+                    .status()
+                    .as_u16()
+            }
+        });
+        // The change must end up waiting for the join, not finish around it.
+        let mut waiting = false;
+        for _ in 0..150 {
+            if change_task.is_finished() {
+                break;
+            }
+            if parked_on_an_advisory_lock(&su).await > 0 {
+                waiting = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
-    });
-    // Whichever happens first is what the lock is about: the removal finishing while the
-    // join is parked, or the removal waiting for the join.
-    let mut finished_early = false;
-    for _ in 0..150 {
-        if removal.is_finished() {
-            finished_early = true;
-            break;
+        let finished_early = change_task.is_finished();
+        ledger.rollback().await.expect("release the ledger");
+        let joined = join.await.expect("join task");
+        let changed = change_task.await.expect("change task");
+        assert!(
+            waiting && !finished_early,
+            "{scene}: the change finished while the join was parked instead of waiting for it \
+             (changed: {changed}, join: {} {})",
+            joined.status,
+            joined.body
+        );
+        assert_eq!(changed, 200, "{scene}: the change itself goes through");
+        assert_eq!(
+            joined.status, expected_join,
+            "{scene}: the join was first, and answers as it would have alone: {}",
+            joined.body
+        );
+
+        // The change is the last word.
+        let state = account_state(&su, target.id).await;
+        match change {
+            Change::Remove | Change::SelfLeave => {
+                assert_eq!(state.status, "deleted", "{scene}");
+                assert_eq!(
+                    (state.role.as_deref(), state.channel_memberships),
+                    (None, 0),
+                    "{scene}: no role or channel row survives"
+                );
+                assert_eq!(
+                    live_tokens().await,
+                    0,
+                    "{scene}: no live token survives, the join's own pair included"
+                );
+            }
+            Change::Suspend => {
+                assert_eq!(state.status, "suspended", "{scene}");
+                assert_eq!(
+                    live_tokens().await,
+                    0,
+                    "{scene}: every token is revoked, the join's own pair included"
+                );
+            }
+            Change::Demote => {
+                assert_eq!(state.status, "active", "{scene}");
+                assert_eq!(
+                    state.role.as_deref(),
+                    Some("guest"),
+                    "{scene}: the demotion is the last word on the role"
+                );
+            }
         }
-        if parked_on_a_lock(&su, "FOR UPDATE OF wm, m").await > 0 {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
     }
-    ledger.rollback().await.expect("release the ledger");
-
-    let joined = join.await.expect("join task");
-    let removed = removal.await.expect("removal task");
-    assert_eq!(removed, 200, "the operator's removal goes through");
-    assert_ne!(
-        joined.status, 200,
-        "a member who was removed during the join is not handed a session by it \
-         (removal finished while the join was parked: {finished_early}): {}",
-        joined.body
-    );
-
-    let state = account_state(&su, target.id).await;
-    assert_eq!(state.status, "deleted", "the removal is the last word");
-    assert_eq!(
-        (state.role.as_deref(), state.channel_memberships),
-        (None, 0),
-        "no role or channel row survives a removal that came after the gate \
-         (removal finished while the join was parked: {finished_early})"
-    );
 }
