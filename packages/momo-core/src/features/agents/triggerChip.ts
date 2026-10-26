@@ -1,0 +1,320 @@
+import type { AgentRunProgress, Message } from "../../lib/api";
+import { turnRecordRunId } from "../timeline/cascadeModel";
+import { RAIL_WORD } from "./activityRail";
+import { isUncollectedPastGrace, type RoutineHint } from "./runException";
+import { runPhaseLabel, serverFactsOf } from "./runPhase";
+import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
+
+// =============================================================================
+// 트리거 메시지의 상태 칩 (#4619, #4577 권장 B).
+//
+// 에이전트를 부른 사람의 메시지 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다:
+//
+//   받음 → 가져감 → 작업 중 → 답함 ✓      못 가져감 !      실패 !      승인 대기
+//
+// 칩은 문장 행(「받았어요 → 깨우는 신호 보냄 → 가져감 → …」)의 자리를 대신한다. 한 낱말이라
+// 행 높이가 변하지 않고, 상태가 바뀌어도 칩의 크기는 그대로다(크기는 표면의 몫, 낱말은 이 모델의
+// 몫). 이 칩의 글자에도 **초 단위 숫자가 없다**: 경과는 말하지 않는다.
+//
+// 낱말은 레일(`activityRail`)과 같은 것이다. 레일은 채널 단위로 「지금 누가 일하나」를, 칩은
+// 메시지 단위로 「내가 부른 일이 어디까지 갔나」를 말하고, 두 자리가 같은 상태를 다른 낱말로
+// 부르지 않는다. 칩이 더 갖는 낱말은 끝난 뒤의 셋(답함·못 가져감·실패)뿐이다.
+//
+// 한 메시지가 여러 에이전트를 불렀으면 **가장 사람에게 급한 상태 하나**가 칩이 된다
+// (실패 > 못 가져감 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함). 하나라도 아직 일하는 중이면
+// 「답함」이 아니다. 취소는 사람이 직접 한 일이라 알릴 새 소식이 아니므로 칩에 세지 않는다.
+// =============================================================================
+
+export type TriggerChipKind =
+  | "received"
+  | "claimed"
+  | "working"
+  | "approval"
+  | "answered"
+  | "uncollected"
+  | "failed";
+
+/** 칩 글자 곁의 표지. 모양이 뜻을 말한다(색에만 기대지 않는다). */
+export type TriggerChipMark = "none" | "dot" | "check" | "alert";
+
+/** 칩 그릇의 톤. 표면이 토큰 클래스에 매긴다. */
+export type TriggerChipTone = "muted" | "working" | "ok" | "warn" | "danger";
+
+export const CHIP_WORD_ANSWERED = "답함";
+export const CHIP_WORD_UNCOLLECTED = "못 가져감";
+export const CHIP_WORD_FAILED = runPhaseLabel({
+  phase: "failed",
+  leaseState: "none",
+  queuedAtMs: 0,
+});
+
+/** 서버가 「아무도 가져가지 않아 끝냈다」고 쓰는 종료 코드. 끝난 뒤에도 그 일은 「못 가져감」이다. */
+const UNCLAIMED_END_REASONS: ReadonlySet<string> = new Set([
+  "unclaimed_expired",
+  "woken_not_collected",
+]);
+
+/** 급한 순서(클수록 앞). */
+const PRIORITY: Readonly<Record<TriggerChipKind, number>> = {
+  failed: 6,
+  uncollected: 5,
+  approval: 4,
+  working: 3,
+  claimed: 2,
+  received: 1,
+  answered: 0,
+};
+
+const MARK: Readonly<Record<TriggerChipKind, TriggerChipMark>> = {
+  received: "none",
+  claimed: "none",
+  working: "dot",
+  approval: "none",
+  answered: "check",
+  uncollected: "alert",
+  failed: "alert",
+};
+
+/**
+ * 칩이 입을 수 있는 (낱말, 표지) 조합 전부. 표면이 칩의 폭을 **가장 넓은 낱말에 맞춰 고정**할 때
+ * 쓴다(낱말이 바뀌어도 칩의 크기가 변하지 않게). 승인 대기는 일시 정지 낱말도 입는다.
+ */
+export const TRIGGER_CHIP_FACES: readonly { word: string; mark: TriggerChipMark }[] = [
+  { word: RAIL_WORD.received, mark: MARK.received },
+  { word: RAIL_WORD.claimed, mark: MARK.claimed },
+  { word: RAIL_WORD.working, mark: MARK.working },
+  { word: RAIL_WORD.approval, mark: MARK.approval },
+  { word: RAIL_WORD.paused, mark: MARK.approval },
+  { word: CHIP_WORD_ANSWERED, mark: MARK.answered },
+  { word: CHIP_WORD_UNCOLLECTED, mark: MARK.uncollected },
+  { word: CHIP_WORD_FAILED, mark: MARK.failed },
+];
+
+const TONE: Readonly<Record<TriggerChipKind, TriggerChipTone>> = {
+  received: "muted",
+  claimed: "muted",
+  working: "working",
+  approval: "warn",
+  answered: "ok",
+  uncollected: "warn",
+  failed: "danger",
+};
+
+/** 답 메시지 한 건: 이동에는 id와 seq가 함께 필요하다(`onJumpToMessage`). */
+export interface AnswerRef {
+  id: string;
+  seq: number;
+}
+
+export interface TriggerChip {
+  kind: TriggerChipKind;
+  /** 칩의 한 낱말. */
+  word: string;
+  mark: TriggerChipMark;
+  tone: TriggerChipTone;
+  /** 보조기술 문장. 숫자가 없다. */
+  label: string;
+  /** 「답함」일 때, 누르면 가야 할 답 메시지. 모르면 없다(그러면 칩은 누르는 것이 아니다). */
+  answer?: AnswerRef;
+  /** 칩이 말하는 run들. */
+  runIds: readonly string[];
+}
+
+export interface TriggerChipContext {
+  graceMs?: number;
+  routineFor?: (memberId: string) => RoutineHint | undefined;
+  /** 이 run의 답 메시지. 모르면 undefined. */
+  answerFor?: (run: AgentRunProgress) => AnswerRef | undefined;
+}
+
+function kindOf(
+  run: AgentRunProgress,
+  nowMs: number,
+  context: TriggerChipContext
+): TriggerChipKind | null {
+  switch (run.phase) {
+    case "queued":
+      return isUncollectedPastGrace(
+        serverFactsOf(run),
+        nowMs,
+        context.routineFor?.(run.agentMemberId),
+        context.graceMs
+      )
+        ? "uncollected"
+        : "received";
+    case "claimed":
+      return "claimed";
+    case "running":
+      return "working";
+    case "awaiting_approval":
+    case "paused":
+      return "approval";
+    case "succeeded":
+      return "answered";
+    case "failed":
+      return "failed";
+    case "timed_out":
+      return run.endReason !== undefined && UNCLAIMED_END_REASONS.has(run.endReason)
+        ? "uncollected"
+        : "failed";
+    case "cancelled":
+      return null;
+  }
+}
+
+function wordOf(kind: TriggerChipKind, run: AgentRunProgress): string {
+  switch (kind) {
+    case "received":
+      return RAIL_WORD.received;
+    case "claimed":
+      return RAIL_WORD.claimed;
+    case "working":
+      return RAIL_WORD.working;
+    // 승인 대기와 일시 정지는 서버의 phase가 낱말을 정한다(`runPhaseLabel`).
+    case "approval":
+      return runPhaseLabel(serverFactsOf(run));
+    case "answered":
+      return CHIP_WORD_ANSWERED;
+    case "uncollected":
+      return CHIP_WORD_UNCOLLECTED;
+    case "failed":
+      return CHIP_WORD_FAILED;
+  }
+}
+
+/** 칩 하나의 보조기술 문장. 이름들은 한 에이전트면 그 이름, 여럿이면 「이름 외 N명」이다. */
+function labelOf(
+  kind: TriggerChipKind,
+  group: readonly AgentRunProgress[],
+  nameFor: AgentNameLookup
+): string {
+  const names: string[] = [];
+  for (const run of group) {
+    const label = agentLabel(nameFor(run.agentMemberId));
+    if (!names.includes(label)) names.push(label);
+  }
+  const who =
+    names.length > 1 ? `${names[0]} 외 ${names.length - 1}명` : (names[0] ?? "");
+  const facts = serverFactsOf(group[0]!);
+  switch (kind) {
+    case "received":
+      return turnHubSentence(who, "queued", { ...facts, phase: "queued" });
+    case "claimed":
+      return turnHubSentence(who, "queued", { ...facts, phase: "claimed" });
+    case "working":
+      return turnHubSentence(who, "working", facts);
+    case "approval":
+      return turnHubSentence(who, "awaiting_approval", facts);
+    case "answered":
+      return `${who} 에이전트가 답했어요.`;
+    case "uncollected":
+      return `${who} 에이전트가 요청을 가져가지 않았어요.`;
+    case "failed":
+      return `${who} 에이전트의 실행이 실패했어요.`;
+  }
+}
+
+/**
+ * 한 메시지가 일으킨 run들 → 칩 하나. 칩에 올릴 run이 없으면(run이 없거나 전부 취소) null이다.
+ * `runs`는 먼저 생긴 것이 앞이다(`runsByTriggerMessage`).
+ */
+export function triggerChip(
+  runs: readonly AgentRunProgress[],
+  nameFor: AgentNameLookup,
+  nowMs: number,
+  context: TriggerChipContext = {}
+): TriggerChip | null {
+  const classified: { run: AgentRunProgress; kind: TriggerChipKind }[] = [];
+  for (const run of runs) {
+    const kind = kindOf(run, nowMs, context);
+    if (kind !== null) classified.push({ run, kind });
+  }
+  if (classified.length === 0) return null;
+  let top = classified[0]!.kind;
+  for (const entry of classified) {
+    if (PRIORITY[entry.kind] > PRIORITY[top]) top = entry.kind;
+  }
+  const group = classified.filter((entry) => entry.kind === top).map((e) => e.run);
+  const answer =
+    top === "answered"
+      ? group.map((run) => context.answerFor?.(run)).find((ref) => ref !== undefined)
+      : undefined;
+  return {
+    kind: top,
+    word: wordOf(top, group[0]!),
+    mark: MARK[top],
+    tone: TONE[top],
+    label: labelOf(top, group, nameFor),
+    ...(answer !== undefined ? { answer } : {}),
+    runIds: group.map((run) => run.id),
+  };
+}
+
+// ---- 「답함 ✓」 → 답 메시지 ----------------------------------------------------
+//
+// 답 메시지를 run과 잇는 길은 둘이다. 하나는 **정산된 턴 기록**(`props.run_id`,
+// `turnRecordRunId`): 그 run이 쓴 최종 글 행이고 run id가 정확히 맞는다. 다른 하나는 **인용**
+// (`replyToId`, ADR-0148 규칙 6): 에이전트의 최종 답은 자기를 부른 메시지를 가리킨다. 승인 만료·
+// 멈춤 알림은 `props.answers_message_id`로 가리키지만 그것은 답이 아니라 알림이므로(서버가 인용을
+// 달지 않는 이유가 그것이다) 여기서 찾지 않는다.
+//
+// 연결을 못 찾으면 undefined다: 칩은 「답함 ✓」을 말하되 누르는 것이 되지 않는다. 가짜 목적지를
+// 지어내지 않는다.
+
+export interface AnswerIndex {
+  /** run id(소문자) → 정산된 턴 기록 행. */
+  readonly byRun: ReadonlyMap<string, AnswerRef>;
+  /** 「트리거 id|에이전트 id」(소문자) → 그 에이전트가 트리거를 인용해 쓴 첫 글. */
+  readonly byQuote: ReadonlyMap<string, AnswerRef>;
+}
+
+/** 로드된 메시지(오래된 것이 앞)에서 답 후보를 한 번 색인한다. 먼저 쓰인 글이 이긴다. */
+export function indexAnswers(messages: readonly Message[]): AnswerIndex {
+  const byRun = new Map<string, AnswerRef>();
+  const byQuote = new Map<string, AnswerRef>();
+  for (const message of messages) {
+    if (message.state === "deleted") continue;
+    const ref = { id: message.id, seq: message.seq };
+    const runId = turnRecordRunId(message);
+    if (runId !== null && !byRun.has(runId)) byRun.set(runId, ref);
+    if (message.type === "text" && message.replyToId !== undefined) {
+      const key = `${message.replyToId.toLowerCase()}|${message.authorMemberId.toLowerCase()}`;
+      if (!byQuote.has(key)) byQuote.set(key, ref);
+    }
+  }
+  return { byRun, byQuote };
+}
+
+/** 이 run의 답 메시지. 모르면 undefined. */
+export function answerMessageFor(
+  index: AnswerIndex,
+  run: Pick<AgentRunProgress, "id" | "agentMemberId" | "triggerMessageId">
+): AnswerRef | undefined {
+  const exact = index.byRun.get(run.id.toLowerCase());
+  if (exact !== undefined) return exact;
+  if (run.triggerMessageId === undefined) return undefined;
+  return index.byQuote.get(
+    `${run.triggerMessageId.toLowerCase()}|${run.agentMemberId.toLowerCase()}`
+  );
+}
+
+/**
+ * 목록이 한 번 계산해 행에 넘기는 지도: **끝난 run마다** 그 답 메시지(run id 소문자 → 답). 끝나지 않았거나 답을
+ * 이을 길이 없는 run은 지도에 없다(칩은 「답함」을 말하되 눌리지 않는다).
+ */
+export function runAnswerMap(
+  runs: readonly Pick<
+    AgentRunProgress,
+    "id" | "phase" | "agentMemberId" | "triggerMessageId"
+  >[],
+  messages: readonly Message[]
+): ReadonlyMap<string, AnswerRef> {
+  const index = indexAnswers(messages);
+  const out = new Map<string, AnswerRef>();
+  for (const run of runs) {
+    if (run.phase !== "succeeded") continue;
+    const answer = answerMessageFor(index, run);
+    if (answer !== undefined) out.set(run.id.toLowerCase(), answer);
+  }
+  return out;
+}

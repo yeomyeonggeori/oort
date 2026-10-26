@@ -63,6 +63,7 @@ import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
+import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
 
 const NO_RUNS: readonly AgentRunProgress[] = [];
 import {
@@ -459,6 +460,10 @@ export function Timeline({
   const timelineChannelId = messages[0]?.channelId ?? null;
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
+  // #4619 — 「답함 ✓」 칩이 누르면 가는 답 메시지. 로드된 메시지를 한 번 색인해 끝난 run마다 답을 찾는다
+  // (행마다 찾으면 목록 전체를 행 수만큼 훑는다). 답이 아직 로드되지 않았거나 이을 길이 없으면 그 run은
+  // 지도에 없고, 칩은 「답함」을 말하되 눌리지 않는다.
+  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
   const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined => {
     // 대화 표면(행 동작이 있는 곳)에서 내가 보낸 메시지에만 선다.
     if (myMemberIdForFold === undefined) return undefined;
@@ -895,6 +900,7 @@ export function Timeline({
               onResend={onResend}
               runEnded={isStreamRunEnded(item.message, endedRuns)}
               runStatus={runStatusFor(item.message)}
+              runAnswers={runAnswers}
             />
           );
         }}

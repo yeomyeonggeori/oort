@@ -45,6 +45,7 @@ export function StopRunControl({
   open,
   live,
   wording = STOP_WORDING,
+  variant = "panel",
 }: {
   runId: string;
   /** 영수증이 부를 이름. 여러 에이전트의 일 옆에 서므로 누구의 실행인지 말한다. */
@@ -58,6 +59,12 @@ export function StopRunControl({
    * 「중단」이다(#4285). 호출·한 겹의 확인·409와 오류를 읽는 규칙은 둘이 같다.
    */
   wording?: CancelWording;
+  /**
+   * 어디에 서는가. `panel`은 작업 패널의 한 영역(경계선·여백이 있는 띠)이고, `inline`은 대화의
+   * 한 줄 안(예외 줄의 행동 자리, #4619)이다: 띠의 경계선·여백을 걷어 줄의 다른 행동 곁에 선다.
+   * 호출·한 겹의 확인·캐럿 규칙은 둘이 같다.
+   */
+  variant?: "panel" | "inline";
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -146,8 +153,15 @@ export function StopRunControl({
   return (
     <section
       ref={sectionRef}
+      // 대화 줄 안(inline)에서는 영역(landmark)이 아니라 묶음이다: 메시지마다 「요청 취소」 영역이 서면
+      // 보조기술의 영역 목록이 타임라인 길이만큼 늘어난다.
+      role={variant === "inline" ? "group" : undefined}
       aria-label={wording.regionName}
-      className="flex flex-col gap-2 border-b border-line px-4 py-2"
+      className={
+        variant === "inline"
+          ? "flex min-w-0 flex-col gap-2"
+          : "flex flex-col gap-2 border-b border-line px-4 py-2"
+      }
       data-testid="agent-work-panel-stop"
     >
       {offer &&

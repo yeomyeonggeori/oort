@@ -19,10 +19,12 @@ describe("승인 대기 배선 (#3738)", () => {
     expect(text).toContain("useApprovalWaits()");
   });
 
-  it("컴포저 활동 줄도 같은 통과를 한다", () => {
-    const text = source("../chat/Composer.tsx");
-    expect(text).toMatch(/applyApprovalWaits\(\s*agentTurnsInChannel\(/);
-    expect(text).toContain("useApprovalWaits()");
+  it("컴포저 레일도 같은 통과를 한다(활동 줄은 #4619에서 입력창 레일로 옮겨 갔다)", () => {
+    const rail = source("./ActivityRail.tsx");
+    expect(rail).toMatch(/applyApprovalWaits\(\s*agentTurnsInChannel\(/);
+    expect(rail).toContain("useApprovalWaits()");
+    // 컴포저가 그 레일을 실제로 꽂는다: 레일이 멀쩡해도 꽂는 줄이 지워지면 화면은 다시 승인을 「작업 중」으로 말한다.
+    expect(source("../chat/Composer.tsx")).toContain("<ComposerActivityRail");
   });
 
   it("앱 셸은 승인 실시간 동기를 마운트한다", () => {

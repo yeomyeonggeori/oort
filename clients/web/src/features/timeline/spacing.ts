@@ -106,6 +106,12 @@ export const ROW_GROUP_START_PAD_CLASS = "pt-row-head pb-row";
 export const ROW_CONTINUATION_PAD_CLASS = "py-row";
 
 /**
+ * 저자 묶음 머리 행의 **이름·시각 줄**. 트리거 메시지의 상태 칩(#4619)이 이 줄의 시각 옆에 서므로,
+ * 칩이 서고 바뀌어도 줄의 높이가 변하지 않는다는 것을 시험이 이 클래스 그대로 실제 엔진에서 잰다.
+ */
+export const MESSAGE_HEAD_CLASS = "flex flex-wrap items-baseline gap-2";
+
+/**
  * 타임라인 메시지 아바타와 그 거터의 한 변 (AP-2a #4189). 코어 `AVATAR_SIZE`(32)가 기본이고 대화
  * 밀도가 28·36으로 바꾼다. 공용 `Avatar`의 기본 `size-8`을 이 클래스가 이긴다(`cn`이 둘을
  * 같은 `size` 그룹으로 안다, `NAMED_MEASURES`) — 디렉터리·받은편지함의 아바타는 밀도를 따르지 않는다.

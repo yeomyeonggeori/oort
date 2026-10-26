@@ -22,6 +22,7 @@ export function ComposerHostChip({ host }: { host: ComposerContextHost }) {
       className="flex items-center gap-2 px-4 py-2 text-meta text-ink-muted"
       data-testid="composer-context-host"
       data-online={host.online ? "" : undefined}
+      data-routine={host.routine === true ? "" : undefined}
     >
       <span
         aria-hidden="true"
