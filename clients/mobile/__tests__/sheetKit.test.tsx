@@ -22,6 +22,7 @@ import {
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
 import {CONV_ICON_SIZE, CONV_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from '../src/design/icons';
 import {PageSheet, SHEET_TOP} from '../src/design/PageSheet';
+import {STACK_PILL_SCALE} from '../src/design/atoms';
 import {PageHeader, SheetHeader} from '../src/design/SheetChrome';
 import {THEME_IDS} from '../src/design/ds2Tokens';
 import {
@@ -673,6 +674,55 @@ describe('행', () => {
       <ListRow title="이도현" leading={<View />} leadingWidth={32} testID="row" />,
     );
     expect(flat('row-lead').width).toBe(32);
+  });
+});
+
+describe('행 — 값은 큰 글씨에서 제목 아래로 내려온다 (#4457)', () => {
+  /** `useWindowDimensions` 가 읽는 창의 글자 배율만 바꾼다. */
+  function setFontScale(fontScale: number) {
+    const real = Dimensions.get('window');
+    jest.spyOn(Dimensions, 'get').mockImplementation(() => ({...real, fontScale}) as never);
+  }
+
+  it('기본 글씨: 값은 오른쪽 한 줄이고 50% 상한이 있다', async () => {
+    setFontScale(1);
+    await mount(<ListRow title="상태 설정" value="없음" accessory="chevron" onPress={() => {}} testID="row" />);
+    const value = screen.getByTestId('row-value');
+    expect(StyleSheet.flatten(value.props.style)).toMatchObject({maxWidth: '50%', textAlign: 'right'});
+    expect(value.props.numberOfLines).toBe(1);
+  });
+
+  it('접근성 글씨(STACK_PILL_SCALE 부터): 값이 제목 아래로 내려와 상한도 말줄임도 없다', async () => {
+    setFontScale(STACK_PILL_SCALE);
+    await mount(<ListRow title="상태 설정" value="지우지 않음" accessory="chevron" onPress={() => {}} testID="row" />);
+    const value = screen.getByTestId('row-value');
+    const style = StyleSheet.flatten(value.props.style);
+    expect(style.maxWidth).toBeUndefined();
+    expect(style.textAlign).not.toBe('right');
+    expect(value.props.numberOfLines).toBeUndefined(); // 말줄임 없이 값 전체를 읽는다(「지우…」가 아니다)
+    expect(style.color).toBe(paletteFor('light').textMuted);
+  });
+
+  it('경계: 문턱 바로 아래(1.49)는 아직 오른쪽, 문턱(1.5)부터 내려온다', async () => {
+    setFontScale(STACK_PILL_SCALE - 0.01);
+    const {unmount} = await mount(<ListRow title="a" value="b" testID="row" />);
+    expect(screen.getByTestId('row-value').props.numberOfLines).toBe(1);
+    unmount();
+    setFontScale(STACK_PILL_SCALE);
+    await mount(<ListRow title="a" value="b" testID="row" />);
+    expect(screen.getByTestId('row-value').props.numberOfLines).toBeUndefined();
+  });
+
+  it('읽히는 이름은 어느 배치에서도 제목·값을 이은 한 문장이다', async () => {
+    setFontScale(3.1);
+    await mount(<ListRow title="상태 설정" value="없음" onPress={() => {}} testID="row" />);
+    expect(screen.getByTestId('row').props.accessibilityLabel).toBe('상태 설정, 없음');
+  });
+
+  it('값이 없는 행은 글씨 크기와 상관없이 그대로다', async () => {
+    setFontScale(3.1);
+    await mount(<ListRow title="로그아웃" tone="danger" onPress={() => {}} testID="row" />);
+    expect(screen.queryByTestId('row-value')).toBeNull();
   });
 });
 

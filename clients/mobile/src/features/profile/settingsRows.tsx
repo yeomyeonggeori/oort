@@ -17,7 +17,7 @@ import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 // =============================================================================
 // 설정 페이지의 얇은 행 부품 (#4457).
 //
-// #4318 의 `design/sheetParts.tsx` `ListRow` 는 이 화면이 필요로 하는 세 가지를 갖고 있지 않다:
+// #4318 의 `design/sheetParts.tsx` `ListRow` 는 이 화면이 필요로 하는 세 가지를 갖고 있지 않았다:
 //
 //   1. **라디오** — `accessibilityRole="radio"` · `accessibilityState.selected` · 오른쪽 ✓.
 //      **→ 이 PR 이 `design/sheetParts.tsx` 로 올렸다**(`ChoiceRow`). 테마 장(`ThemeControl`)이 `design/` 에 있어
@@ -28,10 +28,11 @@ import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 //   3. **누를 수 있으되 접근성으로만 잠기는 상태** — 옛 `GroupRow` 가 하던 것: 읽는 중에는
 //      `accessibilityState.disabled` 만 말하고 줄은 그대로 눌린다(눌림은 훅이 막는다).
 //
-// `design/` 의 부품 파일은 이 이슈가 고치지 않는다(#4318 2단계가 거기를 만지고 있다). 그래서 같은
-// 토큰(`SHEET`·`space`·`font`·`line`)으로 같은 행 모양을 이 화면 쪽에 얇게 둔다 — 모양이 갈라지면
-// 그것이 바로 이 파일이 해야 할 일의 실패다(`settingsPage.test.tsx` 가 치수를 재서 지킨다). #4318 이
-// `ListRow` 에 같은 자리를 내면 이 파일은 지워진다.
+// 1 은 올렸고(테마 장이 `design/` 에 있어 어쩔 수 없었다), 나머지는 **공용 부품에 같은 자리가 나기 전까지** 이 화면
+// 쪽에 얇게 둔다(planner 지시: #4318 이 넣지 않은 것은 PR 「발견」으로 남긴다). 같은 토큰(`SHEET`·`space`·`font`·
+// `line`)으로 같은 행 모양을 두므로, 모양이 갈라지면 그것이 바로 이 파일이 해야 할 일의 실패다
+// (`settingsRows.test.tsx` 가 ListRow 와 같은 상자·글자를 모든 스킴에서 재서 지킨다). `ListRow`·`GroupCard`·`InputPill`
+// 에 같은 자리가 나면 이 파일은 지워진다 — 무엇이 모자란지는 `docs/design-system/phone-sheets.md` §4 의 표에 있다.
 //
 //   SwitchRow   스위치 행: 이름 · 보조 줄 · 오른쪽 {스위치 | 스피너 | 없음}
 //   ActionRow   동작 행: 이름 · 보조 줄 · 오른쪽 {셰브론 | 스피너 | 없음} · 강조·위험 글자 · 펼침 상태

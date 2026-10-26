@@ -10,6 +10,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type ImageSourcePropType,
   type LayoutChangeEvent,
   type ScrollViewProps,
@@ -19,7 +20,7 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
-import {ROW_GLYPH_MAX_SCALE, Sentence} from './atoms';
+import {ROW_GLYPH_MAX_SCALE, Sentence, STACK_PILL_SCALE} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
@@ -239,6 +240,10 @@ export function ListRow({
   const palette = usePalette();
   const afterClose = usePageSheetAction();
   const isToggle = accessory === 'toggle' && toggle !== undefined;
+  // 큰 글씨(`STACK_PILL_SCALE` 부터)에서는 「제목 … 값」이 한 줄에 안 들어간다. 값이 오른쪽에서 50% 상한에 눌려 「지우…」로
+  // 잘리거나 제목 상자만 키가 커진다(#4457 AX5 캡처). iOS 접근성 레이아웃처럼 값을 제목 **아래**로 내려 한 줄 전체를 쓴다.
+  const {fontScale} = useWindowDimensions();
+  const stackValue = Boolean(value) && fontScale >= STACK_PILL_SCALE;
   // 눌리는 행의 기본 이름: 제목만 읽으면 오른쪽 값(「회의 중」)과 보조 줄이 낭독에서 빠진다. 값 행투성이인 설정
   // 페이지가 이 부품을 쓴다. 이름을 직접 주면 그것이 이긴다.
   const spokenName = [title, detail, value].filter(Boolean).join(', ');
@@ -262,6 +267,14 @@ export function ListRow({
           style={[styles.rowTitle, tone === 'danger' && styles.rowTitleDanger]}>
           {title}
         </Text>
+        {stackValue ? (
+          <Text
+            lineBreakStrategyIOS="hangul-word"
+            style={styles.rowValueStacked}
+            testID={testID ? `${testID}-value` : undefined}>
+            {value}
+          </Text>
+        ) : null}
         {detail ? (
           // 문장이다 — 어절 가운데서 끊기지 않는다(옛 `GroupRow.detail` 도 `Sentence` 였다).
           <Sentence style={styles.rowDetail} testID={testID ? `${testID}-detail` : undefined}>
@@ -269,8 +282,11 @@ export function ListRow({
           </Sentence>
         ) : null}
       </View>
-      {value ? (
-        <Text style={styles.rowValue} numberOfLines={1}>
+      {value && !stackValue ? (
+        <Text
+          style={styles.rowValue}
+          numberOfLines={1}
+          testID={testID ? `${testID}-value` : undefined}>
           {value}
         </Text>
       ) : null}
@@ -764,6 +780,12 @@ const buildStyles = (color: Palette) =>
       flexShrink: 1,
       maxWidth: '50%',
       textAlign: 'right',
+      fontSize: font.body,
+      color: color.textMuted,
+    },
+    // 큰 글씨에서 제목 아래로 내려온 값 — 오른쪽 상한도 말줄임도 없이 한 줄 전체를 쓴다.
+    rowValueStacked: {
+      marginTop: space.xs,
       fontSize: font.body,
       color: color.textMuted,
     },
