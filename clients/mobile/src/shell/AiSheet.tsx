@@ -4,13 +4,14 @@ import {
 } from '@momo/core/features/ai/aiHubModel';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import React, {useMemo} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 
 import {
   PageSheet,
   usePageSheetAction,
   usePageSheetClose,
 } from '../design/PageSheet';
+import {STACK_PILL_SCALE} from '../design/atoms';
 import {SheetHeader} from '../design/SheetChrome';
 import {GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
@@ -57,6 +58,11 @@ import {useSession} from '../session/useSession';
 // 임의 노드(`trailing`)** 로 선다(#4458 — 1단계가 부품에 자리가 없어 오른쪽 값 한 줄로 접었던 것을 되살렸다). `trailing` 은
 // 보조기술의 기본 이름에 들어가지 않으므로 **행의 이름에 표식의 글자를 직접 잇는다**(`spoken` — 접었던 때의 낭독을 잃지
 // 않는다. 옛 줄은 칩이 Pressable 안에 있어 이름만 읽혔고, 지금은 이름·보조 줄·표식을 함께 읽는다).
+//
+// **큰 글씨(`STACK_PILL_SCALE` 1.5 부터)에서는 표식을 행 오른쪽에 두지 않는다.** 오른쪽 칩이 폭을 먹으면 이름 칸이 한 글자
+// 폭으로 접혀 「에/물/어/보/기」로 세로로 쌓였다(AX5·SE 캡처 — 옛 `GroupRow` 의 오른쪽 칩도 같은 구조였다). 그 배율부터
+// 표식의 글자(「개인 · 내 맥 켜짐」)는 **보조 줄 아래 제 줄**로 내려가고 칩의 모양(점·채움)은 접는다 — 글자가 상태를 말하는
+// 것은 그대로고, 보조기술 이름도 같다(홈 카드·사이드바의 상태 낱말이 같은 문턱에서 이름 아래로 내려가는 것과 같은 처방).
 //
 // ## 공용 시트로 (#4458)
 //
@@ -125,6 +131,8 @@ function SheetBody({
   gateOpen?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const {fontScale} = useWindowDimensions();
+  const stackMarks = fontScale >= STACK_PILL_SCALE;
   const {member, workspaceId} = useSession();
   const slideClose = usePageSheetClose() ?? onClose;
   const afterClose = usePageSheetAction();
@@ -187,13 +195,17 @@ function SheetBody({
           <GroupCard label="내 도구" testID="ai-section-tools">
             <ListRow
               title={ASK_MAC_TITLE}
-              detail={ASK_MAC_DETAIL}
+              detail={
+                stackMarks && chip !== null
+                  ? `${ASK_MAC_DETAIL}\n${chip.label}`
+                  : ASK_MAC_DETAIL
+              }
               accessory="chevron"
               accessibilityLabel={spoken(ASK_MAC_TITLE, ASK_MAC_DETAIL, chip?.label)}
               onPress={choose(() => onAskMac())}
               accessibilityHint="내 맥에 보내는 시트를 엽니다."
               trailing={
-                chip === null ? undefined : (
+                chip === null || stackMarks ? undefined : (
                   <MacChip on={chip.on} label={chip.label} testID="ai-mac-chip" />
                 )
               }
@@ -206,11 +218,15 @@ function SheetBody({
           <GroupCard label="개인 에이전트" testID="ai-section-personal">
             {personal.map(agent => {
               const detail = `${agent.harnessLabel} · 나만 쓸 수 있어요.`;
+              // 큰 글씨에서 보조 줄 아래로 내려가는 표식 줄: 「개인 · 내 맥 켜짐」(맥이 없으면 「개인」뿐).
+              const markLine = [PERSONAL_BADGE, chip?.label]
+                .filter((part): part is string => Boolean(part))
+                .join(' · ');
               return (
                 <ListRow
                   key={agent.id}
                   title={agent.label}
-                  detail={detail}
+                  detail={stackMarks ? `${detail}\n${markLine}` : detail}
                   accessory="chevron"
                   accessibilityLabel={spoken(
                     agent.label,
@@ -222,20 +238,22 @@ function SheetBody({
                   onPress={choose(() => onAskMac(agent.harness ?? undefined))}
                   accessibilityHint="내 맥에 보내는 시트를 엽니다."
                   trailing={
-                    <View style={styles.marks}>
-                      <Text
-                        style={styles.personal}
-                        testID={`ai-personal-${agent.id}`}>
-                        {PERSONAL_BADGE}
-                      </Text>
-                      {chip === null ? null : (
-                        <MacChip
-                          on={chip.on}
-                          label={chip.label}
-                          testID={`ai-personal-mac-${agent.id}`}
-                        />
-                      )}
-                    </View>
+                    stackMarks ? undefined : (
+                      <View style={styles.marks}>
+                        <Text
+                          style={styles.personal}
+                          testID={`ai-personal-${agent.id}`}>
+                          {PERSONAL_BADGE}
+                        </Text>
+                        {chip === null ? null : (
+                          <MacChip
+                            on={chip.on}
+                            label={chip.label}
+                            testID={`ai-personal-mac-${agent.id}`}
+                          />
+                        )}
+                      </View>
+                    )
                   }
                   testID={`ai-row-personal-${agent.id}`}
                 />

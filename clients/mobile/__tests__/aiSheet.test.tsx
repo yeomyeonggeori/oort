@@ -9,7 +9,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {Dimensions, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -186,6 +186,13 @@ async function renderReady() {
   await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
 }
 
+// 시험의 기본 창은 글자 배율 2(큰 글씨)다 — 칩이 오른쪽에 서는 보통 크기의 시험은 배율 1 로 연다(아래 큰 글씨 묶음이 올린다).
+const BASE_WINDOW = Dimensions.get('window');
+function setFontScale(fontScale: number) {
+  const window = {...BASE_WINDOW, fontScale};
+  Dimensions.set({window, screen: window});
+}
+
 const hapticCalls = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
 const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
@@ -206,6 +213,7 @@ beforeEach(() => {
   hostsWire = [];
   hapticCalls.length = 0;
   __resetSpawnPort();
+  setFontScale(1);
 });
 
 afterEach(() => {
@@ -213,6 +221,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   __resetSpawnPort();
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
 });
 
 /** 승격 뒤의 모습: 내 맥으로 보내는 길이 꽂혀 있다. */
@@ -543,6 +552,71 @@ describe('AI 시트 — 공용 부품', () => {
     const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
     expect(sheet.top).toBeUndefined();
     expect(sheet.maxHeight).toBeGreaterThan(0);
+  });
+});
+
+// ---- 큰 글씨: 표식은 오른쪽 칩이 아니라 보조 줄 아래로 (design-review AX5·SE) -----------------------------------------------
+//
+// 오른쪽 칩이 폭을 먹으면 이름 칸이 한 글자 폭으로 접혀 「에/물/어/보/기」로 세로로 쌓였다(AX5·SE 캡처). 이름 아래로 내리는
+// 문턱은 홈 카드·사이드바와 같은 `STACK_PILL_SCALE`(1.5)이다. Jest 는 레이아웃이 없어 **렌더된 구조**(칩 노드가 그려지는가,
+// 글자가 보조 줄에 서는가)와 보조기술 이름이 같은지를 잰다 — 폭이 정말 안 접히는지는 AX5 캡처가 잰다.
+
+describe('AI 시트 — 큰 글씨에서 표식이 보조 줄 아래로 내려간다 (#4458)', () => {
+  async function openWithMac(fontScale: number) {
+    setFontScale(fontScale);
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [host(true)];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
+  }
+
+  it.each([[1], [1.3], [1.49]])('글자 배율 %s: 칩과 「개인」 표식은 행 오른쪽의 그려진 노드다', async scale => {
+    await openWithMac(scale);
+    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
+    expect(screen.getByTestId(`ai-personal-${MINE}`)).toHaveTextContent('개인');
+    expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 켜짐');
+  });
+
+  it.each([[1.5], [2], [3.1]])(
+    '글자 배율 %s: 칩 노드는 그려지지 않고 그 글자가 보조 줄 아래 제 줄로 서며, 행 이름은 그대로다',
+    async scale => {
+      await openWithMac(scale);
+      await waitFor(() => expect(screen.getByTestId('ai-row-ask-mac')).toBeTruthy());
+      // 오른쪽 노드가 없다 — 이름 칸이 폭을 지킨다.
+      expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
+      expect(screen.queryByTestId(`ai-personal-${MINE}`)).toBeNull();
+      expect(screen.queryByTestId(`ai-personal-mac-${MINE}`)).toBeNull();
+      // 상태 글자는 보조 줄 아래에 남는다(글자가 상태를 말한다).
+      expect(screen.getByTestId('ai-row-ask-mac')).toHaveTextContent(/시켜요\.\s*내 맥 켜짐/);
+      expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toHaveTextContent(/나만 쓸 수 있어요\.\s*개인 · 내 맥 켜짐/);
+      // 보조기술 이름은 배율과 무관하게 같다.
+      expect(screen.getByTestId('ai-row-ask-mac').props.accessibilityLabel).toBe(
+        '내 맥에 물어보기, 내 맥의 Claude Code 같은 도구에 물어보거나 일을 시켜요., 내 맥 켜짐',
+      );
+      expect(screen.getByTestId(`ai-row-personal-${MINE}`).props.accessibilityLabel).toBe(
+        '내 Claude Code, Claude Code · 나만 쓸 수 있어요., 개인, 내 맥 켜짐',
+      );
+    },
+  );
+
+  it('큰 글씨에서 맥이 등록되지 않았으면 「개인」 표식만 보조 줄 아래에 선다', async () => {
+    setFontScale(2);
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
+    expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toHaveTextContent(/나만 쓸 수 있어요\.\s*개인$/);
+    expect(screen.getByTestId(`ai-row-personal-${MINE}`).props.accessibilityLabel).toBe(
+      '내 Claude Code, Claude Code · 나만 쓸 수 있어요., 개인',
+    );
   });
 });
 
