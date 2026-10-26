@@ -592,6 +592,33 @@ describe('보낼 글과 집 채널', () => {
     expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
   });
 
+  it('오류·힌트(채널·폴더)·Face ID 안내 줄은 어절 단위로 접는다 — 같은 시트의 다른 문장과 같은 규칙이다 (design-review r2 L2)', async () => {
+    installFetch({});
+    const {port} = fakePort();
+    mount(port);
+    await screen.findByTestId('ask-mac-form');
+    const hint = () => screen.getByTestId('ask-mac-hint');
+    // 채널을 고르기 전: 이유를 말하는 힌트(채널 갈래)와 늘 서 있는 Face ID 안내.
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), '질문');
+    expect(hint()).toHaveTextContent(/어느 채널에 남길지/);
+    expect(hint().props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(screen.getByTestId('ask-mac-face-id-note').props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 작업 요청 모드에서 채널만 고르면 다른 갈래의 힌트(폴더).
+    fireEvent.press(screen.getByTestId('ask-mac-mode-work'));
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    expect(hint()).toHaveTextContent(/폴더를 골라야/);
+    expect(hint().props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 보내기 전에 글 검사가 막으면(「/」로 시작) 그 자리의 오류 줄.
+    fireEvent.press(screen.getByTestId('ask-mac-folder-fld_app'));
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), '/compact');
+    expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    expect((await screen.findByTestId('ask-mac-issue')).props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('Face ID를 취소하면 오류 배너 없이 폼으로 돌아온다', async () => {
     installFetch({});
     mount(fakePort({kind: 'cancelled', sentence: 'x'}).port);

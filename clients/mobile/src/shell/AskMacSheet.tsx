@@ -588,21 +588,27 @@ function SheetBody({
             <Text
               accessibilityLiveRegion="polite"
               style={styles.issue}
+              lineBreakStrategyIOS="hangul-word"
               testID="ask-mac-issue"
             >
               {issue}
             </Text>
           ) : null}
           {!pending && folderId === null ? (
-            <Text style={styles.hint} testID="ask-mac-hint">
+            <Text style={styles.hint} lineBreakStrategyIOS="hangul-word" testID="ask-mac-hint">
               {NEED_FOLDER_HINT}
             </Text>
           ) : !pending && channelId === null ? (
-            <Text style={styles.hint} testID="ask-mac-hint">
+            <Text style={styles.hint} lineBreakStrategyIOS="hangul-word" testID="ask-mac-hint">
               {NEED_CHANNEL_HINT}
             </Text>
           ) : null}
-          <Text style={styles.rule}>{FACE_ID_NOTE}</Text>
+          <Text
+            style={styles.rule}
+            lineBreakStrategyIOS="hangul-word"
+            testID="ask-mac-face-id-note">
+            {FACE_ID_NOTE}
+          </Text>
         </View>
 
         {state.macs.length > 1 ? (

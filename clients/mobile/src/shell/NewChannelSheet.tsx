@@ -10,7 +10,7 @@ import {
 import {upsertChannel} from '@momo/core/features/directory/model';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useState} from 'react';
-import {StyleSheet, Text} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 
 import {FailureBanner} from '../design/atoms';
 import {HOME_ICONS} from '../design/icons';
@@ -151,47 +151,52 @@ function SheetBody({
         }}
       />
       <SheetScroll keyboardDismissMode="on-drag" testID="new-channel-body">
-        <GroupLabel>채널 이름</GroupLabel>
-        <InputPill
-          icon={HOME_ICONS.hash}
-          value={name}
-          onChangeText={next => {
-            setName(next);
-            if (failure?.field === 'name') setFailure(null);
-          }}
-          onBlur={() => setTouched(true)}
-          onSubmitEditing={() => void submit()}
-          placeholder="product-planning"
-          autoCapitalize="none"
-          autoCorrect={false}
-          // 이름은 영문 소문자·숫자·하이픈·밑줄뿐이다 — 한글 자판으로 열면 첫 글자부터
-          // 규칙 위반 문장을 본다.
-          keyboardType="ascii-capable"
-          autoFocus
-          returnKeyType="done"
-          editable={!pending}
-          accessibilityLabel="채널 이름"
-          // VoiceOver 도 같은 줄을 듣는다: 평소엔 규칙, 어기면 그 이유.
-          accessibilityHint={nameMessage ?? nameRule}
-          testID="new-channel-name"
-        />
-        {nameMessage ? (
-          <Text
-            accessibilityLiveRegion="polite"
-            style={styles.issue}
-            lineBreakStrategyIOS="hangul-word"
-            testID="new-channel-name-issue">
-            {nameMessage}
-          </Text>
-        ) : (
-          // 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
-          <Text
-            style={styles.rule}
-            lineBreakStrategyIOS="hangul-word"
-            testID="new-channel-name-rule">
-            {nameRule}
-          </Text>
-        )}
+        {/* 라벨·입력·규칙(또는 오류) 줄은 한 묶음이다 — 작업 맡기기·내 맥에 보내기의 입력 묶음(`styles.field`)과 같은 문법.
+            낱개로 두면 시트 몸의 섹션 간격(16)이 라벨과 입력, 입력과 규칙 줄 사이에도 들어가 규칙 줄이 입력과 다음 섹션의
+            한가운데 떠서 어느 쪽 문장인지 위치로 안 갈린다(design-review r2 M2). */}
+        <View style={styles.field} testID="new-channel-name-field">
+          <GroupLabel>채널 이름</GroupLabel>
+          <InputPill
+            icon={HOME_ICONS.hash}
+            value={name}
+            onChangeText={next => {
+              setName(next);
+              if (failure?.field === 'name') setFailure(null);
+            }}
+            onBlur={() => setTouched(true)}
+            onSubmitEditing={() => void submit()}
+            placeholder="product-planning"
+            autoCapitalize="none"
+            autoCorrect={false}
+            // 이름은 영문 소문자·숫자·하이픈·밑줄뿐이다 — 한글 자판으로 열면 첫 글자부터
+            // 규칙 위반 문장을 본다.
+            keyboardType="ascii-capable"
+            autoFocus
+            returnKeyType="done"
+            editable={!pending}
+            accessibilityLabel="채널 이름"
+            // VoiceOver 도 같은 줄을 듣는다: 평소엔 규칙, 어기면 그 이유.
+            accessibilityHint={nameMessage ?? nameRule}
+            testID="new-channel-name"
+          />
+          {nameMessage ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={styles.issue}
+              lineBreakStrategyIOS="hangul-word"
+              testID="new-channel-name-issue">
+              {nameMessage}
+            </Text>
+          ) : (
+            // 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
+            <Text
+              style={styles.rule}
+              lineBreakStrategyIOS="hangul-word"
+              testID="new-channel-name-rule">
+              {nameRule}
+            </Text>
+          )}
+        </View>
 
         <GroupCard label="공개 범위" testID="new-channel-kind">
           {KINDS.map(choice => (
@@ -220,6 +225,8 @@ function SheetBody({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
+    // 라벨 + 입력 + 규칙·오류 줄 한 묶음(안쪽 간격 `space.sm` — 작업 맡기기·내 맥에 보내기의 `field` 와 같은 값).
+    field: {gap: space.sm},
     // 입력 알약 아래의 한 줄 — 섹션 라벨과 같은 안쪽 여백에서 시작한다.
     rule: {
       paddingHorizontal: space.xs,

@@ -28,6 +28,7 @@ import {
   darkPalette,
   lightPalette,
   paletteFrom,
+  space,
   TOUCH_TARGET,
   type Palette,
 } from '../src/design/tokens';
@@ -541,6 +542,26 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     // 규칙을 어기면(처음이 하이픈) 같은 자리가 오류 줄로 바뀐다 — 그 줄도 같다.
     fireEvent.changeText(screen.getByTestId('new-channel-name'), '-release');
     expect(screen.getByTestId('new-channel-name-issue').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('채널 이름의 라벨·입력·규칙(오류) 줄은 한 묶음이다 — 낱개로 두면 섹션 간격(16)이 그 사이에 들어가 규칙 줄이 입력과 다음 섹션의 한가운데 뜬다 (design-review r2 M2)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    const field = screen.getByTestId('new-channel-name-field');
+    // 묶음 안쪽 간격은 형제 시트(작업 맡기기·내 맥에 보내기)의 입력 묶음과 같은 `space.sm` 이다.
+    expect(StyleSheet.flatten(field.props.style).gap).toBe(space.sm);
+    // 라벨·입력·규칙 줄이 한 묶음 안에 있고, 공개 범위 카드는 묶음 밖(섹션 간격으로 떨어진 다음 섹션)이다.
+    expect(within(field).getByText('채널 이름')).toBeTruthy();
+    expect(within(field).getByTestId('new-channel-name')).toBeTruthy();
+    expect(within(field).getByTestId('new-channel-name-rule')).toBeTruthy();
+    expect(within(field).queryByTestId('new-channel-kind')).toBeNull();
+    // 규칙을 어겨 오류 줄로 바뀌어도 같은 묶음 안이다.
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), '-release');
+    expect(within(field).getByTestId('new-channel-name-issue')).toBeTruthy();
+    expect(within(field).queryByTestId('new-channel-name-rule')).toBeNull();
   });
 
   it('같은 이름이 있으면(409) 이름 칸 밑에 말하고 시트를 닫지 않는다', async () => {

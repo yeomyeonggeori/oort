@@ -54,7 +54,8 @@ import {useTickingNow} from './workingSignal';
 //
 // 머리는 오른쪽 원형 X 의 `SheetHeader`(옛 직접 짠 머리의 글자 「닫기」는 없다 — 이름은 그대로 「작업 기록 닫기」)이고
 // 몸은 `SheetScroll` 이다. 요약(에이전트·요청·상태·시간)은 카드 하나, 기록 줄은 **묶음 카드의 줄**이고 줄 사이는 카드의
-// 구분선이다(옛 줄마다 아래 테두리 없음). 기록 한계·보관 문장은 목록 아래 각주다. 읽기 전용의 긴 목록이라 규칙상 페이지
+// 구분선이다(옛 줄마다 아래 테두리 없음). 기록 한계·보관 문장은 「기록」 라벨 아래·목록 위다(ADR-0200 D5 — 스크롤을 내려야만
+// 보이는 자리의 한계는 사실상 숨기는 것이다). 읽기 전용의 긴 목록이라 규칙상 페이지
 // 후보다(`docs/design-system/phone-sheets.md` §1) — 이 이슈는 시트로 둔 채 머리·부품만 옮겼다.
 // =============================================================================
 
@@ -212,8 +213,19 @@ export function SheetBody({
           ) : rows.length === 0 ? (
             <GroupCard>
               <View style={styles.emptyBlock} testID="run-ledger-empty">
-                <Text style={styles.emptyHeadline}>{empty.headline}</Text>
-                <Text style={styles.note}>{empty.detail}</Text>
+                {/* 어절 단위로 접는다 — 같은 시트의 요약·기록 줄·한계 문장과 같은 규칙(design-review r2 L2). */}
+                <Text
+                  style={styles.emptyHeadline}
+                  lineBreakStrategyIOS="hangul-word"
+                  testID="run-ledger-empty-headline">
+                  {empty.headline}
+                </Text>
+                <Text
+                  style={styles.note}
+                  lineBreakStrategyIOS="hangul-word"
+                  testID="run-ledger-empty-detail">
+                  {empty.detail}
+                </Text>
               </View>
             </GroupCard>
           ) : (

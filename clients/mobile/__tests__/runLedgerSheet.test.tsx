@@ -355,6 +355,15 @@ describe('폰 기록 시트 — 공용 부품 (#4458)', () => {
     expect(screen.getByText(/깨우는 신호를 보냈어요/).props.lineBreakStrategyIOS).toBe('hangul-word');
   });
 
+  it('빈 기록의 머리말·설명도 어절 단위로 접는다 — 같은 시트의 다른 문장과 같은 규칙이다 (design-review r2 L2)', async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(0));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-empty')).toBeTruthy());
+    for (const id of ['run-ledger-empty-headline', 'run-ledger-empty-detail']) {
+      expect(screen.getByTestId(id).props.lineBreakStrategyIOS).toBe('hangul-word');
+    }
+  });
+
   it('요약은 카드 하나, 기록 줄은 묶음 카드의 줄이고 줄 사이는 카드의 구분선이다 — 글자 「닫기」·줄마다 아래 테두리는 없다', async () => {
     mockFetchEvents.mockResolvedValue(ledgerOf(3));
     render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));

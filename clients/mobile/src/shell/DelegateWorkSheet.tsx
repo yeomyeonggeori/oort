@@ -853,7 +853,10 @@ function SheetBody({
                 testID="delegate-branch"
               />
               <FieldIssue error={fieldError} field="branch" />
-              <Text style={styles.rule}>
+              <Text
+                style={styles.rule}
+                lineBreakStrategyIOS="hangul-word"
+                testID="delegate-repo-rule">
                 둘 다 비워 두면 서버에 보내지 않아요.
               </Text>
             </View>
@@ -877,6 +880,8 @@ function FieldIssue({
     <Text
       accessibilityLiveRegion="polite"
       style={styles.issue}
+      // 코어가 준 칸 오류 문장은 길어질 수 있다 — 어절 가운데서 갈리지 않게(design-review r2 L2).
+      lineBreakStrategyIOS="hangul-word"
       testID={`delegate-issue-${field}`}
     >
       {error.sentence}

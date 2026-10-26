@@ -448,6 +448,18 @@ describe('④ 거절 사유마다 서는 버튼이 다르다', () => {
   });
 });
 
+describe('작업 맡기기 — 문장은 어절 단위로 접는다 (design-review r2 L2)', () => {
+  it('코어가 준 칸 오류 문장과 저장소·브랜치 규칙 줄은 hangul-word 다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({agentMemberId: AGENT});
+    await fillAndSend('가'.repeat(67));
+    expect((await screen.findByTestId('delegate-issue-title')).props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 접힌 「더 보기」 를 펴면 서는 규칙 줄.
+    fireEvent.press(screen.getByTestId('delegate-more'));
+    expect(screen.getByTestId('delegate-repo-rule').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+});
+
 describe('⑤ 한글 67자 제목은 보내기 전에 막힌다', () => {
   it('66자는 나가고 67자는 서버를 부르지 않는다', async () => {
     const fixture = installFetch({
