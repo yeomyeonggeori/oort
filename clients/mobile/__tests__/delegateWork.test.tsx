@@ -7,9 +7,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo} from 'react-native';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -22,7 +23,14 @@ import {
 } from '../src/features/work/delegate/model';
 import {__resetDelegateDrafts} from '../src/features/work/delegate/session';
 import {SessionProvider} from '../src/session/useSession';
+import {NON_SECRET_KEYS, nonSecretStore} from '../src/storage/kv';
+import {GroupRow, GroupSection, NoticeBlock, OutlineButton} from '../src/design/atoms';
+import {GroupCard} from '../src/design/sheetParts';
 import {DelegateWorkSheet, type DelegatePrefill} from '../src/shell/DelegateWorkSheet';
+import {Field, TextArea} from '../src/shell/sheetForm';
+import {HOME_ICONS} from '../src/design/icons';
+import {lightPalette} from '../src/design/tokens';
+import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -603,4 +611,97 @@ describe('후보 판정(순수)', () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.rest).toBe('paused');
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+describe('작업 맡기기 — 공용 부품 (#4458)', () => {
+  it('A 단계: 머리의 왼쪽 ✓ 가 「다음」(고르기 전 회색), 에이전트는 라디오 행이다 — 옛 글자 「다음」·GroupRow 는 없다', async () => {
+    // 앞 시험이 마지막에 쓴 곳을 적어 두면 A 에 미리 찍힌다 — 이 시험은 아무것도 고르지 않은 채로 시작한다.
+    nonSecretStore().remove(NON_SECRET_KEYS.delegateLastTarget);
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({});
+    await screen.findByTestId('delegate-agent-grokbot');
+    const next = screen.getByTestId('delegate-next');
+    expect(next.props.accessibilityRole).toBe('button');
+    expect(next.props.accessibilityLabel).toBe('다음');
+    expect(next.props.accessibilityState).toMatchObject({disabled: true});
+    expect(screen.queryByText('다음')).toBeNull();
+    expect(screen.UNSAFE_queryAllByType(GroupSection)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(GroupRow)).toHaveLength(0);
+    // **그려진** 상태로 본다: 아직 고르지 않았으니 selected 도 ✓ 도 없다 → 누르면 둘이 함께 선다.
+    expect(radioRows(within(screen.getByTestId('delegate-agents')))).toEqual([
+      {testID: 'delegate-agent-grokbot', selected: false, checks: 0},
+    ]);
+    fireEvent.press(screen.getByTestId('delegate-agent-grokbot'));
+    expect(radioRows(within(screen.getByTestId('delegate-agents')))).toEqual([
+      {testID: 'delegate-agent-grokbot', selected: true, checks: 1},
+    ]);
+    expect(screen.getByTestId('delegate-next').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('B 단계: 제목은 입력 알약, 설명은 여러 줄 상자, 저장소·브랜치는 펼침 행, 「바꾸기」는 도착지 카드의 행이다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({});
+    fireEvent.press(await screen.findByTestId('delegate-agent-grokbot'));
+    fireEvent.press(screen.getByTestId('delegate-next'));
+    await screen.findByTestId('delegate-step-b');
+    const send = screen.getByTestId('delegate-send');
+    expect(send.props.accessibilityLabel).toBe('맡기기');
+    expect(screen.queryByText('맡기기')).toBeNull();
+    expect(screen.UNSAFE_getAllByType(Field)).toHaveLength(1);
+    expect(screen.UNSAFE_getAllByType(TextArea)).toHaveLength(1);
+    // 도착지 카드: 값 한 줄 + 「바꾸기」 행(맡길 곳 바꾸기).
+    const destination = within(screen.getByTestId('delegate-destination'));
+    expect(destination.getAllByTestId('group-divider')).toHaveLength(1);
+    const change = screen.getByTestId('delegate-change-target');
+    expect(change.props.accessibilityLabel).toBe('맡길 곳 바꾸기');
+    // 펼침 행: 누르면 저장소·브랜치 입력이 선다 — 옛 글자 단추가 아니다.
+    expect(imageSources(screen.getByTestId('delegate-more'))).toEqual([HOME_ICONS.down]);
+    expect(screen.queryByTestId('delegate-repo')).toBeNull();
+    fireEvent.press(screen.getByTestId('delegate-more'));
+    expect(screen.getByTestId('delegate-repo')).toBeTruthy();
+    expect(screen.getByTestId('delegate-branch')).toBeTruthy();
+    expect(screen.UNSAFE_getAllByType(Field)).toHaveLength(3);
+    expect(screen.UNSAFE_queryAllByType(OutlineButton)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(NoticeBlock)).toHaveLength(0);
+    expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('검증이 막은 칸의 외곽선이 실패색이 된다 — 입력 부품이 invalid 를 받는다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({agentMemberId: AGENT});
+    await screen.findByTestId('delegate-title');
+    // **그려진** 외곽선 색으로 잰다(부품이 invalid 를 무시하면 붉어진다): 평소 textFaint, 막힌 칸만 dangerText.
+    const outline = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style).borderColor;
+    expect(outline('delegate-title-pill')).toBe(lightPalette.textFaint);
+    expect(outline('delegate-brief')).toBe(lightPalette.textFaint);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('delegate-send'));
+    });
+    await screen.findByTestId('delegate-issue-title');
+    expect(outline('delegate-title-pill')).toBe(lightPalette.dangerText);
+    expect(outline('delegate-brief')).toBe(lightPalette.textFaint);
+    // 고치면 그 칸만 풀린다.
+    fireEvent.changeText(screen.getByTestId('delegate-title'), '로그인 버그 고치기');
+    expect(outline('delegate-title-pill')).toBe(lightPalette.textFaint);
+  });
+});
+
+let lastDelegateMount: ReturnType<typeof mount> | null = null;
+
+describeCloseContract({
+  name: 'DelegateWorkSheet',
+  open: async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    lastDelegateMount = mount({});
+    await screen.findByTestId('delegate-agent-grokbot');
+  },
+  closedCount: () => lastDelegateMount?.onClose.mock.calls.length ?? 0,
+  closeTestID: 'delegate-close',
+  closeLabel: '작업 맡기기 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '작업 맡기기 닫기',
 });

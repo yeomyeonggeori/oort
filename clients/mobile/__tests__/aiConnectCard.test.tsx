@@ -10,6 +10,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import fs from 'fs';
 import path from 'path';
@@ -17,6 +18,7 @@ import React from 'react';
 import {
   AccessibilityInfo,
   Dimensions,
+  Image,
   Keyboard,
   type KeyboardEvent,
   ScrollView,
@@ -25,6 +27,7 @@ import {
 } from 'react-native';
 import {ERROR_MESSAGE_FALLBACK} from '@momo/core/features/settings/model';
 
+import {SHEET_ICONS} from '../src/design/icons';
 import {
   AI_CONNECT_CARD_COPY,
   AiConnectCard,
@@ -249,6 +252,15 @@ describe('카드 — 판정은 코어, 행동은 연결 확인 하나', () => {
     card();
     await screen.findByTestId('ai-connect-card-team');
     expect(screen.UNSAFE_queryAllByType(TextInput)).toHaveLength(0);
+  });
+
+  it('카드의 닫기는 시트·페이지와 같은 X 글리프다 — 글자 「닫기」 단추가 아니다 (#4458)', async () => {
+    mockFetch.mockResolvedValue(LINK);
+    card();
+    await screen.findByTestId('ai-connect-card-team');
+    const close = screen.getByTestId('ai-connect-card-close');
+    expect(within(close).UNSAFE_getByType(Image).props.source).toBe(SHEET_ICONS.close);
+    expect(screen.queryByText('닫기')).toBeNull();
   });
 
   it('자판이 올라와 있으면 몸을 접고 머리(닫기)만 남긴다', async () => {

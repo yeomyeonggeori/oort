@@ -8,6 +8,8 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {RunLedgerSheet} from '../src/features/agents/RunLedgerSheet';
+import {GroupCard} from '../src/design/sheetParts';
+import {describeCloseContract} from './fixtures/sheetContract';
 import {MessageRunStatus} from '../src/features/agents/MessageRunStatus';
 import {notifyRunLedgerFrame} from '../src/features/agents/agentRunProgressStore';
 
@@ -282,4 +284,52 @@ describe('폰 메시지 아래 상태 줄 (#3824, #4020: 사람이 알아야 하
     expect(screen.queryByTestId('message-run-status')).toBeNull();
     expect(mockFetchEvents).not.toHaveBeenCalled();
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+function ledgerOf(count: number) {
+  const at = Date.now() - 10 * MIN;
+  const kinds = ['queued', 'claimed', 'succeeded'].slice(0, count);
+  return jest.requireActual('@momo/core/lib/api').agentRunLedgerFromWire({
+    runId: RUN,
+    events: kinds.map((kind, index) => ({ordinal: index + 1, kind, createdAtMs: at + index * SEC})),
+  });
+}
+
+describe('폰 기록 시트 — 공용 부품 (#4458)', () => {
+  it('요약은 카드 하나, 기록 줄은 묶음 카드의 줄이고 줄 사이는 카드의 구분선이다 — 글자 「닫기」·줄마다 아래 테두리는 없다', async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(3));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(2);
+    // 기록 셋 → 구분선 둘. 요약 카드는 자식이 하나라 구분선이 없다.
+    expect(screen.getAllByTestId('group-divider')).toHaveLength(2);
+    expect(screen.getAllByTestId(/^run-ledger-row-/)).toHaveLength(3);
+    expect(screen.queryByText('닫기')).toBeNull();
+  });
+
+  it('기록을 읽는 중·못 읽음도 카드 안에 선다 — 상태 블록의 가로 여백이 시트 몸의 거터와 겹치지 않는다', async () => {
+    mockFetchEvents.mockImplementation(() => new Promise(() => {}));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={() => {}} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-loading')).toBeTruthy());
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(2);
+  });
+});
+
+const closed = jest.fn();
+beforeEach(() => closed.mockReset());
+
+describeCloseContract({
+  name: 'RunLedgerSheet',
+  open: async () => {
+    mockFetchEvents.mockResolvedValue(ledgerOf(2));
+    render(wrap(<RunLedgerSheet progress={progress()} directory={directory} onClose={closed} />));
+    await waitFor(() => expect(screen.getByTestId('run-ledger-rows')).toBeTruthy());
+  },
+  closedCount: () => closed.mock.calls.length,
+  closeTestID: 'run-ledger-close',
+  closeLabel: '작업 기록 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '작업 기록 닫기',
 });

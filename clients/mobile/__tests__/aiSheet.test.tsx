@@ -9,6 +9,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -24,7 +25,11 @@ import {
   registerSpawnPort,
   UNWIRED_SPAWN_PORT,
 } from '../src/features/work/ask/spawnPort';
+import {GroupRow, GroupSection} from '../src/design/atoms';
+import {SHEET_ICONS} from '../src/design/icons';
+import {GroupCard} from '../src/design/sheetParts';
 import AppShell from '../src/shell/AppShell';
+import {describeCloseContract, imageSources} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -263,7 +268,8 @@ describe('구획 노출 조건', () => {
     expect(screen.queryByTestId('ai-section-tools')).toBeNull();
     expect(screen.queryByTestId('ai-row-ask-mac')).toBeNull();
     expect(screen.queryByTestId('ai-section-personal')).toBeNull();
-    expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
+    // 맥 칩의 글자(#4458: 행의 오른쪽 값)는 어느 줄에도 새지 않는다.
+    expect(screen.queryByText(/내 맥 (켜짐|꺼짐)/)).toBeNull();
   });
 
   it('게이트가 켜지면 「내 도구」가 서고, 개인 에이전트가 없으면 그 구획은 서지 않는다', async () => {
@@ -284,9 +290,11 @@ describe('구획 노출 조건', () => {
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
     await waitFor(() => expect(screen.getByTestId('ai-section-personal')).toBeTruthy());
-    expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy();
-    expect(screen.getByTestId(`ai-personal-${MINE}`)).toHaveTextContent('개인');
-    expect(within(screen.getByTestId(`ai-row-personal-${MINE}`)).getByText('내 Claude Code')).toBeTruthy();
+    const row = screen.getByTestId(`ai-row-personal-${MINE}`);
+    expect(within(row).getByText('내 Claude Code')).toBeTruthy();
+    // 「개인」 표식은 행의 오른쪽 값에 선다(#4458: 공용 행에는 오른쪽 임의 노드 자리가 없다). 맥이 등록돼 있지 않으면 표식만이다.
+    expect(within(row).getByText('개인')).toBeTruthy();
+    expect(within(row).getByText('Claude Code · 나만 쓸 수 있어요.')).toBeTruthy();
   });
 });
 
@@ -299,9 +307,13 @@ describe('맥 칩', () => {
     await renderReady();
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
-    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
-    expect(screen.getByTestId('ai-mac-chip')).toHaveTextContent('내 맥 켜짐');
-    expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 켜짐');
+    // 칩의 글자는 행의 오른쪽 값이다(#4458): 내 도구 줄은 칩만, 개인 에이전트 줄은 「개인 · 칩」.
+    await waitFor(() =>
+      expect(within(screen.getByTestId('ai-row-ask-mac')).getByText('내 맥 켜짐')).toBeTruthy(),
+    );
+    expect(
+      within(screen.getByTestId(`ai-row-personal-${MINE}`)).getByText('개인 · 내 맥 켜짐'),
+    ).toBeTruthy();
   });
 
   it('맥이 꺼져 있으면 「내 맥 꺼짐」이다 — 줄은 그대로 눌린다 (T6b가 꺼짐을 안내한다)', async () => {
@@ -312,11 +324,14 @@ describe('맥 칩', () => {
     await renderReady();
     await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
     await openAi();
-    await waitFor(() => expect(screen.getByTestId('ai-mac-chip')).toBeTruthy());
-    expect(screen.getByTestId('ai-mac-chip')).toHaveTextContent('내 맥 꺼짐');
-    expect(screen.getByTestId(`ai-personal-mac-${MINE}`)).toHaveTextContent('내 맥 꺼짐');
+    await waitFor(() =>
+      expect(within(screen.getByTestId('ai-row-ask-mac')).getByText('내 맥 꺼짐')).toBeTruthy(),
+    );
+    expect(
+      within(screen.getByTestId(`ai-row-personal-${MINE}`)).getByText('개인 · 내 맥 꺼짐'),
+    ).toBeTruthy();
     fireEvent.press(screen.getByTestId('ai-row-ask-mac'));
-    expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
   });
 
   it('등록된 맥이 없으면 칩이 없다 — 값이 없는 것을 「꺼짐」으로 말하지 않는다', async () => {
@@ -326,7 +341,7 @@ describe('맥 칩', () => {
     await renderReady();
     await openAi();
     await waitFor(() => expect(screen.getByTestId('ai-row-ask-mac')).toBeTruthy());
-    expect(screen.queryByTestId('ai-mac-chip')).toBeNull();
+    expect(within(screen.getByTestId('ai-row-ask-mac')).queryByText(/내 맥 (켜짐|꺼짐)/)).toBeNull();
   });
 });
 
@@ -411,9 +426,14 @@ describe('행 선택', () => {
     await openAi();
     hapticCalls.length = 0;
     fireEvent.press(screen.getByTestId('ai-row-delegate'));
+    // 햅틱은 누르는 순간 동기로 한 번이고, 이동은 시트가 미끄러져 내려간 **뒤**다(#4458) — 누른 순간에는 AI 시트가
+    // 아직 서 있고 N8 은 없다.
     expect(hapticCalls).toEqual(['selection']);
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('delegate-sheet')).toBeNull();
+    await waitFor(() => expect(screen.getByTestId('delegate-sheet')).toBeTruthy(), {timeout: 8000});
     expect(screen.queryByTestId('ai-sheet')).toBeNull();
-    expect(screen.getByTestId('delegate-sheet')).toBeTruthy();
+    expect(hapticCalls).toEqual(['selection']); // 이동할 때 한 번 더 나지 않는다
     // 한 번에 시트 하나 — 다른 쪽이 함께 서 있으면 연결이 섞인 것이다.
     expect(screen.queryByTestId('ask-mac-sheet') !== null).toBe(false);
   });
@@ -426,8 +446,9 @@ describe('행 선택', () => {
     hapticCalls.length = 0;
     fireEvent.press(screen.getByTestId('ai-row-ask-mac'));
     expect(hapticCalls).toEqual(['selection']);
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
     expect(screen.queryByTestId('ai-sheet')).toBeNull();
-    expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
     expect(screen.queryByTestId('delegate-sheet') !== null).toBe(false);
   });
 
@@ -441,7 +462,7 @@ describe('행 선택', () => {
     await openAi();
     await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
     fireEvent.press(screen.getByTestId(`ai-row-personal-${MINE}`));
-    expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('ask-mac-sheet')).toBeTruthy(), {timeout: 8000});
     await waitFor(() => expect(screen.getByTestId('ask-mac-destination-line')).toBeTruthy());
     expect(screen.getByTestId('ask-mac-destination-line').props.children as string).toContain('Codex');
   });
@@ -451,7 +472,61 @@ describe('행 선택', () => {
     await renderReady();
     await openAi();
     fireEvent.press(screen.getByTestId('ai-row-agents'));
-    expect(screen.queryByTestId('ai-sheet')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('ai-sheet')).toBeNull(), {timeout: 8000});
     await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+describe('AI 시트 — 공용 부품', () => {
+  it('구획은 묶음 카드, 줄은 셰브론 행이다 — 옛 GroupSection·GroupRow·오른쪽 임의 칩은 없다', async () => {
+    wirePort();
+    rosterWire = [...HUMANS, personalAgent(MINE)];
+    hostsWire = [host(true)];
+    installFetch();
+    await renderReady();
+    await waitFor(() => expect(queryClient?.getQueryData(['roster', WS])).toBeTruthy());
+    await openAi();
+    await waitFor(() => expect(screen.getByTestId(`ai-row-personal-${MINE}`)).toBeTruthy());
+    expect(screen.UNSAFE_queryAllByType(GroupSection)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(GroupRow)).toHaveLength(0);
+    // 구획 셋(에이전트·내 도구·개인 에이전트 — 앱 줄은 서버가 플러그인 표면을 실을 때만)이 모두 카드다.
+    expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(3);
+    // 줄마다 **그려진** 오른쪽 셰브론이 하나씩 있다 — 「다른 곳으로 가는 문」이라는 말이 눈에도 선다.
+    for (const id of [
+      'ai-row-delegate',
+      'ai-row-agents',
+      'ai-row-ask-mac',
+      `ai-row-personal-${MINE}`,
+    ]) {
+      expect([id, imageSources(screen.getByTestId(id))]).toEqual([id, [SHEET_ICONS.chevron]]);
+    }
+    // 구분선은 카드마다 줄 수 − 1 이다: 에이전트 둘 → 1, 내 도구 하나 → 0, 개인 하나 → 0.
+    expect(within(screen.getByTestId('ai-section-agents')).getAllByTestId('group-divider')).toHaveLength(1);
+    expect(within(screen.getByTestId('ai-section-tools')).queryAllByTestId('group-divider')).toHaveLength(0);
+  });
+
+  it('행이 다섯 이하인 문 모음이라 내용 맞춤 단이다 — 큰 단(위 58 에서 바닥까지)이 아니다', async () => {
+    installFetch();
+    await renderReady();
+    await openAi();
+    const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
+    expect(sheet.top).toBeUndefined();
+    expect(sheet.maxHeight).toBeGreaterThan(0);
+  });
+});
+
+describeCloseContract({
+  name: 'AiSheet',
+  open: async () => {
+    installFetch();
+    await renderReady();
+    await openAi();
+  },
+  closedCount: () => (screen.queryByTestId('ai-sheet') === null ? 1 : 0),
+  closeTestID: 'ai-close',
+  closeLabel: 'AI 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: 'AI 닫기',
 });

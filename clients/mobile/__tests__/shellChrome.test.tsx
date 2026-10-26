@@ -19,7 +19,10 @@ import '../src/boot/coreHost';
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
+import {HOME_ICONS} from '../src/design/icons';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
+import {GroupCard, InputPill} from '../src/design/sheetParts';
+import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
@@ -345,7 +348,10 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('ai-sheet')).toBeTruthy();
     expect(screen.queryByTestId('agent-list-pane')).toBeNull();
     fireEvent.press(screen.getByTestId('ai-row-agents'));
-    expect(screen.queryByTestId('ai-sheet')).toBeNull();
+    // 시트가 먼저 미끄러져 내려간 뒤에 목록이 열린다(#4458) — 누른 순간에는 시트가 아직 서 있고 목록은 없다.
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('agent-list-pane')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('ai-sheet')).toBeNull(), {timeout: 8000});
     await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('agents-title')).toBeTruthy());
     // 층의 나가는 길이 있다.
@@ -1203,4 +1209,66 @@ describe('리퀴드 글래스 (#3580)', () => {
     expect(screen.queryByTestId('shell-tabbar-liquid')).toBeNull();
     expect(screen.getByTestId('shell-tabbar-fallback')).toBeTruthy();
   });
+});
+
+// ---- 새 채널 시트: 공용 부품 (#4458) -----------------------------------------------------------
+
+async function openNewChannel() {
+  installFetch();
+  await renderReady();
+  openMenu();
+  await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('plus-menu-channel'));
+  expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
+}
+
+describe('새 채널 시트 — 공용 부품 (#4458)', () => {
+  it('머리의 왼쪽 ✓ 가 「채널 만들기」이고(입력 전 회색), 옛 오른쪽 글자 「만들기」 단추는 없다', async () => {
+    await openNewChannel();
+    const create = screen.getByTestId('new-channel-create');
+    expect(create.props.accessibilityRole).toBe('button');
+    expect(create.props.accessibilityLabel).toBe('채널 만들기');
+    expect(create.props.accessibilityState).toMatchObject({disabled: true});
+    expect(screen.queryByText('만들기')).toBeNull();
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('이름은 앞 아이콘(#)이 선 입력 알약이고, 공개 범위는 묶음 카드의 라디오 행 둘이다', async () => {
+    await openNewChannel();
+    expect(screen.UNSAFE_getAllByType(InputPill)).toHaveLength(1);
+    // 그려진 앞 아이콘: 알약 안에 # 글리프가 선다.
+    expect(imageSources(screen.getByTestId('new-channel-name-pill'))).toEqual([HOME_ICONS.hash]);
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(1);
+    // 그려진 라디오 상태: 보조기술이 읽는 selected 와 ✓ 글리프가 함께 한 줄에만 선다. 누르면 둘이 함께 옮겨 간다.
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))).toEqual([
+      {testID: 'new-channel-kind-public', selected: true, checks: 1},
+      {testID: 'new-channel-kind-private', selected: false, checks: 0},
+    ]);
+    fireEvent.press(screen.getByTestId('new-channel-kind-private'));
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))).toEqual([
+      {testID: 'new-channel-kind-public', selected: false, checks: 0},
+      {testID: 'new-channel-kind-private', selected: true, checks: 1},
+    ]);
+    expect(screen.getAllByTestId('group-divider')).toHaveLength(1);
+  });
+
+  it('입력이 하나인 짧은 시트라 중간 단이다 — 큰 단(위 58 에서 바닥까지)이 아니다', async () => {
+    await openNewChannel();
+    const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
+    expect(sheet.top).toBeUndefined();
+    expect(sheet.height).toBeGreaterThan(0);
+  });
+});
+
+describeCloseContract({
+  name: 'NewChannelSheet',
+  open: openNewChannel,
+  closedCount: () => (screen.queryByTestId('new-channel-sheet') === null ? 1 : 0),
+  closeTestID: 'new-channel-close',
+  closeLabel: '새 채널 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '새 채널 닫기',
 });

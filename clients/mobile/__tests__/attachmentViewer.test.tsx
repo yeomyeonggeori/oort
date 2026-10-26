@@ -12,6 +12,7 @@ import {
   AccessibilityInfo,
   Animated,
   Dimensions,
+  Image,
   Pressable,
   ScrollView,
   View,
@@ -19,6 +20,7 @@ import {
 } from 'react-native';
 
 import { BAR_CONTROL_MAX_SCALE } from '../src/design/atoms';
+import { SHEET_ICONS } from '../src/design/icons';
 import { space, TOUCH_TARGET } from '../src/design/tokens';
 import { VIEWER_SNAP_SPRING } from '../src/design/motion';
 import { AttachmentList } from '../src/features/attachments/AttachmentList';
@@ -398,12 +400,23 @@ describe('① 단추 띠는 안전 영역 안에 선다', () => {
     // 띠는 흐름 안에 서므로 글자가 무한히 자라면 사진 영역이 줄어든다. 상한 정책(`atoms.tsx`): 크롬만 상한을 갖는다.
     await mount();
     for (const label of [
-      screen.getByText('닫기'),
       screen.getByTestId('attachment-viewer-position'),
       screen.getByText('공유'),
     ]) {
       expect(label.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
     }
+  });
+
+  it('닫기는 글자가 아니라 시트와 같은 X 글리프다 — 이름·누르는 면은 그대로이고 글자 「닫기」는 없다 (#4458)', async () => {
+    await mount();
+    const close = screen.getByTestId('attachment-viewer-close');
+    expect(close.props.accessibilityLabel).toBe('닫기');
+    expect(within(close).UNSAFE_getByType(Image).props.source).toBe(SHEET_ICONS.close);
+    expect(screen.queryByText('닫기')).toBeNull();
+    // 글리프는 크롬이라 글자 배율을 따라가지 않는다(이미지) — 누르는 면은 글리프가 아니라 단추 상자가 정한다.
+    const style = flatten(close.props.style);
+    expect(style.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    expect(style.minWidth).toBeGreaterThanOrEqual(TOUCH_TARGET);
   });
 
   it('인셋은 Modal **안의** SafeAreaProvider 가 준다 — Modal 은 앱 루트와 다른 네이티브 계층이다', async () => {
