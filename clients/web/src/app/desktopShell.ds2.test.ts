@@ -191,6 +191,37 @@ describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
     expect(CHAT_SHELL).toMatch(/className="channel-head\b/);
   });
 
+  it("넓은 창의 머리는 아래 선 대신 --head-edge 그림자이고, 폰 폭은 예전 경계선이다 (#4591)", () => {
+    const head = utility("channel-head");
+    const wideAt = head.indexOf("@media (width >= 600px)");
+    expect(wideAt).toBeGreaterThan(0);
+    const phone = head.slice(0, wideAt);
+    const wide = head.slice(wideAt);
+    // 폰 폭(바깥 규칙)은 그대로 1px 경계선이다.
+    expect(phone).toMatch(/border-block-end: 1px solid var\(--line\);/);
+    // 넓은 창: 선 0 + 그림자 토큰 + 형제 위에 그려지는 이름 있는 층(손기입 z-index 금지).
+    expect(wide).toMatch(/border-block-end: 0;/);
+    expect(wide).toMatch(/box-shadow: var\(--head-edge\);/);
+    expect(wide).toMatch(/position: relative;/);
+    expect(wide).toMatch(/z-index: var\(--layer-content-float\);/);
+    // 고대비에서는 그림자가 경계를 말하지 못하므로 3:1 선이 돌아온다.
+    expect(wide).toMatch(
+      /@media \(prefers-contrast: more\) \{\s*border-block-end: 1px solid var\(--line-strong\);\s*box-shadow: none;/
+    );
+  });
+
+  it("--head-edge는 :root 역할 하나다: 두 스킴을 가르고, 고도 어휘(--elevation-*·shadow-*)를 늘리지 않는다 (#4591)", () => {
+    const token = /--head-edge:\s*([^;]+);/.exec(TOKENS)?.[1] ?? "";
+    expect(token).toMatch(/light-dark\(rgba\([^)]*\), rgba\([^)]*\)\)/);
+    // 두 겹이다: 머리 가장자리에 붙는 것 하나, 아래로 번지는 것 하나.
+    expect(token.split(/\n/).filter((line) => /light-dark/.test(line))).toHaveLength(2);
+    // @theme 밖이다(`--shadow-*`는 @theme 안에서 `shadow-*` 클래스를 만든다). 이름도 고도 어휘가 아니다.
+    expect(TOKENS).not.toMatch(/--elevation-head|--shadow-head/);
+    const themeAt = TOKENS.indexOf("@theme {");
+    expect(TOKENS.indexOf("--head-edge:")).toBeLessThan(themeAt);
+    expect(CHAT_SHELL).not.toMatch(/\bshadow-head\b/);
+  });
+
   it("컴포저는 반경 20 · float 그림자의 흰 카드이고 좌우 24 · 아래 18에 뜬다", () => {
     const card = utility("composer-card");
     expect(card).toMatch(/border-radius: var\(--radius-2xl\);/);
@@ -199,5 +230,56 @@ describe("본문 머리와 컴포저 (시안 `.a-mhd` · `.a-dcomp`)", () => {
     expect(utility("composer-dock")).toMatch(/padding: var\(--spacing-2\) var\(--spacing-6\) 18px;/);
     expect(COMPOSER).toMatch(/className="composer-card\b/);
     expect(COMPOSER).toMatch(/"composer-dock safe-area-bottom shrink-0"/);
+  });
+});
+
+describe("데스크탑 셸의 잡기 띠 (#4591)", () => {
+  const shell = utility("app-shell");
+
+  it("셸 마커가 판을 상단 줄 아래(둘째 행)로 내리고, 웹의 기본 규칙은 첫 행 그대로다", () => {
+    const wideAt = shell.indexOf("@media (width >= 600px) {");
+    expect(wideAt).toBeGreaterThan(0);
+    const wide = shell.slice(wideAt);
+    // 판은 띠(신호등 높이 40) 아래에서 시작한다. 위 여백 0: 띠가 이미 위 간격을 지고, 아래·오른쪽 인셋 8은 기본 규칙이 그대로 진다.
+    expect(wide).toMatch(/&\[data-desktop-shell\] > main \{\s*grid-row: 2;\s*margin-block-start: 0;\s*\}/);
+    // 웹(마커 없음)은 첫 행까지 올라가 인셋 8이다: 띠가 없다.
+    expect(wide).toMatch(/> main \{\s*grid-row: 1 \/ -1;\s*grid-column: 2;\s*margin-block: var\(--spacing-2\);/);
+    // 마커 규칙은 기본 규칙 **뒤**에 와야 이긴다(같은 우선순위 뒤쪽이 이긴다).
+    expect(wide.indexOf("&[data-desktop-shell] > main")).toBeGreaterThan(
+      wide.indexOf("grid-row: 1 / -1;")
+    );
+    // 마커 규칙은 폰 폭(<600)의 한 행 격자에는 닿지 않는다: 넓은 창 블록 안에만 있다.
+    expect(shell.slice(0, wideAt)).not.toMatch(/data-desktop-shell/);
+  });
+
+  it("띠는 신호등과 같은 40이고 토글 중심 19.5 계약(투명 테두리 1px)은 그대로다", () => {
+    const titlebar = utility("app-titlebar");
+    expect(titlebar).toMatch(/block-size: var\(--spacing-control-lg\);/);
+    expect(TOKENS).toMatch(/--spacing-control-lg: 40px;/);
+    expect(titlebar).toMatch(/border-block-end: 1px solid transparent;/);
+    expect(titlebar).toMatch(/grid-column: 1 \/ -1;/);
+  });
+
+  it("셸은 마커를 AppShell이 `IS_TAURI`와 설정 표면 여부로 찍는다", () => {
+    expect(APP_SHELL).toMatch(/\{\.\.\.desktopShellProps\(IS_TAURI, !isSettingsSurface\)\}/);
+    expect(APP_SHELL).toMatch(/import \{ IS_TAURI \} from "@\/lib\/env";/);
+  });
+
+  it("오른쪽 자리는 줄의 오른쪽 끝에 서고 비면 폭이 없다(자식이 없으면 flex 항목이 내용 폭이다)", () => {
+    const slot = utility("app-titlebar-trailing");
+    expect(slot).toMatch(/margin-inline-start: auto;/);
+    expect(slot).toMatch(/display: flex;/);
+    // 칸 자체에 안쪽 여백을 두지 않는다: 끌기 영역이 아닌 죽은 자리가 생기지 않는다.
+    expect(slot).not.toMatch(/padding/);
+  });
+});
+
+describe("툴팁 면은 연회색 알약이다 (#4591)", () => {
+  it("중립 칩 그릇(--muted-soft) 한 면이고 선도 그림자도 없다", () => {
+    const tooltip = utility("tooltip-surface");
+    expect(tooltip).toMatch(/background-color: var\(--muted-soft\);/);
+    expect(tooltip).toMatch(/border-radius: var\(--radius-md\);/);
+    expect(tooltip).not.toMatch(/\bborder:/);
+    expect(tooltip).not.toMatch(/box-shadow/);
   });
 });

@@ -25,6 +25,7 @@ import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
+import { desktopShellProps } from "@/app/sidebarPane";
 import { useSidebarCollapsePaint } from "@/app/useSidebarCollapsePaint";
 import {
   applySidebarListChange,
@@ -61,6 +62,7 @@ import {
   useAdeDrawerOpen,
 } from "@/features/ade/adeDrawerStore";
 import { SurfaceGate } from "@/features/capabilities/SurfaceGate";
+import { IS_TAURI } from "@/lib/env";
 import { isDesktop } from "@/lib/tauri";
 import { cn } from "@/design/lib/cn";
 import { WallpaperLayer } from "@/design/wallpaper/WallpaperLayer";
@@ -378,6 +380,7 @@ export function AppShell({
             }
             data-work-rail={myWorkTab && !isSettingsSurface ? "" : undefined}
             data-settings-surface={isSettingsSurface ? "" : undefined}
+            {...desktopShellProps(IS_TAURI, !isSettingsSurface)}
           >
             {/* 배경화면(AP-4 #4191): 창 바닥 맨 아래의 그림 한 장. 켜져 있지 않으면 보이지 않는다. */}
             <WallpaperLayer />

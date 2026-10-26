@@ -241,7 +241,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 | 이름 | 클래스 | 자리 |
 |---|---|---|
-| `--layer-content-float` | `layer-content-float` | 떠 있는 본문: UnreadPill, 호버 툴바, 행 배너, 언펄 제거 X(카드가 `isolate` 라 카드 안에서만) |
+| `--layer-content-float` | `layer-content-float` | 떠 있는 본문: UnreadPill, 호버 툴바, 행 배너, 언펄 제거 X(카드가 `isolate` 라 카드 안에서만), 대화 머리(`channel-head`: 구분 그림자가 뒤에 오는 타임라인 위에 서야 한다, #4591) |
 | `--layer-overlay-scrim` | `layer-overlay-scrim` | 다이얼로그·시트·⌘K 팔레트·드로어의 스크림, 그리고 900/1200px 아래에서 드로어가 되는 판(스레드·작업) |
 | `--layer-overlay-surface` | `layer-overlay-surface` | 그 위의 판 (다이얼로그·시트·팝오버·드롭다운·컨텍스트 메뉴·팔레트·드로어·body로 포털되는 컴포저 서식 트레이) |
 
@@ -252,6 +252,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 팝오버·드롭다운·컨텍스트 메뉴에는 **스크림이 없다**(#2485 R1 M-2, probe 실측). 스크림은 뒤를 못 만지게 하는 장치인데 이 셋은 뒤를 일부러 만질 수 있게 둔다. 그래서 스크림 행에 이 셋의 이름이 없다.
 
 3단은 들이지 않는다(ADR-0159 D5). 웹 클래스는 그대로 `shadow-sm`/`shadow-lg`이고, 이름은 `clients/web/src/design/motion.css`가 진다. `designSystem.test.ts`가 그 두 이름과 클래스 어휘를 잠근다. 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.
+
+**머리 구분 그림자 `--head-edge`는 고도 단이 아니다** (#4591, owner 2026-10-26). 넓은 창의 대화 머리(`channel-head`)가 아래 경계선 대신 드리우는 옅은 그림자이고, `tokens.css` `:root`의 역할 하나다. 떠 있는 표면의 높이를 말하지 않고 머리와 타임라인의 경계만 긋는 **구분 장치**라서 `--elevation-*` 이름도 `shadow-*` 클래스도 만들지 않는다(`@theme` 밖이다. 위의 두 단과 `designSystem.test.ts`의 그림자 어휘 단정은 그대로다). 다크는 어두운 그림자가 어두운 판 위에서 보이지 않으므로 가장자리 층이 밝은 1px 하이라이트다. 수치는 캡처로 확정한다. 자리와 층은 §2.9.
 
 **모션은 전면 토큰 축이다.** 손기입 `\d+ms`·`duration-[0-9]+`는 `motion.css`(사다리 + 모달 200/150)와 `motion.ts`(클래스 조립)에만 산다. Tailwind 기본 `transition` 은 `@theme`의 `--default-transition-duration: var(--motion-instant)` / `--default-transition-timing-function: var(--motion-ease-standard)` 가 사다리에 묶는다. 그 밖 tsx/css의 리터럴은 프리플라이트 `raw_motion` 위반이다.
 
@@ -358,6 +360,27 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 `clients/web/src/design/iconSystem.test.ts`다. 새 raw SVG 또는 정적 SVG는 목록 밖이면
 실패하고, 예외를 늘리려면 이 절과 해당 파일의 사유를 같은 변경에서 갱신해야 한다.
 
+### 2.9 창 맨 위 띠와 머리 컨트롤 (#4591, owner 2026-10-26)
+
+> Buzz 데스크탑 캡처와의 비교에서 나온 것: 잡기 띠, 머리 아래 선 → 그림자, 머리 단추의 연한 선, 툴팁 알약, 상단 오른쪽 자리. 값의 근거는 Buzz 소스의 `TOP_CHROME_HEIGHT_DEFAULT = "40px"`(상단 띠가 일반 흐름의 고정 40px 행이고 내용은 그 아래에서 시작한다)와 `data-tauri-drag-region`이다. 구조와 값만 참고했다(Apache-2.0).
+
+**잡기 띠 (데스크탑 셸에서만).** 창 맨 위 신호등 높이(`--spacing-control-lg` 40)의 빈 줄이 띠이고, 그 줄(`app-titlebar`) 전체가 끌기 영역이다(`data-tauri-drag-region`). 본문 판은 그 아래(둘째 행)에서 시작하고 사이드바도 같은 행이라 둘의 위쪽이 같은 높이다. 판이 첫 행까지 올라와 있을 때는 창 맨 위에서 잡을 곳이 판 위의 인셋 8뿐이었다. 띠는 `app-shell`의 마커 `data-desktop-shell`이 켠다(`desktopShellProps(IS_TAURI, !isSettingsSurface)`): **웹(브라우저)에는 마커가 없어 띠도 없고**, 판은 예전처럼 첫 행까지 올라가 인셋 8에서 시작한다. 설정 표면은 앱 상단 줄을 그리지 않는다(자기 끌기 줄을 가진다). 높이 40 · 투명 테두리 1px · `trafficLightPosition.y`는 그대로다: 토글 중심 19.5가 신호등과 맞는 #2700 계약이 이 값들에 걸려 있다.
+
+끌기의 규칙은 Tauri 2.11.5 `drag.js`가 정한다. 속성만 있으면 그 요소를 **직접** 누른 것만 끌기이고(자식은 상속하지 않는다, `"deep"`이 아니다), 버튼·링크·입력 같은 클릭 가능한 요소는 속성이 없으면 끌기를 막는다. 그래서 띠 안의 단추는 속성을 갖지 않고, 단추 사이 틈도 끌리도록 오른쪽 자리 칸은 속성을 가진다. `AppTitlebar.shell.test.tsx`가 같은 판정을 옮겨 단추 눌림과 빈 곳 끌림을 가른다.
+
+**오른쪽 끝 자리.** 띠의 오른쪽 끝에 상단 단추가 들어올 칸(`app-titlebar-trailing`, `AppTitlebar`의 `trailing`)이 있다. 다운로드 단추(#4587)가 채운다. 셸에서만 그리고, 비면 폭이 0이다. 이 칸은 사이드바 띠(`--w-sidebar`) 위가 아니라 바닥 위에 서므로 `band-surface`를 들지만, 유리·배경화면 위의 글자 보정은 채우는 쪽의 몫이다.
+
+**대화 머리.** 넓은 창의 머리는 아래 경계선이 없고 `--head-edge` 그림자로 타임라인과 나뉜다(§2.6). 폰 폭은 예전 경계선이고, 고대비(`prefers-contrast: more`)에서는 3:1 선이 돌아온다. 머리는 뒤에 오는 형제 위에 그려져야 하므로 `layer-content-float`에 선다(§2.6 층 표).
+
+**머리 단추는 연한 선으로 구분한다.** 단추마다 1px `--line`의 둥근 사각이다(34 · `rounded-md`, 숫자가 붙으면 너비만 는다). 상태는 전부 토큰이다: 호버 `--surface-hover`, 눌림 `--surface-pressed`, 열림은 호버 채움, 초점 링, 켜짐은 신호 면에 투명 선. 이것은 두 규칙의 **예외**다: ADR-0189 D6의 「outline 테두리는 텍스트 입력 그릇에만」과 #1210 D1의 「컨트롤 경계는 3:1(`--line-strong`)」. 선은 어포던스가 아니라 구분이다(컨트롤이라는 말은 아이콘과 호버 채움이 한다). 대비를 높이는 사용자에게는 3:1 선이 돌아온다. 입력 그릇의 3:1 규칙은 그대로다. 구현은 `channelHeaderControlClass` 한 곳이다.
+
+**툴팁.** 머리 단추는 전부 공용 `Tooltip`(`clients/web/src/design/ui/tooltip.tsx`)을 쓰고 네이티브 `title`은 쓰지 않는다(둘이 같이 뜬다). 면은 연회색 알약이다: 중립 칩 그릇 `--muted-soft` 한 면, 반경 `--radius-md`(10), 글자 `text-meta`, 여백 12×6, 선도 그림자도 없다. 지연은 500ms(`TOOLTIP_DELAY_MS`, Buzz의 `delayDuration`과 같다), 틈 4, 키보드 `:focus-visible`은 지연 없이 즉시, 눌림·나감·Esc는 즉시 닫힘, 터치는 띄우지 않는다. 접근성: 툴팁은 `aria-hidden`이고 이름은 트리거의 `aria-label`이 진다(문구는 이름과 같아야 하고, 키 힌트만 툴팁에 더할 수 있다).
+- **머리 단추의 방향은 아래다.** 본문 판이 `overflow: clip`이고 머리 위쪽 여백(13)이 툴팁 높이보다 낮아 위로는 잘린다. 머리의 맨 오른쪽 단추(⋮)는 `align="end"`로 오른쪽 끝을 맞춘다.
+- **툴팁은 `DropdownMenuTrigger` 바깥을 감싼다.** 안에 두면 래퍼가 트리거가 된다.
+- **띠·사이드바 범위 안의 툴팁은 아직 없다.** 그 범위에서는 글자 역할이 띠 쪽으로 다시 묶여(`--ink`가 on-band) 툴팁 글자도 on-band 색이 되는데, 면(`--muted-soft`)은 다시 묶이지 않는다. 그래서 띠 안(상단 줄의 토글, 오른쪽 자리의 단추)에 툴팁을 달 때는 글자 역할을 되찾는 보정(`--ink-base`)과 캡처 확인이 먼저다. 상단 줄의 토글이 아직 네이티브 `title`인 까닭이다.
+
+기계: `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하), `AppTitlebar.shell.test.tsx`(셸 끌기 판정), `ChatShell.header.test.ts`(`channelHeaderControlClass(`를 쓰는 자리는 전부 `<Tooltip>` 안이고 `title`이 없다), `channelHeaderControls.tooltip.test.tsx`(렌더: 문구=이름·아래 방향·지연). 갤러리 「Tooltip」 칸에 머리 컨트롤 표본이 있다.
+
 ---
 
 ## 3. 위계 규칙 — 파괴 > 주 > 보조
@@ -462,6 +485,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **대화 밀도 설정** | `densityTokens.test.ts`(CSS ↔ 코어 `DENSITY` ↔ 표 §5, **밀도 변수를 읽는 파일의 닫힌 목록**, `@import` 핀) + `densityTokens.browser.test.ts`(계산된 값, 밀도를 안 따르는 쌍둥이 6px) + `spacing.test.ts`(세 단계의 행 사이·묶음 사이) + `ConversationPreview.test.ts`·`AppearanceSection.test.tsx`(미리보기가 타임라인과 같은 상수를 읽음) | ❌ (폰은 아직 읽지 않는다) | — |
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
+| **창 띠·머리 컨트롤** (§2.9) | `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하: 띠 40 · 판 위쪽 셸 40/웹 8 · 머리 선 0 · `--head-edge` · 단추 선 `--line` · 툴팁 알약) + `AppTitlebar.shell.test.tsx`(셸 끌기 판정) + `ChatShell.header.test.ts`·`channelHeaderControls.tooltip.test.tsx`(머리 단추는 전부 툴팁, `title` 없음) | 비해당(폰은 창 띠가 없다) | — |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
@@ -486,6 +510,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | 14위 (5건) | **상태 수명주기** — 로그아웃/새로고침 생존, 조용한 덮어쓰기 | 사람 |
 | 16위 (4건) | **화면이 거짓을 말함** | 손으로 짠 런타임 프로브가 필요했다 |
 | — | **포커스 링의 *성질*** — 페이드·트랜지션·애니메이션 | 프리플라이트 `naked_focus`는 링이 **있는지**만 본다. 링이 잉크색에서 호박색으로 번지는 것(Tailwind v4 `transition-colors`가 `outline-color`를 포함한다 — v3엔 없던 것)은 `transition-colors`와 `focus-visible:outline-*`를 함께 든 **클래스 리스트 25곳**에 있고, 리뷰 16건이 한 번도 못 잡았다 — 수리·재발 방지는 **#1210** |
+| — | **실제 Tauri 창이 띠를 잡고 움직이는가**(§2.9) | 번들 시험은 속성과 Tauri `drag.js`의 판정 사본까지만 잰다. 진짜 WKWebView에서 마우스로 끌리는지, 신호등 중심과 띠의 시각 정렬, 전체 화면·좁은 창의 모양은 데스크탑 빌드를 사람이 확인한다(PR의 실제 앱 캡처) |
 | — | **웹의 렌더된 컨트롤 경계·터치 크기 전수** | 지금은 토큰 층과 프리미티브 층까지만 잰다. 렌더 스윕은 미구현(감사 §C-3-b·c) |
 | — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`에 남아 있고(`AgentHubRoute` 자리는 #1957이 닫음), **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |
 | — | **hover·선택 상태의 사진** | 이 시스템의 게이트는 마우스를 일부러 치워 둔다(`gate-workstream.mjs:875` — hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 그래서 **이 문서가 다루는 결함(그릇이 hover에서 사라진다)을 찍은 레인이 하나도 없었다**: 회전 2의 1.000 두 건은 리뷰어가 손으로 hover 프레임을 계측해 찾았다. `gate-my-sessions`에 rest/hover 짝 캡처를 신설해 그 공백의 첫 칸을 메웠다(아래 §5.4 레인) — 나머지 표면은 미구현 |

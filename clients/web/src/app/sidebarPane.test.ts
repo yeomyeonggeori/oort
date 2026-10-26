@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  desktopShellProps,
   isSidebarTreeInert,
   prefersReducedMotion,
   shouldHideCollapsedSidebarTree,
@@ -134,6 +135,21 @@ describe("titlebarDragProps", () => {
 
   it("Tauri에서만 줄에 드래그 영역을 연다", () => {
     expect(titlebarDragProps(true)).toEqual({ "data-tauri-drag-region": "" });
+  });
+});
+
+describe("desktopShellProps (#4591)", () => {
+  it("웹에서는 셸 마커를 찍지 않는다: 판이 띠 아래로 내려가지 않는다", () => {
+    expect(desktopShellProps(false, true)).toEqual({});
+    expect(desktopShellProps(false, false)).toEqual({});
+  });
+
+  it("Tauri 셸에서 상단 줄이 그려질 때만 마커를 찍는다", () => {
+    expect(desktopShellProps(true, true)).toEqual({ "data-desktop-shell": "" });
+  });
+
+  it("설정 표면은 상단 줄을 그리지 않으므로 셸이어도 마커가 없다(그 격자는 한 행이다)", () => {
+    expect(desktopShellProps(true, false)).toEqual({});
   });
 });
 
