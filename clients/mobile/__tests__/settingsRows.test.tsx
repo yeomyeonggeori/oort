@@ -1,11 +1,13 @@
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet, Switch} from 'react-native';
+import {ActivityIndicator, Image, StyleSheet, Switch} from 'react-native';
 
+import {SHEET_ICONS} from '../src/design/icons';
 import {ListRow} from '../src/design/sheetParts';
 import {FixedScheme, paletteFor, type ColorScheme} from '../src/design/theme';
 import {SHEET, space} from '../src/design/tokens';
 import {
+  ActionRow,
   ChoiceRow,
   SettingsNote,
   SwitchRow,
@@ -62,6 +64,7 @@ describe.each(['light', 'dark'] as const)('행 모양은 ListRow 와 같다 (%s)
           testID="switch"
         />
         <ChoiceRow title="라디오" detail="라디오 설명" selected={false} onPress={() => {}} testID="choice" />
+        <ActionRow title="동작" detail="동작 설명" chevron onPress={() => {}} testID="action" />
       </>,
       scheme,
     );
@@ -75,6 +78,7 @@ describe.each(['light', 'dark'] as const)('행 모양은 ListRow 와 같다 (%s)
       paddingVertical: space.md,
     });
     expect(box('switch')).toEqual(box('base'));
+    expect(box('action')).toEqual(box('base'));
     // 설명 줄이 있으면 라디오 행만 위로 붙는다(점·✓ 가 제목 첫 줄 옆에 서도록) — 나머지 치수는 같다.
     expect({...box('choice'), alignItems: 'center'}).toEqual(box('base'));
     expect(box('choice').alignItems).toBe('flex-start');
@@ -86,11 +90,14 @@ describe.each(['light', 'dark'] as const)('행 모양은 ListRow 와 같다 (%s)
         <ListRow title="기준" detail="기준 설명" onPress={() => {}} />
         <SwitchRow title="스위치" detail="스위치 설명" checked={false} control={{kind: 'none'}} onPress={() => {}} />
         <ChoiceRow title="라디오" detail="라디오 설명" selected={false} onPress={() => {}} />
+        <ActionRow title="동작" detail="동작 설명" onPress={() => {}} />
       </>,
       scheme,
     );
     expect(type('스위치')).toEqual(type('기준'));
     expect(type('라디오')).toEqual(type('기준'));
+    expect(type('동작')).toEqual(type('기준'));
+    expect(type('동작 설명')).toEqual(type('기준 설명'));
     expect(type('스위치 설명')).toEqual(type('기준 설명'));
     expect(type('라디오 설명')).toEqual(type('기준 설명'));
     expect(type('기준').color).toBe(paletteFor(scheme).text);
@@ -120,6 +127,89 @@ describe.each(['light', 'dark'] as const)('스위치 행의 꺼짐 트랙은 Lis
     expect(mine.props.trackColor.false).toBe(base.props.trackColor.false);
     expect(mine.props.ios_backgroundColor).toBe(base.props.ios_backgroundColor);
     expect(mine.props.trackColor.true).toBe(base.props.trackColor.true);
+  });
+});
+
+describe('ActionRow', () => {
+  const hostsOf = (testID: string) => within(screen.getByTestId(testID, {includeHiddenElements: true}));
+
+  it('셰브론은 ListRow 의 것과 같은 글리프·크기이고, 진행 중이면 스피너가 셰브론을 대신한다', () => {
+    mount(
+      <>
+        <ListRow title="기준" accessory="chevron" onPress={() => {}} testID="base" />
+        <ActionRow title="동작" chevron onPress={() => {}} testID="idle" />
+        <ActionRow title="진행" chevron pending onPress={() => {}} testID="busy" />
+        <ActionRow title="없음" onPress={() => {}} testID="plain" />
+      </>,
+    );
+    const glyph = (testID: string) => hostsOf(testID).UNSAFE_queryAllByType(Image).map(image => image.props.source);
+    expect(glyph('base')).toEqual([SHEET_ICONS.chevron]);
+    expect(glyph('idle')).toEqual([SHEET_ICONS.chevron]);
+    const sizeOf = (testID: string) => StyleSheet.flatten(hostsOf(testID).UNSAFE_getByType(Image).props.style);
+    expect(sizeOf('idle')).toEqual(sizeOf('base'));
+    // 진행 중에는 셰브론이 없고 스피너가 하나다 — 누른 줄에서 진행이 보인다.
+    expect(glyph('busy')).toEqual([]);
+    expect(hostsOf('busy').UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(hostsOf('idle').UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+    // 아무것도 안 준 행은 오른쪽이 비어 있다.
+    expect(glyph('plain')).toEqual([]);
+    expect(hostsOf('plain').UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+  });
+
+  it.each(['light', 'dark'] as const)('강조는 accentText, 위험은 danger, 둘 다 굵게 — 기본은 text (%s)', scheme => {
+    mount(
+      <>
+        <ActionRow title="기본" onPress={() => {}} />
+        <ActionRow title="강조" tone="accent" onPress={() => {}} />
+        <ActionRow title="위험" tone="danger" onPress={() => {}} />
+      </>,
+      scheme,
+    );
+    const palette = paletteFor(scheme);
+    const title = (text: string) => StyleSheet.flatten(screen.getByText(text).props.style);
+    expect(title('기본').color).toBe(palette.text);
+    expect(title('기본').fontWeight).toBeUndefined();
+    expect(title('강조')).toMatchObject({color: palette.accentText, fontWeight: '600'});
+    expect(title('위험')).toMatchObject({color: palette.danger, fontWeight: '600'});
+    // 비교가 헛돌지 않게: 세 색이 서로 다르다.
+    expect(new Set([palette.text, palette.accentText, palette.danger]).size).toBe(3);
+  });
+
+  it('이름은 제목이고(보조 줄을 섞지 않는다), expanded 는 줬을 때만 상태에 들어간다', () => {
+    mount(
+      <>
+        <ActionRow title="직접 고르기" detail="시각을 정해요" expanded={false} onPress={() => {}} testID="closed" />
+        <ActionRow title="열림" expanded onPress={() => {}} testID="open" />
+        <ActionRow title="평범" onPress={() => {}} testID="plain" />
+        <ActionRow title="따로" accessibilityLabel="따로, 내일" onPress={() => {}} testID="named" />
+      </>,
+    );
+    expect(screen.getByTestId('closed').props.accessibilityLabel).toBe('직접 고르기');
+    expect(screen.getByTestId('closed').props.accessibilityState).toEqual({expanded: false});
+    expect(screen.getByTestId('open').props.accessibilityState).toEqual({expanded: true});
+    // 안 준 행은 값이 있는 상태 키가 하나도 없다 — `false` 를 섞지 않는다(Pressable 이 그것도 접근성 상태에 섞는다).
+    // (Pressable 은 상태를 모든 키가 undefined 인 객체로 정규화하므로 「객체 없음」이 아니라 「값 있는 키 없음」을 잰다.)
+    const given = (id: string) =>
+      Object.entries(screen.getByTestId(id).props.accessibilityState ?? {}).filter(([, value]) => value !== undefined);
+    expect(given('plain')).toEqual([]);
+    expect(given('open')).toEqual([['expanded', true]]);
+    expect(screen.getByTestId('named').props.accessibilityLabel).toBe('따로, 내일');
+  });
+
+  it('비활성이면 눌러도 아무 일이 없고 접근성이 잠겼다고 말한다', () => {
+    const onPress = jest.fn();
+    mount(
+      <>
+        <ActionRow title="켬" onPress={onPress} testID="on" />
+        <ActionRow title="잠김" disabled onPress={onPress} testID="off" />
+      </>,
+    );
+    fireEvent.press(screen.getByTestId('on'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+    fireEvent.press(screen.getByTestId('off'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('off').props.accessibilityState).toMatchObject({disabled: true});
+    expect(screen.getByTestId('on').props.accessibilityState?.disabled).not.toBe(true);
   });
 });
 

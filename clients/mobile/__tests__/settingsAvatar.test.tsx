@@ -3,11 +3,13 @@ import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {ThemeProvider} from '../src/design/theme';
+import {paletteFor, ThemeProvider} from '../src/design/theme';
+import {ds2Radius, radius, SAFE_GUTTER} from '../src/design/tokens';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {SettingsPage} from '../src/features/profile/SettingsPage';
 
@@ -103,6 +105,18 @@ afterEach(() => {
 });
 
 describe('설정 페이지 → 프로필 사진 장', () => {
+  it('사진 장의 묶음은 새 카드 가족이다 — 반경 20·surface 채움이고 옛 반경 10 카드가 아니다', () => {
+    mount();
+    fireEvent.press(screen.getByTestId('self-profile-avatar', {includeHiddenElements: true}));
+    const card = StyleSheet.flatten(screen.getByTestId('avatar-card-card').props.style);
+    expect(card.borderRadius).toBe(ds2Radius.card);
+    expect(card.borderRadius).not.toBe(radius.md); // 옛 `GroupSection` 의 반경 — 비교가 헛돌지 않는다
+    expect(card.backgroundColor).toBe(paletteFor('light').surface);
+    // 가로 여백은 이 장이 진다(카드는 폭 전체) — 카드가 화면 가장자리까지 번지지 않는다.
+    const page = StyleSheet.flatten(screen.getByTestId('avatar-page').props.style);
+    expect(page.paddingHorizontal).toBe(SAFE_GUTTER);
+  });
+
   it('큰 얼굴을 누르면 사진 장이 한 겹 더 쌓이고, 머리의 ‹ 뒤로가 설정으로 돌려보낸다', () => {
     mount();
     expect(screen.queryByTestId('avatar-page')).toBeNull();

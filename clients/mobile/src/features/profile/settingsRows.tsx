@@ -34,6 +34,9 @@ import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 //
 //   ChoiceRow   라디오 행: 앞 점(선택) · 이름 · 보조 줄 · 오른쪽 ✓
 //   SwitchRow   스위치 행: 이름 · 보조 줄 · 오른쪽 {스위치 | 스피너 | 없음}
+//   ActionRow   동작 행: 이름 · 보조 줄 · 오른쪽 {셰브론 | 스피너 | 없음} · 강조·위험 글자 · 펼침 상태
+//               (안쪽 장 — 프로필 사진·기한 고르기 — 이 옛 `GroupRow` 에서 옮겨 오며 쓴다. `ListRow` 에 없는 것은
+//               오른쪽 끝의 진행 표시·강조 글자·`expanded` 셋이다)
 //   SettingsSection  카드 하나와 그 밑의 문장들(실패·안내)을 한 덩어리로
 //   SettingsNote     카드 밑의 한 문장(실패는 위험색 + 라이브 영역)
 // =============================================================================
@@ -109,6 +112,89 @@ export function SwitchRow({
           importantForAccessibility="no-hide-descendants"
           testID={control.testID}
         />
+      ) : null}
+    </Pressable>
+  );
+}
+
+/**
+ * 동작 행: 누르면 무언가 일어난다(저장·열기·펼침). 옛 `GroupRow`(`chevron`·`trailing`·`tone`·`accessibilityState`)가
+ * 하던 일을 새 행 모양으로 옮긴다. 모양은 `ListRow` 와 같다(같은 토큰) — 시험이 지킨다.
+ *
+ *  - `pending` 이면 오른쪽 끝이 스피너다(셰브론이 스피너로 바뀐다): 누른 행에서 진행이 보인다.
+ *  - `tone="accent"` 는 강조색 글자(펼쳐 둔 「직접 고르기」, 「설정 열기」), `"danger"` 는 파괴 행(「사진 지우기」).
+ *  - `expanded` 는 펼치는 행이 보조기술에 말하는 상태다. 주지 않으면 상태에 넣지 않는다(`false` 를 넘기지 않는
+ *    관용구 — `Pressable` 이 그것도 접근성 상태에 섞는다).
+ * 이름은 옛 `GroupRow` 처럼 제목이다(보조 줄을 섞지 않는다) — 바꾸려면 `accessibilityLabel` 을 준다.
+ */
+export function ActionRow({
+  title,
+  detail,
+  chevron = false,
+  pending = false,
+  tone = 'default',
+  expanded,
+  disabled = false,
+  onPress,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
+}: {
+  title: string;
+  detail?: string;
+  /** 오른쪽 끝의 ›. `pending` 이면 스피너가 대신 선다. */
+  chevron?: boolean;
+  pending?: boolean;
+  tone?: 'default' | 'accent' | 'danger';
+  expanded?: boolean;
+  /** 눌리지 않고 흐려진다(읽는 중·쓰는 중). */
+  disabled?: boolean;
+  onPress: () => void;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const state = {
+    ...(disabled ? {disabled: true} : null),
+    ...(expanded !== undefined ? {expanded} : null),
+  };
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={Object.keys(state).length > 0 ? state : undefined}
+      // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞는다(`GroupRow` 와 같은 관용구).
+      disabled={disabled ? true : undefined}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.row,
+        pressed && !disabled && styles.rowPressed,
+        disabled && styles.rowDisabled,
+      ]}
+      testID={testID}>
+      <View style={styles.rowText}>
+        <Text
+          lineBreakStrategyIOS="hangul-word"
+          style={[
+            styles.rowTitle,
+            tone === 'accent' && styles.rowTitleAccent,
+            tone === 'danger' && styles.rowTitleDanger,
+          ]}>
+          {title}
+        </Text>
+        {detail ? <Sentence style={styles.rowDetail}>{detail}</Sentence> : null}
+      </View>
+      {pending ? (
+        <ActivityIndicator
+          color={palette.textMuted}
+          accessibilityElementsHidden
+          importantForAccessibility="no-hide-descendants"
+        />
+      ) : chevron ? (
+        <Image source={SHEET_ICONS.chevron} style={styles.chevron} accessibilityElementsHidden />
       ) : null}
     </Pressable>
   );
@@ -252,6 +338,13 @@ const buildStyles = (color: Palette) =>
     rowText: {flex: 1},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
     rowTitleSelected: {fontWeight: '600'},
+    rowTitleAccent: {color: color.accentText, fontWeight: '600'},
+    rowTitleDanger: {color: color.danger, fontWeight: '600'},
+    chevron: {
+      width: SHEET_ICON_SIZE.chevron,
+      height: SHEET_ICON_SIZE.chevron,
+      tintColor: color.icon,
+    },
     rowDetail: {
       marginTop: space.xs,
       fontSize: font.label,

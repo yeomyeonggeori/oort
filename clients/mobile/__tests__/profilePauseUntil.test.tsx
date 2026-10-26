@@ -10,11 +10,13 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
-import {ThemeProvider} from '../src/design/theme';
+import {paletteFor, ThemeProvider} from '../src/design/theme';
+import {ds2Radius, radius, SAFE_GUTTER} from '../src/design/tokens';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {PauseUntilPage} from '../src/features/profile/PauseUntilPage';
 import AppShell from '../src/shell/AppShell';
@@ -470,6 +472,34 @@ describe('방해 금지 — 기한을 고르고서야 켜진다 (ADR-0204 D2)', 
       ).toMatchObject({selected: true}),
     );
     expect(rulesWrites()).toEqual([]);
+  });
+});
+
+describe('기한 장 — 새 카드 가족 (#4457)', () => {
+  const cardOf = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style);
+
+  it('기한 목록·달력·시각 칩이 모두 새 카드다 — 반경 20·surface 채움, 옛 반경 10 카드가 아니다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-custom'));
+    const surface = paletteFor('light').surface;
+    for (const id of ['pause-until-card-card', 'pause-until-date-group-card', 'pause-until-time-group-card']) {
+      const card = cardOf(id);
+      expect([id, card.borderRadius, card.backgroundColor]).toEqual([id, ds2Radius.card, surface]);
+    }
+    expect(ds2Radius.card).not.toBe(radius.md); // 옛 `GroupSection` 의 반경 — 비교가 헛돌지 않는다
+  });
+
+  it('가로 여백은 이 장이 한 번만 진다 — 직접 고르기 블록과 확인 줄이 여백을 또 더하지 않는다', async () => {
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-custom'));
+    expect(cardOf('pause-until-page').paddingHorizontal).toBe(SAFE_GUTTER);
+    // 블록 안쪽(루트·확인 줄)은 가로 여백이 0 이다 — 지면 이중 여백(32)이다.
+    expect(cardOf('pause-until-custom').paddingHorizontal).toBeUndefined();
+    expect(cardOf('pause-until-actions').paddingHorizontal).toBeUndefined();
   });
 });
 

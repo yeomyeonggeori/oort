@@ -3,10 +3,11 @@ import {memberFor, type Directory} from '@momo/core/features/workspace/directory
 import {removeMyAvatar, type RosterMember} from '@momo/core/lib/api';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useRef, useState} from 'react';
-import {ActivityIndicator, Linking, StyleSheet, View} from 'react-native';
+import {Linking, StyleSheet, View} from 'react-native';
 
-import {GroupRow, GroupSection, NoticeBlock, Sentence} from '../../design/atoms';
-import {usePalette, useStyles} from '../../design/theme';
+import {NoticeBlock, Sentence} from '../../design/atoms';
+import {GroupCard} from '../../design/sheetParts';
+import {useStyles} from '../../design/theme';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {Avatar} from '../conversation/Avatar';
 import {useOnline} from '../inbox/useOnline';
@@ -19,6 +20,7 @@ import {
   type AvatarSource,
 } from './avatarPhoto';
 import {nativeAvatarPhotoPorts} from './avatarPhotoNative';
+import {ActionRow} from './settingsRows';
 
 // =============================================================================
 // 프로필 사진 — 프로필 시트 안의 한 장 (#4384, owner 10-25).
@@ -55,7 +57,6 @@ export function AvatarPage({
   ports?: AvatarPhotoPorts;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
   const client = useQueryClient();
   const online = useOnline();
   const [busy, setBusy] = useState<Busy>(null);
@@ -116,14 +117,6 @@ export function AvatarPage({
       return true;
     });
 
-  const spinner = (
-    <ActivityIndicator
-      color={palette.textMuted}
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-    />
-  );
-
   return (
     <View style={styles.page} testID="avatar-page">
       <View style={styles.preview}>
@@ -139,41 +132,39 @@ export function AvatarPage({
         </View>
       )}
 
-      <GroupSection>
-        <GroupRow
+      <GroupCard testID="avatar-card">
+        <ActionRow
           title="사진 고르기"
           detail="사진 보관함에서 골라요"
-          chevron={busy !== 'library'}
+          chevron
+          pending={busy === 'library'}
           disabled={locked}
           onPress={() => choose('library')}
-          trailing={busy === 'library' ? spinner : undefined}
           testID="avatar-choose-library"
         />
         {cameraAvailable ? (
-          <GroupRow
+          <ActionRow
             title="사진 찍기"
             detail="카메라로 지금 찍어요"
-            chevron={busy !== 'camera'}
-            separated
+            chevron
+            pending={busy === 'camera'}
             disabled={locked}
             onPress={() => choose('camera')}
-            trailing={busy === 'camera' ? spinner : undefined}
             testID="avatar-choose-camera"
           />
         ) : null}
         {hasPhoto ? (
-          <GroupRow
+          <ActionRow
             title="사진 지우기"
             detail="이름의 첫 글자로 돌아가요"
             tone="danger"
-            separated
+            pending={busy === 'remove'}
             disabled={locked}
             onPress={remove}
-            trailing={busy === 'remove' ? spinner : undefined}
             testID="avatar-remove"
           />
         ) : null}
-      </GroupSection>
+      </GroupCard>
 
       {failure ? (
         <View style={styles.failureBlock}>
@@ -184,15 +175,15 @@ export function AvatarPage({
             {failure.text}
           </Sentence>
           {failure.settings ? (
-            <GroupSection>
-              <GroupRow
+            <GroupCard>
+              <ActionRow
                 title="설정 열기"
                 chevron
                 tone="accent"
                 onPress={() => void Linking.openSettings()}
                 testID="avatar-open-settings"
               />
-            </GroupSection>
+            </GroupCard>
           ) : null}
         </View>
       ) : null}
@@ -205,8 +196,9 @@ const PREVIEW_AVATAR = 96;
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    page: {gap: space.xl},
-    preview: {alignItems: 'center', gap: space.md, paddingHorizontal: SAFE_GUTTER},
+    // 카드는 폭 전체로 서고 가로 여백은 호스트가 진다(`GroupCard`) — 이 장이 진다. 카드 사이 16(설정 본 페이지와 같다).
+    page: {gap: space.lg, paddingHorizontal: SAFE_GUTTER},
+    preview: {alignItems: 'center', gap: space.md},
     caption: {
       fontSize: font.label,
       color: color.textMuted,
@@ -218,6 +210,5 @@ const buildStyles = (color: Palette) =>
       fontSize: font.label,
       color: color.dangerText,
       lineHeight: 18,
-      paddingHorizontal: SAFE_GUTTER,
     },
   });
