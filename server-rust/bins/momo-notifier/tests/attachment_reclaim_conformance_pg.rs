@@ -22,6 +22,8 @@
 //! | `the_drive_call_runs_inside_the_row_lock_so_a_bind_waits_and_finds_the_row_gone` | call Drive before any lock is taken (no `FOR UPDATE`, Drive answers first) |
 //! | `the_reclaim_cannot_reach_another_tenants_row` | drop the workspace predicate from all three statements (lock, eligibility, delete; any one of them suffices on its own, by design). The first mode stays green because RLS covers it too; the second mode, run without RLS, goes red |
 //! | `a_write_pool_that_bypasses_rls_is_refused` | drop `ensure_write_pool_rls_bound` from `sweep_once` (both the deleting and the switched-off reclaimer) |
+//! | `a_hold_that_appears_after_the_listing_is_seen_by_the_recheck_under_the_lock` | swap the re-check's `eligible_sql(2)` for the core part alone (the huddle-held file then fails the delete on its foreign key, the avatar-shared one is deleted, and the outcome is no longer `SkippedNotEligible`) |
+//! | `an_unknown_reference_stops_the_delete_before_any_byte_goes` | call Drive before the row delete (the archive object is gone although a foreign key the predicate has never heard of refuses the row) |
 //! | `the_operators_check_sql_agrees_with_the_sweep_and_would_notice_a_reference_it_does_not_know` | change one term of the check SQL's `cand` predicate (its count stops equalling the sweep's tally and the reason split's `CANDIDATE`), drop a `NOT EXISTS` from the reason split, stop listing foreign keys (a new `attachment` FK would pass unseen), drop the `reserved` drift probe, or skip a json column in the soft-reference scan |
 
 use std::collections::HashMap;
@@ -429,6 +431,12 @@ async fn expired_audit(su: &PgPool, workspace: Uuid, attachment: Uuid) -> Vec<se
 /// known floor (the DB is shared and earlier tests leave rows — a refused delete leaves
 /// an eligible one on purpose). The tests in this binary are serialized by `test_lock`.
 async fn wipe_test_tenants(su: &PgPool) {
+    // The unknown-reference test's throwaway table (a foreign key into attachment) must not
+    // outlive it, or the cascade below would be refused by it.
+    sqlx::query("DROP TABLE IF EXISTS atr_unknown_reference")
+        .execute(su)
+        .await
+        .expect("drop the throwaway reference table");
     sqlx::query("DELETE FROM workspace WHERE slug LIKE 'atr-%'")
         .execute(su)
         .await
@@ -1321,6 +1329,131 @@ async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_
         Some(foreign_tally(&p, &mine).await),
         "{after:?}"
     );
+}
+
+// ---------------------------------------------------------------------------
+// the last line of defence under the row lock
+// ---------------------------------------------------------------------------
+
+/// The listing is a hint, the lock is the decision: a hold that appears **after** the listing
+/// (and so cannot have been seen by it) must be seen by the re-check under the row lock — and the
+/// holds only a tenant-bound statement can see are exactly the ones a weakened re-check would
+/// miss (the huddle columns, an avatar object sharing the Drive id). The functions are called
+/// directly so the listing's own filtering cannot hide a weakened re-check.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) with bootstrap roles"]
+async fn a_hold_that_appears_after_the_listing_is_seen_by_the_recheck_under_the_lock() {
+    let _guard = test_lock().await;
+    let p = pools().await;
+    wipe_test_tenants(&p.su).await;
+    let t = seed_tenant(&p.su, 1).await;
+    let huddle = huddle_transcription(&p.su, &t).await;
+    let (f_track, f_avatar) = (file_id(), file_id());
+    let by_track = attachment(&p.su, &t, "complete", Some(&f_track), 90).await;
+    let by_avatar = attachment(&p.su, &t, "complete", Some(&f_avatar), 91).await;
+    let workspace = t.workspace_id;
+
+    // Both are in the listing: nothing holds them yet.
+    let listed = momo_db::with_tenant_tx(&p.write, workspace, move |conn| {
+        Box::pin(async move { reclaim_candidate_ids_in_tx(conn, workspace, 50, UNBOUND_TTL).await })
+    })
+    .await
+    .expect("listing");
+    assert_eq!(
+        listed,
+        vec![by_avatar, by_track],
+        "both are candidates when listed (oldest first: the avatar one is 91 days, the track one 90)"
+    );
+
+    // Then something takes them, between the listing and the row lock.
+    name_track_source(&p.su, &huddle, by_track).await;
+    member_avatar_naming(&p.su, &t, &f_avatar).await;
+
+    let drive = MockDrive::default();
+    let mut outcomes = Vec::new();
+    for id in [by_track, by_avatar] {
+        let drive = drive.clone();
+        outcomes.push(
+            momo_db::with_tenant_tx(&p.write, workspace, move |conn| {
+                Box::pin(async move {
+                    reclaim_unbound_attachment_in_tx(
+                        conn,
+                        workspace,
+                        id,
+                        UNBOUND_TTL,
+                        move |file_id| Box::pin(async move { drive.delete(file_id).await }),
+                    )
+                    .await
+                })
+            })
+            .await,
+        );
+    }
+    let calls = drive.total_calls();
+    let (track_row, avatar_row) = (
+        exists(&p.su, by_track).await,
+        exists(&p.su, by_avatar).await,
+    );
+    wipe_test_tenants(&p.su).await;
+
+    for (label, outcome) in [
+        ("huddle track", &outcomes[0]),
+        ("avatar object", &outcomes[1]),
+    ] {
+        assert!(
+            matches!(outcome, Ok(AttachmentReclaimOutcome::SkippedNotEligible)),
+            "a file the {label} took after the listing is skipped by the re-check, not refused by a \
+             foreign key or deleted: {outcome:?}"
+        );
+    }
+    assert_eq!(calls, 0, "no archive call for a file that something took");
+    assert!(track_row && avatar_row, "both rows are still there");
+}
+
+/// A reference kind the predicate has never heard of — a foreign key from a table added later —
+/// must stop the delete **before any byte goes**: the row is deleted first, inside the savepoint,
+/// so the foreign key refuses it and the archive is never called. (Because the row lock is held
+/// to the end, no new reference can appear mid-transaction; this is the defence for a kind nobody
+/// has written into the predicate yet, and the operator's check SQL names it `UNKNOWN`.)
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) with bootstrap roles"]
+async fn an_unknown_reference_stops_the_delete_before_any_byte_goes() {
+    let _guard = test_lock().await;
+    let p = pools().await;
+    wipe_test_tenants(&p.su).await;
+    let t = seed_tenant(&p.su, 1).await;
+    let f = file_id();
+    let referenced = attachment(&p.su, &t, "complete", Some(&f), 90).await;
+    sqlx::query(
+        "CREATE TABLE atr_unknown_reference ( \
+           id serial PRIMARY KEY, attachment_id uuid NOT NULL REFERENCES attachment(id))",
+    )
+    .execute(&p.su)
+    .await
+    .expect("a table with a foreign key into attachment");
+    sqlx::query("INSERT INTO atr_unknown_reference (attachment_id) VALUES ($1)")
+        .bind(referenced)
+        .execute(&p.su)
+        .await
+        .expect("a row that references the file");
+
+    let drive = MockDrive::default();
+    let stats = AttachmentReclaimer::new(Arc::new(drive.clone()), 500)
+        .sweep_once(&p.read, &p.write)
+        .await;
+    let (calls, row) = (drive.calls_for(&f), exists(&p.su, referenced).await);
+    wipe_test_tenants(&p.su).await;
+
+    let stats = stats.expect("the sweep itself runs");
+    assert!(
+        stats.db_errors >= 1,
+        "the foreign key refused the row delete and the sweep counted it: {stats:?}"
+    );
+    assert_eq!(
+        calls, 0,
+        "the archive object must not be deleted when a reference refuses the row"
+    );
+    assert!(row, "the referenced row is still there");
 }
 
 // ---------------------------------------------------------------------------

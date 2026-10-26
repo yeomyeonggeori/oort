@@ -430,8 +430,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // The tick finishes the row it is on and stops; what it leaves is still `pending`, and
         // the next process (or another replica) sends it.
         let _ = stop_scheduler.send(true);
-        // The reclaim tick finishes the file it is on and stops; a file whose archive delete has not
-        // answered keeps its row (the savepoint is never committed), and the next process retries.
+        // The reclaim tick looks at the stop between ticks, so one in progress runs to its end (at
+        // most `batch` files); a file whose archive delete has not answered by the time the process
+        // exits keeps its row (the savepoint is never committed), and the next process retries.
         let _ = stop_reclaim.send(true);
     })
     .await?;

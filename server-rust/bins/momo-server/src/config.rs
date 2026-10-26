@@ -1433,14 +1433,21 @@ pub fn parse_attachment_reclaim_batch(raw: Option<&str>) -> i64 {
 
 impl AttachmentReclaimSettings {
     pub fn from_env() -> AttachmentReclaimSettings {
+        AttachmentReclaimSettings::from_lookup(&env)
+    }
+
+    /// [`AttachmentReclaimSettings::from_env`] with the lookup handed in, so a test proves that
+    /// the **switch variable** reaches `delete_enabled` (the one line that decides whether this
+    /// process deletes files) without touching the process environment.
+    pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> AttachmentReclaimSettings {
         AttachmentReclaimSettings {
             delete_enabled: momo_messaging::attachment_reclaim::delete_switch_is_on(
-                env("MOMO_ATTACHMENT_RECLAIM").as_deref(),
+                get("MOMO_ATTACHMENT_RECLAIM").as_deref(),
             ),
             interval_ms: parse_attachment_reclaim_interval_ms(
-                env("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS").as_deref(),
+                get("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS").as_deref(),
             ),
-            batch: parse_attachment_reclaim_batch(env("MOMO_ATTACHMENT_RECLAIM_BATCH").as_deref()),
+            batch: parse_attachment_reclaim_batch(get("MOMO_ATTACHMENT_RECLAIM_BATCH").as_deref()),
         }
     }
 }
@@ -2866,6 +2873,34 @@ mod tests {
             "at most 500"
         );
         assert_eq!(parse_attachment_reclaim_batch(Some("lots")), 50);
+
+        // The variable the operator sets is the one that reaches `delete_enabled` (the line that
+        // decides whether this process deletes files), through the same parser `from_env` uses.
+        let with_switch = |switch: Option<&'static str>| {
+            AttachmentReclaimSettings::from_lookup(&|key: &str| {
+                (key == "MOMO_ATTACHMENT_RECLAIM")
+                    .then(|| switch.map(str::to_string))
+                    .flatten()
+            })
+        };
+        assert!(!with_switch(None).delete_enabled, "nothing set: off");
+        assert!(with_switch(Some("1")).delete_enabled);
+        for near_miss in ["0", "true", "yes", " 1", "01", "on"] {
+            assert!(
+                !with_switch(Some(near_miss)).delete_enabled,
+                "{near_miss:?} leaves it off"
+            );
+        }
+        let tuned = AttachmentReclaimSettings::from_lookup(&|key: &str| match key {
+            "MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS" => Some("60000".to_string()),
+            "MOMO_ATTACHMENT_RECLAIM_BATCH" => Some("7".to_string()),
+            _ => None,
+        });
+        assert_eq!((tuned.interval_ms, tuned.batch), (60_000, 7));
+        assert!(
+            !tuned.delete_enabled,
+            "tuning the cadence does not turn the delete on"
+        );
 
         // The one switch: only the exact text `1` (the messaging crate's definition).
         for near_miss in [

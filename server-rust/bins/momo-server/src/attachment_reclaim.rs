@@ -44,9 +44,14 @@
 //! ## Bounded
 //!
 //! At most `batch` files a tick, each archive call under [`DELETE_TIMEOUT`], at most
-//! [`MAX_WORKSPACES_PER_TICK`] workspaces a tick (rotating, so no workspace starves), a tick
-//! stops after a few consecutive archive failures, and the touched set itself is capped
-//! ([`MAX_TOUCHED_WORKSPACES`]).
+//! [`MAX_WORKSPACES_PER_TICK`] workspaces a tick, a tick stops after a few consecutive archive
+//! failures, and the touched set itself is capped ([`MAX_TOUCHED_WORKSPACES`]).
+//!
+//! **Rotation** ([`cursor_after`]): a workspace with a big backlog spends the whole `batch` if it
+//! is looked at first, so the order rotates. A tick that looked at every touched workspace moves
+//! the head of the order on by one for the next tick; a tick that looked at only a window of a
+//! bigger set hands the next window the workspaces after it. Either way the workspace that spent
+//! the budget is not first again, so it cannot starve the others.
 
 use std::collections::BTreeSet;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -169,6 +174,18 @@ impl AttachmentDeleter for ArchiveDeleter {
     }
 }
 
+/// Where the next tick starts. A tick that looked at **every** touched workspace rotates the head
+/// of the order by one (the workspace that spent this tick's budget is not first next time, which
+/// is what keeps a big backlog from starving the others when the set fits in one tick); a tick
+/// that looked at a window of a bigger set hands the next tick the workspaces after the window.
+pub(crate) fn cursor_after(batch: &[Uuid], total: usize) -> Option<Uuid> {
+    if batch.len() >= total {
+        batch.first().copied()
+    } else {
+        batch.last().copied()
+    }
+}
+
 /// One iteration. `drive = None` is the switched-off tick: it counts and returns the tally in
 /// [`AttachmentReclaimStats::dry_run`]; it owns no deleter and writes nothing. `cursor` is the
 /// last workspace the previous tick took (this tick starts after it).
@@ -183,8 +200,8 @@ pub async fn sweep_once(
 ) -> Result<AttachmentReclaimStats, DbError> {
     ensure_write_pool_rls_bound(write_pool).await?;
     let workspaces = touched.next_batch(*cursor, MAX_WORKSPACES_PER_TICK as usize);
-    if let Some(last) = workspaces.last() {
-        *cursor = Some(*last);
+    if let Some(next) = cursor_after(&workspaces, touched.len()) {
+        *cursor = Some(next);
     }
     let deleter: Option<Arc<dyn AttachmentDeleter>> = drive.map(|drive| {
         Arc::new(ArchiveDeleter {
@@ -272,8 +289,11 @@ pub async fn start(
 }
 
 /// Look every `interval_ms`; stop when `stop` turns true **or its sender is gone** (a loop that
-/// kept running with nobody left to stop it would spin). A tick in progress finishes the file it
-/// is on.
+/// kept running with nobody left to stop it would spin). The stop is looked at between ticks, so a
+/// tick in progress runs to its end (at most `batch` files, each archive call bounded by
+/// [`DELETE_TIMEOUT`]); `main` waits a bounded time and then lets the process exit. A file whose
+/// archive delete had not answered keeps its row (its savepoint is never committed) and the next
+/// process retries it — the archive delete is idempotent.
 async fn run_loop(
     drive: Arc<dyn DriveArchive>,
     touched: Arc<TouchedWorkspaces>,
@@ -379,6 +399,35 @@ mod tests {
             .is_empty());
         // A cursor past the end starts over at the beginning.
         assert_eq!(set.next_batch(Some(id(99)), 2), vec![id(1), id(2)]);
+    }
+
+    /// The cursor keeps a big backlog from starving the rest: when one tick covers the whole set
+    /// the head moves on by one, and when it covered only a window the next one follows it.
+    #[test]
+    fn the_cursor_rotates_the_head_over_a_whole_set_and_follows_a_window_over_a_bigger_one() {
+        let set = TouchedWorkspaces::default();
+        for n in 1..=3u128 {
+            set.touch(id(n));
+        }
+        // Every workspace fits in one tick: the head is 1, then 2, then 3, then 1 again.
+        let mut cursor = None;
+        let mut heads = Vec::new();
+        for _ in 0..4 {
+            let batch = set.next_batch(cursor, 100);
+            heads.push(batch[0]);
+            cursor = cursor_after(&batch, set.len());
+        }
+        assert_eq!(heads, vec![id(1), id(2), id(3), id(1)], "the head rotates");
+        // A window of a bigger set: the next window starts after this one.
+        let big = TouchedWorkspaces::default();
+        for n in 1..=5u128 {
+            big.touch(id(n));
+        }
+        let first = big.next_batch(None, 2);
+        let cursor = cursor_after(&first, big.len());
+        assert_eq!(cursor, Some(id(2)), "after the window, not the head");
+        assert_eq!(big.next_batch(cursor, 2), vec![id(3), id(4)]);
+        assert_eq!(cursor_after(&[], 0), None);
     }
 
     /// Only the local volume is this process's to reclaim; a Google Drive is the notifier's.

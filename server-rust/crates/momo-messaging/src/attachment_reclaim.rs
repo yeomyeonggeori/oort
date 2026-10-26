@@ -161,6 +161,18 @@ fn workspaces_sql() -> String {
     )
 }
 
+/// The re-check under the row lock: the **full** definition ([`eligible_sql`]) on the one row,
+/// read in a fresh statement after `FOR UPDATE`. Everything the listing decided is decided
+/// again here, so a hold that appeared since the listing is seen — including the holds only a
+/// tenant-bound statement can see (the huddle rows, an avatar object).
+fn recheck_sql() -> String {
+    format!(
+        "SELECT a.drive_file_id, a.channel_id, a.uploader_member_id, a.mime, a.size_bytes \
+           FROM attachment a WHERE a.id = $1 AND a.workspace_id = $3 AND {}",
+        eligible_sql(2)
+    )
+}
+
 /// The per-workspace listing: attachment ids, oldest first.
 fn candidate_ids_sql() -> String {
     format!(
@@ -305,16 +317,12 @@ where
     // 2. A fresh statement (new snapshot under READ COMMITTED): a bind or a
     //    reservation that committed before our lock is visible here, and one that
     //    arrives now waits on the lock above.
-    let row = sqlx::query(&format!(
-        "SELECT a.drive_file_id, a.channel_id, a.uploader_member_id, a.mime, a.size_bytes \
-           FROM attachment a WHERE a.id = $1 AND a.workspace_id = $3 AND {}",
-        eligible_sql(2)
-    ))
-    .bind(attachment_id)
-    .bind(ttl.as_secs_f64())
-    .bind(workspace_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+    let row = sqlx::query(&recheck_sql())
+        .bind(attachment_id)
+        .bind(ttl.as_secs_f64())
+        .bind(workspace_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     let Some(row) = row else {
         return Ok(AttachmentReclaimOutcome::SkippedNotEligible);
     };
@@ -824,6 +832,25 @@ mod tests {
         }
         assert!(words.windows(3).any(|w| w == ["BEGIN", "READ", "ONLY"]));
         assert!(words.iter().any(|word| word == "ROLLBACK"));
+    }
+
+    /// The statement that decides **after the row lock** is the full definition, not the part
+    /// the notifier could evaluate: a hold that only a tenant-bound statement can see (a huddle
+    /// row, an avatar object) must still stop the delete when it appears between the listing and
+    /// the lock. The PG suite proves the behaviour; this pins the text the behaviour rests on.
+    #[test]
+    fn the_recheck_under_the_lock_embeds_the_full_definition_for_one_row() {
+        let sql = recheck_sql();
+        assert!(sql.contains(&eligible_sql(2)), "{sql}");
+        assert!(
+            sql.contains("NOT EXISTS"),
+            "the full definition has its NOT EXISTS terms: {sql}"
+        );
+        assert!(
+            sql.contains("a.id = $1 AND a.workspace_id = $3"),
+            "one row, in its workspace: {sql}"
+        );
+        assert_ne!(sql, eligible_core_sql(2), "not the core part alone");
     }
 
     #[test]

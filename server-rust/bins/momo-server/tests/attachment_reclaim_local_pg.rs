@@ -16,6 +16,8 @@
 //! |---|---|
 //! | `the_tick_follows_the_workspaces_this_process_served_and_deletes_only_when_switched_on` | drop the `touch` in `create_upload` (nothing is looked at); let the switched-off tick reach the archive's delete (the dry run deletes); drop the age term or the `message_id` term from the shared predicate (see the notifier suite for those); look at every workspace instead of the touched ones (the untouched file goes); never `touch` the second workspace's upload (it is never swept) |
 //! | `a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_carries_on` | stop spending the budget as workspaces are listed (the first tick takes all four) |
+//! | `a_big_backlog_in_one_workspace_does_not_starve_the_next_one` | move the cursor to the last workspace of a tick that covered the whole set (the head never rotates, so the big backlog spends every tick's budget) |
+//! | `the_running_tick_obeys_the_switch` | hand a switched-off tick the archive (`archive_for_tick` returns `Some` while off): the loop deletes; or never hand it to a switched-on tick: the loop never deletes |
 //! | `a_refused_upload_touches_nothing_and_a_pool_that_bypasses_rls_is_refused` | move the `touch` above the membership check (a 403 would touch); drop `ensure_write_pool_rls_bound` from `sweep_once` or `start` (a superuser pool runs the tick) |
 
 use std::net::SocketAddr;
@@ -557,6 +559,165 @@ async fn a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_
     }
 
     wipe(&su, &[&a, &b]).await;
+}
+
+/// Old, complete, unbound rows (no object is needed: an object that is already gone is success
+/// for the local archive, so the delete still counts).
+async fn old_rows(su: &PgPool, t: &Tenant, count: i32) -> Vec<Uuid> {
+    let mut ids = Vec::new();
+    for n in 0..count {
+        let id: Uuid = sqlx::query_scalar(
+            "INSERT INTO attachment (workspace_id, channel_id, uploader_member_id, \
+                                     drive_file_id, name, mime, size_bytes, status, created_at) \
+             VALUES ($1, $2, $3, $4, 'x.txt', 'text/plain', 1, 'complete', \
+                     now() - make_interval(days => $5)) RETURNING id",
+        )
+        .bind(t.workspace)
+        .bind(t.channel)
+        .bind(t.person.member)
+        .bind(format!("gone-{}", Uuid::new_v4().simple()))
+        .bind(40 + n)
+        .fetch_one(su)
+        .await
+        .expect("seed an old file");
+        ids.push(id);
+    }
+    ids
+}
+
+/// A workspace with a big backlog must not spend every tick's budget: when one tick covers the
+/// whole set the head of the order moves on, so the next tick starts with the other workspace.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_big_backlog_in_one_workspace_does_not_starve_the_next_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let a = seed_tenant(&su, &app).await;
+    let b = seed_tenant(&su, &app).await;
+    // The set is walked in id order: the smaller id is the head of the first tick.
+    let (big, small) = if a.workspace < b.workspace {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let server = start_server(app.clone()).await;
+    let touched = TouchedWorkspaces::default();
+    touched.touch(big.workspace);
+    touched.touch(small.workspace);
+    let big_rows = old_rows(&su, &big, 4).await;
+    let small_rows = old_rows(&su, &small, 1).await;
+    let drive = as_drive(&server);
+    let mut cursor = None;
+
+    // Tick 1: the head spends the whole budget of 2 and the other workspace is not reached.
+    let first = sweep_once(Some(&drive), &touched, &app, 2, &mut cursor)
+        .await
+        .expect("first tick");
+    assert_eq!(first.counts.reclaimed, 2, "{first:?}");
+    assert!(
+        row_exists(&su, small_rows[0]).await,
+        "the second workspace waits this tick"
+    );
+
+    // Tick 2: the head has moved on, so the small workspace is served first and the big one
+    // takes what is left of the budget. Without the rotation the big workspace spends it all
+    // again and the small one waits for the whole backlog.
+    let second = sweep_once(Some(&drive), &touched, &app, 2, &mut cursor)
+        .await
+        .expect("second tick");
+    assert_eq!(second.counts.reclaimed, 2, "{second:?}");
+    assert!(
+        !row_exists(&su, small_rows[0]).await,
+        "the small workspace's file is gone after two ticks although the big backlog is not"
+    );
+    let mut left = 0;
+    for id in &big_rows {
+        if row_exists(&su, *id).await {
+            left += 1;
+        }
+    }
+    assert_eq!(
+        left, 1,
+        "the big workspace still has one file left: 4 - 2 - 1"
+    );
+
+    wipe(&su, &[&big, &small]).await;
+}
+
+/// The loop itself — the timer, the switch it was started with and the archive it is handed —
+/// obeys the switch, not only the functions it calls. A short interval lets the real `start`
+/// run a few ticks.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_running_tick_obeys_the_switch() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let a = seed_tenant(&su, &app).await;
+    let server = start_server(app.clone()).await;
+    let touched = Arc::new(TouchedWorkspaces::default());
+    touched.touch(a.workspace);
+    let rows = old_rows(&su, &a, 1).await;
+    let fast = |delete_enabled| AttachmentReclaimSettings {
+        delete_enabled,
+        interval_ms: 50,
+        batch: 50,
+    };
+
+    // Switched off: several ticks go by and nothing is deleted.
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let handle = start(
+        as_drive(&server),
+        Arc::clone(&touched),
+        app.clone(),
+        fast(false),
+        rx,
+    )
+    .await
+    .expect("an RLS-bound pool runs the tick");
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    let survived_off = row_exists(&su, rows[0]).await;
+    stop.send(true).expect("stop");
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("stops")
+        .expect("no panic");
+    assert!(
+        survived_off,
+        "a switched-off loop never deletes, however many ticks it runs"
+    );
+
+    // Switched on: the same loop, handed the archive, deletes.
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let handle = start(
+        as_drive(&server),
+        Arc::clone(&touched),
+        app.clone(),
+        fast(true),
+        rx,
+    )
+    .await
+    .expect("an RLS-bound pool runs the tick");
+    let mut gone = false;
+    for _ in 0..100 {
+        if !row_exists(&su, rows[0]).await {
+            gone = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    stop.send(true).expect("stop");
+    tokio::time::timeout(Duration::from_secs(5), handle)
+        .await
+        .expect("stops")
+        .expect("no panic");
+    assert!(
+        gone,
+        "a switched-on loop deletes the old file within a few ticks"
+    );
+
+    wipe(&su, &[&a]).await;
 }
 
 #[tokio::test]

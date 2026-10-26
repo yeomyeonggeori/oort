@@ -3,14 +3,17 @@
 --
 -- 무엇을 하나
 --   청소기(notifier 스윕, api 프로세스의 로컬 볼륨 스윕)가 켜지기 전에, 그리고 켠 뒤에 사람이 같은 숫자를 다른
---   길로 확인하는 SQL이다. 아무것도 쓰지 않는다(읽기 전용 트랜잭션, 마지막에 ROLLBACK). 문장이 하나라 모든 숫자가
---   한 스냅샷에서 나온다. 출력은 전부 같은 모양 `section | key | n | bytes` 이라 psql -A -t -F '|' 로 그대로 읽힌다.
+--   길로 확인하는 SQL이다. 아무것도 쓰지 않는다(읽기 전용 · REPEATABLE READ 트랜잭션, 마지막에 ROLLBACK). 문장이
+--   하나이고 트랜잭션이 스냅샷 하나를 쥐므로, 6절의 동적 문장까지 모든 숫자가 같은 스냅샷에서 나온다. 출력은 전부 같은 모양 `section | key | n | bytes` 이라 psql -A -t -F '|' 로 그대로 읽힌다.
 --
 -- 어떻게 돌리나
 --   슈퍼유저(또는 BYPASSRLS) 접속으로:
 --     psql "$DATABASE_URL" -X -f infra/rust/sql/attachment_reclaim_check.sql
 --   momo_app 으로 돌리면 RLS 때문에 모든 숫자가 0이다(워크스페이스를 하나도 못 본다) — 정상이고 점검이 아니다.
 --   6절은 json/jsonb 열 전부를 한 번씩 훑는다. 큰 인스턴스에서는 한가한 때 돌린다(읽기만 하지만 느릴 수 있다).
+--   **배포·마이그레이션 중에는 돌리지 않는다**: 읽기 전용이어도 6절이 json/jsonb 표 전부에 ACCESS SHARE 락을 트랜잭션 끝까지
+--   쥐어서, 그동안 들어오는 DDL이 기다리고 그 뒤의 쿼리가 줄을 선다.
+--   6절은 json/jsonb 열만 본다(uuid[]·text 열은 보지 않는다). 표본은 가장 오래된 후보 500개다.
 --
 -- 로그와 어떻게 대조하나 (배포 뒤, 켜기 전에)
 --   청소기는 꺼진 채로 틱마다 이런 한 줄을 남긴다:
@@ -48,7 +51,7 @@
 
 \set ON_ERROR_STOP on
 
-BEGIN READ ONLY;
+BEGIN READ ONLY ISOLATION LEVEL REPEATABLE READ;
 
 WITH cand AS (
   SELECT a.*

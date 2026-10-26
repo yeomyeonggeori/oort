@@ -209,13 +209,41 @@ fn env(key: &str) -> Option<String> {
 }
 
 fn env_number<T: std::str::FromStr>(key: &'static str, fallback: T) -> Result<T, ConfigError> {
-    match env(key) {
+    env_number_from(&env, key, fallback)
+}
+
+fn env_number_from<T: std::str::FromStr>(
+    get: &dyn Fn(&str) -> Option<String>,
+    key: &'static str,
+    fallback: T,
+) -> Result<T, ConfigError> {
+    match get(key) {
         Some(raw) => raw
             .trim()
             .parse::<T>()
             .map_err(|_| ConfigError::NotANumber(key)),
         None => Ok(fallback),
     }
+}
+
+/// The attachment Drive reclaim part of the config, read through `get` so a test can hand in a
+/// map. The one line that matters is the first argument: `MOMO_ATTACHMENT_RECLAIM` is what turns
+/// the delete on (exactly `1`), and it reaches [`AttachmentReclaimConfig::delete_enabled`] here.
+fn attachment_reclaim_from(
+    get: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<AttachmentReclaimConfig>, ConfigError> {
+    Ok(AttachmentReclaimConfig::parse(
+        get("MOMO_ATTACHMENT_RECLAIM").as_deref(),
+        get("MOMO_DRIVE_ARCHIVE_BACKEND")
+            .or_else(|| get("MOMO_DRIVE_BACKEND"))
+            .as_deref(),
+        get("MOMO_DRIVE_SA_KEY_PATH").as_deref(),
+        get("MOMO_DRIVE_SHARED_DRIVE_ID").as_deref(),
+        Duration::from_millis(
+            env_number_from(get, "MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS", 600_000u64)?.max(10_000),
+        ),
+        env_number_from(get, "MOMO_ATTACHMENT_RECLAIM_BATCH", 50i64)?.clamp(1, 500),
+    ))
 }
 
 impl NotifierConfig {
@@ -269,18 +297,7 @@ impl NotifierConfig {
             ),
             avatar_reclaim_database_url: env("MOMO_AVATAR_RECLAIM_DATABASE_URL")
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
-            attachment_reclaim: AttachmentReclaimConfig::parse(
-                env("MOMO_ATTACHMENT_RECLAIM").as_deref(),
-                env("MOMO_DRIVE_ARCHIVE_BACKEND")
-                    .or_else(|| env("MOMO_DRIVE_BACKEND"))
-                    .as_deref(),
-                env("MOMO_DRIVE_SA_KEY_PATH").as_deref(),
-                env("MOMO_DRIVE_SHARED_DRIVE_ID").as_deref(),
-                Duration::from_millis(
-                    env_number("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS", 600_000u64)?.max(10_000),
-                ),
-                env_number("MOMO_ATTACHMENT_RECLAIM_BATCH", 50i64)?.clamp(1, 500),
-            ),
+            attachment_reclaim: attachment_reclaim_from(&env)?,
             attachment_reclaim_database_url: env("MOMO_ATTACHMENT_RECLAIM_DATABASE_URL")
                 .or_else(|| env("MOMO_AVATAR_RECLAIM_DATABASE_URL"))
                 .or_else(|| env("MOMO_HUDDLE_SWEEP_DATABASE_URL")),
@@ -419,6 +436,65 @@ fn choose_log_filter(rust_log: Option<&str>, log_level: Option<&str>) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4443: the operator's `MOMO_ATTACHMENT_RECLAIM` is the variable that reaches the
+    /// notifier's `delete_enabled`, through the same lookup `from_env` uses. Configured with a
+    /// Google Drive but no switch, it looks and counts and **does not delete**; only the exact
+    /// text `1` deletes; the cadence variables never turn it on. A non-Google backend configures
+    /// nothing here at all (the api process owns the local volume).
+    #[test]
+    fn the_attachment_reclaim_switch_reaches_the_notifiers_config() {
+        let lookup = |pairs: &'static [(&'static str, &'static str)]| {
+            move |key: &str| {
+                pairs
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| (*v).to_string())
+            }
+        };
+        const DRIVE: [(&str, &str); 2] = [
+            ("MOMO_DRIVE_SA_KEY_PATH", "/k.json"),
+            ("MOMO_DRIVE_SHARED_DRIVE_ID", "0ABC"),
+        ];
+        let configured = |extra: &[(&'static str, &'static str)]| {
+            let mut pairs: Vec<(&'static str, &'static str)> = DRIVE.to_vec();
+            pairs.extend_from_slice(extra);
+            let pairs: &'static [(&'static str, &'static str)] =
+                Box::leak(pairs.into_boxed_slice());
+            attachment_reclaim_from(&lookup(pairs)).expect("parses")
+        };
+        let off = configured(&[]).expect("a Google Drive is configured");
+        assert!(!off.delete_enabled, "no switch: looking only");
+        assert!(
+            configured(&[("MOMO_ATTACHMENT_RECLAIM", "1")])
+                .unwrap()
+                .delete_enabled
+        );
+        for near_miss in ["0", "true", "yes", " 1", "01", "on"] {
+            let cfg = configured(&[("MOMO_ATTACHMENT_RECLAIM", near_miss)]).unwrap();
+            assert!(!cfg.delete_enabled, "{near_miss:?} leaves the delete off");
+        }
+        let tuned = configured(&[
+            ("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS", "60000"),
+            ("MOMO_ATTACHMENT_RECLAIM_BATCH", "9"),
+        ])
+        .unwrap();
+        assert_eq!(tuned.interval, Duration::from_secs(60));
+        assert_eq!(tuned.batch, 9);
+        assert!(
+            !tuned.delete_enabled,
+            "tuning the cadence does not turn the delete on"
+        );
+        // The local volume is the api process's: nothing is configured in the notifier.
+        let local = attachment_reclaim_from(&lookup(&[
+            ("MOMO_DRIVE_ARCHIVE_BACKEND", "local"),
+            ("MOMO_DRIVE_SA_KEY_PATH", "/k.json"),
+            ("MOMO_DRIVE_SHARED_DRIVE_ID", "0ABC"),
+            ("MOMO_ATTACHMENT_RECLAIM", "1"),
+        ]))
+        .expect("parses");
+        assert!(local.is_none());
+    }
 
     #[test]
     fn log_filter_prefers_rust_log_then_the_compose_log_level() {
