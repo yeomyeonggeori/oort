@@ -238,6 +238,7 @@ export function SettingsPage({
             onOpenAvatar={() => setPage('avatar')}
             onSignOut={onSignOut}
             onRevealEnd={revealEnd}
+            covered={page !== 'main' || statusOpen}
           />
         </ScrollView>
       </Screen>
@@ -387,6 +388,7 @@ export function SettingsContent({
   onOpenAvatar,
   onSignOut,
   onRevealEnd,
+  covered = false,
 }: {
   workspaceId: string;
   member: Member;
@@ -405,6 +407,12 @@ export function SettingsContent({
   onSignOut: () => void;
   /** 확인 블록이 열리면 페이지를 끝까지 내린다 — 두 버튼이 접힌 곳 아래에 서지 않게. */
   onRevealEnd: () => void;
+  /**
+   * 안쪽 장이나 「상태 설정」 시트가 이 페이지 위에 덮여 있는가. 덮이면 **열려 있던 로그아웃 확인을 접는다** — 이 페이지는
+   * 덮여도 마운트된 채 남지만(스크롤 자리·읽던 값을 지키려고) 옛 시트는 장을 갈아 끼워 확인이 저절로 닫혔다. 돌아왔을 때
+   * 열려 있던 「로그아웃할까요?」가 눌러 달라는 듯 서 있지 않게 한다(보안 검수 F2).
+   */
+  covered?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {choice, themeId} = useTheme();
@@ -414,6 +422,9 @@ export function SettingsContent({
   const kinds = usePushKinds(workspaceId);
   const now = useNow();
   const [confirming, setConfirming] = useState(false);
+  useEffect(() => {
+    if (covered) setConfirming(false);
+  }, [covered]);
   const [diagCopied, setDiagCopied] = useState(false);
   // 새 버전 배너(#3905): 새 판이 있는 동안 상시 선다.
   const updateOffer = useAppUpdateOffer();

@@ -418,6 +418,24 @@ describe('설정 페이지', () => {
     expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/다크/);
   });
 
+  it('열려 있던 로그아웃 확인은 안쪽 장·상태 시트를 다녀오면 접혀 있다 — 눌러 달라는 듯 서 있지 않는다', async () => {
+    const page = await openPage();
+    // 안쪽 장: 확인을 열고 → 테마 장 → ‹ 로 돌아오면 접혀 있다(옛 시트는 장을 갈아 끼워 저절로 닫혔다).
+    fireEvent.press(within(page).getByTestId('sign-out'));
+    expect(screen.getByTestId('sign-out-confirm-block')).toBeTruthy();
+    fireEvent.press(within(page).getByTestId('profile-theme-row'));
+    fireEvent.press(screen.getByTestId('settings-back'));
+    expect(screen.queryByTestId('sign-out-confirm-block')).toBeNull();
+    expect(screen.getByTestId('sign-out')).toBeTruthy();
+    // 상태 시트도 같다.
+    fireEvent.press(within(page).getByTestId('sign-out'));
+    expect(screen.getByTestId('sign-out-confirm-block')).toBeTruthy();
+    fireEvent.press(within(page).getByTestId('profile-status-row'));
+    expect(screen.queryByTestId('sign-out-confirm-block')).toBeNull();
+    // 세션은 한 번도 지워지지 않았다 — 접힘은 확인이 아니다.
+    expect(getPersistedSession()).not.toBeNull();
+  });
+
   it('로그아웃은 페이지의 마지막 위험 행이고, 확인한 뒤에만 세션을 지운다', async () => {
     await openPage();
     expect(getPersistedSession()).not.toBeNull();
