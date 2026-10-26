@@ -7,7 +7,7 @@
 //!
 //! | 시험 | 증명 | 빨개지면 |
 //! |---|---|---|
-//! | `every_kind_of_call_leaves_one_exact_row` | 성공·-32602(인자 형식·모르는 인자·모르는 도구)·409·-32700(깨진 JSON)·-32600(배열·중복 헤더·64KiB 초과)·-32022·-32020·-32601·legacy initialize·202가 각각 정확히 한 행, 키 집합이 고정 | 결과 매핑·method/tool 분류·전송 거절 경로의 기록 중 하나가 빠짐 |
+//! | `every_kind_of_call_leaves_one_exact_row` | 성공·-32602(인자 형식·모르는 인자·모르는 도구)·409·-32700(깨진 JSON)·-32600(배열·중복 헤더·64KiB 초과·Accept 누락 415)·-32022·-32020(Mcp-Method·Mcp-Name·프로토콜 헤더 누락)·-32601·legacy initialize·202가 각각 정확히 한 행이고 거절마다 `reason` 토큰이 붙으며 키 집합이 고정 | 결과 매핑·method/tool 분류·전송 거절 경로의 기록 중 하나가 빠짐 |
 //! | `the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not` | 같은 도구가 성공이어도 `oort_inbox_read`는 받은 이벤트 수·`agent_job` 수, `oort_job_start`는 가져간 job 수(0/1)가 행에 남아, 「읽고 job을 봤는데 안 가져감」과 「읽었는데 job이 안 보임」과 「inbox가 빈 뒤 job_start가 가져감」을 가른다. id·핸들·커서·본문은 행 어디에도 없다 | 개수가 빠지거나 틀리거나 값이 새어 들어감 |
 //! | `a_tool_outside_the_view_is_named_and_the_list_says_how_many_were_offered` | 도구 범위가 모자란 연결: `tools/list`는 제공 수(`tools_listed`), 못 쓰는 도구 호출은 도구 이름 + invalid_arguments | 「목록이 비었나 일부인가」를 가리는 숫자가 사라짐 |
 //! | `a_call_that_was_not_admitted_leaves_no_row` | 위조·형식 오류 bearer(401)와 범위 없는 bearer(403)에는 이 행이 없다 | 인증 앞에서 기록하거나 신원 없는 호출을 귀속 |
@@ -160,6 +160,12 @@ fn counted(tool: &str, events: Option<u32>, agent_jobs: Option<u32>, jobs: Optio
     expected
 }
 
+/// The closed `reason` token a refusal row carries (`momo_mcp::REFUSAL_REASONS`).
+fn why(mut row: Value, reason: &str) -> Value {
+    row["reason"] = json!(reason);
+    row
+}
+
 const MODERN_HEADERS: [(&str, &str); 2] = [
     ("mcp-protocol-version", MODERN),
     ("mcp-method", "tools/call"),
@@ -207,14 +213,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
     //    liveness, the run ledger or (before this row) anywhere but a log line.
     let bad_type = wire.tool("oort_inbox_read", json!({"cursor": 5})).await;
     assert_eq!((bad_type.status, bad_type.rpc_code()), (400, Some(-32602)));
-    expected.push(row(
-        "tools/call",
-        Some("oort_inbox_read"),
-        "invalid_arguments",
-        400,
-        Some(-32602),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_inbox_read"),
+            "invalid_arguments",
+            400,
+            Some(-32602),
+            "modern",
+            None,
+        ),
+        "tool_arguments",
     ));
 
     // 4. An argument the schema does not list.
@@ -222,14 +231,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         .tool("oort_inbox_read", json!({"limit": 1, "surprise": true}))
         .await;
     assert_eq!((extra.status, extra.rpc_code()), (400, Some(-32602)));
-    expected.push(row(
-        "tools/call",
-        Some("oort_inbox_read"),
-        "invalid_arguments",
-        400,
-        Some(-32602),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_inbox_read"),
+            "invalid_arguments",
+            400,
+            Some(-32602),
+            "modern",
+            None,
+        ),
+        "tool_arguments",
     ));
 
     // 5. A cursor the server cannot open: the 「Unavailable」 a stale saved cursor gets.
@@ -237,27 +249,33 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         .inbox(Some("momo_inbox_cursor_v1.not-a-real-cursor"))
         .await;
     assert_eq!((stale.status, stale.rpc_code()), (409, Some(-32004)));
-    expected.push(row(
-        "tools/call",
-        Some("oort_inbox_read"),
-        "unavailable",
-        409,
-        Some(-32004),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_inbox_read"),
+            "unavailable",
+            409,
+            Some(-32004),
+            "modern",
+            None,
+        ),
+        "tool_unavailable",
     ));
 
     // 6. A tool that is not in the catalog at all.
     let unknown = wire.tool("oort_nonexistent", json!({})).await;
     assert_eq!((unknown.status, unknown.rpc_code()), (400, Some(-32602)));
-    expected.push(row(
-        "tools/call",
-        Some("unknown"),
-        "invalid_arguments",
-        400,
-        Some(-32602),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("unknown"),
+            "invalid_arguments",
+            400,
+            Some(-32602),
+            "modern",
+            None,
+        ),
+        "unknown_tool",
     ));
 
     // 7. A body that is not JSON: a cursor with a raw newline in it, as a shell that builds the
@@ -273,14 +291,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         )
         .await;
     assert_eq!((broken.status, broken.rpc_code()), (400, Some(-32700)));
-    expected.push(row(
-        "unparsed",
-        None,
-        "protocol_error",
-        400,
-        Some(-32700),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "unparsed",
+            None,
+            "protocol_error",
+            400,
+            Some(-32700),
+            "modern",
+            None,
+        ),
+        "parse_error",
     ));
 
     // 8. A JSON-RPC batch (an array) instead of one request.
@@ -291,14 +312,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         )
         .await;
     assert_eq!((batch.status, batch.rpc_code()), (400, Some(-32600)));
-    expected.push(row(
-        "no_method",
-        None,
-        "protocol_error",
-        400,
-        Some(-32600),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "no_method",
+            None,
+            "protocol_error",
+            400,
+            Some(-32600),
+            "modern",
+            None,
+        ),
+        "request_shape",
     ));
 
     // 9. A client that proposes a protocol version this server does not speak.
@@ -309,14 +333,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         )
         .await;
     assert_eq!((version.status, version.rpc_code()), (400, Some(-32022)));
-    expected.push(row(
-        "initialize",
-        None,
-        "protocol_error",
-        400,
-        Some(-32022),
-        "other",
-        None,
+    expected.push(why(
+        row(
+            "initialize",
+            None,
+            "protocol_error",
+            400,
+            Some(-32022),
+            "other",
+            None,
+        ),
+        "version_unsupported",
     ));
 
     // 10. A modern call whose `Mcp-Method` header disagrees with its body.
@@ -333,14 +360,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         )
         .await;
     assert_eq!((mismatch.status, mismatch.rpc_code()), (400, Some(-32020)));
-    expected.push(row(
-        "tools/list",
-        None,
-        "protocol_error",
-        400,
-        Some(-32020),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "tools/list",
+            None,
+            "protocol_error",
+            400,
+            Some(-32020),
+            "modern",
+            None,
+        ),
+        "mcp_method_header",
     ));
 
     // 11. A method this server does not have (legacy era).
@@ -354,14 +384,17 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         (resources.status, resources.rpc_code()),
         (400, Some(-32601))
     );
-    expected.push(row(
-        "other",
-        None,
-        "protocol_error",
-        400,
-        Some(-32601),
-        "legacy",
-        None,
+    expected.push(why(
+        row(
+            "other",
+            None,
+            "protocol_error",
+            400,
+            Some(-32601),
+            "legacy",
+            None,
+        ),
+        "method_not_found",
     ));
 
     // 12. A legacy handshake: `initialize`, then the `202` for `notifications/initialized`.
@@ -415,27 +448,122 @@ async fn every_kind_of_call_leaves_one_exact_row() {
         (duplicate.status, duplicate.rpc_code()),
         (400, Some(-32600))
     );
-    expected.push(row(
-        "tools/call",
-        Some("oort_ping"),
-        "protocol_error",
-        400,
-        Some(-32600),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_ping"),
+            "protocol_error",
+            400,
+            Some(-32600),
+            "modern",
+            None,
+        ),
+        "transport_headers",
     ));
 
     // 14. A body over the 64 KiB ceiling.
     let huge = wire.raw(&vec![b' '; 64 * 1024 + 16], &MODERN_HEADERS).await;
     assert_eq!((huge.status, huge.rpc_code()), (413, Some(-32600)));
-    expected.push(row(
-        "unparsed",
-        None,
-        "protocol_error",
-        413,
-        Some(-32600),
-        "modern",
-        None,
+    expected.push(why(
+        row(
+            "unparsed",
+            None,
+            "protocol_error",
+            413,
+            Some(-32600),
+            "modern",
+            None,
+        ),
+        "body_too_large",
+    ));
+
+    // 15-17: the three request-building mistakes a hand-written `curl` makes most. Each is a
+    // refusal the server neither logs nor records anywhere else; each is told apart here.
+    let ping_body = serde_json::to_vec(&json!({
+        "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+        "params": {"_meta": {
+            "io.modelcontextprotocol/protocolVersion": MODERN,
+            "io.modelcontextprotocol/clientCapabilities": {}},
+            "name": "oort_ping", "arguments": {}}
+    }))
+    .unwrap();
+
+    // 15. `Accept` without the event stream.
+    let accept = wire
+        .raw(
+            &ping_body,
+            &[
+                ("accept", "application/json"),
+                ("mcp-protocol-version", MODERN),
+                ("mcp-method", "tools/call"),
+                ("mcp-name", "oort_ping"),
+            ],
+        )
+        .await;
+    assert_eq!((accept.status, accept.rpc_code()), (415, Some(-32600)));
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_ping"),
+            "protocol_error",
+            415,
+            Some(-32600),
+            "modern",
+            None,
+        ),
+        "accept",
+    ));
+
+    // 16. Modern `_meta` and no `MCP-Protocol-Version` header at all.
+    let no_header = wire
+        .raw(
+            &ping_body,
+            &[("mcp-method", "tools/call"), ("mcp-name", "oort_ping")],
+        )
+        .await;
+    assert_eq!(
+        (no_header.status, no_header.rpc_code()),
+        (400, Some(-32020))
+    );
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_ping"),
+            "protocol_error",
+            400,
+            Some(-32020),
+            "none",
+            None,
+        ),
+        "version_header",
+    ));
+
+    // 17. `Mcp-Name` still names the previous call's tool (one `curl` reused for the next call).
+    let stale_name = wire
+        .raw(
+            &ping_body,
+            &[
+                ("mcp-protocol-version", MODERN),
+                ("mcp-method", "tools/call"),
+                ("mcp-name", "oort_inbox_read"),
+            ],
+        )
+        .await;
+    assert_eq!(
+        (stale_name.status, stale_name.rpc_code()),
+        (400, Some(-32020))
+    );
+    expected.push(why(
+        row(
+            "tools/call",
+            Some("oort_ping"),
+            "protocol_error",
+            400,
+            Some(-32020),
+            "modern",
+            None,
+        ),
+        "mcp_name_header",
     ));
 
     // One row per call, in order, each exactly the closed shape — no other key.
@@ -643,14 +771,17 @@ async fn a_tool_outside_the_view_is_named_and_the_list_says_how_many_were_offere
         rows,
         vec![
             row("tools/list", None, "ok", 200, None, "modern", Some(offered)),
-            row(
-                "tools/call",
-                Some("oort_jobs_claim"),
-                "invalid_arguments",
-                400,
-                Some(-32602),
-                "modern",
-                None
+            why(
+                row(
+                    "tools/call",
+                    Some("oort_jobs_claim"),
+                    "invalid_arguments",
+                    400,
+                    Some(-32602),
+                    "modern",
+                    None
+                ),
+                "unknown_tool"
             ),
         ]
     );
