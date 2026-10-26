@@ -39,7 +39,7 @@ import {
   mentionHandleLabel,
   preferredMentionName,
 } from '@momo/core/features/routing/helperAliases';
-import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import React, {useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   Animated,
@@ -67,6 +67,7 @@ import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV, composerFloat} from './convDesign';
+import {DockFollowContext} from './dockFollow';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {Avatar} from './Avatar';
 import {
@@ -615,10 +616,10 @@ const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + CONV.composerTopAir;
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
 const SEND_SLOP = slopTo(CONV.composerCircle);
 
-// ---- 두 상태 (#4305 → #4456) --------------------------------------------------
+// ---- 두 상태 (#4305 → #4456 → #4518) ------------------------------------------
 // 입력창은 **접힘**(한 줄 알약: + · 글 · 보내기)과 **펼침**(글 칸 위, 도구 줄 아래: + 가 왼쪽 아래,
-// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **포커스가 있다**
-// 또는 **글이 있다**(`focused || text !== ''`)다.
+// 보내기가 오른쪽 아래)을 오간다 (Buzz `compose_bar` 의 `isExpanded`). 펼침의 조건은 **누르는 중** 또는
+// **포커스가 있다** 또는 **글이 있다**(`pressing || focused || text !== ''`)다.
 //
 // #4305 는 글이 있을 때만 펼쳤다: 「포커스로 펼치면 보내서 비는 순간 같은 프레임에 한 줄로 돌아오는 것이
 // 키보드가 떠 있는 동안 성립하지 않는다」(owner 10-24, iOS 3053 실기 — 보낸 직후에도 포커스는 그대로다).
@@ -633,7 +634,18 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 // 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다. 키보드만 내려가고 포커스가 남는 길(앱이 백그라운드로
 // 갔다 옴·하드웨어 키보드)은 일부러 듣지 않는다: 포커스가 곧 「입력 중」이고, iOS 는 돌아올 때 자판을 되살린다.
 //
-// 접힘의 **움직임**은 이유에 따라 갈린다. 포커스를 잃어서 접힐 때는 펼침과 같은 스프링으로 줄어든다(자판이 내려가기
+// **누르는 순간 시작한다**(#4518, owner 10-25 「누르는 순간 바로」). 포커스 이벤트는 손을 뗀 뒤 RN 의 `onPress → focus()` · 네이티브를 돌아 JS 에 닿아서
+// 첫 포커스에서 `keyboardWillShow` 보다도 39~120ms 늦었다(#4456 실측) — 펼침이 키보드를 뒤따랐다. 그래서 손가락이 입력창에 닿는 순간(`composer-field` 의
+// `touchStart`)에 펼침을 시작한다. 단 **누름은 약속이지 사실이 아니다**: 탭이 포커스로 이어지지 않으면 되돌린다 — 손가락이 `PRESS_DRAG_SLOP_PT` 를 넘게
+// 움직임(끌기) · 터치 취소 · 손을 뗀 뒤 `PRESS_FOCUS_GRACE_MS` 안에 `onFocus` 가 안 옴. 손이 닿아 있는 동안에는 시간이 흘러도 되돌리지 않는다(길게 누르면
+// 포커스는 손을 뗄 때 온다). 포커스가 오면 `pressing` 이 `focused` 로 **한 묶음**에 넘어가 스프링이 끊기지 않고, 이미 포커스이거나 글이 있어 펼쳐져 있으면
+// 누름은 아무것도 하지 않는다(렌더·타이머·스프링 0). 햅틱은 없다(#4331).
+//
+// **끌기는 포커스로 이어지지 않는다**(#4518 D2). 접힌 빈 입력창에서 문턱을 넘겨 끌린 손은 되돌리는데, iOS 는 그 손을 **뗄 때** 입력창에 포커스를 줘서(끌었어도 — 시뮬레이터 4방향 실측)
+// 되돌린 입력창이 다시 펼쳐졌다. JS 에서 응답자를 가져가도 막히지 않아서(`onPress` 는 안 오는데 포커스는 왔다) 끌기를 알아챈 즉시 `TextInput` 을 `editable={false}` 로 잠그고 손을 뗀 뒤
+// `PRESS_DRAG_LOCK_RELEASE_MS` 에 푼다. 이미 포커스이거나 글이 있으면 누름이 서지 않으므로 잠기지도 않는다.
+//
+// 접힘의 **움직임**은 이유에 따라 갈린다. 포커스를 잃어서(또는 누름이 포커스로 이어지지 않아 되돌릴 때) 접힐 때는 펼침과 같은 스프링으로 줄어든다(자판이 내려가기
 // 시작하는 프레임에 알약이 44pt 한 번에 줄면 그 위 대화가 통째로 튄다 — 녹화 프레임으로 확인). 포커스 없이 글이 비어서
 // 접힐 때(포커스 없이 보냄·지움)는 같은 프레임이다 — 위 owner 10-24 결함을 애니메이션으로 가리지 않는다.
 //
@@ -651,6 +663,24 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 // 맞대어 잰 숫자와 고른 근거가 그 절에 있다.
 /** 끌어 내리기: 이만큼(pt) 내려가고 세로가 가로의 두 배를 넘으면 자판을 내린다(Buzz `Listener`). */
 const DISMISS_DRAG_PT = 28;
+/**
+ * 누름 (#4518): 누른 손가락이 이만큼(pt) 넘게 움직이면 탭이 아니라 끌기다 — 앞당겨 편 입력창을 거둔다. RN `Pressability` 가 「가만히 누른
+ * 손」의 경계로 쓰는 `longPressDeactivationDistance`(10)와 같은 값이다. 이 입력창은 이미 그 눌림 처리 위에 서 있다: RN `TextInput` 은 손을 뗄
+ * 때 `onPress → focus()` 를 부른다.
+ */
+const PRESS_DRAG_SLOP_PT = 10;
+/**
+ * 누름 (#4518): 손을 뗀 뒤 `onFocus` 를 기다리는 시간(ms). 정상 경로는 손 뗌 → RN `onPress → focus()` → 네이티브 → `onFocus` 이고, 포커스 이벤트가 JS 에
+ * 닿는 것은 키보드(`keyboardWillShow`)보다도 39~120ms 늦었다(시뮬레이터 실측, #4456). 그 위에 첫 키보드가 늦게 뜨는 때·JS 가 바쁠 때의 꼬리를 얹은 값이다.
+ * **짧으면 정상 경로의 탭이 접혔다 되살아나고, 길면 포커스가 안 오는 드문 탭이 펼친 채 머무는 시간이 늘 뿐이다** — 그래서 길 쪽으로 잡았다.
+ * 손이 닿아 있는 동안에는 이 시계가 돌지 않는다(길게 누르면 포커스는 손을 뗄 때 온다).
+ */
+export const PRESS_FOCUS_GRACE_MS = 500;
+/**
+ * 끌기 잠금 (#4518 D2): 손을 뗀 뒤 입력창의 잠금(`editable={false}`)을 푸는 데까지 기다리는 시간(ms). 네이티브는 손을 **뗀 순간**에 포커스를 줄지 정하므로
+ * 잠금은 그 순간을 지나서 풀려야 하고, JS 가 손 뗌을 아는 것은 그보다 5~10ms 늦다 — 그 위에 한두 프레임의 여유를 얹은 값이다. 이 사이에 다시 누르면 그 순간 풀린다.
+ */
+export const PRESS_DRAG_LOCK_RELEASE_MS = 150;
 /** 도구 줄에 서는 도구들. 마이크(#4306)·예약 보내기(#4216)·사진 여러 장(#4296)은 여기에 붙는다. */
 const TOOL_SLOTS: readonly 'mention'[] = ['mention'];
 const TOOL_COPY = {mention: '@로 부르기'} as const;
@@ -1470,14 +1500,50 @@ export function Composer({
   // `onFocus`/`onBlur` 이고 다른 곳에서 쓰지 않는다: 보낸 뒤에도 포커스는 그대로이므로 보내기가 이 값을
   // 건드리면 안 된다(건드리면 보낸 직후 자판은 떠 있는데 한 줄 알약이 된다 — #4456 이 고친 바로 그 모양이다).
   const [focused, setFocused] = useState(false);
+  // 포커스를 쥐었는가의 **동기** 사본 — 터치 처리기(`onFieldTouchStart`)가 「이미 포커스」를 렌더 없이 읽는다.
+  const focusedRef = useRef(false);
+  // 누르는 중 (#4518). 손가락이 입력창에 닿은 순간부터 포커스가 와서 넘겨받거나 되돌릴 때까지 true 다 — 펼침의 조건 하나다(아래 `expanded`).
+  // 포커스는 손을 뗀 뒤에야 오므로 이 값이 펼침을 그만큼 앞당긴다. 손을 뗀 뒤 포커스를 기다리는 유예도 이 값이 참인 동안이다.
+  const [pressing, setPressing] = useState(false);
+  const pressingRef = useRef(false);
+  const pressOriginRef = useRef({x: 0, y: 0});
+  // 끌기 잠금 (#4518 D2). 접힌 빈 입력창을 눌러 끌기 문턱을 넘은 손이 닿아 있는 동안 true — `TextInput` 의 `editable` 을 내려 손을 뗄 때 포커스가 안 서게 한다(아래 `onFieldTouchMove`).
+  const [focusLock, setFocusLock] = useState(false);
+  // 잠금의 **동기** 사본 — 터치 처리기가 렌더 없이 읽는다.
+  const focusLockRef = useRef(false);
+  const applyFocusLock = useCallback((next: boolean) => {
+    focusLockRef.current = next;
+    setFocusLock(next);
+  }, []);
+  const focusLockTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearFocusLockTimer = useCallback(() => {
+    if (focusLockTimerRef.current === null) return;
+    clearTimeout(focusLockTimerRef.current);
+    focusLockTimerRef.current = null;
+  }, []);
+  const pressGraceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearPressGrace = useCallback(() => {
+    if (pressGraceRef.current === null) return;
+    clearTimeout(pressGraceRef.current);
+    pressGraceRef.current = null;
+  }, []);
+  // 언마운트: 기다리던 유예가 사라진 화면을 되돌리려 하지 않게.
+  useEffect(() => () => clearPressGrace(), [clearPressGrace]);
+  useEffect(() => () => clearFocusLockTimer(), [clearFocusLockTimer]);
 
   // 안내를 읽은 뒤 고치러 돌아왔다 — 자판이 다시 오르면 안내가 한 화면을 넘는다
   // (R3-B1). 안내는 alert 로 이미 읽혔고, 키가 남아 있으면 다음 전송이 다시 막는다.
   const onInputFocus = useCallback(() => {
     setKeyBlocked(false);
     // 햅틱은 없다 — 포커스·펼침은 소리 없이 온다(#4331: 입력 길의 햅틱은 보내기 light 한 번뿐).
+    focusedRef.current = true;
+    // 누름이 포커스로 이어졌다(#4518): 펼침을 `pressing` 에서 `focused` 가 넘겨받는다. **한 묶음**이므로 `expanded` 는 한 번도 거짓이 되지 않고
+    // 누름이 건 스프링은 끊기지 않고 이어진다. 유예 시계도 여기서 멈춘다.
+    pressingRef.current = false;
+    clearPressGrace();
+    setPressing(false);
     setFocused(true);
-  }, [setKeyBlocked]);
+  }, [setKeyBlocked, clearPressGrace]);
 
   const onSelectionChange = useCallback(
     (event: NativeSyntheticEvent<TextInputSelectionChangeEventData>) => {
@@ -1647,34 +1713,40 @@ export function Composer({
     offline !== true &&
     attachmentSurface.drafts.length < MAX_ATTACHMENTS_PER_MESSAGE;
 
-  // ---- 두 상태 (#4305 → #4456) ----------------------------------------------
-  // 포커스 **또는** 글. 포커스를 받는 렌더(`onFocus` 가 `focused` 를 올린 그 커밋)가 펼침의 첫 프레임이고, 아래
-  // 효과가 같은 커밋에서 스프링을 건다. 시작은 포커스 이벤트가 JS 에 닿는 때라서 첫 포커스에서는 `keyboardWillShow` 보다
-  // 39~120ms 늦다(시뮬레이터 실측, #4456) — 곡선이 아니라 이벤트 도달 지연이다.
-  const expanded = focused || text !== '';
+  // ---- 두 상태 (#4305 → #4456 → #4518) -------------------------------------
+  // 누르는 중 **또는** 포커스 **또는** 글. 펼침의 첫 프레임은 이 조건이 처음 참이 되는 렌더이고, 아래 효과가 같은 커밋에서 스프링을 건다.
+  // 누르는 중(`pressing`)이 있는 까닭은 **시작 시각**이다: 포커스 이벤트는 손을 뗀 뒤 RN `onPress → focus()` · 네이티브 · JS 를 돌아 와서 첫 포커스에서
+  // `keyboardWillShow` 보다도 39~120ms 늦게 닿았다(시뮬레이터 실측, #4456). 손이 닿는 순간 시작하면(owner 10-25 「누르는 순간 바로」) 그 지연이 없다.
+  const expanded = pressing || focused || text !== '';
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
+  const dockFollow = useContext(DockFollowContext);
   const expandedRef = useRef(expanded);
-  // 진행값의 지금 값. 글 칸 폭을 재는 쪽(`onInputLayout`)이 「접힌 폭에 닿았나」를 알려고 읽는다.
-  const progressRef = useRef(expanded ? 1 : 0);
-  useEffect(() => {
-    const id = progress.addListener(({value}) => {
-      progressRef.current = value;
-    });
-    return () => progress.removeListener(id);
-  }, [progress]);
-  // 접히는 중 (#4456): **포커스를 잃어서** 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 포커스를 잃는 그
-  // 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
-  // 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다. 그래서 `onBlur` 처리기가 `focused` 와 한 묶음으로 올린다.
+  // 접히는 중 (#4456): **포커스를 잃어서**(또는 #4518: 누름이 포커스로 이어지지 않아서) 접힐 때만 true 이고 스프링이 0 에 닿으면 내려간다. `expanded` 는 펼침의
+  // 마지막 이유가 사라지는 그 렌더에서 이미 거짓이라, 펼침 모양(도구 줄·글 칸 양옆 여백)이 스프링이 끝날 때까지 서 있게 하려면 이 값을 **같은 렌더에** 올려야
+  // 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다. 그래서 `onBlur`·`releasePress` 처리기가 `focused`·`pressing` 과 한 묶음으로 올린다.
   const [collapsing, setCollapsing] = useState(false);
   const shown = expanded || collapsing;
-  const onInputBlur = useCallback(() => {
-    // 움직이며 접히는 것은 **펼친 알약이 포커스만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
+  // `shown` 의 **동기** 사본 — `onInputLayout` 이 「접힌 폭에 닿았나」를 렌더 없이 읽는다. 진행값의 리스너(`progress.addListener`)로 읽으면 안 된다: Animated 는 값에 달린
+  // 마지막 자식(도구 줄·글 칸 여백)이 떨어지면 그 값의 리스너를 **모두 지운다**(`AnimatedNode.__detach`). 그래서 첫 접힘이 끝난 뒤에는 진행값 사본이 0 에 멈추고, 그 뒤 접힘마다
+  // 접히는 도중의 넓은 폭이 자리표시 폭으로 새어 들어가 자리표시 문장이 몇 프레임 길게 바뀌었다(#4518 시뮬레이터 실측: 폭 281→247 동안 문장 16→25자). 접히는 도중에 누름이
+  // 되돌려지는 길(`releasePress`)이 생기면서 눈에 띄었다.
+  const shownRef = useRef(shown);
+  useLayoutEffect(() => {
+    shownRef.current = shown;
+  }, [shown]);
+  // 펼친 알약이 글 없이 접힐 때의 움직임을 연다. 포커스를 잃어서(`onInputBlur`)와 누름이 포커스로 이어지지 않아서(`releasePress`)가 **같은 판정**이다.
+  // 움직이며 접히는 것은 **펼친 알약이 펼침의 이유(포커스·누름)만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
+  const collapseWithMotion = useCallback(() => {
     if (expandedRef.current && currentTextRef.current === '' && !reduceMotion.current) {
       setCollapsing(true);
     }
-    setFocused(false);
   }, [reduceMotion]);
+  const onInputBlur = useCallback(() => {
+    focusedRef.current = false;
+    collapseWithMotion();
+    setFocused(false);
+  }, [collapseWithMotion]);
   useEffect(() => {
     if (expandedRef.current === expanded) return;
     expandedRef.current = expanded;
@@ -1682,24 +1754,39 @@ export function Composer({
     // 곡선은 Buzz 스프링이고 **양쪽 방향이 같다**(Buzz `composerExpansionController` 는 펼침도 접힘도 같은 스프링이다; 근거: `design/motion.ts`
     // 의 「입력창 펼침」). `overshootClamping` — 진행값이 범위를 넘으면 도구 줄이 제 높이보다 커지고 글 칸 양옆 여백이 음수가 된다.
     // 레이아웃 속성을 움직이므로 JS 구동이다. 접히는 도중에 다시 포커스가 오면 `stopAnimation` 이 현재 값에서 멈추고 거기서 다시 펼친다.
-    const spring = (toValue: 0 | 1, done?: () => void) =>
+    //
+    // 도크가 자라거나 주는 **프레임마다** 목록에게 바닥을 따라가라고 알린다(#4518, `dockFollow.ts`). 값이 바뀔 때 레이아웃을 미는 같은 JS 틱 안이라, 목록의 `onLayout` 이벤트(네이티브 → JS → 네이티브)를
+    // 기다리지 않는다. 키보드 준비로 메인 스레드가 막혔다 풀려도 레이아웃 커밋과 목록의 `scrollToEnd` 가 한꺼번에 적용돼서 마지막 말풍선이 도크에 가려졌다 돌아오지 않는다.
+    // 리스너는 스프링이 끝나거나 끊길 때 거둔다.
+    const spring = (toValue: 0 | 1, done?: () => void) => {
+      const followId = dockFollow === null ? null : progress.addListener(() => dockFollow.notify());
       Animated.spring(progress, {
         toValue,
         ...COMPOSER_EXPAND_SPRING,
         overshootClamping: true,
         useNativeDriver: false,
       }).start(result => {
+        if (followId !== null) progress.removeListener(followId);
         if (result.finished) done?.();
       });
+    };
     if (expanded) {
       setCollapsing(false);
-      if (reduceMotion.current) progress.setValue(1);
-      else spring(1);
+      if (reduceMotion.current) {
+        // 동작 줄이기: 값이 한 번에 바뀌어 스프링의 프레임별 알림이 없다. 그러면 목록은 `onLayout` 길(네이티브 → JS → 네이티브)로만 따라오는데, 앱을 켜고 처음 누른 탭에서는
+        // 키보드 준비가 메인 스레드를 막는 동안 그 길이 늦어서 마지막 말풍선의 아랫줄이 도크에 가려졌다(#4518 시뮬레이터: 8/8번, 1~8프레임). `setValue` 가 레이아웃을 곧바로
+        // 커밋하므로 **그 직후** 한 번 알리면 목록의 `scrollToEnd` 명령이 커밋 뒤에 줄을 서서 둘이 한꺼번에 적용된다 — 값을 바꾼 **뒤에** 알리는 순서를 지킨다(시험이 잠근다).
+        // 이 순서는 RN 0.86.2 에서 JS 구동 값이 Fabric 에 `setNativeProps` 로 곧바로 커밋되는 것(`shouldUseSetNativePropsInFabric` 기본 true)에 기댄다 — jest 는 이 부분을 흉내 내지 못하니
+        // RN 을 올리면 캡처(`measure/captures/4518/…rm-cold-tap-*.png`)로 다시 확인한다.
+        // 접힘 쪽은 알리지 않는다: 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있고, 동작 줄이기의 접힘은 간격이 변하지 않았다(녹화 6번, 변화 ≤1px).
+        progress.setValue(1);
+        dockFollow?.notify();
+      } else spring(1);
       return;
     }
     // 접힘은 두 갈래다.
-    //  - 포커스를 잃어서(`collapsing`): 키보드가 내려가기 시작하는 프레임에 알약이 44pt 한 번에 줄면 알약 윗면과 그 위 대화가 통째로
-    //    튄다(시뮬레이터 녹화 프레임으로 확인, #4456). 같은 스프링으로 줄인다.
+    //  - 포커스를 잃어서·누름이 포커스로 이어지지 않아서(`collapsing`): 키보드가 내려가기 시작하는 프레임에 알약이 44pt 한 번에 줄면 알약 윗면과 그 위 대화가
+    //    통째로 튄다(시뮬레이터 녹화 프레임으로 확인, #4456). 앞당겨 펼친 알약을 되돌릴 때도 펼침과 같은 스프링으로 거꾸로 줄인다(#4518).
     //  - 포커스 없이 글이 비어서(포커스 없이 보냄·지움): **같은 프레임**이다(렌더가 이미 접힌 모양을 그렸다). 보낸 뒤에도 높이가 늘어난 채
     //    남던 실기 결함(owner 10-24)을 애니메이션으로 가리지 않는다. 보낸 뒤 포커스가 남아 있으면 `expanded` 가 안 바뀌므로 여기에 오지도
     //    않는다(빈 펼침 높이로 남는다 — 글 칸을 한 줄로 못 박는 것은 아래 `TextInput` 의 `height`).
@@ -1709,16 +1796,103 @@ export function Composer({
     }
     progress.setValue(0);
     if (collapsing) setCollapsing(false);
-  }, [expanded, collapsing, progress, reduceMotion]);
+  }, [expanded, collapsing, progress, reduceMotion, dockFollow]);
+
+  // ---- 누름 (#4518) ----------------------------------------------------------
+  // 손가락이 입력창에 닿는 순간 펼침을 시작하고, 그 탭이 포커스로 이어지지 않으면 되돌린다. 신호는 `composer-field`(입력창만 감싼 상자)에 건 **날 터치 이벤트**다.
+  // RN `TextInput` 의 `onPressIn`/`onPressOut` 은 같은 터치를 `Pressability` 가 가공한 것이라 `onPressOut` 이 손을 뗄 때와 영역을 벗어날 때를 가르지 못하고
+  // 130ms 까지 늦춰진다 — 끌기 문턱은 날 터치로만 잰다. 아래 처리기는 위쪽 끌어 내리기(`onDrag*`)처럼 **관찰만** 한다: 응답자를 잡지 않으므로 글자 선택·캐럿·포커스는
+  // 그대로 입력창이 받는다.
+  //
+  // 되돌림의 길은 셋이고 모두 `releasePress` 하나로 모인다.
+  //  - 끌기: 누른 자리에서 `PRESS_DRAG_SLOP_PT` 를 넘게 움직였다(탭이 아니다).
+  //  - 취소: 시스템이 터치를 가져갔다(`touchCancel`).
+  //  - 유예: 손을 뗐는데 `PRESS_FOCUS_GRACE_MS` 안에 `onFocus` 가 안 왔다. 손이 닿아 있는 동안에는 시계가 돌지 않는다.
+  // 포커스가 오면 `onInputFocus` 가 누름을 넘겨받아(`pressingRef` 를 내린다) 이 길들은 모두 아무 일도 안 한다.
+  const releasePress = useCallback(() => {
+    if (!pressingRef.current) return;
+    pressingRef.current = false;
+    clearPressGrace();
+    // `collapsing` 은 `pressing` 과 **같은 핸들러에서** 올려야 한다 — 효과에서 올리면 접힌 모양이 한 프레임 그려졌다 되살아난다(위 `collapsing` 머리말).
+    collapseWithMotion();
+    setPressing(false);
+  }, [clearPressGrace, collapseWithMotion]);
+  const onFieldTouchStart = useCallback(
+    (event: GestureResponderEvent) => {
+      const {pageX, pageY} = event.nativeEvent;
+      // 새 손이 닿으면 잠금은 그 순간 푼다 — 끌고 뗀 직후의 탭이 잠금에 먹히지 않게(탭이 끝나는 것은 네이티브가 새 값을 받고도 남을 만큼 뒤다).
+      if (focusLockRef.current) {
+        clearFocusLockTimer();
+        applyFocusLock(false);
+      }
+      if (pressingRef.current) {
+        // 손을 뗀 뒤 포커스를 기다리는 중에 다시 눌렀다(포커스가 늦어 한 번 더 누른 손) — 유예를 멈추고 이 손가락으로 이어 간다.
+        clearPressGrace();
+        pressOriginRef.current = {x: pageX, y: pageY};
+        return;
+      }
+      // 이미 포커스이거나 이미 펼침(글이 있음)이면 아무것도 하지 않는다 — 렌더도 타이머도 스프링도 없다.
+      if (focusedRef.current || expandedRef.current) return;
+      pressingRef.current = true;
+      pressOriginRef.current = {x: pageX, y: pageY};
+      setPressing(true);
+    },
+    [clearPressGrace, clearFocusLockTimer, applyFocusLock],
+  );
+  const onFieldTouchMove = useCallback(
+    (event: GestureResponderEvent) => {
+      if (!pressingRef.current) return;
+      const {pageX, pageY} = event.nativeEvent;
+      const origin = pressOriginRef.current;
+      if (Math.hypot(pageX - origin.x, pageY - origin.y) > PRESS_DRAG_SLOP_PT) {
+        // 끌기는 포커스로 이어지지 않는다(#4518 D2, owner 위임: 끌기 = 대화 스크롤·끌어 내리기 의도). 그런데 iOS 는 이 손을 **뗄 때** 입력창에 포커스를 준다 — 끌었어도, 눌린 영역을 벗어났어도
+        // (시뮬레이터 실측: 문턱을 넘겨 끌고 뗀 네 방향 모두 손을 뗀 5~30ms 뒤 `onFocus`). RN 의 `onPress → focus()` 가 아니라 네이티브 길이라 응답자를 가져가도(JS 끌기 가져가기를 시험했다 —
+        // `onPress` 는 안 왔는데 포커스는 왔다) 막지 못했고, 네이티브가 포커스를 줄지 정하는 때에 입력창이 **편집 불가**여야 막힌다. 그래서 끌기를 알아챈 즉시 잠그고 손을 뗀 뒤 풀어 준다.
+        clearFocusLockTimer();
+        applyFocusLock(true);
+        releasePress();
+      }
+    },
+    [releasePress, clearFocusLockTimer, applyFocusLock],
+  );
+  // 끌기 잠금을 손이 떨어진 뒤(`PRESS_DRAG_LOCK_RELEASE_MS`) 푼다. 손을 떼거나 시스템이 가져가는 두 길 모두.
+  const unlockFocusSoon = useCallback(() => {
+    if (!focusLockRef.current) return;
+    clearFocusLockTimer();
+    focusLockTimerRef.current = setTimeout(() => {
+      focusLockTimerRef.current = null;
+      applyFocusLock(false);
+    }, PRESS_DRAG_LOCK_RELEASE_MS);
+  }, [clearFocusLockTimer, applyFocusLock]);
+  const onFieldTouchEnd = useCallback(() => {
+    unlockFocusSoon();
+    if (!pressingRef.current) return;
+    clearPressGrace();
+    pressGraceRef.current = setTimeout(releasePress, PRESS_FOCUS_GRACE_MS);
+  }, [clearPressGrace, releasePress, unlockFocusSoon]);
+  const onFieldTouchCancel = useCallback(() => {
+    unlockFocusSoon();
+    releasePress();
+  }, [releasePress, unlockFocusSoon]);
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
   // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
-  const inputInset = shown
-    ? progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [CONV.composerCircle, 0],
-      })
-    : CONV.composerCircle;
+  //
+  // 「동작 줄이기」는 글 칸 여백을 **진행값을 거치지 않고** 상태가 정한 숫자로 쓴다(#4518). 움직임이 없으니 보간할 것이 없다. 보간 값은 JS 구동이라 `setValue` 가 네이티브를 리액트 밖에서 직접 고치는데,
+  // 누름이 펼침 직후 되돌려지면(끌기·취소·유예) 리액트가 마지막으로 보낸 여백은 접힌 값 그대로고 접힌 쪽 렌더가 만든 값도 같은 숫자라 리액트가 아무것도 안 보낸다고 읽는다
+  // (원인은 소스를 읽은 추정이다: RN 0.86.2 는 `setNativeProps` 뒤 48ms 디바운스로 다시 그리는 길도 있어서 정확한 어긋남 창은 계측하지 않았다 — 수리는 여백을 진행값에서 떼므로 메커니즘과 무관하게 선다). 결과는 화면에서 봤다: 자리표시가 + 버튼 위에 겹쳐 남았다(시뮬레이터 16 Pro, 동작 줄이기 켜고 빠르게 끈 끌기 8번 모두 — 끄면 7번 모두 정상,
+  // 이 수리 뒤 8번 모두 정상). 스프링은 접히는 내내 `shown` 이 서서 보간이 끝까지 붙어 있고 끝난 뒤의 숫자가 네이티브 값과 같아서 어긋나지 않는다.
+  // `reduceMotion` 은 ref 라서 **렌더 중에 읽는다** — `useReduceMotion.ts` 머리말은 읽는 곳이 누르는 순간뿐이라고 적지만 여기는 의도된 예외다: 값이 의미를 갖는 것은 상태가 바뀌는 렌더뿐이고
+  // (앱 뿌리가 저장소를 붙들어 첫 렌더부터 안다), 설정이 바뀌어도 다시 그리지 않으니 다음 상태 전이부터 반영된다. 상태판 훅으로 바꾸면 첫 답이 올 때마다 컴포저가 다시 그려진다(그 훅 머리말이 피하려던 소음).
+  const inputInset =
+    shown && !reduceMotion.current
+      ? progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [CONV.composerCircle, 0],
+        })
+      : expanded
+        ? 0
+        : CONV.composerCircle;
   const toolsHeight = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [0, TOUCH_TARGET],
@@ -1773,8 +1947,8 @@ export function Composer({
   const [inputWidth, setInputWidth] = useState<number | null>(null);
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
     // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305). 펼치는 중·접히는 중의 폭도 아니므로
-    // 진행값이 0 에 닿은 뒤(접힌 폭)에서만 잰다(#4456).
-    if (expandedRef.current || progressRef.current > 0) return;
+    // 접힘이 끝나 도구 줄이 내려간 뒤(`shown` 이 거짓, 접힌 폭)에서만 잰다(#4456 → #4518: 진행값 리스너는 첫 접힘 뒤 사라진다, 위 `shownRef`).
+    if (shownRef.current) return;
     const {width} = event.nativeEvent.layout;
     setInputWidth(previous => (previous === width ? previous : width));
   }, []);
@@ -2193,7 +2367,12 @@ export function Composer({
         )}
         <Animated.View
           style={{marginLeft: inputInset, marginRight: inputInset}}
-          testID="composer-field">
+          testID="composer-field"
+          // 누름 (#4518): 입력창에 닿는 터치만 듣는다 — 이 상자는 입력창만 감싼다(+ · 보내기 · 도구 줄은 형제다). 관찰만 하고 응답자를 잡지 않는다.
+          onTouchStart={onFieldTouchStart}
+          onTouchMove={onFieldTouchMove}
+          onTouchEnd={onFieldTouchEnd}
+          onTouchCancel={onFieldTouchCancel}>
         <TextInput
           ref={inputRef}
           // 글이 비면 높이를 **명시**한다 (#4305, owner 10-24): 값만 비우면 iOS(Fabric)가 멀티라인 입력창의
@@ -2235,6 +2414,9 @@ export function Composer({
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           accessibilityHint={droppedHint}
           multiline
+          // 끌기 잠금(#4518 D2): 접힌 빈 입력창을 눌러 끌기 문턱을 넘은 손이 닿아 있는 동안만 `false` 다 — 손을 뗄 때 네이티브가 포커스를 주지 못하게 한다(`onFieldTouchMove`).
+          // 그 밖에는 언제나 `true` 라서(기본값과 같다) 다른 터치·포커스·글자 선택은 지금 그대로다.
+          editable={!focusLock}
           // 이 상자에서 한국어가 **낱말 가운데서** 끊기지 않는다 (#1422 폰 몫).
           //
           // 웹의 같은 문장은 한 줄 상자(`rows=1`)라 넘친 절이 사라지고, 그래서
