@@ -9,7 +9,7 @@ import {
   screen,
   waitFor,
   within,
-} from '@testing-library/react-native';
+} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';

@@ -22,7 +22,12 @@ import {
   replaceInvalidatedKey,
   type DeviceKeyView,
 } from '../src/deviceKey/enrollment';
-import {deviceKeyCopy, QR_LINK_STEPS, REFUSED_WARNING} from '../src/features/deviceKey/copy';
+import {
+  DEVICE_KEY_TITLE,
+  deviceKeyCopy,
+  QR_LINK_STEPS,
+  REFUSED_WARNING,
+} from '../src/features/deviceKey/copy';
 import {
   DeviceKeyLinkGate,
   LINK_SHEET_INTRO,
@@ -954,6 +959,20 @@ describe('the QR link gate', () => {
     await waitFor(() => expect(screen.getByTestId('device-key-link-sheet')).toBeTruthy());
     expect(posts()).toHaveLength(1);
   });
+
+  it('시트의 닫기는 머리의 원형 X 이고 글자 「닫기」 단추는 없다 (#4318)', async () => {
+    noteConnectRoute('qr');
+    renderGate();
+    await waitFor(() => expect(screen.getByTestId('device-key-link-sheet')).toBeTruthy());
+    expect(screen.queryByText('닫기')).toBeNull();
+    expect(screen.getByTestId('device-key-link-close').props.accessibilityLabel).toBe(
+      `${DEVICE_KEY_TITLE} 닫기`,
+    );
+    fireEvent.press(screen.getByTestId('device-key-link-close'));
+    await waitFor(() => expect(screen.queryByTestId('device-key-link-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 15000);
 
   it('on a simulator: says so honestly and registers nothing', async () => {
     mockNative = {...phone(), secureEnclaveAvailable: false, status: jest.fn(async () => 'unsupported')};

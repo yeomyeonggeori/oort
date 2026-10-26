@@ -322,16 +322,24 @@ describe('길게 누르기가 시트를 연다', () => {
     expect(sheetKeys()).not.toContain('leave');
   });
 
-  it('닫기 줄과 배경이 시트를 닫는다', async () => {
+  it('머리의 원형 X 와 배경이 시트를 닫는다 — 글자 「닫기」 줄은 없다 (#4318)', async () => {
     await mount();
     longPress('sidebar-row-channel:ch-general');
+    // 닫기 단추는 글자가 아니라 원형 X 다. 이름은 옛 문장 그대로 「대화 액션 닫기」.
+    expect(screen.queryByText('닫기')).toBeNull();
+    expect(screen.getByTestId('channel-sheet-close').props.accessibilityLabel).toBe('대화 액션 닫기');
     fireEvent.press(screen.getByTestId('channel-sheet-close'));
-    expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
+    // 시트는 미끄러져 나간 뒤에 사라진다(공용 그릇 `PageSheet`). 재는 것은 「닫힌다」이지 속도가 아니다.
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
     longPress('sidebar-row-channel:ch-general');
     // 모달 시트 뒤의 배경은 보조기술 트리에서 가려지므로(`accessibilityViewIsModal`) 숨은 원소까지 찾는다.
     fireEvent.press(screen.getByTestId('channel-sheet-backdrop', {includeHiddenElements: true}));
-    expect(screen.queryByTestId('channel-action-sheet')).toBeNull();
-  });
+    await waitFor(() => expect(screen.queryByTestId('channel-action-sheet')).toBeNull(), {
+      timeout: 8000,
+    });
+  }, 30000);
 });
 
 describe('항목이 서버에 닿는다', () => {

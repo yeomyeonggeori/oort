@@ -37,6 +37,7 @@ import {
   THEME_CHOICES,
   themeChoiceLabel,
   themeIdLabel,
+  useKeyboardAppearance,
   usePalette,
   useStyles,
   useTheme,
@@ -57,10 +58,12 @@ import {ds2Radius, font, radius, space, type Palette} from './tokens';
 //
 // ## 세 값이고 두 값이 아니다
 //
-// 토글(라이트↔다크)로 만들면 「시스템을 따른다」를 표현할 방법이 사라진다. 그것이
-// 기본값이자 대부분의 사람이 원하는 상태이므로, 토글은 첫 탭에서 그 상태를 **잃게**
-// 만든다. 웹 설정(`clients/web/src/features/settings/AppearanceSection.tsx`)도
-// 같은 이유로 세 값이고, 값 이름(system/light/dark)과 기본값이 두 클라에서 같다.
+// 토글(라이트↔다크)로 만들면 「시스템을 따른다」를 표현할 방법이 사라진다. 폰의 기본은
+// 라이트지만(#4526, ADR-0189 증보 5) 기기를 따르고 싶은 사람은 있고, 토글은 그 상태를
+// 아예 없앤다. 웹 설정(`clients/web/src/features/settings/AppearanceSection.tsx`)도
+// 같은 이유로 세 값이고 값 이름(system/light/dark)이 두 클라에서 같다. **기본값과 순서는
+// 폰이 다르다** — 폰은 라이트·시스템·다크 순에 기본이 라이트이고, 웹·데스크탑은 기본이
+// 시스템이다. 순서는 `THEME_CHOICES` 가 정한다(여기서 다시 세우지 않는다).
 // 「시스템」 줄은 그 칸이 **지금** 무엇을 뜻하는지를 설명 줄로 적는다 — 웹이
 // 설명 줄에 적는 그 문장이고, 보조기술에게는 힌트로도 간다.
 //
@@ -75,7 +78,7 @@ import {ds2Radius, font, radius, space, type Palette} from './tokens';
 // =============================================================================
 // 테마와 강조색 (#2719 · ADR-0189 D3 · 성재 2026-10-16 「열기 (추천)」).
 //
-// 세 묶음이다: 화면 모드(시스템·라이트·다크) / 테마(새벽하늘·흑연·노을띠) / 강조색
+// 세 묶음이다: 화면 모드(라이트·시스템·다크, #4526) / 테마(새벽하늘·흑연·노을띠) / 강조색
 // (기본·프리셋 4종·직접 입력). 미리보기는 따로 그리지 않는다 — 고르는 순간 프로바이더가
 // 앱 전체를 다시 칠하므로 지금 보고 있는 이 화면이 곧 미리보기다. 테마 타일과
 // 강조색 점은 **다른 선택지의 모습**을 보이려는 것이고, 그 값은 core 표에서 읽는다.
@@ -290,6 +293,7 @@ function Dot({color, testID}: {color: string; testID: string}): React.JSX.Elemen
 function SignalGroup(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const {themeId, scheme, signal, signalState, setSignal} = useTheme();
   const [draft, setDraft] = useState(signal && 'custom' in signal ? signal.custom : '');
   // 직접 입력이 **거절된** 이유(저장하지 않았다). 보정 안내는 저장된 상태에서 읽는다.
@@ -395,6 +399,7 @@ function SignalGroup(): React.JSX.Element {
             onSubmitEditing={apply}
             placeholder="#RRGGBB"
             placeholderTextColor={palette.textMuted}
+            keyboardAppearance={keyboardAppearance}
             autoCapitalize="characters"
             autoCorrect={false}
             maxLength={7}

@@ -101,7 +101,9 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
+  type LayoutChangeEvent,
   type StyleProp,
   type TextStyle,
 } from 'react-native';
@@ -171,8 +173,21 @@ import {
   type ApprovalReceipt,
 } from './approvalGate';
 import {LandedTintFade, ReduceMotionRefContext} from './LandedTintFade';
-import {EASE_OUT, SEND_ARRIVE_MS, SEND_ARRIVE_RISE} from '../../design/motion';
-import {hasArrived, markArrived} from './sendArrival';
+import {
+  SEND_ARRIVE_EASE,
+  SEND_ARRIVE_MS,
+  SEND_ARRIVE_RISE_FACTOR,
+  SEND_ARRIVE_RISE_FACTOR_HEAD,
+  SEND_ARRIVE_UNMEASURED_HEIGHT,
+} from '../../design/motion';
+import {
+  ARRIVAL_SURFACE_CHANNEL,
+  hasArrived,
+  holdArrival,
+  markArrived,
+  withinArrivalWindow,
+} from './sendArrival';
+import {useSlowSend} from './sendSlow';
 
 /** 표가 없는 표면(측정 하네스·검색 미리보기)에서 매번 새 Map 을 짓지 않으려고. */
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
@@ -283,6 +298,19 @@ import {MessageRunStatus} from '../agents/MessageRunStatus';
  * 패딩이 절반씩 문다. 시험이 상한(8)을 지킨다 — 다시 벌어지면 빨개진다.
  */
 const CONTINUATION_GAP = 6;
+
+/**
+ * 이어지는 행의 느린 전송 시계가 아바타 칸에서 서는 높이(#4455): 말풍선 첫 줄의 가운데. 본문 줄 높이는 글자 배율
+ * (Dynamic Type — 메시지 본문은 상한이 없다, `atoms.tsx`)을 곱해서 자라므로 배율을 받는다. 배율 없이 `line.body` 로
+ * 잡으면 배율 2 에서 시계가 첫 줄 가운데보다 ≈ 11pt 위에 선다(design-review r1 M3).
+ */
+export function slowMarkGutterTop(fontScale: number): number {
+  return (
+    CONTINUATION_GAP / 2 +
+    CONV.bubblePadY +
+    (line.body * fontScale - CONV_ICON_SIZE.clock) / 2
+  );
+}
 
 /**
  * 반응 칩의 레이아웃 변. 두 축 모두 이 값이고, 두 축 모두 슬롭이 44 로 채운다.
@@ -601,6 +629,7 @@ function Author({
   directory,
   memberId,
   time,
+  pendingMark,
   onOpenProfile,
   onLongPress,
   delayLongPress,
@@ -610,9 +639,22 @@ function Author({
   memberId: string;
   /**
    * 이름 뒤 같은 줄의 시각 (DS2-4 — owner 표 「이름 굵게 + 시간 회색 한 줄」).
-   * 서버 시계가 없는 행(보내는 중)은 주지 않는다 — 지어내지 않는다(#1083).
+   *
+   * 서버 사본은 서버가 찍은 시각을 준다. 보내는 중인 메아리(`PendingRow`)는 **기기 시계의 보낸
+   * 시각**을 준다(#4455 — planner 결정, #1083 「지어내지 않는다」를 메아리 **머리 행에 한해** 뒤집음).
+   * 이유: 이슈가 문제 삼은 것이 「보낼 때 잠깐 생겼다 사라지는 글자」인데, 교체 때 시각 글자가 새로
+   * 생기는 것도 같은 종류의 깜빡임이다(Buzz·Telegram 도 보내는 즉시 시각을 보인다). 같은 분이면
+   * 서버 사본으로 바뀔 때 글자 변화가 0 이다. **위험**: 보낸 순간이 분 경계에 걸리거나 기기 시계가
+   * 서버와 다르면 교체 때 한 번 서버 시각으로 바뀐다(순서·정렬은 이 글자와 무관하다 — `message.seq`).
+   * 연속 행은 시각을 그리지 않으므로(행 시각 칸) 이 규칙의 대상이 아니다.
    */
   time?: string;
+  /**
+   * 오래 걸리는 전송의 표지 (#4455). **시각 바로 오른쪽**(이름 줄 끝)에 선다 — 시각(`time`)은
+   * 메아리도 그리므로 서버 사본이 오면 시계만 사라지고 시각은 그 자리에 그대로 있다. 폭·높이 0 상자에
+   * 절대 배치로 매달려 있어서 나타나고 사라질 때 줄이 넘어가거나 줄 높이가 바뀌지 않는다.
+   */
+  pendingMark?: React.ReactNode;
   onOpenProfile?: () => void;
   onLongPress?: () => void;
   delayLongPress?: number;
@@ -654,6 +696,11 @@ function Author({
           testID="row-time">
           {time}
         </Text>
+      ) : null}
+      {pendingMark ? (
+        <View pointerEvents="none" style={styles.authorMarkHost}>
+          {pendingMark}
+        </View>
       ) : null}
     </>
   );
@@ -2238,6 +2285,14 @@ export interface MessageRowProps {
    * 맞는다.
    */
   registerRowNode?: (id: string, node: View) => () => void;
+  /**
+   * **대기 중인 서버 사본**이다(#4455 design-review r3 H3, `sendArrival.ts` 「사진은 서버 사본을 먼저 마운트해 두고」). 사진 메아리가
+   * 서버 사본에 자리를 내줄 때 새 `<Image>` 가 첫 프레임에 안 그려져 타일이 한 프레임 빈 면으로 번쩍이므로, 서버 사본을 **눈에 안 보이는
+   * 채 미리 마운트**해 이미지를 그려 두고 메아리가 걷히는 커밋에 드러낸다. 대기 중에는 높이 0 · 투명 · 위 여백 없음 · 눌림·낭독 없음 —
+   * 레이아웃에 자리를 안 차지하고(자식은 넘쳐 그려지지만 투명하다) 메아리가 아직 그 자리를 지킨다. **구조는 그대로 둔다**: 같은
+   * 인스턴스가 대기에서 드러남으로 이어져야 하므로 스타일·접근성 속성만 바꾼다.
+   */
+  standby?: boolean;
 }
 
 /**
@@ -2313,6 +2368,7 @@ function MessageRowInner({
   runEnded,
   runStatus,
   registerRowNode,
+  standby,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   rowRenders += 1;
@@ -2858,14 +2914,19 @@ function MessageRowInner({
       onAccessibilityAction={onAccessibilityAction}
       style={[
         styles.row,
-        startsGroup && styles.rowStartsGroup,
+        // 대기 중인 서버 사본은 위 여백도 지지 않는다 — 레이아웃에 0 을 낸다(메아리가 아직 그 자리를 지킨다).
+        startsGroup && !standby && styles.rowStartsGroup,
+        standby && styles.rowStandby,
         // 착지 틴트는 **그릇**이 입는다. 그릇 상자가 곧 강조 면이다 — 화면 끝에서
         // `ROW_FACE.outer` 떨어지고 모서리가 둥글다(눌림 면·물러나는 덮개와 같은 상자,
         // `rowFace.ts`). 옛 근거(「안쪽에 걸면 좌우가 안 물든다」)는 owner 2026-10-24 가
         // 「각지다」고 짚어 대체됐다.
         landed && styles.rowLanded,
       ]}
-      testID="message-row"
+      pointerEvents={standby ? 'none' : undefined}
+      accessibilityElementsHidden={standby ? true : undefined}
+      importantForAccessibility={standby ? 'no-hide-descendants' : undefined}
+      testID={standby ? 'message-row-standby' : 'message-row'}
       {...longPress.handlers}>
       {/* 틴트가 **물러나는 순간**의 덮개 (#3921). 서 있는 동안은 아무것도 그리지 않는다 —
           위 그릇이 배경으로 입는다. 첫 자식이라 내용 뒤에 깔린다. */}
@@ -3475,6 +3536,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   runEnded: true,
   runStatus: true,
   registerRowNode: true,
+  standby: true,
 };
 
 /**
@@ -3555,7 +3617,9 @@ export function sameMessageRowProps(
     // #1892 R1 M-3. 목록이 한 함수를 모든 행에 나눠 주므로 동일성으로 충분하다.
     // 빠지면 필이 켜진 표면으로 옮겨 온 행이 노드를 알리지 않아 초점이 그 행에
     // 가지 못한다.
-    a.registerRowNode === b.registerRowNode
+    a.registerRowNode === b.registerRowNode &&
+    // #4455 r3 H3. 대기에서 드러남으로 바뀔 때 이 행이 다시 그려져야 한다 — 빠지면 서버 사본이 투명한 채 남는다.
+    a.standby === b.standby
   );
 }
 
@@ -3744,6 +3808,24 @@ export function WorkingRow({
  * `WorkingRow` 가 이미 답을 들고 있다: 누를 것이 없는 행도 **여백은 진다**. 같은
  * `rowInner` 를 쓰되 `rowTimeReserve` 는 안 쓴다 — 이 행에는 시각이 없고, 없는
  * 것을 위해 자리를 비우면 그것은 예약이 아니라 그냥 여백이다.
+ *
+ * ## 정상 전송에는 아무것도 깜빡이지 않는다 (#4455)
+ *
+ * 이 행은 실패가 아니면 언제나 「전송 중」 줄을 그렸고 본문을 흐리게(`muted`) 그렸다. 정상 전송은
+ * 수백 ms 안에 서버 사본으로 바뀌므로 그 줄은 잠깐 서고 사라지는 글자였고, 사라질 때 행이 14.7pt
+ * 줄었으며(#4331 Maestro 실측 content 1509→1494.3) 본문은 불투명도 0.6(말풍선)·0.7(첨부)에서
+ * 1.0 으로 한 번 튀었다. 키가 `p-<clientMsgId>` → `m-<seq>` 로 달라 교체는 언제나 **다른 컴포넌트의
+ * 새 마운트**이므로, 두 행은 **같은 모양으로 서야** 이어진다.
+ *
+ *   - 정상 전송: 서버 사본과 같은 해부·같은 색. 글자 한 줄도 더하지 않는다.
+ *   - 오래 걸리는 전송(`SEND_SLOW_MS` 이상): 작은 시계 하나만. 흐름에 자리를 차지하지 않는다 —
+ *     머리 행은 시각 바로 오른쪽(이름 줄 끝)에, 이어지는 행은 아바타 칸에 절대 배치로 앉는다.
+ *   - 실패: 예전 그대로(흐린 본문 + 「전송 실패」 + 「다시 보내기」).
+ *   - 글 없이 사진·파일만 보낸 메시지(#4294)는 서버 사본이 본문 칸을 접으므로(`hasRenderableBody`)
+ *     메아리도 접는다. 빈 말풍선이 서 있다가 교체 때 사라지면 그것이 곧 높이 변화다.
+ *   - **머리 행은 기기 시계의 보낸 시각을 그린다**(planner 결정 — #1083 「지어내지 않는다」를 메아리
+ *     머리 행에 한해 뒤집음. 근거·위험은 `Author` 의 `time`). 서버 사본이 오면 서버 시각으로 바뀌고,
+ *     같은 분이면 글자 변화 0 이다. 이어지는 행에는 시각이 없다(서버 사본도 같다).
  */
 export function PendingRow({
   pending,
@@ -3752,10 +3834,16 @@ export function PendingRow({
   quote,
   quoteAttachmentCount,
   onResend,
+  arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
 }: {
   pending: PendingMessage;
   startsGroup: boolean;
   directory: Directory;
+  /**
+   * 이 메아리를 그리는 `Timeline` 의 표면(`sendArrival.ts`). 오름이 도는 동안 확정본 자리를 지키는 보류가 **같은 표면의 목록에서만**
+   * 읽히도록 장부에 함께 적는다(#4455 design-review r2 M4). 채널 목록은 기본값이다.
+   */
+  arrivalSurface?: string;
   /**
    * 이 전송이 인용을 걸고 나갔다면 그 블록 (ADR-0148).
    *
@@ -3771,48 +3859,79 @@ export function PendingRow({
   const styles = useStyles(buildStyles);
   const failed = pending.status === 'failed';
 
-  // 등장 (#4383): 입력창에서 올라와 자리에 앉는다 — **이 메아리가 마운트되는 한 번**만. 서버
-  // 사본(`MessageRow`)이 대체할 때는 움직이지 않고, 가상화로 다시 마운트돼도 장부가 막는다.
-  // 오름·불투명도만 건드린다(높이·여백은 바닥 추적의 측정 대상이다). 「동작 줄이기」·이미 실패한
-  // 행은 처음부터 자리에 선다. 햅틱은 더하지 않는다(보내기 햅틱은 컴포저의 것이다).
+  // 오래 걸리는 전송만 시계 하나로 알린다(#4455). 시작 시각은 보낸 시각이다(`sendSlow.ts`).
+  const slow = useSlowSend(pending.createdAtMs, pending.status);
+
+  // 등장 (#4383 → #4455): 입력창 밑에서 올라와 자리에 앉는다 — **이 메아리가 마운트되는 한 번**,
+  // 그리고 **보낸 지 자격 창 안에 그려졌을 때만**. 서버 사본(`MessageRow`)이 대체할 때는 움직이지
+  // 않고, 가상화로 다시 마운트돼도 장부가 막는다. 「동작 줄이기」·이미 실패한 행은 처음부터 자리에
+  // 선다. 햅틱은 더하지 않는다(보내기 햅틱은 컴포저의 것이다).
+  //
+  // 시작 거리는 **자기 높이의 배수**다. 높이는 첫 레이아웃 이벤트에서 알므로(`onArriveLayout`) 그
+  // 전 한두 프레임은 가정 높이(`SEND_ARRIVE_UNMEASURED_HEIGHT`)로 목록 가장자리 밑에 숨어 있다.
+  // 움직이는 것은 transform 하나다 — 높이·여백·불투명도는 건드리지 않는다(바닥 추적의 측정 대상이고,
+  // 목록이 가장자리에서 행을 자르므로 페이드가 필요 없다).
   const reduceMotionRef = useContext(ReduceMotionRefContext);
-  const [arrive] = useState(() =>
-    pending.status === 'failed' ||
-    reduceMotionRef?.current === true ||
-    hasArrived(pending.clientMsgId)
-      ? null
-      : new Animated.Value(0),
-  );
+  const [arrival] = useState(() => {
+    if (
+      pending.status === 'failed' ||
+      reduceMotionRef?.current === true ||
+      hasArrived(pending.clientMsgId) ||
+      !withinArrivalWindow(pending.createdAtMs)
+    ) {
+      return null;
+    }
+    const factor = startsGroup ? SEND_ARRIVE_RISE_FACTOR_HEAD : SEND_ARRIVE_RISE_FACTOR;
+    // 1 → 0. 남은 오름의 비율이고, 곱하는 쪽(`offset`)이 자리보다 아래인 거리(pt)다.
+    const remaining = new Animated.Value(1);
+    const offset = new Animated.Value(factor * SEND_ARRIVE_UNMEASURED_HEIGHT);
+    return {factor, remaining, offset, translateY: Animated.multiply(remaining, offset)};
+  });
+  // 마운트 때의 모습. 확정본이 등장 도중에 와도 이 메아리를 자리에 두려고 장부에 적는 사본이다(아래 효과).
+  const [mounted] = useState(() => ({pending, startsGroup, surface: arrivalSurface}));
   useLayoutEffect(() => {
     markArrived(pending.clientMsgId);
-    if (arrive === null) return undefined;
-    const run = Animated.timing(arrive, {
-      toValue: 1,
+    if (arrival === null) return undefined;
+    // 오름이 도는 동안은 확정본이 와도 이 메아리를 그 자리에 둔다 — 키가 갈려 transform 이 한 번에 사라지는 것을
+    // 막는다(`sendArrival.ts`, design-review r1 H1). 오름이 없는 행(동작 줄이기·자격 창 밖·실패)은 적지 않는다.
+    holdArrival(mounted.pending, mounted.startsGroup, undefined, mounted.surface);
+    const run = Animated.timing(arrival.remaining, {
+      toValue: 0,
       duration: SEND_ARRIVE_MS,
-      easing: EASE_OUT,
+      easing: SEND_ARRIVE_EASE,
       useNativeDriver: true,
     });
     run.start();
     return () => run.stop();
-  }, [arrive, pending.clientMsgId]);
+  }, [arrival, mounted, pending.clientMsgId]);
+  const onArriveLayout = useCallback(
+    (event: LayoutChangeEvent) => {
+      arrival?.offset.setValue(arrival.factor * event.nativeEvent.layout.height);
+    },
+    [arrival],
+  );
+
+  // VoiceOver (planner 결정 3): 정상 전송에는 낭독이 없다(곧 서버 사본으로 교체된다). 기준 시간을
+  // 넘긴 전송에서만 이 시계가 「전송 중」으로 읽힌다. 실패는 기존 줄(「전송 실패」·「다시 보내기」)이다.
+  const {fontScale} = useWindowDimensions();
+  const slowMark = slow ? (
+    <Image
+      accessible
+      accessibilityLabel="전송 중"
+      source={CONV_ICONS.clock}
+      style={[styles.slowMark, startsGroup && styles.slowMarkInline]}
+      testID="pending-slow"
+    />
+  ) : null;
 
   return (
     <Animated.View
       style={[
         styles.row,
         startsGroup && styles.rowStartsGroup,
-        arrive !== null && {
-          opacity: arrive,
-          transform: [
-            {
-              translateY: arrive.interpolate({
-                inputRange: [0, 1],
-                outputRange: [SEND_ARRIVE_RISE, 0],
-              }),
-            },
-          ],
-        },
+        arrival !== null && {transform: [{translateY: arrival.translateY}]},
       ]}
+      onLayout={arrival !== null ? onArriveLayout : undefined}
       testID="pending-row">
       {/* 시각 칸은 안 쓰고(이 행에는 시각이 없다) **아바타 칸은 쓴다** — 이
           행의 존재 이유가 「서버 사본이 대체할 때 글이 다시 흐르지 않게」이고,
@@ -3825,7 +3944,14 @@ export function PendingRow({
           </View>
         ) : null}
         {startsGroup ? (
-          <Author directory={directory} memberId={pending.authorMemberId} />
+          <Author
+            directory={directory}
+            memberId={pending.authorMemberId}
+            // 기기 시계의 보낸 시각(`Author` 의 `time` 설명). 서버 사본이 오기 전에도 시각 글자가 서 있어서
+            // 교체 때 글자가 새로 생기지 않는다. 시각을 알 수 없으면(유한한 수가 아니면) 지어내지 않는다.
+            time={Number.isFinite(pending.createdAtMs) ? timeLabel(pending.createdAtMs) : undefined}
+            pendingMark={slowMark}
+          />
         ) : null}
         {quote ? (
           <QuoteBlock
@@ -3834,25 +3960,30 @@ export function PendingRow({
             attachmentCount={quoteAttachmentCount}
           />
         ) : null}
-        {/* Same anatomy as a confirmed row, dimmed: the text must not re-flow
-            when the server's copy replaces this one — which is exactly why the
-            echo goes through the SAME renderer. Before this, a pending row
-            printed markdown raw and then rearranged itself the instant its seq
-            landed. */}
-        <MessageBody
-          body={pending.body}
-          directory={directory}
-          muted
-          selectable
-          selfMemberId={pending.authorMemberId}
-          // 낙관적 메아리는 언제나 내 글이다 — 서버 사본이 대체할 때 모양이 안 바뀌어야 한다.
-          bubble="mine"
-        />
+        {/* Same anatomy as a confirmed row: the text must not re-flow when the
+            server's copy replaces this one — which is exactly why the echo goes
+            through the SAME renderer. Before this, a pending row printed
+            markdown raw and then rearranged itself the instant its seq landed.
+            Same COLOUR too (#4455): only a FAILED echo is dimmed, because a
+            dimmed body that brightens on every successful send is a flash.
+            And the same body slot: the server's copy folds it away when there is
+            nothing to read (`hasRenderableBody`, a photo-only send #4294). */}
+        {hasRenderableBody(pending.body) ? (
+          <MessageBody
+            body={pending.body}
+            directory={directory}
+            muted={failed}
+            selectable
+            selfMemberId={pending.authorMemberId}
+            // 낙관적 메아리는 언제나 내 글이다 — 서버 사본이 대체할 때 모양이 안 바뀌어야 한다.
+            bubble="mine"
+          />
+        ) : null}
         {pending.attachments && pending.attachments.length > 0 ? (
           <AttachmentList
             channelId={pending.channelId}
             attachments={pending.attachments}
-            muted
+            muted={failed}
           />
         ) : null}
         {failed ? (
@@ -3869,11 +4000,15 @@ export function PendingRow({
               </Pressable>
             ) : null}
           </View>
-        ) : (
-          <Text style={styles.sending} testID="pending-sending">
-            전송 중
-          </Text>
-        )}
+        ) : null}
+        {/* 이어지는 행에는 시각이 없다 — 시계는 아바타 칸에 절대 배치로 앉는다(레이아웃 비용 0). */}
+        {!startsGroup && slowMark !== null ? (
+          <View
+            pointerEvents="none"
+            style={[styles.slowMarkGutter, {top: slowMarkGutterTop(fontScale)}]}>
+            {slowMark}
+          </View>
+        ) : null}
       </View>
     </Animated.View>
   );
@@ -4058,6 +4193,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * 2 좁다: 아바타가 40 으로 커져 묶음 경계가 얼굴로 먼저 읽힌다.
    */
   rowStartsGroup: {marginTop: CONV.groupGap - CONTINUATION_GAP},
+  /**
+   * 대기 중인 서버 사본(#4455 r3 H3): 레이아웃에 자리를 차지하지 않고(높이 0 — 자식은 넘쳐 그려진다, RN 의 `flexShrink` 기본은 0 이라
+   * 자식 높이가 줄지 않는다) 보이지 않는다. 투명한 채로도 이미지 뷰는 마운트되어 그려진다.
+   */
+  rowStandby: {height: 0, opacity: 0},
   // 시각 칸의 여백은 여기 없다 — 그릇(`rowTimeReserve`)이 진다. 이 줄에만
   // 걸어 두었던 것이 M-1 이 말한 구멍의 절반이었다: 예약이 자식에 붙어 있으면
   // **그 자식이 없는 행**은 예약도 없다.
@@ -4157,7 +4297,40 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     minWidth: TOUCH_TARGET - 2 * META_SLOP,
     textAlign: 'right',
   },
-  sending: {fontSize: font.meta, color: color.textFaint},
+  // 오래 걸리는 전송의 시계 (#4455). 크기는 `CONV_ICON_SIZE.clock`(= 시각 글자 12), 색은 시각 글자와
+  // 같은 `textMuted`(`authorTime`) — 시각이 설 자리에 서므로 서버 사본이 오면 시각이 이어받는다.
+  slowMark: {
+    width: CONV_ICON_SIZE.clock,
+    height: CONV_ICON_SIZE.clock,
+    tintColor: color.textMuted,
+  },
+  // 머리 행: 이름 줄의 폭·높이 0 상자(`authorMarkHost`) 안에서 절대 배치 — 줄 가운데에 세운다.
+  // `left` 는 상자가 시각 오른쪽 끝에 붙는 대신(아래 `authorMarkHost` 의 음수 마진) 시계가 그 간격만큼 띄워 서게 한다.
+  slowMarkInline: {position: 'absolute', left: CONV.whoGap, top: -CONV_ICON_SIZE.clock / 2},
+  // 이어지는 행: 아바타 칸(폭 `CONV.avatar`)의 오른쪽 끝, 말풍선 첫 줄 가운데. 칸은 이 행들에서
+  // 비어 있다. 절대 배치라 세로 비용이 0 이다. 말풍선 위쪽 안쪽 여백(`CONV.bubblePadY`)과 본문 줄
+  // 높이로 첫 줄의 가운데를 잡는다(줄 보기 레이아웃은 안쪽 여백이 없어 그만큼 아래다).
+  slowMarkGutter: {
+    position: 'absolute',
+    left: ROW_FACE.inner,
+    width: CONV.avatar,
+    top: slowMarkGutterTop(1),
+    alignItems: 'flex-end',
+  },
+  // 머리 행 이름 줄에서 표지를 매다는 상자. 폭 0·높이 0 이라 흐름에 자리가 없고(줄 높이 불변),
+  // `alignSelf: 'center'` 로 줄 상자의 가운데에 선다.
+  //
+  // **줄바꿈도 막는다**(design-review r1 M2): 이 줄은 `flexWrap: 'wrap'` + `columnGap` 이라 Yoga 가 항목을 줄에 넣을지를
+  // `이미 쓴 폭 + 항목 폭 + 항목 마진 + 앞 간격 > 줄 폭` 으로 가른다(`FlexLine.cpp`). 폭 0 이어도 앞 간격(`whoGap`)이
+  // 더해져서, 이름·핸들·시각이 줄을 그만큼 안쪽까지 채우면 상자만 높이 0 의 새 줄로 넘어가 시계가 이름 밑·말풍선
+  // 모서리에 걸린다. 음수 마진이 그 간격을 되돌려 항목의 몫이 0 이 되므로 시각이 들어간 줄에는 언제나 들어간다.
+  authorMarkHost: {
+    width: 0,
+    height: 0,
+    alignSelf: 'center',
+    overflow: 'visible',
+    marginLeft: -CONV.whoGap,
+  },
   // 본문 크기의 자리를 차지하되 본문의 무게는 갖지 않는다 — 이것은 메시지에
   // **대한** 서술이지 메시지가 아니다(묘비와 같은 규칙).
   //
