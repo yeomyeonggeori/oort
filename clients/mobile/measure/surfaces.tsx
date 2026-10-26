@@ -379,7 +379,16 @@ import type {
 // =============================================================================
 LogBox.ignoreAllLogs(true);
 
-const ROSTER = makeStressRoster();
+// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 「나」·동료는 실제 팀원 이름이라 하네스에서 가상 인물로
+// 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은 변하지 않는다.
+const VIRTUAL_PEOPLE: Record<string, {displayName: string; handle: string}> = {
+  seongjae: {displayName: '이도현', handle: 'dohyun'},
+  dayeon: {displayName: '박서연', handle: 'seoyeon'},
+};
+const ROSTER = makeStressRoster().map(member => {
+  const virtual = VIRTUAL_PEOPLE[member.handle];
+  return virtual ? {...member, ...virtual} : member;
+});
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
