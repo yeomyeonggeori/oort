@@ -2430,6 +2430,101 @@
   min-inline-size: 0;
 }
 
+/* 상단 오른쪽 다운로드 단추의 링과 점 (#4587). 인라인 style이 금지라 진행률은 `data-ring-step`
+ * (1..12)로 양자화해 이 규칙이 그린다. 링은 단추 안쪽 한 겹(28 → 24)이고, 트랙은 `--ink`의 옅은 겹,
+ * 호는 `--ink`다. 색은 단추가 선 자리(띠의 윗줄)의 글자 역할을 그대로 따르므로 어느 팔레트·유리·
+ * 배경화면 위에서도 글자와 같은 대비를 갖는다. 길이를 모르는 링(`unknown`)은 4분의 1 호가 돈다:
+ * 움직임이 곧 정보다(멈춰 있으면 「0%」로 읽힌다). 돌리는 것은 `spinner-busy`(줄인 움직임에서는
+ * 8단으로 끊어 돈다). 점은 끝났는데 아직 열어 보지 않은 것의 표지고 실제 상태에만 묶인다:
+ * 새로 받은 것은 신호색, 받지 못한 것은 위험색이다. */
+.download-ring {
+  position: absolute;
+  inset: var(--spacing-marker);
+  border: var(--spacing-marker) solid color-mix(in srgb, var(--ink) 24%, transparent);
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.download-ring::after {
+  content: "";
+  position: absolute;
+  inset: calc(var(--spacing-marker) * -1);
+  border-radius: inherit;
+  background-image: conic-gradient(var(--ink) var(--download-ring-fill, 0%), transparent 0);
+  mask-image: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--spacing-marker)),
+    var(--ink) calc(100% - var(--spacing-marker))
+  );
+}
+
+.download-ring[data-ring-step="unknown"] {
+  --download-ring-fill: 25%;
+}
+
+.download-ring[data-ring-step="1"] {
+  --download-ring-fill: 8.333%;
+}
+
+.download-ring[data-ring-step="2"] {
+  --download-ring-fill: 16.667%;
+}
+
+.download-ring[data-ring-step="3"] {
+  --download-ring-fill: 25%;
+}
+
+.download-ring[data-ring-step="4"] {
+  --download-ring-fill: 33.333%;
+}
+
+.download-ring[data-ring-step="5"] {
+  --download-ring-fill: 41.667%;
+}
+
+.download-ring[data-ring-step="6"] {
+  --download-ring-fill: 50%;
+}
+
+.download-ring[data-ring-step="7"] {
+  --download-ring-fill: 58.333%;
+}
+
+.download-ring[data-ring-step="8"] {
+  --download-ring-fill: 66.667%;
+}
+
+.download-ring[data-ring-step="9"] {
+  --download-ring-fill: 75%;
+}
+
+.download-ring[data-ring-step="10"] {
+  --download-ring-fill: 83.333%;
+}
+
+.download-ring[data-ring-step="11"] {
+  --download-ring-fill: 91.667%;
+}
+
+.download-ring[data-ring-step="12"] {
+  --download-ring-fill: 100%;
+}
+
+.download-dot {
+  position: absolute;
+  inset-block-start: var(--spacing-1);
+  inset-inline-end: var(--spacing-1);
+  inline-size: var(--spacing-2);
+  block-size: var(--spacing-2);
+  border-radius: 9999px;
+  background-color: var(--signal);
+  pointer-events: none;
+}
+
+.download-dot[data-tone="failed"] {
+  background-color: var(--danger);
+}
+
 /* S1/S2 스텝 크롬 (#1882). AppTitlebar와 같은 트래픽라이트 인셋·드래그 계약이되
  * 온보딩은 셸 그리드 밖이고 390px에서도 선다(app-titlebar는 600 미만에서 숨음).
  * 버튼은 이 유틸을 갖지 않고 pointerdown을 멈춘다. */
