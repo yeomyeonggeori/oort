@@ -36,12 +36,20 @@ const asJson = args.includes('--json');
 const asSummary = args.includes('--summary');
 const EPS = [0.5, 0.01];
 
-const records = fs
+const loaded = fs
   .readFileSync(file, 'utf8')
   .split('\n')
   .filter(line => line.trim() !== '')
   .map(line => JSON.parse(line))
   .filter(record => record.scenario === 'enter' && Array.isArray(record.trace) && (wantTag === null || record.tag === wantTag));
+// 입력이 한 번도 없는 기록(`touch-down` 표식 없음)은 **유령 기록**이다: 측정 중 Metro 가 번들을 다시 지어 시뮬레이터에 남아 있던 앱이 장면을 혼자 다시 돌고, 그때 싱크의
+// 태그 파일에 적힌 (다른 실행의) 태그로 결과를 보낸 것이다(2026-10-27 #4613 실측: `rec-after-se-dark` 가 두 줄이 됐다). 누름·글자 창이 비어 있어 표에 섞이면 같은 태그가
+// 두 가지 숫자를 갖는다 — 조용히 합치지 않고 건너뛰되 건너뛴 사실을 stderr 로 알린다.
+const hasTouch = record => Array.isArray(record.events) && record.events.some(event => String(event.what).startsWith('touch-down'));
+const records = loaded.filter(hasTouch);
+for (const ghost of loaded.filter(record => !hasTouch(record))) {
+  console.error(`건너뜀: 입력(touch-down)이 없는 기록 — 태그 ${ghost.tag}, 받은 때 ${ghost.at} (유령 기록)`);
+}
 
 const round = value => Math.round(value * 100) / 100;
 const num = value => typeof value === 'number' && Number.isFinite(value);

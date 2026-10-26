@@ -5,6 +5,8 @@
  *
  *   node measure/activity-rows.mjs <sink.jsonl> [--tag <태그>] [--prefix <태그 앞부분>] [--matrix] [--json]
  *   `--matrix`: 기록마다 한 줄 — 문구 변형별 「0…59초에서 높이가 뒤집힌 횟수」를 이름(짧은/중간/긴) 순으로 `a/b/c` 로.
+ *   `--boundaries`: 기록마다 한 줄 — 높이가 뒤집힌 **어느 초 경계**인가(초별 변형 수)와 「59초 → 1분」 경계에서 뒤집힌 변형 수.
+ *               9→10초(자릿수)·59초→1분(단위)·0→1초(「방금 들어왔어요」→「1초째」, 다른 문장) 경계가 각각 몇 변형에서 뒤집히는지 가른다.
  *
  * 한 줄의 읽는 법: `plain/short  56 ×60 | 분: 56 ×9` = 이 변형은 0…59초 모두 높이 56. 높이가 둘 이상이면 `56 ×22, 68 ×38 · 뒤집힘 11번 · 68: 2 3 5…` 처럼
  * 어느 초에서 몇 번 뒤집히는지와 큰 높이가 되는 초를 적는다. **뒤집힘이 0 이 아니면 그 문구는 초가 바뀔 때 화면이 움직일 수 있다.**
@@ -20,6 +22,7 @@ const prefixIndex = args.indexOf('--prefix');
 const wantPrefix = prefixIndex === -1 ? null : args[prefixIndex + 1];
 const asMatrix = args.includes('--matrix');
 const asWide = args.includes('--wide');
+const asBoundaries = args.includes('--boundaries');
 const asJson = args.includes('--json');
 if (!file) {
   console.error('usage: node measure/activity-rows.mjs <sink.jsonl> [--tag <태그>] [--json]');
@@ -50,17 +53,24 @@ for (const record of records) {
     // 화면에서 보이지도 움직이지도 않는다 — 세지 않고 `subpixel` 로 따로 센다.
     let flips = 0;
     let subpixel = 0;
+    const flipSeconds = [];
     for (let index = 1; index < group.seconds.length; index += 1) {
       const delta = Math.abs(group.seconds[index] - group.seconds[index - 1]);
-      if (delta > 0.5) flips += 1;
-      else if (delta > 0) subpixel += 1;
+      if (delta > 0.5) {
+        flips += 1;
+        flipSeconds.push(index);
+      } else if (delta > 0) subpixel += 1;
     }
+    // 59초 표본에서 1분 표본으로 넘어갈 때(「59초째」→「1분째」) 높이가 뒤집히는가.
+    const minuteBoundaryFlip = group.minutes.length > 0 && Math.abs(group.minutes[0] - group.seconds[group.seconds.length - 1]) > 0.5;
     const heights = [...counts.keys()].sort((a, b) => a - b);
     const biggest = heights[heights.length - 1];
     rows.push({
       key,
       heights: heights.map(height => `${height}×${counts.get(height)}`),
       flips,
+      flipSeconds,
+      minuteBoundaryFlip,
       subpixel,
       secondsAtBiggest: flips > 0 ? group.seconds.map((height, second) => (Math.abs(height - biggest) <= 0.5 ? second : null)).filter(second => second !== null) : [],
       minutes: group.minutes,
@@ -74,6 +84,18 @@ if (asJson) {
   // `process.exit` 는 큰 출력을 파이프에서 자른다 — 정상 종료를 기다린다.
   process.stdout.write(`${JSON.stringify(out, null, 2)}\n`);
   process.exitCode = 0;
+}
+if (asBoundaries && !asJson) {
+  for (const entry of out) {
+    const flipping = entry.rows.filter(row => row.flips > 0);
+    const bySecond = new Map();
+    for (const row of entry.rows) for (const second of row.flipSeconds) bySecond.set(second, (bySecond.get(second) || 0) + 1);
+    const seconds = [...bySecond.entries()].sort((a, b) => a[0] - b[0]).map(([second, count]) => `${second}초:${count}`).join(' ') || '없음';
+    const minute = entry.rows.filter(row => row.minuteBoundaryFlip).length;
+    console.log(
+      `${String(entry.tag).padEnd(36)} ${String(entry.width).padStart(3)}pt ×${String(entry.fontScale).padEnd(5)} 변형 ${String(entry.rows.length).padStart(3)}개 | 뒤집힌 변형 ${String(flipping.length).padStart(3)} | 뒤집힌 초 경계(변형 수) ${seconds} | 59초→1분 경계 ${minute}`,
+    );
+  }
 }
 if (asWide && !asJson) {
   // `ACTIVITY-ROWS-WIDE`: 변형(생존 문구 × 앞에 m건) × 이름 마다 0…59초의 뒤집힘. 기록마다 요약 한 줄 + 뒤집히는 변형 목록.
@@ -104,7 +126,7 @@ if (asMatrix && !asJson) {
     void heights;
   }
 }
-if (!asJson && !asMatrix && !asWide) {
+if (!asJson && !asMatrix && !asWide && !asBoundaries) {
   for (const entry of out) {
     console.log(`\n### ${entry.tag}  폭 ${entry.width}pt · 글자 배율 ${entry.fontScale}`);
     for (const row of entry.rows) {
