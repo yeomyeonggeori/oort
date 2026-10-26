@@ -6,7 +6,9 @@ import {
   routineWaitText,
   runException,
   runExceptionText,
+  UNCLAIMED_END_REASONS,
   UNCOLLECTED_GRACE_MS,
+  UNCOLLECTED_HEADLINE,
   uncollectedDeadlineMs,
 } from "./runException";
 import { serverFactsOf } from "./runPhase";
@@ -109,17 +111,62 @@ describe("못 가져감 유예 (#4619: 예상 확인 시각이 있으면 그것,
 describe("예외 줄의 말: 낱말·이유·행동", () => {
   const LATE = T + 10 * MIN;
 
-  it("못 가져감: 낱말은 「아직 받지 않았어요」, 행동 후보는 다시 깨우기·취소·설정, 열린 run이다", () => {
+  it("못 가져감: 낱말은 「못 가져감」, 행동 후보는 다시 깨우기·취소·설정, 열린 run이다", () => {
     const e = runException(progress(), LATE);
     expect(e).toMatchObject({
       kind: "uncollected",
       runId: RUN,
       triggerMessageId: MSG,
-      headline: UNCOLLECTED_WORD,
+      headline: UNCOLLECTED_HEADLINE,
       open: true,
       actions: ["wake", "cancel", "settings"],
     });
-    expect(runExceptionText("달무리봇", e!)).toBe("달무리봇: 아직 받지 않았어요");
+    expect(UNCOLLECTED_HEADLINE).toBe("못 가져감");
+    expect(runExceptionText("달무리봇", e!)).toBe("달무리봇: 못 가져감");
+  });
+
+  it("홈 카드·작업 패널의 「아직 받지 않았어요」(5분, #4285)는 다른 표면의 말이라 이 줄의 낱말이 아니다", () => {
+    expect(UNCOLLECTED_HEADLINE).not.toBe(UNCOLLECTED_WORD);
+    expect(runException(progress(), LATE)?.headline).not.toBe(UNCOLLECTED_WORD);
+  });
+
+  it("서버가 아무도 가져가지 않아 끝낸 run(timed_out + unclaimed_expired·woken_not_collected)도 같은 「못 가져감」이다", () => {
+    expect([...UNCLAIMED_END_REASONS].sort()).toEqual(["unclaimed_expired", "woken_not_collected"]);
+    const cases: [string, string][] = [
+      ["unclaimed_expired", "아무도 가져가지 않아 끝냈어요"],
+      ["woken_not_collected", "깨웠지만 가져가지 않아 끝냈어요"],
+    ];
+    for (const [endReason, reason] of cases) {
+      const e = runException(
+        progress({ phase: "timed_out", status: "timed_out", endReason, finishedAtMs: T + 30 * MIN }),
+        T + HOUR
+      );
+      expect(e, endReason).toMatchObject({
+        kind: "uncollected",
+        headline: UNCOLLECTED_HEADLINE,
+        reason,
+        open: false,
+        // 끝난 run에는 되돌릴 행동이 없다.
+        actions: [],
+      });
+      expect(runExceptionText("달무리봇", e!)).toBe(`달무리봇: 못 가져감 · ${reason}`);
+    }
+  });
+
+  it("그 두 코드가 아닌 timed_out(가져간 뒤의 소식 끊김 등)은 여전히 시간 초과·신호 소실이다", () => {
+    const lost = runException(
+      progress({ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" }),
+      T + HOUR
+    );
+    expect(lost).toMatchObject({ kind: "timed_out", headline: "신호 소실" });
+    const plain = runException(progress({ phase: "timed_out", status: "timed_out" }), T + HOUR);
+    expect(plain).toMatchObject({ kind: "timed_out", headline: "시간 초과" });
+    // failed인데 같은 코드가 와도 실패다(코드가 phase를 덮어쓰지 않는다).
+    const failed = runException(
+      progress({ phase: "failed", status: "failed", endReason: "unclaimed_expired" }),
+      T + HOUR
+    );
+    expect(failed?.kind).toBe("failed");
   });
 
   it("이유의 순서: 루틴 박자가 있으면 그 말이 앞서고, 생존 판정의 「연결이 꺼져 있을 수 있어요」를 대신한다", () => {
@@ -130,7 +177,7 @@ describe("예외 줄의 말: 낱말·이유·행동", () => {
     });
     expect(e?.reason).toBe("다음 확인 때 가져가요(보통 15분 안)");
     expect(runExceptionText("달무리봇", e!)).toBe(
-      "달무리봇: 아직 받지 않았어요 · 다음 확인 때 가져가요(보통 15분 안)"
+      "달무리봇: 못 가져감 · 다음 확인 때 가져가요(보통 15분 안)"
     );
     expect(e?.reason).not.toContain("연결이 꺼져 있을 수 있어요");
   });
@@ -171,13 +218,13 @@ describe("예외 줄의 말: 낱말·이유·행동", () => {
     );
 
     const timedOut = runException(
-      progress({ phase: "timed_out", status: "timed_out", endReason: "woken_not_collected" }),
+      progress({ phase: "timed_out", status: "timed_out", endReason: "agent_error" }),
       T + HOUR
     );
     expect(timedOut).toMatchObject({
       kind: "timed_out",
       headline: "시간 초과",
-      reason: "깨웠지만 가져가지 않아 끝냈어요",
+      reason: "에이전트가 오류로 끝냈어요",
       open: false,
     });
 

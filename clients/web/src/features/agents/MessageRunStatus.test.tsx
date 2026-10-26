@@ -201,7 +201,7 @@ describe("예외 줄이 서는 때", () => {
     const line = q("run-exception");
     expect(line?.getAttribute("data-kind")).toBe("uncollected");
     expect(q("run-exception-text")?.textContent).toBe(
-      "달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요"
+      "달무리봇: 못 가져감 · 연결이 꺼져 있을 수 있어요"
     );
     // 행동: 다시 깨우기(생존 판정이 있을 때), 취소(StopRunControl), 에이전트 설정 열기.
     expect(q("wake-stub")?.getAttribute("data-state")).toBe("woken_not_collected");
@@ -214,7 +214,7 @@ describe("예외 줄이 서는 때", () => {
   it("생존 판정이 없으면(호스티드 아님) 이유도 다시 깨우기도 없다 — 지어내지 않는다", async () => {
     mount([run(Date.now())]);
     await settle();
-    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 아직 받지 않았어요");
+    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 못 가져감");
     expect(q("wake-stub")).toBeNull();
     // 취소는 생존 판정과 무관하다(요청이 열려 있으면 취소할 수 있다).
     expect(q("agent-work-panel-stop-arm")).not.toBeNull();
@@ -224,7 +224,7 @@ describe("예외 줄이 서는 때", () => {
     api.fetchAgentLiveness.mockResolvedValue(liveness("work_waiting"));
     mount([run(Date.now())]);
     await settle();
-    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 아직 받지 않았어요");
+    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 못 가져감");
   });
 
   it("실패·시간 초과: 낱말과 서버가 쓴 이유, 행동 없음(되돌릴 것이 없다), 색이 다르다", async () => {
@@ -312,7 +312,7 @@ describe("행동은 기존 것이다", () => {
       origin: "message",
     });
     expect(q("run-exception-open")?.getAttribute("aria-label")).toBe(
-      "달무리봇: 아직 받지 않았어요. 진행 과정 열기"
+      "달무리봇: 못 가져감. 진행 과정 열기"
     );
   });
 

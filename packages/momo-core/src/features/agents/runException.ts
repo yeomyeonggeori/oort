@@ -4,11 +4,7 @@ import {
   runPhaseLabel,
   serverFactsOf,
 } from "./runPhase";
-import {
-  isUntakenHumanRun,
-  UNCOLLECTED_WORD,
-  uncollectedReason,
-} from "./runWaiting";
+import { isUntakenHumanRun, uncollectedReason } from "./runWaiting";
 import type { ServerRunFacts } from "./workingSignal";
 
 // =============================================================================
@@ -17,18 +13,41 @@ import type { ServerRunFacts } from "./workingSignal";
 // 평소의 진행(받음 → 가져감 → 작업 중 → 답)은 입력창 레일과 메시지의 작은 칩이 말한다.
 // 대화 본 줄에 따로 줄을 세우는 것은 **사람이 움직여야 할 수 있는 상태**뿐이다:
 //
-//   못 가져감   사람이 부른 요청을 아무도 가져가지 않은 채 유예를 넘었다
+//   못 가져감   사람이 부른 요청을 아무도 가져가지 않은 채 유예를 넘었다(서버가 그래서 끝낸 것 포함)
 //   실패        서버가 `failed`로 끝냈다
-//   시간 초과   서버가 `timed_out`으로 끝냈다(신호 소실 포함)
+//   시간 초과   서버가 가져간 뒤 `timed_out`으로 끝냈다(신호 소실 포함)
 //
 // 이 모듈은 아무것도 새로 판정하지 않는다. 입력은 서버가 파생한 run 사실이고, 유예와 낱말만
-// 여기서 정한다. 낱말은 `runPhase`·`runWaiting`의 것을 그대로 쓴다: 같은 상태를 표면마다 다른
-// 낱말로 부르면 사람이 둘을 다른 상태로 읽는다. 웹과 폰이 같은 말을 하도록 코어에 둔다.
+// 여기서 정한다. 같은 상태를 표면마다 다른 낱말로 부르면 사람이 둘을 다른 상태로 읽는다. 웹과 폰이
+// 같은 말을 하도록 코어에 둔다.
+//
+// ## 같은 행의 칩과 같은 낱말이다 (`triggerChip`)
+//
+// 메시지 머리의 칩과 이 줄은 **한 행에 함께 선다**. 둘이 같은 run을 다른 낱말로 부르면(칩은
+// 「못 가져감」, 줄은 「시간 초과」) 읽는 사람은 두 사건으로 읽는다. 그래서 「아무도 가져가지 않은
+// 일」은 열려 있든(유예를 넘은 대기) 서버가 그래서 끝냈든(`unclaimed_expired`·`woken_not_collected`)
+// 한 낱말 `UNCOLLECTED_HEADLINE`(「못 가져감」)이고, 칩이 이 상수를 읽는다. 홈 카드·작업 패널의
+// 「아직 받지 않았어요」(#4285)는 **다른 표면**의 말이다: 거기는 5분 뒤의 낱말이고 이 줄·칩은 2분
+// 뒤의 낱말이다. 교차 시험(`runExceptionChipParity.test`)이 이 줄과 칩의 낱말을 함께 붙든다.
+// 실패는 두 곳이 같은 낱말(`runPhase`의 「실패」)이다. 서버가 가져가고 나서 끝낸 시간 초과·신호 소실은
+// 칩이 큰 범주(「실패」)로, 이 줄이 구체 낱말(`runPhase`의 「시간 초과」·「신호 소실」)로 말한다.
 //
 // 이 줄의 글자에는 **초 단위 숫자가 없다**. 경과를 말하지 않는다: 줄은 서고 나면 가만히 있고,
 // 시계가 돌지 않으니 다시 그릴 이유도 없다. 예외가 아닌 것(승인 대기·일시 정지·가져간 뒤 조용함)은
 // 여기서 null이다 — 승인은 카드가, 나머지는 레일과 작업 패널이 말한다.
 // =============================================================================
+
+/** 「아무도 가져가지 않은 일」의 낱말. 이 줄과 메시지 머리의 칩이 함께 읽는다(위 머리말). */
+export const UNCOLLECTED_HEADLINE = "못 가져감";
+
+/**
+ * 서버가 「아무도 가져가지 않아 끝냈다」고 쓰는 종료 코드. `timed_out`으로 끝나지만 에이전트가 일을
+ * 한 적이 없으므로 시간 초과(일하다 멈춤)가 아니라 **가져가지 않은 일**이다. 칩도 같은 목록을 읽는다.
+ */
+export const UNCLAIMED_END_REASONS: ReadonlySet<string> = new Set([
+  "unclaimed_expired",
+  "woken_not_collected",
+]);
 
 /**
  * 못 가져감 유예: 예상 확인 시각을 모를 때 이 시간이 지나야 예외 줄이 선다.
@@ -156,7 +175,7 @@ export interface RunException {
   runId: string;
   agentMemberId: string;
   triggerMessageId?: string;
-  /** 줄이 말하는 낱말: 「아직 받지 않았어요」 또는 `runPhase` 어휘(실패·시간 초과·신호 소실). */
+  /** 줄이 말하는 낱말: 「못 가져감」(`UNCOLLECTED_HEADLINE`) 또는 `runPhase` 어휘(실패·시간 초과·신호 소실). */
   headline: string;
   /** 이유 한 문장. 근거가 없으면 없다(지어내지 않는다). */
   reason?: string;
@@ -205,7 +224,7 @@ export function runException(
       return {
         ...base,
         kind: "uncollected",
-        headline: UNCOLLECTED_WORD,
+        headline: UNCOLLECTED_HEADLINE,
         ...(reason !== undefined ? { reason } : {}),
         open: true,
         actions: ["wake", "cancel", "settings"],
@@ -214,6 +233,21 @@ export function runException(
     case "failed":
     case "timed_out": {
       const reason = endReasonText(progress.endReason);
+      // 서버가 「아무도 가져가지 않아」 끝낸 run은 일하다 멈춘 것이 아니다: 열린 못 가져감과 같은 낱말이다.
+      if (
+        progress.phase === "timed_out" &&
+        progress.endReason !== undefined &&
+        UNCLAIMED_END_REASONS.has(progress.endReason)
+      ) {
+        return {
+          ...base,
+          kind: "uncollected",
+          headline: UNCOLLECTED_HEADLINE,
+          ...(reason !== undefined ? { reason } : {}),
+          open: false,
+          actions: [],
+        };
+      }
       return {
         ...base,
         kind: progress.phase === "failed" ? "failed" : "timed_out",
@@ -228,7 +262,7 @@ export function runException(
   }
 }
 
-/** 줄 전체를 한 문장으로(툴팁·보조기술·시험): 「달무리봇: 아직 받지 않았어요 · 다음 확인 때 가져가요(보통 15분 안)」. */
+/** 줄 전체를 한 문장으로(툴팁·보조기술·시험): 「달무리봇: 못 가져감 · 다음 확인 때 가져가요(보통 15분 안)」. */
 export function runExceptionText(
   name: string,
   exception: Pick<RunException, "headline" | "reason">

@@ -279,6 +279,50 @@ describe("스레드 요약 줄의 「작업 중」 칩 (E)", () => {
   });
 });
 
+describe("한 행의 칩과 예외 줄은 같은 낱말이다 (#4619)", () => {
+  it("유예를 넘어 아무도 가져가지 않은 요청: 칩도 줄도 「못 가져감」", () => {
+    const el = mount({
+      startsGroup: true,
+      runStatus: [
+        run({
+          status: "queued",
+          phase: "queued",
+          leaseState: "none",
+          startedAtMs: undefined,
+          createdAtMs: T0 - 10 * MIN,
+          updatedAtMs: T0 - 10 * MIN,
+        }),
+      ],
+    });
+    expect(q(el, "trigger-chip-word")?.textContent).toBe("못 가져감");
+    expect(q(el, "run-exception")?.getAttribute("data-kind")).toBe("uncollected");
+    expect(q(el, "run-exception-text")?.textContent).toBe("달무리봇: 못 가져감");
+  });
+
+  it("서버가 아무도 가져가지 않아 끝낸 요청(timed_out + woken_not_collected)도 같다 — 시간 초과가 아니다", () => {
+    const el = mount({
+      startsGroup: true,
+      runStatus: [
+        run({
+          status: "timed_out",
+          phase: "timed_out",
+          endReason: "woken_not_collected",
+          startedAtMs: undefined,
+          finishedAtMs: T0 - 1_000,
+        }),
+      ],
+    });
+    expect(q(el, "trigger-chip-word")?.textContent).toBe("못 가져감");
+    expect(q(el, "run-exception-text")?.textContent).toBe(
+      "달무리봇: 못 가져감 · 깨웠지만 가져가지 않아 끝냈어요"
+    );
+    expect(q(el, "run-exception-text")?.textContent).not.toContain("시간 초과");
+    // 끝난 run에는 되돌릴 행동이 없다.
+    expect(q(el, "agent-work-panel-stop-arm")).toBeNull();
+    expect(q(el, "run-exception-settings")).toBeNull();
+  });
+});
+
 describe("예외 줄 (D)", () => {
   it("실패한 run은 메시지 아래 한 줄로 서고 칩은 「실패」다", () => {
     const el = mount({

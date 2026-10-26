@@ -1,7 +1,12 @@
 import type { AgentRunProgress, Message } from "../../lib/api";
 import { turnRecordRunId } from "../timeline/cascadeModel";
 import { RAIL_WORD } from "./activityRail";
-import { isUncollectedPastGrace, type RoutineHint } from "./runException";
+import {
+  isUncollectedPastGrace,
+  UNCLAIMED_END_REASONS,
+  UNCOLLECTED_HEADLINE,
+  type RoutineHint,
+} from "./runException";
 import { runPhaseLabel, serverFactsOf } from "./runPhase";
 import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 
@@ -41,18 +46,13 @@ export type TriggerChipMark = "none" | "dot" | "check" | "alert";
 export type TriggerChipTone = "muted" | "working" | "ok" | "warn" | "danger";
 
 export const CHIP_WORD_ANSWERED = "답함";
-export const CHIP_WORD_UNCOLLECTED = "못 가져감";
+/** 예외 줄과 **같은 낱말**이다(`runException`의 머리말). 교차 시험이 둘을 함께 붙든다. */
+export const CHIP_WORD_UNCOLLECTED = UNCOLLECTED_HEADLINE;
 export const CHIP_WORD_FAILED = runPhaseLabel({
   phase: "failed",
   leaseState: "none",
   queuedAtMs: 0,
 });
-
-/** 서버가 「아무도 가져가지 않아 끝냈다」고 쓰는 종료 코드. 끝난 뒤에도 그 일은 「못 가져감」이다. */
-const UNCLAIMED_END_REASONS: ReadonlySet<string> = new Set([
-  "unclaimed_expired",
-  "woken_not_collected",
-]);
 
 /** 급한 순서(클수록 앞). */
 const PRIORITY: Readonly<Record<TriggerChipKind, number>> = {
