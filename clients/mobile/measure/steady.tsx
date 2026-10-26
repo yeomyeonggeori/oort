@@ -17,7 +17,7 @@ import {
   View,
   type GestureResponderEvent,
 } from 'react-native';
-import {Screen} from '../src/design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
@@ -98,6 +98,7 @@ import {setServerBase} from '../src/storage/serverBase';
 //             enter       기본 75초. 대기 중 run 의 나이는 3초에서 시작해 매초 글자가 바뀐다.
 //             `+age17h`   run 나이 17시간(글자는 고정, 1초 재렌더만 도는 대조군).   `+nobar` 활동 줄·1초 시계 없음(대조군).
 //             `+label`    에이전트 서버 생존 판정(D4 「깨웠지만 아직 안 가져감」)을 `livenessFor` 로 먹인다 — 실기 대화 화면이 근거 글 맨 앞에 싣는 문구(길다).
+//             `+ahead2`   근거 글 끝에 「에이전트 앞에 2건」.   `+grok` 에이전트 이름을 짧게(grok). 글자 크기는 `xcrun simctl ui <udid> content_size <단계>` 로 바꾼다(활동 줄 줄바꿈은 폭 × 글자 크기 × 문구의 곱이다).
 //             `+T<초>`    재는 시간. 프레임마다 맨 아래 행 y·목록 높이·입력창 높이·도크 높이·알약·포커스를 남기고, 스크롤 보고마다 출처(손가락/목록이 낸 것)와
 //             `chasingTail` 전이를 `scrollLog` 로, 햅틱 호출을 `haptics` 로(`expo-haptics` 를 이 하네스가 감싼다 — 배포 코드 무영향) 싱크에 보낸다.
 //
@@ -158,6 +159,8 @@ const DIRECTORY = makeDirectory([SELF_MEMBER, PEER_MEMBER]);
 const AGENT = '00000000-0000-7000-8000-0000000000e4';
 const AGENT_MEMBER = member({id: AGENT, kind: 'agent', displayName: 'hermes', handle: 'hermes'});
 const AGENT_DIRECTORY = makeDirectory([SELF_MEMBER, AGENT_MEMBER]);
+/** `enter+grok`: 짧은 이름(owner 의 실기 장면은 grok)의 같은 에이전트 — 활동 줄 첫 토막의 폭이 달라 줄바꿈 경계가 옮겨 간다(#4613). */
+const GROK_DIRECTORY = makeDirectory([SELF_MEMBER, member({id: AGENT, kind: 'agent', displayName: 'grok', handle: 'grok'})]);
 const AGENT_RUN = 'A2222222-2222-4222-8222-A22222222222';
 const AGENT_HISTORY: readonly {self: boolean; body: string}[] = [
   {self: true, body: '이번 주 일정 정리해 줄래요'},
@@ -177,7 +180,7 @@ const AGENT_HISTORY: readonly {self: boolean; body: string}[] = [
 ];
 
 /** 대기 중인 run 하나. 활동 줄이 「hermes: 대기 1번째 · N째 기다려요」로 선다(`queued` 는 목록 안 자리표시를 만들지 않는다). */
-function queuedTurn(ageMs: number): AgentWorkingSignal {
+function queuedTurn(ageMs: number, ahead = 0): AgentWorkingSignal {
   const now = Date.now();
   return {
     memberId: AGENT,
@@ -187,7 +190,7 @@ function queuedTurn(ageMs: number): AgentWorkingSignal {
     runId: AGENT_RUN,
     headlines: [],
     lastActivityAtMs: now,
-    server: {phase: 'queued', leaseState: 'none', queuePosition: 1, aheadTotal: 0, queuedAtMs: now - ageMs},
+    server: {phase: 'queued', leaseState: 'none', queuePosition: 1, aheadTotal: ahead, queuedAtMs: now - ageMs},
   };
 }
 
@@ -1020,9 +1023,12 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     if (agentDm) resetServer(true);
     return null;
   });
-  const directory = agentDm ? AGENT_DIRECTORY : DIRECTORY;
+  // `enter` 변형(#4613): `+grok` 짧은 이름 · `+ahead2` 「에이전트 앞에 2건」.
+  const grok = base === 'enter' && mods.includes('grok');
+  const ahead = base === 'enter' && mods.includes('ahead2') ? 2 : 0;
+  const directory = agentDm ? (grok ? GROK_DIRECTORY : AGENT_DIRECTORY) : DIRECTORY;
   const peerId = agentDm ? AGENT : PEER;
-  const peerName = agentDm ? 'hermes' : '박서연';
+  const peerName = agentDm ? (grok ? 'grok' : 'hermes') : '박서연';
   const historyLength = agentDm ? AGENT_HISTORY.length : HISTORY_BODIES.length;
   const fake = useRef<FakeRail | null>(null);
   if (fake.current === null) fake.current = createFakeRail();
@@ -1051,7 +1057,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const scrollLogRef = useRef<ScrollLogEntry[] | null>(base === 'enter' ? [] : null);
   const composerRef = useRef<View | null>(null);
   const [turns, setTurns] = useState<readonly AgentWorkingSignal[]>(() =>
-    agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge)] : [],
+    agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge, ahead)] : [],
   );
   const turnNowMs = useTickingNow(turns.length > 0);
   const [selfSendToken, setSelfSendToken] = useState(0);
@@ -1111,10 +1117,13 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const renderStop = useCallback(
     () => (
       <View style={stopStyle.quiet}>
-        <Text style={[stopStyle.label, {color: palette.accentText}]}>중단</Text>
+        {/* 진짜 `StopTurnControl`(미장착)과 같다: 대기 중 run 의 낱말 「취소」 · 라벨 글자 배율 상한(#4613 — 전에는 「중단」·상한 없음이라 큰 글씨에서 폭이 달랐다). */}
+        <Text style={[stopStyle.label, {color: palette.accentText}]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {base === 'enter' ? '취소' : '중단'}
+        </Text>
       </View>
     ),
-    [palette],
+    [palette, base],
   );
   const anchorRef = useRef<View | null>(null);
   const tailRef = useRef<View | null>(null);

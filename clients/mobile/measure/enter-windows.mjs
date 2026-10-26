@@ -33,6 +33,7 @@ if (!file) {
 }
 const wantTag = flag('--tag');
 const asJson = args.includes('--json');
+const asSummary = args.includes('--summary');
 const EPS = [0.5, 0.01];
 
 const records = fs
@@ -122,15 +123,30 @@ function analyze(record) {
   }
   const entryScrolls = scrolls.filter(entry => entry.t <= firstTouch);
   const programScrolls = entryScrolls.filter(entry => !entry.user);
+  // 꼬리 고정(pin) = 이 목록이 스스로 끝으로 가려고 낸 이동(`scrollPinUntilRef` 가 서 있는 동안의 보고). 진입 수렴의 본체다. pin 이 아닌 목록의
+  // 스크롤 보고(`followOnly`)는 도크 높이가 바뀌어 바닥을 다시 맞추는 따라가기이고 진입과 무관하다 — 둘을 섞으면 활동 줄이 뒤집힌 순간이 「늦은 진입」으로 보인다.
+  const pinScrolls = programScrolls.filter(entry => entry.pin);
+  const followOnly = programScrolls.filter(entry => !entry.pin);
   let pinEpisodes = 0;
-  let lastProgramAt = -1e9;
-  for (const entry of programScrolls) {
-    if (entry.t - lastProgramAt > 250) pinEpisodes += 1;
-    lastProgramAt = entry.t;
+  let lastPinEventAt = -1e9;
+  for (const entry of pinScrolls) {
+    if (entry.t - lastPinEventAt > 250) pinEpisodes += 1;
+    lastPinEventAt = entry.t;
   }
+  const convergedAt = pinScrolls.length === 0 ? 0 : pinScrolls[pinScrolls.length - 1].t;
+  const convergenceFrames = windowOf(frames, 0, convergedAt + 300);
+  const afterFrames = windowOf(frames, convergedAt + 300, firstTouch);
+  // 앉은 뒤 첫 touch 까지: 도크 윗면 − 목록 꼬리(틈)가 변하는가 + 도크 높이가 변했는가(활동 줄이 뒤집히면 둘이 함께 변한다).
+  const gapSeries = afterFrames.filter(f => num(f.dock) && num(f.tail)).map(f => f.dock - f.tail);
+  const gapDeviation = gapSeries.length === 0 ? 0 : round(Math.max(...gapSeries) - Math.min(...gapSeries));
   out.entry = {
     untilMs: firstTouch,
     settleAt,
+    convergedAt,
+    convergence: {anchor: both(convergenceFrames, f => f.anchor)},
+    after: {anchor: both(afterFrames, f => f.anchor), dockH: both(afterFrames, f => f.dockH), gapDeviation},
+    followOnlyScrollEvents: followOnly.length,
+    pinScrollEvents: pinScrolls.length,
     anchor: entryAnchor,
     tail: entryTail,
     content: entryContent,
@@ -261,18 +277,24 @@ function analyze(record) {
     let moves = 0;
     let travel = 0;
     let maxStep = 0;
+    let reversals = 0;
+    let last = 0;
     for (let index = 1; index < frames.length; index += 1) {
       const a = frames[index];
       const b = frames[index - 1];
       if (!(quiet(a.t) && quiet(b.t) && a.t <= sendCut)) continue;
       if (!(num(pick(a)) && num(pick(b)))) continue;
-      const size = Math.abs(pick(a) - pick(b));
+      const delta = pick(a) - pick(b);
+      const size = Math.abs(delta);
       if (size <= eps) continue;
       moves += 1;
       travel += size;
       maxStep = Math.max(maxStep, size);
+      const direction = delta > 0 ? 1 : -1;
+      if (last !== 0 && direction !== last) reversals += 1;
+      last = direction;
     }
-    return {moves, travel: round(travel), maxStep: round(maxStep)};
+    return {moves, travel: round(travel), maxStep: round(maxStep), reversals};
   };
   const quietBarFlips = [];
   for (let index = 1; index < frames.length; index += 1) {
@@ -313,17 +335,39 @@ function analyze(record) {
 }
 
 const results = records.map(analyze);
-if (asJson) {
-  console.log(JSON.stringify(results, null, 2));
-  process.exit(0);
+if (asSummary) {
+  // 태그마다 한 줄 — 증거 표용. 조용한 구간(입력·자판 둘레를 뺀 장면 전체)의 이동과 진입·누름 지표, 햅틱, 알약.
+  for (const r of results) {
+    const q = r.quiet;
+    const e = r.entry;
+    const p = r.press;
+    console.log(
+      [
+        r.tag,
+        `조용 ${q.seconds}s/글바뀜 ${q.ticks}`,
+        `앵커이동 ${q.anchor[0].moves}/${q.anchor[1].moves}프레임·합 ${q.anchor[0].travel}pt·최대 ${q.anchor[0].maxStep}pt·반전 ${q.anchor[0].reversals}/${q.anchor[1].reversals}`,
+        `활동줄 높이 값 ${q.barHValues.join(',')} 변화 ${q.barH[0].moves}회`,
+        `글바뀜 중 움직임 ${q.ticksWithMovement}번`,
+        `진입 pin ${e.pinEpisodes}묶음·수렴 ${e.convergedAt}ms·반전 ${e.convergence.anchor[0].reversals}`,
+        `누름 성장+이동 ${p.growthMinusMove}·가림 ${p.gapDeficit}pt`,
+        `알약 ${r.pill.frames}(목록 스크롤 중 ${r.pill.duringProgramScroll})`,
+        `햅틱 ${r.haptic.beforeAttach}회+대조 ${r.haptic.total - r.haptic.beforeAttach}`,
+        `rAF 최대 ${r.gaps.max}ms`,
+      ].join(' | '),
+    );
+  }
+  process.exitCode = 0;
+} else if (asJson) {
+  process.stdout.write(`${JSON.stringify(results, null, 2)}\n`);
 }
-for (const r of results) {
+for (const r of asSummary || asJson ? [] : results) {
   console.log(`\n### ${r.tag}  (${r.frames}f · ${r.durationMs}ms · rAF 최대 간격 ${r.gaps.max}ms · 50ms 초과 ${r.gaps.over50}회 · 햅틱 프로브 ${r.hapticProbe})`);
   const e = r.entry;
   console.log(
-    `진입(0~${e.untilMs}ms): 앵커 이동 ${fmt(e.anchor, 'moves')}프레임 · 이동합 ${fmt(e.anchor, 'travel')} · 최대한걸음 ${fmt(e.anchor, 'maxStep')} · 반전 ${fmt(e.anchor, 'reversals')} · 앉은 때 ${e.settleAt}ms` +
-      ` | 내용 높이 변화 ${fmt(e.content, 'moves')}회(범위 ${e.content[0].range})` +
-      ` | status ${e.statusMarks.join(' ')} | chasingTail 뗌 ${e.chaseOn}·붙임 ${e.chaseOff} | 스크롤 보고 ${e.scrollEvents}(손가락 ${e.userScrollEvents}·목록 ${e.programScrollEvents}) · 꼬리 고정 묶음 ${e.pinEpisodes} · 마지막 목록 스크롤 ${e.lastProgramScrollAt}ms`,
+    `진입 수렴(0~${e.convergedAt + 300}ms): 앵커 이동 ${fmt(e.convergence.anchor, 'moves')}프레임 · 이동합 ${fmt(e.convergence.anchor, 'travel')} · 반전 ${fmt(e.convergence.anchor, 'reversals')} | 꼬리 고정(pin) 묶음 ${e.pinEpisodes}(보고 ${e.pinScrollEvents}) · chasingTail 뗌 ${e.chaseOn}·붙임 ${e.chaseOff} · status ${e.statusMarks.join(' ')} · 내용 높이 변화 ${fmt(e.content, 'moves')}회(범위 ${e.content[0].range})`,
+  );
+  console.log(
+    `진입 뒤 첫 닿음까지(${e.convergedAt + 300}~${e.untilMs}ms): 앵커 이동 ${fmt(e.after.anchor, 'moves')}프레임(이동합 ${fmt(e.after.anchor, 'travel')}·반전 ${fmt(e.after.anchor, 'reversals')}) · 도크 높이 변화 ${fmt(e.after.dockH, 'moves')}회 · 틈(도크−꼬리) 편차 ${e.after.gapDeviation}pt · 목록이 낸 따라가기 보고 ${e.followOnlyScrollEvents}`,
   );
   const p = r.press;
   console.log(
