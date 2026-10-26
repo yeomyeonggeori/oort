@@ -43,7 +43,7 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
@@ -356,11 +356,15 @@ async fn post_join(http: &reqwest::Client, base: &str, payload: Value) -> JoinAt
 }
 
 fn join_payload(code: &str, email: &str) -> Value {
+    join_payload_with_password(code, email, JOIN_PASSWORD)
+}
+
+fn join_payload_with_password(code: &str, email: &str, password: &str) -> Value {
     json!({
         "code": code,
         "email": email,
         "displayName": "Joining Human",
-        "password": JOIN_PASSWORD,
+        "password": password,
         "timeZone": "Asia/Seoul",
     })
 }
@@ -772,8 +776,16 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
     .await
     .expect("seed existing workspace_membership");
 
+    // The member proves the account first (#4625): the escalation answer is about
+    // the account, so it is only owed to someone who holds it. The request therefore
+    // carries the account's own password.
     let (admin_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "admin", 5).await;
-    let escalation = post_join(&http, &base, join_payload(&admin_code, &existing_email)).await;
+    let escalation = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&admin_code, &existing_email, OWNER_PASSWORD),
+    )
+    .await;
     expect(
         &escalation,
         403,
@@ -782,8 +794,14 @@ async fn every_refusal_answers_the_status_and_sentence_swift_answers() {
     );
 
     // …and the permitted direction really is permitted: a plain `member` link
-    // redeemed by that same member joins them without changing anything.
-    let allowed = post_join(&http, &base, join_payload(&live_code, &existing_email)).await;
+    // redeemed by that same member — who proves the account — joins them without
+    // changing anything.
+    let allowed = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&live_code, &existing_email, OWNER_PASSWORD),
+    )
+    .await;
     assert_eq!(
         allowed.status, 200,
         "an existing human rejoining is 200, not 201: {}",
@@ -1319,11 +1337,36 @@ async fn redeem_directly(
     let code = code.to_string();
     momo_db::with_tenant_tx(pool, workspace, move |conn| {
         Box::pin(async move {
-            Ok(momo_settings::redeem_invite_in_tx(conn, workspace, &code, &values, None).await)
+            Ok(momo_settings::redeem_invite_in_tx(
+                conn,
+                workspace,
+                &code,
+                &values,
+                None,
+                // This helper is about the lookups, not the guess budget (section 7
+                // is): it says out loud that it is unbudgeted.
+                &Unbudgeted,
+            )
+            .await)
         })
     })
     .await
     .expect("the tenant transaction itself must not fail")
+}
+
+/// A [`momo_settings::PasswordGuessBudget`] that always allows — for the tests that
+/// call the domain function directly and are about something else.
+struct Unbudgeted;
+
+impl momo_settings::PasswordGuessBudget for Unbudgeted {
+    fn spend(
+        &self,
+        _workspace_id: Uuid,
+        _member_id: Uuid,
+        _email: &str,
+    ) -> Result<(), momo_settings::GuessRefused> {
+        Ok(())
+    }
 }
 
 fn assert_rejected(
@@ -1343,4 +1386,1207 @@ fn assert_rejected(
             panic!("{case}: expected {expected:?}, got a database failure: {error}")
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// 7. an existing account is resumed only with proof (#4625)
+// ---------------------------------------------------------------------------
+//
+// An invite code names a workspace and a role, not a person. These tests hold the
+// join door to what that implies for an address that already has an account:
+//
+// * `existing_account_requires_proof` — a wrong password gets login's own refusal
+//   and leaves nothing behind (no session, no write to the account, no spent use, no
+//   redemption, no audit row); the right one resumes the account untouched;
+// * `existing_account_states_other_than_active_are_refused` — `invited` and
+//   `deleted` are refused whatever password comes with them, with one answer for both,
+//   and `suspended` keeps the refusal it always had;
+// * `wrong_guesses_are_budgeted_per_account` — the budget is the account's (not the
+//   code's, not the caller's address), is spent before the comparison, and holds under
+//   parallel guesses;
+// * `join_judges_a_password_the_way_login_does` — the same verdicts as the login door
+//   over stored passwords of every shape;
+// * `an_existing_account_is_not_discussed_before_the_proof` — the checks that talk
+//   about the account (already redeemed, role escalation) wait for the proof;
+// * `the_guess_budget_is_spent_once_per_comparison_and_before_it` — the domain
+//   contract, called directly.
+//
+// Fixture passwords are at least ten characters and carry no NUL, so they stay valid
+// when the stricter new-password rule (ADR-0215 D2) reaches the join path.
+
+use std::sync::atomic::{AtomicUsize, Ordering as AtomicOrdering};
+
+const MEMBER_PASSWORD: &str = "join-conformance-member-password";
+const ADMIN_PASSWORD: &str = "join-conformance-admin-password";
+const WRONG_PASSWORD: &str = "join-conformance-not-the-password";
+
+/// What an account's `human.password_hash` holds.
+enum Stored<'a> {
+    Password(&'a str),
+    Null,
+    Empty,
+    Malformed,
+}
+
+struct Seeded {
+    id: Uuid,
+    email: String,
+}
+
+/// An account that already exists, written the way the other fixtures write one — by
+/// the superuser, past RLS — with a display name and a time zone that no join request
+/// in this section ever sends, so "left alone" can be told from "overwritten with the
+/// same value".
+async fn seed_account(
+    su: &PgPool,
+    workspace: Uuid,
+    label: &str,
+    role: &str,
+    stored: Stored<'_>,
+) -> Seeded {
+    let id = Uuid::new_v4();
+    let handle = format!("{label}-{}", &id.to_string()[..8]);
+    let email = format!("{label}-{id}@join.test");
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'human', $3, $4)",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(format!("Seeded {label}"))
+    .bind(&handle)
+    .execute(su)
+    .await
+    .expect("seed member");
+    let (kind, password) = match stored {
+        Stored::Password(password) => ("password", password),
+        Stored::Null => ("null", ""),
+        Stored::Empty => ("empty", ""),
+        Stored::Malformed => ("malformed", ""),
+    };
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz) \
+         VALUES ($1, $2, $3, true, \
+                 CASE $5::text \
+                   WHEN 'password' THEN momo_password_hash($4::text) \
+                   WHEN 'empty' THEN '' \
+                   WHEN 'malformed' THEN 'not-a-bcrypt-hash' \
+                   ELSE NULL \
+                 END, \
+                 'Europe/Paris')",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(&email)
+    .bind(password)
+    .bind(kind)
+    .execute(su)
+    .await
+    .expect("seed human");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, $3::membership_role)",
+    )
+    .bind(workspace)
+    .bind(id)
+    .bind(role)
+    .execute(su)
+    .await
+    .expect("seed workspace_membership");
+    Seeded { id, email }
+}
+
+/// Everything about an account a refused join must leave exactly as it found it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AccountState {
+    status: String,
+    deleted: bool,
+    display_name: String,
+    handle: String,
+    tz: String,
+    email: String,
+    password_hash: Option<String>,
+    role: Option<String>,
+    channel_memberships: i64,
+}
+
+async fn account_state(su: &PgPool, member: Uuid) -> AccountState {
+    let row = sqlx::query(
+        "SELECT m.status::text, m.deleted_at IS NOT NULL, m.display_name, m.handle, \
+                h.tz, h.email, h.password_hash \
+           FROM member m JOIN human h ON h.member_id = m.id \
+          WHERE m.id = $1",
+    )
+    .bind(member)
+    .fetch_one(su)
+    .await
+    .expect("read the account");
+    let role: Option<String> =
+        sqlx::query_scalar("SELECT role::text FROM workspace_membership WHERE member_id = $1")
+            .bind(member)
+            .fetch_optional(su)
+            .await
+            .expect("read the role");
+    let channel_memberships: i64 =
+        sqlx::query_scalar("SELECT count(*)::bigint FROM membership WHERE member_id = $1")
+            .bind(member)
+            .fetch_one(su)
+            .await
+            .expect("count channel memberships");
+    AccountState {
+        status: row.get(0),
+        deleted: row.get(1),
+        display_name: row.get(2),
+        handle: row.get(3),
+        tz: row.get(4),
+        email: row.get(5),
+        password_hash: row.get(6),
+        role,
+        channel_memberships,
+    }
+}
+
+/// The account plus every row a join writes on its behalf: the sessions, the redemption,
+/// the audit row and the spent use of the invite.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Footprint {
+    account: AccountState,
+    tokens: i64,
+    redemptions: i64,
+    join_audits: i64,
+    used_count: i32,
+}
+
+async fn footprint(su: &PgPool, workspace: Uuid, member: Uuid, invite: Uuid) -> Footprint {
+    let count = |sql: &'static str, bound: Uuid| async move {
+        sqlx::query_scalar::<_, i64>(sql)
+            .bind(bound)
+            .fetch_one(su)
+            .await
+            .expect("count")
+    };
+    let used_count: i32 = sqlx::query_scalar("SELECT used_count FROM invite_code WHERE id = $1")
+        .bind(invite)
+        .fetch_one(su)
+        .await
+        .expect("used_count");
+    let join_audits: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'invite.join' AND actor_member_id = $2",
+    )
+    .bind(workspace)
+    .bind(member)
+    .fetch_one(su)
+    .await
+    .expect("count audit rows");
+    Footprint {
+        account: account_state(su, member).await,
+        tokens: count(
+            "SELECT count(*)::bigint FROM token WHERE actor_member_id = $1",
+            member,
+        )
+        .await,
+        redemptions: count(
+            "SELECT count(*)::bigint FROM invite_code_redemption WHERE member_id = $1",
+            member,
+        )
+        .await,
+        join_audits,
+        used_count,
+    }
+}
+
+/// `POST /v1/join` from a stated source address; the third element is `Retry-After`.
+async fn post_join_from(
+    http: &reqwest::Client,
+    base: &str,
+    ip: &str,
+    payload: Value,
+) -> (u16, Value, Option<u64>) {
+    let response = http
+        .post(format!("{base}/v1/join"))
+        .header("x-forwarded-for", ip)
+        .json(&payload)
+        .send()
+        .await
+        .expect("join request");
+    let status = response.status().as_u16();
+    let retry_after = response
+        .headers()
+        .get("retry-after")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    let body: Value = response.json().await.unwrap_or(Value::Null);
+    (status, body, retry_after)
+}
+
+async fn login_status(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    email: &str,
+    password: &str,
+) -> u16 {
+    http.post(format!("{base}/v1/auth/login"))
+        .json(&json!({
+            "email": email,
+            "password": password,
+            "workspace": workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login")
+        .status()
+        .as_u16()
+}
+
+fn uuid_of(raw: &str) -> Uuid {
+    Uuid::parse_str(raw).expect("a uuid")
+}
+
+/// The answer login's own 401 has, plus the machine code this door adds.
+fn invalid_credentials_body() -> Value {
+    json!({"error": {"message": "invalid credentials", "code": "invalid_credentials"}})
+}
+
+/// A wrong password for an account that exists is login's refusal, and it leaves nothing
+/// behind; the right one resumes the account exactly as it was. Run for an owner, an
+/// admin and a member, because what a resumed session can do is the account's, not the
+/// invite's.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn existing_account_requires_proof() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-proof").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    let owner = Seeded {
+        id: fixture.owner,
+        email: fixture.owner_email.clone(),
+    };
+    let admin = seed_account(
+        &su,
+        fixture.workspace,
+        "proof-admin",
+        "admin",
+        Stored::Password(ADMIN_PASSWORD),
+    )
+    .await;
+    let member = seed_account(
+        &su,
+        fixture.workspace,
+        "proof-member",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+
+    // (label, account, its password, may its session create invites?)
+    let accounts = [
+        ("owner", &owner, OWNER_PASSWORD, true),
+        ("admin", &admin, ADMIN_PASSWORD, true),
+        ("member", &member, MEMBER_PASSWORD, false),
+    ];
+    for (label, account, password, may_invite) in accounts {
+        let (code, invite_id) =
+            issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await;
+        let invite = uuid_of(&invite_id);
+        let before = footprint(&su, fixture.workspace, account.id, invite).await;
+
+        // -- a password that is not the account's: refused, in every spelling ----
+        for typed in [
+            account.email.clone(),
+            format!("  {}  ", account.email.to_uppercase()),
+        ] {
+            let refused = post_join(
+                &http,
+                &base,
+                join_payload_with_password(&code, &typed, WRONG_PASSWORD),
+            )
+            .await;
+            assert_eq!(
+                refused.status, 401,
+                "{label} as {typed:?}: {}",
+                refused.body
+            );
+            assert_eq!(refused.body, invalid_credentials_body(), "{label}");
+        }
+        assert_eq!(
+            footprint(&su, fixture.workspace, account.id, invite).await,
+            before,
+            "{label}: a refused proof leaves no session, no write to the account, no spent \
+             use, no redemption and no audit row"
+        );
+
+        // -- the account's own password: resumed, and nothing of it rewritten ----
+        let resumed = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&code, &account.email, password),
+        )
+        .await;
+        assert_eq!(resumed.status, 200, "{label}: {}", resumed.body);
+        assert_eq!(resumed.body["createdMember"], json!(false), "{label}");
+        assert_eq!(
+            resumed.body["member"]["id"],
+            account.id.to_string(),
+            "{label}: the session is for the account the address names"
+        );
+        let access = resumed.body["accessToken"].as_str().expect("access token");
+        let probe = http
+            .post(format!(
+                "{base}/v1/workspaces/{}/invites",
+                fixture.workspace
+            ))
+            .bearer_auth(access)
+            .json(&json!({"role": "member", "maxUses": 1}))
+            .send()
+            .await
+            .expect("probe with the resumed session");
+        assert_eq!(
+            probe.status().as_u16() == 201,
+            may_invite,
+            "{label}: the resumed session acts with the account's own authority"
+        );
+        let after = footprint(&su, fixture.workspace, account.id, invite).await;
+        assert_eq!(
+            AccountState {
+                channel_memberships: before.account.channel_memberships,
+                ..after.account.clone()
+            },
+            before.account,
+            "{label}: password, name, time zone, status and role are exactly as they were — \
+             the request's displayName and timeZone are never written"
+        );
+        assert!(
+            after.account.channel_memberships >= 1,
+            "{label}: the resumed account is in the workspace's public channel"
+        );
+        assert_eq!(after.tokens, before.tokens + 2, "{label}: one session pair");
+        assert_eq!(after.used_count, before.used_count + 1, "{label}");
+        assert_eq!(after.redemptions, before.redemptions + 1, "{label}");
+        assert_eq!(after.join_audits, before.join_audits + 1, "{label}");
+        assert_eq!(
+            login_status(&http, &base, fixture.workspace, &account.email, password).await,
+            200,
+            "{label}: the original password still signs in"
+        );
+    }
+}
+
+/// `invited` and `deleted` accounts are never resumed on a public code, whatever
+/// password comes with the request — and the answer is the same for both, and for every
+/// password, so it does not say which state the account is in. A `suspended` account keeps
+/// the refusal it always had. Nothing about any of them changes.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn existing_account_states_other_than_active_are_refused() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-states").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    let invited = seed_account(
+        &su,
+        fixture.workspace,
+        "state-invited",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    sqlx::query("UPDATE member SET status = 'invited' WHERE id = $1")
+        .bind(invited.id)
+        .execute(&su)
+        .await
+        .expect("mark the account invited");
+
+    // `deleted` through the real removal route, so the row is in the state an
+    // operator's own action leaves it in.
+    let deleted = seed_account(
+        &su,
+        fixture.workspace,
+        "state-deleted",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let removed = http
+        .delete(format!(
+            "{base}/v1/workspaces/{}/members/{}",
+            fixture.workspace, deleted.id
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("remove the member");
+    assert_eq!(removed.status().as_u16(), 200, "the operator removes them");
+
+    let suspended = seed_account(
+        &su,
+        fixture.workspace,
+        "state-suspended",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let suspend = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/members/{}/suspend",
+            fixture.workspace, suspended.id
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("suspend the member");
+    assert_eq!(suspend.status().as_u16(), 200, "the operator suspends them");
+
+    assert_eq!(account_state(&su, invited.id).await.status, "invited");
+    let deleted_before = account_state(&su, deleted.id).await;
+    assert_eq!(deleted_before.status, "deleted");
+    assert_eq!(
+        (
+            deleted_before.role.as_deref(),
+            deleted_before.channel_memberships
+        ),
+        (None, 0),
+        "removal ends the member's whole presence: no workspace role, no channel"
+    );
+    assert_eq!(account_state(&su, suspended.id).await.status, "suspended");
+
+    // The password that is the account's, the one a person would pick for a fresh
+    // start, and one that is neither: none of them may open a refused account.
+    let passwords = [MEMBER_PASSWORD, JOIN_PASSWORD, WRONG_PASSWORD];
+
+    let mut unavailable_answers = Vec::new();
+    for (label, account) in [("invited", &invited), ("deleted", &deleted)] {
+        let (code, invite_id) =
+            issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await;
+        let invite = uuid_of(&invite_id);
+        let before = footprint(&su, fixture.workspace, account.id, invite).await;
+        for password in passwords {
+            let refused = post_join(
+                &http,
+                &base,
+                join_payload_with_password(&code, &account.email, password),
+            )
+            .await;
+            assert_eq!(
+                refused.status, 409,
+                "{label} / {password}: {}",
+                refused.body
+            );
+            assert_eq!(
+                refused.body["error"]["code"],
+                json!("join_email_unavailable"),
+                "{label} / {password}: {}",
+                refused.body
+            );
+            unavailable_answers.push((label, password, refused.body));
+        }
+        assert_eq!(
+            footprint(&su, fixture.workspace, account.id, invite).await,
+            before,
+            "{label}: no session, no resumption, no write to the account, no spent use"
+        );
+    }
+    let (_, _, first_answer) = &unavailable_answers[0];
+    for (label, password, answer) in &unavailable_answers {
+        assert_eq!(
+            answer, first_answer,
+            "{label} / {password}: one answer for every refused state and every password"
+        );
+    }
+    assert_eq!(
+        account_state(&su, deleted.id).await,
+        deleted_before,
+        "a removed account is not re-activated and its password is not replaced"
+    );
+
+    // suspended: the refusal that was here before the gate, answered before any
+    // comparison (so the same for a right and a wrong password).
+    let (code, invite_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await;
+    let invite = uuid_of(&invite_id);
+    let before = footprint(&su, fixture.workspace, suspended.id, invite).await;
+    for password in [MEMBER_PASSWORD, WRONG_PASSWORD] {
+        let refused = post_join(
+            &http,
+            &base,
+            join_payload_with_password(&code, &suspended.email, password),
+        )
+        .await;
+        assert_eq!(
+            refused.status, 403,
+            "suspended / {password}: {}",
+            refused.body
+        );
+        assert_eq!(
+            refused.body["error"]["message"],
+            json!("human is not eligible to join"),
+            "suspended / {password}"
+        );
+    }
+    assert_eq!(
+        footprint(&su, fixture.workspace, suspended.id, invite).await,
+        before,
+        "suspended: nothing changed"
+    );
+}
+
+/// The guess budget is the account's: not the invite code's, not the caller's source
+/// address, and not shared with people who have no account to guess at. It is spent
+/// before the comparison, so the attempt after the last allowed one is refused even with
+/// the right password, and a burst of parallel guesses cannot all slip through.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn wrong_guesses_are_budgeted_per_account() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-budget").await;
+    let base = start_server(
+        app_pool,
+        RateLimitConfig {
+            password_guess_per_account_limit: 3,
+            // The per-IP gate is its own test (the flood test above); here it must
+            // not be what answers.
+            per_ip_limit: 0,
+            ..RateLimitConfig::default()
+        },
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    let target = seed_account(
+        &su,
+        fixture.workspace,
+        "budget-target",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let bystander = seed_account(
+        &su,
+        fixture.workspace,
+        "budget-bystander",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+
+    // Five codes and five source addresses: neither one buys a second budget.
+    let mut codes = Vec::new();
+    for _ in 0..5 {
+        codes.push(issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await);
+    }
+    for attempt in 0..3 {
+        let (status, body, _) = post_join_from(
+            &http,
+            &base,
+            &format!("198.51.100.{attempt}"),
+            join_payload_with_password(&codes[attempt].0, &target.email, WRONG_PASSWORD),
+        )
+        .await;
+        assert_eq!(status, 401, "guess {attempt} is inside the budget: {body}");
+    }
+
+    // The fourth carries the RIGHT password, in another spelling of the address, from
+    // another source, with another code — and is refused anyway, because the budget is
+    // spent before the comparison and belongs to the account.
+    let invite = uuid_of(&codes[3].1);
+    let before = footprint(&su, fixture.workspace, target.id, invite).await;
+    let (status, body, retry_after) = post_join_from(
+        &http,
+        &base,
+        "203.0.113.77",
+        join_payload_with_password(
+            &codes[3].0,
+            &format!("  {}  ", target.email.to_uppercase()),
+            MEMBER_PASSWORD,
+        ),
+    )
+    .await;
+    assert_eq!(status, 429, "{body}");
+    assert_eq!(
+        body,
+        json!({"error": {"message": "rate limit exceeded"}}),
+        "the same body every other limiter answers with"
+    );
+    assert!(
+        retry_after.is_some_and(|seconds| (1..=60).contains(&seconds)),
+        "a 429 says when to come back, inside the window and never zero: {retry_after:?}"
+    );
+    assert_eq!(
+        footprint(&su, fixture.workspace, target.id, invite).await,
+        before,
+        "a refused guess — even a right one — mints no session and spends nothing"
+    );
+
+    // It is the account's budget and nobody else's.
+    let (code, _) = &codes[4];
+    let (status, body, _) = post_join_from(
+        &http,
+        &base,
+        "203.0.113.78",
+        join_payload_with_password(code, &bystander.email, MEMBER_PASSWORD),
+    )
+    .await;
+    assert_eq!(status, 200, "another account is unaffected: {body}");
+    let (code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await;
+    let (status, body, _) = post_join_from(
+        &http,
+        &base,
+        "203.0.113.79",
+        join_payload(&code, &format!("new-{}@join.test", Uuid::new_v4())),
+    )
+    .await;
+    assert_eq!(
+        status, 201,
+        "someone with no account has nothing to guess at and no budget to spend: {body}"
+    );
+
+    // Login is not part of this change: the budget does not reach it.
+    assert_eq!(
+        login_status(
+            &http,
+            &base,
+            fixture.workspace,
+            &target.email,
+            MEMBER_PASSWORD
+        )
+        .await,
+        200,
+        "login has no limiter of its own yet (ADR-0215 F9, #4597) and this budget is not it"
+    );
+
+    // Parallel guesses: twelve at once, each with its own code and source, against an
+    // account nobody has touched. Admission is atomic, so exactly the budget gets a
+    // comparison and the rest are refused — never "everyone looked, nobody had counted".
+    let flood_target = seed_account(
+        &su,
+        fixture.workspace,
+        "budget-flood",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let mut flood_codes = Vec::new();
+    for _ in 0..12 {
+        flood_codes.push(
+            issue_invite(&http, &base, &token, fixture.workspace, "member", 20)
+                .await
+                .0,
+        );
+    }
+    let mut guesses = Vec::new();
+    for (index, code) in flood_codes.into_iter().enumerate() {
+        let (http, base, email) = (http.clone(), base.clone(), flood_target.email.clone());
+        guesses.push(tokio::spawn(async move {
+            post_join_from(
+                &http,
+                &base,
+                &format!("192.0.2.{index}"),
+                join_payload_with_password(&code, &email, WRONG_PASSWORD),
+            )
+            .await
+            .0
+        }));
+    }
+    let mut statuses = Vec::new();
+    for guess in guesses {
+        statuses.push(guess.await.expect("guess task"));
+    }
+    let compared = statuses.iter().filter(|status| **status == 401).count();
+    let refused = statuses.iter().filter(|status| **status == 429).count();
+    assert_eq!(
+        (compared, refused),
+        (3, 9),
+        "twelve parallel guesses, a budget of three: {statuses:?}"
+    );
+}
+
+/// The door and the login door reach the same verdict about the same password, over the
+/// shapes a stored password can take — a right one, none at all, an empty string, a
+/// value that is not bcrypt — and over spellings of the right one that are not it. The
+/// one documented difference is the suspended account, which this door answers (403)
+/// before it compares anything, as it did before the gate.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn join_judges_a_password_the_way_login_does() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-parity").await;
+    let base = start_server(
+        app_pool,
+        RateLimitConfig {
+            // Twenty-odd guesses at four accounts: the budget is not what is measured.
+            password_guess_per_account_limit: 10_000,
+            per_ip_limit: 0,
+            ..RateLimitConfig::default()
+        },
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    let right = seed_account(
+        &su,
+        fixture.workspace,
+        "parity-right",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let none = seed_account(
+        &su,
+        fixture.workspace,
+        "parity-null",
+        "member",
+        Stored::Null,
+    )
+    .await;
+    let empty = seed_account(
+        &su,
+        fixture.workspace,
+        "parity-empty",
+        "member",
+        Stored::Empty,
+    )
+    .await;
+    let malformed = seed_account(
+        &su,
+        fixture.workspace,
+        "parity-bad",
+        "member",
+        Stored::Malformed,
+    )
+    .await;
+
+    let spellings = [
+        MEMBER_PASSWORD.to_string(),
+        WRONG_PASSWORD.to_string(),
+        format!("{MEMBER_PASSWORD} "),
+        MEMBER_PASSWORD.to_uppercase(),
+    ];
+    let mut agreed_resumed = 0;
+    let mut agreed_refused = 0;
+    for (label, account) in [
+        ("right", &right),
+        ("no stored password", &none),
+        ("empty stored password", &empty),
+        ("not a bcrypt string", &malformed),
+    ] {
+        let before = account_state(&su, account.id).await;
+        for password in &spellings {
+            let on_login =
+                login_status(&http, &base, fixture.workspace, &account.email, password).await;
+            let (code, _) =
+                issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+            let on_join = post_join(
+                &http,
+                &base,
+                join_payload_with_password(&code, &account.email, password),
+            )
+            .await
+            .status;
+            assert_eq!(
+                on_login, on_join,
+                "{label} / {password:?}: login answered {on_login}, join answered {on_join}"
+            );
+            match on_join {
+                200 => agreed_resumed += 1,
+                401 => agreed_refused += 1,
+                other => panic!("{label} / {password:?}: unexpected status {other}"),
+            }
+        }
+        // The one account that is let in joins the public channel, which is the join
+        // doing its job; everything else about every account is exactly as it was.
+        let after = account_state(&su, account.id).await;
+        assert_eq!(
+            AccountState {
+                channel_memberships: before.channel_memberships,
+                ..after
+            },
+            before,
+            "{label}: neither door writes a password — an account with none stays without"
+        );
+    }
+    assert_eq!(
+        (agreed_resumed, agreed_refused),
+        (1, 15),
+        "only the right account with the right password gets in, through either door"
+    );
+
+    // The documented difference: a suspended account.
+    let suspended = seed_account(
+        &su,
+        fixture.workspace,
+        "parity-suspended",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(suspended.id)
+        .execute(&su)
+        .await
+        .expect("suspend");
+    let (code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    assert_eq!(
+        login_status(
+            &http,
+            &base,
+            fixture.workspace,
+            &suspended.email,
+            MEMBER_PASSWORD
+        )
+        .await,
+        403,
+        "login: a right password, a suspended account"
+    );
+    assert_eq!(
+        post_join(
+            &http,
+            &base,
+            join_payload_with_password(&code, &suspended.email, MEMBER_PASSWORD)
+        )
+        .await
+        .status,
+        403,
+        "join: the same"
+    );
+    assert_eq!(
+        login_status(
+            &http,
+            &base,
+            fixture.workspace,
+            &suspended.email,
+            WRONG_PASSWORD
+        )
+        .await,
+        401,
+        "login compares first and says 401 to a wrong password"
+    );
+    assert_eq!(
+        post_join(
+            &http,
+            &base,
+            join_payload_with_password(&code, &suspended.email, WRONG_PASSWORD)
+        )
+        .await
+        .status,
+        403,
+        "join answers a suspended account's 403 before any comparison, as it always did"
+    );
+}
+
+/// The two checks that talk about an existing account — "this code was already spent by
+/// it" and "it holds a higher role than this link grants" — are owed only to someone who
+/// has shown they hold the account. Before the proof the answer is the same refusal login
+/// gives a wrong password; after it, the checks answer as they always did.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_existing_account_is_not_discussed_before_the_proof() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-order").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    let member = seed_account(
+        &su,
+        fixture.workspace,
+        "order-member",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+
+    // The account spends this code once, properly.
+    let (spent_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 20).await;
+    let first = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&spent_code, &member.email, MEMBER_PASSWORD),
+    )
+    .await;
+    assert_eq!(first.status, 200, "{}", first.body);
+
+    // -- already redeemed: only the holder is told ---------------------------
+    let stranger = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&spent_code, &member.email, WRONG_PASSWORD),
+    )
+    .await;
+    assert_eq!(stranger.status, 401, "{}", stranger.body);
+    assert_eq!(stranger.body, invalid_credentials_body());
+    let holder = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&spent_code, &member.email, MEMBER_PASSWORD),
+    )
+    .await;
+    assert_eq!(holder.status, 409, "{}", holder.body);
+    assert_eq!(
+        holder.body["error"]["message"],
+        json!("invite code was already redeemed by this member")
+    );
+
+    // -- role escalation: only the holder is told ----------------------------
+    let (admin_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "admin", 20).await;
+    let stranger = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&admin_code, &member.email, WRONG_PASSWORD),
+    )
+    .await;
+    assert_eq!(stranger.status, 401, "{}", stranger.body);
+    assert_eq!(stranger.body, invalid_credentials_body());
+    let holder = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&admin_code, &member.email, MEMBER_PASSWORD),
+    )
+    .await;
+    assert_eq!(holder.status, 403, "{}", holder.body);
+    assert_eq!(
+        holder.body["error"]["message"],
+        json!("public join cannot escalate an existing member role")
+    );
+    let role: String = sqlx::query_scalar(
+        "SELECT role::text FROM workspace_membership WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(member.id)
+    .fetch_one(&su)
+    .await
+    .expect("role");
+    assert_eq!(role, "member", "the refused escalation changed nothing");
+}
+
+/// A [`momo_settings::PasswordGuessBudget`] that counts the guesses it is asked for,
+/// remembers whose they were, and either allows them all or refuses them all.
+struct CountingBudget {
+    spent: AtomicUsize,
+    seen: Mutex<Vec<(Uuid, Uuid, String)>>,
+    refuse_with: Option<u64>,
+}
+
+impl CountingBudget {
+    fn allowing() -> Self {
+        CountingBudget {
+            spent: AtomicUsize::new(0),
+            seen: Mutex::new(Vec::new()),
+            refuse_with: None,
+        }
+    }
+
+    fn refusing(retry_after_seconds: u64) -> Self {
+        CountingBudget {
+            refuse_with: Some(retry_after_seconds),
+            ..CountingBudget::allowing()
+        }
+    }
+
+    fn spent(&self) -> usize {
+        self.spent.load(AtomicOrdering::SeqCst)
+    }
+}
+
+impl momo_settings::PasswordGuessBudget for CountingBudget {
+    fn spend(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        email: &str,
+    ) -> Result<(), momo_settings::GuessRefused> {
+        self.spent.fetch_add(1, AtomicOrdering::SeqCst);
+        self.seen
+            .lock()
+            .expect("budget log")
+            .push((workspace_id, member_id, email.to_string()));
+        match self.refuse_with {
+            Some(retry_after_seconds) => Err(momo_settings::GuessRefused {
+                retry_after_seconds,
+            }),
+            None => Ok(()),
+        }
+    }
+}
+
+/// The domain contract, called directly: a guess is spent for an `active` account and for
+/// no one else, it is spent against the account as the database stores it, and it is spent
+/// **before** the comparison — a refusing budget turns even the right password away.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_guess_budget_is_spent_once_per_comparison_and_before_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-contract").await;
+    let base = start_server(app_pool.clone(), RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    let active = seed_account(
+        &su,
+        fixture.workspace,
+        "contract-active",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let invited = seed_account(
+        &su,
+        fixture.workspace,
+        "contract-invited",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let deleted = seed_account(
+        &su,
+        fixture.workspace,
+        "contract-deleted",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let suspended = seed_account(
+        &su,
+        fixture.workspace,
+        "contract-suspended",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    for (account, status) in [
+        (&invited, "invited"),
+        (&deleted, "deleted"),
+        (&suspended, "suspended"),
+    ] {
+        sqlx::query("UPDATE member SET status = $2::member_status WHERE id = $1")
+            .bind(account.id)
+            .bind(status)
+            .execute(&su)
+            .await
+            .expect("set the status");
+    }
+
+    let attempt = |budget: Arc<CountingBudget>, email: String, password: &'static str| {
+        let (pool, workspace) = (app_pool.clone(), fixture.workspace);
+        let (http, base, token) = (http.clone(), base.clone(), token.clone());
+        async move {
+            let (code, _) = issue_invite(&http, &base, &token, workspace, "member", 5).await;
+            redeem_with_budget(&pool, workspace, &code, &email, password, budget).await
+        }
+    };
+
+    // No account, an invited, a deleted and a suspended one: no guess is ever spent.
+    let allowing = Arc::new(CountingBudget::allowing());
+    let created = attempt(
+        allowing.clone(),
+        format!("contract-new-{}@join.test", Uuid::new_v4()),
+        JOIN_PASSWORD,
+    )
+    .await
+    .expect("an unused address joins");
+    assert!(created.created_member);
+    for (account, expected) in [
+        (&invited, momo_settings::JoinRejection::EmailUnavailable),
+        (&deleted, momo_settings::JoinRejection::EmailUnavailable),
+        (&suspended, momo_settings::JoinRejection::HumanIneligible),
+    ] {
+        let result = attempt(allowing.clone(), account.email.clone(), MEMBER_PASSWORD).await;
+        assert_rejected(result, expected, "an account the gate refuses outright");
+    }
+    assert_eq!(
+        allowing.spent(),
+        0,
+        "no guess is spent where no comparison can matter"
+    );
+
+    // An active account: one guess per comparison, against the account as stored.
+    let resumed = attempt(
+        allowing.clone(),
+        format!("  {}  ", active.email.to_uppercase()),
+        MEMBER_PASSWORD,
+    )
+    .await
+    .expect("the right password resumes the account");
+    assert_eq!(resumed.member.id, active.id);
+    let wrong = attempt(allowing.clone(), active.email.clone(), WRONG_PASSWORD).await;
+    assert_rejected(
+        wrong,
+        momo_settings::JoinRejection::InvalidCredentials,
+        "a wrong password",
+    );
+    assert_eq!(
+        allowing.spent(),
+        2,
+        "one guess per comparison, right or wrong"
+    );
+    let seen = allowing.seen.lock().expect("budget log").clone();
+    assert!(
+        seen.iter().all(|(workspace, member, email)| {
+            *workspace == fixture.workspace && *member == active.id && *email == active.email
+        }),
+        "the budget is told the account as the database stores it, not the spelling typed: {seen:?}"
+    );
+
+    // Spent BEFORE the comparison: a refusing budget turns the right password away.
+    let refusing = Arc::new(CountingBudget::refusing(42));
+    let turned_away = attempt(refusing.clone(), active.email.clone(), MEMBER_PASSWORD).await;
+    match turned_away {
+        Err(momo_settings::JoinError::Rejected(rejection)) => assert_eq!(
+            rejection,
+            momo_settings::JoinRejection::PasswordGuessLimited {
+                retry_after_seconds: 42
+            }
+        ),
+        other => panic!("a refusing budget must end the join, got {other:?}"),
+    }
+    assert_eq!(refusing.spent(), 1);
+}
+
+/// `redeem_directly` with a budget of the caller's choosing and a password of its own.
+async fn redeem_with_budget(
+    pool: &PgPool,
+    workspace: Uuid,
+    code: &str,
+    email: &str,
+    password: &str,
+    budget: Arc<CountingBudget>,
+) -> Result<momo_settings::JoinOutcome, momo_settings::JoinError> {
+    let values = momo_settings::JoinRequestValues {
+        email: email.to_string(),
+        display_name: "Direct Caller".to_string(),
+        requested_handle: None,
+        fallback_handle: format!("direct-{}", &Uuid::new_v4().to_string()[..8]),
+        password: password.to_string(),
+        time_zone: "Asia/Seoul".to_string(),
+    };
+    let code = code.to_string();
+    momo_db::with_tenant_tx(pool, workspace, move |conn| {
+        Box::pin(async move {
+            Ok(
+                momo_settings::redeem_invite_in_tx(conn, workspace, &code, &values, None, &*budget)
+                    .await,
+            )
+        })
+    })
+    .await
+    .expect("the tenant transaction itself must not fail")
 }

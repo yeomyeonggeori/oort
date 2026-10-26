@@ -689,10 +689,26 @@ paths:
       operationId: publicJoin
       summary: Join a workspace with an invite code (public, no auth).
       description: >
-        Redeems a high-entropy invite code, creating (201) or reusing (200) a
-        human member, granting membership in every joinable public channel,
-        and issuing a session token pair. Snake-case body aliases accepted by
-        the server: `display_name`, `time_zone`/`tz`.
+        Redeems a high-entropy invite code, creating (201) a human member or
+        resuming (200) an existing one, granting membership in every joinable
+        public channel, and issuing a session token pair. Snake-case body
+        aliases accepted by the server: `display_name`, `time_zone`/`tz`.
+
+        An invite code names a workspace and a role, not a person, so an
+        address that already has an account is resumed only with proof (#4625,
+        ADR-0215 증보 1). An `active` account is resumed only when the
+        request's `password` is that account's (the check login makes); the
+        password, name and time zone are never written. A `suspended` account
+        is refused (403) without any comparison. An `invited` or `deleted`
+        account, or any other state, is refused (409 `join_email_unavailable`)
+        whatever password was sent, with one answer for all of them. Password
+        guesses are budgeted per account (default 5 per window, env
+        `RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT`, no off value) and the budget
+        is spent before the comparison, so a spent budget is a 429 with
+        `Retry-After` even for the right password. The invite's own state and a
+        ban are judged first; the already-redeemed and role-escalation checks
+        wait for the proof. This door cannot hide which addresses have
+        accounts: an unused address creates one.
       security: []
       requestBody:
         required: true
@@ -708,7 +724,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/JoinResponse"
         "200":
-          description: Existing member (same email) re-joined.
+          description: >
+            Existing member (same email) resumed: the request's `password` is
+            that account's. The account is exactly as it was.
           content:
             application/json:
               schema:
@@ -719,8 +737,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >
+            The address has an account and the request's `password` is not
+            its. `error.code` is `invalid_credentials` and the message is
+            login's own (`invalid credentials`). No session is issued and
+            nothing is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: Role escalation or non-joinable member state.
+          description: >
+            Role escalation, a banned member, or a suspended account (answered
+            before any password comparison).
           content:
             application/json:
               schema:
@@ -732,7 +762,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Already redeemed, exhausted, or no joinable channels.
+          description: >
+            Already redeemed, exhausted, or no joinable channels; or
+            `error.code` `join_email_unavailable` — the address belongs to an
+            account a public invite may not resume (`invited`, `deleted`, or a
+            state this server does not list). The answer is the same for all of
+            them and for every password.
           content:
             application/json:
               schema:
@@ -13273,7 +13308,11 @@ components:
                 `device_key_not_endorsable`, `device_key_already_registered`,
                 `session_lineage_ended`, `device_root_password_required`,
                 `device_root_linked_session`, `host_register_replayed`,
-                `instance_id_unconfigured`; ADR-0208 (#4214, scheduled
+                `instance_id_unconfigured`; ADR-0215 증보 1 (#4625, `POST
+                /v1/join` on an address that already has an account): 401
+                `invalid_credentials` (the password is not that account's) and
+                409 `join_email_unavailable` (the account may not be resumed
+                by a public invite); ADR-0208 (#4214, scheduled
                 messages): 400 `send_at_too_soon` (less than 60 seconds ahead,
                 the past included), `send_at_too_far` (beyond 120 days),
                 `empty_message` (neither text nor an attachment); 409
@@ -13951,6 +13990,13 @@ components:
     # ---- Public join -----------------------------------------------------------
     JoinRequest:
       type: object
+      description: >
+        For an address with no account, `password` is the password the new
+        account is created with. For an address that already has an account it
+        is the proof that the caller holds it: it is compared with the stored
+        password the way login compares it and never written, and
+        `displayName`, `handle` and `timeZone` are ignored (#4625, ADR-0215
+        증보 1).
       required: [code, email, displayName, password]
       properties:
         code:
