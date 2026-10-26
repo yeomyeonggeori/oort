@@ -1,5 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { passwordRuleCopy } from "./passwordRuleCopy";
 
 export interface ClaimFailure {
   message: string;
@@ -26,23 +27,6 @@ function transportFailure(cause: unknown): ClaimFailure | null {
     retryable: true,
     keepForm: true,
   };
-}
-
-/**
- * ADR-0215 D2 (#4593): the server names which rule a new password broke
- * (`error.code`; the English message may be reworded, the code may not). Say the
- * rule, so the person can fix the field. A 400 that names no rule, or one this
- * screen does not know, keeps the generic line.
- */
-function passwordRuleCopy(code: string | undefined): string | null {
-  switch (code) {
-    case "password_too_short":
-      return "비밀번호가 너무 짧습니다. 10자 이상으로 입력하세요.";
-    case "password_too_long":
-      return "비밀번호가 너무 깁니다. 72바이트 이하로 입력하세요. 한글은 24자, 영문은 72자까지입니다.";
-    default:
-      return null;
-  }
 }
 
 /**
@@ -78,6 +62,10 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
         keepForm: false,
       };
     case 400:
+      // ADR-0215 D2 (#4593): the server names which rule a new password broke
+      // (`error.code`; the English message may be reworded, the code may not).
+      // A 400 that names no rule, or one this screen does not know, keeps the
+      // generic line.
       return {
         message:
           passwordRuleCopy(failure.code) ??

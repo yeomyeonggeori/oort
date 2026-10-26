@@ -50,7 +50,7 @@ describe("claimFailureCopy", () => {
     expect(copy.suggestSignIn).toBe(false);
   });
 
-  it("tells a too-long password its ceiling in bytes, and what that is in Hangul", () => {
+  it("tells a too-long password its ceiling in bytes, and the rate to count it by", () => {
     const copy = claimFailureCopy(
       new ApiError(
         400,
@@ -59,7 +59,8 @@ describe("claimFailureCopy", () => {
       )
     );
     expect(copy.message).toContain("72바이트");
-    expect(copy.message).toContain("한글은 24자");
+    expect(copy.message).toContain("한글은 3바이트");
+    expect(copy.message).toContain("24자까지");
     expect(copy.message).not.toContain("10자 이상");
     expect(copy.keepForm).toBe(true);
     expect(copy.retryable).toBe(false);
