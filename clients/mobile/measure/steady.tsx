@@ -564,7 +564,6 @@ let hapticProbeStatus = 'off';
 function installHapticProbe(): string {
   if (hapticProbeOn) return 'already';
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mod = require('expo-haptics') as Record<string, unknown>;
     for (const name of ['impactAsync', 'selectionAsync', 'notificationAsync']) {
       const original = mod[name];
