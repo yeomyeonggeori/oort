@@ -86,6 +86,29 @@
 //! keyed by the account, not by the code or the address the request came from, so
 //! trying another code or another address does not buy a fresh one.
 //!
+//! **The order is enforced where a test cannot reach it.** The comparison takes a
+//! [`guess::Permit`], which only a successful spend from the budget can produce, so
+//! "compare first, count afterwards" does not compile. The other two orders — the
+//! invite's own state and a ban before the gate — are held by conformance tests.
+//!
+//! **The account row is locked for the rest of the join.** The gate reads the
+//! member `FOR SHARE`, the same row an operator's suspend or removal takes `FOR
+//! UPDATE`, so the two line up instead of interleaving: an operator who is first
+//! makes the join see the new state (and refuse it), and a join that is first makes
+//! the operator wait and then undo everything the join wrote. Without the lock a
+//! removal could land between the gate and the role-escalation check and leave the
+//! invite's role on the removed member.
+//!
+//! What the lock does not cover is the session the route mints *after* this
+//! transaction commits, in a transaction of its own — the shape login has too. An
+//! operator who suspends or removes the member in that few-millisecond interval has
+//! already revoked the tokens that existed, so the pair minted next escapes the
+//! revocation. For a removed member it is inert for good (every workspace-scoped
+//! route and refresh re-reads `member.status`). For a suspended one it is refused
+//! until a reinstatement and then works — the pair of someone who had just shown
+//! the password, which a sign-in would give them anyway. Closing it means recording
+//! the session inside the transaction that holds the lock (a follow-up, with login).
+//!
 //! This is a gate on **state and proof**, not a way to hide that an account exists:
 //! a join with an unused address creates an account, so "created" against "refused"
 //! tells an invite holder which addresses are taken, and no wording can change that
@@ -667,7 +690,7 @@ pub async fn redeem_invite_in_tx(
     //     (5) on purpose: both of them answer a question about the account — "did
     //     it already spend this code", "what role does it hold" — and a caller who
     //     has not shown they hold the account is owed neither answer.
-    let existing = find_human_by_email(conn, &values.email).await?;
+    let existing = find_human_by_email(conn, workspace_id, &values.email).await?;
     let resumed = match existing {
         Some(account) => {
             Some(admit_existing_account(conn, workspace_id, account, values, guess_budget).await?)
@@ -969,14 +992,19 @@ struct ExistingAccount {
     stored_email: String,
 }
 
-/// The account this address already belongs to, if any.
+/// The account this address already belongs to in `workspace_id`, if any, **locked
+/// `FOR SHARE`** until the transaction ends (see the module's "the account row is
+/// locked" paragraph).
 ///
 /// The parameter carries `lower(btrim(...))` for the reason in this module's
 /// "the lookups normalise their own argument" section: a miss here sends the
 /// join down the *create* arm for somebody who already exists — and, since #4625,
-/// past the gate that only an existing account has to clear.
+/// past the gate that only an existing account has to clear. The workspace is named
+/// in the statement as well as by the tenant GUC: the row-level policy is what
+/// keeps another tenant out, and this makes the statement say so too.
 async fn find_human_by_email(
     conn: &mut PgConnection,
+    workspace_id: Uuid,
     email: &str,
 ) -> Result<Option<ExistingAccount>, DbError> {
     let row: Option<(Uuid, Uuid, String, String, String, String, String)> = sqlx::query_as(
@@ -984,10 +1012,13 @@ async fn find_human_by_email(
                 m.display_name, m.handle, h.email \
            FROM human h \
            JOIN member m ON m.id = h.member_id \
-          WHERE h.email = lower(btrim($1)) \
-          LIMIT 1",
+          WHERE h.workspace_id = $2 \
+            AND h.email = lower(btrim($1)) \
+          LIMIT 1 \
+            FOR SHARE OF m",
     )
     .bind(email)
+    .bind(workspace_id)
     .fetch_optional(&mut *conn)
     .await?;
     Ok(row.map(
@@ -996,6 +1027,35 @@ async fn find_human_by_email(
             stored_email,
         },
     ))
+}
+
+/// Spending a guess, and the proof that one was spent.
+///
+/// [`Permit`](guess::Permit) has no constructor outside this module, and
+/// [`password_matches`] will not run without one, so the order the ADR promises —
+/// the budget is asked **before** the comparison — is a property of the types
+/// rather than of a line order a later edit could swap.
+mod guess {
+    use super::{JoinRejection, PasswordGuessBudget, Uuid};
+
+    /// A guess that was spent from the budget and has not been used yet.
+    #[must_use = "a spent guess is only worth something when the comparison it paid for runs"]
+    pub(super) struct Permit(());
+
+    /// Ask the budget for one guess at this account's password.
+    pub(super) fn spend(
+        budget: &dyn PasswordGuessBudget,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        stored_email: &str,
+    ) -> Result<Permit, JoinRejection> {
+        budget
+            .spend(workspace_id, member_id, stored_email)
+            .map(|()| Permit(()))
+            .map_err(|refused| JoinRejection::PasswordGuessLimited {
+                retry_after_seconds: refused.retry_after_seconds,
+            })
+    }
 }
 
 /// The gate an existing account has to clear before the join may go on (see the
@@ -1031,12 +1091,8 @@ async fn admit_existing_account(
         "suspended" => return Err(JoinRejection::HumanIneligible.into()),
         _ => return Err(JoinRejection::EmailUnavailable.into()),
     }
-    guess_budget
-        .spend(workspace_id, member.id, &stored_email)
-        .map_err(|refused| JoinRejection::PasswordGuessLimited {
-            retry_after_seconds: refused.retry_after_seconds,
-        })?;
-    if !password_matches(conn, member.id, &values.password).await? {
+    let permit = guess::spend(guess_budget, workspace_id, member.id, &stored_email)?;
+    if !password_matches(conn, member.id, &values.password, permit).await? {
         return Err(JoinRejection::InvalidCredentials.into());
     }
     Ok(member)
@@ -1048,10 +1104,13 @@ async fn admit_existing_account(
 /// stored hash and for a stored value that is not a bcrypt string — so the join
 /// door and the login door cannot disagree about who holds an account. A row that
 /// is not there matches nothing.
+///
+/// The permit is the proof that the budget was asked first; it is consumed here.
 async fn password_matches(
     conn: &mut PgConnection,
     member_id: Uuid,
     password: &str,
+    _permit: guess::Permit,
 ) -> Result<bool, DbError> {
     let matched: Option<Option<bool>> = sqlx::query_scalar(
         "SELECT momo_password_verify($1, h.password_hash) \

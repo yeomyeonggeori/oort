@@ -1685,7 +1685,14 @@ fn assert_rejected(
 // * `an_existing_account_is_not_discussed_before_the_proof` — the checks that talk
 //   about the account (already redeemed, role escalation) wait for the proof;
 // * `the_guess_budget_is_spent_once_per_comparison_and_before_it` — the domain
-//   contract, called directly.
+//   contract, called directly;
+// * `the_invite_and_the_ban_are_judged_before_the_account` — a dead invite, or a
+//   ban, gets the same answer whether or not the address has an account;
+// * `a_spent_budget_runs_no_comparison` — the budget is asked before bcrypt runs,
+//   told apart by the time a comparison costs;
+// * `an_operator_who_removes_a_member_mid_join_is_not_undone` — the account row
+//   is locked from the gate on, so a removal lined up with a join leaves no
+//   role or channel row behind.
 //
 // Fixture passwords are at least ten characters and carry no NUL, so they stay valid
 // when the stricter new-password rule (ADR-0215 D2) reaches the join path.
@@ -1699,6 +1706,9 @@ const WRONG_PASSWORD: &str = "join-conformance-not-the-password";
 /// What an account's `human.password_hash` holds.
 enum Stored<'a> {
     Password(&'a str),
+    /// A real bcrypt hash at cost 14 (the app's own is 6), so comparing against it is
+    /// slow enough to be told apart from not comparing.
+    Costly(&'a str),
     Null,
     Empty,
     Malformed,
@@ -1736,6 +1746,7 @@ async fn seed_account(
     .expect("seed member");
     let (kind, password) = match stored {
         Stored::Password(password) => ("password", password),
+        Stored::Costly(password) => ("costly", password),
         Stored::Null => ("null", ""),
         Stored::Empty => ("empty", ""),
         Stored::Malformed => ("malformed", ""),
@@ -1745,6 +1756,7 @@ async fn seed_account(
          VALUES ($1, $2, $3, true, \
                  CASE $5::text \
                    WHEN 'password' THEN momo_password_hash($4::text) \
+                   WHEN 'costly' THEN crypt($4::text, gen_salt('bf', 14)) \
                    WHEN 'empty' THEN '' \
                    WHEN 'malformed' THEN 'not-a-bcrypt-hash' \
                    ELSE NULL \
@@ -2865,4 +2877,351 @@ async fn redeem_with_budget(
     })
     .await
     .expect("the tenant transaction itself must not fail")
+}
+
+/// A dead invite — revoked, expired, spent, or never issued — is answered by the invite
+/// alone: asking about an address that has an account, in any state, with a password
+/// that is not its, gets exactly what asking about an address that has none gets. The
+/// same goes for a ban. Both are judged **before** the account is looked at (the order
+/// in the module's docs), and a result that only checked the status codes of live
+/// invites would not notice them swapped: a dead invite link, which is easy to come by,
+/// would then say which addresses have accounts.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_invite_and_the_ban_are_judged_before_the_account() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-before").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+
+    // One account in each state a join can meet.
+    let mut accounts = Vec::new();
+    for (label, status) in [
+        ("before-active", "active"),
+        ("before-suspended", "suspended"),
+        ("before-invited", "invited"),
+        ("before-deleted", "deleted"),
+    ] {
+        let account = seed_account(
+            &su,
+            fixture.workspace,
+            label,
+            "member",
+            Stored::Password(MEMBER_PASSWORD),
+        )
+        .await;
+        sqlx::query("UPDATE member SET status = $2::member_status WHERE id = $1")
+            .bind(account.id)
+            .bind(status)
+            .execute(&su)
+            .await
+            .expect("set the status");
+        accounts.push((status, account));
+    }
+
+    // The four ways an invite can be dead, each with the answer it is owed.
+    let (revoked_code, revoked_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    sqlx::query("UPDATE invite_code SET revoked_at = now(), revoked_by = $2 WHERE id = $1")
+        .bind(uuid_of(&revoked_id))
+        .bind(fixture.owner)
+        .execute(&su)
+        .await
+        .expect("revoke");
+    let (expired_code, expired_id) =
+        issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    sqlx::query(
+        "UPDATE invite_code SET created_at = now() - interval '2 hours', \
+         expires_at = now() - interval '1 hour' WHERE id = $1",
+    )
+    .bind(uuid_of(&expired_id))
+    .execute(&su)
+    .await
+    .expect("expire");
+    let (spent_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 1).await;
+    let first = post_join(
+        &http,
+        &base,
+        join_payload(
+            &spent_code,
+            &format!("spender-{}@join.test", Uuid::new_v4()),
+        ),
+    )
+    .await;
+    assert_eq!(first.status, 201, "{}", first.body);
+    let dead = [
+        ("revoked", revoked_code, 410),
+        ("expired", expired_code, 410),
+        ("spent", spent_code, 409),
+        ("unknown", "this-code-was-never-issued".to_string(), 404),
+    ];
+    for (kind, code, expected) in dead {
+        let control = post_join(
+            &http,
+            &base,
+            join_payload(&code, &format!("dead-new-{}@join.test", Uuid::new_v4())),
+        )
+        .await;
+        assert_eq!(
+            control.status, expected,
+            "{kind}: an address with no account meets the invite's own verdict: {}",
+            control.body
+        );
+        for (status, account) in &accounts {
+            let asked = post_join(
+                &http,
+                &base,
+                join_payload_with_password(&code, &account.email, WRONG_PASSWORD),
+            )
+            .await;
+            assert_eq!(
+                (asked.status, &asked.body),
+                (control.status, &control.body),
+                "{kind} invite / {status} account: a dead invite must say nothing about the account"
+            );
+        }
+    }
+
+    // A ban is judged before the account too: a banned address answers 403 whether or
+    // not it has an account, and with a password that is not the account's.
+    let banned_account = seed_account(
+        &su,
+        fixture.workspace,
+        "before-banned",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    let banned_new = format!("banned-new-{}@join.test", Uuid::new_v4());
+    for email in [&banned_account.email, &banned_new] {
+        sqlx::query(
+            "INSERT INTO workspace_ban (workspace_id, email_norm, created_by, reason) \
+             VALUES ($1, $2, $3, 'order conformance')",
+        )
+        .bind(fixture.workspace)
+        .bind(email)
+        .bind(fixture.owner)
+        .execute(&su)
+        .await
+        .expect("ban");
+    }
+    let (live_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "member", 5).await;
+    let with_account = post_join(
+        &http,
+        &base,
+        join_payload_with_password(&live_code, &banned_account.email, WRONG_PASSWORD),
+    )
+    .await;
+    let without_account = post_join(&http, &base, join_payload(&live_code, &banned_new)).await;
+    assert_eq!(without_account.status, 403, "{}", without_account.body);
+    assert_eq!(
+        (with_account.status, &with_account.body),
+        (without_account.status, &without_account.body),
+        "a banned address is refused the same way whether or not it has an account"
+    );
+}
+
+/// The budget is asked before bcrypt runs, and a spent budget costs the caller no
+/// comparison. The outcome of a refused guess is the same either way, so only the time
+/// can tell: the account here stores a cost-14 hash, so a comparison takes a visible
+/// fraction of a second and a refusal takes the time of a request. Both are measured in
+/// this run, on this machine, and compared with each other, not with a clock.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_spent_budget_runs_no_comparison() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-cost").await;
+    let base = start_server(
+        app_pool,
+        RateLimitConfig {
+            password_guess_per_account_limit: 2,
+            per_ip_limit: 0,
+            ..RateLimitConfig::default()
+        },
+    )
+    .await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+    let target = seed_account(
+        &su,
+        fixture.workspace,
+        "cost-target",
+        "member",
+        Stored::Costly(MEMBER_PASSWORD),
+    )
+    .await;
+    let mut codes = Vec::new();
+    for _ in 0..3 {
+        codes.push(
+            issue_invite(&http, &base, &token, fixture.workspace, "member", 5)
+                .await
+                .0,
+        );
+    }
+
+    let mut timed = Vec::new();
+    for (attempt, code) in codes.iter().enumerate() {
+        let started = std::time::Instant::now();
+        let (status, body, _) = post_join_from(
+            &http,
+            &base,
+            &format!("198.51.100.{attempt}"),
+            join_payload_with_password(code, &target.email, WRONG_PASSWORD),
+        )
+        .await;
+        timed.push((status, started.elapsed(), body));
+    }
+    assert_eq!(timed[0].0, 401, "inside the budget: {}", timed[0].2);
+    assert_eq!(timed[1].0, 401, "inside the budget: {}", timed[1].2);
+    assert_eq!(timed[2].0, 429, "over the budget: {}", timed[2].2);
+    let (compared, refused) = (timed[0].1, timed[2].1);
+    assert!(
+        compared > std::time::Duration::from_millis(150),
+        "a cost-14 comparison must take long enough to be measured here: {compared:?}"
+    );
+    assert!(
+        refused * 5 < compared,
+        "a refused guess ran the comparison anyway: refused in {refused:?}, compared in {compared:?}"
+    );
+}
+
+/// Poll `condition` until it holds, a hundred milliseconds apart, or fail the test with
+/// `what` after fifteen seconds.
+async fn wait_until<F, Fut>(what: &str, mut condition: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    for _ in 0..150 {
+        if condition().await {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("timed out waiting for {what}");
+}
+
+/// How many backends of this database are parked on a lock inside a statement whose
+/// text contains `fragment`.
+async fn parked_on_a_lock(su: &PgPool, fragment: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM pg_stat_activity \
+          WHERE datname = current_database() AND state = 'active' \
+            AND wait_event_type = 'Lock' AND query ILIKE $1",
+    )
+    .bind(format!("%{fragment}%"))
+    .fetch_one(su)
+    .await
+    .expect("read pg_stat_activity")
+}
+
+/// An operator's removal that lands while a join is in flight is not undone by it.
+///
+/// The join is parked just after the gate (a table lock on the redemption ledger holds
+/// its next read), the removal is sent while it waits, and the lock is released once the
+/// removal has either finished or is seen waiting on a lock. With the account row locked
+/// by the gate, the removal waits for the join, which then refuses the admin link (the
+/// member still holds the member role) and rolls back; the removal runs after it. With
+/// no lock, the removal finishes first, the escalation check finds no role to compare
+/// with, and the join writes the invite's role back for a member who has just been
+/// removed. Either way the removal must be the last word.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_operator_who_removes_a_member_mid_join_is_not_undone() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, "join-race").await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let token = owner_token(&http, &base, &fixture).await;
+    let target = seed_account(
+        &su,
+        fixture.workspace,
+        "race-target",
+        "member",
+        Stored::Password(MEMBER_PASSWORD),
+    )
+    .await;
+    // An admin link: it is the one the escalation check refuses while the member still
+    // holds the member role, and lets through once the role row is gone.
+    let (admin_code, _) = issue_invite(&http, &base, &token, fixture.workspace, "admin", 5).await;
+
+    // Hold the redemption ledger, so the join stops at the read that follows the gate.
+    let mut ledger = su.begin().await.expect("begin the holding transaction");
+    sqlx::query("LOCK TABLE invite_code_redemption IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *ledger)
+        .await
+        .expect("lock the ledger");
+
+    let join = tokio::spawn({
+        let (http, base, email) = (http.clone(), base.clone(), target.email.clone());
+        async move {
+            post_join(
+                &http,
+                &base,
+                join_payload_with_password(&admin_code, &email, MEMBER_PASSWORD),
+            )
+            .await
+        }
+    });
+    wait_until("the join to park on the redemption ledger", || async {
+        parked_on_a_lock(&su, "invite_code_redemption").await > 0
+    })
+    .await;
+
+    let removal = tokio::spawn({
+        let (http, base, token) = (http.clone(), base.clone(), token.clone());
+        let uri = format!(
+            "{base}/v1/workspaces/{}/members/{}",
+            fixture.workspace, target.id
+        );
+        async move {
+            http.delete(uri)
+                .bearer_auth(token)
+                .send()
+                .await
+                .expect("remove the member")
+                .status()
+                .as_u16()
+        }
+    });
+    // Whichever happens first is what the lock is about: the removal finishing while the
+    // join is parked, or the removal waiting for the join.
+    let mut finished_early = false;
+    for _ in 0..150 {
+        if removal.is_finished() {
+            finished_early = true;
+            break;
+        }
+        if parked_on_a_lock(&su, "FOR UPDATE OF wm, m").await > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    ledger.rollback().await.expect("release the ledger");
+
+    let joined = join.await.expect("join task");
+    let removed = removal.await.expect("removal task");
+    assert_eq!(removed, 200, "the operator's removal goes through");
+    assert_ne!(
+        joined.status, 200,
+        "a member who was removed during the join is not handed a session by it \
+         (removal finished while the join was parked: {finished_early}): {}",
+        joined.body
+    );
+
+    let state = account_state(&su, target.id).await;
+    assert_eq!(state.status, "deleted", "the removal is the last word");
+    assert_eq!(
+        (state.role.as_deref(), state.channel_memberships),
+        (None, 0),
+        "no role or channel row survives a removal that came after the gate \
+         (removal finished while the join was parked: {finished_early})"
+    );
 }
