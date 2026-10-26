@@ -99,16 +99,18 @@ impl World {
 
     /// The owner mentions the agent in the public channel; returns the message id.
     async fn ask(&self, body: &str) -> Uuid {
+        self.say(&format!("@{} {body}", self.agent.handle)).await
+    }
+
+    /// The owner says something to the room (no mention: a `message` event, no job).
+    async fn say(&self, body: &str) -> Uuid {
         let response = reqwest::Client::new()
             .post(format!(
                 "{}/v1/workspaces/{}/channels/{}/messages",
                 self.base, self.workspace, self.public
             ))
             .bearer_auth(&self.owner_jwt)
-            .json(&json!({
-                "clientMsgId": Uuid::new_v4(),
-                "body": format!("@{} {body}", self.agent.handle)
-            }))
+            .json(&json!({"clientMsgId": Uuid::new_v4(), "body": body}))
             .send()
             .await
             .expect("send");
@@ -482,16 +484,20 @@ async fn the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not() {
     let nothing = wire.job_start().await;
     assert!(nothing.is_ok() && nothing.structured()["job"].is_null());
 
-    // A person asks. Wake 2 reads the page, SEES the tracked turn — and goes away without
-    // claiming it (the saved cursor has now moved past the event).
+    // The room talks (two plain messages — events with no job), then a person asks. Wake 2 reads the
+    // page, SEES the tracked turn among the chatter — and goes away without claiming it (the saved
+    // cursor has now moved past the event). Two plain messages around ONE tracked turn on purpose:
+    // counting `message` events instead of `agent_job` ones would give 3 or 2, never 1.
+    w.say("점심 뭐 먹을까요").await;
     w.ask("분기 보고서 초안 부탁해요").await;
+    w.say("저는 국밥이요").await;
     assert!(wire.ping().await.is_ok());
     let saw = wire.inbox(Some(&cursor)).await;
     assert!(saw.is_ok(), "{saw:?}");
     assert_eq!(
         events(&saw).len(),
-        2,
-        "the message and the tracked turn: {:?}",
+        4,
+        "three messages and the tracked turn: {:?}",
         saw.body
     );
     let cursor = next_cursor(&saw);
@@ -510,7 +516,7 @@ async fn the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not() {
     assert!(wire.run_complete(&handle, "초안 올렸어요").await.is_ok());
 
     // The trace of those three wakes, one row per call, with the numbers that separate the
-    // stories: wake 2 read two events of which ONE is a tracked turn and made no claim;
+    // stories: wake 2 read four events of which ONE is a tracked turn and made no claim;
     // wake 3 read none and still took one.
     let ping = row(
         "tools/call",
@@ -526,7 +532,7 @@ async fn the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not() {
         counted("oort_inbox_read", Some(0), Some(0), None),
         counted("oort_job_start", None, None, Some(0)),
         ping.clone(),
-        counted("oort_inbox_read", Some(2), Some(1), None),
+        counted("oort_inbox_read", Some(4), Some(1), None),
         ping.clone(),
         counted("oort_inbox_read", Some(0), Some(0), None),
         counted("oort_job_start", None, None, Some(1)),

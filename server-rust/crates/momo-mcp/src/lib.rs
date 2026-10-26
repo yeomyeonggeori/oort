@@ -426,6 +426,151 @@ pub fn outcome_code(rpc_code: Option<i64>) -> &'static str {
     }
 }
 
+/// The server's own refusal sentences, each mapped to a **closed reason token**.
+///
+/// One JSON-RPC code covers many causes (`-32020` is eight different header/metadata
+/// mismatches, `-32600` is twelve different envelope faults), and which one a runtime hit is
+/// the whole diagnosis: "forgot the `Mcp-Name` header" and "sent a modern `_meta` with no
+/// protocol header" need different fixes in a routine. The sentence itself is
+/// server-authored, but a trace must not depend on that staying true, so it is never copied:
+/// the response's `error.message` is looked up here by **exact match** and only the table's
+/// token comes out. Anything else — a sentence added without a row, a message that ever
+/// carried caller text — is [`REASON_OTHER`], so the vocabulary is closed by construction
+/// and a missing row is visible as `other`, not as a leak. A test fails when a sentence in
+/// this crate has no row.
+pub const REFUSAL_REASONS: &[(&str, &str)] = &[
+    // The transport, before the body is a request.
+    ("request body exceeds the limit", "body_too_large"),
+    ("Content-Type must be application/json", "content_type"),
+    (
+        "Accept must include application/json and text/event-stream",
+        "accept",
+    ),
+    ("invalid Agent Port transport headers", "transport_headers"),
+    ("parse error", "parse_error"),
+    ("JSON nesting exceeds the limit", "json_limits"),
+    ("JSON string exceeds the limit", "json_limits"),
+    ("JSON collection exceeds the limit", "json_limits"),
+    // The JSON-RPC envelope.
+    ("request must be an object", "request_shape"),
+    ("request contains an unknown field", "request_shape"),
+    ("jsonrpc must equal 2.0", "request_shape"),
+    ("method is required", "request_shape"),
+    ("invalid JSON-RPC id", "request_shape"),
+    ("params must be an object", "request_shape"),
+    // Which protocol era, and whether the headers and the body agree.
+    ("unsupported protocol version", "version_unsupported"),
+    (
+        "modern requests require the matching MCP-Protocol-Version",
+        "version_header",
+    ),
+    (
+        "legacy follow-up requests require MCP-Protocol-Version",
+        "version_header",
+    ),
+    (
+        "metadata and header protocol versions do not match",
+        "version_mismatch",
+    ),
+    (
+        "legacy protocolVersion is not valid in modern _meta",
+        "version_mismatch",
+    ),
+    (
+        "modern protocol metadata is not valid in legacy requests",
+        "version_mismatch",
+    ),
+    (
+        "initialize header and proposed version do not match",
+        "version_mismatch",
+    ),
+    (
+        "modern protocolVersion cannot use legacy initialize",
+        "version_mismatch",
+    ),
+    (
+        "Mcp-Method does not match the JSON-RPC method",
+        "mcp_method_header",
+    ),
+    (
+        "Mcp-Name does not match tools/call params.name",
+        "mcp_name_header",
+    ),
+    ("Mcp-Name is only valid for tools/call", "mcp_name_header"),
+    // What a modern request must carry in `params._meta`.
+    ("modern params are required", "modern_meta"),
+    ("modern params._meta is required", "modern_meta"),
+    ("modern protocolVersion metadata is required", "modern_meta"),
+    (
+        "modern clientCapabilities metadata is required",
+        "modern_meta",
+    ),
+    ("invalid modern clientInfo metadata", "modern_meta"),
+    // What the legacy handshake must carry.
+    ("initialize params are required", "initialize_params"),
+    (
+        "initialize protocolVersion is required",
+        "initialize_params",
+    ),
+    (
+        "initialize capabilities and clientInfo are required",
+        "initialize_params",
+    ),
+    ("initialized must be a notification", "initialized_has_id"),
+    // The method and its params.
+    ("method params contain an unknown field", "method_params"),
+    ("method params must be empty", "method_params"),
+    ("invalid tools/call params", "tools_call_params"),
+    ("tools/call name is required", "tools_call_params"),
+    ("method not found", "method_not_found"),
+    // The tool.
+    ("unknown tool", "unknown_tool"),
+    ("invalid tool arguments", "tool_arguments"),
+    (
+        "tool is not authorized for this connection",
+        "tool_not_authorized",
+    ),
+    ("tool target is unavailable", "tool_unavailable"),
+    ("tool target refused the transition", "tool_conflict"),
+    ("secret was already claimed", "tool_already_claimed"),
+    ("claim window has passed", "tool_claim_expired"),
+    ("internal error", "tool_internal"),
+    ("rate limit exceeded", "rate_limited"),
+];
+/// The token for a refusal whose sentence has no row in [`REFUSAL_REASONS`].
+pub const REASON_OTHER: &str = "other";
+/// The token for a refused `oort_run_complete.artifacts` (its message names a field from a
+/// static list, so it is recognised by its `error.data {field, rule}` instead of by sentence).
+pub const REASON_TOOL_ARTIFACTS: &str = "tool_artifacts";
+
+/// The token of one refusal sentence: the table's token on an exact match, else
+/// [`REASON_OTHER`]. The only way a sentence becomes a token.
+pub fn reason_of_sentence(sentence: &str) -> &'static str {
+    REFUSAL_REASONS
+        .iter()
+        .find(|(known, _)| *known == sentence)
+        .map_or(REASON_OTHER, |(_, token)| token)
+}
+
+/// The closed reason token of a refusal body, or `None` for a success (or no body).
+pub fn refusal_reason(body: Option<&[u8]>) -> Option<&'static str> {
+    let value: Value = serde_json::from_slice(body?).ok()?;
+    let error = value.get("error")?;
+    if error
+        .get("data")
+        .and_then(Value::as_object)
+        .is_some_and(|data| data.contains_key("field") && data.contains_key("rule"))
+    {
+        return Some(REASON_TOOL_ARTIFACTS);
+    }
+    Some(
+        error
+            .get("message")
+            .and_then(Value::as_str)
+            .map_or(REASON_OTHER, reason_of_sentence),
+    )
+}
+
 fn dispatch_inner(
     request: HttpRequest<'_>,
     view: &ToolView,

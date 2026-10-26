@@ -27,6 +27,10 @@ const MAX_ORIGIN_BYTES: usize = 2048;
 const MAX_ACCEPT_BYTES: usize = 4096;
 const MAX_PROTOCOL_HEADER_BYTES: usize = 512;
 const MAX_RELEVANT_HEADER_VALUES: usize = 16;
+/// The adapter's own two refusal sentences. Constants so the call trace can name their reason
+/// from the same text the response carries (`momo_mcp::REFUSAL_REASONS` has a row for each).
+const MESSAGE_TRANSPORT_HEADERS: &str = "invalid Agent Port transport headers";
+const MESSAGE_BODY_TOO_LARGE: &str = "request body exceeds the limit";
 
 /// One Agent Port POST. Every invocation independently authenticates and no
 /// request or response creates protocol-session authority.
@@ -88,7 +92,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             Some(protocol_error(
                 StatusCode::BAD_REQUEST,
                 -32600,
-                "invalid Agent Port transport headers",
+                MESSAGE_TRANSPORT_HEADERS,
             )),
         )
     } else {
@@ -99,7 +103,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                 Some(protocol_error(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     -32600,
-                    "request body exceeds the limit",
+                    MESSAGE_BODY_TOO_LARGE,
                 )),
             ),
         }
@@ -142,7 +146,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         Some(protocol_error(
             StatusCode::BAD_REQUEST,
             -32600,
-            "invalid Agent Port transport headers",
+            MESSAGE_TRANSPORT_HEADERS,
         ))
     } else {
         None
@@ -191,8 +195,14 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     let era = call_era(protocol_version.value());
 
     if let Some(rejection) = transport_rejection {
-        // Every transport refusal is `-32600` (`protocol_error` above).
+        // Every transport refusal is `-32600` (`protocol_error` above); which of the two it was
+        // is told by its status (the oversize body is the only `413`).
         if let Some(caller) = caller {
+            let sentence = if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                MESSAGE_BODY_TOO_LARGE
+            } else {
+                MESSAGE_TRANSPORT_HEADERS
+            };
             trace_call(
                 &state,
                 caller,
@@ -201,6 +211,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                     era,
                     status: rejection.status().as_u16(),
                     rpc_code: Some(-32600),
+                    reason: Some(momo_mcp::reason_of_sentence(sentence)),
                     tools_listed: None,
                     counts: momo_mcp::ResultCounts::default(),
                 },
@@ -264,6 +275,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                 era,
                 status: dispatched.status,
                 rpc_code: momo_mcp::response_rpc_code(dispatched.body.as_deref()),
+                reason: momo_mcp::refusal_reason(dispatched.body.as_deref()),
                 tools_listed,
                 counts,
             },
@@ -297,6 +309,8 @@ struct AnswerFacts {
     era: &'static str,
     status: u16,
     rpc_code: Option<i64>,
+    /// The closed reason token of a refusal (`momo_mcp::REFUSAL_REASONS`); `None` for a success.
+    reason: Option<&'static str>,
     tools_listed: Option<usize>,
     counts: momo_mcp::ResultCounts,
 }
@@ -352,6 +366,9 @@ async fn trace_call(
         }
         if let Some(code) = facts.rpc_code {
             object.insert("rpc_code".to_owned(), serde_json::json!(code));
+        }
+        if let Some(reason) = facts.reason {
+            object.insert("reason".to_owned(), serde_json::json!(reason));
         }
         for (key, value) in [
             (
