@@ -46,6 +46,7 @@ import {ThemeControl} from '../../design/ThemeControl';
 import {themeSummary, useStyles, useTheme} from '../../design/theme';
 import {
   font,
+  line,
   radius,
   SAFE_GUTTER,
   space,
@@ -62,6 +63,7 @@ import {
 } from '../../push/usePushSwitch';
 import {getServerBase} from '../../storage/serverBase';
 import {Avatar} from '../conversation/Avatar';
+import {PROFILE_FACE, useFaceRing} from './ProfileFace';
 import {formatRealtimeDiagnostics} from '../../realtime/diagnostics';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
 import {currentAppVersionLabel} from './appVersion';
@@ -153,6 +155,9 @@ export type SettingsSubPage =
   | 'pauseUntil'
   | 'dndUntil';
 export type SettingsPageName = 'main' | SettingsSubPage;
+
+/** 안쪽 장의 첫 요소 위 여백 — 설정 첫 장·시트와 같은 `space.md`. 스타일(`subContent`)과 기한 장의 펼침 셈(`revealAt`)이 함께 읽는다. */
+const SUB_PAGE_TOP = space.md;
 
 const SUB_PAGE_TITLE: Record<SettingsSubPage, string> = {
   theme: '테마',
@@ -290,10 +295,10 @@ function SubPage({
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const scrollRef = useRef<ScrollView>(null);
-  // 장의 윗변에서 잰 `y` 에 장 앞의 위쪽 여백(`subContent.paddingTop`)을 더한다.
+  // 장의 윗변에서 잰 `y` 에 장 앞의 위쪽 여백(`SUB_PAGE_TOP`)을 더하고, 보이려는 요소가 윗변에서 12 아래에 서도록 한 번 뺀다.
   const revealAt = useCallback(
     (y: number) =>
-      scrollRef.current?.scrollTo({y: y + space.xl - space.md, animated: true}),
+      scrollRef.current?.scrollTo({y: y + SUB_PAGE_TOP - space.md, animated: true}),
     [],
   );
   const title = SUB_PAGE_TITLE[page];
@@ -415,6 +420,7 @@ export function SettingsContent({
   covered?: boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const faceRing = useFaceRing();
   const {choice, themeId} = useTheme();
   const push = usePushSwitch(workspaceId, member.id);
   const setPresence = useSetPresence(workspaceId, member.id);
@@ -515,9 +521,9 @@ export function SettingsContent({
           accessibilityElementsHidden={onOpenAvatar !== undefined}
           disabled={onOpenAvatar === undefined}
           onPress={onOpenAvatar}
-          style={({pressed}) => [styles.heroRing, pressed && styles.pressed]}
+          style={({pressed}) => [faceRing, pressed && styles.pressed]}
           testID="self-profile-avatar">
-          <Avatar directory={directory} memberId={member.id} size={HERO_AVATAR} />
+          <Avatar directory={directory} memberId={member.id} size={PROFILE_FACE} />
         </Pressable>
         <View style={styles.heroText}>
           <Text
@@ -584,11 +590,13 @@ export function SettingsContent({
         </GroupCard>
       ) : null}
 
-      {/* ② 내 상태 — 한 번에 고르는 3택이라 같은 자리에서 고른다. */}
+      {/* ② 내 상태 — 한 번에 고르는 3택이라 같은 자리에서 고른다. 앞 칸(상태 점)이 없다: 설정 페이지는 앞 칸 없는 쪽이고
+          (`phone-sheets.md` §4), 점이 있으면 이 카드만 글자 열이 38pt 안으로 들어가 이웃 카드와 어긋난다(design-review
+          r1 H1). 상태의 색은 머리의 알약이 말하고, 고른 줄은 강조색·굵게·✓ 세 신호가 말한다. */}
       {declared ? (
         <SettingsSection>
           <View accessibilityRole="radiogroup" accessibilityLabel={PRESENCE_MENU_LABEL}>
-            <GroupCard label={PRESENCE_MENU_LABEL} inset="icon" testID="settings-presence-card">
+            <GroupCard label={PRESENCE_MENU_LABEL} testID="settings-presence-card">
               {PRESENCE_OPTIONS.map(status => {
                 const selected = status === declared;
                 const label = declaredStatusLabel(status);
@@ -606,12 +614,6 @@ export function SettingsContent({
                         ? `${PRESENCE_DND_HINT} 누르면 기한을 골라요.`
                         : undefined
                     }
-                    leading={
-                      <View
-                        style={[styles.optionDot, optionDotTone(styles, status)]}
-                        importantForAccessibility="no"
-                      />
-                    }
                     testID={`presence-option-${status}`}
                     checkTestID={`presence-${status}-check`}
                   />
@@ -626,8 +628,6 @@ export function SettingsContent({
                       ? PAUSE_UNTIL_NONE_ACTION_LABEL
                       : `${pauseUntilLabel(self.dndUntilMs, now)} · ${PAUSE_UNTIL_CHANGE_ACTION}`
                   }
-                  // 같은 카드의 라디오 줄과 글자 열을 맞춘다(구분선이 그 열에서 시작한다).
-                  leading={<View importantForAccessibility="no" />}
                   accessory="chevron"
                   onPress={onOpenDndUntil}
                   accessibilityHint="방해 금지를 켜 두는 기한을 고르는 화면을 열어요."
@@ -884,7 +884,6 @@ export function SettingsContent({
 }
 
 /** 페이지의 큰 얼굴. Buzz 의 97 에 가장 가까운 4 의 배수. */
-const HERO_AVATAR = 96;
 
 type Styles = ReturnType<typeof buildStyles>;
 
@@ -914,17 +913,6 @@ function pillLabelTone(styles: Styles, presence: EffectivePresence) {
   }
 }
 
-function optionDotTone(styles: Styles, status: PresenceStatus) {
-  switch (status) {
-    case 'auto':
-      return styles.dotOk;
-    case 'away':
-      return styles.dotWarn;
-    case 'dnd':
-      return styles.dotDanger;
-  }
-}
-
 function dotTone(styles: Styles, presence: EffectivePresence) {
   switch (presence) {
     case 'online':
@@ -948,8 +936,10 @@ const buildStyles = (color: Palette) =>
       paddingHorizontal: SAFE_GUTTER,
       gap: space.lg,
     },
-    // 안쪽 장은 옛 시트가 쓰던 간격 그대로다(`PauseUntilPage` 의 `onReveal` 셈이 이 위쪽 여백에 기댄다).
-    subContent: {paddingTop: space.xl, gap: space.xl},
+    // 첫 요소 위 여백이 설정 첫 장(`content`)·시트(`SHEET.bodyTop`)와 같은 12 다 — 옛 시트의 24 가 남아 안쪽 장만 머리에서 더
+    // 떨어져 보였다(design-review r1 L2). `PauseUntilPage` 의 `onReveal` 셈은 이 값(`SUB_PAGE_TOP`)을 읽는다. 한 장이 한
+    // 자식이라 자식 사이 간격은 없다.
+    subContent: {paddingTop: SUB_PAGE_TOP},
     // 설정 페이지 전체(안전 영역까지)를 덮는 한 겹. 불투명해야 밑의 설정이 비치지 않는다.
     subPane: {
       position: 'absolute',
@@ -959,16 +949,13 @@ const buildStyles = (color: Palette) =>
       bottom: 0,
       backgroundColor: color.bg,
     },
+    // 머리 원 아래·알약 아래에 숨을 둔다 — 히어로가 카드 목록과 한 덩어리로 읽히지 않게(design-review r1 L1: Buzz 는
+    // 머리 아래 ≈41pt, 알약 아래 ≈31pt). 카드 사이 간격(16)과 같으면 얼굴 영역이 첫 카드의 일부처럼 보인다.
     hero: {
       alignItems: 'center',
       gap: space.md,
-    },
-    // 사진 없는 이니셜 얼굴은 `surface` 채움이라 바탕 위에서 1.07:1 이다(리뷰 M1). 3:1 을 넘는 한 줄
-    // (`textFaint`, 웹 `--line-strong`)로 가장자리를 준다.
-    heroRing: {
-      borderRadius: radius.pill,
-      borderWidth: 1,
-      borderColor: color.textFaint,
+      paddingTop: space.lg,
+      paddingBottom: space.md,
     },
     heroText: {alignItems: 'center', gap: space.xs},
     name: {
@@ -1006,11 +993,6 @@ const buildStyles = (color: Palette) =>
       boxShadow: color.elevationRest,
       flexShrink: 1,
     },
-    optionDot: {
-      width: space.sm,
-      height: space.sm,
-      borderRadius: radius.pill,
-    },
     pillDot: {width: space.sm, height: space.sm, borderRadius: radius.pill},
     dotOk: {backgroundColor: color.ok},
     dotWarn: {backgroundColor: color.warn},
@@ -1031,16 +1013,21 @@ const buildStyles = (color: Palette) =>
     caption: {
       fontSize: font.label,
       color: color.textMuted,
-      lineHeight: 18,
+      lineHeight: line.label,
       paddingHorizontal: space.xs,
     },
+    // 로그아웃 확인 — 공용 `ConfirmStep`(`sheetParts.tsx`)과 같은 문법이다: 머리말 body/700 · 설명 label + `line.label` · 단추
+    // 반경 `radius.md` · 단추 글자 label/600(위험은 700) · 머리말과 설명 사이 `space.sm`. **다른 것은 둘이고 일부러다**:
+    // ① 위험 단추는 채움(`dangerFill`)이다 — 이 페이지에서 되돌릴 수 없는 유일한 행동이라 위계가 채움 > 윤곽이다
+    // (`phone-sheets.md` §3.1). ② 취소의 윤곽은 3:1 `textFaint` 다(카드 위 `border` 는 비텍스트 대비를 못 넘는다).
+    // `ConfirmStep` 을 이 둘로 올리는 일은 다음 확인 단계를 옮기는 이슈(#4458)에서 한다(design-review #4457 r1 M2, PR 「발견」).
     confirm: {padding: space.lg, gap: space.md},
-    confirmCopy: {gap: space.xs},
-    confirmTitle: {fontSize: font.body, color: color.text, fontWeight: '600'},
+    confirmCopy: {gap: space.sm},
+    confirmTitle: {fontSize: font.body, color: color.text, fontWeight: '700'},
     confirmText: {
       fontSize: font.label,
       color: color.textMuted,
-      lineHeight: 18,
+      lineHeight: line.label,
     },
     confirmActions: {flexDirection: 'row', gap: space.sm},
     confirmButton: {
@@ -1049,13 +1036,13 @@ const buildStyles = (color: Palette) =>
       alignItems: 'center',
       justifyContent: 'center',
       paddingHorizontal: space.sm,
-      borderRadius: radius.sm,
+      borderRadius: radius.md,
       borderWidth: 1,
       // 채움도 강조도 없는 버튼이라 테두리가 「여기가 버튼이다」의 전부다 — 3:1 을 넘는 `textFaint`(웹
       // `--line-strong` 자리)를 쓴다 (#1155 · 리뷰 M-1 의 규칙).
       borderColor: color.textFaint,
     },
-    confirmCancelLabel: {fontSize: font.body, color: color.text},
+    confirmCancelLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
     // 파괴 확인은 채움으로 선다 — 이 페이지에서 되돌릴 수 없는 유일한 행동이다.
     confirmDanger: {
       backgroundColor: color.dangerFill,
@@ -1063,9 +1050,9 @@ const buildStyles = (color: Palette) =>
     },
     confirmDangerPressed: {opacity: 0.85},
     confirmDangerLabel: {
-      fontSize: font.body,
+      fontSize: font.label,
       color: color.onDangerFill,
-      fontWeight: '600',
+      fontWeight: '700',
     },
     // `textMuted` — `textFaint` 는 선 토큰이라 글자로는 AA 아래다 (리뷰 M3). 버그 신고에 옮겨 적히는 줄이다.
     version: {

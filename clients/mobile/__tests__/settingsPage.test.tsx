@@ -10,6 +10,8 @@ import {
   within,
 } from '@testing-library/react-native';
 import {getPermissionsAsync} from 'expo-notifications';
+import fs from 'fs';
+import path from 'path';
 import React from 'react';
 import {Animated, Dimensions, Image, Linking, StyleSheet, View} from 'react-native';
 
@@ -24,11 +26,14 @@ import {
 } from '../src/design/background/store';
 import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {LAYER_POP_MS, LAYER_PUSH_MS, LAYER_RISE_MS, LAYER_SINK_MS} from '../src/design/motion';
+import {dividerIndent} from '../src/design/sheetModel';
+import {ChoiceRow, ConfirmStep} from '../src/design/sheetParts';
 import {ThemeProvider} from '../src/design/theme';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {GroupSection} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
+import {PROFILE_FACE} from '../src/features/profile/ProfileFace';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {
@@ -575,7 +580,7 @@ describe('설정 페이지', () => {
 });
 
 describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 8 카드가 어디에도 없다 (#4457)', () => {
-  // 옛 `GroupSection` 카드의 지문: 반경 `radius.md`(10) + 가는 테두리 + `surface` 채움. 새 `GroupCard` 는 반경 20 이다.
+  // 옛 `GroupSection` 카드의 지문: 반경 `radius.md`(8) + 가는 테두리 + `surface` 채움. 새 `GroupCard` 는 반경 20 이다.
   // 한 장이라도 옛 부품으로 남으면 설정 본 페이지(반경 20)와 카드 모양이 섞인다.
   const surface = lightPalette.surface;
   const oldCards = () =>
@@ -620,6 +625,129 @@ describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 8 카드�
     fireEvent.press(within(page).getByTestId('self-profile-avatar', {includeHiddenElements: true}));
     await waitFor(() => expect(screen.getByTestId('avatar-page')).toBeTruthy());
     expect(oldCards()).toBe(0);
+  });
+});
+
+describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)', () => {
+  const lead = /-lead$/;
+
+  it('탐지기는 실제로 앞 칸을 잡는다 — 대조군(앞 표지가 있는 라디오 행 하나 = 1)', () => {
+    render(
+      <ThemeProvider>
+        <ChoiceRow title="x" selected leading={<View />} onPress={() => {}} testID="probe" />
+      </ThemeProvider>,
+    );
+    expect(screen.queryAllByTestId(lead, {includeHiddenElements: true})).toHaveLength(1);
+  });
+
+  it('H1: 설정 페이지는 앞 칸 없는 문법이다 — 내 상태에 상태 점이 없고, 모든 카드의 구분선이 한 열에서 시작한다', async () => {
+    const page = await openPage();
+    // 명부의 내 상태는 방해 금지라 「기한 바꾸기」 줄까지 선다 — 내 상태 카드의 모든 줄이 이 시험에 든다.
+    await waitFor(() => expect(within(page).getByTestId('profile-dnd-until-row')).toBeTruthy());
+    expect(within(page).queryAllByTestId(lead, {includeHiddenElements: true})).toEqual([]);
+    const indents = within(page)
+      .getAllByTestId('group-divider')
+      .map(divider => StyleSheet.flatten(divider.props.style).marginLeft);
+    expect(indents.length).toBeGreaterThan(5);
+    expect(new Set(indents)).toEqual(new Set([dividerIndent('plain')]));
+  });
+
+  it('M3·N1: 설정 머리의 얼굴과 프로필 사진 장의 얼굴은 같은 크기·같은 3:1 링이다', async () => {
+    const page = await openPage();
+    const ringOf = (testID: string) => {
+      const {borderRadius, borderWidth, borderColor} = StyleSheet.flatten(
+        screen.getByTestId(testID, {includeHiddenElements: true}).props.style,
+      );
+      return {borderRadius, borderWidth, borderColor};
+    };
+    // 링 안에 한 변이 PROFILE_FACE 인 얼굴이 서 있는가.
+    const faces = (testID: string) =>
+      within(screen.getByTestId(testID, {includeHiddenElements: true}))
+        .UNSAFE_getAllByType(View)
+        .filter(view => {
+          const style = StyleSheet.flatten(view.props.style);
+          return style?.width === PROFILE_FACE && style?.height === PROFILE_FACE;
+        }).length;
+
+    const hero = ringOf('self-profile-avatar');
+    expect(hero).toMatchObject({borderRadius: radius.pill, borderWidth: 1});
+    expect([darkPalette.textFaint, lightPalette.textFaint]).toContain(hero.borderColor);
+    expect(faces('self-profile-avatar')).toBeGreaterThan(0);
+
+    fireEvent.press(within(page).getByTestId('self-profile-avatar', {includeHiddenElements: true}));
+    await waitFor(() => expect(screen.getByTestId('avatar-page-face')).toBeTruthy());
+    expect(ringOf('avatar-page-face')).toEqual(hero); // 맨몸이면 다크에서 바탕과 1.04:1 로 사라진다
+    expect(faces('avatar-page-face')).toBeGreaterThan(0);
+  });
+
+  it('M2: 로그아웃 확인은 공용 ConfirmStep 과 같은 문법이다 — 다른 것은 위험 단추의 채움과 취소의 3:1 윤곽 둘뿐이다', async () => {
+    const pick = (style: Record<string, unknown>, keys: string[]) =>
+      Object.fromEntries(keys.map(key => [key, style[key]]));
+    const boxOf = (testID: string) =>
+      pick(StyleSheet.flatten(screen.getByTestId(testID).props.style) ?? {}, [
+        'borderRadius',
+        'borderWidth',
+        'minHeight',
+      ]);
+    const textOf = (text: string, keys: string[]) =>
+      pick(StyleSheet.flatten(screen.getByText(text).props.style) ?? {}, keys);
+    const grammar = (ids: {cancel: string; confirm: string}, text: {confirm: string; headline: string; detail: string}) => ({
+      cancel: boxOf(ids.cancel),
+      confirm: boxOf(ids.confirm),
+      cancelLabel: textOf('취소', ['fontSize', 'fontWeight']),
+      confirmLabel: textOf(text.confirm, ['fontSize', 'fontWeight']),
+      headline: textOf(text.headline, ['fontSize', 'fontWeight']),
+      detail: textOf(text.detail, ['fontSize', 'lineHeight']),
+    });
+
+    // 기준: 공용 부품을 같은 모양(앱 기본)에서 그려 읽는다.
+    const referenceView = render(
+      <ThemeProvider>
+        <ConfirmStep
+          headline="기준 머리말"
+          detail="기준 설명이에요."
+          confirmLabel="기준 확인"
+          pendingLabel="하는 중…"
+          onCancel={() => {}}
+          onConfirm={() => {}}
+          cancelTestID="ref-cancel"
+          confirmTestID="ref-confirm"
+        />
+      </ThemeProvider>,
+    );
+    const reference = grammar(
+      {cancel: 'ref-cancel', confirm: 'ref-confirm'},
+      {confirm: '기준 확인', headline: '기준 머리말', detail: '기준 설명이에요.'},
+    );
+    referenceView.unmount();
+
+    await openPage();
+    fireEvent.press(screen.getByTestId('sign-out'));
+    const mine = grammar(
+      {cancel: 'sign-out-cancel', confirm: 'sign-out-confirm'},
+      {
+        confirm: '로그아웃',
+        headline: '로그아웃할까요?',
+        detail: '로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다.',
+      },
+    );
+    expect(mine).toEqual(reference);
+    // 대조군: 기준이 실제로 값을 갖는다 — 둘 다 비어 있어 같아 보이는 일이 없다.
+    expect(reference.cancel.borderRadius).toBe(radius.md);
+    expect(reference.headline.fontWeight).toBe('700');
+    expect(reference.detail.lineHeight).toBeGreaterThan(0);
+  });
+
+  it('N1: 한 줄 문장의 줄 높이는 토큰이다 — 프로필 화면 네 파일에 lineHeight 18 리터럴이 없다', () => {
+    const literal = /lineHeight:\s*18\b/;
+    const dir = path.join(__dirname, '../src/features/profile');
+    const offenders = ['SettingsPage.tsx', 'AvatarPage.tsx', 'PauseUntilPage.tsx', 'PauseUntilCustom.tsx'].filter(
+      file => literal.test(fs.readFileSync(path.join(dir, file), 'utf8')),
+    );
+    expect(offenders).toEqual([]);
+    // 대조군: 탐지기는 실제로 리터럴을 잡는다.
+    expect(literal.test('caption: {fontSize: font.label, lineHeight: 18}')).toBe(true);
+    expect(literal.test('caption: {fontSize: font.label, lineHeight: line.label}')).toBe(false);
   });
 });
 

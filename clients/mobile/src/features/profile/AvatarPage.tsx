@@ -8,7 +8,7 @@ import {Linking, StyleSheet, View} from 'react-native';
 import {NoticeBlock, Sentence} from '../../design/atoms';
 import {GroupCard} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
-import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {Avatar} from '../conversation/Avatar';
 import {useOnline} from '../inbox/useOnline';
 import {workspaceKeys} from '../workspace/queries';
@@ -20,6 +20,7 @@ import {
   type AvatarSource,
 } from './avatarPhoto';
 import {nativeAvatarPhotoPorts} from './avatarPhotoNative';
+import {PROFILE_FACE, useFaceRing} from './ProfileFace';
 import {ActionRow} from './settingsRows';
 
 // =============================================================================
@@ -57,6 +58,7 @@ export function AvatarPage({
   ports?: AvatarPhotoPorts;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const faceRing = useFaceRing();
   const client = useQueryClient();
   const online = useOnline();
   const [busy, setBusy] = useState<Busy>(null);
@@ -120,7 +122,10 @@ export function AvatarPage({
   return (
     <View style={styles.page} testID="avatar-page">
       <View style={styles.preview}>
-        <Avatar directory={directory} memberId={selfId} size={PREVIEW_AVATAR} />
+        {/* 설정 본 페이지의 머리와 같은 크기·같은 링 — 맨몸이면 다크에서 얼굴이 바탕과 1.04:1 로 사라진다. */}
+        <View style={faceRing} testID="avatar-page-face">
+          <Avatar directory={directory} memberId={selfId} size={PROFILE_FACE} />
+        </View>
         <Sentence style={styles.caption} testID="avatar-page-description">
           정사각으로 잘려 모든 대화에 보여요. 위치 정보는 지워지고 올라가요.
         </Sentence>
@@ -153,7 +158,11 @@ export function AvatarPage({
             testID="avatar-choose-camera"
           />
         ) : null}
-        {hasPhoto ? (
+      </GroupCard>
+
+      {/* 파괴 행은 따로 선 카드다(`phone-sheets.md` §5, 설정의 「로그아웃」·상태 시트의 「상태 지우기」와 같다). */}
+      {hasPhoto ? (
+        <GroupCard testID="avatar-remove-card">
           <ActionRow
             title="사진 지우기"
             detail="이름의 첫 글자로 돌아가요"
@@ -163,8 +172,8 @@ export function AvatarPage({
             onPress={remove}
             testID="avatar-remove"
           />
-        ) : null}
-      </GroupCard>
+        </GroupCard>
+      ) : null}
 
       {failure ? (
         <View style={styles.failureBlock}>
@@ -191,9 +200,6 @@ export function AvatarPage({
   );
 }
 
-/** 이 장의 큰 얼굴. 머리의 80 보다 한 단 크다 — 지금 무엇이 올라가 있는지 보이는 자리다. */
-const PREVIEW_AVATAR = 96;
-
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     // 카드는 폭 전체로 서고 가로 여백은 호스트가 진다(`GroupCard`) — 이 장이 진다. 카드 사이 16(설정 본 페이지와 같다).
@@ -202,13 +208,13 @@ const buildStyles = (color: Palette) =>
     caption: {
       fontSize: font.label,
       color: color.textMuted,
-      lineHeight: 18,
+      lineHeight: line.label,
       textAlign: 'center',
     },
     failureBlock: {gap: space.md},
     failure: {
       fontSize: font.label,
       color: color.dangerText,
-      lineHeight: 18,
+      lineHeight: line.label,
     },
   });
