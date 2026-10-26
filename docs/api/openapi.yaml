@@ -14036,7 +14036,9 @@ components:
         is the proof that the caller holds it: it is compared with the stored
         password the way login compares it and never written, and
         `displayName`, `handle` and `timeZone` are ignored (#4625, ADR-0215
-        증보 1).
+        증보 1). The new-password rule on `password` below is judged first,
+        whichever of the two the field is, so an existing password that does
+        not meet it cannot be proven here; that person signs in instead.
       required: [code, email, displayName, password]
       properties:
         code:
