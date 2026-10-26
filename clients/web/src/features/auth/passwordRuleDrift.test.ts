@@ -18,10 +18,12 @@ import {
 // 둘을 잇는 것이 없으면, 서버 숫자를 바꾸고 Rust 핀 시험을 고쳐 초록으로 만든
 // 뒤에도 화면은 옛 숫자를 계속 말한다(독립 디자인 검수 r2-L1).
 //
-// 이 시험이 웹에 사는 이유: 코어는 `node:fs`가 금지(`scripts/purity.mjs`)라
-// 저장소의 다른 파일을 읽을 수 없다. 선례는 `app/commandRegistry.test.ts`다.
-// 기대값을 베껴 적지 않고 서버 파일을 매번 읽는다. 읽지 못하면(상수 이름이나
-// 모양이 바뀌면) 조용히 통과하지 않고 빨개진다.
+// 이 시험이 웹에 사는 이유: 코어의 `tsc`에는 Node 타입 선언이 없어서 코어 시험이
+// `node:fs`를 import하면 TS2307로 빨개지고(실측), `scripts/purity.mjs`는
+// `import.meta`·`process`·`__dirname`·`require`를 막는다. 그래서 코어 시험은
+// 저장소의 다른 파일을 읽을 수 없다. 웹 시험은 `node:fs`를 쓰고 선례도 있다
+// (`app/commandRegistry.test.ts`). 기대값을 베껴 적지 않고 서버 파일을 매번 읽는다.
+// 읽지 못하면(상수 이름이나 모양이 바뀌면) 조용히 통과하지 않고 빨개진다.
 //
 // 닿는 범위(과장하지 않기): 이 시험은 `password_rules.rs`를 읽는 웹 시험이다.
 // PR CI의 node 레인은 경로 필터(`.github/workflows/pr-ci.yml`)가
