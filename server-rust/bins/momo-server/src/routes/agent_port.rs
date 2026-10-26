@@ -196,11 +196,14 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             trace_call(
                 &state,
                 caller,
-                &bytes,
-                era,
-                rejection.status().as_u16(),
-                Some(-32600),
-                None,
+                momo_mcp::call_shape(&bytes),
+                AnswerFacts {
+                    era,
+                    status: rejection.status().as_u16(),
+                    rpc_code: Some(-32600),
+                    tools_listed: None,
+                    counts: momo_mcp::ResultCounts::default(),
+                },
             )
             .await;
         }
@@ -242,19 +245,28 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         },
     };
     if let Some(caller) = caller {
+        let shape = momo_mcp::call_shape(&bytes);
         // For a `tools/list`, how many tools this caller's view offered: the one
         // number that tells "listed nothing" from "listed everything".
-        let tools_listed = (dispatched.status == 200
-            && momo_mcp::call_shape(&bytes).method == "tools/list")
-            .then(|| view.names().len());
+        let tools_listed =
+            (dispatched.status == 200 && shape.method == "tools/list").then(|| view.names().len());
+        // For the three tools whose answer says whether work exists, how much it handed
+        // over — counted from the server's own answer (`result_counts`).
+        let counts = shape
+            .tool
+            .map(|tool| momo_mcp::result_counts(tool, dispatched.body.as_deref()))
+            .unwrap_or_default();
         trace_call(
             &state,
             caller,
-            &bytes,
-            era,
-            dispatched.status,
-            momo_mcp::response_rpc_code(dispatched.body.as_deref()),
-            tools_listed,
+            shape,
+            AnswerFacts {
+                era,
+                status: dispatched.status,
+                rpc_code: momo_mcp::response_rpc_code(dispatched.body.as_deref()),
+                tools_listed,
+                counts,
+            },
         )
         .await;
     }
@@ -264,12 +276,6 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
 /// The audit row of one admitted Agent Port POST (ADR-0200 증보 4, #4618).
 const CALL_TRACE_ACTION: &str = "agent_port.call";
 const CALL_TRACE_SCHEMA: &str = "oort.agent_port.call.v1";
-/// At most this many rows per credential per hour, then the trace stops for that
-/// credential until the window passes (ADR-0200 T3's rule: stop recording, never
-/// delete). A 15-minute routine makes a few dozen calls an hour; a runaway client is
-/// bounded to this many rows however hard it hammers.
-const CALL_TRACE_PER_HOUR: u32 = 240;
-const CALL_TRACE_WINDOW: Duration = Duration::from_secs(3600);
 /// Same ceiling as the liveness and `tool_call` writes: the call has already been
 /// answered in substance, and a slow database must not become a slow response.
 const CALL_TRACE_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
@@ -285,6 +291,16 @@ fn call_era(header: Option<&str>) -> &'static str {
     }
 }
 
+/// What the server knows about an answer once it exists: every field is a closed token or a
+/// number the server computed, never something the caller sent.
+struct AnswerFacts {
+    era: &'static str,
+    status: u16,
+    rpc_code: Option<i64>,
+    tools_listed: Option<usize>,
+    counts: momo_mcp::ResultCounts,
+}
+
 /// Write one `agent_port.call` audit row for an admitted call, **after** its answer is
 /// known.
 ///
@@ -297,52 +313,60 @@ fn call_era(header: Option<&str>) -> &'static str {
 ///
 /// What it carries is closed on purpose (T1): the JSON-RPC `method` and the `tools/call`
 /// tool name from fixed lists (`other` / `unknown` / `unparsed` otherwise), the closed
-/// outcome token, the HTTP status, the JSON-RPC code, the era, and — for `tools/list` —
-/// how many tools the view offered. Never an argument, a cursor, a handle, a body, an id,
-/// a header's text or a token; `via_token_id` stays empty so a pairing credential's id
-/// can never meet the `token` foreign key.
+/// outcome token, the HTTP status, the JSON-RPC code, the era, and three server-computed
+/// numbers — how many tools a `tools/list` offered, and how many events / `agent_job`
+/// events / jobs a successful `oort_inbox_read` / `oort_jobs_claim` / `oort_job_start`
+/// handed over. Never an argument, a cursor, a handle, a body, an id, a header's text or a
+/// token; `via_token_id` stays empty so a pairing credential's id can never meet the
+/// `token` foreign key.
 ///
 /// Best effort, like the other two records: a separate short tenant transaction, a 2 s
 /// ceiling, and a failure is logged and dropped — it never changes the answer.
 async fn trace_call(
     state: &AppState,
     caller: crate::routes::agent_port_tools::HostedCaller,
-    body: &[u8],
-    era: &'static str,
-    status: u16,
-    rpc_code: Option<i64>,
-    tools_listed: Option<usize>,
+    shape: momo_mcp::CallShape,
+    facts: AnswerFacts,
 ) {
-    let verdict = state.agent_port.limiter.check(
-        &format!("agent-port:trace:{}", caller.token_id),
-        CALL_TRACE_PER_HOUR,
-        CALL_TRACE_WINDOW,
-    );
+    // At most `PER_HOUR` rows per credential per hour, then the trace stops for it until the hour
+    // passes (ADR-0200 T3's rule: stop recording, never delete).
+    let verdict = state.agent_port.call_trace.admit(caller.token_id);
     if !verdict.allowed {
         if verdict.should_log {
             tracing::warn!(
-                limit = CALL_TRACE_PER_HOUR,
+                limit = crate::rate_limit::CallTraceBudget::PER_HOUR,
                 "Agent Port call trace capped for one credential until its hour passes"
             );
         }
         return;
     }
-    let shape = momo_mcp::call_shape(body);
     let mut detail = serde_json::json!({
         "method": shape.method,
-        "outcome": momo_mcp::outcome_code(rpc_code),
-        "status": status,
-        "era": era,
+        "outcome": momo_mcp::outcome_code(facts.rpc_code),
+        "status": facts.status,
+        "era": facts.era,
     });
     if let Some(object) = detail.as_object_mut() {
         if let Some(tool) = shape.tool {
             object.insert("tool".to_owned(), serde_json::json!(tool));
         }
-        if let Some(code) = rpc_code {
+        if let Some(code) = facts.rpc_code {
             object.insert("rpc_code".to_owned(), serde_json::json!(code));
         }
-        if let Some(listed) = tools_listed {
-            object.insert("tools_listed".to_owned(), serde_json::json!(listed));
+        for (key, value) in [
+            (
+                "tools_listed",
+                facts
+                    .tools_listed
+                    .map(|listed| u32::try_from(listed).unwrap_or(u32::MAX)),
+            ),
+            ("events", facts.counts.events),
+            ("agent_jobs", facts.counts.agent_jobs),
+            ("jobs", facts.counts.jobs),
+        ] {
+            if let Some(value) = value {
+                object.insert(key.to_owned(), serde_json::json!(value));
+            }
         }
     }
     let mut entry = momo_db::audit::AuditEntry::new(caller.workspace_id, CALL_TRACE_ACTION)

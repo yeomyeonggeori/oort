@@ -94,6 +94,10 @@ pub struct RateLimitState {
 pub struct AgentPortState {
     pub config: AgentPortConfig,
     pub limiter: SlidingWindowRateLimiter,
+    /// The `agent_port.call` trace's hourly row budget per credential (ADR-0200 증보 4, #4618) —
+    /// its own type and its own map, because `limiter` is swept at the window of whichever call
+    /// triggers the sweep (60 s), which would silently reset an hour-long cap.
+    pub call_trace: rate_limit::CallTraceBudget,
     /// The key behind the two opaque Agent Port envelopes — HAP-E4's inbox
     /// cursor and HAP-E5's `leaseHandle`.
     ///
@@ -113,6 +117,7 @@ impl std::fmt::Debug for AgentPortState {
             .debug_struct("AgentPortState")
             .field("config", &self.config)
             .field("limiter", &self.limiter)
+            .field("call_trace", &self.call_trace)
             .field("envelope_secret", &"<redacted>")
             .finish()
     }
@@ -573,6 +578,7 @@ impl AppState {
         self.agent_port = Arc::new(AgentPortState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
+            call_trace: rate_limit::CallTraceBudget::default(),
             envelope_secret,
         });
         self

@@ -308,6 +308,41 @@ impl SlidingWindowRateLimiter {
     }
 }
 
+/// The hourly row budget of the Agent Port call trace, one per credential (ADR-0200 증보 4, #4618).
+///
+/// A type of its own, with the limit and the window fixed in it, so the trace cannot be pointed at
+/// the shared Agent Port limiter by accident: that map is swept by whichever call triggers the
+/// sweep, with **that call's** window (60 s for the admission axes), and a sweep at the wrong
+/// window silently forgets an hour-long bucket — the same hazard `RateLimitState::member_writes`
+/// exists to avoid. Here the sweep always runs at the budget's own hour, so a bucket lives exactly
+/// as long as its newest stamp is inside the hour.
+///
+/// Stop recording, never delete (ADR-0200 T3): once a credential has spent its rows the trace is
+/// silent for it until the hour passes; the calls themselves are not limited by this.
+#[derive(Debug, Default)]
+pub struct CallTraceBudget {
+    limiter: SlidingWindowRateLimiter,
+}
+
+impl CallTraceBudget {
+    /// Rows one credential may leave in an hour. A 15-minute routine makes a few dozen calls an
+    /// hour; a runaway client is bounded to this however hard it hammers.
+    pub const PER_HOUR: u32 = 240;
+    pub const WINDOW: Duration = Duration::from_secs(3600);
+
+    /// Spend one row for `credential` now. `allowed == false` means the budget is spent;
+    /// `should_log` is true once per burst, so the cap is announced once, not per call.
+    pub fn admit(&self, credential: Uuid) -> Verdict {
+        self.admit_at(credential, Instant::now())
+    }
+
+    /// [`admit`](Self::admit) with an injected clock.
+    pub fn admit_at(&self, credential: Uuid, now: Instant) -> Verdict {
+        self.limiter
+            .check_at(&credential.to_string(), Self::PER_HOUR, Self::WINDOW, now)
+    }
+}
+
 /// The client address to limit on: the first `X-Forwarded-For` hop when present,
 /// else the socket peer (Swift `clientIP` :98-106).
 ///
@@ -1607,5 +1642,101 @@ mod tests {
             "…and so did the slot: the retry wrote"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    // ---- CallTraceBudget (ADR-0200 증보 4, #4618) -------------------------------------------
+
+    /// The budget is the cap, per credential, and an hour later it reopens.
+    #[test]
+    fn the_call_trace_budget_stops_at_its_cap_and_a_new_hour_reopens_it() {
+        let budget = CallTraceBudget::default();
+        let t0 = Instant::now();
+        let credential = Uuid::new_v4();
+        for spent in 0..CallTraceBudget::PER_HOUR {
+            assert!(
+                budget.admit_at(credential, t0).allowed,
+                "row {} of {}",
+                spent + 1,
+                CallTraceBudget::PER_HOUR
+            );
+        }
+        let spent = budget.admit_at(credential, t0);
+        assert!(!spent.allowed, "the budget is spent");
+        assert!(
+            spent.should_log,
+            "the first refusal of a burst is announced"
+        );
+        assert!(spent.retry_after_seconds > 0);
+        assert!(
+            !budget.admit_at(credential, t0).should_log,
+            "and only the first"
+        );
+        // Another credential has a budget of its own.
+        assert!(budget.admit_at(Uuid::new_v4(), t0).allowed);
+        // An hour on, the oldest rows have left the window.
+        assert!(
+            budget
+                .admit_at(
+                    credential,
+                    t0 + CallTraceBudget::WINDOW + Duration::from_secs(1)
+                )
+                .allowed
+        );
+    }
+
+    /// The hazard the type exists for. A shared limiter is swept at the window of whichever call
+    /// triggers the sweep; the budget is swept at its own hour, so a spent bucket survives any
+    /// amount of unrelated traffic inside that hour. Goes red if the budget's window shrinks to
+    /// the admission axes' 60 s.
+    #[test]
+    fn a_spent_budget_survives_a_sweep_and_the_shared_limiter_would_not() {
+        let t0 = Instant::now();
+        let later = t0 + Duration::from_secs(120);
+
+        let budget = CallTraceBudget::default();
+        let credential = Uuid::new_v4();
+        for _ in 0..CallTraceBudget::PER_HOUR {
+            assert!(budget.admit_at(credential, t0).allowed);
+        }
+        // More than a sweep interval of other credentials, two minutes later.
+        for _ in 0..SWEEP_INTERVAL + 8 {
+            budget.admit_at(Uuid::new_v4(), later);
+        }
+        assert!(
+            !budget
+                .admit_at(credential, later + Duration::from_secs(1))
+                .allowed,
+            "the sweep ran at the budget's own hour and kept the spent bucket"
+        );
+
+        // The same traffic on the shared limiter, whose callers use a 60 s window, forgets it.
+        let shared = SlidingWindowRateLimiter::new();
+        let minute = Duration::from_secs(60);
+        for _ in 0..CallTraceBudget::PER_HOUR {
+            assert!(
+                shared
+                    .check_at(
+                        "trace",
+                        CallTraceBudget::PER_HOUR,
+                        CallTraceBudget::WINDOW,
+                        t0
+                    )
+                    .allowed
+            );
+        }
+        for index in 0..SWEEP_INTERVAL + 8 {
+            shared.check_at(&format!("other-{index}"), 1000, minute, later);
+        }
+        assert!(
+            shared
+                .check_at(
+                    "trace",
+                    CallTraceBudget::PER_HOUR,
+                    CallTraceBudget::WINDOW,
+                    later + Duration::from_secs(1)
+                )
+                .allowed,
+            "on a shared map a 60 s sweep forgets an hour-long bucket — why the budget is a type"
+        );
     }
 }

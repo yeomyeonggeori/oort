@@ -321,6 +321,78 @@ pub fn call_shape(body: &[u8]) -> CallShape {
     CallShape { method, tool }
 }
 
+/// How much a successful answer handed over, as small integers the **server** computed
+/// from its own response — the one thing a call trace needs beyond "it succeeded" to tell
+/// "the runtime read the inbox and saw no job" from "it saw the job and never claimed it".
+///
+/// Only three tools have a count, only on success, and a count is all there is: no id, no
+/// cursor, no handle, no text, no channel. The caller's input is not an input here at all
+/// (the argument is the server's own answer body and the catalog tool name the dispatcher
+/// already resolved).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResultCounts {
+    /// `oort_inbox_read`: events on the page the server returned.
+    pub events: Option<u32>,
+    /// `oort_inbox_read`: how many of those are `agent_job` (a tracked turn).
+    pub agent_jobs: Option<u32>,
+    /// `oort_jobs_claim`: jobs handed over; `oort_job_start`: `1` when it handed one over,
+    /// `0` when `job` was null (nothing pending, or a closed run).
+    pub jobs: Option<u32>,
+}
+
+fn clamp_count(len: usize) -> u32 {
+    u32::try_from(len).unwrap_or(u32::MAX)
+}
+
+/// The [`ResultCounts`] of a success body for `tool` (a [`TOOL_CATALOG`] name). Anything
+/// that is not a success of one of the three tools — an error body, another tool, a body
+/// that does not parse, a field of the wrong shape — has no counts.
+pub fn result_counts(tool: &str, body: Option<&[u8]>) -> ResultCounts {
+    let Some(structured) = body
+        .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
+        .and_then(|value| {
+            value
+                .get("result")?
+                .get("structuredContent")
+                .filter(|content| content.is_object())
+                .cloned()
+        })
+    else {
+        return ResultCounts::default();
+    };
+    match tool {
+        TOOL_INBOX_READ => {
+            let Some(events) = structured.get("events").and_then(Value::as_array) else {
+                return ResultCounts::default();
+            };
+            ResultCounts {
+                events: Some(clamp_count(events.len())),
+                agent_jobs: Some(clamp_count(
+                    events
+                        .iter()
+                        .filter(|event| {
+                            event.get("kind").and_then(Value::as_str) == Some("agent_job")
+                        })
+                        .count(),
+                )),
+                jobs: None,
+            }
+        }
+        TOOL_JOBS_CLAIM => ResultCounts {
+            jobs: structured
+                .get("jobs")
+                .and_then(Value::as_array)
+                .map(|jobs| clamp_count(jobs.len())),
+            ..ResultCounts::default()
+        },
+        TOOL_JOB_START => ResultCounts {
+            jobs: structured.get("job").map(|job| u32::from(job.is_object())),
+            ..ResultCounts::default()
+        },
+        _ => ResultCounts::default(),
+    }
+}
+
 /// The JSON-RPC `error.code` a response body carries, or `None` for a success (or a
 /// body-less answer such as the `202` for `notifications/initialized`).
 pub fn response_rpc_code(body: Option<&[u8]>) -> Option<i64> {

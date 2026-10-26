@@ -10,12 +10,15 @@
 //! | `the_outcome_vocabulary_is_the_tool_failure_vocabulary` | for every `ToolFailure` the trace's outcome equals `ToolFailure::code()` | the mapping and the run ledger's `tool_call` codes drift apart |
 //! | `the_outcome_of_a_real_refusal_is_read_from_the_real_response` | the dispatcher's own answers (-32022, -32020, -32601, -32602, success) map to the documented outcome | `response_rpc_code` or `outcome_code` read the wrong field |
 //! | `a_trace_never_reads_a_value` | the shape of two bodies that differ only in argument values is equal | a value (cursor, handle, body text) starts to influence the shape |
+//! | `counts_come_only_from_a_success_of_the_three_tools` | `events` / `agent_jobs` / `jobs` are read from the server's own success body of `oort_inbox_read` / `oort_jobs_claim` / `oort_job_start`, and nowhere else | a count appears for another tool, an error body, or a malformed field; or `agent_job` is counted by something other than its `kind` |
+//! | `a_count_carries_no_text_from_the_answer` | whatever strings, ids and handles an answer holds, the counts are plain integers | the count type grows a string or id |
 
 use momo_mcp::{
-    call_shape, dispatch, outcome_code, response_rpc_code, ArtifactRule, ArtifactViolation,
-    CallShape, HttpRequest, ToolFailure, CALL_METHODS, CALL_METHOD_NONE, CALL_METHOD_OTHER,
-    CALL_METHOD_UNPARSED, CALL_TOOL_UNKNOWN, JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION,
-    MODERN_PROTOCOL_VERSION, TOOL_CATALOG, TOOL_INBOX_READ,
+    call_shape, dispatch, outcome_code, response_rpc_code, result_counts, ArtifactRule,
+    ArtifactViolation, CallShape, HttpRequest, ResultCounts, ToolFailure, CALL_METHODS,
+    CALL_METHOD_NONE, CALL_METHOD_OTHER, CALL_METHOD_UNPARSED, CALL_TOOL_UNKNOWN,
+    JSON_CONTENT_TYPE, LEGACY_PROTOCOL_VERSION, MODERN_PROTOCOL_VERSION, TOOL_CATALOG,
+    TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_START, TOOL_PING,
 };
 use serde_json::{json, Value};
 
@@ -378,4 +381,178 @@ fn the_outcome_of_a_real_refusal_is_read_from_the_real_response() {
         assert_eq!(code, rpc, "case {index}");
         assert_eq!(outcome_code(code), outcome, "case {index}");
     }
+}
+
+/// The MCP success envelope of a tool answer, as the server writes it.
+fn success_body(structured: Value) -> Vec<u8> {
+    serde_json::to_vec(&json!({
+        "jsonrpc": "2.0", "id": 1,
+        "result": {"content": [{"type": "text", "text": "{}"}],
+                   "structuredContent": structured, "isError": false}
+    }))
+    .unwrap()
+}
+
+fn counts(tool: &str, structured: Value) -> ResultCounts {
+    result_counts(tool, Some(&success_body(structured)))
+}
+
+#[test]
+fn counts_come_only_from_a_success_of_the_three_tools() {
+    // oort_inbox_read: how many events, and how many of them are tracked turns.
+    assert_eq!(
+        counts(
+            TOOL_INBOX_READ,
+            json!({"events": [], "nextCursor": "c", "hasMore": false})
+        ),
+        ResultCounts {
+            events: Some(0),
+            agent_jobs: Some(0),
+            jobs: None
+        }
+    );
+    assert_eq!(
+        counts(
+            TOOL_INBOX_READ,
+            json!({"events": [
+                {"kind": "message", "channelId": "a"},
+                {"kind": "agent_job", "channelId": "a"},
+                {"kind": "agent_run", "channelId": "a"},
+                {"kind": "agent_job", "channelId": "b"},
+                {"channelId": "no-kind"},
+                {"kind": 5}
+            ], "nextCursor": "c", "hasMore": true})
+        ),
+        ResultCounts {
+            events: Some(6),
+            agent_jobs: Some(2),
+            jobs: None
+        },
+        "agent_job is counted by its `kind` and by nothing else"
+    );
+
+    // oort_jobs_claim: jobs handed over.
+    assert_eq!(counts(TOOL_JOBS_CLAIM, json!({"jobs": []})).jobs, Some(0));
+    assert_eq!(
+        counts(
+            TOOL_JOBS_CLAIM,
+            json!({"jobs": [{"leaseHandle": "h1"}, {"leaseHandle": "h2"}]})
+        ),
+        ResultCounts {
+            events: None,
+            agent_jobs: None,
+            jobs: Some(2)
+        }
+    );
+
+    // oort_job_start: 1 when it handed a job over, 0 for `job: null` (nothing pending, or
+    // a closed run) — never the job itself.
+    assert_eq!(
+        counts(
+            TOOL_JOB_START,
+            json!({"job": null, "started": false, "resumed": false})
+        )
+        .jobs,
+        Some(0)
+    );
+    assert_eq!(
+        counts(
+            TOOL_JOB_START,
+            json!({"job": null, "started": false, "resumed": true, "closed": "run_settled"})
+        )
+        .jobs,
+        Some(0)
+    );
+    assert_eq!(
+        counts(
+            TOOL_JOB_START,
+            json!({"job": {"leaseHandle": "h", "work": {"prompt": "x"}},
+                   "started": true, "resumed": false})
+        ),
+        ResultCounts {
+            events: None,
+            agent_jobs: None,
+            jobs: Some(1)
+        }
+    );
+
+    // Nothing else has a count, whatever its answer looks like.
+    for tool in [
+        TOOL_PING,
+        "oort_message_post",
+        "oort_run_event",
+        "unknown",
+        "",
+    ] {
+        assert_eq!(
+            counts(tool, json!({"events": [1, 2], "jobs": [1], "job": {}})),
+            ResultCounts::default(),
+            "{tool:?}"
+        );
+    }
+
+    // A refusal, a body-less answer, junk and wrongly shaped fields have none.
+    let refusal =
+        br#"{"jsonrpc":"2.0","id":1,"error":{"code":-32004,"message":"tool target is unavailable"}}"#;
+    for body in [
+        Some(&refusal[..]),
+        None,
+        Some(&b""[..]),
+        Some(&b"not json"[..]),
+        Some(br#"{"result":{}}"#),
+        Some(br#"{"result":{"structuredContent":"events"}}"#),
+        Some(br#"{"result":{"structuredContent":[1,2,3]}}"#),
+    ] {
+        for tool in [TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_START] {
+            assert_eq!(result_counts(tool, body), ResultCounts::default(), "{tool}");
+        }
+    }
+    for structured in [
+        json!({"events": "none"}),
+        json!({"events": {"0": {}}}),
+        json!({"events": null}),
+        json!({"jobs": 3}),
+        json!({"jobs": "1"}),
+        json!({}),
+    ] {
+        for tool in [TOOL_INBOX_READ, TOOL_JOBS_CLAIM] {
+            assert_eq!(
+                counts(tool, structured.clone()),
+                ResultCounts::default(),
+                "{tool} {structured}"
+            );
+        }
+    }
+    // `job` of a wrong type is not a job, and not a missing key either: it is 0 handed over.
+    assert_eq!(counts(TOOL_JOB_START, json!({"job": "yes"})).jobs, Some(0));
+    assert_eq!(counts(TOOL_JOB_START, json!({})).jobs, None);
+
+    // A huge page cannot overflow the count type.
+    let many: Vec<Value> = (0..1000).map(|_| json!({"kind": "agent_job"})).collect();
+    assert_eq!(
+        counts(TOOL_INBOX_READ, json!({"events": many})).agent_jobs,
+        Some(1000)
+    );
+}
+
+#[test]
+fn a_count_carries_no_text_from_the_answer() {
+    // The type is three optional integers; this pins that by construction: a value built from
+    // an answer full of strings, ids and handles is `Copy` + `Eq` and holds nothing but numbers.
+    let hostile = json!({"events": [
+        {"kind": "agent_job", "channelId": "MARKER-CHANNEL", "messageId": "MARKER-MESSAGE"}
+    ], "nextCursor": "MARKER-CURSOR", "hasMore": false});
+    let got = counts(TOOL_INBOX_READ, hostile);
+    let rendered = format!("{got:?}");
+    assert!(!rendered.contains("MARKER"), "{rendered}");
+    assert_eq!(
+        got,
+        ResultCounts {
+            events: Some(1),
+            agent_jobs: Some(1),
+            jobs: None
+        }
+    );
+    fn plain_data<T: Copy + Eq + Default>(_: T) {}
+    plain_data(got);
 }

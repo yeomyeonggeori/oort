@@ -2,12 +2,13 @@
 //!
 //! 서버는 **인증을 통과한 Agent Port POST마다** 답이 정해진 뒤에 감사 행 한 줄을 남긴다:
 //! JSON-RPC method, `tools/call`의 도구 이름, 결과 토큰, HTTP 상태, JSON-RPC 코드, 호출자가 말한
-//! 프로토콜 era, `tools/list`면 보여 준 도구 수. 실제 Axum 라우터를 `momo_app`(NOBYPASSRLS)
+//! 프로토콜 era, 서버가 센 숫자 셋(`tools/list`가 보여 준 도구 수 · inbox 이벤트/`agent_job` 수 · 가져간 job 수). 실제 Axum 라우터를 `momo_app`(NOBYPASSRLS)
 //! 풀 위에 띄우고 HTTP로만 확인한다.
 //!
 //! | 시험 | 증명 | 빨개지면 |
 //! |---|---|---|
 //! | `every_kind_of_call_leaves_one_exact_row` | 성공·-32602(인자 형식·모르는 인자·모르는 도구)·409·-32700(깨진 JSON)·-32600(배열·중복 헤더·64KiB 초과)·-32022·-32020·-32601·legacy initialize·202가 각각 정확히 한 행, 키 집합이 고정 | 결과 매핑·method/tool 분류·전송 거절 경로의 기록 중 하나가 빠짐 |
+//! | `the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not` | 같은 도구가 성공이어도 `oort_inbox_read`는 받은 이벤트 수·`agent_job` 수, `oort_job_start`는 가져간 job 수(0/1)가 행에 남아, 「읽고 job을 봤는데 안 가져감」과 「읽었는데 job이 안 보임」과 「inbox가 빈 뒤 job_start가 가져감」을 가른다. id·핸들·커서·본문은 행 어디에도 없다 | 개수가 빠지거나 틀리거나 값이 새어 들어감 |
 //! | `a_tool_outside_the_view_is_named_and_the_list_says_how_many_were_offered` | 도구 범위가 모자란 연결: `tools/list`는 제공 수(`tools_listed`), 못 쓰는 도구 호출은 도구 이름 + invalid_arguments | 「목록이 비었나 일부인가」를 가리는 숫자가 사라짐 |
 //! | `a_call_that_was_not_admitted_leaves_no_row` | 위조·형식 오류 bearer(401)와 범위 없는 bearer(403)에는 이 행이 없다 | 인증 앞에서 기록하거나 신원 없는 호출을 귀속 |
 //! | `the_trace_holds_nothing_the_caller_sent` | 호출자가 보낸 표지 문자열(도구 이름·커서·인자·method·헤더)이 감사 로그 어디에도 없다 | 값이 한 글자라도 새어 들어감 |
@@ -52,6 +53,7 @@ struct World {
     base: String,
     workspace: Uuid,
     owner: Uuid,
+    owner_jwt: String,
     public: Uuid,
     agent: SeededAgent,
 }
@@ -62,7 +64,7 @@ async fn world() -> World {
     let app = momo_app_pool().await;
     let base = start_server(app, ServerOptions::hosted_open()).await;
     let workspace = seed_workspace(&su).await;
-    let (owner, _jwt) = seed_human(&su, workspace, "member", "박서연").await;
+    let (owner, owner_jwt) = seed_human(&su, workspace, "member", "박서연").await;
     let public = seed_channel(&su, workspace, "public", &[owner]).await;
     let agent = seed_hosted_agent(&su, workspace, owner, "trace", &[public], true, false).await;
     join_channel(&su, workspace, public, agent.id).await;
@@ -71,6 +73,7 @@ async fn world() -> World {
         base,
         workspace,
         owner,
+        owner_jwt,
         public,
         agent,
     }
@@ -92,6 +95,27 @@ impl World {
 
     async fn rows(&self) -> Vec<Value> {
         trace_rows(&self.su, self.workspace, self.agent.id).await
+    }
+
+    /// The owner mentions the agent in the public channel; returns the message id.
+    async fn ask(&self, body: &str) -> Uuid {
+        let response = reqwest::Client::new()
+            .post(format!(
+                "{}/v1/workspaces/{}/channels/{}/messages",
+                self.base, self.workspace, self.public
+            ))
+            .bearer_auth(&self.owner_jwt)
+            .json(&json!({
+                "clientMsgId": Uuid::new_v4(),
+                "body": format!("@{} {body}", self.agent.handle)
+            }))
+            .send()
+            .await
+            .expect("send");
+        let status = response.status().as_u16();
+        let value: Value = response.json().await.expect("send body");
+        assert_eq!(status, 201, "send: {value}");
+        Uuid::parse_str(value["id"].as_str().expect("id")).expect("message uuid")
     }
 }
 
@@ -115,6 +139,21 @@ fn row(
     }
     if let Some(listed) = listed {
         expected["tools_listed"] = json!(listed);
+    }
+    expected
+}
+
+/// A success row of a tool that counts: `events` / `agent_jobs` / `jobs` as the server computed them.
+fn counted(tool: &str, events: Option<u32>, agent_jobs: Option<u32>, jobs: Option<u32>) -> Value {
+    let mut expected = row("tools/call", Some(tool), "ok", 200, None, "modern", None);
+    for (key, value) in [
+        ("events", events),
+        ("agent_jobs", agent_jobs),
+        ("jobs", jobs),
+    ] {
+        if let Some(value) = value {
+            expected[key] = json!(value);
+        }
     }
     expected
 }
@@ -431,6 +470,122 @@ async fn every_kind_of_call_leaves_one_exact_row() {
 
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_counts_tell_a_wake_that_saw_the_job_from_one_that_did_not() {
+    let w = world().await;
+    let wire = w.wire();
+
+    // Wake 1: nothing to do. The page is empty and `oort_job_start {}` hands nothing over.
+    assert!(wire.ping().await.is_ok());
+    let quiet = wire.inbox(None).await;
+    assert!(quiet.is_ok(), "{quiet:?}");
+    let cursor = next_cursor(&quiet);
+    let nothing = wire.job_start().await;
+    assert!(nothing.is_ok() && nothing.structured()["job"].is_null());
+
+    // A person asks. Wake 2 reads the page, SEES the tracked turn — and goes away without
+    // claiming it (the saved cursor has now moved past the event).
+    w.ask("분기 보고서 초안 부탁해요").await;
+    assert!(wire.ping().await.is_ok());
+    let saw = wire.inbox(Some(&cursor)).await;
+    assert!(saw.is_ok(), "{saw:?}");
+    assert_eq!(
+        events(&saw).len(),
+        2,
+        "the message and the tracked turn: {:?}",
+        saw.body
+    );
+    let cursor = next_cursor(&saw);
+
+    // Wake 3: the page is now empty (the cursor moved on) — the job is still there, and the
+    // routine's step 5 (`oort_job_start {}` even on an empty page) takes it.
+    assert!(wire.ping().await.is_ok());
+    let empty = wire.inbox(Some(&cursor)).await;
+    assert!(empty.is_ok() && events(&empty).is_empty(), "{empty:?}");
+    let taken = wire.job_start().await;
+    assert!(taken.is_ok(), "{taken:?}");
+    let handle = taken.structured()["job"]["leaseHandle"]
+        .as_str()
+        .expect("the stranded turn is handed over")
+        .to_string();
+    assert!(wire.run_complete(&handle, "초안 올렸어요").await.is_ok());
+
+    // The trace of those three wakes, one row per call, with the numbers that separate the
+    // stories: wake 2 read two events of which ONE is a tracked turn and made no claim;
+    // wake 3 read none and still took one.
+    let ping = row(
+        "tools/call",
+        Some("oort_ping"),
+        "ok",
+        200,
+        None,
+        "modern",
+        None,
+    );
+    let expected = vec![
+        ping.clone(),
+        counted("oort_inbox_read", Some(0), Some(0), None),
+        counted("oort_job_start", None, None, Some(0)),
+        ping.clone(),
+        counted("oort_inbox_read", Some(2), Some(1), None),
+        ping.clone(),
+        counted("oort_inbox_read", Some(0), Some(0), None),
+        counted("oort_job_start", None, None, Some(1)),
+        row(
+            "tools/call",
+            Some("oort_run_complete"),
+            "ok",
+            200,
+            None,
+            "modern",
+            None,
+        ),
+    ];
+    let rows = w.rows().await;
+    assert_eq!(rows.len(), expected.len(), "{rows:#?}");
+    for (index, (got, want)) in rows.iter().zip(&expected).enumerate() {
+        assert_eq!(got, want, "call #{}", index + 1);
+    }
+
+    // Counts are numbers and only numbers: nothing the answers carried (ids, the cursor, the
+    // lease handle, the request text) is in any audit row of this workspace.
+    for secret in [
+        cursor.as_str(),
+        handle.as_str(),
+        "분기 보고서 초안",
+        "초안 올렸어요",
+    ] {
+        let leaked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND position($2 in detail::text) > 0",
+        )
+        .bind(w.workspace)
+        .bind(secret)
+        .fetch_one(&w.su)
+        .await
+        .expect("scan");
+        assert_eq!(leaked, 0, "{secret:?} must not be in the audit log");
+    }
+    for key in [
+        "messageId",
+        "channelId",
+        "leaseHandle",
+        "nextCursor",
+        "runId",
+    ] {
+        let leaked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE workspace_id = $1 AND action = 'agent_port.call' \
+               AND position($2 in detail::text) > 0",
+        )
+        .bind(w.workspace)
+        .bind(key)
+        .fetch_one(&w.su)
+        .await
+        .expect("scan keys");
+        assert_eq!(leaked, 0, "no `{key}` key in a call trace");
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
 async fn a_tool_outside_the_view_is_named_and_the_list_says_how_many_were_offered() {
     let w = world().await;
     let full = w.wire();
@@ -650,11 +805,14 @@ async fn a_failing_trace_write_never_changes_the_answer() {
     .execute(&w.su)
     .await
     .expect("create function");
-    sqlx::query(
+    // Scoped to THIS test's workspace: a panic before the cleanup below leaves the trigger behind,
+    // and it must not be able to refuse another test's (or another run's) rows.
+    sqlx::query(&format!(
         "CREATE TRIGGER test_4618_refuse_call_trace BEFORE INSERT ON audit_log \
-           FOR EACH ROW WHEN (NEW.action = 'agent_port.call') \
+           FOR EACH ROW WHEN (NEW.action = 'agent_port.call' AND NEW.workspace_id = '{}') \
            EXECUTE FUNCTION test_4618_refuse_call_trace()",
-    )
+        w.workspace
+    ))
     .execute(&w.su)
     .await
     .expect("create trigger");
