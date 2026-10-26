@@ -138,6 +138,7 @@ import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {seedMemberAvatar} from '../src/features/conversation/memberAvatarImage';
 import {SettingsContent, SettingsPage} from '../src/features/profile/SettingsPage';
+import {SettingsOverlay} from './settingsOverlay';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {pushDeviceId} from '../src/push/registration';
@@ -199,20 +200,6 @@ import {AvatarApprovalSurface} from './avatarApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
 
-/**
- * #4457: 옛 `ProfileSheet` 의 자리. 「설정」은 셸의 층(`nav.settings`)이라 하네스는 셸 위에 전체 화면을
- * 불투명하게 덮어 세운다(층의 `overlay` 와 같은 모양). 앱의 층은 `EdgeSwipeBack` 이 이 자리를 맡는다.
- */
-function SettingsOverlay(
-  props: React.ComponentProps<typeof SettingsPage>,
-): React.JSX.Element {
-  const palette = usePalette();
-  return (
-    <View style={[StyleSheet.absoluteFill, {backgroundColor: palette.bg}]}>
-      <SettingsPage {...props} />
-    </View>
-  );
-}
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';

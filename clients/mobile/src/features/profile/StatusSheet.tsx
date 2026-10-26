@@ -22,7 +22,7 @@ import {StyleSheet, TextInput, View} from 'react-native';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
-import {usePalette, useStyles} from '../../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {font, radius, SHEET, space, type Palette} from '../../design/tokens';
 import {useSetPresence} from './selfStatus';
 import {ChoiceRow, SettingsNote} from './settingsRows';
@@ -256,6 +256,8 @@ function StatusInputPill({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  // 키보드 모양은 앱의 스킴이 정한다(#4526) — 시스템이 라이트인데 앱이 다크이면 어두운 시트에 밝은 키보드가 선다.
+  const keyboardAppearance = useKeyboardAppearance();
   return (
     <View style={styles.pill} testID="status-input-pill">
       <TextInput
@@ -266,6 +268,7 @@ function StatusInputPill({
         placeholderTextColor={palette.textMuted}
         accessibilityLabel="상태 이모지"
         accessibilityHint="키보드의 이모지 판에서 고릅니다."
+        keyboardAppearance={keyboardAppearance}
         style={styles.emojiInput}
         testID="status-emoji-input"
       />
@@ -277,6 +280,7 @@ function StatusInputPill({
         accessibilityLabel={CUSTOM_STATUS_TEXT_LABEL}
         maxLength={CUSTOM_STATUS_TEXT_MAX}
         returnKeyType="done"
+        keyboardAppearance={keyboardAppearance}
         style={styles.textInput}
         testID="status-text-input"
       />
