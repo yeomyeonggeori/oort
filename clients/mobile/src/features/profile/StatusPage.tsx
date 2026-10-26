@@ -25,7 +25,7 @@ import {
   PrimaryButton,
   Sentence,
 } from '../../design/atoms';
-import {useStyles, usePalette} from '../../design/theme';
+import {useKeyboardAppearance, useStyles, usePalette} from '../../design/theme';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {useSetPresence} from './selfStatus';
 
@@ -74,6 +74,7 @@ export function StatusPage({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const write = useSetPresence(workspaceId, selfId);
   const declared: PresenceStatus = self?.presenceStatus ?? 'auto';
   // 씨앗은 여는 순간 한 번 — 명부가 다시 읽혀도 쓰던 글을 덮지 않는다.
@@ -124,6 +125,7 @@ export function StatusPage({
             // 이모지를 자리표시자로 두면 제 색으로 그려져 「골라 둔 값」처럼 보인다(리뷰 M-2).
             placeholder="＋"
             placeholderTextColor={palette.textMuted}
+            keyboardAppearance={keyboardAppearance}
             accessibilityLabel="상태 이모지"
             accessibilityHint="키보드의 이모지 판에서 고릅니다."
             style={styles.emojiInput}
@@ -134,6 +136,7 @@ export function StatusPage({
             onChangeText={setText}
             placeholder={CUSTOM_STATUS_TEXT_PLACEHOLDER}
             placeholderTextColor={palette.textMuted}
+            keyboardAppearance={keyboardAppearance}
             accessibilityLabel={CUSTOM_STATUS_TEXT_LABEL}
             maxLength={CUSTOM_STATUS_TEXT_MAX}
             returnKeyType="done"

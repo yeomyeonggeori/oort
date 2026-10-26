@@ -82,18 +82,43 @@ import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
 // `useStyles` 의 캐시 키가 스킴 문자열에서 **팔레트 객체**로 바뀌었을 뿐이고, 컨텍스트
 // 값이 바뀌면 memo 를 통과해 모든 소비자가 다시 그려지는 성질은 그대로다. 저장은 core
 // 의 외양 레코드(`momo.mobile.appearance.v1`)이고 옛 스킴 키는 읽기만 한다.
+//
+// ## 기본은 라이트다 (#4526 · ADR-0189 증보 5 · owner 2026-10-25)
+//
+// 처음에는 기본이 시스템이었다. 그래서 iOS 가 다크 모드인 기기에서는 앱이 처음부터 다크로
+// 떴다. 폰의 기본은 이제 **라이트**이고 고르는 순서는 라이트·시스템·다크다. 바뀌는 사람은
+// **한 번도 고른 적 없는 폰**뿐이다 — 저장된 선택은 그대로다(`readStoredAppearance`). 프로바이더
+// 밖(`DETACHED`)의 기본도 라이트다. 웹·데스크탑은 이번 범위가 아니라 기본이 시스템인 채다
+// (core `DEFAULT_APPEARANCE` 를 고치지 않고 폰의 기본만 여기서 따로 둔다).
+//
+// **OS 가 먼저 그리는 면도 같은 말을 해야 한다** (owner·planner 2026-10-26). 앱이 칠하는 면은 위의 스킴이
+// 정하지만, OS 가 칠하는 면은 알려 주지 않으면 기기 외양을 따른다.
+//   - 런치 화면·그 뒤 JS 첫 프레임까지의 루트 뷰: `LaunchBackground` 는 **라이트 한 색**이다(다크 변형 없음).
+//     기기가 다크여도 라이트로 뜬다. 다크를 고른 폰은 JS 첫 프레임에서 다크로 바뀌는 한 걸음을 진다(수용).
+//     `projectShape.test.ts` 의 #2668 묶음이 지킨다.
+//   - 키보드: `useKeyboardAppearance()` 가 풀린 스킴을 돌려주고 모든 `<TextInput>` 이 든다.
 // =============================================================================
 
 /** 실제로 화면에 서는 두 스킴. `null`(모름)은 여기까지 오지 않는다. */
 export type ColorScheme = 'light' | 'dark';
 
 /**
- * 사람이 고르는 세 값. 웹 설정의 「테마」와 같은 세 값이고 같은 기본값이다
- * (기본 = 시스템, ADR 없이 두 클라가 달라지면 안 되는 자리).
+ * 사람이 고르는 세 값. 값 이름(system/light/dark)은 웹 설정의 「테마」와 같다. **기본값과
+ * 고르는 순서는 폰이 다르다**: 폰은 라이트·시스템·다크 순이고 기본이 라이트다(ADR-0189
+ * 증보 5). 웹·데스크탑은 기본이 시스템이고 이번에 바뀌지 않았다.
  */
 export type ThemeChoice = 'system' | 'light' | 'dark';
 
-export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
+/** 폰의 기본. 한 번도 고른 적 없는 폰과 프로바이더 밖이 이 값이다. */
+export const DEFAULT_THEME_CHOICE: ThemeChoice = 'light';
+
+/** 고르는 곳의 순서. 기본(라이트)이 첫 줄이다. */
+export const THEME_CHOICES: readonly ThemeChoice[] = ['light', 'system', 'dark'];
+
+/** 고른 값을 실제 스킴으로 푼다. `system` 만 기기가 지금 말하는 것을 따른다. */
+function resolveChoice(choice: ThemeChoice, system: ColorScheme): ColorScheme {
+  return choice === 'system' ? system : choice;
+}
 
 const THEME_LABELS_KO: Readonly<Record<ThemeChoice, string>> = {
   system: '시스템',
@@ -112,7 +137,7 @@ export function themeIdLabel(id: ThemeId): string {
 
 export {THEME_IDS};
 
-/** 프로필 시트 「테마」 줄의 값 — 「새벽하늘 · 시스템」. */
+/** 설정 「테마」 줄의 값 — 「새벽하늘 · 라이트」. */
 export function themeSummary(id: ThemeId, choice: ThemeChoice): string {
   return `${themeIdLabel(id)} · ${themeChoiceLabel(choice)}`;
 }
@@ -123,25 +148,49 @@ export function paletteFor(scheme: ColorScheme): Palette {
 }
 
 /**
- * 저장된 외양을 읽는다. 못 읽거나 모르는 값이면 기본(시스템·새벽하늘·기본 신호) —
- * **저장이 없다는 것과 기본을 쓰라는 것은 같은 뜻**이라 폴백에 정보가 없다.
+ * 폰의 기본 외양. core 의 기본(`DEFAULT_APPEARANCE` — 웹·데스크탑의 것이고 스킴이 시스템이다)에서
+ * **스킴만** 폰의 기본으로 바꾼 것이다. 테마·신호·밀도는 core 기본 그대로다.
+ */
+export const MOBILE_DEFAULT_APPEARANCE: AppearanceV2 = {
+  ...DEFAULT_APPEARANCE,
+  scheme: DEFAULT_THEME_CHOICE,
+};
+
+/** core 의 읽기와 같은 기준: 키가 없거나 빈 문자열이면 저장이 없는 것이다. */
+function isUnset(raw: string | undefined): boolean {
+  return raw == null || raw === '';
+}
+
+/**
+ * 저장된 외양을 읽는다.
  *
- * 새 키(`momo.mobile.appearance.v1`)가 먼저, 없으면 옛 스킴 키(`momo.mobile.theme.v1`)
- * 에서 스킴만 이어받는다(core `readMobileAppearance`). MMKV 는 동기라 첫 페인트 전에
- * 답한다. 비동기 저장소였다면 한 프레임 동안 다크로 그렸다가 라이트로 뒤집히는
- * 깜빡임이 있었을 것이고, 그것이 `storage/kv.ts` 가 MMKV 인 이유이기도 하다.
+ * **「한 번도 안 고름」과 「고른 뒤」는 저장소가 구별한다.** 안 고른 폰은 두 키(새 키
+ * `momo.mobile.appearance.v1`, 옛 스킴 키 `momo.mobile.theme.v1`)가 모두 비어 있다. 시스템을
+ * 고른 폰은 새 키에 `{"scheme":"system"}` 레코드가 남는다 — core `serializeAppearance` 가 스킴을
+ * 언제나 쓰기 때문이다. 그래서 **둘 다 비었을 때만** 폰의 기본(라이트)이고, 하나라도 있으면
+ * 지금까지처럼 core `readMobileAppearance`(새 키 먼저, 없으면 옛 키에서 스킴만)가 읽는다.
+ * 시스템을 고른 사람은 시스템으로 남고, 읽을 수 없는 값(깨진 JSON·모르는 옛 값)도 전과 같이
+ * 시스템이다 — 사람이 남긴 흔적이 있는 폰은 이 변경이 건드리지 않는다.
+ *
+ * 한계: 테마·강조색·말풍선만 바꾼 폰도 레코드에 **그때의 기본 스킴**이 같이 적혀 있다
+ * (`update` 가 레코드를 통째로 쓴다). 그것은 명시한 선택과 구별되지 않으므로 그대로 둔다.
+ * 안전한 쪽은 이미 있는 레코드를 기본으로 되돌려 쓰지 않는 것이다.
+ *
+ * MMKV 는 동기라 첫 페인트 전에 답한다. 비동기 저장소였다면 한 프레임 동안 기본으로
+ * 그렸다가 고른 색으로 뒤집히는 깜빡임이 있었을 것이고, 그것이 `storage/kv.ts` 가 MMKV 인
+ * 이유이기도 하다.
  */
 function readStoredAppearance(): AppearanceV2 {
   try {
     const store = nonSecretStore();
-    return readMobileAppearance({
-      current: store.getString(NON_SECRET_KEYS.appearance),
-      legacyScheme: store.getString(NON_SECRET_KEYS.themeChoice),
-    });
+    const current = store.getString(NON_SECRET_KEYS.appearance);
+    const legacyScheme = store.getString(NON_SECRET_KEYS.themeChoice);
+    if (isUnset(current) && isUnset(legacyScheme)) return MOBILE_DEFAULT_APPEARANCE;
+    return readMobileAppearance({current, legacyScheme});
   } catch {
     // 네이티브 모듈이 없는 환경(단위 테스트, 하네스의 일부)에서 색이 아예 안
-    // 나오는 것보다 기본을 따르는 편이 낫다.
-    return DEFAULT_APPEARANCE;
+    // 나오는 것보다 기본을 따르는 편이 낫다. 읽을 저장소가 없다는 것도 「안 고름」이다.
+    return MOBILE_DEFAULT_APPEARANCE;
   }
 }
 
@@ -216,26 +265,28 @@ function systemScheme(): ColorScheme {
  * 프로바이더 **밖**에서 그려질 때의 값.
  *
  * 그런 자리는 앱에 없다(`App.tsx` 가 가장 바깥에 세운다) — 단위 테스트와 측정
- * 하네스뿐이고, 둘 다 「이 기기가 지금 무슨 스킴인가」를 물어 답을 받는 쪽이 옳다.
- * 그래서 다크 고정이 아니라 시스템이다.
+ * 하네스뿐이다. 거기도 **폰의 기본**(`DEFAULT_THEME_CHOICE`, 라이트)을 입는다: 아무도
+ * 고르지 않은 자리에서 기기의 시스템 스킴이 새어 들어오면 「기본은 라이트」가 화면마다
+ * 다른 말이 된다(#4526). 예전에는 기본이 시스템이라 여기도 시스템을 따랐고, 그 시절에
+ * 쓰인 다크 낱값 단정은 `__tests__/fixtures/darkWorld.tsx` 가 다크를 못 박아 받는다.
  *
- * `scheme` 이 게터인 이유는 **구독하지 않고도 지금 값을 답하기 위해서**다. 이
- * 자리에는 다시 그려 줄 프로바이더가 없으므로 구독해 봐야 알릴 곳이 없고, 그
- * 대신 읽을 때마다 최신을 답한다.
+ * 값을 게터로 두는 이유는 **구독하지 않고도 지금 값을 답하기 위해서**다. 이 자리에는 다시
+ * 그려 줄 프로바이더가 없으므로 구독해 봐야 알릴 곳이 없고, 그 대신 읽을 때마다 최신을
+ * 답한다. 기본이 고정 스킴이면 `systemScheme()` 은 해답에 쓰이지 않는다.
  */
 const DETACHED: ThemeValue = {
-  choice: 'system',
+  choice: DEFAULT_THEME_CHOICE,
   get scheme(): ColorScheme {
-    return systemScheme();
+    return resolveChoice(DEFAULT_THEME_CHOICE, systemScheme());
   },
-  // 고른 것이 없는 자리라 둘이 같은 값이다 — `choice` 가 `system` 이면 풀린 답이
-  // 곧 시스템의 답이다.
+  // 시스템이 **지금 말하는 것**은 기본과 상관없는 기기의 사실이다 — 프로바이더 안과 같게
+  // 계속 기기에게 묻는다. (`ThemeControl` 의 「지금 이 기기의 시스템은 …」 문장이 읽는 값.)
   get systemScheme(): ColorScheme {
     return systemScheme();
   },
   setChoice: () => {},
   get palette(): Palette {
-    return paletteFor(systemScheme());
+    return paletteFor(resolveChoice(DEFAULT_THEME_CHOICE, systemScheme()));
   },
   themeId: DEFAULT_THEME_ID,
   setTheme: () => {},
@@ -265,6 +316,27 @@ export function usePalette(): Palette {
 /** 말풍선 개인 덮어쓰기(#4383). 말풍선을 그리는 자리가 읽는다. 프로바이더 밖이면 `undefined`(기본). */
 export function useBubbleChoice(): BubbleChoice | undefined {
   return useContext(ThemeContext).bubble;
+}
+
+/**
+ * OS 가 그리는 키보드의 모양(`TextInput.keyboardAppearance`). **앱이 지금 서 있는 스킴**을 따른다
+ * (#4526 · planner 2026-10-26).
+ *
+ * 키보드는 앱이 아니라 OS 가 그리고, 알려 주지 않으면 **기기 외양**을 따른다. 폰의 기본이 라이트가 된
+ * 뒤로(ADR-0189 증보 5) 아무것도 안 고른 다크 기기는 라이트 앱 위로 다크 키보드를 올렸다. 앱이 입히는
+ * 면은 앱의 스킴이 정하고, OS 가 입히는 이 면은 이 값이 맞춘다.
+ *
+ * 값은 고른 것(`choice`)이 아니라 **풀린 스킴**(`scheme`)이다 — 「시스템」을 고른 폰은 기기를 따라
+ * 풀리고, 다크를 고른 폰은 기기가 라이트여도 다크다. 이미 떠 있는 키보드가 즉시 바뀌는지는 OS 몫이다
+ * (다음에 올라올 때 맞는다).
+ *
+ * 앱의 입력창(`<TextInput>`)은 **하나도 빠짐없이** 이 값을 든다. 하나라도 빠지면 그 입력창만 기기 외양을
+ * 따른다. 그 전수는 `__tests__/keyboardAppearance4526.test.tsx` 가 구문 트리로 훑어 지킨다. 훑는 것은
+ * `src/**` 의 `.tsx` 에 있는 JSX 태그(`<…TextInput>`)다 — 별칭 import(`TextInput as Field`)·
+ * `createElement(TextInput)`·애니메이션 래퍼처럼 JSX 가 아닌 모양과 `measure/` 하네스는 안 본다(지금 앱에는 없다).
+ */
+export function useKeyboardAppearance(): ColorScheme {
+  return useContext(ThemeContext).scheme;
 }
 
 /**
@@ -349,7 +421,7 @@ export function ThemeProvider({
     // 「시스템은 지금 무엇인가」에 답할 것이 `scheme` 밖에 없었다.
     const fromSystem: ColorScheme = system === 'light' ? 'light' : 'dark';
     const choice = appearance.scheme;
-    const scheme: ColorScheme = choice === 'system' ? fromSystem : choice;
+    const scheme = resolveChoice(choice, fromSystem);
     const shown = effectiveBackground(background, reduceTransparency, increaseContrast);
     const resolved = resolveAppearance(appearance.theme, scheme, appearance.signal, shown.active);
     return {

@@ -25,7 +25,7 @@ import {
 import {Sentence} from '../../design/atoms';
 import {CONV_ICON_SIZE, CONV_ICONS} from '../../design/icons';
 import {PULL_FILL, withPullScroll, type PullScrollProps} from '../../design/refresh';
-import {usePalette, useStyles} from '../../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
   font,
@@ -463,6 +463,7 @@ function ChatComposer({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const [text, setText] = useState(initialText ?? '');
   const [interrupt, setInterrupt] = useState(false);
   const [sending, setSending] = useState(false);
@@ -571,6 +572,7 @@ function ChatComposer({
           autoFocus={autoFocus}
           placeholder={ready ? '다음 지시를 적어요' : '지금은 지시를 보낼 수 없어요'}
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           accessibilityLabel="다음 지시"
           submitBehavior="newline"
           textAlignVertical="top"

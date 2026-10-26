@@ -1,0 +1,14 @@
+appId: app.momo.ios
+name: 110-sheet-close-x-live
+---
+# 110-sheet-close-x-live - 원형 X 를 실제 손가락으로 누르면 시트가 내려가고 onClose 가 한 번 불린다 (#4318).
+# 표면은 110-sheet-action-live 와 같다. 행동 없이 「기록: close」 뿐이어야 한다.
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 60000
+- tapOn:
+    id: "sheet-close"
+- extendedWaitUntil:
+    visible: "기록: close"
+    timeout: 10000

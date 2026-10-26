@@ -2,7 +2,7 @@ import React, {useCallback, useRef, useState} from 'react';
 import {Modal, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
-import {usePalette, useStyles} from '../../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {useKeyboard} from '../../lib/useKeyboard';
 
 // =============================================================================
@@ -59,6 +59,7 @@ export function MessageEditorSheet({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   // 동기. 헤더 참조.
   const [text, setText] = useState(initialBody);
   const insets = useSafeAreaInsets();
@@ -118,6 +119,7 @@ export function MessageEditorSheet({
             accessibilityLabel="고칠 메시지 내용"
             placeholder="메시지 내용"
             placeholderTextColor={palette.textFaint}
+            keyboardAppearance={keyboardAppearance}
             testID="editor-input"
           />
 

@@ -1,7 +1,7 @@
 import type {Member, Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {cleanup, render, within} from '@testing-library/react-native';
+import {cleanup, render, within} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
