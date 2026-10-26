@@ -345,9 +345,14 @@ impl DriveSettings {
 /// configures either implementation. A limit of 0 disables the axis.
 ///
 /// The per-IP axis is mounted on the two unauthenticated writes (`/v1/join`
-/// and `/v1/claim`). The per-member axis is not ported yet and the field is
+/// and `/v1/claim`). The Swift **global** per-member axis (`RATE_LIMIT_PER_MEMBER`,
+/// every authenticated route, default 600) is still not ported and the field is
 /// deliberately absent rather than present-and-ignored — a knob that does
-/// nothing is worse documentation than no knob.
+/// nothing is worse documentation than no knob. What exists instead is the
+/// per-member **write** budget below (ADR-0208 D10 증보, #4234): four knobs for the
+/// three write surfaces a member can flood (the send surface has one for people and one
+/// for agents), each read by a middleware that is mounted on exactly those routes
+/// (`rate_limit::member_write`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RateLimitConfig {
     /// `RATE_LIMIT_WINDOW_SECONDS`, floor 1 (default 60).
@@ -377,6 +382,46 @@ pub struct RateLimitConfig {
     /// on the excess; it does not slow guessing, which the token's 122 random
     /// bits, single use and one-hour lifetime answer.
     pub drive_upload_per_ip_limit: u32,
+    /// `RATE_LIMIT_MESSAGE_SEND_PER_MEMBER` (default 120 per window). 0 disables.
+    /// A **human** member's message sends: `POST …/channels/{ch}/messages` (thread
+    /// replies included) and `POST …/scheduled-messages/{id}/send-now`, which is the
+    /// same canonical send, so the two share one budget and cannot be used to
+    /// double it. Two a second sustained is above what anyone types and above Slack's
+    /// own ~1 message/second/channel (`chat.postMessage`, special tier, short bursts
+    /// allowed), and it still admits a client that flushes ~100 queued messages after
+    /// a reconnect. See ADR-0208 D10 증보 for the numbers.
+    pub message_send_per_member_limit: u32,
+    /// `RATE_LIMIT_MESSAGE_SEND_PER_AGENT` (default 600 per window). 0 disables.
+    /// The same send surface for an **agent** (or work-host) credential. Higher
+    /// because an adapter posts one `tool_call` and one `tool_result` per tool
+    /// execution (the Prime adapter, `adapters/prime/prime_adapter.py`), so a busy
+    /// run is bursty by construction. A run's steps are capped by `agent.max_run_steps`
+    /// (schema default 50) and an agent's concurrent runs by `agent.max_concurrent_runs`
+    /// (default 1), so one run posts at most ~100 of them and four concurrent runs ~400;
+    /// 600 is 200 tool executions a minute from one agent identity, above that, and never
+    /// stricter than the Agent Port's own per-agent ceiling
+    /// (`MOMO_AGENT_PORT_RATE_LIMIT_PER_AGENT`, 480), so a REST-only adapter is not
+    /// throttled harder than the MCP path that does the same job. Adapters retry a 429 for
+    /// about a second and do not read `Retry-After`, which is why this is the number to
+    /// raise, not to tighten, if a real run ever meets it. Streaming slices are
+    /// `PATCH …/messages/{id}` and are deliberately **not** on this axis.
+    pub message_send_per_agent_limit: u32,
+    /// `RATE_LIMIT_SCHEDULED_WRITE_PER_MEMBER` (default 60 per window). 0 disables.
+    /// Creating and editing a scheduled message (`POST …/channels/{ch}/scheduled-messages`,
+    /// `PATCH …/scheduled-messages/{id}`). Cancelling is **never** counted: it is the
+    /// safety action (ADR-0208 D9) and a member who is being throttled must still be
+    /// able to stop what is queued. The default is not below the 50-schedule pending
+    /// cap, so a bulk fill of the whole cap is not refused by the rate before it meets
+    /// the cap. What the rate adds is the part the cap cannot bound: create/cancel
+    /// churn and an edit loop, each of which is a transaction that locks the member's
+    /// session and schedule rows and writes an outbox event.
+    pub scheduled_write_per_member_limit: u32,
+    /// `RATE_LIMIT_UPLOAD_START_PER_MEMBER` (default 60 per window). 0 disables.
+    /// Starting an attachment upload (`POST …/channels/{ch}/attachments/uploads`),
+    /// which makes one Google Drive API call and writes one `pending` row per
+    /// request. The gate runs before the Drive call. 60 is three full 20-file
+    /// messages' worth of starts in one window.
+    pub upload_start_per_member_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -388,33 +433,56 @@ impl Default for RateLimitConfig {
             password_change_per_member_limit: 10,
             password_change_per_ip_limit: 30,
             drive_upload_per_ip_limit: 120,
+            message_send_per_member_limit: 120,
+            message_send_per_agent_limit: 600,
+            scheduled_write_per_member_limit: 60,
+            upload_start_per_member_limit: 60,
         }
     }
 }
 
 impl RateLimitConfig {
     pub fn from_env() -> RateLimitConfig {
+        Self::from_lookup(env)
+    }
+
+    /// [`from_env`](Self::from_env) over any lookup, so every env name is testable
+    /// without touching the process environment (a misspelt name would otherwise fall
+    /// back to its default without a word).
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> RateLimitConfig {
         let defaults = RateLimitConfig::default();
         RateLimitConfig {
-            window_seconds: env("RATE_LIMIT_WINDOW_SECONDS")
+            window_seconds: lookup("RATE_LIMIT_WINDOW_SECONDS")
                 .and_then(|value| value.trim().parse::<u64>().ok())
                 .unwrap_or(defaults.window_seconds)
                 .max(1),
-            per_ip_limit: env("RATE_LIMIT_PER_IP")
+            per_ip_limit: lookup("RATE_LIMIT_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.per_ip_limit),
-            claim_per_ip_limit: env("RATE_LIMIT_CLAIM_PER_IP")
+            claim_per_ip_limit: lookup("RATE_LIMIT_CLAIM_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.claim_per_ip_limit),
-            password_change_per_member_limit: env("RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER")
+            password_change_per_member_limit: lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.password_change_per_member_limit),
-            password_change_per_ip_limit: env("RATE_LIMIT_PASSWORD_CHANGE_PER_IP")
+            password_change_per_ip_limit: lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.password_change_per_ip_limit),
-            drive_upload_per_ip_limit: env("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
+            drive_upload_per_ip_limit: lookup("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.drive_upload_per_ip_limit),
+            message_send_per_member_limit: lookup("RATE_LIMIT_MESSAGE_SEND_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.message_send_per_member_limit),
+            message_send_per_agent_limit: lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.message_send_per_agent_limit),
+            scheduled_write_per_member_limit: lookup("RATE_LIMIT_SCHEDULED_WRITE_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.scheduled_write_per_member_limit),
+            upload_start_per_member_limit: lookup("RATE_LIMIT_UPLOAD_START_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.upload_start_per_member_limit),
         }
     }
 }
@@ -1762,10 +1830,16 @@ impl std::fmt::Debug for SettingsConfig {
 ///   so no second egress-exempt input). [`momo_settings::ProviderConfig`] fills
 ///   a localhost default when it is unset, so that default must never be read as
 ///   a declaration: with `declared == false` the feature makes **zero** network
-///   calls and shows nothing.
+///   calls. What the screen may show then is only a plan for the instance
+///   operator, never a finding about an agent (ADR-0203 증보 2026-10-25 F6).
 /// * `tools_locked`: `OORT_COHOSTED_AGENT_TOOLS_LOCKED` — the operator's own
 ///   statement that they followed the tool-lock checklist (D6). It is an
 ///   attestation, not a verification; the server cannot see the agent's tools.
+/// * `platform`: #4337 (ADR-0203 증보 2026-10-25 F1·F3) — which host the process
+///   runs on, **classified once at boot into a closed enum**. The raw
+///   `MOMO_SELF_HOST_PLATFORM` / `RAILWAY_ENVIRONMENT_ID` strings are not kept
+///   (this struct derives `Debug`); the value only picks wording on the operator's
+///   screen and decides nothing else.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CohostedAgentConfig {
     pub declared: bool,
@@ -1778,6 +1852,8 @@ pub struct CohostedAgentConfig {
     /// #3948: `OORT_COHOSTED_AGENT_CONNECTOR_APPS` — the app ids the operator
     /// switched on in Hermes. Empty when unset or when any entry is malformed.
     pub connector_apps: Vec<String>,
+    /// #4337: where this process runs, classified at boot (see the struct doc).
+    pub platform: crate::host_platform::HostPlatform,
 }
 
 impl CohostedAgentConfig {
@@ -1794,6 +1870,7 @@ impl CohostedAgentConfig {
             tools_locked: attest.tools_locked,
             connectors_locked: attest.connectors_locked,
             connector_apps: attest.apps,
+            platform: crate::host_platform::HostPlatform::classify(&lookup),
         }
     }
 
@@ -3181,6 +3258,118 @@ mod tests {
         assert!(
             defaults.password_change_per_member_limit > 0,
             "a default of 0 would ship PATCH …/me/password unguarded"
+        );
+    }
+
+    // -- #4234 per-member write budget ------------------------------------------
+
+    /// The member-write defaults are not free parameters: each is pinned against the
+    /// number it must not undercut, so a later "tighten it" edit that turns ordinary
+    /// use into a 429 fails here first (the same discipline as the ephemeral limits
+    /// below). The derivations are in ADR-0208 D10 증보.
+    #[test]
+    fn the_member_write_defaults_admit_ordinary_use_with_headroom() {
+        let defaults = RateLimitConfig::default();
+        // The numbers ADR-0208 증보 1, the openapi `RateLimited` response and `.env.example`
+        // quote, pinned by value: the relations below leave room, so without this a default could
+        // move and leave those documents saying something else (sabotage E22/E35-E37).
+        assert_eq!(
+            (
+                defaults.message_send_per_member_limit,
+                defaults.message_send_per_agent_limit,
+                defaults.scheduled_write_per_member_limit,
+                defaults.upload_start_per_member_limit,
+            ),
+            (120, 600, 60, 60),
+            "a default changed: update ADR-0208 증보 1, docs/api/openapi.yaml and infra/.env.example with it"
+        );
+        for (name, limit) in [
+            (
+                "message send, human",
+                defaults.message_send_per_member_limit,
+            ),
+            ("message send, agent", defaults.message_send_per_agent_limit),
+            ("scheduled write", defaults.scheduled_write_per_member_limit),
+            ("upload start", defaults.upload_start_per_member_limit),
+        ] {
+            assert!(
+                limit > 0,
+                "a default of 0 would ship the {name} surface unguarded"
+            );
+        }
+        assert!(
+            i64::from(defaults.scheduled_write_per_member_limit)
+                >= momo_messaging::SCHEDULE_PENDING_LIMIT,
+            "filling the whole pending cap must not be refused by the rate before it meets the cap"
+        );
+        assert!(
+            defaults.upload_start_per_member_limit as usize
+                >= 2 * momo_messaging::MAX_ATTACHMENTS_PER_MESSAGE,
+            "two full messages' worth of attachment uploads must fit in one window"
+        );
+        assert!(
+            defaults.message_send_per_agent_limit >= AgentPortConfig::default().per_agent_limit,
+            "a REST-only adapter must not be throttled harder than the MCP path that does the same job"
+        );
+        assert!(
+            defaults.message_send_per_agent_limit > defaults.message_send_per_member_limit,
+            "an agent's tool-result bursts are the reason the agent budget is the larger one"
+        );
+    }
+
+    /// Every env name is the documented one and moves only its own field. A misspelt
+    /// name would otherwise fall back to its default without a word, which is the way
+    /// a knob stops working in production while looking configured.
+    #[test]
+    fn the_member_write_env_names_move_exactly_their_own_field() {
+        let lookup = |name: &'static str, value: &'static str| {
+            move |key: &str| (key == name).then(|| value.to_string())
+        };
+        let defaults = RateLimitConfig::default();
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_MEMBER", "7")),
+            RateLimitConfig {
+                message_send_per_member_limit: 7,
+                ..defaults
+            }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "8")),
+            RateLimitConfig {
+                message_send_per_agent_limit: 8,
+                ..defaults
+            }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_SCHEDULED_WRITE_PER_MEMBER", "9")),
+            RateLimitConfig {
+                scheduled_write_per_member_limit: 9,
+                ..defaults
+            }
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_UPLOAD_START_PER_MEMBER", " 11 ")),
+            RateLimitConfig {
+                upload_start_per_member_limit: 11,
+                ..defaults
+            },
+            "surrounding whitespace is trimmed, as for every other knob"
+        );
+        // 0 is the operator's off switch; a value that is not a number is not one.
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "0"))
+                .message_send_per_agent_limit,
+            0
+        );
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_MESSAGE_SEND_PER_AGENT", "many")),
+            defaults,
+            "an unparseable value keeps the default instead of switching the axis off"
+        );
+        // the Swift global name stays unread: it is not a knob on this server
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PER_MEMBER", "1")),
+            defaults
         );
     }
 
