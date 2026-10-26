@@ -1,16 +1,20 @@
 // Save a downloaded attachment into the Downloads folder, and show / open / probe
 // what is there (#4587, owner 2026-10-26: "다운로드 관련한 버튼을 제일 상단 우측에").
 //
-// Why this exists. The web bundle's old download was a blob + `<a download>`. In
-// this shell that navigation never reaches a file: wry's WKWebView delegate answers
-// `Cancel` to a download navigation when the app registered no `on_download`
-// handler, and this app registers none (wry 0.55.1 `wkwebview/navigation.rs`,
-// read from source; runtime-unverified until a real build confirms it). Even where
-// it did save, there was nothing to ask afterwards: where did it go, is it still
-// there, show me. So the shell does the part the webview cannot, which is where OS
-// behaviour belongs (ADR-0133 §2): it writes the bytes the web bundle already
-// fetched through the authorised attachment proxy (ADR-0151 D2, no direct link) to
-// the Downloads folder, and it can reveal, open and probe the files it saved.
+// Why this exists. The web bundle's old download was a blob + `<a download>`. In this
+// shell that path does write a file: wry's `WebViewAttributes` default is a
+// `download_started_handler` that accepts every download (wry 0.55.1 `lib.rs`), so
+// WKWebView saves the page's suggested name into `dirs::download_dir()`, numbered
+// ` (n)` on a clash and marked `com.apple.quarantine` `0083` (measured on a real build,
+// #4587, 2026-10-27; the app registers no handler of its own). What it cannot do is
+// answer the person afterwards: how far along is it, what did the file end up being
+// called, where did it go, is it still there, show me, open it. The app never sees
+// the result of a download WebKit made on its own. So the shell does the part the
+// webview cannot, which is where OS behaviour belongs (ADR-0133 §2): it writes the
+// bytes the web bundle already fetched through the authorised attachment proxy
+// (ADR-0151 D2, no direct link) to the Downloads folder, and it can reveal, open and
+// probe the files it saved. Both paths end in the same folder with the same
+// quarantine mark; this one returns the name it used.
 //
 // What this module is NOT: a general file API. It is the same "narrow app command"
 // shape as `opener.rs` / `pdf_viewer.rs`, and for the same reason: the plugin
@@ -45,8 +49,10 @@
 //     (`is_openable`); "reveal in Finder" stays available for them. On macOS the
 //     saved file also gets the `com.apple.quarantine` attribute, which is what a
 //     browser does with a download, so Gatekeeper still judges an executable the
-//     person double-clicks in Finder (runtime-unverified until a real build checks
-//     `xattr -l` on a saved file and the prompt for a saved script).
+//     person double-clicks in Finder. Measured (#4587): `xattr -l` on a saved file
+//     shows `0081;<time>;oort;`, a saved `.command` has no execute bit and
+//     `spctl --assess --type open` rejects it (no usable signature). The Gatekeeper
+//     dialog on a Finder double-click itself was not exercised.
 //   * **Ceiling** `MAX_DOWNLOAD_BYTES` (100 MiB), the attachment contract
 //     (`MAX_ATTACHMENT_BYTES`). Raising the contract (ADR-0151 follow-up #4585)
 //     means raising this and moving to chunked transfer: the raw body today is one

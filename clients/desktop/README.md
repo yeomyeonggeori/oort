@@ -433,14 +433,18 @@ shows an inline failure with the address when the shell could not open it.
 
 ## Downloads (#4587)
 
-The old download was a blob + `<a download>`. In this shell that navigation does
-not reach a file: wry's WKWebView delegate answers `Cancel` to a download
-navigation when no `on_download` handler is registered, and the app registers
-none (wry 0.55.1 `wkwebview/navigation.rs`; read from source, `runtime-unverified`
-until a real build confirms it). So the web bundle fetches the bytes through the
-authorised attachment proxy as before (ADR-0151 D2) and hands them to
-`download_save`, and the title bar's download panel (`clients/web/src/features/downloads/`)
-lists what was saved.
+The web bundle's old download was a blob + `<a download>`. In this shell that path
+**does** write a file: wry 0.55.1's `WebViewAttributes` default is a
+`download_started_handler` that accepts every download (`lib.rs`), so WKWebView saves
+the page's suggested name into `dirs::download_dir()` (` (1)` on a clash, a WebKit
+`com.apple.quarantine` `0083`, a leading dot dropped, `../../x` folded to `_.._x`),
+with no `on_download` handler registered by this app. Measured on a real debug build
+(#4587, 2026-10-27; an earlier comment here read wry's source as "cancelled" and was
+wrong). What that path cannot do is answer afterwards: progress, the final name,
+where the file went, whether it is still there, show it, open it. So the web bundle
+fetches the bytes through the authorised attachment proxy as before (ADR-0151 D2) and
+hands them to `download_save`, and the title bar's download panel
+(`clients/web/src/features/downloads/`) lists what was saved.
 
 The commands are **app commands, not `tauri-plugin-fs` / `tauri-plugin-opener`**,
 for the reason `open_external_url` is: the plugins' surface is "any path, any
@@ -449,14 +453,32 @@ inside the Downloads folder, and refuses anything else (`downloads.rs`
 `is_plain_name`, `resolve_in`). `capabilities/downloads.json` grants the five
 commands to the `main` webview on the bundled origin only, and `shell_contract.rs`
 pins that set, that fence, and that no capability carries an `fs:` or `opener:`
-permission.
+permission. The decision record is **ADR-0133 「증보 2026-10-27 — 다운로드 폴더」**
+(Accepted, owner 2026-10-27): the folder fence, no overwriting, no "open" for kinds
+that run or install, the quarantine mark, and what it does not open.
 
-macOS asks the person once for access to the Downloads folder (TCC); the sentence
-is `NSDownloadsFolderUsageDescription` in `Info.plist` (`runtime-unverified` until a
-real build shows the prompt; so is the quarantine attribute's effect on Gatekeeper).
-Saving there is wider than
-`open_pdf_attachment`'s app-cache copy: that is recorded in #4587 for the
-orchestrator to decide whether an ADR note is needed.
+Measured on a real build (macOS 27.0, unsigned debug, sandboxed `HOME`; the table is in
+the PR):
+
+- `xattr -l` on a saved file: `com.apple.quarantine: 0081;<hex time>;oort;`; a saved
+  `.command` has no execute bit and `spctl --assess --type open` rejects it. The
+  Gatekeeper dialog on a Finder double-click was not exercised.
+- Sixteen refusal probes (`../.zshrc`, `/etc/hosts`, `.command` / `.terminal` / `.pkg`
+  / `.HTML` open, an unknown `path` field, an empty or NUL name, a hidden file, 201
+  names) come back as code strings before anything is launched; ten hostile names
+  saved land inside the folder.
+- Transient memory for one 64 MiB file (RSS of the four processes, a fresh app):
+  +569 MiB through `download_save` (shell +256, WebContent +200, Networking +112)
+  against +242 MiB through the old anchor path. One IPC message holds the whole body
+  (up to 100 MiB) until #4585 raises the attachment ceiling and the transfer moves to
+  chunks; `downloadsContract.test.ts` goes red when the shell's ceiling and the
+  attachment contract's ceiling differ.
+
+`runtime-unverified`: the macOS privacy prompt for the Downloads folder (an unsigned
+bundle launched through LaunchServices wrote to the real `~/Downloads` with no prompt,
+also after `tccutil reset SystemPolicyDownloadsFolder`, so the sentence in
+`NSDownloadsFolderUsageDescription` has not been seen), Gatekeeper's dialog, and
+Windows / Linux (the `cfg` branches were not built or run; no quarantine there).
 
 ## Work host sidecar (#2778, helper bundle #3084)
 
