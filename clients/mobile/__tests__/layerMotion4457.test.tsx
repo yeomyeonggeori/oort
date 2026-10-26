@@ -54,6 +54,9 @@ afterEach(() => {
   release = null;
 });
 
+/** `n` 번째로 만든 애니메이션이 **시작됐는가** — 설정만 만들고 `.start()` 를 빼먹은 층은 움직이지 않는다. */
+const startedCount = (n: number): number => timing.mock.results[n].value.start.mock.calls.length;
+
 /** 층 안에서 `useLayerClose()` 가 돌려주는 것을 시험이 붙든다. */
 let layerClose: (() => void) | null = null;
 function Probe(): React.JSX.Element {
@@ -106,6 +109,7 @@ describe('들어옴', () => {
       easing: EASE_OUT,
       useNativeDriver: true,
     });
+    expect(startedCount(0)).toBe(1); // 시킨 것이 실제로 시작됐다
   });
 
   it('push: 화면 오른쪽 밖(화면 너비)에서 시작해 0 으로 밀려 들어온다 — 240ms, 세로로는 움직이지 않는다', async () => {
@@ -118,6 +122,7 @@ describe('들어옴', () => {
       easing: EASE_OUT,
       useNativeDriver: true,
     });
+    expect(startedCount(0)).toBe(1);
   });
 
   it.each(['rise', 'push'] as const)('동작 줄이기(%s): 처음부터 자리에 서고 애니메이션이 하나도 없다', async enter => {
@@ -140,6 +145,7 @@ describe('나감 — 들어온 길의 반대', () => {
       easing: EASE_OUT,
       useNativeDriver: true,
     });
+    expect(startedCount(timing.mock.calls.length - 1)).toBe(1);
     // 움직이는 동안에는 아직 걷히지 않는다.
     expect(onBack).not.toHaveBeenCalled();
     act(() => {
@@ -162,6 +168,7 @@ describe('나감 — 들어온 길의 반대', () => {
       easing: EASE_OUT,
       useNativeDriver: true,
     });
+    expect(startedCount(timing.mock.calls.length - 1)).toBe(1);
     act(() => {
       jest.advanceTimersByTime(LAYER_POP_MS - 1);
     });

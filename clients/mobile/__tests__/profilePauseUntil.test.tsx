@@ -10,11 +10,12 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet, View} from 'react-native';
+import {Animated, Dimensions, StyleSheet, View} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {LAYER_POP_MS} from '../src/design/motion';
 import {paletteFor, ThemeProvider} from '../src/design/theme';
 import {ds2Radius, radius, SAFE_GUTTER} from '../src/design/tokens';
 import {pinReduceMotion} from './fixtures/reduceMotion';
@@ -475,10 +476,34 @@ describe('방해 금지 — 기한을 고르고서야 켜진다 (ADR-0204 D2)', 
   });
 });
 
+describe('기한을 고른 뒤 돌아가는 길도 「‹ 뒤로」와 같은 길이다 (#4457)', () => {
+  it('움직임이 켜져 있으면 30분을 고른 뒤 오른쪽으로 물러난 다음에야 장이 걷힌다', async () => {
+    releaseMotion?.();
+    releaseMotion = await pinReduceMotion(false);
+    const timing = jest.spyOn(Animated, 'timing');
+    freezeClock(FRI_2107);
+    const sheet = await openSheet();
+    fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
+    timing.mockClear();
+    fireEvent.press(within(sheet).getByTestId('pause-until-option-30m'));
+    // 쓰기가 끝나면(`onDone`) 장이 오른쪽으로 물러난다 — 곧바로 사라지지 않는다.
+    await waitFor(
+      () =>
+        expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+          expect.objectContaining({toValue: Dimensions.get('window').width, duration: LAYER_POP_MS}),
+        ),
+      {timeout: 8000},
+    );
+    await waitFor(() => expect(within(sheet).queryByTestId('pause-until-page')).toBeNull(), {
+      timeout: 8000,
+    });
+  });
+});
+
 describe('기한 장 — 새 카드 가족 (#4457)', () => {
   const cardOf = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style);
 
-  it('기한 목록·달력·시각 칩이 모두 새 카드다 — 반경 20·surface 채움, 옛 반경 10 카드가 아니다', async () => {
+  it('기한 목록·달력·시각 칩이 모두 새 카드다 — 반경 20·surface 채움, 옛 반경 8 카드가 아니다', async () => {
     freezeClock(FRI_2107);
     const sheet = await openSheet();
     fireEvent.press(within(sheet).getByTestId('profile-pause-row'));
@@ -489,7 +514,7 @@ describe('기한 장 — 새 카드 가족 (#4457)', () => {
       expect([id, card.borderRadius, card.backgroundColor]).toEqual([id, ds2Radius.card, surface]);
     }
     expect(ds2Radius.card).not.toBe(radius.md); // 옛 `GroupSection` 의 반경 — 비교가 헛돌지 않는다
-    // 옛 카드의 지문(반경 10 + 가는 테두리 + surface 채움)이 이 장 어디에도 없다 — 목록·달력·시각 칩 전부.
+    // 옛 카드의 지문(반경 8 + 가는 테두리 + surface 채움)이 이 장 어디에도 없다 — 목록·달력·시각 칩 전부.
     const oldCards = screen.UNSAFE_getAllByType(View).filter(view => {
       const style = StyleSheet.flatten(view.props.style);
       return (

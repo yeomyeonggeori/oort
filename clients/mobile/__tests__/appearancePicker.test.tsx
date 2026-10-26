@@ -1,6 +1,6 @@
 import React from 'react';
 import {AccessibilityInfo, StyleSheet, Text} from 'react-native';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 
 import {
   SIGNAL_ADJUSTED_COPY,
@@ -12,6 +12,7 @@ import {THEMES} from '@momo/core/design/themes';
 
 import {ThemeControl} from '../src/design/ThemeControl';
 import {BrandAppearance, FixedScheme, ThemeProvider, useStyles} from '../src/design/theme';
+import {dividerIndent} from '../src/design/sheetModel';
 import {ds2Radius, paletteFrom, type Palette} from '../src/design/tokens';
 import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
 import {DARK_CHOSEN_RECORD} from './fixtures/darkWorld';
@@ -274,7 +275,7 @@ describe('직접 입력의 상태 표현 (design-review M-2·M-3·M-4)', () => {
 
   it('직접 입력을 쓰는 중이면 제목이 accent 톤·굵기로 바뀐다 — 체크 하나에 기대지 않는다', () => {
     mount();
-    // 직접 입력 카드는 공용 묶음 카드 가족이다(반경 20) — 옛 반경 10 카드가 아니다(#4457).
+    // 직접 입력 카드는 공용 묶음 카드 가족이다(반경 20) — 옛 반경 8 카드가 아니다(#4457).
     const card = style('appearance-signal-custom-group-card');
     expect(card.borderRadius).toBe(ds2Radius.card);
     expect(card.borderColor).toBeDefined();
@@ -287,6 +288,27 @@ describe('직접 입력의 상태 표현 (design-review M-2·M-3·M-4)', () => {
     if (solved.ok) expect(used.color).toBe(solved.values['signal-text'].toLowerCase());
     expect(used.color).not.toBe(plain.color);
     expect(used.fontWeight).toBe('700');
+  });
+});
+
+describe('카드 구분선은 앞 칸을 비켜 글자 열에서 시작한다 (#4457)', () => {
+  const indentsOf = (cardTestID: string) =>
+    within(screen.getByTestId(cardTestID))
+      .getAllByTestId('group-divider')
+      .map(divider => StyleSheet.flatten(divider.props.style).marginLeft);
+
+  it('테마(견본)·강조색(점)·화면 모드(앞 칸 없음)가 각자의 글자 열에 선이 시작한다', () => {
+    mount();
+    // 견본의 실제 폭을 읽는다 — 카드의 `inset` 이 그 폭과 같아야 선이 글자 열에 맞는다.
+    const swatch = StyleSheet.flatten(
+      screen.getByTestId('appearance-swatch-dawnsky', {includeHiddenElements: true}).props.style,
+    ).width as number;
+    expect(swatch).toBeGreaterThan(0);
+    expect(new Set(indentsOf('appearance-theme-list-card'))).toEqual(new Set([dividerIndent(swatch)]));
+    expect(new Set(indentsOf('appearance-signal-list-card'))).toEqual(new Set([dividerIndent('icon')]));
+    expect(new Set(indentsOf('theme-scheme-card'))).toEqual(new Set([dividerIndent('plain')]));
+    // 세 값이 서로 다르다 — 모두 같으면 이 단정이 아무것도 가르지 못한다.
+    expect(new Set([dividerIndent(swatch), dividerIndent('icon'), dividerIndent('plain')]).size).toBe(3);
   });
 });
 

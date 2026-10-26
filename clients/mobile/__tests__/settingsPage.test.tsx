@@ -556,7 +556,7 @@ describe('설정 페이지', () => {
   });
 });
 
-describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 10 카드가 어디에도 없다 (#4457)', () => {
+describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 8 카드가 어디에도 없다 (#4457)', () => {
   // 옛 `GroupSection` 카드의 지문: 반경 `radius.md`(10) + 가는 테두리 + `surface` 채움. 새 `GroupCard` 는 반경 20 이다.
   // 한 장이라도 옛 부품으로 남으면 설정 본 페이지(반경 20)와 카드 모양이 섞인다.
   const surface = lightPalette.surface;

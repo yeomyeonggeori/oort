@@ -105,7 +105,7 @@ afterEach(() => {
 });
 
 describe('설정 페이지 → 프로필 사진 장', () => {
-  it('사진 장의 묶음은 새 카드 가족이다 — 반경 20·surface 채움이고 옛 반경 10 카드가 아니다', () => {
+  it('사진 장의 묶음은 새 카드 가족이다 — 반경 20·surface 채움이고 옛 반경 8 카드가 아니다', () => {
     mount();
     fireEvent.press(screen.getByTestId('self-profile-avatar', {includeHiddenElements: true}));
     const card = StyleSheet.flatten(screen.getByTestId('avatar-card-card').props.style);
