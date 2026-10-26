@@ -158,20 +158,20 @@ export function releaseVelocity(samples: readonly DragSample[], releaseAt: numbe
   const newest = samples[samples.length - 1];
   if (newest === undefined) return 0;
   if (releaseAt - newest.t > VELOCITY_STOPPED_MS) return 0;
-  const window: DragSample[] = [newest];
+  const recent: DragSample[] = [newest];
   for (let i = samples.length - 2; i >= 0; i--) {
     const sample = samples[i];
-    const next = window[window.length - 1];
+    const next = recent[recent.length - 1];
     if (newest.t - sample.t > VELOCITY_HORIZON_MS || next.t - sample.t > VELOCITY_STOPPED_MS) break;
-    window.push(sample);
+    recent.push(sample);
   }
-  if (window.length < VELOCITY_MIN_SAMPLES) return 0;
-  const n = window.length;
-  const meanT = window.reduce((sum, s) => sum + s.t, 0) / n;
-  const meanY = window.reduce((sum, s) => sum + s.y, 0) / n;
+  if (recent.length < VELOCITY_MIN_SAMPLES) return 0;
+  const n = recent.length;
+  const meanT = recent.reduce((sum, s) => sum + s.t, 0) / n;
+  const meanY = recent.reduce((sum, s) => sum + s.y, 0) / n;
   let covariance = 0;
   let variance = 0;
-  for (const s of window) {
+  for (const s of recent) {
     covariance += (s.t - meanT) * (s.y - meanY);
     variance += (s.t - meanT) ** 2;
   }
