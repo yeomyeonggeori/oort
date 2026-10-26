@@ -11,6 +11,7 @@ name: 113-settings-capture
 # 쓰는 법(사람이 부른다). 한 번에 한 표면·한 장면, 환경 둘:
 #   SCENE  status-empty = 상태가 없는 사람(`shell-profile-sheet`): 시트 열림 → 기간 펼침 → 빠른 상태 → 글 입력(키보드)
 #          status-set   = 보이는 상태가 있는 사람(`shell-profile-status`): 시트 열림(✓ 회색·「지금대로」·「상태 지우기」) → 기간 펼침
+#                         (`shell-profile-status-long` 도 같은 장면 — 80자 글과 다른 날 만료라 긴 값이 두 줄까지 읽히는지 본다)
 #          logout       = 맨 아래 장면(`shell-profile-bottom`): 로그아웃 → 같은 카드 안 확인 블록
 #   OUT    사진 이름 접두(**상대 경로**, 확장자 없이 — `takeScreenshot` 은 절대 경로를 받지 않는다). Maestro 가 `.png` 를 붙이고
 #          사진은 결과 폴더 `~/.maestro/tests/<시각>/113-settings-capture/takeScreenshot/<OUT>-….png` 안에 쌓인다(끝난 뒤 거기서 복사한다).

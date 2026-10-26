@@ -4825,7 +4825,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return <SettingsBottomSurface />;
     // #4457: 보이는 상태 글이 있는 사람의 설정 페이지(상태 알약 옆 글 + 「상태 설정」 행의 값). 「상태 설정」 시트가 이
     // 사람의 저장된 만료를 「지금대로」로, 「상태 지우기」 행을 서게 한다(Maestro 가 행을 눌러 시트를 연다).
+    // `-long`: 80자 글(코어 상한)과 **다른 날** 만료 — 설정 행의 값과 상태 시트 기간 행의 값(「지금대로 · 10월 27일 16:11까지」)이
+    // 한 줄 말줄임으로 잘리지 않고 두 줄까지 읽히는지(design-review r1 M5).
     case 'shell-profile-status':
+    case 'shell-profile-status-long':
       return (
         <View style={styles.fill}>
           <Shell />
@@ -4835,12 +4838,20 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             directory={settingsDirectory(
               SHELL_ROSTER.map(member =>
                 member.id === SELF
-                  ? {
-                      ...member,
-                      statusEmoji: '🚌',
-                      statusText: '출근 중',
-                      statusExpiresAtMs: Date.now() + 3 * 60 * 60 * 1000,
-                    }
+                  ? name === 'shell-profile-status-long'
+                    ? {
+                        ...member,
+                        statusEmoji: '🏠',
+                        statusText:
+                          '달무리 스튜디오 온보딩 자료를 정리하는 중이라 답이 조금 늦어요. 급하면 전화 주세요. 월요일부터는 평소처럼 바로 볼게요. 이번 주도 고생 많았',
+                        statusExpiresAtMs: Date.now() + 30 * 60 * 60 * 1000,
+                      }
+                    : {
+                        ...member,
+                        statusEmoji: '🚌',
+                        statusText: '출근 중',
+                        statusExpiresAtMs: Date.now() + 3 * 60 * 60 * 1000,
+                      }
                   : member,
               ),
             )}
