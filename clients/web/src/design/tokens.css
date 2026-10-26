@@ -367,6 +367,15 @@
   color-scheme: dark;
 }
 
+/* 전체 화면의 상단 줄 인셋 (#4591, planner 결정 4). macOS 전체 화면에서는 신호등이 창에서 사라진다(메뉴 막대
+ * 위로 올려야 보인다). 신호등 자리로 비워 둔 80px(`--titlebar-inset`)은 죽은 빈 공간이 되므로 접는다: 토글이
+ * 사이드바 모서리에서 12px(Buzz `pl-3`)에 선다. 표지 `data-window-fullscreen`은 셸이 창의 전체 화면 상태를
+ * 읽어 루트에 찍는다(`lib/desktopFullscreen.ts`). 브라우저 탭에는 찍히지 않는다. 인셋을 읽는 곳은 상단 줄
+ * (`app-titlebar`)과 온보딩 스텝 줄(`onboarding-step-chrome`)이고, 둘 다 이 한 값을 따라온다. */
+:root[data-window-fullscreen] {
+  --titlebar-inset: var(--spacing-3);
+}
+
 /* 로컬 터미널 칸의 스킴 고정 (#2849). 루트 스탬프와 같은 문법이다. 칸 틀이
  * 찍고, 그 안의 `--term-*`·`--signal`(커서)이 이 스킴으로 갈린다. 「앱 테마
  * 따르기」는 찍지 않는다. */
@@ -1506,15 +1515,27 @@
       var(--canvas-bottom) 100%
     );
     --shell-layer-wallpaper: none;
+    /* 띠 층의 모양 (#4591). 층은 넷이다: 띠 ① · 띠 ② · 바닥 · 배경화면. 띠가 있는 테마(노을띠)에서 판 바깥(위·오른쪽·
+     * 아래 여백, 판의 둥근 모서리 뒤)은 **사이드바와 같은 색**이어야 한다: 판이 떠 있는 화면에서는 띠 ①이 창 전체(`100%`)
+     * 를 덮어 창 바닥 전체가 띠 색이고 판이 그 위에 뜬다(Buzz: 상단 크롬·사이드바·여백이 한 색, owner 2026-10-26
+     * 「테마가 바뀌었을 때 우측 부분이 UI가 좀 이상해」: 남색 사이드바 옆 판의 오른쪽·아래 여백만 밝은 바닥이었다).
+     * 띠가 없는 테마에서는 두 층이 `transparent` 한 장이라 아무것도 칠하지 않고, 사이드바가 바닥 위에 녹는 예전
+     * 모양 그대로다. 판이 없는 「내 작업」(`data-work-rail`)은 바닥 위에 칸이 곧바로 서므로 띠 ①이 사이드바 열(접히면
+     * 레일)만 덮고, 데스크탑 셸에서는 띠 ②가 윗줄 40을 전폭으로 덮는다(아래 `[data-work-rail]`). 그 밖에는 띠 ②의
+     * 높이가 0이다. 유리(`glass.css`)와 배경화면(`wallpaper.css`)은 층 변수만 바꾸므로 같은 층에 그대로 닿는다. */
+    --shell-band-w: 100%;
+    --shell-band-strip: 0px;
     background-color: var(--canvas-mid);
     background-image:
-      var(--shell-layer-band), var(--shell-layer-canvas),
+      var(--shell-layer-band), var(--shell-layer-band), var(--shell-layer-canvas),
       var(--shell-layer-wallpaper);
     background-size:
-      var(--w-sidebar) 100%,
+      var(--shell-band-w) 100%,
+      100% var(--shell-band-strip),
       100% 100%,
       cover;
     background-position:
+      0 0,
       0 0,
       0 0,
       center;
@@ -1538,8 +1559,8 @@
      * 속성이 없어 끌기에서 빠진다). 판은 그 띠 아래(둘째 행)에서 시작한다. 접힘·「내 작업」이 이미 하는 자리와
      * 같아서 접고 펼 때 판이 세로로 뛰지 않는다. 사이드바도 둘째 행이라 판과 같은 높이에서 시작한다.
      * 웹에는 마커가 없어 이 규칙이 닿지 않는다(띠 없음). 마커는 설정 표면에서 찍지 않는다(그 격자는 한 행이다).
-     * 높이(40)·투명 테두리 1px·`trafficLightPosition.y`는 건드리지 않는다: 토글 중심 19.5가 신호등과 맞는 계약이
-     * 그대로다(#2700). */
+     * 높이(40)와 `trafficLightPosition.y`(22)는 한 쌍이다: 토글 중심 20.0 = 띠 가운데 = 신호등 원 중심(#2700,
+     * #4591에서 테두리 1px을 걷고 y를 21.5에서 22로 올렸다). */
     &[data-desktop-shell] > main {
       grid-row: 2;
       margin-block-start: 0;
@@ -1550,10 +1571,6 @@
        * 레일은 모든 탭에서 같은 56 한 벌이라 「내 작업」 모양이 곧 접힌 모양이고, 접힘의
        * 의미가 탭마다 갈리지 않는다. */
       grid-template-columns: var(--spacing-rail) 1fr;
-      background-size:
-        var(--spacing-rail) 100%,
-        100% 100%,
-        cover;
 
       /* 신호등 옆 토글은 상단 줄 첫 열(인셋 80)에 남는다(#1864 「토글은 자리를 옮기지
        * 않는다」). 판이 첫 행까지 올라가 있으면 그 토글을 덮는다. 그래서 접힌 동안 판은
@@ -1572,6 +1589,19 @@
      * 열 규칙이 없다 — 이 탭이 바꾸는 것은 본문 판의 모양뿐이다.
      * 판은 상단 줄 아래(둘째 행)에서 시작한다: 신호등과 접기 단추(인셋 80)가 판 위로 걸친다. */
     &[data-work-rail] {
+      /* 판이 없어서 창 바닥이 곧 칸의 바탕이다: 띠는 사이드바 열(접히면 레일)만 덮고, 그 오른쪽은 바닥이다.
+       * 데스크탑 셸에서는 띠가 윗줄 40을 전폭으로도 덮는다: 판이 띠 아래로 내려오면서 띠 열의 오른쪽 가장자리가
+       * 윗줄 40 전체에서 바닥에 드러나는 「ㄱ 자 끊김」을 막는다(planner 결정 5). */
+      --shell-band-w: var(--w-sidebar);
+
+      &[data-sidebar-collapsed] {
+        --shell-band-w: var(--spacing-rail);
+      }
+
+      &[data-desktop-shell] {
+        --shell-band-strip: var(--spacing-control-lg);
+      }
+
       /* 시안 ①에는 떠 있는 판이 없다: 머리 줄·격자·상태 줄이 창 바닥(그라데이션)
        * 위에 곧바로 서고, 칸 하나하나가 판이다. 그래서 판의 면·그림자·반경을 걷는다. */
       > main {
@@ -1584,7 +1614,7 @@
     }
 
     @media (prefers-contrast: more) {
-      background-image: var(--shell-layer-band);
+      background-image: var(--shell-layer-band), var(--shell-layer-band);
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -1599,19 +1629,12 @@
    * 그대로이고 목록 열은 그 위에 자기 바탕 없이 서며, 본문은 라우트가 그리는 판
    * (`app-pane`) 하나다. 그래서 `<main>` 자신은 투명이고 판 문법(인셋·반경·그림자)은
    * 걷는다. 앞 판은 평면 `--pane` 위에 목록 열의 세로선만 그어서 선이 허공에 떴다.
-   * 띠(`--band`)는 목록 열 폭(`--w-settings-nav`)까지만 칠한다. 폰(<600)은 판이
-   * 창 자체라 예전처럼 `--pane` 평면이다. */
+   * 띠(`--band`)가 있는 테마에서는 창 바닥 전체가 띠 색이고 판이 그 위에 뜬다(#4591: 목록 열 폭까지만 칠하던
+   * 때는 판의 위·오른쪽·아래 여백만 밝은 바닥이었다). 폰(<600)은 판이 창 자체라 예전처럼 `--pane` 평면이다. */
   &[data-settings-surface] {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
     transition: none;
-
-    @media (width >= 600px) {
-      background-size:
-        var(--w-settings-nav) 100%,
-        100% 100%,
-        cover;
-    }
 
     > main {
       grid-row: 1;
@@ -1792,6 +1815,10 @@
  * 묶는다. 띠가 없는 테마에서는 `var(--on-band, …)`가 뒤 값(루트의 원래 역할)을
  * 답해 아무것도 바뀌지 않는다. 그래서 이 규칙은 테마 이름을 모른다.
  *
+ * 데스크탑 셸(`data-desktop-shell`, #4591)에서는 상단 줄이 접힘 여부와 상관없이 띠 위에 선다: 띠 열 위쪽
+ * 윗줄(40)이 전폭으로 띠 색이기 때문이다(`app-shell`의 「띠의 윗줄」). 그래서 접힌 셸의 상단 줄(토글·오른쪽 자리)도
+ * 이 묶음에 든다. 웹의 접힌 줄은 예전 그대로 바닥 위다.
+ *
  * 원래 값은 루트에서 한 번 받아 둔다(`--*-base`). 사이드바 안에서 흰 면에 서는
  * 것(선택 행, 검색, 지금 카드, 배너)은 `band-surface`로 원래 역할을 되찾는다.
  * 띠 위의 채움(호버·눌림)과 선은 시안 C의 `--bandFill`·`--bandLine`처럼
@@ -1820,7 +1847,8 @@
 }
 
 .sidebar-drawer,
-.app-shell:not([data-sidebar-collapsed]) > .app-titlebar {
+.app-shell:not([data-sidebar-collapsed]) > .app-titlebar,
+.app-shell[data-desktop-shell] > .app-titlebar {
   --ink: var(--on-band, var(--ink-base));
   --ink-muted: var(--on-band-muted, var(--ink-muted-base));
   --icon: var(--on-band-muted, var(--icon-base));
@@ -2356,15 +2384,18 @@
  * 일반 상단 바이고, Tauri Overlay일 때만 `data-tauri-drag-region`이 인셋을 연다.
  * 셸에서는 이 줄이 판 위의 **잡기 띠**다(#4591): 판은 `app-shell`의 `data-desktop-shell` 규칙이
  * 띠 아래로 내리고, 띠 어디를 눌러도 창이 움직인다.
- * 버튼은 그 속성을 갖지 않는다. 높이·테두리를 바꾸면 토글 중심선(19.5)이 움직이고,
+ * 버튼은 그 속성을 갖지 않는다. 높이를 바꾸면 토글 중심선(높이 ÷ 2)이 움직이고,
  * 셸의 `trafficLightPosition.y`도 함께 옮겨야 한다(#2700,
  * desktopShellContract.test.ts).
  *
- * DS2-6(#2718): 줄은 창 바닥(셸의 그라데이션·띠) 위에 녹는다. 바탕이 없고, 아래
- * 테두리 1px은 투명하게 **자리만** 지킨다. 테두리를 지우면 내용 상자가 39에서
- * 40이 되어 토글 중심이 19.5에서 20으로 내려가고, 네이티브 신호등과 0.5pt
- * 어긋난다. 시안의 `.tb`(28 높이, 위 여백 14)는 신호등 중심 28이라 따르지 않는다
- * (#2700 실측 계약이 이긴다, PR 「시안과의 차이」). */
+ * DS2-6(#2718): 줄은 창 바닥(셸의 그라데이션·띠) 위에 녹는다. 바탕이 없다.
+ *
+ * 아래 테두리는 없다(#4591). 예전에는 투명 1px이 **자리만** 지켜서 내용 상자가 39, 토글 중심이 19.5였고
+ * 신호등 y 21.5(원 중심 19.5)가 그에 맞춰 있었다. 그러면 신호등과 토글은 서로 맞아도 띠(높이 40)의
+ * 가운데 20.0보다 0.5pt(2x 화면에서 1픽셀) 위에 앉는다. 띠를 판 위의 빈 줄로 세우면서(owner 2026-10-26,
+ * planner 결정 「신호등 y는 띠의 세로 가운데」) 테두리를 걷고 신호등 y를 22로 올렸다: 내용 상자 40,
+ * 토글 중심 20.0 = 띠 가운데 = 신호등 원 중심(y − 2). 실기(Retina 2x 창 캡처) 값은 PR 본문에 있다.
+ * 시안의 `.tb`(28 높이, 위 여백 14)는 신호등 중심 28이라 따르지 않는다(#2700 실측 계약이 이긴다). */
 @utility app-titlebar {
   display: flex;
   grid-row: 1;
@@ -2372,7 +2403,6 @@
   align-items: center;
   block-size: var(--spacing-control-lg);
   padding-inline: var(--spacing-2);
-  border-block-end: 1px solid transparent;
   background-color: transparent;
 
   &[data-tauri-drag-region] {
@@ -2389,8 +2419,9 @@
  *
  * 칸 자신도 끌기 영역이다(`data-tauri-drag-region`): Tauri의 drag.js는 속성이 있는 **요소 자신**만 끌기로
  * 보므로, 속성 없는 칸은 단추 사이 틈이 끌리지 않는 죽은 자리가 된다. 단추는 속성이 없고 클릭 가능한
- * 요소라 끌기에서 빠진다. 이 칸은 띠(`--w-sidebar` 폭) 위가 아니라 바닥 위에 서므로 `band-surface`와 함께 쓴다
- * (상단 줄은 펼친 동안 글자 역할이 띠 쪽으로 다시 묶여 있다). 유리·배경화면 위의 보정은 칸을 채우는 쪽의 몫이다. */
+ * 요소라 끌기에서 빠진다. 이 칸은 띠의 윗줄 위에 선다(`app-shell`의 「띠의 윗줄」): 글자 역할은 상단 줄이 이미
+ * 띠 쪽으로 묶고(`data-desktop-shell`), 유리·배경화면의 보정도 상단 줄 규칙을 그대로 받는다. 그래서
+ * `band-surface`를 들지 않는다(들면 보정까지 지워 원래 역할로 돌아간다). */
 @utility app-titlebar-trailing {
   display: flex;
   align-items: center;

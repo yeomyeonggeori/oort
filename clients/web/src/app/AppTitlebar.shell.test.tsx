@@ -132,8 +132,9 @@ describe("셸의 상단 줄: 창 맨 위 잡기 띠 (#4591)", () => {
     expect(toggle.hasAttribute("data-tauri-drag-region")).toBe(false);
     // 자리는 줄의 마지막 자식이다: 줄 왼쪽의 신호등 인셋·토글 뒤로 오른쪽 끝에 선다.
     expect(titlebar.lastElementChild).toBe(slot);
-    // 자리는 띠(사이드바 열) 위가 아니라 바닥 위다: 띠 쪽으로 묶인 글자 역할을 다시 끊는다.
-    expect(slot?.className).toContain("band-surface");
+    // 자리는 띠의 윗줄(전폭) 위에 선다: 글자 역할은 상단 줄이 이미 띠 쪽으로 묶는다(`data-desktop-shell`).
+    // `band-surface`를 들면 그 묶음과 유리·배경화면의 보정이 지워져 원래 역할로 돌아간다.
+    expect(slot?.className).not.toContain("band-surface");
     expect(slot?.className).toContain("app-titlebar-trailing");
   });
 

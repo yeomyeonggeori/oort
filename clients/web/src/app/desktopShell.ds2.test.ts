@@ -16,6 +16,8 @@ const read = (rel: string) =>
   readFileSync(new URL(rel, import.meta.url), "utf8");
 
 const TOKENS = read("../design/tokens.css");
+const GLASS_CSS = read("../design/appearance/glass.css");
+const WALLPAPER_CSS = read("../design/appearance/wallpaper.css");
 const APP_SHELL = read("./AppShell.tsx");
 const SIDEBAR = read("../features/sidebar/Sidebar.tsx");
 const SIDEBAR_ROW = read("../features/sidebar/SidebarRow.tsx");
@@ -53,10 +55,15 @@ describe("창 바닥과 떠 있는 판 (시안 `.a-win` · `.a-main`)", () => {
     );
   });
 
-  it("띠가 있는 테마는 사이드바 열 폭만큼 띠가 바닥 위에 깔리고, 접히면 레일 폭만 남는다 (#3280)", () => {
+  it("띠가 있는 테마는 창 바닥 전체가 띠 색이고, 「내 작업」에서만 사이드바 열 폭(접히면 레일 폭)만 칠한다 (#3280, #4591)", () => {
     expect(shell).toMatch(/linear-gradient\(var\(--band, transparent\), var\(--band, transparent\)\)/);
-    expect(shell).toMatch(/background-size:\s*var\(--w-sidebar\) 100%,/);
-    expect(shell).toMatch(/\[data-sidebar-collapsed\][\s\S]*?background-size:\s*var\(--spacing-rail\) 100%,/);
+    // 판이 뜨는 화면의 기본: 띠 ①이 창 전체(100%)다. 사이드바와 판 바깥(위·오른쪽·아래 여백)이 한 색이다.
+    expect(shell).toMatch(/--shell-band-w: 100%;/);
+    expect(shell).toMatch(/background-size:\s*var\(--shell-band-w\) 100%,/);
+    // 판이 없는 「내 작업」은 사이드바 열 폭, 접히면 레일 폭이다.
+    const workRail = shell.slice(shell.indexOf("&[data-work-rail] {"));
+    expect(workRail).toMatch(/--shell-band-w: var\(--w-sidebar\);/);
+    expect(workRail).toMatch(/&\[data-sidebar-collapsed\] \{\s*--shell-band-w: var\(--spacing-rail\);/);
   });
 
   it("본문은 첫 행부터 인셋 8(위·오른쪽·아래)로 떠 있고, 접히면 상단 줄 아래로 내려간다", () => {
@@ -77,10 +84,10 @@ describe("창 바닥과 떠 있는 판 (시안 `.a-win` · `.a-main`)", () => {
     expect(TOKENS).toMatch(/--w-sidebar: calc\(var\(--spacing-rail\) \+ var\(--w-sidebar-list\)\);/);
   });
 
-  it("상단 줄은 바닥 위에 녹는다: 바탕 없음, 테두리는 투명하게 자리만(#2700 19.5 유지)", () => {
+  it("상단 줄은 바닥 위에 녹는다: 바탕 없음, 아래 테두리도 없다(#4591: 토글 중심 20.0 = 띠 가운데)", () => {
     const titlebar = utility("app-titlebar");
     expect(titlebar).toMatch(/background-color: transparent;/);
-    expect(titlebar).toMatch(/border-block-end: 1px solid transparent;/);
+    expect(titlebar).not.toMatch(/border-block-end|border-bottom/);
   });
 
   it("사이드바 열과 레일은 자기 바탕도 경계선도 칠하지 않는다", () => {
@@ -136,7 +143,9 @@ describe("사이드바 (시안 `.a-side`)", () => {
 });
 
 describe("띠 위 규칙 (노을띠 `band`, themes-2.0 §3)", () => {
-  const scope = rule(".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed]) > .app-titlebar {");
+  const scope = rule(
+    ".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed]) > .app-titlebar,\n.app-shell[data-desktop-shell] > .app-titlebar {"
+  );
   const allowed = new Set<string>(BAND_ALLOWED_FOREGROUNDS.map(([role]) => role));
 
   it("사이드바 범위의 글자 역할은 전부 띠 위에 설 수 있는 역할로 다시 묶인다", () => {
@@ -252,11 +261,11 @@ describe("데스크탑 셸의 잡기 띠 (#4591)", () => {
     expect(shell.slice(0, wideAt)).not.toMatch(/data-desktop-shell/);
   });
 
-  it("띠는 신호등과 같은 40이고 토글 중심 19.5 계약(투명 테두리 1px)은 그대로다", () => {
+  it("띠는 신호등과 같은 40이고 테두리 없이 토글 중심 20.0 = 띠 가운데다(#4591, 신호등 y 22)", () => {
     const titlebar = utility("app-titlebar");
     expect(titlebar).toMatch(/block-size: var\(--spacing-control-lg\);/);
     expect(TOKENS).toMatch(/--spacing-control-lg: 40px;/);
-    expect(titlebar).toMatch(/border-block-end: 1px solid transparent;/);
+    expect(titlebar).not.toMatch(/border-block-end|border-bottom/);
     expect(titlebar).toMatch(/grid-column: 1 \/ -1;/);
   });
 
@@ -271,6 +280,121 @@ describe("데스크탑 셸의 잡기 띠 (#4591)", () => {
     expect(slot).toMatch(/display: flex;/);
     // 칸 자체에 안쪽 여백을 두지 않는다: 끌기 영역이 아닌 죽은 자리가 생기지 않는다.
     expect(slot).not.toMatch(/padding/);
+  });
+});
+
+describe("판 바깥은 사이드바와 같은 색이다 (#4591, planner 결정 5 + owner 10-26 우측 UI)", () => {
+  const shell = utility("app-shell");
+  const wide = shell.slice(shell.indexOf("@media (width >= 600px) {"));
+
+  it("층은 넷이다: 띠 ① · 띠 ② · 바닥 · 배경화면, 크기·위치 목록이 층 수(넷)와 같다", () => {
+    expect(wide).toMatch(
+      /background-image:\s*var\(--shell-layer-band\), var\(--shell-layer-band\), var\(--shell-layer-canvas\),\s*var\(--shell-layer-wallpaper\);/
+    );
+    expect(wide).toMatch(
+      /background-size:\s*var\(--shell-band-w\) 100%,\s*100% var\(--shell-band-strip\),\s*100% 100%,\s*cover;/
+    );
+    // 위치가 짧으면 순환해서 배경화면(넷째 층)이 0 0에 선다: 넷을 다 적는다.
+    const position = /background-position:([^;]+);/.exec(wide)?.[1] ?? "";
+    expect(position.split(",").map((part) => part.trim().replace(/\s+/g, " "))).toEqual([
+      "0 0",
+      "0 0",
+      "0 0",
+      "center",
+    ]);
+  });
+
+  it("기본은 띠 ②의 높이가 0이다: 판이 뜨는 화면에서는 띠 ①이 창 전체라 윗줄이 따로 필요 없다", () => {
+    expect(wide).toMatch(/--shell-band-strip: 0px;/);
+  });
+
+  it("「내 작업」의 셸에서만 띠 ②가 윗줄 높이(띠와 같은 토큰)다", () => {
+    const workRail = wide.slice(wide.indexOf("&[data-work-rail] {"));
+    expect(workRail).toMatch(/&\[data-desktop-shell\] \{\s*--shell-band-strip: var\(--spacing-control-lg\);/);
+    expect(utility("app-titlebar")).toMatch(/block-size: var\(--spacing-control-lg\);/);
+    // 다른 곳에서 윗줄 높이를 켜지 않는다.
+    expect([...wide.matchAll(/--shell-band-strip: var\(--spacing-control-lg\)/g)]).toHaveLength(1);
+  });
+
+  it("고대비는 띠 두 층만 남긴다(바닥은 평면)", () => {
+    expect(wide).toMatch(
+      /@media \(prefers-contrast: more\) \{\s*background-image: var\(--shell-layer-band\), var\(--shell-layer-band\);/
+    );
+  });
+
+  it("설정 전면은 자기 크기 목록을 두지 않는다: 기본(창 전체 띠)이라 판 바깥 여백이 사이드바 열과 같은 색이다", () => {
+    const settings = rule("&[data-settings-surface] {");
+    expect(settings).not.toMatch(/background-size|--shell-band-w/);
+  });
+
+  it("마커 규칙은 판을 둘째 행으로 내릴 뿐 배경을 만지지 않는다", () => {
+    expect(wide).toMatch(/&\[data-desktop-shell\] > main \{\s*grid-row: 2;\s*margin-block-start: 0;\s*\}/);
+    expect(wide).not.toMatch(/&\[data-desktop-shell\] \{\s*background/);
+  });
+
+  it("판 네 모서리는 같은 반경이다(--radius-xl 18): 위·아래·오른쪽 여백이 판 바깥 색 위에서 일정하다", () => {
+    const pane = utility("app-pane");
+    expect(pane).toMatch(/border-radius: var\(--radius-xl\);/);
+    expect(pane).not.toMatch(/border-(top|bottom)-(left|right)-radius/);
+    // 오른쪽·아래 인셋은 8로 같다(데스크탑 셸·웹 공통).
+    expect(wide).toMatch(/margin-inline: 0 var\(--spacing-2\);/);
+    expect(wide).toMatch(/margin-block: var\(--spacing-2\);/);
+  });
+
+  it("상단 줄은 셸에서 접힘과 상관없이 띠 위 글자 역할로 묶인다(웹의 접힌 줄은 아니다)", () => {
+    const scope = rule(
+      ".sidebar-drawer,\n.app-shell:not([data-sidebar-collapsed]) > .app-titlebar,\n.app-shell[data-desktop-shell] > .app-titlebar {"
+    );
+    expect(scope).toMatch(/--ink: var\(--on-band, var\(--ink-base\)\);/);
+  });
+
+  it("유리는 접힌 셸의 상단 줄을 띠 쪽 잉크로 보내고, 웹의 접힌 줄만 바닥 잉크로 둔다", () => {
+    expect(GLASS_CSS).toMatch(
+      /:root\[data-glass\] \.app-shell\[data-desktop-shell\] > \.app-titlebar \{\s*--ink-muted: var\(--glass-band-ink-muted\);/
+    );
+    expect(GLASS_CSS).toMatch(
+      /:root\[data-glass\] \.app-shell\[data-sidebar-collapsed\]:not\(\[data-desktop-shell\]\) > \.app-titlebar \{\s*--ink-muted: var\(--glass-ink-muted\);/
+    );
+  });
+
+  it("배경화면은 띠가 있으면 접힌 셸의 상단 줄을 보정하지 않는다(띠가 그 줄을 덮는다)", () => {
+    expect(WALLPAPER_CSS).toContain(
+      ":root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region]"
+    );
+    expect(WALLPAPER_CSS).not.toMatch(
+      /:root\[data-wallpaper-live\] \.app-shell\[data-sidebar-collapsed\] > \.app-titlebar/
+    );
+  });
+
+  it("오른쪽 자리는 band-surface를 들지 않는다: 띠 위에 서고, 유리·배경화면 보정을 지우지 않는다", () => {
+    expect(read("./AppTitlebar.tsx")).not.toMatch(/app-titlebar-trailing[^"]*band-surface/);
+  });
+
+  it("셸 바닥은 배경색 전이를 두지 않는다: 테마가 바뀌면 판 바깥이 같은 프레임에 새 색이다", () => {
+    // 셸의 전이는 열 폭(접고 펼침) 하나뿐이다. `background*`를 전이하면 바뀐 직후 옛 색이 남는다.
+    const transitions = [...shell.matchAll(/transition:\s*([^;]+);/g)].map((m) => m[1]);
+    for (const value of transitions) expect(value).not.toMatch(/background|all\b|--shell-/);
+  });
+});
+
+describe("전체 화면에서는 신호등 자리 인셋을 접는다 (#4591, planner 결정 4)", () => {
+  it("루트 표지가 `--titlebar-inset`을 12(--spacing-3)로 바꾼다", () => {
+    const fold = rule(":root[data-window-fullscreen] {");
+    expect(fold).toMatch(/--titlebar-inset: var\(--spacing-3\);/);
+    expect(TOKENS).toMatch(/--titlebar-inset: 80px;/);
+    expect(TOKENS).toMatch(/--spacing-3: 12px;/);
+  });
+
+  it("인셋을 읽는 자리는 상단 줄과 온보딩 스텝 줄이고, 둘 다 같은 한 값을 따른다", () => {
+    const readers = [...TOKENS.matchAll(/padding-inline-start: var\(--titlebar-inset\);/g)];
+    expect(readers).toHaveLength(2);
+    expect(utility("app-titlebar")).toMatch(/padding-inline-start: var\(--titlebar-inset\);/);
+    expect(utility("onboarding-step-chrome")).toMatch(/padding-inline-start: var\(--titlebar-inset\);/);
+  });
+
+  it("표지는 넓은 값(`:root` 선언)보다 우선순위가 높아 순서와 상관없이 이긴다", () => {
+    // `:root[…]`(0,2,0) > `:root`(0,1,0). 표지 규칙이 `:root` 블록보다 뒤에 있어야 한다는 가정이 필요 없다.
+    expect(TOKENS.indexOf(":root[data-window-fullscreen] {")).toBeGreaterThan(TOKENS.indexOf("--titlebar-inset: 80px;"));
   });
 });
 

@@ -79,7 +79,7 @@ export function AppTitlebar({
       {/* 오른쪽 끝 자리(#4591): 칸 자신도 끌기 영역이라 단추 사이 틈도 창을 옮긴다. 단추는 속성이 없다. */}
       {IS_TAURI && (
         <div
-          className="app-titlebar-trailing band-surface"
+          className="app-titlebar-trailing"
           data-testid="app-titlebar-trailing"
           {...titlebarDragProps(true)}
         >

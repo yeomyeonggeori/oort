@@ -116,6 +116,62 @@ export async function onSystemThemeChanged(
   });
 }
 
+// ---- native fullscreen (#4591) -----------------------------------------------
+
+/**
+ * Follow the window's native fullscreen state: `handler(true|false)` runs once with the current state and
+ * again whenever the window is resized (entering or leaving fullscreen resizes it), so a person who presses the
+ * green button or `Ctrl+Cmd+F` is followed without the page polling. Resize events that arrive while a read is
+ * in flight are folded into one more read, so dragging a window edge does not queue a stream of IPC calls. Resolves to the unsubscribe function; in a
+ * browser tab it resolves at once to a no-op and `@tauri-apps/api/window` is never requested.
+ *
+ * Why the page cares: in macOS fullscreen the traffic lights leave the window, so the inset the top row keeps for
+ * them (`--titlebar-inset`, 80px) turns into dead space. The root stamp that folds it is
+ * `lib/desktopFullscreen.ts`.
+ *
+ * No Rust command is involved: `is_fullscreen` is in `core:window:default` and the resize event is a `listen`
+ * (`core:event:allow-listen`), both inside `core:default` which the main window holds. The page can read the
+ * state but not set it (`set_fullscreen` is not granted); `shell_contract.rs` pins both halves. A read that fails
+ * keeps the last state rather than guessing.
+ */
+export async function watchWindowFullscreen(
+  handler: (fullscreen: boolean) => void
+): Promise<() => void> {
+  if (!IS_TAURI) return noop;
+  const { getCurrentWindow } = await windowApi();
+  const current = getCurrentWindow();
+  let disposed = false;
+  let reading = false;
+  let dirty = false;
+  // 창 가장자리를 끌 때 크기 변화는 초당 수십 번 온다. 읽는 동안 온 것은 한 번으로 합쳐 끝난 뒤 한 번만 다시 읽는다.
+  const read = async () => {
+    if (reading) {
+      dirty = true;
+      return;
+    }
+    reading = true;
+    try {
+      do {
+        dirty = false;
+        const fullscreen = await current.isFullscreen();
+        if (!disposed) handler(fullscreen);
+      } while (dirty && !disposed);
+    } catch {
+      /* 읽을 수 없으면 마지막 상태를 유지한다 */
+    } finally {
+      reading = false;
+    }
+  };
+  await read();
+  const unlisten = await current.onResized(() => {
+    void read();
+  });
+  return () => {
+    disposed = true;
+    unlisten();
+  };
+}
+
 // ---- window glass (AP-3 #4190) ------------------------------------------------
 
 /**
