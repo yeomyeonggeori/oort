@@ -1012,6 +1012,56 @@ async fn a_current_password_is_not_held_to_the_new_password_rule() {
     }
 }
 
+/// ADR-0215 F8 made a fact (it was `[S, runtime-unverified]`): `gen_salt('bf')`
+/// reads the first 72 bytes of a password and ignores the rest. That is why the
+/// new-password ceiling is 72 **bytes** and why a longer password is refused
+/// instead of truncated: to this database, two passwords that agree on their
+/// first 72 bytes are the same password.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn bcrypt_reads_exactly_the_first_72_bytes_of_a_password() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    // (a password, the hash it was stored under, whether `momo_password_verify`
+    // accepts it) — each row says what the database makes of one pair.
+    let verifies = |stored: String, presented: String| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>("SELECT momo_password_verify($1, momo_password_hash($2))")
+                .bind(presented)
+                .bind(stored)
+                .fetch_one(&su)
+                .await
+                .expect("verify against a fresh hash")
+        }
+    };
+    let seventy_two = "a".repeat(72);
+    assert!(
+        verifies(seventy_two.clone(), seventy_two.clone()).await,
+        "control: a password verifies against its own hash"
+    );
+    assert!(
+        verifies(format!("{seventy_two}Y"), format!("{seventy_two}X")).await,
+        "byte 73 is ignored: two different passwords with one 72-byte prefix are the same password"
+    );
+    assert!(
+        !verifies(
+            format!("{}Y", "a".repeat(71)),
+            format!("{}X", "a".repeat(71))
+        )
+        .await,
+        "byte 72 counts: that is why 72 bytes, not fewer, is the ceiling"
+    );
+    // The ceiling is in bytes, not characters: 24 Hangul syllables are exactly
+    // 72 bytes, so a 25th is ignored.
+    let hangul = password_cases::NFC_HAN.repeat(24);
+    assert_eq!(hangul.len(), 72);
+    assert!(
+        verifies(format!("{hangul}\u{D55C}"), format!("{hangul}\u{1112}")).await,
+        "the 25th syllable is past byte 72 and ignored"
+    );
+}
+
 /// ADR-0215 D2: login does not apply the rule. An account that exists keeps
 /// signing in with the password it has — a nine-character one, and one longer
 /// than the 72 bytes the rule allows a new password.

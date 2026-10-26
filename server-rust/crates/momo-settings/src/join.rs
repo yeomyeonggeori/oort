@@ -1196,9 +1196,9 @@ mod tests {
     }
 
     /// ADR-0215 D2 on the join path: nine characters are refused, ten pass;
-    /// 72 bytes pass, 73 do not; and the 73rd byte counts although it is a
-    /// character short of anything else. The shared rule is tested in
-    /// `momo_auth::password_rules`; this pins that join actually asks it.
+    /// 72 bytes pass and 73 do not, even when those 73 bytes are only 25
+    /// characters. The shared rule is tested in `momo_auth::password_rules`;
+    /// this pins that join actually asks it.
     #[test]
     fn join_holds_the_new_password_to_ten_characters_and_seventy_two_bytes() {
         assert_eq!(
