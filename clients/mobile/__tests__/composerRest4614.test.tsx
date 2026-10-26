@@ -202,6 +202,24 @@ describe('그 글에 한해서다 · 다시 누르면 같은 자리에서 펼친
     expect(input().props.scrollEnabled).not.toBe(false);
   });
 
+  it('쉰 뒤 글이 바뀌었다가 같은 글자로 돌아와도 다시 쉬는 초안이 되지 않는다 — 「그 글」의 표식이 낡은 채 남지 않는다', () => {
+    mount();
+    typeAndSettle();
+    rest();
+    blur();
+    settle();
+    expect(hasTools()).toBe(false); // 전제: 쉬는 중
+    fireEvent.changeText(input(), '쓰던 글!'); // 포커스 이벤트 없이 글이 바뀐다(초안 복원·붙여넣기 같은 길)
+    settle();
+    expect(hasTools()).toBe(true);
+    fireEvent.changeText(input(), '쓰던 글'); // 같은 글자로 돌아왔다
+    settle();
+    // 낡은 표식이 남아 있으면 이 글은 쉬는 초안으로 되살아나 접힌 높이·스크롤 잠금으로 선다.
+    expect(hasTools()).toBe(true);
+    expect(inputStyle().height).toBeUndefined();
+    expect(input().props.scrollEnabled).not.toBe(false);
+  });
+
   it('다시 눌러 포커스가 오면 같은 자리에서 펼친다 — 글 그대로, 안의 스크롤도 다시 된다', () => {
     mount();
     typeAndSettle();

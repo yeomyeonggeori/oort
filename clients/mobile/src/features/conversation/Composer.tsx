@@ -1731,6 +1731,13 @@ export function Composer({
   // `keyboardWillShow` 보다도 39~120ms 늦게 닿았다(시뮬레이터 실측, #4456). 손이 닿는 순간 시작하면(owner 10-25 「누르는 순간 바로」) 그 지연이 없다.
   // 글이 있어도 **그 글이 쉬는 초안**이면 펼침의 이유가 아니다(위 `restedText`). 포커스·누름은 여전히 이유다.
   const rested = restedText !== null && restedText === text;
+  // 글이 달라진 **그 순간** 표식을 걷는다 — 걷지 않으면 글이 바뀌었다가 같은 글자로 돌아왔을 때(포커스 이벤트 없이 글이 바뀌는 길: 초안 복원·붙여넣기) 낡은 표식이 그 글을 다시 쉬는 초안으로
+  // 되살린다(「그 글에 한해서」가 깨진다). 렌더는 위 `rested` 가 이미 맞게 그렸고, 이 효과는 낡은 표식(상태와 동기 사본)만 치운다.
+  useEffect(() => {
+    if (restedText === null || restedText === text) return;
+    restedTextRef.current = null;
+    setRestedText(null);
+  }, [restedText, text]);
   const expanded = pressing || focused || (text !== '' && !rested);
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
