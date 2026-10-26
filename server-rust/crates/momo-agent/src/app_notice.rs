@@ -11,17 +11,26 @@
 //!   host?: string,          // egress_blocked only: the refused host name
 //! }
 //! message.props.appsUsed = [ { pluginId, tool, calls }, … ]   // present only when reported
+//! message.props.requestedApps = [ "<pluginId>", … ]           // a PERSON's message only
 //! ```
 //!
 //! ## Who may say what
 //!
-//! * **Both keys are server-owned.** A caller-supplied props map (REST send,
+//! * **All three keys are server-owned.** A caller-supplied props map (REST send,
 //!   webhook) has them stripped ([`SERVER_OWNED_APP_PROPS_KEYS`]); only the
-//!   completion transaction and the two sweeps write them. A person or an agent
-//!   that could write `app_notice` could put a sentence under another agent's
-//!   name, and one that could write `appsUsed` could print a receipt for work
-//!   that never ran — the same forged-claim case the other server-owned keys
-//!   guard.
+//!   completion transaction and the two sweeps write `app_notice` / `appsUsed`,
+//!   and only the REST send writes `requestedApps` — from its validated `apps`
+//!   field, never from the props map. A person or an agent that could write
+//!   `app_notice` could put a sentence under another agent's name, one that could
+//!   write `appsUsed` could print a receipt for work that never ran, and one that
+//!   could write `requestedApps` could draw 「요청한 앱」 chips under a message
+//!   that never asked for them — the same forged-claim case the other
+//!   server-owned keys guard.
+//! * **`requestedApps` is a marker, not a grant** (ADR-0113 증보 3 F5, #4313). It
+//!   says which apps the *requester picked* in the composer. No delivery gate and
+//!   no `tool_grants` computation reads it (a static guard test pins that), so a
+//!   message carrying it is delivered, refused and granted exactly like the same
+//!   message without it.
 //! * **`site` is never reported.** The server knows which door a completion came
 //!   through; a site that could name itself could claim to be somebody else.
 //!   Hermes' REST door is `hermes`; a hosted (Agent Port) connection cannot be
@@ -46,9 +55,32 @@ pub const PROP_APPS_USED: &str = "appsUsed";
 /// forged value cannot ride under the spelling the server does not write.
 pub const PROP_APPS_USED_ALIAS: &str = "apps_used";
 
+/// `message.props.requestedApps` — the apps the requester picked in the composer
+/// (ADR-0113 증보 3 F5, #4313): a JSON array of distinct official plugin ids, at
+/// most [`MAX_REQUESTED_APPS`]. Written by the REST send from the validated
+/// `apps` request field; a **marker** for the clients' logo chips, never read by
+/// delivery or by `tool_grants`.
+pub const PROP_REQUESTED_APPS: &str = "requestedApps";
+/// The most apps one message may request (ADR-0113 증보 3 F5), after de-duplication.
+pub const MAX_REQUESTED_APPS: usize = 3;
+/// The longest `apps` list a send request may carry **as received**, repeats included. The limit
+/// above counts distinct ids, so the server has to de-duplicate before it can count - and a list of
+/// any length is work a single request could multiply (#4313 review r1 H1: tens of thousands of ids
+/// held a worker for seconds). Past this bound the request is refused, with the same coded 400 as any
+/// other `apps` refusal, before the list is normalised and before a connection is taken. Chips are
+/// distinct and at most three, so no client sends more than a handful; the room above three is for a
+/// retrying client that repeats itself.
+pub const MAX_REQUESTED_APPS_INPUT: usize = 16;
+// A ceiling over the distinct limit, never below it - checked when the crate compiles.
+const _: () = assert!(MAX_REQUESTED_APPS_INPUT > MAX_REQUESTED_APPS);
+
 /// Every props key this module owns. A caller-supplied props map loses these.
-pub const SERVER_OWNED_APP_PROPS_KEYS: [&str; 3] =
-    [PROP_APP_NOTICE, PROP_APPS_USED, PROP_APPS_USED_ALIAS];
+pub const SERVER_OWNED_APP_PROPS_KEYS: [&str; 4] = [
+    PROP_APP_NOTICE,
+    PROP_APPS_USED,
+    PROP_APPS_USED_ALIAS,
+    PROP_REQUESTED_APPS,
+];
 
 /// The job-payload key carrying the 「요약만」 instruction (ADR-0113 증보 2 E10).
 pub const APP_RESULT_POLICY_KEY: &str = "app_result_policy";
@@ -382,5 +414,22 @@ mod tests {
         assert!(SERVER_OWNED_APP_PROPS_KEYS.contains(&"appsUsed"));
         assert!(SERVER_OWNED_APP_PROPS_KEYS.contains(&"apps_used"));
         assert!(SERVER_OWNED_APP_PROPS_KEYS.contains(&"app_notice"));
+    }
+
+    /// ADR-0113 증보 3 F5 (#4313): the requested-apps marker is on the one list the send, the webhook
+    /// ingress and the gateway read, under exactly the spelling the clients parse. A key missing from this
+    /// list is a key a caller can forge, so the list is also pinned as a set (a fifth entry is a decision).
+    #[test]
+    fn the_requested_apps_marker_is_a_server_owned_key() {
+        assert_eq!(PROP_REQUESTED_APPS, "requestedApps");
+        assert!(SERVER_OWNED_APP_PROPS_KEYS.contains(&PROP_REQUESTED_APPS));
+        let mut keys: Vec<&str> = SERVER_OWNED_APP_PROPS_KEYS.to_vec();
+        keys.sort_unstable();
+        let mut expected = vec!["app_notice", "appsUsed", "apps_used", "requestedApps"];
+        expected.sort_unstable();
+        assert_eq!(keys, expected);
+        assert_eq!(MAX_REQUESTED_APPS, 3);
+        // The input bound (a compile-time `const _` asserts it stays above the distinct limit).
+        assert_eq!(MAX_REQUESTED_APPS_INPUT, 16);
     }
 }

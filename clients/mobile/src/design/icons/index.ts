@@ -66,7 +66,7 @@ export const HOME_ICON_SIZE: Readonly<Record<HomeIconName, number>> = {
   user: 18,
 };
 
-// ---- 대화 아이콘 일곱 (DS2-4 #2716) ------------------------------------------
+// ---- 대화 아이콘 여덟 (DS2-4 #2716 · 시계 #4455) -----------------------------
 // 같은 레시피(선 1.8, viewBox 24, 1·2·3배). `left`·`up`·`check`·`file`·`plus`·`x`는
 // 시안 `<symbol>`이고, `kebab`(세로 점 셋)은 시안에 없어 Lucide `ellipsis-vertical`
 // 이다 — owner 피드백 표의 Buzz 머리 오른쪽 「⋮」. 이름이 셸의 `plus`·`x`와 겹치는
@@ -84,6 +84,9 @@ export const CONV_ICONS = {
   check: require('./check.png') as ImageSourcePropType,
   cross: require('./cross.png') as ImageSourcePropType,
   file: require('./file.png') as ImageSourcePropType,
+  // 오래 걸리는 전송의 표지 (#4455). Lucide `clock`(ISC) — 같은 레시피(선 1.8, viewBox 24, 12pt 의
+  // 1·2·3배). 시각 글자(`font.meta` 12)와 같은 크기라 이름 줄 옆에서 글자보다 튀지 않는다.
+  clock: require('./clock.png') as ImageSourcePropType,
 } as const;
 
 export type ConvIconName = keyof typeof CONV_ICONS;
@@ -100,6 +103,7 @@ export const CONV_ICON_SIZE: Readonly<Record<ConvIconName, number>> = {
   check: 14,
   cross: 14,
   file: 18,
+  clock: 12,
 };
 
 // ---- + 메뉴 아이콘 넷 (DS2-2b #2750) -----------------------------------------
@@ -156,7 +160,7 @@ export const SHEET_ICONS = {
 
 export type SheetIconName = keyof typeof SHEET_ICONS;
 
-/** 머리 단추 글리프 22(= `SHEET.glyph`), 행 오른쪽 복사 22, 셰브론 18. */
+/** 머리 단추 글리프(닫기·확정) 22 — Buzz 22, 행 오른쪽 복사 22, 셰브론 18. */
 export const SHEET_ICON_SIZE: Readonly<Record<SheetIconName, number>> = {
   close: 22,
   check: 22,

@@ -6,7 +6,7 @@ import {PrimaryButton, Sentence} from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {useStyles} from '../../design/theme';
-import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, SHEET, space, type Palette} from '../../design/tokens';
 import {usePushPrompt} from '../../push/PushProvider';
 import {useSession} from '../../session/useSession';
 import {
@@ -97,6 +97,7 @@ export function DeviceKeyLinkGate(): React.JSX.Element | null {
     <PageSheet
       onClose={() => setOpen(false)}
       accessibilityLabel={DEVICE_KEY_TITLE}
+      scrimLabel={`${DEVICE_KEY_TITLE} 닫기`}
       testID="device-key-link-sheet"
     >
       <LinkSheetBody state={state} onClose={() => setOpen(false)} />
@@ -157,7 +158,7 @@ export function LinkSheetBody({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {flex: 1},
-    content: {paddingTop: space.md, gap: space.xl},
+    content: {paddingTop: SHEET.bodyTop, gap: space.xl},
     intro: {
       fontSize: font.body,
       color: color.text,

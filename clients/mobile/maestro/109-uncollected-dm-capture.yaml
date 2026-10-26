@@ -1,0 +1,20 @@
+appId: app.momo.ios
+name: 109-uncollected-dm-capture
+---
+# 109-uncollected-dm-capture - 대화 아래 활동 줄의 「취소」: 첫 탭이 확인 줄로 바뀐다 (#4285).
+#
+# 표면은 `-momoMeasure UNCOLLECTED-DM`(라이트: `LIGHT-UNCOLLECTED-DM`). 확정은 누르지 않는다(영수증은 대화 화면의 몫이다).
+#
+#   maestro test -e SHOT=uncollected-dm-dark clients/mobile/maestro/109-uncollected-dm-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "turn-stop-arm"
+    timeout: 60000
+- takeScreenshot: ${SHOT}-idle
+- tapOn:
+    id: "turn-stop-arm"
+- extendedWaitUntil:
+    visible:
+      id: "turn-stop-confirm"
+    timeout: 10000
+- takeScreenshot: ${SHOT}-confirm

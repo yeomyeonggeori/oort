@@ -8,12 +8,13 @@ import {FlatList, Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {
   BAR_CONTROL_MAX_SCALE,
   FailureBanner,
+  Sentence,
 } from '../design/atoms';
 import {PageSheet} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
 import {GroupCardItem, GroupLabel, InputPill, ListRow} from '../design/sheetParts';
 import {usePalette, useStyles} from '../design/theme';
-import {font, SAFE_GUTTER, slopTo, space, type Palette} from '../design/tokens';
+import {font, SAFE_GUTTER, SHEET, slopTo, space, type Palette} from '../design/tokens';
 import {SHELL_ICONS, SHELL_ICON_SIZE} from '../design/icons';
 import {Avatar} from '../features/conversation/Avatar';
 import {useDirectory, useRememberOpenedDm} from '../features/workspace/queries';
@@ -51,7 +52,11 @@ export function NewMessageSheet({
   onClose: () => void;
 }): React.JSX.Element {
   return (
-    <PageSheet onClose={onClose} accessibilityLabel="새 DM" testID="new-dm-sheet">
+    <PageSheet
+      onClose={onClose}
+      accessibilityLabel="새 DM"
+      scrimLabel="새 DM 닫기"
+      testID="new-dm-sheet">
       <SheetBody
         onOpenConversation={onOpenConversation}
         onClose={onClose}
@@ -142,11 +147,11 @@ function SheetBody({
         keyboardDismissMode="on-drag"
         contentContainerStyle={styles.list}
         ListEmptyComponent={
-          <Text style={styles.empty} testID="new-dm-empty">
+          <Sentence style={styles.empty} testID="new-dm-empty">
             {query.trim() === ''
               ? '말을 걸 수 있는 사람이 아직 없습니다.'
               : `'${query.trim()}'에 맞는 사람이 없습니다.`}
-          </Text>
+          </Sentence>
         }
         renderItem={({item, index}) => {
           const busy = openDm.isPending && openDm.variables === item.id;
@@ -154,7 +159,15 @@ function SheetBody({
           return (
             <GroupCardItem index={index} count={people.length} inset={AVATAR_SIZE}>
               <ListRow
-                leading={<Avatar directory={directoryQuery.directory} memberId={item.id} />}
+                // 카드(`surface`) 위의 아바타 — 기본 `ground='surface'` 는 카드에 녹아 이니셜만 떠 보인다
+                // (`Avatar.ground` 주석이 말한 그 실패). `muted` 로 원이 선다.
+                leading={
+                  <Avatar
+                    directory={directoryQuery.directory}
+                    memberId={item.id}
+                    ground="muted"
+                  />
+                }
                 leadingWidth={AVATAR_SIZE}
                 title={item.displayName}
                 detail={`@${item.handle} · ${kind}`}
@@ -233,6 +246,8 @@ const buildStyles = (color: Palette) =>
     // 카드·입력은 가로 여백을 목록이 준다 — 시트 몸은 여백이 없다(`PageSheet`).
     list: {
       paddingHorizontal: SAFE_GUTTER,
+      // 머리 줄 아래 숨 쉴 틈(`SheetScroll` 과 같은 값).
+      paddingTop: SHEET.bodyTop,
       paddingBottom: space.xl * 2,
     },
     listHeader: {gap: space.sm, paddingBottom: space.lg},

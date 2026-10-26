@@ -49,7 +49,7 @@ import {
 } from 'react-native';
 import {FailureBanner, NoticeBlock, SAS_MAX_SCALE, Sentence} from '../design/atoms';
 import {font, space, TOUCH_TARGET, type Palette} from '../design/tokens';
-import {usePalette, useStyles, useTheme} from '../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles, useTheme} from '../design/theme';
 import {
   arrivalFromDeviceLinkUrl,
   useDeviceLinkArrival,
@@ -224,6 +224,7 @@ export default function ConnectScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const prefill = useJoinPrefill();
   const deviceLinkArrival = useDeviceLinkArrival();
 
@@ -979,6 +980,7 @@ export default function ConnectScreen({
                   }}
                   placeholder={SERVER_URL_PLACEHOLDER}
                   placeholderTextColor={palette.textMuted}
+                  keyboardAppearance={keyboardAppearance}
                   autoCapitalize="none"
                   autoCorrect={false}
                   keyboardType="url"
@@ -1012,6 +1014,7 @@ export default function ConnectScreen({
                   ref={node => {
                     fields.current.code = node;
                   }}
+                  keyboardAppearance={keyboardAppearance}
                   style={[styles.input, focusRow === 'code' && styles.inputFocus]}
                   value={inviteCode}
                   onChangeText={setInviteCode}
@@ -1033,6 +1036,7 @@ export default function ConnectScreen({
                 ref={node => {
                   fields.current.email = node;
                 }}
+                keyboardAppearance={keyboardAppearance}
                 style={[styles.input, focusRow === 'email' && styles.inputFocus]}
                 value={email}
                 onChangeText={setEmail}
@@ -1061,6 +1065,7 @@ export default function ConnectScreen({
                 ref={node => {
                   fields.current.password = node;
                 }}
+                keyboardAppearance={keyboardAppearance}
                 style={[styles.input, focusRow === 'password' && styles.inputFocus]}
                 value={password}
                 onChangeText={setPassword}
@@ -1095,6 +1100,7 @@ export default function ConnectScreen({
                   onChangeText={setDisplayName}
                   placeholder={derivedName}
                   placeholderTextColor={palette.textMuted}
+                  keyboardAppearance={keyboardAppearance}
                   autoCorrect={false}
                   textContentType="name"
                   accessibilityLabel="팀에서 보일 이름"

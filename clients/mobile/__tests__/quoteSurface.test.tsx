@@ -7,7 +7,7 @@ import {
   type QuoteBlock as QuoteBlockModel,
 } from '@momo/core/features/timeline/quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import {appNote} from '../src/features/conversation/appVoice';
 import React from 'react';
 
@@ -436,7 +436,7 @@ describe('인용 진입 — 액션 시트', () => {
     expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
   }
 
-  it('낱말은 코어의 것이고, 답글과 나란히 선다', () => {
+  it('낱말은 코어의 것이고, 답글과 나란히 선다', async () => {
     const onQuote = jest.fn();
     const onOpenThread = jest.fn();
     openSheet({onQuote, onOpenThread});
@@ -444,7 +444,8 @@ describe('인용 진입 — 액션 시트', () => {
     const quoteRow = screen.getByTestId('sheet-quote');
     expect(quoteRow.props.accessibilityLabel).toBe(QUOTE_ACTION_LABEL);
     fireEvent.press(quoteRow);
-    expect(onQuote).toHaveBeenCalledTimes(1);
+    // 행동은 시트가 미끄러져 내린 뒤에 불린다(#4318).
+    await waitFor(() => expect(onQuote).toHaveBeenCalledTimes(1));
     // 인용은 스레드를 열지 않는다. 여기서 새면 두 장치가 하나가 된다.
     expect(onOpenThread).not.toHaveBeenCalled();
   });

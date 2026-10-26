@@ -723,10 +723,12 @@ export const SHEET = {
   headerRow: TOUCH_TARGET + space.sm,
   /** 원형 단추의 눈에 보이는 지름 — Buzz `IosGlassNavigationButton.controlSize` 40. 눌림 영역은 44. */
   circle: 40,
-  /** 단추 안 글리프 — Buzz 22. 래스터도 22pt 로 구웠다(`icons/index.ts` `SHEET_ICONS`). */
-  glyph: 22,
-  /** 제목이 단추에 겹치지 않게 양쪽에서 비우는 폭 — Buzz 64(단추 44 + 여백 20). */
-  titleInset: 64,
+  /**
+   * 머리 줄 아래에서 첫 내용까지 더하는 위 여백. 머리 줄(52)에서 원(40)이 위아래 6 만 남기므로 원 아래 끝에서 첫
+   * 내용까지는 6 + 12 = 18 이다(Buzz 약 19 · 페이지 전시의 머리→타일 18). 이 값이 없으면 6 이라 원이 첫 카드의
+   * 모서리에 닿을 듯했다(design-review #4318 r1 M1).
+   */
+  bodyTop: space.md,
   /** 카드 안쪽 가로 여백 — Buzz `AppListCard._inset` 16. 우리 공용 여백과 같은 값이다. */
   cardInset: SAFE_GUTTER,
   /** 행 앞 아이콘 칸의 폭 — Buzz 22. 이모지도 같은 칸에 선다. */
@@ -748,4 +750,9 @@ export const SHEET = {
   fitMaxRatio: 0.85,
   /** 중간 단의 높이(화면 비율) — Buzz `scrollControlDisabledMaxHeightRatio` 9/16. */
   mediumRatio: 9 / 16,
+  /**
+   * 키보드 윗변의 둥근 모서리 반경보다 큰 값(실측 쐐기가 24 에 맞는다, design-review #4318 r3 L1·r4 L2). 키보드 위에 앉은 시트는
+   * 이만큼 더 아래(키보드 뒤)까지 `sheet` 색을 깐다 — 안 그러면 키보드 모서리 바깥으로 스크림이 쐐기 모양으로 비친다.
+   */
+  keyboardCorner: 28,
 } as const;

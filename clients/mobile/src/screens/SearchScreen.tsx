@@ -30,7 +30,7 @@ import {
   ScreenHeader,
 } from '../design/atoms';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
-import {usePalette, useStyles} from '../design/theme';
+import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
 import {
   useMessageSearch,
   type MessageSearch,
@@ -180,6 +180,7 @@ export function SearchBody({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const palette = usePalette();
+  const keyboardAppearance = useKeyboardAppearance();
   const clearance = useTabBarClearance();
   const body = useMemo(() => {
     switch (search.phase) {
@@ -254,6 +255,7 @@ export function SearchBody({
           onChangeText={search.setQuery}
           placeholder="메시지 내용으로 검색"
           placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
           // 이 밭의 이름도 이 표면의 이름이다 — 한 낱말을 두 군데 적으면 한쪽만
           // 낡는다 (이슈 #1146 N4).
           accessibilityLabel={SEARCH_SURFACE_NAME}

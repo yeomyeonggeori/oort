@@ -5,13 +5,29 @@
     "name": "Google Drive",
     "version": "1.0.0",
     "description": "Official momo-hosted read-only MCP for an operator-configured shared drive",
-    "publisher": { "id": "momo", "name": "momo", "verified": true },
+    "publisher": { "id": "momo", "name": "oort", "verified": true },
     "license": { "spdx": "Apache-2.0", "kind": "open_source" },
     "provenance": {
       "sourceURL": "https://github.com/Dawn-kim-official/momo",
       "releaseRef": "MOMO-457",
       "verified": true
-    }
+    },
+    "logoKey": "google-drive",
+    "category": "files",
+    "starterPrompts": [
+      {
+        "text": "공유 드라이브에서 이번 분기 기획 문서를 찾아 줘요.",
+        "tool": "drive.search_files"
+      },
+      {
+        "text": "공유 드라이브 파일이 마지막으로 바뀐 때를 알려 줘요.",
+        "tool": "drive.get_file_metadata"
+      },
+      {
+        "text": "공유 드라이브 문서를 텍스트로 읽고 핵심만 정리해 줘요.",
+        "tool": "drive.export_text"
+      }
+    ]
   },
   "mcp": {
     "protocolVersion": "2025-06-18",

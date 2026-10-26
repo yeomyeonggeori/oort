@@ -571,6 +571,8 @@ describe('타이포 스윕 — 글자 크기·굵기는 역할 표에서만 나�
       'BAR_CONTROL_MAX_SCALE',
       'FOLDED_MAX_SCALE',
       'HEAD_MAX_SCALE',
+      'REACTION_GLYPH_MAX_SCALE',
+      'ROW_GLYPH_MAX_SCALE',
       'SAS_MAX_SCALE',
       'STACK_PILL_SCALE',
     ]);

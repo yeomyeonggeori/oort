@@ -10,9 +10,10 @@ import {
 } from '@momo/core/features/timeline/reactions';
 import React, {useCallback, useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
-import {PageSheet} from '../../design/PageSheet';
+import {REACTION_GLYPH_MAX_SCALE, Sentence} from '../../design/atoms';
+import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
+import {ConfirmStep, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
 import {
   font,
   line,
@@ -59,6 +60,19 @@ export function timeLabel(atMs: number): string {
 // 반응은 한 번에 하나를 고르는 행동이고, 고른 뒤에도 시트가 남아 있으면 방금 누른 것이 반영됐는지
 // 보려고 또 닫아야 한다. 닫으면 그 자리에서 칩이 늘어나는 것이 바로 보인다(되돌림은 `MessageRow`
 // 가 그 행에 이유와 함께 그린다. 토스트가 아니다).
+//
+// ## 행동은 시트가 **미끄러져 내린 뒤에** 불린다 (#4318)
+//
+// 답글·인용·복사·고정·고치기·반응은 부모(`MessageRow`)가 행동 안에서 곧바로 `setSheetOpen(false)`
+// 하는 「고르면 곧 닫히는」 행동이다. 그대로 두면 시트가 언마운트되며 스냅으로 사라진다(옛 fade Modal 은
+// 언마운트에도 부드럽게 나갔다). `MessageRow` 는 이 PR 의 손이 아니므로 시트 안에서 푼다: 누름을
+// X·스크림·끌기와 같은 닫는 길(`usePageSheetAction`)로 보내 슬라이드가 끝난 뒤 행동을 **한 번** 부른다
+// (동작 줄이기면 바로). 반응이 칩으로 보이는 데 슬라이드 한 번(260ms)이 더 걸린다 - 고른 것이 시트와
+// 함께 사라지고 그 자리에서 칩이 늘어난다.
+//
+// 닫는 길로 보내지 **않는** 둘: 「지우기」 행은 시트 안에서 확인 단계로 넘어갈 뿐이고, 확인의 「지우기」
+// 는 왕복이 도는 동안 시트가 「지우는 중…」을 말해야 한다(성공 뒤에야 부모가 닫는다). 이 닫힘은 부모의
+// `.then(() => setSheetOpen(false))` 라 지금도 스냅이다 - PR 「발견」 참조.
 //
 // ## 이 배치에 없는 것: 전체 이모지 고르기
 //
@@ -138,6 +152,7 @@ function SheetBody({
   onDelete,
 }: MessageActionSheetProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const afterClose = usePageSheetAction();
   const [confirmingDelete, setConfirmingDelete] = useState(startInDeleteConfirm);
 
   const isMine = useCallback(
@@ -156,10 +171,22 @@ function SheetBody({
   // 바꾸지 않는다. 복사는 **묘비에도 있다**(지워진 메시지는 애초에 이 시트로 오지 않는다).
   const rows: React.ReactNode[] = [
     availability.reply ? (
-      <ListRow key="reply" title="답글 달기" onPress={onReply} testID="sheet-reply" />
+      <ListRow
+        key="reply"
+        title="답글 달기"
+        onPress={onReply}
+        closesSheet
+        testID="sheet-reply"
+      />
     ) : null,
     availability.quote && onQuote ? (
-      <ListRow key="quote" title={QUOTE_ACTION_LABEL} onPress={onQuote} testID="sheet-quote" />
+      <ListRow
+        key="quote"
+        title={QUOTE_ACTION_LABEL}
+        onPress={onQuote}
+        closesSheet
+        testID="sheet-quote"
+      />
     ) : null,
     onCopy ? (
       // 동사형. 낱말은 코어의 `COPY_MESSAGE_ACTION_LABEL` — 웹 메뉴와 이 시트가 같은 말을 쓴다.
@@ -167,6 +194,7 @@ function SheetBody({
         key="copy"
         title={COPY_MESSAGE_ACTION_LABEL}
         onPress={onCopy}
+        closesSheet
         testID="sheet-copy"
       />
     ) : null,
@@ -175,11 +203,18 @@ function SheetBody({
         key="pin"
         title={pinActionLabel(pinned === true)}
         onPress={onPin}
+        closesSheet
         testID="sheet-pin"
       />
     ) : null,
     availability.edit ? (
-      <ListRow key="edit" title="고치기" onPress={onEdit} testID="sheet-edit" />
+      <ListRow
+        key="edit"
+        title="고치기"
+        onPress={onEdit}
+        closesSheet
+        testID="sheet-edit"
+      />
     ) : null,
   ].filter(Boolean);
 
@@ -199,46 +234,29 @@ function SheetBody({
                 {timeLabel(message.createdAtMs)}
               </Text>
             </View>
-            <Text style={styles.previewBody} numberOfLines={2}>
+            <Sentence style={styles.previewBody} numberOfLines={2} testID="sheet-preview-body">
               {preview === '' ? '내용 없는 메시지' : preview}
-            </Text>
+            </Sentence>
           </View>
         </GroupCard>
 
         {confirmingDelete ? (
-          <>
-            <GroupCard testID="delete-confirm">
-              <View style={styles.confirm}>
-                <Text style={styles.confirmHeadline}>메시지를 지울까요?</Text>
-                <Text style={styles.confirmDetail}>
-                  지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」가 남고, 달려 있던
-                  반응도 함께 지워집니다.
-                </Text>
-              </View>
-            </GroupCard>
-            <View style={styles.confirmRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="취소"
-                onPress={() => setConfirmingDelete(false)}
-                style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-                testID="delete-cancel">
-                <Text style={styles.secondaryLabel}>취소</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="지우기"
-                accessibilityState={{disabled: deletePending === true}}
-                disabled={deletePending}
-                onPress={onDelete}
-                style={({pressed}) => [styles.destructive, pressed && styles.pressed]}
-                testID="delete-confirm-button">
-                <Text style={styles.destructiveLabel}>
-                  {deletePending ? '지우는 중…' : '지우기'}
-                </Text>
-              </Pressable>
-            </View>
-          </>
+          <ConfirmStep
+            testID="delete-confirm"
+            headline="메시지를 지울까요?"
+            // 「…」 바로 뒤에 조사를 붙이지 않는다(「…」가 → 「…」 표시가): `hangul-word` 줄바꿈은 닫는 괄호 뒤의 조사를
+            // 못 붙잡아 SE 폭에서 줄 머리에 「가」가 떨어졌다(design-review #4318 r4 H1). 웹 `MessageActions.tsx` 의
+            // 같은 문장은 브라우저가 어절을 지켜 그대로다.
+            detail="지운 메시지는 되돌릴 수 없습니다. 자리에는 「삭제된 메시지」 표시가 남고, 달려 있던 반응도 함께 지워집니다."
+            confirmLabel="지우기"
+            pendingLabel="지우는 중…"
+            pending={deletePending === true}
+            onCancel={() => setConfirmingDelete(false)}
+            // 닫는 길로 보내지 않는다: 왕복 중 시트가 「지우는 중…」을 말하고, 성공 뒤에야 부모가 닫는다.
+            onConfirm={onDelete}
+            cancelTestID="delete-cancel"
+            confirmTestID="delete-confirm-button"
+          />
         ) : (
           <>
             {availability.react ? (
@@ -254,14 +272,18 @@ function SheetBody({
                         accessibilityLabel={
                           already ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`
                         }
-                        onPress={() => onToggleReaction(emoji)}
+                        onPress={() => afterClose(() => onToggleReaction(emoji))}
                         style={({pressed}) => [
                           styles.reaction,
                           already && styles.reactionMine,
                           pressed && styles.pressed,
                         ]}
                         testID={`quick-reaction-${emoji}`}>
-                        <Text style={styles.reactionGlyph}>{emoji}</Text>
+                        <Text
+                          style={styles.reactionGlyph}
+                          maxFontSizeMultiplier={REACTION_GLYPH_MAX_SCALE}>
+                          {emoji}
+                        </Text>
                       </Pressable>
                     );
                   })}
@@ -364,34 +386,5 @@ const buildStyles = (color: Palette) =>
     sheetRowLabel: {fontSize: font.body, color: color.text},
     sheetRowLabelDanger: {color: color.danger},
     sheetRowLabelMuted: {color: color.textMuted},
-    confirm: {
-      gap: space.sm,
-      paddingHorizontal: SHEET.cardInset,
-      paddingVertical: space.md,
-    },
-    confirmHeadline: {fontSize: font.body, color: color.text, fontWeight: '700'},
-    confirmDetail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
-    confirmRow: {flexDirection: 'row', gap: space.sm},
-    secondary: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: color.border,
-    },
-    secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
-    destructive: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: color.dangerBorder,
-      backgroundColor: color.dangerSurface,
-    },
-    destructiveLabel: {fontSize: font.label, color: color.danger, fontWeight: '700'},
     pressed: {opacity: 0.6},
   });

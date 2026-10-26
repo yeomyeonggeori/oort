@@ -12,6 +12,27 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 ## [Unreleased]
 
 ### Added
+- Server: plugin catalog display fields (logo key, category, starter prompts, website URL) and the apps a message asks for; "my app runtimes" lists where each of your apps runs (ADR-0113 addendum 3, #4313, #4491; migration 149).
+- Phone: the approval card for `member.avatar.set` shows the proposed photo before you approve (#4394, #4408).
+- Phone: the composer opens into the editor as soon as you tap it (not only after the first character) and folds back with the same spring when the keyboard goes down (#4456, #4515).
+- Web and phone: the "agent work" card says "not picked up yet" with a Cancel for runs no agent has collected for a while, and hides system work (welcome runs) from the home card (#4285, #4513).
+- Decisions (docs): host ops team box — shell only inside the box, typed actions in oort itself (ADR-0210, #4347, #4470); notification settings v2 — diagnostics, channel levels, keywords, phone delay while the desktop is active, sounds (ADR-0206, #4223, #4490); cohosted Hermes environment facts and the hosting suggestion copy (ADR-0203 addendum, #4336, #4459).
+
+### Changed
+- Server: an attachment that no message carries yet (a composer draft, or a file a scheduled message holds) is readable by its uploader alone; everyone else gets the same 404 as an unknown id (ADR-0151 addendum 1, #4233, #4454).
+- Server: when another member signs in on the same phone install, they take over the dormant device row; deleting another member's dormant device is a 404 (#3978, #4452).
+
+### Fixed
+- Phone, web and desktop: a message with only a photo no longer shows as an empty message in the conversation, lists and notifications (#4294, #4451).
+- Web and desktop: the reconnect recovery marker appears only when someone else's new messages were brought in, the same rule as the phone (#4328, #4447).
+- Web and desktop: a late read that comes back after you switched channels no longer mixes into the new channel (#4438, #4464).
+- Phone, web and desktop: editing a message with a photo no longer drops the photo card in real time (#4441, #4465).
+
+## [0.1.37] - 2026-10-25
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.37>. Tag target: `main=a41298d60`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. Three database migrations (146, 147, 148; the schema goes from 145 to 148) and changes to `bootstrap_runtime_roles.sql` (a read-only lock on three catalog tables, `mem_*` EXECUTE for `momo_app` only, and column-level SELECT for the notifier); the api pre-deploy `momo-migrate` re-applies the runtime roles. Two new environment variables, both optional with defaults and no setting needed (`MOMO_RUN_WOKEN_EXPIRE_MINUTES`, default 30; `MOMO_WELCOME_HOSTED_SIGNAL_HOURS`, default 24). The Postgres image pin in the Railway catalog moved to 18.6; upgrading a running instance is a separate step (#4370) and is not part of this release. This release adds server-side DM closure, agent-proposed profile photo changes, tighter database role locks, the scheduled-message screens for web and desktop, and phone message bubbles, a profile photo flow and a long-press sidebar menu.
+
+### Added
 - Server: an external agent that was woken by the doorbell but never collected its job is now ended after 30 minutes as `timed_out{woken_not_collected}` with an honest line, and a hosted agent with no work signal for a day is not picked for welcome runs (ADR-0200 addendum 3, #4284, #4359, #4365).
 - Server: DM closure is server state — closing a DM on one device closes it everywhere, and conversations with members who left are closed by default (ADR-0177 addendum, #4227, #4335; migration 146).
 - Server: an agent can propose changing *your own* profile photo from an attachment in the same conversation; you approve it on a preview card (`member.avatar.set`, ADR-0186 addendum v4, #4385, #4398; migration 148). The card UI follows in #4394.

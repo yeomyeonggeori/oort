@@ -367,7 +367,7 @@ describe('설정 페이지', () => {
 
   it('테마 행이 안쪽 장을 열고, 고른 것이 저장되며 행의 값이 바뀐다', async () => {
     await openPage();
-    expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/새벽하늘 · 시스템/);
+    expect(screen.getByTestId('profile-theme-row')).toHaveTextContent(/새벽하늘 · 라이트/);
     // 선택지는 행을 누르기 전에는 없다.
     expect(screen.queryByTestId('theme-control')).toBeNull();
 

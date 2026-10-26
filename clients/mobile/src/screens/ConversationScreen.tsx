@@ -27,7 +27,11 @@ import {
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
-import type {CancelOutcome} from '@momo/core/features/agents/runCancel';
+import type {
+  CancelOutcome,
+  CancelWording,
+} from '@momo/core/features/agents/runCancel';
+import {isUntakenHumanRun} from '@momo/core/features/agents/runWaiting';
 import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -115,6 +119,7 @@ import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
 import {visitFlushReason} from '../features/readState/advertise';
 import {useViewingBeat} from '../features/readState/useViewingBeat';
+import {useReportViewedConversation} from '../push/viewedConversation';
 import {
   foldVisitBoundary,
   type VisitBoundary,
@@ -135,7 +140,10 @@ import {
   type NotificationLanding,
 } from '../push/tapArrival';
 import {useRealtime} from '../realtime/RealtimeProvider';
-import {useAgentLiveness} from '../features/agents/useAgentLiveness';
+import {
+  useAgentLiveness,
+  useAgentLivenessLookup,
+} from '../features/agents/useAgentLiveness';
 import {ChannelAudienceContext} from '../features/conversation/appsTail';
 import {useSession} from '../session/useSession';
 import {useDmDeliveryHint} from '../features/conversation/useDmDeliveryHint';
@@ -483,6 +491,18 @@ export default function ConversationScreen({
     [signals, channelId, staleBucket],
   );
 
+  // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
+  // 경고(D4)를 싣고, 5분을 넘으면 「아직 받지 않았어요」로 말한다(#4285). 같은 쿼리 키라 DM 머리의
+  // 상태 점(`peerLiveness`)과 요청을 나눠 쓴다.
+  const waitingAgentIds = useMemo(
+    () =>
+      turns
+        .filter(turn => isUntakenHumanRun(turn.server))
+        .map(turn => turn.memberId),
+    [turns],
+  );
+  const livenessFor = useAgentLivenessLookup(waitingAgentIds);
+
   // ---- 답이 나타날 자리 (#999) ---------------------------------------------
   //
   // 성재는 요청을 보낸 뒤 「작업 중」 UI 를 **한 번도 인지하지 못했다**. 배선이
@@ -821,6 +841,10 @@ export default function ConversationScreen({
 
   // ---- the action surface ---------------------------------------------------
   const [thread, setThread] = useState<Message | null>(null);
+  // 앞에 떠 있는 동안 온 푸시가 「지금 보는 대화」를 읽는 자리 (#4310). 방과, 열려 있는 스레드가
+  // 있으면 그 루트를 올린다 — 알림 처리기(`push/foregroundPresentation.ts`)가 같은 방·같은
+  // 스레드의 알림만 숨기려면 둘 다 필요하다.
+  useReportViewedConversation(workspaceId, channelId, thread?.id ?? null);
   /**
    * 알림이 연 스레드 안에서 착지할 답글 (#2569). 사람이 스레드를 직접 열거나
    * 닫으면 비운다 — 그때는 알림이 가리킨 자리로 끌려갈 이유가 없다.
@@ -1368,11 +1392,13 @@ export default function ConversationScreen({
       memberId: string;
       name: string;
       runCount?: number;
+      wording: CancelWording;
     }) => (
       <StopTurnControl
         runId={turn.runId}
         agentName={turn.name}
         runCount={turn.runCount}
+        wording={turn.wording}
         onOutcome={outcome =>
           setStopOutcome({
             runId: turn.runId,
@@ -1865,6 +1891,7 @@ export default function ConversationScreen({
               nowMs={turnNowMs}
               live={railLive}
               renderStop={renderStop}
+              livenessFor={livenessFor}
             />
             {/* ===================================================
                 「작업 중」 **바로 아래** (design-review M-5).

@@ -10,11 +10,12 @@ import {
   channelLeaveConfirmBody,
 } from '@momo/core/features/channels/model';
 import React from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {StyleSheet} from 'react-native';
+import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
-import {font, line, radius, SHEET, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {ConfirmStep, GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
+import {font, line, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import type {ChannelRowTarget} from './channelRowActions';
 
@@ -103,49 +104,26 @@ export function ChannelActionSheet({
       />
       <SheetScroll testID="channel-sheet-scroll">
         {confirmingLeave ? (
-          <>
-            <GroupCard testID="channel-leave-confirm">
-              <View style={styles.confirm}>
-                <Text style={styles.confirmHeadline}>{CHANNEL_LEAVE_CONFIRM_TITLE}</Text>
-                <Text style={styles.confirmDetail}>{channelLeaveConfirmBody(target.title)}</Text>
-                {leave.error !== null ? (
-                  <Text
-                    accessibilityRole="alert"
-                    style={styles.error}
-                    testID="channel-leave-error">
-                    {leave.error}
-                  </Text>
-                ) : null}
-              </View>
-            </GroupCard>
-            <View style={styles.confirmRow}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="취소"
-                onPress={onCancelLeave}
-                style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-                testID="channel-leave-cancel">
-                <Text style={styles.secondaryLabel}>취소</Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={CHANNEL_LEAVE_LABEL}
-                accessibilityState={{busy: leave.pending}}
-                onPress={onConfirmLeave}
-                style={({pressed}) => [styles.destructive, pressed && styles.pressed]}
-                testID="channel-leave-confirm-button">
-                <Text style={styles.destructiveLabel}>
-                  {leave.pending ? '나가는 중…' : CHANNEL_LEAVE_LABEL}
-                </Text>
-              </Pressable>
-            </View>
-          </>
+          <ConfirmStep
+            testID="channel-leave-confirm"
+            headline={CHANNEL_LEAVE_CONFIRM_TITLE}
+            detail={channelLeaveConfirmBody(target.title)}
+            error={leave.error}
+            errorTestID="channel-leave-error"
+            confirmLabel={CHANNEL_LEAVE_LABEL}
+            pendingLabel="나가는 중…"
+            pending={leave.pending}
+            onCancel={onCancelLeave}
+            onConfirm={onConfirmLeave}
+            cancelTestID="channel-leave-cancel"
+            confirmTestID="channel-leave-confirm-button"
+          />
         ) : (
           <>
             {error !== null ? (
-              <Text accessibilityRole="alert" style={styles.error} testID="channel-sheet-error">
+              <Sentence accessibilityRole="alert" style={styles.error} testID="channel-sheet-error">
                 {error}
-              </Text>
+              </Sentence>
             ) : null}
             {groupItems(items).map(group => (
               <GroupCard key={group.key} label={group.title}>
@@ -157,6 +135,9 @@ export function ChannelActionSheet({
                       title={busy && item.busyLabel ? item.busyLabel : item.label}
                       tone={item.tone === 'danger' ? 'danger' : 'default'}
                       busy={busy}
+                      // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」·「복사됨」·실패를 스스로
+                      // 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다(코어 `channelActionKeepsMenuOpen` 이
+                      // 같은 이유로 이 항목들을 「열어 둔다」고 정한다).
                       onPress={() => onRun(item.key)}
                       testID={`channel-sheet-${item.testKey}`}
                     />
@@ -174,34 +155,4 @@ export function ChannelActionSheet({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     error: {fontSize: font.label, color: color.danger, lineHeight: line.label},
-    confirm: {
-      gap: space.sm,
-      paddingHorizontal: SHEET.cardInset,
-      paddingVertical: space.md,
-    },
-    confirmHeadline: {fontSize: font.body, color: color.text, fontWeight: '700'},
-    confirmDetail: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
-    confirmRow: {flexDirection: 'row', gap: space.sm},
-    secondary: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: color.border,
-    },
-    secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
-    destructive: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      borderRadius: radius.md,
-      borderWidth: 1,
-      borderColor: color.dangerBorder,
-      backgroundColor: color.dangerSurface,
-    },
-    destructiveLabel: {fontSize: font.label, color: color.danger, fontWeight: '700'},
-    pressed: {opacity: 0.6},
   });

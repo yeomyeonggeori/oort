@@ -1,0 +1,37 @@
+appId: app.momo.ios
+name: "112-keyboard-dark-chosen-capture"
+---
+# 112-keyboard-dark-chosen-capture — 다크를 고른 폰의 키보드는 다크다. 기기가 라이트여도 (#4526, ADR-0189 증보 5).
+#
+# 키보드는 OS 가 그리고, 앱이 `keyboardAppearance` 로 알려 줘야 앱을 따른다(`useKeyboardAppearance` — 고른 값이
+# 아니라 풀린 스킴). 같은 흐름을 두 번 돌려 「기기를 따르는가, 앱을 따르는가」를 가른다:
+#   1) 다크 기기에서 다크를 고른다 → 다크 키보드. 기기와 같은 값이라 이것만으로는 둘을 못 가른다.
+#   2) 기기를 라이트로 뒤집고 앱을 다시 켠다(저장된 선택은 다크) → 키보드가 **다크**면 기기가 아니라 앱을 따르는 것이다.
+#      캡션이 「기기 라이트 · 화면 다크 · 고른 것 다크」를 사진 안에 적는다.
+#
+#   xcrun simctl ui <udid> appearance dark
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure THEME-LIVE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=keyboard-dark-device --test-output-dir <dir> clients/mobile/maestro/112-keyboard-dark-chosen-capture.yaml
+#   xcrun simctl terminate <udid> app.momo.ios && xcrun simctl ui <udid> appearance light
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure THEME-LIVE -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --udid <udid> test -e SHOT=keyboard-light-device --test-output-dir <dir> clients/mobile/maestro/112-keyboard-dark-chosen-capture.yaml
+#   xcrun simctl ui <udid> appearance dark   # 되돌린다
+- extendedWaitUntil:
+    visible:
+      id: "theme-live-caption"
+    timeout: 120000
+- waitForAnimationToEnd
+# 두 번째 실행에서는 이미 다크라 아무 일도 안 일어난다(고른 채 다시 켠 상태를 그대로 쓴다).
+- tapOn:
+    id: "theme-dark"
+- waitForAnimationToEnd
+- scrollUntilVisible:
+    element:
+      id: "appearance-signal-input"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "appearance-signal-input"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}
+- hideKeyboard

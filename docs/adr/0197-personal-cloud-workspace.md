@@ -12,6 +12,7 @@
 - 관계: ADR-0188(member host·서명·결정자=소유자), ADR-0146(기기 키 서명 R2), ADR-0190 D3(로그인 상태는 종료 코드만), ADR-0191 D2(공식 바이너리·토큰 비열람·풀링 금지), ADR-0192 D2·D4·D5(페어링·Remote Control·로그인 든 체크포인트 비공유), ADR-0193 D4(구독 에이전트 owner_only), ADR-0157(샌드박스 네트워크 경계), ADR-0156(CubeSandbox), ADR-0184(셀프호스트·Railway), ADR-0100(공개 API는 Accepted ADR), ADR-0004(자격 비유입), ADR-0147 증보(서버 금고에 구독 토큰 금지)
 - 증보: 2026-10-03 **D5** — S2 결과(#3409): 암호군 = 임시 P-256 ECDH(X25519 대신, 사유: 잠금 파일에 x25519 없음·소유자 기기 키와 같은 `p256` 크레이트) + HKDF-SHA256 + AES-256-GCM, 양쪽 신원 서명 transcript 핸드셰이크(Noise 아님: 장기 키가 P-256/Ed25519로 나뉘고 Secure Enclave는 ECDH 장기 키 합의를 주지 않는다). 새 암호 구현 없음, 잠금 파일에 `hkdf 0.13` 패키지 하나만 추가(MIT OR Apache-2.0). 정본·M4 착수 조건: [S2 스파이크](../planning/research/2026-10-03-blind-pty-spike-s2.md). D5 본문은 바꾸지 않았다.
 - 증보: 2026-10-05 **증보 1 Accepted** — S1(#3408) 결과로 배치 B(Railway 어댑터) 닫음, MVP는 런너 호스트(A). VM 제공사는 배포 전 결재. 본문 끝 「증보」 절.
+- 역방향: 2026-10-25 증보 1의 「배치 B(Railway 어댑터) 닫힘」은 **개인 박스**(멤버별 컨테이너)에 대한 것으로 그대로다. 팀 박스(scope=workspace)는 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347)이 다른 모양(박스 안 시크릿 0·oort의 Railway 토큰 0·워크스페이스당 박스 하나·실측 통과 뒤에만)으로 Railway 배치를 조건부로 정한다. 본문 결정은 바꾸지 않았다.
 - 표기: [V] 원문·코드 직접 확인 · [S] 문서 요약만 확인(WebFetch 요약 모델 경유) · [?] 확인 못 함 · **[추정]** 계산값(측정 아님) · `runtime-unverified` 실행 안 함. 이 ADR은 설계 문서이고 인프라를 만들지 않았다. 아래 수치와 Railway 한도는 스파이크(S1)가 실측하기 전까지 가정이다.
 
 ## 맥락

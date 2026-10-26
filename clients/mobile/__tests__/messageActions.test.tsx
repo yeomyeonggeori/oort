@@ -501,9 +501,9 @@ describe('고정 — 로터와 되돌림', () => {
     });
     renderPinRow({rowActions});
     longPress();
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('sheet-pin'));
-    });
+    fireEvent.press(screen.getByTestId('sheet-pin'));
+    // 고정은 시트가 미끄러져 내린 뒤에 불린다(#4318) - 거절은 그 뒤에 행에 선다.
+    await waitFor(() => expect(screen.getByTestId('message-action-error')).toBeTruthy());
 
     // 코어의 문구를 그대로 쓰는지 본다. 화면에서 문장을 새로 지으면 웹과 두 벌이 된다.
     expect(screen.getByTestId('message-action-error')).toBeTruthy();

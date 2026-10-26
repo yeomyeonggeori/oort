@@ -7,7 +7,7 @@ import {
   PIN_ROW_MARK,
   type PinMap,
 } from '@momo/core/features/timeline/pins';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
@@ -168,7 +168,8 @@ describe('스레드의 답글도 고정할 수 있다', () => {
     const item = screen.getByTestId('sheet-pin');
     expect(item.props.accessibilityLabel).toBe('고정하기');
     fireEvent.press(item);
-    expect(togglePin).toHaveBeenCalledTimes(1);
+    // 행동은 시트가 미끄러져 내린 뒤에 불린다(#4318).
+    await waitFor(() => expect(togglePin).toHaveBeenCalledTimes(1));
     expect(togglePin.mock.calls[0][0]).toMatchObject({id: REPLY_ID});
   });
 

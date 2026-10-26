@@ -14,6 +14,7 @@ import {ThemeControl} from '../src/design/ThemeControl';
 import {BrandAppearance, FixedScheme, ThemeProvider, useStyles} from '../src/design/theme';
 import {paletteFrom, type Palette} from '../src/design/tokens';
 import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
+import {DARK_CHOSEN_RECORD} from './fixtures/darkWorld';
 
 // =============================================================================
 // #2719 — 테마와 강조색이 **끝까지** 바뀌고, 저장되고, 거절이 거절로 남는다.
@@ -68,6 +69,9 @@ const saved = () => JSON.parse(store.map.get(NON_SECRET_KEYS.appearance) ?? 'nul
 beforeEach(() => {
   store = memoryStore();
   __setNonSecretStore(store);
+  // 이 파일은 다크에서 테마·강조색이 끝까지 가는지를 잰다. 폰의 기본이 라이트가 된 뒤(#4526,
+  // ADR-0189 증보 5)에는 다크를 **고른** 폰으로 세운다 — 저장된 선택은 기본이 건드리지 않는다.
+  store.map.set(NON_SECRET_KEYS.appearance, DARK_CHOSEN_RECORD);
 });
 afterEach(() => {
   cleanup();
@@ -86,7 +90,7 @@ function mount() {
 describe('테마 — 스킴을 고정한 채 바꿔도 memo 소비자가 따라간다', () => {
   it('새벽하늘 → 흑연 → 노을띠, 다크에서 매번 본문 잉크가 그 테마의 것이다', () => {
     mount();
-    // 시스템 기본은 다크(jest.setup.js).
+    // 다크를 고른 폰이다(위 beforeEach).
     const ink = (theme: 'dawnsky' | 'graphite' | 'noeul') =>
       paletteFrom(theme, 'dark').text;
     // 이 시험이 헛돌지 않으려면 세 값이 실제로 달라야 한다.
@@ -97,7 +101,7 @@ describe('테마 — 스킴을 고정한 채 바꿔도 memo 소비자가 따라�
     expect(colorOf('probe-ink')).toBe(ink('graphite'));
     fireEvent.press(screen.getByTestId('appearance-theme-noeul'));
     expect(colorOf('probe-ink')).toBe(ink('noeul'));
-    expect(saved()).toMatchObject({v: 2, scheme: 'system', theme: 'noeul', signal: null});
+    expect(saved()).toMatchObject({v: 2, scheme: 'dark', theme: 'noeul', signal: null});
   });
 
   it('고른 테마만 selected 이고 체크가 따라간다 — 셋 중 하나', () => {
