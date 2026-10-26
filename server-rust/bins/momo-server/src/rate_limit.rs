@@ -17,12 +17,16 @@
 //! only. What is **not** ported yet, and is recorded rather than implied:
 //!
 //! * the global mount over every path (Swift puts it on the root router);
-//! * the per-**member** axis, which needs the principal and therefore sits after
-//!   the auth middleware;
-//! * the `rate_limit.exceeded` `audit_log` row — and note Swift never writes it
-//!   for the per-IP axis either (:186-195), because that axis runs before any
-//!   principal exists and `audit_log.workspace_id` is `NOT NULL`. A per-IP
-//!   violation is a server log line on both servers.
+//! * the Swift **global** per-member axis (`RATE_LIMIT_PER_MEMBER`, every
+//!   authenticated route). What replaced it is narrower on purpose: the per-member
+//!   **write** budget at the bottom of this file (#4234, ADR-0208 D10 증보), mounted
+//!   on the five write endpoints (three surfaces) a member can flood. Reads and the
+//!   streaming `PATCH` have no per-member budget;
+//! * the per-IP `audit_log` row. Swift never writes it for the per-IP axis either
+//!   (:186-195), because that axis runs before any principal exists and
+//!   `audit_log.workspace_id` is `NOT NULL`: a per-IP violation is a server log
+//!   line on both servers. The per-**member** axis does have its row (Swift's
+//!   `rate_limit.exceeded`), because it runs after the principal is known.
 //!
 //! ## v0 contract, stated because it is a real limitation
 //!
@@ -32,19 +36,26 @@
 //! prerequisite for scaling the API out, not for shipping this.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
+use momo_auth::{Principal, PrincipalKind};
+use momo_db::audit::{write_audit, AuditEntry};
+use momo_db::DbError;
+use serde_json::json;
+use uuid::Uuid;
 
 use crate::config::RateLimitConfig;
 use crate::error::ApiError;
-use crate::AppState;
+use crate::routes::shared::{agent_tenant_tx, audit_via_token_id};
+use crate::{AppState, RateLimitState};
 
 /// How many `check` calls pass before expired buckets are swept (Swift :79).
 const SWEEP_INTERVAL: u32 = 4096;
@@ -249,6 +260,22 @@ impl SlidingWindowRateLimiter {
         if let Some(bucket) = buckets.get_mut(key) {
             if bucket.log_reservation == Some(reservation) {
                 bucket.log_reservation = None;
+            }
+        }
+    }
+
+    /// Take back the one timestamp a `check_at(key, _, _, at)` admitted at exactly `at`,
+    /// as if that request had not been counted. For a caller that claimed a single-use
+    /// slot ahead of the work it guards and must give it back when the work did not
+    /// happen ([`audit_denial_once`]). A no-op when no such timestamp is there.
+    pub(crate) fn forget_at(&self, key: &str, at: Instant) {
+        let mut buckets = match self.buckets.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        if let Some(bucket) = buckets.get_mut(key) {
+            if let Some(position) = bucket.timestamps.iter().rposition(|stamp| *stamp == at) {
+                bucket.timestamps.remove(position);
             }
         }
     }
@@ -570,6 +597,346 @@ async fn gate_per_ip(
     too_many_requests(verdict.retry_after_seconds)
 }
 
+// ---------------------------------------------------------------------------
+// #4234 — the per-member write budget (ADR-0208 D10 증보)
+// ---------------------------------------------------------------------------
+//
+// Five write endpoints (three surfaces) are mounted behind `require_principal` and each does
+// work out of proportion to its request line: a message send is a channel-seq bump + a
+// message row + an outbox row (+ mention routing) in one transaction, an upload
+// start is a Google Drive API call plus a `pending` row, and a scheduled-message
+// create/edit is a transaction that locks the member's session and schedule rows
+// and writes an outbox event. Before this budget nothing bounded how many of
+// them one credential could ask for: a runaway agent loop or a leaked token
+// could write at line rate.
+//
+// **Why a `route_layer` middleware and not a call in each handler.**
+//
+// * It runs before the handler's extractors, so a refused request costs neither a
+//   JSON parse of up to 2 MiB nor the handler's own database work (the message
+//   transaction, the outbox row) — and the upload gate is structurally ahead of the
+//   Drive call, which is the expensive part. It does **not** run ahead of
+//   authentication: `require_principal` is the outer layer, so a refused request still
+//   pays what that layer pays (a `token_state` read for a person; for an agent bearer
+//   also the `last_used_at` touch and an `auth.agent_bearer.used` audit row). A cheaper
+//   rejection ahead of authentication is a follow-up (ADR-0208 증보 1).
+// * `ApiError` has no header slot, so a handler cannot answer a 429 with the
+//   `Retry-After` the contract promises (`password::admit_password_change` cannot,
+//   today). A middleware returns the whole `Response`.
+// * The route table is where a reader looks to learn what is guarded.
+//
+// **Whose budget.** The key is the authenticated principal's member id, never
+// anything the request carries, so a caller can only spend its own budget and can
+// create no key it does not own. Humans and agents are different credentials with
+// different traffic shapes, so the send surface has two limits (the limit follows
+// `Principal::kind`); the other surfaces are not reachable by an agent bearer at
+// all (`required_agent_scope`, `scheduled_messages::require_human`), so they have
+// one limit and a non-human principal that ever reached them would be held to it.
+//
+// **State.** A dedicated limiter, not `RateLimitState::limiter`: that map is shared
+// by axes with other windows, and its sweep drops a bucket whose entries are all
+// older than the window of *whichever call* triggered the sweep — which would
+// forget part of a member's history. Same contract as every limiter here: in
+// process, reset by a restart, not shared between replicas (N replicas admit N
+// times the limit).
+
+/// The write surfaces that carry a per-member budget.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberWrite {
+    /// `POST …/channels/{ch}/messages` and `POST …/scheduled-messages/{id}/send-now`.
+    /// The second is the same canonical send, so it spends the same budget and the
+    /// two cannot be alternated to double it.
+    MessageSend,
+    /// `POST …/channels/{ch}/scheduled-messages` and `PATCH …/scheduled-messages/{id}`.
+    /// Cancelling (`DELETE`) is not a write that is budgeted: it is the safety action.
+    ScheduledWrite,
+    /// `POST …/channels/{ch}/attachments/uploads`.
+    UploadStart,
+}
+
+impl MemberWrite {
+    /// The stable name an audit row and a log line carry. Never a path: a route's
+    /// shape may change, and the ids in it are not the point.
+    pub const fn label(self) -> &'static str {
+        match self {
+            MemberWrite::MessageSend => "message_send",
+            MemberWrite::ScheduledWrite => "scheduled_write",
+            MemberWrite::UploadStart => "upload_start",
+        }
+    }
+
+    /// One key space per surface, so spending one cannot refuse another — the
+    /// reason the per-IP axes each have their own prefix.
+    const fn key_prefix(self) -> &'static str {
+        match self {
+            MemberWrite::MessageSend => "write:send",
+            MemberWrite::ScheduledWrite => "write:schedule",
+            MemberWrite::UploadStart => "write:upload",
+        }
+    }
+}
+
+/// `audit_log.action` of a per-member refusal. Swift's name (`RateLimitMiddleware`),
+/// kept so a query written against the old server still finds the rows.
+pub const MEMBER_WRITE_RATE_LIMIT_ACTION: &str = "rate_limit.exceeded";
+const MEMBER_WRITE_AUDIT_SCHEMA: &str = "oort.rate_limit.exceeded.v1";
+
+/// How many requests `kind` may make on `surface` in one window; 0 = no budget.
+///
+/// Only the send surface tells humans from agents (see the section header). A
+/// work-host credential counts with the agents: it is a machine, and its traffic
+/// has the agents' shape.
+pub fn member_write_limit(
+    config: &RateLimitConfig,
+    surface: MemberWrite,
+    kind: PrincipalKind,
+) -> u32 {
+    match (surface, kind) {
+        (MemberWrite::MessageSend, PrincipalKind::Human) => config.message_send_per_member_limit,
+        (MemberWrite::MessageSend, PrincipalKind::Agent | PrincipalKind::WorkHost) => {
+            config.message_send_per_agent_limit
+        }
+        (MemberWrite::ScheduledWrite, _) => config.scheduled_write_per_member_limit,
+        (MemberWrite::UploadStart, _) => config.upload_start_per_member_limit,
+    }
+}
+
+const fn principal_kind_label(kind: PrincipalKind) -> &'static str {
+    match kind {
+        PrincipalKind::Human => "human",
+        PrincipalKind::Agent => "agent",
+        PrincipalKind::WorkHost => "work_host",
+    }
+}
+
+fn member_write_key(surface: MemberWrite, member_id: Uuid) -> String {
+    format!("{}:{member_id}", surface.key_prefix())
+}
+
+/// The per-member write gate. Mount it with `route_layer` on the method that does
+/// the write, and only there: `route_layer` leaves every other method of the same
+/// path untouched, which is what keeps `DELETE …/scheduled-messages/{id}` and
+/// `PATCH …/messages/{id}` (streaming slices) outside the budget.
+///
+/// It sits inside `auth::require_principal`, so the principal is already in the
+/// request extensions. A request with none cannot be named and so cannot be
+/// fairly limited; it is passed on, where the handler's own `Extension<Principal>`
+/// extractor refuses it as it always has.
+pub async fn member_write(
+    State((state, surface)): State<(AppState, MemberWrite)>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let Some(principal) = request.extensions().get::<Principal>().cloned() else {
+        return next.run(request).await;
+    };
+    let config = &state.rate_limit.config;
+    let limit = member_write_limit(config, surface, principal.kind);
+    if limit == 0 {
+        return next.run(request).await;
+    }
+    let key = member_write_key(surface, principal.member_id);
+    let window = Duration::from_secs(config.window_seconds);
+    let verdict = state.rate_limit.member_writes.check(&key, limit, window);
+    if verdict.allowed {
+        return next.run(request).await;
+    }
+    // Only the first denial of a burst owns a reservation, so a flood of parallel refusals has
+    // exactly one request that goes on to the database.
+    if let Some(reservation) = verdict.log_reservation {
+        record_member_write_denial(&state, &principal, surface, limit, &key, reservation).await;
+    }
+    too_many_requests(verdict.retry_after_seconds)
+}
+
+/// The audit half of a first denial. Never fails the request: an audit that cannot
+/// be written is logged and the 429 stands (Swift's rule: auditing must not turn a
+/// 429 into a 500).
+async fn record_member_write_denial(
+    state: &AppState,
+    principal: &Principal,
+    surface: MemberWrite,
+    limit: u32,
+    key: &str,
+    reservation: u64,
+) {
+    let window_seconds = state.rate_limit.config.window_seconds;
+    tracing::warn!(
+        member_id = %principal.member_id,
+        surface = surface.label(),
+        kind = principal_kind_label(principal.kind),
+        limit,
+        window_seconds,
+        "rate limit exceeded (per-member write)"
+    );
+    // What the row says is what the limiter decided: who, which surface, which
+    // budget. No path, no body, no id from the request.
+    let mut entry = AuditEntry::new(principal.workspace_id, MEMBER_WRITE_RATE_LIMIT_ACTION)
+        .by(principal.member_id)
+        .via_token(audit_via_token_id(principal))
+        .with_schema(
+            MEMBER_WRITE_AUDIT_SCHEMA,
+            json!({
+                "scope": "member",
+                "surface": surface.label(),
+                "kind": principal_kind_label(principal.kind),
+                "limit": limit,
+                "window_seconds": window_seconds,
+            }),
+        );
+    entry.target_type = Some("route".to_string());
+    let (pool, workspace_id) = (state.pool.clone(), principal.workspace_id);
+    audit_denial_detached(
+        state.rate_limit.clone(),
+        key.to_string(),
+        reservation,
+        Duration::from_secs(window_seconds),
+        move || async move {
+            agent_tenant_tx(&pool, workspace_id, move |conn| {
+                Box::pin(async move { write_audit(conn, &entry).await.map(|_| ()) })
+            })
+            .await
+        },
+    )
+    .await;
+}
+
+/// [`audit_denial_once`] on a task of its own, awaited by the request that asked for it.
+///
+/// A server drops the future of a request whose client went away, and does so while the
+/// request is parked on the database. If the audit write were part of that future, a hang-up
+/// would cancel it at an arbitrary point: before the `COMMIT` is answered, the row is rolled
+/// back and the caller who keeps hanging up is never audited; after the `COMMIT` but before
+/// the answer arrives, the row is committed while the dropped guard reports "not written" and
+/// reopens the slot, so the next refusal of the same window writes a second row (#4234 review
+/// r1, H-1; both reproduced against a real database). On its own task the claim, the write and
+/// the commit run to the end whatever the request does. The request still waits for the task,
+/// so the 429 follows the row and a test can read it right after; a request that was dropped
+/// simply is not there to see the result.
+///
+/// A task that panics gives the slot and the marker back while it unwinds (its guard), and
+/// counts as "not written".
+async fn audit_denial_detached<W, Fut>(
+    state: Arc<RateLimitState>,
+    key: String,
+    reservation: u64,
+    window: Duration,
+    write: W,
+) -> bool
+where
+    W: FnOnce() -> Fut + Send + 'static,
+    Fut: Future<Output = Result<(), DbError>> + Send + 'static,
+{
+    let task = tokio::spawn(async move {
+        audit_denial_once(
+            &state.member_writes,
+            &key,
+            reservation,
+            window,
+            Instant::now(),
+            write,
+        )
+        .await
+    });
+    match task.await {
+        Ok(written) => written,
+        Err(error) => {
+            tracing::error!(error = %error, "rate limit audit task did not finish");
+            false
+        }
+    }
+}
+
+/// Spend the one audit row a burst of denials may carry. Returns whether this call wrote it.
+///
+/// Two bounds, because the limiter's first-denial marker alone is not enough. It is
+/// atomic, so a flood of parallel denials produces one writer, not a hundred. But it
+/// resets whenever the key admits a request again, and a caller that stays just
+/// over the limit is admitted once for every request that ages out of the window,
+/// so every one of those starts a new "burst". Without the second bound that is up
+/// to `limit` audit rows per window per surface — an agent's 600 a minute — from a
+/// loop the budget was supposed to quiet. So a row also needs the **audit slot**
+/// for the window (an `audit:` key, one admission per window): the log line says
+/// every first denial, the table says at most one a window.
+///
+/// The slot is taken **before** the write, by the same atomic admission the budget
+/// itself uses, and not after it commits. A slot that only closed once the row had
+/// committed would let a second burst, restarted while the first row was still in
+/// flight (a stalled database is exactly when that happens), read an open slot and
+/// write a second row.
+///
+/// A row that did not get written gives the slot back, so the next denial can try
+/// again: the burst's marker is handed back with it (the Agent Port and webhook
+/// budgets do the same). "Did not get written" includes this future being dropped
+/// mid-write — see [`SlotClaim`]. The middleware never lets that happen to a request's
+/// audit: it runs this on a task of its own ([`audit_denial_detached`]), because a dropped
+/// guard cannot tell a write that never reached the database from one that committed and
+/// whose answer had not arrived yet.
+///
+/// `write` is the database half, injected so this bookkeeping can be tested with an
+/// injected clock and without a database.
+async fn audit_denial_once<W, Fut>(
+    limiter: &SlidingWindowRateLimiter,
+    key: &str,
+    reservation: u64,
+    window: Duration,
+    now: Instant,
+    write: W,
+) -> bool
+where
+    W: FnOnce() -> Fut,
+    Fut: Future<Output = Result<(), DbError>>,
+{
+    let slot = format!("audit:{key}");
+    if !limiter.check_at(&slot, 1, window, now).allowed {
+        return false;
+    }
+    let mut claim = SlotClaim {
+        limiter,
+        slot,
+        at: now,
+        key,
+        reservation,
+        written: false,
+    };
+    match write().await {
+        Ok(()) => {
+            claim.written = true;
+            true
+        }
+        Err(error) => {
+            tracing::error!(
+                error = %error,
+                key,
+                "rate limit audit row failed; the 429 stands and the next denial retries the row"
+            );
+            false
+        }
+    }
+}
+
+/// The audit slot a denial holds while its row is being written. Unless the row was
+/// written, dropping it — on a failed write, on a panic, or when the future is dropped
+/// mid-write — reopens the slot and hands the burst's marker back.
+struct SlotClaim<'a> {
+    limiter: &'a SlidingWindowRateLimiter,
+    slot: String,
+    at: Instant,
+    key: &'a str,
+    reservation: u64,
+    written: bool,
+}
+
+impl Drop for SlotClaim<'_> {
+    fn drop(&mut self) {
+        if !self.written {
+            self.limiter.forget_at(&self.slot, self.at);
+            self.limiter
+                .release_log_reservation(self.key, self.reservation);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -767,5 +1134,478 @@ mod tests {
             None,
             "no resolvable caller means do not block (Swift :177-180)"
         );
+    }
+    // -- #4234 per-member write budget -----------------------------------------
+
+    use std::sync::atomic::AtomicUsize;
+
+    /// Four different numbers, so a swapped field cannot pass by coincidence.
+    fn budget_config() -> RateLimitConfig {
+        RateLimitConfig {
+            message_send_per_member_limit: 11,
+            message_send_per_agent_limit: 22,
+            scheduled_write_per_member_limit: 33,
+            upload_start_per_member_limit: 44,
+            ..RateLimitConfig::default()
+        }
+    }
+
+    #[test]
+    fn the_limit_follows_the_surface_and_only_the_send_surface_tells_humans_from_agents() {
+        let config = budget_config();
+        let limit = |surface, kind| member_write_limit(&config, surface, kind);
+        assert_eq!(limit(MemberWrite::MessageSend, PrincipalKind::Human), 11);
+        assert_eq!(limit(MemberWrite::MessageSend, PrincipalKind::Agent), 22);
+        assert_eq!(
+            limit(MemberWrite::MessageSend, PrincipalKind::WorkHost),
+            22,
+            "a machine credential is held to the agents' budget, not the humans'"
+        );
+        for kind in [
+            PrincipalKind::Human,
+            PrincipalKind::Agent,
+            PrincipalKind::WorkHost,
+        ] {
+            assert_eq!(limit(MemberWrite::ScheduledWrite, kind), 33);
+            assert_eq!(
+                limit(MemberWrite::UploadStart, kind),
+                44,
+                "an agent bearer cannot reach this route today; if one ever does it is held to a budget, not exempt"
+            );
+        }
+    }
+
+    /// The labels are an audit-row contract (`detail.surface`) and the prefixes keep one
+    /// surface's spending from refusing another's.
+    #[test]
+    fn every_surface_has_its_own_label_and_its_own_key_space() {
+        let member = Uuid::from_u128(7);
+        let surfaces = [
+            (MemberWrite::MessageSend, "message_send"),
+            (MemberWrite::ScheduledWrite, "scheduled_write"),
+            (MemberWrite::UploadStart, "upload_start"),
+        ];
+        let mut keys = std::collections::HashSet::new();
+        for (surface, label) in surfaces {
+            assert_eq!(surface.label(), label);
+            assert!(keys.insert(member_write_key(surface, member)));
+        }
+        assert_eq!(keys.len(), 3);
+        assert_ne!(
+            member_write_key(MemberWrite::MessageSend, member),
+            member_write_key(MemberWrite::MessageSend, Uuid::from_u128(8)),
+            "two members never share a bucket"
+        );
+    }
+
+    fn db_failure() -> DbError {
+        DbError::from(momo_db::sqlx::Error::PoolClosed)
+    }
+
+    /// Run the audit bookkeeping with a stand-in writer that counts its calls.
+    async fn audit_with(
+        limiter: &SlidingWindowRateLimiter,
+        key: &str,
+        reservation: u64,
+        now: Instant,
+        write_succeeds: bool,
+        calls: &AtomicUsize,
+    ) -> bool {
+        audit_denial_once(
+            limiter,
+            key,
+            reservation,
+            Duration::from_secs(60),
+            now,
+            || async {
+                calls.fetch_add(1, Ordering::SeqCst);
+                if write_succeeds {
+                    Ok(())
+                } else {
+                    Err(db_failure())
+                }
+            },
+        )
+        .await
+    }
+
+    /// A caller that stays just over the limit is admitted once for every request that
+    /// ages out, and each admission resets the burst marker — so "one row per burst"
+    /// alone is up to `limit` rows a window. The audit slot is what makes it one.
+    #[tokio::test]
+    async fn a_committed_audit_row_closes_the_slot_even_when_the_burst_restarts() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let window = Duration::from_secs(60);
+        let (key, calls, t0) = ("write:send:m", AtomicUsize::new(0), Instant::now());
+        let at = |millis: u64| t0 + Duration::from_millis(millis);
+
+        assert!(limiter.check_at(key, 2, window, at(0)).allowed);
+        assert!(limiter.check_at(key, 2, window, at(10_000)).allowed);
+        let first = limiter.check_at(key, 2, window, at(11_000));
+        assert!(!first.allowed);
+        let reservation = first
+            .log_reservation
+            .expect("the first denial owns the marker");
+        assert!(audit_with(&limiter, key, reservation, at(11_000), true, &calls).await);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        // The oldest request ages out, the key admits one and the marker resets: the next
+        // denial is a NEW burst, inside the window the audit slot already covers.
+        assert!(limiter.check_at(key, 2, window, at(60_500)).allowed);
+        let restarted = limiter.check_at(key, 2, window, at(60_600));
+        assert!(!restarted.allowed);
+        assert!(restarted.should_log, "the limiter calls this a new burst");
+        let again = restarted.log_reservation.expect("a new marker");
+        assert!(
+            !audit_with(&limiter, key, again, at(60_600), true, &calls).await,
+            "…and the slot refuses a second row in the same window"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "the writer never ran");
+
+        // A window after the row committed (11 s + 60 s) the slot is open again.
+        assert!(limiter.check_at(key, 2, window, at(71_500)).allowed);
+        let next = limiter.check_at(key, 2, window, at(71_600));
+        assert!(next.should_log);
+        assert!(
+            audit_with(
+                &limiter,
+                key,
+                next.log_reservation.expect("a marker"),
+                at(71_600),
+                true,
+                &calls
+            )
+            .await
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    /// A row that did not commit must not count as recorded: the burst's marker is handed
+    /// back so the next denial retries it, and the slot stays open for that retry.
+    #[tokio::test]
+    async fn a_failed_audit_row_hands_the_marker_back_and_leaves_the_slot_open() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let window = Duration::from_secs(60);
+        let (key, calls, t0) = ("write:upload:m", AtomicUsize::new(0), Instant::now());
+
+        assert!(limiter.check_at(key, 1, window, t0).allowed);
+        let denied = limiter.check_at(key, 1, window, t0);
+        let reservation = denied.log_reservation.expect("first denial");
+        assert!(!audit_with(&limiter, key, reservation, t0, false, &calls).await);
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+        let retry = limiter.check_at(key, 1, window, t0);
+        assert!(
+            retry.should_log,
+            "the marker came back, so the same burst's next denial carries the retry"
+        );
+        assert!(
+            audit_with(
+                &limiter,
+                key,
+                retry.log_reservation.expect("a marker"),
+                t0,
+                true,
+                &calls
+            )
+            .await,
+            "a failure did not close the slot, so the retry wrote"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        assert!(
+            !limiter.check_at(key, 1, window, t0).should_log,
+            "a committed row keeps its marker: the rest of the burst logs nothing"
+        );
+    }
+
+    /// Drive `future` until it has reached its first real wait (the stand-in database write),
+    /// without letting it finish.
+    async fn run_to_first_wait<F: Future + Unpin>(future: &mut F) {
+        tokio::select! {
+            biased;
+            _ = &mut *future => panic!("the stand-in write finished; it was meant to be waiting"),
+            _ = tokio::task::yield_now() => {}
+        }
+    }
+
+    /// The overlap the slot is taken *before* the write for. The first row is still being
+    /// written (a database that stalls) when the burst restarts and its first denial reaches
+    /// the slot: it has to find the slot taken. A slot that only closed once the row had
+    /// committed would let both write.
+    #[tokio::test]
+    async fn a_row_still_in_flight_holds_the_slot_against_a_burst_that_restarts_meanwhile() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let window = Duration::from_secs(60);
+        let (key, calls, t0) = ("write:send:m", AtomicUsize::new(0), Instant::now());
+        let at = |millis: u64| t0 + Duration::from_millis(millis);
+
+        assert!(limiter.check_at(key, 2, window, at(0)).allowed);
+        assert!(limiter.check_at(key, 2, window, at(10_000)).allowed);
+        let first = limiter.check_at(key, 2, window, at(11_000));
+        let first_reservation = first
+            .log_reservation
+            .expect("the first denial owns the marker");
+
+        // The first row's write starts and does not finish until `finish` fires.
+        let (finish, finished) = tokio::sync::oneshot::channel::<()>();
+        let counted = &calls;
+        let in_flight = audit_denial_once(
+            &limiter,
+            key,
+            first_reservation,
+            window,
+            at(11_000),
+            move || async move {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let _ = finished.await;
+                Ok(())
+            },
+        );
+        tokio::pin!(in_flight);
+        run_to_first_wait(&mut in_flight).await;
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the first row is being written"
+        );
+
+        // Meanwhile the oldest request ages out, the key admits one, and the next denial is a
+        // NEW burst with a marker of its own.
+        assert!(limiter.check_at(key, 2, window, at(60_500)).allowed);
+        let restarted = limiter.check_at(key, 2, window, at(60_600));
+        assert!(restarted.should_log, "the limiter calls this a new burst");
+        assert!(
+            !audit_with(
+                &limiter,
+                key,
+                restarted.log_reservation.expect("a new marker"),
+                at(60_600),
+                true,
+                &calls
+            )
+            .await,
+            "the row in flight holds the slot, so the new burst writes nothing"
+        );
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "the second writer never ran"
+        );
+
+        finish.send(()).expect("the first write is still waiting");
+        assert!(in_flight.await, "the first row committed");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
+
+    /// The slot is one per member and surface, not one for the server: a member's audit row
+    /// must not silence another member's, nor the same member's other surface.
+    #[tokio::test]
+    async fn one_members_audit_row_does_not_close_another_members_slot() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let window = Duration::from_secs(60);
+        let (calls, t0) = (AtomicUsize::new(0), Instant::now());
+        for key in ["write:send:m1", "write:send:m2", "write:upload:m1"] {
+            assert!(limiter.check_at(key, 1, window, t0).allowed);
+            let denied = limiter.check_at(key, 1, window, t0);
+            let reservation = denied.log_reservation.expect("the first denial of its key");
+            assert!(
+                audit_with(&limiter, key, reservation, t0, true, &calls).await,
+                "{key} writes its own row"
+            );
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+    }
+
+    fn rate_limit_state() -> Arc<RateLimitState> {
+        Arc::new(RateLimitState {
+            config: RateLimitConfig::default(),
+            limiter: SlidingWindowRateLimiter::new(),
+            member_writes: SlidingWindowRateLimiter::new(),
+        })
+    }
+
+    /// The request that asked for the row can be dropped (its client hung up) at any point
+    /// after the write started, and the write must not notice: the row, its commit and the
+    /// slot bookkeeping go on without it. (#4234 review r1, H-1: inline, a drop before the
+    /// `COMMIT` answer lost the row, and a drop after it reopened the slot for a second row.)
+    #[tokio::test]
+    async fn a_dropped_request_does_not_cancel_the_audit_write() {
+        let state = rate_limit_state();
+        let window = Duration::from_secs(60);
+        let key = "write:send:m";
+        assert!(state.member_writes.check(key, 1, window).allowed);
+        let denied = state.member_writes.check(key, 1, window);
+        let reservation = denied
+            .log_reservation
+            .expect("the first denial owns the marker");
+
+        let (answer, answered) = tokio::sync::oneshot::channel::<()>();
+        let committed = Arc::new(AtomicUsize::new(0));
+        {
+            let committed = committed.clone();
+            let request = audit_denial_detached(
+                state.clone(),
+                key.to_string(),
+                reservation,
+                window,
+                move || async move {
+                    let _ = answered.await; // the database answers late
+                    committed.fetch_add(1, Ordering::SeqCst);
+                    Ok(())
+                },
+            );
+            tokio::pin!(request);
+            run_to_first_wait(&mut request).await;
+            // `request` is dropped here, with its row still being written.
+        }
+        answer.send(()).expect("the write is still waiting");
+        for _ in 0..100 {
+            if committed.load(Ordering::SeqCst) == 1 {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+        assert_eq!(
+            committed.load(Ordering::SeqCst),
+            1,
+            "the write ran to its end although the request that asked for it was gone"
+        );
+
+        // It counted as written: the slot stays closed for the window, so the next denial of a
+        // restarted burst writes nothing. (A guard that had been dropped with the request would
+        // have reopened it.)
+        let slot = format!("audit:{key}");
+        assert!(
+            !state.member_writes.check(&slot, 1, window).allowed,
+            "a row that committed keeps its slot closed"
+        );
+    }
+
+    /// A write that panics gives the slot and the marker back while its task unwinds, and is
+    /// reported as not written (#4234 review r2, N-2): the claim in `audit_denial_detached`'s
+    /// docs, which no other test reaches.
+    #[tokio::test]
+    async fn a_panicking_audit_write_gives_the_slot_and_the_marker_back() {
+        let state = rate_limit_state();
+        let window = Duration::from_secs(60);
+        let key = "write:send:m";
+        assert!(state.member_writes.check(key, 1, window).allowed);
+        let reservation = state
+            .member_writes
+            .check(key, 1, window)
+            .log_reservation
+            .expect("first denial");
+
+        let written = audit_denial_detached(
+            state.clone(),
+            key.to_string(),
+            reservation,
+            window,
+            || async {
+                if true {
+                    panic!("the write blew up");
+                }
+                Ok(())
+            },
+        )
+        .await;
+        assert!(!written, "a panicked task is reported as not written");
+
+        let retry = state.member_writes.check(key, 1, window);
+        assert!(retry.should_log, "the marker came back after the panic");
+        assert!(
+            audit_denial_detached(
+                state.clone(),
+                key.to_string(),
+                retry.log_reservation.expect("a marker"),
+                window,
+                || async { Ok(()) },
+            )
+            .await,
+            "the slot came back after the panic, so the retry wrote"
+        );
+    }
+
+    /// A request that is *not* dropped gets the result back, and a failed write still hands the
+    /// slot and the marker back through the detached task.
+    #[tokio::test]
+    async fn the_detached_audit_reports_the_result_and_a_failure_gives_the_slot_back() {
+        let state = rate_limit_state();
+        let window = Duration::from_secs(60);
+        let key = "write:upload:m";
+        assert!(state.member_writes.check(key, 1, window).allowed);
+        let denied = state.member_writes.check(key, 1, window);
+        let reservation = denied.log_reservation.expect("first denial");
+
+        let failed = audit_denial_detached(
+            state.clone(),
+            key.to_string(),
+            reservation,
+            window,
+            || async { Err(db_failure()) },
+        )
+        .await;
+        assert!(!failed, "a failed write is reported as not written");
+
+        let retry = state.member_writes.check(key, 1, window);
+        assert!(retry.should_log, "the marker came back through the task");
+        let written = audit_denial_detached(
+            state.clone(),
+            key.to_string(),
+            retry.log_reservation.expect("a marker"),
+            window,
+            || async { Ok(()) },
+        )
+        .await;
+        assert!(written, "the slot came back too, so the retry wrote");
+        assert!(
+            !state.member_writes.check(key, 1, window).should_log,
+            "a committed row keeps its marker"
+        );
+    }
+
+    /// A client that goes away drops the request future wherever it is. If that is the audit
+    /// write, the slot and the marker have to come back with it — otherwise one dropped
+    /// connection at the first denial would close the slot and silence the audit for a window.
+    #[tokio::test]
+    async fn an_audit_write_dropped_mid_flight_gives_the_slot_and_the_marker_back() {
+        let limiter = SlidingWindowRateLimiter::new();
+        let window = Duration::from_secs(60);
+        let (key, calls, t0) = ("write:upload:m", AtomicUsize::new(0), Instant::now());
+
+        assert!(limiter.check_at(key, 1, window, t0).allowed);
+        let denied = limiter.check_at(key, 1, window, t0);
+        let reservation = denied.log_reservation.expect("first denial");
+        {
+            let counted = &calls;
+            let hung =
+                audit_denial_once(&limiter, key, reservation, window, t0, move || async move {
+                    counted.fetch_add(1, Ordering::SeqCst);
+                    std::future::pending::<Result<(), DbError>>().await
+                });
+            tokio::pin!(hung);
+            run_to_first_wait(&mut hung).await;
+            assert_eq!(calls.load(Ordering::SeqCst), 1, "the write had started");
+            // `hung` is dropped here, with the write unfinished: the client went away.
+        }
+
+        let retry = limiter.check_at(key, 1, window, t0);
+        assert!(
+            retry.should_log,
+            "the marker came back with the dropped write"
+        );
+        assert!(
+            audit_with(
+                &limiter,
+                key,
+                retry.log_reservation.expect("a marker"),
+                t0,
+                true,
+                &calls
+            )
+            .await,
+            "…and so did the slot: the retry wrote"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

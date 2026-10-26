@@ -790,8 +790,8 @@ async fn t1_4_an_expired_approval_releases_the_agents_concurrency_gate() {
 }
 
 /// **Tool rows are messages.** They take a real `channel_seq` bump, land in
-/// `message` with gapless seqs, and produce a broadcast outbox row — no private
-/// path, no hand-rolled counter.
+/// `message` with gapless seqs, and each leave one `message.new` broadcast on the
+/// outbox — no private path, no hand-rolled counter.
 #[tokio::test]
 #[ignore]
 async fn t1_5_tool_messages_consume_channel_seq_and_reach_the_outbox() {
@@ -839,19 +839,27 @@ async fn t1_5_tool_messages_consume_channel_seq_and_reach_the_outbox() {
             .expect("read counter");
     assert_eq!(last_seq, 2, "the counter itself must have advanced");
 
-    let broadcasts: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM outbox \
-          WHERE workspace_id = $1 AND kind = 'broadcast' AND partition_key = $2",
+    // The channel's broadcasts are not all messages: the run itself leaves its
+    // board transitions on the same partition as `work.run.updated` (migration
+    // 120, widened to every agent by 135), so counting every broadcast moves with
+    // each trigger that is not about messages (#4259). The egress asserted here is
+    // the message one — one `message.new` frame per message row, matched by seq.
+    let framed_seqs: Vec<i64> = sqlx::query_scalar(
+        "SELECT (payload->'data'->'payload'->>'seq')::bigint FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' AND partition_key = $2 \
+            AND payload->'data'->>'type' = 'message.new' \
+          ORDER BY 1",
     )
     .bind(tenant.workspace_id)
     .bind(tenant.channel_id)
-    .fetch_one(&su)
+    .fetch_all(&su)
     .await
-    .expect("count broadcasts");
+    .expect("read message.new frames");
     assert_eq!(
-        broadcasts, 2,
+        framed_seqs, seqs,
         "each tool message must leave through emit_outbox — the single egress \
-         (invariant #3). A tool row that skipped it would never reach a client"
+         (invariant #3) — as exactly one `message.new` frame carrying its seq. A \
+         tool row that skipped it would never reach a client"
     );
 }
 

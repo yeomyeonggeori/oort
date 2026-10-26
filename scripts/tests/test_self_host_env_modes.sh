@@ -25,6 +25,69 @@ file_mode() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# #4337 (ADR-0203 증보 2026-10-25, 수용 기준 8) — 도장 표 드리프트 가드.
+#
+# The server tells the operator's screen which platform it runs on by classifying
+# MOMO_SELF_HOST_PLATFORM against a name list it carries itself
+# (server-rust/bins/momo-server/src/host_platform.rs COMPOSE_STAMPS, one anchored
+# line per name) rather than parsing this generator's table at run time. The two
+# copies are tied here, statically (no generator run, no docker): platform_profiles()
+# has exactly one T2 row, `railway`, and its T1 rows are exactly the server's anchored
+# names. A new row (say `render`), a rename or a new tier is red here instead of
+# becoming a silent `unknown` on an operator's screen.
+# Limit: PR CI does not run this script; a PR that edits only the table or only the
+# Rust list is stopped by the local gate (docs profile), not by CI.
+# ---------------------------------------------------------------------------
+HOST_PLATFORM_RS="$ROOT/server-rust/bins/momo-server/src/host_platform.rs"
+STAMP_ANCHOR='oort:t1-platform-stamp'
+if [ ! -f "$HOST_PLATFORM_RS" ]; then
+  echo "platform stamp drift guard: $HOST_PLATFORM_RS is missing" >&2
+  exit 1
+fi
+profile_rows="$(awk '
+  /^platform_profiles\(\)/ { grab = 1; next }
+  grab && /^EOF$/ { exit }
+  grab && /^[a-z0-9-]+\|/ { print }
+' "$ROOT/scripts/self_host_env.sh")"
+if [ -z "$profile_rows" ]; then
+  echo "platform stamp drift guard: no rows found in platform_profiles()" >&2
+  exit 1
+fi
+profile_names_of_tier() {
+  printf '%s\n' "$profile_rows" | awk -F'|' -v tier="$1" 'NF == 8 && $3 == tier { print $1 }' | sort
+}
+count_lines() { printf '%s\n' "$1" | grep -c . || true; }
+profile_t1="$(profile_names_of_tier T1)"
+profile_t2="$(profile_names_of_tier T2)"
+profile_total="$(printf '%s\n' "$profile_rows" | awk -F'|' 'NF == 8' | grep -c . || true)"
+server_anchor_lines="$(grep -c "$STAMP_ANCHOR" "$HOST_PLATFORM_RS" || true)"
+server_t1="$(sed -n 's/^[[:space:]]*"\([a-z0-9-][a-z0-9-]*\)",[[:space:]]*\/\/ '"$STAMP_ANCHOR"'[[:space:]]*$/\1/p' "$HOST_PLATFORM_RS" | sort)"
+if [ "$profile_t2" != "railway" ]; then
+  echo "platform stamp drift guard: the T2 rows must be exactly {railway} (the server maps only that stamp to Railway), got: $(printf '%s' "$profile_t2" | tr '\n' ' ')" >&2
+  exit 1
+fi
+profile_t1_count="$(count_lines "$profile_t1")"
+if [ "$profile_t1_count" = "0" ]; then
+  echo "platform stamp drift guard: platform_profiles() has no T1 row" >&2
+  exit 1
+fi
+if [ "$server_anchor_lines" = "0" ] || [ "$server_anchor_lines" != "$(count_lines "$server_t1")" ]; then
+  echo "platform stamp drift guard: $server_anchor_lines anchored line(s) in host_platform.rs but only $(count_lines "$server_t1") parsed as a name — one quoted name per line followed by // $STAMP_ANCHOR" >&2
+  exit 1
+fi
+if [ "$server_t1" != "$profile_t1" ]; then
+  echo "platform stamp drift guard: the server's COMPOSE_STAMPS differ from platform_profiles() T1 rows" >&2
+  echo "  server: $(printf '%s' "$server_t1" | tr '\n' ' ')" >&2
+  echo "  table : $(printf '%s' "$profile_t1" | tr '\n' ' ')" >&2
+  exit 1
+fi
+if [ "$((profile_t1_count + 1))" != "$profile_total" ]; then
+  echo "platform stamp drift guard: platform_profiles() has a row that is neither T1 nor the one T2 row" >&2
+  exit 1
+fi
+echo "platform stamp drift guard: T2={railway}; T1={$(printf '%s' "$profile_t1" | tr '\n' ' ' | sed 's/ $//; s/ /, /g')} = the server's COMPOSE_STAMPS"
+
 make_fixture() {
   local name="$1"
   local fixture="$TMP_ROOT/$name"
