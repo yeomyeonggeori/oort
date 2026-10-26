@@ -67,6 +67,108 @@ describe("status", () => {
   });
 });
 
+// #4337 (ADR-0203 증보 2026-10-25 F2·수용 기준 11): `environment`는 안내 문구를 고르는 값이다. 옛 서버·깨진 답·미래 서버에서
+// 그 필드만 「모름」으로 접히고 상태 읽기는 살아 있어야 한다. 서버 쪽 모양의 정본은 docs/api/cohosted-agent-status.golden.json
+// (이 패키지는 파일을 읽을 수 없어 사례를 직접 적는다).
+describe("environment", () => {
+  const UNKNOWN = { platform: "unknown", loginRelay: "unknown" };
+
+  it("reads every word the server can say, field by field", () => {
+    for (const platform of ["railway", "compose", "unknown"] as const) {
+      for (const loginRelay of ["on", "off"] as const) {
+        const status = statusFromWire({ ...STATUS, environment: { platform, loginRelay } });
+        expect(status?.environment).toEqual({ platform, loginRelay });
+      }
+    }
+  });
+
+  it("reads an old server (no environment) as unknown without losing the status", async () => {
+    const status = statusFromWire(STATUS);
+    expect(status).toMatchObject({ declaration: "ready", connectable: true, toolsLockAttested: true });
+    expect(status?.environment).toEqual(UNKNOWN);
+    request.mockResolvedValueOnce(STATUS);
+    const read = await fetchCohostedStatus("w");
+    expect(read.kind).toBe("ready");
+    expect(read.kind === "ready" && read.status.environment).toEqual(UNKNOWN);
+  });
+
+  it("reads a body that is not an object as unknown, whatever it is", () => {
+    for (const broken of ["railway", 7, true, null, [], ["platform", "railway"], [{ platform: "railway" }]]) {
+      const status = statusFromWire({ ...STATUS, environment: broken });
+      expect(status, JSON.stringify(broken)).not.toBeNull();
+      expect(status?.environment, JSON.stringify(broken)).toEqual(UNKNOWN);
+    }
+  });
+
+  it("folds a future server's words outside the allow-list, only the field that is outside", () => {
+    // 미래 서버가 플랫폼을 하나 더 알아도 로그인 중계 값은 그대로 읽는다. 반대도 같다.
+    expect(statusFromWire({ ...STATUS, environment: { platform: "render", loginRelay: "on" } })?.environment).toEqual({
+      platform: "unknown",
+      loginRelay: "on",
+    });
+    expect(statusFromWire({ ...STATUS, environment: { platform: "railway", loginRelay: "maybe" } })?.environment).toEqual({
+      platform: "railway",
+      loginRelay: "unknown",
+    });
+    // 낱말은 있는 그대로만 통과한다: 대소문자·공백·불리언·숫자는 허용 목록 밖이다.
+    for (const platform of ["Railway", " railway", "railway ", "RAILWAY", "", 1, true, null]) {
+      expect(statusFromWire({ ...STATUS, environment: { platform, loginRelay: "off" } })?.environment, String(platform)).toEqual({
+        platform: "unknown",
+        loginRelay: "off",
+      });
+    }
+    for (const loginRelay of ["ON", "true", "", 1, true, false, null]) {
+      expect(statusFromWire({ ...STATUS, environment: { platform: "compose", loginRelay } })?.environment, String(loginRelay)).toEqual({
+        platform: "compose",
+        loginRelay: "unknown",
+      });
+    }
+    // 읽기 전체는 그대로 산다.
+    expect(statusFromWire({ ...STATUS, environment: { platform: "render", loginRelay: "maybe" } })).not.toBeNull();
+  });
+
+  it("reads one-sided answers: the missing field is unknown, the other is kept", () => {
+    expect(statusFromWire({ ...STATUS, environment: { platform: "compose" } })?.environment).toEqual({
+      platform: "compose",
+      loginRelay: "unknown",
+    });
+    expect(statusFromWire({ ...STATUS, environment: { loginRelay: "off" } })?.environment).toEqual({
+      platform: "unknown",
+      loginRelay: "off",
+    });
+    expect(statusFromWire({ ...STATUS, environment: {} })?.environment).toEqual(UNKNOWN);
+  });
+
+  it("lets no string through: an extra key or a stray value never reaches the parsed status", () => {
+    const status = statusFromWire({
+      ...STATUS,
+      environment: { platform: "railway", loginRelay: "on", stamp: "MARKER-STAMP-4337", id: "MARKER-RWENV-4337" },
+    });
+    expect(Object.keys(status?.environment ?? {}).sort()).toEqual(["loginRelay", "platform"]);
+    expect(JSON.stringify(status)).not.toContain("MARKER");
+    const odd = statusFromWire({ ...STATUS, environment: { platform: "MARKER-PLATFORM-4337", loginRelay: "MARKER-RELAY-4337" } });
+    expect(odd?.environment).toEqual(UNKNOWN);
+    expect(JSON.stringify(odd)).not.toContain("MARKER");
+  });
+
+  it("changes nothing else about the read: undeclared stays hidden, the other answers keep their meaning", async () => {
+    request.mockResolvedValueOnce({
+      ...STATUS,
+      declaration: "not_declared",
+      toolsLockAttested: false,
+      connectable: false,
+      environment: { platform: "compose", loginRelay: "off" },
+    });
+    expect(await fetchCohostedStatus("w")).toEqual({ kind: "hidden" });
+    request.mockResolvedValueOnce({ ...STATUS, environment: { platform: "railway", loginRelay: "on" } });
+    const read = await fetchCohostedStatus("w");
+    expect(read.kind === "ready" && read.status).toMatchObject({ declaration: "ready", connectable: true, environment: { platform: "railway" } });
+    // 모양이 틀린 본문은 여전히 unknown이고, 환경 때문에 새로 버려지는 일은 없다.
+    request.mockResolvedValueOnce({ schema: "proxy", environment: { platform: "railway", loginRelay: "on" } });
+    expect((await fetchCohostedStatus("w")).kind).toBe("unknown");
+  });
+});
+
 describe("probe", () => {
   it("reads the closed vocabulary and says a toolsets signal is not proof", () => {
     const probe = probeFromWire(PROBE);

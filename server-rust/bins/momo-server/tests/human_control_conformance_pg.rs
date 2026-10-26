@@ -11,7 +11,7 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `migration_095_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent 095 statement, a missing FORCE, or a signature CHECK that lets a half-set row in |
+//! | `migration_095_reapplies_as_a_noop_and_keeps_rls_forced` | a non-idempotent 095 statement, a missing FORCE, a signature CHECK that lets a half-set row in, or a re-apply that puts 095's signature CHECK back over 122's on the shared DB |
 //! | `flag_off_keeps_todays_decision_and_poll` | verify or require a signature when none is sent and the flag is off |
 //! | `flag_on_refuses_an_unsigned_allow_but_never_a_reject` | drop the `required` judgment, or require it for a reject |
 //! | `a_signed_allow_rides_on_the_control_and_is_recorded_once` | drop the columns, the envelope, the provenance row, or answer a retry by re-verifying |
@@ -43,7 +43,7 @@ use momo_auth::human_control::{
     verify_human_control_in_tx, ControlSubject, ControlTarget, HumanControlRefusal,
     HumanSignatureInput,
 };
-use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
+use momo_db::migrate::{default_migrations_dir, discover_migrations, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, DbError, PgPool};
@@ -123,8 +123,12 @@ fn resolve_psql() -> PathBuf {
 }
 
 fn psql_file(path: PathBuf) -> std::process::Output {
+    psql_file_at(&database_url(), path)
+}
+
+fn psql_file_at(url: &str, path: PathBuf) -> std::process::Output {
     Command::new(resolve_psql())
-        .arg(database_url())
+        .arg(url)
         .args(["-v", "ON_ERROR_STOP=1"])
         .arg("--no-psqlrc")
         .arg("--quiet")
@@ -786,25 +790,148 @@ async fn constraint_snapshot(su: &PgPool) -> Vec<(String, String)> {
     .expect("constraint snapshot")
 }
 
+/// `DATABASE_URL` with its database name replaced.
+fn url_for(database: &str) -> String {
+    let url = database_url();
+    let (head, _) = url
+        .rsplit_once('/')
+        .expect("DATABASE_URL ends with /<database>");
+    format!("{head}/{database}")
+}
+
+/// A throwaway database, dropped (with its connections) once the test has read
+/// what it needs. Same shape as `dm_closure_backfill_pg.rs`'s.
+struct ScratchDb {
+    name: String,
+    admin: PgPool,
+}
+
+impl ScratchDb {
+    async fn create(label: &str) -> ScratchDb {
+        let admin = superuser_pool().await;
+        let name = format!(
+            "hc3023_{label}_{}",
+            &Uuid::new_v4().simple().to_string()[..8]
+        );
+        sqlx::query(&format!("CREATE DATABASE {name}"))
+            .execute(&admin)
+            .await
+            .expect("CREATE DATABASE (the role must be allowed to)");
+        ScratchDb { name, admin }
+    }
+
+    fn url(&self) -> String {
+        url_for(&self.name)
+    }
+
+    async fn pool(&self) -> PgPool {
+        PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&self.url())
+            .await
+            .expect("connect to the scratch database")
+    }
+
+    async fn drop_it(self) {
+        sqlx::query(&format!(
+            "DROP DATABASE IF EXISTS {} WITH (FORCE)",
+            self.name
+        ))
+        .execute(&self.admin)
+        .await
+        .expect("DROP DATABASE");
+    }
+}
+
+/// A fresh directory holding copies of migrations `001..=095`, so the real
+/// runner can bring a scratch database to the state 095 was written against.
+fn through_095_dir(label: &str) -> PathBuf {
+    let dir = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!(
+        "migrations-{label}-{}",
+        &Uuid::new_v4().simple().to_string()[..8]
+    ));
+    std::fs::create_dir_all(&dir).expect("create scratch migrations dir");
+    let mut copied = 0;
+    for migration in discover_migrations(&default_migrations_dir()).expect("discover migrations") {
+        if migration.version <= 95 {
+            std::fs::copy(&migration.path, dir.join(&migration.name)).expect("copy migration");
+            copied += 1;
+        }
+    }
+    assert_eq!(copied, 95, "migrations 001..=095 are all present");
+    dir
+}
+
 #[tokio::test]
-#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB that may CREATE DATABASE + bootstrap_roles.sql"]
 async fn migration_095_reapplies_as_a_noop_and_keeps_rls_forced() {
     let _lock = test_lock().await;
     let s = stage(false).await;
-    let before = constraint_snapshot(&s.su).await;
+
+    // 095 is re-run where it was written: a scratch database brought to
+    // migrations 001..=095. On the shared (head) database a re-apply can be
+    // neither a no-op nor harmless — its DROP-then-ADD of
+    // `work_control_human_signature_ck` puts 095's definition back over the one
+    // 122 has since replaced. That fails outright once a 122-shaped row exists
+    // ("violated by some row") and otherwise leaves every later suite on the same
+    // DB without 122's new-work spawn arm (#4259). The rounds are collected and
+    // the scratch dropped before anything is asserted, so a red run leaves no
+    // database behind.
+    let scratch = ScratchDb::create("m095").await;
+    let dir = through_095_dir("m095");
+    run_migrations(&scratch.url(), &dir, SeedMode::None).expect("apply migrations 001..=095");
+    let _ = std::fs::remove_dir_all(&dir);
+    let pool = scratch.pool().await;
+    let before = constraint_snapshot(&pool).await;
+    let mut rounds = Vec::new();
     for _ in 0..2 {
-        let out = psql_file(default_migrations_dir().join("095_human_control_nonce.sql"));
-        assert!(
+        let out = psql_file_at(
+            &scratch.url(),
+            default_migrations_dir().join("095_human_control_nonce.sql"),
+        );
+        rounds.push((
             out.status.success(),
-            "095 re-applies: {}",
-            String::from_utf8_lossy(&out.stderr)
+            String::from_utf8_lossy(&out.stderr).to_string(),
+        ));
+    }
+    let after = constraint_snapshot(&pool).await;
+    let scratch_rls: (bool, bool) = sqlx::query_as(
+        "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'human_control_nonce'",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("read the scratch RLS flags");
+    pool.close().await;
+    scratch.drop_it().await;
+    for (round, (ok, stderr)) in rounds.iter().enumerate() {
+        assert!(*ok, "095 re-applies (round {}): {stderr}", round + 1);
+    }
+    assert_eq!(after, before, "re-apply is a no-op");
+    assert!(
+        scratch_rls.0 && scratch_rls.1,
+        "human_control_nonce stays RLS FORCE after a re-apply"
+    );
+
+    // The shared database is as 122 left it: the signature CHECK still names the
+    // columns 122 added. This is what the in-place re-apply used to undo.
+    let live: String = sqlx::query_scalar(
+        "SELECT pg_get_constraintdef(oid) FROM pg_constraint \
+          WHERE conrelid = 'work_control'::regclass AND conname = 'work_control_human_signature_ck'",
+    )
+    .fetch_one(&s.su)
+    .await
+    .expect("read the live signature CHECK");
+    for column in [
+        "human_spawn_thread_root_id",
+        "human_spawn_origin_message_id",
+    ] {
+        assert!(
+            live.contains(column),
+            "{column} is missing from the live work_control_human_signature_ck: 095's \
+             definition was put back over 122's, and every new-work spawn after it is refused"
         );
     }
-    assert_eq!(
-        constraint_snapshot(&s.su).await,
-        before,
-        "re-apply is a no-op"
-    );
+
     let (enabled, forced): (bool, bool) = sqlx::query_as(
         "SELECT relrowsecurity, relforcerowsecurity FROM pg_class WHERE relname = 'human_control_nonce'",
     )

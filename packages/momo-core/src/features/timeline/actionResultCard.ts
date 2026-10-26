@@ -97,6 +97,35 @@ export const ACTION_RESULT_STATUS_NOTE: Readonly<
 };
 
 /**
+ * 행동마다 다른 상태 문장 (#4394). 기본 문장은 「관리자가 승인해야 해요」처럼 **관리자**를
+ * 가정하는데, `member.avatar.set` 은 사진 주인 본인만 승인한다 — 그 문장을 그대로 두면
+ * 결과 줄이 틀린 사람을 가리킨다. 모르는 행동 id·표에 없는 상태는 기본 문장으로 떨어진다
+ * (fail-closed: 새 행동이 이 표를 모르면 지금까지의 문장 그대로다).
+ */
+const ACTION_RESULT_NOTE_OVERRIDES: Readonly<
+  Record<string, Partial<Record<ActionResultStatus, string>>>
+> = {
+  "member.avatar.set": {
+    rejected: "승인하지 않아 프로필 사진은 그대로예요.",
+    expired: "기한이 지나 프로필 사진은 그대로예요.",
+    role_required: "사진 주인 본인이 승인해야 해요.",
+  },
+};
+
+export function actionResultStatusNote(
+  status: ActionResultStatus,
+  actionId: string
+): string {
+  const table = Object.prototype.hasOwnProperty.call(
+    ACTION_RESULT_NOTE_OVERRIDES,
+    actionId
+  )
+    ? ACTION_RESULT_NOTE_OVERRIDES[actionId]
+    : undefined;
+  return table?.[status] ?? ACTION_RESULT_STATUS_NOTE[status];
+}
+
+/**
  * 1회 값이 어디로 갔는지 말하는 줄 (D4).
  *
  * 「없다」가 아니라 「한 번 보여 줬고 그 자리는 결정한 사람의 화면이었다」이다.

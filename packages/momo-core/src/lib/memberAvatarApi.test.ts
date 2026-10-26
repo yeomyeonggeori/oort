@@ -5,6 +5,7 @@ import {
   MEMBER_AVATAR_MIMES,
   completeMyAvatarUpload,
   createMyAvatarUpload,
+  fetchApprovalAvatarPreview,
   fetchMemberAvatar,
   fetchWorkspaceAvatar,
   removeMyAvatar,
@@ -192,3 +193,47 @@ describe("fetchMemberAvatar", () => {
     await expect(fetchMemberAvatar(CONTENT)).rejects.toMatchObject({ status: 404 });
   });
 });
+
+// #4394: 승인 카드가 제안하는 사진의 미리보기. 베어러를 싣는 길이 하나 늘었으므로
+// 「그 모양이 아니면 싣지 않는다」를 같은 방식으로 못박는다.
+describe("fetchApprovalAvatarPreview", () => {
+  const APPROVAL = "0199aa11-2222-7000-8000-0000000000a1";
+  const SHA = "ab".repeat(32);
+  const PREVIEW = `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=${SHA}`;
+
+  it("fetches the approval's preview path with the bearer", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => new Response(new Uint8Array([7, 7]), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const blob = await fetchApprovalAvatarPreview(PREVIEW);
+    expect(blob.size).toBe(2);
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe(`https://oort.test${PREVIEW}`);
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access-token");
+  });
+
+  it("never sends the bearer to anything that is not an approval avatar preview path", async () => {
+    installHost();
+    const fetchMock = vi.fn(async () => new Response("x", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    for (const hostile of [
+      `https://evil.test${PREVIEW}`,
+      `//evil.test${PREVIEW}`,
+      CONTENT, // a member's avatar, not an approval's preview
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview`,
+      `/v1/workspaces/${WS}/approvals/${APPROVAL}/avatar-preview?v=not-a-hash`,
+      `${PREVIEW}&redirect=https://evil.test`,
+      "",
+    ]) {
+      await expect(fetchApprovalAvatarPreview(hostile), hostile).rejects.toMatchObject({ status: 400 });
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates the server's 404 (the person it is not for gets the same answer as an unknown card)", async () => {
+    installHost();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("", { status: 404 })));
+    await expect(fetchApprovalAvatarPreview(PREVIEW)).rejects.toMatchObject({ status: 404 });
+  });
+});
+

@@ -9846,6 +9846,11 @@ paths:
       tags: [attachments]
       operationId: createAttachmentUpload
       summary: Create a Drive resumable upload session without proxying file bytes.
+      description: >
+        Each start makes one Google Drive API call, so it spends a per-member budget
+        (ADR-0208 D10 증보, #4234): `RATE_LIMIT_UPLOAD_START_PER_MEMBER` starts per
+        window, default 60 per 60 seconds. Past it the request is refused with 429 and
+        `Retry-After` **before** the Drive call and before any row is written.
       security:
         - bearerAuth: []
       parameters:
@@ -9884,6 +9889,8 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
         "503":
           description: Drive archive is not configured.
           content:
@@ -13159,7 +13166,15 @@ components:
     RateLimited:
       description: >
         Per-IP or per-member sliding-window rate limit exceeded (MOMO-300).
-        Carries a `Retry-After` header in seconds.
+        Carries a `Retry-After` header in seconds (whole seconds, at least 1).
+        The per-member **write** budgets (ADR-0208 D10 증보, #4234) are, per window
+        (default 60 seconds) and per member: message sends — `POST …/messages` and
+        `POST …/scheduled-messages/{id}/send-now` share one budget, default 120 for a
+        person and 600 for an agent credential; scheduled-message creates and edits,
+        default 60; attachment upload starts, default 60. Cancelling a scheduled
+        message, editing a message (`PATCH …/messages/{id}`, which streaming answers
+        use) and every read are not budgeted. Retrying with the same `clientMsgId`
+        after a 429 is safe.
       headers:
         Retry-After:
           description: Seconds to wait before retrying.

@@ -1,3 +1,4 @@
+import {isMemberAvatarSetAction} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
   threadRollup,
@@ -34,7 +35,7 @@ import {
 import {
   ACTION_RESULT_SECRET_ONCE_NOTE,
   ACTION_RESULT_STATUS_LABEL,
-  ACTION_RESULT_STATUS_NOTE,
+  actionResultStatusNote,
   type ActionResultStatus,
   type AgentActionResultCard,
 } from '@momo/core/features/timeline/actionResultCard';
@@ -114,6 +115,7 @@ import {MessageActionSheet, timeLabel} from './MessageActionSheet';
 import {MessageEditorSheet} from './MessageEditorSheet';
 import {appNote} from './appVoice';
 import {Avatar} from './Avatar';
+import {ApprovalAvatarPreview} from './ApprovalAvatarPreview';
 import {CONV} from './convDesign';
 import {AiConnectSuggestion} from './AiConnectSuggestion';
 import {SettingsOpenSuggestion} from './SettingsOpenSuggestion';
@@ -1438,7 +1440,7 @@ function ActionResultCardView({
         </View>
       ) : null}
       <Sentence style={styles.cardBody} testID="action-result-note">
-        {ACTION_RESULT_STATUS_NOTE[card.status]}
+        {actionResultStatusNote(card.status, card.actionId)}
       </Sentence>
       {card.secretShownOnce ? (
         <Sentence
@@ -1714,6 +1716,14 @@ function AgentCard({
             action={card.action}
             teamAi={card.proposedVia !== undefined}
             styles={styles}
+          />
+        ) : null}
+        {/* 「내 프로필 사진 바꾸기」(#4394): 한 문장과 제안된 사진은 서버 행 아래, 버튼 위에
+            선다. 결정이 난 카드에는 서지 않는다 — 결과는 결과 카드가 말한다. */}
+        {settledStatus === 'pending' && isMemberAvatarSetAction(card.action?.id) ? (
+          <ApprovalAvatarPreview
+            card={card}
+            agentName={memberFor(directory, card.requestedByMemberId)?.displayName ?? null}
           />
         ) : null}
         {/* =====================================================================
@@ -2400,6 +2410,9 @@ function MessageRowInner({
   // 다른 물음이고, 웹의 같은 이름과 **같은 함수**다 — 이 행이 답을 세 곳에서 쓰기
   // 때문에(본문 칸 · 「내용 없는 메시지」 · 시트의 복사) 이름을 한 번만 짓는다.
   const hasBody = hasRenderableBody(body);
+  // 글 없이 사진·파일만 보낸 메시지는 본문이 비어도 **비어 있지 않다** — 첨부 목록이 그 메시지의
+  // 내용이다(#4294). 아래 「내용 없는 메시지」 줄은 이 물음이 아니오일 때만 선다.
+  const hasAttachments = (message.attachments?.length ?? 0) > 0;
   // A reply, on a surface that marks them. The parent may still be unknown.
   const isMarkedReply =
     replyParent !== undefined && message.rootId !== undefined;
@@ -3104,7 +3117,8 @@ function MessageRowInner({
             {presentation.keepsBody &&
             !hasBody &&
             !presentation.card &&
-            !presentation.artifact ? (
+            !presentation.artifact &&
+            !hasAttachments ? (
               <Text style={styles.tombstone}>{appNote('내용 없는 메시지')}</Text>
             ) : null}
           </>

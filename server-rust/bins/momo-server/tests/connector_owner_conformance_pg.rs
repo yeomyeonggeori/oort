@@ -1472,6 +1472,8 @@ fn attested(apps: &[&str]) -> CohostedAgentConfig {
         tools_locked: true,
         connectors_locked: true,
         connector_apps: apps.iter().map(|a| (*a).to_string()).collect(),
+        // #4337: the platform is wording only; this suite never reads it.
+        ..Default::default()
     }
 }
 
