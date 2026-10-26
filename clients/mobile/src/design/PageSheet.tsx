@@ -529,7 +529,9 @@ function SheetFrame({
 
   return (
     <View style={styles.fill}>
-      <Animated.View style={[StyleSheet.absoluteFill, {opacity: scrimOpacityValue}]}>
+      <Animated.View
+        style={[StyleSheet.absoluteFill, {opacity: scrimOpacityValue}]}
+        testID={`${scrimTestID}-fade`}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={scrimLabel}

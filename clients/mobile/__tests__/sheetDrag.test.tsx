@@ -1,4 +1,30 @@
 import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from '@testing-library/react-native';
+import React from 'react';
+import {
+  AccessibilityInfo,
+  ActionSheetIOS,
+  Animated,
+  Dimensions,
+  FlatList,
+  Keyboard,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+
+import {PageSheet, usePageSheetAction} from '../src/design/PageSheet';
+import {SheetHeader} from '../src/design/SheetChrome';
+import {SheetScroll} from '../src/design/sheetParts';
+import {FixedScheme} from '../src/design/theme';
+import {retainReduceMotion} from '../src/lib/useReduceMotion';
+import {
   SCROLL_TOP_EPSILON,
   SHEET_CLAIM_SLOP,
   SHEET_DISMISS_MIN_DISTANCE,
@@ -267,5 +293,533 @@ describe('시트 높이 어림 — 레이아웃을 재기 전', () => {
     expect(estimatedSheetHeight(sheetFrame('large', 800, 0), 800)).toBe(800 - 58);
     expect(estimatedSheetHeight(sheetFrame('medium', 800, 0), 800)).toBe(Math.floor(800 * (9 / 16)));
     expect(estimatedSheetHeight(sheetFrame('fit', 800, 0), 800)).toBe(Math.floor(800 * 0.85));
+  });
+});
+
+// =============================================================================
+// 2부 — 실제 렌더에서 응답자 핸들러를 불러 끌기를 재생한다. 핸들러는 PanResponder 가 만든 것이고, 이벤트는
+// `touchHistory` 까지 갖춘 모양이다(`sheetKit.test.tsx` 의 `dragHandle` 과 같은 방식).
+// =============================================================================
+
+const a11y = AccessibilityInfo as unknown as {isReduceMotionEnabled: jest.Mock};
+const WINDOW = Dimensions.get('window');
+/** 큰 단의 높이(상태 막대 0 → 위 58) — Jest 는 레이아웃을 재지 않으니 상자에서 어림한 값이다. */
+const LARGE_HEIGHT = WINDOW.height - 58;
+
+let releaseReduceMotion: (() => void) | null = null;
+
+afterEach(() => {
+  cleanup();
+  emitter().emit('keyboardDidHide', keyboardFrame(0));
+  releaseReduceMotion?.();
+  releaseReduceMotion = null;
+  jest.restoreAllMocks();
+});
+
+async function mount(ui: React.ReactElement, reduceMotion = true) {
+  a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(reduceMotion));
+  releaseReduceMotion ??= retainReduceMotion();
+  await act(async () => {});
+  const utils = render(<FixedScheme scheme="light">{ui}</FixedScheme>);
+  await act(async () => {});
+  return utils;
+}
+
+const flat = (testID: string) =>
+  StyleSheet.flatten(screen.getByTestId(testID, {includeHiddenElements: true}).props.style);
+
+/** 시트가 가 있는 곳(pt, 아래가 양수). */
+const sheetY = (): number => flat('page-sheet').transform[0].translateY;
+const scrimAlpha = (): number => flat('page-sheet-scrim-fade').opacity;
+
+type Emitter = {emit: (event: string, payload: unknown) => void};
+const emitter = () => (Keyboard as unknown as {_emitter: Emitter})._emitter;
+const keyboardFrame = (height: number) => ({
+  endCoordinates: {height, screenX: 0, screenY: WINDOW.height - height, width: 390},
+  duration: 250,
+  easing: 'keyboard',
+});
+
+type Handlers = Record<string, (event: unknown) => unknown>;
+
+function touch(y: number, at: number, previousY: number = y, touches = 1) {
+  return {
+    nativeEvent: {touches: Array.from({length: touches}, () => ({})), changedTouches: [{}], timestamp: at},
+    touchHistory: {
+      touchBank: [
+        {
+          touchActive: true,
+          startPageX: 0,
+          startPageY: 0,
+          startTimeStamp: 0,
+          currentPageX: 0,
+          currentPageY: y,
+          currentTimeStamp: at,
+          previousPageX: 0,
+          previousPageY: previousY,
+          previousTimeStamp: at - 16,
+        },
+      ],
+      numberActiveTouches: touches,
+      indexOfSingleActiveTouch: 0,
+      mostRecentTimeStamp: at,
+    },
+  };
+}
+
+/**
+ * `testID` 의 응답자를 잡고 `steps`(y, 시각)를 따라 끈다. 첫 걸음이 가져가는 문턱을 넘는다 — 가져가지 못하면(응답자 시스템이
+ * 거절) 거기서 멈추고 `false` 를 돌려준다. `release: false` 면 손을 떼지 않는다. `releaseAt` 은 놓는 시각이다.
+ */
+function drag(
+  testID: string,
+  steps: Array<[number, number]>,
+  options: {release?: boolean; releaseAt?: number; touches?: number} = {},
+): boolean {
+  const handlers = screen.getByTestId(testID).props as Handlers;
+  let claimed = false;
+  act(() => {
+    handlers.onStartShouldSetResponderCapture(touch(0, 1));
+    const [firstY, firstAt] = steps[0];
+    const first = touch(firstY, firstAt, 0, options.touches);
+    // 응답자 시스템처럼 캡처 길이 먼저, 버블 길이 다음이다.
+    claimed = Boolean(handlers.onMoveShouldSetResponderCapture(first)) || Boolean(handlers.onMoveShouldSetResponder(first));
+    if (!claimed) return;
+    handlers.onResponderGrant(first);
+    let previous = firstY;
+    for (const [y, at] of steps.slice(1)) {
+      handlers.onResponderMove(touch(y, at, previous));
+      previous = y;
+    }
+    if (options.release === false) return;
+    const [lastY, lastAt] = steps[steps.length - 1];
+    handlers.onResponderRelease(touch(lastY, options.releaseAt ?? lastAt + 1, lastY));
+  });
+  return claimed;
+}
+
+const scrollTo = (testID: string, y: number) =>
+  act(() => {
+    fireEvent.scroll(screen.getByTestId(testID), {nativeEvent: {contentOffset: {x: 0, y}}});
+  });
+
+function Host({
+  onClose,
+  height,
+  dirty,
+  onDiscardPrompt,
+  children,
+}: {
+  onClose: () => void;
+  height?: 'fit' | 'medium' | 'large';
+  dirty?: boolean;
+  onDiscardPrompt?: (discard: () => void) => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <PageSheet
+      onClose={onClose}
+      accessibilityLabel="시험 시트"
+      height={height}
+      dirty={dirty}
+      onDiscardPrompt={onDiscardPrompt}
+      testID="sheet">
+      <SheetHeader title="시험 시트" closeLabel="시험 시트 닫기" closeTestID="close" testID="hdr" />
+      {children ?? (
+        <SheetScroll testID="sheet-scroll">
+          <View style={{height: 2000}} />
+        </SheetScroll>
+      )}
+    </PageSheet>
+  );
+}
+
+/** 놓았을 때 시트가 닫히는, 느리지만 먼 끌기(문턱 25% 를 넘는다). 표본이 500ms 간격이라 속도는 0 이다. */
+const FAR_SLOW: Array<[number, number]> = [[20, 100], [120, 600], [220, 1100], [360, 1600]];
+/** 문턱에 못 미치는 느린 끌기(60pt). */
+const SHORT_SLOW: Array<[number, number]> = [[20, 100], [50, 400], [80, 800]];
+/** 짧지만 빠른 튕김(92pt, 마지막 64ms 동안 ≈1.4px/ms). */
+const FLICK: Array<[number, number]> = [[20, 100], [40, 116], [62, 132], [86, 148], [112, 164]];
+
+describe('머리 — 손잡이 띠뿐 아니라 제목 줄 어디서든 끌린다', () => {
+  it('제목 줄(머리 뿌리)에도 끌기 응답자가 있고, 손잡이 띠와 같은 시트를 움직인다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(typeof screen.getByTestId('hdr').props.onMoveShouldSetResponderCapture).toBe('function');
+    expect(drag('hdr', [[20, 100], [70, 116], [120, 132]], {release: false})).toBe(true);
+    expect(sheetY()).toBe(100); // 끌기가 시작된 뒤 손가락이 100 움직였고 시트도 100
+  });
+
+  it('손가락 이동 = 시트 이동 (±1pt) — 걸음마다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1));
+      const first = touch(20, 100, 0);
+      handlers.onMoveShouldSetResponderCapture(first);
+      handlers.onResponderGrant(first);
+    });
+    let previous = 20;
+    let finger = 0;
+    for (const [i, y] of [31, 55, 90, 140, 190].entries()) {
+      act(() => {
+        handlers.onResponderMove(touch(y, 116 + i * 16, previous));
+      });
+      finger += y - previous;
+      previous = y;
+      expect(Math.abs(sheetY() - finger)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  it('스크롤이 중간(40)이어도 머리는 끌린다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    scrollTo('sheet-scroll', 40);
+    expect(drag('hdr', [[20, 100], [60, 116]], {release: false})).toBe(true);
+    expect(sheetY()).toBe(40);
+  });
+
+  it('먼 끌기는 닫는다 / 모자란 끌기는 닫지 않고 제자리다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    drag('hdr', SHORT_SLOW);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    drag('hdr', FAR_SLOW);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('짧아도 빠르게 튕기면 닫는다 — 속도 문턱', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    drag('hdr', FLICK);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('빠르게 끌다 멈춰 있다 놓으면 닫지 않는다 — PanResponder 의 마지막 구간 속도가 아니라 창으로 잰다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    // FLICK 과 같은 끌기인데 마지막 이동 뒤 200ms 를 쉬었다 놓는다.
+    drag('hdr', FLICK, {releaseAt: 164 + 200});
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+  });
+
+  it('위로는 고무줄이다: 끈 만큼보다 덜 올라가고 상한을 넘지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    drag('hdr', [[300, 100], [330, 116], [250, 132], [100, 148]], {release: false});
+    // 끌기가 시작된 뒤 손가락은 위로 200 갔다(330→100 중 시작점 300 기준 −200).
+    expect(sheetY()).toBeLessThan(0);
+    expect(sheetY()).toBeGreaterThan(-SHEET_RUBBER_MAX);
+    expect(sheetY()).toBeCloseTo(sheetFollow(100 - 300), 6);
+  });
+
+  it('가로가 앞서면 / 손가락이 둘이면 가져가지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    const sideways = touch(10, 50, 0);
+    sideways.touchHistory.touchBank[0].currentPageX = 40;
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1));
+    });
+    expect(handlers.onMoveShouldSetResponderCapture(sideways)).toBe(false);
+    expect(drag('hdr', [[20, 100], [60, 116]], {touches: 2, release: false})).toBe(false);
+    expect(sheetY()).toBe(0);
+  });
+
+  it('시스템이 끌기를 거둬 가면(terminate) 어중간한 자리에 남지 않고 제자리로 돌아온다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    drag('hdr', [[20, 100], [90, 116], [160, 132]], {release: false});
+    expect(sheetY()).toBe(140);
+    act(() => {
+      handlers.onResponderTerminate(touch(160, 140));
+    });
+    expect(sheetY()).toBe(0);
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
+  });
+
+  it('끌기를 쥔 동안에는 다른 응답자가 가져가지 못하게 한다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    expect(handlers.onResponderTerminationRequest(touch(0, 1))).toBe(false);
+  });
+});
+
+describe('본문 — 스크롤이 맨 위일 때만 시트가 따라온다(스크롤 넘겨받기)', () => {
+  it('맨 위(오프셋 0)에서 아래로 끌면 시트가 손가락을 따라온다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(drag('page-sheet-body', [[20, 100], [70, 116], [120, 132]], {release: false})).toBe(true);
+    expect(sheetY()).toBe(100);
+  });
+
+  it('맨 위에서 멀리 끌면 닫히고, 모자라면 제자리다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    drag('page-sheet-body', SHORT_SLOW);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    drag('page-sheet-body', FAR_SLOW);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('스크롤이 중간(40)이면 시트가 가져가지 않는다 — 본문이 스크롤한다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    scrollTo('sheet-scroll', 40);
+    expect(drag('page-sheet-body', FAR_SLOW)).toBe(false);
+    expect(sheetY()).toBe(0);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('다시 맨 위로 돌아오면 가져간다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    scrollTo('sheet-scroll', 120);
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(false);
+    scrollTo('sheet-scroll', 0);
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(true);
+  });
+
+  it('스크롤이 끝났을 때(드래그를 놓음·관성이 멈춤)의 오프셋도 시트가 안다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const scroll = screen.getByTestId('sheet-scroll');
+    act(() => {
+      scroll.props.onScrollEndDrag({nativeEvent: {contentOffset: {x: 0, y: 80}}});
+    });
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(false);
+    act(() => {
+      screen.getByTestId('sheet-scroll').props.onMomentumScrollEnd({nativeEvent: {contentOffset: {x: 0, y: 0}}});
+    });
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(true);
+  });
+
+  it('등록된 스크롤이 하나라도 중간이면 가져가지 않고, 그 스크롤이 사라지면 가져간다', async () => {
+    function Two({second}: {second: boolean}) {
+      return (
+        <Host onClose={() => {}}>
+          <SheetScroll testID="a"><View /></SheetScroll>
+          {second ? <SheetScroll testID="b"><View /></SheetScroll> : null}
+        </Host>
+      );
+    }
+    const utils = await mount(<Two second />);
+    scrollTo('b', 50);
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(false);
+    utils.rerender(
+      <FixedScheme scheme="light">
+        <Two second={false} />
+      </FixedScheme>,
+    );
+    await act(async () => {});
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(true);
+  });
+
+  it('시트에 알리지 않은 스크롤(날 FlatList)만 있으면 본문은 가져가지 않는다 — 머리는 끌린다', async () => {
+    await mount(
+      <Host onClose={() => {}}>
+        <FlatList data={[1, 2, 3]} renderItem={({item}) => <Text>{item}</Text>} testID="raw-list" />
+      </Host>,
+    );
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(false);
+    expect(drag('hdr', [[20, 100], [70, 116]], {release: false})).toBe(true);
+  });
+
+  it('끌기를 쥐는 동안 본문 스크롤을 얼리고, 놓으면 푼다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
+    drag('page-sheet-body', [[20, 100], [70, 116]], {release: false});
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(false);
+    const handlers = screen.getByTestId('page-sheet-body').props as Handlers;
+    act(() => {
+      handlers.onResponderRelease(touch(70, 120, 70));
+    });
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
+  });
+
+  it('호출자가 준 onScroll·scrollEnabled 를 지우지 않는다 — 시트의 배선을 겹쳐 쓴다', async () => {
+    const onScroll = jest.fn();
+    await mount(
+      <Host onClose={() => {}}>
+        <SheetScroll testID="mine" onScroll={onScroll} scrollEnabled={false}>
+          <View />
+        </SheetScroll>
+      </Host>,
+    );
+    scrollTo('mine', 30);
+    expect(onScroll).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('mine').props.scrollEnabled).toBe(false);
+    expect(screen.getByTestId('mine').props.scrollEventThrottle).toBe(16);
+    // 시트도 그 오프셋을 알았다
+    expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(false);
+  });
+});
+
+describe('스크림 — 끌면 실제 렌더의 스크림이 따라서 옅어진다', () => {
+  it('끌수록 옅어지고(시트 높이만큼 내리면 0), 위로 늘어난 때는 더 짙어지지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(scrimAlpha()).toBe(1);
+    const half = Math.round(LARGE_HEIGHT / 2);
+    drag('hdr', [[0 + 20, 100], [20 + half, 116]], {release: false});
+    expect(sheetY()).toBe(half);
+    expect(scrimAlpha()).toBeCloseTo(scrimOpacity(half, LARGE_HEIGHT), 3);
+    expect(scrimAlpha()).toBeCloseTo(0.5, 2);
+  });
+
+  it('위로 끌어 늘어나도 1 을 넘지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    drag('hdr', [[300, 100], [200, 116]], {release: false});
+    expect(sheetY()).toBeLessThan(0);
+    expect(scrimAlpha()).toBe(1);
+  });
+});
+
+describe('저장 안 한 입력 — 끌어 닫기 전에 「버릴까요?」', () => {
+  it('dirty 인 시트를 먼 끌기로 닫으려 하면 닫지 않고 제자리로 돌아온 뒤 묻는다', async () => {
+    const onClose = jest.fn();
+    const prompt = jest.fn();
+    await mount(<Host onClose={onClose} dirty onDiscardPrompt={prompt} />);
+    drag('hdr', FAR_SLOW);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('「버리기」(discard)를 부르면 그때 닫는다', async () => {
+    const onClose = jest.fn();
+    const prompt = jest.fn();
+    await mount(<Host onClose={onClose} dirty onDiscardPrompt={prompt} />);
+    drag('hdr', FAR_SLOW);
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => {
+      prompt.mock.calls[0][0]();
+    });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('깨끗하면(dirty 아님) 묻지 않고 바로 닫는다', async () => {
+    const onClose = jest.fn();
+    const prompt = jest.fn();
+    await mount(<Host onClose={onClose} onDiscardPrompt={prompt} />);
+    drag('hdr', FAR_SLOW);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it('모자란 끌기는 dirty 여도 묻지 않는다 — 닫으려던 것이 아니다', async () => {
+    const prompt = jest.fn();
+    await mount(<Host onClose={() => {}} dirty onDiscardPrompt={prompt} />);
+    drag('hdr', SHORT_SLOW);
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
+  it('스크림·VoiceOver escape·X 도 같은 문이다', async () => {
+    const onClose = jest.fn();
+    const prompt = jest.fn();
+    await mount(<Host onClose={onClose} dirty onDiscardPrompt={prompt} />);
+    fireEvent.press(screen.getByTestId('page-sheet-scrim', {includeHiddenElements: true}));
+    act(() => {
+      screen.getByTestId('page-sheet').props.onAccessibilityEscape();
+    });
+    fireEvent.press(screen.getByTestId('close'));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(prompt).toHaveBeenCalledTimes(3);
+  });
+
+  it('행동 누름(usePageSheetAction)은 묻지 않는다 — 저장·확정이 끝난 뒤의 닫기다', async () => {
+    const onClose = jest.fn();
+    const action = jest.fn();
+    const prompt = jest.fn();
+    function Save() {
+      const afterClose = usePageSheetAction();
+      return <Text onPress={() => afterClose(action)} testID="save">저장</Text>;
+    }
+    await mount(
+      <Host onClose={onClose} dirty onDiscardPrompt={prompt}>
+        <Save />
+      </Host>,
+    );
+    fireEvent.press(screen.getByTestId('save'));
+    expect(prompt).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(action).toHaveBeenCalledTimes(1);
+  });
+
+  it('기본 묻기는 iOS 액션 시트다: 「버리기」를 고르면 닫고 「계속 편집」이면 그대로다', async () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} dirty />);
+    drag('hdr', FAR_SLOW);
+    expect(show).toHaveBeenCalledTimes(1);
+    const [options, callback] = show.mock.calls[0];
+    expect(options).toMatchObject({title: '버릴까요?', options: ['버리기', '계속 편집'], destructiveButtonIndex: 0, cancelButtonIndex: 1});
+    act(() => callback(1));
+    expect(onClose).not.toHaveBeenCalled();
+    act(() => callback(0));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('동작 줄이기 · 키보드', () => {
+  it('동작 줄이기 켜짐: 끌어 닫아도 미끄러지지 않고 바로 닫히고, 모자란 끌기는 스프링 없이 바로 제자리다', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    const spring = jest.spyOn(Animated, 'spring');
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />, true);
+    drag('hdr', SHORT_SLOW);
+    expect(spring).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    drag('hdr', FAR_SLOW);
+    expect(timing).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('동작 줄이기 꺼짐: 모자란 끌기는 스프링으로 제자리, 닫는 끌기는 화면 높이까지 미끄러지는 강한 ease-out', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    const spring = jest.spyOn(Animated, 'spring');
+    await mount(<Host onClose={() => {}} />, false);
+    timing.mockClear();
+    drag('hdr', SHORT_SLOW);
+    expect(spring).toHaveBeenCalledTimes(1);
+    expect(spring.mock.calls[0][1]).toMatchObject({toValue: 0});
+    drag('hdr', FLICK);
+    const slide = timing.mock.calls[timing.mock.calls.length - 1][1];
+    expect(slide).toMatchObject({toValue: WINDOW.height});
+    expect(slide.easing).toBeDefined(); // X·스크림의 닫기는 기본 곡선이다(아래 대조)
+  });
+
+  it('X 로 닫을 때는 기본 곡선이다(대조)', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    await mount(<Host onClose={() => {}} />, false);
+    timing.mockClear();
+    fireEvent.press(screen.getByTestId('close'));
+    expect(timing.mock.calls[0][1].easing).toBeUndefined();
+  });
+
+  it('시트 안의 입력이 부른 키보드는 끌어 닫을 때 같이 내려간다', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss');
+    await mount(<Host onClose={() => {}} height="medium" />);
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(336));
+    });
+    drag('hdr', FAR_SLOW);
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('닫는 중에는 끌기를 가져가지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />, false);
+    fireEvent.press(screen.getByTestId('close'));
+    expect(drag('hdr', [[20, 100], [70, 116]], {release: false})).toBe(false);
+  });
+});
+
+describe('위로 늘어나는 고무줄 밑의 바탕', () => {
+  it('시트 바닥 밑에 상한만큼의 바탕이 깔려 있다(키보드가 시트를 올렸을 때는 키보드 쐐기가 대신한다)', async () => {
+    await mount(<Host onClose={() => {}} height="medium" />);
+    const skirt = flat('page-sheet-skirt');
+    expect(skirt.height).toBe(SHEET_RUBBER_MAX);
+    expect(skirt.bottom).toBe(-SHEET_RUBBER_MAX);
+    act(() => {
+      emitter().emit('keyboardWillShow', keyboardFrame(336));
+    });
+    expect(screen.queryByTestId('page-sheet-skirt')).toBeNull();
+    expect(within(screen.getByTestId('page-sheet')).getByTestId('page-sheet-keyboard-corner')).toBeTruthy();
   });
 });
