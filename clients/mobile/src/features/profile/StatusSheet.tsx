@@ -21,11 +21,11 @@ import {StyleSheet, TextInput, View} from 'react-native';
 
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
-import {GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
+import {ChoiceRow, GroupCard, ListRow, RowEmoji, SheetScroll} from '../../design/sheetParts';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
 import {font, radius, SHEET, space, type Palette} from '../../design/tokens';
 import {useSetPresence} from './selfStatus';
-import {ChoiceRow, SettingsNote} from './settingsRows';
+import {SettingsNote} from './settingsRows';
 import {initialExpiry, statusDraftVerdict, statusSeed} from './statusDraft';
 
 // =============================================================================

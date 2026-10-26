@@ -12,7 +12,7 @@ import {THEMES} from '@momo/core/design/themes';
 
 import {ThemeControl} from '../src/design/ThemeControl';
 import {BrandAppearance, FixedScheme, ThemeProvider, useStyles} from '../src/design/theme';
-import {paletteFrom, type Palette} from '../src/design/tokens';
+import {ds2Radius, paletteFrom, type Palette} from '../src/design/tokens';
 import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
 import {DARK_CHOSEN_RECORD} from './fixtures/darkWorld';
 
@@ -274,8 +274,10 @@ describe('직접 입력의 상태 표현 (design-review M-2·M-3·M-4)', () => {
 
   it('직접 입력을 쓰는 중이면 제목이 accent 톤·굵기로 바뀐다 — 체크 하나에 기대지 않는다', () => {
     mount();
-    const before = style('appearance-signal-custom').borderColor;
-    expect(before).toBeDefined();
+    // 직접 입력 카드는 공용 묶음 카드 가족이다(반경 20) — 옛 반경 10 카드가 아니다(#4457).
+    const card = style('appearance-signal-custom-group-card');
+    expect(card.borderRadius).toBe(ds2Radius.card);
+    expect(card.borderColor).toBeDefined();
     const label = () => StyleSheet.flatten(screen.getByText('직접 입력').props.style) ?? {};
     const plain = label();
     type('#3A6BD8');

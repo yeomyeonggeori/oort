@@ -20,7 +20,8 @@ import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 // #4318 의 `design/sheetParts.tsx` `ListRow` 는 이 화면이 필요로 하는 세 가지를 갖고 있지 않다:
 //
 //   1. **라디오** — `accessibilityRole="radio"` · `accessibilityState.selected` · 오른쪽 ✓.
-//      선언 상태 3줄(온라인·자리 비움·방해 금지)과 상태 시트의 지우기 기간 선택이 쓴다.
+//      **→ 이 PR 이 `design/sheetParts.tsx` 로 올렸다**(`ChoiceRow`). 테마 장(`ThemeControl`)이 `design/` 에 있어
+//      feature 쪽 부품을 쓸 수 없고, 앱의 라디오가 모두 같은 세 신호(강조색·굵게·✓)를 쥐어야 해서다.
 //   2. **읽는 중·못 읽음의 오른쪽 자리** — 스위치 대신 스피너(또는 아무것도 없음). 서버 값을 모르는
 //      동안 「꺼짐」을 그리면 켜 둔 사람에게 거짓이다(푸시·일시 중지·작업 끝남·기억 스위치가 같은
 //      약속을 지킨다). `ListRow accessory="toggle"` 은 언제나 스위치를 그린다.
@@ -32,7 +33,6 @@ import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 // 그것이 바로 이 파일이 해야 할 일의 실패다(`settingsPage.test.tsx` 가 치수를 재서 지킨다). #4318 이
 // `ListRow` 에 같은 자리를 내면 이 파일은 지워진다.
 //
-//   ChoiceRow   라디오 행: 앞 점(선택) · 이름 · 보조 줄 · 오른쪽 ✓
 //   SwitchRow   스위치 행: 이름 · 보조 줄 · 오른쪽 {스위치 | 스피너 | 없음}
 //   ActionRow   동작 행: 이름 · 보조 줄 · 오른쪽 {셰브론 | 스피너 | 없음} · 강조·위험 글자 · 펼침 상태
 //               (안쪽 장 — 프로필 사진·기한 고르기 — 이 옛 `GroupRow` 에서 옮겨 오며 쓴다. `ListRow` 에 없는 것은
@@ -200,81 +200,6 @@ export function ActionRow({
   );
 }
 
-export function ChoiceRow({
-  title,
-  detail,
-  selected,
-  leading,
-  onPress,
-  disabled = false,
-  accessibilityLabel,
-  accessibilityHint,
-  testID,
-  checkTestID,
-}: {
-  title: string;
-  detail?: string;
-  selected: boolean;
-  /** 앞 표지(상태 점). 장식이라 읽히지 않는다. 제목 첫 줄의 가운데에 선다. */
-  leading?: React.ReactNode;
-  onPress: () => void;
-  /** 쓰는 중(다른 선택이 날아가는 동안). 눌리지 않고 흐려진다. */
-  disabled?: boolean;
-  accessibilityLabel?: string;
-  accessibilityHint?: string;
-  testID?: string;
-  /** 선택된 줄의 ✓ 에만 붙는다 — 선택되지 않은 줄에는 ✓ 가 그려지지 않는다. */
-  checkTestID?: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="radio"
-      accessibilityLabel={accessibilityLabel ?? title}
-      accessibilityHint={accessibilityHint}
-      accessibilityState={disabled ? {selected, disabled: true} : {selected}}
-      // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞는다(`GroupRow` 와 같은 관용구).
-      disabled={disabled ? true : undefined}
-      onPress={onPress}
-      style={({pressed}) => [
-        styles.row,
-        // 설명 줄이 붙은 행은 위로 붙인다 — 점과 ✓ 가 제목 첫 줄 옆에 선다(설명 줄 쪽으로 쏠리지 않게).
-        detail ? styles.rowTop : null,
-        pressed && !disabled && styles.rowPressed,
-        disabled && styles.rowDisabled,
-      ]}
-      testID={testID}>
-      {leading ? (
-        <View
-          style={styles.rowLead}
-          importantForAccessibility="no"
-          testID={testID ? `${testID}-lead` : undefined}>
-          {leading}
-        </View>
-      ) : null}
-      <View style={styles.rowText}>
-        <Text
-          lineBreakStrategyIOS="hangul-word"
-          style={[styles.rowTitle, selected && styles.rowTitleSelected]}>
-          {title}
-        </Text>
-        {detail ? <Sentence style={styles.rowDetail}>{detail}</Sentence> : null}
-      </View>
-      <View style={styles.checkSlot}>
-        {selected ? (
-          <Image
-            source={SHEET_ICONS.check}
-            style={styles.check}
-            accessibilityElementsHidden
-            importantForAccessibility="no"
-            testID={checkTestID}
-          />
-        ) : null}
-      </View>
-    </Pressable>
-  );
-}
-
 /** 묶음 카드 하나와 그 밑의 문장들. 카드 사이 간격(`space.lg`)은 부모가 쥐고, 이 안은 라벨·카드 사이와 같은 `space.sm`이다. */
 export function SettingsSection({
   children,
@@ -325,19 +250,8 @@ const buildStyles = (color: Palette) =>
     },
     rowPressed: {backgroundColor: color.surfacePressed},
     rowDisabled: {opacity: 0.55},
-    rowTop: {alignItems: 'flex-start'},
-    // 앞 칸은 아이콘 칸(22) 폭이라 카드의 `inset="icon"` 구분선이 글자 열에 맞는다. 높이는 제목 한
-    // 줄이라(`rowTop` 과 함께) 점이 설명 줄이 붙은 행에서도 제목 첫 줄 옆에 선다.
-    rowLead: {
-      width: SHEET.iconSlot,
-      height: line.body,
-      alignItems: 'center',
-      justifyContent: 'center',
-      marginRight: space.sm,
-    },
     rowText: {flex: 1},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
-    rowTitleSelected: {fontWeight: '600'},
     rowTitleAccent: {color: color.accentText, fontWeight: '600'},
     rowTitleDanger: {color: color.danger, fontWeight: '600'},
     chevron: {
@@ -350,17 +264,6 @@ const buildStyles = (color: Palette) =>
       fontSize: font.label,
       lineHeight: line.label,
       color: color.textMuted,
-    },
-    checkSlot: {
-      width: SHEET_ICON_SIZE.check,
-      height: SHEET_ICON_SIZE.check,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    check: {
-      width: SHEET_ICON_SIZE.check,
-      height: SHEET_ICON_SIZE.check,
-      tintColor: color.accentText,
     },
     section: {gap: space.sm},
     note: {

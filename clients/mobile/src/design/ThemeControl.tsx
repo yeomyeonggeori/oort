@@ -18,7 +18,7 @@ import {
   type SignalPresetId,
 } from '@momo/core/design/signal';
 import {contrast} from '@momo/core/design/color';
-import {GroupRow, OutlineButton, Sentence} from './atoms';
+import {OutlineButton, Sentence} from './atoms';
 import {
   BACKGROUND_FALLBACK_COPY,
   NO_BACKGROUND,
@@ -32,6 +32,8 @@ import {
 import {IMPORT_FAILURE_COPY, type PhotoPorts} from './background/photo';
 import {backgroundPhotoUri, chooseBackgroundPhoto} from './background/store';
 import {THEMES, THEME_IDS, type ThemeId} from './ds2Tokens';
+import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
+import {ChoiceRow, GroupCard, GroupLabel} from './sheetParts';
 import {
   normalizeCustomHex,
   THEME_CHOICES,
@@ -78,6 +80,10 @@ import {ds2Radius, font, radius, space, type Palette} from './tokens';
 // =============================================================================
 // 테마와 강조색 (#2719 · ADR-0189 D3 · 성재 2026-10-16 「열기 (추천)」).
 //
+// **카드는 폰 공용 묶음 카드 가족이다**(#4457): 설정 페이지의 안쪽 장이라 본 페이지와 같은 `GroupCard`(반경 20·들여 쓴
+// 구분선)와 `ChoiceRow`(강조색·굵게·✓ 세 신호)로 선다. 옛 `GroupSection`·`GroupRow`(반경 10·전폭 구분선)가 아니다.
+// 모양만 옮겼다 — testID·접근성 이름·고르는 동작은 그대로다.
+//
 // 세 묶음이다: 화면 모드(라이트·시스템·다크, #4526) / 테마(새벽하늘·흑연·노을띠) / 강조색
 // (기본·프리셋 4종·직접 입력). 미리보기는 따로 그리지 않는다 — 고르는 순간 프로바이더가
 // 앱 전체를 다시 칠하므로 지금 보고 있는 이 화면이 곧 미리보기다. 테마 타일과
@@ -108,7 +114,7 @@ export function ThemeControl({
 
 const buildLayout = StyleSheet.create({root: {gap: space.lg}});
 
-/** 머리글 + 내용. 시트가 이미 좌우 여백을 주므로 `GroupSection` 의 거터는 쓰지 않는다. */
+/** 머리글 + 내용(카드·보조 문장이 한 묶음). 가로 여백은 호스트가 진다(`GroupCard` 규칙). */
 function GroupSection({
   label,
   children,
@@ -119,16 +125,31 @@ function GroupSection({
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.section}>
-      <Text accessibilityRole="header" style={styles.sectionLabel}>
-        {label}
-      </Text>
+      <GroupLabel>{label}</GroupLabel>
       {children}
     </View>
   );
 }
 
-function SchemeGroup(): React.JSX.Element {
+/** 고른 줄의 ✓ — 라디오 행 밖(직접 입력 머리)에서 쓴다. 공용 `ChoiceRow` 와 같은 글리프·색이고 고른 줄에만 선다. */
+function CheckMark({selected, testID}: {selected: boolean; testID: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  return (
+    <View style={styles.checkSlot}>
+      {selected ? (
+        <Image
+          source={SHEET_ICONS.check}
+          style={styles.checkGlyph}
+          accessibilityElementsHidden
+          importantForAccessibility="no"
+          testID={testID}
+        />
+      ) : null}
+    </View>
+  );
+}
+
+function SchemeGroup(): React.JSX.Element {
   const {choice, systemScheme, setChoice} = useTheme();
   // **`scheme` 이 아니라 `systemScheme` 이다** (U2 리뷰 H-1). 풀린 스킴으로 이
   // 문장을 만들면 다크를 **고른** 동안에는 시스템이 라이트여도 「시스템은
@@ -137,21 +158,18 @@ function SchemeGroup(): React.JSX.Element {
   const systemNow = `지금 이 기기의 시스템은 ${systemScheme === 'dark' ? '다크' : '라이트'}예요.`;
   return (
     <GroupSection label="화면 모드">
-      <View
-        accessibilityRole="radiogroup"
-        accessibilityLabel="화면 모드"
-        style={styles.card}
-        testID="theme-control">
-        {THEME_CHOICES.map((value, index) => (
-          <Choice
-            key={value}
-            value={value}
-            selected={value === choice}
-            separated={index > 0}
-            onSelect={setChoice}
-            detail={value === 'system' ? systemNow : undefined}
-          />
-        ))}
+      <View accessibilityRole="radiogroup" accessibilityLabel="화면 모드" testID="theme-control">
+        <GroupCard testID="theme-scheme">
+          {THEME_CHOICES.map(value => (
+            <Choice
+              key={value}
+              value={value}
+              selected={value === choice}
+              onSelect={setChoice}
+              detail={value === 'system' ? systemNow : undefined}
+            />
+          ))}
+        </GroupCard>
       </View>
     </GroupSection>
   );
@@ -160,42 +178,25 @@ function SchemeGroup(): React.JSX.Element {
 function Choice({
   value,
   selected,
-  separated,
   onSelect,
   detail,
 }: {
   value: ThemeChoice;
   selected: boolean;
-  separated: boolean;
   onSelect: (choice: ThemeChoice) => void;
   detail?: string;
 }): React.JSX.Element {
   return (
-    <GroupRow
+    <ChoiceRow
       title={themeChoiceLabel(value)}
       detail={detail}
-      tone={selected ? 'accent' : 'default'}
-      separated={separated}
+      selected={selected}
       onPress={() => onSelect(value)}
-      accessibilityRole="radio"
-      accessibilityState={{selected}}
       accessibilityLabel={themeChoiceLabel(value)}
       accessibilityHint={detail}
-      trailing={<Check selected={selected} testID={`theme-${value}-check`} />}
       testID={`theme-${value}`}
+      checkTestID={`theme-${value}-check`}
     />
-  );
-}
-
-function Check({selected, testID}: {selected: boolean; testID: string}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Text
-      style={[styles.check, !selected && styles.checkHidden]}
-      importantForAccessibility="no"
-      testID={selected ? testID : undefined}>
-      ✓
-    </Text>
   );
 }
 
@@ -207,6 +208,12 @@ function Check({selected, testID}: {selected: boolean; testID: string}): React.J
  * M-1) — 두 반쪽이 있으면 모드를 바꾸지 않고도 테마의 차이가 보인다(웹 증보 1 D3 의 쌍
  * 미리보기와 같은 뜻).
  */
+/** 내 사진 썸네일의 한 변 — 행의 앞 칸 폭과 같은 값이다. */
+const PHOTO_THUMB = 36;
+
+/** 테마 견본의 폭 — `styles.swatch.width` 와 같은 값이다(앞 칸 폭과 카드 `inset` 이 이 값을 쓴다). */
+const SWATCH_WIDTH = 44;
+
 function ThemeSwatch({id}: {id: ThemeId}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
@@ -243,34 +250,31 @@ const THEME_DETAIL: Partial<Record<ThemeId, string>> = {
 };
 
 function ThemeGroup(): React.JSX.Element {
-  const styles = useStyles(buildStyles);
   const {themeId, setTheme} = useTheme();
   return (
     <GroupSection label="테마">
       <View
         accessibilityRole="radiogroup"
         accessibilityLabel="테마"
-        style={styles.card}
         testID="appearance-theme-group">
-        {THEME_IDS.map((id, index) => {
-          const selected = id === themeId;
-          return (
-            <GroupRow
+        {/* 견본 폭(44)이 앞 칸이고, 구분선이 글자 열에서 시작하도록 카드의 `inset` 이 같은 값이다. */}
+        <GroupCard inset={SWATCH_WIDTH} testID="appearance-theme-list">
+          {THEME_IDS.map(id => (
+            <ChoiceRow
               key={id}
               title={themeIdLabel(id)}
               detail={THEME_DETAIL[id]}
-              tone={selected ? 'accent' : 'default'}
-              separated={index > 0}
+              selected={id === themeId}
               onPress={() => setTheme(id)}
-              accessibilityRole="radio"
-              accessibilityState={{selected}}
               accessibilityLabel={themeIdLabel(id)}
               leading={<ThemeSwatch id={id} />}
-              trailing={<Check selected={selected} testID={`appearance-theme-${id}-check`} />}
+              leadingWidth={SWATCH_WIDTH}
+              leadingAlign="center"
               testID={`appearance-theme-${id}`}
+              checkTestID={`appearance-theme-${id}-check`}
             />
-          );
-        })}
+          ))}
+        </GroupCard>
       </View>
     </GroupSection>
   );
@@ -345,80 +349,80 @@ function SignalGroup(): React.JSX.Element {
       <View
         accessibilityRole="radiogroup"
         accessibilityLabel="강조색"
-        style={styles.card}
         testID="appearance-signal-group">
-        <GroupRow
-          title="기본"
-          tone={usingDefault ? 'accent' : 'default'}
-          onPress={() => pick(null)}
-          accessibilityRole="radio"
-          accessibilityState={{selected: usingDefault}}
-          accessibilityLabel="기본, 강조색"
-          leading={<Dot color={THEMES[themeId][scheme].color.signal} testID="appearance-dot-default" />}
-          trailing={<Check selected={usingDefault} testID="appearance-signal-default-check" />}
-          testID="appearance-signal-default"
-        />
-        {SIGNAL_PRESET_IDS.map(id => {
-          const selected = presetId === id;
-          const solved = resolvePreset(id, themeId, scheme);
-          return (
-            <GroupRow
-              key={id}
-              title={SIGNAL_PRESETS[id].label}
-              tone={selected ? 'accent' : 'default'}
-              separated
-              onPress={() => pick(id)}
-              accessibilityRole="radio"
-              accessibilityState={{selected}}
-              accessibilityLabel={`${SIGNAL_PRESETS[id].label}, 강조색`}
-              leading={
-                <Dot
-                  color={solved.ok ? solved.values.signal : SIGNAL_PRESETS[id][scheme]}
-                  testID={`appearance-dot-${id}`}
-                />
-              }
-              trailing={<Check selected={selected} testID={`appearance-signal-${id}-check`} />}
-              testID={`appearance-signal-${id}`}
-            />
-          );
-        })}
+        {/* 색 점(20)은 아이콘 칸(22)에 가운데로 서서 구분선이 글자 열에서 시작한다(`inset="icon"`). */}
+        <GroupCard inset="icon" testID="appearance-signal-list">
+          <ChoiceRow
+            title="기본"
+            selected={usingDefault}
+            onPress={() => pick(null)}
+            accessibilityLabel="기본, 강조색"
+            leading={<Dot color={THEMES[themeId][scheme].color.signal} testID="appearance-dot-default" />}
+            leadingAlign="center"
+            testID="appearance-signal-default"
+            checkTestID="appearance-signal-default-check"
+          />
+          {SIGNAL_PRESET_IDS.map(id => {
+            const solved = resolvePreset(id, themeId, scheme);
+            return (
+              <ChoiceRow
+                key={id}
+                title={SIGNAL_PRESETS[id].label}
+                selected={presetId === id}
+                onPress={() => pick(id)}
+                accessibilityLabel={`${SIGNAL_PRESETS[id].label}, 강조색`}
+                leading={
+                  <Dot
+                    color={solved.ok ? solved.values.signal : SIGNAL_PRESETS[id][scheme]}
+                    testID={`appearance-dot-${id}`}
+                  />
+                }
+                leadingAlign="center"
+                testID={`appearance-signal-${id}`}
+                checkTestID={`appearance-signal-${id}-check`}
+              />
+            );
+          })}
+        </GroupCard>
       </View>
 
-      <View style={[styles.card, styles.customCard]} testID="appearance-signal-custom">
-        <View style={styles.customHead}>
-          <Text style={[styles.customLabel, custom && styles.customLabelSelected]}>직접 입력</Text>
-          <Check selected={!!custom} testID="appearance-signal-custom-check" />
+      <GroupCard style={styles.customWrap} testID="appearance-signal-custom-group">
+        <View style={styles.customCard} testID="appearance-signal-custom">
+          <View style={styles.customHead}>
+            <Text style={[styles.customLabel, custom && styles.customLabelSelected]}>직접 입력</Text>
+            <CheckMark selected={!!custom} testID="appearance-signal-custom-check" />
+          </View>
+          <View style={styles.customRow}>
+            <TextInput
+              value={draft}
+              onChangeText={text => {
+                setDraft(text);
+                setError(null);
+              }}
+              onSubmitEditing={apply}
+              placeholder="#RRGGBB"
+              placeholderTextColor={palette.textMuted}
+              keyboardAppearance={keyboardAppearance}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              maxLength={7}
+              returnKeyType="done"
+              accessibilityLabel={custom ? '강조색 직접 입력, 사용 중, 여섯 자리 색 코드' : '강조색 직접 입력, 여섯 자리 색 코드'}
+              style={[styles.input, custom && styles.inputSelected, error != null && styles.inputError]}
+              testID="appearance-signal-input"
+            />
+            <OutlineButton label="적용" onPress={apply} testID="appearance-signal-apply" />
+          </View>
+          {notice ? (
+            <Sentence
+              style={[styles.notice, error != null && styles.noticeError]}
+              accessibilityLiveRegion="polite"
+              testID="appearance-signal-notice">
+              {notice}
+            </Sentence>
+          ) : null}
         </View>
-        <View style={styles.customRow}>
-          <TextInput
-            value={draft}
-            onChangeText={text => {
-              setDraft(text);
-              setError(null);
-            }}
-            onSubmitEditing={apply}
-            placeholder="#RRGGBB"
-            placeholderTextColor={palette.textMuted}
-            keyboardAppearance={keyboardAppearance}
-            autoCapitalize="characters"
-            autoCorrect={false}
-            maxLength={7}
-            returnKeyType="done"
-            accessibilityLabel={custom ? '강조색 직접 입력, 사용 중, 여섯 자리 색 코드' : '강조색 직접 입력, 여섯 자리 색 코드'}
-            style={[styles.input, custom && styles.inputSelected, error != null && styles.inputError]}
-            testID="appearance-signal-input"
-          />
-          <OutlineButton label="적용" onPress={apply} testID="appearance-signal-apply" />
-        </View>
-        {notice ? (
-          <Sentence
-            style={[styles.notice, error != null && styles.noticeError]}
-            accessibilityLiveRegion="polite"
-            testID="appearance-signal-notice">
-            {notice}
-          </Sentence>
-        ) : null}
-      </View>
+      </GroupCard>
 
       <Preview />
       {standing ? (
@@ -477,123 +481,116 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
       <View
         accessibilityRole="radiogroup"
         accessibilityLabel="배경"
-        style={styles.card}
         testID="appearance-background-group">
-        <GroupRow
-          title="기본"
-          detail="테마의 바닥 그대로예요."
-          tone={none ? 'accent' : 'default'}
-          onPress={() => {
-            setNotice(null);
-            setBackground(NO_BACKGROUND);
-          }}
-          accessibilityRole="radio"
-          accessibilityState={{selected: none}}
-          accessibilityLabel="배경 기본"
-          trailing={<Check selected={none} testID="appearance-background-none-check" />}
-          testID="appearance-background-none"
-        />
-        <View style={styles.bgBlock}>
-          <Text style={styles.customLabel}>단색</Text>
-          <View style={styles.bgSolids}>
-            {SOLID_IDS.map(id => {
-              const selected = background.kind === 'solid' && background.id === id;
-              return (
-                <Pressable
-                  key={id}
-                  accessibilityRole="radio"
-                  accessibilityState={{selected}}
-                  accessibilityLabel={`배경 단색 ${SOLIDS[id].label}`}
-                  onPress={() => pickSolid(id)}
-                  style={[
-                    styles.solid,
-                    {backgroundColor: SOLIDS[id].hex},
-                    selected && styles.solidSelected,
-                  ]}
-                  testID={`appearance-background-solid-${id}`}>
-                  {selected ? (
-                    <Text style={[styles.solidCheck, {color: checkInkOn(SOLIDS[id].hex, palette)}]}>
-                      ✓
-                    </Text>
-                  ) : null}
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-        <View style={styles.bgBlock}>
-          <Text style={styles.customLabel}>기본 제공</Text>
-          <View style={styles.bgPresets}>
-            {PRESET_IDS.map(id => {
-              const selected = background.kind === 'preset' && background.id === id;
-              return (
-                <Pressable
-                  key={id}
-                  accessibilityRole="radio"
-                  accessibilityState={{selected}}
-                  accessibilityLabel={`배경 ${PRESETS[id].label}`}
-                  onPress={() => pickPreset(id)}
-                  style={styles.presetCell}
-                  testID={`appearance-background-preset-${id}`}>
-                  <View
+        <GroupCard testID="appearance-background-list">
+          <ChoiceRow
+            title="기본"
+            detail="테마의 바닥 그대로예요."
+            selected={none}
+            onPress={() => {
+              setNotice(null);
+              setBackground(NO_BACKGROUND);
+            }}
+            accessibilityLabel="배경 기본"
+            testID="appearance-background-none"
+            checkTestID="appearance-background-none-check"
+          />
+          <View style={styles.bgBlock}>
+            <Text style={styles.customLabel}>단색</Text>
+            <View style={styles.bgSolids}>
+              {SOLID_IDS.map(id => {
+                const selected = background.kind === 'solid' && background.id === id;
+                return (
+                  <Pressable
+                    key={id}
+                    accessibilityRole="radio"
+                    accessibilityState={{selected}}
+                    accessibilityLabel={`배경 단색 ${SOLIDS[id].label}`}
+                    onPress={() => pickSolid(id)}
                     style={[
-                      styles.presetTile,
-                      {
-                        backgroundColor: PRESETS[id].fallback,
-                        experimental_backgroundImage: PRESETS[id].gradient,
-                      },
+                      styles.solid,
+                      {backgroundColor: SOLIDS[id].hex},
                       selected && styles.solidSelected,
-                    ]}>
+                    ]}
+                    testID={`appearance-background-solid-${id}`}>
                     {selected ? (
-                      <View style={styles.tileCheck} testID={`appearance-background-preset-${id}-check`}>
-                        <Text style={styles.tileCheckGlyph}>✓</Text>
-                      </View>
+                      <Text style={[styles.solidCheck, {color: checkInkOn(SOLIDS[id].hex, palette)}]}>
+                        ✓
+                      </Text>
                     ) : null}
-                  </View>
-                  <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>
-                    {PRESETS[id].label}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
-        <GroupRow
-          title="내 사진"
-          detail={
-            busy
-              ? '사진을 줄이는 중이에요…'
-              : background.kind === 'photo'
-                ? '탭해서 다른 사진으로 바꿔요. oort 서버로는 올라가지 않아요.'
-                : '이 기기 안에 저장되고, oort 서버로는 올라가지 않아요.'
-          }
-          tone={background.kind === 'photo' ? 'accent' : 'default'}
-          separated
-          disabled={busy}
-          onPress={pickPhoto}
-          accessibilityRole="radio"
-          accessibilityState={{selected: background.kind === 'photo', disabled: busy}}
-          accessibilityLabel={
-            background.kind === 'photo' ? '배경 내 사진, 다시 고르기' : '배경 내 사진 고르기'
-          }
-          leading={
-            background.kind === 'photo' ? (
-              <Image
-                source={{uri: backgroundPhotoUri(background.file)}}
-                style={styles.photoThumb}
-                accessible={false}
-                testID="appearance-background-photo-thumb"
-              />
-            ) : undefined
-          }
-          trailing={
-            <Check
-              selected={background.kind === 'photo'}
-              testID="appearance-background-photo-check"
-            />
-          }
-          testID="appearance-background-photo"
-        />
+          <View style={styles.bgBlock}>
+            <Text style={styles.customLabel}>기본 제공</Text>
+            <View style={styles.bgPresets}>
+              {PRESET_IDS.map(id => {
+                const selected = background.kind === 'preset' && background.id === id;
+                return (
+                  <Pressable
+                    key={id}
+                    accessibilityRole="radio"
+                    accessibilityState={{selected}}
+                    accessibilityLabel={`배경 ${PRESETS[id].label}`}
+                    onPress={() => pickPreset(id)}
+                    style={styles.presetCell}
+                    testID={`appearance-background-preset-${id}`}>
+                    <View
+                      style={[
+                        styles.presetTile,
+                        {
+                          backgroundColor: PRESETS[id].fallback,
+                          experimental_backgroundImage: PRESETS[id].gradient,
+                        },
+                        selected && styles.solidSelected,
+                      ]}>
+                      {selected ? (
+                        <View style={styles.tileCheck} testID={`appearance-background-preset-${id}-check`}>
+                          <Text style={styles.tileCheckGlyph}>✓</Text>
+                        </View>
+                      ) : null}
+                    </View>
+                    <Text style={[styles.presetLabel, selected && styles.presetLabelSelected]}>
+                      {PRESETS[id].label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+          </View>
+          <ChoiceRow
+            title="내 사진"
+            detail={
+              busy
+                ? '사진을 줄이는 중이에요…'
+                : background.kind === 'photo'
+                  ? '탭해서 다른 사진으로 바꿔요. oort 서버로는 올라가지 않아요.'
+                  : '이 기기 안에 저장되고, oort 서버로는 올라가지 않아요.'
+            }
+            selected={background.kind === 'photo'}
+            disabled={busy}
+            onPress={pickPhoto}
+            accessibilityLabel={
+              background.kind === 'photo' ? '배경 내 사진, 다시 고르기' : '배경 내 사진 고르기'
+            }
+            leading={
+              background.kind === 'photo' ? (
+                <Image
+                  source={{uri: backgroundPhotoUri(background.file)}}
+                  style={styles.photoThumb}
+                  accessible={false}
+                  testID="appearance-background-photo-thumb"
+                />
+              ) : undefined
+            }
+            leadingWidth={PHOTO_THUMB}
+            leadingAlign="center"
+            testID="appearance-background-photo"
+            checkTestID="appearance-background-photo-check"
+          />
+        </GroupCard>
       </View>
 
       {backgroundFallback ? (
@@ -636,44 +633,36 @@ function BackgroundGroup({photoPorts}: {photoPorts?: PhotoPorts}): React.JSX.Ele
 function Preview(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
-    <View style={styles.preview} testID="appearance-preview">
-      <View style={styles.previewFill}>
-        <Text style={styles.previewFillText}>안 읽음</Text>
+    <GroupCard style={styles.previewWrap} testID="appearance-preview-group">
+      <View style={styles.preview} testID="appearance-preview">
+        <View style={styles.previewFill}>
+          <Text style={styles.previewFillText}>안 읽음</Text>
+        </View>
+        <View style={styles.previewSoft}>
+          <Text style={styles.previewSoftText}>내가 참여했어요</Text>
+        </View>
+        <Text style={styles.previewLink}>링크</Text>
       </View>
-      <View style={styles.previewSoft}>
-        <Text style={styles.previewSoftText}>내가 참여했어요</Text>
-      </View>
-      <Text style={styles.previewLink}>링크</Text>
-    </View>
+    </GroupCard>
   );
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
   section: {gap: space.sm},
-  sectionLabel: {
-    fontSize: font.label,
-    color: color.textMuted,
-    fontWeight: '600',
-    paddingHorizontal: space.xs,
+  // 직접 입력 머리의 ✓ — 공용 `ChoiceRow` 와 같은 글리프·색이다(자리는 지킨다).
+  checkSlot: {
+    width: SHEET_ICON_SIZE.check,
+    height: SHEET_ICON_SIZE.check,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  card: {
-    borderRadius: radius.md,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
-    backgroundColor: color.surface,
-    overflow: 'hidden',
+  checkGlyph: {
+    width: SHEET_ICON_SIZE.check,
+    height: SHEET_ICON_SIZE.check,
+    tintColor: color.accentText,
   },
-  check: {
-    fontSize: font.body,
-    fontWeight: '700',
-    color: color.accentText,
-    minWidth: space.lg,
-    textAlign: 'center',
-  },
-  // 자리는 지킨다 — 고른 줄이 바뀔 때 글자가 옆으로 움찔하지 않게.
-  checkHidden: {opacity: 0},
   swatch: {
-    width: 44,
+    width: SWATCH_WIDTH,
     height: 36,
     flexDirection: 'row',
     borderRadius: ds2Radius.badge,
@@ -705,11 +694,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: color.border,
   },
-  customCard: {
-    marginTop: space.md,
-    padding: space.md,
-    gap: space.sm,
-  },
+  // 카드(`GroupCard`)의 바깥 간격과 안쪽 여백. 카드 모양은 부품이 쥔다.
+  customWrap: {marginTop: space.md},
+  customCard: {padding: space.md, gap: space.sm},
   customHead: {flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between'},
   customLabel: {
     fontSize: font.label,
@@ -739,23 +726,15 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     fontSize: font.meta,
     color: color.textMuted,
   },
+  previewWrap: {marginTop: space.md},
   preview: {
-    marginTop: space.md,
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
     padding: space.md,
-    borderRadius: radius.md,
-    backgroundColor: color.surface,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
   },
-  bgBlock: {
-    padding: space.md,
-    gap: space.sm,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.border,
-  },
+  // 단색·기본 제공 블록 — 위 구분선은 카드(`GroupCard`)가 그린다.
+  bgBlock: {padding: space.md, gap: space.sm},
   bgSolids: {flexDirection: 'row', flexWrap: 'wrap', gap: space.md},
   solid: {
     width: 44,
@@ -793,7 +772,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   tileCheckGlyph: {fontSize: font.label, fontWeight: '700', color: color.onAccent},
   presetLabel: {fontSize: font.meta, color: color.textMuted, textAlign: 'center'},
   presetLabelSelected: {color: color.accentText, fontWeight: '600'},
-  photoThumb: {width: 36, height: 36, borderRadius: ds2Radius.badge},
+  photoThumb: {width: PHOTO_THUMB, height: PHOTO_THUMB, borderRadius: ds2Radius.badge},
   reset: {marginTop: space.sm, alignItems: 'flex-start'},
   previewFill: {
     paddingHorizontal: space.md,

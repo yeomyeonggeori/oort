@@ -11,7 +11,7 @@ import {
 } from '@testing-library/react-native';
 import {getPermissionsAsync} from 'expo-notifications';
 import React from 'react';
-import {Animated, Dimensions, Image, Linking, StyleSheet} from 'react-native';
+import {Animated, Dimensions, Image, Linking, StyleSheet, View} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -26,7 +26,8 @@ import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {LAYER_POP_MS, LAYER_PUSH_MS, LAYER_RISE_MS, LAYER_SINK_MS} from '../src/design/motion';
 import {ThemeProvider} from '../src/design/theme';
 import {pinReduceMotion} from './fixtures/reduceMotion';
-import {darkPalette, lightPalette} from '../src/design/tokens';
+import {GroupSection} from '../src/design/atoms';
+import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
@@ -555,11 +556,62 @@ describe('설정 페이지', () => {
   });
 });
 
+describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 10 카드가 어디에도 없다 (#4457)', () => {
+  // 옛 `GroupSection` 카드의 지문: 반경 `radius.md`(10) + 가는 테두리 + `surface` 채움. 새 `GroupCard` 는 반경 20 이다.
+  // 한 장이라도 옛 부품으로 남으면 설정 본 페이지(반경 20)와 카드 모양이 섞인다.
+  const surface = lightPalette.surface;
+  const oldCards = () =>
+    screen.UNSAFE_getAllByType(View).filter(view => {
+      const style = StyleSheet.flatten(view.props.style);
+      return (
+        style?.borderRadius === radius.md &&
+        style?.borderWidth === StyleSheet.hairlineWidth &&
+        style?.backgroundColor === surface
+      );
+    }).length;
+
+  it('탐지기는 실제로 옛 카드를 잡는다 — 대조군(옛 GroupSection 하나 = 1)', () => {
+    render(
+      <ThemeProvider>
+        <GroupSection>
+          <Image source={0} />
+        </GroupSection>
+      </ThemeProvider>,
+    );
+    expect(oldCards()).toBe(1);
+  });
+
+  // 알림 일시 중지 기한 장은 규칙 응답이 있어야 행이 풀리는데 이 파일의 서버는 그것을 싣지 않는다 — 그 장의 같은 약속은
+  // 규칙을 시드하는 `profilePauseUntil.test.tsx` 가 진다.
+  it.each([
+    ['테마', 'profile-theme-row', 'theme-scheme-card'],
+    ['지시 기기', 'profile-device-key-row', 'device-key-card-card'],
+    ['방해 금지 기한', 'presence-option-dnd', 'pause-until-card-card'],
+  ] as const)('%s 장 — 옛 카드가 없고 새 카드가 선다', async (_name, rowTestID, expectedTestID) => {
+    const page = await openPage();
+    await waitFor(() =>
+      expect(within(page).getByTestId('presence-option-dnd')).toBeTruthy(),
+    );
+    fireEvent.press(within(page).getByTestId(rowTestID));
+    await waitFor(() => expect(screen.getByTestId(expectedTestID)).toBeTruthy());
+    expect(oldCards()).toBe(0);
+  });
+
+  it('프로필 사진 장 — 옛 카드가 없다', async () => {
+    const page = await openPage();
+    fireEvent.press(within(page).getByTestId('self-profile-avatar', {includeHiddenElements: true}));
+    await waitFor(() => expect(screen.getByTestId('avatar-page')).toBeTruthy());
+    expect(oldCards()).toBe(0);
+  });
+});
+
 describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
   // 위의 시험은 모두 동작 줄이기를 켠 채 돈다. 여기서는 끄고, 셸이 층에 건 움직임이 실제로 배선돼 있는지 잰다
   // (`layerMotion4457.test.tsx` 는 층 부품 홀로의 약속이다): 첫 장은 올라오고 X 는 내려가며 걷고, 안쪽 장은 밀려
   // 들어오고 ‹ 는 물러나며 걷는다.
   const WINDOW = Dimensions.get('window');
+  // 퇴장 타이머(150~180ms)는 실시간이다 — 로드가 높은 머신에서 `waitFor` 기본 1초(벽시계)가 모자란 전례(`fixtures/fakeClock.ts`).
+  const EXIT_WAIT = {timeout: 8000};
 
   it('설정 첫 장은 올라오고, X 는 내려간 뒤에야 페이지를 걷는다', async () => {
     releaseMotion?.();
@@ -577,7 +629,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     );
     // 내려가는 동안에는 아직 서 있다 — 누른 즉시 사라지지 않는다.
     expect(screen.getByTestId('settings-page')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
     expect(screen.getByTestId('sidebar-list')).toBeTruthy();
   });
 
@@ -599,7 +651,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
       expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
     );
     expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull(), EXIT_WAIT);
     // 설정 페이지는 남는다 — 한 겹만 벗겼다.
     expect(screen.getByTestId('settings-page')).toBeTruthy();
   });
@@ -617,7 +669,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     expect(timing.mock.calls.map(call => call[1])).toContainEqual(
       expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
     );
-    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull(), EXIT_WAIT);
 
     timing.mockClear();
     act(() => {
@@ -626,7 +678,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     expect(timing.mock.calls.map(call => call[1])).toContainEqual(
       expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
     );
-    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
   });
 });
 

@@ -48,6 +48,7 @@ import {
 //   GroupCard      둥근 묶음 카드, 행 사이는 안쪽으로 들여 쓴 구분선
 //   GroupCardItem  가상화 목록(FlatList)의 한 줄을 같은 카드로 보이게 하는 틀
 //   ListRow        행: 앞 아이콘·이모지 · 이름 · 보조 줄 · 오른쪽 값 · 셰브론/펼침/복사/토글, 위험
+//   ChoiceRow      라디오 행: 앞 표지 · 이름 · 보조 줄 · 오른쪽 ✓ — 고른 줄은 강조색·굵게·✓ 셋 (#4457 이 올렸다)
 //   InputPill      입력 알약: 앞 아이콘 + 입력(ADR-0189 D6: 외곽선은 텍스트 입력에만 남는다)
 //   ActionTile     큰 행동 타일(아이콘 위, 이름 아래) · ActionTileRow 는 같은 폭으로 나란히
 //   SheetScroll    시트 몸의 스크롤 — 머리 아래 숨 쉴 틈·안전 영역·키보드 탭·큰 글씨에서도 끝까지 닿는다
@@ -322,6 +323,105 @@ export function ListRow({
       ]}
       testID={testID}>
       {body}
+    </Pressable>
+  );
+}
+
+/**
+ * 라디오 행: 서로 배타적인 **설정값**(테마·화면 모드·내 상태…)을 한 줄씩 고른다. 오른쪽 ✓ 는 고른 줄에만 서고 자리는
+ * 늘 지킨다(고른 줄이 바뀔 때 글자가 옆으로 움찔하지 않는다).
+ *
+ * **고른 줄은 세 신호가 함께 바뀐다 — 강조색 글자 · 굵기 · ✓.** ✓ 하나만 바꾸면 그것을 손가락이 덮는 동안 신호가 없다
+ * (`ThemeControl` 머리말, #2702). 앱의 라디오가 모두 이 규칙이었고(옛 `GroupRow tone="accent"`) 그래서 한 부품이 쥔다.
+ * 보조기술에는 `radio` + `selected` 로 읽힌다(「3개 중」은 부모의 `radiogroup`).
+ *
+ * `leading` 은 장식이다(상태 점·견본·썸네일 — 읽히지 않는다). 기본은 제목 첫 줄 높이의 22pt 칸이고(설명 줄이 붙으면 행이
+ * 위로 붙어 점·✓ 가 제목 첫 줄 옆에 선다), 칸이 더 크면 `leadingWidth` 와 `leadingAlign="center"` 로 가운데에 세운다 —
+ * 이때 카드의 `inset` 은 같은 폭이어야 구분선이 글자 열에서 시작한다.
+ */
+export function ChoiceRow({
+  title,
+  detail,
+  selected,
+  leading,
+  leadingWidth = SHEET.iconSlot,
+  leadingAlign = 'first-line',
+  onPress,
+  disabled = false,
+  accessibilityLabel,
+  accessibilityHint,
+  testID,
+  checkTestID,
+}: {
+  title: string;
+  detail?: string;
+  selected: boolean;
+  /** 앞 표지(장식). 낭독에서 빠진다. */
+  leading?: React.ReactNode;
+  /** 앞 칸의 폭. 카드의 `inset`(숫자)과 같아야 구분선이 맞는다. */
+  leadingWidth?: number;
+  /** `first-line`: 제목 첫 줄 높이 칸(작은 점) · `center`: 행 가운데(견본·썸네일처럼 줄보다 큰 것). */
+  leadingAlign?: 'first-line' | 'center';
+  onPress: () => void;
+  /** 쓰는 중(다른 선택이 날아가는 동안). 눌리지 않고 흐려진다. */
+  disabled?: boolean;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
+  testID?: string;
+  /** 고른 줄의 ✓ 에만 붙는다 — 고르지 않은 줄에는 ✓ 가 그려지지 않는다. */
+  checkTestID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const firstLine = leadingAlign === 'first-line';
+  return (
+    <Pressable
+      accessibilityRole="radio"
+      accessibilityLabel={accessibilityLabel ?? title}
+      accessibilityHint={accessibilityHint}
+      // `false` 를 넘기지 않는다 — Pressable 은 그것도 접근성 상태에 섞는다(옛 `GroupRow` 와 같은 관용구).
+      accessibilityState={disabled ? {selected, disabled: true} : {selected}}
+      disabled={disabled ? true : undefined}
+      onPress={onPress}
+      style={({pressed}) => [
+        styles.row,
+        // 설명 줄이 붙은 행은 위로 붙인다 — 점과 ✓ 가 제목 첫 줄 옆에 선다(설명 줄 쪽으로 쏠리지 않게).
+        detail && firstLine ? styles.rowTop : null,
+        pressed && !disabled && styles.rowPressed,
+        disabled && styles.rowDisabled,
+      ]}
+      testID={testID}>
+      {leading ? (
+        <View
+          style={[
+            styles.choiceLead,
+            {width: leadingWidth},
+            firstLine && styles.choiceLeadFirstLine,
+          ]}
+          importantForAccessibility="no"
+          testID={testID ? `${testID}-lead` : undefined}>
+          {leading}
+        </View>
+      ) : null}
+      <View style={styles.rowText}>
+        <Text
+          lineBreakStrategyIOS="hangul-word"
+          style={[styles.rowTitle, selected && styles.rowTitleSelected]}>
+          {title}
+        </Text>
+        {detail ? <Sentence style={styles.rowDetail}>{detail}</Sentence> : null}
+      </View>
+      <View style={styles.choiceCheckSlot}>
+        {selected ? (
+          // 장식이다 — 행 자신이 접근성 요소(`radio`)라 안의 글리프는 따로 읽히지 않는다. `accessibilityElementsHidden` 은
+          // 주지 않는다: 시험이 `getByTestId` 로 「고른 줄에만 ✓ 가 선다」를 잴 수 있어야 한다.
+          <Image
+            source={SHEET_ICONS.check}
+            style={styles.choiceCheck}
+            importantForAccessibility="no"
+            testID={checkTestID}
+          />
+        ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -633,6 +733,27 @@ const buildStyles = (color: Palette) =>
     rowText: {flex: 1},
     rowTitle: {fontSize: font.body, lineHeight: line.body, color: color.text},
     rowTitleDanger: {color: color.danger, fontWeight: '600'},
+    // 라디오 행(`ChoiceRow`): 고른 줄은 강조색 + 굵게(✓ 와 함께 세 신호).
+    rowTitleSelected: {color: color.accentText, fontWeight: '600'},
+    rowTop: {alignItems: 'flex-start'},
+    choiceLead: {
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: space.sm,
+    },
+    // 앞 칸은 제목 한 줄 높이라(`rowTop` 과 함께) 점이 설명 줄이 붙은 행에서도 제목 첫 줄 옆에 선다.
+    choiceLeadFirstLine: {height: line.body},
+    choiceCheckSlot: {
+      width: SHEET_ICON_SIZE.check,
+      height: SHEET_ICON_SIZE.check,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    choiceCheck: {
+      width: SHEET_ICON_SIZE.check,
+      height: SHEET_ICON_SIZE.check,
+      tintColor: color.accentText,
+    },
     rowDetail: {
       marginTop: space.xs,
       fontSize: font.label,

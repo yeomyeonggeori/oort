@@ -41,7 +41,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {Screen, Sentence} from '../../design/atoms';
 import {PageHeader} from '../../design/SheetChrome';
-import {GroupCard, ListRow} from '../../design/sheetParts';
+import {ChoiceRow, GroupCard, ListRow} from '../../design/sheetParts';
 import {ThemeControl} from '../../design/ThemeControl';
 import {themeSummary, useStyles, useTheme} from '../../design/theme';
 import {
@@ -79,12 +79,7 @@ import {
 import {AvatarPage} from './AvatarPage';
 import {PauseUntilPage} from './PauseUntilPage';
 import {StatusSheet} from './StatusSheet';
-import {
-  ChoiceRow,
-  SettingsNote,
-  SettingsSection,
-  SwitchRow,
-} from './settingsRows';
+import {SettingsNote, SettingsSection, SwitchRow} from './settingsRows';
 import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
 import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
 import {useDeviceKey} from '../deviceKey/useDeviceKey';

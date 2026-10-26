@@ -10,7 +10,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {StyleSheet, View} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -489,6 +489,16 @@ describe('기한 장 — 새 카드 가족 (#4457)', () => {
       expect([id, card.borderRadius, card.backgroundColor]).toEqual([id, ds2Radius.card, surface]);
     }
     expect(ds2Radius.card).not.toBe(radius.md); // 옛 `GroupSection` 의 반경 — 비교가 헛돌지 않는다
+    // 옛 카드의 지문(반경 10 + 가는 테두리 + surface 채움)이 이 장 어디에도 없다 — 목록·달력·시각 칩 전부.
+    const oldCards = screen.UNSAFE_getAllByType(View).filter(view => {
+      const style = StyleSheet.flatten(view.props.style);
+      return (
+        style?.borderRadius === radius.md &&
+        style?.borderWidth === StyleSheet.hairlineWidth &&
+        style?.backgroundColor === surface
+      );
+    });
+    expect(oldCards).toHaveLength(0);
   });
 
   it('가로 여백은 이 장이 한 번만 진다 — 직접 고르기 블록과 확인 줄이 여백을 또 더하지 않는다', async () => {

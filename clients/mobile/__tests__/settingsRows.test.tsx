@@ -3,12 +3,11 @@ import React from 'react';
 import {ActivityIndicator, Image, StyleSheet, Switch} from 'react-native';
 
 import {SHEET_ICONS} from '../src/design/icons';
-import {ListRow} from '../src/design/sheetParts';
+import {ChoiceRow, ListRow} from '../src/design/sheetParts';
 import {FixedScheme, paletteFor, type ColorScheme} from '../src/design/theme';
-import {SHEET, space} from '../src/design/tokens';
+import {line, SHEET, space} from '../src/design/tokens';
 import {
   ActionRow,
-  ChoiceRow,
   SettingsNote,
   SwitchRow,
 } from '../src/features/profile/settingsRows';
@@ -210,6 +209,61 @@ describe('ActionRow', () => {
     expect(onPress).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('off').props.accessibilityState).toMatchObject({disabled: true});
     expect(screen.getByTestId('on').props.accessibilityState?.disabled).not.toBe(true);
+  });
+});
+
+describe.each(['light', 'dark'] as const)('ChoiceRow — 고른 줄의 세 신호 (%s)', scheme => {
+  it('강조색 글자·굵기·✓ 가 함께 서고, 고르지 않은 줄에는 셋 다 없다', () => {
+    mount(
+      <>
+        <ChoiceRow title="고름" selected onPress={() => {}} testID="on" checkTestID="on-check" />
+        <ChoiceRow title="안고름" selected={false} onPress={() => {}} testID="off" checkTestID="off-check" />
+      </>,
+      scheme,
+    );
+    const palette = paletteFor(scheme);
+    const title = (text: string) => StyleSheet.flatten(screen.getByText(text).props.style);
+    expect(title('고름')).toMatchObject({color: palette.accentText, fontWeight: '600'});
+    expect(title('안고름').color).toBe(palette.text);
+    expect(title('안고름').fontWeight).toBeUndefined();
+    // ✓ 도 같은 강조색이고, 고르지 않은 줄에는 없다(자리만 지킨다).
+    const check = StyleSheet.flatten(
+      screen.getByTestId('on-check', {includeHiddenElements: true}).props.style,
+    );
+    expect(check.tintColor).toBe(palette.accentText);
+    expect(screen.queryByTestId('off-check', {includeHiddenElements: true})).toBeNull();
+    // 비교가 헛돌지 않게: 강조색과 글자색이 다르다.
+    expect(palette.accentText).not.toBe(palette.text);
+  });
+});
+
+describe('ChoiceRow — 앞 칸', () => {
+  it('기본은 제목 첫 줄 높이의 22pt 칸이고, 설명 줄이 있으면 행이 위로 붙는다', () => {
+    mount(
+      <ChoiceRow title="점" detail="설명" selected leading={<></>} onPress={() => {}} testID="dot" />,
+    );
+    expect(flat('dot-lead')).toMatchObject({width: SHEET.iconSlot, height: line.body});
+    expect(flat('dot').alignItems).toBe('flex-start');
+  });
+
+  it('견본·썸네일처럼 줄보다 큰 앞 칸은 가운데에 서고 고정 높이가 없다 — 폭은 넘긴 값이다', () => {
+    mount(
+      <ChoiceRow
+        title="견본"
+        detail="설명"
+        selected={false}
+        leading={<></>}
+        leadingWidth={44}
+        leadingAlign="center"
+        onPress={() => {}}
+        testID="swatch"
+      />,
+    );
+    const lead = flat('swatch-lead');
+    expect(lead.width).toBe(44);
+    expect(lead.height).toBeUndefined();
+    // 설명 줄이 있어도 행이 위로 붙지 않는다(가운데 정렬 그대로).
+    expect(flat('swatch').alignItems).toBe('center');
   });
 });
 
