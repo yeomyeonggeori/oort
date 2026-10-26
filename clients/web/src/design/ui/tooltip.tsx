@@ -14,7 +14,9 @@ import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
 //   · 눌리면·포인터가 나가면·초점이 나가면·Esc면 닫는다. 닫힘은 즉시다(나타남만 모션이 있다).
 //   · 트리거가 이미 `aria-label`로 같은 이름을 갖는다. 툴팁은 눈으로 보는 보조라
 //     `aria-hidden`이고 `aria-describedby`로 이름을 두 번 읽히게 하지 않는다.
-//   · 면은 `tooltip-surface`(둥근 작은 면, 12×6), 간격 4(`mb-1`/`mt-1`), 위/아래 두 방향이다.
+//   · 면은 `tooltip-surface`(연회색 둥근 알약: `--muted-soft` 한 면, 선도 그림자도 없다, 12×6), 간격 4(`mb-1`/`mt-1`),
+//     위/아래 두 방향이다. 대화 머리 단추는 전부 이 부품을 **아래 방향**으로 쓴다(#4591): 본문 판이 `overflow: clip`이라
+//     위로는 잘린다. 단추에 네이티브 `title`을 같이 두지 않는다(둘이 같이 뜬다). 규칙의 문서는 design-system §2.9.
 
 export type TooltipSide = "top" | "bottom";
 

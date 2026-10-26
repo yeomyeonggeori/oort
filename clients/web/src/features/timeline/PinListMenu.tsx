@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { appNote } from "@momo/core/features/timeline/appVoice";
@@ -94,30 +95,34 @@ export function PinListMenu({
   const nowMs = Date.now();
   return (
     <DropdownMenu modal={false}>
-      <DropdownMenuTrigger asChild>
-        <button
-          type="button"
-          // 이름과 툴팁이 같은 문자열이다: 하나를 듣고 하나를 보는 사람에게
-          // 이름이 둘이면 컨트롤도 둘이다 (작업 세션 토글과 같은 규칙).
-          aria-label={label}
-          title={label}
-          data-testid="open-pin-list"
-          data-pin-count={entries.length}
-          className={channelHeaderControlClass({
-            wide: status === "ready" && entries.length > 0,
-          })}
-        >
-          <Pin className="size-4" aria-hidden="true" />
-          {/* 0개일 때 숫자를 그리지 않는다: 「고정 0개」는 아무것도 알리지 않으면서
-              헤더의 폭만 가져간다. 버튼 자체는 남는다 — 처음 고정하는 사람이
-              어디서 목록을 여는지 배울 자리가 필요하다. */}
-          {status === "ready" && entries.length > 0 && (
-            <span className="text-meta" data-numeric>
-              {entries.length}
-            </span>
-          )}
-        </button>
-      </DropdownMenuTrigger>
+      {/* 툴팁은 트리거 **바깥**이다(`MessageActions`와 같다): 안에 두면 래퍼가 Radix 트리거가 된다. 방향은 아래다 —
+          본문 판이 `overflow: clip`이라 위로는 잘린다(#4591). */}
+      <Tooltip label={label} side="bottom">
+        <DropdownMenuTrigger asChild>
+          <button
+            type="button"
+            // 이름과 툴팁이 같은 문자열이다: 하나를 듣고 하나를 보는 사람에게
+            // 이름이 둘이면 컨트롤도 둘이다 (작업 세션 토글과 같은 규칙).
+            // 네이티브 `title`은 두지 않는다: 툴팁이 이미 떠서 같은 말이 두 번 뜬다.
+            aria-label={label}
+            data-testid="open-pin-list"
+            data-pin-count={entries.length}
+            className={channelHeaderControlClass({
+              wide: status === "ready" && entries.length > 0,
+            })}
+          >
+            <Pin className="size-4" aria-hidden="true" />
+            {/* 0개일 때 숫자를 그리지 않는다: 「고정 0개」는 아무것도 알리지 않으면서
+                헤더의 폭만 가져간다. 버튼 자체는 남는다 — 처음 고정하는 사람이
+                어디서 목록을 여는지 배울 자리가 필요하다. */}
+            {status === "ready" && entries.length > 0 && (
+              <span className="text-meta" data-numeric>
+                {entries.length}
+              </span>
+            )}
+          </button>
+        </DropdownMenuTrigger>
+      </Tooltip>
       <DropdownMenuContent
         align="end"
         aria-label={label}
