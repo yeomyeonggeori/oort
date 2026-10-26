@@ -135,7 +135,8 @@ function DownloadControl({ store }: { store: DownloadsStore }) {
             </button>
           </PopoverTrigger>
         </Tooltip>
-        <PopoverContent align="end" side="bottom">
+        {/* 대화상자의 이름은 패널 제목과 같다(design-review M5): 안쪽 section 이름만으로는 대화상자 자체가 이름 없는 그룹으로 읽혔다. */}
+        <PopoverContent align="end" side="bottom" aria-label={DOWNLOAD_COPY.title}>
           <DownloadPanel
             items={items}
             notices={notices}

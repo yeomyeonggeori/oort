@@ -37,8 +37,8 @@ export const DOWNLOAD_COPY = {
 const FAILURE_COPY: Record<DownloadFailure, string> = {
   network: "연결이 끊겨 받지 못했어요. 연결을 확인하고 다시 시도하세요",
   auth: "로그인이 끝나서 받지 못했어요. 다시 로그인한 뒤 시도하세요",
-  gone: "첨부파일이 없거나 볼 권한이 없어요",
-  "too-large": "파일이 너무 커서 저장하지 못했어요",
+  gone: "첨부파일이 없거나 볼 권한이 없어요. 보낸 사람에게 다시 요청해 보세요",
+  "too-large": "파일이 너무 커서 저장하지 못했어요. 보낸 사람에게 나눠서 보내 달라고 요청해 보세요",
   denied: "다운로드 폴더에 저장할 권한이 없어요. 시스템 설정에서 oort의 폴더 접근을 허용하세요",
   "disk-full": "저장 공간이 부족해요. 공간을 비우고 다시 시도하세요",
   failed: "받지 못했어요. 다시 시도하세요",
@@ -91,10 +91,12 @@ export function rowStatusLine(item: DownloadItem): string {
 
 /** 상단 단추의 이름. 점·링은 색과 모양이라 보조기술에는 이 문장이 상태를 말한다. */
 export function downloadButtonLabel(view: DownloadButtonView): string {
-  if (view.activity === "progress") return `${DOWNLOAD_COPY.title}, 받는 중 ${view.activeCount}개`;
-  if (view.badge === "failed") return `${DOWNLOAD_COPY.title}, 받지 못한 파일이 있어요`;
-  if (view.badge === "done") return `${DOWNLOAD_COPY.title}, 새로 받은 파일 ${view.unseenCount}개`;
-  return DOWNLOAD_COPY.title;
+  // 링과 점은 함께 설 수 있다: 이름이 둘 다 말한다(링이 도는 동안 점의 뜻이 이름에서 사라지지 않게, design-review M1).
+  const parts: string[] = [DOWNLOAD_COPY.title];
+  if (view.activity === "progress") parts.push(`받는 중 ${view.activeCount}개`);
+  if (view.badge === "failed") parts.push("받지 못한 파일이 있어요");
+  else if (view.badge === "done") parts.push(`새로 받은 파일 ${view.unseenCount}개`);
+  return parts.join(", ");
 }
 
 /**

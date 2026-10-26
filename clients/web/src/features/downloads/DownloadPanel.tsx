@@ -93,13 +93,13 @@ function DownloadRow({
         </span>
         <span
           data-testid="download-row-status"
-          className={cn("text-meta", failed ? "text-danger" : "text-ink-muted")}
+          className={cn("text-meta break-keep", failed ? "text-danger" : "text-ink-muted")}
         >
           {rowStatusLine(item)}
         </span>
         {item.phase === "receiving" && <RowProgress item={item} title={title} />}
         {notice !== undefined && (
-          <span role="status" data-testid="download-row-notice" className="text-meta text-danger">
+          <span role="status" data-testid="download-row-notice" className="text-meta break-keep text-danger">
             {notice}
           </span>
         )}
@@ -157,14 +157,14 @@ export function DownloadPanel({
         </Button>
       </header>
       {folderNotice !== null && (
-        <p role="status" data-testid="download-folder-notice" className="px-2 text-meta text-danger">
+        <p role="status" data-testid="download-folder-notice" className="px-2 text-meta break-keep text-danger">
           {folderNotice}
         </p>
       )}
       {items.length === 0 ? (
         <div data-testid="download-empty" className="flex flex-col gap-1 px-2 py-4">
-          <p className="text-label text-ink">{DOWNLOAD_COPY.empty}</p>
-          <p className="text-meta text-ink-muted">{DOWNLOAD_COPY.emptyHint}</p>
+          <p className="text-label break-keep text-ink">{DOWNLOAD_COPY.empty}</p>
+          <p className="text-meta break-keep text-ink-muted">{DOWNLOAD_COPY.emptyHint}</p>
         </div>
       ) : (
         <ul data-testid="download-list" className="flex max-h-pane flex-col overflow-y-auto">
@@ -173,7 +173,7 @@ export function DownloadPanel({
           ))}
         </ul>
       )}
-      <p className="px-2 text-meta text-ink-muted">{DOWNLOAD_COPY.saveLocation}</p>
+      <p className="px-2 text-meta break-keep text-ink-muted">{DOWNLOAD_COPY.saveLocation}</p>
     </section>
   );
 }

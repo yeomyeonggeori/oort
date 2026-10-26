@@ -4,7 +4,8 @@ import { describe, expect, it } from "vitest";
 import { compileTokensCss, ENGINES } from "@/design/appearance/compileTokensTestKit";
 import { splitFileName } from "@momo/core/features/attachments/model";
 import { DownloadPanel } from "./DownloadPanel";
-import { newDownload, type DownloadItem } from "./downloadsModel";
+import { newDownload, type DownloadFailure, type DownloadItem } from "./downloadsModel";
+import { DOWNLOAD_COPY, downloadFailureCopy } from "./downloadsCopy";
 
 // =============================================================================
 // 패널 행의 파일 이름은 앞부분이 공백으로 끝나도 공백을 잃지 않는다 (#4587, 실기 캡처에서 발견).
@@ -118,4 +119,146 @@ describe("패널 행 이름의 공백 (#4587)", () => {
     },
     60_000
   );
+});
+
+// -----------------------------------------------------------------------------
+// 패널의 문장은 어절에서 끊긴다 (#4587, design-review H2).
+//
+// 실기 캡처에서 가장 흔한 실패 문장이 「…다시 시도하」 / 「세요」로 갈렸다: 이 패널의 글에 `break-keep`이 없어서 브라우저가
+// 한글 음절 사이 어디서든 줄을 바꿨다. 이 레포는 한국어를 어절에서 끊는다(`word-break: keep-all`). 렌더 폭에 달린 결함이라
+// 문자열 시험은 못 본다: 진짜 `DownloadPanel`을 **팝오버 폭(`w-pane-picker` + `p-3`)** 에 그려 엔진이 만든 줄 경계를 글자별
+// `Range` 사각형으로 읽고, 새 줄의 첫 글자 바로 앞이 공백이 아니면(= 낱말 한가운데서 끊김) 위반으로 센다.
+// -----------------------------------------------------------------------------
+
+const FAILURES: DownloadFailure[] = ["network", "auth", "gone", "too-large", "denied", "disk-full", "failed"];
+
+function failedItem(failure: DownloadFailure, index: number): DownloadItem {
+  return {
+    ...newDownload({
+      id: `fl-${index}`,
+      source: { workspaceId: "ws-dalmuri", channelId: "ch-design", attachmentId: `att-fl-${index}` },
+      name: `실패 ${index}.pdf`,
+      mime: "application/pdf",
+      sizeBytes: 1000,
+      nowMs: 10_000,
+    }),
+    phase: "failed",
+    failure,
+    finishedAtMs: 11_000,
+    seen: true,
+  };
+}
+
+function panelMarkup(items: DownloadItem[], withNotices: boolean): string {
+  return renderToStaticMarkup(
+    createElement(DownloadPanel, {
+      items,
+      notices: withNotices
+        ? { "fl-keep": DOWNLOAD_COPY.notOpenable }
+        : {},
+      folderNotice: withNotices ? DOWNLOAD_COPY.folderFailed : null,
+      onAction: () => undefined,
+      onOpenFolder: () => undefined,
+    })
+  );
+}
+
+describe("패널 문장의 줄바꿈 (#4587)", () => {
+  it.skipIf(ENGINES.length === 0)(
+    "실패 이유 일곱 · 행 아래 안내 · 폴더 안내 · 빈 상태 · 저장 위치 문장은 모두 어절 경계에서만 줄을 바꾼다",
+    async () => {
+      const done: DownloadItem = {
+        ...doneItem("회의록 정리.txt", 99),
+        id: "fl-keep",
+      };
+      const filled = panelMarkup([...FAILURES.map(failedItem), done], true);
+      const empty = panelMarkup([], false);
+      const candidates = [...(filled + empty).matchAll(/class="([^"]*)"/g)]
+        .flatMap((m) => (m[1] ?? "").split(/\s+/))
+        .filter(Boolean);
+      const css = await compileTokensCss([...candidates, "w-pane-picker", "p-3", "text-label"]);
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext({ viewport: { width: 800, height: 900 } });
+          try {
+            const view = await ctx.newPage();
+            for (const [label, markup] of [["목록", filled], ["빈 상태", empty]] as const) {
+              await view.setContent(
+                `<!doctype html><html lang="ko"><head><style>${css}\nhtml,body{margin:0}</style></head><body><div id="host" class="w-pane-picker p-3">${markup}</div></body></html>`
+              );
+              const result = await view.evaluate(() => {
+                const selectors = [
+                  '[data-testid="download-row-status"]',
+                  '[data-testid="download-row-notice"]',
+                  '[data-testid="download-folder-notice"]',
+                  '[data-testid="download-empty"] p',
+                  '[data-testid="download-panel"] > p:last-child',
+                ];
+                const out: Array<{ sel: string; text: string; lines: number; broken: string[] }> = [];
+                for (const sel of selectors) {
+                  for (const el of document.querySelectorAll(sel)) {
+                    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+                    let prevTop: number | null = null;
+                    let prevIndex = -1;
+                    let prevNode: Node | null = null;
+                    let lines = 1;
+                    const broken: string[] = [];
+                    while (walker.nextNode()) {
+                      const node = walker.currentNode as Text;
+                      const text = node.textContent ?? "";
+                      for (let i = 0; i < text.length; i += 1) {
+                        const range = document.createRange();
+                        range.setStart(node, i);
+                        range.setEnd(node, i + 1);
+                        const rects = range.getClientRects();
+                        if (rects.length === 0 || (rects[0]!.width === 0 && /\s/.test(text[i]!))) continue;
+                        const top = Math.round(rects[0]!.top);
+                        if (prevTop !== null && top > prevTop + 2) {
+                          lines += 1;
+                          // 새 줄의 첫 글자: 바로 앞(같은 글 노드)에 공백이 없으면 낱말 한가운데서 끊긴 것이다.
+                          const between = prevNode === node ? text.slice(prevIndex + 1, i) : " ";
+                          if (!/\s/.test(between)) broken.push(`${text.slice(Math.max(0, i - 4), i)}|${text.slice(i, i + 4)}`);
+                        }
+                        prevTop = top;
+                        prevIndex = i;
+                        prevNode = node;
+                      }
+                    }
+                    out.push({ sel, text: (el.textContent ?? "").slice(0, 40), lines, broken });
+                  }
+                }
+                return out;
+              });
+              const wrapped = result.filter((r) => r.lines >= 2).length;
+              if (label === "목록" && wrapped < 3) {
+                problems.push(`${engine} ${label}: 두 줄 이상으로 접힌 문장이 ${wrapped}개뿐이다(장면이 줄바꿈을 만들지 못했다)`);
+              }
+              for (const r of result) {
+                if (r.broken.length > 0) {
+                  problems.push(`${engine} ${label} ${r.sel} 「${r.text}…」 ${r.lines}줄, 낱말 한가운데서 끊김: ${r.broken.join(" / ")}`);
+                }
+              }
+            }
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(problems).toEqual([]);
+    },
+    90_000
+  );
+
+  it("이유 문장은 실제로 쓰는 일곱 이유 전부다(시험이 한 이유를 빠뜨리지 않는다)", () => {
+    const all = FAILURES.map((f) => downloadFailureCopy(f));
+    expect(new Set(all).size).toBe(7);
+    // 가장 흔한 실패(연결 끊김)는 패널 폭에서 두 줄로 접히는 길이다: 이 시험의 전제.
+    expect(downloadFailureCopy("network").length).toBeGreaterThan(30);
+  });
 });

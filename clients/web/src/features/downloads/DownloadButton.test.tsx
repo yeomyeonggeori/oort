@@ -191,6 +191,35 @@ describe("단추 상태: 없음 · 진행 · 완료 점", () => {
     expect(q("download-dot")).not.toBeNull();
   });
 
+  it("링이 도는 동안에도 이름이 점의 뜻을 말한다(새로 받은 것 · 받지 못한 것)", async () => {
+    mount();
+    void start();
+    await settle();
+    await finish(0);
+    void start({ ...ATTACHMENT, id: "att-2", name: "시안.png" }).catch(() => undefined);
+    await settle();
+    expect(button().getAttribute("aria-label")).toBe("다운로드, 받는 중 1개, 새로 받은 파일 1개");
+    // 새로 받은 것이 하나, 이어서 받는 것이 하나, 그 사이 이어 받던 것이 실패: 점은 실패가 먼저 말한다.
+    await act(async () => {
+      f.fetches[1]?.reject(new TypeError("Failed to fetch"));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    void start({ ...ATTACHMENT, id: "att-3", name: "회의록.txt" });
+    await settle();
+    expect(button().getAttribute("data-activity")).toBe("progress");
+    expect(button().getAttribute("data-badge")).toBe("failed");
+    expect(button().getAttribute("aria-label")).toBe("다운로드, 받는 중 1개, 받지 못한 파일이 있어요");
+  });
+
+  it("패널 대화상자에 이름이 있다(안쪽 section만이 아니라)", async () => {
+    mount();
+    openPanel();
+    const dialog = document.body.querySelector('[role="dialog"]');
+    expect(dialog).not.toBeNull();
+    expect(dialog?.getAttribute("aria-label")).toBe("다운로드");
+  });
+
   it("목록을 열면 점이 꺼진다", async () => {
     mount();
     void start();
@@ -386,7 +415,9 @@ describe("패널", () => {
     openPanel();
     await settle();
     const row = qa("download-row")[0] as HTMLElement;
-    expect(q("download-row-status", row)?.textContent).toBe("첨부파일이 없거나 볼 권한이 없어요");
+    expect(q("download-row-status", row)?.textContent).toBe(
+      "첨부파일이 없거나 볼 권한이 없어요. 보낸 사람에게 다시 요청해 보세요"
+    );
     expect(row.querySelectorAll("button")).toHaveLength(0);
   });
 
