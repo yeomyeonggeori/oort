@@ -1262,6 +1262,92 @@ async fn password_change_rate_limit_is_per_member() {
     assert_eq!(guess().await.status().as_u16(), 429);
 }
 
+/// The change route counts an attempt **before** it judges the new password
+/// (ADR-0215 D2, #4593 security review L-2): a refused `newPassword` is an
+/// attempt too, so the per-member limit sees it. The order is rate limit, then
+/// the two password checks, then `current == new`.
+///
+/// `password_change_rate_limit_is_per_member` above sends a `newPassword` the
+/// rule accepts, so it cannot tell the order: a route that judged the password
+/// first would never count a refusal, and this is the test that notices.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_refused_new_password_is_counted_by_the_change_rate_limit() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "pw-limit-order").await;
+    let state = AppState::new(
+        app_pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_rate_limit(RateLimitConfig {
+        password_change_per_member_limit: 2,
+        password_change_per_ip_limit: 0,
+        ..RateLimitConfig::default()
+    });
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let base = format!("http://{address}");
+    let http = reqwest::Client::new();
+    let (status, body) = login(
+        &http,
+        &base,
+        tenant.workspace,
+        &tenant.member.email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let access = body["accessToken"].as_str().expect("access");
+    // The right current password and a new one the rule refuses, so the only
+    // thing wrong with the request is the new password.
+    let refused = || {
+        let http = http.clone();
+        let base = base.clone();
+        let access = access.to_string();
+        let workspace = tenant.workspace;
+        async move {
+            let response = http
+                .patch(format!(
+                    "{base}/v1/workspaces/{workspace}/members/me/password"
+                ))
+                .bearer_auth(access)
+                .json(&json!({
+                    "currentPassword": MEMBER_PASSWORD,
+                    "newPassword": password_cases::NINE_CHARS,
+                }))
+                .send()
+                .await
+                .expect("change");
+            let status = response.status().as_u16();
+            let body: Value = response.json().await.unwrap_or(Value::Null);
+            (status, body)
+        }
+    };
+    for attempt in 1..=2 {
+        let (status, body) = refused().await;
+        assert_eq!(status, 400, "attempt {attempt}: {body}");
+        assert_eq!(
+            body["error"]["code"],
+            json!("password_too_short"),
+            "attempt {attempt}: {body}"
+        );
+    }
+    let (status, body) = refused().await;
+    assert_eq!(
+        status, 429,
+        "the two refusals above were attempts, so the third is over the limit: {body}"
+    );
+}
+
 /// ADR-0128 D2 matrix: each cell is one ignored PG test (red proof first).
 macro_rules! hierarchy_cell_test {
     ($name:ident, $actor:expr, $target:expr, $expected:expr) => {
