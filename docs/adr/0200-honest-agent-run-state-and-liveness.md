@@ -3,7 +3,7 @@
 - Status: **Accepted** (2026-10-13 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다.) 초안은 같은 날 Proposed였고 결재로 D4-5(`oort_ping`)가 추천안과 달라졌다.
 - Date: 2026-10-13
 - Deciders: 성재
-- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · 2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기 · **2026-10-27 증보 4 (#4618, Proposed) Agent Port 호출 기록 `agent_port.call` — 깨어서 무엇을 부르고 멈추는지** — 파일 끝.
+- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · 2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기 · **2026-10-27 증보 4 (#4618) Accepted(planner 위임, owner 사후 보고 2026-10-27) — Agent Port 호출 기록 `agent_port.call`: 깨어서 무엇을 부르고 멈추는지** — 파일 끝.
 - 기안: Opus 5.5 (#3736 + #3737 묶음)
 - 관계: ADR-0162 증보 3(D9 「새 저장소 없음」, D11 「단계 표식은 realtime 없음」, D13 보드 가시성, D17 비목표, 부록 A lease·암묵 갱신) **일부를 이 ADR이 바꾼다**(아래 「바뀌는 기존 결정」), ADR-0171(도어벨), ADR-0186(승인 액션 — run을 park), ADR-0199(인박스 투영 — 같은 방식의 쓰기 시 투영), ADR-0198, ADR-0100
 - 표기: [V] 코드·문서 직접 확인 · **[추정]** 해석 · [확인 필요] 구현 전 사실 확인 · `runtime-unverified` 실행 안 함
@@ -600,7 +600,8 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 ## 증보 4 (2026-10-27, #4618) — Agent Port 호출 기록 `agent_port.call`: 깨어서 무엇을 부르고 멈추는지
 
-- Status: **Proposed** (2026-10-27). **관측 추가**예요. 새 테이블·새 열·새 권한·새 API가 없어서 owner 결정 없이 planner 수락(위임)으로 Accepted가 될 수 있다고 보고 올려요. 이유는 아래 「왜 owner 결정이 필요 없는가」예요. Accepted 전에는 배포하지 않아요.
+- Status: **Accepted(planner 위임, owner 사후 보고 2026-10-27)**. **관측 추가**예요. 새 테이블·새 열·새 권한·새 API가 없고 새로 보이는 내용도 없어서 owner 결정 없이 planner 위임으로 수락해요. 근거는 아래 「왜 owner 결정이 필요 없는가」 네 가지예요. 공개 API·DB 계약은 바뀌지 않지만 Agent Port와 감사 기록을 건드려서, ADR-0100에 따라 이 Accepted가 구현 머지 조건이에요. 초안은 같은 날 Proposed였어요(#4618 1단계).
+- 결재 기록 (planner 위임, 2026-10-27, #4618 2단계 지시): ① 이 증보를 Accepted로 수락해요. ② 1단계가 이슈 본문(method·도구·결과)보다 넓힌 두 가지, 곧 서버가 센 **개수**(`events`·`agent_jobs`·`jobs`)와 거절 **이유** `reason`을 승인해요. 배포→관찰 한 번이 비싸서 한 번에 원인을 가르려는 것이고, 거절 이유는 **닫힌 어휘로만** 둬요(호출자가 고른 문자열의 일부도 안 들어가요). ③ owner에게는 사후 보고해요.
 - 근거: 이슈 #4618과 코멘트 두 개(2026-10-26, 운영 읽기 전용 집계). 2026-10-15·10-24 증보와 같은 줄기예요(「에이전트가 살아 있는데 일을 안 가져간다」를 서버 사실로 가른다).
 - 표기: [V] 코드·운영 직접 확인 · **[추정]** 해석
 
@@ -649,13 +650,13 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 **A5. 실패해도 응답은 그대로예요.** 기록 tx가 실패하거나 2초를 넘으면 경고 로그만 남기고 버려요. 응답·다른 감사 행·liveness·`tool_call`은 영향이 없어요. 시험이 기록 INSERT를 거절하는 트리거를 걸고 확인해요.
 
-**A6. 읽는 법.** 관리자 감사 표면(`audit_log`)만이에요. 새 API·새 화면·새 테이블·마이그레이션이 없어요. 이 행을 읽는 클라이언트 코드는 만들지 않아요.
+**A6. 읽는 길.** `audit_log`를 읽는 기존 길뿐이에요. 새 API·새 화면·새 테이블·마이그레이션이 없고, 이 행을 읽는 클라이언트 코드는 만들지 않아요. 오늘은 감사 행을 목록으로 읽는 REST 경로가 서버에 없어서(아래 「왜 owner 결정이 필요 없는가」 2) 운영 관찰은 DB 읽기 전용 집계(planner)로 해요.
 
 ### 읽는 법 (깨운 뒤 그 에이전트의 행을 시각순으로)
 
 | 보이는 것 | 뜻 | 다음 |
 |---|---|---|
-| 행이 없다 | 호출이 서버에 닿지 않았거나 인증 단계에서 거절(401/403/429) | 기존 `auth.agent_bearer.*`·`agent_port.rate_limit.denied` 감사 |
+| 행이 없다 | 호출이 서버에 닿지 않았거나 인증 단계에서 거절(401/403/429)이에요. 또는 이 자격이 그 시간의 상한(240행)에 이미 닿았거나(로그 `Agent Port call trace capped`), 기록이 실패했어요(로그 `Agent Port call trace write failed`·`write timed out`) | 기존 `auth.agent_bearer.*`·`agent_port.rate_limit.denied` 감사. `auth.agent_bearer.used`는 쌓이는데 이 행만 전혀 없으면 배포가 안 됐거나 기록이 막힌 거예요 |
 | `protocol_error` + `reason` | 런타임이 요청을 잘못 만들었어요. `parse_error`(JSON 깨짐: 문자열에 줄바꿈이 들어가는 쉘 보간 등) · `accept`(Accept에 `text/event-stream` 없음) · `content_type` · `version_header`(modern `_meta`인데 `MCP-Protocol-Version` 헤더 없음) · `version_mismatch` · `mcp_method_header`·`mcp_name_header`(헤더가 본문과 다름 — 이전 호출의 `curl`을 재사용할 때 흔해요) · `modern_meta` · `request_shape` · `method_not_found` | 서버 문제가 아니라 루틴 지시문·런타임 쪽이에요. 이유 토큰이 고칠 곳을 말해 줘요 |
 | `tools/list` `tools_listed` < 13 | 범위가 모자란 연결 | 승인 범위·토큰 범위 확인 |
 | `tools/call` `unknown` 또는 카탈로그 이름 + `invalid_arguments` | 없는 도구나, view가 못 쓰는 도구를 불렀어요 | 범위 또는 루틴이 부르는 이름 |
@@ -667,12 +668,17 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 ### 왜 owner 결정이 필요 없는가
 
-1. **새 저장소·새 권한·새 API가 없어요.** `audit_log`에 행 종류(`action`) 하나를 더할 뿐이에요. 스키마·RLS·역할·GRANT는 그대로예요(2026-10-14 증보와 같은 등급이에요).
-2. **새로 보이는 정보가 없어요.** 호출한 에이전트가 이미 아는 사실(자기가 부른 method·도구와 서버의 답)과, 서버가 자기 응답에서 센 정수예요. 읽을 수 있는 사람은 지금 `audit_log`를 읽는 관리자뿐이에요. 2026-10-15 증보(T1)가 `?include=tools`로 채널 멤버에게도 연 것(도구 이름·시간·성공 여부)보다 좁아요.
-3. **밖으로 나가는 것이 없어요.** 어떤 외부 호출·웹훅·푸시도 이 행에서 일어나지 않아요.
-4. **동작이 안 바뀌어요.** 응답 본문·상태·헤더·제한·인증은 그대로예요. 호출당 INSERT 1건이 더해질 뿐이고(지금도 `used`와 liveness가 있어요), 자격당 시간당 240행으로 닫혀 있어요.
-5. **되돌리기가 쉬워요.** `trace_call` 호출 두 곳을 지우면 새 행이 안 쌓여요. 쌓인 행은 감사 표에 남지만 읽는 소비자가 없어서 해가 없어요.
-6. 남는 주의: 이 행은 「서버가 본 호출」이에요. 호출자가 보낸 도구 이름은 `unknown`까지만 알 수 있고, 에이전트가 하려던 일을 알려 주지 않아요.
+planner 위임으로 수락하는 근거는 넷이에요(2026-10-14 증보와 같은 형식이에요).
+
+1. **새로 보이는 내용이 없어요 — 본문·인자·토큰이 없어요.** 행에는 닫힌 어휘(`method`·`tool`·`outcome`·`reason`·`era`)와 HTTP 상태·JSON-RPC 코드, 서버가 자기 응답에서 센 정수(`tools_listed`·`events`·`agent_jobs`·`jobs`)만 실려요. 인자의 이름과 값·커서·`leaseHandle`·요청 `id`·헤더 값·채널/메시지/run id·본문·오류 문장·토큰, 그리고 호출자가 고른 문자열의 일부는 읽지도 않고(타입 `&'static str`·정확 일치 표), 시험이 값이 새지 않는 것을 잠가요(A3). 호출한 에이전트가 이미 아는 사실(자기가 부른 method·도구와 서버의 답)과 서버가 센 숫자라서, 2026-10-15 증보(T1)가 `?include=tools`로 채널 멤버에게도 연 것(도구 이름·시간·성공 여부)보다 좁아요. 밖으로 나가는 호출·웹훅·푸시도 이 행에서는 일어나지 않아요.
+2. **기존 감사 열람 범위 그대로예요.** 새 테이블·열·권한·API·화면이 없어요. `audit_log`에 행 종류(`action`) 하나를 더할 뿐이고, 스키마·RLS·역할·GRANT는 그대로예요.
+   - 오늘 `audit_log`를 목록으로 읽는 REST 경로는 서버에 없어요. OpenAPI의 `listWorkspaceAudit`은 핸들러가 등록되지 않은 폐기 경로예요(`docs/security/README.ko.md` 126행, ADR-0183 판정표). 그래서 이 행을 읽는 사람은 운영 DB를 직접 읽을 수 있는 운영자뿐이에요.
+   - 나중에 감사 목록 API가 생기면 그 API의 열람 범위(owner/admin)를 따라가요. 이 행만 따로 열거나 닫지 않아요.
+   - 서버 코드에서 `audit_log`를 읽는 쿼리 열두 곳(2026-10-27 전수 확인)은 모두 특정 `action`이나 `run_id`·`target_type = 'work_control'`로 좁혀서 읽어요. 이 행(`target_type = 'route'`, `run_id` 없음)은 그 어느 쿼리에도 걸리지 않아요.
+3. **시간당 240행 상한이 있어요.** 자격(토큰 id)당 시간당 240행이고(전용 타입 `CallTraceBudget`, A4), 넘으면 그 시간이 지날 때까지 이 행만 안 써요. 호출은 막지 않고 쌓인 행도 지우지 않아요. 상한이 없다면 입장 속도 제한(토큰당 분당 240·에이전트당 분당 480)만큼, 토큰당 시간당 14,400행까지 쌓일 수 있어서 상한은 그 1/60이에요. 15분 박자 루틴은 시간당 수십 행이고, 하루 최대는 자격당 5,760행으로 닫혀요. 인증과 속도 제한을 통과한 호출만 기록하고, 응답 본문·상태·헤더·제한·인증은 그대로예요(호출당 INSERT 한 건이 더해질 뿐이에요).
+4. **되돌리기가 쉬워요.** `trace_call` 호출 두 곳을 지우면 새 행이 안 쌓여요. 쌓인 행은 감사 표에 남지만 읽는 소비자가 없어서 해가 없어요. 기록이 실패해도 응답은 바뀌지 않아요(경고 로그만, A5).
+
+남는 주의 둘. ① 이 행은 「서버가 본 호출」이에요. 호출자가 보낸 도구 이름은 카탈로그 이름이나 `unknown`까지만 알 수 있고, 에이전트가 하려던 일은 알려 주지 않아요. ② 기록은 답이 정해진 뒤 응답을 보내기 **전에** 기다려요(별도 tx, 2초 제한). 느린 DB에서는 호출당 최대 2초가 늘 수 있어요. 2026-10-15 증보(T1)의 `tool_call`·liveness 기록과 같은 방식·같은 한도예요.
 
 ### 불변식 대조
 
@@ -684,4 +690,5 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 - **#4618 (engine) 1단계.** `momo-mcp`의 `call_shape`·`outcome_code`·`response_rpc_code`·`result_counts`(순수 함수, 닫힌 어휘), `routes/agent_port.rs` `trace_call`, `rate_limit.rs` `CallTraceBudget`.
 - 시험: `momo-mcp/tests/call_trace.rs`(어휘가 닫혀 있다·`ToolFailure` 변종마다 결과 토큰이 같다·개수는 서버 응답에서만) · `momo-mcp/tests/refusal_reason.rs`(실제 거절 요청 40여 건이 각자의 토큰·상태·코드를 내요·`ToolFailure` 변종마다 토큰·디스패처의 모든 문장이 표에 있다·표에 없는 문장은 `other`) · `bins/momo-server/tests/agent_port_call_trace_pg.rs`(모든 종류의 호출이 정확히 한 행·값이 안 새요·상한·기록 실패가 응답을 못 바꿔요·개수가 「job을 봤는데 안 가져감」을 가려요) · `bins/momo-server/tests/grok_like_agent_flow_pg.rs`(현행 루틴대로 부르는 클라이언트의 DM·멘션·연속 DM 재현) · `rate_limit.rs` 단위(시간 주입).
-- 2단계는 workspace 게이트·보안 검수·PR이에요. 배포 뒤 운영 관찰은 planner가 해요.
+- **#4618 (engine) 2단계.** workspace 게이트(`cargo fmt/clippy/test`)·독립 보안 검수(Blocker 0·High 0)·PR이에요. 검증 증거의 정본은 PR 본문이에요.
+- 배포 뒤 운영 관찰은 planner가 읽기 전용 집계로 해요. 서버만 배포하면 되고(앱 빌드 없음), 에이전트를 한 번 깨운 뒤 최근 3시간의 `agent_port.call` 행을 시각순으로 위 「읽는 법」 표대로 읽어요. 이 증보는 원인을 고치지 않고 **어디서 멈추는지를 가르는 것**까지가 범위예요. 고치는 일은 갈린 결과에 따라 후속으로 해요.
