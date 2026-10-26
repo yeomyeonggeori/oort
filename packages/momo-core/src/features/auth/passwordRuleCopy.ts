@@ -39,18 +39,18 @@ export const PASSWORD_TOO_LONG_CODE = "password_too_long";
  * rule's sentence.
  *
  * The ceiling is bytes, not characters, and a person types characters. So the
- * long sentence gives the exchange rate, which holds for any mix of scripts,
- * instead of two per-script limits that read as independent: twenty Hangul and
- * thirteen digits are inside both "24 Hangul" and "72 Latin" and still 73 bytes.
- * The register is the form's (합니다체); the rate is stated the way
- * `eventSubscriptions.ts` states its own byte ceiling.
+ * long sentence gives the exchange rate (a Hangul syllable is three bytes),
+ * which holds for any mix of scripts, instead of two per-script limits that read
+ * as independent: twenty Hangul and thirteen digits are inside both "24 Hangul"
+ * and "72 Latin" and still 73 bytes. The register is the form's (합니다체); the
+ * rate is stated the way `eventSubscriptions.ts` states its own byte ceiling.
  */
 export function passwordRuleCopy(code: string | undefined): string | null {
   switch (code) {
     case PASSWORD_TOO_SHORT_CODE:
       return `비밀번호가 너무 짧습니다. ${NEW_PASSWORD_MIN_CHARS}자 이상으로 입력하세요.`;
     case PASSWORD_TOO_LONG_CODE:
-      return `비밀번호가 너무 깁니다. ${NEW_PASSWORD_MAX_BYTES}바이트 이하로 입력하세요. 한 자에 영문·숫자·기호는 1바이트, 한글은 ${HANGUL_SYLLABLE_BYTES}바이트라서 한글만이면 ${NEW_PASSWORD_MAX_HANGUL}자까지입니다.`;
+      return `비밀번호가 너무 깁니다. ${NEW_PASSWORD_MAX_BYTES}바이트 이하로 입력하세요. 한글은 한 자에 ${HANGUL_SYLLABLE_BYTES}바이트입니다(한글만이면 ${NEW_PASSWORD_MAX_HANGUL}자).`;
     default:
       return null;
   }

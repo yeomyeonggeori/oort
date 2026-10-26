@@ -18,18 +18,20 @@ describe("passwordRuleCopy", () => {
 
   it("says the byte ceiling and the exchange rate for a too-long password", () => {
     expect(passwordRuleCopy("password_too_long")).toBe(
-      "비밀번호가 너무 깁니다. 72바이트 이하로 입력하세요. 한 자에 영문·숫자·기호는 1바이트, 한글은 3바이트라서 한글만이면 24자까지입니다."
+      "비밀번호가 너무 깁니다. 72바이트 이하로 입력하세요. 한글은 한 자에 3바이트입니다(한글만이면 24자)."
     );
   });
 
   it("gives a mix of scripts a rate to compute with, not two independent limits", () => {
     // Twenty Hangul and thirteen digits are inside "24 Hangul" and inside "72
     // Latin" taken one at a time, and still 73 bytes. The sentence has to let a
-    // person work that out, so it must state a rate for each class it names.
+    // person work that out: one byte budget, and what a Hangul syllable costs
+    // against it. The old per-script pair read as two limits.
     const sentence = passwordRuleCopy("password_too_long") ?? "";
-    expect(sentence).toContain("영문·숫자·기호는 1바이트");
-    expect(sentence).toContain("한글은 3바이트");
+    expect(sentence).toContain("72바이트 이하");
+    expect(sentence).toContain("한글은 한 자에 3바이트");
     expect(sentence).not.toContain("영문은 72자");
+    expect(sentence).not.toContain("한글은 24자");
   });
 
   it("names no rule for a code it does not know, or for none", () => {

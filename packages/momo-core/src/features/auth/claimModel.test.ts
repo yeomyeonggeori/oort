@@ -59,8 +59,8 @@ describe("claimFailureCopy", () => {
       )
     );
     expect(copy.message).toContain("72바이트");
-    expect(copy.message).toContain("한글은 3바이트");
-    expect(copy.message).toContain("24자까지");
+    expect(copy.message).toContain("한글은 한 자에 3바이트");
+    expect(copy.message).toContain("한글만이면 24자");
     expect(copy.message).not.toContain("10자 이상");
     expect(copy.keepForm).toBe(true);
     expect(copy.retryable).toBe(false);

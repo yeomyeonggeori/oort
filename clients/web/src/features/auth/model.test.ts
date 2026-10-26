@@ -342,7 +342,7 @@ describe("failure copy", () => {
       )
     );
     expect(long.message).toContain("72바이트");
-    expect(long.message).toContain("한글은 3바이트");
+    expect(long.message).toContain("한글은 한 자에 3바이트");
     expect(long.message).not.toContain("초대");
     expect(long.onGateway).toBeUndefined();
     expect(long.retryable).toBe(false);
