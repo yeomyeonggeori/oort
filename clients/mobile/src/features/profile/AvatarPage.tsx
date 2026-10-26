@@ -3,11 +3,12 @@ import {memberFor, type Directory} from '@momo/core/features/workspace/directory
 import {removeMyAvatar, type RosterMember} from '@momo/core/lib/api';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useRef, useState} from 'react';
-import {ActivityIndicator, Linking, StyleSheet, View} from 'react-native';
+import {Linking, StyleSheet, View} from 'react-native';
 
-import {GroupRow, GroupSection, NoticeBlock, Sentence} from '../../design/atoms';
-import {usePalette, useStyles} from '../../design/theme';
-import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {NoticeBlock, Sentence} from '../../design/atoms';
+import {GroupCard} from '../../design/sheetParts';
+import {useStyles} from '../../design/theme';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {Avatar} from '../conversation/Avatar';
 import {useOnline} from '../inbox/useOnline';
 import {workspaceKeys} from '../workspace/queries';
@@ -19,12 +20,14 @@ import {
   type AvatarSource,
 } from './avatarPhoto';
 import {nativeAvatarPhotoPorts} from './avatarPhotoNative';
+import {PROFILE_FACE, useFaceRing} from './ProfileFace';
+import {ActionRow} from './settingsRows';
 
 // =============================================================================
-// 프로필 사진 — 프로필 시트 안의 한 장 (#4384, owner 10-25).
+// 프로필 사진 — 설정 페이지 위의 안쪽 장 (#4384, owner 10-25; #4457 에서 시트 안의 장 → 안쪽 장).
 //
 // 「모바일에서 프로필 이미지를 바꿀 수 있는 수단이 없다」. 머리의 큰 얼굴(또는 그 밑의 「사진
-// 바꾸기」)이 이 장을 연다. 시트 위에 시트를 겹치지 않는다(테마·상태 글·기한 장과 같은 문법) —
+// 바꾸기」)이 이 장을 연다. 시트 위에 시트를 겹치지 않는다(테마·기한 장과 같은 안쪽 장 문법, 머리는 ‹) —
 // 이슈의 「사진 고르기 · 사진 찍기 · 사진 지우기(있을 때)」 세 줄이 이 장이다.
 //
 // 고르면 시스템 편집기가 정사각으로 자르게 하고(가운데 기본, 끌어 조정), 512 로 줄여 올린다
@@ -49,13 +52,13 @@ export function AvatarPage({
   workspaceId: string;
   selfId: string;
   directory: Directory;
-  /** 바뀌었거나 지워졌으면 부른다 — 시트가 프로필로 돌아간다. */
+  /** 바뀌었거나 지워졌으면 부른다 — 이 장이 걷히고 설정 페이지로 돌아간다. */
   onDone: () => void;
   /** 시험이 바꿔 끼운다. 앱은 네이티브 포트다. */
   ports?: AvatarPhotoPorts;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
+  const faceRing = useFaceRing();
   const client = useQueryClient();
   const online = useOnline();
   const [busy, setBusy] = useState<Busy>(null);
@@ -116,18 +119,13 @@ export function AvatarPage({
       return true;
     });
 
-  const spinner = (
-    <ActivityIndicator
-      color={palette.textMuted}
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-    />
-  );
-
   return (
     <View style={styles.page} testID="avatar-page">
       <View style={styles.preview}>
-        <Avatar directory={directory} memberId={selfId} size={PREVIEW_AVATAR} />
+        {/* 설정 본 페이지의 머리와 같은 크기·같은 링 — 맨몸이면 다크에서 얼굴이 바탕과 1.04:1 로 사라진다. */}
+        <View style={faceRing} testID="avatar-page-face">
+          <Avatar directory={directory} memberId={selfId} size={PROFILE_FACE} />
+        </View>
         <Sentence style={styles.caption} testID="avatar-page-description">
           정사각으로 잘려 모든 대화에 보여요. 위치 정보는 지워지고 올라가요.
         </Sentence>
@@ -139,41 +137,43 @@ export function AvatarPage({
         </View>
       )}
 
-      <GroupSection>
-        <GroupRow
+      <GroupCard testID="avatar-card">
+        <ActionRow
           title="사진 고르기"
           detail="사진 보관함에서 골라요"
-          chevron={busy !== 'library'}
+          chevron
+          pending={busy === 'library'}
           disabled={locked}
           onPress={() => choose('library')}
-          trailing={busy === 'library' ? spinner : undefined}
           testID="avatar-choose-library"
         />
         {cameraAvailable ? (
-          <GroupRow
+          <ActionRow
             title="사진 찍기"
             detail="카메라로 지금 찍어요"
-            chevron={busy !== 'camera'}
-            separated
+            chevron
+            pending={busy === 'camera'}
             disabled={locked}
             onPress={() => choose('camera')}
-            trailing={busy === 'camera' ? spinner : undefined}
             testID="avatar-choose-camera"
           />
         ) : null}
-        {hasPhoto ? (
-          <GroupRow
+      </GroupCard>
+
+      {/* 파괴 행은 따로 선 카드다(`phone-sheets.md` §5, 설정의 「로그아웃」·상태 시트의 「상태 지우기」와 같다). */}
+      {hasPhoto ? (
+        <GroupCard testID="avatar-remove-card">
+          <ActionRow
             title="사진 지우기"
             detail="이름의 첫 글자로 돌아가요"
             tone="danger"
-            separated
+            pending={busy === 'remove'}
             disabled={locked}
             onPress={remove}
-            trailing={busy === 'remove' ? spinner : undefined}
             testID="avatar-remove"
           />
-        ) : null}
-      </GroupSection>
+        </GroupCard>
+      ) : null}
 
       {failure ? (
         <View style={styles.failureBlock}>
@@ -184,15 +184,15 @@ export function AvatarPage({
             {failure.text}
           </Sentence>
           {failure.settings ? (
-            <GroupSection>
-              <GroupRow
+            <GroupCard>
+              <ActionRow
                 title="설정 열기"
                 chevron
                 tone="accent"
                 onPress={() => void Linking.openSettings()}
                 testID="avatar-open-settings"
               />
-            </GroupSection>
+            </GroupCard>
           ) : null}
         </View>
       ) : null}
@@ -200,24 +200,21 @@ export function AvatarPage({
   );
 }
 
-/** 이 장의 큰 얼굴. 머리의 80 보다 한 단 크다 — 지금 무엇이 올라가 있는지 보이는 자리다. */
-const PREVIEW_AVATAR = 96;
-
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    page: {gap: space.xl},
-    preview: {alignItems: 'center', gap: space.md, paddingHorizontal: SAFE_GUTTER},
+    // 카드는 폭 전체로 서고 가로 여백은 호스트가 진다(`GroupCard`) — 이 장이 진다. 카드 사이 16(설정 본 페이지와 같다).
+    page: {gap: space.lg, paddingHorizontal: SAFE_GUTTER},
+    preview: {alignItems: 'center', gap: space.md},
     caption: {
       fontSize: font.label,
       color: color.textMuted,
-      lineHeight: 18,
+      lineHeight: line.label,
       textAlign: 'center',
     },
     failureBlock: {gap: space.md},
     failure: {
       fontSize: font.label,
       color: color.dangerText,
-      lineHeight: 18,
-      paddingHorizontal: SAFE_GUTTER,
+      lineHeight: line.label,
     },
   });

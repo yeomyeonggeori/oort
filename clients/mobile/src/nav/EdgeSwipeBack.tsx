@@ -24,8 +24,16 @@ import {
   settles,
   type EdgeSwipeState,
 } from './edgeSwipe';
+import {
+  EASE_OUT,
+  LAYER_POP_MS,
+  LAYER_PUSH_MS,
+  LAYER_RISE_MS,
+  LAYER_SINK_MS,
+} from '../design/motion';
 import {type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
+import {useReduceMotionRef} from '../lib/useReduceMotion';
 
 // =============================================================================
 // 셸 위로 push 된 화면을 좌측 엣지에서 밀어 닫는다.
@@ -81,6 +89,21 @@ import {useStyles} from '../design/theme';
 // 래퍼는 부모에게 **자기가 있다는 것을 알린다**. 자식이 하나라도 있으면 부모는 무장을
 // 풀고, capture 에서 false 를 돌려주므로 질문은 그대로 안쪽까지 내려간다. 전역 스택도
 // 아니고 화면들이 서로를 알 필요도 없다 — 트리가 이미 알고 있는 것을 쓴다.
+//
+// ## 들어오고 나가는 움직임은 **옵트인**이다 (#4457)
+//
+// 앱의 층은 지금까지 모두 움직임 없이 서고(들어올 때) 가장자리 밀기로만 미끄러져 나갔다. 설정 페이지가 그 규칙에
+// 예외를 처음 둔다(planner 결정): 첫 장은 모달 페이지처럼 **아래에서 올라오고**(`enter="rise"`), 그 위의 안쪽 장은
+// 스택처럼 **오른쪽에서 밀려 들어온다**(`enter="push"`). `enter` 를 안 준 층(나머지 전부)은 한 줄도 달라지지 않는다.
+//
+// 들어옴은 마운트 때 한 번이다. **나감**은 머리의 X·‹ 와 VoiceOver escape 가 `useLayerClose()` 로 부른다 —
+// 올라온 길의 반대로(올라온 층은 내려가고, 밀려 들어온 층은 오른쪽으로 물러난다). 안 그러면 들어올 때는 미끄러지고
+// 나갈 때는 사라져서 한 쌍으로 읽히지 않는다. 가장자리 밀기는 그대로 손가락을 따라 오른쪽으로 나가는 별개의 길이다.
+// 값(시간·곡선)은 `design/motion.ts` 의 `LAYER_*` 이고 사다리 안이다. 「동작 줄이기」면 움직임이 0 이다 — 처음부터
+// 자리에 서고, 누르면 바로 걷힌다.
+//
+// **나가는 약속도 렌더러에 매달지 않는다**(위 「애니메이션은 장식」과 같은 이유): 층을 걷는 `onBack` 은 애니메이션의
+// 완료 콜백이 아니라 같은 길이의 타이머가 부른다.
 // =============================================================================
 
 /** 안쪽 래퍼가 바깥 래퍼에게 자기 존재를 알리는 통로. */
@@ -90,6 +113,23 @@ interface Nesting {
 }
 
 const NestingContext = createContext<Nesting | null>(null);
+
+/**
+ * 층이 어떻게 들어오는가. 없으면 움직임 없이 선다(지금까지의 모든 층). `rise` 는 아래에서 올라오는 모달 페이지,
+ * `push` 는 오른쪽에서 밀려 들어오는 스택의 안쪽 장.
+ */
+export type LayerEnter = 'rise' | 'push';
+
+const LayerCloseContext = createContext<(() => void) | null>(null);
+
+/**
+ * 이 층을 **움직임과 함께** 닫는다 — 층 안의 머리 단추(X·‹)와 VoiceOver escape 가 부른다. 들어온 길의 반대로
+ * 나간 뒤(`enter` 가 없거나 동작 줄이기면 바로) 층의 `onBack` 을 한 번 부른다. 이미 나가는 중이면 아무 일도 없다.
+ * 층 밖(하네스·시험)에서는 `null` 이라 부르는 쪽이 제 `onBack` 으로 물러선다: `useLayerClose() ?? onBack`.
+ */
+export function useLayerClose(): (() => void) | null {
+  return useContext(LayerCloseContext);
+}
 
 /** 테스트가 화면의 위치를 읽는 이음매. `Timeline` 의 `metricsRef` 와 같은 성격. */
 export type EdgeSwipeProgressRef = React.MutableRefObject<number | null>;
@@ -101,6 +141,7 @@ export function EdgeSwipeBack({
   enabled = true,
   accessibilityViewIsModal,
   progressRef,
+  enter,
   testID = 'edge-swipe-pane',
 }: {
   /** 제스처가 끝까지 갔을 때 부르는 것. 화면을 실제로 닫는 쪽의 몫이다. */
@@ -116,11 +157,29 @@ export function EdgeSwipeBack({
   /** iOS VoiceOver modal boundary; it must live on this actual overlay sibling. */
   accessibilityViewIsModal?: boolean;
   progressRef?: EdgeSwipeProgressRef;
+  /** 들어오는 움직임(위 「옵트인」). 안 주면 지금까지처럼 움직임 없이 선다. */
+  enter?: LayerEnter;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {width} = useWindowDimensions();
+  const {width, height} = useWindowDimensions();
   const translateX = useRef(new Animated.Value(0)).current;
+  // 들어오고 나가는 오프셋(`enter` 가 있을 때만 0 이 아니다): `rise` 는 세로, `push` 는 가로 한 축이다. 가장자리
+  // 밀기의 `translateX` 와는 별개 값이라 둘이 서로를 덮지 않는다.
+  const reduceMotion = useReduceMotionRef();
+  const enterOffset = useRef(
+    new Animated.Value(
+      enter === undefined || reduceMotion.current
+        ? 0
+        : enter === 'rise'
+          ? height
+          : width,
+    ),
+  ).current;
+  const pushX = useMemo(
+    () => Animated.add(translateX, enterOffset),
+    [translateX, enterOffset],
+  );
 
   // ---- 겹침: 자식이 있으면 물러난다 ------------------------------------------
   const parent = useContext(NestingContext);
@@ -148,14 +207,19 @@ export function EdgeSwipeBack({
   onBackRef.current = onBack;
   const widthRef = useRef(width);
   widthRef.current = width;
+  const heightRef = useRef(height);
+  heightRef.current = height;
 
   const stateRef = useRef<EdgeSwipeState>(IDLE);
   /** 화면이 마지막으로 「가 있으라」고 들은 위치. 남은 거리를 재는 데 쓴다. */
   const atRef = useRef(0);
   /** 놓은 뒤 미끄러지는 중. 그 사이에 다시 잡히지 않는다. */
   const settlingRef = useRef(false);
+  /** `useLayerClose` 로 나가는 중. 그 사이에는 가장자리도 다시 잡히지 않고, 두 번째 부름은 무시된다. */
+  const closingRef = useRef(false);
   const mountedRef = useRef(true);
   const commitRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const exitRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   const write = useCallback(
     (value: number) => {
@@ -170,9 +234,54 @@ export function EdgeSwipeBack({
     () => () => {
       mountedRef.current = false;
       if (commitRef.current !== undefined) clearTimeout(commitRef.current);
+      if (exitRef.current !== undefined) clearTimeout(exitRef.current);
     },
     [],
   );
+
+  // ---- 들어옴: 마운트 때 한 번. 동작 줄이기면 처음부터 자리에 선다 ----------------------
+  useEffect(() => {
+    if (enter === undefined) return;
+    if (reduceMotion.current) {
+      enterOffset.setValue(0);
+      return;
+    }
+    Animated.timing(enterOffset, {
+      toValue: 0,
+      duration: enter === 'rise' ? LAYER_RISE_MS : LAYER_PUSH_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    }).start();
+  }, [enter, enterOffset, reduceMotion]);
+
+  // ---- 나감: 들어온 길의 반대로 나간 뒤 `onBack` ------------------------------------------
+  // 움직임은 장식이고 `onBack` 은 사실이다 — 완료 콜백이 아니라 같은 길이의 타이머가 부른다.
+  const close = useCallback(() => {
+    if (closingRef.current) return;
+    if (enter === undefined || reduceMotion.current) {
+      onBackRef.current();
+      return;
+    }
+    closingRef.current = true;
+    const duration = enter === 'rise' ? LAYER_SINK_MS : LAYER_POP_MS;
+    Animated.timing(enterOffset, {
+      toValue: enter === 'rise' ? heightRef.current : widthRef.current,
+      duration,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    }).start();
+    exitRef.current = setTimeout(() => {
+      exitRef.current = undefined;
+      closingRef.current = false;
+      if (!mountedRef.current) return;
+      onBackRef.current();
+      // `onBack` 이 층을 걷어내지 않으면 화면이 밖에 나간 채 남는다 — 다음 프레임에 제자리로 돌린다
+      // (걷어내면 이미 언마운트라 아무 일도 하지 않는다. 가장자리 밀기 쪽과 같은 방어).
+      requestAnimationFrame(() => {
+        if (mountedRef.current) enterOffset.setValue(0);
+      });
+    }, duration);
+  }, [enter, enterOffset, reduceMotion]);
 
   // ===========================================================================
   // 놓은 뒤: 애니메이션은 **장식**이고, 네비게이션은 **사실**이다
@@ -238,7 +347,10 @@ export function EdgeSwipeBack({
             touches: touches?.length ?? 1,
             point: {x: pageX, y: pageY},
           },
-          {enabled: armedRef.current && !settlingRef.current},
+          {
+            enabled:
+              armedRef.current && !settlingRef.current && !closingRef.current,
+          },
         );
         stateRef.current = state;
         return false;
@@ -248,7 +360,10 @@ export function EdgeSwipeBack({
         const {state, claims} = edgeSwipeStep(
           stateRef.current,
           {kind: 'move', point: {x: pageX, y: pageY}},
-          {enabled: armedRef.current && !settlingRef.current},
+          {
+            enabled:
+              armedRef.current && !settlingRef.current && !closingRef.current,
+          },
         );
         stateRef.current = state;
         return claims;
@@ -294,19 +409,25 @@ export function EdgeSwipeBack({
     }),
   ).current;
 
+  // `enter` 가 없으면 변환 배열이 지금까지와 한 글자도 다르지 않다.
+  const transform =
+    enter === 'push'
+      ? [{translateX: pushX}]
+      : enter === 'rise'
+        ? [{translateX}, {translateY: enterOffset}]
+        : [{translateX}];
+
   return (
     <NestingContext.Provider value={nesting}>
-      <Animated.View
-        accessibilityViewIsModal={accessibilityViewIsModal}
-        style={[
-          style,
-          styles.pane,
-          {transform: [{translateX}]},
-        ]}
-        testID={testID}
-        {...responder.panHandlers}>
-        {children}
-      </Animated.View>
+      <LayerCloseContext.Provider value={close}>
+        <Animated.View
+          accessibilityViewIsModal={accessibilityViewIsModal}
+          style={[style, styles.pane, {transform}]}
+          testID={testID}
+          {...responder.panHandlers}>
+          {children}
+        </Animated.View>
+      </LayerCloseContext.Provider>
     </NestingContext.Provider>
   );
 }
