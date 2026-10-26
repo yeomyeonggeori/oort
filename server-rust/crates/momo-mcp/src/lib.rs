@@ -247,6 +247,113 @@ pub fn request_shape(body: &[u8]) -> RequestShape {
     }
 }
 
+/// The JSON-RPC methods this server answers. The only `method` values a call trace
+/// ever carries besides [`CALL_METHOD_OTHER`], [`CALL_METHOD_UNPARSED`] and
+/// [`CALL_METHOD_NONE`].
+pub const CALL_METHODS: [&str; 6] = [
+    "initialize",
+    "notifications/initialized",
+    "ping",
+    "tools/list",
+    "tools/call",
+    "server/discover",
+];
+/// A well-formed request whose method is not one of [`CALL_METHODS`].
+pub const CALL_METHOD_OTHER: &str = "other";
+/// The body is not JSON at all (a broken string, a truncated body, a stray newline).
+pub const CALL_METHOD_UNPARSED: &str = "unparsed";
+/// The body is JSON but names no method (a batch array, an object without `method`).
+pub const CALL_METHOD_NONE: &str = "no_method";
+/// A `tools/call` whose `params.name` is not a [`TOOL_CATALOG`] name (or is absent).
+pub const CALL_TOOL_UNKNOWN: &str = "unknown";
+
+/// What one Agent Port call was, in **closed vocabulary only** (ADR-0200 증보 4, #4618).
+///
+/// Both fields are `&'static str` on purpose: the only way to build one is to pick a
+/// string this crate owns, so a method or tool name the *caller* chose can never reach
+/// the audit row this feeds — not a prefix of it, not a truncation, not a hash.
+/// Arguments, cursors, handles and every other value are not read at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallShape {
+    /// One of [`CALL_METHODS`], [`CALL_METHOD_OTHER`], [`CALL_METHOD_UNPARSED`] or
+    /// [`CALL_METHOD_NONE`].
+    pub method: &'static str,
+    /// For a `tools/call` only: the [`TOOL_CATALOG`] name it asked for, or
+    /// [`CALL_TOOL_UNKNOWN`]. The catalog name is recorded even when this caller's view
+    /// cannot call it — which is exactly the diagnosis "it asked for a tool it was not
+    /// given" — and the wire answer stays the same "unknown tool" for both.
+    pub tool: Option<&'static str>,
+}
+
+/// Classify a raw Agent Port body. Never fails, never echoes a caller string.
+pub fn call_shape(body: &[u8]) -> CallShape {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return CallShape {
+            method: CALL_METHOD_UNPARSED,
+            tool: None,
+        };
+    };
+    let Some(method) = value
+        .as_object()
+        .and_then(|object| object.get("method"))
+        .and_then(Value::as_str)
+    else {
+        return CallShape {
+            method: CALL_METHOD_NONE,
+            tool: None,
+        };
+    };
+    let Some(method) = CALL_METHODS.iter().copied().find(|known| *known == method) else {
+        return CallShape {
+            method: CALL_METHOD_OTHER,
+            tool: None,
+        };
+    };
+    let tool = (method == "tools/call").then(|| {
+        value
+            .get("params")
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("name"))
+            .and_then(Value::as_str)
+            .and_then(|name| TOOL_CATALOG.iter().find(|tool| tool.name == name))
+            .map_or(CALL_TOOL_UNKNOWN, |tool| tool.name)
+    });
+    CallShape { method, tool }
+}
+
+/// The JSON-RPC `error.code` a response body carries, or `None` for a success (or a
+/// body-less answer such as the `202` for `notifications/initialized`).
+pub fn response_rpc_code(body: Option<&[u8]>) -> Option<i64> {
+    serde_json::from_slice::<Value>(body?)
+        .ok()?
+        .get("error")?
+        .get("code")?
+        .as_i64()
+}
+
+/// The closed result token for a response's JSON-RPC code: `ok` for none, the same
+/// seven tokens [`ToolFailure::code`] uses for the tool failures (so a call trace and
+/// the run ledger's `tool_call` rows speak one vocabulary), and `protocol_error` for
+/// everything the transport itself refused (`-32700`, `-32600`, `-32601`, `-32020`,
+/// `-32022`, `-32029`).
+///
+/// `-32602` is `invalid_arguments` for a tool call **and** for a malformed envelope:
+/// the wire already answers both with the same code, and the trace's `method`/`tool`
+/// say which one it was.
+pub fn outcome_code(rpc_code: Option<i64>) -> &'static str {
+    match rpc_code {
+        None => "ok",
+        Some(-32602) => "invalid_arguments",
+        Some(-32003) => "not_authorized",
+        Some(-32004) => "unavailable",
+        Some(-32005) => "conflict",
+        Some(-32006) => "already_claimed",
+        Some(-32007) => "claim_expired",
+        Some(-32603) => "internal",
+        Some(_) => "protocol_error",
+    }
+}
+
 fn dispatch_inner(
     request: HttpRequest<'_>,
     view: &ToolView,
