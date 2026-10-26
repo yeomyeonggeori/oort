@@ -6477,13 +6477,18 @@ function seedAi(surface: string): void {
 /** #4457: 설정 페이지 내용을 진짜 스크롤뷰에 얹고 끝까지 내려 선다(`shell-profile-bottom`). */
 function SettingsBottomSurface(): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const insets = useSafeAreaInsets();
   const scroll = React.useRef<ScrollView>(null);
   return (
     <Screen>
       <ScrollView
         ref={scroll}
         onContentSizeChange={() => scroll.current?.scrollToEnd({animated: false})}
-        contentContainerStyle={styles.settingsBody}
+        // 실제 페이지(`SettingsPage`)와 같은 바닥 여백 — 버전 줄이 홈 인디케이터에 겹치지 않는다.
+        contentContainerStyle={[
+          styles.settingsBody,
+          {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
+        ]}
         testID="settings-scroll">
         <SettingsContent
           workspaceId={HARNESS_MEMBER.workspaceId}
@@ -6504,8 +6509,18 @@ function SettingsBottomSurface(): React.JSX.Element {
   );
 }
 
-const PUSH_CAPTURE_SCROLL = 475;
-const PUSH_CAPTURE_SCROLL_AX = 1160;
+/**
+ * 「알림」 묶음의 첫 줄(푸시 스위치)이 화면 위쪽(상태 막대 아래)에 오도록 설정 내용을 끌어올리는 만큼(pt).
+ * 기준은 99번 흐름이 누르는 자리다: 줄 `profile-push-row` 의 윗변이 y≈83 이라야 스위치 탭 지점(84%,13%)이 스위치 안에 든다.
+ *
+ * #4457 이 설정 본 페이지의 구성(얼굴 → 상태 설정 → 내 상태 → 프로필 → 알림)을 바꿔 다시 쟀다 — iPhone 16 Pro(402×874pt),
+ * `maestro hierarchy` 의 `profile-push-row` bounds(윗변이 83 으로 선다; 높이는 상태 문구 줄 수에 따라 다르다): 기본 글자
+ * 크기 `shell-profile-push-off` [16,83][385,170], 접근성 최대(AX5, `accessibility-extra-extra-extra-large`)
+ * `shell-profile-push-off-ax` [16,83][385,515]. AX 에서는 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로
+ * 끌어올림이 다르다. AX 판의 스위치는 줄 가운데에 서므로 흐름은 줄을 누른다(`TAP=row`).
+ */
+const PUSH_CAPTURE_SCROLL = 483;
+const PUSH_CAPTURE_SCROLL_AX = 1295;
 
 function seedPush(surface: string): void {
   const denied = surface.startsWith('shell-profile-push-denied');
