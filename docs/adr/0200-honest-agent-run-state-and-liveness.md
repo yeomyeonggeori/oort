@@ -609,7 +609,7 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 - [V] 운영 실측(2026-10-26, #4618). grok의 마지막 완료는 10-18 00:30이에요. 그 뒤 실행 3건은 시간 초과 2·대기 1이에요. 도어벨은 `ok_200`이고, grok 자격은 약 15분 박자로 한 번에 3~6번 `POST /v1/mcp/agent-port`를 불러요(전부 허용). 그런데 `claimed`·run 이벤트·메시지가 없어요.
 - [V] 서버가 그 호출을 기억하지 못하는 이유(`track/engine` `b17e1b3df`).
-  - `auth.agent_bearer.used`는 인증 tx 안에서, 본문을 읽기 **전에** 써요. 그래서 경로(`POST /v1/mcp/agent-port`)만 있고 method·도구·결과가 없어요(`auth.rs`).
+  - `auth.agent_bearer.used`는 인증 tx 안에서, 디스패치 **전에** 써요(본문은 이미 읽었지만 method·도구·결과는 아직 몰라요). 그래서 경로(`POST /v1/mcp/agent-port`)만 있고 method·도구·결과가 없어요(`auth.rs`).
   - `hosted_agent_liveness`는 성공한 도구 호출의 시각과, 거절 중 `unavailable`·`not_authorized` 두 가지만 남겨요(`agent_port_tools.rs` `record_liveness`의 `Err(_) => return`).
   - 2026-10-15 증보(T1) `tool_call` 원장은 **run을 가리키는** 호출만 남겨요. `oort_inbox_read`·`oort_ping`·`tools/list`·`initialize`는 run을 가리키지 않아요.
   - `-32602` 거절만 경고 로그(`Agent Port refused request params`)가 있어요(`log_invalid_params`). `-32700`(JSON 깨짐)·`-32600`·`-32601`·`-32020`(헤더 불일치)·`-32022`(버전)·`415`·`413`은 로그도 기록도 없어요.
@@ -621,8 +621,8 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 - `audit_log.action = 'agent_port.call'`, `detail.schema = 'oort.agent_port.call.v1'`이에요.
 - 행위자는 호출한 에이전트 멤버, `target_type = 'route'`예요. `via_token_id`는 비워요. 페어링 자격의 id는 `token` 행이 아니라서 외래 키에 맞지 않아요.
 - 별도의 짧은 테넌트 tx(`momo_app`, BYPASSRLS 없음, 2초 제한)예요. 2026-10-15 증보(T1) `tool_call` 기록과 같은 방식이에요.
-- 인증 실패(401)·범위 없음(403)·속도 제한(429)에는 이 행이 없어요. 그 경우의 기록은 기존 `auth.agent_bearer.scope_denied`·`agent_port.rate_limit.denied`가 맡아요.
-- 전송 거절(헤더 중복·본문 64KiB 초과 등)은 인증 뒤에 답하므로 이 행이 남아요.
+- 인증 실패(401)·범위 없음(403)·속도 제한(429)에는 이 행이 없어요. 그 경우의 기록은 기존 `auth.agent_bearer.scope_denied`·`agent_port.rate_limit.denied`가 맡아요. 429는 신원을 만들기 전에 답하므로 행이 붙을 수 없고, 시험이 입장 제한을 켠 서버에서 확인해요.
+- 전송 거절(헤더 중복·본문 64KiB 초과 등)은 인증 뒤에 답하므로 이 행이 남아요. 본문을 읽지 않은 거절(헤더 길이·개수 초과, 413)의 `method`는 `unparsed`예요(아래 「읽는 법」의 라벨 주의).
 
 **A2. 싣는 것 — 전부 서버가 가진 닫힌 어휘나 서버가 센 숫자예요.**
 
@@ -640,15 +640,15 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 
 **A3. 싣지 않는 것 (T1·T3 규율 그대로).** 인자의 이름과 값, 커서, `leaseHandle`, 요청 `id`, 헤더 값, 채널·메시지·run id, 본문, 오류 문장, 토큰, 그리고 **호출자가 고른 문자열의 일부**(접두·자른 조각·해시 포함)예요.
 - `CallShape.method`·`tool`은 `&'static str`이에요. 호출자의 문자열은 타입 수준에서 이 행에 들어갈 길이 없어요.
-- `reason`은 응답의 `error.message`를 **정확히 일치하는 표(`momo_mcp::REFUSAL_REASONS`)에서만** 찾아 그 표의 토큰을 내보내요. 문장은 복사하지 않아요. 표에 없는 문장(새로 추가했는데 행을 안 단 문장, 앞으로 호출자 글이 섞일지도 모르는 메시지)은 `other`예요. 그래서 닫힘이 구성으로 보장되고, 행이 빠지면 누출이 아니라 `other`로 보여요. `src/lib.rs`의 모든 문장이 표에 있는지 소스 스캔 시험이 잠가요.
+- `reason`은 응답의 `error.message`를 **정확히 일치하는 표(`momo_mcp::REFUSAL_REASONS`)에서만** 찾아 그 표의 토큰을 내보내요. 문장은 복사하지 않아요. 표에 없는 문장(새로 추가했는데 행을 안 단 문장, 앞으로 호출자 글이 섞일지도 모르는 메시지)은 `other`예요. 그래서 닫힘이 구성으로 보장되고, 행이 빠지면 누출이 아니라 `other`로 보여요. `src/lib.rs`에서 리터럴로 쓴 문장이 모두 표에 있는지 소스 스캔 시험이 잠가요. 동적으로 만든 문장(`format!`)은 스캔이 못 보고, 실제 거절 40여 건을 디스패처에 넣는 시험이 보완해요. 닫힘 자체는 정확 일치 조회가 구성으로 지켜요.
 - 개수(A2의 마지막 세 줄)는 호출자 입력이 아니라 서버 응답에서 세요. 이 값들이 2026-10-15 증보(T1)의 「싣지 않는 것: 결과 본문·채널/메시지 id」를 넘지 않는다는 근거예요. 세는 함수는 정수만 돌려주는 `ResultCounts`(`Copy`)예요.
 
-**A4. 상한 — 멈추고, 지우지 않아요(T3과 같은 규칙).** 자격(토큰 id)당 **시간당 240행**이에요. 넘으면 그 시간이 지날 때까지 이 행만 안 써요. 호출 자체는 제한하지 않고, 넘은 만큼을 따로 세지도 않아요.
+**A4. 상한 — 멈추고, 지우지 않아요(T3과 같은 규칙).** 자격(토큰 id)당 **시간당 240행**이에요. 넘으면 이 행만 안 써요. 슬라이딩 창이라 가장 오래된 도장이 1시간을 넘기는 대로 한 칸씩 다시 써요(한 번에 풀리지 않아요). 호출 자체는 제한하지 않고, 넘은 만큼을 따로 세지도 않아요. 쓰기에 실패하거나 시간이 초과돼도 한 칸은 쓴 것으로 세요(행 ≤ 시도).
 - 15분 박자 루틴은 한 번에 3~10번이라 시간당 수십 행이에요.
-- 최악의 하루 크기는 자격당 5,760행으로 닫혀요.
+- 한 자격·한 프로세스 기준으로 최악의 하루 크기는 5,760행이에요. 단위가 토큰 id라서 같은 에이전트의 자격이 여럿이면 그만큼 열려요(OAuth 접근 토큰은 30분마다 갱신되고 갱신마다 새 `token` 행이라 새 예산이에요). 인-프로세스 상태라 재시작·복제본마다 처음부터예요. 에이전트 쪽 천장은 입장 속도 제한(`per_agent_limit` 기본 분당 480, 시간당 28,800 호출)이에요. 이 행은 허용된 호출당 최대 한 줄이라, 같은 호출이 이미 남기는 `auth.agent_bearer.used`(상한 없음)의 행 수를 넘을 수 없어요. 그래서 새 증가 등급이 아니에요(최악도 그 행의 두 배).
 - 상한은 전용 타입 `CallTraceBudget`(`rate_limit.rs`)에 있어요. 공유 limiter는 스윕이 **스윕을 일으킨 호출의 창**(60초)으로 돌아서 1시간 버킷을 잊어요. 같은 이유로 `member_writes`가 따로 있어요. 시험이 시간을 주입해 두 경우를 나란히 보여 줘요.
 
-**A5. 실패해도 응답은 그대로예요.** 기록 tx가 실패하거나 2초를 넘으면 경고 로그만 남기고 버려요. 응답·다른 감사 행·liveness·`tool_call`은 영향이 없어요. 시험이 기록 INSERT를 거절하는 트리거를 걸고 확인해요.
+**A5. 실패해도 응답은 그대로예요.** 기록 tx가 실패하거나 2초를 넘으면 경고 로그만 남기고 버려요. 응답·다른 감사 행·liveness·`tool_call`은 영향이 없어요. 시험이 두 경로를 따로 확인해요. 기록 INSERT를 거절하는 트리거(실패 경로)와, `pg_sleep(4)`를 거는 트리거(2초 시간 초과 경로: 응답이 같고, 행이 안 남고, 응답이 느린 쓰기를 기다리지 않고, 취소된 tx가 풀을 망가뜨리지 않아 다음 호출은 기록돼요)예요.
 
 **A6. 읽는 길.** `audit_log`를 읽는 기존 길뿐이에요. 새 API·새 화면·새 테이블·마이그레이션이 없고, 이 행을 읽는 클라이언트 코드는 만들지 않아요. 오늘은 감사 행을 목록으로 읽는 REST 경로가 서버에 없어서(아래 「왜 owner 결정이 필요 없는가」 2) 운영 관찰은 DB 읽기 전용 집계(planner)로 해요.
 
@@ -666,6 +666,12 @@ last_tool_error_code text          -- 닫힌 코드(자유 서술 없음)
 | `oort_job_start` ok `jobs = 0`, 그런데 oort 쪽으로 수령 가능한 대기 run이 있다 | **서버 claim 술어 문제** | 재현 시험 요청(엔진) |
 | `oort_job_start` ok `jobs = 1`, 뒤에 `oort_run_event`·`oort_run_complete`가 없다 | 시작 보고 뒤 에이전트가 멈췄어요 | 2026-10-15 증보(T1) 원장·liveness |
 
+라벨을 읽을 때 알아 둘 것(모두 닫힌 어휘 안이라 누출이 아니에요).
+- `method: unparsed`는 JSON이 아닌 본문뿐 아니라, 본문을 읽지 않은 전송 거절(헤더 길이·개수 초과, 413)에도 붙어요.
+- `era: none`은 헤더가 없거나 중복이거나 UTF-8이 아닌 경우예요. `reason: transport_headers`는 쿼리 문자열 거절에도 붙어요. `413 ↔ body_too_large`는 「본문 거절은 413뿐」이라는 가정으로 상태 코드에서 정해요(코드 주석에 적혀 있어요).
+- 같은 키가 두 번 있는 본문(`{"method":"ping","method":"tools/call", …}`)은 디스패처가 `parse_error`로 거절하는데 `method`·`tool`은 마지막 키 기준이에요. 실제로 실행된 요청에서는 둘이 일치해요(검수가 임의 요청 30만 건으로 대조했어요).
+- `reason: rate_limited`는 도달할 수 없는 방어 행이에요(429는 기록하지 않아요). 표에 남겨 둔 이유는 그 문장이 `other`로 보이지 않게 하려는 것뿐이에요.
+
 ### 왜 owner 결정이 필요 없는가
 
 planner 위임으로 수락하는 근거는 넷이에요(2026-10-14 증보와 같은 형식이에요).
@@ -678,7 +684,12 @@ planner 위임으로 수락하는 근거는 넷이에요(2026-10-14 증보와 �
 3. **시간당 240행 상한이 있어요.** 자격(토큰 id)당 시간당 240행이고(전용 타입 `CallTraceBudget`, A4), 넘으면 그 시간이 지날 때까지 이 행만 안 써요. 호출은 막지 않고 쌓인 행도 지우지 않아요. 상한이 없다면 입장 속도 제한(`AgentPortConfig` 기본값 토큰당 분당 240·에이전트당 분당 480)만큼, 토큰당 시간당 14,400행까지 쌓일 수 있어서 상한은 그 1/60이에요. 15분 박자 루틴은 시간당 수십 행이고, 하루 최대는 자격당 5,760행으로 닫혀요. 인증과 속도 제한을 통과한 호출만 기록하고, 응답 본문·상태·헤더·제한·인증은 그대로예요(호출당 INSERT 한 건이 더해질 뿐이에요).
 4. **되돌리기가 쉬워요.** `trace_call` 호출 두 곳을 지우면 새 행이 안 쌓여요. 쌓인 행은 감사 표에 남지만 읽는 소비자가 없어서 해가 없어요. 기록이 실패해도 응답은 바뀌지 않아요(경고 로그만, A5).
 
-남는 주의 둘. ① 이 행은 「서버가 본 호출」이에요. 호출자가 보낸 도구 이름은 카탈로그 이름이나 `unknown`까지만 알 수 있고, 에이전트가 하려던 일은 알려 주지 않아요. ② 기록은 답이 정해진 뒤 응답을 보내기 **전에** 기다려요(별도 tx, 2초 제한). 느린 DB에서는 호출당 최대 2초가 늘 수 있어요. 2026-10-15 증보(T1)의 `tool_call`·liveness 기록과 같은 방식·같은 한도예요.
+남는 주의 다섯.
+1. 이 행은 「서버가 본 호출」이에요. 호출자가 보낸 도구 이름은 카탈로그 이름이나 `unknown`까지만 알 수 있고, 에이전트가 하려던 일은 알려 주지 않아요.
+2. 기록은 답이 정해진 뒤 응답을 보내기 **전에** 기다려요(별도 tx, 2초 제한). 느린 DB에서는 호출당 최대 2초가 늘 수 있어요. 2026-10-15 증보(T1)의 `tool_call`·liveness 기록과 같은 방식·같은 한도예요. 새로 늘어나는 곳은 둘이에요. 지금까지 호출 뒤 DB 쓰기가 없던 호출(`initialize`·`tools/list`·`server/discover`·`ping`·거절·전송 거절)이고, lease 핸들을 건네는 `oort_jobs_claim`·`oort_job_start`예요(liveness 2초·`tool_call` 2초에 이어 이 기록 2초까지 기다린 뒤 응답해요. 클라이언트가 먼저 끊으면 「가져갔는데 핸들을 못 받음」이 되는데, #4284가 가리키는 증상과 같은 계열이에요. 정상 지연(ms)에서는 무시할 수준이고, DB가 2초씩 느린 때는 어차피 전체가 느려진 때예요). 시간당 240행을 넘은 뒤에는 이 기록의 DB 일이 없어요.
+3. 이 행은 **진단용이고 보안 감사 통제가 아니에요.** 한 자격이 1분 안에 시간당 예산을 다 쓰면 그 뒤 한 시간은 호출이 이 행으로 남지 않아요(그 호출을 이 행에서 가릴 수 있어요). `auth.agent_bearer.used`는 허용된 호출마다 한 줄, 상한 없이 그대로여서 감사 기록 자체가 약해지진 않아요.
+4. 상한에 닿은 뒤에도 사실 계산(요청 본문 1회·응답 본문 3회 파싱)은 호출마다 해요. 입장 속도 제한 아래에서 코어 하나의 0.4%(전형)~2.4%(3.2 MB 응답) 정도라 증폭이 되지 않아서 받아들였어요(검수 R1-01, Low).
+5. `audit_log`에는 `run_id`·`action` 인덱스가 없고(`audit_ws_time_idx`·`audit_actor_idx`·`audit_subject_idx`·`audit_target_idx`뿐이에요), 이 행은 Agent Port발 감사 행을 한도 아래에서 대략 두 배로 늘려요. 위쪽이 닫혀 있어(자격당 시간당 240) 등급은 그대로예요. 후속 이슈 후보: `(workspace_id, action, created_at)` 인덱스와 보존 정책(검수 R1-06).
 
 ### 불변식 대조
 
@@ -689,6 +700,6 @@ planner 위임으로 수락하는 근거는 넷이에요(2026-10-14 증보와 �
 ### 구현 슬라이스
 
 - **#4618 (engine) 1단계.** `momo-mcp`의 `call_shape`·`outcome_code`·`response_rpc_code`·`result_counts`(순수 함수, 닫힌 어휘), `routes/agent_port.rs` `trace_call`, `rate_limit.rs` `CallTraceBudget`.
-- 시험: `momo-mcp/tests/call_trace.rs`(어휘가 닫혀 있다·`ToolFailure` 변종마다 결과 토큰이 같다·개수는 서버 응답에서만) · `momo-mcp/tests/refusal_reason.rs`(실제 거절 요청 40여 건이 각자의 토큰·상태·코드를 내요·`ToolFailure` 변종마다 토큰·디스패처의 모든 문장이 표에 있다·표에 없는 문장은 `other`) · `bins/momo-server/tests/agent_port_call_trace_pg.rs`(모든 종류의 호출이 정확히 한 행·값이 안 새요·상한·기록 실패가 응답을 못 바꿔요·개수가 「job을 봤는데 안 가져감」을 가려요) · `bins/momo-server/tests/grok_like_agent_flow_pg.rs`(현행 루틴대로 부르는 클라이언트의 DM·멘션·연속 DM 재현) · `rate_limit.rs` 단위(시간 주입).
+- 시험: `momo-mcp/tests/call_trace.rs`(어휘가 닫혀 있다·`ToolFailure` 변종마다 결과 토큰이 같다·개수는 서버 응답에서만) · `momo-mcp/tests/refusal_reason.rs`(실제 거절 요청 40여 건이 각자의 토큰·상태·코드를 내요·`ToolFailure` 변종마다 토큰·디스패처의 모든 문장이 표에 있다·표에 없는 문장은 `other`) · `bins/momo-server/tests/agent_port_call_trace_pg.rs`(모든 종류의 호출이 정확히 한 행·값이 안 새요·상한·기록 실패가 응답을 못 바꿔요·개수가 「job을 봤는데 안 가져감」을 가려요) · `bins/momo-server/tests/grok_like_agent_flow_pg.rs`(현행 루틴대로 부르는 클라이언트의 DM·멘션·연속 DM 재현) · `rate_limit.rs` 단위(시간 주입, 240·3600 값 고정) · 검수 보강: `call_trace.rs`의 `every_listed_method_is_one_the_dispatcher_answers`(`CALL_METHODS`와 디스패처가 어긋나지 않는다) · `agent_port_call_trace_pg.rs`의 `a_trace_write_that_outlasts_its_ceiling_is_abandoned_and_the_answer_is_unchanged`(2초 시간 초과 경로)·`a_call_the_admission_limiter_refused_leaves_no_trace_row`(429)·모든 행의 열과 키를 보는 `assert_every_row_is_plain`.
 - **#4618 (engine) 2단계.** workspace 게이트(`cargo fmt/clippy/test`)·독립 보안 검수(Blocker 0·High 0)·PR이에요. 검증 증거의 정본은 PR 본문이에요.
 - 배포 뒤 운영 관찰은 planner가 읽기 전용 집계로 해요. 서버만 배포하면 되고(앱 빌드 없음), 에이전트를 한 번 깨운 뒤 최근 3시간의 `agent_port.call` 행을 시각순으로 위 「읽는 법」 표대로 읽어요. 이 증보는 원인을 고치지 않고 **어디서 멈추는지를 가르는 것**까지가 범위예요. 고치는 일은 갈린 결과에 따라 후속으로 해요.
