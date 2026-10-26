@@ -630,6 +630,8 @@ describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 8 카드�
 
 describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)', () => {
   const lead = /-lead$/;
+  /** 질의 결과를 testID 목록으로 — 실패 메시지가 React 트리가 아니라 이름을 찍는다. */
+  const ids = (nodes: {props: {testID?: string}}[]) => nodes.map(node => node.props.testID);
 
   it('탐지기는 실제로 앞 칸을 잡는다 — 대조군(앞 표지가 있는 라디오 행 하나 = 1)', () => {
     render(
@@ -637,14 +639,15 @@ describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)'
         <ChoiceRow title="x" selected leading={<View />} onPress={() => {}} testID="probe" />
       </ThemeProvider>,
     );
-    expect(screen.queryAllByTestId(lead, {includeHiddenElements: true})).toHaveLength(1);
+    // 인스턴스가 아니라 testID 로 비교한다 — 실패했을 때 React 트리 전체를 찍다가 메모리가 터진다(사보타주 Q48 이 그렇게 죽었다).
+    expect(ids(screen.queryAllByTestId(lead, {includeHiddenElements: true}))).toEqual(['probe-lead']);
   });
 
   it('H1: 설정 페이지는 앞 칸 없는 문법이다 — 내 상태에 상태 점이 없고, 모든 카드의 구분선이 한 열에서 시작한다', async () => {
     const page = await openPage();
     // 명부의 내 상태는 방해 금지라 「기한 바꾸기」 줄까지 선다 — 내 상태 카드의 모든 줄이 이 시험에 든다.
     await waitFor(() => expect(within(page).getByTestId('profile-dnd-until-row')).toBeTruthy());
-    expect(within(page).queryAllByTestId(lead, {includeHiddenElements: true})).toEqual([]);
+    expect(ids(within(page).queryAllByTestId(lead, {includeHiddenElements: true}))).toEqual([]);
     const indents = within(page)
       .getAllByTestId('group-divider')
       .map(divider => StyleSheet.flatten(divider.props.style).marginLeft);

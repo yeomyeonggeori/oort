@@ -768,10 +768,11 @@ describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
     const row = sheet.getByTestId('status-expiry-row');
     expect(row).toHaveTextContent(new RegExp(CUSTOM_STATUS_EXPIRY_LABEL));
     expect(row.props.accessibilityLabel).toBe(`${CUSTOM_STATUS_EXPIRY_LABEL}, 지우지 않음`);
-    // 시트 안에서 「지우기」가 들어간 글자는 파괴 행의 이름 하나뿐이다(대조: 그 행은 실제로 있다).
-    const withVerb = sheet.getAllByText(/지우기/);
-    expect(withVerb).toHaveLength(1);
-    expect(within(sheet.getByTestId('status-clear')).getByText(CUSTOM_STATUS_CLEAR_LABEL)).toBe(withVerb[0]);
+    // 시트 안에서 「지우기」가 들어간 글자는 파괴 행의 이름 하나뿐이다(대조: 그 행은 실제로 있다). 인스턴스가 아니라 글자로 비교한다 —
+    // 실패했을 때 React 트리 전체를 찍다가 메모리가 터진다.
+    const withVerb = sheet.getAllByText(/지우기/).map(node => node.props.children);
+    expect(withVerb).toEqual([CUSTOM_STATUS_CLEAR_LABEL]);
+    expect(within(sheet.getByTestId('status-clear')).getByText(CUSTOM_STATUS_CLEAR_LABEL)).toBeTruthy();
     // 접근성 이름도 같다 — 파괴 행 말고는 「지우기」로 시작하지 않는다.
     expect(row.props.accessibilityLabel).not.toMatch(/지우기/);
   });
@@ -779,7 +780,10 @@ describe('상태 설정 시트 — design-review r1 반영 (#4457)', () => {
   it('H1: 두 카드 모두 앞 칸이 없다 — 이모지는 이름 앞에 글자로 붙고, 구분선은 한 열에서 시작한다', async () => {
     const sheet = await openStatusSheet();
     fireEvent.press(sheet.getByTestId('status-expiry-row')); // 기간 카드에도 구분선이 서게 연다
-    expect(sheet.queryAllByTestId(/-lead$/, {includeHiddenElements: true})).toEqual([]);
+    // testID 로 비교한다 — 인스턴스를 비교하면 실패했을 때 React 트리 전체를 찍다가 메모리가 터진다(사보타주 Q49).
+    expect(
+      sheet.queryAllByTestId(/-lead$/, {includeHiddenElements: true}).map(node => node.props.testID),
+    ).toEqual([]);
     for (const preset of CUSTOM_STATUS_PRESETS) {
       const row = sheet.getByTestId(`status-preset-${preset.id}`);
       expect(row).toHaveTextContent(`${preset.emoji}  ${preset.label}`);
