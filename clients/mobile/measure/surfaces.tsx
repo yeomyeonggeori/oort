@@ -4925,6 +4925,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // `-undetermined` 는 iOS 가 아직 묻지 않은 폰, `-checking` 은 iOS 의 답이 아직 오지 않은 「읽는
     // 중」이다. `-busy`·`-failed` 는 **눌러야만** 서는 상태라 정지 사진이 아니라
     // `maestro/99-push-switch-capture.yaml` 이 진짜로 눌러 찍는다(서버 자리만 `seedPush` 의 가짜가 진다).
+    // `shell-profile-load-failed`(#4457 r3 M1): 알림 규칙·종류별 스위치·기억 설정을 **읽지 못한** 설정 페이지 — 「다시 불러오기」 세
+    // 행이 선다(강조색 글자여야 눌리는 줄로 읽힌다). 서버가 500 으로 답하는 가짜 `fetch`(`seedLoadFailed`).
+    case 'shell-profile-load-failed':
     case 'shell-profile-push-on':
     case 'shell-profile-push-off':
     case 'shell-profile-push-denied':
@@ -6535,6 +6538,31 @@ function SettingsBottomSurface(): React.JSX.Element {
 const PUSH_CAPTURE_SCROLL = 527;
 const PUSH_CAPTURE_SCROLL_AX = 1254;
 
+/**
+ * #4457 r3 M1: 읽기가 실패한 설정 페이지. 푸시 스위치는 켬(허용)으로 세우고, 그 밖의 모든 요청에 서버가 500 으로 답한다 —
+ * 세션 만료(401)가 아니라서 캐시가 지워지지 않고, 알림 규칙·종류별 스위치·기억 설정이 각자 「읽지 못함」으로 서서 복구 길
+ * (「다시 불러오기」)이 보인다. 세 질의는 재시도를 한 번 거친 뒤 실패로 서므로 캡처는 충분히 기다린다.
+ */
+function seedLoadFailed(): void {
+  seedPush('shell-profile-push-on');
+  // 기본 씨앗(`seedShell`)은 알림 규칙·종류별 스위치를 「읽은 것」으로 채워 둔다 — 이 표면은 그 둘을 비워 실제로 다시 읽게 하고(500),
+  // 그래서 세 질의가 모두 「읽지 못함」으로 선다.
+  // 하네스 클라이언트는 질의를 꺼 두고(`enabled: false`) 씨앗만 읽는다 — 이 두 질의만 켜서 진짜로 500 을 맞게 한다.
+  for (const key of [
+    ['settings', 'notification-rules'],
+    ['settings', 'push-kinds'],
+  ]) {
+    harnessClient.removeQueries({queryKey: key});
+    harnessClient.setQueryDefaults(key, {enabled: true});
+  }
+  globalThis.fetch = (async () =>
+    ({
+      status: 500,
+      ok: false,
+      text: async () => JSON.stringify({error: {message: 'x'}}),
+    }) as unknown as Response) as typeof fetch;
+}
+
 function seedPush(surface: string): void {
   const denied = surface.startsWith('shell-profile-push-denied');
   // iOS 가 아직 묻지 않은 폰: 허용도 거부도 아니고 다시 물을 수 있다.
@@ -7637,4 +7665,5 @@ if (
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
   if (isPauseSurface(LAUNCHED.name)) seedPause(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
+  if (LAUNCHED.name === 'shell-profile-load-failed') seedLoadFailed();
 }
