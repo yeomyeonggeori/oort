@@ -106,8 +106,8 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 // **Modal 위의 Modal**이 된다(§1 규칙 2: Modal 위에 화면을 쌓지 않는다). 층은 그 둘을 한 번에 푼다.
 //
 // 이 안의 장(테마·지시 기기·프로필 사진·알림 일시 중지 기한·방해 금지 기한)은 설정 페이지 **위에 한 겹
-// 더** 쌓이고, 그 머리의 원형 X 와 왼쪽 가장자리 밀기는 **한 겹만** 벗긴다(설정 페이지는 남는다 —
-// 안쪽 `EdgeSwipeBack` 이 바깥을 무장 해제한다). 시트가 하던 「장 바꾸기」(`page` 상태로 한 화면을 갈아
+// 더** 쌓이고, 그 머리의 **‹ 뒤로**(첫 장의 X 와 다르다: X 는 설정 전체를 닫고 ‹ 는 한 겹만 벗긴다)와
+// 왼쪽 가장자리 밀기는 **한 겹만** 벗긴다(설정 페이지는 남는다 — 안쪽 `EdgeSwipeBack` 이 바깥을 무장 해제한다). 시트가 하던 「장 바꾸기」(`page` 상태로 한 화면을 갈아
 // 끼움)와 다른 점: 설정 페이지는 마운트된 채 밑에 남아 스크롤 자리와 읽던 값이 그대로다.
 //
 // ## 무엇이 어디에 서는가 (Buzz 문법, 우리 항목)
@@ -182,7 +182,7 @@ export function SettingsPage({
   /** 실시간 연결이 지금 붙어 있는가. 상태 알약의 `auto` 가 이것으로 풀린다. */
   connected: boolean;
   onSignOut: () => void;
-  /** 페이지를 떠난다(머리의 원형 X). 안쪽 장의 X 는 이것이 아니라 설정으로 돌아간다. */
+  /** 페이지를 떠난다(머리의 원형 X). 안쪽 장의 ‹ 뒤로는 이것이 아니라 설정으로 돌아간다. */
   onClose: () => void;
   /** 처음 열 장. 앱은 늘 `main` 이고, 측정 하네스가 안쪽 장을 찍을 때 쓴다. */
   initialPage?: SettingsPageName;
@@ -275,7 +275,7 @@ export function SettingsPage({
   );
 }
 
-/** 안쪽 장 하나: 머리(원형 X → 설정으로) + 자기 스크롤. */
+/** 안쪽 장 하나: 머리(‹ 뒤로 → 설정으로) + 자기 스크롤. */
 function SubPage({
   page,
   workspaceId,
@@ -305,9 +305,13 @@ function SubPage({
       <Screen>
         <PageHeader
           title={title}
-          closeLabel={`${title} 닫기`}
-          onClose={onBack}
-          closeTestID="settings-back"
+          // 안쪽 장의 머리는 ‹ 뒤로다(X 가 아니다) — X 는 「설정 전체를 닫는다」이고 ‹ 는 「한 겹만 벗기고 설정으로
+          // 돌아간다」(iOS 관례, planner 결정). 이름은 어디로 가는지 말한다.
+          back={{
+            label: '설정으로 돌아가기',
+            onPress: onBack,
+            testID: 'settings-back',
+          }}
           titleTestID="settings-sub-title"
           testID="settings-sub-header"
         />

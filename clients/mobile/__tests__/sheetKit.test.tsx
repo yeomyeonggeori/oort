@@ -13,12 +13,14 @@ import {
   AccessibilityInfo,
   Animated,
   Dimensions,
+  Image,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
+import {CONV_ICON_SIZE, CONV_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from '../src/design/icons';
 import {PageSheet, SHEET_TOP} from '../src/design/PageSheet';
 import {PageHeader, SheetHeader} from '../src/design/SheetChrome';
 import {THEME_IDS} from '../src/design/ds2Tokens';
@@ -490,6 +492,58 @@ describe('머리의 좌우 — 시트는 오른쪽 X, 페이지는 왼쪽 X', ()
       />,
     );
     expect(slotOf('header', 'close')).toBe(0);
+  });
+});
+
+describe('페이지 머리 — ‹ 뒤로 변형 (#4457)', () => {
+  const glyphsOf = (testID: string) =>
+    within(screen.getByTestId(testID)).UNSAFE_getAllByType(Image).map(image => ({
+      source: image.props.source,
+      size: StyleSheet.flatten(image.props.style).width,
+    }));
+
+  it('‹ 는 왼쪽 칸에 서고 누르면 back.onPress, 이름은 돌아갈 곳이며 X 는 없다', async () => {
+    const onPress = jest.fn();
+    await mount(
+      <PageHeader
+        title="테마"
+        back={{label: '설정으로 돌아가기', onPress, testID: 'back'}}
+        testID="header"
+      />,
+    );
+    expect(slotOf('header', 'back')).toBe(0);
+    fireEvent.press(screen.getByLabelText('설정으로 돌아가기'));
+    expect(onPress).toHaveBeenCalledTimes(1);
+    // 글리프는 22pt ‹ 하나 — X 가 아니다.
+    expect(glyphsOf('back')).toEqual([{source: CONV_ICONS.left, size: CONV_ICON_SIZE.left}]);
+    expect(CONV_ICON_SIZE.left).toBe(SHEET_ICON_SIZE.close); // 같은 22 칸이라 원 안에서 같은 무게로 읽힌다
+    expect(screen.queryByLabelText(/닫기/)).toBeNull();
+  });
+
+  it('X 변형은 그대로 X 글리프다 — 두 변형이 서로를 바꾸지 않는다', async () => {
+    await mount(
+      <PageHeader title="설정" closeLabel="설정 닫기" onClose={() => {}} closeTestID="close" testID="header" />,
+    );
+    expect(glyphsOf('close')).toEqual([{source: SHEET_ICONS.close, size: SHEET_ICON_SIZE.close}]);
+  });
+
+  it.each(['light', 'dark'] as const)('‹ 의 원은 X 의 원과 같은 상자(크기·채움·그림자·가장자리)를 입는다 (%s)', async scheme => {
+    await mount(
+      <>
+        <PageHeader title="설정" closeLabel="설정 닫기" onClose={() => {}} closeTestID="close" />
+        <PageHeader title="테마" back={{label: '설정으로 돌아가기', onPress: () => {}, testID: 'back'}} />
+      </>,
+      true,
+      scheme,
+    );
+    const BOX = ['width', 'height', 'borderRadius', 'backgroundColor', 'borderColor', 'borderWidth', 'boxShadow'] as const;
+    const pick = (testID: string) => {
+      const style = flat(testID);
+      return Object.fromEntries(BOX.map(key => [key, style[key]]));
+    };
+    // 기준이 비어 있지 않다 — 둘 다 undefined 여서 맞는 헛단정을 막는다.
+    expect(pick('close')).toMatchObject({width: SHEET.circle, height: SHEET.circle, backgroundColor: circleLook(paletteFor(scheme)).fill});
+    expect(pick('back')).toEqual(pick('close'));
   });
 });
 

@@ -11,7 +11,7 @@ import {
 } from '@testing-library/react-native';
 import {getPermissionsAsync} from 'expo-notifications';
 import React from 'react';
-import {Linking, StyleSheet} from 'react-native';
+import {Image, Linking, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -22,6 +22,7 @@ import {
   getBackground,
   setBackground,
 } from '../src/design/background/store';
+import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {ThemeProvider} from '../src/design/theme';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
@@ -45,7 +46,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // 이 파일이 지는 것은 **구조**다:
 //   1. 대화 목록 발치에 계정 줄·테마 칸·로그아웃이 더는 없다
 //   2. 머리 오른쪽 아바타가 설정 페이지를 연다 — 머리는 왼쪽 원형 X + 가운데 「설정」, 이름·@핸들·상태가 그 안에 있다
-//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 X 는 한 겹만 벗긴다
+//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 머리는 ‹ 뒤로이며 한 겹만 벗긴다(X 가 아니다)
 //   4. 테마는 「테마 ›」 행이 여는 안쪽 장이고, 고른 것이 저장된다
 //   5. 로그아웃은 마지막 카드의 위험 행이고, 한 번 확인한 뒤에만 세션을 지운다
 //   6. 알림 권한이 꺼져 있으면 그렇게 말하고, 스위치를 누르면 설정이 열린다 (#3924)
@@ -349,7 +350,31 @@ describe('설정 페이지', () => {
     expect(screen.queryByTestId('settings-page')).toBeNull();
   });
 
-  it('안쪽 장의 원형 X 는 한 겹만 벗긴다 — 설정 페이지는 남는다', async () => {
+  it('안쪽 장의 머리는 ‹ 뒤로다 — X 가 아니고, 첫 장의 X 는 그대로 X 다', async () => {
+    const page = await openPage();
+    // 첫 장: 글리프가 X 다.
+    const glyphsOf = (testID: string) =>
+      within(screen.getByTestId(testID)).UNSAFE_getAllByType(Image).map(image => image.props.source);
+    expect(glyphsOf('settings-close')).toEqual([SHEET_ICONS.close]);
+
+    fireEvent.press(within(page).getByTestId('profile-theme-row'));
+    const back = screen.getByTestId('settings-back');
+    expect(back.props.accessibilityRole).toBe('button');
+    // 이름은 「닫기」가 아니라 돌아갈 곳이다 — 닫는 것이 아니라 한 걸음 돌아간다.
+    expect(back.props.accessibilityLabel).toBe('설정으로 돌아가기');
+    expect(glyphsOf('settings-back')).toEqual([CONV_ICONS.left]);
+    // 안쪽 머리에는 X 가 없다.
+    const header = within(screen.getByTestId('settings-sub-header'));
+    expect(header.queryByTestId('settings-close')).toBeNull();
+    expect(header.queryByText('닫기')).toBeNull();
+    expect(header.queryByLabelText(/닫기/)).toBeNull();
+    // 트리 순서가 곧 왼쪽·가운데다: ‹ 가 제목보다 앞이다.
+    const order = flatten(screen.toJSON());
+    expect(order.indexOf('settings-sub-title')).toBeGreaterThan(order.indexOf('settings-back'));
+    expect(order.indexOf('settings-back')).toBeGreaterThan(-1);
+  });
+
+  it('안쪽 장의 ‹ 뒤로는 한 겹만 벗긴다 — 설정 페이지는 남는다', async () => {
     await openPage();
     expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
     fireEvent.press(screen.getByTestId('profile-theme-row'));

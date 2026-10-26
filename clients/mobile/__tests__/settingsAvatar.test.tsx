@@ -91,7 +91,7 @@ function mount() {
 afterEach(cleanup);
 
 describe('설정 페이지 → 프로필 사진 장', () => {
-  it('큰 얼굴을 누르면 사진 장이 한 겹 더 쌓이고, 머리의 원형 X 가 설정으로 돌려보낸다', () => {
+  it('큰 얼굴을 누르면 사진 장이 한 겹 더 쌓이고, 머리의 ‹ 뒤로가 설정으로 돌려보낸다', () => {
     mount();
     expect(screen.queryByTestId('avatar-page')).toBeNull();
     fireEvent.press(screen.getByTestId('self-profile-avatar', {includeHiddenElements: true}));
