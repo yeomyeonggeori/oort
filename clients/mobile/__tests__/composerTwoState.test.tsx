@@ -1382,7 +1382,7 @@ describe('도크가 자라는 프레임에 목록에게 알린다 (#4518, design
   });
 
   // 동작 줄이기: 값이 한 번에 바뀌어 스프링의 프레임별 알림이 없다. 앱을 켜고 처음 누른 짧은 탭에서는 키보드 준비가 메인 스레드를 막는 동안 목록의 `onLayout` 길이 늦어서 마지막 말풍선의
-  // 아랫줄이 가려졌다(시뮬레이터: 커밋 코드 8/8번 잘림 1~8프레임, 값을 바꾼 직후 한 번 알리면 0/8번 — 리뷰 R3 M3 를 측정으로 닫은 것).
+  // 아랫줄이 가려졌다(시뮬레이터: 알림 없는 코드 8/8번 잘림 1~8프레임 · 값을 바꾼 직후 한 번 알리면 한가할 때 12번 중 0번, 부하 속 8번 중 1번 — 리뷰 R3 M3 를 측정으로 닫은 것).
   it('동작 줄이기: 스프링이 없으니 프레임별 알림은 없고, 값이 한 번에 바뀐 직후 한 번 알린다 — 목록이 onLayout 길만 기다리지 않게', async () => {
     a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
     const spring = jest.spyOn(Animated, 'spring');
@@ -1419,6 +1419,19 @@ describe('도크가 자라는 프레임에 목록에게 알린다 (#4518, design
     expect(notified).toBeGreaterThan(0); // 전제: 알렸다
     expect(order[notified - 1]).toBe('값 1'); // 바로 앞이 펼침 값이다
     expect(order.filter(entry => entry === '알림')).toHaveLength(1);
+  });
+
+  it('동작 줄이기: 접힘은 목록에게 알리지 않는다 — 줄어드는 도크 위로 목록은 늘기만 하고(가려질 줄이 없고), 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const {follow} = await mountWithBridgeSettled();
+    touchDown();
+    expect(hasTools()).toBe(true); // 전제: 펼쳤다
+    follow.mockClear(); // 펼침의 알림 한 번은 위 시험이 잠근다
+    touchMoveTo(100, 130); // 끌기로 되돌림 — 동작 줄이기라 같은 렌더에서 즉시 접힌다
+    settle();
+    wait(500);
+    expect(hasTools()).toBe(false); // 전제: 접혔다
+    expect(follow).not.toHaveBeenCalled();
   });
 
   it('동작 줄이기여도 다리가 없는 곳에서는 그대로 펼친다 — 알릴 곳이 없다고 터지지 않는다', async () => {
@@ -1468,6 +1481,22 @@ describe('누름 (#4518) — 동작 줄이기는 즉시, 햅틱은 0', () => {
       expect(inputHeight()).toBe(collapsed());
     }
     expect(ourSprings(spring)).toHaveLength(0);
+  });
+
+  it('동작 줄이기: 글 칸 양옆 여백은 진행값이 아니라 상태가 정한다 — 진행값이 영영 안 따라와도 펼치고 되돌린 뒤 접힌 자리로 돌아온다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    // 시뮬레이터에서는 JS 구동 값이 `setNativeProps` 로 네이티브를 직접 고친다. 누름이 펼침 직후 되돌려지면(끌기·취소·유예) 리액트가 기억하는 여백(접힌 값)과 네이티브에 써 둔 여백(펼친 값)이 어긋나고
+    // 접힌 쪽 렌더가 「같은 값」이라며 아무것도 안 보내서 자리표시가 + 버튼 위에 겹쳐 남았다(16 Pro: 0.2초 이하로 끈 끌기 7번 중 4번). jest 는 그 어긋남을 못 만든다 — 대신 최악을 만든다: 진행값이
+    // 아예 안 바뀐다. 여백이 상태에서만 나오면(진행값을 안 거치면) 어긋날 곳이 없어서 이 시험이 선다.
+    jest.spyOn(Animated.Value.prototype, 'setValue').mockImplementation(() => {});
+    await mountSettled();
+    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle});
+    touchDown();
+    expect(hasTools()).toBe(true); // 전제: 상태는 펼침이다
+    expect(fieldStyle()).toMatchObject({marginLeft: 0, marginRight: 0});
+    touchMoveTo(100, 130); // 끌기로 되돌림
+    expect(hasTools()).toBe(false); // 전제: 접혔다
+    expect(fieldStyle()).toMatchObject({marginLeft: CONV.composerCircle, marginRight: CONV.composerCircle});
   });
 
   it('햅틱 0 — 닿고 · 떨고 · 끌고 · 취소하고 · 유예가 지나고 · 포커스가 넘겨받는 동안 한 번도 안 울린다(#4331)', async () => {

@@ -1776,6 +1776,8 @@ export function Composer({
         // 동작 줄이기: 값이 한 번에 바뀌어 스프링의 프레임별 알림이 없다. 그러면 목록은 `onLayout` 길(네이티브 → JS → 네이티브)로만 따라오는데, 앱을 켜고 처음 누른 탭에서는
         // 키보드 준비가 메인 스레드를 막는 동안 그 길이 늦어서 마지막 말풍선의 아랫줄이 도크에 가려졌다(#4518 시뮬레이터: 8/8번, 1~8프레임). `setValue` 가 레이아웃을 곧바로
         // 커밋하므로 **그 직후** 한 번 알리면 목록의 `scrollToEnd` 명령이 커밋 뒤에 줄을 서서 둘이 한꺼번에 적용된다 — 값을 바꾼 **뒤에** 알리는 순서를 지킨다(시험이 잠근다).
+        // 이 순서는 RN 0.86.2 에서 JS 구동 값이 Fabric 에 `setNativeProps` 로 곧바로 커밋되는 것(`shouldUseSetNativePropsInFabric` 기본 true)에 기댄다 — jest 는 이 부분을 흉내 내지 못하니
+        // RN 을 올리면 캡처(`measure/captures/4518/…rm-cold-tap-*.png`)로 다시 확인한다.
         // 접힘 쪽은 알리지 않는다: 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있고, 동작 줄이기의 접힘은 간격이 변하지 않았다(녹화 6번, 변화 ≤1px).
         progress.setValue(1);
         dockFollow?.notify();
@@ -1875,12 +1877,20 @@ export function Composer({
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
   // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
-  const inputInset = shown
-    ? progress.interpolate({
-        inputRange: [0, 1],
-        outputRange: [CONV.composerCircle, 0],
-      })
-    : CONV.composerCircle;
+  //
+  // 「동작 줄이기」는 글 칸 여백을 **진행값을 거치지 않고** 상태가 정한 숫자로 쓴다(#4518). 움직임이 없으니 보간할 것이 없다. 보간 값은 JS 구동이라 `setValue` 가 네이티브를 리액트 밖에서 직접 고치는데,
+  // 누름이 펼침 직후 되돌려지면(끌기·취소·유예) 그 사이에 다시 그릴 일이 없어서 리액트가 마지막으로 보낸 여백은 접힌 값 그대로고 접힌 쪽 렌더가 만든 값도 같은 숫자라 리액트가 아무것도 안 보낸다고 읽는다
+  // (소스를 읽은 설명이고 네이티브 쪽을 직접 계측하진 않았다). 결과는 화면에서 봤다: 자리표시가 + 버튼 위에 겹쳐 남았다(시뮬레이터 16 Pro, 동작 줄이기 켜고 빠르게 끈 끌기 8번 모두 — 끄면 7번 모두 정상,
+  // 이 수리 뒤 8번 모두 정상). 스프링은 접히는 내내 `shown` 이 서서 보간이 끝까지 붙어 있고 끝난 뒤의 숫자가 네이티브 값과 같아서 어긋나지 않는다.
+  const inputInset =
+    shown && !reduceMotion.current
+      ? progress.interpolate({
+          inputRange: [0, 1],
+          outputRange: [CONV.composerCircle, 0],
+        })
+      : expanded
+        ? 0
+        : CONV.composerCircle;
   const toolsHeight = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [0, TOUCH_TARGET],
