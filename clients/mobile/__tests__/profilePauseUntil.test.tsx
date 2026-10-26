@@ -15,6 +15,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
+import {pinReduceMotion} from './fixtures/reduceMotion';
 import {PauseUntilPage} from '../src/features/profile/PauseUntilPage';
 import AppShell from '../src/shell/AppShell';
 import {
@@ -219,7 +220,11 @@ const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
 ).__store;
 
-beforeEach(() => {
+/** 이 시험들은 움직임이 주제가 아니다 — 층이 누르는 즉시 걷히도록 동작 줄이기를 켠 채 돈다(`layerMotion4457.test.tsx` 가 움직임을 잰다). */
+let releaseMotion: (() => void) | null = null;
+
+beforeEach(async () => {
+  releaseMotion = await pinReduceMotion(true);
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -243,6 +248,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  releaseMotion?.();
+  releaseMotion = null;
   queryClient?.clear();
   queryClient = null;
   jest.restoreAllMocks();

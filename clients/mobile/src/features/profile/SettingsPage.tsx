@@ -53,7 +53,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
-import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
+import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
   PUSH_SWITCH_LABEL,
   PUSH_SWITCH_OFF_FAILED,
@@ -252,6 +252,8 @@ export function SettingsPage({
           accessibilityViewIsModal
           style={styles.subPane}
           onBack={backToMain}
+          // 스택의 push 처럼 오른쪽에서 밀려 들어오고, ‹ 는 오른쪽으로 물러난다(동작 줄이기면 즉시).
+          enter="push"
           testID="settings-sub-pane">
           <SubPage
             page={page}
@@ -299,9 +301,13 @@ function SubPage({
     [],
   );
   const title = SUB_PAGE_TITLE[page];
+  // ‹ · VoiceOver escape · 「기한/사진을 고른 뒤 돌아가기」는 모두 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로
+  // 물러난 뒤 `onBack`(층 밖에서는 곧바로 `onBack`).
+  const closeLayer = useLayerClose();
+  const goBack = closeLayer ?? onBack;
   return (
     // VoiceOver 의 두 손가락 문지르기는 한 겹만 벗긴다 — 설정 페이지의 것(위쪽 뿌리)까지 올라가지 않는다.
-    <View style={styles.root} onAccessibilityEscape={onBack} testID="settings-sub-page">
+    <View style={styles.root} onAccessibilityEscape={goBack} testID="settings-sub-page">
       <Screen>
         <PageHeader
           title={title}
@@ -309,7 +315,7 @@ function SubPage({
           // 돌아간다」(iOS 관례, planner 결정). 이름은 어디로 가는지 말한다.
           back={{
             label: '설정으로 돌아가기',
-            onPress: onBack,
+            onPress: goBack,
             testID: 'settings-back',
           }}
           titleTestID="settings-sub-title"
@@ -333,7 +339,7 @@ function SubPage({
               workspaceId={workspaceId}
               selfId={member.id}
               directory={directory}
-              onDone={onBack}
+              onDone={goBack}
             />
           ) : (
             <PauseUntilPage
@@ -341,7 +347,7 @@ function SubPage({
               workspaceId={workspaceId}
               selfId={member.id}
               self={memberFor(directory, member.id) ?? undefined}
-              onDone={onBack}
+              onDone={goBack}
               onReveal={revealAt}
             />
           )}

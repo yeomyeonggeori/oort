@@ -11,7 +11,7 @@ import {
 } from '@testing-library/react-native';
 import {getPermissionsAsync} from 'expo-notifications';
 import React from 'react';
-import {Image, Linking, StyleSheet} from 'react-native';
+import {Animated, Dimensions, Image, Linking, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -23,7 +23,9 @@ import {
   setBackground,
 } from '../src/design/background/store';
 import {CONV_ICONS, SHEET_ICONS} from '../src/design/icons';
+import {LAYER_POP_MS, LAYER_PUSH_MS, LAYER_RISE_MS, LAYER_SINK_MS} from '../src/design/motion';
 import {ThemeProvider} from '../src/design/theme';
+import {pinReduceMotion} from './fixtures/reduceMotion';
 import {darkPalette, lightPalette} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
 import AppShell from '../src/shell/AppShell';
@@ -159,7 +161,11 @@ const mmkvStore = (
 
 const permissions = getPermissionsAsync as jest.Mock;
 
-beforeEach(() => {
+/** 이 시험들은 움직임이 주제가 아니다 — 층이 누르는 즉시 걷히도록 동작 줄이기를 켠 채 돈다(`layerMotion4457.test.tsx` 가 움직임을 잰다). */
+let releaseMotion: (() => void) | null = null;
+
+beforeEach(async () => {
+  releaseMotion = await pinReduceMotion(true);
   mmkvStore.clear();
   __resetBackgroundStoreForTests();
   __resetSessionStore();
@@ -171,6 +177,8 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  releaseMotion?.();
+  releaseMotion = null;
   queryClient?.clear();
   queryClient = null;
   permissions.mockImplementation(async () => ({
@@ -544,6 +552,81 @@ describe('설정 페이지', () => {
     expect(screen.getByTestId('profile-version')).toHaveTextContent(
       '연결 기록 복사됨',
     );
+  });
+});
+
+describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
+  // 위의 시험은 모두 동작 줄이기를 켠 채 돈다. 여기서는 끄고, 셸이 층에 건 움직임이 실제로 배선돼 있는지 잰다
+  // (`layerMotion4457.test.tsx` 는 층 부품 홀로의 약속이다): 첫 장은 올라오고 X 는 내려가며 걷고, 안쪽 장은 밀려
+  // 들어오고 ‹ 는 물러나며 걷는다.
+  const WINDOW = Dimensions.get('window');
+
+  it('설정 첫 장은 올라오고, X 는 내려간 뒤에야 페이지를 걷는다', async () => {
+    releaseMotion?.();
+    releaseMotion = await pinReduceMotion(false);
+    const timing = jest.spyOn(Animated, 'timing');
+    await openPage();
+    expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+      expect.objectContaining({toValue: 0, duration: LAYER_RISE_MS}),
+    );
+
+    timing.mockClear();
+    fireEvent.press(screen.getByTestId('settings-close'));
+    expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+      expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
+    );
+    // 내려가는 동안에는 아직 서 있다 — 누른 즉시 사라지지 않는다.
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull());
+    expect(screen.getByTestId('sidebar-list')).toBeTruthy();
+  });
+
+  it('안쪽 장은 밀려 들어오고, ‹ 는 오른쪽으로 물러난 뒤에야 한 겹만 걷는다', async () => {
+    releaseMotion?.();
+    releaseMotion = await pinReduceMotion(false);
+    const timing = jest.spyOn(Animated, 'timing');
+    await openPage();
+    timing.mockClear();
+    fireEvent.press(screen.getByTestId('profile-theme-row'));
+    expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
+    expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+      expect.objectContaining({toValue: 0, duration: LAYER_PUSH_MS}),
+    );
+
+    timing.mockClear();
+    fireEvent.press(screen.getByTestId('settings-back'));
+    expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+      expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
+    );
+    expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
+    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull());
+    // 설정 페이지는 남는다 — 한 겹만 벗겼다.
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+  });
+
+  it('VoiceOver escape 도 같은 길로 나간다 — 첫 장은 내려가고 안쪽 장은 물러난다', async () => {
+    releaseMotion?.();
+    releaseMotion = await pinReduceMotion(false);
+    const timing = jest.spyOn(Animated, 'timing');
+    await openPage();
+    fireEvent.press(screen.getByTestId('profile-theme-row'));
+    timing.mockClear();
+    act(() => {
+      screen.getByTestId('settings-sub-page').props.onAccessibilityEscape();
+    });
+    expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+      expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
+    );
+    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull());
+
+    timing.mockClear();
+    act(() => {
+      screen.getByTestId('settings-page').props.onAccessibilityEscape();
+    });
+    expect(timing.mock.calls.map(call => call[1])).toContainEqual(
+      expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
+    );
+    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull());
   });
 });
 

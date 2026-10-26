@@ -8,6 +8,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
+import {pinReduceMotion} from './fixtures/reduceMotion';
 import {SettingsPage} from '../src/features/profile/SettingsPage';
 
 // =============================================================================
@@ -88,7 +89,18 @@ function mount() {
   );
 }
 
-afterEach(cleanup);
+/** 이 시험들은 움직임이 주제가 아니다 — 층이 누르는 즉시 걷히도록 동작 줄이기를 켠 채 돈다(`layerMotion4457.test.tsx` 가 움직임을 잰다). */
+let releaseMotion: (() => void) | null = null;
+
+beforeEach(async () => {
+  releaseMotion = await pinReduceMotion(true);
+});
+
+afterEach(() => {
+  cleanup();
+  releaseMotion?.();
+  releaseMotion = null;
+});
 
 describe('설정 페이지 → 프로필 사진 장', () => {
   it('큰 얼굴을 누르면 사진 장이 한 겹 더 쌓이고, 머리의 ‹ 뒤로가 설정으로 돌려보낸다', () => {
