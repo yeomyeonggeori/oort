@@ -21,7 +21,7 @@ import {StyleSheet, View} from 'react-native';
 import {NoticeBlock, Sentence} from '../../design/atoms';
 import {GroupCard} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
-import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useNow} from '../../lib/useNow';
 import {useOnline} from '../inbox/useOnline';
 import {PauseUntilCustom} from './PauseUntilCustom';
@@ -162,7 +162,6 @@ export function PauseUntilPage({
               key={option.id}
               title={option.label}
               detail={hint}
-              chevron={custom}
               pending={pendingId === option.id}
               tone={custom && customOpen ? 'accent' : 'default'}
               disabled={locked}
@@ -217,10 +216,10 @@ const buildStyles = (color: Palette) =>
     page: {gap: space.lg, paddingHorizontal: SAFE_GUTTER},
     intro: {gap: space.sm},
     heading: {fontSize: font.heading, fontWeight: '600', color: color.text},
-    caption: {fontSize: font.label, color: color.textMuted, lineHeight: 18},
+    caption: {fontSize: font.label, color: color.textMuted, lineHeight: line.label},
     failure: {
       fontSize: font.label,
       color: color.dangerText,
-      lineHeight: 18,
+      lineHeight: line.label,
     },
   });

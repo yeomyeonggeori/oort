@@ -2,7 +2,7 @@ import {cleanup, fireEvent, render, screen, within} from '@testing-library/react
 import React from 'react';
 import {ActivityIndicator, Image, StyleSheet, Switch} from 'react-native';
 
-import {SHEET_ICONS} from '../src/design/icons';
+import {HOME_ICONS, SHEET_ICONS} from '../src/design/icons';
 import {ChoiceRow, ListRow} from '../src/design/sheetParts';
 import {FixedScheme, paletteFor, type ColorScheme} from '../src/design/theme';
 import {line, SHEET, space} from '../src/design/tokens';
@@ -193,6 +193,34 @@ describe('ActionRow', () => {
     expect(given('plain')).toEqual([]);
     expect(given('open')).toEqual([['expanded', true]]);
     expect(screen.getByTestId('named').props.accessibilityLabel).toBe('따로, 내일');
+  });
+
+  it('expanded 를 주면 오른쪽 끝이 ⌄ 이고 펼치면 뒤집힌다 — ListRow 의 펼침과 같은 표지, 셰브론 ›(더 들어간다)와 갈린다', () => {
+    mount(
+      <>
+        <ListRow title="기준" accessory="expand" expanded onPress={() => {}} testID="base" />
+        <ActionRow title="접힘" expanded={false} onPress={() => {}} testID="closed" />
+        <ActionRow title="열림" expanded onPress={() => {}} testID="open" />
+        <ActionRow title="섞임" chevron expanded={false} onPress={() => {}} testID="both" />
+        <ActionRow title="들어감" chevron onPress={() => {}} testID="push" />
+      </>,
+    );
+    const glyph = (testID: string) => hostsOf(testID).UNSAFE_queryAllByType(Image).map(image => image.props.source);
+    const imageStyle = (testID: string) => StyleSheet.flatten(hostsOf(testID).UNSAFE_getByType(Image).props.style);
+    expect(glyph('base')).toEqual([HOME_ICONS.down]);
+    expect(glyph('closed')).toEqual([HOME_ICONS.down]);
+    expect(glyph('open')).toEqual([HOME_ICONS.down]);
+    // 둘 다 줘도 ⌄ 하나다 — 셰브론과 펼침이 한 행에서 겹치지 않는다. 펼침이 아닌 「들어감」은 그대로 ›.
+    expect(glyph('both')).toEqual([HOME_ICONS.down]);
+    expect(glyph('push')).toEqual([SHEET_ICONS.chevron]);
+    // 같은 크기·색이고(ListRow 와 한 가족), 뒤집힘은 펼친 행에만 있다.
+    const {transform: baseFlip, ...baseBox} = imageStyle('base');
+    const {transform: closedFlip, ...closedBox} = imageStyle('closed');
+    expect(closedBox).toEqual(baseBox);
+    expect(baseFlip).toEqual([{rotate: '180deg'}]);
+    expect(closedFlip).toBeUndefined();
+    expect(imageStyle('open').transform).toEqual([{rotate: '180deg'}]);
+    expect(imageStyle('both').transform).toBeUndefined();
   });
 
   it('비활성이면 눌러도 아무 일이 없고 접근성이 잠겼다고 말한다', () => {

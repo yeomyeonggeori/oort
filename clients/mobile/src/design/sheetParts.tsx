@@ -200,6 +200,7 @@ export function ListRow({
   leadingWidth = SHEET.iconSlot,
   accessory = 'none',
   toggle,
+  expanded,
   tone = 'default',
   onPress,
   closesSheet = false,
@@ -221,6 +222,11 @@ export function ListRow({
   accessory?: RowAccessory;
   /** `accessory="toggle"` 일 때 필수. */
   toggle?: {value: boolean; onValueChange: (next: boolean) => void};
+  /**
+   * 제자리 펼침 행(`accessory="expand"`)이 보조기술에 말하는 상태이고, 펼치면 ⌄ 가 뒤집힌다(⌃). **주지 않으면 상태에
+   * 넣지 않는다**(`false` 도 상태에 섞이는 `Pressable` 관용구 — 펼침이 아닌 행은 이 말을 하지 않는다).
+   */
+  expanded?: boolean;
   /** 파괴 행(나가기·지우기)은 글자가 위험색이다. */
   tone?: 'default' | 'danger';
   onPress?: () => void;
@@ -285,7 +291,9 @@ export function ListRow({
       {value && !stackValue ? (
         <Text
           style={styles.rowValue}
-          numberOfLines={1}
+          // 두 줄까지 — 한 줄이면 「지금대로 · 10월 27일 16:11까지」 같은 긴 값이 50% 상한에서 말줄임으로 잘린다(r1 M5). 그보다
+          // 길면(80자 상태 글) 말줄임이고, 그 글은 호스트가 따로 전문을 보인다.
+          numberOfLines={2}
           testID={testID ? `${testID}-value` : undefined}>
           {value}
         </Text>
@@ -294,7 +302,12 @@ export function ListRow({
         <Image source={SHEET_ICONS.chevron} style={styles.chevron} accessibilityElementsHidden />
       ) : null}
       {accessory === 'expand' ? (
-        <Image source={HOME_ICONS.down} style={styles.expand} accessibilityElementsHidden />
+        <Image
+          source={HOME_ICONS.down}
+          style={[styles.expand, expanded === true && styles.expandFlipped]}
+          accessibilityElementsHidden
+          testID={testID ? `${testID}-expand` : undefined}
+        />
       ) : null}
       {accessory === 'copy' ? (
         <Image source={SHEET_ICONS.copy} style={styles.copy} accessibilityElementsHidden />
@@ -329,6 +342,7 @@ export function ListRow({
         disabled,
         busy,
         ...(isToggle ? {checked: toggle.value} : null),
+        ...(expanded !== undefined ? {expanded} : null),
       }}
       disabled={disabled}
       onPress={press}
@@ -351,9 +365,11 @@ export function ListRow({
  * (`ThemeControl` 머리말, #2702). 앱의 라디오가 모두 이 규칙이었고(옛 `GroupRow tone="accent"`) 그래서 한 부품이 쥔다.
  * 보조기술에는 `radio` + `selected` 로 읽힌다(「3개 중」은 부모의 `radiogroup`).
  *
- * `leading` 은 장식이다(상태 점·견본·썸네일 — 읽히지 않는다). 기본은 제목 첫 줄 높이의 22pt 칸이고(설명 줄이 붙으면 행이
- * 위로 붙어 점·✓ 가 제목 첫 줄 옆에 선다), 칸이 더 크면 `leadingWidth` 와 `leadingAlign="center"` 로 가운데에 세운다 —
- * 이때 카드의 `inset` 은 같은 폭이어야 구분선이 글자 열에서 시작한다.
+ * `leading` 은 **고르는 값의 모습을 미리 보이는 표지**다(테마 견본·강조색 점·사진 썸네일 — 읽히지 않는다). 아이콘 같은 장식
+ * 앞 칸이 아니다: 앞 칸의 폭은 표지가 정한다(견본 44·점 20·썸네일 36). 기본은 제목 첫 줄 높이의 22pt 칸이고(설명 줄이 붙으면
+ * 행이 위로 붙어 점·✓ 가 제목 첫 줄 옆에 선다), 칸이 더 크면 `leadingWidth` 와 `leadingAlign="center"` 로 가운데에 세운다 —
+ * 이때 카드의 `inset` 은 같은 폭이어야 구분선이 글자 열에서 시작한다. **표지가 없는 값(상태 이름처럼 색이 이미 다른 곳에서
+ * 말해지는 것)에는 주지 않는다**(`phone-sheets.md` §4 의 앞 칸 규칙).
  */
 export function ChoiceRow({
   title,
@@ -799,6 +815,8 @@ const buildStyles = (color: Palette) =>
       height: HOME_ICON_SIZE.down,
       tintColor: color.icon,
     },
+    // 펼친 행의 ⌄ 는 뒤집힌다(⌃) — 눌렀을 때 무슨 일이 일어났는지 눈에도 말한다.
+    expandFlipped: {transform: [{rotate: '180deg'}]},
     copy: {
       width: SHEET_ICON_SIZE.copy,
       height: SHEET_ICON_SIZE.copy,

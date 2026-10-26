@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 
 import {Sentence} from '../../design/atoms';
-import {SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
+import {HOME_ICON_SIZE, HOME_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {font, line, SHEET, space, type Palette} from '../../design/tokens';
 
@@ -124,7 +124,9 @@ export function SwitchRow({
  *
  *  - `pending` 이면 오른쪽 끝이 스피너다(셰브론이 스피너로 바뀐다): 누른 행에서 진행이 보인다.
  *  - `tone="accent"` 는 강조색 글자(펼쳐 둔 「직접 고르기」, 「설정 열기」), `"danger"` 는 파괴 행(「사진 지우기」).
- *  - `expanded` 는 펼치는 행이 보조기술에 말하는 상태다. 주지 않으면 상태에 넣지 않는다(`false` 를 넘기지 않는
+ *  - `expanded` 는 **제자리 펼침 행**이 보조기술에 말하는 상태이고, 주면 오른쪽 끝이 ⌄ 가 된다(펼치면 뒤집힘 ⌃) — `ListRow`
+ *    `accessory="expand"` + `expanded` 와 같은 표지다. 셰브론 ›(`chevron`)은 「더 들어간다」, ⌄ 는 「여기서 고른다」로 갈린다
+ *    (design-review #4457 r1 M4: 펼침이 세 가지 표지로 말해졌다). 주지 않으면 상태에 넣지 않는다(`false` 를 넘기지 않는
  *    관용구 — `Pressable` 이 그것도 접근성 상태에 섞는다).
  * 이름은 옛 `GroupRow` 처럼 제목이다(보조 줄을 섞지 않는다) — 바꾸려면 `accessibilityLabel` 을 준다.
  */
@@ -143,10 +145,11 @@ export function ActionRow({
 }: {
   title: string;
   detail?: string;
-  /** 오른쪽 끝의 ›. `pending` 이면 스피너가 대신 선다. */
+  /** 오른쪽 끝의 ›. `pending` 이면 스피너가 대신 선다. `expanded` 가 있으면 ⌄ 가 이긴다. */
   chevron?: boolean;
   pending?: boolean;
   tone?: 'default' | 'accent' | 'danger';
+  /** 제자리 펼침 행의 상태. 주면 오른쪽 끝은 ⌄(펼치면 ⌃)이고 보조기술에 펼침 상태가 읽힌다. */
   expanded?: boolean;
   /** 눌리지 않고 흐려진다(읽는 중·쓰는 중). */
   disabled?: boolean;
@@ -193,6 +196,13 @@ export function ActionRow({
           color={palette.textMuted}
           accessibilityElementsHidden
           importantForAccessibility="no-hide-descendants"
+        />
+      ) : expanded !== undefined ? (
+        <Image
+          source={HOME_ICONS.down}
+          style={[styles.expand, expanded && styles.expandFlipped]}
+          accessibilityElementsHidden
+          testID={testID ? `${testID}-expand` : undefined}
         />
       ) : chevron ? (
         <Image source={SHEET_ICONS.chevron} style={styles.chevron} accessibilityElementsHidden />
@@ -260,6 +270,13 @@ const buildStyles = (color: Palette) =>
       height: SHEET_ICON_SIZE.chevron,
       tintColor: color.icon,
     },
+    // `ListRow` 의 펼침 글리프와 같다(같은 PNG·크기·색, 펼치면 뒤집힘).
+    expand: {
+      width: HOME_ICON_SIZE.down,
+      height: HOME_ICON_SIZE.down,
+      tintColor: color.icon,
+    },
+    expandFlipped: {transform: [{rotate: '180deg'}]},
     rowDetail: {
       marginTop: space.xs,
       fontSize: font.label,

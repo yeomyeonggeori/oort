@@ -13,6 +13,7 @@ import {GroupCard} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {
   font,
+  line,
   radius,
   space,
   TOUCH_TARGET,
@@ -415,7 +416,7 @@ const buildStyles = (color: Palette) =>
     error: {
       fontSize: font.label,
       color: color.dangerText,
-      lineHeight: 18,
+      lineHeight: line.label,
       textAlign: 'center',
     },
   });

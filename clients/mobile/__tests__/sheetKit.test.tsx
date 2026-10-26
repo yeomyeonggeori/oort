@@ -684,12 +684,13 @@ describe('행 — 값은 큰 글씨에서 제목 아래로 내려온다 (#4457)'
     jest.spyOn(Dimensions, 'get').mockImplementation(() => ({...real, fontScale}) as never);
   }
 
-  it('기본 글씨: 값은 오른쪽 한 줄이고 50% 상한이 있다', async () => {
+  it('기본 글씨: 값은 오른쪽에 서고 50% 상한이 있으며 두 줄까지 쓴다(긴 값이 한 줄에서 잘리지 않게)', async () => {
     setFontScale(1);
     await mount(<ListRow title="상태 설정" value="없음" accessory="chevron" onPress={() => {}} testID="row" />);
     const value = screen.getByTestId('row-value');
     expect(StyleSheet.flatten(value.props.style)).toMatchObject({maxWidth: '50%', textAlign: 'right'});
-    expect(value.props.numberOfLines).toBe(1);
+    // 한 줄이면 「지금대로 · 10월 27일 16:11까지」 같은 값이 말줄임으로 잘린다(design-review #4457 r1 M5).
+    expect(value.props.numberOfLines).toBe(2);
   });
 
   it('접근성 글씨(STACK_PILL_SCALE 부터): 값이 제목 아래로 내려와 상한도 말줄임도 없다', async () => {
@@ -706,7 +707,7 @@ describe('행 — 값은 큰 글씨에서 제목 아래로 내려온다 (#4457)'
   it('경계: 문턱 바로 아래(1.49)는 아직 오른쪽, 문턱(1.5)부터 내려온다', async () => {
     setFontScale(STACK_PILL_SCALE - 0.01);
     const {unmount} = await mount(<ListRow title="a" value="b" testID="row" />);
-    expect(screen.getByTestId('row-value').props.numberOfLines).toBe(1);
+    expect(screen.getByTestId('row-value').props.numberOfLines).toBe(2); // 오른쪽에 선 값
     unmount();
     setFontScale(STACK_PILL_SCALE);
     await mount(<ListRow title="a" value="b" testID="row" />);
@@ -723,6 +724,48 @@ describe('행 — 값은 큰 글씨에서 제목 아래로 내려온다 (#4457)'
     setFontScale(3.1);
     await mount(<ListRow title="로그아웃" tone="danger" onPress={() => {}} testID="row" />);
     expect(screen.queryByTestId('row-value')).toBeNull();
+  });
+});
+
+describe('행 — 제자리 펼침(expanded) (#4457 r1 M4)', () => {
+  const glyphOf = () => screen.getByTestId('row-expand', {includeHiddenElements: true});
+  const rotate = () => StyleSheet.flatten(glyphOf().props.style).transform;
+
+  it('펼침 행은 보조기술에 펼침 상태를 말하고, 접힌 ⌄ 와 펼친 ⌃ 가 눈에도 갈린다', async () => {
+    const collapsed = await mount(
+      <ListRow title="만료" value="지우지 않음" accessory="expand" expanded={false} onPress={() => {}} testID="row" />,
+    );
+    expect(screen.getByTestId('row').props.accessibilityState).toMatchObject({expanded: false});
+    expect(rotate()).toBeUndefined(); // ⌄ 그대로
+    collapsed.unmount();
+    await mount(
+      <ListRow title="만료" value="지우지 않음" accessory="expand" expanded onPress={() => {}} testID="row" />,
+    );
+    expect(screen.getByTestId('row').props.accessibilityState).toMatchObject({expanded: true});
+    expect(rotate()).toEqual([{rotate: '180deg'}]); // 뒤집혀 ⌃
+  });
+
+  it('expanded 를 안 준 행은 펼침 상태를 말하지 않는다 — 펼침이 아닌 행에 expanded 가 섞이지 않는다', async () => {
+    // Pressable 은 상태를 모든 키가 있는 객체로 정규화한다 — 「값이 있는 키」로 잰다.
+    const given = () =>
+      Object.entries(screen.getByTestId('row').props.accessibilityState ?? {})
+        .filter(([, value]) => value !== undefined)
+        .map(([key]) => key);
+    const expand = await mount(<ListRow title="복사" accessory="expand" onPress={() => {}} testID="row" />);
+    expect(given()).not.toContain('expanded');
+    expect(rotate()).toBeUndefined();
+    expand.unmount();
+    const chevron = await mount(<ListRow title="테마" accessory="chevron" onPress={() => {}} testID="row" />);
+    expect(given()).not.toContain('expanded');
+    chevron.unmount();
+    // 대조군: 주면(`false` 여도) 들어간다 — 위 「없다」가 상태를 아예 못 읽어서 참인 것이 아니다.
+    await mount(<ListRow title="접힘" accessory="expand" expanded={false} onPress={() => {}} testID="row" />);
+    expect(given()).toContain('expanded');
+  });
+
+  it('펼침 글리프는 expand 액세서리에만 선다 — 셰브론 행에는 ⌄ 가 없다', async () => {
+    await mount(<ListRow title="테마" accessory="chevron" expanded onPress={() => {}} testID="row" />);
+    expect(screen.queryByTestId('row-expand', {includeHiddenElements: true})).toBeNull();
   });
 });
 
