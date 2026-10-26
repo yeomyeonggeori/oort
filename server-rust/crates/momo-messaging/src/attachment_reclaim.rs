@@ -50,8 +50,10 @@
 //!    transaction per file ([`reclaim_unbound_attachment_in_tx`]) that locks the row
 //!    and decides again. The api process has no cross-tenant read at all
 //!    (`workspace` is FORCE-RLS on `app.workspace_id`, so `momo_app` without the GUC
-//!    sees zero rows); it runs step 2 for the workspaces whose attachments it has
-//!    served (`momo-server` `attachment_reclaim`) and needs no new privilege.
+//!    sees zero rows); it runs step 2 for the workspaces whose **uploads it has served
+//!    since it started** (`momo-server` `attachment_reclaim`, [`ReclaimScope::TouchedByThisProcess`])
+//!    and needs no new privilege. The price is coverage: a workspace nobody has uploaded to
+//!    since the last restart is not looked at until somebody does.
 //!
 //! Because the listing uses the full predicate, a file something else holds can never
 //! sit at the front of the window and starve the rest.

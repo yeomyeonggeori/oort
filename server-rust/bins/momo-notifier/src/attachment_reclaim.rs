@@ -57,8 +57,9 @@
 //! `LocalDriveArchive::open` clears pending sessions of the process that opens it — the
 //! self-host volume, and a Railway volume, belong to the api process alone. On the
 //! default `local` backend this job is not configured at all; the api process runs the
-//! same two-step sweep for the workspaces whose attachments it serves
-//! (`momo-server` `attachment_reclaim`).
+//! same two-step sweep for the workspaces whose uploads it has served since it started
+//! (`momo-server` `attachment_reclaim`; it has no cross-tenant read, and a new
+//! `SECURITY DEFINER` to enumerate tenants was deliberately not made).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
