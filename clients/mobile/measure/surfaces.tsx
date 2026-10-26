@@ -190,6 +190,7 @@ import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
+import {ActivityRowsSurface} from './activityRows';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
@@ -2212,6 +2213,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #4613: 활동 줄 높이 표 — 글자(N초째·생존 판정 라벨·앞에 m건)별 줄 수. 초가 바뀔 때 줄 수가 뒤집히는 글자가 있는가.
+  if (name === 'activity-rows' || name === 'activity-rows-wide') return <ActivityRowsSurface wide={name === 'activity-rows-wide'} />;
   // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
   if (name.startsWith('dm-steady')) {
     return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
