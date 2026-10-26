@@ -384,6 +384,11 @@ pub struct RateLimitConfig {
     /// fresh budget. Every comparison is counted, a right one included, and the
     /// budget is spent *before* the comparison runs. Login has no limiter yet
     /// (ADR-0215 F9, #4597); when it gets one it should spend this same key.
+    ///
+    /// The window is `RATE_LIMIT_WINDOW_SECONDS`, which every limiter in this file
+    /// shares: this knob is how many guesses fit in it, and only a value of 0 is
+    /// refused. An operator who shortens the window to a second turns "5 a minute"
+    /// into "5 a second", for this budget and for the rest.
     pub password_guess_per_account_limit: u32,
     /// `RATE_LIMIT_DRIVE_UPLOAD_PER_IP` (default 120). 0 disables. The public
     /// upload PUT (`/__momo_stub/drive/uploads/{token}`, #2628), which answers

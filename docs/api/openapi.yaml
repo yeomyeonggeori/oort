@@ -13228,7 +13228,11 @@ components:
         default 60; attachment upload starts, default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read are not budgeted. Retrying with the same `clientMsgId`
-        after a 429 is safe.
+        after a 429 is safe. `POST /v1/join` also has a per-account password-guess
+        budget (default 5 per window, #4625): it applies only to an address that
+        already has an active account, is spent before the password is compared
+        (a right password counts too), and answers 429 without comparing once
+        spent. The window is the shared one (`RATE_LIMIT_WINDOW_SECONDS`).
       headers:
         Retry-After:
           description: Seconds to wait before retrying.
