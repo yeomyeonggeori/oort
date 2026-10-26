@@ -42,7 +42,7 @@
 - 근거 결정: owner 2026-10-26 「QR을 찍지 않더라도 데스크탑 앱에서 QR 이외에 로그인 수단(코드같은거나 링크같은거. 스팀이나 다른곳에서 사용하는 방식 확인)을 마련해봐줘.」 + 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 owner 문장이 덮는 것은 「QR 말고 코드나 링크도」까지다. 코드의 방향·모양·예산·확인 규칙은 아래 [권장]이다. PR 본문 「권장으로 정한 것」 표와 1:1이다.
 - 짝: ADR-0215(비밀번호 변경·찾기·재설정, 같은 PR). 기안: Sonnet 5.5 엔진 워커(#4574).
 - 이 증보는 D1~D7을 **뒤집지 않는다**. 토큰(43자·QR·딥링크)은 그대로 정본이다. D4(SAS는 모드별)는 **토큰 소비에 그대로** 두되 「확인 마감이 없다」는 빈틈(G8)만 닫고(C5), **코드 소비에만** 모드와 무관한 발급자 확인을 더한다.
-- 표기: [V] 이번에 직접 확인 · [S] 검색 요약으로만 확인 · [추정] · **[권장]** · `runtime-unverified`. 문서만 바꾸는 PR이고 코드 사실은 track/engine `b5affda6b`를 읽어 얻었다. 용어: **M0·M1·M2**는 폰 로그인 전 화면의 환영·스캐너·SAS 대기 화면 코드다(`ConnectScreen.tsx:104-125`).
+- 표기: [V] 이번에 직접 확인 · [S] 검색 요약으로만 확인 · [추정] · **[권장]** · `runtime-unverified`. 문서만 바꾸는 PR이고 코드 사실은 track/engine `b5affda6b`를 읽어 얻었다(병합 시점 선두 `cda32e691`로 바뀐 `lib.rs`·`config.rs`는 줄 번호만 갱신했다). 용어: **M0·M1·M2**는 폰 로그인 전 화면의 환영·스캐너·SAS 대기 화면 코드다(`ConnectScreen.tsx:104-125`).
 
 ### 확인한 사실 [V]
 
@@ -52,7 +52,7 @@
 | G2 | 데스크탑·웹 카드의 「복사」는 딥링크 전체를 복사한다. 폰은 딥링크가 도착하면 바로 redeem한다 | `clients/web/src/features/settings/DeviceLinkCard.tsx:421-425`, `ConnectScreen.tsx:557-583` |
 | G3 | 폰은 redeem 응답에 SAS가 없으면 **토큰에서 직접 파생**한다(`result.sas ?? deviceLinkSasDigits(link.token)`). 코드로 연결한 폰은 토큰이 없어 파생할 수 없다. #2010(OPEN)이 「redeem 응답에 sas 동봉」과 「서버 랜딩 뒤 파생 경로를 제거하는 정리」다 | `ConnectScreen.tsx:572` |
 | G4 | 토큰은 43자(256비트)·TTL 120초이고, 새 발급이 같은 멤버의 미소비 링크를 지워서 **멤버당 live 링크는 1개**다 | `crates/momo-auth/src/device_link.rs:20-23`, `:143-158` |
-| G5 | redeem은 공개 + per-IP 게이트(버킷 `ip:device-link`)이고 예산은 claim과 같은 `claim_per_ip_limit`(기본 30/60초)다. IP는 첫 `X-Forwarded-For` 홉을 그대로 믿는다 | `bins/momo-server/src/lib.rs:2009-2017`, `rate_limit.rs:310-332`, `:378-392`, `config.rs:364`, `:3247` |
+| G5 | redeem은 공개 + per-IP 게이트(버킷 `ip:device-link`)이고 예산은 claim과 같은 `claim_per_ip_limit`(기본 30/60초)다. IP는 첫 `X-Forwarded-For` 홉을 그대로 믿는다 | `bins/momo-server/src/lib.rs:2020-2028`, `rate_limit.rs:310-332`, `:378-392`, `config.rs:368`, `:3398` |
 | G6 | SAS 4자리는 토큰 해시에서 파생하고 공개 오리진 모드에서만 채운다. `confirm-sas`는 `sas`가 없으면 409다 | `momo-auth/src/device_link.rs:172-182`, `:437`, `routes/device_link.rs:119-120`, `:318-321` |
 | G7 | redeem 실패 응답은 갈린다: 만료·없음·발급자 세션 폐기는 401, 소비됨은 409. 43자 토큰에는 문제가 아니지만 **짧은 코드에서는 「맞는 코드였다」를 알려 주는 오라클**이다 | `routes/device_link.rs:57-72` |
 | G8 | `status` 응답은 상태와 기기 이름·플랫폼뿐이다. 「확인이 필요함」·SAS는 없고 카드는 발급 응답의 `sas`로 판단한다. 확인 SQL은 링크 만료도, **거절 표식도** 보지 않는다(거절 수단 자체가 없다). 그래서 확인 마감이 없다 | `momo-auth/src/device_link.rs:366-405`, `:410-480`, `DeviceLinkCard.tsx:330` |
@@ -183,7 +183,7 @@
 
 ### DB 계약 (새 migration만)
 
-- 번호: 149가 마지막이다 [V, 2026-10-26]. 실제 번호는 구현 시점의 다음 번호다. `schema_v0.sql`은 건드리지 않는다.
+- 번호: main·track/uxui는 149, track/engine은 151이 마지막이다 [V, 2026-10-26]. 실제 번호는 구현 시점의 다음 번호다. `schema_v0.sql`은 건드리지 않는다.
 - `device_link_token`의 새 열: `code_mac bytea NULL`(`code_mac IS NOT NULL`인 행에 부분 UNIQUE), `redeemed_via text`, `confirm_by timestamptz`, `denied_at timestamptz`, 토큰 소비의 확인 필요 여부 열(SAS를 항상 채우는 대신 옮긴다. 기존 행은 `sas IS NOT NULL`을 이관), `token`의 새 열 `revoked_reason`(거절·마감 구분, NULL 허용, C5).
 - **새 EXECUTE 전용 definer 함수** `momo_join_private.device_link_workspace_id_by_code(bytea)`(086의 `device_link_workspace_id`와 같은 모양). RLS FORCE·`ws_isolation`은 기존 그대로다. 새 테넌트 테이블은 없다.
 

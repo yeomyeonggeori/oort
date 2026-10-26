@@ -12,7 +12,7 @@
   - 위임 2026-10-22: 「결정 부탁드릴 것은 너가 권장으로 진행해봐.」 아래 [권장]이 이 위임으로 정한 것이다. PR 본문 「권장으로 정한 것」 표에 모두 적는다.
 - 관계: ADR-0100(공개 API·보안 경계·DB 계약은 Accepted ADR이 머지 조건) · ADR-0180(기기 연결 — 이 ADR의 짝) · ADR-0146 개정 2026-09-28(기기 키·`momo.human.*` 서명 — D4·D7이 사용하고 머리 증보 줄·D-8 표·끝 절(D-7 역방향 줄 포함)에 역방향 줄을 둔다) · ADR-0166(claim 토큰 — 재설정 링크가 같은 테이블·라우트를 쓴다) · ADR-0195(패스키 — 복구 순서 D-8을 이 ADR이 한 칸 늘린다) · ADR-0128 D2(관리자 사다리) · ADR-0185(제로베이스 온보딩) · ADR-0186 부록 C(링크의 공개 origin) · ADR-0208 D14(예약 메시지 보류) · ADR-0214(보안 주장은 시험이 없으면 공개하지 않는다)
 - 번호 확인 [V, 2026-10-26]: `origin/main`·`track/engine`·`track/uxui`와 모든 원격 브랜치의 `docs/adr/`는 0214가 마지막이다. 열린 이슈 본문은 0207(#4512), 0209(#4240의 「멀티 계정」), 0211(#4238), 0212(#4239), 0213(#4240)을 예약했고 0215 이상은 어디에도 없다. 이 ADR은 **0215**만 쓴다.
-- 표기: [V] 코드·문서·1차 출처를 이번에 직접 열어 확인 · [S] 검색 결과·요약으로만 확인(1차 본문을 열지 못함) · [추정] 해석 · **[권장]** planner 위임으로 정한 결정 · `runtime-unverified` 실행해 보지 않음. 이 PR은 문서만 바꾼다. 코드 사실은 track/engine `b5affda6b`를 읽어 얻었고 어떤 시험도 새로 돌리지 않았다.
+- 표기: [V] 코드·문서·1차 출처를 이번에 직접 열어 확인 · [S] 검색 결과·요약으로만 확인(1차 본문을 열지 못함) · [추정] 해석 · **[권장]** planner 위임으로 정한 결정 · `runtime-unverified` 실행해 보지 않음. 이 PR은 문서만 바꾼다. 코드 사실은 track/engine `b5affda6b`를 읽어 얻었고(내용), 병합 시점 선두 `cda32e691`로 바뀐 파일(`lib.rs`·`config.rs`·`main.rs`·`.env.example`)은 줄 번호만 그 기준으로 갱신했다(밀린 줄의 내용 일치를 줄마다 확인). 어떤 시험도 새로 돌리지 않았다.
 - 용어: **R2**는 ADR-0146 개정의 「사람 기기 키 서명」이다. **지시 키**는 그 키(맥 뿌리 키, 맥이 승인한 폰 키)다. **계보**(lineage)는 한 번의 로그인이 낳은 토큰 묶음(`token.session_id`)이다.
 
 ## 맥락
@@ -25,28 +25,28 @@
 |---|---|---|
 | F1 | 시험 파일을 뺀 `clients/web`·`clients/mobile`·`clients/desktop/src`·`packages/momo-core`에서 `password-reset`·`members/me/password`·`changePassword` 같은 호출은 0건이다. 「비밀번호 찾기」·「변경」 화면이 없다. 같은 라우트를 부르는 **제품 밖** 호출자는 있다(F21) | grep 0건(2026-10-26) |
 | F2 | 로그인은 **워크스페이스 단위 이메일+비밀번호**다. 워크스페이스를 비우면 시드 워크스페이스로 간다 | `bins/momo-server/src/routes/auth_routes.rs:9-27`, `:320-361`, `dto.rs:124-131` |
-| F3 | #1767 API 둘: owner/admin이 멤버의 1회용 재설정 링크를 발급(`POST …/members/{member}/password-reset`), 본인이 현재 비밀번호로 변경(`PATCH …/members/me/password`) | `lib.rs:907`, `:913`, `routes/password.rs:1-9` |
+| F3 | #1767 API 둘: owner/admin이 멤버의 1회용 재설정 링크를 발급(`POST …/members/{member}/password-reset`), 본인이 현재 비밀번호로 변경(`PATCH …/members/me/password`) | `lib.rs:918`, `:924`, `routes/password.rs:1-9` |
 | F4 | **메일 발송기는 없다**. 링크는 초대처럼 다른 경로로 전한다 | `password.rs:8-9` |
 | F5 | 발급 사다리: owner는 자기 외 누구나(다른 owner 포함), admin은 member·guest만, 자기 자신은 403, 사람·활성 멤버만. 재발급은 이전 미소비 토큰을 소비한다. TTL은 24시간(ADR-0166 봉인 상수 — 「두 번째 시계를 만들지 말 것」) | `crates/momo-auth/src/owner_claim.rs:17-19`, `:241-328`, `workspace_authorization.rs:107-115` |
-| F6 | 소비는 공개 `POST /v1/claim`이다. owner 부트스트랩과 같은 라우트·같은 `credential_claim` 테이블이고 `kind`만 다르다. 재설정 소비는 비밀번호를 정하고 그 멤버의 모든 세션·푸시·기기 키를 끝내고 새 세션을 돌려준다 | `routes/claim.rs:67-175`, `owner_claim.rs:205-207`, `lib.rs:1999-2005` |
+| F6 | 소비는 공개 `POST /v1/claim`이다. owner 부트스트랩과 같은 라우트·같은 `credential_claim` 테이블이고 `kind`만 다르다. 재설정 소비는 비밀번호를 정하고 그 멤버의 모든 세션·푸시·기기 키를 끝내고 새 세션을 돌려준다 | `routes/claim.rs:67-175`, `owner_claim.rs:205-207`, `lib.rs:2010-2016` |
 | F7 | 본인 변경은 현재 비밀번호를 확인하고 모든 세션 토큰을 폐기한 뒤 호출자에게 새 세션 쌍을 준다. 같은 트랜잭션에서 푸시 등록·**기기 키**·예약 메시지(보류)를 함께 끝낸다. 현재 비밀번호와 새 비밀번호를 **같은 검증기**(`spec_password` → `normalized_claim_password`)로 거른다 | `password.rs:37-39`, `:161-261`(검증 `:174-175`), `owner_claim.rs:332-379`, `bins/momo-server/src/session_end.rs:12-18`, `:101-115` |
 | F8 | 새 비밀번호 규칙은 「비어 있지 않음, 1024자 이하」뿐이다(join·claim 같은 규칙). 해시는 `crypt(pw, gen_salt('bf'))`라 pgcrypto 기본 반복 6이고 `bf`의 최대 비밀번호 길이는 72다(pgcrypto 문서 [V]). 72 넘는 부분이 해시에 쓰이지 않는다는 것은 bcrypt의 알려진 성질이고 이 저장소에서 실행해 확인하지는 않았다 [S, `runtime-unverified`]. 클라이언트에도 최소 길이가 없다(웹 `maxLength={1024}`뿐) | `owner_claim.rs:108-116`, `crates/momo-settings/src/join.rs:250-258`, `server/Migrations/005_auth_password_hash.sql:10-16`, `clients/web/src/features/auth/ClaimPage.tsx:252`, `:269` |
-| F9 | `/v1/auth/login`에는 per-IP 게이트도 시도 제한도 잠금도 없다. join·claim·device-link redeem에는 per-IP 게이트가 있다 | `lib.rs:1913` 대 `:1990-2017`, `crates/momo-messaging/src/identity.rs:366-410` |
+| F9 | `/v1/auth/login`에는 per-IP 게이트도 시도 제한도 잠금도 없다. join·claim·device-link redeem에는 per-IP 게이트가 있다 | `lib.rs:1924` 대 `:2001-2028`, `crates/momo-messaging/src/identity.rs:366-410` |
 | F10 | per-IP 게이트는 첫 `X-Forwarded-For` 홉을 그대로 믿는다. 직접 노출된 서버나 값을 덧붙이는 프록시 뒤에서는 IP 키 예산을 우회할 수 있다(주석이 이미 v0 한계로 적는다) | `rate_limit.rs:310-332` |
 | F11 | 웹 claim 화면의 실패 문구는 owner 부트스트랩 전제다(410 「설치를 실행한 쪽에 새 링크를 요청하세요」, 400 「비어 있거나 너무 깁니다」). 재설정 링크가 와도 같은 문구가 뜬다 | `packages/momo-core/src/features/auth/claimModel.ts:48-52`, `:63-69` |
 | F12 | `oort://claim`은 계약이 아니다. 웹 입력 파서가 `invalid`로 돌려보내고, #2812(OPEN, **데스크탑 앱** 이슈)는 서버 없는 `oort://claim/<token>`을 말한다 | `clients/web/src/features/auth/entryInput.ts:21-22`, `:93`, `entryInput.test.ts:27`, #2812 |
 | F13 | 기기 키는 맥(뿌리 후보, **로그인 비밀번호로 등록**, QR 연결 세션에서는 못 만든다)과 폰(QR 연결 + 맥의 승인) 둘뿐이고 웹은 비지시 표면이다. 키는 세션 계보에 묶이고 변경·재설정이 전부 폐기한다. 승인 안 된 폰 키는 「지시 불가」이고, 승인된 폰 키도 **승인한 맥의 계보가 살아 있어야** 지시 가능하다 | `routes/device_keys.rs:1-41`, `:272-315`, `momo-auth/src/device_key.rs:93-143`, `momo-auth/src/human_control.rs:278`, ADR-0146 D-4·D-6·D-7 |
 | F14 | 서명 검증 몸통이 있다: 키 → 사슬 → 서명문 재구성 → 시간창(±5분, 수명 ≤ 10분 상수) → nonce 1회 소비(맨 끝). 형제 스키마 선례(`device_endorse.v1`·`device_rebind.v1`·`refresh_proof.v1`)와 nonce 테이블이 있다. nonce 테이블의 `kind` CHECK는 5종(`spawn`·`input`·`permission`·`bundle_manifest`·`host_register`)이고 ADR-0210 HO-10이 같은 CHECK에 `ops_session`·`ops_box`를 더할 예정이다(`0210-…md:285`). 거절된 요청도 트랜잭션이 커밋된다 | `momo-auth/src/human_control.rs:1-60`, `crates/momo-wire/src/human_control.rs:147-175`, `:984-986`, `server/Migrations/095_human_control_nonce.sql:56-61` |
-| F15 | `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`는 기본 꺼짐이고 **host 지시**를 겨냥한다. `signing-context`는 `MOMO_INSTANCE_ID`가 없으면 503 `instance_id_unconfigured`로 「서명한 것은 아무것도 검증되지 않는다」고 답하고, 응답에 호출 세션의 계보 `sessionId`를 싣는다. refresh sender-constraint 모드 기본은 `observe`다: **비밀번호 로그인(웹·데스크탑) 계보는 훔친 refresh 토큰으로 계속 갱신된다.** QR 연결(폰) 계보는 재사용이 감지되면 기본값에서도 끝난다 | `config.rs:1418-1442`, `:2850`, `routes/device_keys.rs:166-215`, `dto.rs:1050-1053`, `momo-auth/src/refresh_proof.rs:42-52` |
+| F15 | `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`는 기본 꺼짐이고 **host 지시**를 겨냥한다. `signing-context`는 `MOMO_INSTANCE_ID`가 없으면 503 `instance_id_unconfigured`로 「서명한 것은 아무것도 검증되지 않는다」고 답하고, 응답에 호출 세션의 계보 `sessionId`를 싣는다. refresh sender-constraint 모드 기본은 `observe`다: **비밀번호 로그인(웹·데스크탑) 계보는 훔친 refresh 토큰으로 계속 갱신된다.** QR 연결(폰) 계보는 재사용이 감지되면 기본값에서도 끝난다 | `config.rs:1490-1514`, `:3001`, `routes/device_keys.rs:166-215`, `dto.rs:1050-1053`, `momo-auth/src/refresh_proof.rs:42-52` |
 | F16 | 패스키(ADR-0195)는 비밀번호에 **추가**한다. 등록은 「최근 5분 안 재인증」이 조건이고, 복구 순서를 「비밀번호 로그인 → 운영자 재설정 링크 → 로그인된 다른 기기의 QR」로 적는다 | ADR-0195 D-2·D-8 |
 | F17 | 멤버 관리 표면은 웹·데스크탑 `MemberProfileDialog`이고 역할 변경(`RoleChangeField`)이 이미 있다. 보이는 조건은 코어 `canChangeWorkspaceRole`이다. 폰에는 멤버 관리 화면이 없다 | `clients/web/src/features/directory/MemberProfileDialog.tsx:83-140`, `:230-250`, `momo-core/src/features/directory/model.ts:90-98`, `clients/mobile/src/screens/`(14개 화면) |
 | F18 | 마지막 owner 잠김: owner 재설정은 **다른** owner가 할 수 있다. 일반 운영자 경로는 없고, `migrate set-owner`가 시드 워크스페이스 owner 한정으로 있다 | `owner_claim.rs:248-250`, `bins/momo-migrate/src/main.rs:760-777`, `infra/rust/sql/set_initial_owner.sql` |
-| F19 | 사람이 다른 곳으로 전하는 1회용 링크는 **설정된 공개 주소**(`MOMO_PUBLIC_BASE_URL`, https만)를 요청의 `Host`보다 먼저 쓴다. 이유가 이미 적혀 있다: 링크가 사람에게 닿는 동안 서버는 그 링크를 보지 못하므로 `Host` 헤더가 가리킬 곳을 정하게 두지 않는다. 기기 연결의 `deepLink`는 요청 헤더로만 도출한다(발급자와 수신자가 같은 자리) | `routes/agent_port_tools.rs:2744-2749`, `main.rs:183-196`, `config.rs:2228-2236`, `routes/device_link.rs:93-102`, `realtime_advert.rs:265-282` |
-| F20 | `MOMO_INSTANCE_ID`는 설치 스크립트·`infra/`·셀프호스트 문서 어디에서도 값이 정해지지 않는다. `infra/.env.example`에 주석 처리된 한 줄만 있다. 그래서 설치 기본값에서는 `signing-context`가 503이고 서명 경로가 모두 닫혀 있다 | `infra/.env.example:278-289`, grep 0건(`scripts/`·`infra/`·`docs/SELF_HOST*.md`) |
+| F19 | 사람이 다른 곳으로 전하는 1회용 링크는 **설정된 공개 주소**(`MOMO_PUBLIC_BASE_URL`, https만)를 요청의 `Host`보다 먼저 쓴다. 이유가 이미 적혀 있다: 링크가 사람에게 닿는 동안 서버는 그 링크를 보지 못하므로 `Host` 헤더가 가리킬 곳을 정하게 두지 않는다. 기기 연결의 `deepLink`는 요청 헤더로만 도출한다(발급자와 수신자가 같은 자리) | `routes/agent_port_tools.rs:2744-2749`, `main.rs:192-205`, `config.rs:2300-2308`, `routes/device_link.rs:93-102`, `realtime_advert.rs:265-282` |
+| F20 | `MOMO_INSTANCE_ID`는 설치 스크립트·`infra/`·셀프호스트 문서 어디에서도 값이 정해지지 않는다. `infra/.env.example`에 주석 처리된 한 줄만 있다. 그래서 설치 기본값에서는 `signing-context`가 503이고 서명 경로가 모두 닫혀 있다 | `infra/.env.example:287-298`, grep 0건(`scripts/`·`infra/`·`docs/SELF_HOST*.md`) |
 | F21 | 재설정 발급 라우트를 **본문 없이** 부르는 저장소 안 호출자: OpenAPI 계약 게이트(본문 없이 201 기대), `password_reset_conformance_pg.rs`(발급 호출 여러 곳), `verify_owner_claim.sh`, OpenAPI 문서(요청 본문 없음), `docs/security/claims.yaml`의 AUTH-4 증명 | `scripts/verify_openapi_contract_rust.sh:1985-2001`, `server-rust/bins/momo-server/tests/password_reset_conformance_pg.rs`, `scripts/verify_owner_claim.sh:247`, `docs/api/openapi.yaml:1782-1830`, `docs/security/claims.yaml:98` |
 | F22 | `credential_claim` 행을 바꾸는 코드는 소비와 「재발급 때 이전 토큰 소비」 둘뿐이다. 본인 변경과 `end_member_sessions_in_tx`는 대기 중인 `password_reset` 행을 건드리지 않는다. 소비는 대상의 비밀번호 상태를 보지 않고(owner 부트스트랩만 보호) 비밀번호를 덮어쓴다 | `owner_claim.rs:128-233`(`:165-167`), `:292-303`, `:332-379`, `session_end.rs:101-115` |
 | F23 | 멤버 전체 세션 sweep은 토큰 행을 먼저 잡은 호출자가 **먼저** `lock_member_wide_sweep_in_tx`를 불러야 한다(#3109 규칙). `verify_human_control_in_tx`는 요청 계보·키 행을 끝까지 `FOR SHARE`로 잡는다 | `momo-auth/src/token_store.rs:596-620`, `human_control.rs:12-21` |
-| F24 | 기기 연결 **발급**(`POST /v1/auth/device-link`)에는 속도 제한이 없고, redeem이 새 계보(`session_id`)를 만든다. 세션 하나를 훔친 쪽이 계보를 얼마든지 늘릴 수 있다 | `lib.rs:1170-1174`, `momo-auth/src/device_link.rs:288-290` |
+| F24 | 기기 연결 **발급**(`POST /v1/auth/device-link`)에는 속도 제한이 없고, redeem이 새 계보(`session_id`)를 만든다. 세션 하나를 훔친 쪽이 계보를 얼마든지 늘릴 수 있다 | `lib.rs:1181-1185`, `momo-auth/src/device_link.rs:288-290` |
 
 ### 업계 조사
 
@@ -96,7 +96,7 @@
 
 ### D3. 로그인 상태 비밀번호 변경
 
-- API는 그대로다(#1767): `PATCH /v1/workspaces/{ws}/members/me/password {currentPassword, newPassword}` → 200 `LoginResponse`(새 세션 쌍), 403 현재 비밀번호 불일치, 409 비밀번호 없음, 400(같은 비밀번호·D2 규칙), 429(멤버 10회·IP 30회 / 60초, `password.rs:41-73`, `config.rs:364-369`). `currentPassword`는 `normalized_current_password`로 거른다(D2).
+- API는 그대로다(#1767): `PATCH /v1/workspaces/{ws}/members/me/password {currentPassword, newPassword}` → 200 `LoginResponse`(새 세션 쌍), 403 현재 비밀번호 불일치, 409 비밀번호 없음, 400(같은 비밀번호·D2 규칙), 429(멤버 10회·IP 30회 / 60초, `password.rs:41-73`, `config.rs:368-373`). `currentPassword`는 `normalized_current_password`로 거른다(D2).
 - 클라이언트가 해야 할 일(웹·데스크탑·폰 공통):
   - 응답의 새 쌍을 **즉시 저장**한다. 기존 refresh는 이미 폐기됐다.
   - 확인 전에 결과를 말한다: 「다른 기기는 모두 로그아웃돼요. 맥의 지시 키와 폰 승인은 다시 만들어야 해요.」(D4)
@@ -111,7 +111,7 @@
 - [V] 본인 변경(`password.rs:196-202`)과 관리자 링크 소비(`claim.rs:111-119`)는 `end_member_sessions_in_tx`를 부른다(`session_end.rs:101-115`). 푸시 등록 무효화, **기기 키 폐기**(`member_sessions_ended`), 예약 메시지 보류(ADR-0208 D14)가 한 커밋에 일어난다. 새 서명 재설정(D7)도 같게 한다. 이 함수의 호출처는 다섯이다: 정지·제거(`member_lifecycle.rs:250`·`:324`), 본인 변경(`password.rs:196`), 탈퇴(`workspaces.rs:351`), claim 소비(`claim.rs:112`). 호출 원인은 `RevocationCause`(`PasswordChanged`·`PasswordReset`·`Suspended`·`Removed`·`Left`)로 구별된다.
 - 그래서 변경·재설정 뒤에는 R2 사슬을 다시 만들어야 한다: 맥 뿌리 키(재등록은 비밀번호 재입력 — 새 비밀번호다), 승인된 폰 키(폰을 QR로 다시 연결하고 맥이 다시 승인). 호출한 기기도 같다(새 계보를 받고 키는 폐기된다).
 - **대기 중인 재설정 링크.** 지금은 어느 경로도 대기 중인 `password_reset` 링크를 끝내지 않아서(F22) 이런 일이 생긴다: 관리자가 보낸 링크 L이 새어 나갔는데 멤버가 D7로 먼저 안전하게 복구해도, 공격자가 24시간 안에 L로 `POST /v1/claim`을 해서 새 비밀번호를 정하고 계정을 가져간다. 그래서 `end_member_sessions_in_tx` **안에서** 그 멤버의 미소비 `password_reset` claim을 같은 트랜잭션에서 소비한다(`owner_bootstrap`은 `kind` 필터로 건드리지 않는다). 한 곳에 두는 이유는 그 파일 머리 주석의 규칙이다(세션만큼 사는 새로운 것은 호출처마다가 아니라 여기에 더한다. 주석이 세는 「호출처 일곱 곳」은 옛 숫자이고 지금 호출처는 위의 다섯이다). **단, 원인이 `PasswordChanged`(본인 변경)이면 하지 않는다.**
-  - 이유: 본인 변경은 「현재 비밀번호를 아는 자」의 행위라 소유자와 공격자를 구별하지 못한다. 변경이 대기 링크를 끝내면, 비밀번호를 아는 공격자가 변경을 반복해(멤버당 분당 10회 한도 안, `config.rs:365-367`) 관리자가 발급하는 링크를 계속 끊을 수 있다. 변경은 그 멤버의 세션과 기기 키도 모두 끝내므로(D7도 사라진다) 소유자에게 남은 복구 길이 링크 하나뿐인데 그 길을 공격자가 끊게 된다. 정지로 공격자를 끊어도 정지된 멤버에게는 발급이 되지 않는다(`owner_claim.rs:281-283`). 서명 재설정(D7, 하드웨어 키)·정지·제거·탈퇴·claim 소비·관리자 재발급은 비밀번호만 아는 쪽이 흉내 낼 수 없거나 관리자 권한이다.
+  - 이유: 본인 변경은 「현재 비밀번호를 아는 자」의 행위라 소유자와 공격자를 구별하지 못한다. 변경이 대기 링크를 끝내면, 비밀번호를 아는 공격자가 변경을 반복해(멤버당 분당 10회 한도 안, `config.rs:369-371`) 관리자가 발급하는 링크를 계속 끊을 수 있다. 변경은 그 멤버의 세션과 기기 키도 모두 끝내므로(D7도 사라진다) 소유자에게 남은 복구 길이 링크 하나뿐인데 그 길을 공격자가 끊게 된다. 정지로 공격자를 끊어도 정지된 멤버에게는 발급이 되지 않는다(`owner_claim.rs:281-283`). 서명 재설정(D7, 하드웨어 키)·정지·제거·탈퇴·claim 소비·관리자 재발급은 비밀번호만 아는 쪽이 흉내 낼 수 없거나 관리자 권한이다.
   - 소비하는 원인: `PasswordReset`(D7·claim 소비)·`Suspended`·`Removed`·`Left`. 정지·제거·탈퇴에도 걸리는 것은 의도한 결과다(정지된 멤버의 링크가 살아 있으면 안 된다). 대신 순서가 있다: **세션을 끝낸 뒤에 링크를 발급한다**(발급 뒤에 세션을 끝내면 링크도 죽는다). 관리자 화면 문구에 쓴다.
   - **남는 위험**: 본인 변경 뒤에도 대기 링크가 최대 24시간 산다. 새어 나간 링크에 대한 대응은 **재발급(=취소)**이고, 변경 성공 화면이 이를 알린다(D3).
   - **잠금 순서.** claim 소비는 claim 행 → `human` 행 → 멤버 전체 sweep 잠금 순으로 잡고(`owner_claim.rs:134-145`, `:173-199`, `:205-207`), 본인 변경은 `human` 행 → sweep 순이다(`:339-345`, `:377`). **D7도 같은 순서(`human` 행 → sweep)를 따른다**(D7 순서 1): sweep을 먼저 잡으면 같은 멤버의 claim·PATCH와 `human` 행에서 순환한다(3회차 검토 지적). 정지·제거·탈퇴는 `member`·멤버십 행을 쓰고 `human` 행은 잡지 않는다(`membership_lifecycle.rs:416-`, `workspace.rs:432-`). 새 소비 UPDATE가 claim 행을 기다리면 이 순환에 claim 행이 끼어 교착(40P01)이 날 수 있으므로 `FOR UPDATE SKIP LOCKED`로 쓴다: 잠겨 있는 claim은 지금 소비되는 중이라 건너뛰어도 안전하다. 그 소비가 롤백하는 드문 경우에는 그 링크가 남고, 커밋하는 경우에는 링크 소지자의 새 비밀번호가 D7·재설정 뒤에 덮어쓴다. 이 틈은 링크가 유출됐고 두 트랜잭션이 정확히 겹칠 때뿐이며, 링크 소지자가 먼저 움직였다는 점에서 D7 이전에 claim한 것과 같다.
@@ -162,7 +162,7 @@
 - 위협: 비밀번호 없이 새 비밀번호를 정할 수 있게 하면 **세션 하나를 훔친 사람이 계정을 영구히 가져간다**. 훔치는 대상은 access(15분)만이 아니다. 비밀번호 로그인 계보의 refresh 토큰은 기본 모드 `observe`에서 증명 없이도 계속 갱신된다(F15). 웹 세션은 localStorage에 있다(ADR-0146 F19). 그래서 세션 보유만으로는 모자라고, **기기에 묶인 키의 서명 + 사람의 현장 확인**이 필요하다.
 - **자리는 로그인된 기기의 설정 › 보안이다.** 로그인 화면은 안내만 한다(D5). 그래서 새 공개 엔드포인트는 없다.
 
-**켜기 [권장].** 이 라우트는 `MOMO_PASSWORD_RESET_SIGNED`(기본 **꺼짐**)가 켜져 있을 때만 열린다. 꺼져 있으면 404이고 `signing-context`는 `passwordResetSchema`를 내리지 않는다(클라이언트가 「다시 정하기」 행을 숨긴다). **스위치가 켜졌는데 `MOMO_INSTANCE_ID`가 없으면 기동을 거부한다**(기존 서명 플래그와 같은 규율, `config.rs:1491-1499`·`infra/.env.example:282`).
+**켜기 [권장].** 이 라우트는 `MOMO_PASSWORD_RESET_SIGNED`(기본 **꺼짐**)가 켜져 있을 때만 열린다. 꺼져 있으면 404이고 `signing-context`는 `passwordResetSchema`를 내리지 않는다(클라이언트가 「다시 정하기」 행을 숨긴다). **스위치가 켜졌는데 `MOMO_INSTANCE_ID`가 없으면 기동을 거부한다**(기존 서명 플래그와 같은 규율, `config.rs:1563-1571`·`infra/.env.example:291`).
 - 켜는 조건: ① E-3의 독립 보안 검수 PASS ② ADR-0146 D-11의 조건(R1 보안 재검수 PASS·R2 검수 #3030 PASS)이 충족돼 있거나, E-3 검수가 그 키 사슬의 재검수를 포함한다고 적을 것(D7이 기대는 것이 R2의 사슬 — 승인·계보 결속·QR 연결 전용 폰 키·뿌리 키 비밀번호 등록 — 이라서다) ③ `MOMO_INSTANCE_ID`가 설정돼 있을 것(셀프호스트 설치 기본값에는 없다, F20 → E-7이 설치 스크립트가 값을 만들게 한다) ④ 운영 값 변경 전 owner 판단(#4488·#3593과 같은 절차).
 - ADR-0146 D-11이 「R2 서명 라우트는 R1·R2 검수 PASS 뒤에만 켠다」고 닫아 둔 것은 **host 지시**의 규칙이다. D7은 지시가 아니라 복구 라우트지만 같은 키·같은 nonce 표를 쓰는 새 경계라 D-11의 켜기 규율을 따른다. 「구현 머지 ≠ 켜기」다. ADR-0146의 D-8 서명 범위 표에 한 행(「비밀번호 재설정 — 필요, 서버 검증」)을 더한다(같은 PR).
 
@@ -305,7 +305,7 @@ momo.human.password_reset.v1
 
 ## DB 계약 (새 migration만)
 
-- 번호: track/engine·track/uxui·main 모두 149가 마지막이다 [V, 2026-10-26]. 실제 번호는 구현 시점의 다음 번호다. `schema_v0.sql`은 건드리지 않는다.
+- 번호: main·track/uxui는 149, track/engine은 151(`150_attachment_reclaim.sql`·`151_audit_attachment_name_scrub.sql`, #4443)이 마지막이다 [V, 2026-10-26]. 실제 번호는 구현 시점의 다음 번호다. `schema_v0.sql`은 건드리지 않는다.
 - 이 ADR(D6·D7) 몫: `human_control_nonce_kind_ck`에 `'password_reset'`을 더한다(DROP 후 ADD, 재실행 가능한 모양, F14). **허용 목록은 그 시점의 전체 목록에 더한다**: ADR-0210 HO-10이 같은 CHECK에 `ops_session`·`ops_box`를 더하므로, 두 마이그레이션이 각자 목록을 다시 쓰면 나중 것이 먼저 것의 kind를 지운다. 마이그레이션 시험은 기존 kind가 모두 허용됨을 단정한다. 새 테넌트 테이블은 없고 기존 테이블의 RLS FORCE·`ws_isolation`은 그대로다.
 - **이 PR 전체로는** 새 EXECUTE 전용 definer 함수가 하나 있고 새 열이 있다: ADR-0180 증보 C3의 `momo_join_private.device_link_workspace_id_by_code`, `device_link_token`의 새 열, `token`의 폐기 사유 열. 이 ADR 단독으로는 새 definer 함수가 없다(D7은 인증된 요청이고 D6은 기존 `owner_claim_workspace_id`를 쓴다).
 
