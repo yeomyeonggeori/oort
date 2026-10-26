@@ -126,7 +126,8 @@ export function MessageEditorSheet({
         />
 
         {pending ? (
-          // ✓ 자리의 스피너가 진행을 말하고(`busy`), 이 한 줄은 키보드 위에서 글을 보는 눈과 낭독에게 같은 말을 한 번 더 한다.
+          // ✓ 자리의 스피너가 진행을 말하고(`busy`), 이 한 줄은 키보드 위에서 글을 보는 눈에 같은 말을 한 번 더 한다. `accessibilityLiveRegion` 은
+          // Android 에서만 읽힌다 — iOS VoiceOver 는 ✓ 의 `busy` 상태와 이름(「저장 중」)이 말한다(실제 낭독은 runtime-unverified, design-review r1b M5).
           <Text accessibilityLiveRegion="polite" style={styles.pending} testID="editor-pending">
             저장 중
           </Text>

@@ -132,7 +132,11 @@ export function SheetBody({
               {name}
             </Text>
             {summary !== undefined && summary !== '' ? (
-              <Text style={styles.summary} numberOfLines={3} testID="run-ledger-summary">
+              <Text
+                style={styles.summary}
+                numberOfLines={3}
+                lineBreakStrategyIOS="hangul-word"
+                testID="run-ledger-summary">
                 {summary}
               </Text>
             ) : null}
@@ -174,6 +178,23 @@ export function SheetBody({
 
         <View style={styles.section}>
           <GroupLabel>기록</GroupLabel>
+          {/* 한계·보관 문장은 행을 어떻게 읽을지 정하는 지시다(안 보이는 것은 안 한 일이 아니다). 목록 위, 스크롤 몸의 첫머리에 둔다 —
+              스크롤을 내려야만 보이는 자리의 한계는 사실상 숨기는 것이다(ADR-0200 D5, 웹 `PanelFooter` 주석과 같은 결정). 이 PR 의
+              1단계가 목록 아래 각주로 옮겼던 것을 design-review r1b M1 이 되돌렸다. */}
+          <View style={styles.limits}>
+            <Text
+              style={styles.note}
+              lineBreakStrategyIOS="hangul-word"
+              testID="run-ledger-limit">
+              {RUN_LEDGER_LIMIT_SENTENCE}
+            </Text>
+            <Text
+              style={styles.note}
+              lineBreakStrategyIOS="hangul-word"
+              testID="run-ledger-kept">
+              {RUN_LEDGER_KEPT_SENTENCE}
+            </Text>
+          </View>
           {query.isLoading ? (
             // 상태 블록은 가로 여백(16)을 스스로 든다 — 카드 안에 서야 시트 몸의 거터와 겹치지 않고 카드 행과 글자 열이 맞는다.
             <GroupCard>
@@ -203,13 +224,6 @@ export function SheetBody({
             </GroupCard>
           )}
         </View>
-
-        <View style={styles.footnotes}>
-          <Text style={styles.note} testID="run-ledger-limit">
-            {RUN_LEDGER_LIMIT_SENTENCE}
-          </Text>
-          <Text style={styles.note}>{RUN_LEDGER_KEPT_SENTENCE}</Text>
-        </View>
       </SheetScroll>
     </View>
   );
@@ -233,7 +247,8 @@ function LedgerRowView({
             row.tone === 'neutral' && styles.rowTextNeutral,
             row.tone === 'action' && styles.rowTextAction,
             row.tone === 'end' && styles.rowTextEnd,
-          ]}>
+          ]}
+          lineBreakStrategyIOS="hangul-word">
           {row.text}
           {row.count !== undefined ? (
             <Text style={styles.rowTextNeutral}>{` · ${row.count}번`}</Text>
@@ -241,7 +256,9 @@ function LedgerRowView({
         </Text>
       </View>
       {row.reason !== undefined ? (
-        <Text style={styles.rowReason}>{row.reason}</Text>
+        <Text style={styles.rowReason} lineBreakStrategyIOS="hangul-word">
+          {row.reason}
+        </Text>
       ) : null}
     </View>
   );
@@ -280,7 +297,7 @@ const buildStyles = (color: Palette) =>
     },
     // 섹션 라벨과 그 아래 카드는 한 묶음이다(`GroupCard` 의 라벨과 같은 간격).
     section: {gap: space.sm},
-    footnotes: {gap: space.xs, paddingHorizontal: space.xs},
+    limits: {gap: space.xs, paddingHorizontal: space.xs},
     note: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     emptyBlock: {
       paddingHorizontal: SHEET.cardInset,

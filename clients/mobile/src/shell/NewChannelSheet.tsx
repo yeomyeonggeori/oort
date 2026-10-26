@@ -180,11 +180,16 @@ function SheetBody({
           <Text
             accessibilityLiveRegion="polite"
             style={styles.issue}
+            lineBreakStrategyIOS="hangul-word"
             testID="new-channel-name-issue">
             {nameMessage}
           </Text>
         ) : (
-          <Text style={styles.rule} testID="new-channel-name-rule">
+          // 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
+          <Text
+            style={styles.rule}
+            lineBreakStrategyIOS="hangul-word"
+            testID="new-channel-name-rule">
             {nameRule}
           </Text>
         )}

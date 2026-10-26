@@ -10,7 +10,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, StyleSheet} from 'react-native';
+import {AccessibilityInfo, StyleSheet, Text} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -493,6 +493,20 @@ describe('햅틱은 사용자 행동 한 번에 한 번, 입력 검증 오류에
     expect(haptics.light).toHaveBeenCalledTimes(1);
     expect(haptics.error).toHaveBeenCalledTimes(1);
     expect(haptics.success).not.toHaveBeenCalled();
+  });
+
+  it('거절 배너의 문장은 어절 단위로 접는다 — 「에 / 서」처럼 조사가 줄 머리에 고아로 서지 않는다 (design-review r1a M1)', async () => {
+    installFetch({
+      members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})],
+      runs: [{kind: 'refuse', status: 409, code: 'hosted_channel_not_approved', message: 'x'}],
+    });
+    mount({agentMemberId: AGENT});
+    await fillAndSend();
+    const banner = await screen.findByTestId('delegate-error');
+    // 배너의 첫 글자 노드가 문장이다(다음 것은 「다시 시도」 같은 단추 글자).
+    const [sentence] = within(banner).UNSAFE_getAllByType(Text);
+    expect(sentence.props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(sentence.props.children).toEqual(expect.stringContaining('채널'));
   });
 
   it('접수되면 success 한 번', async () => {

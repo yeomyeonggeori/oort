@@ -539,7 +539,7 @@ export function FailureBanner({
       accessibilityLiveRegion="polite"
       style={styles.failure}
       testID={testID}>
-      <Text style={styles.failureText}>{message}</Text>
+      <Sentence style={styles.failureText}>{message}</Sentence>
       {onRetry ? (
         <Pressable
           accessibilityRole="button"

@@ -531,6 +531,18 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(posts()).toHaveLength(1);
   });
 
+  it('규칙 줄과 이름 오류 줄은 어절 단위로 접는다 — 「대 / 문자는」처럼 어절 가운데서 갈리지 않는다 (design-review r1a M1)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    expect(screen.getByTestId('new-channel-name-rule').props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 규칙을 어기면(처음이 하이픈) 같은 자리가 오류 줄로 바뀐다 — 그 줄도 같다.
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), '-release');
+    expect(screen.getByTestId('new-channel-name-issue').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('같은 이름이 있으면(409) 이름 칸 밑에 말하고 시트를 닫지 않는다', async () => {
     installFetch(0, undefined, 409);
     await renderReady();
