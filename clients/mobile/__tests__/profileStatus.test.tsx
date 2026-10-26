@@ -1158,6 +1158,28 @@ describe('기능 손실 0 — 옛 프로필 시트가 하던 일이 설정 페�
     absent(within(page), ['profile-pause-switch', 'profile-work-complete-switch']);
   });
 
+  it('r3 M1: 읽기 실패의 「다시 불러오기」는 강조색 글자다 — 눌리지 않는 정보 행과 같은 모양이 아니다', async () => {
+    server.rulesRead = 'fail';
+    server.kindsRead = 'fail';
+    const page = await openSheet();
+    await waitFor(
+      () => expect(within(page).getByTestId('profile-work-complete-retry')).toBeTruthy(),
+      {timeout: 4000},
+    );
+    const titleStyle = (testID: string) =>
+      StyleSheet.flatten(within(within(page).getByTestId(testID)).getByText('다시 불러오기').props.style);
+    for (const id of ['profile-pause-retry', 'profile-work-complete-retry']) {
+      // 옛 판의 `GroupRow tone="accent"` 를 지킨다: 강조색 + 굵게.
+      expect(titleStyle(id)).toMatchObject({color: lightPalette.accentText, fontWeight: '600'});
+      expect(titleStyle(id).color).not.toBe(lightPalette.text); // 대조군: 기본색이 아니다
+    }
+    // 눌리지 않는 정보 행은 기본색이다 — 두 모양이 갈린다.
+    const info = StyleSheet.flatten(
+      within(within(page).getByTestId('profile-always-row')).getByText('항상 오는 알림').props.style,
+    );
+    expect(info.color).toBe(lightPalette.text);
+  });
+
   it('로그아웃 확인 블록은 같은 카드 안에서 행을 대신한다', async () => {
     const page = await openSheet();
     fireEvent.press(within(page).getByTestId('sign-out'));

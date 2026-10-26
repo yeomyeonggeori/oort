@@ -81,7 +81,7 @@ import {
 import {AvatarPage} from './AvatarPage';
 import {PauseUntilPage} from './PauseUntilPage';
 import {StatusSheet} from './StatusSheet';
-import {SettingsNote, SettingsSection, SwitchRow} from './settingsRows';
+import {ActionRow, SettingsNote, SettingsSection, SwitchRow} from './settingsRows';
 import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
 import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
 import {useDeviceKey} from '../deviceKey/useDeviceKey';
@@ -530,13 +530,15 @@ export function SettingsContent({
           <Avatar directory={directory} memberId={member.id} size={PROFILE_FACE} />
         </Pressable>
         <View style={styles.heroText}>
-          <Text
+          {/* 두 줄까지 허용한 자리라 줄바꿈도 어절 단위다(`Sentence` = `hangul-word`) — 띄어쓰기가 있는 긴 이름이 어절
+              가운데서 끊기지 않는다(r3 L1). */}
+          <Sentence
             accessibilityRole="header"
             style={styles.name}
             numberOfLines={2}
             testID="self-profile-name">
             {member.displayName}
-          </Text>
+          </Sentence>
           <Text style={styles.handle} numberOfLines={1} testID="self-profile-handle">
             @{member.handle}
           </Text>
@@ -733,8 +735,15 @@ export function SettingsContent({
               testID="profile-pause-until-row"
             />
           ) : null}
+          {/* 읽기 실패의 복구 길: 옛 판의 `tone="accent"` 를 지킨다 — 기본색 행이면 눌리지 않는 정보 행(「서버」·「항상 오는
+              알림」)과 같은 모양이라 눌러야 하는 줄이 안 보인다(design-review #4457 r3 M1). */}
           {pause.loadFailed ? (
-            <ListRow title="다시 불러오기" onPress={pause.retryLoad} testID="profile-pause-retry" />
+            <ActionRow
+              title="다시 불러오기"
+              tone="accent"
+              onPress={pause.retryLoad}
+              testID="profile-pause-retry"
+            />
           ) : null}
           {/* 종류별 스위치 (#3342, ADR-0120 부록 A). 서버가 이 경로를 모르면(아직 배포 전) 줄 자체를
               세우지 않는다 — 켜도 아무 일 없는 스위치는 약속이다. */}
@@ -769,8 +778,9 @@ export function SettingsContent({
             />
           )}
           {kinds.loadFailed ? (
-            <ListRow
+            <ActionRow
               title="다시 불러오기"
+              tone="accent"
               onPress={kinds.retryLoad}
               testID="profile-work-complete-retry"
             />

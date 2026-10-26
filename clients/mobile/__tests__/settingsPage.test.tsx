@@ -766,6 +766,13 @@ describe('design-review r1 반영 — 얼굴·내 상태·확인 블록 (#4457)'
     },
   );
 
+  it('r3 L1: 두 줄까지 허용한 이름도 어절 단위로 줄을 바꾼다(hangul-word)', async () => {
+    const page = await openPage();
+    const name = within(page).getByTestId('self-profile-name');
+    expect(name.props.numberOfLines).toBe(2);
+    expect(name.props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('r2: 확인의 머리말과 설명은 어절 단위로 줄을 바꾼다(hangul-word)', async () => {
     await openPage();
     fireEvent.press(screen.getByTestId('sign-out'));

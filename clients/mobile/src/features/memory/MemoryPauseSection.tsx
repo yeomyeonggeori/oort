@@ -2,6 +2,7 @@ import React from 'react';
 
 import {GroupCard, ListRow} from '../../design/sheetParts';
 import {
+  ActionRow,
   SettingsNote,
   SettingsSection,
   SwitchRow,
@@ -72,8 +73,10 @@ export function MemoryPauseSection({
           testID="memory-pause-row"
         />
         {pause.loadFailed ? (
-          <ListRow
+          // 복구 길은 강조색 글자다(옛 판의 `tone="accent"`) — 눌리지 않는 안내 행과 갈린다.
+          <ActionRow
             title={MEMORY_PAUSE_RETRY}
+            tone="accent"
             onPress={pause.retryLoad}
             testID="memory-pause-retry"
           />
