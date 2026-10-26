@@ -2703,11 +2703,16 @@
  * #4591(owner 2026-10-26, Buzz 캡처): **연회색 알약**이다. 흰 면에 선과 그림자를 두르던 카드에서, 중립 칩의
  * 그릇인 `--muted-soft` 한 면으로 바꿨다. 선도 그림자도 없다: 이 면은 눌리지도 값을 받지도 않아 컨트롤 문법(1px
  * 선)을 들일 이유가 없고, 판 위에서 보이게 하는 것은 면의 명도다(라이트 `#dedddb`가 흰 판 위에서 뚜렷하다).
- * 글자는 `--ink`로 두 스킴에서 12~13:1이다(`tokens.contrast.test.ts`가 `ink`를 `muted-soft`를 포함한 모든 면 위에서 잰다). */
+ * 글자는 `--ink`로 두 스킴에서 12~13:1이다(`tokens.contrast.test.ts`가 `ink`를 `muted-soft`를 포함한 모든 면 위에서 잰다).
+ *
+ * #4587: 글자는 **기본 글자 역할 `--ink-base`** 로 읽는다. 면(`--muted-soft`)은 띠 범위에서도 다시 묶이지 않는 기본 면이라
+ * 짝은 기본 글자여야 한다. 띠 범위(사이드바, 셸의 상단 줄과 오른쪽 자리)에서는 `--ink`가 on-band로 다시 묶여서(위 「띠 위의
+ * 글자」) 노을띠 라이트에서 밝은 on-band(`#f4f1ea`) 글자가 연회색 면(`#dedddb`) 위에 얹혀 읽히지 않았다. 띠 밖에서
+ * `--ink-base`는 `--ink`와 같은 값이라 아무것도 바뀌지 않는다. */
 @utility tooltip-surface {
   border-radius: var(--radius-md);
   background-color: var(--muted-soft);
-  color: var(--ink);
+  color: var(--ink-base);
   padding: var(--spacing-tooltip-y) var(--spacing-3);
   white-space: nowrap;
   pointer-events: none;

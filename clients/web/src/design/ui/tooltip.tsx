@@ -17,6 +17,8 @@ import { TOOLTIP_DELAY_MS, TOOLTIP_MOTION } from "@/design/motion";
 //   · 면은 `tooltip-surface`(연회색 둥근 알약: `--muted-soft` 한 면, 선도 그림자도 없다, 12×6), 간격 4(`mb-1`/`mt-1`),
 //     위/아래 두 방향이다. 대화 머리 단추는 전부 이 부품을 **아래 방향**으로 쓴다(#4591): 본문 판이 `overflow: clip`이라
 //     위로는 잘린다. 단추에 네이티브 `title`을 같이 두지 않는다(둘이 같이 뜬다). 규칙의 문서는 design-system §2.9.
+//   · 띠 안(셸의 상단 줄 오른쪽 자리의 다운로드 단추, #4587)에서도 같은 부품이다: 알약의 글자는 `--ink-base`라서 띠 범위가
+//     `--ink`를 on-band로 다시 묶어도 면과 짝이 맞는다(`tooltip-surface`, tokens.css).
 
 export type TooltipSide = "top" | "bottom";
 

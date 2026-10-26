@@ -2,6 +2,7 @@ import { Download } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { Popover, PopoverContent, PopoverTrigger } from "@/design/ui/popover";
+import { Tooltip } from "@/design/ui/tooltip";
 import { IS_TAURI } from "@/lib/env";
 import { DownloadPanel } from "./DownloadPanel";
 import { DOWNLOAD_COPY, downloadButtonLabel, finishedAnnouncement } from "./downloadsCopy";
@@ -20,8 +21,9 @@ import {
 //   · 끌기 속성이 없다. 속성 없는 단추는 Tauri의 drag.js 판정에서 끌기를 빠져 눌린다(`AppTitlebar`).
 //   · 단추 안: 아이콘 하나, 받는 중이면 링(`download-ring`), 끝났는데 안 본 것이 있으면 점(`download-dot`).
 //     링은 잰 값으로 12칸이고, 길이를 모르면 도는 호다. 어느 쪽도 인라인 style이 없다.
-//   · 툴팁은 네이티브 `title`이다. 띠 안의 공용 `Tooltip`은 글자 역할 보정(`--ink-base`)과 캡처 확인이
-//     먼저다(디자인 시스템 §2.9, 상단 줄의 토글이 같은 이유로 `title`을 쓴다).
+//   · 툴팁은 공용 `Tooltip`이다(owner 요청, 아래 방향 · 오른쪽 끝 맞춤). 네이티브 `title`은 두지 않는다: 둘이 같이 뜬다.
+//     띠 안에서는 글자 역할이 on-band로 다시 묶이므로 알약의 글자는 `--ink-base`로 되찾는다(`tooltip-surface`,
+//     tokens.css). 문구는 접근성 이름과 같은 한 문자열이다. 상단 줄의 토글은 아직 `title`이다(이 PR의 범위 밖).
 //   · 패널은 포털로 뜨는 `Popover`라 띠의 글자 역할 묶음 밖에서 기본 역할로 그려진다.
 
 /** 한 행의 행동 결과를 그 행 아래의 한 줄 문장으로. 성공과 「지워짐」은 문장이 없다(행이 말한다). */
@@ -96,39 +98,43 @@ function DownloadControl({ store }: { store: DownloadsStore }) {
   return (
     <>
       <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            aria-label={label}
-            title={label}
-            data-testid="download-button"
-            data-activity={view.activity}
-            data-badge={view.badge}
-            className={cn(
-              "relative flex size-control-sm shrink-0 items-center justify-center rounded-md press hover:bg-surface-hover focus-visible:focus-ring",
-              view.activity === "progress" ? "text-ink" : "text-ink-muted",
-              open && "bg-surface-hover"
-            )}
-          >
-            <Download aria-hidden="true" className="size-4" />
-            {view.activity === "progress" && (
-              <span
-                aria-hidden="true"
-                data-testid="download-ring"
-                data-ring-step={view.step ?? "unknown"}
-                className={cn("download-ring", view.step === null && "spinner-busy")}
-              />
-            )}
-            {view.badge !== "none" && (
-              <span
-                aria-hidden="true"
-                data-testid="download-dot"
-                data-tone={view.badge}
-                className="download-dot"
-              />
-            )}
-          </button>
-        </PopoverTrigger>
+        {/* 툴팁은 트리거 **바깥**이다(`PinListMenu`와 같다): 안에 두면 래퍼가 Radix 트리거가 된다. 래퍼는 포커스도 끌기 속성도
+            갖지 않는 `span`이고 단추 크기 그대로라 누름은 항상 단추가 받는다(끌기 판정은 `AppTitlebar.shell.test.tsx`).
+            방향은 아래, 이 단추는 창의 오른쪽 끝이라 알약의 오른쪽 끝을 단추에 맞춘다(`align="end"`). 네이티브 `title`은 없다. */}
+        <Tooltip label={label} side="bottom" align="end">
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              aria-label={label}
+              data-testid="download-button"
+              data-activity={view.activity}
+              data-badge={view.badge}
+              className={cn(
+                "relative flex size-control-sm shrink-0 items-center justify-center rounded-md press hover:bg-surface-hover focus-visible:focus-ring",
+                view.activity === "progress" ? "text-ink" : "text-ink-muted",
+                open && "bg-surface-hover"
+              )}
+            >
+              <Download aria-hidden="true" className="size-4" />
+              {view.activity === "progress" && (
+                <span
+                  aria-hidden="true"
+                  data-testid="download-ring"
+                  data-ring-step={view.step ?? "unknown"}
+                  className={cn("download-ring", view.step === null && "spinner-busy")}
+                />
+              )}
+              {view.badge !== "none" && (
+                <span
+                  aria-hidden="true"
+                  data-testid="download-dot"
+                  data-tone={view.badge}
+                  className="download-dot"
+                />
+              )}
+            </button>
+          </PopoverTrigger>
+        </Tooltip>
         <PopoverContent align="end" side="bottom">
           <DownloadPanel
             items={items}

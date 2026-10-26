@@ -85,7 +85,10 @@ function DownloadRow({
           title={title}
           className={cn("flex min-w-0 text-label", missing ? "text-ink-muted" : "text-ink")}
         >
-          <span className="truncate">{head}</span>
+          {/* `splitFileName`은 확장자 앞 두 글자까지를 꼬리로 떼므로 앞부분이 공백으로 끝날 수 있다(「끊기는 」+「파일.zip」).
+              `truncate`의 `white-space: nowrap`은 줄 끝 공백을 접어 「끊기는파일.zip」으로 붙여 버리므로(실기 캡처에서 확인),
+              공백을 지키는 `whitespace-pre`로 줄인다. 줄임표는 그대로 앞부분 끝에 선다. */}
+          <span className="overflow-hidden text-ellipsis whitespace-pre">{head}</span>
           <span className="shrink-0">{tail}</span>
         </span>
         <span
