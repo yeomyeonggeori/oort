@@ -137,8 +137,8 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {seedMemberAvatar} from '../src/features/conversation/memberAvatarImage';
-import {SettingsContent, SettingsPage} from '../src/features/profile/SettingsPage';
-import {SettingsOverlay} from './settingsOverlay';
+import {SettingsContent} from '../src/features/profile/SettingsPage';
+import {SettingsOverlay, SETTINGS_PERSONA, settingsPersona} from './settingsOverlay';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {pushDeviceId} from '../src/push/registration';
@@ -181,7 +181,7 @@ import {
   composerPlaceholder,
   composerPlaceholderClauses,
 } from '@momo/core/features/chat/composerCopy';
-import {FixedScheme, usePalette, useStyles, type ColorScheme} from '../src/design/theme';
+import {FixedScheme, useStyles, type ColorScheme} from '../src/design/theme';
 import {PullProbe} from './pullProbe';
 import {PullHold} from './pullHold';
 import {PullRefreshSurface} from './pullRefresh';
@@ -4729,8 +4729,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Shell />
           <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(SHELL_ROSTER)}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
             connected
             onSignOut={() => {}}
             onClose={() => {}}
@@ -4768,8 +4768,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <SettingsOverlay
             initialPage="avatar"
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(
+            member={SETTINGS_ME}
+            directory={settingsDirectory(
               name === 'shell-avatar-sheet-photo'
                 ? SHELL_ROSTER.map(member =>
                     member.id === SELF
@@ -4787,14 +4787,63 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4457: 테마 안쪽 장. 진짜 셸 위의 설정 페이지가 테마 장으로 열린다(`initialPage="theme"`) — 화면 모드·테마·강조색·배경
+    // 네 묶음이 한 장에 선다(스크롤은 `shell-settings-theme-*` 가 아니라 Maestro 가 한다).
+    case 'shell-settings-theme':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <SettingsOverlay
+            initialPage="theme"
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
           <Shell />
           <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(SHELL_ROSTER)}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
+    // #4457: 설정 페이지의 **끝** — 계정 카드(로그아웃 위험 행)와 버전 줄. 고정 오프셋 대신 스크롤을 끝까지 내려
+    // 어떤 기기·글자 크기에서도 같은 장면(맨 아래)이 서게 한다. 로그아웃의 확인 블록은 눌러야 서므로
+    // `maestro/113-settings-sheet-capture.yaml` 이 `sign-out` 을 눌러 찍는다(여기 `onSignOut` 은 아무것도 지우지 않는다).
+    case 'shell-profile-bottom':
+      return <SettingsBottomSurface />;
+    // #4457: 보이는 상태 글이 있는 사람의 설정 페이지(상태 알약 옆 글 + 「상태 설정」 행의 값). 「상태 설정」 시트가 이
+    // 사람의 저장된 만료를 「지금대로」로, 「상태 지우기」 행을 서게 한다(Maestro 가 행을 눌러 시트를 연다).
+    case 'shell-profile-status':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <SettingsOverlay
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(
+              SHELL_ROSTER.map(member =>
+                member.id === SELF
+                  ? {
+                      ...member,
+                      statusEmoji: '🚌',
+                      statusText: '출근 중',
+                      statusExpiresAtMs: Date.now() + 3 * 60 * 60 * 1000,
+                    }
+                  : member,
+              ),
+            )}
             connected
             onSignOut={() => {}}
             onClose={() => {}}
@@ -4810,8 +4859,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               <View style={styles.settingsBody}>
                 <SettingsContent
                   workspaceId={HARNESS_MEMBER.workspaceId}
-                  member={HARNESS_MEMBER}
-                  directory={makeDirectory(SHELL_ROSTER)}
+                  member={SETTINGS_ME}
+                  directory={settingsDirectory(SHELL_ROSTER)}
                   connected
                   onOpenTheme={() => {}}
                   onOpenStatus={() => {}}
@@ -4842,8 +4891,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           <Shell />
           <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(pauseRoster(name))}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(pauseRoster(name))}
             connected
             onSignOut={() => {}}
             onClose={() => {}}
@@ -4888,8 +4937,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
               <View style={styles.settingsBody}>
                 <SettingsContent
                   workspaceId={HARNESS_MEMBER.workspaceId}
-                  member={HARNESS_MEMBER}
-                  directory={makeDirectory(SHELL_ROSTER)}
+                  member={SETTINGS_ME}
+                  directory={settingsDirectory(SHELL_ROSTER)}
                   connected
                   onOpenTheme={() => {}}
                   onOpenStatus={() => {}}
@@ -5350,8 +5399,8 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
         <Shell />
         <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
-          member={HARNESS_MEMBER}
-          directory={makeDirectory(SHELL_ROSTER)}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onSignOut={() => {}}
           onClose={() => {}}
@@ -5370,8 +5419,8 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
         <Shell />
         <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
-          member={HARNESS_MEMBER}
-          directory={makeDirectory(SHELL_ROSTER)}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onSignOut={() => {}}
           onClose={() => {}}
@@ -5381,7 +5430,7 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     );
   }
   if (which === 'profile-page' || which === 'profile-page-faceid-off') {
-    // 실제 프로필 시트의 안쪽 장 — 머리의 「‹ 프로필」까지 배송되는 그대로.
+    // 실제 설정 페이지의 안쪽 장 — 머리의 ‹ 뒤로까지 배송되는 그대로(#4457).
     harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {
       status: which === 'profile-page' ? 'ready' : 'biometryUnavailable',
       publicKey: DK_KEY,
@@ -5394,8 +5443,8 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
         <Shell />
         <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
-          member={HARNESS_MEMBER}
-          directory={makeDirectory(SHELL_ROSTER)}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onSignOut={() => {}}
           onClose={() => {}}
@@ -5473,6 +5522,10 @@ const HARNESS_MEMBER = {
   displayName: HARNESS_SELF?.displayName ?? '곽성재',
   handle: HARNESS_SELF?.handle ?? 'seongjae',
 } as Member;
+/** 설정 표면의 나(가상 인물, `settingsOverlay.tsx`) — 캡처가 레포에 남는다. */
+const SETTINGS_ME = {...HARNESS_MEMBER, ...SETTINGS_PERSONA} as Member;
+const settingsDirectory = (roster: typeof SHELL_ROSTER) =>
+  makeDirectory(settingsPersona(roster, SELF));
 
 export default function SurfacesHarness({
   name,
@@ -6421,6 +6474,36 @@ function seedAi(surface: string): void {
 // 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
 // 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
 /** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
+/** #4457: 설정 페이지 내용을 진짜 스크롤뷰에 얹고 끝까지 내려 선다(`shell-profile-bottom`). */
+function SettingsBottomSurface(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const scroll = React.useRef<ScrollView>(null);
+  return (
+    <Screen>
+      <ScrollView
+        ref={scroll}
+        onContentSizeChange={() => scroll.current?.scrollToEnd({animated: false})}
+        contentContainerStyle={styles.settingsBody}
+        testID="settings-scroll">
+        <SettingsContent
+          workspaceId={HARNESS_MEMBER.workspaceId}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
+          connected
+          onOpenTheme={() => {}}
+          onOpenStatus={() => {}}
+          onOpenDeviceKey={() => {}}
+          onOpenPauseUntil={() => {}}
+          onOpenDndUntil={() => {}}
+          onOpenAvatar={() => {}}
+          onSignOut={() => {}}
+          onRevealEnd={() => scroll.current?.scrollToEnd({animated: true})}
+        />
+      </ScrollView>
+    </Screen>
+  );
+}
+
 const PUSH_CAPTURE_SCROLL = 475;
 const PUSH_CAPTURE_SCROLL_AX = 1160;
 
