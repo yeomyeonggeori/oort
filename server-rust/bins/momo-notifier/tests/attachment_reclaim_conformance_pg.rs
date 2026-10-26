@@ -12,14 +12,16 @@
 //!
 //! | test | revert that makes it red |
 //! |---|---|
-//! | `old_unbound_complete_attachments_are_reclaimed_and_everything_else_is_kept` | drop `status = 'complete'` (pending/failed go), `message_id IS NULL` (the carried one goes), `NOT a.reserved` (the held one goes), the `unreserved_at` term of the `GREATEST` (the just-released one goes) or the age term (the young one goes) from `eligible_sql` |
+//! | `old_unbound_complete_attachments_are_reclaimed_and_everything_else_is_kept` | drop `status = 'complete'` (pending/failed go), `message_id IS NULL` (the carried one goes), `NOT a.reserved` (the held one goes), the `unreserved_at` term of the `GREATEST` (the just-released one goes) or the age term (the young one goes) from `eligible_core_sql` |
+//! | `a_file_something_else_holds_is_never_deleted_and_never_in_the_way` | drop any one of the four `NOT EXISTS` of `NO_OTHER_HOLD_SQL` (the huddle merged transcript, the track's source, the track's transcript, a member or workspace avatar naming the same Drive object): that file is deleted — or, for a huddle column, the foreign key refuses and the pass reports a database error. Take `NO_OTHER_HOLD_SQL` out of the per-workspace listing and the five older held files fill the budget of 2 and the two free files stay |
+//! | `the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_and_deletes_nothing` | weaken the tally (drop the `NOT EXISTS` fragment, or `NOT a.reserved`) and its count no longer equals what the enabled sweep deletes; let the switched-off reclaimer reach `sweep_workspace` and rows go; count `bytes` from the wrong column |
 //! | `a_drive_failure_writes_nothing_and_the_next_tick_retries` | take the row delete / audit row out of the savepoint, or skip `ROLLBACK TO SAVEPOINT` on `DriveDelete::Failed` |
 //! | `a_drive_404_is_success_and_a_second_sweep_calls_drive_zero_times` | count `Gone` as a failure |
 //! | `a_refused_delete_leaves_the_row_and_the_object` | commit the row delete on `DriveDelete::Refused` |
-//! | `a_bind_or_a_hold_that_commits_while_the_reclaim_waits_beats_it` | drop the eligibility predicate from the statement after the `FOR UPDATE` (decide from the candidate list or from the lock alone) |
+//! | `a_bind_or_a_hold_that_commits_while_the_reclaim_waits_beats_it` | drop the eligibility predicate from the statement after the `FOR UPDATE` (decide from the listing or from the lock alone) |
 //! | `the_drive_call_runs_inside_the_row_lock_so_a_bind_waits_and_finds_the_row_gone` | call Drive before any lock is taken (no `FOR UPDATE`, Drive answers first) |
 //! | `the_reclaim_cannot_reach_another_tenants_row` | drop the workspace predicate from all three statements (lock, eligibility, delete; any one of them suffices on its own, by design). The first mode stays green because RLS covers it too; the second mode, run without RLS, goes red |
-//! | `a_write_pool_that_bypasses_rls_is_refused` | drop `ensure_write_pool_rls_bound` from `sweep_once` |
+//! | `a_write_pool_that_bypasses_rls_is_refused` | drop `ensure_write_pool_rls_bound` from `sweep_once` (both the deleting and the switched-off reclaimer) |
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -32,9 +34,11 @@ use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::PgPool;
 use momo_drive::{DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession};
 use momo_messaging::attachment_reclaim::{
-    reclaim_unbound_attachment_in_tx, AttachmentReclaimOutcome, UNBOUND_TTL,
+    reclaim_candidate_ids_in_tx, reclaim_unbound_attachment_in_tx, sweep_workspace,
+    tally_workspace, workspaces_with_reclaim_candidates, AttachmentDeleter,
+    AttachmentReclaimCounts, AttachmentReclaimOutcome, ReclaimTally, UNBOUND_TTL,
 };
-use momo_messaging::avatar_reclaim::DriveDelete;
+use momo_messaging::avatar_reclaim::{DriveDelete, DriveDeleteFuture};
 use momo_notifier::attachment_reclaim::AttachmentReclaimer;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use uuid::Uuid;
@@ -226,6 +230,23 @@ impl DriveArchive for MockDrive {
     }
 }
 
+/// The mock as the thing that deletes — the same classification the notifier's Google
+/// deleter applies (`FileNotFound` is "gone", a permanent refusal is `Refused`).
+impl AttachmentDeleter for MockDrive {
+    fn delete<'a>(&'a self, drive_file_id: &'a str) -> DriveDeleteFuture<'a> {
+        Box::pin(async move {
+            match self.delete_file(drive_file_id).await {
+                Ok(()) => DriveDelete::Deleted,
+                Err(DriveError::FileNotFound) => DriveDelete::Gone,
+                Err(DriveError::AccessDenied | DriveError::InvalidArguments(_)) => {
+                    DriveDelete::Refused
+                }
+                Err(_) => DriveDelete::Failed,
+            }
+        })
+    }
+}
+
 // ---------------------------------------------------------------------------
 // fixtures
 // ---------------------------------------------------------------------------
@@ -401,6 +422,168 @@ async fn expired_audit(su: &PgPool, workspace: Uuid, attachment: Uuid) -> Vec<se
     .fetch_all(su)
     .await
     .expect("audit rows")
+}
+
+/// Every tenant these tests seeded, so a test that counts across tenants starts from a
+/// known floor (the DB is shared and earlier tests leave rows — a refused delete leaves
+/// an eligible one on purpose). The tests in this binary are serialized by `test_lock`.
+async fn wipe_test_tenants(su: &PgPool) {
+    sqlx::query("DELETE FROM workspace WHERE slug LIKE 'atr-%'")
+        .execute(su)
+        .await
+        .expect("wipe the tenants earlier tests seeded");
+}
+
+/// What the delete would take from every workspace **except** `mine`. Other suites share
+/// this database and leave eligible files behind; a test that compares a global count with
+/// what it seeded adds this floor, computed with the same full predicate.
+async fn foreign_tally(p: &Pools, mine: &[Uuid]) -> ReclaimTally {
+    let hinted = workspaces_with_reclaim_candidates(&p.read, 100_000, UNBOUND_TTL)
+        .await
+        .expect("cross-tenant read");
+    let mut total = ReclaimTally::default();
+    for workspace in hinted.into_iter().filter(|w| !mine.contains(w)) {
+        let tally = tally_workspace(&p.write, workspace, UNBOUND_TTL)
+            .await
+            .expect("tally a foreign workspace");
+        total.add(&tally);
+    }
+    total
+}
+
+async fn set_size(su: &PgPool, attachment: Uuid, bytes: i64) {
+    sqlx::query("UPDATE attachment SET size_bytes = $2 WHERE id = $1")
+        .bind(attachment)
+        .bind(bytes)
+        .execute(su)
+        .await
+        .expect("size");
+}
+
+/// A recorded huddle with one transcription job and one track (raw seed: the Rust
+/// server writes none of the attachment columns yet, so the fixture names them by hand —
+/// they are the foreign keys of `046_huddle_transcription.sql`).
+struct Huddle {
+    job: Uuid,
+    track: Uuid,
+}
+
+async fn huddle_transcription(su: &PgPool, t: &Tenant) -> Huddle {
+    let huddle: Uuid = sqlx::query_scalar(
+        "INSERT INTO huddle (workspace_id, channel_id, started_by, ended_at) \
+         VALUES ($1, $2, $3, now()) RETURNING id",
+    )
+    .bind(t.workspace_id)
+    .bind(t.channel_id)
+    .bind(t.members[0])
+    .fetch_one(su)
+    .await
+    .expect("seed huddle");
+    let notice = message(su, t).await;
+    let recording: Uuid = sqlx::query_scalar(
+        "INSERT INTO huddle_recording \
+           (workspace_id, huddle_id, channel_id, requested_by, model, status, notice_message_id) \
+         VALUES ($1, $2, $3, $4, 'test-model', 'stopped', $5) RETURNING id",
+    )
+    .bind(t.workspace_id)
+    .bind(huddle)
+    .bind(t.channel_id)
+    .bind(t.members[0])
+    .bind(notice)
+    .fetch_one(su)
+    .await
+    .expect("seed recording");
+    let job: Uuid = sqlx::query_scalar(
+        "INSERT INTO huddle_transcription_job \
+           (workspace_id, huddle_id, recording_id, channel_id, model) \
+         VALUES ($1, $2, $3, $4, 'test-model') RETURNING id",
+    )
+    .bind(t.workspace_id)
+    .bind(huddle)
+    .bind(recording)
+    .bind(t.channel_id)
+    .fetch_one(su)
+    .await
+    .expect("seed job");
+    let track: Uuid = sqlx::query_scalar(
+        "INSERT INTO huddle_transcription_track \
+           (workspace_id, job_id, member_id, livekit_track_sid) \
+         VALUES ($1, $2, $3, $4) RETURNING id",
+    )
+    .bind(t.workspace_id)
+    .bind(job)
+    .bind(t.members[0])
+    .bind(format!("TR_{}", Uuid::new_v4().simple()))
+    .fetch_one(su)
+    .await
+    .expect("seed track");
+    Huddle { job, track }
+}
+
+async fn name_merged_transcript(su: &PgPool, huddle: &Huddle, attachment: Uuid) {
+    sqlx::query("UPDATE huddle_transcription_job SET merged_transcript_attachment_id = $2 WHERE id = $1")
+        .bind(huddle.job)
+        .bind(attachment)
+        .execute(su)
+        .await
+        .expect("merged transcript");
+}
+
+async fn name_track_source(su: &PgPool, huddle: &Huddle, attachment: Uuid) {
+    sqlx::query("UPDATE huddle_transcription_track SET source_attachment_id = $2 WHERE id = $1")
+        .bind(huddle.track)
+        .bind(attachment)
+        .execute(su)
+        .await
+        .expect("track source");
+}
+
+async fn name_track_transcript(su: &PgPool, huddle: &Huddle, attachment: Uuid) {
+    sqlx::query(
+        "UPDATE huddle_transcription_track SET transcript_attachment_id = $2 WHERE id = $1",
+    )
+    .bind(huddle.track)
+    .bind(attachment)
+    .execute(su)
+    .await
+    .expect("track transcript");
+}
+
+/// A member avatar media row that names the **same Drive object** as an attachment.
+async fn member_avatar_naming(su: &PgPool, t: &Tenant, drive_file_id: &str) {
+    sqlx::query(
+        "INSERT INTO member_avatar_media \
+           (workspace_id, member_id, drive_file_id, name, mime, size_bytes, status) \
+         VALUES ($1, $2, $3, 'a.png', 'image/png', 10, 'complete')",
+    )
+    .bind(t.workspace_id)
+    .bind(t.members[0])
+    .bind(drive_file_id)
+    .execute(su)
+    .await
+    .expect("member avatar media");
+}
+
+async fn workspace_avatar_naming(su: &PgPool, t: &Tenant, drive_file_id: &str) {
+    sqlx::query(
+        "INSERT INTO workspace_avatar_media \
+           (workspace_id, uploader_member_id, drive_file_id, name, mime, size_bytes, status) \
+         VALUES ($1, $2, $3, 'w.png', 'image/png', 10, 'complete')",
+    )
+    .bind(t.workspace_id)
+    .bind(t.members[0])
+    .bind(drive_file_id)
+    .execute(su)
+    .await
+    .expect("workspace avatar media");
+}
+
+async fn tombstone(su: &PgPool, message: Uuid) {
+    sqlx::query("UPDATE message SET state = 'deleted', body = NULL, deleted_at = now() WHERE id = $1")
+        .bind(message)
+        .execute(su)
+        .await
+        .expect("tombstone");
 }
 
 struct Pools {
@@ -819,4 +1002,288 @@ async fn a_write_pool_that_bypasses_rls_is_refused() {
     let refused = reclaimer.sweep_once(&p.read, &p.read).await;
     assert!(refused.is_err(), "a BYPASSRLS write pool must be refused");
     assert_eq!(drive.total_calls(), 0, "and nothing reached Drive");
+    // The switched-off reclaimer reads through the same pool, so it refuses the same way.
+    let refused_off = AttachmentReclaimer::dry_run(500)
+        .sweep_once(&p.read, &p.read)
+        .await;
+    assert!(
+        refused_off.is_err(),
+        "the dry-run count runs on the write pool too, and that pool must be RLS-bound"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) with bootstrap roles"]
+async fn a_file_something_else_holds_is_never_deleted_and_never_in_the_way() {
+    let _guard = test_lock().await;
+    let p = pools().await;
+    wipe_test_tenants(&p.su).await;
+    let t = seed_tenant(&p.su, 1).await;
+    let huddle = huddle_transcription(&p.su, &t).await;
+
+    // Seven old, complete, unbound, unreserved files: every one passes the part of the
+    // definition the BYPASSRLS read can see. Five are held by something it cannot, and
+    // are the OLDEST (90 days), so they sort first and would fill a window.
+    let f_merged = file_id();
+    let f_source = file_id();
+    let f_transcript = file_id();
+    let f_member_avatar = file_id();
+    let f_workspace_avatar = file_id();
+    let held_merged = attachment(&p.su, &t, "complete", Some(&f_merged), 90).await;
+    name_merged_transcript(&p.su, &huddle, held_merged).await;
+    let held_source = attachment(&p.su, &t, "complete", Some(&f_source), 91).await;
+    name_track_source(&p.su, &huddle, held_source).await;
+    let held_transcript = attachment(&p.su, &t, "complete", Some(&f_transcript), 92).await;
+    name_track_transcript(&p.su, &huddle, held_transcript).await;
+    let held_member_avatar =
+        attachment(&p.su, &t, "complete", Some(&f_member_avatar), 93).await;
+    member_avatar_naming(&p.su, &t, &f_member_avatar).await;
+    let held_workspace_avatar =
+        attachment(&p.su, &t, "complete", Some(&f_workspace_avatar), 94).await;
+    workspace_avatar_naming(&p.su, &t, &f_workspace_avatar).await;
+    // A file a message carries stays carried when the message is deleted (soft): the
+    // sweep reclaims what NO message carries, and a tombstone still carries.
+    let f_tombstoned = file_id();
+    let carried_by_tombstone = attachment(&p.su, &t, "complete", Some(&f_tombstoned), 95).await;
+    let dead = message(&p.su, &t).await;
+    carry(&p.su, carried_by_tombstone, dead).await;
+    tombstone(&p.su, dead).await;
+    // The two files nothing holds.
+    let (f_free_old, f_free_new) = (file_id(), file_id());
+    let free_old = attachment(&p.su, &t, "complete", Some(&f_free_old), 41).await;
+    let free_new = attachment(&p.su, &t, "complete", Some(&f_free_new), 40).await;
+
+    // The cross-tenant read is only a hint: it names this workspace and cannot tell which
+    // of the files are held. The listing under the tenant's own policies can.
+    let hinted = workspaces_with_reclaim_candidates(&p.read, 100, UNBOUND_TTL)
+        .await
+        .expect("cross-tenant read");
+    assert!(
+        hinted.contains(&t.workspace_id),
+        "the hint names the workspace (workspace ids are all it answers): {hinted:?}"
+    );
+    let workspace = t.workspace_id;
+    let listed = momo_db::with_tenant_tx(&p.write, workspace, move |conn| {
+        Box::pin(async move {
+            reclaim_candidate_ids_in_tx(conn, workspace, 50, UNBOUND_TTL).await
+        })
+    })
+    .await
+    .expect("listing");
+    assert_eq!(
+        listed,
+        vec![free_old, free_new],
+        "the listing holds exactly the two files nothing holds, oldest first"
+    );
+
+    // A budget of two is enough for both: the held files are not in the way.
+    let drive = MockDrive::default();
+    let deleter: Arc<dyn AttachmentDeleter> = Arc::new(drive.clone());
+    let mut failures = 0u32;
+    let sweep = sweep_workspace(&p.write, workspace, UNBOUND_TTL, 2, &deleter, &mut failures)
+        .await
+        .expect("sweep");
+    assert_eq!(sweep.listed, 2, "{sweep:?}");
+    assert_eq!(sweep.counts.reclaimed, 2, "{sweep:?}");
+    assert_eq!(
+        sweep.db_errors, 0,
+        "the predicate says no first: a foreign key refusing the delete is never what stops a held file ({sweep:?})"
+    );
+    assert_eq!(sweep.counts.skipped_not_eligible, 0, "{sweep:?}");
+
+    for (f, label) in [
+        (&f_free_old, "free, older"),
+        (&f_free_new, "free, newer"),
+    ] {
+        assert_eq!(drive.calls_for(f), 1, "{label} is deleted once");
+    }
+    for (f, label) in [
+        (&f_merged, "named by a huddle job as its merged transcript"),
+        (&f_source, "named by a huddle track as its source"),
+        (&f_transcript, "named by a huddle track as its transcript"),
+        (&f_member_avatar, "the same Drive object as a member avatar"),
+        (&f_workspace_avatar, "the same Drive object as a workspace avatar"),
+        (&f_tombstoned, "carried by a deleted message"),
+    ] {
+        assert_eq!(drive.calls_for(f), 0, "{label}: never deleted");
+    }
+    for (id, label) in [(free_old, "free, older"), (free_new, "free, newer")] {
+        assert!(!exists(&p.su, id).await, "{label}: row gone");
+    }
+    for (id, label) in [
+        (held_merged, "huddle merged transcript"),
+        (held_source, "huddle track source"),
+        (held_transcript, "huddle track transcript"),
+        (held_member_avatar, "member avatar object"),
+        (held_workspace_avatar, "workspace avatar object"),
+        (carried_by_tombstone, "carried by a deleted message"),
+    ] {
+        assert!(exists(&p.su, id).await, "{label}: row stays");
+        assert!(
+            expired_audit(&p.su, workspace, id).await.is_empty(),
+            "{label}: and nothing says it was deleted"
+        );
+    }
+
+    // And a whole tick (this workspace is still in the hint: the held files look like
+    // candidates from where the notifier stands) leaves every held file alone and finds
+    // nothing more to delete here. Other suites share this database, so the assertions are
+    // about this workspace's files, not the tick's global totals.
+    AttachmentReclaimer::new(Arc::new(drive.clone()), 500)
+        .sweep_once(&p.read, &p.write)
+        .await
+        .expect("tick");
+    for f in [
+        &f_merged,
+        &f_source,
+        &f_transcript,
+        &f_member_avatar,
+        &f_workspace_avatar,
+        &f_tombstoned,
+    ] {
+        assert_eq!(drive.calls_for(f), 0, "a held file is skipped by the predicate, tick after tick");
+    }
+    assert_eq!(
+        tally_workspace(&p.write, workspace, UNBOUND_TTL)
+            .await
+            .expect("tally"),
+        ReclaimTally::default(),
+        "nothing left to delete in this workspace"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL (pgvector/pg18 superuser) with bootstrap roles"]
+async fn the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_and_deletes_nothing()
+{
+    let _guard = test_lock().await;
+    let p = pools().await;
+    wipe_test_tenants(&p.su).await;
+    let a = seed_tenant(&p.su, 1).await;
+    let b = seed_tenant(&p.su, 1).await;
+    let c = seed_tenant(&p.su, 1).await;
+
+    // Workspace a: two files to delete (100 + 250 bytes), and one of each kind to keep.
+    let (a1, a2) = (file_id(), file_id());
+    let del_a1 = attachment(&p.su, &a, "complete", Some(&a1), 40).await;
+    set_size(&p.su, del_a1, 100).await;
+    let del_a2 = attachment(&p.su, &a, "complete", Some(&a2), 70).await;
+    set_size(&p.su, del_a2, 250).await;
+    let f_young = file_id();
+    attachment(&p.su, &a, "complete", Some(&f_young), 5).await;
+    let f_pending = file_id();
+    attachment(&p.su, &a, "pending", Some(&f_pending), 90).await;
+    let f_held = file_id();
+    let held = attachment(&p.su, &a, "complete", Some(&f_held), 90).await;
+    hold(&p.su, held).await;
+    let f_carried = file_id();
+    let carried = attachment(&p.su, &a, "complete", Some(&f_carried), 90).await;
+    let m = message(&p.su, &a).await;
+    carry(&p.su, carried, m).await;
+    // Workspace b: one file to delete (7 bytes).
+    let f_b = file_id();
+    let del_b = attachment(&p.su, &b, "complete", Some(&f_b), 45).await;
+    set_size(&p.su, del_b, 7).await;
+    // Workspace c: its only old file is named by a huddle track. The cross-tenant read
+    // cannot see that, so it still names this workspace — and the count says 0 for it.
+    let f_c = file_id();
+    let held_c = attachment(&p.su, &c, "complete", Some(&f_c), 80).await;
+    let huddle_c = huddle_transcription(&p.su, &c).await;
+    name_track_transcript(&p.su, &huddle_c, held_c).await;
+
+    let hinted = workspaces_with_reclaim_candidates(&p.read, 100, UNBOUND_TTL)
+        .await
+        .expect("cross-tenant read");
+    assert!(
+        [a.workspace_id, b.workspace_id, c.workspace_id]
+            .iter()
+            .all(|w| hinted.contains(w)),
+        "the hint names all three, including the one whose only file is held: {hinted:?}"
+    );
+    let c_tally = tally_workspace(&p.write, c.workspace_id, UNBOUND_TTL)
+        .await
+        .expect("tally c");
+    assert_eq!(c_tally, ReclaimTally::default(), "…but the full predicate counts nothing for it");
+
+    // The switched-off reclaimer: counts, deletes nothing, owns no Drive.
+    let off = AttachmentReclaimer::dry_run(500);
+    assert!(!off.deletes());
+    let mine = [a.workspace_id, b.workspace_id, c.workspace_id];
+    let mut expected = ReclaimTally {
+        candidates: 3,
+        bytes: 100 + 250 + 7,
+    };
+    let mine_expected = expected;
+    // Other suites' leftovers, counted with the same predicate, are part of the global tally.
+    let foreign = foreign_tally(&p, &mine).await;
+    expected.add(&foreign);
+    for tick in 1..=2 {
+        let stats = off
+            .sweep_once(&p.read, &p.write)
+            .await
+            .unwrap_or_else(|e| panic!("dry run {tick}: {e}"));
+        assert_eq!(stats.dry_run, Some(expected), "tick {tick}: {stats:?}");
+        assert_eq!(stats.counts, AttachmentReclaimCounts::default(), "{stats:?}");
+        assert_eq!(stats.db_errors, 0, "{stats:?}");
+    }
+    // Per workspace (no leftovers in the way): a and b have something to delete, c — whose
+    // only old file a huddle names — has not.
+    let per_workspace = |w: Uuid| {
+        let write = p.write.clone();
+        async move { tally_workspace(&write, w, UNBOUND_TTL).await.expect("tally") }
+    };
+    assert_eq!(
+        per_workspace(a.workspace_id).await,
+        ReclaimTally { candidates: 2, bytes: 350 }
+    );
+    assert_eq!(
+        per_workspace(b.workspace_id).await,
+        ReclaimTally { candidates: 1, bytes: 7 }
+    );
+    assert_eq!(per_workspace(c.workspace_id).await, ReclaimTally::default());
+    for (id, label) in [(del_a1, "a1"), (del_a2, "a2"), (del_b, "b")] {
+        assert!(exists(&p.su, id).await, "switched off: {label} is still there");
+    }
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'attachment.expired' \
+           AND workspace_id = ANY($1)",
+    )
+    .bind(vec![a.workspace_id, b.workspace_id, c.workspace_id])
+    .fetch_one(&p.su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 0, "switched off: no deletion was audited");
+
+    // The enabled reclaimer deletes exactly what the dry run counted.
+    let drive = MockDrive::default();
+    let on = AttachmentReclaimer::new(Arc::new(drive.clone()), 500);
+    assert!(on.deletes());
+    let stats = on.sweep_once(&p.read, &p.write).await.expect("enabled");
+    assert_eq!(
+        i64::from(stats.counts.reclaimed),
+        expected.candidates,
+        "the enabled sweep deletes exactly what the dry run counted: {stats:?}"
+    );
+    assert_eq!(drive.total_calls() as i64, expected.candidates);
+    let freed: i64 = sqlx::query_scalar(
+        "SELECT COALESCE(sum((detail->>'size_bytes')::bigint), 0)::bigint FROM audit_log \
+          WHERE action = 'attachment.expired' AND workspace_id = ANY($1)",
+    )
+    .bind(vec![a.workspace_id, b.workspace_id, c.workspace_id])
+    .fetch_one(&p.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        freed, mine_expected.bytes,
+        "the bytes the dry run counted for these workspaces are the bytes deleted from them"
+    );
+    for (id, label) in [(del_a1, "a1"), (del_a2, "a2"), (del_b, "b")] {
+        assert!(!exists(&p.su, id).await, "enabled: {label} is gone");
+    }
+    // After the delete, the dry run has nothing left to report for these workspaces.
+    for w in mine {
+        assert_eq!(per_workspace(w).await, ReclaimTally::default(), "after the delete");
+    }
+    let after = off.sweep_once(&p.read, &p.write).await.expect("after");
+    assert_eq!(after.dry_run, Some(foreign_tally(&p, &mine).await), "{after:?}");
 }

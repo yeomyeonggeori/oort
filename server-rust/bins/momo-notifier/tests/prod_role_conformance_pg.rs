@@ -531,8 +531,17 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "momo_notifier + momo_app",
         reclaimer.sweep_once(&notifier, &app).await,
     );
-    // loop 2f — attachment reclaim (#4443): candidate read (notifier, column-scoped
-    // GRANT) + row delete and audit (app).
+    // loop 2f — attachment reclaim (#4443). It ships off, so the production default is the
+    // dry run: the one cross-tenant read of workspace ids (notifier, column-scoped GRANT)
+    // plus the count over the full predicate (app) — and it must delete nothing.
+    let dry_run = AttachmentReclaimer::dry_run(10).sweep_once(&notifier, &app).await;
+    let dry_run_tally = dry_run.as_ref().ok().and_then(|stats| stats.dry_run);
+    report.check(
+        "attachment reclaim (dry run, the default)",
+        "momo_notifier + momo_app",
+        dry_run,
+    );
+    // …and switched on: the same read, the listing and the delete with its audit row (app).
     let attachment_reclaimer =
         AttachmentReclaimer::new(Arc::new(StubDriveArchive::new("http://drive.invalid")), 10);
     report.check(
@@ -583,13 +592,14 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     // are readable, the Drive id, the file name, the mime and the uploader are not — and
     // the dev bootstrap, which holds table-level grants, cannot show that.
     let readable = sqlx::query(
-        "SELECT id, workspace_id, status, message_id, reserved, unreserved_at, created_at \
+        "SELECT workspace_id, status, message_id, reserved, unreserved_at, created_at \
            FROM attachment LIMIT 1",
     )
     .fetch_all(&notifier)
     .await;
     let mut unreadable = Vec::new();
     for column in [
+        "id",
         "drive_file_id",
         "name",
         "mime",
@@ -632,7 +642,15 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     assert_eq!(unreclaimed, 0, "the abandoned avatar row was reclaimed");
     assert_eq!(
         attachments_left, 0,
-        "the idle unbound attachment was reclaimed (candidate read as the notifier, delete as momo_app)"
+        "the idle unbound attachment was reclaimed (workspace ids read as the notifier, listing and delete as momo_app)"
+    );
+    assert_eq!(
+        dry_run_tally,
+        Some(momo_messaging::attachment_reclaim::ReclaimTally {
+            candidates: 1,
+            bytes: 10
+        }),
+        "the production default counts the one idle file the delete then took, as the production roles"
     );
 }
 
@@ -713,7 +731,7 @@ async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attach
     );
     assert!(
         name.is_err(),
-        "…and still not the file name: the grant is the seven candidate columns only"
+        "…and still not the file name: the grant is the six columns of the cross-tenant read only"
     );
     assert_eq!(
         flags,

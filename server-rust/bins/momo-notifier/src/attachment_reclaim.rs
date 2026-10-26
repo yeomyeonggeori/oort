@@ -5,31 +5,44 @@
 //! A file is uploaded before the message that carries it, so some uploads are never
 //! carried: a draft nobody sent, a cancelled schedule's files, a file whose message
 //! was hard-deleted. Nothing collected them, so the shared Drive only grew. This
-//! sweep deletes a completed attachment that no message and no schedule holds once it
-//! has been idle for [`momo_messaging::attachment_reclaim::UNBOUND_TTL`] (30 days).
+//! sweep deletes a completed attachment that nothing holds once it has been idle for
+//! [`momo_messaging::attachment_reclaim::UNBOUND_TTL`] (30 days) — and a file is
+//! "held" by more than a message and a schedule; see `momo_messaging::attachment_reclaim`
+//! for the full definition and the reference table behind it.
+//!
+//! ## It ships off
+//!
+//! **This job deletes files an operator cannot get back, so it deletes nothing until
+//! `MOMO_ATTACHMENT_RECLAIM` is exactly `1`** ([`delete_switch_is_on`]). Switched off —
+//! the default — every tick still runs the same read path and writes one fixed line
+//! (`attachment reclaim dry-run: … candidates=N bytes=B …`, [`dry_run_line`]) with
+//! how many files and bytes the delete *would* take, counted with the same predicate
+//! the delete uses. An operator compares that line with
+//! `infra/rust/sql/attachment_reclaim_check.sql` and only then turns the delete on.
+//! A switched-off tick never builds a Drive client and never calls Drive.
 //!
 //! ## Shape (the avatar reclaim's two-pool shape, ADR-0161 D5)
 //!
-//! 1. The candidate read ([`momo_messaging::attachment_reclaim::attachment_reclaim_candidates`])
-//!    runs on the notifier's own pool — the existing BYPASSRLS `momo_notifier` role, a
-//!    **read** through a column-level grant (`id`, `workspace_id`, `status`,
-//!    `message_id`, `reserved`, `unreserved_at`, `created_at` — never the Drive id, the
-//!    file name, the mime or the uploader), the only way to see every tenant. It
-//!    returns ids only.
-//! 2. Every write goes through a second pool whose role must be RLS-bound
-//!    (`momo_app`); [`AttachmentReclaimer::sweep_once`] checks that first and refuses
-//!    otherwise. **No new RLS-bypassing write path, no new `SECURITY DEFINER`, no
-//!    foreign owner binding.** Each attachment is its own tenant transaction
-//!    (`SET LOCAL app.workspace_id`) in which the row is locked, eligibility is decided
-//!    again, the row and its audit row are deleted/written inside a savepoint, the
-//!    Drive object is deleted, and a failed Drive call takes the savepoint back — see
-//!    `momo_messaging::attachment_reclaim` for the order and the race argument.
+//! 1. The one cross-tenant read ([`workspaces_with_reclaim_candidates`]) runs on the
+//!    notifier's own pool — the existing BYPASSRLS `momo_notifier` role, a **read**
+//!    through a column-level grant (`workspace_id`, `status`, `message_id`, `reserved`,
+//!    `unreserved_at`, `created_at` — never an attachment id, the Drive id, the name, the
+//!    mime, the size or the uploader). It answers **workspace ids only**.
+//! 2. Every other statement — the listing, the dry-run count, the row delete — goes
+//!    through a second pool whose role must be RLS-bound (`momo_app`);
+//!    [`AttachmentReclaimer::sweep_once`] checks that first and refuses otherwise.
+//!    **No new RLS-bypassing write path, no new `SECURITY DEFINER`, no foreign owner
+//!    binding.** Each workspace is its own tenant transaction (`SET LOCAL
+//!    app.workspace_id`), each file another, in which the row is locked, eligibility is
+//!    decided again, the row and its audit row are deleted/written inside a savepoint,
+//!    the Drive object is deleted, and a failed Drive call takes the savepoint back —
+//!    see `momo_messaging::attachment_reclaim` for the order and the race argument.
 //!
 //! ## What must never happen
 //!
-//! * A file a message carries, a file a schedule holds, or a file younger than the TTL
-//!   is never deleted (decided under the row lock, from the row — not from the
-//!   candidate list).
+//! * A file a message carries, a file a schedule holds, a file another row names, or a
+//!   file younger than the TTL is never deleted (decided under the row lock, from the
+//!   row — not from the workspace list).
 //! * Drive unreachable is not "deleted": a transient failure writes nothing and the
 //!   row is retried next tick. Drive **404 is success** (idempotent).
 //! * Nothing here logs a file name, a Drive id or a member id — counts only.
@@ -39,39 +52,40 @@
 //!
 //! ## What does not run here
 //!
-//! Only a Google Drive is reclaimed (the avatar reclaim's limit, for the same reason):
-//! `momo-server`'s stub archive is in its own memory, and `LocalDriveArchive::open`
-//! clears pending sessions of the process that opens it — the self-host volume, and a
-//! Railway volume, belong to the api process alone. On the default `local` backend this
-//! sweep is **off** and attachment bytes and rows stay where they are
-//! (ADR-0151 증보 2, 남는 위험; closing it needs an api-process runner, which needs a
-//! cross-tenant candidate read that only a new `SECURITY DEFINER` can give — an owner
-//! decision).
+//! Only a Google Drive is reclaimed here (the avatar reclaim's limit, for the same
+//! reason): `momo-server`'s stub archive is in its own memory, and
+//! `LocalDriveArchive::open` clears pending sessions of the process that opens it — the
+//! self-host volume, and a Railway volume, belong to the api process alone. On the
+//! default `local` backend this job is not configured at all; the api process runs the
+//! same two-step sweep for the workspaces whose attachments it serves
+//! (`momo-server` `attachment_reclaim`).
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use momo_db::{with_tenant_tx, DbError, PgPool};
+use momo_db::{DbError, PgPool};
 use momo_drive::DriveArchive;
 use momo_messaging::attachment_reclaim::{
-    attachment_reclaim_candidates, reclaim_unbound_attachment_in_tx, AttachmentReclaimCounts,
-    AttachmentReclaimOutcome, UNBOUND_TTL,
+    delete_switch_is_on, dry_run_line, sweep_workspace, tally_workspace,
+    workspaces_with_reclaim_candidates, AttachmentDeleter, AttachmentReclaimCounts, ReclaimTally,
+    MAX_WORKSPACES_PER_TICK, UNBOUND_TTL,
 };
-use momo_messaging::avatar_reclaim::ensure_write_pool_rls_bound;
-use uuid::Uuid;
+use momo_messaging::avatar_reclaim::{ensure_write_pool_rls_bound, DriveDeleteFuture};
 
-use crate::avatar_reclaim::{delete_outcome, AvatarReclaimConfig, MAX_CONSECUTIVE_DRIVE_FAILURES};
+use crate::avatar_reclaim::{delete_outcome, AvatarReclaimConfig};
 
 /// Settings for the attachment reclaim. The Drive credentials are the avatar reclaim's
-/// (one parser, one loader — [`AvatarReclaimConfig`]); only the cadence and the batch
-/// are this sweep's own. Holds a key **path**, never key material.
+/// (one parser, one loader — [`AvatarReclaimConfig`]); only the cadence, the batch and
+/// the delete switch are this sweep's own. Holds a key **path**, never key material.
 #[derive(Debug, Clone)]
 pub struct AttachmentReclaimConfig {
     pub interval: Duration,
     /// Attachments per tick.
     pub batch: i64,
+    /// `MOMO_ATTACHMENT_RECLAIM` is exactly `1`. `false` (the default) still looks and
+    /// writes the dry-run line; it never deletes.
+    pub delete_enabled: bool,
     drive: AvatarReclaimConfig,
 }
 
@@ -79,9 +93,9 @@ impl AttachmentReclaimConfig {
     /// Both Drive values present and the backend unset / `google` / `sa`, or `None`.
     /// A `stub` or `local` backend is deliberately `None` (see the module docs).
     ///
-    /// `switch` is the raw `MOMO_ATTACHMENT_RECLAIM`: **this sweep deletes files**, so an
-    /// operator can turn it off without touching the Drive credentials the avatar reclaim
-    /// shares (`0`, `false`, `off` or `no`, any case). Unset means on.
+    /// `switch` is the raw `MOMO_ATTACHMENT_RECLAIM`; only the exact text `1` turns the
+    /// delete on ([`delete_switch_is_on`]). Unset, empty, `true`, `yes` and every other
+    /// value leave this configured but looking only.
     pub fn parse(
         switch: Option<&str>,
         backend: Option<&str>,
@@ -90,19 +104,12 @@ impl AttachmentReclaimConfig {
         interval: Duration,
         batch: i64,
     ) -> Option<AttachmentReclaimConfig> {
-        if switch.is_some_and(|value| {
-            matches!(
-                value.trim().to_ascii_lowercase().as_str(),
-                "0" | "false" | "off" | "no"
-            )
-        }) {
-            return None;
-        }
         let drive =
             AvatarReclaimConfig::parse(backend, sa_key_path, shared_drive_id, interval, batch)?;
         Some(AttachmentReclaimConfig {
             interval,
             batch: batch.max(1),
+            delete_enabled: delete_switch_is_on(switch),
             drive,
         })
     }
@@ -111,104 +118,184 @@ impl AttachmentReclaimConfig {
 /// What one tick did. Counts only.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct AttachmentReclaimStats {
+    /// Workspaces that had at least one file to delete (or, switched off, to count).
     pub workspaces: usize,
     pub counts: AttachmentReclaimCounts,
-    /// Per-row transactions that failed in the database.
+    /// Per-file or per-workspace transactions that failed in the database.
     pub db_errors: u32,
+    /// Set on a switched-off tick: the files and bytes the delete would take. `None`
+    /// when the delete ran.
+    pub dry_run: Option<ReclaimTally>,
+}
+
+/// The Google Drive behind [`AttachmentDeleter`]. One per tick, so `unavailable` (the
+/// archive said it is not configured at all) does not outlive the tick that saw it.
+struct GoogleDeleter {
+    drive: Arc<dyn DriveArchive>,
+    unavailable: AtomicBool,
+}
+
+impl AttachmentDeleter for GoogleDeleter {
+    fn delete<'a>(&'a self, drive_file_id: &'a str) -> DriveDeleteFuture<'a> {
+        Box::pin(delete_outcome(
+            &*self.drive,
+            drive_file_id,
+            &self.unavailable,
+        ))
+    }
+
+    fn unavailable(&self) -> bool {
+        self.unavailable.load(Ordering::Relaxed)
+    }
 }
 
 pub struct AttachmentReclaimer {
-    drive: Arc<dyn DriveArchive>,
+    /// `None` is the switched-off reclaimer: it counts and logs, and has no Drive.
+    drive: Option<Arc<dyn DriveArchive>>,
     batch: i64,
 }
 
 impl AttachmentReclaimer {
+    /// A reclaimer that deletes through `drive`.
     pub fn new(drive: Arc<dyn DriveArchive>, batch: i64) -> AttachmentReclaimer {
         AttachmentReclaimer {
-            drive,
+            drive: Some(drive),
             batch: batch.max(1),
         }
     }
 
-    /// Build the Google archive named by `config`. `None` when the service account
-    /// cannot be loaded (the error carries no credential material).
-    pub fn from_config(config: &AttachmentReclaimConfig) -> Option<AttachmentReclaimer> {
-        config
-            .drive
-            .google_archive()
-            .map(|archive| AttachmentReclaimer::new(archive, config.batch))
+    /// The switched-off reclaimer: every tick counts what the delete would take and
+    /// writes the dry-run line. It owns no Drive client and calls no Drive.
+    pub fn dry_run(batch: i64) -> AttachmentReclaimer {
+        AttachmentReclaimer {
+            drive: None,
+            batch: batch.max(1),
+        }
     }
 
-    /// One iteration. `read_pool` is the BYPASSRLS notifier pool (read only);
-    /// `write_pool` must be RLS-bound or this refuses to run.
+    /// The reclaimer `config` describes: deleting when the switch is `1` **and** the
+    /// Google archive loads, looking only otherwise. A service account that cannot be
+    /// loaded (the error carries no credential material) falls back to looking only —
+    /// a delete that cannot reach its Drive is not a delete.
+    pub fn from_config(config: &AttachmentReclaimConfig) -> AttachmentReclaimer {
+        AttachmentReclaimer::from_config_with(config, |config| config.drive.google_archive())
+    }
+
+    /// [`AttachmentReclaimer::from_config`] with the archive loader handed in, so a test can
+    /// prove that a switched-off config never asks for an archive at all.
+    fn from_config_with(
+        config: &AttachmentReclaimConfig,
+        load_archive: impl FnOnce(&AttachmentReclaimConfig) -> Option<Arc<dyn DriveArchive>>,
+    ) -> AttachmentReclaimer {
+        if !config.delete_enabled {
+            return AttachmentReclaimer::dry_run(config.batch);
+        }
+        match load_archive(config) {
+            Some(archive) => AttachmentReclaimer::new(archive, config.batch),
+            None => {
+                tracing::error!(
+                    "attachment reclaim: MOMO_ATTACHMENT_RECLAIM=1 but the Drive service account \
+                     is unusable; running as a dry run (nothing is deleted)"
+                );
+                AttachmentReclaimer::dry_run(config.batch)
+            }
+        }
+    }
+
+    /// Whether this reclaimer will delete.
+    pub fn deletes(&self) -> bool {
+        self.drive.is_some()
+    }
+
+    /// One iteration. `read_pool` is the BYPASSRLS notifier pool (it answers workspace
+    /// ids and nothing else); `write_pool` must be RLS-bound or this refuses to run — it
+    /// carries every other statement, the dry-run count included.
     pub async fn sweep_once(
         &self,
         read_pool: &PgPool,
         write_pool: &PgPool,
     ) -> Result<AttachmentReclaimStats, DbError> {
         ensure_write_pool_rls_bound(write_pool).await?;
-        let candidates = attachment_reclaim_candidates(read_pool, self.batch, UNBOUND_TTL).await?;
-
-        let mut per_workspace: HashMap<Uuid, AttachmentReclaimCounts> = HashMap::new();
+        let workspaces =
+            workspaces_with_reclaim_candidates(read_pool, MAX_WORKSPACES_PER_TICK, UNBOUND_TTL)
+                .await?;
         let mut stats = AttachmentReclaimStats::default();
-        let drive_unavailable = Arc::new(AtomicBool::new(false));
+
+        let Some(drive) = &self.drive else {
+            // Switched off: the same predicate, no Drive.
+            let mut total = ReclaimTally::default();
+            for workspace_id in workspaces {
+                match tally_workspace(write_pool, workspace_id, UNBOUND_TTL).await {
+                    Ok(tally) => {
+                        if tally.candidates > 0 {
+                            stats.workspaces += 1;
+                        }
+                        total.add(&tally);
+                    }
+                    Err(_) => {
+                        stats.db_errors += 1;
+                        tracing::warn!(
+                            workspace_id = %workspace_id,
+                            "attachment reclaim dry-run could not count a workspace (database error)"
+                        );
+                    }
+                }
+            }
+            let line = dry_run_line(stats.workspaces, &total);
+            tracing::info!("{line}");
+            stats.dry_run = Some(total);
+            return Ok(stats);
+        };
+
+        let deleter: Arc<dyn AttachmentDeleter> = Arc::new(GoogleDeleter {
+            drive: Arc::clone(drive),
+            unavailable: AtomicBool::new(false),
+        });
+        let mut budget = self.batch;
         // A Drive that keeps failing (timeouts, 5xx) must not hold the tick for
         // batch x DELETE_TIMEOUT: stop after a few consecutive failures.
         let mut consecutive_drive_failures = 0u32;
-
-        for candidate in candidates {
-            if consecutive_drive_failures >= MAX_CONSECUTIVE_DRIVE_FAILURES {
+        for workspace_id in workspaces {
+            if budget <= 0 {
                 break;
             }
-            if drive_unavailable.load(Ordering::Relaxed) {
-                // No Drive configured at all: every further row would fail the
-                // same way. Stop; nothing was written.
-                break;
-            }
-            let drive = Arc::clone(&self.drive);
-            let flag = Arc::clone(&drive_unavailable);
-            let result = with_tenant_tx(write_pool, candidate.workspace_id, move |conn| {
-                Box::pin(async move {
-                    reclaim_unbound_attachment_in_tx(
-                        conn,
-                        candidate.workspace_id,
-                        candidate.attachment_id,
-                        UNBOUND_TTL,
-                        move |file_id| {
-                            Box::pin(async move { delete_outcome(&*drive, file_id, &flag).await })
-                        },
-                    )
-                    .await
-                })
-            })
-            .await;
-
-            let counts = per_workspace.entry(candidate.workspace_id).or_default();
-            match result {
-                Ok(outcome) => {
-                    counts.record(outcome);
-                    if outcome == AttachmentReclaimOutcome::DriveFailed {
-                        consecutive_drive_failures += 1;
-                    } else {
-                        consecutive_drive_failures = 0;
+            match sweep_workspace(
+                write_pool,
+                workspace_id,
+                UNBOUND_TTL,
+                budget,
+                &deleter,
+                &mut consecutive_drive_failures,
+            )
+            .await
+            {
+                Ok(sweep) => {
+                    if sweep.listed > 0 {
+                        stats.workspaces += 1;
+                    }
+                    stats.counts.add(&sweep.counts);
+                    stats.db_errors += sweep.db_errors;
+                    budget -= i64::from(sweep.listed);
+                    if sweep.db_errors > 0 {
+                        // Fixed text: a database error may echo relation/constraint
+                        // names, and nothing here needs them.
+                        tracing::warn!(
+                            workspace_id = %workspace_id,
+                            "attachment reclaim failed for an attachment (database error)"
+                        );
+                    }
+                    if sweep.stop {
+                        break;
                     }
                 }
-                Err(error) => {
+                Err(_) => {
                     stats.db_errors += 1;
-                    // Fixed text: a database error may echo relation/constraint
-                    // names, and nothing here needs them.
-                    let _ = &error;
                     tracing::warn!(
-                        workspace_id = %candidate.workspace_id,
-                        "attachment reclaim failed for an attachment (database error)"
+                        workspace_id = %workspace_id,
+                        "attachment reclaim could not list a workspace (database error)"
                     );
                 }
             }
-        }
-
-        stats.workspaces = per_workspace.len();
-        for counts in per_workspace.values() {
-            stats.counts.add(counts);
         }
 
         if stats.counts.reclaimed > 0 || stats.counts.refused > 0 || stats.counts.drive_failed > 0 {
@@ -232,7 +319,7 @@ mod tests {
     const TICK: Duration = Duration::from_secs(60);
 
     #[test]
-    fn only_a_complete_google_drive_configuration_enables_the_reclaim() {
+    fn only_a_complete_google_drive_configuration_configures_the_reclaim() {
         let parse = |backend, key, drive| {
             AttachmentReclaimConfig::parse(None, backend, key, drive, TICK, 50)
         };
@@ -243,25 +330,97 @@ mod tests {
         assert!(parse(None, Some("/k.json"), None).is_none());
         assert!(parse(None, Some(" "), Some("0ABC")).is_none());
         // The default self-host / Railway archive and the test archive are not reachable
-        // from this process: the sweep is off there, not half on.
+        // from this process: the sweep is not configured there at all.
         assert!(parse(Some("local"), Some("/k.json"), Some("0ABC")).is_none());
         assert!(parse(Some("stub"), Some("/k.json"), Some("0ABC")).is_none());
     }
 
-    /// The sweep deletes files, so it has its own off switch (`MOMO_ATTACHMENT_RECLAIM`),
-    /// separate from the Drive credentials the avatar reclaim needs. Unset or anything else
-    /// leaves it on.
+    /// The sweep deletes files, so it ships **off**: configured, it looks and logs; only
+    /// the exact text `1` lets it delete (`MOMO_ATTACHMENT_RECLAIM`, separate from the
+    /// Drive credentials the avatar reclaim needs).
     #[test]
-    fn an_operator_can_switch_the_sweep_off_without_touching_the_drive_credentials() {
+    fn the_sweep_deletes_only_when_the_switch_is_exactly_one() {
         let parse = |switch| {
             AttachmentReclaimConfig::parse(switch, None, Some("/k.json"), Some("0ABC"), TICK, 50)
+                .expect("a complete Google configuration")
         };
-        assert!(parse(None).is_some(), "unset is on");
-        assert!(parse(Some("1")).is_some());
-        assert!(parse(Some("yes")).is_some());
-        for off in ["0", "false", "FALSE", " off ", "No"] {
-            assert!(parse(Some(off)).is_none(), "{off:?} turns it off");
+        assert!(!parse(None).delete_enabled, "unset is off");
+        assert!(parse(Some("1")).delete_enabled);
+        for near_miss in ["0", "", "true", "TRUE", "yes", "on", " 1", "1 ", "01", "enable"] {
+            assert!(
+                !parse(Some(near_miss)).delete_enabled,
+                "{near_miss:?} must leave the delete off"
+            );
         }
+    }
+
+    /// A switched-off config never asks for a Drive archive (so it can neither build a
+    /// client nor call Drive); an enabled one asks once and deletes through it; an enabled
+    /// one whose archive cannot load falls back to looking only.
+    #[test]
+    fn a_switched_off_reclaimer_never_asks_for_a_drive() {
+        use std::sync::atomic::AtomicU32;
+        use std::sync::Arc;
+
+        #[derive(Debug)]
+        struct NoDrive;
+        #[async_trait::async_trait]
+        impl DriveArchive for NoDrive {
+            async fn create_resumable_upload(
+                &self,
+                _channel_id: uuid::Uuid,
+                _name: &str,
+                _mime: &str,
+                _size_bytes: i64,
+            ) -> Result<momo_drive::DriveUploadSession, momo_drive::DriveError> {
+                Err(momo_drive::DriveError::Unavailable)
+            }
+            async fn file_metadata(
+                &self,
+                _file_id: &str,
+            ) -> Result<momo_drive::DriveFile, momo_drive::DriveError> {
+                Err(momo_drive::DriveError::Unavailable)
+            }
+            async fn file_content(
+                &self,
+                _file_id: &str,
+                _max_bytes: i64,
+            ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+                Err(momo_drive::DriveError::Unavailable)
+            }
+            async fn delete_file(&self, _file_id: &str) -> Result<(), momo_drive::DriveError> {
+                Ok(())
+            }
+        }
+
+        let config = |switch| {
+            AttachmentReclaimConfig::parse(switch, None, Some("/k.json"), Some("0ABC"), TICK, 10)
+                .expect("a complete Google configuration")
+        };
+        let asked = AtomicU32::new(0);
+        let loader = |_: &AttachmentReclaimConfig| -> Option<Arc<dyn DriveArchive>> {
+            asked.fetch_add(1, Ordering::SeqCst);
+            Some(Arc::new(NoDrive))
+        };
+
+        let off = AttachmentReclaimer::from_config_with(&config(None), loader);
+        assert!(!off.deletes(), "switched off: looking only");
+        assert_eq!(asked.load(Ordering::SeqCst), 0, "switched off: no archive is asked for");
+
+        let near_miss = AttachmentReclaimer::from_config_with(&config(Some("true")), loader);
+        assert!(!near_miss.deletes(), "`true` is not `1`");
+        assert_eq!(asked.load(Ordering::SeqCst), 0);
+
+        let on = AttachmentReclaimer::from_config_with(&config(Some("1")), loader);
+        assert!(on.deletes(), "exactly 1 with a loadable archive: deleting");
+        assert_eq!(asked.load(Ordering::SeqCst), 1);
+
+        let unusable = AttachmentReclaimer::from_config_with(&config(Some("1")), |_| None);
+        assert!(
+            !unusable.deletes(),
+            "1 but the archive cannot load: a delete that cannot reach its Drive is not a delete"
+        );
+        assert!(!AttachmentReclaimer::dry_run(10).deletes());
     }
 
     #[test]

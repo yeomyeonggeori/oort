@@ -21,8 +21,10 @@
 --                             예약 생성·취소·발송·정리·CASCADE 가 어느 경로로 점유를 만들고 지우든 한 곳에서
 --                             맞춘다(호출 자리마다 고치면 하나를 빠뜨리는 순간 청소기가 점유된 파일을 지운다).
 --   partial index             청소기 후보 읽기용. 「묶이지 않은 완료 첨부」만 담는 작은 집합이다.
---   notifier 컬럼 GRANT       후보 읽기용 SELECT 컬럼 일곱 개(#3377 전례의 컬럼 단위). drive_file_id·name·
---                             mime·uploader 는 주지 않는다 — 지우는 쓰기 tx 가 momo_app 으로 다시 읽는다.
+--   notifier 컬럼 GRANT       교차 테넌트 읽기용 SELECT 컬럼 여섯 개(#3377 전례의 컬럼 단위). 그 읽기는
+--                             **워크스페이스 id만** 답한다. 첨부 id·drive_file_id·name·mime·size_bytes·
+--                             uploader 는 주지 않는다 — 후보 목록·참조 재판정·바이트 집계·삭제는 전부 워크스페이스별
+--                             momo_app(RLS-bound) tx 가 한다.
 --
 -- 순서가 중요한 이유 (146 과 같다)
 --   트리거를 먼저 만들고 백필한다. 백필을 먼저 하면 그 사이에 만들어진 점유를 아무도 세지 않는다.
@@ -115,20 +117,21 @@ BEGIN
 END $$;
 
 -- ---- 4) 청소기 후보 인덱스 -----------------------------------------------------
--- 「묶이지 않은 완료 첨부」만 담는다. 후보 읽기는 created_at 순으로 앞에서부터 읽고, 시계의 나머지 항
--- (unreserved_at)은 행 필터로 건다. 이 집합은 초안과 쓰레기뿐이라 작다.
+-- 「묶이지 않은 완료 첨부」만 담는다. 교차 테넌트 읽기(워크스페이스 id)도, 워크스페이스별 목록도 이 집합을
+-- created_at 순으로 읽고, 시계의 나머지 항(unreserved_at)은 행 필터로 건다. 이 집합은 초안과 쓰레기뿐이라 작다.
 CREATE INDEX attachment_unbound_reclaim_idx
   ON attachment (created_at, id)
   WHERE status = 'complete' AND message_id IS NULL AND NOT reserved;
 
--- ---- 5) notifier 후보 읽기 GRANT ----------------------------------------------
--- 컬럼 단위: id, workspace_id (어느 테넌트의 어느 행인지), status·message_id·reserved·unreserved_at·
--- created_at (후보 술어). 같은 줄이 infra/rust/sql/bootstrap_runtime_roles.sql 에도 있다(운영 부트스트랩은
--- 마이그레이션 뒤에 한 번 더 돈다). 개발 부트스트랩은 기본 권한으로 이미 읽는다.
+-- ---- 5) notifier 교차 테넌트 읽기 GRANT ---------------------------------------
+-- 컬럼 단위: workspace_id (어느 테넌트인지), status·message_id·reserved·unreserved_at·created_at (후보 술어의
+-- 핵심 항). 청소기의 교차 테넌트 읽기는 `SELECT workspace_id … GROUP BY workspace_id` 하나이고 첨부 id조차
+-- 읽지 않는다. 같은 줄이 infra/rust/sql/bootstrap_runtime_roles.sql 에도 있다(운영 부트스트랩은 마이그레이션 뒤에
+-- 한 번 더 돈다). 개발 부트스트랩은 기본 권한으로 이미 읽는다.
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier') THEN
-    GRANT SELECT (id, workspace_id, status, message_id, reserved, unreserved_at, created_at)
+    GRANT SELECT (workspace_id, status, message_id, reserved, unreserved_at, created_at)
       ON attachment TO momo_notifier;
   END IF;
 END $$;

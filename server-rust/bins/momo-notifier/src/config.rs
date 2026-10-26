@@ -38,16 +38,19 @@
 //!   through `MOMO_AVATAR_RECLAIM_DATABASE_URL` (default
 //!   `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the RLS-bound `momo_app` connection).
 //!
-//! * The same Drive variables also enable the attachment Drive reclaim (#4443,
+//! * The same Drive variables also configure the attachment Drive reclaim (#4443,
 //!   ADR-0151 증보 2), every `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS` (600000, floored at
 //!   10000), at most `MOMO_ATTACHMENT_RECLAIM_BATCH` (50, 1..=500) attachments per tick,
-//!   writing through `MOMO_ATTACHMENT_RECLAIM_DATABASE_URL` (default
+//!   through `MOMO_ATTACHMENT_RECLAIM_DATABASE_URL` (default
 //!   `MOMO_AVATAR_RECLAIM_DATABASE_URL`, then `MOMO_HUDDLE_SWEEP_DATABASE_URL`: the
-//!   RLS-bound `momo_app` connection). The idle time before a file is reclaimed is a
-//!   constant (30 days), not an environment variable. On the default `local` backend
-//!   (self-host, Railway) this sweep does not run. `MOMO_ATTACHMENT_RECLAIM=0` turns it
-//!   off (it deletes files; the first ticks after an upgrade collect everything that has
-//!   piled up) without touching the Drive credentials the avatar reclaim shares.
+//!   RLS-bound `momo_app` connection, which carries every statement but the one
+//!   cross-tenant read of workspace ids). The idle time before a file is reclaimed is a
+//!   constant (30 days), not an environment variable. **It ships off: it deletes nothing
+//!   unless `MOMO_ATTACHMENT_RECLAIM` is exactly `1`** (it deletes files nobody can get
+//!   back); switched off, each tick writes one `attachment reclaim dry-run: …` line with
+//!   the files and bytes it would delete, counted with the delete's own predicate. On the
+//!   default `local` backend (self-host, Railway) this sweep is not configured in this
+//!   process; the api process runs the same sweep with the same variables.
 //!
 //! * `MOMO_SHARE_RETENTION_DATABASE_URL` (default `MOMO_HUDDLE_SWEEP_DATABASE_URL`)
 //!   — the RLS-bound `momo_app` connection the shared-session retention sweep
@@ -169,11 +172,13 @@ pub struct NotifierConfig {
     pub avatar_reclaim_database_url: Option<String>,
     /// #4443 attachment Drive reclaim (ADR-0151 증보 2). `None` unless a **Google** Drive
     /// is configured — the same condition, and the same credentials, as
-    /// [`NotifierConfig::avatar_reclaim`].
+    /// [`NotifierConfig::avatar_reclaim`]. `Some` does not mean it deletes: it ships off
+    /// ([`AttachmentReclaimConfig::delete_enabled`], `MOMO_ATTACHMENT_RECLAIM=1`).
     pub attachment_reclaim: Option<AttachmentReclaimConfig>,
     /// `MOMO_ATTACHMENT_RECLAIM_DATABASE_URL`, falling back to
     /// `MOMO_AVATAR_RECLAIM_DATABASE_URL` and then `MOMO_HUDDLE_SWEEP_DATABASE_URL` (the
-    /// same RLS-bound `momo_app` connection). Every reclaim write goes through it;
+    /// same RLS-bound `momo_app` connection). Every statement but the one cross-tenant
+    /// read of workspace ids — the dry-run count and every delete — goes through it;
     /// never logged.
     pub attachment_reclaim_database_url: Option<String>,
     /// #3377: `MOMO_SHARE_RETENTION_DATABASE_URL`, falling back to
