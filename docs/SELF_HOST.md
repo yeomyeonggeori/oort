@@ -694,6 +694,35 @@ attachment files, copy the archive volume at the same moment. One-line
 procedure:
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md).
 
+**Cleaning up unattached uploads (off by default).** A file is uploaded before
+the message that carries it, so some uploads are never sent: a draft nobody
+sent, a cancelled schedule's files. The api can delete such a file 30 days
+after it was uploaded (or last released from a schedule), together with its
+row. It deletes **only** a file that no message, scheduled message, huddle
+transcription or avatar holds, and it ships **off**: set
+`MOMO_ATTACHMENT_RECLAIM=1` (exactly `1`; `true`, `yes` and blank stay off) in
+`infra/rust/local.secrets.env` and restart the api. Switched off it still
+writes one line per tick (every `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS`, default
+600000) to `logs api`:
+`attachment reclaim dry-run: delete_enabled=false scope=touched looked_at=N workspaces=W candidates=C bytes=B …`.
+That is how many files and bytes it *would* delete. Before turning it on,
+run `infra/rust/sql/attachment_reclaim_check.sql` against the database as a
+superuser (it only reads; its header says how to compare). The log line may be
+smaller than the SQL's number but never larger (compared at the same moment: a
+file bound in between can make a later run of the SQL smaller). A deleted file
+cannot be brought back, so take a `pg_dump` and copy the archive volume (see
+**Backup target** above) before you turn it on, and check that the volume really
+holds your files (`oort exec api sh -c 'ls "$MOMO_DRIVE_LOCAL_DIR/objects" | head'`):
+on an empty, unmounted volume a missing file counts as already
+deleted and only the rows would go. Two limits are worth knowing:
+the api looks only at workspaces whose uploads it has served **since it last
+started** (it has no way to list every workspace), so an old draft in a
+workspace nobody has uploaded to since the restart stays until somebody does;
+and a file a deleted message carried is unreadable but is not cleaned up (its
+row and bytes stay). On the Google Drive backend the notifier does the cleanup
+instead of the api; the compose notifier services do not receive these keys, so
+on a compose stack it runs only on the local volume.
+
 ## Link previews (unfurl)
 
 The server fetches title · description · image of http(s) links on a

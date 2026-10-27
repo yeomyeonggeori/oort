@@ -17,8 +17,9 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::{
     active_workspace_role, change_own_password_in_tx, issue_password_reset_in_tx,
-    mint_owner_claim_token, normalized_claim_password, IssuedPasswordReset, PasswordChangeMutation,
-    PasswordResetIssueError, Principal, CLAIM_KIND_PASSWORD_RESET,
+    mint_owner_claim_token, normalized_current_password, normalized_new_password,
+    IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError, Principal,
+    CLAIM_KIND_PASSWORD_RESET,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{get_member, RevocationCause};
@@ -34,8 +35,13 @@ use crate::routes::shared::{
 };
 use crate::AppState;
 
-fn spec_password(raw: &str) -> Result<String, ApiError> {
-    normalized_claim_password(raw).map_err(|error| ApiError::bad_request(error.to_string()))
+/// The password the caller *proves* (ADR-0215 D2): present and bounded, and
+/// nothing more — an account whose password predates the new length rule must
+/// still be able to change it. The password the caller *chooses* goes through
+/// [`normalized_new_password`] and answers `password_too_short` /
+/// `password_too_long`.
+fn spec_current_password(raw: &str) -> Result<String, ApiError> {
+    normalized_current_password(raw).map_err(|error| ApiError::bad_request(error.to_string()))
 }
 
 pub(crate) fn admit_password_change(
@@ -171,8 +177,8 @@ pub async fn change_own_password(
     let member_id = principal.member_id;
     admit_password_change(&state, &headers, member_id)?;
 
-    let current = spec_password(&request.current_password)?;
-    let new_password = spec_password(&request.new_password)?;
+    let current = spec_current_password(&request.current_password)?;
+    let new_password = normalized_new_password(&request.new_password)?;
     if current == new_password {
         return Err(ApiError::bad_request("new password must be different"));
     }

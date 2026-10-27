@@ -11,6 +11,7 @@
 - 증보: **2026-09-29 (#3119)** — 폰(`ios`) 키는 QR 연결 계보에서만 등록·승인·재결속한다(E10 검수 H2). D-6 ②를 서버에서 강제하는 결정 변경이다. 결재 인용: 성재 2026-09-29 「QR 연결로만 등록」(이슈 #3119 코멘트). 아래 「증보 2026-09-29 — 폰 키는 QR 연결로만」 절.
 - 증보: **2026-09-29 (#3095, R2-E8 후속)** — 「이 세션 동안」 허락의 범위 규칙과 host의 기억. 서버는 서명된 `scope=session` allow를 받고(400 `permission_scope_unsupported` 해제), host는 같은 세션에서 범위 규칙이 덮는 요청만 묻지 않고 허락한다. 결재 인용: R2 결재 성재 2026-09-28 「전부 권장대로」의 D-8 「이 세션 동안 허용은 R2에서 서명과 함께 폰에도 연다」. 범위 규칙 자체는 D-8이 정하지 않아 이 증보가 보수적으로 정한다(결정 변경이 아니라 D-8의 이행). 아래 「증보 2026-09-29 — 이 세션 동안 허락」 절.
 - 역방향: 2026-10-25 새 서명 kind `ops_session`(세션 열기)·`ops_box`(박스 확인·소유자 승계)와 새 스키마 문자열은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347) D5가 정한다. 바이트 직렬화는 구현 슬라이스가 공유 테스트 벡터로 고정하고, D-8의 「끄는 쪽은 서명 불필요」는 Ops에도 그대로다. Ops를 켜는 것은 서명 요구 플래그(D-11: R1 재검수·E10 PASS 뒤 owner 승인)에 걸려 있다(ADR-0210 D2·HO-28). D-10(보안 경계는 host)과 달리 Ops 박스는 Phase 1에서 서버만 검증한다(ADR-0210 D5-10, RISK-1, 닫는 슬라이스 HO-27). 본문 결정은 바꾸지 않았다.
+- 역방향: 2026-10-26 새 서명 스키마 `momo.human.password_reset.v1`(로그인된 기기의 비밀번호 재설정)은 [ADR-0215](0215-login-recovery-v2-password-change-and-reset.md)(#4574) D7이 정한다. 키 적재·nonce 표(095)·시간창은 재사용하되 수명은 5분이고 새 함수가 검증한다. D-10(보안 경계는 workd)과 달리 workd가 없어 **보안 경계는 서버**다. 켜기는 별도 스위치 `MOMO_PASSWORD_RESET_SIGNED`(기본 꺼짐)로 D-11의 열쇠(보안 검수 PASS 뒤 owner 판단)에 건다. 결재 인용: owner 2026-10-26 「관리자 재발급 + 로그인된 기기에서 재설정」 + 위임 2026-10-22 「결정 부탁드릴 것은 너가 권장으로 진행해봐」. 비밀번호 변경·재설정이 그 멤버의 모든 기기 키를 `member_sessions_ended`로 폐기하는 사실(D-7)은 ADR-0215 D4가 「유지」 결정으로 기록한다. 본문 결정은 바꾸지 않았다.
 - 관련: **ADR-0145**(Rust/Axum 재작성 — 이 서명은 그 위에 얹힌다), ADR-0004(자격증명 비유입), ADR-0101(에이전트 신원), ADR-0139/0140(workd — 이미 Ed25519 서명 보유), `docs/architecture/invariants-in-rust.md`(D2 — 이 서명이 불변식을 안 건드림을 교차검증)
 - 발단: 서버 스택 재검토에서 "oort가 buzz에서 취할 만한 한 가지 = 에이전트 행동의 암호학적 provenance"로 식별 → 성재가 B안에 포함 지시 + **범위를 "상태 전이까지 넓게"로 결정**.
 
@@ -319,6 +320,7 @@ momo.human.control.v1
 | 「이 세션 동안」 허용 | **필요**, R2에서 폰에도 연다 | R1 동안 폰은 「이번 한 번」만(`0188:117`). 범위 값을 `permission` 본문에 넣는다 |
 | 설정 묶음 목록(ADR-0192 D3) | **필요**, `kind=bundle_manifest` | 0192 D3가 같은 키를 요구한다 |
 | host 등록(0188 §4 R2 항목) | **필요**, `kind=host_register` | D-6 ①의 로컬 고정은 「이 맥의 host 키 ↔ 뿌리 키」만 묶는다. 훔친 refresh 토큰으로 서버에 가짜 host를 등록하는 위협은 막지 못한다. 서버는 뿌리 키 서명 없는 member-scope host 등록을 거부한다. 폰의 새 작업은 페이로드 `host_id`가 사람이 고른 host를 고정한다 |
+| 비밀번호 재설정(로그인된 기기, ADR-0215 D7) | **필요**, 서버 검증(`momo.human.password_reset.v1`) | workd가 없어 서버가 유일한 검증자다(D-10과 다르다). 스위치 `MOMO_PASSWORD_RESET_SIGNED`(기본 꺼짐)로 닫혀 있고 켜기는 D-11의 열쇠다 |
 | 사람의 일반 메시지(설계 1 표면 1) | **다음 단계** | 이번에는 인가 조건만 다룬다. 메시지 provenance와 「서명됨」 뱃지(세부 결정 ③)는 사람 서명이 모든 표면에 퍼진 뒤다 |
 
 ### D-9. 재생 방지 — 서버 1회 소비 + workd 영속
@@ -689,3 +691,8 @@ E10 검수(H2)는 D-6 ②의 전제가 서버에서 강제되지 않는다고 �
 ### 시험
 
 - `work_instruction_conformance_pg`: `a_signed_resume_must_name_the_agent_the_session_ran`, `a_retried_signed_resume_answers_with_the_successor_it_made`, v1 input 거절. `human_control_vectors`: `verify_any_refuses_every_v1_statement`. `momo-workd` `register_cleanup`(모의 서버, 실제 바이너리). 데스크탑 `a_register_that_times_out_takes_its_key_and_config_with_it`, `a_mac_more_than_five_minutes_off_the_server_is_told_before_the_dialog`.
+
+## 증보 2026-10-26 — 비밀번호 변경·재설정과 서명 재설정 (ADR-0215 D4·D7, #4574)
+
+- **D-7 역방향 줄.** 비밀번호 변경·재설정(관리자 링크·기기 서명 모두)은 `end_member_sessions_in_tx`를 불러 그 멤버의 모든 기기 키를 `member_sessions_ended`로 폐기한다(`bins/momo-server/src/session_end.rs`). 그 뒤에는 맥 뿌리 키(재등록은 비밀번호)와 승인된 폰 키(폰 QR 재연결과 맥의 재승인)를 다시 만들어야 한다. ADR-0215 D4가 이 사실을 「유지」 결정으로 기록하고, 대기 중인 재설정 링크도 본인 변경을 뺀 경로에서는 같은 트랜잭션에서 끝낸다는 규칙을 더한다.
+- **형제 스키마.** `momo.human.password_reset.v1`을 `device_endorse.v1`·`device_rebind.v1`·`refresh_proof.v1`의 형제로 더한다(ADR-0215 D7). 키 적재·nonce 테이블(095)·시간창은 재사용한다. D-10과 다른 점은 **보안 경계가 서버**라는 것이다(재설정에는 workd가 없다). 그래서 `MOMO_HUMAN_CONTROL_SIGNATURE_REQUIRED`의 값과 무관하게(켜진 동안은 항상) 검증하고, 켜기는 `MOMO_PASSWORD_RESET_SIGNED`(기본 꺼짐)로 D-11의 열쇠에 건다.

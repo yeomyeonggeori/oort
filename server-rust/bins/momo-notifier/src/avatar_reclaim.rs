@@ -75,6 +75,20 @@ impl std::fmt::Debug for AvatarReclaimConfig {
 }
 
 impl AvatarReclaimConfig {
+    /// The Google archive these credentials name, or `None` when the service account
+    /// cannot be loaded (the error carries no credential material). Shared with the
+    /// attachment reclaim (#4443), which holds the same Drive credentials: one loader,
+    /// so the two sweeps cannot disagree about which Drive they may delete from.
+    pub(crate) fn google_archive(&self) -> Option<Arc<dyn DriveArchive>> {
+        match GoogleDriveArchive::new(Some(&self.sa_key_path), Some(&self.shared_drive_id)) {
+            Ok(archive) => Some(Arc::new(archive)),
+            Err(error) => {
+                tracing::error!(%error, "Drive reclaim: Drive archive unavailable");
+                None
+            }
+        }
+    }
+
     /// Both Drive values present and the backend unset / `google` / `sa`, or
     /// `None`. A `stub` or `local` backend is deliberately `None`.
     pub fn parse(
@@ -124,13 +138,9 @@ impl AvatarReclaimer {
     /// Build the Google archive named by `config`. `None` when the service
     /// account cannot be loaded (the error carries no credential material).
     pub fn from_config(config: &AvatarReclaimConfig) -> Option<AvatarReclaimer> {
-        match GoogleDriveArchive::new(Some(&config.sa_key_path), Some(&config.shared_drive_id)) {
-            Ok(archive) => Some(AvatarReclaimer::new(Arc::new(archive), config.batch)),
-            Err(error) => {
-                tracing::error!(%error, "avatar reclaim: Drive archive unavailable");
-                None
-            }
-        }
+        config
+            .google_archive()
+            .map(|archive| AvatarReclaimer::new(archive, config.batch))
     }
 
     /// One iteration. `read_pool` is the BYPASSRLS notifier pool (read only);
@@ -232,7 +242,7 @@ impl AvatarReclaimer {
 
 /// Run one Drive delete under [`DELETE_TIMEOUT`] and classify it. A 404 is the
 /// archive's `Ok`; `FileNotFound` is accepted too, for an archive that reports it.
-async fn delete_outcome(
+pub(crate) async fn delete_outcome(
     drive: &dyn DriveArchive,
     file_id: &str,
     unavailable: &AtomicBool,
