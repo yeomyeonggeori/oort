@@ -110,4 +110,3 @@ schema_v0.sql:176   reply_to_id uuid REFERENCES message(id)   -- direct reply ta
 
 - 행동 시험 네 곳이 같은 자리를 잠가요: 외부 Agent Port(`agent_answer_place_pg.rs`), REST 콜백(`gateway_mode_conformance_pg.rs`), 관리형 워커의 비스트리밍·스트리밍(`agent_worker_conformance_pg.rs`), 팀 AI(`team_ai_conformance_pg.rs`). 각 시험은 `root_id`·`reply_to_id`와 함께 root의 롤업과 `thread.updated`를 단정하고, 최상위 요청은 본류에 남는다는 대조를 같이 봐요. 사보타주 결과는 PR 본문에 있어요.
 - `runtime-unverified`: 클라이언트가 스레드 안 **스트리밍** 답을 어떻게 그리는지, 실기기 푸시 묶음, 스레드 안 답의 안 읽음 표시는 실행해 보지 않았어요.
-
