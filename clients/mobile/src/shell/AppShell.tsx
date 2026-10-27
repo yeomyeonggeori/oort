@@ -216,6 +216,11 @@ export function Shell({
     () => dispatch({type: 'openSettings'}),
     [],
   );
+  // 대화 안의 내 프로필 시트의 「설정 열기」(#4319). 설정 층은 대화 층 **밑**에 그려지므로 대화와 그 밑의 층을 걷고 연다(`navReducer`).
+  const onOpenSettingsFromConversation = useCallback(
+    () => dispatch({type: 'openSettingsFromConversation'}),
+    [],
+  );
   const onOpenAgent = useCallback(
     (agent: OpenAgent) => dispatch({type: 'openAgent', agent}),
     [],
@@ -573,6 +578,7 @@ export function Shell({
             onDelegateWork={onDelegateWork}
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
             onOpenWorkList={onOpenWorkList}
+            onOpenSettings={onOpenSettingsFromConversation}
           />
         </EdgeSwipeBack>
       ) : null}

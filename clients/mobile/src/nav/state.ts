@@ -272,6 +272,7 @@ export type NavAction =
   | {type: 'openAppsList'}
   | {type: 'openApp'; pluginId: string; name: string}
   | {type: 'openSettings'}
+  | {type: 'openSettingsFromConversation'}
   | {type: 'channelLeft'; channelId: string}
   | {type: 'back'}
   | {type: 'reset'};
@@ -414,6 +415,12 @@ export function navReducer(state: NavState, action: NavAction): NavState {
       // 층이 이미 있으면 그 층이 문을 가린다. 같은 값이면 상태를 그대로 돌려 불필요한 렌더를 막는다.
       if (state.settings) return state;
       return {...state, settings: true};
+    case 'openSettingsFromConversation':
+      // 대화 안(다른 사람이 아니라 **내** 프로필 시트의 「설정 열기」, #4319)에서 연다. 설정은 층 중 가장 아래라서(`settings` 의 주석) 그 위에
+      // 층이 하나라도 남아 있으면 가려진다 — 대화만 걷고 `openSettings` 하면, 이 대화가 에이전트 상세·작업 목록 위에서 열렸을 때 설정이
+      // 그 밑에 서서 사람에게 아무 일도 안 일어난 것으로 보이고 나중에 뒤로 가기에서 불쑥 나타난다. 그래서 대화와 그 밑의 층을 모두
+      // 걷고 설정만 세운다. 탭은 그대로라 설정을 닫으면 대화를 열던 탭으로 돌아온다(`back` 이 탭을 바꾸지 않는 것과 같은 성질).
+      return {...state, ...NO_LAYERS, settings: true};
     case 'channelLeft':
       // 열려 있는 채널을 **내가 나갔다** (#4229). 웹은 `/` 로 착지한다. 폰의 같은 자리는 그 대화 층을 걷어
       // 아래 화면(사이드바)으로 돌아가는 것이다. 다른 채널이 열려 있으면 건드리지 않는다.

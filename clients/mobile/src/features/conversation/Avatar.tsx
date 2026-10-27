@@ -76,6 +76,29 @@ export function avatarImageSource(
 }
 
 /**
+ * 한 멤버의 얼굴이 **실제로 싣는 사진 주소** — 없으면 `null`(이니셜·「모른다」 표지가 선다)이고, 판정(`identity`)을 함께 준다.
+ *
+ * `Avatar` 가 이것으로 그리고, 사진이 있을 때만 눌리는 큰 얼굴(프로필 시트의 「크게 보기」)이 같은 답을 읽는다 — 「누르면 열린다」와
+ * 「그려져 있다」가 서로 다른 판정에서 나오면 사진 없는 얼굴이 눌리거나 사진 있는 얼굴이 안 눌린다.
+ *
+ * 서버 주소를 **의존성으로 든다.** `apiBase()` 를 메모 안에서만 부르면 기기가 서버를 고른 순간 이미 그려져 있던 아바타들이 옛 답
+ * (주소 없음 → 이니셜)에 붙잡힌다. 값을 밖에서 한 번 읽고 그것으로 키를 잡으면 그 경로가 없다. 업로드된 사진(인가 content 경로)은
+ * 베어러로 받아 오고, 받는 중·실패에는 `null` 이라 이니셜이 같은 크기로 서 있다. 옛 `avatarUrl` 은 기존 길 그대로.
+ */
+export function useAvatarSource(
+  directory: Directory,
+  memberId: string,
+): {identity: AvatarIdentity; source: string | null} {
+  const base = apiBase();
+  const identity = useMemo(
+    () => avatarIdentity(memberFor(directory, memberId), base),
+    [directory, memberId, base],
+  );
+  const uploaded = useMemberAvatarUri(identity.contentPath);
+  return {identity, source: uploaded ?? avatarImageSource(identity, base)};
+}
+
+/**
  * 한 사람(또는 에이전트)의 아바타.
  *
  * **보조기술에는 나가지 않는다.** 행은 접근성 원소 하나이고 그 라벨은 이미
@@ -87,6 +110,7 @@ export function Avatar({
   memberId,
   size = AVATAR_SIZE,
   ground = 'surface',
+  squareRadius,
 }: {
   /**
    * 사람 얼굴 원이 앉는 바닥. 대화 화면(DS2-4)의 바닥은 시안 `.a-conv` 대로 거의
@@ -102,20 +126,14 @@ export function Avatar({
    * 코어가 답한 그대로다.
    */
   size?: number;
+  /**
+   * 에이전트 **둥근 사각**의 모서리 반경. 기본은 작은 얼굴(32)이 쓰는 `radius.md` 이고, 큰 얼굴(프로필 시트 112)은 같은
+   * 비율(1/4)로 키워 준다 — 8 을 그대로 두면 큰 사각이 모서리만 살짝 깎인 정사각으로 읽힌다. 사람의 원에는 듣지 않는다.
+   */
+  squareRadius?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  // 서버 주소를 **의존성으로 든다.** `apiBase()` 를 메모 안에서만 부르면 기기가
-  // 서버를 고른 순간 이미 그려져 있던 아바타들이 옛 답(주소 없음 → 이니셜)에
-  // 붙잡힌다. 값을 밖에서 한 번 읽고 그것으로 키를 잡으면 그 경로가 없다.
-  const base = apiBase();
-  const identity = useMemo(
-    () => avatarIdentity(memberFor(directory, memberId), base),
-    [directory, memberId, base],
-  );
-  // 업로드된 사진(인가 content 경로)은 베어러로 받아 온다. 받는 중·실패에는
-  // `null` 이라 이니셜이 같은 크기로 서 있다. 옛 `avatarUrl` 은 기존 길 그대로.
-  const uploaded = useMemberAvatarUri(identity.contentPath);
-  const source = uploaded ?? avatarImageSource(identity, base);
+  const {identity, source} = useAvatarSource(directory, memberId);
   const carriesColor = avatarCarriesIdentityColor(identity.kind);
   const round = AVATAR_SHAPE[identity.kind] === 'round';
   const sized =
@@ -126,6 +144,8 @@ export function Avatar({
           height: size,
           ...(round ? {borderRadius: size / 2} : null),
         };
+  // 사각의 반경을 키운 얼굴은 상자와 이미지가 같은 값을 든다(상자가 이미지를 자르지만, 이미지도 같은 모서리여야 투명 PNG 의 바닥이 비치지 않는다).
+  const corner = !round && squareRadius !== undefined ? {borderRadius: squareRadius} : null;
   // 이니셜은 상자의 절반 남짓 — 기본 크기에서 `font.label`(13) 이 32 에 앉는
   // 비율을 그대로 키운다.
   const initialSized =
@@ -148,6 +168,7 @@ export function Avatar({
         carriesColor && identity.kind === 'human' && styles.human,
         carriesColor && identity.kind === 'human' && ground === 'muted' && styles.humanMuted,
         sized,
+        corner,
       ]}
       testID={`avatar-${identity.kind}`}>
       {source !== null ? (
@@ -158,6 +179,7 @@ export function Avatar({
             identity.kind === 'human' && styles.imageHuman,
             round ? styles.round : styles.roundedSquare,
             sized,
+            corner,
           ]}
           testID="avatar-image"
         />

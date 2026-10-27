@@ -58,7 +58,12 @@ import {useStyles} from '../design/theme';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
-import {MemberProfileSheet} from '../features/directory/MemberProfileSheet';
+import {AvatarViewer} from '../features/directory/AvatarViewer';
+import {
+  MemberProfileSheet,
+  type ProfilePhoto,
+} from '../features/directory/MemberProfileSheet';
+import {useMemberStatusDot} from '../features/presence/useMemberStatusDot';
 import {AgentActivityBar} from '../features/agents/turnSurfaces';
 import {
   agentTurnsInChannel,
@@ -295,6 +300,7 @@ export default function ConversationScreen({
   onDelegateWork,
   onOpenWorkSession,
   onOpenWorkList,
+  onOpenSettings,
 }: {
   channelId: string;
   title: string;
@@ -342,6 +348,11 @@ export default function ConversationScreen({
     displayName: string;
     handle: string;
   }) => void;
+  /**
+   * 자기 자신의 프로필 시트가 「설정 열기」로 부른다(#4319). 설정은 셸의 층이고 이 화면 **밑**에 그려지므로 셸이 이 대화를 걷으며 연다 —
+   * 없으면 자기 프로필에 그 타일이 서지 않는다(측정 하네스처럼 셸이 아닌 곳에서 쓰는 호출자).
+   */
+  onOpenSettings?: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
@@ -374,6 +385,15 @@ export default function ConversationScreen({
     () => memberFor(directory, profileMemberId ?? undefined),
     [directory, profileMemberId],
   );
+  // 프로필 시트의 상태 칩(#4319). DM 머리의 상대 점(아래 `peerStatus`)과 같은 core 판정·같은 생존 쿼리다. 시트가 닫혀 있으면 `null`.
+  const profileStatus = useMemberStatusDot(
+    profileMember,
+    memberFor(directory, member.id)?.role,
+    nowMs,
+  );
+  // 프로필 사진 크게 보기(#4319). 시트가 먼저 내려간 뒤 이 화면이 연다 — Modal 위에 Modal 을 쌓지 않는다(`phone-sheets.md` §1 규칙 2).
+  const [avatarViewer, setAvatarViewer] = useState<ProfilePhoto | null>(null);
+  const closeAvatarViewer = useCallback(() => setAvatarViewer(null), []);
 
   const rememberOpenedDm = useRememberOpenedDm(workspaceId);
   const {
@@ -1648,6 +1668,7 @@ export default function ConversationScreen({
     setPinsOpen(false);
     setAdeOpen(false);
     closeMemberProfile();
+    closeAvatarViewer();
     setThread(plan.thread);
     setThreadLanding(
       plan.thread
@@ -1673,6 +1694,7 @@ export default function ConversationScreen({
     timelineMessages,
     requestJump,
     closeMemberProfile,
+    closeAvatarViewer,
   ]);
   const dismissNotificationNotice = useCallback(
     () => setNotificationNotice(null),
@@ -2035,21 +2057,33 @@ export default function ConversationScreen({
           online={networkOnline}
           dmPending={profileDmPending}
           dmError={profileDmError}
+          status={profileStatus}
+          nowMs={nowMs}
           onClose={closeMemberProfile}
           onOpenDm={() => openProfileDm(profileMember.id)}
+          // 「에이전트 정보」·「설정 열기」 타일은 `closesSheet` 라 시트가 내려가며 `onClose`(= `closeMemberProfile`)를 먼저 부른다 — 여기서
+          // 다시 닫지 않는다.
           onOpenAgent={
             profileMember.kind === 'agent' && onOpenAgent
-              ? () => {
-                  closeMemberProfile();
+              ? () =>
                   onOpenAgent({
                     memberId: profileMember.id,
                     displayName: profileMember.displayName,
                     handle: profileMember.handle,
-                  });
-                }
+                  })
               : undefined
           }
+          onOpenSettings={onOpenSettings}
+          onEnlargeAvatar={setAvatarViewer}
           roleLabels={roleLabels}
+        />
+      ) : null}
+
+      {avatarViewer !== null ? (
+        <AvatarViewer
+          uri={avatarViewer.uri}
+          label={avatarViewer.label}
+          onClose={closeAvatarViewer}
         />
       ) : null}
     </Screen>
