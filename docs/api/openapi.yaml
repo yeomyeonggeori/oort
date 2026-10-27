@@ -4071,7 +4071,7 @@ paths:
       summary: Is this hosted agent alive right now? (label only)
       description: >
         ADR-0200 D4. Any active human workspace member who shares a channel with the agent receives
-        its derived liveness label and when it last spoke, in place of "connected". Amendment 5
+        its derived liveness label and when it last spoke, in place of "connected". Amendment 6
         (#4621) adds `cadence`: how often the agent comes to the Agent Port (the usual gap and when a
         waiting request stops being explained by it). An agent without a hosted connection and an agent
         the caller shares no channel with are the same 404, so the route is no probe for whether an
@@ -15731,7 +15731,8 @@ components:
         a routine agent is waiting for its next beat, not switched off, so a screen says "다음 확인 때
         가져가요" instead of "연결이 꺼져 있을 수 있어요". `routine` carries all of `typicalMinutes`,
         `expectedCheckAtMs` and `late`; `realtime` and `unknown` carry none of them. A connection that is
-        not `active` reads `unknown`. Always present on a server that has amendment 6.
+        not `active` reads `unknown`. A server that has amendment 6 always sends it; it is not `required`
+        so that a client still reads the answer of an older server (read that as `unknown`).
       properties:
         kind:
           type: string

@@ -141,6 +141,33 @@ fn requested_owner_only(
     }
 }
 
+/// The calls the beat is estimated from. A beat is something to SHOW, so a read that failed or
+/// timed out (the loader runs it in a savepoint, see `load_agent_call_times_in_tx`) reads
+/// `unknown` instead of failing the route: the admin reaches "disconnect" through these GETs.
+async fn cadence_calls(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    agent_ids: &[Uuid],
+    now: chrono::DateTime<chrono::Utc>,
+    params: &momo_agent::CadenceParams,
+) -> Result<std::collections::HashMap<Uuid, Vec<chrono::DateTime<chrono::Utc>>>, momo_db::DbError> {
+    match momo_agent::load_agent_call_times_in_tx(
+        conn,
+        workspace_id,
+        agent_ids,
+        now - params.window,
+        params.max_calls,
+    )
+    .await?
+    {
+        Ok(calls) => Ok(calls),
+        Err(error) => {
+            tracing::warn!(?error, "agent cadence read failed; the beat reads unknown");
+            Ok(std::collections::HashMap::new())
+        }
+    }
+}
+
 /// The beat of one agent: derived from its admitted Agent Port calls, and only for an active
 /// connection (anything else is `unknown`, never a promise). The ONE place that rule lives: the
 /// routes read for every agent they were asked about, so deleting this check is visible.
@@ -178,16 +205,10 @@ pub(crate) async fn attach_liveness(
     let cadence_params = momo_agent::CadenceParams::default();
     let agent_ids: Vec<Uuid> = dtos
         .iter()
+        .filter(|dto| dto.status == "active")
         .filter_map(|dto| Uuid::parse_str(&dto.agent_member_id).ok())
         .collect();
-    let calls = momo_agent::load_agent_call_times_in_tx(
-        conn,
-        workspace_id,
-        &agent_ids,
-        now - cadence_params.window,
-        cadence_params.max_calls,
-    )
-    .await?;
+    let calls = cadence_calls(conn, workspace_id, &agent_ids, now, &cadence_params).await?;
     for dto in dtos.iter_mut() {
         let (Ok(id), Ok(agent)) = (
             Uuid::parse_str(&dto.id),
@@ -616,11 +637,12 @@ pub async fn agent_liveness(
     let doorbell_enabled = state.webhook.doorbell_enabled;
     let thresholds = crate::config::liveness_thresholds();
     let cadence_params = momo_agent::CadenceParams::default();
-    let now = chrono::Utc::now();
     let dto = settle_db(
         "hosted_agent_connections.agent_liveness",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
+                // Taken inside the transaction: a wait for a pool connection must not age it.
+                let now = chrono::Utc::now();
                 let Some((connection_id, active)) = momo_agent::liveness_target_for_viewer_in_tx(
                     conn,
                     workspace_id,
@@ -663,14 +685,11 @@ pub async fn agent_liveness(
                 );
                 // ADR-0200 증보 6 (#4621): the beat, from the agent's admitted Agent Port calls.
                 // `cadence_for` alone decides whether this connection may be promised one.
-                let calls = momo_agent::load_agent_call_times_in_tx(
-                    conn,
-                    workspace_id,
-                    &[agent_id],
-                    now - cadence_params.window,
-                    cadence_params.max_calls,
-                )
-                .await?;
+                let calls = if active {
+                    cadence_calls(conn, workspace_id, &[agent_id], now, &cadence_params).await?
+                } else {
+                    std::collections::HashMap::new()
+                };
                 let cadence = cadence_for(now, active, calls.get(&agent_id), &cadence_params);
                 Ok(Ok(AgentLivenessDto {
                     agent_member_id: agent_id.to_string(),

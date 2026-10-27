@@ -22,6 +22,10 @@
 //! | `the_beat_is_read_from_the_rows_the_agent_port_really_writes` | 실제 호출 N번 = 로더가 N개 (감사 두 줄 중 `used`만) | 쓰는 쪽과 읽는 쪽이 어긋남 |
 //! | `a_connection_that_is_not_active_reads_unknown_whatever_it_did` | 박자 모양 이력이 있어도 비활성 연결은 `unknown` | 비활성 가드 |
 //! | `the_wire_is_closed_and_a_stranger_gets_the_same_404` | 멤버 응답에 허용된 키 밖의 것(관리자 필드·간격 수)이 없고, 채널을 공유하지 않는 멤버는 404 (키 집합의 정확한 일치는 `agent_cadence_contract`가 잠가요) | 새 키·탐침 |
+//! | `a_new_connection_counts_only_its_own_calls` | 해제 뒤 다시 등록한 새 연결은 옛 연결의 15분 루틴을 물려받지 않고(`unknown`) 자기 호출로만 박자를 만든다 | 연결 era 하한 |
+//! | `the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful` | 한 에이전트의 호출 6,000행, 플래너가 적게 보는 통계 → 한도 50이면 읽은 튜플이 150 이하(대조: 같은 문장을 플래너에 맡기면 1,000 이상) | 순서 인덱스 스캔 강제 |
+//! | `a_beat_read_that_cannot_finish_leaves_the_liveness_routes_answering` | 표를 다른 세션이 잠그면 박자 읽기는 2초에 취소되고 라우트는 200 + `unknown`, 풀려나면 다시 `routine` | 읽기 실패 격리 |
+//! | `the_limit_is_per_agent_not_for_the_whole_read` | 에이전트 둘 × 한도 2 → 각자 자기 최신 2개 | 에이전트별 LATERAL 한도 |
 //!
 //! 격리 DB에서만:
 //!
@@ -89,6 +93,24 @@ fn whole_ms_now() -> DateTime<Utc> {
         .expect("a valid instant")
 }
 
+/// The loader the way the routes call it: inside a transaction (it opens a savepoint), as the
+/// superuser (RLS is covered by the route tests; here the predicates are what is under test).
+async fn load(
+    w: &World,
+    agents: &[Uuid],
+    since: DateTime<Utc>,
+    limit: i64,
+) -> std::collections::HashMap<Uuid, Vec<DateTime<Utc>>> {
+    let mut tx = w.su.begin().await.expect("begin");
+    let loaded =
+        momo_agent::load_agent_call_times_in_tx(&mut tx, w.workspace, agents, since, limit)
+            .await
+            .expect("the savepoint machinery")
+            .expect("the read");
+    tx.rollback().await.expect("rollback");
+    loaded
+}
+
 /// One routine wake: the first call `start` seconds before `now`, each next call `spread[i]` seconds
 /// after the one before.
 fn wake(now: DateTime<Utc>, start: i64, spread: &[i64]) -> Vec<DateTime<Utc>> {
@@ -142,6 +164,18 @@ impl World {
         )
         .await;
         join_channel(&self.su, self.workspace, self.channel, agent.id).await;
+        // The beat counts an agent's calls from the creation of its current connection (the era).
+        // The fixtures put calls hours in the past, so the connection is made older than the
+        // 24-hour window; the era test sets its own date.
+        sqlx::query(
+            "UPDATE hosted_agent_connection SET created_at = now() - interval '48 hours' \
+              WHERE workspace_id = $1 AND agent_member_id = $2",
+        )
+        .bind(self.workspace)
+        .bind(agent.id)
+        .execute(&self.su)
+        .await
+        .expect("age the connection");
         agent
     }
 
@@ -504,17 +538,8 @@ async fn the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the
     )
     .await;
 
-    let mut conn = w.su.acquire().await.expect("superuser connection");
-    let loaded = momo_agent::load_agent_call_times_in_tx(
-        &mut conn,
-        w.workspace,
-        // the same id twice: the calls must not be counted twice
-        &[agent.id, agent.id, other.id],
-        since,
-        2000,
-    )
-    .await
-    .expect("load");
+    // the same id twice: the calls must not be counted twice
+    let loaded = load(&w, &[agent.id, agent.id, other.id], since, 2000).await;
     let mut mine = loaded
         .get(&agent.id)
         .cloned()
@@ -532,10 +557,7 @@ async fn the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the
     );
 
     // the newest `limit` calls, newest first
-    let capped =
-        momo_agent::load_agent_call_times_in_tx(&mut conn, w.workspace, &[other.id], since, 3)
-            .await
-            .expect("load capped");
+    let capped = load(&w, &[other.id], since, 3).await;
     assert_eq!(
         capped.get(&other.id).cloned(),
         Some(vec![at(11), at(21), at(31)]),
@@ -579,16 +601,7 @@ async fn the_beat_is_read_from_the_rows_the_agent_port_really_writes() {
         "the #4618 trace row is a second, different row per call"
     );
 
-    let mut conn = w.su.acquire().await.expect("superuser connection");
-    let loaded = momo_agent::load_agent_call_times_in_tx(
-        &mut conn,
-        w.workspace,
-        &[agent.id],
-        Utc::now() - Duration::hours(1),
-        2000,
-    )
-    .await
-    .expect("load");
+    let loaded = load(&w, &[agent.id], Utc::now() - Duration::hours(1), 2000).await;
     assert_eq!(
         loaded.get(&agent.id).map(Vec::len),
         Some(5),
@@ -681,4 +694,177 @@ async fn the_wire_is_closed_and_a_stranger_gets_the_same_404() {
     assert_eq!(response.status().as_u16(), 404);
     let body = response.text().await.expect("404 body");
     assert!(!body.contains("cadence"), "{body}");
+}
+
+/// Heap tuples this transaction has fetched from `audit_log` so far (index fetches + sequential
+/// reads), from the transaction-local statistics: the work a statement did, whatever its plan.
+async fn fetched(conn: &mut sqlx::PgConnection) -> i64 {
+    sqlx::query_scalar(
+        "SELECT COALESCE(sum(COALESCE(idx_tup_fetch, 0) + COALESCE(seq_tup_read, 0)), 0)::bigint \
+           FROM pg_stat_xact_user_tables WHERE relname = 'audit_log'",
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .expect("transaction-local table statistics")
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_new_connection_counts_only_its_own_calls() {
+    let w = world().await;
+    let detail = w.real_detail().await;
+    let agent = w.agent("reborn").await;
+    let now = whole_ms_now();
+    // The connection the agent has now was created three hours ago. Before it, the agent made a
+    // perfect 15-minute routine: that was another connection (a host that was disconnected).
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET created_at = $3 \
+          WHERE workspace_id = $1 AND agent_member_id = $2",
+    )
+    .bind(w.workspace)
+    .bind(agent.id)
+    .bind(now - Duration::hours(3))
+    .execute(&w.su)
+    .await
+    .expect("date the connection");
+    w.put_calls(agent.id, &wakes(now, 4 * 60 * MIN, &[15; 12]), &detail)
+        .await;
+    let cadence = w.cadence(agent.id).await;
+    assert_eq!(
+        cadence["kind"], "unknown",
+        "the old connection's routine is not the new connection's: {cadence}"
+    );
+    // its own calls, since it was created, are what make its beat
+    w.put_calls(agent.id, &wakes(now, 20 * MIN, &REAL_15), &detail)
+        .await;
+    let cadence = w.cadence(agent.id).await;
+    assert_eq!(cadence["kind"], "routine", "{cadence}");
+    assert_eq!(cadence["typicalMinutes"], 15, "{cadence}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
+    let w = world().await;
+    let detail = w.real_detail().await;
+    let agent = w.agent("hammer").await;
+    let now = whole_ms_now();
+    // a poller that made 6,000 admitted calls in the last 20 hours
+    let calls: Vec<_> = (0..6000)
+        .map(|k| now - Duration::seconds(20 * 60 * MIN - k * 12))
+        .collect();
+    w.put_calls(agent.id, &calls, &detail).await;
+    // Production's planner estimates one agent's rows from the average over very many actors and
+    // expects a handful (15 rows per actor here, of which a few pass the other predicates);
+    // say so, whatever this small database's own statistics would have said.
+    sqlx::query("ALTER TABLE audit_log ALTER COLUMN actor_member_id SET (n_distinct = -0.0667)")
+        .execute(&w.su)
+        .await
+        .expect("n_distinct");
+    sqlx::query("ANALYZE audit_log")
+        .execute(&w.su)
+        .await
+        .expect("analyze");
+    let since = now - Duration::hours(24);
+
+    // control: the same statement with the planner left alone reads them all
+    let mut tx = w.su.begin().await.expect("begin");
+    let before = fetched(&mut tx).await;
+    let rows = sqlx::query(momo_agent::CALL_TIMES_SQL)
+        .bind(w.workspace)
+        .bind(vec![agent.id])
+        .bind(momo_agent::AGENT_PORT_CALL_ACTION)
+        .bind(momo_agent::AGENT_PORT_CALL_PATH)
+        .bind(since)
+        .bind(50_i64)
+        .fetch_all(&mut *tx)
+        .await
+        .expect("control read");
+    let control = fetched(&mut tx).await - before;
+    tx.rollback().await.expect("rollback");
+    assert_eq!(rows.len(), 50);
+
+    // the loader reads about as many as it returns
+    let mut tx = w.su.begin().await.expect("begin");
+    let before = fetched(&mut tx).await;
+    let loaded =
+        momo_agent::load_agent_call_times_in_tx(&mut tx, w.workspace, &[agent.id], since, 50)
+            .await
+            .expect("the savepoint machinery")
+            .expect("the read");
+    let bounded = fetched(&mut tx).await - before;
+    tx.rollback().await.expect("rollback");
+
+    sqlx::query("ALTER TABLE audit_log ALTER COLUMN actor_member_id RESET (n_distinct)")
+        .execute(&w.su)
+        .await
+        .expect("reset n_distinct");
+    sqlx::query("ANALYZE audit_log")
+        .execute(&w.su)
+        .await
+        .expect("analyze");
+
+    eprintln!("50 rows of a 6,000-row agent: planner left alone fetched {control} tuples, the loader {bounded}");
+    assert_eq!(loaded[&agent.id].len(), 50);
+    assert!(
+        control >= 1000,
+        "the control must show the problem or this test proves nothing: it fetched {control}"
+    );
+    assert!(
+        bounded <= 150,
+        "50 rows returned must not cost {bounded} fetched tuples (control: {control})"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_beat_read_that_cannot_finish_leaves_the_liveness_routes_answering() {
+    let w = world().await;
+    let detail = w.real_detail().await;
+    let agent = w.agent("blocked").await;
+    let now = whole_ms_now();
+    w.put_calls(agent.id, &wakes(now, 4 * MIN, &REAL_15), &detail)
+        .await;
+    assert_eq!(w.cadence(agent.id).await["kind"], "routine");
+
+    // another session holds the table: the beat read waits, is cancelled at its 2-second
+    // ceiling, and the route still answers - with everything but the beat
+    let su = w.su.clone();
+    let holder = tokio::spawn(async move {
+        let mut tx = su.begin().await.expect("begin");
+        sqlx::query("LOCK TABLE audit_log IN ACCESS EXCLUSIVE MODE")
+            .execute(&mut *tx)
+            .await
+            .expect("lock");
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        tx.rollback().await.expect("release");
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let member = w.member_view(agent.id).await; // asserts 200
+    holder.await.expect("the lock holder");
+    assert_eq!(member["cadence"]["kind"], "unknown", "{member}");
+    assert!(
+        member["state"].is_string(),
+        "the rest of the answer is there: {member}"
+    );
+    // nothing is left behind: the same read, once the table is free, is a routine again
+    assert_eq!(w.cadence(agent.id).await["kind"], "routine");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_limit_is_per_agent_not_for_the_whole_read() {
+    let w = world().await;
+    let detail = w.real_detail().await;
+    let a = w.agent("limit-a").await;
+    let b = w.agent("limit-b").await;
+    let now = whole_ms_now();
+    let at = |minutes: i64| now - Duration::minutes(minutes);
+    w.put_calls(a.id, &[at(10), at(20), at(30), at(40)], &detail)
+        .await;
+    w.put_calls(b.id, &[at(11), at(21), at(31), at(41)], &detail)
+        .await;
+    let loaded = load(&w, &[a.id, b.id], now - Duration::hours(1), 2).await;
+    assert_eq!(loaded[&a.id], vec![at(10), at(20)]);
+    assert_eq!(loaded[&b.id], vec![at(11), at(21)]);
 }

@@ -105,7 +105,9 @@ pub struct CadenceParams {
     /// How far back a call still counts. Also the staleness bound: an agent silent for the
     /// whole window has no samples and reads `unknown`.
     pub window: Duration,
-    /// Newest calls read per agent: a ceiling on the work one read can cause.
+    /// Newest calls returned per agent. Also the ceiling on the rows READ (within a factor of about
+    /// two: the agent's rows that are not calls are skipped) because the loader forces an ordered
+    /// scan; see [`load_agent_call_times_in_tx`].
     pub max_calls: i64,
     /// A silence longer than this ends a wake.
     pub wake_gap: Duration,
@@ -280,13 +282,43 @@ pub fn derive_cadence(
     Cadence {
         kind: CadenceKind::Routine,
         typical_minutes: Some(((beat_ms + 30_000) / 60_000).max(1)),
-        expected_check_at: Some(
-            newest_wake_start + Duration::milliseconds(beat_ms * params.expected_after_beats),
-        ),
+        // `checked_`: a plain `+` panics near chrono's last instant, and a request must not.
+        expected_check_at: newest_wake_start.checked_add_signed(Duration::milliseconds(
+            beat_ms * params.expected_after_beats,
+        )),
         late: silence_ms > beat_ms * params.late_after_beats,
         intervals: count,
     }
 }
+
+/// How long one beat read may run before it is cancelled (and the beat reads `unknown`). The read
+/// is a nicety on routes that must keep answering; it never gets to hold a pool connection longer.
+pub const CALL_READ_TIMEOUT: &str = "2s";
+
+/// The read, one statement for every agent asked about. Per agent: the agent's own admitted calls
+/// ([`AGENT_PORT_CALL_ACTION`] on [`AGENT_PORT_CALL_PATH`]) newer than `$5` AND no older than the
+/// agent's current connection (see "the era" on [`load_agent_call_times_in_tx`]), newest first,
+/// at most `$6`. The connection chosen is the one the liveness route chooses for the same agent
+/// (`liveness_target_for_viewer_in_tx`: an active one before an inactive one, then the newest).
+pub const CALL_TIMES_SQL: &str = "\
+    SELECT a.agent_id, c.created_at \
+      FROM unnest($2::uuid[]) AS a(agent_id) \
+      CROSS JOIN LATERAL ( \
+            SELECT COALESCE( \
+                     (SELECT hc.created_at FROM hosted_agent_connection hc \
+                       WHERE hc.workspace_id = $1 AND hc.agent_member_id = a.agent_id \
+                       ORDER BY (hc.status = 'active') DESC, hc.created_at DESC LIMIT 1), \
+                     '-infinity'::timestamptz) AS era_start) e \
+      CROSS JOIN LATERAL ( \
+            SELECT al.created_at FROM audit_log al \
+             WHERE al.workspace_id = $1 \
+               AND al.actor_member_id = a.agent_id \
+               AND al.action = $3 \
+               AND al.detail->>'path' = $4 \
+               AND al.created_at > $5 \
+               AND al.created_at >= e.era_start \
+             ORDER BY al.created_at DESC \
+             LIMIT $6) c";
 
 /// The times of each agent's admitted Agent Port calls since `since`, newest first, at most
 /// `per_agent_limit` each. An agent with no such call has no entry.
@@ -296,41 +328,80 @@ pub fn derive_cadence(
 /// so `audit_actor_idx` carries the range), the action, the path and the window — and to the
 /// tenant twice over: the explicit `workspace_id` and the caller's `app.workspace_id` (RLS).
 /// Only the derived [`Cadence`] ever leaves the server; no row does.
+///
+/// **The era.** Calls are counted from the creation of the agent's current connection, not from
+/// the start of the window: the rows are keyed by the agent (an OAuth token is replaced every 30
+/// minutes), and a disconnected agent can be registered again as a NEW connection on a new host.
+/// Without the lower bound the new connection would inherit the old one's beat the moment it
+/// went `active`, and a screen would promise "보통 15분 안" for a host that has never called.
+///
+/// **The bound on the work.** `per_agent_limit` is a ceiling on the rows RETURNED; it bounds the
+/// rows READ only if the plan walks `audit_actor_idx` in order and stops. The planner does not
+/// do that by itself: it estimates an agent's rows from the average over all actors, expects a
+/// handful, and picks a bitmap scan plus a sort that reads every row the agent made in the window
+/// (a polling agent makes up to ~690,000 a day). So the read runs with bitmap scans off and
+/// under [`CALL_READ_TIMEOUT`], inside its own savepoint:
+///
+/// * the two `SET LOCAL`s are undone with the savepoint and never leak into the route's own
+///   queries;
+/// * a read that fails or times out does not abort the route's transaction. The outer `Result`
+///   is the savepoint machinery (an error there means the transaction is unusable: propagate);
+///   the inner `Result` is the read itself, and its `Err` means "no beat can be told": the
+///   caller logs it and reads `unknown`. A beat is something to show; it must not take the
+///   liveness route, which the admin uses to reach "disconnect", down with it.
 pub async fn load_agent_call_times_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_ids: &[Uuid],
     since: DateTime<Utc>,
     per_agent_limit: i64,
-) -> Result<HashMap<Uuid, Vec<DateTime<Utc>>>, DbError> {
+) -> Result<Result<HashMap<Uuid, Vec<DateTime<Utc>>>, DbError>, DbError> {
     // A repeated id would be unnested twice and every call time pushed twice.
     let mut agent_ids = agent_member_ids.to_vec();
     agent_ids.sort_unstable();
     agent_ids.dedup();
     if agent_ids.is_empty() {
-        return Ok(HashMap::new());
+        return Ok(Ok(HashMap::new()));
     }
-    let rows = sqlx::query(
-        "SELECT a.agent_id, c.created_at \
-           FROM unnest($2::uuid[]) AS a(agent_id) \
-           CROSS JOIN LATERAL ( \
-                SELECT al.created_at FROM audit_log al \
-                 WHERE al.workspace_id = $1 \
-                   AND al.actor_member_id = a.agent_id \
-                   AND al.action = $3 \
-                   AND al.detail->>'path' = $4 \
-                   AND al.created_at > $5 \
-                 ORDER BY al.created_at DESC \
-                 LIMIT $6) c",
-    )
-    .bind(workspace_id)
-    .bind(&agent_ids)
-    .bind(AGENT_PORT_CALL_ACTION)
-    .bind(AGENT_PORT_CALL_PATH)
-    .bind(since)
-    .bind(per_agent_limit)
-    .fetch_all(&mut *conn)
+    sqlx::query("SAVEPOINT cadence_read")
+        .execute(&mut *conn)
+        .await?;
+    let read = read_call_times(conn, workspace_id, &agent_ids, since, per_agent_limit).await;
+    // Whatever the read did, return the transaction to how it was: this reverts both SET LOCALs
+    // and, after an error or a timeout, clears the aborted state.
+    sqlx::query("ROLLBACK TO SAVEPOINT cadence_read")
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query("RELEASE SAVEPOINT cadence_read")
+        .execute(&mut *conn)
+        .await?;
+    Ok(read)
+}
+
+async fn read_call_times(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_ids: &[Uuid],
+    since: DateTime<Utc>,
+    per_agent_limit: i64,
+) -> Result<HashMap<Uuid, Vec<DateTime<Utc>>>, DbError> {
+    sqlx::query("SET LOCAL enable_bitmapscan = off")
+        .execute(&mut *conn)
+        .await?;
+    sqlx::query(&format!(
+        "SET LOCAL statement_timeout = '{CALL_READ_TIMEOUT}'"
+    ))
+    .execute(&mut *conn)
     .await?;
+    let rows = sqlx::query(CALL_TIMES_SQL)
+        .bind(workspace_id)
+        .bind(agent_ids)
+        .bind(AGENT_PORT_CALL_ACTION)
+        .bind(AGENT_PORT_CALL_PATH)
+        .bind(since)
+        .bind(per_agent_limit)
+        .fetch_all(&mut *conn)
+        .await?;
     let mut by_agent: HashMap<Uuid, Vec<DateTime<Utc>>> = HashMap::new();
     for row in &rows {
         by_agent
@@ -686,6 +757,57 @@ mod tests {
         );
         assert_eq!(read_at(Duration::hours(1)), Cadence::unknown());
         assert_eq!(read_at(Duration::hours(23)), Cadence::unknown());
+    }
+
+    #[test]
+    fn the_on_beat_band_is_half_a_beat_either_side_and_both_edges_count() {
+        // the median is 20 minutes in all four; four of ten intervals sit away from it
+        let read = |intervals: &[i64]| {
+            derive_cadence(now(), &wakes_with_intervals(4 * MIN, intervals), &p())
+        };
+        let around = |far: i64| {
+            let mut intervals = vec![far; 4];
+            intervals.extend([20; 6]);
+            intervals
+        };
+        // exactly half a beat (10) and exactly one and a half beats (30) are on the beat
+        assert_eq!(read(&around(10)).kind, CadenceKind::Routine);
+        assert_eq!(read(&around(30)).kind, CadenceKind::Routine);
+        // a minute outside either edge: six of ten is 60 %, under the 70 % share
+        assert_eq!(read(&around(31)).kind, CadenceKind::Unknown);
+        assert_eq!(read(&around(9)).kind, CadenceKind::Unknown);
+    }
+
+    #[test]
+    fn realtime_needs_thirty_minutes_and_eighty_percent_presence_and_both_edges_count() {
+        let kind = |calls: &[DateTime<Utc>]| derive_cadence(now(), calls, &p()).kind;
+        // a call a minute, the newest now: a span of exactly 30 minutes is enough, 29 is not
+        let steady =
+            |minutes: i64| -> Vec<_> { (0..=minutes).map(|k| ago((minutes - k) * MIN)).collect() };
+        assert_eq!(kind(&steady(30)), CadenceKind::Realtime);
+        assert_eq!(kind(&steady(29)), CadenceKind::Unknown);
+        // 40 minutes of a call a minute, then `silence` seconds with no call, then one call now:
+        // 600 s of silence in a 3,000 s span is present exactly 80 % of the time, 601 s is not
+        let after_silence = |silence: i64| -> Vec<_> {
+            let mut calls: Vec<_> = (0..=40).map(|k| ago(silence + 2400 - k * 60)).collect();
+            calls.push(ago(0));
+            calls
+        };
+        assert_eq!(kind(&after_silence(600)), CadenceKind::Realtime);
+        assert_eq!(kind(&after_silence(601)), CadenceKind::Unknown);
+        // a call every 5:00 exactly is present (the edge that also keeps two calls in one wake)
+        let every_five_minutes: Vec<_> = (0..=12).map(|k| ago(60 * MIN - k * 5 * MIN)).collect();
+        assert_eq!(kind(&every_five_minutes), CadenceKind::Realtime);
+    }
+
+    #[test]
+    fn a_call_exactly_a_day_old_is_inside_the_window_and_one_second_older_is_not() {
+        // five single-call wakes 15 minutes apart, the oldest exactly 24 hours old (or a second more)
+        let oldest = 24 * 60 * MIN;
+        let five =
+            |extra: i64| -> Vec<_> { (0..5).map(|k| ago(oldest + extra - k * 15 * MIN)).collect() };
+        assert_eq!(derive_cadence(now(), &five(0), &p()).intervals, 4);
+        assert_eq!(derive_cadence(now(), &five(1), &p()).intervals, 3);
     }
 
     #[test]
