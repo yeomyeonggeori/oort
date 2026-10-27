@@ -25,6 +25,7 @@ import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
+import { DownloadButton } from "@/features/downloads/DownloadButton";
 import { desktopShellProps } from "@/app/sidebarPane";
 import { useSidebarCollapsePaint } from "@/app/useSidebarCollapsePaint";
 import {
@@ -394,6 +395,7 @@ export function AppShell({
                   desktopToggleFocusedRef.current = true;
                 }}
                 onToggleBlur={onDesktopToggleBlur}
+                trailing={<DownloadButton />}
               />
             )}
             {!isSettingsSurface && (

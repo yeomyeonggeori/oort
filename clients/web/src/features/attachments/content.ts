@@ -4,6 +4,8 @@ import {
   hasPdfSignature,
 } from "@momo/core/features/attachments/model";
 import { fetchAttachmentContent } from "@momo/core/lib/api";
+import { downloads } from "@/features/downloads/downloadsStore";
+import { IS_TAURI } from "@/lib/env";
 import { openPdfInDesktopViewer } from "@/lib/tauri";
 
 // =============================================================================
@@ -171,7 +173,13 @@ export function useAttachmentPreview(
 /**
  * 파일을 디스크로.
  *
- * `<a href download>` 를 만들어 누르고 곧바로 치운다. 서버가 이미
+ * 데스크탑 셸에서는 다운로드 매니저를 거친다(#4587): 받는 동안의 진행을 재고, 셸이 다운로드
+ * 폴더에 쓰고, 상단 오른쪽 패널의 목록이 그 기록을 든다. 셸에서 `<a download>`도 파일은 쓴다
+ * (wry의 기본 다운로드 핸들러가 받아들여 OS 다운로드 폴더에 저장한다: 실기 확인, #4587). 다만 앱은
+ * 진행도, 끝난 이름도, 어디에 놓였는지도 알 길이 없어 패널이 보여 줄 것이 없다. 끝나면 resolve,
+ * 못 끝나면 reject하므로 부르는 카드의 바쁨·실패 표시는 그대로다.
+ *
+ * 브라우저 탭은 아래 그대로다: `<a href download>`를 만들어 누르고 곧바로 치운다. 서버가 이미
  * `Content-Disposition: attachment` 를 붙이지만 그 헤더는 **주소로 이동할 때만**
  * 뜻이 있고, 여기서는 바이트가 이미 손에 있다 — 이름을 붙이는 것은 이 쪽이다.
  *
@@ -180,8 +188,12 @@ export function useAttachmentPreview(
 export async function downloadAttachment(
   workspaceId: string,
   channelId: string,
-  attachment: { id: string; name: string }
+  attachment: { id: string; name: string; mime?: string; sizeBytes?: number }
 ): Promise<void> {
+  if (IS_TAURI) {
+    await downloads.start({ workspaceId, channelId, attachment });
+    return;
+  }
   const blob = await fetchAttachmentContent(
     workspaceId,
     channelId,
