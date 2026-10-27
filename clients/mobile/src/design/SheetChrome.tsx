@@ -11,7 +11,7 @@ import {
 
 import {BAR_CONTROL_MAX_SCALE} from './atoms';
 import {CONV_ICON_SIZE, CONV_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
-import {usePageSheetClose} from './PageSheet';
+import {usePageSheetClose, usePageSheetDrag} from './PageSheet';
 import {circleLook} from './sheetModel';
 import {usePalette, useStyles} from './theme';
 import {
@@ -40,7 +40,7 @@ import {
 // 모든 닫기 단추는 **글자 없는 원형 X** 이고, 보조기술 이름(`closeLabel`)은 시트마다 다른
 // 「… 닫기」 문장이라 **필수**다(기본값 「닫기」 를 두지 않는다 — 어느 시트를 닫는지 모른다).
 // 시트 안에서 `onClose` 를 생략하면 그릇이 쥔 닫기(`usePageSheetClose`)가 불려 스크림·끌기와
-// 같이 미끄러져 나간다.
+// 같이 미끄러져 나간다. 바텀시트 머리는 손잡이 띠만이 아니라 **제목 줄 전체**가 끌기 영역이다(`usePageSheetDrag`, #4612).
 //
 // 원이 「떠 있는」 근거는 토큰이다(`sheetModel.circleLook`): 라이트 `surface` + 그림자, 다크는
 // 그림자가 안 보이므로 한 단 위 `surfaceMuted` + 가장자리 한 줄.
@@ -202,8 +202,10 @@ export function SheetHeader({
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 머리는 제목 줄 어디서든 시트를 끌어 내린다(#4612). 단추(X·✓) 위에서 시작한 끌기도 시트가 가져가고 그 눌림은 취소된다.
+  const drag = usePageSheetDrag();
   return (
-    <View style={styles.header} testID={testID}>
+    <View {...drag} style={styles.header} testID={testID}>
       <View style={styles.side}>
         {confirm ? (
           <ConfirmCheck

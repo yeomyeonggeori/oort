@@ -11,6 +11,15 @@ import {Easing} from 'react-native';
 /** UI 진입·퇴장의 강한 ease-out. `ease-in` 은 쓰지 않는다 — 보는 순간을 늦춘다. */
 export const EASE_OUT = Easing.bezier(0.23, 1, 0.32, 1);
 
+/**
+ * 손가락을 **놓아 던진** 표면이 나가는 곡선 (#4612). 시작 기울기가 1 이다 — 시간을 `거리 ÷ 놓은 속도`로 잡으면
+ * (`sheetModel.releaseSlideMs`) 첫 순간의 속도가 정확히 손가락의 속도라 끊김 없이 이어지고, 가운데서 최대 1.29 배까지
+ * 빨라졌다가 끝에서 가라앉는다. `EASE_OUT` 은 시작 기울기가 ≈4.3 이라 정지에서 튀어 나가는 곡선이어서 던진 속도를 잇지
+ * 못한다(어떤 시간을 줘도 손가락보다 4 배 빠르게 출발한다). 값은 시작 기울기 1 을 지키는 `(a, a, x2, 1)` 꼴 중 최대 기울기가
+ * 1.3 안쪽인 것을 골랐다 — 시험이 시작 기울기를 잰다(`sheetDrag.test.tsx`).
+ */
+export const FLING_OUT = Easing.bezier(0.4, 0.4, 0.7, 1);
+
 /** 탭 콘텐츠가 드러나는 시간. 하루 수백 번 보는 전환이라 150ms 를 넘기지 않는다. */
 export const TAB_FADE_MS = 150;
 

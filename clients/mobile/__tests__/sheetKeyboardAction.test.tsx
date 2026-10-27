@@ -48,11 +48,13 @@ import {
   space,
   TOUCH_TARGET,
 } from '../src/design/tokens';
+import {DEVICE_KEY_TITLE} from '../src/features/deviceKey/copy';
 import {DeviceKeyPanel} from '../src/features/deviceKey/DeviceKeyPanel';
 import {LinkSheetBody} from '../src/features/deviceKey/DeviceKeyLinkSheet';
 import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
+import {describeCloseContract} from './fixtures/sheetContract';
 
 // =============================================================================
 // 시트의 키보드 올림과 「행동은 닫은 뒤에」 (#4318 2단계).
@@ -1059,9 +1061,11 @@ describe('지시 기기 패널의 카드는 바깥 가로 여백을 스스로 �
       screen.getByTestId('device-key-link-scroll').props.contentContainerStyle,
     );
     // 카드의 16 은 패널이 진다. 호스트가 또 주면 패널 단독 시험(위)은 초록인 채 화면만 32 로 좁아진다.
-    expect(content.paddingHorizontal).toBeUndefined();
-    expect(content.paddingLeft).toBeUndefined();
-    expect(content.paddingRight).toBeUndefined();
+    // 몸은 이제 공용 `SheetScroll`(#4612)이라 기본 가로 여백(SAFE_GUTTER)이 있고, 이 시트는 그 위에 0 을 얹어 걷는다 — 그러니 「속성이
+    // 없다」가 아니라 **실효 값이 0** 이어야 한다(`paddingHorizontal: 0` 을 지우면 기본 16 이 되살아나 여기서 붉어진다).
+    expect(content.paddingHorizontal ?? 0).toBe(0);
+    expect(content.paddingLeft ?? 0).toBe(0);
+    expect(content.paddingRight ?? 0).toBe(0);
     expect(flat('device-key-card').paddingHorizontal).toBe(SAFE_GUTTER);
   });
 });
@@ -1387,4 +1391,77 @@ describe('확인 단계의 문구에는 닫는 괄호 바로 뒤의 조사가 �
     expect(confirm).toContain(failure);
     expect(confirm.filter(text => BRACKET_PARTICLE.test(text))).toEqual([]);
   });
+});
+
+// =============================================================================
+// 이 파일이 마운트하는 시트 셋의 닫는 길·끌기 계약 (#4458 의 공용 계약에 #4612 의 머리·본문 끌기를 더해 시트마다 같은 코드로 잰다).
+// `describeCloseContract` 는 시트 열 개가 시험 파일마다 부르고, 이 셋(메시지 행동·대화 행 행동·지시 기기)은 여기서 마운트하므로 여기서 부른다.
+// =============================================================================
+
+let messageCalls: string[] = [];
+describeCloseContract({
+  name: 'MessageActionSheet',
+  open: async () => {
+    messageCalls = [];
+    render(<FixedScheme scheme="light">{messageSheet(messageCalls).ui}</FixedScheme>);
+    await act(async () => {});
+  },
+  closedCount: () => messageCalls.filter(name => name === 'close').length,
+  closeTestID: 'sheet-close',
+  closeLabel: '메시지 액션 닫기',
+  scrimTestID: 'sheet-backdrop',
+  scrimLabel: '메시지 액션 닫기',
+});
+
+let channelHandlers = {onRun: jest.fn(), onClose: jest.fn()};
+describeCloseContract({
+  name: 'ChannelActionSheet',
+  open: async () => {
+    channelHandlers = {onRun: jest.fn(), onClose: jest.fn()};
+    render(<FixedScheme scheme="light">{channelSheet(ITEMS, channelHandlers)}</FixedScheme>);
+    await act(async () => {});
+  },
+  closedCount: () => channelHandlers.onClose.mock.calls.length,
+  closeTestID: 'channel-sheet-close',
+  closeLabel: '대화 액션 닫기',
+  scrimTestID: 'channel-sheet-backdrop',
+  scrimLabel: '대화 액션 닫기',
+});
+
+let linkClosed = 0;
+describeCloseContract({
+  name: 'DeviceKeyLinkSheet',
+  open: async () => {
+    linkClosed = 0;
+    const close = () => {
+      linkClosed += 1;
+    };
+    render(
+      <FixedScheme scheme="light">
+        <PageSheet
+          onClose={close}
+          accessibilityLabel={DEVICE_KEY_TITLE}
+          scrimLabel={`${DEVICE_KEY_TITLE} 닫기`}
+          testID="device-key-link-sheet">
+          <LinkSheetBody
+            onClose={close}
+            state={{
+              view: {kind: 'unsupported'},
+              enroll: () => {},
+              replace: () => {},
+              refresh: () => {},
+              busy: false,
+              failure: null,
+            }}
+          />
+        </PageSheet>
+      </FixedScheme>,
+    );
+    await act(async () => {});
+  },
+  closedCount: () => linkClosed,
+  closeTestID: 'device-key-link-close',
+  closeLabel: `${DEVICE_KEY_TITLE} 닫기`,
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: `${DEVICE_KEY_TITLE} 닫기`,
 });
