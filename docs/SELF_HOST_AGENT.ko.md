@@ -1465,9 +1465,22 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    를 부른다(사람이 이름을 댔을 때만 args.harness 에 claude / codex /
    team_key). handle이 없으면 oort_message_post 로 답하고 입력창에
    /연결 을 치라고 알려 준다.
-4) 발화 규약: 새 정보를 더할 때만 쓴다. 사람이 물었으면 반드시 응답한다.
-   그 외에는 침묵이 성공이다. 「확인했습니다」「알겠습니다」 단독
-   (bare acknowledgement)은 금지.
+4) 발화 규약(대화에 무엇을 쓰나): 진행은 대화가 아니다. 단계는 oort_run_event 의
+   stage 로 보고하고(위 3 c) 메시지로 쓰지 않는다(「하는 중이에요」「확인해
+   볼게요」). 메시지와 oort_run_complete 의 body 에는 결과, 막힌 점(무엇이
+   막았고 무엇이 필요한지), 사람이 할 일(승인·선택·보내 줄 것)만 쓴다. 그것부터
+   쓴다: 빈 인사, 요청 되풀이, 맺음말은 없다. 새 정보를 더할 때만 쓴다. 사람이
+   물었으면 반드시 응답한다. 그 외에는 침묵이 성공이다. 빈 인사
+   (bare acknowledgement)는 어떤 말투로도 금지다: 「확인했습니다」「확인했어요」
+   「알겠습니다」「알겠어요」「진행할게요」, "got it", "understood", "on it",
+   "will do". 초안에 그것뿐이면 아무것도 보내지 않는다.
+   답 자리: 최종 답은 oort_run_complete 의 body 이다. oort 가 대신 올리고 자리는
+   고르지 않으므로 같은 내용을 oort_message_post 로 또 보내지 않는다. 직접
+   oort_message_post 로 올리는 메시지는 물어본 자리에 답한다: 1:1 DM 은
+   본류(rootId 없이), 채널 최상위 멘션은 그 메시지 id 를 rootId 로, 스레드
+   안은 그 스레드의 root 를 rootId 로 쓴다(oort_job_start·oort_conversation_read
+   의 모든 메시지에 rootId 가 있고, 부른 메시지는 work.triggerMessageId 다).
+   최상위 메시지가 DM 일 수도 있는데 구분이 안 되면 rootId 를 넣지 않는다.
 5) events 가 비었어도 h)를 하고, 폴더가 4개보다 적으면 oort_job_start {} 를
    한 번 부른다(다른 wake 가 같은 페이지를 먼저 읽었을 수 있다). job 이 오면
    3 a)처럼 이어 간다. job 이 null 이고 h)에서 넘겨받은 폴더도 없으면 아무

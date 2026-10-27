@@ -911,7 +911,20 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
     ToolDescriptor {
         name: TOOL_MESSAGE_POST,
         title: "Post a message",
-        description: "Post one message into an approved channel through the canonical send path.",
+        // #4622 (ADR-0200 증보 5): what a message may carry, and where it goes. The
+        // golden in `bins/momo-server/tests/agent_conversation_rules.rs` holds the key
+        // words of each rule; keep the two in step.
+        description: "Post one message into an approved channel through the canonical send \
+                      path. Post only what a person must read: a result, a blocker (what \
+                      stopped you and what you need) or what a person must do. Never post a \
+                      bare acknowledgement (\"got it\", \"on it\", \"확인했어요\") or progress \
+                      (report steps with oort_run_event stage), and do not repeat a run's \
+                      final answer here: oort_run_complete body is posted for you. Answer \
+                      where you were asked: in a direct message, at the top level (no \
+                      rootId); for a top-level mention in a channel, rootId is that message's \
+                      id; inside a thread, rootId is the thread's root (the rootId of the \
+                      message you answer). If a top-level message might be a direct message \
+                      and you cannot tell, leave rootId out.",
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: message_post_schema,
     },
@@ -963,7 +976,8 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       sub-bot (\"위임: <봇> · <일>\"), and at least every five minutes while \
                       working (status running with no stage is enough). Never put a secret, a \
                       file path, a commit title, code or a copy of the request in a stage: \
-                      name the step. People see only what you report here and in \
+                      name the step. Progress belongs here and never in a chat message (no \
+                      \"working on it\"). People see only what you report here and in \
                       textDelta; oort cannot see your reasoning.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_event_schema,
@@ -971,7 +985,12 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
     ToolDescriptor {
         name: TOOL_RUN_COMPLETE,
         title: "Complete a run",
-        description: "Deliver the final answer and settle the run this lease owns. For a code \
+        description: "Deliver the final answer and settle the run this lease owns. body is \
+                      posted for you as your reply (do not also send it with \
+                      oort_message_post): only the result, a blocker (what stopped you and \
+                      what you need) or what a person must do, with no empty greeting, no \
+                      restated request and no step log (steps go to oort_run_event stage). \
+                      For a code \
                       task, report the result in artifacts: resultKind (pr_opened, \
                       branch_only, vm_only or no_change), tests {passed, failed, notRun}, \
                       nextAction (merge_ok, please_test, blocked or none) and commitSha (7 to \
@@ -1027,7 +1046,9 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       (ai.connect: connect an AI subscription or a team API key; \
                       settings.open: open one settings section, e.g. notifications). The \
                       server picks the channel, the recipient and the title; the card \
-                      runs nothing until that person taps it on their own device.",
+                      runs nothing until that person taps it on their own device. If the \
+                      request came inside a thread, set rootId to that thread's root so the \
+                      card lands there.",
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: card_suggest_schema,
     },
