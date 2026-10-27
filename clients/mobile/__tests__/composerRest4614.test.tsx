@@ -358,3 +358,224 @@ describe('접히는 움직임 — 포커스를 잃어서 접힐 때와 같은 �
     expect(input().props.value).toBe('쓰던 글');
   });
 });
+
+// =============================================================================
+// 여러 줄 초안이 쉬러 가고 돌아올 때 글 칸이 **한 프레임에** 줄거나 자라지 않는다 (#4614, 계측 `DM-STEADY-FOCUS+actions+draft<N>` 의 `dismiss`·`focus` 창).
+//
+// 글 칸이 자라는 빌드(#4615 가 고치는 중 — 이 빌드의 입력창은 `flex: 1` 에 갇혀 글이 몇 줄이든 한 줄 높이다)에서 쉬는 알약으로 접는 순간 글 칸이 쉬는 알약의 한 줄로 **한 프레임에** 줄었다:
+// 시뮬레이터 16 Pro · 세 줄 초안 · `flex: 0` 으로 키운 입력창에서 도크가 43pt 줄고 목록이 1~2프레임 늦게 따라와 틈 편차가 +43pt(46ms)였다. 다시 펼칠 때도 같은 크기로 한 번에 자랐다
+// (포커스가 스프링 한가운데 닿으면서 못 박힘이 풀렸다). 이 블록은 그 높이 변화가 도구 줄과 **같은 스프링**으로 이어지는지 잰다.
+//
+// 제스트에는 레이아웃이 없다: 글 칸의 자연 높이는 시험이 입력창의 `onLayout` 으로 알려 준다(실기에서 입력창이 알리는 값과 같은 경로). 읽는 것은 글 칸이 차지하는 높이(= 높이 + 위·아래 여백)다 —
+// 움직이는 동안은 감싼 상자(`composer-field`)가, 쉬는 알약으로 못 박힌 뒤에는 입력창이, 자연 높이로 서 있을 때는 시험이 알려 준 값이 그 값이다.
+// =============================================================================
+describe.each([[1], [2]])('쉬러 가고 돌아오는 동안 글 칸이 한 프레임에 줄거나 자라지 않는다 (#4614 단차) — 글자 배수 %s', scale => {
+  // 글자 배수 2 는 제스트 기본값이다. 이 배수에서는 쉬는 알약의 위 여백이 0 이라(첫 줄 상자 46 이 알약 64 의 한가운데 가까이 선다) 위 여백의 보간이 비어 보인다 — 배수 1 은 위 여백 1, 아래 여백 11 이다.
+  beforeEach(() => {
+    if (scale !== 2) jest.spyOn(Dimensions, 'get').mockReturnValue({...Dimensions.get('window'), fontScale: scale});
+  });
+  const NATURAL = 110; // 다섯 줄쯤의 글 칸(5 × 22 + 크롬 18)
+
+  const fieldBox = () => screen.getByTestId('composer-field');
+  const outerStyle = () => flat(fieldBox().props.style);
+  const num = (value: unknown) => (typeof value === 'number' ? value : 0);
+  /** 글 칸이 알약 안에서 차지하는 높이. 어느 모양(움직이는 중 · 못 박힌 쉼 · 자연 높이)이든 같은 자로 잰다. */
+  const footprint = (natural = NATURAL) => {
+    // 보간 세 줄(높이·위·아래 여백)의 합은 부동소수점 오차(1e-14)를 낸다 — 1000분의 1pt 로 자른다.
+    const thousandth = (value: number) => Math.round(value * 1000) / 1000;
+    const outer = outerStyle();
+    if (typeof outer.height === 'number') return thousandth(outer.height + num(outer.marginTop) + num(outer.marginBottom));
+    const inner = inputStyle();
+    if (typeof inner.height === 'number') return thousandth(inner.height + num(inner.marginTop) + num(inner.marginBottom));
+    return natural;
+  };
+  const reportLayout = (height: number) =>
+    fireEvent(input(), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 280, height}}});
+  /** 입력창이 자연 높이로 서 있다고 알리고(여러 줄 글), 펼친 끝값에 앉힌다. */
+  function mountMultiline(natural = NATURAL) {
+    mount();
+    reportLayout(natural);
+    typeAndSettle('첫 줄\n둘째 줄\n셋째 줄');
+    expect(footprint(natural)).toBe(natural); // 대조: 서 있는 동안은 자연 높이다 — 아래 「줄어든다」가 알림 없이도 통과하지 않는다
+  }
+  const frames = (count: number, natural = NATURAL) => {
+    const boxes: number[] = [];
+    for (let frame = 0; frame < count; frame += 1) {
+      advance();
+      boxes.push(footprint(natural));
+    }
+    return boxes;
+  };
+  const steps = (boxes: number[]) => boxes.slice(1).map((box, index) => box - (boxes[index] as number));
+
+  it('접힘: 알림이 온 렌더는 자연 높이 그대로이고, 프레임마다 단조롭게 쉬는 알약 높이로 내려간다 — 한 프레임에 줄지 않는다', () => {
+    mountMultiline();
+    rest();
+    blur();
+    const boxes = [footprint(), ...frames(40)];
+    expect(boxes[0]).toBe(NATURAL); // 첫 렌더가 이미 줄어 있으면 그 위 대화가 그 프레임에 통째로 뛴다
+    boxes.forEach((box, index) => {
+      if (index > 0) expect(box).toBeLessThanOrEqual(boxes[index - 1] as number);
+    });
+    expect(boxes[boxes.length - 1]).toBe(collapsed());
+    // 한 걸음이 전체 변화의 반을 넘지 않는다: 한 프레임 단차(전체)는 여기서 걸린다. 스프링이면 프레임당 한 자릿수 퍼센트다.
+    const total = NATURAL - collapsed();
+    expect(Math.max(...steps(boxes).map(Math.abs))).toBeLessThan(total / 2);
+    expect(steps(boxes).filter(step => step < -0.5).length).toBeGreaterThanOrEqual(5); // 여러 프레임에 걸쳐 움직인다
+  });
+
+  it('움직이는 동안은 상자가 안을 자르고 입력창은 못 박히지 않는다 — 못 박힘의 여백과 상자의 여백이 겹쳐 첫 줄이 밀리지 않는다', () => {
+    mountMultiline();
+    rest();
+    blur();
+    advance(5);
+    expect(hasTools()).toBe(true); // 전제: 아직 움직이는 중이다
+    expect(outerStyle().overflow).toBe('hidden');
+    expect(typeof outerStyle().height).toBe('number');
+    expect(inputStyle().height).toBeUndefined();
+    expect(inputStyle().marginTop).toBeUndefined();
+    expect(inputStyle().marginBottom).toBeUndefined();
+  });
+
+  it('블러 → 알림 순서여도 같다', () => {
+    mountMultiline();
+    blur();
+    rest();
+    const boxes = [footprint(), ...frames(40)];
+    expect(boxes[0]).toBe(NATURAL);
+    expect(Math.max(...steps(boxes).map(Math.abs))).toBeLessThan((NATURAL - collapsed()) / 2);
+    expect(boxes[boxes.length - 1]).toBe(collapsed());
+  });
+
+  it('움직임이 끝나면 쉬는 알약의 못 박힘이 넘겨받고 상자의 높이·여백은 걷힌다 — 같은 높이로 바톤을 넘긴다', () => {
+    mountMultiline();
+    rest();
+    blur();
+    settle();
+    expect(outerStyle().height).toBeUndefined();
+    expect(outerStyle().overflow).toBeUndefined();
+    expect(inputStyle().height).toBe(firstLineBox());
+    expect(footprint()).toBe(collapsed());
+  });
+
+  it('돌아옴: 다시 누르면 알약 높이에서 자연 높이로 프레임마다 단조롭게 자란다 — 포커스가 스프링 한가운데 닿아도 한 번에 자라지 않는다', () => {
+    mountMultiline();
+    rest();
+    blur();
+    settle();
+    expect(footprint()).toBe(collapsed()); // 전제: 쉬는 알약
+    focus();
+    const boxes = [footprint(), ...frames(40)];
+    expect(boxes[0]).toBe(collapsed());
+    boxes.forEach((box, index) => {
+      if (index > 0) expect(box).toBeGreaterThanOrEqual(boxes[index - 1] as number);
+    });
+    expect(Math.max(...steps(boxes).map(Math.abs))).toBeLessThan((NATURAL - collapsed()) / 2);
+    expect(boxes[boxes.length - 1]).toBe(NATURAL);
+    expect(steps(boxes).filter(step => step > 0.5).length).toBeGreaterThanOrEqual(5);
+    // 끝나면 상자가 걷히고 입력창은 자연 높이다(못 박힘 없음).
+    expect(outerStyle().height).toBeUndefined();
+    expect(inputStyle().height).toBeUndefined();
+    expect(input().props.scrollEnabled).not.toBe(false);
+  });
+
+  it('왕복을 되풀이해도 시작값은 늘 자연 높이다 — 잘려 있는 동안 입력창이 알려 온 높이는 자연 높이로 적히지 않는다', () => {
+    mountMultiline();
+    rest();
+    blur();
+    reportLayout(50); // 상자가 입력창을 자르는 동안 입력창이 알려 온 줄어든 높이
+    settle();
+    reportLayout(31); // 못 박힌 쉼 높이
+    focus();
+    reportLayout(70); // 펼치는 도중의 높이
+    settle();
+    expect(footprint()).toBe(NATURAL); // 전제: 다시 자연 높이
+    blur(); // 알림 없이 포커스만 잃는다 — 글이 있으니 펼친 채
+    rest();
+    const boxes = [footprint(), ...frames(40)];
+    expect(boxes[0]).toBe(NATURAL); // 두 번째 접힘도 자연 높이에서 시작한다(50·31·70 이 아니라)
+    expect(boxes[boxes.length - 1]).toBe(collapsed());
+  });
+
+  it('한 줄 초안은 높이가 변하지 않는다 — 알약 높이와 자연 높이가 같다', () => {
+    mountMultiline(collapsed());
+    rest();
+    blur();
+    const boxes = [footprint(collapsed()), ...frames(40, collapsed())];
+    expect(new Set(boxes)).toEqual(new Set([collapsed()]));
+  });
+
+  it('자연 높이를 아직 모르면(입력창이 한 번도 안 알렸다) 움직임 없이 바로 쉬는 알약으로 못 박힌다 — 이전과 같다', () => {
+    mount();
+    typeAndSettle('첫 줄\n둘째 줄');
+    rest();
+    blur();
+    expect(outerStyle().height).toBeUndefined();
+    expect(outerStyle().overflow).toBeUndefined();
+    advance();
+    expect(inputStyle().height).toBe(firstLineBox());
+  });
+
+  it('동작 줄이기: 움직임 없이 한 번에 쉬는 알약이 되고, 다시 누르면 한 번에 펼쳐지며 상자는 걷힌다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    await mountSettled();
+    reportLayout(NATURAL);
+    focus();
+    fireEvent.changeText(input(), '첫 줄\n둘째 줄\n셋째 줄');
+    expect(hasTools()).toBe(true);
+    rest();
+    blur();
+    expect(hasTools()).toBe(false);
+    expect(outerStyle().height).toBeUndefined();
+    expect(footprint()).toBe(collapsed());
+    focus();
+    expect(hasTools()).toBe(true);
+    expect(outerStyle().height).toBeUndefined();
+    expect(inputStyle().height).toBeUndefined();
+  });
+
+  describe('쉬던 초안의 높이 기억은 쉬는 상태와 함께 풀린다', () => {
+    beforeEach(() => __setNonSecretStore(memoryStore()));
+    afterEach(() => __setNonSecretStore(null));
+
+    it('방이 바뀌면 걷힌다 — 다른 방의 복원된 초안이 이 방의 자연 높이 상자에 갇히지 않는다', () => {
+      const keyA = channelDraftKey('ch-a');
+      const keyB = channelDraftKey('ch-b');
+      saveDraft(keyA, '첫 줄\n둘째 줄');
+      saveDraft(keyB, '다른 방의\n초안');
+      const view = mount({draftKey: keyA});
+      settle();
+      reportLayout(NATURAL);
+      rest();
+      settle();
+      expect(hasTools()).toBe(false); // 전제: 쉬는 알약
+      view.rerender(tree({draftKey: keyB}));
+      // 펼치는 스프링이 **끝나기 전에** 읽는다 — 끝나면 어느 쪽이든 낡은 기억이 걷힌다. 낡은 기억이 남았다면 이 순간 상자가 새 방의 복원된 초안을 쉬는 알약 높이에 가둔다.
+      expect(hasTools()).toBe(true); // 복원된 초안은 펼침이다
+      expect(outerStyle().height).toBeUndefined();
+      expect(outerStyle().overflow).toBeUndefined();
+      settle();
+      expect(outerStyle().height).toBeUndefined();
+    });
+  });
+
+  it('쉬는 초안을 보내면 걷힌다 — 다음에 쓰는 글이 낡은 높이 상자에 갇히지 않는다', () => {
+    mountMultiline();
+    rest();
+    blur();
+    settle();
+    fireEvent.press(screen.getByTestId('composer-send'));
+    settle();
+    expect(input().props.value).toBe('');
+    focus(); // 빈 입력창을 포커스로 펼친다 — 이제 쉬는 초안이 아니다
+    // 펼치는 스프링이 도는 중에 읽는다(끝나면 어느 쪽이든 낡은 기억이 걷힌다): 낡은 기억이 남았다면 상자가 이 빈 입력창을 쉬는 알약 높이에 가둔다.
+    expect(hasTools()).toBe(true);
+    expect(outerStyle().height).toBeUndefined();
+    expect(outerStyle().overflow).toBeUndefined();
+    fireEvent.changeText(input(), '새 글\n두 줄');
+    settle();
+    expect(hasTools()).toBe(true);
+    expect(outerStyle().height).toBeUndefined();
+    expect(outerStyle().overflow).toBeUndefined();
+  });
+});

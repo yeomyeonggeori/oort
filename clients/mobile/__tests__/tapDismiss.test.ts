@@ -10,7 +10,7 @@ import {
 } from '../src/features/conversation/tapDismiss';
 
 // =============================================================================
-// 대화 목록의 「탭」 판정 (#4614) — 이동 10pt 미만 · 300ms 미만 · 손가락 하나.
+// 대화 목록의 「탭」 판정 (#4614) — 이동 10pt 미만 · 250ms 미만(길게 누르기가 열리기 전; 이슈의 처음 300ms 는 10-27 에 정정) · 손가락 하나.
 //
 // 판정은 순수 함수라 제스처 시퀀스를 그대로 재생한다. 이 파일의 단정은 전부 **재생한 결과**(어느 단계에서 `tap` 이 참이 되나)를 읽는다 — 상수를 읽어 상수와 비교하지 않는다.
 // 경계는 양쪽에서 잰다(문턱 바로 안 = 탭, 문턱 = 아님). 한쪽만 재면 문턱을 아무 데로 옮겨도 통과한다.
@@ -99,6 +99,13 @@ describe('탭이 아니다', () => {
     expect(tappedAtTheEnd([down(0, 0, 1000), up(1000 + 2 * TAP_MAX_MS)])).toBe(false);
   });
 
+  it('길게 누르기가 시트를 여는 시간(LONG_PRESS_MS, 250ms)에 뗀 손은 탭이 아니다 — 시트를 연 손가락이 입력창까지 접지 않는다 (이슈의 처음 300ms 를 250ms 로 정정한 이유)', () => {
+    // 상수가 아니라 **길게 누르기 쪽 상수**로 잰다: 탭 상한을 300 처럼 더 크게 못 박으면 250~299ms 에 뗀 손이 시트도 열고 탭도 된다.
+    expect(tappedAtTheEnd([down(0, 0, 5000), up(5000 + LONG_PRESS_MS - 1)])).toBe(true);
+    expect(tappedAtTheEnd([down(0, 0, 5000), up(5000 + LONG_PRESS_MS)])).toBe(false);
+    expect(tappedAtTheEnd([down(0, 0, 5000), up(5000 + LONG_PRESS_MS + 40)])).toBe(false);
+  });
+
   it('손가락이 둘이면 탭이 아니다 — 둘째가 닿으면 이 제스처는 깨진다', () => {
     expect(tappedAtTheEnd([down(0, 0, 1000), down(50, 0, 1010, 2), up(1060, 1), up(1070, 0)])).toBe(false);
   });
@@ -148,9 +155,9 @@ describe('탭이 아니다', () => {
 });
 
 describe('상수', () => {
-  it('시간 상한은 계약(300ms) 이하이고 길게 누르기가 열리는 시간 이하다 — 시트가 열리는 손가락은 탭이 아니다', () => {
-    expect(TAP_MAX_MS).toBeLessThanOrEqual(300);
-    expect(TAP_MAX_MS).toBeLessThanOrEqual(LONG_PRESS_MS);
+  it('시간 상한은 계약(250ms)이고 길게 누르기가 열리는 시간과 같다 — 시트가 열리는 손가락은 탭이 아니다', () => {
+    expect(TAP_MAX_MS).toBe(250);
+    expect(TAP_MAX_MS).toBe(LONG_PRESS_MS);
   });
 
   it('거리 문턱은 계약(10pt)이다', () => {

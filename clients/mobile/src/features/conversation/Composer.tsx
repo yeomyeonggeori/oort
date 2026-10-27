@@ -1272,6 +1272,14 @@ export function Composer({
   const [restedFlag, setRestedFlag] = useState(false);
   // 위의 **동기** 사본 — `onBlur`·목록의 알림이 렌더 없이 읽는다(접히는 움직임을 열지 말지가 같은 핸들러 안에서 정해져야 한다, `collapseWithMotion`).
   const restedRef = useRef(false);
+  // 쉬러 갈 때의 글 칸 **자연 높이**(#4614). 여러 줄 초안이 쉬는 알약으로 접히거나 다시 펼쳐질 때 글 칸의 높이를 한 프레임에 줄이거나 키우지 않고, 도구 줄과 **같은 스프링**으로 잇는 데 쓴다 —
+  // 한 프레임에 줄면 그 위 대화가 그만큼 한 번에 뛴다(시뮬레이터 실측, 세 줄: 도크 43pt 가 한 프레임에 줄고 목록이 1~2프레임 늦게 따라와 틈이 43pt 벌어졌다).
+  // 쉬는 동안 계속 들고 있다가 펼침의 스프링이 끝나면 버린다. `null` 이면 이 움직임이 없다(쉬지 않는 글·높이를 모를 때).
+  const [restFrom, setRestFrom] = useState<number | null>(null);
+  // 위의 **동기** 사본 — 입력창의 `onLayout` 이 「잘려 있는 중의 높이」를 자연 높이로 적지 않게 읽는다.
+  const restFromRef = useRef<number | null>(null);
+  // 입력창이 **자기 크기로 서 있을 때** 마지막으로 알려 온 높이(`onInputLayout`). 쉬러 가는 순간 이 값이 `restFrom` 이 된다.
+  const inputHeightRef = useRef(0);
   // 끌어 내리기가 읽는 것들 (#4305). 글자 범위를 잡고 있거나(선택 손잡이를 끄는 중) 글이 상한을 넘어 안에서
   // 스크롤되는 중이면 아래로 끄는 손가락은 자판을 내리려는 것이 아니다.
   const selectionRangeRef = useRef(false);
@@ -1383,6 +1391,8 @@ export function Composer({
     // 다른 방의 초안은 그 방의 규칙으로 돌아온다 — 쉬던 방의 표식이 따라오지 않는다(#4614).
     restedRef.current = false;
     setRestedFlag(false);
+    restFromRef.current = null;
+    setRestFrom(null);
     setText(restored);
     setCaret(restored.length);
     setMentionOpen(false);
@@ -1739,6 +1749,8 @@ export function Composer({
     if (!restedFlag || text !== '') return;
     restedRef.current = false;
     setRestedFlag(false);
+    restFromRef.current = null;
+    setRestFrom(null);
   }, [restedFlag, text]);
   const expanded = pressing || focused || (text !== '' && !rested);
   const reduceMotion = useReduceMotionRef();
@@ -1779,8 +1791,12 @@ export function Composer({
     return dockFollow.registerRest(() => {
       if (currentTextRef.current === '' || restedRef.current) return;
       restedRef.current = true;
+      // 접히는 스프링의 **시작값**: 지금 글 칸이 서 있는 높이. 모르면(아직 한 번도 재지 않았다) 이 움직임 없이 바로 접는다.
+      const natural = inputHeightRef.current;
+      restFromRef.current = natural > 0 ? natural : null;
       collapseWithMotion();
       setRestedFlag(true);
+      setRestFrom(restFromRef.current);
     });
   }, [dockFollow, collapseWithMotion]);
   useEffect(() => {
@@ -1806,6 +1822,12 @@ export function Composer({
         if (result.finished) done?.();
       });
     };
+    // 쉬던 초안의 글 칸 움직임(`restFrom`)은 펼침이 **끝나야** 버린다 — 포커스가 오는 순간(`onInputFocus`)이 아니라. 포커스는 스프링 한가운데에 닿고(눌림이 먼저 펼침을 연다),
+    // 그때 글 칸을 자연 높이로 되돌리면 남은 높이가 한 프레임에 열린다.
+    const endRestClip = () => {
+      restFromRef.current = null;
+      setRestFrom(null);
+    };
     if (expanded) {
       setCollapsing(false);
       if (reduceMotion.current) {
@@ -1817,7 +1839,8 @@ export function Composer({
         // 접힘 쪽은 알리지 않는다: 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있고, 동작 줄이기의 접힘은 간격이 변하지 않았다(녹화 6번, 변화 ≤1px).
         progress.setValue(1);
         dockFollow?.notify();
-      } else spring(1);
+        endRestClip();
+      } else spring(1, endRestClip);
       return;
     }
     // 접힘은 두 갈래다.
@@ -1917,13 +1940,26 @@ export function Composer({
   const restedLine = Math.ceil(line.body * fontScale);
   const restedBox = INPUT_PAD_Y + INPUT_BORDER + restedLine;
   const restedMarginTop = Math.max(0, Math.floor((collapsedHeight - restedLine) / 2) - INPUT_PAD_Y - INPUT_BORDER);
+  const restedMarginBottom = Math.max(0, collapsedHeight - restedMarginTop - restedBox);
   const restedStyle = {
     height: restedBox,
     minHeight: restedBox,
     paddingBottom: 0,
     marginTop: restedMarginTop,
-    marginBottom: Math.max(0, collapsedHeight - restedMarginTop - restedBox),
+    marginBottom: restedMarginBottom,
   };
+  // 접히거나 펼쳐지는 **움직임 동안**(`shown`)에는 글 칸을 못 박지 않고 그것을 감싼 상자(`composer-field`)를 같은 진행값으로 줄이고 키운다(#4614): 상자의 높이가 쉬는 알약의 첫 줄 상자 ↔ 쉬러 갈 때의
+  // 자연 높이(`restFrom`)를 오가고, 위·아래 여백이 쉬는 알약의 값 ↔ 0 을 오간다 — 그래서 상자가 차지하는 높이(높이 + 여백)는 `collapsedHeight` ↔ `restFrom` 을 **도구 줄과 같은 스프링으로** 오간다.
+  // 상자는 안을 잘라서(`overflow`) 첫 줄이 위에 붙은 채 줄어든다. 움직임이 끝나면(`shown` 거짓 = 쉬는 알약) 끝 모양과 **같은** 못 박힘으로 바톤을 넘긴다: 높이 + 여백이 같아 한 프레임도 안 튄다.
+  const clipRest = restFrom !== null && shown;
+  const restClipStyle = clipRest
+    ? {
+        height: progress.interpolate({inputRange: [0, 1], outputRange: [restedBox, Math.max(restFrom, restedBox)]}),
+        marginTop: progress.interpolate({inputRange: [0, 1], outputRange: [restedMarginTop, 0]}),
+        marginBottom: progress.interpolate({inputRange: [0, 1], outputRange: [restedMarginBottom, 0]}),
+        overflow: 'hidden' as const,
+      }
+    : null;
   // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
   //
   // 「동작 줄이기」는 글 칸 여백을 **진행값을 거치지 않고** 상태가 정한 숫자로 쓴다(#4518). 움직임이 없으니 보간할 것이 없다. 보간 값은 JS 구동이라 `setValue` 가 네이티브를 리액트 밖에서 직접 고치는데,
@@ -1994,6 +2030,8 @@ export function Composer({
   // 그 답은 이 상자에 대한 답이 아니다.
   const [inputWidth, setInputWidth] = useState<number | null>(null);
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
+    // 쉬는 움직임이 글 칸을 잘라 두는 동안(`restFrom`)의 높이는 자연 높이가 아니다 — 그 높이를 적으면 다음에 쉬러 갈 때 시작값이 줄어든 높이가 된다(#4614).
+    if (restFromRef.current === null) inputHeightRef.current = event.nativeEvent.layout.height;
     // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305). 펼치는 중·접히는 중의 폭도 아니므로
     // 접힘이 끝나 도구 줄이 내려간 뒤(`shown` 이 거짓, 접힌 폭)에서만 잰다(#4456 → #4518: 진행값 리스너는 첫 접힘 뒤 사라진다, 위 `shownRef`).
     if (shownRef.current) return;
@@ -2414,7 +2452,7 @@ export function Composer({
           </Pressable>
         )}
         <Animated.View
-          style={{marginLeft: inputInset, marginRight: inputInset}}
+          style={[{marginLeft: inputInset, marginRight: inputInset}, restClipStyle]}
           testID="composer-field"
           // 누름 (#4518): 입력창에 닿는 터치만 듣는다 — 이 상자는 입력창만 감싼다(+ · 보내기 · 도구 줄은 형제다). 관찰만 하고 응답자를 잡지 않는다.
           onTouchStart={onFieldTouchStart}
@@ -2436,7 +2474,8 @@ export function Composer({
             {maxHeight},
             text === '' && {height: collapsedHeight},
             // 쉬는 초안도 한 줄로 못 박는다(#4614) — 안 그러면 접힌 알약이 여러 줄 높이로 서 있다. 위 `restedStyle` 이 왜 `collapsedHeight` 가 아닌지 말한다.
-            rested && restedStyle,
+            // 움직이는 동안은 못 박지 않는다 — 그동안은 감싼 상자(`restClipStyle`)가 같은 일을 진행값으로 한다.
+            rested && !clipRest && restedStyle,
           ]}
           onContentSizeChange={event => {
             overflowRef.current =
