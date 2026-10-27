@@ -118,7 +118,7 @@ function coordinates(ids) {
     // 속도 문턱(0.7px/ms)을 넘으려면 ≈100pt 이상이 필요해, 그보다 작은 시트(SE 편집 시트: 문턱 87pt → 튕김 78pt → 측정 0.52~0.63)에서는 이 장면을 못 쓴다.
     FLICK_SKIP: flick < 100,
   };
-  const geometry = {sheetTop: sheet.y0, sheetHeight: height, thresholdPt: threshold, farPt: far, shortPt: short};
+  const geometry = {sheetTop: sheet.y0, sheetHeight: height, thresholdPt: threshold, farPt: far, shortPt: short, screenWidthPt: sheet.x1 - sheet.x0};
   if (SURFACE === 'LIST') {
     const row = ids.get('new-dm-person-member01');
     const pill = ids.get('new-dm-search-pill');
@@ -281,7 +281,8 @@ async function main() {
   summary.failed = lines.filter(line => /FAILED/.test(line));
   if (recorder && fs.existsSync(mp4)) {
     // 키보드가 있는 편집 시트는 시트 바닥(= 키보드 윗면) 위만 본다.
-    const track = trackSheetTop(mp4, 3, SURFACE === 'EDIT' ? coords.geometry.sheetTop + coords.geometry.sheetHeight - 20 : Infinity);
+    // 배율은 영상 폭 ÷ 화면 폭(pt)이다(16 Pro 3x · SE 2x) — 3 으로 못 박으면 SE 의 수치가 틀렸다(design-review r1 M2).
+    const track = trackSheetTop(mp4, 3, SURFACE === 'EDIT' ? coords.geometry.sheetTop + coords.geometry.sheetHeight - 20 : Infinity, coords.geometry.screenWidthPt);
     fs.writeFileSync(path.join(OUT, `${TAG}.track.csv`), ['t_ms,sheet_top_pt', ...track.rows.map(r => `${r.t},${r.top ?? ''}`)].join('\n'));
     const tops = track.rows.map(r => r.top).filter(v => v !== null);
     summary.track = {frames: track.rows.length, restTopPt: coords.geometry.sheetTop, minTopPt: Math.min(...tops), maxTopPt: Math.max(...tops)};
