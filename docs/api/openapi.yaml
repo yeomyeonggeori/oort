@@ -1871,7 +1871,10 @@ paths:
         Mints a 32-byte token (same shape as owner_bootstrap), stores sha256
         only, TTL 24h, single use. Reissue consumes any previous live reset
         token for that member. The raw token is in this 201 body once — the
-        operator delivers `/claim/<token>` out of band. There is no mailer.
+        operator delivers `/claim/<token>` out of band. There is no mailer. The
+        issue takes the workspace's membership lock (exclusive) first, like a
+        claim and a membership change, so it is ordered with them (ADR-0215
+        증보 2, #4636).
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"

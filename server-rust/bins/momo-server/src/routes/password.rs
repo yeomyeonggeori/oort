@@ -30,8 +30,7 @@
 //! audit row, so without the shared first lock the two could wait for each other. Row locks
 //! that a foreign key takes (an `audit_log` or `token` insert needs the member row) are not
 //! part of this order: transactions that start with the membership lock are serialized by it
-//! and cannot meet there, and the paths that do not start with it (token rotation, linking a
-//! device) are not covered by this change.
+//! and cannot meet there; paths that do not start with it are outside this change.
 
 use std::time::Duration;
 
