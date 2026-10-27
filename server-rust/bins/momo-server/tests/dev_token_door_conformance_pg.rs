@@ -25,7 +25,7 @@
 //! | `a_developer_token_is_not_an_agent_port_credential` | R1(a): a card, an access, a refresh and a relabelled secret get an unknown string's answer at the Agent Port; the control agent bearer is admitted | the Agent Port takes a developer envelope |
 //! | `a_live_token_is_refused_on_every_pair_off_the_table_and_the_database_is_unchanged` | R3(b) with a live all-scope owner token: the sweep, the database unchanged, the token untouched; then L1–L7 with real data | a refusal reaches a handler, or a table pair stops working |
 //! | `a_variant_of_a_table_path_never_reaches_a_handler_the_table_did_not_open` | R3(c): a static sibling of `{ch}` behind the real door, hit by every method and spelling, runs no handler; `%61rchived` and friends reach only the table row's | the key is the raw path's shape instead of the matched template |
-//! | `a_developer_token_cannot_issue_list_or_revoke_developer_tokens` | R3(d): the credential routes and the policy route are refused, nothing changes, a session is admitted on them | a credential route enters the table |
+//! | `a_developer_token_cannot_issue_list_or_revoke_developer_tokens` | R3(d): the credential routes and the policy route are refused, nothing changes, a session is admitted on them | a credential route enters the table **and** its handler's own refusal (`refuse_developer_token`) is removed — either wall alone is defence in depth and stays green; the handler wall is asserted DB-free in `routes::dev_access::tests` |
 //! | `a_live_developer_token_is_refused_on_the_approval_decision_route` / `…_run_decision_route` | decide(), layer one, with a live token: refused before the lookup, no decision recorded, a person is not refused | a decision route enters the table |
 //! | `the_database_keeps_dev_scopes_on_dev_rows_and_dev_columns_off_every_other_row` | R4 in the database: the named CHECK (23514) refuses each violation; the CHECKs agree with `DEV_SCOPES` and with every existing scope | a CHECK is dropped or loosened |
 //!
@@ -2890,7 +2890,10 @@ async fn a_variant_of_a_table_path_never_reaches_a_handler_the_table_did_not_ope
 /// four credential routes and on the policy route — and nothing happens: no `token` row appears, no
 /// card is revoked. The controls: the same token's `…/dev-access/self` answers 200, and the
 /// owner's SESSION JWT is admitted on the very same routes (200), so the routes exist and the 403
-/// is the table's.
+/// is a refusal for the developer token itself. The table (first wall) and the handler's own
+/// `refuse_developer_token` (second wall) answer with the same 403 `dev_route_not_allowed`, so this
+/// test goes red only when BOTH walls are gone; each wall alone is covered elsewhere (the table by the
+/// sweep and the closed-table tests, the handler by `routes::dev_access::tests`).
 #[tokio::test]
 #[ignore = "needs an isolated PostgreSQL 18 (ADR-0216 R3)"]
 async fn a_developer_token_cannot_issue_list_or_revoke_developer_tokens() {

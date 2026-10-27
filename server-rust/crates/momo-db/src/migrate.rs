@@ -689,12 +689,18 @@ mod tests {
     /// `attachment.upload_started` rows written before schema v2 (a file name can be a person's), with
     /// a `row_security = off` safety line and before/after row counts in a `NOTICE`. Data only: no
     /// column, no function, no grant — and the only migration that edits audit rows.
+    ///
+    /// 152 is #4660's human developer token (ADR-0216 D2·D3·D4·D7·D8): `token_kind` gains `dev`, `token`
+    /// gains nullable `dev_*` columns under named CHECKs (all written on `kind::text`, because the same
+    /// single-transaction file cannot use the new enum value as a literal), a `BEFORE INSERT` trigger that
+    /// lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
+    /// per lineage, and `message.sent_via` (`NULL` or `'dev'`). No new table, so no new RLS policy.
     #[test]
-    fn discovers_contiguous_migrations_001_to_151() {
+    fn discovers_contiguous_migrations_001_to_152() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=151).collect();
+        let expected: Vec<i64> = (1..=152).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -702,15 +708,11 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=151 under {}",
+            "expected contiguous 001..=152 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-        assert!(migrations
-            .last()
-            .unwrap()
-            .name
-            .starts_with("151_audit_attachment_name_scrub"));
+        assert!(migrations.last().unwrap().name.starts_with("152_dev_token"));
     }
 
     #[test]
