@@ -1665,6 +1665,43 @@ describe('아래 필 「최신으로」', () => {
     expect(spy).toHaveBeenCalledWith({offset: 3200, animated: false});
   });
 
+  // #4689 — 한 화면 안(끝까지 ≤ 창 높이)이라 「가깝다」고 읽히는 누름도 곧바로 선다. 활강은 UIKit 의 고정 길이 애니메이션이라
+  // 거리와 무관하게 약 300ms 를 먹는다(16 Pro 0.6화면 6회: 300~383ms · 17~18프레임, 세 화면 밖의 즉시 홉은 15~25ms).
+  it.each([false, true])(
+    '가까우면 활강하지 않고 곧바로 끝에 서며, 선 뒤에는 따라가기가 켜져 있다 (동작 줄이기 %s)',
+    async reduced => {
+      (AccessibilityInfo.isReduceMotionEnabled as jest.Mock).mockResolvedValue(reduced);
+      const {listRef} = mount();
+      await flushFrame(); // 설정의 첫 답이 온다
+      await settleAtBottom();
+      fireEvent(list(), 'scrollBeginDrag');
+      scrollBy(2800); // 끝까지 400pt — 창(800) 안이라 「가깝다」
+      expect(bottomPill()).not.toBeNull();
+      const toOffset = jest.spyOn(listRef.current!, 'scrollToOffset');
+      const toEnd = jest.spyOn(listRef.current!, 'scrollToEnd');
+
+      fireEvent.press(screen.getByTestId('jump-latest'));
+      expect(bottomPill()).toBeNull();
+      await flushFrame();
+      // 콘텐츠의 실제 끝으로, 애니메이션 없이 한 번에.
+      expect(toOffset).toHaveBeenCalledWith({offset: 3200, animated: false});
+      // 활강 명령(애니메이션 인자가 참인 호출)은 한 번도 나가지 않는다.
+      const glides = [...toOffset.mock.calls, ...toEnd.mock.calls].filter(
+        ([options]) => options?.animated === true,
+      );
+      expect(glides).toEqual([]);
+
+      // 서고 나면 따라가기가 켜져 있다 — 뒤따라 붙는 행을 끝으로 따라가고, 필은 다시 서지 않는다.
+      atTheEnd();
+      await waitRound();
+      toOffset.mockClear();
+      fireEvent(list(), 'contentSizeChange', 390, 4100);
+      await flushFrame();
+      expect(toOffset).toHaveBeenCalledWith({offset: 3300, animated: true});
+      expect(bottomPill()).toBeNull();
+    },
+  );
+
   it('끝을 넘어 선 자리는 쉬는 자리가 아니다 — 스크롤뷰가 든 끝으로 되돌린다', async () => {
     // 시뮬레이터 실측(iOS 26.5): 착지한 목록이 콘텐츠 끝보다 415pt 아래에 서서
     // 화면이 비었다. 옛 도착 판정(`left <= 1`)은 음수도 도착으로 읽었다.

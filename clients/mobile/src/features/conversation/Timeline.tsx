@@ -2011,14 +2011,23 @@ function TimelineInner({
       // reason in the note above.
       //
       // `latest` is the 「최신으로」 pill (#1892): the same travel as a send, and
-      // the one of the three a person asked for by pressing something — so it is
-      // the one that honours 「동작 줄이기」, as the web jump does
-      // (`timelineScrollBehavior`). Far away it is instant rounds already.
+      // the one of the three a person asked for by pressing something.
+      //
+      // **It never glides** (#4689, owner 10-27: 「스크롤 한 상태에서 최신 메세지로
+      // 이동하면 바로 이동 되게」). The glide is UIKit's `setContentOffset(animated:)`,
+      // whose duration is fixed whatever the distance — measured (16 Pro, Debug, a
+      // 0.6-screen distance, 6 presses): 300–383ms from the press to the last row
+      // standing, 17–18 frames, against 15–25ms for the instant hop the same press
+      // takes from three screens away. A person who pressed it to get to the newest
+      // message was being made to watch the list slide for a third of a second.
+      // 「동작 줄이기」 therefore no longer decides anything here: the answer is
+      // already instant. A send stays gliding — the reader's own message eases in,
+      // and nobody pressed anything for it.
       const distance = distanceToEnd(geometryRef.current);
       const near =
         mode !== 'entry' &&
         (distance === null || distance <= geometryRef.current.viewportHeight);
-      const glide = near && !(mode === 'latest' && reduceMotionRef.current);
+      const glide = near && mode !== 'latest';
       convergingRef.current = !near;
       // Off for the correction, back on the moment it ends.
       if (!near) setChasingTail(true);
@@ -2257,8 +2266,6 @@ function TimelineInner({
         converge();
       });
     },
-    // `reduceMotionRef` is one ref object for the life of the mount (a hook's
-    // `useRef`); listing it costs nothing and keeps the linter honest.
     [
       cancelConvergence,
       cancelFocus,
@@ -2267,7 +2274,6 @@ function TimelineInner({
       lastVisibleMessageId,
       listRef,
       noteFollowing,
-      reduceMotionRef,
       settleEntry,
     ],
   );

@@ -27,8 +27,8 @@ import type {PillState, ScrollLogEntry, TimelineGeometry} from '../src/features/
 //     n120 · n300 · n<행 수>   방의 메시지 수(기본 300). seq 1..N, 가변 높이(1~5줄)·네 사람·며칠 치(날짜 구분선).
 //     r1 · r2 · r<횟수>        거리마다 반복할 횟수(기본 3). 한 번 실행에 시험은 (거리 수 × 횟수)번이다.
 //     dnear · d3scr · dhalf · dtop   이 거리만 시험한다(여럿 가능). 없으면 네 거리 전부.
-//     paged    앱처럼 **50행씩** 부른다 — 처음엔 맨 끝 50행(`reachedStart=false`)이고, 위로 올라 `onStartReached` 가 불리면 120ms 뒤 앞 50행이 앞에 붙는다.
-//              기본(`full`)은 N 행이 처음부터 다 있다(`reachedStart`).
+//     paged    앱처럼 **50행씩** 부른다(`useTimeline` 의 `HEAD_LIMIT`·`PAGE_LIMIT` = 50) — 처음엔 맨 끝 50행(`reachedStart=false`)이고, 위로 올라 `onStartReached` 가 불리면 120ms 뒤 앞 50행이 앞에 붙는다.
+//              기본(`full`)은 N 행이 처음부터 다 있다(`reachedStart`). **멀리서 눌렀을 때 여러 홉이 나는 것은 `paged` 쪽이다**(full 은 대개 한 홉) — 실측은 #4689 계측 노트.
 //     arrive   올라가 있는 동안 남의 메시지 3통이 도착한다(아직 안 잰 꼬리 행) — 그 뒤에 누른다.
 //     fast     더 세게 올린다(플릭 간격 350ms·초기 속도 9000pt/s). 기본은 사람의 플릭(700ms·6000pt/s).
 //
@@ -37,12 +37,14 @@ import type {PillState, ScrollLogEntry, TimelineGeometry} from '../src/features/
 //   ② 사람이 올라가듯 올린다: `scrollToOffset({animated:false})` 를 16ms 마다, 플릭(속도가 지수로 줄어드는 밀기)을 700ms 마다 더하며 목표까지.
 //        가까움  끝에서 창 높이의 0.6배   ·  3화면  끝에서 창 높이의 3배
 //        중간    전체의 50% 위(= seq N/2 가 창에 들어올 때까지)  ·  맨 위 근처  전체의 90% 위(= seq N/10)
-//      (먼 둘은 **그 행이 창에 들어올 때까지** 올린다 — `anchorSeq`/`anchorRef`. 목록의 높이 추정이 아니라 행을 기준으로 해서 `paged` 에서도 같은 뜻이다.)
+//      (먼 둘은 **그 행이 창에 들어올 때까지** 올린다 — `anchorSeq`/`anchorRef`. 목록의 높이 추정이 아니라 행을 기준으로 해서 `paged` 에서도 같은 뜻이다. 행이 보이기 시작하면 관성을 버리고
+//       그 행의 창 좌표를 보며 **양쪽으로** 창 윗변에서 35% 자리에 앉힌다 — 위 끝에서 옛 페이지가 연달아 붙어 행이 아래로 밀리면 사람처럼 되돌아 내려온다. `ascend` 주석.)
 //   ③ 0.8초 쉰 뒤 화면 맨 위 표식(`jlat-phase`)을 `ARMED <k>` 로 켠다. 이때 `anchorSeq` 는 **마지막 seq** 다.
 //   ④ Maestro 가 `jump-latest` 알약을 **진짜로** 누른다.
 //   ⑤ 알약이 사라지는 렌더(`pillsRef.latest` true→false) = 누름 시각. 그 순간부터 프레임(rAF)마다: 스크롤 기하(`metricsRef`)·알약·마지막 행의 창 좌표(`anchorRef`)·꼬리 이음매의 창 좌표(`tailRef`).
 //      스크롤 보고 전부(`scrollLogRef`)·`chasingTail` 전이도 함께. 끝: 끝까지 남은 거리 ≤1pt 가 1.2초 유지되거나 누른 지 6초.
-//   ⑥ 기록을 싱크로 보낸다(`/jump`) → `DONE <k>`. 다음 시험은 새 목록이라 이전 시험의 잴 수 없는 것이 이어지지 않는다.
+//   ⑥ 기록을 싱크로 보낸다(`/jump`) → `DONE <k>`(다음 시험의 ARMED 직전까지 남는다). 다음 시험은 새 목록이라 이전 시험의 잴 수 없는 것이 이어지지 않는다.
+//      올림 뒤 알약이 안 서 있거나(드묾) 진입이 안 앉으면 그 목록을 버리고 새로 세운다(기록의 `skipped`·`entry.retries`). 올림이 목표에 못 닿았으면 `ascent.ok=false` — 분석기가 중앙값에서 뺀다.
 //
 // **이 표면은 `Timeline.tsx` 를 건드리지 않는다** — 읽는 것은 전부 `Timeline` 이 원래 내는 측정 seam(`listRef`·`metricsRef`·`scrollLogRef`·`pillsRef`·`anchorRef`·`tailRef`)이다.
 // 전부 지어낸 인물·문구다(달무리 스튜디오는 가상의 회사).
@@ -375,6 +377,8 @@ const SETTLE_QUIET_MS = 1000;
 const SETTLE_MAX_MS = 15_000;
 /** 진입이 안 앉으면(드물게 — 24건 중 2건) 새 목록으로 다시 시작한다. */
 const ENTRY_RETRIES = 2;
+/** 알약이 안 선 시험을 버리고 다시 세우는 최대 횟수(처음 포함). */
+const MAX_ATTEMPTS = 3;
 const PRESS_TIMEOUT_MS = 6000;
 const LAND_HOLD_MS = 1200;
 const NO_PRESS_MS = 300_000;
@@ -732,6 +736,18 @@ export function JumpLatestSurface({which}: {which: string}): React.JSX.Element {
       };
     }
 
+    /** 새 목록을 세우고(진입이 안 앉으면 새 목록으로 다시) 목표 거리까지 올린다. */
+    async function stage(spec: DistanceSpec, targetSeq: number | null) {
+      let entry = await prepare();
+      let retries = 0;
+      while (!entry.settled && retries < ENTRY_RETRIES && !cancelled) {
+        retries += 1;
+        entry = await prepare();
+      }
+      const ascent = await ascend(spec, targetSeq);
+      return {entry: {...entry, retries}, ascent};
+    }
+
     void (async () => {
       const trials: {spec: DistanceSpec; round: number}[] = [];
       for (let round = 1; round <= config.repeats; round += 1) {
@@ -747,28 +763,38 @@ export function JumpLatestSurface({which}: {which: string}): React.JSX.Element {
       for (let index = 0; index < trials.length && !cancelled; index += 1) {
         const k = index + 1;
         const {spec, round} = trials[index];
-        let entry = await prepare();
-        let retries = 0;
-        while (!entry.settled && retries < ENTRY_RETRIES && !cancelled) {
-          retries += 1;
-          entry = await prepare();
-        }
-        if (cancelled) return;
         const targetSeq = spec.kind === 'seq' ? Math.max(1, Math.round(config.rows * (1 - (spec.frac as number)))) : null;
-        const ascent = await ascend(spec, targetSeq);
-        if (cancelled) return;
-        if (config.arrive) {
-          // 올라가 있는 동안 남의 글 3통 — 목록은 따라가지 않고(읽는 중), 꼬리에 아직 안 잰 행이 선다.
-          for (let n = 0; n < ARRIVALS; n += 1) {
-            const arrival = {...room[config.rows + n], authorMemberId: OTHERS[n]} as Message;
-            setMessages(previous => [...previous, arrival]);
-            await wait(250);
+        // 누를 알약이 서 있어야 시험이다. 드물게(SE paged 12건 중 1건) 올림이 끝난 뒤 쉬는 동안 목록이 혼자 맨 아래로 돌아가 알약이 안 선다 — 그 시험은 버리고 새 목록으로 다시 세운다
+        // (기록의 `skipped` 에 남긴다). Maestro 는 표식 ARMED 가 켜진 뒤에야 알약을 찾으므로, 알약 없는 ARMED 를 보이면 흐름이 죽는다.
+        const skipped: Record<string, unknown>[] = [];
+        let staged = await stage(spec, targetSeq);
+        let gAtRest = geometry();
+        for (let attempt = 1; ; attempt += 1) {
+          if (cancelled) return;
+          if (config.arrive) {
+            // 올라가 있는 동안 남의 글 3통 — 목록은 따라가지 않고(읽는 중), 꼬리에 아직 안 잰 행이 선다.
+            for (let n = 0; n < ARRIVALS; n += 1) {
+              const arrival = {...room[config.rows + n], authorMemberId: OTHERS[n]} as Message;
+              setMessages(previous => [...previous, arrival]);
+              await wait(250);
+            }
           }
+          // 마지막 행을 이제부터 지켜본다(`anchorSeq`) — 목표 행 표식을 거둔다.
+          setAnchorSeq(lastSeq);
+          await wait(REST_MS);
+          gAtRest = geometry();
+          if (pillsNow()?.latest === true || attempt >= MAX_ATTEMPTS || cancelled) break;
+          skipped.push({
+            attempt,
+            reason: 'no-pill',
+            y: gAtRest === null ? null : round1(gAtRest.offsetY),
+            content: gAtRest === null ? null : round1(gAtRest.contentHeight),
+            ascentOk: staged.ascent.ok,
+            ascentMs: staged.ascent.ms,
+          });
+          staged = await stage(spec, targetSeq);
         }
-        // 마지막 행을 이제부터 지켜본다(`anchorSeq`) — 목표 행 표식을 거둔다.
-        setAnchorSeq(lastSeq);
-        await wait(REST_MS);
-        const gAtRest = geometry();
+        if (cancelled) return;
         const measured = await armAndMeasure(k);
         const distancePt = gAtRest === null ? null : round1(gAtRest.contentHeight - (gAtRest.offsetY + gAtRest.viewportHeight));
         await sink({
@@ -783,8 +809,9 @@ export function JumpLatestSurface({which}: {which: string}): React.JSX.Element {
           targetSeq,
           lastSeq,
           distancePt,
-          ascent,
-          entry: {...entry, retries},
+          ascent: staged.ascent,
+          entry: staged.entry,
+          skipped,
           device: {w: win.width, h: win.height, scale: PixelRatio.get()},
           reduceMotion,
           ...measured,

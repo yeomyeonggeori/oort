@@ -17,6 +17,8 @@
  *            `stable` = 그 뒤로 다시는 안 사라지는 첫 순간, `full` = 윗변까지 창 안에 든 첫 순간
  *   land     누름 → 착지(끝까지 남은 거리 ≤1pt 가 600ms 이어지기 시작한 순간)
  *   hops     홉 수 — 아래 기준
+ *   hops(fwd/rev)  홉 수(앞으로 간 홉 / 방향이 반대인 홉). paged 의 느림은 fwd 가 많은 것(꼬리가 잘려 한 배치씩 전진), full 의 흔들림은 rev 가 큰 것(해제 때 MVCP 가 앵커로 되밀음)이다.
+ *   lastFwd 마지막 앞으로-홉의 시각(ms) · chaseOff `chasingTail` 이 꺼진(= `release`) 시각(ms) — 그 사이가 `holdLanding` 틱, 그 뒤가 `followGlide` 의 활강이다.
  *   step/gap 첫 홉(누르자마자 「지금 아는 끝」으로 가는 한 번)을 뺀 **앞으로 가는 홉**의 중앙값: 한 번에 전진하는 양(pt)과 홉 사이 간격(ms)
  *   anim     애니메이션 프레임 수 — 아래 기준
  *   content  콘텐츠 높이: 누를 때 → 착지 때(Δ = 자란 만큼). 자랐다면 끝이 움직이는 과녁이었다는 뜻이다.
@@ -206,6 +208,10 @@ function analyze(rec) {
     fullMs: firstFull ? rel(firstFull.t) : null,
     landMs: landStart === null ? null : rel(landStart),
     hops: hops.length,
+    fwdHops: forward.length,
+    revHops: hops.filter(hop => hop.reversal).length,
+    lastFwdMs: forward.length > 0 ? forward[forward.length - 1].at : null,
+    chaseOffMs: (chases.find(entry => entry.on === false && entry.at > 0) ?? {}).at ?? null,
     hopList: hops,
     anim,
     animSpans,
@@ -223,6 +229,7 @@ function analyze(rec) {
     entrySettled: rec.entry?.settled,
     ascentOk: rec.ascent?.ok,
     ascentMs: rec.ascent?.ms,
+    skipped: Array.isArray(rec.skipped) ? rec.skipped : [],
     atArm: rec.atArm,
     frames: frames.length,
   };
@@ -269,6 +276,10 @@ for (const [tag, records] of byTag) {
       landMs: median(list.map(row => row.landMs)),
       landed: list.filter(row => row.landMs !== null).length,
       hops: median(list.map(row => row.hops)),
+      fwdHops: median(list.map(row => row.fwdHops)),
+      revHops: median(list.map(row => row.revHops)),
+      lastFwdMs: median(list.map(row => row.lastFwdMs)),
+      chaseOffMs: median(list.map(row => row.chaseOffMs)),
       hopStepPt: median(list.map(row => row.hopStepPt)),
       hopGapMs: median(list.map(row => row.hopGapMs)),
       anim: median(list.map(row => row.anim)),
@@ -320,7 +331,7 @@ for (const {tag, dup, rows, medians} of result) {
         text(row.landErr, 6, 1),
         row.pillUp600 ? 'y' : 'n',
         text(row.rebound, 5, 1),
-        row.end + (row.arrive ? '+arrive' : '') + (row.mode === 'paged' ? '+paged' : '') + (row.ascentOk === false ? ' !올림실패(중앙값 제외)' : '') + (row.entrySettled === false ? ' !진입미착(중앙값 제외)' : ''),
+        row.end + (row.arrive ? '+arrive' : '') + (row.mode === 'paged' ? '+paged' : '') + (row.ascentOk === false ? ' !올림실패(중앙값 제외)' : '') + (row.entrySettled === false ? ' !진입미착(중앙값 제외)' : '') + (row.skipped.length > 0 ? ` ↻${row.skipped.length}(알약 안 선 시험을 버리고 다시 세움)` : ''),
       ].join('\t'),
     );
     if (detail) {
@@ -333,7 +344,7 @@ for (const {tag, dup, rows, medians} of result) {
   }
   console.log('\n거리별 중앙값');
   console.log(
-    ['row', 'dist', 'n', 'dPt', 'travel', 'move', 'visible', 'stable', 'land', 'landed', 'hops', 'step(pt)', 'gap(ms)', 'anim', 'content press→land (Δ)', '|err|', 'pill+600', 'rebound'].join('\t'),
+    ['row', 'dist', 'n', 'dPt', 'travel', 'move', 'visible', 'stable', 'land', 'landed', 'hops(fwd/rev)', 'step(pt)', 'gap(ms)', 'lastFwd', 'chaseOff', 'anim', 'content press→land (Δ)', '|err|', 'pill+600', 'rebound'].join('\t'),
   );
   for (const m of medians) {
     console.log(
@@ -348,9 +359,11 @@ for (const {tag, dup, rows, medians} of result) {
         text(m.stableMs, 6),
         text(m.landMs, 5),
         `${m.landed}/${m.n}`,
-        text(m.hops, 4, 1),
+        `${text(m.hops, 4, 1)}(${text(m.fwdHops, 0, 1)}/${text(m.revHops, 0, 1)})`,
         text(m.hopStepPt, 7, 0),
         text(m.hopGapMs, 6, 0),
+        text(m.lastFwdMs, 6, 0),
+        text(m.chaseOffMs, 6, 0),
         text(m.anim, 4, 1),
         `${text(m.contentPress, 7, 0)}→${text(m.contentLand, 7, 0)} (${m.contentGrew >= 0 ? '+' : ''}${text(m.contentGrew, 0, 0)})`,
         text(m.absLandErr, 6, 1),
