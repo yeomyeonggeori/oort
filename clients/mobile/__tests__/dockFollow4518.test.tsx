@@ -223,7 +223,7 @@ describe('Timeline 이 도크 알림에 답한다', () => {
     // 풀었는지는 다리가 본 것으로 잰다: 목록이 사라지면 그 처리기가 불려도 `listRef` 가 비어 있어 **겉으로는** 아무 일도 안 일어나서, 부른 결과로는 풀었는지 못 가린다.
     const release = jest.fn();
     const register = jest.fn(() => release);
-    const bridge = {register, notify: jest.fn()};
+    const bridge = {register, notify: jest.fn(), registerRest: jest.fn(() => jest.fn()), rest: jest.fn()};
     const {view} = mountTimeline(bridge);
     await settleAtBottom();
     expect(register).toHaveBeenCalledTimes(1); // 전제: 실제로 걸었다

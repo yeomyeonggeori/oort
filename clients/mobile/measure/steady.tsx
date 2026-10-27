@@ -28,7 +28,7 @@ import {ConversationLayout} from '../src/features/conversation/ConversationLayou
 import {CONV} from '../src/features/conversation/convDesign';
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
-import {clearDraft, readDraft} from '../src/features/conversation/drafts';
+import {clearDraft, readDraft, saveDraft} from '../src/features/conversation/drafts';
 import {Timeline, type PillState, type ScrollLogEntry, type TimelineGeometry} from '../src/features/conversation/Timeline';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {useTimeline} from '../src/features/conversation/useTimeline';
@@ -88,6 +88,10 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
 //                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
 //                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
+//             `focus+draft<N>`(#4614) 는 N줄(최대 8) 초안을 **들고 시작한다**(초안 복원 길). 타자로 친 줄은 이 빌드에서 입력창을 키우지 못해서(#4615) 쉬는 알약으로 접히는 순간의 높이 변화를
+//                         재려면 복원으로 키가 큰 입력창을 세운다.
+//             `focus+actions`(#4614) 는 행에 **실제 행 동작**(`actions`)을 주고 `Keyboard.dismiss` 호출을 `dismiss` 표식으로 남긴다 — 목록을 눌러 자판을 내리고 입력창이 접히는 길
+//                         (행이 눌리는 표면)의 이동을 `focus-windows.mjs` 가 `dismiss` 창으로 잰다(`maestro/116-list-tap-rest.yaml`). `actions` 가 없으면 행이 비활성이라 그 길을 안 탄다.
 //             `focus+T<초>` 는 재는 시간을 줄인다(기본 140초; 예: `DM-STEADY-FOCUS+T130`). #4518 부터 **손이 닿는 순간**의 표식도 남긴다 —
 //                         `touch-down-x<pageX>-y<pageY>` · `touch-drag-d<거리>`(끌기 문턱 10pt 를 처음 넘는 때) · `touch-up` · `touch-cancel`(입력창에 닿은
 //                         터치를 도크 상자가 위로 받는다) 과 컴포저가 다시 그려진 커밋의 `render-<phase>-<ms>ms`(React `Profiler`). 흐름은
@@ -133,6 +137,17 @@ const SEND_ACTIONS: MessageRowActions = {
   onDelete: async () => {},
 };
 const TARGET = {workspaceId: WS, channelId: CHANNEL};
+/** `focus+draft<N>`(#4614)의 초안 줄들 — 가상 문구, 줄마다 한 줄에 들어가는 길이(SE 폭에서도). */
+const DRAFT_SAMPLE: readonly string[] = [
+  '내일 리뷰 열 시예요',
+  '자료는 공유 폴더에요',
+  '빠진 건 알려 주세요',
+  '명단은 오후에 보내요',
+  '회의록은 끝나고 정리',
+  '다음 주 일정도 부탁',
+  '장소는 회의실 B예요',
+  '점심은 각자 챙겨요',
+];
 
 function member(over: Partial<RosterMember> & {id: string}): RosterMember {
   return {
@@ -845,6 +860,14 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     // 사람이 누르고 친다(#4456; `enter` 는 #4613 — 같은 표식에 글자 수(`chars`)를 더한다). 포커스·자판·초안·보냄이 바뀔 때마다 표식을 남겨 프레임과 맞춘다. 자판 표식에는 높이(pt)와 iOS 가
     // 준 길이(ms)를 담는다 — 알약이 자판과 같은 박자로 오르내리는지 보는 근거다.
     c.mark('focus-start');
+    // `+actions`(#4614): 목록을 눌러 자판을 내리는 호출(`Timeline` 의 `onListTap`·행 `onRowPress`)을 표식으로 남긴다 — 입력창이 쉬러 가는 첫 순간이다. 원본은 그대로 부르고 장면이 끝나면 돌려 놓는다.
+    const originalDismiss = Keyboard.dismiss;
+    if (c.hasMod('actions')) {
+      Keyboard.dismiss = () => {
+        c.mark('dismiss');
+        originalDismiss.call(Keyboard);
+      };
+    }
     const keyboardEvents = ['keyboardWillShow', 'keyboardDidShow', 'keyboardWillHide', 'keyboardDidHide'] as const;
     const subscriptions = keyboardEvents.map(kind =>
       Keyboard.addListener(kind, event =>
@@ -874,6 +897,7 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
       await wait(16);
     }
     for (const subscription of subscriptions) subscription.remove();
+    Keyboard.dismiss = originalDismiss;
     return;
   }
   if (name === 'own') {
@@ -987,6 +1011,8 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const panelOpen = which === 'panel' || which === 'panel-flat';
   // #4455 보내기 장면. `send20+d80+relay60+anchor` 처럼 옵션이 붙을 수 있다.
   const sendScene = base === 'send20' || base === 'rec' || base === 'namefit';
+  // #4614 `+actions`: 행이 눌리는 표면(`actions` 가 있으면 행이 활성이다) — 목록을 눌러 자판을 내리는 실제 길을 탄다.
+  const rowActions = agentDm && mods.includes('actions');
   const [narrowBy, setNarrowBy] = useState<number | null>(null);
   const scenarios: readonly ScenarioName[] = unread || panelOpen
     ? ['hold']
@@ -1183,7 +1209,11 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
 
   useState(() => {
-    clearDraft(DRAFT_KEY);
+    // `+draft<N>`(#4614): 장면이 **N줄짜리 초안을 들고 시작한다**(초안 복원 길 — 입력창이 마운트 때 그 줄 수만큼의 높이로 선다). 쉬는 알약으로 접힐 때 글 칸이 한 프레임에 줄어드는 한 걸음을
+    // 재려면 키가 큰 입력창이 있어야 하는데, 타자로 친 줄은 이 빌드에서 입력창을 키우지 못한다(#4615) — 복원은 처음부터 콘텐츠 높이로 선다. 줄은 한 줄에 다 들어가는 짧은 가상 문구라 줄 수 = 눈에 보이는 줄 수다.
+    const restored = mods.map(mod => /^draft(\d+)$/.exec(mod)).find(match => match !== null);
+    if (restored) saveDraft(DRAFT_KEY, DRAFT_SAMPLE.slice(0, Number(restored[1])).join('\n'));
+    else clearDraft(DRAFT_KEY);
     return null;
   });
 
@@ -1375,7 +1405,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             pending={timeline.pending}
             // `+working`: 스트림 맨 끝에 「작업 중」 자리를 세운다(#4455 r4 H4 — 사진 뒤에 서 있는 행). 에이전트가 일하는 대화에서 사진을 보내는 경우다.
             working={mods.includes('working') ? WORKING_PEER : undefined}
-            actions={sendScene ? SEND_ACTIONS : undefined}
+            actions={sendScene || rowActions ? SEND_ACTIONS : undefined}
             reactions={timeline.reactions}
             pins={timeline.pins}
             loadingOlder={timeline.loadingOlder}
