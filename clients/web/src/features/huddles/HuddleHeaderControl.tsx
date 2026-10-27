@@ -7,7 +7,8 @@ import {
   PhoneOff,
   RotateCw,
 } from "lucide-react";
-import { Button } from "@/design/ui/button";
+import { Tooltip } from "@/design/ui/tooltip";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { InlineBanner } from "@/features/common/States";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
@@ -63,20 +64,21 @@ function HuddleIconButton({
   onClick: () => void;
   children: ReactNode;
 }) {
+  // 다른 머리 단추와 같은 문법이다(#4591): 같은 클래스 함수(34px 둥근 사각 + 연한 선 + 상태 토큰)와 디자인 시스템
+  // 툴팁(아래 방향). 네이티브 `title`은 두지 않는다.
   return (
-    <Button
-      type="button"
-      variant="ghost"
-      size="icon"
-      onClick={onClick}
-      aria-label={label}
-      title={label}
-      aria-busy={busy || undefined}
-      data-testid={testId}
-      className="shrink-0 rounded-md text-ink-muted"
-    >
-      {children}
-    </Button>
+    <Tooltip label={label} side="bottom">
+      <button
+        type="button"
+        onClick={onClick}
+        aria-label={label}
+        aria-busy={busy || undefined}
+        data-testid={testId}
+        className={channelHeaderControlClass()}
+      >
+        {children}
+      </button>
+    </Tooltip>
   );
 }
 
@@ -121,27 +123,30 @@ export function HuddleHeaderControl({
         <div className="wide-only min-w-0">
           <HuddleLiveChip huddle={huddle.active} />
         </div>
+        {/* 마이크 묶음은 `overflow-hidden`이 아니다(#4591): 그 상자는 안의 툴팁을 잘라 버린다. 대신 양 끝 단추가 자기
+            바깥 모서리를 둥글게 한다(`rounded-s-sm` · `rounded-e-sm`, 묶음의 `rounded-sm` 테두리와 같은 반경). */}
         <div
-          className="flex shrink-0 overflow-hidden rounded-sm border border-line-strong"
+          className="flex shrink-0 rounded-sm border border-line-strong"
           data-testid="huddle-mic-cluster"
         >
-          <button
-            type="button"
-            onClick={() => void huddle.toggleMicrophone()}
-            aria-label={microphoneLabel}
-            title={microphoneLabel}
-            aria-busy={huddle.busy === "microphone" || undefined}
-            data-testid="huddle-microphone"
-            className="flex size-control shrink-0 items-center justify-center text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            {huddle.busy === "microphone" ? (
-              <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
-            ) : huddle.muted ? (
-              <MicOff aria-hidden="true" className="size-4" />
-            ) : (
-              <Mic aria-hidden="true" className="size-4" />
-            )}
-          </button>
+          <Tooltip label={microphoneLabel} side="bottom">
+            <button
+              type="button"
+              onClick={() => void huddle.toggleMicrophone()}
+              aria-label={microphoneLabel}
+              aria-busy={huddle.busy === "microphone" || undefined}
+              data-testid="huddle-microphone"
+              className="flex size-control shrink-0 items-center justify-center rounded-s-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              {huddle.busy === "microphone" ? (
+                <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
+              ) : huddle.muted ? (
+                <MicOff aria-hidden="true" className="size-4" />
+              ) : (
+                <Mic aria-hidden="true" className="size-4" />
+              )}
+            </button>
+          </Tooltip>
           <HuddleMicMenu
             selectedDeviceId={huddle.microphoneDeviceId}
             gainPercent={huddle.microphoneGainPercent}

@@ -42,6 +42,7 @@ import AppDetailScreen from '../screens/AppDetailScreen';
 import AppsScreen from '../screens/AppsScreen';
 import InboxScreen from '../screens/InboxScreen';
 import SearchScreen from '../screens/SearchScreen';
+import SettingsScreen from '../screens/SettingsScreen';
 import SidebarScreen from '../screens/SidebarScreen';
 import WorkJobsScreen from '../screens/WorkJobsScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
@@ -210,6 +211,11 @@ export function Shell({
     () => dispatch({type: 'openAgentList'}),
     [],
   );
+  // 홈 머리의 내 얼굴 → 「설정」 페이지(층, #4457).
+  const onOpenSettings = useCallback(
+    () => dispatch({type: 'openSettings'}),
+    [],
+  );
   const onOpenAgent = useCallback(
     (agent: OpenAgent) => dispatch({type: 'openAgent', agent}),
     [],
@@ -307,7 +313,18 @@ export function Shell({
     nav.workList ||
     nav.workSession !== null ||
     nav.hosted !== null ||
-    nav.apps !== null;
+    nav.apps !== null ||
+    nav.settings;
+  // 설정 위에 다른 층이 얹히면(알림 입구 등) 설정은 더 이상 VoiceOver 의 모달 경계가 아니다.
+  const settingsOnTop =
+    nav.settings &&
+    nav.conversation === null &&
+    !nav.agentList &&
+    nav.agent === null &&
+    !nav.workList &&
+    nav.workSession === null &&
+    nav.hosted === null &&
+    nav.apps === null;
   // 메뉴가 열린 채 다른 길(알림 탭 등)로 층이 서면 메뉴를 **접는다**. 숨기기만 하면
   // 층이 닫힐 때 아무도 부르지 않은 메뉴가 다시 뜬다(design-review L1).
   useEffect(() => {
@@ -335,6 +352,7 @@ export function Shell({
               onOpenSearch={onOpenSearch}
               onOpenAgentList={onOpenAgentList}
               onOpenWorkList={onOpenWorkList}
+              onOpenSettings={onOpenSettings}
               onChannelLeft={onChannelLeft}
               notificationNotice={tapRouting.notice}
               onDismissNotificationNotice={tapRouting.dismissNotice}
@@ -381,6 +399,21 @@ export function Shell({
           순간(행을 고른 순간)에는 이미 닫혀 있다. */}
       {create === 'menu' && !covered ? (
         <PlusMenu items={plusItems} onClose={closeCreate} />
+      ) : null}
+
+      {/* 「설정」 — 홈 머리의 내 얼굴이 여는 전체 화면(#4457). 층 중 가장 아래라 다른 층보다 먼저
+          그린다(트리 순서가 쌓임 순서다): 설정 위에 얹히는 길이 생겨도 그 층이 위에 선다. 닫힐 때는
+          언마운트한다 — 안쪽 장·스크롤은 다시 열 때 처음부터다. 모달 페이지처럼 아래에서 올라오고(`enter="rise"`,
+          동작 줄이기면 즉시) 머리의 X 는 내려가며 닫는다(`useLayerClose`) — 나머지 층은 움직임 없이 선다. */}
+      {nav.settings ? (
+        <EdgeSwipeBack
+          accessibilityViewIsModal={settingsOnTop}
+          style={styles.overlay}
+          onBack={onBack}
+          enter="rise"
+          testID="settings-pane">
+          <SettingsScreen onBack={onBack} />
+        </EdgeSwipeBack>
       ) : null}
 
       {/* 탭이던 두 층 (ADR-0189 D1). + 메뉴가 열고, 한 번 열린 뒤로는 닫혀도

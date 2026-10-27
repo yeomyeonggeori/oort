@@ -53,6 +53,14 @@ const APP_COMMANDS: &[&str] = &[
     "session_revoke",
     "open_external_url",
     "open_pdf_attachment",
+    // Downloads folder (#4587): save one attachment, probe / reveal / open what
+    // was saved, open the folder. Desktop only. Granted only by
+    // capabilities/downloads.json.
+    "download_save",
+    "download_probe",
+    "download_reveal",
+    "download_open",
+    "download_folder_open",
     "detect_hosted_agents",
     // Local harness detection (#2813): no arguments, exit codes only.
     "detect_local_harnesses",

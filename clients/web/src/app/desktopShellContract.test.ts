@@ -89,21 +89,33 @@ describe("데스크탑 셸 계약 (#2671, #2676)", () => {
   });
 });
 
+describe("전체 화면 상태 읽기 (#4591)", () => {
+  it("main 창은 core:default를 든다(전체 화면 읽기와 크기 변화 구독이 거기 있다). 전체 화면을 바꾸는 권한은 주지 않는다", () => {
+    const ids = permissionIds(capability);
+    expect(ids).toContain("core:default");
+    // 페이지는 읽기만 한다: `set_fullscreen`·`set_simple_fullscreen` 같은 쓰기 권한이 한 줄이라도 생기면 붉어진다.
+    expect(ids.filter((id) => /fullscreen/.test(id))).toEqual([]);
+  });
+});
+
 // -----------------------------------------------------------------------------
-// #2700 — 신호등 중심선 = 토글 중심선
+// #2700·#4591 — 신호등 중심선 = 토글 중심선 = 잡기 띠의 가운데
 //
 // 실측(2026-09-25, macOS 27.0 26A428, tauri-runtime-wry 2.11.4 / tao 0.35.3,
-// Retina 2x, `screencapture -l` 창 캡처의 픽셀 경계 ÷ 2):
+// Retina 2x, `screencapture -l` 창 캡처의 픽셀 경계 ÷ 2), 2026-10-26 #4591에서 이 트리의 디버그
+// 빌드로 다시 쟀다:
 //   trafficLightPosition.y = 14   → 신호등 원 5.0–19.0pt, 중심 12.0pt
 //   trafficLightPosition.y = 21.5 → 신호등 원 12.5–26.5pt, 중심 19.5pt
-// 두 점이 기울기 1로 이어진다: 신호등 중심 = y − 2. tao는 버튼 컨테이너의 높이를
+//   trafficLightPosition.y = 22   → 신호등 원 14.0–26.0pt, 중심 20.0pt
+// 점들이 기울기 1로 이어진다: 신호등 중심 = y − 2. tao는 버튼 컨테이너의 높이를
 // 「버튼 높이 + y」로 늘릴 뿐 버튼의 y를 직접 두지 않으므로, 이 2pt는 설정이
 // 아니라 AppKit 배치에서 나온 값이다. OS가 신호등을 다시 그리면 다시 잰다.
 //
-// 토글: `app-titlebar`는 border-box 높이 `--spacing-control-lg`(40)에 아래
-// 테두리 1px이다. 내용 상자는 39px이고 `align-items: center`라 토글 중심은
-// 19.5px. 같은 캡처에서 토글 아이콘 경계 12.5–26.5pt, 중심 19.5pt로 확인했다.
-// 수정 전(y=14)에는 7.5pt 어긋나 있었다(성재 스크린샷과 같은 모양).
+// 토글: `app-titlebar`는 border-box 높이 `--spacing-control-lg`(40)이고 아래 테두리가 없다(#4591).
+// 내용 상자가 40px이고 `align-items: center`라 토글 중심은 20.0px, 곧 잡기 띠의 가운데다. 예전에는 투명
+// 1px 테두리가 내용 상자를 39로 줄여 토글과 신호등이 19.5(띠 가운데보다 0.5pt 위)에서 만났다. 그때
+// 허용 오차 1pt는 그 어긋남도 통과시켰다: 이제 띠 가운데에 맞추므로 0.25pt로 조인다(y 21.5로 되돌리면
+// 이 시험이 붉어진다). 수정 전(y=14)에는 7.5pt 어긋나 있었다(성재 스크린샷과 같은 모양).
 // -----------------------------------------------------------------------------
 
 /** 신호등 중심 − `trafficLightPosition.y` (pt). 음수 = 중심이 y보다 위. 위 실측. */
@@ -133,20 +145,20 @@ describe("타이틀바 신호등과 사이드바 토글의 세로 정렬 (#2700)
     expect(main?.hiddenTitle).toBe(true);
   });
 
-  it("app-titlebar 줄은 control-lg 높이에 아래 테두리 1px, 토글은 세로 가운데", () => {
+  it("app-titlebar 줄은 control-lg 높이에 아래 테두리가 없고, 토글은 세로 가운데", () => {
     expect(titlebar).toMatch(/block-size:\s*var\(--spacing-control-lg\);/);
-    expect(titlebar).toMatch(/border-block-end:\s*1px solid/);
+    // 테두리가 한 줄이라도 있으면 내용 상자가 줄어 토글 중심이 띠 가운데에서 벗어난다.
+    expect(titlebar).not.toMatch(/border-block-end|border-bottom|border-block:/);
     expect(titlebar).toMatch(/align-items:\s*center;/);
   });
 
-  it("신호등 중심과 토글 중심이 1pt 안에서 맞는다", () => {
+  it("신호등 중심과 토글 중심(= 띠 가운데)이 0.25pt 안에서 맞는다", () => {
     const rowHeight = pxToken("--spacing-control-lg");
-    const borderBottom = 1;
-    const toggleCenter = (rowHeight - borderBottom) / 2;
+    const toggleCenter = rowHeight / 2;
     const y = main?.trafficLightPosition?.y;
     expect(typeof y).toBe("number");
     const lightsCenter = (y as number) + LIGHT_CENTER_MINUS_Y;
-    expect(Math.abs(lightsCenter - toggleCenter)).toBeLessThanOrEqual(1);
+    expect(Math.abs(lightsCenter - toggleCenter)).toBeLessThanOrEqual(0.25);
   });
 });
 
