@@ -149,6 +149,7 @@ pub mod decider;
 pub mod dm;
 pub mod effort;
 pub mod error;
+pub mod hosted_cadence;
 pub mod hosted_dm;
 pub mod hosted_liveness;
 pub mod hosted_notice;
@@ -255,6 +256,11 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
+// ADR-0200 증보 6 (#4621) — how often a hosted agent comes to the Agent Port.
+pub use hosted_cadence::{
+    derive_cadence, load_agent_call_times_in_tx, Cadence, CadenceKind, CadenceParams,
+    AGENT_PORT_CALL_ACTION, AGENT_PORT_CALL_PATH, CALL_READ_TIMEOUT, CALL_TIMES_SQL,
+};
 pub use hosted_dm::{
     hosted_dm_approval_state, hosted_dm_delivery, list_hosted_agent_dms_in_tx,
     load_hosted_dm_connection_in_tx, set_hosted_dm_approval_in_tx, unapproved_dm_reason,
