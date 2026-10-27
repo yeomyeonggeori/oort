@@ -14,13 +14,14 @@ import {
   Dimensions,
   FlatList,
   Keyboard,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
 
 import {EASE_OUT, FLING_OUT} from '../src/design/motion';
-import {PageSheet, usePageSheetAction} from '../src/design/PageSheet';
+import {PageSheet, usePageSheetAction, usePageSheetScrollProps} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {SheetScroll} from '../src/design/sheetParts';
 import {FixedScheme} from '../src/design/theme';
@@ -753,6 +754,41 @@ describe('본문 — 스크롤이 맨 위일 때만 시트가 따라온다(스�
     expect(screen.getByTestId('mine').props.scrollEventThrottle).toBe(16);
     // 시트도 그 오프셋을 알았다
     expect(drag('page-sheet-body', [[20, 100], [70, 116]], {release: false})).toBe(false);
+  });
+
+  it('시트의 스크롤에는 고무줄이 없다 — 맨 위에서 아래로 끄는 손가락이 네이티브 스크롤을 당겨 이중으로 움직이지 않는다(iOS)', async () => {
+    await mount(<Host onClose={() => {}} />);
+    // 맨 위의 UIScrollView 는 고무줄이 없으면 아래로 끄는 손가락에 움직일 곳이 없다. JS 가 응답자를 가져가도 네이티브 스크롤은 멈추지
+    // 않는다(시뮬레이터 계측: PR 본문) — 그래서 끌기를 쥐는 동안의 얼림(scrollEnabled)에 더해 이것이 구조적 방어다.
+    expect(screen.getByTestId('sheet-scroll').props.bounces).toBe(false);
+  });
+
+  it('시트 밖에서도 부를 수 있다 — 알릴 곳이 없으니 호출자의 값 그대로 동작한다(날 FlatList·ScrollView 가 시트 밖에서 재사용돼도 안전)', async () => {
+    const onScroll = jest.fn();
+    function Outside() {
+      const wired = usePageSheetScrollProps({onScroll});
+      return (
+        <ScrollView testID="outside" {...wired}>
+          <View />
+        </ScrollView>
+      );
+    }
+    await mount(<Outside />);
+    scrollTo('outside', 25);
+    expect(onScroll).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('outside').props.scrollEnabled).toBe(true); // 얼릴 시트가 없다
+    expect(screen.getByTestId('outside').props.bounces).toBe(false);
+  });
+
+  it('호출자가 고무줄을 따로 주면 그쪽이 이긴다 — 시트의 기본이 막지 않는다', async () => {
+    await mount(
+      <Host onClose={() => {}}>
+        <SheetScroll testID="mine" bounces>
+          <View />
+        </SheetScroll>
+      </Host>,
+    );
+    expect(screen.getByTestId('mine').props.bounces).toBe(true);
   });
 });
 
