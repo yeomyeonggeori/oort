@@ -605,8 +605,8 @@ enum Change {
     Remove,
     /// The member leaves the workspace themself.
     SelfLeave,
-    /// The member changes their own password.
-    ChangePassword,
+    /// The member sets a new password of their own.
+    NewPassword,
     /// The member spends an operator-issued reset link.
     ResetClaim,
 }
@@ -718,7 +718,7 @@ fn spawn_change(w: &World, change: Change, kit: &Kit) -> JoinHandle<Reply> {
             Change::SelfLeave => http
                 .delete(format!("{base}/v1/workspaces/{workspace}/members/me"))
                 .bearer_auth(member_bearer),
-            Change::ChangePassword => http
+            Change::NewPassword => http
                 .patch(format!(
                     "{base}/v1/workspaces/{workspace}/members/me/password"
                 ))
@@ -864,7 +864,7 @@ async fn a_change_meets_a_door(issuer: Issuer, change: Change) {
                 "{scene}: no session survives"
             );
         }
-        Change::ChangePassword | Change::ResetClaim => {
+        Change::NewPassword | Change::ResetClaim => {
             assert_eq!(member_status(&w.su, w.member).await, "active", "{scene}");
             // The only session left is the change's own new pair.
             assert_eq!(
@@ -909,11 +909,11 @@ scenes! {
     a_suspension_that_meets_a_login_waits_for_it: Login, Suspend;
     a_removal_that_meets_a_login_waits_for_it: Login, Remove;
     a_departure_that_meets_a_login_waits_for_it: Login, SelfLeave;
-    a_password_change_that_meets_a_login_sweeps_its_pair: Login, ChangePassword;
+    a_password_change_that_meets_a_login_sweeps_its_pair: Login, NewPassword;
     a_reset_that_meets_a_login_sweeps_its_pair: Login, ResetClaim;
     a_suspension_that_meets_a_join_waits_for_it: Join, Suspend;
     a_removal_that_meets_a_join_waits_for_it: Join, Remove;
-    a_password_change_that_meets_a_join_sweeps_its_pair: Join, ChangePassword;
+    a_password_change_that_meets_a_join_sweeps_its_pair: Join, NewPassword;
     a_reset_that_meets_a_join_sweeps_its_pair: Join, ResetClaim;
     a_suspension_that_meets_a_password_change_waits_for_it: PasswordChange, Suspend;
     a_removal_that_meets_a_password_change_waits_for_it: PasswordChange, Remove;
