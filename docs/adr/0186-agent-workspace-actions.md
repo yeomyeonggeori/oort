@@ -5,7 +5,7 @@
 - Deciders: 성재
 - 역방향: 2026-10-16 [ADR-0113](0113-connector-credential-plugin-boundary.md) 증보 2 E4가 `action_type='connector_tool'`(실행 없는 결정 전달 — Hermes 쓰기 2단계, ADR-0203 증보 K6, Proposed)을 더한다. D2의 같은 tx 실행은 workspace_action에 그대로다. 본문 결정은 바꾸지 않았다.
 - 역방향: 2026-10-25 `host.session.open`·`host.install` 행동 어휘의 방향은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347) D3·D5가 정한다. `host.session.open`은 D2의 결정 방식을 확장한다: 승인 결정 입력에 서명 필드가 있고 행동별 승인 대기 TTL(10분)이 레지스트리의 새 속성이다. 레지스트리 등록과 증보는 그 문서의 HO-15가 한다. 이 ADR의 기존 본문 결정은 바꾸지 않고 확장만 한다.
-- 증보(Proposed): 2026-10-27 **v5 「먼저 제안과 메시지 고정」**(#4659) — 사람이 부르지 않은 에이전트의 제안(`oort_action_initiate`)과 `message.pin`·`message.unpin`을 정한다. §2의 run-less 승인 기각은 유지하되 그 이유 (c)의 전제를 푼다. **owner 결재 전에는 효력이 없고, 이 증보에 기대는 구현은 머지하지 않는다**(ADR-0100). 파일 끝 「증보 2026-10-27」 절.
+- 증보(Accepted, 2026-10-27 owner 결재): 2026-10-27 **v5 「먼저 제안과 메시지 고정」**(#4659) — 사람이 부르지 않은 에이전트의 제안(`oort_action_initiate`)과 `message.pin`·`message.unpin`을 정한다. §2의 run-less 승인 기각은 유지하되 그 이유 (c)의 전제를 푼다. owner가 2026-10-27 질문 일곱 개를 모두 권장안으로 결재했다(「권장대로 진행하면서」). 파일 끝 「증보 2026-10-27」 절.
 - 발제: 성재 2026-09-22 「에이전트한테 웹훅 발급해줘 같은 내부 기능을 요청해도 수행하고, OpenUI 같은 철학 기반으로 gen UI로 뭔가 보여주면 좋겠다(테마 바꿔줘·누구 초대해줘·훅 발급하고 연동해줘). 유즈케이스 기반으로 AI 활용도를 극대화」
 - Consumes: ADR-0101(에이전트=1급 멤버) · ADR-0114(승인 게이트) · ADR-0162(Agent Port·hosted durable inbox) · ADR-0171(도어벨) · ADR-0174(외양=이 기기 localStorage) · ADR-0182(일시 확인 3형, 토스트 금지) · ADR-0004 증보 4(webhook 마스터키 분리 — `webhook.create` 실행기의 선행) · ADR-0159(디자인 시스템 네 상태)
 - 시장 근거(2026-09-22 조사, `docs/planning/2026-09-22-plan-revision.md` §2): Meta Muse의 「백그라운드로 일하다 승인이 필요할 때 돌아온다 + 전체 감사 기록」, Slack Code의 Plan/Task **Block Kit 허용목록 카드**, OpenUI 「State of Generative UI」의 **선언형 카탈로그 기본·오픈엔드 HTML은 샌드박스 슬롯 한정** 권고
@@ -778,7 +778,7 @@ Accepted 본문의 수치·모양 중 구현에서 측정으로 바뀐 것만 �
 
 ## 증보 2026-10-27 — 먼저 제안과 메시지 고정: `oort_action_initiate`·`message.pin`·`message.unpin` (v5, #4659)
 
-- Status: **Proposed** (2026-10-27, owner 결재 대기). 독립 보안 검수 기록(U-l)은 붙었다(r1: Blocker 0 · High 3 수정, 확인 1회에서 H1·H2 닫힘, H3 잔여는 검수자 수정안대로 반영했고 재확인은 하지 않았다). owner 결재 기록(U-m의 질문 답)이 붙기 전에는 이 증보에 기대는 구현을 머지하지 않는다(ADR-0100). Accepted 전환은 결재를 인용해 planner가 한다.
+- Status: **Accepted** (2026-10-27, owner 결재 — planner가 U-m 질문 일곱 개를 권장안과 함께 물어 「권장대로 진행하면서」. 일곱 개 모두 권장안이다). 독립 보안 검수 기록(U-l)은 붙었다(r1: Blocker 0 · High 3 수정, 확인 1회에서 H1·H2 닫힘, H3 잔여는 검수자 수정안대로 반영했고 재확인은 하지 않았다). 결재로 ADR-0100 머지 조건이 충족됐다. 다만 N3(먼저 제안 서버)는 U-g 선행 조건(개발자·CLI 토큰의 결정 차단, #4660)이 충족된 뒤에만 머지한다.
 - 발제: owner 2026-10-27 요청의 요지. planner(터미널의 Claude Code)가 oort 에이전트로 연결돼 있을 때(#4616), 누가 시키지 않아도 「비공개 채널 `qa`를 만들까요?」 승인 카드를 올린다. owner는 승인 탭만 누른다. 승인되면 에이전트가 안내문을 올리고 **고정**한다(#4290). 지금은 둘 다 막혀 있다. 제안은 job의 handle이 있어야 하고(§1.2·D2), 메시지 고정은 에이전트가 할 수 있는 행동에 없다.
 - 기안: Sonnet 5.5 엔진 워커 (#4659). 근거는 이슈 #4659·#4616·#4290·#4617 본문, planner 리서치(2026-10-27, 비공개)의 「oort 현재 상태」 8·9번 요지, 그리고 아래 U-0의 코드 실측이다.
 - Consumes: 이 ADR의 §2·D1~D4·V1·V3·V3-6·V4-1·V4-10 · ADR-0162 D3·D4·증보 2(B2·B6-1)·증보 5(G2) · ADR-0199 · ADR-0200 D1·증보 4 · ADR-0214 · ADR-0100
