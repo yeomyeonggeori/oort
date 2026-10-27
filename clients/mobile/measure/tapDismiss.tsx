@@ -26,6 +26,7 @@ import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 //     typed   초안이 있는 채(한 줄 글).
 //     long    초안이 여러 줄이고 첫 줄이 길다(접힘의 「첫 줄 + …」).
 //     short   행이 셋뿐이다 — 목록 위쪽에 **빈 곳**이 선다(탭이 아무 행에도 안 닿는 자리).
+//     one     행이 하나뿐이다 — 작은 화면에서도 목록 위쪽이 통째로 빈 곳이다(`maestro/115` 의 `empty`·`hold`).
 //     link    링크가 든 행이 맨 끝에 선다.   chip  반응 칩이 붙은 행이 맨 끝에 선다.
 //     pend    서버가 아직 안 받은 낙관적 메아리(`PendingRow`)가 맨 끝에 하나 서 있다.
 //     slow    보내면 메아리가 60초 남는다(기본은 1.2초 뒤 서버 사본이 대신한다).
@@ -193,6 +194,8 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
   });
 
   const [messages, setMessages] = useState<Message[]>(() => {
+    // `one`: 행이 **하나뿐**이다 — 목록은 맨 아래에 붙어 서므로 그 위가 통째로 빈 곳이다. 작은 화면(SE)에서도 「행이 아닌 곳」이 있다(`short` 는 행이 셋이라 SE 에서는 그 위쪽까지 행이 찬다).
+    if (has('one')) return ALL.slice(0, 1);
     if (has('short')) return ALL.slice(0, 3);
     // `link`·`chip`: 그 행을 맨 끝으로 옮긴다(자판이 올라온 창에는 끝 행 서넛만 든다). id 는 그대로라 반응 지도가 따라온다.
     const tail = has('link') ? ALL[3] : has('chip') ? ALL[5] : has('roll') ? ALL[7] : null;

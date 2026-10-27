@@ -16,7 +16,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$HOME/.maestro/bin:$PATH"
 case "$CASE" in
   body|reopen-edge)             SURFACE="TAP-UP+TYPED+PROBE" ;;
-  empty|hold)                   SURFACE="TAP-UP+SHORT+TYPED+PROBE" ;;
+  empty|hold)                   SURFACE="TAP-UP+ONE+TYPED+PROBE" ;;
   send|autocorrect|hangul)      SURFACE="TAP-UP+PROBE" ;;
   link|author|avatar|replymark) SURFACE="TAP-UP+LINK+TYPED+PROBE" ;;
   chip)                         SURFACE="TAP-UP+CHIP+TYPED+PROBE" ;;
@@ -48,8 +48,8 @@ sleep 1
 if [ -n "$RECPID" ]; then kill -INT "$RECPID" 2>/dev/null; wait "$RECPID" 2>/dev/null; fi
 if [ -n "$SHOTS" ]; then
   mkdir -p "$SHOTS"
-  LATEST="$(ls -td "$HOME"/.maestro/tests/*/ 2>/dev/null | head -1)"
-  find "$LATEST" -name "${PREFIX}-*.png" -exec cp {} "$SHOTS"/ \; 2>/dev/null
+  # 가장 새 결과 폴더만 보면 이어 도는 다음 실행의 폴더에 밀려 사진을 놓치는 일이 있었다 — 방금 5분 안의 모든 결과 폴더에서 찾는다(이름 접두가 같은 사진은 가장 새 것이 남는다).
+  find "$HOME"/.maestro/tests -name "${PREFIX}-*.png" -mmin -5 2>/dev/null | sort | while read -r shot; do cp "$shot" "$SHOTS"/; done
 fi
 echo "[run-list-tap] $CASE ($SURFACE) rc=$RC in $(( $(date +%s) - START ))s"
 grep -E "COMPLETED|FAILED|Assertion|Element not found|ERROR|Error" "$LOG" | tail -8
