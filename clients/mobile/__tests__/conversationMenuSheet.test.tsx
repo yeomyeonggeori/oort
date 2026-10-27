@@ -20,7 +20,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Image, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Image, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -266,6 +266,16 @@ describe('시트 — 카드와 행의 차례 (#4319)', () => {
     expect(screen.getByTestId('conversation-menu-info')).toHaveTextContent('채널 정보');
   });
 
+  it('내용 맞춤 단이다 — 높이를 고정하지 않고, 화면의 85% 위로는 안에서 스크롤한다(큰 글씨·SE 의 안전망)', () => {
+    renderSheet({items: [MUTE_OFF]});
+    const frame = flatten(screen.getByTestId('page-sheet').props.style);
+    const windowHeight = Dimensions.get('window').height;
+    // 큰 단은 `top`, 중간 단은 `height` 를 갖는다 — 내용 맞춤은 둘 다 없고 최대 높이만 갖는다.
+    expect([frame.top, frame.height]).toEqual([undefined, undefined]);
+    expect(Number(frame.maxHeight)).toBeLessThanOrEqual(Math.floor(windowHeight * 0.85));
+    expect(Number(frame.maxHeight)).toBeGreaterThan(windowHeight / 2);
+  });
+
   it('종류를 모르는 동안(채널 목록이 오기 전)에는 `onOpenInfo` 가 있어도 정보 행이 서지 않는다 — 무엇이라 부를지 모른다', () => {
     renderSheet({kind: undefined, onOpenInfo: jest.fn()});
     expect(screen.queryByTestId('conversation-menu-info')).toBeNull();
@@ -295,7 +305,8 @@ describe('시트 — 카드와 행의 차례 (#4319)', () => {
     for (const key of ['info', 'pins', 'delegate', 'mute-toggle', 'close-dm']) {
       const id = `conversation-menu-${key}`;
       const row = screen.getByTestId(id);
-      expect([key, screen.queryByTestId(`${id}-lead`)]).toEqual([key, null]);
+      // 요소 자체를 비교하지 않는다 — 실패하면 렌더 트리 통째가 출력돼 시험 프로세스가 죽는다. 있는가 없는가만 비교한다.
+      expect([key, screen.queryByTestId(`${id}-lead`) === null]).toEqual([key, true]);
       expect([key, Number(flatten(row.props.style).minHeight) >= TOUCH_TARGET]).toEqual([key, true]);
       const title = within(row).getAllByText(/\S/)[0];
       expect([key, title.props.numberOfLines]).toEqual([key, undefined]);
@@ -397,7 +408,7 @@ describe('시트 — 채널 나가기의 확인 단계 (#4319)', () => {
     );
     expect(screen.getByTestId('conversation-menu-leave-confirm-button')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
     for (const key of ['pins', 'mute-toggle', 'leave']) {
-      expect([key, screen.queryByTestId(`conversation-menu-${key}`)]).toEqual([key, null]);
+      expect([key, screen.queryByTestId(`conversation-menu-${key}`) === null]).toEqual([key, true]);
     }
   });
 
@@ -495,6 +506,15 @@ interface Routes {
   serverClosure?: boolean;
   /** 사람 DM 에 안 읽은 메시지가 있다(닫기는 안 읽은 것이 없을 때만 내밀어진다). */
   dmUnread?: boolean;
+  /** 사람 DM 에 멘션이 하나 있다(안 읽은 수는 0). 멘션이 있으면 닫기를 내밀지 않는다. */
+  dmMention?: boolean;
+  /**
+   * 사람 DM 을 「여기부터 안 읽음」으로 표시해 뒀다 — 서버는 이 표시를 `unread_count` 에 접지 않는다(wire 의 안 읽음은 0). 화면이 코어의
+   * 합성(`composedUnreadCount`, ADR-0178 D3)으로 읽어야만 안 읽음이 1 로 보인다.
+   */
+  dmMarkedUnread?: boolean;
+  /** 사람 DM 의 읽음 투영 행이 없다(메시지가 한 번도 없는 DM) — 닫을 때 적을 행이 없다. */
+  noDmRow?: boolean;
   selfRole?: string;
   pins?: unknown[];
   /** 응답 상태. 기본은 성공. */
@@ -534,12 +554,21 @@ function jsonResponse(status: number, body: unknown): Response {
 const callsTo = (suffix: string) => calls.filter(call => call.url.endsWith(suffix) || call.url.includes(suffix));
 
 function readStates(routes: Routes) {
+  const human = {channel_id: 'ch-dm-human', last_read_seq: 2, latest_seq: 2, unread_count: 0, mention_count: 0};
   const rows = [
     {channel_id: 'ch-general', last_read_seq: 15, latest_seq: 15, unread_count: 0, mention_count: 0},
     {channel_id: 'ch-quiet', last_read_seq: 7, latest_seq: 7, unread_count: 0, mention_count: 0},
-    routes.dmUnread
-      ? {channel_id: 'ch-dm-human', last_read_seq: 1, latest_seq: 2, unread_count: 1, mention_count: 0}
-      : {channel_id: 'ch-dm-human', last_read_seq: 2, latest_seq: 2, unread_count: 0, mention_count: 0},
+    ...(routes.noDmRow
+      ? []
+      : [
+          routes.dmUnread
+            ? {...human, last_read_seq: 1, unread_count: 1}
+            : routes.dmMention
+              ? {...human, mention_count: 1}
+              : routes.dmMarkedUnread
+                ? {...human, marked_unread_before_seq: 2}
+                : human,
+        ]),
     {channel_id: 'ch-dm-agent', last_read_seq: 2, latest_seq: 2, unread_count: 0, mention_count: 0},
   ];
   return routes.serverClosure
@@ -759,6 +788,27 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
   });
 
+  it('멘션이 있는 DM 에도 닫기를 내밀지 않는다 — 안 읽은 수가 0 이어도', async () => {
+    await mountShell({serverClosure: true, dmMention: true});
+    await openConversation(ROW.human);
+    await openConversationMenu();
+    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+  });
+
+  it('「여기부터 안 읽음」 표시가 있는 DM 에도 내밀지 않는다 — wire 의 안 읽음이 0 이어도 코어 합성(ADR-0178 D3)으로 읽는다', async () => {
+    await mountShell({serverClosure: true, dmMarkedUnread: true});
+    await openConversation(ROW.human);
+    await openConversationMenu();
+    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+  });
+
+  it('읽음 투영 행이 없는 DM(메시지가 한 번도 없다)에는 내밀지 않는다 — 눌러도 아무 일도 못 하는 행은 없다', async () => {
+    await mountShell({serverClosure: true, noDmRow: true});
+    await openConversation(ROW.human);
+    await openConversationMenu();
+    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+  });
+
   it('서버가 닫기를 싣지 않는 옛 서버에서는 닫기를 내밀지 않는다 — 폰에 기기 로컬 닫기는 없다', async () => {
     await mountShell({serverClosure: false});
     await openConversation(ROW.human);
@@ -766,11 +816,11 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
   });
 
-  it('채널에는 서버가 닫기를 실어도 닫기가 없다', async () => {
-    await mountShell({serverClosure: true});
+  it('채널에는 서버가 닫기를 실어도 닫기가 없다 — 나가기가 없는 일반 멤버라도(나가기가 있으면 한 자리를 먼저 차지해 가린다)', async () => {
+    await mountShell({serverClosure: true, selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).not.toContain('close-dm');
+    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
   });
 
   it('고정 행의 낱말은 고정 읽기가 끝나면 개수를 말한다 — 코어 `pinListHeaderLabel`', async () => {
