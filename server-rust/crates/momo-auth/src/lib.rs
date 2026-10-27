@@ -173,7 +173,7 @@ pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
 };
 pub use owner_claim::{
-    change_own_password_in_tx, claim_refusal_without_lock, consume_claim_in_tx,
+    change_own_password_in_tx, claim_refusal_in_tx, consume_claim_in_tx,
     issue_password_reset_in_tx, mint_owner_claim_token, normalized_claim_token,
     resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
     IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,

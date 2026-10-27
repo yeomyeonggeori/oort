@@ -44,24 +44,29 @@
 //! **A token that can never be spent does not queue for it.** This route is public and the
 //! lock is exclusive, so a request that holds or waits for it makes every sign-in of the
 //! workspace wait or retry. Before the lock, a read that takes none
-//! ([`claim_refusal_without_lock`]) refuses what is already refused — no such token, spent,
+//! ([`claim_refusal_in_tx`]) refuses what is already refused — no such token, spent,
 //! expired, an owner-bootstrap token for an account that has a password, a member who is
-//! not active — with the answers the consume itself has. What it lets through is judged
-//! again under the lock, and that answer counts; it can only be wrong in the safe
+//! not active — with the answers the consume itself has. What it lets through is read
+//! again once the lock is held, where nothing can change underneath it (a suspension or
+//! another claim that came first is refused before anything is written), and the consume
+//! judges it a last time. Before the lock the read can only be wrong in the safe
 //! direction (a spent token never comes back).
 //!
 //! Lock order: membership lock → claim row → `human` row → member-wide sweep lock →
-//! `token` rows. The membership lock is always first, so no cycle can close through
-//! it; the operator's reissue (`issue_password_reset`) takes no membership lock, so it
-//! cannot be waiting for one.
+//! `token` rows. The membership lock is always first. The operator's reissue
+//! (`issue_password_reset`) takes it first too: it locks a member row and then that
+//! member's open link, the opposite order of this route (the link, then the member row for
+//! the audit row), so without the shared first lock the two could wait for each other.
+//! Row locks that a foreign key takes are not part of this order; transactions that start
+//! with the membership lock are serialized by it.
 
 use crate::session_end::end_member_sessions_in_tx;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::Json;
 use momo_auth::{
-    claim_refusal_without_lock, consume_claim_in_tx, normalized_claim_token,
-    normalized_new_password, resolve_claim_workspace, ClaimMutation, ClaimSpecInvalid,
+    claim_refusal_in_tx, consume_claim_in_tx, normalized_claim_token, normalized_new_password,
+    resolve_claim_workspace, ClaimMutation, ClaimSpecInvalid,
 };
 use momo_auth::{ClaimOutcome, IssuedToken};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -146,14 +151,18 @@ pub async fn claim(
         move |conn| {
             Box::pin(async move {
                 // A token that can never be spent is answered here, without the lock.
-                if let Some(refusal) =
-                    claim_refusal_without_lock(conn, workspace_id, &token).await?
-                {
+                if let Some(refusal) = claim_refusal_in_tx(conn, workspace_id, &token).await? {
                     return Ok(Claimed::Refused(refusal));
                 }
                 // The membership lock, exclusive, before anything is judged under it (see
                 // the module docs).
                 lock_membership_mutation(conn, workspace_id).await?;
+                // Read again under the lock: a suspension, or another claim, that committed
+                // while this request waited is refused here, before a single write — in the
+                // documented words, instead of by the consume failing halfway.
+                if let Some(refusal) = claim_refusal_in_tx(conn, workspace_id, &token).await? {
+                    return Ok(Claimed::Refused(refusal));
+                }
                 let mutation = consume_claim_in_tx(conn, workspace_id, &token, &password).await?;
                 let ClaimMutation::Applied(outcome) = mutation else {
                     return Ok(Claimed::Refused(mutation));

@@ -113,26 +113,29 @@ pub async fn resolve_claim_workspace(
         .await
 }
 
-/// What a claim token **already** refuses, read without taking any lock: no such
-/// token, spent, expired, an owner-bootstrap token for an account that has a password
-/// by now, or a member who is not active. `None` means nothing this read can see refuses
-/// it; [`consume_claim_in_tx`] judges the same things again under the caller's locks and
-/// its answer is the one that counts.
+/// What a claim token **already** refuses, by reading only — it takes no lock of its own:
+/// no such token, spent, expired, an owner-bootstrap token for an account that has a
+/// password by now, or a member who is not active. `None` means nothing this read can see
+/// refuses it; [`consume_claim_in_tx`] judges the same things again under the caller's
+/// locks and its answer is the one that counts.
 ///
 /// **Why it exists.** `POST /v1/claim` is public, and it takes the workspace's
 /// membership lock exclusively (ADR-0215 증보 2 K3). A request that holds or waits for
 /// that lock makes every sign-in of the workspace wait or retry, so a token that can
 /// never be spent must not be able to do that: the route asks this first and answers a
-/// refusal with the answers [`consume_claim_in_tx`] has, *before* the lock.
+/// refusal with the answers [`consume_claim_in_tx`] has, *before* the lock. It asks again
+/// once it holds the lock, where nothing can change underneath the read, so that what
+/// became true while it waited (a suspension, a claim that spent the token first) is
+/// refused before anything is written, in the same words.
 ///
-/// **Why a read without a lock is enough.** It can only be wrong in the safe direction.
-/// A token is never un-spent and never un-expired, an account never loses its password,
-/// and a member that looks inactive because a reinstatement is in flight is refused, not
-/// admitted. A token it lets through is read again under the lock.
+/// **Why a read without a lock is enough before the lock.** It can only be wrong in the
+/// safe direction. A token is never un-spent and never un-expired, an account never
+/// loses its password, and a member that looks inactive because a reinstatement is in
+/// flight is refused, not admitted. A token it lets through is read again under the lock.
 ///
 /// The order of the refusals is [`consume_claim_in_tx`]'s, so the same request gets the
 /// same answer from either.
-pub async fn claim_refusal_without_lock(
+pub async fn claim_refusal_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     token: &str,

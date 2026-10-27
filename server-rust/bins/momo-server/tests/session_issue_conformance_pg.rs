@@ -536,18 +536,23 @@ struct Hold {
     pid: i32,
 }
 
-async fn hold_member_row(su: &PgPool, member: Uuid) -> Hold {
+/// A row lock the test takes: `sql` is a `SELECT … FOR UPDATE` over the row, bound to `id`.
+async fn hold_row(su: &PgPool, sql: &str, id: Uuid) -> Hold {
     let mut tx = su.begin().await.expect("begin the holding transaction");
     let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
         .fetch_one(&mut *tx)
         .await
         .expect("the holder's backend id");
-    sqlx::query("SELECT 1 FROM member WHERE id = $1 FOR UPDATE")
-        .bind(member)
+    sqlx::query(sql)
+        .bind(id)
         .execute(&mut *tx)
         .await
-        .expect("lock the member row");
+        .expect("lock the row");
     Hold { tx, pid }
+}
+
+async fn hold_member_row(su: &PgPool, member: Uuid) -> Hold {
+    hold_row(su, "SELECT 1 FROM member WHERE id = $1 FOR UPDATE", member).await
 }
 
 impl Hold {
@@ -1099,8 +1104,9 @@ async fn open_suspension(
     open_departure(su, workspace, member, false).await
 }
 
-/// The same for a member who is **removed** (`removed`: the row is soft-deleted, as a removal
-/// or a departure leaves it) rather than suspended.
+/// The same for a member who is **removed** (`removed`: the status becomes `deleted` and
+/// nothing else on the row, which is all a removal or a departure writes there) rather than
+/// suspended.
 async fn open_departure(
     su: &PgPool,
     workspace: Uuid,
@@ -1114,7 +1120,7 @@ async fn open_departure(
         .await
         .expect("take the membership lock");
     let write = if removed {
-        "UPDATE member SET status = 'deleted', deleted_at = now(), updated_at = now() WHERE id = $1"
+        "UPDATE member SET status = 'deleted', updated_at = now() WHERE id = $1"
     } else {
         "UPDATE member SET status = 'suspended', updated_at = now() WHERE id = $1"
     };
@@ -1149,6 +1155,10 @@ async fn password_changes_audited(su: &PgPool, member: Uuid) -> i64 {
 /// standing is read under the lock and before the first write. The middleware cannot have
 /// caught it — it judged the bearer before the lock was had — and a change that went ahead
 /// would write the password and hand a member who is no longer active a new session.
+///
+/// (The departure is one transaction here. Through the API a suspension and a reinstatement are
+/// two requests that each take the lock, and a change that queued behind the first wakes between
+/// them and reads `suspended`; the reinstatement cannot overtake it.)
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_password_change_that_waited_for_a_suspension_or_removal_refuses() {
@@ -1216,10 +1226,14 @@ async fn a_reset_claim_that_waited_for_a_suspension_is_refused_and_spends_nothin
     suspension.commit().await.expect("commit the suspension");
     let reply = door.await.expect("claim task");
 
-    assert!(
-        reply.status >= 400,
-        "the claim is refused, not answered with a session: {} {}",
-        reply.status,
+    assert_eq!(
+        reply.status, 404,
+        "the claim is refused in the documented words, not answered with a session: {}",
+        reply.body
+    );
+    assert_eq!(
+        reply.body["error"]["message"], "claim token is invalid",
+        "and not by the consume failing halfway: {}",
         reply.body
     );
     assert!(
@@ -1687,6 +1701,188 @@ async fn a_claim_token_that_can_never_be_spent_does_not_queue_for_the_lock() {
         "and goes through once the lock is free: {}",
         reply.body
     );
+}
+
+// ---------------------------------------------------------------------------
+// 3c. the operator's reissue is ordered with the doors that spend or end a link
+// ---------------------------------------------------------------------------
+
+fn spawn_reissue(w: &World) -> JoinHandle<Reply> {
+    let (http, base, workspace, member, bearer) = (
+        w.http.clone(),
+        w.base.clone(),
+        w.workspace,
+        w.member,
+        w.owner_bearer.clone(),
+    );
+    tokio::spawn(async move {
+        reply_of(
+            http.post(format!(
+                "{base}/v1/workspaces/{workspace}/members/{member}/password-reset"
+            ))
+            .bearer_auth(bearer)
+            .send()
+            .await
+            .expect("send the reissue"),
+        )
+        .await
+    })
+}
+
+fn spawn_claim(w: &World, token: &str) -> JoinHandle<Reply> {
+    let (http, base, token) = (w.http.clone(), w.base.clone(), token.to_string());
+    tokio::spawn(async move {
+        reply_of(
+            http.post(format!("{base}/v1/claim"))
+                .json(&json!({ "token": token, "password": CLAIMED_PASSWORD }))
+                .send()
+                .await
+                .expect("send the claim"),
+        )
+        .await
+    })
+}
+
+fn no_kit() -> Kit {
+    Kit {
+        member_bearer: String::new(),
+        invite_code: String::new(),
+        issuer_claim: String::new(),
+        change_claim: String::new(),
+    }
+}
+
+/// A reissue takes the membership lock, exclusively, before it locks the member. It locks the
+/// member's row and then the member's open link; the claim that spends the link holds the link and
+/// then needs the member's row, and a suspension holds the operator's rows and then the member's.
+/// Taking the lock first is what keeps those orders from meeting.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_reissue_takes_the_membership_lock_before_it_locks_the_member() {
+    let w = world("session-issue-reissue-lock", Some(MEMBER_PASSWORD), 4).await;
+    let hold = hold_member_row(&w.su, w.member).await;
+    let reissue = spawn_reissue(&w);
+    wait_until("the reissue to stop on the member row", || async {
+        !blocked_by(&w.su, hold.pid).await.is_empty()
+    })
+    .await;
+    let stopped = blocked_by(&w.su, hold.pid).await;
+    assert_eq!(
+        stopped.len(),
+        1,
+        "exactly one request is stopped: {stopped:?}"
+    );
+    let (pid, statement) = &stopped[0];
+    assert!(
+        statement.contains("FOR UPDATE OF m"),
+        "the reissue is held at the lock on the member's row: {statement}"
+    );
+    assert_eq!(
+        membership_modes_held_by(&w.su, w.workspace, *pid).await,
+        vec!["ExclusiveLock".to_string()],
+        "the reissue already holds the membership lock, exclusively, when it locks the member"
+    );
+    hold.release().await;
+    let reply = reissue.await.expect("reissue task");
+    assert_eq!(
+        reply.status, 201,
+        "the reissue goes through: {}",
+        reply.body
+    );
+}
+
+/// A claim that is spending the member's link and a reissue for the same member meet: the claim
+/// holds the link and is about to need the member's row for its audit row, and the reissue locks
+/// the member's row and then wants the link. Without the shared first lock each ends up waiting
+/// for the other until the database ends one of them (a 500); behind it the reissue waits for the
+/// claim and both answer.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_claim_and_a_reissue_that_meet_do_not_wait_for_each_other() {
+    let w = world("session-issue-claim-reissue", Some(MEMBER_PASSWORD), 4).await;
+    let live = issue_reset_token(&w).await;
+
+    // Stop the claim after it holds its link: on the member's credential row, which it writes
+    // next.
+    let hold = hold_row(
+        &w.su,
+        "SELECT 1 FROM human WHERE member_id = $1 FOR UPDATE",
+        w.member,
+    )
+    .await;
+    let claim = spawn_claim(&w, &live);
+    wait_until("the claim to stop on the credential row", || async {
+        !blocked_by(&w.su, hold.pid).await.is_empty()
+    })
+    .await;
+
+    let reissue = spawn_reissue(&w);
+    wait_until("the reissue to queue for the membership lock", || async {
+        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await == 1
+    })
+    .await;
+    hold.release().await;
+
+    let claim = claim.await.expect("claim task");
+    let reissue = reissue.await.expect("reissue task");
+    assert_eq!(claim.status, 200, "the claim goes through: {}", claim.body);
+    assert_eq!(
+        reissue.status, 201,
+        "and so does the reissue, after it: {}",
+        reissue.body
+    );
+}
+
+/// A suspension and a reissue for the same member meet: the suspension holds the operator's rows
+/// and goes on to the member's, and the reissue holds the member's row and then needs the
+/// operator's for its audit row. Behind the lock the suspension queues for the reissue and both
+/// answer.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_suspension_and_a_reissue_that_meet_do_not_wait_for_each_other() {
+    let w = world("session-issue-suspend-reissue", Some(MEMBER_PASSWORD), 4).await;
+    let _open_link = issue_reset_token(&w).await;
+
+    // Stop the reissue after it holds the member's row: on the member's open link, which it
+    // spends next.
+    let hold = hold_row(
+        &w.su,
+        "SELECT 1 FROM credential_claim \
+          WHERE member_id = $1 AND consumed_at IS NULL FOR UPDATE",
+        w.member,
+    )
+    .await;
+    let reissue = spawn_reissue(&w);
+    wait_until("the reissue to stop on the open link", || async {
+        !blocked_by(&w.su, hold.pid).await.is_empty()
+    })
+    .await;
+
+    let suspension = spawn_change(&w, Change::Suspend, &no_kit());
+    wait_until(
+        "the suspension to queue for the membership lock",
+        || async { membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await == 1 },
+    )
+    .await;
+    assert!(
+        !suspension.is_finished(),
+        "the suspension waits for the reissue"
+    );
+    hold.release().await;
+
+    let reissue = reissue.await.expect("reissue task");
+    let suspension = suspension.await.expect("suspension task");
+    assert_eq!(
+        reissue.status, 201,
+        "the reissue goes through: {}",
+        reissue.body
+    );
+    assert_eq!(
+        suspension.status, 200,
+        "and the suspension after it: {}",
+        suspension.body
+    );
+    assert_eq!(member_status(&w.su, w.member).await, "suspended");
 }
 
 // ---------------------------------------------------------------------------

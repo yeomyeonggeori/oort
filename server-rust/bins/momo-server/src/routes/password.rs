@@ -24,9 +24,14 @@
 //! anything is written.
 //!
 //! Lock order: membership lock → `human` row → member-wide sweep lock → `token` rows.
-//! The membership lock is always first, so no cycle can close through it; the operator's
-//! reissue (`issue_password_reset`) takes no membership lock, so it cannot be waiting
-//! for one.
+//! The membership lock is always first. The operator's reissue (`issue_password_reset`)
+//! takes it first too, exclusively: it locks a member row and then that member's open link,
+//! the opposite order of a claim that spends the link and then needs the member row for its
+//! audit row, so without the shared first lock the two could wait for each other. Row locks
+//! that a foreign key takes (an `audit_log` or `token` insert needs the member row) are not
+//! part of this order: transactions that start with the membership lock are serialized by it
+//! and cannot meet there, and the paths that do not start with it (token rotation, linking a
+//! device) are not covered by this change.
 
 use std::time::Duration;
 
@@ -131,6 +136,13 @@ pub async fn issue_password_reset(
         let token = token.clone();
         move |conn| {
             Box::pin(async move {
+                // The membership lock, exclusive and first, like every other transaction that
+                // locks member rows to change what a member can do: a reissue locks the target's
+                // member row and then the target's open link, and the claim that spends that link
+                // holds the link and then needs the member row (its audit row references it). Two
+                // transactions that take those rows in opposite orders wait for each other until
+                // the database ends one of them; behind this lock they cannot meet.
+                lock_membership_mutation(conn, workspace_id).await?;
                 if let Err(rejection) = require_admin(conn, workspace_id, actor_id).await? {
                     return Ok(Err(rejection));
                 }
