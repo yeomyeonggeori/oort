@@ -64,7 +64,7 @@ import {useHostedConnections} from '../hostedAgents/queries';
 import {useDirectory} from '../workspace/queries';
 import {useKeyboardShown} from '../../lib/useKeyboardShown';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
-import {HOME_ICONS, SHELL_ICONS} from '../../design/icons';
+import {HOME_ICONS, SHEET_ICONS} from '../../design/icons';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   ds2Radius,
@@ -336,8 +336,9 @@ export function AiConnectCard({
           pressed && styles.pressed,
         ]}
         testID="ai-connect-card-close">
+        {/* 시트·페이지의 원형 X 와 같은 글리프다(#4458) — 카드이므로 원은 없다. */}
         <Image
-          source={SHELL_ICONS.x}
+          source={SHEET_ICONS.close}
           style={[glyph(16), {tintColor: palette.textMuted}]}
           accessibilityIgnoresInvertColors
         />

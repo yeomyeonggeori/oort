@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -276,6 +277,10 @@ describe('결과 중심 줄 (ADR-0202 D1)', () => {
     expect(block).toHaveTextContent(/PR을 열었어요/);
     expect(block).toHaveTextContent(/테스트 통과 12/);
     expect(block).toHaveTextContent(/abcdef123456/);
+    // 칸은 묶음 카드의 줄이다(#4458): 네 칸이 꼬리표 아래 카드 하나에 서고 줄 사이는 카드의 구분선이다.
+    const cells = within(block).getAllByLabelText(/^(한 일|테스트|다음 할 일|커밋|작업 환경 안), /);
+    expect(cells.length).toBeGreaterThanOrEqual(3);
+    expect(within(block).getAllByTestId('group-divider')).toHaveLength(cells.length - 1);
   });
 
   it('비면 필터에 맞는 한 줄', async () => {

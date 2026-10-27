@@ -103,4 +103,16 @@ describe("AppTitlebar", () => {
     expect(host.querySelector("[data-sidebar-collapsed]")).toBeNull();
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
   });
+
+  // #4591: 웹(브라우저)에는 잡기 띠도 오른쪽 자리도 없다. 판이 첫 행까지 올라와 그 자리를 덮고, 창을 잡을 일도
+  // 없다. 셸(IS_TAURI)일 때의 줄은 `AppTitlebar.shell.test.tsx`가 잰다.
+  it("웹에서는 끌기 영역도 오른쪽 자리도 그리지 않는다 (#4591)", () => {
+    const host = mountTitlebar();
+    const titlebar = host.querySelector('[data-testid="app-titlebar"]');
+    expect(titlebar).not.toBeNull();
+    expect(host.querySelector("[data-tauri-drag-region]")).toBeNull();
+    expect(host.querySelector('[data-testid="app-titlebar-trailing"]')).toBeNull();
+    // 줄 안에는 토글 하나뿐이다.
+    expect(titlebar?.childElementCount).toBe(1);
+  });
 });

@@ -15,9 +15,14 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {Image, StyleSheet} from 'react-native';
 
+import {SHEET_ICONS} from '../src/design/icons';
+import {GroupCard} from '../src/design/sheetParts';
+import {describeCloseContract} from './fixtures/sheetContract';
 import * as copy from '../src/features/memory/copy';
 import {MemoryPauseSection} from '../src/features/memory/MemoryPauseSection';
 import {MemoryReceiptChip} from '../src/features/memory/MemoryReceiptChip';
@@ -166,6 +171,14 @@ describe('요약 카드 — 화면', () => {
     expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 
+  it('닫기는 글자가 아니라 시트와 같은 X 글리프다 — 이름은 그대로 「안 읽은 동안 요약 닫기」 (#4458)', () => {
+    view({kind: 'empty'});
+    const dismiss = screen.getByTestId('missed-digest-dismiss');
+    expect(dismiss.props.accessibilityLabel).toBe(copy.MISSED_DISMISS_A11Y);
+    expect(within(dismiss).UNSAFE_getByType(Image).props.source).toBe(SHEET_ICONS.close);
+    expect(screen.queryByText('닫기')).toBeNull();
+  });
+
   it('hidden 이면 아무것도 그리지 않는다', () => {
     view({kind: 'hidden'});
     expect(screen.queryByTestId('missed-digest-card')).toBeNull();
@@ -268,7 +281,12 @@ describe('요약 카드 — 서버와의 계약', () => {
     fireEvent.press(screen.getByTestId('missed-digest-more'));
     expect(screen.getByTestId('missed-digest-sheet')).toBeTruthy();
     fireEvent.press(screen.getByTestId('missed-digest-sheet-evidence-1-1'));
-    expect(onOpenEvidence).toHaveBeenCalledWith({messageId: 'm-15', channelId: CH, seq: 15});
+    // 근거는 다른 화면(그 메시지)으로 가는 누름이라 시트가 먼저 미끄러져 내려간 뒤에 불린다(#4458).
+    expect(onOpenEvidence).not.toHaveBeenCalled();
+    await waitFor(
+      () => expect(onOpenEvidence).toHaveBeenCalledWith({messageId: 'm-15', channelId: CH, seq: 15}),
+      {timeout: 8000},
+    );
     expect(screen.queryByTestId('missed-digest-sheet')).toBeNull();
   });
 });
@@ -336,6 +354,17 @@ describe('기억 n개 참고 칩', () => {
     expect(screen.queryByText(copy.WITHHELD_EXPLAIN)).toBeNull();
   });
 
+  it('시트의 요약은 묶음 카드의 줄이고 줄 사이는 카드의 구분선이다 — 글자 「닫기」는 없다 (#4458)', async () => {
+    mockReceipt.mockResolvedValue(receipt());
+    mount();
+    await waitFor(() => expect(screen.getByTestId('memory-receipt-chip')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('memory-receipt-chip'));
+    // 요약 둘 → 카드 하나 + 구분선 하나(옛 줄마다 위 테두리가 아니다).
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(1);
+    expect(screen.getAllByTestId('group-divider')).toHaveLength(1);
+    expect(screen.queryByText('닫기')).toBeNull();
+  });
+
   it('withheldCount 가 있으면 개수와 이유만 말하고 내용은 그리지 않는다', async () => {
     mockReceipt.mockResolvedValue(receipt({withheldCount: 3}));
     mount();
@@ -363,7 +392,11 @@ describe('기억 n개 참고 칩', () => {
     await waitFor(() => expect(screen.getByTestId('memory-receipt-chip')).toBeTruthy());
     fireEvent.press(screen.getByTestId('memory-receipt-chip'));
     fireEvent.press(screen.getByTestId('memory-sheet-evidence-1-2'));
-    expect(onOpenEvidence).toHaveBeenCalledWith({messageId: 'm-18', channelId: CH, seq: 18});
+    expect(onOpenEvidence).not.toHaveBeenCalled();
+    await waitFor(
+      () => expect(onOpenEvidence).toHaveBeenCalledWith({messageId: 'm-18', channelId: CH, seq: 18}),
+      {timeout: 8000},
+    );
     expect(screen.queryByTestId('memory-sheet')).toBeNull();
   });
 });
@@ -479,6 +512,16 @@ describe('개인 일시정지 (프로필 시트)', () => {
     await waitFor(() => expect(screen.getByTestId('memory-pause-retry')).toBeTruthy());
     expect(pauseSwitch(true)).toBeNull();
     expect(screen.getByText(copy.MEMORY_PAUSE_LOAD_FAILED)).toBeTruthy();
+    // 복구 길은 강조색 글자다(옛 판의 `tone="accent"`) — 눌리지 않는 안내 행과 갈린다(design-review #4457 r3 M1).
+    const retry = StyleSheet.flatten(
+      within(screen.getByTestId('memory-pause-retry')).getByText(copy.MEMORY_PAUSE_RETRY).props.style,
+    );
+    expect(retry).toMatchObject({fontWeight: '600'});
+    expect(retry.color).not.toBe(
+      StyleSheet.flatten(
+        within(screen.getByTestId('memory-admin-row')).getByText(copy.MEMORY_ADMIN_ROW).props.style,
+      ).color,
+    );
   });
 
   it('팀 설정이 꺼져 있으면 그 사실을 알리고, 관리자 설정은 데스크탑이라고 말한다', async () => {
@@ -497,4 +540,24 @@ describe('근거 점프의 못 찾음 고지', () => {
     expect(unknown.headline).toBe('근거 메시지를 이 화면에서 찾지 못했어요');
     expect(older.detail).toMatch(/요\.$/);
   });
+});
+
+// ---- 기억 목록 시트의 닫는 길 (#4458) -------------------------------------------------
+async function openReceiptSheet() {
+  mockReceipt.mockResolvedValue(receipt());
+  const {ui} = withClient(<MemoryReceiptChip workspaceId={WS} runId="r-1" />);
+  render(ui);
+  await waitFor(() => expect(screen.getByTestId('memory-receipt-chip')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('memory-receipt-chip'));
+}
+
+describeCloseContract({
+  name: 'MemoryDigestSheet',
+  open: openReceiptSheet,
+  // 부모(칩)가 시트를 걷는다 — 시트가 사라졌으면 「닫아 달라」고 한 것이다.
+  closedCount: () => (screen.queryByTestId('memory-sheet') === null ? 1 : 0),
+  closeTestID: 'memory-sheet-close',
+  closeLabel: copy.RECEIPT_CLOSE_A11Y,
+  scrimTestID: 'memory-sheet-backdrop',
+  scrimLabel: copy.RECEIPT_CLOSE_A11Y,
 });

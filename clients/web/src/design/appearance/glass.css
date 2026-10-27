@@ -88,10 +88,13 @@
     margin-inline-start: var(--spacing-2);
   }
 
-  /* 사이드바·타이틀바·설정 목록은 띠(있으면) 위에, 접힌 타이틀바는 바닥 위에 선다. 글자·표식은 두 면 위에서 각각 보정한 색이다. */
+  /* 사이드바·타이틀바·설정 목록은 띠(있으면) 위에, 접힌 타이틀바는 바닥 위에 선다. 글자·표식은 두 면 위에서 각각 보정한 색이다.
+   * 데스크탑 셸(`data-desktop-shell`, #4591)은 예외다: 띠의 윗줄이 전폭으로 깔려(`tokens.css` `app-shell`) 접힌 상단 줄도
+   * 띠 위에 선다. 띠 역할 값은 띠가 없는 테마에서 바닥 값과 같다(`GLASS_VARS.bandRole`), 그래서 띠가 없으면 달라지는 것이 없다. */
   :root[data-glass] .sidebar-drawer,
   :root[data-glass] .settings-nav,
-  :root[data-glass] .app-shell:not([data-sidebar-collapsed]) > .app-titlebar {
+  :root[data-glass] .app-shell:not([data-sidebar-collapsed]) > .app-titlebar,
+  :root[data-glass] .app-shell[data-desktop-shell] > .app-titlebar {
     --ink-muted: var(--glass-band-ink-muted);
     --icon: var(--glass-band-icon);
     --signal: var(--glass-band-signal);
@@ -103,7 +106,7 @@
     --danger: var(--glass-band-danger);
   }
 
-  :root[data-glass] .app-shell[data-sidebar-collapsed] > .app-titlebar {
+  :root[data-glass] .app-shell[data-sidebar-collapsed]:not([data-desktop-shell]) > .app-titlebar {
     --ink-muted: var(--glass-ink-muted);
     --icon: var(--glass-icon);
     --signal: var(--glass-signal);

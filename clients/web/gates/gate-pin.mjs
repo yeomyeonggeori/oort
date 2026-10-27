@@ -1095,14 +1095,26 @@ async function exercise(browser) {
   );
 
   // ---- 7. 헤더 버튼은 하나의 이름을 갖는다 ------------------------------------
+  // #4591: 이름은 `aria-label` 하나이고, 눈으로 보는 툴팁은 디자인 시스템 `Tooltip`이 **같은 문구**를 말한다.
+  // 예전에는 네이티브 `title`이 그 자리였고 이 단정이 `aria-label === title`을 쟀다. `title`을 같이 두면
+  // 운영체제 툴팁과 디자인 시스템 툴팁이 둘 다 떠서 한 컨트롤에 이름이 둘이다.
   const trigger = page.getByTestId("open-pin-list");
   const [ariaLabel, title] = await Promise.all([
     trigger.getAttribute("aria-label"),
     trigger.getAttribute("title"),
   ]);
-  if (!ariaLabel || ariaLabel !== title) {
+  if (title !== null) {
     throw new Error(
-      `two names for one control is two controls to a reader: aria-label "${ariaLabel}" vs title "${title}"`
+      `a native title doubles the design-system tooltip on one control: title "${title}"`
+    );
+  }
+  await trigger.hover();
+  const tooltip = page.getByTestId("tooltip");
+  await tooltip.waitFor({ timeout: 3_000 }); // 지연 500ms 뒤에 뜬다
+  const tooltipText = ((await tooltip.textContent()) ?? "").trim();
+  if (!ariaLabel || ariaLabel !== tooltipText) {
+    throw new Error(
+      `two names for one control is two controls to a reader: aria-label "${ariaLabel}" vs tooltip "${tooltipText}"`
     );
   }
 

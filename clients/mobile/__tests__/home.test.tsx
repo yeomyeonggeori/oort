@@ -20,6 +20,8 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {darkPalette, lightPalette} from '../src/design/tokens';
+import {GroupCard} from '../src/design/sheetParts';
+import {describeCloseContract} from './fixtures/sheetContract';
 import {
   markAgentWorking,
   resetAgentWorking,
@@ -1061,7 +1063,9 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(item).toHaveTextContent(/나간 멤버/);
     expect(item).toHaveTextContent(/상대가 나갔고 안 읽은 메시지가 없어요/);
     const reopen = screen.getByTestId('dm-closed-reopen-ch-dm-gone');
-    expect(reopen).toHaveTextContent(/^열기$/);
+    // 대화 하나는 행 하나이고 행 전체가 동사다(#4458): 동사는 오른쪽 값이다. 「열기」와 「다시 열기」는 다른 동사다.
+    expect(within(reopen).getByText('열기')).toBeTruthy();
+    expect(within(reopen).queryByText('다시 열기')).toBeNull();
     expect(reopen.props.accessibilityLabel).toBe('나간 멤버, 열기');
     fireEvent.press(reopen);
     await waitFor(() => expect(screen.getByTestId('conversation-pane')).toBeTruthy());
@@ -1070,16 +1074,16 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     expect(screen.queryByTestId('dm-closed-sheet')).toBeNull();
   });
 
-  it('시트의 닫기 줄과 배경이 시트를 닫는다', async () => {
+  it('시트의 원형 X 와 배경이 시트를 닫는다 — 맨 아래 「닫기」 줄은 없다 (#4458)', async () => {
     await mountHome({channels: withGone});
     await settledHidden();
     openClosedSheet();
     await screen.findByTestId('dm-closed-sheet');
     fireEvent.press(screen.getByTestId('dm-closed-close'));
-    expect(screen.queryByTestId('dm-closed-sheet')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('dm-closed-sheet')).toBeNull(), {timeout: 8000});
     openClosedSheet();
     fireEvent.press(await screen.findByTestId('dm-closed-backdrop', {includeHiddenElements: true}));
-    expect(screen.queryByTestId('dm-closed-sheet')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('dm-closed-sheet')).toBeNull(), {timeout: 8000});
   });
 
   it('이름으로 찾으면 숨은 대화도 나오고, 얼굴은 빈 원이 아니라 기본 아바타다 (닫기는 지우기가 아니다)', async () => {
@@ -1326,7 +1330,8 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     openClosedSheet();
     const item = await screen.findByTestId('dm-closed-item-ch-dm-human');
     expect(item).toHaveTextContent(/내가 닫았어요/);
-    expect(screen.getByTestId('dm-closed-reopen-ch-dm-human')).toHaveTextContent(/^다시 열기$/);
+    expect(within(screen.getByTestId('dm-closed-reopen-ch-dm-human')).getByText('다시 열기')).toBeTruthy();
+    expect(within(screen.getByTestId('dm-closed-reopen-ch-dm-human')).queryByText('열기')).toBeNull();
     expect(screen.getByTestId('dm-closed-hint')).toHaveTextContent(
       /새 메시지가 오면 닫은 대화는 사이드바로 돌아와요\./,
     );
@@ -1460,5 +1465,39 @@ describe('홈 — 닫은 대화·나간 멤버와의 대화 (#4367)', () => {
     await settledHidden();
     expect(screen.queryByTestId('channels-empty')).toBeNull();
     expect(screen.queryByTestId(HUMAN_ROW)).toBeNull();
+  });
+
+  it('대화 하나는 묶음 카드의 행 하나이고, 맨 아래 「닫기」 줄·외곽선 「다시 열기」 단추는 없다 (#4458)', async () => {
+    await mountHome({channels: withGone, readStates: serverRows(4)});
+    await settledHidden();
+    openClosedSheet();
+    await screen.findByTestId('dm-closed-sheet');
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(1);
+    // 닫은 대화 둘(내가 닫은 것 · 상대가 나간 것) → 행 둘 → 구분선 하나(카드가 그린다).
+    await screen.findByTestId('dm-closed-item-ch-dm-gone');
+    await screen.findByTestId('dm-closed-item-ch-dm-human');
+    expect(screen.getAllByTestId(/^dm-closed-item-/)).toHaveLength(2);
+    expect(screen.getAllByTestId('group-divider')).toHaveLength(1);
+    // 행 전체가 동사다: 이름 줄과 동사 단추가 따로 있지 않다.
+    const reopenRow = screen.getByTestId('dm-closed-reopen-ch-dm-gone');
+    expect(reopenRow.props.accessibilityRole).toBe('button');
+    expect(within(screen.getByTestId('dm-closed-item-ch-dm-gone')).getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByText('닫기')).toBeNull();
+  });
+
+  describeCloseContract({
+    name: 'DmClosedSheet',
+    open: async () => {
+      await mountHome({channels: withGone});
+      await settledHidden();
+      openClosedSheet();
+      await screen.findByTestId('dm-closed-sheet');
+    },
+    // 부모(사이드바)가 시트를 걷는다 — 시트가 사라졌으면 「닫아 달라」고 한 것이다.
+    closedCount: () => (screen.queryByTestId('dm-closed-sheet') === null ? 1 : 0),
+    closeTestID: 'dm-closed-close',
+    closeLabel: '닫은 대화 닫기',
+    scrimTestID: 'dm-closed-backdrop',
+    scrimLabel: '닫은 대화 닫기',
   });
 });
