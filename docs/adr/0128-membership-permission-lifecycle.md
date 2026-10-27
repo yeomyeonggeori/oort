@@ -28,7 +28,7 @@
 - `DELETE .../members/:member` (**추방 remove**): 전 채널 membership 제거 + status=deleted 전이(메시지 이력은 보존 — 저자 표시는 유지, Slack 문법). 토큰 revoke 동반.
 - `POST .../bans` / `DELETE .../bans/:ban` (**차단**): email(human)·handle 기준 ban 원장(migration 026) — **invite redeem·join 시 banned 검사로 재합류 차단**(P2의 구멍 봉합). 추방 시 `ban: true` 옵션으로 원스텝.
   - 증보(Accepted, 2026-10-27 owner 승인, #4625): 이미 `deleted`인 이메일은 일반 초대 코드로 되살아나지 않는다([ADR-0215](0215-login-recovery-v2-password-change-and-reset.md) 증보 1 J7). 차단은 새 이메일·핸들까지 막는 도구로 남는다. 「돌아온 사람」 복원 경로는 후속 #4627.
-  - 증보(Proposed, 2026-10-27, #4636): 정지·추방·탈퇴·비밀번호 변경·재설정이 로그인·claim·비밀번호 변경·join의 세션 발급과 겹쳐도 바뀐 상태를 따른다. 세션 기록은 판정과 같은 트랜잭션에서, 멤버십 잠금 아래서 한다([ADR-0215](0215-login-recovery-v2-password-change-and-reset.md) 증보 2).
+  - 증보(Accepted, 2026-10-27 owner 승인, #4636): 정지·추방·탈퇴·비밀번호 변경·재설정이 로그인·claim·비밀번호 변경·join의 세션 발급과 겹쳐도 바뀐 상태를 따른다. 세션 기록은 판정과 같은 트랜잭션에서, 멤버십 잠금 아래서 한다([ADR-0215](0215-login-recovery-v2-password-change-and-reset.md) 증보 2).
 - deleted의 완전 소거(GDPR성 익명화)는 v1.5 별도 — 이 ADR 범위 밖.
 
 ### D4. self-service
