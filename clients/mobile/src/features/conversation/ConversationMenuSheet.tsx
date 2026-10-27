@@ -155,7 +155,7 @@ export function ConversationMenuSheet({
                 <ListRow
                   title={infoLabel}
                   accessory="chevron"
-                  accessibilityHint={`${infoLabel}를 엽니다.`}
+                  accessibilityHint={`${infoLabel} 화면을 엽니다.`}
                   onPress={onOpenInfo}
                   closesSheet
                   testID="conversation-menu-info"

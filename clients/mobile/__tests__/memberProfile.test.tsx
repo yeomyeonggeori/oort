@@ -31,6 +31,7 @@ import {
 import {
   PROFILE_FACE,
   PROFILE_FACE_SQUARE_RADIUS,
+  PROFILE_FACE_SQUARE_RING_RADIUS,
 } from '../src/features/profile/ProfileFace';
 import {
   describeCloseContract,
@@ -259,6 +260,8 @@ describe('다른 사람 프로필 시트 — 가운데 큰 얼굴과 이름 (#43
     expect(face.width).toBe(PROFILE_FACE);
     expect(face.borderRadius).toBe(PROFILE_FACE_SQUARE_RADIUS);
     expect(face.borderRadius).not.toBe(PROFILE_FACE / 2);
+    // 링(얼굴 바깥의 가장자리 한 줄)도 사각이다 — 링 반경은 얼굴 반경 + 링 두께라 얼굴 모서리와 한 겹으로 맞는다. 사람의 링은 원(pill)이다.
+    expect(flatten(screen.getByTestId('profile-face').props.style).borderRadius).toBe(PROFILE_FACE_SQUARE_RING_RADIUS);
     // 에이전트는 역할이 없다 — 이름 아래 한 줄이 「에이전트」라고 말한다(얼굴은 보조기술에서 숨는다).
     expect(screen.getByTestId('profile-role').props.children).toBe('에이전트');
   });
