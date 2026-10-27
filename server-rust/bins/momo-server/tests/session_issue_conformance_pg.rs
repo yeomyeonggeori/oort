@@ -1096,17 +1096,33 @@ async fn open_suspension(
     workspace: Uuid,
     member: Uuid,
 ) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    open_departure(su, workspace, member, false).await
+}
+
+/// The same for a member who is **removed** (`removed`: the row is soft-deleted, as a removal
+/// or a departure leaves it) rather than suspended.
+async fn open_departure(
+    su: &PgPool,
+    workspace: Uuid,
+    member: Uuid,
+    removed: bool,
+) -> sqlx::Transaction<'static, sqlx::Postgres> {
     let mut tx = su.begin().await.expect("begin the suspension");
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 128))")
         .bind(workspace.to_string())
         .execute(&mut *tx)
         .await
         .expect("take the membership lock");
-    sqlx::query("UPDATE member SET status = 'suspended', updated_at = now() WHERE id = $1")
+    let write = if removed {
+        "UPDATE member SET status = 'deleted', deleted_at = now(), updated_at = now() WHERE id = $1"
+    } else {
+        "UPDATE member SET status = 'suspended', updated_at = now() WHERE id = $1"
+    };
+    sqlx::query(write)
         .bind(member)
         .execute(&mut *tx)
         .await
-        .expect("suspend the member");
+        .expect("change the member's standing");
     sqlx::query(
         "UPDATE token SET revoked_at = now() WHERE actor_member_id = $1 AND revoked_at IS NULL",
     )
@@ -1129,46 +1145,53 @@ async fn password_changes_audited(su: &PgPool, member: Uuid) -> i64 {
 }
 
 /// A password change whose bearer was good when the request arrived, but which then waited
-/// for the membership lock while a suspension committed, **refuses**: the standing is read
-/// under the lock and before the first write. The middleware cannot have caught it — it
-/// judged the bearer before the lock was had — and a change that went ahead would write the
-/// password and hand a suspended member a new session.
+/// for the membership lock while the member was suspended or removed, **refuses**: the
+/// standing is read under the lock and before the first write. The middleware cannot have
+/// caught it — it judged the bearer before the lock was had — and a change that went ahead
+/// would write the password and hand a member who is no longer active a new session.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
-async fn a_password_change_that_waited_for_a_suspension_refuses() {
-    let w = world("session-issue-stale-change", Some(MEMBER_PASSWORD), 4).await;
-    let kit = prepare(&w, Issuer::PasswordChange, Change::Suspend).await;
-    let hash_before = password_hash(&w.su, w.member).await;
+async fn a_password_change_that_waited_for_a_suspension_or_removal_refuses() {
+    for removed in [false, true] {
+        let case = if removed { "removal" } else { "suspension" };
+        let w = world("session-issue-stale-change", Some(MEMBER_PASSWORD), 4).await;
+        let kit = prepare(&w, Issuer::PasswordChange, Change::Suspend).await;
+        let hash_before = password_hash(&w.su, w.member).await;
 
-    let suspension = open_suspension(&w.su, w.workspace, w.member).await;
-    let door = spawn_issuer(&w, Issuer::PasswordChange, &kit);
-    wait_until("the change to wait for the membership lock", || async {
-        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await > 0
-    })
-    .await;
-    assert!(
-        !door.is_finished(),
-        "the change waits for the open suspension"
-    );
-    suspension.commit().await.expect("commit the suspension");
-    let reply = door.await.expect("change task");
+        let departure = open_departure(&w.su, w.workspace, w.member, removed).await;
+        let door = spawn_issuer(&w, Issuer::PasswordChange, &kit);
+        wait_until("the change to wait for the membership lock", || async {
+            membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await > 0
+        })
+        .await;
+        assert!(
+            !door.is_finished(),
+            "{case}: the change waits for the open departure"
+        );
+        departure.commit().await.expect("commit the departure");
+        let reply = door.await.expect("change task");
 
-    assert_eq!(reply.status, 403, "the change is refused: {}", reply.body);
-    assert_eq!(
-        password_hash(&w.su, w.member).await,
-        hash_before,
-        "the password is untouched"
-    );
-    assert_eq!(
-        live_tokens(&w.su, w.member).await,
-        0,
-        "no session was issued"
-    );
-    assert_eq!(
-        password_changes_audited(&w.su, w.member).await,
-        0,
-        "nothing was audited"
-    );
+        assert_eq!(
+            reply.status, 403,
+            "{case}: the change is refused: {}",
+            reply.body
+        );
+        assert_eq!(
+            password_hash(&w.su, w.member).await,
+            hash_before,
+            "{case}: the password is untouched"
+        );
+        assert_eq!(
+            live_tokens(&w.su, w.member).await,
+            0,
+            "{case}: no session was issued"
+        );
+        assert_eq!(
+            password_changes_audited(&w.su, w.member).await,
+            0,
+            "{case}: nothing was audited"
+        );
+    }
 }
 
 /// A reset claim that waited for a suspension refuses the same way, and rolls everything
