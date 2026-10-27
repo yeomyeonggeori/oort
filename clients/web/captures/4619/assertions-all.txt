@@ -1,0 +1,515 @@
+[320-light] 끊긴 레일: 칸 안쪽 272.0px(접힘) · 한정 문장 254.0/254px · 에이전트 글 0.0px 「」
+ok   320-light 끊긴 레일: 한정 문장이 전문 그대로다
+ok   320-light 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   320-light 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   320-light 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 0.0px)
+ok   320-light 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「」)
+ok   320-light 끊긴 레일: 칸 안쪽 272.0px는 「접힘」 단계다(안쪽 20rem·32rem 문턱)
+ok   320-light 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   320-light 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   320-light 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+[360-light] 끊긴 레일: 칸 안쪽 312.0px(접힘) · 한정 문장 254.0/254px · 에이전트 글 0.0px 「」
+ok   360-light 끊긴 레일: 한정 문장이 전문 그대로다
+ok   360-light 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   360-light 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   360-light 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 0.0px)
+ok   360-light 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「」)
+ok   360-light 끊긴 레일: 칸 안쪽 312.0px는 「접힘」 단계다(안쪽 20rem·32rem 문턱)
+ok   360-light 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   360-light 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   360-light 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+[375-light] 끊긴 레일: 칸 안쪽 327.0px(이름만) · 한정 문장 254.0/254px · 에이전트 글 41.5px 「달무리봇」
+ok   375-light 끊긴 레일: 한정 문장이 전문 그대로다
+ok   375-light 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   375-light 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   375-light 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 41.5px)
+ok   375-light 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「달무리봇」)
+ok   375-light 끊긴 레일: 칸 안쪽 327.0px는 「이름만」 단계다(안쪽 20rem·32rem 문턱)
+ok   375-light 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   375-light 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   375-light 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+[390-light] 끊긴 레일: 칸 안쪽 342.0px(이름만) · 한정 문장 254.0/254px · 에이전트 글 41.5px 「달무리봇」
+ok   390-light 끊긴 레일: 한정 문장이 전문 그대로다
+ok   390-light 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   390-light 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   390-light 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 41.5px)
+ok   390-light 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「달무리봇」)
+ok   390-light 끊긴 레일: 칸 안쪽 342.0px는 「이름만」 단계다(안쪽 20rem·32rem 문턱)
+ok   390-light 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   390-light 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   390-light 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+[390-dark] 끊긴 레일: 칸 안쪽 342.0px(이름만) · 한정 문장 254.0/254px · 에이전트 글 41.5px 「달무리봇」
+ok   390-dark 끊긴 레일: 한정 문장이 전문 그대로다
+ok   390-dark 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   390-dark 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   390-dark 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 41.5px)
+ok   390-dark 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「달무리봇」)
+ok   390-dark 끊긴 레일: 칸 안쪽 342.0px는 「이름만」 단계다(안쪽 20rem·32rem 문턱)
+ok   390-dark 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   390-dark 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   390-dark 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+[720-light] 끊긴 레일: 칸 안쪽 340.0px(이름만) · 한정 문장 254.0/254px · 에이전트 글 41.5px 「달무리봇」
+ok   720-light 끊긴 레일: 한정 문장이 전문 그대로다
+ok   720-light 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   720-light 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   720-light 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 41.5px)
+ok   720-light 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「달무리봇」)
+ok   720-light 끊긴 레일: 칸 안쪽 340.0px는 「이름만」 단계다(안쪽 20rem·32rem 문턱)
+ok   720-light 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   720-light 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   720-light 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+[1440-light] 끊긴 레일: 칸 안쪽 1060.0px(전문) · 한정 문장 254.0/254px · 에이전트 글 189.8px 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   1440-light 끊긴 레일: 한정 문장이 전문 그대로다
+ok   1440-light 끊긴 레일: 한정 문장이 잘리지 않는다(B1, 254.0 ≥ 254)
+ok   1440-light 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다
+ok   1440-light 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, 189.8px)
+ok   1440-light 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「달무리봇 · 작업 중 · 회의록 초안 정리 중」)
+ok   1440-light 끊긴 레일: 칸 안쪽 1060.0px는 「전문」 단계다(안쪽 20rem·32rem 문턱)
+ok   1440-light 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음
+ok   1440-light 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)
+ok   1440-light 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다
+sheet <OUT>/offline-rail.png
+[320-light] 팝오버: 폭 304.0 · 왼쪽 8.0 · 오른쪽 312.0 / 뷰포트 320
+ok   320-light 팝오버가 뷰포트 안에 선다(B2, 8.0~312.0 / 320)
+ok   320-light 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다
+ok   320-light 팝오버가 가로 스크롤을 만들지 않는다
+[360-light] 팝오버: 폭 344.0 · 왼쪽 8.0 · 오른쪽 352.0 / 뷰포트 360
+ok   360-light 팝오버가 뷰포트 안에 선다(B2, 8.0~352.0 / 360)
+ok   360-light 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다
+ok   360-light 팝오버가 가로 스크롤을 만들지 않는다
+[375-light] 팝오버: 폭 359.0 · 왼쪽 8.0 · 오른쪽 367.0 / 뷰포트 375
+ok   375-light 팝오버가 뷰포트 안에 선다(B2, 8.0~367.0 / 375)
+ok   375-light 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다
+ok   375-light 팝오버가 가로 스크롤을 만들지 않는다
+[390-light] 팝오버: 폭 374.0 · 왼쪽 8.0 · 오른쪽 382.0 / 뷰포트 390
+ok   390-light 팝오버가 뷰포트 안에 선다(B2, 8.0~382.0 / 390)
+ok   390-light 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다
+ok   390-light 팝오버가 가로 스크롤을 만들지 않는다
+[320-dark] 팝오버: 폭 304.0 · 왼쪽 8.0 · 오른쪽 312.0 / 뷰포트 320
+ok   320-dark 팝오버가 뷰포트 안에 선다(B2, 8.0~312.0 / 320)
+ok   320-dark 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다
+ok   320-dark 팝오버가 가로 스크롤을 만들지 않는다
+[720-light] 팝오버: 폭 384.0 · 왼쪽 328.0 · 오른쪽 712.0 / 뷰포트 720
+ok   720-light 팝오버가 뷰포트 안에 선다(B2, 328.0~712.0 / 720)
+ok   720-light 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다
+ok   720-light 팝오버가 가로 스크롤을 만들지 않는다
+sheet <OUT>/popover-widths.png
+ok   390-light 구경꾼: 아직 받지 않았어요: 문장은 선다(「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」)
+ok   390-light 구경꾼: 아직 받지 않았어요: 행동 단추가 없다(다시 깨우기 0 · 취소 0 · 설정 0)
+ok   390-light 구경꾼: 아직 받지 않았어요: 남이 부른 메시지에도 칩이 선다(answered,uncollected)
+ok   390-light 구경꾼: 실패: 문장은 선다(「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」)
+ok   390-light 구경꾼: 실패: 행동 단추가 없다(다시 깨우기 0 · 취소 0 · 설정 0)
+ok   390-light 구경꾼: 실패: 남이 부른 메시지에도 칩이 선다(answered,failed)
+ok   720-light 구경꾼: 아직 받지 않았어요: 문장은 선다(「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」)
+ok   720-light 구경꾼: 아직 받지 않았어요: 행동 단추가 없다(다시 깨우기 0 · 취소 0 · 설정 0)
+ok   720-light 구경꾼: 아직 받지 않았어요: 남이 부른 메시지에도 칩이 선다(answered,uncollected)
+ok   720-light 구경꾼: 실패: 문장은 선다(「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」)
+ok   720-light 구경꾼: 실패: 행동 단추가 없다(다시 깨우기 0 · 취소 0 · 설정 0)
+ok   720-light 구경꾼: 실패: 남이 부른 메시지에도 칩이 선다(answered,failed)
+sheet <OUT>/bystander.png
+[1440-light] working1: 레일「달무리봇 · 작업 중 · 회의록 초안 정리 중」 줄「」 칩 answered:row,working:word 목록~입력창 24
+ok   1440-light working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   1440-light working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)
+ok   1440-light working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다
+ok   1440-light working1: 레일 칸 높이 24
+[1440-light] working2: 레일「달무리봇 +1」 줄「」 칩 answered:row,working:word,working:word 목록~입력창 24
+ok   1440-light working2: 두 에이전트는 한 줄로 합친다
+ok   1440-light working2: 레일 칸 높이 24
+[1440-light] approval: 레일「달무리봇 · 승인 대기」 줄「」 칩 answered:row,approval:word 목록~입력창 24
+ok   1440-light approval: 레일 「달무리봇 · 승인 대기」
+ok   1440-light approval: 승인 대기는 「작업 중」이라 부르지 않는다
+ok   1440-light approval: 레일 칸 높이 24
+[1440-light] uncollected: 레일「」 줄「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,uncollected:word 목록~입력창 24
+ok   1440-light uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」
+ok   1440-light uncollected: 레일에서는 빠진다(한 군데서만 말한다)
+ok   1440-light uncollected: 대화에 경과 숫자가 없다
+ok   1440-light uncollected: 다시 깨우기(owner) · 취소 · 설정이 줄 안에 선다
+[1440-light] uncollected 행동 단추 크기: wake-agent-button=79×28 agent-work-panel-stop-arm=44.8×28 run-exception-settings=113.2×28
+ok   1440-light uncollected: 레일 칸 높이 24
+[1440-light] failed: 레일「」 줄「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」 칩 answered:row,failed:word 목록~입력창 24
+ok   1440-light failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」
+ok   1440-light failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)
+ok   1440-light failed: 줄의 아이콘이 칩과 같은 가위표
+ok   1440-light failed: 레일 칸 높이 24
+[1440-light] timedOut: 레일「」 줄「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」 칩 answered:row,timed_out:word 목록~입력창 24
+ok   1440-light timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」
+ok   1440-light timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)
+ok   1440-light timedOut: 칩의 낱말 「신호 소실」
+ok   1440-light timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)
+ok   1440-light timedOut: 레일 칸 높이 24
+[1440-light] done: 레일「」 줄「」 칩 answered:row,answered:row 목록~입력창 24
+ok   1440-light done: 레일은 비고 칸은 남는다
+ok   1440-light done: 「답함 ✓」은 답을 알 때 눌리는 단추다
+ok   1440-light done: 레일 칸 높이 24
+[1440-light] wakeFailed: 레일「달무리봇 · 받음」 줄「달무리봇: 깨우는 신호가 닿지 않음 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,received:word 목록~입력창 24
+ok   1440-light wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」
+ok   1440-light wakeFailed: 칩은 아직 진행 낱말(받음)
+ok   1440-light wakeFailed: 레일 칸 높이 24
+[1440-light] 목록 상자 바닥 ~ 입력창 카드 위: working1=24 working2=24 approval=24 uncollected=24 failed=24 timedOut=24 done=24 wakeFailed=24 idle=24
+ok   1440-light 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 0.00px)
+ok   1440-light 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 0.00px)
+ok   1440-light 에이전트 대화의 목록~입력창 간격은 24px(칸 24)
+ok   1440-light 칩 여덟 종이 한 화면에: answered,approval,claimed,failed,received,timed_out,uncollected,working
+ok   1440-light 칩 크기 고정: 여덟 종의 폭·높이가 같다(114.3×20.0)
+ok   1440-light 넓은 줄: 여덟 낱말이 보인다
+ok   1440-light 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, 8행)
+ok   1440-light 이어지는 행: 거터 아이콘 칩이 둘(작업 중·실패)
+ok   1440-light 이어지는 행: 쉬는 중 칩이 보이고 시각은 숨는다
+ok   1440-light 이어지는 행: 거터 칩이 행 높이를 바꾸지 않는다
+ok   1440-light 이어지는 행: hover하면 칩은 시각에 자리를 내준다
+ok   1440-light 스레드 요약 줄에 「작업 중」 칩이 선다
+ok   1440-light 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, answered,answered,answered,working)
+ok   1440-light 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다
+ok   1440-light 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」
+ok   1440-light 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(4행)
+sheet <OUT>/states-wide-light.png
+ok   1440-light 팝오버: 일하는 에이전트가 각자의 낱말로 나란히
+ok   1440-light 팝오버: 경과는 1분 단위로만
+ok   1440-light 팝오버: 「활동 보기」가 있다
+ok   1440-light 취소: 첫 클릭은 묻기만 한다
+ok   1440-light 취소: 확인 문장
+[1440-light] 취소 확인 단추 크기: agent-work-panel-stop-keep=79×28 agent-work-panel-stop-commit=68.6×28
+ok   1440-light 취소: 확정하면 취소 요청이 한 번 나간다
+sheet <OUT>/extras-wide-light.png
+ok   1440-light 에이전트 대화(레일 칸 24): 목록~입력창 간격 24px
+ok   1440-light 사람만 있는 대화(칸 없음, 폼 윗 여백): 목록~입력창 간격 8px
+ok   1440-light 사람만 있는 대화: 레일 칸이 없다(죽은 띠 없음)
+ok   1440-light 사람만 있는 대화: 간격이 폼의 윗 여백 그대로다(#1749, 8)
+sheet <OUT>/spacing-wide-light.png
+ok   1440-light 점프: 위에서 본 「답함 ✓」은 단추다
+ok   1440-light 점프: 「답함 ✓」을 누르면 답 메시지로 간다(스크롤 0 → 1456)
+[1440-dark] working1: 레일「달무리봇 · 작업 중 · 회의록 초안 정리 중」 줄「」 칩 answered:row,working:word 목록~입력창 24
+ok   1440-dark working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   1440-dark working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)
+ok   1440-dark working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다
+ok   1440-dark working1: 레일 칸 높이 24
+[1440-dark] working2: 레일「달무리봇 +1」 줄「」 칩 answered:row,working:word,working:word 목록~입력창 24
+ok   1440-dark working2: 두 에이전트는 한 줄로 합친다
+ok   1440-dark working2: 레일 칸 높이 24
+[1440-dark] approval: 레일「달무리봇 · 승인 대기」 줄「」 칩 answered:row,approval:word 목록~입력창 24
+ok   1440-dark approval: 레일 「달무리봇 · 승인 대기」
+ok   1440-dark approval: 승인 대기는 「작업 중」이라 부르지 않는다
+ok   1440-dark approval: 레일 칸 높이 24
+[1440-dark] uncollected: 레일「」 줄「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,uncollected:word 목록~입력창 24
+ok   1440-dark uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」
+ok   1440-dark uncollected: 레일에서는 빠진다(한 군데서만 말한다)
+ok   1440-dark uncollected: 대화에 경과 숫자가 없다
+ok   1440-dark uncollected: 다시 깨우기(owner) · 취소 · 설정이 줄 안에 선다
+[1440-dark] uncollected 행동 단추 크기: wake-agent-button=79×28 agent-work-panel-stop-arm=44.8×28 run-exception-settings=113.2×28
+ok   1440-dark uncollected: 레일 칸 높이 24
+[1440-dark] failed: 레일「」 줄「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」 칩 answered:row,failed:word 목록~입력창 24
+ok   1440-dark failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」
+ok   1440-dark failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)
+ok   1440-dark failed: 줄의 아이콘이 칩과 같은 가위표
+ok   1440-dark failed: 레일 칸 높이 24
+[1440-dark] timedOut: 레일「」 줄「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」 칩 answered:row,timed_out:word 목록~입력창 24
+ok   1440-dark timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」
+ok   1440-dark timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)
+ok   1440-dark timedOut: 칩의 낱말 「신호 소실」
+ok   1440-dark timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)
+ok   1440-dark timedOut: 레일 칸 높이 24
+[1440-dark] done: 레일「」 줄「」 칩 answered:row,answered:row 목록~입력창 24
+ok   1440-dark done: 레일은 비고 칸은 남는다
+ok   1440-dark done: 「답함 ✓」은 답을 알 때 눌리는 단추다
+ok   1440-dark done: 레일 칸 높이 24
+[1440-dark] wakeFailed: 레일「달무리봇 · 받음」 줄「달무리봇: 깨우는 신호가 닿지 않음 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,received:word 목록~입력창 24
+ok   1440-dark wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」
+ok   1440-dark wakeFailed: 칩은 아직 진행 낱말(받음)
+ok   1440-dark wakeFailed: 레일 칸 높이 24
+[1440-dark] 목록 상자 바닥 ~ 입력창 카드 위: working1=24 working2=24 approval=24 uncollected=24 failed=24 timedOut=24 done=24 wakeFailed=24 idle=24
+ok   1440-dark 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 0.00px)
+ok   1440-dark 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 0.00px)
+ok   1440-dark 에이전트 대화의 목록~입력창 간격은 24px(칸 24)
+ok   1440-dark 칩 여덟 종이 한 화면에: answered,approval,claimed,failed,received,timed_out,uncollected,working
+ok   1440-dark 칩 크기 고정: 여덟 종의 폭·높이가 같다(114.3×20.0)
+ok   1440-dark 넓은 줄: 여덟 낱말이 보인다
+ok   1440-dark 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, 8행)
+ok   1440-dark 이어지는 행: 거터 아이콘 칩이 둘(작업 중·실패)
+ok   1440-dark 이어지는 행: 쉬는 중 칩이 보이고 시각은 숨는다
+ok   1440-dark 이어지는 행: 거터 칩이 행 높이를 바꾸지 않는다
+ok   1440-dark 이어지는 행: hover하면 칩은 시각에 자리를 내준다
+ok   1440-dark 스레드 요약 줄에 「작업 중」 칩이 선다
+ok   1440-dark 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, answered,answered,answered,working)
+ok   1440-dark 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다
+ok   1440-dark 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」
+ok   1440-dark 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(4행)
+sheet <OUT>/states-wide-dark.png
+ok   1440-dark 팝오버: 일하는 에이전트가 각자의 낱말로 나란히
+ok   1440-dark 팝오버: 경과는 1분 단위로만
+ok   1440-dark 팝오버: 「활동 보기」가 있다
+ok   1440-dark 취소: 첫 클릭은 묻기만 한다
+ok   1440-dark 취소: 확인 문장
+[1440-dark] 취소 확인 단추 크기: agent-work-panel-stop-keep=79×28 agent-work-panel-stop-commit=68.6×28
+ok   1440-dark 취소: 확정하면 취소 요청이 한 번 나간다
+sheet <OUT>/extras-wide-dark.png
+[720-light] working1: 레일「달무리봇 · 작업 중 · 회의록 초안 정리 중」 줄「」 칩 answered:row,working:word 목록~입력창 24
+ok   720-light working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   720-light working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)
+ok   720-light working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다
+ok   720-light working1: 레일 칸 높이 24
+[720-light] working2: 레일「달무리봇 +1」 줄「」 칩 answered:row,working:word,working:word 목록~입력창 24
+ok   720-light working2: 두 에이전트는 한 줄로 합친다
+ok   720-light working2: 레일 칸 높이 24
+[720-light] approval: 레일「달무리봇 · 승인 대기」 줄「」 칩 answered:row,approval:word 목록~입력창 24
+ok   720-light approval: 레일 「달무리봇 · 승인 대기」
+ok   720-light approval: 승인 대기는 「작업 중」이라 부르지 않는다
+ok   720-light approval: 레일 칸 높이 24
+[720-light] uncollected: 레일「」 줄「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,uncollected:word 목록~입력창 24
+ok   720-light uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」
+ok   720-light uncollected: 레일에서는 빠진다(한 군데서만 말한다)
+ok   720-light uncollected: 대화에 경과 숫자가 없다
+ok   720-light uncollected: 다시 깨우기(owner) · 취소 · 설정이 줄 안에 선다
+[720-light] uncollected 행동 단추 크기: wake-agent-button=79×28 agent-work-panel-stop-arm=44.8×28 run-exception-settings=113.2×28
+ok   720-light uncollected: 레일 칸 높이 24
+[720-light] failed: 레일「」 줄「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」 칩 answered:row,failed:word 목록~입력창 24
+ok   720-light failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」
+ok   720-light failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)
+ok   720-light failed: 줄의 아이콘이 칩과 같은 가위표
+ok   720-light failed: 레일 칸 높이 24
+[720-light] timedOut: 레일「」 줄「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」 칩 answered:row,timed_out:word 목록~입력창 24
+ok   720-light timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」
+ok   720-light timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)
+ok   720-light timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)
+ok   720-light timedOut: 레일 칸 높이 24
+[720-light] done: 레일「」 줄「」 칩 answered:row,answered:row 목록~입력창 24
+ok   720-light done: 레일은 비고 칸은 남는다
+ok   720-light done: 「답함 ✓」은 답을 알 때 눌리는 단추다
+ok   720-light done: 레일 칸 높이 24
+[720-light] wakeFailed: 레일「달무리봇 · 받음」 줄「달무리봇: 깨우는 신호가 닿지 않음 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,received:word 목록~입력창 24
+ok   720-light wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」
+ok   720-light wakeFailed: 칩은 아직 진행 낱말(받음)
+ok   720-light wakeFailed: 레일 칸 높이 24
+[720-light] 목록 상자 바닥 ~ 입력창 카드 위: working1=24 working2=24 approval=24 uncollected=24 failed=24 timedOut=24 done=24 wakeFailed=24 idle=24
+ok   720-light 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 0.00px)
+ok   720-light 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 0.38px)
+ok   720-light 에이전트 대화의 목록~입력창 간격은 24px(칸 24)
+ok   720-light 칩 여덟 종이 한 화면에: answered,approval,claimed,failed,received,timed_out,uncollected,working
+ok   720-light 칩 크기 고정: 여덟 종의 폭·높이가 같다(28.0×20.0)
+[720-light] 좁은 줄: 보이는 낱말 0개 · 보이는 아이콘 8개
+ok   720-light 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, 8행)
+ok   720-light 이어지는 행: 거터 아이콘 칩이 둘(작업 중·실패)
+ok   720-light 이어지는 행: 쉬는 중 칩이 보이고 시각은 숨는다
+ok   720-light 이어지는 행: 거터 칩이 행 높이를 바꾸지 않는다
+ok   720-light 이어지는 행: hover하면 칩은 시각에 자리를 내준다
+ok   720-light 스레드 요약 줄에 「작업 중」 칩이 선다
+ok   720-light 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, answered,answered,answered,working)
+ok   720-light 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다
+ok   720-light 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」
+ok   720-light 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(4행)
+sheet <OUT>/states-narrow720-light.png
+ok   720-light 팝오버: 일하는 에이전트가 각자의 낱말로 나란히
+ok   720-light 팝오버: 경과는 1분 단위로만
+ok   720-light 팝오버: 「활동 보기」가 있다
+ok   720-light 취소: 첫 클릭은 묻기만 한다
+ok   720-light 취소: 확인 문장
+[720-light] 취소 확인 단추 크기: agent-work-panel-stop-keep=79×28 agent-work-panel-stop-commit=68.6×28
+ok   720-light 취소: 확정하면 취소 요청이 한 번 나간다
+sheet <OUT>/extras-narrow720-light.png
+ok   720-light 에이전트 대화(레일 칸 24): 목록~입력창 간격 24px
+ok   720-light 사람만 있는 대화(칸 없음, 폼 윗 여백): 목록~입력창 간격 8px
+ok   720-light 사람만 있는 대화: 레일 칸이 없다(죽은 띠 없음)
+ok   720-light 사람만 있는 대화: 간격이 폼의 윗 여백 그대로다(#1749, 8)
+sheet <OUT>/spacing-narrow720-light.png
+ok   720-light 긴 이름(21자): 모든 머리 줄이 한 줄이다(줄바꿈 0)
+sheet <OUT>/longname-narrow720-light.png
+[720-dark] working1: 레일「달무리봇 · 작업 중 · 회의록 초안 정리 중」 줄「」 칩 answered:row,working:word 목록~입력창 24
+ok   720-dark working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   720-dark working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)
+ok   720-dark working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다
+ok   720-dark working1: 레일 칸 높이 24
+[720-dark] working2: 레일「달무리봇 +1」 줄「」 칩 answered:row,working:word,working:word 목록~입력창 24
+ok   720-dark working2: 두 에이전트는 한 줄로 합친다
+ok   720-dark working2: 레일 칸 높이 24
+[720-dark] approval: 레일「달무리봇 · 승인 대기」 줄「」 칩 answered:row,approval:word 목록~입력창 24
+ok   720-dark approval: 레일 「달무리봇 · 승인 대기」
+ok   720-dark approval: 승인 대기는 「작업 중」이라 부르지 않는다
+ok   720-dark approval: 레일 칸 높이 24
+[720-dark] uncollected: 레일「」 줄「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,uncollected:word 목록~입력창 24
+ok   720-dark uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」
+ok   720-dark uncollected: 레일에서는 빠진다(한 군데서만 말한다)
+ok   720-dark uncollected: 대화에 경과 숫자가 없다
+ok   720-dark uncollected: 다시 깨우기(owner) · 취소 · 설정이 줄 안에 선다
+[720-dark] uncollected 행동 단추 크기: wake-agent-button=79×28 agent-work-panel-stop-arm=44.8×28 run-exception-settings=113.2×28
+ok   720-dark uncollected: 레일 칸 높이 24
+[720-dark] failed: 레일「」 줄「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」 칩 answered:row,failed:word 목록~입력창 24
+ok   720-dark failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」
+ok   720-dark failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)
+ok   720-dark failed: 줄의 아이콘이 칩과 같은 가위표
+ok   720-dark failed: 레일 칸 높이 24
+[720-dark] timedOut: 레일「」 줄「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」 칩 answered:row,timed_out:word 목록~입력창 24
+ok   720-dark timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」
+ok   720-dark timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)
+ok   720-dark timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)
+ok   720-dark timedOut: 레일 칸 높이 24
+[720-dark] done: 레일「」 줄「」 칩 answered:row,answered:row 목록~입력창 24
+ok   720-dark done: 레일은 비고 칸은 남는다
+ok   720-dark done: 「답함 ✓」은 답을 알 때 눌리는 단추다
+ok   720-dark done: 레일 칸 높이 24
+[720-dark] wakeFailed: 레일「달무리봇 · 받음」 줄「달무리봇: 깨우는 신호가 닿지 않음 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,received:word 목록~입력창 24
+ok   720-dark wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」
+ok   720-dark wakeFailed: 칩은 아직 진행 낱말(받음)
+ok   720-dark wakeFailed: 레일 칸 높이 24
+[720-dark] 목록 상자 바닥 ~ 입력창 카드 위: working1=24 working2=24 approval=24 uncollected=24 failed=24 timedOut=24 done=24 wakeFailed=24 idle=24
+ok   720-dark 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 0.00px)
+ok   720-dark 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 0.38px)
+ok   720-dark 에이전트 대화의 목록~입력창 간격은 24px(칸 24)
+ok   720-dark 칩 여덟 종이 한 화면에: answered,approval,claimed,failed,received,timed_out,uncollected,working
+ok   720-dark 칩 크기 고정: 여덟 종의 폭·높이가 같다(28.0×20.0)
+[720-dark] 좁은 줄: 보이는 낱말 0개 · 보이는 아이콘 8개
+ok   720-dark 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, 8행)
+ok   720-dark 이어지는 행: 거터 아이콘 칩이 둘(작업 중·실패)
+ok   720-dark 이어지는 행: 쉬는 중 칩이 보이고 시각은 숨는다
+ok   720-dark 이어지는 행: 거터 칩이 행 높이를 바꾸지 않는다
+ok   720-dark 이어지는 행: hover하면 칩은 시각에 자리를 내준다
+ok   720-dark 스레드 요약 줄에 「작업 중」 칩이 선다
+ok   720-dark 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, answered,answered,answered,working)
+ok   720-dark 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다
+ok   720-dark 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」
+ok   720-dark 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(4행)
+sheet <OUT>/states-narrow720-dark.png
+ok   720-dark 팝오버: 일하는 에이전트가 각자의 낱말로 나란히
+ok   720-dark 팝오버: 경과는 1분 단위로만
+ok   720-dark 팝오버: 「활동 보기」가 있다
+ok   720-dark 취소: 첫 클릭은 묻기만 한다
+ok   720-dark 취소: 확인 문장
+[720-dark] 취소 확인 단추 크기: agent-work-panel-stop-keep=79×28 agent-work-panel-stop-commit=68.6×28
+ok   720-dark 취소: 확정하면 취소 요청이 한 번 나간다
+sheet <OUT>/extras-narrow720-dark.png
+[390-light] working1: 레일「달무리봇 · 작업 중 · 회의록 초안 정리 중」 줄「」 칩 answered:row,working:word 목록~입력창 25
+ok   390-light working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   390-light working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)
+ok   390-light working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다
+ok   390-light working1: 레일 칸 높이 24
+[390-light] working2: 레일「달무리봇 +1」 줄「」 칩 answered:row,working:word,working:word 목록~입력창 25
+ok   390-light working2: 두 에이전트는 한 줄로 합친다
+ok   390-light working2: 레일 칸 높이 24
+[390-light] approval: 레일「달무리봇 · 승인 대기」 줄「」 칩 answered:row,approval:word 목록~입력창 25
+ok   390-light approval: 레일 「달무리봇 · 승인 대기」
+ok   390-light approval: 승인 대기는 「작업 중」이라 부르지 않는다
+ok   390-light approval: 레일 칸 높이 24
+[390-light] uncollected: 레일「」 줄「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,uncollected:word 목록~입력창 25
+ok   390-light uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」
+ok   390-light uncollected: 레일에서는 빠진다(한 군데서만 말한다)
+ok   390-light uncollected: 대화에 경과 숫자가 없다
+ok   390-light uncollected: 다시 깨우기(owner) · 취소 · 설정이 줄 안에 선다
+[390-light] uncollected 행동 단추 크기: wake-agent-button=79×44 agent-work-panel-stop-arm=44.8×44 run-exception-settings=113.2×44
+ok   390-light uncollected: 행동 단추 셋이 폰 폭에서 44×44 이상이다(M3)
+ok   390-light uncollected: 레일 칸 높이 24
+[390-light] failed: 레일「」 줄「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」 칩 answered:row,failed:word 목록~입력창 25
+ok   390-light failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」
+ok   390-light failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)
+ok   390-light failed: 줄의 아이콘이 칩과 같은 가위표
+ok   390-light failed: 레일 칸 높이 24
+[390-light] timedOut: 레일「」 줄「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」 칩 answered:row,timed_out:word 목록~입력창 25
+ok   390-light timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」
+ok   390-light timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)
+ok   390-light timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)
+ok   390-light timedOut: 레일 칸 높이 24
+[390-light] done: 레일「」 줄「」 칩 answered:row,answered:row 목록~입력창 25
+ok   390-light done: 레일은 비고 칸은 남는다
+ok   390-light done: 「답함 ✓」은 답을 알 때 눌리는 단추다
+ok   390-light done: 레일 칸 높이 24
+[390-light] wakeFailed: 레일「달무리봇 · 받음」 줄「달무리봇: 깨우는 신호가 닿지 않음 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,received:word 목록~입력창 25
+ok   390-light wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」
+ok   390-light wakeFailed: 칩은 아직 진행 낱말(받음)
+ok   390-light wakeFailed: 레일 칸 높이 24
+[390-light] 목록 상자 바닥 ~ 입력창 카드 위: working1=25 working2=25 approval=25 uncollected=25 failed=25 timedOut=25 done=25 wakeFailed=25 idle=25
+ok   390-light 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 0.00px)
+ok   390-light 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 0.38px)
+ok   390-light 에이전트 대화의 목록~입력창 간격은 25px(칸 24 + 독 경계선 1)
+ok   390-light 칩 여덟 종이 한 화면에: answered,approval,claimed,failed,received,timed_out,uncollected,working
+ok   390-light 칩 크기 고정: 여덟 종의 폭·높이가 같다(28.0×20.0)
+[390-light] 좁은 줄: 보이는 낱말 0개 · 보이는 아이콘 8개
+ok   390-light 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, 8행)
+ok   390-light 이어지는 행: 거터 아이콘 칩이 둘(작업 중·실패)
+ok   390-light 이어지는 행: 쉬는 중 칩이 보이고 시각은 숨는다
+ok   390-light 이어지는 행: 거터 칩이 행 높이를 바꾸지 않는다
+ok   390-light 이어지는 행: hover하면 칩은 시각에 자리를 내준다
+ok   390-light 스레드 요약 줄에 「작업 중」 칩이 선다
+ok   390-light 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, answered,answered,answered,working)
+ok   390-light 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다
+ok   390-light 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」
+ok   390-light 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(4행)
+sheet <OUT>/states-narrow390-light.png
+ok   390-light 취소: 첫 클릭은 묻기만 한다
+ok   390-light 취소: 확인 문장
+[390-light] 취소 확인 단추 크기: agent-work-panel-stop-keep=79×44 agent-work-panel-stop-commit=68.6×44
+ok   390-light 취소 확인: 「그대로 두기」·「취소 확정」이 폰 폭에서 같은 44(위험한 쪽만 크지 않다, M3)
+ok   390-light 취소: 확정하면 취소 요청이 한 번 나간다
+sheet <OUT>/extras-narrow390-light.png
+ok   390-light 에이전트 대화(레일 칸 24): 목록~입력창 간격 25px
+ok   390-light 사람만 있는 대화(칸 없음, 폼 윗 여백): 목록~입력창 간격 13px
+ok   390-light 사람만 있는 대화: 레일 칸이 없다(죽은 띠 없음)
+ok   390-light 사람만 있는 대화: 간격이 폼의 윗 여백 그대로다(#1749, 폰 폭 12 + 독 경계선 1)
+sheet <OUT>/spacing-narrow390-light.png
+ok   390-light 긴 이름(21자): 모든 머리 줄이 한 줄이다(줄바꿈 0)
+sheet <OUT>/longname-narrow390-light.png
+[320-light] working1: 레일「달무리봇 · 작업 중 · 회의록 초안 정리 중」 줄「」 칩 answered:row,working:word 목록~입력창 25
+ok   320-light working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」
+ok   320-light working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)
+ok   320-light working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다
+ok   320-light working1: 레일 칸 높이 24
+[320-light] working2: 레일「달무리봇 +1」 줄「」 칩 answered:row,working:word,working:word 목록~입력창 25
+ok   320-light working2: 두 에이전트는 한 줄로 합친다
+ok   320-light working2: 레일 칸 높이 24
+[320-light] approval: 레일「달무리봇 · 승인 대기」 줄「」 칩 answered:row,approval:word 목록~입력창 25
+ok   320-light approval: 레일 「달무리봇 · 승인 대기」
+ok   320-light approval: 승인 대기는 「작업 중」이라 부르지 않는다
+ok   320-light approval: 레일 칸 높이 24
+[320-light] uncollected: 레일「」 줄「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,uncollected:word 목록~입력창 25
+ok   320-light uncollected: 줄 「달무리봇: 아직 받지 않았어요 · 연결이 꺼져 있을 수 있어요」
+ok   320-light uncollected: 레일에서는 빠진다(한 군데서만 말한다)
+ok   320-light uncollected: 대화에 경과 숫자가 없다
+ok   320-light uncollected: 다시 깨우기(owner) · 취소 · 설정이 줄 안에 선다
+[320-light] uncollected 행동 단추 크기: wake-agent-button=79×44 agent-work-panel-stop-arm=44.8×44 run-exception-settings=113.2×44
+ok   320-light uncollected: 행동 단추 셋이 폰 폭에서 44×44 이상이다(M3)
+ok   320-light uncollected: 레일 칸 높이 24
+[320-light] failed: 레일「」 줄「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」 칩 answered:row,failed:word 목록~입력창 25
+ok   320-light failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」
+ok   320-light failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)
+ok   320-light failed: 줄의 아이콘이 칩과 같은 가위표
+ok   320-light failed: 레일 칸 높이 24
+[320-light] timedOut: 레일「」 줄「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」 칩 answered:row,timed_out:word 목록~입력창 25
+ok   320-light timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」
+ok   320-light timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)
+ok   320-light timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)
+ok   320-light timedOut: 레일 칸 높이 24
+[320-light] done: 레일「」 줄「」 칩 answered:row,answered:row 목록~입력창 25
+ok   320-light done: 레일은 비고 칸은 남는다
+ok   320-light done: 「답함 ✓」은 답을 알 때 눌리는 단추다
+ok   320-light done: 레일 칸 높이 24
+[320-light] wakeFailed: 레일「달무리봇 · 받음」 줄「달무리봇: 깨우는 신호가 닿지 않음 · 연결이 꺼져 있을 수 있어요」 칩 answered:row,received:word 목록~입력창 25
+ok   320-light wakeFailed: 유예를 기다리지 않고 줄 「달무리봇: 깨우는 신호가 닿지 않음」
+ok   320-light wakeFailed: 칩은 아직 진행 낱말(받음)
+ok   320-light wakeFailed: 레일 칸 높이 24
+[320-light] 목록 상자 바닥 ~ 입력창 카드 위: working1=25 working2=25 approval=25 uncollected=25 failed=25 timedOut=25 done=25 wakeFailed=25 idle=25
+ok   320-light 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 0.00px)
+ok   320-light 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 0.25px)
+ok   320-light 에이전트 대화의 목록~입력창 간격은 25px(칸 24 + 독 경계선 1)
+ok   320-light 칩 여덟 종이 한 화면에: answered,approval,claimed,failed,received,timed_out,uncollected,working
+ok   320-light 칩 크기 고정: 여덟 종의 폭·높이가 같다(28.0×20.0)
+[320-light] 좁은 줄: 보이는 낱말 0개 · 보이는 아이콘 8개
+ok   320-light 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, 8행)
+ok   320-light 이어지는 행: 거터 아이콘 칩이 둘(작업 중·실패)
+ok   320-light 이어지는 행: 쉬는 중 칩이 보이고 시각은 숨는다
+ok   320-light 이어지는 행: 거터 칩이 행 높이를 바꾸지 않는다
+ok   320-light 이어지는 행: hover하면 칩은 시각에 자리를 내준다
+ok   320-light 스레드 요약 줄에 「작업 중」 칩이 선다
+ok   320-light 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, answered,answered,answered,working)
+ok   320-light 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다
+ok   320-light 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」
+ok   320-light 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(4행)
+sheet <OUT>/states-narrow320-light.png
+ok   320-light 취소: 첫 클릭은 묻기만 한다
+ok   320-light 취소: 확인 문장
+[320-light] 취소 확인 단추 크기: agent-work-panel-stop-keep=79×44 agent-work-panel-stop-commit=68.6×44
+ok   320-light 취소 확인: 「그대로 두기」·「취소 확정」이 폰 폭에서 같은 44(위험한 쪽만 크지 않다, M3)
+ok   320-light 취소: 확정하면 취소 요청이 한 번 나간다
+sheet <OUT>/extras-narrow320-light.png
+ok   320-light 에이전트 대화(레일 칸 24): 목록~입력창 간격 25px
+ok   320-light 사람만 있는 대화(칸 없음, 폼 윗 여백): 목록~입력창 간격 13px
+ok   320-light 사람만 있는 대화: 레일 칸이 없다(죽은 띠 없음)
+ok   320-light 사람만 있는 대화: 간격이 폼의 윗 여백 그대로다(#1749, 폰 폭 12 + 독 경계선 1)
+sheet <OUT>/spacing-narrow320-light.png
+ok   320-light 긴 이름(21자): 모든 머리 줄이 한 줄이다(줄바꿈 0)
+sheet <OUT>/longname-narrow320-light.png

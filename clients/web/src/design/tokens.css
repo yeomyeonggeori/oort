@@ -2779,6 +2779,13 @@
   font-synthesis-style: none;
 }
 
+/* 앵커 팝오버가 뷰포트를 넘지 않게 (#4619 레일 팝오버, design-review r1 B2). 공용 `PopoverContent`는 폭 `w-pane-picker`(384)
+ * 고정이라 폰 폭(390 이하)에서 오른쪽이 화면 밖으로 나갔다. Radix가 충돌 경계(좌우 8 여백 포함)까지 남은 폭을
+ * `--radix-popover-content-available-width`로 주므로, 고정 폭은 그 폭보다 넓을 때만 줄어든다. 넓은 창에서는 아무 일도 없다. */
+@utility popover-fit {
+  max-inline-size: var(--radix-popover-content-available-width);
+}
+
 /* 44px 손가락 타깃 (B6). 폰에서만 커진다: 포인터에는 28px 아이콘 버튼이 맞고,
  * 데스크탑 밀도를 손가락 크기로 올리면 사이드바 한 화면에 들어가던 채널 수가
  * 절반이 된다. 커지는 것은 타깃이지 아이콘이 아니다 — 그려지는 글리프는 그대로
@@ -6071,6 +6078,12 @@
 @media (hover: none) {
   [data-row-clock] {
     opacity: 1;
+  }
+  /* 같은 거터 칸에 서는 에이전트 상태 아이콘 칩(#4619 `GutterTriggerChip`)은 시각에 자리를 내준다: hover가
+   * 있는 기기에서는 행에 포인터가 오면 그 자리가 시각이 되지만, 없는 기기에서는 시각이 처음부터 서 있으므로 칩이
+   * 세울 자리가 없다. 그 행의 상태는 입력창 레일과 예외 줄이 말한다. */
+  [data-row-chip] {
+    display: none;
   }
 }
 
