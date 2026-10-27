@@ -28,6 +28,7 @@ const CH = "00000000-0000-7000-8000-000000000201";
 const A = "00000000-0000-7000-8000-000000000301";
 const B = "00000000-0000-7000-8000-000000000302";
 const C = "00000000-0000-7000-8000-000000000303";
+const D = "00000000-0000-7000-8000-000000000304";
 const T = 1_800_000_000_000;
 const MIN = 60_000;
 
@@ -50,6 +51,8 @@ const directory = makeDirectory([
   agent(A, "달무리봇", "dalmuri-bot"),
   agent(B, "모래시계봇", "sand-bot"),
   agent(C, "구름봇", "cloud-bot"),
+  // 이름이 긴 에이전트(16자): 끊긴 레일에서 한정 문장이 긴 이름에도 안 잘리는지 재는 데만 쓴다(`LONG_NAME_OFFLINE`).
+  agent(D, "달무리 스튜디오 회의록 정리 봇", "minutes-bot"),
 ]);
 const nameFor = (id: string) => ({ name: directory.byId.get(id.toLowerCase())?.displayName ?? "" });
 
@@ -101,6 +104,9 @@ const SCENARIOS: Scenario[] = [
   scenario("가져감", [turn("r1", A, { phase: "claimed", status: "queued", startedAtMs: undefined })]),
   scenario("연결이 끊김(마지막 확인 문장이 같은 줄에 붙음)", [turn("r1", A, { latestStage: "설계 문서 읽는 중" })], false),
 ];
+
+/** 이름이 긴 에이전트의 끊긴 레일. 다른 시험이 훑는 `SCENARIOS`에 넣지 않고 양보 계약 시험만 쓴다. */
+const LONG_NAME_OFFLINE = scenario("연결이 끊김, 긴 이름", [turn("r1", D, { latestStage: "설계 문서 읽는 중" })], false);
 
 /** 레일을 실제로 한 번 그려 마크업을 얻는다(시험이 적은 사본이 아니라 컴포넌트가 낸 것). */
 function markupOf(s: Scenario): string {
@@ -364,6 +370,67 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
               if (tier === "full" && !(g.visible === g.full && g.tailWidth > 0)) {
                 problems.push(`${at}: 전문이 서야 하는 폭에서 「${g.visible}」(낱말·단계 폭 ${g.tailWidth})`);
               }
+            }
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(problems).toEqual([]);
+    },
+    120_000
+  );
+
+  it.skipIf(ENGINES.length === 0)(
+    "끊긴 레일: 이름이 길어도 한정 문장은 잘리지 않고 에이전트 글이 양보한다 (design-review r1 B1의 양보 계약, 문턱 아래 좁은 칸의 긴 이름)",
+    async () => {
+      // 낱말·단계 접기(`@max-lg:hidden`)는 기본 fixture(이름 4자)에서 에이전트 글이 양보할 일 자체를 없앴다. 그래서 `flex-1`(기준 폭 0에서
+      // 남는 자리만 받기)을 지워도 위의 폭 훑기 시험은 통과했다(사보타주가 GREEN으로 드러냄). 이름이 길면(16자) 이름만 단계에서도
+      // 남는 자리(칸 안쪽 - 262)보다 길어 에이전트 글이 줄어야 한다: 한정 문장은 전문이고 줄임표는 이름이 받는다(가변 문자열이라 낱말
+      // 중간 끊김 규칙의 대상이 아니다, 문서 §9 7번).
+      expect(LONG_NAME_OFFLINE.live).toBe(false);
+      const html = markupOf(LONG_NAME_OFFLINE);
+      const css = await compileTokensCss([...HARNESS_CLASSES, ...classesOf(html)]);
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext({ viewport: { width: 1200, height: 700 } });
+          try {
+            const p = await ctx.newPage();
+            for (const width of [368, 375, 390, 440, 559, 560, 720, 1000]) {
+              await p.setContent(page(css, html).replace("width: 720px", `width: ${width}px`));
+              const g = await p.evaluate(() => {
+                const shell = document.querySelector<HTMLElement>('[data-testid="composer-working"]')!;
+                const stale = shell.querySelector<HTMLElement>('[data-testid="composer-working-stale"]')!;
+                const text = shell.querySelector<HTMLElement>('[data-testid="composer-working-text"]')!;
+                const button = shell.querySelector("button")!.getBoundingClientRect();
+                const sh = shell.getBoundingClientRect();
+                const cs = getComputedStyle(shell);
+                return {
+                  staleClipped: stale.scrollWidth > stale.clientWidth + 0.5,
+                  staleWidth: stale.getBoundingClientRect().width,
+                  staleNatural: stale.scrollWidth,
+                  textWidth: text.getBoundingClientRect().width,
+                  textRight: text.getBoundingClientRect().right,
+                  staleLeft: stale.getBoundingClientRect().left,
+                  buttonRight: button.right,
+                  shellRight: sh.right,
+                  shellHeight: sh.height,
+                  inner: shell.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+                  rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+                };
+              });
+              const at = `${engine} 열 ${width}(안쪽 ${g.inner}) 긴 이름`;
+              if (g.staleClipped) problems.push(`${at}: 한정 문장이 잘렸다(${g.staleWidth} < ${g.staleNatural})`);
+              if (g.textRight > g.staleLeft + 0.5) problems.push(`${at}: 에이전트 글이 한정 문장과 겹친다`);
+              if (g.buttonRight > g.shellRight + 0.5) problems.push(`${at}: 줄이 칸 오른쪽을 넘친다`);
+              if (Math.abs(g.shellHeight - 24) > 0.51) problems.push(`${at}: 칸 높이 ${g.shellHeight}`);
+              // 양보: 칸이 좁은 동안(안쪽 32rem 아래) 에이전트 글이 한정 문장보다 좁다(이름이 줄어든다).
+              if (g.inner < 32 * g.rem && !(g.textWidth < g.staleNatural)) problems.push(`${at}: 에이전트 글(${g.textWidth})이 양보하지 않았다`);
             }
           } finally {
             await ctx.close();
