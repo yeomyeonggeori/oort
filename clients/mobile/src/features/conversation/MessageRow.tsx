@@ -355,15 +355,6 @@ const META_HIT_SLOP = {
   right: META_SLOP,
 } as const;
 
-/** 작성자 머리줄(`line.head`)을 44pt로 만드는 슬롭. meta 줄과 높이가 다르다. */
-const AUTHOR_SLOP = slopTo(CONV.whoLine);
-const AUTHOR_HIT_SLOP = {
-  top: AUTHOR_SLOP,
-  bottom: AUTHOR_SLOP,
-  left: AUTHOR_SLOP,
-  right: AUTHOR_SLOP,
-} as const;
-
 /**
  * `#rrggbb` 에 알파 두 자리를 붙인다. 팔레트 값은 전부 여섯 자리 hex 이고, 이미
  * 알파가 있는 값(여덟 자리)은 그대로 둔다 — 겹친 투명도를 지어내지 않는다.
@@ -630,10 +621,6 @@ function Author({
   memberId,
   time,
   pendingMark,
-  onOpenProfile,
-  onLongPress,
-  delayLongPress,
-  consumeTap,
 }: {
   directory: Directory;
   memberId: string;
@@ -655,10 +642,6 @@ function Author({
    * 절대 배치로 매달려 있어서 나타나고 사라질 때 줄이 넘어가거나 줄 높이가 바뀌지 않는다.
    */
   pendingMark?: React.ReactNode;
-  onOpenProfile?: () => void;
-  onLongPress?: () => void;
-  delayLongPress?: number;
-  consumeTap?: () => boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
@@ -704,24 +687,10 @@ function Author({
       ) : null}
     </>
   );
-  if (!onOpenProfile) return <View style={styles.authorRow}>{content}</View>;
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`${parts.name} 프로필 보기`}
-      delayLongPress={delayLongPress}
-      hitSlop={AUTHOR_HIT_SLOP}
-      onLongPress={onLongPress}
-      onPress={event => {
-        event?.stopPropagation();
-        if (consumeTap?.()) return;
-        onOpenProfile();
-      }}
-      style={({pressed}) => [styles.authorRow, pressed && styles.pressed]}
-      testID="profile-author-target">
-      {content}
-    </Pressable>
-  );
+  // **이름은 누르는 것이 아니다**(#4666, owner 10-27 「프로필 이미지쪽을 눌러야만 열리게」). 작성자 줄은 행 전체
+  // 폭이라 답글(행 탭 = 스레드)을 달려던 손이 이름을 짚어 프로필이 뜨는 오탭이 났다. 프로필 문은 얼굴
+  // (`profile-avatar-target`)과 멘션뿐이고, 이 줄을 누르면 행 탭이 받는다(스레드·키보드 닫기·길게 누르기 시트).
+  return <View style={styles.authorRow}>{content}</View>;
 }
 
 /**
@@ -2555,6 +2524,19 @@ function MessageRowInner({
     }),
     [longPress.onLongPress, longPress.delayLongPress, longPress.consumeTap],
   );
+  // 멘션을 누르면 프로필이다(#4319). 얼굴과 같은 문이라 `onOpenProfile` 이 없으면 멘션은 글자 스타일뿐이다.
+  const openProfile = actions?.onOpenProfile;
+  const mentionTap = useMemo(
+    () =>
+      openProfile
+        ? {
+            onOpen: openProfile,
+            onLongPress: longPress.onLongPress,
+            consumeTap: longPress.consumeTap,
+          }
+        : undefined,
+    [openProfile, longPress.onLongPress, longPress.consumeTap],
+  );
 
   // ===========================================================================
   // 탭 = 이 행이 이미 열어 주는 문 (goal RN-U1 결함 2)
@@ -2994,14 +2976,6 @@ function MessageRowInner({
             directory={directory}
             memberId={message.authorMemberId}
             time={timeLabel(message.createdAtMs)}
-            onOpenProfile={
-              actions?.onOpenProfile
-                ? () => actions.onOpenProfile?.(message.authorMemberId)
-                : undefined
-            }
-            onLongPress={longPress.onLongPress}
-            delayLongPress={longPress.delayLongPress}
-            consumeTap={longPress.consumeTap}
           />
         ) : null}
 
@@ -3078,6 +3052,7 @@ function MessageRowInner({
                 body={body}
                 directory={directory}
                 selfMemberId={actions?.myMemberId}
+                mentionTap={mentionTap}
                 // ===================================================
                 // 규칙: **모든 행에 텍스트를 꺼내는 길이 정확히 하나** (goal U4-b)
                 //

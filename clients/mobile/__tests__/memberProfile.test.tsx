@@ -189,8 +189,8 @@ describe('사람 프로필 시트', () => {
   });
 });
 
-describe('메시지 작성자 탭과 롱프레스', () => {
-  it('아바타·작성자명이 같은 프로필을 열고 목표 크기는 44pt를 채운다', () => {
+describe('메시지의 프로필 문은 얼굴이다 — 이름은 문이 아니다 (#4666)', () => {
+  it('얼굴이 프로필을 열고 목표 크기는 44pt를 채운다', () => {
     const onOpenProfile = jest.fn();
     render(
       <MessageRow
@@ -203,22 +203,17 @@ describe('메시지 작성자 탭과 롱프레스', () => {
       />,
     );
     const avatar = screen.getByTestId('profile-avatar-target');
-    const author = screen.getByTestId('profile-author-target');
     fireEvent.press(avatar);
-    fireEvent.press(author);
-    expect(onOpenProfile).toHaveBeenNthCalledWith(1, OTHER);
-    expect(onOpenProfile).toHaveBeenNthCalledWith(2, OTHER);
+    expect(onOpenProfile).toHaveBeenCalledTimes(1);
+    expect(onOpenProfile).toHaveBeenCalledWith(OTHER);
 
     const avatarSlop = avatar.props.hitSlop.top;
-    const authorSlop = author.props.hitSlop.top;
     // 대화의 얼굴은 40 이다(DS2-4, owner 표). 슬롭은 그 크기에서 도출된다.
     expect(CONV.avatar + avatarSlop * 2).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    expect(CONV.whoLine + authorSlop * 2).toBeGreaterThanOrEqual(TOUCH_TARGET);
     expect(avatarSlop).toBe(slopTo(CONV.avatar));
   });
 
-  it('작성자명을 길게 누르면 프로필 탭이 아니라 기존 메시지 액션시트가 열린다', () => {
-    const onOpenProfile = jest.fn();
+  it('작성자 이름 줄은 눌리는 단추가 아니다 — 길게 누르기·탭 회귀는 messageTap 이 잰다', () => {
     render(
       <MessageRow
         message={message()}
@@ -226,15 +221,10 @@ describe('메시지 작성자 탭과 롱프레스', () => {
         directory={DIRECTORY}
         chips={[]}
         nowMs={BASE_MS}
-        actions={actions({ onOpenProfile })}
+        actions={actions({ onOpenProfile: jest.fn() })}
       />,
     );
-    fireEvent(screen.getByTestId('message-row'), 'touchStart', {
-      nativeEvent: { pageX: 10, pageY: 10 },
-    });
-    fireEvent(screen.getByTestId('profile-author-target'), 'longPress');
-    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('profile-author-target'));
-    expect(onOpenProfile).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('profile-author-target')).toBeNull();
+    expect(screen.getByText('김모모')).toBeTruthy();
   });
 });
