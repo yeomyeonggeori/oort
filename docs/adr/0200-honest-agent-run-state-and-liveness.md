@@ -3,7 +3,7 @@
 - Status: **Accepted** (2026-10-13 성재 결재 — 아래 「결재 기록」. 공개 API·DB 계약 변경이라 ADR-0100에 따라 이 Accepted가 구현 머지 조건이다.) 초안은 같은 날 Proposed였고 결재로 D4-5(`oort_ping`)가 추천안과 달라졌다.
 - Date: 2026-10-13
 - Deciders: 성재
-- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · 2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기 · **2026-10-27 증보 4 (#4618) Accepted(planner 위임, owner 사후 보고 2026-10-27) — Agent Port 호출 기록 `agent_port.call`: 깨어서 무엇을 부르고 멈추는지** — 파일 끝.
+- 증보: 2026-10-14 (#3822) 도어벨 깨움 `doorbell_rung` · 2026-10-15 (#3838) oort 호출 기록 `tool_call`(T1~T5)·「지금 실행 중」 읽기(R1) · 2026-10-24 증보 3 (#4332) 깨웠는데 가져가지 않은 run 종결 `woken_not_collected`(30분)·환영 run 종결은 조용히·환영 대상 정책·notifier 열 읽기 · **2026-10-27 증보 4 (#4618) Accepted(planner 위임, owner 사후 보고 2026-10-27) — Agent Port 호출 기록 `agent_port.call`: 깨어서 무엇을 부르고 멈추는지** · **2026-10-27 증보 5 (#4622) Accepted(규칙 문구 한정, owner 결재 2026-10-26) — D5 증보: 대화에는 무엇을 쓰나·진행은 stage로·빈 인사 금지·답 자리. 서버가 정하는 최종 답의 자리는 열어 둔다** — 파일 끝.
 - 기안: Opus 5.5 (#3736 + #3737 묶음)
 - 관계: ADR-0162 증보 3(D9 「새 저장소 없음」, D11 「단계 표식은 realtime 없음」, D13 보드 가시성, D17 비목표, 부록 A lease·암묵 갱신) **일부를 이 ADR이 바꾼다**(아래 「바뀌는 기존 결정」), ADR-0171(도어벨), ADR-0186(승인 액션 — run을 park), ADR-0199(인박스 투영 — 같은 방식의 쓰기 시 투영), ADR-0198, ADR-0100
 - 표기: [V] 코드·문서 직접 확인 · **[추정]** 해석 · [확인 필요] 구현 전 사실 확인 · `runtime-unverified` 실행 안 함
@@ -703,3 +703,69 @@ planner 위임으로 수락하는 근거는 넷이에요(2026-10-14 증보와 �
 - 시험: `momo-mcp/tests/call_trace.rs`(어휘가 닫혀 있다·`ToolFailure` 변종마다 결과 토큰이 같다·개수는 서버 응답에서만) · `momo-mcp/tests/refusal_reason.rs`(실제 거절 요청 40여 건이 각자의 토큰·상태·코드를 내요·`ToolFailure` 변종마다 토큰·디스패처의 모든 문장이 표에 있다·표에 없는 문장은 `other`) · `bins/momo-server/tests/agent_port_call_trace_pg.rs`(모든 종류의 호출이 정확히 한 행·값이 안 새요·상한·기록 실패가 응답을 못 바꿔요·개수가 「job을 봤는데 안 가져감」을 가려요) · `bins/momo-server/tests/grok_like_agent_flow_pg.rs`(현행 루틴대로 부르는 클라이언트의 DM·멘션·연속 DM 재현) · `rate_limit.rs` 단위(시간 주입, 240·3600 값 고정) · 검수 보강: `call_trace.rs`의 `every_listed_method_is_one_the_dispatcher_answers`(`CALL_METHODS`와 디스패처가 어긋나지 않는다) · `agent_port_call_trace_pg.rs`의 `a_trace_write_that_outlasts_its_ceiling_is_abandoned_and_the_answer_is_unchanged`(2초 시간 초과 경로)·`a_call_the_admission_limiter_refused_leaves_no_trace_row`(429)·모든 행의 열과 키를 보는 `assert_every_row_is_plain`.
 - **#4618 (engine) 2단계.** workspace 게이트(`cargo fmt/clippy/test`)·독립 보안 검수(Blocker 0·High 0)·PR이에요. 검증 증거의 정본은 PR 본문이에요.
 - 배포 뒤 운영 관찰은 planner가 읽기 전용 집계로 해요. 서버만 배포하면 되고(앱 빌드 없음), 에이전트를 한 번 깨운 뒤 최근 3시간의 `agent_port.call` 행을 시각순으로 위 「읽는 법」 표대로 읽어요. 이 증보는 원인을 고치지 않고 **어디서 멈추는지를 가르는 것**까지가 범위예요. 고치는 일은 갈린 결과에 따라 후속으로 해요.
+
+
+## 증보 5 (2026-10-27, #4622) — D5 증보: 대화에는 무엇을 쓰나·진행은 stage로·빈 인사 금지·답 자리
+
+- Status: **Accepted — 규칙 문구에 한해요.** 근거는 owner 결재예요: 2026-10-26 「ㄱㄱ」(#4577 권장 C 「진행은 에이전트 자신의 말로」·E 「답 자리」). 이 증보는 에이전트 지시문과 도구 설명만 고쳐요. API·DB·권한·새 도구는 바뀌지 않아요. **서버가 정하는 최종 답의 자리는 이 증보가 바꾸지 않아요**(아래 「답 자리 현황」「열어 두는 것」). 제품 방향(C·E)을 기록하는 자리라서 ADR-0100의 Accepted 참조로 쓰여요.
+- 바뀌는 기존 결정: ① ADR-0162 D8 routine template의 한 문장 「결과를 원래 thread에 게시한다」를 아래 규칙으로 바꿔요. 그 문장은 서버가 하는 일과 달랐어요(최종 답은 에이전트가 게시하지 않고 `oort_run_complete`가 올려요). ② ADR-0132 D4의 빈 인사 목록을 해요체까지 넓혀요(원문 상수는 그대로 두고 더해요). ③ ADR-0148 규칙 6은 **바꾸지 않아요**.
+- 표기: [V] 코드·시험 직접 확인(`track/engine` `9fbdfeb4d`) · **[추정]** 해석 · `runtime-unverified` 실행 안 함
+
+### 확인한 사실
+
+- [V] 「빈 인사 금지」는 없던 규칙이 아니에요. ADR-0132 D4가 정했고 서버가 관리형·공동 호스팅 Hermes·외부 에이전트 job의 `system_prompt`에 실어요(`AGENT_INTERACTION_SAFETY_PREAMBLE`, 외부 A2A 카드 런타임은 제외). 외부 루틴 4번(`SELF_HOST_AGENT.md` §3.3.17.4)에도 있어요. **없던 것**은 ① 해요체 목록(「확인했어요」는 합쇼체 목록 밖이었어요), ② 「대화에는 결과·막힘·사람이 할 일만」, ③ 「진행은 stage, 대화로는 아님」, ④ 답 자리예요. 팀 AI 프롬프트·`oort_message_post`/`oort_run_complete` 설명·외부 연결 프롬프트에는 넷 모두 없었어요.
+- [V] `stage`를 내보낼 수 있는 곳은 Agent Port의 `oort_run_event`뿐이에요. REST gateway 콜백은 `stage`를 받지 않고(`agent_gateway.rs:311`), 관리형 워커에는 stage 보고가 없고, Hermes 어댑터는 `gateway/events`에 `status`·`detail`·`text_delta`만 보내요. 그래서 이 셋에게 규칙 7은 「stage로 보내라」가 아니라 「대화에 중계하지 마라」예요. 이 발견은 #4619 레일의 「지금 단계」가 이 셋에서는 비어 있을 수 있다는 뜻이에요. 이 증보는 고치지 않아요.
+- [V] 외부 연결 프롬프트의 본문은 `HostedAgentWizard.tsx`가 아니라 `packages/momo-core/src/features/hostedAgents/presets.ts`의 `HOSTED_ROUTINE_TEMPLATE`예요. 위저드는 그 값을 보여 주기만 해요.
+
+### 규칙 (D5의 0~6에 이어요)
+
+7. **진행은 stage로, 대화로는 아니다.** `oort_run_event`가 있는 에이전트(외부 Agent Port)는 단계를 `stage`로 보내고 메시지로 쓰지 않는다(「하는 중이에요」「확인해 볼게요」). `stage`를 못 내보내는 런타임(관리형·Hermes·팀 AI)은 진행을 말하지 않고 결과가 생길 때까지 조용히 있는다.
+8. **대화에는 결과·막힘·사람이 할 일만.** 메시지와 `oort_run_complete.body`에는 ① 결과, ② 막힌 점(무엇이 막았고 무엇이 필요한지), ③ 사람이 할 일(승인·선택·보내 줄 것)만 쓴다. 그것부터 쓴다(빈 인사·요청 되풀이·맺음말 없음). 환영처럼 인사 자체가 일인 턴은 그 인사가 결과라서 이 규칙의 대상이 아니다.
+9. **빈 인사 금지(ADR-0132 D4 확장).** 어떤 말투로도 쓰지 않는다: 「확인했습니다」「확인했어요」「알겠습니다」「알겠어요」「진행할게요」「시작할게요」, "got it", "understood", "on it", "will do". 초안에 그것뿐이면 아무것도 보내지 않는다. D4의 나머지(새 정보를 더할 때만 · 사람이 물었으면 반드시 응답 · 침묵은 성공)는 그대로다.
+10. **답 자리.** E의 기준은 DM은 본류, 채널 최상위 멘션은 그 메시지의 스레드(`rootId`=그 메시지 id), 스레드 안은 같은 스레드(`rootId`=그 스레드의 root)예요. **에이전트가 직접 올리는 메시지**(`oort_message_post`, `oort_card_suggest`의 `rootId`)에는 이 규칙을 지시문으로 써요. **최종 답은 `oort_run_complete.body`이고 oort가 올려요.** 자리는 에이전트가 못 골라요. 그래서 같은 내용을 `oort_message_post`로 또 보내지 않는다. 지시문은 최종 답의 자리를 약속하지 않아요(아래 「답 자리 현황」).
+
+### 답 자리 현황 (서버가 강제하나, 지시문뿐인가) [V]
+
+| 에이전트가 내는 것 | 자리를 정하는 곳 | DM | 채널 최상위 멘션 | 스레드 안 | E와 |
+|---|---|---|---|---|---|
+| **최종 답**: 외부 `oort_run_complete`(`agent_gateway.rs:780,787`), 관리형 워커(`agent-worker/lib.rs:2034,2055`·`stream.rs:252`), 팀 AI(`team_ai.rs:833`) | **서버 고정** `root_id: None` + `reply_to_id`=트리거 | 본류+인용 | 본류+인용 | **본류+인용(스레드를 떠나요)** | DM만 일치 |
+| `oort_message_post` | 에이전트. 서버는 `rootId`·`replyToId`가 이 채널의 것인지만 봐요(`agent_port_tools.rs:981-996`) | 에이전트 몫 | 에이전트 몫 | 에이전트 몫 | 지시문뿐 |
+| `oort_card_suggest` | 관리형: 서버(트리거의 스레드, 없으면 본류, `tool_exec.rs:204`). 외부: 에이전트(`rootId`, 존재만 검증) | 본류 | 관리형은 본류(새 스레드를 안 열어요) | 같은 스레드 | 스레드 안만 일치 |
+| 호출 불가·건너뜀 안내 줄, 채널 쓰기 승인 카드 | 서버 `root_id: send.root_id`(말한 자리, `agent_mentions.rs:1556,1967`) | 본류 | 본류 | 같은 스레드 | 「말한 자리」 규칙 |
+| ADR-0193 구독 경계 안내 | 서버 `notice_root`(`agent_mentions.rs:1842`) | 평가 안 함 | 트리거 아래 새 스레드 | 같은 스레드 | E와 같아요 |
+
+행동 시험이 이미 잠근 것은 안내 줄·승인 카드의 말한 자리(`agent_port_tools_conformance_pg.rs`), 카드의 트리거 스레드, 관리형 답의 **인용**(`agent_worker_conformance_pg.rs`)이에요. **최종 답의 `root_id`를 잠그는 시험은 없었어요.** 이 증보가 `bins/momo-server/tests/agent_answer_place_pg.rs`로 외부 Agent Port 경로를 잠가요. 격리 PG 18에서 DM·채널 최상위 멘션·스레드 안 멘션 셋 모두 최종 답이 `root_id` NULL + 트리거 인용으로 나오는 것을 확인했어요. 관리형 워커·팀 AI 경로의 `root_id`는 코드로만 확인했고(위 표의 줄 번호) 행동 시험이 없어요.
+
+### 어긋남과 판단
+
+- 어긋남 1: 채널 최상위 멘션의 최종 답이 본류+인용이라 E와 달라요. ADR-0148 규칙 6의 설계(「인용은 대화를 본류에 두면서 맥락만 끌어오는 장치」)예요.
+- 어긋남 2(더 커요): 스레드 안에서 부르거나 답글로 깨워도(ADR-0162 증보 5) 최종 답이 스레드 밖 본류로 나와요(위 PG 시험이 확인해요). run에는 트리거 id만 있고 답을 쓰는 곳이 트리거의 root를 읽지 않아요. 읽는 길은 이미 있어요(`suggestion_requester_in_tx`가 같은 조인으로 root를 읽어요).
+- 어긋남 3: 외부 에이전트는 job에서 트리거의 root도 DM 여부도 받지 못해요(`work`는 `triggerMessageId`만 주고, 메시지에는 `rootId`가 있지만 채널 종류는 없어요). 그래서 지시문만으로는 「스레드 안 → 같은 스레드」는 따를 수 있고(대화를 읽어서), DM과 채널 최상위의 구분은 못 해요.
+- **판단: 서버는 이 증보로 바꾸지 않아요.**
+  1. 현행은 ADR-0148(Accepted) 규칙 6의 설계이고 E는 채널에서 그것을 뒤집어요. 바꾸려면 ADR-0148 규칙 6을 증보해야 해요. owner가 E를 승인한 것은 Buzz식 경험 묶음 안이었고, 이 충돌을 보고 승인했는지는 확인되지 않아요.
+  2. 쓰는 곳이 넷(`agent_gateway.rs`, 워커 `lib.rs`·`stream.rs`, `team_ai.rs`)이고, 트리거 root 조회, `send_message_in_tx`에서 `send_thread_notice_in_tx`(롤업·`thread.updated`)로의 전환, 스트리밍 열기 시점의 root, 인용이 스레드 root 자신을 가리키는 중복, 푸시·안 읽음·hosted 인박스가 스레드 답글을 세는 방식([확인 필요]), 클라이언트 표시까지 닿아요.
+  3. E의 화면(스레드 요약 행의 작업 중 칩)은 #4619(A·B·D)에 없어서, 서버가 먼저 뒤집히면 답이 「답글 1개」 뒤로 숨어요.
+  4. 지시문은 서버가 정한 자리를 거짓으로 말할 수 없어요. 그래서 규칙 10은 에이전트가 고르는 자리에 한정했어요.
+
+### 열어 두는 것 (owner·planner 결정 대기)
+
+1. **서버 정렬.** 1차(작고 논란이 적어요): 스레드 안 트리거의 최종 답을 같은 스레드로. 2차(owner 확인 필요): 채널 최상위 멘션의 최종 답을 트리거 아래 새 스레드로(`notice_root`와 같은 규칙, DM은 본류) + ADR-0148 규칙 6 증보 + #4619·#4620과 같이 출시. 정렬 PR은 `agent_answer_place_pg.rs`를 먼저 빨갛게 만든 뒤 고쳐요(그 시험이 현행을 고정하는 시험이에요). 관리형 워커·팀 AI 경로에는 같은 행동 시험이 아직 없어서 그 PR이 더해요.
+2. **job 페이로드의 답 자리 힌트.** 외부 에이전트가 DM·최상위·스레드를 가리도록 `work`에 `triggerRootId`(와 채널 종류 또는 `replyTo`)를 더할지. 공개 API 가산이라 ADR이 필요해요(Buzz는 하니스가 `<context>`에 답 위치를 넣어 줘요).
+
+### 반영 자리와 시험
+
+| 자리 | 바꾼 것 |
+|---|---|
+| `docs/SELF_HOST_AGENT.md`·`.ko.md` §3.3.17.4 4번 | 규칙 7~10(외부 루틴) |
+| `momo-mcp/src/tools.rs` | `oort_message_post`(무엇을 올리나·자리), `oort_run_complete`(body는 oort가 올려요·결과/막힘/할 일만), `oort_run_event`(진행은 여기), `oort_card_suggest`(스레드 안이면 `rootId`) |
+| `momo-agent/src/mention.rs` | `AGENT_CONVERSATION_PREAMBLE`(규칙 7~9, ADR-0132 D4 상수는 그대로). 관리형·공동 호스팅 Hermes·외부 job의 `system_prompt`가 받아요 |
+| `momo-workspace-actions/src/team_ai.rs` | 팀 AI 프롬프트 규칙 한 줄(규칙 8·9) |
+| `packages/momo-core/src/features/hostedAgents/presets.ts` | `HOSTED_ROUTINE_TEMPLATE`(외부 연결 프롬프트, ADR-0162 D8 문장 교체). 위저드 tsx는 diff 0 |
+| `bins/momo-server/tests/agent_answer_place_pg.rs` | 새 행동 시험: 최종 답의 자리(현행 고정). 서버는 안 바꿨어요 |
+
+지시문 시험(`bins/momo-server/tests/agent_conversation_rules.rs`, `presets.test.ts`)은 문장 존재가 아니라 **규칙마다 핵심 낱말 집합**이 그 자리 안에 모두 있는지 봐요. 시험이 낱말을 하나씩 지워 보고 그 규칙이 빨개지는지를 스스로 확인해서(사보타주) 「실패할 수 없는 단정」이 되지 않게 해요. 각 규칙이 #4622 이전 문장에서는 빨갛다는 것도 시험이 스스로 확인해요(원래 있던 낱말로 채워지는 규칙은 아무것도 증명하지 않아요). 시험이 못 보는 것은 낱말이 있어도 문장이 부정형으로 바뀐 경우와, 실제 모델이 따르는지예요.
+
+### 한계
+
+- 규약이지 보증이 아니에요(증보 3 D16의 `runtime-unverified` 규율). 규칙 7~9는 모델이 따를 때만 지켜져요. 서버가 막는 것이 아니에요.
+- 실계정 동작은 별도 `[manual]` 증거 전까지 단정하지 않아요.

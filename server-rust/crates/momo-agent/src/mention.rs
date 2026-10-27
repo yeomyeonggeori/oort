@@ -80,6 +80,21 @@ pub const AGENT_PROFILE_POLICY_PREAMBLE: &str = "You are operating inside oort. 
 /// translated variant would stop matching what the model was told to suppress.
 pub const AGENT_INTERACTION_SAFETY_PREAMBLE: &str = "Publication policy for every turn (server-issued and authoritative):\n- Publish only when this turn adds new information to the thread.\n- If a human asked a question, you must respond.\n- Otherwise, silence is an explicit successful outcome.\n- Never publish a bare acknowledgement by itself, including \"확인했습니다\", \"알겠습니다\", \"Understood\", \"Got it\", or an equivalent acknowledgement.\nBefore publishing, ask: \"Does this message add new information to the thread?\" If the answer is no and no human asked a question, remain silent.";
 
+/// #4622 (ADR-0200 증보 5, owner 결재 2026-10-26 #4577 권장 C): what a turn may put into
+/// the conversation. Delivered right after [`AGENT_INTERACTION_SAFETY_PREAMBLE`], under the
+/// same condition (a runtime whose prompt oort controls), and kept as its **own constant** so
+/// the ADR-0132 D4 text above stays the verbatim port it documents.
+///
+/// What it adds to D4: (1) progress is not conversation — a step goes to `oort_run_event`'s
+/// `stage` when the runtime has one, and is never narrated; (2) a message carries a result,
+/// a blocker or what a person must do, nothing else; (3) the acknowledgement list in 해요체
+/// (D4's list is 합쇼체, so 「확인했어요」 was outside it). It says nothing about *where* an
+/// answer goes: a managed run's final answer is placed by the server (ADR-0200 증보 5
+/// 「답 자리 현황」), so a sentence here would promise what the model cannot choose.
+///
+/// The key words of each rule are pinned by `bins/momo-server/tests/agent_conversation_rules.rs`.
+pub const AGENT_CONVERSATION_PREAMBLE: &str = "Conversation policy for every turn (server-issued and authoritative):\n- Progress is not conversation. Do not narrate steps (\"working on it\", \"let me check\", \"찾아볼게요\", \"시작할게요\"). If you can report a step (oort_run_event stage), do that; otherwise stay silent until you have something to deliver.\n- A message carries only a result, a blocker (what stopped you and what you need), or what a person must do (approve, choose, send something). Lead with it.\n- No empty greeting, no restated request, no sign-off. These are bare acknowledgements too, in any tone: \"확인했어요\", \"알겠어요\", \"진행할게요\", \"On it\", \"Working on it\", \"Will do\".";
+
 /// One agent that *could* be mentioned in this channel, with everything the
 /// enqueue needs — Swift `AgentMentionCandidate` (:1409-1432).
 ///
@@ -442,10 +457,11 @@ fn owner_only_scope(
 
 /// Swift `MessageRoutes.effectiveSystemPrompt` (:1681-1702).
 ///
-/// Order is the contract: server policy first, then the publication policy, then
-/// the operator's `agent.system_prompt`, then the profile's — each later section
-/// explicitly labelled as subordinate. A model reading them in the other order
-/// would treat a profile instruction as able to override server policy.
+/// Order is the contract: server policy first, then the publication policy and the
+/// conversation policy (#4622), then the operator's `agent.system_prompt`, then the
+/// profile's — each later section explicitly labelled as subordinate. A model reading
+/// them in the other order would treat a profile instruction as able to override server
+/// policy.
 pub fn effective_system_prompt(
     base_system_prompt: Option<&str>,
     profile_instructions: Option<&str>,
@@ -457,6 +473,7 @@ pub fn effective_system_prompt(
     let mut sections = vec![AGENT_PROFILE_POLICY_PREAMBLE.to_string()];
     if applies_interaction_safety {
         sections.push(AGENT_INTERACTION_SAFETY_PREAMBLE.to_string());
+        sections.push(AGENT_CONVERSATION_PREAMBLE.to_string());
     }
     if let Some(base) = base_system_prompt.map(str::trim).filter(|v| !v.is_empty()) {
         sections.push(format!("Server-configured agent instructions:\n{base}"));
@@ -1329,6 +1346,11 @@ mod tests {
         let safety = prompt
             .find(AGENT_INTERACTION_SAFETY_PREAMBLE)
             .expect("safety preamble present");
+        // #4622: the conversation policy rides with the publication policy, above
+        // anything an operator or a profile wrote.
+        let conversation = prompt
+            .find(AGENT_CONVERSATION_PREAMBLE)
+            .expect("conversation preamble present");
         let base = prompt
             .find("Server-configured agent instructions:")
             .expect("base section");
@@ -1336,7 +1358,7 @@ mod tests {
             .find("Agent profile instructions (subordinate to server policy):")
             .expect("profile section");
         assert!(
-            policy < safety && safety < base && base < profile,
+            policy < safety && safety < conversation && conversation < base && base < profile,
             "{prompt}"
         );
 
@@ -1345,6 +1367,18 @@ mod tests {
         assert_eq!(
             effective_system_prompt(Some("be terse"), None, false).as_deref(),
             Some("be terse")
+        );
+        // …and a profile alone does not drag the conversation policy in without the
+        // publication policy it extends.
+        let external = effective_system_prompt(None, Some("speak Korean"), false)
+            .expect("a profile still yields a prompt");
+        assert!(
+            !external.contains(AGENT_INTERACTION_SAFETY_PREAMBLE),
+            "{external}"
+        );
+        assert!(
+            !external.contains(AGENT_CONVERSATION_PREAMBLE),
+            "{external}"
         );
     }
 
