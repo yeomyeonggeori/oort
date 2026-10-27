@@ -139,6 +139,10 @@ pub struct MessageStream {
 }
 
 impl MessageStream {
+    /// `root_id` is a required argument on purpose (rule 5): a stream that could be built without
+    /// deciding its thread would open every answer in the main flow, and the commit — a dedupe onto
+    /// this row — could never move it. The extra argument is the price of that.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: PgPool,
         workspace_id: Uuid,
