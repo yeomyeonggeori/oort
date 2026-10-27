@@ -31,6 +31,18 @@ reason = """jsonwebtoken 9.3.1: claim type confusion can skip nbf/exp checks; fi
 Low reach: every decode (momo-auth jwt.rs:74, realtime.rs:161/227, ephemeral_grant.rs:259) verifies an HS256 signature made with the \
 server's own secret first, so a caller cannot craft the claims. Follow-up: jsonwebtoken 10 migration."""
 
+# ---- server-rust + clients/desktop/src-tauri (Rust, GHSA-only advisory) -------
+
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+ignoreUntil = 2027-01-25
+reason = """block-buffer 0.10.4: a panic inside the caller's compress callback, if caught and the buffer reused, can leave EagerBuffer/ReadBuffer's \
+cursor corrupt (out-of-bounds read/write). Fixed only in 0.12.1, which needs digest 0.11 (a RustCrypto-wide major: sha2/sha1/md-5/hmac/ \
+curve25519-dalek/ecdsa/elliptic-curve all pin digest 0.10.7). No reach: oort never names block_buffer, EagerBuffer or ReadBuffer; the only \
+callers are those hash crates, whose compress functions are pure arithmetic that does not panic; and no production code catches a panic \
+around hashing (catch_unwind appears in one PG test only). Both Rust lockfiles (server-rust, clients/desktop/src-tauri). \
+Follow-up: RustCrypto digest 0.11 migration."""
+
 # ---- clients/web (npm, runtime) ----------------------------------------------
 
 [[IgnoredVulns]]
