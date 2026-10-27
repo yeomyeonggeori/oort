@@ -363,6 +363,8 @@ describe('넘침 — 스크롤이 실제로 스크롤될 수 있는가', () => {
     expect(scrollOverflows(Number.NaN, 500)).toBe(true);
     expect(scrollOverflows(300, Number.NaN)).toBe(true);
     expect(scrollOverflows(300, 0)).toBe(true); // 뷰포트 0 = 아직 레이아웃 전
+    expect(scrollOverflows(0, 0)).toBe(true); // 내용도 0 이어도 레이아웃 전이면 모르는 것이다(「0 ≤ 0 + 1 이라 들어간다」가 아니다)
+    expect(scrollOverflows(1, 0)).toBe(true);
     expect(scrollOverflows(-1, 500)).toBe(true);
     expect(scrollOverflows(0, 500)).toBe(false); // 빈 내용은 확실히 들어간다
   });
