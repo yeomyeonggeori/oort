@@ -116,12 +116,14 @@ export function setPushShowSender(on: boolean): void {
 }
 
 /** 설정 › 알림의 두 줄(문구는 한 곳에: 화면과 시험이 같은 글을 읽는다). */
+// 기본이 켬인 기존 스위치(「푸시 알림」「작업 끝남」)처럼 **지금 하는 일**을 먼저 말하고, 끈 뒤의 모양을 잇는다 —
+// 이미 꺼 둔 사람이 읽어도 어긋나지 않는다.
 export const PUSH_PREVIEW_LABEL = '메시지 미리보기';
 export const PUSH_PREVIEW_DETAIL =
-  '끄면 잠금 화면에는 「새 메시지」라고만 보여요. 보낸 사람의 이름과 사진은 그대로예요.';
+  '알림에 메시지 내용을 보여요. 끄면 「새 메시지」라고만 보여요. 이름과 사진은 그대로예요.';
 export const PUSH_SHOW_SENDER_LABEL = '보낸 사람 표시';
 export const PUSH_SHOW_SENDER_DETAIL =
-  '끄면 이름, 사진, 미리보기 없이 「새 메시지」로만 알려요.';
+  '알림에 보낸 사람의 이름과 사진을 보여요. 끄면 미리보기도 없이 「새 메시지」로만 알려요.';
 
 export function usePushPreview(): boolean {
   return useSyncExternalStore(subscribe, isPushPreviewOn, () => true);
