@@ -135,16 +135,20 @@ pub async fn issue_password_reset(
         let token = token.clone();
         move |conn| {
             Box::pin(async move {
-                // The membership lock, exclusive and first, like every other transaction that
-                // locks member rows to change what a member can do: a reissue locks the target's
-                // member row and then the target's open link, and the claim that spends that link
-                // holds the link and then needs the member row (its audit row references it). Two
-                // transactions that take those rows in opposite orders wait for each other until
-                // the database ends one of them; behind this lock they cannot meet.
-                lock_membership_mutation(conn, workspace_id).await?;
+                // Someone who is not an operator is refused here, before the lock: a request that
+                // cannot succeed must not be able to queue every sign-in of the workspace behind
+                // it. This is only the cheap refusal; whether *this* operator may reset *this*
+                // member is judged by `issue_password_reset_in_tx` under the lock.
                 if let Err(rejection) = require_admin(conn, workspace_id, actor_id).await? {
                     return Ok(Err(rejection));
                 }
+                // The membership lock, exclusive, before any member row is locked, like every
+                // other transaction that does: a reissue locks the target's member row and then
+                // the target's open link, and the claim that spends that link holds the link and
+                // then needs the member row (its audit row references it). Two transactions that
+                // take those rows in opposite orders wait for each other until the database ends
+                // one of them; behind this lock they cannot meet.
+                lock_membership_mutation(conn, workspace_id).await?;
                 match issue_password_reset_in_tx(conn, workspace_id, actor_id, target_id, &token)
                     .await?
                 {

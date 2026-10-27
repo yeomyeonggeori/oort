@@ -1885,6 +1885,52 @@ async fn a_suspension_and_a_reissue_that_meet_do_not_wait_for_each_other() {
     assert_eq!(member_status(&w.su, w.member).await, "suspended");
 }
 
+/// Someone who is not an operator is refused before the membership lock: while a change holds
+/// the lock, a reissue by an ordinary member is answered at once instead of queueing for it —
+/// a request that cannot succeed must not be able to hold up every sign-in of the workspace.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_reissue_by_someone_who_is_not_an_operator_does_not_queue_for_the_lock() {
+    let w = world("session-issue-reissue-refused", Some(MEMBER_PASSWORD), 4).await;
+    let (status, body, _) = api_login(
+        &w.http,
+        &w.base,
+        w.workspace,
+        &w.member_email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(status, 200, "the member signs in first: {body}");
+    let member_bearer = body["accessToken"].as_str().expect("access token");
+
+    let change = open_lock(&w.su, w.workspace).await;
+    let refused = tokio::time::timeout(Duration::from_millis(1500), async {
+        reply_of(
+            w.http
+                .post(format!(
+                    "{}/v1/workspaces/{}/members/{}/password-reset",
+                    w.base,
+                    w.workspace,
+                    Uuid::new_v4()
+                ))
+                .bearer_auth(member_bearer)
+                .send()
+                .await
+                .expect("send the reissue"),
+        )
+        .await
+    })
+    .await
+    .expect("the refusal came without waiting for the lock");
+    assert_eq!(refused.status, 403, "{}", refused.body);
+    assert_eq!(
+        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await,
+        0,
+        "the refused request is not queued for the lock"
+    );
+    change.rollback().await.expect("release the lock");
+}
+
 // ---------------------------------------------------------------------------
 // 4. what a door writes is written by one transaction
 // ---------------------------------------------------------------------------
