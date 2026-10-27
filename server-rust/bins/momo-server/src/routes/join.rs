@@ -9,8 +9,24 @@
 //! POST /v1/join   (public — no bearer, per-IP rate limited)
 //!   → 201 { accessToken, refreshToken, workspaceId, member, memberships,
 //!           invite, redemptionId, createdMember: true }   account created
-//!   → 200 same shape, createdMember: false                existing human rejoined
+//!   → 200 same shape, createdMember: false                existing human rejoined,
+//!                                                         password proven
+//!   → 401 invalid_credentials                             existing account, wrong password
+//!   → 409 join_email_unavailable                          existing account that a public
+//!                                                         code may not resume
+//!   → 429 (+ Retry-After)                                 that account's guess budget is spent
 //! ```
+//!
+//! ## An existing account needs proof (#4625)
+//!
+//! A code does not name a person, so an address that already has an account is
+//! resumed only when the request's `password` is that account's — checked with the
+//! predicate login uses, after one guess has been spent from the account's budget
+//! ([`crate::rate_limit::AccountGuessBudget`]). The rules by state, and why they sit
+//! before every other check that discusses the account, are in `momo_settings::join`;
+//! this route only translates them: [`JoinRejection::InvalidCredentials`] and
+//! [`JoinRejection::EmailUnavailable`] carry their `error.code`, and a spent budget
+//! becomes a 429 with the `Retry-After` an `ApiError` has no slot for.
 //!
 //! ## Why it is mounted outside the auth middleware
 //!
@@ -55,13 +71,14 @@ use momo_db::audit::{write_audit, AuditEntry};
 use momo_settings::{
     fallback_handle, normalized_invite_code, normalized_join_display_name, normalized_join_email,
     normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
-    redeem_invite_in_tx, resolve_invite_workspace, JoinError, JoinOutcome, JoinRejection,
-    JoinRequestValues, JoinSpecInvalid,
+    redeem_invite_in_tx, resolve_invite_workspace, JoinError, JoinRejection, JoinRequestValues,
+    JoinSpecInvalid,
 };
 
 use crate::dto::{InviteCodeDto, JoinMembershipDto, JoinRequest, JoinResponse, MemberDto};
 use crate::error::ApiError;
-use crate::routes::auth_routes::{base_scopes, issue_and_record_session};
+use crate::rate_limit::{too_many_requests, AccountGuessBudget};
+use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
 use crate::routes::shared::join_tenant_tx;
 use crate::AppState;
 
@@ -70,7 +87,12 @@ use crate::AppState;
 /// which matters more here than elsewhere: this handler is reachable without a
 /// credential, and `momo_password_hash` is bcrypt running inside Postgres.
 fn spec_error(error: JoinSpecInvalid) -> ApiError {
-    ApiError::bad_request(error.to_string())
+    match error {
+        // ADR-0215 D2: the length refusals and the NUL refusal name themselves on
+        // the wire.
+        JoinSpecInvalid::NewPassword(invalid) => ApiError::from(invalid),
+        other => ApiError::bad_request(other.to_string()),
+    }
 }
 
 /// [`JoinRejection`] → HTTP, using the status the domain type carries so the
@@ -90,7 +112,13 @@ fn join_error(error: JoinError) -> ApiError {
 fn rejection_error(rejection: JoinRejection) -> ApiError {
     let status =
         StatusCode::from_u16(rejection.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
-    ApiError::new(status, rejection.to_string())
+    // The code comes from the domain type, beside the status and the sentence, so the
+    // three cannot drift (the two account refusals of #4625 are the only ones that
+    // carry one).
+    match rejection.code() {
+        Some(code) => ApiError::coded(status, code, rejection.to_string()),
+        None => ApiError::new(status, rejection.to_string()),
+    }
 }
 
 pub async fn join(
@@ -152,15 +180,26 @@ pub async fn join(
     };
 
     // -- 3. the join, in one tenant transaction ----------------------------
-    let outcome: JoinOutcome = join_tenant_tx(&state.pool, workspace_id, {
+    // The account's password-guess budget (#4625): the domain spends one from it
+    // immediately before it compares a password, and only for an address that
+    // already has an active account.
+    let guess_budget = AccountGuessBudget::new(state.rate_limit.clone());
+    let jwt_secret = state.jwt_secret.clone();
+    let joined = join_tenant_tx(&state.pool, workspace_id, {
         let values = values.clone();
         let code = code.clone();
         let user_agent = user_agent.clone();
         move |conn| {
             Box::pin(async move {
-                let outcome =
-                    redeem_invite_in_tx(conn, workspace_id, &code, &values, user_agent.as_deref())
-                        .await?;
+                let outcome = redeem_invite_in_tx(
+                    conn,
+                    workspace_id,
+                    &code,
+                    &values,
+                    user_agent.as_deref(),
+                    &guess_budget,
+                )
+                .await?;
                 // Swift writes this row inside the same transaction
                 // (`insertAuditLog` :652-683) and so does this: an audit row that
                 // survived a rolled-back join would be a false record.
@@ -197,25 +236,36 @@ pub async fn join(
                     )
                     .await?;
                 }
-                Ok(outcome)
+                // -- the session, in this same transaction ---------------------
+                // The same mint-and-record path login uses (so a joined session is
+                // revocable exactly like a logged-in one, MOMO-300), but on THIS
+                // connection: the transaction holds the workspace's membership lock
+                // (shared) from its first statement, so an operator's suspension or
+                // removal waits for the commit and then revokes the pair recorded
+                // here. Minted after the commit, the pair could be born just after
+                // that revocation ran and escape it.
+                let (access, refresh) = mint_and_record_session_in_tx(
+                    conn,
+                    &jwt_secret,
+                    workspace_id,
+                    outcome.member.id,
+                    base_scopes(),
+                )
+                .await?;
+                Ok((outcome, access, refresh))
             })
         }
     })
-    .await
-    .map_err(join_error)?;
-
-    // -- 4. the session ----------------------------------------------------
-    // The same mint-and-record path login uses, so a joined session is revocable
-    // exactly like a logged-in one (MOMO-300). Reusing it rather than re-minting
-    // here is what keeps the two from drifting in what they persist.
-    let (access, refresh) = issue_and_record_session(
-        &state,
-        workspace_id,
-        outcome.member.id,
-        base_scopes(),
-        "join.session",
-    )
-    .await?;
+    .await;
+    let (outcome, access, refresh) = match joined {
+        Ok(joined) => joined,
+        // A spent guess budget is the one refusal that needs a header: `ApiError` has
+        // no slot for `Retry-After`, so it is answered here, as the per-IP gate does.
+        Err(JoinError::Rejected(JoinRejection::PasswordGuessLimited {
+            retry_after_seconds,
+        })) => return Ok(too_many_requests(retry_after_seconds)),
+        Err(error) => return Err(join_error(error)),
+    };
 
     let status = if outcome.created_member {
         StatusCode::CREATED
@@ -318,11 +368,59 @@ mod tests {
                 403,
                 "human is not eligible to join",
             ),
+            (
+                JoinRejection::InvalidCredentials,
+                401,
+                "invalid credentials",
+            ),
+            (
+                JoinRejection::EmailUnavailable,
+                409,
+                "email is unavailable for this invite",
+            ),
+            (
+                JoinRejection::PasswordGuessLimited {
+                    retry_after_seconds: 9,
+                },
+                429,
+                "rate limit exceeded",
+            ),
         ];
         for (rejection, status, message) in cases {
             let api = rejection_error(rejection);
             assert_eq!(api.status.as_u16(), status, "{rejection:?}");
             assert_eq!(api.message, message, "{rejection:?}");
+        }
+    }
+
+    /// The wire shape of the two refusals #4625 added: each names itself beside its
+    /// status and sentence, and no other refusal grows a code by accident.
+    #[test]
+    fn the_account_refusals_name_themselves_and_no_other_refusal_does() {
+        let wrong = rejection_error(JoinRejection::InvalidCredentials);
+        assert_eq!(wrong.status, StatusCode::UNAUTHORIZED);
+        assert_eq!(wrong.code, Some("invalid_credentials"));
+        let unavailable = rejection_error(JoinRejection::EmailUnavailable);
+        assert_eq!(unavailable.status, StatusCode::CONFLICT);
+        assert_eq!(unavailable.code, Some("join_email_unavailable"));
+        for rejection in [
+            JoinRejection::InviteInvalid,
+            JoinRejection::InviteExpired,
+            JoinRejection::InviteRevoked,
+            JoinRejection::InviteExhausted,
+            JoinRejection::RoleNotPubliclyJoinable,
+            JoinRejection::Banned,
+            JoinRejection::AlreadyRedeemed,
+            JoinRejection::RoleEscalation,
+            JoinRejection::NotHuman,
+            JoinRejection::HumanIneligible,
+            JoinRejection::PasswordGuessLimited {
+                retry_after_seconds: 3,
+            },
+            JoinRejection::HandleTaken,
+            JoinRejection::NoPublicChannels,
+        ] {
+            assert_eq!(rejection_error(rejection).code, None, "{rejection:?}");
         }
     }
 
@@ -366,5 +464,31 @@ mod tests {
             spec_error(JoinSpecInvalid::PasswordMissing).status,
             StatusCode::BAD_REQUEST
         );
+        assert_eq!(
+            spec_error(JoinSpecInvalid::PasswordMissing).code,
+            None,
+            "a missing password has never carried an error.code"
+        );
+    }
+
+    /// ADR-0215 D2: a join whose password is too short or too long is a 400 that
+    /// names its reason, so a client can say which rule it broke.
+    #[test]
+    fn a_refused_join_password_is_a_coded_400() {
+        let short = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::TooShort,
+        ));
+        assert_eq!(short.status, StatusCode::BAD_REQUEST);
+        assert_eq!(short.code, Some("password_too_short"));
+        let long = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::TooLong,
+        ));
+        assert_eq!(long.status, StatusCode::BAD_REQUEST);
+        assert_eq!(long.code, Some("password_too_long"));
+        let nul = spec_error(JoinSpecInvalid::NewPassword(
+            momo_auth::NewPasswordInvalid::InvalidChar,
+        ));
+        assert_eq!(nul.status, StatusCode::BAD_REQUEST);
+        assert_eq!(nul.code, Some("password_invalid_char"));
     }
 }

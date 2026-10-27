@@ -97,6 +97,10 @@ pub struct Config {
     pub mentions: MentionSettings,
     /// ADR-0208 D15 — the scheduled-message tick: on by default, four optional knobs.
     pub scheduler: SchedulerSettings,
+    /// #4443 / ADR-0151 증보 2 D4 — the attachment reclaim tick of the api process (the
+    /// local-volume half). **Ships off**: it deletes nothing unless `MOMO_ATTACHMENT_RECLAIM` is
+    /// exactly `1`. Runs only on the `local` backend (the notifier reclaims a Google Drive).
+    pub attachment_reclaim: AttachmentReclaimSettings,
     /// ADR-0146 개정 2026-09-28 (R2) — the server instance id signed statements
     /// echo, and whether a member-scoped host registration must carry its root
     /// key's `host_register` signature. **Off by default** (D-11 / Q11: the R2
@@ -367,6 +371,25 @@ pub struct RateLimitConfig {
     pub password_change_per_member_limit: u32,
     /// `RATE_LIMIT_PASSWORD_CHANGE_PER_IP` (default 30). 0 disables.
     pub password_change_per_ip_limit: u32,
+    /// `RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT` (default 5 per window). **No off
+    /// switch**: 0 and a value that is not a number both keep the default, because
+    /// this is a password-guessing surface (ADR-0215 D6 — a knob on a guessable
+    /// surface does not get an "off").
+    ///
+    /// Guesses at one account's password made through a door that lets a caller who
+    /// holds no session name the account — today `POST /v1/join`, which compares a
+    /// password only for an address that already has an `active` account. The key is
+    /// the account (workspace + stored address), never the invite code or the
+    /// caller's address, so another code or another source address does not buy a
+    /// fresh budget. Every comparison is counted, a right one included, and the
+    /// budget is spent *before* the comparison runs. Login has no limiter yet
+    /// (ADR-0215 F9, #4597); when it gets one it should spend this same key.
+    ///
+    /// The window is `RATE_LIMIT_WINDOW_SECONDS`, which every limiter in this file
+    /// shares: this knob is how many guesses fit in it, and only a value of 0 is
+    /// refused. An operator who shortens the window to a second turns "5 a minute"
+    /// into "5 a second", for this budget and for the rest.
+    pub password_guess_per_account_limit: u32,
     /// `RATE_LIMIT_DRIVE_UPLOAD_PER_IP` (default 120). 0 disables. The public
     /// upload PUT (`/__momo_stub/drive/uploads/{token}`, #2628), which answers
     /// anyone who knows the path shape. Its own key, so upload traffic and the
@@ -432,6 +455,7 @@ impl Default for RateLimitConfig {
             claim_per_ip_limit: 30,
             password_change_per_member_limit: 10,
             password_change_per_ip_limit: 30,
+            password_guess_per_account_limit: 5,
             drive_upload_per_ip_limit: 120,
             message_send_per_member_limit: 120,
             message_send_per_agent_limit: 600,
@@ -468,6 +492,11 @@ impl RateLimitConfig {
             password_change_per_ip_limit: lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.password_change_per_ip_limit),
+            // No off switch (see the field): 0 is filtered out and falls to the default.
+            password_guess_per_account_limit: lookup("RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .filter(|limit| *limit > 0)
+                .unwrap_or(defaults.password_guess_per_account_limit),
             drive_upload_per_ip_limit: lookup("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.drive_upload_per_ip_limit),
@@ -1376,6 +1405,74 @@ impl SchedulerSettings {
             grace_seconds: parse_scheduler_grace_seconds(
                 env("MOMO_SCHEDULER_GRACE_SECONDS").as_deref(),
             ),
+        }
+    }
+}
+
+/// #4443 / ADR-0151 증보 2 D4 — the attachment reclaim tick that lives in the api process.
+///
+/// The same variable names and defaults as the notifier's Google-Drive sweep (an operator sets
+/// one spelling and whichever process owns the backend reads it):
+///
+/// * `MOMO_ATTACHMENT_RECLAIM` — **exactly `1` turns the delete on**; unset, empty, `0`, `true`,
+///   a typo all leave it looking only (`momo_messaging::attachment_reclaim::delete_switch_is_on`,
+///   the one definition both processes call). The job deletes files nobody can get back, so it
+///   ships off; switched off, every tick writes one dry-run line with what it *would* delete.
+/// * `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS` — 600000, floored at 10000. Unparsable → default.
+/// * `MOMO_ATTACHMENT_RECLAIM_BATCH` — files per tick, 50, clamped 1..=500. Unparsable → default.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentReclaimSettings {
+    pub delete_enabled: bool,
+    pub interval_ms: u64,
+    pub batch: i64,
+}
+
+pub const ATTACHMENT_RECLAIM_INTERVAL_MS_DEFAULT: u64 = 600_000;
+pub const ATTACHMENT_RECLAIM_INTERVAL_MS_FLOOR: u64 = 10_000;
+pub const ATTACHMENT_RECLAIM_BATCH_DEFAULT: i64 = 50;
+pub const ATTACHMENT_RECLAIM_BATCH_MAX: i64 = 500;
+
+impl Default for AttachmentReclaimSettings {
+    fn default() -> Self {
+        AttachmentReclaimSettings {
+            delete_enabled: false,
+            interval_ms: ATTACHMENT_RECLAIM_INTERVAL_MS_DEFAULT,
+            batch: ATTACHMENT_RECLAIM_BATCH_DEFAULT,
+        }
+    }
+}
+
+pub fn parse_attachment_reclaim_interval_ms(raw: Option<&str>) -> u64 {
+    raw.and_then(|value| value.trim().parse::<u64>().ok())
+        .map_or(ATTACHMENT_RECLAIM_INTERVAL_MS_DEFAULT, |ms| {
+            ms.max(ATTACHMENT_RECLAIM_INTERVAL_MS_FLOOR)
+        })
+}
+
+pub fn parse_attachment_reclaim_batch(raw: Option<&str>) -> i64 {
+    raw.and_then(|value| value.trim().parse::<i64>().ok())
+        .map_or(ATTACHMENT_RECLAIM_BATCH_DEFAULT, |batch| {
+            batch.clamp(1, ATTACHMENT_RECLAIM_BATCH_MAX)
+        })
+}
+
+impl AttachmentReclaimSettings {
+    pub fn from_env() -> AttachmentReclaimSettings {
+        AttachmentReclaimSettings::from_lookup(&env)
+    }
+
+    /// [`AttachmentReclaimSettings::from_env`] with the lookup handed in, so a test proves that
+    /// the **switch variable** reaches `delete_enabled` (the one line that decides whether this
+    /// process deletes files) without touching the process environment.
+    pub fn from_lookup(get: &dyn Fn(&str) -> Option<String>) -> AttachmentReclaimSettings {
+        AttachmentReclaimSettings {
+            delete_enabled: momo_messaging::attachment_reclaim::delete_switch_is_on(
+                get("MOMO_ATTACHMENT_RECLAIM").as_deref(),
+            ),
+            interval_ms: parse_attachment_reclaim_interval_ms(
+                get("MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS").as_deref(),
+            ),
+            batch: parse_attachment_reclaim_batch(get("MOMO_ATTACHMENT_RECLAIM_BATCH").as_deref()),
         }
     }
 }
@@ -2554,6 +2651,7 @@ impl Config {
             agent_port: AgentPortConfig::from_env()?,
             mentions: MentionSettings::from_env(),
             scheduler: SchedulerSettings::from_env(),
+            attachment_reclaim: AttachmentReclaimSettings::from_env(),
             device_keys,
             cloud_box: CloudBoxConfig::from_env(),
             // ADR-0149: never fatal. An instance that was not given the
@@ -2768,6 +2866,84 @@ mod tests {
         ] {
             assert!(!hosted_inplace_grant_switch_on(off), "{off:?}");
         }
+    }
+
+    /// #4443: the api process's reclaim tick reads the notifier's variable names with the
+    /// notifier's defaults, and — like the notifier — deletes only on the exact text `1`.
+    #[test]
+    fn the_attachment_reclaim_tick_ships_off_and_reads_the_notifiers_names() {
+        let default = AttachmentReclaimSettings::default();
+        assert!(!default.delete_enabled, "ships off");
+        assert_eq!(default.interval_ms, 600_000);
+        assert_eq!(default.batch, 50);
+
+        assert_eq!(parse_attachment_reclaim_interval_ms(None), 600_000);
+        assert_eq!(
+            parse_attachment_reclaim_interval_ms(Some("5")),
+            10_000,
+            "floor 10 s"
+        );
+        assert_eq!(parse_attachment_reclaim_interval_ms(Some("60000")), 60_000);
+        assert_eq!(
+            parse_attachment_reclaim_interval_ms(Some("soon")),
+            600_000,
+            "a typo keeps the default"
+        );
+        assert_eq!(parse_attachment_reclaim_batch(None), 50);
+        assert_eq!(parse_attachment_reclaim_batch(Some("0")), 1, "at least one");
+        assert_eq!(
+            parse_attachment_reclaim_batch(Some("9999")),
+            500,
+            "at most 500"
+        );
+        assert_eq!(parse_attachment_reclaim_batch(Some("lots")), 50);
+
+        // The variable the operator sets is the one that reaches `delete_enabled` (the line that
+        // decides whether this process deletes files), through the same parser `from_env` uses.
+        let with_switch = |switch: Option<&'static str>| {
+            AttachmentReclaimSettings::from_lookup(&|key: &str| {
+                (key == "MOMO_ATTACHMENT_RECLAIM")
+                    .then(|| switch.map(str::to_string))
+                    .flatten()
+            })
+        };
+        assert!(!with_switch(None).delete_enabled, "nothing set: off");
+        assert!(with_switch(Some("1")).delete_enabled);
+        for near_miss in ["0", "true", "yes", " 1", "01", "on"] {
+            assert!(
+                !with_switch(Some(near_miss)).delete_enabled,
+                "{near_miss:?} leaves it off"
+            );
+        }
+        let tuned = AttachmentReclaimSettings::from_lookup(&|key: &str| match key {
+            "MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS" => Some("60000".to_string()),
+            "MOMO_ATTACHMENT_RECLAIM_BATCH" => Some("7".to_string()),
+            _ => None,
+        });
+        assert_eq!((tuned.interval_ms, tuned.batch), (60_000, 7));
+        assert!(
+            !tuned.delete_enabled,
+            "tuning the cadence does not turn the delete on"
+        );
+
+        // The one switch: only the exact text `1` (the messaging crate's definition).
+        for near_miss in [
+            None,
+            Some(""),
+            Some("0"),
+            Some("true"),
+            Some("yes"),
+            Some(" 1"),
+            Some("01"),
+        ] {
+            assert!(
+                !momo_messaging::attachment_reclaim::delete_switch_is_on(near_miss),
+                "{near_miss:?}"
+            );
+        }
+        assert!(momo_messaging::attachment_reclaim::delete_switch_is_on(
+            Some("1")
+        ));
     }
 
     /// ADR-0208 D15 — four optional knobs, every one with a default, none required.
@@ -3247,6 +3423,7 @@ mod tests {
         assert_eq!(defaults.claim_per_ip_limit, 30);
         assert_eq!(defaults.password_change_per_member_limit, 10);
         assert_eq!(defaults.password_change_per_ip_limit, 30);
+        assert_eq!(defaults.password_guess_per_account_limit, 5);
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
@@ -3258,6 +3435,44 @@ mod tests {
         assert!(
             defaults.password_change_per_member_limit > 0,
             "a default of 0 would ship PATCH …/me/password unguarded"
+        );
+        assert!(
+            defaults.password_guess_per_account_limit > 0,
+            "a default of 0 would ship the join door's password check unbudgeted"
+        );
+    }
+
+    /// The per-account password-guess knob (#4625): its own env name, moves only its
+    /// own field, and — unlike every other knob here — has no off switch.
+    #[test]
+    fn the_password_guess_knob_is_named_moves_only_itself_and_cannot_be_switched_off() {
+        let lookup = |name: &'static str, value: &'static str| {
+            move |key: &str| (key == name).then(|| value.to_string())
+        };
+        let defaults = RateLimitConfig::default();
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT", " 3 ")),
+            RateLimitConfig {
+                password_guess_per_account_limit: 3,
+                ..defaults
+            },
+            "the documented name moves exactly its own field, whitespace trimmed"
+        );
+        for refused in ["0", "many", "-1", ""] {
+            assert_eq!(
+                RateLimitConfig::from_lookup(lookup(
+                    "RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT",
+                    refused
+                )),
+                defaults,
+                "{refused:?} must keep the default: a guessable surface has no off value"
+            );
+        }
+        // the other password knob does not leak into this one
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER", "2"))
+                .password_guess_per_account_limit,
+            defaults.password_guess_per_account_limit
         );
     }
 

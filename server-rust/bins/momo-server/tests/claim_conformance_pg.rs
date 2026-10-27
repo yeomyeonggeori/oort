@@ -27,6 +27,9 @@ use tracing_subscriber::fmt::MakeWriter;
 use tracing_subscriber::util::SubscriberInitExt;
 use uuid::Uuid;
 
+#[path = "common/password_cases.rs"]
+mod password_cases;
+
 const TEST_JWT_SECRET: &str = "claim-conformance-app-signing-secret";
 const CLAIM_PASSWORD: &str = "claim-conformance-owner-password";
 
@@ -424,7 +427,7 @@ async fn the_public_claim_route_sheds_a_flood_from_one_address() {
         async move {
             http.post(format!("{base}/v1/claim"))
                 .header("x-forwarded-for", ip)
-                .json(&json!({ "token": token, "password": "x" }))
+                .json(&json!({ "token": token, "password": CLAIM_PASSWORD }))
                 .send()
                 .await
                 .expect("claim guess")
@@ -438,6 +441,115 @@ async fn the_public_claim_route_sheds_a_flood_from_one_address() {
         );
     }
     assert_eq!(guess("198.51.100.9").await.status().as_u16(), 429);
+}
+
+/// ADR-0215 D2 (#4593) on `POST /v1/claim` — the first owner's bootstrap, the
+/// path ADR-0185's zero-base onboarding sets the owner's first password on.
+///
+/// Every refusal is a coded 400 *before* any statement runs, so a typo costs the
+/// owner nothing: the one-time token is still live, no password was stored, and
+/// the very same token takes a valid password next.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_claimed_password_is_held_to_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    let fixture =
+        seed_claim_pending(&su, "claim-rule", "now() + interval '24 hours'", "now()").await;
+
+    let mut nine_chars_answer = None;
+    for (case, password, code) in password_cases::refused() {
+        let (status, body) = post_claim(&http, &base, &fixture.token, &password).await;
+        assert_eq!(status, 400, "{case}: {body}");
+        assert_eq!(body["error"]["code"], json!(code), "{case}: {body}");
+        if password == password_cases::NINE_CHARS {
+            nine_chars_answer = Some((status, body));
+        }
+    }
+    let (status, body) = post_claim(&http, &base, &fixture.token, "").await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["error"]["message"], json!("password is required"));
+    assert!(
+        body["error"].get("code").is_none(),
+        "an empty password has never carried an error.code: {body}"
+    );
+
+    // The password is judged before the token is looked up, so a short one
+    // answers a dead token exactly as it answers a live one: this rule adds no
+    // oracle for which tokens exist.
+    let dead = mint_owner_claim_token().expect("entropy");
+    let dead_answer = post_claim(&http, &base, &dead, password_cases::NINE_CHARS).await;
+    assert_eq!(Some(dead_answer), nine_chars_answer);
+
+    // Nothing above stored a password or spent the token.
+    let (password_stored, token_spent): (bool, bool) = sqlx::query_as(
+        "SELECT (h.password_hash IS NOT NULL AND h.password_hash <> ''), \
+                EXISTS (SELECT 1 FROM credential_claim c \
+                         WHERE c.workspace_id = h.workspace_id \
+                           AND c.member_id = h.member_id \
+                           AND c.consumed_at IS NOT NULL) \
+           FROM human h \
+          WHERE h.workspace_id = $1 AND h.member_id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.owner)
+    .fetch_one(&su)
+    .await
+    .expect("read the claim-pending owner");
+    assert!(!password_stored, "a refused claim stores no password");
+    assert!(
+        !token_spent,
+        "a refused claim does not spend the one-time token"
+    );
+
+    // The same token, ten characters: the shortest password the rule accepts.
+    let (status, body) = post_claim(&http, &base, &fixture.token, password_cases::TEN_CHARS).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        login_status(
+            &http,
+            &base,
+            fixture.workspace,
+            &fixture.owner_email,
+            password_cases::TEN_CHARS,
+        )
+        .await,
+        200
+    );
+}
+
+/// The accepting side of the same rule: every shape on the boundary claims, and
+/// signs in with exactly the string it was set with (nothing trimmed, nothing
+/// normalised).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn every_accepted_claim_password_signs_in_exactly_as_typed() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let base = start_server(app_pool, RateLimitConfig::default()).await;
+    let http = reqwest::Client::new();
+    for (case, password) in password_cases::accepted() {
+        let fixture =
+            seed_claim_pending(&su, "claim-rule-ok", "now() + interval '24 hours'", "now()").await;
+        let (status, body) = post_claim(&http, &base, &fixture.token, &password).await;
+        assert_eq!(status, 200, "{case}: {body}");
+        assert_eq!(
+            login_status(
+                &http,
+                &base,
+                fixture.workspace,
+                &fixture.owner_email,
+                &password
+            )
+            .await,
+            200,
+            "{case}: the stored password signs in with the bytes it was set with"
+        );
+    }
 }
 
 #[tokio::test]

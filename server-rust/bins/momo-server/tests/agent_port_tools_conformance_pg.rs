@@ -16797,6 +16797,43 @@ async fn a_workspace_image_can_be_the_avatar_only_if_the_agent_could_read_it() {
         not_approved.is_none(),
         "an unapproved channel hides its files"
     );
+    // …and a half tombstone (only `deleted_at` written, `state` untouched) hides it too: ADR-0151
+    // amendment 2 D1 reads both columns. Restored before the assertion so a failure leaves no mark.
+    sqlx::query(
+        "UPDATE message SET deleted_at = now() \
+          WHERE id = (SELECT message_id FROM attachment WHERE id = $1)",
+    )
+    .bind(good)
+    .execute(&su)
+    .await
+    .unwrap();
+    let half_tombstone = tenant_3786(&app, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::find_visible_image_attachment_in_tx(
+                conn,
+                ws,
+                agent,
+                &[fixture_channel],
+                good,
+                5 << 20,
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE message SET deleted_at = NULL \
+          WHERE id = (SELECT message_id FROM attachment WHERE id = $1)",
+    )
+    .bind(good)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert!(
+        half_tombstone.is_none(),
+        "a message with only deleted_at set hides its file from the agent"
+    );
 }
 
 async fn agent_invite_state_3788(
@@ -20508,6 +20545,33 @@ async fn member_avatar_set_a_run_names_its_requester_only_when_that_is_a_live_hu
     assert!(
         find(dm, mine_dm, 5 << 20).await.is_none(),
         "a deleted message hides its file"
+    );
+    // A half tombstone (only `deleted_at` written, `state` untouched — a shape only an older path
+    // could leave) hides it too: ADR-0151 amendment 2 D1 reads both columns.
+    let half = seed_message_4385(su, ws, dm, w.requester, "half").await;
+    let half_att = seed_attachment_4385(
+        su,
+        ws,
+        dm,
+        w.requester,
+        Some(half),
+        "d3",
+        "image/png",
+        "complete",
+    )
+    .await;
+    assert!(
+        find(dm, half_att, 5 << 20).await.is_some(),
+        "control: found while the message lives"
+    );
+    sqlx::query("UPDATE message SET deleted_at = now() WHERE id=$1")
+        .bind(half)
+        .execute(su)
+        .await
+        .unwrap();
+    assert!(
+        find(dm, half_att, 5 << 20).await.is_none(),
+        "a message with only deleted_at set hides its file from the requester's avatar too"
     );
 }
 

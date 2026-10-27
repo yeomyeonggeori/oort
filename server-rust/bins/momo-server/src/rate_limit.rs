@@ -49,6 +49,7 @@ use axum::response::{IntoResponse, Response};
 use momo_auth::{Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::DbError;
+use momo_settings::{GuessRefused, PasswordGuessBudget};
 use serde_json::json;
 use uuid::Uuid;
 
@@ -305,6 +306,41 @@ impl SlidingWindowRateLimiter {
         buckets.retain(|_, bucket| {
             cutoff.is_none_or(|cutoff| bucket.timestamps.iter().any(|stamp| *stamp > cutoff))
         });
+    }
+}
+
+/// The hourly row budget of the Agent Port call trace, one per credential (ADR-0200 증보 4, #4618).
+///
+/// A type of its own, with the limit and the window fixed in it, so the trace cannot be pointed at
+/// the shared Agent Port limiter by accident: that map is swept by whichever call triggers the
+/// sweep, with **that call's** window (60 s for the admission axes), and a sweep at the wrong
+/// window silently forgets an hour-long bucket — the same hazard `RateLimitState::member_writes`
+/// exists to avoid. Here the sweep always runs at the budget's own hour, so a bucket lives exactly
+/// as long as its newest stamp is inside the hour.
+///
+/// Stop recording, never delete (ADR-0200 T3): once a credential has spent its rows the trace is
+/// silent for it until the hour passes; the calls themselves are not limited by this.
+#[derive(Debug, Default)]
+pub struct CallTraceBudget {
+    limiter: SlidingWindowRateLimiter,
+}
+
+impl CallTraceBudget {
+    /// Rows one credential may leave in an hour. A 15-minute routine makes a few dozen calls an
+    /// hour; a runaway client is bounded to this however hard it hammers.
+    pub const PER_HOUR: u32 = 240;
+    pub const WINDOW: Duration = Duration::from_secs(3600);
+
+    /// Spend one row for `credential` now. `allowed == false` means the budget is spent;
+    /// `should_log` is true once per burst, so the cap is announced once, not per call.
+    pub fn admit(&self, credential: Uuid) -> Verdict {
+        self.admit_at(credential, Instant::now())
+    }
+
+    /// [`admit`](Self::admit) with an injected clock.
+    pub fn admit_at(&self, credential: Uuid, now: Instant) -> Verdict {
+        self.limiter
+            .check_at(&credential.to_string(), Self::PER_HOUR, Self::WINDOW, now)
     }
 }
 
@@ -934,6 +970,100 @@ impl Drop for SlotClaim<'_> {
             self.limiter
                 .release_log_reservation(self.key, self.reservation);
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// #4625 — the per-account password-guess budget
+// ---------------------------------------------------------------------------
+//
+// `POST /v1/join` compares a password for one kind of request: an address that already
+// has an `active` account. The caller holds a code and nothing else, so every comparison
+// is a guess, and each one is bcrypt work inside the database. The domain asks this
+// budget **before** it runs the comparison ([`momo_settings::PasswordGuessBudget`]) and a
+// refusal means the comparison never happens.
+//
+// **Whose budget.** The account's: workspace + the address as the database stores it. Not
+// the invite code (a second code would be a second budget), not the caller's address (the
+// per-IP gate on the route trusts `X-Forwarded-For` as written, so it is a politeness limit
+// and not a guess limit), and not the member id (the key has to be buildable by a door that
+// has an address and has not looked the member up yet — login, when #4597 gives it a
+// limiter, is that door). Both doors spending the one key is what makes it a budget for the
+// account rather than for a door.
+//
+// **What counts.** Every comparison, a right one too: the limiter is atomic, so counting
+// at admission is the only way N parallel guesses cannot all pass a "not yet exhausted"
+// look. A person returning with a new link spends one of five.
+//
+// **No off switch.** `RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT` of 0 (or garbage) is the
+// default, in the config and again here: a `RateLimitConfig` built by hand with 0 must not
+// silently unbudget a guessable surface.
+//
+// State is the shared in-process limiter: reset by a restart, not shared between replicas
+// (N replicas admit N times the limit) — the contract of every limiter in this file.
+
+/// The key one account's password guesses are counted under. A function, not an inline
+/// `format!`, so every door that spends this budget spends the **same** key.
+pub(crate) fn password_guess_key(workspace_id: Uuid, stored_email: &str) -> String {
+    format!("pwguess:{workspace_id}:{stored_email}")
+}
+
+/// The join door's [`PasswordGuessBudget`], backed by the process limiter.
+pub(crate) struct AccountGuessBudget {
+    state: Arc<RateLimitState>,
+}
+
+impl AccountGuessBudget {
+    pub(crate) fn new(state: Arc<RateLimitState>) -> Self {
+        AccountGuessBudget { state }
+    }
+
+    /// The budget per window — never 0 (see the section header).
+    fn limit(&self) -> u32 {
+        match self.state.config.password_guess_per_account_limit {
+            0 => RateLimitConfig::default().password_guess_per_account_limit,
+            limit => limit,
+        }
+    }
+
+    fn spend_at(
+        &self,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        stored_email: &str,
+        now: Instant,
+    ) -> Result<(), GuessRefused> {
+        let limit = self.limit();
+        let window_seconds = self.state.config.window_seconds;
+        let verdict = self.state.limiter.check_at(
+            &password_guess_key(workspace_id, stored_email),
+            limit,
+            Duration::from_secs(window_seconds),
+            now,
+        );
+        if verdict.allowed {
+            return Ok(());
+        }
+        if verdict.should_log {
+            // One line per burst. The workspace and member ids are not secrets; the
+            // address is, so it is not logged, and neither is anything the request sent.
+            tracing::warn!(
+                workspace_id = %workspace_id,
+                member_id = %member_id,
+                limit,
+                window_seconds,
+                "password guesses at one account are over budget (join)"
+            );
+        }
+        Err(GuessRefused {
+            retry_after_seconds: verdict.retry_after_seconds,
+        })
+    }
+}
+
+impl PasswordGuessBudget for AccountGuessBudget {
+    fn spend(&self, workspace_id: Uuid, member_id: Uuid, email: &str) -> Result<(), GuessRefused> {
+        self.spend_at(workspace_id, member_id, email, Instant::now())
     }
 }
 
@@ -1607,5 +1737,251 @@ mod tests {
             "…and so did the slot: the retry wrote"
         );
         assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    // -- #4625 per-account password-guess budget ---------------------------------
+
+    fn guess_budget(limit: u32) -> AccountGuessBudget {
+        AccountGuessBudget::new(Arc::new(RateLimitState {
+            config: RateLimitConfig {
+                password_guess_per_account_limit: limit,
+                ..RateLimitConfig::default()
+            },
+            limiter: SlidingWindowRateLimiter::new(),
+            member_writes: SlidingWindowRateLimiter::new(),
+        }))
+    }
+
+    /// The budget is the account's: the limit admits exactly that many guesses, the next
+    /// is refused with a truthful `Retry-After`, and the window slides.
+    #[test]
+    fn an_account_may_be_guessed_at_exactly_its_limit_per_window() {
+        let budget = guess_budget(3);
+        let (workspace, member) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+        for attempt in 0..3 {
+            assert!(
+                budget
+                    .spend_at(workspace, member, "ada@example.com", start)
+                    .is_ok(),
+                "guess {attempt} is within the budget"
+            );
+        }
+        let refused = budget
+            .spend_at(workspace, member, "ada@example.com", start)
+            .expect_err("the fourth guess in one window is refused");
+        assert_eq!(
+            refused.retry_after_seconds, 60,
+            "nothing has aged, so the whole window remains"
+        );
+        assert!(
+            budget
+                .spend_at(
+                    workspace,
+                    member,
+                    "ada@example.com",
+                    start + Duration::from_secs(61)
+                )
+                .is_ok(),
+            "the window slid, so the budget has room again"
+        );
+    }
+
+    /// The key is the account — workspace and stored address — and nothing else, so one
+    /// account's spent budget refuses neither another address nor another workspace's
+    /// account with the same address, and the member id (which the caller of a door that
+    /// has only an address cannot supply) is not part of it.
+    #[test]
+    fn the_budget_is_keyed_by_workspace_and_address_and_nothing_else() {
+        let budget = guess_budget(1);
+        let (workspace, other_workspace) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+        assert!(budget
+            .spend_at(workspace, Uuid::new_v4(), "ada@example.com", start)
+            .is_ok());
+        assert!(
+            budget
+                .spend_at(workspace, Uuid::new_v4(), "ada@example.com", start)
+                .is_err(),
+            "another member id with the same stored address is the same account's budget"
+        );
+        assert!(
+            budget
+                .spend_at(workspace, Uuid::new_v4(), "grace@example.com", start)
+                .is_ok(),
+            "another address in the same workspace is another account"
+        );
+        assert!(
+            budget
+                .spend_at(other_workspace, Uuid::new_v4(), "ada@example.com", start)
+                .is_ok(),
+            "the same address in another workspace is another account"
+        );
+        assert_eq!(
+            password_guess_key(workspace, "ada@example.com"),
+            format!("pwguess:{workspace}:ada@example.com"),
+            "the key shape is what a second door has to reuse"
+        );
+    }
+
+    /// A budget of 0 in a hand-built config is not "off": it is the default.
+    #[test]
+    fn a_zero_budget_is_the_default_not_an_off_switch() {
+        let budget = guess_budget(0);
+        assert_eq!(
+            budget.limit(),
+            RateLimitConfig::default().password_guess_per_account_limit
+        );
+        let (workspace, member) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+        let admitted = (0..100)
+            .take_while(|_| {
+                budget
+                    .spend_at(workspace, member, "ada@example.com", start)
+                    .is_ok()
+            })
+            .count();
+        assert_eq!(
+            admitted,
+            RateLimitConfig::default().password_guess_per_account_limit as usize,
+            "a 0 must not let the guesses through unbudgeted"
+        );
+    }
+
+    /// This budget does not touch the per-IP, password-change or member-write keys — and
+    /// they do not touch it: an `ip:` or `pwchange:` bucket being full says nothing about an
+    /// account's guesses.
+    #[test]
+    fn the_guess_budget_has_its_own_key_space() {
+        let budget = guess_budget(1);
+        let (workspace, member) = (Uuid::new_v4(), Uuid::new_v4());
+        let start = Instant::now();
+        let window = Duration::from_secs(60);
+        for key in [
+            format!("ip:{workspace}"),
+            format!("pwchange:member:{member}"),
+            format!("pwchange:ip:{workspace}"),
+        ] {
+            assert!(
+                budget
+                    .state
+                    .limiter
+                    .check_at(&key, 1, window, start)
+                    .allowed,
+                "{key}"
+            );
+        }
+        assert!(
+            budget
+                .spend_at(workspace, member, "ada@example.com", start)
+                .is_ok(),
+            "full neighbours do not spend the account's guesses"
+        );
+    }
+
+    // ---- CallTraceBudget (ADR-0200 증보 4, #4618) -------------------------------------------
+
+    /// The two numbers ADR-0200 증보 4 (A4) states: 240 rows an hour per credential. The test below
+    /// walks `PER_HOUR` whatever it is, so on its own it would follow a change; the PostgreSQL suite
+    /// pins 240 too but runs only where a database is. This line is the default lane's pin: changing
+    /// the number is an edit of this test and of the ADR together.
+    #[test]
+    fn the_call_trace_budget_is_the_number_the_adr_states() {
+        assert_eq!(CallTraceBudget::PER_HOUR, 240);
+        assert_eq!(CallTraceBudget::WINDOW, Duration::from_secs(3600));
+    }
+
+    /// The budget is the cap, per credential, and an hour later it reopens.
+    #[test]
+    fn the_call_trace_budget_stops_at_its_cap_and_a_new_hour_reopens_it() {
+        let budget = CallTraceBudget::default();
+        let t0 = Instant::now();
+        let credential = Uuid::new_v4();
+        for spent in 0..CallTraceBudget::PER_HOUR {
+            assert!(
+                budget.admit_at(credential, t0).allowed,
+                "row {} of {}",
+                spent + 1,
+                CallTraceBudget::PER_HOUR
+            );
+        }
+        let spent = budget.admit_at(credential, t0);
+        assert!(!spent.allowed, "the budget is spent");
+        assert!(
+            spent.should_log,
+            "the first refusal of a burst is announced"
+        );
+        assert!(spent.retry_after_seconds > 0);
+        assert!(
+            !budget.admit_at(credential, t0).should_log,
+            "and only the first"
+        );
+        // Another credential has a budget of its own.
+        assert!(budget.admit_at(Uuid::new_v4(), t0).allowed);
+        // An hour on, the oldest rows have left the window.
+        assert!(
+            budget
+                .admit_at(
+                    credential,
+                    t0 + CallTraceBudget::WINDOW + Duration::from_secs(1)
+                )
+                .allowed
+        );
+    }
+
+    /// The hazard the type exists for. A shared limiter is swept at the window of whichever call
+    /// triggers the sweep; the budget is swept at its own hour, so a spent bucket survives any
+    /// amount of unrelated traffic inside that hour. Goes red if the budget's window shrinks to
+    /// the admission axes' 60 s.
+    #[test]
+    fn a_spent_budget_survives_a_sweep_and_the_shared_limiter_would_not() {
+        let t0 = Instant::now();
+        let later = t0 + Duration::from_secs(120);
+
+        let budget = CallTraceBudget::default();
+        let credential = Uuid::new_v4();
+        for _ in 0..CallTraceBudget::PER_HOUR {
+            assert!(budget.admit_at(credential, t0).allowed);
+        }
+        // More than a sweep interval of other credentials, two minutes later.
+        for _ in 0..SWEEP_INTERVAL + 8 {
+            budget.admit_at(Uuid::new_v4(), later);
+        }
+        assert!(
+            !budget
+                .admit_at(credential, later + Duration::from_secs(1))
+                .allowed,
+            "the sweep ran at the budget's own hour and kept the spent bucket"
+        );
+
+        // The same traffic on the shared limiter, whose callers use a 60 s window, forgets it.
+        let shared = SlidingWindowRateLimiter::new();
+        let minute = Duration::from_secs(60);
+        for _ in 0..CallTraceBudget::PER_HOUR {
+            assert!(
+                shared
+                    .check_at(
+                        "trace",
+                        CallTraceBudget::PER_HOUR,
+                        CallTraceBudget::WINDOW,
+                        t0
+                    )
+                    .allowed
+            );
+        }
+        for index in 0..SWEEP_INTERVAL + 8 {
+            shared.check_at(&format!("other-{index}"), 1000, minute, later);
+        }
+        assert!(
+            shared
+                .check_at(
+                    "trace",
+                    CallTraceBudget::PER_HOUR,
+                    CallTraceBudget::WINDOW,
+                    later + Duration::from_secs(1)
+                )
+                .allowed,
+            "on a shared map a 60 s sweep forgets an hour-long bucket — why the budget is a type"
+        );
     }
 }

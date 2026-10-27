@@ -159,13 +159,64 @@ claims:
       - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#another_members_attachment_cannot_be_bound_and_the_message_rolls_back_with_it"
   - id: ATT-3
     claim: "An attachment that no message carries yet (a draft in a composer tray, or a file a scheduled message is holding) is readable by its uploader alone: every other member of the channel gets the same 404 an unknown id gets, and once a message carries it the channel's members can read it."
-    scope: "Real PostgreSQL, through the content route. The uploader has to be an active member of the channel too. The 404 is compared by status and body, not by headers. The tests read as a plain channel member and as an outsider: that no workspace role (owner, admin) is an exception is read from the code, not tested. An attachment a deleted message carried stays readable by the channel (follow-up #4443)."
+    scope: "Real PostgreSQL, through the content route. The uploader has to be an active member of the channel too. The 404 is compared by status and body, not by headers. The tests read as a plain channel member and as an outsider: that no workspace role (owner, admin) is an exception is read from the code, not tested. A file a deleted message carried is covered by ATT-4."
     priority: P1
     runs: pr-ci
     proofs:
       - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#an_unbound_attachment_is_its_uploaders_alone_until_a_message_carries_it"
       - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_draft_and_a_carried_attachment_stay_inside_their_tenant_and_channel"
       - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_scheduled_messages_file_is_its_authors_alone_until_the_message_goes_out"
+  - id: ATT-4
+    claim: "A file that a deleted message carried is read by nobody, not the channel, not the author who uploaded it, not a workspace admin: the content route answers the same 404 an unknown id gets, and the deleted message's history row lists no files."
+    scope: "Real PostgreSQL, through the content route and through the four projections that list a message's files: channel history, thread replies, the replay echo of a retried send, and the agent port's image list. A row with only `state` or only `deleted_at` set counts as deleted. The 404 is compared by status and body. The admin check runs as a workspace admin. Not covered: the file stays on the archive after its message is deleted (the cleanup in ATT-7 takes only files no message carries), and a client that already holds the file card in memory may still show it until it reloads."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_deleted_messages_attachment_is_nobodys_to_read"
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_deleted_messages_attachments_are_not_listed_anywhere"
+  - id: ATT-5
+    claim: "The audit row oort writes when an attachment upload starts carries the file's type and size but not its file name."
+    scope: "Real PostgreSQL, through the upload route: the row is read back and has no name key, with the file name used in the test found in no audit detail. This covers rows written by this release. Rows an older release wrote are covered by ATT-6. The audit rows written when a member or workspace avatar upload starts still carry the image's file name."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#the_audit_trail_never_holds_a_file_name"
+  - id: ATT-6
+    claim: "Upgrading to this release removes the file name from the audit rows that older releases wrote when an attachment upload started, changes no other audit row, and running the same step again changes nothing."
+    scope: "A real PostgreSQL database upgraded from the previous release's schema with seeded rows: rows with and without a schema key, in two workspaces, are cleaned; a row of another action that has a name key, another attachment action, a row with no name and a name nested below the top level are left byte for byte; no row is lost; a second run changes no row version. The audit table has no hash chain, append-only trigger or update-denying policy, so the edit breaks no such guarantee. An older api instance that is still running during the deploy can write one more row with a name after the step has run; the operator's check SQL counts such rows and the step can be run again. Runs in the nightly lane only (the upgrade harness is not in the PR security pack)."
+    priority: P1
+    runs: nightly
+    proofs:
+      - "server-rust/bins/momo-notifier/tests/prod_role_conformance_pg.rs#the_audit_scrub_removes_a_file_name_from_old_upload_rows_and_touches_nothing_else"
+  - id: ATT-7
+    claim: "The cleanup of unattached uploads never deletes a file a message, a scheduled message, a huddle transcription or an avatar still holds, never deletes a file younger than 30 days, deletes nothing at all until an operator sets MOMO_ATTACHMENT_RECLAIM to exactly 1, and writes only through a connection that cannot bypass row-level security."
+    scope: "Real PostgreSQL with the same role names as production (the candidate read as the notifier role, every write as the app role; this lane runs with the development role grants, and the production column grants and upgrade order are proven separately in the nightly lane by prod_role_conformance_pg) and a recording stand-in for Google Drive. Every kind of reference that the schema enforces is tested one by one: a message (live or deleted), a scheduled message hold (and a hold released less than 30 days ago), the three huddle transcription columns, a member avatar and a workspace avatar naming the same Drive object. A Drive failure writes nothing and the next run retries; an object Drive says is already gone counts as deleted; a bind or a hold that commits while the cleanup waits wins. References that exist only outside the database, such as a file card in a composer tray that is still open after 30 days, are not seen; the 30 days is the cover. The Google Drive and local volume runners are separate processes; this claim covers the shared decision in both, and ATT-8 covers the local volume runner. A file that stays unattached is only deleted from the workspaces the runner looks at (see ATT-8)."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#old_unbound_complete_attachments_are_reclaimed_and_everything_else_is_kept"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_file_something_else_holds_is_never_deleted_and_never_in_the_way"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_drive_failure_writes_nothing_and_the_next_tick_retries"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_bind_or_a_hold_that_commits_while_the_reclaim_waits_beats_it"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#the_reclaim_cannot_reach_another_tenants_row"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_write_pool_that_bypasses_rls_is_refused"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#the_switched_off_reclaimer_counts_exactly_what_the_enabled_one_deletes_and_deletes_nothing"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#a_hold_that_appears_after_the_listing_is_seen_by_the_recheck_under_the_lock"
+      - "server-rust/bins/momo-notifier/tests/attachment_reclaim_conformance_pg.rs#an_unknown_reference_stops_the_delete_before_any_byte_goes"
+      - "server-rust/bins/momo-server/tests/attachment_conformance_pg.rs#a_held_file_is_never_reclaimed_and_a_released_one_is_a_draft_for_a_full_ttl"
+      - "server-rust/crates/momo-messaging/src/attachment_reclaim.rs#only_exactly_one_turns_the_delete_on"
+  - id: ATT-8
+    claim: "On the local volume the api process deletes unattached uploads only in workspaces whose uploads it has served since it started, deletes nothing unless MOMO_ATTACHMENT_RECLAIM is exactly 1, and refuses to run on a database role that bypasses row-level security."
+    scope: "Real PostgreSQL and the real local-volume archive, through the real upload routes. Switched off, the run counts what it would delete and leaves the volume and the rows alone. Switched on, the object and its sidecar leave the volume, the row goes, and the audit row says why without a file name. A workspace this process has not served an upload for since it started is not looked at, so its old unattached files stay until somebody uploads there; this is a gap in coverage, not a leak, because storage does not grow in a workspace that uploads nothing. A run deletes at most the batch size in total. A request that creates no upload remembers no workspace. Only the local backend runs this in the api process; with Google Drive the notifier runs the cleanup (ATT-7). The real tick loop (timer, switch, archive) is run with a short interval to prove the switch holds. Not covered: the call in main that starts the tick and the shutdown wait."
+    priority: P1
+    runs: pr-ci
+    proofs:
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#the_tick_follows_the_workspaces_this_process_served_and_deletes_only_when_switched_on"
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_refused_upload_touches_nothing_and_a_pool_that_bypasses_rls_is_refused"
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_tick_deletes_at_most_batch_files_across_workspaces_and_the_next_tick_carries_on"
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#a_big_backlog_in_one_workspace_does_not_starve_the_next_one"
+      - "server-rust/bins/momo-server/tests/attachment_reclaim_local_pg.rs#the_running_tick_obeys_the_switch"
+      - "server-rust/bins/momo-server/src/attachment_reclaim.rs#only_the_local_volume_is_reclaimed_by_the_api_process"
   - id: PUSH-1
     claim: "The push dispatch payload carries identifiers only: no message body, and no content-shaped key."
     scope: "Payload construction in momo-push and the relay's closed dispatch (static placeholder text). The notification the phone shows is built on the device after a separate authenticated fetch."

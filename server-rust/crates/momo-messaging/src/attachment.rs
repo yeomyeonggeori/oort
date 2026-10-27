@@ -31,14 +31,25 @@
 //!    neither finish it nor attach it to a message of their own.
 //! 2. **An attachment binds to exactly one message.** `message_id IS NULL` is
 //!    checked under `FOR UPDATE`, so two concurrent sends cannot both claim it.
-//! 3. **Only `complete` rows are ever projected.** Every read filters
-//!    `status = 'complete'`, so a pending or failed upload is invisible to
-//!    history, to the send echo, and to the realtime rail alike.
+//! 3. **Only `complete` rows of a live message are ever projected.** Every read
+//!    filters `status = 'complete'`, so a pending or failed upload is invisible to
+//!    history, to the send echo, and to the realtime rail alike — and a message
+//!    that was deleted projects **no** attachments at all (rule 5).
 //! 4. **A file no message carries is its uploader's alone to read.** The content
-//!    route's load ([`load_readable_attachment_in_tx`]) requires
-//!    `message_id IS NOT NULL` *or* the reader to be the uploader, so a draft in a
-//!    composer tray — or one a scheduled message holds until its deadline — is not
-//!    open to the channel before it is sent (ADR-0208 남는 위험 8, #4233).
+//!    route's load ([`load_readable_attachment_in_tx`]) requires a **live** message to
+//!    carry the file (rule 5) *or* the reader to be the uploader of a file **no**
+//!    message carries, so a draft in a composer tray — or one a scheduled message
+//!    holds until its deadline — is not open to the channel before it is sent
+//!    (ADR-0208 남는 위험 8, #4233).
+//! 5. **A file a deleted message carried is nobody's to read or to see listed.**
+//!    The tombstone keeps `message_id`, so the content load and every projection
+//!    join the message and require it to be alive (`state <> 'deleted' AND
+//!    deleted_at IS NULL` — both halves, like `LockedMessage::is_deleted`). The
+//!    author, the uploader and a workspace admin are not exceptions: the refusal is
+//!    the same flat 404 an unknown id gets (ADR-0151 증보 2, #4443). A message that
+//!    is *hard*-deleted is a different case on purpose — `ON DELETE SET NULL` hands
+//!    the file back as a draft (rule 4) and the reclaim sweep collects it
+//!    ([`crate::attachment_reclaim`]).
 //!
 //! RLS FORCE (migration 017) is the tenant boundary underneath all of it: every
 //! function here takes a connection whose `app.workspace_id` GUC was bound by
@@ -162,6 +173,11 @@ pub fn validate_attachment_mime(raw: &str) -> Result<String, AttachmentSpecInval
 const ATTACHMENT_COLS: &str = "id, channel_id, uploader_member_id, message_id, drive_file_id, \
      name, mime, size_bytes, status, created_at";
 
+/// [`ATTACHMENT_COLS`] with the `a.` alias, for the statements that join `message`
+/// (whose own `id`, `channel_id` and `created_at` would otherwise be ambiguous).
+const ATTACHMENT_COLS_A: &str = "a.id, a.channel_id, a.uploader_member_id, a.message_id, \
+     a.drive_file_id, a.name, a.mime, a.size_bytes, a.status, a.created_at";
+
 fn decode_attachment(row: &sqlx::postgres::PgRow) -> Result<Attachment, sqlx::Error> {
     Ok(Attachment {
         id: row.try_get("id")?,
@@ -251,6 +267,14 @@ pub async fn create_pending_upload_in_tx(
     .fetch_one(&mut *conn)
     .await?;
 
+    // **No file name in the detail** (ADR-0151 증보 2, #4443; schema v2). A name can
+    // be a person's (`급여명세서.pdf`), the audit trail is read by admins and kept
+    // longer than the file — the reclaim sweep deletes the row, and the name would
+    // otherwise survive there as the last copy. The attachment id is the join key
+    // while the row exists; mime and size are enough to reason about an upload
+    // without knowing what it was called. A hash was rejected: a file name is short
+    // and guessable, so an unkeyed hash is a dictionary away from the name, and a
+    // keyed one is a new secret with a rotation problem.
     write_audit(
         &mut *conn,
         &AuditEntry::new(workspace_id, "attachment.upload_started")
@@ -259,10 +283,9 @@ pub async fn create_pending_upload_in_tx(
             .target("attachment", id)
             .via_token(via_token_id)
             .with_schema(
-                "momo.attachment.upload_started.v1",
+                "momo.attachment.upload_started.v2",
                 json!({
                     "channel_id": channel_id.to_string(),
-                    "name": name,
                     "mime": mime,
                     // A string, like Swift's detail dictionary: an int64 that
                     // round-trips through a JSON reader with a float type would
@@ -323,8 +346,18 @@ pub async fn load_attachment_in_tx(
 /// `PendingRow`, the phone's optimistic echo) opens its attachment cards while the
 /// send is still in flight, and the send is what carries them.
 ///
+/// **A message that was deleted carries nothing** (ADR-0151 증보 2, #4443). The
+/// soft delete leaves `message_id` on the file, so "carried" is not `message_id IS
+/// NOT NULL` alone: the message has to be alive too (`state <> 'deleted' AND
+/// deleted_at IS NULL`). The uploader is **not** an exception to that — her own
+/// delete is what ended the conversation's claim on the file, and a deleted
+/// message is not a draft she is still writing. Neither is a workspace admin. The
+/// two branches are separate `AND` groups on purpose: `(carried AND alive) OR
+/// uploader` would hand a deleted message's file back to its uploader.
+///
 /// A refusal is an absent row, so the caller answers the same flat 404 it gives an
-/// id that never existed and the route is no oracle for other people's drafts.
+/// id that never existed and the route is no oracle for other people's drafts —
+/// or for deleted messages.
 /// `status` is deliberately **not** filtered here: whether the file is `complete`
 /// is the caller's answer to give (`pending` and `failed` are not content for
 /// anyone, their uploader included).
@@ -335,9 +368,11 @@ pub async fn load_readable_attachment_in_tx(
     reader_member_id: Uuid,
 ) -> Result<Option<Attachment>, DbError> {
     let sql = format!(
-        "SELECT {ATTACHMENT_COLS} FROM attachment \
-          WHERE id = $1 AND channel_id = $2 \
-            AND (message_id IS NOT NULL OR uploader_member_id = $3)"
+        "SELECT {ATTACHMENT_COLS_A} FROM attachment a \
+           LEFT JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+          WHERE a.id = $1 AND a.channel_id = $2 \
+            AND ( (a.message_id IS NOT NULL AND m.state <> 'deleted' AND m.deleted_at IS NULL) \
+               OR (a.message_id IS NULL AND a.uploader_member_id = $3) )"
     );
     let row = sqlx::query(&sql)
         .bind(attachment_id)
@@ -552,14 +587,21 @@ pub async fn link_attachments_in_tx(
 /// `status = 'complete'` is the filter that makes the array safe to hand to a
 /// client: a `pending` row names a file that may never arrive, and a `failed`
 /// one names bytes that did not match what was declared.
+///
+/// **A deleted message projects nothing** (ADR-0151 증보 2, #4443): the join to
+/// `message` requires it alive. The case that reaches this on a tombstone is the
+/// idempotent replay of a send whose message was deleted afterwards — the replay
+/// echoes the stored row, and the file cards it used to carry must not come back.
 pub async fn message_attachments_in_tx(
     conn: &mut PgConnection,
     message_id: Uuid,
 ) -> Result<Vec<MessageAttachment>, DbError> {
     let rows = sqlx::query(
-        "SELECT id, name, mime, size_bytes FROM attachment \
-          WHERE message_id = $1 AND status = 'complete' \
-          ORDER BY created_at ASC, id ASC",
+        "SELECT a.id, a.name, a.mime, a.size_bytes FROM attachment a \
+           JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
+          WHERE a.message_id = $1 AND a.status = 'complete' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
+          ORDER BY a.created_at ASC, a.id ASC",
     )
     .bind(message_id)
     .fetch_all(&mut *conn)
@@ -584,6 +626,13 @@ pub async fn message_attachments_in_tx(
 /// same reasoning as the quote join: reading ids off the rows and then fetching
 /// per message would cost one round trip per attached message, and would read
 /// them under a different snapshot than the page.
+///
+/// **A tombstone row carries no attachments** (ADR-0151 증보 2, #4443): the page
+/// keeps deleted messages visible (so a reconnecting client converges on the
+/// deletion), but `m.state <> 'deleted' AND m.deleted_at IS NULL` here is what
+/// stops the row from listing the file names, sizes and ids of what its author
+/// removed. The aggregate is then `NULL`, which [`decode_paged_attachments`] reads
+/// as "none" and the DTO omits.
 pub(crate) const PAGED_ATTACHMENT_JOIN: &str = "LEFT JOIN LATERAL ( \
        SELECT jsonb_agg( \
                 jsonb_build_object( \
@@ -593,6 +642,7 @@ pub(crate) const PAGED_ATTACHMENT_JOIN: &str = "LEFT JOIN LATERAL ( \
               ) AS items \
          FROM attachment a \
         WHERE a.message_id = m.id AND a.status = 'complete' \
+          AND m.state <> 'deleted' AND m.deleted_at IS NULL \
      ) att ON true";
 
 /// The column the join above contributes, aliased for [`decode_paged_attachments`].
@@ -731,6 +781,11 @@ mod tests {
     fn the_page_projection_reads_the_lateral_aggregate_and_hides_incomplete_rows() {
         assert!(PAGED_ATTACHMENT_JOIN.contains("a.status = 'complete'"));
         assert!(PAGED_ATTACHMENT_JOIN.contains("a.message_id = m.id"));
+        // A tombstone lists nothing — both halves of "deleted" (#4443). The PG test
+        // `a_deleted_messages_attachments_are_not_listed_anywhere` is the proof;
+        // this pins the spelling the other tombstone guards use.
+        assert!(PAGED_ATTACHMENT_JOIN.contains("m.state <> 'deleted'"));
+        assert!(PAGED_ATTACHMENT_JOIN.contains("m.deleted_at IS NULL"));
         assert!(PAGED_ATTACHMENT_JOIN.contains("ORDER BY a.created_at ASC, a.id ASC"));
         assert_eq!(PAGED_ATTACHMENT_COL, "att.items AS attachments_json");
         // 'sizeBytes' inside the aggregate is the wire key, not the column —

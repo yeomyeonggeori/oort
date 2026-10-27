@@ -912,6 +912,27 @@ describe("D1′ 초대 수락 한 화면 (#2810 OB2-4)", () => {
     expect((q("login-password") as HTMLInputElement).value).toBe("new-pass");
   });
 
+  // ADR-0215 D2 (#4593): the join password is held to the new-password rule and
+  // the server names the rule. The invite is still good, so the screen says what
+  // to fix in the field instead of sending the person to ask an admin for a new
+  // invite, and it keeps what they typed so they can edit it.
+  it("tells a refused join password the rule it broke, in place, with the fields kept", async () => {
+    joinWithInvite.mockRejectedValue(
+      new ApiError(
+        400,
+        "password must be at least 10 characters",
+        "password_too_short"
+      )
+    );
+    await joinFromLink();
+    await vi.waitFor(() => expect(q("login-error")).not.toBeNull());
+    expect(q("onboarding-join")).not.toBeNull();
+    expect(q("login-error")?.textContent).toContain("10자 이상");
+    expect(q("login-error")?.textContent).not.toContain("초대 링크");
+    expect(q("login-error")?.querySelector("button")).toBeNull();
+    expect((q("login-password") as HTMLInputElement).value).toBe("new-pass");
+  });
+
   it("keeps the invite when 뒤로 leaves a link-opened D1′, and 계속 returns to it", () => {
     window.history.replaceState(null, "", `/?code=${CODE}`);
     mount();

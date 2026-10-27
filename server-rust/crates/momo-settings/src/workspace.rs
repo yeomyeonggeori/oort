@@ -355,6 +355,33 @@ pub async fn lock_membership_mutation(
     Ok(())
 }
 
+/// Take the membership-mutation lock **in shared mode**, for a transaction that
+/// reads a member's standing and then acts on it — today the public join.
+///
+/// Every mutation that changes who is in a workspace (suspend, reinstate, remove,
+/// self-leave, both role changes) takes [`lock_membership_mutation`] exclusively as
+/// its first statement. Shared readers do not wait for each other, but a mutation
+/// waits for every shared holder to finish and every later shared holder waits for
+/// a mutation that is already queued, so a holder sees the workspace either wholly
+/// before a mutation or wholly after it — never between its first and last write.
+/// The lock is the same advisory key, so there is no row-lock order to get wrong:
+/// a mutation that takes its row locks in any order is safe, because it takes this
+/// one first. (A row-level `FOR SHARE` on the member was tried first and deadlocked
+/// with self-leave, which deletes the membership rows before it touches the member.)
+///
+/// Take it before the first read whose answer the transaction relies on, and keep
+/// it until commit; it is released with the transaction.
+pub async fn share_membership_state(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text, 128))")
+        .bind(workspace_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
 /// Is there another **active** owner besides `excluding` (Swift
 /// `requireAnotherOwner`, :566). The workspace must always retain one owner, so a
 /// last owner's self-leave is refused (409) — ownership transfer is a separate,

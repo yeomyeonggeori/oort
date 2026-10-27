@@ -57,6 +57,63 @@
 //! is safe only when no rejection can follow a write, and here several can
 //! (a lost redemption race is detected after the member row is inserted).
 //!
+//! ## An existing account is resumed only with proof (#4625)
+//!
+//! An invite code names a workspace and a role. It does **not** name a person, so
+//! it cannot vouch for whoever types an address. The create-or-reuse step is
+//! therefore a gate, and it sits **before** every read that talks about the
+//! account (the duplicate-redemption and role-escalation checks), so nothing about
+//! an existing account is said to a caller who has not shown they hold it:
+//!
+//! | the address belongs to | answer |
+//! |---|---|
+//! | nobody | a new account is created (unchanged) |
+//! | an `active` account | the request's password is checked, and only a match resumes the account — [`JoinRejection::InvalidCredentials`] (401) otherwise. The password, the name and the time zone are **never written** |
+//! | a `suspended` account | [`JoinRejection::HumanIneligible`] (403), the rule that was already here |
+//! | `invited`, `deleted`, or any status this table does not list | [`JoinRejection::EmailUnavailable`] (409): no session, no resumption, nothing changed, and the same answer for every one of them |
+//!
+//! "A match" is the verdict login reaches: the SQL predicate is
+//! `momo_password_verify(<sent>, human.password_hash)`, the function
+//! `momo_messaging::verify_password_login` calls (this crate cannot depend on
+//! `momo-messaging`, which depends on it, so the predicate is restated here and a
+//! conformance test holds the two to the same verdicts). An account with no stored
+//! password never matches.
+//!
+//! **Guesses are budgeted before they are made.** The check runs bcrypt inside the
+//! database for a caller who holds nothing but a code, so each one is first spent
+//! from a [`PasswordGuessBudget`] the transport layer supplies; a spent budget is
+//! [`JoinRejection::PasswordGuessLimited`] and bcrypt never runs. The budget is
+//! keyed by the account, not by the code or the address the request came from, so
+//! trying another code or another address does not buy a fresh one.
+//!
+//! **The order is enforced where a test cannot reach it.** The comparison takes a
+//! `guess::Permit` (private), which only a successful spend from the budget can produce, so
+//! "compare first, count afterwards" does not compile. The other two orders — the
+//! invite's own state and a ban before the gate — are held by conformance tests.
+//!
+//! **The join stands in line with every membership change.** The transaction's
+//! first statement takes the workspace's membership lock in shared mode
+//! ([`crate::share_membership_state`]), the lock every suspend, reinstatement,
+//! removal, self-leave and role change already takes exclusively as *its* first
+//! statement. A join therefore sees a workspace wholly before such a change or
+//! wholly after it: an operator who is first makes the join read the new state (and
+//! refuse it), and a join that is first makes the operator wait, then revoke the
+//! session the join just recorded and delete the rows it wrote. Without the lock a
+//! removal could land between the gate and the role-escalation check and leave the
+//! invite's role on the removed member. (A row lock on the member was tried first
+//! and deadlocked with self-leave, which deletes the membership rows before it
+//! touches the member; the advisory lock has no row order to get wrong.)
+//!
+//! **The session is recorded in this same transaction** (the route does it, on the
+//! connection that holds the lock). If it were minted afterwards, a suspension or
+//! removal that arrives between the commit and the recording would have revoked only
+//! the tokens that existed and the pair minted next would escape it.
+//!
+//! This is a gate on **state and proof**, not a way to hide that an account exists:
+//! a join with an unused address creates an account, so "created" against "refused"
+//! tells an invite holder which addresses are taken, and no wording can change that
+//! while the same door both registers and resumes.
+//!
 //! ## The lookups normalise their own argument (#1248)
 //!
 //! Four pre-flight reads are keyed by the joining address — the ban check, the
@@ -92,11 +149,13 @@
 //! for an address with no `@`) and it still decides what a *new* row stores. What
 //! changed is that the reads no longer depend on it having run.
 
+use momo_auth::{normalized_new_password, NewPasswordInvalid};
 use momo_db::DbError;
 use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::invite::{read_invite, InviteCode};
+use crate::workspace::share_membership_state;
 
 // ---------------------------------------------------------------------------
 // request-shape validation (Swift `JoinRoutes` :724-819 + `InviteRoutes.normalizedCode`)
@@ -119,10 +178,15 @@ pub enum JoinSpecInvalid {
     DerivedHandle,
     #[error("timeZone is too long")]
     TimeZone,
+    /// No password at all (absent or empty): the sentence this route has always
+    /// answered, with no `error.code`.
     #[error("password is required")]
     PasswordMissing,
-    #[error("password is too long")]
-    PasswordTooLong,
+    /// A password that is present but breaks the ADR-0215 D2 rule: too short,
+    /// too long, or holding a NUL. Never [`NewPasswordInvalid::Missing`] (that is
+    /// [`Self::PasswordMissing`]): the route puts the wire `error.code` on it.
+    #[error(transparent)]
+    NewPassword(NewPasswordInvalid),
 }
 
 /// Swift `InviteRoutes.normalizedCode` (:492-498). Trimmed, non-empty, ≤256.
@@ -242,19 +306,26 @@ pub fn normalized_join_time_zone(raw: Option<&str>) -> Result<String, JoinSpecIn
     Ok(value.to_string())
 }
 
-/// Swift `normalizedPassword` (:790-798): required, non-empty, ≤1024 characters.
+/// Swift `normalizedPassword` (:790-798), tightened by ADR-0215 D2 (#4593): the
+/// joining human is *choosing* a password, so it must be at least 10 characters
+/// and at most 72 bytes of UTF-8 — the one rule
+/// [`momo_auth::normalized_new_password`] holds for every path that sets one.
 ///
 /// The ceiling matters for a bcrypt-backed column: `momo_password_hash` runs
 /// `crypt()` inside Postgres, so an unbounded password field would be an
-/// unbounded amount of DB CPU an unauthenticated caller can ask for.
+/// unbounded amount of DB CPU an unauthenticated caller can ask for. 72 bytes
+/// is also all bcrypt reads, and is far below the 1024 characters this used to
+/// allow.
+///
+/// Absent and empty stay the code-less "password is required" they always were.
 pub fn normalized_join_password(raw: Option<&str>) -> Result<String, JoinSpecInvalid> {
     let Some(value) = raw.filter(|value| !value.is_empty()) else {
         return Err(JoinSpecInvalid::PasswordMissing);
     };
-    if value.chars().count() > 1024 {
-        return Err(JoinSpecInvalid::PasswordTooLong);
-    }
-    Ok(value.to_string())
+    normalized_new_password(value).map_err(|invalid| match invalid {
+        NewPasswordInvalid::Missing => JoinSpecInvalid::PasswordMissing,
+        other => JoinSpecInvalid::NewPassword(other),
+    })
 }
 
 /// Swift `isValidHandle` (:800-804): 2..=32 characters of `[a-z0-9_-]`.
@@ -316,9 +387,30 @@ pub enum JoinRejection {
     /// `403`.
     #[error("invite can only join human members")]
     NotHuman,
-    /// `403` — suspended, or any status outside active/invited/deleted.
+    /// `403` — a suspended account. (It used to be "any status outside
+    /// active/invited/deleted"; suspended is the only such value, and a status the
+    /// enum gains later is [`JoinRejection::EmailUnavailable`].)
     #[error("human is not eligible to join")]
     HumanIneligible,
+    /// `401` — the address belongs to a live account and the password sent with
+    /// the request is not that account's. The sentence is login's own, because the
+    /// two doors ask the same question and a client must not learn a second way to
+    /// hear "no". Its machine code is `invalid_credentials` (login's 401 carries
+    /// none yet).
+    #[error("invalid credentials")]
+    InvalidCredentials,
+    /// `409` — the address belongs to an account a public code may never resume:
+    /// `invited`, `deleted`, or a status this crate does not know. One answer for
+    /// all of them, so the refusal does not say which one the account is in. Its
+    /// machine code is `join_email_unavailable`.
+    #[error("email is unavailable for this invite")]
+    EmailUnavailable,
+    /// `429` — the account's password-guess budget is spent
+    /// ([`PasswordGuessBudget`]). The sentence is the one every other limiter
+    /// answers with; `retry_after_seconds` is what the transport turns into
+    /// `Retry-After`.
+    #[error("rate limit exceeded")]
+    PasswordGuessLimited { retry_after_seconds: u64 },
     /// `409`.
     #[error("handle is already in use")]
     HandleTaken,
@@ -330,16 +422,20 @@ pub enum JoinRejection {
 }
 
 impl JoinRejection {
-    /// The HTTP status Swift answers with. Kept beside the message so the two
-    /// cannot drift, and so the route layer needs no table of its own.
+    /// The HTTP status Swift answers with (and, for the refusals #4625 added, the
+    /// status this server chose). Kept beside the message so the two cannot drift,
+    /// and so the route layer needs no table of its own.
     pub fn status_code(self) -> u16 {
         match self {
+            JoinRejection::InvalidCredentials => 401,
             JoinRejection::InviteInvalid => 404,
             JoinRejection::InviteExpired | JoinRejection::InviteRevoked => 410,
             JoinRejection::InviteExhausted
             | JoinRejection::AlreadyRedeemed
+            | JoinRejection::EmailUnavailable
             | JoinRejection::HandleTaken
             | JoinRejection::NoPublicChannels => 409,
+            JoinRejection::PasswordGuessLimited { .. } => 429,
             JoinRejection::RoleNotPubliclyJoinable
             | JoinRejection::Banned
             | JoinRejection::RoleEscalation
@@ -347,6 +443,60 @@ impl JoinRejection {
             | JoinRejection::HumanIneligible => 403,
         }
     }
+
+    /// The stable machine code (`error.code` on the wire) of the refusals a client
+    /// branches on, `None` for the ones that have always been told by status and
+    /// sentence alone. Listed variant by variant — no catch-all — so a refusal added
+    /// later has to decide whether it names itself.
+    pub fn code(self) -> Option<&'static str> {
+        match self {
+            JoinRejection::InvalidCredentials => Some("invalid_credentials"),
+            JoinRejection::EmailUnavailable => Some("join_email_unavailable"),
+            JoinRejection::InviteInvalid
+            | JoinRejection::InviteExpired
+            | JoinRejection::InviteRevoked
+            | JoinRejection::InviteExhausted
+            | JoinRejection::RoleNotPubliclyJoinable
+            | JoinRejection::Banned
+            | JoinRejection::AlreadyRedeemed
+            | JoinRejection::RoleEscalation
+            | JoinRejection::NotHuman
+            | JoinRejection::HumanIneligible
+            | JoinRejection::PasswordGuessLimited { .. }
+            | JoinRejection::HandleTaken
+            | JoinRejection::NoPublicChannels => None,
+        }
+    }
+}
+
+/// A password guess the transport layer refused: how long until the account's
+/// budget has room again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuessRefused {
+    /// Whole seconds, at least 1 (a client told to retry immediately would just be
+    /// refused again).
+    pub retry_after_seconds: u64,
+}
+
+/// The transport layer's say over how many password guesses one account may be
+/// asked to judge — the one decision this crate cannot make for itself, because
+/// the counters live in the server process, not in the database.
+///
+/// [`redeem_invite_in_tx`] calls [`spend`](Self::spend) **immediately before** it
+/// asks the database to compare a password, and only for an account whose state
+/// lets the comparison matter (`active`). An `Err` ends the join with
+/// [`JoinRejection::PasswordGuessLimited`] and the comparison is never run, so a
+/// spent budget costs the caller no bcrypt work and answers nothing about the
+/// password.
+///
+/// The arguments are the account as the database holds it — the member id and the
+/// **stored** address, not the spelling the caller typed — so a budget keyed on
+/// them cannot be sidestepped by spelling the same address another way (the lesson
+/// of #1248). A caller that wants the comparison unbudgeted has to say so by
+/// writing an implementation that always allows; there is no default.
+pub trait PasswordGuessBudget: Sync {
+    /// Spend one guess at this account's password, or refuse it.
+    fn spend(&self, workspace_id: Uuid, member_id: Uuid, email: &str) -> Result<(), GuessRefused>;
 }
 
 /// The join transaction's error channel.
@@ -414,6 +564,9 @@ pub struct JoinRequestValues {
     /// The handle derived from the email, used when `requested_handle` is `None`
     /// and — in both cases — as the second key of the ban check.
     pub fallback_handle: String,
+    /// For an address with no account: the password the new account is created
+    /// with. For an address that has one: the proof that the caller holds it — it
+    /// is compared with the stored password and **never written**.
     pub password: String,
     pub time_zone: String,
 }
@@ -467,16 +620,32 @@ pub struct JoinOutcome {
 /// [`resolve_invite_workspace`] returned. Every refusal is an `Err`, so the
 /// caller's transaction rolls back on all of them.
 ///
-/// Order is Swift's, and the order is the contract — a caller reading the
-/// response cannot tell a "banned" refusal from an "expired" one unless they are
-/// evaluated in the same sequence on both servers.
+/// Order is Swift's, with one deliberate insertion (3b, #4625), and the order is
+/// the contract — a caller reading the response cannot tell a "banned" refusal
+/// from an "expired" one unless they are evaluated in the same sequence on both
+/// servers. What the insertion fixes is *where the account is first discussed*:
+/// the invite's own state and the ban come first (neither says anything about an
+/// account), then the existing-account gate, then every check that does.
+///
+/// `guess_budget` is how the transport layer limits password guesses (see
+/// [`PasswordGuessBudget`]); it is a required argument, with no unbudgeted default.
+///
+/// The transaction holds the workspace's membership lock in shared mode from its
+/// first statement to its commit (see the module docs). A caller that goes on to
+/// mint a session for the member should record it **on this connection**, inside
+/// the same transaction, so that a suspension or removal that follows revokes it.
 pub async fn redeem_invite_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     code: &str,
     values: &JoinRequestValues,
     user_agent: Option<&str>,
+    guess_budget: &dyn PasswordGuessBudget,
 ) -> Result<JoinOutcome, JoinError> {
+    // 0) Stand in line with the membership mutations (see the module's "the join
+    //    stands in line" paragraph). First, before any read the rest relies on.
+    share_membership_state(conn, workspace_id).await?;
+
     // 1) Resolve AND lock in one statement. Swift resolves unlocked
     //    (`findInvite` :216-267) and re-reads `FOR UPDATE` by id inside the
     //    transaction (`lockInvite` :333-359); one locked read by `code_hash`
@@ -526,6 +695,19 @@ pub async fn redeem_invite_in_tx(
         return Err(JoinRejection::Banned.into());
     }
 
+    // 3b) An account that already has this address is resumed only with proof, and
+    //     nothing about it is said before that (#4625). This sits ahead of (4) and
+    //     (5) on purpose: both of them answer a question about the account — "did
+    //     it already spend this code", "what role does it hold" — and a caller who
+    //     has not shown they hold the account is owed neither answer.
+    let existing = find_human_by_email(conn, workspace_id, &values.email).await?;
+    let resumed = match existing {
+        Some(account) => {
+            Some(admit_existing_account(conn, workspace_id, account, values, guess_budget).await?)
+        }
+        None => None,
+    };
+
     // 4) This code, already spent by this email (Swift `assertNotDuplicateJoin`
     //    :269-292). Keyed by email rather than member id because the member row
     //    may not exist yet.
@@ -542,26 +724,12 @@ pub async fn redeem_invite_in_tx(
         }
     }
 
-    // 6) Create or reuse the human (Swift :71-99).
-    let existing = find_human_by_email(conn, &values.email).await?;
-    let (member, created_member) = match existing {
-        Some(member) => {
-            if member.kind != "human" {
-                return Err(JoinRejection::NotHuman.into());
-            }
-            match member.status.as_str() {
-                // A soft-deleted account rejoining is a re-activation, not a
-                // second row: `human_email_norm_uniq` (065) would refuse the
-                // second row anyway, and a new member id would orphan every
-                // message the person already wrote.
-                "deleted" => (
-                    reactivate_deleted_human(conn, &member, values).await?,
-                    false,
-                ),
-                "active" | "invited" => (member, false),
-                _ => return Err(JoinRejection::HumanIneligible.into()),
-            }
-        }
+    // 6) Create the human, or resume the one 3b admitted (Swift :71-99). There is
+    //    no re-activation arm any more: a `deleted` account is refused at 3b, and a
+    //    second row for its address would be refused by `human_email_norm_uniq`
+    //    (065) anyway.
+    let (member, created_member) = match resumed {
+        Some(member) => (member, false),
         None => (create_human_member(conn, workspace_id, values).await?, true),
     };
 
@@ -826,27 +994,144 @@ fn member_from_row(row: MemberRow) -> JoinedMember {
     }
 }
 
-/// The member this address already belongs to, if any — "create or reuse".
+/// The account this address already belongs to: the member, and the address as the
+/// database **stores** it (which is what a per-account budget must be keyed on —
+/// not the spelling the caller typed).
+struct ExistingAccount {
+    member: JoinedMember,
+    stored_email: String,
+}
+
+/// The account this address already belongs to in `workspace_id`, if any.
 ///
 /// The parameter carries `lower(btrim(...))` for the reason in this module's
 /// "the lookups normalise their own argument" section: a miss here sends the
-/// join down the *create* arm for somebody who already exists.
+/// join down the *create* arm for somebody who already exists — and, since #4625,
+/// past the gate that only an existing account has to clear. The workspace is named
+/// in the statement as well as by the tenant GUC: the row-level policy is what
+/// keeps another tenant out, and this makes the statement say so too.
+///
+/// A plain read: what stops the answer from going stale before commit is the shared
+/// membership lock this transaction already holds, not a lock on the row.
 async fn find_human_by_email(
     conn: &mut PgConnection,
+    workspace_id: Uuid,
     email: &str,
-) -> Result<Option<JoinedMember>, DbError> {
-    let row: Option<MemberRow> = sqlx::query_as(
+) -> Result<Option<ExistingAccount>, DbError> {
+    let row: Option<(Uuid, Uuid, String, String, String, String, String)> = sqlx::query_as(
         "SELECT m.id, m.workspace_id, m.kind::text, m.status::text, \
-                m.display_name, m.handle \
+                m.display_name, m.handle, h.email \
            FROM human h \
            JOIN member m ON m.id = h.member_id \
-          WHERE h.email = lower(btrim($1)) \
+          WHERE h.workspace_id = $2 \
+            AND h.email = lower(btrim($1)) \
           LIMIT 1",
     )
     .bind(email)
+    .bind(workspace_id)
     .fetch_optional(&mut *conn)
     .await?;
-    Ok(row.map(member_from_row))
+    Ok(row.map(
+        |(id, workspace_id, kind, status, display_name, handle, stored_email)| ExistingAccount {
+            member: member_from_row((id, workspace_id, kind, status, display_name, handle)),
+            stored_email,
+        },
+    ))
+}
+
+/// Spending a guess, and the proof that one was spent.
+///
+/// `Permit` has no constructor outside this module, and
+/// [`password_matches`] will not run without one, so the order the ADR promises —
+/// the budget is asked **before** the comparison — is a property of the types
+/// rather than of a line order a later edit could swap.
+mod guess {
+    use super::{JoinRejection, PasswordGuessBudget, Uuid};
+
+    /// A guess that was spent from the budget and has not been used yet.
+    #[must_use = "a spent guess is only worth something when the comparison it paid for runs"]
+    pub(super) struct Permit(());
+
+    /// Ask the budget for one guess at this account's password.
+    pub(super) fn spend(
+        budget: &dyn PasswordGuessBudget,
+        workspace_id: Uuid,
+        member_id: Uuid,
+        stored_email: &str,
+    ) -> Result<Permit, JoinRejection> {
+        budget
+            .spend(workspace_id, member_id, stored_email)
+            .map(|()| Permit(()))
+            .map_err(|refused| JoinRejection::PasswordGuessLimited {
+                retry_after_seconds: refused.retry_after_seconds,
+            })
+    }
+}
+
+/// The gate an existing account has to clear before the join may go on (see the
+/// module's "an existing account is resumed only with proof" section).
+///
+/// * not a human → [`JoinRejection::NotHuman`] (unchanged; a `human` row cannot
+///   belong to anything else, so this is a defensive refusal);
+/// * `suspended` → [`JoinRejection::HumanIneligible`], the refusal that was here
+///   before the gate, and — like login — without a comparison;
+/// * anything but `active` (`invited`, `deleted`, a status added later) →
+///   [`JoinRejection::EmailUnavailable`], the same answer for all of them;
+/// * `active` → one guess is spent from `guess_budget`, **then** the password is
+///   compared; a mismatch is [`JoinRejection::InvalidCredentials`].
+///
+/// Nothing here writes. A caller that clears the gate gets the account back
+/// exactly as it was, and every refusal rolls the transaction back.
+async fn admit_existing_account(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    account: ExistingAccount,
+    values: &JoinRequestValues,
+    guess_budget: &dyn PasswordGuessBudget,
+) -> Result<JoinedMember, JoinError> {
+    let ExistingAccount {
+        member,
+        stored_email,
+    } = account;
+    if member.kind != "human" {
+        return Err(JoinRejection::NotHuman.into());
+    }
+    match member.status.as_str() {
+        "active" => {}
+        "suspended" => return Err(JoinRejection::HumanIneligible.into()),
+        _ => return Err(JoinRejection::EmailUnavailable.into()),
+    }
+    let permit = guess::spend(guess_budget, workspace_id, member.id, &stored_email)?;
+    if !password_matches(conn, member.id, &values.password, permit).await? {
+        return Err(JoinRejection::InvalidCredentials.into());
+    }
+    Ok(member)
+}
+
+/// Does `password` match what this member's `human` row stores? The predicate is
+/// `momo_messaging::verify_password_login`'s own — `momo_password_verify(raw,
+/// stored_hash)` (migration 005), which is false for an empty password, for no
+/// stored hash and for a stored value that is not a bcrypt string — so the join
+/// door and the login door cannot disagree about who holds an account. A row that
+/// is not there matches nothing.
+///
+/// The permit is the proof that the budget was asked first; it is consumed here.
+async fn password_matches(
+    conn: &mut PgConnection,
+    member_id: Uuid,
+    password: &str,
+    _permit: guess::Permit,
+) -> Result<bool, DbError> {
+    let matched: Option<Option<bool>> = sqlx::query_scalar(
+        "SELECT momo_password_verify($1, h.password_hash) \
+           FROM human h \
+          WHERE h.member_id = $2",
+    )
+    .bind(password)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(matched.flatten() == Some(true))
 }
 
 /// Swift `createHumanMember` (:390-440), one CTE.
@@ -910,41 +1195,6 @@ pub fn is_handle_unique_violation(error: &sqlx::Error) -> bool {
         && db_error
             .constraint()
             .is_some_and(|name| name == "member_handle_uniq")
-}
-
-/// Swift `reactivateDeletedHuman` (:442-470). The password and timezone from
-/// *this* request win — the person is proving control of the address again, and
-/// a stale hash would leave them unable to log in to the account they just
-/// rejoined.
-async fn reactivate_deleted_human(
-    conn: &mut PgConnection,
-    member: &JoinedMember,
-    values: &JoinRequestValues,
-) -> Result<JoinedMember, DbError> {
-    sqlx::query(
-        "UPDATE member \
-            SET status = 'active', display_name = $2, updated_at = now() \
-          WHERE id = $1 AND status = 'deleted'",
-    )
-    .bind(member.id)
-    .bind(&values.display_name)
-    .execute(&mut *conn)
-    .await?;
-    sqlx::query(
-        "UPDATE human \
-            SET password_hash = momo_password_hash($2), tz = $3 \
-          WHERE member_id = $1",
-    )
-    .bind(member.id)
-    .bind(&values.password)
-    .bind(&values.time_zone)
-    .execute(&mut *conn)
-    .await?;
-    Ok(JoinedMember {
-        status: "active".to_string(),
-        display_name: values.display_name.clone(),
-        ..member.clone()
-    })
 }
 
 async fn ensure_workspace_membership(
@@ -1162,10 +1412,10 @@ mod tests {
     }
 
     #[test]
-    fn the_password_is_required_and_capped_because_bcrypt_runs_in_postgres() {
+    fn the_password_is_required_and_held_to_the_new_password_rule() {
         assert_eq!(
-            normalized_join_password(Some("hunter2")).expect("ok"),
-            "hunter2"
+            normalized_join_password(Some("hunter2-hunter2")).expect("ok"),
+            "hunter2-hunter2"
         );
         assert_eq!(
             normalized_join_password(None),
@@ -1177,8 +1427,43 @@ mod tests {
         );
         assert_eq!(
             normalized_join_password(Some(&"a".repeat(1025))),
-            Err(JoinSpecInvalid::PasswordTooLong),
+            Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooLong)),
             "an unauthenticated caller must not be able to ask for unbounded crypt() work"
+        );
+    }
+
+    /// ADR-0215 D2 on the join path: nine characters are refused, ten pass;
+    /// 72 bytes pass and 73 do not, even when those 73 bytes are only 25
+    /// characters. The shared rule is tested in `momo_auth::password_rules`;
+    /// this pins that join actually asks it.
+    #[test]
+    fn join_holds_the_new_password_to_ten_characters_and_seventy_two_bytes() {
+        assert_eq!(
+            normalized_join_password(Some("abcdefghi")),
+            Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooShort))
+        );
+        assert_eq!(
+            normalized_join_password(Some("abcdefghij")).expect("ten characters pass"),
+            "abcdefghij"
+        );
+        let seventy_two = "\u{D55C}".repeat(24);
+        assert_eq!(seventy_two.len(), 72);
+        assert_eq!(
+            normalized_join_password(Some(&seventy_two)).expect("72 bytes pass"),
+            seventy_two
+        );
+        assert_eq!(
+            normalized_join_password(Some(&format!("{seventy_two}a"))),
+            Err(JoinSpecInvalid::NewPassword(NewPasswordInvalid::TooLong)),
+            "73 bytes, 25 characters: the ceiling is bytes"
+        );
+        // Ten characters, the tenth a NUL: long enough and short enough, refused
+        // for the NUL alone.
+        assert_eq!(
+            normalized_join_password(Some("abcdefghi\0")),
+            Err(JoinSpecInvalid::NewPassword(
+                NewPasswordInvalid::InvalidChar
+            ))
         );
     }
 
@@ -1238,6 +1523,23 @@ mod tests {
                 403,
                 "human is not eligible to join",
             ),
+            (
+                JoinRejection::InvalidCredentials,
+                401,
+                "invalid credentials",
+            ),
+            (
+                JoinRejection::EmailUnavailable,
+                409,
+                "email is unavailable for this invite",
+            ),
+            (
+                JoinRejection::PasswordGuessLimited {
+                    retry_after_seconds: 7,
+                },
+                429,
+                "rate limit exceeded",
+            ),
             (JoinRejection::HandleTaken, 409, "handle is already in use"),
             (
                 JoinRejection::NoPublicChannels,
@@ -1251,9 +1553,43 @@ mod tests {
         }
         assert_eq!(
             cases.len(),
-            12,
+            15,
             "a new refusal is a security decision: add it to this table too"
         );
+    }
+
+    /// Only the two refusals #4625 added name themselves. The rest have always been
+    /// told by status and sentence, and a code appearing on one of them is a wire
+    /// change that has to be decided, not inherited.
+    #[test]
+    fn exactly_the_two_account_refusals_carry_a_machine_code() {
+        assert_eq!(
+            JoinRejection::InvalidCredentials.code(),
+            Some("invalid_credentials")
+        );
+        assert_eq!(
+            JoinRejection::EmailUnavailable.code(),
+            Some("join_email_unavailable")
+        );
+        for rejection in [
+            JoinRejection::InviteInvalid,
+            JoinRejection::InviteExpired,
+            JoinRejection::InviteRevoked,
+            JoinRejection::InviteExhausted,
+            JoinRejection::RoleNotPubliclyJoinable,
+            JoinRejection::Banned,
+            JoinRejection::AlreadyRedeemed,
+            JoinRejection::RoleEscalation,
+            JoinRejection::NotHuman,
+            JoinRejection::HumanIneligible,
+            JoinRejection::PasswordGuessLimited {
+                retry_after_seconds: 1,
+            },
+            JoinRejection::HandleTaken,
+            JoinRejection::NoPublicChannels,
+        ] {
+            assert_eq!(rejection.code(), None, "{rejection:?}");
+        }
     }
 
     /// The escalation predicate is `rank(invite) < rank(current)`, and the
@@ -1290,7 +1626,7 @@ mod tests {
             display_name: "Ada".into(),
             requested_handle: Some("ada-l".into()),
             fallback_handle: "ada".into(),
-            password: "hunter2".into(),
+            password: "hunter2-hunter2".into(),
             time_zone: "UTC".into(),
         };
         assert_eq!(values.handle(), "ada-l");

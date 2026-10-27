@@ -12,6 +12,27 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 ## [Unreleased]
 
 ### Added
+- Phone: the home avatar opens a Buzz-style Settings page — round X, a large avatar, a status pill, grouped cards and a status sheet — in place of the profile sheet (#4457, #4623).
+- Server: each Agent Port call leaves one diagnostic audit row (method, tool, outcome and counts; no arguments, bodies or tokens; capped per credential per hour) so the server can show where a hosted agent stops (ADR-0200 addendum 4, #4618, #4634).
+
+### Changed
+- Desktop: a drag band at the top of the window (the content starts below it); the conversation header uses a soft shadow instead of a border; header buttons get faint outlines and design-system tooltips; the area outside the pane follows the sidebar colour when the theme changes; a slot at the top right of the title bar for downloads (#4591, #4624).
+- Phone: every bottom sheet closes with a round X and uses the shared inner parts; the confirm ✓ shows progress while it works (#4458, #4629).
+- Server: a new password needs at least 10 characters and at most 72 bytes, and one with a NUL character is refused; the web claim screen says which rule failed (ADR-0215, #4593, #4626).
+- Server: joining with an email that already has an account works only with that account's own password, under a per-account attempt budget; a pending or deleted account cannot join through a general invite (ADR-0215 addendum 1, ADR-0128, #4625, #4630).
+- Server: a file that a deleted message carried is read by nobody and listed nowhere; upload audit rows no longer carry the file name, and the upgrade removes it from older rows; an operator-only cleanup of unattached uploads, off by default (ADR-0151 addendum 2, #4443, #4589; migrations 150 and 151).
+
+### Fixed
+- Phone: the conversation no longer moves up and down during the first minute while an agent request is waiting — the ticking seconds keep a fixed width, so the activity line no longer flips between one and two lines (#4613, #4628).
+
+### Docs
+- Login and recovery v2 decisions: a device link code you can type or paste, changing your password while signed in, an admin reset that asks for the admin's own password, and a 10-character minimum (ADR-0215, #4574, #4592, #4610).
+
+## [0.1.38] - 2026-10-26
+
+GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.38>. Tag target: `main=a12c025df`. Multi-arch (linux/amd64 + linux/arm64), digest pins in `releases/latest.json`; SLSA v1 provenance verified for the app and postgres lists. One database migration (149; the schema goes from 148 to 149): a data patch on the seven official rows of `plugin_registry` (display fields and the team drive's publisher name) with no table, column, policy or role change; `bootstrap_runtime_roles.sql` is unchanged. **An older server refuses the patched manifests**, so rolling the image back below v0.1.38 needs the 149 rollback SQL first (it is at the bottom of `server/Migrations/149_official_catalog_display_fields.sql`); otherwise the seven official apps vanish from the older server's catalogue and installs and grants answer 409. New environment variables, all optional with defaults and no setting needed: `RATE_LIMIT_MESSAGE_SEND_PER_MEMBER` (120), `RATE_LIMIT_MESSAGE_SEND_PER_AGENT` (600), `RATE_LIMIT_SCHEDULED_WRITE_PER_MEMBER` (60) and `RATE_LIMIT_UPLOAD_START_PER_MEMBER` (60) requests per window, where 0 removes a budget, and `MOMO_SELF_HOST_PLATFORM` (the platform stamp `scripts/self_host_env.sh` writes; Railway is detected through its own `RAILWAY_ENVIRONMENT_ID`). This release adds per-member write rate limits, the official-app catalogue (logos, categories, starter prompts, "my app runtimes"), a Light default appearance and a shared bottom-sheet kit on the phone, an in-app banner for messages in other conversations, and attachment reads limited to the uploader until a message carries the file.
+
+### Added
 - Phone: shared sheet kit — every reworked bottom sheet closes with a round X (✓ on the left to confirm), grouped cards, input pills and section labels; rules for page vs drawer vs bottom sheet in `docs/design-system/phone-sheets.md` (#4318, #4556).
 - Phone: a sent message rises from under the composer (Buzz curve, 300 ms) with no "Sending" flash and no height jump; a small clock appears only when sending takes longer than 1.5 s (#4455, #4562).
 - Phone: while the app is open, a new message in another conversation shows a banner; the conversation you are looking at stays quiet, approvals always show (#4310, #4551).
