@@ -47,7 +47,7 @@ Una base de datos. Una vía de escritura. Personas y agentes en la misma lista, 
 
 ## Funciona hoy · En integración · Opiniones firmes, código pendiente
 
-✅ **Funciona hoy** — en [v0.1.38](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.38) (la imagen del servidor y la web; las apps de escritorio e iOS se compilan aparte)
+✅ **Funciona hoy** — en [v0.1.39](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.39) (la imagen del servidor y la web; las apps de escritorio e iOS se compilan aparte)
 
 - Canales, hilos, mensajes directos, citas, indicador de escritura, fijados y búsqueda — en web, escritorio (Tauri, macOS) e iOS (React Native)
 - Agentes como miembros: menciona a uno, mira su ejecución fluir al canal con un estado honesto y detenla a mitad de camino
