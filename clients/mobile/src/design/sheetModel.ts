@@ -63,12 +63,55 @@ export function sheetDismissDistance(sheetHeight: number): number {
  * 손을 뗐을 때 시트를 닫는가. 거리와 속도 **어느 한쪽**이면 닫고, 둘 다 모자라면 제자리로 돌아온다. 경계값 자체는
  * 닫지 않는다 — 「넘어야」 닫는다.
  *
+ * **단, 위로 튕기며 놓았으면 거리와 무관하게 열어 둔다**(planner 결정, #4612 코멘트 「속도 방향이 이겨요」): 문턱을 넘게
+ * 내려 놓고도 놓는 순간 위로 {@link SHEET_DISMISS_VELOCITY} 보다 빠르게 쳐올린 손가락은 「아니, 닫지 않는다」고 말한 것이다.
+ * 그 말을 거리를 근거로 뒤집지 않는다 — 같은 저장소의 가로 뒤로가기(`nav/edgeSwipe.ts` `settles`)가 같은 규칙이다
+ * (「되돌리는 방향으로 튕겼으면 거리와 무관하게 취소」). Buzz(Flutter `_handleDragEnd`)는 방향을 보지 않고 진행률만 봐서 이
+ * 경우를 닫는다 — 그쪽과 갈리는 자리이고, 갈리는 이유는 위의 결정이다.
+ *
+ * 위로 튕김의 문턱은 닫는 쪽과 **같은 크기·같은 경계**다(대칭): 정확히 −0.7 은 튕김이 아니라 거리가 정한다. 문턱 안쪽의
+ * 작은 위쪽 속도(손가락 떨림)는 거리 판정을 뒤집지 못한다 — 천천히 내려 놓은 손이 떨렸다고 안 닫히면 이 이슈의 불만(안 내려간다)이
+ * 되살아난다.
+ *
  * @param offset 시트가 가 있는 곳(pt, 아래가 양수). 손가락이 아니라 **시트**의 이동이다(고무줄은 음수).
  * @param velocity 놓는 순간의 아래쪽 속도(px/ms). 위로 튕기면 음수다.
  * @param sheetHeight 시트가 실제로 선 높이(pt).
  */
 export function shouldDismissSheet(offset: number, velocity: number, sheetHeight: number): boolean {
+  if (velocity < -SHEET_DISMISS_VELOCITY) return false;
   return offset > sheetDismissDistance(sheetHeight) || velocity > SHEET_DISMISS_VELOCITY;
+}
+
+/**
+ * 시트가 미끄러져 서고 나가는 기본 길이(ms). X·스크림·VoiceOver escape·행동 누름·끌기를 시작 때 속도 없이 놓은 닫기가 쓰고,
+ * 놓고 닫는 슬라이드({@link releaseSlideMs})의 **상한**이다 — 천천히 놓은 끌기는 전과 같은 길이로 나간다.
+ */
+export const SHEET_SLIDE_MS = 260;
+
+/**
+ * 놓고 닫는 슬라이드의 **하한**(ms). 모션 사다리 `instant`(120ms — `docs/design-system/README.md` 모션 표, 폰 사다리는 웹과 값이
+ * 같다)다. 아주 빠른 튕김이 이보다 짧아지면 시트가 나가는 것이 아니라 끊겨 사라진다. 사다리 밖의 값을 지어내지 않고 한 칸을
+ * 골랐다.
+ */
+export const SHEET_RELEASE_MIN_MS = 120;
+
+/**
+ * 손가락을 **놓고** 닫을 때 시트가 남은 거리를 미끄러져 나가는 시간(ms) — 놓은 속도를 이어 간다(planner 결정: 속도 기반
+ * 지속 시간, 상하한). 남은 거리를 놓은 속도로 가는 데 걸리는 시간 `remaining / velocity` 를
+ * [{@link SHEET_RELEASE_MIN_MS}, {@link SHEET_SLIDE_MS}] 로 가둔다. 이 길이와 짝인 곡선(`motion.ts` `FLING_OUT`)은 시작
+ * 기울기가 1 이라, 시작 속도가 정확히 놓은 속도가 된다.
+ *
+ *   · 빠르게 쳐서 놓으면 그 속도로 나간다 → 짧다(하한까지). 튕긴 손가락 뒤에서 시트가 굼뜨게 따라 나가지 않는다.
+ *   · 느리게 놓았거나 속도가 없으면(거리로만 닫은 끌기·멈췄다 놓음) 속도를 이을 것이 없으니 기본 길이다.
+ *   · 속도를 모르는 값(NaN)·위쪽 속도는 이을 속도가 아니다 → 기본 길이. 남은 거리가 없거나 모르면 하한이다.
+ *
+ * @param remaining 시트가 나가야 할 남은 거리(pt, 양수). 슬라이드의 목적지 − 놓은 자리다.
+ * @param velocity 놓는 순간의 아래쪽 속도(px/ms, {@link releaseVelocity}).
+ */
+export function releaseSlideMs(remaining: number, velocity: number): number {
+  if (!(velocity > 0)) return SHEET_SLIDE_MS;
+  if (!(remaining > 0)) return SHEET_RELEASE_MIN_MS;
+  return Math.round(Math.min(SHEET_SLIDE_MS, Math.max(SHEET_RELEASE_MIN_MS, remaining / velocity)));
 }
 
 /** 시트가 위로 늘어나는 상한(pt). 시트 바닥 밑에 이만큼의 바탕을 깔아(`PageSheet`) 틈이 보이지 않게 한다. */

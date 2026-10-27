@@ -1,12 +1,12 @@
 import React, {useEffect, useRef, useState, useSyncExternalStore} from 'react';
-import {ScrollView, StyleSheet, View} from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {StyleSheet, View} from 'react-native';
 
 import {PrimaryButton, Sentence} from '../../design/atoms';
 import {PageSheet, usePageSheetClose} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
+import {SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
-import {font, line, SAFE_GUTTER, SHEET, space, type Palette} from '../../design/tokens';
+import {font, line, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {usePushPrompt} from '../../push/PushProvider';
 import {useSession} from '../../session/useSession';
 import {
@@ -116,7 +116,6 @@ export function LinkSheetBody({
   initialScrollY?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const insets = useSafeAreaInsets();
   const slideClose = usePageSheetClose() ?? onClose;
   return (
     <View style={styles.root}>
@@ -127,12 +126,11 @@ export function LinkSheetBody({
         closeTestID="device-key-link-close"
         onClose={slideClose}
       />
-      <ScrollView
+      {/* 몸은 공용 `SheetScroll`(#4612) — 맨 위에서 끌어내리면 시트가 따라오고(스크롤 넘겨받기), 위 여백·홈 인디케이터 아래 바닥
+          여백·고무줄 없음이 다른 시트와 같다. 패널의 카드가 스스로 가로 여백을 지므로 호스트의 기본 가로 여백만 걷는다. */}
+      <SheetScroll
         contentOffset={initialScrollY ? {x: 0, y: initialScrollY} : undefined}
-        contentContainerStyle={[
-          styles.content,
-          {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
-        ]}
+        contentContainerStyle={styles.content}
         testID="device-key-link-scroll"
       >
         <Sentence style={styles.intro} testID="device-key-link-intro">
@@ -150,7 +148,7 @@ export function LinkSheetBody({
             />
           </View>
         )}
-      </ScrollView>
+      </SheetScroll>
     </View>
   );
 }
@@ -158,7 +156,9 @@ export function LinkSheetBody({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {flex: 1},
-    content: {paddingTop: SHEET.bodyTop, gap: space.xl},
+    // `SheetScroll` 의 기본(가로 여백 SAFE_GUTTER·위 여백·gap lg) 위에 얹는다: 가로 여백은 패널의 카드가 진다(이중 인셋 방지 — 시험이
+    // 잰다), 카드 사이 숨은 이 시트가 원래 쓰던 xl 이다.
+    content: {paddingHorizontal: 0, gap: space.xl},
     intro: {
       fontSize: font.body,
       color: color.text,

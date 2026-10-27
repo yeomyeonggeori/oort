@@ -18,6 +18,8 @@ import {
   useWindowDimensions,
   View,
   type LayoutChangeEvent,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   type PanResponderInstance,
 } from 'react-native';
 import {
@@ -27,12 +29,14 @@ import {
 
 import {useKeyboardHeight} from '../lib/useKeyboardHeight';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
-import {EASE_OUT} from './motion';
+import {FLING_OUT} from './motion';
 import {
   SHEET_RUBBER_MAX,
+  SHEET_SLIDE_MS,
   SHEET_TOP,
   claimsSheetDrag,
   estimatedSheetHeight,
+  releaseSlideMs,
   releaseVelocity,
   sheetFollow,
   sheetFrame,
@@ -103,6 +107,10 @@ import {ds2Radius, SHEET, type Palette} from './tokens';
 // 한 번 본 뒤 응답자 잠금을 쥐고 놓지 않는다(`ScrollView.js` `_handleResponderTerminationRequest`). 맨 위에서 **시작한**
 // 끌기만 시트가 가져온다. 손가락을 뗐다 다시 끌면 된다.
 //
+// 놓을 때 둘(planner 결정, #4612 코멘트): (1) **속도 방향이 이긴다** — 거리 문턱을 넘게 내려 놓고도 놓는 순간 위로 튕겼으면
+// 열린 채 둔다(`shouldDismissSheet`). (2) **놓고 닫는 슬라이드는 놓은 속도를 잇는다** — 길이는 남은 거리 ÷ 놓은 속도를
+// 상하한 안에서(`releaseSlideMs`), 곡선은 시작 기울기 1 의 `FLING_OUT`. 동작 줄이기면 슬라이드 없이 즉시 닫힌다.
+//
 // ## 저장 안 한 입력 (#4612)
 //
 // `dirty` 가 참이면 **사용자가 부른 닫기**(X·스크림·끌기·escape)는 닫지 않고 「버릴까요?」를 묻는다(iOS
@@ -115,7 +123,6 @@ export {SHEET_TOP};
 export const SHEET_RADIUS = ds2Radius.sheet;
 /** 시안 `.a-grab` 38×5. */
 const GRAB = {width: 38, height: 5} as const;
-const SLIDE_MS = 260;
 
 type DragHandlers = PanResponderInstance['panHandlers'];
 
@@ -179,6 +186,56 @@ export function usePageSheetScroll(): {report: (offsetY: number) => void; frozen
     [scrolls, key],
   );
   return port ? {report, frozen: port.frozen} : null;
+}
+
+type ScrollEventHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
+
+/**
+ * `usePageSheetScroll()` 의 배선을 **스크롤 뷰에 펼칠 props 로** 돌려준다 — `SheetScroll` 과 시트 안의 날 `FlatList`·`ScrollView` 가
+ * 같은 코드를 쓴다(#4612). 스크롤·끌기 끝·관성 끝마다 오프셋을 시트에 알리고, 시트가 끌기를 쥐는 동안은 스크롤을 얼린다.
+ * `scrollEventThrottle` 은 16 이다 — 0(기본)이면 iOS 는 스크롤이 시작할 때 한 번만 알려서 시트가 낡은 오프셋을 믿는다.
+ *
+ * 호출자가 이미 가진 `onScroll`·`onScrollEndDrag`·`onMomentumScrollEnd`·`scrollEnabled` 는 지우지 않고 겹쳐 쓴다(`own`). 시트 밖에서는
+ * 알릴 곳이 없으니 호출자의 값 그대로 동작한다.
+ *
+ * `bounces: false` 도 함께 준다 — 시트 몸의 표준이고(`SheetScroll`), 맨 위에서 아래로 끄는 손가락이 네이티브 스크롤을 위로 당겨 시트와
+ * 내용이 같이 움직이는 이중 이동을 구조적으로 막는다(맨 위의 `UIScrollView` 는 고무줄이 없으면 아래로 끄는 손가락에 움직일 곳이 없다).
+ * 호출자가 스크롤 뷰에 `bounces` 를 따로 주면 그쪽이 이긴다(이 객체를 먼저 펼친다).
+ */
+export function usePageSheetScrollProps(
+  own: {
+    onScroll?: ScrollEventHandler;
+    onScrollEndDrag?: ScrollEventHandler;
+    onMomentumScrollEnd?: ScrollEventHandler;
+    scrollEnabled?: boolean;
+  } = {},
+): {
+  bounces: boolean;
+  scrollEventThrottle: number;
+  scrollEnabled: boolean;
+  onScroll: ScrollEventHandler;
+  onScrollEndDrag: ScrollEventHandler;
+  onMomentumScrollEnd: ScrollEventHandler;
+} {
+  const sheet = usePageSheetScroll();
+  const {onScroll, onScrollEndDrag, onMomentumScrollEnd, scrollEnabled = true} = own;
+  return {
+    bounces: false,
+    scrollEventThrottle: 16,
+    scrollEnabled: scrollEnabled && !sheet?.frozen,
+    onScroll: event => {
+      sheet?.report(event.nativeEvent.contentOffset.y);
+      onScroll?.(event);
+    },
+    onScrollEndDrag: event => {
+      sheet?.report(event.nativeEvent.contentOffset.y);
+      onScrollEndDrag?.(event);
+    },
+    onMomentumScrollEnd: event => {
+      sheet?.report(event.nativeEvent.contentOffset.y);
+      onMomentumScrollEnd?.(event);
+    },
+  };
 }
 
 /**
@@ -377,17 +434,19 @@ function SheetFrame({
     }
     Animated.timing(travel, {
       toValue: 0,
-      duration: SLIDE_MS,
+      duration: SHEET_SLIDE_MS,
       useNativeDriver: true,
     }).start();
   }, [travel, reduceMotion]);
 
   // 닫는 길은 하나다 — X·스크림·끌기·escape·행동 누름이 전부 여기를 지난다. `after` 는 행동 누름만
   // 싣는다. 이 함수를 `onPress` 에 직접 걸지 않는다(Pressable 이 첫 인자로 이벤트를 넘긴다):
-  // 아래 `close`·`closeThen` 이 인자를 못 박아 감싼다. `flung` 은 손가락을 놓아 닫는 때다 — 정지에서 출발하는
-  // 곡선(`inOut`)은 튕긴 손가락의 속도를 잇지 못하고 멈칫하므로, 이 때는 처음부터 빠른 강한 ease-out 이다.
+  // 아래 `close`·`closeThen` 이 인자를 못 박아 감싼다. `release` 는 손가락을 **놓아** 닫는 때만 있다 — 놓은 자리와 속도를
+  // 이어 간다: 시간은 남은 거리를 그 속도로 가는 만큼(`releaseSlideMs`, 상하한 안), 곡선은 시작 기울기가 1 이라 첫 순간의
+  // 속도가 손가락의 속도인 `FLING_OUT`. 정지에서 출발하는 기본 곡선(`inOut`)은 튕긴 손가락의 속도를 잇지 못하고 멈칫하고,
+  // 강한 ease-out(`EASE_OUT`)은 손가락보다 4 배 빠르게 튀어 나간다. 없으면(X·스크림·행동 누름) 기본 길이·기본 곡선이다.
   const slideOut = useCallback(
-    (after?: () => void, flung = false) => {
+    (after?: () => void, release?: {offset: number; velocity: number}) => {
       if (closing.current) return;
       closing.current = true;
       // 시트 안의 입력이 부른 키보드는 시트와 같이 내려간다. 안 그러면 시트가 다 나간 뒤에야(언마운트 때)
@@ -404,8 +463,9 @@ function SheetFrame({
       }
       Animated.timing(travel, {
         toValue: height,
-        duration: SLIDE_MS,
-        ...(flung ? {easing: EASE_OUT} : null),
+        ...(release
+          ? {duration: releaseSlideMs(height - release.offset, release.velocity), easing: FLING_OUT}
+          : {duration: SHEET_SLIDE_MS}),
         useNativeDriver: true,
       }).start(finish);
     },
@@ -493,7 +553,7 @@ function SheetFrame({
             askDiscard();
             return;
           }
-          slideOut(undefined, true);
+          slideOut(undefined, {offset, velocity});
         },
         // 시스템이 끌기를 거둬 갔다(알림·제스처): 어중간한 자리에 남지 않게 제자리로.
         onPanResponderTerminate: () => {

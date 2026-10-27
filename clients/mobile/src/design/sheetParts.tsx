@@ -22,7 +22,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {ROW_GLYPH_MAX_SCALE, Sentence, STACK_PILL_SCALE} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
-import {usePageSheetAction, usePageSheetKeyboard, usePageSheetScroll} from './PageSheet';
+import {usePageSheetAction, usePageSheetKeyboard, usePageSheetScrollProps} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
 import {useKeyboardAppearance, usePalette, useStyles, useTheme} from './theme';
 import {
@@ -681,6 +681,7 @@ export function SheetScroll({
   onScrollEndDrag,
   onMomentumScrollEnd,
   scrollEnabled = true,
+  contentContainerStyle,
   ...scroll
 }: ScrollViewProps & {children: React.ReactNode; testID?: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -688,7 +689,7 @@ export function SheetScroll({
   const insets = useSafeAreaInsets();
   const keyboardHeight = usePageSheetKeyboard();
   // 시트에 자기를 알린다(#4612): 맨 위일 때만 시트가 본문 끌기를 가져가고, 시트가 끌기를 쥐는 동안은 스크롤을 얼린다.
-  const sheet = usePageSheetScroll();
+  const sheetScroll = usePageSheetScrollProps({onScroll, onScrollEndDrag, onMomentumScrollEnd, scrollEnabled});
   const bottom =
     (keyboardHeight > 0 ? 0 : Math.max(insets.bottom, space.lg)) + space.lg;
   const ref = useRef<ScrollView>(null);
@@ -712,27 +713,15 @@ export function SheetScroll({
   return (
     <ScrollView
       ref={ref}
-      bounces={false}
       showsVerticalScrollIndicator
       indicatorStyle={scheme === 'light' ? 'black' : 'white'}
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={[styles.scrollContent, {paddingBottom: bottom}]}
       testID={testID}
-      scrollEventThrottle={16}
+      {...sheetScroll}
       {...scroll}
-      scrollEnabled={scrollEnabled && !sheet?.frozen}
-      onScroll={event => {
-        sheet?.report(event.nativeEvent.contentOffset.y);
-        onScroll?.(event);
-      }}
-      onScrollEndDrag={event => {
-        sheet?.report(event.nativeEvent.contentOffset.y);
-        onScrollEndDrag?.(event);
-      }}
-      onMomentumScrollEnd={event => {
-        sheet?.report(event.nativeEvent.contentOffset.y);
-        onMomentumScrollEnd?.(event);
-      }}
+      // 호출자의 몸 스타일은 기본(가로 여백·위 여백·gap)과 키보드를 아는 바닥 여백 **위에 얹는다** — 덮어쓰지 않는다. 카드가 스스로
+      // 가로 여백을 지는 몸(지시 기기 패널)은 `paddingHorizontal: 0` 만 얹어 위·바닥 여백과 키보드 처리는 그대로 받는다.
+      contentContainerStyle={[styles.scrollContent, {paddingBottom: bottom}, contentContainerStyle]}
       onLayout={handleLayout}
       onContentSizeChange={handleContentSize}>
       {children}

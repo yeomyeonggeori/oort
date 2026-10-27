@@ -24,6 +24,7 @@ import {ROW_GLYPH_MAX_SCALE} from '../src/design/atoms';
 import {dividerIndent} from '../src/design/sheetModel';
 import {ThemeProvider} from '../src/design/theme';
 import {pinReduceMotion} from './fixtures/reduceMotion';
+import {FAR_SLOW_DRAG, dragBody, dragHeader} from './fixtures/sheetContract';
 import {darkPalette, lightPalette, SHEET, TOUCH_TARGET} from '../src/design/tokens';
 import AppShell from '../src/shell/AppShell';
 import {
@@ -1193,4 +1194,25 @@ describe('기능 손실 0 — 옛 프로필 시트가 하던 일이 설정 페�
     present(within(page), ['sign-out']);
     absent(within(page), ['sign-out-confirm-block']);
   });
+});
+
+// 상태 설정 시트(#4457)도 같은 그릇이라 머리·본문 어디서든 끌어내려 닫힌다(#4612). 열기까지의 길은 설정 페이지의 「상태」 행이다.
+describe('상태 설정 시트 — 끌어내려 닫기 (#4612)', () => {
+  async function openStatus() {
+    const page = await openSheet();
+    fireEvent.press(within(page).getByTestId('profile-status-row'));
+    expect(within(page).getByTestId('status-sheet')).toBeTruthy();
+  }
+
+  it('머리(제목 줄)를 끌어내리면 닫힌다 — 손잡이 띠만이 아니다', async () => {
+    await openStatus();
+    expect(dragHeader(FAR_SLOW_DRAG)).toBe(true);
+    await waitFor(() => expect(screen.queryByTestId('status-sheet')).toBeNull(), {timeout: 8000});
+  }, 20000);
+
+  it('본문을 스크롤 맨 위에서 끌어내려도 닫힌다 — 본문 스크롤이 시트에 등록돼 있다', async () => {
+    await openStatus();
+    expect(dragBody(FAR_SLOW_DRAG)).toBe(true);
+    await waitFor(() => expect(screen.queryByTestId('status-sheet')).toBeNull(), {timeout: 8000});
+  }, 20000);
 });

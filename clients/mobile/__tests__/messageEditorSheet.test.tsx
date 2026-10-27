@@ -1,10 +1,17 @@
-import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
-import {StyleSheet, TextInput} from 'react-native';
+import {ActionSheetIOS, StyleSheet, TextInput} from 'react-native';
 
 import {ds2Radius, lightPalette} from '../src/design/tokens';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
-import {describeCloseContract} from './fixtures/sheetContract';
+import {
+  FAR_SLOW_DRAG,
+  describeCloseContract,
+  dragBody,
+  dragHeader,
+  releaseReduceMotion,
+  setReduceMotion,
+} from './fixtures/sheetContract';
 
 // =============================================================================
 // 메시지 고치기 시트 (#4458: 자체 Modal → 공용 시트). 입력 값이 동기인 규칙(한글 조합)은 컴포저와 같고,
@@ -112,6 +119,122 @@ describe('그릇', () => {
     const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
     expect(sheet.top).toBeUndefined();
     expect(sheet.height).toBeGreaterThan(0);
+  });
+});
+
+// 저장 안 한 입력(#4612): 고쳐 둔 채 닫으면 쓴 글이 사라진다 — 시트가 닫기 전에 「버릴까요?」를 묻는다(iOS isModalInPresentation).
+describe('저장 안 한 입력 — 닫기 전에 「버릴까요?」', () => {
+  beforeEach(async () => {
+    await setReduceMotion(true); // 슬라이드 없이 바로 닫혀 「닫혔다」가 동기 단정이 된다
+  });
+  afterEach(() => {
+    releaseReduceMotion();
+  });
+
+  const edit = (text: string) => {
+    fireEvent.changeText(screen.getByTestId('editor-input'), text);
+  };
+  const askedOnce = (show: jest.SpyInstance) => show.mock.calls.length === 1;
+  /** 묻는 액션 시트의 선택지 중 `index` 를 고른 것으로 한다(0 = 버리기, 1 = 계속 편집). */
+  const choose = (show: jest.SpyInstance, index: number) => {
+    act(() => {
+      show.mock.calls[show.mock.calls.length - 1][1](index);
+    });
+  };
+
+  it('고치지 않았으면 X·스크림·escape 가 묻지 않고 바로 닫는다 — 대조', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(show).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  it('고친 뒤 X 는 닫지 않고 「버릴까요?」를 묻는다 — 「계속 편집」이면 그대로, 「버리기」면 닫는다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    edit('안녕하세요, 이도현 님');
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    expect(askedOnce(show)).toBe(true);
+    expect(show.mock.calls[0][0]).toMatchObject({title: '버릴까요?', options: ['버리기', '계속 편집']});
+    expect(cancel).not.toHaveBeenCalled();
+    choose(show, 1);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(screen.getByTestId('editor-input').props.value).toBe('안녕하세요, 이도현 님'); // 쓴 글은 그대로
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    choose(show, 0);
+    expect(cancel).toHaveBeenCalledTimes(1);
+    show.mockRestore();
+  });
+
+  it('스크림·VoiceOver escape·머리 끌기·본문 끌기도 같은 문이다 — 닫지 않고 묻는다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    edit('다른 글');
+    fireEvent.press(screen.getByTestId('editor-backdrop', {includeHiddenElements: true}));
+    act(() => {
+      screen.getByTestId('page-sheet').props.onAccessibilityEscape();
+    });
+    expect(dragHeader(FAR_SLOW_DRAG)).toBe(true);
+    expect(dragBody(FAR_SLOW_DRAG)).toBe(true);
+    expect(show).toHaveBeenCalledTimes(4);
+    expect(cancel).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  // 한 마운트에서 X 를 두 번 누르지 않는다 — 첫 누름이 시트를 닫는 중으로 만들어 둘째는 무시된다.
+  it('원문으로 되돌리면 고친 것이 아니다 — 묻지 않는다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    edit('다른 글');
+    edit('안녕하세요');
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(show).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  it('앞뒤 공백만 다르면 고친 것이 아니다 — 묻지 않는다(✓ 가 회색인 조건과 같다)', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    edit('  안녕하세요  ');
+    expect(screen.getByTestId('editor-save').props.accessibilityState).toMatchObject({disabled: true});
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(show).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  it('전부 지워도 고친 것이다 — 저장은 막혀도 쓴 글이 사라지므로 묻는다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    edit('');
+    expect(screen.getByTestId('editor-save').props.accessibilityState).toMatchObject({disabled: true});
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    expect(askedOnce(show)).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    show.mockRestore();
+  });
+
+  it('저장하는 동안(pending)은 묻지 않는다 — 보내는 중이라 「저장하지 않은 내용」이 아니다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount({pending: true});
+    edit('다른 글');
+    fireEvent.press(screen.getByTestId('editor-cancel'));
+    expect(show).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    show.mockRestore();
+  });
+
+  it('✓ 저장은 묻지 않는다 — 저장은 닫는 길의 문이 아니라 행동이다', () => {
+    const show = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    mount();
+    edit('안녕하세요, 이도현 님');
+    fireEvent.press(screen.getByTestId('editor-save'));
+    expect(save).toHaveBeenCalledWith('안녕하세요, 이도현 님');
+    expect(show).not.toHaveBeenCalled();
+    show.mockRestore();
   });
 });
 

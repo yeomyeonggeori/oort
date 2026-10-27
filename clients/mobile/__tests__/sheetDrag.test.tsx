@@ -19,6 +19,7 @@ import {
   View,
 } from 'react-native';
 
+import {EASE_OUT, FLING_OUT} from '../src/design/motion';
 import {PageSheet, usePageSheetAction} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {SheetScroll} from '../src/design/sheetParts';
@@ -30,12 +31,15 @@ import {
   SHEET_DISMISS_MIN_DISTANCE,
   SHEET_DISMISS_RATIO,
   SHEET_DISMISS_VELOCITY,
+  SHEET_RELEASE_MIN_MS,
   SHEET_RUBBER_MAX,
+  SHEET_SLIDE_MS,
   VELOCITY_HORIZON_MS,
   VELOCITY_STOPPED_MS,
   claimsSheetDrag,
   estimatedSheetHeight,
   isScrolledToTop,
+  releaseSlideMs,
   releaseVelocity,
   rubberBand,
   scrimOpacity,
@@ -105,6 +109,106 @@ describe('속도 문턱 — px/ms, Buzz(Flutter) 700px/s = 0.7', () => {
 
   it('위로 끄는 것(음수 거리·음수 속도)은 닫지 않는다', () => {
     expect(shouldDismissSheet(-500, -5, 400)).toBe(false);
+  });
+});
+
+describe('위로 튕기며 놓기 — 속도 방향이 이긴다 (planner 결정, #4612 코멘트)', () => {
+  // 높이 400 의 문턱은 100. 아래의 거리 150 은 속도가 없으면 닫는 자리다(위 「경계 ±1」 가 그 사실을 잰다).
+  it('거리 문턱을 넘게 내려 놓았어도 위로 문턱보다 빠르게 튕겼으면 닫지 않는다', () => {
+    expect(shouldDismissSheet(150, 0, 400)).toBe(true); // 대조: 튕김이 없으면 거리로 닫는다
+    expect(shouldDismissSheet(150, -0.71, 400)).toBe(false);
+    expect(shouldDismissSheet(150, -3, 400)).toBe(false);
+    expect(shouldDismissSheet(900, -1.5, 400)).toBe(false); // 아무리 멀리 내려 놓았어도
+  });
+
+  it('경계는 닫는 쪽과 대칭이다 — 정확히 −0.7 은 튕김이 아니라 거리가 정한다', () => {
+    expect(shouldDismissSheet(150, -0.7, 400)).toBe(true);
+    expect(shouldDismissSheet(150, -0.69, 400)).toBe(true);
+    expect(shouldDismissSheet(150, -0.71, 400)).toBe(false);
+  });
+
+  it('문턱 안쪽의 작은 위쪽 속도(손가락 떨림)는 거리 판정을 뒤집지 못한다', () => {
+    expect(shouldDismissSheet(150, -0.1, 400)).toBe(true);
+    expect(shouldDismissSheet(150, -0.5, 400)).toBe(true);
+  });
+
+  it('아래로 튕김은 그대로 닫는다 — 방향이 이기는 것은 위쪽만이다', () => {
+    expect(shouldDismissSheet(10, 2, 400)).toBe(true);
+    expect(shouldDismissSheet(10, 0.71, 400)).toBe(true);
+  });
+});
+
+describe('놓고 닫는 슬라이드 — 놓은 속도를 잇는다 (속도 기반 길이, 상하한)', () => {
+  it('상한은 옛 고정 길이 260, 하한은 모션 사다리 instant 120 이다', () => {
+    expect(SHEET_SLIDE_MS).toBe(260);
+    expect(SHEET_RELEASE_MIN_MS).toBe(120);
+  });
+
+  it.each([
+    // [남은 거리, 놓은 속도(px/ms), 길이(ms)]
+    [600, 3, 200], // 600 ÷ 3
+    [600, 2.5, 240],
+    [600, 5, 120], // 정확히 하한
+    [600, 10, 120], // 60 → 하한으로 올린다
+    [700, 3.5, 200],
+    [600, 2, 260], // 300 → 상한으로 내린다
+    [600, 0.8, 260], // 750 → 상한
+    [780, 3, 260], // 정확히 상한
+    [770, 3, 257], // 256.67 → 반올림
+    [100, 0.7, 143], // 거의 다 내려온 시트는 문턱 속도로도 짧다
+  ])('남은 %i pt · 속도 %f px/ms → %i ms', (remaining, velocity, expected) => {
+    expect(releaseSlideMs(remaining, velocity)).toBe(expected);
+  });
+
+  it('이을 속도가 없으면 기본 길이다 — 거리로만 닫은 끌기·멈췄다 놓음·위쪽·모르는 값', () => {
+    expect(releaseSlideMs(600, 0)).toBe(SHEET_SLIDE_MS);
+    expect(releaseSlideMs(600, -2)).toBe(SHEET_SLIDE_MS);
+    expect(releaseSlideMs(600, Number.NaN)).toBe(SHEET_SLIDE_MS);
+  });
+
+  it('남은 거리가 없거나 모르면 하한이다', () => {
+    expect(releaseSlideMs(0, 2)).toBe(SHEET_RELEASE_MIN_MS);
+    expect(releaseSlideMs(-5, 2)).toBe(SHEET_RELEASE_MIN_MS);
+    expect(releaseSlideMs(Number.NaN, 2)).toBe(SHEET_RELEASE_MIN_MS);
+  });
+
+  it('빠를수록 길어지지 않는다(단조) — 그리고 늘 상하한 안이다', () => {
+    let previous = Number.POSITIVE_INFINITY;
+    for (let velocity = 0.1; velocity <= 12; velocity += 0.1) {
+      const ms = releaseSlideMs(650, velocity);
+      expect(ms).toBeLessThanOrEqual(previous);
+      expect(ms).toBeGreaterThanOrEqual(SHEET_RELEASE_MIN_MS);
+      expect(ms).toBeLessThanOrEqual(SHEET_SLIDE_MS);
+      previous = ms;
+    }
+  });
+});
+
+describe('던진 시트의 곡선 — 시작 기울기 1 이라 놓은 속도에서 끊김 없이 이어진다', () => {
+  // 곡선의 y 가 진행률(0→1)이고 x 가 시간 비율이다. 시간을 `거리 ÷ 속도`로 잡으면 첫 순간의 속도 = 거리 × 시작 기울기 ÷ 시간 = 속도.
+  const startSlope = (curve: (t: number) => number) => curve(0.005) / 0.005;
+
+  it('FLING_OUT 의 시작 기울기는 1 이다(±5%)', () => {
+    expect(startSlope(FLING_OUT)).toBeGreaterThan(0.95);
+    expect(startSlope(FLING_OUT)).toBeLessThan(1.05);
+  });
+
+  it('대조: 옛 강한 ease-out 은 4 배 빠르게 출발한다 — 그래서 속도를 잇는 슬라이드에 쓰지 않는다', () => {
+    expect(startSlope(EASE_OUT)).toBeGreaterThan(4);
+  });
+
+  it('0 에서 시작해 1 에서 끝나고 거꾸로 가지 않으며 가운데서 기울기가 1.3 을 넘지 않는다', () => {
+    expect(FLING_OUT(0)).toBe(0);
+    expect(FLING_OUT(1)).toBe(1);
+    let previous = 0;
+    let steepest = 0;
+    for (let t = 0.01; t <= 1.0001; t += 0.01) {
+      const y = FLING_OUT(Math.min(1, t));
+      expect(y).toBeGreaterThanOrEqual(previous);
+      steepest = Math.max(steepest, (y - previous) / 0.01);
+      previous = y;
+    }
+    expect(steepest).toBeLessThan(1.3);
   });
 });
 
@@ -771,7 +875,7 @@ describe('동작 줄이기 · 키보드', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('동작 줄이기 꺼짐: 모자란 끌기는 스프링으로 제자리, 닫는 끌기는 화면 높이까지 미끄러지는 강한 ease-out', async () => {
+  it('동작 줄이기 꺼짐: 모자란 끌기는 스프링으로 제자리, 닫는 끌기는 화면 높이까지 미끄러지는 던진 곡선', async () => {
     const timing = jest.spyOn(Animated, 'timing');
     const spring = jest.spyOn(Animated, 'spring');
     await mount(<Host onClose={() => {}} />, false);
@@ -782,15 +886,16 @@ describe('동작 줄이기 · 키보드', () => {
     drag('hdr', FLICK);
     const slide = timing.mock.calls[timing.mock.calls.length - 1][1];
     expect(slide).toMatchObject({toValue: WINDOW.height});
-    expect(slide.easing).toBeDefined(); // X·스크림의 닫기는 기본 곡선이다(아래 대조)
+    expect(slide.easing).toBe(FLING_OUT); // X·스크림의 닫기는 기본 곡선이다(아래 대조)
   });
 
-  it('X 로 닫을 때는 기본 곡선이다(대조)', async () => {
+  it('X 로 닫을 때는 기본 곡선·기본 길이다(대조)', async () => {
     const timing = jest.spyOn(Animated, 'timing');
     await mount(<Host onClose={() => {}} />, false);
     timing.mockClear();
     fireEvent.press(screen.getByTestId('close'));
     expect(timing.mock.calls[0][1].easing).toBeUndefined();
+    expect(timing.mock.calls[0][1].duration).toBe(SHEET_SLIDE_MS);
   });
 
   it('시트 안의 입력이 부른 키보드는 끌어 닫을 때 같이 내려간다', async () => {
@@ -807,6 +912,121 @@ describe('동작 줄이기 · 키보드', () => {
     await mount(<Host onClose={() => {}} />, false);
     fireEvent.press(screen.getByTestId('close'));
     expect(drag('hdr', [[20, 100], [70, 116]], {release: false})).toBe(false);
+  });
+});
+
+// 거리 문턱(큰 단 1276 의 25% = 319)을 넘게 천천히 내려 놓은 뒤(dy 400) 마지막 48ms 에 위로 쳐올리며 놓는다 — 놓는 순간 시트는
+// 아직 문턱 아래(dy 342 > 319)이고 속도는 −1.2px/ms 다. 놓은 자리만 보면 닫는 자리이고 속도 방향만 보면 열어 두는 자리다.
+const DOWN_THEN_FLICK_UP: Array<[number, number]> = [
+  [20, 100],
+  [170, 600],
+  [270, 1100],
+  [420, 1600],
+  [405, 1616],
+  [385, 1632],
+  [362, 1648],
+];
+/** 아주 빠른 내려치기(6px/ms): 64ms 에 384pt. 남은 거리는 화면 높이 − 384. */
+const FAST_DOWN: Array<[number, number]> = [[20, 100], [116, 116], [212, 132], [308, 148], [404, 164]];
+
+describe('놓을 때 — 속도 방향이 이기고, 놓고 닫는 슬라이드는 놓은 속도를 잇는다', () => {
+  it('문턱을 넘게 내려 놓았어도 위로 튕기며 놓으면 열린 채 제자리로 돌아온다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(drag('hdr', DOWN_THEN_FLICK_UP)).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+  });
+
+  it('대조: 같은 자리에서 튕김 없이 멈췄다 놓으면 닫는다 — 위의 열림은 속도 방향이 만든 것이다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    // 같은 마지막 자리(dy 342)에 닿되 마지막 표본이 40ms 보다 오래 전이라 속도는 0 이다.
+    drag('hdr', [[20, 100], [170, 600], [270, 1100], [362, 1600]]);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('위로 튕기며 놓으면 dirty 여도 묻지 않는다 — 닫으려던 것이 아니다', async () => {
+    const onClose = jest.fn();
+    const prompt = jest.fn();
+    await mount(<Host onClose={onClose} dirty onDiscardPrompt={prompt} />);
+    drag('hdr', DOWN_THEN_FLICK_UP);
+    expect(prompt).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+  });
+
+  it('본문 끌기(스크롤 맨 위)도 같다 — 위로 튕기며 놓으면 열린 채다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(drag('page-sheet-body', DOWN_THEN_FLICK_UP)).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+  });
+
+  it('아주 빠르게 내려쳐 놓으면 그 속도로 남은 거리를 나간다 — 길이는 남은 거리 ÷ 놓은 속도', async () => {
+    // 아래의 158 은 Jest 의 창 높이(RN 프리셋 1334)에 기댄 숫자다 — 창이 바뀌면 이 단정이 먼저 말한다.
+    expect(WINDOW.height).toBe(1334);
+    const timing = jest.spyOn(Animated, 'timing');
+    await mount(<Host onClose={() => {}} />, false);
+    timing.mockClear();
+    drag('hdr', FAST_DOWN);
+    const slide = timing.mock.calls[timing.mock.calls.length - 1][1];
+    // 384pt 를 64ms 에 내려갔으니 6px/ms, 남은 거리는 목적지(창 높이 1334) − 384 = 950 → 950 ÷ 6 = 158.3.
+    expect(slide.duration).toBe(158);
+    expect(slide.easing).toBe(FLING_OUT);
+    expect(slide.toValue).toBe(WINDOW.height);
+  });
+
+  it('느리게 놓아 닫으면(속도 0) 옛 길이 그대로다 — 속도 기반 길이의 상한', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    await mount(<Host onClose={() => {}} />, false);
+    timing.mockClear();
+    drag('hdr', FAR_SLOW);
+    const slide = timing.mock.calls[timing.mock.calls.length - 1][1];
+    expect(slide.duration).toBe(SHEET_SLIDE_MS);
+    expect(slide.easing).toBe(FLING_OUT);
+  });
+
+  /**
+   * 같은 간격의 표본 넷(grant + 이동 셋)으로 `stepPt`/`stepMs` px/ms 로 내려 놓고, 그때 시트가 잡은 슬라이드 길이를 돌려준다.
+   * 시험 하나에 한 번만 부른다 — 한 시험 안에서 `cleanup()` 하고 다시 마운트하면 act 범위가 겹친다.
+   */
+  async function releaseDurationOf(stepPt: number, stepMs: number): Promise<number> {
+    const timing = jest.spyOn(Animated, 'timing');
+    await mount(<Host onClose={() => {}} />, false);
+    timing.mockClear();
+    drag('hdr', [
+      [20, 100],
+      [20 + stepPt, 100 + stepMs],
+      [20 + 2 * stepPt, 100 + 2 * stepMs],
+      [20 + 3 * stepPt, 100 + 3 * stepMs],
+    ]);
+    return timing.mock.calls[timing.mock.calls.length - 1][1].duration as number;
+  }
+
+  it('슬라이드 길이 — 느리게 놓으면(1px/ms, 문턱 0.7 은 넘는다) 상한이다: 남은 거리 ÷ 1 은 어느 창에서나 상한을 넘는다', async () => {
+    expect(await releaseDurationOf(40, 40)).toBe(SHEET_SLIDE_MS);
+  });
+
+  it('슬라이드 길이 — 가운데 속도면 상하한 사이다: 남은 거리 ÷ 속도 ≈ 190ms 가 되게 표본 간격을 골랐다(창 높이와 무관)', async () => {
+    const duration = await releaseDurationOf(100, Math.round(19000 / (WINDOW.height - 300)));
+    expect(duration).toBeGreaterThan(SHEET_RELEASE_MIN_MS);
+    expect(duration).toBeLessThan(SHEET_SLIDE_MS);
+  });
+
+  it('슬라이드 길이 — 아주 빠르게 놓으면(33px/ms) 하한이다: 남은 거리 ÷ 33 은 하한보다 짧다', async () => {
+    expect(await releaseDurationOf(100, 3)).toBe(SHEET_RELEASE_MIN_MS);
+  });
+
+  it('동작 줄이기 켜짐: 놓고 닫아도 슬라이드 없이 즉시다(속도와 무관)', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />, true);
+    timing.mockClear();
+    drag('hdr', FAST_DOWN);
+    expect(timing).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 
