@@ -15738,8 +15738,8 @@ components:
           enum: [realtime, routine, unknown]
           description: >
             `routine` = wakes on a beat: at least five wakes (a silence over 5 minutes ends a wake), the
-            median gap between wake starts is the beat, and at least 60 percent of the gaps lie within
-            half to one and a half beats. `realtime` = never silent for more than 5 minutes during at
+            median gap between wake starts is the beat (at most 90 minutes), and at least 70 percent of
+            the gaps lie within half to one and a half beats. `realtime` = never silent for more than 5 minutes during at
             least 80 percent of a span of at least 30 minutes: ask whether it is connected, not when it
             next checks. `unknown` = too few wakes, not periodic, or no call in the last 24 hours.
         typicalMinutes:

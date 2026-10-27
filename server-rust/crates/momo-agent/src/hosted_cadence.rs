@@ -32,11 +32,18 @@
 //!    that calls every 10 seconds is one 24-hour wake, has no intervals, and reads `unknown`.
 //! 4. Otherwise the **intervals between wake starts**; with fewer than
 //!    [`CadenceParams::min_intervals`] (4, i.e. five wakes) the answer is `unknown`.
-//! 5. The **median** interval `M` is the beat. If fewer than 60 % of the intervals lie within
-//!    ±50 % of `M` the agent is not periodic (a doorbell-only agent wakes whenever someone
-//!    writes): `unknown`, not a made-up "보통 40분".
+//! 5. The **median** interval `M` is the beat — if it holds two things. `M` is at most
+//!    [`CadenceParams::max_beat`] (90 min): a longer "beat" is a handful of wakes that happen to
+//!    look regular. And at least 70 % of the intervals lie within ±50 % of `M`: an agent that
+//!    wakes whenever someone writes has no beat, and the answer is `unknown`, not a made-up
+//!    "보통 40분".
 //! 6. `routine`: `typical_minutes` = `M` rounded to the nearest minute; `expected_check_at`
 //!    = start of the newest wake + 2 × `M`; `late` = no call for more than 3 × `M`.
+//!
+//! The 70 % and the 90 minutes were chosen by simulation (ADR-0200 증보 5): on random wakes with
+//! no schedule at all, 60 % and no ceiling called 9-47 % of the days a routine; 70 % and 90
+//! minutes call 0.6-2.7 %, while a 15-minute routine with the measured 10-29 minute jitter is
+//! still read as one on 90 % of days after 1.5 hours of history and on 100 % after a day.
 //!
 //! The 2× in step 6 is the allowance the screen needs. Half of all intervals are longer than
 //! their median, so a deadline at `+ M` would flag a healthy routine as "못 가져감" on every
@@ -63,8 +70,8 @@ use uuid::Uuid;
 pub const AGENT_PORT_CALL_ACTION: &str = "auth.agent_bearer.used";
 
 /// `detail.path` of an Agent Port call. A hosted credential is only admitted on its own
-/// audience, so for a hosted agent this is every `used` row it has; the filter is the belt to
-/// that brace (a REST call by some other credential of the same member is not a check).
+/// audience, so for a hosted agent this is every `used` row it has; the filter is a second
+/// line of defence (a REST call by some other credential of the same member is not a check).
 pub const AGENT_PORT_CALL_PATH: &str = "/v1/mcp/agent-port";
 
 /// The closed vocabulary (`cadence.kind` on the wire).
@@ -105,6 +112,8 @@ pub struct CadenceParams {
     pub on_beat_band_percent: i64,
     /// This share of the intervals must be on the beat.
     pub on_beat_share_percent: i64,
+    /// A beat longer than this is not claimed.
+    pub max_beat: Duration,
     /// `expected_check_at` = newest wake start + this many beats.
     pub expected_after_beats: i64,
     /// `late` when silent for more than this many beats.
@@ -123,7 +132,8 @@ impl Default for CadenceParams {
             wake_gap: Duration::minutes(5),
             min_intervals: 4,
             on_beat_band_percent: 50,
-            on_beat_share_percent: 60,
+            on_beat_share_percent: 70,
+            max_beat: Duration::minutes(90),
             expected_after_beats: 2,
             late_after_beats: 3,
             realtime_min_span: Duration::minutes(30),
@@ -232,6 +242,14 @@ pub fn derive_cadence(
     intervals.sort_unstable();
     let beat_ms = median_ms(&intervals);
 
+    // A beat this long is a few wakes that happen to look regular, not a routine to promise on.
+    if beat_ms > params.max_beat.num_milliseconds() {
+        return Cadence {
+            intervals: count,
+            ..Cadence::unknown()
+        };
+    }
+
     // Periodic? An agent that wakes whenever somebody writes has intervals all over the place.
     let low = beat_ms * (100 - params.on_beat_band_percent);
     let high = beat_ms * (100 + params.on_beat_band_percent);
@@ -276,7 +294,11 @@ pub async fn load_agent_call_times_in_tx(
     since: DateTime<Utc>,
     per_agent_limit: i64,
 ) -> Result<HashMap<Uuid, Vec<DateTime<Utc>>>, DbError> {
-    if agent_member_ids.is_empty() {
+    // A repeated id would be unnested twice and every call time pushed twice.
+    let mut agent_ids = agent_member_ids.to_vec();
+    agent_ids.sort_unstable();
+    agent_ids.dedup();
+    if agent_ids.is_empty() {
         return Ok(HashMap::new());
     }
     let rows = sqlx::query(
@@ -293,7 +315,7 @@ pub async fn load_agent_call_times_in_tx(
                  LIMIT $6) c",
     )
     .bind(workspace_id)
-    .bind(agent_member_ids)
+    .bind(&agent_ids)
     .bind(AGENT_PORT_CALL_ACTION)
     .bind(AGENT_PORT_CALL_PATH)
     .bind(since)
@@ -498,18 +520,67 @@ mod tests {
     }
 
     #[test]
-    fn the_beat_share_edge_is_sixty_percent() {
-        // 3 of 5 on the beat (60 %) is periodic
-        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 60, 90]);
+    fn the_beat_share_edge_is_seventy_percent() {
+        // 7 of 10 on the beat (70 %) is periodic
+        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 15, 15, 15, 15, 60, 90, 120]);
         let cadence = derive_cadence(now(), &calls, &p());
         assert_eq!(cadence.kind, CadenceKind::Routine);
         assert_eq!(cadence.typical_minutes, Some(15));
-        // 4 of 7 (57 %) is not
-        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 15, 60, 60, 90]);
+        // 6 of 10 (60 %) is not
+        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 15, 15, 15, 60, 90, 120, 200]);
         assert_eq!(
             derive_cadence(now(), &calls, &p()).kind,
             CadenceKind::Unknown
         );
+    }
+
+    #[test]
+    fn a_beat_longer_than_ninety_minutes_is_not_claimed_and_ninety_is() {
+        // an hourly-and-a-half cron, perfectly regular: the edge passes
+        let calls = wakes_with_intervals(2 * MIN, &[90; 8]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert_eq!(cadence.typical_minutes, Some(90));
+        // one more minute is a few wakes that happen to look regular
+        let calls = wakes_with_intervals(2 * MIN, &[91; 8]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Unknown);
+        assert_eq!(cadence.intervals, 8, "it was a candidate, then refused");
+        assert_eq!(cadence.typical_minutes, None);
+        // a two-hour cron likewise
+        let calls = wakes_with_intervals(2 * MIN, &[120; 8]);
+        assert_eq!(
+            derive_cadence(now(), &calls, &p()).kind,
+            CadenceKind::Unknown
+        );
+    }
+
+    #[test]
+    fn the_measured_shape_of_a_fifteen_minute_routine_passes_the_gates() {
+        // 36 gaps shaped like the #4284 measurement: 10-29 min, median 15, mean about 16.3. Real
+        // jitter must not push a real routine into `unknown`: 32 of the 36 gaps (89 %) are on the beat.
+        let mut gaps: Vec<i64> = Vec::new();
+        for (minutes, times) in [
+            (10, 3),
+            (12, 4),
+            (14, 5),
+            (15, 8),
+            (16, 5),
+            (18, 4),
+            (20, 3),
+            (24, 2),
+            (29, 2),
+        ] {
+            gaps.extend(std::iter::repeat_n(minutes, times));
+        }
+        assert_eq!(gaps.len(), 36);
+        // an order that is not sorted
+        gaps.rotate_left(11);
+        let calls = wakes_with_intervals(3 * MIN, &gaps);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert_eq!(cadence.typical_minutes, Some(15));
+        assert_eq!(cadence.intervals, 36);
     }
 
     #[test]

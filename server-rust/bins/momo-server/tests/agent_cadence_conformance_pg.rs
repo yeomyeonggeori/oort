@@ -8,7 +8,7 @@
 //!
 //! 픽스처 행은 **실제 Agent Port 호출이 남긴 행을 본떠서** 만든다(`real_detail`): 호출 하나를 정말로 보내고
 //! 그 행의 `detail`을 복제해, 쓰는 쪽(`auth.rs`)이 모양을 바꾸면 이 시험이 같이 빨개진다. 시각은 superuser가
-//! 과거 `created_at`으로 넣는다(`audit_log`는 UPDATE 불변 트리거가 없고, 실제 행도 `now()`뿐이라 늙힐 수 없다).
+//! 과거 `created_at`으로 직접 넣는다(실제 호출의 행은 `now()`로만 남아 늙힐 수 없다).
 //!
 //! | 시험 | 증명 | 빨개지면 |
 //! |---|---|---|
@@ -17,7 +17,7 @@
 //! | `a_beat_that_broke_reads_late_and_a_slow_one_does_not` | 마지막 호출이 3박(45분) 넘게 없으면 `late`, 아니면 아님 | 늦음 배수 |
 //! | `a_poller_reads_realtime_and_carries_no_numbers` | 20초마다 40분 → `realtime` 하나만 | realtime 규칙 |
 //! | `an_agent_that_wakes_whenever_somebody_writes_reads_unknown` | 간격이 제각각 → `unknown` | 규칙성 |
-//! | `the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the_window` | 창 밖·다른 에이전트·다른 action(`agent_port.call`)·REST 경로·다른 워크스페이스의 행은 세지 않고, 상한은 가장 새로운 것부터 | 술어 하나씩 |
+//! | `the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the_window` | 창 밖·다른 에이전트·다른 action(`agent_port.call`, 거절된 호출 `scope_denied`)·REST 경로·다른 워크스페이스의 행은 세지 않고, 같은 id를 두 번 줘도 두 배가 되지 않고, 상한은 가장 새로운 것부터 | 술어 하나씩, 중복 제거 |
 //! | `the_beat_is_read_from_the_rows_the_agent_port_really_writes` | 실제 호출 N번 = 로더가 N개 (감사 두 줄 중 `used`만) | 쓰는 쪽과 읽는 쪽이 어긋남 |
 //! | `a_connection_that_is_not_active_reads_unknown_whatever_it_did` | 박자 모양 이력이 있어도 비활성 연결은 `unknown` | 비활성 가드 |
 //! | `the_wire_is_closed_and_a_stranger_gets_the_same_404` | 키 집합 고정, 채널을 공유하지 않는 멤버는 404 | 새 키·탐침 |
@@ -451,12 +451,22 @@ async fn the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the
     // another agent of the same workspace
     w.put_calls(other.id, &[at(11), at(21), at(31), at(41)], &detail)
         .await;
-    // another action of the same agent (the #4618 trace row is one of these)
+    // another action of the same agent: the #4618 trace row ...
     w.put_rows(
         w.workspace,
         agent.id,
         "agent_port.call",
         &[at(12), at(22)],
+        &detail,
+    )
+    .await;
+    // ... and a REFUSED call, which carries the very same path and detail keys as an admitted one
+    // (`write_agent_bearer_audit` writes both): the action is the only thing telling them apart
+    w.put_rows(
+        w.workspace,
+        agent.id,
+        "auth.agent_bearer.scope_denied",
+        &[at(15), at(25)],
         &detail,
     )
     .await;
@@ -479,7 +489,8 @@ async fn the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the
     let loaded = momo_agent::load_agent_call_times_in_tx(
         &mut conn,
         w.workspace,
-        &[agent.id, other.id],
+        // the same id twice: the calls must not be counted twice
+        &[agent.id, agent.id, other.id],
         since,
         2000,
     )

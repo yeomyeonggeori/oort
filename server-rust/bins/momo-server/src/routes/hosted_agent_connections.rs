@@ -142,7 +142,8 @@ fn requested_owner_only(
 }
 
 /// The beat of one agent: derived from its admitted Agent Port calls, and only for an active
-/// connection (anything else is `unknown`, never a promise).
+/// connection (anything else is `unknown`, never a promise). The ONE place that rule lives: the
+/// routes read for every agent they were asked about, so deleting this check is visible.
 fn cadence_for(
     now: chrono::DateTime<chrono::Utc>,
     active: bool,
@@ -172,18 +173,17 @@ pub(crate) async fn attach_liveness(
         .collect();
     let rows = momo_agent::load_liveness_rows_in_tx(conn, workspace_id, &ids).await?;
     let now = chrono::Utc::now();
-    // ADR-0200 증보 5 (#4621): the beat is read only for a connection that is active — a
-    // disconnected agent's old calls are not a promise that it will check again.
+    // ADR-0200 증보 5 (#4621): the beat. Who may be promised one is decided in `cadence_for` and
+    // nowhere else, so the read below is for every agent on the page.
     let cadence_params = momo_agent::CadenceParams::default();
-    let active_agents: Vec<Uuid> = dtos
+    let agent_ids: Vec<Uuid> = dtos
         .iter()
-        .filter(|dto| dto.status == "active")
         .filter_map(|dto| Uuid::parse_str(&dto.agent_member_id).ok())
         .collect();
     let calls = momo_agent::load_agent_call_times_in_tx(
         conn,
         workspace_id,
-        &active_agents,
+        &agent_ids,
         now - cadence_params.window,
         cadence_params.max_calls,
     )
@@ -662,18 +662,15 @@ pub async fn agent_liveness(
                     &thresholds,
                 );
                 // ADR-0200 증보 5 (#4621): the beat, from the agent's admitted Agent Port calls.
-                let calls = if active {
-                    momo_agent::load_agent_call_times_in_tx(
-                        conn,
-                        workspace_id,
-                        &[agent_id],
-                        now - cadence_params.window,
-                        cadence_params.max_calls,
-                    )
-                    .await?
-                } else {
-                    std::collections::HashMap::new()
-                };
+                // `cadence_for` alone decides whether this connection may be promised one.
+                let calls = momo_agent::load_agent_call_times_in_tx(
+                    conn,
+                    workspace_id,
+                    &[agent_id],
+                    now - cadence_params.window,
+                    cadence_params.max_calls,
+                )
+                .await?;
                 let cadence = cadence_for(now, active, calls.get(&agent_id), &cadence_params);
                 Ok(Ok(AgentLivenessDto {
                     agent_member_id: agent_id.to_string(),
