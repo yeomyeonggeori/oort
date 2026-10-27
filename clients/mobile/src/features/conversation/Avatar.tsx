@@ -7,7 +7,7 @@ import {
 } from '@momo/core/features/workspace/avatar';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import React, {useMemo} from 'react';
-import {Image, StyleSheet, Text, View} from 'react-native';
+import {Image, StyleSheet, Text, View, type TextStyle} from 'react-native';
 import {AVATAR_INITIAL_MAX_SCALE} from '../../design/atoms';
 import {font, radius, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
@@ -99,6 +99,17 @@ export function useAvatarSource(
 }
 
 /**
+ * 이니셜 글자의 크기 — 기본 아바타(32)에서 `font.label`(13) 이 앉는 비율을 `size` 로 키운 값. 큰 얼굴의 이니셜과 채널의 큰 `#` 얼굴(대화 정보
+ * 페이지, #4319)이 **같은 비율**을 쓴다 — 글자 크기를 모듈마다 새로 짓지 않는다(`designSystem.test.ts` 의 타이포 스윕이 `fontSize` 계산식을 이 파일 하나에 둔다).
+ */
+export function avatarInitialMetrics(size: number): Required<Pick<TextStyle, 'fontSize' | 'lineHeight'>> {
+  return {
+    fontSize: Math.round((font.label * size) / AVATAR_SIZE),
+    lineHeight: Math.round(((font.label + space.xs) * size) / AVATAR_SIZE),
+  };
+}
+
+/**
  * 한 사람(또는 에이전트)의 아바타.
  *
  * **보조기술에는 나가지 않는다.** 행은 접근성 원소 하나이고 그 라벨은 이미
@@ -148,13 +159,7 @@ export function Avatar({
   const corner = !round && squareRadius !== undefined ? {borderRadius: squareRadius} : null;
   // 이니셜은 상자의 절반 남짓 — 기본 크기에서 `font.label`(13) 이 32 에 앉는
   // 비율을 그대로 키운다.
-  const initialSized =
-    size === AVATAR_SIZE
-      ? null
-      : {
-          fontSize: Math.round((font.label * size) / AVATAR_SIZE),
-          lineHeight: Math.round(((font.label + space.xs) * size) / AVATAR_SIZE),
-        };
+  const initialSized = size === AVATAR_SIZE ? null : avatarInitialMetrics(size);
 
   return (
     <View

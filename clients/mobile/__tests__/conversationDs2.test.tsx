@@ -15,6 +15,12 @@ import {
 } from '../src/features/conversation/ConversationHeader';
 import {CONV, composerFloat} from '../src/features/conversation/convDesign';
 import {
+  headerSlotWidth,
+  pillContainerWidth,
+  pillShowsSecondary,
+  pillStatusWord,
+} from '../src/features/conversation/headerPill';
+import {
   LONG_PRESS_HINT_MS,
   LongPressHint,
   useLongPressHint,
@@ -486,6 +492,88 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
     const dmPill = screen.getByTestId('conversation-info-button');
     expect(within(dmPill).queryByTestId('conversation-title-face', HIDDEN) !== null).toBe(true);
     expect(within(dmPill).queryByTestId('conversation-title-status-dot', HIDDEN) !== null).toBe(true);
+  });
+});
+
+describe('머리 알약의 한 줄 규칙 — 순수 판정 (#4319)', () => {
+  /** DM 알약: 얼굴 28 + 상태 낱말 「응답함」. 이름의 길이(글자 수)만 바꿔 경계를 찾는다. */
+  const dmShows = (nameChars: number, windowWidth: number, fontScale = 1) =>
+    pillShowsSecondary({
+      name: '가'.repeat(nameChars),
+      secondary: '응답함',
+      leading: CONV.titleFace,
+      windowWidth,
+      fontScale,
+      slotWidth: headerSlotWidth({huddle: false, menu: true}),
+    });
+
+  it('양쪽 칸의 폭: ⋮ 만 있으면 원 하나, 허들 자리가 더해지면 원 둘 + 간격, 둘 다 없어도 원 하나를 비운다', () => {
+    expect(headerSlotWidth({huddle: false, menu: true})).toBe(CONV.circle);
+    expect(headerSlotWidth({huddle: true, menu: true})).toBe(2 * CONV.circle + CONV.headGap);
+    expect(headerSlotWidth({huddle: true, menu: false})).toBe(CONV.circle);
+    expect(headerSlotWidth({huddle: false, menu: false})).toBe(CONV.circle);
+  });
+
+  it('알약이 쓸 수 있는 가로: 창 폭 − 좌우 여백 − 양쪽 칸 − 칸 사이 간격 둘', () => {
+    expect(pillContainerWidth(393, 42)).toBe(393 - 2 * CONV.headPadX - 2 * 42 - 2 * CONV.headGap);
+    expect(pillContainerWidth(320, 42)).toBeLessThan(pillContainerWidth(393, 42));
+  });
+
+  it('SE(320pt): 이름 4글자까지 상태 낱말이 같이 서고 5글자부터 숨는다 — 경계가 정확히 4↔5 다', () => {
+    expect(dmShows(4, 320)).toBe(true);
+    expect(dmShows(5, 320)).toBe(false);
+    // 단조: 더 긴 이름이 낱말을 되살리지 않는다.
+    for (let chars = 5; chars <= 30; chars += 1) expect([chars, dmShows(chars, 320)]).toEqual([chars, false]);
+  });
+
+  it('넓은 화면(393pt)에서는 이름이 아무리 길어도 낱말이 선다 — 이름은 말줄임으로 줄고 낱말은 줄지 않는다', () => {
+    for (const chars of [4, 5, 9, 15, 30]) expect([chars, dmShows(chars, 393)]).toEqual([chars, true]);
+  });
+
+  it('큰 글씨는 폭과 무관하게 숨는다 — 1.49 는 서고 1.5(`STACK_PILL_SCALE`)부터 숨는다', () => {
+    expect(dmShows(3, 430, 1.49)).toBe(true);
+    expect(dmShows(3, 430, 1.5)).toBe(false);
+    expect(dmShows(3, 430, 2)).toBe(false);
+  });
+
+  it('보조 글이 없으면 설 것도 없다', () => {
+    expect(
+      pillShowsSecondary({
+        name: '박서연',
+        secondary: '',
+        leading: CONV.titleFace,
+        windowWidth: 430,
+        fontScale: 1,
+        slotWidth: CONV.circle,
+      }),
+    ).toBe(false);
+  });
+
+  it('이름의 바닥은 5글자 또는 이름 전체 — 짧은 이름은 좁은 화면에서도 낱말을 지킨다', () => {
+    expect(dmShows(1, 320)).toBe(true);
+    expect(dmShows(2, 320)).toBe(true);
+  });
+
+  it('채널의 짧은 멤버 수는 SE 에서도 긴 이름 곁에 선다 — 앞 표지가 `#`(16)라 얼굴(28)보다 좁다', () => {
+    const channelShows = (chars: number) =>
+      pillShowsSecondary({
+        name: 'a'.repeat(chars),
+        secondary: '6명',
+        leading: CONV.titleGlyph,
+        windowWidth: 320,
+        fontScale: 1,
+        slotWidth: CONV.circle,
+      });
+    expect(channelShows(40)).toBe(true);
+  });
+
+  it('상태 낱말: 코어의 긴 판정은 ` · ` 앞 낱말만, 너무 길면 없다 — 낭독은 전문이 따로 읽는다', () => {
+    expect(pillStatusWord('응답함')).toBe('응답함');
+    expect(pillStatusWord('조용함 · 마지막 응답 5분 전')).toBe('조용함');
+    expect(pillStatusWord('살아 있음 · 대기 중')).toBe('살아 있음');
+    expect(pillStatusWord('깨웠지만 아직 안 가져감')).toBeNull();
+    expect(pillStatusWord('')).toBeNull();
+    expect(pillStatusWord(undefined)).toBeNull();
   });
 });
 

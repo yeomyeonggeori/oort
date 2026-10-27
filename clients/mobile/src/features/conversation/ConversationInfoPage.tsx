@@ -9,14 +9,13 @@ import {
   channelLeaveConfirmBody,
 } from '@momo/core/features/channels/model';
 import {roleLabel, type RoleLabels} from '@momo/core/features/directory/model';
-import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import type {Channel, RosterMember} from '@momo/core/lib/api';
 import React from 'react';
 import {Image, ScrollView, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {Screen, Sentence} from '../../design/atoms';
+import {AVATAR_INITIAL_MAX_SCALE, Screen, Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {PageHeader} from '../../design/SheetChrome';
 import {ConfirmStep, GroupCard, ListRow} from '../../design/sheetParts';
@@ -33,6 +32,7 @@ import {
   type ProfilePhoto,
 } from '../directory/profileHero';
 import {PROFILE_FACE, useFaceRing} from '../profile/ProfileFace';
+import {avatarInitialMetrics} from './Avatar';
 import {CONVERSATION_INFO_LABEL} from './conversationMenu';
 
 // =============================================================================
@@ -340,9 +340,9 @@ function ChannelFace({
         <Text
           accessibilityElementsHidden
           importantForAccessibility="no"
-          // 큰 글씨에서도 원 안에 머문다 — 이 글자는 읽는 글이 아니라 표지다.
-          maxFontSizeMultiplier={1}
-          style={styles.channelHash}>
+          // 이니셜과 같은 처지다 — 상자에 갇힌 표지라 큰 글씨에서도 원 안에 머문다(`Avatar` 의 이니셜이 같은 상한을 쓴다).
+          maxFontSizeMultiplier={AVATAR_INITIAL_MAX_SCALE}
+          style={[styles.channelHash, avatarInitialMetrics(PROFILE_FACE)]}>
           #
         </Text>
       )}
@@ -394,13 +394,8 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
       backgroundColor: color.surface,
     },
-    // 112 원 안의 `#` — 이니셜이 큰 얼굴에서 크는 비율(`Avatar` 의 `initialSized`: 32 에 `font.label` 13)과 같다. 격자 밖 글자 크기를 새로 두지 않는다.
-    channelHash: {
-      fontSize: Math.round((font.label * PROFILE_FACE) / AVATAR_SIZE),
-      lineHeight: Math.round(((font.label + space.xs) * PROFILE_FACE) / AVATAR_SIZE),
-      fontWeight: '700',
-      color: color.textMuted,
-    },
+    // 112 원 안의 `#` — 크기는 이니셜이 큰 얼굴에서 크는 비율 그대로(`avatarInitialMetrics`, 위 JSX 가 얹는다).
+    channelHash: {fontWeight: '700', color: color.textMuted},
     // 자물쇠 배지: 얼굴 오른쪽 아래에 걸친다(`StatusDot` 이 아바타 모서리에 앉는 것과 같은 자리).
     lockBadge: {
       position: 'absolute',

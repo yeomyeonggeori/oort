@@ -24,7 +24,7 @@ export function textEm(text: string): number {
   return em;
 }
 
-/** `text` 가 `fontSize`(pt)·`fontScale`(글자 배율)에서 한 줄로 차지하는 폭(pt)의 어림. */
-export function estimateTextWidth(text: string, fontSize: number, fontScale: number): number {
-  return textEm(text) * fontSize * fontScale;
+/** `text` 가 글자 크기 `pt`·글자 배율 `fontScale` 에서 한 줄로 차지하는 폭(pt)의 어림. */
+export function estimateTextWidth(text: string, pt: number, fontScale: number): number {
+  return textEm(text) * pt * fontScale;
 }
