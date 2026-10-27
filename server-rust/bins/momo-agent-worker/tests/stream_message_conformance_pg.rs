@@ -310,6 +310,7 @@ async fn an_agent_grows_one_message_across_seventeen_deltas() {
         tenant.agent_id,
         run_id,
         None,
+        None,
         serde_json::json!({}),
     );
 
@@ -399,6 +400,7 @@ async fn a_reclaimed_turn_resumes_the_revision_it_left_behind() {
         tenant.agent_id,
         run_id,
         None,
+        None,
         serde_json::json!({}),
     );
     for delta in ["앞부분 ", "중간 ", "조금 더 "] {
@@ -419,6 +421,7 @@ async fn a_reclaimed_turn_resumes_the_revision_it_left_behind() {
         tenant.channel_id,
         tenant.agent_id,
         run_id,
+        None,
         None,
         serde_json::json!({}),
     );
@@ -499,6 +502,7 @@ async fn an_agent_cannot_stream_into_a_humans_message() {
         tenant.channel_id,
         tenant.agent_id,
         agent_run,
+        None,
         None,
         serde_json::json!({}),
     );
@@ -595,6 +599,7 @@ async fn a_cancelled_run_freezes_its_message_and_marks_how_it_ended() {
         tenant.channel_id,
         tenant.agent_id,
         run_id,
+        None,
         None,
         serde_json::json!({}),
     );
@@ -740,6 +745,7 @@ async fn a_provisional_freeze_is_found_and_ended_by_the_turns_terminal_close() {
         tenant.channel_id,
         tenant.agent_id,
         run_id,
+        None,
         None,
         serde_json::json!({}),
     );
@@ -898,6 +904,7 @@ async fn an_outcome_on_a_non_final_slice_is_refused() {
         tenant.agent_id,
         run_id,
         None,
+        None,
         serde_json::json!({}),
     );
     stream
@@ -995,6 +1002,7 @@ async fn a_slice_at_a_revision_already_spent_changes_nothing() {
         tenant.channel_id,
         tenant.agent_id,
         run_id,
+        None,
         None,
         serde_json::json!({}),
     );

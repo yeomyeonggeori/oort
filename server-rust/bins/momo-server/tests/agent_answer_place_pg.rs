@@ -1,22 +1,23 @@
-//! #4622 / ADR-0200 증보 5 「답 자리 현황」 — 한 run의 **최종 답이 오늘 어디에 놓이는지**, 서버가 쓴 행으로 고정한다.
+//! #4622 / ADR-0200 증보 5 · ADR-0148 증보 「답 자리」 — 한 run의 **최종 답이 어디에 놓이는지**, 서버가 쓴 행으로 고정한다.
 //!
 //! 실제 Axum 라우터를 `momo_app`(NOBYPASSRLS) 풀 위에 띄우고, 호스팅 에이전트가 현행 루틴대로(ping·inbox·
 //! `oort_job_start`·`oort_run_event`·`oort_run_complete`) 답하게 한 뒤, **`message` 행의 `root_id`·`reply_to_id`**를
 //! 읽는다. 서버 안쪽 함수를 부르지 않고 HTTP로만 움직인다. 같은 harness를 쓰는 `grok_like_agent_flow_pg.rs`는
-//! 답이 DM에 도착하는지까지만 보고, 어느 자리인지는 어떤 시험도 잠그지 않았다(인용 `reply_to_id`만 관리형
-//! 워커 시험이 잠근다).
+//! 답이 DM에 도착하는지까지만 보고, 어느 자리인지는 어떤 시험도 잠그지 않았다.
 //!
-//! | 시험 | 오늘의 자리 | 이 시험이 바뀌는 때 |
+//! | 시험 | 자리 | 고정하는 것 |
 //! |---|---|---|
-//! | `a_dm_answer_lands_in_the_main_flow_quoting_the_message` | 본류 + 인용 | 바뀌지 않아요(E도 DM은 본류) |
-//! | `a_top_level_channel_mention_is_answered_in_the_main_flow_quoting_it` | **본류 + 인용** | 서버 정렬 2차(`ADR-0200 증보 5 「열어 두는 것」 1`)가 승인되면 `root_id`가 트리거 id가 돼요 |
-//! | `a_mention_inside_a_thread_is_answered_outside_that_thread` | **스레드 밖 본류 + 인용** | 서버 정렬 1차가 승인되면 `root_id`가 그 스레드의 root가 돼요 |
+//! | `a_dm_answer_lands_in_the_main_flow_quoting_the_message` | 본류 + 인용 | E도 DM은 본류예요 |
+//! | `a_top_level_channel_mention_is_answered_in_the_main_flow_quoting_it` | **본류 + 인용** | **현행**이에요. 규칙 E는 트리거 아래 새 스레드를 원하고, 그 정렬 2차는 #4646이에요. 그 PR이 이 시험을 먼저 빨갛게 만들어요 |
+//! | `a_mention_inside_a_thread_is_answered_inside_that_thread` | **같은 스레드 + 인용**, root의 「답글 N개」·`thread.updated`가 같이 움직여요 | #4622 정렬 1차(ADR-0148 증보). 이전에는 스레드 밖 본류였어요 |
+//! | `a_thread_whose_root_was_deleted_since_is_answered_in_the_main_flow` | 본류 + 인용, 롤업 불변 | 사람이 못 올릴 자리(지워진 root)에는 답도 안 올려요. 턴을 실패시키지 않고 예전 자리로 돌아가요 |
 //!
-//! **이 시험은 현행 계약(ADR-0148 규칙 6, 「인용은 본류에 두고 맥락만 끌어온다」)을 고정하는 것이지 그 자리가
-//! 옳다는 선언이 아니다.** 규칙 E(채널 최상위 멘션은 그 메시지의 스레드, 스레드 안은 같은 스레드)와 어긋나는 두
-//! 줄이 어디인지를 시험이 이름으로 보여 주고, 서버가 정렬되는 PR은 이 시험을 **먼저 빨갛게 만들고** 고친다.
-//! 보충으로, 외부 에이전트가 「스레드 안 → 같은 스레드」를 따를 수 있는 근거(트리거의 `rootId`가 job 시작 답의
-//! 대화에 실린다)도 같은 시험에서 확인한다(지시문 `SELF_HOST_AGENT.md` §3.3.17.4 4번이 기대는 사실).
+//! **표의 DM·채널 최상위 두 줄은 현행 계약(ADR-0148 규칙 6, 「인용은 본류에 두고 맥락만 끌어온다」)을 고정하는
+//! 것이지 그 자리가 옳다는 선언이 아니다.** 같은 결정을 쓰는 곳은 넷(여기 외부 `oort_run_complete`, REST 콜백
+//! `gateway_mode_conformance_pg.rs`, 관리형 워커 `agent_worker_conformance_pg.rs`, 팀 AI
+//! `team_ai_conformance_pg.rs`)이고 모두 `GatewayRunSnapshot::trigger_root_id` 한 곳에서 자리를 받아요.
+//! 보충으로, 외부 에이전트가 직접 올리는 메시지로 같은 자리를 따를 수 있는 근거(트리거의 `rootId`가 job 시작
+//! 답의 대화에 실린다)도 같은 시험에서 확인한다(지시문 `SELF_HOST_AGENT.md` §3.3.17.4 4번이 기대는 사실).
 //!
 //! 격리 DB에서만:
 //!
@@ -118,6 +119,74 @@ impl World {
         .await
         .expect("agent places")
     }
+
+    /// The `seq` of the agent's only message in `channel`.
+    async fn the_answers_seq(&self, channel: Uuid) -> i64 {
+        sqlx::query_scalar(
+            "SELECT seq FROM message \
+              WHERE workspace_id = $1 AND channel_id = $2 AND author_member_id = $3",
+        )
+        .bind(self.workspace)
+        .bind(channel)
+        .bind(self.agent)
+        .fetch_one(&self.su)
+        .await
+        .expect("the agent's one message")
+    }
+
+    /// A thread's rollup row — what the root's 「답글 N개」 reads — as
+    /// `(reply_count, last_reply_seq, participant_ids)`. `None` when no reply ever made one.
+    async fn rollup(&self, root: Uuid) -> Option<(i32, Option<i64>, Vec<Uuid>)> {
+        sqlx::query_as(
+            "SELECT reply_count, last_reply_seq, participant_ids FROM thread \
+              WHERE workspace_id = $1 AND root_id = $2",
+        )
+        .bind(self.workspace)
+        .bind(root)
+        .fetch_optional(&self.su)
+        .await
+        .expect("thread rollup")
+    }
+
+    /// The newest `thread.updated` broadcast for `root` as `(reply_count, last_reply_seq)` — what
+    /// every open client is told about the thread. Read from the outbox, where the relay picks it up.
+    async fn last_thread_updated(&self, root: Uuid) -> Option<(i64, i64)> {
+        let payload: Option<Value> = sqlx::query_scalar(
+            "SELECT payload->'data'->'payload' FROM outbox \
+              WHERE workspace_id = $1 AND kind = 'broadcast' \
+                AND payload->'data'->>'type' = 'thread.updated' \
+                AND lower(payload->'data'->'payload'->>'root_id') = lower($2) \
+              ORDER BY id DESC LIMIT 1",
+        )
+        .bind(self.workspace)
+        .bind(root.to_string())
+        .fetch_optional(&self.su)
+        .await
+        .expect("thread.updated broadcast");
+        payload.map(|payload| {
+            (
+                payload["reply_count"].as_i64().expect("reply_count"),
+                payload["last_reply_seq"].as_i64().expect("last_reply_seq"),
+            )
+        })
+    }
+
+    /// The person deletes one of their own messages (a tombstone, not a removal).
+    async fn delete(&self, message: Uuid) {
+        let response = self
+            .http
+            .delete(format!(
+                "{}/v1/workspaces/{}/messages/{message}",
+                self.base, self.workspace
+            ))
+            .bearer_auth(&self.owner_jwt)
+            .send()
+            .await
+            .expect("delete");
+        let status = response.status().as_u16();
+        let body = response.text().await.unwrap_or_default();
+        assert_eq!(status, 200, "delete: {body}");
+    }
 }
 
 /// One tracked turn the way the routine does it: ping, inbox, `oort_job_start {}`, one progress
@@ -191,7 +260,7 @@ async fn a_top_level_channel_mention_is_answered_in_the_main_flow_quoting_it() {
 
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
-async fn a_mention_inside_a_thread_is_answered_outside_that_thread() {
+async fn a_mention_inside_a_thread_is_answered_inside_that_thread() {
     let w = world().await;
     let root = w.say(w.public, "다음 주 배포 일정", None).await;
     let asked = w
@@ -201,6 +270,8 @@ async fn a_mention_inside_a_thread_is_answered_outside_that_thread() {
             Some(root),
         )
         .await;
+    // The person's reply is the first reply the thread has; the answer will be the second.
+    assert_eq!(w.rollup(root).await.map(|r| r.0), Some(1));
     let started = answer_the_pending_turn(&w, w.public, "이어서 정리했어요").await;
 
     // What an external agent is told about the message that called it: the trigger id, and in the
@@ -225,12 +296,62 @@ async fn a_mention_inside_a_thread_is_answered_outside_that_thread() {
         "the trigger carries the root of the thread it was said in"
     );
 
-    // TODAY: the final answer leaves the thread. `root_id` is NULL although the question was asked
-    // inside the thread of `root`. Rule E wants `root_id == root`. That is ADR-0200 증보 5 「열어 두는
-    // 것」 1, first step.
+    // #4622 (ADR-0148 증보): the final answer stays in the thread the question was asked in — and
+    // still quotes the message it answers (규칙 1: belonging and aim are two columns).
+    assert_eq!(
+        w.agent_places(w.public).await,
+        vec![(Some(root), Some(asked))],
+        "the final answer is inside the thread of `root` and quotes the in-thread message"
+    );
+
+    // …and it is a REPLY the thread knows about, not a row that happens to carry a `root_id`: the
+    // root's 「답글 N개」 moved, the answer's author joined the thread, and every open client was told.
+    // This is the half a bare `root_id: Some(_)` on the raw spine silently skips.
+    let answer_seq = w.the_answers_seq(w.public).await;
+    let (count, last_seq, participants) = w.rollup(root).await.expect("the thread has a rollup");
+    assert_eq!(count, 2, "the person's reply and the agent's answer");
+    assert_eq!(
+        last_seq,
+        Some(answer_seq),
+        "the rollup's newest reply is the answer"
+    );
+    assert!(
+        participants.contains(&w.agent),
+        "the agent that answered is a participant of the thread: {participants:?}"
+    );
+    assert_eq!(
+        w.last_thread_updated(root).await,
+        Some((2, answer_seq)),
+        "`thread.updated` was published for the answer, so a client holding the root re-draws its count"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_thread_whose_root_was_deleted_since_is_answered_in_the_main_flow() {
+    let w = world().await;
+    let root = w.say(w.public, "다음 주 배포 일정", None).await;
+    let asked = w
+        .say(
+            w.public,
+            &format!("@{} 이어서 정리해줘", w.handle),
+            Some(root),
+        )
+        .await;
+    // The person deletes the thread's root while the agent is working. A REPLY under a deleted root is
+    // refused to people (`validate_thread_root_in_tx`), so the agent's answer must not be written
+    // there either — and must not fail the turn: it goes where answers went before #4622.
+    w.delete(root).await;
+    answer_the_pending_turn(&w, w.public, "이어서 정리했어요").await;
+
     assert_eq!(
         w.agent_places(w.public).await,
         vec![(None, Some(asked))],
-        "the final answer is at the top level and quotes the in-thread message"
+        "no live thread to belong to: main flow, quoting the message it answers"
+    );
+    assert_eq!(
+        w.rollup(root).await.map(|r| r.0),
+        Some(1),
+        "the deleted thread's rollup still counts only the person's reply: the answer was not added to it"
     );
 }

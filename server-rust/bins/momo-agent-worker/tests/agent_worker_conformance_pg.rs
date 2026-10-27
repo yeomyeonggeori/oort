@@ -41,6 +41,8 @@
 //! | `b51_2_a_provider_failure_is_visible_to_the_user_and_retried_only_when_worth_it` | post the failure notice on every attempt instead of the last, or widen `is_retryable` so a 4xx is retried |
 //! | `b51_3_one_agent_runs_one_job_at_a_time_and_two_agents_run_together` | drop the `NOT EXISTS` in-flight predicate or the `row_number() = 1` rank, or "fix" the claim into a global `LIMIT 1` |
 //! | `b51_4_the_operators_bearer_never_reaches_a_row_a_message_or_an_error` | remove `redact_secrets`, or start logging/persisting the resolved endpoint |
+//! | `t4622_a_turn_raised_inside_a_thread_answers_inside_that_thread` | write the commit's answer with `root_id: None` (it leaves the thread the person is watching), or on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving) |
+//! | `t4622_a_streamed_turn_raised_inside_a_thread_is_opened_inside_that_thread` | open the stream without the thread (the commit dedupes onto that row, so the answer is outside the thread for good — only this test goes red, the non-streaming one stays green), drop the rollup from the opening write, or let the dedupe bump the rollup a second time |
 //! | `uxc_a_1_a_completion_report_rides_the_ordinary_turn_message` | leave the report fence in the body, stop merging the card into the turn's props, take `elapsed_ms` from the model instead of `agent_run.started_at`, or give the card its own `message_type`/row instead of the turn's |
 //! | `uxc_a_2_a_streamed_report_lands_on_the_message_the_reader_watched` | drop the props patch a deduped commit needs, move it after the closing slice (the row moves with no frame to say so), or stop cutting the fence out of the streamed slices |
 //! | `uxc_a_3_a_report_without_prose_never_commits_its_own_envelope` | make the empty-body fallback reach for the raw turn text again (the envelope lands in the channel as prose), drop the card when there is no sentence to hang it under, or measure `elapsed_ms` against this host's wall clock instead of the database's |
@@ -73,7 +75,7 @@ use momo_agent_worker::provider::{
 use momo_agent_worker::{AgentWorker, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
-use momo_messaging::{send_message_in_tx, NewMessage};
+use momo_messaging::{send_message_in_tx, send_thread_notice_in_tx, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind, DEFAULT_WORKER_LEASE_SECONDS};
 use momo_settings::{seal_bearer, upsert_link};
 use serde_json::{json, Value};
@@ -327,6 +329,19 @@ async fn enqueue_mention_turn(
     agent_id: Uuid,
     body: &str,
 ) -> (Uuid, Uuid, i64) {
+    enqueue_mention_turn_at(pool, tenant, agent_id, body, None).await
+}
+
+/// [`enqueue_mention_turn`], with the person saying it **inside the thread of `root`** (#4622) —
+/// `None` is the channel's top level. A reply goes through the spine that keeps the thread's rollup,
+/// as the product's send does, so the root already counts the person's reply when the agent answers.
+async fn enqueue_mention_turn_at(
+    pool: &PgPool,
+    tenant: &Tenant,
+    agent_id: Uuid,
+    body: &str,
+    root: Option<Uuid>,
+) -> (Uuid, Uuid, i64) {
     let workspace_id = tenant.workspace_id;
     let channel_id = tenant.channel_id;
     let human_id = tenant.human_id;
@@ -334,12 +349,15 @@ async fn enqueue_mention_turn(
 
     with_tenant_tx(pool, workspace_id, move |conn| {
         Box::pin(async move {
-            let trigger_message = send_message_in_tx(
-                conn,
-                workspace_id,
-                NewMessage::text(channel_id, human_id, body.clone()),
-            )
-            .await?;
+            let said = NewMessage {
+                root_id: root,
+                ..NewMessage::text(channel_id, human_id, body.clone())
+            };
+            let trigger_message = if root.is_some() {
+                send_thread_notice_in_tx(conn, workspace_id, said).await?
+            } else {
+                send_message_in_tx(conn, workspace_id, said).await?
+            };
 
             let created = create_agent_run_in_tx(
                 conn,
@@ -452,6 +470,45 @@ async fn agent_messages(
         )
     })
     .collect()
+}
+
+/// The person says `body` at the channel's top level and the message id comes back — a thread root.
+async fn human_says_at_top_level(pool: &PgPool, tenant: &Tenant, body: &str) -> Uuid {
+    let workspace_id = tenant.workspace_id;
+    let channel_id = tenant.channel_id;
+    let human_id = tenant.human_id;
+    let body = body.to_string();
+    with_tenant_tx(pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace_id,
+                NewMessage::text(channel_id, human_id, body),
+            )
+            .await?;
+            Ok(sent.message.id)
+        })
+    })
+    .await
+    .expect("the person says something at the top level")
+}
+
+/// Where a message sits: `(root_id, reply_to_id)`.
+async fn place_of(su: &PgPool, message_id: Uuid) -> (Option<Uuid>, Option<Uuid>) {
+    sqlx::query_as("SELECT root_id, reply_to_id FROM message WHERE id = $1")
+        .bind(message_id)
+        .fetch_one(su)
+        .await
+        .expect("read the message's place")
+}
+
+/// A thread's rollup as `(reply_count, last_reply_seq)` — what the root's 「답글 N개」 reads.
+async fn thread_rollup(su: &PgPool, root: Uuid) -> (i32, Option<i64>) {
+    sqlx::query_as("SELECT reply_count, last_reply_seq FROM thread WHERE root_id = $1")
+        .bind(root)
+        .fetch_one(su)
+        .await
+        .expect("the thread's rollup")
 }
 
 async fn run_status(su: &PgPool, run_id: Uuid) -> String {
@@ -635,6 +692,134 @@ async fn b51_1_a_turn_answers_in_the_channel_and_bills_the_run() {
     assert_eq!(again.claimed, 0, "a settled job is not re-claimable");
     assert_eq!(agent_messages(&su, &tenant, tenant.agent_id).await.len(), 1);
     assert_eq!(provider.calls().len(), 1, "the provider was paid once");
+}
+
+// ---------------------------------------------------------------------------
+// #4622 — the answer belongs in the thread the request was made in
+// ---------------------------------------------------------------------------
+
+/// **A turn raised inside a thread answers inside it** (#4622, ADR-0148 증보 2026-10-27).
+///
+/// The answer used to leave the thread the person was watching: the worker wrote `root_id: None`
+/// because it had no reader for the trigger's own root. The assertions that matter are the pair — the
+/// place (`root_id` = the thread's root, `reply_to_id` = the message answered, both columns because
+/// belonging and aim are not one spelling) and the rollup (the root counts the answer as a reply, so its
+/// 「답글 N개」 moves and `thread.updated` is published). A bare `root_id: Some(_)` on the raw spine
+/// passes the first and fails the second.
+///
+/// A non-streaming provider here, so the commit's send is the write that *creates* the answer; the
+/// streamed twin below is the one where it is a dedupe.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn t4622_a_turn_raised_inside_a_thread_answers_inside_that_thread() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let root = human_says_at_top_level(&su, &tenant, "다음 주 배포 일정").await;
+    let (run_id, trigger, _job_id) = enqueue_mention_turn_at(
+        &su,
+        &tenant,
+        tenant.agent_id,
+        "@hermes 이어서 정리해줘",
+        Some(root),
+    )
+    .await;
+    assert_eq!(
+        thread_rollup(&su, root).await.0,
+        1,
+        "the person's reply is the thread's first"
+    );
+
+    let provider = Arc::new(MockChatProvider::echo());
+    let worker = build_worker(provider, base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(messages.len(), 1, "exactly one agent reply");
+    let (message_id, seq, _, _) = messages.into_iter().next().unwrap();
+    assert_eq!(
+        place_of(&su, message_id).await,
+        (Some(root), Some(trigger)),
+        "the answer is inside the thread of the request and quotes it"
+    );
+    assert_eq!(
+        thread_rollup(&su, root).await,
+        (2, Some(seq)),
+        "the answer is a reply the thread knows about: the person's reply and the answer"
+    );
+    let stats = broadcast_stats(&su, tenant.channel_id).await;
+    assert_eq!(
+        count_of(&stats, "thread.updated"),
+        2,
+        "one `thread.updated` for the person's reply and one for the answer: {stats:?}"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
+}
+
+/// **The streamed twin: the opening write is the one that must carry the thread.**
+///
+/// On a streamed turn the pump creates the answer at its first slice and the commit's send — with the
+/// same `client_msg_id` — dedupes onto that row and updates nothing. So a place decided only at the
+/// commit is a place the answer never gets: this test goes red when the stream opens in the main flow
+/// while the non-streaming test above stays green, which is the whole reason it exists.
+///
+/// `thread.updated == 2` is the other half: the person's reply and the answer's *one* bump. The
+/// commit's dedupe must not add a third.
+#[tokio::test]
+#[ignore = "requires DATABASE_URL to a throwaway pgvector/pg18 database"]
+async fn t4622_a_streamed_turn_raised_inside_a_thread_is_opened_inside_that_thread() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let tenant = seed_tenant(&su).await;
+
+    let root = human_says_at_top_level(&su, &tenant, "다음 주 배포 일정").await;
+    let (run_id, trigger, _job_id) = enqueue_mention_turn_at(
+        &su,
+        &tenant,
+        tenant.agent_id,
+        "@hermes 길게 이어서 정리해줘",
+        Some(root),
+    )
+    .await;
+
+    // Four slices at the shipped window, so the answer is opened by the pump and grown, not written once.
+    let provider = Arc::new(MockChatProvider::echo().streaming(4, Duration::from_millis(900)));
+    let worker = build_worker(provider, base_config()).await;
+    let stats = worker.drain_once().await.expect("drain");
+    assert_eq!(stats.answered, 1, "the turn produced an answer");
+
+    let messages = agent_messages(&su, &tenant, tenant.agent_id).await;
+    assert_eq!(
+        messages.len(),
+        1,
+        "one turn is one message — a second row is the commit posting its own copy beside the streamed one"
+    );
+    let (message_id, seq, _, props) = messages.into_iter().next().unwrap();
+    assert!(
+        props.get(momo_messaging::STREAM_PROPS_KEY).is_some(),
+        "the answer was streamed (opened by the pump), not written once by the commit: {props}"
+    );
+    assert_eq!(
+        place_of(&su, message_id).await,
+        (Some(root), Some(trigger)),
+        "the streamed answer was OPENED inside the thread of the request, quoting it"
+    );
+    assert_eq!(
+        thread_rollup(&su, root).await,
+        (2, Some(seq)),
+        "the person's reply and the answer — counted once, at the opening write"
+    );
+    let stats = broadcast_stats(&su, tenant.channel_id).await;
+    assert_eq!(
+        count_of(&stats, "thread.updated"),
+        2,
+        "the commit's dedupe publishes no third `thread.updated`: {stats:?}"
+    );
+    assert_eq!(run_status(&su, run_id).await, "succeeded");
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,6 +1191,7 @@ async fn a_cancel_closes_the_message_a_streaming_turn_left_open() {
         tenant.channel_id,
         tenant.agent_id,
         run_id,
+        None,
         None,
         serde_json::json!({}),
     );

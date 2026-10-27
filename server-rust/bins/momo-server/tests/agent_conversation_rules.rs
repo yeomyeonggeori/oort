@@ -453,9 +453,12 @@ fn the_message_tools_carry_the_conversation_rules() {
     );
 }
 
-/// ADR-0200 증보 5 「답 자리 현황」: a run's final answer is placed by the server (main flow, a
-/// quote of the trigger), so the tool that delivers it must not promise a place. If the server is
-/// aligned (「열어 두는 것」 1) this test changes in the same PR, on purpose.
+/// ADR-0200 증보 5 「답 자리」: a run's final answer is placed by the server, never chosen by the
+/// agent — inside the thread the request was made in (#4622, ADR-0148 증보), otherwise in the main
+/// flow quoting the message (a channel's top level moves under it in #4646). The tool that delivers
+/// it therefore stays **place-free**: it tells the agent that oort posts `body` for it, and a place
+/// word here would be a promise about server behaviour that is about to change again. The place is
+/// pinned where it lives — `agent_answer_place_pg.rs` and the three sibling PG suites — not here.
 #[test]
 fn the_final_answers_tool_promises_no_place() {
     let complete = lower(description(TOOL_RUN_COMPLETE));

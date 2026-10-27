@@ -354,7 +354,8 @@ describe("#4622 routine 지시가 행동 규칙을 싣는다 (핵심 낱말 집�
   it("지시문은 한 줄이고 최종 답의 자리를 약속하지 않는다 (서버가 정한다)", () => {
     // routine 구획의 `- 지시: …` 한 줄에 들어가는 문장이라 줄바꿈이 있으면 구획이 깨진다.
     expect(HOSTED_ROUTINE_TEMPLATE).not.toMatch(/\n/);
-    // 「원래 thread에 게시한다」는 서버가 하는 일과 달라서 뺐다(ADR-0200 증보 5 「열어 두는 것」).
+    // 「원래 thread에 게시한다」는 서버가 하는 일과 달라서 뺐다(ADR-0200 증보 5 「바뀌는 기존 결정」).
+    // 최종 답은 `oort_run_complete` 가 올리고 자리는 서버가 정한다(규칙 10, #4646 이 한 번 더 바꾼다).
     expect(HOSTED_ROUTINE_TEMPLATE).not.toContain("원래 thread");
     expect(HOSTED_ROUTINE_TEMPLATE).not.toContain("에 게시한다");
   });

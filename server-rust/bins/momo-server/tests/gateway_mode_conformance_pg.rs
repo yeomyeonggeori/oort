@@ -26,6 +26,7 @@
 //! |---|---|
 //! | `b6_1_a_work_run_reaches_a_gateway_and_comes_back` | drop gateway mode from the route guard, stop carrying tools on the work payload (#1037), drop the lease from the claim, or stop `complete` from writing the message/ledger/terminal-status trio |
 //! | `b6_2_a_gateway_event_moves_the_run_and_publishes_progress` | drop the `mark_run_started` transition from `events`, or drop the progress/partial frames it emits (#1013) |
+//! | `t4622_the_rest_callback_answers_inside_the_thread_it_was_asked_in` | write the callback's answer with `root_id: None` (it leaves the thread the person is watching), or write it on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving), or give a main-flow request a thread it never had |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -1042,4 +1043,175 @@ async fn s4054_the_answer_carries_a_server_owned_receipt_and_notice_that_nobody_
             "{key} must be stripped: {stored}"
         );
     }
+}
+
+// ---------------------------------------------------------------------------
+// #4622 — where the REST callback's final answer lands
+// ---------------------------------------------------------------------------
+
+/// The owner says `body` in the tenant's channel — inside the thread of `root` when given — through the
+/// real REST send, and the message id comes back. A body that names `@hermes` is a mention: the send
+/// itself creates the run and the pending `gateway` job.
+async fn say(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    tenant: &Tenant,
+    body: &str,
+    root: Option<Uuid>,
+) -> Uuid {
+    let mut request = json!({"clientMsgId": Uuid::new_v4(), "body": body});
+    if let Some(root) = root {
+        request["rootId"] = json!(root);
+    }
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            tenant.workspace, tenant.channel
+        ))
+        .bearer_auth(token)
+        .json(&request)
+        .send()
+        .await
+        .expect("send");
+    let status = response.status().as_u16();
+    let value: Value = response.json().await.expect("send body");
+    assert_eq!(status, 201, "a send answers 201: {value}");
+    Uuid::parse_str(value["id"].as_str().expect("message id")).expect("message uuid")
+}
+
+/// Claim the one pending job and complete it with `answer` over the REST callback, as a gateway
+/// adapter does. Returns the run's id.
+async fn claim_and_complete(
+    http: &reqwest::Client,
+    base: &str,
+    tenant: &Tenant,
+    agent: Uuid,
+    answer: &str,
+) -> Uuid {
+    let pending: Value = gateway(http.get(format!(
+        "{base}/v1/workspaces/{}/agents/{agent}/gateway/jobs/pending",
+        tenant.workspace
+    )))
+    .send()
+    .await
+    .expect("claim")
+    .json()
+    .await
+    .expect("pending body");
+    let jobs = pending["jobs"].as_array().expect("jobs");
+    assert_eq!(jobs.len(), 1, "one mention, one claimable job: {pending}");
+    let job = &jobs[0];
+    let run_id = Uuid::parse_str(job["runId"].as_str().expect("runId")).expect("run uuid");
+    let done = gateway(http.post(format!(
+        "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+        tenant.workspace
+    )))
+    .json(&json!({
+        "job_id": job["id"],
+        "lease_id": job["leaseId"],
+        "status": "succeeded",
+        "body": answer,
+    }))
+    .send()
+    .await
+    .expect("complete");
+    let status = done.status().as_u16();
+    let body = done.text().await.unwrap_or_default();
+    assert_eq!(status, 200, "complete: {body}");
+    run_id
+}
+
+/// A run's final answer as `(seq, root_id, reply_to_id)`.
+async fn the_answer_of(su: &PgPool, run: Uuid) -> (i64, Option<Uuid>, Option<Uuid>) {
+    sqlx::query_as(
+        "SELECT seq, root_id, reply_to_id FROM message WHERE run_id = $1 AND client_msg_id = $1",
+    )
+    .bind(run)
+    .fetch_one(su)
+    .await
+    .expect("the run's answer")
+}
+
+/// **The REST callback answers where the person asked** (#4622, ADR-0148 증보 2026-10-27).
+///
+/// A request made inside a thread is answered inside it — the same place, the same rollup, the same
+/// `thread.updated` as the managed worker, the team AI and the Agent Port's `oort_run_complete` — and a
+/// request made at the channel's top level is answered at the top level, quoting it. The second half is
+/// what keeps the first from being "always thread": #4646 owns the day that changes.
+///
+/// The rollup assertions are the ones a bare `root_id: Some(_)` on the raw spine fails: it would leave
+/// the root's `reply_count` at 1 and publish no `thread.updated`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn t4622_the_rest_callback_answers_inside_the_thread_it_was_asked_in() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let app_pool = role_pool("momo_app", &momo_app_password()).await;
+    let tenant = seed_tenant(&su, &app_pool).await;
+    let agent = seed_channel_agent(&su, &tenant, "hermes").await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, tenant.workspace, &tenant.email).await;
+
+    // A request made inside a thread.
+    let root = say(&http, &base, &token, &tenant, "다음 주 배포 일정", None).await;
+    let asked = say(
+        &http,
+        &base,
+        &token,
+        &tenant,
+        "@hermes 이어서 정리해줘",
+        Some(root),
+    )
+    .await;
+    let run = claim_and_complete(&http, &base, &tenant, agent, "이어서 정리했어요").await;
+    let (answer_seq, answer_root, answer_quote) = the_answer_of(&su, run).await;
+    assert_eq!(
+        (answer_root, answer_quote),
+        (Some(root), Some(asked)),
+        "the callback's answer is inside the thread of the request, quoting it"
+    );
+    let rollup: (i32, Option<i64>) = sqlx::query_as(
+        "SELECT reply_count, last_reply_seq FROM thread WHERE workspace_id = $1 AND root_id = $2",
+    )
+    .bind(tenant.workspace)
+    .bind(root)
+    .fetch_one(&su)
+    .await
+    .expect("the thread's rollup");
+    assert_eq!(
+        rollup,
+        (2, Some(answer_seq)),
+        "the person's reply and the answer — the answer is a reply the thread knows about"
+    );
+    let announced: Value = sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'thread.updated' \
+            AND lower(payload->'data'->'payload'->>'root_id') = lower($2) \
+          ORDER BY id DESC LIMIT 1",
+    )
+    .bind(tenant.workspace)
+    .bind(root.to_string())
+    .fetch_one(&su)
+    .await
+    .expect("the thread was announced");
+    assert_eq!(announced["reply_count"], json!(2), "{announced}");
+    assert_eq!(
+        announced["last_reply_seq"],
+        json!(answer_seq),
+        "{announced}"
+    );
+
+    // A request made at the channel's top level stays where it was: the main flow, quoting it.
+    let top = say(&http, &base, &token, &tenant, "@hermes 새 질문이에요", None).await;
+    let run = claim_and_complete(&http, &base, &tenant, agent, "새 답이에요").await;
+    let (_, answer_root, answer_quote) = the_answer_of(&su, run).await;
+    assert_eq!(
+        (answer_root, answer_quote),
+        (None, Some(top)),
+        "a top-level request is answered in the main flow (the thread-under-it step is #4646)"
+    );
 }
