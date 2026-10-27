@@ -29,13 +29,18 @@ import {
 //
 // 바텀시트 머리: **오른쪽** 떠 있는 원형 X · 가운데 제목 · **왼쪽** 선택적 ✓(확정). ✓ 는 편집
 // 시트에만 서고 입력 전에는 회색이다. 손잡이는 위 가운데이고 그릇(`PageSheet`)이 그린다.
-// 페이지 머리: **왼쪽** 원형 X · 가운데 제목(오른쪽은 비어 있거나 `trailing`). 시트 안의 X 는
-// 오른쪽, 페이지의 X 는 왼쪽 — 손이 가는 쪽이 「시트를 내리는 쪽」과 「페이지를 떠나는 쪽」으로
-// 갈린다.
+// 페이지 머리: **오른쪽** 원형 X · 가운데 제목(왼쪽은 비어 있다). **닫기 X 는 시트든 페이지든 어디서나 오른쪽
+// 위다**(#4691, owner 10-27 「X 닫기 버튼이 우측 위에」 — #4457 이 정했던 「페이지의 X 는 왼쪽」을 바꿨다).
+// 닫는 자리를 시트와 페이지가 나누지 않는다.
 //
-// 페이지 머리의 왼쪽 원은 두 모양이다(#4457, planner 결정): **X** 는 「이 페이지 전체를 닫는다」(스택의 첫
-// 페이지·모달 페이지), **‹ 뒤로** 는 「한 겹만 벗긴다」(그 위에 쌓인 안쪽 장). iOS 의 관례와 같다 — X 는
-// 나가는 문, ‹ 는 온 곳으로 한 걸음. 둘은 같은 원(같은 크기·채움·그림자)이고 글리프만 다르다.
+// 페이지 머리의 나가는 문은 두 모양이다(#4457, planner 결정): **X**(오른쪽)는 「이 페이지 전체를 닫는다」(스택의
+// 첫 페이지·모달 페이지), **‹ 뒤로**(왼쪽)는 「한 겹만 벗긴다」(그 위에 쌓인 안쪽 장). iOS 의 관례와 같다 — X 는
+// 나가는 문, ‹ 는 온 곳으로 한 걸음. 둘은 같은 원(같은 크기·채움·그림자)이고 글리프와 **자리**만 다르다(X 오른쪽,
+// ‹ 왼쪽). 한 머리에 둘이 함께 서지 않는다(타입이 막는다).
+//
+// **한 칸은 한 가지만 든다**(#4691): X 의 칸(오른쪽)은 X 가 갖는다 — 그래서 X 머리에는 `trailing` 이 없다(타입이
+// 막는다). ‹ 머리의 오른쪽 칸은 비어 있거나 `trailing`(페이지의 동작 하나)이 선다. X 머리의 왼쪽 칸은 비워 둔다 —
+// 거기에 동작이 필요해지면 시트의 ✓ 처럼 왼쪽에 세운다(지금 쓰는 곳이 없어 부품을 만들지 않았다).
 //
 // 모든 닫기 단추는 **글자 없는 원형 X** 이고, 보조기술 이름(`closeLabel`)은 시트마다 다른
 // 「… 닫기」 문장이라 **필수**다(기본값 「닫기」 를 두지 않는다 — 어느 시트를 닫는지 모른다).
@@ -226,24 +231,31 @@ export function SheetHeader({
 }
 
 /**
- * 페이지 머리의 왼쪽 원. **둘 중 하나**다 — 페이지를 떠나는 X(`closeLabel`·`onClose`) 아니면 한 겹 뒤로 가는
- * ‹(`back`). 둘을 함께 받지 않는다(타입이 막는다): 한 머리에 나가는 문이 둘이면 어느 것이 어디로 가는지 모른다.
+ * 페이지 머리의 나가는 문. **둘 중 하나**다 — 페이지를 떠나는 X(`closeLabel`·`onClose`, **오른쪽** 칸) 아니면 한 겹
+ * 뒤로 가는 ‹(`back`, **왼쪽** 칸). 둘을 함께 받지 않는다(타입이 막는다): 한 머리에 나가는 문이 둘이면 어느 것이
+ * 어디로 가는지 모른다. `trailing`(오른쪽 칸의 동작)은 ‹ 머리에만 있다 — X 머리의 오른쪽 칸은 X 의 것이다.
  */
-type PageHeaderLeft =
+type PageHeaderExit =
   | {
       closeLabel: string;
       onClose: () => void;
       closeTestID?: string;
       back?: undefined;
+      trailing?: undefined;
     }
   | {
       back: {label: string; onPress: () => void; testID?: string};
+      /** ‹ 머리의 오른쪽 칸 — 페이지의 동작 하나(글자 「편집」 같은 것). 생략하면 비어 있다. */
+      trailing?: React.ReactNode;
       closeLabel?: undefined;
       onClose?: undefined;
       closeTestID?: undefined;
     };
 
-/** 페이지 머리: [X 또는 ‹] 제목 [trailing]. 페이지에는 그릇이 없으므로 `onClose`(또는 `back.onPress`)가 필수다. */
+/**
+ * 페이지 머리: X 머리는 [ ] 제목 [X], ‹ 머리는 [‹] 제목 [trailing]. 페이지에는 그릇이 없으므로 `onClose`(또는
+ * `back.onPress`)가 필수다.
+ */
 export function PageHeader({
   title,
   closeLabel,
@@ -255,22 +267,25 @@ export function PageHeader({
   testID,
 }: {
   title: string;
-  trailing?: React.ReactNode;
   titleTestID?: string;
   testID?: string;
-} & PageHeaderLeft): React.JSX.Element {
+} & PageHeaderExit): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.header} testID={testID}>
       <View style={styles.side}>
         {back ? (
           <BackCircle label={back.label} onPress={back.onPress} testID={back.testID} />
+        ) : null}
+      </View>
+      <HeaderTitle title={title} testID={titleTestID} />
+      <View style={[styles.side, styles.sideEnd]}>
+        {back ? (
+          (trailing ?? null)
         ) : (
           <CloseCircle label={closeLabel} onPress={onClose} testID={closeTestID} />
         )}
       </View>
-      <HeaderTitle title={title} testID={titleTestID} />
-      <View style={[styles.side, styles.sideEnd]}>{trailing ?? null}</View>
     </View>
   );
 }
