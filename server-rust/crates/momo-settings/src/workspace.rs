@@ -382,6 +382,28 @@ pub async fn share_membership_state(
     Ok(())
 }
 
+/// [`share_membership_state`] that does not wait: `Ok(true)` when the shared lock is
+/// held from here to the end of the transaction, `Ok(false)` when it could not be
+/// granted at once — a membership change holds it, or is queued for it (a shared
+/// request never overtakes a waiting exclusive one) — and then nothing is held.
+///
+/// For a door anyone can knock on. Waiting for the lock keeps a pooled connection
+/// while waiting, so a change that holds the lock for long makes every caller of such
+/// a door queue for a connection, and every other request on the instance queues
+/// behind them. The caller of this answers `false` with a retry instead, which holds
+/// nothing and tells the client when to come back.
+pub async fn try_share_membership_state(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<bool, DbError> {
+    let granted: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1::text, 128))")
+            .bind(workspace_id.to_string())
+            .fetch_one(&mut *conn)
+            .await?;
+    Ok(granted)
+}
+
 /// Is there another **active** owner besides `excluding` (Swift
 /// `requireAnotherOwner`, :566). The workspace must always retain one owner, so a
 /// last owner's self-leave is refused (409) — ownership transfer is a separate,

@@ -46,6 +46,9 @@ pub struct ApiError {
     pub message: String,
     /// `error.code` on the wire; `None` omits the key.
     pub code: Option<&'static str>,
+    /// `Retry-After` (whole seconds) on the response; `None` sends no header. Only a
+    /// refusal that tells the client when to come back carries one ([`ApiError::busy`]).
+    pub retry_after_seconds: Option<u64>,
 }
 
 impl ApiError {
@@ -54,6 +57,7 @@ impl ApiError {
             status,
             message: message.into(),
             code: None,
+            retry_after_seconds: None,
         }
     }
 
@@ -63,6 +67,19 @@ impl ApiError {
             status,
             message: message.into(),
             code: Some(code),
+            retry_after_seconds: None,
+        }
+    }
+
+    /// A door that would have had to queue for a lock answers this instead: 503 with
+    /// a `Retry-After`. Nothing was written and nothing is held, so the retry is
+    /// safe whatever the request was.
+    pub fn busy(retry_after_seconds: u64) -> Self {
+        ApiError {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            message: "the server is busy; retry shortly".to_string(),
+            code: None,
+            retry_after_seconds: Some(retry_after_seconds),
         }
     }
 
@@ -118,7 +135,14 @@ impl From<NewPasswordInvalid> for ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status;
-        (status, Json(self.envelope())).into_response()
+        let retry_after = self.retry_after_seconds;
+        let mut response = (status, Json(self.envelope())).into_response();
+        if let Some(seconds) = retry_after {
+            if let Ok(value) = seconds.to_string().parse() {
+                response.headers_mut().insert("retry-after", value);
+            }
+        }
+        response
     }
 }
 

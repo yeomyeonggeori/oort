@@ -25,7 +25,26 @@
 //! ## This route owns no SQL
 //!
 //! Token lookup and consume live in `momo_auth::owner_claim`. Session rows are
-//! `issue_and_record_session`. The audit row is `momo_db::audit::write_audit`.
+//! `mint_and_record_session_in_tx`. The audit row is `momo_db::audit::write_audit`.
+//!
+//! ## One transaction, under the workspace's membership lock (#4636)
+//!
+//! The claim, the sweep of the member's other sessions (a reset), the audit row and
+//! the new session's pair are **one tenant transaction** whose first statement takes
+//! the workspace's membership lock **exclusively** ([`lock_membership_mutation`]).
+//! Exclusive for both kinds, so the handler has one mode: a claim writes the
+//! credential, and a reset ends every other session of the member, and both must be
+//! ordered against the doors that sign someone in under the shared lock (login, join):
+//! a sign-in in flight finishes first and is swept with the rest, or starts after and
+//! reads the new password. A suspension or removal that overlaps a claim waits for its
+//! commit and revokes the pair it recorded; one that committed first makes the claim
+//! find an inactive member, which rolls the whole transaction back (no password
+//! written, the token still unspent, no session).
+//!
+//! Lock order: membership lock → claim row → `human` row → member-wide sweep lock →
+//! `token` rows. The membership lock is always first, so no cycle can close through
+//! it; the operator's reissue (`issue_password_reset`) takes no membership lock, so it
+//! cannot be waiting for one.
 
 use crate::session_end::end_member_sessions_in_tx;
 use axum::extract::State;
@@ -35,14 +54,30 @@ use momo_auth::{
     consume_claim_in_tx, normalized_claim_token, normalized_new_password, resolve_claim_workspace,
     ClaimMutation, ClaimSpecInvalid,
 };
+use momo_auth::{ClaimOutcome, IssuedToken};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::RevocationCause;
+use momo_settings::lock_membership_mutation;
 
 use crate::dto::{ClaimRequest, LoginResponse, MemberDto};
 use crate::error::{db_error, ApiError};
-use crate::routes::auth_routes::{base_scopes, issue_and_record_session};
+use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
 use crate::AppState;
+
+/// What the claim transaction decided, mapped to HTTP outside it.
+enum Claimed {
+    /// The token was not spendable (unknown, expired, used, password already set).
+    /// Nothing was written.
+    Refused(ClaimMutation),
+    /// The claim is applied and the new session's pair is recorded, in the same
+    /// transaction that holds the membership lock.
+    Issued {
+        outcome: ClaimOutcome,
+        access: IssuedToken,
+        refresh: IssuedToken,
+    },
+}
 
 fn spec_error(error: ClaimSpecInvalid) -> ApiError {
     ApiError::bad_request(error.to_string())
@@ -94,74 +129,88 @@ pub async fn claim(
     let subscription_agents_enabled = state.agent_port.config.subscription_agents_enabled;
     let claude_subscription_agents_enabled =
         state.agent_port.config.claude_subscription_agents_enabled;
+    let jwt_secret = state.jwt_secret.clone();
 
-    let mutation = with_tenant_tx(&state.pool, workspace_id, {
+    let claimed = with_tenant_tx(&state.pool, workspace_id, {
         let token = token.clone();
         let password = password.clone();
         move |conn| {
             Box::pin(async move {
+                // The membership lock, exclusive and first (see the module docs).
+                lock_membership_mutation(conn, workspace_id).await?;
                 let mutation = consume_claim_in_tx(conn, workspace_id, &token, &password).await?;
-                if let ClaimMutation::Applied(ref outcome) = mutation {
-                    let (action, schema) =
-                        if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
-                            ("member.password_reset", "momo.member.password_reset.v1")
-                        } else {
-                            ("owner.claim", "momo.owner.claim.v1")
-                        };
-                    // A reset revokes every session of the member
-                    // (`consume_claim_in_tx`); their push registrations and device keys (#3022) end in
-                    // the same commit (#2677). An owner bootstrap revokes none.
-                    if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
-                        end_member_sessions_in_tx(
-                            conn,
-                            workspace_id,
-                            outcome.member_id,
-                            RevocationCause::PasswordReset,
-                        )
-                        .await?;
-                    }
-                    write_audit(
+                let ClaimMutation::Applied(outcome) = mutation else {
+                    return Ok(Claimed::Refused(mutation));
+                };
+                let (action, schema) = if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET
+                {
+                    ("member.password_reset", "momo.member.password_reset.v1")
+                } else {
+                    ("owner.claim", "momo.owner.claim.v1")
+                };
+                // A reset revokes every session of the member
+                // (`consume_claim_in_tx`); their push registrations and device keys (#3022) end in
+                // the same commit (#2677). An owner bootstrap revokes none.
+                if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
+                    end_member_sessions_in_tx(
                         conn,
-                        &AuditEntry::new(workspace_id, action)
-                            .by(outcome.member_id)
-                            .target("credential_claim", outcome.claim_id)
-                            .via_token(None)
-                            .with_schema(schema, serde_json::json!({})),
+                        workspace_id,
+                        outcome.member_id,
+                        RevocationCause::PasswordReset,
                     )
                     .await?;
-                    if outcome.claim_kind == momo_auth::CLAIM_KIND_OWNER_BOOTSTRAP {
-                        crate::routes::welcome::enqueue_welcome_kickoff_in_tx(
-                            conn,
-                            workspace_id,
-                            outcome.member_id,
-                            gateway_enabled,
-                            hosted_delivery_enabled,
-                            subscription_agents_enabled,
-                            claude_subscription_agents_enabled,
-                            None,
-                        )
-                        .await?;
-                    }
                 }
-                Ok::<_, DbError>(mutation)
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, action)
+                        .by(outcome.member_id)
+                        .target("credential_claim", outcome.claim_id)
+                        .via_token(None)
+                        .with_schema(schema, serde_json::json!({})),
+                )
+                .await?;
+                if outcome.claim_kind == momo_auth::CLAIM_KIND_OWNER_BOOTSTRAP {
+                    crate::routes::welcome::enqueue_welcome_kickoff_in_tx(
+                        conn,
+                        workspace_id,
+                        outcome.member_id,
+                        gateway_enabled,
+                        hosted_delivery_enabled,
+                        subscription_agents_enabled,
+                        claude_subscription_agents_enabled,
+                        None,
+                    )
+                    .await?;
+                }
+                // The new session's pair, on THIS connection and after the sweep above, so
+                // the sweep cannot take it and a suspension that follows can.
+                let (access, refresh) = mint_and_record_session_in_tx(
+                    conn,
+                    &jwt_secret,
+                    workspace_id,
+                    outcome.member_id,
+                    base_scopes(),
+                )
+                .await?;
+                Ok::<_, DbError>(Claimed::Issued {
+                    outcome,
+                    access,
+                    refresh,
+                })
             })
         }
     })
     .await
     .map_err(|error| db_error("claim.consume", error))?;
 
-    let ClaimMutation::Applied(outcome) = mutation else {
-        return Err(mutation_error(mutation));
+    let (outcome, access, refresh) = match claimed {
+        Claimed::Refused(mutation) => return Err(mutation_error(mutation)),
+        Claimed::Issued {
+            outcome,
+            access,
+            refresh,
+        } => (outcome, access, refresh),
     };
-
-    let (access, refresh) = issue_and_record_session(
-        &state,
-        workspace_id,
-        outcome.member_id,
-        base_scopes(),
-        "claim.session",
-    )
-    .await?;
 
     Ok(Json(LoginResponse {
         access_token: access.token,
