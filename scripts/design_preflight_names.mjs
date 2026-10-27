@@ -261,8 +261,12 @@ function main(argv) {
   const mode = argv[0] ?? "";
   if (mode === "--selftest") return selftest();
   if (mode === "--mint") {
-    const terms = argv[1] === "-" ? readFileSync(0, "utf8").split("\n") : argv.slice(1);
-    for (const t of terms.map((x) => x.trim()).filter(Boolean)) {
+    // 평문은 stdin 으로만 받는다: 인자로 받으면 셸 기록·프로세스 목록에 이름이 남는다.
+    if (argv[1] !== "-" || argv.length !== 2) {
+      console.error("usage: node scripts/design_preflight_names.mjs --mint -   (낱말은 stdin 한 줄에 하나)");
+      return 2;
+    }
+    for (const t of readFileSync(0, "utf8").split("\n").map((x) => x.trim()).filter(Boolean)) {
       const e = mintEntry(t);
       console.log(`${e.kind}${e.len} ${e.hex}`);
     }
