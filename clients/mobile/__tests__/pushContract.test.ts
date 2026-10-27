@@ -383,7 +383,7 @@ const onMac = process.platform === 'darwin';
     }
     expect(output).toMatch(/^PASS$/m);
     expect(output).not.toMatch(/^FAIL:/m);
-    // 검사 수가 크게 줄었다면 누군가 검사를 지운 것이다. (#4316 이 202건으로 시작했다: 하한 190)
+    // 검사 수가 크게 줄었다면 누군가 검사를 지운 것이다. (#4316 이 213건으로 시작했다: 하한 190)
     expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(190);
   }, 180_000);
 });

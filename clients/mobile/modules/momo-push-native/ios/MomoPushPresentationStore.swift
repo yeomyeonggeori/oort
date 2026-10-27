@@ -25,8 +25,14 @@
 //     push-presentation-settings.json     the two switches (survives a sign-out: a preference of THIS PHONE)
 //     push-presentation-cleanup-pending   a marker: a sign-out asked the system to forget our donations
 //     push-presentation/                  the cache, gone on sign-out and when 「보낸 사람 표시」 goes off
-//       avatars/<member>.<version>.png    ≤ 64 KB, ≤ 288 px, one file per (server, workspace, member, v)
+//       avatars/<member>.<version>.<seconds>.png   ≤ 64 KB, ≤ 288 px, one file per (server, workspace, member, v); <seconds> = last used
 //       channels/<scope>.json             channel id → kind, name (a push carries ids only)
+//
+// No file timestamps: when a face was last used is part of its NAME (`<member>.<version>.<seconds>.png`), not an
+// attribute of the file (`modificationDate`). The extension has no privacy manifest, and reading or setting a
+// file's timestamps is a "required reason" API that a manifest has to declare (App Store Connect ITMS-91053);
+// the notification extension must stay clear of the whole category, so nothing in this file touches it
+// (`projectShape.test.ts` keeps that true for every file the extension compiles).
 //
 // Why files, not `UserDefaults(suiteName:)`: with a missing App Group entitlement
 // `UserDefaults(suiteName:)` still answers, from a private per-app plist the other process never
@@ -268,8 +274,25 @@ public struct MomoPushPresentationCache: Sendable, Equatable {
 
     // ---- avatars --------------------------------------------------------------------------------
 
-    private func avatarFileName(member: String, version: String) -> String {
-        "\(member).\(version).png"
+    /// A face is `<member>.<version>.<seconds>.png`, where `<seconds>` is when it was last used (epoch seconds).
+    /// The time lives in the NAME so that no file-timestamp API is needed (see the header). Neither the member
+    /// key nor the version key can contain a dot, so the name splits on dots into exactly four parts.
+    private func avatarFileName(member: String, version: String, usedAt: Int64) -> String {
+        "\(member).\(version).\(usedAt).png"
+    }
+
+    private static func parseAvatarName(_ name: String) -> (member: String, version: String, usedAt: Int64)? {
+        let parts = name.split(separator: ".", omittingEmptySubsequences: false)
+        guard parts.count == 4, parts[3] == "png", let usedAt = Int64(parts[2]), usedAt >= 0 else { return nil }
+        return (String(parts[0]), String(parts[1]), usedAt)
+    }
+
+    /// Using a face renews it at most this often: a rename per notification would be a write for nothing, and
+    /// the thirty days it buys do not care about an hour.
+    static let touchInterval: Int64 = 3600
+
+    private func fileSize(_ url: URL) -> Int? {
+        (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
     }
 
     /// The cached face for EXACTLY this version of this member's photo. A different version on disk
@@ -279,23 +302,32 @@ public struct MomoPushPresentationCache: Sendable, Equatable {
     ) -> Data? {
         guard let versionKey = MomoPushPresentationKey.version(version) else { return nil }
         let memberKey = MomoPushPresentationKey.member(server: server, workspace: workspace, member: member)
-        let url = avatarsURL.appendingPathComponent(avatarFileName(member: memberKey, version: versionKey))
         let fileManager = FileManager.default
-        guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
-              let modified = attributes[.modificationDate] as? Date
-        else { return nil }
-        guard now.timeIntervalSince(modified) <= MomoPushPresentationContract.avatarTimeToLive else {
+        let nowSeconds = Int64(now.timeIntervalSince1970)
+        var newest: (name: String, usedAt: Int64)?
+        for name in (try? fileManager.contentsOfDirectory(atPath: avatarsURL.path)) ?? [] {
+            guard let parsed = Self.parseAvatarName(name), parsed.member == memberKey, parsed.version == versionKey
+            else { continue }
+            if newest == nil || parsed.usedAt > newest!.usedAt { newest = (name, parsed.usedAt) }
+        }
+        guard let found = newest else { return nil }
+        let url = avatarsURL.appendingPathComponent(found.name)
+        guard nowSeconds - found.usedAt <= Int64(MomoPushPresentationContract.avatarTimeToLive) else {
             try? fileManager.removeItem(at: url)
             return nil
         }
-        guard let size = attributes[.size] as? Int, size > 0, size <= MomoPushPresentationContract.avatarMaxBytes,
+        guard let size = fileSize(url), size > 0, size <= MomoPushPresentationContract.avatarMaxBytes,
               let data = try? Data(contentsOf: url), Self.isPNG(data)
         else {
             try? fileManager.removeItem(at: url)
             return nil
         }
-        // A face somebody still receives notifications from does not age out.
-        try? fileManager.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
+        // A face somebody still receives notifications from does not age out: renew it, in its name.
+        if nowSeconds - found.usedAt >= Self.touchInterval {
+            let renewed = avatarsURL.appendingPathComponent(
+                avatarFileName(member: memberKey, version: versionKey, usedAt: nowSeconds))
+            try? fileManager.moveItem(at: url, to: renewed)
+        }
         return data
     }
 
@@ -311,38 +343,40 @@ public struct MomoPushPresentationCache: Sendable, Equatable {
         else { return false }
         let memberKey = MomoPushPresentationKey.member(server: server, workspace: workspace, member: member)
         let fileManager = FileManager.default
+        let name = avatarFileName(member: memberKey, version: versionKey, usedAt: Int64(now.timeIntervalSince1970))
         do {
             try fileManager.createDirectory(at: avatarsURL, withIntermediateDirectories: true)
-            let name = avatarFileName(member: memberKey, version: versionKey)
-            // The same person's other versions go first: only the current photo is worth a byte.
+            // The same person's other versions (and older copies of this one) go first: only the current photo
+            // is worth a byte.
             for file in (try? fileManager.contentsOfDirectory(atPath: avatarsURL.path)) ?? []
-            where file.hasPrefix("\(memberKey).") && file != name {
+            where Self.parseAvatarName(file)?.member == memberKey && file != name {
                 try? fileManager.removeItem(at: avatarsURL.appendingPathComponent(file))
             }
-            let url = avatarsURL.appendingPathComponent(name)
-            try png.write(to: url, options: .atomic)
-            try? fileManager.setAttributes([.modificationDate: now], ofItemAtPath: url.path)
+            try png.write(to: avatarsURL.appendingPathComponent(name), options: .atomic)
         } catch {
             return false
         }
-        evictAvatars(keeping: avatarFileName(member: memberKey, version: versionKey))
+        evictAvatars(keeping: name)
         return true
     }
 
-    /// Oldest first, never the file just written.
+    /// Least recently used first, never the file just written. A file that does not follow the naming is not
+    /// ours and is tidied away.
     private func evictAvatars(keeping keep: String) {
         let fileManager = FileManager.default
-        var entries: [(url: URL, modified: Date, size: Int)] = []
+        var entries: [(url: URL, name: String, usedAt: Int64, size: Int)] = []
         for file in (try? fileManager.contentsOfDirectory(atPath: avatarsURL.path)) ?? [] {
             let url = avatarsURL.appendingPathComponent(file)
-            guard let attributes = try? fileManager.attributesOfItem(atPath: url.path) else { continue }
-            entries.append((
-                url, (attributes[.modificationDate] as? Date) ?? .distantPast, (attributes[.size] as? Int) ?? 0))
+            guard let parsed = Self.parseAvatarName(file) else {
+                try? fileManager.removeItem(at: url)
+                continue
+            }
+            entries.append((url, file, parsed.usedAt, fileSize(url) ?? 0))
         }
-        entries.sort { $0.modified < $1.modified }
+        entries.sort { ($0.usedAt, $0.name) < ($1.usedAt, $1.name) }
         var total = entries.reduce(0) { $0 + $1.size }
         var count = entries.count
-        for entry in entries where entry.url.lastPathComponent != keep {
+        for entry in entries where entry.name != keep {
             if count <= MomoPushPresentationContract.avatarMaxEntries
                 && total <= MomoPushPresentationContract.avatarMaxTotalBytes { break }
             try? fileManager.removeItem(at: entry.url)
@@ -398,8 +432,7 @@ public struct MomoPushPresentationCache: Sendable, Equatable {
         server: String, workspace: String, channelID: String, now: Date = Date()
     ) -> MomoPushPresentationChannel? {
         let url = channelFileURL(server: server, workspace: workspace)
-        guard let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
-              let size = attributes[.size] as? Int, size > 0, size <= MomoPushPresentationContract.channelFileMaxBytes,
+        guard let size = fileSize(url), size > 0, size <= MomoPushPresentationContract.channelFileMaxBytes,
               let data = try? Data(contentsOf: url),
               let file = try? JSONDecoder().decode(ChannelFile.self, from: data), file.v == 1
         else { return nil }

@@ -273,6 +273,49 @@ do {
   check(!FileManager.default.fileExists(atPath: evictionDirectory.appendingPathComponent("push-presentation").path), "and no directory")
 }
 
+// ---- when a face was last used lives in its NAME (the extension may not touch a file-timestamp API) -------------------
+
+do {
+  let directory = tempDirectory()
+  defer { try? FileManager.default.removeItem(at: directory) }
+  let cache = MomoPushPresentationContainer(url: directory).cache
+  let avatarsDirectory = directory.appendingPathComponent("push-presentation/avatars")
+  func files() -> [String] { ((try? FileManager.default.contentsOfDirectory(atPath: avatarsDirectory.path)) ?? []).sorted() }
+  let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+  _ = cache.storeAvatarPNG(fakePNG(size: 900), server: baseURL, workspace: workspaceID, member: dohyun, version: version, now: t0)
+  let first = files()
+  check(
+    first.count == 1 && first[0].split(separator: ".").count == 4 && first[0].hasSuffix(".1800000000.png"),
+    "a stored face is <member>.<version>.<seconds>.png: the time it was last used is in the name")
+  _ = cache.avatarPNG(server: baseURL, workspace: workspaceID, member: dohyun, version: version, now: t0.addingTimeInterval(1800))
+  check(files() == first, "a use within the hour leaves the name alone (no rename for every notification)")
+  let renewed = cache.avatarPNG(server: baseURL, workspace: workspaceID, member: dohyun, version: version, now: t0.addingTimeInterval(7200))
+  check(renewed != nil && files().count == 1 && files()[0].hasSuffix(".1800007200.png"), "a use after the hour renews the time in the name and still serves the face")
+  check(
+    cache.avatarPNG(server: baseURL, workspace: workspaceID, member: dohyun, version: version, now: t0.addingTimeInterval(7200 + 30 * 24 * 3600 - 1)) != nil,
+    "the thirty days count from the renewed time")
+  // expiry measured from the renewed time, not from the first write
+  let expiring = tempDirectory()
+  defer { try? FileManager.default.removeItem(at: expiring) }
+  let expiringCache = MomoPushPresentationContainer(url: expiring).cache
+  _ = expiringCache.storeAvatarPNG(fakePNG(size: 900), server: baseURL, workspace: workspaceID, member: seoyeon, version: version, now: t0)
+  check(
+    expiringCache.avatarPNG(server: baseURL, workspace: workspaceID, member: seoyeon, version: version, now: t0.addingTimeInterval(30 * 24 * 3600 + 1)) == nil,
+    "a face unused for more than thirty days is gone, judged by the time in its name")
+  check(
+    ((try? FileManager.default.contentsOfDirectory(atPath: expiring.appendingPathComponent("push-presentation/avatars").path)) ?? []).isEmpty,
+    "and its file was removed, not just skipped")
+  // a stray file is not ours
+  try? Data("x".utf8).write(to: avatarsDirectory.appendingPathComponent("stray.txt"))
+  _ = cache.storeAvatarPNG(fakePNG(size: 900), server: baseURL, workspace: workspaceID, member: seoyeon, version: version, now: t0.addingTimeInterval(7300))
+  check(!files().contains("stray.txt"), "a file that does not follow the naming is tidied away by the next store")
+  check(files().count == 2, "and the two real faces are both still there")
+  // a clock that went back
+  check(
+    cache.avatarPNG(server: baseURL, workspace: workspaceID, member: seoyeon, version: version, now: t0.addingTimeInterval(-86400)) != nil,
+    "a clock that went back does not expire a face (its time is in the future, not older than thirty days)")
+}
+
 // ---- the channel names ------------------------------------------------------------------------------------
 
 do {
