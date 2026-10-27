@@ -543,22 +543,25 @@ describe('다른 사람 프로필 시트 — 멘션 복사 (#4319)', () => {
     );
   });
 
-  it('시트가 걷힌 뒤에 끝난 복사는 아무것도 다시 그리지 않는다 — 영수증 타이머가 새지 않는다', async () => {
+  it('시트가 걷히면 영수증 타이머도 걷힌다 — 걷힌 시트가 1.5 초 뒤에 상태를 넣으려고 대기하지 않는다', async () => {
     jest.useFakeTimers();
-    const view = renderProfile(HUMAN);
-    fireEvent.press(screen.getByTestId('profile-copy-mention'));
-    await flushCopy();
-    view.unmount();
-    // 타이머가 살아 있다면 언마운트된 컴포넌트에 상태를 넣는다 — 걷힌 뒤 시간이 흘러도 조용하다.
-    const errors = jest.spyOn(console, 'error').mockImplementation(() => {});
+    const setSpy = jest.spyOn(global, 'setTimeout');
+    const clearSpy = jest.spyOn(global, 'clearTimeout');
     try {
-      act(() => {
-        jest.advanceTimersByTime(COPY_RECEIPT_MS * 2);
-      });
-      expect(errors).not.toHaveBeenCalled();
-      expect(jest.getTimerCount()).toBe(0);
+      const view = renderProfile(HUMAN);
+      fireEvent.press(screen.getByTestId('profile-copy-mention'));
+      await flushCopy();
+      // 영수증 타이머가 서 있다 — 그 타이머의 번호를 잡아 둔다(다른 부품의 타이머와 섞이지 않게 영수증 시간으로 찾는다).
+      const at = setSpy.mock.calls.findIndex(([, delay]) => delay === COPY_RECEIPT_MS);
+      expect(at).toBeGreaterThanOrEqual(0);
+      const receiptTimer = setSpy.mock.results[at].value;
+      expect(clearSpy).not.toHaveBeenCalledWith(receiptTimer);
+      view.unmount();
+      // 언마운트가 그 타이머를 지웠다.
+      expect(clearSpy).toHaveBeenCalledWith(receiptTimer);
     } finally {
-      errors.mockRestore();
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
     }
   });
 });
@@ -678,8 +681,10 @@ describe('다른 사람 프로필 시트 — 작은 화면·큰 글씨에서 타
     expect(tilesFitInRow(three, 393, 3.1)).toBe(false);
   });
 
-  it('타일이 하나뿐이면 늘 한 줄이다 — 폭 전체를 쓰므로 쌓아도 나아지지 않는다', () => {
-    expect(tilesFitInRow(['멘션 복사'], 320, 3.1)).toBe(true);
+  it('타일이 하나뿐이면 늘 한 줄이다 — 이미 폭 전체를 쓰므로 쌓아도 나아지지 않는다', () => {
+    // 가장 긴 라벨이 가장 큰 글씨의 가장 좁은 폭에서 폭 전체에도 안 들어가는 경우(6.3em × 13pt × 3.5 ≈ 287pt + 숨 8 > 288pt).
+    expect(tileLabelWidth('메시지 보내기', 3.5) + 2 * 4).toBeGreaterThan(320 - 32);
+    expect(tilesFitInRow(['메시지 보내기'], 320, 3.5)).toBe(true);
   });
 
   it('렌더: 보통 크기의 에이전트 시트는 타일이 한 줄이고, 접근성 큰 글씨에서는 한 줄씩 쌓인다', () => {
