@@ -146,6 +146,13 @@ check(
   PushAvatarReference.isValidVersion("aaaa1111-bbbb_4ccc") == true
     && PushAvatarReference.isValidVersion("../etc") == false,
   "the extension and the store agree on what a version looks like (a sample each way)")
+do {
+  let digest = MomoPushPresentationKey.digest(["https://oort.test", workspaceID, dohyun])
+  check(digest.count == 32 && digest.allSatisfy({ "0123456789abcdef".contains($0) }), "a file-name digest is 32 hex characters")
+  check(digest == MomoPushPresentationKey.digest(["https://oort.test", workspaceID, dohyun]), "and the same ids always give the same name")
+  check(digest != MomoPushPresentationKey.digest(["https://oort.test", workspaceID, seoyeon]), "another member gives another name")
+  check(MomoPushPresentationKey.digest(["ab", "c"]) != MomoPushPresentationKey.digest(["a", "bc"]), "moving a boundary between two parts gives another name")
+}
 check(
   MomoPushPresentationKey.version("AAAA1111-bbbb_4ccc") == "aaaa1111-bbbb_4ccc"
     && MomoPushPresentationKey.version("../etc") == nil && MomoPushPresentationKey.version("a b") == nil

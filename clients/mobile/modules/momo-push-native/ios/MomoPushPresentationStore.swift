@@ -15,7 +15,8 @@
 //     the extension's own directory, but the layout this file defines has to be written and read by
 //     the SAME code or the two halves drift — which here is silent: a drift is a missing photo).
 //
-// Foundation, CoreGraphics, CoreText, ImageIO and CryptoKit only. No UIKit and no Intents, so the
+// Foundation, CoreGraphics, CoreText and ImageIO only. No UIKit, no Intents and no crypto library (the app
+// declares none to App Store Connect: `projectShape.test.ts` keeps that true), so the
 // `sim-check` next to this module compiles it on a Mac and runs every decision in it.
 //
 // ## What lives in the container
@@ -56,7 +57,6 @@
 // =============================================================================
 import CoreGraphics
 import CoreText
-import CryptoKit
 import Foundation
 import ImageIO
 
@@ -176,11 +176,19 @@ enum MomoPushPresentationKey {
         return value
     }
 
-    /// Hex of the first 12 bytes of a SHA-256: a file name that never holds a URL or an id.
+    /// 128 bits from two independent multiplicative hashes (FNV-1a, and a rotate-multiply mix), as hex: a file
+    /// name that never holds a URL or an id. It NAMES a file and guards nothing — the cache is written by the
+    /// app from its own data, never from a name another person chose — so it is not a cryptographic hash and
+    /// links no crypto library.
     static func digest(_ parts: [String]) -> String {
-        let joined = parts.joined(separator: "\n")
-        let hash = SHA256.hash(data: Data(joined.utf8))
-        return hash.prefix(12).map { String(format: "%02x", $0) }.joined()
+        var first: UInt64 = 0xcbf2_9ce4_8422_2325
+        var second: UInt64 = 0x9e37_79b9_7f4a_7c15
+        for byte in parts.joined(separator: "\n").utf8 {
+            first = (first ^ UInt64(byte)) &* 0x0000_0100_0000_01b3
+            second = ((second << 5) | (second >> 59)) ^ (UInt64(byte) &* 0xff51_afd7_ed55_8ccd)
+            second = second &* 0xc4ce_b9fe_1a85_ec53
+        }
+        return String(format: "%016llx%016llx", first, second)
     }
 
     static func scope(server: String, workspace: String) -> String {
