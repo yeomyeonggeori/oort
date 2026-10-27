@@ -13519,7 +13519,7 @@ components:
 
         Every accepted request writes one `auth.dev_token.used` audit row in the
         authentication transaction; its `detail` is a closed vocabulary (method, route
-        template, required scope, granted scopes), never a body, a channel id, a query
+        template, required scope, a boolean `granted`), never a body, a channel id, a query
         or a token. A password change or reset, a suspension, a removal and leaving
         the workspace end all of the member's developer tokens in the same
         transaction. An app logout does not.

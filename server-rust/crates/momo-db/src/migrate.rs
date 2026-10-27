@@ -692,8 +692,8 @@ mod tests {
     ///
     /// 152 is #4660's human developer token (ADR-0216 D2·D3·D4·D7·D8): `token_kind` gains `dev`, `token`
     /// gains nullable `dev_*` columns under named CHECKs (all written on `kind::text`, because the same
-    /// single-transaction file cannot use the new enum value as a literal), a `BEFORE INSERT` trigger that
-    /// lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
+    /// single-transaction file cannot use the new enum value as a literal), a `BEFORE INSERT OR UPDATE OF
+    /// kind, actor_member_id, workspace_id` trigger that lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
     /// per lineage, and `message.sent_via` (`NULL` or `'dev'`). No new table, so no new RLS policy.
     #[test]
     fn discovers_contiguous_migrations_001_to_152() {
