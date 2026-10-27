@@ -1385,7 +1385,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         peerId={peerId}
         directory={directory}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus={status}
         onBannerInset={setBannerInset}
       />

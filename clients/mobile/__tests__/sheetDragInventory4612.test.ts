@@ -91,10 +91,12 @@ describe('시트 안의 세로 스크롤은 모두 시트에 자기를 알린다
   /** `<PageSheet` 를 세우는 소스 — 시트의 몸이 거기 있다(몸을 다른 파일에서 가져오는 시트는 시트별 계약 시험이 잰다). */
   const sheetFiles = sources().filter(file => /<PageSheet\b/.test(code(file)));
 
-  it('시트 파일이 열여섯 개 넘게 있다(점검이 빈 목록을 훑고 통과하지 않는다) — 다른 사람 프로필 시트(#4319)가 열여섯째다', () => {
-    expect(sheetFiles.length).toBeGreaterThanOrEqual(16);
+  it('시트 파일이 열일곱 개 넘게 있다(점검이 빈 목록을 훑고 통과하지 않는다) — 다른 사람 프로필 시트(#4319)가 열여섯째, 대화 머리 ⋮ 시트(#4319)가 열일곱째다', () => {
+    expect(sheetFiles.length).toBeGreaterThanOrEqual(17);
     // 끌기 영역이 없던 자체 Modal 시트가 이 점검 안으로 들어왔다 — 빠지면 그 시트의 본문 스크롤이 시트에 자기를 알리는지 아무도 세지 않는다.
     expect(sheetFiles.map(rel)).toContain('features/directory/MemberProfileSheet.tsx');
+    // 시스템 액션 시트(`ActionSheetIOS`)이던 대화 머리 ⋮ 가 공용 시트가 됐다 — 이 시트도 같은 점검 안에 있다.
+    expect(sheetFiles.map(rel)).toContain('features/conversation/ConversationMenuSheet.tsx');
   });
 
   it('시트 파일의 세로 스크롤은 `SheetScroll` 이거나 `usePageSheetScrollProps` 를 펼친 것뿐이다', () => {

@@ -257,7 +257,7 @@ export function DockGapSurface({which}: {which: string}): React.JSX.Element {
         peerId={PEER}
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus="connected"
       />
       <ConversationLayout

@@ -257,7 +257,7 @@ export function PhotoCardSurface({which}: {which: string}): React.JSX.Element {
           peerStatusTone="ok"
           directory={DIRECTORY}
           onBack={NOOP}
-          menu={[{label: '고정', run: NOOP}]}
+          onOpenMenu={NOOP}
           railStatus="connected"
         />
         <ConversationLayout

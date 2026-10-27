@@ -59,7 +59,6 @@ export function OortLoaderSurface({which}: {which: string}): React.JSX.Element {
         kind="public"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[]}
         railStatus={status}
       />
     </View>

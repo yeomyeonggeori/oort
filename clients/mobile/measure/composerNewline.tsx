@@ -214,7 +214,7 @@ function RealComposerSurface({probeLayout = false}: {probeLayout?: boolean}): Re
         peerStatusTone="ok"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus="connected"
       />
       <Readout lines={lines} />

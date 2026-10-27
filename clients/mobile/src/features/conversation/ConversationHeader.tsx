@@ -2,7 +2,6 @@ import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect} from 'react';
 import {
-  ActionSheetIOS,
   Image,
   type LayoutChangeEvent,
   Pressable,
@@ -41,6 +40,8 @@ import {CONV} from './convDesign';
 //   가운데 제목은 좌우 폭이 달라 가운데가 아니게 된다(Buzz 도 왼쪽이다).
 // * 오른쪽은 아이콘 원. 옛 머리의 빨간 글자 링크 「고정한 메시지」는 ⋮ 메뉴 안으로
 //   갔다 — 그 문은 매일 쓰는 것이 아니고, 머리 오른쪽을 글자 하나가 차지했다.
+//   ⋮ 가 여는 것은 시스템 액션 시트(제목 + 「취소」)가 아니라 앱의 **공용 행동 시트**다(#4319,
+//   `ConversationMenuSheet`) — 이 머리는 누름을 알릴 뿐이고 무엇이 서는지는 화면이 정한다.
 // * 허들 헤드폰은 **자리만** 있다(`huddle` prop). 폰에는 허들이 없고
 //   (`realtime/channelRail.ts` 가 허들 레일을 받지 않는다), 없는 기능의 아이콘은
 //   누르면 아무 일도 안 하는 버튼이 된다. 생기는 날 호출자가 prop 을 준다.
@@ -59,11 +60,6 @@ import {CONV} from './convDesign';
 //   그 필들은 띠 밑에 쌓여야 하므로(안 그러면 필이 띠 뒤에 숨은 채 눌리는 컨트롤이 된다) 띠의 **실제** 높이를
 //   `onBannerInset` 으로 알린다 — 글자 크기에 따라 띠 높이가 달라서 상수로 둘 수 없다.
 // =============================================================================
-
-export interface ConversationHeaderMenuItem {
-  label: string;
-  run: () => void;
-}
 
 /** 머리 오른쪽 허들 자리. 기능이 생기면 호출자가 준다. */
 export interface HuddleSlot {
@@ -92,7 +88,7 @@ export function ConversationHeader({
   peerStatusLabel,
   directory,
   onBack,
-  menu,
+  onOpenMenu,
   huddle,
   railStatus,
   onBannerInset,
@@ -109,8 +105,11 @@ export function ConversationHeader({
   peerStatusLabel?: string;
   directory: Directory;
   onBack: () => void;
-  /** ⋮ 메뉴 항목. 비면 ⋮ 원을 세우지 않는다. */
-  menu: readonly ConversationHeaderMenuItem[];
+  /**
+   * ⋮ 를 누르면 부른다 — 무엇이 열리는가(공용 행동 시트, `ConversationMenuSheet`)는 호출자의 일이다. 없으면 ⋮ 원을 세우지 않는다:
+   * 열 것이 없는 원은 누르면 아무 일도 안 하는 버튼이다(허들 자리와 같은 규칙).
+   */
+  onOpenMenu?: () => void;
   huddle?: HuddleSlot;
   railStatus: RealtimeStatus;
   /**
@@ -136,17 +135,6 @@ export function ConversationHeader({
   useEffect(() => {
     if (banner === null) onBannerInset?.(0);
   }, [banner, onBannerInset]);
-
-  const openMenu = useCallback(() => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title,
-        options: [...menu.map(item => item.label), '취소'],
-        cancelButtonIndex: menu.length,
-      },
-      index => menu[index]?.run(),
-    );
-  }, [menu, title]);
 
   return (
     <View testID="conversation-header" style={styles.root}>
@@ -220,12 +208,11 @@ export function ConversationHeader({
               />
             </Pressable>
           ) : null}
-          {menu.length > 0 ? (
+          {onOpenMenu ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="대화 메뉴"
-              accessibilityHint={menu.map(item => item.label).join(', ')}
-              onPress={openMenu}
+              onPress={onOpenMenu}
               hitSlop={CIRCLE_SLOP}
               style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
               testID="conversation-menu">

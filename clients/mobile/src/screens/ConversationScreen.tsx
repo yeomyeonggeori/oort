@@ -22,6 +22,10 @@ import {
   memberNameParts,
 } from '@momo/core/features/workspace/directory';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
+import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
+import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
+import {composedUnreadCount} from '@momo/core/features/readState/model';
 import {
   dmAutoReplyAgent,
   dmPeer,
@@ -106,10 +110,9 @@ import {
 } from '../features/conversation/typingSignals';
 import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
-import {
-  ConversationHeader,
-  type ConversationHeaderMenuItem,
-} from '../features/conversation/ConversationHeader';
+import {ConversationHeader} from '../features/conversation/ConversationHeader';
+import {ConversationMenuSheet} from '../features/conversation/ConversationMenuSheet';
+import {conversationMenuActionItems} from '../features/conversation/conversationMenu';
 import {
   LongPressHint,
   useLongPressHint,
@@ -122,6 +125,9 @@ import {Timeline} from '../features/conversation/Timeline';
 import {usePersonalAgentCall} from '../features/conversation/usePersonalAgentCall';
 import {useTimeline} from '../features/conversation/useTimeline';
 import {useMarkRead} from '../features/inbox/useInbox';
+import {dmClosureMode} from '../features/sidebar/dmVerdicts';
+import type {ChannelRowTarget} from '../features/sidebar/channelRowActions';
+import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
 import {visitFlushReason} from '../features/readState/advertise';
 import {useViewingBeat} from '../features/readState/useViewingBeat';
 import {useReportViewedConversation} from '../push/viewedConversation';
@@ -960,18 +966,85 @@ export default function ConversationScreen({
   // 그리고 **셀 자격이 있을 때만** 센다 (#1146 M2): 목록을 못 불러온 채로
   // 「고정 3개」라고 적으면, 목록 안에서 고친 거짓말이 헤더로 옮겨 갈 뿐이다.
   const pinLabel = pinListHeaderLabel(pinCount, timeline.pinsStatus);
-  const headerMenu = useMemo<ConversationHeaderMenuItem[]>(() => {
-    const items: ConversationHeaderMenuItem[] = [{label: pinLabel, run: openPins}];
-    // 일대일 DM의 상대가 활성 에이전트일 때만 — 그룹 DM·사람 DM에는 맡길 대상이 없다.
-    if (dmAgent !== null && onDelegateWork !== undefined) {
-      items.push({
-        label: '작업 맡기기',
-        run: () =>
-          onDelegateWork({agentMemberId: dmAgent.id, channelId}),
-      });
-    }
-    return items;
-  }, [pinLabel, openPins, dmAgent, onDelegateWork, channelId]);
+
+  // ---- 머리 ⋮ 시트 (#4319) -----------------------------------------------------
+  //
+  // 옛 ⋮ 는 시스템 액션 시트(제목 + 「취소」 + 항목)였다. 이제는 앱의 공용 행동 시트(`ConversationMenuSheet`)다 — 대화 정보(문이 생기면) ·
+  // 고정한 메시지 · 작업 맡기기, 알림 끄기, 대화 닫기(DM) / 채널 나가기(채널).
+  //
+  // 알림 · 닫기 · 나가기는 사이드바 행 시트(#4229)와 **같은 훅**이 실행한다(다시 짓지 않는다): 낱말과 「내밀지 말지」는 코어 표가, 서버 왕복은
+  // 훅이 맡는다. 시트의 열림도 그 훅의 `active` 다 — 알림이 성공하면 훅이 시트를 걷고 낭독하고, 실패하면 시트가 열린 채 그 자리에서 이유를
+  // 말한다(`failed` 가 `active` 를 다시 세운다). 자체 열림 상태를 따로 두면 「성공하면 닫힌다」를 효과로 다시 알아내야 한다.
+  const channelIdRef = useRef(channelId);
+  channelIdRef.current = channelId;
+  const onMenuChannelLeft = useCallback(
+    (leftChannelId: string) => {
+      // 열려 있던 대화를 걷는다(DM 을 닫았거나 채널을 나갔다). 요청이 도는 사이 셸이 다른 대화로 바꿔 놨으면 건드리지 않는다 — 셸의
+      // `channelLeft` 와 같은 규칙(지금 열린 채널일 때만 걷는다). 그냥 뒤로가기를 부르면 새로 열린 대화를 걷게 된다.
+      if (uuidEq(leftChannelId, channelIdRef.current)) onBack();
+    },
+    [onBack],
+  );
+  const rowActions = useChannelRowActions(workspaceId, member.id, onMenuChannelLeft);
+  const {
+    open: openRowActions,
+    close: closeMenu,
+    run: runRowAction,
+    isPending: isRowActionPending,
+  } = rowActions;
+  // 채널이 바뀌면 열린 시트를 걷는다 — 고정 목록(`pinsOpen`)과 같은 이유다: 이 화면은 `channelId` 만 갈아 끼우므로 앞 방의 시트가 이 방 위에 남는다.
+  useEffect(() => closeMenu(), [channelId, closeMenu]);
+
+  const readPhase = readProjectionPhase(readStates);
+  const closureMode = dmClosureMode(readStates.data);
+  const selfRole = memberFor(directory, member.id)?.role;
+  // 이 채널의 **지금** 읽음 투영 행이다. 방문 때 얼려 둔 구분선 기준(`boundary`)이 아니다 — 닫기 판정은 서버가 지금 말하는 안 읽음을 본다.
+  const liveReadState = unreadFor(readStates.byChannel, channelId);
+  const menuTarget = useMemo<ChannelRowTarget>(
+    () => ({
+      // 채널 목록이 오기 전에도 ⋮ 는 열린다(고정 목록은 채널 없이 열린다). 훅은 id 만 읽고, 알림·닫기·나가기 행은 채널을 알 때만 선다(`menuItems`).
+      channel: channel ?? {id: channelId, kind: 'public', topic: ''},
+      title,
+      muted: channel?.muted ?? false,
+      selfRole,
+      readState: liveReadState,
+      // 「대화 닫기」: 코어 `dmCloseOffered` 한 함수(웹 호버 X · 사이드바 행 시트와 같다) + 서버가 닫기를 싣는 동안만 + 닫을 때 적을 투영 행이
+      // 있을 때만(메시지가 한 번도 없는 DM 에는 행이 없어 훅이 아무 일도 하지 않는다 — 눌러도 반응 없는 행을 내밀지 않는다).
+      closeOffered:
+        channel?.kind === 'dm' &&
+        closureMode === 'server' &&
+        liveReadState !== null &&
+        dmCloseOffered({
+          phase: readPhase,
+          unreadCount: composedUnreadCount(liveReadState),
+          mentionCount: liveReadState.mentionCount,
+          starredOrSectioned: false,
+        }),
+    }),
+    [channel, channelId, title, selfRole, liveReadState, closureMode, readPhase],
+  );
+  const menuItems = useMemo(
+    () => (channel === null ? [] : conversationMenuActionItems(menuTarget)),
+    [channel, menuTarget],
+  );
+  // ⋮ 를 **누르는** 손짓이다 — 행을 길게 눌러 여는 진동(`medium`)이 아니라 + 메뉴처럼 가벼운 한 번(`light`).
+  const openMenu = useCallback(
+    () => openRowActions(menuTarget, 'tap'),
+    [openRowActions, menuTarget],
+  );
+  const runMenuAction = useCallback(
+    (key: ChannelActionKey) => {
+      // 같은 행동이 도는 중이면 다시 보내지 않는다 — 두 번 누른 「대화 닫기」가 요청과 뒤로가기를 두 번 내지 않게.
+      if (isRowActionPending(key)) return;
+      runRowAction(menuTarget, key);
+    },
+    [isRowActionPending, runRowAction, menuTarget],
+  );
+  // 일대일 DM의 상대가 활성 에이전트일 때만 — 그룹 DM·사람 DM에는 맡길 대상이 없다.
+  const delegateWork =
+    dmAgent !== null && onDelegateWork !== undefined
+      ? () => onDelegateWork({agentMemberId: dmAgent.id, channelId})
+      : undefined;
   const headerSubtitle = useMemo(
     () => conversationSubtitle(channel, peer, directory),
     [channel, peer, directory],
@@ -1756,7 +1829,7 @@ export default function ConversationScreen({
         peerStatusLabel={peerStatus?.label}
         directory={directory}
         onBack={onBack}
-        menu={headerMenu}
+        onOpenMenu={openMenu}
         railStatus={railStatus}
         onBannerInset={setBannerInset}
       />
@@ -2046,6 +2119,26 @@ export default function ConversationScreen({
           onClose={closeAde}
           onOpenChannel={onOpenConversation}
           onOpenAnchor={onOpenAdeAnchor}
+        />
+      ) : null}
+
+      {rowActions.active !== null ? (
+        // `onOpenInfo` 는 달지 않는다 — 정보 화면이 서는 날 그 문을 단다(문 없는 행을 먼저 세우지 않는다).
+        <ConversationMenuSheet
+          title={title}
+          kind={channel?.kind}
+          pinLabel={pinLabel}
+          onOpenPins={openPins}
+          onDelegateWork={delegateWork}
+          items={menuItems}
+          confirmingLeave={rowActions.confirmingLeave}
+          isPending={rowActions.isPending}
+          error={rowActions.error}
+          leave={rowActions.leave}
+          onRun={runMenuAction}
+          onConfirmLeave={rowActions.confirmLeave}
+          onCancelLeave={rowActions.cancelLeave}
+          onClose={closeMenu}
         />
       ) : null}
 

@@ -73,7 +73,7 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
         kind="public"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정 2개', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus="connected"
         {...props}
       />,
@@ -116,30 +116,29 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(screen.getByTestId('conversation-title-glyph-public', {includeHiddenElements: true})).toBeTruthy();
   });
 
-  it('⋮ 는 메뉴를 열고, 고른 항목을 실행한다 — 고정 목록의 문이 여기로 왔다', () => {
-    const run = jest.fn();
-    const spy = jest
-      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
-      .mockImplementation((options, callback) => {
-        expect(options.options).toEqual(['고정 2개', '취소']);
-        expect(options.cancelButtonIndex).toBe(1);
-        callback(0);
-      });
-    header({menu: [{label: '고정 2개', run}]});
-    fireEvent.press(screen.getByTestId('conversation-menu'));
-    expect(run).toHaveBeenCalledTimes(1);
-    spy.mockRestore();
+  it('⋮ 는 누르면 `onOpenMenu` 를 한 번 부른다 — 시스템 액션 시트는 더 이상 서지 않는다 (#4319)', () => {
+    // 옛 ⋮ 는 `ActionSheetIOS`(제목 + 「취소」)를 직접 불렀다. 이제 머리는 누름을 알릴 뿐이고 무엇이 서는지는 화면이 정한다(공용 행동 시트).
+    const system = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    const onOpenMenu = jest.fn();
+    header({onOpenMenu});
+    const kebab = screen.getByTestId('conversation-menu');
+    expect(kebab.props.accessibilityRole).toBe('button');
+    expect(kebab.props.accessibilityLabel).toBe('대화 메뉴');
+    fireEvent.press(kebab);
+    expect(onOpenMenu).toHaveBeenCalledTimes(1);
+    expect(system).not.toHaveBeenCalled();
+    system.mockRestore();
   });
 
-  it('취소는 아무것도 실행하지 않는다', () => {
-    const run = jest.fn();
-    const spy = jest
-      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
-      .mockImplementation((_options, callback) => callback(1));
-    header({menu: [{label: '고정한 메시지', run}]});
-    fireEvent.press(screen.getByTestId('conversation-menu'));
-    expect(run).not.toHaveBeenCalled();
-    spy.mockRestore();
+  it('⋮ 의 보조기술 힌트는 항목을 읊지 않는다 — 항목은 이제 시트가 말한다 (#4319)', () => {
+    // 옛 힌트는 메뉴 항목 이름을 쉼표로 이었다(「고정 2개, 작업 맡기기」). 시트가 서면 그 문장은 시트가 말하고, 머리에 남은 목록은 거짓이 된다.
+    header({onOpenMenu: () => {}});
+    expect(screen.getByTestId('conversation-menu').props.accessibilityHint).toBeUndefined();
+  });
+
+  it('`onOpenMenu` 가 없으면 ⋮ 원을 세우지 않는다 — 누르면 아무 일도 없는 버튼은 없다', () => {
+    header({onOpenMenu: undefined});
+    expect(screen.queryByTestId('conversation-menu')).toBeNull();
   });
 
   it('허들 아이콘은 기능이 없으면 서지 않는다 — 누르면 아무 일도 없는 버튼은 없다', () => {
@@ -675,7 +674,6 @@ describe('치수가 시안에서 온다', () => {
           kind="public"
           directory={DIRECTORY}
           onBack={() => {}}
-          menu={[]}
           railStatus="connected"
         />
       </FixedScheme>,
@@ -683,7 +681,7 @@ describe('치수가 시안에서 온다', () => {
     expect(flatten(screen.getByTestId('header-back').props.style).backgroundColor).toBe(
       lightPalette.surface,
     );
-    // 메뉴가 비면 ⋮ 원을 세우지 않는다.
+    // 열 메뉴가 없으면(`onOpenMenu` 없음) ⋮ 원을 세우지 않는다.
     expect(screen.queryByTestId('conversation-menu')).toBeNull();
   });
 });

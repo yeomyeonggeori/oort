@@ -289,6 +289,15 @@ describe('길게 누르기가 시트를 연다', () => {
     ]);
   });
 
+  it('길게 누르기는 무거운 햅틱 한 번이다 — 대화 머리 ⋮ 의 탭(가벼운 한 번)과 갈린다 (#4319)', async () => {
+    const haptics = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
+    await mount();
+    haptics.length = 0;
+    longPress('sidebar-row-channel:ch-general');
+    expect(screen.getByTestId('channel-action-sheet')).toBeTruthy();
+    expect(haptics).toEqual(['impact:medium']);
+  });
+
   it('그냥 탭은 시트를 열지 않는다', async () => {
     await mount();
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));

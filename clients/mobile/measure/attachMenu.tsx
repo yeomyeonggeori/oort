@@ -100,7 +100,7 @@ export function AttachMenuSurface({which}: {which: string}): React.JSX.Element {
         peerStatusTone="ok"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus="connected"
       />
       <ConversationLayout

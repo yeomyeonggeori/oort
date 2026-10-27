@@ -112,7 +112,7 @@ export function DmConversationSurface({which}: {which: string}): React.JSX.Eleme
         peerStatusTone="ok"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus="connected"
       />
       <ConversationLayout
