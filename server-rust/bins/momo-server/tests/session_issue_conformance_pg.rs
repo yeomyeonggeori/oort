@@ -175,6 +175,7 @@ struct World {
     base: String,
     workspace: Uuid,
     owner_bearer: String,
+    owner_email: String,
     member: Uuid,
     member_email: String,
 }
@@ -256,6 +257,7 @@ async fn world(label: &str, member_password: Option<&str>, pool_width: u32) -> W
         base,
         workspace,
         owner_bearer,
+        owner_email,
         member,
         member_email,
     }
@@ -1424,6 +1426,64 @@ async fn logins_and_joins_do_not_queue_for_the_lock_and_leave_the_pool_alone() {
     );
     let joined = join_reply(&w, &code, &joined_emails[0]).await;
     assert_eq!(joined.status, 201, "and so does the join: {}", joined.body);
+}
+
+/// A change that is waiting for the lock is not overtaken. While a suspension waits behind a
+/// sign-in in flight, another login is answered 503 instead of slipping in ahead of it; if
+/// shared requests could jump the queue, a steady stream of logins would keep a suspension
+/// waiting for as long as the stream lasted.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_login_does_not_overtake_a_change_that_is_waiting_for_the_lock() {
+    let w = world("session-issue-overtake", Some(MEMBER_PASSWORD), 4).await;
+    let kit = prepare(&w, Issuer::Login, Change::Suspend).await;
+
+    let hold = hold_member_row(&w.su, w.member).await;
+    let door = spawn_issuer(&w, Issuer::Login, &kit);
+    wait_until("the login to stop on the member row", || async {
+        !blocked_by(&w.su, hold.pid).await.is_empty()
+    })
+    .await;
+    let change = spawn_change(&w, Change::Suspend, &kit);
+    wait_until("the suspension to queue for the lock", || async {
+        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await == 1
+    })
+    .await;
+
+    // Someone else signs in now. The lock is held shared (by the first login) and the
+    // suspension is next for it.
+    let (status, body, retry_after) = tokio::time::timeout(
+        Duration::from_millis(1500),
+        api_login(
+            &w.http,
+            &w.base,
+            w.workspace,
+            &w.owner_email,
+            OWNER_PASSWORD,
+        ),
+    )
+    .await
+    .expect("the late login answered instead of waiting or slipping in");
+    assert_eq!(
+        status, 503,
+        "the late login does not overtake the queued change: {body}"
+    );
+    assert_eq!(retry_after, Some(1));
+
+    hold.release().await;
+    let door = door.await.expect("door task");
+    let change = change.await.expect("change task");
+    assert_eq!(
+        door.status, 200,
+        "the login that was first answers as it would alone"
+    );
+    assert_eq!(change.status, 200, "and the suspension runs after it");
+    assert_eq!(member_status(&w.su, w.member).await, "suspended");
+    assert_eq!(
+        live_tokens(&w.su, w.member).await,
+        0,
+        "the first login's pair is revoked"
+    );
 }
 
 // ---------------------------------------------------------------------------
