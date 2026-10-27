@@ -6766,7 +6766,7 @@ mod tests {
             "email": "ada@example.com",
             "displayName": "Ada",
             "timeZone": "Asia/Seoul",
-            "password": "hunter2",
+            "password": "hunter2-hunter2",
         }))
         .expect("camelCase decodes");
         assert_eq!(camel.display_name, "Ada");

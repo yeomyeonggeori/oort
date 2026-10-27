@@ -738,7 +738,7 @@ pub async fn find_visible_image_attachment_in_tx(
             AND a.drive_file_id IS NOT NULL \
             AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
             AND a.size_bytes BETWEEN 1 AND $5 \
-            AND m.state <> 'deleted' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND c.kind IN ('public', 'private') AND c.archived_at IS NULL \
             AND a.channel_id = ANY($3) \
             AND EXISTS (SELECT 1 FROM membership p \
@@ -817,7 +817,7 @@ pub async fn find_requester_attachment_in_tx(
             AND a.drive_file_id IS NOT NULL \
             AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
             AND a.size_bytes BETWEEN 1 AND $5 \
-            AND m.state <> 'deleted' \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND m.author_member_id = $4 \
             AND a.channel_id = $3 AND c.archived_at IS NULL",
     )
@@ -842,6 +842,12 @@ pub async fn find_requester_attachment_in_tx(
 /// only. The agent learns an attachment's **id** here because that id is the only
 /// way to name a file for [`find_visible_image_attachment_in_tx`]; the Drive file id
 /// is never projected.
+///
+/// **A deleted message lists nothing** (ADR-0151 증보 2, #4443), in the statement
+/// itself: the join requires the message alive, the same tombstone test every other
+/// attachment projection uses. The conversation-read handler also drops a deleted
+/// row's `imageAttachments` (`agent_port_tools.rs`, `gated_channel_page`) — a second
+/// layer, kept, so this statement is the one that must be right on its own.
 pub async fn image_attachments_for_messages_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -849,8 +855,10 @@ pub async fn image_attachments_for_messages_in_tx(
 ) -> Result<Vec<(Uuid, Uuid, String, String, i64)>, DbError> {
     let rows = sqlx::query(
         "SELECT a.message_id, a.id, a.name, a.mime, a.size_bytes FROM attachment a \
+           JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
           WHERE a.workspace_id = $1 AND a.message_id = ANY($2) AND a.status = 'complete' \
             AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
+            AND m.state <> 'deleted' AND m.deleted_at IS NULL \
           ORDER BY a.created_at ASC, a.id ASC",
     )
     .bind(workspace_id)

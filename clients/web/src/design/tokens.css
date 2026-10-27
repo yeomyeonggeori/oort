@@ -1771,8 +1771,16 @@
 
 /* 본문 판 (시안 `.a-main`): 인셋 8 · 반경 18 · rest 그림자 + 1px 선 고리.
  * 폰 폭(600 미만)에서는 판이 창 자체라 반경·그림자가 없다(서랍 문법 B6).
- * 고대비에서는 고리가 --line-strong이 된다(D7, `card-edge`와 같은 규칙). */
+ * 고대비에서는 고리가 --line-strong이 된다(D7, `card-edge`와 같은 규칙).
+ *
+ * 판은 **자기 스태킹 컨텍스트**다(`isolation: isolate`, #4587 design-review H1). 판 안의 층(대화 머리
+ * `channel-head`, 호버 툴바, UnreadPill: 전부 `--layer-content-float` 100)은 판 안에서만 겨룬다. 이게 없으면 창
+ * 띠(`app-titlebar`, 판보다 DOM이 앞이다)에서 아래로 떨어지는 툴팁 알약이 같은 100에서 DOM 순서로 져서 대화 머리의
+ * 컨트롤 아래에 깔렸다(실기 캡처에서 알약 아래 30%가 덮였다). 판 밖의 100(띠·사이드바의 툴팁)은 이제 판 전체 위에
+ * 선다. 서랍(300)·스크림(200)은 판 안이든 밖이든 순서가 그대로다(`overlayLayers.test.ts`). 판은 z-index가 없어서
+ * 이름 밖 수치 z가 늘지 않는다. */
 @utility app-pane {
+  isolation: isolate;
   background-color: var(--pane);
 
   @media (width >= 600px) {
@@ -2430,6 +2438,101 @@
   min-inline-size: 0;
 }
 
+/* 상단 오른쪽 다운로드 단추의 링과 점 (#4587). 인라인 style이 금지라 진행률은 `data-ring-step`
+ * (1..12)로 양자화해 이 규칙이 그린다. 링은 단추 안쪽 한 겹(28 → 24)이고, 트랙은 `--ink`의 옅은 겹,
+ * 호는 `--ink`다. 색은 단추가 선 자리(띠의 윗줄)의 글자 역할을 그대로 따르므로 어느 팔레트·유리·
+ * 배경화면 위에서도 글자와 같은 대비를 갖는다. 길이를 모르는 링(`unknown`)은 4분의 1 호가 돈다:
+ * 움직임이 곧 정보다(멈춰 있으면 「0%」로 읽힌다). 돌리는 것은 `spinner-busy`(줄인 움직임에서는
+ * 8단으로 끊어 돈다). 점은 끝났는데 아직 열어 보지 않은 것의 표지고 실제 상태에만 묶인다:
+ * 새로 받은 것은 신호색, 받지 못한 것은 위험색이다. */
+.download-ring {
+  position: absolute;
+  inset: var(--spacing-marker);
+  border: var(--spacing-marker) solid color-mix(in srgb, var(--ink) 24%, transparent);
+  border-radius: 9999px;
+  pointer-events: none;
+}
+
+.download-ring::after {
+  content: "";
+  position: absolute;
+  inset: calc(var(--spacing-marker) * -1);
+  border-radius: inherit;
+  background-image: conic-gradient(var(--ink) var(--download-ring-fill, 0%), transparent 0);
+  mask-image: radial-gradient(
+    farthest-side,
+    transparent calc(100% - var(--spacing-marker)),
+    var(--ink) calc(100% - var(--spacing-marker))
+  );
+}
+
+.download-ring[data-ring-step="unknown"] {
+  --download-ring-fill: 25%;
+}
+
+.download-ring[data-ring-step="1"] {
+  --download-ring-fill: 8.333%;
+}
+
+.download-ring[data-ring-step="2"] {
+  --download-ring-fill: 16.667%;
+}
+
+.download-ring[data-ring-step="3"] {
+  --download-ring-fill: 25%;
+}
+
+.download-ring[data-ring-step="4"] {
+  --download-ring-fill: 33.333%;
+}
+
+.download-ring[data-ring-step="5"] {
+  --download-ring-fill: 41.667%;
+}
+
+.download-ring[data-ring-step="6"] {
+  --download-ring-fill: 50%;
+}
+
+.download-ring[data-ring-step="7"] {
+  --download-ring-fill: 58.333%;
+}
+
+.download-ring[data-ring-step="8"] {
+  --download-ring-fill: 66.667%;
+}
+
+.download-ring[data-ring-step="9"] {
+  --download-ring-fill: 75%;
+}
+
+.download-ring[data-ring-step="10"] {
+  --download-ring-fill: 83.333%;
+}
+
+.download-ring[data-ring-step="11"] {
+  --download-ring-fill: 91.667%;
+}
+
+.download-ring[data-ring-step="12"] {
+  --download-ring-fill: 100%;
+}
+
+.download-dot {
+  position: absolute;
+  inset-block-start: var(--spacing-1);
+  inset-inline-end: var(--spacing-1);
+  inline-size: var(--spacing-2);
+  block-size: var(--spacing-2);
+  border-radius: 9999px;
+  background-color: var(--signal);
+  pointer-events: none;
+}
+
+.download-dot[data-tone="failed"] {
+  background-color: var(--danger);
+}
+
 /* S1/S2 스텝 크롬 (#1882). AppTitlebar와 같은 트래픽라이트 인셋·드래그 계약이되
  * 온보딩은 셸 그리드 밖이고 390px에서도 선다(app-titlebar는 600 미만에서 숨음).
  * 버튼은 이 유틸을 갖지 않고 pointerdown을 멈춘다. */
@@ -2608,11 +2711,16 @@
  * #4591(owner 2026-10-26, Buzz 캡처): **연회색 알약**이다. 흰 면에 선과 그림자를 두르던 카드에서, 중립 칩의
  * 그릇인 `--muted-soft` 한 면으로 바꿨다. 선도 그림자도 없다: 이 면은 눌리지도 값을 받지도 않아 컨트롤 문법(1px
  * 선)을 들일 이유가 없고, 판 위에서 보이게 하는 것은 면의 명도다(라이트 `#dedddb`가 흰 판 위에서 뚜렷하다).
- * 글자는 `--ink`로 두 스킴에서 12~13:1이다(`tokens.contrast.test.ts`가 `ink`를 `muted-soft`를 포함한 모든 면 위에서 잰다). */
+ * 글자는 `--ink`로 두 스킴에서 12~13:1이다(`tokens.contrast.test.ts`가 `ink`를 `muted-soft`를 포함한 모든 면 위에서 잰다).
+ *
+ * #4587: 글자는 **기본 글자 역할 `--ink-base`** 로 읽는다. 면(`--muted-soft`)은 띠 범위에서도 다시 묶이지 않는 기본 면이라
+ * 짝은 기본 글자여야 한다. 띠 범위(사이드바, 셸의 상단 줄과 오른쪽 자리)에서는 `--ink`가 on-band로 다시 묶여서(위 「띠 위의
+ * 글자」) 노을띠 라이트에서 밝은 on-band(`#f4f1ea`) 글자가 연회색 면(`#dedddb`) 위에 얹혀 읽히지 않았다. 띠 밖에서
+ * `--ink-base`는 `--ink`와 같은 값이라 아무것도 바뀌지 않는다. */
 @utility tooltip-surface {
   border-radius: var(--radius-md);
   background-color: var(--muted-soft);
-  color: var(--ink);
+  color: var(--ink-base);
   padding: var(--spacing-tooltip-y) var(--spacing-3);
   white-space: nowrap;
   pointer-events: none;
@@ -2669,6 +2777,13 @@
 @utility em-latin-only {
   font-style: italic;
   font-synthesis-style: none;
+}
+
+/* 앵커 팝오버가 뷰포트를 넘지 않게 (#4619 레일 팝오버, design-review r1 B2). 공용 `PopoverContent`는 폭 `w-pane-picker`(384)
+ * 고정이라 폰 폭(390 이하)에서 오른쪽이 화면 밖으로 나갔다. Radix가 충돌 경계(좌우 8 여백 포함)까지 남은 폭을
+ * `--radix-popover-content-available-width`로 주므로, 고정 폭은 그 폭보다 넓을 때만 줄어든다. 넓은 창에서는 아무 일도 없다. */
+@utility popover-fit {
+  max-inline-size: var(--radix-popover-content-available-width);
 }
 
 /* 44px 손가락 타깃 (B6). 폰에서만 커진다: 포인터에는 28px 아이콘 버튼이 맞고,
@@ -5963,6 +6078,12 @@
 @media (hover: none) {
   [data-row-clock] {
     opacity: 1;
+  }
+  /* 같은 거터 칸에 서는 에이전트 상태 아이콘 칩(#4619 `GutterTriggerChip`)은 시각에 자리를 내준다: hover가
+   * 있는 기기에서는 행에 포인터가 오면 그 자리가 시각이 되지만, 없는 기기에서는 시각이 처음부터 서 있으므로 칩이
+   * 세울 자리가 없다. 그 행의 상태는 입력창 레일과 예외 줄이 말한다. */
+  [data-row-chip] {
+    display: none;
   }
 }
 

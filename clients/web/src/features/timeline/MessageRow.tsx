@@ -66,6 +66,9 @@ import {
   MARKER_DIVIDER_PAD_CLASS,
   MESSAGE_AVATAR_GUTTER_CLASS,
   MESSAGE_AVATAR_SIZE_CLASS,
+  MESSAGE_HEAD_CHIP_CLASS,
+  MESSAGE_HEAD_CHIP_TIME_CLASS,
+  MESSAGE_HEAD_CLASS,
   ROW_BANNER_STRADDLE_PAD_CLASS,
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
@@ -138,6 +141,8 @@ import { useConversationEntrance } from "./conversationEntrance";
 import { commandSuggestCard } from "@momo/core/features/timeline/commandSuggest";
 import { CommandSuggestSlot, ThreadSurfaceRoot } from "./commandSuggestSlot";
 import { MessageRunStatus } from "@/features/agents/MessageRunStatus";
+import { GutterTriggerChip, MessageTriggerChip, ThreadWorkChip } from "@/features/agents/TriggerChip";
+import type { AnswerRef } from "@momo/core/features/agents/triggerChip";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -327,6 +332,7 @@ export function MessageRow({
   playEntrance = false,
   onEntranceConsumed,
   runStatus,
+  runAnswers,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -419,6 +425,11 @@ export function MessageRow({
    * (남의 메시지·스레드 패널·작업 로그) 줄이 없다. 빈 배열은 「아직 없음」이다.
    */
   runStatus?: readonly AgentRunProgress[];
+  /**
+   * #4619 — 위 run들의 **답 메시지**(run id 소문자 → id·seq). 「답함 ✓」 칩이 누르면 답으로 가는 길이다.
+   * 목록이 한 번 색인해 넣는다(`Timeline`). 없거나 모르는 run이면 칩은 누르는 것이 아니다.
+   */
+  runAnswers?: ReadonlyMap<string, AnswerRef>;
 }) {
   const entrance = useConversationEntrance(playEntrance, onEntranceConsumed);
   const [resending, setResending] = useState(false);
@@ -455,6 +466,9 @@ export function MessageRow({
   const name = author?.displayName ?? missingMemberLabel(directory);
   const owner = isAgent ? memberFor(directory, author?.ownerHumanId) : null;
   const deleted = message.state === "deleted";
+  // 에이전트를 부른 메시지(누가 불렀든, #4619): 칩이 서는 행이다. 칩이 있는 머리 줄은 줄바꿈이 없고, 머리 줄이 없는
+  // 이어지는 행에서는 시각이 서는 거터 칸에 아이콘 칩이 선다.
+  const hasRunChip = runStatus !== undefined && runStatus.length > 0;
   const receiptRunId = receiptRunIdFor({
     message,
     isAgent,
@@ -866,6 +880,7 @@ export function MessageRow({
             <Avatar member={author} className={MESSAGE_AVATAR_SIZE_CLASS} />
           )
         ) : (
+          <>
           <time
             dateTime={new Date(message.createdAtMs).toISOString()}
             data-numeric
@@ -889,6 +904,10 @@ export function MessageRow({
           >
             {timeLabel(message.createdAtMs)}
           </time>
+          {/* 이어지는 행의 상태 칩 (#4619 planner 결정 2). 이 행에는 머리 줄이 없어 칩이 설 자리가 시각이 서는
+              이 거터 칸뿐이다. `absolute`라서 행 높이도 본문 자리도 움직이지 않는다. */}
+          {hasRunChip && <GutterTriggerChip runs={runStatus} directory={directory} />}
+          </>
         )}
       </div>
       {/* `data-row-body` is the box whose text Range the capture gate measures
@@ -897,7 +916,7 @@ export function MessageRow({
           · N-2). */}
       <div data-row-body className="min-w-0 flex-1">
         {startsGroup && (
-          <div className="flex flex-wrap items-baseline gap-2">
+          <div className={hasRunChip ? MESSAGE_HEAD_CHIP_CLASS : MESSAGE_HEAD_CLASS}>
             {/* 이름은 이름이다 (R1 M8). 프로필 진입점은 옆의 아바타다. 그 버튼은
                 `data-row-action` 로 이 행의 기존 로빙 그룹에 합류하므로 메시지마다
                 탭 정거장을 하나씩 늘리지 않는다. 행 액션은 호버 툴바·우클릭
@@ -938,10 +957,21 @@ export function MessageRow({
               dateTime={new Date(message.createdAtMs).toISOString()}
               data-numeric
               data-testid="row-time"
-              className="text-timestamp text-ink-muted"
+              className={cn("text-timestamp text-ink-muted", hasRunChip && MESSAGE_HEAD_CHIP_TIME_CLASS)}
             >
               {timeLabel(message.createdAtMs)}
             </time>
+            {/* 에이전트를 부른 일의 상태 칩 (#4619 B, 누가 불렀든). 시각 **옆**에 서는 크기 고정 칩이라 칩이 서고
+                바뀌어도 이 줄의 높이가 변하지 않는다(칩이 있는 줄은 줄바꿈이 없다: `MESSAGE_HEAD_CHIP_CLASS`).
+                머리 줄이 없는 이어지는 행의 칩은 위 거터의 `GutterTriggerChip`이다. */}
+            {runStatus !== undefined && runStatus.length > 0 && (
+              <MessageTriggerChip
+                runs={runStatus}
+                directory={directory}
+                {...(runAnswers !== undefined ? { runAnswers } : {})}
+                {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
+              />
+            )}
           </div>
         )}
         {/* 본문 **위**. 스레드 롤업이 본문 아래 꼬리에 있는 것과 대칭이고, 그
@@ -1176,16 +1206,23 @@ export function MessageRow({
               ) : (
                 <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
               ))}
+            {/* 스레드 요약 줄의 「작업 중」 칩 (#4619 E). 답글이 달리는 루트를 **누가 불렀든** 그 일이 지금
+                진행 중이면 요약 줄에 같은 칩이 선다. 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어
+                (진행 읽기에 rootId가 없다) 여기 서지 않는다. */}
+            {rollup && runStatus !== undefined && runStatus.length > 0 && (
+              <ThreadWorkChip runs={runStatus} directory={directory} />
+            )}
           </div>
         )}
-        {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
-            안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
+        {/* 에이전트를 부른 메시지(누가 불렀든)의 **예외 줄** (#3824 → #4619): 평소의 진행은 레일과 칩이 말하고, 이 줄은
+            아직 받지 않았어요·깨우는 신호가 닿지 않음·실패·시간 초과일 때만 선다. 행동 단추는 요청자와 owner/admin에게만. */}
         {runStatus !== undefined && (
           <div className="flex min-w-0 flex-col empty:hidden" data-testid="message-run-status-slot">
             <MessageRunStatus
               messageId={message.id}
               channelId={message.channelId}
               createdAtMs={message.createdAtMs}
+              requesterId={message.authorMemberId}
               runs={runStatus}
               directory={directory}
             />

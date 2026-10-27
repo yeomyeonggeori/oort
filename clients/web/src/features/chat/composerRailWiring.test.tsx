@@ -6,8 +6,6 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  ApiError,
-  type AgentLiveness,
   type AgentRunProgress,
   type Channel,
   type RosterMember,
@@ -17,10 +15,11 @@ import { signalFromProgress } from "@momo/core/features/agents/runPhase";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 
 // =============================================================================
-// 진짜 `Composer`의 배선 (#4285, ADR-0200 증보 3 E6). 활동 줄 자체의 문구는 `composerUncollectedLine.test`가
-// 재고, 여기서는 **컴포저가 생존 판정을 읽어 그 줄에 넘기는가**를 잰다 — 이 배선이 빠지면 줄은 낱말만 바뀌고
-// 서버의 경고(「깨웠지만 아직 안 가져감」)도 이유도 영영 서지 않는다. 가짜인 것은 REST 응답뿐이고(생존 판정·
-// 채널·명부·예약) 그 밖은 진짜다: 진짜 `Composer`, 진짜 신호 스토어, 진짜 쿼리 훅.
+// 진짜 `Composer`의 레일 배선 (#4619 A). 레일 줄 자체의 글자는 `ActivityRail.test`가 재고, 여기서는 **컴포저가**
+// (1) 에이전트가 있는 채널에 레일 칸을 입력창 카드 위에 미리 잡고 폼 윗 여백을 그 칸이 대신하게 하는가,
+// (2) 에이전트가 없는 채널에는 칸도 없는가, (3) 신호 스토어의 열린 턴을 줄로 올리는가, (4) 서버 생존 판정을
+// 읽지 않는가(그것은 예외 줄의 몫이다)를 잰다. 가짜인 것은 REST 응답뿐이고 그 밖은 진짜다: 진짜 `Composer`,
+// 진짜 신호 스토어, 진짜 쿼리 훅.
 // =============================================================================
 
 const scheduledApi = vi.hoisted(() => ({
@@ -37,6 +36,7 @@ const api = vi.hoisted(() => ({
   fetchRoster: vi.fn(),
   fetchWorkHosts: vi.fn(),
   fetchAgentLiveness: vi.fn(),
+  fetchApprovals: vi.fn(),
 }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -55,7 +55,6 @@ const CH = "00000000-0000-7000-8000-000000000201";
 const AGENT = "00000000-0000-7000-8000-000000000301";
 const RUN = "0199aa11-2222-7000-8000-0000000000b1";
 const MIN = 60_000;
-const HOUR = 60 * MIN;
 
 const CHANNELS: Channel[] = [{ id: CH, workspaceId: WS, kind: "public", name: "일반", muted: false } as Channel];
 const BOT = {
@@ -72,21 +71,22 @@ const BOT = {
   updatedAtMs: 0,
 } as unknown as RosterMember;
 
-function waitingRun(over: Partial<AgentRunProgress> = {}) {
+function openTurn(over: Partial<AgentRunProgress> = {}) {
   const now = Date.now();
   const signal = signalFromProgress({
     id: RUN,
     channelId: CH,
     agentMemberId: AGENT,
     triggerMessageId: "0199aa11-2222-7000-8000-0000000000c1",
-    status: "queued",
-    phase: "queued",
-    leaseState: "none",
+    status: "running",
+    phase: "running",
+    leaseState: "live",
     stepCount: 0,
     ahead: [],
-    queuePosition: 1,
-    createdAtMs: now - 17 * HOUR,
-    updatedAtMs: now - 17 * HOUR,
+    startedAtMs: now - 3 * MIN,
+    latestStage: "설계 문서 읽는 중",
+    createdAtMs: now - 3 * MIN,
+    updatedAtMs: now - 3 * MIN,
     ...over,
   });
   if (signal === null) throw new Error("signal");
@@ -106,6 +106,7 @@ beforeEach(() => {
   api.listChannels.mockResolvedValue(CHANNELS);
   api.fetchRoster.mockResolvedValue([]);
   api.fetchWorkHosts.mockResolvedValue([]);
+  api.fetchApprovals.mockResolvedValue([]);
   scheduledApi.listAllScheduledMessages.mockResolvedValue([]);
   resetSchedulerDisabledForTest();
   clearDraft(WS, CH);
@@ -143,7 +144,7 @@ async function settle(rounds = 4) {
   }
 }
 
-async function mount(): Promise<void> {
+async function mount(options: { members?: RosterMember[]; dmAgent?: RosterMember | null } = {}): Promise<void> {
   host = document.createElement("div");
   document.body.append(host);
   mountedRoot = createRoot(host);
@@ -165,11 +166,11 @@ async function mount(): Promise<void> {
               createElement(Composer, {
                 workspaceId: WS,
                 channelId: CH,
-                directory: makeDirectory([BOT]),
+                directory: makeDirectory(options.members ?? [BOT]),
                 channels: CHANNELS,
                 channelLabel: "일반",
                 recipient: "place",
-                dmAgent: null,
+                dmAgent: options.dmAgent ?? null,
                 quote: null,
                 onCancelQuote: () => undefined,
                 onSend: () => undefined,
@@ -185,56 +186,71 @@ async function mount(): Promise<void> {
 
 const byId = (id: string): HTMLElement | null =>
   document.querySelector<HTMLElement>(`[data-testid="${id}"]`);
+const formOf = () => byId("composer-frame")?.closest("form") ?? null;
 
-describe("컴포저가 생존 판정을 읽어 활동 줄에 넘긴다", () => {
-  it("아무도 가져가지 않은 요청: 낱말과 경고 문구·이유가 서고, 그 에이전트의 판정을 읽었다", async () => {
-    api.fetchAgentLiveness.mockResolvedValue({
-      agentMemberId: AGENT,
-      state: "woken_not_collected",
-      lastSignalAtMs: Date.now() - 3 * HOUR,
-    } satisfies AgentLiveness);
+describe("컴포저의 레일 칸", () => {
+  it("에이전트가 있는 채널: 입력창 카드 **위**에 칸이 미리 서고, 폼의 윗 여백은 그 칸이 대신한다", async () => {
     await mount();
-    act(() => markAgentWorking(waitingRun()));
-    await settle();
-    expect(byId("composer-working")?.textContent).toContain("달무리봇: 아직 받지 않았어요");
-    expect(byId("composer-working-detail")?.textContent).toBe(
-      "깨웠지만 아직 안 가져감 · 17시간째 기다려요 · 연결이 꺼져 있을 수 있어요"
-    );
-    expect(api.fetchAgentLiveness).toHaveBeenCalledWith(WS, AGENT);
+    const rail = byId("composer-working");
+    expect(rail).not.toBeNull();
+    expect(rail?.getAttribute("data-state")).toBe("idle");
+    // 카드 바깥, 위: 칸은 카드(`composer-frame`) 안이 아니고 문서 순서에서 앞선다.
+    const frame = byId("composer-frame");
+    expect(frame?.contains(rail)).toBe(false);
+    expect(rail!.compareDocumentPosition(frame!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // 칸이 윗 여백을 대신하니 폼은 윗 여백이 없다(칸 24 + 여백 12가 겹쳐 쌓이지 않는다).
+    expect(formOf()?.hasAttribute("data-rail")).toBe(true);
+    expect(formOf()?.className).toContain("data-rail:pt-0");
   });
 
-  it("호스티드가 아닌 에이전트(404)는 판정이 없다 — 낱말만 바뀌고 경고 문구·이유는 지어내지 않는다", async () => {
-    api.fetchAgentLiveness.mockRejectedValue(new ApiError(404, "not found"));
-    await mount();
-    act(() => markAgentWorking(waitingRun()));
-    await settle();
-    expect(byId("composer-working")?.textContent).toContain("달무리봇: 아직 받지 않았어요");
-    expect(byId("composer-working-detail")?.textContent).toBe("17시간째 기다려요");
+  it("에이전트가 없는 채널: 칸도 없고 폼은 예전 그대로다", async () => {
+    await mount({ members: [] });
+    expect(byId("composer-working")).toBeNull();
+    expect(formOf()?.hasAttribute("data-rail")).toBe(false);
   });
 
-  it("가져간 run과 일하는 run에는 생존 판정을 읽지 않는다 (쿼리를 세우지 않는다)", async () => {
+  it("에이전트 DM(명부에 채널 소속이 없어도 `dmAgent`가 있으면)은 칸을 미리 잡는다", async () => {
+    await mount({ members: [], dmAgent: BOT });
+    expect(byId("composer-working")?.getAttribute("data-state")).toBe("idle");
+    expect(formOf()?.hasAttribute("data-rail")).toBe(true);
+  });
+
+  it("열린 턴이 줄로 오른다: 가져가 쓰는 동안 이름·낱말·최근 단계, 끝나면 줄만 사라지고 칸은 남는다", async () => {
     await mount();
+    act(() => markAgentWorking(openTurn()));
+    await settle();
+    expect(byId("composer-working-text")?.textContent).toBe("달무리봇 · 작업 중 · 설계 문서 읽는 중");
+    expect(byId("composer-working")?.getAttribute("data-state")).toBe("active");
+    // 줄의 글에는 초 단위 숫자가 없다.
+    expect(byId("composer-working")?.textContent).not.toMatch(/\d+\s*초/);
+
+    const { clearAgentWorking } = await import("@/features/agents/agentWorkingSignal");
+    act(() => clearAgentWorking(CH, AGENT));
+    await settle();
+    expect(byId("composer-working-text")).toBeNull();
+    expect(byId("composer-working")?.getAttribute("data-state")).toBe("idle");
+  });
+
+  it("컴포저는 서버 생존 판정을 읽지 않는다 — 그것은 예외 줄이 유예를 넘긴 run에서만 읽는다", async () => {
+    await mount();
+    // 유예를 넘은 대기 run: 레일에서는 빠지고, 컴포저는 그 에이전트의 생존을 묻지 않는다.
     act(() =>
       markAgentWorking(
-        waitingRun({
-          phase: "running",
-          status: "running",
-          leaseState: "live",
-          startedAtMs: Date.now() - MIN,
-          queuePosition: undefined,
+        openTurn({
+          status: "queued",
+          phase: "queued",
+          leaseState: "none",
+          startedAtMs: undefined,
+          latestStage: undefined,
+          queuePosition: 1,
+          createdAtMs: Date.now() - 17 * 60 * MIN,
+          updatedAtMs: Date.now() - 17 * 60 * MIN,
         })
       )
     );
     await settle();
-    expect(byId("composer-working")).not.toBeNull();
-    expect(api.fetchAgentLiveness).not.toHaveBeenCalled();
-  });
-
-  it("시스템 작업(환영)의 에이전트도 읽지 않는다 — 줄은 기존 말이다", async () => {
-    await mount();
-    act(() => markAgentWorking(waitingRun({ triggerMessageId: undefined, system: true })));
-    await settle();
-    expect(byId("composer-working")?.textContent).toContain("달무리봇: 대기 1번째");
+    expect(byId("composer-working-text")).toBeNull();
+    expect(byId("composer-working")?.getAttribute("data-state")).toBe("idle");
     expect(api.fetchAgentLiveness).not.toHaveBeenCalled();
   });
 });

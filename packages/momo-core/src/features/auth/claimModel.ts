@@ -1,5 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { passwordRuleCopy } from "./passwordRuleCopy";
 
 export interface ClaimFailure {
   message: string;
@@ -61,8 +62,14 @@ export function claimFailureCopy(cause: unknown): ClaimFailure {
         keepForm: false,
       };
     case 400:
+      // ADR-0215 D2 (#4593): the server names which rule a new password broke
+      // (`error.code`; the English message may be reworded, the code may not).
+      // A 400 that names no rule, or one this screen does not know, keeps the
+      // generic line.
       return {
-        message: "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다.",
+        message:
+          passwordRuleCopy(failure.code) ??
+          "비밀번호를 다시 확인하세요. 비어 있거나 너무 깁니다.",
         suggestSignIn: false,
         retryable: false,
         keepForm: true,

@@ -9,7 +9,7 @@
 //
 // The Rust half lives in `clients/desktop/src-tauri/src/{deeplink,discovery,
 // notification,keychain,session_refresh,updater,detect,harness_status,opener,
-// pdf_viewer,pty,git_read,work_host,device_key}.rs` and the
+// pdf_viewer,downloads,pty,git_read,work_host,device_key}.rs` and the
 // command/event contract is documented in `clients/desktop/README.md`. Keep
 // the three in sync — a renamed command fails at runtime, not at compile time.
 //
@@ -357,6 +357,117 @@ export async function openPdfInDesktopViewer(
     headers: { "x-oort-file-name": encodeURIComponent(name) },
   });
 }
+
+// ---- downloads folder (#4587) ------------------------------------------------
+
+/**
+ * Why a native download call did not complete. The panel maps each to a sentence and a
+ * next step; none of them carries a path (the shell never shows one).
+ *
+ *   too-large    the bytes were over the shell's ceiling (the attachment contract)
+ *   denied       the OS refused the write (the Downloads privacy prompt was declined)
+ *   disk-full    no room left
+ *   missing      the saved file is gone (moved or deleted since)
+ *   not-openable a kind of file that runs or installs what it is given: revealed, not opened
+ *   refused      the shell refused the request itself (a name it will not touch)
+ *   failed       anything else, including "this is not the desktop shell"
+ */
+export type DesktopDownloadErrorCode =
+  | "too-large"
+  | "denied"
+  | "disk-full"
+  | "missing"
+  | "not-openable"
+  | "refused"
+  | "failed";
+
+export class DesktopDownloadError extends Error {
+  readonly code: DesktopDownloadErrorCode;
+  constructor(code: DesktopDownloadErrorCode) {
+    super(`desktop download ${code}`);
+    this.name = "DesktopDownloadError";
+    this.code = code;
+  }
+}
+
+/** The shell's error strings start with a code (`downloads.rs`); anything unknown is `failed`. */
+export function desktopDownloadErrorCode(error: unknown): DesktopDownloadErrorCode {
+  const text = typeof error === "string" ? error : error instanceof Error ? error.message : "";
+  if (text.startsWith("refused: larger than")) return "too-large";
+  if (text.startsWith("refused: this kind of file")) return "not-openable";
+  if (text.startsWith("refused")) return "refused";
+  if (text === "denied") return "denied";
+  if (text === "disk_full") return "disk-full";
+  if (text === "missing") return "missing";
+  return "failed";
+}
+
+async function downloadCall<T>(command: string, run: () => Promise<T>): Promise<T> {
+  if (!IS_TAURI) throw new DesktopDownloadError("failed");
+  try {
+    return await run();
+  } catch (error) {
+    console.warn(`[momo] ${command} did not complete`);
+    throw new DesktopDownloadError(desktopDownloadErrorCode(error));
+  }
+}
+
+/**
+ * The download panel's native half (`downloads.rs`, capability `downloads.json`). A file is
+ * always named by the bare `fileName` the shell returned from `save`: the page never holds or
+ * sends a path, and the shell resolves the name inside the Downloads folder. Every call but
+ * `probe` throws a `DesktopDownloadError` when it did not happen; a browser tab throws
+ * `failed` (there is no panel there, so nothing calls these).
+ */
+export const desktopDownloads = {
+  /**
+   * Write the bytes into the Downloads folder. The bytes go as a RAW invoke body (no JSON
+   * number array for a 100 MB file) and the display name rides a percent-encoded header; the
+   * shell re-derives the file name and returns the one it used.
+   */
+  save(bytes: Uint8Array, name: string): Promise<{ fileName: string }> {
+    return downloadCall("download_save", async () => {
+      const { invoke: call } = await core();
+      return call<{ fileName: string }>("download_save", bytes, {
+        headers: { "x-oort-file-name": encodeURIComponent(name) },
+      });
+    });
+  },
+  /** Which of these saved files are still in the Downloads folder (same order). */
+  async probe(fileNames: readonly string[]): Promise<boolean[]> {
+    if (fileNames.length === 0) return [];
+    if (!IS_TAURI) throw new DesktopDownloadError("failed");
+    let present: unknown;
+    try {
+      present = await invoke<unknown>("download_probe", { request: { fileNames } });
+    } catch {
+      // Unknown is not "deleted": the caller keeps whatever it knew.
+      throw new DesktopDownloadError("failed");
+    }
+    // The answer is one flag per name, in order. A short or malformed one is no answer:
+    // reading the missing flags as "absent" would mark every file deleted.
+    if (!Array.isArray(present) || present.length !== fileNames.length) {
+      throw new DesktopDownloadError("failed");
+    }
+    return present.map((flag) => flag === true);
+  },
+  /** Show the file in Finder. */
+  reveal(fileName: string): Promise<void> {
+    return downloadCall("download_reveal", () =>
+      invoke<void>("download_reveal", { request: { fileName } })
+    );
+  },
+  /** Open the file with its default application (the shell refuses kinds that run or install). */
+  open(fileName: string): Promise<void> {
+    return downloadCall("download_open", () =>
+      invoke<void>("download_open", { request: { fileName } })
+    );
+  },
+  /** Open the Downloads folder itself. */
+  openFolder(): Promise<void> {
+    return downloadCall("download_folder_open", () => invoke<void>("download_folder_open"));
+  },
+};
 
 // ---- local hosted-agent detection (T-5) ------------------------------------
 

@@ -17,6 +17,9 @@ vi.mock("@/lib/env", async (importOriginal) => ({
 }));
 
 import { AppTitlebar } from "./AppTitlebar";
+import { DownloadButton } from "@/features/downloads/DownloadButton";
+import { createDownloadsStore } from "@/features/downloads/downloadsStore";
+import { ATTACHMENT, bytes, fake } from "@/features/downloads/downloadsTestKit";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -177,6 +180,39 @@ describe("셸의 상단 줄: 창 맨 위 잡기 띠 (#4591)", () => {
     const { toggle } = mountTitlebar({ onCollapsedChange });
     act(() => toggle.click());
     expect(onCollapsedChange).toHaveBeenCalledWith(true);
+  });
+});
+
+describe("오른쪽 자리를 채운 다운로드 단추 (#4587)", () => {
+  // 위 「#4587이 쓰는 입구」 시험은 자리에 임의의 단추를 꽂았다. 여기는 진짜 단추다: 링과 점까지 서 있는
+  // 상태에서도 단추 안의 어느 조각을 눌러도 창이 끌리지 않고, 단추 사이 틈은 여전히 끌린다.
+  it("아이콘·링·점 어디를 눌러도 끌리지 않고, 칸은 그대로 끌기 영역이다", async () => {
+    const f = fake();
+    const store = createDownloadsStore(f.deps);
+    const first = store.start({ workspaceId: "ws", channelId: "ch", attachment: ATTACHMENT });
+    f.fetches[0]?.resolve(bytes(10));
+    await first; // 끝났는데 안 본 것: 점
+    void store.start({ workspaceId: "ws", channelId: "ch", attachment: { ...ATTACHMENT, id: "att-2" } }); // 받는 중: 링
+
+    const { slot, titlebar } = mountTitlebar({ trailing: createElement(DownloadButton, { store }) });
+    const downloadButton = slot?.querySelector<HTMLButtonElement>('[data-testid="download-button"]');
+    expect(downloadButton).not.toBeNull();
+    const ring = slot?.querySelector('[data-testid="download-ring"]');
+    const dot = slot?.querySelector('[data-testid="download-dot"]');
+    const icon = downloadButton?.querySelector("svg");
+    expect(ring).not.toBeNull();
+    expect(dot).not.toBeNull();
+    expect(icon).not.toBeNull();
+
+    for (const part of [downloadButton, ring, dot, icon]) {
+      expect(pressStartsWindowDrag(part as Element)).toBe(false);
+    }
+    expect(pressStartsWindowDrag(slot as Element)).toBe(true);
+    expect(pressStartsWindowDrag(titlebar)).toBe(true);
+    expect(titlebar.lastElementChild).toBe(slot);
+    // 단추는 자리 안에 서고 끌기 속성을 갖지 않는다.
+    expect(slot?.contains(downloadButton as Node)).toBe(true);
+    expect(downloadButton?.hasAttribute("data-tauri-drag-region")).toBe(false);
   });
 });
 

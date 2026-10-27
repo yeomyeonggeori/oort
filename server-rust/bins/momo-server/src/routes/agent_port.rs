@@ -27,6 +27,10 @@ const MAX_ORIGIN_BYTES: usize = 2048;
 const MAX_ACCEPT_BYTES: usize = 4096;
 const MAX_PROTOCOL_HEADER_BYTES: usize = 512;
 const MAX_RELEVANT_HEADER_VALUES: usize = 16;
+/// The adapter's own two refusal sentences. Constants so the call trace can name their reason
+/// from the same text the response carries (`momo_mcp::REFUSAL_REASONS` has a row for each).
+const MESSAGE_TRANSPORT_HEADERS: &str = "invalid Agent Port transport headers";
+const MESSAGE_BODY_TOO_LARGE: &str = "request body exceeds the limit";
 
 /// One Agent Port POST. Every invocation independently authenticates and no
 /// request or response creates protocol-session authority.
@@ -88,7 +92,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             Some(protocol_error(
                 StatusCode::BAD_REQUEST,
                 -32600,
-                "invalid Agent Port transport headers",
+                MESSAGE_TRANSPORT_HEADERS,
             )),
         )
     } else {
@@ -99,7 +103,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
                 Some(protocol_error(
                     StatusCode::PAYLOAD_TOO_LARGE,
                     -32600,
-                    "request body exceeds the limit",
+                    MESSAGE_BODY_TOO_LARGE,
                 )),
             ),
         }
@@ -142,7 +146,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         Some(protocol_error(
             StatusCode::BAD_REQUEST,
             -32600,
-            "invalid Agent Port transport headers",
+            MESSAGE_TRANSPORT_HEADERS,
         ))
     } else {
         None
@@ -187,7 +191,33 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     let _incoming_session = parts.headers.get(MCP_SESSION_ID);
     let _incoming_event = parts.headers.get(LAST_EVENT_ID);
 
+    let caller = crate::routes::agent_port_tools::HostedCaller::from_principal(&principal);
+    let era = call_era(protocol_version.value());
+
     if let Some(rejection) = transport_rejection {
+        // Every transport refusal is `-32600` (`protocol_error` above); which of the two it was
+        // is told by its status (the oversize body is the only `413`).
+        if let Some(caller) = caller {
+            let sentence = if rejection.status() == StatusCode::PAYLOAD_TOO_LARGE {
+                MESSAGE_BODY_TOO_LARGE
+            } else {
+                MESSAGE_TRANSPORT_HEADERS
+            };
+            trace_call(
+                &state,
+                caller,
+                momo_mcp::call_shape(&bytes),
+                AnswerFacts {
+                    era,
+                    status: rejection.status().as_u16(),
+                    rpc_code: Some(-32600),
+                    reason: Some(momo_mcp::reason_of_sentence(sentence)),
+                    tools_listed: None,
+                    counts: momo_mcp::ResultCounts::default(),
+                },
+            )
+            .await;
+        }
         return rejection;
     }
 
@@ -198,7 +228,6 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     // queries HAP-E2 measured. A caller with no live hosted connection resolves
     // to the empty view, which is byte-identical to a connect-only credential:
     // an empty catalog and an unknown-tool answer.
-    let caller = crate::routes::agent_port_tools::HostedCaller::from_principal(&principal);
     let view = match (mentions_tools(&bytes), caller) {
         (true, Some(caller)) => {
             crate::routes::agent_port_tools::tool_view_for(&state, caller).await
@@ -214,22 +243,169 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         mcp_name: name.value(),
         body: &bytes,
     };
-    match momo_mcp::dispatch_with_tools(request, &view) {
+    let dispatched = match momo_mcp::dispatch_with_tools(request, &view) {
         momo_mcp::Outcome::Response(response) => {
             log_invalid_params(&response, &bytes);
-            dispatched_response(response)
+            response
         }
         momo_mcp::Outcome::Tool(call) => match caller {
-            Some(caller) => dispatched_response(
-                crate::routes::agent_port_tools::execute(&state, caller, call).await,
-            ),
+            Some(caller) => crate::routes::agent_port_tools::execute(&state, caller, call).await,
             // Unreachable: a non-empty view requires a hosted caller. Answering
             // like an unknown tool keeps the impossible case fail-closed.
-            None => dispatched_response(momo_mcp::tool_failure(
-                &call,
-                momo_mcp::ToolFailure::NotAuthorized,
-            )),
+            None => momo_mcp::tool_failure(&call, momo_mcp::ToolFailure::NotAuthorized),
         },
+    };
+    if let Some(caller) = caller {
+        let shape = momo_mcp::call_shape(&bytes);
+        // For a `tools/list`, how many tools this caller's view offered: the one
+        // number that tells "listed nothing" from "listed everything".
+        let tools_listed =
+            (dispatched.status == 200 && shape.method == "tools/list").then(|| view.names().len());
+        // For the three tools whose answer says whether work exists, how much it handed
+        // over — counted from the server's own answer (`result_counts`).
+        let counts = shape
+            .tool
+            .map(|tool| momo_mcp::result_counts(tool, dispatched.body.as_deref()))
+            .unwrap_or_default();
+        trace_call(
+            &state,
+            caller,
+            shape,
+            AnswerFacts {
+                era,
+                status: dispatched.status,
+                rpc_code: momo_mcp::response_rpc_code(dispatched.body.as_deref()),
+                reason: momo_mcp::refusal_reason(dispatched.body.as_deref()),
+                tools_listed,
+                counts,
+            },
+        )
+        .await;
+    }
+    dispatched_response(dispatched)
+}
+
+/// The audit row of one admitted Agent Port POST (ADR-0200 증보 4, #4618).
+const CALL_TRACE_ACTION: &str = "agent_port.call";
+const CALL_TRACE_SCHEMA: &str = "oort.agent_port.call.v1";
+/// Same ceiling as the liveness and `tool_call` writes: the call has already been
+/// answered in substance, and a slow database must not become a slow response.
+const CALL_TRACE_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// The protocol era the caller *said* it was speaking, from the `MCP-Protocol-Version`
+/// header alone — a closed token, never the header's text.
+fn call_era(header: Option<&str>) -> &'static str {
+    match header {
+        None => "none",
+        Some(momo_mcp::MODERN_PROTOCOL_VERSION) => "modern",
+        Some(momo_mcp::LEGACY_PROTOCOL_VERSION) => "legacy",
+        Some(_) => "other",
+    }
+}
+
+/// What the server knows about an answer once it exists: every field is a closed token or a
+/// number the server computed, never something the caller sent.
+struct AnswerFacts {
+    era: &'static str,
+    status: u16,
+    rpc_code: Option<i64>,
+    /// The closed reason token of a refusal (`momo_mcp::REFUSAL_REASONS`); `None` for a success.
+    reason: Option<&'static str>,
+    tools_listed: Option<usize>,
+    counts: momo_mcp::ResultCounts,
+}
+
+/// Write one `agent_port.call` audit row for an admitted call, **after** its answer is
+/// known.
+///
+/// Why this exists: `auth.agent_bearer.used` is written in the authentication
+/// transaction, before the body is read, so it can only say "a call happened" — and
+/// the liveness and `tool_call` records skip every refusal that is not
+/// `unavailable`/`not_authorized` and every call that points at no run. A runtime that
+/// wakes, calls, gets a `-32602`, a `-32700` or a version error and goes quiet left
+/// nothing behind. This row says which method, which tool, what came back.
+///
+/// What it carries is closed on purpose (T1): the JSON-RPC `method` and the `tools/call`
+/// tool name from fixed lists (`other` / `unknown` / `unparsed` otherwise), the closed
+/// outcome token, the HTTP status, the JSON-RPC code, the era, and three server-computed
+/// numbers — how many tools a `tools/list` offered, and how many events / `agent_job`
+/// events / jobs a successful `oort_inbox_read` / `oort_jobs_claim` / `oort_job_start`
+/// handed over. Never an argument, a cursor, a handle, a body, an id, a header's text or a
+/// token; `via_token_id` stays empty so a pairing credential's id can never meet the
+/// `token` foreign key.
+///
+/// Best effort, like the other two records: a separate short tenant transaction, a 2 s
+/// ceiling, and a failure is logged and dropped — it never changes the answer.
+async fn trace_call(
+    state: &AppState,
+    caller: crate::routes::agent_port_tools::HostedCaller,
+    shape: momo_mcp::CallShape,
+    facts: AnswerFacts,
+) {
+    // At most `PER_HOUR` rows per credential per hour, then the trace stops for it until the hour
+    // passes (ADR-0200 T3's rule: stop recording, never delete).
+    let verdict = state.agent_port.call_trace.admit(caller.token_id);
+    if !verdict.allowed {
+        if verdict.should_log {
+            tracing::warn!(
+                limit = crate::rate_limit::CallTraceBudget::PER_HOUR,
+                "Agent Port call trace capped for one credential until its hour passes"
+            );
+        }
+        return;
+    }
+    let mut detail = serde_json::json!({
+        "method": shape.method,
+        "outcome": momo_mcp::outcome_code(facts.rpc_code),
+        "status": facts.status,
+        "era": facts.era,
+    });
+    if let Some(object) = detail.as_object_mut() {
+        if let Some(tool) = shape.tool {
+            object.insert("tool".to_owned(), serde_json::json!(tool));
+        }
+        if let Some(code) = facts.rpc_code {
+            object.insert("rpc_code".to_owned(), serde_json::json!(code));
+        }
+        if let Some(reason) = facts.reason {
+            object.insert("reason".to_owned(), serde_json::json!(reason));
+        }
+        for (key, value) in [
+            (
+                "tools_listed",
+                facts
+                    .tools_listed
+                    .map(|listed| u32::try_from(listed).unwrap_or(u32::MAX)),
+            ),
+            ("events", facts.counts.events),
+            ("agent_jobs", facts.counts.agent_jobs),
+            ("jobs", facts.counts.jobs),
+        ] {
+            if let Some(value) = value {
+                object.insert(key.to_owned(), serde_json::json!(value));
+            }
+        }
+    }
+    let mut entry = momo_db::audit::AuditEntry::new(caller.workspace_id, CALL_TRACE_ACTION)
+        .by(caller.agent_member_id)
+        .with_schema(CALL_TRACE_SCHEMA, detail);
+    entry.target_type = Some("route".to_string());
+    let write = tokio::time::timeout(
+        CALL_TRACE_WRITE_TIMEOUT,
+        momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
+            Box::pin(async move {
+                momo_db::audit::write_audit(conn, &entry).await?;
+                Ok(())
+            })
+        }),
+    )
+    .await;
+    match write {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::warn!(error = %error, "Agent Port call trace write failed");
+        }
+        Err(_) => tracing::warn!("Agent Port call trace write timed out"),
     }
 }
 
