@@ -26,8 +26,20 @@ const CORE_SRC = path.resolve(__dirname, '../../packages/momo-core/src');
  */
 const MAX_WORKERS = Math.min(8, Math.max(os.availableParallelism() - 1, 1));
 
+/**
+ * Per-test timeout (#4633). Many sheet and layer tests wait for REAL animations with
+ * `waitFor(…, {timeout: 8000})` (sheetContract, aiSheet, home, profile*, memoryUi …), and a
+ * few wait twice in a row. Jest's default test timeout is 5 s, shorter than the waits it
+ * hosts, so on a slow CI runner Jest killed the test before `waitFor` could finish — the
+ * failure said "Exceeded timeout of 5000 ms", not that the UI was wrong (#4629/#4638/#4641 CI,
+ * 10-27). The test timeout must exceed the longest wait chain; 20 s covers two 8 s waits plus
+ * render. Determinizing these tests with fake timers stays open in #4633.
+ */
+const TEST_TIMEOUT_MS = 20_000;
+
 module.exports = {
   maxWorkers: MAX_WORKERS,
+  testTimeout: TEST_TIMEOUT_MS,
   preset: '@react-native/jest-preset',
   moduleNameMapper: {
     '^@momo/core/(.*)$': `${CORE_SRC}/$1`,

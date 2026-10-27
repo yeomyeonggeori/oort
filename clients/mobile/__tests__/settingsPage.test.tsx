@@ -880,6 +880,8 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
       expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
     );
     await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
+    // 실제 퇴장 애니메이션 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다린다. 제한 시간은
+    // jest.config.js 의 testTimeout(20 s, #4633)이 진다 — 결정화(가짜 시계)는 #4633.
   });
 });
 

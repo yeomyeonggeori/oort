@@ -45,6 +45,7 @@ src-tauri/
   src/discovery.rs    # _momo._tcp browse
   src/notification.rs # permission + show
   src/opener.rs       # hand one https URL to the OS browser
+  src/downloads.rs    # save an attachment into Downloads; probe / reveal / open it by file name (#4587)
   src/detect.rs       # passive local hosted-agent signatures (T-5)
   src/keychain.rs     # refresh token in the OS credential store
   src/updater.rs      # check / install / relaunch over the minisign manifest
@@ -66,6 +67,7 @@ src-tauri/
                       # workbench-start.json: folder pick/inspect + worktree add, same fence (#2775)
                       # harness-profile.json: the four harness_profile_*
                       # commands, same fence (D3-f, #2878)
+                      # downloads.json: the five download_* commands, same fence (#4587)
   icons/              # generated via `cargo tauri icon app-icon.png`
 ```
 
@@ -123,6 +125,11 @@ interface HostedAgentProbe {
 | `session_rotation_end` | — | `void` | That rotation is over and its token written. An `_end` without a `_begin` is a no-op. |
 | `open_external_url` | `{ url: string }` | `void` \| error | Opens one **https** URL in the OS browser. Rejects anything else. Desktop only. |
 | `open_pdf_attachment` | raw bytes (invoke body) + header `x-oort-file-name` (percent-encoded) | `void` \| error | Writes one PDF to `<app cache>/pdf-preview/<unique>/<name>.pdf` and opens it in the OS default viewer (#2701). Rejects a body without a `%PDF-` header in its first 1 KiB or over 100 MiB; the name is re-derived (always `.pdf`, no separators). Each copy (dir 0700, file 0600) is removed 10 minutes after launch; copies older than an hour are swept at app start and on every call. The raw body only survives the custom-protocol IPC transport, so the shell CSP must keep `connect-src ipc: http://ipc.localhost` (pinned by `shell_contract.rs` and `desktopShellContract.test.ts`; without it every invoke silently falls back to postMessage JSON). Desktop only. |
+| `download_save` | raw bytes (invoke body) + header `x-oort-file-name` (percent-encoded) | `{ fileName: string }` \| error | Writes one downloaded attachment into the OS Downloads folder (`app.path().download_dir()`) and returns the name it got there (#4587). The name is re-derived here: extension kept; separators, control and bidi characters stripped; a leading dot removed; Windows device names defused; ≤ 200 bytes. `create_new` (never overwrites; a collision becomes `name (1).ext`, a symlink at the name is not written through). A failed write leaves no partial file. Rejects a body over 100 MiB. macOS: the file gets `com.apple.quarantine` (`0081;<time>;oort;`, best effort) so Gatekeeper judges what is double-clicked in Finder, as for a browser download. Errors start with a code: `refused: …`, `denied`, `disk_full`, `failed`. Needs the `ipc:` transport (same CSP note as `open_pdf_attachment`). Desktop only. |
+| `download_probe` | `{ request: { fileNames: string[] } }` (≤ 200) | `boolean[]` (same order) \| error | Which saved files are still in the Downloads folder (the panel's 「지워진 파일」 marker). A name that is not plain, or is not a regular file directly in the folder, reads as `false`, so the page learns nothing about the rest of the disk. |
+| `download_reveal` | `{ request: { fileName: string } }` | `void` \| error | Shows one saved file in Finder (`open -R`; Windows/Linux open the folder). The name is a bare file name resolved inside the Downloads folder; both are canonicalised and the file must be a regular file (not a symlink, wherever it points) that is a direct child. Errors: `refused: …`, `missing`, `failed`. |
+| `download_open` | `{ request: { fileName: string } }` | `void` \| error | Opens one saved file with its default application, by the same resolution as `download_reveal`. Refused (`refused: this kind of file is not opened from here`) for extensions whose handler runs or installs what it is given (`.command`, `.terminal`, `.pkg`, `.mobileconfig`, `.jar`, scripts, `.exe`, local `.html`/`.svg`, …; closed list `NOT_OPENED_EXTENSIONS` in `downloads.rs`): those can still be revealed. |
+| `download_folder_open` | — | `void` \| error | Opens the Downloads folder itself. No argument. |
 | `detect_hosted_agents` | — | `HostedAgentProbe[]` | Passive allowlist only (app bundle path, bundle id, process name). Never scans ports. Empty-flags, not an error, when nothing matches. Desktop only. |
 | `detect_local_harnesses` | — | `{ id: "claude" \| "codex", installed: boolean, auth: "logged_in" \| "needs_login" \| "unknown" }[]` | Finds `claude`/`codex` on the inherited PATH plus fixed install folders (no login-shell probe) and runs only `claude auth status` / `codex login status` by absolute path, no shell, fixed arguments, 6 s limit each (in parallel). Exit code only: 0 = logged in, the CLI ran and exited non-zero = needs login, missing/failed to start/126·127 (did not run)/signal/timed out = unknown. stdout/stderr are discarded, credential files are never opened (ADR-0190 D3-a·D3-b, #2813). Desktop only. |
 | `app_version` | — | `string` | The running build, e.g. `0.1.0-next.1`. |
@@ -423,6 +430,56 @@ parks neither the main thread nor an async runtime worker.
 Web half: `openExternalUrl()` in `clients/web/src/lib/tauri.ts`, called from
 `ArtifactCard`'s link row, which falls back to the plain anchor in a browser and
 shows an inline failure with the address when the shell could not open it.
+
+## Downloads (#4587)
+
+The web bundle's old download was a blob + `<a download>`. In this shell that path
+**does** write a file: wry 0.55.1's `WebViewAttributes` default is a
+`download_started_handler` that accepts every download (`lib.rs`), so WKWebView saves
+the page's suggested name into `dirs::download_dir()` (` (1)` on a clash, a WebKit
+`com.apple.quarantine` `0083`, a leading dot dropped, `../../x` folded to `_.._x`),
+with no `on_download` handler registered by this app. Measured on a real debug build
+(#4587, 2026-10-27; an earlier comment here read wry's source as "cancelled" and was
+wrong). What that path cannot do is answer afterwards: progress, the final name,
+where the file went, whether it is still there, show it, open it. So the web bundle
+fetches the bytes through the authorised attachment proxy as before (ADR-0151 D2) and
+hands them to `download_save`, and the title bar's download panel
+(`clients/web/src/features/downloads/`) lists what was saved.
+
+The commands are **app commands, not `tauri-plugin-fs` / `tauri-plugin-opener`**,
+for the reason `open_external_url` is: the plugins' surface is "any path, any
+handler". The webview names a file only by its bare name; the shell resolves it
+inside the Downloads folder, and refuses anything else (`downloads.rs`
+`is_plain_name`, `resolve_in`). `capabilities/downloads.json` grants the five
+commands to the `main` webview on the bundled origin only, and `shell_contract.rs`
+pins that set, that fence, and that no capability carries an `fs:` or `opener:`
+permission. The decision record is **ADR-0133 「증보 2026-10-27 — 다운로드 폴더」**
+(Accepted, owner 2026-10-27): the folder fence, no overwriting, no "open" for kinds
+that run or install, the quarantine mark, and what it does not open.
+
+Measured on a real build (macOS 27.0, unsigned debug, sandboxed `HOME`; the table is in
+the PR):
+
+- `xattr -l` on a saved file: `com.apple.quarantine: 0081;<hex time>;oort;`; a saved
+  `.command` has no execute bit and `spctl --assess --type open` rejects it. The
+  Gatekeeper dialog on a Finder double-click was not exercised.
+- Sixteen negative probes (`../.zshrc`, `/etc/hosts`, `.command` / `.terminal` / `.pkg`
+  / `.HTML` / `a.pdf.command` open, an unknown `path` field, an empty or NUL name, a
+  hidden file, a missing file, a probe of names outside the folder, 201 names) come
+  back as code strings or `false` before anything is launched (14 refusals, one
+  `missing`, one probe answer); ten hostile names saved land inside the folder.
+- Transient memory for one 64 MiB file (RSS of the four processes, a fresh app):
+  +569 MiB through `download_save` (shell +256, WebContent +200, Networking +112)
+  against +242 MiB through the old anchor path. One IPC message holds the whole body
+  (up to 100 MiB) until #4585 raises the attachment ceiling and the transfer moves to
+  chunks; `downloadsContract.test.ts` goes red when the shell's ceiling and the
+  attachment contract's ceiling differ.
+
+`runtime-unverified`: the macOS privacy prompt for the Downloads folder (an unsigned
+bundle launched through LaunchServices wrote to the real `~/Downloads` with no prompt,
+also after `tccutil reset SystemPolicyDownloadsFolder`, so the sentence in
+`NSDownloadsFolderUsageDescription` has not been seen), Gatekeeper's dialog, and
+Windows / Linux (the `cfg` branches were not built or run; no quarantine there).
 
 ## Work host sidecar (#2778, helper bundle #3084)
 
