@@ -13,6 +13,7 @@
 //! | `a_token_over_its_budget_is_told_to_wait_and_a_token_inside_it_is_served` | R13: three requests inside a budget of three → 200 with no `Retry-After`; the next ones → 429 with a `Retry-After` that is whole seconds inside the window (the rest of it, not a made-up number); only the admitted ones are recorded as use; the 429 row names the `token` axis | the token budget is dropped, the 429 has no (or a made-up) `Retry-After`, a 429 is recorded as use |
 //! | `two_tokens_of_one_member_share_the_members_budget_and_another_member_is_not_touched` | R13: two tokens, each inside its own budget, whose sum passes the member's → 429 on the `member` axis (with a `Retry-After`, touching nothing); a flood refused on the token axis spends none of the member's budget; another member's token is served and limited by its own budget | the member axis is dropped or keyed on the token, a denied request still counts against the member, the member key is shared by everyone |
 //! | `the_send_row_has_a_budget_of_its_own_that_reads_neither_spend_nor_feel` | R13: sends (`dev:messages:write`) are refused on the `write` axis alone, before the handler (no message stored, nothing touched), reads before and after are served, another token of the same member sends | the write axis is dropped, covers reads, or is keyed on the member |
+//! | `a_send_is_counted_on_top_of_the_read_budgets_and_a_request_over_two_budgets_names_both` | R13: with two sends a token and two calls a token, the third send is one 429 whose row names both the `token` and the `write` axis, and a read right after is refused as well (a send spends the token's budget too) | the send row is counted instead of the read budgets, the row names only the first full axis |
 //! | `the_budget_is_keyed_on_who_holds_the_token_not_on_the_address` | R13: one member's token is refused although every request names a different address; another member's token from the very same address is served and then has a budget of its own; the member's other token is not the spent one | the key is an address (peer or forwarded), one global bucket, or the member for a per-token budget |
 //! | `a_429_writes_nothing_and_leaves_one_refusal_row_per_token` | R13/R15: a 429 leaves the token row, `last_used_at` and the use rows as they were (an admitted request moves them — the control), the whole 429 flood adds exactly one `rate_limited` row to the workspace's audit, per token, with the closed detail | a 429 reaches `finalize`/the use row, the refusal row is unbounded or global |
 //! | `a_zero_or_unparsable_budget_keeps_the_default_and_never_switches_the_door_off` | R13: a zero (injected three ways: through the builder, through an env-style lookup of 0/garbage/negative/blank, straight into the state) leaves the send budget at the default 30 — the 31st is a 429 | a zero is read as "off", the config is not normalized on the way in or at use |
@@ -27,7 +28,7 @@
 //! | `a_refusal_whose_row_cannot_be_written_is_the_same_refusal_and_is_recorded_when_it_can` | D9: a failing write of a `scope_denied` row changes no byte of the 403, and the failed attempts do not use up the window's one row — the next refusal is recorded | the audit failure turns the refusal into an error, the slot is not handed back |
 //! | `a_429_whose_row_cannot_be_written_is_still_a_429_and_is_recorded_when_it_can` | D9: the same for the `rate_limited` row of a 429 | as above |
 //! | `a_valid_token_anywhere_but_the_bearer_header_is_not_a_credential` | R6: the same valid token in a query (`access_token`, `token`), a cookie, a JSON body, `X-Api-Key`, `X-Access-Token`, `Authorization: Token`/`Basic` → 401 the same bytes as no credential, nothing recorded or stored; as `Authorization: Bearer` it is served | the door reads a token from another place |
-//! | `no_audit_row_and_no_log_line_holds_any_piece_of_a_presented_token` | R6: after 200s (one with the token in the URL as well), 401s, 403s and a 429, no row of the workspace's audit and no captured log line holds the envelope, any 8 characters of its secret, the SHA-256 of the envelope or of the secret; the same log does hold the 429 warning with the token's id | a log line, an error or a detail carries the bearer, the request URI or a hash |
+//! | `no_audit_row_and_no_log_line_holds_any_piece_of_a_presented_token` | R6: after 200s (one with the token in the URL as well), 401s, 403s and a 429, no row of the workspace's audit, no captured log line and no answer the client received (status line, headers, body) holds the envelope, any 8 characters of its secret, the SHA-256 of the envelope or of the secret; the same log does hold the 429 warning with the token's id, and the recorded answers hold the refusals' own words | a log line, an answer, an error or a detail carries the bearer, the request URI or a hash |
 //! | `the_leak_scanner_sees_the_envelope_its_windows_and_its_hash` | the scanner above flags each form of a planted token and nothing harmless (no database) | the scanner cannot fail |
 //!
 //! `#[ignore]` — needs a real PostgreSQL 18 + pgvector (superuser URL); run on an isolated
@@ -216,6 +217,22 @@ impl Reply {
         self.header("retry-after")?.trim().parse().ok()
     }
 
+    /// The answer as one text — status, every header, the body — which is what a leak scan
+    /// reads.
+    fn transcript(&self) -> String {
+        let mut text = format!("HTTP {}\n", self.status);
+        for (name, value) in &self.headers {
+            text.push_str(&format!(
+                "{name}: {}\n",
+                String::from_utf8_lossy(value.as_bytes())
+            ));
+        }
+        text.push('\n');
+        text.push_str(&self.text());
+        text.push('\n');
+        text
+    }
+
     /// Everything a client could tell two refusals apart by (`date` and the like are left
     /// out — they differ between any two answers).
     fn fingerprint(&self) -> Fingerprint {
@@ -241,10 +258,49 @@ async fn finish(request: RequestBuilder) -> Reply {
     let status = response.status().as_u16();
     let headers = response.headers().clone();
     let body = response.bytes().await.expect("the body is read").to_vec();
-    Reply {
+    let reply = Reply {
         status,
         headers,
         body,
+    };
+    if let Some(record) = ANSWERS
+        .lock()
+        .expect("the answer record is healthy")
+        .as_mut()
+    {
+        record.push_str(&reply.transcript());
+    }
+    reply
+}
+
+/// Every answer `finish` returns while an [`AnswerRecord`] lives, as [`Reply::transcript`]s.
+static ANSWERS: Mutex<Option<String>> = Mutex::new(None);
+
+/// Records the answers of the requests made while it lives: the third haystack of the leak
+/// scan (the audit and the captured log are the other two). The tests run one at a time under
+/// `test_lock`, so a recording holds the requests of the test that started it and no other.
+struct AnswerRecord;
+
+impl AnswerRecord {
+    fn start() -> Self {
+        *ANSWERS.lock().expect("the answer record is healthy") = Some(String::new());
+        AnswerRecord
+    }
+
+    fn text(&self) -> String {
+        ANSWERS
+            .lock()
+            .expect("the answer record is healthy")
+            .clone()
+            .unwrap_or_default()
+    }
+}
+
+impl Drop for AnswerRecord {
+    fn drop(&mut self) {
+        if let Ok(mut record) = ANSWERS.lock() {
+            *record = None;
+        }
     }
 }
 
@@ -830,6 +886,47 @@ async fn the_send_row_has_a_budget_of_its_own_that_reads_neither_spend_nor_feel(
     assert_eq!(world.message_count(channel).await, 3);
     // Reads count as use (8 reads, 2 sends) and the refused send does not.
     assert_eq!(world.used_rows(writer.id).await, 10);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_send_is_counted_on_top_of_the_read_budgets_and_a_request_over_two_budgets_names_both() {
+    let _serial = test_lock().await;
+    // Two sends a token and two calls a token: the two sends are the token's whole budget
+    // and the send row's whole budget at once.
+    let world = World::boot(budgets(2, 100, 2)).await;
+    let member = world.admin("lee-dohyeon").await;
+    let channel = world.channel(&[member]).await;
+    let writer = world.card(member, &DEV_SCOPES).await;
+
+    for call in 1..=2 {
+        let reply = world.send_as(channel, &writer.secret, "점검 기록").await;
+        expect_status(&reply, 201, &format!("send {call} of 2"));
+    }
+    // The third send is over both budgets: one 429, one row, and the row names both axes.
+    // (Were the send row counted instead of the read budgets, only `write` would be full.)
+    let refused = world.send_as(channel, &writer.secret, "세 번째 글").await;
+    expect_status(&refused, 429, "the third send is over both its budgets");
+    assert_eq!(world.message_count(channel).await, 2);
+    let rows = world.audit(RATE_LIMITED, Some(writer.id)).await;
+    assert_eq!(rows.len(), 1, "one refusal row");
+    assert_eq!(
+        rows[0].detail,
+        limited_detail(
+            "POST",
+            T_MESSAGES,
+            "dev:messages:write",
+            &["token", "write"]
+        ),
+        "every full axis is named"
+    );
+    // The sends spent the token's budget for reads as well: the next read is refused too.
+    expect_status(
+        &world.get_as(&world.channels_path(), &writer.secret).await,
+        429,
+        "a read after two sends: the token's budget of two is spent",
+    );
+    assert_eq!(world.used_rows(writer.id).await, 2);
 }
 
 #[tokio::test]
@@ -2172,7 +2269,9 @@ fn the_leak_scanner_sees_the_envelope_its_windows_and_its_hash() {
 async fn no_audit_row_and_no_log_line_holds_any_piece_of_a_presented_token() {
     let _serial = test_lock().await;
     // The capture is a default of this thread (see the file's notes): installed before
-    // anything runs, so that issuing the tokens is captured too.
+    // anything runs, so that issuing the tokens is captured too. The answers the client
+    // receives are recorded from the same moment.
+    let answers_record = AnswerRecord::start();
     let logs = LogBuffer::default();
     let _capture = tracing_subscriber::fmt()
         .with_writer(logs.clone())
@@ -2286,8 +2385,9 @@ async fn no_audit_row_and_no_log_line_holds_any_piece_of_a_presented_token() {
     ];
     let audit = world.audit_text().await;
     let log = logs.text();
+    let answers = answers_record.text();
 
-    // The controls first: the two texts below are the real ones, so "no piece" is a
+    // The controls first: the three texts below are the real ones, so "no piece" is a
     // finding and not an empty haystack.
     for needle in [
         USED,
@@ -2312,6 +2412,21 @@ async fn no_audit_row_and_no_log_line_holds_any_piece_of_a_presented_token() {
         warning.contains(&writer.id.to_string()),
         "the 429 warning names the token by its id: {warning}"
     );
+    // The recorded answers are the refusals' own words (the 403s, the 429 and its
+    // `Retry-After`, the 401) — the answers most likely to echo what was presented.
+    for needle in [
+        "dev_scope_denied",
+        "dev_route_not_allowed",
+        "rate limit exceeded",
+        "retry-after: ",
+        "invalid or expired token",
+    ] {
+        assert!(
+            answers.contains(needle),
+            "the recorded answers lack {needle} ({} bytes recorded)",
+            answers.len()
+        );
+    }
     // The scanner can fail on these very tokens.
     for (name, envelope) in &presented {
         let planted = format!(
@@ -2327,9 +2442,13 @@ async fn no_audit_row_and_no_log_line_holds_any_piece_of_a_presented_token() {
     }
 
     // The claim: no piece of any presented token — valid, spent, made up or malformed — is
-    // in the audit of the workspace or in anything the server logged.
+    // in the audit of the workspace, in anything the server logged or in any answer it gave.
     for (name, envelope) in &presented {
-        for (where_, haystack) in [("the audit", &audit), ("the captured log", &log)] {
+        for (where_, haystack) in [
+            ("the audit", &audit),
+            ("the captured log", &log),
+            ("the recorded answers", &answers),
+        ] {
             if let Some(piece) = leaked_piece(haystack, envelope) {
                 panic!("{where_} holds a piece of the {name} token: {piece}");
             }
