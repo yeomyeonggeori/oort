@@ -58,11 +58,32 @@ const CANDIDATES = [
 
 const PALETTES = ["dawnsky", "noeul"] as const;
 
-/** 겹치는 상자들의 장면. 위치는 뷰포트 기준 고정 좌표라 어느 팔레트·스킴에서도 같다. */
-function html(css: string): string {
-  const fixed = (id: string, cls: string, box: string) =>
-    `<div id="${id}" class="${cls}" style="position:fixed;${box}"></div>`;
-  return `<!doctype html><html lang="ko"><head><style>${css}
+interface Box {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 장면에 놓을 겹침 상자들(뷰포트 기준 고정 좌표). 없는 것은 그리지 않는다. 런타임에 스타일을 쓰지 않고 장면을 새로 그린다. */
+interface Boxes {
+  /** 판 안의 덮는 판(스레드·작업 판, 200). */
+  thread?: Box;
+  /** 서랍(300, DOM이 판보다 앞). */
+  drawer?: Box;
+  /** body로 포털된 스크림(200, DOM이 판보다 뒤). */
+  portal?: Box;
+  /** 사이드바 스크림(200, DOM이 판보다 앞). */
+  sscrim?: Box;
+}
+
+/** 겹치는 상자들의 장면. 팔레트·스킴은 `data-palette`와 브라우저 스킴이 정한다. */
+function html(css: string, palette: string, boxes: Boxes): string {
+  const fixed = (id: string, cls: string, b: Box | undefined) =>
+    b
+      ? `<div id="${id}" class="${cls}" style="position:fixed;left:${b.left}px;top:${b.top}px;width:${b.width}px;height:${b.height}px"></div>`
+      : "";
+  return `<!doctype html><html lang="ko" data-palette="${palette}"><head><style>${css}
 html, body { margin: 0; }
 </style></head><body>
 <div class="app-shell" id="shell" data-desktop-shell>
@@ -75,16 +96,16 @@ html, body { margin: 0; }
     </div>
   </header>
   <aside class="sidebar-drawer" id="side">사이드바</aside>
-  ${fixed("drawer", "layer-overlay-surface bg-danger", "left:20px;top:300px;width:200px;height:60px")}
-  ${fixed("sscrim", "layer-overlay-scrim bg-primary", "left:300px;top:600px;width:200px;height:100px")}
+  ${fixed("drawer", "layer-overlay-surface bg-danger", boxes.drawer)}
+  ${fixed("sscrim", "layer-overlay-scrim bg-primary", boxes.sscrim)}
   <main class="app-pane flex min-h-0 min-w-0 flex-col" id="pane">
     <header class="channel-head flex min-w-0 items-center justify-end py-row-fixed" id="head">
       <span id="hbox" class="bg-primary" style="display:block;inline-size:60px;block-size:34px"></span>
     </header>
-    ${fixed("thread", "layer-overlay-scrim bg-ok", "left:500px;top:300px;width:300px;height:200px")}
+    ${fixed("thread", "layer-overlay-scrim bg-ok", boxes.thread)}
   </main>
 </div>
-${fixed("portal", "layer-overlay-scrim bg-warn", "left:700px;top:380px;width:300px;height:200px")}
+${fixed("portal", "layer-overlay-scrim bg-warn", boxes.portal)}
 </body></html>`;
 }
 
@@ -118,6 +139,35 @@ function parseColor(value: string): Rgb {
 const near = (a: Rgb, b: Rgb) => a.every((v, i) => Math.abs(v - b[i]!) <= 3);
 
 describe("판을 isolate로 가둔 뒤의 겹침 층 순서 (#4587)", () => {
+  type R = { left: number; right: number; top: number; bottom: number };
+  /** 한 불변식: `upper`가 `lower` 위에 그려진다. 장면의 상자와 두 id, 알려 줄 이름. */
+  interface Case {
+    label: string;
+    upper: string;
+    lower: string;
+    upperName: string;
+    lowerName: string;
+    boxes: Boxes;
+    /** 위에 설 것의 색을 읽을 id(알약·상자 모두 자기 배경색이다). */
+    upperBgId: string;
+    lowerBgId: string;
+  }
+  // 좌표는 1100×760 뷰포트 기준이다. 머리 단색 상자(`hbox`)는 판의 오른쪽 위(약 x 972~1032, y 53~87), 알약은 띠 오른쪽 끝에서
+  // 아래로(약 x 910~1092, y 38~68)에 선다. 각 장면은 겹쳐야 할 두 상자만 둔다.
+  const CASES: Case[] = [
+    { label: "I1", upper: "portal", lower: "thread", upperName: "포털 스크림", lowerName: "판 안의 덮는 판", upperBgId: "portal", lowerBgId: "thread",
+      boxes: { thread: { left: 500, top: 300, width: 300, height: 200 }, portal: { left: 700, top: 380, width: 300, height: 200 } } },
+    { label: "I2", upper: "drawer", lower: "thread", upperName: "서랍", lowerName: "판 안의 덮는 판", upperBgId: "drawer", lowerBgId: "thread",
+      boxes: { thread: { left: 500, top: 300, width: 300, height: 200 }, drawer: { left: 560, top: 340, width: 200, height: 60 } } },
+    { label: "I3", upper: "thread", lower: "hbox", upperName: "판 안의 덮는 판", lowerName: "머리", upperBgId: "thread", lowerBgId: "hbox",
+      boxes: { thread: { left: 900, top: 44, width: 190, height: 80 } } },
+    { label: "I4", upper: "pill", lower: "hbox", upperName: "띠의 알약", lowerName: "판의 머리", upperBgId: "pill", lowerBgId: "hbox", boxes: {} },
+    { label: "I5", upper: "pill", lower: "thread", upperName: "띠의 알약", lowerName: "판 안의 덮는 판", upperBgId: "pill", lowerBgId: "thread",
+      boxes: { thread: { left: 950, top: 44, width: 120, height: 60 } } },
+    { label: "I6", upper: "sscrim", lower: "thread", upperName: "사이드바 스크림", lowerName: "판 안의 덮는 판", upperBgId: "sscrim", lowerBgId: "thread",
+      boxes: { sscrim: { left: 300, top: 600, width: 200, height: 100 }, thread: { left: 350, top: 620, width: 100, height: 60 } } },
+  ];
+
   it.skipIf(ENGINES.length === 0)(
     "I1~I6: 겹친 곳에 그려진 픽셀이 위에 서야 할 것의 색이다",
     async () => {
@@ -133,120 +183,49 @@ describe("판을 isolate로 가둔 뒤의 겹침 층 순서 (#4587)", () => {
               const ctx = await browser.newContext({ viewport: { width: 1100, height: 760 }, colorScheme });
               try {
                 const page = await ctx.newPage();
-                await page.setContent(html(css).replace("<html lang=\"ko\">", `<html lang="ko" data-palette="${palette}">`));
-                const at = `${engine} ${palette} ${colorScheme}`;
-                const m = await page.evaluate(() => {
-                  const rect = (id: string) => {
-                    const r = document.getElementById(id)!.getBoundingClientRect();
-                    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-                  };
-                  const bg = (id: string) => getComputedStyle(document.getElementById(id)!).backgroundColor;
-                  return {
-                    pill: rect("pill"),
-                    hbox: rect("hbox"),
-                    thread: rect("thread"),
-                    portal: rect("portal"),
-                    drawer: rect("drawer"),
-                    sscrim: rect("sscrim"),
-                    pillBg: bg("pill"),
-                    hboxBg: bg("hbox"),
-                    threadBg: bg("thread"),
-                    portalBg: bg("portal"),
-                    drawerBg: bg("drawer"),
-                    sscrimBg: bg("sscrim"),
-                  };
-                });
-                const overlap = (a: { left: number; right: number; top: number; bottom: number }, b: typeof a) => {
+                for (const c of CASES) {
+                  await page.setContent(html(css, palette, c.boxes));
+                  const at = `${engine} ${palette} ${colorScheme} ${c.label}`;
+                  const m = await page.evaluate(
+                    ([upperId, lowerId, upperBgId, lowerBgId]) => {
+                      const rect = (id: string) => {
+                        const r = document.getElementById(id)!.getBoundingClientRect();
+                        return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+                      };
+                      const bg = (id: string) => getComputedStyle(document.getElementById(id)!).backgroundColor;
+                      return {
+                        upper: rect(upperId!),
+                        lower: rect(lowerId!),
+                        upperBg: bg(upperBgId!),
+                        lowerBg: bg(lowerBgId!),
+                        tipZ: getComputedStyle(document.getElementById("pill")!).zIndex,
+                        paneZ: getComputedStyle(document.getElementById("pane")!).zIndex,
+                        paneIsolation: getComputedStyle(document.getElementById("pane")!).isolation,
+                      };
+                    },
+                    [c.upper, c.lower, c.upperBgId, c.lowerBgId] as const
+                  );
+                  if (m.tipZ !== "100") problems.push(`${at}: 알약 층 ${m.tipZ}, 기대 100(층 어휘를 올려서 고친 것이 아니다)`);
+                  if (m.paneZ !== "auto") problems.push(`${at}: 판에 z-index가 생겼다(${m.paneZ})`);
+                  if (m.paneIsolation !== "isolate") problems.push(`${at}: 판이 isolate가 아니다(${m.paneIsolation})`);
+                  const a: R = m.upper;
+                  const b: R = m.lower;
                   const x0 = Math.max(a.left, b.left);
                   const x1 = Math.min(a.right, b.right);
                   const y0 = Math.max(a.top, b.top);
                   const y1 = Math.min(a.bottom, b.bottom);
-                  return x1 - x0 >= 6 && y1 - y0 >= 6
-                    ? { x: Math.round((x0 + x1) / 2), y: Math.round((y0 + y1) / 2) }
-                    : null;
-                };
-                const check = async (
-                  label: string,
-                  upper: string,
-                  lower: string,
-                  a: typeof m.pill,
-                  b: typeof m.pill,
-                  upperBg: string,
-                  lowerBg: string
-                ) => {
-                  const o = overlap(a, b);
-                  if (!o) {
-                    problems.push(`${at} ${label}: 두 상자가 겹치지 않는다(장면이 틀렸다)`);
-                    return;
+                  if (!(x1 - x0 >= 6 && y1 - y0 >= 6)) {
+                    problems.push(`${at}: 두 상자가 겹치지 않는다(장면이 틀렸다): 위 ${c.upperName} [${a.left},${a.top},${a.right},${a.bottom}] 아래 ${c.lowerName} [${b.left},${b.top},${b.right},${b.bottom}]`);
+                    continue;
                   }
-                  const got = await pixel(page, o.x, o.y);
-                  if (!near(got, parseColor(upperBg))) {
-                    problems.push(`${at} ${label}: 겹친 곳(${o.x},${o.y})의 픽셀 [${got}]이 위에 설 ${upper} [${parseColor(upperBg).map(Math.round)}]이 아니다(${lower} [${parseColor(lowerBg).map(Math.round)}]가 위에 그려졌나?)`);
+                  const cx = Math.round((x0 + x1) / 2);
+                  const cy = Math.round((y0 + y1) / 2);
+                  const got = await pixel(page, cx, cy);
+                  const want = parseColor(m.upperBg);
+                  if (!near(got, want)) {
+                    problems.push(`${at}: 겹친 곳(${cx},${cy})의 픽셀 [${got}]이 위에 설 ${c.upperName} [${want.map(Math.round)}]이 아니다(${c.lowerName} [${parseColor(m.lowerBg).map(Math.round)}]가 위에 그려졌나?)`);
                   }
-                };
-                // I1 body로 포털된 스크림이 판 안의 덮는 판을 가린다.
-                await check("I1", "포털 스크림", "판 안의 덮는 판", m.portal, m.thread, m.portalBg, m.threadBg);
-                // I2 서랍이 판 안의 덮는 판 위에 선다: 서랍과 덮는 판을 같은 자리에 겹쳐 두려면 좌표가 달라 별도 상자로 잰다.
-                // (서랍 좌표를 덮는 판 쪽으로 옮겨 겹치게 한다)
-                await page.evaluate(() => {
-                  const d = document.getElementById("drawer")!;
-                  d.style.left = "560px";
-                  d.style.top = "340px";
-                });
-                const m2 = await page.evaluate(() => {
-                  const r = document.getElementById("drawer")!.getBoundingClientRect();
-                  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-                });
-                await check("I2", "서랍", "판 안의 덮는 판", m2, m.thread, m.drawerBg, m.threadBg);
-                // I3 판 안에서는 덮는 판이 머리 위에 선다: 덮는 판을 머리 쪽으로 올려 겹친다.
-                await page.evaluate(() => {
-                  const t = document.getElementById("thread")!;
-                  const h = document.getElementById("hbox")!.getBoundingClientRect();
-                  t.style.left = `${Math.round(h.left - 10)}px`;
-                  t.style.top = `${Math.round(h.top - 10)}px`;
-                  t.style.width = "120px";
-                  t.style.height = "60px";
-                  document.getElementById("drawer")!.style.display = "none";
-                  document.getElementById("portal")!.style.display = "none";
-                });
-                const mt = await page.evaluate(() => {
-                  const r = document.getElementById("thread")!.getBoundingClientRect();
-                  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-                });
-                await check("I3", "판 안의 덮는 판", "머리", mt, m.hbox, m.threadBg, m.hboxBg);
-                // I4 띠의 알약이 판의 머리 위에 선다(H1). 덮는 판은 치운다.
-                await page.evaluate(() => {
-                  document.getElementById("thread")!.style.display = "none";
-                });
-                await check("I4", "띠의 알약", "판의 머리", m.pill, m.hbox, m.pillBg, m.hboxBg);
-                // I5 띠의 알약이 판 안의 덮는 판 위에도 선다(이번 수리로 바뀐 관계). 덮는 판을 알약 아래로 옮겨 겹친다.
-                await page.evaluate(() => {
-                  const t = document.getElementById("thread")!;
-                  const p = document.getElementById("pill")!.getBoundingClientRect();
-                  t.style.display = "block";
-                  t.style.left = `${Math.round(p.left + 10)}px`;
-                  t.style.top = `${Math.round(p.top + 6)}px`;
-                  t.style.width = "120px";
-                  t.style.height = "60px";
-                });
-                const mt2 = await page.evaluate(() => {
-                  const r = document.getElementById("thread")!.getBoundingClientRect();
-                  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-                });
-                await check("I5", "띠의 알약", "판 안의 덮는 판", m.pill, mt2, m.pillBg, m.threadBg);
-                // I6 사이드바 스크림(DOM이 판보다 앞)이 판 안의 덮는 판 위에 선다. 덮는 판을 스크림 쪽으로 옮겨 겹친다.
-                await page.evaluate(() => {
-                  const t = document.getElementById("thread")!;
-                  t.style.left = "350px";
-                  t.style.top = "620px";
-                  t.style.width = "100px";
-                  t.style.height = "60px";
-                });
-                const mt3 = await page.evaluate(() => {
-                  const r = document.getElementById("thread")!.getBoundingClientRect();
-                  return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
-                });
-                await check("I6", "사이드바 스크림", "판 안의 덮는 판", m.sscrim, mt3, m.sscrimBg, m.threadBg);
+                }
               } finally {
                 await ctx.close();
               }
