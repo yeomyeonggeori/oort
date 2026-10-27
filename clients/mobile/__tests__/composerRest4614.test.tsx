@@ -602,9 +602,9 @@ describe('쉬는 알약 전체가 누르는 면이다 (#4614 H1)', () => {
     const ref = {current: null as TextInput | null};
     render(tree({inputRef: ref}));
     // RN 의 `TextInput` 목은 `focus` 를 **프로토타입의 공용 `jest.fn`** 으로 갖는다 — `jest.spyOn` 은 이미 목인 함수를 그대로 돌려줘서 시험 사이에 호출이 쌓인다. 이 입력창 하나에만 새 함수를 단다.
-    const focus = jest.fn();
-    (ref.current as unknown as {focus: () => void}).focus = focus;
-    return {ref, focus};
+    const focusSpy = jest.fn();
+    (ref.current as unknown as {focus: () => void}).focus = focusSpy;
+    return {ref, focusSpy};
   }
   /** 글을 쓴 입력창을 목록 탭으로 쉬게 해 **정적인 쉬는 알약**에 앉힌다. */
   function rested() {
@@ -618,11 +618,11 @@ describe('쉬는 알약 전체가 누르는 면이다 (#4614 H1)', () => {
   }
 
   it('쉬는 알약에서 면이 서고 누르면 입력창에 포커스를 준다', () => {
-    const {focus} = rested();
+    const {focusSpy} = rested();
     expect(hasTarget()).toBe(true);
-    expect(focus).not.toHaveBeenCalled();
+    expect(focusSpy).not.toHaveBeenCalled();
     fireEvent.press(target());
-    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focusSpy).toHaveBeenCalledTimes(1);
   });
 
   it('면은 글 칸이 아니라 글 칸을 감싼 상자 전체를 덮는다(absoluteFill) — 글 칸 밖의 위·아래 여백도 같은 면이다', () => {
@@ -654,14 +654,14 @@ describe('쉬는 알약 전체가 누르는 면이다 (#4614 H1)', () => {
   });
 
   it('손이 닿아 펼침이 시작돼도(포커스 전) 면이 서 있다 — 눌리던 손의 `onPress` 가 와야 한다(실기에서 처음 판이 실패한 모양)', () => {
-    const {focus} = rested();
+    const {focusSpy} = rested();
     fireEvent(target(), 'touchStart', finger(100, 100)); // 누름 표식: 손이 닿는 순간 펼침이 시작된다(#4518)
     advance(2);
     expect(hasTools()).toBe(true); // 전제: 펼침이 시작됐다(`shown`)
     expect(hasTarget()).toBe(true);
     fireEvent(target(), 'touchEnd', finger(100, 100));
     fireEvent.press(target());
-    expect(focus).toHaveBeenCalledTimes(1);
+    expect(focusSpy).toHaveBeenCalledTimes(1);
   });
 
   it('포커스가 오면 면이 사라진다 — 이제 입력창이 손을 받는다(캐럿·글자 선택)', () => {
@@ -674,7 +674,7 @@ describe('쉬는 알약 전체가 누르는 면이다 (#4614 H1)', () => {
   });
 
   it('끌기로 알아챈 손(끌기 잠금)은 포커스로 잇지 않는다 — 면의 `onPress` 가 와도', () => {
-    const {focus: focusSpy} = rested();
+    const {focusSpy} = rested();
     fireEvent(target(), 'touchStart', finger(100, 100));
     fireEvent(target(), 'touchMove', finger(100, 140)); // 40pt — 끌기 문턱(10pt)을 넘는다 → 잠금
     expect(input().props.editable).toBe(false); // 전제: 잠겼다
@@ -690,7 +690,7 @@ describe('쉬는 알약 전체가 누르는 면이다 (#4614 H1)', () => {
   });
 
   it('쉬던 입력창이 다시 쉬러 가면 면이 다시 선다 — 한 번 쓰고 사라지지 않는다', () => {
-    const {focus: focusSpy} = rested();
+    const {focusSpy} = rested();
     fireEvent.press(target());
     focus();
     settle();
