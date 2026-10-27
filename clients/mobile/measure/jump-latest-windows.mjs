@@ -7,7 +7,7 @@
  *
  *   --tag       그 태그의 기록만(없으면 태그마다 따로 표를 낸다).
  *   --json      표 대신 시험별 값과 거리별 중앙값을 JSON 으로.
- *   --detail    시험마다 **홉 목록**(누른 뒤 ms · 한 번의 이동량 · 그때 콘텐츠 높이)과 `chasingTail` 전이를 덧붙인다.
+ *   --detail    시험마다 **홉 목록**(누른 뒤 ms · 한 번의 이동량 · 그때 콘텐츠 높이)과 `chasingTail` 전이·중립 앵커(`neutralAnchor.tsx`) 전이를 덧붙인다.
  *   --origin    「누름」의 기준 시각. `pill`(기본) = 알약이 사라지는 렌더(`pillsRef.latest` true→false) · `touch` = 래퍼의 `onTouchEnd`.
  *
  * 열(ms 는 누름 기준, 표본 간격이 프레임(≈16ms)이라 ±16ms 의 해상도다):
@@ -185,6 +185,8 @@ function analyze(rec) {
   const pillFrame = pillProbeAt === null ? lastFrame : (frames.find(frame => frame.t >= pillProbeAt) ?? lastFrame);
   const contents = after.map(frame => frame.c).filter(num);
   const chases = scrollAll.filter(entry => entry.k === 'c' && entry.t >= press - 100).map(entry => ({at: rel(entry.t), on: entry.on}));
+  // 중립 앵커(먼 「최신으로」가 prop 을 떼는 대신 세우는 보초 뷰, `neutralAnchor.tsx`)의 전이 — 켜진 시각과 평상으로 돌아온 시각.
+  const neutrals = scrollAll.filter(entry => entry.k === 'n' && entry.t >= press - 100).map(entry => ({at: rel(entry.t), on: entry.on}));
 
   // 첫 홉(누르자마자 「지금 아는 끝」으로 가는 한 번)을 빼고, 앞으로 가는 홉들의 크기·간격 — 홉마다 얼마씩 전진하는가.
   const forward = hops.filter(hop => !hop.reversal && hop.delta > 0);
@@ -224,6 +226,7 @@ function analyze(rec) {
     pillUp600: pillFrame?.pill === true,
     rebound: rebound > LAND_PT ? round(rebound) : 0,
     chases,
+    neutrals,
     durationMs: rel(lastFrame?.t),
     entryWaitMs: rec.entry?.waitedMs,
     entrySettled: rec.entry?.settled,
@@ -338,7 +341,7 @@ for (const {tag, dup, rows, medians} of result) {
       const hopText = row.hopList.map(hop => `+${hop.at}ms ${hop.delta >= 0 ? '+' : ''}${hop.delta}pt${hop.reversal ? '(반전)' : ''} c=${hop.content}`).join(' | ');
       console.log(`    홉: ${hopText || '(없음)'}`);
       console.log(
-        `    chasingTail: ${row.chases.map(c => `${c.at}ms ${c.on ? 'on' : 'off'}`).join(' → ') || '(전이 없음)'} · 애니메이션 구간 ${row.animSpans}개 · 손가락 보고 ${row.userReports} · 누름→알약 렌더 ${row.touchToPill ?? '-'}ms · 진입 ${row.entryWaitMs}ms(${row.entrySettled ? '앉음' : '못 앉음'}) · 올림 ${row.ascentMs}ms(${row.ascentOk ? 'ok' : '시간 초과'}) · 기록 ${row.durationMs}ms/${row.frames}프레임`,
+        `    chasingTail: ${row.chases.map(c => `${c.at}ms ${c.on ? 'on' : 'off'}`).join(' → ') || '(전이 없음)'} · 중립앵커: ${row.neutrals.map(c => `${c.at}ms ${c.on ? 'on' : 'off'}`).join(' → ') || '(없음)'} · 애니메이션 구간 ${row.animSpans}개 · 손가락 보고 ${row.userReports} · 누름→알약 렌더 ${row.touchToPill ?? '-'}ms · 진입 ${row.entryWaitMs}ms(${row.entrySettled ? '앉음' : '못 앉음'}) · 올림 ${row.ascentMs}ms(${row.ascentOk ? 'ok' : '시간 초과'}) · 기록 ${row.durationMs}ms/${row.frames}프레임`,
       );
     }
   }

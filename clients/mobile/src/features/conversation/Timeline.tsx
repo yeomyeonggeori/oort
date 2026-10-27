@@ -1116,17 +1116,16 @@ function TimelineInner({
     [anchorStore],
   );
   // 측정 seam: 중립 앵커의 전이도 같은 기록에 남긴다(앱에서는 하네스가 배열을 꽂지 않아 아무 일도 하지 않는다).
-  useEffect(
-    () =>
-      anchorStore.subscribe(() => {
-        scrollLogRef?.current?.push({
-          k: 'n',
-          t: Date.now(),
-          on: anchorStore.get() === 'neutral',
-        });
-      }),
-    [anchorStore, scrollLogRef],
-  );
+  useEffect(() => {
+    if (scrollLogRef === undefined) return undefined;
+    return anchorStore.subscribe(() => {
+      scrollLogRef.current?.push({
+        k: 'n',
+        t: Date.now(),
+        on: anchorStore.get() === 'neutral',
+      });
+    });
+  }, [anchorStore, scrollLogRef]);
   /**
    * 방금 점프해서 도착한 행 (#1076 · #3921). 없으면 `null`.
    *

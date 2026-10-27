@@ -6,7 +6,6 @@ import React, {Profiler, useCallback, useRef, useState} from 'react';
 import type {FlatList} from 'react-native';
 
 import {Timeline, type PillState} from '../src/features/conversation/Timeline';
-import {NEUTRAL_ANCHOR_TEST_ID} from '../src/features/conversation/neutralAnchor';
 
 // =============================================================================
 // 방에 들어가면 끝에 앉는다 — 옛 페이지가 붙는 팀 방에서도, 빈 화면 없이 (#2604)
@@ -208,12 +207,7 @@ function contentChildren(): Child[] {
     if (kids.length !== 1) break;
     container = kids[0];
   }
-  // 보초(#4689, `neutralAnchor.tsx`)는 이 이중이 모델하는 머리·셀·꼬리·스페이서가 아니다. 평상에서는 어느 앵커 스캔에도 걸리지 않는
-  // 높이 0 의 뷰라서(`y + h < offset`), 이중의 자식 목록에서 빼는 것이 네이티브와 같다.
-  const own = (container.children as unknown[])
-    .filter(isNode)
-    .filter(child => firstHost(child).props.testID !== NEUTRAL_ANCHOR_TEST_ID);
-  return own.map((child, index) => {
+  return (container.children as unknown[]).filter(isNode).map((child, index) => {
     const key = (child.props as {cellKey?: unknown}).cellKey;
     const host = firstHost(child);
     if (typeof key === 'string') {
