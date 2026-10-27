@@ -666,10 +666,13 @@ describe('다른 사람 프로필 시트 — 작은 화면·큰 글씨에서 타
     expect(tileLabelWidth('AB', 1)).toBeLessThan(tileLabelWidth('가나', 1));
   });
 
-  it('보통 크기에서는 16 Pro·SE(375) 모두 세 타일이 한 줄에 선다', () => {
+  it('보통 크기에서는 16 Pro·SE(375) 모두 세 타일이 한 줄에 선다 — 320pt 폭에서도 간신히 들어간다', () => {
     const labels = ['메시지 보내기', '멘션 복사', '에이전트 정보'];
     expect(tilesFitInRow(labels, 393, 1)).toBe(true);
     expect(tilesFitInRow(labels, 375, 1)).toBe(true);
+    // 320pt: 타일 폭 (320 − 32 − 16) ÷ 3 ≈ 90.7 에 가장 긴 라벨 ≈ 81.9 + 숨 8 = 89.9 — 1.0 배에서만 들어가고 조금만 커져도 쌓는다.
+    expect(tilesFitInRow(labels, 320, 1)).toBe(true);
+    expect(tilesFitInRow(labels, 320, 1.1)).toBe(false);
   });
 
   it('글씨가 커지면 쌓는다 — SE 에서 세 타일은 1.3배부터, 접근성 크기는 둘도 쌓는다', () => {
