@@ -31,7 +31,6 @@ function TimelineTail() {
 const TIMELINE_COMPONENTS = { Footer: TimelineTail };
 import {
   threadRollup,
-  uuidEq,
   type AgentRunProgress,
   type Channel,
   type Message,
@@ -63,8 +62,9 @@ import { isStreamRunEnded } from "@momo/core/features/timeline/streamStop";
 import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
+import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
+import { runStatusForMessage } from "./runStatus";
 
-const NO_RUNS: readonly AgentRunProgress[] = [];
 import {
   DayDivider,
   MessageRow,
@@ -459,12 +459,12 @@ export function Timeline({
   const timelineChannelId = messages[0]?.channelId ?? null;
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
-  const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined => {
-    // 대화 표면(행 동작이 있는 곳)에서 내가 보낸 메시지에만 선다.
-    if (myMemberIdForFold === undefined) return undefined;
-    if (!uuidEq(message.authorMemberId, myMemberIdForFold)) return undefined;
-    return runsByMessage.get(message.id.toLowerCase()) ?? NO_RUNS;
-  };
+  // #4619 — 「답함 ✓」 칩이 누르면 가는 답 메시지. 로드된 메시지를 한 번 색인해 끝난 run마다 답을 찾는다
+  // (행마다 찾으면 목록 전체를 행 수만큼 훑는다). 답이 아직 로드되지 않았거나 이을 길이 없으면 그 run은
+  // 지도에 없고, 칩은 「답함」을 말하되 눌리지 않는다.
+  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
+  const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined =>
+    runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage });
 
   // Derived during render, not in an effect: virtuoso has to receive the new
   // `data` and the lowered `firstItemIndex` together or the correction lands a
@@ -895,6 +895,7 @@ export function Timeline({
               onResend={onResend}
               runEnded={isStreamRunEnded(item.message, endedRuns)}
               runStatus={runStatusFor(item.message)}
+              runAnswers={runAnswers}
             />
           );
         }}

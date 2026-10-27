@@ -100,7 +100,7 @@ function host(over: Partial<WorkHost> = {}): WorkHost {
     scope: "member",
     ownerMemberId: "11111111-1111-4111-8111-111111111111",
     type: "app",
-    displayName: "성재의 맥",
+    displayName: "민수의 맥",
     capabilities: {},
     createdAtMs: 0,
     online: true,

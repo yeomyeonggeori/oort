@@ -23,8 +23,8 @@ function member(over: Partial<RosterMember> = {}): RosterMember {
     workspaceId: "22222222-2222-4222-8222-222222222222",
     kind: "human",
     status: "active",
-    displayName: "곽성재",
-    handle: "seongjae",
+    displayName: "구민수",
+    handle: "minsu",
     channelCount: 1,
     channelIds: [],
     capabilities: [],
@@ -83,7 +83,7 @@ describe("renderableAvatarUrl — CSP가 실을 수 있는 것만", () => {
 
 describe("avatarInitial", () => {
   it("첫 글자를 코드포인트로 자른다 — 서로게이트 쌍을 반으로 가르지 않는다", () => {
-    expect(avatarInitial("곽성재")).toBe("곽");
+    expect(avatarInitial("구민수")).toBe("구");
     expect(avatarInitial("dohyun")).toBe("D");
     expect(avatarInitial("𠮷田")).toBe("𠮷");
   });
@@ -126,7 +126,7 @@ describe("avatarIdentity", () => {
       ORIGIN
     );
     expect(identity.imageUrl).toBeNull();
-    expect(identity.fallback).toEqual({ kind: "initial", text: "곽" });
+    expect(identity.fallback).toEqual({ kind: "initial", text: "구" });
   });
 
   it("실을 수 있으면 이미지 주소가 나온다", () => {

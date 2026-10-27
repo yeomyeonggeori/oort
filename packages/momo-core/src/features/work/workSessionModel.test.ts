@@ -611,7 +611,7 @@ describe("workHostTrust", () => {
     scope: "member",
     ownerMemberId: "00000000-0000-7000-8000-000000000101",
     type: "app",
-    displayName: "성재 MacBook Pro",
+    displayName: "민수 MacBook Pro",
     capabilities: { terminal: true },
     createdAtMs: 0,
     online: true,

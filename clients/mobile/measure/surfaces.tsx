@@ -383,19 +383,9 @@ import type {
 // =============================================================================
 LogBox.ignoreAllLogs(true);
 
-// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 첫 두 사람(「나」와 첫 동료)은 실제 팀원 이름이라 하네스에서
-// 가상 인물로 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은
-// 변하지 않는다. 이름으로 짚지 않고 순서로 짚는다(`SELF` 도 「첫 사람」이다): 그래야 실명이 이 파일의 새 줄에 다시 적히지 않는다.
-const VIRTUAL_PEOPLE = [
-  {displayName: '이도현', handle: 'dohyun'},
-  {displayName: '박서연', handle: 'seoyeon'},
-];
-let virtualSeen = 0;
-const ROSTER = makeStressRoster().map(member => {
-  if (member.kind !== 'human') return member;
-  const virtual = VIRTUAL_PEOPLE[virtualSeen++];
-  return virtual ? {...member, ...virtual} : member;
-});
+// 스트레스 로스터(core)의 사람들은 처음부터 가상 인물이다(#4632): 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다.
+// 예전에는 첫 두 사람이 실제 팀원 이름이라 이 하네스가 순서로 덮었다(#4458). 그 우회는 걷었다. 재유입은 design_preflight_names 가 막는다.
+const ROSTER = makeStressRoster();
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
@@ -593,7 +583,7 @@ const ADE_HOSTS = [
     scope: 'member',
     ownerMemberId: SELF,
     type: 'app',
-    displayName: '성재 맥북',
+    displayName: '도현 맥북',
     capabilities: {},
     createdAtMs: 0,
     online: true,
@@ -1003,7 +993,7 @@ function PlaceholderProbe(): React.JSX.Element {
  *
  * ## 첫 줄이 **긴 이름**인 이유 (design-review 회전 1 H2)
  *
- * 첫 판의 픽스처는 곽성재·박다연·김인턴·동료1~9 로 **전부 짧았고**, 그래서
+ * 첫 판의 픽스처는 이도현·박서연·김인턴·동료1~9 로 **전부 짧았고**, 그래서
  * 사진은 행이 폭에서 어떻게 지는지를 한 번도 안 보여 줬다. 그 자리에 실제로 결함이
  * 있었다: 행의 세 조각 중 양보할 수 있는 것이 `mentionHandle` 하나뿐이라, 긴 한글
  * 이름 + 행 끝의 「에이전트」 표지 조합에서 행은 **잘리는 대신 넘쳤고** 넘쳐서
@@ -1064,7 +1054,7 @@ const AI_BASE = {
   kind: 'agent' as const,
   status: 'active' as const,
 };
-const AI_OWNER = {id: OTHER, displayName: '박다연'};
+const AI_OWNER = {id: OTHER, displayName: '박서연'};
 const AI_MEMBERS: RosterMember[] = [
   {
     ...AI_BASE,
@@ -1082,14 +1072,14 @@ const AI_MEMBERS: RosterMember[] = [
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: SELF,
-    owner: {id: SELF, displayName: '곽성재'},
+    owner: {id: SELF, displayName: '이도현'},
     hostOnline: true,
   },
   {
     ...AI_BASE,
     id: 'ai-other-sub',
-    displayName: '다연의 Claude Code',
-    handle: 'dayeon-claude',
+    displayName: '서연의 Claude Code',
+    handle: 'seoyeon-claude',
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: AI_OWNER.id,
@@ -1099,8 +1089,8 @@ const AI_MEMBERS: RosterMember[] = [
   {
     ...AI_BASE,
     id: 'ai-other-key',
-    displayName: '다연 키',
-    handle: 'dayeon-key',
+    displayName: '서연 키',
+    handle: 'seoyeon-key',
     brain: 'personal_key',
     callableBy: 'owner_only',
     ownerHumanId: AI_OWNER.id,
@@ -1114,7 +1104,7 @@ const AI_MEMBERS: RosterMember[] = [
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: SELF,
-    owner: {id: SELF, displayName: '곽성재'},
+    owner: {id: SELF, displayName: '이도현'},
     hostOnline: true,
     brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
   },
@@ -1126,7 +1116,7 @@ const AI_MEMBERS: RosterMember[] = [
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: SELF,
-    owner: {id: SELF, displayName: '곽성재'},
+    owner: {id: SELF, displayName: '이도현'},
     hostOnline: false,
   },
 ] as RosterMember[];
@@ -2149,7 +2139,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       chips={CHIPS}
       availability={AVAILABILITY}
       pinned={pinned}
-      authorLabel="곽성재"
+      authorLabel="이도현"
       onClose={() => {}}
       onToggleReaction={() => {}}
       onReply={() => {}}
@@ -2165,7 +2155,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       message={MESSAGE}
       chips={CHIPS}
       availability={AVAILABILITY}
-      authorLabel="곽성재"
+      authorLabel="이도현"
       startInDeleteConfirm={confirm}
       onClose={() => {}}
       onToggleReaction={() => {}}
@@ -2798,7 +2788,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             message={{...MESSAGE, id: 'buzz-sh-1', seq: 81, body: '@claude-code ㅎㅇ', createdAtMs: NOW - 60_000, thread: undefined} as unknown as Message}
             chips={[]}
             availability={AVAILABILITY}
-            authorLabel="곽성재"
+            authorLabel="이도현"
             onClose={() => {}}
             onToggleReaction={() => {}}
             onReply={() => {}}
@@ -3607,7 +3597,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         unavailable_reason,
       });
       const candidates = [
-        host('h-1', '성재 맥북', 'local', 'app', true, null),
+        host('h-1', '도현 맥북', 'local', 'app', true, null),
         host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
         host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
         host('h-4', 'oort Cloud', 'cloud', 'cloud', false, 't3_disabled'),
@@ -3688,7 +3678,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         unavailable_reason,
       });
       const rows = [
-        host('h-1', '성재 맥북', 'local', 'app', true, null),
+        host('h-1', '도현 맥북', 'local', 'app', true, null),
         host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
         host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
       ];
@@ -4134,7 +4124,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'composer-agent-notice': {
       // 글에 못 부르는 에이전트가 있는 두 입력창: 남의 구독(위) · 쉬는 중(아래). 초안은 배송되는
       // 경로(`saveDraft` → `draftKey`)로 심는다 — 한 줄은 캐럿이 아니라 글을 읽는다.
-      saveDraft('measure:agent-notice-other', '@dayeon-claude 이번 배포 확인해 줘');
+      saveDraft('measure:agent-notice-other', '@seoyeon-claude 이번 배포 확인해 줘');
       saveDraft('measure:agent-notice-paused', '@paused-claude 어제 건 이어서 봐 줘');
       return (
         <Frame label="입력창 위 한 줄 — 못 부르는 · 쉬는 에이전트 (AIH-9b)">
@@ -4203,7 +4193,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                   nowMs={Date.now()}
                   live
                 />
-                <TypingBar segments={typingSegments(['박다연'])} />
+                <TypingBar segments={typingSegments(['박서연'])} />
                 <Composer recipient="place"
                   channelLabel="배포"
                   directory={ADE_DIRECTORY}
@@ -5514,7 +5504,7 @@ function SearchResults(): React.JSX.Element {
           hit={item}
           query="배포"
           channelTitle={item.channelId === 'ch-1' ? '#배포' : '#일반'}
-          authorName="곽성재"
+          authorName="이도현"
           onPress={() => {}}
         />
       )}
@@ -5554,8 +5544,8 @@ const HARNESS_MEMBER = {
   id: SELF,
   workspaceId: HARNESS_WS,
   kind: 'human',
-  displayName: HARNESS_SELF?.displayName ?? '곽성재',
-  handle: HARNESS_SELF?.handle ?? 'seongjae',
+  displayName: HARNESS_SELF?.displayName ?? '이도현',
+  handle: HARNESS_SELF?.handle ?? 'dohyun',
 } as Member;
 /** 설정 표면의 나(가상 인물, `settingsOverlay.tsx`) — 캡처가 레포에 남는다. */
 const SETTINGS_ME = {...HARNESS_MEMBER, ...SETTINGS_PERSONA} as Member;
@@ -5590,8 +5580,8 @@ export default function SurfacesHarness({
 const AIH4_WS = '00000000-0000-7000-8000-0000000000a1';
 const AIH4_ME = '00000000-0000-7000-8000-0000000000a2';
 const AIH4_ROSTER = [
-  {id: AIH4_ME, workspaceId: AIH4_WS, kind: 'human', status: 'active', displayName: '곽성재', handle: 'seongjae', role: 'owner', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
-  {id: '00000000-0000-7000-8000-0000000000a3', workspaceId: AIH4_WS, kind: 'agent', status: 'active', displayName: '성재-claude', handle: 'seongjae-claude', channelCount: 1, channelIds: [], capabilities: [], ownerHumanId: AIH4_ME, createdAtMs: 0, updatedAtMs: 0},
+  {id: AIH4_ME, workspaceId: AIH4_WS, kind: 'human', status: 'active', displayName: '이도현', handle: 'dohyun', role: 'owner', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
+  {id: '00000000-0000-7000-8000-0000000000a3', workspaceId: AIH4_WS, kind: 'agent', status: 'active', displayName: '도현-claude', handle: 'dohyun-claude', channelCount: 1, channelIds: [], capabilities: [], ownerHumanId: AIH4_ME, createdAtMs: 0, updatedAtMs: 0},
 ];
 const AIH4_CONNECTIONS = [
   {id: 'c1', agentMemberId: '00000000-0000-7000-8000-0000000000a3', status: 'active', authMode: 'bearer', audience: 'oort', approvedChannelIds: [], approvedScopes: [], createdAtMs: 1, updatedAtMs: 1, invocationScope: 'owner_only', subscriptionHarness: 'claude_code'},
@@ -5891,7 +5881,7 @@ const AGENT_DETAIL_HOSTS: WorkHost[] = [
     scope: 'member',
     ownerMemberId: SELF,
     type: 'app',
-    displayName: '성재 맥북',
+    displayName: '도현 맥북',
     capabilities: {},
     createdAtMs: 0,
     online: true,
@@ -6479,7 +6469,7 @@ function seedAi(surface: string): void {
       personalAgent: {
         label: '내 Claude Code',
         ownerId: SELF,
-        ownerDisplayName: '곽성재',
+        ownerDisplayName: '이도현',
         harness: 'claude',
         enabled: true,
         mentionable: true,
@@ -7063,7 +7053,7 @@ function seedShell(surface: string): void {
 
 // ---- #2864: 「작업」 팀 보드 한 열 판 --------------------------------------------
 //
-// 서버가 보는 사람(SELF = 곽성재)의 채널 멤버십으로 이미 걸러 준 공유 세션이다. 로컬 공유
+// 서버가 보는 사람(SELF = 이도현)의 채널 멤버십으로 이미 걸러 준 공유 세션이다. 로컬 공유
 // 세션과 에이전트 레인(origin=host) 세션이 섞여 있고, 두 줄이 내 것이다(하나는 A 레인).
 // 시각은 찍는 순간 기준으로 잡는다(「3분 전」이 사진마다 어긋나지 않게).
 const TB_OTHER = '00000000-0000-7000-8000-00000000b002';

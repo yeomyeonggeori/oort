@@ -53,7 +53,7 @@ function context(overrides: Partial<NotifyContext> = {}): NotifyContext {
     selfMemberId: SELF,
     isMuted: () => false,
     isAnnounced: () => false,
-    actorFor: (id) => (id === AGENT ? "@hermes" : "곽성재"),
+    actorFor: (id) => (id === AGENT ? "@hermes" : "구민수"),
     nowMs: NOW,
     ...overrides,
   };
@@ -213,7 +213,7 @@ describe("notifyDecision: suppression", () => {
         kind: "mention",
         messageId: "019F96A4-E717-7F82-9750-58B2D7D28225",
         channelId: CHANNEL,
-        title: "곽성재",
+        title: "구민수",
         body: "@데모 사용자 배포 확인 부탁드립니다",
       },
     });
@@ -444,7 +444,7 @@ describe("live momowebqa frames", () => {
   const live = (overrides: Partial<NotifyContext> = {}) =>
     context({
       selfMemberId: "00000000-0000-7000-8000-0000000005d2",
-      actorFor: () => "곽성재",
+      actorFor: () => "구민수",
       nowMs: 1784962532068 + 1_000,
       ...overrides,
     });
@@ -456,7 +456,7 @@ describe("live momowebqa frames", () => {
         kind: "mention",
         messageId: "019F980E-C2E5-70D9-9C43-7541DA39B4F2",
         channelId: "019F9803-AFA6-7941-BA00-27BCF74C1228",
-        title: "곽성재",
+        title: "구민수",
         body: "@intern-kim 스테이징 배포 확인 부탁드립니다",
       },
     });

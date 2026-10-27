@@ -195,10 +195,10 @@ describe("동사 배정 — 두 낱말이 섞이지 않는다", () => {
     // 보이지 않는다 — 그 자리를 이 단정이 대신 든다.
     expect(TAKEOVER_PICKER_COPY.group).toBe("인수할 호스트");
     expect(TAKEOVER_PICKER_COPY.confirm).toBe(HANDOFF_COPY.takeover.button);
-    expect(TAKEOVER_PICKER_COPY.action("성재 맥북")).toBe("성재 맥북에서 인수");
-    expect(TAKEOVER_PICKER_COPY.busy("성재 맥북")).toBe("성재 맥북에서 인수 중");
+    expect(TAKEOVER_PICKER_COPY.action("민수 맥북")).toBe("민수 맥북에서 인수");
+    expect(TAKEOVER_PICKER_COPY.busy("민수 맥북")).toBe("민수 맥북에서 인수 중");
     // 「인수하는 중」이 아니다 (#1501 정본 · #1511 게이트).
-    expect(TAKEOVER_PICKER_COPY.busy("성재 맥북")).not.toContain("하는 중");
+    expect(TAKEOVER_PICKER_COPY.busy("민수 맥북")).not.toContain("하는 중");
     // 확정 버튼의 보이는 글자는 호스트 이름을 담지 않는다 — 폭이 상태에 따라
     // 흔들리면 포인터 아래에서 버튼이 움직인다(HostPicker 머리말 MOMO-676 M-3).
     expect(TAKEOVER_PICKER_COPY.confirm).not.toContain("맥북");

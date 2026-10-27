@@ -34,20 +34,20 @@ const mineSub = agent({
 });
 const otherSub = agent({
   handle: "sj",
-  displayName: "성재의 Claude Code",
+  displayName: "민수의 Claude Code",
   brain: "subscription",
   callableBy: "owner_only",
   ownerHumanId: OWNER,
-  owner: { id: OWNER, displayName: "성재" },
+  owner: { id: OWNER, displayName: "민수" },
   hostOnline: false,
 });
 const otherKey = agent({
   handle: "sjkey",
-  displayName: "성재 키",
+  displayName: "민수 키",
   brain: "personal_key",
   callableBy: "owner_only",
   ownerHumanId: OWNER,
-  owner: { id: OWNER, displayName: "성재" },
+  owner: { id: OWNER, displayName: "민수" },
 });
 const pausedMine = agent({
   handle: "pm",
@@ -68,12 +68,12 @@ describe("mentionAnnotation", () => {
       locked: false,
     });
     expect(mentionAnnotation(otherSub, VIEWER)).toMatchObject({
-      line: "성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐",
-      badge: "성재 님만",
+      line: "민수 님 개인 구독 · 민수 님만 부를 수 있어요 · 맥 꺼짐",
+      badge: "민수 님만",
       locked: true,
     });
     expect(mentionAnnotation(otherKey, VIEWER)?.locked).toBe(true);
-    expect(mentionAnnotation(otherKey, VIEWER)?.line).toBe("개인 키 · 성재 님만");
+    expect(mentionAnnotation(otherKey, VIEWER)?.line).toBe("개인 키 · 민수 님만");
     expect(mentionAnnotation(pausedMine, VIEWER)?.line).toBe("내 구독 · 나만 부를 수 있어요 · 문의 중");
   });
 
@@ -90,9 +90,9 @@ describe("mentionAnnotation", () => {
 describe("composerAgentNotice", () => {
   it("names the owner when the viewer cannot call the agent", () => {
     expect(composerAgentNotice([otherSub], VIEWER)).toBe(
-      "성재의 Claude Code는 성재 님만 부를 수 있어요. 보내도 답하지 않아요."
+      "민수의 Claude Code는 민수 님만 부를 수 있어요. 보내도 답하지 않아요."
     );
-    expect(composerAgentNotice([otherKey], VIEWER)).toContain("성재 님만 부를 수 있어요. 보내도 답하지 않아요.");
+    expect(composerAgentNotice([otherKey], VIEWER)).toContain("민수 님만 부를 수 있어요. 보내도 답하지 않아요.");
   });
 
   it("says nothing for agents the viewer can call", () => {
@@ -110,7 +110,7 @@ describe("composerAgentNotice", () => {
 
   it("counts the rest when several agents are called", () => {
     expect(composerAgentNotice([teamKey, otherSub, otherKey], VIEWER)).toBe(
-      "성재의 Claude Code는 성재 님만 부를 수 있어요. 보내도 답하지 않아요. 외 1명도 답하지 않아요."
+      "민수의 Claude Code는 민수 님만 부를 수 있어요. 보내도 답하지 않아요. 외 1명도 답하지 않아요."
     );
   });
 });
@@ -158,7 +158,7 @@ describe("큰 글자용 변형 (#3459)", () => {
   it("lineStatusFirst moves 문의 중 / 맥 꺼짐 to the front and keeps the same facts", () => {
     expect(mentionAnnotation(pausedMine, VIEWER)?.lineStatusFirst).toBe("문의 중 · 내 구독 · 나만 부를 수 있어요");
     expect(mentionAnnotation(otherSub, VIEWER)?.lineStatusFirst).toBe(
-      "맥 꺼짐 · 성재 님 개인 구독 · 성재 님만 부를 수 있어요"
+      "맥 꺼짐 · 민수 님 개인 구독 · 민수 님만 부를 수 있어요"
     );
     // 상태가 없으면 본래 줄과 같다.
     expect(mentionAnnotation(teamKey, VIEWER)?.lineStatusFirst).toBe(mentionAnnotation(teamKey, VIEWER)?.line);
@@ -168,7 +168,7 @@ describe("큰 글자용 변형 (#3459)", () => {
   it("essentialFirst puts 보내도 답하지 않아요 in front without changing the facts", () => {
     const normal = composerAgentNotice([otherSub], VIEWER);
     const first = composerAgentNotice([otherSub], VIEWER, { essentialFirst: true });
-    expect(first).toBe("보내도 답하지 않아요. 성재의 Claude Code는 성재 님만 부를 수 있어요.");
+    expect(first).toBe("보내도 답하지 않아요. 민수의 Claude Code는 민수 님만 부를 수 있어요.");
     expect(first).not.toBe(normal);
     expect(composerAgentNotice([pausedMine], VIEWER, { essentialFirst: true })?.startsWith("보내도 답하지 않아요.")).toBe(
       true

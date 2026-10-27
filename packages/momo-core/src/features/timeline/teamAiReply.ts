@@ -23,7 +23,7 @@
 //
 // 앱을 쓴 에이전트의 답에는 도구 사용 줄 옆(아래)에 한 줄이 더 붙는다:
 //
-//   쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고
+//   쓴 앱: Gmail 검색 2회 · 구민수 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고
 //   이 채널 12명에게 보여요 · 개인 앱 내용은 요약만 올리는 게 원칙이에요. …
 //
 //   1. **자기 보고다.** 값은 실행 장소(Hermes·내 맥·호스팅 에이전트)가 스스로 알린
@@ -153,7 +153,7 @@ export function appsRunSiteLabel(site: AppsRunSite): string {
 
 export interface TeamAiReplyMeta {
   /**
-   * 「쓴 앱: Gmail 검색 2회 · 곽성재 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고」.
+   * 「쓴 앱: Gmail 검색 2회 · 구민수 명의 · gmailmcp.googleapis.com · Hermes에서 · 실행 장소 보고」.
    * 실행 장소의 자기 보고다. 보고가 없으면 null(빈 꼬리를 만들지 않는다).
    */
   appsLine: string | null;

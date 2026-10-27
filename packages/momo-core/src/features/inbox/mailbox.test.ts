@@ -26,7 +26,7 @@ const DM = "00000000-0000-7000-8000-000000000401";
 const CH = "00000000-0000-7000-8000-000000000201";
 
 const people: Record<string, ActorNames> = {
-  [SELF]: { name: "곽성재", isAgent: false },
+  [SELF]: { name: "구민수", isAgent: false },
   [SEO]: { name: "서연", isAgent: false },
   [BOT]: { name: "김인턴", handle: "kim-intern", isAgent: true },
 };
@@ -273,7 +273,7 @@ describe("dmEntry · 명부에서 빠진 상대", () => {
     }) as RosterMember;
 
   it("부제는 「DM · 나간 멤버」이고 「다이렉트 메시지」가 아니다", () => {
-    const directory = makeDirectory([roster(SELF, "곽성재")]);
+    const directory = makeDirectory([roster(SELF, "구민수")]);
     const e = dmEntry({
       channelId: DM,
       channelLabel: channelLabel(dmChannel, directory, SELF),
@@ -288,7 +288,7 @@ describe("dmEntry · 명부에서 빠진 상대", () => {
     expect(e?.typeLabel).not.toContain("다이렉트 메시지");
     // 「나」는 마지막 말을 한 사람이다. 대화 이름이 자기 자신으로 떨어진 것이 아니다.
     expect(e?.actor).toBe("나");
-    expect(e?.channelLabel).not.toContain("곽성재");
+    expect(e?.channelLabel).not.toContain("구민수");
   });
 });
 

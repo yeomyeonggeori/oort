@@ -45,6 +45,8 @@ export function StopRunControl({
   open,
   live,
   wording = STOP_WORDING,
+  variant = "panel",
+  onSettled,
 }: {
   runId: string;
   /** 영수증이 부를 이름. 여러 에이전트의 일 옆에 서므로 누구의 실행인지 말한다. */
@@ -58,6 +60,18 @@ export function StopRunControl({
    * 「중단」이다(#4285). 호출·한 겹의 확인·409와 오류를 읽는 규칙은 둘이 같다.
    */
   wording?: CancelWording;
+  /**
+   * 어디에 서는가. `panel`은 작업 패널의 한 영역(경계선·여백이 있는 띠)이고, `inline`은 대화의
+   * 한 줄 안(예외 줄의 행동 자리, #4619)이다: 띠의 경계선·여백을 걷어 줄의 다른 행동 곁에 선다.
+   * 호출·한 겹의 확인·캐럿 규칙은 둘이 같다.
+   */
+  variant?: "panel" | "inline";
+  /**
+   * 취소·중단이 **받아들여졌거나 이미 끝나 있었다**는 답이 선 순간 한 번 부른다(오류는 부르지 않는다: 다시 누를 수 있다). 대화 줄 안의
+   * 이 단추(#4619)는 run이 취소로 넘어가는 순간 줄과 함께 사라지는데, 그 안의 결과 문장(`role="status"`)과 캐럿도 같이 사라진다
+   * (design-review r1 M9). 부르는 쪽이 이 신호로 줄을 영수증으로 남긴다.
+   */
+  onSettled?: () => void;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -140,14 +154,28 @@ export function StopRunControl({
   // 이 버튼이 이미 답을 받았으면(중단됨·이미 끝남) 서버 칩이 따라오기 전이라도 다시
   // 권하지 않는다. 실패(`error`)만 다시 누를 수 있다.
   const settled = outcome !== null && outcome.kind !== "error";
+  const settledRef = useRef(onSettled);
+  settledRef.current = onSettled;
+  useEffect(() => {
+    if (settled) settledRef.current?.();
+  }, [settled]);
   const offer = open && live && !settled;
   if (!offer && outcome === null) return null;
 
   return (
     <section
       ref={sectionRef}
+      // 대화 줄 안(inline)에서는 영역(landmark)이 아니라 묶음이다: 메시지마다 「요청 취소」 영역이 서면
+      // 보조기술의 영역 목록이 타임라인 길이만큼 늘어난다.
+      role={variant === "inline" ? "group" : undefined}
       aria-label={wording.regionName}
-      className="flex flex-col gap-2 border-b border-line px-4 py-2"
+      className={
+        variant === "inline"
+          ? // 확인 줄·결과 문장이 서면 같은 줄의 다른 행동 곁이 아니라 **자기 줄**(`basis-full`)을 쓴다: 문장 위에 단추가 쌓인
+            // 두 겹 덩어리가 예외 줄 한가운데(`items-center`)에 떠 있으면 줄의 글이 그 덩어리의 한가운데로 밀려 어긋난다.
+            cn("flex min-w-0 flex-col gap-2", (armed || outcome !== null) && "basis-full")
+          : "flex flex-col gap-2 border-b border-line px-4 py-2"
+      }
       data-testid="agent-work-panel-stop"
     >
       {offer &&
@@ -158,6 +186,8 @@ export function StopRunControl({
               type="button"
               variant="secondary"
               size="sm"
+              // 폰 폭에서 44: 같은 확인 줄의 「취소 확정」은 이미 44(전역 규칙)라 안전한 쪽이 더 작은 표적이면 위험한 쪽이 더 크다.
+              className="tap-target"
               aria-label={wording.armName}
               onClick={() => setArmed(true)}
               data-testid="agent-work-panel-stop-arm"
@@ -176,6 +206,7 @@ export function StopRunControl({
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="tap-target"
                 aria-disabled={busy || undefined}
                 onClick={() => {
                   if (!busy) dismiss();
