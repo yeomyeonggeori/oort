@@ -280,7 +280,7 @@ pub use mention::{
     load_mention_candidates_in_tx, max_output_tokens, mention_diagnostic_detail,
     mention_job_broadcast_payload, mention_job_payload, mention_run_input, message_source,
     paused_mention_body, paused_mention_props, resolve_mention_routing, MentionCandidate,
-    MentionRouting, MentionTrigger, AGENT_INTERACTION_SAFETY_PREAMBLE,
+    MentionRouting, MentionTrigger, AGENT_CONVERSATION_PREAMBLE, AGENT_INTERACTION_SAFETY_PREAMBLE,
     AGENT_PROFILE_POLICY_PREAMBLE, MENTION_JOB_CREATED_FROM, MENTION_JOB_METHOD_GATEWAY,
     MENTION_JOB_METHOD_WORKER, MENTION_RUN_INPUT_SCHEMA,
 };

@@ -22,6 +22,7 @@
 //! | `the_per_requester_ceiling_stops_the_fourth_card` | drop the pending count |
 //! | `the_fast_path_reaches_a_card_within_the_budget` | (measurement, not a gate) |
 //! | `an_install_request_becomes_a_card_that_installs_nothing_until_decided` | take `plugin.install` out of `ACTIONS`/`TEAM_AI_ACTION_IDS`, read the registry as the wrong role (42501), drop the egress row, or skip the `nothing to change` / requester-role refusals |
+//! | `an_answer_to_a_request_made_in_a_thread_lands_in_that_thread` | write the team AI's answer with `root_id: None` (it leaves the thread the person is watching), or on the spine that skips the thread rollup (the root's 「답글 N개」 and `thread.updated` stop moving) |
 //! | `the_helper_raises_the_new_settings_cards_from_the_worker_role` | read `mem_settings` in the memory resolver (42501 as `momo_worker`) or drop an id from `TEAM_AI_ACTION_IDS` |
 
 use std::path::PathBuf;
@@ -38,7 +39,7 @@ use momo_agent_worker::provider::{
 use momo_agent_worker::{AgentWorker, DrainStats, WorkerConfig};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
-use momo_messaging::{send_message_in_tx, NewMessage};
+use momo_messaging::{send_message_in_tx, send_thread_notice_in_tx, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_settings::{seal_bearer, upsert_link};
 use serde_json::{json, Value};
@@ -263,6 +264,20 @@ async fn enqueue(
     text: &str,
     earlier: Option<&str>,
 ) -> (Uuid, Uuid) {
+    enqueue_at(pool, t, author, author_kind, text, earlier, None).await
+}
+
+/// [`enqueue`], with the request made **inside the thread of `root`** (#4622); `None` is the channel's
+/// top level. A reply goes through the spine that keeps the thread's rollup, as the product's send does.
+async fn enqueue_at(
+    pool: &PgPool,
+    t: &Tenant,
+    author: Uuid,
+    author_kind: &str,
+    text: &str,
+    earlier: Option<&str>,
+    root: Option<Uuid>,
+) -> (Uuid, Uuid) {
     let (workspace_id, channel_id, agent) = (t.workspace_id, t.channel_id, t.agent_id);
     let other = t.other_agent_id;
     let (text, earlier, author_kind) = (
@@ -288,12 +303,15 @@ async fn enqueue(
                     "type": "text", "body": earlier,
                 }));
             }
-            let sent = send_message_in_tx(
-                conn,
-                workspace_id,
-                NewMessage::text(channel_id, author, text.clone()),
-            )
-            .await?;
+            let said = NewMessage {
+                root_id: root,
+                ..NewMessage::text(channel_id, author, text.clone())
+            };
+            let sent = if root.is_some() {
+                send_thread_notice_in_tx(conn, workspace_id, said).await?
+            } else {
+                send_message_in_tx(conn, workspace_id, said).await?
+            };
             window.push(json!({
                 "message_id": sent.message.id, "channel_id": channel_id,
                 "seq": sent.message.seq, "author_member_id": author,
@@ -615,6 +633,130 @@ async fn a_message_someone_else_wrote_is_never_an_instruction() {
         "the user turn is the trigger, verbatim"
     );
     assert!(approvals(&su, &t).await.is_empty());
+}
+
+/// `author` says `text` at the channel's top level and the message id comes back — a thread root.
+async fn say_at_top_level(pool: &PgPool, t: &Tenant, author: Uuid, text: &str) -> Uuid {
+    let (workspace_id, channel_id) = (t.workspace_id, t.channel_id);
+    let text = text.to_string();
+    with_tenant_tx(pool, workspace_id, move |conn| {
+        let text = text.clone();
+        Box::pin(async move {
+            let sent = send_message_in_tx(
+                conn,
+                workspace_id,
+                NewMessage::text(channel_id, author, text),
+            )
+            .await?;
+            Ok(sent.message.id)
+        })
+    })
+    .await
+    .expect("say at the top level")
+}
+
+/// **The team AI answers inside the thread the request was made in** (#4622, ADR-0148 증보 2026-10-27).
+///
+/// The same place and the same rollup as the managed worker, the REST callback and the Agent Port's
+/// `oort_run_complete`: `root_id` is the thread's root, `reply_to_id` the message answered, and the answer
+/// counts as a reply (the root's 「답글 N개」 moves, `thread.updated` is published). A request made at the
+/// top level is answered at the top level — the control that keeps this from being "always thread".
+#[tokio::test]
+#[ignore = "requires an isolated PostgreSQL 18 (see module docs)"]
+async fn an_answer_to_a_request_made_in_a_thread_lands_in_that_thread() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let pool = momo_worker_pool().await;
+    reset_instance(&su).await;
+    let t = seed(&su, &pool, true).await;
+    seed_link(&su, t.owner_id).await;
+    let provider = Arc::new(MockChatProvider::echo());
+    let w = worker_with(provider, |_| {}).await;
+
+    let root = say_at_top_level(&pool, &t, t.owner_id, "이번 주 정리").await;
+    let (run_id, asked) = enqueue_at(
+        &pool,
+        &t,
+        t.owner_id,
+        "human",
+        "@oort-helper 이어서 알려줘",
+        None,
+        Some(root),
+    )
+    .await;
+    drain(&w).await;
+
+    let (status, _) = run_status(&su, run_id).await;
+    assert_eq!(status, "succeeded", "the team AI answered");
+    let answers: Vec<(i64, Option<Uuid>, Option<Uuid>)> = sqlx::query_as(
+        "SELECT seq, root_id, reply_to_id FROM message \
+          WHERE workspace_id = $1 AND author_member_id = $2 ORDER BY seq",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .fetch_all(&su)
+    .await
+    .unwrap();
+    assert_eq!(answers.len(), 1, "exactly one answer");
+    let (answer_seq, answer_root, answer_quote) = answers[0];
+    assert_eq!(
+        (answer_root, answer_quote),
+        (Some(root), Some(asked)),
+        "the answer is inside the thread of the request and quotes it"
+    );
+    let rollup: (i32, Option<i64>) =
+        sqlx::query_as("SELECT reply_count, last_reply_seq FROM thread WHERE root_id = $1")
+            .bind(root)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        rollup,
+        (2, Some(answer_seq)),
+        "the person's reply and the answer — the answer is a reply the thread knows about"
+    );
+    let announced: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox \
+          WHERE workspace_id = $1 AND kind = 'broadcast' \
+            AND payload->'data'->>'type' = 'thread.updated' \
+            AND lower(payload->'data'->'payload'->>'root_id') = lower($2)",
+    )
+    .bind(t.workspace_id)
+    .bind(root.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        announced, 2,
+        "one `thread.updated` for the person's reply and one for the answer"
+    );
+
+    // A request at the top level stays in the main flow, quoting it.
+    let (_, top) = enqueue(
+        &pool,
+        &t,
+        t.owner_id,
+        "human",
+        "@oort-helper 새 질문이에요",
+        None,
+    )
+    .await;
+    drain(&w).await;
+    let place: (Option<Uuid>, Option<Uuid>) = sqlx::query_as(
+        "SELECT root_id, reply_to_id FROM message \
+          WHERE workspace_id = $1 AND author_member_id = $2 AND reply_to_id = $3",
+    )
+    .bind(t.workspace_id)
+    .bind(t.agent_id)
+    .bind(top)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        place,
+        (None, Some(top)),
+        "a top-level request is answered in the main flow (the thread-under-it step is #4646)"
+    );
 }
 
 #[tokio::test]
