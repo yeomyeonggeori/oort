@@ -38,10 +38,10 @@ const ME = member({
   displayName: "데모 사용자",
   handle: "demo",
 });
-const SEONGJAE = member({
+const MINSU = member({
   id: "00000000-0000-7000-8000-0000000005d1",
-  displayName: "곽성재",
-  handle: "seongjae",
+  displayName: "구민수",
+  handle: "minsu",
 });
 const INTERN_HUMAN = member({
   id: "00000000-0000-7000-8000-000000000201",
@@ -53,36 +53,36 @@ const INTERN_AGENT = member({
   kind: "agent",
   displayName: "김인턴",
   handle: "kim-intern",
-  ownerHumanId: SEONGJAE.id,
+  ownerHumanId: MINSU.id,
 });
 
 describe("isChannelMember", () => {
   it("reads membership off the roster row's channelIds, case-folded", () => {
     // The channel id arrives upper-cased from another response; membership must
     // still be recognised.
-    const inChannel = member({ id: SEONGJAE.id, channelIds: [CH.toUpperCase()] });
+    const inChannel = member({ id: MINSU.id, channelIds: [CH.toUpperCase()] });
     expect(isChannelMember(inChannel, CH)).toBe(true);
-    expect(isChannelMember(member({ id: SEONGJAE.id }), CH)).toBe(false);
-    expect(isChannelMember(member({ id: SEONGJAE.id, channelIds: [OTHER_CH] }), CH)).toBe(
+    expect(isChannelMember(member({ id: MINSU.id }), CH)).toBe(false);
+    expect(isChannelMember(member({ id: MINSU.id, channelIds: [OTHER_CH] }), CH)).toBe(
       false
     );
   });
 });
 
 describe("channelMemberCandidates", () => {
-  const roster = [ME, SEONGJAE, INTERN_HUMAN, INTERN_AGENT];
+  const roster = [ME, MINSU, INTERN_HUMAN, INTERN_AGENT];
 
   it("drops me, splits people and agents, both kinds sorted by name", () => {
     const groups = channelMemberCandidates(roster, ME.id, "");
-    expect(groups.people.map((m) => m.id)).toEqual([SEONGJAE.id, INTERN_HUMAN.id]);
+    expect(groups.people.map((m) => m.id)).toEqual([MINSU.id, INTERN_HUMAN.id]);
     expect(groups.agents.map((m) => m.id)).toEqual([INTERN_AGENT.id]);
-    // 곽/김 sort by ko collation; me is not counted.
+    // 구/김 sort by ko collation; me is not counted.
     expect(groups.total).toBe(3);
     expect(groups.matched).toBe(3);
   });
 
   it("keeps already-in members in the list so a just-added row can flip in place", () => {
-    const already = member({ id: SEONGJAE.id, displayName: "곽성재", handle: "seongjae", channelIds: [CH] });
+    const already = member({ id: MINSU.id, displayName: "구민수", handle: "minsu", channelIds: [CH] });
     const groups = channelMemberCandidates([ME, already, INTERN_HUMAN], ME.id, "");
     expect(groups.people.map((m) => m.id)).toContain(already.id);
   });
@@ -100,8 +100,8 @@ describe("channelMemberCandidates", () => {
 
 describe("hasAddableMembers", () => {
   it("false when the only other members are already in the channel", () => {
-    const seongjaeIn = member({ id: SEONGJAE.id, channelIds: [CH] });
-    expect(hasAddableMembers([ME, seongjaeIn], CH, ME.id)).toBe(false);
+    const minsuIn = member({ id: MINSU.id, channelIds: [CH] });
+    expect(hasAddableMembers([ME, minsuIn], CH, ME.id)).toBe(false);
   });
 
   it("false when I am the only member of the workspace", () => {
@@ -109,34 +109,34 @@ describe("hasAddableMembers", () => {
   });
 
   it("true when someone not in the channel could be added", () => {
-    expect(hasAddableMembers([ME, SEONGJAE], CH, ME.id)).toBe(true);
+    expect(hasAddableMembers([ME, MINSU], CH, ME.id)).toBe(true);
   });
 });
 
 describe("withChannelMemberAdded (optimistic)", () => {
   it("adds the channel to the member's channelIds and ticks channelCount", () => {
-    const next = withChannelMemberAdded([ME, SEONGJAE], CH, SEONGJAE.id);
-    const added = next.find((m) => m.id === SEONGJAE.id);
+    const next = withChannelMemberAdded([ME, MINSU], CH, MINSU.id);
+    const added = next.find((m) => m.id === MINSU.id);
     expect(added?.channelIds).toContain(CH);
     expect(added?.channelCount).toBe(1);
   });
 
   it("leaves every other row untouched", () => {
-    const next = withChannelMemberAdded([ME, SEONGJAE], CH, SEONGJAE.id);
+    const next = withChannelMemberAdded([ME, MINSU], CH, MINSU.id);
     expect(next.find((m) => m.id === ME.id)).toBe(ME);
   });
 
   it("is idempotent: re-adding a member already in the channel does not double-count", () => {
-    const already = member({ id: SEONGJAE.id, channelCount: 1, channelIds: [CH] });
+    const already = member({ id: MINSU.id, channelCount: 1, channelIds: [CH] });
     const next = withChannelMemberAdded([already], CH, already.id);
     expect(next[0]?.channelCount).toBe(1);
     expect(next[0]?.channelIds).toEqual([CH]);
   });
 
   it("does not mutate the input, so the pre-add snapshot survives for rollback", () => {
-    const before: RosterMember[] = [ME, member({ id: SEONGJAE.id, channelIds: [], channelCount: 0 })];
+    const before: RosterMember[] = [ME, member({ id: MINSU.id, channelIds: [], channelCount: 0 })];
     const snapshot = before.map((m) => ({ ...m, channelIds: [...m.channelIds] }));
-    withChannelMemberAdded(before, CH, SEONGJAE.id);
+    withChannelMemberAdded(before, CH, MINSU.id);
     // The array the hook held before the optimistic write is unchanged, so
     // restoring it on failure returns the exact prior state.
     expect(before).toEqual(snapshot);

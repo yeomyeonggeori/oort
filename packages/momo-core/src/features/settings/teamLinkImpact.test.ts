@@ -25,7 +25,7 @@ const roster: RosterMember[] = [
   member({ id: "A1", displayName: "hermes", channelIds: ["c1"] }),
   member({ id: "a2", displayName: "김인턴", channelIds: ["c2", "c1", "c3"], paused: true }),
   member({ id: "a3", displayName: "내 Claude", channelIds: ["c1"] }),
-  member({ id: "h1", kind: "human", displayName: "성재" }),
+  member({ id: "h1", kind: "human", displayName: "민수" }),
   member({ id: "a4", displayName: "지운 봇", status: "deleted" }),
 ];
 

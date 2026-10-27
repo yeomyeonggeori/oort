@@ -38,7 +38,7 @@ function row(over: Partial<WorkHost> = {}): WorkHost {
     scope: "member",
     ownerMemberId: "m1",
     type: "workd",
-    displayName: "성재 맥북",
+    displayName: "민수 맥북",
     publicKey: "PK",
     capabilities: {},
     createdAtMs: 1,
@@ -115,7 +115,7 @@ describe("owner notices (ADR-0188 D2)", () => {
       payload: {
         workspace_id: WS,
         host_id: HOST,
-        display_name: "성재 맥북",
+        display_name: "민수 맥북",
         host_type: "workd",
         scope: "member",
         actor_member_id: "m1",
@@ -125,7 +125,7 @@ describe("owner notices (ADR-0188 D2)", () => {
       type: "work_host.registered",
       hostId: HOST,
       workspaceId: WS,
-      displayName: "성재 맥북",
+      displayName: "민수 맥북",
       actorMemberId: "m1",
     });
     expect(asWorkHostNotice({ ...frame, type: "message.new" })).toBeNull();

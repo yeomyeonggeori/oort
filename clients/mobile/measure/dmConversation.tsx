@@ -49,7 +49,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: 'kwak', handle: 'kwak'}),
+  member({id: SELF, displayName: 'lee', handle: 'lee'}),
   member({id: GROK, kind: 'agent', displayName: 'grok', handle: 'grok'}),
 ]);
 
@@ -82,7 +82,7 @@ function message(seq: number, author: string, body: string): Message {
 
 const MESSAGES = [
   message(1, SELF, 'ㅎㅇ'),
-  message(2, GROK, '안녕하세요, kwak님! 필요한 일 있으면 편하게 말씀해 주세요.'),
+  message(2, GROK, '안녕하세요, lee님! 필요한 일 있으면 편하게 말씀해 주세요.'),
   message(3, SELF, '반가워요'),
 ];
 
