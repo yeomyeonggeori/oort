@@ -86,13 +86,30 @@ describe("run 하나 → 칩", () => {
     },
     { name: "완료", extra: DONE, kind: "answered", word: CHIP_WORD_ANSWERED, mark: "check", tone: "ok" },
     { name: "실패", extra: FAILED, kind: "failed", word: CHIP_WORD_FAILED, mark: "cross", tone: "danger" },
+    // 서버가 일을 끝내지 못한 것(시간 초과·신호 소실)은 오류가 아니다(ADR-0132): 경고 톤·느낌표이고 위험 톤·가위표가 아니다.
     {
-      name: "소식 끊겨 끝남",
+      name: "소식 끊겨 끝남(신호 소실)",
       extra: { phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" },
-      kind: "failed",
-      word: "실패",
-      mark: "cross",
-      tone: "danger",
+      kind: "timed_out",
+      word: "신호 소실",
+      mark: "clock",
+      tone: "warn",
+    },
+    {
+      name: "가져간 뒤 시간 초과",
+      extra: { phase: "timed_out", status: "timed_out", endReason: "approval_expired" },
+      kind: "timed_out",
+      word: "시간 초과",
+      mark: "clock",
+      tone: "warn",
+    },
+    {
+      name: "종료 사유 없는 시간 초과",
+      extra: { phase: "timed_out", status: "timed_out" },
+      kind: "timed_out",
+      word: "시간 초과",
+      mark: "clock",
+      tone: "warn",
     },
     {
       name: "유예를 넘은 대기",
@@ -156,9 +173,13 @@ describe("한 메시지가 여러 에이전트를 불렀을 때: 가장 급한 �
   const NOW = T + 30 * SEC;
   const pick = (runs: AgentRunProgress[], now = NOW) => triggerChip(runs, nameFor, now);
 
-  it("실패 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함", () => {
+  it("실패 > 시간 초과 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함", () => {
     expect(pick([run(DONE), run(FAILED)])?.kind).toBe("failed");
     expect(pick([run(FAILED), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("failed");
+    // 시간 초과(가져간 뒤 서버가 끝냄)는 실패보다 약하고 아직 받지 않았어요보다 강하다.
+    const TIMED = { phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" } as const;
+    expect(pick([run(TIMED), run({ ...FAILED, agentMemberId: B })])?.kind).toBe("failed");
+    expect(pick([run(TIMED), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("timed_out");
     expect(pick([run(RUNNING), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("uncollected");
     expect(
       pick([run(RUNNING), run({ phase: "awaiting_approval", status: "awaiting_approval", agentMemberId: B })])?.kind

@@ -2671,6 +2671,13 @@
   font-synthesis-style: none;
 }
 
+/* 앵커 팝오버가 뷰포트를 넘지 않게 (#4619 레일 팝오버, design-review r1 H3). 공용 `PopoverContent`는 폭 `w-pane-picker`(384)
+ * 고정이라 폰 폭(390 이하)에서 오른쪽이 화면 밖으로 나갔다. Radix가 충돌 경계(좌우 8 여백 포함)까지 남은 폭을
+ * `--radix-popover-content-available-width`로 주므로, 고정 폭은 그 폭보다 넓을 때만 줄어든다. 넓은 창에서는 아무 일도 없다. */
+@utility popover-fit {
+  max-inline-size: var(--radix-popover-content-available-width);
+}
+
 /* 44px 손가락 타깃 (B6). 폰에서만 커진다: 포인터에는 28px 아이콘 버튼이 맞고,
  * 데스크탑 밀도를 손가락 크기로 올리면 사이드바 한 화면에 들어가던 채널 수가
  * 절반이 된다. 커지는 것은 타깃이지 아이콘이 아니다 — 그려지는 글리프는 그대로

@@ -281,6 +281,17 @@ describe("팝오버: 일하는 에이전트와 행동", () => {
     expect(q(popover!, "composer-working-activity")?.textContent).toBe("활동 보기");
   });
 
+  it("팝오버는 뷰포트 폭에 묶인다(popover-fit): 폰 폭에서 오른쪽이 화면 밖으로 나가지 않는다 (design-review r1 H3)", () => {
+    const el = mountView([turn(RUNNING)]);
+    const popover = open(el);
+    // 공용 PopoverContent의 고정 폭(`w-pane-picker` 384)에 남은 폭 상한이 더해진다. 폭의 계산은 브라우저 시험이 잰다.
+    expect(popover?.className).toContain("w-pane-picker");
+    expect(popover?.className).toContain("popover-fit");
+    // 그 유틸이 tokens.css에서 Radix의 남은 폭 변수를 읽는다(정본 파일을 읽는다, 기대값을 베끼지 않는다).
+    const css = readFileSync(resolve(process.cwd(), "src/design/tokens.css"), "utf8");
+    expect(css).toMatch(/@utility popover-fit \{\s*max-inline-size: var\(--radix-popover-content-available-width\);/);
+  });
+
   it("에이전트 행을 누르면 그 run의 작업 패널이 열리고 팝오버는 닫힌다", () => {
     const el = mountView([turn(RUNNING)]);
     const popover = open(el);

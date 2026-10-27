@@ -11,7 +11,7 @@ import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 //
 // 에이전트를 부른 사람의 메시지 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다:
 //
-//   받음 → 가져감 → 작업 중 → 답함 ✓      아직 받지 않았어요 !      실패 !      승인 대기
+//   받음 → 가져감 → 작업 중 → 답함 ✓      아직 받지 않았어요 !      시간 초과 ◷      실패 ✕      승인 대기
 //
 // 칩은 문장 행(「받았어요 → 깨우는 신호 보냄 → 가져감 → …」)의 자리를 대신한다. 한 낱말이라
 // 행 높이가 변하지 않고, 상태가 바뀌어도 칩의 크기는 그대로다(크기는 표면의 몫, 낱말은 이 모델의
@@ -19,11 +19,17 @@ import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 //
 // 낱말은 레일(`activityRail`)과 같은 것이다. 레일은 채널 단위로 「지금 누가 일하나」를, 칩은
 // 메시지 단위로 「내가 부른 일이 어디까지 갔나」를 말하고, 두 자리가 같은 상태를 다른 낱말로
-// 부르지 않는다. 칩이 더 갖는 낱말은 끝난 뒤의 답함·실패와, 유예를 넘은 「아직 받지 않았어요」뿐이다
-// (그 낱말은 홈 카드·작업 패널·예외 줄과 같은 상수 `UNCOLLECTED_WORD`다).
+// 부르지 않는다. 칩이 더 갖는 낱말은 끝난 뒤의 답함·실패·시간 초과와, 유예를 넘은 「아직 받지 않았어요」뿐이다
+// (「아직 받지 않았어요」는 홈 카드·작업 패널·예외 줄과 같은 상수 `UNCOLLECTED_WORD`이고, 「시간 초과」·「신호 소실」은
+// 같은 행의 예외 줄이 쓰는 `runPhaseLabel`의 낱말 그대로다).
+//
+// **서버가 일을 끝내지 못한 것(시간 초과·신호 소실)은 오류가 아니다**(ADR-0132: 부재를 오류로 올리지 않는다). 가져간 뒤
+// 서버가 `timed_out`으로 끝낸 run은 경고 톤과 느낌표로 말하고 위험 톤·가위표는 서버가 `failed`로 끝낸 것에만 쓴다. 신호 소실은
+// 일을 끝내 놓고 소식만 끊긴 경우일 수 있어 「실패」는 거짓일 수 있고, 같은 행의 줄이 이미 구체 낱말로 말하므로 칩도 같은 말을 한다
+// (교차 시험이 둘의 낱말을 함께 붙든다).
 //
 // 한 메시지가 여러 에이전트를 불렀으면 **가장 사람에게 급한 상태 하나**가 칩이 된다
-// (실패 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함). 하나라도 아직 일하는 중이면
+// (실패 > 시간 초과 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함). 하나라도 아직 일하는 중이면
 // 「답함」이 아니다. 취소는 사람이 직접 한 일이라 알릴 새 소식이 아니므로 칩에 세지 않는다.
 // =============================================================================
 
@@ -34,14 +40,16 @@ export type TriggerChipKind =
   | "approval"
   | "answered"
   | "uncollected"
+  | "timed_out"
   | "failed";
 
 /**
  * 칩 글자 곁의 표지. 모양이 뜻을 말한다(색에만 기대지 않는다): 점(작업 중)·체크(답함)·느낌표(아직 받지
- * 않았어요)·가위표(실패). 아직 받지 않았어요(주의)와 실패(오류)는 한때 같은 느낌표였고 색만 달랐다 —
- * 색을 못 보는 사람에게 둘이 같은 말이 되므로 실패에 자기 모양을 줬다.
+ * 않았어요)·시계(시간 초과·신호 소실)·가위표(실패). 주의(아직 받지 않았어요·시간 초과)와 오류(실패)는 한때 같은
+ * 느낌표였고 색만 달랐다 — 색을 못 보는 사람에게 같은 말이 되므로 실패에 자기 모양(가위표)을, 가져간 뒤 끝난
+ * 것에 자기 모양(시계)을 줬다(아이콘만 남는 좁은 줄에서 「아직 받지 않았어요」와 「시간 초과」가 같은 글리프가 되지 않게).
  */
-export type TriggerChipMark = "none" | "dot" | "check" | "alert" | "cross";
+export type TriggerChipMark = "none" | "dot" | "check" | "alert" | "clock" | "cross";
 
 /** 칩 그릇의 톤. 표면이 토큰 클래스에 매긴다. */
 export type TriggerChipTone = "muted" | "working" | "ok" | "warn" | "danger";
@@ -54,10 +62,24 @@ export const CHIP_WORD_FAILED = runPhaseLabel({
   leaseState: "none",
   queuedAtMs: 0,
 });
+/** 가져간 뒤 서버가 시간 초과로 끝냈다. 예외 줄의 머리말과 **같은 함수의 같은 낱말**이다. */
+export const CHIP_WORD_TIMED_OUT = runPhaseLabel({
+  phase: "timed_out",
+  leaseState: "none",
+  queuedAtMs: 0,
+});
+/** 가져간 에이전트의 소식이 오래 끊겨 서버가 끝냈다(`lease_abandoned`). */
+export const CHIP_WORD_SIGNAL_LOST = runPhaseLabel({
+  phase: "timed_out",
+  leaseState: "none",
+  queuedAtMs: 0,
+  endReason: "lease_abandoned",
+});
 
 /** 급한 순서(클수록 앞). */
 const PRIORITY: Readonly<Record<TriggerChipKind, number>> = {
-  failed: 6,
+  failed: 7,
+  timed_out: 6,
   uncollected: 5,
   approval: 4,
   working: 3,
@@ -73,6 +95,7 @@ const MARK: Readonly<Record<TriggerChipKind, TriggerChipMark>> = {
   approval: "none",
   answered: "check",
   uncollected: "alert",
+  timed_out: "clock",
   failed: "cross",
 };
 
@@ -88,6 +111,8 @@ export const TRIGGER_CHIP_FACES: readonly { word: string; mark: TriggerChipMark 
   { word: RAIL_WORD.paused, mark: MARK.approval },
   { word: CHIP_WORD_ANSWERED, mark: MARK.answered },
   { word: CHIP_WORD_UNCOLLECTED, mark: MARK.uncollected },
+  { word: CHIP_WORD_TIMED_OUT, mark: MARK.timed_out },
+  { word: CHIP_WORD_SIGNAL_LOST, mark: MARK.timed_out },
   { word: CHIP_WORD_FAILED, mark: MARK.failed },
 ];
 
@@ -98,6 +123,7 @@ const TONE: Readonly<Record<TriggerChipKind, TriggerChipTone>> = {
   approval: "warn",
   answered: "ok",
   uncollected: "warn",
+  timed_out: "warn",
   failed: "danger",
 };
 
@@ -155,9 +181,10 @@ function kindOf(
     case "failed":
       return "failed";
     case "timed_out":
+      // 아무도 가져가지 않아 끝난 것은 열린 「아직 받지 않았어요」와 같은 낱말이고, 가져간 뒤의 것은 시간 초과·신호 소실이다.
       return run.endReason !== undefined && UNCLAIMED_END_REASONS.has(run.endReason)
         ? "uncollected"
-        : "failed";
+        : "timed_out";
     case "cancelled":
       return null;
   }
@@ -178,6 +205,9 @@ function wordOf(kind: TriggerChipKind, run: AgentRunProgress): string {
       return CHIP_WORD_ANSWERED;
     case "uncollected":
       return CHIP_WORD_UNCOLLECTED;
+    case "timed_out":
+      // 줄의 머리말(`runException`)과 같은 함수: 소식이 끊겨 끝난 것만 「신호 소실」이다.
+      return runPhaseLabel(serverFactsOf(run));
     case "failed":
       return CHIP_WORD_FAILED;
   }
@@ -210,6 +240,8 @@ function labelOf(
       return `${who} 에이전트가 답했어요.`;
     case "uncollected":
       return `${who} 에이전트가 요청을 가져가지 않았어요.`;
+    case "timed_out":
+      return `${who} 에이전트의 실행이 ${runPhaseLabel(facts)}로 끝났어요.`;
     case "failed":
       return `${who} 에이전트의 실행이 실패했어요.`;
   }

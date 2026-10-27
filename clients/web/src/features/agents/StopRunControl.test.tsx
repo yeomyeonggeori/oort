@@ -121,6 +121,15 @@ describe("언제 서는가", () => {
   });
 });
 
+describe("누르는 면 (#4619 design-review r1 M3)", () => {
+  it("「중단」과 「그대로 두기」도 폰 폭 44(tap-target)다 — 「취소 확정」만 44면 위험한 쪽이 더 큰 표적이 된다", async () => {
+    mount();
+    expect(q("agent-work-panel-stop-arm")?.classList.contains("tap-target")).toBe(true);
+    await click("agent-work-panel-stop-arm");
+    expect(q("agent-work-panel-stop-keep")?.classList.contains("tap-target")).toBe(true);
+  });
+});
+
 describe("두 번 누른다 — 첫 번째는 아무것도 보내지 않는다", () => {
   it("첫 클릭은 확인 문장과 안전한 쪽 초점, 요청 0건", async () => {
     mount();

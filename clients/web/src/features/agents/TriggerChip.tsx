@@ -1,4 +1,4 @@
-import { Check, CircleAlert, CircleX, Eye, Hand, ShieldQuestion } from "lucide-react";
+import { Check, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion } from "lucide-react";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import { nextUncollectedDeadlineMs } from "@momo/core/features/agents/runException";
 import { UNKNOWN_AGENT_NAME } from "@momo/core/features/agents/turnCopy";
@@ -9,17 +9,17 @@ import {
   type TriggerChip,
   type TriggerChipKind,
   type TriggerChipMark,
-  type TriggerChipTone,
 } from "@momo/core/features/agents/triggerChip";
 import { cn } from "@/design/lib/cn";
 import { CHIP_CLASS } from "@/features/common/chip";
+import { TRIGGER_CHIP_CLASS, TRIGGER_CHIP_TONE_CLASS } from "./triggerChipClasses";
 import { memberNameParts, type Directory } from "@/features/workspace/useWorkspace";
 import { useRerenderAt } from "./useRerenderAt";
 
 // =============================================================================
 // 에이전트를 부른 메시지의 상태 칩 (#4619, #4577 권장 B).
 //
-//   이도현 오후 3:07  [받음]  →  [가져감]  →  [● 작업 중]  →  [✓ 답함]   [! 아직 받지 않았어요]  [✕ 실패]
+//   이도현 오후 3:07  [받음]  →  [가져감]  →  [● 작업 중]  →  [✓ 답함]   [! 아직 받지 않았어요]  [◷ 시간 초과]  [✕ 실패]
 //
 // 에이전트를 부른 사람의 메시지 머리 줄(시각 옆)에 **크기가 고정된** 칩 하나가 선다. 문장 행(「받았어요
 // → 깨우는 신호 보냄 → 가져감 → …」)을 대신한다. 누가 불렀든 선다(planner 결정 2). 한 낱말이라 상태가
@@ -39,37 +39,20 @@ import { useRerenderAt } from "./useRerenderAt";
 //     없으므로(`MESSAGE_HEAD_CHIP_CLASS`) 칩이 클수록 이름이 줄어든다.
 //   - 머리 줄이 없는 **이어지는 행**(같은 사람의 연속 메시지)의 거터: 시각이 서는 그 자리에 선다(`GutterTriggerChip`).
 //     거터(32px + 행 여백 16px)에 낱말은 들어가지 않는다.
-// 아이콘 칩은 글자 없이 모양만으로 일곱 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
+// 아이콘 칩은 글자 없이 모양만으로 여덟 상태가 갈려야 해서 낱말 칩에 없던 표지도 하나씩 갖는다
 // (`MarkGlyph`). 그릇 높이는 낱말 칩과 같다: 폭 0으로 접은 낱말이 줄 상자의 높이를 지킨다.
 //
 // ## 낱말과 모양
 //
 // 낱말과 상태 판정은 코어 `triggerChip`이 정한다(레일과 같은 낱말). 모양은 색에만 기대지 않는다:
-// 점(작업 중)·체크(답함)·느낌표(아직 받지 않았어요)·가위표(실패). 그릇은 칩 그릇 규칙(`chipVessel.test`)의 넷
-// (`muted/ok/warn/danger-soft`)만 쓴다.
+// 점(작업 중)·체크(답함)·느낌표(아직 받지 않았어요)·시계(시간 초과·신호 소실)·가위표(실패, 위험 톤). 느낌표와 시계는 경고
+// 톤이다. 서버가 일을 끝내지
+// 못한 것은 오류가 아니라서(ADR-0132) 위험 톤·가위표는 서버가 `failed`로 끝낸 것에만 쓴다. 그릇은 칩 그릇 규칙
+// (`chipVessel.test`)의 넷(`muted/ok/warn/danger-soft`)만 쓴다.
 //
 // 「답함 ✓」은 답 메시지를 알 때만 눌리는 단추다(눌러도 갈 곳이 없는 단추를 세우지 않는다). 거터의 칩은
 // 눌리지 않는다: 행에 포인터가 오면 그 자리가 시각으로 바뀌므로(아래) 누를 수 있는 단추를 거기 둘 수 없다.
 // =============================================================================
-
-/** 톤 → 그릇과 글자. 짝은 `tokens.contrast.test`가 두 스킴에서 재는 것들이다. */
-export const TRIGGER_CHIP_TONE_CLASS: Readonly<Record<TriggerChipTone, string>> = {
-  muted: "bg-muted-soft text-ink-muted",
-  working: "bg-muted-soft text-warn",
-  ok: "bg-ok-soft text-ok",
-  warn: "bg-warn-soft text-warn",
-  danger: "bg-danger-soft text-danger",
-};
-
-/**
- * 칩 한 개의 바탕 클래스. 격자(`inline-grid`)가 겹쳐 놓은 낱말들 중 가장 넓은 것이 폭을 정한다.
- *
- * `self-center`가 높이를 지킨다: 머리 줄은 `items-baseline`이고, 칩의 기준선은 안에 아이콘이 있느냐에
- * 따라 갈린다(아이콘이 먼저면 아이콘 바닥이 기준선이다). 기준선 정렬로 두면 글자만 있는 칩(받음·가져감·
- * 승인 대기)은 줄을 1px, 점이 붙은 칩(작업 중)은 2px 키웠다 — 실제 엔진에서 잰 값이다. 가운데 정렬은
- * 칩 높이(18)가 줄(22) 안에 들어가는 한 낱말과 무관하게 줄 높이를 건드리지 않는다.
- */
-export const TRIGGER_CHIP_CLASS = "inline-grid items-center self-center";
 
 function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
   return (
@@ -77,6 +60,7 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
       {mark === "dot" && <span aria-hidden="true" className="size-1 rounded-full bg-warn" />}
       {mark === "check" && <Check aria-hidden="true" className="size-3" />}
       {mark === "alert" && <CircleAlert aria-hidden="true" className="size-3" />}
+      {mark === "clock" && <Clock aria-hidden="true" className="size-3" />}
       {mark === "cross" && <CircleX aria-hidden="true" className="size-3" />}
       {word}
     </span>
@@ -84,9 +68,11 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
 }
 
 /**
- * 아이콘 칩의 글리프: 일곱 상태가 **모양으로** 갈린다. 낱말 칩에서 표지가 없던 셋(받음·가져감·승인 대기)도 여기서는
+ * 아이콘 칩의 글리프: 상태가 **모양으로** 갈린다. 낱말 칩에서 표지가 없던 셋(받음·가져감·승인 대기)도 여기서는
  * 하나씩 갖는다 — 글자 없는 빈 칩은 상태를 말하지 못하므로. 받음은 눈(요청이 닿아 눈에 띔, Buzz의 👀와 같은 뜻),
- * 가져감은 손, 승인 대기는 사람에게 묻는 방패(작업 카드가 쓰는 그것).
+ * 가져감은 손, 승인 대기는 사람에게 묻는 방패(작업 카드가 쓰는 그것), 작업 중은 속이 찬 원(원 안의 점).
+ * 모두 lucide다(§2.8: 손으로 그린 `<svg>`는 예외 목록 밖이면 `iconSystem.test`가 붉다). 상태 원 셋(작업 중·주의·오류)은
+ * 같은 원 계열이라 한 가족으로 읽힌다.
  */
 function MarkGlyph({ kind }: { kind: TriggerChipKind }) {
   const icon = "size-3";
@@ -96,19 +82,17 @@ function MarkGlyph({ kind }: { kind: TriggerChipKind }) {
     case "claimed":
       return <Hand aria-hidden="true" className={icon} />;
     case "working":
-      // 점도 **SVG**다: 다른 글리프와 같은 대체 요소여야 줄 상자의 높이(기준선)가 같다. `<span>` 점은 기준선이 달라
-      // 칩이 2px 낮아졌다(실제 엔진에서 잰 값). 색은 칩 톤(`text-warn`)을 따른다.
-      return (
-        <svg aria-hidden="true" viewBox="0 0 12 12" className={cn(icon, "fill-current")}>
-          <circle cx="6" cy="6" r="3.5" />
-        </svg>
-      );
+      // 점도 **SVG 글리프**여야 한다: 다른 글리프와 같은 대체 요소여야 줄 상자의 높이(기준선)가 같다(`<span>` 점은 기준선이
+      // 달라 칩이 2px 낮아졌다, 실제 엔진에서 잰 값). 손으로 그린 `<svg>`는 아이콘 경계(ADR-0172)가 막으므로 lucide의 원 안의 점이다.
+      return <CircleDot aria-hidden="true" className={icon} />;
     case "approval":
       return <ShieldQuestion aria-hidden="true" className={icon} />;
     case "answered":
       return <Check aria-hidden="true" className={icon} />;
     case "uncollected":
       return <CircleAlert aria-hidden="true" className={icon} />;
+    case "timed_out":
+      return <Clock aria-hidden="true" className={icon} />;
     case "failed":
       return <CircleX aria-hidden="true" className={icon} />;
   }
@@ -291,7 +275,9 @@ export function GutterTriggerChip({
     <span
       data-row-chip=""
       className={cn(
-        "absolute right-0 top-px",
+        // `pointer-events-none`: 행에 포인터가 오면 이 칩은 시각에 자리를 내준다(opacity 0). 숨은 칩이 시각 위의 최상단으로
+        // 남으면 시각에 포인터를 올릴 때 칩의 툴팁이 뜬다(design-review r1 Nitpick). 거터 칩은 어차피 눌리지 않는다.
+        "pointer-events-none absolute right-0 top-px",
         "transition-opacity group-hover:opacity-0 group-focus-within:opacity-0",
         // 움직임을 줄여 달라고 한 사람에게는 페이드도 움직임이다.
         "motion-reduce:transition-none"
@@ -303,7 +289,8 @@ export function GutterTriggerChip({
 }
 
 /**
- * 스레드 요약 줄(「답글 N개 · 마지막 …」) 곁의 「작업 중」 칩 (#4619 E). 같은 모델·같은 칩이다.
+ * 스레드 요약 줄(「답글 N개 · 마지막 …」) 곁의 「작업 중」 칩 (#4619 E). 같은 모델·같은 칩이다. 루트 메시지가 일으킨 run에만
+ * 서고(누가 불렀든), 답글이 일으킨 run은 진행 읽기에 루트 id가 없어 닿지 못한다.
  * 일이 **진행 중**(가져감·작업 중)일 때만 선다: 끝난 일의 「답함」이나 실패는 머리 줄의 칩이 말하고,
  * 이 줄은 「이 스레드에서 지금 에이전트가 일하는 중」만 말한다. 누르는 것이 아니다. 폭은 고정하지 않는다
  * (`reserve={false}`): 이 줄의 칩은 맨 끝이라 서고 져도 이웃 글자가 움직이지 않는다.

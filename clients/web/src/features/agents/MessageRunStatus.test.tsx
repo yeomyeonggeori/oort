@@ -59,6 +59,26 @@ const MSG = "00000000-0000-7000-8000-0000000a0001";
 const SEC = 1000;
 const MIN = 60 * SEC;
 
+const REQUESTER = "00000000-0000-7000-8000-000000000101";
+const ADMIN = "00000000-0000-7000-8000-000000000102";
+const BYSTANDER = "00000000-0000-7000-8000-000000000103";
+
+const human = (id: string, name: string, role: "owner" | "admin" | "member") =>
+  ({
+    id,
+    workspaceId: WS,
+    kind: "human",
+    status: "active",
+    displayName: name,
+    handle: name,
+    role,
+    channelCount: 1,
+    channelIds: [CH],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  }) as unknown as RosterMember;
+
 const bot = {
   id: AGENT,
   workspaceId: WS,
@@ -72,7 +92,12 @@ const bot = {
   createdAtMs: 0,
   updatedAtMs: 0,
 } as RosterMember;
-const directory = makeDirectory([bot]);
+const directory = makeDirectory([
+  bot,
+  human(REQUESTER, "이도현", "member"),
+  human(ADMIN, "박서연", "admin"),
+  human(BYSTANDER, "최민수", "member"),
+]);
 
 function run(now: number, extra: Partial<AgentRunProgress> = {}): AgentRunProgress {
   return {
@@ -100,38 +125,56 @@ let host: HTMLElement | null = null;
 
 function mount(
   runs: AgentRunProgress[],
-  options: { createdAtMs?: number; openProfile?: ((id: string) => void) | null } = {}
+  options: {
+    createdAtMs?: number;
+    openProfile?: ((id: string) => void) | null;
+    /** 화면을 보는 사람(기본: 요청자 본인). */
+    viewer?: string;
+    /** 에이전트를 부른 메시지의 작성자(기본: 요청자). `null`이면 모른다. */
+    requester?: string | null;
+  } = {}
 ) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
-  const session = { workspaceId: WS, connStatus: "connected" } as unknown as SessionContextValue;
-  act(() => {
-    root?.render(
-      createElement(
-        QueryClientProvider,
-        { client },
+  const session = {
+    workspaceId: WS,
+    connStatus: "connected",
+    session: { member: { id: options.viewer ?? REQUESTER } },
+  } as unknown as SessionContextValue;
+  const draw = (nextRuns: AgentRunProgress[]) =>
+    act(() => {
+      root?.render(
         createElement(
-          SessionProvider,
-          { value: session },
+          QueryClientProvider,
+          { client },
           createElement(
-            OpenAgentProfileContext.Provider,
-            { value: options.openProfile ?? null },
-            createElement(MessageRunStatus, {
-              messageId: MSG,
-              channelId: CH,
-              createdAtMs: options.createdAtMs ?? Date.now() - 60 * MIN,
-              runs,
-              directory,
-            })
+            SessionProvider,
+            { value: session },
+            createElement(
+              OpenAgentProfileContext.Provider,
+              { value: options.openProfile ?? null },
+              createElement(MessageRunStatus, {
+                messageId: MSG,
+                channelId: CH,
+                createdAtMs: options.createdAtMs ?? Date.now() - 60 * MIN,
+                ...(options.requester === null ? {} : { requesterId: options.requester ?? REQUESTER }),
+                runs: nextRuns,
+                directory,
+              })
+            )
           )
         )
-      )
-    );
-  });
+      );
+    });
+  draw(runs);
+  redraw = draw;
   return client;
 }
+
+/** 같은 루트를 그대로 두고 run 목록만 바꿔 다시 그린다(서버가 진행을 새로 읽어 준 것처럼): 행이 다시 마운트되지 않는다. */
+let redraw: (runs: AgentRunProgress[]) => void = () => undefined;
 
 const settle = async (ms = 5) => {
   await act(async () => {
@@ -464,6 +507,185 @@ describe("행동은 기존 것이다", () => {
     await settle();
     expect(lines()).toHaveLength(1);
     expect(q("run-exception-settings")).toBeNull();
+  });
+});
+
+describe("행동 단추는 요청자와 owner/admin에게만 선다 (design-review r1 M2)", () => {
+  const actionIds = ["agent-work-panel-stop-arm", "run-exception-settings", "wake-stub"] as const;
+  const actionsShown = () => actionIds.filter((id) => q(id) !== null);
+
+  it("요청자 본인: 문장과 행동 셋(다시 깨우기는 생존 판정이 있을 때)이 선다", async () => {
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(Date.now())], { openProfile: () => undefined });
+    await settle();
+    expect(q("run-exception-text")).not.toBeNull();
+    expect(actionsShown()).toEqual([...actionIds]);
+  });
+
+  it("구경꾼(요청자도 owner/admin도 아님): 문장만 서고 행동 단추는 없다 — 문장은 작업 패널로 가는 입구로 남는다", async () => {
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(Date.now())], { openProfile: () => undefined, viewer: BYSTANDER });
+    await settle();
+    expect(q("run-exception-text")?.textContent).toBe(`달무리봇: ${UNCOLLECTED_WORD} · 연결이 꺼져 있을 수 있어요`);
+    expect(actionsShown()).toEqual([]);
+    act(() => q("run-exception-open")?.click());
+    expect(workPanelSnapshot()).toMatchObject({ runId: RUN, origin: "message" });
+  });
+
+  it("workspace owner/admin은 남의 요청에도 행동 셋이 선다", async () => {
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(Date.now())], { openProfile: () => undefined, viewer: ADMIN });
+    await settle();
+    expect(actionsShown()).toEqual([...actionIds]);
+  });
+
+  it("작성자를 모르면 owner/admin에게만 선다", async () => {
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(Date.now())], { openProfile: () => undefined, requester: null, viewer: REQUESTER });
+    await settle();
+    expect(actionsShown()).toEqual([]);
+    act(() => root?.unmount());
+    host?.remove();
+    mount([run(Date.now())], { openProfile: () => undefined, requester: null, viewer: ADMIN });
+    await settle();
+    expect(actionsShown()).toEqual([...actionIds]);
+  });
+
+  it("끝난 줄(실패)은 누구에게나 문장뿐이다(행동이 원래 없다)", async () => {
+    const now = Date.now();
+    mount([run(now, { phase: "failed", status: "failed", endReason: "agent_error", finishedAtMs: now - SEC })], {
+      viewer: BYSTANDER,
+    });
+    await settle();
+    expect(q("run-exception-text")?.textContent).toBe("달무리봇: 실패 · 에이전트가 오류로 끝냈어요");
+    expect(actionsShown()).toEqual([]);
+  });
+});
+
+describe("행동 단추의 누르는 면 (design-review r1 M3)", () => {
+  it("「에이전트 설정 열기」는 폰 폭 44(tap-target)다: 같은 줄의 「취소」·「다시 깨우기」와 같은 표적 크기", async () => {
+    mount([run(Date.now())], { openProfile: () => undefined });
+    await settle();
+    const settings = q("run-exception-settings");
+    expect(settings).not.toBeNull();
+    expect(settings?.classList.contains("tap-target")).toBe(true);
+  });
+});
+
+describe("줄의 모양 (design-review r1 M7)", () => {
+  it("실패 줄은 칩과 같은 가위표, 나머지 예외는 느낌표다 — 색으로만 갈리지 않는다", async () => {
+    const now = Date.now();
+    mount([run(now, { phase: "failed", status: "failed", endReason: "agent_error", finishedAtMs: now - SEC })]);
+    await settle();
+    expect(q("run-exception")?.querySelector("svg")?.getAttribute("class")).toContain("lucide-circle-x");
+    act(() => root?.unmount());
+    host?.remove();
+    mount([run(now)]);
+    await settle();
+    expect(q("run-exception")?.querySelector("svg")?.getAttribute("class")).toContain("lucide-circle-alert");
+    act(() => root?.unmount());
+    host?.remove();
+    mount([run(now, { phase: "timed_out", status: "timed_out", endReason: "lease_abandoned", finishedAtMs: now - SEC })]);
+    await settle();
+    expect(q("run-exception")?.querySelector("svg")?.getAttribute("class")).toContain("lucide-circle-alert");
+  });
+
+  it("행동 단추의 순서는 다시 깨우기 → 설정 → 취소다(위험한 행동은 마지막)", async () => {
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(Date.now())], { openProfile: () => undefined });
+    await settle();
+    const line = q("run-exception")!;
+    const order = [...line.querySelectorAll<HTMLElement>('[data-testid="run-exception-open"], [data-testid="wake-stub"], [data-testid="run-exception-settings"], [data-testid="agent-work-panel-stop-arm"]')].map((el) => el.getAttribute("data-testid"));
+    expect(order).toEqual(["run-exception-open", "wake-stub", "run-exception-settings", "agent-work-panel-stop-arm"]);
+  });
+
+  it("취소를 열면 설정 단추가 확인 줄 아래 혼자 남지 않는다(취소가 맨 뒤라 확인 줄이 자기 줄로 내려가도 앞의 단추는 그대로 윗줄이다)", async () => {
+    api.fetchAgentLiveness.mockResolvedValue(liveness("woken_not_collected"));
+    mount([run(Date.now())], { openProfile: () => undefined });
+    await settle();
+    act(() => q("agent-work-panel-stop-arm")?.click());
+    const children = [...q("run-exception")!.children].map((el) => el.getAttribute("data-testid"));
+    expect(children.at(-1)).toBe("agent-work-panel-stop");
+    expect(children.indexOf("run-exception-settings")).toBeLessThan(children.indexOf("agent-work-panel-stop"));
+  });
+});
+
+describe("취소 영수증은 줄이 사라져도 남는다 (design-review r1 M9)", () => {
+  const cancelledRow = (now: number) =>
+    run(now, { phase: "cancelled", status: "cancelled", endReason: "human_cancelled", finishedAtMs: now });
+
+  async function cancelFromLine() {
+    api.cancelAgentRun.mockResolvedValue({
+      runId: RUN,
+      status: "cancelled",
+      linkedWorkSessionIds: [],
+      workSessionsTerminated: false,
+    } satisfies AgentRunCancelResult);
+    const now = Date.now();
+    mount([run(now)], { openProfile: () => undefined });
+    await settle();
+    act(() => q("agent-work-panel-stop-arm")?.click());
+    await act(async () => {
+      q("agent-work-panel-stop-commit")?.click();
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    return now;
+  }
+
+  it("확정 → run이 취소로 넘어가 예외가 걷혀도 결과 문장이 같은 자리에 남고 줄의 글·행동은 사라진다", async () => {
+    const now = await cancelFromLine();
+    expect(q("agent-work-panel-stop-outcome")?.textContent).toBe("달무리봇의 요청을 취소했어요.");
+    expect(q("run-exception")?.hasAttribute("data-receipt")).toBe(false);
+    const outcome = q("agent-work-panel-stop-outcome");
+
+    // 서버가 run을 취소로 돌려준다(진행 읽기).
+    redraw([cancelledRow(now)]);
+    await settle();
+    const line = q("run-exception");
+    expect(line, "줄이 영수증으로 남는다").not.toBeNull();
+    expect(line?.hasAttribute("data-receipt")).toBe(true);
+    // 같은 결과 문장 노드가 그대로다(다시 마운트되지 않았다: 캐럿·낭독이 사라지지 않는다).
+    expect(q("agent-work-panel-stop-outcome")).toBe(outcome);
+    expect(q("agent-work-panel-stop-outcome")?.textContent).toBe("달무리봇의 요청을 취소했어요.");
+    // 줄의 글(작업 패널 입구)·행동 단추는 걷힌다: 이미 끝난 요청이라 권할 것이 없다.
+    expect(q("run-exception-open")).toBeNull();
+    expect(q("run-exception-settings")).toBeNull();
+    expect(q("agent-work-panel-stop-arm")).toBeNull();
+    expect(q("agent-work-panel-stop-commit")).toBeNull();
+  });
+
+  it("취소하지 않고 run이 취소로 넘어간 경우(다른 곳에서 취소)는 아무것도 남기지 않는다", async () => {
+    const now = Date.now();
+    mount([run(now)], { openProfile: () => undefined });
+    await settle();
+    expect(q("run-exception")).not.toBeNull();
+    redraw([cancelledRow(now)]);
+    await settle();
+    expect(q("run-exception")).toBeNull();
+    expect(host?.childElementCount ?? 0).toBe(0);
+  });
+
+  it("처음부터 취소된 run(이력)은 줄도 영수증도 없다", async () => {
+    mount([cancelledRow(Date.now())]);
+    await settle();
+    expect(q("run-exception")).toBeNull();
+    expect(host?.childElementCount ?? 0).toBe(0);
+  });
+
+  it("영수증은 서버의 취소 답이 오기 전에 걷히지 않는다: 오류 문장이 서면 다시 누를 수 있게 줄이 그대로다", async () => {
+    api.cancelAgentRun.mockRejectedValue(new ApiError(500, "boom"));
+    const now = Date.now();
+    mount([run(now)], { openProfile: () => undefined });
+    await settle();
+    act(() => q("agent-work-panel-stop-arm")?.click());
+    await act(async () => {
+      q("agent-work-panel-stop-commit")?.click();
+      await vi.advanceTimersByTimeAsync(5);
+    });
+    expect(q("agent-work-panel-stop-outcome")?.getAttribute("data-kind")).toBe("error");
+    expect(q("run-exception")?.hasAttribute("data-receipt")).toBe(false);
+    expect(q("run-exception-open")).not.toBeNull();
+    expect(q("agent-work-panel-stop-commit")).not.toBeNull();
   });
 });
 

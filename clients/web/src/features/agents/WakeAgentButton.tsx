@@ -124,6 +124,8 @@ export function WakeAgentButton({
         type="button"
         variant="secondary"
         size="sm"
+        // 폰 폭(<600)에서 44: 대화의 예외 줄(#4619)에서는 자기 줄을 갖는 1급 컨트롤이다. 데스크탑 폭에서는 아무 일도 없다.
+        className="tap-target"
         disabled={ring.isPending || cooldownText !== undefined}
         onClick={() => ring.mutate()}
         data-testid="wake-agent-button"

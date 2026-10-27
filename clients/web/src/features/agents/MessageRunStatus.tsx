@@ -1,7 +1,7 @@
-import { useContext, useEffect, useMemo } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { CircleAlert } from "lucide-react";
-import type { AgentLiveness, AgentRunProgress } from "@momo/core/lib/api";
+import { CircleAlert, CircleX } from "lucide-react";
+import { uuidEq, type AgentLiveness, type AgentRunProgress } from "@momo/core/lib/api";
 import {
   nextUncollectedDeadlineMs,
   runException,
@@ -17,7 +17,7 @@ import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { OpenAgentProfileContext } from "@/features/routing/useAgentProfile";
-import { memberNameParts, type Directory } from "@/features/workspace/useWorkspace";
+import { memberFor, memberNameParts, type Directory } from "@/features/workspace/useWorkspace";
 import { nudgeRunProgress } from "./agentRunProgressStore";
 import { StopRunControl } from "./StopRunControl";
 import { useAgentLiveness } from "./useAgentLiveness";
@@ -39,6 +39,14 @@ import { openWorkPanel } from "./workLogStore";
 // 「grok: 아직 받지 않았어요 · 깨웠지만 아직 안 가져감 · 15분째 기다려요 · 연결이 꺼져 있을 수
 // 있어요」 캡처)이 이 변경의 이유다. 이 줄은 **누가 부른 요청이든** 선다(planner 결정 2): 칩이 남의
 // 메시지에도 서는데 칩의 「실패」·「아직 받지 않았어요」를 풀어 줄 줄이 내 메시지에만 있으면 안 된다.
+//
+// **문장은 모두에게, 행동 단추는 요청자와 워크스페이스 owner/admin에게만** 선다(design-review r1 M2). 서버는 그 채널의
+// 멤버 누구든 취소를 받지만 그것은 바닥이지 천장이 아니다: 남이 부른 요청마다 멤버 수만큼의 화면에 같은 단추 셋이 서면
+// 어수선하고, 확인 문장(「취소하면 이 요청은 여기서 끝나요」)은 요청자에게 하는 말이다. 구경꾼도 줄의 글을 눌러 작업 패널
+// (거기에는 채널 멤버 누구에게나 취소가 있다)로 갈 수 있다. 정책이므로 owner가 바꿀 수 있는 한 곳(`mayAct`)이다.
+//
+// 취소를 확정하면 run이 취소로 넘어가 줄은 사라지지만 **취소 영수증은 남는다**: 줄과 함께 결과 문장(`role="status"`)과 캐럿이
+// 사라지면 키보드·보조기술 사용자가 확인을 받지 못한다(design-review r1 M9, #3854 H-1과 같은 종류).
 //
 // 이 줄은 **사람이 움직여야 할 수 있는 상태**에만 선다: 아직 받지 않았어요(유예 뒤), 깨우는 신호가 닿지
 // 않음, 실패, 시간 초과. 판정과 낱말은 코어 `runException`이 정하고 폰이 같은 모델을 쓴다. 줄은 서고 나면
@@ -63,21 +71,32 @@ import { openWorkPanel } from "./workLogStore";
 /** 내가 방금 보낸 메시지로 보는 시간. 이 안이면 진행을 한 번 당겨 읽는다. */
 const FRESH_SEND_MS = 15_000;
 
-/** 줄을 세울 수 있는 run인가(그 밖의 phase는 훅도 읽기도 없이 건너뛴다). */
+/**
+ * 줄을 세울 수 있는 run인가(그 밖의 phase는 훅도 읽기도 없이 건너뛴다). `cancelled`는 줄을 세우지 않지만 **줄이 영수증으로
+ * 남으려면** 대기에서 취소로 넘어가는 동안 같은 행이 마운트된 채여야 해서 포함한다(예외가 없으면 아무것도 그리지 않는다).
+ */
 function mayHaveException(run: AgentRunProgress): boolean {
-  return run.phase === "queued" || run.phase === "failed" || run.phase === "timed_out";
+  return (
+    run.phase === "queued" ||
+    run.phase === "failed" ||
+    run.phase === "timed_out" ||
+    run.phase === "cancelled"
+  );
 }
 
 export function MessageRunStatus({
   messageId,
   channelId,
   createdAtMs,
+  requesterId,
   runs,
   directory,
 }: {
   messageId: string;
   channelId: string;
   createdAtMs: number;
+  /** 이 메시지를 쓴(에이전트를 부른) 멤버. 행동 단추는 이 사람과 owner/admin에게만 선다. 모르면 owner/admin에게만. */
+  requesterId?: string;
   /** 이 메시지가 일으킨 run들(먼저 생긴 것이 위). 없으면 빈 배열. */
   runs: readonly AgentRunProgress[];
   directory: Directory;
@@ -100,7 +119,13 @@ export function MessageRunStatus({
   return (
     <>
       {runs.filter(mayHaveException).map((run) => (
-        <RunExceptionRow key={run.id} run={run} nowMs={nowMs} directory={directory} />
+        <RunExceptionRow
+          key={run.id}
+          run={run}
+          nowMs={nowMs}
+          directory={directory}
+          {...(requesterId !== undefined ? { requesterId } : {})}
+        />
       ))}
     </>
   );
@@ -113,12 +138,24 @@ function RunExceptionRow({
   run,
   nowMs,
   directory,
+  requesterId,
 }: {
   run: AgentRunProgress;
   nowMs: number;
   directory: Directory;
+  requesterId?: string;
 }) {
-  const { workspaceId } = useSession();
+  const { workspaceId, session } = useSession();
+  // 행동 단추를 낼 수 있는 사람: 요청자 본인, 또는 워크스페이스 owner/admin.
+  const me = session?.member?.id;
+  const role = me === undefined ? undefined : memberFor(directory, me)?.role;
+  const mayAct =
+    (requesterId !== undefined && me !== undefined && uuidEq(requesterId, me)) ||
+    role === "owner" ||
+    role === "admin";
+  // 취소를 확정한 줄: run이 취소로 넘어가 예외가 없어져도 영수증은 남긴다.
+  const last = useRef<RunException | null>(null);
+  const [settled, setSettled] = useState(false);
   const queued = run.phase === "queued";
   const key = run.id.toLowerCase();
   // 깨우는 신호는 아직 아무도 가져가지 않은 요청에만 읽는다. 작업 패널과 같은 캐시 키다.
@@ -129,8 +166,20 @@ function RunExceptionRow({
   const candidate = queued && (isUncollected(serverFactsOf(run), nowMs) || doorbell?.failed === true);
   const { liveness } = useAgentLiveness(candidate ? run.agentMemberId : null, candidate);
   const exception = runException(run, nowMs, { liveness, doorbell });
-  if (exception === null) return null;
-  return <ExceptionLine run={run} exception={exception} liveness={liveness} directory={directory} />;
+  if (exception !== null) last.current = exception;
+  const shown = exception ?? (settled ? last.current : null);
+  if (shown === null) return null;
+  return (
+    <ExceptionLine
+      run={run}
+      exception={shown}
+      liveness={liveness}
+      directory={directory}
+      mayAct={mayAct}
+      receipt={exception === null}
+      onSettled={() => setSettled(true)}
+    />
+  );
 }
 
 function ExceptionLine({
@@ -138,11 +187,19 @@ function ExceptionLine({
   exception,
   liveness,
   directory,
+  mayAct,
+  receipt,
+  onSettled,
 }: {
   run: AgentRunProgress;
   exception: RunException;
   liveness: AgentLiveness | null | undefined;
   directory: Directory;
+  /** 행동 단추(다시 깨우기·취소·설정)를 낼 수 있는가: 요청자와 owner/admin. */
+  mayAct: boolean;
+  /** 예외는 이미 걷혔고(run이 취소로 넘어갔다) 취소 영수증만 남아 있다. */
+  receipt: boolean;
+  onSettled: () => void;
 }) {
   const { connStatus } = useSession();
   const openAgentProfile = useContext(OpenAgentProfileContext);
@@ -151,7 +208,10 @@ function ExceptionLine({
   // 사람 몫의 색은 하나다(`--warn`): 아직 받지 않았어요·깨우는 신호가 닿지 않음·시간 초과는 신호 없음이지
   // 오류가 아니다(ADR-0132: 부재를 오류로 올리지 않는다). 서버가 실패로 끝낸 것만 `--danger`다.
   const iconTone = exception.kind === "failed" ? "text-danger" : "text-warn";
-  const wants = (action: RunException["actions"][number]) => exception.actions.includes(action);
+  // 모양도 같은 이유로 갈린다: 칩의 실패는 가위표라 줄도 같은 가위표다(주의 느낌표와 색으로만 갈리지 않는다, design-review r1 M7).
+  const Icon = exception.kind === "failed" ? CircleX : CircleAlert;
+  const wants = (action: RunException["actions"][number]) =>
+    mayAct && !receipt && exception.actions.includes(action);
 
   return (
     <div
@@ -159,7 +219,9 @@ function ExceptionLine({
       data-testid="run-exception"
       data-kind={exception.kind}
       data-run-id={run.id}
+      data-receipt={receipt ? "" : undefined}
     >
+      {!receipt && (
       <button
         type="button"
         onClick={(event) =>
@@ -178,35 +240,40 @@ function ExceptionLine({
         data-testid="run-exception-open"
         className="flex min-w-0 items-center gap-1 rounded-sm text-left press hover:bg-surface-hover focus-visible:focus-ring"
       >
-        <CircleAlert aria-hidden="true" className={cn("size-4 shrink-0", iconTone)} />
+        <Icon aria-hidden="true" className={cn("size-4 shrink-0", iconTone)} />
         <span className="min-w-0 break-keep" data-testid="run-exception-text">
           <span className="text-agent">{name}</span>
           {text.slice(name.length)}
         </span>
       </button>
+      )}
       {wants("wake") && liveness !== null && liveness !== undefined && (
         <WakeAgentButton agentId={run.agentMemberId} state={liveness.state} />
-      )}
-      {wants("cancel") && (
-        <StopRunControl
-          runId={run.id}
-          agentName={name}
-          open={exception.open}
-          live={connStatus === "connected"}
-          wording={cancelWordingFor(serverFactsOf(run))}
-          variant="inline"
-        />
       )}
       {wants("settings") && openAgentProfile !== null && (
         <Button
           type="button"
           variant="ghost"
           size="sm"
+          className="tap-target"
           data-testid="run-exception-settings"
           onClick={() => openAgentProfile(run.agentMemberId)}
         >
           에이전트 설정 열기
         </Button>
+      )}
+      {/* 취소는 맨 뒤다(위험한 행동은 마지막): 확인 줄이 열려 자기 줄로 내려가도 다른 행동이 그 아래 혼자 남지 않는다.
+          영수증 모드에서는 이 단추만 남는다: 결과 문장과 캐럿이 줄과 함께 사라지지 않게 같은 자리에 마운트된 채 둔다. */}
+      {(wants("cancel") || receipt) && (
+        <StopRunControl
+          runId={run.id}
+          agentName={name}
+          open={exception.open && !receipt}
+          live={connStatus === "connected"}
+          wording={cancelWordingFor(serverFactsOf(run))}
+          variant="inline"
+          onSettled={onSettled}
+        />
       )}
     </div>
   );

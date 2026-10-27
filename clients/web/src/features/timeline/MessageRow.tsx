@@ -1206,7 +1206,7 @@ export function MessageRow({
               ) : (
                 <span data-testid="thread-anchor">{rollupLabel(rollup)}</span>
               ))}
-            {/* 스레드 요약 줄의 「작업 중」 칩 (#4619 E). 답글이 달리는 루트를 **내가 불렀고** 그 일이 지금
+            {/* 스레드 요약 줄의 「작업 중」 칩 (#4619 E). 답글이 달리는 루트를 **누가 불렀든** 그 일이 지금
                 진행 중이면 요약 줄에 같은 칩이 선다. 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어
                 (진행 읽기에 rootId가 없다) 여기 서지 않는다. */}
             {rollup && runStatus !== undefined && runStatus.length > 0 && (
@@ -1214,14 +1214,15 @@ export function MessageRow({
             )}
           </div>
         )}
-        {/* 내가 보낸 메시지가 에이전트를 불렀으면 그 일의 상태 한 줄 (#3824). 칩보다
-            안쪽이다: 칩은 남들의 반응이고, 이 줄은 이 메시지가 일으킨 일이다. */}
+        {/* 에이전트를 부른 메시지(누가 불렀든)의 **예외 줄** (#3824 → #4619): 평소의 진행은 레일과 칩이 말하고, 이 줄은
+            아직 받지 않았어요·깨우는 신호가 닿지 않음·실패·시간 초과일 때만 선다. 행동 단추는 요청자와 owner/admin에게만. */}
         {runStatus !== undefined && (
           <div className="flex min-w-0 flex-col empty:hidden" data-testid="message-run-status-slot">
             <MessageRunStatus
               messageId={message.id}
               channelId={message.channelId}
               createdAtMs={message.createdAtMs}
+              requesterId={message.authorMemberId}
               runs={runStatus}
               directory={directory}
             />

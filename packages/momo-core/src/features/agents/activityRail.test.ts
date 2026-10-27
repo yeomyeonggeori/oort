@@ -210,10 +210,25 @@ describe("여러 에이전트는 한 줄로 합친다", () => {
     // 늦게 시작했어도 사람을 기다리는 에이전트가 줄을 이끈다.
     const waiting = turn({ ...APPROVAL, id: "0199aa11-2222-7000-8000-0000000000a4", agentMemberId: B, startedAtMs: T + 5 * MIN });
     const lead = activityRail([a(), waiting], nameFor, T + 6 * MIN);
-    expect(lead?.text).toBe("모래시계봇 +1");
+    // 합친 줄도 사람을 기다리는 쪽의 낱말을 남긴다(색 하나로만 전하지 않는다, M5).
+    expect(lead?.text).toBe("모래시계봇 · 승인 대기 +1");
     expect(lead?.needsHuman).toBe(true);
     // 합친 줄에서도 사람이 할 일이 있다는 사실은 사라지지 않는다.
     expect(lead?.label).toContain("승인을 기다려요");
+  });
+
+  it("합친 줄의 낱말은 이끄는 쪽이 사람을 기다릴 때만 선다: 작업 중·가져감만 모이면 이름과 수뿐이다", () => {
+    expect(activityRail([a(), c()], nameFor, T + 2 * MIN)?.text).toBe("달무리봇 +1");
+    const waiting = turn({ ...APPROVAL, id: "0199aa11-2222-7000-8000-0000000000a4", agentMemberId: B, startedAtMs: T + 5 * MIN });
+    const paused = turn({ ...APPROVAL, phase: "paused", status: "paused", id: "0199aa11-2222-7000-8000-0000000000a5", agentMemberId: C });
+    expect(activityRail([a(), waiting, paused], nameFor, T + 6 * MIN)?.text).toBe("모래시계봇 · 승인 대기 +2");
+    // 일시 정지는 줄을 이끌 수는 있어도(작업 중보다 앞선다) 「사람이 할 일이 있다」(`needsHuman`)가 아니라 낱말이 남지 않는다.
+    const withPaused = activityRail([a(), paused], nameFor, T + 6 * MIN);
+    expect(withPaused?.lead.memberId).toBe(C);
+    expect(withPaused?.needsHuman).toBe(false);
+    expect(withPaused?.text).toBe("구름봇 +1");
+    // 합친 줄의 글에는 초 단위 숫자가 없다.
+    expect(activityRail([a(), waiting], nameFor, T + 6 * MIN)?.text).not.toMatch(/\d+\s*초/);
   });
 
   it("보조기술 이름은 모든 에이전트의 상태를 말하고 숫자가 없다", () => {

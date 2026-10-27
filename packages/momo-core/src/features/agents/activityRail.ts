@@ -19,6 +19,7 @@ import type { AgentTurnState, AgentWorkingSignal } from "./workingSignal";
 //
 //   grok · 작업 중 · 설계 문서 읽는 중      (한 에이전트)
 //   grok +1                                  (둘 이상은 합친다)
+//   grok · 승인 대기 +1                      (합친 줄을 이끄는 쪽이 사람을 기다리면 그 낱말을 남긴다)
 //
 // 레일은 입력창에 붙은 **높이가 예약된 한 줄**이고, 서고 사라지고 바뀌어도 타임라인을 밀지
 // 않는다(높이는 표면의 몫, 글자는 이 모델의 몫). 그래서 이 줄의 글자는 **가만히 있어야** 한다:
@@ -254,9 +255,14 @@ export function activityRail(
   const lead = agents[0]!;
   const extra = agents.length - 1;
   const leadName = agentLabel(lead.name);
+  // 합친 줄은 이름과 수뿐이지만, 이끄는 쪽이 **사람을 기다리면**(승인 대기) 그 낱말을 남긴다: 레일이 사람 몫 상태를 올리려고 있는
+  // 자리인데 합치면 그 신호가 색 하나로 줄어든다(design-review r1 M5, WCAG 1.4.1). 이끄는 순서가 승인 대기를 맨 앞에 두므로
+  // 합친 줄의 낱말은 언제나 사람을 기다리는 쪽의 말이다.
   const text =
     extra > 0
-      ? `${leadName} +${extra}`
+      ? lead.needsHuman
+        ? `${leadName} · ${lead.word} +${extra}`
+        : `${leadName} +${extra}`
       : lead.stage !== undefined
         ? `${leadName} · ${lead.word} · ${lead.stage}`
         : `${leadName} · ${lead.word}`;

@@ -47,6 +47,11 @@ describe("트리거 칩·예외 줄 배선 (#4619)", () => {
     expect(gutter).toContain("{hasRunChip && <GutterTriggerChip runs={runStatus} directory={directory} />}");
   });
 
+  it("예외 줄의 「다시 깨우기」는 폰 폭 44(tap-target)다 — 단추가 줄 안에서만 서서 단위 시험이 스텁으로 갈아 끼우는 부품이라 소스로 잰다 (design-review r1 M3)", () => {
+    const wake = source("./WakeAgentButton.tsx");
+    expect(wake).toMatch(/<Button[\s\S]*?className="tap-target"[\s\S]*?data-testid="wake-agent-button"/);
+  });
+
   it("옛 문장 행의 자리(MessageRunStatus)는 예외 줄만 그리고, 평소의 진행은 core `runStatusLine`을 더 부르지 않는다", () => {
     const status = source("./MessageRunStatus.tsx");
     expect(status).toContain("runException(");

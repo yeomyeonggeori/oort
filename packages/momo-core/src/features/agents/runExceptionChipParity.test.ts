@@ -33,7 +33,8 @@ import { CHIP_WORD_UNCOLLECTED, triggerChip } from "./triggerChip";
 //   4. 열린 대기 run은 같은 시각에 카드·줄·칩이 **같은 판정**을 내리고 **같은 낱말**을 쓴다.
 //   5. 같은 시각에 레일은 그 run을 정확히 그때 뺀다(줄·칩이 이어받는다).
 //   6. 깨우는 신호가 닿지 않은 줄의 칩은 아직 진행 낱말이다(경보 낱말이 아니다).
-// 가져간 뒤의 시간 초과·신호 소실은 칩이 큰 범주(「실패」)로, 줄이 구체 낱말로 말한다 — 일부러 다르고 아래에서 못 박는다.
+//   7. 예외 줄이 시간 초과·신호 소실이면 칩도 같은 낱말·경고 톤이다(서버가 일을 끝내지 못한 것은 오류가 아니다, ADR-0132).
+//      1단계는 칩만 「실패」(위험 톤)로 말해 같은 행의 줄(경고 톤)과 모순이었다 — design-review r1 H2.
 // =============================================================================
 
 const T = 1_800_000_000_000;
@@ -252,13 +253,26 @@ describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말
     }
   });
 
-  it("가져간 뒤의 시간 초과·신호 소실: 칩은 큰 범주 「실패」, 줄이 구체 낱말이다(일부러 다르다)", () => {
+  it("7. 가져간 뒤의 시간 초과·신호 소실: 칩도 줄과 같은 낱말이고 경고 톤이다(위험 톤은 서버가 failed로 끝낸 것에만)", () => {
     const lost = run({ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" });
-    expect(triggerChip([lost], nameFor, T + HOUR)?.word).toBe("실패");
+    expect(triggerChip([lost], nameFor, T + HOUR)).toMatchObject({ kind: "timed_out", word: "신호 소실", tone: "warn", mark: "clock" });
     expect(runException(lost, T + HOUR)?.headline).toBe("신호 소실");
     const plain = run({ phase: "timed_out", status: "timed_out" });
-    expect(triggerChip([plain], nameFor, T + HOUR)?.word).toBe("실패");
+    expect(triggerChip([plain], nameFor, T + HOUR)).toMatchObject({ kind: "timed_out", word: "시간 초과", tone: "warn", mark: "clock" });
     expect(runException(plain, T + HOUR)?.headline).toBe("시간 초과");
+    // 전수: 줄이 timed_out이면 칩도 같은 낱말·같은 톤 계열(경고)이다. 위험 톤(danger)은 줄이 failed일 때뿐이다.
+    let seen = 0;
+    for (const { where, exception, chip } of rows) {
+      if (exception?.kind === "timed_out") {
+        seen += 1;
+        expect(chip, where).not.toBeNull();
+        expect(chip!.kind, where).toBe("timed_out");
+        expect(chip!.word, where).toBe(exception.headline);
+        expect(chip!.tone, where).toBe("warn");
+      }
+      if (chip?.tone === "danger") expect(exception?.kind, where).toBe("failed");
+    }
+    expect(seen).toBeGreaterThan(20);
   });
 
   it("줄도 칩도 없는 상태: 취소는 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·답함·승인 대기뿐이다", () => {

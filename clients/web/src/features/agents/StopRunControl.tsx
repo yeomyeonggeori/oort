@@ -46,6 +46,7 @@ export function StopRunControl({
   live,
   wording = STOP_WORDING,
   variant = "panel",
+  onSettled,
 }: {
   runId: string;
   /** 영수증이 부를 이름. 여러 에이전트의 일 옆에 서므로 누구의 실행인지 말한다. */
@@ -65,6 +66,12 @@ export function StopRunControl({
    * 호출·한 겹의 확인·캐럿 규칙은 둘이 같다.
    */
   variant?: "panel" | "inline";
+  /**
+   * 취소·중단이 **받아들여졌거나 이미 끝나 있었다**는 답이 선 순간 한 번 부른다(오류는 부르지 않는다: 다시 누를 수 있다). 대화 줄 안의
+   * 이 단추(#4619)는 run이 취소로 넘어가는 순간 줄과 함께 사라지는데, 그 안의 결과 문장(`role="status"`)과 캐럿도 같이 사라진다
+   * (design-review r1 M9). 부르는 쪽이 이 신호로 줄을 영수증으로 남긴다.
+   */
+  onSettled?: () => void;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -147,6 +154,11 @@ export function StopRunControl({
   // 이 버튼이 이미 답을 받았으면(중단됨·이미 끝남) 서버 칩이 따라오기 전이라도 다시
   // 권하지 않는다. 실패(`error`)만 다시 누를 수 있다.
   const settled = outcome !== null && outcome.kind !== "error";
+  const settledRef = useRef(onSettled);
+  settledRef.current = onSettled;
+  useEffect(() => {
+    if (settled) settledRef.current?.();
+  }, [settled]);
   const offer = open && live && !settled;
   if (!offer && outcome === null) return null;
 
@@ -174,6 +186,8 @@ export function StopRunControl({
               type="button"
               variant="secondary"
               size="sm"
+              // 폰 폭에서 44: 같은 확인 줄의 「취소 확정」은 이미 44(전역 규칙)라 안전한 쪽이 더 작은 표적이면 위험한 쪽이 더 크다.
+              className="tap-target"
               aria-label={wording.armName}
               onClick={() => setArmed(true)}
               data-testid="agent-work-panel-stop-arm"
@@ -192,6 +206,7 @@ export function StopRunControl({
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="tap-target"
                 aria-disabled={busy || undefined}
                 onClick={() => {
                   if (!busy) dismiss();

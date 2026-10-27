@@ -12,13 +12,15 @@
 //   - 레일 y 이동 0: 같은 대화·같은 마지막 행에서 상태만 바꿨을 때 「마지막 행 바닥 ~ 입력창 카드 위」 간격이 모든 상태에서 같다.
 //   - 칩이 행 높이를 바꾸지 않는다: 칩을 `display:none`으로 지운 같은 행과 높이가 같다(머리 칩·거터 칩 모두).
 //   - 사람만 있는 대화는 간격 불변(폼 윗 여백 그대로), 에이전트 대화는 24(+폰 폭은 독의 위 경계선 1).
-//   - 카드·줄·칩이 같은 낱말(「아직 받지 않았어요」), 대화에 경과 숫자 없음.
+//   - 카드·줄·칩이 같은 낱말(「아직 받지 않았어요」), 대화에 경과 숫자 없음. 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤.
+//   - 레일 팝오버가 지원하는 가장 좁은 폭(320)까지 뷰포트 안에 선다(design-review r1 B2). 끊긴 레일의 한정 문장은 잘리지 않는다(B1).
+//   - 행동 단추는 요청자·owner/admin에게만(구경꾼에게는 문장만, M2).
 //
 // 백엔드는 없다: `/v1/**`는 고정 응답이고 소켓은 구독만 받는다. **인물은 전부 가상**이다(이도현·박서연·최민수·정하윤,
 // 달무리 스튜디오, 달무리봇·모래시계봇·구름봇): 레포는 공개이고 실제 팀원 이름·대화를 fixture에 넣지 않는다.
 //
 //   npm run build && OUT_DIR=<dir> node scripts/capture-4619.mjs
-//   (ONLY=wide|narrow720|narrow390 로 한 묶음만)
+//   (ONLY=wide|narrow720|narrow390|narrow320|r2|full 로 한 묶음만; r2 = 끊긴 레일·팝오버 폭·구경꾼)
 // =============================================================================
 
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -43,31 +45,35 @@ const A1 = "00000000-0000-7000-8000-000000000301";
 const A2 = "00000000-0000-7000-8000-000000000302";
 const CH = "00000000-0000-7000-8000-000000000201";
 const GEN = "00000000-0000-7000-8000-000000000202";
+const DM = "00000000-0000-7000-8000-000000000203";
 const mid = (n) => `00000000-0000-7000-8000-0000000a${String(n).padStart(4, "0")}`;
 const rid = (n) => `0199aa11-2222-7000-8000-0000000000${String(n).padStart(2, "0")}`;
-
-const NAMES = { [ME]: "이도현", [SEO]: "박서연", [MINSU]: "최민수", [HAYUN]: "정하윤", [A1]: "달무리봇", [A2]: "모래시계봇" };
 
 const person = (id, kind, displayName, handle, extra = {}) => ({
   id, workspaceId, kind, status: "active", displayName, handle, channelCount: 2,
   channelIds: [CH, GEN], capabilities: [], createdAtMs: 0, updatedAtMs: 0, ...extra,
 });
+/** 이 장면이 서는 채널(대부분 #디자인-리뷰, 에이전트 DM 장면만 DM). */
+const channelOf = (scene) => scene.channelId ?? CH;
 const rosterOf = (scene) => [
-  person(ME, "human", scene.names?.[ME] ?? "이도현", "dohyun", { role: scene.role ?? "owner" }),
+  person(ME, "human", scene.names?.[ME] ?? "이도현", "dohyun", { role: scene.role ?? "owner", channelIds: scene.channelId === DM ? [CH, GEN, DM] : [CH, GEN] }),
   person(SEO, "human", scene.names?.[SEO] ?? "박서연", "seoyeon"),
   person(MINSU, "human", scene.names?.[MINSU] ?? "최민수", "minsu"),
   person(HAYUN, "human", scene.names?.[HAYUN] ?? "정하윤", "hayun"),
   ...(scene.humansOnly
     ? []
     : [
-        person(A1, "agent", "달무리봇", "dalmuri-bot", { ownerHumanId: ME }),
+        person(A1, "agent", "달무리봇", "dalmuri-bot", { ownerHumanId: ME, channelIds: scene.channelId === DM ? [CH, GEN, DM] : [CH, GEN] }),
         person(A2, "agent", "모래시계봇", "sand-bot", { ownerHumanId: ME }),
       ]),
 ];
-const channels = [
+const baseChannels = [
   { id: CH, workspaceId, kind: "public", name: "디자인-리뷰", muted: false },
   { id: GEN, workspaceId, kind: "public", name: "일반", muted: false },
 ];
+/** 에이전트 DM 장면에서만 DM이 목록에 더해진다: 상대는 에이전트 한 명(서버 규칙 「DM·사람 작성자·에이전트 상대 정확히 하나」). */
+const channelsOf = (scene) =>
+  scene.channelId === DM ? [...baseChannels, { id: DM, workspaceId, kind: "dm", name: "", memberIds: [ME, A1], muted: false }] : baseChannels;
 const auth = {
   accessToken: "capture-only-not-a-credential",
   refreshToken: "capture-only-not-a-credential",
@@ -108,6 +114,10 @@ const FAILED = (now) => ({
   status: "failed", phase: "failed", leaseState: "none", createdAtMs: now - 5 * MIN, updatedAtMs: now - MIN,
   claimedAtMs: now - 4 * MIN, startedAtMs: now - 4 * MIN, finishedAtMs: now - MIN, endReason: "agent_error",
 });
+const TIMED_OUT = (now) => ({
+  status: "timed_out", phase: "timed_out", leaseState: "none", createdAtMs: now - 8 * MIN, updatedAtMs: now - MIN,
+  claimedAtMs: now - 7 * MIN, startedAtMs: now - 7 * MIN, finishedAtMs: now - MIN, endReason: "lease_abandoned",
+});
 const DONE = (now) => ({
   status: "succeeded", phase: "succeeded", leaseState: "none", createdAtMs: now - 5 * MIN, updatedAtMs: now - MIN,
   claimedAtMs: now - 4 * MIN, startedAtMs: now - 4 * MIN, finishedAtMs: now - MIN,
@@ -117,11 +127,11 @@ const DONE = (now) => ({
  * 대화 한 벌. **마지막 줄은 언제나 같은 평범한 글**이다(정하윤 「점심 먹고 이어서 볼게요」): 상태만 바꿨을 때 그 글의 바닥과
  * 입력창 카드 위 사이가 움직이는지를 같은 자로 잰다. 나머지는 상태마다 다르다.
  */
-function conversation(kind, now) {
+function conversation(kind, now, triggerAuthor = ME) {
   const rows = [
     m(1, SEO, "지난주 인터뷰 메모를 한 장으로 정리해 줄래요? @달무리봇", 52),
     m(2, A1, "정리했어요. 핵심은 세 가지예요. 첫째, 처음 쓰는 사람은 설정 단계에서 가장 많이 멈춰요.", 50, { replyToId: mid(1) }),
-    m(3, ME, "@달무리봇 이번 주 회의록 초안도 부탁해요", 9),
+    m(3, triggerAuthor, "@달무리봇 이번 주 회의록 초안도 부탁해요", 9),
   ];
   const runs = [runRow(now, 0, 1, { ...DONE(now), createdAtMs: now - 52 * MIN, claimedAtMs: now - 51 * MIN, startedAtMs: now - 51 * MIN, finishedAtMs: now - 50 * MIN })];
   const trigger = (extra) => runs.push(runRow(now, 1, 3, extra));
@@ -142,6 +152,9 @@ function conversation(kind, now) {
       break;
     case "failed":
       trigger(FAILED(now));
+      break;
+    case "timedOut":
+      trigger(TIMED_OUT(now));
       break;
     case "done":
       rows.push(m(5, A1, "초안을 올렸어요. 결정이 필요한 항목 두 개에 표시해 뒀어요.", 1, { replyToId: mid(3) }));
@@ -169,6 +182,7 @@ function gallery(now) {
     m(25, ME, "@달무리봇 오늘 일정 요약해 줘요", 16),
     m(26, HAYUN, "@달무리봇 시안 파일 이름을 규칙에 맞게 바꿔 줘요", 10),
     m(27, SEO, "@달무리봇 회의 링크 다시 보내 줘요", 4),
+    m(28, MINSU, "@달무리봇 어제 올린 시안에 코멘트를 달아 줘요", 2),
   ];
   const r = (n, trigger, extra) => runRow(now, n, trigger, extra);
   const runs = [
@@ -179,6 +193,7 @@ function gallery(now) {
     r(25, 22, { ...RUNNING(now, "문구 후보 다듬는 중"), createdAtMs: now - 34 * MIN }),
     r(26, 23, { ...APPROVAL(now), createdAtMs: now - 28 * MIN }),
     r(27, 24, { createdAtMs: now - 20_000, updatedAtMs: now - 20_000, queuePosition: 1, aheadTotal: 0 }),
+    r(28, 28, TIMED_OUT(now)),
   ];
   // 위 r(…)의 trigger 인자는 메시지 번호가 아니라 rows의 mid(n)이다.
   runs[0].triggerMessageId = mid(25);
@@ -188,6 +203,7 @@ function gallery(now) {
   runs[4].triggerMessageId = mid(22);
   runs[5].triggerMessageId = mid(23);
   runs[6].triggerMessageId = mid(24);
+  runs[7].triggerMessageId = mid(28);
   return { rows, runs };
 }
 
@@ -228,18 +244,44 @@ function jumpScene(now) {
   return { rows, runs };
 }
 
+/** 에이전트 DM: 사람 메시지마다 에이전트의 답이 달렸고 마지막 요청은 진행 중이다(「답함 ✓」 칩이 모든 사람 메시지에 서는 밀도). */
+function dmScene(now) {
+  const rows = [
+    m(81, ME, "이번 주 인터뷰 메모를 세 줄로 줄여 줘요", 46),
+    m(82, A1, "세 줄로 줄였어요. 처음 쓰는 사람이 설정에서 멈춘다는 이야기가 핵심이에요.", 44, { replyToId: mid(81) }),
+    m(83, ME, "고마워요. 그럼 다음 주 일정표도 맞춰 줄래요?", 31),
+    m(84, A1, "일정표를 맞췄어요. 목요일 오후 두 시가 비어 있어요.", 29, { replyToId: mid(83) }),
+    m(85, ME, "목요일 두 시에 회의 초대 초안을 만들어 줘요", 12),
+    m(86, A1, "초대 초안을 올렸어요. 참석자는 네 명으로 적었어요.", 10, { replyToId: mid(85) }),
+    m(87, ME, "참석자에 정하윤도 넣어 줘요", 3),
+  ];
+  const done = (n, trigger, startAgo) => ({
+    ...runRow(now, n, trigger, { ...DONE(now), createdAtMs: now - startAgo * MIN, claimedAtMs: now - (startAgo - 1) * MIN, startedAtMs: now - (startAgo - 1) * MIN, finishedAtMs: now - (startAgo - 2) * MIN }),
+    channelId: DM,
+  });
+  const runs = [
+    done(81, 81, 46),
+    done(82, 83, 31),
+    done(83, 85, 12),
+    { ...runRow(now, 84, 87, { ...RUNNING(now, "참석자 명단 고치는 중"), createdAtMs: now - 2 * MIN }), channelId: DM },
+  ];
+  return { rows, runs };
+}
+
 function sceneOf(kind, opts = {}) {
   const now = Date.now();
   const base =
-    kind === "gallery" ? gallery(now)
+    kind === "dm" ? dmScene(now)
+    : kind === "gallery" ? gallery(now)
     : kind === "continuing" ? continuing(now)
     : kind === "threadRoot" ? threadRoot(now)
     : kind === "jump" ? jumpScene(now)
-    : conversation(kind, now);
+    : conversation(kind, now, opts.triggerAuthor);
   const wakeKinds = new Set(["uncollected", "wakeFailed"]);
   const scene = {
     kind,
     now,
+    channelId: kind === "dm" ? DM : CH,
     role: opts.role ?? "owner",
     humansOnly: opts.humansOnly ?? false,
     names: opts.names,
@@ -267,7 +309,7 @@ function messageRows(scene) {
   return scene.messages.map((x) => {
     const createdAtMs = scene.now - x.ago;
     const row = {
-      id: x.id, channelId: CH, seq: seq++, hlcTs: createdAtMs, hlcCount: 0, authorMemberId: x.authorMemberId,
+      id: x.id, channelId: channelOf(scene), seq: seq++, hlcTs: createdAtMs, hlcCount: 0, authorMemberId: x.authorMemberId,
       type: x.type, body: x.body, state: x.state, createdAtMs,
     };
     if (x.replyToId !== undefined) row.replyToId = x.replyToId;
@@ -287,13 +329,13 @@ async function installRoutes(context, scene) {
       return json(route, { token: "capture", tokenType: "Bearer", expiresAtMs: Date.now() + 600_000, ttlSeconds: 60, workspaceId, memberId: ME });
     }
     if (/\/inbox(\/|$)/.test(path)) return json(route, { error: { code: "not_found", message: "not found" } }, 404);
-    if (path.endsWith("/channels")) return json(route, { channels });
+    if (path.endsWith("/channels")) return json(route, { channels: channelsOf(scene) });
     if (path.endsWith("/roster")) return json(route, { members: rosterOf(scene) });
     if (path.endsWith("/read-state") && method === "GET") {
-      return json(route, { read_states: channels.map((c) => ({ channel_id: c.id, last_read_seq: 999, latest_seq: 999, unread_count: 0, mention_count: 0, marked_unread_before_seq: null })) });
+      return json(route, { read_states: channelsOf(scene).map((c) => ({ channel_id: c.id, last_read_seq: 999, latest_seq: 999, unread_count: 0, mention_count: 0, marked_unread_before_seq: null })) });
     }
     if (path.endsWith("/approvals")) return json(route, { approvals: [] });
-    if (path.endsWith(`/channels/${CH}/agent-runs/progress`)) return json(route, { runs: scene.runs });
+    if (path.endsWith(`/channels/${channelOf(scene)}/agent-runs/progress`)) return json(route, { runs: scene.runs });
     if (path.endsWith("/agent-runs/progress")) return json(route, { runs: [] });
     const liveness = path.match(/\/agents\/([^/]+)\/liveness$/);
     if (liveness) {
@@ -321,7 +363,7 @@ async function installRoutes(context, scene) {
     if (path.endsWith("/work-sessions")) return json(route, { workSessions: [] });
     if (path.endsWith("/reminders")) return json(route, { reminders: [] });
     if (path.endsWith(`/workspaces/${workspaceId}`)) return json(route, { workspace: { id: workspaceId, name: "달무리 스튜디오" } });
-    if (path.includes(`/channels/${CH}/messages`)) return json(route, { messages: messageRows(scene) });
+    if (path.includes(`/channels/${channelOf(scene)}/messages`)) return json(route, { messages: messageRows(scene) });
     if (path.includes("/messages")) return json(route, { messages: [] });
     return json(route, {});
   });
@@ -334,6 +376,12 @@ async function installRealtime(page) {
       constructor(url) {
         this.url = String(url);
         this.readyState = 0;
+        window.__socket = this;
+        // 오프라인 장면: 새 소켓은 열리지 않는다(재연결이 곧바로 성공해 끊긴 레일을 지우지 않게).
+        if (window.__offline) {
+          queueMicrotask(() => { this.readyState = 3; this.onclose?.(new CloseEvent("close", { code: 1006 })); });
+          return;
+        }
         queueMicrotask(() => { this.readyState = 1; this.onopen?.(new Event("open")); });
       }
       send(data) {
@@ -375,7 +423,7 @@ async function open(browser, origin, vp, scene) {
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-item").first().waitFor({ state: "attached", timeout: 20_000 });
-  await page.evaluate((h) => { location.hash = h; }, `/c/${CH}`);
+  await page.evaluate((h) => { location.hash = h; }, `/c/${channelOf(scene)}`);
   await page.getByTestId("composer").waitFor({ timeout: 20_000 });
   // 로그인 단추를 누른 자리에 포인터가 남아 있으면 그 자리의 행이 hover로 칠해진다(캡처가 거짓말을 한다). 구석으로 치운다.
   await page.mouse.move(2, 2);
@@ -479,6 +527,7 @@ const STATE_LABELS = {
   approval: "승인 대기",
   uncollected: "아직 받지 않았어요 (owner)",
   failed: "실패",
+  timedOut: "신호 소실(가져간 뒤 서버가 끝냄)",
   done: "끝남(답함 ✓)",
   wakeFailed: "깨우는 신호가 닿지 않음 (owner)",
 };
@@ -503,6 +552,9 @@ async function bundle(browser, origin, vp, opts) {
     if (kind === "working1") {
       check(`${tag} working1: 레일 「달무리봇 · 작업 중 · 회의록 초안 정리 중」`, railText === "달무리봇 · 작업 중 · 회의록 초안 정리 중", railText);
       check(`${tag} working1: 예외 줄이 없다(평소의 진행은 줄을 세우지 않는다)`, line === "");
+      // 결정 3: #4020 점 셋은 레일 안 작은 생존 표지로 남고, 동작 줄이기(이 캡처의 컨텍스트)에서는 멈춰 선다.
+      const dots = await page.getByTestId("responding-dots").evaluateAll((els) => els.map((e) => ({ motion: e.getAttribute("data-motion"), inRail: e.closest('[data-testid="composer-working"]') !== null, animated: [...e.children].some((c) => getComputedStyle(c).animationName !== "none") })));
+      check(`${tag} working1: 점 셋이 레일 안에 있고 동작 줄이기에서는 멈춰 선다`, dots.length === 1 && dots[0].inRail && dots[0].motion === "still" && !dots[0].animated, JSON.stringify(dots));
     }
     if (kind === "working2") check(`${tag} working2: 두 에이전트는 한 줄로 합친다`, railText === "달무리봇 +1", railText);
     if (kind === "approval") {
@@ -518,10 +570,25 @@ async function bundle(browser, origin, vp, opts) {
         (await page.getByTestId("run-exception").getByTestId("wake-agent-button").count()) === 1 &&
         (await page.getByTestId("run-exception").getByTestId("agent-work-panel-stop-arm").count()) === 1 &&
         (await page.getByTestId("run-exception-settings").count()) === 1);
+      // M3: 폰 폭에서 자기 줄을 갖는 행동 단추 셋은 44 이상(전역 `tap-target`이 실제로 먹는지 실제 앱에서 잰다).
+      const boxes = await page.evaluate(() => ["wake-agent-button", "agent-work-panel-stop-arm", "run-exception-settings"].map((id) => {
+        const r = document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect();
+        return r ? { id, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 } : { id, w: 0, h: 0 };
+      }));
+      note(`[${tag}] uncollected 행동 단추 크기: ${boxes.map((b) => `${b.id}=${b.w}×${b.h}`).join(" ")}`);
+      if (phoneWidth) check(`${tag} uncollected: 행동 단추 셋이 폰 폭에서 44×44 이상이다(M3)`, boxes.every((b) => b.h >= 43.99 && b.w >= 43.99), JSON.stringify(boxes));
     }
     if (kind === "failed") {
       check(`${tag} failed: 줄 「달무리봇: 실패 · 에이전트가 오류로 끝냈어요」`, line === "달무리봇: 실패 · 에이전트가 오류로 끝냈어요", line);
       check(`${tag} failed: 되돌릴 행동이 없다(다시 깨우기·취소 없음)`, (await page.getByTestId("run-exception").getByTestId("agent-work-panel-stop-arm").count()) === 0);
+      check(`${tag} failed: 줄의 아이콘이 칩과 같은 가위표`, ((await page.getByTestId("run-exception").locator("svg").first().getAttribute("class")) ?? "").includes("circle-x"));
+    }
+    if (kind === "timedOut") {
+      check(`${tag} timedOut: 줄 「달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요」`, line === "달무리봇: 신호 소실 · 가져간 에이전트가 오래 응답하지 않아 서버가 끝냈어요", line);
+      const chip = page.locator('[data-testid="trigger-chip"][data-kind="timed_out"]').first();
+      check(`${tag} timedOut: 칩도 같은 낱말·경고 톤(위험 톤 아님)`, (await chip.count()) === 1 && /bg-warn-soft/.test((await chip.getAttribute("class")) ?? "") && !/danger/.test((await chip.getAttribute("class")) ?? ""));
+      if (!phoneWidth && vp.width >= 900) check(`${tag} timedOut: 칩의 낱말 「신호 소실」`, (await chip.locator('[data-testid="trigger-chip-word"]').first().textContent())?.trim() === "신호 소실");
+      check(`${tag} timedOut: 줄의 아이콘은 느낌표(가위표는 failed만)`, ((await page.getByTestId("run-exception").locator("svg").first().getAttribute("class")) ?? "").includes("circle-alert"));
     }
     if (kind === "done") {
       check(`${tag} done: 레일은 비고 칸은 남는다`, g.railState === "idle" && g.hasRail);
@@ -550,7 +617,7 @@ async function bundle(browser, origin, vp, opts) {
   note(`[${tag}] 목록 상자 바닥 ~ 입력창 카드 위: ${gapValues.join(" ")}`);
   const base = gaps.get("idle");
   const boxShift = Math.max(...[...gaps.values()].map((v) => Math.max(Math.abs(v.listBottom - base.listBottom), Math.abs(v.cardTop - base.cardTop))));
-  check(`${tag} 레일 y 이동 0: 비어 있을 때와 여덟 장면(일곱 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 ${boxShift.toFixed(2)}px)`, boxShift < 0.01, gapValues.join(" "));
+  check(`${tag} 레일 y 이동 0: 비어 있을 때와 아홉 장면(여덟 상태 + 빈 레일)의 목록 상자 바닥·입력창 카드 위가 같다(최대 차이 ${boxShift.toFixed(2)}px)`, boxShift < 0.01, gapValues.join(" "));
   const rowShift = Math.max(...[...gaps.values()].map((v) => Math.abs(v.lastRowGap - base.lastRowGap)));
   check(`${tag} 마지막 행 바닥~입력창 카드 위도 같다(스크롤 반올림 1px 미만 허용, 최대 차이 ${rowShift.toFixed(2)}px)`, rowShift < 1, [...gaps.entries()].map(([k, v]) => `${k}=${v.lastRowGap}`).join(" "));
   const expectedAgentGap = base.dockBorderTop + 24;
@@ -564,9 +631,9 @@ async function bundle(browser, origin, vp, opts) {
       const scene = sceneOf("gallery");
       const { context, page } = await open(browser, origin, vp, scene);
       const kinds = await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => ({ kind: e.getAttribute("data-kind"), variant: e.getAttribute("data-variant") ?? "row", w: e.getBoundingClientRect().width, h: e.getBoundingClientRect().height })));
-      check(`${tag} 칩 일곱 종이 한 화면에: ${kinds.map((k) => k.kind).sort().join(",")}`,
-        JSON.stringify(kinds.map((k) => k.kind).sort()) === JSON.stringify(["answered", "approval", "claimed", "failed", "received", "uncollected", "working"]));
-      check(`${tag} 칩 크기 고정: 일곱 종의 폭·높이가 같다(${kinds[0]?.w.toFixed(1)}×${kinds[0]?.h.toFixed(1)})`,
+      check(`${tag} 칩 여덟 종이 한 화면에: ${kinds.map((k) => k.kind).sort().join(",")}`,
+        JSON.stringify(kinds.map((k) => k.kind).sort()) === JSON.stringify(["answered", "approval", "claimed", "failed", "received", "timed_out", "uncollected", "working"]));
+      check(`${tag} 칩 크기 고정: 여덟 종의 폭·높이가 같다(${kinds[0]?.w.toFixed(1)}×${kinds[0]?.h.toFixed(1)})`,
         kinds.every((k) => Math.abs(k.w - kinds[0].w) < 0.01 && Math.abs(k.h - kinds[0].h) < 0.01));
       const words = await page.getByTestId("trigger-chip-word").evaluateAll((els) => els.filter((e) => e.getClientRects().length > 0).map((e) => e.textContent?.trim()));
       if (phoneWidth || vp.width < 900) {
@@ -574,12 +641,12 @@ async function bundle(browser, origin, vp, opts) {
         const marks = await page.getByTestId("trigger-chip-mark").evaluateAll((els) => els.filter((e) => e.getClientRects().length > 0).length);
         note(`[${tag}] 좁은 줄: 보이는 낱말 ${words.length}개 · 보이는 아이콘 ${marks}개`);
       } else {
-        check(`${tag} 넓은 줄: 일곱 낱말이 보인다`, words.length === 7, words.join("|"));
+        check(`${tag} 넓은 줄: 여덟 낱말이 보인다`, words.length === 8, words.join("|"));
       }
       const heights = await rowHeightsWithAndWithoutChip(page);
       check(`${tag} 칩이 행 높이를 바꾸지 않는다(칩을 지운 같은 행과 높이가 같다, ${heights.withChip.length}행)`,
-        heights.withChip.length === 7 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
-      items.push({ label: "머리 칩 일곱 종", buf: await crop(page, { height: 640, width: phoneWidth ? 420 : 700 }) });
+        heights.withChip.length === 8 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
+      items.push({ label: "머리 칩 여덟 종", buf: await crop(page, { height: 700, width: phoneWidth ? 420 : 700 }) });
       out.galleryItem = items.at(-1);
       await context.close();
     }
@@ -635,6 +702,21 @@ async function bundle(browser, origin, vp, opts) {
       out.thread = await crop(page, { height: 300, width: phoneWidth ? 420 : 700 });
       await context.close();
     }
+    // 에이전트 DM: 모든 사람 메시지에 칩이 서는 밀도(design-review r1 M1의 증거 공백). 끝의 진행 중 요청은 레일이 말한다.
+    {
+      const scene = sceneOf("dm");
+      const { context, page } = await open(browser, origin, vp, scene);
+      const g = await geometry(page);
+      const kinds = await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
+      check(`${tag} 에이전트 DM: 사람 메시지 넷에 칩이 선다(답함 ×3 + 작업 중 ×1, ${kinds.join(",")})`, JSON.stringify([...kinds].sort()) === JSON.stringify(["answered", "answered", "answered", "working"]), kinds.join(","));
+      check(`${tag} 에이전트 DM: 레일 칸이 서고(24) 진행 중 줄이 선다`, g.hasRail && Math.abs(g.railHeight - 24) < 0.51 && g.railState === "active", JSON.stringify(g));
+      const dmRail = await text(page, "composer-working-text");
+      check(`${tag} 에이전트 DM: 레일 「달무리봇 · 작업 중 · 참석자 명단 고치는 중」`, dmRail === "달무리봇 · 작업 중 · 참석자 명단 고치는 중", dmRail);
+      const heights = await rowHeightsWithAndWithoutChip(page);
+      check(`${tag} 에이전트 DM: 칩이 행 높이를 바꾸지 않는다(${heights.withChip.length}행)`, heights.withChip.length === 4 && heights.withChip.every((h, i) => Math.abs(h - heights.without[i]) < 0.01), JSON.stringify(heights));
+      out.dm = await crop(page, { height: 560, width: phoneWidth ? Math.max(vp.width, 320) : 700 });
+      await context.close();
+    }
   }
   return out;
 }
@@ -665,7 +747,13 @@ async function cancelConfirmScene(browser, origin, vp) {
   check(`${tag} 취소: 첫 클릭은 묻기만 한다`, scene.cancels.length === 0);
   const confirmText = ((await page.getByTestId("run-exception").getByTestId("agent-work-panel-stop-confirm").textContent()) ?? "").replace(/\s+/g, " ");
   check(`${tag} 취소: 확인 문장`, confirmText.includes("취소하면 이 요청은 여기서 끝나요"), confirmText);
-  const buf = await crop(page, { height: 460, width: vp.width < 600 ? 420 : 700 });
+  const confirmBoxes = await page.evaluate(() => ["agent-work-panel-stop-keep", "agent-work-panel-stop-commit"].map((id) => {
+    const r = document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect();
+    return r ? { id, w: Math.round(r.width * 10) / 10, h: Math.round(r.height * 10) / 10 } : { id, w: 0, h: 0 };
+  }));
+  note(`[${tag}] 취소 확인 단추 크기: ${confirmBoxes.map((b) => `${b.id}=${b.w}×${b.h}`).join(" ")}`);
+  if (vp.width < 600) check(`${tag} 취소 확인: 「그대로 두기」·「취소 확정」이 폰 폭에서 같은 44(위험한 쪽만 크지 않다, M3)`, confirmBoxes.every((b) => b.h >= 43.99 && b.w >= 43.99), JSON.stringify(confirmBoxes));
+  const buf = await crop(page, { height: 460, width: vp.width < 600 ? Math.max(vp.width, 320) : 700 });
   await page.getByTestId("run-exception").getByTestId("agent-work-panel-stop-commit").click();
   await page.waitForTimeout(500);
   check(`${tag} 취소: 확정하면 취소 요청이 한 번 나간다`, scene.cancels.length === 1, String(scene.cancels.length));
@@ -738,6 +826,118 @@ async function longNameScene(browser, origin, vp) {
   return buf;
 }
 
+// ---- design-review r2 보강: 끊긴 레일·좁은 폭 팝오버·구경꾼 ------------------------
+
+const STALE_SENTENCE = "연결이 끊겨 갱신이 멈췄어요. 마지막으로 확인된 상태예요.";
+
+/** 실시간 연결을 끊고 다시 붙지 못하게 한다(새 소켓은 열리자마자 닫힌다). REST는 그대로라 화면은 남는다. */
+async function goOffline(page) {
+  await page.evaluate(() => {
+    window.__offline = true;
+    window.__socket?.onclose?.(new CloseEvent("close", { code: 1006 }));
+  });
+  await page.getByTestId("composer-working-stale").waitFor({ state: "attached", timeout: 15_000 });
+  await page.waitForTimeout(300);
+}
+
+/**
+ * B1: 끊긴 레일은 한정 문장을 **전문 그대로, 잘림 없이** 보인다. 지원하는 가장 좁은 폭(320)부터 데스크탑 최소 창(720)까지 실제 앱에서 잰다.
+ * 에이전트 글은 한정 문장에 자리를 내준다(0까지 줄 수 있다).
+ */
+async function offlineScene(browser, origin, vp) {
+  const tag = `${vp.width}-${vp.scheme}`;
+  const scene = sceneOf("working1");
+  const { context, page } = await open(browser, origin, vp, scene);
+  await goOffline(page);
+  const g = await page.evaluate(() => {
+    const shell = document.querySelector('[data-testid="composer-working"]');
+    const stale = shell.querySelector('[data-testid="composer-working-stale"]');
+    const agent = shell.querySelector('[data-testid="composer-working-text"]');
+    const button = shell.querySelector("button").getBoundingClientRect();
+    const sh = shell.getBoundingClientRect();
+    const st = stale.getBoundingClientRect();
+    const ag = agent.getBoundingClientRect();
+    return {
+      sentence: stale.textContent.trim(),
+      clipped: stale.scrollWidth > stale.clientWidth + 0.5,
+      staleWidth: st.width,
+      staleNatural: stale.scrollWidth,
+      agentWidth: ag.width,
+      overlap: ag.right > st.left + 0.5,
+      buttonRight: button.right,
+      shellRight: sh.right,
+      shellHeight: sh.height,
+      hasFaces: shell.querySelector('[data-testid="composer-working-avatars"]') !== null,
+      hasDots: shell.querySelector('[data-testid="responding-dots"]') !== null,
+      hScroll: document.documentElement.scrollWidth > innerWidth + 0.5,
+      title: shell.querySelector("button").getAttribute("title") ?? "",
+    };
+  });
+  note(`[${tag}] 끊긴 레일: 한정 문장 ${g.staleWidth.toFixed(1)}/${g.staleNatural}px · 에이전트 글 ${g.agentWidth.toFixed(1)}px`);
+  check(`${tag} 끊긴 레일: 한정 문장이 전문 그대로다`, g.sentence === STALE_SENTENCE, g.sentence);
+  check(`${tag} 끊긴 레일: 한정 문장이 잘리지 않는다(B1, ${g.staleWidth.toFixed(1)} ≥ ${g.staleNatural})`, !g.clipped, JSON.stringify(g));
+  check(`${tag} 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다`, !g.overlap && g.buttonRight <= g.shellRight + 0.5, JSON.stringify(g));
+  check(`${tag} 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, ${g.agentWidth.toFixed(1)}px)`, g.agentWidth === 0 || g.agentWidth >= 40, JSON.stringify(g));
+  check(`${tag} 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음`, Math.abs(g.shellHeight - 24) < 0.51 && !g.hScroll, JSON.stringify(g));
+  check(`${tag} 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)`, !g.hasFaces && !g.hasDots, JSON.stringify(g));
+  check(`${tag} 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다`, g.title.endsWith(STALE_SENTENCE), g.title);
+  const buf = await crop(page, { height: 240, width: vp.width < 600 ? Math.max(vp.width, 320) : 700 });
+  await context.close();
+  return buf;
+}
+
+/**
+ * B2: 레일 팝오버는 어떤 폭에서도 뷰포트 안에 선다(고정 폭 384가 폰 폭에서 오른쪽을 넘던 것). 행·「활동 보기」도 안에 든다.
+ */
+async function popoverWidthScene(browser, origin, vp) {
+  const tag = `${vp.width}-${vp.scheme}`;
+  const scene = sceneOf("working2");
+  const { context, page } = await open(browser, origin, vp, scene);
+  await page.getByTestId("composer-working-open").click();
+  await page.getByTestId("composer-working-popover").waitFor();
+  await page.waitForTimeout(300);
+  const r = await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="composer-working-popover"]').getBoundingClientRect();
+    const inner = [...document.querySelectorAll('[data-testid="composer-working-agent"], [data-testid="composer-working-activity"]')].map((e) => e.getBoundingClientRect());
+    return {
+      left: box.left, right: box.right, width: box.width, vw: innerWidth,
+      innerLeft: Math.min(...inner.map((b) => b.left)), innerRight: Math.max(...inner.map((b) => b.right)), rows: inner.length,
+      hScroll: document.documentElement.scrollWidth > innerWidth + 0.5,
+    };
+  });
+  note(`[${tag}] 팝오버: 폭 ${r.width.toFixed(1)} · 왼쪽 ${r.left.toFixed(1)} · 오른쪽 ${r.right.toFixed(1)} / 뷰포트 ${r.vw}`);
+  check(`${tag} 팝오버가 뷰포트 안에 선다(B2, ${r.left.toFixed(1)}~${r.right.toFixed(1)} / ${r.vw})`, r.left >= -0.5 && r.right <= r.vw + 0.5, JSON.stringify(r));
+  check(`${tag} 팝오버의 행(에이전트 둘 + 「활동 보기」)이 팝오버 안에 든다`, r.rows === 3 && r.innerLeft >= r.left - 0.5 && r.innerRight <= r.right + 0.5, JSON.stringify(r));
+  check(`${tag} 팝오버가 가로 스크롤을 만들지 않는다`, !r.hScroll, JSON.stringify(r));
+  const buf = await crop(page, { height: 420, extraTop: 120, width: vp.width < 600 ? Math.max(vp.width, 320) : 700 });
+  await context.close();
+  return buf;
+}
+
+/**
+ * M2: 구경꾼(요청자도 owner/admin도 아닌 멤버)에게는 예외 줄의 **문장만** 서고 행동 단추(다시 깨우기·취소·설정)는 없다.
+ * 칩은 모든 사람 메시지에 선다(planner 결정 2): 박서연이 부른 메시지에도.
+ */
+async function bystanderScene(browser, origin, vp) {
+  const tag = `${vp.width}-${vp.scheme}`;
+  const out = [];
+  for (const [kind, label] of [["uncollected", "구경꾼: 아직 받지 않았어요"], ["failed", "구경꾼: 실패"]]) {
+    const scene = sceneOf(kind, { role: "member", triggerAuthor: SEO });
+    const { context, page } = await open(browser, origin, vp, scene);
+    const line = await text(page, "run-exception-text");
+    const wake = await page.getByTestId("run-exception").getByTestId("wake-agent-button").count();
+    const cancel = await page.getByTestId("run-exception").getByTestId("agent-work-panel-stop-arm").count();
+    const settings = await page.getByTestId("run-exception-settings").count();
+    check(`${tag} ${label}: 문장은 선다(「${line}」)`, line.startsWith("달무리봇: "), line);
+    check(`${tag} ${label}: 행동 단추가 없다(다시 깨우기 ${wake} · 취소 ${cancel} · 설정 ${settings})`, wake === 0 && cancel === 0 && settings === 0);
+    const chipKinds = await page.getByTestId("trigger-chip").evaluateAll((els) => els.map((e) => e.getAttribute("data-kind")));
+    check(`${tag} ${label}: 남이 부른 메시지에도 칩이 선다(${chipKinds.join(",")})`, chipKinds.includes(kind === "failed" ? "failed" : "uncollected"), chipKinds.join(","));
+    out.push({ label, buf: await crop(page, { height: 400, width: vp.width < 600 ? Math.max(vp.width, 320) : 700 }) });
+    await context.close();
+  }
+  return out;
+}
+
 // ---- main --------------------------------------------------------------------
 
 /** 창 전체의 모습(사이드바·머리·본문·입력창)을 한 장씩: 컨택트 시트가 자른 아래쪽이 창 어디에 서는지 보여 준다. */
@@ -765,10 +965,40 @@ async function main() {
       await fullWindowShots(browser, preview.origin);
       return;
     }
+    if (ONLY === "r2" || ONLY === "") {
+      // design-review r1 보강: 끊긴 레일(B1)·좁은 폭 팝오버(B2)·구경꾼(M2).
+      const offline = [];
+      for (const [width, scheme] of [[320, "light"], [360, "light"], [390, "light"], [390, "dark"], [720, "light"], [1440, "light"]]) {
+        const buf = await offlineScene(browser, preview.origin, { width, height: 760, scheme });
+        offline.push({ label: `끊긴 레일 ${width} ${scheme}`, buf });
+      }
+      await sheet(browser, "light", "offline-rail", offline, 2);
+      const pops = [];
+      for (const [width, scheme] of [[320, "light"], [360, "light"], [375, "light"], [390, "light"], [320, "dark"], [720, "light"]]) {
+        const buf = await popoverWidthScene(browser, preview.origin, { width, height: 760, scheme });
+        pops.push({ label: `팝오버 ${width} ${scheme}`, buf });
+      }
+      await sheet(browser, "light", "popover-widths", pops, 3);
+      const by = [];
+      for (const [width, scheme] of [[390, "light"], [720, "light"]]) {
+        for (const item of await bystanderScene(browser, preview.origin, { width, height: 760, scheme })) by.push({ ...item, label: `${item.label} (${width})` });
+      }
+      await sheet(browser, "light", "bystander", by, 2);
+      if (ONLY === "r2") {
+        writeFileSync(resolve(OUT_DIR, "assertions-r2.txt"), `${log.join("\n")}\n`);
+        if (failures.length > 0) {
+          console.error(`\n${failures.length}개 단언 실패`);
+          process.exit(1);
+        }
+        console.log(`\nPASS: ${log.filter((l) => l.startsWith("ok")).length}개 단언`);
+        return;
+      }
+    }
     const plan = [
       { key: "wide", width: 1440, height: 900, extras: true, schemes: ["light", "dark"] },
       { key: "narrow720", width: 720, height: 800, extras: true, schemes: ["light", "dark"] },
       { key: "narrow390", width: 390, height: 800, extras: true, schemes: ["light"] },
+      { key: "narrow320", width: 320, height: 700, extras: true, schemes: ["light"] },
     ];
     for (const p of plan) {
       if (ONLY && ONLY !== p.key) continue;
@@ -782,13 +1012,17 @@ async function main() {
         await sheet(browser, scheme, `states-${name}`, r.items.filter((i) => !i.label.startsWith("머리 칩")), cols);
         // 칩·거터·스레드 시트
         const extra = [
-          { label: "머리 칩 일곱 종", buf: r.galleryItem.buf },
+          { label: "머리 칩 여덟 종", buf: r.galleryItem.buf },
           { label: "이어지는 행: 쉼 (거터 아이콘 칩)", buf: r.gutterRest },
           { label: "이어지는 행: hover (시각에 자리를 내준다)", buf: r.gutterHover },
           { label: "스레드 요약 줄의 작업 중 칩", buf: r.thread },
+          { label: "에이전트 DM: 사람 메시지마다 칩(답함 ×3 + 작업 중)", buf: r.dm },
         ];
         if (p.key === "wide" || p.key === "narrow720") {
           extra.push({ label: "레일 팝오버", buf: await popoverScene(browser, preview.origin, vp) });
+          extra.push({ label: "취소 확인(예외 줄 안)", buf: await cancelConfirmScene(browser, preview.origin, vp) });
+        } else {
+          // 폰 폭: 팝오버는 별도 장면(popover-widths)이 재고, 취소 확인은 여기서 44를 잰다.
           extra.push({ label: "취소 확인(예외 줄 안)", buf: await cancelConfirmScene(browser, preview.origin, vp) });
         }
         await sheet(browser, scheme, `extras-${name}`, extra, p.width < 600 ? 4 : 2);

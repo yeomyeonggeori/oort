@@ -17,9 +17,9 @@ import {
   GutterTriggerChip,
   MessageTriggerChip,
   ThreadWorkChip,
-  TRIGGER_CHIP_TONE_CLASS,
   TriggerChipView,
 } from "./TriggerChip";
+import { TRIGGER_CHIP_TONE_CLASS } from "./triggerChipClasses";
 
 // =============================================================================
 // 트리거 메시지의 칩 (#4619 B)과 스레드 요약 줄의 「작업 중」 칩 (E). 칩이 낱말을 갈아 끼워도 폭이 변하지 않는
@@ -113,14 +113,16 @@ describe("칩의 그림", () => {
   const chipOf = (extra: Partial<AgentRunProgress>, at = now) =>
     triggerChip([run(now, extra)], nameFor, at)!;
 
-  it("낱말과 표지: 점(작업 중) · 체크(답함) · 느낌표(아직 받지 않았어요) · 가위표(실패) · 표지 없음(받음·가져감·승인 대기)", () => {
-    const cases: [Partial<AgentRunProgress>, number, string, "dot" | "check" | "alert" | "cross" | "none"][] = [
+  it("낱말과 표지: 점(작업 중) · 체크(답함) · 느낌표(아직 받지 않았어요) · 시계(시간 초과·신호 소실) · 가위표(실패) · 표지 없음(받음·가져감·승인 대기)", () => {
+    const cases: [Partial<AgentRunProgress>, number, string, "dot" | "check" | "alert" | "clock" | "cross" | "none"][] = [
       [{}, now, "받음", "none"],
       [{ phase: "claimed", leaseState: "live" }, now, "가져감", "none"],
       [RUNNING(now), now, "작업 중", "dot"],
       [{ phase: "awaiting_approval", status: "awaiting_approval" }, now, "승인 대기", "none"],
       [DONE(now), now, "답함", "check"],
       [{}, now + 10 * MIN, UNCOLLECTED_WORD, "alert"],
+      [{ phase: "timed_out", status: "timed_out" }, now, "시간 초과", "clock"],
+      [{ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" }, now, "신호 소실", "clock"],
       [FAILED(now), now, "실패", "cross"],
     ];
     for (const [extra, at, word, mark] of cases) {
@@ -129,14 +131,31 @@ describe("칩의 그림", () => {
       expect(visible?.textContent, word).toBe(word);
       // 보이는 낱말 쪽의 표지만 센다(유령 낱말들도 자기 표지를 안고 있다).
       expect(visible?.querySelectorAll("svg").length, `${word} 표지`).toBe(
-        mark === "check" || mark === "alert" || mark === "cross" ? 1 : 0
+        mark === "check" || mark === "alert" || mark === "clock" || mark === "cross" ? 1 : 0
       );
       // 아직 받지 않았어요(주의)와 실패(오류)는 같은 모양이 아니다: 색을 못 보는 사람에게 둘이 같은 말이 되지 않게.
       if (mark === "alert") expect(visible?.querySelector("svg")?.getAttribute("class")).toContain("circle-alert");
+      if (mark === "clock") expect(visible?.querySelector("svg")?.getAttribute("class")).toContain("lucide-clock");
       if (mark === "cross") expect(visible?.querySelector("svg")?.getAttribute("class")).toContain("circle-x");
       expect(visible?.querySelector(".size-1.rounded-full") !== null, `${word} 점`).toBe(mark === "dot");
       unmount();
     }
+  });
+
+  it("서버가 일을 끝내지 못한 것(시간 초과·신호 소실)은 경고 톤이고 위험 톤은 서버가 failed로 끝낸 것에만 쓴다 (ADR-0132, design-review r1 H2)", () => {
+    const toneOf = (extra: Partial<AgentRunProgress>) => chipOf(extra).tone;
+    expect(toneOf({ phase: "timed_out", status: "timed_out" })).toBe("warn");
+    expect(toneOf({ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" })).toBe("warn");
+    expect(toneOf(FAILED(now))).toBe("danger");
+    expect(TRIGGER_CHIP_TONE_CLASS.warn).toContain("text-warn");
+    expect(TRIGGER_CHIP_TONE_CLASS.danger).toContain("text-danger");
+    // 접근성 이름도 「실패」라 읽지 않는다.
+    expect(chipOf({ phase: "timed_out", status: "timed_out", endReason: "lease_abandoned" }).label).toBe(
+      "달무리봇 에이전트의 실행이 신호 소실로 끝났어요."
+    );
+    expect(chipOf({ phase: "timed_out", status: "timed_out" }).label).toBe(
+      "달무리봇 에이전트의 실행이 시간 초과로 끝났어요."
+    );
   });
 
   it("폭을 가장 넓은 낱말에 맞춘다: 지금 낱말 말고 가능한 모든 (낱말, 표지)가 겹쳐 있고 보이지 않으며 읽히지 않는다", () => {
@@ -312,6 +331,7 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     ["승인 대기", { phase: "awaiting_approval", status: "awaiting_approval" }, now],
     ["답함", DONE(now), now],
     [UNCOLLECTED_WORD, {}, now + 10 * MIN],
+    ["시간 초과", { phase: "timed_out", status: "timed_out" }, now],
     ["실패", FAILED(now), now],
   ];
   const glyphOf = (el: ParentNode): string => {
@@ -335,7 +355,7 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     expect(mark?.getAttribute("title")).toBe("작업 중");
   });
 
-  it("일곱 상태가 아이콘 모양만으로 갈린다(글자 없이)", () => {
+  it("여덟 상태가 아이콘 모양만으로 갈린다(글자 없이)", () => {
     const glyphs = new Map<string, string>();
     for (const [name, extra, at] of STATES) {
       const el = render(createElement(TriggerChipView, { chip: chipOf(extra, at) }));
@@ -344,10 +364,12 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     }
     expect(glyphs.get("받음")).toContain("lucide-eye");
     expect(glyphs.get("가져감")).toContain("lucide-hand");
-    expect(glyphs.get("작업 중")).toContain("fill-current");
+    // 손으로 그린 `<svg>`가 아니라 lucide의 원 안의 점이다(ADR-0172 아이콘 경계, design-review r1 H1).
+    expect(glyphs.get("작업 중")).toContain("lucide-circle-dot");
     expect(glyphs.get("승인 대기")).toContain("lucide-shield-question");
     expect(glyphs.get("답함")).toContain("lucide-check");
     expect(glyphs.get(UNCOLLECTED_WORD)).toContain("lucide-circle-alert");
+    expect(glyphs.get("시간 초과")).toContain("lucide-clock");
     expect(glyphs.get("실패")).toContain("lucide-circle-x");
     expect(new Set(glyphs.values()).size).toBe(STATES.length);
   });

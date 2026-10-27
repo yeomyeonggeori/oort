@@ -236,7 +236,7 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
   );
 
   it.skipIf(ENGINES.length === 0)(
-    "좁은 창(400)에서도 긴 단계는 줄 안에서 잘리고 칸 높이는 같고, 줄의 누르는 면은 44까지 칸 밖으로 고르게 넘친다",
+    "좁은 창(400)에서도 긴 단계는 줄 안에서 잘리고 칸 높이는 같고, 줄의 누르는 면은 칸을 가득 채운다(24, 넘치지 않는다)",
     async () => {
       const long = SCENARIOS.find((s) => s.name.startsWith("1명 작업 중, 아주 긴"))!;
       const html = markupOf(long);
@@ -262,16 +262,127 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
                 shellWidth: sh.width,
                 lineRight: b.right,
                 shellRight: sh.right,
-                // 폰 폭(<600)에서 줄은 `tap-target`으로 44까지 자란다. 칸(24)은 그대로이고 줄은 칸의 가운데에서 위아래로 고르게 넘친다.
+                // 누르는 면은 칸을 가득 채운다(24): 글자 높이(18)가 아니라 칸 높이다. 칸 밖으로 넘치지 않는다(넘친 면은 타임라인·입력창
+                // 카드가 가로채서 실제 표적이 되지 못한다, design-review r1 M3).
                 lineHeight: b.height,
-                centerOffset: Math.abs(b.top + b.height / 2 - (sh.top + sh.height / 2)),
+                lineTop: b.top - sh.top,
+                lineBottom: sh.bottom - b.bottom,
+                // 칸의 맨 위·맨 아래 1px 안쪽을 눌러도 이 단추가 맞는다.
+                hitTop: document.elementFromPoint(b.left + 4, sh.top + 1)?.closest("button") === button,
+                hitBottom: document.elementFromPoint(b.left + 4, sh.bottom - 1)?.closest("button") === button,
               };
             });
             if (Math.abs(g.shellHeight - 24) > 0.51) problems.push(`${engine} 칸 높이 ${g.shellHeight}`);
-            if (g.lineHeight < 43.5) problems.push(`${engine} 폰 폭에서 줄의 누르는 면이 44에 못 미친다(${g.lineHeight})`);
-            if (g.centerOffset > 0.51) problems.push(`${engine} 줄이 칸의 가운데에서 넘치지 않는다(어긋남 ${g.centerOffset})`);
+            if (Math.abs(g.lineHeight - 24) > 0.51) problems.push(`${engine} 줄의 누르는 면이 칸 높이(24)가 아니다(${g.lineHeight})`);
+            if (g.lineTop < -0.01 || g.lineBottom < -0.01) problems.push(`${engine} 줄이 칸 밖으로 넘친다(위 ${g.lineTop}, 아래 ${g.lineBottom})`);
+            if (!g.hitTop || !g.hitBottom) problems.push(`${engine} 칸의 위·아래 가장자리를 눌러도 단추가 맞지 않는다(위 ${g.hitTop}, 아래 ${g.hitBottom})`);
             if (!g.textTruncated) problems.push(`${engine} 긴 단계가 잘리지 않았다(한 줄을 넘는 글이 칸을 넘는다)`);
             if (g.lineRight > g.shellRight + 0.5) problems.push(`${engine} 줄이 칸 오른쪽을 넘친다`);
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(problems).toEqual([]);
+    },
+    120_000
+  );
+
+  it.skipIf(ENGINES.length === 0)(
+    "끊긴 레일: 좁은 폭(320·360·368·390·400)에서 한정 문장은 전문이 잘리지 않고 에이전트 글이 양보한다 (design-review r1 B1)",
+    async () => {
+      const offline = SCENARIOS.find((x) => x.name.startsWith("연결이 끊김"))!;
+      expect(offline.live).toBe(false);
+      const html = markupOf(offline);
+      const css = await compileTokensCss([...HARNESS_CLASSES, ...classesOf(html)]);
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext({ viewport: { width: 800, height: 700 } });
+          try {
+            const p = await ctx.newPage();
+            // 대화 열 폭: 지원하는 가장 좁은 폭(320, `gate-typing`)·360·368·390·400, 그리고 데스크탑 최소 창(720)의 사이드바 옆 열(약 390).
+            for (const width of [320, 360, 368, 390, 400]) {
+              await p.setContent(page(css, html).replace("width: 720px", `width: ${width}px`));
+              const g = await p.evaluate(() => {
+                const shell = document.querySelector<HTMLElement>('[data-testid="composer-working"]')!;
+                const stale = shell.querySelector<HTMLElement>('[data-testid="composer-working-stale"]')!;
+                const text = shell.querySelector<HTMLElement>('[data-testid="composer-working-text"]')!;
+                const button = shell.querySelector("button")!.getBoundingClientRect();
+                const sh = shell.getBoundingClientRect();
+                return {
+                  staleClipped: stale.scrollWidth > stale.clientWidth + 0.5,
+                  staleWidth: stale.getBoundingClientRect().width,
+                  staleNatural: stale.scrollWidth,
+                  textWidth: text.getBoundingClientRect().width,
+                  textRight: text.getBoundingClientRect().right,
+                  staleLeft: stale.getBoundingClientRect().left,
+                  buttonRight: button.right,
+                  shellRight: sh.right,
+                  shellHeight: sh.height,
+                };
+              });
+              const at = `${engine} 열 ${width}`;
+              if (g.staleClipped) problems.push(`${at}: 한정 문장이 잘렸다(${g.staleWidth} < ${g.staleNatural})`);
+              if (g.textRight > g.staleLeft + 0.5) problems.push(`${at}: 에이전트 글이 한정 문장과 겹친다`);
+              if (g.buttonRight > g.shellRight + 0.5) problems.push(`${at}: 줄이 칸 오른쪽을 넘친다`);
+              if (Math.abs(g.shellHeight - 24) > 0.51) problems.push(`${at}: 칸 높이 ${g.shellHeight}`);
+              // 에이전트 글은 양보한 쪽이다: 한정 문장보다 좁다.
+              if (!(g.textWidth < g.staleNatural)) problems.push(`${at}: 에이전트 글(${g.textWidth})이 양보하지 않았다`);
+              // 부스러기 금지: 에이전트 글은 접히거나(0) 이름이 읽힐 만큼(≥ 40) 선다. 한 글자만 남아 선 줄임표 부스러기는 안 된다
+              // (320에서 10px였다). 칸 안쪽이 20rem(320) 아래인 폭(320·360)에서는 접힌다.
+              if (!(g.textWidth === 0 || g.textWidth >= 40)) problems.push(`${at}: 에이전트 글이 ${g.textWidth}px 부스러기로 남았다`);
+              if (width < 368 && g.textWidth !== 0) problems.push(`${at}: 좁은 칸에서 에이전트 글이 접히지 않았다(${g.textWidth})`);
+              if (width >= 368 && g.textWidth === 0) problems.push(`${at}: 넉넉한 칸에서 에이전트 글이 접혔다`);
+            }
+          } finally {
+            await ctx.close();
+          }
+        } finally {
+          await browser.close();
+        }
+      }
+      expect(problems).toEqual([]);
+    },
+    120_000
+  );
+
+  it.skipIf(ENGINES.length === 0)(
+    "popover-fit: 팝오버의 고정 폭(384)은 Radix가 준 남은 폭보다 넓을 때만 줄어든다 (design-review r1 H3)",
+    async () => {
+      // 레일 팝오버의 클래스는 컴포넌트 소스에서 꺼내고(시험이 따로 적은 사본이 아니다), 공용 `PopoverContent`의 폭 클래스를 함께 먹인다.
+      const source = readFileSync(resolve(process.cwd(), "src/features/agents/ActivityRail.tsx"), "utf8");
+      const popoverClass = /className="(popover-fit[^"]*)"\s+data-testid="composer-working-popover"/.exec(source)?.[1] ?? "";
+      expect(popoverClass).toContain("popover-fit");
+      const widthClass = "w-pane-picker";
+      const css = await compileTokensCss([...popoverClass.split(/\s+/), widthClass]);
+      const playwright = await import("playwright");
+      const problems: string[] = [];
+      for (const engine of ENGINES) {
+        const browser = await playwright[engine].launch();
+        try {
+          const ctx = await browser.newContext();
+          try {
+            const p = await ctx.newPage();
+            for (const [available, want] of [
+              [500, 384],
+              [384, 384],
+              [358, 358],
+              [328, 328],
+              [288, 288],
+            ] as const) {
+              await p.setContent(
+                `<!doctype html><html><head><style>${css} body{margin:0}</style></head><body>` +
+                  `<div id="wrap" style="--radix-popover-content-available-width:${available}px">` +
+                  `<div id="pop" class="${widthClass} ${popoverClass}">x</div></div></body></html>`
+              );
+              const w = await p.evaluate(() => document.getElementById("pop")!.getBoundingClientRect().width);
+              if (Math.abs(w - want) > 0.51) problems.push(`${engine} 남은 폭 ${available}: 폭 ${w}, 기대 ${want}`);
+            }
           } finally {
             await ctx.close();
           }

@@ -65,14 +65,21 @@ import { openWorkPanel } from "./workLogStore";
  * (브라우저 시험이 바닥 행의 y를 재서 그것을 붙든다).
  *
  * `px-6`은 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px이다. 레일은 textarea 텍스트 기둥에 선다.
+ *
+ * `@container`: 끊긴 레일이 칸의 안쪽 폭(`@max-xs` = 20rem 아래)을 물어 에이전트 글을 접는 데 쓴다(아래 `RailLine`).
  */
-export const RAIL_SHELL_CLASS = "flex h-6 shrink-0 items-center px-6";
-// 줄(누르는 단추)은 폰 폭(<600)에서 `tap-target`으로 44까지 **칸 밖으로 넘친다**: 칸은 `items-center`라 위아래로 고르게 넘치고, 칸의
-// 높이(타임라인이 보는 것)는 그대로다. 입력창 카드는 DOM 순서에서 뒤라 카드 위쪽 가장자리를 가로채지 않는다.
+export const RAIL_SHELL_CLASS = "@container flex h-6 shrink-0 items-center px-6";
 
-/** 레일 줄(누르면 팝오버). 칸 안에서 한 줄을 넘지 않는다: 글은 줄어들고 점·얼굴은 줄지 않는다. */
+/**
+ * 레일 줄(누르면 팝오버). 칸 안에서 한 줄을 넘지 않는다: 글은 줄어들고 점·얼굴은 줄지 않는다.
+ *
+ * **누르는 면은 칸의 높이(24)다**(`h-full`): 글자 높이(18)가 아니라 칸을 가득 채워 24px 표적이 된다(WCAG 2.5.8 바닥).
+ * 폰 폭에서 44로 키우려고 칸 밖으로 넘치게 해 보았지만(`tap-target`) 실측으로 닿지 않았다: 위쪽 넘침은 타임라인이, 아래쪽
+ * 넘침은 입력창 카드가 가로챈다(design-review r1 M3). 44를 지키려면 칸 자체가 폰 폭에서 커져야 하고 그것은 타임라인 위에
+ * 쓰는 세로 자리를 늘리는 결정이라 이 PR은 24에서 멈추고 이 줄에 사실대로 적는다.
+ */
 export const RAIL_LINE_CLASS =
-  "tap-target flex min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta press hover:bg-surface-hover focus-visible:focus-ring";
+  "flex h-full min-w-0 max-w-full items-center gap-2 rounded-sm text-left text-meta press hover:bg-surface-hover focus-visible:focus-ring";
 
 function RailAgentRow({
   agent,
@@ -169,7 +176,7 @@ function RailLine({
           type="button"
           // 이름을 명시한다: 자식에 맡기면 줄이 잘렸을 때 잘린 글이 접근성 이름이 된다.
           aria-label={`${accessibleName} 일하는 에이전트 보기`}
-          title={rail.text}
+          title={live ? rail.text : `${rail.text} ${TURN_STALE_SENTENCE}`}
           data-testid="composer-working-open"
           className={cn(RAIL_LINE_CLASS, live && rail.needsHuman ? "text-warn" : "text-ink-muted")}
         >
@@ -180,13 +187,24 @@ function RailLine({
               ))}
             </span>
           )}
-          <span className="min-w-0 truncate" data-testid="composer-working-text">
+          <span
+            // 끊긴 줄에서는 에이전트 글이 **양보한다**(`flex-1` = 기준 폭 0에서 남는 자리만 받는다): 한 줄에 두 말이 못 들어가면
+            // 한정 문장(「마지막으로 확인된 상태예요」)이 남고 에이전트 글이 줄어든다. 둘이 같은 비율로 줄면 좁은 폭(390·720)에서
+            // 한정이 잘렸다(design-review r1 B1). 한정 문장은 이 폭에서 잘리지 않아야 사용자가 지금 글이 낡았다는 것을 안다.
+            // 칸 안쪽이 20rem 아래(폰 폭 320~367)이면 에이전트 글에 남는 자리가 이름 한 글자(320에서 10px)라 줄임표 부스러기만
+            // 서므로 아예 접는다(`@max-xs:hidden`): 이름은 `aria-label`·`title`·팝오버에 그대로 있다.
+            className={cn("min-w-0 truncate", !live && "flex-1 @max-xs:hidden")}
+            data-testid="composer-working-text"
+          >
             <span className={live ? "text-agent" : undefined}>{rail.leadLabel}</span>
             {tail}
           </span>
           {live && rail.active && <RespondingDots />}
           {!live && (
-            <span className="min-w-0 truncate text-warn" data-testid="composer-working-stale">
+            // 한정 문장은 작은 단(11)으로 선다: 12에서는 277px이라 지원하는 가장 좁은 폭(320, 칸 안쪽 272)에 전문이 못 든다. 11에서는
+            // 254px라 에이전트 글이 0으로 양보한 자리(간격 8 포함 262)에 전문이 들어간다. 문장은 한 상수(`TURN_STALE_SENTENCE`)
+            // 그대로다: 보이는 글과 읽히는 글이 달라지지 않는다.
+            <span className="min-w-0 truncate text-timestamp text-warn" data-testid="composer-working-stale">
               {TURN_STALE_SENTENCE}
             </span>
           )}
@@ -196,7 +214,9 @@ function RailLine({
         side="top"
         align="start"
         sideOffset={8}
-        className="p-2"
+        // `popover-fit`: 폭 384 고정이 폰 폭에서 화면 밖으로 나가던 것(390에서 2px, 360에서 32px, 320에서 72px)을 Radix가 주는
+        // 남은 폭에 묶는다(design-review r1 H3). 행의 글은 줄어들고 경과(「3분째」)는 줄지 않는다.
+        className="popover-fit p-2"
         data-testid="composer-working-popover"
       >
         <p className="px-2 py-1 text-meta text-ink-muted">일하는 에이전트</p>
