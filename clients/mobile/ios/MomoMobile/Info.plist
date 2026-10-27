@@ -114,6 +114,14 @@
 	     발견하면 실패해 그 시점을 알린다. -->
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.</string>
+	<!-- #4316 (ADR-0204 증보 5): the intent class the notification extension donates for a communication
+	     notification. Apple: "Add the class name of each intent that your app supports to the
+	     NSUserActivityTypes array in your Info.plist" — the APP's plist, not the extension's (Buzz ships it
+	     the same way). The matching capability is in MomoMobile.entitlements. -->
+	<key>NSUserActivityTypes</key>
+	<array>
+		<string>INSendMessageIntent</string>
+	</array>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<!-- ADR-0120 D2-A sends `content-available: 1` alongside `mutable-content: 1`
