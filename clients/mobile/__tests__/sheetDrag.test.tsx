@@ -1069,6 +1069,31 @@ describe('시작 응답자 길 — 눌리지 않는 자리에서 시작한 끌�
     expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
   });
 
+  it('기다리는 동안 시스템이 터치를 거둬 가도(terminate) 시트는 아무것도 하지 않는다 — 쥔 끌기만 제자리로 돌아간다', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    await mount(<Host onClose={() => {}} />, false);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    spring.mockClear();
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1, 0));
+      expect(handlers.onStartShouldSetResponder(touch(0, 1, 0))).toBe(true);
+      handlers.onResponderGrant(touch(0, 1, 0));
+      handlers.onResponderTerminate(touch(2, 20, 0)); // 쥐지 않은 채 거둬졌다(알림·제스처)
+    });
+    expect(spring).not.toHaveBeenCalled();
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
+    // 대조: 쥔 끌기가 거둬지면 제자리로 돌아간다.
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 100, 0));
+      handlers.onStartShouldSetResponder(touch(0, 100, 0));
+      handlers.onResponderGrant(touch(0, 100, 0));
+      handlers.onResponderMove(touch(40, 116, 0)); // 쥔다
+      handlers.onResponderTerminate(touch(40, 132, 40));
+    });
+    expect(spring).toHaveBeenCalledTimes(1);
+    expect(spring.mock.calls[0][1]).toMatchObject({toValue: 0});
+  });
+
   it('잡고도 얌전히 기다린다 — 문턱 안의 떨림·위로 쓸기·가로 쓸기는 시트를 움직이지 않는다', async () => {
     await mount(<Host onClose={() => {}} />);
     for (const steps of [
