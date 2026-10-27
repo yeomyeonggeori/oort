@@ -27,6 +27,7 @@
 - `POST .../members/:member/suspend` · `/reinstate`: suspended 전이 — **로그인 거부 + 기존 토큰 즉시 revoke(token 테이블) + realtime 구독 차단**. 데이터·메시지 이력 보존. admin 이상, 계층 규칙 적용.
 - `DELETE .../members/:member` (**추방 remove**): 전 채널 membership 제거 + status=deleted 전이(메시지 이력은 보존 — 저자 표시는 유지, Slack 문법). 토큰 revoke 동반.
 - `POST .../bans` / `DELETE .../bans/:ban` (**차단**): email(human)·handle 기준 ban 원장(migration 026) — **invite redeem·join 시 banned 검사로 재합류 차단**(P2의 구멍 봉합). 추방 시 `ban: true` 옵션으로 원스텝.
+  - 증보(Accepted, 2026-10-27 owner 승인, #4625): 이미 `deleted`인 이메일은 일반 초대 코드로 되살아나지 않는다([ADR-0215](0215-login-recovery-v2-password-change-and-reset.md) 증보 1 J7). 차단은 새 이메일·핸들까지 막는 도구로 남는다. 「돌아온 사람」 복원 경로는 후속 #4627.
 - deleted의 완전 소거(GDPR성 익명화)는 v1.5 별도 — 이 ADR 범위 밖.
 
 ### D4. self-service

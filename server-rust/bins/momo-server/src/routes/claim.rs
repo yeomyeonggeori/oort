@@ -32,8 +32,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::Json;
 use momo_auth::{
-    consume_claim_in_tx, normalized_claim_password, normalized_claim_token,
-    resolve_claim_workspace, ClaimMutation, ClaimSpecInvalid,
+    consume_claim_in_tx, normalized_claim_token, normalized_new_password, resolve_claim_workspace,
+    ClaimMutation, ClaimSpecInvalid,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
@@ -71,7 +71,10 @@ pub async fn claim(
     Json(request): Json<ClaimRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     let token = normalized_claim_token(&request.token).map_err(spec_error)?;
-    let password = normalized_claim_password(&request.password).map_err(spec_error)?;
+    // The caller is choosing this password — for the first owner's bootstrap and
+    // for an operator-issued reset alike (ADR-0215 D2). A refusal is a 400 before
+    // any statement runs, so the one-time token is not spent on a typo.
+    let password = normalized_new_password(&request.password)?;
 
     let mut conn = state
         .pool

@@ -136,6 +136,7 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | api | `HOST` | `0.0.0.0` (a *legacy* IPv6-only Railway environment needs `[::]` with the brackets; bare `::` fails the `host:port` parse) |
 | api | `PORT` | `8080` |
 | api | `RAILWAY_RUN_UID` | `0` — the start command drops to uid 10001 itself (see Drive) |
+| api | `MOMO_ATTACHMENT_RECLAIM` | (선택, 기본 꺼짐) 로컬 볼륨 첨부 청소(#4443, ADR-0151 증보 2)를 켠다. **정확히 `1`일 때만 지운다**(`true`·`yes`·빈 값은 꺼짐). 꺼진 채로도 틱마다 지울 수 있는 파일 수·바이트를 로그 한 줄로 남긴다. 켜기 전에 `infra/rust/sql/attachment_reclaim_check.sql`로 대조한다(위 Drive 절). 주기 `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS`(기본 600000, 최소 10000), 틱당 `MOMO_ATTACHMENT_RECLAIM_BATCH`(기본 50, 1..500). `local` 백엔드에서만 도는 api 프로세스의 잡이고 Google Drive는 notifier가 한다 |
 | api | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
 | api | `MOMO_PUBLIC_BASE_URL` | `https://${{shared.OORT_SITE_ADDRESS}}` — the address GitHub is told to call (ADR-0205 D2) and the origin of the invite links an approval decision answers with (ADR-0186); api only. The generator does not write this key: the scheme is typed here, the host is the one already declared for this edge (see "GitHub App on this instance") |
 | relay | `CENT_API_URL` | `http://centrifugo.railway.internal:8000/api` |
@@ -304,7 +305,7 @@ Wi-Fi and a phone hotspot); bogus claims only ever get 400 or 429.
    ```sh
    for i in $(seq 31); do
      curl -s -o /dev/null -w '%{http_code}\n' -X POST -H 'Content-Type: application/json' \
-       --data '{"token":"not-a-claim-token","password":"x"}' "https://$RAILWAY_PUBLIC_DOMAIN/v1/claim"
+       --data '{"token":"not-a-claim-token","password":"bogus-claim-password"}' "https://$RAILWAY_PUBLIC_DOMAIN/v1/claim"
    done | sort | uniq -c        # expect 30 × 400 and 1 × 429
    ```
 3. In the api logs (`railway logs --service api`, or the api service's Deploy
@@ -422,6 +423,22 @@ it walks the whole volume on every start, which is cheap at team scale. Without 
 command refuses with exit 78 and says so. The long-term fix is the same
 init-and-drop step in the image entrypoint (#2574).
 
+Attachment cleanup (#4443, ADR-0151 amendment 2): an upload that no message,
+scheduled message, huddle transcription or avatar holds is deleted 30 days after
+the later of its upload and the last release of a hold. Only the api process can
+open this volume, so **on the local backend the api runs the cleanup** (the
+notifier does it for a Google Drive). **It ships off.** Until `MOMO_ATTACHMENT_RECLAIM`
+is exactly `1` on the api service it deletes nothing; switched off it still writes one
+line per tick (every `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS`, default 600000):
+`attachment reclaim dry-run: delete_enabled=false scope=touched looked_at=N workspaces=W
+candidates=C bytes=B …`. Before turning it on, run
+`psql "$DATABASE_URL" -X -f infra/rust/sql/attachment_reclaim_check.sql` as a superuser (read
+only; its header says how to compare with the log line: the log may be smaller than the
+SQL's `candidates`, never larger, and a `UNKNOWN` foreign key in section 4 means stop). The
+api looks only at workspaces **whose uploads it has served since it started** (it has no
+cross-tenant read, and no new `SECURITY DEFINER` was made for it), so an old draft in a
+workspace nobody has uploaded to since the last restart stays until somebody does.
+
 relay, webhook-sender, agent-worker, notifier and push-relay write no volume and
 run as the image user.
 
@@ -468,8 +485,9 @@ base64 < ~/.momo-secrets/railway-relay-key/server-ed25519-private.pem | tr -d '\
 | notifier | `MOMO_LIVEKIT_API_SECRET` | sealed: the api's value (#2759) |
 | notifier | `MOMO_LIVEKIT_URL` | the api's value (#2759). The sweep calls LiveKit RoomService there (server → LiveKit HTTPS only) |
 | notifier | `MOMO_AVATAR_RECLAIM_DATABASE_URL` | (선택) 아바타 Drive 회수 잡(#3284, ADR-0161 증보 2)의 쓰기 연결 — 기본은 위 `MOMO_HUDDLE_SWEEP_DATABASE_URL`(같은 RLS-bound `momo_app`). BYPASSRLS URL 은 거절한다 |
+| notifier | `MOMO_ATTACHMENT_RECLAIM_DATABASE_URL` | (선택) 첨부 Drive 회수 잡(#4443, ADR-0151 증보 2)의 쓰기 연결 — 기본은 `MOMO_AVATAR_RECLAIM_DATABASE_URL`, 그다음 위 `MOMO_HUDDLE_SWEEP_DATABASE_URL`(같은 RLS-bound `momo_app`). 후보 목록·건수 집계·삭제가 모두 이 연결의 워크스페이스별 트랜잭션이고(notifier 자신의 연결은 워크스페이스 id만 읽는다), BYPASSRLS URL 은 거절한다. 어떤 메시지·예약·huddle 전사·아바타 객체도 쥐지 않고 업로드(또는 마지막 점유 해제)로부터 30일이 지난 완료 첨부의 Drive 객체와 행을 지운다. **기본 꺼짐**: `MOMO_ATTACHMENT_RECLAIM`이 정확히 `1`일 때만 지우고, 꺼진 채로는 틱마다 dry-run 한 줄만 남긴다(켜기 전 대조는 `infra/rust/sql/attachment_reclaim_check.sql`). 위 Drive 두 값과 같은 조건(Google 백엔드)에서만 돈다 — 기본 `local` 백엔드는 api 프로세스가 같은 일을 한다(api 의 `MOMO_ATTACHMENT_RECLAIM`). 주기 `MOMO_ATTACHMENT_RECLAIM_INTERVAL_MS`(기본 600000), 틱당 `MOMO_ATTACHMENT_RECLAIM_BATCH`(기본 50). 30일은 환경변수가 아니라 상수다. 켠 뒤 끄려면 변수를 `1`이 아닌 값으로 돌린다(아바타 잡과 Drive 값을 공유하므로 Drive 값은 지우지 않는다) |
 | notifier | `MOMO_SHARE_RETENTION_DATABASE_URL` | (선택) 공유 세션 보존 잡(#2862, #3377)의 삭제 연결 — 기본은 위 `MOMO_HUDDLE_SWEEP_DATABASE_URL`(같은 RLS-bound `momo_app`). notifier 역할(`NOTIFIER_DATABASE_URL`)에는 DELETE 가 없어 후보 읽기만 하고, 둘 다 없으면 잡을 켜지 않는다. BYPASSRLS URL 은 거절한다. `MOMO_SHARE_RETENTION_INTERVAL_MS`(기본 600000) 로 주기를 바꾼다 |
-| notifier | `MOMO_DRIVE_SA_KEY_PATH` / `MOMO_DRIVE_SHARED_DRIVE_ID` | (선택) **Google Drive 백엔드에서만** 회수 잡이 돈다(api 와 같은 값). 기본 `local` 백엔드(위 Drive 절)는 api 볼륨을 notifier 가 마운트할 수 없어 **회수하지 않는다** — 후속 이슈. 주기 `MOMO_AVATAR_RECLAIM_INTERVAL_MS`(기본 600000), 틱당 `MOMO_AVATAR_RECLAIM_BATCH`(기본 50) |
+| notifier | `MOMO_DRIVE_SA_KEY_PATH` / `MOMO_DRIVE_SHARED_DRIVE_ID` | (선택) **Google Drive 백엔드에서만** 회수 잡(아바타, 첨부)이 돈다(api 와 같은 값). 기본 `local` 백엔드(위 Drive 절)는 api 볼륨을 notifier 가 마운트할 수 없어 notifier 는 회수하지 않는다 — 첨부는 api 프로세스가 청소하고(위 Drive 절), 아바타 미디어는 아직 후속 이슈다. 주기 `MOMO_AVATAR_RECLAIM_INTERVAL_MS`(기본 600000), 틱당 `MOMO_AVATAR_RECLAIM_BATCH`(기본 50) |
 
 Check in the Apple Developer portal that the APNs key's environment scope
 includes Production.

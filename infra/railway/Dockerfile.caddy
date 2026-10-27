@@ -4,7 +4,7 @@
 # copy is build-time instead of a named volume.
 #
 # Pin ARG OORT_IMAGE to releases/latest.json images.app (ref@digest_list).
-ARG OORT_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:86f01414ec87582d505e8c8fe84f2f0b42ea2ebec561e7d992354b52621f4aae
+ARG OORT_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:529c2287d556ecd55e6efae3bd918152040722883f3eade9851a85c5f08cb575
 FROM ${OORT_IMAGE} AS web
 FROM caddy:2-alpine
 COPY --from=web /opt/momo/web /srv/web

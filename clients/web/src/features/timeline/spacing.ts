@@ -106,6 +106,22 @@ export const ROW_GROUP_START_PAD_CLASS = "pt-row-head pb-row";
 export const ROW_CONTINUATION_PAD_CLASS = "py-row";
 
 /**
+ * 저자 묶음 머리 행의 **이름·시각 줄**. 트리거 메시지의 상태 칩(#4619)이 이 줄의 시각 옆에 서므로,
+ * 칩이 서고 바뀌어도 줄의 높이가 변하지 않는다는 것을 시험이 이 클래스 그대로 실제 엔진에서 잰다.
+ */
+export const MESSAGE_HEAD_CLASS = "flex flex-wrap items-baseline gap-2";
+
+/**
+ * 칩이 서는 머리 줄(#4619 planner 결정 6): **줄이 바뀌지 않는다.** 칩이 있는 줄은 이름이 줄어들고
+ * (`truncate`) 시각·칩은 줄지 않는다 — `flex-wrap`이면 이름이 길 때 칩이 혼자 다음 줄로 내려가 칩이 서고
+ * 질 때마다 행 높이가 변했다(이름 13자부터, 최소 폭 368). `@container`는 칩이 좁은 폭에서 아이콘만 남기는
+ * 기준(이 줄 자신의 폭)이다: 이름이 칩 때문에 너무 많이 잘리지 않게 한다.
+ */
+export const MESSAGE_HEAD_CHIP_CLASS = "@container flex items-baseline gap-2";
+/** 칩이 서는 머리 줄의 시각: 줄 안에서 줄어들지 않고 줄바꿈하지 않는다(`flex-nowrap`이므로). */
+export const MESSAGE_HEAD_CHIP_TIME_CLASS = "shrink-0 whitespace-nowrap";
+
+/**
  * 타임라인 메시지 아바타와 그 거터의 한 변 (AP-2a #4189). 코어 `AVATAR_SIZE`(32)가 기본이고 대화
  * 밀도가 28·36으로 바꾼다. 공용 `Avatar`의 기본 `size-8`을 이 클래스가 이긴다(`cn`이 둘을
  * 같은 `size` 그룹으로 안다, `NAMED_MEASURES`) — 디렉터리·받은편지함의 아바타는 밀도를 따르지 않는다.

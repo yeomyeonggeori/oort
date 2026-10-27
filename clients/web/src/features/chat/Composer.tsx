@@ -31,33 +31,9 @@ import {
   composerFieldLabel,
 } from "@momo/core/features/chat/composerCopy";
 import { useFittedComposerPlaceholder } from "@/features/chat/placeholderFit";
-import { useApprovalWaits } from "@/features/inbox/useInbox";
-import {
-  agentTurnsInChannel,
-  applyApprovalWaits,
-  elapsedLabel,
-  hasChannelTurn,
-  useAgentWorkingSignals,
-  useTickingNow,
-  type AgentWorkingSignal,
-} from "@/features/agents/agentWorkingSignal";
-import {
-  activityLines,
-  activityDetail,
-  activitySuffix,
-  activityText,
-  isRespondingLine,
-  MAX_ACTIVITY_LINES,
-  TURN_STALE_SENTENCE,
-  UNKNOWN_AGENT_NAME,
-  type AgentActivityLine,
-  type AgentLivenessLookup,
-} from "@/features/agents/turnCopy";
-import { isUntakenHumanRun } from "@momo/core/features/agents/runWaiting";
-import { useAgentLivenessLookup } from "@/features/agents/useAgentLiveness";
-import { RespondingAvatar, RespondingDots } from "@/features/agents/RespondingIndicator";
-import { memberFor, memberNameParts } from "@/features/workspace/useWorkspace";
-import { openWorkPanel } from "@/features/agents/workLogStore";
+import { ComposerActivityRail } from "@/features/agents/ActivityRail";
+import { isRailReserved } from "@/features/agents/railReservation";
+import { memberFor } from "@/features/workspace/useWorkspace";
 import {
   MENTION_ROUTING_ROW_CLASS,
   MentionRoutingBar,
@@ -252,193 +228,6 @@ function ComposerHint({
   );
 }
 
-/**
- * Composer activity bar (R-1 §3, mac AgentWorkingComposerBar). One flat meta
- * line per open turn, drawn from what the agent actually wrote, with its clock
- * beside its own label.
- *
- * It does NOT rotate. The mac bar cycles agent x headline pairs every five
- * seconds because a SwiftUI composer footer has one line to spend; on the web
- * that same loop is content that mutates on a timer, which needs a pause
- * control to meet WCAG 2.2.2, has no keyboard path when the pause is a hover,
- * and prints a "1/3" pager that reads as a slideshow inside a work tool. Two or
- * three stacked lines say more, sit still, and need no controls at all. Nothing
- * here animates, so there is no reduced-motion branch to diverge from.
- *
- * The bar states a turn even before a headline exists ("김인턴이 작업 중" plus a
- * clock is a true thing the reader wants) and states an approval wait as an
- * approval wait, never as work.
- *
- * OFFLINE (SKILL §5) is a state this bar has to SHOW, not merely encode. The
- * first cut expressed a dead rail by hiding the clock and rewriting an
- * aria-label, which for an awaiting_approval turn is a no-op on screen: the
- * line "Hermes가 승인을 기다립니다" was pixel-identical either way, so the app
- * kept asserting agent state on a socket that was gone. Now the agent token
- * comes off the name (the same demotion the sidebar pill makes: a remembered
- * claim must not look as confirmed as a live one) and one warn-colored line
- * says why, in place, which is what an offline banner is (§5) and not a toast.
- */
-export function AgentActivityBar({
-  turns,
-  directory,
-  nowMs,
-  live,
-  livenessFor,
-}: {
-  turns: AgentWorkingSignal[];
-  directory: Directory;
-  nowMs: number;
-  /** The realtime rail is connected, so a clock is measuring something. */
-  live: boolean;
-  /**
-   * 에이전트의 서버 생존 판정(D4)을 찾는 함수. 아무도 가져가지 않은 요청의 근거 줄 맨 앞에 경고 라벨이
-   * 서고 「연결이 꺼져 있을 수 있어요」가 붙는 데에만 쓴다(#4285). 이 컴포넌트는 읽지 않고 받는다 —
-   * 읽기는 워크스페이스와 쿼리를 아는 `Composer`의 일이다. 생략하면 판정 없이 말한다.
-   */
-  livenessFor?: AgentLivenessLookup;
-}) {
-  const { lines, overflowCount, summary } = useMemo(
-    () =>
-      activityLines(
-        turns,
-        (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
-        MAX_ACTIVITY_LINES,
-        livenessFor
-      ),
-    [turns, directory, livenessFor]
-  );
-
-  if (lines.length === 0) return null;
-
-  return (
-    <ul
-      // `px-6`은 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px이다. 작업 줄은
-      // textarea 텍스트 기둥에 서고, 작성 중·키 힌트는 #1749에서 액션 행 가운데
-      // 슬롯으로 내려갔다.
-      className="flex flex-col gap-1 px-6 pb-2"
-      // The offline sentence is a real list item below, so it is announced in
-      // reading order rather than glued onto the list's name and read twice.
-      aria-label={summary}
-      data-testid="composer-working"
-      data-live={live ? "" : undefined}
-    >
-      {lines.map((line) => {
-        const turn = turns.find((t) => t.memberId === line.memberId);
-        const runId = turn?.runId;
-        // 에이전트가 요청을 가져가 답을 쓰는 중이면 얼굴과 점이 붙는다(#4020). 끊긴
-        // 레일(`!live`)에서는 둘 다 뺀다: 아무도 일하는 중이 아닌 줄에 움직임을 두지 않는다.
-        const responding = live && isRespondingLine(line);
-        const body = (
-          <>
-            {responding && (
-              <RespondingAvatar directory={directory} memberId={line.memberId} />
-            )}
-            <ActivityText line={line} live={live} nowMs={nowMs} />
-            {responding && <RespondingDots />}
-            {/* 서버가 아는 run의 근거 한 줄(n분째 기다려요 · 앞에 m건 / 가져간 뒤
-                n분째 소식이 없어요 / 마지막 보고 n분 전). 사실만 적고 판정은
-                하지 않는다 — 「끊김」은 서버가 알릴 때만 나온다. */}
-            {activityDetail(line, nowMs) !== undefined && (
-              <span
-                className="min-w-0 truncate text-timestamp"
-                data-testid="composer-working-detail"
-              >
-                {activityDetail(line, nowMs)}
-              </span>
-            )}
-            {/* 서버가 아는 run은 근거 줄이 「12분째」를 이미 말한다(#3824). */}
-            {live &&
-              line.server === undefined &&
-              line.state === "working" &&
-              line.startedAtMs !== undefined && (
-              <span className="shrink-0 text-timestamp" data-numeric>
-                {elapsedLabel(line.startedAtMs, nowMs)}
-              </span>
-            )}
-          </>
-        );
-        return (
-          <li key={line.key} className="flex text-meta text-ink-muted">
-            {/* 작업 패널 진입점 ① (goal WEB-WP1). 이 줄은 이미 "지금 무슨 일이
-                일어나고 있는가"이고, 그 과정을 펼쳐 보는 자리도 여기다.
-                run을 특정하지 못한 턴은 버튼이 되지 않는다: 눌러도 아무 일이
-                없는 컨트롤은 고장 난 버튼으로 읽힌다. */}
-            {turn === undefined || runId === undefined ? (
-              <span className="flex min-w-0 items-baseline gap-2">{body}</span>
-            ) : (
-              <button
-                type="button"
-                onClick={(event) =>
-                  openWorkPanel(
-                    {
-                      runId,
-                      memberId: turn.memberId,
-                      channelId: turn.channelId,
-                      origin: "activity",
-                      // 이 줄이 이미 그리고 있는 시계와 같은 값이다. 패널이 자기
-                      // 힘으로는 얻을 수 없는 유일한 값이라 여기서 넘겨준다.
-                      ...(turn.startedAtMs !== undefined
-                        ? { startedAtMs: turn.startedAtMs }
-                        : {}),
-                    },
-                    // 닫을 때 캐럿이 돌아올 자리. WebKit은 클릭으로 버튼에
-                    // 포커스를 주지 않으므로 추정에 맡기지 않는다.
-                    event.currentTarget
-                  )
-                }
-                // 이름을 명시한다. 자식에 맡기면 접근성 이름에 1초마다 바뀌는
-                // 시계가 들어가고, 보조기술이 그 줄을 초당 한 번 다시 읽는다.
-                aria-label={`${activityText(line, nowMs)}. 진행 과정 열기`}
-                data-testid="composer-working-open"
-                className="flex min-w-0 items-baseline gap-2 rounded-sm text-left press hover:bg-surface-hover focus-visible:focus-ring"
-              >
-                {body}
-              </button>
-            )}
-          </li>
-        );
-      })}
-      {overflowCount > 0 && (
-        <li className="text-meta text-ink-muted">
-          외 <span data-numeric>{overflowCount}</span>명
-        </li>
-      )}
-      {!live && (
-        <li className="text-meta text-warn" data-testid="composer-working-stale">
-          {TURN_STALE_SENTENCE}
-        </li>
-      )}
-    </ul>
-  );
-}
-
-/**
- * The line itself. `min-w-0 truncate` without `flex-1`, so the clock sits right
- * after the text it belongs to: a right-aligned number a screen away from its
- * label stops reading as a card and starts reading as a banner (tokens.md §4).
- */
-function ActivityText({
-  line,
-  live,
-  nowMs,
-}: {
-  line: AgentActivityLine;
-  live: boolean;
-  nowMs: number;
-}) {
-  return (
-    <span className="min-w-0 truncate" title={activityText(line, nowMs)}>
-      {/* Offline the name drops to the row's own ink-muted: agent identity is a
-          claim about who is acting right now, and nobody is acting right now. */}
-      <span className={live ? "text-agent" : undefined}>{line.name.name}</span>
-      {line.name.handle && (
-        <span className="text-ink-muted">({line.name.handle})</span>
-      )}
-      {activitySuffix(line, nowMs)}
-    </span>
-  );
-}
-
 function withoutAgent(target: MentionRoutingTarget, memberId: string | undefined): MentionRoutingTarget {
   if (memberId === undefined || target.kind === "none") return target;
   const agents = (target.kind === "one" ? [target.agent] : target.agents).filter((agent) => agent.id !== memberId);
@@ -590,7 +379,6 @@ export function Composer({
   const offline = useOffline();
   // 키 배치 설명이 아직 필요한가 (감사 M-7). 이 기기에서 ↵로 한 번 보내면 꺼진다.
   const keysHintNeeded = useSendHintNeeded();
-  const signals = useAgentWorkingSignals();
 
   // ── 첨부 (ADR-0151 D2) ────────────────────────────────────────────────────
   //
@@ -628,21 +416,9 @@ export function Composer({
     isEligible: (memberId) => memberFor(directory, memberId)?.kind === "human",
   });
   const typingThreshold = useTypingThreshold();
-  const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
-  const approvalWaits = useApprovalWaits();
-  // 승인 원장이 레일보다 이긴다(#3738): 이 채널에서 사람을 기다리는 카드가 있으면 그 에이전트는 승인 대기다.
-  const turns = applyApprovalWaits(
-    agentTurnsInChannel(signals, channelId, nowMs),
-    channelId,
-    approvalWaits,
-    nowMs
-  );
-  // 아직 아무도 가져가지 않은 사람 요청의 에이전트들. 활동 줄이 그 근거 줄 맨 앞에 서버의 생존
-  // 경고(D4)를 싣고, 5분을 넘으면 「아직 받지 않았어요」로 말한다(#4285). 같은 쿼리 키라 사이드바·
-  // 헤더가 이미 읽은 답을 나눠 쓴다.
-  const livenessFor = useAgentLivenessLookup(
-    turns.filter((turn) => isUntakenHumanRun(turn.server)).map((turn) => turn.memberId)
-  );
+  // 에이전트가 있는 채널은 입력창 위에 레일 칸을 **미리** 잡는다(#4619): 줄이 서고 사라져도 타임라인이
+  // 밀리지 않으려면 칸이 먼저 있어야 한다. 칸이 폼의 윗 여백을 대신하므로 폼에 `data-rail`을 달아 `pt-0`이 되게 한다.
+  const railReserved = isRailReserved({ dmAgent, directory, channelId });
 
   /**
    * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
@@ -1113,12 +889,11 @@ export function Composer({
           sharedRow={false}
         />
       )}
-      <AgentActivityBar
-        turns={turns}
+      <ComposerActivityRail
+        channelId={channelId}
         directory={directory}
-        nowMs={nowMs}
+        reserved={railReserved}
         live={railLive}
-        livenessFor={livenessFor}
       />
 
       {/* 예약 배너(ADR-0208, UI 명세 1.6): 입력창 바로 위, 시간으로 사라지지 않는 지속 카드다. */}
@@ -1143,7 +918,12 @@ export function Composer({
         </p>
       )}
 
-      <form onSubmit={onSubmit} className="relative p-3">
+      <form
+        onSubmit={onSubmit}
+        className="relative p-3 data-rail:pt-0"
+        // 레일 칸이 윗 여백을 대신한다(칸 24 + 여백 12가 겹쳐 쌓이지 않는다).
+        data-rail={railReserved ? "" : undefined}
+      >
         {secretBlocked && (
           <SecretKeyBlockNotice
             key={secretBlocks}

@@ -8280,7 +8280,8 @@ async function captureScheme(browser, scheme) {
   await signIn(turns);
   await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
-  await turns.getByTestId("composer-working").waitFor({ state: "visible" });
+  // #4619: `composer-working` is the reserved rail cell (it stands even with no line); the line itself is `-text`.
+  await turns.getByTestId("composer-working-text").waitFor({ state: "visible" });
   // The rich frame is reserved before bytes arrive (#1903 H-1). Wait for
   // the image so the shot shows the OG card, not the muted skeleton.
   await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });

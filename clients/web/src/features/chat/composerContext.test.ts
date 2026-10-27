@@ -29,6 +29,26 @@ describe("맥락 띠 판정", () => {
     expect(composerContextHost(null)).toBeNull();
   });
 
+  it("루틴형 에이전트는 「연결 안 됨」 대신 「다음 확인 때 가져가요(보통 N분 안)」로 말한다(#4619 D)", () => {
+    const routine = { typicalMinutes: 15 };
+    const off = composerContextHost({ kind: "agent", hostOnline: false }, routine);
+    expect(off).toEqual({
+      online: false,
+      text: "다음 확인 때 가져가요(보통 15분 안)",
+      routine: true,
+    });
+    expect(off?.text).not.toContain("연결 안 됨");
+    // 박자를 모르면 그대로다(지어내지 않는다).
+    expect(composerContextHost({ kind: "agent", hostOnline: false })?.text).toBe(
+      "일하는 곳 · 연결 안 됨"
+    );
+    // 박자가 있어도 연결됨·모름·사람에게는 칩이 없다.
+    expect(composerContextHost({ kind: "agent", hostOnline: true }, routine)).toBeNull();
+    expect(composerContextHost({ kind: "agent" }, routine)).toBeNull();
+    expect(composerContextHost({ kind: "human", hostOnline: false }, routine)).toBeNull();
+    expect(composerContextHost(null, routine)).toBeNull();
+  });
+
   it("인용이나 칩이 있을 때만 띠가 선다", () => {
     const host = composerContextHost({ kind: "agent", hostOnline: false });
     expect(composerContextBandShows({ quoting: false, host: null })).toBe(false);

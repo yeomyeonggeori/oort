@@ -247,6 +247,333 @@ pub fn request_shape(body: &[u8]) -> RequestShape {
     }
 }
 
+/// The JSON-RPC methods this server answers. The only `method` values a call trace
+/// ever carries besides [`CALL_METHOD_OTHER`], [`CALL_METHOD_UNPARSED`] and
+/// [`CALL_METHOD_NONE`].
+pub const CALL_METHODS: [&str; 6] = [
+    "initialize",
+    "notifications/initialized",
+    "ping",
+    "tools/list",
+    "tools/call",
+    "server/discover",
+];
+/// A well-formed request whose method is not one of [`CALL_METHODS`].
+pub const CALL_METHOD_OTHER: &str = "other";
+/// The body is not JSON at all (a broken string, a truncated body, a stray newline).
+pub const CALL_METHOD_UNPARSED: &str = "unparsed";
+/// The body is JSON but names no method (a batch array, an object without `method`).
+pub const CALL_METHOD_NONE: &str = "no_method";
+/// A `tools/call` whose `params.name` is not a [`TOOL_CATALOG`] name (or is absent).
+pub const CALL_TOOL_UNKNOWN: &str = "unknown";
+
+/// What one Agent Port call was, in **closed vocabulary only** (ADR-0200 증보 4, #4618).
+///
+/// Both fields are `&'static str` on purpose: the only way to build one is to pick a
+/// string this crate owns, so a method or tool name the *caller* chose can never reach
+/// the audit row this feeds — not a prefix of it, not a truncation, not a hash.
+/// Arguments, cursors, handles and every other value are not read at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CallShape {
+    /// One of [`CALL_METHODS`], [`CALL_METHOD_OTHER`], [`CALL_METHOD_UNPARSED`] or
+    /// [`CALL_METHOD_NONE`].
+    pub method: &'static str,
+    /// For a `tools/call` only: the [`TOOL_CATALOG`] name it asked for, or
+    /// [`CALL_TOOL_UNKNOWN`]. The catalog name is recorded even when this caller's view
+    /// cannot call it — which is exactly the diagnosis "it asked for a tool it was not
+    /// given" — and the wire answer stays the same "unknown tool" for both.
+    pub tool: Option<&'static str>,
+}
+
+/// Classify a raw Agent Port body. Never fails, never echoes a caller string.
+pub fn call_shape(body: &[u8]) -> CallShape {
+    let Ok(value) = serde_json::from_slice::<Value>(body) else {
+        return CallShape {
+            method: CALL_METHOD_UNPARSED,
+            tool: None,
+        };
+    };
+    let Some(method) = value
+        .as_object()
+        .and_then(|object| object.get("method"))
+        .and_then(Value::as_str)
+    else {
+        return CallShape {
+            method: CALL_METHOD_NONE,
+            tool: None,
+        };
+    };
+    let Some(method) = CALL_METHODS.iter().copied().find(|known| *known == method) else {
+        return CallShape {
+            method: CALL_METHOD_OTHER,
+            tool: None,
+        };
+    };
+    let tool = (method == "tools/call").then(|| {
+        value
+            .get("params")
+            .and_then(Value::as_object)
+            .and_then(|params| params.get("name"))
+            .and_then(Value::as_str)
+            .and_then(|name| TOOL_CATALOG.iter().find(|tool| tool.name == name))
+            .map_or(CALL_TOOL_UNKNOWN, |tool| tool.name)
+    });
+    CallShape { method, tool }
+}
+
+/// How much a successful answer handed over, as small integers the **server** computed
+/// from its own response — the one thing a call trace needs beyond "it succeeded" to tell
+/// "the runtime read the inbox and saw no job" from "it saw the job and never claimed it".
+///
+/// Only three tools have a count, only on success, and a count is all there is: no id, no
+/// cursor, no handle, no text, no channel. The caller's input is not an input here at all
+/// (the argument is the server's own answer body and the catalog tool name the dispatcher
+/// already resolved).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ResultCounts {
+    /// `oort_inbox_read`: events on the page the server returned.
+    pub events: Option<u32>,
+    /// `oort_inbox_read`: how many of those are `agent_job` (a tracked turn).
+    pub agent_jobs: Option<u32>,
+    /// `oort_jobs_claim`: jobs handed over; `oort_job_start`: `1` when it handed one over,
+    /// `0` when `job` was null (nothing pending, or a closed run).
+    pub jobs: Option<u32>,
+}
+
+fn clamp_count(len: usize) -> u32 {
+    u32::try_from(len).unwrap_or(u32::MAX)
+}
+
+/// The [`ResultCounts`] of a success body for `tool` (a [`TOOL_CATALOG`] name). Anything
+/// that is not a success of one of the three tools — an error body, another tool, a body
+/// that does not parse, a field of the wrong shape — has no counts.
+pub fn result_counts(tool: &str, body: Option<&[u8]>) -> ResultCounts {
+    let Some(structured) = body
+        .and_then(|bytes| serde_json::from_slice::<Value>(bytes).ok())
+        .and_then(|value| {
+            value
+                .get("result")?
+                .get("structuredContent")
+                .filter(|content| content.is_object())
+                .cloned()
+        })
+    else {
+        return ResultCounts::default();
+    };
+    match tool {
+        TOOL_INBOX_READ => {
+            let Some(events) = structured.get("events").and_then(Value::as_array) else {
+                return ResultCounts::default();
+            };
+            ResultCounts {
+                events: Some(clamp_count(events.len())),
+                agent_jobs: Some(clamp_count(
+                    events
+                        .iter()
+                        .filter(|event| {
+                            event.get("kind").and_then(Value::as_str) == Some("agent_job")
+                        })
+                        .count(),
+                )),
+                jobs: None,
+            }
+        }
+        TOOL_JOBS_CLAIM => ResultCounts {
+            jobs: structured
+                .get("jobs")
+                .and_then(Value::as_array)
+                .map(|jobs| clamp_count(jobs.len())),
+            ..ResultCounts::default()
+        },
+        TOOL_JOB_START => ResultCounts {
+            jobs: structured.get("job").map(|job| u32::from(job.is_object())),
+            ..ResultCounts::default()
+        },
+        _ => ResultCounts::default(),
+    }
+}
+
+/// The JSON-RPC `error.code` a response body carries, or `None` for a success (or a
+/// body-less answer such as the `202` for `notifications/initialized`).
+pub fn response_rpc_code(body: Option<&[u8]>) -> Option<i64> {
+    serde_json::from_slice::<Value>(body?)
+        .ok()?
+        .get("error")?
+        .get("code")?
+        .as_i64()
+}
+
+/// The closed result token for a response's JSON-RPC code: `ok` for none, the same
+/// seven tokens [`ToolFailure::code`] uses for the tool failures (so a call trace and
+/// the run ledger's `tool_call` rows speak one vocabulary), and `protocol_error` for
+/// everything the transport itself refused (`-32700`, `-32600`, `-32601`, `-32020`,
+/// `-32022`, `-32029`).
+///
+/// `-32602` is `invalid_arguments` for a tool call **and** for a malformed envelope:
+/// the wire already answers both with the same code, and the trace's `method`/`tool`
+/// say which one it was.
+pub fn outcome_code(rpc_code: Option<i64>) -> &'static str {
+    match rpc_code {
+        None => "ok",
+        Some(-32602) => "invalid_arguments",
+        Some(-32003) => "not_authorized",
+        Some(-32004) => "unavailable",
+        Some(-32005) => "conflict",
+        Some(-32006) => "already_claimed",
+        Some(-32007) => "claim_expired",
+        Some(-32603) => "internal",
+        Some(_) => "protocol_error",
+    }
+}
+
+/// The server's own refusal sentences, each mapped to a **closed reason token**.
+///
+/// One JSON-RPC code covers many causes (`-32020` is eight different reachable header/metadata
+/// mismatches, `-32600` about a dozen envelope and transport faults), and which one a runtime hit is
+/// the whole diagnosis: "forgot the `Mcp-Name` header" and "sent a modern `_meta` with no
+/// protocol header" need different fixes in a routine. The sentence itself is
+/// server-authored, but a trace must not depend on that staying true, so it is never copied:
+/// the response's `error.message` is looked up here by **exact match** and only the table's
+/// token comes out. Anything else — a sentence added without a row, a message that ever
+/// carried caller text — is [`REASON_OTHER`], so the vocabulary is closed by construction
+/// and a missing row is visible as `other`, not as a leak. A test fails when a sentence in
+/// this crate has no row.
+pub const REFUSAL_REASONS: &[(&str, &str)] = &[
+    // The transport, before the body is a request.
+    ("request body exceeds the limit", "body_too_large"),
+    ("Content-Type must be application/json", "content_type"),
+    (
+        "Accept must include application/json and text/event-stream",
+        "accept",
+    ),
+    ("invalid Agent Port transport headers", "transport_headers"),
+    ("parse error", "parse_error"),
+    ("JSON nesting exceeds the limit", "json_limits"),
+    ("JSON string exceeds the limit", "json_limits"),
+    ("JSON collection exceeds the limit", "json_limits"),
+    // The JSON-RPC envelope.
+    ("request must be an object", "request_shape"),
+    ("request contains an unknown field", "request_shape"),
+    ("jsonrpc must equal 2.0", "request_shape"),
+    ("method is required", "request_shape"),
+    ("invalid JSON-RPC id", "request_shape"),
+    ("params must be an object", "request_shape"),
+    // Which protocol era, and whether the headers and the body agree.
+    ("unsupported protocol version", "version_unsupported"),
+    (
+        "modern requests require the matching MCP-Protocol-Version",
+        "version_header",
+    ),
+    (
+        "legacy follow-up requests require MCP-Protocol-Version",
+        "version_header",
+    ),
+    (
+        "metadata and header protocol versions do not match",
+        "version_mismatch",
+    ),
+    (
+        "legacy protocolVersion is not valid in modern _meta",
+        "version_mismatch",
+    ),
+    (
+        "modern protocol metadata is not valid in legacy requests",
+        "version_mismatch",
+    ),
+    (
+        "initialize header and proposed version do not match",
+        "version_mismatch",
+    ),
+    (
+        "modern protocolVersion cannot use legacy initialize",
+        "version_mismatch",
+    ),
+    (
+        "Mcp-Method does not match the JSON-RPC method",
+        "mcp_method_header",
+    ),
+    (
+        "Mcp-Name does not match tools/call params.name",
+        "mcp_name_header",
+    ),
+    ("Mcp-Name is only valid for tools/call", "mcp_name_header"),
+    // What a modern request must carry in `params._meta`.
+    ("modern params are required", "modern_meta"),
+    ("modern params._meta is required", "modern_meta"),
+    ("modern protocolVersion metadata is required", "modern_meta"),
+    (
+        "modern clientCapabilities metadata is required",
+        "modern_meta",
+    ),
+    ("invalid modern clientInfo metadata", "modern_meta"),
+    // What the legacy handshake must carry.
+    ("initialize params are required", "initialize_params"),
+    (
+        "initialize protocolVersion is required",
+        "initialize_params",
+    ),
+    (
+        "initialize capabilities and clientInfo are required",
+        "initialize_params",
+    ),
+    ("initialized must be a notification", "initialized_has_id"),
+    // The method and its params.
+    ("method params contain an unknown field", "method_params"),
+    ("method params must be empty", "method_params"),
+    ("invalid tools/call params", "tools_call_params"),
+    ("tools/call name is required", "tools_call_params"),
+    ("method not found", "method_not_found"),
+    // The tool.
+    ("unknown tool", "unknown_tool"),
+    ("invalid tool arguments", "tool_arguments"),
+    (
+        "tool is not authorized for this connection",
+        "tool_not_authorized",
+    ),
+    ("tool target is unavailable", "tool_unavailable"),
+    ("tool target refused the transition", "tool_conflict"),
+    ("secret was already claimed", "tool_already_claimed"),
+    ("claim window has passed", "tool_claim_expired"),
+    ("internal error", "tool_internal"),
+    // The adapter's own `429` sentence (`routes/agent_port.rs`). Kept so a refusal that says it maps to
+    // a token rather than `other`, but nothing reaches it today: the admission limiter answers before
+    // any identity exists, so a `429` is never traced (ADR-0200 증보 4, A1). A defensive row, not a live one.
+    ("rate limit exceeded", "rate_limited"),
+];
+/// The token for a refusal whose sentence has no row in [`REFUSAL_REASONS`].
+pub const REASON_OTHER: &str = "other";
+/// The token for a refused `oort_run_complete.artifacts` (its message names a field from a
+/// static list, so it is recognised by its `error.data {field, rule}` instead of by sentence).
+pub const REASON_TOOL_ARTIFACTS: &str = "tool_artifacts";
+
+/// The token of one refusal sentence: the table's token on an exact match, else
+/// [`REASON_OTHER`]. The only way a sentence becomes a token.
+pub fn reason_of_sentence(sentence: &str) -> &'static str {
+    REFUSAL_REASONS
+        .iter()
+        .find(|(known, _)| *known == sentence)
+        .map_or(REASON_OTHER, |(_, token)| token)
+}
+
+/// The closed reason token of a refusal body, or `None` for a success (or no body).
+pub fn refusal_reason(body: Option<&[u8]>) -> Option<&'static str> {
+    let value: Value = serde_json::from_slice(body?).ok()?;
+    let error = value.get("error")?;
+    if error
+        .get("data")
+        .and_then(Value::as_object)
+        .is_some_and(|data| data.contains_key("field") && data.contains_key("rule"))
+    {
+        return Some(REASON_TOOL_ARTIFACTS);
+    }
+    Some(
+        error
+            .get("message")
+            .and_then(Value::as_str)
+            .map_or(REASON_OTHER, reason_of_sentence),
+    )
+}
+
 fn dispatch_inner(
     request: HttpRequest<'_>,
     view: &ToolView,

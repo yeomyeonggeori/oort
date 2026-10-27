@@ -26,6 +26,9 @@ use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+#[path = "common/password_cases.rs"]
+mod password_cases;
+
 const TEST_JWT_SECRET: &str = "password-reset-conformance-secret";
 const OWNER_PASSWORD: &str = "owner-conformance-password";
 const OWNER_B_PASSWORD: &str = "owner-b-conformance-password";
@@ -130,6 +133,31 @@ async fn start_server(pool: PgPool) -> String {
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
     .with_rate_limit(RateLimitConfig::default());
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+/// A server with the per-member change throttle off. The rule tests below send
+/// a dozen changes for one member inside a minute, which the production limit
+/// (10 per member per 60 s) is there to refuse.
+async fn start_server_unthrottled(pool: PgPool) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_rate_limit(RateLimitConfig {
+        password_change_per_member_limit: 0,
+        password_change_per_ip_limit: 0,
+        ..RateLimitConfig::default()
+    });
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -358,6 +386,38 @@ async fn post_claim(
     let status = response.status().as_u16();
     let body: Value = response.json().await.unwrap_or(json!({}));
     (status, body)
+}
+
+async fn change_password(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    access: &str,
+    current: &str,
+    new: &str,
+) -> (u16, Value) {
+    let response = http
+        .patch(format!(
+            "{base}/v1/workspaces/{workspace}/members/me/password"
+        ))
+        .bearer_auth(access)
+        .json(&json!({ "currentPassword": current, "newPassword": new }))
+        .send()
+        .await
+        .expect("change password");
+    let status = response.status().as_u16();
+    let body: Value = response.json().await.unwrap_or(json!({}));
+    (status, body)
+}
+
+async fn roster_status(http: &reqwest::Client, base: &str, workspace: Uuid, access: &str) -> u16 {
+    http.get(format!("{base}/v1/workspaces/{workspace}/roster"))
+        .bearer_auth(access)
+        .send()
+        .await
+        .expect("roster")
+        .status()
+        .as_u16()
 }
 
 async fn seed_owner_bootstrap(
@@ -785,6 +845,362 @@ async fn current_password_mismatch_is_refused_and_sessions_rotate_on_change() {
     );
 }
 
+/// ADR-0215 D2 (#4593) on `PATCH …/members/me/password`: the `newPassword` is
+/// held to the rule (10 characters minimum, 72 bytes maximum). A refusal is a
+/// coded 400 before any statement runs: the password stands and the caller's
+/// session lives.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_changed_password_is_held_to_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "pw-rule").await;
+    let base = start_server_unthrottled(app_pool).await;
+    let http = reqwest::Client::new();
+    let (status, body) = login(
+        &http,
+        &base,
+        tenant.workspace,
+        &tenant.member.email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(status, 200, "{body}");
+    let mut access = body["accessToken"].as_str().expect("access").to_string();
+
+    for (case, password, code) in password_cases::refused() {
+        let (status, body) = change_password(
+            &http,
+            &base,
+            tenant.workspace,
+            &access,
+            MEMBER_PASSWORD,
+            &password,
+        )
+        .await;
+        assert_eq!(status, 400, "{case}: {body}");
+        assert_eq!(body["error"]["code"], json!(code), "{case}: {body}");
+    }
+    let (status, body) =
+        change_password(&http, &base, tenant.workspace, &access, MEMBER_PASSWORD, "").await;
+    assert_eq!(status, 400, "{body}");
+    assert_eq!(body["error"]["message"], json!("password is required"));
+    assert!(
+        body["error"].get("code").is_none(),
+        "an empty password has never carried an error.code: {body}"
+    );
+
+    // Nothing above was applied: the session lives and the old password stands.
+    assert_eq!(
+        roster_status(&http, &base, tenant.workspace, &access).await,
+        200,
+        "a refused change revokes no session"
+    );
+    assert_eq!(
+        login(
+            &http,
+            &base,
+            tenant.workspace,
+            &tenant.member.email,
+            MEMBER_PASSWORD,
+        )
+        .await
+        .0,
+        200,
+        "a refused change leaves the old password standing"
+    );
+
+    // The accepting side, chained: each new password is the next change's
+    // current password, and each signs in with exactly the bytes it was set with.
+    let mut current = MEMBER_PASSWORD.to_string();
+    for (case, password) in password_cases::accepted() {
+        let (status, body) =
+            change_password(&http, &base, tenant.workspace, &access, &current, &password).await;
+        assert_eq!(status, 200, "{case}: {body}");
+        access = body["accessToken"]
+            .as_str()
+            .expect("new access")
+            .to_string();
+        assert_eq!(
+            login(
+                &http,
+                &base,
+                tenant.workspace,
+                &tenant.member.email,
+                &password,
+            )
+            .await
+            .0,
+            200,
+            "{case}: the stored password signs in with the bytes it was set with"
+        );
+        current = password;
+    }
+}
+
+/// ADR-0215 D2, the other half of the split: the password the caller *proves* is
+/// not held to the new rule. An account whose password predates it — nine
+/// characters, or more than 72 bytes — must still be able to change it, or the
+/// people who most need to change it are the ones locked out.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_current_password_is_not_held_to_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "pw-current").await;
+    let base = start_server_unthrottled(app_pool).await;
+    let http = reqwest::Client::new();
+    let nine = "legacy-9c";
+    assert_eq!(nine.chars().count(), 9);
+    let over_ceiling = "L".repeat(100);
+    let short = seed_human(&su, tenant.workspace, "legacy-short", "member", nine).await;
+    let long = seed_human(
+        &su,
+        tenant.workspace,
+        "legacy-long",
+        "member",
+        &over_ceiling,
+    )
+    .await;
+
+    for (case, person, replacement) in [
+        ("nine-character current password", &short, "replacement-ten"),
+        ("100-character current password", &long, "replacement-chars"),
+    ] {
+        let (status, body) = login(
+            &http,
+            &base,
+            tenant.workspace,
+            &person.email,
+            &person.password,
+        )
+        .await;
+        assert_eq!(status, 200, "{case}: {body}");
+        let access = body["accessToken"].as_str().expect("access");
+        let (status, body) = change_password(
+            &http,
+            &base,
+            tenant.workspace,
+            access,
+            &person.password,
+            replacement,
+        )
+        .await;
+        assert_eq!(status, 200, "{case} changes to a valid one: {body}");
+        assert_eq!(
+            login(&http, &base, tenant.workspace, &person.email, replacement)
+                .await
+                .0,
+            200,
+            "{case}: the replacement signs in"
+        );
+        assert_eq!(
+            login(
+                &http,
+                &base,
+                tenant.workspace,
+                &person.email,
+                &person.password
+            )
+            .await
+            .0,
+            401,
+            "{case}: the old password died with the change"
+        );
+    }
+}
+
+/// ADR-0215 F8 made a fact (it was `[S, runtime-unverified]`): `gen_salt('bf')`
+/// reads the first 72 bytes of a password and ignores the rest. That is why the
+/// new-password ceiling is 72 **bytes** and why a longer password is refused
+/// instead of truncated: to this database, two passwords that agree on their
+/// first 72 bytes are the same password.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn bcrypt_reads_exactly_the_first_72_bytes_of_a_password() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    // (a password, the hash it was stored under, whether `momo_password_verify`
+    // accepts it) — each row says what the database makes of one pair.
+    let verifies = |stored: String, presented: String| {
+        let su = su.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>("SELECT momo_password_verify($1, momo_password_hash($2))")
+                .bind(presented)
+                .bind(stored)
+                .fetch_one(&su)
+                .await
+                .expect("verify against a fresh hash")
+        }
+    };
+    let seventy_two = "a".repeat(72);
+    assert!(
+        verifies(seventy_two.clone(), seventy_two.clone()).await,
+        "control: a password verifies against its own hash"
+    );
+    assert!(
+        verifies(format!("{seventy_two}Y"), format!("{seventy_two}X")).await,
+        "byte 73 is ignored: two different passwords with one 72-byte prefix are the same password"
+    );
+    assert!(
+        !verifies(
+            format!("{}Y", "a".repeat(71)),
+            format!("{}X", "a".repeat(71))
+        )
+        .await,
+        "byte 72 counts: that is why 72 bytes, not fewer, is the ceiling"
+    );
+    // The ceiling is in bytes, not characters: 24 Hangul syllables are exactly
+    // 72 bytes, so a 25th is ignored.
+    let hangul = password_cases::NFC_HAN.repeat(24);
+    assert_eq!(hangul.len(), 72);
+    assert!(
+        verifies(format!("{hangul}\u{D55C}"), format!("{hangul}\u{1112}")).await,
+        "the 25th syllable is past byte 72 and ignored"
+    );
+}
+
+/// ADR-0215 D2: login does not apply the rule. An account that exists keeps
+/// signing in with the password it has — a nine-character one, and one longer
+/// than the 72 bytes the rule allows a new password.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn login_does_not_apply_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "pw-login").await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let nine = seed_human(&su, tenant.workspace, "login-nine", "member", "legacy-9c").await;
+    let long = seed_human(
+        &su,
+        tenant.workspace,
+        "login-long",
+        "member",
+        &"L".repeat(100),
+    )
+    .await;
+    for (case, person) in [("nine characters", &nine), ("100 characters", &long)] {
+        let (status, body) = login(
+            &http,
+            &base,
+            tenant.workspace,
+            &person.email,
+            &person.password,
+        )
+        .await;
+        assert_eq!(status, 200, "{case}: {body}");
+        assert!(body["accessToken"].is_string(), "{case}: {body}");
+    }
+}
+
+/// ADR-0215 D2 on the `password_reset` kind of `POST /v1/claim` (the first
+/// owner's bootstrap is `claim_conformance_pg`'s). A refused password is a coded
+/// 400 that applies nothing: the reset link stays live, the member keeps the old
+/// password and the session, and the same link then takes a valid password.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_reset_claim_password_is_held_to_the_new_password_rule() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "reset-rule").await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+
+    let (status, owner) = login(
+        &http,
+        &base,
+        tenant.workspace,
+        &tenant.owner.email,
+        &tenant.owner.password,
+    )
+    .await;
+    assert_eq!(status, 200, "{owner}");
+    let (status, issued) = issue_password_reset(
+        &http,
+        &base,
+        tenant.workspace,
+        owner["accessToken"].as_str().expect("owner access"),
+        tenant.member.id,
+    )
+    .await;
+    assert_eq!(status, 201, "{issued}");
+    let token = issued["token"].as_str().expect("token").to_string();
+    let (status, member) = login(
+        &http,
+        &base,
+        tenant.workspace,
+        &tenant.member.email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(status, 200, "{member}");
+    let member_access = member["accessToken"].as_str().expect("member access");
+
+    for (case, password, code) in password_cases::refused() {
+        let (status, body) = post_claim(&http, &base, &token, &password).await;
+        assert_eq!(status, 400, "{case}: {body}");
+        assert_eq!(body["error"]["code"], json!(code), "{case}: {body}");
+    }
+
+    let link_live: bool = sqlx::query_scalar(
+        "SELECT consumed_at IS NULL FROM credential_claim \
+          WHERE workspace_id = $1 AND member_id = $2 AND kind = 'password_reset' \
+          ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(tenant.workspace)
+    .bind(tenant.member.id)
+    .fetch_one(&su)
+    .await
+    .expect("read the reset link");
+    assert!(
+        link_live,
+        "a refused password does not spend the reset link"
+    );
+    assert_eq!(
+        roster_status(&http, &base, tenant.workspace, member_access).await,
+        200,
+        "a refused reset revokes no session"
+    );
+    assert_eq!(
+        login(
+            &http,
+            &base,
+            tenant.workspace,
+            &tenant.member.email,
+            MEMBER_PASSWORD,
+        )
+        .await
+        .0,
+        200,
+        "a refused reset leaves the old password standing"
+    );
+
+    let (status, body) = post_claim(&http, &base, &token, password_cases::TEN_CHARS).await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        login(
+            &http,
+            &base,
+            tenant.workspace,
+            &tenant.member.email,
+            password_cases::TEN_CHARS,
+        )
+        .await
+        .0,
+        200
+    );
+    assert_eq!(
+        roster_status(&http, &base, tenant.workspace, member_access).await,
+        401,
+        "the reset that went through ended the old session"
+    );
+}
+
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn password_change_rate_limit_is_per_member() {
@@ -844,6 +1260,92 @@ async fn password_change_rate_limit_is_per_member() {
     assert_eq!(guess().await.status().as_u16(), 403);
     assert_eq!(guess().await.status().as_u16(), 403);
     assert_eq!(guess().await.status().as_u16(), 429);
+}
+
+/// The change route counts an attempt **before** it judges the new password
+/// (ADR-0215 D2, #4593 security review L-2): a refused `newPassword` is an
+/// attempt too, so the per-member limit sees it. The order is rate limit, then
+/// the two password checks, then `current == new`.
+///
+/// `password_change_rate_limit_is_per_member` above sends a `newPassword` the
+/// rule accepts, so it cannot tell the order: a route that judged the password
+/// first would never count a refusal, and this is the test that notices.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_refused_new_password_is_counted_by_the_change_rate_limit() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_tenant(&su, "pw-limit-order").await;
+    let state = AppState::new(
+        app_pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_rate_limit(RateLimitConfig {
+        password_change_per_member_limit: 2,
+        password_change_per_ip_limit: 0,
+        ..RateLimitConfig::default()
+    });
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let base = format!("http://{address}");
+    let http = reqwest::Client::new();
+    let (status, body) = login(
+        &http,
+        &base,
+        tenant.workspace,
+        &tenant.member.email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(status, 200);
+    let access = body["accessToken"].as_str().expect("access");
+    // The right current password and a new one the rule refuses, so the only
+    // thing wrong with the request is the new password.
+    let refused = || {
+        let http = http.clone();
+        let base = base.clone();
+        let access = access.to_string();
+        let workspace = tenant.workspace;
+        async move {
+            let response = http
+                .patch(format!(
+                    "{base}/v1/workspaces/{workspace}/members/me/password"
+                ))
+                .bearer_auth(access)
+                .json(&json!({
+                    "currentPassword": MEMBER_PASSWORD,
+                    "newPassword": password_cases::NINE_CHARS,
+                }))
+                .send()
+                .await
+                .expect("change");
+            let status = response.status().as_u16();
+            let body: Value = response.json().await.unwrap_or(Value::Null);
+            (status, body)
+        }
+    };
+    for attempt in 1..=2 {
+        let (status, body) = refused().await;
+        assert_eq!(status, 400, "attempt {attempt}: {body}");
+        assert_eq!(
+            body["error"]["code"],
+            json!("password_too_short"),
+            "attempt {attempt}: {body}"
+        );
+    }
+    let (status, body) = refused().await;
+    assert_eq!(
+        status, 429,
+        "the two refusals above were attempts, so the third is over the limit: {body}"
+    );
 }
 
 /// ADR-0128 D2 matrix: each cell is one ignored PG test (red proof first).
