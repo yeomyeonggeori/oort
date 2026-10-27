@@ -728,6 +728,46 @@ describe('what the upload declares stays true of the code (#2568)', () => {
     expect(native).toEqual([]);
   });
 
+  // #4316: the notification extension has NO privacy manifest (`ios/NotificationService` holds an Info.plist, an
+  // entitlements file and Swift — no `PrivacyInfo.xcprivacy`; only the app declares its required-reason APIs). App Store
+  // Connect rejects a build whose binary uses one of those APIs without a declared reason (ITMS-91053), and it reads
+  // the extension's binary too. Until the extension gets a manifest of its own it must stay clear of all four
+  // categories the app declares: file timestamps, UserDefaults, system boot time, disk space. The face cache keeps
+  // "when it was last used" in the file NAME for exactly this reason (MomoPushPresentationStore.swift).
+  //
+  // The files the extension compiles: its own, the kit, and the one store file it shares with the app's pod.
+  // `swiftCode` drops comments and string text, so the reasoning that names these APIs does not trip the guard.
+  it('keeps the notification extension clear of required-reason APIs: no file timestamps, no UserDefaults, no boot time, no disk space', () => {
+    const EXTENSION_FILES = [
+      'ios/NotificationService/NotificationService.swift',
+      'ios/MomoPushKit/PushNotification.swift',
+      'ios/MomoPushKit/PushCommunication.swift',
+      'modules/momo-push-native/ios/MomoPushPresentationStore.swift',
+    ].map(file => join(APP_ROOT, file));
+    const REQUIRED_REASON_APIS: [string, RegExp][] = [
+      [
+        'file timestamps',
+        /\b(?:modificationDate|creationDate|fileModificationDate|fileCreationDate|NSFileModificationDate|NSFileCreationDate|contentModificationDate|contentModificationDateKey|creationDateKey|attributesOfItem|setAttributes|getattrlist\w*|fgetattrlist|getattrlistat)\b|\b(?:stat|fstat|fstatat|lstat)\s*\(/,
+      ],
+      ['UserDefaults', /\b(?:UserDefaults|NSUserDefaults)\b/],
+      ['system boot time', /\b(?:systemUptime|mach_absolute_time|clock_gettime_nsec_np)\b/],
+      [
+        'disk space',
+        /\b(?:volumeAvailableCapacity\w*|volumeTotalCapacity|systemFreeSize|systemSize|NSFileSystemFreeSize|NSFileSystemSize|statfs|fstatfs|statvfs)\b/,
+      ],
+    ];
+    const offenders = EXTENSION_FILES.flatMap(file => {
+      const code = swiftCode(readFileSync(file, 'utf8'));
+      return REQUIRED_REASON_APIS.filter(([, pattern]) => pattern.test(code)).map(
+        ([category]) => `${file.replace(APP_ROOT + '/', '')}: ${category}`,
+      );
+    });
+    expect(offenders).toEqual([]);
+    // The guard is not vacuous: the files were read, and the app's own manifest still declares what the pod needs.
+    expect(EXTENSION_FILES.every(file => readFileSync(file, 'utf8').length > 1000)).toBe(true);
+    expect(existsSync(join(APP_ROOT, 'ios/NotificationService/PrivacyInfo.xcprivacy'))).toBe(false);
+  });
+
   // #3931: the third sanctioned CryptoKit import, and the only one that does not
   // sign. A lock-screen 승인/거절 is answered without a screen, and the server's
   // idempotency key for it (`client_decision_id`) must be one nobody else can
