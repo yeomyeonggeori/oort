@@ -14,6 +14,8 @@
 //!   new standing and refuses before it writes anything;
 //! * a door that anyone can reach does not queue for the lock while holding a pooled
 //!   connection;
+//! * the operator's reissue of a reset link takes the same lock first, so it cannot wait for a
+//!   claim that is spending the link, or for a suspension, in the opposite order;
 //! * what a door writes is written by **one transaction**, which the timing tests above
 //!   can only show by racing.
 //!
