@@ -355,31 +355,45 @@ pub async fn lock_membership_mutation(
     Ok(())
 }
 
-/// Take the membership-mutation lock **in shared mode**, for a transaction that
-/// reads a member's standing and then acts on it — today the public join.
+/// Take the membership-mutation lock **in shared mode, without waiting**, for a
+/// transaction that reads a member's standing and then acts on it — the doors that sign
+/// someone in under a read of the account (login, the public join). `Ok(true)` means the
+/// lock is held from here to the end of the transaction; `Ok(false)` means it could not
+/// be granted at once and nothing is held.
 ///
 /// Every mutation that changes who is in a workspace (suspend, reinstate, remove,
-/// self-leave, both role changes) takes [`lock_membership_mutation`] exclusively as
-/// its first statement. Shared readers do not wait for each other, but a mutation
-/// waits for every shared holder to finish and every later shared holder waits for
-/// a mutation that is already queued, so a holder sees the workspace either wholly
-/// before a mutation or wholly after it — never between its first and last write.
-/// The lock is the same advisory key, so there is no row-lock order to get wrong:
-/// a mutation that takes its row locks in any order is safe, because it takes this
-/// one first. (A row-level `FOR SHARE` on the member was tried first and deadlocked
-/// with self-leave, which deletes the membership rows before it touches the member.)
+/// self-leave, both role changes) and every door that writes a credential and ends the
+/// member's sessions (claim, password change) takes [`lock_membership_mutation`]
+/// exclusively as its first statement. Shared readers do not wait for each other, but a
+/// mutation waits for every shared holder to finish, so a holder sees the workspace
+/// either wholly before a mutation or wholly after it — never between its first and last
+/// write. The lock is the same advisory key, so there is no row-lock order to get wrong:
+/// a mutation that takes its row locks in any order is safe, because it takes this one
+/// first. (A row-level `FOR SHARE` on the member was tried first and deadlocked with
+/// self-leave, which deletes the membership rows before it touches the member.)
 ///
-/// Take it before the first read whose answer the transaction relies on, and keep
-/// it until commit; it is released with the transaction.
-pub async fn share_membership_state(
+/// **Why it does not wait.** The doors that use this are open to anyone, and waiting for
+/// the lock keeps a pooled connection while waiting: a change that holds the lock for
+/// long (a large member's suspension, a credential change that sweeps many sessions)
+/// would make every caller queue for a connection, and every other request on the
+/// instance queue behind them. A shared request is also refused while an exclusive one
+/// is *queued* (it never overtakes it), so `false` means "a change holds the lock or is
+/// next for it". The caller answers that with a 503 and a `Retry-After` — nothing was
+/// read or written, so the retry is safe — instead of holding a connection.
+///
+/// Take it before the first read whose answer the transaction relies on, and keep it
+/// until commit; it is released with the transaction.
+pub async fn try_share_membership_state(
     conn: &mut PgConnection,
     workspace_id: Uuid,
-) -> Result<(), DbError> {
-    sqlx::query("SELECT pg_advisory_xact_lock_shared(hashtextextended($1::text, 128))")
-        .bind(workspace_id.to_string())
-        .execute(&mut *conn)
-        .await?;
-    Ok(())
+) -> Result<bool, DbError> {
+    let granted: bool = sqlx::query_scalar(
+        "SELECT pg_try_advisory_xact_lock_shared(hashtextextended($1::text, 128))",
+    )
+    .bind(workspace_id.to_string())
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(granted)
 }
 
 /// Is there another **active** owner besides `excluding` (Swift

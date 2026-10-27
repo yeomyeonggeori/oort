@@ -187,6 +187,13 @@ paths:
       tags: [auth]
       operationId: authLogin
       summary: Log in with email/password and receive a session token pair.
+      description: >
+        The password check, the status read and the session rows are one
+        transaction that holds the workspace's membership lock (shared) from its
+        first statement, so a suspension, removal, departure or credential change
+        that overlaps a login is ordered wholly before or wholly after it (ADR-0215
+        증보 2, #4636). A login that finds the lock held does not wait for it: it
+        answers 503 with `Retry-After` and has written nothing.
       security: []
       requestBody:
         required: true
@@ -209,6 +216,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/MembershipBusy"
 
   /v1/auth/refresh:
     post:
@@ -709,6 +718,11 @@ paths:
         ban are judged first; the already-redeemed and role-escalation checks
         wait for the proof. This door cannot hide which addresses have
         accounts: an unused address creates one.
+
+        The join stands in line with every membership change for the workspace's
+        membership lock (shared) and does not wait for it: when a change holds the
+        lock, or is queued for it, the join answers 503 with `Retry-After` before it
+        has read or written anything (ADR-0215 증보 2, #4636).
       security: []
       requestBody:
         required: true
@@ -785,6 +799,8 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/MembershipBusy"
 
   /v1/workspaces/{workspaceId}:
     get:
@@ -1154,7 +1170,13 @@ paths:
         owner/admin). Sets the target human's password in the same transaction
         and issues a session token pair. `password_reset` also revokes that
         member's other session tokens. The raw token is never stored (sha256
-        only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
+        only). Reuse returns 409; expiry returns 410. Per-IP rate limited. The
+        claim, the sweep, the audit row and the new session pair are one
+        transaction that holds the workspace's membership lock (exclusive)
+        (ADR-0215 증보 2, #4636). A token that can never be spent (unknown,
+        used, expired, an `owner_bootstrap` token for an account that has a
+        password, a member who is not active) is refused before that lock is
+        taken, with the same answers.
       security: []
       requestBody:
         required: true
@@ -1181,7 +1203,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
-          description: Claim token is invalid.
+          description: Claim token is invalid, or its member is not active.
           content:
             application/json:
               schema:
@@ -1785,7 +1807,11 @@ paths:
         #1767. Requires the current password. On success every live session
         token of this member is revoked and a fresh access/refresh pair is
         issued (same LoginResponse shape as login/claim). Agent bearers are
-        not touched. Per-member and per-IP rate limited.
+        not touched. Per-member and per-IP rate limited. The standing check, the
+        password change, the sweep and the new pair are one transaction that holds
+        the workspace's membership lock (exclusive), so a sign-in or a suspension
+        that overlaps it is ordered wholly before or wholly after it (ADR-0215
+        증보 2, #4636).
       security: [{bearerAuth: []}]
       parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
       requestBody:
@@ -1815,7 +1841,9 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Current password is incorrect, or caller is not a human member.
+          description: >
+            Current password is incorrect, or caller is not a human member, or is
+            no longer an active member of the workspace (nothing was written).
           content:
             application/json:
               schema:
@@ -1843,7 +1871,10 @@ paths:
         Mints a 32-byte token (same shape as owner_bootstrap), stores sha256
         only, TTL 24h, single use. Reissue consumes any previous live reset
         token for that member. The raw token is in this 201 body once — the
-        operator delivers `/claim/<token>` out of band. There is no mailer.
+        operator delivers `/claim/<token>` out of band. There is no mailer. The
+        issue takes the workspace's membership lock (exclusive) first, like a
+        claim and a membership change, so it is ordered with them (ADR-0215
+        증보 2, #4636).
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -13240,6 +13271,23 @@ components:
           description: Seconds to wait before retrying.
           schema:
             type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    MembershipBusy:
+      description: >
+        A change to the workspace's membership (a suspension, removal, departure,
+        role change or credential change) holds or is queued for the lock this door
+        takes, and this door does not wait for it. Nothing was read or written.
+        Carries a `Retry-After` header in seconds (whole seconds, at least 1);
+        retrying is safe.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+            minimum: 1
       content:
         application/json:
           schema:
