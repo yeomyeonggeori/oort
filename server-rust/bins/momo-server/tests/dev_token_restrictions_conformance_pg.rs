@@ -24,14 +24,14 @@
 //! | `the_channel_list_of_a_restricted_token_omits_every_other_channel_and_the_limit_counts_only_what_it_may_see` | the channel list drops its restriction, or applies it after `LIMIT` |
 //! | `the_inbox_of_a_restricted_token_lists_and_counts_only_its_channels_and_never_carries_an_approval_card` | the approval list is read for a developer token; `unreadCount` or `items` ignore the restriction |
 //! | `an_inbox_page_of_a_restricted_token_is_full_and_ends_where_its_channels_end` | the restriction becomes a filter over the page instead of an argument of the read |
-//! | `a_member_who_left_a_listed_channel_is_refused_there_and_gets_it_back_when_added_again` | the token's stored list is trusted without today's membership |
+//! | `a_member_who_left_a_listed_channel_is_refused_there_and_gets_it_back_when_added_again` | today's membership stops being asked (history guard, channel list or inbox join): the token's stored list alone is trusted |
 //! | `a_card_for_a_channel_the_person_is_not_in_is_refused_at_issuance_and_a_route_issued_card_keeps_its_restriction` | the issue route stops checking channel membership |
 //! | `a_developer_send_with_any_field_outside_the_allow_list_is_a_coded_400_and_stores_nothing` | `dev_send_body_gate` is removed or lets one of the keys through |
 //! | `a_developer_send_that_is_not_one_plain_json_object_is_refused_and_stores_nothing` | the gate stops judging the raw bytes |
 //! | `a_message_sent_with_a_developer_token_is_marked_dev_and_the_same_body_from_a_session_is_not` | the mark is derived from the request, dropped, or put on a session's message |
 //! | `a_session_cannot_imitate_the_dev_mark_through_sent_via_or_props` | the mark is read from a request field |
 //! | `an_authors_edit_keeps_the_dev_mark` | the edit statement rewrites `sent_via` |
-//! | `a_retried_developer_send_lands_once` | the developer path stops deduplicating on `clientMsgId` |
+//! | `a_retried_developer_send_lands_once` | the send statement loses its `ON CONFLICT … DO NOTHING` (a retry stops landing once) |
 //! | `a_read_only_token_reads_channels_history_threads_and_inbox_and_a_write_scope_is_what_lets_it_send` | the closed table or the scope check stops letting L3–L7 through |
 
 #[path = "common/apps_pg.rs"]
@@ -576,8 +576,9 @@ async fn studio() -> Studio {
 
 impl Studio {
     /// Two unread inbox items for the holder in `channel`: a quote of the holder's own message
-    /// and an @mention, both from 박서연. The two messages are `minutes_ago` and one minute
-    /// newer. Returns the ids of the two **inbox messages** `(quote, mention)`.
+    /// and an @mention, both from 박서연. Ages: the holder's own message `minutes_ago + 2`, the
+    /// quote `minutes_ago + 1`, the mention `minutes_ago` (so the mention is the newest item).
+    /// Returns the ids of the two **inbox messages** `(quote, mention)`.
     async fn plant_unread(&self, channel: Uuid, tag: &str, minutes_ago: i64) -> (Uuid, Uuid) {
         let own = self
             .w
@@ -671,7 +672,7 @@ fn inbox_message_ids(page: &Value) -> BTreeSet<String> {
         .collect()
 }
 
-/// The message with `id` in a history / replies / send answer's `messages` array.
+/// The message with `id` on a history or thread page (its `messages` array).
 fn message_in(page: &Value, id: Uuid) -> &Value {
     page["messages"]
         .as_array()
@@ -1346,31 +1347,30 @@ async fn a_developer_send_that_is_not_one_plain_json_object_is_refused_and_store
     let w = &s.w;
     let token = w.card(s.holder.id, &DEV_SCOPES, None).await;
     let id = Uuid::new_v4();
-    // `discriminates`: without the gate the handler's own JSON extractor answers a 422 for
-    // these (wrong shape, or a repeated field), so a 400 here is the gate's. The others are
-    // plain syntax errors both layers answer with a 400; they are here for the contract (a
-    // plain 400 with no code, nothing stored).
-    let cases: Vec<(&str, Vec<u8>, bool)> = vec![
-        ("not JSON at all", b"this is not json".to_vec(), false),
-        ("an empty body", Vec::new(), false),
-        ("truncated JSON", br#"{"clientMsgId":"#.to_vec(), false),
+    // Every one of these must come back as the app's own JSON error envelope with status 400 and
+    // **no `code`**. That is what tells the gate's answer from the handler's: left to its own
+    // extractor, a body that is not an object or repeats a key is a 422 and a syntax error is a
+    // 400 with a plain-text body, so removing the gate turns each case red (the failure message
+    // prints the answer).
+    let cases: Vec<(&str, Vec<u8>)> = vec![
+        ("not JSON at all", b"this is not json".to_vec()),
+        ("an empty body", Vec::new()),
+        ("truncated JSON", br#"{"clientMsgId":"#.to_vec()),
         (
             "bytes after the object",
             format!(r#"{{"clientMsgId":"{id}","body":"a"}} {{"x":1}}"#).into_bytes(),
-            false,
         ),
-        ("a JSON array", b"[]".to_vec(), true),
-        ("a JSON string", br#""body""#.to_vec(), true),
-        ("JSON null", b"null".to_vec(), true),
+        ("a JSON array", b"[]".to_vec()),
+        ("a JSON string", br#""body""#.to_vec()),
+        ("JSON null", b"null".to_vec()),
         (
             "an allowed key given twice",
             format!(r#"{{"clientMsgId":"{id}","body":"a","body":"b"}}"#).into_bytes(),
-            true,
         ),
     ];
 
     let before = w.ledger(s.a).await;
-    for (what, bytes, _discriminates) in &cases {
+    for (what, bytes) in &cases {
         let reply = w.send_raw(&token, s.a, bytes.clone()).await;
         assert_eq!(reply.status, 400, "{what}: {reply:?}");
         assert_eq!(
