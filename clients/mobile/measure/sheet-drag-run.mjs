@@ -114,6 +114,9 @@ function coordinates(ids) {
     HY_FAR: hy + far,
     HY_FLICK: hy + flick,
     FLICK_MS: 60,
+    // 합성 스와이프는 요청 시간(35~60ms)과 무관하게 실제로 116~150ms 걸려서(실측: 78pt 튕김의 표본 간격) 속도가 거리/0.12s 쯤이다. 문턱 거리 아래에서
+    // 속도 문턱(0.7px/ms)을 넘으려면 ≈95pt 이상이 필요해, 그보다 작은 시트(SE 편집 시트: 문턱 87pt → 튕김 78pt → 측정 0.52~0.63)에서는 이 장면을 못 쓴다.
+    FLICK_SKIP: flick < 95,
   };
   const geometry = {sheetTop: sheet.y0, sheetHeight: height, thresholdPt: threshold, farPt: far, shortPt: short};
   if (SURFACE === 'LIST') {
@@ -142,7 +145,19 @@ function coordinates(ids) {
   } else if (SURFACE === 'ACTION') {
     const reply = ids.get('sheet-reply');
     const gap = sheet.y0 + 23 + 52 + 6; // 머리 줄 바로 아래의 눌리지 않는 여백
-    Object.assign(env, {ROWY: mid(reply), ROW_FAR: mid(reply) + far, GAPY: gap, GAP_FAR: gap + far});
+    // SE(375×667)에서는 메시지 행동 시트가 최대 높이를 넘쳐 스크롤된다 — 넘치는 본문은 눌리지 않는 자리를 잡지 않는다(`claimsSheetTouchStart`).
+    // 그 기기에서 장면 ④ 는 「안 닫힘」을 단정하고 뒤 장면의 닫힘 번호가 하나씩 당겨진다.
+    const gapStays = args.device === 'se';
+    Object.assign(env, {
+      ROWY: mid(reply),
+      ROW_FAR: mid(reply) + far,
+      GAPY: gap,
+      GAP_FAR: gap + far,
+      GAP_STAYS: gapStays,
+      N4: gapStays ? 3 : 4,
+      N5: gapStays ? 4 : 5,
+      N6: gapStays ? 5 : 6,
+    });
   } else {
     const body = ids.get('sheetdrag-probe-body');
     // 짝수 줄(probe-row-2)은 누르는 줄, 홀수 줄(probe-row-5)은 눌리지 않는 줄이다(`measure/sheetDrag.tsx` `ProbeRows`).
@@ -166,13 +181,36 @@ function coordinates(ids) {
  * Maestro 2.8 은 `swipe` 의 `start`·`end` 에 `${…}` 를 실행 시 파싱하지 못한다(`check-syntax` 는 통과해도 `Parsing Failed`).
  * 그래서 흐름 파일은 **틀**이고, 이 스크립트가 `env:` 의 기본값 위에 계산한 좌표를 얹어 `${이름}` 을 텍스트로 채운 파일을 만들어 돌린다.
  */
+/**
+ * 흐름 틀의 조건 블록. `# @skip-when NAME` … `# @end` 는 NAME 이 `true` 면 뺀다, `# @only-when NAME` … `# @end` 는 NAME 이 `true` 일 때만 넣는다.
+ * (YAML 주석이라 틀을 그대로 열어도 문법은 유효하다.)
+ */
+function applyBlocks(text, values) {
+  const out = [];
+  let skipping = false;
+  for (const line of text.split('\n')) {
+    const open = /^#\s*@(skip-when|only-when)\s+([A-Z][A-Z0-9_]*)\s*$/.exec(line);
+    if (open) {
+      const on = values[open[2]] === 'true';
+      skipping = open[1] === 'skip-when' ? on : !on;
+      continue;
+    }
+    if (/^#\s*@end\s*$/.test(line)) {
+      skipping = false;
+      continue;
+    }
+    if (!skipping) out.push(line);
+  }
+  return out.join('\n');
+}
+
 function renderFlow(templatePath, overrides) {
   const text = fs.readFileSync(templatePath, 'utf8');
   const head = text.slice(0, text.indexOf('\n---'));
   const defaults = {};
   for (const m of head.matchAll(/^\s{2}([A-Z][A-Z0-9_]*):\s*"([^"]*)"/gm)) defaults[m[1]] = m[2];
   const values = {...defaults, ...Object.fromEntries(Object.entries(overrides).map(([k, v]) => [k, String(v)]))};
-  const rendered = text.replace(/\$\{([A-Z][A-Z0-9_]*)\}/g, (all, name) => {
+  const rendered = applyBlocks(text, values).replace(/\$\{([A-Z][A-Z0-9_]*)\}/g, (all, name) => {
     if (!(name in values)) throw new Error(`흐름 틀의 ${all} 에 값이 없다`);
     return values[name];
   });
