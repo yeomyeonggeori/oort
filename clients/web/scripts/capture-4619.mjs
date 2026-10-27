@@ -826,7 +826,7 @@ async function longNameScene(browser, origin, vp) {
   return buf;
 }
 
-// ---- design-review r2 보강: 끊긴 레일·좁은 폭 팝오버·구경꾼 ------------------------
+// ---- r2 묶음(ONLY=r2): design-review r1의 B1·B2·M2 수리를 재는 장면(끊긴 레일·좁은 폭 팝오버·구경꾼) ----
 
 const STALE_SENTENCE = "연결이 끊겨 갱신이 멈췄어요. 마지막으로 확인된 상태예요.";
 

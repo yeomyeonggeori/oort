@@ -75,7 +75,7 @@ export const RAIL_SHELL_CLASS = "@container flex h-6 shrink-0 items-center px-6"
  *
  * **누르는 면은 칸의 높이(24)다**(`h-full`): 글자 높이(18)가 아니라 칸을 가득 채워 24px 표적이 된다(WCAG 2.5.8 바닥).
  * 폰 폭에서 44로 키우려고 칸 밖으로 넘치게 해 보았지만(`tap-target`) 실측으로 닿지 않았다: 위쪽 넘침은 타임라인이, 아래쪽
- * 넘침은 입력창 카드가 가로챈다(design-review r1 M3). 44를 지키려면 칸 자체가 폰 폭에서 커져야 하고 그것은 타임라인 위에
+ * 넘침은 입력창 카드가 가로챈다(design-review r1 H3). 44를 지키려면 칸 자체가 폰 폭에서 커져야 하고 그것은 타임라인 위에
  * 쓰는 세로 자리를 늘리는 결정이라 이 PR은 24에서 멈추고 이 줄에 사실대로 적는다.
  */
 export const RAIL_LINE_CLASS =
@@ -215,7 +215,7 @@ function RailLine({
         align="start"
         sideOffset={8}
         // `popover-fit`: 폭 384 고정이 폰 폭에서 화면 밖으로 나가던 것(390에서 2px, 360에서 32px, 320에서 72px)을 Radix가 주는
-        // 남은 폭에 묶는다(design-review r1 H3). 행의 글은 줄어들고 경과(「3분째」)는 줄지 않는다.
+        // 남은 폭에 묶는다(design-review r1 B2). 행의 글은 줄어들고 경과(「3분째」)는 줄지 않는다.
         className="popover-fit p-2"
         data-testid="composer-working-popover"
       >

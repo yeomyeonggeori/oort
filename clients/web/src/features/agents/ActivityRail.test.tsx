@@ -281,7 +281,7 @@ describe("팝오버: 일하는 에이전트와 행동", () => {
     expect(q(popover!, "composer-working-activity")?.textContent).toBe("활동 보기");
   });
 
-  it("팝오버는 뷰포트 폭에 묶인다(popover-fit): 폰 폭에서 오른쪽이 화면 밖으로 나가지 않는다 (design-review r1 H3)", () => {
+  it("팝오버는 뷰포트 폭에 묶인다(popover-fit): 폰 폭에서 오른쪽이 화면 밖으로 나가지 않는다 (design-review r1 B2)", () => {
     const el = mountView([turn(RUNNING)]);
     const popover = open(el);
     // 공용 PopoverContent의 고정 폭(`w-pane-picker` 384)에 남은 폭 상한이 더해진다. 폭의 계산은 브라우저 시험이 잰다.

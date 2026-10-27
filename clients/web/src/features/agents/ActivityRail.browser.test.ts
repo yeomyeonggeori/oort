@@ -263,7 +263,7 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
                 lineRight: b.right,
                 shellRight: sh.right,
                 // 누르는 면은 칸을 가득 채운다(24): 글자 높이(18)가 아니라 칸 높이다. 칸 밖으로 넘치지 않는다(넘친 면은 타임라인·입력창
-                // 카드가 가로채서 실제 표적이 되지 못한다, design-review r1 M3).
+                // 카드가 가로채서 실제 표적이 되지 못한다, design-review r1 H3).
                 lineHeight: b.height,
                 lineTop: b.top - sh.top,
                 lineBottom: sh.bottom - b.bottom,
@@ -352,7 +352,7 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
   );
 
   it.skipIf(ENGINES.length === 0)(
-    "popover-fit: 팝오버의 고정 폭(384)은 Radix가 준 남은 폭보다 넓을 때만 줄어든다 (design-review r1 H3)",
+    "popover-fit: 팝오버의 고정 폭(384)은 Radix가 준 남은 폭보다 넓을 때만 줄어든다 (design-review r1 B2)",
     async () => {
       // 레일 팝오버의 클래스는 컴포넌트 소스에서 꺼내고(시험이 따로 적은 사본이 아니다), 공용 `PopoverContent`의 폭 클래스를 함께 먹인다.
       const source = readFileSync(resolve(process.cwd(), "src/features/agents/ActivityRail.tsx"), "utf8");
