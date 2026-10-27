@@ -2,33 +2,14 @@ import {fetchHumanControlSignatureRequired} from '@momo/core/features/auth/devic
 import {uuidEq, type Channel} from '@momo/core/lib/api';
 import {useQuery, useQueryClient} from '@tanstack/react-query';
 import React, {useEffect, useMemo, useRef, useState} from 'react';
-import {
-  AccessibilityInfo,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import {AccessibilityInfo, StyleSheet, Text, View} from 'react-native';
 
-import {
-  FailureBanner,
-  GroupRow,
-  GroupSection,
-  LoadingState,
-  NoticeBlock,
-  OutlineButton,
-  Sentence,
-} from '../design/atoms';
+import {FailureBanner, LoadingState, Sentence} from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
-import {
-  ds2Radius,
-  font,
-  SAFE_GUTTER,
-  space,
-  type Palette,
-} from '../design/tokens';
+import {SheetHeader, type SheetConfirm} from '../design/SheetChrome';
+import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
+import {useStyles} from '../design/theme';
+import {font, line, SHEET, space, type Palette} from '../design/tokens';
 import {useWorkHosts, useWorkSessions} from '../features/agents/queries';
 import {useDeviceKey} from '../features/deviceKey/useDeviceKey';
 import {
@@ -71,8 +52,7 @@ import {spawnPort, type SpawnOutcome, type SpawnPort} from '../features/work/ask
 import {useChannels} from '../features/workspace/queries';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
-import {Check, FieldLabel, TrailingAction} from './DelegateWorkSheet';
-import {SheetTitleRow} from './NewMessageSheet';
+import {FieldLabel, SheetNotice, TextArea} from './sheetForm';
 
 // =============================================================================
 // 내 맥에 보내기 — 폰에서 하네스로 「물어보기」·작업 요청 (#3597 T6b, ADR-0198 D4·D7 증보 1).
@@ -144,6 +124,7 @@ export function AskMacSheet({
     <PageSheet
       onClose={onClose}
       accessibilityLabel="내 맥에 보내기"
+      scrimLabel="내 맥에 보내기 닫기"
       testID="ask-mac-sheet"
     >
       <SheetBody
@@ -180,8 +161,6 @@ function SheetBody({
   waitTimeoutMs: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  const keyboardAppearance = useKeyboardAppearance();
   const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
@@ -404,13 +383,13 @@ function SheetBody({
     }
   };
 
-  const header = (trailing?: React.ReactNode) => (
-    <SheetTitleRow
+  const header = (confirm?: SheetConfirm) => (
+    <SheetHeader
       title="내 맥에 보내기"
       closeLabel="내 맥에 보내기 닫기"
       onClose={slideClose}
-      trailing={trailing}
-      testID="ask-mac"
+      closeTestID="ask-mac-close"
+      confirm={confirm}
     />
   );
 
@@ -441,398 +420,328 @@ function SheetBody({
     .join(' · ');
 
   const destination = (
-    <View style={styles.destination} testID="ask-mac-destination">
-      <Text style={styles.destinationLabel}>보낼 곳</Text>
-      <Sentence style={styles.destinationValue} testID="ask-mac-destination-line">
-        {destinationValue}
-      </Sentence>
-      {state.kind === 'on' && placeLine !== '' ? (
-        <Sentence style={styles.destinationPlace} testID="ask-mac-folder-line">
-          {placeLine}
+    <GroupCard label="보낼 곳" testID="ask-mac-destination">
+      <View style={styles.destination}>
+        <Sentence style={styles.destinationValue} testID="ask-mac-destination-line">
+          {destinationValue}
         </Sentence>
-      ) : null}
-    </View>
+        {state.kind === 'on' && placeLine !== '' ? (
+          <Sentence style={styles.destinationPlace} testID="ask-mac-folder-line">
+            {placeLine}
+          </Sentence>
+        ) : null}
+      </View>
+    </GroupCard>
   );
 
   if (waiting) {
     return (
-      <View>
+      <>
         {header()}
-        {destination}
-        <View style={styles.gap}>
-          <LoadingState
-            label="내 맥이 받는 중이에요. 받으면 대화 화면으로 가요."
-            testID="ask-mac-waiting"
-          />
-          <Sentence style={styles.waitNote}>{WAITING_NOTE}</Sentence>
-          <View style={styles.waitAction}>
-            <OutlineButton
-              label="작업 목록 보기"
-              onPress={() => {
-                onOpenWorkList();
-                slideClose();
-              }}
+        <SheetScroll>
+          {destination}
+          <GroupCard>
+            <LoadingState
+              label="내 맥이 받는 중이에요. 받으면 대화 화면으로 가요."
+              testID="ask-mac-waiting"
+            />
+          </GroupCard>
+          <Sentence style={styles.note}>{WAITING_NOTE}</Sentence>
+          <GroupCard>
+            <ListRow
+              title="작업 목록 보기"
+              accessory="chevron"
+              closesSheet
+              onPress={onOpenWorkList}
               testID="ask-mac-to-list"
             />
-          </View>
-        </View>
-      </View>
+          </GroupCard>
+        </SheetScroll>
+      </>
     );
   }
 
   if (loading) {
     return (
-      <View>
+      <>
         {header()}
-        <LoadingState label="내 맥을 확인하는 중이에요." testID="ask-mac-loading" />
-      </View>
+        <SheetScroll>
+          <GroupCard>
+            <LoadingState label="내 맥을 확인하는 중이에요." testID="ask-mac-loading" />
+          </GroupCard>
+        </SheetScroll>
+      </>
     );
   }
 
   if (state.kind !== 'on') {
     return (
-      <View style={styles.fill}>
+      <>
         {header()}
-        <ScrollView contentContainerStyle={styles.list} testID="ask-mac-off">
+        <SheetScroll testID="ask-mac-off">
           {destination}
-          <View style={styles.gap}>
-            <NoticeBlock
-              headline={MAC_OFF_HEADLINE}
-              detail={state.kind === 'none' ? MAC_NONE_DETAIL : MAC_OFF_DETAIL}
-              testID="ask-mac-off-notice"
-            />
-          </View>
+          <SheetNotice
+            headline={MAC_OFF_HEADLINE}
+            detail={state.kind === 'none' ? MAC_NONE_DETAIL : MAC_OFF_DETAIL}
+            testID="ask-mac-off-notice"
+          />
           {banner !== null ? (
-            <View style={styles.bannerWrap}>
-              <FailureBanner message={banner} testID="ask-mac-banner" />
-            </View>
+            <FailureBanner message={banner} testID="ask-mac-banner" />
           ) : null}
-          <Sentence style={styles.suggest}>{AGENT_SUGGEST_SENTENCE}</Sentence>
-          <View style={styles.suggestAction}>
-            <OutlineButton
-              label={AGENT_SUGGEST_LABEL}
+          <Sentence style={styles.note}>{AGENT_SUGGEST_SENTENCE}</Sentence>
+          <GroupCard>
+            <ListRow
+              title={AGENT_SUGGEST_LABEL}
+              accessory="chevron"
+              closesSheet
               onPress={onUseAgent}
               testID="ask-mac-use-agent"
             />
-          </View>
-        </ScrollView>
-      </View>
+          </GroupCard>
+        </SheetScroll>
+      </>
     );
   }
 
   if (signing !== null) {
     return (
-      <View style={styles.fill}>
+      <>
         {header()}
-        <ScrollView contentContainerStyle={styles.list} testID="ask-mac-blocked">
+        <SheetScroll testID="ask-mac-blocked">
           {destination}
-          <View style={styles.gap}>
-            <NoticeBlock
-              headline={
-                signing === 'flag_off' ? FLAG_OFF_HEADLINE : KEY_NOT_READY_HEADLINE
-              }
-              detail={signingSentence ?? undefined}
-              testID="ask-mac-signing"
-            />
-          </View>
-        </ScrollView>
-      </View>
+          <SheetNotice
+            headline={signing === 'flag_off' ? FLAG_OFF_HEADLINE : KEY_NOT_READY_HEADLINE}
+            detail={signingSentence ?? undefined}
+            testID="ask-mac-signing"
+          />
+        </SheetScroll>
+      </>
     );
   }
 
   const sendLabel = pending ? '보내는 중' : '보내기';
+  const promptLabel = mode === 'ask' ? '물어볼 것' : '시킬 일';
 
   return (
-    <View style={styles.fill}>
-      {header(
-        <TrailingAction
-          label={sendLabel}
-          disabled={!canSend}
-          onPress={() => {
-            void submit();
-          }}
-          testID="ask-mac-send"
-        />,
-      )}
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
+    <>
+      {header({
+        label: sendLabel,
+        disabled: !canSend,
+        busy: pending,
+        onPress: () => {
+          void submit();
+        },
+        testID: 'ask-mac-send',
+      })}
+      <SheetScroll
         keyboardDismissMode="on-drag"
+        // 큰 단은 시트가 키보드를 올리지 않는다 — 몸 스크롤이 입력 칸을 키보드 위로 올려 준다.
         automaticallyAdjustKeyboardInsets
-        contentContainerStyle={styles.list}
-        testID="ask-mac-form"
-      >
+        testID="ask-mac-form">
         {destination}
 
         {banner !== null ? (
-          <View style={styles.bannerWrap}>
-            <FailureBanner message={banner} testID="ask-mac-banner" />
-          </View>
+          <FailureBanner message={banner} testID="ask-mac-banner" />
         ) : null}
 
-        <View style={styles.gap}>
-          <GroupSection label="어떻게 보낼까요" testID="ask-mac-modes">
-            {(['ask', 'work'] as const).map((value, index) => (
-              <GroupRow
-                key={value}
-                title={MODE_LABEL[value]}
-                detail={
-                  value === 'ask'
-                    ? '빈 질문용 폴더에서 물어봐요.'
-                    : '프로젝트 폴더에서 일을 시켜요.'
-                }
-                separated={index > 0}
-                accessibilityRole="radio"
-                accessibilityState={{selected: mode === value}}
-                onPress={() => {
-                  haptics.selection();
-                  setMode(value);
-                  setFolderPick(null);
-                  setIssue(null);
-                }}
-                trailing={<Check on={mode === value} />}
-                testID={`ask-mac-mode-${value}`}
-              />
-            ))}
-          </GroupSection>
-        </View>
+        <GroupCard label="어떻게 보낼까요" testID="ask-mac-modes">
+          {(['ask', 'work'] as const).map(value => (
+            <ChoiceRow
+              key={value}
+              title={MODE_LABEL[value]}
+              detail={
+                value === 'ask'
+                  ? '빈 질문용 폴더에서 물어봐요.'
+                  : '프로젝트 폴더에서 일을 시켜요.'
+              }
+              selected={mode === value}
+              onPress={() => {
+                haptics.selection();
+                setMode(value);
+                setFolderPick(null);
+                setIssue(null);
+              }}
+              testID={`ask-mac-mode-${value}`}
+            />
+          ))}
+        </GroupCard>
 
-        <FieldLabel label={mode === 'ask' ? '물어볼 것' : '시킬 일'} note={null} />
-        <TextInput
-          style={[styles.input, issue !== null && styles.inputError]}
-          value={prompt}
-          onChangeText={value => {
-            setPrompt(value);
-            setIssue(null);
-          }}
-          placeholder={
-            mode === 'ask'
-              ? '예: 이 에러 메시지가 무슨 뜻이야?'
-              : '예: 로그인 버그를 찾아서 고쳐 줘.'
-          }
-          placeholderTextColor={palette.textFaint}
-          keyboardAppearance={keyboardAppearance}
-          multiline
-          lineBreakStrategyIOS="hangul-word"
-          textAlignVertical="top"
-          editable={!pending}
-          accessibilityLabel={mode === 'ask' ? '물어볼 것' : '시킬 일'}
-          testID="ask-mac-prompt"
-        />
-        {issue !== null ? (
+        <View style={styles.field}>
+          <FieldLabel label={promptLabel} />
+          <TextArea
+            value={prompt}
+            onChangeText={value => {
+              setPrompt(value);
+              setIssue(null);
+            }}
+            placeholder={
+              mode === 'ask'
+                ? '예: 이 에러 메시지가 무슨 뜻이야?'
+                : '예: 로그인 버그를 찾아서 고쳐 줘.'
+            }
+            invalid={issue !== null}
+            editable={!pending}
+            accessibilityLabel={promptLabel}
+            testID="ask-mac-prompt"
+          />
+          {issue !== null ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={styles.issue}
+              lineBreakStrategyIOS="hangul-word"
+              testID="ask-mac-issue"
+            >
+              {issue}
+            </Text>
+          ) : null}
+          {!pending && folderId === null ? (
+            <Text style={styles.hint} lineBreakStrategyIOS="hangul-word" testID="ask-mac-hint">
+              {NEED_FOLDER_HINT}
+            </Text>
+          ) : !pending && channelId === null ? (
+            <Text style={styles.hint} lineBreakStrategyIOS="hangul-word" testID="ask-mac-hint">
+              {NEED_CHANNEL_HINT}
+            </Text>
+          ) : null}
           <Text
-            accessibilityLiveRegion="polite"
-            style={styles.issue}
-            testID="ask-mac-issue"
-          >
-            {issue}
+            style={styles.rule}
+            lineBreakStrategyIOS="hangul-word"
+            testID="ask-mac-face-id-note">
+            {FACE_ID_NOTE}
           </Text>
-        ) : null}
-        {!pending && folderId === null ? (
-          <Text style={styles.hint} testID="ask-mac-hint">
-            {NEED_FOLDER_HINT}
-          </Text>
-        ) : !pending && channelId === null ? (
-          <Text style={styles.hint} testID="ask-mac-hint">
-            {NEED_CHANNEL_HINT}
-          </Text>
-        ) : null}
-        <Text style={styles.rule}>{FACE_ID_NOTE}</Text>
+        </View>
 
         {state.macs.length > 1 ? (
-          <View style={styles.gap}>
-            <GroupSection label="어느 맥으로" testID="ask-mac-macs">
-              {state.macs.map((mac, index) => {
-                const on = activeMac !== null && mac.id === activeMac.id;
-                return (
-                  <GroupRow
-                    key={mac.id}
-                    title={mac.displayName}
-                    separated={index > 0}
-                    accessibilityRole="radio"
-                    accessibilityState={{selected: on}}
-                    onPress={() => {
-                      haptics.selection();
-                      setMacId(mac.id);
-                      setFolderPick(null);
-                    }}
-                    trailing={<Check on={on} />}
-                    testID={`ask-mac-mac-${mac.id}`}
-                  />
-                );
-              })}
-            </GroupSection>
-          </View>
-        ) : null}
-
-        <View style={styles.gap}>
-          <GroupSection label="도구" testID="ask-mac-harnesses">
-            {harnesses.map((key, index) => (
-              <GroupRow
-                key={key}
-                title={HARNESS_LABEL[key]}
-                separated={index > 0}
-                accessibilityRole="radio"
-                accessibilityState={{selected: harness === key}}
-                onPress={() => {
-                  haptics.selection();
-                  setHarnessPick(key);
-                }}
-                trailing={<Check on={harness === key} />}
-                testID={`ask-mac-harness-${key}`}
-              />
-            ))}
-          </GroupSection>
-        </View>
-
-        {folderOptions.length > 0 ? (
-          <View style={styles.gap}>
-            <GroupSection
-              label={mode === 'work' ? '어느 폴더에서' : '질문용 폴더를 골라 주세요'}
-              testID="ask-mac-folders"
-            >
-              {folderOptions.map((folder, index) => (
-                <GroupRow
-                  key={folder.id}
-                  title={folder.displayName}
-                  separated={index > 0}
-                  accessibilityRole="radio"
-                  accessibilityState={{selected: folderId === folder.id}}
+          <GroupCard label="어느 맥으로" testID="ask-mac-macs">
+            {state.macs.map(mac => {
+              const on = activeMac !== null && mac.id === activeMac.id;
+              return (
+                <ChoiceRow
+                  key={mac.id}
+                  title={mac.displayName}
+                  selected={on}
                   onPress={() => {
                     haptics.selection();
-                    setFolderPick(folder.id);
-                    setChannelPick(null);
+                    setMacId(mac.id);
+                    setFolderPick(null);
                   }}
-                  trailing={<Check on={folderId === folder.id} />}
-                  testID={`ask-mac-folder-${folder.id}`}
+                  testID={`ask-mac-mac-${mac.id}`}
                 />
-              ))}
-            </GroupSection>
-          </View>
-        ) : activeMac !== null && folderId === null ? (
-          <View style={styles.gap}>
-            <NoticeBlock
-              headline={
-                mode === 'work'
-                  ? projectFolders(activeMac).length === 0
-                    ? '이 맥에 허용된 프로젝트 폴더가 없어요. 맥 앱에서 폴더를 추가해 주세요.'
-                    : '프로젝트 폴더를 골라 주세요.'
-                  : '이 맥에서 쓸 폴더가 없어요. 맥 앱을 확인해 주세요.'
-              }
-              testID="ask-mac-no-folder"
-            />
-          </View>
+              );
+            })}
+          </GroupCard>
         ) : null}
 
-        <View style={styles.gap}>
-          <GroupSection label="어느 채널에 남길까요" testID="ask-mac-channels">
-            {channelOptions.length === 0 ? (
-              <GroupRow title="들어 있는 채널이 없어요" disabled />
-            ) : (
-              channelOptions.map((channel, index) => {
-                const on = channelId !== null && uuidEq(channelId, channel.id);
-                return (
-                  <GroupRow
-                    key={channel.id}
-                    title={`#${channel.name ?? '이름 없는 채널'}`}
-                    detail={channelReach(channel)}
-                    separated={index > 0}
-                    accessibilityRole="radio"
-                    accessibilityState={{selected: on}}
-                    onPress={() => {
-                      haptics.selection();
-                      setChannelPick(channel.id);
-                    }}
-                    trailing={<Check on={on} />}
-                    testID={`ask-mac-channel-${channel.name ?? channel.id}`}
-                  />
-                );
-              })
-            )}
-          </GroupSection>
-        </View>
+        <GroupCard label="도구" testID="ask-mac-harnesses">
+          {harnesses.map(key => (
+            <ChoiceRow
+              key={key}
+              title={HARNESS_LABEL[key]}
+              selected={harness === key}
+              onPress={() => {
+                haptics.selection();
+                setHarnessPick(key);
+              }}
+              testID={`ask-mac-harness-${key}`}
+            />
+          ))}
+        </GroupCard>
 
-      </ScrollView>
-    </View>
+        {folderOptions.length > 0 ? (
+          <GroupCard
+            label={mode === 'work' ? '어느 폴더에서' : '질문용 폴더를 골라 주세요'}
+            testID="ask-mac-folders"
+          >
+            {folderOptions.map(folder => (
+              <ChoiceRow
+                key={folder.id}
+                title={folder.displayName}
+                selected={folderId === folder.id}
+                onPress={() => {
+                  haptics.selection();
+                  setFolderPick(folder.id);
+                  setChannelPick(null);
+                }}
+                testID={`ask-mac-folder-${folder.id}`}
+              />
+            ))}
+          </GroupCard>
+        ) : activeMac !== null && folderId === null ? (
+          <SheetNotice
+            headline={
+              mode === 'work'
+                ? projectFolders(activeMac).length === 0
+                  ? '이 맥에 허용된 프로젝트 폴더가 없어요. 맥 앱에서 폴더를 추가해 주세요.'
+                  : '프로젝트 폴더를 골라 주세요.'
+                : '이 맥에서 쓸 폴더가 없어요. 맥 앱을 확인해 주세요.'
+            }
+            testID="ask-mac-no-folder"
+          />
+        ) : null}
+
+        <GroupCard label="어느 채널에 남길까요" testID="ask-mac-channels">
+          {channelOptions.length === 0 ? (
+            <ListRow title="들어 있는 채널이 없어요" />
+          ) : (
+            channelOptions.map(channel => {
+              const on = channelId !== null && uuidEq(channelId, channel.id);
+              return (
+                <ChoiceRow
+                  key={channel.id}
+                  title={`#${channel.name ?? '이름 없는 채널'}`}
+                  detail={channelReach(channel)}
+                  selected={on}
+                  onPress={() => {
+                    haptics.selection();
+                    setChannelPick(channel.id);
+                  }}
+                  testID={`ask-mac-channel-${channel.name ?? channel.id}`}
+                />
+              );
+            })
+          )}
+        </GroupCard>
+      </SheetScroll>
+    </>
   );
 }
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    fill: {flex: 1},
-    list: {paddingBottom: space.xl * 2},
-    gap: {marginTop: space.lg},
+    // 「보낼 곳」 카드의 안쪽.
     destination: {
-      marginHorizontal: SAFE_GUTTER,
-      paddingHorizontal: space.md,
-      paddingVertical: space.md,
-      borderRadius: ds2Radius.card,
-      backgroundColor: color.surface,
       gap: space.xs,
-    },
-    destinationLabel: {
-      fontSize: font.label,
-      color: color.textMuted,
-      fontWeight: '700',
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
     },
     destinationValue: {
       fontSize: font.body,
       color: color.text,
       fontWeight: '600',
     },
-    bannerWrap: {marginTop: space.lg, marginHorizontal: SAFE_GUTTER},
-    suggest: {
-      marginTop: space.lg,
-      marginHorizontal: SAFE_GUTTER,
-      fontSize: font.label,
-      color: color.textMuted,
-    },
-    suggestAction: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-      alignSelf: 'flex-start',
-    },
-    waitAction: {
-      marginTop: space.md,
-      marginHorizontal: SAFE_GUTTER,
-      alignSelf: 'flex-start',
-    },
     destinationPlace: {fontSize: font.label, color: color.textMuted},
-    waitNote: {
-      marginTop: space.md,
-      marginHorizontal: SAFE_GUTTER,
+    // 카드 밖의 한 문단(안내·각주).
+    note: {
+      paddingHorizontal: space.xs,
       fontSize: font.label,
+      lineHeight: line.label,
       color: color.textMuted,
     },
+    // 입력 한 칸의 묶음: 라벨 · 상자 · 실패 · 힌트 · 규칙.
+    field: {gap: space.sm},
     hint: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
       color: color.warn,
     },
-    input: {
-      minHeight: 132,
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-      paddingVertical: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-      fontSize: font.body,
-      color: color.text,
-    },
-    inputError: {borderColor: color.dangerText},
     issue: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
       color: color.dangerText,
     },
     rule: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
       color: color.textMuted,
     },
   });
-

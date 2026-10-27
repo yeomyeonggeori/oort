@@ -11,6 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { Tooltip } from "@/design/ui/tooltip";
 import { clampGainPercent } from "./micGain";
 import { useAudioInputDevices } from "./useAudioInputDevices";
 
@@ -70,11 +71,10 @@ export function HuddleMicMenu({
     <button
       type="button"
       aria-label={HUDDLE_MIC_PICKER_LABEL}
-      title={HUDDLE_MIC_PICKER_LABEL}
       aria-busy={busy || undefined}
       disabled={locked}
       data-testid="huddle-mic-devices"
-      className="flex h-control w-6 shrink-0 items-center justify-center border-l border-line-strong text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink disabled:pointer-events-none disabled:opacity-50"
+      className="flex h-control w-6 shrink-0 items-center justify-center rounded-e-sm border-l border-line-strong text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink disabled:pointer-events-none disabled:opacity-50"
     >
       {busy ? (
         <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
@@ -88,7 +88,6 @@ export function HuddleMicMenu({
       variant="outline"
       size="icon"
       aria-label={HUDDLE_MIC_PICKER_LABEL}
-      title={HUDDLE_MIC_PICKER_LABEL}
       aria-busy={busy || undefined}
       disabled={locked}
       data-testid="huddle-mic-devices"
@@ -102,15 +101,16 @@ export function HuddleMicMenu({
     </Button>
   );
 
+  // 툴팁은 트리거 바깥, 방향은 아래다(#4591). 네이티브 `title`은 두지 않는다: 같은 말이 두 번 뜬다.
+  const tipped = (
+    <Tooltip label={HUDDLE_MIC_PICKER_LABEL} side="bottom">
+      <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
+    </Tooltip>
+  );
+
   return (
     <DropdownMenu>
-      {split ? (
-        <div className="wide-only">
-          <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-        </div>
-      ) : (
-        <DropdownMenuTrigger asChild>{trigger}</DropdownMenuTrigger>
-      )}
+      {split ? <div className="wide-only">{tipped}</div> : tipped}
       <DropdownMenuContent
         align="end"
         data-testid="huddle-mic-menu"

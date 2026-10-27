@@ -7,13 +7,16 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {
+  AGENT_SUGGEST_LABEL,
   defaultHarness,
   findSpawnedSession,
   labelFromPrompt,
@@ -27,7 +30,13 @@ import {
   type SpawnRequest,
 } from '../src/features/work/ask/spawnPort';
 import {SessionProvider} from '../src/session/useSession';
+import {GroupRow, GroupSection, NoticeBlock, OutlineButton} from '../src/design/atoms';
+import {GroupCard, ListRow} from '../src/design/sheetParts';
 import {AskMacSheet} from '../src/shell/AskMacSheet';
+import {SheetNotice, TextArea} from '../src/shell/sheetForm';
+import {SHEET_ICONS} from '../src/design/icons';
+import {lightPalette} from '../src/design/tokens';
+import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {NON_SECRET_KEYS, nonSecretStore} from '../src/storage/kv';
@@ -277,7 +286,9 @@ describe('② 맥이 꺼져 있으면 보내기가 막히고 에이전트만 제
     // 자동 전환이 아니다: 누르기 전에는 에이전트 시트로 가지 않았다.
     expect(handlers.onUseAgent).not.toHaveBeenCalled();
     fireEvent.press(screen.getByTestId('ask-mac-use-agent'));
-    expect(handlers.onUseAgent).toHaveBeenCalledTimes(1);
+    // 시트가 먼저 미끄러져 내려간 뒤에 N8 로 간다(#4458) — 누른 순간에는 아직 부르지 않는다.
+    expect(handlers.onUseAgent).not.toHaveBeenCalled();
+    await waitFor(() => expect(handlers.onUseAgent).toHaveBeenCalledTimes(1), {timeout: 8000});
     expect(port.spawn).not.toHaveBeenCalled();
   });
 
@@ -581,6 +592,33 @@ describe('보낼 글과 집 채널', () => {
     expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
   });
 
+  it('오류·힌트(채널·폴더)·Face ID 안내 줄은 어절 단위로 접는다 — 같은 시트의 다른 문장과 같은 규칙이다 (design-review r2 L2)', async () => {
+    installFetch({});
+    const {port} = fakePort();
+    mount(port);
+    await screen.findByTestId('ask-mac-form');
+    const hint = () => screen.getByTestId('ask-mac-hint');
+    // 채널을 고르기 전: 이유를 말하는 힌트(채널 갈래)와 늘 서 있는 Face ID 안내.
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), '질문');
+    expect(hint()).toHaveTextContent(/어느 채널에 남길지/);
+    expect(hint().props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(screen.getByTestId('ask-mac-face-id-note').props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 작업 요청 모드에서 채널만 고르면 다른 갈래의 힌트(폴더).
+    fireEvent.press(screen.getByTestId('ask-mac-mode-work'));
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    expect(hint()).toHaveTextContent(/폴더를 골라야/);
+    expect(hint().props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 보내기 전에 글 검사가 막으면(「/」로 시작) 그 자리의 오류 줄.
+    fireEvent.press(screen.getByTestId('ask-mac-folder-fld_app'));
+    fireEvent.press(screen.getByTestId('ask-mac-channel-개발'));
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), '/compact');
+    expect(screen.getByTestId('ask-mac-send')).toBeEnabled();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    expect((await screen.findByTestId('ask-mac-issue')).props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
   it('Face ID를 취소하면 오류 배너 없이 폼으로 돌아온다', async () => {
     installFetch({});
     mount(fakePort({kind: 'cancelled', sentence: 'x'}).port);
@@ -634,4 +672,135 @@ describe('보낼 글과 집 채널', () => {
       ).map(mac => mac.id),
     ).toEqual([MAC]);
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+describe('내 맥에 보내기 — 공용 부품 (#4458)', () => {
+  it('머리의 왼쪽 ✓ 가 「보내기」이고(고르기 전 회색), 옛 오른쪽 글자 「보내기」 단추는 없다', async () => {
+    installFetch({});
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    const send = screen.getByTestId('ask-mac-send');
+    expect(send.props.accessibilityRole).toBe('button');
+    expect(send.props.accessibilityLabel).toBe('보내기');
+    expect(send.props.accessibilityState).toMatchObject({disabled: true});
+    expect(screen.queryByText('보내기')).toBeNull();
+    await pickChannelAndType();
+    expect(screen.getByTestId('ask-mac-send').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('보내는 동안 ✓ 자리에 스피너가 서고 이름이 「보내는 중」이며, 다시 눌러도 전송은 한 번이다', async () => {
+    installFetch({});
+    // 포트가 끝내 답하지 않는다 — 보내는 중 상태를 붙든다.
+    const spawn = jest.fn(() => new Promise<SpawnOutcome>(() => {}));
+    mount({wired: true, spawn} as SpawnPort);
+    await screen.findByTestId('ask-mac-form');
+    await pickChannelAndType();
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    await waitFor(() => expect(spawn).toHaveBeenCalledTimes(1));
+    const send = screen.getByTestId('ask-mac-send');
+    expect(send.props.accessibilityLabel).toBe('보내는 중');
+    expect(send.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    // **그려진** 모양: ✓ 글리프는 없고 스피너가 선다.
+    expect(imageSources(send)).toEqual([]);
+    expect(screen.getByTestId('ask-mac-send-busy')).toBeTruthy();
+    fireEvent.press(send);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it('방식·도구·폴더·채널은 묶음 카드의 라디오 행이고 묶음마다 하나만 고른 상태다 — 옛 GroupSection·GroupRow·NoticeBlock 은 없다', async () => {
+    installFetch({});
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    await screen.findByTestId('ask-mac-channel-개발');
+    expect(screen.UNSAFE_queryAllByType(GroupSection)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(GroupRow)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(NoticeBlock)).toHaveLength(0);
+    // **그려진** 상태로 센다: 보조기술이 읽는 selected 와 ✓ 글리프가 함께 하나뿐이다(부품이 prop 을 무시하면 붉어진다).
+    for (const group of ['ask-mac-modes', 'ask-mac-harnesses']) {
+      const rows = radioRows(within(screen.getByTestId(group)));
+      expect([group, rows.length > 0]).toEqual([group, true]);
+      expect(rows.filter(row => row.selected)).toHaveLength(1);
+      for (const row of rows) expect([row.testID, row.checks]).toEqual([row.testID, row.selected ? 1 : 0]);
+    }
+    // 채널은 아직 고르지 않았다(처음이면 고르게 한다) — 고른 줄도 ✓ 도 없다.
+    const channels = radioRows(within(screen.getByTestId('ask-mac-channels')));
+    expect(channels.length).toBeGreaterThan(0);
+    expect(channels.filter(row => row.selected || row.checks > 0)).toHaveLength(0);
+    // 일을 시키는 방식으로 바꾸면 프로젝트 폴더 묶음이 서고, 그것도 라디오 행이다 — 처음 쓰는 폴더라 아직 고른 줄이 없다.
+    fireEvent.press(screen.getByTestId('ask-mac-mode-work'));
+    const folders = radioRows(within(screen.getByTestId('ask-mac-folders')));
+    expect(folders).toEqual([
+      {testID: 'ask-mac-folder-fld_app', selected: false, checks: 0},
+      {testID: 'ask-mac-folder-fld_docs', selected: false, checks: 0},
+    ]);
+    // 누르면 ✓ 가 그 줄에 선다.
+    fireEvent.press(screen.getByTestId('ask-mac-folder-fld_docs'));
+    expect(radioRows(within(screen.getByTestId('ask-mac-folders')))).toEqual([
+      {testID: 'ask-mac-folder-fld_app', selected: false, checks: 0},
+      {testID: 'ask-mac-folder-fld_docs', selected: true, checks: 1},
+    ]);
+    // 다른 줄을 누르면 ✓ 가 옮겨 간다 — 둘이 함께 서 있지 않다.
+    fireEvent.press(screen.getByTestId('ask-mac-folder-fld_app'));
+    expect(radioRows(within(screen.getByTestId('ask-mac-folders')))).toEqual([
+      {testID: 'ask-mac-folder-fld_app', selected: true, checks: 1},
+      {testID: 'ask-mac-folder-fld_docs', selected: false, checks: 0},
+    ]);
+    expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(5);
+  });
+
+  it('물어볼 것은 여러 줄 입력 상자이고, 보낼 글이 규칙을 어기면 외곽선이 실패색이 된다', async () => {
+    installFetch({});
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+    expect(screen.UNSAFE_getAllByType(TextArea)).toHaveLength(1);
+    // **그려진** 외곽선 색으로 잰다(부품이 invalid 를 무시하면 붉어진다): 평소는 입력 그릇의 textFaint(3:1), 실패하면 dangerText.
+    const outline = () => StyleSheet.flatten(screen.getByTestId('ask-mac-prompt').props.style).borderColor;
+    expect(outline()).toBe(lightPalette.textFaint);
+    fireEvent.press(await screen.findByTestId('ask-mac-channel-개발'));
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('ask-mac-send'));
+    });
+    await screen.findByTestId('ask-mac-issue');
+    expect(outline()).toBe(lightPalette.dangerText);
+    // 다시 고치면 풀린다.
+    fireEvent.changeText(screen.getByTestId('ask-mac-prompt'), '이 에러가 무슨 뜻이야?');
+    expect(outline()).toBe(lightPalette.textFaint);
+  });
+
+  it('맥이 꺼져 있을 때의 안내는 카드이고, 에이전트로 가는 길은 글자 단추가 아니라 행이다', async () => {
+    installFetch({hosts: [hostWire({online: false})]});
+    mount(fakePort().port);
+    await screen.findByTestId('ask-mac-off');
+    expect(screen.UNSAFE_getAllByType(SheetNotice)).toHaveLength(1);
+    expect(screen.UNSAFE_queryAllByType(NoticeBlock)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(OutlineButton)).toHaveLength(0);
+    const rows = screen.UNSAFE_getAllByType(ListRow);
+    expect(rows.map(row => row.props.testID)).toEqual(['ask-mac-use-agent']);
+    // 그려진 모양: 이름과 오른쪽 셰브론. (시트를 먼저 내리는 동작은 위 ② 시험이 누름으로 잰다.)
+    const row = screen.getByTestId('ask-mac-use-agent');
+    expect(within(row).getByText(AGENT_SUGGEST_LABEL)).toBeTruthy();
+    expect(imageSources(row)).toEqual([SHEET_ICONS.chevron]);
+  });
+});
+
+let lastAskMount: ReturnType<typeof mount> | null = null;
+
+describeCloseContract({
+  name: 'AskMacSheet',
+  open: async () => {
+    installFetch({});
+    lastAskMount = mount(fakePort().port);
+    await screen.findByTestId('ask-mac-form');
+  },
+  closedCount: () => lastAskMount?.onClose.mock.calls.length ?? 0,
+  closeTestID: 'ask-mac-close',
+  closeLabel: '내 맥에 보내기 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '내 맥에 보내기 닫기',
 });

@@ -3207,7 +3207,8 @@ export async function fetchAttachmentContent(
   workspaceId: string,
   channelId: string,
   attachmentId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onProgress?: AttachmentProgress
 ): Promise<Blob> {
   const path = `${attachmentPath(workspaceId, channelId)}/${encodeURIComponent(
     attachmentId
@@ -3226,7 +3227,47 @@ export async function fetchAttachmentContent(
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
-  return res.blob();
+  return onProgress === undefined ? res.blob() : readBlobWithProgress(res, onProgress);
+}
+
+/**
+ * 받은 바이트 수(`loaded`)와 전체(`total`). 전체는 서버가 `Content-Length`로 알려 준 값이고,
+ * 알려 주지 않았거나(교차 출처 응답은 그 헤더를 노출해야 읽힌다) 압축된 응답이라 헤더가 풀린
+ * 바이트 수를 말하지 않으면 `null`이다. 그때는 부르는 쪽이 아는 크기(첨부 메타)로 가늠한다.
+ */
+export type AttachmentProgress = (loaded: number, total: number | null) => void;
+
+/**
+ * 본문을 스트림으로 읽으며 진행을 알린다. `res.blob()`과 같은 값을 돌려주되 바이트가 오는 동안
+ * 몇 번째까지 왔는지 말한다 — 잰 값 없이 퍼센트를 만들지 않는다(데스크탑 다운로드 패널, #4587).
+ * 스트림이 없는 런타임은 다 받은 뒤 한 번만 알린다.
+ */
+async function readBlobWithProgress(
+  res: Response,
+  onProgress: AttachmentProgress
+): Promise<Blob> {
+  const declared = Number(res.headers.get("content-length"));
+  const encoded = (res.headers.get("content-encoding") ?? "").trim() !== "";
+  const total = !encoded && Number.isFinite(declared) && declared > 0 ? declared : null;
+  const type = res.headers.get("content-type") ?? "";
+  const stream = res.body;
+  if (stream === null) {
+    const blob = await res.blob();
+    onProgress(blob.size, total ?? blob.size);
+    return blob;
+  }
+  const reader = stream.getReader();
+  const chunks: BlobPart[] = [];
+  let loaded = 0;
+  onProgress(0, total);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value as BlobPart);
+    loaded += value.byteLength;
+    onProgress(loaded, total);
+  }
+  return new Blob(chunks, { type });
 }
 
 // ---- 워크스페이스 아바타 (ADR-0161 D5) --------------------------------------

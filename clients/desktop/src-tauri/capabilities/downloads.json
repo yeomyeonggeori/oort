@@ -1,0 +1,20 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "downloads",
+  "description": "The download panel's native half (#4587): write one downloaded attachment into the OS Downloads folder, ask which saved files are still there, reveal or open a saved file, open the Downloads folder. The webview names a file only by its bare name, and the shell resolves it inside the Downloads folder (no path from the page, a symlink or anything outside the folder is refused; files that run or install are not opened). For the main window's own webview (label `main`) on the bundled (local) origin only, scoped by webview like pty.json so a child webview does not inherit it. No `remote` entry, and no `fs:*` or `opener:*` permission: the webview has no general file access.",
+  "webviews": [
+    "main"
+  ],
+  "platforms": [
+    "macOS",
+    "windows",
+    "linux"
+  ],
+  "permissions": [
+    "allow-download-save",
+    "allow-download-probe",
+    "allow-download-reveal",
+    "allow-download-open",
+    "allow-download-folder-open"
+  ]
+}

@@ -79,6 +79,12 @@ mod opener;
 // platform" shape as `opener`, for bytes the webview cannot show itself.
 #[cfg(desktop)]
 mod pdf_viewer;
+// Saving an attachment into the Downloads folder and showing / opening / probing
+// what is there (#4587): the same "hand it to the platform" shape, for the files
+// the top-right download panel lists. Reachable only through the five
+// `download_*` commands, which only `capabilities/downloads.json` grants.
+#[cfg(desktop)]
+mod downloads;
 // Local terminal lane (ADR-0190 D1·D2, #2772): the app process opens the PTY,
 // the webview draws it. Reachable only through the five `pty_*` commands,
 // which only `capabilities/pty.json` grants.
@@ -194,6 +200,11 @@ pub fn run() {
             session_refresh::session_revoke,
             opener::open_external_url,
             pdf_viewer::open_pdf_attachment,
+            downloads::download_save,
+            downloads::download_probe,
+            downloads::download_reveal,
+            downloads::download_open,
+            downloads::download_folder_open,
             detect::detect_hosted_agents,
             harness_status::detect_local_harnesses,
             terminal_app::open_terminal_app,
