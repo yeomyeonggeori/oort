@@ -208,6 +208,8 @@ export function ListRow({
   busy = false,
   accessibilityLabel,
   accessibilityHint,
+  accessibilityRole,
+  trailing,
   testID,
 }: {
   title: string;
@@ -240,6 +242,17 @@ export function ListRow({
   busy?: boolean;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  /**
+   * 눌리는 행이 보조기술에 말하는 역할. 기본은 `button`이고, 이 앱 밖(브라우저)으로 나가는 행은 `link` 다(옛 PR 이동 행이
+   * 그랬다). 토글 행은 늘 `switch` 이고 이 값은 듣지 않는다. 눌리지 않는 행에는 역할이 없다.
+   */
+  accessibilityRole?: React.ComponentProps<typeof Pressable>['accessibilityRole'];
+  /**
+   * 오른쪽 임의 노드 — 값(`value`) 뒤·셰브론 앞에 서는 칩·배지 같은 **표식**(AI 시트의 「내 맥 켜짐」·「개인」). 글자만
+   * 이면 `value` 를 쓴다. **보조기술 이름에 들어가지 않는다**(`value` 만 기본 이름에 들어간다): 표식의 글자를 읽혀야 하면
+   * `accessibilityLabel` 에 넣는다. 표식은 색만으로 말하지 않는다 — 글자가 상태를 말한다.
+   */
+  trailing?: React.ReactNode;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -300,6 +313,7 @@ export function ListRow({
           {value}
         </Text>
       ) : null}
+      {trailing}
       {accessory === 'chevron' ? (
         <Image source={SHEET_ICONS.chevron} style={styles.chevron} accessibilityElementsHidden />
       ) : null}
@@ -337,7 +351,7 @@ export function ListRow({
   }
   return (
     <Pressable
-      accessibilityRole={isToggle ? 'switch' : 'button'}
+      accessibilityRole={isToggle ? 'switch' : accessibilityRole ?? 'button'}
       accessibilityLabel={accessibilityLabel ?? spokenName}
       accessibilityHint={accessibilityHint}
       accessibilityState={{
@@ -626,7 +640,7 @@ export function ConfirmStep({
           onPress={onCancel}
           style={({pressed}) => [styles.secondary, pressed && styles.confirmPressed]}
           testID={cancelTestID}>
-          <Text style={styles.secondaryLabel}>{cancelLabel}</Text>
+          <Sentence style={styles.secondaryLabel}>{cancelLabel}</Sentence>
         </Pressable>
         <Pressable
           accessibilityRole="button"
@@ -636,7 +650,7 @@ export function ConfirmStep({
           onPress={onConfirm}
           style={({pressed}) => [styles.destructive, pressed && styles.confirmPressed]}
           testID={confirmTestID}>
-          <Text style={styles.destructiveLabel}>{pending ? pendingLabel : confirmLabel}</Text>
+          <Sentence style={styles.destructiveLabel}>{pending ? pendingLabel : confirmLabel}</Sentence>
         </Pressable>
       </View>
     </>
@@ -881,22 +895,26 @@ const buildStyles = (color: Palette) =>
       minHeight: TOUCH_TARGET,
       alignItems: 'center',
       justifyContent: 'center',
+      // r6-M2: 라벨이 테두리에 붙지 않게 가로 여백을 준다(큰 글씨에서 두 줄이 될 때).
+      paddingHorizontal: space.sm,
       borderRadius: radius.md,
       borderWidth: 1,
       borderColor: color.border,
     },
-    secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
+    // r6-M2: `Sentence`(hangul-word)라 AX5 에서 「채널 나 / 가기」가 아니라 「채널 / 나가기」로 어절 단위로 접는다.
+    secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600', textAlign: 'center'},
     destructive: {
       flex: 1,
       minHeight: TOUCH_TARGET,
       alignItems: 'center',
       justifyContent: 'center',
+      paddingHorizontal: space.sm,
       borderRadius: radius.md,
       borderWidth: 1,
       borderColor: color.dangerBorder,
       backgroundColor: color.dangerSurface,
     },
-    destructiveLabel: {fontSize: font.label, color: color.danger, fontWeight: '700'},
+    destructiveLabel: {fontSize: font.label, color: color.danger, fontWeight: '700', textAlign: 'center'},
     confirmPressed: {opacity: 0.6},
     scrollContent: {
       paddingHorizontal: SAFE_GUTTER,
