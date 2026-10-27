@@ -93,16 +93,22 @@
 //!
 //! **The join stands in line with every membership change.** The transaction's
 //! first statement takes the workspace's membership lock in shared mode
-//! ([`crate::share_membership_state`]), the lock every suspend, reinstatement,
+//! ([`crate::try_share_membership_state`]), the lock every suspend, reinstatement,
 //! removal, self-leave and role change already takes exclusively as *its* first
-//! statement. A join therefore sees a workspace wholly before such a change or
-//! wholly after it: an operator who is first makes the join read the new state (and
-//! refuse it), and a join that is first makes the operator wait, then revoke the
-//! session the join just recorded and delete the rows it wrote. Without the lock a
-//! removal could land between the gate and the role-escalation check and leave the
-//! invite's role on the removed member. (A row lock on the member was tried first
-//! and deadlocked with self-leave, which deletes the membership rows before it
-//! touches the member; the advisory lock has no row order to get wrong.)
+//! statement (and so do the claim and the password change, which end the member's
+//! other sessions as they write the credential). A join therefore sees a workspace
+//! wholly before such a change or wholly after it: an operator who is first makes the
+//! join read the new state (and refuse it), and a join that is first makes the operator
+//! wait, then revoke the session the join just recorded and delete the rows it wrote.
+//! Without the lock a removal could land between the gate and the role-escalation check
+//! and leave the invite's role on the removed member. (A row lock on the member was
+//! tried first and deadlocked with self-leave, which deletes the membership rows before
+//! it touches the member; the advisory lock has no row order to get wrong.)
+//!
+//! **The join does not wait for the lock.** It is a door anyone can reach, and a wait
+//! keeps a pooled connection. A join that finds the lock held — or a change queued for
+//! it — is refused with [`JoinRejection::MembershipBusy`] (503, `Retry-After`) before it
+//! has read or written anything (ADR-0215 증보 2 K5).
 //!
 //! **The session is recorded in this same transaction** (the route does it, on the
 //! connection that holds the lock). If it were minted afterwards, a suspension or
@@ -155,7 +161,7 @@ use sqlx::PgConnection;
 use uuid::Uuid;
 
 use crate::invite::{read_invite, InviteCode};
-use crate::workspace::share_membership_state;
+use crate::workspace::try_share_membership_state;
 
 // ---------------------------------------------------------------------------
 // request-shape validation (Swift `JoinRoutes` :724-819 + `InviteRoutes.normalizedCode`)
@@ -419,6 +425,12 @@ pub enum JoinRejection {
     /// nothing.
     #[error("workspace has no joinable public channels")]
     NoPublicChannels,
+    /// `503` — a change to the workspace's membership holds the lock the join stands
+    /// in line for, or is queued for it, and the join does not wait (ADR-0215 증보 2
+    /// K5). Nothing was read or written. The sentence is the one every door that
+    /// answers this carries (`ApiError::busy`).
+    #[error("the server is busy; retry shortly")]
+    MembershipBusy,
 }
 
 impl JoinRejection {
@@ -441,6 +453,7 @@ impl JoinRejection {
             | JoinRejection::RoleEscalation
             | JoinRejection::NotHuman
             | JoinRejection::HumanIneligible => 403,
+            JoinRejection::MembershipBusy => 503,
         }
     }
 
@@ -464,7 +477,8 @@ impl JoinRejection {
             | JoinRejection::HumanIneligible
             | JoinRejection::PasswordGuessLimited { .. }
             | JoinRejection::HandleTaken
-            | JoinRejection::NoPublicChannels => None,
+            | JoinRejection::NoPublicChannels
+            | JoinRejection::MembershipBusy => None,
         }
     }
 }
@@ -643,8 +657,11 @@ pub async fn redeem_invite_in_tx(
     guess_budget: &dyn PasswordGuessBudget,
 ) -> Result<JoinOutcome, JoinError> {
     // 0) Stand in line with the membership mutations (see the module's "the join
-    //    stands in line" paragraph). First, before any read the rest relies on.
-    share_membership_state(conn, workspace_id).await?;
+    //    stands in line" paragraph). First, before any read the rest relies on — and
+    //    without waiting: a lock that is not free is a 503, not a held connection.
+    if !try_share_membership_state(conn, workspace_id).await? {
+        return Err(JoinRejection::MembershipBusy.into());
+    }
 
     // 1) Resolve AND lock in one statement. Swift resolves unlocked
     //    (`findInvite` :216-267) and re-reads `FOR UPDATE` by id inside the

@@ -35,13 +35,13 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use momo_auth::IssuedToken;
 use momo_auth::{
     active_workspace_role, change_own_password_in_tx, issue_password_reset_in_tx,
     mint_owner_claim_token, normalized_current_password, normalized_new_password,
     IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError, Principal,
     CLAIM_KIND_PASSWORD_RESET,
 };
-use momo_auth::IssuedToken;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_messaging::{get_member, Member, RevocationCause};
 use momo_settings::lock_membership_mutation;

@@ -193,7 +193,15 @@ async fn world(label: &str, member_password: Option<&str>, pool_width: u32) -> W
 
     let owner = Uuid::new_v4();
     let owner_email = format!("owner-{owner}@session-issue.test");
-    seed_human(&su, workspace, owner, "owner", &owner_email, Some(OWNER_PASSWORD)).await;
+    seed_human(
+        &su,
+        workspace,
+        owner,
+        "owner",
+        &owner_email,
+        Some(OWNER_PASSWORD),
+    )
+    .await;
     let channel = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO channel (id, workspace_id, kind, name, topic, created_by) \
@@ -224,7 +232,15 @@ async fn world(label: &str, member_password: Option<&str>, pool_width: u32) -> W
 
     let member = Uuid::new_v4();
     let member_email = format!("member-{member}@session-issue.test");
-    seed_human(&su, workspace, member, "member", &member_email, member_password).await;
+    seed_human(
+        &su,
+        workspace,
+        member,
+        "member",
+        &member_email,
+        member_password,
+    )
+    .await;
 
     let base = start_server(momo_app_pool_of(pool_width).await).await;
     let http = reqwest::Client::new();
@@ -613,10 +629,19 @@ async fn prepare(w: &World, issuer: Issuer, change: Change) -> Kit {
         change_claim: String::new(),
     };
     if issuer.member_has_password() {
-        let (status, body, _) =
-            api_login(&w.http, &w.base, w.workspace, &w.member_email, MEMBER_PASSWORD).await;
+        let (status, body, _) = api_login(
+            &w.http,
+            &w.base,
+            w.workspace,
+            &w.member_email,
+            MEMBER_PASSWORD,
+        )
+        .await;
         assert_eq!(status, 200, "the member signs in first: {body}");
-        kit.member_bearer = body["accessToken"].as_str().expect("access token").to_string();
+        kit.member_bearer = body["accessToken"]
+            .as_str()
+            .expect("access token")
+            .to_string();
     }
     match issuer {
         Issuer::Join => kit.invite_code = issue_invite(w).await,
@@ -655,7 +680,9 @@ fn spawn_issuer(w: &World, issuer: Issuer, kit: &Kit) -> JoinHandle<Reply> {
                 "timeZone": "Asia/Seoul",
             })),
             Issuer::PasswordChange => http
-                .patch(format!("{base}/v1/workspaces/{workspace}/members/me/password"))
+                .patch(format!(
+                    "{base}/v1/workspaces/{workspace}/members/me/password"
+                ))
                 .bearer_auth(bearer)
                 .json(&json!({
                     "currentPassword": MEMBER_PASSWORD,
@@ -679,7 +706,9 @@ fn spawn_change(w: &World, change: Change, kit: &Kit) -> JoinHandle<Reply> {
     tokio::spawn(async move {
         let request = match change {
             Change::Suspend => http
-                .post(format!("{base}/v1/workspaces/{workspace}/members/{member}/suspend"))
+                .post(format!(
+                    "{base}/v1/workspaces/{workspace}/members/{member}/suspend"
+                ))
                 .bearer_auth(owner_bearer),
             Change::Remove => http
                 .delete(format!("{base}/v1/workspaces/{workspace}/members/{member}"))
@@ -688,7 +717,9 @@ fn spawn_change(w: &World, change: Change, kit: &Kit) -> JoinHandle<Reply> {
                 .delete(format!("{base}/v1/workspaces/{workspace}/members/me"))
                 .bearer_auth(member_bearer),
             Change::ChangePassword => http
-                .patch(format!("{base}/v1/workspaces/{workspace}/members/me/password"))
+                .patch(format!(
+                    "{base}/v1/workspaces/{workspace}/members/me/password"
+                ))
                 .bearer_auth(member_bearer)
                 .json(&json!({
                     "currentPassword": MEMBER_PASSWORD,
@@ -784,9 +815,20 @@ async fn a_change_meets_a_door(issuer: Issuer, change: Change) {
         door.status,
         door.body
     );
-    assert_eq!(queued, 1, "{scene}: the change was queued behind the door, exclusively");
-    assert_eq!(door.status, 200, "{scene}: the door was first: {}", door.body);
-    assert_eq!(change_reply.status, 200, "{scene}: the change goes through: {}", change_reply.body);
+    assert_eq!(
+        queued, 1,
+        "{scene}: the change was queued behind the door, exclusively"
+    );
+    assert_eq!(
+        door.status, 200,
+        "{scene}: the door was first: {}",
+        door.body
+    );
+    assert_eq!(
+        change_reply.status, 200,
+        "{scene}: the change goes through: {}",
+        change_reply.body
+    );
 
     // The change is the last word.
     let door_access = door.body["accessToken"]
@@ -801,12 +843,24 @@ async fn a_change_meets_a_door(issuer: Issuer, change: Change) {
     match change {
         Change::Suspend => {
             assert_eq!(member_status(&w.su, w.member).await, "suspended", "{scene}");
-            assert_eq!(live_tokens(&w.su, w.member).await, 0, "{scene}: no session survives");
+            assert_eq!(
+                live_tokens(&w.su, w.member).await,
+                0,
+                "{scene}: no session survives"
+            );
         }
         Change::Remove | Change::SelfLeave => {
             assert_eq!(member_status(&w.su, w.member).await, "deleted", "{scene}");
-            assert_eq!(workspace_role(&w.su, w.member).await, None, "{scene}: no role survives");
-            assert_eq!(live_tokens(&w.su, w.member).await, 0, "{scene}: no session survives");
+            assert_eq!(
+                workspace_role(&w.su, w.member).await,
+                None,
+                "{scene}: no role survives"
+            );
+            assert_eq!(
+                live_tokens(&w.su, w.member).await,
+                0,
+                "{scene}: no session survives"
+            );
         }
         Change::ChangePassword | Change::ResetClaim => {
             assert_eq!(member_status(&w.su, w.member).await, "active", "{scene}");
@@ -819,11 +873,18 @@ async fn a_change_meets_a_door(issuer: Issuer, change: Change) {
             let new_access = change_reply.body["accessToken"]
                 .as_str()
                 .expect("the change answers with a new session");
-            assert_eq!(roster_status(&w, new_access).await, 200, "{scene}: the new pair works");
+            assert_eq!(
+                roster_status(&w, new_access).await,
+                200,
+                "{scene}: the new pair works"
+            );
         }
     }
     // A door that is itself a credential write left its own mark before the change ran.
-    if matches!(issuer, Issuer::PasswordChange | Issuer::ClaimReset | Issuer::ClaimBootstrap) {
+    if matches!(
+        issuer,
+        Issuer::PasswordChange | Issuer::ClaimReset | Issuer::ClaimBootstrap
+    ) {
         assert_ne!(
             password_hash(&w.su, w.member).await,
             hash_before,
@@ -859,6 +920,167 @@ scenes! {
     a_removal_that_meets_a_reset_claim_waits_for_it: ClaimReset, Remove;
     a_suspension_that_meets_a_first_claim_waits_for_it: ClaimBootstrap, Suspend;
     a_removal_that_meets_a_first_claim_waits_for_it: ClaimBootstrap, Remove;
+}
+
+// ---------------------------------------------------------------------------
+// 1b. the control: a door that meets no change issues a working session
+// ---------------------------------------------------------------------------
+
+/// The control for the scenes above. Held and let go with nothing arriving, every door
+/// answers with a session that works. Without it a door that recorded nothing at all would
+/// pass every scene: a pair that does not exist is revoked, and swept, trivially.
+async fn a_door_alone(issuer: Issuer) {
+    let scene = format!("{issuer:?} alone");
+    let w = world(
+        "session-issue-alone",
+        issuer.member_has_password().then_some(MEMBER_PASSWORD),
+        4,
+    )
+    .await;
+    let kit = prepare(&w, issuer, Change::Suspend).await;
+    let hold = hold_member_row(&w.su, w.member).await;
+    let door = spawn_issuer(&w, issuer, &kit);
+    wait_until("the door to stop on the member row", || async {
+        !blocked_by(&w.su, hold.pid).await.is_empty()
+    })
+    .await;
+    hold.release().await;
+    let door = door.await.expect("door task");
+    assert_eq!(door.status, 200, "{scene}: {}", door.body);
+    let access = door.body["accessToken"]
+        .as_str()
+        .expect("the door answers with a session");
+    assert_eq!(
+        roster_status(&w, access).await,
+        200,
+        "{scene}: the session works"
+    );
+    assert_eq!(member_status(&w.su, w.member).await, "active", "{scene}");
+}
+
+macro_rules! controls {
+    ($($name:ident: $issuer:ident;)*) => {$(
+        #[tokio::test]
+        #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+        async fn $name() {
+            a_door_alone(Issuer::$issuer).await;
+        }
+    )*};
+}
+
+controls! {
+    a_login_that_meets_no_change_issues_a_working_session: Login;
+    a_join_that_meets_no_change_issues_a_working_session: Join;
+    a_password_change_that_meets_no_change_issues_a_working_session: PasswordChange;
+    a_reset_claim_that_meets_no_change_issues_a_working_session: ClaimReset;
+    a_first_claim_that_meets_no_change_issues_a_working_session: ClaimBootstrap;
+}
+
+// ---------------------------------------------------------------------------
+// 1c. the lock comes before the first read of the account
+// ---------------------------------------------------------------------------
+
+/// Where a door is held to show it already has its lock: at a table the test holds
+/// (`ACCESS EXCLUSIVE`), or at the claim's own row.
+#[derive(Clone, Copy)]
+enum Park {
+    Table(&'static str),
+    ClaimRow,
+}
+
+async fn hold_for(su: &PgPool, park: Park, kit: &Kit) -> Hold {
+    let mut tx = su.begin().await.expect("begin the holding transaction");
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("the holder's backend id");
+    match park {
+        Park::Table(table) => {
+            sqlx::query(&format!("LOCK TABLE {table} IN ACCESS EXCLUSIVE MODE"))
+                .execute(&mut *tx)
+                .await
+                .expect("lock the table");
+        }
+        Park::ClaimRow => {
+            sqlx::query(
+                "SELECT 1 FROM credential_claim \
+                  WHERE token_hash = digest($1::text, 'sha256') FOR UPDATE",
+            )
+            .bind(&kit.issuer_claim)
+            .execute(&mut *tx)
+            .await
+            .expect("lock the claim row");
+        }
+    }
+    Hold { tx, pid }
+}
+
+/// A door is held at the first read of the account it makes after taking its lock — the
+/// password check of a login, the claim's own row, the standing check of a password change
+/// — and must already hold the lock there. A lock taken after that read would leave the
+/// read describing a workspace that a change can already have left.
+async fn a_door_locks_before_it_reads(issuer: Issuer, park: Park, statement_has: &str) {
+    let scene = format!("{issuer:?}");
+    let w = world(
+        "session-issue-lock-first",
+        issuer.member_has_password().then_some(MEMBER_PASSWORD),
+        4,
+    )
+    .await;
+    let kit = prepare(&w, issuer, Change::Suspend).await;
+
+    let hold = hold_for(&w.su, park, &kit).await;
+    let door = spawn_issuer(&w, issuer, &kit);
+    wait_until(
+        "the door to stop at its first read of the account",
+        || async { !blocked_by(&w.su, hold.pid).await.is_empty() },
+    )
+    .await;
+    let stopped = blocked_by(&w.su, hold.pid).await;
+    assert_eq!(
+        stopped.len(),
+        1,
+        "{scene}: exactly one request is stopped: {stopped:?}"
+    );
+    let (door_pid, door_statement) = &stopped[0];
+    assert!(
+        door_statement.contains(statement_has),
+        "{scene}: the door is held at its first read of the account: {door_statement}"
+    );
+    assert_eq!(
+        membership_modes_held_by(&w.su, w.workspace, *door_pid).await,
+        vec![issuer.lock_mode().to_string()],
+        "{scene}: the door already holds the membership lock ({}) when it first reads the account",
+        issuer.lock_mode()
+    );
+    hold.release().await;
+    let door = door.await.expect("door task");
+    assert_eq!(door.status, 200, "{scene}: {}", door.body);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_login_takes_its_lock_before_it_reads_the_account() {
+    a_door_locks_before_it_reads(Issuer::Login, Park::Table("human"), "FROM human h").await;
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_claim_takes_its_lock_before_it_judges_the_token() {
+    for issuer in [Issuer::ClaimReset, Issuer::ClaimBootstrap] {
+        a_door_locks_before_it_reads(issuer, Park::ClaimRow, "FOR UPDATE OF oc").await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_password_change_takes_its_lock_before_it_reads_the_standing() {
+    a_door_locks_before_it_reads(
+        Issuer::PasswordChange,
+        Park::Table("member"),
+        "FROM member WHERE id",
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -922,7 +1144,10 @@ async fn a_password_change_that_waited_for_a_suspension_refuses() {
         membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await > 0
     })
     .await;
-    assert!(!door.is_finished(), "the change waits for the open suspension");
+    assert!(
+        !door.is_finished(),
+        "the change waits for the open suspension"
+    );
     suspension.commit().await.expect("commit the suspension");
     let reply = door.await.expect("change task");
 
@@ -932,8 +1157,16 @@ async fn a_password_change_that_waited_for_a_suspension_refuses() {
         hash_before,
         "the password is untouched"
     );
-    assert_eq!(live_tokens(&w.su, w.member).await, 0, "no session was issued");
-    assert_eq!(password_changes_audited(&w.su, w.member).await, 0, "nothing was audited");
+    assert_eq!(
+        live_tokens(&w.su, w.member).await,
+        0,
+        "no session was issued"
+    );
+    assert_eq!(
+        password_changes_audited(&w.su, w.member).await,
+        0,
+        "nothing was audited"
+    );
 }
 
 /// A reset claim that waited for a suspension refuses the same way, and rolls everything
@@ -951,7 +1184,10 @@ async fn a_reset_claim_that_waited_for_a_suspension_is_refused_and_spends_nothin
         membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await > 0
     })
     .await;
-    assert!(!door.is_finished(), "the claim waits for the open suspension");
+    assert!(
+        !door.is_finished(),
+        "the claim waits for the open suspension"
+    );
     suspension.commit().await.expect("commit the suspension");
     let reply = door.await.expect("claim task");
 
@@ -971,7 +1207,11 @@ async fn a_reset_claim_that_waited_for_a_suspension_is_refused_and_spends_nothin
         hash_before,
         "the password is untouched"
     );
-    assert_eq!(live_tokens(&w.su, w.member).await, 0, "no session was issued");
+    assert_eq!(
+        live_tokens(&w.su, w.member).await,
+        0,
+        "no session was issued"
+    );
     let unspent: bool = sqlx::query_scalar(
         "SELECT consumed_at IS NULL FROM credential_claim \
           WHERE token_hash = digest($1::text, 'sha256')",
@@ -996,18 +1236,36 @@ async fn a_login_that_meets_a_change_in_flight_is_told_to_retry_and_then_the_new
     // wait is bounded and its end is the failure.
     let (status, body, retry_after) = tokio::time::timeout(
         Duration::from_secs(8),
-        api_login(&w.http, &w.base, w.workspace, &w.member_email, MEMBER_PASSWORD),
+        api_login(
+            &w.http,
+            &w.base,
+            w.workspace,
+            &w.member_email,
+            MEMBER_PASSWORD,
+        ),
     )
     .await
     .expect("the login answered instead of waiting for the lock");
     assert_eq!(status, 503, "the login does not wait for the lock: {body}");
     assert_eq!(retry_after, Some(1), "and says when to come back");
-    assert!(body.get("accessToken").is_none(), "no session in the answer: {body}");
+    assert!(
+        body.get("accessToken").is_none(),
+        "no session in the answer: {body}"
+    );
     suspension.commit().await.expect("commit the suspension");
 
-    let (status, body, _) =
-        api_login(&w.http, &w.base, w.workspace, &w.member_email, MEMBER_PASSWORD).await;
-    assert_eq!(status, 403, "after the change the standing is the new one: {body}");
+    let (status, body, _) = api_login(
+        &w.http,
+        &w.base,
+        w.workspace,
+        &w.member_email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(
+        status, 403,
+        "after the change the standing is the new one: {body}"
+    );
     assert_eq!(
         live_tokens(&w.su, w.member).await,
         before,
@@ -1019,24 +1277,50 @@ async fn a_login_that_meets_a_change_in_flight_is_told_to_retry_and_then_the_new
 // 3. a door anyone can reach does not queue for the lock
 // ---------------------------------------------------------------------------
 
-/// While a change holds the membership lock for seconds, a flood of logins is answered at
-/// once and an unrelated request on the same instance is not held up.
+/// The membership lock held exclusively and nothing else: a change in flight that has
+/// taken its first statement and not yet finished.
+async fn open_lock(su: &PgPool, workspace: Uuid) -> sqlx::Transaction<'static, sqlx::Postgres> {
+    let mut tx = su.begin().await.expect("begin the change");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 128))")
+        .bind(workspace.to_string())
+        .execute(&mut *tx)
+        .await
+        .expect("take the membership lock");
+    tx
+}
+
+async fn join_reply(w: &World, code: &str, email: &str) -> Reply {
+    reply_of(
+        w.http
+            .post(format!("{}/v1/join", w.base))
+            .json(&json!({
+                "code": code,
+                "email": email,
+                "displayName": "Joining Member",
+                "password": MEMBER_PASSWORD,
+                "timeZone": "Asia/Seoul",
+            }))
+            .send()
+            .await
+            .expect("join request"),
+    )
+    .await
+}
+
+/// While a change holds the membership lock for seconds, a flood of logins and joins is
+/// answered at once, writes nothing, and an unrelated request on the same instance is not
+/// held up.
 ///
-/// The pool is four connections wide. Logins that waited for the lock would each keep one
+/// The pool is four connections wide. Doors that waited for the lock would each keep one
 /// until the change committed, and every other request — whatever it asked for — would
 /// queue for a connection behind them. The roster read has nothing to do with the lock;
 /// what it measures is whether the pool is still there.
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
-async fn logins_do_not_queue_for_the_lock_and_leave_the_pool_alone() {
+async fn logins_and_joins_do_not_queue_for_the_lock_and_leave_the_pool_alone() {
     let w = world("session-issue-pool", Some(MEMBER_PASSWORD), 4).await;
-
-    let mut change = w.su.begin().await.expect("begin the change");
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 128))")
-        .bind(w.workspace.to_string())
-        .execute(&mut *change)
-        .await
-        .expect("take the membership lock");
+    let code = issue_invite(&w).await;
+    let change = open_lock(&w.su, w.workspace).await;
 
     let started = Instant::now();
     let logins: Vec<JoinHandle<Reply>> = (0..16)
@@ -1058,7 +1342,33 @@ async fn logins_do_not_queue_for_the_lock_and_leave_the_pool_alone() {
             })
         })
         .collect();
-    // Give the logins time to reach the server and, if they were going to wait, to take
+    let joined_emails: Vec<String> = (0..8)
+        .map(|n| format!("flood-{n}-{}@session-issue.test", Uuid::new_v4()))
+        .collect();
+    let joins: Vec<JoinHandle<Reply>> = joined_emails
+        .iter()
+        .map(|email| {
+            let (http, base, code, email) =
+                (w.http.clone(), w.base.clone(), code.clone(), email.clone());
+            tokio::spawn(async move {
+                reply_of(
+                    http.post(format!("{base}/v1/join"))
+                        .json(&json!({
+                            "code": code,
+                            "email": email,
+                            "displayName": "Flooding Joiner",
+                            "password": MEMBER_PASSWORD,
+                            "timeZone": "Asia/Seoul",
+                        }))
+                        .send()
+                        .await
+                        .expect("join request"),
+                )
+                .await
+            })
+        })
+        .collect();
+    // Give the requests time to reach the server and, if they were going to wait, to take
     // their connections.
     tokio::time::sleep(Duration::from_millis(500)).await;
     let roster = tokio::time::timeout(Duration::from_millis(1500), async {
@@ -1069,22 +1379,231 @@ async fn logins_do_not_queue_for_the_lock_and_leave_the_pool_alone() {
     assert_eq!(
         roster.ok(),
         Some(200),
-        "an unrelated request is answered while the lock is held and the logins are in \
+        "an unrelated request is answered while the lock is held and the doors are in \
          flight (took {answered_in:?})"
     );
-    for login in logins {
-        let reply = tokio::time::timeout(Duration::from_millis(1500), login)
+    for door in logins.into_iter().chain(joins) {
+        let reply = tokio::time::timeout(Duration::from_millis(1500), door)
             .await
-            .expect("a login answers without waiting for the lock")
-            .expect("login task");
+            .expect("a door answers without waiting for the lock")
+            .expect("door task");
         assert_eq!(reply.status, 503, "{}", reply.body);
         assert_eq!(reply.retry_after, Some(1));
     }
+    // Nothing was written by the refused joins: no account for any address, the code unspent.
+    let accounts: i64 = sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM human WHERE workspace_id = $1 AND email = ANY($2)",
+    )
+    .bind(w.workspace)
+    .bind(&joined_emails)
+    .fetch_one(&w.su)
+    .await
+    .expect("count accounts");
+    assert_eq!(accounts, 0, "a refused join created no account");
+    let spent: i32 = sqlx::query_scalar(
+        "SELECT COALESCE(max(used_count), 0) FROM invite_code WHERE workspace_id = $1",
+    )
+    .bind(w.workspace)
+    .fetch_one(&w.su)
+    .await
+    .expect("read the invite's use count");
+    assert_eq!(spent, 0, "a refused join spent no use of the code");
     change.rollback().await.expect("release the lock");
 
-    let (status, body, _) =
-        api_login(&w.http, &w.base, w.workspace, &w.member_email, MEMBER_PASSWORD).await;
-    assert_eq!(status, 200, "with the lock free the login goes through: {body}");
+    let (status, body, _) = api_login(
+        &w.http,
+        &w.base,
+        w.workspace,
+        &w.member_email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "with the lock free the login goes through: {body}"
+    );
+    let joined = join_reply(&w, &code, &joined_emails[0]).await;
+    assert_eq!(joined.status, 201, "and so does the join: {}", joined.body);
+}
+
+// ---------------------------------------------------------------------------
+// 3b. a claim token that can never be spent does not queue for the lock
+// ---------------------------------------------------------------------------
+
+/// A one-time claim row of `kind` for `member`, created and expiring at the SQL
+/// expressions given (an expired row must have been created before it expired), with a
+/// token the test knows.
+async fn seed_claim(
+    su: &PgPool,
+    workspace: Uuid,
+    member: Uuid,
+    kind: &str,
+    created_sql: &str,
+    expires_sql: &str,
+) -> String {
+    let token = mint_owner_claim_token().expect("entropy");
+    let insert = format!(
+        "INSERT INTO credential_claim \
+            (workspace_id, member_id, token_hash, created_at, expires_at, kind) \
+         VALUES ($1, $2, digest($3::text, 'sha256'), {created_sql}, {expires_sql}, $4)"
+    );
+    sqlx::query(&insert)
+        .bind(workspace)
+        .bind(member)
+        .bind(&token)
+        .bind(kind)
+        .execute(su)
+        .await
+        .expect("seed the claim");
+    token
+}
+
+async fn claim_reply(w: &World, token: &str) -> Reply {
+    reply_of(
+        w.http
+            .post(format!("{}/v1/claim", w.base))
+            .json(&json!({ "token": token, "password": CLAIMED_PASSWORD }))
+            .send()
+            .await
+            .expect("claim request"),
+    )
+    .await
+}
+
+/// `POST /v1/claim` is public and takes the membership lock exclusively, so a request that
+/// holds or waits for it holds up every sign-in of the workspace. A token that can never be
+/// spent is therefore refused **before** the lock, with the answer it has always had: spent,
+/// expired, an owner-bootstrap token for an account that has a password, a member who is not
+/// active. While a change holds the lock they are answered at once and none of them is
+/// queued for it; a token that can still be spent is the one that waits.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_claim_token_that_can_never_be_spent_does_not_queue_for_the_lock() {
+    let w = world("session-issue-dead-claim", Some(MEMBER_PASSWORD), 4).await;
+
+    // Spent: a real link, spent through the route.
+    let spent = issue_reset_token(&w).await;
+    assert_eq!(
+        claim_reply(&w, &spent).await.status,
+        200,
+        "the link is spent once"
+    );
+    // Still spendable: the member's open link (a member has at most one).
+    let live = issue_reset_token(&w).await;
+
+    // Every other row belongs to a member of its own, because a member has at most one open
+    // reset link and the rows below are open as far as the table is concerned.
+    let other_member = |label: &'static str| {
+        let (su, workspace) = (w.su.clone(), w.workspace);
+        async move {
+            let id = Uuid::new_v4();
+            seed_human(
+                &su,
+                workspace,
+                id,
+                "member",
+                &format!("{label}-{id}@session-issue.test"),
+                Some(MEMBER_PASSWORD),
+            )
+            .await;
+            id
+        }
+    };
+    // Expired.
+    let expiring = other_member("expired").await;
+    let expired = seed_claim(
+        &w.su,
+        w.workspace,
+        expiring,
+        "password_reset",
+        "now() - interval '2 hours'",
+        "now() - interval '1 hour'",
+    )
+    .await;
+    // An owner-bootstrap token for an account that has a password.
+    let owner_like = other_member("bootstrapped").await;
+    let bootstrap_with_password = seed_claim(
+        &w.su,
+        w.workspace,
+        owner_like,
+        "owner_bootstrap",
+        "now()",
+        "now() + interval '1 hour'",
+    )
+    .await;
+    // A live link of a member who is not active.
+    let sidelined = other_member("sidelined").await;
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(sidelined)
+        .execute(&w.su)
+        .await
+        .expect("suspend the member");
+    let inactive_member = seed_claim(
+        &w.su,
+        w.workspace,
+        sidelined,
+        "password_reset",
+        "now()",
+        "now() + interval '1 hour'",
+    )
+    .await;
+    // A token that names nothing at all.
+    let unknown = mint_owner_claim_token().expect("entropy");
+
+    let change = open_lock(&w.su, w.workspace).await;
+    for (case, token, status) in [
+        ("spent", &spent, 409),
+        ("expired", &expired, 410),
+        (
+            "owner-bootstrap token of an account that has a password",
+            &bootstrap_with_password,
+            409,
+        ),
+        ("member who is not active", &inactive_member, 404),
+        ("unknown", &unknown, 404),
+    ] {
+        let reply = tokio::time::timeout(Duration::from_millis(1500), claim_reply(&w, token))
+            .await
+            .unwrap_or_else(|_| {
+                panic!("{case}: the claim waited for the lock instead of being refused")
+            });
+        assert_eq!(reply.status, status, "{case}: {}", reply.body);
+    }
+    assert_eq!(
+        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await,
+        0,
+        "no refused claim is queued for the lock"
+    );
+
+    // The token that can still be spent is the one that waits.
+    let waiting = {
+        let (http, base) = (w.http.clone(), w.base.clone());
+        tokio::spawn(async move {
+            reply_of(
+                http.post(format!("{base}/v1/claim"))
+                    .json(&json!({ "token": live, "password": CLAIMED_PASSWORD }))
+                    .send()
+                    .await
+                    .expect("claim request"),
+            )
+            .await
+        })
+    };
+    wait_until("the live claim to queue for the lock", || async {
+        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await == 1
+    })
+    .await;
+    assert!(
+        !waiting.is_finished(),
+        "the live claim waits for the open change"
+    );
+    change.rollback().await.expect("release the lock");
+    let reply = waiting.await.expect("claim task");
+    assert_eq!(
+        reply.status, 200,
+        "and goes through once the lock is free: {}",
+        reply.body
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1111,7 +1630,11 @@ async fn xmin_of(su: &PgPool, sql: &'static str, bound: &str) -> String {
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_claims_rows_and_session_are_written_by_one_transaction() {
     for (issuer, member_password, audit_action) in [
-        (Issuer::ClaimReset, Some(MEMBER_PASSWORD), "member.password_reset"),
+        (
+            Issuer::ClaimReset,
+            Some(MEMBER_PASSWORD),
+            "member.password_reset",
+        ),
         (Issuer::ClaimBootstrap, None, "owner.claim"),
     ] {
         let case = format!("{issuer:?}");
@@ -1163,7 +1686,11 @@ async fn a_claims_rows_and_session_are_written_by_one_transaction() {
             .fetch_all(&w.su)
             .await
             .expect("the swept rows");
-            assert_eq!(swept, vec![claim.clone()], "{case}: the sweep is the claim's");
+            assert_eq!(
+                swept,
+                vec![claim.clone()],
+                "{case}: the sweep is the claim's"
+            );
         }
     }
 }

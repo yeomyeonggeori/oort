@@ -340,7 +340,7 @@ enum LoginGate {
 
 /// `Retry-After` for a login (or any door) that found the membership lock taken: a
 /// membership change takes milliseconds, so one second is the honest smallest value.
-const MEMBERSHIP_BUSY_RETRY_SECONDS: u64 = 1;
+pub(crate) const MEMBERSHIP_BUSY_RETRY_SECONDS: u64 = 1;
 
 pub async fn login(
     State(state): State<AppState>,

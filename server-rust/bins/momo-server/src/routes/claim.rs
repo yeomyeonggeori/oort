@@ -41,6 +41,15 @@
 //! find an inactive member, which rolls the whole transaction back (no password
 //! written, the token still unspent, no session).
 //!
+//! **A token that can never be spent does not queue for it.** This route is public and the
+//! lock is exclusive, so a request that holds or waits for it makes every sign-in of the
+//! workspace wait or retry. Before the lock, a read that takes none
+//! ([`claim_refusal_without_lock`]) refuses what is already refused — no such token, spent,
+//! expired, an owner-bootstrap token for an account that has a password, a member who is
+//! not active — with the answers the consume itself has. What it lets through is judged
+//! again under the lock, and that answer counts; it can only be wrong in the safe
+//! direction (a spent token never comes back).
+//!
 //! Lock order: membership lock → claim row → `human` row → member-wide sweep lock →
 //! `token` rows. The membership lock is always first, so no cycle can close through
 //! it; the operator's reissue (`issue_password_reset`) takes no membership lock, so it
@@ -51,8 +60,8 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::Json;
 use momo_auth::{
-    consume_claim_in_tx, normalized_claim_token, normalized_new_password, resolve_claim_workspace,
-    ClaimMutation, ClaimSpecInvalid,
+    claim_refusal_without_lock, consume_claim_in_tx, normalized_claim_token,
+    normalized_new_password, resolve_claim_workspace, ClaimMutation, ClaimSpecInvalid,
 };
 use momo_auth::{ClaimOutcome, IssuedToken};
 use momo_db::audit::{write_audit, AuditEntry};
@@ -136,7 +145,14 @@ pub async fn claim(
         let password = password.clone();
         move |conn| {
             Box::pin(async move {
-                // The membership lock, exclusive and first (see the module docs).
+                // A token that can never be spent is answered here, without the lock.
+                if let Some(refusal) =
+                    claim_refusal_without_lock(conn, workspace_id, &token).await?
+                {
+                    return Ok(Claimed::Refused(refusal));
+                }
+                // The membership lock, exclusive, before anything is judged under it (see
+                // the module docs).
                 lock_membership_mutation(conn, workspace_id).await?;
                 let mutation = consume_claim_in_tx(conn, workspace_id, &token, &password).await?;
                 let ClaimMutation::Applied(outcome) = mutation else {
