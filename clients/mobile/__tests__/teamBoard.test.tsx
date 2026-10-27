@@ -8,6 +8,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,6 +20,9 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {lightPalette, darkPalette, TOUCH_TARGET} from '../src/design/tokens';
+import {SHEET_ICONS} from '../src/design/icons';
+import {GroupCard} from '../src/design/sheetParts';
+import {describeCloseContract, imageSources} from './fixtures/sheetContract';
 import {createChannelRail} from '../src/realtime/channelRail';
 import {
   RealtimeContext,
@@ -449,6 +453,31 @@ describe('읽기 전용 상세 시트', () => {
     expect(sheet).toBeTruthy();
   });
 
+  it('몸은 묶음 카드와 행이다 — 요약·진행·로그·결과·이동. 옛 외곽선 알약 단추·테두리 카드·글자 「닫기」는 없다 (#4458)', async () => {
+    installFetch();
+    renderBoard();
+    await waitFor(() =>
+      expect(screen.getByTestId('team-board-row-S-WAIT')).toBeTruthy(),
+    );
+    fireEvent.press(screen.getByTestId('team-board-row-S-WAIT'));
+    await waitFor(() =>
+      expect(screen.getByTestId('team-detail-sheet')).toBeTruthy(),
+    );
+    // 요약 · 진행 · 로그 · 결과(에이전트 보고가 있으면 하나 더) · 이동 — 카드가 다섯 이상이다.
+    expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(5);
+    // 누르는 것은 모두 행이고 **그려진** 오른쪽 셰브론이 하나 선다: 결과의 PR 과 바닥의 「채널에서 보기」.
+    for (const id of ['team-detail-pr', 'team-detail-open-channel']) {
+      expect([id, imageSources(screen.getByTestId(id))]).toEqual([id, [SHEET_ICONS.chevron]]);
+    }
+    // 이 앱 **밖**(브라우저)으로 나가는 PR 행은 「링크」로 읽히고(옛 줄과 같다), 앱 안 채널로 가는 행은 「버튼」이다.
+    expect(screen.getByTestId('team-detail-pr').props.accessibilityRole).toBe('link');
+    expect(screen.getByTestId('team-detail-pr').props.accessibilityLabel).toMatch(/, 브라우저에서 열기$/);
+    expect(screen.getByTestId('team-detail-open-channel').props.accessibilityRole).toBe('button');
+    expect(screen.queryByText('닫기')).toBeNull();
+    // 단계 셋 → 구분선 둘이 한 카드 안에 있다.
+    expect(within(screen.getByTestId('team-detail-stages')).getAllByTestId('group-divider')).toHaveLength(2);
+  });
+
   it('PR이 없으면 「아직 PR 없음」이고, 에이전트 레인은 diff·저장소를 지어내지 않는다', async () => {
     installFetch();
     renderBoard();
@@ -484,7 +513,10 @@ describe('읽기 전용 상세 시트', () => {
     );
     expect(screen.queryByTestId('team-detail-open-agent-session')).toBeNull();
     fireEvent.press(screen.getByTestId('team-detail-open-channel'));
-    expect(opened).toEqual([[CH_A, '#workbench']]);
+    // 이동은 시트가 미끄러져 내려간 뒤다(#4458) — 누른 순간에는 시트가 서 있고 이동은 아직 없다.
+    expect(screen.getByTestId('team-detail-sheet')).toBeTruthy();
+    expect(opened).toEqual([]);
+    await waitFor(() => expect(opened).toEqual([[CH_A, '#workbench']]), {timeout: 8000});
     await waitFor(() =>
       expect(screen.queryByTestId('team-detail-sheet')).toBeNull(),
     );
@@ -494,7 +526,7 @@ describe('읽기 전용 상세 시트', () => {
       expect(screen.getByTestId('team-detail-open-agent-session')).toBeTruthy(),
     );
     fireEvent.press(screen.getByTestId('team-detail-open-agent-session'));
-    expect(agent).toEqual(['S-RUN-AGENT']);
+    await waitFor(() => expect(agent).toEqual(['S-RUN-AGENT']), {timeout: 8000});
   });
 
   it('열어 둔 줄이 공유 해제로 보이지 않게 되면(단건 404) 시트가 닫히고 안내가 선다', async () => {
@@ -887,4 +919,22 @@ describe('앱 복귀 재조회 (#3589 N9) — 단계에는 realtime이 없다', 
     );
     expect(src).not.toMatch(/["'`>][^"'`<]*즉시/);
   });
+});
+
+// ---- 읽기 전용 상세 시트의 닫는 길 (#4458) ---------------------------------------------------
+describeCloseContract({
+  name: 'TeamBoardDetailSheet',
+  open: async () => {
+    installFetch();
+    renderBoard();
+    await waitFor(() => expect(screen.getByTestId('team-board-row-S-WAIT')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('team-board-row-S-WAIT'));
+    await waitFor(() => expect(screen.getByTestId('team-detail-sheet')).toBeTruthy());
+  },
+  // 부모(보드)가 시트를 걷는다 — 시트가 사라졌으면 「닫아 달라」고 한 것이다.
+  closedCount: () => (screen.queryByTestId('team-detail-sheet') === null ? 1 : 0),
+  closeTestID: 'team-detail-close',
+  closeLabel: '작업 상세 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '작업 상세 닫기',
 });

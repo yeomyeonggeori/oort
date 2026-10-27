@@ -1,8 +1,12 @@
 import React from 'react';
-import {ActivityIndicator, StyleSheet, Switch} from 'react-native';
-import {GroupRow, GroupSection, Sentence} from '../../design/atoms';
-import {font, line, space, type Palette} from '../../design/tokens';
-import {usePalette, useStyles} from '../../design/theme';
+
+import {GroupCard, ListRow} from '../../design/sheetParts';
+import {
+  ActionRow,
+  SettingsNote,
+  SettingsSection,
+  SwitchRow,
+} from '../profile/settingsRows';
 import {
   MEMORY_ADMIN_DETAIL,
   MEMORY_ADMIN_ROW,
@@ -19,11 +23,14 @@ import {
 import {useMyMemoryPause} from './queries';
 
 // =============================================================================
-// 프로필 시트의 「기억」 묶음 (ADR-0196 D9 / #3166) — 내 일시정지 하나.
+// 설정 페이지의 「기억」 묶음 (ADR-0196 D9 / #3166) — 내 일시정지 하나.
 //
 // 팀 전체 스위치와 채널별 제외는 관리자 일이라 폰에 두지 않는다(ADR-0137 D5: 설정은
 // 데스크탑). 없는 스위치를 그려 두지 않고, 어디서 바꾸는지만 한 줄로 말한다.
 // 스위치는 서버 값을 한 번 읽은 뒤에야 서며, 모르는 동안 「꺼짐」을 그리지 않는다.
+//
+// #4457: 옛 `GroupSection`·`GroupRow`(반경 8·테두리 카드)에서 새 묶음 카드 가족(`GroupCard`·
+// `ListRow`·`SwitchRow`)으로 제자리 교체했다. 로직(`useMyMemoryPause`)과 testID 는 그대로다.
 // =============================================================================
 
 export function MemoryPauseSection({
@@ -31,8 +38,6 @@ export function MemoryPauseSection({
 }: {
   workspaceId: string;
 }): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const palette = usePalette();
   const pause = useMyMemoryPause(workspaceId);
   const locked = !pause.ready || pause.pending;
   const detail = pause.loadFailed
@@ -43,84 +48,55 @@ export function MemoryPauseSection({
         ? MEMORY_PAUSE_DETAIL_ON
         : MEMORY_PAUSE_DETAIL_OFF;
   return (
-    <GroupSection label={MEMORY_SECTION} testID="memory-section">
-      <GroupRow
-        title={MEMORY_PAUSE_LABEL}
-        detail={detail}
-        onPress={() => pause.setPaused(!pause.paused)}
-        accessibilityRole="switch"
-        accessibilityState={{checked: pause.paused, disabled: locked}}
-        accessibilityLabel={MEMORY_PAUSE_LABEL}
-        accessibilityHint={detail}
-        trailing={
-          pause.ready ? (
-            <Switch
-              value={pause.paused}
-              onValueChange={next => pause.setPaused(next)}
-              disabled={locked}
-              trackColor={{false: palette.border, true: palette.ok}}
-              ios_backgroundColor={palette.border}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              testID="memory-pause-switch"
-            />
-          ) : pause.loadFailed ? null : (
-            <ActivityIndicator
-              color={palette.textMuted}
-              accessibilityElementsHidden
-              importantForAccessibility="no-hide-descendants"
-              testID="memory-pause-loading"
-            />
-          )
-        }
-        testID="memory-pause-row"
-      />
-      {pause.ready && !pause.workspaceEnabled ? (
-        <Sentence style={styles.note} testID="memory-workspace-off">
-          {MEMORY_PAUSE_WORKSPACE_OFF}
-        </Sentence>
-      ) : null}
-      {pause.loadFailed ? (
-        <GroupRow
-          title={MEMORY_PAUSE_RETRY}
-          tone="accent"
-          separated
-          onPress={pause.retryLoad}
-          testID="memory-pause-retry"
+    <SettingsSection>
+      <GroupCard label={MEMORY_SECTION} testID="memory-section">
+        <SwitchRow
+          title={MEMORY_PAUSE_LABEL}
+          detail={detail}
+          checked={pause.paused}
+          a11yDisabled={locked}
+          onPress={() => pause.setPaused(!pause.paused)}
+          accessibilityHint={detail}
+          control={
+            pause.ready
+              ? {
+                  kind: 'switch',
+                  value: pause.paused,
+                  onValueChange: next => pause.setPaused(next),
+                  disabled: locked,
+                  testID: 'memory-pause-switch',
+                }
+              : pause.loadFailed
+                ? {kind: 'none'}
+                : {kind: 'loading', testID: 'memory-pause-loading'}
+          }
+          testID="memory-pause-row"
         />
+        {pause.loadFailed ? (
+          // 복구 길은 강조색 글자다(옛 판의 `tone="accent"`) — 눌리지 않는 안내 행과 갈린다.
+          <ActionRow
+            title={MEMORY_PAUSE_RETRY}
+            tone="accent"
+            onPress={pause.retryLoad}
+            testID="memory-pause-retry"
+          />
+        ) : null}
+        <ListRow
+          title={MEMORY_ADMIN_ROW}
+          detail={MEMORY_ADMIN_DETAIL}
+          testID="memory-admin-row"
+        />
+      </GroupCard>
+      {pause.ready && !pause.workspaceEnabled ? (
+        <SettingsNote testID="memory-workspace-off">
+          {MEMORY_PAUSE_WORKSPACE_OFF}
+        </SettingsNote>
       ) : null}
       {pause.failed ? (
-        <Sentence
-          style={styles.failure}
-          accessibilityLiveRegion="polite"
-          testID="memory-pause-failure">
+        <SettingsNote tone="danger" testID="memory-pause-failure">
           {MEMORY_PAUSE_SAVE_FAILED}
-        </Sentence>
+        </SettingsNote>
       ) : null}
-      <GroupRow
-        title={MEMORY_ADMIN_ROW}
-        detail={MEMORY_ADMIN_DETAIL}
-        separated
-        testID="memory-admin-row"
-      />
-    </GroupSection>
+    </SettingsSection>
   );
 }
-
-const buildStyles = (color: Palette) =>
-  StyleSheet.create({
-    note: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.textMuted,
-      paddingHorizontal: space.lg,
-      paddingBottom: space.md,
-    },
-    failure: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      color: color.dangerText,
-      paddingHorizontal: space.lg,
-      paddingBottom: space.md,
-    },
-  });

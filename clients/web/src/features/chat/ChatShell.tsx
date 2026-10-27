@@ -94,6 +94,7 @@ import {
   ChannelMemberPanel,
   type ChannelMemberListStatus,
 } from "@/features/channels/ChannelContextControls";
+import { Tooltip } from "@/design/ui/tooltip";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import {
   HuddleHeaderBanner,
@@ -1183,29 +1184,35 @@ export function ChatShell() {
                 `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다.
                 #2753: 작업 표면이 없는 서버에서는 버튼 자체를 내놓지 않는다. */}
             {stressCount === 0 && terminalButtonShown && (
-              <button
-                ref={terminalToggleRef}
-                type="button"
-                onClick={(event) => {
-                  if (localTerminal) {
-                    toggleDock(event.currentTarget);
-                    return;
-                  }
-                  setWorkOpen(false);
-                  setDockOpen((open) => !open);
-                }}
-                aria-pressed={terminalPressed}
-                {...(dockOpen && !localTerminal
-                  ? { "aria-controls": "channel-terminal-dock" }
-                  : {})}
-                aria-label="터미널"
-                aria-keyshortcuts={localTerminal ? "Control+`" : undefined}
-                title={localTerminal ? "터미널 (⌃`)" : "터미널"}
-                data-testid="open-terminal-dock"
-                className={channelHeaderControlClass({ pressed: terminalPressed })}
+              // 머리 단추의 툴팁은 디자인 시스템 `Tooltip`이다(#4591): 네이티브 `title`을 같이 두면 두 개가 뜬다.
+              // 키 힌트는 접근성 이름이 아니라 툴팁 문구에만 싣는다(이름은 `aria-label`, 열쇠는 `aria-keyshortcuts`).
+              <Tooltip
+                label={localTerminal ? "터미널 (⌃`)" : "터미널"}
+                side="bottom"
               >
-                <SquareTerminal aria-hidden="true" className="size-4" />
-              </button>
+                <button
+                  ref={terminalToggleRef}
+                  type="button"
+                  onClick={(event) => {
+                    if (localTerminal) {
+                      toggleDock(event.currentTarget);
+                      return;
+                    }
+                    setWorkOpen(false);
+                    setDockOpen((open) => !open);
+                  }}
+                  aria-pressed={terminalPressed}
+                  {...(dockOpen && !localTerminal
+                    ? { "aria-controls": "channel-terminal-dock" }
+                    : {})}
+                  aria-label="터미널"
+                  aria-keyshortcuts={localTerminal ? "Control+`" : undefined}
+                  data-testid="open-terminal-dock"
+                  className={channelHeaderControlClass({ pressed: terminalPressed })}
+                >
+                  <SquareTerminal aria-hidden="true" className="size-4" />
+                </button>
+              </Tooltip>
             )}
             {/* 이슈 #1112 — 고정 목록. 스트레스 픽스처에서는 뒤에 서버 행이
                 없으므로 내놓지 않는다 — 반응·액션과 같은 규칙. */}

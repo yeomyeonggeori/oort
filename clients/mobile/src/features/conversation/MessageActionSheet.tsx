@@ -308,45 +308,6 @@ function SheetBody({
   );
 }
 
-/**
- * 옛 시트의 한 줄. `DmClosedSheet`(#4458 이 옮긴다)가 아직 쓴다 — 새 시트는 `ListRow` 를 쓴다.
- * 그 시트를 옮기는 날 이 함수와 아래 `sheetRow*` 스타일을 지운다.
- */
-export function SheetRow({
-  label,
-  onPress,
-  tone = 'default',
-  testID,
-  busy = false,
-}: {
-  label: string;
-  onPress: () => void;
-  tone?: 'default' | 'danger' | 'muted';
-  testID?: string;
-  /** 왕복이 도는 중. 잠그지 않고 낱말과 `busy` 가 진행을 말한다(웹 메뉴와 같다). */
-  busy?: boolean;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={busy ? {busy: true} : undefined}
-      onPress={onPress}
-      style={({pressed}) => [styles.sheetRow, pressed && styles.pressed]}
-      testID={testID}>
-      <Text
-        style={[
-          styles.sheetRowLabel,
-          tone === 'danger' && styles.sheetRowLabelDanger,
-          tone === 'muted' && styles.sheetRowLabelMuted,
-        ]}>
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     preview: {
@@ -382,9 +343,5 @@ const buildStyles = (color: Palette) =>
     reactionMine: {borderColor: color.accent, backgroundColor: color.accentSurface},
     // 이모지 한 글자의 도형 크기 — 역할 표의 「화면·시트 제목」(22)과 같다.
     reactionGlyph: {fontSize: font.title},
-    sheetRow: {minHeight: TOUCH_TARGET, justifyContent: 'center'},
-    sheetRowLabel: {fontSize: font.body, color: color.text},
-    sheetRowLabelDanger: {color: color.danger},
-    sheetRowLabelMuted: {color: color.textMuted},
     pressed: {opacity: 0.6},
   });
