@@ -1654,6 +1654,33 @@ function sentinel(): {phase: 'rest' | 'neutral'; top: number | undefined} {
   throw new Error(`알 수 없는 보초 모양: ${JSON.stringify(style)}`);
 }
 
+// ---- #4689 원인 B — 먼 「최신으로」가 가는 동안만 목록의 한 판·창이 넓어진다 --------------------------------------
+// 앱처럼 50행씩 붙인 방은 꼬리 스페이서가 잰 데까지만 잘려 있어, 홉마다 한 배치(기본 10행)만 자란다. 가는 동안만 판·창을 넓혀 꼬리를 한두 판에 마운트한다.
+// 시험은 상수 값이 아니라 호출자가 보는 것 — 목록이 받은 prop 이 기본보다 넓은가 — 만 본다(`FlatList` 는 안 주면 10·21 을 쓴다).
+
+const DEFAULT_BATCH = 10;
+const DEFAULT_WINDOW = 21;
+
+function windowing(): {batch: number; window: number} {
+  const props = list().props as {maxToRenderPerBatch?: number; windowSize?: number};
+  return {
+    batch: props.maxToRenderPerBatch ?? DEFAULT_BATCH,
+    window: props.windowSize ?? DEFAULT_WINDOW,
+  };
+}
+
+/** 한 판도 창도 기본보다 넓다. */
+function isWidened(): boolean {
+  const {batch, window} = windowing();
+  return batch > DEFAULT_BATCH && window > DEFAULT_WINDOW;
+}
+
+/** 한 판도 창도 기본 그대로다. */
+function isDefaultWindowing(): boolean {
+  const {batch, window} = windowing();
+  return batch === DEFAULT_BATCH && window === DEFAULT_WINDOW;
+}
+
 describe('아래 필 「최신으로」', () => {
   it('바닥에 있으면 없고, 떠나면 「최신 메시지로 이동」이 선다', async () => {
     mount();
@@ -1726,31 +1753,35 @@ describe('아래 필 「최신으로」', () => {
     },
   );
 
-  it('먼 「최신으로」는 prop 을 떼지 않는다 — 보초가 내용 전체 높이로 서 있다가 착지 유지가 끝나야 평상으로 돌아온다 (#4689)', async () => {
+  it('먼 「최신으로」는 prop 을 떼지 않는다 — 보초가 내용 전체 높이로 서고 목록이 한 판·창을 넓히며, 착지 유지가 끝나야 둘 다 돌아온다 (#4689)', async () => {
     mount();
     await settleAtBottom();
     scrollUpIntoHistory(); // 끝까지 2000pt — 창(800)보다 멀다
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     const tops = [sentinel().top];
 
     fireEvent.press(screen.getByTestId('jump-latest'));
     await flushFrame();
-    // 가는 동안: prop 은 그대로이고, 보초가 내용 전체 높이가 됐다.
+    // 가는 동안: prop 은 그대로이고, 보초가 내용 전체 높이가 됐고, 한 판·창이 넓다.
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('neutral');
+    expect(isWidened()).toBe(true);
     tops.push(sentinel().top);
 
     atTheEnd();
     await waitRound(); // 도착 — 수렴이 풀린다
-    // 첫 도착으로 풀지 않는다: 이어 붙는 배치는 보초가 받는다.
+    // 첫 도착으로 풀지 않는다: 이어 붙는 배치는 보초가 받고, 넓은 판·창이 받아 낸다.
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('neutral');
+    expect(isWidened()).toBe(true);
     tops.push(sentinel().top);
 
     await sleep(800); // 착지 유지(600ms)가 끝난다
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     tops.push(sentinel().top);
 
     // 보초의 y 는 평상·중립 어느 때도 같다 — 앵커의 y 가 바뀌면 그 차이가 그대로 되밀림이 된다(켜고 끌 때도).
@@ -1765,10 +1796,74 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    expect(isWidened()).toBe(true);
+
     // 도착 보고가 없다 — 수렴은 진전 없이 400ms 뒤 손을 놓고, 그 뒤에는 착지 유지도 없다.
     await sleep(700);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     expect(mvcp()).toEqual(RESTING_MVCP);
+  });
+
+  it('착지 유지는 내용이 아직 자라는 동안 이어지고, 자람이 멈추면 놓는다 — 이어 붙는 판이 낡은 앵커를 만나지 않게 (#4689 원인 B)', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    atTheEnd();
+    await waitRound(); // 도착 — 착지 유지(600ms)가 시작된다
+
+    // 유지 시간을 훌쩍 넘겨서도 100ms 마다 내용이 자란다 — 그동안 보초와 넓은 판·창이 그대로다.
+    let height = 4000;
+    for (let elapsed = 0; elapsed < 1000; elapsed += 100) {
+      height += 300;
+      fireEvent(list(), 'contentSizeChange', 390, height);
+      await sleep(100);
+    }
+    expect(sentinel().phase).toBe('neutral');
+    expect(isWidened()).toBe(true);
+
+    // 자람이 멈추면 곧 놓는다.
+    await sleep(400);
+    expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
+  });
+
+  it('끝없이 자라는 내용도 이동의 뒷줄(4초)을 넘기지 못한다 — 보초와 판·창을 반드시 놓는다 (#4689 원인 B)', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    atTheEnd();
+    await waitRound();
+
+    let height = 4000;
+    for (let elapsed = 0; elapsed < 4600; elapsed += 100) {
+      height += 300;
+      fireEvent(list(), 'contentSizeChange', 390, height);
+      await sleep(100);
+    }
+    // 아직도 자라는 중이지만 누른 지 4.6초다.
+    expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
+  });
+
+  it('먼 「최신으로」는 판이 붙어 내용이 자라는 즉시(한 프레임 안에) 끝으로 다시 간다 (#4689 원인 B)', async () => {
+    const {listRef} = mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    const toOffset = jest.spyOn(listRef.current!, 'scrollToOffset');
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame(); // 첫 홉
+    toOffset.mockClear();
+
+    fireEvent(list(), 'contentSizeChange', 390, 6000); // 넓힌 한 판이 붙었다
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(20); // 배치 간격(50ms)이 아니라 한 프레임
+    });
+    expect(toOffset).toHaveBeenCalledWith({offset: 5200, animated: false});
   });
 
   it('손가락이 목록을 잡으면 보초는 그 자리에서 평상이다 (#4689)', async () => {
@@ -1779,8 +1874,11 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    expect(isWidened()).toBe(true);
+
     fireEvent(list(), 'scrollBeginDrag'); // 시간은 흐르지 않았다
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     expect(mvcp()).toEqual(RESTING_MVCP);
   });
 
@@ -1792,8 +1890,11 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    expect(isWidened()).toBe(true);
+
     switchToRoomB(rerender);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     expect(mvcp()).toEqual(RESTING_MVCP);
   });
 
@@ -1806,8 +1907,11 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    expect(isWidened()).toBe(true);
+
     rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
   });
 
   it('가까운 「최신으로」는 prop 도 보초도 건드리지 않는다 (#4689)', async () => {
@@ -1821,10 +1925,12 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     atTheEnd();
     await sleep(800);
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
   });
 
   it('먼 전송과 진입은 지금까지처럼 prop 을 뗐다 붙인다 — 보초는 쉰다 (#4689)', async () => {
@@ -1834,20 +1940,23 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(mvcp()).toBeUndefined();
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     atTheEnd();
     await settleAtBottom();
     expect(mvcp()).toEqual(RESTING_MVCP);
 
-    // 전송: 멀리 올라간 채 보내면 끝으로 가는 동안 prop 이 빠졌다 도착하면 돌아온다.
+    // 전송: 멀리 올라간 채 보내면 끝으로 가는 동안 prop 이 빠졌다 도착하면 돌아온다. 한 판·창은 그대로다.
     scrollUpIntoHistory();
     rerender({selfSendToken: 1});
     await flushFrame();
     expect(mvcp()).toBeUndefined();
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
     atTheEnd();
     await waitRound();
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
   });
 
   it('끝을 넘어 선 자리는 쉬는 자리가 아니다 — 스크롤뷰가 든 끝으로 되돌린다', async () => {
