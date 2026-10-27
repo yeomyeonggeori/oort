@@ -291,7 +291,8 @@ async function u1(browser, origin, scheme) {
   const lineText = ((await page.getByTestId("run-exception-text").first().textContent()) ?? "").trim();
   check(`${tag} queued: 예외 줄이 「아직 받지 않았어요」를 말한다`, lineText === "그록봇: 아직 받지 않았어요", lineText);
   check(`${tag} queued: 대화에 경과 숫자가 없다(「11분째」)`, !/\d+\s*(시간|분|초)/.test(lineText), lineText);
-  check(`${tag} queued: 「신호 소실」이 없다 (11분이 지났는데도)`, !(await page.locator("body").textContent())?.includes("신호 소실"));
+  // 화면에 **보이는** 글이다(`innerText`): 칩의 폭을 지키는 보이지 않는 유령 낱말(`invisible`, `aria-hidden`)에는 「신호 소실」이 있다.
+  check(`${tag} queued: 「신호 소실」이 보이지 않는다 (11분이 지났는데도)`, !(await page.locator("body").innerText())?.includes("신호 소실"));
   check(`${tag} queued: 머리 칩도 같은 낱말`, ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "아직 받지 않았어요");
   await page.getByTestId("run-exception-open").click();
   await page.getByTestId("agent-work-panel").waitFor();
@@ -362,7 +363,13 @@ async function u1(browser, origin, scheme) {
   await page.waitForTimeout(300);
   const lost = ((await page.getByTestId("agent-work-panel-state").textContent()) ?? "").trim();
   check(`${tag} ended: 「신호 소실」은 서버가 lease_abandoned로 알렸을 때만`, lost === "신호 소실", lost);
-  check(`${tag} ended: 줄은 구체 낱말(신호 소실), 칩은 큰 범주(실패)`, ((await page.getByTestId("run-exception-text").first().textContent()) ?? "").includes("신호 소실") && ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "실패");
+  // design-review r1 H2: 칩도 줄과 같은 낱말·같은 경고 톤이다(서버가 `failed`로 끝낸 것만 「실패」·위험 톤, ADR-0132: 부재를 오류로 올리지 않는다).
+  const lostChip = page.getByTestId("trigger-chip").first();
+  const lostChipClass = (await lostChip.getAttribute("class")) ?? "";
+  check(`${tag} ended: 줄도 칩도 같은 낱말(신호 소실)이고 칩은 경고 톤이다(위험 톤 아님)`,
+    ((await page.getByTestId("run-exception-text").first().textContent()) ?? "").includes("신호 소실") &&
+      ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "신호 소실" &&
+      (await lostChip.getAttribute("data-kind")) === "timed_out" && /bg-warn-soft/.test(lostChipClass) && !/danger/.test(lostChipClass), lostChipClass);
   await page.screenshot({ path: shot("7-ended-lease-abandoned") });
 
   // ⑥ 여러 run 병렬: 두 에이전트가 동시에. 레일은 한 줄(이끄는 쪽 + N)이고 둘은 팝오버에서 각자의 낱말로 나란히 선다.
