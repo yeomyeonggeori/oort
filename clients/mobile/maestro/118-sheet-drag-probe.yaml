@@ -1,0 +1,48 @@
+appId: app.momo.ios
+name: 118-sheet-drag-probe
+env:
+  # 16 Pro 기본값. probe 시트는 큰 단이다(위 66). SE: HX=187 ROWY=200 DOWN_B=320 UP_A=520 UP_B=160 BACK_A=200 BACK_B=500.
+  HX: "201"
+  ROWY: "210" # 본문 첫 줄(눌리지 않는 View) y
+  DOWN_B: "330" # 맨 위에서 아래로 120 끈 자리(문턱 202 아래 — 닫히지 않는다)
+  UP_A: "700" # 스크롤: 손가락을 UP_A → UP_B 로 올린다
+  UP_B: "300"
+  BACK_A: "250" # 스크롤된 채 되돌려 끌기: BACK_A → BACK_B
+  BACK_B: "550"
+  SHOT: "sheet-drag-probe"
+---
+# 118-sheet-drag-probe — 결정 2 계측: 끄는 동안 본문 contentOffset 이 움직이는가(iOS 이중 이동) (#4612 2단계).
+#
+# 표면 `-momoMeasure SHEETDRAG-PROBE-STD|FREEZE|NONE -momoGapSink 127.0.0.1:<포트>`. 끌기(터치 시작 → 끝 + 600ms)마다 표면이 onScroll 표본과 시트
+# 본문의 창 좌표 변위를 `measure/gap-sink.mjs` 로 한 줄 보낸다(`kind: drag-probe`). 이 흐름은 손가락만 놀리고, 단정은 구동 스크립트가 싱크에서 한다.
+#   STD     배송되는 `SheetScroll`(고무줄 없음 + 쥐면 얼림)   FREEZE  날 ScrollView(고무줄 있음) + 얼림만   NONE  날 ScrollView + 아무 방어 없음(대조군)
+#
+#   P1 맨 위에서 아래로 120 끌기(느리게, 문턱 아래 — 시트가 따라왔다 돌아온다)   → contentOffset 이 가만히 있어야 한다(비영점 0)
+#   P2 스크롤(손가락을 올린다)                                              → 정상 스크롤: y 가 양수로 올라간다
+#   P3 스크롤된 채 아래로 끌기                                              → 시트는 안 움직인다(시트 변위 0), y 가 줄어든다
+- extendedWaitUntil:
+    visible:
+      id: "sheetdrag-probe-body"
+    timeout: 60000
+- waitForAnimationToEnd
+# P1
+- swipe:
+    start: "${HX}, ${ROWY}"
+    end: "${HX}, ${DOWN_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-1
+# P2
+- swipe:
+    start: "${HX}, ${UP_A}"
+    end: "${HX}, ${UP_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-2
+# P3
+- swipe:
+    start: "${HX}, ${BACK_A}"
+    end: "${HX}, ${BACK_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-3

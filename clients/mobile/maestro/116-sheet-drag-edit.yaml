@@ -1,0 +1,97 @@
+appId: app.momo.ios
+name: 116-sheet-drag-edit
+env:
+  # 16 Pro(402×874) 기본값 — 키보드가 올라온 중간 단의 머리 줄이다(시트 위 66). `measure/sheet-drag-run.mjs` 가 기기마다 읽어 덮어쓴다.
+  # SE(375×667): HX=187 HY=107 HY_SHORT=167 HY_FAR=367 HY_FLICK=207 INPUTY=185 INPUT_FAR=445.
+  HX: "201"
+  HY: "115" # 머리 제목 줄 y
+  HY_SHORT: "175"
+  HY_FAR: "415"
+  HY_FLICK: "215"
+  INPUTY: "193" # 입력 상자(본문 맨 위) y — 입력은 응답자라 시트가 이동에서 가로챈다
+  INPUT_FAR: "453"
+  SHOT: "sheet-drag-edit"
+---
+# 116-sheet-drag-edit — 편집 시트(메시지 고치기, 중간 단, 키보드 위)의 끌어내리기와 저장 안 한 입력 확인 (#4612 2단계).
+#
+# 표면 `-momoMeasure SHEETDRAG-EDIT`(다크) · `LIGHT-SHEETDRAG-EDIT`(라이트)는 배송되는 `MessageEditorSheet` 를 세운다. 입력이 자동으로
+# 초점을 얻어 소프트 키보드가 올라오고 시트의 바닥이 키보드 윗면에 앉는다(`phone-sheets.md` §2). 닫히면 무대에 「닫힘 N」과 「시트 다시 열기」.
+#
+#   ① 모자란 끌기(머리, 느리게)                       닫히지 않고 제자리로 — 키보드는 그대로
+#   ② 깨끗한 시트의 머리 끌기(문턱 위)                 묻지 않고 닫힌다(닫힘 1)
+#   ③ 입력한 뒤(저장 안 한 입력) 머리 끌기              닫지 않고 「버릴까요?」 — 「계속 편집」이면 시트·입력이 그대로다
+#   ④ 입력한 뒤 입력 상자에서 끌기                     같은 확인 — 「버리기」를 고르면 닫힌다(닫힘 2)
+#   ⑤ 깨끗한 시트의 빠른 튕김                         묻지 않고 닫힌다(닫힘 3)
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-0-open
+# ① 모자란 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_SHORT}"
+    duration: 1500
+- waitForAnimationToEnd
+- assertVisible:
+    id: "editor-input"
+# ② 깨끗한 머리 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 1"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-2-clean-closed
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 10000
+- waitForAnimationToEnd
+# ③ 입력한 뒤 머리 끌기 — 「버릴까요?」
+- inputText: "추가로 적은 문장"
+- waitForAnimationToEnd
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "버릴까요?"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-3-discard-prompt
+- tapOn: "계속 편집"
+- waitForAnimationToEnd
+- assertVisible:
+    id: "editor-input"
+- takeScreenshot: ${SHOT}-3-kept
+# ④ 입력 상자에서 끌기 — 같은 확인, 「버리기」면 닫힌다
+- swipe:
+    start: "${HX}, ${INPUTY}"
+    end: "${HX}, ${INPUT_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "버릴까요?"
+    timeout: 8000
+- tapOn: "버리기"
+- extendedWaitUntil:
+    visible: "닫힘 2"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 10000
+- waitForAnimationToEnd
+# ⑤ 깨끗한 시트의 빠른 튕김
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FLICK}"
+    duration: 100
+- extendedWaitUntil:
+    visible: "닫힘 3"
+    timeout: 8000

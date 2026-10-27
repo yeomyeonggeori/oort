@@ -1,4 +1,5 @@
-import type {RosterMember} from '@momo/core/lib/api';
+import {QUICK_REACTIONS, type ReactionChip} from '@momo/core/features/timeline/reactions';
+import type {Message, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
@@ -18,6 +19,7 @@ import {SheetHeader} from '../src/design/SheetChrome';
 import {SheetScroll} from '../src/design/sheetParts';
 import {useStyles} from '../src/design/theme';
 import {ds2Radius, font, SAFE_GUTTER, space, type Palette} from '../src/design/tokens';
+import {MessageActionSheet} from '../src/features/conversation/MessageActionSheet';
 import {MessageEditorSheet} from '../src/features/conversation/MessageEditorSheet';
 import {workspaceKeys} from '../src/features/workspace/queries';
 import {useSession} from '../src/session/useSession';
@@ -29,13 +31,12 @@ import {NewMessageSheet} from '../src/shell/NewMessageSheet';
 //   -momoMeasure SHEETDRAG-<이름> · LIGHT-SHEETDRAG-<이름>
 //     [-momoGapSink 127.0.0.1:<포트>]   (선택 — `measure/gap-sink.mjs` 가 받는다. 없으면 숫자를 보내지 않고 화면의 읽음표만 선다)
 //
+//   action        배송되는 `MessageActionSheet`(내용 맞춤 단 · 행동 목록). 닫히면 「닫힘 N」이 늘고 「시트 다시 열기」 단추가 선다.
 //   edit          배송되는 `MessageEditorSheet`(중간 단 · 입력 · 저장 안 한 입력 확인). 닫히면(취소) 「닫힘 N」이 늘고 시트가 다시 선다.
 //   list          배송되는 `NewMessageSheet`(큰 단 · 날 `FlatList` · 스크롤이 가능한 서른 명). 같은 방식으로 다시 선다.
 //   probe-std     결정 2 계측: 시트 안의 **배송되는 `SheetScroll`**(고무줄 없음 + 끌기를 쥐면 스크롤 얼림).
 //   probe-freeze  같은 목록을 **날 `ScrollView`**(고무줄 있음)로 두고 얼림만 건다 — 1단계 완화 하나만 있을 때.
 //   probe-none    날 `ScrollView`(고무줄 있음)에 얼림도 없다 — 아무 방어도 없을 때(대조군).
-//
-// 메시지 행동 시트는 기존 표면(`SHEETKIT-MESSAGE-LIVE`)을 쓴다.
 //
 // 닫힌 시트는 무대의 「시트 다시 열기」 단추(`sheetdrag-reopen`)를 눌러야 다시 선다 — 한 번 띄운 앱에서 「닫힘 1」「닫힘 2」를 세며
 // Maestro 가 머리 끌기 · 본문 끌기 · 튕김을 차례로 친다(`maestro/115-sheet-drag-*.yaml`). 시간에 맡겨 다시 세우면 부하가 큰 기계에서
@@ -116,6 +117,46 @@ function useReopen(): {open: boolean; nonce: number; closes: number; onClosed: (
 }
 
 // ---- 배송되는 시트 --------------------------------------------------------
+
+const ACTION_MESSAGE = {
+  id: '00000000-0000-7000-8000-0000000046a1',
+  channelId: '00000000-0000-7000-8000-0000000046c1',
+  seq: 42,
+  hlcTs: 42,
+  hlcCount: 0,
+  authorMemberId: '00000000-0000-7000-8000-0000000046b1',
+  type: 'text',
+  body: '금요일 배포는 오전 10시에 시작해요. 롤백 절차는 문서에 적어 뒀어요.',
+  state: 'sent',
+  createdAtMs: Date.UTC(2026, 9, 25, 1, 30),
+} as unknown as Message;
+const ACTION_CHIPS = [{emoji: QUICK_REACTIONS[0], count: 2, mine: true}] as unknown as ReactionChip[];
+const ACTION_AVAILABILITY = {reply: true, quote: true, react: true, pin: true, edit: true, delete: true} as never;
+
+function ActionSurface(): React.JSX.Element {
+  const {open, nonce, closes, onClosed, reopen} = useReopen();
+  return (
+    <Stage log={`닫힘 ${closes}`} reopen={open ? undefined : reopen}>
+      {open ? (
+        <MessageActionSheet
+          key={nonce}
+          message={ACTION_MESSAGE}
+          chips={ACTION_CHIPS}
+          availability={ACTION_AVAILABILITY}
+          authorLabel="이도현"
+          onClose={onClosed}
+          onToggleReaction={noop}
+          onReply={noop}
+          onQuote={noop}
+          onCopy={noop}
+          onPin={noop}
+          onEdit={noop}
+          onDelete={noop}
+        />
+      ) : null}
+    </Stage>
+  );
+}
 
 function EditSurface(): React.JSX.Element {
   const {open, nonce, closes, onClosed, reopen} = useReopen();
@@ -226,8 +267,34 @@ function ProbeBody({
     [],
   );
 
+  /** 지금까지 쌓은 끌기 하나를 한 줄로 내고 비운다. */
+  const flush = () => {
+    stopPoll();
+    const list = samples.current;
+    samples.current = [];
+    const ys = list.map(s => s.y);
+    onGesture(
+      {
+        variant,
+        n: list.length,
+        minY: ys.length ? Math.min(...ys) : 0,
+        maxY: ys.length ? Math.max(...ys) : 0,
+        nonZero: ys.filter(y => Math.abs(y) > 0.5).length,
+        sheetMaxDisp: Math.round(maxDisp.current * 10) / 10,
+        spanMs: list.length ? list[list.length - 1].t - list[0].t : 0,
+      },
+      list.slice(0, 160),
+    );
+  };
+  const flushRef = useRef(flush);
+  flushRef.current = flush;
+  const pending = useRef(false);
+
   const begin = () => {
+    // 앞 끌기의 기록이 아직 안 나갔으면(터치 끝 + 600ms 전에 다음 터치가 왔다) 버리지 않고 먼저 낸다.
     if (timer.current) clearTimeout(timer.current);
+    if (pending.current) flushRef.current();
+    pending.current = false;
     stopPoll();
     samples.current = [];
     y0.current = null;
@@ -241,24 +308,11 @@ function ProbeBody({
   };
   const end = () => {
     if (timer.current) clearTimeout(timer.current);
+    pending.current = true;
     // 관성이 끝나고 시트가 자리를 잡을 때까지(+600ms) 더 본 뒤 낸다.
     timer.current = setTimeout(() => {
-      stopPoll();
-      const list = samples.current;
-      samples.current = [];
-      const ys = list.map(s => s.y);
-      onGesture(
-        {
-          variant,
-          n: list.length,
-          minY: ys.length ? Math.min(...ys) : 0,
-          maxY: ys.length ? Math.max(...ys) : 0,
-          nonZero: ys.filter(y => Math.abs(y) > 0.5).length,
-          sheetMaxDisp: Math.round(maxDisp.current * 10) / 10,
-          spanMs: list.length ? list[list.length - 1].t - list[0].t : 0,
-        },
-        list.slice(0, 160),
-      );
+      pending.current = false;
+      flushRef.current();
     }, 600);
   };
 
@@ -360,6 +414,8 @@ function ProbeSurface({variant}: {variant: ProbeVariant}): React.JSX.Element {
 
 export function SheetDragSurface({which}: {which: string}): React.JSX.Element {
   switch (which) {
+    case 'action':
+      return <ActionSurface />;
     case 'edit':
       return <EditSurface />;
     case 'probe-freeze':

@@ -1,0 +1,175 @@
+appId: app.momo.ios
+name: 115-sheet-drag-list
+env:
+  # 16 Pro(402×874) 기본값 — 기기마다 시트 위치가 다르므로 `measure/sheet-drag-run.mjs` 가 `maestro hierarchy` 로 읽어 -e 로 덮어쓴다.
+  # SE(375×667): HX=187 HY=107 HY_SHORT=167 HY_FAR=367 HY_FLICK=207 ROWY=263 ROW_FAR=523 BLANKY=154 BLANK_FAR=414 UP_A=167 UP_B=77.
+  HX: "201" # 가운데 x
+  HY: "115" # 머리 제목 줄 y
+  HY_SHORT: "175" # 문턱(시트 높이의 25%) 아래로 60 끈 자리
+  HY_FAR: "415" # 문턱 위로 300 끈 자리
+  HY_FLICK: "215" # 짧게(100) 튕긴 자리
+  ROWY: "271" # 첫 사람 줄 y(눌리는 줄 — Pressable)
+  ROW_FAR: "571"
+  BLANKY: "162" # 「받는 사람」 라벨 y(눌리지 않는 자리)
+  BLANK_FAR: "462"
+  UP_A: "175" # 위로 쓸기: UP_A → UP_B
+  UP_B: "85"
+  SCR_A: "760" # 스크롤: 손가락을 SCR_A → SCR_B 로 올린다(목록이 내려간다)
+  SCR_B: "300"
+  BACK_A: "300" # 되돌려 끌기: BACK_A → BACK_B(목록이 올라온다)
+  BACK_B: "600"
+  LONG_A: "260" # 맨 위를 지나 계속 끌기: LONG_A → LONG_B
+  LONG_B: "840"
+  SHOT: "sheet-drag-list"
+---
+# 115-sheet-drag-list — 긴 목록 시트(새 DM, 큰 단, 날 FlatList)를 끌어내리는 장면들 (#4612 2단계).
+#
+# 표면 `-momoMeasure SHEETDRAG-LIST`(다크) · `LIGHT-SHEETDRAG-LIST`(라이트)는 배송되는 `NewMessageSheet` 를 가상 인물 서른 명의 목록으로
+# 세운다(`measure/sheetDrag.tsx`). 시트가 닫히면 무대에 「닫힘 N」과 「시트 다시 열기」 단추가 서고, 이 흐름이 그 단추를 눌러 다시 세워 장면을
+# 이어 친다 — 한 번 띄운 앱에서 일곱 장면이다.
+#
+#   ① 모자란 끌기(머리, 문턱 아래, 느리게)           시트가 따라왔다가 제자리로 돌아온다 — 닫히지 않는다
+#   ② 머리 끌기(문턱 위)                            닫힌다 — 머리의 눌리지 않는 자리(제목)에서 시작: 시작 응답자 길
+#   ③ 본문 맨 위 끌기 — 사람 줄(눌리는 줄)에서 시작     닫힌다 — 줄이 먼저 응답자, 시트가 이동에서 가로챈다
+#   ④ 본문 맨 위 끌기 — 「받는 사람」 라벨(빈 자리)     닫힌다 — 시작 응답자 길
+#   ⑤ 빠른 튕김(짧지만 빠르게)                       닫힌다 — 거리는 모자라도 속도 문턱(0.7px/ms)을 넘는다
+#   ⑥ 스크롤 중 끌기                                목록이 스크롤된 채 아래로 끌면 목록만 올라오고 시트는 안 움직인다(열려 있다)
+#   ⑦ 같은 손가락으로 맨 위를 지나 계속 끌기            알려진 한계: 시트가 이어받지 않는다(열려 있다). 손가락을 뗐다 다시 끌면 닫힌다
+#   ⑧ 위로 쓸기                                    열려 있다(닫지 않는다)
+#
+# 「시트가 안 움직였다」는 이 흐름이 못 잰다 — 화면 안에서 위치를 단정할 도구가 없다. 구동 스크립트가 녹화에서 시트 위 끝을 프레임마다 재고,
+# 닫힘·열림은 여기서 단정한다(닫힘은 「닫힘 N」 글자가 보이는 것, 열림은 목록이 그대로 보이는 것).
+#
+#   node clients/mobile/measure/sheet-drag-run.mjs --udid <UDID> --device 16pro --surface LIST --metro <포트> ...
+#   (손으로: xcrun simctl launch <UDID> app.momo.ios --args -momoMeasure SHEETDRAG-LIST -RCT_jsLocation 127.0.0.1:<포트>
+#            maestro --udid <UDID> test clients/mobile/maestro/115-sheet-drag-list.yaml)
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-0-open
+# ① 모자란 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_SHORT}"
+    duration: 1500
+- waitForAnimationToEnd
+- assertVisible:
+    id: "new-dm-list"
+# ② 머리 끌기(문턱 위)
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 1"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-2-header-closed
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 10000
+- waitForAnimationToEnd
+# ③ 본문 맨 위 — 사람 줄에서 시작
+- swipe:
+    start: "${HX}, ${ROWY}"
+    end: "${HX}, ${ROW_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 2"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 10000
+- waitForAnimationToEnd
+# ④ 본문 맨 위 — 빈 자리(라벨)에서 시작
+- swipe:
+    start: "${HX}, ${BLANKY}"
+    end: "${HX}, ${BLANK_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 3"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 10000
+- waitForAnimationToEnd
+# ⑤ 빠른 튕김
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FLICK}"
+    duration: 100
+- extendedWaitUntil:
+    visible: "닫힘 4"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 10000
+- waitForAnimationToEnd
+# ⑥ 스크롤 중 끌기 — 먼저 목록을 내려 스크롤한다
+- swipe:
+    start: "${HX}, ${SCR_A}"
+    end: "${HX}, ${SCR_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "new-dm-person-member01"
+- takeScreenshot: ${SHOT}-6-scrolled
+# …스크롤된 채 아래로 끌면 목록이 올라올 뿐 시트는 안 내려온다
+- swipe:
+    start: "${HX}, ${BACK_A}"
+    end: "${HX}, ${BACK_B}"
+    duration: 1200
+- waitForAnimationToEnd
+- assertVisible:
+    id: "new-dm-list"
+- assertVisible:
+    id: "page-sheet-handle"
+- takeScreenshot: ${SHOT}-6-dragged-back
+# ⑦ 같은 손가락으로 맨 위를 지나 계속 끌기 — 알려진 한계(이어받지 않는다)
+- swipe:
+    start: "${HX}, ${LONG_A}"
+    end: "${HX}, ${LONG_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- assertVisible:
+    id: "new-dm-list"
+- assertVisible:
+    id: "new-dm-person-member01"
+- takeScreenshot: ${SHOT}-7-passed-top-stays
+# 손가락을 뗐다 다시 끌면 닫힌다
+- swipe:
+    start: "${HX}, ${ROWY}"
+    end: "${HX}, ${ROW_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 5"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "new-dm-list"
+    timeout: 10000
+- waitForAnimationToEnd
+# ⑧ 위로 쓸기 — 열려 있다
+- swipe:
+    start: "${HX}, ${UP_A}"
+    end: "${HX}, ${UP_B}"
+    duration: 150
+- waitForAnimationToEnd
+- assertVisible:
+    id: "new-dm-list"
+- takeScreenshot: ${SHOT}-8-up-stays
