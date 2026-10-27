@@ -102,9 +102,9 @@ function coordinates(ids) {
   const threshold = Math.max(64, height * 0.25);
   const far = Math.ceil(threshold * 1.5);
   const short = Math.floor(threshold * 0.3);
-  // 빠른 튕김: 문턱 거리 **미만**(90%)을 60ms 에 쓴다 — 거리로는 안 닫히고 속도 문턱(0.7px/ms)으로만 닫힌다. XCTest 합성 스와이프는 끝에서
+  // 빠른 튕김: 문턱 거리 **미만**(95% — 슬라이드 첫 6pt 는 흡수하므로 실제 변위는 95%-6pt)을 60ms 에 쓴다 — 거리로는 안 닫히고 속도 문턱(0.7px/ms)으로만 닫힌다. XCTest 합성 스와이프는 끝에서
   // 감속해 측정 속도가 명목 속도의 40~53% 라(실측: 100pt/60ms → 0.65, 150pt/100ms → 0.79, 200pt/100ms → 1.06), 명목 2.3px/ms 이상으로 쓴다.
-  const flick = Math.floor(threshold * 0.9);
+  const flick = Math.floor(threshold * 0.95);
   const hx = Math.round((sheet.x0 + sheet.x1) / 2);
   const hy = sheet.y0 + 49; // 손잡이 띠 23 + 머리 줄 절반 26
   const env = {
@@ -115,8 +115,8 @@ function coordinates(ids) {
     HY_FLICK: hy + flick,
     FLICK_MS: 60,
     // 합성 스와이프는 요청 시간(35~60ms)과 무관하게 실제로 116~150ms 걸려서(실측: 78pt 튕김의 표본 간격) 속도가 거리/0.12s 쯤이다. 문턱 거리 아래에서
-    // 속도 문턱(0.7px/ms)을 넘으려면 ≈95pt 이상이 필요해, 그보다 작은 시트(SE 편집 시트: 문턱 87pt → 튕김 78pt → 측정 0.52~0.63)에서는 이 장면을 못 쓴다.
-    FLICK_SKIP: flick < 95,
+    // 속도 문턱(0.7px/ms)을 넘으려면 ≈100pt 이상이 필요해, 그보다 작은 시트(SE 편집 시트: 문턱 87pt → 튕김 78pt → 측정 0.52~0.63)에서는 이 장면을 못 쓴다.
+    FLICK_SKIP: flick < 100,
   };
   const geometry = {sheetTop: sheet.y0, sheetHeight: height, thresholdPt: threshold, farPt: far, shortPt: short};
   if (SURFACE === 'LIST') {
