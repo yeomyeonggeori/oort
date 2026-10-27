@@ -3,14 +3,14 @@ import type {PendingMessage} from '@momo/core/features/timeline/model';
 import type {ReactionMap} from '@momo/core/features/timeline/reactions';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
-import {Keyboard, Linking, Settings, StyleSheet, TextInput, View} from 'react-native';
+import {Keyboard, Linking, Settings, StyleSheet, Text, TextInput, View} from 'react-native';
 import type {GestureResponderEvent} from 'react-native';
 import {Screen} from '../src/design/atoms';
 import {Composer} from '../src/features/conversation/Composer';
 import {ConversationHeader} from '../src/features/conversation/ConversationHeader';
 import {ConversationLayout} from '../src/features/conversation/ConversationLayout';
 import {CONV} from '../src/features/conversation/convDesign';
-import {clearDraft, saveDraft} from '../src/features/conversation/drafts';
+import {clearDraft, readDraft, saveDraft} from '../src/features/conversation/drafts';
 import {Timeline} from '../src/features/conversation/Timeline';
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 
@@ -29,6 +29,11 @@ import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 //     link    링크가 든 행이 맨 끝에 선다.   chip  반응 칩이 붙은 행이 맨 끝에 선다.
 //     pend    서버가 아직 안 받은 낙관적 메아리(`PendingRow`)가 맨 끝에 하나 서 있다.
 //     slow    보내면 메아리가 60초 남는다(기본은 1.2초 뒤 서버 사본이 대신한다).
+//     roll    스레드 루트(그 밑에 「답글 1개」 롤업 단추가 선다)가 맨 끝에 선다.
+//     probe   화면 맨 위에 한 줄(`tap-probe`)을 얹는다: `kb=up|down dismiss=<n> last=<마지막 동작> draft=<초안>` — 네이티브 자판 이벤트·`Keyboard.dismiss` 호출·행 동작·초안 저장소를 그대로
+//             적는다. Maestro 가 화면에서 읽는다(`maestro/115-list-tap-dismiss.yaml`). 캡처에는 켜지 않는다.
+//
+//   `link`·`chip`·`roll` 의 맨 끝 행은 **세 번째 인물(최민수)** 이 쓴 글이다 — 그 행의 아바타·작성자 줄이 화면에서 하나뿐이라 Maestro 가 이름으로 집을 수 있다.
 //
 // **대화 화면이 세우는 그대로** 세운다 — 머리 · 레이아웃(목록 / 도크) · 행 동작(`actions`, 행이 눌리는 표면).
 // 다른 하네스(`dockGap`)는 `actions` 가 없어서 행이 **비활성**(`disabled`)이라, 행을 누르는 길을 못 잰다.
@@ -40,10 +45,15 @@ import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 const WS = '00000000-0000-7000-8000-0000000000f0';
 const SELF = '00000000-0000-7000-8000-0000000000f1';
 const PEER = '00000000-0000-7000-8000-0000000000f2';
+const PEER2 = '00000000-0000-7000-8000-0000000000f3';
 const CHANNEL = 'tap-dismiss-capture';
 const DRAFT_KEY = 'measure:tap-dismiss';
 const NO_TOP = {paddingTop: 0} as const;
-const styles = StyleSheet.create({fill: {flex: 1}});
+const styles = StyleSheet.create({
+  fill: {flex: 1},
+  probeBox: {position: 'absolute', top: 0, left: 0, right: 0, zIndex: 999},
+  probeText: {fontSize: 9, lineHeight: 11, color: '#ffffff', backgroundColor: 'rgba(0,0,0,0.65)'},
+});
 
 function member(over: Partial<RosterMember> & {id: string}): RosterMember {
   return {
@@ -64,6 +74,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '박서연', handle: 'seoyeon'}),
   member({id: PEER, displayName: '이도현', handle: 'dohyun'}),
+  member({id: PEER2, displayName: '최민수', handle: 'minsu'}),
 ]);
 
 const NOW = Date.now();
@@ -83,7 +94,7 @@ function message(seq: number, author: string, body: string, ageSec: number): Mes
   } as Message;
 }
 
-const LINK = 'https://example.com/studio/schedule';
+const LINK = 'https://example.com/plan';
 const ALL: Message[] = [
   message(1, PEER, '내일 오전에 디자인 리뷰 가능할까요', 900),
   message(2, SELF, '네, 열 시 괜찮아요', 860),
@@ -112,6 +123,46 @@ const DRAFTS = {
 
 type Sink = (record: Record<string, unknown>) => void;
 
+// ---- probe 한 줄 (#4614) --------------------------------------------------------
+// Maestro 는 계층에 보이는 글만 읽는다. 자판이 올라와 있는가·`Keyboard.dismiss` 가 불렸는가·어느 행 동작이 일어났는가·초안이 남았는가를 **앱이 아는 그대로** 한 줄로 적는다.
+// 저장소는 모듈 수준이라 표면(대화 화면 전체)을 다시 그리지 않는다 — 한 줄만 갱신되고 재는 대상(목록·입력창)은 이 줄 때문에 달라지지 않는다.
+interface ProbeState {
+  kb: 'up' | 'down';
+  dismiss: number;
+  last: string;
+  draft: string;
+}
+let probeState: ProbeState = {kb: 'down', dismiss: 0, last: '-', draft: ''};
+const probeListeners = new Set<() => void>();
+function probeSet(patch: Partial<ProbeState>): void {
+  probeState = {...probeState, ...patch};
+  probeListeners.forEach(listener => listener());
+}
+
+function ProbeLine(): React.JSX.Element {
+  const [, bump] = useState(0);
+  useEffect(() => {
+    const listener = () => bump(count => count + 1);
+    probeListeners.add(listener);
+    // 초안은 입력창이 글자마다 저장소에 쓴다(`drafts.ts`) — 그 저장소를 읽는다(입력창 내부를 들여다보지 않는다).
+    const poll = setInterval(() => {
+      const draft = readDraft(DRAFT_KEY).replace(/\n/g, '⏎');
+      if (draft !== probeState.draft) probeSet({draft});
+    }, 150);
+    return () => {
+      probeListeners.delete(listener);
+      clearInterval(poll);
+    };
+  }, []);
+  return (
+    <View pointerEvents="none" style={styles.probeBox}>
+      <Text style={styles.probeText} testID="tap-probe">
+        {`kb=${probeState.kb} dismiss=${probeState.dismiss} last=${probeState.last} draft=${probeState.draft}`}
+      </Text>
+    </View>
+  );
+}
+
 function makeSink(): Sink {
   const sink = Settings.get('momoGapSink');
   const t0 = Date.now();
@@ -134,6 +185,7 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
   const sink = sinkRef.current;
 
   useState(() => {
+    probeState = {kb: 'down', dismiss: 0, last: '-', draft: ''};
     const draft = has('long') ? DRAFTS.long : has('typed') ? DRAFTS.typed : undefined;
     if (draft === undefined) clearDraft(DRAFT_KEY);
     else saveDraft(DRAFT_KEY, draft);
@@ -143,9 +195,17 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
   const [messages, setMessages] = useState<Message[]>(() => {
     if (has('short')) return ALL.slice(0, 3);
     // `link`·`chip`: 그 행을 맨 끝으로 옮긴다(자판이 올라온 창에는 끝 행 서넛만 든다). id 는 그대로라 반응 지도가 따라온다.
-    const tail = has('link') ? ALL[3] : has('chip') ? ALL[5] : null;
+    const tail = has('link') ? ALL[3] : has('chip') ? ALL[5] : has('roll') ? ALL[7] : null;
     if (tail === null) return [...ALL, REPLY];
-    const moved = {...tail, seq: 12, hlcTs: 12, createdAtMs: NOW - 30_000} as Message;
+    // `link`: 맨 끝 행의 글은 **링크 하나뿐**이다 — 말풍선 한가운데가 곧 링크 글자라 Maestro 가 말풍선을 눌러 링크를 확실히 누른다(중첩된 링크 글자는 계층에 따로 서지 않는다).
+    const moved = {
+      ...tail,
+      authorMemberId: PEER2,
+      ...(has('link') ? {body: LINK} : {}),
+      seq: 12,
+      hlcTs: 12,
+      createdAtMs: NOW - 30_000,
+    } as Message;
     return [...ALL.filter(entry => entry.id !== tail.id), REPLY, moved];
   });
   // 낙관적 메아리(`PendingRow`) — `pend` 는 처음부터 하나 세운다(서버가 안 받은 채 오래 남는 장면), 보내면 `slow` 는 60초, 아니면 1.2초 뒤 서버 사본이 대신한다.
@@ -177,12 +237,15 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
   useEffect(() => {
     const subs = (['keyboardWillShow', 'keyboardDidShow', 'keyboardWillHide', 'keyboardDidHide'] as const).map(
       name =>
-        Keyboard.addListener(name, event =>
-          sink({k: 'kb', name, h: event.endCoordinates.height, visible: Keyboard.isVisible()}),
-        ),
+        Keyboard.addListener(name, event => {
+          sink({k: 'kb', name, h: event.endCoordinates.height, visible: Keyboard.isVisible()});
+          if (name === 'keyboardDidShow') probeSet({kb: 'up'});
+          if (name === 'keyboardDidHide') probeSet({kb: 'down'});
+        }),
     );
     const original = Keyboard.dismiss;
     Keyboard.dismiss = () => {
+      probeSet({dismiss: probeState.dismiss + 1});
       sink({
         k: 'dismiss',
         visible: Keyboard.isVisible(),
@@ -193,6 +256,7 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
     const openURL = Linking.openURL;
     Linking.openURL = (url: string) => {
       sink({k: 'link', url});
+      probeSet({last: 'link'});
       return Promise.resolve(true);
     };
     return () => {
@@ -204,11 +268,20 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
 
   const actions = useRef<MessageRowActions>({
     myMemberId: SELF,
-    onToggleReaction: async (m, emoji) => sink({k: 'reaction', seq: m.seq, emoji}),
+    onToggleReaction: async (m, emoji) => {
+      sink({k: 'reaction', seq: m.seq, emoji});
+      probeSet({last: 'reaction'});
+    },
     onEdit: async () => {},
     onDelete: async () => {},
-    onOpenThread: m => sink({k: 'thread', seq: m.seq}),
-    onOpenProfile: id => sink({k: 'profile', id}),
+    onOpenThread: m => {
+      sink({k: 'thread', seq: m.seq});
+      probeSet({last: 'thread'});
+    },
+    onOpenProfile: id => {
+      sink({k: 'profile', id});
+      probeSet({last: 'profile'});
+    },
   }).current;
 
   const touch = useCallback(
@@ -227,6 +300,7 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
   const onSend = useCallback(
     (body: string) => {
       sink({k: 'send', body: body.length});
+      probeSet({last: 'send'});
       const clientMsgId = `echo-${Date.now()}`;
       setPending(previous => [
         ...previous,
@@ -296,6 +370,7 @@ export function TapDismissSurface({which}: {which: string}): React.JSX.Element {
           </View>
         }
       />
+      {has('probe') ? <ProbeLine /> : null}
     </Screen>
   );
 }

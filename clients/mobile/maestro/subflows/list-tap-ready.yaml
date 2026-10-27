@@ -1,0 +1,10 @@
+appId: app.momo.ios
+name: list-tap-ready
+---
+# 115-list-tap-dismiss 의 시작 조건 (#4614): 자판이 올라와 있고 입력창이 펼쳐져 있다. 이 대조가 없으면 아래 「내려갔다·접혔다」 단정은 탭 없이도 통과한다 — 처음부터 내려가 있었을 수 있다.
+# 표면(`TAP-UP+…+PROBE`)은 1.5초 뒤 입력창에 포커스를 준다. 화면 맨 위 한 줄(`tap-probe`)이 네이티브 자판 이벤트를 그대로 적는다.
+- extendedWaitUntil:
+    visible: ".*kb=up.*"
+    timeout: 60000
+- assertVisible:
+    id: "composer-tools"

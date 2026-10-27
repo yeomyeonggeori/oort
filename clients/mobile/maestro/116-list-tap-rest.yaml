@@ -1,0 +1,82 @@
+appId: app.momo.ios
+name: 116-list-tap-rest
+---
+# 116-list-tap-rest — 입력 중에 **대화 목록을 눌러** 자판을 내리고 입력창을 쉬게 하는 흐름의 **이동을 재는** 단계들 (#4614).
+# 재는 것은 앱이 한다(`measure/steady.tsx` 의 `focus` 장면 + `+actions`: 행이 실제로 눌리는 표면 — 프레임마다 맨 아래 행·도크의 창 좌표, 포커스, 자판, `Keyboard.dismiss`
+# 호출). 분석은 `measure/focus-windows.mjs` 의 `dismiss` 창: 도크 높이가 줄어든 만큼 목록 꼬리가 같이 움직였는가(틈 편차), 방향이 뒤집히는가(반전), 도크 높이가
+# **한 프레임에 얼마나 뛰는가**(최대 한 걸음).
+#
+# **이 파일은 한 번에 한 단계만 한다** — `-e STEP=<…>`. 단계 사이의 「가만히」는 구동 스크립트(`measure/run-list-rest.sh`)가 셸 `sleep` 으로 띄운다
+# (한 흐름 안의 `extendedWaitUntil … optional: true` 는 앱이 바쁘면 일찍 반환한다 — `112-enter-steady` 머리말).
+#
+#   measure/run-list-rest.sh <udid> <태그> DM-STEADY-FOCUS+actions+T120 <Metro 포트> <싱크 포트 파일> <싱크 태그 파일> <싱크 jsonl> [rec.mp4]
+#
+# 시뮬레이터는 키보드가 처음 오를 때 받아쓰기·슬라이드 입력 안내를 띄울 수 있고 그 알림이 앱 트리를 가린다 — `tips` 단계가 그 알림이 떠 있을 때만 닫는다(첫 `focus` 뒤에 한 번만; 눈으로 확인하는
+# 데 몇 초가 걸려서 매 단계에 넣지 않는다).
+#
+# 단계
+#   focus   입력창을 누른다(포커스·자판). 쉬는 초안을 다시 누르는 것도 이 단계다(같은 자리에서 펼침).   tips  안내 알림이 떠 있으면 닫는다.
+#   line1   한 줄을 친다.                      line2·line3  줄바꿈 + 한 줄씩(여러 줄 초안이 된다).
+#   send    보낸다(포커스가 남는다 → 빈 펼침).   clear  글을 모두 지운다.
+#   list    **대화 목록의 보이는 윗부분을 누른다**(`-e LIST_POINT="50%,25%"`: 화면 높이 25%) — 자판이 내려가고 글이 있으면 입력창이 쉬는 알약으로 접힌다. 키 큰 초안이 올라온 작은 화면(SE)은
+#           목록이 화면 위쪽 뼘밖에 안 남으므로 더 위(`50%,16%`)를 준다. 구동기가 기본값을 넣는다.
+- runFlow:
+    when:
+      true: ${STEP == 'focus'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "composer-input"
+          timeout: 60000
+      - tapOn:
+          id: "composer-input"
+- runFlow:
+    when:
+      true: ${STEP == 'tips'}
+    commands:
+      - runFlow:
+          when:
+            visible: "Continue"
+          commands:
+            - tapOn: "Continue"
+      - runFlow:
+          when:
+            visible: "지금 안 함"
+          commands:
+            - tapOn: "지금 안 함"
+- runFlow:
+    when:
+      true: ${STEP == 'line1'}
+    commands:
+      - inputText: "오늘 리뷰 끝나면 알려줄게요"
+- runFlow:
+    when:
+      true: ${STEP == 'line2'}
+    commands:
+      - pressKey: Enter
+      - inputText: "빠진 항목이 있으면 알려 주세요"
+- runFlow:
+    when:
+      true: ${STEP == 'line3'}
+    commands:
+      - pressKey: Enter
+      - inputText: "끝나면 여기에 정리해서 남길게요"
+- runFlow:
+    when:
+      true: ${STEP == 'send'}
+    commands:
+      - tapOn:
+          id: "composer-send"
+- runFlow:
+    when:
+      true: ${STEP == 'clear'}
+    commands:
+      - eraseText: 200
+- runFlow:
+    when:
+      true: ${STEP == 'list'}
+    commands:
+      # 목록의 **보이는 윗부분**을 누른다. 목록 상자(`conversation-list`)의 한가운데는 자판이 올라온 동안 도크 아래로 들어가(상자는 도크 뒤까지 뻗는다) 도크를 누르게 된다 — 화면 높이의 25% 는
+      # 머리(약 14%) 밑 · 도크 윗면(자판이 올라온 16 Pro 에서 약 42%, SE 약 35%) 위라서 두 기기 모두 목록이다. 행 본문일 수도 행 사이일 수도 있다 — 둘 다 같은 길이다.
+      - tapOn:
+          point: ${LIST_POINT}
