@@ -438,6 +438,13 @@ const REVOKE_PRIVILEGED_SQL: &str = "UPDATE token \
 /// Revoke every still-live **session** token of one member (access + refresh).
 /// Agent bearers are left alone — password rotation is not a member exile.
 ///
+/// The member's **developer tokens** (ADR-0216, `kind = 'dev'`: cards and
+/// every login lineage) end here too, in the same transaction — a password
+/// change or reset must not leave a CLI credential alive (D7, the trap R9
+/// names). They are swept inside this function rather than at its call sites
+/// so no caller can forget them. The returned count is still sessions only
+/// (the audit's `sessions_revoked`).
+///
 /// Ending every session also ends everything registered under them: the
 /// route that commits this must invalidate the member's push registrations in
 /// the same transaction (`momo_push::invalidate_member_push_tokens_in_tx`,
@@ -451,6 +458,11 @@ pub async fn revoke_member_session_tokens(
     // one id-ordered acquisition, before the `UPDATE` (whose own lock order is
     // scan order, not id order).
     lock_member_wide_sweep_in_tx(conn, workspace_id, member_id).await?;
+    // ADR-0216 D7: under the same sweep lock (re-entrant), the developer rows
+    // are taken in their own id-ordered acquisition and revoked. Every other
+    // multi-row developer lock holds this sweep lock too, so the two
+    // acquisitions cannot be interleaved by another sweeper.
+    crate::dev_token::revoke_member_dev_tokens_in_tx(conn, workspace_id, member_id).await?;
     lock_member_live_session_rows_in_tx(conn, workspace_id, member_id, false).await?;
     let rows = sqlx::query(REVOKE_MEMBER_SESSION_SQL)
         .bind(workspace_id)
