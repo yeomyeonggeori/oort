@@ -225,8 +225,10 @@ async function main() {
   envArgs.push('-e', `SHOT=${TAG}`);
   const flowPath = path.join(HERE, '..', 'maestro', FLOW);
   const startedAt = Date.now();
+  // `takeScreenshot` 은 작업 디렉터리에 PNG 를 쓴다 — 출력 폴더에서 돌려 캡처가 한곳에 모이게 한다.
   const run = sh(MAESTRO, ['--udid', UDID, 'test', ...envArgs, '--debug-output', path.join(OUT, `${TAG}.maestro-debug`), flowPath], {
     maxBuffer: 64 * 1024 * 1024,
+    cwd: OUT,
   });
   const log = `${run.stdout}\n${run.stderr}`;
   fs.writeFileSync(path.join(OUT, `${TAG}.maestro.log`), log);

@@ -1344,7 +1344,8 @@ async function openNewDm() {
   openMenu();
   await waitFor(() => expect(screen.getByTestId('plus-menu-dm')).toBeTruthy());
   fireEvent.press(screen.getByTestId('plus-menu-dm'));
-  await waitFor(() => expect(screen.getByTestId('new-dm-person-seeun')).toBeTruthy());
+  // 목록 컨테이너는 명단이 오기 전에도 서 있다 — 끌기 시험에는 줄이 필요 없다(시트에 알리는 쪽은 목록 컨테이너다).
+  await waitFor(() => expect(screen.getByTestId('new-dm-list')).toBeTruthy());
 }
 
 describeCloseContract({
