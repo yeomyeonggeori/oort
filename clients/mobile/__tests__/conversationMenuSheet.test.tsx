@@ -1689,8 +1689,10 @@ describe('화면 — 채널 목록을 모르는 동안과 대화가 바뀔 때 (
     mountScreen(jest.fn());
     await screen.findByTestId('conversation-menu');
     await openConversationMenu();
-    // 정보 행도 없다 — 종류를 모르면 정보 페이지가 무엇의 정보인지 모른다(알약도 단추가 아니다).
+    // 정보 행도 없다 — 종류를 모르면 정보 페이지가 무엇의 정보인지 모른다. 머리 알약도 단추가 아니라 이름만 선다(눌러도 열 곳이 없다).
     expect(menuKeys()).toEqual(['pins']);
+    expect(screen.queryByTestId('conversation-info-button')).toBeNull();
+    expect(screen.getByTestId('conversation-title')).toHaveTextContent('general');
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent(/^general$/);
     // 고정 목록은 채널 없이도 열린다.
     fireEvent.press(screen.getByTestId('conversation-menu-pins'));
@@ -1705,6 +1707,17 @@ describe('화면 — 채널 목록을 모르는 동안과 대화가 바뀔 때 (
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent('# general');
     view.rerender(tree(WORLD.other));
     await waitFor(() => expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull());
+  });
+
+  it('채널이 바뀌면 열린 정보 페이지도 걷는다 — 앞 방의 정보가 이 방 위에 남지 않는다', async () => {
+    installFetch();
+    const {view, tree} = mountScreen(jest.fn());
+    await screen.findByTestId('conversation-info-button');
+    fireEvent.press(screen.getByTestId('conversation-info-button'));
+    await screen.findByTestId('conversation-info-page');
+    expect(screen.getByTestId('conversation-info-name')).toHaveTextContent('general');
+    view.rerender(tree(WORLD.other));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
   });
 
   it('대조: 요청이 도는 사이 그 대화가 그대로면 닫기가 끝난 뒤 뒤로가기를 한 번 부른다', async () => {

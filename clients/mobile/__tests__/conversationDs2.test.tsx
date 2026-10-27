@@ -443,6 +443,26 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
       expect(JSON.stringify(without)).toBe(JSON.stringify(withWord));
     });
 
+    it('줄을 키울 수 있는 값이 알약·이름·보조 글에 없다 — 조건부가 아니라 **무조건** 자라는 수리도 막는다', () => {
+      pillHeader(dm());
+      // 위 시험은 낱말 유무에서 같은지만 본다 — 알약에 세로 여백 12 를 늘 얹어도 양쪽이 같아 초록이다. 높이를 정하는 길을 이름으로 막아 둔다:
+      // 알약의 높이는 `minHeight`(원과 같은 42) 하나뿐이고, 글줄은 폰트가 정한다(줄 높이를 따로 주지 않는다).
+      const pill = flatten(screen.getByTestId('conversation-info-button').props.style);
+      for (const key of ['height', 'paddingVertical', 'paddingTop', 'paddingBottom', 'marginVertical', 'marginTop', 'marginBottom']) {
+        expect([key, pill[key]]).toEqual([key, undefined]);
+      }
+      for (const id of ['conversation-title', 'conversation-title-status']) {
+        const text = flatten(screen.getByTestId(id).props.style);
+        expect([id, text.lineHeight]).toEqual([id, undefined]);
+        expect([id, text.paddingVertical]).toEqual([id, undefined]);
+      }
+      // 가운데 칸·양쪽 칸도 높이를 들지 않는다 — 줄(`row`)의 `minHeight` 62 와 알약의 42 가 높이의 전부다.
+      for (const id of ['conversation-header-center', 'conversation-header-start', 'conversation-header-end']) {
+        const box = flatten(screen.getByTestId(id).props.style);
+        expect([id, box.height, box.minHeight]).toEqual([id, undefined, undefined]);
+      }
+    });
+
     it('연결 띠가 서도 머리는 그대로이고 띠는 흐름 밖에 뜬다(#4292)', async () => {
       pillHeader(dm());
       const calm = metrics();

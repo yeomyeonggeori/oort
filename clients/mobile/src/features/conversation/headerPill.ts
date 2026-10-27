@@ -1,4 +1,4 @@
-import {BAR_CONTROL_MAX_SCALE, STACK_PILL_SCALE} from '../../design/atoms';
+import {STACK_PILL_SCALE} from '../../design/atoms';
 import {estimateTextWidth, textEm} from '../../design/textEstimate';
 import {font} from '../../design/tokens';
 import {CONV} from './convDesign';
@@ -67,8 +67,8 @@ export function pillShowsSecondary({
   slotWidth: number;
 }): boolean {
   if (secondary === '' || fontScale >= STACK_PILL_SCALE) return false;
-  // 머리 글자는 `BAR_CONTROL_MAX_SCALE` 에서 멈춘다 — 더 큰 배율의 폭을 어리면 늘 숨겨 버린다.
-  const scale = Math.min(fontScale, BAR_CONTROL_MAX_SCALE);
+  // 여기까지 오면 배율은 1.5 미만이다 — 머리 글자의 상한(`BAR_CONTROL_MAX_SCALE` 1.6)에 닿기 전이라 그대로 곱한다.
+  const scale = fontScale;
   const container = pillContainerWidth(windowWidth, slotWidth);
   const chrome = 2 * CONV.headPillPadX + leading + CONV.headPillGap;
   const secondaryWidth = estimateTextWidth(secondary, font.meta, scale);

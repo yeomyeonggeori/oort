@@ -15,9 +15,10 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
-import {Image, StyleSheet} from 'react-native';
+import {Animated, Dimensions, Image, StyleSheet} from 'react-native';
 
 import {SHEET_ICONS} from '../src/design/icons';
+import {EASE_OUT, LAYER_POP_MS, LAYER_PUSH_MS} from '../src/design/motion';
 import {FixedScheme} from '../src/design/theme';
 import {TOUCH_TARGET} from '../src/design/tokens';
 import {
@@ -31,6 +32,7 @@ import {
 import {PROFILE_FACE_SQUARE_RING_RADIUS} from '../src/features/profile/ProfileFace';
 import type {ChannelRowTarget} from '../src/features/sidebar/channelRowActions';
 import {finger, pane} from './fixtures/finger';
+import {pinReduceMotion} from './fixtures/reduceMotion';
 import {releaseReduceMotion, setReduceMotion} from './fixtures/sheetContract';
 
 // =============================================================================
@@ -430,9 +432,37 @@ describe('정보 페이지 — 행은 코어 표의 답이다 (#4319)', () => {
     expect(screen.queryByText(/별표|섹션/)).toBeNull();
     expect(screen.queryByTestId('conversation-info-star')).toBeNull();
     expect(screen.queryByTestId('conversation-info-move-to-section')).toBeNull();
-    // 코어 표가 입력에서 이미 막는다 — 읽음·별표·섹션은 이 페이지의 열쇠가 아니다.
+    // 코어 표가 입력에서 이미 막는다 — 읽음·별표·섹션은 이 페이지의 열쇠가 아니다. 열쇠 집합은 **적어 둔 목록**과 견준다(자기가 거른 집합에 자기가 들었는지
+    // 묻는 단정은 실패할 수 없다).
     const keys = conversationInfoActionItems(channelTarget()).map(item => item.key);
-    for (const key of keys) expect([key, CONVERSATION_INFO_ACTION_KEYS.has(key)]).toEqual([key, true]);
+    expect([...keys].sort()).toEqual(['copy-id', 'copy-link', 'copy-name', 'leave', 'mute']);
+    expect([...CONVERSATION_INFO_ACTION_KEYS].sort()).toEqual([
+      'close-dm',
+      'copy-id',
+      'copy-link',
+      'copy-name',
+      'leave',
+      'mute',
+    ]);
+    // 코어 표에 별표·섹션 이동이 **있어도** 폰이 손이 없다고 입력으로 막은 답이다 — 풀면 열쇠가 늘어난다.
+    expect(keys).not.toContain('star');
+    expect(keys).not.toContain('move-to-section');
+  });
+
+  it('읽음 투영이 있는 대화에도 「읽지 않음으로 표시」·「읽음 처리」는 이 페이지의 행이 아니다 — 지금 읽고 있는 대화에 건네는 말이 아니다', () => {
+    const caughtUp = {
+      channelId: 'ch-general',
+      lastReadSeq: 9,
+      latestSeq: 9,
+      unreadCount: 0,
+      mentionCount: 0,
+      markedUnreadBeforeSeq: null,
+    } as ChannelRowTarget['readState'];
+    const unread = {...caughtUp, lastReadSeq: 4, unreadCount: 5} as ChannelRowTarget['readState'];
+    for (const readState of [caughtUp, unread]) {
+      const keys = conversationInfoActionItems(channelTarget({readState})).map(item => item.key);
+      expect([...keys].sort()).toEqual(['copy-id', 'copy-link', 'copy-name', 'leave', 'mute']);
+    }
   });
 
   it('행을 누르면 그 열쇠로 실행을 부탁한다 — 페이지는 닫히지 않는다(닫는 길이 없다)', () => {
@@ -556,5 +586,109 @@ describe('정보 페이지 — 채널 나가기의 확인 단계 (#4319)', () =>
     expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
     expect(screen.getByTestId('conversation-info-leave-confirm')).toBeTruthy();
     expect(props.onClose).not.toHaveBeenCalled();
+  });
+});
+
+// ---- 5. 움직임: 오른쪽에서 밀려 들어오고 ‹ 는 오른쪽으로 물러난다 ----------------------------------------
+
+describe('정보 페이지 — 안쪽 장의 움직임 (#4319, `phone-sheets.md` §1)', () => {
+  const {width: WIDTH} = Dimensions.get('window');
+  let release: (() => void) | null = null;
+  let timing: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.useFakeTimers();
+    // 시킨 설정만 본다 — 네이티브 구동 애니메이션은 시험 환경에서 끝나지 않는다(`layerMotion4457.test.tsx` 와 같은 이음매).
+    timing = jest
+      .spyOn(Animated, 'timing')
+      .mockImplementation(() => ({start: jest.fn(), stop: jest.fn(), reset: jest.fn()}) as never);
+  });
+  afterEach(() => {
+    cleanup();
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+    release?.();
+    release = null;
+  });
+
+  const transformOf = () =>
+    Object.assign(
+      {},
+      ...(StyleSheet.flatten(screen.getByTestId('conversation-info-pane').props.style).transform as object[]),
+    ) as {translateX?: number; translateY?: number};
+
+  async function mountMoving() {
+    release = await pinReduceMotion(false);
+    mounted?.unmount();
+    const props = pageProps();
+    mounted = render(
+      <FixedScheme scheme="light">
+        <ConversationInfoPage {...props} />
+      </FixedScheme>,
+    );
+    return props;
+  }
+
+  it('들어올 때 화면 오른쪽 밖(화면 너비)에서 시작해 0 으로 밀려 들어온다 — 240ms, 세로로는 움직이지 않는다', async () => {
+    await mountMoving();
+    expect(transformOf()).toEqual({translateX: WIDTH});
+    expect(timing).toHaveBeenCalledTimes(1);
+    expect(timing.mock.calls[0][1]).toMatchObject({
+      toValue: 0,
+      duration: LAYER_PUSH_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    });
+  });
+
+  it('‹ 는 들어온 길의 반대로 오른쪽 밖까지 물러난 뒤(180ms) 한 번 걷는다 — 누른 즉시가 아니다', async () => {
+    const props = await mountMoving();
+    timing.mockClear();
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    // 아직 걷지 않았다 — 물러나는 움직임이 먼저다.
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(timing).toHaveBeenCalledTimes(1);
+    expect(timing.mock.calls[0][1]).toMatchObject({
+      toValue: WIDTH,
+      duration: LAYER_POP_MS,
+      easing: EASE_OUT,
+      useNativeDriver: true,
+    });
+    act(() => {
+      jest.advanceTimersByTime(LAYER_POP_MS - 1);
+    });
+    expect(props.onClose).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(2);
+    });
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('물러나는 동안 ‹ 를 다시 눌러도 걷는 일은 한 번이다', async () => {
+    const props = await mountMoving();
+    timing.mockClear();
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    expect(timing).toHaveBeenCalledTimes(1);
+    act(() => {
+      jest.advanceTimersByTime(LAYER_POP_MS * 3);
+    });
+    expect(props.onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('VoiceOver escape 도 같은 길로 물러난 뒤 한 번 걷는다', async () => {
+    const props = await mountMoving();
+    act(() => {
+      screen.getByTestId('conversation-info-page').props.onAccessibilityEscape();
+    });
+    expect(props.onClose).not.toHaveBeenCalled();
+    act(() => {
+      jest.advanceTimersByTime(LAYER_POP_MS + 1);
+    });
+    expect(props.onClose).toHaveBeenCalledTimes(1);
   });
 });
