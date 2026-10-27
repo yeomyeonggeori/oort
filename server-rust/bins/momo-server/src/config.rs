@@ -371,6 +371,25 @@ pub struct RateLimitConfig {
     pub password_change_per_member_limit: u32,
     /// `RATE_LIMIT_PASSWORD_CHANGE_PER_IP` (default 30). 0 disables.
     pub password_change_per_ip_limit: u32,
+    /// `RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT` (default 5 per window). **No off
+    /// switch**: 0 and a value that is not a number both keep the default, because
+    /// this is a password-guessing surface (ADR-0215 D6 — a knob on a guessable
+    /// surface does not get an "off").
+    ///
+    /// Guesses at one account's password made through a door that lets a caller who
+    /// holds no session name the account — today `POST /v1/join`, which compares a
+    /// password only for an address that already has an `active` account. The key is
+    /// the account (workspace + stored address), never the invite code or the
+    /// caller's address, so another code or another source address does not buy a
+    /// fresh budget. Every comparison is counted, a right one included, and the
+    /// budget is spent *before* the comparison runs. Login has no limiter yet
+    /// (ADR-0215 F9, #4597); when it gets one it should spend this same key.
+    ///
+    /// The window is `RATE_LIMIT_WINDOW_SECONDS`, which every limiter in this file
+    /// shares: this knob is how many guesses fit in it, and only a value of 0 is
+    /// refused. An operator who shortens the window to a second turns "5 a minute"
+    /// into "5 a second", for this budget and for the rest.
+    pub password_guess_per_account_limit: u32,
     /// `RATE_LIMIT_DRIVE_UPLOAD_PER_IP` (default 120). 0 disables. The public
     /// upload PUT (`/__momo_stub/drive/uploads/{token}`, #2628), which answers
     /// anyone who knows the path shape. Its own key, so upload traffic and the
@@ -436,6 +455,7 @@ impl Default for RateLimitConfig {
             claim_per_ip_limit: 30,
             password_change_per_member_limit: 10,
             password_change_per_ip_limit: 30,
+            password_guess_per_account_limit: 5,
             drive_upload_per_ip_limit: 120,
             message_send_per_member_limit: 120,
             message_send_per_agent_limit: 600,
@@ -472,6 +492,11 @@ impl RateLimitConfig {
             password_change_per_ip_limit: lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.password_change_per_ip_limit),
+            // No off switch (see the field): 0 is filtered out and falls to the default.
+            password_guess_per_account_limit: lookup("RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .filter(|limit| *limit > 0)
+                .unwrap_or(defaults.password_guess_per_account_limit),
             drive_upload_per_ip_limit: lookup("RATE_LIMIT_DRIVE_UPLOAD_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.drive_upload_per_ip_limit),
@@ -3398,6 +3423,7 @@ mod tests {
         assert_eq!(defaults.claim_per_ip_limit, 30);
         assert_eq!(defaults.password_change_per_member_limit, 10);
         assert_eq!(defaults.password_change_per_ip_limit, 30);
+        assert_eq!(defaults.password_guess_per_account_limit, 5);
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
@@ -3409,6 +3435,44 @@ mod tests {
         assert!(
             defaults.password_change_per_member_limit > 0,
             "a default of 0 would ship PATCH …/me/password unguarded"
+        );
+        assert!(
+            defaults.password_guess_per_account_limit > 0,
+            "a default of 0 would ship the join door's password check unbudgeted"
+        );
+    }
+
+    /// The per-account password-guess knob (#4625): its own env name, moves only its
+    /// own field, and — unlike every other knob here — has no off switch.
+    #[test]
+    fn the_password_guess_knob_is_named_moves_only_itself_and_cannot_be_switched_off() {
+        let lookup = |name: &'static str, value: &'static str| {
+            move |key: &str| (key == name).then(|| value.to_string())
+        };
+        let defaults = RateLimitConfig::default();
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT", " 3 ")),
+            RateLimitConfig {
+                password_guess_per_account_limit: 3,
+                ..defaults
+            },
+            "the documented name moves exactly its own field, whitespace trimmed"
+        );
+        for refused in ["0", "many", "-1", ""] {
+            assert_eq!(
+                RateLimitConfig::from_lookup(lookup(
+                    "RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT",
+                    refused
+                )),
+                defaults,
+                "{refused:?} must keep the default: a guessable surface has no off value"
+            );
+        }
+        // the other password knob does not leak into this one
+        assert_eq!(
+            RateLimitConfig::from_lookup(lookup("RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER", "2"))
+                .password_guess_per_account_limit,
+            defaults.password_guess_per_account_limit
         );
     }
 
