@@ -173,11 +173,12 @@ pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
 };
 pub use owner_claim::{
-    change_own_password_in_tx, consume_claim_in_tx, issue_password_reset_in_tx,
-    mint_owner_claim_token, normalized_claim_token, resolve_claim_workspace, ClaimInputError,
-    ClaimMutation, ClaimOutcome, ClaimSpecInvalid, IssuedPasswordReset, PasswordChangeMutation,
-    PasswordResetIssueError, CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET,
-    OWNER_CLAIM_TOKEN_LEN, OWNER_CLAIM_TTL_SECONDS,
+    change_own_password_in_tx, claim_refusal_in_tx, consume_claim_in_tx,
+    issue_password_reset_in_tx, mint_owner_claim_token, normalized_claim_token,
+    resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
+    IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
+    CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET, OWNER_CLAIM_TOKEN_LEN,
+    OWNER_CLAIM_TTL_SECONDS,
 };
 pub use password_rules::{
     normalized_current_password, normalized_new_password, CurrentPasswordInvalid,

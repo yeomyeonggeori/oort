@@ -19,6 +19,7 @@ auth momo-server password_reset_conformance_pg
 auth momo-server device_key_conformance_pg
 auth momo-server invite_lifecycle_conformance_pg
 auth momo-server join_conformance_pg
+auth momo-server session_issue_conformance_pg
 auth momo-server membership_lifecycle_conformance_pg
 auth momo-server member_write_rate_limit_pg
 approval momo-server approval_push_audience_conformance_pg

@@ -160,7 +160,7 @@ pub use tier::{
 pub use workspace::{
     create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
     normalized_workspace_slug, rename_workspace_in_tx, revoke_member_tokens_in_tx,
-    share_membership_state, terminate_workspace_membership_in_tx,
+    terminate_workspace_membership_in_tx, try_share_membership_state,
     workspace_has_another_active_owner, CreatedWorkspace, RevokedTokens,
     WorkspaceProvisionRejected, WorkspaceRenameApplied, WorkspaceRenameRejected,
     WorkspaceSpecInvalid,
