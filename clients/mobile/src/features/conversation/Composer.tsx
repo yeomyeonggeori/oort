@@ -1964,7 +1964,9 @@ export function Composer({
   const clipRest = restFrom !== null && shown;
   const restClipStyle = clipRest
     ? {
-        height: progress.interpolate({inputRange: [0, 1], outputRange: [restedBox, Math.max(restFrom, restedBox)]}),
+        // 끝값은 쉬러 갈 때의 자연 높이 **그대로**다 — 쉬는 글 상자(`restedBox`)보다 낮아도(접근성 큰 글씨: 펼친 칸은 한 줄 높이에 갇히고 쉬는 알약은 큰 글자의 한 줄이다, design-review r2 L4) 끝값을 올리지 않는다.
+        // 올리면 움직임이 시작·끝나는 프레임에 그 차이만큼 칸이 한 번에 뛴다. 높이가 이 값을 오가는 동안 위·아래 여백이 함께 줄어 칸이 차지하는 높이는 `collapsedHeight` ↔ `restFrom` 을 매끈히 오간다.
+        height: progress.interpolate({inputRange: [0, 1], outputRange: [restedBox, restFrom]}),
         marginTop: progress.interpolate({inputRange: [0, 1], outputRange: [restedMarginTop, 0]}),
         marginBottom: progress.interpolate({inputRange: [0, 1], outputRange: [restedMarginBottom, 0]}),
         overflow: 'hidden' as const,

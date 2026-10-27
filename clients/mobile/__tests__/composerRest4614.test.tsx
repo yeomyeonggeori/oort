@@ -497,6 +497,21 @@ describe.each([[1], [2]])('쉬러 가고 돌아오는 동안 글 칸이 한 프�
     expect(boxes[boxes.length - 1]).toBe(collapsed());
   });
 
+  it('자연 높이가 쉬는 글 상자보다 낮아도(접근성 큰 글씨의 펼친 칸) 시작은 자연 높이 그대로이고 한 걸음이 반을 넘지 않는다 (design-review r2 L4)', () => {
+    // 글자 배수 2(jest 기본)에서 쉬는 글 상자는 56pt, 알약은 64pt 다 — 자연 높이 40 은 둘 다보다 낮다.
+    const natural = 40;
+    mountMultiline(natural);
+    rest();
+    blur();
+    const boxes = [footprint(natural), ...frames(40, natural)];
+    expect(boxes[0]).toBe(natural); // 끝값을 쉬는 글 상자로 올리면 첫 렌더가 그만큼 뛴다
+    boxes.forEach((box, index) => {
+      if (index > 0) expect(box).toBeGreaterThanOrEqual(boxes[index - 1] as number);
+    });
+    expect(boxes[boxes.length - 1]).toBe(collapsed());
+    expect(Math.max(...steps(boxes).map(Math.abs))).toBeLessThan((collapsed() - natural) / 2 + 0.01);
+  });
+
   it('한 줄 초안은 높이가 변하지 않는다 — 알약 높이와 자연 높이가 같다', () => {
     mountMultiline(collapsed());
     rest();
