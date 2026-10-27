@@ -17,9 +17,9 @@
 //! content route reads the bytes itself, *after* the same channel-membership
 //! check every other read on this server makes — so a Drive URL never reaches a
 //! client, and the only way to an attachment's bytes is an authenticated request
-//! that RLS and the membership predicate both agreed to, for a file a message
+//! that RLS and the membership predicate both agreed to, for a file a live message
 //! carries or one the caller uploaded herself (a draft is its uploader's alone,
-//! ADR-0208 남는 위험 8).
+//! ADR-0208 남는 위험 8; a file a deleted message carried is nobody's, ADR-0151 증보 2).
 //!
 //! ## What is *not* here
 //!
@@ -179,6 +179,10 @@ pub async fn create_upload(
     })
     .await;
     let attachment_id = crate::routes::shared::settle_db("attachments.create_upload", created)?;
+    // #4443: remember the workspace for the local-volume reclaim tick (this process cannot
+    // enumerate tenants itself). `workspace_id` is the principal's own, checked by
+    // `workspace_scope` above — never a request-supplied id. An id and nothing else.
+    state.attachment_reclaim_touched.touch(workspace_id);
 
     Ok((
         StatusCode::CREATED,
@@ -332,17 +336,20 @@ pub async fn complete(
 /// `GET /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/content`
 ///
 /// The authorization proxy. An **active member of the channel** may read a
-/// completed attachment **a message carries** — not only its uploader, because a
-/// file posted to a room belongs to the conversation. A completed attachment **no
+/// completed attachment **a live message carries** — not only its uploader, because
+/// a file posted to a room belongs to the conversation. A completed attachment **no
 /// message carries yet** (a draft in a composer tray, or a file a scheduled
 /// message is holding for up to 120 days) is its uploader's alone to read
 /// (ADR-0208 남는 위험 8, #4233); the uploader still passes the membership check
-/// first, so leaving the channel ends her access like everyone else's.
+/// first, so leaving the channel ends her access like everyone else's. A file a
+/// **deleted** message carried is nobody's to read — its author and uploader
+/// included, a workspace admin included (ADR-0151 증보 2, #4443).
 ///
 /// Anything that is not a completed attachment this member may read is a flat
-/// 404: pending, failed, **another member's draft**, another channel's, another
-/// tenant's (invisible under RLS) all answer identically, so the route cannot be
-/// used to enumerate what exists — or whose drafts do.
+/// 404: pending, failed, **another member's draft**, **a deleted message's file**,
+/// another channel's, another tenant's (invisible under RLS) all answer
+/// identically, so the route cannot be used to enumerate what exists — or whose
+/// drafts do.
 pub async fn content(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -358,9 +365,9 @@ pub async fn content(
             if !is_attachment_channel_member(conn, workspace_id, channel_id, member_id).await? {
                 return Ok(Err(not_a_member()));
             }
-            // Carried by a message, or uploaded by this very member: nothing else is
-            // readable, and what is not is the same `None` as an id that never
-            // existed (`load_readable_attachment_in_tx`).
+            // Carried by a live message, or uploaded by this very member and carried
+            // by none: nothing else is readable, and what is not is the same `None` as
+            // an id that never existed (`load_readable_attachment_in_tx`).
             match load_readable_attachment_in_tx(conn, attachment_id, channel_id, member_id).await?
             {
                 Some(attachment) => Ok(Ok(attachment)),

@@ -28,6 +28,8 @@
 //! The router is a library so `tests/http_smoke_pg.rs` can boot the real app on
 //! an ephemeral port; `main.rs` only reads the environment and serves.
 
+/// #4443 / ADR-0151 증보 2 D4 — the attachment reclaim tick of the api process (local volume).
+pub mod attachment_reclaim;
 pub mod auth;
 pub mod config;
 pub mod cors;
@@ -92,6 +94,10 @@ pub struct RateLimitState {
 pub struct AgentPortState {
     pub config: AgentPortConfig,
     pub limiter: SlidingWindowRateLimiter,
+    /// The `agent_port.call` trace's hourly row budget per credential (ADR-0200 증보 4, #4618) —
+    /// its own type and its own map, because `limiter` is swept at the window of whichever call
+    /// triggers the sweep (60 s), which would silently reset an hour-long cap.
+    pub call_trace: rate_limit::CallTraceBudget,
     /// The key behind the two opaque Agent Port envelopes — HAP-E4's inbox
     /// cursor and HAP-E5's `leaseHandle`.
     ///
@@ -111,6 +117,7 @@ impl std::fmt::Debug for AgentPortState {
             .debug_struct("AgentPortState")
             .field("config", &self.config)
             .field("limiter", &self.limiter)
+            .field("call_trace", &self.call_trace)
             .field("envelope_secret", &"<redacted>")
             .finish()
     }
@@ -224,6 +231,14 @@ pub struct AppState {
     /// (ADR-0208 D15). `false` on every state nobody started a tick for (tests drive
     /// `scheduler::run_tick` directly).
     pub scheduler_blocked: Arc<std::sync::atomic::AtomicBool>,
+    /// #4443 (ADR-0151 증보 2 D4) — the workspaces whose attachment uploads this process has
+    /// served since it started. `create_upload` fills it (from the principal's own workspace,
+    /// never from a request body); the local-volume reclaim tick
+    /// ([`attachment_reclaim::start`], started by `main` only on the `local` backend) reads it,
+    /// because this process has no cross-tenant read of its own. Nothing starts a tick for a
+    /// state built by [`AppState::new`], so a test drives `attachment_reclaim::sweep_once`
+    /// explicitly.
+    pub attachment_reclaim_touched: Arc<attachment_reclaim::TouchedWorkspaces>,
     /// ADR-0146 개정 2026-09-28 (#3022): the instance id signed statements echo
     /// and the (default-off) host-registration signature requirement.
     pub device_keys: Arc<DeviceKeySettings>,
@@ -332,6 +347,7 @@ impl AppState {
             mentions: Arc::new(MentionSettings::default()),
             scheduler: Arc::new(SchedulerSettings::default()),
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            attachment_reclaim_touched: Arc::new(attachment_reclaim::TouchedWorkspaces::default()),
             device_keys: Arc::new(DeviceKeySettings::default()),
             cloud_box: Arc::new(CloudBoxConfig::default()),
             cors: Arc::new(CorsConfig::default()),
@@ -562,6 +578,7 @@ impl AppState {
         self.agent_port = Arc::new(AgentPortState {
             config,
             limiter: SlidingWindowRateLimiter::new(),
+            call_trace: rate_limit::CallTraceBudget::default(),
             envelope_secret,
         });
         self

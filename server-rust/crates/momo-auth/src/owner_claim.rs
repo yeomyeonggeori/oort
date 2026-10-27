@@ -44,14 +44,12 @@ pub enum ClaimMutation {
     PasswordPresent,
 }
 
+/// The claim token is malformed. (A claim's *password* is judged by
+/// `crate::password_rules::normalized_new_password`, ADR-0215 D2.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ClaimSpecInvalid {
     #[error("claim token is invalid")]
     Token,
-    #[error("password is required")]
-    PasswordMissing,
-    #[error("password is too long")]
-    PasswordTooLong,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -103,16 +101,6 @@ pub fn normalized_claim_token(raw: &str) -> Result<String, ClaimSpecInvalid> {
         return Err(ClaimSpecInvalid::Token);
     }
     Ok(value.to_string())
-}
-
-pub fn normalized_claim_password(raw: &str) -> Result<String, ClaimSpecInvalid> {
-    if raw.is_empty() {
-        return Err(ClaimSpecInvalid::PasswordMissing);
-    }
-    if raw.chars().count() > 1024 {
-        return Err(ClaimSpecInvalid::PasswordTooLong);
-    }
-    Ok(raw.to_string())
 }
 
 pub async fn resolve_claim_workspace(
@@ -397,22 +385,6 @@ mod tests {
             Err(ClaimSpecInvalid::Token)
         );
         assert_eq!(normalized_claim_token(&"A".repeat(43)), Ok("A".repeat(43)));
-    }
-
-    #[test]
-    fn an_empty_password_is_refused_before_the_database() {
-        assert_eq!(
-            normalized_claim_password(""),
-            Err(ClaimSpecInvalid::PasswordMissing)
-        );
-        assert_eq!(
-            normalized_claim_password(&"a".repeat(1025)),
-            Err(ClaimSpecInvalid::PasswordTooLong)
-        );
-        assert_eq!(
-            normalized_claim_password("hunter2"),
-            Ok("hunter2".to_string())
-        );
     }
 
     #[test]

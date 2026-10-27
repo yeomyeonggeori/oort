@@ -53,6 +53,7 @@ use momo_messaging::{
     opening_stream_props, send_message_in_tx, stream_message_body_in_tx, MessageType, NewMessage,
     StreamEdit, STREAM_PROPS_KEY,
 };
+use momo_notifier::attachment_reclaim::AttachmentReclaimer;
 use momo_notifier::avatar_reclaim::AvatarReclaimer;
 use momo_notifier::inbox_retention_sweep::sweep_read_inbox_items;
 use momo_notifier::push::PushDrain;
@@ -176,8 +177,46 @@ struct ProdDb {
     su: PgPool,
 }
 
+/// Copy the migration files numbered below `first_new` into a scratch directory, so that
+/// `run_migrations` can lay down "the previous release's schema" before this release's own.
+fn migrations_before(first_new: i64) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+        "momo-migrations-before-{first_new}-{}",
+        Uuid::new_v4().simple()
+    ));
+    std::fs::create_dir_all(&dir).expect("scratch migrations dir");
+    for entry in std::fs::read_dir(default_migrations_dir()).expect("read migrations") {
+        let entry = entry.expect("migration entry");
+        let name = entry.file_name().to_string_lossy().to_string();
+        let number: Option<i64> = name.split('_').next().and_then(|n| n.parse().ok());
+        if name.ends_with(".sql") && matches!(number, Some(n) if n < first_new) {
+            std::fs::copy(entry.path(), dir.join(&name)).expect("copy migration");
+        }
+    }
+    dir
+}
+
 impl ProdDb {
     async fn create() -> ProdDb {
+        Self::create_with(None, &[]).await
+    }
+
+    /// An **upgrade**: the previous release's schema (every migration below `first_new`)
+    /// is already there — with `previous_release_rows` in it — when this release's roles
+    /// file runs, before its own migrations (the order Railway's api pre-deploy and the
+    /// compose `runtime-roles` service use), and then the rest of the migrations and the
+    /// roles file again.
+    async fn create_upgrading_from_before(
+        first_new: i64,
+        previous_release_rows: &[&str],
+    ) -> ProdDb {
+        Self::create_with(Some(first_new), previous_release_rows).await
+    }
+
+    async fn create_with(
+        upgrade_from_before: Option<i64>,
+        previous_release_rows: &[&str],
+    ) -> ProdDb {
         assert_disposable_cluster();
         let admin = PgPoolOptions::new()
             .max_connections(2)
@@ -200,6 +239,28 @@ impl ProdDb {
         let url = url_for(&name);
         // Same order as Railway's api pre-deploy: roles, migrate, roles again.
         apply_runtime_roles(&url);
+        if let Some(first_new) = upgrade_from_before {
+            let previous = migrations_before(first_new);
+            run_migrations(&url, &previous, SeedMode::None)
+                .expect("apply the previous release's migrations");
+            let _ = std::fs::remove_dir_all(&previous);
+            if !previous_release_rows.is_empty() {
+                let previous_pool = PgPoolOptions::new()
+                    .max_connections(1)
+                    .connect(&url)
+                    .await
+                    .expect("connect to the previous release's database");
+                for statement in previous_release_rows {
+                    sqlx::query(statement)
+                        .execute(&previous_pool)
+                        .await
+                        .unwrap_or_else(|error| panic!("seed {statement}: {error}"));
+                }
+                previous_pool.close().await;
+            }
+            // This release's pre-deploy runs the roles file on the OLD schema.
+            apply_runtime_roles(&url);
+        }
         run_migrations(&url, &default_migrations_dir(), SeedMode::None)
             .expect("apply all migrations");
         apply_runtime_roles(&url);
@@ -382,6 +443,22 @@ async fn seed_work(su: &PgPool) {
     .execute(su)
     .await
     .expect("avatar row");
+    // #4443: a completed attachment nothing carries and nothing holds, idle for 40 days —
+    // the reclaim's candidate read (column-scoped, as the notifier) and its row delete
+    // (as momo_app) both have to run for it to go.
+    sqlx::query(
+        "INSERT INTO attachment \
+           (workspace_id, channel_id, uploader_member_id, drive_file_id, name, mime, size_bytes, \
+            status, created_at) \
+         VALUES ($1, $2, $3, 'attachment-file-1', 'secret-name.pdf', 'application/pdf', 10, \
+                 'complete', now() - interval '40 days')",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .bind(member)
+    .execute(su)
+    .await
+    .expect("attachment row");
 }
 
 #[tokio::test]
@@ -454,6 +531,26 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "momo_notifier + momo_app",
         reclaimer.sweep_once(&notifier, &app).await,
     );
+    // loop 2f — attachment reclaim (#4443). It ships off, so the production default is the
+    // dry run: the one cross-tenant read of workspace ids (notifier, column-scoped GRANT)
+    // plus the count over the full predicate (app) — and it must delete nothing.
+    let dry_run = AttachmentReclaimer::dry_run(10)
+        .sweep_once(&notifier, &app)
+        .await;
+    let dry_run_tally = dry_run.as_ref().ok().and_then(|stats| stats.dry_run);
+    report.check(
+        "attachment reclaim (dry run, the default)",
+        "momo_notifier + momo_app",
+        dry_run,
+    );
+    // …and switched on: the same read, the listing and the delete with its audit row (app).
+    let attachment_reclaimer =
+        AttachmentReclaimer::new(Arc::new(StubDriveArchive::new("http://drive.invalid")), 10);
+    report.check(
+        "attachment reclaim",
+        "momo_notifier + momo_app",
+        attachment_reclaimer.sweep_once(&notifier, &app).await,
+    );
     // loop 4 — push drain: claim, and the judgment queries on an unknown message.
     let drain = PushDrain::new(notifier.clone(), PushConfig::for_target(), Arc::new(NoPush));
     report.check(
@@ -489,7 +586,52 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
     .fetch_one(&db.su)
     .await
     .expect("count avatars");
+    let attachments_left: i64 = sqlx::query_scalar("SELECT count(*) FROM attachment")
+        .fetch_one(&db.su)
+        .await
+        .expect("count attachments");
+    // The notifier's grant on `attachment` is column-scoped (#4443): the candidate columns
+    // are readable, the Drive id, the file name, the mime and the uploader are not — and
+    // the dev bootstrap, which holds table-level grants, cannot show that.
+    let readable = sqlx::query(
+        "SELECT workspace_id, status, message_id, reserved, unreserved_at, created_at \
+           FROM attachment LIMIT 1",
+    )
+    .fetch_all(&notifier)
+    .await;
+    let mut unreadable = Vec::new();
+    for column in [
+        "id",
+        "drive_file_id",
+        "name",
+        "mime",
+        "uploader_member_id",
+        "channel_id",
+        "size_bytes",
+    ] {
+        let attempt = sqlx::query(&format!("SELECT {column} FROM attachment LIMIT 1"))
+            .fetch_all(&notifier)
+            .await;
+        if attempt.is_ok() {
+            unreadable.push(column);
+        }
+    }
+    let sealed = sqlx::query("SELECT attachment_id FROM scheduled_message_attachment LIMIT 1")
+        .fetch_all(&notifier)
+        .await;
     db.finish().await;
+    assert!(
+        readable.is_ok(),
+        "the production notifier reads the candidate columns of attachment: {readable:?}"
+    );
+    assert!(
+        unreadable.is_empty(),
+        "the production notifier must NOT read these attachment columns: {unreadable:?}"
+    );
+    assert!(
+        sealed.is_err(),
+        "the reservation table stays sealed from the notifier (ADR-0208 D3)"
+    );
     assert!(
         report.failures.is_empty(),
         "notifier jobs failed as their production role:\n  {}",
@@ -500,6 +642,290 @@ async fn every_notifier_job_iteration_runs_as_its_production_role() {
         "the expired share payload was deleted by the sweep"
     );
     assert_eq!(unreclaimed, 0, "the abandoned avatar row was reclaimed");
+    assert_eq!(
+        attachments_left, 0,
+        "the idle unbound attachment was reclaimed (workspace ids read as the notifier, listing and delete as momo_app)"
+    );
+    assert_eq!(
+        dry_run_tally,
+        Some(momo_messaging::attachment_reclaim::ReclaimTally {
+            candidates: 1,
+            bytes: 10
+        }),
+        "the production default counts the one idle file the delete then took, as the production roles"
+    );
+}
+
+/// **Upgrade order (#4443, migration 150).** The roles file runs before a release's
+/// migrations as well as after them, and migration 150 adds `attachment.reserved` /
+/// `unreserved_at` — columns the notifier's grant names. On an upgrade the first pass
+/// sees the table without the columns; a grant that named them anyway stopped the whole
+/// file (`column "reserved" of relation "attachment" does not exist`, ON_ERROR_STOP) and
+/// with it the deploy. Every other suite here builds its database from nothing, where the
+/// table does not exist yet on the first pass, so none of them could see it.
+///
+/// The previous release's database also holds a schedule that holds one of two files, so
+/// the migration's backfill runs over a **real** reservation row (on an empty table its
+/// row-count assertion is 0 = 0 and proves nothing): afterwards the held file is
+/// `reserved` and the free one is not.
+///
+/// Take the existence guard off the grant in `bootstrap_runtime_roles.sql` and this goes
+/// red inside `create_upgrading_from_before` (the pre-migrate pass fails); make the
+/// backfill set `false`, or miss the row, and the flag assertion (or the migration's own
+/// count) goes red.
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn an_upgrade_survives_the_pre_migrate_roles_pass_and_ends_with_the_attachment_grant() {
+    const WS: &str = "00000000-0000-4000-8000-0000000000a0";
+    const MEMBER: &str = "00000000-0000-4000-8000-0000000000a1";
+    const CHANNEL: &str = "00000000-0000-4000-8000-0000000000a2";
+    const HELD: &str = "00000000-0000-4000-8000-0000000000a3";
+    const FREE: &str = "00000000-0000-4000-8000-0000000000a4";
+    const SCHEDULE: &str = "00000000-0000-4000-8000-0000000000a5";
+    let previous_release = [
+        format!("INSERT INTO workspace (id, slug, name) VALUES ('{WS}', 'upgrade-fixture', 'upgrade-fixture')"),
+        format!(
+            "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+             VALUES ('{MEMBER}', '{WS}', 'human', 'u', 'u-upgrade')"
+        ),
+        format!(
+            "INSERT INTO channel (id, workspace_id, kind, name, created_by) \
+             VALUES ('{CHANNEL}', '{WS}', 'public', 'upgrade', '{MEMBER}')"
+        ),
+        format!(
+            "INSERT INTO attachment (id, workspace_id, channel_id, uploader_member_id, drive_file_id, \
+                                    name, mime, size_bytes, status) \
+             VALUES ('{HELD}', '{WS}', '{CHANNEL}', '{MEMBER}', 'upgrade-held', 'a.txt', 'text/plain', 1, 'complete'), \
+                    ('{FREE}', '{WS}', '{CHANNEL}', '{MEMBER}', 'upgrade-free', 'b.txt', 'text/plain', 1, 'complete')"
+        ),
+        format!(
+            "INSERT INTO scheduled_message (id, workspace_id, channel_id, author_member_id, body, \
+                                            send_at, client_request_id) \
+             VALUES ('{SCHEDULE}', '{WS}', '{CHANNEL}', '{MEMBER}', 'later', now() + interval '2 days', \
+                     '00000000-0000-4000-8000-0000000000a6')"
+        ),
+        format!(
+            "INSERT INTO scheduled_message_attachment \
+               (scheduled_message_id, workspace_id, member_id, attachment_id, position) \
+             VALUES ('{SCHEDULE}', '{WS}', '{MEMBER}', '{HELD}', 0)"
+        ),
+    ];
+    let rows: Vec<&str> = previous_release.iter().map(String::as_str).collect();
+
+    let db = ProdDb::create_upgrading_from_before(150, &rows).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let reads = sqlx::query("SELECT reserved, unreserved_at FROM attachment LIMIT 1")
+        .fetch_all(&notifier)
+        .await;
+    let name = sqlx::query("SELECT name FROM attachment LIMIT 1")
+        .fetch_all(&notifier)
+        .await;
+    let flags: Vec<(String, bool, bool)> = sqlx::query_as(
+        "SELECT id::text, reserved, unreserved_at IS NOT NULL FROM attachment ORDER BY id",
+    )
+    .fetch_all(&db.su)
+    .await
+    .expect("read the flags");
+    db.finish().await;
+    assert!(
+        reads.is_ok(),
+        "after the upgrade the notifier reads the candidate columns: {reads:?}"
+    );
+    assert!(
+        name.is_err(),
+        "…and still not the file name: the grant is the six columns of the cross-tenant read only"
+    );
+    assert_eq!(
+        flags,
+        vec![
+            (HELD.to_string(), true, false),
+            (FREE.to_string(), false, false)
+        ],
+        "the backfill flagged the file the previous release's schedule holds, and only it"
+    );
+}
+
+/// #4443 (owner 승인 2026-10-26, 조건 C): migration 151 removes the file **name** from the
+/// `attachment.upload_started` audit rows an older release wrote — and from nothing else.
+///
+/// The previous release's rows are seeded below schema 151 (the upgrade harness), the rest of the
+/// migrations run, and the rows are read back. What the proof pins:
+///
+/// * the named rows lose exactly the top-level `name` key — a schema-v1 row, a row from the old
+///   server that wrote no `schema` key at all, and one in **another workspace** (the scrub is
+///   cross-tenant: it runs as the migration role, not as a tenant);
+/// * every other key survives, the `schema` string is not rewritten;
+/// * rows that must not change do not: a v2 row (no name), another action that has a `name` key
+///   (`member.renamed`), another attachment action that happens to carry one, and a `name`
+///   nested below the top level (the scrub is top-level only, which is the v1 shape);
+/// * no row is lost;
+/// * **idempotent**: running the file again changes nothing — not even a row version (`xmin`),
+///   so an UPDATE that rewrites rows without a name is caught too.
+///
+/// Red proof: drop `action = 'attachment.upload_started'` from the UPDATE (`member.renamed` and the
+/// completed row lose their `name`); delete a different key than `name` (the named rows keep it);
+/// narrow the scrub to `detail->>'schema' = '…v1'` (the schema-less old row keeps its name); drop
+/// `detail ? 'name'` (the second run rewrites the v2 row: its `xmin` moves). **Not provable here:**
+/// the `SET LOCAL row_security = off` line — this harness connects as a superuser, which bypasses
+/// RLS anyway (it is a safety net for a migration role that cannot, exactly as in 150).
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn the_audit_scrub_removes_a_file_name_from_old_upload_rows_and_touches_nothing_else() {
+    const WS: &str = "00000000-0000-4000-8000-0000000000d0";
+    const WS2: &str = "00000000-0000-4000-8000-0000000000d1";
+    const V1: &str = "00000000-0000-4000-8000-0000000000e1";
+    const NO_SCHEMA: &str = "00000000-0000-4000-8000-0000000000e2";
+    const OTHER_WORKSPACE: &str = "00000000-0000-4000-8000-0000000000e3";
+    const V2: &str = "00000000-0000-4000-8000-0000000000e4";
+    const OTHER_ACTION: &str = "00000000-0000-4000-8000-0000000000e5";
+    const COMPLETED: &str = "00000000-0000-4000-8000-0000000000e6";
+    const NESTED: &str = "00000000-0000-4000-8000-0000000000e7";
+    const SECRET: &str = "private-payslip-name-visible-nowhere.pdf";
+
+    let audit = |id: &str, workspace: &str, action: &str, detail: &str| {
+        format!(
+            "INSERT INTO audit_log (id, workspace_id, action, target_type, detail) \
+             VALUES ('{id}', '{workspace}', '{action}', 'attachment', '{detail}'::jsonb)"
+        )
+    };
+    let v1_named = format!(
+        r#"{{"schema":"momo.attachment.upload_started.v1","channel_id":"c","name":"{SECRET}","mime":"text/plain","size_bytes":"1"}}"#
+    );
+    let schemaless_named =
+        r#"{"name":"old-server-name.pdf","mime":"text/plain","size_bytes":"2"}"#.to_string();
+    let v2 = r#"{"schema":"momo.attachment.upload_started.v2","channel_id":"c","mime":"text/plain","size_bytes":"3"}"#;
+    let other_action = r#"{"schema":"momo.member.renamed.v1","name":"keep-this-name"}"#;
+    let completed = r#"{"schema":"momo.attachment.upload_completed.v1","name":"keep-this-too","expected_mime":"text/plain"}"#;
+    let nested = r#"{"schema":"x","file":{"name":"nested-stays"},"mime":"text/plain"}"#;
+    let previous_release = [
+        format!("INSERT INTO workspace (id, slug, name) VALUES ('{WS}', 'scrub-a', 'scrub-a'), ('{WS2}', 'scrub-b', 'scrub-b')"),
+        audit(V1, WS, "attachment.upload_started", &v1_named),
+        audit(NO_SCHEMA, WS, "attachment.upload_started", &schemaless_named),
+        audit(OTHER_WORKSPACE, WS2, "attachment.upload_started", &v1_named),
+        audit(V2, WS, "attachment.upload_started", v2),
+        audit(OTHER_ACTION, WS, "member.renamed", other_action),
+        audit(COMPLETED, WS, "attachment.upload_completed", completed),
+        audit(NESTED, WS, "attachment.upload_started", nested),
+    ];
+    let rows: Vec<&str> = previous_release.iter().map(String::as_str).collect();
+
+    let db = ProdDb::create_upgrading_from_before(151, &rows).await;
+
+    let ids: Vec<Uuid> = [
+        V1,
+        NO_SCHEMA,
+        OTHER_WORKSPACE,
+        V2,
+        OTHER_ACTION,
+        COMPLETED,
+        NESTED,
+    ]
+    .iter()
+    .map(|id| id.parse().expect("uuid"))
+    .collect();
+    let read_state = |pool: PgPool| {
+        let ids = ids.clone();
+        async move {
+            sqlx::query_as::<_, (String, String, String)>(
+                "SELECT id::text, detail::text, xmin::text FROM audit_log \
+                  WHERE id = ANY($1) ORDER BY id",
+            )
+            .bind(ids)
+            .fetch_all(&pool)
+            .await
+            .expect("read the seeded audit rows")
+        }
+    };
+    let detail_is = |id: &'static str, expected: String| {
+        let pool = db.su.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>(
+                "SELECT detail = $2::jsonb FROM audit_log WHERE id = $1::uuid",
+            )
+            .bind(id)
+            .bind(expected)
+            .fetch_one(&pool)
+            .await
+            .expect("compare a detail")
+        }
+    };
+
+    // 1. After the upgrade (migration 151 ran with the rest).
+    let first = read_state(db.su.clone()).await;
+    assert_eq!(first.len(), 7, "no audit row was lost");
+    let v1_scrubbed =
+        r#"{"schema":"momo.attachment.upload_started.v1","channel_id":"c","mime":"text/plain","size_bytes":"1"}"#
+            .to_string();
+    assert!(
+        detail_is(V1, v1_scrubbed.clone()).await,
+        "v1: only `name` is gone, the schema string and the other keys stay"
+    );
+    assert!(
+        detail_is(
+            NO_SCHEMA,
+            r#"{"mime":"text/plain","size_bytes":"2"}"#.into()
+        )
+        .await,
+        "the old server's row carried no schema key and lost its name anyway"
+    );
+    assert!(
+        detail_is(OTHER_WORKSPACE, v1_scrubbed).await,
+        "the scrub is cross-tenant: another workspace's row is cleaned too"
+    );
+    assert!(
+        detail_is(V2, v2.into()).await,
+        "a v2 row (no name) is unchanged"
+    );
+    assert!(
+        detail_is(OTHER_ACTION, other_action.into()).await,
+        "another action's `name` is not this scrub's business"
+    );
+    assert!(
+        detail_is(COMPLETED, completed.into()).await,
+        "another attachment action's row is unchanged"
+    );
+    assert!(
+        detail_is(NESTED, nested.into()).await,
+        "the scrub is top-level only (the v1 shape): a nested `name` stays"
+    );
+    let still_named: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE action = 'attachment.upload_started' AND detail ? 'name'",
+    )
+    .fetch_one(&db.su)
+    .await
+    .expect("count the rows still carrying a name");
+    assert_eq!(
+        still_named, 0,
+        "no upload_started row keeps a top-level name"
+    );
+    let secret_anywhere: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE detail::text LIKE '%' || $1 || '%'",
+    )
+    .bind(SECRET)
+    .fetch_one(&db.su)
+    .await
+    .expect("scan every audit detail for the secret name");
+    assert_eq!(
+        secret_anywhere, 0,
+        "the file name appears in no audit detail"
+    );
+
+    // 2. Idempotent: the same file again changes nothing — not even a row version.
+    let sql = std::fs::read_to_string(
+        default_migrations_dir().join("151_audit_attachment_name_scrub.sql"),
+    )
+    .expect("read migration 151");
+    sqlx::raw_sql(&sql)
+        .execute(&db.su)
+        .await
+        .expect("the scrub runs a second time");
+    let second = read_state(db.su.clone()).await;
+    db.finish().await;
+    assert_eq!(
+        first, second,
+        "a second run is a no-op: same details and the same row versions (an UPDATE that touches \
+         a row without a name would move its xmin)"
+    );
 }
 
 /// A hosted agent's finished `type=work` run, seeded as the production code
