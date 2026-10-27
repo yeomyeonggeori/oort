@@ -103,7 +103,7 @@ const PHOTO_DATA = [
   'Su0ZWHXUHih/xRSowV0LtxV0vxeDYT+EmbM+tVzfrzvne/vrtT0bX7KxZZLjJsncJOllklomySVLXCfwqwQEQFYZQnM6OKN8',
   'EOACc41QxyBq64dN3aCh7dM2Paq6U1axi4sWft54ltUdp1T7CcU2I1kFkDwm/g80XGAfVFpYFAAAAABJRU5ErkJggg==',
 ].join('');
-const PHOTO = `data:image/png;base64,${PHOTO_DATA}`;
+export const PHOTO = `data:image/png;base64,${PHOTO_DATA}`;
 
 const NOW = Date.UTC(2026, 9, 27, 3, 0);
 const WS = '00000000-0000-7000-8000-000000004a00';

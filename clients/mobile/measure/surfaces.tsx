@@ -126,6 +126,8 @@ import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
 import {ProfileSheetSurface} from './profileSheet';
 import {ConversationMenuSurface} from './conversationMenu';
+import {ConversationHeaderSurface} from './conversationHeader';
+import {ConversationInfoPageSurface} from './conversationInfoPage';
 import {
   DelegateWorkSheet,
   type DelegatePreview,
@@ -2213,6 +2215,14 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).
   if (name === 'convmenu' || name.startsWith('convmenu-')) {
     return <ConversationMenuSurface which={name.slice('convmenu'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화 머리 가운데 이름·상태 알약(`measure/conversationHeader.tsx`, 배송되는 머리 + 고정 데이터, 가상 인물).
+  if (name === 'convheader' || name.startsWith('convheader-')) {
+    return <ConversationHeaderSurface which={name.slice('convheader'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화·채널 정보 페이지(`measure/conversationInfoPage.tsx`, 배송되는 페이지 + 고정 데이터·합성 사진, 가상 인물).
+  if (name === 'infopage' || name.startsWith('infopage-')) {
+    return <ConversationInfoPageSurface which={name.slice('infopage'.length).replace(/^-/, '')} />;
   }
   // #4612: 시트 끌어내려 닫기 계측(`measure/sheetDrag.tsx`, 배송되는 시트 + 결정 2 probe, 가상 인물).
   if (name === 'sheetdrag' || name.startsWith('sheetdrag-')) {

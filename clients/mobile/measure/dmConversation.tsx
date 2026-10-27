@@ -110,9 +110,12 @@ export function DmConversationSurface({which}: {which: string}): React.JSX.Eleme
         kind="dm"
         peerId={GROK}
         peerStatusTone="ok"
+        peerStatusLabel="응답함"
         directory={DIRECTORY}
         onBack={() => {}}
         onOpenMenu={() => {}}
+        // 가운데 알약은 단추다(#4319) — 정보 페이지로 가는 문이 있는 실제 대화 화면과 같은 모양으로 찍는다.
+        onOpenInfo={() => {}}
         railStatus="connected"
       />
       <ConversationLayout

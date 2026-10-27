@@ -1,11 +1,17 @@
 import {
+  CHANNEL_COPY_FAILURE,
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MUTE_FAILURE,
   DM_CLOSE_FAILURE,
   DM_CLOSE_LABEL,
+  channelCopyIdLabel,
+  channelCopyNameLabel,
   channelLeaveConfirmBody,
+  channelMuteToggleLabel,
 } from '@momo/core/features/channels/model';
+import {channelShareUrlFromServerBase} from '@momo/core/features/channels/shareLink';
+import {copyLinkActionLabel} from '@momo/core/features/timeline/copyLabels';
 import type {ChannelActionItem} from '@momo/core/features/channels/actionModel';
 import {pinListHeaderLabel} from '@momo/core/features/timeline/pins';
 import type {Member} from '@momo/core/lib/api';
@@ -20,12 +26,13 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Dimensions, Image, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Dimensions, Image, Keyboard, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {SHEET_ICONS} from '../src/design/icons';
+import {COPY_RECEIPT_MS, copyText} from '../src/features/conversation/copy';
 import {TOUCH_TARGET} from '../src/design/tokens';
 import {ConversationMenuSheet} from '../src/features/conversation/ConversationMenuSheet';
 import {
@@ -46,6 +53,7 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import {openConversationMenu} from './fixtures/conversationMenu';
+import {finger, pane} from './fixtures/finger';
 import {installAppClock, SHELL_WAIT_TEST_TIMEOUT_MS} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {describeCloseContract} from './fixtures/sheetContract';
@@ -80,6 +88,12 @@ const SELF: Member = {
 
 const flatten = (style: unknown) =>
   StyleSheet.flatten(style as never) as Record<string, unknown>;
+
+// 복사 실패는 클립보드 모듈이 아니라 **복사 길**(`copyText`)의 답(`false`)으로 흉내 낸다 — 기본은 진짜 구현(상자에 담는다)을 그대로 부른다.
+jest.mock('../src/features/conversation/copy', () => {
+  const actual = jest.requireActual('../src/features/conversation/copy');
+  return {...actual, copyText: jest.fn(actual.copyText)};
+});
 
 // 셸을 가짜 시계로 폴링하는 시험의 방 — 실패가 정직한 단정 문장으로 나오게(`fakeClock.ts`). `jest.setTimeout` 은 파일이 시작할 때 한 번 읽힌다.
 jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
@@ -488,6 +502,11 @@ function rosterMember(over: Record<string, unknown>) {
   };
 }
 
+const CHANNEL_TOPIC = '다음 배포 일정과 장애 대응을 이야기해요.';
+/** 1×1 PNG — `data:` 주소라 서버 주소·받기 없이 `Avatar` 가 이미지로 싣는다. */
+const PHOTO =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
 const PINNED_WIRE = {
   messageId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
   channelId: 'ch-general',
@@ -517,6 +536,12 @@ interface Routes {
   noDmRow?: boolean;
   selfRole?: string;
   pins?: unknown[];
+  /** 박서연의 프로필 사진(`data:` 주소) — 정보 페이지의 큰 얼굴이 사진 단추가 된다. */
+  photo?: boolean;
+  /** 에이전트가 호스트에 닿아 있다(`hostOnline`) — 머리 알약과 정보 페이지에 상태 낱말(「연결됨」)이 선다. */
+  agentOnline?: boolean;
+  /** 일반 채널 `general` 이 멤버 목록·주제를 싣는다 — 머리 알약의 멤버 수와 정보 페이지의 부제·주제. */
+  channelInfo?: boolean;
   /** 응답 상태. 기본은 성공. */
   muteStatus?: number;
   closeStatus?: number;
@@ -594,6 +619,9 @@ function installFetch(routes: Routes = {}) {
     CHANNELS.filter(channel => !left.has(channel.id)).map(channel => ({
       ...channel,
       muted: muted.has(channel.id),
+      ...(routes.channelInfo && channel.id === 'ch-general'
+        ? {memberIds: [SELF_ID, HUMAN_ID, AGENT_ID], topic: CHANNEL_TOPIC}
+        : null),
     }));
   globalThis.fetch = jest.fn(async (url: string, init?: {method?: string; body?: string}) => {
     const method = init?.method ?? 'GET';
@@ -654,8 +682,20 @@ function installFetch(routes: Routes = {}) {
       return jsonResponse(200, {
         members: [
           rosterMember({id: SELF_ID, displayName: '이도현', handle: 'dohyun', role: routes.selfRole ?? 'admin'}),
-          rosterMember({id: HUMAN_ID, displayName: '박서연', handle: 'seoyeon'}),
-          rosterMember({id: AGENT_ID, kind: 'agent', displayName: '달무리 도우미', handle: 'dalmuri-helper'}),
+          rosterMember({
+            id: HUMAN_ID,
+            displayName: '박서연',
+            handle: 'seoyeon',
+            ...(routes.photo ? {avatarUrl: PHOTO} : null),
+          }),
+          rosterMember({
+            id: AGENT_ID,
+            kind: 'agent',
+            displayName: '달무리 도우미',
+            handle: 'dalmuri-helper',
+            ownerHumanId: SELF_ID,
+            ...(routes.agentOnline ? {hostOnline: true} : null),
+          }),
         ],
       });
     }
@@ -1130,6 +1170,480 @@ describe('셸 — DM 의 「대화 닫기」 (#4319, ADR-0177 증보 D7)', () =>
     await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
     expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
     expect(closedDms.get('ch-dm-human')).toBe(2);
+  });
+});
+
+// ---- 3b. 정보 페이지 — 머리 알약과 ⋮ 시트의 「정보」 행이 같은 문이다 ---------------------------------
+
+const clipboardBox = (jest.requireMock('expo-clipboard') as {__box: {value: string | null}}).__box;
+
+/** 정보 페이지의 행 이름(`conversation-info-` 뒤)을 그려진 순서로. */
+const infoKeys = () =>
+  screen
+    .queryAllByTestId(/^conversation-info-(mute-toggle|copy-name|copy-link|copy-id|close-dm|leave|agent-open|owner)$/)
+    .map(node => String(node.props.testID).replace('conversation-info-', ''));
+
+/** 머리 알약을 눌러 정보 페이지를 연다. */
+async function openInfoPage(): Promise<void> {
+  fireEvent.press(screen.getByTestId('conversation-info-button'));
+  await screen.findByTestId('conversation-info-page');
+}
+
+describe('셸 — 머리 알약과 ⋮ 시트의 정보 행이 같은 정보 페이지를 연다 (#4319)', () => {
+  liveWorld();
+
+  it('알약: 채널이면 「채널 정보」 페이지가 서고 ⋮ 시트는 서지 않는다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    expect(screen.queryByTestId('conversation-info-page')).toBeNull();
+    await openInfoPage();
+    expect(screen.getByTestId('conversation-info-title')).toHaveTextContent('채널 정보');
+    expect(screen.getByTestId('conversation-info-name')).toHaveTextContent('general');
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+  });
+
+  it('알약: DM 이면 「대화 정보」 페이지에 상대의 얼굴·이름·핸들이 선다', async () => {
+    await mountShell();
+    await openConversation(ROW.human);
+    await openInfoPage();
+    expect(screen.getByTestId('conversation-info-title')).toHaveTextContent('대화 정보');
+    expect(screen.getByTestId('conversation-info-name')).toHaveTextContent('박서연');
+    expect(screen.getByTestId('conversation-info-handle')).toHaveTextContent('@seoyeon');
+    // 얼굴은 알약·사이드바에도 있다 — 이 페이지의 큰 얼굴만 본다.
+    expect(
+      within(screen.getByTestId('conversation-info-face')).getByTestId('avatar-human', {includeHiddenElements: true}),
+    ).toBeTruthy();
+  });
+
+  it('알약을 누르면 자판이 내려간다 — 알약은 모달이 아니라서 iOS 가 접어 주지 않는다', async () => {
+    const dismiss = jest.spyOn(Keyboard, 'dismiss').mockImplementation(() => {});
+    await mountShell();
+    await openConversation(ROW.general);
+    dismiss.mockClear();
+    fireEvent.press(screen.getByTestId('conversation-info-button'));
+    expect(dismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('⋮ 시트의 「채널 정보」 행: 시트가 먼저 걷히고 그 뒤에 페이지가 선다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    await openConversationMenu();
+    expect(screen.getByTestId('conversation-menu-info')).toHaveTextContent('채널 정보');
+    fireEvent.press(screen.getByTestId('conversation-menu-info'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-page')).toBeTruthy());
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    expect(screen.getByTestId('conversation-info-title')).toHaveTextContent('채널 정보');
+  });
+
+  it('⋮ 시트의 「대화 정보」 행(DM): 같은 길로 페이지가 선다', async () => {
+    await mountShell();
+    await openConversation(ROW.human);
+    await openConversationMenu();
+    expect(screen.getByTestId('conversation-menu-info')).toHaveTextContent('대화 정보');
+    fireEvent.press(screen.getByTestId('conversation-menu-info'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-page')).toBeTruthy());
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    expect(screen.getByTestId('conversation-info-title')).toHaveTextContent('대화 정보');
+  });
+
+  it('‹ 를 누르면 대화로 돌아온다 — 대화는 그대로이고 알약으로 다시 열 수 있다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+    await openInfoPage();
+  });
+
+  it('VoiceOver escape 와 왼쪽 가장자리 밀기도 한 겹만 걷는다 — 대화는 남는다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    act(() => {
+      screen.getByTestId('conversation-info-page').props.onAccessibilityEscape();
+    });
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+
+    await openInfoPage();
+    const touch = finger(pane('conversation-info-pane'));
+    touch.down(6, 400);
+    touch.move(200, 400);
+    touch.move(500, 400);
+    touch.up();
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    // 밀기는 정보 페이지 한 겹만 벗겼다 — 대화(바깥 래퍼)까지 닫지 않는다.
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+  });
+
+  it('채널은 짧은 멤버 수가 알약에, 긴 부제와 주제가 페이지에 선다 — 같은 사실을 두 길이로', async () => {
+    // 알약의 보조 글은 글자 배율이 1.5 미만일 때 선다 — RN jest 프리셋의 기본 배율은 2 라서 배율 1 을 직접 고른다.
+    const base = Dimensions.get('window');
+    Dimensions.set({window: {...base, fontScale: 1}, screen: {...base, fontScale: 1}});
+    try {
+      await mountShell({channelInfo: true});
+      await openConversation(ROW.general);
+      await waitFor(() => expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('3명'));
+      await openInfoPage();
+      expect(screen.getByTestId('conversation-info-subtitle')).toHaveTextContent('3명 · 달무리 도우미 참여 중');
+      expect(screen.getByTestId('conversation-info-topic')).toHaveTextContent(CHANNEL_TOPIC);
+    } finally {
+      Dimensions.set({window: base, screen: base});
+    }
+  });
+
+  it('에이전트 DM: 머리 알약과 정보 페이지가 같은 상태 낱말을 말한다 — 같은 판정을 나눠 쓴다', async () => {
+    const base = Dimensions.get('window');
+    Dimensions.set({window: {...base, fontScale: 1}, screen: {...base, fontScale: 1}});
+    try {
+      await mountShell({agentOnline: true});
+      await openConversation(ROW.agent);
+      await waitFor(() => expect(screen.getByTestId('conversation-title-status')).toHaveTextContent('연결됨'));
+      await openInfoPage();
+      expect(screen.getByTestId('conversation-info-status')).toHaveTextContent('연결됨');
+      // 에이전트: 관리자 줄과 「에이전트 정보」 행.
+      expect(screen.getByTestId('conversation-info-owner')).toHaveTextContent('이도현님이 관리');
+      expect(screen.getByTestId('conversation-info-agent-open')).toBeTruthy();
+    } finally {
+      Dimensions.set({window: base, screen: base});
+    }
+  });
+
+  it('「에이전트 정보」 행: 에이전트 상세 화면이 선다', async () => {
+    await mountShell();
+    await openConversation(ROW.agent);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-agent-open'));
+    await waitFor(() => expect(screen.getByTestId('agent-detail-scroll')).toBeTruthy());
+  });
+});
+
+describe('셸 — 정보 페이지의 복사: 영수증이 서도 페이지는 남는다 (#4319)', () => {
+  liveWorld();
+
+  beforeEach(() => {
+    clipboardBox.value = null;
+  });
+
+  it('이름 복사: 클립보드에 이름이 담기고, 그 줄이 「복사됨」이 되고, ⋮ 시트는 서지 않는다 — 영수증이 걷혀도 페이지는 남는다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(true)),
+    );
+    expect(clipboardBox.value).toBe('general');
+    // 같은 훅이 시트를 세우던 길(`setActive`)을 타지 않는다 — 정보 페이지 위에 ⋮ 시트가 뜨면 안 된다.
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    // 다른 줄은 그대로다.
+    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
+    // 영수증 시간이 지나면 훅이 `close()` 를 부른다 — 시트였다면 여기서 사라진다. 페이지는 남고 낱말만 돌아온다.
+    await act(async () => {
+      await jest.advanceTimersByTimeAsync(COPY_RECEIPT_MS + 50);
+    });
+    expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+  });
+
+  it('링크 복사와 ID 복사는 각자 서버 주소 · 채널 id 를 담는다 — 한 번에 한 줄만 「복사됨」이다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-copy-link'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(true)),
+    );
+    expect(clipboardBox.value).toBe(channelShareUrlFromServerBase(BASE, 'ch-general'));
+    fireEvent.press(screen.getByTestId('conversation-info-copy-id'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-copy-id')).toHaveTextContent(channelCopyIdLabel(true)),
+    );
+    expect(clipboardBox.value).toBe('ch-general');
+    // 앞 줄의 영수증은 새 영수증이 밀어낸다.
+    expect(screen.getByTestId('conversation-info-copy-link')).toHaveTextContent(copyLinkActionLabel(false));
+  });
+
+  it('DM 의 이름 복사는 상대의 이름이다', async () => {
+    await mountShell();
+    await openConversation(ROW.human);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
+    await waitFor(() => expect(clipboardBox.value).toBe('박서연'));
+  });
+
+  it('클립보드가 거절하면 페이지 안에서 이유를 말하고 낭독한다 — ⋮ 시트가 대신 서지 않고 「복사됨」도 없다', async () => {
+    const spoken = announce();
+    (copyText as jest.Mock).mockResolvedValueOnce(false);
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
+    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(CHANNEL_COPY_FAILURE);
+    expect(spoken).toHaveBeenCalledWith(CHANNEL_COPY_FAILURE);
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    expect(clipboardBox.value).toBeNull();
+  });
+
+  it('페이지를 닫았다 다시 열면 지난 영수증이 없다', async () => {
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-copy-name'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(true)),
+    );
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    await openInfoPage();
+    expect(screen.getByTestId('conversation-info-copy-name')).toHaveTextContent(channelCopyNameLabel(false));
+  });
+});
+
+describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
+  liveWorld();
+
+  it('끄기: notification-pref 에 muted:true 를 보내고, 성공해도 페이지는 남고 행이 「알림 켜기」로 바뀐다', async () => {
+    const spoken = announce();
+    await mountShell();
+    await openConversation(ROW.general);
+    await openInfoPage();
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false));
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    await waitFor(() => expect(callsTo('/notification-pref')).toHaveLength(1));
+    expect(callsTo('/notification-pref')[0].url).toContain('/channels/ch-general/notification-pref');
+    expect(callsTo('/notification-pref')[0].body).toEqual({muted: true});
+    // 서버가 진실이다: 채널 목록을 다시 읽어 새 값이 흘러 내려오면 같은 행이 다른 낱말을 말한다.
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true)),
+    );
+    expect(spoken).toHaveBeenCalledWith('알림을 껐습니다.');
+    // 시트였다면 성공에서 걷히는 자리다 — 페이지는 남고, ⋮ 시트는 서지 않는다.
+    expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+  });
+
+  it('켜기: 꺼진 채널은 muted:false 를 보낸다', async () => {
+    await mountShell();
+    await openConversation(ROW.quiet);
+    await openInfoPage();
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true));
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    await waitFor(() => expect(callsTo('/notification-pref')).toHaveLength(1));
+    expect(callsTo('/notification-pref')[0].body).toEqual({muted: false});
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false)),
+    );
+  });
+
+  it('요청이 도는 동안 행이 「알림 끄는 중」이 되고 다시 눌러도 요청은 한 번이다', async () => {
+    await mountShell({hold: ['mute']});
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent('알림 끄는 중'),
+    );
+    expect(screen.getByTestId('conversation-info-mute-toggle').props.accessibilityState).toMatchObject({busy: true});
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    await act(async () => releaseHeld());
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true)),
+    );
+    expect(callsTo('/notification-pref')).toHaveLength(1);
+  });
+
+  it('거절되면 페이지 안에서 이유를 말하고 낭독한다 — ⋮ 시트가 대신 서지 않고 행은 원래 낱말이다', async () => {
+    const spoken = announce();
+    await mountShell({muteStatus: 500});
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
+    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(CHANNEL_MUTE_FAILURE);
+    expect(spoken).toHaveBeenCalledWith(CHANNEL_MUTE_FAILURE);
+    // 훅의 `failed` 는 시트를 다시 세우는 길(`setActive`)이다 — 정보 페이지는 둘째 인스턴스를 읽어서 ⋮ 시트가 서지 않는다.
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false));
+    expect(muted.has('ch-general')).toBe(false);
+  });
+
+  it('페이지를 닫았다 다시 열면 지난 실패 문장이 없다', async () => {
+    await mountShell({muteStatus: 500});
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    await openInfoPage();
+    expect(screen.queryByTestId('conversation-info-error')).toBeNull();
+  });
+
+  it('⋮ 시트와 정보 페이지는 서로 모르는 상태를 쥔다 — 한쪽의 실패가 다른 쪽에 비치지 않는다', async () => {
+    await mountShell({muteStatus: 500});
+    await openConversation(ROW.general);
+    await openConversationMenu();
+    fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
+    await waitFor(() => expect(screen.getByTestId('conversation-menu-error')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('conversation-menu-close'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull());
+    await openInfoPage();
+    expect(screen.queryByTestId('conversation-info-error')).toBeNull();
+  });
+});
+
+describe('셸 — 정보 페이지의 채널 나가기 (#4319)', () => {
+  liveWorld();
+
+  async function toConfirm(routes: Routes = {}) {
+    await mountShell(routes);
+    await openConversation(ROW.general);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-leave'));
+  }
+
+  it('누르면 DELETE 가 아니라 확인이 먼저다 — 취소하면 항목으로 돌아온다', async () => {
+    await toConfirm();
+    expect(screen.getByTestId('conversation-info-leave-confirm')).toBeTruthy();
+    expect(infoKeys()).toEqual([]);
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+    fireEvent.press(screen.getByTestId('conversation-info-leave-cancel'));
+    expect(screen.queryByTestId('conversation-info-leave-confirm')).toBeNull();
+    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'leave']);
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
+  });
+
+  it('확인하면 내 멤버십을 지우고, 서버가 답한 뒤 열려 있던 대화가 페이지째 걷힌다', async () => {
+    const spoken = announce();
+    await toConfirm();
+    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await waitFor(() => expect(calls.some(call => call.method === 'DELETE')).toBe(true));
+    expect(calls.find(call => call.method === 'DELETE')!.url).toContain(
+      `/channels/ch-general/members/${SELF_ID}`,
+    );
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    expect(screen.queryByTestId('conversation-info-page')).toBeNull();
+    expect(spoken).toHaveBeenCalledWith('채널에서 나갔습니다.');
+    await waitFor(() => expect(screen.queryByTestId(ROW.general)).toBeNull());
+  });
+
+  it('403: 확인 단계가 그대로 서서 이유를 말한다 — 페이지도 대화도 사라지지 않는다', async () => {
+    await toConfirm({leaveStatus: 403});
+    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-leave-error')).toBeTruthy());
+    expect(screen.getByTestId('conversation-info-leave-error')).toHaveTextContent(/나갈 권한이 없습니다/);
+    expect(screen.getByTestId('conversation-info-leave-confirm')).toBeTruthy();
+    expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+  });
+
+  it('도는 중에는 위험 단추가 잠겨 두 번 눌러도 DELETE 는 한 번이다', async () => {
+    await toConfirm({hold: ['leave']});
+    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await waitFor(() =>
+      expect(screen.getByTestId('conversation-info-leave-confirm-button')).toHaveTextContent('나가는 중…'),
+    );
+    fireEvent.press(screen.getByTestId('conversation-info-leave-confirm-button'));
+    await act(async () => releaseHeld());
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(1);
+  });
+
+  it('확인 단계에서 ‹ 로 나갔다 다시 열면 항목 목록이다', async () => {
+    await toConfirm();
+    fireEvent.press(screen.getByTestId('conversation-info-back'));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    await openInfoPage();
+    expect(screen.queryByTestId('conversation-info-leave-confirm')).toBeNull();
+    expect(infoKeys()).toContain('leave');
+    expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
+  });
+
+  it('일반 멤버에게는 나가기가 없다 — 알림 · 복사만 선다', async () => {
+    await mountShell({selfRole: 'member'});
+    await openConversation(ROW.general);
+    await openInfoPage();
+    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
+  });
+});
+
+describe('셸 — 정보 페이지의 DM 「대화 닫기」 (#4319)', () => {
+  liveWorld();
+
+  it('닫기를 내미는 DM: 누르면 PUT …/closure 를 한 번 보내고 대화가 페이지째 걷히며 낭독한다', async () => {
+    const spoken = announce();
+    await mountShell({serverClosure: true});
+    await openConversation(ROW.human);
+    await openInfoPage();
+    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id', 'close-dm']);
+    expect(screen.getByTestId('conversation-info-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
+    fireEvent.press(screen.getByTestId('conversation-info-close-dm'));
+    await waitFor(() => expect(callsTo('/closure')).toHaveLength(1));
+    expect(callsTo('/closure')[0].body).toEqual({seenSeq: 2});
+    await waitFor(() => expect(screen.queryByTestId('conversation-pane')).toBeNull());
+    expect(screen.queryByTestId('conversation-info-page')).toBeNull();
+    expect(spoken).toHaveBeenCalledWith('대화를 닫았습니다.');
+    // 한 겹만 걷혔다: 사이드바가 그대로 서 있다.
+    expect(screen.getByTestId('sidebar-list')).toBeTruthy();
+  });
+
+  it('닫기를 내밀지 않는 DM(안 읽은 메시지가 있다)에는 「대화 닫기」가 없다', async () => {
+    await mountShell({serverClosure: true, dmUnread: true});
+    await openConversation(ROW.human);
+    await openInfoPage();
+    expect(infoKeys()).toEqual(['mute-toggle', 'copy-name', 'copy-link', 'copy-id']);
+  });
+
+  it('서버가 거절하면(500) 페이지 안에서 이유를 말하고 대화는 그대로다', async () => {
+    await mountShell({serverClosure: true, closeStatus: 500});
+    await openConversation(ROW.human);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-close-dm'));
+    await waitFor(() => expect(screen.getByTestId('conversation-info-error')).toBeTruthy());
+    expect(screen.getByTestId('conversation-info-error')).toHaveTextContent(DM_CLOSE_FAILURE);
+    expect(screen.getByTestId('conversation-pane')).toBeTruthy();
+    expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
+  });
+});
+
+describe('셸 — 정보 페이지의 큰 얼굴: 사진이 있을 때만 크게 본다 (#4319)', () => {
+  liveWorld();
+
+  // 정보 페이지 층이 `accessibilityViewIsModal` 이라 RNTL 은 같은 부모의 다른 가지(뷰어 Modal)를 접근성에서 숨은 것으로 센다 — 실기기에서는 Modal 이
+  // 별도 표시 층이라 VoiceOver 가 뷰어를 읽는다. 시험은 숨은 요소까지 조회한다.
+  const VIEWER = {includeHiddenElements: true} as const;
+
+  it('사진이 있으면 눌러서 크게 본다 — 뷰어는 페이지 위에 서고, 닫으면 페이지로 돌아온다', async () => {
+    await mountShell({photo: true});
+    await openConversation(ROW.human);
+    await openInfoPage();
+    expect(screen.queryByTestId('avatar-viewer', VIEWER)).toBeNull();
+    fireEvent.press(screen.getByTestId('conversation-info-face'));
+    await waitFor(() => expect(screen.getByTestId('avatar-viewer', VIEWER)).toBeTruthy());
+    const image = screen.getByTestId('avatar-viewer-image', VIEWER);
+    expect(image.props.source).toEqual({uri: PHOTO});
+    expect(image.props.accessibilityLabel).toBe('박서연 프로필 사진');
+    // 뷰어를 닫으면 대화가 아니라 **정보 페이지**로 돌아온다 — 페이지가 닫히지 않았다.
+    fireEvent.press(screen.getByTestId('avatar-viewer-close', VIEWER));
+    await waitFor(() => expect(screen.queryByTestId('avatar-viewer', VIEWER)).toBeNull());
+    expect(screen.getByTestId('conversation-info-page')).toBeTruthy();
+  });
+
+  it('사진이 없으면 얼굴은 눌러도 아무 일이 없다', async () => {
+    await mountShell();
+    await openConversation(ROW.human);
+    await openInfoPage();
+    fireEvent.press(screen.getByTestId('conversation-info-face'));
+    expect(screen.queryByTestId('avatar-viewer', {includeHiddenElements: true})).toBeNull();
+    expect(screen.getByTestId('conversation-info-face').props.accessibilityRole).toBeUndefined();
   });
 });
 
