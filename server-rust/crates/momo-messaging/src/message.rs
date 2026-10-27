@@ -770,6 +770,14 @@ pub async fn send_message_in_tx(
 ///
 /// The caller must have validated the root (it is the trigger's own thread, or
 /// the trigger itself).
+///
+/// Since #4622 this is also the spine of an agent's **final answer** — the gateway completion, the
+/// managed worker's opening and committing writes, the team AI — because an answer to a request made
+/// inside a thread is a reply the thread has to count. Those callers meet the root contract through
+/// `GatewayRunSnapshot::trigger_root_id`, which only ever names a live top-level message of the run's
+/// channel. The two bullets above still describe them and are not regressions: the gateway completion
+/// fans its answer out to the hosted inboxes itself, beside this call
+/// (`complete_gateway_run_in_tx`), and the worker and the team AI never did, on either spine.
 pub async fn send_thread_notice_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
