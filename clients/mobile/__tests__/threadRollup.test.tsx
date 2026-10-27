@@ -245,8 +245,12 @@ describe('스레드 화면 전체에서 개수가 사라진다', () => {
     expect(screen.getByTestId('thread-title').props.children).toBe('스레드');
   });
 
-  it('답글이 없는 스레드는 여전히 첫 답글을 청한다', async () => {
+  it('답글이 없는 스레드에는 안내 문장이 없다 — 입력창의 자리 표시 「답글 쓰기」만 남는다 (#4690)', async () => {
     await renderPanel([SERVED_ROOT]);
-    expect(screen.getByTestId('thread-empty')).toBeTruthy();
+    // 입력창 위의 「첫 답글을 남겨 이 대화를 이어가세요.」와 그 자리의 이름표가 둘 다 없다.
+    expect(screen.queryByTestId('thread-empty')).toBeNull();
+    expect(screen.queryByText(/첫 답글을 남겨/)).toBeNull();
+    // 초대는 입력창 하나가 말한다. 이 단정이 서 있으므로 위의 「없다」가 패널이 안 그려져서 맞는 헛단정이 아니다.
+    expect(screen.getByPlaceholderText('답글 쓰기')).toBeTruthy();
   });
 });

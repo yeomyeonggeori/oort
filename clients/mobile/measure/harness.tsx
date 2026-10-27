@@ -20,7 +20,7 @@ import {
   type PillState,
   type TimelineGeometry,
 } from '../src/features/conversation/Timeline';
-import {color, font, SAFE_GUTTER, space} from '../src/design/tokens';
+import {color} from '../src/design/tokens';
 import {FixedScheme} from '../src/design/theme';
 import {keyboardNative} from '../src/lib/keyboardPane';
 import {useKeyboard} from '../src/lib/useKeyboard';
@@ -1726,16 +1726,11 @@ function Harness(): React.JSX.Element {
             }
             composer={
               <View ref={threadDockRef} collapsable={false}>
-                {/* `ThreadPanel.tsx` puts this line in the composer slot while a
-                    thread has no replies, and it is load-bearing for the one
-                    number buzz's counterexample is about: it is what stands
-                    between a bottom-packed root and the input. A harness that
-                    dropped it would report that gap smaller than the app's. */}
-                {threadReplies.length === 0 ? (
-                  <Text style={styles.threadInvite}>
-                    첫 답글을 남겨 이 대화를 이어가세요.
-                  </Text>
-                ) : null}
+                {/* No "no replies yet" line stands above the composer any more
+                    (#4690 took it out of `ThreadPanel.tsx`, and this replica has
+                    to drop it with it). It used to sit between the root and the
+                    input, so the root-gap reading above is the gap WITHOUT it —
+                    the shipping one. */}
                 <Composer recipient="place"
                   channelLabel="스레드"
                   directory={DIRECTORY}
@@ -1931,14 +1926,6 @@ const styles = StyleSheet.create({
   pass: {color: color.ok},
   fail: {color: color.danger},
   meta: {color: color.textFaint, fontSize: 10},
-  // `ThreadPanel` 의 `styles.invite` 와 같은 값. 이 줄의 높이가 buzz 반례의
-  // 숫자에 그대로 들어가므로, 비슷한 것이 아니라 같은 것이어야 한다.
-  threadInvite: {
-    paddingHorizontal: SAFE_GUTTER,
-    paddingTop: space.sm,
-    fontSize: font.meta,
-    color: color.textFaint,
-  },
   travelRow: {gap: 1},
   travelValues: {flexDirection: 'row', alignItems: 'center', gap: 8},
   stage: {flex: 1},

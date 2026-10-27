@@ -1,4 +1,5 @@
-import type {Member} from '@momo/core/lib/api';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
+import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -34,6 +35,11 @@ import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
 import {PROFILE_FACE} from '../src/features/profile/ProfileFace';
+import {
+  SettingsPage,
+  type SettingsPageName,
+  type SettingsSubPage,
+} from '../src/features/profile/SettingsPage';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {
@@ -53,8 +59,8 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //
 // 이 파일이 지는 것은 **구조**다:
 //   1. 대화 목록 발치에 계정 줄·테마 칸·로그아웃이 더는 없다
-//   2. 머리 오른쪽 아바타가 설정 페이지를 연다 — 머리는 왼쪽 원형 X + 가운데 「설정」, 이름·@핸들·상태가 그 안에 있다
-//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 머리는 ‹ 뒤로이며 한 겹만 벗긴다(X 가 아니다)
+//   2. 머리 오른쪽 아바타가 설정 페이지를 연다 — 머리는 가운데 「설정」 + 오른쪽 원형 X(#4691), 이름·@핸들·상태가 그 안에 있다
+//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 머리는 왼쪽 ‹ 뒤로이며 한 겹만 벗긴다(X 가 아니다)
 //   4. 테마는 「테마 ›」 행이 여는 안쪽 장이고, 고른 것이 저장된다
 //   5. 로그아웃은 마지막 카드의 위험 행이고, 한 번 확인한 뒤에만 세션을 지운다
 //   6. 알림 권한이 꺼져 있으면 그렇게 말하고, 스위치를 누르면 설정이 열린다 (#3924)
@@ -259,19 +265,19 @@ describe('설정 페이지', () => {
     }
   });
 
-  it('닫기는 글자가 아니라 머리 왼쪽의 원형 X 다 — 가운데는 「설정」이다', async () => {
+  it('닫기는 글자가 아니라 머리 오른쪽의 원형 X 다 — 가운데는 「설정」이다', async () => {
     const page = await openPage();
     const close = within(page).getByTestId('settings-close');
     expect(close.props.accessibilityRole).toBe('button');
     expect(close.props.accessibilityLabel).toBe('설정 닫기');
     expect(within(page).queryByText('닫기')).toBeNull();
     expect(within(page).getByTestId('settings-title')).toHaveTextContent('설정');
-    // 트리 순서가 곧 왼쪽·가운데다: X 가 제목보다 앞이다.
+    // 트리 순서가 곧 가운데·오른쪽이다: X 가 제목보다 뒤다(#4691 — 시트의 X 와 같은 자리).
     const order = flatten(screen.toJSON());
     const closeAt = order.indexOf('settings-close');
     const titleAt = order.indexOf('settings-title');
-    expect(closeAt).toBeGreaterThan(-1);
-    expect(titleAt).toBeGreaterThan(closeAt);
+    expect(titleAt).toBeGreaterThan(-1);
+    expect(closeAt).toBeGreaterThan(titleAt);
   });
 
   it('설정이 VoiceOver 의 모달 경계다 — 밑의 홈 목록은 읽히지 않는다', async () => {
@@ -577,6 +583,65 @@ describe('설정 페이지', () => {
       '연결 기록 복사됨',
     );
   });
+});
+
+describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는 왼쪽 위: 설정 페이지 전수 (#4691)', () => {
+  // 안쪽 장이 하나 늘면 이 표가 타입 오류를 낸다 — 새 장의 머리도 같은 약속을 지켜야 한다.
+  const SUB_PAGES: Record<SettingsSubPage, true> = {
+    theme: true,
+    deviceKey: true,
+    avatar: true,
+    pauseUntil: true,
+    dndUntil: true,
+  };
+
+  function mountPage(initialPage: SettingsPageName) {
+    queryClient = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {retry: false, gcTime: 0}},
+    });
+    return render(
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <SettingsPage
+            workspaceId={WS}
+            member={SELF}
+            directory={makeDirectory(ROSTER as unknown as RosterMember[])}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+            initialPage={initialPage}
+          />
+        </QueryClientProvider>
+      </ThemeProvider>,
+    );
+  }
+
+  /** 머리의 세 칸([왼쪽, 제목, 오른쪽])에 서 있는 단추의 이름. 칸이 셋이 아니면 제목이 가운데에 서지 않는다. */
+  function buttonsBySlot(headerTestID: string): string[][] {
+    const slots = (screen.getByTestId(headerTestID).children as unknown[]).filter(
+      child => typeof child !== 'string',
+    );
+    expect(slots).toHaveLength(3);
+    return slots.map(slot =>
+      within(slot as never)
+        .queryAllByRole('button')
+        .map(button => button.props.accessibilityLabel as string),
+    );
+  }
+
+  it('첫 장(모달 페이지): 왼쪽은 비고, 「설정」 제목, 오른쪽에 「설정 닫기」 X 하나다', () => {
+    mountPage('main');
+    expect(buttonsBySlot('settings-header')).toEqual([[], [], ['설정 닫기']]);
+  });
+
+  it.each(Object.keys(SUB_PAGES) as SettingsSubPage[])(
+    '안쪽 장 %s: 왼쪽에 ‹ 뒤로 하나, 오른쪽은 비고 X 는 없다',
+    page => {
+      mountPage(page);
+      expect(buttonsBySlot('settings-sub-header')).toEqual([['설정으로 돌아가기'], [], []]);
+      expect(within(screen.getByTestId('settings-sub-header')).queryByLabelText(/닫기/)).toBeNull();
+    },
+  );
 });
 
 describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 8 카드가 어디에도 없다 (#4457)', () => {
