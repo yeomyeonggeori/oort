@@ -313,7 +313,9 @@ pub const CALL_READ_TIMEOUT: &str = "2s";
 /// The era bound MUST stay a bare outer column (`e.era_start`), never wrapped in `COALESCE` or a
 /// scalar subselect: only then does the planner make it an index condition, so the ordered scan
 /// stops at the era instead of reading every older row of the agent just to discard it. The PG
-/// suite measures this on an agent whose connection is new and whose older rows are many.
+/// suite measures this on an agent whose connection is new and whose older rows are many, **as the
+/// application role under RLS**: the same statement is an index condition for the superuser and a
+/// filter for `momo_app`, so a measurement taken as the superuser cannot see the regression.
 pub const CALL_TIMES_SQL: &str = "\
     SELECT a.agent_id, c.created_at \
       FROM unnest($2::uuid[]) AS a(agent_id) \
@@ -838,6 +840,7 @@ mod tests {
         assert_eq!(cadence.typical_minutes, None);
         assert_eq!(cadence.expected_check_at, None);
         assert!(!cadence.late);
+        assert_eq!(cadence.intervals, 4, "the evidence is still counted");
     }
 
     #[test]

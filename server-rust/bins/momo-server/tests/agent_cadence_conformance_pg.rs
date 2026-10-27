@@ -26,7 +26,7 @@
 //! | `the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful` | 한 에이전트의 호출 6,000행, 플래너가 적게 보는 통계 → 한도 50이면 읽은 튜플이 150 이하(대조: 같은 문장을 플래너에 맡기면 1,000 이상) | 순서 인덱스 스캔 강제 |
 //! | `a_beat_read_that_cannot_finish_leaves_the_liveness_routes_answering` | 표를 다른 세션이 잠그면 박자 읽기는 2초에 취소되고 라우트는 200 + `unknown`, 풀려나면 다시 `routine` | 읽기 실패 격리 |
 //! | `the_limit_is_per_agent_not_for_the_whole_read` | 에이전트 둘 × 한도 2 → 각자 자기 최신 2개 | 에이전트별 LATERAL 한도 |
-//! | `an_agent_with_a_new_connection_does_not_cost_its_old_rows` | 연결이 한 시간 전이고 그 전에 6,000행이 있는 에이전트에서 era 안 10행을 읽는 데 100튜플 이하(era 하한이 필터가 아니라 인덱스 조건) | era 하한의 계획 모양 |
+//! | `an_agent_with_a_new_connection_does_not_cost_its_old_rows` | 연결이 한 시간 전이고 그 전에 6,000행이 있는 에이전트에서 era 안 10행을 읽는 데 100튜플 이하. **앱 역할(`momo_app`, RLS)로 재요**: 같은 문장이 슈퍼유저에서는 인덱스 조건이고 앱에서는 필터가 될 수 있어서 슈퍼유저 측정은 이 퇴화를 못 봐요 | era 하한의 계획 모양 |
 //!
 //! 격리 DB에서만:
 //!
@@ -56,6 +56,8 @@ const REAL_15: [i64; 5] = [29, 15, 10, 16, 14];
 
 struct World {
     su: PgPool,
+    /// The application's role (`momo_app`, NOBYPASSRLS): what the routes run as.
+    app: PgPool,
     base: String,
     workspace: Uuid,
     admin_jwt: String,
@@ -69,13 +71,14 @@ async fn world() -> World {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
-    let base = start_server(app, ServerOptions::hosted_open()).await;
+    let base = start_server(app.clone(), ServerOptions::hosted_open()).await;
     let workspace = seed_workspace(&su).await;
     let (admin, admin_jwt) = seed_human(&su, workspace, "owner", "이도현").await;
     let (viewer, viewer_jwt) = seed_human(&su, workspace, "member", "박서연").await;
     let channel = seed_channel(&su, workspace, "public", &[admin, viewer]).await;
     World {
         su,
+        app,
         base,
         workspace,
         admin_jwt,
@@ -178,6 +181,19 @@ impl World {
         .await
         .expect("age the connection");
         agent
+    }
+
+    /// A transaction the way a route has one: `momo_app` with this workspace as the tenant for the
+    /// transaction only. What the planner does under RLS is NOT what it does for the superuser (the
+    /// same statement was an index condition for one and a filter for the other), so every
+    /// measurement of work is taken here.
+    async fn app_tx(&self) -> Result<sqlx::Transaction<'static, sqlx::Postgres>, sqlx::Error> {
+        let mut tx = self.app.begin().await?;
+        sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
+            .bind(self.workspace.to_string())
+            .execute(&mut *tx)
+            .await?;
+        Ok(tx)
     }
 
     fn wire(&self, agent: &SeededAgent) -> Wire {
@@ -631,12 +647,14 @@ async fn a_connection_that_is_not_active_reads_unknown_whatever_it_did() {
     for status in ["cleanup_pending", "disconnected"] {
         // `disconnected` is reachable only through the disconnect lifecycle (a trigger demands a
         // cleanup manifest); the fixture jumps there inside ONE transaction with user triggers off,
-        // which touches nothing outside it
+        // which touches nothing outside it. `cleanup_pending` needs no such jump
         let mut tx = w.su.begin().await.expect("begin");
-        sqlx::query("SET LOCAL session_replication_role = replica")
-            .execute(&mut *tx)
-            .await
-            .expect("this transaction only");
+        if status == "disconnected" {
+            sqlx::query("SET LOCAL session_replication_role = replica")
+                .execute(&mut *tx)
+                .await
+                .expect("this transaction only");
+        }
         sqlx::query(
             "UPDATE hosted_agent_connection SET status = $3 \
               WHERE workspace_id = $1 AND agent_member_id = $2",
@@ -713,14 +731,13 @@ async fn the_wire_is_closed_and_a_stranger_gets_the_same_404() {
 
 /// Heap tuples this transaction has fetched from `audit_log` so far (index fetches + sequential
 /// reads), from the transaction-local statistics: the work a statement did, whatever its plan.
-async fn fetched(conn: &mut sqlx::PgConnection) -> i64 {
+async fn fetched(conn: &mut sqlx::PgConnection) -> Result<i64, sqlx::Error> {
     sqlx::query_scalar(
         "SELECT COALESCE(sum(COALESCE(idx_tup_fetch, 0) + COALESCE(seq_tup_read, 0)), 0)::bigint \
            FROM pg_stat_xact_user_tables WHERE relname = 'audit_log'",
     )
     .fetch_one(&mut *conn)
     .await
-    .expect("transaction-local table statistics")
 }
 
 #[tokio::test]
@@ -778,10 +795,14 @@ async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
         .execute(&w.su)
         .await
         .expect("reset n_distinct");
-    // Production's planner estimates one agent's rows from the average over very many actors and
-    // expects a handful (15 rows per actor here, of which a few pass the other predicates);
-    // say so, whatever this small database's own statistics would have said.
-    sqlx::query("ALTER TABLE audit_log ALTER COLUMN actor_member_id SET (n_distinct = -0.0667)")
+    // Production's planner estimates one agent's rows from the average over very many actors, far
+    // below what a polling agent has made, and so takes the plan that reads them all when it may
+    // (a bitmap scan and a sort). Say so, whatever this small database's own statistics would have
+    // said: -0.005 is 200 rows per actor. The regime is wide (every value from -0.02 down gives
+    // the bitmap plan under the era bound as an index condition) but it has an edge: at -0.0667,
+    // 15 rows per actor, the planner prefers the ordered scan and a loader that forgot to forbid
+    // the bitmap scan would not be caught.
+    sqlx::query("ALTER TABLE audit_log ALTER COLUMN actor_member_id SET (n_distinct = -0.005)")
         .execute(&w.su)
         .await
         .expect("n_distinct");
@@ -793,11 +814,11 @@ async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
     let measured = async {
         // control: the same statement when the planner takes the plan that reads them all (an
         // ordered index scan switched off, so the bitmap scan - or a sequential one - is left)
-        let mut tx = w.su.begin().await?;
+        let mut tx = w.app_tx().await?;
         sqlx::query("SET LOCAL enable_indexscan = off")
             .execute(&mut *tx)
             .await?;
-        let before = fetched(&mut tx).await;
+        let before = fetched(&mut tx).await?;
         let rows = sqlx::query(momo_agent::CALL_TIMES_SQL)
             .bind(w.workspace)
             .bind(vec![agent.id])
@@ -807,16 +828,16 @@ async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
             .bind(50_i64)
             .fetch_all(&mut *tx)
             .await?;
-        let control = fetched(&mut tx).await - before;
+        let control = fetched(&mut tx).await? - before;
         tx.rollback().await?;
 
         // the loader reads about as many as it returns
-        let mut tx = w.su.begin().await?;
-        let before = fetched(&mut tx).await;
+        let mut tx = w.app_tx().await?;
+        let before = fetched(&mut tx).await?;
         let loaded =
             momo_agent::load_agent_call_times_in_tx(&mut tx, w.workspace, &[agent.id], since, 50)
                 .await;
-        let bounded = fetched(&mut tx).await - before;
+        let bounded = fetched(&mut tx).await? - before;
         tx.rollback().await?;
         Ok::<_, sqlx::Error>((rows.len(), control, loaded, bounded))
     }
@@ -930,8 +951,8 @@ async fn an_agent_with_a_new_connection_does_not_cost_its_old_rows() {
     w.put_calls(agent.id, &before_era, &detail).await;
     w.put_calls(agent.id, &since_era, &detail).await;
 
-    let mut tx = w.su.begin().await.expect("begin");
-    let before = fetched(&mut tx).await;
+    let mut tx = w.app_tx().await.expect("begin as momo_app");
+    let before = fetched(&mut tx).await.expect("statistics");
     let loaded = momo_agent::load_agent_call_times_in_tx(
         &mut tx,
         w.workspace,
@@ -942,7 +963,7 @@ async fn an_agent_with_a_new_connection_does_not_cost_its_old_rows() {
     .await
     .expect("the savepoint machinery")
     .expect("the read");
-    let cost = fetched(&mut tx).await - before;
+    let cost = fetched(&mut tx).await.expect("statistics") - before;
     tx.rollback().await.expect("rollback");
 
     assert_eq!(
