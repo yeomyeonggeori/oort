@@ -48,11 +48,11 @@ import {SettingsOverlay} from './settingsOverlay';
 //
 //   -momoMeasure SHEETKIT-PAGE · LIGHT-SHEETKIT-PAGE …
 //
-//   page            **앞 칸 없는 쪽**(설정 페이지의 문법): 페이지 머리(왼쪽 X) · 큰 행동 타일 · 묶음 카드(값/셰브론/펼침/
+//   page            **앞 칸 없는 쪽**(설정 페이지의 문법): 페이지 머리(오른쪽 X) · 큰 행동 타일 · 묶음 카드(값/셰브론/펼침/
 //                   복사/토글/보조 줄/위험) · 입력 알약 — 이름 + 오른쪽 한 요소뿐이고 앞 칸이 한 카드에도 없다
 //   page-lead       **앞 칸 있는 쪽**: 같은 부품인데 **모든 카드**가 앞 칸을 든다 — 고른 상태는 이모지(데이터),
 //                   이동·연결 행은 선 글리프(기능). 한 표면 안에서는 이 둘을 섞지 않는다(글자 열이 카드 사이로 점프한다)
-//   headers         시트 머리 ✓ 비활성/활성 · 확정 없음 · 페이지 머리 오른쪽 자리
+//   headers         시트 머리 ✓ 비활성/활성 · 확정 없음 · 페이지 머리(첫 장 오른쪽 X · 안쪽 장 왼쪽 ‹ + 오른쪽 자리)
 //   status          중간 단 시트 + 입력 알약 + ✓ 비활성(입력 전). autoFocus 라 소프트 키보드가 올라온다 —
 //                   시트가 키보드 위에 앉고 입력 칸이 가려지지 않는지 본다
 //   status-ready    같은 시트, 입력 뒤(✓ 활성)
@@ -278,12 +278,15 @@ function HeadersKit(): React.JSX.Element {
       </View>
       <SheetHeader title="메시지 액션" closeLabel="메시지 액션 닫기" onClose={noop} />
       <View style={styles.labelBox}>
-        <GroupLabel>페이지 머리 — 왼쪽 X · 오른쪽 자리</GroupLabel>
+        <GroupLabel>페이지 머리 — 첫 장: 오른쪽 X(왼쪽은 비어 있다)</GroupLabel>
+      </View>
+      <PageHeader title="설정" closeLabel="설정 닫기" onClose={noop} />
+      <View style={styles.labelBox}>
+        <GroupLabel>페이지 머리 — 안쪽 장: 왼쪽 ‹ · 오른쪽 자리</GroupLabel>
       </View>
       <PageHeader
-        title="설정"
-        closeLabel="설정 닫기"
-        onClose={noop}
+        title="테마"
+        back={{label: '설정으로 돌아가기', onPress: noop}}
         trailing={<Text style={styles.trailing}>편집</Text>}
       />
     </View>

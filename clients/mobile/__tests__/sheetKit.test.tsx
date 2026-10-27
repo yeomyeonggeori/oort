@@ -461,16 +461,30 @@ describe('확정 ✓', () => {
   });
 });
 
-/** 머리의 세 칸([왼쪽, 제목, 오른쪽]) 중 `testID` 의 단추가 어느 칸에 있는가. */
-function slotOf(headerTestID: string, buttonTestID: string): number {
+/** 머리의 세 칸([왼쪽, 제목, 오른쪽]). 칸이 셋이 아니면 제목이 가운데에 서지 않는다. */
+function slotsOf(headerTestID: string): unknown[] {
   const slots = (screen.getByTestId(headerTestID).children as unknown[]).filter(
     child => typeof child !== 'string',
   );
   expect(slots).toHaveLength(3);
-  return slots.findIndex(slot => within(slot as never).queryByTestId(buttonTestID) !== null);
+  return slots;
 }
 
-describe('머리의 좌우 — 시트는 오른쪽 X, 페이지는 왼쪽 X', () => {
+/** 칸 안에 그려진 단추와 글자의 수 — 비어 있는 칸은 둘 다 0이다. */
+function contentOf(slot: unknown): {buttons: number; texts: number} {
+  const inside = within(slot as never);
+  return {buttons: inside.queryAllByRole('button').length, texts: inside.queryAllByText(/./).length};
+}
+const EMPTY_SLOT = {buttons: 0, texts: 0};
+
+/** 머리의 세 칸 중 `testID` 의 단추가 어느 칸에 있는가. */
+function slotOf(headerTestID: string, buttonTestID: string): number {
+  return slotsOf(headerTestID).findIndex(
+    slot => within(slot as never).queryByTestId(buttonTestID) !== null,
+  );
+}
+
+describe('머리의 좌우 — 닫기 X 는 시트든 페이지든 오른쪽, ‹ 는 왼쪽 (#4691)', () => {
   it('바텀시트: 원형 X 는 오른쪽 칸, ✓ 는 왼쪽 칸이다', async () => {
     await mount(
       <PageSheet onClose={() => {}} accessibilityLabel="편집">
@@ -488,7 +502,7 @@ describe('머리의 좌우 — 시트는 오른쪽 X, 페이지는 왼쪽 X', ()
     expect(slotOf('header', 'confirm')).toBe(0);
   });
 
-  it('페이지: 원형 X 는 왼쪽 칸이다', async () => {
+  it('페이지(X 머리): 원형 X 는 시트와 같은 오른쪽 칸이고, 왼쪽 칸은 비어 있다', async () => {
     await mount(
       <PageHeader
         title="설정"
@@ -498,7 +512,37 @@ describe('머리의 좌우 — 시트는 오른쪽 X, 페이지는 왼쪽 X', ()
         testID="header"
       />,
     );
-    expect(slotOf('header', 'close')).toBe(0);
+    expect(slotOf('header', 'close')).toBe(2);
+    // 왼쪽 칸에는 아무것도 서지 않는다 — 닫는 문이 둘이 되거나 다른 단추가 X 의 자리를 나누지 않는다.
+    expect(contentOf(slotsOf('header')[0])).toEqual(EMPTY_SLOT);
+    expect(screen.getAllByLabelText(/닫기/)).toHaveLength(1);
+  });
+
+  it('trailing 은 ‹ 머리의 오른쪽 칸에 선다 — X 머리에는 줄 수 없고, 줘도(타입을 어겨도) 그려지지 않는다', async () => {
+    await mount(
+      <>
+        <PageHeader
+          title="테마"
+          back={{label: '설정으로 돌아가기', onPress: () => {}, testID: 'back'}}
+          trailing={<Text testID="action-back">편집</Text>}
+          testID="header-back"
+        />
+        {/* @ts-expect-error — X 의 칸(오른쪽)은 X 의 것이다: `trailing` 은 ‹ 머리에만 있다(타입이 막는다). */}
+        <PageHeader
+          title="설정"
+          closeLabel="설정 닫기"
+          onClose={() => {}}
+          closeTestID="close"
+          trailing={<Text testID="action-close">편집</Text>}
+          testID="header-close"
+        />
+      </>,
+    );
+    expect(slotOf('header-back', 'action-back')).toBe(2);
+    expect(slotOf('header-back', 'back')).toBe(0);
+    // X 머리: X 가 오른쪽 칸을 지키고, 어긴 `trailing` 은 어느 칸에도 그려지지 않는다.
+    expect(slotOf('header-close', 'close')).toBe(2);
+    expect(screen.queryByTestId('action-close')).toBeNull();
   });
 });
 
@@ -509,7 +553,7 @@ describe('페이지 머리 — ‹ 뒤로 변형 (#4457)', () => {
       size: StyleSheet.flatten(image.props.style).width,
     }));
 
-  it('‹ 는 왼쪽 칸에 서고 누르면 back.onPress, 이름은 돌아갈 곳이며 X 는 없다', async () => {
+  it('‹ 는 왼쪽 칸에 서고(오른쪽 칸은 비어 있다) 누르면 back.onPress, 이름은 돌아갈 곳이며 X 는 없다', async () => {
     const onPress = jest.fn();
     await mount(
       <PageHeader
@@ -519,6 +563,7 @@ describe('페이지 머리 — ‹ 뒤로 변형 (#4457)', () => {
       />,
     );
     expect(slotOf('header', 'back')).toBe(0);
+    expect(contentOf(slotsOf('header')[2])).toEqual(EMPTY_SLOT);
     fireEvent.press(screen.getByLabelText('설정으로 돌아가기'));
     expect(onPress).toHaveBeenCalledTimes(1);
     // 글리프는 22pt ‹ 하나 — X 가 아니다.
@@ -555,7 +600,7 @@ describe('페이지 머리 — ‹ 뒤로 변형 (#4457)', () => {
 });
 
 describe('페이지 머리', () => {
-  it('원형 X 가 왼쪽에 서고 누르면 onClose, 이름은 넘긴 문장이다', async () => {
+  it('원형 X 를 누르면 onClose, 이름은 넘긴 문장이다', async () => {
     const onClose = jest.fn();
     await mount(<PageHeader title="설정" closeLabel="설정 닫기" onClose={onClose} closeTestID="page-close" />);
     fireEvent.press(screen.getByLabelText('설정 닫기'));
