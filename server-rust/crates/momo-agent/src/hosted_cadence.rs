@@ -278,14 +278,22 @@ pub fn derive_cadence(
     let Some(&newest_wake_start) = starts.last() else {
         return Cadence::unknown();
     };
+    // `checked_`: a plain `+` panics near chrono's last instant, and a request must not. A
+    // deadline that cannot be told leaves no routine to promise: `routine` always carries all
+    // three numbers on the wire, so the answer is `unknown`, not a half-empty routine.
+    let Some(expected_check_at) = newest_wake_start.checked_add_signed(Duration::milliseconds(
+        beat_ms * params.expected_after_beats,
+    )) else {
+        return Cadence {
+            intervals: count,
+            ..Cadence::unknown()
+        };
+    };
     let silence_ms = (now - last_call).num_milliseconds();
     Cadence {
         kind: CadenceKind::Routine,
         typical_minutes: Some(((beat_ms + 30_000) / 60_000).max(1)),
-        // `checked_`: a plain `+` panics near chrono's last instant, and a request must not.
-        expected_check_at: newest_wake_start.checked_add_signed(Duration::milliseconds(
-            beat_ms * params.expected_after_beats,
-        )),
+        expected_check_at: Some(expected_check_at),
         late: silence_ms > beat_ms * params.late_after_beats,
         intervals: count,
     }
@@ -299,16 +307,21 @@ pub const CALL_READ_TIMEOUT: &str = "2s";
 /// ([`AGENT_PORT_CALL_ACTION`] on [`AGENT_PORT_CALL_PATH`]) newer than `$5` AND no older than the
 /// agent's current connection (see "the era" on [`load_agent_call_times_in_tx`]), newest first,
 /// at most `$6`. The connection chosen is the one the liveness route chooses for the same agent
-/// (`liveness_target_for_viewer_in_tx`: an active one before an inactive one, then the newest).
+/// (`liveness_target_for_viewer_in_tx`: an active one before an inactive one, then the newest);
+/// an agent with no connection row has no entry.
+///
+/// The era bound MUST stay a bare outer column (`e.era_start`), never wrapped in `COALESCE` or a
+/// scalar subselect: only then does the planner make it an index condition, so the ordered scan
+/// stops at the era instead of reading every older row of the agent just to discard it. The PG
+/// suite measures this on an agent whose connection is new and whose older rows are many.
 pub const CALL_TIMES_SQL: &str = "\
     SELECT a.agent_id, c.created_at \
       FROM unnest($2::uuid[]) AS a(agent_id) \
       CROSS JOIN LATERAL ( \
-            SELECT COALESCE( \
-                     (SELECT hc.created_at FROM hosted_agent_connection hc \
-                       WHERE hc.workspace_id = $1 AND hc.agent_member_id = a.agent_id \
-                       ORDER BY (hc.status = 'active') DESC, hc.created_at DESC LIMIT 1), \
-                     '-infinity'::timestamptz) AS era_start) e \
+            SELECT hc.created_at AS era_start FROM hosted_agent_connection hc \
+             WHERE hc.workspace_id = $1 AND hc.agent_member_id = a.agent_id \
+             ORDER BY (hc.status = 'active') DESC, hc.created_at DESC \
+             LIMIT 1) e \
       CROSS JOIN LATERAL ( \
             SELECT al.created_at FROM audit_log al \
              WHERE al.workspace_id = $1 \
@@ -808,6 +821,23 @@ mod tests {
             |extra: i64| -> Vec<_> { (0..5).map(|k| ago(oldest + extra - k * 15 * MIN)).collect() };
         assert_eq!(derive_cadence(now(), &five(0), &p()).intervals, 4);
         assert_eq!(derive_cadence(now(), &five(1), &p()).intervals, 3);
+    }
+
+    #[test]
+    fn a_deadline_that_cannot_be_told_is_unknown_not_a_routine_without_a_deadline() {
+        // five single-call wakes 15 minutes apart, the newest one minute before chrono's last
+        // instant: its deadline (+ 30 minutes) does not exist. A plain `+` would panic here, and a
+        // routine without its deadline would break the wire's closed shape (a routine carries all
+        // three numbers).
+        let last = DateTime::<Utc>::MAX_UTC;
+        let calls: Vec<_> = (0..5)
+            .map(|k| last - Duration::minutes(1 + 15 * k))
+            .collect();
+        let cadence = derive_cadence(last, &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Unknown);
+        assert_eq!(cadence.typical_minutes, None);
+        assert_eq!(cadence.expected_check_at, None);
+        assert!(!cadence.late);
     }
 
     #[test]

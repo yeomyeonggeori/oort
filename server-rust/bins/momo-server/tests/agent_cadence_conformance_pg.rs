@@ -20,12 +20,13 @@
 //! | `an_agent_that_wakes_whenever_somebody_writes_reads_unknown` | 간격이 제각각 → `unknown` | 규칙성 |
 //! | `the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the_window` | 창 밖·다른 에이전트·다른 action(`agent_port.call`, 거절된 호출 `scope_denied`)·REST 경로·다른 워크스페이스의 행은 세지 않고, 같은 id를 두 번 줘도 두 배가 되지 않고, 상한은 가장 새로운 것부터 | 술어 하나씩, 중복 제거 |
 //! | `the_beat_is_read_from_the_rows_the_agent_port_really_writes` | 실제 호출 N번 = 로더가 N개 (감사 두 줄 중 `used`만) | 쓰는 쪽과 읽는 쪽이 어긋남 |
-//! | `a_connection_that_is_not_active_reads_unknown_whatever_it_did` | 박자 모양 이력이 있어도 비활성 연결은 `unknown` | 비활성 가드 |
+//! | `a_connection_that_is_not_active_reads_unknown_whatever_it_did` | 활성 에이전트가 era 안의 15분 루틴을 가진 채 `cleanup_pending`·`disconnected`로 가면 `unknown`(era가 아니라 연결이 이유) | 비활성 읽기 안 함 + 가드 |
 //! | `the_wire_is_closed_and_a_stranger_gets_the_same_404` | 멤버 응답에 허용된 키 밖의 것(관리자 필드·간격 수)이 없고, 채널을 공유하지 않는 멤버는 404 (키 집합의 정확한 일치는 `agent_cadence_contract`가 잠가요) | 새 키·탐침 |
 //! | `a_new_connection_counts_only_its_own_calls` | 해제 뒤 다시 등록한 새 연결은 옛 연결의 15분 루틴을 물려받지 않고(`unknown`) 자기 호출로만 박자를 만든다 | 연결 era 하한 |
 //! | `the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful` | 한 에이전트의 호출 6,000행, 플래너가 적게 보는 통계 → 한도 50이면 읽은 튜플이 150 이하(대조: 같은 문장을 플래너에 맡기면 1,000 이상) | 순서 인덱스 스캔 강제 |
 //! | `a_beat_read_that_cannot_finish_leaves_the_liveness_routes_answering` | 표를 다른 세션이 잠그면 박자 읽기는 2초에 취소되고 라우트는 200 + `unknown`, 풀려나면 다시 `routine` | 읽기 실패 격리 |
 //! | `the_limit_is_per_agent_not_for_the_whole_read` | 에이전트 둘 × 한도 2 → 각자 자기 최신 2개 | 에이전트별 LATERAL 한도 |
+//! | `an_agent_with_a_new_connection_does_not_cost_its_old_rows` | 연결이 한 시간 전이고 그 전에 6,000행이 있는 에이전트에서 era 안 10행을 읽는 데 100튜플 이하(era 하한이 필터가 아니라 인덱스 조건) | era 하한의 계획 모양 |
 //!
 //! 격리 DB에서만:
 //!
@@ -620,26 +621,40 @@ async fn a_connection_that_is_not_active_reads_unknown_whatever_it_did() {
     let w = world().await;
     let detail = w.real_detail().await;
     let now = whole_ms_now();
-    // `connect = false`: a hosted connection that is detected, not active (and holds no token)
-    let agent = seed_hosted_agent(
-        &w.su,
-        w.workspace,
-        w.admin,
-        "dormant",
-        &[w.channel],
-        false,
-        false,
-    )
-    .await;
-    join_channel(&w.su, w.workspace, w.channel, agent.id).await;
+    // an ACTIVE agent whose calls are all inside its connection's era: a perfect 15-minute routine
+    let agent = w.agent("dormant").await;
     w.put_calls(agent.id, &wakes(now, 4 * MIN, &REAL_15), &detail)
         .await;
-    let cadence = w.cadence(agent.id).await;
-    assert_cadence_is_closed(&cadence);
-    assert_eq!(
-        cadence["kind"], "unknown",
-        "an agent whose connection is not active promises nothing: {cadence}"
-    );
+    assert_eq!(w.cadence(agent.id).await["kind"], "routine");
+    // the connection leaves `active`: the history is still there and inside the era, so the only
+    // reason for `unknown` is the connection (the era plays no part)
+    for status in ["cleanup_pending", "disconnected"] {
+        // `disconnected` is reachable only through the disconnect lifecycle (a trigger demands a
+        // cleanup manifest); the fixture jumps there inside ONE transaction with user triggers off,
+        // which touches nothing outside it
+        let mut tx = w.su.begin().await.expect("begin");
+        sqlx::query("SET LOCAL session_replication_role = replica")
+            .execute(&mut *tx)
+            .await
+            .expect("this transaction only");
+        sqlx::query(
+            "UPDATE hosted_agent_connection SET status = $3 \
+              WHERE workspace_id = $1 AND agent_member_id = $2",
+        )
+        .bind(w.workspace)
+        .bind(agent.id)
+        .bind(status)
+        .execute(&mut *tx)
+        .await
+        .expect("leave active");
+        tx.commit().await.expect("commit");
+        let cadence = w.cadence(agent.id).await;
+        assert_cadence_is_closed(&cadence);
+        assert_eq!(
+            cadence["kind"], "unknown",
+            "a connection that is `{status}` promises nothing: {cadence}"
+        );
+    }
 }
 
 #[tokio::test]
@@ -754,6 +769,15 @@ async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
         .map(|k| now - Duration::seconds(20 * 60 * MIN - k * 12))
         .collect();
     w.put_calls(agent.id, &calls, &detail).await;
+    let since = now - Duration::hours(24);
+
+    // The table's statistics are shared with the other suites, so a leftover override from a run
+    // that died half way is healed first, and NOTHING that can fail sits between the override and
+    // its reset: the measurements are collected as plain values and judged after the reset.
+    sqlx::query("ALTER TABLE audit_log ALTER COLUMN actor_member_id RESET (n_distinct)")
+        .execute(&w.su)
+        .await
+        .expect("reset n_distinct");
     // Production's planner estimates one agent's rows from the average over very many actors and
     // expects a handful (15 rows per actor here, of which a few pass the other predicates);
     // say so, whatever this small database's own statistics would have said.
@@ -765,35 +789,38 @@ async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
         .execute(&w.su)
         .await
         .expect("analyze");
-    let since = now - Duration::hours(24);
 
-    // control: the same statement with the planner left alone reads them all
-    let mut tx = w.su.begin().await.expect("begin");
-    let before = fetched(&mut tx).await;
-    let rows = sqlx::query(momo_agent::CALL_TIMES_SQL)
-        .bind(w.workspace)
-        .bind(vec![agent.id])
-        .bind(momo_agent::AGENT_PORT_CALL_ACTION)
-        .bind(momo_agent::AGENT_PORT_CALL_PATH)
-        .bind(since)
-        .bind(50_i64)
-        .fetch_all(&mut *tx)
-        .await
-        .expect("control read");
-    let control = fetched(&mut tx).await - before;
-    tx.rollback().await.expect("rollback");
-    assert_eq!(rows.len(), 50);
+    let measured = async {
+        // control: the same statement when the planner takes the plan that reads them all (an
+        // ordered index scan switched off, so the bitmap scan - or a sequential one - is left)
+        let mut tx = w.su.begin().await?;
+        sqlx::query("SET LOCAL enable_indexscan = off")
+            .execute(&mut *tx)
+            .await?;
+        let before = fetched(&mut tx).await;
+        let rows = sqlx::query(momo_agent::CALL_TIMES_SQL)
+            .bind(w.workspace)
+            .bind(vec![agent.id])
+            .bind(momo_agent::AGENT_PORT_CALL_ACTION)
+            .bind(momo_agent::AGENT_PORT_CALL_PATH)
+            .bind(since)
+            .bind(50_i64)
+            .fetch_all(&mut *tx)
+            .await?;
+        let control = fetched(&mut tx).await - before;
+        tx.rollback().await?;
 
-    // the loader reads about as many as it returns
-    let mut tx = w.su.begin().await.expect("begin");
-    let before = fetched(&mut tx).await;
-    let loaded =
-        momo_agent::load_agent_call_times_in_tx(&mut tx, w.workspace, &[agent.id], since, 50)
-            .await
-            .expect("the savepoint machinery")
-            .expect("the read");
-    let bounded = fetched(&mut tx).await - before;
-    tx.rollback().await.expect("rollback");
+        // the loader reads about as many as it returns
+        let mut tx = w.su.begin().await?;
+        let before = fetched(&mut tx).await;
+        let loaded =
+            momo_agent::load_agent_call_times_in_tx(&mut tx, w.workspace, &[agent.id], since, 50)
+                .await;
+        let bounded = fetched(&mut tx).await - before;
+        tx.rollback().await?;
+        Ok::<_, sqlx::Error>((rows.len(), control, loaded, bounded))
+    }
+    .await;
 
     sqlx::query("ALTER TABLE audit_log ALTER COLUMN actor_member_id RESET (n_distinct)")
         .execute(&w.su)
@@ -804,7 +831,12 @@ async fn the_read_stops_at_its_limit_even_when_the_planner_expects_a_handful() {
         .await
         .expect("analyze");
 
-    eprintln!("50 rows of a 6,000-row agent: planner left alone fetched {control} tuples, the loader {bounded}");
+    let (control_rows, control, loaded, bounded) = measured.expect("the measurements");
+    let loaded = loaded.expect("the savepoint machinery").expect("the read");
+    eprintln!(
+        "50 rows of a 6,000-row agent: the read-everything plan fetched {control} tuples, the loader {bounded}"
+    );
+    assert_eq!(control_rows, 50);
     assert_eq!(loaded[&agent.id].len(), 50);
     assert!(
         control >= 1000,
@@ -867,4 +899,59 @@ async fn the_limit_is_per_agent_not_for_the_whole_read() {
     let loaded = load(&w, &[a.id, b.id], now - Duration::hours(1), 2).await;
     assert_eq!(loaded[&a.id], vec![at(10), at(20)]);
     assert_eq!(loaded[&b.id], vec![at(11), at(21)]);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agent_with_a_new_connection_does_not_cost_its_old_rows() {
+    let w = world().await;
+    let detail = w.real_detail().await;
+    let agent = w.agent("reborn-heavy").await;
+    let now = whole_ms_now();
+    // The connection is an hour old. Before it, the agent made 6,000 calls (a polling host that was
+    // disconnected and registered again); since it, ten. The era bound must stop the ordered scan
+    // at the connection, not read the 6,000 only to throw them away.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET created_at = $3 \
+          WHERE workspace_id = $1 AND agent_member_id = $2",
+    )
+    .bind(w.workspace)
+    .bind(agent.id)
+    .bind(now - Duration::hours(1))
+    .execute(&w.su)
+    .await
+    .expect("date the connection");
+    let before_era: Vec<_> = (0..6000)
+        .map(|k| now - Duration::seconds(23 * 60 * MIN - k * 10))
+        .collect();
+    let since_era: Vec<_> = (0..10)
+        .map(|k| now - Duration::minutes(50 - k * 5))
+        .collect();
+    w.put_calls(agent.id, &before_era, &detail).await;
+    w.put_calls(agent.id, &since_era, &detail).await;
+
+    let mut tx = w.su.begin().await.expect("begin");
+    let before = fetched(&mut tx).await;
+    let loaded = momo_agent::load_agent_call_times_in_tx(
+        &mut tx,
+        w.workspace,
+        &[agent.id],
+        now - Duration::hours(24),
+        2000,
+    )
+    .await
+    .expect("the savepoint machinery")
+    .expect("the read");
+    let cost = fetched(&mut tx).await - before;
+    tx.rollback().await.expect("rollback");
+
+    assert_eq!(
+        loaded[&agent.id].len(),
+        10,
+        "only the connection's own calls"
+    );
+    assert!(
+        cost <= 100,
+        "ten calls in the era must not cost {cost} fetched tuples: the era bound is a filter, not an index condition"
+    );
 }

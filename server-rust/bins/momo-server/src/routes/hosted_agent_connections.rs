@@ -169,8 +169,10 @@ async fn cadence_calls(
 }
 
 /// The beat of one agent: derived from its admitted Agent Port calls, and only for an active
-/// connection (anything else is `unknown`, never a promise). The ONE place that rule lives: the
-/// routes read for every agent they were asked about, so deleting this check is visible.
+/// connection (anything else is `unknown`, never a promise). The ONE place that rule lives. The
+/// routes also skip the read for an inactive connection (no wasted query), so a route-level test
+/// cannot tell the two apart: `an_inactive_connection_is_promised_no_beat_whatever_it_did` pins
+/// this check on its own.
 fn cadence_for(
     now: chrono::DateTime<chrono::Utc>,
     active: bool,
@@ -1264,6 +1266,27 @@ mod tests {
         assert_eq!(
             momo_agent::AGENT_PORT_CALL_PATH,
             momo_auth::HOSTED_AGENT_PORT_AUDIENCE
+        );
+    }
+
+    /// The guard that stands even when a caller reads anyway: a perfect 15-minute history on a
+    /// connection that is not active is `unknown`; the same history on an active one is a routine.
+    /// (The routes no longer read for an inactive connection, so only this test sees the guard.)
+    #[test]
+    fn an_inactive_connection_is_promised_no_beat_whatever_it_did() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-27T12:00:00Z")
+            .expect("time")
+            .with_timezone(&chrono::Utc);
+        // six single-call wakes, 15 minutes apart, the newest two minutes ago
+        let calls: Vec<_> = (0..6)
+            .map(|k| now - chrono::Duration::minutes(2 + 15 * k))
+            .collect();
+        let params = momo_agent::CadenceParams::default();
+        let active = cadence_for(now, true, Some(&calls), &params);
+        assert_eq!(active.kind, momo_agent::CadenceKind::Routine, "{active:?}");
+        assert_eq!(
+            cadence_for(now, false, Some(&calls), &params),
+            momo_agent::Cadence::unknown()
         );
     }
 
