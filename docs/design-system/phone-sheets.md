@@ -4,7 +4,7 @@
 > 「머리와 안쪽을 무엇으로 짓는가」를 물으면 여는 문서다. 정본 규칙은 [오르트 구름](README.md), 이 문서는
 > 폰 표면 하나만 다룬다(웹·데스크탑은 해당 없음).
 >
-> - 이슈: #4318 (owner 2026-10-24·25). 이후 화면 이슈 #4457(홈 아바타 → 설정 페이지)·#4458(나머지 시트 전부 이전 — 이 문서 §5 가 그 결과다)·#4319(다른 사람 프로필)가 이 부품을 쓴다.
+> - 이슈: #4318 (owner 2026-10-24·25). 이후 화면 이슈 #4457(홈 아바타 → 설정 페이지)·#4458(나머지 시트 전부 이전 — 이 문서 §5 가 그 결과다)·#4319(다른 사람 프로필)가 이 부품을 쓴다. #4691(owner 2026-10-27)은 **닫기 X 를 페이지에서도 오른쪽 위로** 옮겼다(#4457 의 「페이지 X 는 왼쪽」을 바꿨다).
 > - 참고: Buzz 캡처(비공개) 두 장, Buzz 모바일 소스(Apache-2.0) `buzz_sheet_header.dart`·`buzz_titled_sheet_layout.dart`·`modal_presentation.dart`·`app_list_card.dart`·`app_list.dart`·`buzz_action_tile.dart`. **구조와 값만 읽어 RN 으로 다시 짰다**(코드는 가져오지 않았다, 새 의존성 없음).
 > - 코드: `clients/mobile/src/design/` — `PageSheet.tsx`(그릇) · `SheetChrome.tsx`(머리) · `sheetParts.tsx`(안쪽) · `sheetModel.ts`(판정) · `tokens.ts` 의 `SHEET`(치수) · `icons/` 의 `SHEET_ICONS`. 키보드 높이는 `src/lib/useKeyboardHeight.ts`.
 
@@ -15,8 +15,8 @@
 | 한 줄 | **지금 화면 맥락을 유지한 채 하는 짧은 일** | **되돌아올 위치가 필요한 일** | **지금 있는 곳을 바꾸는 이동 목록** |
 | 들어가는 것 | 행동 6개 이하 · 입력 1~2칸 · 미리보기(프로필·메시지 행동·반응·길게 누르기) · 고르고 곧 닫히는 선택기 | 여러 묶음의 설정 · 긴 목록 · 상세(채널·DM 정보, 설정, 멤버 목록) | 워크스페이스·채널·DM 처럼 어디서든 오가는 탐색 목록 |
 | 맥락 | 뒤의 화면이 스크림 아래에 그대로 남는다 | 화면 스택에 쌓인다. 닫으면 온 곳으로 돌아간다 | 뒤의 화면 위에 밀려 나왔다가 접힌다. 내용을 고치지 않는다 |
-| 닫는 법 | 오른쪽 위 **원형 X** · 스크림 탭 · 끌어내리기 · VoiceOver 두 손가락 문지르기 | 머리 **왼쪽** 원형 X(스택의 첫 장·모달 페이지) 또는 ‹ 뒤로(그 위의 안쪽 장) · 가장자리 스와이프 | 바깥 탭 · 가장자리로 밀기 |
-| 머리 | `SheetHeader`: [✓] 제목 [X] (✓ 는 편집 시트에만) | `PageHeader`: [X 또는 ‹] 제목 | 없다(목록이 머리) |
+| 닫는 법 | 오른쪽 위 **원형 X** · 스크림 탭 · 끌어내리기 · VoiceOver 두 손가락 문지르기 | 머리 **오른쪽 위** 원형 X(스택의 첫 장·모달 페이지 — 시트와 같은 자리) 또는 **왼쪽** ‹ 뒤로(그 위의 안쪽 장) · 가장자리 스와이프 | 바깥 탭 · 가장자리로 밀기 |
+| 머리 | `SheetHeader`: [✓] 제목 [X] (✓ 는 편집 시트에만) | `PageHeader`: X 머리 [ ] 제목 [X] · ‹ 머리 [‹] 제목 [`trailing`] | 없다(목록이 머리) |
 | 부품 | `PageSheet` + `SheetHeader` + 안쪽 부품 | `PageHeader` + 안쪽 부품(큰 타일 줄 → 묶음 카드 → 위험 행) | 폰에는 **지금 없다** |
 | **지금 폰 사용처** | 메시지 행동 · 대화 행 행동 · 새 DM · 지시 기기 연결(#4318), 새 채널 · AI · 메시지 고치기 · 닫은 대화 · 기억 목록 · 새 버전 안내 · 내 맥에 보내기 · 작업 맡기기 · 작업 기록 · 작업 상세(#4458), 상태 설정(#4457), 다른 사람 프로필(#4319) | `src/screens/*` 의 스택 화면(홈·대화·받은함·검색·에이전트·앱·연결·팀 보드·작업), 설정(`SettingsPage` — #4457 에서 이전) | 없음 — 홈 탭(`SidebarScreen`)이 채널·DM 목록을 전체 화면으로 맡는다 |
 | **후보** | 지금 화면을 두고 하는 짧은 일은 모두 | 정보·설정·멤버 목록처럼 되돌아올 곳이 있는 것 | 워크스페이스 전환 · 채널/DM 목록(웹 사이드바의 폰 짝). **이 PR 은 구현하지 않는다** — 폰에 두려면 먼저 두 가지를 풀어야 한다(ADR 사항): 왼쪽 가장자리 24pt 는 이미 뒤로가기 스와이프(`nav/edgeSwipe.ts`)가 쓰고, 홈 탭과 같은 목록을 두 곳에서 말하게 된다 |
@@ -34,7 +34,7 @@
 
 | | 들어옴 | 나감 | 닫는 단추 |
 |---|---|---|---|
-| **첫 장 = 모달 페이지** (`enter="rise"`) | 아래에서 올라온다 · 200ms(사다리 `modal-open`) | 아래로 내려간다 · 150ms(`modal-close`) | 머리 왼쪽 **X** |
+| **첫 장 = 모달 페이지** (`enter="rise"`) | 아래에서 올라온다 · 200ms(사다리 `modal-open`) | 아래로 내려간다 · 150ms(`modal-close`) | 머리 오른쪽 위 **X** |
 | **안쪽 장 = 스택 push** (`enter="push"`) | 오른쪽에서 밀려 들어온다 · 240ms(`standard`) | 오른쪽으로 물러난다 · 180ms(`fast`) | 머리 왼쪽 **‹ 뒤로** |
 
 - **나감은 들어온 길의 반대다.** 들어올 때는 미끄러지고 나갈 때는 사라지면 한 쌍으로 읽히지 않는다. X·‹·VoiceOver escape 는 `useLayerClose()` 로 같은 길을 지난다. 가장자리 밀기는 이것과 별개로 손가락을 따라 오른쪽으로 나가고(`MAX_SETTLE_MS`), 나가는 동안에는 다시 잡히지 않는다(두 번째 `onBack` 방지).
@@ -87,7 +87,9 @@
 - 눈에 보이는 원 **40**, 눌림 영역 **44**(`slopTo` 가 채운다), 글리프 **22**, 머리 줄 높이 `TOUCH_TARGET + space.sm`. 값은 `tokens.ts` `SHEET` 한 곳이다.
 - **떠 보이는 근거는 토큰이다**(`sheetModel.circleLook`): 라이트는 `surface` 채움이 `sheet` 바탕 위에 서고 `elevationRest` 그림자가 띄운다. 다크는 그림자가 어두운 바닥 위에서 보이지 않고, 게다가 다크의 `surface` 는 `sheet` 와 새벽하늘 1.076 · 흑연 1.035 로 라이트의 1.109 · 1.083 보다 덜 갈린다. 그래서 다크는 한 단 위 `surfaceMuted`(1.234 · 1.119)와 가장자리 한 줄(`glassLine`)로 선다. **시험이 모든 테마에서 「다크의 원이 라이트의 원보다 바탕에서 덜 구분되지 않는다」를 잰다**(`sheetKit.test.tsx`).
 - ✓ 는 `confirm={{label, onPress, disabled, busy}}`. 입력 전·바뀐 것이 없으면 `disabled`(회색 `textFaint`, `accessibilityState.disabled`) — 새 채널(이름 규칙)과 메시지 고치기(바뀐 것)가 그렇다. **내 맥에 보내기·작업 맡기기는 base 동작 그대로 글이 비어도 ✓ 가 켜져 있고 눌러서 검증이 막는다**(이 PR 은 로직을 안 바꿨다 — §7 공백). **왕복 중(보내는 중·저장 중)이면 `busy`** — ✓ 자리에 스피너가 서고 눌리지 않으며 `accessibilityState.busy` 와 이름의 진행 낱말(「보내는 중」)이 말한다. 회색은 「지금은 보낼 수 없음」이라 진행과 눈으로 구별되지 않기 때문이다(#4458).
-- **페이지 머리의 왼쪽 원은 둘 중 하나다**(#4457): **X** 는 「이 페이지 전체를 닫는다」(스택의 첫 장·모달 페이지), **‹ 뒤로** 는 「한 겹만 벗기고 온 곳으로 돌아간다」(그 위에 쌓인 안쪽 장). iOS 관례와 같다 — X 는 나가는 문, ‹ 는 온 곳으로 한 걸음. 같은 원 상자(크기·채움·그림자)에 글리프만 다르다(‹ 는 대화 머리의 22pt 선 셰브론 `CONV_ICONS.left` — 새 에셋 없음, 뒤집어 그리지 않아 선명하다). 보조기술 이름은 「닫기」가 아니라 **돌아갈 곳**이다(`back.label`, 「설정으로 돌아가기」). `PageHeader` 는 `closeLabel`·`onClose` 와 `back` 중 하나만 받는다(타입이 막는다 — 한 머리에 나가는 문이 둘이면 어느 것이 어디로 가는지 모른다).
+- **닫기 X 는 시트든 페이지든 어디서나 오른쪽 위다**(#4691, owner 2026-10-27 「X 닫기 버튼이 우측 위에」). #4457 이 정했던 「시트 X 는 오른쪽, 페이지 X 는 왼쪽」은 닫는 자리를 둘로 나눴고, 이제 한 자리다.
+- **페이지 머리의 나가는 문은 둘 중 하나다**(#4457): **X**(오른쪽 칸)는 「이 페이지 전체를 닫는다」(스택의 첫 장·모달 페이지), **‹ 뒤로**(왼쪽 칸)는 「한 겹만 벗기고 온 곳으로 돌아간다」(그 위에 쌓인 안쪽 장). iOS 관례와 같다 — X 는 나가는 문, ‹ 는 온 곳으로 한 걸음. 같은 원 상자(크기·채움·그림자)에 글리프와 **자리**만 다르다(‹ 는 대화 머리의 22pt 선 셰브론 `CONV_ICONS.left` — 새 에셋 없음, 뒤집어 그리지 않아 선명하다). 보조기술 이름은 「닫기」가 아니라 **돌아갈 곳**이다(`back.label`, 「설정으로 돌아가기」). `PageHeader` 는 `closeLabel`·`onClose` 와 `back` 중 하나만 받는다(타입이 막는다 — 한 머리에 나가는 문이 둘이면 어느 것이 어디로 가는지 모른다).
+- **자리 규칙 — 한 칸은 한 가지만 든다**(#4691): 머리는 늘 세 칸([왼쪽, 제목, 오른쪽], 양쪽 칸이 같은 폭 44 라 제목이 가운데에 선다)이다. **X 머리**는 오른쪽 칸을 X 가 갖는다 — 그래서 X 머리에는 `trailing` 이 **없다**(타입이 막고, 어겨서 넘겨도 그려지지 않는다). 왼쪽 칸은 비워 둔다 — 거기에 동작이 필요해지면 시트의 ✓ 처럼 왼쪽에 세운다(지금 쓰는 곳이 없어 부품은 만들지 않았다). **‹ 머리**는 오른쪽 칸이 비어 있거나 `trailing`(페이지의 동작 하나 — 「편집」 같은 글자)이 선다. 지금 앱에서 `trailing` 을 쓰는 페이지는 없고(설정의 두 머리는 X 와 ‹ 만 쓴다), 전시 표면 `sheetkit-headers` 가 두 모양을 나란히 보인다.
 
 ```tsx
 // 행동 목록 시트 — 고르면 곧 닫히는 행동은 closesSheet.
@@ -115,9 +117,9 @@
 const afterClose = usePageSheetAction();
 <Pressable onPress={() => afterClose(() => onToggleReaction(emoji))} />
 
-// 페이지: 그릇이 없으니 onClose 가 필수다.
+// 페이지: 그릇이 없으니 onClose 가 필수다. X 는 시트처럼 오른쪽 위에 선다.
 <PageHeader title="설정" closeLabel="설정 닫기" onClose={goBack} />
-// 그 위의 안쪽 장: X 가 아니라 ‹ — 한 겹만 벗긴다.
+// 그 위의 안쪽 장: X 가 아니라 왼쪽 ‹ — 한 겹만 벗긴다. 오른쪽 칸은 비어 있거나 `trailing` 하나(X 머리에는 없다).
 <PageHeader title="테마" back={{label: '설정으로 돌아가기', onPress: goBack}} />
 ```
 
@@ -211,6 +213,7 @@ const afterClose = usePageSheetAction();
   - **시트마다 같은 계약**(#4458): `__tests__/fixtures/sheetContract.tsx` 의 `describeCloseContract` 가 시트별 시험 파일에서 머리 X(이름 「… 닫기」·공용 글리프·글자 「닫기」 없음) · X 즉시/슬라이드 뒤 · 스크림 이름·testID · escape · 끌어내리기를 같은 코드로 잰다. `__tests__/sheetInventory4458.test.ts` 는 소스를 훑어 「글자 닫기 단추 0」·「모든 `*Sheet.tsx` 는 `PageSheet`+`SheetHeader`」·「`<Modal` 은 그릇과 시트가 아닌 넷뿐」·「옛 묶음(`GroupSection`·`GroupRow`)은 정의와 `ThemeControl` 의 로컬 함수 말고 없음」을 계속 센다.
   - **2단계(#4458)**: `sheetPartsSlots4458.test.tsx` 「행 — 오른쪽 임의 노드·역할·펼침 상태」(값→표식→셰브론의 **그려진 순서**(기본 글씨; `STACK_PILL_SCALE` 부터는 값이 이름 칸으로 내려와도 표식은 그대로 셰브론 앞) · `trailing` 이 기본 이름에 안 들어감 · 역할 기본/link/switch · `expanded` 미지정/false/true 와 ⌄ 의 뒤집힘)와 「확정 ✓ 의 진행 표시」(`busy` 면 ✓ 글리프 대신 스피너 · 눌려도 아무 일 없음 · 상태 busy·disabled · `SheetHeader` 가 `confirm.busy` 를 전함) · `askMac`·`delegateWork`·`shellChrome`(새 채널)·`messageEditorSheet` 의 진행 중 시험(스피너 · 이름 「보내는 중」 · 다시 눌러도 요청은 한 번) · `sheetKeyboardAction.test.tsx` 「ConfirmStep」(두 단추 라벨의 `hangul-word`·가운데 정렬·단추의 가로 여백) · `aiSheet.test.tsx`(칩·「개인」 표식이 행 안에 그려짐 · 켜짐/꺼짐 칩의 채움 · 행 이름에 칩 글자) · `delegateWork.test.tsx`(A 머리에 ✓ 없음·바닥 단추 「다음」, B 머리 ✓ + X, 펼침 행 상태) · `teamBoard.test.tsx`(PR 행 `link`) · `runLedgerSheet.test.tsx`(한계·보관 문장이 「기록」 라벨 아래·목록 위 — **그려진 순서**, 요약·기록 줄·문장의 어절 줄바꿈) · `shellChrome`(새 채널 규칙·오류 줄)·`delegateWork`(거절 배너 문장)의 어절 줄바꿈 · **design-review r2 반영**: `shellChrome`(새 채널의 라벨·입력·규칙 줄이 **한 묶음**이고 안쪽 간격이 `space.sm` — 형제 시트의 입력 묶음과 같은 문법) · `runLedgerSheet`(빈 기록 머리말·설명)·`delegateWork`(칸 오류 문장·저장소 규칙 줄)·`askMac`(글 검사 오류·채널/폴더 힌트·Face ID 안내 줄)의 어절 줄바꿈.
   - #4457: `sheetKit.test.tsx` 의 「‹ 뒤로 변형」(왼쪽 칸·22pt ‹ 글리프·X 와 같은 원 상자·X 없음) · `layerMotion4457.test.tsx`(층의 들어옴·나감: 사다리 값·시작 위치·시킨 설정과 `start` 호출·동작 줄이기 0·타이머 확정·이중 닫기·언마운트·나가는 중 가장자리 차단) · `settingsPage.test.tsx`(셸 안 배선 — 첫 장은 올라오고 X 는 내려간다·안쪽 장은 밀려 들어오고 ‹·escape 는 물러난다, 안쪽 장 전수 「옛 카드 0」) · `settingsRows.test.tsx`(`ActionRow`·`ChoiceRow` 의 세 신호·앞 칸·`ListRow` 와 같은 상자·꺼짐 트랙) · `appearancePicker.test.tsx`(카드 구분선이 앞 칸을 비킴) · `settingsHarnessPersona4457.test.ts`(설정 표면에 가상 인물만) · design-review r1 반영: `settingsPage.test.tsx`(설정 페이지에 앞 칸이 없고 구분선이 한 열 · 두 얼굴의 크기·링 · 로그아웃 확인이 `ConfirmStep` 과 같은 문법 · 줄 높이 리터럴 없음) · `profileStatus.test.tsx`(기간 행 이름 = 코어 만료 낱말·「지우기」는 파괴 행 하나 · 두 카드 앞 칸 없음 · 이모지 칸 44×44 · 펼침 상태와 ⌄ 뒤집힘 · 긴 값 두 줄) · `sheetKit.test.tsx`(`ListRow` 의 `expanded`) · `settingsRows.test.tsx`(`ActionRow` 의 ⌄) · `appearancePicker.test.tsx`(테마·강조색이 같은 앞 칸 폭) · `avatarPage.test.tsx`(파괴 행이 따로 선 카드).
+  - #4691: `sheetKit.test.tsx` 「머리의 좌우」(시트·페이지의 X 가 **같은 오른쪽 칸** · X 머리의 왼쪽 칸이 비어 있음 · ‹ 머리의 오른쪽 칸이 비어 있음 · `trailing` 은 ‹ 머리의 오른쪽 칸에만 서고 X 머리에는 줄 수 없음 — 타입 오류 단정 `@ts-expect-error` 는 `tsc` 가 지킨다) · `settingsPage.test.tsx` 「머리의 자리 — 설정 페이지 전수」(첫 장은 [ ] 설정 [설정 닫기], 안쪽 장 다섯은 [설정으로 돌아가기] 제목 [ ] — 안쪽 장이 늘면 표가 타입 오류를 낸다)와 첫 장의 X 가 제목 **뒤**에 선다는 층 배선 단정. 이 둘이 재지 **않는 것**: 실제 화면에서 X 가 오른쪽 위에 그려지는지(Jest 는 레이아웃 엔진이 없다) — 그 픽셀 증거는 캡처(`clients/mobile/measure/captures/4691/`)와 design-review 가 진다.
   - 새 파일의 격자 밖 간격·반경·글자 크기는 `designSystem.test.ts` 스윕이 0 으로 둔다.
 - **재지 않는 것**: 실기기의 끌기 감촉 · 실제 VoiceOver 낭독 · **키보드가 올라올 때 시트가 도는 곡선의 느낌**(이벤트에서 한 번에 선다) · 스크롤 막대가 **눈에 보이는지**(호출만 잰다) · **렌더된 폭·여백·줄바꿈**(카드가 화면 가장자리까지 번지는지, 아바타 원이 카드에 녹는지, 한국어 어절이 갈리는지 — Jest 는 레이아웃 엔진이 없어 스타일 값과 시트 상자의 산수, 문구의 글자 조합만 잰다. 그 픽셀 증거는 캡처이고(`clients/mobile/measure/captures/4318/`, 전시 표면 `sheetkit-*`) design-review 가 사람의 눈으로 본다). 처음 한 번의 design-review 는 이 축에서 High 셋을 잡았다.
 - **전시 표면**(`clients/mobile/measure/sheetKit.tsx`, 가상 인물만): `-momoMeasure SHEETKIT-<이름>`(다크) · `LIGHT-SHEETKIT-<이름>`(라이트). `page`(앞 칸 없는 쪽) · `page-lead`(앞 칸 있는 쪽) · `headers` · `status`·`status-ready`(중간 단 + 입력 + 키보드) · `message`·`message-delete`·`message-live`·`message-keyboard` · `channel`·`channel-leave`·`channel-dm` · `newdm`·`newdm-empty` · `devicekey-pending|approved|unregistered` · `profile-device`.
