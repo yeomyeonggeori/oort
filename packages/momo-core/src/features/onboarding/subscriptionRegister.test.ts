@@ -87,8 +87,8 @@ describe("차분한 문구에는 오류 어휘가 없다", () => {
 
 describe("이름", () => {
   it("기본 이름은 서버와 같은 규칙이다", () => {
-    expect(defaultAgentHandle("claude", "Seongjae")).toBe("seongjae-claude");
-    expect(defaultAgentHandle("codex", "성재")).toBe("my-codex");
+    expect(defaultAgentHandle("claude", "Minsu")).toBe("minsu-claude");
+    expect(defaultAgentHandle("codex", "민수")).toBe("my-codex");
     expect(defaultAgentHandle("claude", "a".repeat(40)).length).toBeLessThanOrEqual(32);
   });
 
@@ -122,7 +122,7 @@ describe("이름", () => {
     expect(agentHandleProblem("")).not.toBeNull();
     expect(agentHandleProblem("a")).not.toBeNull();
     expect(agentHandleProblem("a".repeat(33))).not.toBeNull();
-    expect(agentHandleProblem("성재-claude")).not.toBeNull();
+    expect(agentHandleProblem("민수-claude")).not.toBeNull();
     expect(agentHandleProblem("has space")).not.toBeNull();
   });
 });
@@ -137,7 +137,7 @@ describe("문장", () => {
       "이 맥의 Codex를 @sj-bot로 부를 수 있게 할까요?"
     );
     expect(attachInstrument("영일")).toBe("영일로");
-    expect(attachInstrument("성재")).toBe("성재로");
+    expect(attachInstrument("민수")).toBe("민수로");
     expect(attachInstrument("한솔")).toBe("한솔로");
     expect(attachInstrument("김밥")).toBe("김밥으로");
     expect(confirmCreateLabel("sj-claude")).toBe("@sj-claude 만들기");

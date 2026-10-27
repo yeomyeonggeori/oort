@@ -1,0 +1,15 @@
+# design_preflight_names.digests — 시험 고정값·하네스에 두지 않는 이름의 해시 목록 (이슈 #4632).
+#
+# 평문 이름은 이 파일에도, 이 레포 어디에도 적지 않는다. 한 줄 = `<종류><길이> <sha256>`:
+#   h<N>  한글 연속 N음절 부분문자열(조사가 붙어도 잡는다)
+#   l<N>  영문 N자 한 토막(구분자·카멜 경계로 쪼갠 토막 전체)
+# 해시 = sha256("oort/fixture-names/v1\0" + NFC·소문자 낱말). 규칙·한계: scripts/design_preflight_names.mjs 머리말.
+#
+# 새 이름을 더하는 법(평문을 셸 기록·PR에 남기지 않는다):
+#   node scripts/design_preflight_names.mjs --mint - < ~/.momo-secrets/<비공개 목록 파일>   # 한 줄에 한 낱말
+# 나온 줄을 아래에 붙인다. 낱말이 이 목록에서 빠지면 그 이름은 더 이상 막히지 않는다.
+h3 5a6856dbeeb9e6986da271d39df8a2f069789ed7ba726538b0894e87aead8364  # n01
+h3 90e699fc639f172626efbae51b36c259573ede2aa757a6b6015461ef7da97e64  # n02
+l8 005afadd6f914a5f78b936b4935f0577129bec05a6b29f35ef62c26c06a1376d  # n03
+l6 9e76d7605df02870bcf903ebaaa70bf9257086d3b8b67cbaac2241df863e8853  # n04
+l4 59e119bc0385f8b5834ad83b558f309c0754264fa689dd6a3ef918a662a8ba04  # n05

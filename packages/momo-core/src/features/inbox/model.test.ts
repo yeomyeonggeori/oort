@@ -36,12 +36,12 @@ function message(props: Record<string, unknown> | undefined): Message {
   };
 }
 
-const human: ActorNames = { name: "곽성재", isAgent: false };
+const human: ActorNames = { name: "구민수", isAgent: false };
 const agent: ActorNames = {
   name: "김인턴",
   handle: "kim-intern",
   isAgent: true,
-  ownerName: "곽성재",
+  ownerName: "구민수",
 };
 
 function approval(overrides: Partial<Approval> = {}): Approval {
@@ -145,7 +145,7 @@ describe("approval rows", () => {
     expect(item.predicate).toBe("작업 실행 허가를 요청했어요");
     // The projection carries no created_at, so a pending row shows the deadline.
     expect(item.timeLabel).toBe("5분 후 만료");
-    expect(item.managedBy).toBe("곽성재");
+    expect(item.managedBy).toBe("구민수");
   });
 
   it("shows the ledger decision and when it was made", () => {
@@ -288,7 +288,7 @@ describe("mention rows", () => {
     );
     expect(item.seq).toBe(42);
     expect(item.channelLabel).toBe("general");
-    expect(item.actor).toBe("곽성재");
+    expect(item.actor).toBe("구민수");
     expect(item.actorIsAgent).toBe(false);
     expect(item.predicate).toBe("나를 불렀어요");
     expect(item.detail).toBe("이 건 김인턴한테 시켜볼까요?");

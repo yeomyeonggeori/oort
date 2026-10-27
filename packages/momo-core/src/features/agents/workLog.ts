@@ -319,7 +319,7 @@ function lastPhaseEntry(log: WorkLog): WorkPhaseEntry | undefined {
  *
  * 이름을 남기기로 한 근거는 "이름은 도구의 스키마이고 값은 사람의 데이터"였다.
  * 그 전제가 깨지는 실제 모양이 하나 있다: map형 인자
- * (`{"/Users/seongjae/secret.md": "…", "https://…": "…"}`)에서는 **키 자체가
+ * (`{"/Users/minsu/secret.md": "…", "https://…": "…"}`)에서는 **키 자체가
  * 경로이고 URL이다**. 그때는 이름도 값과 같은 것이므로 함께 접는다.
  *
  * 판정은 fail-closed다. 경로처럼 보이는지 애매하면 접는 쪽으로 기운다: 잘못

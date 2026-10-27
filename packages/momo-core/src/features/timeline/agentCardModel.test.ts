@@ -46,7 +46,7 @@ function approvalProps(extra: Record<string, unknown> = {}) {
     tool_name: "shell",
     title: "빌드 캐시 정리",
     summary: "빌드 산출물 디렉터리를 지웁니다.",
-    arguments: { command: "rm -rf build/", cwd: "/Users/seongjae/projects/momo" },
+    arguments: { command: "rm -rf build/", cwd: "/Users/minsu/projects/momo" },
     tool_grant: { grant_id: "g-31", scopes: ["shell:write"] },
     status: "pending",
     source: "hermes_gateway",

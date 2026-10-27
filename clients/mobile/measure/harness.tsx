@@ -285,7 +285,7 @@ const KEYBOARD_DURATION_MS = 250;
 function burnJs(forMs: number): number {
   const until = Date.now() + forMs;
   let rounds = 0;
-  const queries = ['s', 'se', 'seo', '김', '김인', 'da', 'dayeon', 'x'];
+  const queries = ['s', 'se', 'seo', '김', '김인', 'da', 'seoyeon', 'x'];
   while (Date.now() < until) {
     matchMembers(ROSTER, queries[rounds % queries.length]);
     rounds += 1;
