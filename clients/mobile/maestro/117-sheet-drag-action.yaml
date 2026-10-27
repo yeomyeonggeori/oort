@@ -3,7 +3,7 @@ name: 117-sheet-drag-action
 env:
   # 기본값은 없다 — 내용 맞춤 단이라 시트 위 끝이 내용·기기마다 다르다. `measure/sheet-drag-run.mjs` 가 `maestro hierarchy` 로 읽어 넘긴다.
   #   HX 가운데 x · HY 머리 제목 줄 y · HY_SHORT/HY_FAR/HY_FLICK 거기서 문턱 아래/위/튕김 거리만큼 내린 자리
-  #   ROWY 첫 행동 줄 y · ROW_FAR · GAPY 머리 바로 아래 빈 자리 y · GAP_FAR
+  #   ROWY 첫 행동 줄 y · ROW_FAR · GAPY 머리 바로 아래 빈 자리 y · GAP_FAR · FLICK_MS 튕김 시간
   SHOT: "sheet-drag-action"
 ---
 # 117-sheet-drag-action — 행동 시트(메시지 행동, 내용 맞춤 단)를 끌어내려 닫는 장면들 (#4612 2단계).
@@ -82,7 +82,7 @@ env:
 - swipe:
     start: "${HX}, ${HY}"
     end: "${HX}, ${HY_FLICK}"
-    duration: 100
+    duration: ${FLICK_MS}
 - extendedWaitUntil:
     visible: "닫힘 4"
     timeout: 8000

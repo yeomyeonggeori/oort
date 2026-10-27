@@ -102,7 +102,9 @@ function coordinates(ids) {
   const threshold = Math.max(64, height * 0.25);
   const far = Math.ceil(threshold * 1.5);
   const short = Math.floor(threshold * 0.3);
-  const flick = 100;
+  // 빠른 튕김: 문턱 거리 **미만**(90%)을 60ms 에 쓴다 — 거리로는 안 닫히고 속도 문턱(0.7px/ms)으로만 닫힌다. XCTest 합성 스와이프는 끝에서
+  // 감속해 측정 속도가 명목 속도의 40~53% 라(실측: 100pt/60ms → 0.65, 150pt/100ms → 0.79, 200pt/100ms → 1.06), 명목 2.3px/ms 이상으로 쓴다.
+  const flick = Math.floor(threshold * 0.9);
   const hx = Math.round((sheet.x0 + sheet.x1) / 2);
   const hy = sheet.y0 + 49; // 손잡이 띠 23 + 머리 줄 절반 26
   const env = {
@@ -111,6 +113,7 @@ function coordinates(ids) {
     HY_SHORT: hy + short,
     HY_FAR: hy + far,
     HY_FLICK: hy + flick,
+    FLICK_MS: 60,
   };
   const geometry = {sheetTop: sheet.y0, sheetHeight: height, thresholdPt: threshold, farPt: far, shortPt: short};
   if (SURFACE === 'LIST') {
@@ -122,6 +125,7 @@ function coordinates(ids) {
       ROW_FAR: mid(row) + far,
       BLANKY: pill.y0 - 14,
       BLANK_FAR: pill.y0 - 14 + far,
+      BLANK_UP: Math.max(14, pill.y0 - 14 - 150),
       UP_A: hy + 60,
       UP_B: hy - 30,
       SCR_A: list.y1 - 100,
@@ -133,19 +137,22 @@ function coordinates(ids) {
     });
   } else if (SURFACE === 'EDIT') {
     const input = ids.get('editor-input');
-    Object.assign(env, {INPUTY: mid(input), INPUT_FAR: mid(input) + far});
+    // BLANKY: 입력 상자 아래의 빈 본문(눌리지 않는 자리 — 시작 응답자 길). INPUTY: 입력 상자 위(입력이 응답자라 시트가 이동에서 가로채야 한다).
+    Object.assign(env, {INPUTY: mid(input), INPUT_FAR: mid(input) + far, BLANKY: input.y1 + 40, BLANK_FAR: input.y1 + 40 + far});
   } else if (SURFACE === 'ACTION') {
     const reply = ids.get('sheet-reply');
     const gap = sheet.y0 + 23 + 52 + 6; // 머리 줄 바로 아래의 눌리지 않는 여백
     Object.assign(env, {ROWY: mid(reply), ROW_FAR: mid(reply) + far, GAPY: gap, GAP_FAR: gap + far});
   } else {
     const body = ids.get('sheetdrag-probe-body');
-    const rowy = body.y0 + 40;
+    // 짝수 줄(probe-row-2)은 누르는 줄, 홀수 줄(probe-row-5)은 눌리지 않는 줄이다(`measure/sheetDrag.tsx` `ProbeRows`).
+    const pressy = mid(ids.get('probe-row-2'));
+    const plainy = mid(ids.get('probe-row-5'));
     Object.assign(env, {
-      ROWY: rowy,
-      DOWN_B: rowy + 120,
-      UP_A: body.y1 - 120,
-      UP_B: body.y1 - 120 - 400,
+      ROWY: pressy,
+      DOWN_B: pressy + 120,
+      UP_A: plainy,
+      UP_B: plainy - 300,
       BACK_A: body.y0 + 60,
       BACK_B: body.y0 + 360,
     });
@@ -235,7 +242,8 @@ async function main() {
   summary.commands = lines.length;
   summary.failed = lines.filter(line => /FAILED/.test(line));
   if (recorder && fs.existsSync(mp4)) {
-    const track = trackSheetTop(mp4, 3);
+    // 키보드가 있는 편집 시트는 시트 바닥(= 키보드 윗면) 위만 본다.
+    const track = trackSheetTop(mp4, 3, SURFACE === 'EDIT' ? coords.geometry.sheetTop + coords.geometry.sheetHeight - 20 : Infinity);
     fs.writeFileSync(path.join(OUT, `${TAG}.track.csv`), ['t_ms,sheet_top_pt', ...track.rows.map(r => `${r.t},${r.top ?? ''}`)].join('\n'));
     const tops = track.rows.map(r => r.top).filter(v => v !== null);
     summary.track = {frames: track.rows.length, restTopPt: coords.geometry.sheetTop, minTopPt: Math.min(...tops), maxTopPt: Math.max(...tops)};

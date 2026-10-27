@@ -2,7 +2,7 @@
 /**
  * 시뮬레이터 녹화에서 시트 위 끝의 높이(pt)를 프레임마다 잰다 (#4612 2단계). `sheet-drag-run.mjs` 가 쓰고, 단독으로도 돈다.
  *
- *   node clients/mobile/measure/sheet-drag-track.mjs <녹화.mp4> [배율 3] > track.csv     (t_ms,sheet_top_pt)
+ *   node clients/mobile/measure/sheet-drag-track.mjs <녹화.mp4> [배율 3] [검색 상한 y pt] > track.csv     (t_ms,sheet_top_pt)
  */
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
@@ -15,7 +15,7 @@ const sh = (cmd, argv, opts = {}) => spawnSync(cmd, argv, {encoding: 'utf8', ...
  * 계단(시트 바탕이 시작하는 곳)을 시트 위 끝으로 본다. 그림자는 완만한 기울기라 계단이 이긴다. 모서리 반경 때문에 그 열의 위 끝은 직선보다
  * 조금 아래이지만 상수라 변위에는 영향이 없다. 시트가 화면 밖이면 `null`.
  */
-export function trackSheetTop(mp4, scale) {
+export function trackSheetTop(mp4, scale, maxYpt = Infinity) {
   const probe = sh('ffprobe', ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height', '-of', 'csv=p=0:s=x', mp4]);
   const [w, h] = probe.stdout.trim().split('x').map(Number);
   const x = Math.round(8 * scale);
@@ -32,7 +32,9 @@ export function trackSheetTop(mp4, scale) {
     for (let y = 0; y < h; y += 1) col[y] = raw[f * 2 * h + y * 2];
     let best = 0;
     let bestAt = -1;
-    for (let y = Math.round(40 * scale); y < h - 4; y += 1) {
+    // 키보드가 올라온 시트는 키보드 윗면이 더 센 계단이다 — 검색을 시트 안(`maxYpt` 위)으로 좁힌다.
+    const yMax = Math.min(h - 4, Math.round(maxYpt * scale));
+    for (let y = Math.round(40 * scale); y < yMax; y += 1) {
       const g = Math.abs(col[y + 3] - col[y - 3]);
       if (g > best) {
         best = g;
@@ -51,6 +53,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     console.error('usage: sheet-drag-track.mjs <녹화.mp4> [배율]');
     process.exit(2);
   }
-  const {rows} = trackSheetTop(mp4, Number(process.argv[3] ?? 3));
+  const {rows} = trackSheetTop(mp4, Number(process.argv[3] ?? 3), Number(process.argv[4] ?? Infinity));
   console.log(['t_ms,sheet_top_pt', ...rows.map(r => `${r.t},${r.top ?? ''}`)].join('\n'));
 }

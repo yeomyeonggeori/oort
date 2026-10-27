@@ -145,6 +145,18 @@ export function isScrolledToTop(offsetY: number): boolean {
   return offsetY <= SCROLL_TOP_EPSILON;
 }
 
+/** 내용이 뷰포트보다 이 이하(pt)로만 크면 넘치지 않은 것이다 — `SheetScroll` 의 「잘림 단서」·사진 카드의 문턱과 같은 1pt 다. */
+export const SCROLL_FIT_SLACK = 1;
+
+/**
+ * 스크롤이 **실제로 스크롤될 수 있는가**(내용이 뷰포트를 넘치는가). 크기를 아직 모르면(레이아웃 전·알리지 않는 스크롤) **넘친다고 본다**
+ * — 모르면 스크롤을 막지 않는 쪽이 안전하다(fail-closed, `claimsSheetTouchStart` 가 이 값으로 본문의 시작 응답자를 정한다).
+ */
+export function scrollOverflows(contentHeight: number, viewportHeight: number): boolean {
+  if (!(viewportHeight > 0) || !(contentHeight >= 0)) return true;
+  return contentHeight > viewportHeight + SCROLL_FIT_SLACK;
+}
+
 /** 손가락이 닿은 곳: 머리(손잡이·제목 줄)는 늘 시트의 것이고, 본문은 스크롤이 맨 위일 때만이다. */
 export type DragZone = 'header' | 'body';
 
@@ -162,9 +174,18 @@ export type DragZone = 'header' | 'body';
  *
  *   · 머리(손잡이 띠·제목 줄): 늘 잡는다. 눌리지 않는 자리라 탭은 어차피 할 일이 없다. 단추(X·✓) 위에서 시작한 터치는 단추가 먼저
  *     잡고, 시트는 이동에서 가로챈다(`claimsSheetDrag`) — 그 눌림이 취소된다.
- *   · 본문: **스크롤이 맨 위일 때만** 잡는다(등록된 스크롤이 하나 이상이고 전부 맨 위). 스크롤이 중간이면 잡지 않아 Modal 호스트가 쥐던 옛
- *     그대로이고 스크롤과 아무 간섭이 없다 — 「스크롤 중 끌기는 시트가 안 움직인다」가 구조로 보장된다.
+ *   · 본문: **스크롤이 맨 위이고, 스크롤이 실제로 스크롤되지 않을 때만**(내용이 뷰포트에 들어갈 때만) 잡는다. 스크롤이 중간이면 잡지 않아
+ *     Modal 호스트가 쥐던 옛 그대로이고 스크롤과 아무 간섭이 없다 — 「스크롤 중 끌기는 시트가 안 움직인다」가 구조로 보장된다.
  *   · 닫는 중에는 잡지 않는다(슬라이드를 끊으면 행동이 앞당겨 불린다).
+ *
+ * **왜 내용이 넘치면 본문은 잡지 않는가**(시뮬레이터가 잡은 둘째 결함, #4612 2단계): 시작 응답자는 본문 뿌리 `View` 이고 그것은 스크롤 뷰의
+ * **조상**이다. iOS(Fabric)는 스크롤 뷰의 조상 중 하나라도 JS 응답자이면 그 터치의 네이티브 스크롤을 **시작도 못 하게** 막는다
+ * (`RCTScrollViewComponentView` `_shouldDisableScrollInteraction` → `touchesShouldCancelInContentView:` NO). `onResponderGrant` 의 반환값
+ * (`onShouldBlockNativeResponder`)은 iOS 에서 버려져서(`RCTMountingManager` 가 `blockNativeResponder` 를 쓰지 않는다) 고칠 수 없다.
+ * 그래서 맨 위에서 눌리지 않는 자리를 짚고 위로 올리는 스크롤이 통째로 죽었다(실측: 같은 쓸기에서 스크롤 표본 0 ↔ 응답자를 끄면 91).
+ * 내용이 뷰포트에 들어가면 스크롤할 것이 없으니 막혀도 잃는 것이 없다 — 짧은 시트(행동 시트·편집 시트)는 본문 어디서든 끌린다.
+ * 내용이 넘치는 시트는 머리와, 행·단추처럼 후손이 먼저 응답자가 되는 자리(시트가 이동에서 가로챈다)에서 끌린다. 눌리지 않는 본문 자리의
+ * 끌기는 **알려진 한계**다(스크롤과 끌기의 중재는 네이티브 제스처 인식기의 일이다 — gesture-handler 평가 #4645).
  *
  * 잡는다고 끌리는 것은 아니다: 잡은 응답자는 **얌전히 기다리다가**(armed) 이동이 `claimsSheetDrag` 의 조건을 채울 때 비로소 시트를 움직인다.
  */
@@ -172,9 +193,12 @@ export function claimsSheetTouchStart(args: {
   zone: DragZone;
   closing: boolean;
   scrollOffsets: readonly number[];
+  /** 등록된 스크롤 중 내용이 넘치는(또는 크기를 아직 모르는) 것이 하나라도 있는가 — `scrollOverflows`. */
+  scrollsOverflow: boolean;
 }): boolean {
   if (args.closing) return false;
   if (args.zone === 'header') return true;
+  if (args.scrollsOverflow) return false;
   return args.scrollOffsets.length > 0 && args.scrollOffsets.every(isScrolledToTop);
 }
 

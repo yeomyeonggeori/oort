@@ -39,6 +39,7 @@ import {
   estimatedSheetHeight,
   releaseSlideMs,
   releaseVelocity,
+  scrollOverflows,
   sheetFollow,
   sheetFrame,
   shouldDismissSheet,
@@ -106,6 +107,11 @@ import {ds2Radius, SHEET, type Palette} from './tokens';
 // 건너뛴다). 눌리지 않는 자리의 터치는 시트가 **시작에서** 얌전히 응답자를 쥐고(`claimsSheetTouchStart`) 이동이 조건을 채울 때 비로소
 // 쥔다. 단추·행·입력 위에서 시작한 터치는 그쪽이 먼저 쥐고 시트가 조상으로서 이동에서 가로챈다.
 //
+// 단, 본문의 시작 응답자는 **내용이 뷰포트에 들어갈 때만** 선다. 본문 뿌리는 스크롤 뷰의 조상이고, iOS 는 조상이 JS 응답자인 터치의 네이티브
+// 스크롤을 시작도 못 하게 막는다(`onResponderGrant` 의 차단 값은 iOS 에서 버려진다) — 넘치는 스크롤에서 시작 응답자를 잡으면 맨 위에서
+// 위로 올리는 스크롤이 죽는다(시뮬레이터 실측, `claimsSheetTouchStart`·`scrollOverflows`). 넘치는 시트의 본문은 후손(행·단추)이 응답자인
+// 터치를 이동에서 가로채는 길로만 끌리고, 눌리지 않는 본문 자리는 머리가 대신한다.
+//
 // 가져간 동안에는 본문 스크롤을 얼린다(`scrollEnabled=false`) — iOS 는 JS 응답자를 가져가도 네이티브 스크롤을 멈추지
 // 않아서, 손가락이 되돌아올 때 시트와 내용이 같이 움직인다. 시트 안의 스크롤은 고무줄도 없다(`usePageSheetScrollProps`).
 //
@@ -153,6 +159,8 @@ const SheetControlContext = createContext<SheetControl | null>(null);
 interface SheetScrollPort {
   /** 스크롤마다 한 칸 — 맨 위인지 판정할 오프셋(pt). 마운트하면 0, 언마운트하면 지운다. */
   scrolls: Map<symbol, number>;
+  /** 스크롤마다 한 칸 — 내용이 뷰포트를 넘치는가(`scrollOverflows`). 크기를 알리기 전에는 `true`(모르면 넘친다고 본다). `scrolls` 와 같은 열쇠. */
+  overflows: Map<symbol, boolean>;
   /** 시트가 끌기를 쥐고 있다 — 이 동안 본문 스크롤은 얼어 있어야 한다. */
   frozen: boolean;
 }
@@ -174,24 +182,54 @@ export function usePageSheetDrag(): DragHandlers | null {
  * `SheetScroll` 이 이 일을 한다. 날 `ScrollView`·`FlatList` 를 시트 안에 두면 **알리지 않는 한 본문 끌기는 꺼져 있다**
  * (머리 끌기만 선다) — 모르는 스크롤을 시트가 가져가지 않는 쪽이 안전하다.
  */
-export function usePageSheetScroll(): {report: (offsetY: number) => void; frozen: boolean} | null {
+export function usePageSheetScroll(): {
+  report: (offsetY: number) => void;
+  /** 스크롤의 **내용 높이**(`onContentSizeChange`). 뷰포트 높이와 함께 알려야 시트가 「넘치는가」를 안다. */
+  reportContentHeight: (height: number) => void;
+  /** 스크롤 뷰 자신의 **뷰포트 높이**(`onLayout`). */
+  reportViewportHeight: (height: number) => void;
+  frozen: boolean;
+} | null {
   const port = useContext(SheetScrollContext);
   const scrolls = port?.scrolls;
+  const overflows = port?.overflows;
   const key = useMemo(() => Symbol('sheet-scroll'), []);
+  // 크기는 두 사건(레이아웃·내용 크기)으로 따로 온다 — 둘을 함께 들고 있다가 둘 다 알면 판정한다(`scrollOverflows`: 모르면 넘친다).
+  const sizes = useRef({content: Number.NaN, viewport: Number.NaN});
   useEffect(() => {
-    if (!scrolls) return undefined;
+    if (!scrolls || !overflows) return undefined;
     scrolls.set(key, 0);
+    overflows.set(key, scrollOverflows(sizes.current.content, sizes.current.viewport));
     return () => {
       scrolls.delete(key);
+      overflows.delete(key);
     };
-  }, [scrolls, key]);
+  }, [scrolls, overflows, key]);
   const report = useCallback(
     (offsetY: number) => {
       scrolls?.set(key, offsetY);
     },
     [scrolls, key],
   );
-  return port ? {report, frozen: port.frozen} : null;
+  // 등록된 뒤에만 쓴다 — 언마운트 뒤에 늦게 온 크기 사건이 지워진 열쇠를 되살려 「넘침」으로 시트를 영영 막지 않게.
+  const settleSize = useCallback(() => {
+    if (scrolls?.has(key)) overflows?.set(key, scrollOverflows(sizes.current.content, sizes.current.viewport));
+  }, [scrolls, overflows, key]);
+  const reportContentHeight = useCallback(
+    (height: number) => {
+      sizes.current.content = height;
+      settleSize();
+    },
+    [settleSize],
+  );
+  const reportViewportHeight = useCallback(
+    (height: number) => {
+      sizes.current.viewport = height;
+      settleSize();
+    },
+    [settleSize],
+  );
+  return port ? {report, reportContentHeight, reportViewportHeight, frozen: port.frozen} : null;
 }
 
 type ScrollEventHandler = (event: NativeSyntheticEvent<NativeScrollEvent>) => void;
@@ -213,6 +251,8 @@ export function usePageSheetScrollProps(
     onScroll?: ScrollEventHandler;
     onScrollEndDrag?: ScrollEventHandler;
     onMomentumScrollEnd?: ScrollEventHandler;
+    onLayout?: (event: LayoutChangeEvent) => void;
+    onContentSizeChange?: (width: number, height: number) => void;
     scrollEnabled?: boolean;
   } = {},
 ): {
@@ -222,13 +262,24 @@ export function usePageSheetScrollProps(
   onScroll: ScrollEventHandler;
   onScrollEndDrag: ScrollEventHandler;
   onMomentumScrollEnd: ScrollEventHandler;
+  onLayout: (event: LayoutChangeEvent) => void;
+  onContentSizeChange: (width: number, height: number) => void;
 } {
   const sheet = usePageSheetScroll();
-  const {onScroll, onScrollEndDrag, onMomentumScrollEnd, scrollEnabled = true} = own;
+  const {onScroll, onScrollEndDrag, onMomentumScrollEnd, onLayout, onContentSizeChange, scrollEnabled = true} = own;
   return {
     bounces: false,
     scrollEventThrottle: 16,
     scrollEnabled: scrollEnabled && !sheet?.frozen,
+    // 크기를 알린다 — 내용이 뷰포트를 넘치면 본문은 시작 응답자를 잡지 않는다(`claimsSheetTouchStart`).
+    onLayout: event => {
+      sheet?.reportViewportHeight(event.nativeEvent.layout.height);
+      onLayout?.(event);
+    },
+    onContentSizeChange: (width, height) => {
+      sheet?.reportContentHeight(height);
+      onContentSizeChange?.(width, height);
+    },
     onScroll: event => {
       sheet?.report(event.nativeEvent.contentOffset.y);
       onScroll?.(event);
@@ -415,6 +466,8 @@ function SheetFrame({
   const closing = useRef(false);
   // 본문의 세로 스크롤들이 알려 온 오프셋. 시트의 본문 끌기는 이 값이 전부 맨 위일 때만 선다.
   const scrolls = useMemo(() => new Map<symbol, number>(), []);
+  // 같은 열쇠로, 그 스크롤의 내용이 뷰포트를 넘치는가. 넘치는(또는 모르는) 스크롤이 하나라도 있으면 본문은 시작 응답자를 잡지 않는다.
+  const overflows = useMemo(() => new Map<symbol, boolean>(), []);
   // 시트가 끌기를 쥐고 있는 동안 본문 스크롤을 얼린다(`SheetScroll` 이 읽는다).
   const [frozen, setFrozen] = useState(false);
   // 시트가 실제로 선 높이 — 레이아웃이 알려 준 값. 아직 모르면 상자에서 어림한 값을 쓴다(아래 `sheetBox`).
@@ -567,7 +620,12 @@ function SheetFrame({
         },
         // 시작 응답자: 머리는 늘, 본문은 스크롤이 맨 위일 때만. 닫는 중에는 잡지 않는다(슬라이드를 끊으면 행동이 앞당겨 불린다).
         onStartShouldSetPanResponder: () =>
-          claimsSheetTouchStart({zone, closing: closing.current, scrollOffsets: [...scrolls.values()]}),
+          claimsSheetTouchStart({
+            zone,
+            closing: closing.current,
+            scrollOffsets: [...scrolls.values()],
+            scrollsOverflow: [...overflows.values()].some(Boolean),
+          }),
         // 이동 가로채기. 캡처 길이 먼저다: 단추·행 위에서 시작한 끌기를 가져와야 그 눌림이 취소된다.
         onMoveShouldSetPanResponderCapture: (e, g) => {
           // 쥐기 전의 이동도 속도 표본이다(캡처 길은 이동마다 한 번 돈다 — 같은 이벤트를 또 적지 않는다).
@@ -635,7 +693,7 @@ function SheetFrame({
         },
       });
     },
-    [askDiscard, scrolls, settle, slideOut, travel],
+    [askDiscard, overflows, scrolls, settle, slideOut, travel],
   );
   const headerPan = useMemo(() => makePan('header'), [makePan]);
   const bodyPan = useMemo(() => makePan('body'), [makePan]);
@@ -644,7 +702,7 @@ function SheetFrame({
     () => ({close, closeThen, keyboardHeight: lifted, dragHandlers: headerPan.panHandlers}),
     [close, closeThen, lifted, headerPan],
   );
-  const scrollPort = useMemo<SheetScrollPort>(() => ({scrolls, frozen}), [scrolls, frozen]);
+  const scrollPort = useMemo<SheetScrollPort>(() => ({scrolls, overflows, frozen}), [scrolls, overflows, frozen]);
 
   // 스크림은 시트가 내려간 만큼 **비례해** 옅어진다 — 시트가 제 높이만큼 내려 화면을 나가는 순간 0 이다.
   // 위로 늘어난(고무줄) 때는 clamp 로 더 짙어지지 않는다. 같은 두 점이 `scrimOpacity` 다.

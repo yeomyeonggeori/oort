@@ -2,14 +2,17 @@ appId: app.momo.ios
 name: 116-sheet-drag-edit
 env:
   # 16 Pro(402×874) 기본값 — 키보드가 올라온 중간 단의 머리 줄이다(시트 위 66). `measure/sheet-drag-run.mjs` 가 기기마다 읽어 덮어쓴다.
-  # SE(375×667): HX=187 HY=107 HY_SHORT=167 HY_FAR=367 HY_FLICK=207 INPUTY=185 INPUT_FAR=445.
+  # SE(375×667) 등 다른 기기의 값은 구동 스크립트가 계산한다(수동 실행은 `--render-only` 로 만든 파일을 쓴다 — 이 파일은 틀이다).
   HX: "201"
   HY: "115" # 머리 제목 줄 y
   HY_SHORT: "175"
   HY_FAR: "415"
-  HY_FLICK: "215"
-  INPUTY: "193" # 입력 상자(본문 맨 위) y — 입력은 응답자라 시트가 이동에서 가로챈다
-  INPUT_FAR: "453"
+  HY_FLICK: "296"
+  FLICK_MS: "60" # 튕김 시간(ms)
+  INPUTY: "187" # 입력 상자 y — 입력은 응답자라 시트가 이동에서 가로채야 한다
+  INPUT_FAR: "365"
+  BLANKY: "301" # 입력 상자 아래 빈 본문 y(눌리지 않는 자리 — 시작 응답자 길)
+  BLANK_FAR: "479"
   SHOT: "sheet-drag-edit"
 ---
 # 116-sheet-drag-edit — 편집 시트(메시지 고치기, 중간 단, 키보드 위)의 끌어내리기와 저장 안 한 입력 확인 (#4612 2단계).
@@ -20,7 +23,7 @@ env:
 #   ① 모자란 끌기(머리, 느리게)                       닫히지 않고 제자리로 — 키보드는 그대로
 #   ② 깨끗한 시트의 머리 끌기(문턱 위)                 묻지 않고 닫힌다(닫힘 1)
 #   ③ 입력한 뒤(저장 안 한 입력) 머리 끌기              닫지 않고 「버릴까요?」 — 「계속 편집」이면 시트·입력이 그대로다
-#   ④ 입력한 뒤 입력 상자에서 끌기                     같은 확인 — 「버리기」를 고르면 닫힌다(닫힘 2)
+#   ④ 입력한 뒤 입력 상자 아래 빈 본문에서 끌기          같은 확인 — 「버리기」를 고르면 닫힌다(닫힘 2). (입력 상자 **위**에서 시작한 끌기는 아래 ⑥)
 #   ⑤ 깨끗한 시트의 빠른 튕김                         묻지 않고 닫힌다(닫힘 3)
 - extendedWaitUntil:
     visible:
@@ -68,10 +71,10 @@ env:
 - assertVisible:
     id: "editor-input"
 - takeScreenshot: ${SHOT}-3-kept
-# ④ 입력 상자에서 끌기 — 같은 확인, 「버리기」면 닫힌다
+# ④ 입력 상자 아래 빈 본문에서 끌기 — 같은 확인, 「버리기」면 닫힌다
 - swipe:
-    start: "${HX}, ${INPUTY}"
-    end: "${HX}, ${INPUT_FAR}"
+    start: "${HX}, ${BLANKY}"
+    end: "${HX}, ${BLANK_FAR}"
     duration: 1200
 - extendedWaitUntil:
     visible: "버릴까요?"
@@ -91,7 +94,7 @@ env:
 - swipe:
     start: "${HX}, ${HY}"
     end: "${HX}, ${HY_FLICK}"
-    duration: 100
+    duration: ${FLICK_MS}
 - extendedWaitUntil:
     visible: "닫힘 3"
     timeout: 8000

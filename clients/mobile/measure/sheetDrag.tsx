@@ -338,11 +338,19 @@ function ProbeRows(): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <>
-      {PROBE_ROWS.map(n => (
-        <View key={n} style={styles.probeRow}>
-          <Text style={styles.probeRowText}>{`항목 ${n}`}</Text>
-        </View>
-      ))}
+      {PROBE_ROWS.map(n =>
+        // 짝수 줄은 누르는 줄(Pressable — 목록 행·카드처럼 후손이 먼저 응답자가 된다: 시트는 이동에서 가로챈다), 홀수 줄은 눌리지 않는 줄(글자 카드처럼
+        // 응답자가 없다: 넘치는 스크롤에서 시트가 시작 응답자를 잡으면 그 위에서 시작한 스크롤이 죽는다 — 118 의 P0 이 지킨다).
+        n % 2 === 0 ? (
+          <Pressable accessibilityRole="button" key={n} onPress={noop} style={styles.probeRow} testID={`probe-row-${n}`}>
+            <Text style={styles.probeRowText}>{`항목 ${n}`}</Text>
+          </Pressable>
+        ) : (
+          <View key={n} style={styles.probeRow} testID={`probe-row-${n}`}>
+            <Text style={styles.probeRowText}>{`항목 ${n}`}</Text>
+          </View>
+        ),
+      )}
     </>
   );
 }

@@ -21,12 +21,13 @@ import {
 } from 'react-native';
 
 import {EASE_OUT, FLING_OUT} from '../src/design/motion';
-import {PageSheet, usePageSheetAction, usePageSheetScrollProps} from '../src/design/PageSheet';
+import {PageSheet, usePageSheetAction, usePageSheetScroll, usePageSheetScrollProps} from '../src/design/PageSheet';
 import {SheetHeader} from '../src/design/SheetChrome';
 import {SheetScroll} from '../src/design/sheetParts';
 import {FixedScheme} from '../src/design/theme';
 import {retainReduceMotion} from '../src/lib/useReduceMotion';
 import {
+  SCROLL_FIT_SLACK,
   SCROLL_TOP_EPSILON,
   SHEET_CLAIM_SLOP,
   SHEET_DISMISS_MIN_DISTANCE,
@@ -45,6 +46,7 @@ import {
   releaseVelocity,
   rubberBand,
   scrimOpacity,
+  scrollOverflows,
   sheetDismissDistance,
   sheetFollow,
   sheetFrame,
@@ -304,7 +306,7 @@ describe('누가 끌기를 가져가는가 — 머리·본문·스크롤', () =>
 });
 
 describe('시작 응답자 — 터치가 시작되는 순간 시트가 응답자를 잡는가 (RN Modal 이 시작 응답자를 쥐므로)', () => {
-  const START = {closing: false};
+  const START = {closing: false, scrollsOverflow: false};
 
   it('머리(손잡이 띠·제목 줄)는 스크롤이 어떻든·스크롤이 없어도 늘 잡는다', () => {
     expect(claimsSheetTouchStart({zone: 'header', ...START, scrollOffsets: []})).toBe(true);
@@ -324,12 +326,45 @@ describe('시작 응답자 — 터치가 시작되는 순간 시트가 응답자
   });
 
   it('닫는 중에는 머리도 본문도 잡지 않는다(슬라이드를 끊으면 행동이 앞당겨 불린다)', () => {
-    expect(claimsSheetTouchStart({zone: 'header', closing: true, scrollOffsets: [0]})).toBe(false);
-    expect(claimsSheetTouchStart({zone: 'body', closing: true, scrollOffsets: [0]})).toBe(false);
+    expect(claimsSheetTouchStart({zone: 'header', closing: true, scrollsOverflow: false, scrollOffsets: [0]})).toBe(false);
+    expect(claimsSheetTouchStart({zone: 'body', closing: true, scrollsOverflow: false, scrollOffsets: [0]})).toBe(false);
+  });
+
+  // 시뮬레이터가 잡은 결함: 본문 뿌리는 스크롤 뷰의 조상이라, 거기서 응답자를 잡으면 iOS 가 그 터치의 네이티브 스크롤을 시작도 못 하게 막는다
+  // (맨 위에서 눌리지 않는 자리를 짚고 위로 올리는 스크롤이 죽는다). 내용이 넘치는 스크롤은 막히면 잃는 것이 있다.
+  it('내용이 넘치는 스크롤이 있으면 본문은 맨 위에서도 잡지 않는다 — 잡으면 iOS 가 그 스크롤을 막는다', () => {
+    expect(claimsSheetTouchStart({zone: 'body', closing: false, scrollsOverflow: true, scrollOffsets: [0]})).toBe(false);
+    expect(claimsSheetTouchStart({zone: 'body', closing: false, scrollsOverflow: true, scrollOffsets: [0, 0]})).toBe(false);
+  });
+
+  it('머리는 스크롤이 넘쳐도 잡는다 — 머리는 스크롤 뷰의 조상이 아니라 막을 스크롤이 없다', () => {
+    expect(claimsSheetTouchStart({zone: 'header', closing: false, scrollsOverflow: true, scrollOffsets: [0]})).toBe(true);
+    expect(claimsSheetTouchStart({zone: 'header', closing: false, scrollsOverflow: true, scrollOffsets: []})).toBe(true);
   });
 
   it('모르는 값(NaN)은 맨 위가 아니다 — 모르면 잡지 않는다', () => {
     expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: [Number.NaN]})).toBe(false);
+  });
+});
+
+describe('넘침 — 스크롤이 실제로 스크롤될 수 있는가', () => {
+  it('내용이 뷰포트에 들어가면 넘치지 않는다 — 같거나 1pt 이내로만 크면 아직 들어간 것이다', () => {
+    expect(scrollOverflows(300, 500)).toBe(false);
+    expect(scrollOverflows(500, 500)).toBe(false);
+    expect(scrollOverflows(500 + SCROLL_FIT_SLACK, 500)).toBe(false);
+  });
+
+  it('1pt 를 넘게 크면 넘친다', () => {
+    expect(scrollOverflows(500 + SCROLL_FIT_SLACK + 0.5, 500)).toBe(true);
+    expect(scrollOverflows(2000, 500)).toBe(true);
+  });
+
+  it('크기를 모르면 넘친다고 본다 — 모르면 스크롤을 막지 않는 쪽이 안전하다(fail-closed)', () => {
+    expect(scrollOverflows(Number.NaN, 500)).toBe(true);
+    expect(scrollOverflows(300, Number.NaN)).toBe(true);
+    expect(scrollOverflows(300, 0)).toBe(true); // 뷰포트 0 = 아직 레이아웃 전
+    expect(scrollOverflows(-1, 500)).toBe(true);
+    expect(scrollOverflows(0, 500)).toBe(false); // 빈 내용은 확실히 들어간다
   });
 });
 
@@ -568,6 +603,14 @@ function dragFromStart(
 const scrollTo = (testID: string, y: number) =>
   act(() => {
     fireEvent.scroll(screen.getByTestId(testID), {nativeEvent: {contentOffset: {x: 0, y}}});
+  });
+
+/** 스크롤의 크기 사건을 흘린다(jest 는 레이아웃을 하지 않는다): 뷰포트 높이(`onLayout`)와 내용 높이(`onContentSizeChange`). */
+const sizeScroll = (testID: string, content: number, viewport: number) =>
+  act(() => {
+    const node = screen.getByTestId(testID);
+    fireEvent(node, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: viewport}}});
+    fireEvent(node, 'contentSizeChange', 390, content);
   });
 
 function Host({
@@ -1048,6 +1091,7 @@ describe('시작 응답자 길 — 눌리지 않는 자리에서 시작한 끌�
   it('본문의 눌리지 않는 자리는 스크롤이 맨 위일 때만 잡는다 — 중간이면 응답자가 시트에 오지 않는다(스크롤과 간섭 없음)', async () => {
     const onClose = jest.fn();
     await mount(<Host onClose={onClose} />);
+    sizeScroll('sheet-scroll', 300, 500); // 내용이 뷰포트에 들어간다 — 넘치면 잡지 않는다(아래 「넘치는 스크롤」)
     scrollTo('sheet-scroll', 40);
     expect(dragFromStart('page-sheet-body', FAR_SLOW).armed).toBe(false);
     expect(onClose).not.toHaveBeenCalled();
@@ -1110,6 +1154,7 @@ describe('시작 응답자 길 — 눌리지 않는 자리에서 시작한 끌�
 
   it('스크롤은 시트가 끌기를 **쥔 뒤에야** 얼린다 — 기다리는 동안은 그대로 스크롤된다', async () => {
     await mount(<Host onClose={() => {}} />);
+    sizeScroll('sheet-scroll', 300, 500); // 내용이 뷰포트에 들어가야 본문이 시작 응답자를 잡는다(넘치면 잡지 않는다)
     const scroll = () => screen.getByTestId('sheet-scroll').props.scrollEnabled;
     const handlers = screen.getByTestId('page-sheet-body').props as Handlers;
     act(() => {
@@ -1187,6 +1232,167 @@ describe('시작 응답자 길 — 눌리지 않는 자리에서 시작한 끌�
     expect(dragFromStart('hdr', DOWN_THEN_FLICK_UP).armed).toBe(true);
     expect(onClose).not.toHaveBeenCalled();
     expect(sheetY()).toBe(0);
+  });
+});
+
+/** 이 자리의 터치가 시작될 때 시트가 응답자를 잡는가 — 이동 없이 시작 협상만 묻는다(캡처 → 버블, 응답자 플러그인과 같은 순서). */
+const claimsStart = (testID: string): boolean => {
+  const handlers = screen.getByTestId(testID).props as Handlers;
+  let claimed = false;
+  act(() => {
+    handlers.onStartShouldSetResponderCapture(touch(0, 1, 0));
+    claimed = Boolean(handlers.onStartShouldSetResponder(touch(0, 1, 0)));
+  });
+  return claimed;
+};
+
+describe('넘치는 스크롤 — 본문은 시작 응답자를 잡지 않는다 (시뮬레이터가 잡은 둘째 결함: 맨 위에서 눌리지 않는 자리를 짚고 위로 올리는 스크롤이 죽었다)', () => {
+  // 본문 뿌리는 스크롤 뷰의 조상이다. iOS(Fabric)는 스크롤 뷰의 조상 중 하나라도 JS 응답자이면 그 터치의 네이티브 스크롤을 시작도 못 하게 막는다
+  // (`_shouldDisableScrollInteraction`). 그래서 내용이 넘쳐 실제로 스크롤되는 본문은 시작 응답자를 잡으면 안 된다.
+  it('내용이 뷰포트를 넘치면 본문의 눌리지 않는 자리는 맨 위에서도 잡지 않는다 — 스크롤이 막히지 않는다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    sizeScroll('sheet-scroll', 2000, 500);
+    expect(dragFromStart('page-sheet-body', FAR_SLOW).armed).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+  });
+
+  it('내용이 뷰포트에 들어가면 같은 자리를 잡는다 — 짧은 시트는 본문 어디서든 끌린다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    sizeScroll('sheet-scroll', 300, 500);
+    expect(dragFromStart('page-sheet-body', FAR_SLOW).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('크기 사건이 오는 대로 따라간다 — 내용이 늘어 넘치면 놓고, 줄어 들어가면 다시 잡는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    sizeScroll('sheet-scroll', 300, 500);
+    expect(claimsStart('page-sheet-body')).toBe(true);
+    sizeScroll('sheet-scroll', 900, 500);
+    expect(claimsStart('page-sheet-body')).toBe(false);
+    sizeScroll('sheet-scroll', 400, 500);
+    expect(claimsStart('page-sheet-body')).toBe(true);
+  });
+
+  it('크기를 알리기 전(레이아웃 전)은 넘친다고 본다 — 잡지 않는다(fail-closed)', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(claimsStart('page-sheet-body')).toBe(false);
+  });
+
+  it('뷰포트만, 또는 내용 크기만 알려서는 판정하지 못한다 — 둘 다 알아야 한다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    act(() => {
+      fireEvent(screen.getByTestId('sheet-scroll'), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 500}}});
+    });
+    expect(claimsStart('page-sheet-body')).toBe(false); // 내용 크기를 모른다
+    act(() => {
+      fireEvent(screen.getByTestId('sheet-scroll'), 'contentSizeChange', 390, 300);
+    });
+    expect(claimsStart('page-sheet-body')).toBe(true);
+  });
+
+  it('스크롤이 둘이면 하나라도 넘치면 잡지 않고, 그 스크롤이 사라지면 잡는다', async () => {
+    function Two({second}: {second: boolean}) {
+      return (
+        <Host onClose={() => {}}>
+          <SheetScroll testID="a"><View /></SheetScroll>
+          {second ? <SheetScroll testID="b"><View /></SheetScroll> : null}
+        </Host>
+      );
+    }
+    const utils = await mount(<Two second />);
+    sizeScroll('a', 200, 500);
+    sizeScroll('b', 3000, 500);
+    expect(claimsStart('page-sheet-body')).toBe(false);
+    utils.rerender(
+      <FixedScheme scheme="light">
+        <Two second={false} />
+      </FixedScheme>,
+    );
+    await act(async () => {});
+    expect(claimsStart('page-sheet-body')).toBe(true);
+  });
+
+  it('언마운트 뒤에 늦게 온 크기 사건이 지워진 스크롤을 되살려 시트를 영영 막지 않는다', async () => {
+    let handle: ReturnType<typeof usePageSheetScroll> = null;
+    function Late() {
+      handle = usePageSheetScroll();
+      return null;
+    }
+    function Two({late}: {late: boolean}) {
+      return (
+        <Host onClose={() => {}}>
+          <SheetScroll testID="a"><View /></SheetScroll>
+          {late ? <Late /> : null}
+        </Host>
+      );
+    }
+    const utils = await mount(<Two late />);
+    sizeScroll('a', 200, 500);
+    expect(claimsStart('page-sheet-body')).toBe(false); // `Late` 는 크기를 모르는 스크롤로 등록돼 있다
+    utils.rerender(
+      <FixedScheme scheme="light">
+        <Two late={false} />
+      </FixedScheme>,
+    );
+    await act(async () => {});
+    expect(claimsStart('page-sheet-body')).toBe(true);
+    act(() => {
+      handle?.reportContentHeight(5000);
+      handle?.reportViewportHeight(300);
+    });
+    expect(claimsStart('page-sheet-body')).toBe(true); // 늦은 사건이 `Late` 를 되살리지 못했다
+  });
+
+  it('넘치는 스크롤에서도 머리는 잡는다 — 머리는 스크롤 뷰의 조상이 아니라 막을 스크롤이 없다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    sizeScroll('sheet-scroll', 2000, 500);
+    expect(dragFromStart('hdr', FAR_SLOW).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('넘치는 스크롤의 맨 위에서도, 행·단추처럼 후손이 응답자인 터치는 시트가 이동에서 가로챈다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    sizeScroll('sheet-scroll', 2000, 500);
+    expect(drag('page-sheet-body', FAR_SLOW)).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('`usePageSheetScrollProps` 를 펼친 날 FlatList 도 크기를 알린다', async () => {
+    function List() {
+      const sheetScroll = usePageSheetScrollProps();
+      return <FlatList {...sheetScroll} data={[1, 2, 3]} renderItem={({item}) => <Text>{item}</Text>} testID="own-list" />;
+    }
+    await mount(
+      <Host onClose={() => {}}>
+        <List />
+      </Host>,
+    );
+    expect(claimsStart('page-sheet-body')).toBe(false); // 크기를 모른다
+    sizeScroll('own-list', 120, 500);
+    expect(claimsStart('page-sheet-body')).toBe(true);
+    sizeScroll('own-list', 4000, 500);
+    expect(claimsStart('page-sheet-body')).toBe(false);
+  });
+
+  it('호출자가 준 onLayout·onContentSizeChange 는 지워지지 않고 같이 불린다', async () => {
+    const onLayout = jest.fn();
+    const onContentSizeChange = jest.fn();
+    await mount(
+      <Host onClose={() => {}}>
+        <SheetScroll testID="own" onLayout={onLayout} onContentSizeChange={onContentSizeChange}>
+          <View />
+        </SheetScroll>
+      </Host>,
+    );
+    sizeScroll('own', 300, 500);
+    expect(onLayout).toHaveBeenCalledTimes(1);
+    expect(onContentSizeChange).toHaveBeenCalledWith(390, 300);
+    expect(claimsStart('page-sheet-body')).toBe(true);
   });
 });
 
