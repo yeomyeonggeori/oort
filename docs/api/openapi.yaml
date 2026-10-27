@@ -689,10 +689,26 @@ paths:
       operationId: publicJoin
       summary: Join a workspace with an invite code (public, no auth).
       description: >
-        Redeems a high-entropy invite code, creating (201) or reusing (200) a
-        human member, granting membership in every joinable public channel,
-        and issuing a session token pair. Snake-case body aliases accepted by
-        the server: `display_name`, `time_zone`/`tz`.
+        Redeems a high-entropy invite code, creating (201) a human member or
+        resuming (200) an existing one, granting membership in every joinable
+        public channel, and issuing a session token pair. Snake-case body
+        aliases accepted by the server: `display_name`, `time_zone`/`tz`.
+
+        An invite code names a workspace and a role, not a person, so an
+        address that already has an account is resumed only with proof (#4625,
+        ADR-0215 증보 1). An `active` account is resumed only when the
+        request's `password` is that account's (the check login makes); the
+        password, name and time zone are never written. A `suspended` account
+        is refused (403) without any comparison. An `invited` or `deleted`
+        account, or any other state, is refused (409 `join_email_unavailable`)
+        whatever password was sent, with one answer for all of them. Password
+        guesses are budgeted per account (default 5 per window, env
+        `RATE_LIMIT_PASSWORD_GUESS_PER_ACCOUNT`, no off value) and the budget
+        is spent before the comparison, so a spent budget is a 429 with
+        `Retry-After` even for the right password. The invite's own state and a
+        ban are judged first; the already-redeemed and role-escalation checks
+        wait for the proof. This door cannot hide which addresses have
+        accounts: an unused address creates one.
       security: []
       requestBody:
         required: true
@@ -708,19 +724,38 @@ paths:
               schema:
                 $ref: "#/components/schemas/JoinResponse"
         "200":
-          description: Existing member (same email) re-joined.
+          description: >
+            Existing member (same email) resumed: the request's `password` is
+            that account's. The account is exactly as it was.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/JoinResponse"
         "400":
-          description: Invalid code/email/displayName/handle/password shape.
+          description: >
+            Invalid code/email/displayName/handle/password shape. A password
+            that breaks the ADR-0215 D2 rule answers `error.code`
+            `password_too_short`, `password_too_long` or `password_invalid_char`
+            (a NUL character); an empty or absent one is the code-less
+            "password is required".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: >
+            The address has an account and the request's `password` is not
+            its. `error.code` is `invalid_credentials` and the message is
+            login's own (`invalid credentials`). No session is issued and
+            nothing is written.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "403":
-          description: Role escalation or non-joinable member state.
+          description: >
+            Role escalation, a banned member, or a suspended account (answered
+            before any password comparison).
           content:
             application/json:
               schema:
@@ -732,7 +767,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
-          description: Already redeemed, exhausted, or no joinable channels.
+          description: >
+            Already redeemed, exhausted, or no joinable channels; or
+            `error.code` `join_email_unavailable` — the address belongs to an
+            account a public invite may not resume (`invited`, `deleted`, or a
+            state this server does not list). The answer is the same for all of
+            them and for every password.
           content:
             application/json:
               schema:
@@ -1130,7 +1170,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "400":
-          description: Invalid token or password shape.
+          description: >
+            Invalid token or password shape. A password that breaks the
+            ADR-0215 D2 rule answers `error.code` `password_too_short`,
+            `password_too_long` or `password_invalid_char` (a NUL character),
+            before any statement runs (the one-time token is not spent); an
+            empty one is the code-less "password is required".
           content:
             application/json:
               schema:
@@ -1757,7 +1802,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/LoginResponse"
         "400":
-          description: Password shape invalid, or new password equals current.
+          description: >
+            Password shape invalid, or new password equals current. A new
+            password that breaks the ADR-0215 D2 rule answers `error.code`
+            `password_too_short`, `password_too_long` or `password_invalid_char`
+            (a NUL character); the current password is only required and at most
+            1024 characters (code-less 400).
           content:
             application/json:
               schema:
@@ -2022,7 +2072,11 @@ paths:
     delete:
       tags: [membership-admin]
       operationId: deleteWorkspaceBan
-      summary: Delete a workspace ban and permit future rejoin.
+      summary: Delete a workspace ban so its email and handle pass the ban check again.
+      description: >
+        Only the ban check on invite redemption and public join is lifted. A
+        removed (`deleted`) account is not resumed by an invite code either way
+        (ADR-0215 증보 1 J7, follow-up #4627).
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -9949,12 +10003,14 @@ paths:
       operationId: getAttachmentContent
       summary: Stream complete attachment bytes from Drive after channel membership validation.
       description: >
-        An active member of the channel reads a completed attachment that a message carries
-        (`messageId` is set). A completed attachment that no message carries yet (a draft in a
-        composer tray, or a file a scheduled message is holding) is read by its uploader alone;
-        every other member of the channel gets the same 404 an unknown id gets, so the route does
-        not reveal whose drafts exist (ADR-0208 remaining risk 8). The caller must be an active
-        member of the channel in every case, the uploader included.
+        An active member of the channel reads a completed attachment that a live message carries
+        (`messageId` is set and that message has not been deleted). A completed attachment that no
+        message carries yet (a draft in a composer tray, or a file a scheduled message is holding)
+        is read by its uploader alone; every other member of the channel gets the same 404 an
+        unknown id gets, so the route does not reveal whose drafts exist (ADR-0208 remaining risk
+        8). A file a deleted message carried is read by nobody - not the room, not the author
+        who uploaded it, not a workspace admin - and answers the same 404 (ADR-0151 amendment 2).
+        The caller must be an active member of the channel in every case, the uploader included.
       security:
         - bearerAuth: []
       parameters:
@@ -9980,8 +10036,8 @@ paths:
         "404":
           description: >
             Completed attachment not found: unknown id, pending or failed upload, another
-            channel's or tenant's attachment, or a draft (no message carries it) that the caller
-            did not upload. All of these answer identically.
+            channel's or tenant's attachment, a draft (no message carries it) that the caller
+            did not upload, or a file a deleted message carried. All of these answer identically.
           content:
             application/json:
               schema:
@@ -13172,7 +13228,11 @@ components:
         default 60; attachment upload starts, default 60. Cancelling a scheduled
         message, editing a message (`PATCH …/messages/{id}`, which streaming answers
         use) and every read are not budgeted. Retrying with the same `clientMsgId`
-        after a 429 is safe.
+        after a 429 is safe. `POST /v1/join` also has a per-account password-guess
+        budget (default 5 per window, #4625): it applies only to an address that
+        already has an active account, is spent before the password is compared
+        (a right password counts too), and answers 429 without comparing once
+        spent. The window is the shared one (`RATE_LIMIT_WINDOW_SECONDS`).
       headers:
         Retry-After:
           description: Seconds to wait before retrying.
@@ -13271,7 +13331,11 @@ components:
                 `device_key_not_endorsable`, `device_key_already_registered`,
                 `session_lineage_ended`, `device_root_password_required`,
                 `device_root_linked_session`, `host_register_replayed`,
-                `instance_id_unconfigured`; ADR-0208 (#4214, scheduled
+                `instance_id_unconfigured`; ADR-0215 증보 1 (#4625, `POST
+                /v1/join` on an address that already has an account): 401
+                `invalid_credentials` (the password is not that account's) and
+                409 `join_email_unavailable` (the account may not be resumed
+                by a public invite); ADR-0208 (#4214, scheduled
                 messages): 400 `send_at_too_soon` (less than 60 seconds ahead,
                 the past included), `send_at_too_far` (beyond 120 days),
                 `empty_message` (neither text nor an attachment); 409
@@ -13291,7 +13355,11 @@ components:
                 `invalid_schedule`, `unknown_sound`, `muted_until_in_past`,
                 `muted_until_too_far`, `level_not_applicable`, `keyword_too_short`,
                 `keyword_too_long`, `too_many_keywords`; 409 `no_device`; 429
-                `rate_limited` (the test push only).
+                `rate_limited` (the test push only); ADR-0215 D2 (#4593, the
+                password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
+                `PATCH …/members/me/password`): 400 `password_too_short` (fewer
+                than 10 characters), `password_too_long` (more than 72 bytes of
+                UTF-8) and `password_invalid_char` (a NUL character, U+0000).
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -13557,7 +13625,17 @@ components:
             only sha256.
         password:
           type: string
-          description: Required, at most 1024 chars.
+          minLength: 10
+          description: >
+            The password being chosen (ADR-0215 D2, owner decision 2026-10-26):
+            at least 10 characters (Unicode scalar values, counted as sent) and
+            at most 72 bytes of UTF-8 — a Korean syllable is 3 bytes, so 24 fit
+            — because bcrypt reads no more than 72. Not trimmed, not normalised,
+            no composition rule; the one character refused is NUL (U+0000).
+            Over-short, over-long and NUL answer 400 `password_too_short` /
+            `password_too_long` / `password_invalid_char`. Applies to the first
+            owner's bootstrap and to an operator-issued reset alike. Login does
+            not apply it: an existing password keeps working.
 
     ChangePasswordRequest:
       type: object
@@ -13566,10 +13644,21 @@ components:
       properties:
         currentPassword:
           type: string
-          description: The caller's current password. Reconfirm is mandatory.
+          description: >
+            The caller's current password. Reconfirm is mandatory. Required and
+            at most 1024 characters; it is not held to the new-password length
+            rule, so an account whose password predates that rule can still
+            change it.
         newPassword:
           type: string
-          description: Replacement password, at most 1024 chars, must differ.
+          minLength: 10
+          description: >
+            Replacement password, must differ from the current one. The
+            ADR-0215 D2 rule: at least 10 characters (Unicode scalar values,
+            counted as sent) and at most 72 bytes of UTF-8; not trimmed, not
+            normalised; no NUL (U+0000). Refusals answer 400
+            `password_too_short` / `password_too_long` /
+            `password_invalid_char`.
 
     RenameWorkspaceRequest:
       type: object
@@ -13949,6 +14038,15 @@ components:
     # ---- Public join -----------------------------------------------------------
     JoinRequest:
       type: object
+      description: >
+        For an address with no account, `password` is the password the new
+        account is created with. For an address that already has an account it
+        is the proof that the caller holds it: it is compared with the stored
+        password the way login compares it and never written, and
+        `displayName`, `handle` and `timeZone` are ignored (#4625, ADR-0215
+        증보 1). The new-password rule on `password` below is judged first,
+        whichever of the two the field is, so an existing password that does
+        not meet it cannot be proven here; that person signs in instead.
       required: [code, email, displayName, password]
       properties:
         code:
@@ -13966,7 +14064,16 @@ components:
           description: Optional; derived from the email local part when omitted.
         password:
           type: string
-          description: Required, at most 1024 chars.
+          minLength: 10
+          description: >
+            The password being chosen (ADR-0215 D2, owner decision 2026-10-26):
+            at least 10 characters (Unicode scalar values, counted as sent) and
+            at most 72 bytes of UTF-8 — a Korean syllable is 3 bytes, so 24 fit
+            — because bcrypt reads no more than 72. Not trimmed, not normalised,
+            no composition rule; the one character refused is NUL (U+0000).
+            Over-short, over-long and NUL answer 400 `password_too_short` /
+            `password_too_long` / `password_invalid_char`; an empty or absent
+            password is the code-less 400 "password is required".
         timeZone:
           type: string
           description: Optional IANA time zone; defaults to UTC. Aliases `time_zone`, `tz`.
@@ -20997,8 +21104,10 @@ components:
             $ref: "#/components/schemas/MessageAttachment"
           description: >
             Completed attachments bound to this message, ordered by creation time.
-            Omitted when empty. Upload capability URLs and archive provider identifiers
-            are never included; download bytes through the authenticated content proxy.
+            Omitted when empty, and always omitted on a deleted message (a history
+            tombstone lists no files). Upload capability URLs and archive provider
+            identifiers are never included; download bytes through the authenticated
+            content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
         runEnded:

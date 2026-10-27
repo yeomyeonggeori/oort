@@ -29,6 +29,8 @@ push momo-server push_action_token_conformance_pg
 push momo-server push_fetch_token_conformance_pg
 push momo-server push_session_end_conformance_pg
 attachment momo-server attachment_conformance_pg
+attachment momo-notifier attachment_reclaim_conformance_pg
+attachment momo-server attachment_reclaim_local_pg
 webhook momo-server webhook_admin_conformance_pg
 webhook momo-server webhook_inbound_conformance_pg
 webhook momo-webhook-sender webhook_delivery_conformance_pg

@@ -316,6 +316,66 @@ describe("failure copy", () => {
     ).toBeUndefined();
   });
 
+  // ADR-0215 D2 (#4593): the join password is held to the same new-password rule
+  // as the claim screen's, and the server names the rule it broke. Before this a
+  // 400 fell to the generic line and sent the person to ask an admin for a new
+  // invite, when the invite was fine and the fix was the field they had typed.
+  it("tells a join password the rule it broke, on the account step", () => {
+    const short = joinFailureCopy(
+      new ApiError(
+        400,
+        "password must be at least 10 characters",
+        "password_too_short"
+      )
+    );
+    expect(short.message).toContain("10자 이상");
+    expect(short.message).not.toContain("초대");
+    expect(short.onGateway).toBeUndefined();
+    expect(short.retryable).toBe(false);
+    expect(short.suggestSignIn).toBe(false);
+
+    const long = joinFailureCopy(
+      new ApiError(
+        400,
+        "password must be at most 72 bytes in UTF-8",
+        "password_too_long"
+      )
+    );
+    expect(long.message).toContain("72바이트");
+    expect(long.message).toContain("한글은 한 자에 3바이트");
+    expect(long.message).not.toContain("초대");
+    expect(long.onGateway).toBeUndefined();
+    expect(long.retryable).toBe(false);
+  });
+
+  it("keeps the generic join line for a 400 that names no password rule", () => {
+    const generic = "요청을 처리하지 못했습니다";
+    // No code (an empty password, or any 400 older than the named rules).
+    expect(
+      joinFailureCopy(new ApiError(400, "password is required")).message
+    ).toContain(generic);
+    // A code this screen does not know must not borrow another rule's sentence.
+    expect(
+      joinFailureCopy(
+        new ApiError(
+          400,
+          "password must not contain a NUL character",
+          "password_invalid_char"
+        )
+      ).message
+    ).toContain(generic);
+    // A rule code on another status is not a password refusal.
+    expect(
+      joinFailureCopy(new ApiError(429, "rate limit", "password_too_short"))
+        .message
+    ).toContain("잠시");
+    const gateway = joinFailureCopy(
+      new ApiError(404, "invite not found", "password_too_long")
+    );
+    expect(gateway.message).toContain("유효하지 않은 초대 코드");
+    expect(gateway.onGateway).toBe(true);
+  });
+
   it("never shows a raw transport failure as an invite verdict", () => {
     const unreachable = new NetworkError("unreachable", 15_000);
     expect(joinFailureCopy(unreachable).message).toContain("서버에 닿지 못했어요");

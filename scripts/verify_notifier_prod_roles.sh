@@ -74,6 +74,7 @@ cargo test --manifest-path server-rust/Cargo.toml -p momo-notifier \
   --test prod_role_conformance_pg \
   --test share_retention_conformance_pg \
   --test avatar_reclaim_conformance_pg \
+  --test attachment_reclaim_conformance_pg \
   -- --ignored --test-threads=1 --nocapture
 
 echo "[notifier-roles] PASS: every notifier job iteration ran as its production role"

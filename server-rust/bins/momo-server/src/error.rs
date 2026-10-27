@@ -21,6 +21,7 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
+use momo_auth::NewPasswordInvalid;
 use momo_db::DbError;
 use momo_messaging::MessagingError;
 use serde::Serialize;
@@ -99,6 +100,21 @@ impl ApiError {
     }
 }
 
+/// A refused new password (ADR-0215 D2) is a 400. The three real refusals carry
+/// their stable `error.code` (`password_too_short` / `password_too_long` /
+/// `password_invalid_char`); the empty password keeps the code-less sentence it
+/// always had. `?` on
+/// `momo_auth::normalized_new_password` in a handler is this conversion, so
+/// every path that sets a password answers one way.
+impl From<NewPasswordInvalid> for ApiError {
+    fn from(invalid: NewPasswordInvalid) -> Self {
+        match invalid.code() {
+            Some(code) => ApiError::coded(StatusCode::BAD_REQUEST, code, invalid.to_string()),
+            None => ApiError::bad_request(invalid.to_string()),
+        }
+    }
+}
+
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status;
@@ -137,6 +153,47 @@ mod tests {
     fn an_uncoded_error_keeps_the_original_envelope() {
         let body = serde_json::to_value(ApiError::forbidden("nope").envelope()).unwrap();
         assert_eq!(body, serde_json::json!({"error": {"message": "nope"}}));
+    }
+
+    /// ADR-0215 D2 on the wire: the length refusals and the NUL refusal are
+    /// 400s that name themselves; the empty password is the code-less 400 it
+    /// always was.
+    #[test]
+    fn a_refused_new_password_is_a_400_that_names_its_reason() {
+        let short = ApiError::from(NewPasswordInvalid::TooShort);
+        assert_eq!(short.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(short.envelope()).unwrap(),
+            serde_json::json!({"error": {
+                "message": "password must be at least 10 characters",
+                "code": "password_too_short"
+            }})
+        );
+        let long = ApiError::from(NewPasswordInvalid::TooLong);
+        assert_eq!(long.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(long.envelope()).unwrap(),
+            serde_json::json!({"error": {
+                "message": "password must be at most 72 bytes in UTF-8",
+                "code": "password_too_long"
+            }})
+        );
+        let nul = ApiError::from(NewPasswordInvalid::InvalidChar);
+        assert_eq!(nul.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(nul.envelope()).unwrap(),
+            serde_json::json!({"error": {
+                "message": "password must not contain a NUL character",
+                "code": "password_invalid_char"
+            }})
+        );
+        let empty = ApiError::from(NewPasswordInvalid::Missing);
+        assert_eq!(empty.status, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            serde_json::to_value(empty.envelope()).unwrap(),
+            serde_json::json!({"error": {"message": "password is required"}}),
+            "the empty password keeps its code-less envelope"
+        );
     }
 
     /// A coded refusal carries the code beside the sentence, inside `error`.
