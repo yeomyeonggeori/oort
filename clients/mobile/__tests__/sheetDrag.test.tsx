@@ -510,12 +510,12 @@ function touch(y: number, at: number, previousY: number = y, touches = 1) {
 function drag(
   testID: string,
   steps: Array<[number, number]>,
-  options: {release?: boolean; releaseAt?: number; touches?: number} = {},
+  options: {release?: boolean; releaseAt?: number; touches?: number; downAt?: number} = {},
 ): boolean {
   const handlers = screen.getByTestId(testID).props as Handlers;
   let claimed = false;
   act(() => {
-    handlers.onStartShouldSetResponderCapture(touch(0, 1));
+    handlers.onStartShouldSetResponderCapture(touch(0, options.downAt ?? 1));
     const [firstY, firstAt] = steps[0];
     const first = touch(firstY, firstAt, 0, options.touches);
     // 응답자 시스템처럼 캡처 길이 먼저, 버블 길이 다음이다.
@@ -543,12 +543,12 @@ function drag(
 function dragFromStart(
   testID: string,
   steps: Array<[number, number]>,
-  options: {release?: boolean; releaseAt?: number; touches?: number} = {},
+  options: {release?: boolean; releaseAt?: number; touches?: number; downAt?: number} = {},
 ): {armed: boolean} {
   const handlers = screen.getByTestId(testID).props as Handlers;
   let armed = false;
   act(() => {
-    const down = touch(0, 1, 0, options.touches);
+    const down = touch(0, options.downAt ?? 1, 0, options.touches);
     handlers.onStartShouldSetResponderCapture(down);
     armed = Boolean(handlers.onStartShouldSetResponder(down));
     if (!armed) return;
@@ -1187,6 +1187,67 @@ describe('시작 응답자 길 — 눌리지 않는 자리에서 시작한 끌�
     expect(dragFromStart('hdr', DOWN_THEN_FLICK_UP).armed).toBe(true);
     expect(onClose).not.toHaveBeenCalled();
     expect(sheetY()).toBe(0);
+  });
+});
+
+describe('놓는 속도의 표본은 터치 시작부터 모은다 — 쥐는 첫 이벤트가 전체의 상당수인 짧은 튕김 (시뮬레이터가 잡은 결함)', () => {
+  // 터치가 y=0 에서 84ms 에 내려앉고, 16ms 뒤 30pt, 다시 16ms 뒤 75pt — 두 번의 이동뿐인 아주 짧은 튕김(2.3px/ms). 쥐는 것은 첫 이동(30pt > 6)이라
+  // 쥔 뒤의 표본만 모으면 둘(쥔 이동·마지막 이동)뿐이라 속도가 0 으로 읽혀(`VELOCITY_MIN_SAMPLES` 3) 닫히지 않았다. 문턱 거리에는 한참 못 미친다(45pt).
+  const SHORT_FLICK: Array<[number, number]> = [[30, 100], [75, 116]];
+
+  it('시작 응답자 길: 쥔 뒤의 이동이 둘뿐인 튕김도 속도로 닫는다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('hdr', SHORT_FLICK, {downAt: 84}).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('이동 가로채기 길: 같다 — 쥐기 전의 이동도 표본이다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(drag('hdr', SHORT_FLICK, {downAt: 84})).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('대조: 같은 거리를 느리게(표본이 40ms 보다 벌어짐) 끌면 닫지 않는다 — 속도가 닫은 것이다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('hdr', [[30, 100], [75, 300]], {downAt: 84}).armed).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('시작 응답자 길: 쥐기 전의 이동 때문에 따라오기가 어긋나지 않는다 — 시트는 쥔 자리부터 손가락과 1:1 이다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    // 첫 이동(30pt)에서 쥐고 그 30 은 흡수한다 → 75 까지 갔으면 시트는 45.
+    expect(dragFromStart('hdr', SHORT_FLICK, {downAt: 84, release: false}).armed).toBe(true);
+    expect(sheetY()).toBe(45);
+  });
+
+  it('이동 가로채기 길: 같은 45 다 — grant 가 dy 를 0 으로 되돌려도 이미 움직인 30 을 기준에 더해 둔다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(drag('hdr', SHORT_FLICK, {downAt: 84, release: false})).toBe(true);
+    expect(sheetY()).toBe(45);
+  });
+});
+
+describe('속도 표본의 기준은 어느 길로 쥐었든 같다 — 터치 시작부터의 누적 이동', () => {
+  // 처음 16ms 에 60pt 를 휙 내리고 이어서 2pt 씩 기어간다. 마지막 100ms 창의 기울기는 (0·60·62·64 @ 0·16·32·48ms) ≈ 1.2px/ms 라 속도로 닫힌다.
+  // 이동 가로채기 길은 grant 가 `g.dy` 를 0 으로 되돌리므로, 이미 움직인 60 을 기준에 더해 두지 않으면 쥔 뒤의 표본이 (2·4)로 내려앉아
+  // 기울기가 뒤집힌다 — 눈에 보이는 따라오기는 같아서 이 시험만이 잡는다.
+  const BURST_THEN_CRAWL: Array<[number, number]> = [[60, 100], [62, 116], [64, 132]];
+
+  it('시작 응답자 길', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('hdr', BURST_THEN_CRAWL, {downAt: 84}).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('이동 가로채기 길', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(drag('hdr', BURST_THEN_CRAWL, {downAt: 84})).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
 

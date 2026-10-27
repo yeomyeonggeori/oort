@@ -420,7 +420,6 @@ function SheetFrame({
   // 시트가 실제로 선 높이 — 레이아웃이 알려 준 값. 아직 모르면 상자에서 어림한 값을 쓴다(아래 `sheetBox`).
   const [measured, setMeasured] = useState(0);
   const measuredRef = useRef(0);
-  const samples = useRef<DragSample[]>([]);
 
   // 단계별 상자. 큰 단은 상태 막대가 58보다 깊은 기기(다이내믹 아일랜드)에서 그 아래 4pt 에서
   // 시작한다 — 58 은 시안 기기(390×844, 상태 막대 54)의 값이라 그 위에 올리면 시계와 겹친다.
@@ -516,10 +515,29 @@ function SheetFrame({
   const makePan = useCallback(
     (zone: DragZone) => {
       // 응답자마다 제 상태를 든다(머리·본문이 서로의 상태를 건드리지 않게). 응답자는 `useMemo` 로 한 번 만들어 끌기 내내 같은 것이다.
-      //   engaged  끌기를 **실제로 쥐었는가**. 시작 응답자는 터치가 시작될 때 얌전히 응답자를 쥐고(armed) 이동이 조건을 채울 때 비로소 쥔다.
-      //   dyBase   쥔 순간의 `g.dy` — 그때까지의 이동(첫 문턱)은 흡수한다. 이동 가로채기 길은 grant 가 dy 를 0 으로 되돌려 늘 0 이다.
-      //   stolen   이동 가로채기(`onMoveShouldSet…`)가 참을 돌려줬다 — 곧 오는 grant 는 이미 조건을 통과했으니 바로 쥔다.
-      const state = {engaged: false, dyBase: 0, stolen: false};
+      //   engaged   끌기를 **실제로 쥐었는가**. 시작 응답자는 터치가 시작될 때 얌전히 응답자를 쥐고(armed) 이동이 조건을 채울 때 비로소 쥔다.
+      //   dyBase    쥔 순간의 터치 시작부터의 이동 — 그때까지의 이동(첫 문턱)은 흡수한다.
+      //   dyOffset  grant 가 `g.dy` 를 0 으로 되돌리기 전에 이미 움직인 거리(이동 가로채기 길). 시작 응답자 길은 0 이다.
+      //   lastDy    가장 최근 이동 협상에서 본 `g.dy` — 가로채서 grant 가 오면 `dyOffset` 이 된다.
+      //   stolen    이동 가로채기(`onMoveShouldSet…`)가 참을 돌려줬다 — 곧 오는 grant 는 이미 조건을 통과했으니 바로 쥔다.
+      //   samples   놓는 속도를 잴 표본. **터치 시작부터** 모은다(쥐기 전의 이동 포함) — 빠른 튕김은 쥐는 첫 이벤트가 전체 이벤트의 상당수라,
+      //             쥔 뒤의 표본만으로는 `VELOCITY_MIN_SAMPLES` 에 못 미쳐 속도가 0 으로 읽히고 「짧아도 빠르면 닫힘」이 꺼진다
+      //             (시뮬레이터 실측: 100pt/100ms 튕김의 표본 2 → 속도 0, #4612 2단계). 응답자마다 따로 둔다 — 조상 응답자가 같은 이동을
+      //             또 적어 표본 수를 부풀리지 않게.
+      const state = {
+        engaged: false,
+        dyBase: 0,
+        dyOffset: 0,
+        lastDy: 0,
+        stolen: false,
+        samples: [] as DragSample[],
+      };
+      /** 터치 시작부터의 누적 이동(pt, 아래가 양수) — 어느 길로 쥐었든 같은 기준이다. */
+      const travelled = (g: {dy: number}) => g.dy + state.dyOffset;
+      const record = (e: Parameters<typeof stamp>[0], g: {dy: number}) => {
+        state.samples.push({y: travelled(g), t: stamp(e)});
+        if (state.samples.length > MAX_SAMPLES) state.samples.shift();
+      };
       // 지금 이 이동이 끌기를 쥘 만한가(판정은 순수 함수).
       const wants = (g: {dx: number; dy: number; numberActiveTouches: number}) =>
         claimsSheetDrag({
@@ -530,10 +548,9 @@ function SheetFrame({
           closing: closing.current,
           scrollOffsets: [...scrolls.values()],
         });
-      const engage = (e: Parameters<typeof stamp>[0], g: {dy: number}) => {
+      const engage = (g: {dy: number}) => {
         state.engaged = true;
-        state.dyBase = g.dy;
-        samples.current = [{y: 0, t: stamp(e)}];
+        state.dyBase = travelled(g);
         setFrozen(true);
       };
       return PanResponder.create({
@@ -542,6 +559,9 @@ function SheetFrame({
           if (e.nativeEvent.touches.length === 1) {
             state.engaged = false;
             state.stolen = false;
+            state.dyOffset = 0;
+            state.lastDy = 0;
+            state.samples = [{y: 0, t: stamp(e)}];
           }
           return false;
         },
@@ -549,7 +569,10 @@ function SheetFrame({
         onStartShouldSetPanResponder: () =>
           claimsSheetTouchStart({zone, closing: closing.current, scrollOffsets: [...scrolls.values()]}),
         // 이동 가로채기. 캡처 길이 먼저다: 단추·행 위에서 시작한 끌기를 가져와야 그 눌림이 취소된다.
-        onMoveShouldSetPanResponderCapture: (_e, g) => {
+        onMoveShouldSetPanResponderCapture: (e, g) => {
+          // 쥐기 전의 이동도 속도 표본이다(캡처 길은 이동마다 한 번 돈다 — 같은 이벤트를 또 적지 않는다).
+          state.lastDy = g.dy;
+          record(e, g);
           const claim = wants(g);
           if (claim) state.stolen = true;
           return claim;
@@ -563,32 +586,33 @@ function SheetFrame({
         // 끌기를 쥔 동안 다른 응답자(스크롤)가 가져가지 못하게 한다. 기다리는 동안에도 내주지 않는다 — 조상의 가로채기가 끌기를 둘로 쪼개지 않게.
         onPanResponderTerminationRequest: () => false,
         // 가로채서 쥔 길은 이미 조건을 통과했으니 바로 쥔다(`g.dy` 는 grant 가 0 으로 되돌렸다). 시작 응답자는 기다린다.
-        onPanResponderGrant: (e, g) => {
+        onPanResponderGrant: (_e, g) => {
           if (state.stolen) {
+            // 이미 움직인 거리(`lastDy`)는 grant 가 0 으로 되돌렸으니 기준에 더해 둔다. 그 이동은 위에서 표본으로 적혔다.
             state.stolen = false;
-            engage(e, g);
+            state.dyOffset = state.lastDy;
+            engage(g);
           } else {
             state.engaged = false;
+            state.dyOffset = 0;
           }
         },
         onPanResponderMove: (e, g) => {
+          record(e, g);
           if (!state.engaged) {
             // 기다리는 응답자: 탭·가로 쓸기·위로 쓸기는 시트가 할 일이 없다. 아래로 문턱을 넘고 세로가 앞서면 그때 쥔다.
-            if (!wants(g)) return;
-            engage(e, g);
+            if (!wants({...g, dy: travelled(g)})) return;
+            engage(g);
           }
-          const dy = g.dy - state.dyBase;
-          travel.setValue(sheetFollow(dy));
-          samples.current.push({y: dy, t: stamp(e)});
-          if (samples.current.length > MAX_SAMPLES) samples.current.shift();
+          travel.setValue(sheetFollow(travelled(g) - state.dyBase));
         },
         onPanResponderRelease: (e, g) => {
           // 쥐지 않은 채 끝났다(탭·스크롤) — 시트가 할 일이 없다.
           if (!state.engaged) return;
           state.engaged = false;
           setFrozen(false);
-          const offset = sheetFollow(g.dy - state.dyBase);
-          const velocity = releaseVelocity(samples.current, stamp(e));
+          const offset = sheetFollow(travelled(g) - state.dyBase);
+          const velocity = releaseVelocity(state.samples, stamp(e));
           if (!shouldDismissSheet(offset, velocity, boxRef.current)) {
             settle();
             return;
