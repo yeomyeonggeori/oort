@@ -1,0 +1,39 @@
+== design pre-flight (web), SKILL momo-design-taste-web §10 ==
+   scanned: clients/web/src, clients/web/index.html
+   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts, src/design/themes/ (pre-validated bindings only)
+   emdash·progress_word·latin_particle·legacy_term: AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141·#1511
+
+OK    emdash: 0
+OK    raw_color: 0
+OK    inline_style: 0
+OK    arbitrary_tw: 0
+OK    ai_gradient: 0
+OK    toast: 0
+OK    naked_focus: 0
+OK    external_font: 0
+OK    hype: 0
+OK    pure_bw: 0
+OK    progress_word: 0
+OK    latin_particle: 0
+OK    legacy_term: 0
+OK    raw_motion: 0
+OK    motion_lib_scope: 0
+
+OK    web: 14/14 categories clean.
+
+== design pre-flight (core), 이슈 #1141 ==
+   scanned: packages/momo-core/src (문자열 리터럴 노드만, *.test.ts 제외)
+   excluded: 주석·독스트링(AST가 보지 않는다), *.test.ts, design-preflight-allow 줄
+
+OK    emdash: 0
+OK    progress_word: 0
+OK    latin_particle: 0
+OK    legacy_term: 0
+OK    raw_color: 0
+OK    hype: 0
+
+RESULT: PASS, 6/6 categories clean.
+
+RESULT: PASS, web 14/14 + core 6/6 categories clean.
+  Still manual (SKILL §10 checklist): light AND dark reviewed, four states
+  present, keyboard path exists, long Korean strings do not overflow.
