@@ -832,7 +832,7 @@ planner 위임으로 수락하는 근거는 넷이에요(증보 2·4와 같은 �
   - `hosted_cadence.rs` 단위 19건: 중앙값≠평균·묶음·최소 표본·규칙성 경계 70%·박자 상한 90분·실측 모양 36개 표본·늦음 경계·마감 배수·realtime·창.
   - `routes/hosted_agent_connections.rs` 둘: 읽는 쪽과 쓰는 쪽의 action·경로 상수가 같다, 응답이 닫힌 어휘다.
   - `agent_cadence_contract.rs` 4건(DB 없음): 스펙의 `AgentCadence`·두 liveness 스키마와 DTO의 키가 양방향으로 같고, `kind` 목록이 서버의 어휘와 같다.
-  - `agent_cadence_conformance_pg.rs` 9건: 멤버·관리자 둘 다 `routine(15)`, 간격 3개 `unknown`·4개 `routine`, 늦음, realtime, 주기 없음, 로더의 술어마다 한 건씩(같은 id 두 번 포함), **실제 호출이 남긴 행을 읽음**, 비활성 연결 `unknown`, 키 집합과 404.
+  - `agent_cadence_conformance_pg.rs` 9건: 멤버·관리자 둘 다 `routine(15)`, 간격 3개 `unknown`·4개 `routine`, 늦음, realtime, 주기 없음, 로더의 술어마다 한 건씩(같은 id 두 번 포함), **실제 호출이 남긴 행을 읽음**, 비활성 연결 `unknown`, 멤버 응답에 허용된 키 밖의 것이 없음과 404.
   - 픽스처 행은 실제 호출 한 번의 `detail`을 본떠서 쓰는 쪽이 모양을 바꾸면 같이 빨개져요. 로더는 superuser 연결로 직접 불러요(RLS가 가려 주는 술어와 순수 함수가 대신 거르는 창을 따로 잡으려고요). 사보타주 표는 PR 본문에 있어요.
 - **#4621 (engine) 2단계.** workspace 게이트·OpenAPI 계약 게이트(`verify_openapi_contract_rust.sh`가 이 GET을 샘플해요)·독립 보안 검수(노출 범위·열세 번째 `audit_log` 읽기)·PR. 검증 증거의 정본은 PR 본문이에요.
 - 범위 밖(후속): 코어 파서의 `cadence` 읽기와 문구(#4619·#4620), 도어벨 깨움 분리, `audit_log` 인덱스·보존 정책.

@@ -20,7 +20,7 @@
 //! | `the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the_window` | 창 밖·다른 에이전트·다른 action(`agent_port.call`, 거절된 호출 `scope_denied`)·REST 경로·다른 워크스페이스의 행은 세지 않고, 같은 id를 두 번 줘도 두 배가 되지 않고, 상한은 가장 새로운 것부터 | 술어 하나씩, 중복 제거 |
 //! | `the_beat_is_read_from_the_rows_the_agent_port_really_writes` | 실제 호출 N번 = 로더가 N개 (감사 두 줄 중 `used`만) | 쓰는 쪽과 읽는 쪽이 어긋남 |
 //! | `a_connection_that_is_not_active_reads_unknown_whatever_it_did` | 박자 모양 이력이 있어도 비활성 연결은 `unknown` | 비활성 가드 |
-//! | `the_wire_is_closed_and_a_stranger_gets_the_same_404` | 키 집합 고정, 채널을 공유하지 않는 멤버는 404 | 새 키·탐침 |
+//! | `the_wire_is_closed_and_a_stranger_gets_the_same_404` | 멤버 응답에 허용된 키 밖의 것(관리자 필드·간격 수)이 없고, 채널을 공유하지 않는 멤버는 404 (키 집합의 정확한 일치는 `agent_cadence_contract`가 잠가요) | 새 키·탐침 |
 //!
 //! 격리 DB에서만:
 //!
