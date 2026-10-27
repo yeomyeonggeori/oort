@@ -880,9 +880,9 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
       expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
     );
     await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
-    // 실제 퇴장 애니메이션 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다리므로 기본 5초를 넘길 수 있다
-    // (느린 CI에서 3회 연속 초과, #4633). 결정화(가짜 시계)는 #4633에서 하고, 그때까지 이 시험만 넉넉히 둔다.
-  }, 20_000);
+    // 실제 퇴장 애니메이션 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다린다. 제한 시간은
+    // jest.config.js 의 testTimeout(20 s, #4633)이 진다 — 결정화(가짜 시계)는 #4633.
+  });
 });
 
 describe('버전 줄', () => {
