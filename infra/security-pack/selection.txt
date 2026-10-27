@@ -22,6 +22,12 @@ auth momo-server join_conformance_pg
 auth momo-server session_issue_conformance_pg
 auth momo-server membership_lifecycle_conformance_pg
 auth momo-server member_write_rate_limit_pg
+auth momo-server dev_token_door_conformance_pg
+auth momo-server dev_token_door_budget_audit_conformance_pg
+auth momo-server dev_token_lifecycle_conformance_pg
+auth momo-server dev_token_restrictions_conformance_pg
+auth momo-server dev_access_routes_conformance_pg
+auth momo-server member_sweep_lock_order_pg
 approval momo-server approval_push_audience_conformance_pg
 approval momo-server tool_grants_conformance_pg
 push momo-push device_conformance_pg
