@@ -734,12 +734,12 @@ const announce = () => jest.spyOn(AccessibilityInfo, 'announceForAccessibility')
 describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () => {
   liveWorld();
 
-  it('채널(관리자): 고정한 메시지 · 알림 끄기 · 채널 나가기 — 머리는 `# 이름`, 정보 행은 문이 없어 서지 않는다', async () => {
+  it('채널(관리자): 고정한 메시지 · 알림 끄기 · 채널 나가기 — 머리는 `# 이름`, 정보 행이 첫 줄이다', async () => {
     await mountShell();
     await openConversation(ROW.general);
     await openConversationMenu();
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent('# general');
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle', 'leave']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
     expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 끄기');
     expect(screen.getByTestId('conversation-menu-leave')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
   });
@@ -748,7 +748,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await mountShell({selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('알림이 꺼진 채널은 「알림 켜기」다', async () => {
@@ -763,7 +763,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await openConversation(ROW.human);
     await openConversationMenu();
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent('박서연');
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle', 'close-dm']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'close-dm']);
     expect(screen.getByTestId('conversation-menu-close-dm')).toHaveTextContent(DM_CLOSE_LABEL);
   });
 
@@ -771,7 +771,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await mountShell({serverClosure: true});
     await openConversation(ROW.agent);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'delegate', 'mute-toggle', 'close-dm']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'delegate', 'mute-toggle', 'close-dm']);
     fireEvent.press(screen.getByTestId('conversation-menu-close'));
     await waitFor(() => expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull());
     fireEvent.press(screen.getByTestId('header-back'));
@@ -785,42 +785,42 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await mountShell({serverClosure: true, dmUnread: true});
     await openConversation(ROW.human);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('멘션이 있는 DM 에도 닫기를 내밀지 않는다 — 안 읽은 수가 0 이어도', async () => {
     await mountShell({serverClosure: true, dmMention: true});
     await openConversation(ROW.human);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('「여기부터 안 읽음」 표시가 있는 DM 에도 내밀지 않는다 — wire 의 안 읽음이 0 이어도 코어 합성(ADR-0178 D3)으로 읽는다', async () => {
     await mountShell({serverClosure: true, dmMarkedUnread: true});
     await openConversation(ROW.human);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('읽음 투영 행이 없는 DM(메시지가 한 번도 없다)에는 내밀지 않는다 — 눌러도 아무 일도 못 하는 행은 없다', async () => {
     await mountShell({serverClosure: true, noDmRow: true});
     await openConversation(ROW.human);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('서버가 닫기를 싣지 않는 옛 서버에서는 닫기를 내밀지 않는다 — 폰에 기기 로컬 닫기는 없다', async () => {
     await mountShell({serverClosure: false});
     await openConversation(ROW.human);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('채널에는 서버가 닫기를 실어도 닫기가 없다 — 나가기가 없는 일반 멤버라도(나가기가 있으면 한 자리를 먼저 차지해 가린다)', async () => {
     await mountShell({serverClosure: true, selfRole: 'member'});
     await openConversation(ROW.general);
     await openConversationMenu();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle']);
   });
 
   it('고정 행의 낱말은 고정 읽기가 끝나면 개수를 말한다 — 코어 `pinListHeaderLabel`', async () => {
@@ -996,7 +996,7 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
     fireEvent.press(screen.getByTestId('conversation-menu-leave-cancel'));
     expect(screen.queryByTestId('conversation-menu-leave-confirm')).toBeNull();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle', 'leave']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
   });
 
@@ -1041,7 +1041,7 @@ describe('셸 — 채널 나가기는 확인 단계를 지난다 (#4319)', () =>
     await waitFor(() => expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull());
     await openConversationMenu();
     expect(screen.queryByTestId('conversation-menu-leave-confirm')).toBeNull();
-    expect(menuKeys()).toEqual(['pins', 'mute-toggle', 'leave']);
+    expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
     expect(calls.filter(call => call.method === 'DELETE')).toHaveLength(0);
   });
 
@@ -1164,7 +1164,7 @@ describe('화면 — 채널 목록을 모르는 동안과 대화가 바뀔 때 (
     return {view, tree};
   }
 
-  it('채널 목록이 이 대화를 모르면 ⋮ 는 그래도 열린다 — 고정 목록만 서고 알림·닫기·나가기는 없다, 머리는 이름만이다', async () => {
+  it('채널 목록이 이 대화를 모르면 ⋮ 는 그래도 열린다 — 고정 목록만 서고 정보·알림·닫기·나가기는 없다, 머리는 이름만이다', async () => {
     installFetch({serverClosure: true});
     // 서버 채널 목록이 이 대화를 싣지 않는다(목록이 오기 전 · 보관된 채널을 연 경우).
     const real = globalThis.fetch as unknown as jest.Mock;
@@ -1175,6 +1175,7 @@ describe('화면 — 채널 목록을 모르는 동안과 대화가 바뀔 때 (
     mountScreen(jest.fn());
     await screen.findByTestId('conversation-menu');
     await openConversationMenu();
+    // 정보 행도 없다 — 종류를 모르면 정보 페이지가 무엇의 정보인지 모른다(알약도 단추가 아니다).
     expect(menuKeys()).toEqual(['pins']);
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent(/^general$/);
     // 고정 목록은 채널 없이도 열린다.

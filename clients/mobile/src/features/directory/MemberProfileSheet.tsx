@@ -2,24 +2,15 @@ import {
   dmAvailability,
   openDmErrorMessage,
   roleLabel,
-  statusLabel,
   type RoleLabels,
 } from '@momo/core/features/directory/model';
-import {
-  customStatusAccessibleText,
-  visibleCustomStatus,
-} from '@momo/core/features/presence/customStatus';
-import type {
-  StatusDot as PeerStatus,
-  StatusDotTone,
-} from '@momo/core/features/presence/statusDot';
+import type {StatusDot as PeerStatus} from '@momo/core/features/presence/statusDot';
 import type {RosterMember} from '@momo/core/lib/api';
 import {memberFor, type Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
   Image,
-  Pressable,
   StyleSheet,
   Text,
   useWindowDimensions,
@@ -27,7 +18,7 @@ import {
 } from 'react-native';
 import {FailureBanner, Sentence} from '../../design/atoms';
 import {HOME_ICON_SIZE, HOME_ICONS, MENU_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
-import {PageSheet, usePageSheetAction} from '../../design/PageSheet';
+import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
 import {
   ActionTile,
@@ -38,17 +29,18 @@ import {
   TileIcon,
 } from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
-import {font, line, radius, space, type Palette} from '../../design/tokens';
+import {font, line, space, type Palette} from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
-import {Avatar, useAvatarSource} from '../conversation/Avatar';
 import {COPY_RECEIPT_MS, copyText} from '../conversation/copy';
-import {StatusDot} from '../presence/StatusDot';
 import {
-  PROFILE_FACE,
-  PROFILE_FACE_SQUARE_RADIUS,
-  PROFILE_FACE_SQUARE_RING_RADIUS,
-  useFaceRing,
-} from '../profile/ProfileFace';
+  BigFace,
+  HeroMeta,
+  memberChip,
+  memberCustomStatus,
+  ProfileHero,
+  StatusChips,
+  type ProfilePhoto,
+} from './profileHero';
 import {tilesFitInRow} from './profileTiles';
 
 // =============================================================================
@@ -82,15 +74,7 @@ import {tilesFitInRow} from './profileTiles';
 // 공개 범위 결정)이 되면 이 카드에 한 줄이 선다.
 // =============================================================================
 
-/** 크게 볼 사진 — 호출한 쪽(대화 화면)이 시트를 내린 뒤 `AvatarViewer` 로 연다. */
-export interface ProfilePhoto {
-  uri: string;
-  label: string;
-}
-
-/** 얼굴을 눌러 크게 보는 단추의 이름(사진이 있을 때만 단추다)과 뷰어가 읽는 사진의 이름. */
-const enlargeName = (name: string) => `${name} 프로필 사진 크게 보기`;
-const photoName = (name: string) => `${name} 프로필 사진`;
+export type {ProfilePhoto};
 
 /** 멘션 복사가 안 됐을 때 같은 자리에서 하는 말 — 토스트가 아니다. */
 const COPY_FAILURE = '복사하지 못했어요. 다시 눌러 보세요.';
@@ -159,15 +143,8 @@ export function MemberProfileSheet({
   const emailText = email?.trim() ? email.trim() : null;
 
   // ---- 상태 칩 · 한 줄 상태 · 이름 아래 한 줄 ---------------------------------
-  const membershipWord = statusLabel(member);
-  const chip: {label: string; tone: StatusDotTone | null} | null =
-    membershipWord !== null
-      ? {label: membershipWord, tone: null}
-      : status !== null
-        ? {label: status.label, tone: status.tone}
-        : null;
-  const custom = visibleCustomStatus(member, nowMs);
-  const customLine = custom ? [custom.emoji, custom.text].filter(Boolean).join(' ') : null;
+  const chip = memberChip(member, status);
+  const custom = memberCustomStatus(member, nowMs);
   const kindWord = isAgent ? '에이전트' : roleLabel(member, roleLabels);
 
   // ---- 멘션 복사 영수증 -------------------------------------------------------
@@ -276,18 +253,19 @@ export function MemberProfileSheet({
       testID="member-profile-sheet">
       <SheetHeader title="프로필" closeLabel="프로필 닫기" closeTestID="member-profile-close" />
       <SheetScroll testID="member-profile-scroll">
-        <View style={styles.hero}>
-          <Face
-            member={member}
-            directory={directory}
-            isAgent={isAgent}
-            onEnlarge={onEnlargeAvatar}
-          />
-          <View style={styles.heroText}>
-            <Sentence style={styles.name} numberOfLines={2} testID="profile-name">
-              {member.displayName}
-            </Sentence>
-            <Text style={styles.meta} numberOfLines={1}>
+        <ProfileHero
+          face={
+            <BigFace
+              member={member}
+              directory={directory}
+              isAgent={isAgent}
+              onEnlarge={onEnlargeAvatar}
+            />
+          }
+          name={member.displayName}
+          nameTestID="profile-name"
+          meta={
+            <HeroMeta>
               <Text testID="profile-handle">{`@${member.handle}`}</Text>
               {kindWord ? (
                 <>
@@ -295,36 +273,16 @@ export function MemberProfileSheet({
                   <Text testID="profile-role">{kindWord}</Text>
                 </>
               ) : null}
-            </Text>
-          </View>
-          {chip !== null || customLine !== null ? (
-            <View style={styles.pills}>
-              {chip !== null ? (
-                <View
-                  accessible
-                  accessibilityLabel={`상태: ${chip.label}`}
-                  style={styles.chip}
-                  testID="profile-status">
-                  {chip.tone !== null ? (
-                    <StatusDot tone={chip.tone} testID="profile-status-dot" />
-                  ) : null}
-                  {/* 낱말을 자르지 않는다 — 「조용함 · 마지막 응답 5분 전」 같은 긴 판정이 큰 글씨·좁은 폭에서 한 줄이 못 되면 알약 안에서 접힌다. */}
-                  <Sentence style={styles.chipLabel}>{chip.label}</Sentence>
-                </View>
-              ) : null}
-              {customLine !== null ? (
-                <View style={[styles.chip, styles.customPill]}>
-                  <Sentence
-                    accessibilityLabel={customStatusAccessibleText(member, nowMs) ?? undefined}
-                    style={styles.customText}
-                    testID="profile-status-text">
-                    {customLine}
-                  </Sentence>
-                </View>
-              ) : null}
-            </View>
-          ) : null}
-        </View>
+            </HeroMeta>
+          }
+          chips={
+            <StatusChips
+              chip={chip}
+              custom={custom}
+              ids={{chip: 'profile-status', dot: 'profile-status-dot', custom: 'profile-status-text'}}
+            />
+          }
+        />
 
         {stacked ? <View style={styles.tileStack}>{tiles}</View> : <ActionTileRow>{tiles}</ActionTileRow>}
 
@@ -368,56 +326,6 @@ export function MemberProfileSheet({
 }
 
 /**
- * 큰 얼굴. 사진이 **있을 때만** 단추다 — 눌리는지는 `Avatar` 가 그리는 것과 같은 판정(`useAvatarSource`)에서 나온다. 이니셜·「모른다」
- * 표지의 얼굴은 눌러도 아무 일도 없고 단추 역할도 없다(눌리는 척하는 얼굴이 가장 나쁘다).
- *
- * 누르면 시트를 내린 뒤(`usePageSheetAction`) 부른 쪽이 사진을 연다. 사람은 원, 에이전트는 둥근 사각이고(ADR-0189, `Avatar` 가 가른다)
- * 둘 다 설정 페이지의 큰 얼굴과 같은 크기·같은 링이다(`ProfileFace`).
- */
-function Face({
-  member,
-  directory,
-  isAgent,
-  onEnlarge,
-}: {
-  member: RosterMember;
-  directory: Directory;
-  isAgent: boolean;
-  onEnlarge?: (photo: ProfilePhoto) => void;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const faceRing = useFaceRing();
-  const afterClose = usePageSheetAction();
-  const {source} = useAvatarSource(directory, member.id);
-  const ring = [faceRing, isAgent && styles.ringSquare];
-  const face = (
-    <Avatar
-      directory={directory}
-      memberId={member.id}
-      size={PROFILE_FACE}
-      squareRadius={isAgent ? PROFILE_FACE_SQUARE_RADIUS : undefined}
-    />
-  );
-  if (source === null || onEnlarge === undefined) {
-    return (
-      <View style={ring} testID="profile-face">
-        {face}
-      </View>
-    );
-  }
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={enlargeName(member.displayName)}
-      onPress={() => afterClose(() => onEnlarge({uri: source, label: photoName(member.displayName)}))}
-      style={({pressed}) => [ring, pressed && styles.facePressed]}
-      testID="profile-face">
-      {face}
-    </Pressable>
-  );
-}
-
-/**
  * 설정 타일의 앞 글리프. 우리 아이콘 세트에는 톱니가 없고(새 에셋은 이 이슈가 만들지 않는다) 「내 계정」은 사람 윤곽이 가장 가깝다.
  * 그 글리프(`HOME_ICONS.user`)는 18pt 로 구워져 22 칸으로 키우면 흐려지므로(`phone-sheets.md` §4) 제 크기로 그리고, 이웃 타일과 라벨 줄이
  * 어긋나지 않게 22 칸 안에 가운데 앉힌다.
@@ -433,43 +341,6 @@ function UserGlyph(): React.JSX.Element {
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    // 설정 페이지의 히어로(`SettingsPage` `hero`)와 같은 문법 — 큰 얼굴 · 이름 · 알약 한 줄.
-    hero: {alignItems: 'center', gap: space.md, paddingTop: space.sm},
-    heroText: {alignItems: 'center', gap: space.xs, alignSelf: 'stretch'},
-    name: {
-      fontSize: font.title,
-      fontWeight: '700',
-      color: color.text,
-      textAlign: 'center',
-    },
-    meta: {fontSize: font.label, color: color.textMuted, textAlign: 'center'},
-    ringSquare: {borderRadius: PROFILE_FACE_SQUARE_RING_RADIUS},
-    facePressed: {opacity: 0.7},
-    pills: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      justifyContent: 'center',
-      gap: space.sm,
-    },
-    // 테두리가 없다 — 작은 테두리 알약은 이 팔레트에서 **컨트롤** 문법이고, 이 알약은 누를 수 없다(`SettingsPage` 알약과 같은 이유).
-    chip: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.sm,
-      paddingHorizontal: space.md,
-      paddingVertical: space.xs,
-      borderRadius: radius.pill,
-      backgroundColor: color.surface,
-      maxWidth: '100%',
-    },
-    chipLabel: {flexShrink: 1, fontSize: font.label, fontWeight: '600', color: color.text},
-    customPill: {boxShadow: color.elevationRest, flexShrink: 1},
-    customText: {
-      fontSize: font.label,
-      fontWeight: '600',
-      color: color.textMuted,
-      textAlign: 'center',
-    },
     tileStack: {gap: space.sm},
     glyphSlot: {
       width: SHEET_ICON_SIZE.copy,

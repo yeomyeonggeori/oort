@@ -1,3 +1,4 @@
+import {estimateTextWidth} from '../../design/textEstimate';
 import {font, SAFE_GUTTER, space} from '../../design/tokens';
 
 // =============================================================================
@@ -12,22 +13,9 @@ import {font, SAFE_GUTTER, space} from '../../design/tokens';
 // 라벨이 잘리는 것보다 싸다. 한글 한 음절은 글자 크기만큼(1em), 공백은 0.3em, 그 밖(영문·숫자·기호)은 0.6em 이다.
 // =============================================================================
 
-/** 한글 음절 한 글자의 폭(em). */
-const HANGUL_EM = 1;
-/** 공백의 폭(em). */
-const SPACE_EM = 0.3;
-/** 한글 음절·공백이 아닌 글자의 폭(em) — 영문·숫자·기호. */
-const OTHER_EM = 0.6;
-
-const HANGUL_SYLLABLE = /[가-힣]/;
-
-/** 타일 라벨(`font.label`, 굵게)이 `fontScale` 에서 차지하는 폭(pt)의 어림. */
+/** 타일 라벨(`font.label`, 굵게)이 `fontScale` 에서 차지하는 폭(pt)의 어림 — 어림표는 `design/textEstimate.ts` 한 곳이다. */
 export function tileLabelWidth(label: string, fontScale: number): number {
-  let em = 0;
-  for (const char of label) {
-    em += HANGUL_SYLLABLE.test(char) ? HANGUL_EM : char === ' ' ? SPACE_EM : OTHER_EM;
-  }
-  return em * font.label * fontScale;
+  return estimateTextWidth(label, font.label, fontScale);
 }
 
 /** 라벨이 타일 가장자리에 붙지 않게 양쪽에 남기는 숨(pt). 타일은 가로 여백이 없다. */

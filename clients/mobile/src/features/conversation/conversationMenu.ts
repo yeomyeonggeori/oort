@@ -4,7 +4,12 @@ import {
 } from '@momo/core/features/channels/actionModel';
 import {channelMenuAccessibleLabel} from '@momo/core/features/channels/model';
 import type {Channel} from '@momo/core/lib/api';
-import {channelRowActionItems, type ChannelRowTarget} from '../sidebar/channelRowActions';
+import {
+  channelRowActionItems,
+  NOTHING_COPIED,
+  type ChannelRowCopied,
+  type ChannelRowTarget,
+} from '../sidebar/channelRowActions';
 
 // =============================================================================
 // 대화 머리 ⋮ 시트가 **무엇을 내놓는가** (#4319, owner 10-27 「DM 에서는 대화 정보 · 고정한 메시지 · 알림 끄기 · …」).
@@ -36,6 +41,31 @@ export const CONVERSATION_MENU_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new 
 /** 코어 `row` 표의 답에서 이 시트의 셋만(알림 · DM 닫기 · 채널 나가기) — 차례·낱말·위험색·진행 낱말은 표의 것 그대로다. */
 export function conversationMenuActionItems(target: ChannelRowTarget): ChannelActionItem[] {
   return channelRowActionItems(target).filter(item => CONVERSATION_MENU_ACTION_KEYS.has(item.key));
+}
+
+/**
+ * 대화·채널 **정보 페이지**(#4319)가 내놓는 열쇠 — 이름·링크·ID 복사 · 알림 · 대화 닫기 · 채널 나가기. 사이드바 행 시트(`channelRowActionItems`)가 쓰는 같은
+ * 코어 표에서 읽음 처리·읽지 않음 표시만 뺀 것이다(읽음은 지금 읽고 있는 대화에 건네는 말이 아니다 — 코어 `header` 표면과 같은 판단).
+ * **별표·섹션 이동은 없다**: 폰에 그 손이 없어서(`channelRowActions.ts` 의 「죽은 항목 금지」) 코어 표가 입력으로 이미 막는다.
+ */
+export const CONVERSATION_INFO_ACTION_KEYS: ReadonlySet<ChannelActionKey> = new Set<ChannelActionKey>([
+  'copy-name',
+  'copy-link',
+  'copy-id',
+  'mute',
+  'close-dm',
+  'leave',
+]);
+
+/**
+ * 정보 페이지의 항목. 낱말·차례·위험색·진행 낱말·**복사 영수증 낱말**(`copied` 가 참인 줄은 「복사됨」)까지 코어 표의 답이다 — 내밀지 말지
+ * (`canLeaveChannel`·`dmCloseOffered`)도 이 표가 이미 정했다. 여기서는 거르기만 한다.
+ */
+export function conversationInfoActionItems(
+  target: ChannelRowTarget,
+  copied: ChannelRowCopied = NOTHING_COPIED,
+): ChannelActionItem[] {
+  return channelRowActionItems(target, copied).filter(item => CONVERSATION_INFO_ACTION_KEYS.has(item.key));
 }
 
 /** 「정보」 행의 낱말. 코어에 없는 폰의 문이다(위 머리말 1). DM 은 대화, 채널은 채널. */

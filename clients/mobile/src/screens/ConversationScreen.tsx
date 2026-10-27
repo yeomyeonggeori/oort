@@ -23,6 +23,7 @@ import {
 } from '@momo/core/features/workspace/directory';
 import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import type {ChannelActionKey} from '@momo/core/features/channels/actionModel';
+import {normalizeChannelTopic} from '@momo/core/features/channels/model';
 import {dmCloseOffered} from '@momo/core/features/sidebar/dmVisibility';
 import {readProjectionPhase} from '@momo/core/features/sidebar/goneDm';
 import {composedUnreadCount} from '@momo/core/features/readState/model';
@@ -112,7 +113,11 @@ import {useTypingSender} from '../features/conversation/useTypingSender';
 import {ConversationLayout} from '../features/conversation/ConversationLayout';
 import {ConversationHeader} from '../features/conversation/ConversationHeader';
 import {ConversationMenuSheet} from '../features/conversation/ConversationMenuSheet';
-import {conversationMenuActionItems} from '../features/conversation/conversationMenu';
+import {
+  conversationInfoActionItems,
+  conversationMenuActionItems,
+} from '../features/conversation/conversationMenu';
+import {ConversationInfoPage} from '../features/conversation/ConversationInfoPage';
 import {
   LongPressHint,
   useLongPressHint,
@@ -242,7 +247,15 @@ const NO_RECEIPTS: ReadonlyMap<string, ApprovalReceipt> = new Map();
  * 연결 상태는 여기 없다(DS2-4, owner 표: 연결 문제는 부제가 아니라 배너). 모르는
  * 것은 말하지 않는다: 멤버 목록이 안 왔으면 수를 짓지 않는다. DM 은 부제가 없다
  * (얼굴 + 이름 한 줄, #4016).
+ *
+ * 이 긴 문장은 이제 머리가 아니라 **정보 페이지**(#4319)의 것이다 — 머리 알약에는 짧은 멤버 수
+ * (`channelMemberCountLabel`)만 서서 머리가 한 줄로 남는다.
  */
+export function channelMemberCountLabel(channel: {memberIds?: string[]} | null): string | undefined {
+  const ids = channel?.memberIds;
+  return ids && ids.length > 0 ? `${ids.length}명` : undefined;
+}
+
 export function conversationSubtitle(
   channel: {kind: string; memberIds?: string[]} | null,
   peer: {kind: string} | null,
@@ -257,7 +270,7 @@ export function conversationSubtitle(
   const agents = ids
     .map(id => memberFor(directory, id))
     .filter(found => found?.kind === 'agent');
-  const count = `${ids.length}명`;
+  const count = channelMemberCountLabel(channel) as string;
   if (agents.length === 0) return count;
   const first = agents[0]!.displayName;
   return agents.length === 1
@@ -995,6 +1008,28 @@ export default function ConversationScreen({
   // 채널이 바뀌면 열린 시트를 걷는다 — 고정 목록(`pinsOpen`)과 같은 이유다: 이 화면은 `channelId` 만 갈아 끼우므로 앞 방의 시트가 이 방 위에 남는다.
   useEffect(() => closeMenu(), [channelId, closeMenu]);
 
+  // ---- 대화·채널 정보 페이지 (#4319) ------------------------------------------------
+  //
+  // 머리 가운데 알약과 ⋮ 시트의 「정보」 행이 같은 페이지를 연다. 고정 목록(`pinsOpen`)처럼 이 화면의 지역 상태이고 채널이 바뀌면 닫힌다.
+  //
+  // 페이지의 알림·복사·닫기·나가기는 같은 훅의 **둘째 인스턴스**가 실행한다 — 첫째(`rowActions`)의 `active` 가 ⋮ 시트의 열림이라, 정보 페이지의 복사
+  // 영수증·알림 실패·나가기 확인이 같은 인스턴스를 쓰면 ⋮ 시트가 페이지 위에 뜬다(`flashCopied`·`failed`·`run(leave)` 가 모두 `active` 를 세운다). 둘째는
+  // `active` 를 그리는 데 쓰지 않으므로 그럴 일이 없고, 훅이 영수증 뒤 `close()` 를 불러도 페이지는 안 사라진다(페이지의 열림은 `infoOpen` 이다).
+  const infoActions = useChannelRowActions(workspaceId, member.id, onMenuChannelLeft);
+  const {
+    close: closeInfoActions,
+    run: runInfoAction,
+    isPending: isInfoActionPending,
+  } = infoActions;
+  const [infoOpen, setInfoOpen] = useState(false);
+  const openInfo = useCallback(() => setInfoOpen(true), []);
+  // 페이지를 걷으면 훅의 상태(복사 영수증·실패 문장·나가기 확인)도 비운다 — 다시 열었을 때 지난 영수증이 남아 있지 않게.
+  const closeInfo = useCallback(() => {
+    setInfoOpen(false);
+    closeInfoActions();
+  }, [closeInfoActions]);
+  useEffect(() => closeInfo(), [channelId, closeInfo]);
+
   const readPhase = readProjectionPhase(readStates);
   const closureMode = dmClosureMode(readStates.data);
   const selfRole = memberFor(directory, member.id)?.role;
@@ -1026,6 +1061,18 @@ export default function ConversationScreen({
   const menuItems = useMemo(
     () => (channel === null ? [] : conversationMenuActionItems(menuTarget)),
     [channel, menuTarget],
+  );
+  const infoItems = useMemo(
+    () => (channel === null ? [] : conversationInfoActionItems(menuTarget, infoActions.copied)),
+    [channel, menuTarget, infoActions.copied],
+  );
+  const runInfo = useCallback(
+    (key: ChannelActionKey) => {
+      // 같은 행동이 도는 중이면 다시 보내지 않는다(⋮ 시트와 같은 규칙).
+      if (isInfoActionPending(key)) return;
+      runInfoAction(menuTarget, key);
+    },
+    [isInfoActionPending, runInfoAction, menuTarget],
   );
   // ⋮ 를 **누르는** 손짓이다 — 행을 길게 눌러 여는 진동(`medium`)이 아니라 + 메뉴처럼 가벼운 한 번(`light`).
   const openMenu = useCallback(
@@ -1739,6 +1786,7 @@ export default function ConversationScreen({
     landedNotificationRef.current = notification.token;
     const plan = planNotificationLanding(timelineMessages, notification);
     setPinsOpen(false);
+    closeInfo();
     setAdeOpen(false);
     closeMemberProfile();
     closeAvatarViewer();
@@ -1766,6 +1814,7 @@ export default function ConversationScreen({
     landingHeld,
     timelineMessages,
     requestJump,
+    closeInfo,
     closeMemberProfile,
     closeAvatarViewer,
   ]);
@@ -1822,7 +1871,7 @@ export default function ConversationScreen({
       <View collapsable={false} style={styles.column} testID="conversation-column">
       <ConversationHeader
         title={title}
-        subtitle={headerSubtitle}
+        memberCount={channelMemberCountLabel(channel)}
         kind={channel?.kind}
         peerId={peer?.id ?? null}
         peerStatusTone={peerStatus?.tone ?? null}
@@ -1830,6 +1879,8 @@ export default function ConversationScreen({
         directory={directory}
         onBack={onBack}
         onOpenMenu={openMenu}
+        // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
+        onOpenInfo={channel !== null ? openInfo : undefined}
         railStatus={railStatus}
         onBannerInset={setBannerInset}
       />
@@ -2114,6 +2165,41 @@ export default function ConversationScreen({
         />
       ) : null}
 
+      {/* 정보 페이지. 고정 목록 뒤 — 층은 JSX 순서다. 사진 뷰어는 아래 맨 끝이라 페이지 **위에** 선다(닫으면 이 페이지로 돌아온다). */}
+      {infoOpen && channel !== null ? (
+        <ConversationInfoPage
+          kind={channel.kind}
+          title={title}
+          directory={directory}
+          items={infoItems}
+          confirmingLeave={infoActions.confirmingLeave}
+          isPending={isInfoActionPending}
+          error={infoActions.error}
+          leave={infoActions.leave}
+          onRun={runInfo}
+          onConfirmLeave={infoActions.confirmLeave}
+          onCancelLeave={infoActions.cancelLeave}
+          onClose={closeInfo}
+          peer={peer}
+          status={peerStatus}
+          nowMs={nowMs}
+          roleLabels={roleLabels}
+          subtitle={headerSubtitle}
+          topic={normalizeChannelTopic(channel.topic ?? '')}
+          onOpenAgent={
+            peer?.kind === 'agent' && onOpenAgent
+              ? () =>
+                  onOpenAgent({
+                    memberId: peer.id,
+                    displayName: peer.displayName,
+                    handle: peer.handle,
+                  })
+              : undefined
+          }
+          onEnlargeAvatar={setAvatarViewer}
+        />
+      ) : null}
+
       {adeOpen && onOpenConversation && isSurfaceProvided('ade') ? (
         <AdeControlPanel
           onClose={closeAde}
@@ -2123,12 +2209,13 @@ export default function ConversationScreen({
       ) : null}
 
       {rowActions.active !== null ? (
-        // `onOpenInfo` 는 달지 않는다 — 정보 화면이 서는 날 그 문을 단다(문 없는 행을 먼저 세우지 않는다).
+        // 「정보」 행은 시트를 먼저 내린 뒤(`closesSheet`: `onClose` → 이 문) 정보 페이지를 연다.
         <ConversationMenuSheet
           title={title}
           kind={channel?.kind}
           pinLabel={pinLabel}
           onOpenPins={openPins}
+          onOpenInfo={channel !== null ? openInfo : undefined}
           onDelegateWork={delegateWork}
           items={menuItems}
           confirmingLeave={rowActions.confirmingLeave}
