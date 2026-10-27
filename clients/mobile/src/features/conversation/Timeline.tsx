@@ -24,6 +24,7 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewProps,
   type ViewToken,
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
@@ -32,6 +33,7 @@ import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
+import {AnchoredScrollView, createNeutralAnchorStore} from './neutralAnchor';
 import {
   ARRIVAL_SURFACE_CHANNEL,
   arrivalsInFlight,
@@ -446,10 +448,12 @@ const NO_ECHOES: readonly EchoItem[] = [];
  * 관성 자격이 서 있는 동안 — 날짜 알약이 서는 조건과 같은 판정)이고, 아니면 이 목록이 스스로 낸 이동(진입 수렴·바닥 맞춤·따라가기)이다.
  * `pin` 은 이 목록이 낸 이동이 지금 쥐고 있는 창(`scrollPinUntilRef`)이다.
  * `c` = `maintainVisibleContentPosition` 을 뗐다(`on`) 붙였다(`!on`)(`chasingTail`).
+ * `n` = 중립 앵커(`neutralAnchor.tsx`)가 섰다(`on`) 평상으로 돌아왔다(`!on`) — 먼 「최신으로」는 prop 을 떼지 않고 이것을 켠다(#4689).
  */
 export type ScrollLogEntry =
   | {k: 's'; t: number; y: number; content: number; view: number; user: boolean; pin: boolean}
-  | {k: 'c'; t: number; on: boolean};
+  | {k: 'c'; t: number; on: boolean}
+  | {k: 'n'; t: number; on: boolean};
 
 /** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
 export interface PillState {
@@ -1099,6 +1103,30 @@ function TimelineInner({
   useEffect(() => {
     scrollLogRef?.current?.push({k: 'c', t: Date.now(), on: chasingTail});
   }, [chasingTail, scrollLogRef]);
+  /**
+   * 먼 「최신으로」가 prop 을 떼는 대신 켜는 중립 앵커 (#4689, `neutralAnchor.tsx`). 켜고 끄는 문은 이 저장소 하나다
+   * (`convergeToEnd` 가 켜고, `holdLanding` 의 끝·`release(false)`·`cancelConvergence` 가 끈다). React state 가 아니라 저장소인 이유와
+   * 전이가 보초 View 하나만 다시 그리는 이유는 그 파일 머리말에 있다. 렌더 함수가 변하지 않으므로 목록은 다시 그려지지 않는다.
+   */
+  const anchorStore = useMemo(createNeutralAnchorStore, []);
+  const renderScrollComponent = useCallback(
+    (props: ScrollViewProps) => (
+      <AnchoredScrollView {...props} anchorStore={anchorStore} />
+    ),
+    [anchorStore],
+  );
+  // 측정 seam: 중립 앵커의 전이도 같은 기록에 남긴다(앱에서는 하네스가 배열을 꽂지 않아 아무 일도 하지 않는다).
+  useEffect(
+    () =>
+      anchorStore.subscribe(() => {
+        scrollLogRef?.current?.push({
+          k: 'n',
+          t: Date.now(),
+          on: anchorStore.get() === 'neutral',
+        });
+      }),
+    [anchorStore, scrollLogRef],
+  );
   /**
    * 방금 점프해서 도착한 행 (#1076 · #3921). 없으면 `null`.
    *
@@ -1971,7 +1999,10 @@ function TimelineInner({
       followSettleTimerRef.current = undefined;
     }
     convergingRef.current = false;
-  }, []);
+    // 중립 앵커는 이동의 것이다 — 이동을 거두는 모든 길(손가락·방 전환·다른 이동·언마운트)이 함께 끈다(#4689). 끄는 것은 보초의 높이뿐이라
+    // y 가 안 변하고, 그래서 어느 커밋에서 꺼도 보정이 생기지 않는다(`neutralAnchor.tsx`).
+    anchorStore.set('rest');
+  }, [anchorStore]);
 
   const convergeToEnd = useCallback(
     (mode: 'entry' | 'send' | 'latest') => {
@@ -2029,8 +2060,26 @@ function TimelineInner({
         (distance === null || distance <= geometryRef.current.viewportHeight);
       const glide = near && mode !== 'latest';
       convergingRef.current = !near;
-      // Off for the correction, back on the moment it ends.
-      if (!near) setChasingTail(true);
+      // **A far 「최신으로」 never takes the prop off** (#4689). Off for the
+      // correction and back on at release is how the stale anchor came back: the
+      // re-attach applied `−y` of a row that had been unmounted on the way (16
+      // Pro, 300 rows: −14,854pt from the middle, −2,631pt from near the top),
+      // which showed the old content again and sent the hold ticks back down
+      // for 200–415ms. So the prop stays on and the anchor is made neutral
+      // instead — an always-mounted sentinel that is the native anchor for the
+      // length of the travel and never moves (`neutralAnchor.tsx`). Entry and
+      // send keep the toggle, as before: their numbers (#2586, #2604) were
+      // earned with it.
+      const neutral = mode === 'latest' && !near;
+      if (neutral) {
+        // A far send cancelled by this press may have left the prop off; it comes
+        // back first, so the travel starts from the prop the sentinel can govern.
+        setChasingTail(false);
+        anchorStore.set('neutral');
+      } else if (!near) {
+        // Off for the correction, back on the moment it ends.
+        setChasingTail(true);
+      }
 
       /**
        * One hop toward the end.
@@ -2133,6 +2182,10 @@ function TimelineInner({
           }
           if (Date.now() >= until) {
             scrollPinUntilRef.current = 0;
+            // The neutral anchor lasts as long as the hold (#4689): the first
+            // arrival is not the end of the movement — the batches that follow it
+            // are met by the sentinel, not by a re-attached stale anchor.
+            anchorStore.set('rest');
             return;
           }
           convergeTimerRef.current = setTimeout(tick, CONVERGE_ROUND_MS);
@@ -2145,7 +2198,11 @@ function TimelineInner({
 
       const release = (arrived: boolean) => {
         convergingRef.current = false;
-        setChasingTail(false);
+        // The prop was never taken off for a neutral travel — nothing to put back.
+        if (!neutral) setChasingTail(false);
+        // No hold follows a travel that did not arrive, so its anchor is let go here;
+        // one that arrived lets go when `holdLanding` ends.
+        if (neutral && !arrived) anchorStore.set('rest');
         // Hand the scroll back at once rather than at the deadline: the list is
         // where the correction wanted it, so the ordinary rule ("far from the end
         // means the reader is reading") is true again and should apply again.
@@ -2267,6 +2324,7 @@ function TimelineInner({
       });
     },
     [
+      anchorStore,
       cancelConvergence,
       cancelFocus,
       cancelJumpTravel,
@@ -3162,6 +3220,8 @@ function TimelineInner({
       // cell keeps its native view while it is off, so the anchor it comes back
       // to is still the same row (#2586 — `TimelineCell`).
       CellRendererComponent={TimelineCell}
+      // 먼 「최신으로」는 위 prop 을 떼지 않는다 — 대신 헤더 바로 뒤의 보초가 네이티브 앵커가 된다(#4689, `neutralAnchor.tsx`).
+      renderScrollComponent={renderScrollComponent}
       onScroll={onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}
