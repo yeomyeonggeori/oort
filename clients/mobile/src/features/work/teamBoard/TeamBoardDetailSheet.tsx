@@ -13,26 +13,22 @@ import {
   whereLabel,
 } from '@momo/core/features/workbench/teamBoard';
 import React from 'react';
+import {Linking, StyleSheet, Text, View} from 'react-native';
+import {Sentence} from '../../../design/atoms';
 import {
-  Linking,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {BAR_CONTROL_MAX_SCALE} from '../../../design/atoms';
-import {PageSheet, usePageSheetClose} from '../../../design/PageSheet';
+  PageSheet,
+  usePageSheetAction,
+  usePageSheetClose,
+} from '../../../design/PageSheet';
+import {SheetHeader} from '../../../design/SheetChrome';
+import {GroupCard, GroupLabel, ListRow, SheetScroll} from '../../../design/sheetParts';
 import {useStyles} from '../../../design/theme';
 import {
-  ds2Radius,
   font,
   line,
   radius,
-  SAFE_GUTTER,
+  SHEET,
   space,
-  TOUCH_TARGET,
   type Palette,
 } from '../../../design/tokens';
 import {LaneLabel, StateChip} from './TeamBoardParts';
@@ -49,7 +45,18 @@ import {ReportedFacts} from '../jobs/WorkJobParts';
 //
 // 보이는 것은 서버가 준 S1 필드뿐이다: 레인, 이름, 주인·하네스·저장소/브랜치, 상태 문장,
 // 단계 표지, 커밋·diff 숫자, PR. 커밋 제목은 어느 길로도 오지 않는다(Q2).
+//
+// ## 공용 시트로 (#4458)
+//
+// 머리는 오른쪽 원형 X 의 `SheetHeader` 다(옛 글자 「닫기」 단추는 없다). 이름은 「작업 상세 닫기」 —
+// 코어 `drawerClose` 는 웹 서랍과 공용인 맨 「닫기」라 어느 시트를 닫는지 말하지 못해, 폰은 화면 이름에 「 닫기」를
+// 붙인다(코어는 건드리지 않는다). 몸은 묶음 카드다: 요약 카드, 진행·로그·결과는 라벨 + 카드, 이동은 **행**(셰브론)이고
+// 눌리면 시트가 **먼저 내려간 뒤** 이동한다. 읽기 전용 상세라 규칙상 페이지 후보다(`phone-sheets.md` §1) — 이 이슈는
+// 시트로 둔 채 머리·부품만 옮겼다.
 // =============================================================================
+
+/** X·스크림의 보조기술 이름. */
+const DETAIL_CLOSE_LABEL = `${TEAM_BOARD_COPY.drawerLabel} 닫기`;
 
 export function TeamBoardDetailSheet({
   item,
@@ -73,6 +80,7 @@ export function TeamBoardDetailSheet({
     <PageSheet
       onClose={onClose}
       accessibilityLabel={TEAM_BOARD_COPY.drawerLabel}
+      scrimLabel={DETAIL_CLOSE_LABEL}
       testID="team-detail-sheet">
       <SheetBody
         item={item}
@@ -99,8 +107,8 @@ function SheetBody({
   onOpenAgentSession?: (sessionId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const insets = useSafeAreaInsets();
   const slideClose = usePageSheetClose() ?? onClose;
+  const afterClose = usePageSheetAction();
   const where = whereLabel(item);
   const whereText = [where.primary, where.secondary]
     .filter((part): part is string => part !== null)
@@ -120,75 +128,59 @@ function SheetBody({
             : null,
           facts.files !== null ? `파일 ${facts.files}` : null,
         ].filter((part): part is string => part !== null);
+  // 다른 화면으로 가는 행: 시트를 먼저 내린 뒤 부른 쪽의 일을 한 번 부른다(부른 쪽이 곧바로 걷어도 스냅으로 사라지지 않는다).
+  const openChannel = () => afterClose(() => onOpenChannel(item.homeChannel.id));
 
   return (
     <View style={styles.root}>
-      <View style={styles.nav}>
-        <View style={styles.navSide} />
-        <Text
-          accessibilityRole="header"
-          style={styles.navTitle}
-          numberOfLines={1}
-          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-          {TEAM_BOARD_COPY.drawerLabel}
-        </Text>
-        <View style={[styles.navSide, styles.navSideEnd]}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={TEAM_BOARD_COPY.drawerClose}
-            onPress={slideClose}
-            style={({pressed}) => [styles.navButton, pressed && styles.pressed]}
-            testID="team-detail-close">
-            <Text style={styles.navButtonLabel}>
-              {TEAM_BOARD_COPY.drawerClose}
-            </Text>
-          </Pressable>
-        </View>
-      </View>
+      <SheetHeader
+        title={TEAM_BOARD_COPY.drawerLabel}
+        closeLabel={DETAIL_CLOSE_LABEL}
+        onClose={slideClose}
+        closeTestID="team-detail-close"
+      />
 
-      <ScrollView
-        contentContainerStyle={[
-          styles.content,
-          {paddingBottom: insets.bottom + space.xl},
-        ]}
-        testID="team-detail-scroll">
-        <View style={styles.head}>
-          <LaneLabel item={item} testID="team-detail-lane" />
-          <Text style={styles.title} testID="team-detail-title">
-            {sessionTitle(item)}
-          </Text>
-          <Text style={styles.meta} testID="team-detail-meta">
-            {item.owner.displayName} · {harnessLabel(item)}
-          </Text>
-          {whereText !== '' ? (
-            <Text style={styles.where} testID="team-detail-where">
-              {whereText}
+      <SheetScroll testID="team-detail-scroll">
+        <GroupCard>
+          <View style={styles.head}>
+            <LaneLabel item={item} testID="team-detail-lane" />
+            <Text style={styles.title} testID="team-detail-title">
+              {sessionTitle(item)}
             </Text>
-          ) : null}
-          <View style={styles.stateLine}>
-            <StateChip item={item} testID="team-detail-state" />
-            <Text style={styles.stateSentence} testID="team-detail-sentence">
-              {approval ? WORK_JOBS_COPY.approvalHint : stateSentence(item, nowMs)}
+            <Text style={styles.meta} testID="team-detail-meta">
+              {item.owner.displayName} · {harnessLabel(item)}
             </Text>
+            {whereText !== '' ? (
+              <Text style={styles.where} testID="team-detail-where">
+                {whereText}
+              </Text>
+            ) : null}
+            <View style={styles.stateLine}>
+              <StateChip item={item} testID="team-detail-state" />
+              <Text style={styles.stateSentence} testID="team-detail-sentence">
+                {approval ? WORK_JOBS_COPY.approvalHint : stateSentence(item, nowMs)}
+              </Text>
+            </View>
           </View>
-          {/* 승인 대기(ADR-0202 D1): 결정 단추는 여기 없다. 카드가 있는 채널로 간다(D5). */}
-          {approval ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`${WORK_JOBS_COPY.approvalAction}, ${channel}`}
-              onPress={() => onOpenChannel(item.homeChannel.id)}
-              style={({pressed}) => [styles.card, pressed && styles.pressed]}
-              testID="team-detail-approval-link">
-              <Text style={styles.cardTitle}>{WORK_JOBS_COPY.approvalAction}</Text>
-              <Text style={styles.cardSub}>{channel}</Text>
-            </Pressable>
-          ) : null}
-        </View>
+        </GroupCard>
 
+        {/* 승인 대기(ADR-0202 D1): 결정 단추는 여기 없다. 카드가 있는 채널로 간다(D5). */}
+        {approval ? (
+          <GroupCard>
+            <ListRow
+              title={WORK_JOBS_COPY.approvalAction}
+              detail={channel}
+              accessory="chevron"
+              accessibilityLabel={`${WORK_JOBS_COPY.approvalAction}, ${channel}`}
+              onPress={openChannel}
+              testID="team-detail-approval-link"
+            />
+          </GroupCard>
+        ) : null}
 
         {markers.length > 0 ? (
           <Section heading={TEAM_BOARD_COPY.progressHeading}>
-            <View style={styles.stages} testID="team-detail-stages">
+            <GroupCard testID="team-detail-stages">
               {markers.map((marker, index) => (
                 <View
                   key={`${index}-${marker.label}`}
@@ -204,104 +196,94 @@ function SheetBody({
                   <Text style={styles.stageLabel}>{marker.label}</Text>
                 </View>
               ))}
-            </View>
+            </GroupCard>
           </Section>
         ) : null}
 
         {logParts.length > 0 ? (
-          <Section
-            heading={TEAM_BOARD_COPY.logHeading}
-            hint={TEAM_BOARD_COPY.logHint}>
-            <Text style={styles.log} testID="team-detail-log">
-              {logParts.join(' · ')}
-            </Text>
+          <Section heading={TEAM_BOARD_COPY.logHeading}>
+            <GroupCard>
+              <View style={styles.body}>
+                <Text style={styles.log} testID="team-detail-log">
+                  {logParts.join(' · ')}
+                </Text>
+                <Text style={styles.hint}>{TEAM_BOARD_COPY.logHint}</Text>
+              </View>
+            </GroupCard>
           </Section>
         ) : null}
 
         {/* 웹 서랍과 같은 순서: 진행 → 로그 요약 → 에이전트 보고 → 결과(design-review M-6). */}
         {item.agentReported != null ? (
-          <View style={styles.section}>
-            <ReportedFacts reported={item.agentReported} />
-          </View>
+          <ReportedFacts reported={item.agentReported} />
         ) : null}
 
         <Section heading={TEAM_BOARD_COPY.resultHeading}>
-          {pr !== null ? (
-            <Pressable
-              accessibilityRole="link"
-              accessibilityLabel={`${pr.number}, ${pr.repo}, 브라우저에서 열기`}
-              onPress={() => void Linking.openURL(pr.href)}
-              style={({pressed}) => [styles.card, pressed && styles.pressed]}
-              testID="team-detail-pr">
-              <Text style={styles.cardTitle}>{pr.number}</Text>
-              <Text style={styles.cardSub}>{pr.repo}</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.card} testID="team-detail-no-pr">
-              <Text style={styles.cardTitle}>{TEAM_BOARD_COPY.noPr}</Text>
-              <Text style={styles.cardSub}>
-                {isRunItem(item)
-                  ? TEAM_BOARD_COPY.runNoPrBody
-                  : TEAM_BOARD_COPY.noPrBody}
-              </Text>
-            </View>
-          )}
+          <GroupCard>
+            {pr !== null ? (
+              <ListRow
+                title={pr.number}
+                detail={pr.repo}
+                accessory="chevron"
+                // 이 앱 밖(브라우저)으로 나가는 행이라 「버튼」이 아니라 「링크」로 읽힌다(옛 줄과 같다).
+                accessibilityRole="link"
+                accessibilityLabel={`${pr.number}, ${pr.repo}, 브라우저에서 열기`}
+                onPress={() => void Linking.openURL(pr.href)}
+                testID="team-detail-pr"
+              />
+            ) : (
+              <View style={styles.body} testID="team-detail-no-pr">
+                <Text style={styles.cardTitle}>{TEAM_BOARD_COPY.noPr}</Text>
+                <Text style={styles.cardSub}>
+                  {isRunItem(item)
+                    ? TEAM_BOARD_COPY.runNoPrBody
+                    : TEAM_BOARD_COPY.noPrBody}
+                </Text>
+              </View>
+            )}
+          </GroupCard>
         </Section>
 
-        <Text style={styles.terminalNote} testID="team-detail-terminal-note">
+        <Sentence style={styles.terminalNote} testID="team-detail-terminal-note">
           {isRunItem(item)
             ? TEAM_BOARD_COPY.runNote
             : TEAM_BOARD_COPY.terminalNote}
-        </Text>
+        </Sentence>
 
         {/* 행동은 대화에서 한다. 바닥에는 이동만 있다. */}
-        <View style={styles.actions}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${channel}에서 보기`}
-            onPress={() => onOpenChannel(item.homeChannel.id)}
-            style={({pressed}) => [styles.action, pressed && styles.pressed]}
-            testID="team-detail-open-channel">
-            <Text style={styles.actionLabel} numberOfLines={1}>
-              {channel}에서 보기
-            </Text>
-          </Pressable>
+        <GroupCard>
+          <ListRow
+            title={`${channel}에서 보기`}
+            accessory="chevron"
+            onPress={openChannel}
+            testID="team-detail-open-channel"
+          />
           {onOpenAgentSession !== undefined && item.origin === 'host' ? (
-            <Pressable
-              accessibilityRole="button"
+            <ListRow
+              title="내 에이전트 세션 화면"
+              accessory="chevron"
               accessibilityLabel="내 에이전트 세션 화면으로 이동"
-              onPress={() => onOpenAgentSession(item.sessionId)}
-              style={({pressed}) => [styles.action, pressed && styles.pressed]}
-              testID="team-detail-open-agent-session">
-              <Text style={styles.actionLabel} numberOfLines={1}>
-                내 에이전트 세션 화면
-              </Text>
-            </Pressable>
+              onPress={() => afterClose(() => onOpenAgentSession(item.sessionId))}
+              testID="team-detail-open-agent-session"
+            />
           ) : null}
-        </View>
-      </ScrollView>
+        </GroupCard>
+      </SheetScroll>
     </View>
   );
 }
 
 function Section({
   heading,
-  hint,
   children,
 }: {
   heading: string;
-  hint?: string;
   children: React.ReactNode;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.section}>
-      <Text accessibilityRole="header" style={styles.sectionHeading}>
-        {heading}
-        {hint !== undefined ? (
-          <Text style={styles.sectionHint}>{`  ${hint}`}</Text>
-        ) : null}
-      </Text>
+      <GroupLabel>{heading}</GroupLabel>
       {children}
     </View>
   );
@@ -310,37 +292,17 @@ function Section({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {flex: 1},
-    nav: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      minHeight: TOUCH_TARGET + space.md,
-      paddingHorizontal: space.sm,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: color.border,
+    // 카드 안의 요약·본문 — 안쪽 가로 여백은 카드 행과 같은 값이다.
+    head: {
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+      gap: space.sm,
     },
-    navSide: {flex: 1, flexDirection: 'row'},
-    navSideEnd: {justifyContent: 'flex-end'},
-    navTitle: {
-      flexShrink: 1,
-      fontSize: font.body,
-      fontWeight: '600',
-      color: color.text,
-      textAlign: 'center',
+    body: {
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
+      gap: space.xs,
     },
-    navButton: {
-      minHeight: TOUCH_TARGET,
-      justifyContent: 'center',
-      paddingHorizontal: space.sm,
-      borderRadius: radius.sm,
-    },
-    navButtonLabel: {
-      fontSize: font.body,
-      color: color.accentText,
-      fontWeight: '600',
-    },
-    pressed: {backgroundColor: color.surfacePressed},
-    content: {paddingTop: space.lg, gap: space.lg},
-    head: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
     title: {
       fontSize: font.heading,
       lineHeight: line.body,
@@ -360,16 +322,15 @@ const buildStyles = (color: Palette) =>
       lineHeight: line.label,
       color: color.text,
     },
-    section: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
-    sectionHeading: {
-      fontSize: font.label,
-      lineHeight: line.label,
-      fontWeight: '600',
-      color: color.textMuted,
+    // 섹션 라벨과 그 아래 카드는 한 묶음이다(`GroupCard` 의 라벨과 같은 간격).
+    section: {gap: space.sm},
+    stage: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: space.sm,
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
     },
-    sectionHint: {fontWeight: '400', color: color.textMuted},
-    stages: {gap: space.sm},
-    stage: {flexDirection: 'row', alignItems: 'center', gap: space.sm},
     stageDot: {
       width: 8,
       height: 8,
@@ -389,16 +350,7 @@ const buildStyles = (color: Palette) =>
       color: color.text,
       fontVariant: ['tabular-nums'],
     },
-    card: {
-      gap: space.xs,
-      paddingHorizontal: space.md,
-      paddingVertical: space.md,
-      minHeight: TOUCH_TARGET,
-      borderRadius: ds2Radius.row,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: color.border,
-      backgroundColor: color.surface,
-    },
+    hint: {fontSize: font.meta, lineHeight: line.meta, color: color.textMuted},
     cardTitle: {
       fontSize: font.body,
       lineHeight: line.body,
@@ -406,30 +358,11 @@ const buildStyles = (color: Palette) =>
       color: color.text,
     },
     cardSub: {fontSize: font.label, lineHeight: line.label, color: color.textMuted},
+    // 카드가 아니라 각주다 — 터미널 원문이 어디에 있는지 말하는 한 문단.
     terminalNote: {
-      marginHorizontal: SAFE_GUTTER,
-      paddingHorizontal: space.md,
-      paddingVertical: space.sm,
-      borderRadius: ds2Radius.row,
-      backgroundColor: color.surface,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
       lineHeight: line.label,
       color: color.textMuted,
-    },
-    actions: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
-    action: {
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-      paddingHorizontal: space.lg,
-      borderRadius: ds2Radius.pill,
-      backgroundColor: color.surface,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-    },
-    actionLabel: {
-      fontSize: font.body,
-      fontWeight: '600',
-      color: color.text,
     },
   });
