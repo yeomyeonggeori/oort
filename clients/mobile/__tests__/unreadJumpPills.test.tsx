@@ -13,7 +13,7 @@ import {
 import {readFileSync} from 'fs';
 import {join} from 'path';
 import React from 'react';
-import {AccessibilityInfo, FlatList, Keyboard} from 'react-native';
+import {AccessibilityInfo, FlatList, Keyboard, StyleSheet} from 'react-native';
 
 import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 import {
@@ -1630,6 +1630,30 @@ describe('메우기를 걸었으면 초점은 활강이 끝난 뒤에 옮긴다 
   });
 });
 
+// ---- #4689 중립 앵커 ---------------------------------------------------------------------------
+// 먼 「최신으로」는 `maintainVisibleContentPosition` 을 떼지 않는다. 떼었다 붙이는 순간 네이티브가 낡은 앵커의 이동량을 더해 목록을 방금 간 만큼 되밀었다(16 Pro·Debug·300행:
+// 중간 −14,854pt). 대신 헤더 바로 뒤의 보초 뷰가 가는 동안만 내용 전체 높이로 서서 네이티브 앵커가 된다 — y 가 안 변하니 보정은 0 이다(`neutralAnchor.tsx`).
+// 이 시험들은 호출자가 보는 것만 본다: 스크롤뷰가 받은 prop 과 보초가 그려진 모양.
+
+/** 쉬는 목록이 스크롤뷰에 내려 주는 prop — 머리 1 이 더해진 값(`timelineRender.test.tsx`). */
+const RESTING_MVCP = {minIndexForVisible: 1};
+
+function mvcp(): unknown {
+  return list().props.maintainVisibleContentPosition;
+}
+
+/**
+ * 보초의 지금 모양 — 평상(높이 0)인가 중립(위에서 아래까지 내용 전체)인가, 그리고 어디에 있는가(`top`).
+ * 접근성에서 숨긴 뷰라 숨은 것도 찾는다.
+ */
+function sentinel(): {phase: 'rest' | 'neutral'; top: number | undefined} {
+  const node = screen.getByTestId('timeline-anchor', {includeHiddenElements: true});
+  const style = StyleSheet.flatten(node.props.style) as {top?: number; bottom?: number; height?: number};
+  if (style.height === 0) return {phase: 'rest', top: style.top};
+  if (style.bottom === 0 && style.height === undefined) return {phase: 'neutral', top: style.top};
+  throw new Error(`알 수 없는 보초 모양: ${JSON.stringify(style)}`);
+}
+
 describe('아래 필 「최신으로」', () => {
   it('바닥에 있으면 없고, 떠나면 「최신 메시지로 이동」이 선다', async () => {
     mount();
@@ -1701,6 +1725,130 @@ describe('아래 필 「최신으로」', () => {
       expect(bottomPill()).toBeNull();
     },
   );
+
+  it('먼 「최신으로」는 prop 을 떼지 않는다 — 보초가 내용 전체 높이로 서 있다가 착지 유지가 끝나야 평상으로 돌아온다 (#4689)', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory(); // 끝까지 2000pt — 창(800)보다 멀다
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('rest');
+    const tops = [sentinel().top];
+
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    // 가는 동안: prop 은 그대로이고, 보초가 내용 전체 높이가 됐다.
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('neutral');
+    tops.push(sentinel().top);
+
+    atTheEnd();
+    await waitRound(); // 도착 — 수렴이 풀린다
+    // 첫 도착으로 풀지 않는다: 이어 붙는 배치는 보초가 받는다.
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('neutral');
+    tops.push(sentinel().top);
+
+    await sleep(800); // 착지 유지(600ms)가 끝난다
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('rest');
+    tops.push(sentinel().top);
+
+    // 보초의 y 는 평상·중립 어느 때도 같다 — 앵커의 y 가 바뀌면 그 차이가 그대로 되밀림이 된다(켜고 끌 때도).
+    expect(tops).toEqual([-1000, -1000, -1000, -1000]);
+  });
+
+  it('끝에 닿지 못한 먼 「최신으로」는 수렴이 손을 놓을 때 보초를 평상으로 돌린다 (#4689)', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    expect(sentinel().phase).toBe('neutral');
+
+    // 도착 보고가 없다 — 수렴은 진전 없이 400ms 뒤 손을 놓고, 그 뒤에는 착지 유지도 없다.
+    await sleep(700);
+    expect(sentinel().phase).toBe('rest');
+    expect(mvcp()).toEqual(RESTING_MVCP);
+  });
+
+  it('손가락이 목록을 잡으면 보초는 그 자리에서 평상이다 (#4689)', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    expect(sentinel().phase).toBe('neutral');
+
+    fireEvent(list(), 'scrollBeginDrag'); // 시간은 흐르지 않았다
+    expect(sentinel().phase).toBe('rest');
+    expect(mvcp()).toEqual(RESTING_MVCP);
+  });
+
+  it('방을 옮기면 보초는 그 자리에서 평상이다 — 새 방의 스크롤뷰가 중립으로 서지 않는다 (#4689)', async () => {
+    const {rerender} = mount({channelId: 'ch'});
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    expect(sentinel().phase).toBe('neutral');
+
+    switchToRoomB(rerender);
+    expect(sentinel().phase).toBe('rest');
+    expect(mvcp()).toEqual(RESTING_MVCP);
+  });
+
+  it('다른 이동이 가로채도 보초는 그 자리에서 평상이다 — 인용 점프 (#4689)', async () => {
+    jest.spyOn(FlatList.prototype, 'scrollToIndex').mockImplementation(() => {});
+    const {rerender} = mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    expect(sentinel().phase).toBe('neutral');
+
+    rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});
+    expect(sentinel().phase).toBe('rest');
+  });
+
+  it('가까운 「최신으로」는 prop 도 보초도 건드리지 않는다 (#4689)', async () => {
+    mount();
+    await settleAtBottom();
+    fireEvent(list(), 'scrollBeginDrag');
+    scrollBy(2800); // 끝까지 400pt — 창(800) 안이라 「가깝다」
+    expect(bottomPill()).not.toBeNull();
+
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('rest');
+    atTheEnd();
+    await sleep(800);
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('rest');
+  });
+
+  it('먼 전송과 진입은 지금까지처럼 prop 을 뗐다 붙인다 — 보초는 쉰다 (#4689)', async () => {
+    const {rerender} = mount();
+    // 진입: 첫 콘텐츠 크기가 오면 끝을 쫓는 동안 prop 이 빠진다.
+    fireEvent(list(), 'contentSizeChange', 390, 4000);
+    await flushFrame();
+    expect(mvcp()).toBeUndefined();
+    expect(sentinel().phase).toBe('rest');
+    atTheEnd();
+    await settleAtBottom();
+    expect(mvcp()).toEqual(RESTING_MVCP);
+
+    // 전송: 멀리 올라간 채 보내면 끝으로 가는 동안 prop 이 빠졌다 도착하면 돌아온다.
+    scrollUpIntoHistory();
+    rerender({selfSendToken: 1});
+    await flushFrame();
+    expect(mvcp()).toBeUndefined();
+    expect(sentinel().phase).toBe('rest');
+    atTheEnd();
+    await waitRound();
+    expect(mvcp()).toEqual(RESTING_MVCP);
+    expect(sentinel().phase).toBe('rest');
+  });
 
   it('끝을 넘어 선 자리는 쉬는 자리가 아니다 — 스크롤뷰가 든 끝으로 되돌린다', async () => {
     // 시뮬레이터 실측(iOS 26.5): 착지한 목록이 콘텐츠 끝보다 415pt 아래에 서서

@@ -92,7 +92,6 @@ function NeutralAnchor({store}: {store: NeutralAnchorStore}): React.JSX.Element 
       pointerEvents="none"
       accessible={false}
       accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
       style={styles[phase]}
       testID={NEUTRAL_ANCHOR_TEST_ID}
     />
