@@ -125,6 +125,9 @@ pub struct ServerOptions {
     pub hosted_delivery_enabled: bool,
     /// What the operator declared for the co-hosted Hermes (#3948).
     pub cohosted: CohostedAgentConfig,
+    /// The Agent Port admission limits as `(per token, per agent)` calls per window. `None` leaves
+    /// both axes off (`0`), which is what every suite but the ones that test refusal wants (#4618).
+    pub agent_port_limits: Option<(u32, u32)>,
 }
 
 impl ServerOptions {
@@ -133,6 +136,12 @@ impl ServerOptions {
             hosted_delivery_enabled: true,
             ..ServerOptions::default()
         }
+    }
+
+    /// Turn the Agent Port admission limiter on (calls per 60 s window, `0` = that axis stays off).
+    pub fn with_agent_port_limits(mut self, per_token: u32, per_agent: u32) -> Self {
+        self.agent_port_limits = Some((per_token, per_agent));
+        self
     }
 
     pub fn attested(mut self, apps: &[&str]) -> Self {
@@ -170,8 +179,12 @@ pub async fn start_server(pool: PgPool, options: ServerOptions) -> String {
     .with_agent_port(AgentPortConfig {
         external_origin: None,
         window_seconds: 60,
-        per_token_limit: 0,
-        per_agent_limit: 0,
+        per_token_limit: options
+            .agent_port_limits
+            .map_or(0, |(per_token, _)| per_token),
+        per_agent_limit: options
+            .agent_port_limits
+            .map_or(0, |(_, per_agent)| per_agent),
         per_ip_limit: 0,
         hosted_delivery_enabled: options.hosted_delivery_enabled,
         subscription_agents_enabled: true,

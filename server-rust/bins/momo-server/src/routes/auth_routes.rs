@@ -192,11 +192,14 @@ struct SessionTokens {
 /// middleware's MOMO-300 revocation check meaningful — minting without a row
 /// would turn every subsequent request into a 401 `unknown token`.
 ///
-/// `pub(crate)` since B4.3 so `POST /v1/join` mints its session through this and
-/// not a copy: a joined session must be revocable exactly like a logged-in one.
+/// `pub(crate)` since B4.3 so the other doors that sign someone in (claim, password
+/// change) mint through this and not a copy: a session must be revocable exactly
+/// like a logged-in one. `POST /v1/join` signs in inside its own transaction
+/// ([`mint_and_record_session_in_tx`], #4625) and shares the recording with this
+/// function ([`record_session_pair`]), so what a session persists is still said once.
 ///
-/// Every caller of this name starts a NEW session (login, join, claim, password
-/// change), so it opens a fresh lineage (#2677). A refresh continues one and
+/// Every caller of this name starts a NEW session (login, claim, password change),
+/// so it opens a fresh lineage (#2677). A refresh continues one and
 /// goes through [`issue_and_record_session_in_lineage`] instead.
 pub(crate) async fn issue_and_record_session(
     state: &AppState,
@@ -243,34 +246,82 @@ async fn issue_and_record_session_in_lineage(
     };
     with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            record_session_token(
-                conn,
-                workspace_id,
-                session.member_id,
-                &session.access_token,
-                SESSION_LABEL_ACCESS,
-                &session.scopes,
-                session.access_expires_at,
-                session.session_id,
-            )
-            .await?;
-            record_session_token(
-                conn,
-                workspace_id,
-                session.member_id,
-                &session.refresh_token,
-                SESSION_LABEL_REFRESH,
-                &session.scopes,
-                session.refresh_expires_at,
-                session.session_id,
-            )
-            .await?;
+            record_session_pair(conn, workspace_id, &session).await?;
             Ok::<(), DbError>(())
         })
     })
     .await
     .map_err(|error| db_error(&format!("{context}.record_session"), error))?;
 
+    Ok((access, refresh))
+}
+
+/// Record both halves of one session pair on `conn`, in the order and with the
+/// labels every session has. The single place that says what a session persists:
+/// [`issue_and_record_session_in_lineage`] and [`mint_and_record_session_in_tx`]
+/// both end here.
+async fn record_session_pair(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session: &SessionTokens,
+) -> Result<(), momo_db::sqlx::Error> {
+    record_session_token(
+        conn,
+        workspace_id,
+        session.member_id,
+        &session.access_token,
+        SESSION_LABEL_ACCESS,
+        &session.scopes,
+        session.access_expires_at,
+        session.session_id,
+    )
+    .await?;
+    record_session_token(
+        conn,
+        workspace_id,
+        session.member_id,
+        &session.refresh_token,
+        SESSION_LABEL_REFRESH,
+        &session.scopes,
+        session.refresh_expires_at,
+        session.session_id,
+    )
+    .await
+}
+
+/// Mint a NEW session's pair for `member_id` and record it **on `conn`**, a
+/// connection that already carries the tenant GUC and belongs to a transaction the
+/// caller commits — for a caller whose decision to sign someone in must not be
+/// separable from the pair that decision produces.
+///
+/// `POST /v1/join` is that caller: it holds the workspace's membership lock (shared)
+/// from its first statement to its commit, so a suspension or removal that follows
+/// waits, then revokes the pair this function recorded. Minting after the commit
+/// instead lets that revocation run in between and miss a pair that does not exist
+/// yet. A signing failure surfaces as a `sqlx::Error::Protocol`: it cannot happen
+/// with a configured secret, and the caller answers it as the opaque 500 any other
+/// failure of that transaction is.
+pub(crate) async fn mint_and_record_session_in_tx(
+    conn: &mut PgConnection,
+    jwt_secret: &str,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    scopes: Vec<String>,
+) -> Result<(IssuedToken, IssuedToken), momo_db::sqlx::Error> {
+    let access = sign_access(member_id, workspace_id, &scopes, jwt_secret)
+        .map_err(|error| momo_db::sqlx::Error::Protocol(format!("sign_access: {error}")))?;
+    let refresh = sign_refresh(member_id, workspace_id, &scopes, jwt_secret)
+        .map_err(|error| momo_db::sqlx::Error::Protocol(format!("sign_refresh: {error}")))?;
+    let session = SessionTokens {
+        member_id,
+        scopes,
+        access_token: access.token.clone(),
+        access_expires_at: access.expires_at,
+        refresh_token: refresh.token.clone(),
+        refresh_expires_at: refresh.expires_at,
+        session_id: new_session_id(),
+    };
+    record_session_pair(conn, workspace_id, &session).await?;
     Ok((access, refresh))
 }
 

@@ -50,6 +50,7 @@
 pub mod agent_avatar;
 pub mod agent_card;
 pub mod attachment;
+pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod channel;
 pub mod channel_viewing;
