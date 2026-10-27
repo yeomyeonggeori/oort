@@ -4879,6 +4879,8 @@ pub struct HostedLivenessDto {
     /// When the oldest such run was queued.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest_waiting_at_ms: Option<i64>,
+    /// ADR-0200 증보 6 (#4621): how often this agent comes to the Agent Port.
+    pub cadence: AgentCadenceDto,
 }
 
 /// openapi `AgentLiveness` — what any member who shares a channel with the agent may
@@ -4890,6 +4892,43 @@ pub struct AgentLivenessDto {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_signal_at_ms: Option<i64>,
+    /// ADR-0200 증보 6 (#4621): how often this agent comes to the Agent Port, so a screen
+    /// can say "다음 확인 때 가져가요" instead of "연결이 꺼져 있을 수 있어요".
+    pub cadence: AgentCadenceDto,
+}
+
+/// openapi `AgentCadence` (ADR-0200 증보 6, #4621) — derived by the server from the agent's
+/// admitted Agent Port calls; a client draws it and estimates nothing.
+///
+/// `routine` carries all three of `typicalMinutes`, `expectedCheckAtMs` and `late`; `realtime`
+/// and `unknown` carry none of them. No row, no call time and no count leaves the server.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCadenceDto {
+    /// `realtime` | `routine` | `unknown`.
+    pub kind: String,
+    /// The usual gap between the agent's wakes, in whole minutes (at least 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typical_minutes: Option<i64>,
+    /// When a request that is still waiting stops being explained by the beat: the newest
+    /// wake's start plus two usual gaps. A deadline, not a forecast; it may already be past.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_check_at_ms: Option<i64>,
+    /// No call for more than three usual gaps: the beat is broken.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub late: Option<bool>,
+}
+
+impl From<&momo_agent::Cadence> for AgentCadenceDto {
+    fn from(cadence: &momo_agent::Cadence) -> Self {
+        let routine = cadence.kind == momo_agent::CadenceKind::Routine;
+        AgentCadenceDto {
+            kind: cadence.kind.as_wire().to_string(),
+            typical_minutes: cadence.typical_minutes,
+            expected_check_at_ms: cadence.expected_check_at.map(|at| at.timestamp_millis()),
+            late: routine.then_some(cadence.late),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]

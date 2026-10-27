@@ -4071,9 +4071,11 @@ paths:
       summary: Is this hosted agent alive right now? (label only)
       description: >
         ADR-0200 D4. Any active human workspace member who shares a channel with the agent receives
-        its derived liveness label and when it last spoke, in place of "connected". An agent without
-        a hosted connection and an agent the caller shares no channel with are the same 404, so the
-        route is no probe for whether an agent is hosted.
+        its derived liveness label and when it last spoke, in place of "connected". Amendment 6
+        (#4621) adds `cadence`: how often the agent comes to the Agent Port (the usual gap and when a
+        waiting request stops being explained by it). An agent without a hosted connection and an agent
+        the caller shares no channel with are the same 404, so the route is no probe for whether an
+        agent is hosted.
       security: [{bearerAuth: []}]
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
@@ -15699,6 +15701,8 @@ components:
           type: boolean
           description: At least one queued run this agent could claim right now.
         oldestWaitingAtMs: {type: integer, format: int64}
+        cadence:
+          $ref: "#/components/schemas/AgentCadence"
 
     AgentLiveness:
       type: object
@@ -15713,6 +15717,50 @@ components:
           type: string
           enum: [inactive, error, woken_not_collected, work_waiting, responsive, alive_idle, quiet, unresponsive]
         lastSignalAtMs: {type: integer, format: int64}
+        cadence:
+          $ref: "#/components/schemas/AgentCadence"
+
+    AgentCadence:
+      type: object
+      additionalProperties: false
+      required: [kind]
+      description: >
+        ADR-0200 amendment 6 (#4621). How often a hosted agent comes to the Agent Port, derived by the
+        server from the agent's admitted calls (`auth.agent_bearer.used` on the Agent Port path, newest
+        24 hours) - never from a body, an argument or an id. A client draws it and estimates nothing:
+        a routine agent is waiting for its next beat, not switched off, so a screen says "다음 확인 때
+        가져가요" instead of "연결이 꺼져 있을 수 있어요". `routine` carries all of `typicalMinutes`,
+        `expectedCheckAtMs` and `late`; `realtime` and `unknown` carry none of them. A connection that is
+        not `active` reads `unknown`. A server that has amendment 6 always sends it; it is not `required`
+        so that a client still reads the answer of an older server (read that as `unknown`).
+      properties:
+        kind:
+          type: string
+          enum: [realtime, routine, unknown]
+          description: >
+            `routine` = wakes on a beat: at least five wakes (a silence over 5 minutes ends a wake), the
+            median gap between wake starts is the beat (at most 90 minutes), and at least 70 percent of
+            the gaps lie within half to one and a half beats. `realtime` = never silent for more than 5
+            minutes during at least 80 percent of a span of at least 30 minutes, and its newest call is no
+            more than 5 minutes old (it is calling right now): ask whether it is connected, not when it
+            next checks. `unknown` = too few wakes, not periodic, no call in the last 24 hours, or a poller
+            that has stopped.
+        typicalMinutes:
+          type: integer
+          minimum: 1
+          description: The usual gap between wakes, rounded to the nearest minute (`routine` only).
+        expectedCheckAtMs:
+          type: integer
+          format: int64
+          description: >
+            `routine` only. The newest wake's start plus two usual gaps: when a request that is still
+            waiting stops being explained by the beat. A deadline with the agent's own jitter allowed
+            (half of all gaps are longer than their median), not a forecast; it may already be past.
+        late:
+          type: boolean
+          description: >
+            `routine` only. No call for more than three usual gaps: the beat is broken. Measured from
+            the newest call, so an agent that is working is not late.
 
     EnablePersonalAgentRequest:
       type: object
