@@ -141,6 +141,20 @@ fn requested_owner_only(
     }
 }
 
+/// The beat of one agent: derived from its admitted Agent Port calls, and only for an active
+/// connection (anything else is `unknown`, never a promise).
+fn cadence_for(
+    now: chrono::DateTime<chrono::Utc>,
+    active: bool,
+    calls: Option<&Vec<chrono::DateTime<chrono::Utc>>>,
+    params: &momo_agent::CadenceParams,
+) -> momo_agent::Cadence {
+    if !active {
+        return momo_agent::Cadence::unknown();
+    }
+    momo_agent::derive_cadence(now, calls.map_or(&[][..], Vec::as_slice), params)
+}
+
 /// ADR-0200 D4 (#3742): stamp each connection's derived liveness onto its DTO.
 ///
 /// One read of `hosted_agent_liveness` for the whole page; the doorbell fact is the one
@@ -158,6 +172,22 @@ pub(crate) async fn attach_liveness(
         .collect();
     let rows = momo_agent::load_liveness_rows_in_tx(conn, workspace_id, &ids).await?;
     let now = chrono::Utc::now();
+    // ADR-0200 증보 5 (#4621): the beat is read only for a connection that is active — a
+    // disconnected agent's old calls are not a promise that it will check again.
+    let cadence_params = momo_agent::CadenceParams::default();
+    let active_agents: Vec<Uuid> = dtos
+        .iter()
+        .filter(|dto| dto.status == "active")
+        .filter_map(|dto| Uuid::parse_str(&dto.agent_member_id).ok())
+        .collect();
+    let calls = momo_agent::load_agent_call_times_in_tx(
+        conn,
+        workspace_id,
+        &active_agents,
+        now - cadence_params.window,
+        cadence_params.max_calls,
+    )
+    .await?;
     for dto in dtos.iter_mut() {
         let (Ok(id), Ok(agent)) = (
             Uuid::parse_str(&dto.id),
@@ -199,6 +229,12 @@ pub(crate) async fn attach_liveness(
             last_tool_error_code: liveness.last_tool_error_code,
             work_waiting: waiting_since.is_some(),
             oldest_waiting_at_ms: waiting_since.map(super::shared::epoch_ms),
+            cadence: crate::dto::AgentCadenceDto::from(&cadence_for(
+                now,
+                active,
+                calls.get(&agent),
+                &cadence_params,
+            )),
         });
     }
     Ok(())
@@ -579,6 +615,8 @@ pub async fn agent_liveness(
     let viewer = principal.member_id;
     let doorbell_enabled = state.webhook.doorbell_enabled;
     let thresholds = crate::config::liveness_thresholds();
+    let cadence_params = momo_agent::CadenceParams::default();
+    let now = chrono::Utc::now();
     let dto = settle_db(
         "hosted_agent_connections.agent_liveness",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -616,17 +654,32 @@ pub async fn agent_liveness(
                     last_status: doorbell.and_then(|bell| bell.last_status),
                 };
                 let liveness = momo_agent::derive_liveness(
-                    chrono::Utc::now(),
+                    now,
                     active,
                     rows.get(&connection_id),
                     &fact,
                     waiting_since,
                     &thresholds,
                 );
+                // ADR-0200 증보 5 (#4621): the beat, from the agent's admitted Agent Port calls.
+                let calls = if active {
+                    momo_agent::load_agent_call_times_in_tx(
+                        conn,
+                        workspace_id,
+                        &[agent_id],
+                        now - cadence_params.window,
+                        cadence_params.max_calls,
+                    )
+                    .await?
+                } else {
+                    std::collections::HashMap::new()
+                };
+                let cadence = cadence_for(now, active, calls.get(&agent_id), &cadence_params);
                 Ok(Ok(AgentLivenessDto {
                     agent_member_id: agent_id.to_string(),
                     state: liveness.state.as_wire().to_string(),
                     last_signal_at_ms: liveness.last_signal_at.map(super::shared::epoch_ms),
+                    cadence: crate::dto::AgentCadenceDto::from(&cadence),
                 }))
             })
         })
@@ -1180,5 +1233,67 @@ mod tests {
         );
         assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
         assert_eq!(response.headers()[header::PRAGMA], "no-cache");
+    }
+
+    /// #4621: the beat is read from the rows the Agent Port's authentication writes. The reader
+    /// (`momo-agent`) cannot import the writer's constants (`momo-auth`), so it restates them;
+    /// this is where the two are made one. A renamed action or audience that this test did not
+    /// catch would leave every agent reading `unknown` with nothing red.
+    #[test]
+    fn the_cadence_reads_exactly_the_rows_the_agent_port_writes() {
+        assert_eq!(
+            momo_agent::AGENT_PORT_CALL_ACTION,
+            momo_auth::AUDIT_ACTION_USED
+        );
+        assert_eq!(
+            momo_agent::AGENT_PORT_CALL_PATH,
+            momo_auth::HOSTED_AGENT_PORT_AUDIENCE
+        );
+    }
+
+    fn dto_of(cadence: &momo_agent::Cadence) -> serde_json::Value {
+        serde_json::to_value(crate::dto::AgentCadenceDto::from(cadence)).expect("serialize")
+    }
+
+    /// The wire carries the closed vocabulary and nothing else: `routine` has all three
+    /// measurements, `realtime` and `unknown` have none (not `null`, absent), and no key outside
+    /// the four exists on any of them.
+    #[test]
+    fn the_cadence_wire_is_closed_and_only_a_routine_carries_numbers() {
+        let at = chrono::DateTime::parse_from_rfc3339("2026-10-27T12:00:00Z")
+            .expect("time")
+            .with_timezone(&chrono::Utc);
+        let routine = momo_agent::Cadence {
+            kind: momo_agent::CadenceKind::Routine,
+            typical_minutes: Some(15),
+            expected_check_at: Some(at),
+            late: true,
+            intervals: 5,
+        };
+        let json = dto_of(&routine);
+        assert_eq!(
+            json,
+            serde_json::json!({
+                "kind": "routine",
+                "typicalMinutes": 15,
+                "expectedCheckAtMs": at.timestamp_millis(),
+                "late": true,
+            })
+        );
+        // a count of intervals is the server's working, not the wire's
+        assert!(json.get("intervals").is_none(), "{json}");
+
+        for cadence in [
+            momo_agent::Cadence::unknown(),
+            momo_agent::Cadence {
+                kind: momo_agent::CadenceKind::Realtime,
+                ..momo_agent::Cadence::unknown()
+            },
+        ] {
+            let json = dto_of(&cadence);
+            let object = json.as_object().expect("object");
+            assert_eq!(object.len(), 1, "only `kind`: {json}");
+            assert_eq!(object["kind"], cadence.kind.as_wire());
+        }
     }
 }

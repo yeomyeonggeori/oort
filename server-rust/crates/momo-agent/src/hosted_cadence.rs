@@ -1,0 +1,628 @@
+//! How often does a hosted agent come to the Agent Port? (ADR-0200 증보 5, #4621)
+//!
+//! A hosted agent is not a socket. The grok bot wakes on a routine (about every 15
+//! minutes, three to six calls a wake) and sleeps in between, yet the screen read
+//! `hostOnline = false` and said "the connection may be off" — which is not what happened:
+//! the agent was waiting for its next beat. This module estimates that beat from facts the
+//! server already keeps, so a screen can say "다음 확인 때 가져가요(보통 N분 안)" instead.
+//!
+//! ## The material
+//!
+//! `audit_log` rows `auth.agent_bearer.used` on the Agent Port path — one row per admitted
+//! call, written in the authentication transaction, never capped, and present from before
+//! this change. The two other materials the issue names cannot carry the estimate alone:
+//!
+//! * `agent_port.call` is capped at 240 rows per credential per hour (a fast poller would
+//!   look like a slower one) and exists only since #4634;
+//! * `oort_ping` leaves one value (`hosted_agent_liveness.last_ping_at`), so there is no
+//!   history to take a median of.
+//!
+//! The rows are keyed by `actor_member_id` — the agent — not by token: an OAuth access
+//! token is replaced every 30 minutes and each replacement is a new `token` row.
+//!
+//! ## The estimate ([`derive_cadence`], pure)
+//!
+//! 1. Calls inside the window ([`CadenceParams::window`], 24 h — the staleness bound: with
+//!    no call inside it the answer is `unknown`).
+//! 2. A silence longer than [`CadenceParams::wake_gap`] (5 min) ends a **wake**: the three to
+//!    six calls of one routine run are one event, not five.
+//! 3. `realtime` when the agent was present — never silent for more than the wake gap — for
+//!    at least 80 % of a span of at least 30 minutes. Such an agent has no beat to estimate:
+//!    "connected / not connected" is the right question for it. Without this rule a poller
+//!    that calls every 10 seconds is one 24-hour wake, has no intervals, and reads `unknown`.
+//! 4. Otherwise the **intervals between wake starts**; with fewer than
+//!    [`CadenceParams::min_intervals`] (4, i.e. five wakes) the answer is `unknown`.
+//! 5. The **median** interval `M` is the beat. If fewer than 60 % of the intervals lie within
+//!    ±50 % of `M` the agent is not periodic (a doorbell-only agent wakes whenever someone
+//!    writes): `unknown`, not a made-up "보통 40분".
+//! 6. `routine`: `typical_minutes` = `M` rounded to the nearest minute; `expected_check_at`
+//!    = start of the newest wake + 2 × `M`; `late` = no call for more than 3 × `M`.
+//!
+//! The 2× in step 6 is the allowance the screen needs. Half of all intervals are longer than
+//! their median, so a deadline at `+ M` would flag a healthy routine as "못 가져감" on every
+//! slow wake; 15-minute routines were measured at 10–29 minutes (#4284), and the same ratio
+//! (30 = 2 × 15) is the sweep's `woken_not_collected` rule (증보 3 E2). The 3× is the issue's
+//! "박자가 끊김" line. `late` is measured from the newest **call** (a sign of life) and the
+//! deadline from the newest wake **start** (the beat is start to start): an agent working a
+//! 50-minute job is calling, so it is not late.
+//!
+//! Nothing here changes a state: [`crate::derive_liveness`], the stall sweep and
+//! [`crate::collected_since`] are untouched. A cadence is something to show, not an input to a
+//! transition.
+
+use std::collections::HashMap;
+
+use chrono::{DateTime, Duration, Utc};
+use momo_db::DbError;
+use sqlx::{PgConnection, Row};
+use uuid::Uuid;
+
+/// `audit_log.action` of one admitted Agent Port call. Restated here because this crate does
+/// not depend on `momo-auth`, where the writer's constant (`AUDIT_ACTION_USED`) lives; the
+/// server crate's unit test and the PG suite lock the two together.
+pub const AGENT_PORT_CALL_ACTION: &str = "auth.agent_bearer.used";
+
+/// `detail.path` of an Agent Port call. A hosted credential is only admitted on its own
+/// audience, so for a hosted agent this is every `used` row it has; the filter is the belt to
+/// that brace (a REST call by some other credential of the same member is not a check).
+pub const AGENT_PORT_CALL_PATH: &str = "/v1/mcp/agent-port";
+
+/// The closed vocabulary (`cadence.kind` on the wire).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CadenceKind {
+    /// Near-continuous presence: ask "is it connected", not "when does it next check".
+    Realtime,
+    /// Periodic: wakes about every `typical_minutes`.
+    Routine,
+    /// Not enough evidence, not periodic, or nothing recent. Honest "모름".
+    Unknown,
+}
+
+impl CadenceKind {
+    pub fn as_wire(self) -> &'static str {
+        match self {
+            CadenceKind::Realtime => "realtime",
+            CadenceKind::Routine => "routine",
+            CadenceKind::Unknown => "unknown",
+        }
+    }
+}
+
+/// Every number behind the estimate. Constants, not environment: nothing here is a knob an
+/// operator needs, and a typo must not be able to make every agent look late.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CadenceParams {
+    /// How far back a call still counts. Also the staleness bound: an agent silent for the
+    /// whole window has no samples and reads `unknown`.
+    pub window: Duration,
+    /// Newest calls read per agent: a ceiling on the work one read can cause.
+    pub max_calls: i64,
+    /// A silence longer than this ends a wake.
+    pub wake_gap: Duration,
+    /// Intervals (wakes − 1) needed before a beat is claimed.
+    pub min_intervals: usize,
+    /// An interval is on the beat when within `M ± this` percent.
+    pub on_beat_band_percent: i64,
+    /// This share of the intervals must be on the beat.
+    pub on_beat_share_percent: i64,
+    /// `expected_check_at` = newest wake start + this many beats.
+    pub expected_after_beats: i64,
+    /// `late` when silent for more than this many beats.
+    pub late_after_beats: i64,
+    /// `realtime` needs at least this long a span between the first and last call …
+    pub realtime_min_span: Duration,
+    /// … and presence (gaps no longer than `wake_gap`) for this share of it.
+    pub realtime_presence_percent: i64,
+}
+
+impl Default for CadenceParams {
+    fn default() -> Self {
+        CadenceParams {
+            window: Duration::hours(24),
+            max_calls: 2000,
+            wake_gap: Duration::minutes(5),
+            min_intervals: 4,
+            on_beat_band_percent: 50,
+            on_beat_share_percent: 60,
+            expected_after_beats: 2,
+            late_after_beats: 3,
+            realtime_min_span: Duration::minutes(30),
+            realtime_presence_percent: 80,
+        }
+    }
+}
+
+/// The derived answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Cadence {
+    pub kind: CadenceKind,
+    /// `Routine` only: the median beat, in whole minutes (at least 1).
+    pub typical_minutes: Option<i64>,
+    /// `Routine` only: when a still-waiting request should stop being explained by the beat.
+    pub expected_check_at: Option<DateTime<Utc>>,
+    /// `Routine` only: no call for more than three beats. Always `false` for the others.
+    pub late: bool,
+    /// How many intervals the estimate stood on (0 unless a beat was looked for).
+    pub intervals: usize,
+}
+
+impl Cadence {
+    pub fn unknown() -> Cadence {
+        Cadence {
+            kind: CadenceKind::Unknown,
+            typical_minutes: None,
+            expected_check_at: None,
+            late: false,
+            intervals: 0,
+        }
+    }
+
+    fn realtime() -> Cadence {
+        Cadence {
+            kind: CadenceKind::Realtime,
+            ..Cadence::unknown()
+        }
+    }
+}
+
+/// Median of a non-empty list of positive durations, in milliseconds (the mean of the two
+/// middle values when the count is even).
+fn median_ms(sorted: &[i64]) -> i64 {
+    let mid = sorted.len() / 2;
+    if sorted.len() % 2 == 1 {
+        sorted[mid]
+    } else {
+        (sorted[mid - 1] + sorted[mid]) / 2
+    }
+}
+
+/// Estimate the beat from the times of one agent's admitted Agent Port calls (any order).
+///
+/// `now` is passed in, never read, so every boundary is testable.
+pub fn derive_cadence(
+    now: DateTime<Utc>,
+    calls: &[DateTime<Utc>],
+    params: &CadenceParams,
+) -> Cadence {
+    let mut times: Vec<DateTime<Utc>> = calls
+        .iter()
+        .copied()
+        .filter(|at| now - *at <= params.window)
+        .collect();
+    times.sort_unstable();
+    let (Some(&first), Some(&last_call)) = (times.first(), times.last()) else {
+        return Cadence::unknown();
+    };
+
+    // Presence: time spent in gaps no longer than a wake gap, over the whole observed span.
+    let span_ms = (last_call - first).num_milliseconds();
+    if span_ms >= params.realtime_min_span.num_milliseconds() {
+        let present_ms: i64 = times
+            .windows(2)
+            .map(|pair| pair[1] - pair[0])
+            .filter(|gap| *gap <= params.wake_gap)
+            .map(|gap| gap.num_milliseconds())
+            .sum();
+        if present_ms * 100 >= span_ms * params.realtime_presence_percent {
+            return Cadence::realtime();
+        }
+    }
+
+    // Wakes: a call within one wake gap of the previous call belongs to the same wake.
+    let mut starts: Vec<DateTime<Utc>> = Vec::new();
+    let mut previous: Option<DateTime<Utc>> = None;
+    for at in &times {
+        if previous.is_none_or(|before| *at - before > params.wake_gap) {
+            starts.push(*at);
+        }
+        previous = Some(*at);
+    }
+
+    let mut intervals: Vec<i64> = starts
+        .windows(2)
+        .map(|pair| (pair[1] - pair[0]).num_milliseconds())
+        .collect();
+    let count = intervals.len();
+    if count < params.min_intervals.max(1) {
+        return Cadence {
+            intervals: count,
+            ..Cadence::unknown()
+        };
+    }
+    intervals.sort_unstable();
+    let beat_ms = median_ms(&intervals);
+
+    // Periodic? An agent that wakes whenever somebody writes has intervals all over the place.
+    let low = beat_ms * (100 - params.on_beat_band_percent);
+    let high = beat_ms * (100 + params.on_beat_band_percent);
+    let on_beat = intervals
+        .iter()
+        .filter(|interval| **interval * 100 >= low && **interval * 100 <= high)
+        .count() as i64;
+    if on_beat * 100 < count as i64 * params.on_beat_share_percent {
+        return Cadence {
+            intervals: count,
+            ..Cadence::unknown()
+        };
+    }
+
+    let Some(&newest_wake_start) = starts.last() else {
+        return Cadence::unknown();
+    };
+    let silence_ms = (now - last_call).num_milliseconds();
+    Cadence {
+        kind: CadenceKind::Routine,
+        typical_minutes: Some(((beat_ms + 30_000) / 60_000).max(1)),
+        expected_check_at: Some(
+            newest_wake_start + Duration::milliseconds(beat_ms * params.expected_after_beats),
+        ),
+        late: silence_ms > beat_ms * params.late_after_beats,
+        intervals: count,
+    }
+}
+
+/// The times of each agent's admitted Agent Port calls since `since`, newest first, at most
+/// `per_agent_limit` each. An agent with no such call has no entry.
+///
+/// The one `audit_log` read of this feature (the thirteenth in the server; the other twelve are
+/// each narrowed to one action or one run). It is narrowed to the agent (`actor_member_id`,
+/// so `audit_actor_idx` carries the range), the action, the path and the window — and to the
+/// tenant twice over: the explicit `workspace_id` and the caller's `app.workspace_id` (RLS).
+/// Only the derived [`Cadence`] ever leaves the server; no row does.
+pub async fn load_agent_call_times_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_ids: &[Uuid],
+    since: DateTime<Utc>,
+    per_agent_limit: i64,
+) -> Result<HashMap<Uuid, Vec<DateTime<Utc>>>, DbError> {
+    if agent_member_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let rows = sqlx::query(
+        "SELECT a.agent_id, c.created_at \
+           FROM unnest($2::uuid[]) AS a(agent_id) \
+           CROSS JOIN LATERAL ( \
+                SELECT al.created_at FROM audit_log al \
+                 WHERE al.workspace_id = $1 \
+                   AND al.actor_member_id = a.agent_id \
+                   AND al.action = $3 \
+                   AND al.detail->>'path' = $4 \
+                   AND al.created_at > $5 \
+                 ORDER BY al.created_at DESC \
+                 LIMIT $6) c",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_ids)
+    .bind(AGENT_PORT_CALL_ACTION)
+    .bind(AGENT_PORT_CALL_PATH)
+    .bind(since)
+    .bind(per_agent_limit)
+    .fetch_all(&mut *conn)
+    .await?;
+    let mut by_agent: HashMap<Uuid, Vec<DateTime<Utc>>> = HashMap::new();
+    for row in &rows {
+        by_agent
+            .entry(row.try_get::<Uuid, _>("agent_id")?)
+            .or_default()
+            .push(row.try_get::<DateTime<Utc>, _>("created_at")?);
+    }
+    Ok(by_agent)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIN: i64 = 60;
+
+    /// `now` is far from the epoch so no fixture sits near a window edge by accident.
+    fn now() -> DateTime<Utc> {
+        DateTime::parse_from_rfc3339("2026-10-27T12:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc)
+    }
+
+    fn ago(seconds: i64) -> DateTime<Utc> {
+        now() - Duration::seconds(seconds)
+    }
+
+    /// One routine wake: the first call `start` seconds ago, each next call `spread[i]`
+    /// seconds after the one before (a model thinking between tool calls: 8 to 55 s).
+    fn wake(start: i64, spread: &[i64]) -> Vec<DateTime<Utc>> {
+        let mut at = start;
+        let mut out = vec![ago(at)];
+        for step in spread {
+            at -= step;
+            out.push(ago(at));
+        }
+        out
+    }
+
+    /// Wakes whose starts are `intervals_newest_first[i]` minutes apart, the newest one starting
+    /// `newest_ago` seconds ago. Each wake has a different number of calls and spacing (3 to 6
+    /// calls, 8 to 55 s apart, 29 to 133 s long), the way a real routine's wakes differ.
+    ///
+    /// Keep every interval at 8 minutes or more: a wake can run 133 s, and the next wake must
+    /// begin more than the 5-minute wake gap after it ends, or the two are one wake by design.
+    fn wakes_with_intervals(newest_ago: i64, intervals_newest_first: &[i64]) -> Vec<DateTime<Utc>> {
+        let shapes: [&[i64]; 4] = [
+            &[8, 21],
+            &[12, 31, 9, 55],
+            &[17, 40, 14],
+            &[10, 25, 33, 46, 19],
+        ];
+        let mut calls = Vec::new();
+        let mut start = newest_ago;
+        for (n, minutes) in std::iter::once(&0)
+            .chain(intervals_newest_first.iter())
+            .enumerate()
+        {
+            start += minutes * MIN;
+            calls.extend(wake(start, shapes[n % shapes.len()]));
+        }
+        calls
+    }
+
+    /// Intervals a real 15-minute routine produced (#4284: 10-29 min, median 15), in an order
+    /// that is not sorted. Median 15, mean 16.8: the two differ on purpose.
+    const REAL_15: [i64; 5] = [29, 15, 10, 16, 14];
+
+    fn p() -> CadenceParams {
+        CadenceParams::default()
+    }
+
+    fn newest_call(calls: &[DateTime<Utc>]) -> DateTime<Utc> {
+        calls.iter().max().copied().unwrap()
+    }
+
+    #[test]
+    fn a_fifteen_minute_routine_reads_routine_fifteen_not_the_mean_and_not_the_raw_call_gaps() {
+        // newest wake began 4 minutes ago: well inside the beat
+        let calls = wakes_with_intervals(4 * MIN, &REAL_15);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert_eq!(
+            cadence.typical_minutes,
+            Some(15),
+            "median 15, not mean 16.8 -> 17"
+        );
+        assert_eq!(cadence.intervals, 5);
+        assert!(!cadence.late);
+        // newest wake start + 2 beats (30 min)
+        assert_eq!(
+            cadence.expected_check_at,
+            Some(ago(4 * MIN) + Duration::minutes(30))
+        );
+    }
+
+    #[test]
+    fn the_median_is_the_mean_of_the_middle_two_when_the_count_is_even() {
+        // 12, 14, 16, 18 minutes: the middle two are 14 and 16 -> 15
+        let calls = wakes_with_intervals(2 * MIN, &[18, 12, 16, 14]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.typical_minutes, Some(15));
+        assert_eq!(cadence.intervals, 4);
+    }
+
+    #[test]
+    fn fewer_than_four_intervals_is_unknown_and_four_is_enough() {
+        // three intervals = four wakes
+        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Unknown);
+        assert_eq!(cadence.intervals, 3);
+        assert_eq!(cadence.typical_minutes, None);
+        assert_eq!(cadence.expected_check_at, None);
+        assert!(!cadence.late);
+        // four intervals = five wakes
+        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 15]);
+        assert_eq!(
+            derive_cadence(now(), &calls, &p()).kind,
+            CadenceKind::Routine
+        );
+    }
+
+    #[test]
+    fn nothing_inside_the_window_is_unknown_and_a_stale_routine_is_late_not_forgotten() {
+        assert_eq!(derive_cadence(now(), &[], &p()), Cadence::unknown());
+        // a perfect 15-minute routine whose newest wake was 25 hours ago has nothing inside the window
+        let calls = wakes_with_intervals(25 * 60 * MIN, &[15; 6]);
+        assert_eq!(derive_cadence(now(), &calls, &p()), Cadence::unknown());
+        // the same routine with its newest wake 22 hours ago is still a routine - and late
+        let calls = wakes_with_intervals(22 * 60 * MIN, &[15; 6]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert!(cadence.late);
+    }
+
+    #[test]
+    fn a_routine_silent_for_more_than_three_beats_is_late_and_exactly_three_is_not() {
+        let calls = wakes_with_intervals(10 * MIN, &[15; 6]);
+        let last = newest_call(&calls);
+        let at_exactly_three = last + Duration::minutes(45);
+        let cadence = derive_cadence(at_exactly_three, &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert!(!cadence.late, "3 beats of silence is the edge, not past it");
+        assert!(derive_cadence(at_exactly_three + Duration::seconds(1), &calls, &p()).late);
+        // and a routine seen two minutes ago is not late
+        assert!(!derive_cadence(last + Duration::minutes(2), &calls, &p()).late);
+    }
+
+    #[test]
+    fn lateness_is_measured_from_the_newest_call_so_a_long_job_is_not_late() {
+        // a regular 15-minute routine whose newest wake is a 50-minute job: a call every 2 minutes
+        let mut calls = wakes_with_intervals(50 * MIN, &[15; 5]);
+        for k in 0..=25 {
+            calls.push(ago(50 * MIN - k * 2 * MIN));
+        }
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert_eq!(cadence.intervals, 5);
+        assert!(
+            !cadence.late,
+            "it is calling right now; measuring from the wake start (50 min > 3 beats) would call it late"
+        );
+    }
+
+    #[test]
+    fn a_call_stamped_a_moment_in_the_future_is_not_late_and_breaks_nothing() {
+        // database and API clocks can disagree by a little
+        let mut calls = wakes_with_intervals(4 * MIN, &REAL_15);
+        calls.push(now() + Duration::seconds(30));
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert!(!cadence.late);
+    }
+
+    #[test]
+    fn the_deadline_is_two_beats_after_the_newest_wake_start_not_one() {
+        let calls = wakes_with_intervals(10 * MIN, &[15; 5]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(
+            cadence.expected_check_at,
+            Some(ago(10 * MIN) + Duration::minutes(30)),
+            "one beat after would flag half of all healthy wakes"
+        );
+    }
+
+    #[test]
+    fn an_agent_that_wakes_whenever_somebody_writes_is_not_a_routine() {
+        // intervals all over the place: 8, 25, 200, 14, 90, 9 minutes
+        let calls = wakes_with_intervals(2 * MIN, &[9, 90, 14, 200, 25, 8]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Unknown);
+        assert_eq!(cadence.intervals, 6);
+        assert_eq!(cadence.typical_minutes, None);
+        assert_eq!(cadence.expected_check_at, None);
+    }
+
+    #[test]
+    fn the_beat_share_edge_is_sixty_percent() {
+        // 3 of 5 on the beat (60 %) is periodic
+        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 60, 90]);
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_eq!(cadence.kind, CadenceKind::Routine);
+        assert_eq!(cadence.typical_minutes, Some(15));
+        // 4 of 7 (57 %) is not
+        let calls = wakes_with_intervals(2 * MIN, &[15, 15, 15, 15, 60, 60, 90]);
+        assert_eq!(
+            derive_cadence(now(), &calls, &p()).kind,
+            CadenceKind::Unknown
+        );
+    }
+
+    #[test]
+    fn typical_minutes_rounds_to_the_nearest_minute() {
+        // a scheduler that fires 7 s late every time: 15 min 7 s -> 15
+        let mut calls = Vec::new();
+        let mut start = 2 * MIN;
+        for _ in 0..6 {
+            calls.extend(wake(start, &[10, 20]));
+            start += 15 * MIN + 7;
+        }
+        assert_eq!(
+            derive_cadence(now(), &calls, &p()).typical_minutes,
+            Some(15)
+        );
+        // 15 min 40 s -> 16
+        let mut calls = Vec::new();
+        let mut start = 2 * MIN;
+        for _ in 0..6 {
+            calls.extend(wake(start, &[10, 20]));
+            start += 15 * MIN + 40;
+        }
+        assert_eq!(
+            derive_cadence(now(), &calls, &p()).typical_minutes,
+            Some(16)
+        );
+    }
+
+    #[test]
+    fn a_poller_is_realtime_and_twenty_minutes_of_it_is_not_enough_to_say_so() {
+        // a call every 20 seconds for 40 minutes
+        let steady: Vec<_> = (0..=120).map(|k| ago(40 * MIN - k * 20)).collect();
+        let cadence = derive_cadence(now(), &steady, &p());
+        assert_eq!(cadence.kind, CadenceKind::Realtime);
+        assert_eq!(cadence.typical_minutes, None);
+        assert_eq!(cadence.expected_check_at, None);
+        assert!(!cadence.late);
+        // the same poller seen for only 20 minutes: not enough evidence either way
+        let brief: Vec<_> = (0..=60).map(|k| ago(20 * MIN - k * 20)).collect();
+        assert_eq!(
+            derive_cadence(now(), &brief, &p()).kind,
+            CadenceKind::Unknown
+        );
+    }
+
+    #[test]
+    fn a_routine_that_once_ran_a_forty_minute_job_is_still_a_routine_not_realtime() {
+        // regular 15-minute wakes, and 2 hours ago a 40-minute job with a call every 2 minutes
+        let mut calls = wakes_with_intervals(3 * MIN, &[15, 15, 15, 15, 15, 15]);
+        for k in 0..=20 {
+            calls.push(ago(120 * MIN - k * 2 * MIN));
+        }
+        let cadence = derive_cadence(now(), &calls, &p());
+        assert_ne!(
+            cadence.kind,
+            CadenceKind::Realtime,
+            "one long wake among short ones is not continuous presence"
+        );
+    }
+
+    #[test]
+    fn a_poller_with_one_ten_minute_restart_is_still_realtime() {
+        // 3 hours of a call every 30 s, with a 10-minute hole in the middle: present ~94 %
+        let mut calls = Vec::new();
+        for k in 0..=(3 * 60 * 2) {
+            let at = ago(3 * 60 * MIN - k * 30);
+            if !(ago(95 * MIN)..=ago(85 * MIN)).contains(&at) {
+                calls.push(at);
+            }
+        }
+        assert_eq!(
+            derive_cadence(now(), &calls, &p()).kind,
+            CadenceKind::Realtime
+        );
+    }
+
+    #[test]
+    fn a_silence_of_exactly_the_wake_gap_keeps_one_wake_and_one_second_more_splits_it() {
+        // five wakes 15 minutes apart: four intervals
+        let base = wakes_with_intervals(30 * MIN, &[15, 15, 15, 15]);
+        let last = newest_call(&base);
+        let mut inside = base.clone();
+        inside.push(last + Duration::minutes(5));
+        assert_eq!(
+            derive_cadence(now(), &inside, &p()).intervals,
+            4,
+            "5:00 of silence is inside the wake"
+        );
+        let mut outside = base;
+        outside.push(last + Duration::minutes(5) + Duration::seconds(1));
+        assert_eq!(
+            derive_cadence(now(), &outside, &p()).intervals,
+            5,
+            "5:01 of silence ends the wake"
+        );
+    }
+
+    #[test]
+    fn the_order_the_calls_arrive_in_does_not_matter() {
+        let mut calls = wakes_with_intervals(4 * MIN, &REAL_15);
+        let as_built = derive_cadence(now(), &calls, &p());
+        calls.sort_unstable();
+        let ascending = derive_cadence(now(), &calls, &p());
+        calls.reverse();
+        let descending = derive_cadence(now(), &calls, &p());
+        assert_eq!(as_built, ascending);
+        assert_eq!(ascending, descending);
+    }
+
+    #[test]
+    fn the_wire_words_are_the_closed_vocabulary() {
+        assert_eq!(CadenceKind::Realtime.as_wire(), "realtime");
+        assert_eq!(CadenceKind::Routine.as_wire(), "routine");
+        assert_eq!(CadenceKind::Unknown.as_wire(), "unknown");
+    }
+}
