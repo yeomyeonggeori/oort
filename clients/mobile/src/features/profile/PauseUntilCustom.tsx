@@ -8,17 +8,13 @@ import {
 import React, {useState} from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {
-  BAR_CONTROL_MAX_SCALE,
-  GroupSection,
-  PrimaryButton,
-  Sentence,
-} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, PrimaryButton, Sentence} from '../../design/atoms';
+import {GroupCard} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {
   font,
+  line,
   radius,
-  SAFE_GUTTER,
   space,
   TOUCH_TARGET,
   type Palette,
@@ -103,7 +99,7 @@ export function PauseUntilCustom({
 
   return (
     <View style={styles.root} testID="pause-until-custom">
-      <GroupSection label="날짜">
+      <GroupCard label="날짜" testID="pause-until-date-group">
         <View style={styles.card}>
           <View style={styles.monthBar}>
             <Pressable
@@ -201,9 +197,9 @@ export function PauseUntilCustom({
             </View>
           ))}
         </View>
-      </GroupSection>
+      </GroupCard>
 
-      <GroupSection label="시각">
+      <GroupCard label="시각" testID="pause-until-time-group">
         <View style={styles.card}>
           <View
             accessibilityRole="radiogroup"
@@ -243,9 +239,9 @@ export function PauseUntilCustom({
             testIDPrefix="pause-until-minute"
           />
         </View>
-      </GroupSection>
+      </GroupCard>
 
-      <View style={styles.actions}>
+      <View style={styles.actions} testID="pause-until-actions">
         {result.ok ? (
           <Text
             accessibilityLiveRegion="polite"
@@ -355,7 +351,9 @@ function ChipGrid({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    root: {gap: space.xl},
+    // 카드는 폭 전체로 서고 가로 여백은 호스트가 진다(`GroupCard`) — 이 블록의 호스트 `PauseUntilPage` 가 진다(그래서
+    // `actions` 도 스스로 지지 않는다 — 지면 이중 여백이다). 카드 사이 16.
+    root: {gap: space.lg},
     card: {padding: space.md, gap: space.md},
     dimmed: {opacity: 0.4},
     pressed: {backgroundColor: color.surfacePressed},
@@ -408,7 +406,7 @@ const buildStyles = (color: Palette) =>
     chipSelected: {backgroundColor: color.accent, borderColor: color.accent},
     chipText: {fontSize: font.body, color: color.text},
     chipTextSelected: {color: color.onAccent, fontWeight: '600'},
-    actions: {paddingHorizontal: SAFE_GUTTER, gap: space.sm},
+    actions: {gap: space.sm},
     summary: {
       fontSize: font.heading,
       fontWeight: '600',
@@ -418,7 +416,7 @@ const buildStyles = (color: Palette) =>
     error: {
       fontSize: font.label,
       color: color.dangerText,
-      lineHeight: 18,
+      lineHeight: line.label,
       textAlign: 'center',
     },
   });

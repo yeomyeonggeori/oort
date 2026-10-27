@@ -31,6 +31,19 @@ reason = """jsonwebtoken 9.3.1: claim type confusion can skip nbf/exp checks; fi
 Low reach: every decode (momo-auth jwt.rs:74, realtime.rs:161/227, ephemeral_grant.rs:259) verifies an HS256 signature made with the \
 server's own secret first, so a caller cannot craft the claims. Follow-up: jsonwebtoken 10 migration."""
 
+# ---- server-rust + clients/desktop/src-tauri (Rust, GHSA-only advisory) -------
+
+[[IgnoredVulns]]
+id = "GHSA-qwgh-2vcv-g2f7"
+ignoreUntil = 2027-01-25
+reason = """block-buffer < 0.12.1 (GHSA range `introduced: 0`): a caught panic can corrupt the inline cursor of EagerBuffer/ReadBuffer (OOB read/write). \
+Not exposed here: the locked 0.10.4 keeps its cursor in a separate `pos: u8` field and has no ReadBuffer; the inline-cursor layout arrived in 0.11.0 \
+(block-buffer CHANGELOG), so the match is a version-range over-approximation. Also no reach: oort never names block_buffer/EagerBuffer/ReadBuffer, \
+only digest 0.10.7 uses it (sha2/sha1/md-5/hmac/curve25519-dalek in server-rust; sha2/hmac/ecdsa/elliptic-curve/signature in src-tauri), and no \
+production code catches a panic or keeps a hasher alive. Not upgradable yet: 0.12.1 needs digest 0.11, but sqlx-core 0.9.0 (always-on migrate feature), \
+wry 0.57.1 and tauri-codegen 2.7.4 still pin sha2 ^0.10. Follow-up: ask RustCrypto/utils to narrow the GHSA `introduced` to 0.11.0 (then drop this entry); \
+at renewal re-check those upstreams and the RustSec alias; keep server-rust's block-buffer 0.12.x >= 0.12.1. Upgrade issue: #4644."""
+
 # ---- clients/web (npm, runtime) ----------------------------------------------
 
 [[IgnoredVulns]]

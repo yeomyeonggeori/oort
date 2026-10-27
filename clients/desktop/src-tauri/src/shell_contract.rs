@@ -228,18 +228,21 @@ fn app_commands_are_gated_by_the_capability() {
         .is_none());
 }
 
-/// The traffic lights and the sidebar toggle share one centre line (#2700).
+/// The traffic lights, the sidebar toggle and the middle of the top band share one centre
+/// line (#2700, #4591).
 ///
-/// The lights are native (`trafficLightPosition`), the toggle sits in the
-/// middle of the web bundle's `app-titlebar` row. Neither knows the other, so
-/// a change to either side alone drifts them apart while both sides' own tests
-/// stay green. Measured 2026-09-25 (macOS 27.0 26A428, tauri-runtime-wry
-/// 2.11.4 / tao 0.35.3, Retina window capture): the light's visible centre is
-/// `y - 2` pt (y 14 → 12.0, y 21.5 → 19.5). The row is `--spacing-control-lg`
-/// tall, border-box, with a 1px bottom border, so the toggle's centre is
-/// `(control-lg - 1) / 2` = 19.5. Before the fix they were 7.5pt apart.
-/// `clients/web/src/app/desktopShellContract.test.ts` pins the same relation
-/// from the web side, where CI runs it.
+/// The lights are native (`trafficLightPosition`), the toggle sits in the middle of the web
+/// bundle's `app-titlebar` row, and since #4591 that row is the window's grab band:
+/// `--spacing-control-lg` tall, no border, the content panel starts right under it. Neither side
+/// knows the other, so a change to either alone drifts them apart while both sides' own tests
+/// stay green. Measured 2026-09-25 (macOS 27.0 26A428, tauri-runtime-wry 2.11.4 / tao 0.35.3,
+/// Retina window capture) and again 2026-10-26 on a debug build of this tree: the light's visible
+/// centre is `y - 2` pt (y 14 → 12.0, y 21.5 → 19.5, y 22 → 20.0). The row has no border, so the
+/// toggle's centre and the band's middle are both `control-lg / 2` = 20.0. Until #4591 the row
+/// kept a transparent 1px bottom border (toggle centre 19.5, y 21.5): lights and toggle agreed
+/// with each other and sat 0.5pt (one device pixel) above the band's middle.
+/// `clients/web/src/app/desktopShellContract.test.ts` pins the same relation from the web side,
+/// where CI runs it.
 #[test]
 fn the_traffic_lights_share_the_titlebar_toggles_centre_line() {
     const TOKENS: &str = include_str!("../../../web/src/design/tokens.css");
@@ -264,15 +267,49 @@ fn the_traffic_lights_share_the_titlebar_toggles_centre_line() {
         .trim()
         .parse()
         .unwrap();
-    let toggle_centre = (control_lg - 1.0) / 2.0;
+    // No bottom border on the row: the content box is the whole band.
+    let titlebar = TOKENS
+        .split("@utility app-titlebar {")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}").next())
+        .expect("@utility app-titlebar in tokens.css");
+    assert!(
+        !titlebar.contains("border-block-end"),
+        "a bottom border would move the toggle centre off the band middle:\n{titlebar}"
+    );
+    let band_middle = control_lg / 2.0;
     let y = main["trafficLightPosition"]["y"]
         .as_f64()
         .expect("trafficLightPosition.y");
     let light_centre = y + LIGHT_CENTRE_MINUS_Y;
     assert!(
-        (light_centre - toggle_centre).abs() <= 1.0,
-        "lights centre {light_centre}pt vs toggle centre {toggle_centre}pt"
+        (light_centre - band_middle).abs() <= 0.25,
+        "lights centre {light_centre}pt vs band middle {band_middle}pt"
     );
+}
+
+/// The page reads the window's fullscreen state (#4591): in native fullscreen macOS hides the
+/// traffic lights, so the 80px the top row keeps for them is folded away. The probe
+/// (`is_fullscreen`) and the resize event it re-reads on come with `core:default`; the page must
+/// not be able to *set* fullscreen, and another window must not get either.
+#[test]
+fn tauri_resolves_the_fullscreen_probe_for_the_main_window_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    assert!(authority
+        .resolve_access("plugin:window|is_fullscreen", "main", "main", &local)
+        .is_some());
+    assert!(authority
+        .resolve_access("plugin:event|listen", "main", "main", &local)
+        .is_some());
+    // Controls: reading is not setting, and the grant is the main window's.
+    assert!(authority
+        .resolve_access("plugin:window|set_fullscreen", "main", "main", &local)
+        .is_none());
+    assert!(authority
+        .resolve_access("plugin:window|is_fullscreen", "other", "other", &local)
+        .is_none());
 }
 
 fn csp_directive<'a>(csp: &'a str, name: &str) -> Vec<&'a str> {
@@ -650,6 +687,122 @@ fn tauri_grants_the_start_location_commands_to_the_local_main_webview_only() {
             .resolve_access(command, "main", "main", &local)
             .is_some());
         for url in ["https://evil.example/", "http://127.0.0.1:8080/"] {
+            let remote = tauri::ipc::Origin::Remote {
+                url: url.parse().unwrap(),
+            };
+            assert!(
+                authority
+                    .resolve_access(command, "main", "main", &remote)
+                    .is_none(),
+                "{command} from {url}"
+            );
+        }
+        assert!(authority
+            .resolve_access(command, "other", "other", &local)
+            .is_none());
+        assert!(authority
+            .resolve_access(command, "main", "embedded", &local)
+            .is_none());
+        assert!(desktop.iter().any(|c| c == command));
+        assert!(!mobile.iter().any(|c| c == command));
+    }
+}
+
+/// Does this capability hand the webview the general file or opener plugin
+/// (`tauri-plugin-fs`, `tauri-plugin-opener`: "any path, any handler")? The
+/// download panel's commands exist so that it never needs to (#4587).
+fn grants_file_or_opener_plugin(capability: &Value) -> bool {
+    permission_ids(capability)
+        .iter()
+        .any(|p| p.starts_with("fs:") || p.starts_with("opener:"))
+}
+
+/// The check above reads both spellings of a permission (a bare string and an
+/// object with an `identifier`) and is not blind to either plugin. Without this the
+/// assertion in the capability loop could never fail: the build refuses a
+/// permission of a plugin it does not link, so a real capability cannot be made to
+/// carry one.
+#[test]
+fn a_capability_that_grants_the_file_or_opener_plugin_is_noticed() {
+    let cap = |permissions: Value| serde_json::json!({ "permissions": permissions });
+    assert!(grants_file_or_opener_plugin(&cap(serde_json::json!([
+        "fs:default"
+    ]))));
+    assert!(grants_file_or_opener_plugin(&cap(serde_json::json!([
+        "core:default",
+        "opener:allow-open-path"
+    ]))));
+    assert!(grants_file_or_opener_plugin(&cap(serde_json::json!([
+        { "identifier": "fs:allow-write-file", "allow": [{ "path": "$DOWNLOAD/*" }] }
+    ]))));
+    assert!(grants_file_or_opener_plugin(&cap(serde_json::json!([
+        { "identifier": "opener:allow-reveal-item-in-dir" }
+    ]))));
+    assert!(!grants_file_or_opener_plugin(&cap(serde_json::json!([
+        "core:default",
+        "allow-download-save",
+        { "identifier": "allow-download-open" }
+    ]))));
+}
+
+const DOWNLOAD_COMMANDS: [&str; 5] = [
+    "download_save",
+    "download_probe",
+    "download_reveal",
+    "download_open",
+    "download_folder_open",
+];
+const DOWNLOAD_PERMISSIONS: [&str; 5] = [
+    "allow-download-save",
+    "allow-download-probe",
+    "allow-download-reveal",
+    "allow-download-open",
+    "allow-download-folder-open",
+];
+
+/// Tauri's resolver: the download commands (#4587) — write into the Downloads
+/// folder, probe, reveal, open, open the folder — answer the main webview's
+/// bundled origin only, and exist in the desktop table only.
+#[test]
+fn tauri_grants_the_download_commands_to_the_local_main_webview_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    let blocks = handler_blocks(LIB_RS);
+    let desktop = blocks
+        .iter()
+        .find(|b| b.contains(&"updater_check".to_string()))
+        .unwrap();
+    let mobile = blocks
+        .iter()
+        .find(|b| !b.contains(&"updater_check".to_string()))
+        .unwrap();
+    // The general file plugins are not granted to anyone: the webview has no
+    // path-taking file access, only these five name-taking commands.
+    for command in [
+        "plugin:fs|write_file",
+        "plugin:fs|read_file",
+        "plugin:fs|remove",
+        "plugin:opener|open_path",
+        "plugin:opener|reveal_item_in_dir",
+        "plugin:opener|open_url",
+    ] {
+        assert!(
+            authority
+                .resolve_access(command, "main", "main", &local)
+                .is_none(),
+            "{command} is granted"
+        );
+    }
+    for command in DOWNLOAD_COMMANDS {
+        assert!(authority
+            .resolve_access(command, "main", "main", &local)
+            .is_some());
+        for url in [
+            "https://evil.example/",
+            "https://oort-team.up.railway.app/",
+            "http://127.0.0.1:8080/",
+        ] {
             let remote = tauri::ipc::Origin::Remote {
                 url: url.parse().unwrap(),
             };
@@ -1064,6 +1217,7 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             "agent-port.json",
             "default.json",
             "device-key.json",
+            "downloads.json",
             "git-read.json",
             "harness-profile.json",
             "pty.json",
@@ -1201,6 +1355,31 @@ fn only_the_local_terminal_capability_grants_pty_and_none_is_remote() {
             );
         } else {
             assert!(start.is_empty(), "{name} grants {start:?}");
+        }
+        // The download panel's commands (#4587): five, the main webview only,
+        // and no general file or opener plugin permission anywhere.
+        assert!(
+            !grants_file_or_opener_plugin(cap),
+            "{name} grants a file or opener plugin permission"
+        );
+        let download: Vec<&str> = permission_ids(cap)
+            .into_iter()
+            .filter(|p| p.contains("download"))
+            .collect();
+        if name == "downloads.json" {
+            assert_eq!(download, DOWNLOAD_PERMISSIONS);
+            assert_eq!(
+                permission_ids(cap).len(),
+                DOWNLOAD_PERMISSIONS.len(),
+                "downloads.json grants only the download commands"
+            );
+            assert_eq!(cap["webviews"], serde_json::json!(["main"]));
+            assert!(
+                cap.get("windows").is_none(),
+                "a window grant covers child webviews"
+            );
+        } else {
+            assert!(download.is_empty(), "{name} grants {download:?}");
         }
         if name == "pty.json" {
             assert_eq!(
