@@ -160,24 +160,23 @@ describe("3. JS가 싣는 변수와 CSS가 읽는 변수가 한 칸씩 같다", 
 
 describe("4. 바닥 위 글자의 보정은 scrim이 호스트일 때만 선다 (design-review H-1·H-2)", () => {
   const BAND_FREE = ":root[data-wallpaper-live]:not([data-wallpaper-band])";
-  /** 띠가 호스트일 수 있는 자리: 띠가 없을 때만 보정한다. 웹의 접힌 상단 줄(토글이 안쪽 여백 8px, 레일 안)도 여기다. */
+  /** 띠가 호스트일 수 있는 자리: 띠가 없을 때만 보정한다. 웹의 접힌 상단 줄(토글이 안쪽 여백 8px, 레일 안)도 여기다.
+   *  데스크탑의 접힌 상단 줄(토글이 신호등 인셋 80px 뒤)도 여기다: 띠가 있는 테마에서는 띠의 윗줄이 전폭으로 깔려(#4591) 그 줄을 덮는다. */
   const BAND_HOSTED = [
     `${BAND_FREE} .app-shell > .sidebar-drawer`,
     `${BAND_FREE} .app-shell > .app-titlebar`,
     `${BAND_FREE} .app-shell .settings-nav`,
+    `${BAND_FREE} .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region]`,
   ];
-  /** 띠가 있어도 scrim이 호스트인 자리: 데스크탑의 접힌 상단 줄(토글이 신호등 인셋 80px 뒤, 레일 밖)과 내 작업 격자 바닥. */
-  const SCRIM_ALWAYS = [
-    ":root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region]",
-    ":root[data-wallpaper-live] .app-shell[data-work-rail] > main",
-  ];
+  /** 띠가 있어도 scrim이 호스트인 자리: 내 작업 격자 바닥(본문이 투명이라 사진이 뒤에 깔린다). */
+  const SCRIM_ALWAYS = [":root[data-wallpaper-live] .app-shell[data-work-rail] > main"];
   const fit = FLOOR.find((rule) => rule.selectors.includes(BAND_HOSTED[0]));
 
-  it("띠 위에 설 수 있는 자리(사이드바·상단 줄·설정 목록 열)는 띠가 없을 때만 보정한다: 띠가 호스트면 보정색이 대비를 깎는다", () => {
+  it("띠 위에 설 수 있는 자리(사이드바·상단 줄·설정 목록 열·데스크탑의 접힌 상단 줄)는 띠가 없을 때만 보정한다: 띠가 호스트면 보정색이 대비를 깎는다", () => {
     expect(fit?.selectors.filter((selector) => selector.includes("data-wallpaper-band"))).toEqual(BAND_HOSTED);
   });
 
-  it("띠가 있어도 scrim 위에 서는 자리(데스크탑의 접힌 상단 줄·내 작업 격자 바닥)는 늘 보정한다", () => {
+  it("띠가 있어도 scrim 위에 서는 자리(내 작업 격자 바닥)는 늘 보정한다", () => {
     for (const selector of SCRIM_ALWAYS) {
       expect(fit?.selectors, selector).toContain(selector);
       expect(selector).not.toContain("data-wallpaper-band");

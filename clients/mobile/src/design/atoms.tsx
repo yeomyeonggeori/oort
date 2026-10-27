@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Image,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,6 +13,7 @@ import {
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from './tokens';
+import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePalette, useStyles} from './theme';
 import {PULL_FILL} from './pullRefresh';
 import type {PullScrollProps} from './refresh';
@@ -470,7 +472,8 @@ export function NoticeBlock({
             onPress={onDismiss}
             style={({pressed}) => [styles.noticeDismiss, pressed && styles.pressed]}
             testID={testID ? `${testID}-dismiss` : undefined}>
-            <Text style={styles.retryLabel}>닫기</Text>
+            {/* 글자 「닫기」가 아니라 시트·페이지와 같은 X 글리프다(#4458). 시트가 아니므로 원은 없다. */}
+            <Image source={SHEET_ICONS.close} style={styles.noticeDismissGlyph} />
           </Pressable>
         ) : null}
       </View>
@@ -536,7 +539,7 @@ export function FailureBanner({
       accessibilityLiveRegion="polite"
       style={styles.failure}
       testID={testID}>
-      <Text style={styles.failureText}>{message}</Text>
+      <Sentence style={styles.failureText}>{message}</Sentence>
       {onRetry ? (
         <Pressable
           accessibilityRole="button"
@@ -809,6 +812,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     alignItems: 'center',
     marginVertical: -space.md,
     borderRadius: radius.sm,
+  },
+  noticeDismissGlyph: {
+    width: SHEET_ICON_SIZE.close,
+    height: SHEET_ICON_SIZE.close,
+    tintColor: color.icon,
   },
   noticeHeadline: {fontSize: font.label, color: color.text, fontWeight: '600'},
   noticeDetail: {fontSize: font.meta, color: color.textMuted, lineHeight: 18},

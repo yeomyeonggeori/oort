@@ -7,9 +7,10 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo} from 'react-native';
+import {AccessibilityInfo, StyleSheet, Text} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -22,7 +23,14 @@ import {
 } from '../src/features/work/delegate/model';
 import {__resetDelegateDrafts} from '../src/features/work/delegate/session';
 import {SessionProvider} from '../src/session/useSession';
+import {NON_SECRET_KEYS, nonSecretStore} from '../src/storage/kv';
+import {GroupRow, GroupSection, NoticeBlock, OutlineButton} from '../src/design/atoms';
+import {GroupCard} from '../src/design/sheetParts';
 import {DelegateWorkSheet, type DelegatePrefill} from '../src/shell/DelegateWorkSheet';
+import {Field, TextArea} from '../src/shell/sheetForm';
+import {HOME_ICONS, SHEET_ICONS} from '../src/design/icons';
+import {lightPalette} from '../src/design/tokens';
+import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -130,6 +138,8 @@ function runWire() {
 type RunAnswer =
   | {kind: 'ok'}
   | {kind: 'network'}
+  /** 서버가 끝내 답하지 않는다 — 보내는 중 상태를 붙든다. */
+  | {kind: 'hang'}
   | {kind: 'refuse'; status: number; code?: string; message: string};
 
 interface Posted {
@@ -172,6 +182,7 @@ function installFetch(options: {
     if (target.endsWith('/agent-runs') && init?.method === 'POST') {
       posted.push({url: target, body: JSON.parse(String(init.body))});
       const answer = answers.length > 1 ? answers.shift() : answers[0];
+      if (answer?.kind === 'hang') return new Promise<Response>(() => {});
       if (answer?.kind === 'network') throw new TypeError('Network request failed');
       if (answer?.kind === 'refuse') {
         return reply(answer.status, {
@@ -437,6 +448,18 @@ describe('④ 거절 사유마다 서는 버튼이 다르다', () => {
   });
 });
 
+describe('작업 맡기기 — 문장은 어절 단위로 접는다 (design-review r2 L2)', () => {
+  it('코어가 준 칸 오류 문장과 저장소·브랜치 규칙 줄은 hangul-word 다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({agentMemberId: AGENT});
+    await fillAndSend('가'.repeat(67));
+    expect((await screen.findByTestId('delegate-issue-title')).props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 접힌 「더 보기」 를 펴면 서는 규칙 줄.
+    fireEvent.press(screen.getByTestId('delegate-more'));
+    expect(screen.getByTestId('delegate-repo-rule').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+});
+
 describe('⑤ 한글 67자 제목은 보내기 전에 막힌다', () => {
   it('66자는 나가고 67자는 서버를 부르지 않는다', async () => {
     const fixture = installFetch({
@@ -482,6 +505,20 @@ describe('햅틱은 사용자 행동 한 번에 한 번, 입력 검증 오류에
     expect(haptics.light).toHaveBeenCalledTimes(1);
     expect(haptics.error).toHaveBeenCalledTimes(1);
     expect(haptics.success).not.toHaveBeenCalled();
+  });
+
+  it('거절 배너의 문장은 어절 단위로 접는다 — 「에 / 서」처럼 조사가 줄 머리에 고아로 서지 않는다 (design-review r1a M1)', async () => {
+    installFetch({
+      members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})],
+      runs: [{kind: 'refuse', status: 409, code: 'hosted_channel_not_approved', message: 'x'}],
+    });
+    mount({agentMemberId: AGENT});
+    await fillAndSend();
+    const banner = await screen.findByTestId('delegate-error');
+    // 배너의 첫 글자 노드가 문장이다(다음 것은 「다시 시도」 같은 단추 글자).
+    const [sentence] = within(banner).UNSAFE_getAllByType(Text);
+    expect(sentence.props.lineBreakStrategyIOS).toBe('hangul-word');
+    expect(sentence.props.children).toEqual(expect.stringContaining('채널'));
   });
 
   it('접수되면 success 한 번', async () => {
@@ -603,4 +640,154 @@ describe('후보 판정(순수)', () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.rest).toBe('paused');
   });
+});
+
+// ---- 공용 시트로 (#4458) ------------------------------------------------------------------
+
+describe('작업 맡기기 — 공용 부품 (#4458)', () => {
+  it('A 단계: 머리에는 ✓ 가 없고 X 뿐이다 — 「다음」은 시트 바닥의 기본 단추(고르기 전 비활성), 에이전트는 라디오 행이다', async () => {
+    // 앞 시험이 마지막에 쓴 곳을 적어 두면 A 에 미리 찍힌다 — 이 시험은 아무것도 고르지 않은 채로 시작한다.
+    nonSecretStore().remove(NON_SECRET_KEYS.delegateLastTarget);
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({});
+    await screen.findByTestId('delegate-agent-grokbot');
+    // 머리: **그려진** 글리프로 본다 — 오른쪽 X 하나, ✓ 는 없다(✓ 는 마지막 확정에만 쓴다).
+    expect(imageSources(screen.getByTestId('delegate-header'))).toEqual([SHEET_ICONS.close]);
+    // 「다음」: 글자가 보이는 기본 단추이고(✓ 글리프가 아니다), 스크롤 몸 밖 시트 바닥(푸터)에 선다.
+    const next = screen.getByTestId('delegate-next');
+    expect(next.props.accessibilityRole).toBe('button');
+    expect(within(next).getByText('다음')).toBeTruthy();
+    expect(imageSources(next)).toEqual([]);
+    expect(next.props.accessibilityState).toMatchObject({disabled: true});
+    expect(within(screen.getByTestId('delegate-footer')).getByTestId('delegate-next')).toBeTruthy();
+    expect(within(screen.getByTestId('delegate-step-a')).queryByTestId('delegate-next')).toBeNull();
+    expect(screen.UNSAFE_queryAllByType(GroupSection)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(GroupRow)).toHaveLength(0);
+    // **그려진** 상태로 본다: 아직 고르지 않았으니 selected 도 ✓ 도 없다 → 누르면 둘이 함께 선다.
+    expect(radioRows(within(screen.getByTestId('delegate-agents')))).toEqual([
+      {testID: 'delegate-agent-grokbot', selected: false, checks: 0},
+    ]);
+    fireEvent.press(screen.getByTestId('delegate-agent-grokbot'));
+    expect(radioRows(within(screen.getByTestId('delegate-agents')))).toEqual([
+      {testID: 'delegate-agent-grokbot', selected: true, checks: 1},
+    ]);
+    expect(screen.getByTestId('delegate-next').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('✓ 는 마지막 확정에만 선다: B 단계 머리의 ✓ 는 「맡기기」이고, 「다음」 단추는 B 에 없다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({});
+    fireEvent.press(await screen.findByTestId('delegate-agent-grokbot'));
+    fireEvent.press(screen.getByTestId('delegate-next'));
+    await screen.findByTestId('delegate-step-b');
+    // 머리: 왼쪽 ✓ 와 오른쪽 X — 두 글리프가 **그려진다**.
+    expect(imageSources(screen.getByTestId('delegate-header'))).toEqual([
+      SHEET_ICONS.check,
+      SHEET_ICONS.close,
+    ]);
+    expect(screen.getByTestId('delegate-send').props.accessibilityLabel).toBe('맡기기');
+    // 바닥 단추는 A 의 것이다 — B 에는 「다음」도, 푸터도 없다.
+    expect(screen.queryByTestId('delegate-next')).toBeNull();
+    expect(screen.queryByTestId('delegate-footer')).toBeNull();
+    expect(screen.queryByText('다음')).toBeNull();
+    // 「바꾸기」로 A 로 돌아가면 다시 ✓ 가 없고 「다음」 단추가 선다(고른 곳은 그대로라 눌린다).
+    fireEvent.press(screen.getByTestId('delegate-change-target'));
+    expect(imageSources(screen.getByTestId('delegate-header'))).toEqual([SHEET_ICONS.close]);
+    expect(screen.getByTestId('delegate-next').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('B 단계: 제목은 입력 알약, 설명은 여러 줄 상자, 저장소·브랜치는 펼침 행, 「바꾸기」는 도착지 카드의 행이다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({});
+    fireEvent.press(await screen.findByTestId('delegate-agent-grokbot'));
+    fireEvent.press(screen.getByTestId('delegate-next'));
+    await screen.findByTestId('delegate-step-b');
+    const send = screen.getByTestId('delegate-send');
+    expect(send.props.accessibilityLabel).toBe('맡기기');
+    expect(screen.queryByText('맡기기')).toBeNull();
+    expect(screen.UNSAFE_getAllByType(Field)).toHaveLength(1);
+    expect(screen.UNSAFE_getAllByType(TextArea)).toHaveLength(1);
+    // 도착지 카드: 값 한 줄 + 「바꾸기」 행(맡길 곳 바꾸기).
+    const destination = within(screen.getByTestId('delegate-destination'));
+    expect(destination.getAllByTestId('group-divider')).toHaveLength(1);
+    const change = screen.getByTestId('delegate-change-target');
+    expect(change.props.accessibilityLabel).toBe('맡길 곳 바꾸기');
+    // 펼침 행: 누르면 저장소·브랜치 입력이 선다 — 옛 글자 단추가 아니다.
+    expect(imageSources(screen.getByTestId('delegate-more'))).toEqual([HOME_ICONS.down]);
+    expect(screen.queryByTestId('delegate-repo')).toBeNull();
+    // 펼침 상태는 보조기술이 읽는 `accessibilityState.expanded` 로 말한다(옛 단추가 그랬다) — 접힘 false → 펼침 true.
+    expect(screen.getByTestId('delegate-more').props.accessibilityState).toMatchObject({expanded: false});
+    const arrow = () =>
+      StyleSheet.flatten(
+        screen.getByTestId('delegate-more-expand', {includeHiddenElements: true}).props.style,
+      );
+    expect(arrow().transform).toBeUndefined();
+    fireEvent.press(screen.getByTestId('delegate-more'));
+    expect(screen.getByTestId('delegate-more').props.accessibilityState).toMatchObject({expanded: true});
+    // 눈에도 말한다: 펼치면 ⌄ 가 뒤집힌다(⌃).
+    expect(arrow().transform).toEqual([{rotate: '180deg'}]);
+    expect(screen.getByTestId('delegate-repo')).toBeTruthy();
+    expect(screen.getByTestId('delegate-branch')).toBeTruthy();
+    expect(screen.UNSAFE_getAllByType(Field)).toHaveLength(3);
+    expect(screen.UNSAFE_queryAllByType(OutlineButton)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(NoticeBlock)).toHaveLength(0);
+    expect(screen.UNSAFE_getAllByType(GroupCard).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('보내는 동안 ✓ 자리에 스피너가 서고 이름이 「보내는 중」이며, 다시 눌러도 요청은 한 번이다', async () => {
+    const fixture = installFetch({
+      members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})],
+      runs: [{kind: 'hang'}],
+    });
+    mount({agentMemberId: AGENT});
+    await fillAndSend();
+    await waitFor(() => expect(fixture.posted()).toHaveLength(1));
+    const send = screen.getByTestId('delegate-send');
+    expect(send.props.accessibilityLabel).toBe('보내는 중');
+    expect(send.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    // **그려진** 모양: ✓ 글리프는 없고 스피너가 선다.
+    expect(imageSources(send)).toEqual([]);
+    expect(screen.getByTestId('delegate-send-busy')).toBeTruthy();
+    fireEvent.press(send);
+    expect(fixture.posted()).toHaveLength(1);
+  });
+
+  it('검증이 막은 칸의 외곽선이 실패색이 된다 — 입력 부품이 invalid 를 받는다', async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    mount({agentMemberId: AGENT});
+    await screen.findByTestId('delegate-title');
+    // **그려진** 외곽선 색으로 잰다(부품이 invalid 를 무시하면 붉어진다): 평소 textFaint, 막힌 칸만 dangerText.
+    const outline = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style).borderColor;
+    expect(outline('delegate-title-pill')).toBe(lightPalette.textFaint);
+    expect(outline('delegate-brief')).toBe(lightPalette.textFaint);
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('delegate-send'));
+    });
+    await screen.findByTestId('delegate-issue-title');
+    expect(outline('delegate-title-pill')).toBe(lightPalette.dangerText);
+    expect(outline('delegate-brief')).toBe(lightPalette.textFaint);
+    // 고치면 그 칸만 풀린다.
+    fireEvent.changeText(screen.getByTestId('delegate-title'), '로그인 버그 고치기');
+    expect(outline('delegate-title-pill')).toBe(lightPalette.textFaint);
+  });
+});
+
+let lastDelegateMount: ReturnType<typeof mount> | null = null;
+
+describeCloseContract({
+  name: 'DelegateWorkSheet',
+  open: async () => {
+    installFetch({members: [rosterMember({channelIds: [CH_DEV], channelCount: 1})]});
+    lastDelegateMount = mount({});
+    await screen.findByTestId('delegate-agent-grokbot');
+  },
+  closedCount: () => lastDelegateMount?.onClose.mock.calls.length ?? 0,
+  closeTestID: 'delegate-close',
+  closeLabel: '작업 맡기기 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '작업 맡기기 닫기',
 });

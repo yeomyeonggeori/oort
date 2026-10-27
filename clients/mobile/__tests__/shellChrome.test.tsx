@@ -19,12 +19,16 @@ import '../src/boot/coreHost';
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
+import {HOME_ICONS} from '../src/design/icons';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
+import {GroupCard, InputPill} from '../src/design/sheetParts';
+import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
   lightPalette,
   paletteFrom,
+  space,
   TOUCH_TARGET,
   type Palette,
 } from '../src/design/tokens';
@@ -120,7 +124,7 @@ function jsonResponse(status: number, body: unknown): Response {
 function installFetch(
   mentions = 0,
   selfRole?: 'owner' | 'admin' | 'member',
-  createStatus = 201,
+  createStatus: number | 'hang' = 201,
 ): jest.Mock {
   const roster = ROSTER.map(row =>
     (row as {id?: string}).id === SELF_ID && selfRole ? {...row, role: selfRole} : row,
@@ -133,6 +137,8 @@ function installFetch(
       return jsonResponse(200, {channel: DM_CHANNEL, created: true});
     }
     if (url.endsWith('/channels') && init?.method === 'POST') {
+      // 서버가 끝내 답하지 않는다 — 만드는 중 상태를 붙든다.
+      if (createStatus === 'hang') return new Promise<Response>(() => {});
       if (createStatus !== 201) {
         return jsonResponse(createStatus, {error: 'conflict', message: 'exists'});
       }
@@ -345,7 +351,10 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     expect(screen.getByTestId('ai-sheet')).toBeTruthy();
     expect(screen.queryByTestId('agent-list-pane')).toBeNull();
     fireEvent.press(screen.getByTestId('ai-row-agents'));
-    expect(screen.queryByTestId('ai-sheet')).toBeNull();
+    // 시트가 먼저 미끄러져 내려간 뒤에 목록이 열린다(#4458) — 누른 순간에는 시트가 아직 서 있고 목록은 없다.
+    expect(screen.getByTestId('ai-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('agent-list-pane')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('ai-sheet')).toBeNull(), {timeout: 8000});
     await waitFor(() => expect(screen.getByTestId('agent-list-pane')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('agents-title')).toBeTruthy());
     // 층의 나가는 길이 있다.
@@ -499,6 +508,60 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     // 새 채널이 목록 캐시에 바로 들어간다.
     const cached = queryClient?.getQueryData<Array<{id: string}>>(['channels', WS]);
     expect(cached?.some(channel => channel.id === 'ch-new')).toBe(true);
+  });
+
+  it('만드는 동안 ✓ 자리에 스피너가 서고 이름이 「채널 만드는 중」이며, 다시 눌러도 요청은 한 번이다', async () => {
+    const fetchMock = installFetch(0, undefined, 'hang');
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    fireEvent.press(screen.getByTestId('new-channel-create'));
+    const posts = () =>
+      fetchMock.mock.calls.filter(
+        ([url, init]) => String(url).endsWith(`/workspaces/${WS}/channels`) && init?.method === 'POST',
+      );
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    const create = screen.getByTestId('new-channel-create');
+    expect(create.props.accessibilityLabel).toBe('채널 만드는 중');
+    expect(create.props.accessibilityState).toMatchObject({busy: true, disabled: true});
+    expect(imageSources(create)).toEqual([]);
+    expect(screen.getByTestId('new-channel-create-busy')).toBeTruthy();
+    fireEvent.press(create);
+    expect(posts()).toHaveLength(1);
+  });
+
+  it('규칙 줄과 이름 오류 줄은 어절 단위로 접는다 — 「대 / 문자는」처럼 어절 가운데서 갈리지 않는다 (design-review r1a M1)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    expect(screen.getByTestId('new-channel-name-rule').props.lineBreakStrategyIOS).toBe('hangul-word');
+    // 규칙을 어기면(처음이 하이픈) 같은 자리가 오류 줄로 바뀐다 — 그 줄도 같다.
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), '-release');
+    expect(screen.getByTestId('new-channel-name-issue').props.lineBreakStrategyIOS).toBe('hangul-word');
+  });
+
+  it('채널 이름의 라벨·입력·규칙(오류) 줄은 한 묶음이다 — 낱개로 두면 섹션 간격(16)이 그 사이에 들어가 규칙 줄이 입력과 다음 섹션의 한가운데 뜬다 (design-review r2 M2)', async () => {
+    installFetch();
+    await renderReady();
+    openMenu();
+    await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('plus-menu-channel'));
+    const field = screen.getByTestId('new-channel-name-field');
+    // 묶음 안쪽 간격은 형제 시트(작업 맡기기·내 맥에 보내기)의 입력 묶음과 같은 `space.sm` 이다.
+    expect(StyleSheet.flatten(field.props.style).gap).toBe(space.sm);
+    // 라벨·입력·규칙 줄이 한 묶음 안에 있고, 공개 범위 카드는 묶음 밖(섹션 간격으로 떨어진 다음 섹션)이다.
+    expect(within(field).getByText('채널 이름')).toBeTruthy();
+    expect(within(field).getByTestId('new-channel-name')).toBeTruthy();
+    expect(within(field).getByTestId('new-channel-name-rule')).toBeTruthy();
+    expect(within(field).queryByTestId('new-channel-kind')).toBeNull();
+    // 규칙을 어겨 오류 줄로 바뀌어도 같은 묶음 안이다.
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), '-release');
+    expect(within(field).getByTestId('new-channel-name-issue')).toBeTruthy();
+    expect(within(field).queryByTestId('new-channel-name-rule')).toBeNull();
   });
 
   it('같은 이름이 있으면(409) 이름 칸 밑에 말하고 시트를 닫지 않는다', async () => {
@@ -1001,12 +1064,12 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     expect(hapticCalls).toEqual(['impact:light']);
   });
 
-  it('프로필 아바타는 light 한 번, 시트는 같은 누름에 열린다', async () => {
+  it('프로필 아바타는 light 한 번, 설정 페이지는 같은 누름에 열린다', async () => {
     installFetch();
     await renderReady();
     fireEvent.press(screen.getByTestId('profile-avatar'));
     expect(hapticCalls).toEqual(['impact:light']);
-    await waitFor(() => expect(screen.getByTestId('profile-sheet')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('settings-page')).toBeTruthy());
   });
 
   it('사이드바 섹션 접기·펴기는 누를 때마다 selection 한 번', async () => {
@@ -1203,4 +1266,66 @@ describe('리퀴드 글래스 (#3580)', () => {
     expect(screen.queryByTestId('shell-tabbar-liquid')).toBeNull();
     expect(screen.getByTestId('shell-tabbar-fallback')).toBeTruthy();
   });
+});
+
+// ---- 새 채널 시트: 공용 부품 (#4458) -----------------------------------------------------------
+
+async function openNewChannel() {
+  installFetch();
+  await renderReady();
+  openMenu();
+  await waitFor(() => expect(screen.getByTestId('plus-menu-channel')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('plus-menu-channel'));
+  expect(screen.getByTestId('new-channel-sheet')).toBeTruthy();
+}
+
+describe('새 채널 시트 — 공용 부품 (#4458)', () => {
+  it('머리의 왼쪽 ✓ 가 「채널 만들기」이고(입력 전 회색), 옛 오른쪽 글자 「만들기」 단추는 없다', async () => {
+    await openNewChannel();
+    const create = screen.getByTestId('new-channel-create');
+    expect(create.props.accessibilityRole).toBe('button');
+    expect(create.props.accessibilityLabel).toBe('채널 만들기');
+    expect(create.props.accessibilityState).toMatchObject({disabled: true});
+    expect(screen.queryByText('만들기')).toBeNull();
+    fireEvent.changeText(screen.getByTestId('new-channel-name'), 'design-review');
+    expect(screen.getByTestId('new-channel-create').props.accessibilityState).toMatchObject({
+      disabled: false,
+    });
+  });
+
+  it('이름은 앞 아이콘(#)이 선 입력 알약이고, 공개 범위는 묶음 카드의 라디오 행 둘이다', async () => {
+    await openNewChannel();
+    expect(screen.UNSAFE_getAllByType(InputPill)).toHaveLength(1);
+    // 그려진 앞 아이콘: 알약 안에 # 글리프가 선다.
+    expect(imageSources(screen.getByTestId('new-channel-name-pill'))).toEqual([HOME_ICONS.hash]);
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(1);
+    // 그려진 라디오 상태: 보조기술이 읽는 selected 와 ✓ 글리프가 함께 한 줄에만 선다. 누르면 둘이 함께 옮겨 간다.
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))).toEqual([
+      {testID: 'new-channel-kind-public', selected: true, checks: 1},
+      {testID: 'new-channel-kind-private', selected: false, checks: 0},
+    ]);
+    fireEvent.press(screen.getByTestId('new-channel-kind-private'));
+    expect(radioRows(within(screen.getByTestId('new-channel-kind')))).toEqual([
+      {testID: 'new-channel-kind-public', selected: false, checks: 0},
+      {testID: 'new-channel-kind-private', selected: true, checks: 1},
+    ]);
+    expect(screen.getAllByTestId('group-divider')).toHaveLength(1);
+  });
+
+  it('입력이 하나인 짧은 시트라 중간 단이다 — 큰 단(위 58 에서 바닥까지)이 아니다', async () => {
+    await openNewChannel();
+    const sheet = StyleSheet.flatten(screen.getByTestId('page-sheet').props.style);
+    expect(sheet.top).toBeUndefined();
+    expect(sheet.height).toBeGreaterThan(0);
+  });
+});
+
+describeCloseContract({
+  name: 'NewChannelSheet',
+  open: openNewChannel,
+  closedCount: () => (screen.queryByTestId('new-channel-sheet') === null ? 1 : 0),
+  closeTestID: 'new-channel-close',
+  closeLabel: '새 채널 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '새 채널 닫기',
 });

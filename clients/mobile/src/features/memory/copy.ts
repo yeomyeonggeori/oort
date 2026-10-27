@@ -11,7 +11,6 @@
 // =============================================================================
 
 export const MISSED_TITLE = '안 읽은 동안';
-export const MISSED_DISMISS_LABEL = '닫기';
 export const MISSED_DISMISS_A11Y = '안 읽은 동안 요약 닫기';
 export const MISSED_MORE = '더 보기';
 export const MISSED_LOADING = '안 읽은 대화를 요약하고 있어요.';
@@ -61,7 +60,6 @@ export function receiptChipA11y(count: number): string {
 }
 
 export const RECEIPT_SHEET_TITLE = '이 답에 참고한 기억';
-export const RECEIPT_CLOSE = '닫기';
 export const RECEIPT_CLOSE_A11Y = '기억 목록 닫기';
 export const RECEIPT_ONLY_READABLE = '이 목록에는 내가 볼 수 있는 기억만 나와요.';
 

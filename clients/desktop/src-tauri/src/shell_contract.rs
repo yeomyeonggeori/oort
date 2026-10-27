@@ -228,18 +228,21 @@ fn app_commands_are_gated_by_the_capability() {
         .is_none());
 }
 
-/// The traffic lights and the sidebar toggle share one centre line (#2700).
+/// The traffic lights, the sidebar toggle and the middle of the top band share one centre
+/// line (#2700, #4591).
 ///
-/// The lights are native (`trafficLightPosition`), the toggle sits in the
-/// middle of the web bundle's `app-titlebar` row. Neither knows the other, so
-/// a change to either side alone drifts them apart while both sides' own tests
-/// stay green. Measured 2026-09-25 (macOS 27.0 26A428, tauri-runtime-wry
-/// 2.11.4 / tao 0.35.3, Retina window capture): the light's visible centre is
-/// `y - 2` pt (y 14 → 12.0, y 21.5 → 19.5). The row is `--spacing-control-lg`
-/// tall, border-box, with a 1px bottom border, so the toggle's centre is
-/// `(control-lg - 1) / 2` = 19.5. Before the fix they were 7.5pt apart.
-/// `clients/web/src/app/desktopShellContract.test.ts` pins the same relation
-/// from the web side, where CI runs it.
+/// The lights are native (`trafficLightPosition`), the toggle sits in the middle of the web
+/// bundle's `app-titlebar` row, and since #4591 that row is the window's grab band:
+/// `--spacing-control-lg` tall, no border, the content panel starts right under it. Neither side
+/// knows the other, so a change to either alone drifts them apart while both sides' own tests
+/// stay green. Measured 2026-09-25 (macOS 27.0 26A428, tauri-runtime-wry 2.11.4 / tao 0.35.3,
+/// Retina window capture) and again 2026-10-26 on a debug build of this tree: the light's visible
+/// centre is `y - 2` pt (y 14 → 12.0, y 21.5 → 19.5, y 22 → 20.0). The row has no border, so the
+/// toggle's centre and the band's middle are both `control-lg / 2` = 20.0. Until #4591 the row
+/// kept a transparent 1px bottom border (toggle centre 19.5, y 21.5): lights and toggle agreed
+/// with each other and sat 0.5pt (one device pixel) above the band's middle.
+/// `clients/web/src/app/desktopShellContract.test.ts` pins the same relation from the web side,
+/// where CI runs it.
 #[test]
 fn the_traffic_lights_share_the_titlebar_toggles_centre_line() {
     const TOKENS: &str = include_str!("../../../web/src/design/tokens.css");
@@ -264,15 +267,49 @@ fn the_traffic_lights_share_the_titlebar_toggles_centre_line() {
         .trim()
         .parse()
         .unwrap();
-    let toggle_centre = (control_lg - 1.0) / 2.0;
+    // No bottom border on the row: the content box is the whole band.
+    let titlebar = TOKENS
+        .split("@utility app-titlebar {")
+        .nth(1)
+        .and_then(|rest| rest.split("\n}").next())
+        .expect("@utility app-titlebar in tokens.css");
+    assert!(
+        !titlebar.contains("border-block-end"),
+        "a bottom border would move the toggle centre off the band middle:\n{titlebar}"
+    );
+    let band_middle = control_lg / 2.0;
     let y = main["trafficLightPosition"]["y"]
         .as_f64()
         .expect("trafficLightPosition.y");
     let light_centre = y + LIGHT_CENTRE_MINUS_Y;
     assert!(
-        (light_centre - toggle_centre).abs() <= 1.0,
-        "lights centre {light_centre}pt vs toggle centre {toggle_centre}pt"
+        (light_centre - band_middle).abs() <= 0.25,
+        "lights centre {light_centre}pt vs band middle {band_middle}pt"
     );
+}
+
+/// The page reads the window's fullscreen state (#4591): in native fullscreen macOS hides the
+/// traffic lights, so the 80px the top row keeps for them is folded away. The probe
+/// (`is_fullscreen`) and the resize event it re-reads on come with `core:default`; the page must
+/// not be able to *set* fullscreen, and another window must not get either.
+#[test]
+fn tauri_resolves_the_fullscreen_probe_for_the_main_window_only() {
+    let mut context = crate::context();
+    let authority = context.runtime_authority_mut();
+    let local = tauri::ipc::Origin::Local;
+    assert!(authority
+        .resolve_access("plugin:window|is_fullscreen", "main", "main", &local)
+        .is_some());
+    assert!(authority
+        .resolve_access("plugin:event|listen", "main", "main", &local)
+        .is_some());
+    // Controls: reading is not setting, and the grant is the main window's.
+    assert!(authority
+        .resolve_access("plugin:window|set_fullscreen", "main", "main", &local)
+        .is_none());
+    assert!(authority
+        .resolve_access("plugin:window|is_fullscreen", "other", "other", &local)
+        .is_none());
 }
 
 fn csp_directive<'a>(csp: &'a str, name: &str) -> Vec<&'a str> {

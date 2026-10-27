@@ -1,0 +1,111 @@
+appId: app.momo.ios
+name: 113-settings-capture
+---
+# 113-settings-capture — 설정 페이지에서 **눌러야 서는** 장면들 (#4457).
+#
+# `measure/` 표면은 저 혼자 서서 찍히는데, 이 장면들은 사람이 눌러야 선다: 「상태 설정」 시트의 단계들과
+# 로그아웃 확인 블록. 진짜 설정 페이지·진짜 시트가 그대로 돌고(서버 자리만 하네스의 가짜 `fetch`), 이 흐름은
+# 누르고 친 뒤 `takeScreenshot` 으로 찍는다. 로그인도 서버도 필요 없고 `launchApp` 도 없다 — 앱을 다시 띄우면
+# 계측 인자가 아니라 보통의 앱이 뜬다.
+#
+# 쓰는 법(사람이 부른다). 한 번에 한 표면·한 장면, 환경 둘:
+#   SCENE  status-empty = 상태가 없는 사람(`shell-profile-sheet`): 시트 열림 → 기간 펼침 → 빠른 상태 → 글 입력(키보드)
+#          status-set   = 보이는 상태가 있는 사람(`shell-profile-status`): 시트 열림(✓ 회색·「지금대로」·「상태 지우기」) → 기간 펼침
+#                         (`shell-profile-status-long` 도 같은 장면 — 80자 글과 다른 날 만료라 긴 값이 두 줄까지 읽히는지 본다)
+#          logout       = 맨 아래 장면(`shell-profile-bottom`): 로그아웃 → 같은 카드 안 확인 블록
+#   OUT    사진 이름 접두(**상대 경로**, 확장자 없이 — `takeScreenshot` 은 절대 경로를 받지 않는다). Maestro 가 `.png` 를 붙이고
+#          사진은 결과 폴더 `~/.maestro/tests/<시각>/113-settings-capture/takeScreenshot/<OUT>-….png` 안에 쌓인다(끝난 뒤 거기서 복사한다).
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure shell-profile-sheet -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test -e SCENE=status-empty -e OUT=16pro-light \
+#     clients/mobile/maestro/113-settings-capture.yaml
+#
+# 키보드를 찍는 장면은 시뮬레이터 창이 앞에 있고 하드웨어 키보드가 끊겨 있어야 한다(`ConnectHardwareKeyboard=0`).
+- runFlow:
+    when:
+      true: ${SCENE == 'status-empty'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "profile-status-row"
+          timeout: 60000
+      - tapOn:
+          id: "profile-status-row"
+      - extendedWaitUntil:
+          visible:
+            id: "status-sheet-title"
+          timeout: 10000
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: ${OUT}-status-1-open
+      # 기간: 접힌 행을 눌러 그 자리에서 고른다(시트 위 시트 없음).
+      - tapOn:
+          id: "status-expiry-row"
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - takeScreenshot: ${OUT}-status-2-expiry
+      - tapOn:
+          id: "status-expiry-row"
+      # 빠른 상태: 이모지와 글을 채우고 ✓ 가 켜진다. 큰 글씨·작은 화면에서는 접힌 아래라 스크롤로 찾는다.
+      - scrollUntilVisible:
+          element:
+            id: "status-preset-meeting"
+          direction: DOWN
+          timeout: 15000
+      - tapOn:
+          id: "status-preset-meeting"
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - takeScreenshot: ${OUT}-status-3-preset
+      # 글을 직접 친다 — 키보드가 올라오고 시트의 바닥이 키보드 윗면에 앉는다. 입력은 시트 맨 위라 위로 스크롤해 찾는다.
+      - scrollUntilVisible:
+          element:
+            id: "status-text-input"
+          direction: UP
+          timeout: 15000
+      - tapOn:
+          id: "status-text-input"
+      - inputText: " 오후 반차"
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: ${OUT}-status-4-keyboard
+- runFlow:
+    when:
+      true: ${SCENE == 'status-set'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "profile-status-row"
+          timeout: 60000
+      - tapOn:
+          id: "profile-status-row"
+      - extendedWaitUntil:
+          visible:
+            id: "status-sheet-title"
+          timeout: 10000
+      - waitForAnimationToEnd:
+          timeout: 3000
+      - takeScreenshot: ${OUT}-status-set-1-open
+      - tapOn:
+          id: "status-expiry-row"
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - takeScreenshot: ${OUT}-status-set-2-expiry
+- runFlow:
+    when:
+      true: ${SCENE == 'logout'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "sign-out"
+          timeout: 60000
+      - takeScreenshot: ${OUT}-logout-1-row
+      - tapOn:
+          id: "sign-out"
+      - extendedWaitUntil:
+          visible:
+            id: "sign-out-confirm"
+          timeout: 10000
+      - waitForAnimationToEnd:
+          timeout: 2000
+      - takeScreenshot: ${OUT}-logout-2-confirm
