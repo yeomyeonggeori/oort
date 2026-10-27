@@ -256,7 +256,7 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
-// ADR-0200 증보 5 (#4621) — how often a hosted agent comes to the Agent Port.
+// ADR-0200 증보 6 (#4621) — how often a hosted agent comes to the Agent Port.
 pub use hosted_cadence::{
     derive_cadence, load_agent_call_times_in_tx, Cadence, CadenceKind, CadenceParams,
     AGENT_PORT_CALL_ACTION, AGENT_PORT_CALL_PATH,

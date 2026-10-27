@@ -15725,13 +15725,13 @@ components:
       additionalProperties: false
       required: [kind]
       description: >
-        ADR-0200 amendment 5 (#4621). How often a hosted agent comes to the Agent Port, derived by the
+        ADR-0200 amendment 6 (#4621). How often a hosted agent comes to the Agent Port, derived by the
         server from the agent's admitted calls (`auth.agent_bearer.used` on the Agent Port path, newest
         24 hours) - never from a body, an argument or an id. A client draws it and estimates nothing:
         a routine agent is waiting for its next beat, not switched off, so a screen says "다음 확인 때
         가져가요" instead of "연결이 꺼져 있을 수 있어요". `routine` carries all of `typicalMinutes`,
         `expectedCheckAtMs` and `late`; `realtime` and `unknown` carry none of them. A connection that is
-        not `active` reads `unknown`. Always present on a server that has amendment 5.
+        not `active` reads `unknown`. Always present on a server that has amendment 6.
       properties:
         kind:
           type: string
@@ -15739,9 +15739,11 @@ components:
           description: >
             `routine` = wakes on a beat: at least five wakes (a silence over 5 minutes ends a wake), the
             median gap between wake starts is the beat (at most 90 minutes), and at least 70 percent of
-            the gaps lie within half to one and a half beats. `realtime` = never silent for more than 5 minutes during at
-            least 80 percent of a span of at least 30 minutes: ask whether it is connected, not when it
-            next checks. `unknown` = too few wakes, not periodic, or no call in the last 24 hours.
+            the gaps lie within half to one and a half beats. `realtime` = never silent for more than 5
+            minutes during at least 80 percent of a span of at least 30 minutes, and its newest call is no
+            more than 5 minutes old (it is calling right now): ask whether it is connected, not when it
+            next checks. `unknown` = too few wakes, not periodic, no call in the last 24 hours, or a poller
+            that has stopped.
         typicalMinutes:
           type: integer
           minimum: 1

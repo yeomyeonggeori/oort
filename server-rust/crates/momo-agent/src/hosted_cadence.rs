@@ -1,4 +1,4 @@
-//! How often does a hosted agent come to the Agent Port? (ADR-0200 증보 5, #4621)
+//! How often does a hosted agent come to the Agent Port? (ADR-0200 증보 6, #4621)
 //!
 //! A hosted agent is not a socket. The grok bot wakes on a routine (about every 15
 //! minutes, three to six calls a wake) and sleeps in between, yet the screen read
@@ -27,9 +27,11 @@
 //! 2. A silence longer than [`CadenceParams::wake_gap`] (5 min) ends a **wake**: the three to
 //!    six calls of one routine run are one event, not five.
 //! 3. `realtime` when the agent was present — never silent for more than the wake gap — for
-//!    at least 80 % of a span of at least 30 minutes. Such an agent has no beat to estimate:
-//!    "connected / not connected" is the right question for it. Without this rule a poller
-//!    that calls every 10 seconds is one 24-hour wake, has no intervals, and reads `unknown`.
+//!    at least 80 % of a span of at least 30 minutes, **and is present now** (its newest call is
+//!    no more than a wake gap old: the word is about this moment, so a poller that stopped
+//!    reads `unknown`, not `realtime`). Such an agent has no beat to estimate: "connected / not
+//!    connected" is the right question for it. Without this rule a poller that calls every 10
+//!    seconds is one 24-hour wake, has no intervals, and reads `unknown`.
 //! 4. Otherwise the **intervals between wake starts**; with fewer than
 //!    [`CadenceParams::min_intervals`] (4, i.e. five wakes) the answer is `unknown`.
 //! 5. The **median** interval `M` is the beat — if it holds two things. `M` is at most
@@ -40,7 +42,7 @@
 //! 6. `routine`: `typical_minutes` = `M` rounded to the nearest minute; `expected_check_at`
 //!    = start of the newest wake + 2 × `M`; `late` = no call for more than 3 × `M`.
 //!
-//! The 70 % and the 90 minutes were chosen by simulation (ADR-0200 증보 5): on random wakes with
+//! The 70 % and the 90 minutes were chosen by simulation (ADR-0200 증보 6): on random wakes with
 //! no schedule at all, 60 % and no ceiling called 9-47 % of the days a routine; 70 % and 90
 //! minutes call 0.6-2.7 %, while a 15-minute routine with the measured 10-29 minute jitter is
 //! still read as one on 90 % of days after 1.5 hours of history and on 100 % after a day.
@@ -77,7 +79,8 @@ pub const AGENT_PORT_CALL_PATH: &str = "/v1/mcp/agent-port";
 /// The closed vocabulary (`cadence.kind` on the wire).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CadenceKind {
-    /// Near-continuous presence: ask "is it connected", not "when does it next check".
+    /// Near-continuous presence, and present now: ask "is it connected", not "when does it
+    /// next check".
     Realtime,
     /// Periodic: wakes about every `typical_minutes`.
     Routine,
@@ -205,8 +208,14 @@ pub fn derive_cadence(
     };
 
     // Presence: time spent in gaps no longer than a wake gap, over the whole observed span.
+    //
+    // `realtime` is a statement about NOW — a screen reads it as "connected right now" — so the
+    // agent must still be present: no more than a wake gap of silence up to `now`, the same
+    // yardstick that makes a pause between two calls a silence. A poller that stopped an hour
+    // ago was realtime then; it has no beat either, so it falls through and reads `unknown`.
     let span_ms = (last_call - first).num_milliseconds();
-    if span_ms >= params.realtime_min_span.num_milliseconds() {
+    let present_now = now - last_call <= params.wake_gap;
+    if present_now && span_ms >= params.realtime_min_span.num_milliseconds() {
         let present_ms: i64 = times
             .windows(2)
             .map(|pair| pair[1] - pair[0])
@@ -655,6 +664,28 @@ mod tests {
             derive_cadence(now(), &calls, &p()).kind,
             CadenceKind::Realtime
         );
+    }
+
+    #[test]
+    fn a_poller_that_went_quiet_is_realtime_only_while_its_silence_is_within_a_wake_gap() {
+        // a call every 20 seconds for 40 minutes; ask at different moments after the last one
+        let steady: Vec<_> = (0..=120).map(|k| ago(40 * MIN - k * 20)).collect();
+        let last = newest_call(&steady);
+        let read_at = |silence: Duration| derive_cadence(last + silence, &steady, &p());
+        assert_eq!(read_at(Duration::zero()).kind, CadenceKind::Realtime);
+        assert_eq!(
+            read_at(Duration::minutes(5)).kind,
+            CadenceKind::Realtime,
+            "5:00 of silence is still presence (the same edge that keeps two calls in one wake)"
+        );
+        // "realtime" is about this moment: one second past the wake gap it is gone, and so it
+        // stays - an hour later, and 23 hours later while the calls are still inside the window
+        assert_eq!(
+            read_at(Duration::minutes(5) + Duration::seconds(1)),
+            Cadence::unknown()
+        );
+        assert_eq!(read_at(Duration::hours(1)), Cadence::unknown());
+        assert_eq!(read_at(Duration::hours(23)), Cadence::unknown());
     }
 
     #[test]

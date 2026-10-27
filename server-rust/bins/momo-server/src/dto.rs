@@ -4879,7 +4879,7 @@ pub struct HostedLivenessDto {
     /// When the oldest such run was queued.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest_waiting_at_ms: Option<i64>,
-    /// ADR-0200 증보 5 (#4621): how often this agent comes to the Agent Port.
+    /// ADR-0200 증보 6 (#4621): how often this agent comes to the Agent Port.
     pub cadence: AgentCadenceDto,
 }
 
@@ -4892,12 +4892,12 @@ pub struct AgentLivenessDto {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_signal_at_ms: Option<i64>,
-    /// ADR-0200 증보 5 (#4621): how often this agent comes to the Agent Port, so a screen
+    /// ADR-0200 증보 6 (#4621): how often this agent comes to the Agent Port, so a screen
     /// can say "다음 확인 때 가져가요" instead of "연결이 꺼져 있을 수 있어요".
     pub cadence: AgentCadenceDto,
 }
 
-/// openapi `AgentCadence` (ADR-0200 증보 5, #4621) — derived by the server from the agent's
+/// openapi `AgentCadence` (ADR-0200 증보 6, #4621) — derived by the server from the agent's
 /// admitted Agent Port calls; a client draws it and estimates nothing.
 ///
 /// `routine` carries all three of `typicalMinutes`, `expectedCheckAtMs` and `late`; `realtime`

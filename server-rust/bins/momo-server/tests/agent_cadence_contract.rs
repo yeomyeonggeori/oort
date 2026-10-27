@@ -1,4 +1,4 @@
-//! Contract test for #4621 / ADR-0200 증보 5 (no database): `docs/api/openapi.yaml` and the wire DTOs in
+//! Contract test for #4621 / ADR-0200 증보 6 (no database): `docs/api/openapi.yaml` and the wire DTOs in
 //! `momo_server::dto` name the same fields for the agent's check beat (`cadence`), and the closed
 //! vocabulary the spec documents is the one the server derives.
 //!

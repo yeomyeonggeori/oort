@@ -1,4 +1,4 @@
-//! #4621 / ADR-0200 증보 5 — 에이전트 확인 박자(`cadence`): 「다음 확인 때 가져가요」의 근거.
+//! #4621 / ADR-0200 증보 6 — 에이전트 확인 박자(`cadence`): 「다음 확인 때 가져가요」의 근거.
 //!
 //! 서버는 에이전트가 Agent Port에 **허용되어 부른 호출 시각**(`audit_log` `auth.agent_bearer.used`)에서
 //! 깨어남 묶음을 만들고, 묶음 시작 사이 간격의 중앙값으로 박자를 추정한다. 이 파일은 실제 Axum 라우터를
@@ -16,6 +16,7 @@
 //! | `four_intervals_make_a_beat_and_three_do_not` | 깨어남 4개(간격 3) → `unknown`, 5개(간격 4) → `routine` | 최소 표본 |
 //! | `a_beat_that_broke_reads_late_and_a_slow_one_does_not` | 마지막 호출이 3박(45분) 넘게 없으면 `late`, 아니면 아님 | 늦음 배수 |
 //! | `a_poller_reads_realtime_and_carries_no_numbers` | 20초마다 40분 → `realtime` 하나만 | realtime 규칙 |
+//! | `a_poller_that_went_quiet_is_not_realtime_any_more` | 같은 20초마다 40분이 두 시간 전에 끝났다 → `unknown`(`realtime`은 「지금」의 말이에요) | realtime의 현재 조건 |
 //! | `an_agent_that_wakes_whenever_somebody_writes_reads_unknown` | 간격이 제각각 → `unknown` | 규칙성 |
 //! | `the_loader_counts_only_this_agents_admitted_agent_port_calls_inside_the_window` | 창 밖·다른 에이전트·다른 action(`agent_port.call`, 거절된 호출 `scope_denied`)·REST 경로·다른 워크스페이스의 행은 세지 않고, 같은 id를 두 번 줘도 두 배가 되지 않고, 상한은 가장 새로운 것부터 | 술어 하나씩, 중복 제거 |
 //! | `the_beat_is_read_from_the_rows_the_agent_port_really_writes` | 실제 호출 N번 = 로더가 N개 (감사 두 줄 중 `used`만) | 쓰는 쪽과 읽는 쪽이 어긋남 |
@@ -402,6 +403,24 @@ async fn a_poller_reads_realtime_and_carries_no_numbers() {
     let cadence = w.cadence(agent.id).await;
     assert_cadence_is_closed(&cadence);
     assert_eq!(cadence["kind"], "realtime", "{cadence}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_poller_that_went_quiet_is_not_realtime_any_more() {
+    let w = world().await;
+    let detail = w.real_detail().await;
+    let agent = w.agent("quiet-poller").await;
+    let now = whole_ms_now();
+    // the same call every 20 seconds for 40 minutes, but it ended two hours ago: `realtime` is a
+    // word about this moment, so a poller that stopped is not it, and has no beat either
+    let steady: Vec<_> = (0..=118)
+        .map(|k| now - Duration::seconds(160 * MIN - k * 20))
+        .collect();
+    w.put_calls(agent.id, &steady, &detail).await;
+    let cadence = w.cadence(agent.id).await;
+    assert_cadence_is_closed(&cadence);
+    assert_eq!(cadence["kind"], "unknown", "{cadence}");
 }
 
 #[tokio::test]

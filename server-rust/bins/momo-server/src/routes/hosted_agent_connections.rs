@@ -173,7 +173,7 @@ pub(crate) async fn attach_liveness(
         .collect();
     let rows = momo_agent::load_liveness_rows_in_tx(conn, workspace_id, &ids).await?;
     let now = chrono::Utc::now();
-    // ADR-0200 증보 5 (#4621): the beat. Who may be promised one is decided in `cadence_for` and
+    // ADR-0200 증보 6 (#4621): the beat. Who may be promised one is decided in `cadence_for` and
     // nowhere else, so the read below is for every agent on the page.
     let cadence_params = momo_agent::CadenceParams::default();
     let agent_ids: Vec<Uuid> = dtos
@@ -661,7 +661,7 @@ pub async fn agent_liveness(
                     waiting_since,
                     &thresholds,
                 );
-                // ADR-0200 증보 5 (#4621): the beat, from the agent's admitted Agent Port calls.
+                // ADR-0200 증보 6 (#4621): the beat, from the agent's admitted Agent Port calls.
                 // `cadence_for` alone decides whether this connection may be promised one.
                 let calls = momo_agent::load_agent_call_times_in_tx(
                     conn,
