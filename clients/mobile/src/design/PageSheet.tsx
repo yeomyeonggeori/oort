@@ -35,6 +35,7 @@ import {
   SHEET_SLIDE_MS,
   SHEET_TOP,
   claimsSheetDrag,
+  claimsSheetTouchStart,
   estimatedSheetHeight,
   releaseSlideMs,
   releaseVelocity,
@@ -95,13 +96,18 @@ import {ds2Radius, SHEET, type Palette} from './tokens';
 // 끌기 응답자는 둘이다. 같은 `travel`·같은 닫는 길을 쓰고 **가져가는 조건만** 다르다.
 //
 //   머리   손잡이 띠와 `SheetHeader`(`usePageSheetDrag()` 로 핸들러를 받는다). 스크롤이 어디든 아래로 끌면 가져간다.
-//          단추(X·✓) 위에서 시작한 끌기도 가져가고, 그 단추의 눌림은 취소된다(캡처 길).
 //   본문   스크롤이 **맨 위**일 때만 가져간다(스크롤 넘겨받기). 본문의 세로 스크롤은 스스로를 시트에 **등록**한다
 //          (`usePageSheetScroll()` — `SheetScroll` 이 한다). 등록된 스크롤이 하나도 없으면 가져가지 않는다:
 //          시트가 모르는 날 `FlatList` 를 위로 되감던 손가락이 시트를 끌어 내리는 회귀를 막는다(fail-closed).
 //
+// 응답자를 쥐는 길도 둘이다(`makePan` 머리말). **시작 응답자**와 **이동 가로채기**다. RN `Modal` 은 시작 터치에서 스스로 응답자를 쥐고
+// (`Modal.js` `_shouldSetResponder`), 응답자 플러그인은 이동마다 현재 응답자의 **조상**에게만 가로채기를 묻는다. Modal 의 후손인 시트는
+// 그래서 「이동에서 가져가기」만으로는 눌리지 않는 자리에서 시작한 터치에 닿지 못한다 — 시뮬레이터가 잡았다(jest 는 응답자 플러그인을
+// 건너뛴다). 눌리지 않는 자리의 터치는 시트가 **시작에서** 얌전히 응답자를 쥐고(`claimsSheetTouchStart`) 이동이 조건을 채울 때 비로소
+// 쥔다. 단추·행·입력 위에서 시작한 터치는 그쪽이 먼저 쥐고 시트가 조상으로서 이동에서 가로챈다.
+//
 // 가져간 동안에는 본문 스크롤을 얼린다(`scrollEnabled=false`) — iOS 는 JS 응답자를 가져가도 네이티브 스크롤을 멈추지
-// 않아서, 손가락이 되돌아올 때 시트와 내용이 같이 움직인다.
+// 않아서, 손가락이 되돌아올 때 시트와 내용이 같이 움직인다. 시트 안의 스크롤은 고무줄도 없다(`usePageSheetScrollProps`).
 //
 // 알려진 한계(런타임 미검증): **같은 손가락으로 스크롤하다 맨 위에 닿아 이어 끄는 것은 안 된다.** RN `ScrollView` 는 스크롤을
 // 한 번 본 뒤 응답자 잠금을 쥐고 놓지 않는다(`ScrollView.js` `_handleResponderTerminationRequest`). 맨 위에서 **시작한**
@@ -501,47 +507,87 @@ function SheetFrame({
     }).start();
   }, [reduceMotion, travel]);
 
-  // 끌기 응답자 둘: 가져가는 조건(`claimsSheetDrag`)만 다르고 따라가기·놓기는 같다.
+  // 끌기 응답자 둘: 가져가는 조건(`claimsSheetDrag`·`claimsSheetTouchStart`)만 다르고 따라가기·놓기는 같다. 응답자를 쥐는 길은 둘이다.
+  //
+  //   시작 응답자   누를 것이 아닌 자리(머리의 제목·손잡이 띠, 스크롤이 맨 위인 본문의 빈 자리)에서 시작한 터치. RN `Modal` 이 시작
+  //                 응답자를 쥐고 플러그인이 시트(Modal 의 후손)에는 이동을 묻지 않으므로, 시트가 **시작에서** 잡아야 닿는다
+  //                 (`claimsSheetTouchStart` 머리말). 잡은 뒤에는 얌전히 기다리다가 이동이 조건을 채우면 쥔다.
+  //   이동 가로채기 단추·행·입력 위에서 시작한 터치(후손이 응답자다). 시트가 조상으로서 이동에서 가로챈다 — 그 눌림이 취소된다.
   const makePan = useCallback(
-    (zone: DragZone) =>
-      PanResponder.create({
-        // 닫는 중에는 잡지 않는다: 끌기가 슬라이드를 끊으면 애니메이션이 `finished:false` 로 끝나 `onClose` 와
-        // 행동이 그 자리에서 앞당겨 불리고 시트가 스냅으로 사라진다. 판정은 순수 함수(`claimsSheetDrag`)다.
-        // 캡처 길이 먼저다: 단추·행 위에서 시작한 끌기를 가져와야 그 눌림이 취소된다.
-        onMoveShouldSetPanResponderCapture: (_e, g) =>
-          claimsSheetDrag({
-            zone,
-            dx: g.dx,
-            dy: g.dy,
-            touches: g.numberActiveTouches,
-            closing: closing.current,
-            scrollOffsets: [...scrolls.values()],
-          }),
+    (zone: DragZone) => {
+      // 응답자마다 제 상태를 든다(머리·본문이 서로의 상태를 건드리지 않게). 응답자는 `useMemo` 로 한 번 만들어 끌기 내내 같은 것이다.
+      //   engaged  끌기를 **실제로 쥐었는가**. 시작 응답자는 터치가 시작될 때 얌전히 응답자를 쥐고(armed) 이동이 조건을 채울 때 비로소 쥔다.
+      //   dyBase   쥔 순간의 `g.dy` — 그때까지의 이동(첫 문턱)은 흡수한다. 이동 가로채기 길은 grant 가 dy 를 0 으로 되돌려 늘 0 이다.
+      //   stolen   이동 가로채기(`onMoveShouldSet…`)가 참을 돌려줬다 — 곧 오는 grant 는 이미 조건을 통과했으니 바로 쥔다.
+      const state = {engaged: false, dyBase: 0, stolen: false};
+      // 지금 이 이동이 끌기를 쥘 만한가(판정은 순수 함수).
+      const wants = (g: {dx: number; dy: number; numberActiveTouches: number}) =>
+        claimsSheetDrag({
+          zone,
+          dx: g.dx,
+          dy: g.dy,
+          touches: g.numberActiveTouches,
+          closing: closing.current,
+          scrollOffsets: [...scrolls.values()],
+        });
+      const engage = (e: Parameters<typeof stamp>[0], g: {dy: number}) => {
+        state.engaged = true;
+        state.dyBase = g.dy;
+        samples.current = [{y: 0, t: stamp(e)}];
+        setFrozen(true);
+      };
+      return PanResponder.create({
+        // 새 터치(첫 손가락)마다 상태를 비운다. 캡처 길은 모든 후보를 지나므로 늘 돈다 — 쥐지는 않는다. 둘째 손가락의 시작은 끌기를 끊지 않는다.
+        onStartShouldSetPanResponderCapture: e => {
+          if (e.nativeEvent.touches.length === 1) {
+            state.engaged = false;
+            state.stolen = false;
+          }
+          return false;
+        },
+        // 시작 응답자: 머리는 늘, 본문은 스크롤이 맨 위일 때만. 닫는 중에는 잡지 않는다(슬라이드를 끊으면 행동이 앞당겨 불린다).
+        onStartShouldSetPanResponder: () =>
+          claimsSheetTouchStart({zone, closing: closing.current, scrollOffsets: [...scrolls.values()]}),
+        // 이동 가로채기. 캡처 길이 먼저다: 단추·행 위에서 시작한 끌기를 가져와야 그 눌림이 취소된다.
+        onMoveShouldSetPanResponderCapture: (_e, g) => {
+          const claim = wants(g);
+          if (claim) state.stolen = true;
+          return claim;
+        },
         // 머리는 버블 길도 같은 판정이다(옛 손잡이 띠가 이 길이었다). 본문은 캡처 길뿐이다.
-        onMoveShouldSetPanResponder: (_e, g) =>
-          zone === 'header' &&
-          claimsSheetDrag({
-            zone,
-            dx: g.dx,
-            dy: g.dy,
-            touches: g.numberActiveTouches,
-            closing: closing.current,
-            scrollOffsets: [],
-          }),
-        // 끌기를 쥔 동안 다른 응답자(스크롤)가 가져가지 못하게 한다.
+        onMoveShouldSetPanResponder: (_e, g) => {
+          const claim = zone === 'header' && wants(g);
+          if (claim) state.stolen = true;
+          return claim;
+        },
+        // 끌기를 쥔 동안 다른 응답자(스크롤)가 가져가지 못하게 한다. 기다리는 동안에도 내주지 않는다 — 조상의 가로채기가 끌기를 둘로 쪼개지 않게.
         onPanResponderTerminationRequest: () => false,
-        onPanResponderGrant: e => {
-          samples.current = [{y: 0, t: stamp(e)}];
-          setFrozen(true);
+        // 가로채서 쥔 길은 이미 조건을 통과했으니 바로 쥔다(`g.dy` 는 grant 가 0 으로 되돌렸다). 시작 응답자는 기다린다.
+        onPanResponderGrant: (e, g) => {
+          if (state.stolen) {
+            state.stolen = false;
+            engage(e, g);
+          } else {
+            state.engaged = false;
+          }
         },
         onPanResponderMove: (e, g) => {
-          travel.setValue(sheetFollow(g.dy));
-          samples.current.push({y: g.dy, t: stamp(e)});
+          if (!state.engaged) {
+            // 기다리는 응답자: 탭·가로 쓸기·위로 쓸기는 시트가 할 일이 없다. 아래로 문턱을 넘고 세로가 앞서면 그때 쥔다.
+            if (!wants(g)) return;
+            engage(e, g);
+          }
+          const dy = g.dy - state.dyBase;
+          travel.setValue(sheetFollow(dy));
+          samples.current.push({y: dy, t: stamp(e)});
           if (samples.current.length > MAX_SAMPLES) samples.current.shift();
         },
         onPanResponderRelease: (e, g) => {
+          // 쥐지 않은 채 끝났다(탭·스크롤) — 시트가 할 일이 없다.
+          if (!state.engaged) return;
+          state.engaged = false;
           setFrozen(false);
-          const offset = sheetFollow(g.dy);
+          const offset = sheetFollow(g.dy - state.dyBase);
           const velocity = releaseVelocity(samples.current, stamp(e));
           if (!shouldDismissSheet(offset, velocity, boxRef.current)) {
             settle();
@@ -555,12 +601,16 @@ function SheetFrame({
           }
           slideOut(undefined, {offset, velocity});
         },
-        // 시스템이 끌기를 거둬 갔다(알림·제스처): 어중간한 자리에 남지 않게 제자리로.
+        // 시스템이 끌기를 거둬 갔다(알림·제스처): 어중간한 자리에 남지 않게 제자리로. 쥐지 않았으면 할 일이 없다.
         onPanResponderTerminate: () => {
+          state.stolen = false;
+          if (!state.engaged) return;
+          state.engaged = false;
           setFrozen(false);
           settle();
         },
-      }),
+      });
+    },
     [askDiscard, scrolls, settle, slideOut, travel],
   );
   const headerPan = useMemo(() => makePan('header'), [makePan]);

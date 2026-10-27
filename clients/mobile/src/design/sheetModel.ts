@@ -149,6 +149,36 @@ export function isScrolledToTop(offsetY: number): boolean {
 export type DragZone = 'header' | 'body';
 
 /**
+ * 터치가 **시작되는 순간** 시트의 끌기 응답자가 응답자를 잡는가(`onStartShouldSetPanResponder` 의 판정).
+ *
+ * 이동 시점에 가져가는 길(`claimsSheetDrag`)만으로는 **시트가 안 끌린다** — 시뮬레이터가 잡았다(#4612 2단계, jest 는 응답자 플러그인을
+ * 건너뛰어 못 잡는다). 이유는 둘이 겹친다.
+ *   · RN `Modal` 은 시작 터치에서 스스로 응답자를 쥔다(`Modal.js` `_shouldSetResponder` → `true`, 「응답자 이벤트가 모달 밖으로 새지 않게」).
+ *     그래서 시작 터치를 후손(Pressable·TextInput)이 잡지 않았으면 응답자는 **Modal 호스트**다.
+ *   · 응답자 플러그인은 이동마다 「현재 응답자의 조상」에게만 가로채기를 묻는다(응답자 자신과 그 후손은 건너뛴다). 시트는 Modal 의
+ *     후손이라, 응답자가 Modal 호스트인 터치에서는 시트의 `onMoveShouldSet…` 가 **한 번도 불리지 않는다.**
+ * 그 결과 머리·손잡이·본문의 눌리지 않는 자리에서 시작한 끌기는 시트에 닿지 않았고, 목록 행처럼 Pressable 이 먼저 응답자가 된 터치만 시트가
+ * (조상으로서) 가로챌 수 있었다. 해법은 시트가 **시작에서** 응답자를 잡는 것이다 — 시작 응답자는 버블 순서상 Modal 호스트보다 먼저다.
+ *
+ *   · 머리(손잡이 띠·제목 줄): 늘 잡는다. 눌리지 않는 자리라 탭은 어차피 할 일이 없다. 단추(X·✓) 위에서 시작한 터치는 단추가 먼저
+ *     잡고, 시트는 이동에서 가로챈다(`claimsSheetDrag`) — 그 눌림이 취소된다.
+ *   · 본문: **스크롤이 맨 위일 때만** 잡는다(등록된 스크롤이 하나 이상이고 전부 맨 위). 스크롤이 중간이면 잡지 않아 Modal 호스트가 쥐던 옛
+ *     그대로이고 스크롤과 아무 간섭이 없다 — 「스크롤 중 끌기는 시트가 안 움직인다」가 구조로 보장된다.
+ *   · 닫는 중에는 잡지 않는다(슬라이드를 끊으면 행동이 앞당겨 불린다).
+ *
+ * 잡는다고 끌리는 것은 아니다: 잡은 응답자는 **얌전히 기다리다가**(armed) 이동이 `claimsSheetDrag` 의 조건을 채울 때 비로소 시트를 움직인다.
+ */
+export function claimsSheetTouchStart(args: {
+  zone: DragZone;
+  closing: boolean;
+  scrollOffsets: readonly number[];
+}): boolean {
+  if (args.closing) return false;
+  if (args.zone === 'header') return true;
+  return args.scrollOffsets.length > 0 && args.scrollOffsets.every(isScrolledToTop);
+}
+
+/**
  * 이 이동으로 시트가 끌기를 가져가는가(`onMoveShouldSetPanResponderCapture` 의 판정).
  *
  *   · 닫는 중이 아니다(슬라이드가 끊기면 행동이 앞당겨 불린다)

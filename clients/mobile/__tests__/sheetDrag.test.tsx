@@ -4,6 +4,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from '@testing-library/react-native';
 import React from 'react';
@@ -38,6 +39,7 @@ import {
   VELOCITY_HORIZON_MS,
   VELOCITY_STOPPED_MS,
   claimsSheetDrag,
+  claimsSheetTouchStart,
   estimatedSheetHeight,
   isScrolledToTop,
   releaseSlideMs,
@@ -302,6 +304,36 @@ describe('누가 끌기를 가져가는가 — 머리·본문·스크롤', () =>
   });
 });
 
+describe('시작 응답자 — 터치가 시작되는 순간 시트가 응답자를 잡는가 (RN Modal 이 시작 응답자를 쥐므로)', () => {
+  const START = {closing: false};
+
+  it('머리(손잡이 띠·제목 줄)는 스크롤이 어떻든·스크롤이 없어도 늘 잡는다', () => {
+    expect(claimsSheetTouchStart({zone: 'header', ...START, scrollOffsets: []})).toBe(true);
+    expect(claimsSheetTouchStart({zone: 'header', ...START, scrollOffsets: [0]})).toBe(true);
+    expect(claimsSheetTouchStart({zone: 'header', ...START, scrollOffsets: [400]})).toBe(true);
+  });
+
+  it('본문은 스크롤이 맨 위일 때만 잡는다 — 중간이면 잡지 않아 스크롤과 간섭하지 않는다', () => {
+    expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: [0]})).toBe(true);
+    expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: [SCROLL_TOP_EPSILON]})).toBe(true);
+    expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: [SCROLL_TOP_EPSILON + 1]})).toBe(false);
+    expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: [0, 120]})).toBe(false); // 하나라도 중간이면
+  });
+
+  it('본문은 등록된 스크롤이 없으면 잡지 않는다 — 알려진 것만 잡는다(fail-closed)', () => {
+    expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: []})).toBe(false);
+  });
+
+  it('닫는 중에는 머리도 본문도 잡지 않는다(슬라이드를 끊으면 행동이 앞당겨 불린다)', () => {
+    expect(claimsSheetTouchStart({zone: 'header', closing: true, scrollOffsets: [0]})).toBe(false);
+    expect(claimsSheetTouchStart({zone: 'body', closing: true, scrollOffsets: [0]})).toBe(false);
+  });
+
+  it('모르는 값(NaN)은 맨 위가 아니다 — 모르면 잡지 않는다', () => {
+    expect(claimsSheetTouchStart({zone: 'body', ...START, scrollOffsets: [Number.NaN]})).toBe(false);
+  });
+});
+
 describe('놓는 순간의 속도 — 100ms 창, 40ms 멈춤, 최소제곱 기울기', () => {
   /** `perMs` px/ms 로 `count` 개를 `step`ms 간격으로. */
   const line = (perMs: number, count: number, step = 16, from = 1000): DragSample[] =>
@@ -501,6 +533,37 @@ function drag(
     handlers.onResponderRelease(touch(lastY, options.releaseAt ?? lastAt + 1, lastY));
   });
   return claimed;
+}
+
+/**
+ * **시작 응답자 길**로 `testID` 의 끌기를 재생한다 — 응답자 시스템과 같은 순서다. 터치(y=0)가 시작될 때 캡처 → 버블 순으로 응답자를
+ * 묻고(RN `Modal` 이 시작 응답자를 쥐므로 눌리지 않는 자리의 터치는 시트가 여기서 잡아야 닿는다), 잡았으면 바로 grant 한 뒤 걸음을 이동
+ * 이벤트로 흘린다. 잡지 못하면 `armed: false` — 응답자는 Modal 호스트이고 시트에는 아무것도 오지 않는다. `drag()` 는 반대 길(후손이 응답자라
+ * 시트가 이동에서 가로채는 터치)이다.
+ */
+function dragFromStart(
+  testID: string,
+  steps: Array<[number, number]>,
+  options: {release?: boolean; releaseAt?: number; touches?: number} = {},
+): {armed: boolean} {
+  const handlers = screen.getByTestId(testID).props as Handlers;
+  let armed = false;
+  act(() => {
+    const down = touch(0, 1, 0, options.touches);
+    handlers.onStartShouldSetResponderCapture(down);
+    armed = Boolean(handlers.onStartShouldSetResponder(down));
+    if (!armed) return;
+    handlers.onResponderGrant(down);
+    let previous = 0;
+    for (const [y, at] of steps) {
+      handlers.onResponderMove(touch(y, at, previous, options.touches));
+      previous = y;
+    }
+    if (options.release === false) return;
+    const [lastY, lastAt] = steps[steps.length - 1];
+    handlers.onResponderRelease(touch(lastY, options.releaseAt ?? lastAt + 1, lastY));
+  });
+  return {armed};
 }
 
 const scrollTo = (testID: string, y: number) =>
@@ -948,6 +1011,158 @@ describe('동작 줄이기 · 키보드', () => {
     await mount(<Host onClose={() => {}} />, false);
     fireEvent.press(screen.getByTestId('close'));
     expect(drag('hdr', [[20, 100], [70, 116]], {release: false})).toBe(false);
+  });
+});
+
+describe('시작 응답자 길 — 눌리지 않는 자리에서 시작한 끌기 (시뮬레이터가 잡은 결함: Modal 호스트가 응답자를 쥐면 시트에 이동이 닿지 않는다)', () => {
+  it('머리의 눌리지 않는 자리(제목)에서 시작해도 시트가 손가락을 따라온다 (±1pt)', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(dragFromStart('hdr', [[20, 100], [70, 116], [120, 132]], {release: false}).armed).toBe(true);
+    expect(sheetY()).toBe(100); // 쥔 순간(첫 걸음 20)을 흡수하고 손가락이 100 더 움직였다
+  });
+
+  it('머리의 눌리지 않는 자리에서 시작한 먼 끌기는 닫고, 모자란 끌기는 제자리로 돌아온다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('hdr', SHORT_SLOW).armed).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    expect(dragFromStart('hdr', FAR_SLOW).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('손잡이 띠도 같다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('page-sheet-handle', FAR_SLOW).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('머리는 스크롤이 중간이어도 잡는다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    scrollTo('sheet-scroll', 300);
+    expect(dragFromStart('hdr', FAR_SLOW).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('본문의 눌리지 않는 자리는 스크롤이 맨 위일 때만 잡는다 — 중간이면 응답자가 시트에 오지 않는다(스크롤과 간섭 없음)', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    scrollTo('sheet-scroll', 40);
+    expect(dragFromStart('page-sheet-body', FAR_SLOW).armed).toBe(false);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    scrollTo('sheet-scroll', 0);
+    expect(dragFromStart('page-sheet-body', FAR_SLOW).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('잡고도 얌전히 기다린다 — 탭은 시트가 할 일이 없다(움직이지도, 스프링도, 얼림도 없다)', async () => {
+    const spring = jest.spyOn(Animated, 'spring');
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />, false);
+    spring.mockClear();
+    expect(dragFromStart('hdr', [[2, 40]]).armed).toBe(true); // 2pt 움직인 탭
+    expect(spring).not.toHaveBeenCalled(); // 쥐지 않았으니 「제자리로」의 스프링도 없다(애니메이션이 켜져 있어야 스프링이 보인다)
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
+  });
+
+  it('잡고도 얌전히 기다린다 — 문턱 안의 떨림·위로 쓸기·가로 쓸기는 시트를 움직이지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    for (const steps of [
+      [[4, 20], [5, 40]] as Array<[number, number]>, // 6pt 문턱 안
+      [[-30, 20], [-80, 40]] as Array<[number, number]>, // 위로
+    ]) {
+      expect(dragFromStart('hdr', steps, {release: false}).armed).toBe(true);
+      expect(sheetY()).toBe(0);
+      act(() => {
+        (screen.getByTestId('hdr').props as Handlers).onResponderRelease(touch(0, 90, 0));
+      });
+    }
+    expect(sheetY()).toBe(0);
+  });
+
+  it('스크롤은 시트가 끌기를 **쥔 뒤에야** 얼린다 — 기다리는 동안은 그대로 스크롤된다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const scroll = () => screen.getByTestId('sheet-scroll').props.scrollEnabled;
+    const handlers = screen.getByTestId('page-sheet-body').props as Handlers;
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1, 0));
+      expect(handlers.onStartShouldSetResponder(touch(0, 1, 0))).toBe(true);
+      handlers.onResponderGrant(touch(0, 1, 0));
+    });
+    expect(scroll()).toBe(true); // 잡았지만 아직 기다린다
+    act(() => {
+      handlers.onResponderMove(touch(3, 16, 0));
+    });
+    expect(scroll()).toBe(true); // 문턱 안
+    act(() => {
+      handlers.onResponderMove(touch(30, 32, 3));
+    });
+    expect(scroll()).toBe(false); // 쥐었다
+    act(() => {
+      handlers.onResponderRelease(touch(30, 33, 30));
+    });
+    expect(scroll()).toBe(true); // 놓으면 푼다
+  });
+
+  it('닫는 중에는 시작에서도 잡지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />, false);
+    fireEvent.press(screen.getByTestId('close'));
+    expect(dragFromStart('hdr', FAR_SLOW).armed).toBe(false);
+    expect(dragFromStart('page-sheet-body', FAR_SLOW).armed).toBe(false);
+  });
+
+  it('둘째 손가락이 내려앉아도 쥔 끌기가 끊기지 않는다 — 새 터치(첫 손가락)만 상태를 비운다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    expect(dragFromStart('hdr', [[20, 100], [120, 132]], {release: false}).armed).toBe(true);
+    expect(sheetY()).toBe(100);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(120, 140, 120, 2)); // 둘째 손가락의 시작
+      handlers.onResponderMove(touch(170, 156, 120));
+    });
+    expect(sheetY()).toBe(150); // 여전히 쥐고 있고 따라온다
+  });
+
+  it('새 터치(첫 손가락)는 지난 끌기가 남긴 상태를 비운다 — 쥐지 못한 채 끝난 터치 뒤의 터치가 곧바로 쥐지 않는다', async () => {
+    await mount(<Host onClose={() => {}} />);
+    const handlers = screen.getByTestId('hdr').props as Handlers;
+    act(() => {
+      handlers.onStartShouldSetResponderCapture(touch(0, 1, 0));
+      handlers.onMoveShouldSetResponderCapture(touch(20, 16, 0)); // 가로채기가 참 — 곧 grant 가 올 터였다
+      // …그러나 현재 응답자가 내주지 않아 grant 는 오지 않았고, 「가로채기 참」이 상태에 남았다.
+    });
+    expect(dragFromStart('hdr', [[3, 40]], {release: false}).armed).toBe(true);
+    expect(sheetY()).toBe(0); // 기다린다 — 옛 「가로채기 참」이 남아 곧바로 쥐지 않았다
+    expect(screen.getByTestId('sheet-scroll').props.scrollEnabled).toBe(true);
+  });
+
+  it('저장 안 한 입력이 있으면 이 길로 먼 끌기를 해도 닫지 않고 묻는다', async () => {
+    const onClose = jest.fn();
+    const prompt = jest.fn();
+    await mount(<Host onClose={onClose} dirty onDiscardPrompt={prompt} />);
+    expect(dragFromStart('hdr', FAR_SLOW).armed).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
+    expect(prompt).toHaveBeenCalledTimes(1);
+  });
+
+  it('짧아도 빠르게 튕기면 닫는다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('hdr', FLICK).armed).toBe(true);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('아래로 문턱을 넘게 내렸다가 위로 튕기며 놓으면 열린 채다', async () => {
+    const onClose = jest.fn();
+    await mount(<Host onClose={onClose} />);
+    expect(dragFromStart('hdr', DOWN_THEN_FLICK_UP).armed).toBe(true);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(sheetY()).toBe(0);
   });
 });
 

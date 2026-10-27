@@ -66,27 +66,34 @@ function touch(y: number, at: number, previousY: number = y) {
 }
 
 /**
- * 응답자 핸들러(`handlers`)를 잡고 `steps`(y, 시각)를 따라 끌었다가 놓는다 — 실제 응답자 이벤트로. 응답자 시스템처럼 캡처 길이
- * 먼저, 버블 길이 다음이다. 어느 쪽도 가져가지 않으면 거기서 멈추고 `false` 를 돌려준다.
+ * 응답자 핸들러(`handlers`)를 **응답자 시스템과 같은 순서**로 불러 `steps`(y, 시각)를 따라 끌었다가 놓는다(`ResponderEventPlugin`):
+ * 터치가 시작될 때 캡처 → 버블 순으로 응답자를 묻고(시작 응답자 — RN `Modal` 이 시작 응답자를 쥐므로 눌리지 않는 자리의 터치는 시트가
+ * 여기서 잡아야 닿는다), 쥐지 못했으면 이동마다 캡처 → 버블로 가로채기를 묻는다. 어느 쪽으로도 쥐지 못하면 거기서 멈추고 `false` 를
+ * 돌려준다(그 터치는 시트에 닿지 않는다). 터치는 y=0 에서 시작하고 첫 걸음이 그 위치로 움직인 것이다.
  */
 function dragWith(handlers: Handlers, steps: Array<[number, number]>): boolean {
-  let claimed = false;
+  let granted = false;
   act(() => {
-    handlers.onStartShouldSetResponderCapture?.(touch(0, 1));
-    const [firstY, firstAt] = steps[0];
-    const e = touch(firstY, firstAt, 0);
-    claimed = Boolean(handlers.onMoveShouldSetResponderCapture(e)) || Boolean(handlers.onMoveShouldSetResponder?.(e));
-    if (!claimed) return;
-    handlers.onResponderGrant(e);
-    let previous = firstY;
-    for (const [y, at] of steps.slice(1)) {
-      handlers.onResponderMove(touch(y, at, previous));
+    const down = touch(0, 1);
+    handlers.onStartShouldSetResponderCapture?.(down);
+    granted = Boolean(handlers.onStartShouldSetResponder?.(down));
+    if (granted) handlers.onResponderGrant(down);
+    let previous = 0;
+    for (const [y, at] of steps) {
+      const move = touch(y, at, previous);
       previous = y;
+      if (granted) {
+        handlers.onResponderMove(move);
+        continue;
+      }
+      granted = Boolean(handlers.onMoveShouldSetResponderCapture(move)) || Boolean(handlers.onMoveShouldSetResponder?.(move));
+      if (granted) handlers.onResponderGrant(move);
     }
+    if (!granted) return;
     const [lastY, lastAt] = steps[steps.length - 1];
     handlers.onResponderRelease(touch(lastY, lastAt + 1, lastY));
   });
-  return claimed;
+  return granted;
 }
 
 /** 손잡이 띠를 잡고 `steps`(y, 시각)를 따라 끌었다가 놓는다 — 실제 응답자 이벤트로. */
