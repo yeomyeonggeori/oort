@@ -26,12 +26,12 @@ import {STACK_PILL_SCALE} from '../src/design/atoms';
 import {PageHeader, SheetHeader} from '../src/design/SheetChrome';
 import {THEME_IDS} from '../src/design/ds2Tokens';
 import {
-  SHEET_DISMISS_DISTANCE,
   SHEET_DISMISS_VELOCITY,
   cardPosition,
   cardRing,
   circleLook,
   dividerIndent,
+  sheetDismissDistance,
   sheetFrame,
   shouldDismissSheet,
 } from '../src/design/sheetModel';
@@ -109,21 +109,25 @@ function Sheet({
 // 순수 규칙
 // ---------------------------------------------------------------------------
 
+// 문턱의 값·경계·비율·바닥은 `sheetDrag.test.tsx` 가 잰다(#4612). 여기는 옛 시험이 지키던 세 문장만 새 판정으로 잇는다.
 describe('끌어 닫기 문턱', () => {
+  const HEIGHT = 400;
+  const distance = sheetDismissDistance(HEIGHT);
+
   it('거리만 넘어도 닫고, 속도만 넘어도 닫고, 둘 다 모자라면 닫지 않는다', () => {
-    expect(shouldDismissSheet(SHEET_DISMISS_DISTANCE + 1, 0)).toBe(true);
-    expect(shouldDismissSheet(10, SHEET_DISMISS_VELOCITY + 0.1)).toBe(true);
-    expect(shouldDismissSheet(SHEET_DISMISS_DISTANCE - 1, SHEET_DISMISS_VELOCITY - 0.1)).toBe(false);
-    expect(shouldDismissSheet(0, 0)).toBe(false);
+    expect(shouldDismissSheet(distance + 1, 0, HEIGHT)).toBe(true);
+    expect(shouldDismissSheet(10, SHEET_DISMISS_VELOCITY + 0.1, HEIGHT)).toBe(true);
+    expect(shouldDismissSheet(distance - 1, SHEET_DISMISS_VELOCITY - 0.1, HEIGHT)).toBe(false);
+    expect(shouldDismissSheet(0, 0, HEIGHT)).toBe(false);
   });
 
   it('경계값 자체는 닫지 않는다 — 「넘어야」 닫는다', () => {
-    expect(shouldDismissSheet(SHEET_DISMISS_DISTANCE, 0)).toBe(false);
-    expect(shouldDismissSheet(0, SHEET_DISMISS_VELOCITY)).toBe(false);
+    expect(shouldDismissSheet(distance, 0, HEIGHT)).toBe(false);
+    expect(shouldDismissSheet(0, SHEET_DISMISS_VELOCITY, HEIGHT)).toBe(false);
   });
 
   it('위로 끄는 것(음수)은 닫지 않는다', () => {
-    expect(shouldDismissSheet(-500, -5)).toBe(false);
+    expect(shouldDismissSheet(-500, -5, HEIGHT)).toBe(false);
   });
 });
 
@@ -339,17 +343,19 @@ function dragHandle(steps: Array<[number, number]>) {
 }
 
 describe('끌어내려 닫기', () => {
-  it('손잡이 띠를 천천히 멀리 끌면 거리 문턱을 넘어 닫힌다', async () => {
+  it('손잡이 띠를 천천히 멀리 끌면 거리 문턱(시트 높이의 25%)을 넘어 닫힌다', async () => {
     const onClose = jest.fn();
     await mount(<Sheet onClose={onClose} />, false);
-    dragHandle([[20, 100], [60, 300], [100, 500], [150, 700]]);
+    // 큰 단의 높이는 화면 − 58, 문턱은 그 25%. 느리게(500ms 간격) 끌어 속도 문턱은 넘지 않는다.
+    dragHandle([[20, 100], [120, 600], [220, 1100], [360, 1600]]);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), {timeout: 8000});
   }, 15000);
 
   it('짧게 휙 튕겨도 속도 문턱을 넘어 닫힌다', async () => {
     const onClose = jest.fn();
     await mount(<Sheet onClose={onClose} />, false);
-    dragHandle([[20, 100], [45, 116]]);
+    // 92pt 만 끌었지만 마지막 64ms 동안 1.4px/ms 로 내렸다(100ms 창의 표본 다섯).
+    dragHandle([[20, 100], [40, 116], [62, 132], [86, 148], [112, 164]]);
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1), {timeout: 8000});
   }, 15000);
 

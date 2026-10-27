@@ -62,11 +62,11 @@ describe("거절 문장", () => {
 
 describe("에이전트 처음 값", () => {
   it("표시 이름은 이름-회사, 핸들은 소유자 핸들에서 만든 합법 핸들", () => {
-    const d = personalAgentDefaults({ memberName: "곽성재", memberHandle: "Seongjae.K", company: "Anthropic", format: "anthropic" });
-    expect(d.displayName).toBe("곽성재-Anthropic");
-    expect(d.handle).toBe("seongjae-k-claude");
+    const d = personalAgentDefaults({ memberName: "구민수", memberHandle: "Minsu.K", company: "Anthropic", format: "anthropic" });
+    expect(d.displayName).toBe("구민수-Anthropic");
+    expect(d.handle).toBe("minsu-k-claude");
     expect(personalAgentHandleValid(d.handle)).toBe(true);
-    const hangul = personalAgentDefaults({ memberName: "성재", memberHandle: "성재", company: "OpenAI", format: "openai" });
+    const hangul = personalAgentDefaults({ memberName: "민수", memberHandle: "민수", company: "OpenAI", format: "openai" });
     expect(personalAgentHandleValid(hangul.handle)).toBe(true);
     const long = personalAgentDefaults({ memberName: "a", memberHandle: "x".repeat(60), company: "OpenAI", format: "openai" });
     expect(long.handle.length).toBeLessThanOrEqual(32);

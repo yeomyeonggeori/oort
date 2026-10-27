@@ -65,8 +65,8 @@ function input(overrides: Partial<CallPersonalAgentInput> = {}): CallPersonalAge
     workspaceId: WS,
     channelId: CH,
     clientMsgId: "cmid-1",
-    text: "@kwak-claude 빌드가 왜 깨지는지 봐 줘\n로그부터요",
-    agent: { memberId: AGENT, handle: "kwak-claude" },
+    text: "@gu-claude 빌드가 왜 깨지는지 봐 줘\n로그부터요",
+    agent: { memberId: AGENT, handle: "gu-claude" },
     destination: { hostId: HOST, folderId: "fld_0123456789abcdef0123", tool: "claude" },
     signer: null,
     ...overrides,
@@ -149,7 +149,7 @@ describe("calling a personal agent (#3592)", () => {
 
   it("an alias with nothing after it sends the message and calls nothing", async () => {
     const { signer, signed } = recordingSigner();
-    const result = await callPersonalAgent(input({ signer, text: "@kwak-claude  " }));
+    const result = await callPersonalAgent(input({ signer, text: "@gu-claude  " }));
     expect(result.call).toEqual({ state: "message_only", reason: "nothing_to_ask", text: CALL_NOTHING_TO_ASK_LINE });
     expect(signed).toHaveLength(0);
     expect(api.postWorkSpawn).not.toHaveBeenCalled();
@@ -200,16 +200,16 @@ describe("calling a personal agent (#3592)", () => {
 
 describe("what is signed from what was typed", () => {
   it("drops a leading @alias (and its separator) and keeps the rest as typed", () => {
-    expect(promptFromMessage("@kwak-claude 빌드 봐 줘", "kwak-claude")).toBe("빌드 봐 줘");
-    expect(promptFromMessage("  @Kwak-Claude: 빌드 봐 줘", "kwak-claude")).toBe("빌드 봐 줘");
-    expect(promptFromMessage("<@kwak-claude> 빌드", "kwak-claude")).toBe("빌드");
+    expect(promptFromMessage("@gu-claude 빌드 봐 줘", "gu-claude")).toBe("빌드 봐 줘");
+    expect(promptFromMessage("  @Gu-Claude: 빌드 봐 줘", "gu-claude")).toBe("빌드 봐 줘");
+    expect(promptFromMessage("<@gu-claude> 빌드", "gu-claude")).toBe("빌드");
     // A different handle that merely starts the same is someone else.
-    expect(promptFromMessage("@kwak-claude2 빌드", "kwak-claude")).toBe("@kwak-claude2 빌드");
+    expect(promptFromMessage("@gu-claude2 빌드", "gu-claude")).toBe("@gu-claude2 빌드");
     // A DM has no mention: the text goes whole.
-    expect(promptFromMessage("빌드 봐 줘", "kwak-claude")).toBe("빌드 봐 줘");
-    expect(promptFromMessage("메일 @kwak-claude 에게", "kwak-claude")).toBe("메일 @kwak-claude 에게");
+    expect(promptFromMessage("빌드 봐 줘", "gu-claude")).toBe("빌드 봐 줘");
+    expect(promptFromMessage("메일 @gu-claude 에게", "gu-claude")).toBe("메일 @gu-claude 에게");
     // One line-break spelling, so every signer signs what the host reads.
-    expect(promptFromMessage("@kwak-claude 첫 줄\r\n둘째 줄\r셋째", "kwak-claude")).toBe("첫 줄\n둘째 줄\n셋째");
+    expect(promptFromMessage("@gu-claude 첫 줄\r\n둘째 줄\r셋째", "gu-claude")).toBe("첫 줄\n둘째 줄\n셋째");
   });
 
   it("makes a one-line title of at most 120 characters", () => {

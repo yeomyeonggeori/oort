@@ -339,7 +339,7 @@ describe("auto target eligibility (mirrors requireAllowedTarget)", () => {
     id: "019f994c-4ed0-76a9-9d43-a9bde45b8fcd",
     scope: "member",
     ownerMemberId: "00000000-0000-7000-8000-000000000101",
-    displayName: "성재 MacBook Pro",
+    displayName: "민수 MacBook Pro",
   };
   const otherHost = {
     id: "019f994c-4ed0-76a9-9d43-a9bde45b8fce",
@@ -362,7 +362,7 @@ describe("auto target eligibility (mirrors requireAllowedTarget)", () => {
       eligibleAutoTargets([workspaceHost, myHost, otherHost], "member", ME).map(
         (h) => h.displayName
       )
-    ).toEqual(["dawn-build-01", "성재 MacBook Pro"]);
+    ).toEqual(["dawn-build-01", "민수 MacBook Pro"]);
   });
 
   it("never offers a revoked host, whatever its scope", () => {
@@ -449,7 +449,7 @@ describe("핸들·워크스페이스 이름 error copy", () => {
     expect(handleFieldError("!")).toBe(
       "핸들은 영문 소문자·숫자·하이픈 2~32자예요."
     );
-    expect(handleFieldError("seongjae")).toBeNull();
+    expect(handleFieldError("minsu")).toBeNull();
   });
 
   it("maps a workspace 400 to Korean and names the next move", () => {
@@ -534,18 +534,18 @@ describe("work host row (WorkHostRoutes projection)", () => {
   // The live momowebqa registry: six rows, four revoked, and three of them
   // sharing one displayName because the host re-registered three times.
   const LIVE = [
-    { id: "019f9984-b2a9-7618-8ed1-eb0d622ccaa2", online: false, name: "성재 MacBook Pro 16인치, 사무실 창가 자리" },
+    { id: "019f9984-b2a9-7618-8ed1-eb0d622ccaa2", online: false, name: "민수 MacBook Pro 16인치, 사무실 창가 자리" },
     { id: "019f9984-b2cb-7c28-8a42-387c95d5b9b6", online: false, name: "dawn-build-01" },
     { id: "019f9984-b2ee-78b0-89c0-31ac6769e8f3", online: false, revokedAtMs: 1784987053140, name: "지수 MacBook Air" },
-    { id: "019f999c-6845-79cd-841d-22f20d098c61", online: false, revokedAtMs: 1784988592207, name: "성재 iMac, 집 작업실" },
-    { id: "019f999d-8729-72a6-995d-5dffec0bc8a0", online: false, revokedAtMs: 1784988665650, name: "성재 iMac, 집 작업실" },
-    { id: "019f99a0-8ac1-77b0-948b-210e791c6238", online: false, revokedAtMs: 1784988863000, name: "성재 iMac, 집 작업실" },
+    { id: "019f999c-6845-79cd-841d-22f20d098c61", online: false, revokedAtMs: 1784988592207, name: "민수 iMac, 집 작업실" },
+    { id: "019f999d-8729-72a6-995d-5dffec0bc8a0", online: false, revokedAtMs: 1784988665650, name: "민수 iMac, 집 작업실" },
+    { id: "019f99a0-8ac1-77b0-948b-210e791c6238", online: false, revokedAtMs: 1784988863000, name: "민수 iMac, 집 작업실" },
   ];
 
   it("distinguishes rows by id tail, because a display name does not", () => {
     // Three live rows, one name. Only the tail separates them, so it is what
     // the accessible name of a per-row control has to carry.
-    const sameName = LIVE.filter((h) => h.name === "성재 iMac, 집 작업실");
+    const sameName = LIVE.filter((h) => h.name === "민수 iMac, 집 작업실");
     expect(sameName).toHaveLength(3);
     const tails = sameName.map((h) => workHostIdTail(h.id));
     expect(tails).toEqual(["098c61", "0bc8a0", "1c6238"]);

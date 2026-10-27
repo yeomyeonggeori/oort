@@ -31,8 +31,8 @@ const MEMBER = {
   id: "00000000-0000-7000-8000-000000000101",
   workspaceId: "00000000-0000-7000-8000-000000000001",
   kind: "human" as const,
-  displayName: "Seongjae",
-  handle: "seongjae",
+  displayName: "Minsu",
+  handle: "minsu",
 };
 
 const LOGIN_WIRE = {
@@ -56,7 +56,7 @@ describe("joinWithInvite createdMember", () => {
       )
     );
 
-    const result = await joinWithInvite("Ab3-_x", "seongjae@dawn.example", "new-pass");
+    const result = await joinWithInvite("Ab3-_x", "minsu@dawn.example", "new-pass");
     expect(result.createdMember).toBe(true);
     expect(result.member).toEqual(MEMBER);
     expect(host.applyLogin).toHaveBeenCalledWith(
@@ -77,7 +77,7 @@ describe("joinWithInvite createdMember", () => {
       )
     );
 
-    const result = await joinWithInvite("Ab3-_x", "seongjae@dawn.example", "new-pass");
+    const result = await joinWithInvite("Ab3-_x", "minsu@dawn.example", "new-pass");
     expect(result.createdMember).toBe(false);
   });
 
@@ -95,7 +95,7 @@ describe("joinWithInvite createdMember", () => {
     );
 
     await expect(
-      joinWithInvite("Ab3-_x", "seongjae@dawn.example", "new-pass")
+      joinWithInvite("Ab3-_x", "minsu@dawn.example", "new-pass")
     ).rejects.toBeInstanceOf(WireShapeError);
   });
 });
@@ -119,10 +119,10 @@ describe("joinWithInvite displayName (ADR-0193 D7 초대 1화면, #2819)", () =>
   it("sends the name the person typed, trimmed", async () => {
     installHost();
     const { bodies } = captureBody();
-    await joinWithInvite("Ab3-_x", "seongjae@dawn.example", "new-pass", "  지민 ");
+    await joinWithInvite("Ab3-_x", "minsu@dawn.example", "new-pass", "  지민 ");
     expect(bodies[0]?.displayName).toBe("지민");
     // The handle still comes from the email: the name is not an identifier.
-    expect(bodies[0]?.handle).toBe("seongjae");
+    expect(bodies[0]?.handle).toBe("minsu");
   });
 
   it("falls back to the email derivation when the name is blank or absent", async () => {

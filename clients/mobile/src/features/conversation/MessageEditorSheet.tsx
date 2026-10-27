@@ -80,11 +80,17 @@ export function MessageEditorSheet({
   // 빈 본문은 서버가 400 으로 거절한다. 보내기 전에 막는 편이, 거절을 한국어로
   // 옮겨 보여 주는 것보다 낫다 — 코어 `actionCopy` 의 400 문구가 tombstone 쪽을
   // 말하는 것도 그래서다("빈 본문은 요청 전에 잡힌다").
-  const canSave = trimmed !== '' && trimmed !== initialBody.trim() && !pending;
+  const changed = trimmed !== initialBody.trim();
+  const canSave = trimmed !== '' && changed && !pending;
+  // 저장 안 한 입력(#4612): 원문과 다르게 고쳐 둔 채다(전부 지운 것도 고친 것이다). 끌기·X·스크림·escape 가 그냥 닫으면 쓴 글이
+  // 사라지므로 시트가 「버릴까요?」를 먼저 묻는다(iOS `isModalInPresentation` 시트와 같다). 저장하는 동안(`pending`)은 이미 보내는
+  // 중이라 묻지 않는다 — 「저장하지 않은 내용」이 아니다.
+  const dirty = changed && !pending;
 
   return (
     <PageSheet
       height="medium"
+      dirty={dirty}
       onClose={onCancel}
       accessibilityLabel="메시지 고치기"
       scrimLabel="고치기 취소"

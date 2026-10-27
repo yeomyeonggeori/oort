@@ -68,7 +68,7 @@ function previewWire(overrides: Record<string, unknown> = {}): unknown {
 function channels(): ApprovalChannelInput[] {
   return [
     { id: GENERAL, label: "#general", kind: "public" },
-    { id: DM, label: "성재", kind: "dm" },
+    { id: DM, label: "민수", kind: "dm" },
   ];
 }
 

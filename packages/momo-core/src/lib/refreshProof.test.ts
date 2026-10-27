@@ -26,7 +26,7 @@ const member = {
   id: "00000000-0000-0000-0000-000000000002",
   workspaceId: "00000000-0000-0000-0000-000000000001",
   handle: "sj",
-  displayName: "성재",
+  displayName: "민수",
   kind: "human",
   role: "owner",
 };

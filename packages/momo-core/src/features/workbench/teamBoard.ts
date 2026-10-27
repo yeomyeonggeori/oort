@@ -145,7 +145,7 @@ export function whereLabel(item: SharedWorkSession): {
 }
 
 /**
- * 상세 머리의 상태 문장(시안 ④ 「곽성재의 응답이 필요해요 · 3분째」).
+ * 상세 머리의 상태 문장(시안 ④ 「구민수의 응답이 필요해요 · 3분째」).
  * `nowMs`는 호출자가 준다(시계 없는 순수 함수).
  */
 export function stateSentence(item: SharedWorkSession, nowMs: number): string {

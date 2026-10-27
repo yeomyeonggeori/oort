@@ -29,8 +29,8 @@ function roster(id: string, kind: 'human' | 'agent', name: string): RosterMember
     channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0,
   } as RosterMember;
 }
-const DIRECTORY = makeDirectory([roster(SELF, 'human', '곽성재'), roster(HERMES, 'agent', 'Hermes')]);
-const ME: Member = {id: SELF, workspaceId: WS, kind: 'human', displayName: '곽성재', handle: 'seongjae'};
+const DIRECTORY = makeDirectory([roster(SELF, 'human', '이도현'), roster(HERMES, 'agent', 'Hermes')]);
+const ME: Member = {id: SELF, workspaceId: WS, kind: 'human', displayName: '이도현', handle: 'dohyun'};
 
 const CATALOG = {
   plugins: [

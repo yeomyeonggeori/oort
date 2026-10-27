@@ -1,0 +1,132 @@
+appId: app.momo.ios
+name: 117-sheet-drag-action
+env:
+  # 기본값은 없다 — 내용 맞춤 단이라 시트 위 끝이 내용·기기마다 다르다. `measure/sheet-drag-run.mjs` 가 `maestro hierarchy` 로 읽어 넘긴다.
+  #   HX 가운데 x · HY 머리 제목 줄 y · HY_SHORT/HY_FAR/HY_FLICK 거기서 문턱 아래/위/튕김 거리만큼 내린 자리
+  #   ROWY 첫 행동 줄 y · ROW_FAR · GAPY 머리 바로 아래 빈 자리 y · GAP_FAR · FLICK_MS 튕김 시간
+  SHOT: "sheet-drag-action"
+  GAP_STAYS: "false" # SE: 행동 시트가 넘쳐 머리 아래 빈 자리를 시트가 잡지 않는다 — 장면 ④ 가 「안 닫힘」이고 뒤의 닫힘 번호가 하나씩 당겨진다
+  N4: "4" # ⑤ 뒤의 닫힘 번호
+  N5: "5" # ⑥ 뒤
+  N6: "6" # ⑦ 뒤
+---
+# 117-sheet-drag-action — 행동 시트(메시지 행동, 내용 맞춤 단)를 끌어내려 닫는 장면들 (#4612 2단계).
+#
+# 표면 `-momoMeasure SHEETDRAG-ACTION`(다크) · `LIGHT-SHEETDRAG-ACTION` 은 배송되는 `MessageActionSheet` 를 세운다. 닫히면 무대에
+# 「닫힘 N」과 「시트 다시 열기」.
+#
+#   ① 모자란 끌기(머리, 느리게)        제자리로 돌아온다
+#   ② 머리 끌기(문턱 위)              닫힌다(닫힘 1) — 제목에서 시작: 시작 응답자 길
+#   ③ 본문 맨 위 끌기 — 행동 줄에서 시작  닫힌다(닫힘 2) — 줄이 먼저 응답자, 시트가 이동에서 가로챈다
+#   ④ 본문 맨 위 끌기 — 머리 아래 빈 자리  닫힌다(닫힘 3) — 시작 응답자 길. **내용이 넘치는 시트(SE)는 시트가 잡지 않는다 — 열려 있다**(알려진 한계)
+#   ⑤ 빠른 튕김                      닫힌다(닫힘 4)
+#   ⑥ 행동 줄을 **누른다**             닫힌다(닫힘 5) — 시트가 시작에서 응답자를 쥐어도 눌림을 훔치지 않는다(줄이 먼저 쥔다)
+#   ⑦ X 를 **누른다**                 닫힌다(닫힘 6)
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-0-open
+# ① 모자란 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_SHORT}"
+    duration: 1500
+- waitForAnimationToEnd
+- assertVisible:
+    id: "sheet-close"
+# ② 머리 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 1"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-2-header-closed
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 10000
+- waitForAnimationToEnd
+# ③ 행동 줄에서 시작
+- swipe:
+    start: "${HX}, ${ROWY}"
+    end: "${HX}, ${ROW_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 2"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 10000
+- waitForAnimationToEnd
+# @skip-when GAP_STAYS
+# ④ 머리 아래 빈 자리에서 시작
+- swipe:
+    start: "${HX}, ${GAPY}"
+    end: "${HX}, ${GAP_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 3"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 10000
+- waitForAnimationToEnd
+# @end
+# @only-when GAP_STAYS
+# ④ (넘치는 시트) 머리 아래 빈 자리에서 시작 — 시트가 잡지 않는다: 열려 있다(무대의 「닫힘 N」은 시트 밑이라 안 보인다)
+- swipe:
+    start: "${HX}, ${GAPY}"
+    end: "${HX}, ${GAP_FAR}"
+    duration: 1200
+- waitForAnimationToEnd
+- assertVisible:
+    id: "sheet-close"
+- takeScreenshot: ${SHOT}-4-gap-stays
+# @end
+# ⑤ 빠른 튕김
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FLICK}"
+    duration: ${FLICK_MS}
+- extendedWaitUntil:
+    visible: "닫힘 ${N4}"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 10000
+- waitForAnimationToEnd
+# ⑥ 행동 줄 누르기 — 탭은 그대로 동작한다
+- tapOn:
+    id: "sheet-copy"
+- extendedWaitUntil:
+    visible: "닫힘 ${N5}"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "sheet-close"
+    timeout: 10000
+- waitForAnimationToEnd
+# ⑦ X 누르기
+- tapOn:
+    id: "sheet-close"
+- extendedWaitUntil:
+    visible: "닫힘 ${N6}"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-7-x-closed

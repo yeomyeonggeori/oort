@@ -173,7 +173,7 @@ describe("라벨 표(손으로 적은 정답)", () => {
   }> = [
     {
       name: "내 구독, 맥 켜짐",
-      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "성재", hostOnline: true },
+      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "민수", hostOnline: true },
       viewer: ME,
       brain: "내 구독 (Claude Code)", callable: "나만", cost: "내 구독",
       line: "내 구독 · 나만 부를 수 있어요", badge: "내 구독", locked: false, host: "내 맥 켜짐",
@@ -187,24 +187,24 @@ describe("라벨 표(손으로 적은 정답)", () => {
     },
     {
       name: "남의 구독, 맥 켜짐",
-      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "성재", hostOnline: true },
+      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "민수", hostOnline: true },
       viewer: OTHER,
-      brain: "개인 구독 (Claude Code)", callable: "성재 님만", cost: "성재 님 구독",
-      line: "성재 님 개인 구독 · 성재 님만 부를 수 있어요", badge: "성재 님만", locked: true, host: "맥 켜짐",
+      brain: "개인 구독 (Claude Code)", callable: "민수 님만", cost: "민수 님 구독",
+      line: "민수 님 개인 구독 · 민수 님만 부를 수 있어요", badge: "민수 님만", locked: true, host: "맥 켜짐",
     },
     {
       name: "남의 구독, 맥 꺼짐",
-      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "성재", hostOnline: false },
+      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "민수", hostOnline: false },
       viewer: OTHER,
-      brain: "개인 구독 (Claude Code)", callable: "성재 님만", cost: "성재 님 구독",
-      line: "성재 님 개인 구독 · 성재 님만 부를 수 있어요 · 맥 꺼짐", badge: "성재 님만", locked: true, host: "맥 꺼짐",
+      brain: "개인 구독 (Claude Code)", callable: "민수 님만", cost: "민수 님 구독",
+      line: "민수 님 개인 구독 · 민수 님만 부를 수 있어요 · 맥 꺼짐", badge: "민수 님만", locked: true, host: "맥 꺼짐",
     },
     {
       name: "남의 구독, 맥 상태 모름",
-      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "성재" },
+      facts: { ...sub, ownerHumanId: "h-me", ownerDisplayName: "민수" },
       viewer: OTHER,
-      brain: "개인 구독 (Claude Code)", callable: "성재 님만", cost: "성재 님 구독",
-      line: "성재 님 개인 구독 · 성재 님만 부를 수 있어요", badge: "성재 님만", locked: true, host: null,
+      brain: "개인 구독 (Claude Code)", callable: "민수 님만", cost: "민수 님 구독",
+      line: "민수 님 개인 구독 · 민수 님만 부를 수 있어요", badge: "민수 님만", locked: true, host: null,
     },
     {
       name: "남의 구독, 소유자 이름 모름",
@@ -215,10 +215,10 @@ describe("라벨 표(손으로 적은 정답)", () => {
     },
     {
       name: "구독인데 소유자 관계 모름, 이름 앎: 누구에게나 참인 문장",
-      facts: { ...sub, ownerDisplayName: "성재" },
+      facts: { ...sub, ownerDisplayName: "민수" },
       viewer: ME,
-      brain: "개인 구독 (Claude Code)", callable: "성재 님만", cost: "성재 님 구독",
-      line: "성재 님 개인 구독 · 성재 님만 부를 수 있어요", badge: "성재 님만", locked: false, host: null,
+      brain: "개인 구독 (Claude Code)", callable: "민수 님만", cost: "민수 님 구독",
+      line: "민수 님 개인 구독 · 민수 님만 부를 수 있어요", badge: "민수 님만", locked: false, host: null,
     },
     {
       name: "구독인데 소유자 관계도 이름도 모름: 중립",
@@ -306,7 +306,7 @@ describe("조합 전수 불변식", () => {
     ["no viewer", { ownerHumanId: "h-me" }, {}],
   ];
   const hostVariants: Array<boolean | null | undefined> = [true, false, null, undefined];
-  const nameVariants: Array<string | null | undefined> = ["성재", "  ", null, undefined];
+  const nameVariants: Array<string | null | undefined> = ["민수", "  ", null, undefined];
 
   const all: Array<{ id: string; facts: AiAgentFacts; viewer: AiViewer }> = [];
   for (const [bn, bf] of brainVariants)
@@ -389,8 +389,8 @@ describe("조합 전수 불변식", () => {
       const l = aiAgentLabels(c);
       const texts = [
         l.brain, l.callable, l.cost, l.mentionLine, l.mentionBadge, l.host?.label, l.host?.detail,
-        nonOwnerNotice(c, "성재의 Claude Code", "김인턴"), nonOwnerNotice(c, "성재의 Claude Code"),
-        nonOwnerComposerNotice(c, "성재의 Claude Code"), hostOfflineNotice(c),
+        nonOwnerNotice(c, "민수의 Claude Code", "김인턴"), nonOwnerNotice(c, "민수의 Claude Code"),
+        nonOwnerComposerNotice(c, "민수의 Claude Code"), hostOfflineNotice(c),
       ].filter((t): t is string => t !== null && t !== undefined);
       for (const t of texts) {
         expect(t.trim(), id).not.toBe("");
@@ -404,33 +404,33 @@ describe("조합 전수 불변식", () => {
 
 describe("안내 문구", () => {
   const c = classifyAiAgent(
-    { brain: "subscription", ownerHumanId: "h-me", ownerDisplayName: "성재", hostOnline: false },
+    { brain: "subscription", ownerHumanId: "h-me", ownerDisplayName: "민수", hostOnline: false },
     OTHER
   );
 
   it("비소유자 정적 안내(팀 에이전트 있음)", () => {
-    expect(nonOwnerNotice(c, "성재의 Claude Code", "김인턴")).toBe(
-      "성재의 Claude Code는 성재 님 개인 구독이라 성재 님만 부를 수 있어요. 팀 키로 답하는 @김인턴에게 물어보거나, 성재 님에게 부탁해 보세요."
+    expect(nonOwnerNotice(c, "민수의 Claude Code", "김인턴")).toBe(
+      "민수의 Claude Code는 민수 님 개인 구독이라 민수 님만 부를 수 있어요. 팀 키로 답하는 @김인턴에게 물어보거나, 민수 님에게 부탁해 보세요."
     );
   });
   it("팀 에이전트가 없으면 앞 문장만", () => {
-    const expected = "성재의 Claude Code는 성재 님 개인 구독이라 성재 님만 부를 수 있어요.";
-    expect(nonOwnerNotice(c, "성재의 Claude Code")).toBe(expected);
-    expect(nonOwnerNotice(c, "성재의 Claude Code", "  ")).toBe(expected);
-    expect(nonOwnerNotice(c, "성재의 Claude Code", null)).toBe(expected);
+    const expected = "민수의 Claude Code는 민수 님 개인 구독이라 민수 님만 부를 수 있어요.";
+    expect(nonOwnerNotice(c, "민수의 Claude Code")).toBe(expected);
+    expect(nonOwnerNotice(c, "민수의 Claude Code", "  ")).toBe(expected);
+    expect(nonOwnerNotice(c, "민수의 Claude Code", null)).toBe(expected);
   });
   it("주제 조사는 받침을 따른다", () => {
     expect(nonOwnerNotice(c, "코드봇")).toMatch(/^코드봇은 /);
     expect(nonOwnerNotice(c, "hermes")).toMatch(/^hermes는 /);
-    expect(nonOwnerNotice(c, "성재의 Claude Code")).toMatch(/^성재의 Claude Code는 /);
+    expect(nonOwnerNotice(c, "민수의 Claude Code")).toMatch(/^민수의 Claude Code는 /);
   });
   it("composer 한 줄", () => {
-    expect(nonOwnerComposerNotice(c, "성재의 Claude Code")).toBe(
-      "성재의 Claude Code는 성재 님만 부를 수 있어요. 보내도 답하지 않아요."
+    expect(nonOwnerComposerNotice(c, "민수의 Claude Code")).toBe(
+      "민수의 Claude Code는 민수 님만 부를 수 있어요. 보내도 답하지 않아요."
     );
   });
   it("소유자 맥 꺼짐: 남/나/이름 모름", () => {
-    expect(hostOfflineNotice(c)).toBe("성재 님 맥이 꺼져 있어요. 켜지면 답해요. 팀 키로 대신하지 않아요.");
+    expect(hostOfflineNotice(c)).toBe("민수 님 맥이 꺼져 있어요. 켜지면 답해요. 팀 키로 대신하지 않아요.");
     const mine = classifyAiAgent({ brain: "subscription", ownerHumanId: "h-me", hostOnline: false }, ME);
     expect(hostOfflineNotice(mine)).toBe("내 맥이 꺼져 있어요. 켜지면 답해요. 팀 키로 대신하지 않아요.");
     const anon = classifyAiAgent({ brain: "subscription", ownerHumanId: "h-me", hostOnline: false }, OTHER);
@@ -448,31 +448,31 @@ describe("안내 문구", () => {
 });
 
 describe("에이전트 기본 이름", () => {
-  const base = { displayName: "성재", harness: "claude_code", takenNames: [] } as const;
+  const base = { displayName: "민수", harness: "claude_code", takenNames: [] } as const;
 
   it("종류별 꼬리", () => {
-    expect(defaultAgentName(base)).toBe("성재-claude");
-    expect(defaultAgentName({ ...base, harness: "codex" })).toBe("성재-codex");
+    expect(defaultAgentName(base)).toBe("민수-claude");
+    expect(defaultAgentName({ ...base, harness: "codex" })).toBe("민수-codex");
   });
   it("겹치면 -2, -3 (대소문자 무시, 앞뒤 공백 무시)", () => {
-    expect(defaultAgentName({ ...base, takenNames: ["성재-claude"] })).toBe("성재-claude-2");
-    expect(defaultAgentName({ ...base, takenNames: ["성재-claude", " 성재-claude-2 "] })).toBe("성재-claude-3");
+    expect(defaultAgentName({ ...base, takenNames: ["민수-claude"] })).toBe("민수-claude-2");
+    expect(defaultAgentName({ ...base, takenNames: ["민수-claude", " 민수-claude-2 "] })).toBe("민수-claude-3");
     expect(defaultAgentName({ ...base, displayName: "Sj", takenNames: ["SJ-CLAUDE"] })).toBe("Sj-claude-2");
   });
   it("다른 종류의 같은 사람 이름은 겹침이 아니다", () => {
-    expect(defaultAgentName({ ...base, takenNames: ["성재-codex"] })).toBe("성재-claude");
+    expect(defaultAgentName({ ...base, takenNames: ["민수-codex"] })).toBe("민수-claude");
   });
   it("맥이 여러 대면 -기기이름, 그래도 겹치면 -2", () => {
     const multi = { ...base, multipleDevices: true, deviceName: "MacBook Pro" };
-    expect(defaultAgentName(multi)).toBe("성재-claude-MacBook-Pro");
-    expect(defaultAgentName({ ...multi, takenNames: ["성재-claude-macbook-pro"] })).toBe("성재-claude-MacBook-Pro-2");
+    expect(defaultAgentName(multi)).toBe("민수-claude-MacBook-Pro");
+    expect(defaultAgentName({ ...multi, takenNames: ["민수-claude-macbook-pro"] })).toBe("민수-claude-MacBook-Pro-2");
   });
   it("맥이 한 대면 기기 이름을 붙이지 않는다", () => {
-    expect(defaultAgentName({ ...base, multipleDevices: false, deviceName: "MacBook" })).toBe("성재-claude");
+    expect(defaultAgentName({ ...base, multipleDevices: false, deviceName: "MacBook" })).toBe("민수-claude");
   });
   it("여러 대인데 기기 이름이 비면 붙이지 않는다", () => {
-    expect(defaultAgentName({ ...base, multipleDevices: true, deviceName: "  " })).toBe("성재-claude");
-    expect(defaultAgentName({ ...base, multipleDevices: true, deviceName: null })).toBe("성재-claude");
+    expect(defaultAgentName({ ...base, multipleDevices: true, deviceName: "  " })).toBe("민수-claude");
+    expect(defaultAgentName({ ...base, multipleDevices: true, deviceName: null })).toBe("민수-claude");
   });
   it("공백은 -, 앞의 @ 는 제거, 비면 me", () => {
     expect(defaultAgentName({ ...base, displayName: "  Kim  Ha " })).toBe("Kim-Ha-claude");
@@ -512,7 +512,7 @@ describe("옛 말 → 새 말 표", () => {
     expect(findLegacyTerms("에이전트를 합류시켜요").map((e) => e.old)).toEqual(["합류"]);
     expect(findLegacyTerms("owner_only 에이전트의 과금").map((e) => e.old).sort()).toEqual(["owner_only", "과금"].sort());
     expect(findLegacyTerms("팀 키 · 누구나")).toEqual([]);
-    expect(findLegacyTerms("성재 님 개인 구독 · 성재 님만 부를 수 있어요")).toEqual([]);
+    expect(findLegacyTerms("민수 님 개인 구독 · 민수 님만 부를 수 있어요")).toEqual([]);
   });
 });
 
@@ -546,8 +546,8 @@ describe("허브 구획과 옛 입구 (AIH-3)", () => {
 
 describe("내 AI 계정 구독 에이전트 줄 (AIH-4)", () => {
   it("에이전트 줄: 이름이 있으면 @이름, 없으면 아직 없음", () => {
-    expect(subscriptionAgentText("성재-claude")).toBe("에이전트 @성재-claude");
-    expect(subscriptionAgentText("@성재-claude")).toBe("에이전트 @성재-claude");
+    expect(subscriptionAgentText("민수-claude")).toBe("에이전트 @민수-claude");
+    expect(subscriptionAgentText("@민수-claude")).toBe("에이전트 @민수-claude");
     expect(subscriptionAgentText(null)).toBe("아직 에이전트 없음");
     expect(subscriptionAgentText("  ")).toBe("아직 에이전트 없음");
   });
@@ -594,10 +594,10 @@ describe("내 AI 계정 구독 에이전트 줄 (AIH-4)", () => {
 
 describe("내가 만든 구독 에이전트 (AIH-4)", () => {
   const roster = [
-    { id: "A1", displayName: "성재-claude", ownerHumanId: "ME" },
+    { id: "A1", displayName: "민수-claude", ownerHumanId: "ME" },
     { id: "A2", displayName: "서연-codex", ownerHumanId: "OTHER" },
     { id: "A3", displayName: "김인턴", ownerHumanId: "ME" },
-    { id: "A4", displayName: "성재-codex", ownerHumanId: null },
+    { id: "A4", displayName: "민수-codex", ownerHumanId: null },
   ];
   const connections = [
     { agentMemberId: "a1", subscriptionHarness: "claude_code" },
@@ -607,7 +607,7 @@ describe("내가 만든 구독 에이전트 (AIH-4)", () => {
   ];
   it("소유자가 나이고 구독 하니스가 있는 것만 올린다", () => {
     expect(mySubscriptionAgents(roster, connections, "me")).toEqual([
-      { agentId: "A1", name: "성재-claude", harness: "claude_code" },
+      { agentId: "A1", name: "민수-claude", harness: "claude_code" },
     ]);
   });
   it("끊겼거나 정리 중인 연결은 올리지 않는다", () => {
@@ -644,20 +644,20 @@ describe("개인 키 brain 과 서버 사유 (#3416)", () => {
   });
 
   it("남의 개인 키 에이전트는 이름으로 말하고 잠근다", () => {
-    const l = labelsFor({ brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "성재" }, OTHER);
-    expect(l.callable).toBe("성재 님만");
-    expect(l.mentionLine).toBe("개인 키 · 성재 님만");
+    const l = labelsFor({ brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "민수" }, OTHER);
+    expect(l.callable).toBe("민수 님만");
+    expect(l.mentionLine).toBe("개인 키 · 민수 님만");
     expect(l.lockedForViewer).toBe(true);
-    const c = classifyAiAgent({ brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "성재" }, OTHER);
-    expect(nonOwnerNotice(c, "성재의 봇")).toBe("성재의 봇은 성재 님 개인 키라서 성재 님만 부를 수 있어요.");
-    expect(nonOwnerComposerNotice(c, "성재의 봇")).toContain("성재 님만 부를 수 있어요");
+    const c = classifyAiAgent({ brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "민수" }, OTHER);
+    expect(nonOwnerNotice(c, "민수의 봇")).toBe("민수의 봇은 민수 님 개인 키라서 민수 님만 부를 수 있어요.");
+    expect(nonOwnerComposerNotice(c, "민수의 봇")).toContain("민수 님만 부를 수 있어요");
     expect(hostOfflineNotice(classifyAiAgent({ brain: "personal_key", hostOnline: false }, ME))).toBeNull();
   });
 
   it("개인 키 문장도 옛 말(grep 게이트 대상)이 없고, 소유자 이름 유무와 관계없이 줄표·빈 값이 없다 (#3426 Low)", () => {
     for (const [id, facts, viewer] of [
       ["내 것", { brain: "personal_key", ownerHumanId: "h-me" }, ME],
-      ["남의 것(이름 있음)", { brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "성재" }, OTHER],
+      ["남의 것(이름 있음)", { brain: "personal_key", ownerHumanId: "h-me", ownerDisplayName: "민수" }, OTHER],
       ["남의 것(이름 없음)", { brain: "personal_key", ownerHumanId: "h-me" }, OTHER],
       ["소유자 모름", { brain: "personal_key" }, {}],
     ] as const) {
@@ -665,7 +665,7 @@ describe("개인 키 brain 과 서버 사유 (#3416)", () => {
       const l = aiAgentLabels(c);
       const texts = [
         l.brain, l.callable, l.cost, l.mentionLine, l.mentionBadge, l.host?.label,
-        nonOwnerNotice(c, "성재의 봇", "김인턴"), nonOwnerComposerNotice(c, "성재의 봇"),
+        nonOwnerNotice(c, "민수의 봇", "김인턴"), nonOwnerComposerNotice(c, "민수의 봇"),
       ].filter((t): t is string => t !== null && t !== undefined);
       expect(texts.length, id).toBeGreaterThan(0);
       for (const t of texts) {
