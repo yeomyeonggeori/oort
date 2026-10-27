@@ -9,6 +9,7 @@ import ImageIO
 // URLSession; the system's half (Intents) is run only when this is spawned inside an iOS simulator
 // (`#if os(iOS)` at the end). Run by ./run.sh. People are made up (달무리 스튜디오).
 
+setvbuf(stdout, nil, _IOLBF, 0)  // line-buffered: a crash must not swallow what was already printed
 var failures = 0
 func check(_ ok: Bool, _ what: String) {
   print("\(ok ? "ok" : "FAIL"): \(what)")
@@ -367,6 +368,12 @@ do {
   let container = MomoPushPresentationContainer(url: directory)
   var calls = 0
   var pending: [(Error?) -> Void] = []
+  /// The oldest completion the fake system was handed. A mutation that stops asking the system must end in a
+  /// failed check, not in a trap on an empty list.
+  func answer(_ error: Error?) {
+    guard !pending.isEmpty else { check(false, "the system was asked for an answer that was never requested"); return }
+    pending.removeFirst()(error)
+  }
   let cleanup = MomoPushPresentationCleanup(
     container: container,
     deleteAllInteractions: { completion in
@@ -383,19 +390,19 @@ do {
   check(calls == 1, "a sign-out asks the system to forget the donated interactions")
   check(container.cache.avatarPNG(server: baseURL, workspace: workspaceID, member: dohyun, version: version) == nil && container.cache.channel(server: baseURL, workspace: workspaceID, channelID: designChannel) == nil, "and the cache is already empty before the system answers")
   check(cleanup.hasPendingCleanup() && result.isEmpty, "the marker is on disk while the system has not answered")
-  pending.removeFirst()(nil)
+  answer(nil)
   check(result.count == 1 && result[0] == nil && !cleanup.hasPendingCleanup(), "the system said yes: one completion, no error, the marker removed")
 
   // A deletion that failed is owed, and is retried at the next start.
   result = []
   cleanup.request { result.append($0) }
-  pending.removeFirst()(NSError(domain: "x", code: 9))
+  answer(NSError(domain: "x", code: 9))
   check(result.count == 1 && result[0] != nil && cleanup.hasPendingCleanup(), "the system failed: the error is reported and the marker stays")
   let before = calls
   var retried: [Error?] = []
   cleanup.retryPending { retried.append($0) }
   check(calls == before + 1, "the next start retries it")
-  pending.removeFirst()(nil)
+  answer(nil)
   check(retried.count == 1 && retried[0] == nil && !cleanup.hasPendingCleanup(), "and the marker goes once the retry succeeded")
   var idle: [Error?] = []
   let afterRetry = calls
@@ -407,8 +414,8 @@ do {
   var newer: [Error?] = []
   cleanup.request { older.append($0) }
   cleanup.request { newer.append($0) }
-  let first = pending.removeFirst()
-  let second = pending.removeFirst()
+  let first = pending.isEmpty ? { (_: Error?) in } : pending.removeFirst()
+  let second = pending.isEmpty ? { (_: Error?) in } : pending.removeFirst()
   first(nil)
   check(cleanup.hasPendingCleanup(), "the older answer does not clear a newer request's marker")
   second(nil)
@@ -425,7 +432,7 @@ do {
   impatient.request { timed.append($0) }
   fire?()
   check(timed.count == 1 && timed[0] != nil && impatient.hasPendingCleanup(), "no answer in time: a timeout error, once, and the marker stays for the retry")
-  late.removeFirst()(nil)
+  if let lateAnswer = late.first { lateAnswer(nil) }
   check(timed.count == 1, "an answer that arrives after the deadline does not complete the request a second time")
 
   // No container (the entitlement is missing): the system is still asked, and nothing crashes.
@@ -462,6 +469,7 @@ final class RESTStub: URLProtocol {
   nonisolated(unsafe) static var routes: [String: (status: Int, body: Data)] = [:]
   nonisolated(unsafe) static var requested: [(path: String, auth: String?, host: String?)] = []
   nonisolated(unsafe) static var redirectAvatarTo: String?
+  nonisolated(unsafe) static var omitContentLength = false
 
   override class func canInit(with request: URLRequest) -> Bool { true }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -476,8 +484,9 @@ final class RESTStub: URLProtocol {
       return
     }
     let route = routeKey.flatMap { RESTStub.routes[$0] } ?? (404, Data())
-    let response = HTTPURLResponse(
-      url: url, statusCode: route.0, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json", "Content-Length": "\(route.1.count)"])!
+    var headers = ["Content-Type": "application/json"]
+    if !RESTStub.omitContentLength { headers["Content-Length"] = "\(route.1.count)" }
+    let response = HTTPURLResponse(url: url, statusCode: route.0, httpVersion: "HTTP/1.1", headerFields: headers)!
     client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
     client?.urlProtocol(self, didLoad: route.1)
     client?.urlProtocolDidFinishLoading(self)
@@ -695,6 +704,13 @@ do {
   check(await stubDownloader().download(reference, session: stubFetchSession()) == nil, "a body over 256 KB is refused")
   RESTStub.routes = ["/avatar/content?v=\(version)": (200, Data(repeating: 1, count: 256 * 1024))]
   check(await stubDownloader().download(reference, session: stubFetchSession()) != nil, "and exactly 256 KB is taken (control)")
+  // A server that does not say how long the body is (or lies about it): only the bytes counted while reading can stop it.
+  RESTStub.omitContentLength = true
+  RESTStub.routes = ["/avatar/content?v=\(version)": (200, Data(repeating: 1, count: 300_000))]
+  check(await stubDownloader().download(reference, session: stubFetchSession()) == nil, "a body over 256 KB with no Content-Length is cut off while it is being read")
+  RESTStub.routes = ["/avatar/content?v=\(version)": (200, Data(repeating: 1, count: 256 * 1024))]
+  check(await stubDownloader().download(reference, session: stubFetchSession()) != nil, "and exactly 256 KB with no Content-Length is taken (control)")
+  RESTStub.omitContentLength = false
   RESTStub.routes = ["/avatar/content?v=\(version)": (200, photo)]
   RESTStub.redirectAvatarTo = "https://evil.example.test/steal"
   RESTStub.requested = []

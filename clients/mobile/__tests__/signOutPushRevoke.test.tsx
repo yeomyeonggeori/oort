@@ -223,6 +223,20 @@ describe('로그아웃 — 알림 확장에게 건넨 것을 지운다 (#4316)',
     await waitFor(() => expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true));
   });
 
+  it('토큰 만료·계정 교체로 세션 provider 가 내려갈 때도 지운다 — 앞 사람의 것이 다음 사람에게 남지 않는다', () => {
+    const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SessionProvider member={LOGIN_BODY.member as never}>
+          <></>
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    expect(clearPresentation).not.toHaveBeenCalled();
+    view.unmount();
+    expect(clearPresentation).toHaveBeenCalledTimes(1);
+  });
+
   it('두 설정은 지우지 않는다 — 이 폰의 취향이다', async () => {
     setPushPreview(false);
     setPushShowSender(false);
