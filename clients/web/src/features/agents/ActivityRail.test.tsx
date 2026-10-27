@@ -184,6 +184,8 @@ describe("레일 칸과 한 줄", () => {
     expect(q(el, "composer-working")?.getAttribute("data-state")).toBe("active");
     expect(q(el, "composer-working-text")?.textContent).toBe("달무리봇 · 작업 중 · 설계 문서 읽는 중");
     expect(q(el, "composer-working-text")?.firstElementChild?.className).toContain("text-agent");
+    // 살아 있는 줄에는 접히는 조각이 없다: 글이 칸에 맞춰 줄어드는 기존 그대로다(접는 것은 낡은 글인 끊긴 줄만).
+    expect(q(el, "composer-working-tail")).toBeNull();
     expect(all(el, "responding-avatar")).toHaveLength(1);
     const dots = q(el, "responding-dots");
     expect(dots?.getAttribute("data-motion")).toBe("full");
@@ -251,6 +253,13 @@ describe("레일 칸과 한 줄", () => {
     expect(q(el, "composer-working-stale")?.textContent).toBe(TURN_STALE_SENTENCE);
     // 이름은 에이전트색에서 내려온다: 기억하던 주장을 확인된 것처럼 그리지 않는다.
     expect(q(el, "composer-working-text")?.firstElementChild?.className ?? "").not.toContain("text-agent");
+    // 낱말·단계는 한 덩어리로 접히는 조각이다(design-review r2 B1-r2): 좁은 칸에서 「달무리봇 · 작…」처럼 낱말 중간에서 끊기지 않게
+    // 이름 뒤를 통째로 접는다(`@max-lg:hidden`). 이름이 첫 자식, 이 조각이 바로 다음 자식이고 글은 한 글자도 줄지 않는다.
+    const tail = q(el, "composer-working-tail");
+    expect(tail?.className).toContain("@max-lg:hidden");
+    expect(tail?.textContent).toBe(" · 작업 중 · 설계 문서 읽는 중");
+    expect(q(el, "composer-working-text")?.firstElementChild?.nextElementSibling).toBe(tail);
+    expect(q(el, "composer-working-text")?.textContent).toBe("달무리봇 · 작업 중 · 설계 문서 읽는 중");
     expect(q(el, "composer-working-open")?.getAttribute("aria-label")).toContain(TURN_STALE_SENTENCE);
     // 줄은 여전히 하나다(두 번째 줄을 세우지 않는다).
     expect(all(el, "composer-working-open")).toHaveLength(1);

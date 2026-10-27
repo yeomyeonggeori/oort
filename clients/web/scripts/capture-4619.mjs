@@ -13,7 +13,8 @@
 //   - 칩이 행 높이를 바꾸지 않는다: 칩을 `display:none`으로 지운 같은 행과 높이가 같다(머리 칩·거터 칩 모두).
 //   - 사람만 있는 대화는 간격 불변(폼 윗 여백 그대로), 에이전트 대화는 24(+폰 폭은 독의 위 경계선 1).
 //   - 카드·줄·칩이 같은 낱말(「아직 받지 않았어요」), 대화에 경과 숫자 없음. 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤.
-//   - 레일 팝오버가 지원하는 가장 좁은 폭(320)까지 뷰포트 안에 선다(design-review r1 B2). 끊긴 레일의 한정 문장은 잘리지 않는다(B1).
+//   - 레일 팝오버가 지원하는 가장 좁은 폭(320)까지 뷰포트 안에 선다(design-review r1 B2). 끊긴 레일의 한정 문장은 잘리지 않고(B1),
+//     에이전트 글은 접힘·이름만·전문 중 하나이며 낱말 중간에서 끊기지 않는다(r2 B1-r2; 안쪽 폭 20rem·32rem 문턱).
 //   - 행동 단추는 요청자·owner/admin에게만(구경꾼에게는 문장만, M2).
 //
 // 백엔드는 없다: `/v1/**`는 고정 응답이고 소켓은 구독만 받는다. **인물은 전부 가상**이다(이도현·박서연·최민수·정하윤,
@@ -842,7 +843,7 @@ async function goOffline(page) {
 
 /**
  * B1: 끊긴 레일은 한정 문장을 **전문 그대로, 잘림 없이** 보인다. 지원하는 가장 좁은 폭(320)부터 데스크탑 최소 창(720)까지 실제 앱에서 잰다.
- * 에이전트 글은 한정 문장에 자리를 내준다(0까지 줄 수 있다).
+ * 에이전트 글은 한정 문장에 자리를 내주되 낱말 중간에서 끊기지 않는다: 안쪽 폭에 따라 접힘 · 이름만 · 전문으로 선다(r2 B1-r2).
  */
 async function offlineScene(browser, origin, vp) {
   const tag = `${vp.width}-${vp.scheme}`;
@@ -863,6 +864,18 @@ async function offlineScene(browser, origin, vp) {
       staleWidth: st.width,
       staleNatural: stale.scrollWidth,
       agentWidth: ag.width,
+      // 칸 안쪽 폭(컨테이너 쿼리가 묻는 폭)과 rem, 낱말·단계 조각, 보이는 글(r2 B1-r2: 접힘·이름만·전문 중 하나이고 잘리지 않는다).
+      // 접혀 그려지지 않는 글(`display: none`)은 innerText가 textContent로 되돌아가므로 폭 0이면 빈 글로 본다.
+      inner: shell.clientWidth - parseFloat(getComputedStyle(shell).paddingLeft) - parseFloat(getComputedStyle(shell).paddingRight),
+      rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+      tailWidth: (() => {
+        const t = shell.querySelector('[data-testid="composer-working-tail"]');
+        return t ? t.getBoundingClientRect().width : -1;
+      })(),
+      visible: ag.width === 0 ? "" : agent.innerText.replace(/\s+/g, " ").trim(),
+      lead: (agent.firstElementChild?.textContent ?? "").trim(),
+      full: (agent.textContent ?? "").replace(/\s+/g, " ").trim(),
+      textCut: ag.width > 0 && agent.scrollWidth > agent.clientWidth + 0.5,
       overlap: ag.right > st.left + 0.5,
       buttonRight: button.right,
       shellRight: sh.right,
@@ -873,11 +886,18 @@ async function offlineScene(browser, origin, vp) {
       title: shell.querySelector("button").getAttribute("title") ?? "",
     };
   });
-  note(`[${tag}] 끊긴 레일: 한정 문장 ${g.staleWidth.toFixed(1)}/${g.staleNatural}px · 에이전트 글 ${g.agentWidth.toFixed(1)}px`);
+  const tier = g.inner < 20 * g.rem ? "접힘" : g.inner < 32 * g.rem ? "이름만" : "전문";
+  note(`[${tag}] 끊긴 레일: 칸 안쪽 ${g.inner.toFixed(1)}px(${tier}) · 한정 문장 ${g.staleWidth.toFixed(1)}/${g.staleNatural}px · 에이전트 글 ${g.agentWidth.toFixed(1)}px 「${g.visible}」`);
   check(`${tag} 끊긴 레일: 한정 문장이 전문 그대로다`, g.sentence === STALE_SENTENCE, g.sentence);
   check(`${tag} 끊긴 레일: 한정 문장이 잘리지 않는다(B1, ${g.staleWidth.toFixed(1)} ≥ ${g.staleNatural})`, !g.clipped, JSON.stringify(g));
   check(`${tag} 끊긴 레일: 에이전트 글과 한정 문장이 겹치지 않고, 줄이 칸을 넘치지 않는다`, !g.overlap && g.buttonRight <= g.shellRight + 0.5, JSON.stringify(g));
   check(`${tag} 끊긴 레일: 에이전트 글이 부스러기로 남지 않는다(접히거나 이름이 읽힐 만큼, ${g.agentWidth.toFixed(1)}px)`, g.agentWidth === 0 || g.agentWidth >= 40, JSON.stringify(g));
+  check(`${tag} 끊긴 레일: 보이는 에이전트 글이 낱말 중간에서 끊기지 않는다(B1-r2: 접힘·이름만·전문 중 하나, 줄임표 없음, 「${g.visible}」)`, !g.textCut && (g.visible === "" || g.visible === g.lead || g.visible === g.full), JSON.stringify(g));
+  check(
+    `${tag} 끊긴 레일: 칸 안쪽 ${g.inner.toFixed(1)}px는 「${tier}」 단계다(안쪽 20rem·32rem 문턱)`,
+    tier === "접힘" ? g.agentWidth === 0 : tier === "이름만" ? g.visible === g.lead && g.tailWidth === 0 : g.visible === g.full && g.tailWidth > 0,
+    JSON.stringify(g)
+  );
   check(`${tag} 끊긴 레일: 칸 높이 24 · 가로 스크롤 없음`, Math.abs(g.shellHeight - 24) < 0.51 && !g.hScroll, JSON.stringify(g));
   check(`${tag} 끊긴 레일: 얼굴·점이 걷힌다(낡은 상태를 살아 있는 듯 보이지 않는다)`, !g.hasFaces && !g.hasDots, JSON.stringify(g));
   check(`${tag} 끊긴 레일: 보이는 글과 title·보조기술이 같은 문장을 쓴다`, g.title.endsWith(STALE_SENTENCE), g.title);
@@ -968,7 +988,7 @@ async function main() {
     if (ONLY === "r2" || ONLY === "") {
       // design-review r1 보강: 끊긴 레일(B1)·좁은 폭 팝오버(B2)·구경꾼(M2).
       const offline = [];
-      for (const [width, scheme] of [[320, "light"], [360, "light"], [390, "light"], [390, "dark"], [720, "light"], [1440, "light"]]) {
+      for (const [width, scheme] of [[320, "light"], [360, "light"], [375, "light"], [390, "light"], [390, "dark"], [720, "light"], [1440, "light"]]) {
         const buf = await offlineScene(browser, preview.origin, { width, height: 760, scheme });
         offline.push({ label: `끊긴 레일 ${width} ${scheme}`, buf });
       }

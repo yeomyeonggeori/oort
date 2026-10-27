@@ -291,7 +291,7 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
   );
 
   it.skipIf(ENGINES.length === 0)(
-    "끊긴 레일: 좁은 폭(320·360·368·390·400)에서 한정 문장은 전문이 잘리지 않고 에이전트 글이 양보한다 (design-review r1 B1)",
+    "끊긴 레일: 폭을 훑어도 한정 문장은 전문이 잘리지 않고, 에이전트 글은 접힘·이름만·전문 중 하나이며 낱말 중간에서 끊기지 않는다 (design-review r1 B1, r2 B1-r2)",
     async () => {
       const offline = SCENARIOS.find((x) => x.name.startsWith("연결이 끊김"))!;
       expect(offline.live).toBe(false);
@@ -302,42 +302,68 @@ describe("레일 칸의 높이 예약 (#4619 A)", () => {
       for (const engine of ENGINES) {
         const browser = await playwright[engine].launch();
         try {
-          const ctx = await browser.newContext({ viewport: { width: 800, height: 700 } });
+          const ctx = await browser.newContext({ viewport: { width: 1200, height: 700 } });
           try {
             const p = await ctx.newPage();
-            // 대화 열 폭: 지원하는 가장 좁은 폭(320, `gate-typing`)·360·368·390·400, 그리고 데스크탑 최소 창(720)의 사이드바 옆 열(약 390).
-            for (const width of [320, 360, 368, 390, 400]) {
+            // 열 폭 = 칸 안쪽 + 48(`px-6` 둘). 문턱 둘이 안쪽 20rem(320)·32rem(512)이라 열 폭으로는 368·560이다: 그 앞뒤 1px,
+            // 지원하는 가장 좁은 폭(320)·360, 폰(375·390), 데스크탑 최소 창의 열(약 388), 중간 폭, 넓은 창(1000)을 훑는다.
+            for (const width of [320, 360, 367, 368, 375, 390, 400, 440, 480, 559, 560, 600, 720, 1000]) {
               await p.setContent(page(css, html).replace("width: 720px", `width: ${width}px`));
               const g = await p.evaluate(() => {
                 const shell = document.querySelector<HTMLElement>('[data-testid="composer-working"]')!;
                 const stale = shell.querySelector<HTMLElement>('[data-testid="composer-working-stale"]')!;
                 const text = shell.querySelector<HTMLElement>('[data-testid="composer-working-text"]')!;
+                const tail = shell.querySelector<HTMLElement>('[data-testid="composer-working-tail"]');
                 const button = shell.querySelector("button")!.getBoundingClientRect();
                 const sh = shell.getBoundingClientRect();
+                const cs = getComputedStyle(shell);
+                const textRect = text.getBoundingClientRect();
                 return {
                   staleClipped: stale.scrollWidth > stale.clientWidth + 0.5,
                   staleWidth: stale.getBoundingClientRect().width,
                   staleNatural: stale.scrollWidth,
-                  textWidth: text.getBoundingClientRect().width,
-                  textRight: text.getBoundingClientRect().right,
+                  textWidth: textRect.width,
+                  textRight: textRect.right,
                   staleLeft: stale.getBoundingClientRect().left,
                   buttonRight: button.right,
                   shellRight: sh.right,
                   shellHeight: sh.height,
+                  // 칸 안쪽 폭(컨테이너 쿼리가 묻는 폭)과 rem: 문턱은 rem이라 둘을 함께 잰다.
+                  inner: shell.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight),
+                  rem: parseFloat(getComputedStyle(document.documentElement).fontSize),
+                  tailWidth: tail ? tail.getBoundingClientRect().width : -1,
+                  // 접혀 그려지지 않는 글(`display: none`)은 `innerText`가 `textContent`로 되돌아가므로 폭 0이면 빈 글로 본다.
+                  visible: textRect.width === 0 ? "" : text.innerText.replace(/\s+/g, " ").trim(),
+                  lead: (text.firstElementChild?.textContent ?? "").trim(),
+                  full: (text.textContent ?? "").replace(/\s+/g, " ").trim(),
+                  // 서 있는 글이 칸보다 길어 줄임표를 받았는가(= 낱말 중간에서 끊겼는가).
+                  textCut: textRect.width > 0 && text.scrollWidth > text.clientWidth + 0.5,
                 };
               });
-              const at = `${engine} 열 ${width}`;
+              const at = `${engine} 열 ${width}(안쪽 ${g.inner})`;
               if (g.staleClipped) problems.push(`${at}: 한정 문장이 잘렸다(${g.staleWidth} < ${g.staleNatural})`);
               if (g.textRight > g.staleLeft + 0.5) problems.push(`${at}: 에이전트 글이 한정 문장과 겹친다`);
               if (g.buttonRight > g.shellRight + 0.5) problems.push(`${at}: 줄이 칸 오른쪽을 넘친다`);
               if (Math.abs(g.shellHeight - 24) > 0.51) problems.push(`${at}: 칸 높이 ${g.shellHeight}`);
-              // 에이전트 글은 양보한 쪽이다: 한정 문장보다 좁다.
-              if (!(g.textWidth < g.staleNatural)) problems.push(`${at}: 에이전트 글(${g.textWidth})이 양보하지 않았다`);
-              // 부스러기 금지: 에이전트 글은 접히거나(0) 이름이 읽힐 만큼(≥ 40) 선다. 한 글자만 남아 선 줄임표 부스러기는 안 된다
-              // (320에서 10px였다). 칸 안쪽이 20rem(320) 아래인 폭(320·360)에서는 접힌다.
+              // 에이전트 글은 양보한 쪽이다: 칸이 좁은 동안(안쪽 32rem 아래) 한정 문장보다 좁다.
+              if (g.inner < 32 * g.rem && !(g.textWidth < g.staleNatural)) problems.push(`${at}: 에이전트 글(${g.textWidth})이 양보하지 않았다`);
+              // 부스러기 금지: 서 있는 글은 이름이 읽힐 만큼(≥ 40)이다. 한 글자만 남아 선 줄임표는 안 된다(320에서 10px였다).
               if (!(g.textWidth === 0 || g.textWidth >= 40)) problems.push(`${at}: 에이전트 글이 ${g.textWidth}px 부스러기로 남았다`);
-              if (width < 368 && g.textWidth !== 0) problems.push(`${at}: 좁은 칸에서 에이전트 글이 접히지 않았다(${g.textWidth})`);
-              if (width >= 368 && g.textWidth === 0) problems.push(`${at}: 넉넉한 칸에서 에이전트 글이 접혔다`);
+              // **낱말 중간에서 끊기지 않는다**(B1-r2): 서 있는 글은 줄임표를 받지 않고, 보이는 글은 접힘·이름만·전문 셋 중 하나다.
+              // 「이름이 읽힌다」가 아니라 「잘리지 않았다」를 잰다(옛 단정은 「달무리봇 · 작…」에서도 통과했다).
+              if (g.textCut) problems.push(`${at}: 에이전트 글이 줄임표로 잘렸다 — 「${g.visible}」`);
+              if (!(g.visible === "" || g.visible === g.lead || g.visible === g.full)) {
+                problems.push(`${at}: 보이는 에이전트 글 「${g.visible}」이 접힘·이름만·전문 어느 것도 아니다`);
+              }
+              // 단계: 안쪽 20rem 아래 접힘, 32rem 아래 이름만, 그 이상 전문.
+              const tier = g.inner < 20 * g.rem ? "hidden" : g.inner < 32 * g.rem ? "name" : "full";
+              if (tier === "hidden" && g.textWidth !== 0) problems.push(`${at}: 좁은 칸에서 에이전트 글이 접히지 않았다(${g.textWidth})`);
+              if (tier === "name" && !(g.visible === g.lead && g.tailWidth === 0)) {
+                problems.push(`${at}: 이름만 서야 하는 폭에서 「${g.visible}」(낱말·단계 폭 ${g.tailWidth})`);
+              }
+              if (tier === "full" && !(g.visible === g.full && g.tailWidth > 0)) {
+                problems.push(`${at}: 전문이 서야 하는 폭에서 「${g.visible}」(낱말·단계 폭 ${g.tailWidth})`);
+              }
             }
           } finally {
             await ctx.close();

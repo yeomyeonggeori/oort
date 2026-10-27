@@ -66,7 +66,8 @@ import { openWorkPanel } from "./workLogStore";
  *
  * `px-6`은 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px이다. 레일은 textarea 텍스트 기둥에 선다.
  *
- * `@container`: 끊긴 레일이 칸의 안쪽 폭(`@max-xs` = 20rem 아래)을 물어 에이전트 글을 접는 데 쓴다(아래 `RailLine`).
+ * `@container`: 끊긴 레일이 칸의 안쪽 폭을 물어 에이전트 글을 접는 데 쓴다(아래 `RailLine`): `@max-xs`(20rem 아래)는 이름도,
+ * `@max-lg`(32rem 아래)는 낱말·단계를 접는다.
  */
 export const RAIL_SHELL_CLASS = "@container flex h-6 shrink-0 items-center px-6";
 
@@ -191,13 +192,22 @@ function RailLine({
             // 끊긴 줄에서는 에이전트 글이 **양보한다**(`flex-1` = 기준 폭 0에서 남는 자리만 받는다): 한 줄에 두 말이 못 들어가면
             // 한정 문장(「마지막으로 확인된 상태예요」)이 남고 에이전트 글이 줄어든다. 둘이 같은 비율로 줄면 좁은 폭(390·720)에서
             // 한정이 잘렸다(design-review r1 B1). 한정 문장은 이 폭에서 잘리지 않아야 사용자가 지금 글이 낡았다는 것을 안다.
-            // 칸 안쪽이 20rem 아래(폰 폭 320~367)이면 에이전트 글에 남는 자리가 이름 한 글자(320에서 10px)라 줄임표 부스러기만
-            // 서므로 아예 접는다(`@max-xs:hidden`): 이름은 `aria-label`·`title`·팝오버에 그대로 있다.
+            // **에이전트 글은 낱말 중간에서 끊기지 않는다**(r2 B1-r2, ADR-0112 D6 Detail SLA): 글에 남는 자리는 칸 안쪽 - 262(한정
+            // 문장 254 + 간격 8)라서 세 단계로 선다. 안쪽 32rem(512) 이상이면 전문(이름 · 낱말 · 단계: 남는 250에 기본 fixture
+            // 전문 190이 든다), 그 아래(390·720의 약 340에서 남는 약 80)이면 이름만(`@max-lg:hidden`이 낱말·단계를 통째로 접는다),
+            // 20rem(320) 아래(폰 폭 320~367)이면 이름도 접는다(`@max-xs:hidden`: 남는 자리가 이름 한 글자). 「작…」 같은 조각은
+            // 어느 단계에서도 서지 않는다. 접힌 글은 `aria-label`·`title`·팝오버에 그대로 있다.
             className={cn("min-w-0 truncate", !live && "flex-1 @max-xs:hidden")}
             data-testid="composer-working-text"
           >
             <span className={live ? "text-agent" : undefined}>{rail.leadLabel}</span>
-            {tail}
+            {live ? (
+              tail
+            ) : (
+              <span className="@max-lg:hidden" data-testid="composer-working-tail">
+                {tail}
+              </span>
+            )}
           </span>
           {live && rail.active && <RespondingDots />}
           {!live && (
