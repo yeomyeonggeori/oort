@@ -8,7 +8,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import {Linking} from 'react-native';
+import {Linking, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -123,7 +123,7 @@ describe('홈 배너', () => {
   });
 });
 
-describe('프로필 시트 배너', () => {
+describe('설정 페이지 배너', () => {
   it('「내 상태」 위에 상시 서고, 상태 구역보다 앞이다', async () => {
     offerHook.mockReturnValue(OFFER);
     renderShell();
@@ -131,6 +131,8 @@ describe('프로필 시트 배너', () => {
     fireEvent.press(screen.getByTestId('profile-avatar'));
     const banner = await screen.findByTestId('profile-update-banner');
     expect(banner).toBeTruthy();
+    // 설정 페이지의 스크롤이 이미 가로 여백을 준다 — 배너가 한 번 더 들이면 카드보다 안쪽으로 서 보인다.
+    expect(StyleSheet.flatten(banner.props.style).marginHorizontal).toBe(0);
     const order = flatten(screen.toJSON());
     const bannerAt = order.indexOf('profile-update-banner');
     const statusAt = order.indexOf('내 상태');
@@ -141,12 +143,12 @@ describe('프로필 시트 배너', () => {
     expect(screen.getByTestId('app-update-sheet')).toBeTruthy();
   });
 
-  it('제안이 없으면 프로필에도 없다', async () => {
+  it('제안이 없으면 설정 페이지에도 없다', async () => {
     offerHook.mockReturnValue(null);
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('profile-avatar'));
-    await screen.findByTestId('profile-sheet');
+    await screen.findByTestId('settings-page');
     expect(screen.queryByTestId('profile-update-banner')).toBeNull();
   });
 });

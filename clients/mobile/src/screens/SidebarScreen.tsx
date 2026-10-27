@@ -99,7 +99,6 @@ import {
   type ChannelRowTarget,
 } from '../features/sidebar/channelRowActions';
 import {useChannelRowActions} from '../features/sidebar/useChannelRowActions';
-import {ProfileSheet} from '../features/profile/ProfileSheet';
 import {
   AppUpdateBanner,
   AppUpdateSheet,
@@ -241,10 +240,11 @@ export function SearchFallthrough({
 }
 
 /**
- * 머리 오른쪽의 내 얼굴 — 내 프로필 시트를 여는 문 (#2702).
+ * 머리 오른쪽의 내 얼굴 — 「설정」 페이지를 여는 문 (#2702 → #4457).
  *
  * Buzz·Slack 모바일이 같은 자리에 둔다: 계정은 매일 보는 목록의 발치가 아니라
- * 머리 한구석에 작게 있고, 누르면 그 안에서 테마·알림·로그아웃이 열린다.
+ * 머리 한구석에 작게 있고, 누르면 전체 화면 설정 페이지(상태·알림·테마·로그아웃)가 열린다.
+ * 시트이던 시절(#2702)과 문은 같고 열리는 것만 페이지가 되었다.
  *
  * 얼굴 자체(`Avatar`)는 보조기술에서 숨는다 — 그래서 이 버튼이 라벨을 **직접**
  * 진다. 라벨이 없으면 VoiceOver 는 이름 없는 버튼 하나를 읽는다.
@@ -265,9 +265,9 @@ export function ProfileAvatarButton({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`내 프로필, ${name}`}
-      accessibilityHint="테마·알림·로그아웃을 엽니다."
+      accessibilityHint="상태·알림·테마·로그아웃이 있는 설정 페이지를 엽니다."
       onPress={() => {
-        // 시트가 열리는 그 프레임에 — 시각이 단독으로도 선다(시스템 햅틱을 끈 사람 포함).
+        // 페이지가 열리는 그 프레임에 — 시각이 단독으로도 선다(시스템 햅틱을 끈 사람 포함).
         haptics.light();
         onPress();
       }}
@@ -288,6 +288,7 @@ export default function SidebarScreen({
   onOpenSearch,
   onOpenAgentList,
   onOpenWorkList,
+  onOpenSettings,
   onChannelLeft,
   notificationNotice = null,
   onDismissNotificationNotice,
@@ -321,6 +322,11 @@ export default function SidebarScreen({
    */
   onOpenWorkList?: () => void;
   /**
+   * 「설정」 페이지 층을 연다(#4457): 머리 오른쪽 내 얼굴. 셸 밖(하네스)에서는 없을 수 있고, 그때
+   * 얼굴은 눌러도 아무 일이 없다 — 설정은 셸의 층이라 이 화면이 스스로 세우지 않는다.
+   */
+  onOpenSettings?: () => void;
+  /**
    * 알림을 눌렀는데 그 대화로 갈 수 없었던 이유, 한 문장 (#2569).
    *
    * 이 목록에 서는 이유는 이곳이 그 대화가 **있었어야 할 자리**이기 때문이다.
@@ -338,9 +344,8 @@ export default function SidebarScreen({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const keyboardAppearance = useKeyboardAppearance();
-  const {member, workspaceId, signOut} = useSession();
+  const {member, workspaceId} = useSession();
   const realtime = useRealtime();
-  const [profileOpen, setProfileOpen] = useState(false);
   // 새 버전 배너(#3905): 피드를 못 읽었거나 이미 최신이면 `null` 이라 아무것도 서지 않는다.
   const updateOffer = useAppUpdateOffer();
   const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
@@ -797,7 +802,7 @@ export default function SidebarScreen({
           directory={directoryQuery.directory}
           memberId={member.id}
           name={member.displayName}
-          onPress={() => setProfileOpen(true)}
+          onPress={() => onOpenSettings?.()}
         />
       </View>
 
@@ -968,17 +973,6 @@ export default function SidebarScreen({
         <AppUpdateSheet
           offer={updateOffer}
           onClose={() => setUpdateSheetOpen(false)}
-        />
-      ) : null}
-
-      {profileOpen ? (
-        <ProfileSheet
-          workspaceId={workspaceId}
-          member={member}
-          directory={directoryQuery.directory}
-          connected={realtime.status === 'connected'}
-          onSignOut={signOut}
-          onClose={() => setProfileOpen(false)}
         />
       ) : null}
     </Screen>

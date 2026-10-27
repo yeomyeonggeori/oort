@@ -15,32 +15,29 @@ import {useMutation, useQueryClient} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
-  Pressable,
-  ScrollView,
   StyleSheet,
   Text,
-  TextInput,
+  type TextInput,
   View,
 } from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {
-  BAR_CONTROL_MAX_SCALE,
   FailureBanner,
-  GroupRow,
-  GroupSection,
   LoadingState,
-  NoticeBlock,
-  OutlineButton,
+  PrimaryButton,
   Sentence,
 } from '../design/atoms';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
+import {SheetHeader, type SheetConfirm} from '../design/SheetChrome';
+import {ChoiceRow, GroupCard, ListRow, SheetScroll} from '../design/sheetParts';
+import {useStyles} from '../design/theme';
 import {
-  ds2Radius,
   font,
+  line,
   SAFE_GUTTER,
+  SHEET,
   space,
-  TOUCH_TARGET,
   type Palette,
 } from '../design/tokens';
 import {
@@ -73,7 +70,7 @@ import {useHostedConnections} from '../features/hostedAgents/queries';
 import {useChannels, useDirectory} from '../features/workspace/queries';
 import {haptics} from '../lib/haptics';
 import {useSession} from '../session/useSession';
-import {SheetTitleRow} from './NewMessageSheet';
+import {Field, FieldLabel, SheetNotice, TextArea} from './sheetForm';
 
 // =============================================================================
 // 작업 맡기기 — 폰에서 에이전트에게 type=work 요청을 만든다 (#3588 N8, ADR-0198 D4 증보 1).
@@ -98,6 +95,16 @@ import {SheetTitleRow} from './NewMessageSheet';
 // ## 입력은 이 앱 실행 안의 메모리에서만 남는다 (owner 결정)
 //
 // `features/work/delegate/session.ts`. 디스크에는 마지막에 쓴 에이전트·채널 id뿐이다.
+//
+// ## 공용 시트로 (#4458)
+//
+// 머리는 `SheetHeader`: **오른쪽 원형 X = 닫기**, 그리고 **B 단계에만 왼쪽 ✓ = 「맡기기」**(보낼 수 없는 동안 회색·눌리지 않음).
+// ✓ 는 **마지막 확정에만** 쓴다 — 중간 단계인 A 의 「다음」은 머리가 아니라 **시트 아래의 기본 단추**(`PrimaryButton`)다
+// (2026-10-26 planner 결정: 1단계가 ✓ 의 뜻을 「다음」까지 넓혔던 것을 되돌렸다). 옛 오른쪽 글자 단추(「다음」「맡기기」)와 글자
+// 「더 보기」·외곽선 「바꾸기」 단추는 없다. 몸은 `SheetScroll` 의 묶음 카드다: 누구에게·어느 채널은 라벨 + 라디오 행
+// (`ChoiceRow`), 「보낼 곳」은 카드(「바꾸기」는 그 카드의 **행**), 제목·저장소·브랜치는 입력 알약, 설명은 여러 줄 입력 상자,
+// 「저장소·브랜치」는 펼침 행(`expanded` 상태를 보조기술에 말한다)이다. 입력이 넷까지 서고 두 단계라 규칙상 페이지 후보다
+// (`phone-sheets.md` §1·§5) — 이 이슈는 시트로 둔 채 머리·부품만 옮겼고 페이지 전환은 별도 이슈(#4611)다.
 // =============================================================================
 
 type Step = 'A' | 'B';
@@ -143,6 +150,7 @@ export function DelegateWorkSheet({
     <PageSheet
       onClose={onClose}
       accessibilityLabel="작업 맡기기"
+      scrimLabel="작업 맡기기 닫기"
       testID="delegate-sheet"
     >
       <SheetBody
@@ -198,11 +206,10 @@ function SheetBody({
   onSubmitted: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  const keyboardAppearance = useKeyboardAppearance();
   const {member, workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
+  const insets = useSafeAreaInsets();
 
   const directoryQuery = useDirectory(workspaceId);
   const channelsQuery = useChannels(workspaceId);
@@ -498,193 +505,171 @@ function SheetBody({
   };
 
   // ---- 그리기 -------------------------------------------------------------
-  const header = (trailing?: React.ReactNode): React.JSX.Element => (
-    <SheetTitleRow
+  const header = (confirm?: SheetConfirm): React.JSX.Element => (
+    <SheetHeader
       title="작업 맡기기"
       closeLabel="작업 맡기기 닫기"
       onClose={slideClose}
-      trailing={trailing}
-      testID="delegate"
+      closeTestID="delegate-close"
+      confirm={confirm}
+      testID="delegate-header"
     />
   );
 
   if (received) {
     return (
-      <View>
+      <>
         {header()}
-        <View style={styles.gap}>
-          <NoticeBlock
+        <SheetScroll>
+          <SheetNotice
             headline="작업을 맡겼어요."
             detail="이 서버에는 작업 보드가 없어서 진행은 여기서 볼 수 없어요."
             testID="delegate-received"
           />
-        </View>
-      </View>
+        </SheetScroll>
+      </>
     );
   }
 
   if (loading) {
     return (
-      <View>
+      <>
         {header()}
-        <LoadingState
-          label="맡길 수 있는 곳을 불러오는 중이에요."
-          testID="delegate-loading"
-        />
-      </View>
+        <SheetScroll>
+          <GroupCard>
+            <LoadingState
+              label="맡길 수 있는 곳을 불러오는 중이에요."
+              testID="delegate-loading"
+            />
+          </GroupCard>
+        </SheetScroll>
+      </>
     );
   }
 
   if (effectiveStep === 'A') {
     return (
-      <View style={styles.fill}>
-        {header(
-          <TrailingAction
-            label="다음"
-            disabled={!canGoToB}
-            onPress={() => {
-              if (canGoToB) setStep('B');
-            }}
-            testID="delegate-next"
-          />,
-        )}
-        <ScrollView
-          keyboardShouldPersistTaps="handled"
-          contentContainerStyle={styles.list}
-          testID="delegate-step-a"
-        >
+      <>
+        {/* 머리에는 확정 ✓ 가 없다 — 「다음」은 중간 단계라 시트 아래의 기본 단추다(아래). */}
+        {header()}
+        <SheetScroll testID="delegate-step-a">
           <Sentence style={styles.intro}>
             에이전트에게 일을 맡기면 작업 탭에서 진행을 볼 수 있어요.
           </Sentence>
 
           {!lockedAgent ? (
             agents.length === 0 ? (
-              <View style={styles.gap}>
-                <NoticeBlock
-                  headline={NO_AGENT_SENTENCE}
-                  testID="delegate-no-agent"
-                />
-              </View>
+              <SheetNotice
+                headline={NO_AGENT_SENTENCE}
+                testID="delegate-no-agent"
+              />
             ) : (
-              <View style={styles.gap}>
-                <GroupSection
-                  label="누구에게 맡길까요"
-                  testID="delegate-agents"
-                >
-                  {agents.map((candidate, index) => {
-                    const refused = refusedAgents.some(id =>
-                      uuidEq(id, candidate.member.id),
-                    );
-                    const rest = candidate.rest;
-                    const isSelected =
-                      agentId !== null && uuidEq(agentId, candidate.member.id);
-                    return (
-                      <GroupRow
-                        key={candidate.member.id}
-                        title={candidate.member.displayName}
-                        detail={
-                          rest !== null
-                            ? REST_SENTENCE[rest]
-                            : refused
-                            ? '방금은 받아 주지 않았어요'
-                            : `@${candidate.member.handle}`
-                        }
-                        separated={index > 0}
-                        disabled={rest !== null || refused}
-                        accessibilityRole="radio"
-                        accessibilityState={{selected: isSelected}}
-                        onPress={() => pickAgent(candidate)}
-                        trailing={<Check on={isSelected} />}
-                        testID={`delegate-agent-${candidate.member.handle}`}
-                      />
-                    );
-                  })}
-                </GroupSection>
-              </View>
+              <GroupCard label="누구에게 맡길까요" testID="delegate-agents">
+                {agents.map(candidate => {
+                  const refused = refusedAgents.some(id =>
+                    uuidEq(id, candidate.member.id),
+                  );
+                  const rest = candidate.rest;
+                  const isSelected =
+                    agentId !== null && uuidEq(agentId, candidate.member.id);
+                  return (
+                    <ChoiceRow
+                      key={candidate.member.id}
+                      title={candidate.member.displayName}
+                      detail={
+                        rest !== null
+                          ? REST_SENTENCE[rest]
+                          : refused
+                          ? '방금은 받아 주지 않았어요'
+                          : `@${candidate.member.handle}`
+                      }
+                      disabled={rest !== null || refused}
+                      selected={isSelected}
+                      onPress={() => pickAgent(candidate)}
+                      testID={`delegate-agent-${candidate.member.handle}`}
+                    />
+                  );
+                })}
+              </GroupCard>
             )
           ) : selected !== null ? (
-            <View style={styles.gap}>
-              <GroupSection
-                label="맡길 에이전트"
-                testID="delegate-agent-locked"
-              >
-                <GroupRow
-                  title={selected.member.displayName}
-                  detail={
-                    selected.rest !== null
-                      ? REST_SENTENCE[selected.rest]
-                      : `@${selected.member.handle}`
-                  }
-                  testID="delegate-agent-fixed"
-                />
-              </GroupSection>
-            </View>
-          ) : (
-            <View style={styles.gap}>
-              <NoticeBlock
-                headline="이 에이전트를 찾지 못했어요. 목록을 새로 불러온 뒤에 다시 열어 주세요."
-                testID="delegate-agent-missing"
+            <GroupCard label="맡길 에이전트" testID="delegate-agent-locked">
+              <ListRow
+                title={selected.member.displayName}
+                detail={
+                  selected.rest !== null
+                    ? REST_SENTENCE[selected.rest]
+                    : `@${selected.member.handle}`
+                }
+                testID="delegate-agent-fixed"
               />
-            </View>
+            </GroupCard>
+          ) : (
+            <SheetNotice
+              headline="이 에이전트를 찾지 못했어요. 목록을 새로 불러온 뒤에 다시 열어 주세요."
+              testID="delegate-agent-missing"
+            />
           )}
 
           {selected !== null && selected.rest === null ? (
             channelOptions.length === 0 ? (
-              <View style={styles.gap}>
-                <NoticeBlock
-                  headline={
-                    selected.filteredByApproval
-                      ? NO_APPROVED_CHANNEL_SENTENCE
-                      : '이 에이전트가 들어 있는 채널이 없어요. 에이전트를 채널에 넣은 뒤에 맡겨 주세요.'
-                  }
-                  testID="delegate-no-channel"
-                />
-              </View>
+              <SheetNotice
+                headline={
+                  selected.filteredByApproval
+                    ? NO_APPROVED_CHANNEL_SENTENCE
+                    : '이 에이전트가 들어 있는 채널이 없어요. 에이전트를 채널에 넣은 뒤에 맡겨 주세요.'
+                }
+                testID="delegate-no-channel"
+              />
             ) : lockedChannel === null ? (
-              <View style={styles.gap}>
-                <GroupSection
-                  label="어느 채널에서 할까요"
-                  testID="delegate-channels"
-                >
-                  {channelOptions.map((option, index) => {
-                    const isSelected =
-                      resolvedChannel !== null &&
-                      uuidEq(resolvedChannel.id, option.id);
-                    const refused = pairRefused(selected.member.id, option.id);
-                    return (
-                      <GroupRow
-                        key={option.id}
-                        title={`#${option.name ?? '이름 없는 채널'}`}
-                        detail={
-                          refused
-                            ? '이 채널은 아직 승인되지 않았어요'
-                            : undefined
-                        }
-                        disabled={refused}
-                        separated={index > 0}
-                        accessibilityRole="radio"
-                        accessibilityState={{selected: isSelected}}
-                        onPress={() => pickChannel(option)}
-                        trailing={<Check on={isSelected} />}
-                        testID={`delegate-channel-${option.name ?? option.id}`}
-                      />
-                    );
-                  })}
-                </GroupSection>
-              </View>
+              <GroupCard label="어느 채널에서 할까요" testID="delegate-channels">
+                {channelOptions.map(option => {
+                  const isSelected =
+                    resolvedChannel !== null &&
+                    uuidEq(resolvedChannel.id, option.id);
+                  const refused = pairRefused(selected.member.id, option.id);
+                  return (
+                    <ChoiceRow
+                      key={option.id}
+                      title={`#${option.name ?? '이름 없는 채널'}`}
+                      detail={
+                        refused ? '이 채널은 아직 승인되지 않았어요' : undefined
+                      }
+                      disabled={refused}
+                      selected={isSelected}
+                      onPress={() => pickChannel(option)}
+                      testID={`delegate-channel-${option.name ?? option.id}`}
+                    />
+                  );
+                })}
+              </GroupCard>
             ) : null
           ) : null}
 
           {refusal !== null ? (
-            <View style={styles.bannerWrap}>
-              <FailureBanner
-                message={refusal.failure.sentence}
-                testID="delegate-error"
-              />
-            </View>
+            <FailureBanner
+              message={refusal.failure.sentence}
+              testID="delegate-error"
+            />
           ) : null}
-        </ScrollView>
-      </View>
+        </SheetScroll>
+        {/* 스크롤 밖 시트 바닥에 붙는 기본 단추. 고를 수 없는 동안은 회색·눌리지 않는다(`canGoToB`). */}
+        <View
+          style={[
+            styles.footer,
+            {paddingBottom: Math.max(insets.bottom, space.lg)},
+          ]}
+          testID="delegate-footer">
+          <PrimaryButton
+            label="다음"
+            disabled={!canGoToB}
+            onPress={() => {
+              if (canGoToB) setStep('B');
+            }}
+            testID="delegate-next"
+          />
+        </View>
+      </>
     );
   }
 
@@ -707,26 +692,22 @@ function SheetBody({
   const briefBytes = utf8ByteLength(draft.brief.trim());
 
   return (
-    <View style={styles.fill}>
-      {header(
-        <TrailingAction
-          label={mutation.isPending ? '보내는 중' : '맡기기'}
-          disabled={sendDisabled}
-          onPress={() => submit()}
-          testID="delegate-send"
-        />,
-      )}
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
+    <>
+      {header({
+        label: mutation.isPending ? '보내는 중' : '맡기기',
+        disabled: sendDisabled,
+        busy: mutation.isPending,
+        onPress: () => submit(),
+        testID: 'delegate-send',
+      })}
+      <SheetScroll
         keyboardDismissMode="on-drag"
-        // 키보드가 시트 아래를 덮는다. 네이티브 스크롤이 입력 칸을 키보드 위로 올려 준다.
+        // 큰 단은 시트가 키보드를 올리지 않는다 — 네이티브 스크롤이 입력 칸을 키보드 위로 올려 준다.
         automaticallyAdjustKeyboardInsets
-        contentContainerStyle={styles.list}
         testID="delegate-step-b"
       >
-        <View style={styles.destination} testID="delegate-destination">
-          <View style={styles.destinationText}>
-            <Text style={styles.destinationLabel}>보낼 곳</Text>
+        <GroupCard label="보낼 곳" testID="delegate-destination">
+          <View style={styles.destination}>
             <Sentence style={styles.destinationValue}>
               {selected !== null && resolvedChannel !== null
                 ? destinationLine(
@@ -739,17 +720,18 @@ function SheetBody({
             </Sentence>
           </View>
           {!fixed ? (
-            <OutlineButton
-              label="바꾸기"
-              onPress={() => setStep('A')}
+            <ListRow
+              title="바꾸기"
+              accessory="chevron"
               accessibilityLabel="맡길 곳 바꾸기"
+              onPress={() => setStep('A')}
               testID="delegate-change-target"
             />
           ) : null}
-        </View>
+        </GroupCard>
 
         {refusal !== null ? (
-          <View style={styles.bannerWrap}>
+          <View style={styles.refusal}>
             <FailureBanner
               message={refusal.failure.sentence}
               onRetry={
@@ -767,194 +749,121 @@ function SheetBody({
               testID="delegate-error"
             />
             {action === 'repick' && !fixed ? (
-              <View style={styles.repick}>
-                <OutlineButton
-                  label={FAILURE_ACTION_LABEL.repick}
+              <GroupCard>
+                <ListRow
+                  title={FAILURE_ACTION_LABEL.repick}
+                  accessory="chevron"
                   onPress={() => setStep('A')}
                   testID="delegate-error-repick"
                 />
-              </View>
+              </GroupCard>
             ) : null}
           </View>
         ) : null}
 
-        <FieldLabel
-          label="제목"
-          note={
-            nearLimit(titleBytes, WORK_TITLE_MAX_BYTES) ? '조금 남았어요' : null
-          }
-        />
-        <TextInput
-          ref={node => {
-            inputs.current.title = node;
-          }}
-          style={[
-            styles.input,
-            fieldError?.field === 'title' && styles.inputError,
-          ]}
-          value={draft.title}
-          onChangeText={value => setField('title', value)}
-          placeholder="예: 로그인 버그 고치기"
-          placeholderTextColor={palette.textFaint}
-          keyboardAppearance={keyboardAppearance}
-          returnKeyType="next"
-          editable={!mutation.isPending}
-          accessibilityLabel="제목"
-          testID="delegate-title"
-        />
-        <FieldIssue error={fieldError} field="title" />
+        <View style={styles.field}>
+          <FieldLabel
+            label="제목"
+            note={
+              nearLimit(titleBytes, WORK_TITLE_MAX_BYTES) ? '조금 남았어요' : null
+            }
+          />
+          <Field
+            ref={node => {
+              inputs.current.title = node;
+            }}
+            value={draft.title}
+            onChangeText={value => setField('title', value)}
+            placeholder="예: 로그인 버그 고치기"
+            invalid={fieldError?.field === 'title'}
+            returnKeyType="next"
+            editable={!mutation.isPending}
+            accessibilityLabel="제목"
+            testID="delegate-title"
+          />
+          <FieldIssue error={fieldError} field="title" />
+        </View>
 
-        <FieldLabel
-          label="설명"
-          note={
-            nearLimit(briefBytes, WORK_BRIEF_MAX_BYTES) ? '조금 남았어요' : null
-          }
-        />
-        <TextInput
-          ref={node => {
-            inputs.current.brief = node;
-          }}
-          style={[
-            styles.input,
-            styles.multiline,
-            fieldError?.field === 'brief' && styles.inputError,
-          ]}
-          value={draft.brief}
-          onChangeText={value => setField('brief', value)}
-          placeholder="무엇을, 어떻게 해 주면 좋을지 적어 주세요."
-          placeholderTextColor={palette.textFaint}
-          keyboardAppearance={keyboardAppearance}
-          multiline
-          lineBreakStrategyIOS="hangul-word"
-          textAlignVertical="top"
-          editable={!mutation.isPending}
-          accessibilityLabel="설명"
-          testID="delegate-brief"
-        />
-        <FieldIssue error={fieldError} field="brief" />
+        <View style={styles.field}>
+          <FieldLabel
+            label="설명"
+            note={
+              nearLimit(briefBytes, WORK_BRIEF_MAX_BYTES) ? '조금 남았어요' : null
+            }
+          />
+          <TextArea
+            ref={node => {
+              inputs.current.brief = node;
+            }}
+            value={draft.brief}
+            onChangeText={value => setField('brief', value)}
+            placeholder="무엇을, 어떻게 해 주면 좋을지 적어 주세요."
+            invalid={fieldError?.field === 'brief'}
+            editable={!mutation.isPending}
+            accessibilityLabel="설명"
+            testID="delegate-brief"
+          />
+          <FieldIssue error={fieldError} field="brief" />
+        </View>
 
-        <Pressable
-          accessibilityRole="button"
-          accessibilityState={{expanded: showMore}}
-          onPress={() => setShowMore(current => !current)}
-          style={({pressed}) => [styles.more, pressed && styles.pressed]}
-          testID="delegate-more"
-        >
-          <Text style={styles.moreLabel}>
-            {showMore ? '저장소·브랜치 접기' : '저장소·브랜치 더 보기'}
-          </Text>
-        </Pressable>
+        <GroupCard>
+          <ListRow
+            title={showMore ? '저장소·브랜치 접기' : '저장소·브랜치 더 보기'}
+            accessory="expand"
+            expanded={showMore}
+            onPress={() => setShowMore(current => !current)}
+            testID="delegate-more"
+          />
+        </GroupCard>
         {showMore ? (
-          <View>
-            <FieldLabel label="저장소" note={null} />
-            <TextInput
-              ref={node => {
-                inputs.current.repo = node;
-              }}
-              style={[
-                styles.input,
-                fieldError?.field === 'repo' && styles.inputError,
-              ]}
-              value={draft.repo}
-              onChangeText={value => setField('repo', value)}
-              placeholder="예: https://github.com/oort/app"
-              placeholderTextColor={palette.textFaint}
-              keyboardAppearance={keyboardAppearance}
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              editable={!mutation.isPending}
-              accessibilityLabel="저장소"
-              testID="delegate-repo"
-            />
-            <FieldIssue error={fieldError} field="repo" />
-            <FieldLabel label="브랜치" note={null} />
-            <TextInput
-              ref={node => {
-                inputs.current.branch = node;
-              }}
-              style={[
-                styles.input,
-                fieldError?.field === 'branch' && styles.inputError,
-              ]}
-              value={draft.branch}
-              onChangeText={value => setField('branch', value)}
-              placeholder="예: main"
-              placeholderTextColor={palette.textFaint}
-              keyboardAppearance={keyboardAppearance}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!mutation.isPending}
-              accessibilityLabel="브랜치"
-              testID="delegate-branch"
-            />
-            <FieldIssue error={fieldError} field="branch" />
-            <Text style={styles.rule}>
-              둘 다 비워 두면 서버에 보내지 않아요.
-            </Text>
-          </View>
+          <>
+            <View style={styles.field}>
+              <FieldLabel label="저장소" />
+              <Field
+                ref={node => {
+                  inputs.current.repo = node;
+                }}
+                value={draft.repo}
+                onChangeText={value => setField('repo', value)}
+                placeholder="예: https://github.com/oort/app"
+                invalid={fieldError?.field === 'repo'}
+                autoCapitalize="none"
+                autoCorrect={false}
+                keyboardType="url"
+                editable={!mutation.isPending}
+                accessibilityLabel="저장소"
+                testID="delegate-repo"
+              />
+              <FieldIssue error={fieldError} field="repo" />
+            </View>
+            <View style={styles.field}>
+              <FieldLabel label="브랜치" />
+              <Field
+                ref={node => {
+                  inputs.current.branch = node;
+                }}
+                value={draft.branch}
+                onChangeText={value => setField('branch', value)}
+                placeholder="예: main"
+                invalid={fieldError?.field === 'branch'}
+                autoCapitalize="none"
+                autoCorrect={false}
+                editable={!mutation.isPending}
+                accessibilityLabel="브랜치"
+                testID="delegate-branch"
+              />
+              <FieldIssue error={fieldError} field="branch" />
+              <Text
+                style={styles.rule}
+                lineBreakStrategyIOS="hangul-word"
+                testID="delegate-repo-rule">
+                둘 다 비워 두면 서버에 보내지 않아요.
+              </Text>
+            </View>
+          </>
         ) : null}
-      </ScrollView>
-    </View>
-  );
-}
-
-export function TrailingAction({
-  label,
-  disabled,
-  onPress,
-  testID,
-}: {
-  label: string;
-  disabled: boolean;
-  onPress: () => void;
-  testID: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      accessibilityState={{disabled}}
-      disabled={disabled}
-      onPress={onPress}
-      style={({pressed}) => [styles.trailing, pressed && styles.pressed]}
-      testID={testID}
-    >
-      <Text
-        style={[styles.trailingLabel, disabled && styles.trailingLabelOff]}
-        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-      >
-        {label}
-      </Text>
-    </Pressable>
-  );
-}
-
-export function Check({on}: {on: boolean}): React.JSX.Element | null {
-  const styles = useStyles(buildStyles);
-  return on ? (
-    <Text style={styles.check} importantForAccessibility="no">
-      ✓
-    </Text>
-  ) : null;
-}
-
-export function FieldLabel({
-  label,
-  note,
-}: {
-  label: string;
-  note: string | null;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <View style={styles.labelRow}>
-      <Text accessibilityRole="header" style={styles.label}>
-        {label}
-      </Text>
-      {note !== null ? <Text style={styles.note}>{note}</Text> : null}
-    </View>
+      </SheetScroll>
+    </>
   );
 }
 
@@ -971,6 +880,8 @@ function FieldIssue({
     <Text
       accessibilityLiveRegion="polite"
       style={styles.issue}
+      // 코어가 준 칸 오류 문장은 길어질 수 있다 — 어절 가운데서 갈리지 않게(design-review r2 L2).
+      lineBreakStrategyIOS="hangul-word"
       testID={`delegate-issue-${field}`}
     >
       {error.sentence}
@@ -980,97 +891,35 @@ function FieldIssue({
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    fill: {flex: 1},
-    list: {paddingBottom: space.xl * 2},
-    gap: {marginTop: space.lg},
     intro: {
-      marginHorizontal: SAFE_GUTTER,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
+      lineHeight: line.label,
       color: color.textMuted,
     },
-    labelRow: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      gap: space.sm,
-      marginTop: space.lg,
-      marginBottom: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-    },
-    label: {fontSize: font.label, fontWeight: '700', color: color.textMuted},
-    note: {fontSize: font.label, color: color.warn},
-    // 입력 그릇만 선을 든다(ADR-0189 D6: outline 은 텍스트 입력에만).
-    input: {
-      minHeight: TOUCH_TARGET,
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-      paddingVertical: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-      fontSize: font.body,
-      color: color.text,
-    },
-    inputError: {borderColor: color.dangerText},
-    multiline: {minHeight: 132},
-    issue: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-      fontSize: font.label,
-      color: color.dangerText,
-    },
-    rule: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-      fontSize: font.label,
-      color: color.textMuted,
-    },
-    more: {
-      minHeight: TOUCH_TARGET,
-      justifyContent: 'center',
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
-    },
-    moreLabel: {
-      fontSize: font.body,
-      fontWeight: '600',
-      color: color.accentText,
-    },
+    // A 단계 바닥의 「다음」 단추 — 스크롤 밖, 몸과 같은 가로 거터.
+    footer: {paddingHorizontal: SAFE_GUTTER, paddingTop: space.sm},
+    // 입력 한 칸의 묶음: 라벨 · 입력 · 실패.
+    field: {gap: space.sm},
+    // 「보낼 곳」 카드의 안쪽(행 「바꾸기」가 그 아래 같은 카드에 선다).
     destination: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.md,
-      marginHorizontal: SAFE_GUTTER,
-      paddingHorizontal: space.md,
+      paddingHorizontal: SHEET.cardInset,
       paddingVertical: space.md,
-      borderRadius: ds2Radius.card,
-      backgroundColor: color.surface,
-    },
-    destinationText: {flex: 1, minWidth: 0, gap: space.xs},
-    destinationLabel: {
-      fontSize: font.label,
-      color: color.textMuted,
-      fontWeight: '700',
     },
     destinationValue: {
       fontSize: font.body,
       color: color.text,
       fontWeight: '600',
     },
-    bannerWrap: {marginTop: space.lg, marginHorizontal: SAFE_GUTTER},
-    repick: {marginTop: space.sm, alignSelf: 'flex-start'},
-    trailing: {
-      minWidth: TOUCH_TARGET,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
+    refusal: {gap: space.sm},
+    issue: {
+      paddingHorizontal: space.xs,
+      fontSize: font.label,
+      color: color.dangerText,
     },
-    trailingLabel: {
-      fontSize: font.body,
-      fontWeight: '700',
-      color: color.text,
+    rule: {
+      paddingHorizontal: space.xs,
+      fontSize: font.label,
+      color: color.textMuted,
     },
-    trailingLabelOff: {color: color.textFaint},
-    pressed: {opacity: 0.6},
-    check: {fontSize: font.body, fontWeight: '700', color: color.text},
   });

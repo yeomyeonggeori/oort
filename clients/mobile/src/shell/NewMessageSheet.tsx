@@ -3,19 +3,15 @@ import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import {channelLabel} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useMemo, useState} from 'react';
-import {FlatList, Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {FlatList, StyleSheet, View} from 'react-native';
 
-import {
-  BAR_CONTROL_MAX_SCALE,
-  FailureBanner,
-  Sentence,
-} from '../design/atoms';
+import {FailureBanner, Sentence} from '../design/atoms';
 import {PageSheet} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
 import {GroupCardItem, GroupLabel, InputPill, ListRow} from '../design/sheetParts';
-import {usePalette, useStyles} from '../design/theme';
-import {font, SAFE_GUTTER, SHEET, slopTo, space, type Palette} from '../design/tokens';
-import {SHELL_ICONS, SHELL_ICON_SIZE} from '../design/icons';
+import {useStyles} from '../design/theme';
+import {font, SAFE_GUTTER, SHEET, space, type Palette} from '../design/tokens';
+import {SHELL_ICONS} from '../design/icons';
 import {Avatar} from '../features/conversation/Avatar';
 import {useDirectory, useRememberOpenedDm} from '../features/workspace/queries';
 import {openDmFailureCopy} from '../screens/SidebarScreen';
@@ -40,8 +36,7 @@ import {useSession} from '../session/useSession';
 // 머리는 오른쪽 원형 X 의 `SheetHeader` 이고 목록 밖에 고정이다. 검색은 앞 아이콘이 선 입력
 // 알약(`InputPill`), 사람은 묶음 카드의 줄(`GroupCardItem` + `ListRow`)이다. 긴 목록이지만
 // 「고르면 곧 닫히는」 선택기라 페이지가 아니라 큰 단의 시트다(`docs/design-system/phone-sheets.md`).
-// 아래 `SheetTitleRow`(왼쪽 원형 X 의 옛 머리)는 아직 옮기지 않은 시트들이 쓰므로 남겨 둔다 —
-// #4458 이 그 시트들을 옮기는 날 함께 지운다.
+// (옛 왼쪽 원형 X 의 머리 `SheetTitleRow` 는 나머지 시트가 모두 새 `SheetHeader` 로 옮겨 가며 지웠다 — #4458.)
 // =============================================================================
 
 export function NewMessageSheet({
@@ -187,59 +182,6 @@ function SheetBody({
   );
 }
 
-/** 시안 `.a-cbtn{width:42px;height:42px}`. 44 에 모자란 2 는 `hitSlop` 이 진다. */
-const CLOSE_SIZE = 42;
-
-/**
- * 시안 `.a-sh-top`: 왼쪽 42pt 원형 닫기(`.a-cbtn`, ×), 가운데 시트 이름, 오른쪽
- * 행위 자리(`trailing`, 시안의 「편집」 자리). 행위가 없으면 닫기와 같은 폭의 빈 칸이
- * 이름을 가운데에 둔다. 새 DM·새 채널 두 시트가 같은 머리를 쓴다.
- */
-export function SheetTitleRow({
-  title,
-  closeLabel,
-  onClose,
-  trailing,
-  testID,
-}: {
-  title: string;
-  closeLabel: string;
-  onClose: () => void;
-  trailing?: React.ReactNode;
-  testID: string;
-}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  return (
-    <View style={styles.titleRow}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={closeLabel}
-        onPress={onClose}
-        hitSlop={slopTo(CLOSE_SIZE)}
-        style={({pressed}) => [styles.close, pressed && styles.pressed]}
-        testID={`${testID}-close`}>
-        <Image
-          source={SHELL_ICONS.x}
-          style={{
-            width: SHELL_ICON_SIZE.x,
-            height: SHELL_ICON_SIZE.x,
-            tintColor: palette.text,
-          }}
-        />
-      </Pressable>
-      <Text
-        accessibilityRole="header"
-        style={styles.title}
-        numberOfLines={1}
-        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-        {title}
-      </Text>
-      {trailing ?? <View style={styles.closeBalance} />}
-    </View>
-  );
-}
-
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     body: {flex: 1},
@@ -256,30 +198,4 @@ const buildStyles = (color: Palette) =>
       fontSize: font.body,
       color: color.textMuted,
     },
-    // ---- `SheetTitleRow` — 옛 머리(왼쪽 원형 X). #4458 이 나머지 시트를 새 `SheetHeader` 로 옮기면 지운다.
-    titleRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.md,
-      paddingHorizontal: SAFE_GUTTER,
-      marginBottom: space.md,
-    },
-    title: {
-      flex: 1,
-      textAlign: 'center',
-      fontSize: font.heading,
-      fontWeight: '700',
-      color: color.text,
-    },
-    close: {
-      width: CLOSE_SIZE,
-      height: CLOSE_SIZE,
-      borderRadius: CLOSE_SIZE / 2,
-      alignItems: 'center',
-      justifyContent: 'center',
-      backgroundColor: color.surface,
-      boxShadow: color.elevationRest,
-    },
-    closeBalance: {width: CLOSE_SIZE},
-    pressed: {opacity: 0.6},
   });

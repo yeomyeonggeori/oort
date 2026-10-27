@@ -29,6 +29,7 @@ import {
   type Palette,
 } from '../../design/tokens';
 import { BAR_CONTROL_MAX_SCALE } from '../../design/atoms';
+import { SHEET_ICON_SIZE, SHEET_ICONS } from '../../design/icons';
 import { useStyles } from '../../design/theme';
 import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useAttachmentPreview } from './content';
@@ -274,12 +275,9 @@ function ViewerFrame({
           ]}
           testID="attachment-viewer-close"
         >
-          <Text
-            style={styles.viewerButtonLabel}
-            maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-          >
-            닫기
-          </Text>
+          {/* 글자 「닫기」가 아니라 시트·페이지와 같은 X 글리프다(#4458). 시트가 아닌 전체 화면 뷰어라 원은 없다. 누르는 면(44)·
+              이름·testID·쓸어 닫기 영역은 그대로다 — 단추 상자는 글자가 아니라 `viewerButton` 이 정한다. */}
+          <Image source={SHEET_ICONS.close} style={styles.viewerCloseGlyph} />
         </Pressable>
         {images.length > 1 ? (
           <Text
@@ -376,6 +374,11 @@ const buildStyles = (color: Palette) =>
       fontSize: font.body,
       lineHeight: line.body,
       color: color.text,
+    },
+    viewerCloseGlyph: {
+      width: SHEET_ICON_SIZE.close,
+      height: SHEET_ICON_SIZE.close,
+      tintColor: color.text,
     },
     viewerPosition: {
       fontSize: font.label,

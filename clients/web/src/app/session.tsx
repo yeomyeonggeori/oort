@@ -27,6 +27,7 @@ import {
   subscribeSessionRestoreHold,
 } from "@/features/auth/onboardingSessionHold";
 import { clearAllDrafts } from "@/features/chat/draftStore";
+import { clearDownloadHistory } from "@/features/downloads/downloadsStore";
 import { clearAllFirstMentionRecords } from "@/features/hostedAgents/firstMentionStore";
 import { clearApprovalAvatarPreviews } from "@/features/timeline/useApprovalAvatarPreview";
 import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
@@ -159,6 +160,7 @@ export function useRestoredSession(): SessionLifecycle {
     if (!expired) return;
     clearSession();
     clearApprovalAvatarPreviews(); // 본인 전용 사진: 계정 경계를 넘어 남지 않게.
+    clearDownloadHistory(); // 받은 파일의 이름도 다음 사람에게 남지 않게(디스크의 파일은 그대로).
     setSession(null);
     setStatus("anonymous");
   }, [expired]);
@@ -206,6 +208,7 @@ export function useRestoredSession(): SessionLifecycle {
     clearAllDrafts();
     clearAllFirstMentionRecords();
     clearApprovalAvatarPreviews();
+    clearDownloadHistory(); // 받은 파일의 이름은 이 기기에서 이 사람의 흔적이다(#4587).
     setSession(null);
     setStatus("anonymous");
   }, []);

@@ -1,4 +1,4 @@
-import {cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
 import {Linking} from 'react-native';
 
@@ -8,8 +8,12 @@ import {
   updateDestination,
 } from '../src/features/appUpdate/AppUpdateBanner';
 import type {AppUpdateOffer} from '../src/features/appUpdate/feed';
+import {OutlineButton, PrimaryButton} from '../src/design/atoms';
+import {SHEET_ICONS} from '../src/design/icons';
+import {GroupCard} from '../src/design/sheetParts';
 import {TOUCH_TARGET} from '../src/design/tokens';
 import {StyleSheet} from 'react-native';
+import {describeCloseContract, imageSources} from './fixtures/sheetContract';
 
 const TF: AppUpdateOffer = {version: '0.1.29', latestBuild: 3036, currentBuild: 3035, testflight: true};
 const STORE: AppUpdateOffer = {...TF, testflight: false};
@@ -69,13 +73,39 @@ describe('시트', () => {
     expect(screen.getByTestId('app-update-sheet-failure').props.children).toContain('직접 열어 주세요');
   });
 
-  it('[닫기] 와 배경이 시트만 닫는다', () => {
+  it('안쪽은 공용 부품이다 — 안내 카드와 행동 행이고, 옛 채움·외곽선 글자 단추는 없다 (#4458)', () => {
+    render(<AppUpdateSheet offer={TF} onClose={jest.fn()} />);
+    expect(screen.UNSAFE_getAllByType(GroupCard)).toHaveLength(2);
+    // 행동은 행 하나다 — **그려진** 모양으로 본다: 이름이 곧 이동처(「TestFlight 열기」)이고 오른쪽에 셰브론이 선다.
+    const open = screen.getByTestId('app-update-open');
+    expect(within(open).getByText('TestFlight 열기')).toBeTruthy();
+    expect(imageSources(open)).toEqual([SHEET_ICONS.chevron]);
+    expect(open.props.accessibilityRole).toBe('button');
+    expect(screen.UNSAFE_queryAllByType(PrimaryButton)).toHaveLength(0);
+    expect(screen.UNSAFE_queryAllByType(OutlineButton)).toHaveLength(0);
+  });
+
+  it('행동 행은 시트를 닫지 않는다 — 다른 앱으로 넘어갔다 돌아와도 안내가 남아 있다', async () => {
+    jest.spyOn(Linking, 'openURL').mockResolvedValue(true);
     const onClose = jest.fn();
     render(<AppUpdateSheet offer={TF} onClose={onClose} />);
-    fireEvent.press(screen.getByTestId('app-update-close'));
-    fireEvent.press(
-      screen.getByTestId('app-update-sheet-backdrop', {includeHiddenElements: true}),
-    );
-    expect(onClose).toHaveBeenCalledTimes(2);
+    fireEvent.press(screen.getByTestId('app-update-open'));
+    await new Promise(resolve => setTimeout(resolve, 400));
+    expect(onClose).not.toHaveBeenCalled();
   });
+});
+
+const closed = jest.fn();
+beforeEach(() => closed.mockReset());
+
+describeCloseContract({
+  name: 'AppUpdateSheet',
+  open: () => {
+    render(<AppUpdateSheet offer={TF} onClose={closed} />);
+  },
+  closedCount: () => closed.mock.calls.length,
+  closeTestID: 'app-update-close',
+  closeLabel: '업데이트 안내 닫기',
+  scrimTestID: 'app-update-sheet-backdrop',
+  scrimLabel: '업데이트 안내 닫기',
 });

@@ -7,7 +7,18 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { ArrowUp, Hash, Moon, Search, Sun, SunMoon } from "lucide-react";
+import {
+  ArrowUp,
+  EllipsisVertical,
+  Hash,
+  Moon,
+  Pin,
+  Search,
+  SquareTerminal,
+  Sun,
+  SunMoon,
+  Users,
+} from "lucide-react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { setTheme, useSystemScheme, useThemeChoice } from "@/design/theme";
@@ -67,6 +78,7 @@ import { Switch } from "@/design/ui/switch";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { CHIP_CLASS } from "@/features/common/chip";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { SidebarRow } from "@/features/sidebar/SidebarRow";
 import {
@@ -545,6 +557,59 @@ function OverlayExamples() {
               </Button>
             </Tooltip>
           </Export>
+        </div>
+
+        {/* 대화 머리 컨트롤 (#4591): 연한 선(`--line`)의 34 둥근 사각 + 공용 툴팁(연회색 알약, 아래 방향). 숫자가 붙은
+            둘째는 너비만 늘고, 켜진 터미널은 신호 면에 투명 선이다. 가운데 단추의 툴팁만 열어 둔다. 맨 오른쪽 ⋮는
+            툴팁 오른쪽 끝을 맞춘다. */}
+        <div className="flex w-max max-w-full flex-col gap-2 pb-10">
+          <p className="text-meta text-ink-muted">대화 머리 컨트롤 + Tooltip</p>
+          <div
+            className="flex items-center gap-1"
+            data-gallery-specimen="channel-header-controls"
+          >
+            <Tooltip label="터미널 (⌃`)" side="bottom">
+              <button
+                type="button"
+                aria-label="터미널"
+                aria-pressed="true"
+                className={channelHeaderControlClass({ pressed: true })}
+              >
+                <SquareTerminal aria-hidden="true" className="size-4" />
+              </button>
+            </Tooltip>
+            <Tooltip label="고정 3개" side="bottom">
+              <button
+                type="button"
+                aria-label="고정 3개"
+                className={channelHeaderControlClass({ wide: true })}
+              >
+                <Pin aria-hidden="true" className="size-4" />
+                <span className="text-meta" data-numeric>
+                  3
+                </span>
+              </button>
+            </Tooltip>
+            <Tooltip label="채널 멤버 12명" side="bottom" defaultOpen>
+              <button
+                type="button"
+                aria-label="채널 멤버 12명"
+                className={channelHeaderControlClass({ wide: true })}
+              >
+                <Users aria-hidden="true" className="size-4" />
+                <span data-numeric>12</span>
+              </button>
+            </Tooltip>
+            <Tooltip label="design-lab 채널 메뉴" side="bottom" align="end">
+              <button
+                type="button"
+                aria-label="design-lab 채널 메뉴"
+                className={channelHeaderControlClass()}
+              >
+                <EllipsisVertical aria-hidden="true" className="size-4" />
+              </button>
+            </Tooltip>
+          </div>
         </div>
 
         <div className="flex w-max max-w-full flex-col gap-2">

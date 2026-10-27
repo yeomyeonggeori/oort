@@ -18,7 +18,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {ThemeProvider} from '../src/design/theme';
-import {ProfilePage} from '../src/features/profile/ProfileSheet';
+import {SettingsContent} from '../src/features/profile/SettingsPage';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import PushProvider from '../src/push/PushProvider';
 import {SessionProvider, useSession} from '../src/session/useSession';
@@ -270,7 +270,7 @@ function launch() {
         <SessionProvider member={SELF}>
           <PushProvider>
             <Probe />
-            <ProfilePage
+            <SettingsContent
               workspaceId={WS}
               member={SELF}
               directory={makeDirectory([])}

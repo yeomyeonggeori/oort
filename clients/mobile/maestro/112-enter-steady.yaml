@@ -1,0 +1,54 @@
+appId: app.momo.ios
+name: 112-enter-steady
+---
+# 112-enter-steady — 대기 중인 실행이 있는 에이전트 DM 에 **들어가서** 입력창을 **누르고** 첫 글자 1~5개를 치고 1분 남짓 가만히 두는 흐름 (#4613).
+# 재는 것은 앱이 한다(`measure/steady.tsx` 의 `enter` 장면: 마운트 첫 프레임부터 프레임마다 맨 아래 행·목록 높이·입력창 높이·도크·알약,
+# 스크롤 보고마다 출처, `chasingTail` 전이, 햅틱 호출). 분석은 `measure/enter-windows.mjs`.
+#
+# **이 파일은 한 번에 한 단계만 한다** — `-e STEP=<press|type1|type2|send>`. 단계 사이의 「가만히」는 이 파일이 기다리지 않고 구동 스크립트
+# (`measure/run-enter.sh`)가 셸 `sleep` 으로 정확히 띄운다. 이유: 한 흐름 안의 `extendedWaitUntil … optional: true` 는 앱이 바쁘면(장면이 rAF 로 프레임마다 재는 중)
+# 명목 시간보다 훨씬 일찍 반환한다(15초 대기가 약 6초에 끝남, 2026-10-26 실측) — 「45초 가만히」가 성립하지 않는다. 대기 중 Maestro 가 계층을 계속 읽는 부하도 없어진다.
+#
+#   measure/run-enter.sh <udid> <태그> DM-STEADY-ENTER+T85[+age17h|+nobar|+label] <Metro 포트> <싱크 포트 파일> <싱크 태그 파일>
+#
+# 시뮬레이터는 키보드가 처음 오를 때 받아쓰기·슬라이드 입력 안내를 띄울 수 있고 그 알림이 앱 트리를 가린다 — 잴 기기에서 한 번 미리 눌러 두고
+# 이 흐름은 그 뒤에 돌린다(`110-focus-steady` 머리말과 같다). 아래 `지금 안 함` 가드는 그 알림이 떠 있을 때만 닫는다.
+#
+# 순서 (스크립트가 단계 사이를 띄운다):
+#   A 진입 뒤 가만히   (앱이 뜬 뒤 9초: 진입 수렴과 첫 「N초째」 갱신을 입력 없이 본다)
+#   B press   입력창을 누른다   → 닿는 순간 펼침(#4518) → 손을 떼면 포커스·자판
+#   C type1   글자 1개          → 가만히 → type2 글자 4개 더(총 5) → 가만히
+#   D         장면이 끝나기 13초 전까지 가만히 → 초 단위 갱신만으로 목록이 움직이는가(1분이 지나는 순간 「N초째」→「1분째」도 이 안에 든다)
+#   E send    보내기 한 번      → **양성 대조**: 앱 햅틱이 울리면 하네스의 햅틱 계수가 정확히 1 이어야 한다(「진입·입력 중 0」이 증거가 되려면).
+#             (첨부 버튼은 쓰지 않는다: 이 하네스에서 자판이 올라온 채 Maestro 가 누르면 메뉴가 열리지 않았다 — 하네스 한계, 앱 결함 주장 아님.)
+- runFlow:
+    when:
+      true: ${STEP == 'press'}
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "composer-input"
+          timeout: 60000
+      - tapOn:
+          id: "composer-input"
+      - runFlow:
+          when:
+            visible: "지금 안 함"
+          commands:
+            - tapOn: "지금 안 함"
+- runFlow:
+    when:
+      true: ${STEP == 'type1'}
+    commands:
+      - inputText: "가"
+- runFlow:
+    when:
+      true: ${STEP == 'type2'}
+    commands:
+      - inputText: "나다라마"
+- runFlow:
+    when:
+      true: ${STEP == 'send'}
+    commands:
+      - tapOn:
+          id: "composer-send"

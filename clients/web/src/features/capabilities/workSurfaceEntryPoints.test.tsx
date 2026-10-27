@@ -659,6 +659,47 @@ describe("로컬 터미널 진입점 (#2774)", () => {
     expect(host.querySelector('[data-testid="observer-dock-stub"]')).toBeNull();
   });
 
+  // #4591: 머리 단추의 툴팁은 디자인 시스템 `Tooltip`이다. 네이티브 `title`을 같이 두면 두 개가 뜬다. 키보드 초점은
+  // 지연 없이 즉시 뜨는 것이 `Tooltip`의 계약이라 가짜 타이머 없이 잰다(jsdom은 `:focus-visible`을 몰라 `matches`를 켠다).
+  async function focusTerminalTooltip(): Promise<{ button: HTMLButtonElement; tip: HTMLElement | null }> {
+    // 열린 ⌘K 팔레트는 모달이라 초점을 붙든다(캐럿 시험처럼 닫고 잰다).
+    const host = await mount({ switcherOpen: false });
+    const button = host.querySelector<HTMLButtonElement>(
+      '[data-testid="open-terminal-dock"]'
+    ) as HTMLButtonElement;
+    const original = button.matches.bind(button);
+    vi.spyOn(button, "matches").mockImplementation((selector: string) =>
+      selector === ":focus-visible" ? true : original(selector)
+    );
+    act(() => button.focus());
+    return {
+      button,
+      tip: button.parentElement?.querySelector<HTMLElement>('[data-testid="tooltip"]') ?? null,
+    };
+  }
+
+  it("터미널 버튼은 title 없이 디자인 시스템 툴팁이 아래로 뜨고, 로컬 터미널의 키 힌트는 툴팁에만 싣는다 (#4591)", async () => {
+    shell.desktop = true;
+    workFlag.provided = false;
+    const { button, tip } = await focusTerminalTooltip();
+    expect(button.hasAttribute("title")).toBe(false);
+    // 이름은 키 힌트 없이 「터미널」이고, 열쇠는 `aria-keyshortcuts`가 말한다. 눈으로 보는 사람에게만 `(⌃`)`가 뜬다.
+    expect(button.getAttribute("aria-label")).toBe("터미널");
+    expect(button.parentElement?.className).toContain("inline-flex");
+    expect(tip?.textContent).toBe("터미널 (⌃`)");
+    expect(tip?.getAttribute("data-side")).toBe("bottom");
+  });
+
+  it("관전 도크의 터미널 버튼도 title 없이 같은 툴팁이고 키 힌트가 없다 (#4591)", async () => {
+    shell.desktop = false;
+    workFlag.provided = true;
+    const { button, tip } = await focusTerminalTooltip();
+    expect(button.hasAttribute("title")).toBe(false);
+    expect(button.hasAttribute("aria-keyshortcuts")).toBe(false);
+    expect(tip?.textContent).toBe("터미널");
+    expect(tip?.getAttribute("data-side")).toBe("bottom");
+  });
+
   it("데스크탑에서는 작업 표면이 있어도 헤더가 관전 도크를 열지 않는다(로컬 도크가 대체)", async () => {
     shell.desktop = true;
     workFlag.provided = true;

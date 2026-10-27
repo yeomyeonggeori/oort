@@ -1,7 +1,7 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {ApiError, type RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
 import {Linking} from 'react-native';
 
@@ -144,6 +144,21 @@ describe('세 줄', () => {
   it('남의 사진만 있고 내 사진이 없으면 지우기 줄이 없다', () => {
     mount([member(ME, '이도현'), member(OTHER, '박서연', OTHER_PATH)]);
     expect(screen.queryByTestId('avatar-remove')).toBeNull();
+  });
+
+  it('파괴 행(사진 지우기)은 고르기·찍기와 다른 카드에 따로 선다 (design-review #4457 r1 L8, phone-sheets §5)', () => {
+    const withPhoto = mount(ROWS_WITH_PHOTO());
+    const choose = within(screen.getByTestId('avatar-card-card'));
+    // 같은 카드에 섞이지 않는다 — 한 번 잘못 눌러 사진이 지워지지 않도록 위계(§3)가 카드 경계로도 선다.
+    expect(choose.queryByTestId('avatar-remove')).toBeNull();
+    expect(choose.getByTestId('avatar-choose-library')).toBeTruthy();
+    const remove = within(screen.getByTestId('avatar-remove-card-card'));
+    expect(remove.getByTestId('avatar-remove')).toBeTruthy();
+    expect(remove.queryByTestId('avatar-choose-library')).toBeNull();
+    // 사진이 없으면 파괴 카드 자체가 없다(빈 카드가 남지 않는다).
+    withPhoto.unmount();
+    mount(ROWS_NO_PHOTO());
+    expect(screen.queryByTestId('avatar-remove-card')).toBeNull();
   });
 });
 

@@ -1,28 +1,18 @@
 import React, {useState} from 'react';
-import {
-  Linking,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
-} from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {Linking, Pressable, StyleSheet, Text, View} from 'react-native';
 
-import {
-  BAR_CONTROL_MAX_SCALE,
-  OutlineButton,
-  PrimaryButton,
-  Sentence,
-} from '../../design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Sentence} from '../../design/atoms';
+import {PageSheet} from '../../design/PageSheet';
+import {SheetHeader} from '../../design/SheetChrome';
+import {GroupCard, ListRow, SheetScroll} from '../../design/sheetParts';
 import {useStyles} from '../../design/theme';
 import {
   ds2Radius,
   font,
+  line,
   radius,
   SAFE_GUTTER,
+  SHEET,
   space,
   TOUCH_TARGET,
   type Palette,
@@ -121,68 +111,52 @@ export function AppUpdateSheet({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const insets = useSafeAreaInsets();
-  const {height} = useWindowDimensions();
   const [failed, setFailed] = useState(false);
   const destination = updateDestination(offer);
   const open = () => {
     setFailed(false);
     Linking.openURL(destination.url).catch(() => setFailed(true));
   };
+  // 공용 시트(#4458): 머리의 오른쪽 원형 X · 스크림 · 끌어내리기 · VoiceOver escape 가 모두 같은 슬라이드를 지난다.
+  // 옛 글자 「닫기」 단추는 없다 — 이름은 그대로 「업데이트 안내 닫기」다. 행동 한 줄(스토어로 가기)은 시트를 닫지 않는다:
+  // 다른 앱으로 넘어갔다 돌아오면 안내가 그대로 남아 있어야 하고, 열지 못하면 이유가 이 시트 안에서 말해진다.
   return (
-    <Modal
-      visible
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
+    <PageSheet
+      height="fit"
+      onClose={onClose}
+      accessibilityLabel="업데이트 안내"
+      scrimLabel="업데이트 안내 닫기"
+      scrimTestID="app-update-sheet-backdrop"
       testID="app-update-sheet">
-      <View style={styles.root}>
-        <Pressable
-          style={styles.backdrop}
-          accessibilityRole="button"
-          accessibilityLabel="업데이트 안내 닫기"
-          onPress={onClose}
-          testID="app-update-sheet-backdrop"
-        />
-        <View
-          accessibilityViewIsModal
-          style={[
-            styles.sheet,
-            {
-              paddingBottom: Math.max(insets.bottom, space.lg),
-              maxHeight: height * 0.85,
-            },
-          ]}>
-          <View style={styles.grabber} />
-          <ScrollView bounces={false} contentContainerStyle={styles.sheetScroll}>
-          <Text accessibilityRole="header" style={styles.sheetTitle}>
-            {`새 버전 ${offer.version} (${offer.latestBuild})`}
-          </Text>
-          <Sentence style={styles.sheetBody}>{destination.body}</Sentence>
-          {failed ? (
-            <Sentence
-              accessibilityLiveRegion="polite"
-              style={styles.failure}
-              testID="app-update-sheet-failure">
-              {destination.failure}
-            </Sentence>
-          ) : null}
-          </ScrollView>
-          <View style={styles.sheetActions}>
-            <PrimaryButton
-              label={destination.actionLabel}
-              onPress={open}
-              testID="app-update-open"
-            />
-            <OutlineButton
-              label="닫기"
-              onPress={onClose}
-              testID="app-update-close"
-            />
+      <SheetHeader
+        title={`새 버전 ${offer.version} (${offer.latestBuild})`}
+        closeLabel="업데이트 안내 닫기"
+        closeTestID="app-update-close"
+      />
+      <SheetScroll>
+        <GroupCard>
+          <View style={styles.note}>
+            <Sentence style={styles.noteBody}>{destination.body}</Sentence>
+            {failed ? (
+              <Sentence
+                accessibilityLiveRegion="polite"
+                style={styles.failure}
+                testID="app-update-sheet-failure">
+                {destination.failure}
+              </Sentence>
+            ) : null}
           </View>
-        </View>
-      </View>
-    </Modal>
+        </GroupCard>
+        <GroupCard>
+          <ListRow
+            title={destination.actionLabel}
+            accessory="chevron"
+            onPress={open}
+            testID="app-update-open"
+          />
+        </GroupCard>
+      </SheetScroll>
+    </PageSheet>
   );
 }
 
@@ -216,34 +190,12 @@ const buildStyles = (color: Palette) =>
     },
     actionLabel: {fontSize: font.label, fontWeight: '700', color: color.accentText},
     pressed: {opacity: 0.85},
-    root: {flex: 1, justifyContent: 'flex-end'},
-    backdrop: {
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor: color.scrim,
+    // 안내 문장 카드 — `ConfirmStep` 의 본문과 같은 안쪽 여백(카드 안 글자 열이 행과 맞는다).
+    note: {
+      gap: space.sm,
+      paddingHorizontal: SHEET.cardInset,
+      paddingVertical: space.md,
     },
-    sheet: {
-      backgroundColor: color.surface,
-      borderTopLeftRadius: ds2Radius.sheet,
-      borderTopRightRadius: ds2Radius.sheet,
-      paddingHorizontal: SAFE_GUTTER,
-      paddingTop: space.sm,
-      gap: space.md,
-    },
-    grabber: {
-      alignSelf: 'center',
-      width: 38,
-      height: 5,
-      borderRadius: radius.pill,
-      backgroundColor: color.border,
-      marginBottom: space.sm,
-    },
-    sheetTitle: {fontSize: font.title, fontWeight: '700', color: color.text},
-    sheetBody: {fontSize: font.body, color: color.textMuted, lineHeight: 22},
-    failure: {fontSize: font.meta, color: color.danger},
-    sheetScroll: {gap: space.md},
-    sheetActions: {gap: space.sm, marginTop: space.sm},
+    noteBody: {fontSize: font.body, lineHeight: line.body, color: color.text},
+    failure: {fontSize: font.label, lineHeight: line.label, color: color.danger},
   });

@@ -10,34 +10,17 @@ import {
 import {upsertChannel} from '@momo/core/features/directory/model';
 import {useQueryClient} from '@tanstack/react-query';
 import React, {useState} from 'react';
-import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import {StyleSheet, Text, View} from 'react-native';
 
-import {
-  BAR_CONTROL_MAX_SCALE,
-  FailureBanner,
-  GroupRow,
-  GroupSection,
-} from '../design/atoms';
+import {FailureBanner} from '../design/atoms';
+import {HOME_ICONS} from '../design/icons';
 import {PageSheet, usePageSheetClose} from '../design/PageSheet';
-import {useKeyboardAppearance, usePalette, useStyles} from '../design/theme';
-import {
-  ds2Radius,
-  font,
-  SAFE_GUTTER,
-  space,
-  TOUCH_TARGET,
-  type Palette,
-} from '../design/tokens';
+import {SheetHeader} from '../design/SheetChrome';
+import {ChoiceRow, GroupCard, GroupLabel, InputPill, SheetScroll} from '../design/sheetParts';
+import {useStyles} from '../design/theme';
+import {font, space, type Palette} from '../design/tokens';
 import {workspaceKeys} from '../features/workspace/queries';
 import {useSession} from '../session/useSession';
-import {SheetTitleRow} from './NewMessageSheet';
 
 // =============================================================================
 // 새 채널 시트 — + 메뉴의 「새 채널」 (DS2-2b #2750).
@@ -53,6 +36,12 @@ import {SheetTitleRow} from './NewMessageSheet';
 //
 // 누가 볼 수 있는가(소유자·관리자)는 메뉴가 정한다(`canCreateChannelNow`). 서버가 마지막
 // 말을 하므로 여기서 403 이 와도 배너로 말한다.
+//
+// ## 공용 시트로 (#4458)
+//
+// 그릇은 `PageSheet`(중간 단 — 입력이 있는 짧은 시트의 표준 모양, 키보드는 그릇이 피한다). 머리는 `SheetHeader`:
+// **왼쪽 ✓ = 채널 만들기**(이름이 규칙을 어기거나 만드는 중이면 회색·눌리지 않음), **오른쪽 원형 X = 닫기**. 옛 오른쪽 글자
+// 「만들기」 단추는 없다. 이름은 앞 아이콘(#)이 선 입력 알약(`InputPill`), 공개 범위는 묶음 카드의 라디오 행이다.
 // =============================================================================
 
 const KINDS = [
@@ -77,8 +66,10 @@ export function NewChannelSheet({
 }): React.JSX.Element {
   return (
     <PageSheet
+      height="medium"
       onClose={onClose}
       accessibilityLabel="새 채널"
+      scrimLabel="새 채널 닫기"
       testID="new-channel-sheet">
       <SheetBody onOpenConversation={onOpenConversation} onClose={onClose} />
     </PageSheet>
@@ -93,8 +84,6 @@ function SheetBody({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const palette = usePalette();
-  const keyboardAppearance = useKeyboardAppearance();
   const {workspaceId} = useSession();
   const client = useQueryClient();
   const slideClose = usePageSheetClose() ?? onClose;
@@ -147,174 +136,106 @@ function SheetBody({
   const disabled = pending || issue !== null;
 
   return (
-    <ScrollView
-      keyboardShouldPersistTaps="handled"
-      keyboardDismissMode="on-drag"
-      contentContainerStyle={styles.list}
-      testID="new-channel-body">
-      <SheetTitleRow
+    <>
+      <SheetHeader
         title="새 채널"
         closeLabel="새 채널 닫기"
         onClose={slideClose}
-        testID="new-channel"
-        trailing={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={pending ? '채널 만드는 중' : '채널 만들기'}
-            accessibilityState={{disabled, busy: pending}}
-            disabled={disabled}
-            onPress={() => void submit()}
-            style={({pressed}) => [styles.create, pressed && styles.pressed]}
-            testID="new-channel-create">
-            <Text
-              style={[styles.createLabel, disabled && styles.createLabelOff]}
-              maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-              만들기
-            </Text>
-          </Pressable>
-        }
+        closeTestID="new-channel-close"
+        confirm={{
+          label: pending ? '채널 만드는 중' : '채널 만들기',
+          onPress: () => void submit(),
+          disabled,
+          busy: pending,
+          testID: 'new-channel-create',
+        }}
       />
+      <SheetScroll keyboardDismissMode="on-drag" testID="new-channel-body">
+        {/* 라벨·입력·규칙(또는 오류) 줄은 한 묶음이다 — 작업 맡기기·내 맥에 보내기의 입력 묶음(`styles.field`)과 같은 문법.
+            낱개로 두면 시트 몸의 섹션 간격(16)이 라벨과 입력, 입력과 규칙 줄 사이에도 들어가 규칙 줄이 입력과 다음 섹션의
+            한가운데 떠서 어느 쪽 문장인지 위치로 안 갈린다(design-review r2 M2). */}
+        <View style={styles.field} testID="new-channel-name-field">
+          <GroupLabel>채널 이름</GroupLabel>
+          <InputPill
+            icon={HOME_ICONS.hash}
+            value={name}
+            onChangeText={next => {
+              setName(next);
+              if (failure?.field === 'name') setFailure(null);
+            }}
+            onBlur={() => setTouched(true)}
+            onSubmitEditing={() => void submit()}
+            placeholder="product-planning"
+            autoCapitalize="none"
+            autoCorrect={false}
+            // 이름은 영문 소문자·숫자·하이픈·밑줄뿐이다 — 한글 자판으로 열면 첫 글자부터
+            // 규칙 위반 문장을 본다.
+            keyboardType="ascii-capable"
+            autoFocus
+            returnKeyType="done"
+            editable={!pending}
+            accessibilityLabel="채널 이름"
+            // VoiceOver 도 같은 줄을 듣는다: 평소엔 규칙, 어기면 그 이유.
+            accessibilityHint={nameMessage ?? nameRule}
+            testID="new-channel-name"
+          />
+          {nameMessage ? (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={styles.issue}
+              lineBreakStrategyIOS="hangul-word"
+              testID="new-channel-name-issue">
+              {nameMessage}
+            </Text>
+          ) : (
+            // 「대 / 문자는」처럼 어절 가운데서 갈리지 않게 어절 단위로 접는다(design-review r1a M1·r1c M1).
+            <Text
+              style={styles.rule}
+              lineBreakStrategyIOS="hangul-word"
+              testID="new-channel-name-rule">
+              {nameRule}
+            </Text>
+          )}
+        </View>
 
-      <Text accessibilityRole="header" style={styles.label}>
-        채널 이름
-      </Text>
-      <View style={styles.field}>
-        <Text
-          style={styles.hash}
-          importantForAccessibility="no"
-          accessibilityElementsHidden>
-          #
-        </Text>
-        <TextInput
-          style={styles.input}
-          value={name}
-          onChangeText={next => {
-            setName(next);
-            if (failure?.field === 'name') setFailure(null);
-          }}
-          onBlur={() => setTouched(true)}
-          onSubmitEditing={() => void submit()}
-          placeholder="product-planning"
-          placeholderTextColor={palette.textFaint}
-          keyboardAppearance={keyboardAppearance}
-          autoCapitalize="none"
-          autoCorrect={false}
-          // 이름은 영문 소문자·숫자·하이픈·밑줄뿐이다 — 한글 자판으로 열면 첫 글자부터
-          // 규칙 위반 문장을 본다.
-          keyboardType="ascii-capable"
-          autoFocus
-          returnKeyType="done"
-          editable={!pending}
-          accessibilityLabel="채널 이름"
-          // VoiceOver 도 같은 줄을 듣는다: 평소엔 규칙, 어기면 그 이유.
-          accessibilityHint={nameMessage ?? nameRule}
-          testID="new-channel-name"
-        />
-      </View>
-      {nameMessage ? (
-        <Text
-          accessibilityLiveRegion="polite"
-          style={styles.issue}
-          testID="new-channel-name-issue">
-          {nameMessage}
-        </Text>
-      ) : (
-        <Text style={styles.rule} testID="new-channel-name-rule">
-          {nameRule}
-        </Text>
-      )}
-
-      <View style={styles.kind}>
-        <GroupSection label="공개 범위" testID="new-channel-kind">
-          {KINDS.map((choice, index) => (
-            <GroupRow
+        <GroupCard label="공개 범위" testID="new-channel-kind">
+          {KINDS.map(choice => (
+            <ChoiceRow
               key={choice.id}
               title={choice.label}
               detail={choice.detail}
-              separated={index > 0}
-              accessibilityRole="radio"
-              accessibilityState={{selected: kind === choice.id}}
+              selected={kind === choice.id}
               onPress={() => setKind(choice.id)}
-              trailing={
-                kind === choice.id ? (
-                  <Text style={styles.check} importantForAccessibility="no">
-                    ✓
-                  </Text>
-                ) : null
-              }
               testID={`new-channel-kind-${choice.id}`}
             />
           ))}
-        </GroupSection>
-      </View>
+        </GroupCard>
 
-      {failure && failure.field === null ? (
-        <FailureBanner
-          message={failure.message}
-          onRetry={() => void submit()}
-          testID="new-channel-error"
-        />
-      ) : null}
-    </ScrollView>
+        {failure && failure.field === null ? (
+          <FailureBanner
+            message={failure.message}
+            onRetry={() => void submit()}
+            testID="new-channel-error"
+          />
+        ) : null}
+      </SheetScroll>
+    </>
   );
 }
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    list: {paddingBottom: space.xl * 2},
-    kind: {marginTop: space.xl},
-    label: {
-      marginTop: space.lg,
-      marginBottom: space.sm,
-      marginLeft: SAFE_GUTTER,
-      fontSize: font.label,
-      fontWeight: '700',
-      color: color.textMuted,
-    },
-    // 입력 그릇만 선을 든다(ADR-0189 D6: outline 은 텍스트 입력에만).
-    field: {
-      minHeight: TOUCH_TARGET,
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: space.sm,
-      borderRadius: ds2Radius.row,
-      borderWidth: 1,
-      borderColor: color.textFaint,
-      backgroundColor: color.surface,
-      paddingHorizontal: space.md,
-      marginHorizontal: SAFE_GUTTER,
-    },
-    hash: {fontSize: font.body, color: color.textMuted, fontWeight: '600'},
-    input: {
-      flex: 1,
-      minHeight: TOUCH_TARGET,
-      fontSize: font.body,
-      color: color.text,
-    },
+    // 라벨 + 입력 + 규칙·오류 줄 한 묶음(안쪽 간격 `space.sm` — 작업 맡기기·내 맥에 보내기의 `field` 와 같은 값).
+    field: {gap: space.sm},
+    // 입력 알약 아래의 한 줄 — 섹션 라벨과 같은 안쪽 여백에서 시작한다.
     rule: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
       color: color.textMuted,
     },
     issue: {
-      marginTop: space.sm,
-      marginHorizontal: SAFE_GUTTER,
+      paddingHorizontal: space.xs,
       fontSize: font.label,
       color: color.dangerText,
     },
-    create: {
-      minWidth: TOUCH_TARGET,
-      minHeight: TOUCH_TARGET,
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    createLabel: {
-      fontSize: font.body,
-      fontWeight: '700',
-      color: color.text,
-    },
-    createLabelOff: {color: color.textFaint},
-    pressed: {opacity: 0.6},
-    check: {fontSize: font.body, fontWeight: '700', color: color.text},
   });

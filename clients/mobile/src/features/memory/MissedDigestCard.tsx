@@ -3,8 +3,9 @@ import type {
   MemoryEvidenceLink,
 } from '@momo/core/features/memory/model';
 import React, {useMemo, useState} from 'react';
-import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
 import {Sentence} from '../../design/atoms';
+import {SHEET_ICON_SIZE, SHEET_ICONS} from '../../design/icons';
 import {
   font,
   line,
@@ -18,7 +19,6 @@ import {
 import {useStyles} from '../../design/theme';
 import {
   MISSED_DISMISS_A11Y,
-  MISSED_DISMISS_LABEL,
   MISSED_EMPTY,
   MISSED_ERROR,
   MISSED_LOADING,
@@ -93,7 +93,8 @@ export function MissedDigestCardView({
           onPress={onDismiss}
           style={({pressed}) => [styles.dismiss, pressed && styles.pressed]}
           testID="missed-digest-dismiss">
-          <Text style={styles.action}>{MISSED_DISMISS_LABEL}</Text>
+          {/* 글자 「닫기」가 아니라 시트·페이지와 같은 X 글리프다(#4458). 카드이므로 원은 없다. */}
+          <Image source={SHEET_ICONS.close} style={styles.dismissGlyph} />
         </Pressable>
       </View>
       {state.kind === 'loading' ? (
@@ -296,6 +297,11 @@ const buildStyles = (color: Palette) =>
       justifyContent: 'center',
     },
     pressed: {opacity: 0.6},
+    dismissGlyph: {
+      width: SHEET_ICON_SIZE.close,
+      height: SHEET_ICON_SIZE.close,
+      tintColor: color.icon,
+    },
     action: {fontSize: font.label, color: color.accentText, fontWeight: '600'},
     stack: {gap: space.xs},
     body: {fontSize: font.label, lineHeight: line.label, color: color.text},

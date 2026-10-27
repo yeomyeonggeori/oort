@@ -437,6 +437,18 @@ const NO_PINS: PinMap = {};
 /** 남는 메아리가 없는 상태 — 매번 새 빈 배열이면 효과가 매 렌더 다시 걸린다. */
 const NO_ECHOES: readonly EchoItem[] = [];
 
+/**
+ * 측정 seam 이 남기는 스크롤 기록 한 줄 (#4613). 앱에서는 아무도 읽지 않는다 — 하네스가 `scrollLogRef` 에 배열을 꽂을 때만 쌓인다.
+ *
+ * `s` = 목록이 스크롤 보고를 한 번 받았다. `user` 는 그 보고가 **손가락의 것인가**(손가락이 목록을 잡은 동안이거나 손가락이 끈 뒤의
+ * 관성 자격이 서 있는 동안 — 날짜 알약이 서는 조건과 같은 판정)이고, 아니면 이 목록이 스스로 낸 이동(진입 수렴·바닥 맞춤·따라가기)이다.
+ * `pin` 은 이 목록이 낸 이동이 지금 쥐고 있는 창(`scrollPinUntilRef`)이다.
+ * `c` = `maintainVisibleContentPosition` 을 뗐다(`on`) 붙였다(`!on`)(`chasingTail`).
+ */
+export type ScrollLogEntry =
+  | {k: 's'; t: number; y: number; content: number; view: number; user: boolean; pin: boolean}
+  | {k: 'c'; t: number; on: boolean};
+
 /** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
 export interface PillState {
   /**
@@ -819,6 +831,7 @@ function TimelineInner({
   tailGap,
   topPillInset = 0,
   metricsRef,
+  scrollLogRef,
   listRef: externalListRef,
 }: {
   messages: Message[];
@@ -1023,6 +1036,11 @@ function TimelineInner({
    * from the end it ended up, and that number exists nowhere else.
    */
   metricsRef?: React.MutableRefObject<TimelineGeometry | null>;
+  /**
+   * 같은 seam: 스크롤 보고마다 한 줄(누가 낸 이동인가 포함)과 `chasingTail` 전이를 이 배열에 쌓는다(#4613). 하네스가 배열을 꽂지 않으면
+   * (앱 전부) 아무것도 쌓지 않고 아무도 읽지 않는다.
+   */
+  scrollLogRef?: React.MutableRefObject<ScrollLogEntry[] | null>;
   /** Same seam: lets the harness put the reader mid-history before measuring. */
   listRef?: React.MutableRefObject<FlatList<TimelineStreamItem> | null>;
 }): React.JSX.Element {
@@ -1074,6 +1092,11 @@ function TimelineInner({
    * `KEEP_VISIBLE_POSITION`. Exactly two renders per far send.
    */
   const [chasingTail, setChasingTail] = useState(false);
+  // 측정 seam (#4613): `maintainVisibleContentPosition` 을 뗐다 붙이는 전이를 남긴다. 마운트의 첫 `false` 가 「진입 시작」 표식이다.
+  // 하네스가 배열을 꽂지 않으면(앱 전부) 아무 일도 하지 않는다.
+  useEffect(() => {
+    scrollLogRef?.current?.push({k: 'c', t: Date.now(), on: chasingTail});
+  }, [chasingTail, scrollLogRef]);
   /**
    * 방금 점프해서 도착한 행 (#1076 · #3921). 없으면 `null`.
    *
@@ -1563,6 +1586,15 @@ function TimelineInner({
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
       const {contentOffset, contentSize, layoutMeasurement} = event.nativeEvent;
       const previous = geometryRef.current;
+      scrollLogRef?.current?.push({
+        k: 's',
+        t: Date.now(),
+        y: contentOffset.y,
+        content: contentSize.height,
+        view: layoutMeasurement.height,
+        user: fingerOnListRef.current || dragOwnsScrollRef.current,
+        pin: Date.now() < scrollPinUntilRef.current,
+      });
       noteGeometry({
         offsetY: contentOffset.y,
         contentHeight: contentSize.height,
@@ -1620,7 +1652,7 @@ function TimelineInner({
       // 뿐이다.
       noteFollowing(distanceFromEnd <= FOLLOW_THRESHOLD_PX);
     },
-    [noteGeometry, noteFollowing, resolvePendingVerdict],
+    [noteGeometry, noteFollowing, resolvePendingVerdict, scrollLogRef],
   );
 
   // ---- 점프가 데려간 행에 초점을 둔다 (#1892 R1 M-3) --------------------------

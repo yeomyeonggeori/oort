@@ -32,7 +32,6 @@ import {
   DEVICE_KEYS_QUERY_KEY,
   type DeviceKeyState,
 } from '../src/features/deviceKey/useDeviceKey';
-import {ProfileSheet} from '../src/features/profile/ProfileSheet';
 import {
   channelRowActionItems,
   NOTHING_COPIED,
@@ -42,6 +41,7 @@ import {ChannelActionSheet} from '../src/features/sidebar/ChannelActionSheet';
 import {workspaceKeys} from '../src/features/workspace/queries';
 import {useSession} from '../src/session/useSession';
 import {NewMessageSheet} from '../src/shell/NewMessageSheet';
+import {SettingsOverlay} from './settingsOverlay';
 
 // =============================================================================
 // 공용 시트·페이지 부품 전시 + 이전한 시트 (#4318 2단계 캡처).
@@ -642,9 +642,8 @@ function DeviceKeySheetSurface({
 const DEVICE_PUBLIC_KEY = 'A2sX0fLhLEJH+Lzm5WOkQPJ3A32BLeszoPShOUXYmMKW';
 
 /**
- * 프로필 시트의 「지시 기기」 장. `DeviceKeyPanel` 의 카드는 새 `GroupCard` 로 바뀌었고 이 시트의 나머지는 옛
- * `GroupSection` 이라 한 화면에 두 카드 모양이 섞인다 — 받아들인 파급이다(#4457 의 설정 페이지가 이 시트를
- * 대체한다). 가상 인물로 세운다.
+ * 설정 페이지의 「지시 기기」 안쪽 장(#4457 — 옛 프로필 시트의 같은 장을 대체했다). `DeviceKeyPanel` 은 두 호스트
+ * (이 장과 `DeviceKeyLinkSheet`)가 같은 `GroupCard` 로 선다. 가상 인물로 세운다.
  */
 function ProfileDeviceSurface(): React.JSX.Element {
   const {workspaceId, member} = useSession();
@@ -671,17 +670,15 @@ function ProfileDeviceSurface(): React.JSX.Element {
   }, [workspaceId, member.id, people]);
   return (
     <QueryClientProvider client={client}>
-      <Backdrop>
-        <ProfileSheet
-          workspaceId={workspaceId}
-          member={me}
-          directory={makeDirectory(people)}
-          connected
-          onSignOut={noop}
-          onClose={noop}
-          initialPage="deviceKey"
-        />
-      </Backdrop>
+      <SettingsOverlay
+        workspaceId={workspaceId}
+        member={me}
+        directory={makeDirectory(people)}
+        connected
+        onSignOut={noop}
+        onClose={noop}
+        initialPage="deviceKey"
+      />
     </QueryClientProvider>
   );
 }

@@ -66,3 +66,17 @@ export function titlebarDragProps(isTauri: boolean): {
 } {
   return isTauri ? { "data-tauri-drag-region": "" } : {};
 }
+
+/**
+ * 셸이 창 맨 위 잡기 띠를 그리는가의 마커 (#4591). `app-shell`의 `data-desktop-shell` 규칙(tokens.css)이 이
+ * 마커를 읽어 본문 판을 띠 아래(둘째 행)로 내린다. 마커가 없으면 판은 웹처럼 첫 행까지 올라가 있다.
+ *
+ * 띠는 **Tauri 셸에서 상단 줄이 그려질 때만** 선다. 웹(브라우저)에는 창을 잡을 일이 없고, 설정 표면은 앱 상단
+ * 줄 자체를 그리지 않으며(격자가 한 행이다) 자기 끌기 줄을 따로 가진다.
+ */
+export function desktopShellProps(
+  isTauri: boolean,
+  titlebarDrawn: boolean
+): { "data-desktop-shell"?: "" } {
+  return isTauri && titlebarDrawn ? { "data-desktop-shell": "" } : {};
+}

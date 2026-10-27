@@ -94,14 +94,15 @@
    *   · 사이드바, 펼친 상단 줄, 설정 목록 열: 띠가 열 폭을 덮는다.
    *   · **웹의 접힌 상단 줄**: 토글이 줄 안쪽 여백 8px에 서서 레일(56px, 띠가 덮는다) 안에 있다.
    * scrim 위의 자리 (늘 보정한다):
-   *   · **데스크탑의 접힌 상단 줄**: 신호등 자리를 비우려고 토글이 80px 뒤에 서서(`data-tauri-drag-region`이 인셋을 연다,
-   *     `tokens.css` `app-titlebar`) 레일 오른쪽, 띠 밖이다(design-review H-2: 이 자리를 웹과 같다고 보고 늘 보정하면 웹의
-   *     토글이 띠 위에서 깎인다).
+   *   · **데스크탑의 접힌 상단 줄 — 띠가 없을 때만**: 신호등 자리를 비우려고 토글이 80px 뒤에 서서(`data-tauri-drag-region`이
+   *     인셋을 연다, `tokens.css` `app-titlebar`) 레일 오른쪽, 띠 열 밖이다(design-review H-2: 이 자리를 웹과 같다고 보고
+   *     늘 보정하면 웹의 토글이 띠 위에서 깎인다). 띠가 있으면(노을띠) 데스크탑 셸은 띠의 윗줄이 전폭으로 깔려
+   *     (`tokens.css` `app-shell` 「띠의 윗줄」, #4591) 이 줄도 띠 위에 서므로 보정하지 않는다.
    *   · 「내 작업」 격자의 바닥: 본문이 투명이라 사진이 뒤에 깔리고 띠는 사이드바 열까지만 칠한다. */
   :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .sidebar-drawer,
   :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell > .app-titlebar,
   :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell .settings-nav,
-  :root[data-wallpaper-live] .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region],
+  :root[data-wallpaper-live]:not([data-wallpaper-band]) .app-shell[data-sidebar-collapsed] > .app-titlebar[data-tauri-drag-region],
   :root[data-wallpaper-live] .app-shell[data-work-rail] > main {
     --ink-muted: var(--wallpaper-ink-muted);
     --icon: var(--wallpaper-icon);

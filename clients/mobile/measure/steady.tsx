@@ -1,10 +1,11 @@
 import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
+import {activityDetail, activityLines, MAX_ACTIVITY_LINES, UNKNOWN_AGENT_NAME, type AgentLivenessLookup} from '@momo/core/features/agents/turnCopy';
 import {typingSegments} from '@momo/core/features/chat/typing';
-import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {makeDirectory, memberNameParts} from '@momo/core/features/workspace/directory';
 import NetInfo from '@react-native-community/netinfo';
-import React, {Profiler, useCallback, useEffect, useRef, useState, type ProfilerOnRenderCallback} from 'react';
+import React, {Profiler, useCallback, useEffect, useMemo, useRef, useState, type ProfilerOnRenderCallback} from 'react';
 import {
   Animated,
   Keyboard,
@@ -16,7 +17,7 @@ import {
   View,
   type GestureResponderEvent,
 } from 'react-native';
-import {Screen} from '../src/design/atoms';
+import {BAR_CONTROL_MAX_SCALE, Screen} from '../src/design/atoms';
 import {usePalette} from '../src/design/theme';
 import {font, space, TOUCH_TARGET} from '../src/design/tokens';
 import {AgentActivityBar} from '../src/features/agents/turnSurfaces';
@@ -28,7 +29,7 @@ import {CONV} from '../src/features/conversation/convDesign';
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
 import {clearDraft, readDraft} from '../src/features/conversation/drafts';
-import {Timeline, type PillState, type TimelineGeometry} from '../src/features/conversation/Timeline';
+import {Timeline, type PillState, type ScrollLogEntry, type TimelineGeometry} from '../src/features/conversation/Timeline';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {useTimeline} from '../src/features/conversation/useTimeline';
 import type {ChannelRail} from '../src/realtime/channelRail';
@@ -92,6 +93,15 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         터치를 도크 상자가 위로 받는다) 과 컴포저가 다시 그려진 커밋의 `render-<phase>-<ms>ms`(React `Profiler`). 흐름은
 //                         `maestro/111-press-steady.yaml`(짧은 탭 · 길게 누름 · 끌기 4방향), 분석은 `focus-windows.mjs` 의 「누름→자판」 줄.
 //
+//   #4613 「진입·입력 초반에 진동이 반복되는가」 — **마운트 첫 프레임부터** 재는 장면. 에이전트 DM 에 들어가(진입 수렴) · 입력창을 누르고(펼침+자판) ·
+//             첫 글자 1~5개를 치고 · 1분 동안 활동 줄의 「N초째」가 매초 바뀌는 채로 둔다(`maestro/112-enter-steady.yaml`).
+//             enter       기본 75초. 대기 중 run 의 나이는 3초에서 시작해 매초 글자가 바뀐다.
+//             `+age17h`   run 나이 17시간(글자는 고정, 1초 재렌더만 도는 대조군).   `+nobar` 활동 줄·1초 시계 없음(대조군).
+//             `+label`    에이전트 서버 생존 판정(D4 「깨웠지만 아직 안 가져감」)을 `livenessFor` 로 먹인다 — 실기 대화 화면이 근거 글 맨 앞에 싣는 문구(길다).
+//             `+ahead2`   근거 글 끝에 「에이전트 앞에 2건」.   `+grok` 에이전트 이름을 짧게(grok). 글자 크기는 `xcrun simctl ui <udid> content_size <단계>` 로 바꾼다(활동 줄 줄바꿈은 폭 × 글자 크기 × 문구의 곱이다).
+//             `+T<초>`    재는 시간. 프레임마다 맨 아래 행 y·목록 높이·입력창 높이·도크 높이·알약·포커스를 남기고, 스크롤 보고마다 출처(손가락/목록이 낸 것)와
+//             `chasingTail` 전이를 `scrollLog` 로, 햅틱 호출을 `haptics` 로(`expo-haptics` 를 이 하네스가 감싼다 — 배포 코드 무영향) 싱크에 보낸다.
+//
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
 // (`fetch` 는 메시지·반응·고정 읽기에 답하고, 레일은 이 파일이 구독 핸들러를 쥐고 직접 부른다). 그래서 표지·띠가 서는
@@ -149,6 +159,8 @@ const DIRECTORY = makeDirectory([SELF_MEMBER, PEER_MEMBER]);
 const AGENT = '00000000-0000-7000-8000-0000000000e4';
 const AGENT_MEMBER = member({id: AGENT, kind: 'agent', displayName: 'hermes', handle: 'hermes'});
 const AGENT_DIRECTORY = makeDirectory([SELF_MEMBER, AGENT_MEMBER]);
+/** `enter+grok`: 짧은 이름(owner 의 실기 장면은 grok)의 같은 에이전트 — 활동 줄 첫 토막의 폭이 달라 줄바꿈 경계가 옮겨 간다(#4613). */
+const GROK_DIRECTORY = makeDirectory([SELF_MEMBER, member({id: AGENT, kind: 'agent', displayName: 'grok', handle: 'grok'})]);
 const AGENT_RUN = 'A2222222-2222-4222-8222-A22222222222';
 const AGENT_HISTORY: readonly {self: boolean; body: string}[] = [
   {self: true, body: '이번 주 일정 정리해 줄래요'},
@@ -168,7 +180,7 @@ const AGENT_HISTORY: readonly {self: boolean; body: string}[] = [
 ];
 
 /** 대기 중인 run 하나. 활동 줄이 「hermes: 대기 1번째 · N째 기다려요」로 선다(`queued` 는 목록 안 자리표시를 만들지 않는다). */
-function queuedTurn(ageMs: number): AgentWorkingSignal {
+function queuedTurn(ageMs: number, ahead = 0): AgentWorkingSignal {
   const now = Date.now();
   return {
     memberId: AGENT,
@@ -178,7 +190,7 @@ function queuedTurn(ageMs: number): AgentWorkingSignal {
     runId: AGENT_RUN,
     headlines: [],
     lastActivityAtMs: now,
-    server: {phase: 'queued', leaseState: 'none', queuePosition: 1, aheadTotal: 0, queuedAtMs: now - ageMs},
+    server: {phase: 'queued', leaseState: 'none', queuePosition: 1, aheadTotal: ahead, queuedAtMs: now - ageMs},
   };
 }
 
@@ -484,6 +496,9 @@ interface Frame {
   latest: boolean;
   /** 입력창이 포커스를 쥐고 있다(#4456). 입력창이 없는 장면이면 false. */
   focused: boolean;
+  /** 컴포저(입력창 + 도구 줄) 자신의 높이(#4613 — `enter` 장면만; 도크 높이에서 유추하지 않고 직접 잰다). */
+  comp: number | null;
+  /** 목록 아래 끝(꼬리 이음매)의 창 좌표와 목록 보이는 높이는 `tail`·`viewport` 가 이미 말한다. */
 }
 
 interface Summary {
@@ -537,6 +552,40 @@ export function summarize(values: readonly (number | null)[]): Summary | null {
 
 const wait = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms));
 
+// ---- 햅틱 호출 계수 (#4613) -----------------------------------------------------
+//
+// 앱의 햅틱은 `lib/haptics.ts` 가 `expo-haptics` 를 지연 `require` 해 부른다. 이 하네스는 그 모듈의 세 진입점을 감싸 호출을 센다 — 앱 코드에는 틈을
+// 내지 않았다. 「진입·입력 중 0」은 **양성 대조**(첨부 버튼 한 번 → 정확히 1회)가 같은 실행에서 세어져야 증거가 된다: 감싼 것이 정말 울림을 세는가.
+const hapticLog: {t: number; kind: string}[] = [];
+let hapticProbeOn = false;
+let hapticProbeBegin = 0;
+let hapticProbeStatus = 'off';
+
+function installHapticProbe(): string {
+  if (hapticProbeOn) return 'already';
+  try {
+    const mod = require('expo-haptics') as Record<string, unknown>;
+    for (const name of ['impactAsync', 'selectionAsync', 'notificationAsync']) {
+      const original = mod[name];
+      if (typeof original !== 'function') continue;
+      const wrapped = (...args: unknown[]) => {
+        hapticLog.push({t: Date.now() - hapticProbeBegin, kind: `${name}(${args.map(String).join(',')})`});
+        return (original as (...a: unknown[]) => unknown)(...args);
+      };
+      try {
+        Object.defineProperty(mod, name, {value: wrapped, writable: true, configurable: true, enumerable: true});
+      } catch {
+        mod[name] = wrapped;
+      }
+      if (mod[name] !== wrapped) return `patch-failed:${name}`;
+    }
+    hapticProbeOn = true;
+    return 'ok';
+  } catch (error) {
+    return `no-module:${String(error)}`;
+  }
+}
+
 type ScenarioName =
   | 'idle'
   | 'peer'
@@ -551,9 +600,10 @@ type ScenarioName =
   | 'send20'
   | 'rec'
   | 'namefit'
-  | 'focus';
+  | 'focus'
+  | 'enter';
 /** #4331·#4456: 에이전트 DM 에 활동 줄이 서는 장면들. */
-const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live', 'focus'];
+const INPUT_SCENES: readonly string[] = ['tick', 'bar', 'live', 'focus', 'enter'];
 /** `hold` 는 연결 띠를 세운 채 90초 머문다 — 사진용이고 `all` 에 들지 않는다. */
 const ALL: readonly ScenarioName[] = ['idle', 'peer', 'blip', 'outage', 'gap'];
 
@@ -791,8 +841,8 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     await wait(1_500);
     return;
   }
-  if (name === 'focus') {
-    // 사람이 누르고 친다(#4456). 포커스·자판·초안·보냄이 바뀔 때마다 표식을 남겨 프레임과 맞춘다. 자판 표식에는 높이(pt)와 iOS 가
+  if (name === 'focus' || name === 'enter') {
+    // 사람이 누르고 친다(#4456; `enter` 는 #4613 — 같은 표식에 글자 수(`chars`)를 더한다). 포커스·자판·초안·보냄이 바뀔 때마다 표식을 남겨 프레임과 맞춘다. 자판 표식에는 높이(pt)와 iOS 가
     // 준 길이(ms)를 담는다 — 알약이 자판과 같은 박자로 오르내리는지 보는 근거다.
     c.mark('focus-start');
     const keyboardEvents = ['keyboardWillShow', 'keyboardDidShow', 'keyboardWillHide', 'keyboardDidHide'] as const;
@@ -815,6 +865,7 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
       if (draft !== lastDraft) {
         lastDraft = draft;
         c.mark(`draft-${draft === '' ? 0 : draft.split('\n').length}-lines`);
+        if (name === 'enter') c.mark(`chars-${draft.length}`);
       }
       if (server.messages.length !== lastCount) {
         lastCount = server.messages.length;
@@ -952,6 +1003,10 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   useState(() => {
     if (sendScene) installAnimProbe();
     // 옵션: 확정 지연·선착 프레임. 모듈 수준 값이라 장면이 끝나도 남으므로 매번 정한다.
+    if (base === 'enter') {
+      hapticLog.length = 0;
+      hapticProbeStatus = installHapticProbe();
+    }
     postDelayMs = 250;
     relayAtMs = null;
     for (const mod of mods) {
@@ -967,9 +1022,12 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     if (agentDm) resetServer(true);
     return null;
   });
-  const directory = agentDm ? AGENT_DIRECTORY : DIRECTORY;
+  // `enter` 변형(#4613): `+grok` 짧은 이름 · `+ahead2` 「에이전트 앞에 2건」.
+  const grok = base === 'enter' && mods.includes('grok');
+  const ahead = base === 'enter' && mods.includes('ahead2') ? 2 : 0;
+  const directory = agentDm ? (grok ? GROK_DIRECTORY : AGENT_DIRECTORY) : DIRECTORY;
   const peerId = agentDm ? AGENT : PEER;
-  const peerName = agentDm ? 'hermes' : '박서연';
+  const peerName = agentDm ? (grok ? 'grok' : 'hermes') : '박서연';
   const historyLength = agentDm ? AGENT_HISTORY.length : HISTORY_BODIES.length;
   const fake = useRef<FakeRail | null>(null);
   if (fake.current === null) fake.current = createFakeRail();
@@ -978,9 +1036,27 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const [bannerInset, setBannerInset] = useState(0);
   const timeline = useTimeline(fake.current.rail, WS, CHANNEL, SELF);
   // #4331: 활동 줄(대기 중인 run 하나)과 1초 시계 — 대화 화면이 턴이 열려 있는 동안 초당 한 번 다시 그리는 것과 같다.
-  const startAge = base === 'tick' ? 59 * 60_000 + 50_000 : 17 * 3_600_000;
+  // #4613 `enter`: 새로 대기에 든 run(3초째)이라 첫 1분 동안 「N초째」가 매초 바뀐다. `+age17h` 는 글자가 고정인 대조군.
+  const startAge =
+    base === 'tick'
+      ? 59 * 60_000 + 50_000
+      : base === 'enter' && !mods.includes('age17h')
+        ? 3_000
+        : 17 * 3_600_000;
+  // `+label`: 대화 화면이 근거 글 맨 앞에 싣는 서버 생존 판정(D4)을 하네스도 먹인다 — 안 먹이면 짧은 문구만 재서 실기보다 줄 바꿈 여유가 크다.
+  const livenessFor = useMemo<AgentLivenessLookup | undefined>(
+    () =>
+      mods.includes('label')
+        ? memberId => ({agentMemberId: memberId, state: 'woken_not_collected', lastSignalAtMs: Date.now() - 3 * 3_600_000})
+        : undefined,
+    // `mods` 는 마운트 때의 값이다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  const scrollLogRef = useRef<ScrollLogEntry[] | null>(base === 'enter' ? [] : null);
+  const composerRef = useRef<View | null>(null);
   const [turns, setTurns] = useState<readonly AgentWorkingSignal[]>(() =>
-    agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge)] : [],
+    agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge, ahead)] : [],
   );
   const turnNowMs = useTickingNow(turns.length > 0);
   const [selfSendToken, setSelfSendToken] = useState(0);
@@ -1011,6 +1087,28 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     markRef.current?.(pendingNow > seenPendingRef.current ? 'pending-add' : 'pending-remove');
     seenPendingRef.current = pendingNow;
   }, [pendingNow]);
+  // #4613: 목록의 진입 상태 전이와 활동 줄 근거 글의 바뀜을 표식으로 남긴다(`enter` 만 쓴다).
+  const statusNow = timeline.status;
+  useEffect(() => {
+    if (base === 'enter') markRef.current?.(`status-${statusNow}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusNow]);
+  const barDetail =
+    base === 'enter' && turns.length > 0
+      ? activityDetail(
+          activityLines(
+            turns,
+            memberId => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
+            MAX_ACTIVITY_LINES,
+            livenessFor,
+          ).lines[0],
+          turnNowMs,
+        )
+      : undefined;
+  useEffect(() => {
+    if (base === 'enter' && barDetail !== undefined) markRef.current?.(`txt:${barDetail}`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barDetail]);
   const pillsRef = useRef<PillState | null>(null);
   const barRef = useRef<View | null>(null);
   const palette = usePalette();
@@ -1018,10 +1116,13 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const renderStop = useCallback(
     () => (
       <View style={stopStyle.quiet}>
-        <Text style={[stopStyle.label, {color: palette.accentText}]}>중단</Text>
+        {/* 진짜 `StopTurnControl`(미장착)과 같다: 대기 중 run 의 낱말 「취소」 · 라벨 글자 배율 상한(#4613 — 전에는 「중단」·상한 없음이라 큰 글씨에서 폭이 달랐다). */}
+        <Text style={[stopStyle.label, {color: palette.accentText}]} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {base === 'enter' ? '취소' : '중단'}
+        </Text>
       </View>
     ),
-    [palette],
+    [palette, base],
   );
   const anchorRef = useRef<View | null>(null);
   const tailRef = useRef<View | null>(null);
@@ -1064,7 +1165,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // 장면 이름 뒤 `+t<초>` 는 `focus` 장면이 재는 시간(기본 140초).
   const focusMs = (() => {
     const seconds = mods.map(mod => /^t(\d+)$/.exec(mod)).find(match => match !== null);
-    return seconds ? Number(seconds[1]) * 1_000 : 140_000;
+    return seconds ? Number(seconds[1]) * 1_000 : base === 'enter' ? 75_000 : 140_000;
   })();
   const [report, setReport] = useState<string[]>([]);
   const [finished, setFinished] = useState(false);
@@ -1093,23 +1194,27 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   }, [timeline.status]);
 
   useEffect(() => {
-    if (timeline.status !== 'ready' || startedRef.current) return undefined;
+    // `enter`(#4613)는 마운트 첫 프레임부터 잰다 — 진입 수렴이 이 장면이 보려는 것이다.
+    if ((base !== 'enter' && timeline.status !== 'ready') || startedRef.current) return undefined;
     startedRef.current = true;
     let cancelled = false;
     const sink = Settings.get('momoGapSink');
     const lines: string[] = [];
     void (async () => {
-      // 진입 수렴(목록이 끝에 앉는 데 걸리는 시간)이 끝나도록 기다린다.
-      await wait(4_000);
+      // 진입 수렴(목록이 끝에 앉는 데 걸리는 시간)이 끝나도록 기다린다. (`enter` 는 그 수렴 자체를 재므로 기다리지 않는다.)
+      if (base !== 'enter') await wait(4_000);
       for (const name of scenarios) {
         if (cancelled) return;
         // 이 장면이 재는 행을 지금 가장 새 메시지로 옮기고, 표식이 붙을 때까지 기다린다.
-        setAnchorSeq(server.messages[server.messages.length - 1]?.seq ?? 0);
-        await wait(800);
+        if (name !== 'enter') {
+          setAnchorSeq(server.messages[server.messages.length - 1]?.seq ?? 0);
+          await wait(800);
+        }
         const frames: Frame[] = [];
         const events: {t: number; what: string}[] = [];
         const begin = Date.now();
         sceneBegin = begin;
+        hapticProbeBegin = begin;
         animLog.length = 0;
         let sampling = true;
         const sample = () => {
@@ -1131,6 +1236,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             day: pillsRef.current?.day === true,
             latest: pillsRef.current?.latest === true,
             focused: inputRef.current?.isFocused() === true,
+            comp: null,
           };
           frames.push(frame);
           void rectOf(anchorRef.current).then(rect => {
@@ -1147,6 +1253,11 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             frame.bar = rect === null ? null : rect.y;
             frame.barH = rect === null ? null : rect.h;
           });
+          if (composerRef.current !== null) {
+            void rectOf(composerRef.current).then(rect => {
+              frame.comp = rect === null ? null : rect.h;
+            });
+          }
           requestAnimationFrame(sample);
         };
         const controls: Controls = {
@@ -1201,12 +1312,16 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
           events,
           anim: animLog.map(item => ({...item, samples: item.samples.slice()})),
         };
+        const extra =
+          name === 'enter'
+            ? {scrollLog: scrollLogRef.current ?? [], haptics: hapticLog.slice(), hapticProbe: hapticProbeStatus}
+            : {};
         console.log(`STEADY4292 ${JSON.stringify(result)}`);
         if (typeof sink === 'string' && sink !== '') {
           try {
             await fetch(`http://${sink}/steady`, {
               method: 'POST',
-              body: JSON.stringify({...result, trace: frames}),
+              body: JSON.stringify({...result, trace: frames, ...extra}),
             });
           } catch {
             // 받는 쪽이 없으면 로그만 남는다. 계측이 앱을 죽이지 않는다.
@@ -1275,6 +1390,7 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             anchorRef={anchorRef}
             tailRef={tailRef}
             metricsRef={metricsRef}
+            scrollLogRef={scrollLogRef}
             pillsRef={pillsRef}
             selfSendToken={selfSendToken}
           />
@@ -1295,19 +1411,35 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
                 nowMs={turnNowMs}
                 live
                 renderStop={renderStop}
+                livenessFor={livenessFor}
               />
             </View>
             <TypingBar segments={typingSegments([])} label={null} />
             <Profiler id="composer" onRender={onComposerRender}>
-              <Composer
-                recipient="person"
-                channelLabel={peerName}
-                directory={directory}
-                draftKey={DRAFT_KEY}
-                attachmentTarget={TARGET}
-                inputRef={inputRef}
-                onSend={onSend}
-              />
+              {base === 'enter' ? (
+                // 입력창 자신의 높이를 직접 잰다(`comp`). 다른 장면은 래퍼 없이 같은 배치를 유지한다.
+                <View ref={composerRef} collapsable={false}>
+                  <Composer
+                    recipient="person"
+                    channelLabel={peerName}
+                    directory={directory}
+                    draftKey={DRAFT_KEY}
+                    attachmentTarget={TARGET}
+                    inputRef={inputRef}
+                    onSend={onSend}
+                  />
+                </View>
+              ) : (
+                <Composer
+                  recipient="person"
+                  channelLabel={peerName}
+                  directory={directory}
+                  draftKey={DRAFT_KEY}
+                  attachmentTarget={TARGET}
+                  inputRef={inputRef}
+                  onSend={onSend}
+                />
+              )}
             </Profiler>
           </View>
         }

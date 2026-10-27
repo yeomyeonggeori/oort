@@ -1,11 +1,19 @@
 import React from 'react';
-import {Image, Pressable, StyleSheet, Text, View} from 'react-native';
+import {
+  ActivityIndicator,
+  Image,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  type ImageSourcePropType,
+} from 'react-native';
 
 import {BAR_CONTROL_MAX_SCALE} from './atoms';
-import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
+import {CONV_ICON_SIZE, CONV_ICONS, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
 import {usePageSheetClose} from './PageSheet';
 import {circleLook} from './sheetModel';
-import {useStyles} from './theme';
+import {usePalette, useStyles} from './theme';
 import {
   font,
   SAFE_GUTTER,
@@ -25,6 +33,10 @@ import {
 // 오른쪽, 페이지의 X 는 왼쪽 — 손이 가는 쪽이 「시트를 내리는 쪽」과 「페이지를 떠나는 쪽」으로
 // 갈린다.
 //
+// 페이지 머리의 왼쪽 원은 두 모양이다(#4457, planner 결정): **X** 는 「이 페이지 전체를 닫는다」(스택의 첫
+// 페이지·모달 페이지), **‹ 뒤로** 는 「한 겹만 벗긴다」(그 위에 쌓인 안쪽 장). iOS 의 관례와 같다 — X 는
+// 나가는 문, ‹ 는 온 곳으로 한 걸음. 둘은 같은 원(같은 크기·채움·그림자)이고 글리프만 다르다.
+//
 // 모든 닫기 단추는 **글자 없는 원형 X** 이고, 보조기술 이름(`closeLabel`)은 시트마다 다른
 // 「… 닫기」 문장이라 **필수**다(기본값 「닫기」 를 두지 않는다 — 어느 시트를 닫는지 모른다).
 // 시트 안에서 `onClose` 를 생략하면 그릇이 쥔 닫기(`usePageSheetClose`)가 불려 스크림·끌기와
@@ -33,6 +45,37 @@ import {
 // 원이 「떠 있는」 근거는 토큰이다(`sheetModel.circleLook`): 라이트 `surface` + 그림자, 다크는
 // 그림자가 안 보이므로 한 단 위 `surfaceMuted` + 가장자리 한 줄.
 // =============================================================================
+
+/** 떠 있는 원 하나 — X 와 ‹ 가 같은 상자를 쓴다(글리프만 다르다). 보이는 원 40, 눌림 영역 44(`slopTo`). */
+function HeaderCircle({
+  glyph,
+  glyphSize,
+  label,
+  onPress,
+  testID,
+}: {
+  glyph: ImageSourcePropType;
+  glyphSize: number;
+  label: string;
+  onPress?: () => void;
+  testID?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={slopTo(SHEET.circle)}
+      onPress={onPress}
+      style={({pressed}) => [styles.circle, pressed && styles.pressed]}
+      testID={testID}>
+      <Image
+        source={glyph}
+        style={[styles.glyph, {width: glyphSize, height: glyphSize}]}
+      />
+    </Pressable>
+  );
+}
 
 /**
  * 떠 있는 원형 X. 눈에 보이는 원은 40, 눌림 영역은 44(`slopTo` 가 채운다).
@@ -48,51 +91,85 @@ export function CloseCircle({
   onPress?: () => void;
   testID?: string;
 }): React.JSX.Element {
-  const styles = useStyles(buildStyles);
   const sheetClose = usePageSheetClose();
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={label}
-      hitSlop={slopTo(SHEET.circle)}
+    <HeaderCircle
+      glyph={SHEET_ICONS.close}
+      glyphSize={SHEET_ICON_SIZE.close}
+      label={label}
       onPress={onPress ?? sheetClose ?? undefined}
-      style={({pressed}) => [styles.circle, pressed && styles.pressed]}
-      testID={testID}>
-      <Image source={SHEET_ICONS.close} style={styles.glyph} />
-    </Pressable>
+      testID={testID}
+    />
+  );
+}
+
+/**
+ * 떠 있는 원형 ‹ 뒤로 — 페이지 안의 **안쪽 장**의 머리 왼쪽. 한 겹만 벗긴다(아래의 페이지는 남는다).
+ * 글리프는 대화 머리의 「뒤로」와 같은 22pt 선 셰브론이다(새 에셋 없음, 뒤집어 그리지 않아 선명하다).
+ */
+export function BackCircle({
+  label,
+  onPress,
+  testID,
+}: {
+  /** 보조기술 이름 — 어디로 돌아가는지 말한다(「설정으로 돌아가기」). 「닫기」가 아니다: 닫는 것이 아니라 돌아간다. */
+  label: string;
+  onPress: () => void;
+  testID?: string;
+}): React.JSX.Element {
+  return (
+    <HeaderCircle
+      glyph={CONV_ICONS.left}
+      glyphSize={CONV_ICON_SIZE.left}
+      label={label}
+      onPress={onPress}
+      testID={testID}
+    />
   );
 }
 
 /**
  * 확정 ✓ — 편집 시트의 왼쪽. `disabled`(입력 전·바뀐 것이 없음)이면 회색이고 눌리지 않는다.
  * 색이 아니라 `accessibilityState` 가 비활성을 말한다.
+ *
+ * `busy`(보내는 중·저장 중)면 ✓ 자리에 **스피너**가 서고 눌리지 않는다 — 옛 글자 단추는 라벨이 「보내는 중」으로 눈에 보이게
+ * 바뀌었는데, 글리프에는 그 자리가 없어 왕복(Face ID 뒤 POST) 동안 「눌렸는가」가 안 보였다(#4458 보안 검수 M1).
+ * 이름(`label`)에도 진행 낱말을 넣는 것은 호출자의 몫이다.
  */
 export function ConfirmCheck({
   label,
   onPress,
   disabled = false,
+  busy = false,
   testID,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  busy?: boolean;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const palette = usePalette();
+  const inert = disabled || busy;
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      accessibilityState={{disabled}}
-      disabled={disabled}
+      accessibilityState={{disabled: inert, busy}}
+      disabled={inert}
       hitSlop={slopTo(SHEET.circle)}
       onPress={onPress}
       style={({pressed}) => [styles.check, pressed && styles.pressed]}
       testID={testID}>
-      <Image
-        source={SHEET_ICONS.check}
-        style={[styles.checkGlyph, disabled && styles.checkGlyphOff]}
-      />
+      {busy ? (
+        <ActivityIndicator color={palette.text} testID={testID ? `${testID}-busy` : undefined} />
+      ) : (
+        <Image
+          source={SHEET_ICONS.check}
+          style={[styles.checkGlyph, disabled && styles.checkGlyphOff]}
+        />
+      )}
     </Pressable>
   );
 }
@@ -101,6 +178,8 @@ export interface SheetConfirm {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  /** 왕복 중 — ✓ 자리에 스피너가 서고 눌리지 않는다(`ConfirmCheck`). */
+  busy?: boolean;
   testID?: string;
 }
 
@@ -131,6 +210,7 @@ export function SheetHeader({
             label={confirm.label}
             onPress={confirm.onPress}
             disabled={confirm.disabled}
+            busy={confirm.busy}
             testID={confirm.testID}
           />
         ) : null}
@@ -143,29 +223,49 @@ export function SheetHeader({
   );
 }
 
-/** 페이지 머리: [X] 제목 [trailing]. 페이지에는 그릇이 없으므로 `onClose` 가 필수다. */
+/**
+ * 페이지 머리의 왼쪽 원. **둘 중 하나**다 — 페이지를 떠나는 X(`closeLabel`·`onClose`) 아니면 한 겹 뒤로 가는
+ * ‹(`back`). 둘을 함께 받지 않는다(타입이 막는다): 한 머리에 나가는 문이 둘이면 어느 것이 어디로 가는지 모른다.
+ */
+type PageHeaderLeft =
+  | {
+      closeLabel: string;
+      onClose: () => void;
+      closeTestID?: string;
+      back?: undefined;
+    }
+  | {
+      back: {label: string; onPress: () => void; testID?: string};
+      closeLabel?: undefined;
+      onClose?: undefined;
+      closeTestID?: undefined;
+    };
+
+/** 페이지 머리: [X 또는 ‹] 제목 [trailing]. 페이지에는 그릇이 없으므로 `onClose`(또는 `back.onPress`)가 필수다. */
 export function PageHeader({
   title,
   closeLabel,
   onClose,
   closeTestID,
+  back,
   trailing,
   titleTestID,
   testID,
 }: {
   title: string;
-  closeLabel: string;
-  onClose: () => void;
-  closeTestID?: string;
   trailing?: React.ReactNode;
   titleTestID?: string;
   testID?: string;
-}): React.JSX.Element {
+} & PageHeaderLeft): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <View style={styles.header} testID={testID}>
       <View style={styles.side}>
-        <CloseCircle label={closeLabel} onPress={onClose} testID={closeTestID} />
+        {back ? (
+          <BackCircle label={back.label} onPress={back.onPress} testID={back.testID} />
+        ) : (
+          <CloseCircle label={closeLabel} onPress={onClose} testID={closeTestID} />
+        )}
       </View>
       <HeaderTitle title={title} testID={titleTestID} />
       <View style={[styles.side, styles.sideEnd]}>{trailing ?? null}</View>
@@ -224,11 +324,7 @@ const buildStyles = (color: Palette) => {
       borderColor: look.ring,
       boxShadow: color.elevationRest,
     },
-    glyph: {
-      width: SHEET_ICON_SIZE.close,
-      height: SHEET_ICON_SIZE.close,
-      tintColor: color.text,
-    },
+    glyph: {tintColor: color.text},
     check: {
       width: SHEET.circle,
       height: SHEET.circle,

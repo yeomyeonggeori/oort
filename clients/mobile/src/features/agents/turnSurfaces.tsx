@@ -272,6 +272,32 @@ export function AgentTurnStaleNotice({
   );
 }
 
+/** 숫자 한 칸과 같은 폭의 줄바꿈 금지 공백(U+2007 FIGURE SPACE). 소스에 보이지 않는 글자를 두지 않으려고 escape 로 쓴다. */
+const FIGURE_SPACE = '\u2007';
+
+// 시간이 흐르며 매초(또는 매분) 바뀌는 낱말의 한 자리 숫자: 「5초째」「3분째」「마지막 보고 7초 전」「1분 전에 가져감」. 앞이 숫자나 숫자 공백이면 이미 두 자리다.
+const TICKING_NUMBER = /(^|[^\d\u2007])(\d)(?=(?:초|분)(?:째| 전))/g;
+// 시계의 한 자리 초(「5s」). 분 이상(「2m 05s」「1h 04m」)은 코어가 이미 0 을 채워 폭이 일정하다.
+const TICKING_CLOCK_SECONDS = /^(\d)(?=s$)/;
+
+/**
+ * 근거 글에서 바뀌는 숫자의 **폭을 두 자리로 미리 잡는다** (#4613). 한 자리 숫자 앞에 숫자 폭 공백을 하나 둔다(「5초째」→「 5초째」).
+ *
+ * 활동 줄은 줄바꿈이 되는 줄이고 근거 글은 그 안에서 줄어드는 글자라서, 숫자가 한 자리에서 두 자리로 넘어가는 순간(9→10초) 글자가 한 자리만큼 길어져 줄 수가
+ * 한 줄→두 줄로 뒤집혔다(`tabular-nums` 뒤에도 남은 것: 375pt·글자 ×1.118 에서 「grok … 앞에 2건」). 두 자리 폭을 처음부터 잡아 두면 1초부터 59분까지 낱말의
+ * 폭이 같다 — 「59초째」와 「 1분째」도 같아서 1분이 되는 순간에도 줄 수가 안 바뀐다. 두 자리 숫자·시간 낱말(「17시간째」)은 건드리지 않는다.
+ *
+ * 코어 문구(`runPhaseDetail`)는 웹과 나눠 쓰므로 고치지 않고 **보이는 글에만** 입힌다: 접근성 이름(`activityText`)은 숫자가 없어 그대로다.
+ */
+export function reserveTickingDigits(text: string): string {
+  return text.replace(TICKING_NUMBER, `$1${FIGURE_SPACE}$2`);
+}
+
+/** 시계(「5s」)의 한 자리 초에도 같은 규칙. 「9s」→「10s」에서 글자가 길어져 줄이 뒤집히지 않게. */
+export function reserveClockDigits(label: string): string {
+  return label.replace(TICKING_CLOCK_SECONDS, `${FIGURE_SPACE}$1`);
+}
+
 /**
  * The line itself. The clock sits right after the text it belongs to rather than
  * pushed to the far edge: a number a screen away from its label stops reading as
@@ -309,7 +335,8 @@ function ActivityRow({
     line.server === undefined &&
     line.state === 'working' &&
     line.startedAtMs !== undefined;
-  const detail = activityDetail(line, nowMs);
+  const rawDetail = activityDetail(line, nowMs);
+  const detail = rawDetail === undefined ? undefined : reserveTickingDigits(rawDetail);
   // 큰 글씨(`STACK_PILL_SCALE`부터)에서는 「이름: 상태 낱말」이 한 줄에 다 들어가지 않는다. 한 줄로 자르면 새 낱말
   // 「아직 받지 않았어요」가 「아직 받지…」로 잘려 핵심이 사라진다(design-review #4285 r1 H1과 같은 폭의 문제) —
   // 큰 글씨에서는 줄을 바꿔 다 말한다.
@@ -355,7 +382,7 @@ function ActivityRow({
       ) : null}
       {showClock ? (
         <Text style={styles.activityClock}>
-          {elapsedLabel(line.startedAtMs as number, nowMs)}
+          {reserveClockDigits(elapsedLabel(line.startedAtMs as number, nowMs))}
         </Text>
       ) : null}
       {stop ?? null}
@@ -410,10 +437,13 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   activityText: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textMuted},
   activityTextFlex: {flexShrink: 1},
   activityName: {color: color.agent},
-  activityClock: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textFaint},
+  // 숫자 글리프의 폭을 같게 한다(#4613). 가변폭 숫자는 같은 자릿수끼리도 폭이 달라(「1」은 좁고 「4」·「8」은 넓다) 「N초째」·「12m 03s」가 매초 바뀔 때, 줄바꿈 경계에
+  // 걸린 줄이 어떤 초에서는 한 줄·어떤 초에서는 두 줄이 됐다. 그때마다 도크가 입력창 위에서 자라고 줄어 대화가 같은 양만큼 오르내렸다(375pt·글자 ×1.118 에서
+  // 첫 1분에 11번·26pt, `measure/activityRows.tsx`). 자릿수가 바뀌는 순간(9→10초)의 폭 차이는 `reserveTickingDigits`·`reserveClockDigits` 가 두 자리 폭을 미리 잡아 없앤다.
+  activityClock: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textFaint, fontVariant: ['tabular-nums']},
   // 근거 줄은 사람이 판단하는 근거라 시계(장식)와 위계가 다르다: 본문 AA를 노리는
   // `textMuted`이고, 줄이 모자라면 이름이 아니라 이 줄이 줄어든다(design-review U4).
-  activityDetail: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textMuted, flexShrink: 1},
+  activityDetail: {fontSize: font.meta, lineHeight: lineHeightToken.meta, color: color.textMuted, flexShrink: 1, fontVariant: ['tabular-nums']},
   staleText: {fontSize: font.meta, color: color.warn},
   staleNotice: {
     paddingHorizontal: SAFE_GUTTER,

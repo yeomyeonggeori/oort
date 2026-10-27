@@ -1,9 +1,11 @@
 import React, {useCallback, useRef, useState} from 'react';
-import {Modal, Pressable, StyleSheet, Text, TextInput, View} from 'react-native';
-import {useSafeAreaInsets} from 'react-native-safe-area-context';
-import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
+import {StyleSheet, Text, TextInput} from 'react-native';
+import {Sentence} from '../../design/atoms';
+import {PageSheet} from '../../design/PageSheet';
+import {SheetHeader} from '../../design/SheetChrome';
+import {SheetScroll} from '../../design/sheetParts';
+import {font, ds2Radius, space, type Palette} from '../../design/tokens';
 import {useKeyboardAppearance, usePalette, useStyles} from '../../design/theme';
-import {useKeyboard} from '../../lib/useKeyboard';
 
 // =============================================================================
 // 메시지 고치기.
@@ -36,6 +38,14 @@ import {useKeyboard} from '../../lib/useKeyboard';
 // 웹 1라운드는 `rows={2}` 로 고정해 두었고, 리뷰는 "수정이 두 줄짜리 창구를
 // 스크롤하는 일이 됐다"고 적었다. 여기서는 `minHeight`~`maxHeight` 사이에서
 // 자라고, 그 위로는 내부 스크롤이 받는다.
+//
+// ## 공용 시트로 (#4458)
+//
+// 그릇은 `PageSheet`(중간 단 — 입력이 있는 짧은 시트의 표준 모양)이고, 키보드는 그릇이 피한다(시트의 바닥이 키보드
+// 윗면에 앉는다). 머리는 `SheetHeader`: **왼쪽 ✓ = 저장**(바뀐 것이 없거나 비면 회색·눌리지 않음, 저장하는 동안도
+// 잠긴다), **오른쪽 원형 X = 고치기 취소**. 옛 「취소」「저장」 글자 단추 행은 없다 — 스크림·끌어내리기·VoiceOver escape 와
+// X 는 모두 같은 슬라이드로 `onCancel` 을 부른다. 입력은 여러 줄이라 한 줄 알약(`InputPill`)이 아니라 입력 상자다
+// (같은 외곽선 `textFaint` 3:1 · 입력 반경). 값은 여전히 동기다: `onChangeText` 는 `setText` 하나뿐이다.
 // =============================================================================
 
 /** 두 줄 어림. 한 줄짜리 창구로 문단을 고치게 하지 않는다. */
@@ -62,8 +72,6 @@ export function MessageEditorSheet({
   const keyboardAppearance = useKeyboardAppearance();
   // 동기. 헤더 참조.
   const [text, setText] = useState(initialBody);
-  const insets = useSafeAreaInsets();
-  const keyboard = useKeyboard();
   const inputRef = useRef<TextInput | null>(null);
 
   const onChangeText = useCallback((next: string) => setText(next), []);
@@ -75,157 +83,81 @@ export function MessageEditorSheet({
   const canSave = trimmed !== '' && trimmed !== initialBody.trim() && !pending;
 
   return (
-    <Modal
-      visible
-      transparent
-      animationType="fade"
-      onRequestClose={onCancel}
+    <PageSheet
+      height="medium"
+      onClose={onCancel}
+      accessibilityLabel="메시지 고치기"
+      scrimLabel="고치기 취소"
+      scrimTestID="editor-backdrop"
       testID="message-editor">
-      <View style={styles.root}>
-        <Pressable
-          style={styles.backdrop}
-          accessibilityRole="button"
-          accessibilityLabel="고치기 취소"
-          onPress={onCancel}
-          testID="editor-backdrop"
+      <SheetHeader
+        title="메시지 고치기"
+        closeLabel="메시지 고치기 닫기"
+        closeTestID="editor-cancel"
+        confirm={{
+          label: pending ? '저장 중' : '저장',
+          onPress: () => onSave(trimmed),
+          disabled: !canSave,
+          busy: pending,
+          testID: 'editor-save',
+        }}
+      />
+      <SheetScroll>
+        <TextInput
+          ref={inputRef}
+          style={styles.input}
+          value={text}
+          onChangeText={onChangeText}
+          multiline
+          // 컴포저와 같은 규칙 (#1422 design-review M2). 이 상자에 담기는 것은
+          // 방금 보낸 한국어 문장이라 낱말 가운데서 끊기면 안 되는 이유가
+          // 그쪽과 똑같다 — `design/atoms.tsx` 의 `Sentence` 가 든 그 값이고,
+          // `conversationHygiene.test.tsx` 의 스윕이 이 클라의 여러 줄 입력창을
+          // 전수로 센다.
+          lineBreakStrategyIOS="hangul-word"
+          autoFocus
+          submitBehavior="newline"
+          textAlignVertical="top"
+          accessibilityLabel="고칠 메시지 내용"
+          placeholder="메시지 내용"
+          placeholderTextColor={palette.textFaint}
+          keyboardAppearance={keyboardAppearance}
+          testID="editor-input"
         />
-        <View
-          accessibilityViewIsModal
-          style={[
-            styles.sheet,
-            {
-              paddingBottom: keyboard.visible
-                ? keyboard.height + space.md
-                : Math.max(insets.bottom, space.md),
-            },
-          ]}>
-          <Text style={styles.title}>메시지 고치기</Text>
 
-          <TextInput
-            ref={inputRef}
-            style={styles.input}
-            value={text}
-            onChangeText={onChangeText}
-            multiline
-            // 컴포저와 같은 규칙 (#1422 design-review M2). 이 상자에 담기는 것은
-            // 방금 보낸 한국어 문장이라 낱말 가운데서 끊기면 안 되는 이유가
-            // 그쪽과 똑같다 — `design/atoms.tsx` 의 `Sentence` 가 든 그 값이고,
-            // `conversationHygiene.test.tsx` 의 스윕이 이 클라의 여러 줄 입력창을
-            // 전수로 센다.
-            lineBreakStrategyIOS="hangul-word"
-            autoFocus
-            submitBehavior="newline"
-            textAlignVertical="top"
-            accessibilityLabel="고칠 메시지 내용"
-            placeholder="메시지 내용"
-            placeholderTextColor={palette.textFaint}
-            keyboardAppearance={keyboardAppearance}
-            testID="editor-input"
-          />
+        {pending ? (
+          // ✓ 자리의 스피너가 진행을 말하고(`busy`), 이 한 줄은 키보드 위에서 글을 보는 눈에 같은 말을 한 번 더 한다. `accessibilityLiveRegion` 은
+          // Android 에서만 읽힌다 — iOS VoiceOver 는 ✓ 의 `busy` 상태와 이름(「저장 중」)이 말한다(실제 낭독은 runtime-unverified, design-review r1b M5).
+          <Text accessibilityLiveRegion="polite" style={styles.pending} testID="editor-pending">
+            저장 중
+          </Text>
+        ) : null}
 
-          {error ? (
-            <View style={styles.failure} testID="editor-error">
-              <Text style={styles.failureText}>{error}</Text>
-            </View>
-          ) : null}
-
-          <View style={styles.row}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="취소"
-              onPress={onCancel}
-              style={({pressed}) => [styles.secondary, pressed && styles.pressed]}
-              testID="editor-cancel">
-              <Text style={styles.secondaryLabel}>취소</Text>
-            </Pressable>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="저장"
-              accessibilityState={{disabled: !canSave, busy: pending}}
-              disabled={!canSave}
-              onPress={() => onSave(trimmed)}
-              style={({pressed}) => [
-                styles.primary,
-                !canSave && styles.primaryDisabled,
-                pressed && canSave && styles.pressed,
-              ]}
-              testID="editor-save">
-              <Text
-                style={[styles.primaryLabel, !canSave && styles.primaryLabelDisabled]}>
-                {pending ? '저장 중…' : '저장'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-      </View>
-    </Modal>
+        {error ? (
+          <Sentence accessibilityRole="alert" style={styles.failure} testID="editor-error">
+            {error}
+          </Sentence>
+        ) : null}
+      </SheetScroll>
+    </PageSheet>
   );
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
-  root: {flex: 1, justifyContent: 'flex-end'},
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: color.scrim,
-  },
-  sheet: {
-    backgroundColor: color.surface,
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: color.border,
-    paddingHorizontal: SAFE_GUTTER,
-    paddingTop: space.md,
-    gap: space.sm,
-  },
-  title: {fontSize: font.label, color: color.text, fontWeight: '700'},
+  // 입력 그릇만 선을 든다(ADR-0189 D6): `textFaint` 3:1. 채움은 없다 — 시트 바탕 위에 직접 선다(`InputPill` 과 같다).
   input: {
     minHeight: MIN_HEIGHT,
     maxHeight: MAX_HEIGHT,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
-    borderRadius: radius.md,
+    borderRadius: ds2Radius.row,
     borderWidth: 1,
-    borderColor: color.border,
-    backgroundColor: color.bg,
+    borderColor: color.textFaint,
     // 16 미만이면 포커스 때 iOS 가 화면을 확대한다.
     fontSize: font.body,
     color: color.text,
     lineHeight: 21,
   },
-  row: {flexDirection: 'row', gap: space.sm},
-  secondary: {
-    flex: 1,
-    minHeight: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: color.border,
-  },
-  secondaryLabel: {fontSize: font.label, color: color.text, fontWeight: '600'},
-  primary: {
-    flex: 1,
-    minHeight: TOUCH_TARGET,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: radius.md,
-    backgroundColor: color.accent,
-  },
-  primaryDisabled: {backgroundColor: color.border},
-  primaryLabel: {fontSize: font.label, color: color.onAccent, fontWeight: '700'},
-  primaryLabelDisabled: {color: color.textFaint},
-  failure: {
-    borderRadius: radius.md,
-    padding: space.md,
-    backgroundColor: color.dangerSurface,
-    borderWidth: 1,
-    borderColor: color.dangerBorder,
-  },
-  failureText: {color: color.dangerText, fontSize: font.label, lineHeight: 20},
-  pressed: {opacity: 0.6},
+  pending: {fontSize: font.label, color: color.textMuted},
+  failure: {color: color.dangerText, fontSize: font.label, lineHeight: 20},
 });

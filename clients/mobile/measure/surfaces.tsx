@@ -137,7 +137,8 @@ import {bootSpawnPort} from '../src/boot/spawnPort';
 import {workRunFailure} from '@momo/core/features/agents/workRunRequest';
 import {INITIAL_NAV, navReducer} from '../src/nav/state';
 import {seedMemberAvatar} from '../src/features/conversation/memberAvatarImage';
-import {ProfilePage, ProfileSheet} from '../src/features/profile/ProfileSheet';
+import {SettingsContent} from '../src/features/profile/SettingsPage';
+import {SettingsOverlay, SETTINGS_PERSONA, settingsPersona} from './settingsOverlay';
 import {__setPermissionReader} from '../src/push/permissionStatus';
 import {clearPushOptOut, setPushOptedOut} from '../src/push/pushOptOut';
 import {pushDeviceId} from '../src/push/registration';
@@ -189,6 +190,7 @@ import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
+import {ActivityRowsSurface} from './activityRows';
 import {UncollectedSurface, isUncollectedSurface, seedUncollected} from './uncollected';
 import {AppsSurface} from './apps';
 import {AppsTailSurface} from './appsTail';
@@ -198,6 +200,7 @@ import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
+
 import TeamBoardScreen from '../src/screens/TeamBoardScreen';
 import WorkJobsScreen from '../src/screens/WorkJobsScreen';
 import {TeamBoardDetailSheet} from '../src/features/work/teamBoard/TeamBoardDetailSheet';
@@ -379,7 +382,19 @@ import type {
 // =============================================================================
 LogBox.ignoreAllLogs(true);
 
-const ROSTER = makeStressRoster();
+// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 첫 두 사람(「나」와 첫 동료)은 실제 팀원 이름이라 하네스에서
+// 가상 인물로 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은
+// 변하지 않는다. 이름으로 짚지 않고 순서로 짚는다(`SELF` 도 「첫 사람」이다): 그래야 실명이 이 파일의 새 줄에 다시 적히지 않는다.
+const VIRTUAL_PEOPLE = [
+  {displayName: '이도현', handle: 'dohyun'},
+  {displayName: '박서연', handle: 'seoyeon'},
+];
+let virtualSeen = 0;
+const ROSTER = makeStressRoster().map(member => {
+  if (member.kind !== 'human') return member;
+  const virtual = VIRTUAL_PEOPLE[virtualSeen++];
+  return virtual ? {...member, ...virtual} : member;
+});
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
@@ -2210,6 +2225,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name.startsWith('dm-conversation')) {
     return <DmConversationSurface which={name.slice('dm-conversation'.length).replace(/^-/, '')} />;
   }
+  // #4613: 활동 줄 높이 표 — 글자(N초째·생존 판정 라벨·앞에 m건)별 줄 수. 초가 바뀔 때 줄 수가 뒤집히는 글자가 있는가.
+  if (name === 'activity-rows' || name === 'activity-rows-wide') return <ActivityRowsSurface wide={name === 'activity-rows-wide'} />;
   // #4292: 실시간 이벤트(재연결·복구·상대 메시지)를 재생하며 맨 아래 메시지의 창 좌표를 매 프레임 잰다.
   if (name.startsWith('dm-steady')) {
     return <SteadySurface which={name.slice('dm-steady'.length).replace(/^-/, '')} />;
@@ -3966,8 +3983,8 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'memory-pause': {
       harnessClient.setQueryData(memoryKeys.settings(MEMORY_WS), MEMORY_SETTINGS);
       return (
-        <Frame label="프로필 시트 — 기억 (#3166)">
-          <ScrollView>
+        <Frame label="설정 페이지 — 기억 (#3166 → #4457)">
+          <ScrollView contentContainerStyle={styles.settingsBody}>
             <MemoryPauseSection workspaceId={MEMORY_WS} />
           </ScrollView>
         </Frame>
@@ -4725,10 +4742,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(SHELL_ROSTER)}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
             connected
             onSignOut={() => {}}
             onClose={() => {}}
@@ -4763,11 +4780,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             initialPage="avatar"
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(
+            member={SETTINGS_ME}
+            directory={settingsDirectory(
               name === 'shell-avatar-sheet-photo'
                 ? SHELL_ROSTER.map(member =>
                     member.id === SELF
@@ -4785,14 +4802,74 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4457: 테마 안쪽 장. 진짜 셸 위의 설정 페이지가 테마 장으로 열린다(`initialPage="theme"`) — 화면 모드·테마·강조색·배경
+    // 네 묶음이 한 장에 선다(스크롤은 `shell-settings-theme-*` 가 아니라 Maestro 가 한다).
+    case 'shell-settings-theme':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <SettingsOverlay
+            initialPage="theme"
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
     case 'shell-profile-sheet':
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(SHELL_ROSTER)}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
+    // #4457: 설정 페이지의 **끝** — 계정 카드(로그아웃 위험 행)와 버전 줄. 고정 오프셋 대신 스크롤을 끝까지 내려
+    // 어떤 기기·글자 크기에서도 같은 장면(맨 아래)이 서게 한다. 로그아웃의 확인 블록은 눌러야 서므로
+    // `maestro/113-settings-sheet-capture.yaml` 이 `sign-out` 을 눌러 찍는다(여기 `onSignOut` 은 아무것도 지우지 않는다).
+    case 'shell-profile-bottom':
+      return <SettingsBottomSurface />;
+    // #4457: 보이는 상태 글이 있는 사람의 설정 페이지(상태 알약 옆 글 + 「상태 설정」 행의 값). 「상태 설정」 시트가 이
+    // 사람의 저장된 만료를 「지금대로」로, 「상태 지우기」 행을 서게 한다(Maestro 가 행을 눌러 시트를 연다).
+    // `-long`: 80자 글(코어 상한)과 **다른 날** 만료 — 설정 행의 값과 상태 시트 기간 행의 값(「지금대로 · 10월 27일 16:11까지」)이
+    // 한 줄 말줄임으로 잘리지 않고 두 줄까지 읽히는지(design-review r1 M5).
+    case 'shell-profile-status':
+    case 'shell-profile-status-long':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <SettingsOverlay
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(
+              SHELL_ROSTER.map(member =>
+                member.id === SELF
+                  ? name === 'shell-profile-status-long'
+                    ? {
+                        ...member,
+                        statusEmoji: '🏠',
+                        statusText:
+                          '달무리 스튜디오 온보딩 자료를 정리하는 중이라 답이 조금 늦어요. 급하면 전화 주세요. 월요일부터는 평소처럼 바로 볼게요. 이번 주도 고생 많았',
+                        statusExpiresAtMs: Date.now() + 30 * 60 * 60 * 1000,
+                      }
+                    : {
+                        ...member,
+                        statusEmoji: '🚌',
+                        statusText: '출근 중',
+                        statusExpiresAtMs: Date.now() + 3 * 60 * 60 * 1000,
+                      }
+                  : member,
+              ),
+            )}
             connected
             onSignOut={() => {}}
             onClose={() => {}}
@@ -4805,19 +4882,21 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
             <View style={{marginTop: -560, height: 3000}}>
-              <ProfilePage
-                workspaceId={HARNESS_MEMBER.workspaceId}
-                member={HARNESS_MEMBER}
-                directory={makeDirectory(SHELL_ROSTER)}
-                connected
-                onOpenTheme={() => {}}
-                onOpenStatus={() => {}}
-                onOpenDeviceKey={() => {}}
-                onOpenPauseUntil={() => {}}
-                onOpenDndUntil={() => {}}
-                onSignOut={() => {}}
-                onRevealEnd={() => {}}
-              />
+              <View style={styles.settingsBody}>
+                <SettingsContent
+                  workspaceId={HARNESS_MEMBER.workspaceId}
+                  member={SETTINGS_ME}
+                  directory={settingsDirectory(SHELL_ROSTER)}
+                  connected
+                  onOpenTheme={() => {}}
+                  onOpenStatus={() => {}}
+                  onOpenDeviceKey={() => {}}
+                  onOpenPauseUntil={() => {}}
+                  onOpenDndUntil={() => {}}
+                  onSignOut={() => {}}
+                  onRevealEnd={() => {}}
+                />
+              </View>
             </View>
           </View>
         </Screen>
@@ -4836,10 +4915,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       return (
         <View style={styles.fill}>
           <Shell />
-          <ProfileSheet
+          <SettingsOverlay
             workspaceId={HARNESS_MEMBER.workspaceId}
-            member={HARNESS_MEMBER}
-            directory={makeDirectory(pauseRoster(name))}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(pauseRoster(name))}
             connected
             onSignOut={() => {}}
             onClose={() => {}}
@@ -4848,7 +4927,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 ? 'dndUntil'
                 : name.startsWith('shell-pause-until')
                   ? 'pauseUntil'
-                  : 'profile'
+                  : 'main'
             }
           />
         </View>
@@ -4861,6 +4940,9 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     // `-undetermined` 는 iOS 가 아직 묻지 않은 폰, `-checking` 은 iOS 의 답이 아직 오지 않은 「읽는
     // 중」이다. `-busy`·`-failed` 는 **눌러야만** 서는 상태라 정지 사진이 아니라
     // `maestro/99-push-switch-capture.yaml` 이 진짜로 눌러 찍는다(서버 자리만 `seedPush` 의 가짜가 진다).
+    // `shell-profile-load-failed`(#4457 r3 M1): 알림 규칙·종류별 스위치·기억 설정을 **읽지 못한** 설정 페이지 — 「다시 불러오기」 세
+    // 행이 선다(강조색 글자여야 눌리는 줄로 읽힌다). 서버가 500 으로 답하는 가짜 `fetch`(`seedLoadFailed`).
+    case 'shell-profile-load-failed':
     case 'shell-profile-push-on':
     case 'shell-profile-push-off':
     case 'shell-profile-push-denied':
@@ -4873,18 +4955,21 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'shell-profile-push-failed-ax':
       return (
         <Screen>
-          <View style={{flex: 1, overflow: 'hidden'}}>
-            <View
-              style={{
-                marginTop: -(name.endsWith('-ax')
-                  ? PUSH_CAPTURE_SCROLL_AX
-                  : PUSH_CAPTURE_SCROLL),
-                height: 6000,
-              }}>
-              <ProfilePage
+          <ScrollView
+            // 고정 오프셋에서 시작하되 **스크롤은 살아 있다**: 접근성 최대 글씨에서는 알림 카드가 1000pt 넘게 커져 실패 문장이 접힘선
+            // 한참 아래에 선다 — 99번 흐름이 `scrollUntilVisible` 로 내려가야 닿는다(옛 판은 위를 잘라 둔 정지 상자라 스크롤이 없었다).
+            contentOffset={{
+              x: 0,
+              y: name.endsWith('-ax') ? PUSH_CAPTURE_SCROLL_AX : PUSH_CAPTURE_SCROLL,
+            }}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+            style={styles.fill}>
+            <View style={styles.settingsBody}>
+              <SettingsContent
                 workspaceId={HARNESS_MEMBER.workspaceId}
-                member={HARNESS_MEMBER}
-                directory={makeDirectory(SHELL_ROSTER)}
+                member={SETTINGS_ME}
+                directory={settingsDirectory(SHELL_ROSTER)}
                 connected
                 onOpenTheme={() => {}}
                 onOpenStatus={() => {}}
@@ -4895,7 +4980,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                 onRevealEnd={() => {}}
               />
             </View>
-          </View>
+          </ScrollView>
         </Screen>
       );
     case 'mark-unread-sidebar':
@@ -5342,10 +5427,10 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     return (
       <View style={styles.fill}>
         <Shell />
-        <ProfileSheet
+        <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
-          member={HARNESS_MEMBER}
-          directory={makeDirectory(SHELL_ROSTER)}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onSignOut={() => {}}
           onClose={() => {}}
@@ -5362,10 +5447,10 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     return (
       <View style={styles.fill}>
         <Shell />
-        <ProfileSheet
+        <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
-          member={HARNESS_MEMBER}
-          directory={makeDirectory(SHELL_ROSTER)}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onSignOut={() => {}}
           onClose={() => {}}
@@ -5375,7 +5460,7 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     );
   }
   if (which === 'profile-page' || which === 'profile-page-faceid-off') {
-    // 실제 프로필 시트의 안쪽 장 — 머리의 「‹ 프로필」까지 배송되는 그대로.
+    // 실제 설정 페이지의 안쪽 장 — 머리의 ‹ 뒤로까지 배송되는 그대로(#4457).
     harnessClient.setQueryData(DEVICE_KEY_LOCAL_QUERY_KEY, {
       status: which === 'profile-page' ? 'ready' : 'biometryUnavailable',
       publicKey: DK_KEY,
@@ -5386,10 +5471,10 @@ function DeviceKeySurface({which: rawWhich}: {which: string}): React.JSX.Element
     return (
       <View style={styles.fill}>
         <Shell />
-        <ProfileSheet
+        <SettingsOverlay
           workspaceId={HARNESS_MEMBER.workspaceId}
-          member={HARNESS_MEMBER}
-          directory={makeDirectory(SHELL_ROSTER)}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
           connected
           onSignOut={() => {}}
           onClose={() => {}}
@@ -5467,6 +5552,10 @@ const HARNESS_MEMBER = {
   displayName: HARNESS_SELF?.displayName ?? '곽성재',
   handle: HARNESS_SELF?.handle ?? 'seongjae',
 } as Member;
+/** 설정 표면의 나(가상 인물, `settingsOverlay.tsx`) — 캡처가 레포에 남는다. */
+const SETTINGS_ME = {...HARNESS_MEMBER, ...SETTINGS_PERSONA} as Member;
+const settingsDirectory = (roster: typeof SHELL_ROSTER) =>
+  makeDirectory(settingsPersona(roster, SELF));
 
 export default function SurfacesHarness({
   name,
@@ -6143,7 +6232,7 @@ function seedGoneDmHome(): void {
   const dohyun = person('11', '이도현', 'dohyun');
   const seoyeon = person('12', '박서연', 'seoyeon');
   const minsu = person('13', '최민수', 'minsu');
-  const claude = agent('14', 'kwak의 Claude', 'kwak-claude', {hostOnline: false});
+  const claude = agent('14', '달무리 Claude', 'dalmuri-claude', {hostOnline: false});
   const grok = agent('15', 'grok', 'grok', {hostOnline: true});
   harnessClient.setQueryData(['roster', ADE_WS], [viewer, dohyun, seoyeon, minsu, claude, grok]);
   harnessClient.setQueryData(['agent-liveness', ADE_WS, claude.id.toLowerCase()], {
@@ -6357,7 +6446,7 @@ function seedAsk(surface: string): void {
       scope: 'member',
       ownerMemberId: SELF,
       type: 'workd',
-      displayName: '성재의 MacBook Pro',
+      displayName: '달무리의 MacBook Pro',
       capabilities: {},
       createdAtMs: 0,
       lastSeenAtMs: Date.now(),
@@ -6399,7 +6488,7 @@ function seedAi(surface: string): void {
       scope: 'member',
       ownerMemberId: SELF,
       type: 'workd',
-      displayName: '성재의 MacBook Pro',
+      displayName: '달무리의 MacBook Pro',
       capabilities: {},
       createdAtMs: 0,
       lastSeenAtMs: Date.now(),
@@ -6415,8 +6504,79 @@ function seedAi(surface: string): void {
 // 진짜 저장소에 적는다 — 하네스의 멤버 id 로 적히므로 이 기기에 로그인한 진짜 멤버의 스위치에는
 // 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
 /** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
-const PUSH_CAPTURE_SCROLL = 475;
-const PUSH_CAPTURE_SCROLL_AX = 1160;
+/** #4457: 설정 페이지 내용을 진짜 스크롤뷰에 얹고 끝까지 내려 선다(`shell-profile-bottom`). */
+function SettingsBottomSurface(): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  const insets = useSafeAreaInsets();
+  const scroll = React.useRef<ScrollView>(null);
+  return (
+    <Screen>
+      <ScrollView
+        ref={scroll}
+        onContentSizeChange={() => scroll.current?.scrollToEnd({animated: false})}
+        // 실제 페이지(`SettingsPage`)와 같은 바닥 여백 — 버전 줄이 홈 인디케이터에 겹치지 않는다.
+        contentContainerStyle={[
+          styles.settingsBody,
+          {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
+        ]}
+        testID="settings-scroll">
+        <SettingsContent
+          workspaceId={HARNESS_MEMBER.workspaceId}
+          member={SETTINGS_ME}
+          directory={settingsDirectory(SHELL_ROSTER)}
+          connected
+          onOpenTheme={() => {}}
+          onOpenStatus={() => {}}
+          onOpenDeviceKey={() => {}}
+          onOpenPauseUntil={() => {}}
+          onOpenDndUntil={() => {}}
+          onOpenAvatar={() => {}}
+          onSignOut={() => {}}
+          onRevealEnd={() => scroll.current?.scrollToEnd({animated: true})}
+        />
+      </ScrollView>
+    </Screen>
+  );
+}
+
+/**
+ * 「알림」 묶음의 첫 줄(푸시 스위치)이 화면 위쪽(상태 막대 아래)에 오도록 설정 내용을 끌어올리는 만큼(pt).
+ * 기준은 99번 흐름이 누르는 자리다: 줄 `profile-push-row` 의 윗변이 y≈83 이라야 스위치 탭 지점(84%,13%)이 스위치 안에 든다.
+ *
+ * #4457 이 설정 본 페이지의 구성(얼굴 → 상태 설정 → 내 상태 → 프로필 → 알림)을 바꿔 다시 쟀다(design-review r1 수리 뒤 한 번 더 —
+ * 얼굴 96→112 와 「내 상태」의 앞 칸 제거로 기본 글자 크기는 44pt 아래로, AX5 는 글이 덜 접혀 41pt 위로 옮겨 483→527·1295→1254) — iPhone 16 Pro(402×874pt),
+ * `maestro hierarchy` 의 `profile-push-row` bounds(윗변이 83 으로 선다; 높이는 상태 문구 줄 수에 따라 다르다): 기본 글자
+ * 크기 `shell-profile-push-off` [16,83][385,170], 접근성 최대(AX5, `accessibility-extra-extra-extra-large`)
+ * `shell-profile-push-off-ax` [16,83][385,515]. AX 에서는 위쪽 줄들이 함께 커져 알림 묶음이 더 아래로 밀리므로
+ * 끌어올림이 다르다. AX 판의 스위치는 줄 가운데에 서므로 흐름은 줄을 누른다(`TAP=row`).
+ */
+const PUSH_CAPTURE_SCROLL = 527;
+const PUSH_CAPTURE_SCROLL_AX = 1254;
+
+/**
+ * #4457 r3 M1: 읽기가 실패한 설정 페이지. 푸시 스위치는 켬(허용)으로 세우고, 그 밖의 모든 요청에 서버가 500 으로 답한다 —
+ * 세션 만료(401)가 아니라서 캐시가 지워지지 않고, 알림 규칙·종류별 스위치·기억 설정이 각자 「읽지 못함」으로 서서 복구 길
+ * (「다시 불러오기」)이 보인다. 세 질의는 재시도를 한 번 거친 뒤 실패로 서므로 캡처는 충분히 기다린다.
+ */
+function seedLoadFailed(): void {
+  seedPush('shell-profile-push-on');
+  // 기본 씨앗(`seedShell`)은 알림 규칙·종류별 스위치를 「읽은 것」으로 채워 둔다 — 이 표면은 그 둘을 비워 실제로 다시 읽게 하고(500),
+  // 그래서 세 질의가 모두 「읽지 못함」으로 선다.
+  // 하네스 클라이언트는 질의를 꺼 두고(`enabled: false`) 씨앗만 읽는다 — 이 두 질의만 켜서 진짜로 500 을 맞게 한다.
+  for (const key of [
+    ['settings', 'notification-rules'],
+    ['settings', 'push-kinds'],
+  ]) {
+    harnessClient.removeQueries({queryKey: key});
+    harnessClient.setQueryDefaults(key, {enabled: true});
+  }
+  globalThis.fetch = (async () =>
+    ({
+      status: 500,
+      ok: false,
+      text: async () => JSON.stringify({error: {message: 'x'}}),
+    }) as unknown as Response) as typeof fetch;
+}
 
 function seedPush(surface: string): void {
   const denied = surface.startsWith('shell-profile-push-denied');
@@ -6503,7 +6663,7 @@ function seedCall(surface: string): void {
       scope: 'member',
       ownerMemberId: SELF,
       type: 'workd',
-      displayName: '성재의 MacBook Pro',
+      displayName: '달무리의 MacBook Pro',
       capabilities: {},
       createdAtMs: 0,
       lastSeenAtMs: Date.now(),
@@ -6910,7 +7070,7 @@ function tbRow(over: Partial<SharedWorkSession> & {sessionId: string}): SharedWo
     label: '작업',
     folderLabel: 'oort',
     status: 'running',
-    owner: {memberId: SELF, displayName: '곽성재'},
+    owner: {memberId: SELF, displayName: '이도현'},
     homeChannel: {id: 'ch-deploy', name: 'workbench'},
     startedAtMs: now - 3_600_000,
     endedAtMs: null,
@@ -6955,7 +7115,7 @@ const TEAM_BOARD_ROWS: SharedWorkSession[] = [
     folderLabel: null,
     repo: null,
     branch: null,
-    owner: {memberId: SELF, displayName: '곽성재'},
+    owner: {memberId: SELF, displayName: '이도현'},
     homeChannel: {id: 'ch-build', name: 'agent-lab'},
     state: 'running',
     lastActivityAt: TB_MIN(2),
@@ -7005,7 +7165,7 @@ const WORK_JOBS_ROWS: SharedWorkSession[] = [
     sessionId: '00000000-0000-7000-8000-0000000000c1',
     source: 'run',
     runId: '00000000-0000-7000-8000-0000000000c1',
-    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    requestedBy: {memberId: SELF, displayName: '이도현'},
     origin: 'agent_run',
     label: '#launch 채널에 v0.1.26 공지 올리기',
     folderLabel: null,
@@ -7024,7 +7184,7 @@ const WORK_JOBS_ROWS: SharedWorkSession[] = [
     sessionId: '00000000-0000-7000-8000-0000000000c2',
     source: 'run',
     runId: '00000000-0000-7000-8000-0000000000c2',
-    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    requestedBy: {memberId: SELF, displayName: '이도현'},
     origin: 'agent_run',
     label: '온보딩 문구 해요체로 다듬기',
     folderLabel: null,
@@ -7044,7 +7204,7 @@ const WORK_JOBS_ROWS: SharedWorkSession[] = [
     sessionId: '00000000-0000-7000-8000-0000000000c3',
     source: 'run',
     runId: '00000000-0000-7000-8000-0000000000c3',
-    requestedBy: {memberId: SELF, displayName: '곽성재'},
+    requestedBy: {memberId: SELF, displayName: '이도현'},
     origin: 'agent_run',
     label: '푸시 알림이 두 번 오는 문제 고치기',
     folderLabel: null,
@@ -7316,6 +7476,8 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     conversationFloorMid: {flex: 1, justifyContent: 'center'},
     /** 제 `Screen` 을 든 화면을 통째로 세울 때 (#1964). */
     fill: {flex: 1, backgroundColor: color.bg},
+    // #4457: `SettingsContent` 는 스크롤 안쪽이라 가로 여백과 카드 사이 간격을 페이지의 스크롤이 준다 — 하네스가 대신 준다.
+    settingsBody: {paddingHorizontal: SAFE_GUTTER, gap: space.lg},
     /** 그런 화면 아래의 캡션 — 홈 인디케이터를 비켜 선다. */
     captionBottom: {paddingTop: 8, paddingBottom: 34},
     label: {
@@ -7518,4 +7680,5 @@ if (
   if (LAUNCHED.name.startsWith('shell-call-')) seedCall(LAUNCHED.name);
   if (isPauseSurface(LAUNCHED.name)) seedPause(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-profile-push-')) seedPush(LAUNCHED.name);
+  if (LAUNCHED.name === 'shell-profile-load-failed') seedLoadFailed();
 }

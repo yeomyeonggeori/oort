@@ -38,6 +38,7 @@ describe('the three tabs (ADR-0189 D1)', () => {
       workSession: null,
       hosted: null,
       apps: null,
+      settings: false,
     });
   });
 
@@ -383,5 +384,58 @@ describe('열려 있는 채널을 내가 나갔다 (#4229)', () => {
     const open = nav({conversation: OPEN});
     expect(navReducer(open, {type: 'channelLeft', channelId: 'CH-2'})).toBe(open);
     expect(navReducer(INITIAL_NAV, {type: 'channelLeft', channelId: 'CH-1'})).toBe(INITIAL_NAV);
+  });
+});
+
+// ---- 「설정」 층 (#4457) ------------------------------------------------------------------
+//
+// 홈 머리의 내 얼굴이 여는 전체 화면. 시트였던 프로필이 페이지가 되면서 셸의 층이 되었다
+// (`phone-sheets.md` §1: 페이지는 화면 스택에 쌓여 가장자리 밀기로 닫힌다). 층 중 가장 아래다 —
+// 그래서 위에 얹힌 층이 먼저 벗겨지고 설정이 맨 마지막에 닫힌다.
+
+describe('「설정」 층 (#4457)', () => {
+  it('얼굴을 누르면 설정만 서고 탭과 다른 층은 그대로다', () => {
+    expect(navReducer(INITIAL_NAV, {type: 'openSettings'})).toEqual(
+      nav({settings: true}),
+    );
+  });
+
+  it('이미 열려 있으면 같은 상태를 돌려준다 — 렌더가 늘지 않는다', () => {
+    const open = navReducer(INITIAL_NAV, {type: 'openSettings'});
+    expect(navReducer(open, {type: 'openSettings'})).toBe(open);
+  });
+
+  it('뒤로 한 번이면 닫히고 홈으로 돌아온다', () => {
+    const open = navReducer(INITIAL_NAV, {type: 'openSettings'});
+    expect(navReducer(open, {type: 'back'})).toEqual(INITIAL_NAV);
+  });
+
+  it('가장 아래 층이다 — 위에 얹힌 대화가 먼저 벗겨지고 설정은 남는다', () => {
+    const open = navReducer(INITIAL_NAV, {type: 'openSettings'});
+    const over = navReducer(open, {type: 'openConversation', conversation: OPEN});
+    const peeled = navReducer(over, {type: 'back'});
+    expect(peeled).toEqual(open);
+    expect(navReducer(peeled, {type: 'back'})).toEqual(INITIAL_NAV);
+  });
+
+  it('탭 선택·검색 입구·알림 입구는 설정을 걷는다 — 새 입구는 지나온 적 없는 층 위에 서지 않는다', () => {
+    const open = navReducer(INITIAL_NAV, {type: 'openSettings'});
+    expect(navReducer(open, {type: 'selectTab', tab: 'inbox'}).settings).toBe(false);
+    expect(navReducer(open, {type: 'selectTab', tab: 'home'}).settings).toBe(false);
+    expect(navReducer(open, {type: 'openSearch', initialQuery: '배포'}).settings).toBe(false);
+    expect(
+      navReducer(open, {type: 'openFromNotification', conversation: OPEN}).settings,
+    ).toBe(false);
+    expect(
+      navReducer(open, {
+        type: 'openWorkSessionFromNotification',
+        workSession: {sessionId: 'S-1'},
+      }).settings,
+    ).toBe(false);
+  });
+
+  it('로그아웃(reset)은 설정을 걷는다 — 다음 사람이 설정 페이지에 착지하지 않는다', () => {
+    const open = navReducer(INITIAL_NAV, {type: 'openSettings'});
+    expect(navReducer(open, {type: 'reset'})).toEqual(INITIAL_NAV);
   });
 });

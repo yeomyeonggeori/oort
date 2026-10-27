@@ -1216,6 +1216,24 @@ pub struct GatewayRunSnapshot {
     /// from — `resume_job_payload` carries no trigger, but the run row never
     /// stopped holding one.
     pub trigger_message_id: Option<Uuid>,
+    /// The thread the trigger was said in — and so the thread the run's **final answer**
+    /// belongs in (#4622, ADR-0148 증보 2026-10-27).
+    ///
+    /// `Some(root)` only when the trigger sits inside a thread whose root is still a **live
+    /// top-level message of this run's channel** — the test the REST send applies to a reply
+    /// (`momo_messaging::validate_thread_root_in_tx`, state `Live`), made here by
+    /// construction because the answer is written on the raw spine, whose thread-rollup bump
+    /// trusts its caller to have validated the root. `None` for a trigger at the channel's top
+    /// level or in a DM's main flow (unchanged: main flow + quote), a run with no trigger, and
+    /// a thread whose root was deleted since — an answer a person could not have posted there
+    /// falls back to where it always went, instead of failing the turn.
+    ///
+    /// Read in the same locked statement as [`Self::trigger_message_id`], for the same
+    /// reason: every writer of a final answer (gateway completion, the managed worker's commit
+    /// **and** its streamed opening write, the team AI) already reads this row, so the place is
+    /// decided in one spot and the paths cannot drift. The streamed opening write matters most:
+    /// it is the write that creates the message, and the commit's send is a dedupe onto it.
+    pub trigger_root_id: Option<Uuid>,
     /// `agent.model` — the ledger's fallback when the adapter reports none.
     pub model: String,
     /// ADR-0134 D2 ledger fallbacks, read on the already-locked row: what the run
@@ -1270,7 +1288,8 @@ pub async fn lock_gateway_run_in_tx(
 ) -> Result<Option<GatewayRunSnapshot>, DbError> {
     let row = sqlx::query(
         "SELECT r.agent_member_id, r.channel_id, r.status::text AS status_label, \
-                r.trigger_message_id, r.started_at, now() AS observed_at, a.model, \
+                r.trigger_message_id, trig_root.id AS trigger_root_id, \
+                r.started_at, now() AS observed_at, a.model, \
                 r.input->'routing'->>'effort' AS requested_effort, \
                 ap.effort_pref AS profile_effort_pref \
            FROM agent_run r \
@@ -1285,6 +1304,17 @@ pub async fn lock_gateway_run_in_tx(
            LEFT JOIN agent_profile ap \
              ON ap.workspace_id = a.workspace_id \
             AND ap.agent_member_id = a.member_id \
+           LEFT JOIN message trig \
+             ON trig.id = r.trigger_message_id \
+            AND trig.workspace_id = $1 \
+            AND trig.channel_id = r.channel_id \
+           LEFT JOIN message trig_root \
+             ON trig_root.id = trig.root_id \
+            AND trig_root.workspace_id = $1 \
+            AND trig_root.channel_id = r.channel_id \
+            AND trig_root.root_id IS NULL \
+            AND trig_root.deleted_at IS NULL \
+            AND trig_root.state::text <> 'deleted' \
           WHERE r.id = $2 \
             AND r.workspace_id = $1 \
             AND EXISTS ( \
@@ -1310,6 +1340,7 @@ pub async fn lock_gateway_run_in_tx(
         channel_id: row.try_get("channel_id")?,
         status,
         trigger_message_id: row.try_get("trigger_message_id")?,
+        trigger_root_id: row.try_get("trigger_root_id")?,
         model: row.try_get("model")?,
         requested_effort: row.try_get("requested_effort")?,
         profile_effort_pref: row.try_get("profile_effort_pref")?,

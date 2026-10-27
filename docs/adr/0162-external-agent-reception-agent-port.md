@@ -173,7 +173,7 @@ Grok preset은 다음만 제공한다.
 
 - endpoint와 one-time pairing 값을 복사하는 설정 단계
 - deterministic connector/routine 이름
-- “oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 결과를 원래 thread에 게시한다”는 routine template
+- “oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 결과를 원래 thread에 게시한다”는 routine template (**→ 2026-10-27 ADR-0200 증보 5(#4622, Accepted — planner 위임, owner 방향 승인)가 이 문장을 바꾼다.** 최종 답은 에이전트가 게시하지 않고 `oort_run_complete`가 올려서 「원래 thread에 게시」는 서버가 하는 일과 달랐다. 지금 문장은 진행은 stage로, 대화에는 결과·막힌 점·사람이 할 일만, 빈 인사 금지, 직접 올리는 메시지의 자리를 담는다.)
 - `pairing_pending`, `detected`, `active`, `cleanup_pending` 상태와 복구 안내
 - routine/MCP connector/local plugin source 제거 체크리스트
 

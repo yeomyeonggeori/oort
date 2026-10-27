@@ -393,6 +393,10 @@ async function openWorkDetail(sessionId: string): Promise<void> {
     expect(screen.getByTestId('team-detail-open-agent-session')).toBeTruthy(),
   );
   fireEvent.press(screen.getByTestId('team-detail-open-agent-session'));
+  // 시트가 먼저 미끄러져 내려간 뒤에 에이전트 세션 화면이 선다(#4458).
+  await waitFor(() => expect(screen.getByTestId('work-detail-pane')).toBeTruthy(), {
+    timeout: 8000,
+  });
 }
 
 describe('read-only phone-native work detail', () => {
