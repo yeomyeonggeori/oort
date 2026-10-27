@@ -44,13 +44,15 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
     active_workspace_role, add_channel_member_in_tx, clamp_channel_list_limit,
-    create_channel_detailed_in_tx, list_workspace_channels, normalize_channel_kind,
+    create_channel_detailed_in_tx, list_workspace_channels_within, normalize_channel_kind,
     normalize_channel_name, normalize_channel_topic, normalize_membership_role,
-    remove_channel_member_in_tx, set_notification_pref_in_tx, ChannelMembership, ChannelSummary,
-    CreatedChannel, NewChannel,
+    remove_channel_member_in_tx, set_notification_pref_in_tx, ChannelMembership,
+    ChannelRestriction, ChannelSummary, CreatedChannel, NewChannel,
 };
 use serde::Deserialize;
+use uuid::Uuid;
 
+use crate::dev_credential::DevCredential;
 use crate::dto::{
     AddChannelMemberRequest, ChannelDto, ChannelMembershipDto, ChannelMembershipResponse,
     CreateChannelRequest, CreateChannelResponse, NotificationPrefResponse,
@@ -118,10 +120,17 @@ pub async fn list(
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
     Query(query): Query<ChannelListQuery>,
+    // ADR-0216 (#4660): present only for a developer token, and only able to narrow.
+    dev_credential: Option<Extension<DevCredential>>,
 ) -> Result<Json<WorkspaceChannelsResponse>, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let limit = query.limit();
     let include_archived = query.include_archived();
+    // ADR-0216 D4 · R11 — a developer token's channel restriction, owned so the
+    // transaction can carry it. `None` (a person's session, or a token with no
+    // restriction) is the unchanged list.
+    let restricted_to: Option<Vec<Uuid>> =
+        dev_credential.and_then(|Extension(credential)| credential.channel_ids);
 
     let outcome: DbRejectable<Vec<ChannelSummary>> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -132,12 +141,17 @@ pub async fn list(
                 {
                     return Ok(Err(ApiError::forbidden("not a workspace member")));
                 }
-                let channels = list_workspace_channels(
+                // The restriction rides the statement beside its membership join, so the
+                // list is the token's channels ∩ today's memberships and `limit` counts
+                // only what the caller may see (a channel outside it is simply absent —
+                // the list never says it exists).
+                let channels = list_workspace_channels_within(
                     conn,
                     workspace_id,
                     principal.member_id,
                     include_archived,
                     limit,
+                    ChannelRestriction::from_channel_ids(restricted_to.as_deref()),
                 )
                 .await?;
                 Ok(Ok(channels))

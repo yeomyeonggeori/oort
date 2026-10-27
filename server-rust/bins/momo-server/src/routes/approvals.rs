@@ -128,6 +128,7 @@ use uuid::Uuid;
 
 use crate::auth::PushActionCredential;
 use crate::config::T3Settings;
+use crate::dev_credential::DevCredential;
 use crate::dto::{
     ApprovalDecisionReceipt, ApprovalDecisionRequest, ApprovalDto, ApprovalListQuery,
     ApprovalListResponse, SecretOnceDto,
@@ -277,6 +278,14 @@ const REJECTED_TOOL_RESULT_BODY: &str = "Tool call rejected by human approval.";
 /// refused with: 「결정 라우트는 사람 principal만 받는다」.
 const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 
+/// ADR-0216 D4 / #4660 — the receipt `status` a **developer token** is refused with: a
+/// token a person minted for a terminal tool never decides an approval. The closed
+/// route table already keeps both decision routes off the developer door (first
+/// layer, judged before the database); this is the second layer, inside the one
+/// function both routes share, so a future change to either the table or a route's
+/// extractors cannot quietly reopen the decision to a tool.
+const DEV_CANNOT_DECIDE: &str = "dev_cannot_decide";
+
 /// The one expected failure this route discovers **after** its first write, and
 /// the receipt `status` it answers with.
 ///
@@ -396,6 +405,9 @@ pub async fn decide_by_approval(
     // never a reason to allow anything an access token could not, because the token
     // adds no authority.
     credential: Option<Extension<PushActionCredential>>,
+    // Present only when the middleware verified a developer token (ADR-0216, #4660).
+    // It can only make this route refuse (`decide` answers `dev_cannot_decide`).
+    dev_credential: Option<Extension<DevCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -415,6 +427,7 @@ pub async fn decide_by_approval(
         &headers,
         request,
         credential.map(|_| AUDIT_VIA_PUSH_ACTION),
+        dev_credential.is_some(),
     )
     .await
 }
@@ -430,6 +443,9 @@ pub async fn decide_by_run(
     Extension(principal): Extension<Principal>,
     Path(run): Path<String>,
     headers: HeaderMap,
+    // See `decide_by_approval`: present only for a developer token, and only able to
+    // make `decide` refuse. Taken by BOTH routes so neither is a way around the check.
+    dev_credential: Option<Extension<DevCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
     let run_id = path_uuid(&run, "invalid run id")?;
@@ -446,6 +462,7 @@ pub async fn decide_by_run(
         &headers,
         request,
         None,
+        dev_credential.is_some(),
     )
     .await
 }
@@ -486,7 +503,27 @@ async fn decide(
     headers: &HeaderMap,
     request: ApprovalDecisionRequest,
     credential_via: Option<&'static str>,
+    by_dev_credential: bool,
 ) -> Result<Response, ApiError> {
+    // **ADR-0216 D4 (#4660) — a developer token never decides.**
+    //
+    // A developer token authenticates as a *person* (the `Principal` it travels with is
+    // `Human`), so the kind check right below does not stop it, and the closed route
+    // table is the first and only other layer. This is the second: it sits in the one
+    // function both decision routes call, before the idempotency replay and before any
+    // row is read, so a tool cannot read a stored receipt through this route either.
+    // The marker is inserted only by the developer-token branch of the middleware.
+    if by_dev_credential {
+        return respond(refusal(
+            approval_id,
+            principal.member_id,
+            DEV_CANNOT_DECIDE,
+            "approval decisions are not available to a developer token",
+            StatusCode::FORBIDDEN,
+            Utc::now(),
+        ));
+    }
+
     // **ADR-0188 D3 (R0) — the decision route takes a person, and only a
     // person.**
     //

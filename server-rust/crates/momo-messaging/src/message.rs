@@ -102,6 +102,36 @@ impl MessageType {
     }
 }
 
+/// How a message was sent, when the server has to say so (`message.sent_via`, ADR-0216
+/// D8, #4660).
+///
+/// A closed set that matches `message_sent_via_ck` (migration 152) value for value. The
+/// column is written by the server from the **authenticated credential** of the request
+/// that sent the message — never from anything in the request body — so a client can
+/// neither forge the marker nor strip it. `NULL` (no variant) is every message sent
+/// through the app, by an agent, or by the server itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SentVia {
+    /// Sent with a person's developer token (the clients say 「명령줄에서」). Not the tool's
+    /// name: the tool a token was made "for" is the maker's unverified choice (D8).
+    Dev,
+}
+
+impl SentVia {
+    pub fn as_db_label(self) -> &'static str {
+        match self {
+            SentVia::Dev => "dev",
+        }
+    }
+
+    pub fn from_db_label(label: &str) -> Option<Self> {
+        match label {
+            "dev" => Some(SentVia::Dev),
+            _ => None,
+        }
+    }
+}
+
 /// A message to write. `props` defaults to an empty object; `hlc_ts`/`hlc_count`
 /// default to a fresh wall-clock stamp with logical counter 0 (single-node HLC,
 /// matching `MessageRoutes.swift:50-54`). `client_msg_id` drives idempotency —
@@ -183,6 +213,11 @@ pub struct StoredMessage {
     /// Soft-delete stamp. The row stays, `body` is NULL'd; see
     /// [`crate::interaction::delete_message_in_tx`].
     pub deleted_at: Option<DateTime<Utc>>,
+    /// ADR-0216 D8 (#4660) — `message.sent_via`: `Some(SentVia::Dev)` for a message sent
+    /// with a developer token, `None` for everything else. Written once by the insert and
+    /// never by an edit (`edit_message_in_tx` sets `body`/`state`/`edited_at` only), so the
+    /// marker outlives its author's later edits.
+    pub sent_via: Option<SentVia>,
 }
 
 /// The reply rollup a client draws as "3 replies" under a root message
@@ -246,9 +281,12 @@ pub struct SentMessage {
 
 /// The `message.*` column list shared by insert-RETURNING and read queries, so a
 /// single [`decode_stored`] reads every row shape.
+///
+/// `sent_via` (ADR-0216 D8) is in this list and in its two siblings — [`PAGED_COLS`] and
+/// `interaction::INTERACTION_COLS` — because [`decode_stored`] reads it from every row shape.
 const STORED_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, reply_to_id, created_at, edited_at, deleted_at";
+     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via";
 
 /// [`decode_stored`] for the sibling modules that project the same columns with
 /// extras beside them (`interaction::INTERACTION_COLS`). Crate-private: the
@@ -263,6 +301,16 @@ fn decode_stored(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Err
     let message_type = MessageType::from_db_label(&type_label).ok_or_else(|| {
         sqlx::Error::Decode(format!("unknown message_type '{type_label}'").into())
     })?;
+    // Fail closed on a label this build does not know, exactly like `message_type`:
+    // `message_sent_via_ck` admits `dev` only, so an unknown value means the schema moved
+    // ahead of the code, and guessing would put a wrong marker on the wire.
+    let sent_via = match row.try_get::<Option<String>, _>("sent_via")? {
+        None => None,
+        Some(label) => Some(
+            SentVia::from_db_label(&label)
+                .ok_or_else(|| sqlx::Error::Decode(format!("unknown sent_via '{label}'").into()))?,
+        ),
+    };
     Ok(StoredMessage {
         id: row.try_get("id")?,
         workspace_id: row.try_get("workspace_id")?,
@@ -280,7 +328,60 @@ fn decode_stored(row: &sqlx::postgres::PgRow) -> Result<StoredMessage, sqlx::Err
         created_at: row.try_get("created_at")?,
         edited_at: row.try_get("edited_at")?,
         deleted_at: row.try_get("deleted_at")?,
+        sent_via,
     })
+}
+
+/// The `message.new` / `message.edited` key that carries [`SentVia`] (ADR-0216 D8).
+///
+/// snake_case like every other key of the realtime message payload (the clients map
+/// `reply_to_id` → `replyToId` the same way); the REST DTO spells it `sentVia`.
+pub(crate) const SENT_VIA_PAYLOAD_KEY: &str = "sent_via";
+
+/// Put the marker on a realtime message payload — **only when there is one**.
+///
+/// Omitted rather than `null` for the reason `props` and `attachments` are omitted when
+/// empty: an outbox row is written for every message and replayed forever, and every
+/// message sent before (or without) a developer token must keep exactly the bytes it had.
+pub(crate) fn insert_sent_via(payload: &mut Map<String, Value>, sent_via: Option<SentVia>) {
+    if let Some(sent_via) = sent_via {
+        payload.insert(
+            SENT_VIA_PAYLOAD_KEY.into(),
+            Value::String(sent_via.as_db_label().into()),
+        );
+    }
+}
+
+/// [`build_broadcast_payload`] for a stored message, with its [`SentVia`] marker on the
+/// inner payload when it has one (ADR-0216 D8). The send spine's own builder; the
+/// positional one stays as it was for its other callers and tests.
+fn stored_broadcast_payload(
+    workspace_id: Uuid,
+    message: &StoredMessage,
+    attachments: &[MessageAttachment],
+) -> Value {
+    let mut payload = build_broadcast_payload(
+        workspace_id,
+        message.channel_id,
+        message.id,
+        message.seq,
+        message.message_type,
+        message.body.as_deref(),
+        message.author_member_id,
+        message.hlc_ts,
+        message.hlc_count,
+        message.root_id,
+        message.reply_to_id,
+        &message.props,
+        attachments,
+    );
+    if let Some(inner) = payload
+        .pointer_mut("/data/payload")
+        .and_then(Value::as_object_mut)
+    {
+        insert_sent_via(inner, message.sent_via);
+    }
+    payload
 }
 
 /// The Centrifugo channel string for a workspace's channel, byte-for-byte with
@@ -490,11 +591,19 @@ pub enum SendRejected {
 /// Split out of [`send_message_in_tx`] (B1.2) so a caller can interleave work
 /// between the insert and the broadcast — specifically the mention pass, which
 /// must run *before* the payload is built because Swift's payload carries
-/// `props.mention_member_ids`. The statement itself is byte-for-byte the B1 one.
+/// `props.mention_member_ids`. The statement itself is byte-for-byte the B1 one,
+/// plus `sent_via` (ADR-0216 D8): `NULL` — the column's own default — for every caller
+/// but the developer-token send, so nothing any other path writes changes.
+///
+/// `sent_via` is a parameter of the spine rather than a field of [`NewMessage`] on
+/// purpose. `NewMessage` is built as a literal by dozens of producers, and a field there
+/// would be one more thing a producer *could* set; the marker is the server's statement
+/// about the credential, so only the send composition that knows the credential passes it.
 async fn insert_message_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     input: NewMessage,
+    sent_via: Option<SentVia>,
 ) -> Result<(StoredMessage, bool), DbError> {
     let hlc_ts = input
         .hlc_ts
@@ -511,8 +620,8 @@ async fn insert_message_in_tx(
          ) \
          INSERT INTO message \
            (workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, \
-            type, body, props, root_id, reply_to_id, client_msg_id, run_id) \
-         SELECT $2, $1, b.seq, $3, $4, $5, $6::message_type, $7, $8, $9, $10, $11, $12 \
+            type, body, props, root_id, reply_to_id, client_msg_id, run_id, sent_via) \
+         SELECT $2, $1, b.seq, $3, $4, $5, $6::message_type, $7, $8, $9, $10, $11, $12, $13 \
            FROM bumped b \
          ON CONFLICT (channel_id, author_member_id, client_msg_id) DO NOTHING \
          RETURNING {STORED_COLS}"
@@ -530,6 +639,7 @@ async fn insert_message_in_tx(
         .bind(input.reply_to_id)
         .bind(input.client_msg_id)
         .bind(input.run_id)
+        .bind(sent_via.map(SentVia::as_db_label))
         .fetch_optional(&mut *conn)
         .await?;
 
@@ -669,21 +779,10 @@ async fn finish_send_in_tx(
         AttachmentPolicy::Project => message_attachments_in_tx(&mut *conn, message.id).await?,
     };
 
-    let payload = build_broadcast_payload(
-        workspace_id,
-        message.channel_id,
-        message.id,
-        message.seq,
-        message.message_type,
-        message.body.as_deref(),
-        message.author_member_id,
-        message.hlc_ts,
-        message.hlc_count,
-        message.root_id,
-        message.reply_to_id,
-        &message.props,
-        &attachments,
-    );
+    // ADR-0216 D8 — the payload describes the row, marker included: a developer-token
+    // message reaches every live client already carrying `sent_via`, and every other
+    // message's payload is the same bytes it always was (the key is absent, not null).
+    let payload = stored_broadcast_payload(workspace_id, &message, &attachments);
     let outbox_id = emit_outbox(
         &mut *conn,
         workspace_id,
@@ -741,7 +840,7 @@ pub async fn send_message_in_tx(
     workspace_id: Uuid,
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None).await?;
     finish_send_in_tx(
         conn,
         workspace_id,
@@ -783,7 +882,7 @@ pub async fn send_thread_notice_in_tx(
     workspace_id: Uuid,
     input: NewMessage,
 ) -> Result<SentMessage, DbError> {
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, None).await?;
     finish_send_in_tx(
         conn,
         workspace_id,
@@ -835,6 +934,28 @@ pub async fn send_message_with_mentions_in_tx(
     input: NewMessage,
     extras: SendExtras<'_>,
 ) -> Result<Result<SentMessage, SendRejected>, DbError> {
+    send_message_with_mentions_via_in_tx(conn, workspace_id, input, extras, None).await
+}
+
+/// [`send_message_with_mentions_in_tx`], recording **how** the message was sent
+/// (`message.sent_via`, ADR-0216 D8 · R12, #4660).
+///
+/// `sent_via` is the caller's statement about the request's *authenticated credential* —
+/// `Some(SentVia::Dev)` exactly when a developer token sent it — and must never be derived
+/// from anything the request carries. It rides the same insert as the text (so the
+/// marker exists from the first byte any reader can see) and the `message.new` payload
+/// built from that row. A deduped retry answers the stored row, marker and all: the
+/// marker says how the message was *made*, not how it was last asked for.
+///
+/// `None` is [`send_message_with_mentions_in_tx`] exactly, which is how every other
+/// producer keeps writing `NULL`.
+pub async fn send_message_with_mentions_via_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    input: NewMessage,
+    extras: SendExtras<'_>,
+    sent_via: Option<SentVia>,
+) -> Result<Result<SentMessage, SendRejected>, DbError> {
     let SendExtras {
         signature,
         attachment_ids,
@@ -870,7 +991,7 @@ pub async fn send_message_with_mentions_in_tx(
 
     let channel_id = input.channel_id;
     let author_member_id = input.author_member_id;
-    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input).await?;
+    let (message, deduped) = insert_message_in_tx(conn, workspace_id, input, sent_via).await?;
 
     if let Some(signature) = signature {
         // `client_msg_id` was checked above; the stored row is the digest's
@@ -1364,7 +1485,7 @@ pub struct QuotedMessage {
 /// are unqualified in the result set, so [`decode_stored`] reads it unchanged.
 const PAGED_COLS: &str = "m.id, m.workspace_id, m.channel_id, m.seq, m.hlc_ts, m.hlc_count, \
      m.author_member_id, m.type::text AS message_type, m.state::text AS state, m.body, m.props, \
-     m.root_id, m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, \
+     m.root_id, m.reply_to_id, m.created_at, m.edited_at, m.deleted_at, m.sent_via, \
      t.reply_count, t.last_reply_seq, \
      CASE WHEN t.last_reply_at IS NULL THEN NULL \
           ELSE floor(extract(epoch from t.last_reply_at) * 1000)::bigint \
@@ -2299,6 +2420,80 @@ mod tests {
         assert_eq!(inner["reply_to_id"], Value::Null);
         // Empty props are omitted, matching Swift.
         assert!(inner.get("props").is_none());
+    }
+
+    fn stored_text(sent_via: Option<SentVia>) -> StoredMessage {
+        StoredMessage {
+            id: Uuid::from_u128(3),
+            workspace_id: Uuid::from_u128(1),
+            channel_id: Uuid::from_u128(2),
+            seq: 7,
+            hlc_ts: 1234,
+            hlc_count: 0,
+            author_member_id: Uuid::from_u128(4),
+            message_type: MessageType::Text,
+            state: "sent".into(),
+            body: Some("배포 끝났어요".into()),
+            props: json!({}),
+            root_id: None,
+            reply_to_id: None,
+            created_at: DateTime::from_timestamp_millis(1234).expect("timestamp"),
+            edited_at: None,
+            deleted_at: None,
+            sent_via,
+        }
+    }
+
+    /// ADR-0216 D8 — the label set is `message_sent_via_ck`'s, and nothing else decodes.
+    #[test]
+    fn sent_via_labels_are_the_check_constraints_values() {
+        assert_eq!(SentVia::Dev.as_db_label(), "dev");
+        assert_eq!(SentVia::from_db_label("dev"), Some(SentVia::Dev));
+        for unknown in ["", "Dev", "cli", "app", "agent"] {
+            assert_eq!(SentVia::from_db_label(unknown), None, "{unknown:?}");
+        }
+    }
+
+    /// ADR-0216 D8 — the send spine's payload is the old envelope byte for byte when the
+    /// row has no marker (the key is absent, not `null`), and carries `sent_via: "dev"`
+    /// on the inner message payload when it has one.
+    #[test]
+    fn the_message_new_payload_carries_the_marker_only_when_the_row_has_one() {
+        let plain = stored_text(None);
+        let plain_payload = stored_broadcast_payload(plain.workspace_id, &plain, &[]);
+        assert_eq!(
+            plain_payload,
+            build_broadcast_payload(
+                plain.workspace_id,
+                plain.channel_id,
+                plain.id,
+                plain.seq,
+                plain.message_type,
+                plain.body.as_deref(),
+                plain.author_member_id,
+                plain.hlc_ts,
+                plain.hlc_count,
+                plain.root_id,
+                plain.reply_to_id,
+                &plain.props,
+                &[],
+            ),
+            "a message without a marker publishes exactly what it always did"
+        );
+        assert!(
+            plain_payload["data"]["payload"]
+                .get(SENT_VIA_PAYLOAD_KEY)
+                .is_none(),
+            "{plain_payload}"
+        );
+
+        let dev = stored_text(Some(SentVia::Dev));
+        let dev_payload = stored_broadcast_payload(dev.workspace_id, &dev, &[]);
+        assert_eq!(dev_payload["data"]["payload"]["sent_via"], json!("dev"));
+        assert_eq!(
+            dev_payload["data"]["payload"]["body"],
+            json!("배포 끝났어요")
+        );
     }
 
     /// **The realtime wire carries the quote's ADDRESS, never its text**
