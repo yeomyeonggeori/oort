@@ -1,4 +1,4 @@
-import {LONG_PRESS_MS} from '@momo/core/features/timeline/longPressModel';
+import {LONG_PRESS_MS, MOVE_TOLERANCE_PX} from '@momo/core/features/timeline/longPressModel';
 import {useRef} from 'react';
 import type {GestureResponderEvent} from 'react-native';
 
@@ -38,8 +38,11 @@ import type {GestureResponderEvent} from 'react-native';
 // 시트가 열린 채 입력창이 접힌다 — 두 제스처는 겹치면 안 된다. 그래서 탭은 「길게 누르기가 열리기 **전에** 떼어진 손」이다.
 // =============================================================================
 
-/** 시작점에서 이 거리(pt) **미만**이어야 탭이다. */
-export const TAP_SLOP_PT = 10;
+/**
+ * 시작점에서 이 거리(pt) **미만**이어야 탭이다. 길게 누르기가 취소되는 움직임 문턱(`MOVE_TOLERANCE_PX`)과 **같은 값을 읽는다** — 한 손가락의 제스처가 「길게 누르기 → 끌기 → 탭」으로 갈리는 경계가 한 곳에서 정해진다
+ * (사본을 따로 두면 한쪽만 바뀌는 날 손가락이 둘 다 아니거나 둘 다인 틈이 생긴다. 디자인 리뷰 #4614 M3).
+ */
+export const TAP_SLOP_PT = MOVE_TOLERANCE_PX;
 
 /**
  * 이 시간(ms) **미만**에 떼어져야 탭이다. 길게 누르기가 열리는 시간(250)과 같다 — 둘이 겹치지 않는다(이슈의 처음 300ms 는 10-27 에 이 값으로 정정). 길게 누르기 상수가 바뀌면 이 값이 따라간다.

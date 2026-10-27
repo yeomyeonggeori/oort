@@ -1,4 +1,4 @@
-import {LONG_PRESS_MS} from '@momo/core/features/timeline/longPressModel';
+import {LONG_PRESS_MS, MOVE_TOLERANCE_PX} from '@momo/core/features/timeline/longPressModel';
 
 import {
   IDLE_TAP,
@@ -160,7 +160,8 @@ describe('상수', () => {
     expect(TAP_MAX_MS).toBe(LONG_PRESS_MS);
   });
 
-  it('거리 문턱은 계약(10pt)이다', () => {
+  it('거리 문턱은 계약(10pt)이고 길게 누르기가 취소되는 움직임 문턱과 같은 값이다 — 한 손가락의 세 제스처가 한 경계를 나눠 쓴다', () => {
     expect(TAP_SLOP_PT).toBe(10);
+    expect(TAP_SLOP_PT).toBe(MOVE_TOLERANCE_PX);
   });
 });

@@ -1934,11 +1934,21 @@ export function Composer({
     releasePress();
   }, [releasePress, unlockFocusSoon]);
 
+  // 쉬는 알약 **전체**가 누르는 면이다 (#4614, design-review r1 H1). 쉬는 글 칸은 둘째 줄이 안 걸리게 첫 줄 높이로 줄어 있어서(아래 `restedStyle`) 알약 높이(52pt) 중 글 칸 30pt 만 입력창이 받았다 —
+  // 알약의 아래 16pt 를 누르면 `composer-field` 의 누름 표식만 켜져 알약이 열렸다 포커스가 안 와서 도로 닫혔다. 글 칸 위에 알약 높이만큼 투명한 누름 면을 얹어 **어디를 눌러도** 포커스를 준다.
+  // 포커스는 JS 가 준다(`focus()`): 글 칸의 네이티브 탭 길은 글자 크기에 따라 닿기도 안 닿기도 해서(AX5 에서는 글 칸이 알약 전체라 눌린 자리에 캐럿이 갔고 기본 크기에서는 끝에 있었다) 캐럿이 글자 크기마다 달랐다 —
+  // 이 면이 받으면 캐럿은 쉬기 전 그 자리(보통 끝)에 그대로 있다. 끌기를 알아챈 손(#4518 D2 잠금)은 포커스로 잇지 않는다.
+  const onRestedPress = useCallback(() => {
+    if (focusLockRef.current) return;
+    inputRef.current?.focus();
+  }, [inputRef]);
+
   const collapsedHeight = composerCollapsedHeight(fontScale);
   // 쉬는 초안의 알약은 **첫 줄 하나만** 보인다 (#4614). 엄지 높이(44)에 둘째 줄의 윗부분이 걸려 잘려 보이던 것을, 입력창을 첫 줄의 아랫선까지(위 여백 + 한 줄)만으로 줄이고 남는 높이를 입력창
   // **밖**(margin)으로 돌려 해결한다 — 알약의 높이는 그대로고 첫 줄은 글이 한 줄일 때와 같은 자리(가운데)에 선다. 글이 없는 접힘은 한 줄뿐이라 이 계산이 필요 없다.
   const restedLine = Math.ceil(line.body * fontScale);
-  const restedBox = INPUT_PAD_Y + INPUT_BORDER + restedLine;
+  // 위 여백 + 위 테두리 + 한 줄 + **아래 테두리**(design-review r1 N1: 아래 테두리 몫이 빠져 글 상자가 줄 높이보다 1pt 낮았다 — 라틴 첫 줄의 g·y·p 아랫부분이 걸릴 수 있다).
+  const restedBox = INPUT_PAD_Y + INPUT_BORDER * 2 + restedLine;
   const restedMarginTop = Math.max(0, Math.floor((collapsedHeight - restedLine) / 2) - INPUT_PAD_Y - INPUT_BORDER);
   const restedMarginBottom = Math.max(0, collapsedHeight - restedMarginTop - restedBox);
   const restedStyle = {
@@ -2571,6 +2581,18 @@ export function Composer({
           textAlignVertical="top"
           testID="composer-input"
         />
+        {/* 쉬는 알약의 눌리는 면 (#4614 H1) — 쉬는 초안이 포커스를 받기 전까지 선다. **움직이는 중에도 서 있어야 한다**: 손이 닿는 순간 펼침이 시작되고(#4518) 그 렌더에서 이 면이 사라지면
+            눌리던 손의 `onPress` 가 오지 않는다(시뮬레이터 실측: `pressIn` 만 오고 `onPress` 가 없었다). 접근성 요소가 아니다(글 칸이 그 몫을 한다). */}
+        {rested && !focused ? (
+          <Pressable
+            accessible={false}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+            onPress={onRestedPress}
+            style={StyleSheet.absoluteFill}
+            testID="composer-rested-target"
+          />
+        ) : null}
         </Animated.View>
         {shown ? (
           <Animated.View

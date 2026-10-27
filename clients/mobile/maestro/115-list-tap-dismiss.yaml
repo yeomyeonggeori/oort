@@ -8,6 +8,7 @@ name: 115-list-tap-dismiss
 #
 # 한 번에 한 CASE 다(`-e CASE=…`). 표면은 `measure/run-list-tap.sh` 가 CASE 에 맞춰 띄우고 같은 구동기가 녹화한다:
 #   body         말풍선 본문(자기 동작 없음)을 누른다        → 자판 내림 · 접힘 · 글 유지 · 스레드가 안 열린다
+#   reopen-edge  쉬는 알약의 **아래 띠**(글 칸 밖)를 다시 누른다 → 자판이 오르고 알약이 펼쳐진다(알약 전체가 눌리는 면)
 #   empty        목록의 빈 곳(짧은 대화 위쪽)을 누른다        → 자판 내림 · 접힘 · 글 유지
 #   send         보낸 직후(포커스·빈 펼침 입력창)에 누른다    → 자판 내림 · 접힘(글이 없어 포커스를 잃는 길이 접는다)
 #   link         링크를 누른다                               → 링크가 열리고(그 자리에서 `Linking.openURL`) 자판도 내린다 · 접힘 · 글 유지
@@ -51,6 +52,35 @@ name: 115-list-tap-dismiss
           file: subflows/list-tap-reopen.yaml
           env:
             DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- reopen-edge
+- runFlow:
+    when:
+      true: ${CASE == 'reopen-edge'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+      # 쉬는 알약의 **아래 띠**(글 칸 밖, 알약 안쪽)를 누른다. 쉬는 글 칸은 둘째 줄이 안 걸리게 첫 줄 높이로 줄어 있어서 알약 52pt 중 글 칸은 30pt 였다 — 그 밖의 띠를 누르면 예전 판은
+      # 알약이 열렸다 포커스가 안 와 도로 닫혔다(design-review r1 H1). 알약 전체가 눌리는 면이어야 자판이 오르고 알약이 펼쳐진다.
+      - tapOn:
+          id: "composer-pill"
+          point: "50%,85%"
+      - extendedWaitUntil:
+          visible: ".*kb=up.*"
+          timeout: 15000
+      - waitForAnimationToEnd:
+          timeout: 6000
+      - assertVisible:
+          id: "composer-tools"
+      - assertVisible: ".*draft=오늘 리뷰 끝나면 알려줄게요$"
 # ---------------------------------------------------------------- empty
 - runFlow:
     when:

@@ -4,7 +4,7 @@
 #
 #   measure/run-list-tap.sh <udid> <CASE> <Metro 포트> [rec.mp4] [light] [shots 폴더 사진이름접두]
 #
-#   CASE  body empty send link chip author avatar replymark rollup drag hold long autocorrect hangul   (115 의 단정)
+#   CASE  body reopen-edge empty send link chip author avatar replymark rollup drag hold long autocorrect hangul   (115 의 단정)
 #         shot-typed  shot-long                                                                  (117 의 사진: 한 줄 초안 · 여러 줄 초안)
 #   light 를 주면 라이트 스킴(`LIGHT-` 표면)이다. `shots 폴더`와 `사진이름접두`를 주면 117 이 찍은 사진을 그 폴더에 `<접두>-….png` 로 복사한다.
 #   `LIST_POINT=50%,15% measure/run-list-tap.sh …` — 목록을 누르는 자리(기본 `50%,25%`, 사진 CASE 만). 접근성 큰 글씨에서는 목록이 위쪽 뼘밖에 안 남는다.
@@ -15,7 +15,7 @@ UDID="$1"; CASE="$2"; METRO="$3"; REC="${4:-}"; SCHEME="${5:-}"; SHOTS="${6:-}";
 HERE="$(cd "$(dirname "$0")" && pwd)"
 export PATH="$HOME/.maestro/bin:$PATH"
 case "$CASE" in
-  body)                         SURFACE="TAP-UP+TYPED+PROBE" ;;
+  body|reopen-edge)             SURFACE="TAP-UP+TYPED+PROBE" ;;
   empty|hold)                   SURFACE="TAP-UP+SHORT+TYPED+PROBE" ;;
   send|autocorrect|hangul)      SURFACE="TAP-UP+PROBE" ;;
   link|author|avatar|replymark) SURFACE="TAP-UP+LINK+TYPED+PROBE" ;;

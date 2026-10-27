@@ -1,7 +1,7 @@
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, Animated, Dimensions, StyleSheet} from 'react-native';
+import {AccessibilityInfo, Animated, Dimensions, StyleSheet, type TextInput} from 'react-native';
 
 import {COMPOSER_EXPAND_SPRING} from '../src/design/motion';
 import {line, TOUCH_TARGET} from '../src/design/tokens';
@@ -31,8 +31,8 @@ const flat = (style: unknown) =>
 const fontScale = () => Dimensions.get('window').fontScale;
 /** 시험이 독립적으로 도출한 접힘 높이(엄지 바닥 이상의 한 줄 + 세로 크롬). */
 const collapsed = () => Math.max(TOUCH_TARGET, Math.ceil(line.body * fontScale()) + INPUT_CHROME);
-/** 첫 줄의 아랫선까지: 위 여백(패딩 + 테두리 = 크롬의 절반) + 한 줄. */
-const firstLineBox = () => INPUT_CHROME / 2 + Math.ceil(line.body * fontScale());
+/** 첫 줄의 아랫선까지: 위 여백(패딩 + 테두리 = 크롬의 절반) + 한 줄 + 아래 테두리(1pt — 한 줄 상자보다 낮으면 라틴 g·y·p 의 아랫부분이 걸린다, design-review r1 N1). */
+const firstLineBox = () => INPUT_CHROME / 2 + Math.ceil(line.body * fontScale()) + 1;
 
 const input = () => screen.getByTestId('composer-input');
 const inputStyle = () => flat(input().props.style);
@@ -577,5 +577,128 @@ describe.each([[1], [2]])('쉬러 가고 돌아오는 동안 글 칸이 한 프�
     expect(hasTools()).toBe(true);
     expect(outerStyle().height).toBeUndefined();
     expect(outerStyle().overflow).toBeUndefined();
+  });
+});
+
+// =============================================================================
+// 쉬는 알약 **전체**가 누르는 면이다 (#4614, design-review r1 H1 — 눌리는 면 30pt).
+//
+// 쉬는 글 칸은 둘째 줄이 안 걸리게 첫 줄 높이(32pt)로 줄어 있어서 알약 52pt 중 글 칸 30pt 만 입력창이 받았다. 알약 아래 16pt 를 누르면 `composer-field` 의 누름 표식만 켜져 알약이 열렸다 포커스가 안 와서
+// 500ms 뒤 도로 닫혔다. 그래서 글 칸 위에 알약 높이만큼 투명한 면(`composer-rested-target`)을 얹고 그 면의 `onPress` 가 포커스를 준다.
+//
+// 이 파일이 재는 것은 **구조**다(면이 서는 때·사라지는 때·포커스를 부르는가·끌기 잠금이 이기는가). 눌리는 크기(44 이상)는 jest 에 레이아웃이 없어 못 잰다 — 시뮬레이터 Maestro 가 알약 아래 띠를 눌러 자판이 오르는 것으로
+// 잰다(`maestro/115-list-tap-dismiss.yaml` 의 `reopen-edge`).
+//
+// **실기에서 처음 짠 판이 실패한 모양을 시험으로 잠근다**: 면을 「움직이는 중이 아닐 때만」 세웠더니 손이 닿는 순간(#4518 펼침 시작) 면이 사라져 눌리던 손의 `onPress` 가 오지 않았다(`pressIn` 만 오고 포커스 없음).
+// =============================================================================
+describe('쉬는 알약 전체가 누르는 면이다 (#4614 H1)', () => {
+  // 면은 접근성 트리에서 숨겨져 있어서(`accessibilityElementsHidden`) RNTL 의 기본 조회가 건너뛴다 — 숨은 요소까지 찾는다.
+  const target = () => screen.getByTestId('composer-rested-target', {includeHiddenElements: true});
+  const hasTarget = () => screen.queryByTestId('composer-rested-target', {includeHiddenElements: true}) !== null;
+  const finger = (pageX: number, pageY: number) => ({nativeEvent: {pageX, pageY}});
+
+  /** 외부 ref 를 준 컴포저 — 면이 부르는 `focus()` 를 엿본다. */
+  function mountWithRef() {
+    const ref = {current: null as TextInput | null};
+    render(tree({inputRef: ref}));
+    // RN 의 `TextInput` 목은 `focus` 를 **프로토타입의 공용 `jest.fn`** 으로 갖는다 — `jest.spyOn` 은 이미 목인 함수를 그대로 돌려줘서 시험 사이에 호출이 쌓인다. 이 입력창 하나에만 새 함수를 단다.
+    const focus = jest.fn();
+    (ref.current as unknown as {focus: () => void}).focus = focus;
+    return {ref, focus};
+  }
+  /** 글을 쓴 입력창을 목록 탭으로 쉬게 해 **정적인 쉬는 알약**에 앉힌다. */
+  function rested() {
+    const view = mountWithRef();
+    typeAndSettle();
+    rest();
+    blur();
+    settle();
+    expect(hasTools()).toBe(false); // 전제: 쉬는 알약
+    return view;
+  }
+
+  it('쉬는 알약에서 면이 서고 누르면 입력창에 포커스를 준다', () => {
+    const {focus} = rested();
+    expect(hasTarget()).toBe(true);
+    expect(focus).not.toHaveBeenCalled();
+    fireEvent.press(target());
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('면은 글 칸이 아니라 글 칸을 감싼 상자 전체를 덮는다(absoluteFill) — 글 칸 밖의 위·아래 여백도 같은 면이다', () => {
+    rested();
+    const style = flat(target().props.style) as Record<string, unknown>;
+    expect(style).toMatchObject({position: 'absolute', top: 0, left: 0, right: 0, bottom: 0});
+    // 글 칸 **안**이 아니라 글 칸을 감싼 상자(`composer-field`) 안의 형제다 — 상자는 글 칸과 그 위·아래 여백을 함께 품는다.
+    const field = screen.getByTestId('composer-field');
+    expect(within(field).queryByTestId('composer-rested-target', {includeHiddenElements: true})).not.toBeNull();
+    expect(within(input()).queryByTestId('composer-rested-target', {includeHiddenElements: true})).toBeNull();
+  });
+
+  it('면은 접근성 요소가 아니다 — 읽어 주는 것은 글 칸 하나뿐이다', () => {
+    rested();
+    expect(target().props.accessible).toBe(false);
+    expect(target().props.importantForAccessibility).toBe('no');
+    expect(target().props.accessibilityElementsHidden).toBe(true);
+  });
+
+  it('쉬지 않을 때는 서지 않는다: 펼친 입력창 · 빈 접힘 · 글이 있어 펼친 입력창(알림 없음)', () => {
+    mountWithRef();
+    expect(hasTarget()).toBe(false); // 빈 접힘
+    typeAndSettle();
+    expect(hasTarget()).toBe(false); // 포커스를 쥔 펼침
+    blur();
+    settle();
+    expect(hasTools()).toBe(true); // 대조: 글이 남아 펼친 채(#4456) — 쉬라는 알림이 없었다
+    expect(hasTarget()).toBe(false);
+  });
+
+  it('손이 닿아 펼침이 시작돼도(포커스 전) 면이 서 있다 — 눌리던 손의 `onPress` 가 와야 한다(실기에서 처음 판이 실패한 모양)', () => {
+    const {focus} = rested();
+    fireEvent(target(), 'touchStart', finger(100, 100)); // 누름 표식: 손이 닿는 순간 펼침이 시작된다(#4518)
+    advance(2);
+    expect(hasTools()).toBe(true); // 전제: 펼침이 시작됐다(`shown`)
+    expect(hasTarget()).toBe(true);
+    fireEvent(target(), 'touchEnd', finger(100, 100));
+    fireEvent.press(target());
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it('포커스가 오면 면이 사라진다 — 이제 입력창이 손을 받는다(캐럿·글자 선택)', () => {
+    rested();
+    fireEvent.press(target());
+    focus();
+    settle();
+    expect(hasTarget()).toBe(false);
+    expect(hasTools()).toBe(true);
+  });
+
+  it('끌기로 알아챈 손(끌기 잠금)은 포커스로 잇지 않는다 — 면의 `onPress` 가 와도', () => {
+    const {focus: focusSpy} = rested();
+    fireEvent(target(), 'touchStart', finger(100, 100));
+    fireEvent(target(), 'touchMove', finger(100, 140)); // 40pt — 끌기 문턱(10pt)을 넘는다 → 잠금
+    expect(input().props.editable).toBe(false); // 전제: 잠겼다
+    fireEvent.press(target());
+    expect(focusSpy).not.toHaveBeenCalled();
+  });
+
+  it('쉬라는 알림이 왔는데 포커스가 그대로면(블러 없음) 면이 서지 않는다 — 입력창이 캐럿과 글자 선택을 못 받는 길을 만들지 않는다', () => {
+    mountWithRef();
+    typeAndSettle();
+    rest(); // 블러를 안 보낸다
+    expect(hasTarget()).toBe(false);
+  });
+
+  it('쉬던 입력창이 다시 쉬러 가면 면이 다시 선다 — 한 번 쓰고 사라지지 않는다', () => {
+    const {focus: focusSpy} = rested();
+    fireEvent.press(target());
+    focus();
+    settle();
+    rest();
+    blur();
+    settle();
+    expect(hasTarget()).toBe(true);
+    fireEvent.press(target());
+    expect(focusSpy).toHaveBeenCalledTimes(2);
   });
 });
