@@ -825,9 +825,18 @@ impl AgentWorker {
                 // so a payload read would silently stop quoting after every
                 // approval — and a streamed message's `reply_to_id` is written
                 // once, on the opening send, with no second chance.
-                let trigger_message_id = lock_gateway_run_in_tx(conn, job_workspace_id, run_id)
-                    .await?
-                    .and_then(|snapshot| snapshot.trigger_message_id);
+                //
+                // #4622: the same goes for the thread the answer belongs in
+                // (`trigger_root_id`). The opening send is the write that *creates*
+                // the message and the commit's send dedupes onto it, so a place read
+                // only at the commit would leave every streamed answer where the
+                // opening write put it.
+                let (trigger_message_id, trigger_root_id) =
+                    lock_gateway_run_in_tx(conn, job_workspace_id, run_id)
+                        .await?
+                        .map_or((None, None), |snapshot| {
+                            (snapshot.trigger_message_id, snapshot.trigger_root_id)
+                        });
                 // The rail learns the turn was picked up (goal SRV-B3d). Only
                 // when the transition actually happened: a job re-claimed after
                 // its lease expired finds the run already `running`, and
@@ -847,14 +856,17 @@ impl AgentWorker {
                     )
                     .await?;
                 }
-                Ok((started, trigger_message_id))
+                Ok((started, trigger_message_id, trigger_root_id))
             })
         })
         .await;
-        let quoted_message_id = match started {
-            Ok((started, trigger_message_id)) => {
+        let (quoted_message_id, answer_root_id) = match started {
+            Ok((started, trigger_message_id, trigger_root_id)) => {
                 tracing::debug!(run_id = %run_id, started, "run start transition");
-                trigger_message_id.or(payload.trigger_message_id)
+                (
+                    trigger_message_id.or(payload.trigger_message_id),
+                    trigger_root_id,
+                )
             }
             Err(error) => {
                 // A DB error here is transient by nature: do not run the turn.
@@ -1022,6 +1034,9 @@ impl AgentWorker {
             payload.agent_member_id,
             run_id,
             quoted_message_id,
+            // #4622 — where the answer is *created*: inside the thread the request
+            // was made in, or in the main flow when it was made there.
+            answer_root_id,
             // The turn's self-description rides the first slice, because the
             // commit's deduped `send` cannot supply it later (stream rule 4).
             success_props(&payload, run_id),
@@ -2017,7 +2032,12 @@ impl AgentWorker {
                 // is always a dedupe and what comes back is the answer the
                 // reader has been watching arrive. One key, one message, whether
                 // the answer landed in one write or in forty.
-                let sent = send_message_in_tx(
+                // #4622 (ADR-0148 증보 2026-10-27): the spine that keeps the thread's
+                // rollup. For an answer in the main flow it is the same write as
+                // before (`root_id` is `None`, so nothing is bumped); for one inside a
+                // thread it is what makes the root's 「답글 N개」 and `thread.updated`
+                // move with the reply.
+                let sent = send_thread_notice_in_tx(
                     conn,
                     workspace_id,
                     NewMessage {
@@ -2026,12 +2046,18 @@ impl AgentWorker {
                         message_type: MessageType::Text,
                         body,
                         props,
-                        // See the PR body: Swift answers inside the trigger's
-                        // thread; momo-messaging exposes no reader for a
-                        // message's own root, and this crate owns no message
-                        // SQL, so B5.1 answers at channel top level and records
-                        // the linkage in props.
-                        root_id: None,
+                        // The thread the request was made in (#4622). Swift answered
+                        // inside the trigger's thread; B5.1 could not, because
+                        // momo-messaging exposed no reader for a message's own root and
+                        // this crate owns no message SQL, so the answer went to the top
+                        // level and left the thread the person was watching. The
+                        // locked run row now carries the root
+                        // (`GatewayRunSnapshot::trigger_root_id`), read once with the
+                        // trigger and shared with the streamed opening write — which has
+                        // already created this message when the turn streamed, so the
+                        // two must agree. `None` — the main flow, quoting — when the
+                        // request was made there (a DM, a channel's top level).
+                        root_id: snapshot.trigger_root_id,
                         // ADR-0148 규칙 6 — agent = member, no branch. "This
                         // answers that message" is the one thing an agent turn
                         // always means, and `reply_to_id` is the column the
@@ -2049,9 +2075,11 @@ impl AgentWorker {
                         // to point at, and inventing one would be worse than
                         // pointing at nothing.
                         //
-                        // Quoting, not threading: the answer stays in the
-                        // channel's main flow with the question attached, which
-                        // is the distinction the ADR exists to draw.
+                        // Quoting, not threading — for a request made in the main flow:
+                        // the answer stays there with the question attached, which is
+                        // the distinction the ADR exists to draw. Inside a thread it
+                        // carries both columns (규칙 1: belonging and aim are not one
+                        // spelling): the thread it belongs to, the message it answers.
                         reply_to_id: snapshot.trigger_message_id,
                         client_msg_id: Some(run_id),
                         run_id: Some(run_id),
@@ -3107,8 +3135,12 @@ impl AgentWorker {
                 if snapshot.status == RunStatus::Cancelled {
                     return Ok(false);
                 }
-                // Answers land in the main timeline (root_id None), so the line
-                // does too, and the throttle keys on the channel.
+                // This line lands in the main timeline (root_id None) and the
+                // throttle keys on the channel — whatever place the request was
+                // made in. #4622 moved a run's *final answer* into the thread the
+                // request was made in, and this line, which stands in for an answer,
+                // does not follow it yet: that is #4646's "주변 줄" list, decided
+                // with the rest of the answer-place work rather than here.
                 let thread_key = notice_thread_key(channel_id, None);
                 let key = hosted_skip_notice_key(
                     agent_member_id,

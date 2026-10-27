@@ -40,7 +40,7 @@ use momo_agent::{
 };
 use momo_db::audit::{self, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
-use momo_messaging::{send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{send_thread_notice_in_tx, MessageType, NewMessage};
 use momo_outbox::ClaimedAgentJob;
 use momo_workspace_actions::team_ai::{
     self, FallbackReason, ProposalContext, ProposalRefusal, TeamAiWorkspace, ViaAi, WebSearch,
@@ -821,7 +821,10 @@ impl AgentWorker {
                             object.insert("team_ai_model".into(), label);
                         }
                     }
-                    let sent = send_message_in_tx(
+                    // #4622 (ADR-0148 증보 2026-10-27): the same place and the same spine
+                    // as every other final answer — inside the thread the request was
+                    // made in (the rollup moves with it), the main flow otherwise.
+                    let sent = send_thread_notice_in_tx(
                         conn,
                         workspace_id,
                         NewMessage {
@@ -830,7 +833,7 @@ impl AgentWorker {
                             message_type: MessageType::Text,
                             body: Some(text),
                             props,
-                            root_id: None,
+                            root_id: snapshot.trigger_root_id,
                             reply_to_id: snapshot.trigger_message_id,
                             client_msg_id: Some(run_id),
                             run_id: Some(run_id),

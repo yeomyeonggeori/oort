@@ -55,7 +55,9 @@ use momo_mcp::{
     ArtifactRule, ArtifactViolation, ARTIFACT_KEYS, MAX_REPORTED_COUNT, NEXT_ACTIONS, RESULT_KINDS,
     TEST_COUNT_KEYS, TOOL_COUNT_KEYS,
 };
-use momo_messaging::{find_client_message_in_tx, send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{
+    find_client_message_in_tx, send_thread_notice_in_tx, MessageType, NewMessage,
+};
 use momo_outbox::{
     claim_gateway_jobs_in_tx, clamp_claim_limit, gateway_lease_authorized,
     gateway_lease_authorized_hosted, lock_gateway_lease_in_tx, release_gateway_lease_in_tx,
@@ -754,9 +756,14 @@ pub(crate) async fn complete_gateway_run_in_tx(
     //    the run id so a replay can never produce a second one.
     //    #4017: a successful run with nothing to say writes none (see
     //    [`timeline_body`]); everything below still settles the run.
+    //
+    //    #4622 (ADR-0148 증보 2026-10-27): written on the spine that keeps the thread's
+    //    rollup, because the answer to a request made inside a thread belongs in that
+    //    thread (`run.trigger_root_id`) — and a reply that skipped the rollup would sit
+    //    under the root without the root's 「답글 N개」 ever moving.
     let message = match body_text {
         Some(body_text) => Some(
-            send_message_in_tx(
+            send_thread_notice_in_tx(
                 conn,
                 workspace_id,
                 NewMessage {
@@ -777,13 +784,19 @@ pub(crate) async fn complete_gateway_run_in_tx(
                         apps_used.as_ref(),
                         app_notice.as_ref(),
                     ),
-                    root_id: None,
+                    // #4622 — the thread the request was made in, or the main flow when it
+                    // was made there (a channel's top level, a DM): the same place the
+                    // worker and the team AI put the same answer, read off the same locked
+                    // run row (`GatewayRunSnapshot::trigger_root_id`).
+                    root_id: run.trigger_root_id,
                     // ADR-0148 규칙 6 — the same answer the worker gives,
                     // arriving by a different door, so it points at the same
                     // message. Both read `agent_run.trigger_message_id` off
                     // the locked run row rather than off a job payload,
                     // which is what keeps "an agent quotes what it answers"
-                    // one rule instead of two implementations of it.
+                    // one rule instead of two implementations of it. 규칙 1:
+                    // belonging (`root_id`) and aim (`reply_to_id`) are two
+                    // columns, so an answer inside a thread carries both.
                     reply_to_id: run.trigger_message_id,
                     client_msg_id: Some(run_id),
                     run_id: Some(run_id),
@@ -798,7 +811,7 @@ pub(crate) async fn complete_gateway_run_in_tx(
 
     // 1b. …and the hosted inbox projection for that answer (ADR-0162 / HAP-E5).
     //
-    //     The answer is written through the RAW spine — `send_message_in_tx`,
+    //     The answer is written through the RAW spine — `send_thread_notice_in_tx`,
     //     not the product send — so it does not inherit the fan-out that
     //     `send_message_with_mentions_in_tx` performs. Without this call a
     //     hosted agent sharing a channel with another agent would never see
@@ -2160,6 +2173,7 @@ mod tests {
             channel_id: Uuid::from_u128(2),
             status: momo_agent::RunStatus::Running,
             trigger_message_id: None,
+            trigger_root_id: None,
             model: "hermes-agent".to_string(),
             requested_effort: None,
             profile_effort_pref: None,
