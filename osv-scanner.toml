@@ -36,12 +36,13 @@ server's own secret first, so a caller cannot craft the claims. Follow-up: jsonw
 [[IgnoredVulns]]
 id = "GHSA-qwgh-2vcv-g2f7"
 ignoreUntil = 2027-01-25
-reason = """block-buffer 0.10.4: a panic inside the caller's compress callback, if caught and the buffer reused, can leave EagerBuffer/ReadBuffer's \
-cursor corrupt (out-of-bounds read/write). Fixed only in 0.12.1, which needs digest 0.11 (a RustCrypto-wide major: sha2/sha1/md-5/hmac/ \
-curve25519-dalek/ecdsa/elliptic-curve all pin digest 0.10.7). No reach: oort never names block_buffer, EagerBuffer or ReadBuffer; the only \
-callers are those hash crates, whose compress functions are pure arithmetic that does not panic; and no production code catches a panic \
-around hashing (catch_unwind appears in one PG test only). Both Rust lockfiles (server-rust, clients/desktop/src-tauri). \
-Follow-up: RustCrypto digest 0.11 migration."""
+reason = """block-buffer < 0.12.1 (GHSA range `introduced: 0`): a caught panic can corrupt the inline cursor of EagerBuffer/ReadBuffer (OOB read/write). \
+Not exposed here: the locked 0.10.4 keeps its cursor in a separate `pos: u8` field and has no ReadBuffer; the inline-cursor layout arrived in 0.11.0 \
+(block-buffer CHANGELOG), so the match is a version-range over-approximation. Also no reach: oort never names block_buffer/EagerBuffer/ReadBuffer, \
+only digest 0.10.7 uses it (sha2/sha1/md-5/hmac/curve25519-dalek in server-rust; sha2/hmac/ecdsa/elliptic-curve/signature in src-tauri), and no \
+production code catches a panic or keeps a hasher alive. Not upgradable yet: 0.12.1 needs digest 0.11, but sqlx-core 0.9.0 (always-on migrate feature), \
+wry 0.57.1 and tauri-codegen 2.7.4 still pin sha2 ^0.10. Follow-up: ask RustCrypto/utils to narrow the GHSA `introduced` to 0.11.0 (then drop this entry); \
+at renewal re-check those upstreams and the RustSec alias; keep server-rust's block-buffer 0.12.x >= 0.12.1. Upgrade issue: #4644."""
 
 # ---- clients/web (npm, runtime) ----------------------------------------------
 
