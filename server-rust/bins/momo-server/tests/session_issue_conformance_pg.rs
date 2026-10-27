@@ -1934,6 +1934,229 @@ async fn a_reissue_by_someone_who_is_not_an_operator_does_not_queue_for_the_lock
 }
 
 // ---------------------------------------------------------------------------
+// 3d. a change the caller may not make is refused before the lock
+// ---------------------------------------------------------------------------
+
+/// What the changes below act on: the workspace owner, and that owner's channel.
+struct ChangeTargets {
+    owner: Uuid,
+    channel: Uuid,
+}
+
+async fn change_targets(w: &World) -> ChangeTargets {
+    let owner: Uuid = sqlx::query_scalar(
+        "SELECT member_id FROM workspace_membership \
+          WHERE workspace_id = $1 AND role = 'owner'::membership_role",
+    )
+    .bind(w.workspace)
+    .fetch_one(&w.su)
+    .await
+    .expect("the owner");
+    let channel: Uuid = sqlx::query_scalar("SELECT id FROM channel WHERE workspace_id = $1")
+        .bind(w.workspace)
+        .fetch_one(&w.su)
+        .await
+        .expect("the channel");
+    ChangeTargets { owner, channel }
+}
+
+/// Every membership change somebody who is not an operator can send, with the answer the route
+/// has always given them. (`None` for the channel is a membership that does not exist.)
+fn unauthorised_changes(
+    w: &World,
+    targets: &ChangeTargets,
+    bearer: &str,
+) -> Vec<(&'static str, reqwest::RequestBuilder, u16)> {
+    let ws = format!("{}/v1/workspaces/{}", w.base, w.workspace);
+    let (owner, channel) = (targets.owner, targets.channel);
+    vec![
+        (
+            "suspend",
+            w.http
+                .post(format!("{ws}/members/{owner}/suspend"))
+                .bearer_auth(bearer),
+            403,
+        ),
+        (
+            "reinstate",
+            w.http
+                .post(format!("{ws}/members/{owner}/reinstate"))
+                .bearer_auth(bearer),
+            403,
+        ),
+        (
+            "remove",
+            w.http
+                .delete(format!("{ws}/members/{owner}"))
+                .bearer_auth(bearer),
+            403,
+        ),
+        (
+            "workspace role",
+            w.http
+                .patch(format!("{ws}/members/{owner}/role"))
+                .bearer_auth(bearer)
+                .json(&json!({ "role": "guest" })),
+            403,
+        ),
+        (
+            "channel role",
+            w.http
+                .patch(format!("{ws}/channels/{channel}/members/{owner}/role"))
+                .bearer_auth(bearer)
+                .json(&json!({ "role": "member" })),
+            403,
+        ),
+        (
+            "channel role of someone who is not in the channel",
+            w.http
+                .patch(format!(
+                    "{ws}/channels/{channel}/members/{}/role",
+                    Uuid::new_v4()
+                ))
+                .bearer_auth(bearer)
+                .json(&json!({ "role": "member" })),
+            404,
+        ),
+    ]
+}
+
+async fn sign_in_as(w: &World, role: &str) -> String {
+    let id = Uuid::new_v4();
+    let email = format!("{role}-{id}@session-issue.test");
+    seed_human(&w.su, w.workspace, id, role, &email, Some(MEMBER_PASSWORD)).await;
+    let (status, body, _) = api_login(&w.http, &w.base, w.workspace, &email, MEMBER_PASSWORD).await;
+    assert_eq!(status, 200, "the {role} signs in: {body}");
+    body["accessToken"]
+        .as_str()
+        .expect("access token")
+        .to_string()
+}
+
+/// Suspending, reinstating, removing and changing a role take the membership lock exclusively,
+/// and login and join answer 503 while it is held. A request that is going to be refused anyway
+/// must not be able to hold it: while a change holds the lock, each of these requests from a
+/// plain member and from a guest is answered at once, in the words it has always had, and none of
+/// them queues for the lock.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_change_the_caller_may_not_make_does_not_queue_for_the_lock() {
+    let w = world("session-issue-unauthorised", Some(MEMBER_PASSWORD), 4).await;
+    let targets = change_targets(&w).await;
+    let callers = [
+        ("member", sign_in_as(&w, "member").await),
+        ("guest", sign_in_as(&w, "guest").await),
+    ];
+
+    let change = open_lock(&w.su, w.workspace).await;
+    for (who, bearer) in &callers {
+        for (what, request, expected) in unauthorised_changes(&w, &targets, bearer) {
+            let reply = tokio::time::timeout(Duration::from_millis(1500), async {
+                reply_of(request.send().await.expect("send the change")).await
+            })
+            .await
+            .unwrap_or_else(|_| {
+                panic!("{who} / {what}: waited for the lock instead of being refused")
+            });
+            assert_eq!(
+                reply.status, expected,
+                "{who} / {what}: refused as it always was: {}",
+                reply.body
+            );
+        }
+    }
+    assert_eq!(
+        membership_lock_holders(&w.su, w.workspace, "ExclusiveLock", false).await,
+        0,
+        "no refused request is queued for the lock"
+    );
+    change.rollback().await.expect("release the lock");
+}
+
+/// The same thing end to end: a guest sends refused changes as fast as the server answers, on
+/// several connections at once, and a login and a join that arrive meanwhile are not turned away.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_member_sending_refused_changes_does_not_turn_sign_ins_away() {
+    let w = world("session-issue-flood", Some(MEMBER_PASSWORD), 10).await;
+    let targets = change_targets(&w).await;
+    let guest = sign_in_as(&w, "guest").await;
+    let code = issue_invite(&w).await;
+
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flooders: Vec<JoinHandle<u32>> = (0..4)
+        .map(|_| {
+            let (http, base, workspace, guest, owner, stop) = (
+                w.http.clone(),
+                w.base.clone(),
+                w.workspace,
+                guest.clone(),
+                targets.owner,
+                stop.clone(),
+            );
+            tokio::spawn(async move {
+                let mut sent = 0u32;
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    let status = http
+                        .patch(format!(
+                            "{base}/v1/workspaces/{workspace}/members/{owner}/role"
+                        ))
+                        .bearer_auth(&guest)
+                        .json(&json!({ "role": "guest" }))
+                        .send()
+                        .await
+                        .expect("send the refused change")
+                        .status()
+                        .as_u16();
+                    assert_eq!(status, 403, "the guest is refused");
+                    sent += 1;
+                }
+                sent
+            })
+        })
+        .collect();
+    tokio::time::sleep(Duration::from_millis(300)).await;
+
+    let mut turned_away = 0;
+    for n in 0..20 {
+        let (status, body, _) = api_login(
+            &w.http,
+            &w.base,
+            w.workspace,
+            &w.member_email,
+            MEMBER_PASSWORD,
+        )
+        .await;
+        if status == 503 {
+            turned_away += 1;
+        } else {
+            assert_eq!(status, 200, "login {n}: {body}");
+        }
+    }
+    let joined = join_reply(
+        &w,
+        &code,
+        &format!("flood-join-{}@session-issue.test", Uuid::new_v4()),
+    )
+    .await;
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let mut sent = 0;
+    for flooder in flooders {
+        sent += flooder.await.expect("flood task");
+    }
+    assert!(sent > 50, "the flood really ran ({sent} refused changes)");
+    assert_eq!(
+        turned_away, 0,
+        "no login was turned away while the guest sent {sent} refused changes"
+    );
+    assert_eq!(
+        joined.status, 201,
+        "and the join went through: {}",
+        joined.body
+    );
+}
+
+// ---------------------------------------------------------------------------
 // 4. what a door writes is written by one transaction
 // ---------------------------------------------------------------------------
 
