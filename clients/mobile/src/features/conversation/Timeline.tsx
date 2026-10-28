@@ -24,6 +24,7 @@ import {
   type LayoutChangeEvent,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
+  type ScrollViewProps,
   type ViewToken,
 } from 'react-native';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
@@ -32,6 +33,7 @@ import {useTapDismiss} from './tapDismiss';
 import {JumpPill, JumpPillDock} from './JumpPill';
 import {LANDED_HOLD_MS, landedApprovalOf} from './landedHighlight';
 import {ReduceMotionRefContext} from './LandedTintFade';
+import {AnchoredScrollView, createNeutralAnchorStore} from './neutralAnchor';
 import {
   ARRIVAL_SURFACE_CHANNEL,
   arrivalsInFlight,
@@ -446,10 +448,12 @@ const NO_ECHOES: readonly EchoItem[] = [];
  * 관성 자격이 서 있는 동안 — 날짜 알약이 서는 조건과 같은 판정)이고, 아니면 이 목록이 스스로 낸 이동(진입 수렴·바닥 맞춤·따라가기)이다.
  * `pin` 은 이 목록이 낸 이동이 지금 쥐고 있는 창(`scrollPinUntilRef`)이다.
  * `c` = `maintainVisibleContentPosition` 을 뗐다(`on`) 붙였다(`!on`)(`chasingTail`).
+ * `n` = 중립 앵커(`neutralAnchor.tsx`)가 섰다(`on`) 평상으로 돌아왔다(`!on`) — 먼 「최신으로」는 prop 을 떼지 않고 이것을 켠다(#4689).
  */
 export type ScrollLogEntry =
   | {k: 's'; t: number; y: number; content: number; view: number; user: boolean; pin: boolean}
-  | {k: 'c'; t: number; on: boolean};
+  | {k: 'c'; t: number; on: boolean}
+  | {k: 'n'; t: number; on: boolean};
 
 /** 측정 seam 이 읽는 필 판정 (#1892). 앱에서는 아무도 읽지 않는다. */
 export interface PillState {
@@ -703,6 +707,45 @@ const LANDING_HOLD_MS = 600;
 
 /** UIKit's animated `setContentOffset` is ~300ms; wait for it to be down. */
 const GLIDE_SETTLE_MS = 350;
+
+// =============================================================================
+// ## 먼 「최신으로」가 가는 동안만 목록이 한 판에 그리는 양 (#4689 원인 B)
+//
+// 증상: 앱처럼 50행씩 붙인 방(`paged`)에서 중간·맨 위에서 누르면 마지막 메시지가 보이기까지 0.4~1.9초가 걸린다(16 Pro·Debug·300행, 홉 14~30회).
+//
+// 뿌리: `getItemLayout` 이 없는 `VirtualizedList` 는 꼬리 스페이서를 **잰 데까지만**(`getHighestMeasuredCellIndex`) 자른다. 누를 때 콘텐츠는
+// 11~17k 로 잘려 있고, 첫 홉은 그 잘린 끝에 닿는다. 거기서 다음 배치(`maxToRenderPerBatch` 기본 10행 ≈ 1,000pt)가 마운트돼야 끝이 조금 더 멀어지고,
+// 그러면 다음 홉이 또 한 배치를 기어간다 — 배치 사이 50ms 를 두고 24~30k 까지.
+//
+// 창이 마지막 행을 품는 순간 마지막 구역이 스페이서가 아니라 셀이 되어 잘림이 사라진다. 그래서 가는 동안만 한 판의 행 수와 창을 넓혀, 잘린 끝에
+// 닿자마자 꼬리를 몇 판(꼬리 행 수 ÷ 한 판)에 마운트하게 한다. 50ms 씩의 빈틈과 한 판당 10행의 사슬은 사라지지만, **꼬리 행을 마운트하는 비용
+// 자체는 그대로다** — 그 행들이 안 마운트되고는 잘린 끝이 늘지 않는다. 끝나면 기본값으로 돌아가 창 밖 행이 내려가지만 잰 높이는 목록의 기록에
+// 남아 콘텐츠 높이는 그대로다.
+//
+// `latest && !near` 에만 건다 — 전송·진입은 기본값 그대로다(#2586·#2604 의 수치를 그 값으로 얻었다). 값은 16 Pro 실측으로 정했다(PR 본문의 표).
+//
+// **누르는 순간이 아니라 꼬리가 잘린 것을 본 뒤에 넓힌다.** 처음부터 다 잰 방은 첫 홉이 진짜 끝에 닿아 한 판(보이는 행 + 10행)이면 끝나는데, 누르는 순간 넓히면
+// 그 첫 판이 보이는 행 + 40행이 되어 마지막 행이 늦게 선다(16 Pro·Debug·300행 방: 보임 half 48→111ms · top 40→103ms). 잘린 방은 누른 뒤 콘텐츠가 크게 자란다
+// (`FAR_LATEST_GROWTH_PX`) — 그 신호를 본 틱부터 넓힌다. 기본 판 하나(≈60ms)가 더 드는 대신 잘리지 않은 방은 그대로 빠르다.
+// =============================================================================
+
+/**
+ * 먼 「최신으로」 동안 한 판에 마운트할 행 수의 상한(기본 10). 한 판의 JS 렌더 시간이 이 수에 거의 비례한다(16 Pro·Debug 시뮬: 80행 한 판이
+ * 170~270ms, 행당 ≈ 3~4.5ms 네이티브 마운트 포함). 40 은 한 판이 150ms 안에 드는 크기다 — 더 크게 잡아도 총 시간은 같고 JS 만 오래 막힌다.
+ */
+const FAR_LATEST_BATCH = 40;
+
+/** 먼 「최신으로」 동안의 창(뷰포트 배수, 기본 21). 새 행이 그려지는 범위는 보이는 곳 아래로 `0.5 × (창 − 1)` 화면이다. */
+const FAR_LATEST_WINDOW = 41;
+
+/**
+ * 누른 뒤 콘텐츠가 이만큼(pt) 넘게 자라면 꼬리가 잘려 있던 방이다 — 그때부터 판·창을 넓힌다. 잘린 방은 첫 판(기본 10행 ≈ 1,000pt)에서 곧 이만큼 자라고,
+ * 잘리지 않은 방은 가는 동안 거의 안 자란다(16 Pro 300행: 누름→착지 +0~1pt). 새 글 한두 통(≈100pt)이 도착해도 넘지 않는다.
+ */
+const FAR_LATEST_GROWTH_PX = 300;
+
+/** 먼 「최신으로」 동안의 수렴·착지 유지 틱 간격, ms. 배치가 붙는 즉시 끝으로 다시 가려고 한 프레임으로 줄인다(기본은 `CONVERGE_ROUND_MS`). */
+const FAR_LATEST_ROUND_MS = 16;
 
 /**
  * A jump's travel is over once the list has not moved for this long, in ms
@@ -1099,6 +1142,39 @@ function TimelineInner({
   useEffect(() => {
     scrollLogRef?.current?.push({k: 'c', t: Date.now(), on: chasingTail});
   }, [chasingTail, scrollLogRef]);
+  /**
+   * 먼 「최신으로」가 prop 을 떼는 대신 켜는 중립 앵커 (#4689, `neutralAnchor.tsx`). 켜고 끄는 문은 이 저장소 하나다
+   * (`convergeToEnd` 가 켜고, `holdLanding` 의 끝·`release(false)`·`cancelConvergence` 가 끈다). React state 가 아니라 저장소인 이유와
+   * 전이가 보초 View 하나만 다시 그리는 이유는 그 파일 머리말에 있다. 렌더 함수가 변하지 않으므로 목록은 다시 그려지지 않는다.
+   */
+  const anchorStore = useMemo(createNeutralAnchorStore, []);
+  /**
+   * 먼 「최신으로」가 가는 동안 목록의 한 판·창을 넓힌다 (#4689 원인 B, `FAR_LATEST_BATCH` 의 주석). 중립 앵커와 같은 문으로 켜고 끈다 —
+   * `convergeToEnd` 가 켜고 `endFarLatest` 가 둘을 함께 놓는다. 이쪽은 FlatList 의 prop 이라 다시 그려져야 닿으므로 저장소가 아니라 state 다
+   * (누를 때 한 번, 끝날 때 한 번 — 앞서 `chasingTail` 을 뗐다 붙이던 두 번의 렌더와 같은 수다).
+   */
+  const [widenTail, setWidenTail] = useState(false);
+  const endFarLatest = useCallback(() => {
+    anchorStore.set('rest');
+    setWidenTail(false);
+  }, [anchorStore]);
+  const renderScrollComponent = useCallback(
+    (props: ScrollViewProps) => (
+      <AnchoredScrollView {...props} anchorStore={anchorStore} />
+    ),
+    [anchorStore],
+  );
+  // 측정 seam: 중립 앵커의 전이도 같은 기록에 남긴다(앱에서는 하네스가 배열을 꽂지 않아 아무 일도 하지 않는다).
+  useEffect(() => {
+    if (scrollLogRef === undefined) return undefined;
+    return anchorStore.subscribe(() => {
+      scrollLogRef.current?.push({
+        k: 'n',
+        t: Date.now(),
+        on: anchorStore.get() === 'neutral',
+      });
+    });
+  }, [anchorStore, scrollLogRef]);
   /**
    * 방금 점프해서 도착한 행 (#1076 · #3921). 없으면 `null`.
    *
@@ -1971,7 +2047,10 @@ function TimelineInner({
       followSettleTimerRef.current = undefined;
     }
     convergingRef.current = false;
-  }, []);
+    // 중립 앵커와 넓힘은 이동의 것이다 — 이동을 거두는 모든 길(손가락·방 전환·다른 이동·언마운트)이 함께 끈다(#4689). 앵커가 끄는 것은 보초의
+    // 높이뿐이라 y 가 안 변하고, 그래서 어느 커밋에서 꺼도 보정이 생기지 않는다(`neutralAnchor.tsx`).
+    endFarLatest();
+  }, [endFarLatest]);
 
   const convergeToEnd = useCallback(
     (mode: 'entry' | 'send' | 'latest') => {
@@ -2011,17 +2090,66 @@ function TimelineInner({
       // reason in the note above.
       //
       // `latest` is the 「최신으로」 pill (#1892): the same travel as a send, and
-      // the one of the three a person asked for by pressing something — so it is
-      // the one that honours 「동작 줄이기」, as the web jump does
-      // (`timelineScrollBehavior`). Far away it is instant rounds already.
+      // the one of the three a person asked for by pressing something.
+      //
+      // **It never glides** (#4689, owner 10-27: 「스크롤 한 상태에서 최신 메세지로
+      // 이동하면 바로 이동 되게」). The glide is UIKit's `setContentOffset(animated:)`,
+      // whose duration is fixed whatever the distance — measured (16 Pro, Debug, a
+      // 0.6-screen distance, 6 presses): 300–383ms from the press to the last row
+      // standing, 17–18 frames, against 15–25ms for the instant hop the same press
+      // takes from three screens away. A person who pressed it to get to the newest
+      // message was being made to watch the list slide for a third of a second.
+      // 「동작 줄이기」 therefore no longer decides anything here: the answer is
+      // already instant. A send stays gliding — the reader's own message eases in,
+      // and nobody pressed anything for it.
       const distance = distanceToEnd(geometryRef.current);
       const near =
         mode !== 'entry' &&
         (distance === null || distance <= geometryRef.current.viewportHeight);
-      const glide = near && !(mode === 'latest' && reduceMotionRef.current);
+      const glide = near && mode !== 'latest';
       convergingRef.current = !near;
-      // Off for the correction, back on the moment it ends.
-      if (!near) setChasingTail(true);
+      // **A far 「최신으로」 never takes the prop off** (#4689). Off for the
+      // correction and back on at release is how the stale anchor came back: the
+      // re-attach applied `−y` of a row that had been unmounted on the way (16
+      // Pro, 300 rows: −14,854pt from the middle, −2,631pt from near the top),
+      // which showed the old content again and sent the hold ticks back down
+      // for 200–415ms. So the prop stays on and the anchor is made neutral
+      // instead — an always-mounted sentinel that is the native anchor for the
+      // length of the travel and never moves (`neutralAnchor.tsx`). Entry and
+      // send keep the toggle, as before: their numbers (#2586, #2604) were
+      // earned with it.
+      const neutral = mode === 'latest' && !near;
+      /** 가는 동안 수렴·착지 유지 틱의 간격 — 넓힌 판이 붙는 즉시 끝으로 다시 가도록 먼 「최신으로」만 한 프레임이다. */
+      const roundMs = neutral ? FAR_LATEST_ROUND_MS : CONVERGE_ROUND_MS;
+      const contentAtPress = geometryRef.current.contentHeight;
+      let widened = false;
+      /**
+       * 꼬리가 잘려 있던 방이면(누른 뒤 콘텐츠가 `FAR_LATEST_GROWTH_PX` 넘게 자랐다) 한 판·창을 넓힌다 — 잘린 꼬리를 배치 사슬이 아니라 몇 판에
+       * 마운트한다(#4689 원인 B, `FAR_LATEST_BATCH`). 수렴 틱과 착지 유지 틱이 매번 묻는다: 도착이 잘린 끝에서 일찍 선언돼도(첫 판이 붙기 전) 유지 틱이 이어 묻는다.
+       */
+      const widenIfTruncated = () => {
+        if (!neutral || widened) return;
+        if (geometryRef.current.contentHeight - contentAtPress <= FAR_LATEST_GROWTH_PX) return;
+        widened = true;
+        setWidenTail(true);
+      };
+      /**
+       * 가장 아래 메시지 행이 마운트됐는가 — 잘린 꼬리가 다 이어졌는가. 안 됐으면 이동은 끝나지 않았다: 판이 렌더되는 동안(Debug 시뮬 SE: 한 판 수백 ms)
+       * 콘텐츠는 자라지 않아 「조용」해 보이기 때문에 자람만 보고 착지 유지를 놓으면 마지막 판 앞에서 낡은 앵커를 다시 만난다.
+       */
+      const tailMounted = () => {
+        const newest = lastMessageId(itemsRef.current);
+        return newest === null || rowNodesRef.current.has(newest.toLowerCase());
+      };
+      if (neutral) {
+        // A far send cancelled by this press may have left the prop off; it comes
+        // back first, so the travel starts from the prop the sentinel can govern.
+        setChasingTail(false);
+        anchorStore.set('neutral');
+      } else if (!near) {
+        // Off for the correction, back on the moment it ends.
+        setChasingTail(true);
+      }
 
       /**
        * One hop toward the end.
@@ -2111,9 +2239,10 @@ function TimelineInner({
        * instant tick under the pin instead.
        */
       const holdLanding = (firstTickAt: number) => {
-        const until = firstTickAt + LANDING_HOLD_MS;
+        let until = firstTickAt + LANDING_HOLD_MS;
         scrollPinUntilRef.current = until;
         const tick = () => {
+          widenIfTruncated();
           const geometry = geometryRef.current;
           const left = distanceToEnd(geometry);
           if (left !== null && Math.abs(left) > ARRIVED_PX) {
@@ -2122,11 +2251,32 @@ function TimelineInner({
               animated: false,
             });
           }
-          if (Date.now() >= until) {
-            scrollPinUntilRef.current = 0;
-            return;
+          const now = Date.now();
+          if (now >= until) {
+            // A far 「최신으로」 holds on while the tail is still being joined (#4689
+            // cause B) — the content is growing, or the newest row is not mounted
+            // yet (a batch in flight does not grow anything until it lands): the
+            // batches that follow the first arrival are the rest of the same travel,
+            // and the hold's end is what puts the anchor back — let go in the middle
+            // of them and the list is met by a stale one again. Bounded by the
+            // travel's own backstop.
+            if (
+              neutral &&
+              now < hardStop &&
+              (now - lastGrowthAtRef.current < ENTRY_QUIET_MS || !tailMounted())
+            ) {
+              until = now + roundMs;
+              scrollPinUntilRef.current = until;
+            } else {
+              scrollPinUntilRef.current = 0;
+              // The neutral anchor lasts as long as the hold (#4689): the first
+              // arrival is not the end of the movement — the batches that follow it
+              // are met by the sentinel, not by a re-attached stale anchor.
+              if (neutral) endFarLatest();
+              return;
+            }
           }
-          convergeTimerRef.current = setTimeout(tick, CONVERGE_ROUND_MS);
+          convergeTimerRef.current = setTimeout(tick, roundMs);
         };
         convergeTimerRef.current = setTimeout(
           tick,
@@ -2136,7 +2286,11 @@ function TimelineInner({
 
       const release = (arrived: boolean) => {
         convergingRef.current = false;
-        setChasingTail(false);
+        // The prop was never taken off for a neutral travel — nothing to put back.
+        if (!neutral) setChasingTail(false);
+        // No hold follows a travel that did not arrive, so its anchor and window are
+        // let go here; one that arrived lets go when `holdLanding` ends.
+        if (neutral && !arrived) endFarLatest();
         // Hand the scroll back at once rather than at the deadline: the list is
         // where the correction wanted it, so the ordinary rule ("far from the end
         // means the reader is reading") is true again and should apply again.
@@ -2148,7 +2302,7 @@ function TimelineInner({
         // a far 「최신으로」 are met by the stale anchor the moment `setChasingTail`
         // above puts it back; an entry by an end that can still grow — see
         // `holdLanding` for both, and `TimelineCell`'s note for the table.
-        if (arrived) holdLanding(Date.now() + CONVERGE_ROUND_MS);
+        if (arrived) holdLanding(Date.now() + roundMs);
         if (mode !== 'latest') return;
         // The pill that had VoiceOver's focus is gone; the row it brought the
         // reader to takes it (#1892 R1 M-3). When the travel could not finish
@@ -2165,6 +2319,7 @@ function TimelineInner({
       };
 
       const converge = () => {
+        widenIfTruncated();
         const now = Date.now();
         const geometry = geometryRef.current;
         const left = distanceToEnd(geometry);
@@ -2231,7 +2386,7 @@ function TimelineInner({
         // end) — and when the scroll view does not clamp it, the branch above
         // brings it back. (`latest` aims at the held content instead; `hop`.)
         if (!overshot) hop(false);
-        convergeTimerRef.current = setTimeout(converge, CONVERGE_ROUND_MS);
+        convergeTimerRef.current = setTimeout(converge, roundMs);
       };
 
       // The first hop still waits a frame. For a send: the token and the echo row
@@ -2257,17 +2412,16 @@ function TimelineInner({
         converge();
       });
     },
-    // `reduceMotionRef` is one ref object for the life of the mount (a hook's
-    // `useRef`); listing it costs nothing and keeps the linter honest.
     [
+      anchorStore,
       cancelConvergence,
       cancelFocus,
       cancelJumpTravel,
+      endFarLatest,
       focusRow,
       lastVisibleMessageId,
       listRef,
       noteFollowing,
-      reduceMotionRef,
       settleEntry,
     ],
   );
@@ -3156,6 +3310,11 @@ function TimelineInner({
       // cell keeps its native view while it is off, so the anchor it comes back
       // to is still the same row (#2586 — `TimelineCell`).
       CellRendererComponent={TimelineCell}
+      // 먼 「최신으로」는 위 prop 을 떼지 않는다 — 대신 헤더 바로 뒤의 보초가 네이티브 앵커가 된다(#4689, `neutralAnchor.tsx`).
+      renderScrollComponent={renderScrollComponent}
+      // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
+      maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
+      windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
       onScroll={onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}

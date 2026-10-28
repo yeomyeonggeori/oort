@@ -194,6 +194,7 @@ import {DmConversationSurface} from './dmConversation';
 import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
+import {JumpLatestSurface} from './jumpLatest';
 import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
@@ -2255,6 +2256,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4614: 대화 목록을 눌러 자판·입력창을 내린다. 대화 화면 그대로(행이 눌리는 `actions` 포함) + 터치·자판 기록.
   if (name === 'tap' || name.startsWith('tap-')) {
     return <TapDismissSurface which={name.slice('tap'.length).replace(/^-/, '')} />;
+  }
+  // #4689: 멀리 올라간 채 아래 알약 「최신으로」를 누르면 마지막 메시지가 보이기까지 얼마나 걸리고 몇 번에 나눠 내려가는가. 진짜 대화 화면 + 스크롤 기록(`measure/jumpLatest.tsx`).
+  if (name === 'jump-latest' || name.startsWith('jump-latest-') || name.startsWith('jump-latest+')) {
+    return <JumpLatestSurface which={name.slice('jump-latest'.length).replace(/^[-+]/, '')} />;
   }
   // #4690: 스레드 패널(답글 0개·2개). 배송되는 `ThreadPanel` 그대로 + 고정 데이터·가상 인물.
   if (name === 'thread' || name.startsWith('thread-')) {
