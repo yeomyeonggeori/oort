@@ -54,12 +54,19 @@ export function DevAccessSection({
   const policy = useQuery(devAccessPolicyQuery(workspaceId));
   // 만든 직후 스크린리더에 알린다. 이름만 담고 값은 절대 담지 않는다.
   const [announce, setAnnounce] = useState("");
+  // 값 화면이 떠 있는 동안 true. 방금 만든 값은 폼 안의 뮤테이션 결과에만 있고 다시 만들 수 없으므로,
+  // 이 동안은 문이 어떻게 읽혀도 폼을 거두지 않는다.
+  const [revealUp, setRevealUp] = useState(false);
   const onSaved = useCallback((name: string) => {
     setAnnounce(`${name} 연결을 만들었어요. 아래 목록에서 볼 수 있어요.`);
   }, []);
 
-  const gate = policy.isSuccess ? devAccessGate(policy.data) : null;
+  // 문은 **마지막으로 읽은 답**(`data`)이 정한다. `isSuccess`가 아니다: 이미 읽은 정책을 다시 읽다 실패하면
+  // (절전 복귀·Wi-Fi 재연결이 부르는 재조회) 쿼리는 지난 답을 쥔 채 오류 상태가 되는데, 그때 폼을 거두면
+  // 값이 말없이 사라진다. 스위치가 닫혔다고 읽혀도 값 화면이 떠 있는 동안은 폼이 남는다(`revealUp`).
+  const gate = policy.data !== undefined ? devAccessGate(policy.data) : null;
   const canStart = gate?.state === "open";
+  const showForm = canStart || revealUp;
 
   return (
     <div className="flex min-w-0 flex-col gap-8" data-testid="dev-access-page">
@@ -86,7 +93,7 @@ export function DevAccessSection({
         </SettingsSection>
       )}
 
-      {policy.isError && (
+      {policy.isError && policy.data === undefined && (
         <SettingsSection title="새 연결 만들기" testId="dev-access-create-card">
           <CardBody>
             <InlineBanner
@@ -101,7 +108,7 @@ export function DevAccessSection({
         </SettingsSection>
       )}
 
-      {gate !== null && gate.state !== "open" && (
+      {!revealUp && gate !== null && gate.state !== "open" && (
         <SettingsSection title="새 연결 만들기" testId="dev-access-create-card">
           <CardBody>
             <p
@@ -116,14 +123,15 @@ export function DevAccessSection({
         </SettingsSection>
       )}
 
-      {gate !== null && gate.state === "open" && (
+      {showForm && (
         <DevAccessCreateForm
           workspaceId={workspaceId}
           memberId={memberId}
           offline={offline}
-          gateText={gate.text}
+          gateText={gate?.state === "open" ? gate.text : ""}
           nameFieldId={NAME_FIELD_ID}
           onSaved={onSaved}
+          onRevealChange={setRevealUp}
         />
       )}
 
@@ -131,7 +139,7 @@ export function DevAccessSection({
         workspaceId={workspaceId}
         memberId={memberId}
         offline={offline}
-        canManageAll={policy.isSuccess && policy.data.canManageAll}
+        canManageAll={policy.data?.canManageAll === true}
         onStartCreate={
           canStart
             ? () => document.getElementById(NAME_FIELD_ID)?.focus({ preventScroll: false })

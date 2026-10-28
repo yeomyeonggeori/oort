@@ -114,6 +114,7 @@ export function DevAccessCreateForm({
   gateText,
   nameFieldId,
   onSaved,
+  onRevealChange,
 }: {
   workspaceId: string;
   memberId: string;
@@ -123,6 +124,11 @@ export function DevAccessCreateForm({
   nameFieldId: string;
   /** 「저장했어요」 뒤. 이름만 건넨다. 값은 이미 지워졌다. */
   onSaved: (name: string) => void;
+  /**
+   * 값 화면이 서 있는지 부모에게 알린다. 값의 유일한 보관처가 이 폼의 뮤테이션이라서, 부모는 값 화면이 떠
+   * 있는 동안(정책이 다시 읽혀 문이 닫혔다고 해도) 이 폼을 거두지 않는다. 사라질 때는 항상 false로 알린다.
+   */
+  onRevealChange: (up: boolean) => void;
 }) {
   const client = useQueryClient();
   const createButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -148,6 +154,12 @@ export function DevAccessCreateForm({
 
   // 화면이 사라지면 캐시에 남은 연결 값 뮤테이션을 동기로 비운다(`gcTime: 0`은 다음 틱을 기다린다).
   useEffect(() => () => void purgeDevCredentials(client), [client]);
+
+  const revealUp = create.data !== undefined;
+  useEffect(() => {
+    onRevealChange(revealUp);
+  }, [revealUp, onRevealChange]);
+  useEffect(() => () => onRevealChange(false), [onRevealChange]);
 
   const failure = create.isError ? devAccessError(create.error) : null;
 

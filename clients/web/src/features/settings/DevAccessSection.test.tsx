@@ -23,6 +23,7 @@ import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { chooseListbox } from "@/design/ui/listboxTestKit";
 import { DevAccessSection } from "./DevAccessSection";
+import { devAccessPolicyQueryKey } from "./devAccessQuery";
 
 // 설정 › 명령줄·AI 도구 (#4663, ADR-0216). 화면과 코어와 훅은 진짜로 돌리고 **서버 쪽(HTTP `fetch`)만**
 // 가짜로 둔다. 가짜의 답은 서버 문서(OpenAPI `DevAccessPolicyResponse` 등)의 실제 JSON 모양이고,
@@ -627,6 +628,53 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
     expect(cacheDump()).not.toContain(SECRET_TAIL);
     expect(client.getMutationCache().getAll()).toHaveLength(0);
     expect(secretsOnScreen()).not.toContain(SECRET_TAIL);
+  });
+
+  // 값은 폼 안의 뮤테이션 결과에만 있고 다시 만들 수 없다. 문(정책)이 다시 읽혀 어떻게 바뀌어도(절전 복귀·
+  // Wi-Fi 재연결이 부르는 재조회가 실패하거나 스위치가 닫혔다고 답하거나) 값 화면은 「저장했어요」 전에 사라지지 않는다.
+  it("값이 떠 있는 동안 정책을 다시 읽다 실패해도 값 화면은 그대로이고 「저장했어요」가 출구다", async () => {
+    await createAndReveal();
+    routes[`GET ${ROOT}`] = () => errorBody(null, 500);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: devAccessPolicyQueryKey(WS) });
+    });
+    // 질의 라이브러리는 관찰자에게 다음 틱에 알린다. 그 틱을 넘긴 뒤의 화면을 본다(아니면 단정이 헛돈다).
+    await flushMacrotask();
+    // 장면이 실제로 섰는가: 쿼리는 지난 답을 쥔 채 오류 상태다.
+    expect(client.getQueryState(devAccessPolicyQueryKey(WS))?.status).toBe("error");
+    expect(client.getQueryData(devAccessPolicyQueryKey(WS))).toBeDefined();
+
+    expect(maybe("dev-access-reveal")).not.toBeNull();
+    expect(secretsOnScreen()).toContain(TOKEN);
+
+    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
+    expect(secretsOnScreen()).not.toContain(SECRET_TAIL);
+    // 폼은 지난 답대로 그대로 서 있다(오류 배너로 갈아 끼우지 않는다).
+    expect(maybe("dev-access-create-form")).not.toBeNull();
+    expect(maybe("dev-access-policy-error")).toBeNull();
+  });
+
+  it("값이 떠 있는 동안 스위치가 닫혔다고 읽혀도 값 화면은 그대로이고, 닫은 뒤에야 닫힌 문이 선다", async () => {
+    await createAndReveal();
+    const closed = { policy: "off", canCreate: false, canManageAll: false } as const;
+    routes[`GET ${ROOT}`] = () => json(closed);
+    await act(async () => {
+      await client.refetchQueries({ queryKey: devAccessPolicyQueryKey(WS) });
+    });
+    await flushMacrotask();
+    // 장면이 실제로 섰는가: 캐시의 정책이 「만들 수 없음」으로 바뀌었다.
+    expect(client.getQueryData(devAccessPolicyQueryKey(WS))).toMatchObject({ canCreate: false });
+
+    expect(maybe("dev-access-reveal")).not.toBeNull();
+    expect(secretsOnScreen()).toContain(TOKEN);
+
+    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
+    expect(secretsOnScreen()).not.toContain(SECRET_TAIL);
+    const gate = await screen.findByTestId("dev-access-gate");
+    expect(gate.getAttribute("data-gate-state")).toBe(devAccessGate(closed).state);
+    expect(maybe("dev-access-create-form")).toBeNull();
   });
 
   it("「저장했어요」 뒤 폼은 처음 상태(읽기만, 기본 이름, 30일)로 돌아온다", async () => {
