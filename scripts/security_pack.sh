@@ -120,8 +120,9 @@ cmd_quarantine_lint() {
     grep -Eq '#\[ignore' "$file" || die "격리: #[ignore] 시험이 없어요(야간 --ignored 가 돌리지 않는 파일): ${file#"$ROOT"/}"
     grep -Eq "fn[[:space:]]+${tname}[[:space:]]*\(" "$file" \
       || die "격리: ${file#"$ROOT"/} 에 시험 함수가 없어요(이름이 바뀌었나요?): $tname"
-    # --skip 은 부분 문자열이라 이름이 다른 시험에도 맞으면 그 시험까지 조용히 빠진다 → 함수 하나에만 맞아야 한다.
-    hits="$(grep -rhoE --exclude-dir=target --include='*.rs' "fn[[:space:]]+[A-Za-z0-9_]*${tname}[A-Za-z0-9_]*[[:space:]]*\(" "$ROOT/server-rust" | sort -u | wc -l | tr -d ' ')"
+    # --skip 은 부분 문자열이라 이름이 다른 시험(또 다른 파일의 같은 이름 함수 포함)에도 맞으면 그 시험까지
+    # 조용히 빠진다 → 정의 하나에만 맞아야 한다(그래서 중복 제거(sort -u)를 하지 않는다).
+    hits="$(grep -rhoE --exclude-dir=target --include='*.rs' "fn[[:space:]]+[A-Za-z0-9_]*${tname}[A-Za-z0-9_]*[[:space:]]*\(" "$ROOT/server-rust" | wc -l | tr -d ' ')"
     [ "$hits" = 1 ] || die "격리: 시험 이름 '$tname' 이(가) 워크스페이스의 함수 ${hits}개와 맞아요(정확히 1개여야 해요)"
     n=$((n + 1))
   done < <(quarantine_entries)
