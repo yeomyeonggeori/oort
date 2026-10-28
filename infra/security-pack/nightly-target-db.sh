@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
 # 야간 시험 실행기 (#4707) — cargo 가 시험 실행 파일마다 `이 스크립트 <실행 파일> <인자…>` 로 부른다
-# (`CARGO_TARGET_<TRIPLE>_RUNNER`, scripts/security_pack.sh nightly 가 건다).
+# (`CARGO_TARGET_<TRIPLE>_RUNNER`, scripts/security_pack.sh nightly 가 건다). infra/security-pack/ 아래라
+# 이 파일만 고쳐도 PR CI 의 Rust 레인(Security pack 잡)이 켜져 scripts/tests/test_security_pack.sh 가 돈다.
 #
 # 왜: 야간 전량 실행은 273개 실행 파일을 **한 DB** 에서 차례로 돌렸다. 앞 타깃이 남긴 것(대기 작업 큐·DDL 찌꺼기·
 #   테이블 팽창)이 뒤 타깃을 깨서, 시험 하나의 잘못이 다른 패키지의 빨강으로 나타났다(probe_3162 →
@@ -18,7 +19,7 @@ set -uo pipefail
 
 err() { echo "[nightly-target-db] $*" >&2; }
 
-[ "$#" -ge 1 ] || { err "usage: nightly_target_db.sh <시험 실행 파일> [인자…]"; exit 2; }
+[ "$#" -ge 1 ] || { err "usage: nightly-target-db.sh <시험 실행 파일> [인자…]"; exit 2; }
 exe="$1"; shift
 [ -n "${NIGHTLY_DB_TEMPLATE:-}" ] || { err "NIGHTLY_DB_TEMPLATE 이 필요해요"; exit 2; }
 [ -n "${DATABASE_URL:-}" ] || { err "DATABASE_URL 이 필요해요"; exit 2; }

@@ -265,7 +265,7 @@ grep -Fq -- 'quar_pg' "$calls" && fail "nightly: 격리 목록이 없는데 격�
 want_in "nightly(격리 없음)" "$out" '격리: 없음'
 # ── 타깃마다 새 DB 실행기(#4707) ──────────────────────────────────────────────────────────
 # 시험 실행 파일마다 템플릿 복제본을 주고(없는 쪽은 그대로 실행), 끝나면 — 실패해도 — 지우며, 종료 코드를 보존한다.
-RUNNER="$REPO_ROOT/scripts/nightly_target_db.sh"
+RUNNER="$REPO_ROOT/infra/security-pack/nightly-target-db.sh"
 mk_fake_psql() { # <bin 디렉터리> <기록 파일> — 접속 URL 과 -c 의 SQL 을 적는다(FAKE_PSQL_FAIL=1 이면 실패)
   mkdir -p "$1"
   cat >"$1/psql" <<EOF
@@ -360,10 +360,12 @@ want_in "nightly(격리 안내)" "$out" '시험 실행 파일마다 새 DB' 'CAR
 grep -Fq 'DROP DATABASE IF EXISTS "nt_template" WITH (FORCE)' "$ri/psql.log" || fail "nightly(격리): 옛 템플릿을 지우지 않았어요 — $(cat "$ri/psql.log")"
 grep -Fq 'CREATE DATABASE "nt_template" TEMPLATE "db" ALLOW_CONNECTIONS false' "$ri/psql.log" || fail "nightly(격리): setup 이 끝난 DB(db)에서 템플릿을 만들지 않았어요 — $(cat "$ri/psql.log")"
 [ "$(grep -c 'DROP DATABASE IF EXISTS "nt_template"' "$ri/psql.log")" = 2 ] || fail "nightly(격리): 끝에 템플릿을 지우지 않았어요 — $(cat "$ri/psql.log")"
-[ "$(grep -c 'RUNNER=.*/scripts/nightly_target_db.sh TPL=nt_template' "$ri/cargo.log")" = "$(wc -l <"$ri/cargo.log" | tr -d ' ')" ] \
+[ "$(grep -c 'RUNNER=.*/infra/security-pack/nightly-target-db.sh TPL=nt_template' "$ri/cargo.log")" = "$(wc -l <"$ri/cargo.log" | tr -d ' ')" ] \
   || fail "nightly(격리): 모든 cargo 호출에 실행기를 걸지 않았어요 — $(cat "$ri/cargo.log")"
+runner_path="$(sed -n 's/.*RUNNER=\([^ ]*\) TPL=.*/\1/p' "$ri/cargo.log" | head -1)"
+[ -x "$runner_path" ] || fail "nightly(격리): cargo 에 건 실행기 경로가 실행 파일이 아니에요 — '$runner_path'"
 ro="$TMP/iso-off"; mk_quar_tree "$ro"; : >"$ro/cargo.log"; : >"$ro/psql.log"; mk_iso_bin "$ro/bin" "$ro/cargo.log" "$ro/psql.log"
 out="$(SECURITY_PACK_TARGET_DB=0 iso_nightly "$ro" "$ro/bin")" || fail "nightly(격리 끔): 초록이어야 해요 — $out"
 [ ! -s "$ro/psql.log" ] || fail "nightly(격리 끔): DB 를 만졌어요"
 grep -Fq 'RUNNER=unset' "$ro/cargo.log" || fail "nightly(격리 끔): 실행기가 걸렸어요"
-echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종 + 격리 lint 대조군 3·음성 14종 + 요약 12종 + nightly 흐름 7종 + 타깃별 DB 실행기 8종·nightly 배선 2종)"
+echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종 + 격리 lint 대조군 3·음성 14종 + 요약 12종 + nightly 흐름 7종 + 타깃별 DB 실행기 8종·nightly 배선 3종)"

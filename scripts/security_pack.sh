@@ -10,7 +10,7 @@
 #   negative  일회용 DB 에 FORCE 없는 테넌트 테이블 픽스처를 얹고 tenant_catalog_pg 가
 #             **그 테이블을 이름으로 지목하며** 빨강인지 확인한다(다른 이유의 빨강은 실패).
 #   nightly   선택 밖 PG 시험까지 전부(`--workspace --ignored`) — 야간 잡용. 시험 실행 파일마다 새 DB(템플릿 복제,
-#             scripts/nightly_target_db.sh)에서 돌아 타깃 간 오염이 없다. 끝에 요약(report)을 낸다.
+#             infra/security-pack/nightly-target-db.sh)에서 돌아 타깃 간 오염이 없다. 끝에 요약(report)을 낸다.
 #   report    야간 로그를 읽어 요약(markdown)·실패 시험 상세·격리 현황을 낸다.
 #             `report <전량 로그> <prod_role 로그> <격리 로그>` — DB·cargo 없이 돌아서 시험할 수 있다.
 #
@@ -371,10 +371,11 @@ nightly_quarantine_pass() {
 
 # ── 타깃마다 새 DB (#4707) ────────────────────────────────────────────────────
 # 야간 전량은 273개 실행 파일을 한 DB 에서 차례로 돌려서, 앞 타깃이 남긴 것(대기 작업·DDL 찌꺼기·테이블 팽창)이
-# 뒤 타깃을 깼다. setup 이 끝난 DB 를 템플릿으로 한 번 복제해 두고, scripts/nightly_target_db.sh 를 cargo 실행기
+# 뒤 타깃을 깼다. setup 이 끝난 DB 를 템플릿으로 한 번 복제해 두고, infra/security-pack/nightly-target-db.sh 를 cargo 실행기
 # (`CARGO_TARGET_<TRIPLE>_RUNNER`)로 걸어 `#[ignore]` 시험이 있는 실행 파일마다 그 복제본을 새로 준다.
 # SECURITY_PACK_TARGET_DB=0 이면 예전처럼 한 DB 에서 전부 돈다(진단·시험 편의).
 NIGHTLY_TEMPLATE="nt_template"
+NIGHTLY_RUNNER="$SCRIPT_DIR/../infra/security-pack/nightly-target-db.sh"
 nightly_admin() { # <SQL> — 접속 DB 와 같은 서버의 postgres DB 로 실행
   local base="${DATABASE_URL%%\?*}" query
   query="${DATABASE_URL#"$base"}"
@@ -391,7 +392,8 @@ nightly_target_db_setup() {
     || die "템플릿 DB 를 만들 수 없어요('$curdb' 에 다른 연결이 있나요?)"
   export NIGHTLY_DB_TEMPLATE="$NIGHTLY_TEMPLATE" PSQL_BIN
   PSQL_BIN="$(psql_bin)"
-  export "$var=$SCRIPT_DIR/nightly_target_db.sh"
+  [ -x "$NIGHTLY_RUNNER" ] || die "야간 실행기가 없거나 실행 권한이 없어요: $NIGHTLY_RUNNER"
+  export "$var=$NIGHTLY_RUNNER"
   echo "[security-pack] 시험 실행 파일마다 새 DB 에서 돌려요(템플릿 $NIGHTLY_TEMPLATE ← $curdb, 실행기 $var)"
 }
 nightly_target_db_teardown() { nightly_admin "DROP DATABASE IF EXISTS \"$NIGHTLY_TEMPLATE\" WITH (FORCE)" 2>/dev/null || true; }

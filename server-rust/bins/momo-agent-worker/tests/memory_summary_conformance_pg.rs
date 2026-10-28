@@ -626,7 +626,8 @@ async fn every_memory_write_runs_as_momo_memory_and_the_worker_reads_no_mem_tabl
             .fetch_all(&su)
             .await
             .unwrap();
-    // The probe has done its job: drop all of it *before* any assertion can fail. A table without RLS
+    // The probe has done its job: drop all of it right after reading it, ahead of the assertions on
+    // what it saw (the earlier setup steps can still fail first). A table without RLS
     // and a SECURITY DEFINER function without a pinned search_path, left in the shared database,
     // turn tenant_catalog_pg and the momo-db conformance suite red in the nightly full run (they
     // read the whole catalog).
