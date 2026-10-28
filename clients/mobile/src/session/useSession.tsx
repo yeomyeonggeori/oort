@@ -26,6 +26,7 @@ import {clearMemberAvatarCache} from '../features/conversation/memberAvatarImage
 import {revokeDevice} from '../push/devices';
 import {dismissDeliveredNotifications} from '../push/dismissDelivered';
 import {clearPushActionSession} from '../push/pushActionSession';
+import {clearPresentationState} from '../push/presentation';
 import {clearPushOptOut} from '../push/pushOptOut';
 import {registeredPushDeviceId} from '../push/registration';
 
@@ -227,6 +228,8 @@ export function SessionProvider({
       clearAllAttachmentDrafts();
       // 토큰 만료·계정 교체도 이 경계다 — 앞 사람의 얼굴 파일을 디스크에 남기지 않는다.
       clearMemberAvatarCache();
+      // 알림 확장에게 건넨 얼굴·채널 이름과, 시스템에 기부한 커뮤니케이션 기록도 같은 경계에서 지운다(#4316).
+      void clearPresentationState();
     };
   }, [attachmentSessionKey]);
 
@@ -292,6 +295,10 @@ export function SessionProvider({
     clearAllAttachmentDrafts();
     // 멤버 아바타 파일 캐시도 지운다(메모리 색인 + 디스크).
     clearMemberAvatarCache();
+    // 알림 확장에게 건넨 얼굴·채널 이름(App Group)도 지우고, 시스템에 기부한 커뮤니케이션 기록을 지우라고
+    // 한다(#4316, ADR-0204 증보 5). 지우지 못하면 앞 사람 이름의 알림 기록이 이 폰에 남는다 — 끝나지 못한
+    // 지우기는 네이티브가 다음 실행에 다시 한다. 「메시지 미리보기」·「보낸 사람 표시」는 이 폰의 취향이라 남는다.
+    void clearPresentationState();
     // 내 사진 배경은 이 기기의 사람 데이터다 — 다음 사람의 기기에 남기지 않는다
     // (ADR-0189 증보 2). 단색·기본 제공 선택은 취향이라 남는다.
     forgetBackgroundOnSignOut();

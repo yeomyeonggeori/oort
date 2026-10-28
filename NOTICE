@@ -73,6 +73,11 @@ and prompts") carries the row. The theme catalog also bundles a handful of color
 MIT and Apache-2.0 VS Code color themes; their upstream notices are in legal/THIRD_PARTY_NOTICES.md ("Theme
 palette seeds") and the full texts in legal/generated/THEME_PALETTE_NOTICES.txt.
 
+iOS communication notifications (ADR-0204 증보 5, #4316): the donate-then-update flow with a privacy fence, the deletion
+retry rule and the avatar size ceiling are adapted from Buzz (https://github.com/block/buzz, commit af5bb0a, Apache-2.0,
+Copyright 2026 Block, Inc.), `mobile/ios/BuzzPushKit`; each adapted file carries its origin and a change notice in its
+header, and legal/THIRD_PARTY_NOTICES.md ("Adapted designs and prompts") carries the row.
+
 Named runtime companions operators actually run next to these images:
 
 - PostgreSQL 18 (PostgreSQL License)

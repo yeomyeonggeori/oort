@@ -30,6 +30,7 @@ import {
 } from '../nav/state';
 import {DeviceKeyLinkGate} from '../features/deviceKey/DeviceKeyLinkSheet';
 import {NotificationPrimerGate} from '../features/onboarding/NotificationPrimer';
+import PushPresentationSync from '../push/PushPresentationSync';
 import PushProvider from '../push/PushProvider';
 import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
@@ -116,6 +117,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
           <NotificationPrimerGate />
           {/* QR 연결 직후 기기 키 등록과 맥 승인 대기(#3026). M3 뒤에 선다. */}
           <DeviceKeyLinkGate />
+          {/* 알림 확장에게 건네는 것: 설정 둘, 채널 이름(#4316). 화면은 없다. */}
+          <PushPresentationSync />
         </RealtimeProvider>
       </PushProvider>
     </SessionProvider>

@@ -35,6 +35,7 @@
 | 업로드 인증 (§5-3 폴백) | Xcode › Settings › Accounts에 팀 계정 로그인, 또는 위 ASC API 키 | 계정 화면. 세션이 살아 있는지는 로컬에서 확인할 수 없다 |
 
 - 키체인에 **폐기된** `Apple Distribution` 인증서가 같은 이름으로 하나 더 있다. 이름으로 서명하는 도구가 헷갈리지 않게 owner가 지운다.
+- **App ID 기능 하나가 더 필요하다: Communication Notifications**(#4316, ADR-0204 증보 5). 앱 `app.momo.ios`의 서명된 권한 `com.apple.developer.usernotifications.communication`은 알림 확장이 푸시를 보낸 사람의 둥근 사진과 이름이 있는 커뮤니케이션 알림으로 바꾸게 한다(NSE에는 두지 않는다). 이 기능은 **App Store Connect API로 켤 수 없다**(`capabilityType`의 허용값 28종에 없다, 2026-10-27 실측). owner가 [개발자 포털](https://developer.apple.com/account/resources/identifiers/list)에서 `momo iOS`(`app.momo.ios`) › Capabilities › 「Communication Notifications」를 켜고 저장한 뒤, Xcode 관리형 프로파일(`iOS Team Provisioning Profile: app.momo.ios`, `iOS Team Store Provisioning Profile: app.momo.ios`)을 다시 받아야 한다(Xcode에서 프로젝트를 열어 자동 서명이 갱신하게 하거나 §5-3의 `-allowProvisioningUpdates`, 둘 다 owner만). 이 기능이 켜지기 전의 프로파일로는 **아카이브가 서명에서 실패한다**(권한이 프로파일에 없다). 켠 뒤의 첫 아카이브에서 `ci_post_xcodebuild.sh` §4c가 서명된 앱에 권한이 있고 NSE에는 없음을 확인한다.
 - **momo 프로파일은 전부 Xcode 관리형이다**(`IsXcodeManaged=true`, 개발용·App Store용 모두). 그래서 수동 서명에는 쓸 수 없고 자동 서명만 된다(§4). 수동 프로파일을 새로 만드는 것은 이 런북의 범위가 아니다.
 - `.p8` 파일은 `~/.momo-secrets/`에 권한 `0400`으로 둔다. 명령줄에는 경로만 쓰고 내용은 쓰지 않는다.
 - 이 런북의 기본 경로(§4 스크립트, §5-2 업로드)는 인증서·프로파일을 만들거나 폐기하지 않는다. 예외는 §5-3 폴백 하나다: `-allowProvisioningUpdates`가 프로파일이나 클라우드 관리 배포 인증서를 만들 수 있어 owner만 쓴다. 프로파일이 없거나 만료됐으면 멈추고 owner에게 넘긴다.

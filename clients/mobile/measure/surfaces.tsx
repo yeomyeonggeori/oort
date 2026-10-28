@@ -4902,11 +4902,13 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </View>
       );
     // #3342: 프로필의 「알림」 묶음 — 푸시 종류 스위치. 시트를 알림 묶음이 보이도록 끌어올려 찍는다.
+    // #4316: 묶음에 두 줄(「메시지 미리보기」「보낸 사람 표시」)이 늘어 카드가 그만큼 길어졌다 — 맨 위 「푸시 알림」 줄이
+    // 상태 막대 밑으로 잘리지 않게 끌어올림을 560 에서 500 으로 줄였다.
     case 'shell-profile-notify':
       return (
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
-            <View style={{marginTop: -560, height: 3000}}>
+            <View style={{marginTop: -500, height: 3000}}>
               <View style={styles.settingsBody}>
                 <SettingsContent
                   workspaceId={HARNESS_MEMBER.workspaceId}
