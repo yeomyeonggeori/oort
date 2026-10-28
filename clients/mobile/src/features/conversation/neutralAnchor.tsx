@@ -1,5 +1,5 @@
 import React, {forwardRef, isValidElement, useSyncExternalStore} from 'react';
-import {ScrollView, StyleSheet, View, type ScrollViewProps} from 'react-native';
+import {ScrollView, View, type ScrollViewProps} from 'react-native';
 
 // =============================================================================
 // ## 중립 앵커 — 먼 「최신으로」 동안 `maintainVisibleContentPosition` 을 **떼지 않고** 무력화한다 (#4689)
@@ -77,10 +77,10 @@ export function createNeutralAnchorStore(): NeutralAnchorStore {
   };
 }
 
-const styles = StyleSheet.create({
-  rest: {position: 'absolute', top: -ANCHOR_TOP, left: 0, right: 0, height: 0},
-  neutral: {position: 'absolute', top: -ANCHOR_TOP, left: 0, right: 0, bottom: 0},
-});
+// 색이 없는 배치 상수다. 모듈에서 즉시 만드는 스타일시트는 스킴을 못 따라가는 한 벌짜리 색이 새는 길이라 테마 규칙(`themeSwitch.test.tsx`)이
+// 통째로 막는다 — 이 보초는 투명한 빈 뷰라 색이 없고, 배치 상수는 `Timeline.tsx` 의 `CONTENT_ALIGNMENT` 처럼 그냥 객체로 둔다.
+const REST_STYLE = {position: 'absolute', top: -ANCHOR_TOP, left: 0, right: 0, height: 0} as const;
+const NEUTRAL_STYLE = {position: 'absolute', top: -ANCHOR_TOP, left: 0, right: 0, bottom: 0} as const;
 
 function NeutralAnchor({store}: {store: NeutralAnchorStore}): React.JSX.Element {
   const phase = useSyncExternalStore(store.subscribe, store.get, store.get);
@@ -92,7 +92,7 @@ function NeutralAnchor({store}: {store: NeutralAnchorStore}): React.JSX.Element 
       pointerEvents="none"
       accessible={false}
       accessibilityElementsHidden
-      style={styles[phase]}
+      style={phase === 'neutral' ? NEUTRAL_STYLE : REST_STYLE}
       testID={NEUTRAL_ANCHOR_TEST_ID}
     />
   );
