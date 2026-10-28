@@ -533,11 +533,14 @@ describe('연결이 끊긴 동안 (#4663)', () => {
     expect(revokeRequests()).toEqual([]);
   });
 
-  it('확인 단계가 열린 채 끊기면 이유를 말하고, 확인해도 요청이 나가지 않는다', async () => {
+  it('확인 단계가 열린 채 끊기면 이유를 말하고 확인 단추를 잠근다: 눌러도 요청이 나가지 않고, 돌아오면 풀린다', async () => {
     mount();
     await askToRevoke(CLAUDE);
+    expect(screen.getByTestId('dev-revoke-confirm-button')).toBeEnabled();
     goOffline();
     expect(screen.getByTestId('dev-revoke-error')).toHaveTextContent(DEV_TOOLS_OFFLINE);
+    // 눌러도 반응 없는 단추를 살아 있는 듯 두지 않는다(목록의 지우기 단추가 끊기면 잠기는 것과 같은 말).
+    expect(screen.getByTestId('dev-revoke-confirm-button')).toBeDisabled();
     fireEvent.press(screen.getByTestId('dev-revoke-confirm-button'));
     // 질의 라이브러리는 눌린 다음 틱에 요청을 낸다. 한 틱 흘려 보낸 뒤에도 0건이고 확인 단계가 그대로여야 한다.
     await act(async () => {});
@@ -546,6 +549,7 @@ describe('연결이 끊긴 동안 (#4663)', () => {
 
     goOnline();
     expect(screen.queryByTestId('dev-revoke-error')).toBeNull();
+    expect(screen.getByTestId('dev-revoke-confirm-button')).toBeEnabled();
     fireEvent.press(screen.getByTestId('dev-revoke-confirm-button'));
     await waitFor(() => expect(revokeRequests()).toHaveLength(1));
     await waitFor(() => expect(screen.queryByTestId('dev-revoke-confirm')).toBeNull());

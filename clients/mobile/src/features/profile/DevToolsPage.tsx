@@ -139,7 +139,8 @@ export function DevToolsPage({
     setTarget(null);
   };
   const confirm = () => {
-    if (target === null || sending.current || !online) return;
+    // 끊긴 동안의 막음은 확인 단추의 잠금(`confirmDisabled`)이 한 곳에서 맡는다. 여기서 또 막으면 단추가 살아 있어도 말없이 무시되는 길이 생긴다.
+    if (target === null || sending.current) return;
     sending.current = true;
     revoke.mutate(target.id, {
       onSuccess: () => {
@@ -164,6 +165,7 @@ export function DevToolsPage({
           confirmLabel={DEV_TOOLS_REVOKE_LABEL}
           pendingLabel={DEV_TOOLS_REVOKE_PENDING}
           pending={revoke.isPending}
+          confirmDisabled={!online}
           onCancel={cancel}
           onConfirm={confirm}
           cancelTestID="dev-revoke-cancel"
