@@ -51,7 +51,7 @@ const ROWS = [
   { n: 2, peer: person("12", "박서연", "seoyeon", { online: false }), tone: "muted", word: "오프라인", what: "접속 없음: 속 빈 고리" },
   { n: 3, peer: person("13", "최민수", "minsu", { presenceStatus: "away", online: true }), tone: "warn", word: "자리 비움", what: "자리 비움이 접속 여부보다 먼저: 주황" },
   { n: 4, peer: person("14", "정하윤", "hayun", { presenceStatus: "dnd", online: true }), tone: "danger", word: "방해 금지", what: "방해 금지: 접속 중이어도 빨강" },
-  { n: 5, peer: person("15", "윤재민", "jaemin"), tone: null, word: null, what: "서버가 말하지 않음: 점 없음(모름은 오프라인이 아니다)" },
+  { n: 5, peer: person("15", "김하늘", "haneul"), tone: null, word: null, what: "서버가 말하지 않음: 점 없음(모름은 오프라인이 아니다)" },
   { n: 6, peer: agent("21", "김인턴", "intern", { hostOnline: true }), tone: "ok", word: "응답함", what: "에이전트: 생존 판정의 점(사람의 접속 점이 아니다)" },
 ];
 const roster = [person("01", "한지우", "jiwoo", { role: "owner" }), ...ROWS.map((r) => r.peer)];
