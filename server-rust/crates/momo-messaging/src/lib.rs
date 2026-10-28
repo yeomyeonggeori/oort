@@ -53,6 +53,8 @@ pub mod attachment;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
 pub mod channel;
+/// ADR-0216 D4 (#4660) — a developer token's channel restriction, as a domain argument.
+pub mod channel_restriction;
 pub mod channel_viewing;
 pub mod dm;
 /// ADR-0177 증보 D6·D7 / #4227 — a member's own DM closure watermark (no outbox fan-out, D10).
@@ -113,12 +115,13 @@ pub use attachment::{
 pub use channel::{
     add_channel_member_in_tx, clamp_channel_list_limit, create_channel,
     create_channel_detailed_in_tx, create_channel_in_tx, list_workspace_channels,
-    normalize_channel_kind, normalize_channel_name, normalize_channel_topic,
-    normalize_membership_role, remove_channel_member_in_tx, set_notification_pref_in_tx, Channel,
-    ChannelKind, ChannelMembership, ChannelSpecInvalid, ChannelSummary, CreatedChannel, NewChannel,
-    CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX, CHANNEL_NAME_MAX_CHARS,
-    CHANNEL_TOPIC_MAX_CHARS,
+    list_workspace_channels_within, normalize_channel_kind, normalize_channel_name,
+    normalize_channel_topic, normalize_membership_role, remove_channel_member_in_tx,
+    set_notification_pref_in_tx, Channel, ChannelKind, ChannelMembership, ChannelSpecInvalid,
+    ChannelSummary, CreatedChannel, NewChannel, CHANNEL_LIST_LIMIT_DEFAULT, CHANNEL_LIST_LIMIT_MAX,
+    CHANNEL_NAME_MAX_CHARS, CHANNEL_TOPIC_MAX_CHARS,
 };
+pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
 pub use dm::{
     canonical_participants, dm_lock_key, dm_participant_key, list_direct_messages,
@@ -148,11 +151,12 @@ pub use identity::{
 };
 pub use inbox::{
     clamp_inbox_limit, delete_read_inbox_items_in_tx, inbox_event_payload,
-    inbox_unread_count_in_tx, list_inbox_in_tx, make_preview, mark_inbox_item_read_in_tx,
-    mark_inbox_read_all_in_tx, workspaces_with_expired_inbox_items, InboxChannel, InboxCursor,
-    InboxFilter, InboxItemReadOutcome, InboxItemView, InboxMessage, InboxPage, InboxQuoted,
-    InboxReadAllOutcome, INBOX_DEFAULT_LIMIT, INBOX_MAX_LIMIT, INBOX_PREVIEW_CHARS,
-    INBOX_READ_RETENTION_DAYS, INBOX_UNREAD_COUNT_CAP,
+    inbox_unread_count_in_tx, inbox_unread_count_within_in_tx, list_inbox_in_tx,
+    list_inbox_within_in_tx, make_preview, mark_inbox_item_read_in_tx, mark_inbox_read_all_in_tx,
+    workspaces_with_expired_inbox_items, InboxChannel, InboxCursor, InboxFilter,
+    InboxItemReadOutcome, InboxItemView, InboxMessage, InboxPage, InboxQuoted, InboxReadAllOutcome,
+    INBOX_DEFAULT_LIMIT, INBOX_MAX_LIMIT, INBOX_PREVIEW_CHARS, INBOX_READ_RETENTION_DAYS,
+    INBOX_UNREAD_COUNT_CAP,
 };
 pub use interaction::{
     build_message_deleted_payload, build_message_edited_payload, build_pin_payload,
@@ -201,12 +205,13 @@ pub use message::{
     context_message_body, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
     list_messages, list_thread_replies, parse_replies_cursor, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, send_message, send_message_in_tx, send_message_with_mentions_in_tx,
-    send_signed_message_in_tx, send_thread_notice_in_tx, thread_root_state_in_tx,
-    validate_quote_target_in_tx, validate_replies_root_in_tx, validate_thread_root_in_tx,
-    HistoryCursor, MessageSignature, MessageType, NewMessage, PagedMessage, QuoteTargetInvalid,
-    QuotedMessage, RepliesCursorInvalid, SendExtras, SendRejected, SentMessage, StoredMessage,
-    ThreadReplyPage, ThreadRollup, ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT,
-    HISTORY_LIMIT_MAX, REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
+    send_message_with_mentions_via_in_tx, send_signed_message_in_tx, send_thread_notice_in_tx,
+    thread_root_state_in_tx, validate_quote_target_in_tx, validate_replies_root_in_tx,
+    validate_thread_root_in_tx, HistoryCursor, MessageSignature, MessageType, NewMessage,
+    PagedMessage, QuoteTargetInvalid, QuotedMessage, RepliesCursorInvalid, SendExtras,
+    SendRejected, SentMessage, SentVia, StoredMessage, ThreadReplyPage, ThreadRollup,
+    ThreadRootInvalid, ThreadRootState, HISTORY_LIMIT_DEFAULT, HISTORY_LIMIT_MAX,
+    REPLIES_LIMIT_DEFAULT, REPLIES_LIMIT_MAX,
 };
 pub use notification_rule::{
     get_notification_rule_in_tx, get_push_kinds_in_tx, patch_notification_rule_in_tx,

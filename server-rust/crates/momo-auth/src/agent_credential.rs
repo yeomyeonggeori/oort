@@ -36,7 +36,9 @@ pub const DEFAULT_AGENT_CREDENTIAL_SCOPES: [&str; 5] = [
     "work:control",
 ];
 
-const GRANTABLE_AGENT_CREDENTIAL_SCOPES: [&str; 9] = [
+/// `pub(crate)` only so `dev_token`'s disjointness test (ADR-0216 R4) can name
+/// every grantable agent scope.
+pub(crate) const GRANTABLE_AGENT_CREDENTIAL_SCOPES: [&str; 9] = [
     "agent:jobs:read",
     "agent:runs:callback",
     "messages:read",

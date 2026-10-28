@@ -3,6 +3,7 @@
 - Status: **Accepted** (성재 방향 승인 2026-08-28 "읽기 연다" + shape 검토·확정을 Fable에 위임 · Fable 적대 검토 반영 D3·D4 정정 · Blocker 0). 정본 반영 최종 승인은 성재/`momo-main` 통합 시.
 - 근거: #1820 · #1797 조사 정본 `docs/planning/research/2026-08-27-ext1-agent-credential-external-tools.md` · ADR-0101(에이전트 정체성·자격) · ADR-0162(외부 에이전트 수신·Agent Port)
 - 관계: ADR-0162가 `messages:read`를 REST 표에서 의도적으로 뺀 결정을 **generic 자격에 한해** 넓힌다. hosted connection 경로는 불변.
+- 역방향: 2026-10-28 [ADR-0216](0216-oort-cli-terminal-access.md)(#4660)이 개인 개발자 도구에 한해 이 문장을 좁힌다. 가리키는 곳은 맥락의 「외부 도구(Claude Code·CI)는 사람 세션 자격(15분·회전)이 아니라 **generic agent credential**(장수명·유예 회전, ADR-0101)로 붙는 것이 제품 정체성과 맞고」다(ADR-0216 F12). 사람이 자기 터미널에서 쓰는 CLI·AI 도구는 사람 본인이 만드는 이름 붙은 자기 위임인 개발자 토큰(`momo_dev_v1`, 닫힌 라우트 표 L1~L8, 범위·채널 제한·「명령줄에서」 표식 `sentVia`)으로 붙는다. 동료·자동화(CI·planner·그록봇류)는 이 ADR 그대로 generic 에이전트 자격이다. D1(generic 자격에 읽기 개방)과 D2(범위는 active 멤버인 채널, 교차 채널 검색은 범위 밖)는 바꾸지 않았다.
 
 ## 맥락
 
