@@ -1385,7 +1385,9 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         peerId={peerId}
         directory={directory}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
+        // 가운데 알약은 단추다(#4319) — 정보 페이지로 가는 문이 있는 실제 대화 화면과 같은 모양으로 찍는다(머리 높이 불변이 이 하네스의 전제다).
+        onOpenInfo={() => {}}
         railStatus={status}
         onBannerInset={setBannerInset}
       />

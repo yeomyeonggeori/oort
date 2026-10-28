@@ -2,12 +2,12 @@ import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect} from 'react';
 import {
-  ActionSheetIOS,
   Image,
   type LayoutChangeEvent,
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -27,20 +27,28 @@ import {StatusDot} from '../presence/StatusDot';
 import {useOnline} from '../inbox/useOnline';
 import {Avatar} from './Avatar';
 import {CONV} from './convDesign';
+import {headerSlotWidth, pillShowsSecondary, pillStatusWord} from './headerPill';
 
 // =============================================================================
 // 대화 머리 — 시안 A `.a-hd` + owner 표의 Buzz 대조 (DS2-4 #2716).
 //
-//   [ ‹ ]  # agent-lab            [🎧] [ ⋮ ]
-//          6명 · 김인턴 참여 중
+//   [ ‹ ]      ( # agent-lab · 6명 )      [🎧] [ ⋮ ]
+//   [ ‹ ]      ( ◉ 김인턴 · 응답함 )          [ ⋮ ]
+//
+// 가운데 알약은 **단추 하나**다(#4319, owner 10-27 Buzz 대조): 이름과 상태가 한 덩어리로 눌려 대화·채널 정보 페이지를 연다. 알약은 원(뒤로·⋮)과
+// 같은 토큰 가족(`surface` + 가는 테두리 + 고도)이라 유리 띠 위에서 같은 층으로 읽힌다.
 //
 // * 뒤로는 42 원(`.a-cbtn`, surface + sh1). 옛 머리의 파란 「‹」 글자는 누르는
 //   자리가 보이지 않았다.
-// * 제목은 **왼쪽 정렬**이다. 시안은 가운데 제목 + 오른쪽 아바타 더미였지만 owner
-//   표가 오른쪽 자리를 「아이콘 액션(허들, ⋮)」으로 정했고, 오른쪽이 아이콘 둘이면
-//   가운데 제목은 좌우 폭이 달라 가운데가 아니게 된다(Buzz 도 왼쪽이다).
+// * 제목은 **가운데**다(#4319 — 이전 판은 왼쪽 정렬이었다). 오른쪽 아이콘 수가 달라 가운데가 아니게 되던 문제는 **양쪽 칸을 같은 폭**으로
+//   두어 푼다(`headerSlotWidth`): 뒤로의 칸이 오른쪽(⋮·허들 자리) 칸과 같은 폭을 비워 두고, 오른쪽이 비어도 원 하나 폭을 지킨다.
+// * **머리는 여전히 한 줄이다**(#4016, owner 「두 줄로 표시하니까 좀 구리네」): 이름 옆에 보조 글(DM 의 상태 낱말·채널의 멤버 수)이 나란히 선다.
+//   줄이 모자라면 **이름이 이기고 보조 글이 통째로 숨는다**(`headerPill.ts` 의 순수 규칙 — 큰 글씨·이름 바닥 미달). 긴 부제(「6명 · 김인턴 참여 중」)와
+//   긴 상태 판정은 정보 페이지가 말한다. 머리 높이(`row.minHeight` 62)는 알약 유무·보조 글 유무와 무관하다(#4292·#4613 의 측정이 이 높이에 기댄다).
 // * 오른쪽은 아이콘 원. 옛 머리의 빨간 글자 링크 「고정한 메시지」는 ⋮ 메뉴 안으로
 //   갔다 — 그 문은 매일 쓰는 것이 아니고, 머리 오른쪽을 글자 하나가 차지했다.
+//   ⋮ 가 여는 것은 시스템 액션 시트(제목 + 「취소」)가 아니라 앱의 **공용 행동 시트**다(#4319,
+//   `ConversationMenuSheet`) — 이 머리는 누름을 알릴 뿐이고 무엇이 서는지는 화면이 정한다. 알약이 여는 정보 페이지도 마찬가지다(`onOpenInfo`).
 // * 허들 헤드폰은 **자리만** 있다(`huddle` prop). 폰에는 허들이 없고
 //   (`realtime/channelRail.ts` 가 허들 레일을 받지 않는다), 없는 기능의 아이콘은
 //   누르면 아무 일도 안 하는 버튼이 된다. 생기는 날 호출자가 prop 을 준다.
@@ -59,11 +67,6 @@ import {CONV} from './convDesign';
 //   그 필들은 띠 밑에 쌓여야 하므로(안 그러면 필이 띠 뒤에 숨은 채 눌리는 컨트롤이 된다) 띠의 **실제** 높이를
 //   `onBannerInset` 으로 알린다 — 글자 크기에 따라 띠 높이가 달라서 상수로 둘 수 없다.
 // =============================================================================
-
-export interface ConversationHeaderMenuItem {
-  label: string;
-  run: () => void;
-}
 
 /** 머리 오른쪽 허들 자리. 기능이 생기면 호출자가 준다. */
 export interface HuddleSlot {
@@ -85,32 +88,45 @@ export function connectionBannerText(status: RealtimeStatus): string | null {
 
 export function ConversationHeader({
   title,
-  subtitle,
+  memberCount,
   kind,
   peerId,
   peerStatusTone = null,
   peerStatusLabel,
   directory,
   onBack,
-  menu,
+  onOpenMenu,
+  onOpenInfo,
   huddle,
   railStatus,
   onBannerInset,
   titleTestID = 'conversation-title',
 }: {
   title: string;
-  subtitle?: string;
+  /** 채널 알약의 보조 글 — 짧은 멤버 수(「6명」). 긴 부제(「6명 · 김인턴 참여 중」)는 정보 페이지의 것이다. 모르면 없다. */
+  memberCount?: string;
   kind: 'public' | 'private' | 'dm' | undefined;
   /** DM 상대. 있으면 제목 앞에 그 얼굴(28)이 선다. */
   peerId?: string | null;
   /** DM 상대의 상태 점 톤(#4016). 없으면 점이 없다. 판정은 호출자가 core 로 한다. */
   peerStatusTone?: StatusDotTone | null;
-  /** 점의 낱말(「꺼짐」 등). 점은 낭독에서 숨으므로 제목 라벨이 이 낱말을 대신 읽는다(홈 DM 줄과 같은 규칙). */
+  /**
+   * 점의 낱말(「꺼짐」 등). 점은 낭독에서 숨으므로 제목 라벨이 이 낱말을 대신 읽는다(홈 DM 줄과 같은 규칙). 눈에는 알약의 보조 글로도 선다
+   * (#4319) — 코어의 긴 판정(「조용함 · 마지막 응답 5분 전」)은 ` · ` 앞 낱말만(`pillStatusWord`).
+   */
   peerStatusLabel?: string;
   directory: Directory;
   onBack: () => void;
-  /** ⋮ 메뉴 항목. 비면 ⋮ 원을 세우지 않는다. */
-  menu: readonly ConversationHeaderMenuItem[];
+  /**
+   * ⋮ 를 누르면 부른다 — 무엇이 열리는가(공용 행동 시트, `ConversationMenuSheet`)는 호출자의 일이다. 없으면 ⋮ 원을 세우지 않는다:
+   * 열 것이 없는 원은 누르면 아무 일도 안 하는 버튼이다(허들 자리와 같은 규칙).
+   */
+  onOpenMenu?: () => void;
+  /**
+   * 가운데 알약을 누르면 부른다 — 대화·채널 정보 페이지(`ConversationInfoPage`)를 여는 것은 화면의 일이다. 없으면 알약은 **단추가 아니다**:
+   * 이름만 선다(누르면 아무 일도 없는 단추는 없다 — ⋮·허들 자리와 같은 규칙).
+   */
+  onOpenInfo?: () => void;
   huddle?: HuddleSlot;
   railStatus: RealtimeStatus;
   /**
@@ -127,6 +143,7 @@ export function ConversationHeader({
   // 기기가 오프라인이면(NetInfo) 레일 재시도가 닿을 수 없다. 웹 배너의 browser-offline 과 같은 규칙으로
   // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
   const online = useOnline();
+  const {width: windowWidth, fontScale} = useWindowDimensions();
 
   const onBannerLayout = useCallback(
     (event: LayoutChangeEvent) => onBannerInset?.(event.nativeEvent.layout.height),
@@ -137,104 +154,136 @@ export function ConversationHeader({
     if (banner === null) onBannerInset?.(0);
   }, [banner, onBannerInset]);
 
-  const openMenu = useCallback(() => {
-    ActionSheetIOS.showActionSheetWithOptions(
-      {
-        title,
-        options: [...menu.map(item => item.label), '취소'],
-        cancelButtonIndex: menu.length,
-      },
-      index => menu[index]?.run(),
-    );
-  }, [menu, title]);
+  // ---- 가운데 알약 -----------------------------------------------------------
+  const isDm = kind === 'dm' && Boolean(peerId);
+  const isChannel = kind === 'public' || kind === 'private';
+  const hasStatus = peerStatusTone !== null && Boolean(peerStatusLabel);
+  const slotWidth = headerSlotWidth({huddle: huddle !== undefined, menu: onOpenMenu !== undefined});
+  // 보조 글: DM 은 상태 낱말, 채널은 멤버 수. 줄이 모자라면 이름이 이기고 보조 글이 통째로 숨는다(`headerPill.ts`).
+  const secondaryText = isDm ? (hasStatus ? pillStatusWord(peerStatusLabel) : null) : isChannel ? (memberCount ?? null) : null;
+  const showSecondary =
+    secondaryText !== null &&
+    pillShowsSecondary({
+      name: title,
+      secondary: secondaryText,
+      leading: isDm ? CONV.titleFace : CONV.titleGlyph,
+      windowWidth,
+      fontScale,
+      slotWidth,
+    });
+  // 알약은 단추 하나라 낭독도 한 문장이다: 이름 · 상태(또는 멤버 수) · 「… 정보 열기」. 점·보조 글은 안쪽에서 숨고 이 이름이 대신 읽는다.
+  const infoName = isDm ? '대화 정보 열기' : '채널 정보 열기';
+  const pillLabel = [title, isDm ? (hasStatus ? peerStatusLabel : undefined) : memberCount, infoName]
+    .filter(Boolean)
+    .join(', ');
+  const body = (
+    <>
+      {isDm ? (
+        <View style={styles.face} testID="conversation-title-face">
+          <Avatar directory={directory} memberId={peerId as string} size={CONV.titleFace} ground="muted" />
+          {peerStatusTone !== null ? (
+            <View style={styles.statusAnchor}>
+              <StatusDot tone={peerStatusTone} testID="conversation-title-status-dot" />
+            </View>
+          ) : null}
+        </View>
+      ) : isChannel ? (
+        <Image
+          accessibilityElementsHidden
+          source={kind === 'private' ? HOME_ICONS.lock : HOME_ICONS.hash}
+          style={[styles.titleGlyph, {tintColor: palette.text}]}
+          testID={`conversation-title-glyph-${kind}`}
+        />
+      ) : null}
+      <Text
+        accessibilityRole="header"
+        accessibilityLabel={
+          peerStatusTone !== null && peerStatusLabel ? `${title}, ${peerStatusLabel}` : undefined
+        }
+        style={styles.title}
+        numberOfLines={1}
+        ellipsizeMode="tail"
+        maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+        testID={titleTestID}>
+        {title}
+      </Text>
+      {showSecondary ? (
+        <Text
+          style={styles.secondary}
+          numberOfLines={1}
+          maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
+          testID={isDm ? 'conversation-title-status' : 'conversation-member-count'}>
+          {secondaryText}
+        </Text>
+      ) : null}
+    </>
+  );
 
   return (
     <View testID="conversation-header" style={styles.root}>
       <GlassSurface radius={0} style={[styles.band, {paddingTop: insets.top}]}>
-        <View style={styles.row}>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="뒤로"
-            onPress={onBack}
-            hitSlop={CIRCLE_SLOP}
-            style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
-            testID="header-back">
-            <Image
-              source={CONV_ICONS.left}
-              style={[styles.icon22, {tintColor: palette.text}]}
-            />
-          </Pressable>
-          <View style={styles.titleBlock}>
-            <View style={styles.titleLine}>
-              {kind === 'dm' && peerId ? (
-                <View style={styles.face} testID="conversation-title-face">
-                  <Avatar directory={directory} memberId={peerId} size={CONV.titleFace} ground="muted" />
-                  {peerStatusTone !== null ? (
-                    <View style={styles.statusAnchor}>
-                      <StatusDot tone={peerStatusTone} testID="conversation-title-status-dot" />
-                    </View>
-                  ) : null}
-                </View>
-              ) : kind === 'public' || kind === 'private' ? (
+        <View style={styles.row} testID="conversation-header-row">
+          <View style={[styles.slot, {width: slotWidth}]} testID="conversation-header-start">
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="뒤로"
+              onPress={onBack}
+              hitSlop={CIRCLE_SLOP}
+              style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+              testID="header-back">
+              <Image
+                source={CONV_ICONS.left}
+                style={[styles.icon22, {tintColor: palette.text}]}
+              />
+            </Pressable>
+          </View>
+          <View style={styles.center} testID="conversation-header-center">
+            {onOpenInfo ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={pillLabel}
+                onPress={onOpenInfo}
+                hitSlop={PILL_SLOP}
+                style={({pressed}) => [styles.pill, pressed && styles.pillPressed]}
+                testID="conversation-info-button">
+                {body}
+              </Pressable>
+            ) : (
+              <View style={styles.titleLine} testID="conversation-title-line">
+                {body}
+              </View>
+            )}
+          </View>
+          <View style={[styles.slot, styles.slotEnd, {width: slotWidth}]} testID="conversation-header-end">
+            {huddle ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={huddle.label}
+                onPress={huddle.onPress}
+                hitSlop={CIRCLE_SLOP}
+                style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+                testID="conversation-huddle">
                 <Image
-                  accessibilityElementsHidden
-                  source={kind === 'private' ? HOME_ICONS.lock : HOME_ICONS.hash}
-                  style={[styles.titleGlyph, {tintColor: palette.text}]}
-                  testID={`conversation-title-glyph-${kind}`}
+                  source={CONV_ICONS[huddle.icon]}
+                  style={[styles.icon20, {tintColor: palette.text}]}
                 />
-              ) : null}
-              <Text
-                accessibilityRole="header"
-                accessibilityLabel={
-                  peerStatusTone !== null && peerStatusLabel ? `${title}, ${peerStatusLabel}` : undefined
-                }
-                style={styles.title}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                testID={titleTestID}>
-                {title}
-              </Text>
-            </View>
-            {subtitle ? (
-              <Text
-                style={styles.subtitle}
-                numberOfLines={1}
-                maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
-                testID="conversation-subtitle">
-                {subtitle}
-              </Text>
+              </Pressable>
+            ) : null}
+            {onOpenMenu ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="대화 메뉴"
+                onPress={onOpenMenu}
+                hitSlop={CIRCLE_SLOP}
+                style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
+                testID="conversation-menu">
+                <Image
+                  source={CONV_ICONS.kebab}
+                  style={[styles.icon20, {tintColor: palette.text}]}
+                />
+              </Pressable>
             ) : null}
           </View>
-          {huddle ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={huddle.label}
-              onPress={huddle.onPress}
-              hitSlop={CIRCLE_SLOP}
-              style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
-              testID="conversation-huddle">
-              <Image
-                source={CONV_ICONS[huddle.icon]}
-                style={[styles.icon20, {tintColor: palette.text}]}
-              />
-            </Pressable>
-          ) : null}
-          {menu.length > 0 ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="대화 메뉴"
-              accessibilityHint={menu.map(item => item.label).join(', ')}
-              onPress={openMenu}
-              hitSlop={CIRCLE_SLOP}
-              style={({pressed}) => [styles.circle, pressed && styles.circlePressed]}
-              testID="conversation-menu">
-              <Image
-                source={CONV_ICONS.kebab}
-                style={[styles.icon20, {tintColor: palette.text}]}
-              />
-            </Pressable>
-          ) : null}
         </View>
       </GlassSurface>
       {banner ? (
@@ -265,6 +314,8 @@ export function ConversationHeader({
 
 /** 42 원을 44 로 만드는 여유 — 한 변에 1. */
 const CIRCLE_SLOP = (TOUCH_TARGET - CONV.circle) / 2;
+/** 알약(최소 높이 42)을 엄지에 44 로 만드는 여유 — 위아래 한 변에 1. 가로는 이미 넉넉하다. */
+const PILL_SLOP = {top: CIRCLE_SLOP, bottom: CIRCLE_SLOP} as const;
 
 /**
  * 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20: 글자 대비 1.67배로
@@ -300,8 +351,33 @@ const buildStyles = (color: Palette) =>
     circlePressed: {backgroundColor: color.surfacePressed},
     icon22: {width: CONV_ICON_SIZE.left, height: CONV_ICON_SIZE.left},
     icon20: {width: CONV_ICON_SIZE.kebab, height: CONV_ICON_SIZE.kebab},
-    titleBlock: {flex: 1, minWidth: 0},
-    titleLine: {flexDirection: 'row', alignItems: 'center', gap: space.xs},
+    // 양쪽 칸은 폭이 같다(`headerSlotWidth`, 인라인) — 가운데 알약이 정말 가운데에 선다. 뒤로의 칸은 왼쪽 정렬, 오른쪽 칸은 원들이 오른쪽 끝에 붙는다.
+    slot: {flexDirection: 'row', alignItems: 'center', gap: CONV.headGap},
+    slotEnd: {justifyContent: 'flex-end'},
+    center: {flex: 1, minWidth: 0, alignItems: 'center', justifyContent: 'center'},
+    // 눌리지 않는 이름(`onOpenInfo` 없음): 캡슐 모양 없이 이름만 선다 — 단추처럼 보이는 것이 단추가 아닌 일은 없다.
+    titleLine: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: CONV.headPillGap,
+      maxWidth: '100%',
+      minHeight: CONV.circle,
+    },
+    // 가운데 알약 — 원(뒤로·⋮)과 같은 토큰 가족이라 유리 띠 위에서 같은 층이다. 최소 높이가 원과 같아 머리 줄(62)이 움직이지 않는다.
+    pill: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: CONV.headPillGap,
+      maxWidth: '100%',
+      minHeight: CONV.circle,
+      paddingHorizontal: CONV.headPillPadX,
+      borderRadius: CONV.circle / 2,
+      backgroundColor: color.surface,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: color.border,
+      boxShadow: color.elevationRest,
+    },
+    pillPressed: {backgroundColor: color.surfacePressed},
     face: {width: CONV.titleFace, height: CONV.titleFace},
     statusAnchor: {position: 'absolute', right: -2, bottom: -2},
     titleGlyph: {width: CONV.titleGlyph, height: CONV.titleGlyph},
@@ -312,7 +388,8 @@ const buildStyles = (color: Palette) =>
       letterSpacing: CONV.titleTracking,
       color: color.text,
     },
-    subtitle: {fontSize: font.meta, color: color.textMuted},
+    // 보조 글은 줄어들지 않는다(`flexShrink: 0`) — 줄어드는 것은 이름이다. 모자라면 규칙(`pillShowsSecondary`)이 통째로 숨긴다.
+    secondary: {flexShrink: 0, fontSize: font.meta, color: color.textMuted},
     // 머리 뿌리: 뒤 형제(목록)보다 위에 그려져야 매달린 띠가 목록 밑으로 숨지 않는다. 뿌리의 크기는 띠가
     // 서든 말든 같다(띠는 아래 `bannerLayer` 가 흐름 밖에서 진다).
     // **이 `zIndex` 는 호출자가 틀로 봉인해야 한다**: RN 새 아키텍처에서 `zIndex` 는 형제의 그리기·누르기 순서를 트리 순서보다 앞세우므로,

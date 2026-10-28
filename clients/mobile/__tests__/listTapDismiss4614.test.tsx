@@ -63,7 +63,7 @@ function message(over: Partial<Message> = {}): Message {
   };
 }
 
-const ROOT = message({id: ROOT_ID, seq: 10, body: `일정표는 이 링크에서 보세요 ${LINK}`});
+const ROOT = message({id: ROOT_ID, seq: 10, body: `일정표는 이 링크에서 보세요 ${LINK} @dohyun`});
 const REPLY = message({
   id: 'reply-1',
   seq: 11,
@@ -261,7 +261,8 @@ describe('요소별 표 — 자기 동작은 그대로, 같은 탭의 끝에서 
   }[] = [
     {name: '링크', testID: 'message-link', own: () => Linking.openURL as unknown as jest.SpyInstance},
     {name: '아바타', testID: 'profile-avatar-target', own: actions => actions.onOpenProfile},
-    {name: '작성자 줄', testID: 'profile-author-target', own: actions => actions.onOpenProfile},
+    // 이름 줄은 문이 아니다(#4666) — 프로필 문은 얼굴과 멘션뿐이다.
+    {name: '멘션', testID: 'message-mention', own: actions => actions.onOpenProfile},
     {name: '스레드 롤업', testID: 'thread-rollup', own: actions => actions.onOpenThread},
     {name: '답글 표식', testID: 'reply-marker', own: actions => actions.onOpenThread},
     {name: '반응 칩', testID: 'reaction-chip-👍', own: actions => actions.onToggleReaction},

@@ -68,7 +68,7 @@ const noop = () => {};
 
 const WORKSPACE_NOTE = '달무리 스튜디오';
 
-function Backdrop({children}: {children?: React.ReactNode}): React.JSX.Element {
+export function Backdrop({children}: {children?: React.ReactNode}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   return (
