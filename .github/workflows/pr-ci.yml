@@ -199,12 +199,28 @@ jobs:
           #     `scripts/tests/test_pr_ci_guardrails.sh`가
           #     `pr_ci_rust_external_inputs.py`로 그 경로를 소스에서 뽑아 이
           #     필터가 덮는지 확인한다. 새 참조가 생기면 그 시험이 빨개진다.
+          # 레인 매칭은 파이프가 아니라 **파일**을 읽는다(#4728). `printf … | grep -q`는
+          # grep 이 첫 일치에서 먼저 끝나면 printf 가 SIGPIPE(141)를 받고, pipefail 이 그
+          # 줄을 "불일치"로 읽어 레인이 통째로 false 가 된다(파일 수백 개부터 재현). 그러면
+          # rust·보안 팩·node·policy 가 모두 skip 인데 gate 는 초록이라 필수 검사가 조용히
+          # 빠진다. 새 레인 줄도 `lane_hit`을 쓴다 — 파이프로 되돌리지 않는다.
+          # grep 종료 코드는 0 일치 · 1 불일치뿐이다. 그 밖(정규식·I/O 오류)은 "불일치"가
+          # 아니라 분류 실패라서 step 을 실패시킨다(changes 잡 실패 → gate 빨강).
+          list="$RUNNER_TEMP/pr-$PR-changed-paths.txt"
+          printf '%s\n' "$files" > "$list" || run_all "could not write changed path list"
+          lane_hit() {
+            local rc=0
+            grep -Eq "$1" "$list" || rc=$?
+            [ "$rc" -le 1 ] || { echo "::error::lane classifier failed: grep exit $rc"; exit 1; }
+            return "$rc"
+          }
+
           rust=false
           node=false
-          printf '%s\n' "$files" | grep -Eq \
+          lane_hit \
             '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/openapi\.yaml$|docs/api/[^/]+\.golden\.json$|docs/api/[^/]+\.vectors?\.json$|server/Migrations/|server/Fixtures/plugin-manifests/|server/Fixtures/plugin-wire/|infra/rust/sql/|infra/security-pack/|scripts/security_pack\.sh$|scripts/tests/test_security_pack\.sh$|infra/([^/]+/)*centrifugo[^/]*\.json$|docs/SELF_HOST_AGENT\.md$|scripts/desktop/build_workd_sidecar\.sh$|packages/momo-core/src/lib/http\.ts$|packages/momo-core/src/features/ai/aiHubModel\.ts$|packages/momo-core/src/features/timeline/|packages/momo-core/src/features/auth/__fixtures__/|packages/momo-core/src/features/workbench/__fixtures__/|clients/web/src/lib/session\.ts$|clients/web/src/features/settings/settingsNav\.ts$|clients/web/src/design/tokens\.css$|clients/web/src/features/work/__fixtures__/|clients/mobile/__tests__/fixtures/|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
-          printf '%s\n' "$files" | grep -Eq \
+          lane_hit \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
 
@@ -225,7 +241,7 @@ jobs:
           # 그래서 policy=true ⊇ rust=true 다. 그 밖의 경로만 바뀐 PR(웹·폰·코어·문서)은
           # 정책 회귀를 건너뛴다 — gate 가 선택/결과를 교차검증해 조용한 skip 은 빨강이다.
           policy="$rust"
-          printf '%s\n' "$files" | grep -Eq \
+          lane_hit \
             '^(scripts/|\.github/|REVIEW\.md$|AGENTS\.md$|CONTRIBUTING\.md$|deny\.toml$|osv-scanner\.toml$|docs/security/claims\.yaml$|docs/GITHUB_OPS\.md$|docs/LOCAL_PR_GATE\.md$|docs/TRACKS\.md$|docs/adr/0153-ci-stack-selfhosted-runners\.md$)' \
             && policy=true
 
