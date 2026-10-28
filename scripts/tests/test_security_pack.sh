@@ -122,6 +122,15 @@ q_red missing-file "시험 파일이 없어요" "fake nope_pg red_probe_two #900
 q_red no-ignore "#[ignore] 시험이 없어요" "fake noignore_pg a #9001 $SOON $WHY"
 q_red missing-fn "시험 함수가 없어요" "$(qline red_probe_gone '#9001' "$SOON" "$WHY")"
 q_red ambiguous "함수 2개와 맞아요" "$(qline red_probe_one '#9001' "$SOON" "$WHY")"
+# 보안 주장(docs/security/claims.yaml)의 증거 시험은 격리할 수 없다.
+r="$TMP/q-claim-proof"; mk_quar_tree "$r"; mkdir -p "$r/docs/security"
+printf '    proofs:\n      - "server-rust/crates/fake/tests/quar_pg.rs#red_probe_two"\n' >"$r/docs/security/claims.yaml"
+qline red_probe_two '#9001' "$SOON" "$WHY" >"$r/infra/security-pack/nightly-quarantine.txt"
+if out="$(lint_in "$r")"; then fail "격리 claim-proof: 보안 주장의 증거 시험이 격리돼요"; fi
+grep -Fq '보안 주장' <<<"$out" || fail "격리 claim-proof: 다른 이유로 빨강 — $out"
+qline red_probe_one_extended '#9001' "$SOON" "$WHY" >"$r/infra/security-pack/nightly-quarantine.txt"
+sed -i.bak 's/^fake quar_pg/fake amb_pg/' "$r/infra/security-pack/nightly-quarantine.txt"; rm -f "$r/infra/security-pack/nightly-quarantine.txt.bak"
+lint_in "$r" >/dev/null || fail "격리 claim-proof: 증거가 아닌 시험까지 막아요"
 # 같은 이름의 함수가 다른 파일에도 있으면 `--skip` 이 둘 다 빼므로 빨강이어야 한다(이름 기준 중복 제거 금지).
 r="$TMP/q-dup-name"; mk_quar_tree "$r"
 printf '#[tokio::test]\n#[ignore]\nasync fn red_probe_two() {}\n' >"$r/server-rust/crates/fake/tests/dup_pg.rs"
@@ -254,4 +263,4 @@ rm "$rn/infra/security-pack/nightly-quarantine.txt"; : >"$calls"; mk_fake_cargo 
 out="$(nightly_in "$rn" "$TMP/nt-bin-ok")" || fail "nightly: 격리가 없고 전량이 초록인데 빨강 — $out"
 grep -Fq -- 'quar_pg' "$calls" && fail "nightly: 격리 목록이 없는데 격리 실행이 돌았어요"
 want_in "nightly(격리 없음)" "$out" '격리: 없음'
-echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종 + 격리 lint 대조군 2·음성 13종 + 요약 12종 + nightly 흐름 7종)"
+echo "test_security_pack: OK (lint 음성 7종 + 워크플로 배선 변이 8종 + 격리 lint 대조군 3·음성 14종 + 요약 12종 + nightly 흐름 7종)"

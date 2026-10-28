@@ -120,6 +120,10 @@ cmd_quarantine_lint() {
     grep -Eq '#\[ignore' "$file" || die "격리: #[ignore] 시험이 없어요(야간 --ignored 가 돌리지 않는 파일): ${file#"$ROOT"/}"
     grep -Eq "fn[[:space:]]+${tname}[[:space:]]*\(" "$file" \
       || die "격리: ${file#"$ROOT"/} 에 시험 함수가 없어요(이름이 바뀌었나요?): $tname"
+    # 보안 주장의 증거(proofs·sabotage.evidence)는 격리할 수 없다 — 격리하면 문서의 주장이 조용히 약해진다.
+    if [ -f "$ROOT/docs/security/claims.yaml" ] && grep -Fq "tests/$target.rs#$tname" "$ROOT/docs/security/claims.yaml"; then
+      die "격리: 보안 주장(docs/security/claims.yaml)의 증거 시험은 격리할 수 없어요: $pkg/$target $tname"
+    fi
     # --skip 은 부분 문자열이라 이름이 다른 시험(또 다른 파일의 같은 이름 함수 포함)에도 맞으면 그 시험까지
     # 조용히 빠진다 → 정의 하나에만 맞아야 한다(그래서 중복 제거(sort -u)를 하지 않는다).
     hits="$(grep -rhoE --exclude-dir=target --include='*.rs' "fn[[:space:]]+[A-Za-z0-9_]*${tname}[A-Za-z0-9_]*[[:space:]]*\(" "$ROOT/server-rust" | wc -l | tr -d ' ')"

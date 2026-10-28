@@ -1,0 +1,23 @@
+# oort 야간(security-nightly) 격리 목록 (#4707). scripts/security_pack.sh 가 읽는다.
+#
+# 야간이 초록이어야 그 시험이 있는 것이다. 지금 못 고치는 `#[ignore]` PG 시험만 여기에 올린다.
+# 이 목록에 없는 시험이 야간에서 빨강이면 야간이 빨강이다 — 아무도 지키지 않는 시험을 늘리지 않는다.
+#
+# 형식: <cargo 패키지> <시험 타깃(tests/<타깃>.rs)> <시험 함수 이름> <#소유 이슈> <기한 YYYY-MM-DD> <사유…>
+#   - 시험 함수 이름은 워크스페이스에서 함수 정의 하나에만 맞아야 한다(`--skip` 은 부분 문자열이다). lint 가 본다.
+#   - 기한은 올리는 날부터 60일 이내(lint). 지나면 야간이 빨강이 된다 — 고치거나, 사유를 바꿔 기한을
+#     다시 정하거나(리뷰 필요) 줄을 지운다.
+#   - 격리 시험은 전량 실행에서 빠지지만 따로 계속 돌아, 결과가 야간 요약 표에 늘 보인다.
+#     통과하면 요약이 「통과 — 목록에서 뺄 수 있어요」로 알려 준다.
+#   - 보안 주장(docs/security/claims.yaml)의 증거 시험은 격리할 수 없다(lint).
+#
+# ── #4729: 기억 평가 자리표시 RED(DB 없는 심이라 이 바이너리에선 영영 연결 불가) ─────────────────────
+momo-agent memory_eval red_permission_leaks_are_zero #4729 2026-12-15 자리표시 RED: 이 바이너리의 product_backend() 는 DB 없는 심이라 연결 불가, 같은 기준은 memory_serving_eval_pg·memory_eval_items_pg 가 지킴
+momo-agent memory_eval red_decision_tracking_meets_threshold #4729 2026-12-15 자리표시 RED: 이 바이너리의 product_backend() 는 DB 없는 심이라 연결 불가, 같은 기준은 memory_eval_items_pg 가 지킴
+momo-agent memory_eval red_collection_policy_and_provenance_hold #4729 2026-12-15 자리표시 RED: 이 바이너리의 product_backend() 는 DB 없는 심이라 연결 불가, 같은 기준은 memory_eval_items_pg 가 지킴
+momo-agent memory_eval red_commitments_are_recalled_with_owner_and_evidence #4729 2026-12-15 자리표시 RED: 약속 회상 축은 PG 평가에 아직 연결되지 않음
+# ── #4730: 야간 러너에 없는 실제 도구가 필요한 시험 ──────────────────────────────────────────────────
+momo-agent-worker memory_embed_conformance_pg real_model_recall_through_the_serving_sql #4730 2026-11-30 ONNX 런타임(ORT_DYLIB_PATH)과 e5 모델 디렉터리(MOMO_EMBED_MODEL_DIR)가 야간 러너에 없음
+momo-server box_runner_e2e the_runner_creates_starts_stops_and_deletes_a_real_hardened_box #4730 2026-11-30 Docker + momo-box-runner + 박스 이미지(MOMO_M2_E2E_*)가 필요, 지금은 infra/personal-box/verify-m2.sh 가 구동
+momo-workd codex_isolation_real a_codex_command_sees_no_credential_from_the_host_or_the_owners_shell_files #4730 2026-11-30 codex-cli 0.155.1 바이너리(MOMO_WORKD_CODEX_BIN)가 야간 러너에 없음
+momo-workd codex_isolation_real codex_loads_no_skill_from_the_owners_home #4730 2026-11-30 codex-cli 0.155.1 바이너리(MOMO_WORKD_CODEX_BIN)가 야간 러너에 없음

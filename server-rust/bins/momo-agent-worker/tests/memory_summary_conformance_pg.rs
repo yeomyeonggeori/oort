@@ -626,6 +626,17 @@ async fn every_memory_write_runs_as_momo_memory_and_the_worker_reads_no_mem_tabl
             .fetch_all(&su)
             .await
             .unwrap();
+    // The probe has done its job: drop all of it *before* any assertion can fail. A table without RLS
+    // and a SECURITY DEFINER function without a pinned search_path, left in the shared database,
+    // turn tenant_catalog_pg and the momo-db conformance suite red in the nightly full run (they
+    // read the whole catalog).
+    for ddl in [
+        "DROP TRIGGER IF EXISTS probe_3162_trg ON mem_digest",
+        "DROP FUNCTION IF EXISTS probe_3162_fn()",
+        "DROP TABLE IF EXISTS probe_3162",
+    ] {
+        sqlx::query(ddl).execute(&su).await.unwrap();
+    }
     assert!(!probes.is_empty(), "the probe saw the digest write");
     for (role, login, ws) in &probes {
         assert_eq!(
@@ -747,10 +758,6 @@ async fn every_memory_write_runs_as_momo_memory_and_the_worker_reads_no_mem_tabl
             "{name} reads/writes a mem_ table directly: {hits:?}"
         );
     }
-    sqlx::query("DROP TRIGGER IF EXISTS probe_3162_trg ON mem_digest")
-        .execute(&su)
-        .await
-        .unwrap();
     reset_instance(&su).await;
 }
 
