@@ -199,9 +199,9 @@ node_jobs_compliant() {
 
 # shellcheck disable=SC2016 # Literal workflow shell contracts, not expansions.
 gate_job_compliant() {
-  local gate="$1" dependency result selected
+  local gate="$1" dependency wiring
   [ -n "$gate" ] || return 1
-  for dependency in changes alignment gitleaks advisories policy rust node_core node_web node_mobile; do
+  for dependency in changes alignment gitleaks advisories policy rust security_pack node_core node_web node_mobile; do
     grep -Fxq "      - $dependency" <<<"$gate" || return 1
   done
   if grep -Fq "      - contract" <<<"$gate"; then
@@ -212,11 +212,15 @@ gate_job_compliant() {
   if grep -Fxq "      - node" <<<"$gate"; then
     return 1
   fi
-  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT ADVISORIES_RESULT POLICY_RESULT RUST_RESULT NODE_CORE_RESULT NODE_WEB_RESULT NODE_MOBILE_RESULT; do
-    grep -Fq "      ${result}: \${{ needs." <<<"$gate" || return 1
-  done
-  for selected in POLICY_SELECTED RUST_SELECTED NODE_SELECTED; do
-    grep -Fq "      ${selected}: \${{ needs.changes.outputs." <<<"$gate" || return 1
+  # Every *_RESULT env var reads its OWN job, as an exact line. A result wired to a
+  # neighbour (NODE_WEB_RESULT from node_core, say) keeps the job in `needs` and the
+  # require_optional_lane line in place, yet lets that job fail unseen (#4696).
+  for wiring in \
+    CHANGES_RESULT:changes ALIGNMENT_RESULT:alignment GITLEAKS_RESULT:gitleaks \
+    ADVISORIES_RESULT:advisories POLICY_RESULT:policy RUST_RESULT:rust \
+    SECURITY_PACK_RESULT:security_pack NODE_CORE_RESULT:node_core \
+    NODE_WEB_RESULT:node_web NODE_MOBILE_RESULT:node_mobile; do
+    grep -Fxq "      ${wiring%%:*}: \${{ needs.${wiring#*:}.result }}" <<<"$gate" || return 1
   done
   grep -Fq "      POLICY_SELECTED: \${{ needs.changes.outputs.policy }}" <<<"$gate" || return 1
   grep -Fq "      RUST_SELECTED: \${{ needs.changes.outputs.rust }}" <<<"$gate" || return 1
@@ -232,6 +236,7 @@ gate_job_compliant() {
   # selected lane that was skipped (or an unselected one that ran) is red.
   grep -Fxq '          require_optional_lane "$POLICY_SELECTED" "$POLICY_RESULT" policy' <<<"$gate" || return 1
   grep -Fxq '          require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust' <<<"$gate" || return 1
+  grep -Fxq '          require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack' <<<"$gate" || return 1
   grep -Fxq '          require_optional_lane "$NODE_SELECTED" "$NODE_CORE_RESULT" node_core' <<<"$gate" || return 1
   grep -Fxq '          require_optional_lane "$NODE_SELECTED" "$NODE_WEB_RESULT" node_web' <<<"$gate" || return 1
   grep -Fxq '          require_optional_lane "$NODE_SELECTED" "$NODE_MOBILE_RESULT" node_mobile' <<<"$gate" || return 1
@@ -579,8 +584,15 @@ for node_job_name in node_core node_web node_mobile; do
   mutate_in_job "$node_job_name-unconditional" "$node_job_name" "    if: needs.changes.outputs.node == 'true'"
   mutate_in_job "$node_job_name-no-needs" "$node_job_name" '    needs: changes'
 done
-# shellcheck disable=SC2016 # Literal workflow shell line, not an expansion.
-mutate_in_job gate-ignores-rust gate '          require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust'
+# shellcheck disable=SC2016 # Literal workflow shell lines, not expansions.
+{
+  mutate_in_job gate-ignores-rust gate '          require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust'
+  # The security pack is a required lane too: dropping it from `needs`, from the
+  # env, or from the selection cross-check each lets it fail (or never run) unseen.
+  mutate_in_job gate-drops-security-pack gate '      - security_pack'
+  mutate_in_job gate-ignores-security-pack gate '          require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack'
+  mutate_in_job gate-security-pack-result-unset gate '      SECURITY_PACK_RESULT: ${{ needs.security_pack.result }}'
+}
 
 insert_after_in_job() { # <name> <job> <anchor line> <inserted line>
   awk -v marker="  $2:" -v anchor="$3" -v ins="$4" '
@@ -613,6 +625,18 @@ mutate_sed alignment-checker-from-pr 's#git show "origin/main:scripts/check_trac
 # The gate's own selection mapping and its two always-required results.
 mutate_sed policy-selection-mapped-to-rust 's/POLICY_SELECTED: \${{ needs.changes.outputs.policy }}/POLICY_SELECTED: ${{ needs.changes.outputs.rust }}/'
 mutate_sed rust-selection-mapped-to-node 's/      RUST_SELECTED: \${{ needs.changes.outputs.rust }}/      RUST_SELECTED: ${{ needs.changes.outputs.node }}/'
+# Each *_RESULT env var reads its own job: wiring one to a neighbour's result keeps
+# the job in `needs` and its require_optional_lane line in place, yet lets that job
+# fail unseen. One mutant per variable (<VAR>:<own job>:<neighbour job>).
+for wiring in \
+  CHANGES_RESULT:changes:alignment ALIGNMENT_RESULT:alignment:changes GITLEAKS_RESULT:gitleaks:changes \
+  ADVISORIES_RESULT:advisories:changes POLICY_RESULT:policy:alignment RUST_RESULT:rust:changes \
+  SECURITY_PACK_RESULT:security_pack:rust NODE_CORE_RESULT:node_core:node_web \
+  NODE_WEB_RESULT:node_web:node_core NODE_MOBILE_RESULT:node_mobile:node_core; do
+  IFS=: read -r wired_var wired_job wired_other <<<"$wiring"
+  mutate_sed "gate-${wired_var}-read-from-${wired_other}" \
+    "s/      ${wired_var}: \\\${{ needs.${wired_job}.result }}/      ${wired_var}: \\\${{ needs.${wired_other}.result }}/"
+done
 # shellcheck disable=SC2016 # Literal workflow shell lines, not expansions.
 {
   mutate_sed changes-result-optional '/test "$CHANGES_RESULT" = success/d'
