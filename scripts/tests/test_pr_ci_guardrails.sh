@@ -719,7 +719,9 @@ assert_filter_fixture() {
     RUNNER_TEMP="$fixture_dir/runner" \
     GH_TOKEN=test REPO=example/oort PR=42 \
     bash -e "$FILTER_SCRIPT" > "$fixture_dir/log" 2>&1; then
-    sed 's/^/[classifier] /' "$fixture_dir/log" >&2
+    # The log starts with the changed-path list (up to 2,999 lines for the big-PR
+    # fixtures) and ends with the reason, so show the tail.
+    tail -n 40 "$fixture_dir/log" | sed 's/^/[classifier] /' >&2
     fail "$name classifier fixture exited non-zero"
   fi
 
@@ -1044,7 +1046,7 @@ expect_lane_lost() { # <classifier script> <lane> <assert_big_pr args...> -> red
     fail "a classifier with the old pipe form for the $lane lane was accepted: $*"
   fi
   grep -Fq "expected $lane=true, got false" <<<"$out" \
-    || fail "the old-form $lane mutant went red for another reason: $out"
+    || fail "the old-form $lane mutant went red for another reason: $(tail -c 600 <<<"$out")"
 }
 mutant="$(old_form_lane_mutant old-form-rust 1)" || fail "old-form-rust"
 expect_lane_lost "$mutant" rust 1000 NOTICE true false true
@@ -1091,7 +1093,7 @@ if out="$( ( assert_step_fails_on_grep_error "$mutant" swallowed ) 2>&1 )"; then
   fail "a classifier that reads a grep failure as 'no match' was accepted"
 fi
 grep -Fq 'the classifier step succeeded although grep failed' <<<"$out" \
-  || fail "the grep-error-swallowed mutant went red for another reason: $out"
+  || fail "the grep-error-swallowed mutant went red for another reason: $(tail -c 600 <<<"$out")"
 
 # The gate itself, executed: it must never be green when classification failed or a lane
 # output is missing. The gate step is extracted and run under a full environment (every
