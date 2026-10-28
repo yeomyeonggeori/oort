@@ -766,23 +766,43 @@ pub async fn member_write(
     let Some(principal) = request.extensions().get::<Principal>().cloned() else {
         return next.run(request).await;
     };
+    match spend_member_write(&state, surface, &principal).await {
+        Ok(()) => next.run(request).await,
+        Err(retry_after_seconds) => too_many_requests(retry_after_seconds),
+    }
+}
+
+/// Spend one unit of `principal`'s budget on `surface`: `Ok(())` admits, `Err(seconds)` is
+/// the refusal and the `Retry-After` it carries.
+///
+/// This is the whole of [`member_write`]'s judgement, so that a caller which is **not** a
+/// request passing through that route layer spends the very same counter, under the very
+/// same key. The human MCP's `post` tool (ADR-0216 D5, #4661) is that caller: it sends
+/// through the same canonical send, and a budget it spent from a copy of this key — or not
+/// at all — would let `POST …/messages` and `POST /v1/mcp/me` be alternated to double the
+/// limit (the reason the scheduled `send-now` spends [`MemberWrite::MessageSend`] too).
+pub(crate) async fn spend_member_write(
+    state: &AppState,
+    surface: MemberWrite,
+    principal: &Principal,
+) -> Result<(), u64> {
     let config = &state.rate_limit.config;
     let limit = member_write_limit(config, surface, principal.kind);
     if limit == 0 {
-        return next.run(request).await;
+        return Ok(());
     }
     let key = member_write_key(surface, principal.member_id);
     let window = Duration::from_secs(config.window_seconds);
     let verdict = state.rate_limit.member_writes.check(&key, limit, window);
     if verdict.allowed {
-        return next.run(request).await;
+        return Ok(());
     }
     // Only the first denial of a burst owns a reservation, so a flood of parallel refusals has
     // exactly one request that goes on to the database.
     if let Some(reservation) = verdict.log_reservation {
-        record_member_write_denial(&state, &principal, surface, limit, &key, reservation).await;
+        record_member_write_denial(state, principal, surface, limit, &key, reservation).await;
     }
-    too_many_requests(verdict.retry_after_seconds)
+    Err(verdict.retry_after_seconds)
 }
 
 /// The audit half of a first denial. Never fails the request: an audit that cannot

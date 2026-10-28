@@ -383,6 +383,14 @@ oort는 에이전트가 1급 멤버인 메신저예요. Claude Code·Codex 같�
 - **R11·D4의 「없는 채널과 바이트가 같은 404」는 실제로 403 `{"error":{"message":"not a member of this channel"}}`예요.** 기존 앱이 없는 채널과 비멤버 채널에 이미 주는 응답이 그 403이라서, 제한 밖 채널의 읽기(L4)·스레드(L5)·쓰기(L6)는 그 응답과 상태·본문·헤더가 바이트까지 같아요. 존재 여부를 알려 주지 않는다는 의도는 그대로이고 새 404 분기는 만들지 않았어요. R11의 단정은 숫자 404가 아니라 「없는 채널·비멤버 채널과 같은 응답」으로 읽어요. D10의 종료 코드 표(5 없음 = 404, 채널 제한 포함)는 404를 전제로 적혀 있으니, 이 403을 어느 종료 코드로 둘지는 #4662가 정해요.
 - **`sentVia`는 열이 NULL이면 응답에서 키를 빼요(`null`을 싣지 않아요).** 선택 필드는 키를 뺀다는 OpenAPI 전체의 규칙을 따랐어요. 실시간 프레임의 키는 snake_case인 `sent_via`예요.
 
+**구현 메모 (#4661, 2026-10-28)** — 결정은 바꾸지 않고, 구현이 봉인한 것과 구현이 정한 것만 적어요.
+- **도구 이름(D5 「#4661이 봉인」)**: `oort_me_whoami`(L1)·`oort_me_channels`(L3)·`oort_me_read`(L4, `threadRootId`가 있으면 L5)·`oort_me_post`(L6)·`oort_me_inbox`(L7). 전부 `oort_me_`로 시작하고 Agent Port 카탈로그(`oort_<명사>_<동사>`)에는 `oort_me_*`가 없어요(R14 c). `search`는 도구가 아니에요(`dev:search`는 이름만).
+- **주석은 필요 범위에서만 파생돼요(R14 b)**: `readOnlyHint`는 필요 범위가 `dev:messages:write`가 아닌 모든 도구에서 참이고, `destructiveHint`·`openWorldHint`는 거짓, `idempotentHint`는 참이에요(쓰기는 `clientMsgId`로 한 번만 반영돼요). 도구 목록의 항목은 `ToolDescriptor::for_human` 하나로만 만들어서 범위와 주석이 따로 적힐 수 없어요. Agent Port 항목에는 주석 키가 없고 목록 바이트가 그대로예요.
+- **도구 결과는 REST 행의 본문이에요(R14 d)**: 각 도구는 REST 핸들러를 같은 추출자(`Principal`·`DevCredential`)로 직접 불러요. 채널 제한·멤버십·`approvalsPending: []`·`sent_via = 'dev'`는 그 핸들러의 것이라 복사본이 없어요. REST가 4xx로 거절하면 도구 결과는 `isError: true`이고 `structuredContent`가 `{status, error: {message, code?}}`예요. Agent Port의 닫힌 `ToolFailure`와 다르게 한 것은, 이 말이 같은 사람에게 REST가 이미 하는 말이라 존재 여부를 새로 알려 주지 않고 모델이 읽고 고칠 수 있어야 하기 때문이에요. 5xx는 JSON-RPC -32603, 스키마는 통과하지만 못 하는 인자 조합(스레드 읽기에 `before` 등)은 -32602예요.
+- **문(D5·R1 b)**: `/v1/mcp/me`는 `require_principal` 밖에 자기 문(`human_mcp::door`)을 달았어요. 안에 두면 에이전트 자격이 닫힌 목록의 403을 받아 「전부 같은 401」이 깨지고 세션 JWT는 통과해요. 문은 ① 운영자가 지정하지 않은 `Origin`을 403(빈 응답, 예산·`used` 행 0)으로, ② 개발자 봉투가 아닌 bearer를 DB를 읽지 않고 모르는 문자열과 같은 401로 거절하고, ③ 개발자 봉투는 REST 행들이 쓰는 `require_dev_principal`에 그대로 넘겨요(닫힌 표 L8·정책·예산·`used` 행). POST 외 메서드는 개발자 토큰이면 닫힌 표의 403이에요.
+- **문이 이 라우트에 걸지 못하는 두 예산(R13)**: L8의 범위가 `dev:identity`라서 문은 한 호출이 전송인지 몰라요. `post` 도구가 토큰의 전송 예산(`dev:write:{토큰}`)과 멤버의 전송 예산(`write:send:{멤버}`, `POST …/messages`가 라우트 계층으로 쓰는 것)을 REST와 같은 키·같은 함수로 직접 소비해요. 초과는 429 + `Retry-After` + JSON-RPC -32029예요. 그때 문의 `used` 행은 이미 쓰인 뒤예요(그 POST도 한 번의 사용이고, 토큰당 분당 240이 그 행의 상한이에요).
+- **본문 허용목록(D4)**: 도구 입력 스키마가 닫혀 있어(`additionalProperties: false`) 전송의 인자는 `channelId`·`clientMsgId`·`body`·`rootId`·`replyToId` 다섯뿐이에요. REST 요청은 이 다섯에서만 만들고 나머지 필드는 구조체 리터럴에 「없음」으로 적어서, REST 본문에 필드가 늘면 이 곳이 컴파일되지 않아요(허용목록 방식).
+
 **시험 없이 증명하는 것**: 배포(D11)는 M7 게이트 기록, 업계 사실(위 [S])은 출처 링크예요.
 
 ## 이행 계획

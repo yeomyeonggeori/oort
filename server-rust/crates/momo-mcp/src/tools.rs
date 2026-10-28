@@ -40,6 +40,106 @@ pub struct ToolDescriptor {
     /// `agent:port:connect` — see the module docs.
     pub required_scope: &'static str,
     schema: fn() -> Value,
+    /// The MCP tool annotations `tools/list` carries, or `None` for a tool that
+    /// advertises none. **Every Agent Port tool is `None`** and its listing is
+    /// byte-for-byte what it was before this field existed (ADR-0216 D12: the
+    /// Agent Port does not change); only the human MCP's catalog
+    /// ([`crate::human`]) sets it, and it builds the value from the tool's scope
+    /// ([`ToolAnnotations::for_scope`]), never by hand.
+    annotations: Option<ToolAnnotations>,
+}
+
+/// The MCP tool annotations of one tool (spec `ToolAnnotations`, minus `title`).
+///
+/// A client reads these to decide whether a call needs the person's confirmation:
+/// a read-only tool can be waved through, a writing one asked about. They are
+/// **hints** — the server's own scope check is what enforces anything — so the
+/// only thing that matters here is that they never disagree with that check. They
+/// cannot: the human catalog builds this from the tool's `required_scope` alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ToolAnnotations {
+    /// `readOnlyHint`: the tool changes nothing.
+    pub read_only: bool,
+    /// `destructiveHint`: the tool may overwrite or delete. Meaningful only when it
+    /// writes; no tool of this server deletes or edits what it wrote.
+    pub destructive: bool,
+    /// `idempotentHint`: the same arguments again have no further effect.
+    pub idempotent: bool,
+    /// `openWorldHint`: the tool reaches outside the workspace. None does.
+    pub open_world: bool,
+}
+
+impl ToolAnnotations {
+    /// The annotations of a tool whose only requirement is `scope`: **read-only
+    /// unless the scope is the one that writes** (`dev:messages:write`). A pure
+    /// function of the scope, and `const` so a catalog entry cannot carry any other
+    /// value — the scope and the annotation come from one place (ADR-0216 D5).
+    ///
+    /// A write here is an append that lands once per client message id (the send's
+    /// own idempotence), not a destructive update, and nothing leaves the workspace.
+    pub const fn for_scope(scope: &str) -> ToolAnnotations {
+        ToolAnnotations {
+            read_only: !const_str_eq(scope, crate::human::SCOPE_MESSAGES_WRITE),
+            destructive: false,
+            idempotent: true,
+            open_world: false,
+        }
+    }
+
+    /// The `annotations` object of a `tools/list` entry.
+    pub fn listing(&self) -> Value {
+        json!({
+            "readOnlyHint": self.read_only,
+            "destructiveHint": self.destructive,
+            "idempotentHint": self.idempotent,
+            "openWorldHint": self.open_world,
+        })
+    }
+}
+
+/// `==` on two strings in a `const fn` (`str` equality is not `const` yet).
+const fn const_str_eq(left: &str, right: &str) -> bool {
+    let (left, right) = (left.as_bytes(), right.as_bytes());
+    if left.len() != right.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < left.len() {
+        if left[index] != right[index] {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+/// Which server a [`ToolView`] speaks for. It decides one thing on the wire: the
+/// `serverInfo` an `initialize` / `server/discover` answers with, so a client that
+/// registered both servers can tell "act as the agent" from "act as me".
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum ToolSurface {
+    /// `POST /v1/mcp/agent-port` — an agent member's door.
+    #[default]
+    AgentPort,
+    /// `POST /v1/mcp/me` — a developer token's door (ADR-0216 D5).
+    HumanMe,
+}
+
+impl ToolSurface {
+    pub(crate) fn server_info(self) -> Value {
+        match self {
+            ToolSurface::AgentPort => json!({
+                "name": "oort-agent-port",
+                "title": "oort Agent Port",
+                "version": env!("CARGO_PKG_VERSION")
+            }),
+            ToolSurface::HumanMe => json!({
+                "name": "oort-me",
+                "title": "oort (as you)",
+                "version": env!("CARGO_PKG_VERSION")
+            }),
+        }
+    }
 }
 
 /// Identity is the **name**, not the struct's bytes: a descriptor holds a
@@ -60,14 +160,44 @@ impl ToolDescriptor {
         (self.schema)()
     }
 
-    /// The MCP `tools/list` entry for this tool.
+    /// The MCP `tools/list` entry for this tool. The `annotations` key is present
+    /// only for a tool that has some, so an Agent Port entry is unchanged.
     pub fn listing(&self) -> Value {
-        json!({
+        let mut entry = json!({
             "name": self.name,
             "title": self.title,
             "description": self.description,
             "inputSchema": (self.schema)(),
-        })
+        });
+        if let (Some(annotations), Some(object)) = (self.annotations, entry.as_object_mut()) {
+            object.insert("annotations".to_owned(), annotations.listing());
+        }
+        entry
+    }
+
+    /// The annotations this tool advertises, if any.
+    pub fn annotations(&self) -> Option<ToolAnnotations> {
+        self.annotations
+    }
+
+    /// A human-MCP catalog entry (ADR-0216 D5). The annotations are derived from
+    /// `required_scope` here and nowhere else, so a catalog row cannot name a scope
+    /// and a different read/write story.
+    pub(crate) const fn for_human(
+        name: &'static str,
+        title: &'static str,
+        description: &'static str,
+        required_scope: &'static str,
+        schema: fn() -> Value,
+    ) -> ToolDescriptor {
+        ToolDescriptor {
+            name,
+            title,
+            description,
+            required_scope,
+            schema,
+            annotations: Some(ToolAnnotations::for_scope(required_scope)),
+        }
     }
 }
 
@@ -134,7 +264,7 @@ const BYTE_BOUND_NOTE: &str = "Length bounds count UTF-8 bytes, not characters."
 ///
 /// [`the_nullability_contract_holds_for_every_tool`] checks the correspondence
 /// mechanically, so a future property cannot be added on one side only.
-fn nullable(schema: Value) -> Value {
+pub(crate) fn nullable(schema: Value) -> Value {
     let mut schema = schema;
     let declared = schema
         .get("type")
@@ -148,17 +278,17 @@ fn nullable(schema: Value) -> Value {
     schema
 }
 
-fn uuid_property() -> Value {
+pub(crate) fn uuid_property() -> Value {
     json!({"type": "string", "format": "uuid"})
 }
 
 /// A length-bounded string, with the byte semantics spelled out.
-fn text(max_bytes: u64) -> Value {
+pub(crate) fn text(max_bytes: u64) -> Value {
     json!({"type": "string", "maxLength": max_bytes, "description": BYTE_BOUND_NOTE})
 }
 
 /// A non-empty length-bounded string.
-fn required_text(max_bytes: u64) -> Value {
+pub(crate) fn required_text(max_bytes: u64) -> Value {
     json!({
         "type": "string",
         "minLength": 1,
@@ -167,7 +297,7 @@ fn required_text(max_bytes: u64) -> Value {
     })
 }
 
-fn integer(minimum: i64, maximum: i64) -> Value {
+pub(crate) fn integer(minimum: i64, maximum: i64) -> Value {
     json!({"type": "integer", "minimum": minimum, "maximum": maximum})
 }
 
@@ -935,6 +1065,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
             "Read the next page of this connection's durable inbox using its opaque cursor.",
         required_scope: SCOPE_INBOX_READ,
         schema: inbox_read_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_CONVERSATION_READ,
@@ -942,6 +1073,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
         description: "Read one page of an approved channel's message history.",
         required_scope: SCOPE_MESSAGES_READ,
         schema: conversation_read_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_MESSAGE_POST,
@@ -962,6 +1094,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       and you cannot tell, leave rootId out.",
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: message_post_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_JOBS_CLAIM,
@@ -969,6 +1102,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
         description: "Claim pending work for this agent, each with an opaque lease handle.",
         required_scope: SCOPE_JOBS_READ,
         schema: jobs_claim_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_JOB_START,
@@ -987,6 +1121,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       agent:runs:callback; the conversation part needs messages:read.",
         required_scope: SCOPE_JOBS_READ,
         schema: job_start_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_JOB_RENEW,
@@ -994,6 +1129,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
         description: "Extend a lease this connection already holds.",
         required_scope: SCOPE_JOBS_READ,
         schema: lease_only_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_JOB_RELEASE,
@@ -1001,6 +1137,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
         description: "Hand a claimed job back immediately instead of waiting out its expiry.",
         required_scope: SCOPE_JOBS_READ,
         schema: lease_only_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_RUN_EVENT,
@@ -1016,6 +1153,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       textDelta; oort cannot see your reasoning.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_event_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_RUN_COMPLETE,
@@ -1044,6 +1182,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       the result in body. Never resend an unchanged call.",
         required_scope: SCOPE_RUNS_CALLBACK,
         schema: run_complete_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_ACTION_PROPOSE,
@@ -1062,6 +1201,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       direct message, and never post it in a channel.",
         required_scope: SCOPE_WORKSPACE_PROPOSE,
         schema: action_propose_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_ACTION_CLAIM_SECRET,
@@ -1075,6 +1215,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       channel; keep it in memory for this turn only.",
         required_scope: SCOPE_WORKSPACE_PROPOSE,
         schema: action_claim_secret_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_CARD_SUGGEST,
@@ -1088,6 +1229,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       card lands there.",
         required_scope: SCOPE_MESSAGES_WRITE,
         schema: card_suggest_schema,
+        annotations: None,
     },
     ToolDescriptor {
         name: TOOL_PING,
@@ -1100,6 +1242,7 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
                       you took work.",
         required_scope: SCOPE_INBOX_READ,
         schema: ping_schema,
+        annotations: None,
     },
 ];
 
@@ -1145,6 +1288,8 @@ impl ToolCapability {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ToolView {
     visible: Vec<&'static ToolDescriptor>,
+    /// Which server this view speaks for (the `serverInfo` it answers with).
+    surface: ToolSurface,
 }
 
 impl ToolView {
@@ -1152,7 +1297,36 @@ impl ToolView {
     pub fn empty() -> ToolView {
         ToolView {
             visible: Vec::new(),
+            surface: ToolSurface::AgentPort,
         }
+    }
+
+    /// The view over a **catalog other than the Agent Port's**: the tools of
+    /// `catalog` whose scope the token carries, speaking for `surface`.
+    ///
+    /// One axis, not three (compare [`ToolView::intersect`]): a developer token has
+    /// no connection record a person approved separately — its scopes *are* what the
+    /// person chose when they made it — and the server serves every tool of its
+    /// catalog. A tool whose scope the token lacks is neither listed nor callable
+    /// (the same fail-closed rule as every view: `tools/list` and `tools/call` read
+    /// this one value).
+    pub(crate) fn over(
+        catalog: &'static [ToolDescriptor],
+        token_scopes: &[String],
+        surface: ToolSurface,
+    ) -> ToolView {
+        ToolView {
+            visible: catalog
+                .iter()
+                .filter(|tool| has_scope(token_scopes, tool.required_scope))
+                .collect(),
+            surface,
+        }
+    }
+
+    /// Which server this view speaks for.
+    pub fn surface(&self) -> ToolSurface {
+        self.surface
     }
 
     /// Intersect the connection's approved scopes, the token's current scopes
@@ -1174,7 +1348,10 @@ impl ToolView {
                     && has_scope(token_scopes, tool.required_scope)
             })
             .collect();
-        ToolView { visible }
+        ToolView {
+            visible,
+            surface: ToolSurface::AgentPort,
+        }
     }
 
     /// The descriptor for `name`, but only when this view may call it. An

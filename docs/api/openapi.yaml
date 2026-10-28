@@ -12818,6 +12818,156 @@ paths:
                 type: string
                 enum: ["private, no-store"]
 
+  /v1/mcp/me:
+    post:
+      tags: [mcp]
+      operationId: humanMcp
+      summary: Call the people's MCP endpoint with a developer token.
+      description: >
+        ADR-0216 D5 (#4661). A POST-only, sessionless JSON-RPC endpoint — the same wire
+        core as the Agent Port (`/v1/mcp/agent-port`: the two eras, `Mcp-Method` and
+        `Mcp-Name` mirrors, a 64 KiB body, no query string, no `Mcp-Session-Id`
+        authority) — for a **person's own** credential, a developer token
+        (`devTokenAuth`). It is a separate server: it takes developer envelopes and
+        nothing else, and the Agent Port takes none of them. An agent bearer, a pairing
+        value, a hosted OAuth access token, an app session JWT, a refresh half and any
+        string the server does not know are one and the same 401, answered without
+        reading the database. `serverInfo.name` is `oort-me`. No OAuth protected-resource
+        metadata is advertised (no OAuth server serves this door yet). Only a `POST` is
+        answered: every other method is a developer token's 403 `dev_route_not_allowed`
+        (the closed table, L8). A browser `Origin` the operator did not name is a 403
+        with an empty body, before a bearer is read.
+
+
+        Five tools, one per `oort` command, each a thin shell over a REST row and
+        returning that row's body unchanged: `oort_me_whoami` (`GET
+        …/dev-access/self`, `dev:identity`), `oort_me_channels` (`GET …/channels`,
+        `dev:channels:read`), `oort_me_read` (`GET …/channels/{channelId}/messages`, or
+        with `threadRootId` `…/messages/{rootId}/replies`, `dev:messages:read`),
+        `oort_me_post` (`POST …/channels/{channelId}/messages`, `dev:messages:write`; an
+        immediate send as the person, marked `sentVia: dev`; `clientMsgId` makes a retry
+        land once) and `oort_me_inbox` (`GET …/inbox`, `dev:inbox:read`; reads, never
+        marks read; `approvalsPending` is always empty). There is no search, no
+        structure change, no approval decision and no proposal: the closed table
+        keeps those out of a developer token's reach, so there is nothing to call.
+        `tools/list` carries `annotations` on every entry (`readOnlyHint` is false for
+        `oort_me_post` alone, and the annotation is derived from the tool's scope), and
+        lists only the tools whose scope the token carries; a tool outside the token's
+        scopes answers a call exactly as an unknown tool name does. The channel
+        restriction, the membership check, the body allow-list (a send's arguments are
+        exactly `channelId`, `clientMsgId`, `body`, `rootId`, `replyToId`; anything else
+        is -32602 and nothing is stored) and the `sent_via` mark are the REST row's own.
+
+
+        A refusal of the REST row (a channel the token cannot reach, a thread root that
+        does not exist) is a tool result with `isError: true` whose `structuredContent` is
+        `{status, error: {message, code?}}` — the row's own status and error body. A
+        server fault is JSON-RPC -32603. A send over the token's send budget (default 30
+        per window) or the member's send budget (the one `POST …/messages` spends) is 429
+        with `Retry-After` and JSON-RPC code -32029; the per-token (240) and per-member
+        (480) budgets are the door's, spent once per POST, and answer 429 with the REST
+        error body. The door's `auth.dev_token.used` row is written for every admitted
+        POST, a refused send included.
+      security:
+        - devTokenAuth: []
+      parameters:
+        - $ref: "#/components/parameters/MCPProtocolVersion"
+        - $ref: "#/components/parameters/MCPMethod"
+        - $ref: "#/components/parameters/MCPName"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentPortJSONRPCRequest"
+      responses:
+        "200":
+          description: >
+            A modern discovery/tools result, a legacy initialize/tools result, a pong,
+            or a `tools/call` result (`content`, `structuredContent`, `isError`). Success
+            never carries `Mcp-Session-Id`.
+          headers:
+            Cache-Control:
+              description: Human MCP responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HumanMcpJSONRPCSuccessResponse"
+        "202":
+          description: Legacy `notifications/initialized` accepted; the response body is empty.
+          headers:
+            Cache-Control:
+              description: Human MCP responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+        "400":
+          description: >
+            Malformed JSON-RPC, metadata/header mismatch, unsupported version or method,
+            a query/duplicate transport header, an unknown tool, invalid tool arguments
+            (-32602) or another bounded protocol validation failure.
+          headers:
+            Cache-Control:
+              description: Human MCP responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `dev_route_not_allowed` (any method but POST, from the closed table),
+            `dev_access_denied` (the workspace switch no longer admits the member's
+            role) or an `Origin` the operator did not name (empty body).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Request body exceeds the 64 KiB bound.
+          headers:
+            Cache-Control:
+              description: Human MCP responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "415":
+          description: >
+            `Content-Type` or `Accept` does not satisfy the MCP transport contract.
+          headers:
+            Cache-Control:
+              description: Human MCP responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "500":
+          description: >
+            A server fault of a tool (JSON-RPC -32603, never a cause), or the door's own
+            transaction failed.
+          headers:
+            Cache-Control:
+              description: Human MCP responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
+
   /v1/workspaces/{workspaceId}/context-packets/{packetId}:
     get:
       tags: [agents]
@@ -13483,8 +13633,8 @@ components:
         `dev:messages:read`. (L6) `POST …/channels/{channelId}/messages` needs
         `dev:messages:write`. (L7) `GET …/inbox` needs `dev:inbox:read`; that route
         is served but not described in this document yet. (L8) `POST /v1/mcp/me`
-        (the people's MCP: `dev:identity` plus a per-tool rule) is a row of the table
-        whose route is not mounted yet (#4661), so it is not an operation here.
+        (the people's MCP, `humanMcp`, #4661) needs `dev:identity`, and each of its tools
+        needs the scope of the REST row it wraps.
         The scope vocabulary is `dev:identity`, `dev:channels:read`,
         `dev:messages:read`, `dev:messages:write` and `dev:inbox:read`; `dev:search`
         is a reserved name that is never issued. Everything else is closed to a
@@ -23484,6 +23634,23 @@ components:
         jsonrpc: {type: string, enum: ["2.0"]}
         id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
         result: {$ref: "#/components/schemas/AgentPortResult"}
+
+    HumanMcpJSONRPCSuccessResponse:
+      description: >
+        A success envelope of `POST /v1/mcp/me` (ADR-0216 D5). The `result` is the shared wire
+        core's: a `server/discover` or `initialize` result whose `serverInfo.name` is `oort-me`,
+        a `tools/list` result whose entries carry `annotations`, a pong, or a `tools/call`
+        result `{content: [{type: text, text}], structuredContent, isError}` where
+        `structuredContent` is the wrapped REST row's body (or, with `isError: true`,
+        `{status, error: {message, code?}}`).
+      type: object
+      additionalProperties: false
+      required: [jsonrpc, id, result]
+      properties:
+        jsonrpc: {type: string, enum: ["2.0"]}
+        id: {$ref: "#/components/schemas/AgentPortJSONRPCRequestId"}
+        result:
+          type: object
 
     AgentPortJSONRPCErrorResponse:
       type: object

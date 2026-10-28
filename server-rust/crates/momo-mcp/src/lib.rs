@@ -12,6 +12,8 @@ use serde::Deserialize;
 use serde_json::Value;
 
 pub mod handle;
+/// ADR-0216 D5 / #4661 — the human MCP's tool catalog (`POST /v1/mcp/me`).
+pub mod human;
 pub mod oauth;
 pub mod tools;
 
@@ -25,14 +27,14 @@ pub use oauth::{
     MAX_STATE_BYTES, PROTECTED_RESOURCE_WELL_KNOWN_PREFIX, RESPONSE_TYPE_CODE, TOKEN_TYPE_BEARER,
 };
 pub use tools::{
-    validate_arguments, ArtifactRule, ArtifactViolation, ToolCapability, ToolDescriptor,
-    ToolFailure, ToolView, APPS_USED_ENTRY_KEYS, APP_NOTICE_KEYS, APP_NOTICE_REPORTABLE_KINDS,
-    ARTIFACT_KEYS, MAX_APPS_USED_ENTRIES, MAX_APPS_USED_TOOL_BYTES, MAX_ARTIFACT_COUNT,
-    MAX_REPORTED_COUNT, MAX_STAGE_BYTES, NEXT_ACTIONS, RESULT_KINDS, TEST_COUNT_KEYS,
-    TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_PROPOSE, TOOL_CARD_SUGGEST, TOOL_CATALOG,
-    TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS, TOOL_INBOX_READ, TOOL_JOBS_CLAIM, TOOL_JOB_RELEASE,
-    TOOL_JOB_RENEW, TOOL_JOB_START, TOOL_MESSAGE_POST, TOOL_PING, TOOL_RUN_COMPLETE,
-    TOOL_RUN_EVENT,
+    validate_arguments, ArtifactRule, ArtifactViolation, ToolAnnotations, ToolCapability,
+    ToolDescriptor, ToolFailure, ToolSurface, ToolView, APPS_USED_ENTRY_KEYS, APP_NOTICE_KEYS,
+    APP_NOTICE_REPORTABLE_KINDS, ARTIFACT_KEYS, MAX_APPS_USED_ENTRIES, MAX_APPS_USED_TOOL_BYTES,
+    MAX_ARTIFACT_COUNT, MAX_REPORTED_COUNT, MAX_STAGE_BYTES, NEXT_ACTIONS, RESULT_KINDS,
+    TEST_COUNT_KEYS, TOOL_ACTION_CLAIM_SECRET, TOOL_ACTION_PROPOSE, TOOL_CARD_SUGGEST,
+    TOOL_CATALOG, TOOL_CONVERSATION_READ, TOOL_COUNT_KEYS, TOOL_INBOX_READ, TOOL_JOBS_CLAIM,
+    TOOL_JOB_RELEASE, TOOL_JOB_RENEW, TOOL_JOB_START, TOOL_MESSAGE_POST, TOOL_PING,
+    TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
 };
 
 pub const MODERN_PROTOCOL_VERSION: &str = "2026-07-28";
@@ -818,7 +820,7 @@ fn dispatch_modern(
                 serde_json::json!({
                     "protocolVersion": MODERN_PROTOCOL_VERSION,
                     "capabilities": {"tools": {"listChanged": false}},
-                    "serverInfo": server_info(),
+                    "serverInfo": view.surface().server_info(),
                     "resultType": "server/discover",
                     "cache": {"ttlSeconds": 300, "scope": "private"}
                 }),
@@ -887,11 +889,27 @@ fn admit_tool_call(
 /// object rendered once — never a second, hand-written projection, so the two
 /// halves cannot describe different outcomes.
 pub fn tool_success(call: &ToolCall, structured: Value) -> HttpResponse {
+    tool_result(call, structured, false)
+}
+
+/// The MCP result envelope for a tool that ran and **refused** (`isError: true`).
+///
+/// A tool-level refusal — "that channel is not one you can read" — is a result the
+/// model reads and reacts to, not a protocol fault, so it travels as HTTP 200 with
+/// the same two halves as a success (`content` text and `structuredContent`, one
+/// object rendered twice). The Agent Port never uses this (its refusals are the
+/// closed [`ToolFailure`] set); the human MCP does, because its refusals are the
+/// REST row's own answers to the same person.
+pub fn tool_error_result(call: &ToolCall, structured: Value) -> HttpResponse {
+    tool_result(call, structured, true)
+}
+
+fn tool_result(call: &ToolCall, structured: Value, is_error: bool) -> HttpResponse {
     let text = serde_json::to_string(&structured).unwrap_or_else(|_| "{}".to_string());
     let mut result = serde_json::json!({
         "content": [{"type": "text", "text": text}],
         "structuredContent": structured,
-        "isError": false
+        "isError": is_error
     });
     if call.era == ToolEra::Modern {
         if let Some(object) = result.as_object_mut() {
@@ -1000,7 +1018,7 @@ fn dispatch_legacy(
                 serde_json::json!({
                     "protocolVersion": LEGACY_PROTOCOL_VERSION,
                     "capabilities": {"tools": {"listChanged": false}},
-                    "serverInfo": server_info()
+                    "serverInfo": view.surface().server_info()
                 }),
             ),
         );
@@ -1075,14 +1093,6 @@ fn dispatch_legacy(
         },
         _ => error(400, id, -32601, "method not found", None),
     }
-}
-
-fn server_info() -> Value {
-    serde_json::json!({
-        "name": "oort-agent-port",
-        "title": "oort Agent Port",
-        "version": env!("CARGO_PKG_VERSION")
-    })
 }
 
 fn success(id: Value, result: Value) -> Value {

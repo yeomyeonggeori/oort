@@ -17,16 +17,16 @@ use axum::extract::{ConnectInfo, Request, State};
 use axum::http::{header, HeaderMap, HeaderName, HeaderValue, StatusCode};
 use axum::response::Response;
 
-const MCP_PROTOCOL_VERSION: &str = "mcp-protocol-version";
-const MCP_METHOD: &str = "mcp-method";
-const MCP_NAME: &str = "mcp-name";
+pub(crate) const MCP_PROTOCOL_VERSION: &str = "mcp-protocol-version";
+pub(crate) const MCP_METHOD: &str = "mcp-method";
+pub(crate) const MCP_NAME: &str = "mcp-name";
 const MCP_SESSION_ID: &str = "mcp-session-id";
 const LAST_EVENT_ID: &str = "last-event-id";
-const MAX_AUTHORIZATION_BYTES: usize = 4096;
-const MAX_ORIGIN_BYTES: usize = 2048;
-const MAX_ACCEPT_BYTES: usize = 4096;
+pub(crate) const MAX_AUTHORIZATION_BYTES: usize = 4096;
+pub(crate) const MAX_ORIGIN_BYTES: usize = 2048;
+pub(crate) const MAX_ACCEPT_BYTES: usize = 4096;
 const MAX_PROTOCOL_HEADER_BYTES: usize = 512;
-const MAX_RELEVANT_HEADER_VALUES: usize = 16;
+pub(crate) const MAX_RELEVANT_HEADER_VALUES: usize = 16;
 /// The adapter's own two refusal sentences. Constants so the call trace can name their reason
 /// from the same text the response carries (`momo_mcp::REFUSAL_REASONS` has a row for each).
 const MESSAGE_TRANSPORT_HEADERS: &str = "invalid Agent Port transport headers";
@@ -522,7 +522,7 @@ fn auth_failure(error: AgentPortAuthError) -> Response {
     response
 }
 
-fn rate_limited(retry_after_seconds: u64) -> Response {
+pub(crate) fn rate_limited(retry_after_seconds: u64) -> Response {
     let mut response = protocol_error(StatusCode::TOO_MANY_REQUESTS, -32029, "rate limit exceeded");
     if let Ok(value) = retry_after_seconds.to_string().parse() {
         response.headers_mut().insert(header::RETRY_AFTER, value);
@@ -530,7 +530,7 @@ fn rate_limited(retry_after_seconds: u64) -> Response {
     response
 }
 
-fn dispatched_response(dispatched: momo_mcp::HttpResponse) -> Response {
+pub(crate) fn dispatched_response(dispatched: momo_mcp::HttpResponse) -> Response {
     let status =
         StatusCode::from_u16(dispatched.status).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     let mut response = Response::builder()
@@ -551,7 +551,7 @@ fn dispatched_response(dispatched: momo_mcp::HttpResponse) -> Response {
     response
 }
 
-fn protocol_error(status: StatusCode, code: i64, message: &str) -> Response {
+pub(crate) fn protocol_error(status: StatusCode, code: i64, message: &str) -> Response {
     let body = serde_json::to_vec(&serde_json::json!({
         "jsonrpc": "2.0",
         "id": null,
@@ -568,7 +568,7 @@ fn protocol_error(status: StatusCode, code: i64, message: &str) -> Response {
     response
 }
 
-fn empty(status: StatusCode) -> Response {
+pub(crate) fn empty(status: StatusCode) -> Response {
     Response::builder()
         .status(status)
         .header(header::CACHE_CONTROL, "private, no-store")
@@ -577,14 +577,14 @@ fn empty(status: StatusCode) -> Response {
 }
 
 #[derive(Debug)]
-enum UniqueHeader<'a> {
+pub(crate) enum UniqueHeader<'a> {
     Missing,
     One(&'a str),
     Invalid,
 }
 
 impl UniqueHeader<'_> {
-    fn value(&self) -> Option<&str> {
+    pub(crate) fn value(&self) -> Option<&str> {
         match self {
             UniqueHeader::One(value) => Some(value),
             UniqueHeader::Missing | UniqueHeader::Invalid => None,
@@ -592,7 +592,7 @@ impl UniqueHeader<'_> {
     }
 }
 
-fn unique_text_header<'a>(headers: &'a HeaderMap, name: HeaderName) -> UniqueHeader<'a> {
+pub(crate) fn unique_text_header<'a>(headers: &'a HeaderMap, name: HeaderName) -> UniqueHeader<'a> {
     let mut values = headers.get_all(name).iter();
     match (values.next(), values.next()) {
         (None, _) => UniqueHeader::Missing,
@@ -604,7 +604,7 @@ fn unique_text_header<'a>(headers: &'a HeaderMap, name: HeaderName) -> UniqueHea
     }
 }
 
-fn unique_bounded_text_header<'a>(
+pub(crate) fn unique_bounded_text_header<'a>(
     headers: &'a HeaderMap,
     name: HeaderName,
     max_bytes: usize,
@@ -616,11 +616,14 @@ fn unique_bounded_text_header<'a>(
     }
 }
 
-fn unique_named_text_header<'a>(headers: &'a HeaderMap, name: &'static str) -> UniqueHeader<'a> {
+pub(crate) fn unique_named_text_header<'a>(
+    headers: &'a HeaderMap,
+    name: &'static str,
+) -> UniqueHeader<'a> {
     unique_text_header(headers, HeaderName::from_static(name))
 }
 
-fn joined_text_headers_bounded(
+pub(crate) fn joined_text_headers_bounded(
     headers: &HeaderMap,
     name: HeaderName,
     max_bytes: usize,
@@ -644,7 +647,7 @@ fn joined_text_headers_bounded(
     Ok((!joined.is_empty()).then_some(joined))
 }
 
-fn relevant_headers_are_bounded(headers: &HeaderMap) -> bool {
+pub(crate) fn relevant_headers_are_bounded(headers: &HeaderMap) -> bool {
     let limits = [
         (header::CONTENT_TYPE, MAX_PROTOCOL_HEADER_BYTES),
         (header::ACCEPT, MAX_ACCEPT_BYTES),
