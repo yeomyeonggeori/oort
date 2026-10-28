@@ -1282,6 +1282,43 @@ pub fn default_expires_at(now: DateTime<Utc>, ttl_seconds: i64) -> DateTime<Utc>
     now + Duration::seconds(ttl_seconds.max(1))
 }
 
+/// Has `expires_at` been reached at `now`? **The one definition of "past its
+/// deadline" for every reader that answers from the application's clock.**
+///
+/// The decision route settles a late tap with this predicate, and the status an
+/// agent is told on a re-ask ([`effective_status`], ADR-0186 증보 v5 U-f) is read
+/// through it too — so the two cannot disagree at the boundary. The instant itself
+/// counts as expired (`<=`), exactly as the sweep's SQL (`expires_at <= now()`)
+/// and the route have always judged it.
+///
+/// `now` is a **parameter**, never read here: the caller takes the clock once,
+/// and the application's clock is the route's. A re-ask that compared against the
+/// database's `now()` instead would call an approval `pending` in the very
+/// millisecond the route settles it as `expired` (or the reverse).
+pub fn is_overdue(expires_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    expires_at.is_some_and(|expires| expires <= now)
+}
+
+/// The status an approval **reads as** at `now`.
+///
+/// A `pending` approval whose deadline has passed is `expired` — before the
+/// notifier's sweep has written it down. Every other status is returned as stored:
+/// the sweep and the decision route are the only writers of `expired`, and a row
+/// already settled stays what it was settled as (ADR-0186 증보 v5 U-f: 「만료는
+/// 재호출이 파생해서 말한다」 — the expiry is never written to the proposer's inbox,
+/// so this derivation is how an agent learns of it).
+pub fn effective_status(
+    status: &str,
+    expires_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> &str {
+    if status == "pending" && is_overdue(expires_at, now) {
+        "expired"
+    } else {
+        status
+    }
+}
+
 /// Swift `validatedStatus` (:487-497).
 pub fn validated_status(raw: Option<&str>) -> Option<String> {
     let status = raw.map(|raw| raw.trim().to_lowercase());
@@ -1707,5 +1744,43 @@ mod tests {
         );
         assert_eq!(receipt["decidedBy"], Value::Null);
         assert_eq!(receipt["status"], "expired");
+    }
+
+    /// ADR-0186 증보 v5 U-f (#4702): a pending approval past its deadline reads as
+    /// `expired` before any sweep has written it, and the deadline instant itself is
+    /// already past — the same `<=` the decision route and the sweep's SQL use.
+    #[test]
+    fn a_pending_approval_reads_as_expired_from_the_deadline_instant_on() {
+        let deadline = DateTime::from_timestamp(1_000, 0).expect("epoch");
+        let just_before = deadline - Duration::milliseconds(1);
+        let just_after = deadline + Duration::milliseconds(1);
+
+        assert_eq!(
+            effective_status("pending", Some(deadline), just_before),
+            "pending"
+        );
+        assert_eq!(
+            effective_status("pending", Some(deadline), deadline),
+            "expired"
+        );
+        assert_eq!(
+            effective_status("pending", Some(deadline), just_after),
+            "expired"
+        );
+        assert!(!is_overdue(Some(deadline), just_before));
+        assert!(is_overdue(Some(deadline), deadline));
+    }
+
+    /// Only `pending` is derived. A settled approval keeps the status it was settled
+    /// with even when its deadline is long gone, and one with no deadline never lapses.
+    #[test]
+    fn only_a_pending_approval_is_derived_to_expired() {
+        let long_ago = DateTime::from_timestamp(0, 0).expect("epoch");
+        let now = DateTime::from_timestamp(86_400, 0).expect("a day later");
+        for settled in ["approved", "rejected", "expired", "cancelled"] {
+            assert_eq!(effective_status(settled, Some(long_ago), now), settled);
+        }
+        assert_eq!(effective_status("pending", None, now), "pending");
+        assert!(!is_overdue(None, now));
     }
 }
