@@ -6048,8 +6048,9 @@ const WORK_CONSOLE_SESSIONS = [
  *   김인턴   응답함            → 채운 초록           헤르메스  살아 있음·대기 → 채운 초록(Buzz식: 살아 있음)
  *   코비     꺼짐             → 속 빈 고리           워처      일이 기다림    → 주황(owner 에게만)
  *   레거시봇  판정 없음+호스트 연결 → 초록            조용봇    판정 없음+안 닿음 → 점 없음(DM 없는 에이전트 줄)
- *   이도현   평소             → 점 없음              최민수    자리 비움      → 주황
- *   정하윤   방해 금지         → 빨강
+ *   이도현   접속 중(`online`)  → 채운 초록           박서연    접속 없음       → 속 빈 회색 고리 (#4692)
+ *   한지우   서버가 말하지 않음  → 점 없음(모름)       최민수    자리 비움(+접속 중) → 주황(선언이 먼저)
+ *   정하윤   방해 금지(+접속 중) → 빨강
  *
  * `-states` 판은 에이전트 판정 **여덟 상태**를 한 화면에 세운다(응답함·살아 있음·조용함·꺼짐·일이 기다림·안 가져감·
  * 응답 없음·거절됨). 채널은 하나만 둔다(줄이 화면에 다 들어오게).
@@ -6103,9 +6104,12 @@ function seedDmStatusDots(surface: string): void {
     refused: agent('2a', '막힘봇', 'refused'),
   };
   const peers = {
-    dohyun: person('11', '이도현', 'dohyun'),
-    minsu: person('12', '최민수', 'minsu', {presenceStatus: 'away'}),
-    hayun: person('13', '정하윤', 'hayun', {presenceStatus: 'dnd'}),
+    // #4692: 서버가 명부에 싣는 접속 여부(`online`). 선언 상태가 먼저이고, 말하지 않은 사람(한지우)은 점이 없다.
+    dohyun: person('11', '이도현', 'dohyun', {online: true}),
+    seoyeon: person('14', '박서연', 'seoyeon', {online: false}),
+    jiwoo: person('15', '한지우', 'jiwoo'),
+    minsu: person('12', '최민수', 'minsu', {presenceStatus: 'away', online: true}),
+    hayun: person('13', '정하윤', 'hayun', {presenceStatus: 'dnd', online: true}),
     intern: agent('21', '김인턴', 'intern', {hostOnline: true}),
     hermes: agent('22', '헤르메스', 'hermes', {hostOnline: true}),
     coby: agent('23', '코비', 'coby', {hostOnline: true}),
@@ -6173,6 +6177,8 @@ function seedDmStatusDots(surface: string): void {
     dm('watcher', peers.watcher),
     dm('legacy', peers.legacy),
     dm('dohyun', peers.dohyun),
+    dm('seoyeon', peers.seoyeon),
+    dm('jiwoo', peers.jiwoo),
     dm('minsu', peers.minsu),
     dm('hayun', peers.hayun),
   ]);

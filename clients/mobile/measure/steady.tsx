@@ -406,6 +406,7 @@ function createFakeRail(): FakeRail {
     subscribeWorkSession: noop,
     subscribeWorkBoard: noop,
     subscribeRunEvents: noop,
+    joinOnlineRollCall: noop,
   };
   return {
     rail,

@@ -37,6 +37,21 @@ pub const TYPING_EVENT_VERSION: i64 = 1;
 /// left an hour ago.
 pub const PRESENCE_NAMESPACE: &str = "presence";
 
+/// The Centrifugo namespace of the workspace roll-call (ADR-0160 ②, #4692).
+///
+/// **Not a publish rail.** Nothing is ever published here and no client may read
+/// it: the namespace exists so that Centrifugo's own presence table has a place to
+/// record "this person has a live connection to this workspace", which is the
+/// availability fact ADR-0160 D1 calls 「전송이 이미 소유한 사실」. The server
+/// reads that table ([`crate::reader::PresenceReader`]) and nothing else does.
+///
+/// It is configured with `presence: true`, `history_size: 0`, and — on purpose —
+/// **none of** `join_leave`, `allow_presence_for_*`, `allow_publish_for_*`,
+/// `allow_history_for_*`. A join/leave push would hand every subscriber (a guest
+/// among them) the connect/disconnect stream of people outside their roster, and
+/// that is exactly the leak ADR-0160 guard 5 forbids.
+pub const ONLINE_NAMESPACE: &str = "online";
+
 /// The `data.type` of the availability(②) signal (ADR-0160 D1).
 pub const PRESENCE_EVENT_TYPE: &str = "ephemeral.presence";
 
@@ -151,6 +166,26 @@ pub fn ephemeral_presence_channel(workspace_id: Uuid, channel_id: Uuid) -> Strin
         "{PRESENCE_NAMESPACE}:ws{}.{}",
         workspace_id.to_string().to_uppercase(),
         channel_id.to_string().to_uppercase()
+    )
+}
+
+/// The one channel a workspace's connected people are rolled up under (#4692).
+///
+/// `online:ws<WS>` — **one segment, the workspace**, where every other rail here
+/// names a channel inside it. That is the point: the question this answers is
+/// 「is this person connected at all」, not 「are they looking at this
+/// conversation」, so it cannot hang off a conversation. Same UPPERCASE casing as
+/// [`ephemeral_channel`] and the connection token's `sub`, so the user ids the
+/// presence table reports round-trip through [`uuid::Uuid`] without a second
+/// normalisation.
+///
+/// The channel carries the workspace id in its name and **the server only ever
+/// builds it from the caller's own workspace**: there is no `online_channel(any)`
+/// reachable from a request path (see `routes::roster`).
+pub fn online_channel(workspace_id: Uuid) -> String {
+    format!(
+        "{ONLINE_NAMESPACE}:ws{}",
+        workspace_id.to_string().to_uppercase()
     )
 }
 
@@ -395,6 +430,29 @@ mod tests {
         // The two ephemeral rails must not collide, or one subscription would
         // carry the other's traffic.
         assert_ne!(name, ephemeral_channel(workspace, channel));
+    }
+
+    /// #4692: the roll-call channel names the **workspace** and nothing below it,
+    /// in the shared casing, and it can never be mistaken for a rail that carries
+    /// publications.
+    #[test]
+    fn the_online_channel_names_a_workspace_in_the_shared_casing() {
+        let workspace = Uuid::new_v4();
+        let name = online_channel(workspace);
+        assert_eq!(
+            name,
+            format!("online:ws{}", workspace.to_string().to_uppercase())
+        );
+        for rail in ["ch:", "dm:", "typing:", "presence:", "agent:", "user:"] {
+            assert!(!name.starts_with(rail), "{name} must not sit in {rail}");
+        }
+        assert_eq!(
+            name.matches('.').count(),
+            0,
+            "one segment: a roll-call is per workspace, never per conversation"
+        );
+        // Two workspaces never share a roll-call.
+        assert_ne!(online_channel(workspace), online_channel(Uuid::new_v4()));
     }
 
     /// Availability is as ephemeral as 「작성 중」: no `seq`, no recovery

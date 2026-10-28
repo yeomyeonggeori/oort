@@ -1,11 +1,13 @@
 import { ChevronRight } from "lucide-react";
 import { uuidEq, type RosterMember } from "@momo/core/lib/api";
+import { withOwnConnection } from "@momo/core/features/presence/statusDot";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory, useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
 import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
+import { AvatarWithPresence } from "@/features/presence/HumanPresence";
 import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
 import {
   memberRowLabel,
@@ -54,7 +56,7 @@ export function MemberRow({
   selfMemberId: string;
   onOpenProfile: (member: RosterMember, opener: HTMLElement) => void;
 }) {
-  const { workspaceId } = useSession();
+  const { workspaceId, connStatus } = useSession();
   const labels = useRoleLabels(workspaceId);
   const isAgent = member.kind === "agent";
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
@@ -107,7 +109,8 @@ export function MemberRow({
         {...shared}
         data-directory-row=""
         aria-label={memberRowLabel(
-          member,
+          // 점이 눈에 말하는 것을 이름이 이어 말한다. 자기 행의 접속 여부는 이 클라이언트의 연결이다.
+          withOwnConnection(member, selfMemberId, connStatus === "connected"),
           owner?.displayName ?? null,
           labels,
           nowMs
@@ -122,7 +125,14 @@ export function MemberRow({
           "hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
         )}
       >
-        <Avatar member={member} />
+        {/* 사람에게만 모서리 점이 선다(모르면 점 없음). 점은 아바타 상자 안이라 행 높이가 움직이지 않는다. */}
+        {isAgent ? (
+          <Avatar member={member} />
+        ) : (
+          <AvatarWithPresence member={member}>
+            <Avatar member={member} />
+          </AvatarWithPresence>
+        )}
         {identity}
         {uuidEq(member.id, selfMemberId) && (
           <span className="shrink-0 text-meta text-ink-muted">나</span>

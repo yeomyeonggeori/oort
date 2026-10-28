@@ -140,10 +140,11 @@ pub use huddle::{
 };
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,
-    is_active_agent, is_channel_member, list_workspace_roster, parse_roster_kind_filter,
-    read_workspace_for_active_member, resolve_member_signing_key, verify_password_login, Member,
-    MemberKind, PasswordLogin, RosterKindFilterInvalid, RosterMember, Workspace, WorkspaceIdentity,
-    WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT, ROSTER_LIMIT_MAX,
+    is_active_agent, is_active_human_member, is_channel_member, list_workspace_roster,
+    parse_roster_kind_filter, read_workspace_for_active_member, resolve_member_signing_key,
+    verify_password_login, Member, MemberKind, PasswordLogin, RosterKindFilterInvalid,
+    RosterMember, Workspace, WorkspaceIdentity, WorkspaceRead, WorkspaceRole, ROSTER_LIMIT_DEFAULT,
+    ROSTER_LIMIT_MAX,
 };
 pub use inbox::{
     clamp_inbox_limit, delete_read_inbox_items_in_tx, inbox_event_payload,

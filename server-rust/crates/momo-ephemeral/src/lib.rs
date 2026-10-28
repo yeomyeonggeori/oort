@@ -21,17 +21,27 @@
 //! holds no connection, so it cannot ask who is in a channel; the route proves
 //! that first and only then hands a signal down. Keeping the check out of here
 //! is what keeps guard 3 true.
+//!
+//! **ADR-0160 ② (#4692) adds a read half, [`reader::PresenceReader`].** The
+//! publish side writes what a request asked for; the read side asks the broker
+//! one question — *who has a live connection to this workspace* — and returns
+//! member ids only. It is sealed the same way (it takes a workspace id, not a
+//! channel; it has no `sqlx`; a failed read is `Unavailable`, never an empty
+//! set), and it is the reason availability needs no Postgres column, no outbox
+//! row and no client-side reading of Centrifugo's presence (ADR-0160 alternative D).
 
 pub mod publisher;
+pub mod reader;
 pub mod signal;
 
 pub use publisher::{EphemeralPublishOutcome, EphemeralPublisher};
+pub use reader::{OnlineRead, PresenceReader, PRESENCE_MAX_BODY_BYTES, PRESENCE_READ_TIMEOUT};
 pub use signal::{
-    ephemeral_channel, ephemeral_presence_channel, now_epoch_ms, EphemeralSignal, PresenceSignal,
-    TypingSignal, EPHEMERAL_NAMESPACE, PRESENCE_EVENT_TYPE, PRESENCE_EVENT_VERSION,
-    PRESENCE_NAMESPACE, PRESENCE_REPUBLISH_INTERVAL_MS, PRESENCE_SIGNAL_TTL_MS,
-    TYPING_AGGREGATE_THRESHOLD, TYPING_EVENT_TYPE, TYPING_REPUBLISH_INTERVAL_MS,
-    TYPING_SIGNAL_TTL_MS,
+    ephemeral_channel, ephemeral_presence_channel, now_epoch_ms, online_channel, EphemeralSignal,
+    PresenceSignal, TypingSignal, EPHEMERAL_NAMESPACE, ONLINE_NAMESPACE, PRESENCE_EVENT_TYPE,
+    PRESENCE_EVENT_VERSION, PRESENCE_NAMESPACE, PRESENCE_REPUBLISH_INTERVAL_MS,
+    PRESENCE_SIGNAL_TTL_MS, TYPING_AGGREGATE_THRESHOLD, TYPING_EVENT_TYPE,
+    TYPING_REPUBLISH_INTERVAL_MS, TYPING_SIGNAL_TTL_MS,
 };
 
 #[cfg(test)]

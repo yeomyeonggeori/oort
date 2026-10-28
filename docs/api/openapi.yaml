@@ -14519,6 +14519,24 @@ components:
             ADR-0124 증보 2. Running DND expiry (epoch ms), present only while
             `presenceStatus` is `dnd` with an expiry ahead. No event fires at
             expiry; past it the client treats the member as `auto`.
+        online:
+          type: boolean
+          description: >
+            Availability (ADR-0160 ②, #4692), present for humans only: does this
+            person have a live realtime connection to the workspace right now.
+            The second input of the dot a client draws, `f(presenceStatus, online)`;
+            the wire never carries the effective value. Read from the transport at
+            request time (Centrifugo's presence table for the workspace roll-call
+            `online:ws<WS>`), never stored, and set only on a row this response
+            already returns, so it reveals nothing beyond the roster the caller may
+            read (a guest's roster still holds only the people who share a channel
+            with them).
+            **Absent is not `false`.** The key is omitted for agents (their liveness
+            is `agent_run`), and from every row of a response whose availability
+            could not be established (the instance has no realtime broker
+            credential, or the broker did not answer in time). A client reads
+            absence as unknown and draws no dot. `false` means the broker answered
+            and this person has no connection.
         statusEmoji:
           type: string
           description: >

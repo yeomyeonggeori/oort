@@ -163,6 +163,37 @@ describe("custom status PUT omit vs null round-trip", () => {
     expect(visibleCustomStatus(roster[0] as RosterMember, NOW)).toBeNull();
   });
 
+  it("roster `online` (#4692): a boolean passes through, anything else is unknown, and the row stays", async () => {
+    installHost();
+    const row = (id: string, over: Record<string, unknown>) =>
+      rosterRow({ id: `00000000-0000-7000-8000-0000000002${id}`, ...over });
+    vi.stubGlobal("fetch", async () =>
+      jsonResponse(200, {
+        members: [
+          row("01", { online: true }),
+          row("02", { online: false }),
+          row("03", {}),
+          // Values this client cannot read must never survive as something truthy.
+          row("04", { online: "false" }),
+          row("05", { online: 1 }),
+          row("06", { online: null }),
+        ],
+      })
+    );
+    const roster = await fetchRoster(WS);
+    expect(roster.map((member) => member.online)).toEqual([
+      true,
+      false,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+    // Dropping the column must not delete the member (unlike a malformed row).
+    expect(roster).toHaveLength(6);
+    expect("online" in roster[3]!).toBe(false);
+  });
+
   it("reads own GET as a snapshot without inventing custom fields", async () => {
     installHost();
     vi.stubGlobal("fetch", async () => jsonResponse(200, { status: "dnd" }));

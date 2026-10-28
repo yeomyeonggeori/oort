@@ -26,7 +26,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
-import { existingDmChannelId, newDmCandidates, peerDot, PEER_DOT_LABEL } from "./newDmModel";
+import { existingDmChannelId, newDmCandidates, peerDot } from "./newDmModel";
 import {
   NewDmOpenContext,
   NewDmOpenStateContext,
@@ -72,7 +72,7 @@ function PickRow({
         aria-busy={pending || undefined}
         disabled={disabled}
         aria-label={`${member.displayName} @${member.handle}${
-          dot ? `, ${PEER_DOT_LABEL[dot]}` : ""
+          dot ? `, ${dot.label}` : ""
         }${hasDm ? ", 대화 이어가기" : ", 새 대화 시작"}`}
         onClick={() => onPick(member)}
         className="flex w-full items-center gap-3 px-4 py-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-60"
@@ -90,7 +90,7 @@ function PickRow({
           <span className="min-w-0 truncate text-meta text-ink-muted">@{member.handle}</span>
         </span>
         {dot ? (
-          <span className="shrink-0 text-meta text-ink-muted">{PEER_DOT_LABEL[dot]}</span>
+          <span className="shrink-0 text-meta text-ink-muted">{dot.label}</span>
         ) : null}
         {hasDm ? (
           <span

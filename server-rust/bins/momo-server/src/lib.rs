@@ -143,6 +143,12 @@ impl AgentPortState {
 pub struct EphemeralState {
     pub settings: EphemeralSettings,
     pub publisher: Option<momo_ephemeral::EphemeralPublisher>,
+    /// The read half (ADR-0160 ②, #4692): 「who is connected to this workspace」,
+    /// asked of Centrifugo's own presence table. Built from the **same** credential
+    /// as `publisher` and absent exactly when it is, so an instance that never
+    /// configured the transport reports no availability (the roster then carries no
+    /// `online`, which clients read as unknown, never as offline).
+    pub presence_reader: Option<momo_ephemeral::PresenceReader>,
 }
 
 impl EphemeralState {
@@ -162,9 +168,19 @@ impl EphemeralState {
                 }
             }
         });
+        let presence_reader = settings.transport().and_then(|(url, key)| {
+            match momo_ephemeral::PresenceReader::new(url, key) {
+                Ok(reader) => Some(reader),
+                Err(error) => {
+                    tracing::error!(%error, "presence reader unavailable; roster carries no availability");
+                    None
+                }
+            }
+        });
         EphemeralState {
             settings,
             publisher,
+            presence_reader,
         }
     }
 }

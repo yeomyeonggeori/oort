@@ -18,6 +18,7 @@ import {
   asWorkSessionShareChangedFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
+  centrifugoOnlineChannelName,
   centrifugoTypingChannelName,
   createReplayGate,
   type AgentProgressEvent,
@@ -372,6 +373,28 @@ export function createRealtime(
     );
   }
 
+  /**
+   * 작업공간 출석부 (ADR-0160 ② 가용성, #4692). **세어지려고** 구독한다: 이 채널
+   * (`online:ws<WS>`)에 붙어 있는 동안 Centrifugo 의 presence 표에 「이 사람은 연결돼 있다」가
+   * 적히고, 그 표는 서버만 읽어 명부 행의 `online` 으로 싣는다. 클라이언트가 이 구독에서
+   * **받는 것은 없다** - 그래서 핸들러가 없고, 네임스페이스는 presence·history·publish·join/leave 를
+   * 아무에게도 주지 않는다.
+   *
+   * 이 파일의 `attach()` 를 그대로 탄다(같은 소켓, 재연결 때 스스로 다시 구독, 소켓이 내려가면 함께
+   * 내려간다). 복구도 위치 추적도 요구하지 않는다: 되살릴 과거가 없는 레일이다(`history_size: 0`).
+   *
+   * 거절(구서버·구설정의 `unknown channel`, 자격 만료의 403)은 이 구독 하나만 끝낸다 -
+   * 연결은 그대로다(실측: 구독 `unsubscribed 102/403`, 연결 `connected` 유지). 그러면 명부에서
+   * 이 사람은 연결 없음으로 보일 뿐이다.
+   */
+  function joinOnlineRollCall(workspaceId: string): () => void {
+    return attach(
+      centrifugoOnlineChannelName(workspaceId),
+      { recoverable: false, positioned: false },
+      () => () => {}
+    );
+  }
+
   function subscribeWorkSession(
     workspaceId: string,
     channelId: string,
@@ -629,6 +652,7 @@ export function createRealtime(
     subscribeScheduled,
     subscribeWorkHostNotices,
     subscribeChannel,
+    joinOnlineRollCall,
     subscribeAgent,
     subscribeTyping,
     subscribeWorkSession,

@@ -256,7 +256,7 @@ python3 "$CATALOG_CHECKER" "$RAILWAY_JSON" "$COMPOSE_RUST" "$CENTRIFUGO_JSON" \
 }
 for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   predeploy-no-privdrop centrifugo-origins-dropped centrifugo-compose-name \
-  centrifugo-namespaces-drift centrifugo-endpoint-drift \
+  centrifugo-namespaces-drift centrifugo-online-leaks centrifugo-endpoint-drift \
   centrifugo-connection-meta-off centrifugo-subscription-token-off \
   api-volume-missing api-run-uid-missing api-keeps-superuser \
   api-keeps-postgres-password api-no-setpriv api-exec-not-last api-chown-in-echo \
@@ -281,7 +281,7 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221); 77 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221); 78 mutations RED"
 
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that
