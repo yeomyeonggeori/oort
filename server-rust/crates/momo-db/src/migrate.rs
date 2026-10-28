@@ -695,12 +695,17 @@ mod tests {
     /// single-transaction file cannot use the new enum value as a literal), a `BEFORE INSERT OR UPDATE OF
     /// kind, actor_member_id, workspace_id` trigger that lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
     /// per lineage, and `message.sent_via` (`NULL` or `'dev'`). No new table, so no new RLS policy.
+    ///
+    /// 153 is #4700's `oort login` browser-approval ledger (ADR-0216 D6 나): the new tenant table
+    /// `dev_login_authorization` (one terminal decision per signed request nonce, a 60 s single-use code
+    /// stored only as a digest, the lineage a consumed code opened) under RLS ENABLE + FORCE and the
+    /// standard `ws_isolation` policy, with a conditional `momo_app` grant.
     #[test]
-    fn discovers_contiguous_migrations_001_to_152() {
+    fn discovers_contiguous_migrations_001_to_153() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=152).collect();
+        let expected: Vec<i64> = (1..=153).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -708,11 +713,15 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=152 under {}",
+            "expected contiguous 001..=153 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-        assert!(migrations.last().unwrap().name.starts_with("152_dev_token"));
+        assert!(migrations
+            .last()
+            .unwrap()
+            .name
+            .starts_with("153_dev_login_authorization"));
     }
 
     #[test]
