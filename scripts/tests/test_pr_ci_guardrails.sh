@@ -1063,11 +1063,15 @@ risk_expect_red duplicate-row "$RISK_MUT/duplicate-row.md" "$POLICY_VERIFIER" "l
 grep -vF 'risk-tier:policy-paths:begin' "$RISK_DOC" > "$RISK_MUT/no-marker.md" || true
 risk_mutation_applied "$RISK_DOC" "$RISK_MUT/no-marker.md" no-marker
 risk_expect_red no-marker "$RISK_MUT/no-marker.md" "$POLICY_VERIFIER" "lists only 0 policy patterns"
-awk '{ print } /^    AGENTS\.md\|\\$/ { print "    CODE_OF_CONDUCT.md|\\" }' \
+# The probe must be a tracked file that the policy lane always has and policy_path()
+# does not flag today: REVIEW.md (this very test already requires it, and the lane
+# selects it). A probe outside the lane would make the proof depend on a file this
+# lane never sees. Pick another probe if REVIEW.md ever becomes a policy file.
+awk '{ print } /^    AGENTS\.md\|\\$/ { print "    REVIEW.md|\\" }' \
   "$POLICY_VERIFIER" > "$RISK_MUT/verifier-gains-a-path.sh"
 risk_mutation_applied "$POLICY_VERIFIER" "$RISK_MUT/verifier-gains-a-path.sh" verifier-gains-a-path
 risk_expect_red verifier-gains-a-path "$RISK_DOC" "$RISK_MUT/verifier-gains-a-path.sh" \
-  "policy_path() flags 'CODE_OF_CONDUCT.md'"
+  "policy_path() flags 'REVIEW.md'"
 grep -vxF '    deny.toml|\' "$POLICY_VERIFIER" > "$RISK_MUT/verifier-loses-a-path.sh" || true
 risk_mutation_applied "$POLICY_VERIFIER" "$RISK_MUT/verifier-loses-a-path.sh" verifier-loses-a-path
 risk_expect_red verifier-loses-a-path "$RISK_DOC" "$RISK_MUT/verifier-loses-a-path.sh" \
