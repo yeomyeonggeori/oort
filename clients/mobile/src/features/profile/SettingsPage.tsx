@@ -56,6 +56,16 @@ import {
 import {useNow} from '../../lib/useNow';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
+  PUSH_PREVIEW_DETAIL,
+  PUSH_PREVIEW_LABEL,
+  PUSH_SHOW_SENDER_DETAIL,
+  PUSH_SHOW_SENDER_LABEL,
+  setPushPreview,
+  setPushShowSender,
+  usePushPreview,
+  usePushShowSender,
+} from '../../push/presentation';
+import {
   PUSH_SWITCH_LABEL,
   PUSH_SWITCH_OFF_FAILED,
   pushSwitchDetail,
@@ -97,7 +107,8 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 // ## 페이지이지 시트가 아니다 — 전환 방식은 스택
 //
 // `docs/design-system/phone-sheets.md` §1 의 표가 정한다: 여러 묶음의 설정은 **페이지**이고, 페이지는
-// 화면 스택에 쌓여 가장자리 밀기로 닫히며(`EdgeSwipeBack`), 머리 **왼쪽**에 원형 X 가 선다. §5 분류표도
+// 화면 스택에 쌓여 가장자리 밀기로 닫히며(`EdgeSwipeBack`), 머리 **오른쪽 위**에 원형 X 가 선다(#4691 — 닫기 X 는
+// 시트와 같은 자리다. 안쪽 장의 ‹ 뒤로는 왼쪽). §5 분류표도
 // 「내 프로필·설정 → 페이지(설정 페이지)」다. 그래서 이 화면은 셸의 한 층(`nav.settings`)이고 `Modal` 이
 // 아니다. 모달 페이지로 지으면 ① 왼쪽 가장자리 밀기가 없고 ② 그 위의 「상태 설정」 시트와 새 버전 시트가
 // **Modal 위의 Modal**이 된다(§1 규칙 2: Modal 위에 화면을 쌓지 않는다). 층은 그 둘을 한 번에 푼다.
@@ -423,6 +434,10 @@ export function SettingsContent({
   const faceRing = useFaceRing();
   const {choice, themeId} = useTheme();
   const push = usePushSwitch(workspaceId, member.id);
+  // 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5): 이 폰의 선택 둘. 서버 값이 아니라 기기에 있어서
+  // 읽는 중·못 읽음이 없고, 켜 두는 것이 처음 상태다.
+  const previewOn = usePushPreview();
+  const showSenderOn = usePushShowSender();
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
   const kinds = usePushKinds(workspaceId);
@@ -690,6 +705,37 @@ export function SettingsContent({
                   }
             }
             testID="profile-push-row"
+          />
+          {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
+              MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
+              끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}
+          <SwitchRow
+            title={PUSH_PREVIEW_LABEL}
+            detail={PUSH_PREVIEW_DETAIL}
+            checked={previewOn}
+            onPress={() => setPushPreview(!previewOn)}
+            accessibilityHint={PUSH_PREVIEW_DETAIL}
+            control={{
+              kind: 'switch',
+              value: previewOn,
+              onValueChange: setPushPreview,
+              testID: 'profile-preview-switch',
+            }}
+            testID="profile-preview-row"
+          />
+          <SwitchRow
+            title={PUSH_SHOW_SENDER_LABEL}
+            detail={PUSH_SHOW_SENDER_DETAIL}
+            checked={showSenderOn}
+            onPress={() => setPushShowSender(!showSenderOn)}
+            accessibilityHint={PUSH_SHOW_SENDER_DETAIL}
+            control={{
+              kind: 'switch',
+              value: showSenderOn,
+              onValueChange: setPushShowSender,
+              testID: 'profile-show-sender-switch',
+            }}
+            testID="profile-show-sender-row"
           />
           <SwitchRow
             title={NOTIFICATION_PAUSE_LABEL}

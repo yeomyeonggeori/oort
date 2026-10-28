@@ -33,11 +33,11 @@ const code = (file: string) => stripComments(read(file));
 const exists = (name: string) => fs.existsSync(path.join(SRC, name));
 
 /**
- * 시트가 아니거나 다른 이슈가 옮기는 자리 — 이유가 없는 면제는 없다. (프로필 시트는 #4457 이 설정 페이지로 대체해 파일째
- * 지웠다 — 면제도 같이 지웠다. 없는 파일의 면제가 남으면 그 이름으로 파일이 되살아났을 때 조용히 통과한다.)
+ * 시트가 아니거나 다른 이슈가 옮기는 자리 — 이유가 없는 면제는 없다. (프로필 시트 둘은 면제에서 나갔다: 내 프로필은 #4457 이
+ * 설정 페이지로 대체해 파일째 지웠고, 다른 사람 프로필은 #4319 가 `PageSheet` 로 옮겨 글자 「닫기」 가 없다. 없는 파일의 면제가
+ * 남으면 그 이름으로 파일이 되살아났을 때 조용히 통과한다.)
  */
 const TEXT_CLOSE_EXEMPT: Record<string, string> = {
-  'features/directory/MemberProfileSheet.tsx': '#4319(다른 사람 프로필)',
   'features/conversation/MessageRow.tsx':
     '행 안의 오류 「닫기」 — 시트가 아니고, 이 파일은 형제 이슈가 만진다',
 };
@@ -66,10 +66,9 @@ describe('「닫기」 글자 단추 0건 (#4458)', () => {
     expect(offenders).toEqual([]);
   });
 
-  it('면제는 이유가 있는 둘뿐이고 둘 다 지금 있는 파일이다 — 이유 없는 면제를 슬쩍 더하거나 지워진 파일의 면제를 두면 붉어진다', () => {
+  it('면제는 이유가 있는 하나뿐이고 지금 있는 파일이다 — 이유 없는 면제를 슬쩍 더하거나 지워진 파일의 면제를 두면 붉어진다', () => {
     expect(Object.keys(TEXT_CLOSE_EXEMPT).sort()).toEqual([
       'features/conversation/MessageRow.tsx',
-      'features/directory/MemberProfileSheet.tsx',
     ]);
     for (const reason of Object.values(TEXT_CLOSE_EXEMPT)) expect(reason.length).toBeGreaterThan(8);
     for (const name of Object.keys(TEXT_CLOSE_EXEMPT)) expect([name, exists(name)]).toEqual([name, true]);
@@ -114,7 +113,6 @@ describe('모든 바텀시트는 공용 그릇과 머리를 쓴다 (#4458)', () 
   /** `*Sheet.tsx` 중 바텀시트가 아닌 것 / 다른 이슈가 옮기는 것. */
   const NOT_PAGE_SHEET: Record<string, string> = {
     'features/deviceLink/QrScannerSheet.tsx': '전체 화면 카메라 모달 — 바텀시트가 아니다',
-    'features/directory/MemberProfileSheet.tsx': '#4319',
   };
 
   const sheetFiles = sources().filter(
@@ -125,7 +123,7 @@ describe('모든 바텀시트는 공용 그릇과 머리를 쓴다 (#4458)', () 
     expect(sheetFiles.length).toBeGreaterThanOrEqual(12);
   });
 
-  it('`*Sheet.tsx` 는 `PageSheet` + `SheetHeader` 를 쓴다 — 면제는 이유가 있는 둘뿐이고 지금 있는 파일이다', () => {
+  it('`*Sheet.tsx` 는 `PageSheet` + `SheetHeader` 를 쓴다 — 면제는 이유가 있는 하나뿐이고 지금 있는 파일이다(다른 사람 프로필 시트는 이제 면제가 아니다)', () => {
     for (const name of Object.keys(NOT_PAGE_SHEET)) expect([name, exists(name)]).toEqual([name, true]);
     const offenders: string[] = [];
     for (const file of sheetFiles) {
@@ -150,7 +148,7 @@ describe('모든 바텀시트는 공용 그릇과 머리를 쓴다 (#4458)', () 
       'features/deviceLink/QrScannerSheet.tsx', // 전체 화면 카메라
       'features/attachments/AttachMenu.tsx', // 앵커 팝오버 — 시트가 아니다
       'features/attachments/AttachmentViewer.tsx', // 전체 화면 사진 뷰어
-      'features/directory/MemberProfileSheet.tsx', // #4319
+      'features/directory/AvatarViewer.tsx', // 전체 화면 프로필 사진 뷰어(#4319) — 첨부 뷰어의 형제, 시트가 아니다
     ]);
     const offenders = sources()
       .filter(file => /<Modal\b/.test(read(file)))

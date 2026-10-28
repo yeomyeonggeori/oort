@@ -219,6 +219,32 @@ app_dk="$(plist_value "$APP" MomoDeviceKeyAccessGroup)"
   fail "the extension's Info.plist carries MomoDeviceKeyAccessGroup; it must not."
 echo "ok: MomoDeviceKeyAccessGroup=$app_dk in the app only"
 
+# ---- 4c. the communication-notifications capability is the APP's alone -------
+#
+# #4316, ADR-0204 증보 5. The notification extension turns a push into a communication notification (the sender's
+# round photo, the app icon small at its corner), and iOS only allows that for an app signed with
+# `com.apple.developer.usernotifications.communication`. It is an APP-target capability (Apple's "Implementing
+# communication notifications"; Buzz ships it the same way) and an App ID capability: the App Store Connect API has no
+# `capabilityType` for it, so it is switched on by hand in the developer portal and the Xcode-managed profile has to be
+# regenerated afterwards (docs/runbooks/ios-testflight.md, owner only). A profile that predates the switch makes the
+# archive fail signing, loudly — but only a signed product can show that the grant really arrived, and what it costs
+# when it did not is quiet: every message notification falls back to the plain look with no photo.
+#
+# `plutil` reads a dotted key as a key path, so the dots are escaped.
+COMMUNICATION_KEY='com\.apple\.developer\.usernotifications\.communication'
+[ "$(entitlement "$WORK/app.plist" "$COMMUNICATION_KEY")" = "true" ] ||
+  fail "the app was signed WITHOUT com.apple.developer.usernotifications.communication.
+       The extension then cannot dress a push as a communication notification (no sender photo, no
+       conversation name): every message notification stays the plain look. The App ID capability
+       'Communication Notifications' is not on, or the profile was not regenerated after it was
+       (docs/adr/0204 증보 5, docs/runbooks/ios-testflight.md)."
+echo "ok: the app was granted communication notifications"
+[ -z "$(entitlement "$WORK/appex.plist" "$COMMUNICATION_KEY")" ] ||
+  fail "the extension was signed WITH the communication capability. It is the app's: the extension
+       donates inside the app's bundle and its App ID has no such capability
+       (NotificationService/MomoMobileNotificationService.entitlements)."
+echo "ok: the extension carries no communication capability"
+
 # ---- 5. the APNs environment agrees with itself -----------------------------
 #
 # docs/cicd/11 §3-2: a build whose token is minted against one APNs host and

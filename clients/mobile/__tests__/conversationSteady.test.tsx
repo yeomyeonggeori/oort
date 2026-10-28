@@ -15,7 +15,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {ActionSheetIOS, AppState, FlatList, StyleSheet} from 'react-native';
+import {AppState, FlatList, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -36,6 +36,7 @@ import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {openPinList} from './fixtures/conversationMenu';
 import {
   installAppClock,
   SHELL_WAIT_TEST_TIMEOUT_MS,
@@ -675,15 +676,10 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     // 눌린다 — 대화 머리의 「‹」가 스레드를 닫으려는 손을 받아 대화를 떠난다. 그래서 머리는 목록과 한 틀에 담기고 덮개는 틀 **뒤** 형제다.
     // 그리기·누르기 순서 자체는 제스트가 못 재므로 그 **구조**를 잰다(시뮬레이터 캡처로도 확인한다).
     await openDm();
-    const sheet = jest
-      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
-      .mockImplementation((_options, callback) => callback(0));
     expect(screen.queryByTestId('pin-list-pane')).toBeNull();
-    // ⋮ 메뉴의 첫 항목이 「고정한 메시지」다.
-    await act(async () => {
-      fireEvent.press(screen.getByTestId('conversation-menu'));
-    });
-    expect(sheet).toHaveBeenCalledTimes(1);
+    // ⋮ 시트의 「고정한 메시지」 행이 고정 목록을 연다(시트가 먼저 내려간 뒤).
+    await openPinList();
+    expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
 
     const column = screen.getByTestId('conversation-column');
     const header = screen.getByTestId('conversation-header');

@@ -5,6 +5,8 @@ import {apiBase, coreSession} from '@momo/core/runtime/host';
 import {Directory, File, Paths} from 'expo-file-system';
 import {useEffect, useState} from 'react';
 
+import {exportAvatarForPush, usePushShowSender} from '../../push/presentation';
+
 // =============================================================================
 // 업로드된 멤버 아바타(ADR-0161 증보, #3277)를 폰에서 싣는 길 — 디스크 파일 캐시
 //
@@ -331,5 +333,11 @@ export function useMemberAvatarUri(path: string | null): string | null {
       alive = false;
     };
   }, [path, key, stale]);
+  // 그려진 얼굴은 알림 확장에게도 한 번 건넨다(#4316): 화면이 이미 받아 둔 파일이라 요청이 늘지 않고,
+  // 같은 (서버·멤버·버전)은 이 실행에서 한 번만 간다. 「보낸 사람 표시」를 다시 켜면 그려진 얼굴이 다시 간다.
+  const showSender = usePushShowSender();
+  useEffect(() => {
+    if (path !== null && hit !== null && showSender) exportAvatarForPush(path, hit);
+  }, [path, hit, showSender]);
   return hit;
 }

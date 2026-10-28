@@ -160,7 +160,8 @@ describe('the JS push contract matches the Swift the extension runs', () => {
 
   it('renders work_run_done with fixed copy, never the agent reply (ADR-0162 D14)', () => {
     const branch = SWIFT.indexOf('envelope.reason == "work_run_done"');
-    const generic = SWIFT.indexOf('return PushDisplayContent(title: author.displayName, body: body)');
+    // #4316: the generic path now answers with the author too (`PushResolution`), so the search string is its display.
+    const generic = SWIFT.indexOf('display: PushDisplayContent(title: author.displayName, body: body)');
     const decode = SWIFT.indexOf('decoder.decode(MessagePage.self');
     expect(branch).toBeGreaterThan(-1);
     // The branch returns before the page is decoded and before the generic
@@ -227,6 +228,16 @@ describe('entitlements — the app/extension asymmetry is deliberate', () => {
     expect(appEnt).toContain('<key>aps-environment</key>');
     expect(nseEnt).not.toContain('<key>aps-environment</key>');
   });
+
+  it('gives the communication-notification capability to the app and NOT to the extension (#4316)', () => {
+    // Apple: "Enable the Communication Notifications capability in your app target". Buzz ships it the same way.
+    // The extension donates inside the app's bundle; declaring it there too would ask the extension's App ID
+    // for a capability it never needs (and the extension's profile has none). It is the KEY that is judged.
+    const key = '<key>com.apple.developer.usernotifications.communication</key>';
+    expect(appEnt).toContain(key);
+    expect(appEnt).toMatch(/<key>com\.apple\.developer\.usernotifications\.communication<\/key>\s*<true\/>/);
+    expect(nseEnt).not.toContain(key);
+  });
 });
 
 describe('Info.plist carries what the runtime reads', () => {
@@ -260,6 +271,15 @@ describe('Info.plist carries what the runtime reads', () => {
     expect(nsePlist).toContain(key);
   });
 
+  it('names the intent a communication notification donates, in the APP plist only (#4316)', () => {
+    // Apple: "Add the class name of each intent that your app supports to the NSUserActivityTypes array in your
+    // Info.plist". The app's plist, not the extension's.
+    expect(plist).toMatch(
+      /<key>NSUserActivityTypes<\/key>\s*<array>\s*<string>INSendMessageIntent<\/string>\s*<\/array>/,
+    );
+    expect(nsePlist).not.toContain('<key>NSUserActivityTypes</key>');
+  });
+
   it('declares the background mode the id-only design depends on', () => {
     // The relay sends content-available alongside mutable-content
     // (PushDispatch.swift:112-113); without this the former is dropped.
@@ -274,4 +294,96 @@ describe('Info.plist carries what the runtime reads', () => {
       '<string>com.apple.usernotifications.service</string>',
     );
   });
+});
+
+// =============================================================================
+// #4316 (ADR-0204 증보 5) — 앱이 알림 확장에게 건네는 길의 JS ↔ Swift 계약.
+//
+// JS 는 네이티브 함수가 없으면 **아무 일도 하지 않는다**(`presentation.ts`: 모듈이 없는 빌드·옛 바이너리·시험).
+// 그 관용이 이 계약의 약점이다: Swift 쪽 이름이 바뀌거나 JS 가 다른 이름을 부르면 어느 쪽도 던지지 않고,
+// 사진·채널 이름이 영원히 건너가지 않는다 — 알림은 오고 「조금 못한 알림」일 뿐이라 아무도 모른다. 두 언어는
+// 서로 컴파일되지 않으므로 이 시험이 이름을 맞댄다. (판정 자체 — 캐시 한도·사진 순서·계획 — 는 아래 sim-check 가 돌린다.)
+// =============================================================================
+describe('앱이 알림 확장에게 건네는 네이티브 함수 (JS 가 부르는 이름 = Swift 가 등록한 이름)', () => {
+  const MODULE_SWIFT = readFileSync(
+    join(APP_ROOT, 'modules/momo-push-native/ios/MomoPushNativeModule.swift'),
+    'utf8',
+  );
+  const JS = readFileSync(join(APP_ROOT, 'src/push/presentation.ts'), 'utf8');
+
+  /** 주석을 걷는다: 주석에 적힌 이름은 등록이 아니다. */
+  const code = (source: string): string =>
+    source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
+
+  it('모듈 이름이 같다', () => {
+    const swiftName = /\bName\("([^"]+)"\)/.exec(code(MODULE_SWIFT))?.[1];
+    const jsName = /const MODULE_NAME = '([^']+)'/.exec(code(JS))?.[1];
+    expect(swiftName).toBe('MomoPushNative');
+    expect(jsName).toBe(swiftName);
+  });
+
+  it('JS 가 부르는 네 함수가 Swift 가 등록한 AsyncFunction 이름과 정확히 같다', () => {
+    const registered = [...code(MODULE_SWIFT).matchAll(/AsyncFunction\("(\w+)"\)/g)].map(m => m[1]).sort();
+    const interfaceBody = /interface PresentationNative \{([\s\S]*?)\n\}/.exec(code(JS))?.[1] ?? '';
+    const called = [...interfaceBody.matchAll(/^\s{2}(\w+)\?\(/gm)].map(m => m[1]).sort();
+    expect(registered).toEqual(['clearPresentation', 'exportAvatar', 'exportChannels', 'setPresentationSettings']);
+    expect(called).toEqual(registered);
+  });
+
+  it('인자의 순서도 같다 (Swift 클로저의 이름 = JS 호출의 자리)', () => {
+    const swift = code(MODULE_SWIFT);
+    expect(swift).toMatch(/AsyncFunction\("setPresentationSettings"\) \{ \(previewEnabled: Bool, showSender: Bool\)/);
+    expect(swift).toMatch(
+      /AsyncFunction\("exportAvatar"\) \{\s*\(baseUrl: String, workspaceId: String, memberId: String, version: String, fileUri: String\)/,
+    );
+    expect(swift).toMatch(/AsyncFunction\("exportChannels"\) \{ \(baseUrl: String, workspaceId: String, channels: \[\[String: Any\]\]\)/);
+    expect(swift).toMatch(/AsyncFunction\("clearPresentation"\) \{ \(promise: Promise\)/);
+    const js = code(JS);
+    expect(js).toMatch(/module\.setPresentationSettings\(isPushPreviewOn\(\), isPushShowSenderOn\(\)\)/);
+    expect(js).toMatch(/module\.exportAvatar\(baseUrl, found\[1\], found\[2\], found\[3\], fileUri\)/);
+    expect(js).toMatch(/module\.exportChannels\(absoluteApiBase\(\), workspaceId, channels\)/);
+  });
+
+  it('Swift 가 읽는 채널 항목의 키가 JS 가 싣는 키와 같다 (id · kind · name · memberCount)', () => {
+    const bridge = readFileSync(
+      join(APP_ROOT, 'modules/momo-push-native/ios/MomoPushPresentationBridge.swift'),
+      'utf8',
+    );
+    for (const key of ['id', 'kind', 'name', 'memberCount']) {
+      expect(bridge).toContain(`entry["${key}"]`);
+      expect(JS).toMatch(new RegExp(`\\b${key}\\??:`));
+    }
+    for (const kind of ['public', 'private', 'dm']) {
+      expect(JS).toContain(`'${kind}'`);
+    }
+  });
+});
+
+// =============================================================================
+// Swift 쪽 판정을 **실제로 컴파일해 돌린다** — 위의 이름 맞댐은 글자일 뿐이고, 캐시 한도·사진 순서·무엇을 어떻게
+// 보여 줄지(계획)·REST 해석·정리 재시도는 컴파일된 코드만이 증명한다. 알림 확장과 앱 모듈이 컴파일하는 바로 그
+// 파일들(`MomoPushPresentationStore.swift`·`PushNotification.swift`·`PushCommunication.swift`)을 `main.swift` 와
+// 함께 `swiftc` 로 빌드해 이 Mac 에서 돌린다(`sim-check/run.sh`, 인자 없음). macOS 가 아니면(리눅스 CI) 건너뛴다.
+// Intents 는 macOS 에 없으므로(`setImage(_:forParameterNamed:)`) 그 절반은 시뮬레이터에서만 돈다
+// (`run.sh <udid>`): 실행한 기록은 PR 본문에 있다.
+// =============================================================================
+const onMac = process.platform === 'darwin';
+(onMac ? describe : describe.skip)('Swift 쪽 알림 표시 판정 (macOS 에서 컴파일해 실행)', () => {
+  it('sim-check 가 PASS 한다 — 설정·캐시·사진 순서·REST 해석·계획·정리 재시도', () => {
+    let output = '';
+    try {
+      output = execFileSync('bash', [join(APP_ROOT, 'modules/momo-push-native/sim-check/run.sh')], {
+        encoding: 'utf8',
+        stdio: 'pipe',
+        timeout: 150_000,
+      });
+    } catch (failure) {
+      const error = failure as {stdout?: string; stderr?: string};
+      throw new Error(`sim-check failed:\n${error.stdout ?? ''}\n${error.stderr ?? ''}`);
+    }
+    expect(output).toMatch(/^PASS$/m);
+    expect(output).not.toMatch(/^FAIL:/m);
+    // 검사 수가 크게 줄었다면 누군가 검사를 지운 것이다. (#4316 이 213건으로 시작했다: 하한 190)
+    expect((output.match(/^ok:/gm) ?? []).length).toBeGreaterThanOrEqual(190);
+  }, 180_000);
 });

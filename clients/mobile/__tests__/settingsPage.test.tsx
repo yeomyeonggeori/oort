@@ -1,4 +1,5 @@
-import type {Member} from '@momo/core/lib/api';
+import {makeDirectory} from '@momo/core/features/workspace/directory';
+import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -9,6 +10,7 @@ import {
   waitFor,
   within,
 } from '@testing-library/react-native';
+import {requireOptionalNativeModule} from 'expo-modules-core';
 import {getPermissionsAsync} from 'expo-notifications';
 import fs from 'fs';
 import path from 'path';
@@ -34,6 +36,17 @@ import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
 import {PROFILE_FACE} from '../src/features/profile/ProfileFace';
+import {
+  SettingsPage,
+  type SettingsPageName,
+  type SettingsSubPage,
+} from '../src/features/profile/SettingsPage';
+import {
+  PUSH_PREVIEW_DETAIL,
+  PUSH_PREVIEW_LABEL,
+  PUSH_SHOW_SENDER_DETAIL,
+  PUSH_SHOW_SENDER_LABEL,
+} from '../src/push/presentation';
 import AppShell from '../src/shell/AppShell';
 import {NON_SECRET_KEYS} from '../src/storage/kv';
 import {
@@ -53,8 +66,8 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 //
 // 이 파일이 지는 것은 **구조**다:
 //   1. 대화 목록 발치에 계정 줄·테마 칸·로그아웃이 더는 없다
-//   2. 머리 오른쪽 아바타가 설정 페이지를 연다 — 머리는 왼쪽 원형 X + 가운데 「설정」, 이름·@핸들·상태가 그 안에 있다
-//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 머리는 ‹ 뒤로이며 한 겹만 벗긴다(X 가 아니다)
+//   2. 머리 오른쪽 아바타가 설정 페이지를 연다 — 머리는 가운데 「설정」 + 오른쪽 원형 X(#4691), 이름·@핸들·상태가 그 안에 있다
+//   3. 원형 X 가 페이지를 닫고, 안쪽 장(테마 등)의 머리는 왼쪽 ‹ 뒤로이며 한 겹만 벗긴다(X 가 아니다)
 //   4. 테마는 「테마 ›」 행이 여는 안쪽 장이고, 고른 것이 저장된다
 //   5. 로그아웃은 마지막 카드의 위험 행이고, 한 번 확인한 뒤에만 세션을 지운다
 //   6. 알림 권한이 꺼져 있으면 그렇게 말하고, 스위치를 누르면 설정이 열린다 (#3924)
@@ -259,19 +272,19 @@ describe('설정 페이지', () => {
     }
   });
 
-  it('닫기는 글자가 아니라 머리 왼쪽의 원형 X 다 — 가운데는 「설정」이다', async () => {
+  it('닫기는 글자가 아니라 머리 오른쪽의 원형 X 다 — 가운데는 「설정」이다', async () => {
     const page = await openPage();
     const close = within(page).getByTestId('settings-close');
     expect(close.props.accessibilityRole).toBe('button');
     expect(close.props.accessibilityLabel).toBe('설정 닫기');
     expect(within(page).queryByText('닫기')).toBeNull();
     expect(within(page).getByTestId('settings-title')).toHaveTextContent('설정');
-    // 트리 순서가 곧 왼쪽·가운데다: X 가 제목보다 앞이다.
+    // 트리 순서가 곧 가운데·오른쪽이다: X 가 제목보다 뒤다(#4691 — 시트의 X 와 같은 자리).
     const order = flatten(screen.toJSON());
     const closeAt = order.indexOf('settings-close');
     const titleAt = order.indexOf('settings-title');
-    expect(closeAt).toBeGreaterThan(-1);
-    expect(titleAt).toBeGreaterThan(closeAt);
+    expect(titleAt).toBeGreaterThan(-1);
+    expect(closeAt).toBeGreaterThan(titleAt);
   });
 
   it('설정이 VoiceOver 의 모달 경계다 — 밑의 홈 목록은 읽히지 않는다', async () => {
@@ -577,6 +590,65 @@ describe('설정 페이지', () => {
       '연결 기록 복사됨',
     );
   });
+});
+
+describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는 왼쪽 위: 설정 페이지 전수 (#4691)', () => {
+  // 안쪽 장이 하나 늘면 이 표가 타입 오류를 낸다 — 새 장의 머리도 같은 약속을 지켜야 한다.
+  const SUB_PAGES: Record<SettingsSubPage, true> = {
+    theme: true,
+    deviceKey: true,
+    avatar: true,
+    pauseUntil: true,
+    dndUntil: true,
+  };
+
+  function mountPage(initialPage: SettingsPageName) {
+    queryClient = new QueryClient({
+      defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {retry: false, gcTime: 0}},
+    });
+    return render(
+      <ThemeProvider>
+        <QueryClientProvider client={queryClient}>
+          <SettingsPage
+            workspaceId={WS}
+            member={SELF}
+            directory={makeDirectory(ROSTER as unknown as RosterMember[])}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+            initialPage={initialPage}
+          />
+        </QueryClientProvider>
+      </ThemeProvider>,
+    );
+  }
+
+  /** 머리의 세 칸([왼쪽, 제목, 오른쪽])에 서 있는 단추의 이름. 칸이 셋이 아니면 제목이 가운데에 서지 않는다. */
+  function buttonsBySlot(headerTestID: string): string[][] {
+    const slots = (screen.getByTestId(headerTestID).children as unknown[]).filter(
+      child => typeof child !== 'string',
+    );
+    expect(slots).toHaveLength(3);
+    return slots.map(slot =>
+      within(slot as never)
+        .queryAllByRole('button')
+        .map(button => button.props.accessibilityLabel as string),
+    );
+  }
+
+  it('첫 장(모달 페이지): 왼쪽은 비고, 「설정」 제목, 오른쪽에 「설정 닫기」 X 하나다', () => {
+    mountPage('main');
+    expect(buttonsBySlot('settings-header')).toEqual([[], [], ['설정 닫기']]);
+  });
+
+  it.each(Object.keys(SUB_PAGES) as SettingsSubPage[])(
+    '안쪽 장 %s: 왼쪽에 ‹ 뒤로 하나, 오른쪽은 비고 X 는 없다',
+    page => {
+      mountPage(page);
+      expect(buttonsBySlot('settings-sub-header')).toEqual([['설정으로 돌아가기'], [], []]);
+      expect(within(screen.getByTestId('settings-sub-header')).queryByLabelText(/닫기/)).toBeNull();
+    },
+  );
 });
 
 describe('안쪽 장은 모두 새 카드 가족이다 — 옛 반경 8 카드가 어디에도 없다 (#4457)', () => {
@@ -893,5 +965,146 @@ describe('버전 줄', () => {
   it('빌드를 모르면 버전만, 버전도 모르면 모른다고 말한다', () => {
     expect(appVersionLabel('0.16.0', null)).toBe('oort 0.16.0');
     expect(appVersionLabel(null, null)).toBe('oort · 버전 정보를 읽지 못했습니다');
+  });
+});
+
+// =============================================================================
+// #4316 (ADR-0204 증보 5) — 설정 › 알림의 두 줄: 「메시지 미리보기」「보낸 사람 표시」.
+//
+// owner(2026-10-24): 「프로필이미지랑 메세지 미리보기도 포함해서 푸시알림 UI쪽 설계도 해줘. 슬랙과 버즈, 카카오톡과
+// 같은 메신저들의 UI 레퍼런스를 확인하고 참고해서」. 카카오톡은 「미리보기」와 「프로필 표시」를 따로 켜고 끈다.
+// 이 두 줄은 이 폰의 선택이고(서버를 부르지 않는다), 알림 확장은 MMKV 를 읽지 못해서 바꿀 때 네이티브가 App
+// Group 으로도 쓴다. 이 블록이 재는 것: 줄의 자리·처음 상태·눌렀을 때 저장과 확장 쪽 쓰기·접근성.
+// =============================================================================
+describe('알림이 보이는 모양 — 두 줄 (#4316)', () => {
+  const requireNative = requireOptionalNativeModule as unknown as jest.Mock;
+  let native: {
+    setPresentationSettings: jest.Mock;
+    clearPresentation: jest.Mock;
+    exportChannels: jest.Mock;
+    order: string[];
+  };
+
+  beforeEach(() => {
+    const order: string[] = [];
+    native = {
+      setPresentationSettings: jest.fn(async (preview: boolean, sender: boolean) => {
+        order.push(`settings:${preview}:${sender}`);
+        return true;
+      }),
+      clearPresentation: jest.fn(async () => {
+        order.push('clear');
+        return true;
+      }),
+      exportChannels: jest.fn(async () => true),
+      order,
+    };
+    requireNative.mockImplementation((name: string) => (name === 'MomoPushNative' ? native : null));
+  });
+
+  afterEach(() => {
+    requireNative.mockImplementation(() => null);
+  });
+
+  const switchValue = (testID: string) =>
+    screen.getByTestId(testID, {includeHiddenElements: true}).props.value as boolean;
+
+  it('알림 카드의 「푸시 알림」 바로 뒤에, 기본으로 켜진 채 선다', async () => {
+    const page = await openPage();
+    const card = within(page).getByTestId('settings-notify-card');
+    const previewRow = within(card).getByTestId('profile-preview-row');
+    const senderRow = within(card).getByTestId('profile-show-sender-row');
+    expect(within(previewRow).getByText(PUSH_PREVIEW_LABEL)).toBeTruthy();
+    expect(within(previewRow).getByText(PUSH_PREVIEW_DETAIL)).toBeTruthy();
+    expect(within(senderRow).getByText(PUSH_SHOW_SENDER_LABEL)).toBeTruthy();
+    expect(within(senderRow).getByText(PUSH_SHOW_SENDER_DETAIL)).toBeTruthy();
+    expect(switchValue('profile-preview-switch')).toBe(true);
+    expect(switchValue('profile-show-sender-switch')).toBe(true);
+    const order = flatten(screen.toJSON());
+    const at = (id: string) => order.indexOf(id);
+    expect(at('profile-push-row')).toBeGreaterThan(-1);
+    expect(at('profile-preview-row')).toBeGreaterThan(at('profile-push-row'));
+    expect(at('profile-show-sender-row')).toBeGreaterThan(at('profile-preview-row'));
+    expect(at('profile-pause-row')).toBeGreaterThan(at('profile-show-sender-row'));
+  });
+
+  it('두 줄은 스위치 역할이고 이름·켜짐 상태·설명을 보조기술에 말한다', async () => {
+    await openPage();
+    for (const [id, label, detail] of [
+      ['profile-preview-row', PUSH_PREVIEW_LABEL, PUSH_PREVIEW_DETAIL],
+      ['profile-show-sender-row', PUSH_SHOW_SENDER_LABEL, PUSH_SHOW_SENDER_DETAIL],
+    ] as const) {
+      const row = screen.getByTestId(id);
+      expect(row.props.accessibilityRole).toBe('switch');
+      expect(row.props.accessibilityLabel).toBe(label);
+      expect(row.props.accessibilityHint).toBe(detail);
+      expect(row.props.accessibilityState).toMatchObject({checked: true});
+    }
+  });
+
+  it('미리보기 줄을 누르면 꺼지고, 확장이 읽는 자리에 두 값이 함께 쓰이며, 아무것도 지우지 않는다', async () => {
+    await openPage();
+    fireEvent.press(screen.getByTestId('profile-preview-row'));
+    expect(switchValue('profile-preview-switch')).toBe(false);
+    expect(screen.getByTestId('profile-preview-row').props.accessibilityState).toMatchObject({checked: false});
+    expect(mmkvStore.get(NON_SECRET_KEYS.pushPreview)).toBe('0');
+    expect(native.setPresentationSettings).toHaveBeenLastCalledWith(false, true);
+    expect(native.clearPresentation).not.toHaveBeenCalled();
+    // 다른 줄은 그대로다.
+    expect(switchValue('profile-show-sender-switch')).toBe(true);
+    fireEvent.press(screen.getByTestId('profile-preview-row'));
+    expect(switchValue('profile-preview-switch')).toBe(true);
+    expect(mmkvStore.has(NON_SECRET_KEYS.pushPreview)).toBe(false);
+    expect(native.setPresentationSettings).toHaveBeenLastCalledWith(true, true);
+  });
+
+  it('스위치 자체를 밀어도 같다', async () => {
+    await openPage();
+    fireEvent(screen.getByTestId('profile-preview-switch', {includeHiddenElements: true}), 'valueChange', false);
+    expect(mmkvStore.get(NON_SECRET_KEYS.pushPreview)).toBe('0');
+    expect(native.setPresentationSettings).toHaveBeenLastCalledWith(false, true);
+  });
+
+  it('보낸 사람 표시를 끄면 설정을 쓴 뒤 건넨 것을 거두고, 미리보기는 건드리지 않는다', async () => {
+    await openPage();
+    native.order.length = 0;
+    fireEvent.press(screen.getByTestId('profile-show-sender-row'));
+    expect(switchValue('profile-show-sender-switch')).toBe(false);
+    expect(mmkvStore.get(NON_SECRET_KEYS.pushShowSender)).toBe('0');
+    expect(native.order).toEqual(['settings:true:false', 'clear']);
+    expect(switchValue('profile-preview-switch')).toBe(true);
+    // 다시 켜면 켜지고, 이번에는 거두지 않는다.
+    fireEvent.press(screen.getByTestId('profile-show-sender-row'));
+    expect(switchValue('profile-show-sender-switch')).toBe(true);
+    expect(mmkvStore.has(NON_SECRET_KEYS.pushShowSender)).toBe(false);
+    expect(native.clearPresentation).toHaveBeenCalledTimes(1);
+  });
+
+  it('고른 상태는 설정을 닫았다 다시 열어도, 앱을 다시 띄워도 남는다', async () => {
+    await openPage();
+    fireEvent.press(screen.getByTestId('profile-preview-row'));
+    fireEvent.press(screen.getByTestId('profile-show-sender-row'));
+    fireEvent.press(screen.getByTestId('settings-close'));
+    fireEvent.press(screen.getByTestId('profile-avatar'));
+    expect(switchValue('profile-preview-switch')).toBe(false);
+    expect(switchValue('profile-show-sender-switch')).toBe(false);
+    // 앱을 다시 띄움: 렌더 트리를 내리고 같은 저장소로 새로 그린다.
+    screen.unmount();
+    native.setPresentationSettings.mockClear();
+    await openPage();
+    expect(switchValue('profile-preview-switch')).toBe(false);
+    expect(switchValue('profile-show-sender-switch')).toBe(false);
+    // 셸이 뜰 때 저장된 두 값이 확장 쪽으로 다시 쓰인다(앱을 지웠다 깐 폰·비워진 그룹이 되찾는다).
+    expect(native.setPresentationSettings).toHaveBeenCalledWith(false, false);
+  });
+
+  it('서버를 부르지 않는다 — 이 두 줄은 이 폰의 선택이다', async () => {
+    await openPage();
+    const before = (globalThis.fetch as jest.Mock).mock.calls.length;
+    fireEvent.press(screen.getByTestId('profile-preview-row'));
+    fireEvent.press(screen.getByTestId('profile-show-sender-row'));
+    await act(async () => {});
+    const after = (globalThis.fetch as jest.Mock).mock.calls.slice(before).map(call => String(call[0]));
+    expect(after.filter(url => /notification|push|device|prefs|presence/i.test(url))).toEqual([]);
   });
 });

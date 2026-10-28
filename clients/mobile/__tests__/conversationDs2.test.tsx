@@ -1,7 +1,7 @@
 import {contrast} from '@momo/core/design/color';
 import type {Member, Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
-import {act, cleanup, fireEvent, render, screen} from './fixtures/darkWorld';
+import {act, cleanup, fireEvent, render, screen, within} from './fixtures/darkWorld';
 import React from 'react';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {AccessibilityInfo, ActionSheetIOS, Dimensions, StyleSheet} from 'react-native';
@@ -14,6 +14,12 @@ import {
   ConversationHeader,
 } from '../src/features/conversation/ConversationHeader';
 import {CONV, composerFloat} from '../src/features/conversation/convDesign';
+import {
+  headerSlotWidth,
+  pillContainerWidth,
+  pillShowsSecondary,
+  pillStatusWord,
+} from '../src/features/conversation/headerPill';
 import {
   LONG_PRESS_HINT_MS,
   LongPressHint,
@@ -43,6 +49,17 @@ afterEach(cleanup);
 const flatten = (style: unknown) =>
   StyleSheet.flatten(style as never) as Record<string, unknown>;
 
+// 창의 폭·글자 배율을 시험이 정한다(`useWindowDimensions` 가 읽는 값). **RN 의 jest 프리셋 기본 글자 배율은 2** 라서(= `STACK_PILL_SCALE` 1.5 이상) 손대지
+// 않으면 머리 알약의 보조 글이 늘 숨은 모습으로 그려진다 — 보조 글을 재는 시험은 배율 1 을 직접 고른다.
+const BASE_WINDOW = Dimensions.get('window');
+function setWindow(next: {width?: number; height?: number; fontScale?: number}) {
+  const window = {...BASE_WINDOW, ...next};
+  Dimensions.set({window, screen: window});
+}
+afterEach(() => {
+  Dimensions.set({window: BASE_WINDOW, screen: BASE_WINDOW});
+});
+
 const HUMAN = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const AGENT = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
 
@@ -51,8 +68,8 @@ function member(over: Partial<Member>): never {
     id: HUMAN,
     workspaceId: 'ws',
     kind: 'human',
-    handle: 'seongjae',
-    displayName: '곽성재',
+    handle: 'dohyun',
+    displayName: '이도현',
     role: 'member',
     ...over,
   } as never;
@@ -73,7 +90,7 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
         kind="public"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정 2개', run: () => {}}]}
+        onOpenMenu={() => {}}
         railStatus="connected"
         {...props}
       />,
@@ -103,11 +120,12 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(screen.getByTestId('conversation-title-face')).toBeTruthy();
     expect(screen.getByTestId('avatar-agent', {includeHiddenElements: true})).toBeTruthy();
     expect(screen.getByTestId('conversation-title-status-dot', {includeHiddenElements: true})).toBeTruthy();
-    expect(screen.queryByTestId('conversation-subtitle')).toBeNull();
+    // DM 에는 멤버 수 자리가 없다 — 상태 낱말(`conversation-title-status`)만 선다.
+    expect(screen.queryByTestId('conversation-member-count')).toBeNull();
   });
 
   it('점이 없으면(사람·모름) 얼굴만 선다, 채널 머리는 그대로다 (#4016)', () => {
-    const person = header({title: '곽성재', kind: 'dm', peerId: HUMAN, peerStatusTone: null});
+    const person = header({title: '이도현', kind: 'dm', peerId: HUMAN, peerStatusTone: null});
     expect(screen.getByTestId('avatar-human', {includeHiddenElements: true})).toBeTruthy();
     expect(screen.queryByTestId('conversation-title-status-dot', {includeHiddenElements: true})).toBeNull();
     person.unmount();
@@ -116,30 +134,29 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     expect(screen.getByTestId('conversation-title-glyph-public', {includeHiddenElements: true})).toBeTruthy();
   });
 
-  it('⋮ 는 메뉴를 열고, 고른 항목을 실행한다 — 고정 목록의 문이 여기로 왔다', () => {
-    const run = jest.fn();
-    const spy = jest
-      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
-      .mockImplementation((options, callback) => {
-        expect(options.options).toEqual(['고정 2개', '취소']);
-        expect(options.cancelButtonIndex).toBe(1);
-        callback(0);
-      });
-    header({menu: [{label: '고정 2개', run}]});
-    fireEvent.press(screen.getByTestId('conversation-menu'));
-    expect(run).toHaveBeenCalledTimes(1);
-    spy.mockRestore();
+  it('⋮ 는 누르면 `onOpenMenu` 를 한 번 부른다 — 시스템 액션 시트는 더 이상 서지 않는다 (#4319)', () => {
+    // 옛 ⋮ 는 `ActionSheetIOS`(제목 + 「취소」)를 직접 불렀다. 이제 머리는 누름을 알릴 뿐이고 무엇이 서는지는 화면이 정한다(공용 행동 시트).
+    const system = jest.spyOn(ActionSheetIOS, 'showActionSheetWithOptions').mockImplementation(() => {});
+    const onOpenMenu = jest.fn();
+    header({onOpenMenu});
+    const kebab = screen.getByTestId('conversation-menu');
+    expect(kebab.props.accessibilityRole).toBe('button');
+    expect(kebab.props.accessibilityLabel).toBe('대화 메뉴');
+    fireEvent.press(kebab);
+    expect(onOpenMenu).toHaveBeenCalledTimes(1);
+    expect(system).not.toHaveBeenCalled();
+    system.mockRestore();
   });
 
-  it('취소는 아무것도 실행하지 않는다', () => {
-    const run = jest.fn();
-    const spy = jest
-      .spyOn(ActionSheetIOS, 'showActionSheetWithOptions')
-      .mockImplementation((_options, callback) => callback(1));
-    header({menu: [{label: '고정한 메시지', run}]});
-    fireEvent.press(screen.getByTestId('conversation-menu'));
-    expect(run).not.toHaveBeenCalled();
-    spy.mockRestore();
+  it('⋮ 의 보조기술 힌트는 항목을 읊지 않는다 — 항목은 이제 시트가 말한다 (#4319)', () => {
+    // 옛 힌트는 메뉴 항목 이름을 쉼표로 이었다(「고정 2개, 작업 맡기기」). 시트가 서면 그 문장은 시트가 말하고, 머리에 남은 목록은 거짓이 된다.
+    header({onOpenMenu: () => {}});
+    expect(screen.getByTestId('conversation-menu').props.accessibilityHint).toBeUndefined();
+  });
+
+  it('`onOpenMenu` 가 없으면 ⋮ 원을 세우지 않는다 — 누르면 아무 일도 없는 버튼은 없다', () => {
+    header({onOpenMenu: undefined});
+    expect(screen.queryByTestId('conversation-menu')).toBeNull();
   });
 
   it('허들 아이콘은 기능이 없으면 서지 않는다 — 누르면 아무 일도 없는 버튼은 없다', () => {
@@ -153,16 +170,18 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
   });
 
   it('연결 상태는 부제가 아니라 띠다 — 연결됐으면 아무 말도 없다', async () => {
-    const calm = header({subtitle: '6명'});
+    // 알약의 보조 글은 글자 배율이 1.5 미만일 때 선다 — RN jest 프리셋의 기본 배율은 2 라서 배율 1 을 직접 고른다.
+    setWindow({width: 393, height: 852, fontScale: 1});
+    const calm = header({memberCount: '6명'});
     expect(screen.queryByTestId('connection-banner')).toBeNull();
-    expect(screen.getByTestId('conversation-subtitle')).toHaveTextContent('6명');
+    expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('6명');
     calm.unmount();
-    header({subtitle: '6명', railStatus: 'disconnected'});
+    header({memberCount: '6명', railStatus: 'disconnected'});
     // 띠의 오르트 로더가 「동작 줄이기」 첫 답을 받는다(#3961). 흘려보내 act 밖 갱신을 막는다.
     await act(async () => {});
     expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
-    // 부제는 방의 정체를 그대로 말한다 — 연결 문장으로 바뀌지 않는다.
-    expect(screen.getByTestId('conversation-subtitle')).toHaveTextContent('6명');
+    // 보조 글은 방의 정체를 그대로 말한다 — 연결 문장으로 바뀌지 않는다.
+    expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('6명');
     expect(connectionBannerText('connecting')).toBe('연결 중…');
     expect(connectionBannerText('connected')).toBeNull();
   });
@@ -178,6 +197,403 @@ describe('머리 — 원형 뒤로 · ⋮ 메뉴 · 허들 자리 · 연결 띠'
     header({kind: 'dm', peerId: AGENT, title: '김인턴'});
     expect(screen.queryByTestId('conversation-title-glyph-public', HIDDEN)).toBeNull();
     expect(screen.getByTestId('avatar-agent', {includeHiddenElements: true})).toBeTruthy();
+  });
+});
+
+describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#4319)', () => {
+  const HIDDEN = {includeHiddenElements: true} as const;
+
+  /**
+   * 한 시험 안에서 다시 세우면 앞의 것을 **내리고** 세운다 — `cleanup()` 뒤에 `render()` 를 부르면 RNTL 이 새 렌더러를 곧바로 내린다.
+   */
+  let mounted: ReturnType<typeof render> | null = null;
+  afterEach(() => {
+    mounted = null;
+  });
+  function pillHeader(
+    props: Partial<React.ComponentProps<typeof ConversationHeader>> = {},
+    scheme: 'light' | 'dark' = 'light',
+  ) {
+    mounted?.unmount();
+    mounted = render(
+      <FixedScheme scheme={scheme}>
+        <ConversationHeader
+          title="agent-lab"
+          kind="public"
+          directory={DIRECTORY}
+          onBack={() => {}}
+          onOpenMenu={() => {}}
+          onOpenInfo={() => {}}
+          railStatus="connected"
+          {...props}
+        />
+      </FixedScheme>,
+    );
+    return mounted;
+  }
+
+  const dm = (over: Partial<React.ComponentProps<typeof ConversationHeader>> = {}) => ({
+    title: '김인턴',
+    kind: 'dm' as const,
+    peerId: AGENT,
+    peerStatusTone: 'ok' as const,
+    peerStatusLabel: '응답함',
+    ...over,
+  });
+
+  beforeEach(() => setWindow({width: 393, height: 852, fontScale: 1}));
+
+  describe('단추 하나 — 눌러서 정보 페이지를 연다', () => {
+    it('알약은 `button` 이고 이름은 이름·상태·「대화 정보 열기」를 한 문장으로 읽는다 (DM)', () => {
+      const onOpenInfo = jest.fn();
+      pillHeader({...dm(), onOpenInfo});
+      const pill = screen.getByTestId('conversation-info-button');
+      expect(pill.props.accessibilityRole).toBe('button');
+      expect(pill.props.accessibilityLabel).toBe('김인턴, 응답함, 대화 정보 열기');
+      fireEvent.press(pill);
+      expect(onOpenInfo).toHaveBeenCalledTimes(1);
+    });
+
+    it('채널은 이름·멤버 수·「채널 정보 열기」로 읽고, 멤버 수를 모르면 이름과 문장 끝말만 읽는다', () => {
+      pillHeader({memberCount: '6명'});
+      expect(screen.getByTestId('conversation-info-button').props.accessibilityLabel).toBe(
+        'agent-lab, 6명, 채널 정보 열기',
+      );
+      pillHeader({});
+      expect(screen.getByTestId('conversation-info-button').props.accessibilityLabel).toBe(
+        'agent-lab, 채널 정보 열기',
+      );
+    });
+
+    it('이름의 testID·낭독 합성은 그대로다 — 점은 낭독에서 숨으므로 제목이 상태 낱말을 대신 읽는다', () => {
+      pillHeader(dm());
+      const title = screen.getByTestId('conversation-title');
+      expect(title.props.accessibilityLabel).toBe('김인턴, 응답함');
+      expect(title.props.accessibilityRole).toBe('header');
+    });
+
+    it('`onOpenInfo` 가 없으면 알약은 단추가 아니다 — 이름만 서고 캡슐 모양도 없다(누르면 아무 일도 없는 단추는 없다)', () => {
+      pillHeader({onOpenInfo: undefined});
+      expect(screen.queryByTestId('conversation-info-button')).toBeNull();
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent('agent-lab');
+      // 캡슐(채움·테두리)이 단추의 모양이다 — 단추가 아니면 입지 않는다.
+      const line = flatten(screen.getByTestId('conversation-title-line').props.style);
+      expect(line.backgroundColor === undefined && line.borderWidth === undefined).toBe(true);
+    });
+
+    it('알약도 엄지에는 44 다 — 높이는 원과 같은 42 이고 위아래로 1 씩 눌림을 더한다', () => {
+      pillHeader();
+      const pill = screen.getByTestId('conversation-info-button');
+      expect(Number(flatten(pill.props.style).minHeight)).toBe(CONV.circle);
+      expect(CONV.circle + pill.props.hitSlop.top + pill.props.hitSlop.bottom).toBe(TOUCH_TARGET);
+    });
+  });
+
+  describe('가운데 — 양쪽 칸이 같은 폭이다', () => {
+    const widths = () => {
+      const start = flatten(screen.getByTestId('conversation-header-start').props.style).width;
+      const end = flatten(screen.getByTestId('conversation-header-end').props.style).width;
+      return [start, end];
+    };
+
+    it('⋮ 만 있으면 두 칸이 원 하나 폭이다', () => {
+      pillHeader();
+      expect(widths()).toEqual([CONV.circle, CONV.circle]);
+    });
+
+    it('⋮ 가 없어도 오른쪽 칸이 원 하나 폭을 지킨다 — 알약이 한쪽으로 쏠리지 않는다', () => {
+      pillHeader({onOpenMenu: undefined});
+      expect(screen.queryByTestId('conversation-menu')).toBeNull();
+      expect(widths()).toEqual([CONV.circle, CONV.circle]);
+    });
+
+    it('허들 자리가 서면 두 칸이 같이 넓어진다 — 뒤로의 칸이 같은 폭을 비워 둔다', () => {
+      pillHeader({huddle: {label: '허들 시작', onPress: () => {}, icon: 'kebab'}});
+      const both = CONV.circle * 2 + CONV.headGap;
+      expect(widths()).toEqual([both, both]);
+      pillHeader({
+        onOpenMenu: undefined,
+        huddle: {label: '허들 시작', onPress: () => {}, icon: 'kebab'},
+      });
+      expect(widths()).toEqual([CONV.circle, CONV.circle]);
+    });
+
+    it('가운데 칸이 남는 폭을 다 쓰고 알약은 그 가운데에 선다', () => {
+      pillHeader();
+      const center = flatten(screen.getByTestId('conversation-header-center').props.style);
+      expect([center.flex, center.alignItems, center.justifyContent]).toEqual([1, 'center', 'center']);
+    });
+  });
+
+  describe('보조 글 — DM 은 상태 낱말, 채널은 멤버 수', () => {
+    it('DM: 상태 낱말이 눈에 보인다 — 낭독에만 있던 것이 이제 알약 안에도 있다', () => {
+      pillHeader(dm());
+      expect(screen.getByTestId('conversation-title-status')).toHaveTextContent('응답함');
+    });
+
+    it('코어의 긴 판정은 ` · ` 앞 낱말만 선다 — 「조용함 · 마지막 응답 5분 전」→ 「조용함」, 낭독은 전문이다', () => {
+      pillHeader(dm({peerStatusTone: 'muted', peerStatusLabel: '조용함 · 마지막 응답 5분 전'}));
+      expect(screen.getByTestId('conversation-title-status')).toHaveTextContent(/^조용함$/);
+      expect(screen.getByTestId('conversation-info-button').props.accessibilityLabel).toBe(
+        '김인턴, 조용함 · 마지막 응답 5분 전, 대화 정보 열기',
+      );
+    });
+
+    it('낱말이 너무 길면(「깨웠지만 아직 안 가져감」) 눈에서는 빠지고 낭독은 전문이다', () => {
+      pillHeader(dm({peerStatusTone: 'warn', peerStatusLabel: '깨웠지만 아직 안 가져감'}));
+      expect(screen.queryByTestId('conversation-title-status')).toBeNull();
+      expect(screen.getByTestId('conversation-info-button').props.accessibilityLabel).toContain(
+        '깨웠지만 아직 안 가져감',
+      );
+    });
+
+    it('상태가 없는 사람(점 없음)에게는 보조 글도 없다 — 모르는 것을 짓지 않는다', () => {
+      pillHeader(dm({title: '이도현', peerId: HUMAN, peerStatusTone: null, peerStatusLabel: undefined}));
+      expect(screen.queryByTestId('conversation-title-status')).toBeNull();
+      expect(screen.getByTestId('conversation-info-button').props.accessibilityLabel).toBe(
+        '이도현, 대화 정보 열기',
+      );
+    });
+
+    it('채널: 짧은 멤버 수가 서고(「6명」), DM 에는 멤버 수 자리가 없다', () => {
+      pillHeader({memberCount: '6명'});
+      expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('6명');
+      pillHeader({...dm(), memberCount: '6명'});
+      expect(screen.queryByTestId('conversation-member-count')).toBeNull();
+    });
+  });
+
+  describe('한 줄 — 모자라면 이름이 이기고 보조 글이 통째로 숨는다 (#4016)', () => {
+    it('이름과 보조 글은 모두 한 줄이다 — 줄어드는 것은 이름(`flexShrink`), 보조 글은 줄어들지 않는다', () => {
+      pillHeader(dm());
+      const name = screen.getByTestId('conversation-title');
+      const word = screen.getByTestId('conversation-title-status');
+      expect([name.props.numberOfLines, word.props.numberOfLines]).toEqual([1, 1]);
+      expect(name.props.ellipsizeMode).toBe('tail');
+      expect(flatten(name.props.style).flexShrink).toBe(1);
+      expect(flatten(word.props.style).flexShrink).toBe(0);
+      // 머리의 큰 글씨 상한은 그대로다 — 이름·보조 글 모두.
+      expect([name.props.maxFontSizeMultiplier, word.props.maxFontSizeMultiplier]).toEqual([1.6, 1.6]);
+    });
+
+    it('SE(320pt): 이름이 4글자면 상태 낱말이 같이 서고, 5글자부터는 낱말이 숨는다 — 이름은 늘 읽힌다', () => {
+      setWindow({width: 320, height: 568, fontScale: 1});
+      pillHeader(dm({title: '정하윤님'}));
+      expect(screen.getByTestId('conversation-title-status')).toHaveTextContent('응답함');
+      pillHeader(dm({title: '정하윤님도'}));
+      expect(screen.queryByTestId('conversation-title-status')).toBeNull();
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent('정하윤님도');
+    });
+
+    it('SE(320pt) 의 긴 이름: 「달무리 도우미」는 낱말이 숨는다 — 대신 정보 페이지·낭독이 상태를 말한다', () => {
+      setWindow({width: 320, height: 568, fontScale: 1});
+      pillHeader(dm({title: '달무리 도우미'}));
+      expect(screen.queryByTestId('conversation-title-status')).toBeNull();
+      expect(screen.getByTestId('conversation-info-button').props.accessibilityLabel).toBe(
+        '달무리 도우미, 응답함, 대화 정보 열기',
+      );
+    });
+
+    it('넓은 화면(393pt)에서는 같은 긴 이름에도 낱말이 선다', () => {
+      pillHeader(dm({title: '달무리 도우미'}));
+      expect(screen.getByTestId('conversation-title-status')).toHaveTextContent('응답함');
+    });
+
+    it('SE 의 긴 채널 이름: 이름이 아무리 길어도 짧은 멤버 수는 선다 — 이름이 줄어 말줄임이 된다', () => {
+      setWindow({width: 320, height: 568, fontScale: 1});
+      pillHeader({title: 'agent-lab-platform-engineering-oncall', memberCount: '6명'});
+      expect(screen.getByTestId('conversation-member-count')).toHaveTextContent('6명');
+      expect(screen.getByTestId('conversation-title').props.numberOfLines).toBe(1);
+    });
+
+    it('큰 글씨(`STACK_PILL_SCALE` 1.5 부터)에서는 보조 글이 숨는다 — 이름이 먼저 자란다. 1.49 까지는 선다', () => {
+      setWindow({width: 393, height: 852, fontScale: 1.49});
+      pillHeader(dm());
+      expect(screen.getByTestId('conversation-title-status')).toBeTruthy();
+      setWindow({width: 393, height: 852, fontScale: 1.5});
+      pillHeader(dm());
+      expect(screen.queryByTestId('conversation-title-status')).toBeNull();
+      expect(screen.getByTestId('conversation-title')).toHaveTextContent('김인턴');
+    });
+  });
+
+  describe('머리 높이는 움직이지 않는다 (#4292·#4613 의 측정이 이 높이에 기댄다)', () => {
+    /** 높이를 정하는 스타일 값 전부 — 머리 뿌리·줄·알약·양쪽 칸. */
+    const metrics = () => ({
+      root: flatten(screen.getByTestId('conversation-header').props.style),
+      row: flatten(screen.getByTestId('conversation-header-row').props.style),
+      pill: flatten(screen.getByTestId('conversation-info-button').props.style),
+      start: flatten(screen.getByTestId('conversation-header-start').props.style),
+      end: flatten(screen.getByTestId('conversation-header-end').props.style),
+    });
+
+    it('줄 높이는 62 이고, 알약은 원(42)보다 크지 않다', () => {
+      pillHeader(dm());
+      const {row, pill} = metrics();
+      expect(row.minHeight).toBe(CONV.headHeight);
+      expect(Number(pill.minHeight)).toBeLessThanOrEqual(CONV.circle);
+    });
+
+    it('상태 낱말이 있든 없든 높이를 정하는 값이 같다', () => {
+      pillHeader(dm());
+      const withWord = metrics();
+      pillHeader(dm({peerStatusTone: null, peerStatusLabel: undefined}));
+      const without = metrics();
+      expect(screen.queryByTestId('conversation-title-status')).toBeNull();
+      expect(JSON.stringify(without)).toBe(JSON.stringify(withWord));
+    });
+
+    it('줄을 키울 수 있는 값이 알약·이름·보조 글에 없다 — 조건부가 아니라 **무조건** 자라는 수리도 막는다', () => {
+      pillHeader(dm());
+      // 위 시험은 낱말 유무에서 같은지만 본다 — 알약에 세로 여백 12 를 늘 얹어도 양쪽이 같아 초록이다. 높이를 정하는 길을 이름으로 막아 둔다:
+      // 알약의 높이는 `minHeight`(원과 같은 42) 하나뿐이고, 글줄은 폰트가 정한다(줄 높이를 따로 주지 않는다).
+      const pill = flatten(screen.getByTestId('conversation-info-button').props.style);
+      for (const key of ['height', 'paddingVertical', 'paddingTop', 'paddingBottom', 'marginVertical', 'marginTop', 'marginBottom']) {
+        expect([key, pill[key]]).toEqual([key, undefined]);
+      }
+      for (const id of ['conversation-title', 'conversation-title-status']) {
+        const text = flatten(screen.getByTestId(id).props.style);
+        expect([id, text.lineHeight]).toEqual([id, undefined]);
+        expect([id, text.paddingVertical]).toEqual([id, undefined]);
+      }
+      // 가운데 칸·양쪽 칸도 높이를 들지 않는다 — 줄(`row`)의 `minHeight` 62 와 알약의 42 가 높이의 전부다.
+      for (const id of ['conversation-header-center', 'conversation-header-start', 'conversation-header-end']) {
+        const box = flatten(screen.getByTestId(id).props.style);
+        expect([id, box.height, box.minHeight]).toEqual([id, undefined, undefined]);
+      }
+    });
+
+    it('연결 띠가 서도 머리는 그대로이고 띠는 흐름 밖에 뜬다(#4292)', async () => {
+      pillHeader(dm());
+      const calm = metrics();
+      pillHeader(dm({railStatus: 'disconnected'}));
+      await act(async () => {});
+      const banner = flatten(screen.getByTestId('connection-banner-layer').props.style);
+      expect(banner.position).toBe('absolute');
+      expect(banner.top).toBe('100%');
+      expect(JSON.stringify(metrics())).toBe(JSON.stringify(calm));
+      // 머리 뿌리의 `zIndex` 는 호출자가 틀로 봉인한다 — 있어야 띠가 목록 위에 뜬다.
+      expect(metrics().root.zIndex).toBe(1);
+    });
+  });
+
+  describe('색 — 원(뒤로·⋮)과 같은 토큰 가족이고 두 모드에서 읽힌다', () => {
+    for (const scheme of ['light', 'dark'] as const) {
+      const palette = scheme === 'light' ? lightPalette : darkPalette;
+
+      it(`${scheme}: 알약은 원과 같은 채움·테두리·고도다`, () => {
+        pillHeader(dm(), scheme);
+        const pill = flatten(screen.getByTestId('conversation-info-button').props.style);
+        const circle = flatten(screen.getByTestId('header-back').props.style);
+        expect(pill.backgroundColor).toBe(palette.surface);
+        for (const key of ['backgroundColor', 'borderColor', 'borderWidth', 'boxShadow']) {
+          expect([key, pill[key]]).toEqual([key, circle[key]]);
+        }
+      });
+
+      it(`${scheme}: 이름과 보조 글은 알약 위에서 AA(4.5) 를 넘는다`, () => {
+        pillHeader(dm(), scheme);
+        const fill = String(flatten(screen.getByTestId('conversation-info-button').props.style).backgroundColor);
+        const name = String(flatten(screen.getByTestId('conversation-title').props.style).color);
+        const word = String(flatten(screen.getByTestId('conversation-title-status').props.style).color);
+        expect(contrast(name, fill)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(word, fill)).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  });
+
+  it('앞 표지 — 채널은 `#`/자물쇠, DM 은 얼굴과 점이 알약 안에 선다', () => {
+    pillHeader({kind: 'private'});
+    const pill = screen.getByTestId('conversation-info-button');
+    const inside = (id: string) =>
+      within(pill).queryByTestId(id, HIDDEN) !== null;
+    expect(inside('conversation-title-glyph-private')).toBe(true);
+    pillHeader(dm());
+    const dmPill = screen.getByTestId('conversation-info-button');
+    expect(within(dmPill).queryByTestId('conversation-title-face', HIDDEN) !== null).toBe(true);
+    expect(within(dmPill).queryByTestId('conversation-title-status-dot', HIDDEN) !== null).toBe(true);
+  });
+});
+
+describe('머리 알약의 한 줄 규칙 — 순수 판정 (#4319)', () => {
+  /** DM 알약: 얼굴 28 + 상태 낱말 「응답함」. 이름의 길이(글자 수)만 바꿔 경계를 찾는다. */
+  const dmShows = (nameChars: number, windowWidth: number, fontScale = 1) =>
+    pillShowsSecondary({
+      name: '가'.repeat(nameChars),
+      secondary: '응답함',
+      leading: CONV.titleFace,
+      windowWidth,
+      fontScale,
+      slotWidth: headerSlotWidth({huddle: false, menu: true}),
+    });
+
+  it('양쪽 칸의 폭: ⋮ 만 있으면 원 하나, 허들 자리가 더해지면 원 둘 + 간격, 둘 다 없어도 원 하나를 비운다', () => {
+    expect(headerSlotWidth({huddle: false, menu: true})).toBe(CONV.circle);
+    expect(headerSlotWidth({huddle: true, menu: true})).toBe(2 * CONV.circle + CONV.headGap);
+    expect(headerSlotWidth({huddle: true, menu: false})).toBe(CONV.circle);
+    expect(headerSlotWidth({huddle: false, menu: false})).toBe(CONV.circle);
+  });
+
+  it('알약이 쓸 수 있는 가로: 창 폭 − 좌우 여백 − 양쪽 칸 − 칸 사이 간격 둘', () => {
+    expect(pillContainerWidth(393, 42)).toBe(393 - 2 * CONV.headPadX - 2 * 42 - 2 * CONV.headGap);
+    expect(pillContainerWidth(320, 42)).toBeLessThan(pillContainerWidth(393, 42));
+  });
+
+  it('SE(320pt): 이름 4글자까지 상태 낱말이 같이 서고 5글자부터 숨는다 — 경계가 정확히 4↔5 다', () => {
+    expect(dmShows(4, 320)).toBe(true);
+    expect(dmShows(5, 320)).toBe(false);
+    // 단조: 더 긴 이름이 낱말을 되살리지 않는다.
+    for (let chars = 5; chars <= 30; chars += 1) expect([chars, dmShows(chars, 320)]).toEqual([chars, false]);
+  });
+
+  it('넓은 화면(393pt)에서는 이름이 아무리 길어도 낱말이 선다 — 이름은 말줄임으로 줄고 낱말은 줄지 않는다', () => {
+    for (const chars of [4, 5, 9, 15, 30]) expect([chars, dmShows(chars, 393)]).toEqual([chars, true]);
+  });
+
+  it('큰 글씨는 폭과 무관하게 숨는다 — 1.49 는 서고 1.5(`STACK_PILL_SCALE`)부터 숨는다', () => {
+    expect(dmShows(3, 430, 1.49)).toBe(true);
+    expect(dmShows(3, 430, 1.5)).toBe(false);
+    expect(dmShows(3, 430, 2)).toBe(false);
+  });
+
+  it('보조 글이 없으면 설 것도 없다', () => {
+    expect(
+      pillShowsSecondary({
+        name: '박서연',
+        secondary: '',
+        leading: CONV.titleFace,
+        windowWidth: 430,
+        fontScale: 1,
+        slotWidth: CONV.circle,
+      }),
+    ).toBe(false);
+  });
+
+  it('이름의 바닥은 5글자 또는 이름 전체 — 짧은 이름은 좁은 화면에서도 낱말을 지킨다', () => {
+    expect(dmShows(1, 320)).toBe(true);
+    expect(dmShows(2, 320)).toBe(true);
+  });
+
+  it('채널의 짧은 멤버 수는 SE 에서도 긴 이름 곁에 선다 — 앞 표지가 `#`(16)라 얼굴(28)보다 좁다', () => {
+    const channelShows = (chars: number) =>
+      pillShowsSecondary({
+        name: 'a'.repeat(chars),
+        secondary: '6명',
+        leading: CONV.titleGlyph,
+        windowWidth: 320,
+        fontScale: 1,
+        slotWidth: CONV.circle,
+      });
+    expect(channelShows(40)).toBe(true);
+  });
+
+  it('상태 낱말: 코어의 긴 판정은 ` · ` 앞 낱말만, 너무 길면 없다 — 낭독은 전문이 따로 읽는다', () => {
+    expect(pillStatusWord('응답함')).toBe('응답함');
+    expect(pillStatusWord('조용함 · 마지막 응답 5분 전')).toBe('조용함');
+    expect(pillStatusWord('살아 있음 · 대기 중')).toBe('살아 있음');
+    expect(pillStatusWord('깨웠지만 아직 안 가져감')).toBeNull();
+    expect(pillStatusWord('')).toBeNull();
+    expect(pillStatusWord(undefined)).toBeNull();
   });
 });
 
@@ -521,7 +937,7 @@ describe('에이전트 카드 — 단계 표지(완료·진행·실패)는 있�
 
 describe('승인 결정 — 대화 카드에서만 알약, 인박스는 그대로', () => {
   it('shape="pill" 이 아니면 옛 상자다', () => {
-    const ME = {id: HUMAN, workspaceId: 'ws', displayName: '곽성재'} as Member;
+    const ME = {id: HUMAN, workspaceId: 'ws', displayName: '이도현'} as Member;
     const tree = (shape?: 'pill') => (
       <QueryClientProvider client={new QueryClient()}>
         <SessionProvider member={ME}>
@@ -675,7 +1091,6 @@ describe('치수가 시안에서 온다', () => {
           kind="public"
           directory={DIRECTORY}
           onBack={() => {}}
-          menu={[]}
           railStatus="connected"
         />
       </FixedScheme>,
@@ -683,7 +1098,7 @@ describe('치수가 시안에서 온다', () => {
     expect(flatten(screen.getByTestId('header-back').props.style).backgroundColor).toBe(
       lightPalette.surface,
     );
-    // 메뉴가 비면 ⋮ 원을 세우지 않는다.
+    // 열 메뉴가 없으면(`onOpenMenu` 없음) ⋮ 원을 세우지 않는다.
     expect(screen.queryByTestId('conversation-menu')).toBeNull();
   });
 });

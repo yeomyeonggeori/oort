@@ -124,6 +124,10 @@ import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
 import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
+import {ProfileSheetSurface} from './profileSheet';
+import {ConversationMenuSurface} from './conversationMenu';
+import {ConversationHeaderSurface} from './conversationHeader';
+import {ConversationInfoPageSurface} from './conversationInfoPage';
 import {
   DelegateWorkSheet,
   type DelegatePreview,
@@ -191,6 +195,7 @@ import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
 import {TapDismissSurface} from './tapDismiss';
 import {JumpLatestSurface} from './jumpLatest';
+import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
 import {ActivityRowsSurface} from './activityRows';
@@ -2204,6 +2209,22 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name === 'sheetkit' || name.startsWith('sheetkit-')) {
     return <SheetKitSurface which={name.slice('sheetkit'.length).replace(/^-/, '')} />;
   }
+  // #4319: 다른 사람 프로필 시트(`measure/profileSheet.tsx`, 배송되는 시트 + 고정 데이터·합성 사진, 가상 인물).
+  if (name === 'profilesheet' || name.startsWith('profilesheet-')) {
+    return <ProfileSheetSurface which={name.slice('profilesheet'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).
+  if (name === 'convmenu' || name.startsWith('convmenu-')) {
+    return <ConversationMenuSurface which={name.slice('convmenu'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화 머리 가운데 이름·상태 알약(`measure/conversationHeader.tsx`, 배송되는 머리 + 고정 데이터, 가상 인물).
+  if (name === 'convheader' || name.startsWith('convheader-')) {
+    return <ConversationHeaderSurface which={name.slice('convheader'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화·채널 정보 페이지(`measure/conversationInfoPage.tsx`, 배송되는 페이지 + 고정 데이터·합성 사진, 가상 인물).
+  if (name === 'infopage' || name.startsWith('infopage-')) {
+    return <ConversationInfoPageSurface which={name.slice('infopage'.length).replace(/^-/, '')} />;
+  }
   // #4612: 시트 끌어내려 닫기 계측(`measure/sheetDrag.tsx`, 배송되는 시트 + 결정 2 probe, 가상 인물).
   if (name === 'sheetdrag' || name.startsWith('sheetdrag-')) {
     return <SheetDragSurface which={name.slice('sheetdrag'.length).replace(/^-/, '')} />;
@@ -2239,6 +2260,10 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4689: 멀리 올라간 채 아래 알약 「최신으로」를 누르면 마지막 메시지가 보이기까지 얼마나 걸리고 몇 번에 나눠 내려가는가. 진짜 대화 화면 + 스크롤 기록(`measure/jumpLatest.tsx`).
   if (name === 'jump-latest' || name.startsWith('jump-latest-') || name.startsWith('jump-latest+')) {
     return <JumpLatestSurface which={name.slice('jump-latest'.length).replace(/^[-+]/, '')} />;
+  }
+  // #4690: 스레드 패널(답글 0개·2개). 배송되는 `ThreadPanel` 그대로 + 고정 데이터·가상 인물.
+  if (name === 'thread' || name.startsWith('thread-')) {
+    return <ThreadPanelSurface which={name.slice('thread'.length).replace(/^-/, '')} />;
   }
   // #4321: 「가 ⏎ 나」를 보내면 줄바꿈이 어느 단계에서 사라지는가. 배송되는 컴포저 + 맨 입력창 + 모의 API.
   if (name === 'composer-newline' || name.startsWith('composer-newline-')) {
@@ -4882,11 +4907,13 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </View>
       );
     // #3342: 프로필의 「알림」 묶음 — 푸시 종류 스위치. 시트를 알림 묶음이 보이도록 끌어올려 찍는다.
+    // #4316: 묶음에 두 줄(「메시지 미리보기」「보낸 사람 표시」)이 늘어 카드가 그만큼 길어졌다 — 맨 위 「푸시 알림」 줄이
+    // 상태 막대 밑으로 잘리지 않게 끌어올림을 560 에서 500 으로 줄였다.
     case 'shell-profile-notify':
       return (
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
-            <View style={{marginTop: -560, height: 3000}}>
+            <View style={{marginTop: -500, height: 3000}}>
               <View style={styles.settingsBody}>
                 <SettingsContent
                   workspaceId={HARNESS_MEMBER.workspaceId}

@@ -439,3 +439,52 @@ describe('「설정」 층 (#4457)', () => {
     expect(navReducer(open, {type: 'reset'})).toEqual(INITIAL_NAV);
   });
 });
+
+// ---- 대화 안의 「설정 열기」 (#4319) ----------------------------------------------------------------
+//
+// 내 프로필 시트(대화 화면 안)의 「설정 열기」가 부른다. 설정은 층 중 가장 아래라서 대화(와 그 밑의 층)가 남아 있으면 가려진다 —
+// `openSettings` 만 부르면 설정이 서도 아무것도 안 보이고, 나중에 뒤로 가기에서 불쑥 나타난다.
+
+describe('대화 안의 「설정 열기」 (#4319)', () => {
+  const conversationOver = (over: Partial<NavState> = {}) =>
+    navReducer(nav(over), {type: 'openConversation', conversation: OPEN});
+
+  it('홈 위의 대화에서는 대화를 걷고 설정만 세운다', () => {
+    const next = navReducer(conversationOver(), {type: 'openSettingsFromConversation'});
+    expect(next).toEqual(nav({settings: true}));
+    expect(next.conversation).toBeNull();
+  });
+
+  it('대화만 걷고 `openSettings` 를 부르면 에이전트 상세 위의 대화에서 설정이 가려진다 — 그래서 이 액션이 따로 있다', () => {
+    const agent = {memberId: 'A-1', displayName: '달무리 도우미', handle: 'dalmuri-helper'};
+    const over = conversationOver({agent});
+    // 대화 하나만 걷는 `back` + `openSettings` 는 에이전트 상세를 남긴다 — 설정이 그 **밑**에 선다.
+    const naive = navReducer(navReducer(over, {type: 'back'}), {type: 'openSettings'});
+    expect(naive.settings).toBe(true);
+    expect(naive.agent).toEqual(agent);
+    // 이 액션은 그 밑의 층까지 걷는다.
+    const next = navReducer(over, {type: 'openSettingsFromConversation'});
+    expect(next.settings).toBe(true);
+    expect(next.conversation).toBeNull();
+    expect(next.agent).toBeNull();
+  });
+
+  it('작업 목록·작업 세션 위의 대화에서도 모든 층을 걷는다', () => {
+    const next = navReducer(
+      conversationOver({workList: true, workSession: {sessionId: 'S-1'}}),
+      {type: 'openSettingsFromConversation'},
+    );
+    expect(next).toEqual(nav({settings: true}));
+  });
+
+  it('탭은 그대로다 — 설정을 닫으면 대화를 열던 탭으로 돌아온다', () => {
+    const search = navReducer(INITIAL_NAV, {type: 'openSearch', initialQuery: '배포'});
+    const open = navReducer(
+      navReducer(search, {type: 'openConversation', conversation: OPEN}),
+      {type: 'openSettingsFromConversation'},
+    );
+    expect(open.tab).toBe('search');
+    expect(open.searchSeed).toEqual(search.searchSeed);
+    expect(navReducer(open, {type: 'back'})).toEqual(search);
+  });
+});
