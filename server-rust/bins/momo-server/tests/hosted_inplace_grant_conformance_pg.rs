@@ -1436,6 +1436,12 @@ async fn rejection_ends_the_held_run_with_a_reason_the_caller_reads() {
         )
     );
     assert_eq!(jobs_for_agent(&su, &f).await, 0);
+    assert_eq!(
+        inbox_events(&su, &f).await,
+        0,
+        "a rejected in-place card tells the agent nothing in its inbox: the room is not one its \
+         connection covers (ADR-0186 증보 v5 U-f), and a rejection is not a wake-up"
+    );
     assert!(!room_granted(&su, &f, f.room).await);
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
