@@ -693,6 +693,8 @@ mod tests {
     use std::cell::{Cell, RefCell};
     use std::os::unix::fs::PermissionsExt;
 
+    use uuid::Uuid;
+
     use super::*;
 
     const SERVER: &str = "https://oort.example";
@@ -858,6 +860,64 @@ mod tests {
         fs::remove_file(&file).expect("rm");
         std::os::unix::fs::symlink(&target, &file).expect("symlink");
         assert!(backend.load(&key()).is_err(), "a link is never followed");
+    }
+
+    /// The macOS login keychain round trip, with a profile of its own that no real login can
+    /// collide with (`.invalid` is reserved and never resolves). `#[ignore]`: it writes to the
+    /// developer's login keychain, so it is run by hand —
+    /// `cargo test -p oort-cli --lib the_login_keychain -- --ignored` — and cleans up after itself,
+    /// failure or not.
+    #[cfg(target_os = "macos")]
+    #[test]
+    #[ignore = "writes one item to the login keychain; run by hand"]
+    fn the_login_keychain_round_trips_a_credential_and_forgets_it_on_delete() {
+        struct Cleanup(ProfileKey);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = KeychainBackend.delete(&self.0);
+            }
+        }
+        let key = ProfileKey {
+            server: "https://keychain-test.invalid".to_string(),
+            workspace_id: Uuid::new_v4().to_string(),
+        };
+        let _cleanup = Cleanup(key.clone());
+        let backend = KeychainBackend;
+        assert!(backend
+            .load(&key)
+            .expect("a missing item is None, not an error")
+            .is_none());
+
+        let mut credential = Credential::card(&key.server, &key.workspace_id, Secret::new(MARKER));
+        backend
+            .save(&key, &credential)
+            .expect("write to the login keychain");
+        let loaded = backend.load(&key).expect("read").expect("present");
+        assert_eq!(loaded.access.expose(), MARKER);
+        assert_eq!(loaded.server, key.server);
+
+        // saving again replaces the item rather than failing with a duplicate
+        credential.access = Secret::new(format!("{MARKER}-second"));
+        backend.save(&key, &credential).expect("overwrite");
+        assert_eq!(
+            backend
+                .load(&key)
+                .expect("read")
+                .expect("present")
+                .access
+                .expose(),
+            format!("{MARKER}-second")
+        );
+
+        assert!(
+            backend.delete(&key).expect("delete"),
+            "something was there to delete"
+        );
+        assert!(backend.load(&key).expect("read after delete").is_none());
+        assert!(
+            !backend.delete(&key).expect("delete again"),
+            "a second delete finds nothing"
+        );
     }
 
     #[test]

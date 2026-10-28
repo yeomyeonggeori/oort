@@ -28,6 +28,7 @@ pub const ROOT: &str = "44444444-4444-4444-8444-444444444444";
 
 /// 43 characters from the envelope alphabet, distinctive enough to grep for.
 pub const CARD_SECRET: &str = "CARDsecretCARDsecretCARDsecretCARDsecret123";
+pub const OTHER_CARD_SECRET: &str = "OTHERcardOTHERcardOTHERcardOTHERcard1234567";
 pub const NEW_ACCESS_SECRET: &str = "NEWaccessNEWaccessNEWaccessNEWaccess1234567";
 pub const OLD_ACCESS_SECRET: &str = "OLDaccessOLDaccessOLDaccessOLDaccess1234567";
 pub const OLD_REFRESH_SECRET: &str = "OLDrefreshOLDrefreshOLDrefreshOLDrefresh123";

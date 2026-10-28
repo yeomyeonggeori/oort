@@ -13,6 +13,7 @@
 //! | `a_credential_file_others_can_read_is_refused_and_never_printed` | R16 (a): 0644 → exit 1, nothing printed; 0600 → works again | the permission check is removed |
 //! | `no_argument_can_carry_a_token_and_a_mistyped_one_is_not_echoed` | R16 (c): exit 2, no request, the parser's complaint holds no token | a token flag appears, or the complaint prints it |
 //! | `eight_processes_with_an_expired_login_rotate_it_once` | R17: one refresh request, none refused as a reuse, eight successes | the store lock around refresh is removed |
+//! | `logout_ends_the_stored_login_with_its_own_token_and_leaves_an_env_token_alone` | logout presents only the stored login's token; an `OORT_TOKEN` card is never presented | logout resolves the env token first |
 //! | `a_redirect_is_never_followed` | R18: the other host sees nothing, the credential went only to the named server | the redirect policy follows |
 //! | `a_plain_http_server_off_the_loopback_is_refused_before_any_connection` | R18: exit 2 at once | the scheme check is removed |
 //! | `every_command_prints_its_json_document_and_no_secret` | R19: goldens for 9 commands, marker sweep | a document gains a token field |
@@ -817,6 +818,55 @@ fn logout_removes_the_local_login_even_when_the_server_cannot_be_reached() {
         "the secret is gone locally whatever the network said"
     );
     assert_no_leak("logout stderr", &stderr(&out), &leak_needles(&card()));
+}
+
+#[test]
+fn logout_ends_the_stored_login_with_its_own_token_and_leaves_an_env_token_alone() {
+    // Two different cards: the one `login` stored, and the one a deployment put in the environment.
+    // `logout` is about the stored login; presenting (and so revoking) the other would end a
+    // credential this command never made.
+    let stored = card();
+    let env_card = access(OTHER_CARD_SECRET);
+    let (stored_for_mock, env_for_mock) = (stored.clone(), env_card.clone());
+    let mock = Mock::start(move |request| {
+        let bearer = request.header("authorization").unwrap_or("").to_string();
+        if bearer == format!("Bearer {stored_for_mock}")
+            || bearer == format!("Bearer {env_for_mock}")
+        {
+            return Response::json(200, &json!({"revokedNow": true}));
+        }
+        Response::json(401, &json!({"error": {"message": "invalid token"}}))
+    });
+    let home = Home::new();
+    home.seed_card(&mock.origin(), &stored);
+    let out = home
+        .command()
+        .env("OORT_TOKEN", &env_card)
+        .args(["logout", "--json"])
+        .output()
+        .expect("run");
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let document = json_of(&stdout(&out));
+    assert_eq!(document["serverRevocation"], "revoked");
+    assert_eq!(document["localRemoved"], true);
+    let presented: Vec<_> = mock
+        .requests()
+        .iter()
+        .map(|request| request.header("authorization").unwrap_or("").to_string())
+        .collect();
+    assert_eq!(
+        presented,
+        [format!("Bearer {stored}")],
+        "only the stored login was presented and ended"
+    );
+    assert!(std::fs::read_dir(home.oort_dir().join("credentials"))
+        .expect("dir")
+        .next()
+        .is_none());
+    let mut needles = leak_needles(&stored);
+    needles.extend(leak_needles(&env_card));
+    assert_no_leak("logout stdout", &stdout(&out), &needles);
+    assert_no_leak("logout stderr", &stderr(&out), &needles);
 }
 
 #[test]
