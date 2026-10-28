@@ -55,9 +55,15 @@
 //!   takes them **only** when the DM has to be opened or re-opened — never for a DM that is already
 //!   open — and only after `channel_seq` (review L8, held by a test that plays the person against
 //!   an archived DM, which is the case that does write them).
-//! * What is left is a three-way queue with an administrator's disconnect, which exists between any
-//!   hosted tool and any send already. A transaction that loses a lock cycle to someone else commits
-//!   nothing, and is run once more (below).
+//! * **What is left, stated plainly.** The branch that has to *re-open* a DM (archived, or a member
+//!   left) takes `channel_seq` and then both membership rows exclusively, while a decision's wake
+//!   share-locks the agent's membership row and then asks for `channel_seq`: an AB/BA pair that the
+//!   one retry below (and the decision route's own retry) absorbs. No product path archives a DM or
+//!   makes a member leave one today (`membership_lifecycle` refuses DM departure and archives only
+//!   private channels), so the branch is unreachable in practice; whoever adds such a path owes a
+//!   test that plays the wake against it. The other leftover is the three-way queue with an
+//!   administrator's disconnect that exists between any hosted tool and any send already.
+//!   A transaction that loses a lock cycle to someone else commits nothing, and is run once more.
 
 use chrono::Utc;
 use momo_auth::{active_workspace_role, SCOPE_WORKSPACE_INITIATE};
