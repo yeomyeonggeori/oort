@@ -1681,6 +1681,17 @@ function isDefaultWindowing(): boolean {
   return batch === DEFAULT_BATCH && window === DEFAULT_WINDOW;
 }
 
+/**
+ * 넓힘의 신호 — 가는 동안 콘텐츠가 크게 자랐다(잘린 꼬리가 한 판 붙었다). 누르는 순간이 아니라 이것을 본 틱부터 목록이 넓어진다:
+ * 처음부터 다 잰 방은 한 판에 끝나고, 넓히면 오히려 마지막 행이 늦게 선다.
+ */
+async function tailGrows() {
+  fireEvent(list(), 'contentSizeChange', 390, 5000);
+  await act(async () => {
+    await jest.advanceTimersByTimeAsync(20);
+  });
+}
+
 describe('아래 필 「최신으로」', () => {
   it('바닥에 있으면 없고, 떠나면 「최신 메시지로 이동」이 선다', async () => {
     mount();
@@ -1764,11 +1775,14 @@ describe('아래 필 「최신으로」', () => {
 
     fireEvent.press(screen.getByTestId('jump-latest'));
     await flushFrame();
-    // 가는 동안: prop 은 그대로이고, 보초가 내용 전체 높이가 됐고, 한 판·창이 넓다.
+    // 가는 동안: prop 은 그대로이고, 보초가 내용 전체 높이가 됐다. 콘텐츠가 자라기 전에는 판·창이 기본이다.
     expect(mvcp()).toEqual(RESTING_MVCP);
     expect(sentinel().phase).toBe('neutral');
-    expect(isWidened()).toBe(true);
+    expect(isDefaultWindowing()).toBe(true);
     tops.push(sentinel().top);
+
+    await tailGrows(); // 잘린 꼬리가 한 판 붙었다 — 이제 판·창이 넓다.
+    expect(isWidened()).toBe(true);
 
     atTheEnd();
     await waitRound(); // 도착 — 수렴이 풀린다
@@ -1796,6 +1810,7 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    await tailGrows();
     expect(isWidened()).toBe(true);
 
     // 도착 보고가 없다 — 수렴은 진전 없이 400ms 뒤 손을 놓고, 그 뒤에는 착지 유지도 없다.
@@ -1803,6 +1818,26 @@ describe('아래 필 「최신으로」', () => {
     expect(sentinel().phase).toBe('rest');
     expect(isDefaultWindowing()).toBe(true);
     expect(mvcp()).toEqual(RESTING_MVCP);
+  });
+
+  it('처음부터 다 잰 방은 넓히지 않는다 — 가는 동안 콘텐츠가 크게 자라지 않으면 판·창은 기본 그대로다 (#4689 원인 B)', async () => {
+    mount();
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    expect(sentinel().phase).toBe('neutral');
+
+    // 새 글 한 통(≈100pt)이 붙어도 잘린 꼬리의 신호가 아니다.
+    fireEvent(list(), 'contentSizeChange', 390, 4100);
+    await sleep(60);
+    expect(isDefaultWindowing()).toBe(true);
+    atTheEnd();
+    await waitRound();
+    expect(isDefaultWindowing()).toBe(true);
+    await sleep(800);
+    expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
   });
 
   it('착지 유지는 내용이 아직 자라는 동안 이어지고, 자람이 멈추면 놓는다 — 이어 붙는 판이 낡은 앵커를 만나지 않게 (#4689 원인 B)', async () => {
@@ -1826,6 +1861,24 @@ describe('아래 필 「최신으로」', () => {
 
     // 자람이 멈추면 곧 놓는다.
     await sleep(400);
+    expect(sentinel().phase).toBe('rest');
+    expect(isDefaultWindowing()).toBe(true);
+  });
+
+  it('가장 아래 행이 아직 마운트되지 않았으면 내용이 조용해도 착지 유지가 이어지고, 이동의 뒷줄(4초)에서 놓는다 (#4689 원인 B)', async () => {
+    // 행이 많아 첫 판(10행)에는 가장 아래 행이 없다 — 판이 렌더되는 동안은 콘텐츠가 자라지 않아 「조용」해 보인다(SE·Debug: 한 판 수백 ms).
+    mount({messages: upTo(120), lastReadSeq: 120, unreadCount: 0});
+    await settleAtBottom();
+    scrollUpIntoHistory();
+    fireEvent.press(screen.getByTestId('jump-latest'));
+    await flushFrame();
+    atTheEnd();
+    await waitRound(); // 도착 — 착지 유지(600ms)가 시작된다
+
+    await sleep(1500); // 유지 시간(600ms)과 자람 창(150ms)을 훌쩍 넘겼다
+    expect(sentinel().phase).toBe('neutral');
+
+    await sleep(2600); // 누른 지 4초가 넘는다 — 뒷줄에서 놓는다
     expect(sentinel().phase).toBe('rest');
     expect(isDefaultWindowing()).toBe(true);
   });
@@ -1874,6 +1927,7 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    await tailGrows();
     expect(isWidened()).toBe(true);
 
     fireEvent(list(), 'scrollBeginDrag'); // 시간은 흐르지 않았다
@@ -1890,6 +1944,7 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    await tailGrows();
     expect(isWidened()).toBe(true);
 
     switchToRoomB(rerender);
@@ -1907,6 +1962,7 @@ describe('아래 필 「최신으로」', () => {
     await flushFrame();
     expect(sentinel().phase).toBe('neutral');
 
+    await tailGrows();
     expect(isWidened()).toBe(true);
 
     rerender({jumpTarget: {messageId: 'msg-2', seq: 2, token: 1}});

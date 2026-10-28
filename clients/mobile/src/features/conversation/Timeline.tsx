@@ -723,6 +723,10 @@ const GLIDE_SETTLE_MS = 350;
 // 남아 콘텐츠 높이는 그대로다.
 //
 // `latest && !near` 에만 건다 — 전송·진입은 기본값 그대로다(#2586·#2604 의 수치를 그 값으로 얻었다). 값은 16 Pro 실측으로 정했다(PR 본문의 표).
+//
+// **누르는 순간이 아니라 꼬리가 잘린 것을 본 뒤에 넓힌다.** 처음부터 다 잰 방은 첫 홉이 진짜 끝에 닿아 한 판(보이는 행 + 10행)이면 끝나는데, 누르는 순간 넓히면
+// 그 첫 판이 보이는 행 + 40행이 되어 마지막 행이 늦게 선다(16 Pro·Debug·300행 방: 보임 half 48→111ms · top 40→103ms). 잘린 방은 누른 뒤 콘텐츠가 크게 자란다
+// (`FAR_LATEST_GROWTH_PX`) — 그 신호를 본 틱부터 넓힌다. 기본 판 하나(≈60ms)가 더 드는 대신 잘리지 않은 방은 그대로 빠르다.
 // =============================================================================
 
 /**
@@ -733,6 +737,12 @@ const FAR_LATEST_BATCH = 40;
 
 /** 먼 「최신으로」 동안의 창(뷰포트 배수, 기본 21). 새 행이 그려지는 범위는 보이는 곳 아래로 `0.5 × (창 − 1)` 화면이다. */
 const FAR_LATEST_WINDOW = 41;
+
+/**
+ * 누른 뒤 콘텐츠가 이만큼(pt) 넘게 자라면 꼬리가 잘려 있던 방이다 — 그때부터 판·창을 넓힌다. 잘린 방은 첫 판(기본 10행 ≈ 1,000pt)에서 곧 이만큼 자라고,
+ * 잘리지 않은 방은 가는 동안 거의 안 자란다(16 Pro 300행: 누름→착지 +0~1pt). 새 글 한두 통(≈100pt)이 도착해도 넘지 않는다.
+ */
+const FAR_LATEST_GROWTH_PX = 300;
 
 /** 먼 「최신으로」 동안의 수렴·착지 유지 틱 간격, ms. 배치가 붙는 즉시 끝으로 다시 가려고 한 프레임으로 줄인다(기본은 `CONVERGE_ROUND_MS`). */
 const FAR_LATEST_ROUND_MS = 16;
@@ -2111,13 +2121,31 @@ function TimelineInner({
       const neutral = mode === 'latest' && !near;
       /** 가는 동안 수렴·착지 유지 틱의 간격 — 넓힌 판이 붙는 즉시 끝으로 다시 가도록 먼 「최신으로」만 한 프레임이다. */
       const roundMs = neutral ? FAR_LATEST_ROUND_MS : CONVERGE_ROUND_MS;
+      const contentAtPress = geometryRef.current.contentHeight;
+      let widened = false;
+      /**
+       * 꼬리가 잘려 있던 방이면(누른 뒤 콘텐츠가 `FAR_LATEST_GROWTH_PX` 넘게 자랐다) 한 판·창을 넓힌다 — 잘린 꼬리를 배치 사슬이 아니라 몇 판에
+       * 마운트한다(#4689 원인 B, `FAR_LATEST_BATCH`). 수렴 틱과 착지 유지 틱이 매번 묻는다: 도착이 잘린 끝에서 일찍 선언돼도(첫 판이 붙기 전) 유지 틱이 이어 묻는다.
+       */
+      const widenIfTruncated = () => {
+        if (!neutral || widened) return;
+        if (geometryRef.current.contentHeight - contentAtPress <= FAR_LATEST_GROWTH_PX) return;
+        widened = true;
+        setWidenTail(true);
+      };
+      /**
+       * 가장 아래 메시지 행이 마운트됐는가 — 잘린 꼬리가 다 이어졌는가. 안 됐으면 이동은 끝나지 않았다: 판이 렌더되는 동안(Debug 시뮬 SE: 한 판 수백 ms)
+       * 콘텐츠는 자라지 않아 「조용」해 보이기 때문에 자람만 보고 착지 유지를 놓으면 마지막 판 앞에서 낡은 앵커를 다시 만난다.
+       */
+      const tailMounted = () => {
+        const newest = lastMessageId(itemsRef.current);
+        return newest === null || rowNodesRef.current.has(newest.toLowerCase());
+      };
       if (neutral) {
         // A far send cancelled by this press may have left the prop off; it comes
         // back first, so the travel starts from the prop the sentinel can govern.
         setChasingTail(false);
         anchorStore.set('neutral');
-        // 같은 문으로 한 판·창을 넓힌다 — 잘린 꼬리를 배치 사슬이 아니라 한두 판에 마운트한다(#4689 원인 B, `FAR_LATEST_BATCH`).
-        setWidenTail(true);
       } else if (!near) {
         // Off for the correction, back on the moment it ends.
         setChasingTail(true);
@@ -2214,6 +2242,7 @@ function TimelineInner({
         let until = firstTickAt + LANDING_HOLD_MS;
         scrollPinUntilRef.current = until;
         const tick = () => {
+          widenIfTruncated();
           const geometry = geometryRef.current;
           const left = distanceToEnd(geometry);
           if (left !== null && Math.abs(left) > ARRIVED_PX) {
@@ -2224,15 +2253,17 @@ function TimelineInner({
           }
           const now = Date.now();
           if (now >= until) {
-            // A far 「최신으로」 holds on while the content is still growing (#4689
-            // cause B): the batches that follow the first arrival are the rest of
-            // the same travel, and the hold's end is what puts the anchor back —
-            // let go in the middle of them and the list is met by a stale one
-            // again. Bounded by the travel's own backstop.
+            // A far 「최신으로」 holds on while the tail is still being joined (#4689
+            // cause B) — the content is growing, or the newest row is not mounted
+            // yet (a batch in flight does not grow anything until it lands): the
+            // batches that follow the first arrival are the rest of the same travel,
+            // and the hold's end is what puts the anchor back — let go in the middle
+            // of them and the list is met by a stale one again. Bounded by the
+            // travel's own backstop.
             if (
               neutral &&
               now < hardStop &&
-              now - lastGrowthAtRef.current < ENTRY_QUIET_MS
+              (now - lastGrowthAtRef.current < ENTRY_QUIET_MS || !tailMounted())
             ) {
               until = now + roundMs;
               scrollPinUntilRef.current = until;
@@ -2288,6 +2319,7 @@ function TimelineInner({
       };
 
       const converge = () => {
+        widenIfTruncated();
         const now = Date.now();
         const geometry = geometryRef.current;
         const left = distanceToEnd(geometry);
