@@ -24,6 +24,7 @@ import {
 } from "@/design/ui/dialog";
 import { FilterTabs } from "@/features/common/FilterTabs";
 import { OneTimeSecretCard } from "@/features/hostedAgents/OneTimeSecretCard";
+import { holdGlobalShortcuts } from "@/app/globalShortcutHold";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { CopyButton, KeyValueRows } from "./SettingsFields";
 
@@ -87,6 +88,10 @@ export function DevAccessReveal({
     serverOrigin: absoluteApiBase(),
     workspaceId,
   });
+
+  // 값이 떠 있는 동안 창의 이동 단축키(⌘⇧A·⌘K·⌘⇧K·⌥↑↓)를 멈춘다: 모달은 창의 keydown 을 막지 않아서, 키 한 번이
+  // 설정 라우트를 내리고 다시 볼 수 없는 값이 사라졌다(`globalShortcutHold`). 풀리는 때는 이 화면이 사라질 때다.
+  useEffect(() => holdGlobalShortcuts(), []);
 
   useEffect(() => {
     function pullBack(event: FocusEvent) {

@@ -77,6 +77,7 @@ import {
   REGISTERED_SHORTCUTS,
   type KeyboardShortcut,
 } from "@/app/keyboardShortcuts";
+import { globalShortcutsHeld } from "@/app/globalShortcutHold";
 import { Keycaps } from "@/app/ShortcutHelpDialog";
 import { useShortcutBindingsVersion } from "@/app/shortcutBindings";
 import {
@@ -564,8 +565,9 @@ export function QuickSwitcher({
       // 모달 폼이 떠 있으면 이 셋 중 어느 것도 발화하지 않는다. 팔레트는 폼
       // 위에 겹쳐 뜨면서 캐럿을 가져갔고, 거기서 채널을 고르면 폼을 열어둔 채
       // 다른 채널로 이동했다. ⌘⇧K와 ⌘,도 같은 이유로 같은 사고를 낸다.
-      // 폼을 닫는 키는 Esc 하나면 충분하다 (R2 M4).
-      if (formDialogOpen) return;
+      // 폼을 닫는 키는 Esc 하나면 충분하다 (R2 M4). 한 번만 보이는 값이 떠 있는 동안도
+      // 같다(`globalShortcutHold`): 팔레트에서 고른 이동이 값을 쥔 화면을 말없이 떠나게 한다.
+      if (formDialogOpen || globalShortcutsHeld()) return;
       // ⌘⇧K = 새 다이렉트 메시지 (R-1 §1 키보드 경로). #3662부터 멤버 목록으로 보내지 않고
       // 사이드바 DM 머리의 +와 같은 「새 다이렉트 메시지」 모달을 연다(받는 사람 검색 칸에
       // 캐럿이 선다). Checked BEFORE ⌘K, because the shifted key still reports as "k" and

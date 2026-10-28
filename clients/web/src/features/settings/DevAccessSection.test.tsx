@@ -20,6 +20,7 @@ import {
   retryAfterPhrase,
 } from "@momo/core/features/auth/devAccessModel";
 import { GONE_MEMBER_LABEL } from "@momo/core/features/workspace/directory";
+import { globalShortcutsHeld } from "@/app/globalShortcutHold";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { chooseListbox } from "@/design/ui/listboxTestKit";
 import { DevAccessSection } from "./DevAccessSection";
@@ -632,6 +633,28 @@ describe("명령줄·AI 도구: 한 번만 보이는 화면", () => {
 
   // 값은 폼 안의 뮤테이션 결과에만 있고 다시 만들 수 없다. 문(정책)이 다시 읽혀 어떻게 바뀌어도(절전 복귀·
   // Wi-Fi 재연결이 부르는 재조회가 실패하거나 스위치가 닫혔다고 답하거나) 값 화면은 「저장했어요」 전에 사라지지 않는다.
+  // 모달은 창의 keydown 을 막지 않는다. ⌘⇧A·⌘K·⌘⇧K·⌥↑↓가 값을 쥔 설정 화면을 말없이 떠나게 하지 않도록, 값이 떠 있는
+  // 동안 창의 이동 단축키는 멈춘다(걸이는 `@/app/globalShortcutHold`, 읽는 핸들러들의 시험은 각자의 파일).
+  it("값이 떠 있는 동안 창의 이동 단축키가 멈추고, 「저장했어요」를 누르면 다시 선다", async () => {
+    await mountReady();
+    expect(globalShortcutsHeld()).toBe(false);
+    routes[`POST ${CREDENTIALS}`] = () => json(created(), 201);
+    await submitWith();
+    await screen.findByTestId("dev-access-reveal");
+    expect(globalShortcutsHeld()).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: DEV_ONE_TIME_COPY.confirmLabel }));
+    await waitFor(() => expect(maybe("dev-access-reveal")).toBeNull());
+    expect(globalShortcutsHeld()).toBe(false);
+  });
+
+  it("값이 떠 있는 채로 화면이 사라져도 멈춤이 남지 않는다", async () => {
+    await createAndReveal();
+    expect(globalShortcutsHeld()).toBe(true);
+    cleanup();
+    expect(globalShortcutsHeld()).toBe(false);
+  });
+
   it("값이 떠 있는 동안 정책을 다시 읽다 실패해도 값 화면은 그대로이고 「저장했어요」가 출구다", async () => {
     await createAndReveal();
     routes[`GET ${ROOT}`] = () => errorBody(null, 500);
