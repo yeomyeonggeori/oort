@@ -1,9 +1,8 @@
 import { uuidEq, type Channel, type RosterMember } from "@momo/core/lib/api";
-import { declaredStatusLabel } from "@momo/core/features/presence/model";
 import {
-  AGENT_HOST_ONLINE_LABEL,
   agentHostDot,
   humanPresenceDot,
+  type StatusDot,
 } from "@momo/core/features/presence/statusDot";
 
 // =============================================================================
@@ -40,28 +39,21 @@ export function newDmCandidates(
   return members.filter((m) => m.status === "active" && !uuidEq(m.id, selfMemberId));
 }
 
-export type PeerDot = "online" | "away" | "dnd";
-
 /**
- * 상대 옆의 상태 점. **알 수 있는 것만** 그린다: 웹 명부에는 다른 사람의 접속 여부가 없으므로
- * (design-review #1889 H-3) 사람은 스스로 정한 자리 비움·방해 금지만, 에이전트는 호스트가
- * 닿아 있음(`hostOnline`)만 점이 된다. 사람의 「온라인」 초록 점은 근거가 없어 만들지 않는다.
- * 방해 금지는 만료 시각이 지나면 자동(auto)으로 본다(서버는 만료 때 이벤트를 보내지 않는다).
+ * 상대 옆의 상태 낱말. **알 수 있는 것만** 말한다. 판정은 코어 한 곳이다(`presence/statusDot.ts`): 사이드바 DM 행의
+ * 상태 점(#3964)과 같은 규칙을 읽고, 이 모달은 점이 아니라 그 점의 **낱말**(`StatusDot.label`)을 그린다.
+ *
+ *   사람      선언 상태(방해 금지 > 자리 비움)가 먼저이고, 없으면 접속 여부: 「온라인」·「오프라인」. 서버가 접속 여부를
+ *             말하지 않았으면(`online` 없음) 아무 말도 하지 않는다 - 모름은 오프라인이 아니다(#4692, ADR-0160 D3).
+ *   에이전트  호스트가 닿아 있을 때만 「연결됨」(이 모달은 생존 판정을 따로 묻지 않는다).
+ *
+ * 예전에는 이 함수가 점의 톤을 `online|away|dnd` 세 값으로 접어 돌려줬다. 사람의 「오프라인」(`muted`)이 생기면서
+ * 그 접기는 오프라인을 「방해 금지」로 읽게 되므로, 코어의 낱말을 그대로 쓴다. 방해 금지는 만료 시각이 지나면
+ * 자동(auto)으로 본다(서버는 만료 때 이벤트를 보내지 않는다).
  */
-export function peerDot(member: RosterMember | null, nowMs: number): PeerDot | null {
+export function peerDot(member: RosterMember | null, nowMs: number): StatusDot | null {
   if (!member) return null;
-  // 판정은 코어 한 곳이다(`presence/statusDot.ts`): 사이드바 DM 행의 상태 점(#3964)과 같은 규칙을 읽는다.
-  // 이 모달은 생존 판정을 따로 묻지 않으므로 에이전트는 호스트 연결(`hostOnline`)만 본다.
-  const dot =
-    member.kind === "agent"
-      ? agentHostDot(member.hostOnline)
-      : humanPresenceDot(member, nowMs);
-  if (dot === null) return null;
-  return dot.tone === "ok" ? "online" : dot.tone === "warn" ? "away" : "dnd";
+  return member.kind === "agent"
+    ? agentHostDot(member.hostOnline)
+    : humanPresenceDot(member, nowMs);
 }
-
-export const PEER_DOT_LABEL: Record<PeerDot, string> = {
-  online: AGENT_HOST_ONLINE_LABEL,
-  away: declaredStatusLabel("away"),
-  dnd: declaredStatusLabel("dnd"),
-};

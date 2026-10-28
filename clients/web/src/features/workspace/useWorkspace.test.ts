@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+// @vitest-environment jsdom
+
+import { act, createElement } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Channel, ReadState, RosterMember } from "@momo/core/lib/api";
+import { AVAILABILITY_REFRESH_MS } from "@momo/core/features/presence/model";
 import {
+  useDirectory,
   channelLabel,
   channelLabelParts,
   dmAutoReplyAgent,
@@ -21,6 +27,18 @@ import {
 // so a DM row named by displayName alone names two different conversations.
 // These are the live roster ids and handles, in the case the server sends them.
 // =============================================================================
+
+const fetchRosterCalls = vi.hoisted(() => ({ count: 0 }));
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    fetchRoster: async () => {
+      fetchRosterCalls.count += 1;
+      return [];
+    },
+  };
+});
 
 const WS = "00000000-0000-7000-8000-000000000001";
 
@@ -330,5 +348,64 @@ describe("읽음 투영 캐시: 두 필드는 말하지 않은 응답이 지우�
     const client = new QueryClient();
     applyClosureToCache(client, WS, READ_CH, 10);
     expect(client.getQueryData(["read-state", WS])).toBeUndefined();
+  });
+});
+
+// #4692: a dot is as fresh as the last roster read (availability is read by the server when it builds
+// the roster), so the roster has to be re-read while a screen that draws dots is in front of the person.
+describe("useDirectory: the roster is re-read on the availability cadence (#4692)", () => {
+  const reactActEnvironment = globalThis as typeof globalThis & {
+    IS_REACT_ACT_ENVIRONMENT?: boolean;
+  };
+  let root: Root | null = null;
+  let host: HTMLElement | null = null;
+  beforeAll(() => {
+    reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  });
+  afterEach(() => {
+    if (root) act(() => root?.unmount());
+    root = null;
+    host?.remove();
+    host = null;
+    vi.useRealTimers();
+  });
+
+  function Probe() {
+    useDirectory(WS);
+    return null;
+  }
+
+  it("reads once on mount, again each cadence while mounted, and stops when unmounted", async () => {
+    vi.useFakeTimers();
+    fetchRosterCalls.count = 0;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    host = document.createElement("div");
+    document.body.append(host);
+    root = createRoot(host);
+    await act(async () => {
+      root?.render(createElement(QueryClientProvider, { client }, createElement(Probe)));
+    });
+    expect(fetchRosterCalls.count).toBe(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(AVAILABILITY_REFRESH_MS - 1);
+    });
+    expect(fetchRosterCalls.count).toBe(1); // not before its time
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(fetchRosterCalls.count).toBe(2);
+    await act(async () => {
+      vi.advanceTimersByTime(AVAILABILITY_REFRESH_MS);
+    });
+    expect(fetchRosterCalls.count).toBe(3);
+
+    act(() => root?.unmount());
+    root = null;
+    await act(async () => {
+      vi.advanceTimersByTime(AVAILABILITY_REFRESH_MS * 3);
+    });
+    expect(fetchRosterCalls.count).toBe(3); // nobody is looking: nobody is asking
   });
 });
