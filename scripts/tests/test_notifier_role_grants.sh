@@ -37,6 +37,14 @@ printf '%s\n' "$granted" | grep -Fxq workspace && \
   fail "GRANT list has a table-level workspace grant (trimmed in #2448; the avatar reclaim read needs only the column, #3377)"
 printf '%s\n' "$granted" | grep -Fxq work_pool && \
   fail "GRANT list still has work_pool (trimmed in #2448; lock_work_pool=false on notifier)"
+# ADR-0186 증보 v5 U-f (#4702): the approval sweep never writes the proposer's hosted inbox
+# (a lapse is told on a re-ask, not by a reference), and the notifier is BYPASSRLS, so it must
+# not read credentials either. Opening these to make a sweep-side inbox write "work" is the
+# wrong repair: the live check is prod_role_conformance_pg.
+for denied_table in hosted_agent_inbox_event hosted_agent_inbox_counter token; do
+  printf '%s\n' "$granted" | grep -Fxq "$denied_table" && \
+    fail "GRANT list names $denied_table for momo_notifier (ADR-0186 v5 U-f: the sweep writes no inbox reference; no credential reads for a BYPASSRLS role)"
+done
 pass "parsed GRANT ON TABLE allowlist ($(printf '%s\n' "$granted" | grep -c .))"
 
 python3 - "$ROOT" "$BOOTSTRAP" <<'PY'

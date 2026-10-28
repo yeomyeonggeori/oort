@@ -89,7 +89,7 @@ use momo_agent::actions::{
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
     decision_stamp_in_tx, default_execution_host, existing_decision_in_tx,
-    is_active_channel_member_in_tx, is_active_human_member_in_tx, list_approvals_in_tx,
+    is_active_channel_member_in_tx, is_active_human_member_in_tx, is_overdue, list_approvals_in_tx,
     lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
     normalized_reason, offers_host_choice, record_decision_in_tx, reference_execution_host,
     resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
@@ -102,7 +102,7 @@ use momo_agent::{
     succeed_parked_run_in_tx, RunStatus,
 };
 use momo_auth::{
-    append_approved_channels_in_tx, grant_hosted_channels_in_tx,
+    active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
     lock_active_hosted_connection_in_tx, Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION,
     MAX_HOSTED_APPROVED_CHANNELS,
 };
@@ -1058,7 +1058,11 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     }
 
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
-    if approval.expires_at.is_some_and(|expires| expires <= now) {
+    //
+    // `is_overdue` is the one definition of 「past its deadline」 (ADR-0186 증보 v5
+    // U-f): the status an agent is told on a re-ask reads the same predicate on the
+    // same application clock, so the two agree at the boundary.
+    if is_overdue(approval.expires_at, now) {
         // An expired proposal's staged avatar image dies with it.
         discard_staged_avatar_in_tx(conn, &approval).await?;
         return Ok(Ok(settle_expired(
@@ -1359,6 +1363,77 @@ async fn announce_card_edit(
     message_id: Uuid,
 ) -> Result<(), momo_db::DbError> {
     emit_message_edited_in_tx(conn, workspace_id, message_id).await?;
+    Ok(())
+}
+
+/// Tell the agent that **proposed a workspace action** that a person has decided
+/// it — one `agent_run` reference in its hosted inbox, in the decision's own
+/// transaction (ADR-0186 증보 v5 U-f, #4702).
+///
+/// ## Why this exists
+///
+/// The outcome line is written through the raw spine ([`send_message_in_tx`]),
+/// which projects nothing into an inbox, and its author is the proposing agent —
+/// which the inbox would skip anyway. So the outcome of every proposal was visible
+/// only to an agent that happened to wake up and re-read the conversation, and
+/// nothing woke it. The reference is that signal (the doorbell rings on any inbox
+/// growth, ADR-0171). A proposal a person asked for gets it exactly as a proposal
+/// nobody asked for does.
+///
+/// ## Who gets one — and who does not
+///
+/// Only the proposer's **own** live hosted connection, and only when the run's
+/// channel is one that connection covers (`append_run_reference_in_tx`'s own
+/// authority predicate is the judge; nothing is added here). A managed agent has no
+/// hosted connection and gets nothing — no regression for them. Another hosted
+/// agent in the same room gets nothing: the target is explicit, never a fan-out.
+/// A replay writes nothing new (the writer is idempotent per run and connection).
+///
+/// ## Where it sits — before the outcome line
+///
+/// Every caller writes this **before** its `channel_seq` bump. The reference takes
+/// the connection first (the hosted canon's lock order: connection → … →
+/// counter), and several executors already hold that row `FOR UPDATE`
+/// (`channel.create`, `hosted.channels.grant`) before the outcome line; a decision
+/// that locked the channel first and the connection second would deadlock against
+/// one of those on a DM that carries two cards.
+///
+/// ## What it never does: expiry
+///
+/// Neither the sweep nor the late-tap arm calls this. The sweep runs as
+/// `momo_notifier`, which holds no grant on `token` or on the inbox tables on
+/// purpose (`bootstrap_runtime_roles.sql`: that role is BYPASSRLS and must not
+/// read credentials), so an inbox write there would raise `permission denied` in
+/// production, roll the workspace's whole sweep back, and leave every run
+/// `awaiting_approval`. A lapse is also not something a person said — waking an
+/// agent for it would invite a new proposal every deadline. Expiry is told on a
+/// re-ask instead ([`momo_agent::approval::effective_status`]).
+///
+/// Only `workspace_action` approvals are told. Every other approval kind belongs to
+/// a managed agent's own tool loop, which has its own resume job.
+async fn wake_proposer_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+) -> Result<(), momo_db::DbError> {
+    if approval.action_type != ACTION_TYPE_WORKSPACE_ACTION {
+        return Ok(());
+    }
+    let Some(connection_id) =
+        active_hosted_connection_in_tx(conn, approval.workspace_id, approval.requested_by)
+            .await
+            .map_err(momo_db::DbError::from)?
+    else {
+        return Ok(());
+    };
+    momo_messaging::append_run_reference_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.requested_by,
+        connection_id,
+        approval.channel_id,
+        approval.run_id,
+    )
+    .await?;
     Ok(())
 }
 
@@ -2127,6 +2202,14 @@ async fn execute_workspace_action(
             secret_once: executed.secret_once,
         }));
     }
+
+    // ---- the proposer's inbox, BEFORE the outcome line (ADR-0186 증보 v5 U-f) ----
+    //
+    // After the in-place arm above on purpose: that card releases a job, which is
+    // its own wake-up (and its channel is not one the connection covers yet), and
+    // writes no outcome line. Before `send_message_in_tx` below for the lock
+    // order `wake_proposer_in_tx` states.
+    wake_proposer_in_tx(conn, approval).await?;
 
     // ---- the outcome line, authored by the agent ---------------------------
     //
@@ -3541,6 +3624,12 @@ async fn reject_run(
     if !ended {
         return Ok(());
     }
+
+    // ADR-0186 증보 v5 U-f — the proposer's inbox hears the rejection too, and
+    // **before** the outcome line below (`wake_proposer_in_tx` says why). Behind
+    // the `ended` guard: a run a person cancelled first already wrote its own
+    // reference, and a decision that moved nothing announces nothing.
+    wake_proposer_in_tx(conn, approval).await?;
 
     // The rail hears it (goal SRV-B3c). A parked run renders as 승인 대기, not
     // 작업 중 — but it is still an entry in the client's run table, and a

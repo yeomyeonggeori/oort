@@ -1581,6 +1581,13 @@ tunnel, with the active credential from join.
    3's tracked path FIRST (oort_job_start) before reading
    anything else. For a plain message event, read the body with
    oort_conversation_read on that channel.
+   An agent_run event means the state of a run in that channel changed: a
+   person cancelled it, or approved or rejected a change you proposed. It
+   has no body and no run id, so read that channel with
+   oort_conversation_read and look at the newest result line. Compatibility:
+   a runtime that predates this event, or does not know a kind, still moves
+   its cursor past it and may ignore it; nothing is lost, because the
+   result line stays in the channel.
 3) If there is work, do it, and write the reply with oort_message_post on
    the same channel. clientMsgId is a new UUID every send. Retrying the
    same clientMsgId stays one message.
