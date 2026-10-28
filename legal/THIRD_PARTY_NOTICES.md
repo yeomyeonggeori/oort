@@ -79,6 +79,7 @@ this table only records why they are there.
 | ort / ort-sys (pykeio/ort, ONNX Runtime bindings; `load-dynamic`: no ONNX Runtime binary is downloaded or linked at cargo build time) | 2.0.0-rc.13 | MIT OR Apache-2.0 | via fastembed, `momo-embed` | same |
 | libloading (nagisa/rust_libloading; already in the graph via ort, now also a direct dependency that checks `ORT_DYLIB_PATH` before ort sees it) | 0.9.0 | ISC | `server-rust/crates/momo-embed` | same |
 | tokenizers (Hugging Face) | 0.23.2 | Apache-2.0 | via fastembed, `momo-embed` | same |
+| clap (clap-rs; `default-features = false`, derive only: no colour, env or suggestion features; brings clap_builder, clap_derive, clap_lex and anstyle) | 4.6.7 | MIT OR Apache-2.0 | `server-rust/bins/oort-cli` (command-line parsing of the `oort` binary) | ADR-0216 D10, #4662 |
 
 ### Embedded model and ONNX Runtime (worker image; not Cargo crates)
 

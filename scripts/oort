@@ -9,6 +9,8 @@ export OORT_ROOT
 
 usage() {
   cat <<'EOF'
+서버 운영 도구예요. 터미널에서 oort를 쓰는 CLI는 `oort`예요 (ADR-0216 D10).
+
 Usage: scripts/oort <command> [options]
 
 Commands:

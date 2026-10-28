@@ -11,7 +11,8 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::api::{
-    parse_json, Channel, ChannelsPage, InboxItem, InboxPage, Message, MessagePage, Reply, SelfInfo,
+    parse_json, Channel, ChannelsPage, InboxItem, InboxPage, Message, MessagePage, Reply, Route,
+    SelfInfo,
 };
 use crate::cli::{InboxArgs, PostArgs, ReadArgs, TokenArgs};
 use crate::error::{CliError, Kind};
@@ -67,7 +68,7 @@ struct CredentialDoc<'a> {
 
 pub fn whoami(ctx: &Ctx) -> Result<(), CliError> {
     let mut active = Active::resolve(ctx)?;
-    let path = active.workspace_path("/dev-access/self");
+    let path = active.path(Route::SelfInfo, None, None);
     let reply = active.get(ctx, &path, &[])?;
     let info: SelfInfo = parse_json(&reply)?;
     let storage = active.source.storage().map(|kind| kind.as_str());
@@ -181,7 +182,7 @@ pub fn logout(ctx: &Ctx) -> Result<(), CliError> {
     stored_ctx.env.workspace = None;
     let revocation = match Active::resolve(&stored_ctx) {
         Ok(mut active) => {
-            let path = active.workspace_path("/dev-access/self");
+            let path = active.path(Route::SelfEnd, None, None);
             match active.delete(&stored_ctx, &path) {
                 Ok(reply) if (200..300).contains(&reply.status) => "revoked",
                 // Already ended by someone else: nothing is left to revoke.
@@ -250,7 +251,7 @@ struct ChannelsDoc<'a> {
 }
 
 fn fetch_channels(active: &mut Active, ctx: &Ctx) -> Result<Vec<Channel>, CliError> {
-    let path = active.workspace_path("/channels");
+    let path = active.path(Route::Channels, None, None);
     let reply = active.get(ctx, &path, &[("limit", CHANNEL_LIST_LIMIT.to_string())])?;
     Ok(parse_json::<ChannelsPage>(&reply)?.channels)
 }
@@ -395,8 +396,7 @@ pub fn read(ctx: &Ctx, args: &ReadArgs) -> Result<(), CliError> {
             if let Some(since) = args.since {
                 query.push(("cursor", since.to_string()));
             }
-            let path =
-                active.workspace_path(&format!("/channels/{channel_id}/messages/{root}/replies"));
+            let path = active.path(Route::Replies, Some(&channel_id), Some(root));
             let reply = active.get(ctx, &path, &query)?;
             (path, parse_json::<MessagePage>(&reply)?)
         }
@@ -407,7 +407,7 @@ pub fn read(ctx: &Ctx, args: &ReadArgs) -> Result<(), CliError> {
             if let Some(before) = args.before {
                 query.push(("before", before.to_string()));
             }
-            let path = active.workspace_path(&format!("/channels/{channel_id}/messages"));
+            let path = active.path(Route::History, Some(&channel_id), None);
             let reply = active.get(ctx, &path, &query)?;
             (path, parse_json::<MessagePage>(&reply)?)
         }
@@ -527,7 +527,7 @@ pub fn post(ctx: &Ctx, args: &PostArgs) -> Result<(), CliError> {
 
     let mut active = Active::resolve(ctx)?;
     let channel_id = resolve_channel(&mut active, ctx, &args.channel)?;
-    let path = active.workspace_path(&format!("/channels/{channel_id}/messages"));
+    let path = active.path(Route::Send, Some(&channel_id), None);
     let message: Message = match active
         .post_json(ctx, &path, &body)
         .and_then(|reply| parse_json(&reply))
@@ -578,7 +578,7 @@ pub fn inbox(ctx: &Ctx, args: &InboxArgs) -> Result<(), CliError> {
         }
     }
     let mut active = Active::resolve(ctx)?;
-    let path = active.workspace_path("/inbox");
+    let path = active.path(Route::Inbox, None, None);
     let query: Vec<(&str, String)> = args
         .limit
         .map(|limit| vec![("limit", limit.to_string())])

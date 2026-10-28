@@ -67,14 +67,16 @@ where
     let cli = match Cli::try_parse_from(&args) {
         Ok(cli) => cli,
         Err(error) => {
-            let code = if error.use_stderr() { 2 } else { 0 };
-            if error.use_stderr() && json_asked {
+            // `--help` and `--version` are not errors. A real usage error is printed through the
+            // same filter as every other message: the parser quotes the offending argument back,
+            // and that argument may be a token typed where it does not belong.
+            if error.use_stderr() {
                 let usage = CliError::usage("usage", error.render().to_string());
-                emit_error(true, &usage);
-            } else {
-                let _ = error.print();
+                emit_error(json_asked, &usage);
+                return usage.exit_code();
             }
-            return code;
+            let _ = error.print();
+            return 0;
         }
     };
     if cli.version {

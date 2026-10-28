@@ -19,14 +19,20 @@ pub fn note(message: &str) {
     let _ = writeln!(std::io::stderr().lock(), "{message}");
 }
 
-/// Text another person or the server wrote, made safe to print to a terminal.
+/// Text another person, the server or the argument parser wrote, made safe to print.
 ///
-/// A message body can carry escape sequences (`ESC [ 2 J`, a title-bar rewrite, a hyperlink) and
-/// Unicode bidirectional overrides that make a line read differently from what it is. Control
-/// characters other than newline and tab and the bidi controls become `?`. JSON output is not
-/// touched: JSON escapes control characters on its own.
+/// * A message body can carry escape sequences (`ESC [ 2 J`, a title-bar rewrite, a hyperlink)
+///   and Unicode bidirectional overrides that make a line read differently from what it is:
+///   control characters other than newline and tab and the bidi controls become `?`.
+/// * Anything shaped like an oort token (`momo_dev…`) becomes `[토큰]`. A person who types a
+///   token where it does not belong (`oort login --with-token momo_dev_v1…`) must not have the
+///   parser's complaint print it back into a scrollback.
+///
+/// JSON output is not touched: JSON escapes control characters on its own, and no document holds
+/// a token but `oort token`'s.
 pub fn sanitize(text: &str) -> String {
-    text.chars()
+    redact_tokens(text)
+        .chars()
         .map(|character| {
             let bidi = matches!(character, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}');
             let control = character.is_control() && character != '\n' && character != '\t';
@@ -37,6 +43,25 @@ pub fn sanitize(text: &str) -> String {
             }
         })
         .collect()
+}
+
+/// Replace every run that starts like an oort token envelope (`momo_dev_v1.`, `momo_devr_v1.`)
+/// with `[토큰]`, up to the first character that cannot be part of one.
+pub fn redact_tokens(text: &str) -> String {
+    const MARKER: &str = "momo_dev";
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(start) = rest.find(MARKER) {
+        out.push_str(&rest[..start]);
+        let tail = &rest[start..];
+        let length = tail
+            .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.')))
+            .unwrap_or(tail.len());
+        out.push_str("[토큰]");
+        rest = &tail[length..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Epoch milliseconds as RFC 3339 UTC (`2026-10-28T09:30:00Z`).
@@ -65,6 +90,19 @@ mod tests {
         let safe = sanitize(hostile);
         assert_eq!(safe, "ok?[2Jgone?txt??x\ttab\nline");
         assert!(sanitize("한국어 · 😀").contains("한국어 · 😀"));
+    }
+
+    #[test]
+    fn anything_shaped_like_a_token_is_replaced_wherever_it_appears() {
+        let token = "momo_dev_v1.6f1c2b0e-3a4d-4e5f-8a9b-0c1d2e3f4a5b.AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
+        let refresh = token.replace("momo_dev_v1", "momo_devr_v1");
+        let printed = sanitize(&format!(
+            "unexpected argument '{token}' found; also {refresh}, and ({token})"
+        ));
+        assert!(!printed.contains("AbCdEf"), "{printed}");
+        assert!(!printed.contains("momo_dev"), "{printed}");
+        assert_eq!(printed.matches("[토큰]").count(), 3, "{printed}");
+        assert_eq!(sanitize("plain text, no secrets"), "plain text, no secrets");
     }
 
     #[test]

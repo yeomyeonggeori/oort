@@ -24,6 +24,75 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_BODY_BYTES: usize = 8 * 1024 * 1024;
 
+/// The routes this CLI calls: ADR-0216 D4 L1–L8, the only REST a developer token reaches. The
+/// templates are the router's own, character for character, so `tests/wire_constants.rs` can hold
+/// them against `momo_auth::DEV_ROUTE_TABLE` and a route the server renames or closes fails there
+/// instead of at a person's terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Route {
+    /// L1 `whoami`
+    SelfInfo,
+    /// L2 `logout`
+    SelfEnd,
+    /// L3 `channels`
+    Channels,
+    /// L4 `read`
+    History,
+    /// L5 `read --thread`
+    Replies,
+    /// L6 `post`
+    Send,
+    /// L7 `inbox`
+    Inbox,
+    /// L8 `mcp`
+    Mcp,
+}
+
+impl Route {
+    pub const ALL: [Route; 8] = [
+        Route::SelfInfo,
+        Route::SelfEnd,
+        Route::Channels,
+        Route::History,
+        Route::Replies,
+        Route::Send,
+        Route::Inbox,
+        Route::Mcp,
+    ];
+
+    pub fn method(self) -> &'static str {
+        match self {
+            Route::SelfEnd => "DELETE",
+            Route::Send | Route::Mcp => "POST",
+            _ => "GET",
+        }
+    }
+
+    pub fn template(self) -> &'static str {
+        match self {
+            Route::SelfInfo | Route::SelfEnd => "/v1/workspaces/{ws}/dev-access/self",
+            Route::Channels => "/v1/workspaces/{ws}/channels",
+            Route::History | Route::Send => "/v1/workspaces/{ws}/channels/{ch}/messages",
+            Route::Replies => "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies",
+            Route::Inbox => "/v1/workspaces/{ws}/inbox",
+            Route::Mcp => "/v1/mcp/me",
+        }
+    }
+
+    /// The path with ids filled in. Every id that reaches here has been parsed as a UUID
+    /// (hyphenated, lower case) first, so nothing can add a segment or a query to the path.
+    pub fn fill(self, workspace: &str, channel: Option<&str>, root: Option<&str>) -> String {
+        let mut path = self.template().replace("{ws}", workspace);
+        if let Some(channel) = channel {
+            path = path.replace("{ch}", channel);
+        }
+        if let Some(root) = root {
+            path = path.replace("{root}", root);
+        }
+        path
+    }
+}
+
 /// A server the CLI may talk to, reduced to its origin (`https://oort.example`, no trailing slash).
 pub fn parse_server(raw: &str) -> Result<String, CliError> {
     let url = Url::parse(raw.trim()).map_err(|_| {
@@ -482,6 +551,25 @@ mod tests {
             status,
             retry_after_seconds: None,
             body: body.as_bytes().to_vec(),
+        }
+    }
+
+    #[test]
+    fn a_filled_route_has_no_placeholder_left_and_the_ids_are_only_where_the_template_says() {
+        let ws = "6f1c2b0e-3a4d-4e5f-8a9b-0c1d2e3f4a5b";
+        let ch = "11111111-1111-4111-8111-111111111111";
+        let root = "22222222-2222-4222-8222-222222222222";
+        assert_eq!(
+            Route::Replies.fill(ws, Some(ch), Some(root)),
+            format!("/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies")
+        );
+        assert_eq!(Route::Mcp.fill(ws, None, None), "/v1/mcp/me");
+        for route in Route::ALL {
+            let path = route.fill(ws, Some(ch), Some(root));
+            assert!(
+                !path.contains('{') && !path.contains('}'),
+                "{route:?}: {path}"
+            );
         }
     }
 

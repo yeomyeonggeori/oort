@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::api::{
-    network_error, parse_json, parse_server, read_reply, Api, SelfInfo, TokenResponse,
+    network_error, parse_json, parse_server, read_reply, Api, Route, SelfInfo, TokenResponse,
 };
 use crate::cli::LoginArgs;
 use crate::error::{CliError, Kind};
@@ -185,7 +185,7 @@ fn with_token(ctx: &Ctx, args: &LoginArgs) -> Result<Outcome, CliError> {
     // Prove the token before keeping it: a typo or a revoked card is told now, not at first use.
     let response = api
         .client()
-        .get(api.url(&format!("/v1/workspaces/{workspace_id}/dev-access/self")))
+        .get(api.url(&Route::SelfInfo.fill(&workspace_id, None, None)))
         .bearer_auth(token.expose())
         .send()
         .map_err(|error| network_error(&error))?;

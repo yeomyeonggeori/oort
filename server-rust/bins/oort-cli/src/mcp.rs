@@ -23,7 +23,7 @@ use std::io::{BufRead, Write};
 use reqwest::header::{ACCEPT, CONTENT_TYPE};
 use serde_json::{json, Value};
 
-use crate::api::{refusal, Reply};
+use crate::api::{refusal, Reply, Route};
 use crate::error::{CliError, Kind};
 use crate::output::{note, sanitize};
 use crate::session::{Active, Ctx};
@@ -32,7 +32,6 @@ pub const LEGACY_VERSION: &str = "2025-11-25";
 const META_VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
 /// The door buffers at most this much (`momo_mcp::MAX_BODY_BYTES`); a longer line is refused here.
 pub const MAX_LINE_BYTES: usize = 64 * 1024;
-const MCP_PATH: &str = "/v1/mcp/me";
 
 const RPC_PARSE_ERROR: i64 = -32700;
 const RPC_INVALID_REQUEST: i64 = -32600;
@@ -255,7 +254,7 @@ pub fn serve(ctx: &Ctx) -> Result<(), CliError> {
     // No login is an exit before the first byte, not a server that answers every call with an
     // error: the client shows our standard error next to "failed to start".
     let mut active = Active::resolve(ctx)?;
-    let url = active.api().url(MCP_PATH);
+    let url = active.api().url(&Route::Mcp.fill("", None, None));
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     loop {

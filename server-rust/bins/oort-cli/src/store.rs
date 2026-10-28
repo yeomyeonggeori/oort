@@ -253,6 +253,15 @@ pub fn ensure_private_dir(path: &Path) -> Result<(), CliError> {
                 return Ok(());
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                // Only the directory that holds credentials is private; the places above it
+                // (`~/.config`) are the user's own and are created the ordinary way if absent.
+                if let Some(parent) = path.parent() {
+                    if !parent.exists() {
+                        fs::create_dir_all(parent).map_err(|error| {
+                            io_error("상위 디렉터리를 만들지 못했어요", parent, &error)
+                        })?;
+                    }
+                }
                 match DirBuilder::new().mode(0o700).create(path) {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -576,12 +585,6 @@ impl Store {
     }
 
     fn ensure_root(&self) -> Result<(), CliError> {
-        if let Some(parent) = self.root.parent() {
-            if !parent.exists() {
-                fs::create_dir_all(parent)
-                    .map_err(|error| io_error("설정 디렉터리를 만들지 못했어요", parent, &error))?;
-            }
-        }
         ensure_private_dir(&self.root)
     }
 

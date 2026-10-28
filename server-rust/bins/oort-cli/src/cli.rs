@@ -179,6 +179,34 @@ mod tests {
     }
 
     #[test]
+    fn no_flag_turns_certificate_checking_off_or_points_the_credential_elsewhere() {
+        // ADR-0216 D10 「전송 규칙」: TLS 검증을 끄는 플래그가 없다. Every flag of every command
+        // (and the global ones) is looked at by name, so adding one needs this list to be read.
+        let command = Cli::command();
+        let mut names: Vec<String> = command
+            .get_arguments()
+            .map(|argument| argument.get_id().to_string())
+            .collect();
+        for subcommand in command.get_subcommands() {
+            names.extend(
+                subcommand
+                    .get_arguments()
+                    .map(|argument| argument.get_id().to_string()),
+            );
+        }
+        for name in names {
+            for forbidden in [
+                "insecure", "tls", "ssl", "cert", "verify", "danger", "skip", "proxy", "redirect",
+            ] {
+                assert!(
+                    !name.contains(forbidden),
+                    "`--{name}` looks like a transport escape hatch"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn no_argument_of_any_command_can_carry_a_token() {
         let command = Cli::command();
         for subcommand in command.get_subcommands() {

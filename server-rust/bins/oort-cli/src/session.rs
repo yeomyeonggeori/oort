@@ -8,7 +8,7 @@
 
 use reqwest::blocking::RequestBuilder;
 
-use crate::api::{network_error, parse_json, read_reply, Api, Reply, TokenResponse};
+use crate::api::{network_error, parse_json, read_reply, Api, Reply, Route, TokenResponse};
 use crate::error::{CliError, Kind};
 use crate::output::now_ms;
 use crate::secret::{parse_envelope, EnvelopeKind, Secret};
@@ -212,8 +212,9 @@ impl Active {
         self.stored.as_ref().map(|credential| credential.form)
     }
 
-    pub fn workspace_path(&self, rest: &str) -> String {
-        format!("/v1/workspaces/{}{rest}", self.workspace_id)
+    /// The path of `route` in this profile's workspace.
+    pub fn path(&self, route: Route, channel: Option<&str>, root: Option<&str>) -> String {
+        route.fill(&self.workspace_id, channel, root)
     }
 
     /// The access half to present now (refreshed first if it is about to lapse).
