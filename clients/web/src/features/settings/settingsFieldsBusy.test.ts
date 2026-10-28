@@ -1,9 +1,14 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // =============================================================================
+// (#4711) RED PROOF ② 의 두 단정(busy 가 aria-disabled 식·흐림 식에 없다), #1558 의 SaveButton
+// 잠금·흐림 단정, 소비처 canSave 그물은 린트 규칙이 됐다: `momo/busy-lock-grammar`(selfLock ·
+// opacityFollowsLock, SettingsFields.tsx 포함)와 `momo/in-flight-lock-props`(features 전수).
+// 변조마다의 양성 fixture 는 clients/web/eslint-rules/busyLockGrammar.test.ts. 아래에는 컴포넌트
+// 내부의 배선(낱말 갈아 끼우기·가드·이름)의 핀이 남았다.
+//
 // #1490 — 한 폼의 두 갈래가 진행을 같은 문법으로 말한다.
 //
 // `CleanupArtifactRow` 는 한 자리에서 두 갈래로 갈린다. 관측만 기록하는 갈래는
@@ -105,20 +110,8 @@ describe("RED PROOF ① 처분 확정에도 진행 낱말이 있다", () => {
 });
 
 describe("RED PROOF ② 진행은 잠금으로 그려지지 않는다", () => {
-  it("busy 가 aria-disabled 식에 없다", () => {
-    // #1403 리뷰 H-1 의 규율: 진행 중은 aria-busy 와 바뀐 낱말로만 말한다.
-    const locks = expressions(CONFIRM, "aria-disabled");
-    expect(locks.length).toBeGreaterThan(0);
-    expect(locks.filter((lock) => /\bbusy\b/.test(lock))).toEqual([]);
-  });
-
-  it("busy 가 흐림(opacity-50) 식에 없다", () => {
-    const dims = CONFIRM.match(/className=\{cn\([^)]*\)\}/g) ?? [];
-    expect(dims.length).toBeGreaterThan(0);
-    expect(dims.filter((dim) => /\bbusy\b/.test(dim))).toEqual([]);
-    // 흐림을 켜는 것은 `disabled` 하나뿐이다.
-    for (const dim of dims) expect(dim).toContain("disabled &&");
-  });
+  // busy 가 aria-disabled 식·흐림(opacity-50) 식에 없다는 두 단정은 린트 selfLock ·
+  // opacityFollowsLock 이 됐다(별칭 뒤에 숨은 접힘까지 편다).
 
   it("잠긴 이유는 여전히 disabled 만 가리킨다", () => {
     // 진행 중에 「왜 못 하는지」를 읽어 주면 하지 못하는 중이라는 뜻이 된다.
@@ -160,16 +153,8 @@ describe("RED PROOF ③ 두 번째 Enter 는 삼켜진다", () => {
 // =============================================================================
 
 describe("#1558 RED PROOF — SaveButton 의 진행은 잠금으로 그려지지 않는다", () => {
-  it("잠금은 canSave 하나에서만 온다 — aria-disabled", () => {
-    expect(expressions(SAVE, "aria-disabled")).toEqual([
-      "aria-disabled={!canSave || undefined}",
-    ]);
-  });
-
-  it("흐림도 canSave 하나에서만 온다 — opacity-50", () => {
-    const dims = SAVE.match(/className=\{cn\([^)]*\)\}/g) ?? [];
-    expect(dims).toEqual(['className={cn(!canSave && "opacity-50")}']);
-  });
+  // SaveButton 의 잠금·흐림이 canSave 하나에서만 온다는 두 단정(#1558)은 린트 selfLock ·
+  // opacityFollowsLock 이 됐다(원형 `blocked = !canSave || busy` 가 fixture 로 붉다).
 
   it("진행은 낱말과 aria-busy 로만 말한다", () => {
     expect(SAVE).toContain("aria-busy={busy || undefined}");
@@ -183,50 +168,5 @@ describe("#1558 RED PROOF — SaveButton 의 진행은 잠금으로 그려지지
   });
 });
 
-describe("#1558 소비처 — busy 가 canSave 로 접혀 들어오지 않는다", () => {
-  // 컴포넌트를 갈라도 소비처가 `canSave={dirty && !save.isPending}` 을 넘기면
-  // 같은 겹침이 prop 을 타고 되돌아온다. features/ 아래 모든 <SaveButton> 의
-  // canSave 식을 기계로 훑는다 — 새 소비처도 자동으로 이 규율 아래 선다.
-  const FEATURES_DIR = fileURLToPath(new URL("..", import.meta.url));
-
-  function tsxFiles(dir: string): string[] {
-    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) return tsxFiles(path);
-      return entry.name.endsWith(".tsx") ? [path] : [];
-    });
-  }
-
-  function saveButtonBlocks(): { file: string; canSave: string }[] {
-    const blocks: { file: string; canSave: string }[] = [];
-    for (const file of tsxFiles(FEATURES_DIR)) {
-      const source = readFileSync(file, "utf8");
-      let from = 0;
-      for (;;) {
-        const start = source.indexOf("<SaveButton", from);
-        if (start === -1) break;
-        const end = source.indexOf("/>", start);
-        const block = source.slice(start, end === -1 ? undefined : end);
-        const canSave = block.match(/canSave=\{([^}]*)\}/)?.[1];
-        expect(canSave, `${file} 의 <SaveButton> 에 canSave 가 없다`).toBeTruthy();
-        blocks.push({ file, canSave: canSave ?? "" });
-        from = start + 1;
-      }
-    }
-    return blocks;
-  }
-
-  it("모든 소비처의 canSave 식에 진행 어휘가 없다", () => {
-    const blocks = saveButtonBlocks();
-    // 소비처가 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은
-    // 셋(AiLinkChain chain-save, WorkHostSection 엔진·티어)이고, 줄어들면
-    // 스캔이 깨진 것이므로 여기서 같이 빨개진다.
-    expect(blocks.length).toBeGreaterThanOrEqual(3);
-    for (const { file, canSave } of blocks) {
-      expect(
-        /\b(busy|isPending|isLoading|isFetching|saving)\b/i.test(canSave),
-        `${file}: canSave={${canSave}} 가 진행을 잠금으로 접는다`
-      ).toBe(false);
-    }
-  });
-});
+// #1558 소비처 그물(features 아래 모든 <SaveButton> 의 canSave 식에 진행 어휘가 없다)은 린트
+// `momo/in-flight-lock-props` 가 됐다.
