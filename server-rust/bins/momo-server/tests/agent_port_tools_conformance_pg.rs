@@ -22886,6 +22886,12 @@ async fn an_unasked_card_stands_in_the_owners_dm_with_one_run_one_approval_and_n
     // The owner taps: the private channel is made as them, and a re-ask reads the outcome.
     let (status, approved) = approve(&client, &base, &fixture, approval).await;
     assert_eq!(status, 200, "{approved}");
+    // The tap tells the agent, once: one `agent_run` reference to the run behind its card, in the
+    // DM it stands in — that is what wakes a runtime that raised a card and ended its turn.
+    assert_eq!(
+        agent_run_references(&su, fixture.workspace, fixture.hosted_connection).await,
+        vec![(run_of_approval(&su, approval).await, dm)]
+    );
     let (channel, kind): (Uuid, String) =
         sqlx::query_as("SELECT id, kind::text FROM channel WHERE workspace_id=$1 AND name=$2")
             .bind(fixture.workspace)
@@ -23544,6 +23550,12 @@ async fn the_server_owns_the_run_behind_an_unasked_card() {
     assert_eq!(
         (run_status.as_str(), approval_status.as_str()),
         ("timed_out", "expired")
+    );
+    assert!(
+        agent_run_references(&su, fixture.workspace, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "an expiry is never written to the agent's inbox (the sweep may not, and a lapse is not something a person said)"
     );
     let (status, reask) = initiate(
         &client,
