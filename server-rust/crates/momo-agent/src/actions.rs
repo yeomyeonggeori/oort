@@ -119,6 +119,15 @@ pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 /// that person may approve.
 pub const ACTION_MEMBER_AVATAR_SET: &str = "member.avatar.set";
 
+/// `message.pin` — pin one message to the head of the channel it is in, **as the
+/// approver**, through the very function a person's own pin uses (ADR-0186 증보 v5 U-e).
+/// A pin reads as an endorsement, so an agent never does it unasked.
+pub const ACTION_MESSAGE_PIN: &str = "message.pin";
+
+/// `message.unpin` — take a pin off (ADR-0186 증보 v5 U-e). The same gate and the same
+/// card as [`ACTION_MESSAGE_PIN`]: clearing a pin is as visible to the channel as setting one.
+pub const ACTION_MESSAGE_UNPIN: &str = "message.unpin";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -340,7 +349,7 @@ pub fn changes_avatar(payload: &Value) -> bool {
 /// `momo.approval.open` instead of `momo.approval`.)
 ///
 /// The one list, in the one place; `momo_push::category_for` reads it and nothing
-/// else decides. Five kinds of approval belong on it:
+/// else decides. Six kinds of approval belong on it:
 ///
 /// 1. an action that mints a value shown once ([`ONE_TIME_SECRET_ACTION_IDS`]);
 /// 2. an approval whose card asks the approver to **choose a host**
@@ -351,7 +360,9 @@ pub fn changes_avatar(payload: &Value) -> bool {
 ///    handoff, planner decision 2026-10-17);
 /// 4. an `agent.profile.update` that changes the avatar ([`changes_avatar`], same
 ///    decision) and every `member.avatar.set` (its whole point is a picture);
-/// 5. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
+/// 5. every `message.pin` and `message.unpin` (ADR-0186 증보 v5 U-e): the card names a
+///    message by its first 120 characters, and a pin endorses all of it;
+/// 6. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
 ///    rows with no `approval` row and no `approval_request` message today, so
 ///    there is nothing here to classify; the producer that gives them one adds its
 ///    arm in this function.
@@ -415,6 +426,11 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
                     // A picture cannot be judged from a banner — and this card has no
                     // other kind of proposal, so it is always opened (ADR-0186 증보 v4).
                     || id == ACTION_MEMBER_AVATAR_SET
+                    // A message cannot be judged from a banner either: the card shows the
+                    // first 120 characters of something that can be thousands (ADR-0186
+                    // 증보 v5 U-e, review M4), so the approver reads it in the app.
+                    || id == ACTION_MESSAGE_PIN
+                    || id == ACTION_MESSAGE_UNPIN
             }),
         _ => true,
     }
@@ -1050,6 +1066,209 @@ pub fn plugin_install_result_rows(
     ]
 }
 
+// ---------------------------------------------------------------------------
+// message.pin / message.unpin (ADR-0186 증보 v5 U-e, #4703)
+// ---------------------------------------------------------------------------
+
+/// `ref.type` for the message a pin action changed (its id).
+pub const REF_TYPE_MESSAGE: &str = "message";
+
+/// How many characters of the message the card quotes. The card is a consent, so the quote is
+/// short and the card also says how long the message really is ([`PinCardMessage::total_chars`]).
+pub const PIN_CARD_EXCERPT_CHARS: usize = 120;
+
+/// `message.pin` / `message.unpin` arguments: **one id and nothing else.** No channel, no
+/// URL, no text — the server reads the channel, the author and the words from the stored
+/// message, so no string an agent wrote can become the card's description of its target.
+fn message_pin_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["messageId"],
+        "properties": {
+            "messageId": {
+                "type": "string",
+                "format": "uuid",
+                "description": "The id of a text message in THIS conversation (the `id` oort_conversation_read gives, or the `messageId` oort_message_post answers). A message anywhere else, a deleted one, a system or card line, or (for message.unpin) one that is not pinned is refused with the same answer."
+            }
+        }
+    })
+}
+
+/// What the card says about the message a pin names. **Every field is the server's reading of
+/// the stored row**; the proposing agent supplies only the id.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PinCardMessage {
+    /// Empty for a DM (`channel.name` is NULL there); the rows of a DM card never print it.
+    pub channel_name: String,
+    /// `public`, `private` or `dm` — a DM is called 「1:1 대화」 and has no 공개 범위 row.
+    pub channel_kind: String,
+    /// [`member_card_label`] of the author.
+    pub author_label: String,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    /// The body's first [`PIN_CARD_EXCERPT_CHARS`] characters, as [`pin_card_excerpt`] cut them.
+    pub excerpt: String,
+    /// The body's length in characters; `None` for a message with no text (attachments only).
+    pub total_chars: Option<i64>,
+    pub truncated: bool,
+    pub attachment_count: i64,
+    /// Pins the channel holds now, of [`MESSAGE_PIN_CHANNEL_LIMIT`].
+    pub pinned_count: i64,
+    /// Who pinned it and when — only a `message.unpin` card has them.
+    pub pinned_by_label: Option<String>,
+    pub pinned_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// A channel holds at most this many pins (`momo_messaging::CHANNEL_PIN_LIMIT`, migration 062).
+/// Written here only to draw 「n/100」; the limit itself is enforced by the pin function and the
+/// trigger, never by this number.
+pub const MESSAGE_PIN_CHANNEL_LIMIT: i64 = 100;
+
+/// The quote of a message body for a card: `(excerpt, total characters, was it cut)`.
+///
+/// Plain text, one line: every control character (a newline, a tab, an escape) becomes a space,
+/// the characters that reorder or hide text (bidi controls, zero-width marks, the BOM) are
+/// dropped, and runs of spaces collapse — so a message cannot draw a second row, a fake button
+/// line or reversed text on a card that exists to be read. `total` is the length of the message
+/// **as written**, because that is the number the approver weighs the quote against.
+pub fn pin_card_excerpt(body: &str) -> (String, usize, bool) {
+    let total = body.chars().count();
+    let mut cleaned = String::with_capacity(body.len().min(512));
+    let mut previous_space = true;
+    for ch in body.chars() {
+        let hidden = matches!(
+            ch,
+            '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{2064}'
+                | '\u{2066}'..='\u{2069}'
+                | '\u{FEFF}'
+        );
+        if hidden {
+            continue;
+        }
+        let ch = if ch.is_control() || ch.is_whitespace() {
+            ' '
+        } else {
+            ch
+        };
+        if ch == ' ' {
+            if previous_space {
+                continue;
+            }
+            previous_space = true;
+        } else {
+            previous_space = false;
+        }
+        cleaned.push(ch);
+    }
+    let cleaned = cleaned.trim_end().to_string();
+    let length = cleaned.chars().count();
+    if length > PIN_CARD_EXCERPT_CHARS {
+        let cut: String = cleaned.chars().take(PIN_CARD_EXCERPT_CHARS).collect();
+        (format!("{}…", cut.trim_end()), total, true)
+    } else {
+        (cleaned, total, false)
+    }
+}
+
+fn pin_time_text(at: chrono::DateTime<chrono::Utc>) -> String {
+    at.format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+/// The `message.pin` / `message.unpin` card rows, from the message the server read.
+pub fn message_pin_rows(unpin: bool, message: &PinCardMessage) -> Vec<Value> {
+    let mut rows = Vec::new();
+    if message.channel_kind == "dm" {
+        rows.push(action_row("채널", "1:1 대화"));
+    } else {
+        rows.push(action_row("채널", format!("#{}", message.channel_name)));
+        rows.push(action_row(
+            "공개 범위",
+            if message.channel_kind == "public" {
+                "공개"
+            } else {
+                "비공개"
+            },
+        ));
+    }
+    rows.push(action_row("쓴 사람", message.author_label.clone()));
+    rows.push(action_row("쓴 시각", pin_time_text(message.created_at)));
+    rows.push(action_row(
+        "내용",
+        if message.excerpt.is_empty() {
+            "(본문 없음)".to_string()
+        } else {
+            message.excerpt.clone()
+        },
+    ));
+    match message.total_chars {
+        Some(total) => rows.push(action_row("글자 수", format!("{total}자"))),
+        None => rows.push(action_row(
+            "첨부",
+            format!("{}개 (본문 없음)", message.attachment_count),
+        )),
+    }
+    if message.truncated {
+        rows.push(action_row(
+            "전문",
+            "내용이 길어요. 앱에서 이 메시지를 열어 전문을 읽은 뒤 승인해요",
+        ));
+    }
+    if unpin {
+        if let Some(by) = &message.pinned_by_label {
+            rows.push(action_row("고정한 사람", by.clone()));
+        }
+        if let Some(at) = message.pinned_at {
+            rows.push(action_row("고정한 시각", pin_time_text(at)));
+        }
+    }
+    rows.push(action_row(
+        "지금 고정된 수",
+        format!("{}/{MESSAGE_PIN_CHANNEL_LIMIT}", message.pinned_count),
+    ));
+    rows
+}
+
+/// The card's structured preview (`props.action.preview`): the ids a client needs to open the
+/// message in the app and read it whole, and the size the approver is weighing. Ids are not
+/// secrets to somebody who can already read the room.
+pub fn message_pin_preview(message_id: Uuid, channel_id: Uuid, message: &PinCardMessage) -> Value {
+    json!({
+        "kind": "message",
+        "messageId": message_id.to_string(),
+        "channelId": channel_id.to_string(),
+        "totalChars": message.total_chars,
+        "truncated": message.truncated,
+    })
+}
+
+/// The outcome line of a pin action. **The id is in the body on purpose** (the agent reads this
+/// line on its next turn, like `channel.create`'s): `changed` is false when the message was
+/// already in the asked state, which is a success.
+pub fn message_pin_result_body(unpin: bool, changed: bool, message_id: Uuid) -> String {
+    match (unpin, changed) {
+        (false, true) => format!("메시지를 고정했어요 · id {message_id}"),
+        (false, false) => format!("이미 고정돼 있던 메시지예요 · id {message_id}"),
+        (true, true) => format!("메시지 고정을 풀었어요 · id {message_id}"),
+        (true, false) => format!("이미 고정이 풀려 있던 메시지예요 · id {message_id}"),
+    }
+}
+
+/// The result rows of a pin action: where, and how many pins the channel holds after.
+pub fn message_pin_result_rows(message: &PinCardMessage, pinned_after: i64) -> Vec<Value> {
+    let mut rows = vec![if message.channel_kind == "dm" {
+        action_row("채널", "1:1 대화")
+    } else {
+        action_row("채널", format!("#{}", message.channel_name))
+    }];
+    rows.push(action_row(
+        "지금 고정된 수",
+        format!("{pinned_after}/{MESSAGE_PIN_CHANNEL_LIMIT}"),
+    ));
+    rows
+}
+
 /// The complete registry. Order is the catalog's order.
 pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
@@ -1151,6 +1370,31 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         proposers: Proposers::Any,
         effect: "카드에 보이는 이미지로 내 프로필 사진을 바꿔요",
         args_schema: member_avatar_set_args_schema,
+    },
+    // ADR-0186 증보 v5 U-e: the pin a person does by hand, done as the approver. Admin, not
+    // "any channel member": a new role would grow `RequiredRole`, the gate plan, the push
+    // audience and the client's role table together (V4-3), and the existing `Admin` costs none.
+    WorkspaceAction {
+        id: ACTION_MESSAGE_PIN,
+        title: "메시지 고정",
+        summary: "이 대화의 메시지 하나를 채널 맨 위에 고정해요. 카드에 보이는 메시지만 대상이에요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
+        effect: "표시된 메시지를 그 채널에 고정해요",
+        args_schema: message_pin_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_MESSAGE_UNPIN,
+        title: "메시지 고정 풀기",
+        summary: "이 대화에서 고정된 메시지 하나의 고정을 풀어요. 카드에 보이는 메시지만 대상이에요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::Admin,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
+        effect: "표시된 메시지의 고정을 풀어요",
+        args_schema: message_pin_args_schema,
     },
     WorkspaceAction {
         id: ACTION_WORKSPACE_UNFURL_UPDATE,
@@ -2163,6 +2407,8 @@ mod tests {
                 "agent.profile.update",
                 "agent.invite",
                 "member.avatar.set",
+                "message.pin",
+                "message.unpin",
                 "workspace.unfurl.update",
                 "workspace.memory.update",
                 "workspace.work_tier.update",
@@ -2237,7 +2483,9 @@ mod tests {
                 "workspace.settings.update",
                 "agent.profile.update",
                 "agent.invite",
-                "member.avatar.set"
+                "member.avatar.set",
+                "message.pin",
+                "message.unpin"
             ]
         );
         for id in helper_only {
@@ -3068,10 +3316,14 @@ mod tests {
             );
         }
         for action in ACTIONS {
-            // `member.avatar.set` is a picture, not a secret: it opens for the other reason
-            // (pinned by `a_member_avatar_card_always_opens_in_the_app`).
+            // `member.avatar.set` is a picture and the two pin actions are a message the card
+            // only quotes: they open for those reasons (pinned by
+            // `a_member_avatar_card_always_opens_in_the_app` and
+            // `a_pin_card_always_opens_in_the_app`).
             if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id)
                 && action.id != ACTION_MEMBER_AVATAR_SET
+                && action.id != ACTION_MESSAGE_PIN
+                && action.id != ACTION_MESSAGE_UNPIN
             {
                 assert!(
                     !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
@@ -3155,6 +3407,10 @@ mod tests {
             (ACTION_AGENT_PROFILE_UPDATE, false),
             // A picture on a lock-screen banner cannot be judged: always opened.
             (ACTION_MEMBER_AVATAR_SET, true),
+            // A message the card only quotes (120 characters of up to thousands): the approver
+            // reads it in the app (ADR-0186 증보 v5 U-e, review M4).
+            (ACTION_MESSAGE_PIN, true),
+            (ACTION_MESSAGE_UNPIN, true),
             (ACTION_WORKSPACE_UNFURL_UPDATE, false),
             (ACTION_WORKSPACE_MEMORY_UPDATE, false),
             (ACTION_WORKSPACE_WORK_TIER_UPDATE, false),
@@ -3198,6 +3454,133 @@ mod tests {
                 "{payload}"
             );
         }
+    }
+
+    /// ADR-0186 증보 v5 U-e: a pin card quotes a message, so its push never carries the
+    /// lock-screen 승인 — whatever else the payload says.
+    #[test]
+    fn a_pin_card_always_opens_in_the_app() {
+        for id in [ACTION_MESSAGE_PIN, ACTION_MESSAGE_UNPIN] {
+            for payload in [
+                serde_json::json!({"action": {"id": id, "args": {}}}),
+                serde_json::json!({"action": {"id": id}}),
+                serde_json::json!({"action": {"id": id, "args": {"messageId": "x"}}}),
+            ] {
+                assert!(
+                    opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &payload),
+                    "{id}: {payload}"
+                );
+            }
+        }
+    }
+
+    /// The registry's contract for the two pin actions: any hosted agent may propose, an
+    /// admin decides (no new role), nothing is minted, the helper cannot raise them — and the
+    /// arguments are **one id**: no channel, no URL, no text can be spelled at all.
+    #[test]
+    fn the_pin_actions_take_one_message_id_and_an_admin_decides() {
+        for id in [ACTION_MESSAGE_PIN, ACTION_MESSAGE_UNPIN] {
+            let action = action_by_id(id).expect("registered");
+            assert_eq!(action.required_role, RequiredRole::Admin, "{id}");
+            assert_eq!(action.proposers, Proposers::Any, "{id}");
+            assert_eq!(action.secret_delivery, SecretDelivery::None, "{id}");
+            assert_eq!(action.risk, Risk::Approval, "{id}");
+            assert!(proposable_action_by_id(id, ProposalDoor::AgentPort).is_some());
+            assert!(
+                !TEAM_AI_ACTION_IDS.contains(&id),
+                "{id}: the helper's list is closed"
+            );
+            let schema = action.args_schema();
+            assert_eq!(schema["additionalProperties"], serde_json::json!(false));
+            assert_eq!(schema["required"], serde_json::json!(["messageId"]));
+            let keys: Vec<&String> = schema["properties"]
+                .as_object()
+                .expect("properties")
+                .keys()
+                .collect();
+            assert_eq!(keys, ["messageId"], "{id}");
+            assert!(proposal_summary(action).contains("관리자"), "{id}");
+        }
+    }
+
+    fn pin_message(body: &str) -> PinCardMessage {
+        let (excerpt, total, truncated) = pin_card_excerpt(body);
+        PinCardMessage {
+            channel_name: "design".to_string(),
+            channel_kind: "private".to_string(),
+            author_label: member_card_label("이도현", "dohyun", false),
+            created_at: chrono::DateTime::from_timestamp(1_700_000_000, 0).expect("epoch"),
+            excerpt,
+            total_chars: (!body.is_empty()).then_some(total as i64),
+            truncated,
+            attachment_count: 0,
+            pinned_count: 3,
+            pinned_by_label: Some(member_card_label("박서연", "seoyeon", false)),
+            pinned_at: chrono::DateTime::from_timestamp(1_700_003_600, 0),
+        }
+    }
+
+    /// The quote on a pin card is one plain line: a message cannot draw a second row, a fake
+    /// button line or reversed text there, and the length it reports is the message's own.
+    #[test]
+    fn a_pin_card_quotes_one_plain_line_and_reports_the_real_length() {
+        let (excerpt, total, truncated) =
+            pin_card_excerpt("첫 줄\n\t둘째  줄\r\n\u{202E}거꾸로\u{200B}");
+        assert_eq!(excerpt, "첫 줄 둘째 줄 거꾸로");
+        assert_eq!(
+            total,
+            "첫 줄\n\t둘째  줄\r\n\u{202E}거꾸로\u{200B}"
+                .chars()
+                .count()
+        );
+        assert!(!truncated);
+
+        // Exactly at the limit is whole; one more is cut and says so.
+        let exact = "가".repeat(PIN_CARD_EXCERPT_CHARS);
+        assert_eq!(pin_card_excerpt(&exact), (exact.clone(), 120, false));
+        let longer = "가".repeat(PIN_CARD_EXCERPT_CHARS + 1);
+        let (excerpt, total, truncated) = pin_card_excerpt(&longer);
+        assert_eq!(total, 121, "the length is the message's, not the quote's");
+        assert!(truncated);
+        assert_eq!(excerpt, format!("{}…", "가".repeat(PIN_CARD_EXCERPT_CHARS)));
+    }
+
+    /// 「총 글자 수를 함께 싣고 앱에서 전문을 볼 수 있게」 (review M4): a long message's card
+    /// carries its real length, a row that sends the approver to the app, and a preview with the
+    /// ids a client needs to open it; a short one carries no such row.
+    #[test]
+    fn a_long_message_card_says_how_long_it_is_and_where_to_read_it_whole() {
+        let long = pin_message(&"가".repeat(5_000));
+        let rows = message_pin_rows(false, &long);
+        let row = |label: &str| {
+            rows.iter()
+                .find(|row| row["label"] == label)
+                .map(|row| row["value"].as_str().expect("text").to_string())
+        };
+        assert_eq!(row("글자 수").as_deref(), Some("5000자"));
+        assert!(row("전문").is_some_and(|text| text.contains("앱")));
+        assert_eq!(row("지금 고정된 수").as_deref(), Some("3/100"));
+        assert_eq!(row("공개 범위").as_deref(), Some("비공개"));
+        assert!(
+            row("고정한 사람").is_none(),
+            "only an unpin card says who pinned"
+        );
+        let preview = message_pin_preview(Uuid::from_u128(1), Uuid::from_u128(2), &long);
+        assert_eq!(preview["totalChars"], serde_json::json!(5000));
+        assert_eq!(preview["truncated"], serde_json::json!(true));
+        assert_eq!(
+            preview["messageId"],
+            serde_json::json!(Uuid::from_u128(1).to_string())
+        );
+
+        let short = pin_message("안녕하세요");
+        let rows = message_pin_rows(false, &short);
+        assert!(rows.iter().all(|row| row["label"] != "전문"));
+
+        // An unpin card also says who pinned it, and when.
+        let rows = message_pin_rows(true, &short);
+        assert!(rows.iter().any(|row| row["label"] == "고정한 사람"));
+        assert!(rows.iter().any(|row| row["label"] == "고정한 시각"));
     }
 
     /// The registry's contract for `member.avatar.set`: only the person it changes may

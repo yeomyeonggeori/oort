@@ -2600,6 +2600,23 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             label: "agent.invite: admins; the pairing code is shown once, so the app opens it",
             action_type: "workspace_action",
             payload: workspace_action("agent.invite", json!({})),
+            audience: admins.clone(),
+            category: open,
+        },
+        // ADR-0186 증보 v5 U-e (#4703): the card quotes the first 120 characters of a message
+        // that can be thousands, and a pin endorses all of it — read in the app, not decided
+        // from a banner.
+        Card {
+            label: "message.pin: admins; the card only quotes the message, so the app opens it",
+            action_type: "workspace_action",
+            payload: workspace_action("message.pin", json!({})),
+            audience: admins.clone(),
+            category: open,
+        },
+        Card {
+            label: "message.unpin: admins; the same card, the same app",
+            action_type: "workspace_action",
+            payload: workspace_action("message.unpin", json!({})),
             audience: admins,
             category: open,
         },
