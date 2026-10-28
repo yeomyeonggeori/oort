@@ -9,10 +9,21 @@
 #   run       선택 시험을 `--ignored --test-threads=1` 로 실행. 타깃마다 `N passed`(N>0)·failed 0 을 요구한다.
 #   negative  일회용 DB 에 FORCE 없는 테넌트 테이블 픽스처를 얹고 tenant_catalog_pg 가
 #             **그 테이블을 이름으로 지목하며** 빨강인지 확인한다(다른 이유의 빨강은 실패).
-#   nightly   선택 밖 PG 시험까지 전부(`--workspace --ignored`) — 야간 잡용.
+#   nightly   선택 밖 PG 시험까지 전부(`--workspace --ignored`) — 야간 잡용. 끝에 요약(report)을 낸다.
+#   report    야간 로그를 읽어 요약(markdown)·실패 시험 상세·격리 현황을 낸다.
+#             `report <전량 로그> <prod_role 로그> <격리 로그>` — DB·cargo 없이 돌아서 시험할 수 있다.
+#
+# 야간 격리 (#4707): **야간이 초록이어야 그 시험이 있는 것이다.** 아무도 지키지 않는 `#[ignore]`
+#   시험을 늘리지 않는다. 지금 못 고치는 시험은 infra/security-pack/nightly-quarantine.txt 에
+#   `패키지 타깃 시험 #소유이슈 기한 사유` 로 올린다. 전량 실행에서는 빠지지만(--skip) 따로 계속 돌려
+#   결과를 요약에 보이고, 목록이 비어 있지 않으면 야간 요약·경고 주석에 늘 보이며, 기한이 지나면
+#   야간이 빨강이 된다(기한은 오늘부터 60일을 넘길 수 없다). 형식 검사는 PR 게이트(lint)가 한다.
 #
 # 환경: SECURITY_PACK_SELECTION(기본 infra/security-pack/selection.txt),
+#       SECURITY_PACK_QUARANTINE(기본 infra/security-pack/nightly-quarantine.txt),
 #       SECURITY_PACK_ROOT(기본 레포 루트, 시험 편의), SECURITY_PACK_OUT(로그 디렉터리),
+#       SECURITY_PACK_TODAY(YYYY-MM-DD, 기한 판정용 오늘 — 시험 편의),
+#       SECURITY_PACK_MIN_PASSED(전량 실행 통과 하한, 기본 500 — 빈 초록 방지),
 #       DATABASE_URL, PSQL_BIN. 시크릿은 출력하지 않는다(DB URL은 로그에 안 찍는다).
 # =============================================================================
 set -euo pipefail
@@ -29,6 +40,25 @@ die() { echo "[security-pack] $*" >&2; exit 1; }
 
 # 선택 목록의 유효 줄(`영역 패키지 타깃`)만.
 entries() { grep -Ev '^[[:space:]]*(#|$)' "$SELECTION"; }
+
+QUARANTINE="${SECURITY_PACK_QUARANTINE:-$ROOT/infra/security-pack/nightly-quarantine.txt}"
+QUARANTINE_MAX_DAYS=60
+MIN_PASSED="${SECURITY_PACK_MIN_PASSED:-500}"
+
+# 격리 목록의 유효 줄(`패키지 타깃 시험 #이슈 기한 사유…`)만. 파일이 없으면 격리가 없는 것이다.
+quarantine_entries() {
+  [ -f "$QUARANTINE" ] || return 0
+  grep -Ev '^[[:space:]]*(#|$)' "$QUARANTINE" || true
+}
+
+# YYYY-MM-DD → UTC 자정의 에포크 초(GNU·BSD date 모두). 형식이 틀리면 실패.
+date_epoch() {
+  printf '%s' "$1" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' || return 1
+  date -u -d "$1 00:00:00" +%s 2>/dev/null \
+    || date -u -j -f '%Y-%m-%d %H:%M:%S' "$1 00:00:00" +%s 2>/dev/null
+}
+epoch_date() { date -u -d "@$1" +%Y-%m-%d 2>/dev/null || date -u -r "$1" +%Y-%m-%d 2>/dev/null; }
+today_epoch() { date_epoch "${SECURITY_PACK_TODAY:-$(date -u +%Y-%m-%d)}"; }
 
 # 패키지 이름 → 크레이트 디렉터리 (server-rust 아래 Cargo.toml 의 name 으로 찾는다).
 package_dir() {
@@ -64,6 +94,38 @@ cmd_lint() {
     case " $domains " in *" $domain "*) ;; *) die "영역에 시험이 하나도 없어요: $domain" ;; esac
   done
   echo "[security-pack] lint OK: ${n}개 타깃, 영역 6/6"
+  cmd_quarantine_lint
+}
+
+# 야간 격리 목록 검사(#4707). 형식·존재·기한 상한만 본다 — **만료는 여기서 보지 않는다**(만료는 야간만 빨강,
+# 그렇지 않으면 기한이 지난 날 모든 Rust PR 이 막힌다).
+cmd_quarantine_lint() {
+  local n=0 seen="" pkg target tname owner deadline reason dir file key e today hits
+  today="$(today_epoch)" || die "오늘 날짜를 해석할 수 없어요: ${SECURITY_PACK_TODAY:-}"
+  while read -r pkg target tname owner deadline reason; do
+    [ -n "${reason:-}" ] || die "격리 열이 모자라요(패키지 타깃 시험 #이슈 기한 사유): '$pkg $target ${tname:-}'"
+    [ "${#reason}" -ge 10 ] || die "격리 사유가 너무 짧아요(왜 못 고치는지 적어요): $pkg/$target $tname"
+    printf '%s' "$tname" | grep -Eq '^[A-Za-z0-9_]+$' || die "격리 시험 이름은 함수 이름 하나여야 해요: '$tname'"
+    printf '%s' "$owner" | grep -Eq '^#[0-9]+$' || die "격리 소유 이슈는 #번호여야 해요: $pkg/$target $tname → '$owner'"
+    e="$(date_epoch "$deadline")" && [ "$(epoch_date "$e")" = "$deadline" ] \
+      || die "격리 기한이 올바른 날짜(YYYY-MM-DD)가 아니에요: $pkg/$target $tname → '$deadline'"
+    [ $(((e - today) / 86400)) -le "$QUARANTINE_MAX_DAYS" ] \
+      || die "격리 기한이 오늘부터 ${QUARANTINE_MAX_DAYS}일을 넘어요(끝없는 격리 금지): $pkg/$target $tname → $deadline"
+    key="$pkg/$target/$tname"
+    case " $seen " in *" $key "*) die "격리 중복 항목: $key" ;; esac
+    seen="$seen $key"
+    dir="$(package_dir "$pkg")" || die "격리: 패키지를 찾을 수 없어요: $pkg"
+    file="$dir/tests/$target.rs"
+    [ -f "$file" ] || die "격리: 시험 파일이 없어요: ${file#"$ROOT"/}"
+    grep -Eq '#\[ignore' "$file" || die "격리: #[ignore] 시험이 없어요(야간 --ignored 가 돌리지 않는 파일): ${file#"$ROOT"/}"
+    grep -Eq "fn[[:space:]]+${tname}[[:space:]]*\(" "$file" \
+      || die "격리: ${file#"$ROOT"/} 에 시험 함수가 없어요(이름이 바뀌었나요?): $tname"
+    # --skip 은 부분 문자열이라 이름이 다른 시험에도 맞으면 그 시험까지 조용히 빠진다 → 함수 하나에만 맞아야 한다.
+    hits="$(grep -rhoE --exclude-dir=target --include='*.rs' "fn[[:space:]]+[A-Za-z0-9_]*${tname}[A-Za-z0-9_]*[[:space:]]*\(" "$ROOT/server-rust" | sort -u | wc -l | tr -d ' ')"
+    [ "$hits" = 1 ] || die "격리: 시험 이름 '$tname' 이(가) 워크스페이스의 함수 ${hits}개와 맞아요(정확히 1개여야 해요)"
+    n=$((n + 1))
+  done < <(quarantine_entries)
+  echo "[security-pack] quarantine lint OK: ${n}건"
 }
 
 cmd_list() { entries | while read -r _d pkg test; do echo "$pkg $test"; done; }
@@ -148,11 +210,147 @@ cmd_negative() {
   echo "[security-pack] negative OK: tenant_catalog_pg 가 $NEG_TABLE 의 FORCE 누락을 지목하며 빨강"
 }
 
+# ── 야간 ──────────────────────────────────────────────────────────────────────
+# libtest 로그의 통과·실패 합계. 출력: "통과 실패".
+sum_results() {
+  [ -f "$1" ] || { echo "0 0"; return 0; }
+  awk '/^test result: /{for(i=2;i<=NF;i++){if($i=="passed;")p+=$(i-1); if($i=="failed;")f+=$(i-1)}} END{print p+0, f+0}' "$1"
+}
+
+# `error: N targets failed:` 아래의 `-p 패키지 --test 타깃` 줄들.
+failed_targets() {
+  [ -f "$1" ] || return 0
+  awk '/^error: [0-9]+ targets? failed:/{f=1; next} f&&/^[[:space:]]+`-p /{print; next} f{f=0}' "$1"
+}
+
+# 실패한 시험과 첫 패닉 메시지를 타깃별로(--no-fail-fast 로그). 타깃 이름은 cargo 가 실패 뒤에 찍는
+# `error: test failed, to rerun pass `-p 패키지 --test 타깃`` 줄에서 가져온다.
+failure_digest() {
+  [ -f "$1" ] || return 0
+  awk '
+    function flush(label,   i, k) {
+      if (nf == 0) return
+      printf "- `%s` — 실패 %d개\n", label, nf
+      for (i = 1; i <= nf; i++) {
+        printf "  - `%s`", fn[i]
+        if (fn[i] in msg) printf " — `%s`", msg[fn[i]]
+        printf "\n"
+      }
+      nf = 0
+      for (k in msg) delete msg[k]
+    }
+    /^test .* \.\.\. FAILED$/ { fn[++nf] = $2; next }
+    /^---- .* stdout ----$/ { cur = $2; next }
+    /^thread .* panicked at / {
+      if (cur != "" && !(cur in msg)) {
+        loc = $0; sub(/^thread .* panicked at /, "", loc)
+        if (loc ~ /:$/) { sub(/:$/, "", loc); nxt = ""; getline nxt; loc = loc ": " nxt }
+        gsub(/`/, "\047", loc)
+        if (length(loc) > 240) loc = substr(loc, 1, 240) "…"
+        msg[cur] = loc
+      }
+      next
+    }
+    /^error: test failed, to rerun pass / {
+      l = $0; sub(/^error: test failed, to rerun pass `/, "", l); sub(/`.*$/, "", l)
+      flush(l); cur = ""; next
+    }
+    END { flush("(타깃 미상)") }
+  ' "$1"
+}
+
+# 격리 시험 하나의 이번 결과: 통과 | 빨강 | 안 돎.
+quarantine_status() { # <시험> <격리 로그>
+  [ -s "$2" ] || { echo "안 돎"; return 0; }
+  if grep -Eq "^test [A-Za-z0-9_:]*$1 \.\.\. ok$" "$2"; then echo "통과"
+  elif grep -Eq "^test [A-Za-z0-9_:]*$1 \.\.\. FAILED$" "$2"; then echo "빨강"
+  else echo "안 돎"; fi
+}
+
+# 야간 요약. 인자: <전량 로그> <prod_role 로그> <격리 로그>. markdown 을 stdout 과 $GITHUB_STEP_SUMMARY 에
+# 쓰고, 격리·만료·실패는 GitHub 주석(::warning/::error)으로도 낸다.
+# 종료 코드: 0 = 전량·별도 실행이 깨끗하고 격리 기한이 안 지남, 1 = 그 밖(빈 초록·로그 없음 포함).
+cmd_report() {
+  local main_log="${1:-}" role_log="${2:-}" quar_log="${3:-}"
+  local rc=0 p=0 f=0 rp=0 rf=0 ft digest md="" nq=0 nexp=0 now e days status pkg target tname owner deadline reason rows="" verdict
+  read -r p f <<<"$(sum_results "$main_log")"
+  read -r rp rf <<<"$(sum_results "$role_log")"
+  ft="$(failed_targets "$main_log")"
+  digest="$(failure_digest "$main_log")"
+  now="$(today_epoch)" || die "오늘 날짜를 해석할 수 없어요: ${SECURITY_PACK_TODAY:-}"
+
+  if [ ! -s "$main_log" ]; then verdict="빨강 — 전량 로그가 없어요"; rc=1
+  elif [ "$f" -gt 0 ] || [ -n "$ft" ]; then verdict="빨강 — 실패 ${f}개"; rc=1
+  elif grep -Eq '^error(\[E[0-9]+\])?: (could not compile|test failed)' "$main_log"; then verdict="빨강 — 컴파일 또는 실행 오류"; rc=1
+  elif [ "$p" -lt "$MIN_PASSED" ]; then verdict="빨강 — 통과가 ${p}개뿐이에요(하한 ${MIN_PASSED}, 빈 초록 방지)"; rc=1
+  else verdict="초록"; fi
+
+  md="## 야간 PG 시험 전량 (security-nightly)"$'\n\n'
+  md="${md}- 기준 커밋: \`${GITHUB_SHA:-로컬}\`"$'\n'
+  md="${md}- 전량 실행(\`--workspace --ignored\`): **${verdict}** — 통과 ${p} · 실패 ${f}"$'\n'
+  if [ ! -s "$role_log" ]; then md="${md}- 따로 도는 \`prod_role_conformance_pg\`: **빨강 — 로그가 없어요**"$'\n'; rc=1
+  elif [ "$rf" -gt 0 ] || [ "$rp" -eq 0 ]; then md="${md}- 따로 도는 \`prod_role_conformance_pg\`: **빨강** — 통과 ${rp} · 실패 ${rf}"$'\n'; rc=1
+  else md="${md}- 따로 도는 \`prod_role_conformance_pg\`: **초록** — 통과 ${rp}"$'\n'; fi
+
+  while read -r pkg target tname owner deadline reason; do
+    [ -n "${tname:-}" ] || continue
+    nq=$((nq + 1))
+    e="$(date_epoch "$deadline")" || e="$now"
+    days=$(((e - now) / 86400))
+    status="$(quarantine_status "$tname" "$quar_log")"
+    if [ "$e" -lt "$now" ]; then nexp=$((nexp + 1)); days="${days}일 — **기한 지남**"; else days="${days}일 남음"; fi
+    [ "$status" = "통과" ] && status="통과 — 목록에서 뺄 수 있어요"
+    rows="${rows}| \`${pkg}/${target}\` \`${tname}\` | ${owner} | ${deadline} (${days}) | ${status} | ${reason//|//} |"$'\n'
+  done < <(quarantine_entries)
+  if [ "$nq" -gt 0 ]; then
+    md="${md}- 격리: **${nq}건**(기한 지남 ${nexp}건) — 아래 표. 지키지 않는 시험이 아니라 이름·소유 이슈·기한이 있는 격리예요."$'\n\n'
+    md="${md}### 격리(전량 실행에서 뺀 시험)"$'\n\n'"| 시험 | 소유 이슈 | 기한 | 이번 결과(따로 실행) | 사유 |"$'\n'"|---|---|---|---|---|"$'\n'"${rows}"
+  else
+    md="${md}- 격리: 없음"$'\n'
+  fi
+  if [ -n "$ft" ] || [ -n "$digest" ]; then
+    md="${md}"$'\n'"### 실패한 타깃과 시험"$'\n\n'"${digest:-$ft}"$'\n'
+  fi
+
+  printf '%s\n' "$md"
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then printf '%s\n' "$md" >>"$GITHUB_STEP_SUMMARY"; fi
+  if [ -d "$OUT" ]; then printf '%s\n' "$md" >"$OUT/nightly-summary.md"; fi
+  if [ "$nq" -gt 0 ]; then
+    echo "::warning title=야간 격리 시험 ${nq}건::이름·소유 이슈·기한이 있는 격리예요. 목록: infra/security-pack/nightly-quarantine.txt (기한 지남 ${nexp}건)"
+  fi
+  if [ "$nexp" -gt 0 ]; then
+    echo "::error title=야간 격리 기한이 지났어요::${nexp}건 — 고치거나, 사유를 바꿔 기한을 다시 정하거나(리뷰 필요) 시험을 지워요"
+    rc=1
+  fi
+  if [ "$rc" -ne 0 ]; then
+    echo "::error title=야간 PG 시험 빨강::${verdict} — 요약과 '실패한 타깃과 시험' 참고"
+  fi
+  return "$rc"
+}
+
+# 격리 시험을 따로 돈다 — 결과는 요약에만 쓰고 종료 코드에는 영향이 없다. 전량 실행 뒤에 돌아서 격리 시험이
+# 남기는 잔여물이 야간 결과에 닿지 않는다. 한 묶음은 20분을 넘기지 않는다.
+with_cap() { local secs="$1"; shift; if command -v timeout >/dev/null 2>&1; then timeout "$secs" "$@"; else "$@"; fi; }
+nightly_quarantine_pass() {
+  local groups pkg target filters
+  : >"$OUT/nightly-quarantine.log"
+  groups="$(quarantine_entries | awk '{print $1" "$2}' | sort -u)"
+  [ -n "$groups" ] || return 0
+  while read -r pkg target; do
+    filters="$(quarantine_entries | awk -v p="$pkg" -v t="$target" '$1==p && $2==t {printf "%s ", $3}')"
+    echo "##### $pkg/$target $filters" >>"$OUT/nightly-quarantine.log"
+    # shellcheck disable=SC2086
+    with_cap 1200 cargo test --locked --manifest-path "$MANIFEST" -p "$pkg" --test "$target" -- --ignored --test-threads=1 $filters \
+      >>"$OUT/nightly-quarantine.log" 2>&1 || true
+  done <<<"$groups"
+}
+
 cmd_nightly() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
+  cmd_quarantine_lint
   mkdir -p "$OUT"
   export_pg_env "$DATABASE_URL"
-  local rc=0 skips="" t
+  local rc=0 skips="" t quarantined=""
   # prod_role_conformance_pg 는 cluster-global 역할 비밀번호를 재설정해 이후 타깃을 오염시킨다.
   # 1) 그 타깃의 시험만 건너뛰고 나머지 전량을 돌린 뒤, 2) 마지막 순서로 따로 돌린다.
   for t in every_notifier_job_iteration_runs_as_its_production_role \
@@ -160,13 +358,25 @@ cmd_nightly() {
            the_run_stall_and_ledger_retention_sweeps_do_real_work_as_their_production_roles; do
     skips="$skips --skip $t"
   done
+  # 격리 시험은 전량 실행에서 뺀다(이름이 함수 하나에만 맞는다는 것은 lint 가 보장한다). 아래에서 따로 돌린다.
+  # shellcheck disable=SC2046
+  for t in $(quarantine_entries | awk '{print $3}'); do
+    skips="$skips --skip $t"; quarantined="$quarantined $t"
+  done
+  [ -z "$quarantined" ] || echo "[security-pack] 격리 시험은 전량 실행에서 빼고 따로 돌려요:$quarantined"
   # shellcheck disable=SC2086
   cargo test --locked --manifest-path "$MANIFEST" --workspace --no-fail-fast -- --ignored --test-threads=1 $skips \
     >"$OUT/nightly.log" 2>&1 || rc=1
-  tail -n 40 "$OUT/nightly.log"
   cargo test --locked --manifest-path "$MANIFEST" -p momo-notifier --test prod_role_conformance_pg -- --ignored --test-threads=1 \
     >"$OUT/nightly-prod-role.log" 2>&1 || rc=1
-  tail -n 40 "$OUT/nightly-prod-role.log"
+  nightly_quarantine_pass
+  if [ "${GITHUB_ACTIONS:-}" = true ]; then
+    # 원문은 접어서 남긴다(요약이 놓친 것을 사람이 볼 수 있게). 시험은 가짜 자격증명만 쓰고 비밀을 찍지 않는다.
+    for t in nightly.log nightly-prod-role.log nightly-quarantine.log; do
+      echo "::group::$t 전문"; cat "$OUT/$t"; echo "::endgroup::"
+    done
+  fi
+  cmd_report "$OUT/nightly.log" "$OUT/nightly-prod-role.log" "$OUT/nightly-quarantine.log" || rc=1
   return "$rc"
 }
 
@@ -177,5 +387,6 @@ case "${1:-}" in
   run) cmd_run ;;
   negative) cmd_negative ;;
   nightly) cmd_nightly ;;
-  *) die "usage: scripts/security_pack.sh {lint|list|setup|run|negative|nightly}" ;;
+  report) shift; cmd_report "$@" ;;
+  *) die "usage: scripts/security_pack.sh {lint|list|setup|run|negative|nightly|report}" ;;
 esac
