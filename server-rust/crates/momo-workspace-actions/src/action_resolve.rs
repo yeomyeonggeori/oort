@@ -84,7 +84,7 @@ pub enum CardAudience {
 /// * `channel.create` is a **private** channel — a public one is the whole workspace's room,
 ///   and only a person asks for one;
 /// * its `topic`, like the card's `rationale`, is the agent's own sentence to a person who did
-///   not ask: at most [`momo_agent::initiative::INITIATIVE_FREE_TEXT_MAX_CHARS`] characters
+///   not ask: at most 140 characters
 ///   under the profile-tagline rules (no controls, links or mentions), and what is stored is the
 ///   sentence **as those rules normalised it** (review M4).
 pub fn initiative_args_checks(validated: &mut ValidatedActionArgs) -> Result<(), ActionRejection> {

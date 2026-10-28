@@ -962,6 +962,11 @@ pub async fn find_agent_run_by_trigger_in_tx(
 /// agent for up to an hour. The same holds for a card the agent raised unasked
 /// (`input.hold = "agent_initiated"`, ADR-0186 증보 v5 U-a): it waits up to a day for its
 /// owner, and without this one unanswered card would answer 409 to every work request.
+///
+/// `COALESCE`, not a bare `IN`: an ordinary approval-held run has **no** `hold` key, `NULL IN (…)` is
+/// `NULL`, and `NOT (TRUE AND NULL)` is `NULL` — which `WHERE` drops, so every plain
+/// `awaiting_approval` run would have silently left the cap (the original `IS NOT DISTINCT FROM`
+/// was null-safe for the same reason).
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -972,7 +977,7 @@ pub async fn live_run_count_in_tx(
           WHERE workspace_id = $1 AND agent_member_id = $2 \
             AND status IN ('queued','running','awaiting_approval','paused') \
             AND NOT (status = 'awaiting_approval' \
-                     AND input->>'hold' IN ('channel_grant', 'agent_initiated'))",
+                     AND COALESCE(input->>'hold', '') IN ('channel_grant', 'agent_initiated'))",
     )
     .bind(workspace_id)
     .bind(agent_member_id)

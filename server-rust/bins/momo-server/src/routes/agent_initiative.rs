@@ -12,19 +12,19 @@
 //! `momo_db::with_tenant_tx` **commits a handled refusal**, so anything written before a refusal
 //! stays. Hence the order, which the tests hold:
 //!
-//! 1. the connection and the scope are proved again inside this transaction (door 1, 2);
-//! 2. the agent's `member` row is locked, so one agent's calls — and a re-ask of one of them —
-//!    run one at a time;
-//! 3. a **re-ask** of a `clientRequestId` already raised answers from the record and stops: it
+//! 1. the agent's unasked-card calls are serialised behind an advisory lock (a re-ask of a card and
+//!    a new card of the same agent never run side by side), then the connection and the scope are
+//!    proved again inside this transaction (doors 1 and 2);
+//! 2. a **re-ask** of a `clientRequestId` already raised answers from the record and stops: it
 //!    reads, writes nothing, and is allowed while the workspace switch is off (it tells the agent
 //!    about its own card and about nothing else);
-//! 4. the rest of the door: the workspace switch (3), an active human owner who confirmed this
+//! 3. the rest of the door: the workspace switch (3), an active human owner who confirmed this
 //!    connection (4), and that owner passing the action's role gate *now* (5);
-//! 5. *(ceilings and rate: PR B — before the resolution, so an agent at its ceiling learns nothing
+//! 4. *(ceilings and rate: PR B — before the resolution, so an agent at its ceiling learns nothing
 //!    from whether a name resolves, review M1)*;
-//! 6. the arguments resolved **for the owner's eyes** (6): a channel or message the owner could
+//! 5. the arguments resolved **for the owner's eyes** (6): a channel or message the owner could
 //!    not already read is the owner's side of the door;
-//! 7. only now the owner's direct message is opened (idempotent), then the run, the approval and
+//! 6. only now the owner's direct message is opened (idempotent), then the run, the approval and
 //!    the card. Any failure after this point rolls all five tables back (run, approval, message,
 //!    channel, membership).
 //!
@@ -34,16 +34,30 @@
 //! must not be able to feel its owner's role or its connection's makeup (V1-b). What is the agent's
 //! own — malformed arguments, a name it cannot see — is `InvalidArguments`. The ceilings and
 //! duplicates (7, PR B) are `Conflict`: they are about the agent's own proposals and hide nothing.
+//! (A **paused** agent never gets here: its tool list is already empty, so every tool answers it as
+//! an unknown one; the check inside is for a pause that lands between the list and the call.)
 //!
-//! ## Lock order
+//! ## Lock order — no exclusive lock on a row anybody else shares
 //!
-//! `hosted_agent_connection · token · member · workspace_membership · agent_profile` (all
-//! `FOR SHARE`, the hosted canon) → the DM's `channel_seq` (`FOR UPDATE`, when the DM exists) →
-//! the agent's `member` row (`FOR NO KEY UPDATE`) → the DM pair's advisory lock → `channel` /
-//! `membership` rows of the DM → `agent_run` → `approval` → `message` (its `channel_seq` is
-//! already ours). A person's send into the same DM takes `channel_seq` first and the hosted rows
-//! after, so the two never wait on each other in a cycle; the DM's `channel_seq` is taken *before*
-//! the member row for exactly that reason (review L8, held by a test that plays the person).
+//! `advisory(agent)` → `hosted_agent_connection · token · member · workspace_membership ·
+//! agent_profile` (all `FOR SHARE`, the hosted canon) → reads and the shared `channel` row of a named
+//! room → **the DM's `channel_seq` (`FOR UPDATE`, when the DM exists)** → the DM pair's advisory lock
+//! and the DM's `channel` / `membership` rows (only when the DM is not already open) → `agent_run` →
+//! `approval` → `message` (its `channel_seq` is already ours).
+//!
+//! * The first lock is advisory, not a row lock on the agent's `member`: a `FOR NO KEY UPDATE` there
+//!   is exclusive against the `FOR SHARE` every message write, every decision's wake and the identity
+//!   proof itself take, so it made two simultaneous calls of one agent deadlock every time and formed
+//!   cycles with all of them (security review of #4704, M1).
+//! * A person's send into the same DM, and a decision's wake, take `channel_seq` first (a send) or
+//!   share-lock the agent's membership row in the DM before asking for it (a wake). The membership
+//!   rows are the only thing this transaction could hold exclusively that those two want, and it
+//!   takes them **only** when the DM has to be opened or re-opened — never for a DM that is already
+//!   open — and only after `channel_seq` (review L8, held by a test that plays the person against
+//!   an archived DM, which is the case that does write them).
+//! * What is left is a three-way queue with an administrator's disconnect, which exists between any
+//!   hosted tool and any send already. A transaction that loses a lock cycle to someone else commits
+//!   nothing, and is run once more (below).
 
 use chrono::Utc;
 use momo_auth::{active_workspace_role, SCOPE_WORKSPACE_INITIATE};
@@ -162,6 +176,12 @@ async fn initiate_in_tx(
     let workspace_id = caller.workspace_id;
     let agent = caller.agent_member_id;
 
+    // ---- serialise this agent's unasked-card calls (see the module header) -------------------
+    //
+    // First, before any share lock is taken: an advisory lock only this producer takes. The agent
+    // and workspace are the transport's proven ones, so a revoked credential can only queue itself.
+    momo_agent::initiative::lock_agent_initiative_in_tx(conn, workspace_id, agent).await?;
+
     // ---- doors 1 and 2: the connection, the scope, the agent --------------------------------
     //
     // `authorize_in_tx` re-proves the connection is active and proved, the agent active and not
@@ -172,23 +192,6 @@ async fn initiate_in_tx(
         Ok(identity) => identity,
         Err(_) => return Ok(Err(ToolFailure::Unavailable)),
     };
-
-    // ---- lock order (see the module header) --------------------------------------------------
-    //
-    // The DM's `channel_seq` first, when the DM already exists — the order a person's send into it
-    // takes — and only then the agent's `member` row. The owner is read unlocked to know which DM;
-    // the door below reads it again under the lock.
-    if let Some(facts) = momo_agent::initiative::initiative_facts_in_tx(
-        conn,
-        workspace_id,
-        agent,
-        identity.connection_id,
-    )
-    .await?
-    {
-        lock_direct_message_seq_in_tx(conn, workspace_id, agent, facts.owner_member_id).await?;
-    }
-    momo_agent::initiative::lock_agent_member_in_tx(conn, workspace_id, agent).await?;
 
     // ---- the re-ask: read, write nothing, stop -----------------------------------------------
     //
@@ -216,9 +219,15 @@ async fn initiate_in_tx(
     }
 
     // ---- doors 3, 4, 5 -----------------------------------------------------------------------
-    // 3. the workspace switch (absent = on; unreadable = off).
+    // 3. the workspace switch (absent = on; a non-boolean or unreadable value = off).
+    // Only an absent key or a literal `true` is on: a value that is not a boolean (`"false"`, `0`)
+    // is not a switch somebody meant to leave on, and the door fails closed on it.
     let switch_on = match momo_settings::read_workspace_settings(conn, workspace_id).await? {
-        Some(bag) => bag.get(SETTING_AGENT_INITIATIVE) != Some(&Value::Bool(false)),
+        Some(bag) => match bag.get(SETTING_AGENT_INITIATIVE) {
+            None => true,
+            Some(Value::Bool(on)) => *on,
+            Some(_) => false,
+        },
         None => false,
     };
     if !switch_on {
@@ -283,9 +292,17 @@ async fn initiate_in_tx(
     // ---- duplicates, cooldown: PR B ------------------------------------------------------------
 
     // ---- 7. only now: the owner's DM, then the run, the approval and the card -----------------
-    let dm = match open_direct_message_in_tx(conn, workspace_id, agent, owner).await? {
-        OpenedDirectMessage::Opened { channel, .. } => channel,
-        OpenedDirectMessage::TargetNotFound => return Ok(Err(ToolFailure::Unavailable)),
+    //
+    // The DM's `channel_seq` FIRST when it exists — the order a person's send into it takes,
+    // before anything here could take an exclusive lock on the DM's membership rows (module
+    // header) — and an already-open DM is not opened again: the open's upsert would take both
+    // membership rows exclusively even though it changes nothing.
+    let dm_channel = match lock_direct_message_seq_in_tx(conn, workspace_id, agent, owner).await? {
+        Some(dm) if dm.open => dm.channel_id,
+        _ => match open_direct_message_in_tx(conn, workspace_id, agent, owner).await? {
+            OpenedDirectMessage::Opened { channel, .. } => channel.id,
+            OpenedDirectMessage::TargetNotFound => return Ok(Err(ToolFailure::Unavailable)),
+        },
     };
     let expires_at =
         momo_agent::default_expires_at(now, momo_agent::initiative::INITIATIVE_TTL_SECONDS);
@@ -293,7 +310,7 @@ async fn initiate_in_tx(
         conn,
         workspace_id,
         momo_agent::NewAgentRun {
-            channel_id: dm.id,
+            channel_id: dm_channel,
             trigger: momo_agent::RunTrigger::AgentInitiated {
                 agent_member_id: agent,
                 client_request_id,
@@ -334,7 +351,7 @@ async fn initiate_in_tx(
         workspace_id,
         momo_agent::NewApproval {
             run_id: created.id,
-            channel_id: dm.id,
+            channel_id: dm_channel,
             // The **agent** asked: `approval.requested_by` is a member id like any other, and a
             // decision requires `member.kind = 'human'`, so no agent can decide its own card.
             requested_by: agent,
@@ -363,7 +380,7 @@ async fn initiate_in_tx(
     let mut props = momo_agent::workspace_action_request_props(
         approval_id,
         created.id,
-        dm.id,
+        dm_channel,
         action,
         block,
         expires_at,
@@ -384,7 +401,7 @@ async fn initiate_in_tx(
         conn,
         workspace_id,
         NewMessage {
-            channel_id: dm.id,
+            channel_id: dm_channel,
             author_member_id: agent,
             message_type: MessageType::ApprovalRequest,
             body: Some(momo_agent::workspace_action_request_body(action)),

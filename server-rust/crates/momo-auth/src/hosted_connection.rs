@@ -25,7 +25,7 @@ pub const HOSTED_AGENT_INERT_BASE_URL: &str = "https://hosted-agent.invalid/disa
 /// **not** about reading or speaking. `workspace:initiate` (ADR-0186 증보 v5 U-b,
 /// #4704) is the eighth: the first scope that lets an agent raise a card **nobody
 /// asked for**. It is never in a default request, and an existing connection's
-/// approval is unchanged by its arrival (migration 154 only widens the vocabulary). It is here because a scope a human cannot
+/// approval is unchanged by its arrival (migration 153 only widens the vocabulary). It is here because a scope a human cannot
 /// approve is a tool nobody can ever reach; it is *not* in
 /// `momo_auth::agent_credential`'s grantable set, because generic agent bearers
 /// never reach Agent Port tools at all

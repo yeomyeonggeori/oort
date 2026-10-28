@@ -39,12 +39,6 @@ pub const RUN_HOLD_AGENT_INITIATED: &str = "agent_initiated";
 /// at the screen would be raised again at once.
 pub const INITIATIVE_TTL_SECONDS: i64 = 24 * 60 * 60;
 
-/// `rationale` and `channel.create`'s `topic` on an unasked card: this many characters, under
-/// `momo_messaging::name_guard::validated_agent_tagline`'s rules (no controls, no links or
-/// mentions). There is no person to ask, so the agent's own sentence is its only argument and
-/// the one place it could impersonate someone.
-pub const INITIATIVE_FREE_TEXT_MAX_CHARS: usize = 140;
-
 /// Whether an approval payload is an unasked card.
 pub fn is_agent_initiated(payload: &Value) -> bool {
     payload.get("origin").and_then(Value::as_str) == Some(APPROVAL_ORIGIN_AGENT_INITIATED)
@@ -116,24 +110,26 @@ pub async fn initiative_facts_in_tx(
     }))
 }
 
-/// Take the agent's `member` row `FOR NO KEY UPDATE`: every unasked proposal of one agent — and
-/// every re-ask of one — serialises here, so two simultaneous calls of the same
-/// `clientRequestId` cannot both read "not raised yet" and so the ceilings of PR B cannot be
-/// outrun by concurrency. The same lock `lock_agent_and_count_pending_workspace_actions_in_tx`
-/// takes; it does not block the `FOR KEY SHARE` a message or approval insert takes through its
-/// foreign key.
-pub async fn lock_agent_member_in_tx(
+/// Serialise one agent's unasked-card calls — and every re-ask of one — behind a transaction-scoped
+/// **advisory** lock: two simultaneous calls of the same `clientRequestId` cannot both read "not
+/// raised yet", and PR B's ceilings cannot be outrun by concurrency.
+///
+/// An advisory lock and not a row lock on the agent's `member` row (`FOR NO KEY UPDATE`, which
+/// `lock_agent_and_count_pending_workspace_actions_in_tx` takes for the proposals a person asked
+/// for): that row lock is exclusive against the `FOR SHARE` that every message write, every decision's
+/// wake and every identity proof takes on the same row, so it formed lock cycles with all of them —
+/// and, taken after the share lock the identity proof already holds, it made two simultaneous calls of
+/// one agent wait on each other every time (a share-to-exclusive upgrade). Nothing else takes this
+/// key, so it can be first in the transaction and can wait on nothing but its own kind.
+pub async fn lock_agent_initiative_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_id: Uuid,
 ) -> Result<(), DbError> {
-    sqlx::query_scalar::<_, Uuid>(
-        "SELECT id FROM member WHERE workspace_id = $1 AND id = $2 FOR NO KEY UPDATE",
-    )
-    .bind(workspace_id)
-    .bind(agent_member_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(format!("oort:initiative:{workspace_id}:{agent_member_id}"))
+        .execute(&mut *conn)
+        .await?;
     Ok(())
 }
 
@@ -249,6 +245,12 @@ mod tests {
             args: json!({"messageId": Uuid::nil()}),
             output_ref: None,
         }
+    }
+
+    #[test]
+    fn an_unasked_card_waits_a_day() {
+        // ADR-0186 증보 v5 U-d: 24 hours (PR B makes it a bounded setting; the default stays).
+        assert_eq!(INITIATIVE_TTL_SECONDS, 86_400);
     }
 
     #[test]

@@ -1413,8 +1413,10 @@ oort_action_initiate {clientRequestId, actionId, args, rationale?}
   (the status of that run changed) and, at any time, by asking again with the same `clientRequestId`.
 * `rationale` is at most 140 characters of plain text (no links, no `@`, no markdown); the card shows
   it labelled as your own words.
-* A refusal at this door says nothing about why — the switch, your owner, your owner's role and what
-  you named all answer the same. Do not retry in a loop; tell your owner in a message instead.
+* A refusal at this door says nothing about why — the switch, your owner, your owner's role and a
+  channel or message your owner cannot already read all answer the same (a name you cannot see
+  yourself, or an argument the schema refuses, is a plain invalid-arguments answer). Do not retry in
+  a loop; tell your owner in a message instead.
 
 #### 3.3.17 Doorbell (realtime wake)
 

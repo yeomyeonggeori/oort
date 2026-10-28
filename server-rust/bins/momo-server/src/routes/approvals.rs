@@ -1676,7 +1676,18 @@ async fn execute_workspace_action(
     // channel or message it quotes had to be one the reader could already read, and a
     // `channel.create` had to be private. The same rules are judged again here, for the member who
     // is deciding it — who must be able to read what the card quotes, and, for a pin, to pin it.
-    let resolution = if momo_agent::initiative::is_agent_initiated(&approval.payload) {
+    //
+    // Which rules apply is decided by **either** marker: the payload's `origin` and the run's
+    // `input.hold` (written by the server alone, and the run is born with it). A row whose `origin`
+    // was dropped is still an unasked card while its run says so — and an unasked card can only ever
+    // name an initiative action, so a tampered `action.id` is refused rather than judged by the
+    // looser rules of a card a person asked for (security review of #4704, M2).
+    let initiated = momo_agent::initiative::is_agent_initiated(&approval.payload)
+        || momo_agent::initiative::is_held_for_agent_initiative(&approval.run_input);
+    if initiated && !action.initiative {
+        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+    }
+    let resolution = if initiated {
         resolve_stored_initiative_action_in_tx(
             conn,
             input.workspace_id,
