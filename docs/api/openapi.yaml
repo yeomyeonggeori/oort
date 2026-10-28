@@ -17,7 +17,8 @@ openapi: 3.0.3
 #
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
-# and interactive Work Console control surfaces. Workspace identity
+# interactive Work Console control surfaces, and the ADR-0216 developer-token
+# door (`dev-access`, the `devTokenAuth` scheme, #4660). Workspace identity
 # GET/PATCH /v1/workspaces/{workspaceId} is documented (#2331 / ADR-0185 E1).
 # Other routes (legacy agent credential/run surfaces, cost projection,
 # platform admin, centrifugo proxy, health) remain intentionally undocumented
@@ -51,8 +52,10 @@ info:
     cursor advance), direct messages (list/open), and approvals
     (list/decision), plugin registry/grants, incoming webhooks, the hosted
     read-only Drive MCP endpoint, the sessionless hosted-agent Agent Port, and
-    ADR-0114 Work Console sessions and controls, plus the fresh-database agent
-    creation boundary. Mirrors MomoServer field by field.
+    ADR-0114 Work Console sessions and controls, the fresh-database agent
+    creation boundary, and the ADR-0216 developer-token door (a person's own
+    narrow credential for terminal and AI tools: issue, list, revoke, whoami,
+    and the few routes it reaches). Mirrors MomoServer field by field.
 
 servers:
   - url: /
@@ -102,6 +105,15 @@ tags:
     description: >
       A person's device signing keys (Secure Enclave P-256), bound to the
       sign-in they were registered under (ADR-0146 개정 2026-09-28 R2).
+  - name: dev-access
+    description: >
+      ADR-0216 (#4660) developer tokens: a person's own, named, narrow credential
+      for terminal and AI tools (the `oort` CLI, Claude Code, Codex). A person's
+      app session reads the workspace switch and makes, lists and revokes card
+      tokens (making one re-checks the current password); a developer token itself
+      answers only `whoami` and `logout` here, plus the few reads and the one send
+      named under the `devTokenAuth` security scheme. Human-only: an agent bearer,
+      a work host and a push token are refused by the authentication middleware.
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
   - name: workstreams
@@ -1169,7 +1181,8 @@ paths:
         (`owner_bootstrap` from momo-migrate, or `password_reset` issued by an
         owner/admin). Sets the target human's password in the same transaction
         and issues a session token pair. `password_reset` also revokes that
-        member's other session tokens. The raw token is never stored (sha256
+        member's other session tokens, and their developer tokens (ADR-0216 D7:
+        every card token and every login session). The raw token is never stored (sha256
         only). Reuse returns 409; expiry returns 410. Per-IP rate limited. The
         claim, the sweep, the audit row and the new session pair are one
         transaction that holds the workspace's membership lock (exclusive)
@@ -1807,11 +1820,13 @@ paths:
         #1767. Requires the current password. On success every live session
         token of this member is revoked and a fresh access/refresh pair is
         issued (same LoginResponse shape as login/claim). Agent bearers are
-        not touched. Per-member and per-IP rate limited. The standing check, the
-        password change, the sweep and the new pair are one transaction that holds
-        the workspace's membership lock (exclusive), so a sign-in or a suspension
-        that overlaps it is ordered wholly before or wholly after it (ADR-0215
-        증보 2, #4636).
+        not touched. The member's developer tokens (ADR-0216 D7: every card token
+        and every login session) end in the same transaction, so a CLI or AI tool
+        stops with the next request. Per-member and per-IP rate limited. The
+        standing check, the password change, the sweep and the new pair are one
+        transaction that holds the workspace's membership lock (exclusive), so a
+        sign-in or a suspension that overlaps it is ordered wholly before or wholly
+        after it (ADR-0215 증보 2, #4636).
       security: [{bearerAuth: []}]
       parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
       requestBody:
@@ -1908,6 +1923,373 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/dev-access:
+    get:
+      tags: [dev-access]
+      operationId: getDevAccessPolicy
+      summary: Read the developer-access switch and what it lets the caller do.
+      description: >
+        ADR-0216 D3 (#4660). A person's app session only: a developer token is
+        refused with 403 `dev_route_not_allowed`, first by the closed route table
+        of the developer door and again by this handler. `policy` is the
+        workspace's switch, `admins` | `members` | `off`. #4660 ships it as the
+        constant `admins` — the stored switch, the route that changes it and its
+        UI are a later item — so the answer is `admins` until then. `canCreate`
+        says whether the switch admits the caller's role today (under `admins`:
+        owner and admin; a guest or an agent member never), and `canManageAll`
+        whether the caller is an owner or admin, who may list every member's
+        developer tokens and revoke down the ladder (`revokeDevCredential`).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The switch, and what it lets the caller do.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevAccessPolicyResponse"
+        "400":
+          description: Invalid workspace id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            A developer token (`error.code` `dev_route_not_allowed`), a caller that
+            is not a person, a workspace scope mismatch, or a caller that is not an
+            active member of the workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/dev-access/credentials:
+    post:
+      tags: [dev-access]
+      operationId: createDevCredential
+      summary: Make a developer card token (a person's session plus the current password).
+      description: >
+        ADR-0216 D2·D3·D6 (#4660). A person's app session only: a developer token
+        cannot make developer tokens (403 `dev_route_not_allowed`). The caller
+        **re-enters the current password in the body on every call**, checked like
+        `PATCH …/members/me/password`, so a stolen app session cannot mint a
+        90-day back door by itself. Only wrong passwords are counted: 5 per member
+        per window (the shared rate-limit window; the 5 is a constant with no
+        knob, see `RateLimited`). In a full window even the right password is 429,
+        and it is refused without being compared, so the 429 cannot tell a good
+        guess from a bad one. A right password, an account with no password and
+        every refusal that comes before the comparison give their slot back.
+
+
+        The call is one tenant transaction. It takes the workspace's membership
+        lock shared and without waiting (a suspension, removal, role change or
+        password change holds it exclusively; a busy lock is 503 with
+        `Retry-After`), re-checks that the calling session is still alive (401 if
+        it has ended), judges the workspace switch (403 `dev_access_denied`: under
+        today's `admins` a member, a guest or a non-human member is refused, an
+        owner or admin passes), checks every `channelIds` entry against the
+        caller's channels today (400), compares the password, and only then
+        stores one token row. Every refusal found inside it writes one audit row
+        `dev_token.issue_denied` (`detail.reason` `policy_denied`, `not_human`,
+        `password_mismatch` or `password_unavailable`) and **no token row**. At
+        most 20 card tokens may be live per member (409 `dev_credential_limit`;
+        revoking one makes room).
+
+
+        The 201 carries the only copy of the secret, `token`, with
+        `Cache-Control: no-store`. No route shows it again: the list, whoami, the
+        audit rows and the logs never hold it. The audit row `dev_token.issued`
+        records closed facts only (kind, tool, scopes, whether channel-restricted,
+        days) — not the name, the channels or the secret. After issue the scopes,
+        the channel restriction and the expiry cannot change: make a new token and
+        revoke the old one.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDevCredentialRequest"
+      responses:
+        "201":
+          description: Card token made. `token` is shown only in this response.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CreateDevCredentialResponse"
+        "400":
+          description: >
+            Not one JSON object of the documented shape, an unknown key, a field
+            that fails its rule (`invalid name`, `invalid tool`, `invalid scopes`,
+            `invalid channelIds`, `invalid expiresInDays` or `invalid
+            currentPassword`), or a `channelIds` entry that is not a channel the
+            caller is a member of. No `error.code`, and the answer quotes nothing
+            of the body (it may hold a password typed into the wrong field); a
+            body that cannot be read is a 400, not a 422. No row is written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` `dev_route_not_allowed` (a developer token),
+            `dev_access_denied` (the workspace switch does not admit the caller's
+            role, or the caller is not a human member or not an active member),
+            `current_password_incorrect` (a wrong password; it counts against the
+            5-failure budget) or `current_password_unavailable` (the account has
+            no password to confirm). Also a caller that is not a person and a
+            workspace scope mismatch. Nothing is stored; the refusals found inside
+            the transaction leave one `dev_token.issue_denied` audit row.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            20 card tokens are already live for this member (`error.code`
+            `dev_credential_limit`). Revoking one makes room.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/MembershipBusy"
+    get:
+      tags: [dev-access]
+      operationId: listDevCredentials
+      summary: List developer tokens (the caller's own, or the whole workspace's for an owner or admin).
+      description: >
+        ADR-0216 D6 (#4660). A person's app session only: a developer token cannot
+        list developer tokens (403 `dev_route_not_allowed`). Only live ones are
+        listed — unrevoked, unexpired card tokens and login sessions (one row per
+        session) — newest first; a revoked or expired token is gone from the list.
+        A row never carries the secret, its hash or the channel ids, only
+        `channelRestricted`. The answer is `no-store`. Without `scope` it is the
+        caller's own; `?scope=all` is every member's and needs an owner or admin
+        (403 otherwise). Any other `scope` value is a 400.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: scope
+          in: query
+          required: false
+          description: Omit for the caller's own tokens; `all` for the whole workspace's (owner or admin only).
+          schema:
+            type: string
+            enum: [all]
+      responses:
+        "200":
+          description: The live developer tokens, newest first.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevCredentialListResponse"
+        "400":
+          description: Invalid workspace id, a `scope` other than `all`, or a query string that cannot be read.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            A developer token (`error.code` `dev_route_not_allowed`), a caller that
+            is not a person, a workspace scope mismatch, a caller that is not an
+            active member, or `scope=all` from a member or guest.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/dev-access/credentials/{credentialId}:
+    delete:
+      tags: [dev-access]
+      operationId: revokeDevCredential
+      summary: Revoke a developer token (its owner, or an owner or admin down the ladder).
+      description: >
+        ADR-0216 D7 (#4660). A person's app session only: a developer token cannot
+        revoke developer tokens, not even itself (it has `DELETE
+        …/dev-access/self`). `credentialId` is a card token's id or a login
+        session's id, the `id` the list shows. Who may revoke whose is this route's
+        judgement (the domain function takes no member). The credential's own
+        member may revoke it. An owner may revoke anyone else's, another owner's
+        included (ADR-0215 F5); an admin may revoke a member's or a guest's, and is
+        refused with 403 an owner's or another admin's. A member or guest asking
+        about someone else's id gets the same 404 bytes as an id that does not
+        exist, so the route is no oracle for which ids are live; another
+        workspace's id is that 404 too. Revoking is immediate (every request is
+        judged against the database, there is no cache) and idempotent: a repeat
+        answers 200 with `revokedNow: false` and writes no second audit row
+        (`dev_token.revoked`, with `detail.via` `owner`, `admin` or `self` and the
+        `detail.kind`). A login session ends as a whole, access and refresh half
+        together.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: credentialId
+          in: path
+          required: true
+          description: A card token's id, or a login session's id, as the list shows it.
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: The credential is revoked (`revokedNow` true), or already was (`revokedNow` false).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeDevCredentialResponse"
+        "400":
+          description: Invalid workspace id or credential id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            A developer token (`error.code` `dev_route_not_allowed`), a caller that
+            is not a person, a workspace scope mismatch, a caller that is not an
+            active member, or an admin asking about an owner's or another admin's
+            credential.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            No such credential in this workspace — the same bytes for an unknown id,
+            another workspace's id, and, for a member or guest, someone else's id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/dev-access/self:
+    get:
+      tags: [dev-access]
+      operationId: getDevAccessSelf
+      summary: Describe the calling developer token (`oort whoami`, L1).
+      description: >
+        ADR-0216 D4 L1 (#4660). A developer token only, with `dev:identity` (every
+        token has it); an app session is 403 `dev_credential_required`. The door
+        already resolved the token in this request, so the answer needs no second
+        read. It is `no-store`, and carries no secret, no hash and no channel ids,
+        only `channelRestricted`. `id` is the id the list shows for this
+        credential (the card, or the login session). `lastUsedAtMs` is the use
+        before this one and is absent on a first use. For a login session
+        `expiresAtMs` is this access half's own expiry (minutes) and
+        `lineageExpiresAtMs` the session's absolute cap (approval plus 90 days);
+        `createdAtMs` dates a login session from its approval.
+      security:
+        - devTokenAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The calling developer token.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevAccessSelfResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` `dev_credential_required` (an app session on a route that
+            answers a developer token only), `dev_access_denied`,
+            `dev_route_not_allowed` (the `{workspaceId}` is not the token's own),
+            or `dev_scope_denied` (only for a token without `dev:identity`, which
+            issuance never allows).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [dev-access]
+      operationId: revokeDevAccessSelf
+      summary: End the calling developer token (`oort logout`, L2).
+      description: >
+        ADR-0216 D4 L2 · D7 (#4660). A developer token only, with `dev:identity`;
+        an app session is 403 `dev_credential_required`. It ends the calling card
+        token, or the calling login session as a whole (access and refresh half
+        together), and nothing else of the member: the route takes no id, so a
+        developer token cannot end another token, and the member's other tokens
+        stay alive. The token is dead for its next request (so a second call is the
+        door's 401); `revokedNow` is `false` only when something else ended it
+        first. Audit `dev_token.revoked` with `detail.via` `self`.
+      security:
+        - devTokenAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The calling credential is revoked.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RevokeDevCredentialResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` `dev_credential_required` (an app session),
+            `dev_access_denied`, `dev_route_not_allowed` (the `{workspaceId}` is not
+            the token's own), or `dev_scope_denied` (only for a token without
+            `dev:identity`, which issuance never allows).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members:
     post:
@@ -4215,8 +4597,18 @@ paths:
       description: >
         Returns public/private/dm channels where the caller has an active
         membership, ordered public -> private -> dm, then by name.
+
+
+        A developer token with `dev:channels:read` may call this route as its
+        person (ADR-0216 D4 L3, `oort channels`). The list is then the token's
+        channel restriction ∩ the caller's memberships today, and `limit` counts
+        only what the token may see: a channel outside the restriction is simply
+        absent, so the list never says it exists. A token without a restriction
+        sees the caller's own list, unchanged. The other refusals a developer
+        token can get are described under the `devTokenAuth` security scheme.
       security:
         - bearerAuth: []
+        - devTokenAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - name: include_archived
@@ -4245,7 +4637,16 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: >
+            Not an active workspace member, or workspace scope mismatch. For a
+            developer token (ADR-0216): `error.code` `dev_scope_denied` (no
+            `dev:channels:read`), `dev_access_denied` (the workspace switch no
+            longer admits its member's role) or `dev_route_not_allowed` (the
+            `{workspaceId}` is not the token's own).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
     post:
@@ -10674,8 +11075,32 @@ paths:
         conversation into a thread. The two are independent and may be sent
         together. A quote target must be undeleted and in the same channel, but
         — unlike a thread root — it may itself be a reply.
+
+
+        A developer token with `dev:messages:write` may call this route as its
+        person (ADR-0216 D4 L6 · D8 · R12, `oort post`): an immediate send, with
+        no approval card. Its body is held to an allow-list **before anything is
+        read or written**: only `clientMsgId`, `rootId`, `replyToId`, `body` and
+        `type` (absent, or exactly `text`). Any other key — `props`, `runId`,
+        `attachmentIds`, `routing`, `signature`, `stream`, `harnessRefine`, `apps`,
+        a `sentVia`, or a key added to this schema later — and any other `type`
+        (`null` included) is 400 `dev_field_not_allowed`, with a fixed sentence
+        that does not repeat the refused key. A body that is not one JSON object,
+        repeats a key or has bytes after the object is a 400 without a code, and a
+        body over 2 MiB is 413. Nothing is stored in any of these cases: no
+        message row, no `seq` bump, no outbox row. A channel outside the token's
+        channel restriction is refused exactly like a channel the caller is not a
+        member of, or one that does not exist: 403 `not a member of this channel`,
+        byte for byte, so the token cannot tell an unreachable channel from a
+        missing one. The server marks the stored message `sentVia: "dev"`
+        (`Message.sentVia`) from the credential that authenticated the send;
+        nothing in the request can choose it, and a later edit keeps it. A retry
+        with the same `clientMsgId` applies once, as for everyone. Besides the
+        general budgets a developer token may send 30 messages per minute
+        (`RateLimited`).
       security:
         - bearerAuth: []
+        - devTokenAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/ChannelId"
@@ -10703,7 +11128,11 @@ paths:
             (ADR-0113 증보 3 F5) — an `apps` list the sender may not use: an
             agent or system author, an app that is not an installed and enabled
             official app, more than three distinct ids, or a list longer than 16
-            entries as sent (repeats included). Nothing is stored.
+            entries as sent (repeats included). Nothing is stored. For a
+            developer token also (ADR-0216 R12): `error.code`
+            `dev_field_not_allowed` for a key outside its allow-list or a `type`
+            other than `text`, and a code-less 400 for a body that is not one JSON
+            object, repeats a key or has bytes after the object.
           content:
             application/json:
               schema:
@@ -10711,7 +11140,14 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Not a member of this channel, or workspace scope mismatch.
+          description: >
+            Not a member of this channel, or workspace scope mismatch. A channel
+            outside a developer token's channel restriction is this same 403, with
+            the same bytes as a non-member's or a missing channel's (ADR-0216
+            R11). For a developer token also: `error.code` `dev_scope_denied` (no
+            `dev:messages:write`), `dev_access_denied` (the workspace switch no
+            longer admits its member's role) or `dev_route_not_allowed` (the
+            `{workspaceId}` is not the token's own).
           content:
             application/json:
               schema:
@@ -10721,6 +11157,13 @@ paths:
             Channel/root not found or not provisioned, or a quote target that is
             not in this channel (a target in another channel or workspace is
             answered identically to one that does not exist).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: >
+            A developer token's request body is over 2 MiB. Nothing is stored.
           content:
             application/json:
               schema:
@@ -10744,8 +11187,18 @@ paths:
         scope may call this route on a channel where that agent is an active
         member (ADR-0173). Hosted connection credentials are refused on this
         REST surface; they keep the Agent Port read tool only.
+
+
+        A developer token with `dev:messages:read` may call this route as its
+        person (ADR-0216 D4 L4, `oort read`), on a channel it is a member of today
+        and that its channel restriction, if any, admits. Any other channel — one
+        outside the restriction, one the caller is not in, one that does not
+        exist — is the same 403 `not a member of this channel`, byte for byte.
+        A message that was sent with a developer token carries `sentVia: "dev"`
+        (`Message.sentVia`) in every row.
       security:
         - bearerAuth: []
+        - devTokenAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/ChannelId"
@@ -10788,7 +11241,14 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: Not a member of this channel, or workspace scope mismatch.
+          description: >
+            Not a member of this channel, or workspace scope mismatch. A channel
+            outside a developer token's channel restriction is this same 403, with
+            the same bytes as a non-member's or a missing channel's (ADR-0216
+            R11). For a developer token also: `error.code` `dev_scope_denied` (no
+            `dev:messages:read`), `dev_access_denied` (the workspace switch no
+            longer admits its member's role) or `dev_route_not_allowed` (the
+            `{workspaceId}` is not the token's own).
           content:
             application/json:
               schema:
@@ -10809,8 +11269,18 @@ paths:
         A generic agent bearer that carries the non-default `messages:read`
         scope may call this route on the same membership predicate as history
         (ADR-0173). Hosted connection credentials are refused here.
+
+
+        A developer token with `dev:messages:read` may call this route as its
+        person (ADR-0216 D4 L5, `oort read --thread`), under the same channel rule
+        as history and at the same point in the order: a channel outside its
+        restriction, one the caller is not in, and one that does not exist are all
+        the same 403 `not a member of this channel`, decided before the root is
+        looked up. A reply sent with a developer token carries `sentVia: "dev"`
+        (`Message.sentVia`).
       security:
         - bearerAuth: []
+        - devTokenAuth: []
       parameters:
         - $ref: "#/components/parameters/WorkspaceId"
         - $ref: "#/components/parameters/ChannelId"
@@ -10851,7 +11321,14 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
-          description: Not a channel member, or workspace scope mismatch.
+          description: >
+            Not a channel member, or workspace scope mismatch. A channel outside a
+            developer token's channel restriction is this same 403, with the same
+            bytes as a non-member's or a missing channel's (ADR-0216 R11). For a
+            developer token also: `error.code` `dev_scope_denied` (no
+            `dev:messages:read`), `dev_access_denied` (the workspace switch no
+            longer admits its member's role) or `dev_route_not_allowed` (the
+            `{workspaceId}` is not the token's own).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11255,6 +11732,15 @@ paths:
         with status `idempotency_conflict`.
 
 
+        ADR-0216 D4 (#4660) — a developer token never decides. The developer
+        door's closed route table refuses it first, with the generic 403 error
+        envelope (`error.code` `dev_route_not_allowed`, not a receipt). The
+        handler, which both decision routes share, refuses it again with a 403
+        receipt `dev_cannot_decide`, before the idempotency replay and before any
+        row is read — a second layer no request reaches through the middleware
+        today, so a tool cannot read a stored receipt through this route either.
+
+
         ADR-0188 R0 — a spawn headed to a member-scoped (remote) host is decided
         by that host's owner only; channel membership or a workspace admin role
         does not substitute (403 receipt `remote_host_owner_required`). The host
@@ -11357,7 +11843,9 @@ paths:
           description: >
             Receipt-shaped expected failure — `forbidden` (not human / not a
             channel member), `human_principal_required` (the caller is not a
-            person — the handler's own layer, see above), `remote_host_owner_required` (work headed to a
+            person — the handler's own layer, see above), `dev_cannot_decide`
+            (the caller is a developer token — the handler's second layer, see
+            above), `remote_host_owner_required` (work headed to a
             member-scoped host decided by someone other than its owner),
             `remote_host_shell_refused` (a shell approved onto a member-scoped
             host), `member_host_agent_control_refused` (an agent's spawn approved
@@ -11369,9 +11857,9 @@ paths:
             with `last_attempt: "role_required"`. That key is **removed** again
             by whichever decision finally settles the card (approve or reject),
             so a client reads it by value and may also read it by presence.
-            The one 403 that is not a receipt is an agent bearer's: the
-            authentication middleware answers it with the generic error
-            envelope.
+            The 403s that are not receipts are an agent bearer's and a developer
+            token's first layer (`dev_route_not_allowed`): the authentication
+            middleware answers both with the generic error envelope.
           headers:
             Cache-Control:
               description: Always `no-store` (ADR-0186 D4).
@@ -12958,6 +13446,83 @@ components:
         match its workspace. This scheme is deliberately separate from the app
         JWT scheme and is not OAuth or protected-resource discovery; Agent Port
         credentials are never accepted from a URL or query parameter.
+    devTokenAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: oort developer token
+      description: >
+        ADR-0216 (#4660). A person's developer token, sent only as
+        `Authorization: Bearer momo_dev_v1.<workspaceId>.<secret>` — a copy in a query,
+        a cookie or a body is not read as authentication. The acting member is the
+        person who made the token, and the effect is that person's own rights ∩ the
+        token's scopes ∩ its channel restriction: it adds nothing a person's session
+        could not do. It is a separate credential class. It never reaches the Agent
+        Port (`/v1/mcp/agent-port`), and an agent credential or an app session JWT
+        never reaches the developer-only routes.
+
+
+        Two forms share one envelope. A card token is made in settings
+        (`POST …/dev-access/credentials`): 1 to 90 days (30 by default), shown once,
+        never renewed. A login session (`oort login`: a 15-minute access half
+        `momo_dev_v1…` and a rotating refresh half `momo_devr_v1…`, 90 days at most)
+        is opened by the browser approval, which is not served yet (#4700). A refresh
+        half is accepted on no route of this document.
+
+
+        **A closed route table, and nothing else.** A developer token reaches exactly
+        the (method, route) pairs below, each needing its scope. Every other pair —
+        every other route, and HEAD, OPTIONS or any unlisted method on these — is
+        403 `dev_route_not_allowed`, decided before the database is read, so that
+        answer says nothing about whether the token is any good. What is judged is
+        the route template the router matched, never the shape of the raw path, and a
+        `{workspaceId}` other than the token's own is the same 403.
+        (L1) `GET …/dev-access/self` and (L2) `DELETE …/dev-access/self` need
+        `dev:identity`, which every token carries. (L3) `GET …/channels` needs
+        `dev:channels:read`. (L4, L5) `GET …/channels/{channelId}/messages` and
+        `GET …/channels/{channelId}/messages/{rootId}/replies` need
+        `dev:messages:read`. (L6) `POST …/channels/{channelId}/messages` needs
+        `dev:messages:write`. (L7) `GET …/inbox` needs `dev:inbox:read`; that route
+        is served but not described in this document yet. (L8) `POST /v1/mcp/me`
+        (the people's MCP: `dev:identity` plus a per-tool rule) is a row of the table
+        whose route is not mounted yet (#4661), so it is not an operation here.
+        The scope vocabulary is `dev:identity`, `dev:channels:read`,
+        `dev:messages:read`, `dev:messages:write` and `dev:inbox:read`; `dev:search`
+        is a reserved name that is never issued. Everything else is closed to a
+        developer token: making, listing or revoking developer tokens, passwords and
+        sessions, approval decisions, work spawns and permissions, structure changes,
+        message edits, deletes, pins, reactions and attachments, search, realtime
+        subscriptions and every inbox write.
+
+
+        **The inbox (L7), decided field by field.** For a developer token
+        `approvalsPending` is always an empty list (approval cards never reach this
+        door, and the approval list is not even read). `items` and `unreadCount`
+        count only the token's restricted channels when it has a restriction; the
+        restriction is an argument of the read itself, so `limit`, the cursor and the
+        count agree with each other. Reading marks nothing as read.
+
+
+        **Refusals at the door**, after the closed table above, in this order. A
+        string that is unknown, expired, revoked, of another workspace, malformed, a
+        refresh half, or a suspended, removed or non-human member's is one 401, byte
+        for byte the answer to any string the server does not know. A live token whose
+        member's role the workspace switch no longer admits is 403
+        `dev_access_denied`: judged on every use, so a demoted admin's tokens stop
+        with the next request. A live token without the route's scope is 403
+        `dev_scope_denied`. Over budget is 429 with `Retry-After` (per window, 60
+        seconds by default: 240 requests per token, 480 per member and, for L6, 30
+        sends per token; see `RateLimited`). A channel outside the token's
+        restriction is not an error of its own: it is the 403 `not a member of this
+        channel` that a non-member, or a channel that does not exist, gets, byte for
+        byte.
+
+
+        Every accepted request writes one `auth.dev_token.used` audit row in the
+        authentication transaction; its `detail` is a closed vocabulary (method, route
+        template, required scope, a boolean `granted`), never a body, a channel id, a query
+        or a token. A password change or reset, a suspension, a removal and leaving
+        the workspace end all of the member's developer tokens in the same
+        transaction. An app logout does not.
     workHostAuth:
       type: apiKey
       in: header
@@ -13266,6 +13831,19 @@ components:
         already has an active account, is spent before the password is compared
         (a right password counts too), and answers 429 without comparing once
         spent. The window is the shared one (`RATE_LIMIT_WINDOW_SECONDS`).
+        Developer tokens (ADR-0216 D9, #4660) have budgets of their own, keyed on
+        stable ids and never on an address: per window (default 60 seconds) 240
+        requests per token and 480 per member (all of that member's developer
+        tokens together), and for `POST …/messages` 30 sends per token on top of
+        those; because a developer token acts as its person, its sends also count
+        against that person's per-member send budget above. A 429 at that door
+        does not touch `last_used_at` and writes no `used` audit row; at most one
+        `auth.dev_token.rate_limited` row is kept per token per window.
+        `POST …/dev-access/credentials` has a failure budget of its own: 5 wrong
+        current passwords per member per window, after which even the right
+        password is 429, without being compared. A setting of 0, or one that
+        cannot be read, keeps the default: none of these budgets can be switched
+        off.
       headers:
         Retry-After:
           description: Seconds to wait before retrying.
@@ -13409,7 +13987,23 @@ components:
                 password a person is choosing: `POST /v1/join`, `POST /v1/claim`,
                 `PATCH …/members/me/password`): 400 `password_too_short` (fewer
                 than 10 characters), `password_too_long` (more than 72 bytes of
-                UTF-8) and `password_invalid_char` (a NUL character, U+0000).
+                UTF-8) and `password_invalid_char` (a NUL character, U+0000);
+                ADR-0216 (#4660, developer tokens): 403 `dev_route_not_allowed` (a
+                developer token on a route off its closed table, or on a
+                `{workspaceId}` that is not its own; it is also what the four
+                person-only `dev-access` routes answer a developer token),
+                `dev_scope_denied` (a live token without the route's scope),
+                `dev_access_denied` (the workspace's developer-access switch does
+                not admit the member's role — on a live token, or when making
+                one), `dev_credential_required` (an app session on `GET` or
+                `DELETE …/dev-access/self`), `current_password_incorrect` and
+                `current_password_unavailable` (the password re-check of `POST
+                …/dev-access/credentials`: a wrong password, or an account that
+                has none); 409 `dev_credential_limit` (20 live card tokens
+                already); 400 `dev_field_not_allowed` (a developer-token send with
+                a key outside its allow-list, or a `type` other than `text`). The
+                approval receipt status `dev_cannot_decide` is a receipt's `status`,
+                not an `error.code`.
 
     # ---- Memory Plane (ADR-0129 / MOMO-526) ---------------------------------
     MemoryScope:
@@ -13778,6 +14372,300 @@ components:
           type: string
           description: >
             /claim/<token> — the existing ClaimPage route.
+
+    # ---- Developer tokens (ADR-0216, #4660) ----------------------------------
+    # Object schemas here are closed like the rest of this file. The secret leaves
+    # the server once, in CreateDevCredentialResponse.token; no other schema has a
+    # field for it, for its hash, or for the channel ids a token is limited to
+    # (only whether there is a limit).
+    DevScope:
+      type: string
+      enum: ["dev:identity", "dev:channels:read", "dev:messages:read", "dev:messages:write", "dev:inbox:read"]
+      description: >
+        A developer token's scope vocabulary (ADR-0216 D4), kept in its own `dev:`
+        namespace so that no existing scope check (`messages:*`, `realtime:*`, …)
+        can wave a developer token through by accident. `dev:identity` is always
+        granted: whoami, logout and the people's MCP. `dev:channels:read` lists
+        channels, `dev:messages:read` reads history and threads,
+        `dev:messages:write` sends (the only scope that lets a tool speak as its
+        person) and `dev:inbox:read` reads the inbox. `dev:search` is a reserved
+        name that is never issued.
+
+    DevTool:
+      type: string
+      enum: [claude_code, codex, cli, other]
+      description: >
+        What the maker of a token says it is for. A value the maker chose, never a
+        verified fact, so no screen shows it as one, and it is not what
+        `Message.sentVia` says.
+
+    DevAccessPolicyResponse:
+      type: object
+      additionalProperties: false
+      required: [policy, canCreate, canManageAll]
+      properties:
+        policy:
+          type: string
+          enum: [admins, members, "off"]
+          description: >
+            The workspace's 「명령줄·AI 도구 접근」 switch (ADR-0216 D3): `admins`
+            (owner and admin), `members` (also members) or `off` (nobody). A guest
+            or an agent member is admitted under no value. #4660 ships `admins` as
+            a constant; the other two arrive with the stored switch.
+        canCreate:
+          type: boolean
+          description: The switch admits the caller's role today, so the create button is live.
+        canManageAll:
+          type: boolean
+          description: >
+            The caller is an owner or admin: may list every member's developer
+            tokens (`?scope=all`) and revoke down the ladder.
+
+    CreateDevCredentialRequest:
+      type: object
+      additionalProperties: false
+      required: [name, tool, currentPassword]
+      description: >
+        Closed: any other key is a 400. `scopes`, `channelIds` and `expiresInDays`
+        tell "omitted" (the default) from an explicit `null` (a 400): `null` must
+        not quietly become 30 days, "every channel" or "whoami only".
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: >
+            What the token is called in the list. Trimmed; 1 to 80 characters; no
+            control characters; and no developer-token envelope (`momo_dev_v1.` or
+            `momo_devr_v1.`), so a pasted secret cannot become a second, listable
+            copy of itself.
+        tool:
+          $ref: "#/components/schemas/DevTool"
+        scopes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/DevScope"
+          description: >
+            Omit for the 「읽기만」 preset: `dev:identity`, `dev:channels:read`,
+            `dev:messages:read` and `dev:inbox:read`. Otherwise every entry must be
+            one of the five scopes (case-insensitive after trimming; `dev:search`
+            and unknown names are a 400), and `dev:identity` is always added. The
+            stored array is de-duplicated and in the order of `DevScope`. `[]` and
+            `null` are a 400. `dev:messages:write` is what lets a tool send as the
+            person; it is not in the preset.
+        channelIds:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items:
+            type: string
+            format: uuid
+          description: >
+            Omit for no channel restriction. Otherwise 1 to 50 channels the caller
+            is an active member of today (the list is counted as sent, repeats
+            included; duplicates then collapse). `[]` and `null` are a 400. Every
+            request re-intersects the list with the member's memberships at that
+            moment, so leaving a channel closes it for the token too.
+        expiresInDays:
+          type: integer
+          minimum: 1
+          maximum: 90
+          description: >
+            Omit for 30. A whole number of days from 1 to 90; 0, 91, a negative
+            number, a string and `null` are a 400.
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: >
+            The caller's current password, re-entered on every issuance. Required
+            and at most 1024 characters. Never logged, stored or echoed.
+
+    CreateDevCredentialResponse:
+      type: object
+      additionalProperties: false
+      required: [id, kind, name, tool, scopes, createdAtMs, expiresAtMs, token]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The card token's id — the `id` the list shows, and what `revokeDevCredential` takes.
+        kind:
+          type: string
+          enum: [card]
+          description: Always `card` here (a login session is opened by the browser approval, #4700).
+        name:
+          type: string
+        tool:
+          $ref: "#/components/schemas/DevTool"
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DevScope"
+          description: What was stored, `dev:identity` included.
+        channelIds:
+          type: array
+          items:
+            type: string
+            format: uuid
+          description: >
+            The caller's own choice, echoed back once; the list never shows it.
+            Omitted when the token has no channel restriction.
+        createdAtMs:
+          type: integer
+          format: int64
+        expiresAtMs:
+          type: integer
+          format: int64
+        token:
+          type: string
+          readOnly: true
+          description: >
+            `momo_dev_v1.<workspaceId>.<secret>`, the secret being 43 characters of
+            unpadded base64url. Shown here once; the server keeps only the SHA-256
+            of the whole envelope, and no route shows it again.
+
+    DevCredential:
+      type: object
+      additionalProperties: false
+      required: [id, memberId, kind, name, scopes, channelRestricted, createdAtMs, expiresAtMs]
+      description: >
+        One live developer token: a card token, or a login session (one row per
+        session). No secret, no hash and no channel ids — only whether a channel
+        restriction exists.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: A card token's id, or a login session's id; what `revokeDevCredential` takes.
+        memberId:
+          type: string
+          format: uuid
+          description: The member the token acts as.
+        kind:
+          type: string
+          enum: [card, session]
+        name:
+          type: string
+        tool:
+          allOf:
+            - $ref: "#/components/schemas/DevTool"
+          description: Omitted when none is stored.
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DevScope"
+        channelRestricted:
+          type: boolean
+          description: Whether the token is limited to chosen channels. The channels themselves are never listed.
+        deviceName:
+          type: string
+          description: >
+            A login session's device name. The connecting side chose it, so it is
+            a label, not a fact.
+        createdAtMs:
+          type: integer
+          format: int64
+          description: A card's issuance, or a login session's approval.
+        lastUsedAtMs:
+          type: integer
+          format: int64
+          description: >
+            When the token was last used, refreshed at most once a minute. For a
+            login session, the later of its last rotation and its live access
+            half's last use. Omitted when never used.
+        expiresAtMs:
+          type: integer
+          format: int64
+          description: >
+            A card's expiry, or a login session's live refresh half's (30 days idle
+            or the session's cap, whichever comes first).
+        lineageExpiresAtMs:
+          type: integer
+          format: int64
+          description: A login session's absolute cap (approval plus 90 days). Absent on a card.
+
+    DevCredentialListResponse:
+      type: object
+      additionalProperties: false
+      required: [credentials]
+      properties:
+        credentials:
+          type: array
+          items:
+            $ref: "#/components/schemas/DevCredential"
+          description: The live developer tokens, newest first.
+
+    RevokeDevCredentialResponse:
+      type: object
+      additionalProperties: false
+      required: [id, kind, revokedNow]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The credential id the call named (a card, or a login session).
+        kind:
+          type: string
+          enum: [card, session]
+        revokedNow:
+          type: boolean
+          description: >
+            `false` when it had already ended: a repeated call, or a sweep got there
+            first. A repeat is still 200.
+
+    DevAccessSelfResponse:
+      type: object
+      additionalProperties: false
+      required: [id, kind, name, workspaceId, memberId, scopes, channelRestricted, createdAtMs, expiresAtMs]
+      description: The calling developer token itself (`oort whoami`). No secret, no hash, no channel ids.
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: The id the list shows for this credential (the card, or the login session).
+        kind:
+          type: string
+          enum: [card, session]
+        name:
+          type: string
+        tool:
+          allOf:
+            - $ref: "#/components/schemas/DevTool"
+          description: Omitted when none is stored.
+        workspaceId:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+          description: The person the token acts as.
+        scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DevScope"
+        channelRestricted:
+          type: boolean
+        deviceName:
+          type: string
+          description: A login session's device name, a label the connecting side chose.
+        createdAtMs:
+          type: integer
+          format: int64
+          description: A card's issuance, or a login session's approval.
+        expiresAtMs:
+          type: integer
+          format: int64
+          description: This token's own expiry; a login session's access half lives minutes.
+        lastUsedAtMs:
+          type: integer
+          format: int64
+          description: The use before this one. Absent on a first use.
+        lineageExpiresAtMs:
+          type: integer
+          format: int64
+          description: A login session's absolute cap (approval plus 90 days). Absent on a card.
 
     LoginRequest:
       type: object
@@ -20342,6 +21230,13 @@ components:
     SendMessageRequest:
       type: object
       required: [clientMsgId]
+      description: >
+        The body is closed-world: a key not listed here is refused. In particular
+        there is no `sentVia` key — `Message.sentVia` is answered by the server
+        from the credential of the send and cannot be chosen by a request (ADR-0216
+        D8). A **developer token** (`devTokenAuth`) may send only `clientMsgId`,
+        `rootId`, `replyToId`, `body` and `type: text`; any other key or `type`
+        is 400 `dev_field_not_allowed` and nothing is stored (ADR-0216 D4, R12).
       properties:
         clientMsgId:
           type: string
@@ -21206,6 +22101,26 @@ components:
             content proxy.
         thread:
           $ref: "#/components/schemas/ThreadRollup"
+        sentVia:
+          type: string
+          enum: [dev]
+          readOnly: true
+          description: >
+            ADR-0216 D8 (#4660) — how the message was sent, when the server has to
+            say so. `dev` means it was sent with its author's developer token
+            (`devTokenAuth`); clients say 「명령줄에서」. It is not the tool's
+            name: the tool a token was made "for" is its maker's unverified
+            choice. The server writes it from the credential that authenticated
+            the send and from nothing in the request (`SendMessageRequest` has no
+            such key, and `props` cannot reach it), and the author's later edit
+            keeps it. **Omitted when the message was not sent that way — never
+            `null`:** the ADR calls the column nullable, but on the wire the key
+            is left out, like every optional key in this document, so a message
+            sent through the app answers exactly the bytes it did before. Present
+            on every projection built from the stored row (send echo, history,
+            thread replies, edits). The realtime `message.new` and
+            `message.edited` payload carries the same marker under the snake_case
+            key `sent_via`, again only when there is one.
         runEnded:
           type: boolean
           enum: [true]
@@ -22648,7 +23563,8 @@ components:
         Decision acknowledgement. Committed decisions carry status
         approved/rejected; expected failures reuse this shape with a
         diagnostic status (e.g. idempotency_conflict, forbidden, role_required,
-        human_principal_required, remote_host_owner_required,
+        human_principal_required, dev_cannot_decide (a developer token, ADR-0216
+        D4), remote_host_owner_required,
         remote_host_shell_refused, member_host_agent_control_refused,
         not_found, bad_request, expired,
         action_unavailable, action_args_invalid, public_origin_unavailable,

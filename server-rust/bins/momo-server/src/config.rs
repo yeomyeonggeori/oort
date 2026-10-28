@@ -92,6 +92,9 @@ pub struct Config {
     /// These knobs are separate from the public join limiter so changing one
     /// surface can never silently widen the other.
     pub agent_port: AgentPortConfig,
+    /// ADR-0216 D9 (#4660) — the developer-token door's budgets. Never off: 0 and
+    /// garbage keep the default.
+    pub dev_access: DevAccessConfig,
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
@@ -983,6 +986,192 @@ impl AgentPortConfig {
                 .zip(self.external_origin.as_ref())
                 .is_some_and(|(presented, expected)| &presented == expected),
         }
+    }
+}
+
+/// ADR-0216 D9 (#4660) — the developer-token door's three budgets: per token, per
+/// member, and the write row (L6, `dev:messages:write`) per token. The counters are
+/// keyed on stable ids (`token.id`, `member.id`), never an address, and live in the
+/// Agent Port limiter map under `dev:` keys (`crate::dev_access`).
+///
+/// **No off switch** (ADR-0180 C6). A developer token is a person's credential driven
+/// by a program, so every knob here is a ceiling an operator may move but not remove:
+/// 0, a negative number, a blank value and anything that does not parse all keep the
+/// default. That is the opposite of [`AgentPortConfig`], where 0 disables an axis and
+/// garbage fails the boot (`env_number`), and the same discipline as
+/// [`RateLimitConfig::password_guess_per_account_limit`]. The door applies
+/// [`DevAccessConfig::normalized`] again at use, so a config built by hand with a 0
+/// cannot unbudget the door either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevAccessConfig {
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_WINDOW_SECONDS` (default 60).
+    pub window_seconds: u64,
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_PER_TOKEN` (default 240 per window — the Agent
+    /// Port's per-token number).
+    pub per_token_limit: u32,
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_PER_MEMBER` (default 480 per window — the Agent
+    /// Port's per-agent number), shared by every developer token of one member.
+    pub per_member_limit: u32,
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_WRITE_PER_TOKEN` (default 30 per window): the send
+    /// row only. Counted on top of the per-token budget, never instead of it.
+    pub write_per_token_limit: u32,
+}
+
+impl Default for DevAccessConfig {
+    fn default() -> Self {
+        DevAccessConfig {
+            window_seconds: 60,
+            per_token_limit: 240,
+            per_member_limit: 480,
+            write_per_token_limit: 30,
+        }
+    }
+}
+
+impl DevAccessConfig {
+    pub fn from_env() -> DevAccessConfig {
+        Self::from_lookup(env)
+    }
+
+    /// [`from_env`](Self::from_env) over any lookup, so every env name and the
+    /// "no off switch" rule are testable without touching the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> DevAccessConfig {
+        let defaults = DevAccessConfig::default();
+        DevAccessConfig {
+            window_seconds: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_WINDOW_SECONDS"),
+                defaults.window_seconds,
+            ),
+            per_token_limit: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_PER_TOKEN"),
+                defaults.per_token_limit,
+            ),
+            per_member_limit: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_PER_MEMBER"),
+                defaults.per_member_limit,
+            ),
+            write_per_token_limit: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_WRITE_PER_TOKEN"),
+                defaults.write_per_token_limit,
+            ),
+        }
+    }
+
+    /// Every 0 replaced by its default. The limiter reads a limit of 0 as "this axis
+    /// is off", which is exactly what this config must never mean.
+    pub fn normalized(self) -> DevAccessConfig {
+        let defaults = DevAccessConfig::default();
+        let keep = |value: u32, fallback: u32| if value == 0 { fallback } else { value };
+        DevAccessConfig {
+            window_seconds: if self.window_seconds == 0 {
+                defaults.window_seconds
+            } else {
+                self.window_seconds
+            },
+            per_token_limit: keep(self.per_token_limit, defaults.per_token_limit),
+            per_member_limit: keep(self.per_member_limit, defaults.per_member_limit),
+            write_per_token_limit: keep(self.write_per_token_limit, defaults.write_per_token_limit),
+        }
+    }
+
+    /// A strictly positive number, or `fallback` for anything else (absent, blank,
+    /// 0, negative, not a number).
+    fn positive_or<T>(raw: Option<String>, fallback: T) -> T
+    where
+        T: std::str::FromStr + PartialOrd + Default,
+    {
+        raw.and_then(|value| value.trim().parse::<T>().ok())
+            .filter(|value| *value > T::default())
+            .unwrap_or(fallback)
+    }
+}
+
+#[cfg(test)]
+mod dev_access_config_tests {
+    use super::DevAccessConfig;
+
+    fn lookup_all(value: &'static str) -> impl Fn(&str) -> Option<String> {
+        move |key: &str| {
+            key.starts_with("MOMO_DEV_ACCESS_RATE_LIMIT_")
+                .then(|| value.to_string())
+        }
+    }
+
+    /// ADR-0216 D9: the ADR's numbers when nothing is configured.
+    #[test]
+    fn nothing_configured_is_the_adr_numbers() {
+        let config = DevAccessConfig::from_lookup(|_| None);
+        assert_eq!(config, DevAccessConfig::default());
+        assert_eq!(
+            (
+                config.window_seconds,
+                config.per_token_limit,
+                config.per_member_limit,
+                config.write_per_token_limit
+            ),
+            (60, 240, 480, 30)
+        );
+    }
+
+    /// ADR-0180 C6 / ADR-0216 R13: no value turns a budget off. 0, garbage, a negative
+    /// number and a blank value all keep the default, on every knob.
+    #[test]
+    fn zero_garbage_negative_and_blank_keep_the_default() {
+        for raw in ["0", "abc", "-5", "   ", "", "1.5", "0x10"] {
+            assert_eq!(
+                DevAccessConfig::from_lookup(lookup_all(raw)),
+                DevAccessConfig::default(),
+                "raw value {raw:?} must not change any budget"
+            );
+        }
+    }
+
+    /// A real number is taken as written (surrounding whitespace from an env file
+    /// trimmed), each knob from its own name.
+    #[test]
+    fn a_positive_value_is_taken_from_its_own_name() {
+        let config = DevAccessConfig::from_lookup(|key| {
+            Some(
+                match key {
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_WINDOW_SECONDS" => "120",
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_PER_TOKEN" => " 3\n",
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_PER_MEMBER" => "7",
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_WRITE_PER_TOKEN" => "2",
+                    _ => return None,
+                }
+                .to_string(),
+            )
+        });
+        assert_eq!(
+            config,
+            DevAccessConfig {
+                window_seconds: 120,
+                per_token_limit: 3,
+                per_member_limit: 7,
+                write_per_token_limit: 2,
+            }
+        );
+    }
+
+    /// A config built by hand (a fixture, a future caller) with 0s is normalized back
+    /// to the defaults before the door reads it; non-zero values are kept.
+    #[test]
+    fn normalizing_replaces_only_the_zeros() {
+        let hand_built = DevAccessConfig {
+            window_seconds: 0,
+            per_token_limit: 0,
+            per_member_limit: 9,
+            write_per_token_limit: 0,
+        };
+        assert_eq!(
+            hand_built.normalized(),
+            DevAccessConfig {
+                window_seconds: 60,
+                per_token_limit: 240,
+                per_member_limit: 9,
+                write_per_token_limit: 30,
+            }
+        );
     }
 }
 
@@ -2649,6 +2838,8 @@ impl Config {
             login_relay,
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
+            // ADR-0216 D9: never fatal and never off — a bad value keeps the default.
+            dev_access: DevAccessConfig::from_env(),
             mentions: MentionSettings::from_env(),
             scheduler: SchedulerSettings::from_env(),
             attachment_reclaim: AttachmentReclaimSettings::from_env(),

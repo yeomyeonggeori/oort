@@ -120,6 +120,8 @@ fn event_dto(event: SessionEvent, channel_id: Uuid, root_message_id: Uuid) -> Me
         // #1166 — a session event never streamed and names no run, so there is
         // no half-written answer here for a run's ending to explain.
         run_ended: false,
+        // ADR-0216 D8 — a host's log line is never sent with a developer token.
+        sent_via: None,
     }
 }
 
