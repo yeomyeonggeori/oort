@@ -1,4 +1,4 @@
-import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {Message} from '@momo/core/lib/api';
 import {contrast} from '@momo/core/design/color';
 import {catalogEntries, deriveCatalogMode} from '@momo/core/design/deriveCatalog';
 import {SIGNAL_PRESETS} from '@momo/core/design/signal';
@@ -7,7 +7,6 @@ import {act, cleanup, render, screen} from './fixtures/darkWorld';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {StyleSheet} from 'react-native';
 
 import {resolveAppearance} from '../src/design/appearanceState';
 import {DS2_COMBOS} from '../src/design/ds2Tokens';
@@ -23,6 +22,7 @@ import {
   pressFace,
   ROW_FACE,
 } from '../src/features/conversation/rowFace';
+import {flat, member} from './testkit';
 
 // =============================================================================
 // #4300 — 폰 말풍선(Buzz 식) + 눌림·착지 강조 면.
@@ -34,22 +34,6 @@ import {
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const BASE_MS = 1_700_000_000_000;
-
-function member(over: Partial<RosterMember> & {id: string}): RosterMember {
-  return {
-    workspaceId: 'ws',
-    kind: 'human',
-    status: 'active',
-    displayName: '이름',
-    handle: 'handle',
-    channelCount: 0,
-    channelIds: [],
-    capabilities: [],
-    createdAtMs: 0,
-    updatedAtMs: 0,
-    ...over,
-  } as RosterMember;
-}
 
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '박서연', handle: 'seoyeon'}),
@@ -92,9 +76,6 @@ function row(over: Partial<React.ComponentProps<typeof MessageRow>> = {}) {
     />
   );
 }
-
-const flat = (style: unknown): Record<string, any> =>
-  (StyleSheet.flatten(style as never) ?? {}) as Record<string, any>;
 
 function codeOnly(source: string): string {
   return source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');

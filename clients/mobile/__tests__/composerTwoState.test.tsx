@@ -1296,7 +1296,7 @@ describe('누름 (#4518 D2) — 끌기는 포커스로 이어지지 않는다: �
 describe('도크가 자라는 프레임에 목록에게 알린다 (#4518, design-review R2 B1)', () => {
   // 펼침은 JS 가 프레임마다 도크 높이를 정해 넘기고, 목록이 그 높이를 따라가는 길(`onLayout` → `scrollToEnd`)은 네이티브 → JS → 네이티브를 한 바퀴 돌아서 키보드 준비로 메인 스레드가
   // 막혔다 풀리면 2~3프레임 늦는다 — 그 사이 마지막 말풍선의 아랫줄이 도크에 가려졌다 돌아왔다(짧은 탭: 틈 편차 −22pt·3프레임). 그래서 컴포저는 자라거나 주는 **프레임마다**
-  // 컨텍스트의 다리(`dockFollow`)로 목록에게 바닥을 따라가라고 알린다. 목록의 답은 `dockFollow4518.test.tsx` 가 잠근다.
+  // 컨텍스트의 다리(`dockFollow`)로 목록에게 바닥을 따라가라고 알린다. 목록의 답은 `dockFollow.test.tsx` 가 잠근다.
   function mountWithBridge() {
     const bridge = createDockFollow();
     const follow = jest.fn();

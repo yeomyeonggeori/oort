@@ -945,7 +945,7 @@ describe('#1076 — 인용 점프가 도착했다고 말한다', () => {
     // 웹은 1,600ms 타이머를 쓴다. 폰의 점프는 애니메이션이고 실패 시 한 번 더
     // 돌므로, 시한을 점프 시각부터 재면 이동과 경주한다 — #1076 이 시한을 버린 이유다.
     // #3921 은 시한을 되살리되 **시작하는 순간**을 이동의 끝으로 옮겼다. 행동은
-    // `landedHighlight3921.test.tsx` 가 가짜 시계로 잰다. 여기서는 소스에 남아야 하는
+    // `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 소스에 남아야 하는
     // 두 결정이 되돌려지는 순간 말을 한다.
     const timeline = fs.readFileSync(
       path.resolve(SRC_DIR, 'features/conversation/Timeline.tsx'),

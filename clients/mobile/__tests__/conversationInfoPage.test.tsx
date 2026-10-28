@@ -598,7 +598,7 @@ describe('정보 페이지 — 안쪽 장의 움직임 (#4319, `phone-sheets.md`
 
   beforeEach(() => {
     jest.useFakeTimers();
-    // 시킨 설정만 본다 — 네이티브 구동 애니메이션은 시험 환경에서 끝나지 않는다(`layerMotion4457.test.tsx` 와 같은 이음매).
+    // 시킨 설정만 본다 — 네이티브 구동 애니메이션은 시험 환경에서 끝나지 않는다(`layerMotion.test.tsx` 와 같은 이음매).
     timing = jest
       .spyOn(Animated, 'timing')
       .mockImplementation(() => ({start: jest.fn(), stop: jest.fn(), reset: jest.fn()}) as never);
