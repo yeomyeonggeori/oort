@@ -3026,6 +3026,23 @@ pub struct RosterMemberDto {
     /// ADR-0124 증보 2: running DND expiry (epoch ms), omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dnd_until_ms: Option<i64>,
+    /// ADR-0160 ② **availability**, human only (#4692): does this person have a
+    /// live connection to the workspace right now? The second input of
+    /// `f(presence_status, online)`; the wire never carries the effective dot.
+    ///
+    /// **Absent is a real answer, and it is not `false`.** The key is omitted for
+    /// an agent (D4: an agent's liveness is its `agent_run`), and for every row of a
+    /// response whose availability could not be established — the instance has no
+    /// `CENT_API_*`, or Centrifugo did not answer in time. A client reads absence
+    /// as 「unknown」 and draws no dot; collapsing it to `false` would paint
+    /// everyone offline whenever the broker hiccups.
+    ///
+    /// Derived from the transport at read time and never stored. It is only ever
+    /// set on a row the roster query already returned, so what the viewer may
+    /// learn about availability is exactly the roster they may already read
+    /// (guard 5: the guest narrowing is the query's, and nothing here widens it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub online: Option<bool>,
     /// ADR-0176 custom status, human only, omitted when unset/expired/agent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_emoji: Option<String>,

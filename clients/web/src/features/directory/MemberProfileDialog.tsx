@@ -9,7 +9,8 @@ import {
   statusLabel,
   type RoleLabels,
 } from "@momo/core/features/directory/model";
-import { otherMemberDeclaredPresenceLabel } from "@momo/core/features/presence/model";
+import { AvatarWithPresence } from "@/features/presence/HumanPresence";
+import { useHumanPresenceDot } from "@/features/presence/useHumanPresenceDot";
 import { useSession } from "@/app/session";
 import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
@@ -163,12 +164,10 @@ function ReadyProfile({
   const role = roleLabel(member, labels);
   const status = statusLabel(member) ?? "활성";
   const { visible: custom } = useCustomStatusView(member);
-  // away/dnd only. `auto` is not 온라인: roster has no live availability
-  // boolean for others (`declaredStatusLabel` is the self radio).
-  const declared =
-    member.kind === "human"
-      ? otherMemberDeclaredPresenceLabel(member.presenceStatus)
-      : null;
+  // 선언 상태(자리 비움·방해 금지)가 먼저이고, 선언이 없으면 접속 여부(온라인·오프라인)다. 접속 여부를 모르면
+  // (서버가 못 읽은 응답, 구서버) 아무 말도 하지 않는다 - 모름은 오프라인이 아니다(#4692, ADR-0160 D3).
+  const presence = useHumanPresenceDot(member);
+  const declared = presence?.label ?? null;
   const availability = dmAvailability(member, session.member.id);
   const offline = connStatus === "disconnected";
   const opening = pendingMemberId === member.id;
@@ -197,7 +196,13 @@ function ReadyProfile({
       )}
       <div className="flex min-h-0 flex-col gap-4 overflow-y-auto p-4">
         <div className="flex items-center gap-3">
-          <Avatar member={member} />
+          {member.kind === "agent" ? (
+            <Avatar member={member} />
+          ) : (
+            <AvatarWithPresence member={member}>
+              <Avatar member={member} />
+            </AvatarWithPresence>
+          )}
           <span className="flex min-w-0 flex-1 flex-col">
             <span
               className={

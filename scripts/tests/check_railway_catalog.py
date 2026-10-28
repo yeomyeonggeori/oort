@@ -241,6 +241,37 @@ COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
     # Railway routes the domain to PORT.
     "caddy": ([("caddy.override.yml", "caddy")], {"PORT"}),
 }
+# The `online` namespace (#4692, ADR-0160 ②) is the workspace roll-call: clients
+# subscribe through the proxy only to be COUNTED, and the api reads Centrifugo's
+# presence table through the server API. It is therefore presence-ONLY. Any other
+# option is a leak: `join_leave` pushes the connect/disconnect stream of people
+# outside a subscriber's roster to every subscriber (a guest among them), and any
+# `allow_presence_for_*` / `allow_history_for_*` / `allow_publish_for_*` /
+# `allow_subscribe_for_client` lets a client read or write the table itself. The
+# entry is compared WHOLE, so adding an option is red, not just the known-bad ones.
+ONLINE_NAMESPACE = {
+    "name": "online",
+    "presence": True,
+    "history_size": 0,
+    "history_ttl": "0s",
+    "subscribe_proxy_enabled": True,
+    "channel_regex": "^ws[0-9A-Fa-f-]{36}$",
+}
+
+
+def online_namespace_errors(namespaces: object, where: str) -> list[str]:
+    entries = [n for n in (namespaces if isinstance(namespaces, list) else []) if isinstance(n, dict) and n.get("name") == "online"]
+    if len(entries) != 1:
+        return ["%s must define exactly one `online` namespace (#4692: the roster reads availability from its presence table)" % where]
+    if entries[0] != ONLINE_NAMESPACE:
+        return [
+            "%s online namespace must be presence-only (#4692): exactly %s, got %s — join_leave or any allow_* option "
+            "hands subscribers the connect/disconnect stream or the table itself"
+            % (where, json.dumps(ONLINE_NAMESPACE, sort_keys=True), json.dumps(entries[0], sort_keys=True))
+        ]
+    return []
+
+
 # Leaf settings of infra/centrifugo.json the catalog's Centrifugo literals carry
 # (lists are one setting). A new key there must be carried here first.
 KNOWN_CENTRIFUGO_SETTINGS = {
@@ -632,6 +663,8 @@ def centrifugo_errors(services: dict, centrifugo_json: dict, compose: str) -> li
         namespaces = None
     if namespaces != channel.get("namespaces"):
         errors.append("centrifugo CENTRIFUGO_CHANNEL_NAMESPACES != infra/centrifugo.json channel.namespaces")
+    errors.extend(online_namespace_errors(channel.get("namespaces"), "infra/centrifugo.json"))
+    errors.extend(online_namespace_errors(namespaces, "centrifugo CENTRIFUGO_CHANNEL_NAMESPACES"))
     api = services["api"]
     endpoint_path = urlparse(str(subscribe.get("endpoint", ""))).path
     want_endpoint = "http://%s:%s%s" % (api.get("privateHostname"), api.get("port"), endpoint_path)
@@ -1072,6 +1105,14 @@ def mutate_catalog(kind: str, data: dict) -> None:
         cent_vars["CENTRIFUGO_CHANNEL_NAMESPACES"] = cent_vars["CENTRIFUGO_CHANNEL_NAMESPACES"].replace(
             '"history_size":300', '"history_size":30', 1
         )
+    elif kind == "centrifugo-online-leaks":
+        # the roll-call namespace gains a client-readable presence table
+        cent_vars["CENTRIFUGO_CHANNEL_NAMESPACES"] = replace_once(
+            cent_vars["CENTRIFUGO_CHANNEL_NAMESPACES"],
+            '"name":"online","presence":true,',
+            '"name":"online","presence":true,"allow_presence_for_subscriber":true,',
+            kind,
+        )
     elif kind == "centrifugo-endpoint-drift":
         # the compose host instead of the Railway private one (built, not typed:
         # a literal compose address is a known gitleaks false positive)
@@ -1298,6 +1339,7 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("centrifugo-origins-dropped", "centrifugo CENTRIFUGO_CLIENT_ALLOWED_ORIGINS"),
     ("centrifugo-compose-name", "centrifugo CENTRIFUGO_HTTP_API_KEY"),
     ("centrifugo-namespaces-drift", "centrifugo CENTRIFUGO_CHANNEL_NAMESPACES != infra/centrifugo.json"),
+    ("centrifugo-online-leaks", "centrifugo CENTRIFUGO_CHANNEL_NAMESPACES online namespace must be presence-only"),
     ("centrifugo-endpoint-drift", "centrifugo CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT"),
     ("centrifugo-connection-meta-off", "centrifugo CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_INCLUDE_CONNECTION_META"),
     ("centrifugo-subscription-token-off", "centrifugo CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_ENABLED"),

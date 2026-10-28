@@ -9,6 +9,7 @@ import {
   dmPeerStatusDot,
   humanPresenceDot,
   statusDotTooltip,
+  withOwnConnection,
   type StatusDotTone,
 } from "./statusDot";
 
@@ -132,29 +133,92 @@ describe("생존 판정이 없는 에이전트: 호스트 연결 폴백", () => 
   });
 });
 
-describe("사람: 스스로 정한 자리만", () => {
-  it("자리 비움은 warn, 방해 금지는 danger", () => {
-    expect(humanPresenceDot({ presenceStatus: "away" }, NOW)).toEqual({
-      tone: "warn",
-      label: "자리 비움",
-    });
-    expect(humanPresenceDot({ presenceStatus: "dnd" }, NOW)).toEqual({
-      tone: "danger",
-      label: "방해 금지",
-    });
+describe("사람: 선언 상태가 먼저이고, 선언이 없으면 접속 여부가 정한다 (#4692)", () => {
+  it("자리 비움은 warn, 방해 금지는 danger — 접속 여부와 무관하다(선언이 이긴다)", () => {
+    for (const online of [undefined, true, false]) {
+      expect(humanPresenceDot({ presenceStatus: "away", online }, NOW)).toEqual({
+        tone: "warn",
+        label: "자리 비움",
+      });
+      expect(humanPresenceDot({ presenceStatus: "dnd", online }, NOW)).toEqual({
+        tone: "danger",
+        label: "방해 금지",
+      });
+    }
   });
 
-  it("만료된 방해 금지는 점이 아니다 (서버는 만료 때 이벤트를 보내지 않는다)", () => {
-    expect(humanPresenceDot({ presenceStatus: "dnd", dndUntilMs: NOW - 1 }, NOW)).toBeNull();
-    expect(humanPresenceDot({ presenceStatus: "dnd", dndUntilMs: NOW }, NOW)).toBeNull();
-    expect(humanPresenceDot({ presenceStatus: "dnd", dndUntilMs: NOW + 1 }, NOW)?.tone).toBe(
-      "danger"
+  it("방해 금지는 접속 중이어도 방해 금지다 — 「지금 핑 금지」라는 뜻이다(ADR-0160 D3)", () => {
+    expect(humanPresenceDot({ presenceStatus: "dnd", online: true }, NOW)?.tone).toBe("danger");
+  });
+
+  it("auto 이고 접속 중이면 채운 초록, 접속이 없으면 속 빈 고리 — 에이전트 점과 같은 문법", () => {
+    for (const presenceStatus of ["auto", undefined] as const) {
+      expect(humanPresenceDot({ presenceStatus, online: true }, NOW)).toEqual({
+        tone: "ok",
+        label: "온라인",
+      });
+      expect(humanPresenceDot({ presenceStatus, online: false }, NOW)).toEqual({
+        tone: "muted",
+        label: "오프라인",
+      });
+    }
+    // 같은 문법이라는 말의 뜻: 초록 = 살아 있다, 고리 = 꺼져 있다. 에이전트의 두 끝과 같은 톤이다.
+    expect(humanPresenceDot({ online: true }, NOW)?.tone).toBe(
+      agentLivenessDot({ state: "responsive", lastSignalAtMs: NOW }, NOW, false).tone
+    );
+    expect(humanPresenceDot({ online: false }, NOW)?.tone).toBe(
+      agentLivenessDot({ state: "inactive" }, NOW, false).tone
     );
   });
 
-  it("auto 와 모름에는 점이 없다 — 「온라인」 초록도 회색 오프라인도 근거가 없다", () => {
+  it("만료된 방해 금지는 선언이 아니다 — 서버는 만료 때 이벤트를 보내지 않으므로 접속 여부로 내려간다", () => {
+    const expired = (dndUntilMs: number, online?: boolean) =>
+      humanPresenceDot({ presenceStatus: "dnd", dndUntilMs, online }, NOW);
+    expect(expired(NOW - 1, true)?.tone).toBe("ok");
+    expect(expired(NOW, true)?.tone).toBe("ok"); // 지금 이 순간이 끝이다
+    expect(expired(NOW - 1, false)?.tone).toBe("muted");
+    expect(expired(NOW + 1, true)?.tone).toBe("danger"); // 아직 진행 중
+    // 접속 여부를 모르면 만료된 방해 금지는 점이 없다(예전과 같다).
+    expect(expired(NOW - 1)).toBeNull();
+    expect(expired(NOW)).toBeNull();
+  });
+
+  it("접속 여부를 모르면 점이 없다 — 모름은 꺼짐이 아니다(브로커가 느린 것만으로 모두가 꺼져 보이면 안 된다)", () => {
     expect(humanPresenceDot({ presenceStatus: "auto" }, NOW)).toBeNull();
+    expect(humanPresenceDot({ presenceStatus: "auto", online: undefined }, NOW)).toBeNull();
     expect(humanPresenceDot({}, NOW)).toBeNull();
+  });
+});
+
+describe("withOwnConnection: 자기 행의 접속 여부는 이 클라이언트의 연결이다 (#4692)", () => {
+  const SELF = "00000000-0000-7000-8000-0000000000aa";
+  const OTHER = "00000000-0000-7000-8000-0000000000bb";
+
+  it("자기 행만 바뀐다: 서버의 online 이 비어 있거나 틀려도 내 연결이 이긴다", () => {
+    expect(withOwnConnection({ id: SELF, online: undefined }, SELF, true).online).toBe(true);
+    expect(withOwnConnection({ id: SELF, online: false }, SELF, true).online).toBe(true);
+    expect(withOwnConnection({ id: SELF, online: true }, SELF, false).online).toBe(false);
+  });
+
+  it("남의 행은 그대로다 — 남의 접속은 서버 말이 전부이고, 내 연결 상태가 새어 들어가지 않는다", () => {
+    const row = { id: OTHER, online: undefined };
+    expect(withOwnConnection(row, SELF, true)).toBe(row);
+    expect(withOwnConnection({ id: OTHER, online: false }, SELF, true).online).toBe(false);
+  });
+
+  it("id 비교는 대소문자를 따지지 않는다(서버는 대문자, 세션은 소문자일 수 있다)", () => {
+    expect(withOwnConnection({ id: SELF.toUpperCase(), online: false }, SELF, true).online).toBe(
+      true
+    );
+  });
+
+  it("그 위에서 점이 그려진다: 내 연결이 끊기면 내 행은 속 빈 고리, 모르는 남의 행은 점이 없다", () => {
+    expect(
+      humanPresenceDot(withOwnConnection({ id: SELF, online: undefined }, SELF, false), NOW)?.tone
+    ).toBe("muted");
+    expect(
+      humanPresenceDot(withOwnConnection({ id: OTHER, online: undefined }, SELF, false), NOW)
+    ).toBeNull();
   });
 });
 
@@ -180,19 +244,65 @@ describe("dmPeerStatusDot: DM 상대 한 명", () => {
     ).toBe("warn");
   });
 
-  it("**회색(muted) 점은 에이전트에만 선다** — 사람에게는 어떤 입력으로도 회색이 나오지 않는다", () => {
+  it("사람의 회색(속 빈 고리)은 접속 여부가 `false` 로 **알려졌고** 살아 있는 선언이 없을 때만 선다 — 생존 판정·호스트 연결과 무관하다", () => {
+    // 예전 단정은 「회색은 에이전트에만」이었다. 그 전제는 명부가 접속 여부를 몰랐다는 것이었고(design-review
+    // #1889 H-3), 명부가 `online` 을 싣게 된 지금은 사람도 「꺼짐」을 말할 수 있다. 지키는 규칙은 더 좁아졌을 뿐
+    // 그대로다: 근거(`online === false`)가 없으면 어떤 입력으로도 사람에게 회색이 나오지 않는다.
+    const livenessInputs = [undefined, null, { state: "inactive" as const }];
     for (const presenceStatus of [undefined, "auto", "away", "dnd"] as const) {
       for (const dndUntilMs of [undefined, NOW - 1, NOW + 1]) {
-        for (const liveness of [undefined, null, { state: "inactive" as const }]) {
-          const dot = dmPeerStatusDot({
+        for (const liveness of livenessInputs) {
+          for (const online of [undefined, true]) {
+            const dot = dmPeerStatusDot({
+              ...base,
+              member: human({ presenceStatus, dndUntilMs, hostOnline: false, online }),
+              liveness,
+            });
+            expect(dot?.tone).not.toBe("muted");
+          }
+          // 접속 없음이 알려졌을 때: 선언이 없거나 만료됐을 때만 회색, 살아 있는 선언이 있으면 선언이 이긴다.
+          const offline = dmPeerStatusDot({
             ...base,
-            member: human({ presenceStatus, dndUntilMs, hostOnline: false }),
+            member: human({ presenceStatus, dndUntilMs, hostOnline: true, online: false }),
             liveness,
           });
-          expect(dot?.tone).not.toBe("muted");
+          const declaredAndLive =
+            presenceStatus === "away" ||
+            (presenceStatus === "dnd" && !(dndUntilMs !== undefined && dndUntilMs <= NOW));
+          expect(offline?.tone === "muted").toBe(!declaredAndLive);
         }
       }
     }
+  });
+
+  it("사람: 접속 중이면 초록, 접속 없음이면 고리 — DM 줄·머리가 읽는 같은 함수의 답이다", () => {
+    const input = { ...base, liveness: undefined };
+    expect(dmPeerStatusDot({ ...input, member: human({ online: true }) })).toEqual({
+      tone: "ok",
+      label: "온라인",
+    });
+    expect(dmPeerStatusDot({ ...input, member: human({ online: false }) })).toEqual({
+      tone: "muted",
+      label: "오프라인",
+    });
+    expect(dmPeerStatusDot({ ...input, member: human({}) })).toBeNull();
+  });
+
+  it("에이전트는 `online` 을 읽지 않는다 — 에이전트의 생존감은 서버의 생존 판정이다(ADR-0160 D4)", () => {
+    expect(
+      dmPeerStatusDot({
+        ...base,
+        member: agent({ online: true, hostOnline: false }),
+        liveness: undefined,
+      })
+    ).toBeNull();
+    expect(
+      dmPeerStatusDot({
+        ...base,
+        member: agent({ online: false, hostOnline: true }),
+        liveness: null,
+      })
+    ).toEqual({ tone: "ok", label: "연결됨" });
   });
 
   it("에이전트: 판정이 있으면 판정이 이긴다 — 호스트가 닿아 있어도 꺼짐은 회색이다", () => {

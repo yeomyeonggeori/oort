@@ -177,6 +177,20 @@ export interface RosterMember {
    */
   presenceStatus?: PresenceStatus;
   /**
+   * Availability ② (ADR-0160, #4692), human only: does this person have a live
+   * connection to the workspace right now? The second input of the dot
+   * (`f(presenceStatus, online)`), never stored and never the effective value.
+   *
+   * **ABSENT is not `false`.** The server omits the key for agents and for every
+   * row of a response whose availability it could not establish (no broker
+   * credential, broker slow or down), and an older server never sends it. So
+   * `undefined` means "unknown": draw no dot. Only `false` means the broker
+   * answered and there is no connection. Reading absence as `false` would paint
+   * every colleague offline whenever Centrifugo hiccups. Consumers go through
+   * `humanPresenceDot` rather than touching this.
+   */
+  online?: boolean;
+  /**
    * ADR-0124 증보 2: when a running DND ends (epoch ms). Present only while
    * `presenceStatus` is `dnd` with an expiry ahead; past it, treat the member
    * as `auto` (the server sends no event at expiry).
@@ -241,6 +255,14 @@ function sanitizeRosterMember(value: unknown): unknown {
   // than surfaced as a value the effective-dot logic would then have to guess at.
   if ("presenceStatus" in row && !isPresenceStatus(row.presenceStatus)) {
     const { presenceStatus: _unknown, ...rest } = row;
+    row = rest;
+  }
+  // Availability ② (#4692): only a boolean is a statement. Anything else (a string
+  // `"false"`, a number, null) drops the column and so reads as unknown, which is
+  // the honest reading of a value this client cannot interpret; it must never
+  // survive as a truthy value that draws a green dot.
+  if ("online" in row && typeof row.online !== "boolean") {
+    const { online: _unreadable, ...rest } = row;
     row = rest;
   }
   // Custom-status columns follow the same drop-the-column rule: a bad value
@@ -1796,10 +1818,11 @@ export async function fetchRoster(workspaceId: string): Promise<RosterMember[]> 
 //   GET /v1/workspaces/{ws}/presence   — the caller's own declared status
 //   PUT /v1/workspaces/{ws}/presence   — set it (single write path)
 //
-// This is the durable ③ half. Availability ② rides the ephemeral rail and never
-// comes back through this API; the connection ① fact is the client's own
-// `connStatus`. The effective dot is composed on the client via
-// `effectivePresence`.
+// This is the durable ③ half. Availability ② never comes back through THIS API:
+// it arrives as `online` on each roster row (read from the transport by the
+// server, #4692), and the connection ① fact is the client's own `connStatus`.
+// The effective dot is composed on the client via `effectivePresence` /
+// `humanPresenceDot`.
 
 /**
  * The four values that actually get rendered — `f(declared, available)`

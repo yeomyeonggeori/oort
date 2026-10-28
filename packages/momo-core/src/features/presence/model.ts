@@ -51,13 +51,34 @@ export function declaredStatusLabel(status: PresenceStatus): string {
 }
 
 /**
+ * How often a screen that draws people's dots re-reads the roster while it is in
+ * front of the person (#4692), in milliseconds.
+ *
+ * **This is the whole of "real time" for availability, and it is a choice, not a
+ * limit of the transport.** Availability is read by the server from Centrifugo's
+ * presence table when the roster is read, so a dot is as fresh as the last roster
+ * read. A push (Centrifugo join/leave on the roll-call) would be fresher and was
+ * rejected for this version: join/leave would hand every subscriber, a guest
+ * among them, the connect/disconnect stream of people outside their roster, which
+ * is exactly what ADR-0160 guard 5 forbids. Reading the roster they may already
+ * read has no such leak.
+ *
+ * 30 s matches the read-state refresh the same screens already run, and a dot
+ * that lags a person's arrival by at most that long is the accepted cost. The
+ * refresh runs only while the screen is foreground (never in the background).
+ */
+export const AVAILABILITY_REFRESH_MS = 30_000;
+
+/**
  * Declared presence as shown on someone else's profile, not on the self radio.
  *
  * `away` and `dnd` are durable facts the person set, so naming them is true.
- * `auto` is not named: it means "defer to live availability", and the web
- * roster has no availability boolean for other members (design-review #1889
- * H-3). `declaredStatusLabel` words `auto` as 온라인 because that is what it
- * renders **while this client is connected** — that function is the self
+ * `auto` is not named **here**: it means "defer to live availability", and this
+ * function sees only the declared half. The availability half is the roster row's
+ * `online` (#4692); a surface that has the whole row composes both through
+ * `humanPresenceDot` (statusDot.ts) and names `온라인`/`오프라인` only when
+ * `online` is known. `declaredStatusLabel` words `auto` as 온라인 because that is
+ * what it renders **while this client is connected** — that function is the self
  * radio's copy, not a roster fact.
  */
 export function otherMemberDeclaredPresenceLabel(

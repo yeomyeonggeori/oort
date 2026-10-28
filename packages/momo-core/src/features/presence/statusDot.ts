@@ -7,9 +7,11 @@
 //
 // ## 무엇이 점이 되는가
 //
-//   사람     스스로 정한 **자리 비움**(warn)·**방해 금지**(danger)만. 웹 명부에는 다른 사람의 접속 여부가
-//            없어서 「온라인」 초록 점은 근거가 없다(design-review #1889 H-3). 회색 오프라인 점도 없다:
-//            로스터가 그것을 모른다.
+//   사람     스스로 정한 **자리 비움**(warn)·**방해 금지**(danger)이 먼저이고, 그렇지 않으면(auto) **접속 여부**가 정한다
+//            (#4692, ADR-0160 D3 `f(선언, 가용성)`): 접속 중 = 채운 초록(ok), 접속 없음 = 속 빈 고리(muted) - 에이전트
+//            점과 같은 문법이다(초록 = 살아 있다, 고리 = 꺼져 있다). 가용성은 서버가 전송(Centrifugo presence)에서
+//            읽어 명부 행에 `online` 으로 싣는다. **모르면(필드 없음) 점이 없다** - 명부가 접속 여부를 모를 때 초록이나
+//            고리를 그리면 근거 없는 점이다(design-review #1889 H-3). 방해 금지는 접속 중이어도 방해 금지로 보인다.
 //   에이전트 서버가 파생한 **생존 판정**(`livenessView`)을 점으로 옮긴다(Buzz식, 소유자 결정 2026-10-17
 //            「Buzz식: 초록=살아 있음, 회색 고리=꺼짐」). 낱말이 곁에 없는 자리라 **모양이 말한다**:
 //
@@ -32,13 +34,13 @@
 // 툴팁이 말한다(웹 `DmAvatar`, 폰 `Row`). muted 는 웹에서 속이 빈 고리로 그려 모양으로도 갈린다.
 // =============================================================================
 
-import type { AgentLiveness, RosterMember } from "../../lib/api";
+import { uuidEq, type AgentLiveness, type RosterMember } from "../../lib/api";
 import {
   livenessToneFor,
   livenessView,
   type LivenessView,
 } from "../agents/liveness";
-import { declaredStatusLabel } from "./model";
+import { declaredStatusLabel, effectivePresenceLabel } from "./model";
 
 export type StatusDotTone = "ok" | "warn" | "danger" | "muted";
 
@@ -91,21 +93,53 @@ export function agentHostDot(hostOnline: boolean | undefined): StatusDot | null 
 }
 
 /**
- * 사람: 스스로 정한 자리 비움·방해 금지만. 방해 금지는 만료 시각이 지나면 자동(auto)으로 본다 - 서버는
- * 만료 때 이벤트를 보내지 않는다.
+ * 사람: 선언 상태가 먼저이고(방해 금지 > 자리 비움), 선언이 없으면(auto) 접속 여부가 정한다.
+ *
+ *   방해 금지  접속 중이어도 방해 금지(danger). 만료 시각이 지나면 자동(auto)으로 본다 - 서버는 만료 때 이벤트를
+ *             보내지 않는다. 만료된 방해 금지는 「점 없음」이 아니라 접속 여부로 내려간다.
+ *   자리 비움  warn
+ *   auto      `online === true` 채운 초록(ok) · `online === false` 속 빈 고리(muted) · 모르면(`undefined`) **점 없음**
+ *
+ * `online` 이 `undefined` 인 것은 「꺼짐」이 아니라 「모름」이다(서버가 가용성을 못 읽은 응답, 구서버, 에이전트).
+ * 모름을 고리로 그리면 브로커가 잠깐 느린 것만으로 모든 동료가 꺼진 것처럼 보인다.
  */
 export function humanPresenceDot(
-  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs">,
+  member: Pick<RosterMember, "presenceStatus" | "dndUntilMs" | "online">,
   nowMs: number
 ): StatusDot | null {
   if (member.presenceStatus === "away") {
     return { tone: "warn", label: declaredStatusLabel("away") };
   }
-  if (member.presenceStatus === "dnd") {
-    if (member.dndUntilMs !== undefined && member.dndUntilMs <= nowMs) return null;
+  if (
+    member.presenceStatus === "dnd" &&
+    !(member.dndUntilMs !== undefined && member.dndUntilMs <= nowMs)
+  ) {
     return { tone: "danger", label: declaredStatusLabel("dnd") };
   }
+  if (member.online === true) {
+    return { tone: "ok", label: effectivePresenceLabel("online") };
+  }
+  if (member.online === false) {
+    return { tone: "muted", label: effectivePresenceLabel("offline") };
+  }
   return null;
+}
+
+/**
+ * 점을 그릴 행. **보는 사람 자기 행**의 접속 여부는 이 클라이언트 자신의 연결이다(`connected`): 자기 프레즌스
+ * 컨트롤이 이미 `effectivePresence(선언, 연결됨)` 으로 그렇게 만든다. 서버의 `online` 은 브로커가 본 것이라
+ * 방금 앱을 연 사람에게는 출석부 구독이 끝나기 전까지 비어 있고, 출석부 구독이 실패한 채 연결만 살아 있으면 거짓이
+ * 된다. 남의 행은 그대로 돌려준다(남의 접속은 서버 말이 전부다).
+ *
+ * 자기 연결(①)이 프레즌스(②)가 되는 것은 **자기 행의 점에서만**이고(ADR-0160 가드 6은 연결 점(WorkspaceRail)이
+ * 신호가 되는 것을 막는다), 남에게 나가는 값은 아무것도 바뀌지 않는다.
+ */
+export function withOwnConnection<T extends Pick<RosterMember, "id" | "online">>(
+  member: T,
+  selfMemberId: string,
+  connected: boolean
+): T {
+  return uuidEq(member.id, selfMemberId) ? { ...member, online: connected } : member;
 }
 
 /**
@@ -116,7 +150,7 @@ export function humanPresenceDot(
 export function dmPeerStatusDot(input: {
   member: Pick<
     RosterMember,
-    "kind" | "hostOnline" | "presenceStatus" | "dndUntilMs"
+    "kind" | "hostOnline" | "presenceStatus" | "dndUntilMs" | "online"
   > | null;
   liveness: Pick<AgentLiveness, "state" | "lastSignalAtMs"> | null | undefined;
   mayAct: boolean;

@@ -328,6 +328,57 @@ describe("멤버 프로필 커스텀 상태 (#1889)", () => {
     expect(dialog.textContent).not.toContain("온라인");
   });
 
+  // #4692: the roster now carries availability, so `auto` can be named once the server has said so. Unknown
+  // availability (the case above) still says nothing.
+  it.each([
+    [true, "온라인", "ok"],
+    [false, "오프라인", "muted"],
+  ] as const)("says what the roster knows for auto: online=%s → %s", async (online, word, tone) => {
+    const person = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      presenceStatus: "auto",
+      online,
+    });
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID, roster: [OWNER, ADMIN, person, AGENT] });
+    const dialog = await waitForDialog();
+    expect(dialog.textContent).toContain(`@intern-kim · ${word}`);
+    expect(dialog.querySelector('[data-testid="presence-dot"]')?.getAttribute("data-tone")).toBe(tone);
+  });
+
+  it("a declared away wins over a known connection, in the word and in the dot", async () => {
+    const person = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      presenceStatus: "away",
+      online: true,
+    });
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID, roster: [OWNER, ADMIN, person, AGENT] });
+    const dialog = await waitForDialog();
+    expect(dialog.textContent).toContain("@intern-kim · 자리 비움");
+    expect(dialog.textContent).not.toContain("온라인");
+    expect(dialog.querySelector('[data-testid="presence-dot"]')?.getAttribute("data-tone")).toBe("warn");
+  });
+
+  it("an agent's profile carries no person's dot or word, whatever its row says", async () => {
+    const agent = rosterMember({ ...AGENT, online: true });
+    mountProfile({ viewer: OWNER, targetId: AGENT_ID, roster: [OWNER, ADMIN, INTERN, agent] });
+    const dialog = await waitForDialog();
+    expect(dialog.querySelector('[data-testid="presence-dot"]')).toBeNull();
+    expect(dialog.textContent).not.toContain("온라인");
+  });
+
+  it("the viewer's own profile follows this client's connection, not the broker's view of it", async () => {
+    mountProfile({ viewer: OWNER, targetId: OWNER_ID, roster: [OWNER, ADMIN, INTERN, AGENT] });
+    const dialog = await waitForDialog();
+    // The roster row says nothing about the viewer; the socket is up.
+    expect(dialog.textContent).toContain("@demo · 온라인");
+  });
+
   it("wraps a long custom status instead of truncating mid-word", async () => {
     const long = rosterMember({
       id: MEMBER_ID,

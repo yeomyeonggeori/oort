@@ -32,6 +32,9 @@
 //! | `srv_t2_1_a_grant_needs_live_channel_membership` | drop `is_channel_member` from the grant route, or weaken it to workspace membership |
 //! | `srv_t2_2_the_typing_channel_subscribes_by_the_message_channels_rule` | give `typing:` its own subscribe rule, or forget to teach `parse_channel` about it (the namespace would then be unsubscribable — and unauthorized if it ever were) |
 //! | `srv_t2_3_typing_writes_nothing_at_all` | route 휘발 신호 through the outbox, or let it take a `message.seq` |
+//! | `the_online_rollcall_counts_only_people_the_roster_could_list` | drop `kind = 'human'` from `is_active_human_member` (the agent probe is allowed), or drop its `workspace_membership` join (the unlisted-person probe is allowed), or let `parse_channel` read `online:ws<WS>.<CH>` as a channel rail |
+//! | `the_online_rollcall_predicate_is_the_rosters_row_filter_for_humans` | change either the roster's row filter or `is_active_human_member` so the two stop naming the same people |
+//! | `the_online_rollcall_writes_nothing` | give the roll-call subscribe path an outbox/message/`channel_seq` write |
 //!
 //! ## Two things this file learned the hard way
 //!
@@ -69,8 +72,12 @@ use momo_auth::{CentrifugoConnectionClaims, REALTIME_META_SCHEMA};
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use momo_db::with_tenant_tx;
 use momo_db::PgPool;
-use momo_messaging::{create_channel, ChannelKind, NewChannel};
+use momo_messaging::{
+    create_channel, is_active_human_member, list_workspace_roster, ChannelKind, MemberKind,
+    NewChannel,
+};
 use momo_server::config::{EphemeralSettings, RealtimeSettings};
 use momo_server::routes::realtime::PROXY_SECRET_HEADER;
 use momo_server::{build_app, AppState};
@@ -880,4 +887,432 @@ async fn srv_t2_3_typing_writes_nothing_at_all() {
     let foreign = Uuid::new_v4();
     let (status, body) = post_typing(&http, &base, &token, tenant.workspace, foreign, &grant).await;
     assert_eq!(status, 403, "{body}");
+}
+
+// ---------------------------------------------------------------------------
+// 4 — the online roll-call (ADR-0160 ②, #4692)
+// ---------------------------------------------------------------------------
+//
+// `online:ws<WS>` is the one rail with no conversation in its name. Clients
+// subscribe to it only to be COUNTED; the api reads Centrifugo's presence table
+// and the roster reports `online` on rows it already returns. So the question this
+// section answers is not "who may read the roll-call" (nobody) but "who may be IN
+// it" — and the answer has to be exactly the people the roster could list.
+
+/// Everyone the roll-call has to tell apart, in ONE workspace, each holding a
+/// **live realtime credential** so that a refusal below can only come from the
+/// roll-call's own rule and never from the credential gate that runs first.
+struct Crowd {
+    workspace: Uuid,
+    member: CrowdMember,
+    guest: CrowdMember,
+    /// An active human whose credential is alive and who has **no
+    /// `workspace_membership` row**: the roster would not list them. Their claims
+    /// are minted while the row exists (so the server itself certifies a live
+    /// credential), and the row is deleted before the probe.
+    unlisted: CrowdMember,
+    agent: CrowdMember,
+}
+
+struct CrowdMember {
+    id: Uuid,
+    claims: CentrifugoConnectionClaims,
+}
+
+/// An agent member with a **live realtime credential**: an `agent_bearer` row
+/// carrying `realtime:subscribe`, which is exactly what the proxy's credential
+/// gate accepts for an agent (it needs one to read its `agentwork:` stream).
+///
+/// Returns the agent and the credential row id. The agent cannot mint its
+/// connection token over HTTP (`POST /v1/auth/realtime-token` is not in
+/// `required_agent_scope`), so the caller signs one with the same function the
+/// server uses — the claims are identical to what Centrifugo would forward.
+async fn seed_agent_with_realtime_credential(
+    su: &PgPool,
+    workspace: Uuid,
+    owner: Uuid,
+) -> (Uuid, Uuid) {
+    let agent = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', $3, $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(format!("agent-{}", agent.simple()))
+    .execute(su)
+    .await
+    .expect("seed agent member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, \
+                            max_concurrent_runs, max_run_steps, owner_human_id) \
+         VALUES ($1, $2, 'hermes-agent', 'https://agent.example.test/v1', 4, 50, $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(owner)
+    .execute(su)
+    .await
+    .expect("seed agent");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, 'member')",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("seed agent workspace membership");
+    let secret = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
+    let bearer = format!("momo_agent_v1.{workspace}.{secret}");
+    let credential: Uuid = sqlx::query_scalar(
+        "INSERT INTO token (workspace_id, kind, actor_member_id, subject_member_id, \
+                            token_hash, scopes, label) \
+         VALUES ($1, 'agent_bearer', $2, NULL, digest($3::text, 'sha256'), \
+                 ARRAY['realtime:subscribe']::text[], 'online-rollcall-conformance') \
+         RETURNING id",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .bind(&bearer)
+    .fetch_one(su)
+    .await
+    .expect("seed agent realtime credential");
+    (agent, credential)
+}
+
+/// The connection claims the server would have minted for this credential.
+fn sign_connection_claims(
+    member: Uuid,
+    workspace: Uuid,
+    credential: Uuid,
+) -> CentrifugoConnectionClaims {
+    let issued = momo_auth::sign_centrifugo_connection(
+        member,
+        workspace,
+        credential,
+        momo_auth::CONNECTION_TOKEN_TTL_SECONDS,
+        TEST_CENT_TOKEN_HMAC,
+    )
+    .expect("sign a connection token");
+    jsonwebtoken::decode::<CentrifugoConnectionClaims>(
+        &issued.token,
+        &jsonwebtoken::DecodingKey::from_secret(TEST_CENT_TOKEN_HMAC.as_bytes()),
+        &jsonwebtoken::Validation::new(jsonwebtoken::Algorithm::HS256),
+    )
+    .expect("Centrifugo must be able to verify the connection token")
+    .claims
+}
+
+async fn seed_crowd(su: &PgPool, http: &reqwest::Client, base: &str) -> Crowd {
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(workspace.to_string())
+        .execute(su)
+        .await
+        .expect("seed workspace");
+
+    let (member_id, member_email) = seed_member(su, workspace, "member").await;
+    let (guest_id, guest_email) = seed_member(su, workspace, "guest").await;
+    sqlx::query("UPDATE workspace_membership SET role = 'guest' WHERE member_id = $1")
+        .bind(guest_id)
+        .execute(su)
+        .await
+        .expect("make the second person a guest");
+    let (unlisted_id, unlisted_email) = seed_member(su, workspace, "unlisted").await;
+    let (agent_id, agent_credential) =
+        seed_agent_with_realtime_credential(su, workspace, member_id).await;
+
+    let member_token = login(http, base, workspace, &member_email).await;
+    let guest_token = login(http, base, workspace, &guest_email).await;
+    let unlisted_token = login(http, base, workspace, &unlisted_email).await;
+    let member = connection_claims(http, base, &member_token, "the owner").await;
+    let guest = connection_claims(http, base, &guest_token, "the guest").await;
+    let unlisted = connection_claims(http, base, &unlisted_token, "the soon-unlisted person").await;
+    let agent = sign_connection_claims(agent_id, workspace, agent_credential);
+
+    // Only now take the unlisted person off the roster. Their credential, their
+    // member row and their `active` status are all untouched.
+    sqlx::query("DELETE FROM workspace_membership WHERE member_id = $1")
+        .bind(unlisted_id)
+        .execute(su)
+        .await
+        .expect("take the person off the roster");
+
+    Crowd {
+        workspace,
+        member: CrowdMember {
+            id: member_id,
+            claims: member,
+        },
+        guest: CrowdMember {
+            id: guest_id,
+            claims: guest,
+        },
+        unlisted: CrowdMember {
+            id: unlisted_id,
+            claims: unlisted,
+        },
+        agent: CrowdMember {
+            id: agent_id,
+            claims: agent,
+        },
+    }
+}
+
+/// The rule: you may be counted iff the roster could list you.
+///
+/// Every actor holds a live credential, so the only gate that can refuse them is
+/// the roll-call's own — which the literal pins, exactly as `CHANNEL_RULE_DENIAL`
+/// pins the channel rule above.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_online_rollcall_counts_only_people_the_roster_could_list() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let (cent_url, _captured) = spawn_mock_centrifugo().await;
+    let base = start_server(app_pool.clone(), &cent_url).await;
+    let http = reqwest::Client::new();
+    let crowd = seed_crowd(&su, &http, &base).await;
+    let rollcall = momo_ephemeral::online_channel(crowd.workspace);
+
+    // -- who may be counted ------------------------------------------------
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &crowd.member.claims, &rollcall).await,
+        "an active member → online:",
+    );
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &crowd.guest.claims, &rollcall).await,
+        "a GUEST → online: (guests are on the roster of the people who share a channel \
+         with them, so they must be countable; what a guest may SEE is the roster's job)",
+    );
+
+    // -- who may not -------------------------------------------------------
+    // An agent holds a live realtime credential (it needs one for `agentwork:`)
+    // and is an active member. Availability is a human signal (ADR-0160 D4).
+    assert_eq!(
+        deny_reason(
+            &subscribe_proxy(&http, &base, &crowd.agent.claims, &rollcall).await,
+            "an agent → online:",
+        ),
+        "not an active member of this workspace",
+        "an agent must be refused by the roll-call's own rule, not by the credential gate"
+    );
+    // The positive control for that probe: the SAME agent credential is accepted
+    // on the rail agents do use, so the refusal above measured the rule and not a
+    // dead credential.
+    let own_work_stream = format!(
+        "agentwork:ws{}.{}",
+        crowd.workspace.to_string().to_uppercase(),
+        crowd.agent.id.to_string().to_uppercase()
+    );
+    assert_allowed(
+        &subscribe_proxy(&http, &base, &crowd.agent.claims, &own_work_stream).await,
+        "the same agent → its own agentwork: stream",
+    );
+    // An active human with a live credential whom the roster would NOT list.
+    assert_eq!(
+        deny_reason(
+            &subscribe_proxy(&http, &base, &crowd.unlisted.claims, &rollcall).await,
+            "a person off the roster → online:",
+        ),
+        "not an active member of this workspace",
+        "someone the roster would not list must not be countable — otherwise the \
+         roll-call knows a person the roster is forbidden to mention"
+    );
+
+    // -- the shape rules ---------------------------------------------------
+    // A conversation-shaped spelling is not the roll-call and is not a channel
+    // rail either: it fails closed as an unrecognised name.
+    let some_channel = Uuid::new_v4();
+    let conversation_shaped = format!("{rollcall}.{}", some_channel.to_string().to_uppercase());
+    assert_eq!(
+        deny_reason(
+            &subscribe_proxy(&http, &base, &crowd.member.claims, &conversation_shaped).await,
+            "an active member → online:ws<WS>.<CH>",
+        ),
+        "unrecognized channel"
+    );
+
+    // -- another tenant ----------------------------------------------------
+    // Someone with a perfectly live credential in workspace B asks for A's
+    // roll-call. The proxy opens the tenant transaction on the workspace NAMED BY
+    // THE CHANNEL, where B's token row is invisible, so the credential gate
+    // refuses first: fail-closed, and a different gate from the rule above.
+    let other = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(other)
+        .bind(other.to_string())
+        .execute(&su)
+        .await
+        .expect("seed the other workspace");
+    let (_, other_email) = seed_member(&su, other, "stranger").await;
+    let other_token = login(&http, &base, other, &other_email).await;
+    let other_claims =
+        connection_claims(&http, &base, &other_token, "the other tenant's member").await;
+    assert_allowed(
+        &subscribe_proxy(
+            &http,
+            &base,
+            &other_claims,
+            &momo_ephemeral::online_channel(other),
+        )
+        .await,
+        "the other tenant's member → their OWN roll-call",
+    );
+    assert_eq!(
+        deny_reason(
+            &subscribe_proxy(&http, &base, &other_claims, &rollcall).await,
+            "the other tenant's member → this workspace's roll-call",
+        ),
+        CREDENTIAL_GATE_DENIAL,
+        "another tenant's credential dies at the credential gate"
+    );
+}
+
+/// "The roster could list you" is not asserted by reading two SQL strings side by
+/// side; it is asserted on rows. For a workspace holding every kind of member,
+/// the people `is_active_human_member` accepts must be exactly the human rows the
+/// roster returns to a non-guest viewer.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_online_rollcall_predicate_is_the_rosters_row_filter_for_humans() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let (cent_url, _captured) = spawn_mock_centrifugo().await;
+    let base = start_server(app_pool.clone(), &cent_url).await;
+    let http = reqwest::Client::new();
+    let crowd = seed_crowd(&su, &http, &base).await;
+    let workspace = crowd.workspace;
+
+    // Add the shapes `seed_crowd` does not cover.
+    let (suspended, _) = seed_member(&su, workspace, "suspended").await;
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(suspended)
+        .execute(&su)
+        .await
+        .expect("suspend");
+    let (deleted, _) = seed_member(&su, workspace, "deleted").await;
+    sqlx::query("UPDATE member SET deleted_at = now() WHERE id = $1")
+        .bind(deleted)
+        .execute(&su)
+        .await
+        .expect("soft-delete");
+    let (invited, _) = seed_member(&su, workspace, "invited").await;
+    sqlx::query("UPDATE member SET status = 'invited' WHERE id = $1")
+        .bind(invited)
+        .execute(&su)
+        .await
+        .expect("invite");
+
+    let everyone = [
+        crowd.member.id,
+        crowd.guest.id,
+        crowd.unlisted.id,
+        crowd.agent.id,
+        suspended,
+        deleted,
+        invited,
+        // a member of no workspace at all
+        Uuid::new_v4(),
+    ];
+    let counted = with_tenant_tx(&app_pool, workspace, move |conn| {
+        Box::pin(async move {
+            let mut counted = Vec::new();
+            for member in everyone {
+                if is_active_human_member(conn, workspace, member).await? {
+                    counted.push(member);
+                }
+            }
+            Ok::<_, momo_db::DbError>(counted)
+        })
+    })
+    .await
+    .expect("roll-call predicate");
+    let viewer = crowd.member.id;
+    let listed_humans: Vec<Uuid> = with_tenant_tx(&app_pool, workspace, move |conn| {
+        Box::pin(
+            async move { list_workspace_roster(conn, workspace, viewer, false, None, 200).await },
+        )
+    })
+    .await
+    .expect("roster")
+    .into_iter()
+    .filter(|row| row.kind == MemberKind::Human)
+    .map(|row| row.id)
+    .collect();
+
+    let mut counted_sorted = counted.clone();
+    counted_sorted.sort();
+    let mut listed_sorted = listed_humans.clone();
+    listed_sorted.sort();
+    assert_eq!(
+        counted_sorted, listed_sorted,
+        "the people the roll-call accepts must be exactly the humans the roster lists"
+    );
+    // …and the set is not trivially empty or trivially everyone.
+    assert_eq!(counted.len(), 2, "the owner and the guest: {counted:?}");
+    assert!(counted.contains(&crowd.member.id) && counted.contains(&crowd.guest.id));
+    for refused in [
+        crowd.unlisted.id,
+        crowd.agent.id,
+        suspended,
+        deleted,
+        invited,
+    ] {
+        assert!(
+            !counted.contains(&refused),
+            "{refused} must not be countable"
+        );
+    }
+}
+
+/// The roll-call is subscribed to and read, never written: a round of allowed and
+/// refused subscribes leaves the spine byte-identical (invariants #3 and #4).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn the_online_rollcall_writes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let (cent_url, captured) = spawn_mock_centrifugo().await;
+    let base = start_server(app_pool.clone(), &cent_url).await;
+    let http = reqwest::Client::new();
+    let crowd = seed_crowd(&su, &http, &base).await;
+    let channel = create_channel(
+        &app_pool,
+        crowd.workspace,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: format!("rollcall-{}", Uuid::new_v4()),
+            topic: None,
+            created_by: crowd.member.id,
+        },
+    )
+    .await
+    .expect("create a channel to watch the spine through");
+    let rollcall = momo_ephemeral::online_channel(crowd.workspace);
+
+    let before = counts(&su, crowd.workspace, channel.id).await;
+    for _ in 0..5 {
+        for actor in [
+            &crowd.member.claims,
+            &crowd.guest.claims,
+            &crowd.agent.claims,
+            &crowd.unlisted.claims,
+        ] {
+            let _ = subscribe_proxy(&http, &base, actor, &rollcall).await;
+        }
+    }
+    let after = counts(&su, crowd.workspace, channel.id).await;
+    assert_eq!(
+        after, before,
+        "subscribing to the roll-call must not touch outbox / message / channel_seq"
+    );
+    assert!(
+        captured.lock().expect("sink").is_empty(),
+        "and the api published nothing to Centrifugo either: the roll-call is read, never written"
+    );
 }
