@@ -519,4 +519,61 @@ mod tests {
         assert_eq!(argument_i64(&arguments, "before"), Some(7));
         assert_eq!(argument_i64(&arguments, "cursor"), None);
     }
+
+    /// Each tool needs exactly the scope — and is exactly as read-only as the method — of the REST
+    /// row it wraps, read from the closed table (`momo_auth::dev_token::DEV_ROUTE_TABLE`), not from
+    /// a copy: a tool whose scope drifted from its row would let a token reach through MCP what
+    /// the table refuses it on REST (ADR-0216 D4 · D5, R14 b). The oracle below is spelled out by
+    /// hand; the catalog and the table are both the code under test.
+    #[test]
+    fn every_tool_needs_the_scope_and_the_method_class_of_the_rest_row_it_wraps() {
+        use momo_auth::dev_token::{required_dev_scope, DEV_SCOPES};
+        use momo_mcp::human::HUMAN_TOOL_CATALOG;
+
+        let rows = [
+            (TOOL_WHOAMI, "GET", "/v1/workspaces/{ws}/dev-access/self"),
+            (TOOL_CHANNELS, "GET", "/v1/workspaces/{ws}/channels"),
+            (
+                TOOL_READ,
+                "GET",
+                "/v1/workspaces/{ws}/channels/{ch}/messages",
+            ),
+            (
+                TOOL_READ,
+                "GET",
+                "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies",
+            ),
+            (
+                TOOL_POST,
+                "POST",
+                "/v1/workspaces/{ws}/channels/{ch}/messages",
+            ),
+            (TOOL_INBOX, "GET", "/v1/workspaces/{ws}/inbox"),
+        ];
+        let mut covered = std::collections::BTreeSet::new();
+        for (tool, method, template) in rows {
+            let descriptor = HUMAN_TOOL_CATALOG
+                .iter()
+                .find(|descriptor| descriptor.name == tool)
+                .unwrap_or_else(|| panic!("{tool} is not in the catalog"));
+            assert_eq!(
+                Some(descriptor.required_scope),
+                required_dev_scope(method, template),
+                "{tool} ↔ {method} {template}"
+            );
+            let annotations = descriptor.annotations().expect("every tool is annotated");
+            assert_eq!(
+                annotations.read_only,
+                method == "GET",
+                "{tool}: readOnlyHint follows the wrapped row's method"
+            );
+            assert!(DEV_SCOPES.contains(&descriptor.required_scope), "{tool}");
+            covered.insert(tool);
+        }
+        assert_eq!(
+            covered.len(),
+            HUMAN_TOOL_CATALOG.len(),
+            "a catalog tool has no row in this oracle"
+        );
+    }
 }

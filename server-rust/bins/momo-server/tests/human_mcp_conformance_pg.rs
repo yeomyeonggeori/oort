@@ -1776,6 +1776,12 @@ async fn an_admitted_call_leaves_one_used_row_for_the_template_and_no_tool_conte
     .fetch_one(&s.w.su)
     .await
     .expect("the audit text");
+    // The scanner can see: the rows it reads hold the door's own words (so an empty or blind
+    // read would not pass for "nothing leaked").
+    assert!(
+        everything.contains("auth.dev_token.used") && everything.contains("/v1/mcp/me"),
+        "the audit scan read nothing: {everything:?}"
+    );
     for forbidden in [
         secret_text.to_string(),
         s.a.to_string(),
