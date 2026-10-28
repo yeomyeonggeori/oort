@@ -21839,3 +21839,767 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
     );
     assert_eq!(approval_status_3708(&su, card).await, "approved");
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v5 U-e (#4703) — message.pin / message.unpin
+// ---------------------------------------------------------------------------
+//
+// Sabotage (each goes red on its own):
+//  * drop `bodySha256` from the pins                         -> the edit/delete test
+//  * write the pin with a direct INSERT, not `set_pin_in_tx`  -> the full-channel test
+//  * drop the `m.type = 'text'` condition                     -> the refusal table (the card line)
+//  * drop the run-channel join                                -> the refusal table (the other room)
+//  * drop `message.pin|unpin` from `opens_in_app`             -> `push_conformance_pg` / `momo-agent` tables
+
+/// One plain text message the fixture's human writes in `channel`; its id.
+async fn human_says(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    channel: Uuid,
+    body: &str,
+) -> Uuid {
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{channel}/messages",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": body}))
+        .send()
+        .await
+        .expect("message send")
+        .json()
+        .await
+        .expect("message body");
+    Uuid::parse_str(
+        sent["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no id in {sent}")),
+    )
+    .expect("a message id")
+}
+
+/// A text message written through the raw spine: nothing reads it as a mention, so a message in a
+/// DM with an agent raises no job for it (a message sent over REST into such a DM does — and the
+/// agent's claim would then take that job instead of the one a test means to claim).
+async fn raw_says(su: &PgPool, fixture: &Fixture, channel: Uuid, body: &str) -> Uuid {
+    let (workspace, human, body) = (fixture.workspace, fixture.human, body.to_string());
+    momo_db::with_tenant_tx(su, workspace, move |conn| {
+        let body = body.clone();
+        Box::pin(async move {
+            let sent = momo_messaging::send_message_in_tx(
+                conn,
+                workspace,
+                momo_messaging::NewMessage::text(channel, human, body),
+            )
+            .await?;
+            Ok::<_, momo_db::DbError>(sent.message.id)
+        })
+    })
+    .await
+    .expect("a raw text message")
+}
+
+/// `(message, pinned_by)` of the channel's pins, oldest first.
+async fn pins_in(su: &PgPool, channel: Uuid) -> Vec<(Uuid, Uuid)> {
+    sqlx::query_as(
+        "SELECT message_id, pinned_by FROM message_pin WHERE channel_id=$1 ORDER BY pinned_at, id",
+    )
+    .bind(channel)
+    .fetch_all(su)
+    .await
+    .expect("the channel's pins")
+}
+
+async fn message_props(su: &PgPool, message: Uuid) -> Value {
+    sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(message)
+        .fetch_one(su)
+        .await
+        .expect("message props")
+}
+
+fn card_row(props: &Value, label: &str) -> Option<String> {
+    props["action"]["rows"]
+        .as_array()?
+        .iter()
+        .find(|row| row["label"] == label)
+        .and_then(|row| row["value"].as_str().map(str::to_string))
+}
+
+async fn pin_broadcasts(su: &PgPool, workspace: Uuid, event: &str, message: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->>'type' = $2 \
+           AND payload->'data'->'payload'->>'message_id' = $3",
+    )
+    .bind(workspace)
+    .bind(event)
+    .bind(message.to_string())
+    .fetch_one(su)
+    .await
+    .expect("count pin broadcasts")
+}
+
+async fn audit_details_of(su: &PgPool, workspace: Uuid, action: &str) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action=$2 ORDER BY created_at",
+    )
+    .bind(workspace)
+    .bind(action)
+    .fetch_all(su)
+    .await
+    .expect("audit details")
+}
+
+/// Propose `action_id` for `message` (the human mentions the agent, the agent claims the job
+/// and proposes), answering the raw tool result.
+async fn propose_pin(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    action_id: &str,
+    message: Uuid,
+) -> (u16, Value) {
+    try_propose_action_3706(
+        client,
+        base,
+        su,
+        fixture,
+        action_id,
+        json!({"messageId": message.to_string()}),
+    )
+    .await
+}
+
+/// **message.pin, end to end (증보 v5 U-e).** The card is the server's reading of the stored
+/// message (channel, author, length, the pin count), a plain member's tap is refused, and an
+/// admin's tap pins it **as themselves** through the person's own function: one `message_pin` row
+/// by the approver, one `message.pinned` broadcast, the same audit row a hand pin writes plus
+/// `via_agent` and `approval_id` — and not one word of the message in any audit row. Pinning
+/// again is a success that changes nothing; `message.unpin` mirrors it and says who pinned.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_pin_is_the_approvers_own_pin_and_no_audit_row_holds_a_word_of_the_message() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let ws = fixture.workspace;
+    let secret_word = format!("달무리구호{}", &Uuid::new_v4().simple().to_string()[..12]);
+    let text = format!("새 분기 일정은 마지막 금요일에 확정돼요. {secret_word}");
+    let said = human_says(&client, &base, &fixture, fixture.channel, &text).await;
+
+    // ---- the proposal: a card drawn from the stored message ---------------------------
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", said).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+    let props = message_props(&su, card).await;
+    assert_eq!(props["action"]["id"], json!("message.pin"));
+    assert_eq!(props["action"]["required_role"], json!("admin"));
+    assert_eq!(
+        card_row(&props, "채널").as_deref(),
+        Some(format!("#{}", fixture_channel_name(&su, fixture.channel).await).as_str())
+    );
+    assert!(card_row(&props, "쓴 사람").is_some_and(|who| who.contains("Tools Human")));
+    assert_eq!(
+        card_row(&props, "글자 수").as_deref(),
+        Some(format!("{}자", text.chars().count()).as_str())
+    );
+    assert_eq!(card_row(&props, "지금 고정된 수").as_deref(), Some("0/100"));
+    assert!(
+        card_row(&props, "전문").is_none(),
+        "a short message needs no 「read it whole」 row"
+    );
+    assert_eq!(props["action"]["preview"]["kind"], json!("message"));
+    assert_eq!(
+        props["action"]["preview"]["messageId"],
+        json!(said.to_string())
+    );
+    assert_eq!(
+        props["action"]["preview"]["totalChars"],
+        json!(text.chars().count())
+    );
+    let stored: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored["action"]["args"],
+        json!({"messageId": said.to_string()})
+    );
+    assert_eq!(stored["action"]["pins"]["message"], json!(said.to_string()));
+    assert_eq!(
+        stored["action"]["pins"]["channel"],
+        json!(fixture.channel.to_string())
+    );
+    assert_eq!(
+        stored["action"]["pins"]["bodySha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+
+    // ---- a plain member's tap pins nothing ---------------------------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        ws,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+
+    // ---- the admin's tap: the approver's own pin ----------------------------------------
+    let jobs_before = agent_job_count(&su, ws, fixture.hosted_agent).await;
+    let (status, approved) = approve(&client, &base, &fixture, approval).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("message.pin"));
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "message", "id": said.to_string()})
+    );
+    assert_eq!(
+        pins_in(&su, fixture.channel).await,
+        vec![(said, fixture.human)],
+        "pinned_by is the APPROVER, the agent that proposed it pins nothing"
+    );
+    assert_eq!(pin_broadcasts(&su, ws, "message.pinned", said).await, 1);
+    let pinned_rows = audit_details_of(&su, ws, "message.pinned").await;
+    assert_eq!(pinned_rows.len(), 1, "{pinned_rows:?}");
+    assert_eq!(
+        pinned_rows[0]["via_agent"],
+        json!(fixture.hosted_agent.to_string())
+    );
+    assert_eq!(pinned_rows[0]["approval_id"], json!(approval.to_string()));
+    assert_eq!(
+        pinned_rows[0]["channel_id"],
+        json!(fixture.channel.to_string())
+    );
+    let approved_rows = audit_details_of(&su, ws, "action.approved").await;
+    assert_eq!(approved_rows.len(), 1);
+    assert_eq!(approved_rows[0]["action_id"], json!("message.pin"));
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND detail::text LIKE $2",
+    )
+    .bind(ws)
+    .bind(format!("%{secret_word}%"))
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "no audit row holds a word of the message");
+    let line: (String, Value) = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(ws)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        line.0.contains(&said.to_string()) && line.0.contains("고정했어요"),
+        "{}",
+        line.0
+    );
+    assert_eq!(
+        line.1["momo.action_result"]["ref"]["type"],
+        json!("message")
+    );
+    assert_eq!(
+        agent_job_count(&su, ws, fixture.hosted_agent).await,
+        jobs_before,
+        "an executed action leaves no job behind"
+    );
+
+    // ---- pinning what is already pinned succeeds and changes nothing ---------------------
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", said).await;
+    assert_eq!(status, 200, "{proposed}");
+    let again = proposed_approval_3706(&proposed);
+    let props = message_props(
+        &su,
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(card_row(&props, "지금 고정된 수").as_deref(), Some("1/100"));
+    let (status, approved) = approve(&client, &base, &fixture, again).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 1);
+    assert_eq!(pin_broadcasts(&su, ws, "message.pinned", said).await, 1);
+    assert_eq!(
+        audit_details_of(&su, ws, "message.pinned").await.len(),
+        1,
+        "a pin that changed nothing writes no pin audit row"
+    );
+    assert_eq!(
+        audit_details_of(&su, ws, "action.approved").await.len(),
+        2,
+        "…but the approval itself is recorded"
+    );
+
+    // ---- message.unpin mirrors it, and says who pinned it --------------------------------
+    let (status, proposed) =
+        propose_pin(&client, &base, &su, &fixture, "message.unpin", said).await;
+    assert_eq!(status, 200, "{proposed}");
+    let unpin = proposed_approval_3706(&proposed);
+    let props = message_props(
+        &su,
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert!(card_row(&props, "고정한 사람").is_some_and(|who| who.contains("Tools Human")));
+    assert!(card_row(&props, "고정한 시각").is_some());
+    let (status, approved) = approve(&client, &base, &fixture, unpin).await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+    assert_eq!(pin_broadcasts(&su, ws, "message.unpinned", said).await, 1);
+    let unpinned_rows = audit_details_of(&su, ws, "message.unpinned").await;
+    assert_eq!(unpinned_rows.len(), 1);
+    assert_eq!(unpinned_rows[0]["approval_id"], json!(unpin.to_string()));
+}
+
+/// **What may be pinned: a live text message of the conversation the run was raised in.** Every
+/// other target is the same refusal, and none of them raises a card: a message that does not
+/// exist, a deleted one, an approval card, a message of another room — **even one the agent's
+/// connection covers** (the card would carry that room's words into this one) — a room the
+/// connection does not cover, a DM, an archived channel, an `unpin` of a message that is not
+/// pinned, and every malformed argument.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_pin_of_anything_but_a_live_text_message_of_this_conversation_is_refused_alike() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let ok = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "여기 있는 글이에요",
+    )
+    .await;
+    // A second room the connection covers, with the agent in it.
+    let (covered, _name) =
+        seed_channel_3707(&su, &fixture, "public", &[(fixture.hosted_agent, "member")]).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = approved_channel_ids || $2 \
+          WHERE id=$1",
+    )
+    .bind(fixture.hosted_connection)
+    .bind(covered)
+    .execute(&su)
+    .await
+    .unwrap();
+    let elsewhere = human_says(&client, &base, &fixture, covered, "다른 방의 글이에요").await;
+    // A room the agent sits in that its connection does NOT cover, and a DM it is in.
+    let uncovered = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.private_channel,
+        "승인 밖의 글",
+    )
+    .await;
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',$3,$4,$5)",
+    )
+    .bind(dm)
+    .bind(ws)
+    .bind(format!("dm-{}", &dm.simple().to_string()[..10]))
+    .bind(dm.to_string())
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
+        .bind(dm)
+        .bind(ws)
+        .execute(&su)
+        .await
+        .unwrap();
+    for member in [fixture.human, fixture.hosted_agent] {
+        sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+            .bind(ws)
+            .bind(dm)
+            .bind(member)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let in_dm = raw_says(&su, &fixture, dm, "둘만의 글").await;
+    let deleted = human_says(&client, &base, &fixture, fixture.channel, "지울 글").await;
+    let status = client
+        .delete(format!("{base}/v1/workspaces/{ws}/messages/{deleted}"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("delete responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+
+    // An approval card is a message of this very channel that is not plain text: the
+    // control proposal raises one, and it must not be pinnable.
+    let (status, control) = propose_pin(&client, &base, &su, &fixture, "message.pin", ok).await;
+    assert_eq!(status, 200, "{control}");
+    let card_line =
+        Uuid::parse_str(structured(&control)["cardMessageId"].as_str().unwrap()).unwrap();
+
+    let approvals_before = approval_count_3900(&su, ws).await;
+    let cards_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='approval_request'",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let mut answers = Vec::new();
+    for (label, action, args) in [
+        (
+            "no such message",
+            "message.pin",
+            json!({"messageId": Uuid::new_v4().to_string()}),
+        ),
+        (
+            "a deleted message",
+            "message.pin",
+            json!({"messageId": deleted.to_string()}),
+        ),
+        (
+            "an approval card",
+            "message.pin",
+            json!({"messageId": card_line.to_string()}),
+        ),
+        (
+            "another room the connection covers",
+            "message.pin",
+            json!({"messageId": elsewhere.to_string()}),
+        ),
+        (
+            "a room the connection does not cover",
+            "message.pin",
+            json!({"messageId": uncovered.to_string()}),
+        ),
+        (
+            "a DM",
+            "message.pin",
+            json!({"messageId": in_dm.to_string()}),
+        ),
+        (
+            "unpin of a message that is not pinned",
+            "message.unpin",
+            json!({"messageId": ok.to_string()}),
+        ),
+    ] {
+        let (status, refused) =
+            try_propose_action_3706(&client, &base, &su, &fixture, action, args).await;
+        answers.push((label, status, refused["error"].clone()));
+    }
+    for (label, status, error) in &answers {
+        assert_eq!(*status, 400, "{label}: {error}");
+        assert_eq!(
+            error, &answers[0].2,
+            "{label}: every unresolvable target is the same answer"
+        );
+    }
+    for (label, args) in [
+        (
+            "an id that is not an id",
+            json!({"messageId": "not-a-uuid"}),
+        ),
+        ("no id", json!({})),
+        (
+            "a channel beside the id",
+            json!({"messageId": ok.to_string(), "channel": "x"}),
+        ),
+        (
+            "text beside the id",
+            json!({"messageId": ok.to_string(), "body": "hi"}),
+        ),
+        ("an id that is a number", json!({"messageId": 7})),
+    ] {
+        let (status, refused) =
+            try_propose_action_3706(&client, &base, &su, &fixture, "message.pin", args).await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    assert_eq!(
+        approval_count_3900(&su, ws).await,
+        approvals_before,
+        "no refused proposal left an approval"
+    );
+    let cards_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='approval_request'",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cards_after, cards_before, "and no card was drawn");
+
+    // The channel the run stands in may be archived: nothing in it can be pinned then.
+    let handle_name = hosted_handle(&su, fixture.hosted_agent).await;
+    client
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/channels/{}/messages",
+            fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle_name} 하나 더")}))
+        .send()
+        .await
+        .expect("mention");
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE id=$1")
+        .bind(fixture.channel)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "message.pin",
+               "args": {"messageId": ok.to_string()}}),
+    )
+    .await;
+    assert_eq!(
+        status, 400,
+        "an archived channel's message is not pinnable: {refused}"
+    );
+    assert_eq!(
+        refused["error"], answers[0].2,
+        "the same answer as every other refusal"
+    );
+}
+
+/// **The pin holds what the approver read.** The card pins the message, its channel and a hash of
+/// its words: a message **edited or deleted** after the card was drawn makes the tap
+/// `action_args_invalid` — the approval stays pending and nothing is pinned — and an unchanged one
+/// pins.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_message_edited_or_deleted_after_its_card_was_drawn_cannot_be_approved() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let edited = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "처음 쓴 글이에요",
+    )
+    .await;
+    let removed = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "곧 지울 글이에요",
+    )
+    .await;
+    let kept = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "그대로 둔 글이에요",
+    )
+    .await;
+
+    let (status, proposed) =
+        propose_pin(&client, &base, &su, &fixture, "message.pin", edited).await;
+    assert_eq!(status, 200, "{proposed}");
+    let edited_card = proposed_approval_3706(&proposed);
+    let (status, proposed) =
+        propose_pin(&client, &base, &su, &fixture, "message.pin", removed).await;
+    assert_eq!(status, 200, "{proposed}");
+    let removed_card = proposed_approval_3706(&proposed);
+
+    // The author rewrites one and deletes the other after the cards were drawn.
+    let status = client
+        .patch(format!("{base}/v1/workspaces/{ws}/messages/{edited}"))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"body": "전혀 다른 내용으로 고쳤어요"}))
+        .send()
+        .await
+        .expect("edit responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+    let status = client
+        .delete(format!("{base}/v1/workspaces/{ws}/messages/{removed}"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("delete responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+
+    for (label, card) in [("edited", edited_card), ("deleted", removed_card)] {
+        let (status, refused) = approve(&client, &base, &fixture, card).await;
+        assert_eq!(status, 409, "{label}: {refused}");
+        assert_eq!(refused["status"], "action_args_invalid", "{label}");
+        assert_eq!(
+            approval_status_3708(&su, card).await,
+            "pending",
+            "{label}: the tap spent nothing"
+        );
+    }
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+
+    // An unchanged message still pins.
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", kept).await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, approved) =
+        approve(&client, &base, &fixture, proposed_approval_3706(&proposed)).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        pins_in(&su, fixture.channel).await,
+        vec![(kept, fixture.human)]
+    );
+}
+
+/// **The person's own limits are the agent's.** A full channel (100 pins) refuses the tap with
+/// `action_args_invalid` and the approval stays pending — it was not spent — and the very same
+/// card is approvable the moment a slot frees. A long message's card states its real length and
+/// where to read it whole.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_full_channel_refuses_the_tap_without_spending_the_approval_and_a_long_card_says_so() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    // A hundred pins, made the way a person makes them.
+    let (channel, human) = (fixture.channel, fixture.human);
+    let pinned_ids = momo_db::with_tenant_tx(&su, ws, move |conn| {
+        Box::pin(async move {
+            let mut ids = Vec::new();
+            for index in 0..momo_messaging::CHANNEL_PIN_LIMIT {
+                let sent = momo_messaging::send_message_in_tx(
+                    conn,
+                    ws,
+                    momo_messaging::NewMessage::text(channel, human, format!("고정 {index}")),
+                )
+                .await?;
+                momo_messaging::set_pin_in_tx(
+                    conn,
+                    ws,
+                    sent.message.id,
+                    human,
+                    momo_messaging::PinAction::Pinned,
+                )
+                .await?
+                .expect("a member may pin up to the cap");
+                ids.push(sent.message.id);
+            }
+            Ok::<_, momo_db::DbError>(ids)
+        })
+    })
+    .await
+    .expect("fill the channel");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 100);
+
+    let long_text = "가".repeat(5_000);
+    let long = human_says(&client, &base, &fixture, fixture.channel, &long_text).await;
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", long).await;
+    assert_eq!(
+        status, 200,
+        "a card for a full channel may still be drawn: {proposed}"
+    );
+    let card = proposed_approval_3706(&proposed);
+    let props = message_props(
+        &su,
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        card_row(&props, "지금 고정된 수").as_deref(),
+        Some("100/100")
+    );
+    assert_eq!(card_row(&props, "글자 수").as_deref(), Some("5000자"));
+    assert!(
+        card_row(&props, "전문").is_some_and(|text| text.contains("앱")),
+        "a message cut short on the card says where to read it whole"
+    );
+    assert_eq!(props["action"]["preview"]["totalChars"], json!(5000));
+    assert_eq!(props["action"]["preview"]["truncated"], json!(true));
+    let excerpt = card_row(&props, "내용").expect("the quote row");
+    assert!(
+        excerpt.chars().count() <= 121 && excerpt.ends_with('…'),
+        "a quote of at most 120 characters and an ellipsis: {}",
+        excerpt.chars().count()
+    );
+
+    let (status, refused) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, card).await, "pending");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 100);
+    assert_eq!(pin_broadcasts(&su, ws, "message.pinned", long).await, 0);
+
+    // A slot frees (a person unpins one by hand); the same card now goes through.
+    let status = client
+        .delete(format!(
+            "{base}/v1/workspaces/{ws}/messages/{}/pin",
+            pinned_ids[0]
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("unpin responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+    let (status, approved) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 100);
+    assert!(pins_in(&su, fixture.channel)
+        .await
+        .iter()
+        .any(|(message, _)| *message == long));
+}

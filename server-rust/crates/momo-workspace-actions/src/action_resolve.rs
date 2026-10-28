@@ -17,6 +17,7 @@ use momo_messaging::name_guard::{
 use momo_messaging::{
     load_roster_names_in_tx, lock_display_name_namespace_in_tx, normalize_channel_kind,
     normalize_channel_name, normalize_channel_topic, read_agent_card_in_tx, AgentCard, FieldPatch,
+    PinAction,
 };
 use momo_settings::{
     is_valid_handle, merge_workspace_settings, normalized_invite_role, read_workspace_settings,
@@ -29,7 +30,10 @@ use momo_agent::actions::{
     self, PluginInstallBefore, WorkspaceAction, INVITE_EXPIRES_IN_DAYS_CEILING,
     INVITE_MAX_USES_CEILING, INVITE_PROPOSABLE_ROLES,
 };
-use momo_auth::{lock_active_hosted_connection_in_tx, MAX_HOSTED_APPROVED_CHANNELS};
+use momo_auth::{
+    active_hosted_connection_in_tx, lock_active_hosted_connection_in_tx,
+    MAX_HOSTED_APPROVED_CHANNELS,
+};
 
 /// A proposal the domain refused. Always a client-class (400) refusal; it never
 /// says which name failed to resolve.
@@ -92,6 +96,15 @@ pub struct ValidatedActionArgs {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ActionArgs {
+    /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e, #4703). `message_id` is the one
+    /// argument; `target` is filled by [`resolve_action_in_tx`] with what the server read — the
+    /// channel, the author, the words (and a hash of them) — and is the **only** thing the card
+    /// and the executor describe the message by.
+    MessagePin {
+        message_id: Uuid,
+        change: PinAction,
+        target: Option<ResolvedMessage>,
+    },
     /// `member.avatar.set` (ADR-0186 증보 v4, #4385). `avatar` is the proposal's
     /// [`AvatarIntent::Attachment`] and, after the handler stages it, the stored
     /// [`AvatarIntent::Staged`]; `target` is filled by [`resolve_action_in_tx`] from the run
@@ -194,6 +207,19 @@ pub enum ActionArgs {
         target: Option<ResolvedAgentTarget>,
         before: Option<AgentCard>,
     },
+}
+
+/// The message a pin action names, as the server read it **inside the transaction**.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedMessage {
+    pub id: Uuid,
+    pub channel_id: Uuid,
+    /// The sha256 (hex) of what the approver read: the body, or — for a message with no text —
+    /// the list of its attachment ids. Computed by the database over the stored bytes, so the
+    /// card, the pin and the decision's re-read all hash the same thing.
+    pub body_sha256: String,
+    /// What the card draws; see [`actions::PinCardMessage`].
+    pub card: actions::PinCardMessage,
 }
 
 /// The registry row a `plugin.install` card is drawn from, read as it is now.
@@ -414,6 +440,8 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args, origin),
         actions::ACTION_MEMBER_AVATAR_SET => member_avatar_set_args(args, origin),
+        actions::ACTION_MESSAGE_PIN => message_pin_args(args, PinAction::Pinned),
+        actions::ACTION_MESSAGE_UNPIN => message_pin_args(args, PinAction::Unpinned),
         actions::ACTION_AGENT_INVITE => agent_invite_args(args),
         actions::ACTION_WORKSPACE_UNFURL_UPDATE => workspace_unfurl_update_args(args),
         actions::ACTION_WORKSPACE_MEMORY_UPDATE => workspace_memory_update_args(args),
@@ -1358,6 +1386,43 @@ pub fn agent_profile_update_args(
 /// {source:"staged", …}}`, which only this server writes; the proposal parser refuses it
 /// and the stored parser refuses the raw `attachmentId`, exactly as for the agent's own
 /// profile.
+/// `message.pin` / `message.unpin` arguments: one id. Every other key — a channel, a URL, a
+/// piece of text — is refused (`additionalProperties: false`), so nothing an agent writes can
+/// name where the message is or describe what it says. The id is stored in its one canonical
+/// spelling, so the pin's comparison cannot be defeated by a different way of writing it.
+pub fn message_pin_args(
+    args: &Value,
+    change: PinAction,
+) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["messageId"])?;
+    let raw = match object.get("messageId") {
+        Some(Value::String(raw)) => raw.as_str(),
+        Some(_) => return Err(ActionRejection::new("messageId must be a string")),
+        None => return Err(ActionRejection::new("messageId is required")),
+    };
+    // A uuid is 36 characters in its hyphenated form; anything longer is not an id, and the
+    // parser's other spellings (braces, `urn:`) are not what `oort_conversation_read` gives.
+    if raw.len() != 36 {
+        return Err(ActionRejection::new("messageId must be an id"));
+    }
+    let message_id =
+        Uuid::parse_str(raw).map_err(|_| ActionRejection::new("messageId must be an id"))?;
+    Ok(ValidatedActionArgs {
+        summary: None,
+        normalized: json!({"messageId": message_id.to_string()}),
+        // The rows are the message as the server reads it: the resolver builds them.
+        rows: Vec::new(),
+        args: ActionArgs::MessagePin {
+            message_id,
+            change,
+            target: None,
+        },
+    })
+}
+
 pub fn member_avatar_set_args(
     args: &Value,
     origin: ArgsOrigin,
@@ -1800,6 +1865,132 @@ pub async fn resolve_member_handles_in_tx(
         });
     }
     Ok(Some(members))
+}
+
+/// Find the message a pin action names **from the proposer's point of view** (ADR-0186 증보 v5
+/// U-e), or `None` — and `None` is the one answer for every way it is not there to pin:
+///
+/// * no such id, or one in another workspace (RLS makes that the same as no row);
+/// * a deleted message, or one that is not plain text (an approval card, a result line, a
+///   system line: their state changes, so a pin on them would point at something else tomorrow);
+/// * a channel that is archived;
+/// * a channel **other than the one the run was raised in** — the card stands in the run's
+///   channel, and it quotes the message, so a message from anywhere else would carry another
+///   room's words to people who may not read them (review H2);
+/// * a channel the proposer's own live hosted connection does not cover, or where the proposer
+///   is no longer a live member (a DM the owner has not opened to the connection included);
+/// * for `message.unpin`, a message that is not pinned.
+///
+/// `run_id` must be a run **of this proposer** whose channel is the message's channel; the run is
+/// joined in the same statement, so no other combination can produce a row.
+///
+/// With `lock` (the decision's re-read) the message row is taken `FOR UPDATE` in the same
+/// statement that hashes it: the body the approver was shown cannot change between this read and
+/// the pin that follows. That is the very lock `set_pin_in_tx` takes next.
+pub async fn resolve_pin_target_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    run_id: Uuid,
+    message_id: Uuid,
+    change: PinAction,
+    lock: bool,
+) -> Result<Option<ResolvedMessage>, momo_db::DbError> {
+    use momo_db::sqlx::Row;
+
+    // The proposer's own live connection — the only way a channel is "covered". No argument can
+    // name another agent's.
+    let Some(connection_id) =
+        active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
+    else {
+        return Ok(None);
+    };
+    let sql = format!(
+        "SELECT m.channel_id, m.created_at, m.body, \
+                c.name AS channel_name, c.kind::text AS channel_kind, \
+                a.display_name AS author_name, a.handle AS author_handle, \
+                a.kind::text AS author_kind, \
+                CASE WHEN NULLIF(btrim(m.body), '') IS NOT NULL \
+                     THEN encode(public.digest(convert_to('momo.pin.v1:body:' || m.body, 'UTF8'), \
+                                               'sha256'), 'hex') \
+                     ELSE encode(public.digest(convert_to('momo.pin.v1:attachments:' || \
+                            coalesce((SELECT string_agg(t.id::text, ',' ORDER BY t.id) \
+                                        FROM attachment t \
+                                       WHERE t.workspace_id = m.workspace_id \
+                                         AND t.message_id = m.id), ''), 'UTF8'), \
+                                               'sha256'), 'hex') END AS body_sha256, \
+                (SELECT count(*) FROM attachment t \
+                  WHERE t.workspace_id = m.workspace_id AND t.message_id = m.id) AS attachments, \
+                (SELECT count(*) FROM message_pin q WHERE q.channel_id = m.channel_id) AS pinned, \
+                pin.pinned_by, pin.pinned_at, \
+                pinner.display_name AS pinner_name, pinner.handle AS pinner_handle, \
+                pinner.kind::text AS pinner_kind \
+           FROM message m \
+           JOIN channel c ON c.workspace_id = m.workspace_id AND c.id = m.channel_id \
+           JOIN agent_run r ON r.workspace_id = m.workspace_id AND r.id = $3 \
+                           AND r.agent_member_id = $2 AND r.channel_id = m.channel_id \
+           JOIN member a ON a.workspace_id = m.workspace_id AND a.id = m.author_member_id \
+           LEFT JOIN message_pin pin ON pin.message_id = m.id \
+           LEFT JOIN member pinner \
+             ON pinner.workspace_id = m.workspace_id AND pinner.id = pin.pinned_by \
+          WHERE m.workspace_id = $1 AND m.id = $4 \
+            AND m.type = 'text' AND m.state::text <> 'deleted' AND m.deleted_at IS NULL \
+            AND c.archived_at IS NULL \
+            AND EXISTS (SELECT 1 FROM membership p \
+                         WHERE p.workspace_id = m.workspace_id AND p.channel_id = m.channel_id \
+                           AND p.member_id = $2 AND p.left_at IS NULL) \
+            AND m.channel_id = ANY(hosted_connection_channel_ids($1, $5)) \
+            AND ($6 = false OR pin.message_id IS NOT NULL){}",
+        if lock { " FOR UPDATE OF m" } else { "" }
+    );
+    let Some(row) = momo_db::sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(proposer_member_id)
+        .bind(run_id)
+        .bind(message_id)
+        .bind(connection_id)
+        .bind(change == PinAction::Unpinned)
+        .fetch_optional(&mut *conn)
+        .await?
+    else {
+        return Ok(None);
+    };
+
+    let channel_id: Uuid = row.try_get("channel_id")?;
+    let body: Option<String> = row.try_get("body")?;
+    let (excerpt, total, truncated) = actions::pin_card_excerpt(body.as_deref().unwrap_or(""));
+    let has_text = body.as_deref().is_some_and(|text| !text.trim().is_empty());
+    let pinned_by_label = match row.try_get::<Option<Uuid>, _>("pinned_by")? {
+        Some(_) => Some(actions::member_card_label(
+            &row.try_get::<String, _>("pinner_name")?,
+            &row.try_get::<String, _>("pinner_handle")?,
+            row.try_get::<String, _>("pinner_kind")? == "agent",
+        )),
+        None => None,
+    };
+    let card = actions::PinCardMessage {
+        channel_name: row.try_get("channel_name")?,
+        channel_kind: row.try_get("channel_kind")?,
+        author_label: actions::member_card_label(
+            &row.try_get::<String, _>("author_name")?,
+            &row.try_get::<String, _>("author_handle")?,
+            row.try_get::<String, _>("author_kind")? == "agent",
+        ),
+        created_at: row.try_get("created_at")?,
+        excerpt,
+        total_chars: has_text.then_some(total as i64),
+        truncated,
+        attachment_count: row.try_get("attachments")?,
+        pinned_count: row.try_get("pinned")?,
+        pinned_by_label,
+        pinned_at: row.try_get("pinned_at")?,
+    };
+    Ok(Some(ResolvedMessage {
+        id: message_id,
+        channel_id,
+        body_sha256: row.try_get("body_sha256")?,
+        card,
+    }))
 }
 
 /// The proposer must be an active, unpaused agent member of this workspace *now*
@@ -2542,6 +2733,38 @@ pub async fn resolve_action_with_origin_in_tx(
             });
             GateSubject::Workspace
         }
+        ActionArgs::MessagePin {
+            message_id,
+            change,
+            target,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            // A card stands in a run's channel and quotes the message: with no run (the team AI
+            // has none to stand on) there is nowhere the card could safely quote it.
+            let Some(run_id) = run_id else {
+                return Ok(Err(ActionRejection::new("message did not resolve")));
+            };
+            // The decision's re-read takes the row lock (`decision_approval_id` is only set
+            // there); a proposal reads without one.
+            let Some(found) = resolve_pin_target_in_tx(
+                conn,
+                workspace_id,
+                proposer_member_id,
+                run_id,
+                *message_id,
+                *change,
+                decision_approval_id.is_some(),
+            )
+            .await?
+            else {
+                return Ok(Err(ActionRejection::new("message did not resolve")));
+            };
+            validated.rows = actions::message_pin_rows(*change == PinAction::Unpinned, &found.card);
+            *target = Some(found);
+            GateSubject::Workspace
+        }
         ActionArgs::ChannelMemberAdd {
             channel_ref,
             handles,
@@ -2664,6 +2887,14 @@ pub async fn resolve_action_with_origin_in_tx(
             "channel": channel.as_ref().map(|c| c.id.to_string()),
             "members": members.iter().map(|m| m.id.to_string()).collect::<Vec<_>>(),
         }),
+        // The message, its channel and a hash of the words the approver read: an edit, a delete
+        // or a move in between re-asks. (`message`, not `target`: `pins.target` is read as a
+        // member id elsewhere — `decider::pinned_target_agent`.)
+        ActionArgs::MessagePin { target, .. } => json!({
+            "message": target.as_ref().map(|t| t.id.to_string()),
+            "channel": target.as_ref().map(|t| t.channel_id.to_string()),
+            "bodySha256": target.as_ref().map(|t| t.body_sha256.clone()),
+        }),
     };
     Ok(Ok(ResolvedAction {
         validated,
@@ -2701,6 +2932,66 @@ pub fn bounded_integer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the proposal is one message id
+    /// and nothing else — no channel, no link, no text can be spelled — and the id is stored in
+    /// its one canonical spelling, so the pin's comparison cannot be defeated by writing it
+    /// another way.
+    #[test]
+    fn message_pin_is_one_message_id_and_names_nothing_else() {
+        let id = Uuid::from_u128(0x0123_4567_89ab_cdef_0123_4567_89ab_cdef);
+        for (action_id, change) in [
+            (actions::ACTION_MESSAGE_PIN, PinAction::Pinned),
+            (actions::ACTION_MESSAGE_UNPIN, PinAction::Unpinned),
+        ] {
+            let action = actions::action_by_id(action_id).expect("registered");
+            // The two ids reach the right variant through the one dispatcher.
+            let ok = validated_action_args(action, &json!({"messageId": id.to_string()}), 0)
+                .expect("a message id");
+            assert_eq!(ok.normalized, json!({"messageId": id.to_string()}));
+            assert!(
+                ok.rows.is_empty(),
+                "the rows are the server's reading of the message"
+            );
+            assert!(matches!(
+                ok.args,
+                ActionArgs::MessagePin { message_id, change: found, target: None }
+                    if message_id == id && found == change
+            ));
+            // An upper-case id is the same id, stored lower-case.
+            let upper = validated_action_args(
+                action,
+                &json!({"messageId": id.to_string().to_uppercase()}),
+                0,
+            )
+            .expect("the same id");
+            assert_eq!(upper.normalized, ok.normalized);
+
+            for bad in [
+                json!({}),
+                json!({"messageId": null}),
+                json!({"messageId": 7}),
+                json!({"messageId": "not-a-uuid"}),
+                // Other spellings of an id are not what `oort_conversation_read` gives.
+                json!({"messageId": id.simple().to_string()}),
+                json!({"messageId": format!("urn:uuid:{id}")}),
+                json!({"messageId": format!("{{{id}}}")}),
+                // Where, what, or whose — spelled every way the other actions spell them.
+                json!({"messageId": id.to_string(), "channel": "general"}),
+                json!({"messageId": id.to_string(), "channelId": Uuid::nil().to_string()}),
+                json!({"messageId": id.to_string(), "body": "hi"}),
+                json!({"messageId": id.to_string(), "url": "https://evil.example/"}),
+                json!({"messageId": id.to_string(), "target": Uuid::nil().to_string()}),
+                json!(["messageId"]),
+                json!(null),
+            ] {
+                assert!(
+                    validated_action_args(action, &bad, 0).is_err(),
+                    "{action_id} must refuse {bad}"
+                );
+            }
+        }
+    }
 
     /// `member.avatar.set` (ADR-0186 증보 v4): the proposal is the attachment id and
     /// nothing else. Every spelling of "who", "from where" or "what bytes" is refused —

@@ -16466,7 +16466,27 @@ components:
         (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
         that person only) and its result `ref` is `{type: member, id: <the
         person>}`.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+        `message.pin` and `message.unpin` (`{messageId}`, `admin`; ADR-0186
+        증보 2026-10-27 v5 U-e, #4703) let an agent propose pinning or unpinning
+        **one text message of the conversation the run was raised in**. The
+        server reads the channel, the author and the words from the stored
+        message; the one argument is its id, so nothing an agent writes can
+        describe the target. A message in another channel, a deleted one, a
+        card or result line, one in an archived channel, a DM the agent's
+        connection does not cover, or (for `message.unpin`) one that is not
+        pinned is refused with the same invalid-arguments answer as a missing
+        id. The approval carries `{message, channel, bodySha256}` as its pins: a
+        message edited or deleted before the tap makes the tap
+        `action_args_invalid`, and the approval stays pending. Approving runs
+        the person's own pin function as the approver (they must be in that
+        channel; a channel holds 100 pins; a message already in the asked state
+        is a success that changes nothing) and its result `ref` is
+        `{type: message, id: <the message>}`. The card (`props.action.rows`)
+        quotes the first 120 characters and states the total length;
+        `props.action.preview` carries `{kind: message, messageId, channelId,
+        totalChars, truncated}` so a client can open the whole message. These
+        two are always decided in the app, never from a lock-screen action.
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
 
     SuggestableCommandId:
       type: string
@@ -23655,7 +23675,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent, hosted_connection, workspace_settings, member]
+          enum: [invite, channel, agent, hosted_connection, workspace_settings, member, message]
         id:
           type: string
           format: uuid

@@ -1158,20 +1158,48 @@ async fn record_interaction_audit(
     via_token_id: Option<Uuid>,
     action: &str,
 ) -> Result<(), DbError> {
-    let entry = AuditEntry::new(workspace_id, action)
+    let entry = interaction_audit_entry(
+        workspace_id,
+        channel_id,
+        message_id,
+        actor_member_id,
+        via_token_id,
+        action,
+        &[],
+    );
+    write_audit(conn, &entry).await?;
+    Ok(())
+}
+
+/// The row [`record_interaction_audit`] writes, as a value — **the one place its shape is
+/// decided**, for the two doors that pin a message: a person's own request (above) and an
+/// approved agent proposal (`routes::approvals`' `message.pin` executor, ADR-0186 증보 v5 U-e),
+/// which adds `via_agent` and `approval_id` through `extra_detail`. The detail names ids and the
+/// channel only, never a word of the message.
+pub(crate) fn interaction_audit_entry(
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    message_id: Uuid,
+    actor_member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    action: &str,
+    extra_detail: &[(&str, Uuid)],
+) -> AuditEntry {
+    let mut detail = serde_json::json!({
+        "channel_id": channel_id,
+        "event_type": action,
+    });
+    if let Some(object) = detail.as_object_mut() {
+        for (key, value) in extra_detail {
+            object.insert((*key).to_string(), serde_json::json!(value));
+        }
+    }
+    AuditEntry::new(workspace_id, action)
         .by(actor_member_id)
         .about_optional(None)
         .target("message", message_id)
         .via_token(via_token_id)
-        .with_schema(
-            "momo.message_interaction.v1",
-            serde_json::json!({
-                "channel_id": channel_id,
-                "event_type": action,
-            }),
-        );
-    write_audit(conn, &entry).await?;
-    Ok(())
+        .with_schema("momo.message_interaction.v1", detail)
 }
 
 /// `PATCH /v1/workspaces/{ws}/messages/{id}` — rewrite one's own message.
