@@ -35,6 +35,47 @@ pub const GRANT_TYPE_REFRESH_TOKEN: &str = "refresh_token";
 /// RFC 6750 token type, rendered with this exact spelling in token responses.
 pub const TOKEN_TYPE_BEARER: &str = "Bearer";
 
+/// ADR-0216 D6 (나) — the one **built-in** first-party public client: the `oort`
+/// CLI's browser login. It is not an operator-registered client (those are the
+/// hosted Agent Port's), has no secret, and proves possession with PKCE `S256`
+/// alone.
+pub const OORT_CLI_CLIENT_ID: &str = "oort-cli";
+
+/// The fixed loopback ports the CLI may bind its one-shot receiver on (D6: 「고정된
+/// 루프백 후보 몇 개」). The CLI takes the first free one. Any other port — and any
+/// other host spelling, `localhost` included — is **not** a registered redirect:
+/// RFC 8252 §7.3's any-port rule needs an ADR-0162 amendment this client does not
+/// have. Below the Linux ephemeral range (32768+) so an outgoing connection is not
+/// likely to be sitting on one.
+///
+/// The CLI crate imports this list rather than retyping it; the server compares
+/// against [`OORT_CLI_REDIRECT_URIS`], which a test ties to these ports.
+pub const OORT_CLI_LOOPBACK_PORTS: [u16; 5] = [24681, 24682, 24683, 24684, 24685];
+
+/// The path of the receiver's one callback.
+pub const OORT_CLI_CALLBACK_PATH: &str = "/callback";
+
+/// Every redirect URI the built-in client may name, spelled out so the comparison
+/// is a byte comparison against whole strings (never a parse that could
+/// normalise two spellings into one).
+pub const OORT_CLI_REDIRECT_URIS: [&str; 5] = [
+    "http://127.0.0.1:24681/callback",
+    "http://127.0.0.1:24682/callback",
+    "http://127.0.0.1:24683/callback",
+    "http://127.0.0.1:24684/callback",
+    "http://127.0.0.1:24685/callback",
+];
+
+/// Exact string comparison of a presented redirect URI against the built-in
+/// client's fixed list — the same rule as [`redirect_uri_is_registered`], for a
+/// list that is not operator configuration.
+pub fn oort_cli_redirect_uri_is_registered(presented: &str) -> bool {
+    presented.len() <= MAX_REDIRECT_URI_BYTES
+        && OORT_CLI_REDIRECT_URIS
+            .iter()
+            .any(|allowed| *allowed == presented)
+}
+
 /// The `.well-known` prefix RFC 9728 §3.1 reserves for a protected resource
 /// whose identifier carries a path. The resource path is appended verbatim.
 pub const PROTECTED_RESOURCE_WELL_KNOWN_PREFIX: &str = "/.well-known/oauth-protected-resource";
@@ -396,6 +437,72 @@ mod tests {
                 "{near_miss} must not match"
             );
         }
+    }
+
+    /// ADR-0216 R20 — the built-in client's redirect list is the fixed loopback
+    /// candidates and nothing else. The list the server compares against is tied
+    /// to the port list the CLI imports, so the two cannot drift.
+    #[test]
+    fn oort_cli_redirects_are_exactly_the_fixed_loopback_candidates() {
+        let derived: Vec<String> = OORT_CLI_LOOPBACK_PORTS
+            .iter()
+            .map(|port| format!("http://127.0.0.1:{port}{OORT_CLI_CALLBACK_PATH}"))
+            .collect();
+        assert_eq!(derived, OORT_CLI_REDIRECT_URIS.to_vec());
+        let mut ports = OORT_CLI_LOOPBACK_PORTS.to_vec();
+        ports.sort_unstable();
+        ports.dedup();
+        assert_eq!(
+            ports.len(),
+            OORT_CLI_LOOPBACK_PORTS.len(),
+            "ports are distinct"
+        );
+        assert!(
+            OORT_CLI_LOOPBACK_PORTS.iter().all(|port| *port > 1023),
+            "an unprivileged process must be able to bind every candidate"
+        );
+        for uri in OORT_CLI_REDIRECT_URIS {
+            assert!(oort_cli_redirect_uri_is_registered(uri));
+        }
+    }
+
+    /// R20 — `localhost`, any port outside the list, any other spelling of the
+    /// same address and any near-miss of the path are refused. The refusals the
+    /// issue text calls 「임의 포트·`localhost`」 live here.
+    #[test]
+    fn oort_cli_redirect_comparison_refuses_every_other_loopback_spelling() {
+        for near_miss in [
+            "http://localhost:24681/callback",
+            "http://127.0.0.1:24686/callback",
+            "http://127.0.0.1:8080/callback",
+            "http://127.0.0.1:0/callback",
+            "http://127.0.0.1:024681/callback",
+            "http://127.0.0.1:24681/callback/",
+            "http://127.0.0.1:24681/callback?x=1",
+            "http://127.0.0.1:24681/callback#f",
+            "http://127.0.0.1:24681/Callback",
+            "http://127.0.0.1:24681/",
+            "http://127.0.0.1:24681",
+            "https://127.0.0.1:24681/callback",
+            "http://[::1]:24681/callback",
+            "http://127.1:24681/callback",
+            "http://0x7f.0.0.1:24681/callback",
+            "http://127.0.0.1.evil.example:24681/callback",
+            "http://evil.example@127.0.0.1:24681/callback",
+            " http://127.0.0.1:24681/callback",
+            "http://127.0.0.1:24681/callback ",
+            "",
+        ] {
+            assert!(
+                !oort_cli_redirect_uri_is_registered(near_miss),
+                "{near_miss:?} must not match"
+            );
+        }
+        let oversized = format!(
+            "http://127.0.0.1:24681/callback?{}",
+            "a".repeat(MAX_REDIRECT_URI_BYTES)
+        );
+        assert!(!oort_cli_redirect_uri_is_registered(&oversized));
     }
 
     #[test]
