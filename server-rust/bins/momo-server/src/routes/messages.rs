@@ -602,7 +602,9 @@ pub async fn send(
     // held to the allow-list by [`dev_send_body_gate`] before this handler ran.
     dev_credential: Option<Extension<DevCredential>>,
     Json(request): Json<SendMessageRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+    // `Result<(StatusCode, Json<MessageDto>), _>` rather than `impl IntoResponse`: the human MCP's
+    // `post` tool (ADR-0216 D5, #4661) calls this very function and reads the echoed message.
+) -> Result<(StatusCode, Json<MessageDto>), ApiError> {
     let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
     let dev_credential = dev_credential.map(|Extension(credential)| credential);
     // ADR-0216 D8 · R12 — the 「명령줄에서」 marker comes from the credential that
