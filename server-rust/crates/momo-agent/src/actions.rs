@@ -1099,6 +1099,7 @@ fn message_pin_args_schema() -> Value {
 /// the stored row**; the proposing agent supplies only the id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PinCardMessage {
+    /// Empty for a DM (`channel.name` is NULL there); the rows of a DM card never print it.
     pub channel_name: String,
     /// `public`, `private` or `dm` — a DM is called 「1:1 대화」 and has no 공개 범위 row.
     pub channel_kind: String,

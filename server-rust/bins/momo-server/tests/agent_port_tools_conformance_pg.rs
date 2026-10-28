@@ -22603,3 +22603,80 @@ async fn a_full_channel_refuses_the_tap_without_spending_the_approval_and_a_long
         .iter()
         .any(|(message, _)| *message == long));
 }
+
+/// **A pin in the owner's 1:1 DM with the agent** — the room this action is most often asked in.
+/// A DM has no name (`channel.name` is NULL there, 001_init.sql), so its card says 「1:1 대화」 and
+/// has no 공개 범위 row. Reading that name as text made every proposal in such a room answer 500,
+/// while every other pin test here draws its card in a named channel.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_pin_in_the_owners_dm_with_the_agent_is_drawn_without_a_name_and_pins_on_approval() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    // The agent's owner's 1:1 DM is covered automatically once they also confirmed the
+    // connection (ADR-0162 증보 2 B6): the fixture's human did both.
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(fixture.human)).await;
+    let dm = seed_dm_2915(
+        &su,
+        ws,
+        fixture.human,
+        &[fixture.human, fixture.hosted_agent],
+    )
+    .await;
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM channel WHERE id=$1")
+        .bind(dm)
+        .fetch_one(&su)
+        .await
+        .expect("the DM row");
+    assert_eq!(
+        name, None,
+        "the DM this test draws a card in is nameless, as a product DM is"
+    );
+    let said = raw_says(&su, &fixture, dm, "금요일 배포는 이대로 가요").await;
+
+    // The person asks in the DM (a REST send there raises the job the agent claims).
+    human_says(&client, &base, &fixture, dm, "방금 그 메시지 고정해 줘").await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("the DM message reached the agent as a job")
+        .to_string();
+    let (status, proposed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "message.pin",
+               "args": {"messageId": said.to_string()}}),
+    )
+    .await;
+    remember_handle_3789(&proposed, &handle);
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+    let props = message_props(&su, card).await;
+    assert_eq!(card_row(&props, "채널").as_deref(), Some("1:1 대화"));
+    assert!(
+        card_row(&props, "공개 범위").is_none(),
+        "a DM has no 공개 범위 row"
+    );
+    assert!(pins_in(&su, dm).await.is_empty());
+
+    // The admin's tap pins it, as themselves, in the DM.
+    let (status, approved) = approve(&client, &base, &fixture, approval).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(pins_in(&su, dm).await, vec![(said, fixture.human)]);
+}

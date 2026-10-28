@@ -1969,7 +1969,12 @@ pub async fn resolve_pin_target_in_tx(
         None => None,
     };
     let card = actions::PinCardMessage {
-        channel_name: row.try_get("channel_name")?,
+        // A DM has no name: `channel.name` is NULL for `kind = 'dm'` (001_init.sql), and the owner's
+        // 1:1 DM with the agent is the room this action is most often asked in. The card calls
+        // it 「1:1 대화」 and never prints the name, so a missing name is not a failed read.
+        channel_name: row
+            .try_get::<Option<String>, _>("channel_name")?
+            .unwrap_or_default(),
         channel_kind: row.try_get("channel_kind")?,
         author_label: actions::member_card_label(
             &row.try_get::<String, _>("author_name")?,
