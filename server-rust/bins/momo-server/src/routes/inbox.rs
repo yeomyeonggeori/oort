@@ -28,11 +28,14 @@ use chrono::{DateTime, SecondsFormat, Utc};
 use momo_agent::approval::{is_active_human_member_in_tx, list_approvals_in_tx};
 use momo_auth::Principal;
 use momo_messaging::{
-    clamp_inbox_limit, inbox_unread_count_in_tx, list_inbox_in_tx, mark_inbox_item_read_in_tx,
-    mark_inbox_read_all_in_tx, InboxCursor, InboxFilter, InboxItemView,
+    clamp_inbox_limit, inbox_unread_count_in_tx, list_inbox_within_in_tx,
+    mark_inbox_item_read_in_tx, mark_inbox_read_all_in_tx, ChannelRestriction, InboxCursor,
+    InboxFilter, InboxItemView,
 };
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
+use crate::dev_credential::DevCredential;
 use crate::dto::ApprovalDto;
 use crate::error::ApiError;
 use crate::routes::approvals::approval_dto;
@@ -190,11 +193,23 @@ fn parse_muted(raw: Option<&str>) -> Result<bool, ApiError> {
 }
 
 /// `GET /v1/workspaces/{ws}/inbox`
+///
+/// **A developer token (ADR-0216 D4 · F17 · R11, #4660)** reads this page as its person,
+/// with every field of the answer decided for it:
+/// - `approvalsPending` is always `[]` — approval cards never reach the developer door,
+///   so the approval list is not even read;
+/// - `items` and `unreadCount` cover only the token's restricted channels (∩ today's
+///   memberships) when it has a restriction, as an argument of the domain read so the
+///   page size, the cursor and the count agree with each other;
+/// - nothing is marked read (this is a `GET`; the read routes are not on the token's
+///   table at all).
 pub async fn list(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
     Query(query): Query<InboxQuery>,
+    // ADR-0216 (#4660): present only for a developer token, and only able to narrow.
+    dev_credential: Option<Extension<DevCredential>>,
 ) -> Result<Json<InboxPageDto>, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
     require_human(&principal, "the inbox is for human members")?;
@@ -212,6 +227,13 @@ pub async fn list(
     let limit = clamp_inbox_limit(query.limit.as_deref().and_then(|raw| raw.parse().ok()));
     let member_id = principal.member_id;
     let first_page = cursor.is_none();
+    let dev_credential = dev_credential.map(|Extension(credential)| credential);
+    // ADR-0216 F17 — decided before the transaction and from the marker alone: a
+    // developer token's page never carries approval cards, on any page.
+    let with_approvals = first_page && dev_credential.is_none();
+    // ADR-0216 D4 — the token's channel restriction, owned so the transaction carries it.
+    let restricted_to: Option<Vec<Uuid>> =
+        dev_credential.and_then(|credential| credential.channel_ids);
 
     let outcome: DbRejectable<(momo_messaging::InboxPage, Vec<ApprovalDto>)> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
@@ -221,7 +243,7 @@ pub async fn list(
                         "not an active human workspace member",
                     )));
                 }
-                let page = list_inbox_in_tx(
+                let page = list_inbox_within_in_tx(
                     conn,
                     workspace_id,
                     member_id,
@@ -229,9 +251,10 @@ pub async fn list(
                     cursor,
                     limit,
                     show_muted,
+                    ChannelRestriction::from_channel_ids(restricted_to.as_deref()),
                 )
                 .await?;
-                let approvals = if first_page {
+                let approvals = if with_approvals {
                     list_approvals_in_tx(
                         conn,
                         workspace_id,

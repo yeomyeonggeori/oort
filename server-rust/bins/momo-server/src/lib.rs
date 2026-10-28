@@ -33,6 +33,10 @@ pub mod attachment_reclaim;
 pub mod auth;
 pub mod config;
 pub mod cors;
+/// ADR-0216 (#4660): the developer-token door — limits, audit and the refresh wrapper.
+pub mod dev_access;
+/// ADR-0216 (#4660): the request-extension marker a developer token travels with.
+pub mod dev_credential;
 pub mod dto;
 pub mod error;
 /// ADR-0203 증보 2026-10-25 (#4337): which platform this process runs on, as a closed enum.
@@ -217,6 +221,11 @@ pub struct AppState {
     /// ADR-0162 Agent Port transport policy. It carries no session or product
     /// data; only trusted origin input and process-local abuse counters.
     pub agent_port: Arc<AgentPortState>,
+    /// ADR-0216 D9 (#4660) — the developer-token door's budgets (per token, per
+    /// member, the send row per token). Knobs only: the counters live in
+    /// `agent_port.limiter` under `dev:` keys, one more set of axes on that one map.
+    /// **On by default and never off** (0 and garbage keep the default).
+    pub dev_access: Arc<config::DevAccessConfig>,
     /// Mention→run routing knobs (B5.2). The default is the shipped one, not a
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
@@ -344,6 +353,7 @@ impl AppState {
             settings: Arc::new(SettingsConfig::default()),
             rate_limit: Arc::new(RateLimitState::default()),
             agent_port: Arc::new(AgentPortState::default()),
+            dev_access: Arc::new(config::DevAccessConfig::default()),
             mentions: Arc::new(MentionSettings::default()),
             scheduler: Arc::new(SchedulerSettings::default()),
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -584,6 +594,15 @@ impl AppState {
         self
     }
 
+    /// Attach the developer-token door's budgets (ADR-0216 D9, #4660). Normalized on
+    /// the way in, so a hand-built config with a 0 keeps that budget's default rather
+    /// than switching the axis off. The counters are not replaced here: they live in
+    /// the Agent Port limiter map, which [`AppState::with_agent_port`] owns.
+    pub fn with_dev_access(mut self, config: config::DevAccessConfig) -> Self {
+        self.dev_access = Arc::new(config.normalized());
+        self
+    }
+
     /// Attach the mention-routing knobs (B5.2).
     pub fn with_mentions(mut self, settings: MentionSettings) -> Self {
         self.mentions = Arc::new(settings);
@@ -685,7 +704,13 @@ pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
+            // ADR-0216 D4 · R12 (#4660): the developer-token body allow-list, on the send
+            // only and inside the member write budget. It reads a body only when the
+            // request carries the developer marker; every other send passes untouched.
             post(routes::messages::send)
+                .route_layer(axum::middleware::from_fn(
+                    routes::messages::dev_send_body_gate,
+                ))
                 .route_layer(member_write(rate_limit::MemberWrite::MessageSend))
                 .get(routes::messages::history),
         )
@@ -929,6 +954,27 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/members/{member}/password-reset",
             post(routes::password::issue_password_reset),
+        )
+        // ADR-0216 (#4660) — developer tokens. The first three paths take a person's session
+        // only: the developer door's closed table does not list them, and each handler refuses
+        // a developer token again. `…/dev-access/self` is the reverse — a developer token's own
+        // whoami (L1) and logout (L2), the two rows of the table that live here; its template
+        // must stay byte-identical to `momo_auth::dev_token::DEV_ROUTE_TABLE`.
+        .route(
+            "/v1/workspaces/{ws}/dev-access",
+            get(routes::dev_access::policy),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/credentials",
+            get(routes::dev_access::list).post(routes::dev_access::issue),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/credentials/{id}",
+            delete(routes::dev_access::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/self",
+            get(routes::dev_access::whoami).delete(routes::dev_access::revoke_self),
         )
         // #1768 — ADR-0128 D2/D3. Role/status/ban mutations; leave `/me` stays
         // the more specific sibling registered above.

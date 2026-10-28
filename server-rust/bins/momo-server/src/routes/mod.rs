@@ -33,6 +33,8 @@ pub mod cohosted_agent;
 pub mod credits;
 /// ADR-0208 D4 — the send composition `POST …/messages` and the scheduler share.
 pub(crate) mod deliver;
+/// ADR-0216 (#4660): developer tokens — issue, list, revoke, whoami, self-revoke.
+pub mod dev_access;
 pub mod device_keys;
 pub mod device_link;
 pub mod devices;
