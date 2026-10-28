@@ -11,7 +11,7 @@
 //! | consent screen | `preview` tells the signed-in person who/where/what/how long (closed key set, `serverHost` from the configured issuer, not from `Host`); a role outside the switch, a bad envelope, a developer token, an agent, a signed-out session are each refused | the preview widens, the host is taken from a header, a refused caller learns more than a 403/404/401 |
 //! | decision | approve answers a loopback redirect with `code`, `state`, `iss` and **only the SHA-256 of the code** is stored; deny answers `access_denied`; one terminal decision per nonce (also under a race); the issued scopes are request ∩ choice; a wrong/absent/unavailable password issues nothing; five wrong passwords lock approving out even for the right one, and the budget is the **same** one as the card's; a role outside the switch is refused before the password is compared; ten live lineages refuse | the password is not compared, the nonce is not unique, the scope subset is not checked, the budget key is separate, the policy comes after the password, the code is stored whole |
 //! | request envelope | forged, expired, other-secret, hosted-typed and other-client envelopes are one and the same 404 sentence and write nothing; a hosted envelope is not a dev one and the other way round | the hosted key/typ is shared, the client id is not checked, an enumerating answer |
-//! | exchange | the lineage the code opens has exactly the approved scopes and only digests at rest; every wrong exchange is the same `invalid_grant` bytes and **burns nothing**; an expired code is refused (the clock decides, both sides); a replay ends the lineage the first use opened and leaves one audit line; the member is judged again at exchange (demotion, suspension, removal, the lineage limit) and the code is burned; a password change/reset burns a waiting code and ends a lineage | PKCE/redirect/resource are not compared, a wrong verifier burns the code, a replay opens nothing/ends nothing, the exchange does not re-judge the member, the sweep skips waiting codes |
+//! | exchange | the lineage the code opens has exactly the approved scopes and only digests at rest; every wrong exchange is the same `invalid_grant` bytes and **burns nothing**; an expired code is refused (the clock decides, both sides); a replay ends the lineage the first use opened and leaves one audit line; the member is judged again at exchange (demotion, suspension, removal, the lineage limit) and the code is burned; a password change/reset burns a waiting code and ends a lineage, and an exchange that meets such a sweep in flight queues behind it and finds the code burned | PKCE/redirect/resource are not compared, a wrong verifier burns the code, a replay opens nothing/ends nothing, the exchange does not re-judge the member, the sweep skips waiting codes, the exchange does not take the member's sweep lock (it then runs past a sweep in flight and opens a lineage the sweep never saw) |
 //! | refresh | rotation hands over a fresh pair of the same lineage; a spent refresh ends the whole lineage with one alert; unknown/garbled/spent answers are the same bytes; two simultaneous refreshes let exactly one through; 30-day idle and 90-day cap refuse; access and refresh are not interchangeable | reuse is not detected, the answers differ by reason, the serialisation is lost, idle/cap are not enforced |
 //! | revoke | an access or a refresh ends the whole lineage; a card, an unknown string and an already revoked token are the same 200 as a real one (no oracle); another client id ends nothing | the card is revocable here, a wrong answer is an oracle, the client id is not part of the match |
 //! | metadata, closed arm, hosted | the metadata follows the open arms; with the dev arm closed `oort-cli` is an unknown client byte for byte and a real dev token redeems nothing; opening the dev arm leaves the hosted flow's answers as they were | the flag does not gate the branch, `is_enabled` widens, the hosted PRM leaks out of a dev-only server |
@@ -35,9 +35,10 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use momo_auth::{
     dev_login_request_key, hosted_oauth_request_key, issue_dev_card_in_tx, issue_dev_login_in_tx,
-    sign_authorization_request, sign_dev_login_request, verify_authorization_request,
-    verify_dev_login_request, AuthorizationRequestSeed, DevAccessPolicy, DevLoginRequestSeed,
-    DevTool, IssuedDevCard, IssuedDevLogin, NewDevCard, NewDevLogin, DEV_READ_ONLY_SCOPES,
+    lock_member_wide_sweep_in_tx, revoke_member_dev_tokens_in_tx, sign_authorization_request,
+    sign_dev_login_request, verify_authorization_request, verify_dev_login_request,
+    AuthorizationRequestSeed, DevAccessPolicy, DevLoginRequestSeed, DevTool, IssuedDevCard,
+    IssuedDevLogin, NewDevCard, NewDevLogin, DEV_READ_ONLY_SCOPES,
 };
 use momo_db::sqlx::{self, Row};
 use momo_db::{with_tenant_tx, PgPool};
@@ -4062,6 +4063,153 @@ async fn changing_the_password_burns_a_waiting_code_and_ends_a_login_lineage() {
 async fn an_operator_reset_burns_a_waiting_code_and_ends_a_login_lineage() {
     a_password_event_burns_a_waiting_code_and_ends_a_login(Event::PasswordReset, RESET_PASSWORD)
         .await;
+}
+
+/// Wait — on the database's own `pg_stat_activity`, with a deadline and no fixed wait — until some backend
+/// is parked on a lock that the backend `holder` holds. A task that ends first never queued; that is the
+/// failure this helper exists to show, so it is the first thing every round asks.
+async fn wait_until_queued_behind<T>(
+    su: &PgPool,
+    holder: i32,
+    task: &tokio::task::JoinHandle<T>,
+    what: &str,
+) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        assert!(
+            !task.is_finished(),
+            "{what} answered while the lock was held: it did not queue behind it"
+        );
+        let parked: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND $1 = ANY(pg_blocking_pids(pid))",
+        )
+        .bind(holder)
+        .fetch_one(su)
+        .await
+        .expect("read pg_stat_activity");
+        if parked > 0 {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "{what} never parked behind the held lock within 10 s"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+}
+
+/// A password change/reset and a code exchange serialize on the member's sweep lock, which the exchange takes
+/// (`lock_dev_login_code_in_tx`) before it locks the ledger row: either the sweep burns the waiting code
+/// before the exchange reads it, or the exchange's lineage exists before the sweep looks and the sweep ends
+/// it. A lineage cannot slip between the two.
+///
+/// Here the lock is held on a connection of the test's own — what a sweep in flight holds — while the honest
+/// exchange of a waiting code is started. The exchange has to queue behind it: no answer while the lock is
+/// held (waited for on `pg_stat_activity`, not on a timer). The sweep then burns the code and commits, and
+/// the exchange answers `invalid_grant` having opened nothing. Without the queue the exchange runs straight
+/// through the held lock, opens a lineage the sweep never saw, and answers 200 while the lock is still held.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs an isolated PostgreSQL 18 (ADR-0216 D6 나)"]
+async fn an_exchange_that_meets_a_sweep_in_flight_queues_behind_it_and_opens_nothing() {
+    let _guard = test_lock().await;
+    let w = Arc::new(World::boot().await);
+    let holder = w.person("admin", "박서연").await;
+    let earlier = w.login(&holder).await; // a login the holder already has: the sweep has something to end
+    let waiting = w.grant_all(&holder).await; // a code waiting for its exchange
+    w.keep_code_alive(&waiting.code).await;
+    assert_eq!(
+        w.door(&earlier.access).await,
+        200,
+        "control: the holder's earlier login is live"
+    );
+    let rows_before = w.dev_rows(holder.id).await;
+    assert_eq!(
+        rows_before, 2,
+        "control: the earlier login is the holder's only developer rows"
+    );
+
+    // The sweep in flight: it holds the member's lock and has not committed.
+    let (workspace, member) = (w.workspace, holder.id);
+    let pool = w.app.clone();
+    let (locked_tx, locked_rx) = tokio::sync::oneshot::channel::<i32>();
+    let (go_tx, go_rx) = tokio::sync::oneshot::channel::<()>();
+    let sweep = tokio::spawn(async move {
+        with_tenant_tx(&pool, workspace, move |conn| {
+            Box::pin(async move {
+                lock_member_wide_sweep_in_tx(conn, workspace, member).await?;
+                let backend: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+                    .fetch_one(&mut *conn)
+                    .await?;
+                let _ = locked_tx.send(backend);
+                let _ = go_rx.await;
+                Ok(revoke_member_dev_tokens_in_tx(conn, workspace, member).await?)
+            })
+        })
+        .await
+    });
+    let sweep_backend = locked_rx.await.expect("the sweep took the member's lock");
+
+    // The exchange arrives meanwhile and has to wait for the lock.
+    let exchange = tokio::spawn({
+        let w = Arc::clone(&w);
+        async move { w.exchange(&waiting).await }
+    });
+    wait_until_queued_behind(&w.su, sweep_backend, &exchange, "the exchange").await;
+    assert!(
+        !exchange.is_finished(),
+        "the exchange is still waiting for the lock the sweep holds"
+    );
+
+    // The sweep finishes: it ends the earlier login, burns the waiting code and commits.
+    let _ = go_tx.send(());
+    let swept = sweep.await.expect("sweep task").expect("the sweep commits");
+    assert_eq!(
+        swept, 2,
+        "the sweep ends the earlier login: its access and its refresh"
+    );
+    let reply = exchange.await.expect("exchange task");
+    expect_oauth_error(
+        &reply,
+        400,
+        "invalid_grant",
+        "the exchange that queued behind the sweep",
+    );
+    assert_eq!(
+        w.dev_rows(holder.id).await,
+        rows_before,
+        "the exchange opened no lineage"
+    );
+    assert_eq!(
+        w.live_dev_rows(holder.id).await,
+        0,
+        "every developer row of the holder is ended"
+    );
+    let waiting_rows: Vec<LedgerRow> = w
+        .ledger_of(holder.id)
+        .await
+        .into_iter()
+        .filter(|row| !row.consumed)
+        .collect();
+    assert_eq!(waiting_rows.len(), 1, "the one code that was waiting");
+    assert_eq!(
+        waiting_rows[0].status, "revoked",
+        "the sweep burned the waiting code and the exchange did not consume it"
+    );
+    assert_eq!(
+        w.door(&earlier.access).await,
+        401,
+        "the earlier login is over"
+    );
+
+    // Control: the holder is not shut out — a login after the sweep goes through.
+    let again = w.login(&holder).await;
+    assert_eq!(
+        w.door(&again.access).await,
+        200,
+        "a new login after the sweep opens the door"
+    );
 }
 
 // ===========================================================================
