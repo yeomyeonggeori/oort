@@ -27,6 +27,7 @@ auth momo-server dev_token_door_budget_audit_conformance_pg
 auth momo-server dev_token_lifecycle_conformance_pg
 auth momo-server dev_token_restrictions_conformance_pg
 auth momo-server dev_access_routes_conformance_pg
+auth momo-server human_mcp_conformance_pg
 approval momo-server approval_push_audience_conformance_pg
 approval momo-server tool_grants_conformance_pg
 push momo-push device_conformance_pg

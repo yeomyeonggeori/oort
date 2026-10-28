@@ -21089,3 +21089,753 @@ async fn member_avatar_set_is_limited_to_ten_proposals_per_person_per_hour() {
     assert_eq!(status, 200, "{ok}");
     assert_eq!(staged_rows_3787(su, ws).await, 1);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v5 U-f (#4702) — a person's decision wakes the proposer's inbox
+// ---------------------------------------------------------------------------
+//
+// The caller-visible facts: what a hosted agent reads from `oort_inbox_read`, and the
+// reference rows under it. A run reference carries only the run and its channel.
+//
+// Sabotage (each goes red on its own):
+//  * delete `wake_proposer_in_tx` from the approve arm   -> `…leaves_one_agent_run_reference…`
+//  * delete it from `reject_run`                          -> the reject half of the same test
+//  * give it another agent's connection (a fan-out)       -> the second agent's empty inbox
+//  * drop the `ended` guard / run it for expiry           -> the expiry test
+//  * delete the active-connection read                    -> `…no_live_hosted_connection…`
+
+/// `(run, channel)` of every `agent_run` reference one hosted connection's inbox holds,
+/// oldest first.
+async fn agent_run_references(su: &PgPool, workspace: Uuid, connection: Uuid) -> Vec<(Uuid, Uuid)> {
+    sqlx::query_as(
+        "SELECT source_run_id, source_channel_id FROM hosted_agent_inbox_event \
+          WHERE workspace_id=$1 AND connection_id=$2 AND event_kind='agent_run' \
+          ORDER BY inbox_seq",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .fetch_all(su)
+    .await
+    .expect("agent_run references")
+}
+
+async fn run_of_approval(su: &PgPool, approval: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .expect("the approval's run")
+}
+
+/// Turn the fixture's second hosted agent into a **full** inbox reader of the very
+/// channel the first one proposes in, so that a reference written to the wrong
+/// connection would land somewhere that could receive it. Returns its connection.
+async fn make_second_hosted_agent_an_inbox_reader(su: &PgPool, fixture: &Fixture) -> Uuid {
+    let connection: Uuid = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connect_only_agent)
+    .fetch_one(su)
+    .await
+    .expect("the second agent's connection");
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET approved_scopes = ARRAY['agent:port:connect','agent:inbox:read']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(connection)
+    .execute(su)
+    .await
+    .expect("approve the inbox scope");
+    sqlx::query(
+        "UPDATE token SET scopes = ARRAY['agent:port:connect','agent:inbox:read']::text[] \
+          WHERE workspace_id=$1 AND actor_member_id=$2 AND kind='agent_bearer'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connect_only_agent)
+    .execute(su)
+    .await
+    .expect("grant the inbox scope on the token");
+    connection
+}
+
+/// What `oort_inbox_read` shows an agent: the `channelId` of each `agent_run` event.
+async fn inbox_agent_run_channels(
+    client: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+) -> Vec<String> {
+    let (status, read) = call(
+        client,
+        base,
+        bearer,
+        "oort_inbox_read",
+        json!({"limit": 100}),
+    )
+    .await;
+    assert_eq!(status, 200, "{read}");
+    structured(&read)["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter(|event| event["kind"] == "agent_run")
+        .map(|event| event["channelId"].as_str().expect("channelId").to_string())
+        .collect()
+}
+
+/// The workspace owner approves; the answer is the receipt.
+async fn approve(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval: Uuid,
+) -> (u16, Value) {
+    let (status, _headers, body) = decide_as(
+        client,
+        base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    (status, body)
+}
+
+fn unique_channel_name() -> String {
+    format!("plan-{}", &Uuid::new_v4().simple().to_string()[..8])
+}
+
+/// Approve and reject each leave **one** `agent_run` reference for the agent that
+/// proposed — a proposal a person asked for is the same case — and for nobody else; a
+/// replay and a second tap leave none more. What the agent reads from its inbox says so.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_on_a_proposal_leaves_one_agent_run_reference_for_its_proposer_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = make_second_hosted_agent_an_inbox_reader(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let mine = fixture.hosted_connection;
+
+    // A proposal alone tells nobody. `channel.create` takes the connection row
+    // `FOR UPDATE` in its executor, so the approval below also proves the reference
+    // can follow that lock inside one transaction.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": unique_channel_name()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approved_card = proposed_approval_3706(&proposed);
+    let approved_run = run_of_approval(&su, approved_card).await;
+    assert!(agent_run_references(&su, ws, mine).await.is_empty());
+
+    let decision = Uuid::new_v4();
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approved_card,
+        true,
+        decision,
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        agent_run_references(&su, ws, mine).await,
+        vec![(approved_run, fixture.channel)],
+        "an approval tells the proposer, once, which room's run changed"
+    );
+    assert!(
+        agent_run_references(&su, ws, other).await.is_empty(),
+        "another hosted agent that covers the same room is not told"
+    );
+
+    // The same tap again (a retry) and a different tap on a settled card add nothing.
+    let (status, _h, replayed) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approved_card,
+        true,
+        decision,
+    )
+    .await;
+    assert_eq!(status, 200, "{replayed}");
+    let (status, _h, again) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approved_card,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(agent_run_references(&su, ws, mine).await.len(), 1);
+
+    // What the agent itself sees.
+    assert_eq!(
+        inbox_agent_run_channels(&client, &base, &fixture.hosted_bearer).await,
+        vec![fixture.channel.to_string()]
+    );
+    assert!(
+        inbox_agent_run_channels(&client, &base, &fixture.connect_only_bearer)
+            .await
+            .is_empty()
+    );
+
+    // A rejection tells it too — on a proposal a person asked for, which this is.
+    let rejected_card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let rejected_run = run_of_approval(&su, rejected_card).await;
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        rejected_card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(
+        agent_run_references(&su, ws, mine).await,
+        vec![
+            (approved_run, fixture.channel),
+            (rejected_run, fixture.channel)
+        ]
+    );
+    assert!(agent_run_references(&su, ws, other).await.is_empty());
+    assert_eq!(
+        inbox_agent_run_channels(&client, &base, &fixture.hosted_bearer)
+            .await
+            .len(),
+        2
+    );
+}
+
+/// A person stopping the parked run is the third way a proposal ends, and it leaves one
+/// reference as well; stopping it again changes nothing.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_person_cancelling_a_parked_run_leaves_one_agent_run_reference() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = make_second_hosted_agent_an_inbox_reader(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let run = run_of_approval(&su, card).await;
+    assert!(agent_run_references(&su, ws, fixture.hosted_connection)
+        .await
+        .is_empty());
+
+    for _ in 0..2 {
+        let status = client
+            .post(format!("{base}/v1/workspaces/{ws}/agent-runs/{run}/cancel"))
+            .bearer_auth(&fixture.human_jwt)
+            .send()
+            .await
+            .expect("cancel responds")
+            .status()
+            .as_u16();
+        assert_eq!(status, 200);
+        assert_eq!(
+            agent_run_references(&su, ws, fixture.hosted_connection).await,
+            vec![(run, fixture.channel)],
+            "one reference whether the stop is the first or a repeat"
+        );
+    }
+    assert!(agent_run_references(&su, ws, other).await.is_empty());
+}
+
+/// An expiry is not a person's word, so it tells nobody — whether a late tap settles the
+/// card or the notifier's sweep does.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_expired_proposal_leaves_no_agent_run_reference_by_late_tap_or_by_sweep() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let overdue = |approval: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+                .bind(approval)
+                .execute(&su)
+                .await
+                .expect("make the card overdue");
+        }
+    };
+
+    // a late tap
+    let tapped = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    overdue(tapped).await;
+    let (status, _h, settled) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        tapped,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{settled}");
+    assert_eq!(settled["status"], json!("expired"));
+
+    // the sweep
+    let swept = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    overdue(swept).await;
+    let notifier = momo_notifier_pool().await;
+    let stats = momo_notifier::approval_sweep::sweep_expired_approvals(&notifier, 50)
+        .await
+        .expect("the sweep runs");
+    assert!(stats.expired >= 1, "{stats:?}");
+    for card in [tapped, swept] {
+        let status: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+            .bind(card)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+        assert_eq!(status, "expired");
+    }
+
+    assert!(
+        agent_run_references(&su, ws, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "neither expiry path writes the proposer's inbox"
+    );
+    assert!(
+        inbox_agent_run_channels(&client, &base, &fixture.hosted_bearer)
+            .await
+            .is_empty()
+    );
+}
+
+/// Where the proposer has no live hosted connection covering the run's room, a decision
+/// tells nobody and nothing else changes: the team AI (a managed agent), a hosted agent
+/// whose connection is no longer proved, and one whose connection no longer covers the
+/// room.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_writes_no_agent_run_reference_without_a_live_covering_hosted_connection() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let worker = momo_worker_pool_3900().await;
+    let fixture = seed(&su).await;
+    let other = make_second_hosted_agent_an_inbox_reader(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let nobody_was_told = |label: &'static str| {
+        let su = su.clone();
+        let mine = fixture.hosted_connection;
+        async move {
+            assert!(
+                agent_run_references(&su, ws, mine).await.is_empty(),
+                "{label}: the hosted proposer's inbox"
+            );
+            assert!(
+                agent_run_references(&su, ws, other).await.is_empty(),
+                "{label}: the other hosted agent's inbox"
+            );
+        }
+    };
+
+    // a managed agent (the team AI) — approve, then reject. The second card asks for the
+    // opposite value: a switch already at the asked value is no card at all.
+    let helper = enable_helper_3900(&su, &fixture).await;
+    for (approve, enabled) in [(true, false), (false, true)] {
+        let proposed = helper_propose_3900(
+            &su,
+            &worker,
+            &fixture,
+            helper,
+            "workspace.unfurl.update",
+            json!({"enabled": enabled}),
+        )
+        .await
+        .unwrap_or_else(|refusal| panic!("{refusal:?}"));
+        let (status, _h, decided) = decide_as(
+            &client,
+            &base,
+            ws,
+            &fixture.human_jwt,
+            proposed.approval_id,
+            approve,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{decided}");
+    }
+    nobody_was_told("a managed proposer").await;
+
+    // a hosted proposer whose connection is no longer proved when the card is tapped
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='detected', proved_at=NULL, proved_by=NULL \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, decided) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    nobody_was_told("a connection that is not live").await;
+
+    // …and one that is live but no longer covers the room the card stands in
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='active', proved_at=now(), proved_by=$3 \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = ARRAY[]::uuid[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, decided) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    nobody_was_told("a connection that no longer covers the room").await;
+}
+
+/// **The lock order, measured as database state.** A decision takes the proposer's hosted
+/// connection **before** the channel's sequence counter: the hosted canon locks the
+/// connection first, and some executors already hold it `FOR UPDATE` when they reach the
+/// outcome line, so a decision that took the channel first would deadlock with one of those
+/// on a DM carrying two cards.
+///
+/// Another transaction holds the connection row the way such a decision does; the tap then
+/// stops at the reference write, and **while it is stopped there** the channel's counter row
+/// must still be free (`FOR UPDATE NOWAIT` from a third connection). Written the other way
+/// round — reference after the outcome line — the tap would be holding the counter, and this
+/// goes red. Both arms: approve and reject.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_waits_for_the_proposers_connection_before_it_takes_the_channels_counter() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    for approve in [true, false] {
+        let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+
+        let mut holder = su.begin().await.expect("holder transaction");
+        sqlx::query("SELECT 1 FROM hosted_agent_connection WHERE id=$1 FOR UPDATE")
+            .bind(fixture.hosted_connection)
+            .fetch_one(&mut *holder)
+            .await
+            .expect("hold the connection row");
+        let holder_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *holder)
+            .await
+            .expect("the holder's backend");
+
+        let decision = tokio::spawn({
+            let client = client.clone();
+            let base = base.clone();
+            let jwt = fixture.human_jwt.clone();
+            let workspace = fixture.workspace;
+            async move {
+                decide_as(
+                    &client,
+                    &base,
+                    workspace,
+                    &jwt,
+                    card,
+                    approve,
+                    Uuid::new_v4(),
+                )
+                .await
+            }
+        });
+
+        // Wait for a condition, not for a time: some backend is parked behind the holder —
+        // the only thing the holder holds is the connection row.
+        let mut parked = false;
+        for _ in 0..400 {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                  WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))",
+            )
+            .bind(holder_pid)
+            .fetch_one(&su)
+            .await
+            .expect("read pg_stat_activity");
+            if waiting > 0 {
+                parked = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            parked,
+            "approve={approve}: the decision never reached the reference write while the \
+             connection row was held"
+        );
+
+        let mut probe = su.begin().await.expect("probe transaction");
+        let counter =
+            sqlx::query("SELECT 1 FROM channel_seq WHERE channel_id=$1 FOR UPDATE NOWAIT")
+                .bind(fixture.channel)
+                .fetch_optional(&mut *probe)
+                .await;
+        probe.rollback().await.expect("release the probe");
+        assert!(
+            counter.is_ok(),
+            "approve={approve}: the decision waits on the connection while holding the \
+             channel's counter — the deadlock order: {counter:?}"
+        );
+
+        holder.commit().await.expect("release the connection row");
+        let (status, _h, body) = decision.await.expect("the decision task");
+        assert_eq!(status, 200, "approve={approve}: {body}");
+    }
+}
+
+/// A tap the server **refuses** tells nobody: `with_tenant_tx` commits a refusal that is answered
+/// as a value, so a reference written before the gate or the executor spoke would stay. A plain
+/// member's tap (`role_required`) and an admin's tap on a card that went stale (the channel name
+/// was taken meanwhile) both leave the inbox empty; the decision that then goes through leaves
+/// exactly one.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_refused_tap_leaves_no_agent_run_reference_and_the_decision_after_it_leaves_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    // A name somebody already took: the proposal is drawn, the admin's tap is refused as stale.
+    let taken = unique_channel_name();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
+         VALUES($1,$2,'private',$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(ws)
+    .bind(&taken)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": taken}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let card = proposed_approval_3706(&proposed);
+
+    let (status, _h, refused) =
+        decide_as(&client, &base, ws, &plain_jwt, card, true, Uuid::new_v4()).await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(
+        agent_run_references(&su, ws, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "a tap refused for want of a role tells nobody"
+    );
+
+    let (status, stale) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(approval_status_3708(&su, card).await, "pending");
+    assert!(
+        agent_run_references(&su, ws, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "a tap refused as stale tells nobody either"
+    );
+
+    // The decision that does go through (a rejection of the stale card) tells it, once.
+    let run = run_of_approval(&su, card).await;
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(
+        agent_run_references(&su, ws, fixture.hosted_connection).await,
+        vec![(run, fixture.channel)]
+    );
+}
+
+/// **The reference's lock order against the message spine, measured as an outcome.** The tap
+/// takes the proposer's connection and inbox counter *before* the channel's counter; the spine
+/// takes the channel first and fans out to the same connection after. Here the spine holds the
+/// channel's counter and then asks for the inbox counter the tap holds — a cycle — and
+/// PostgreSQL aborts the one that has waited longest, the person's tap. The tap must be run again
+/// and succeed (once, one reference, 200), not answer 500.
+///
+/// Timing-shaped: the spine's second statement follows the tap's park within a few tens of
+/// milliseconds, well inside `deadlock_timeout` (1 s), so the tap — the longer waiter — is the one
+/// PostgreSQL aborts. Sabotage: delete the retry in `decide` and this answers 500.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_succeeds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let run = run_of_approval(&su, card).await;
+    // The inbox counter exists already (any earlier fan-out creates it): the spine's next step is
+    // a plain lock of that row, as it is for every message after the first.
+    sqlx::query(
+        "INSERT INTO hosted_agent_inbox_counter(workspace_id, agent_member_id, connection_id) \
+         VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // The spine's transaction holds the channel's counter, as the insert of a message does.
+    let mut spine = su.begin().await.expect("the spine's transaction");
+    sqlx::query("SELECT 1 FROM channel_seq WHERE channel_id=$1 FOR UPDATE")
+        .bind(fixture.channel)
+        .fetch_one(&mut *spine)
+        .await
+        .expect("hold the channel counter");
+    let spine_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *spine)
+        .await
+        .expect("the spine's backend");
+
+    let decision = tokio::spawn({
+        let client = client.clone();
+        let base = base.clone();
+        let jwt = fixture.human_jwt.clone();
+        async move { decide_as(&client, &base, ws, &jwt, card, true, Uuid::new_v4()).await }
+    });
+
+    // Wait for a condition: the tap has written its reference and is parked behind the spine,
+    // waiting for the channel's counter for its outcome line.
+    let mut parked = false;
+    for _ in 0..400 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))",
+        )
+        .bind(spine_pid)
+        .fetch_one(&su)
+        .await
+        .expect("read pg_stat_activity");
+        if waiting > 0 {
+            parked = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        parked,
+        "the tap never reached its outcome line behind the spine"
+    );
+
+    // The spine fans the message out to the same connection: it wants the inbox counter the tap
+    // holds. PostgreSQL breaks the cycle by aborting the tap, which has waited longest.
+    let fan_out = sqlx::query(
+        "SELECT last_seq FROM hosted_agent_inbox_counter WHERE connection_id=$1 FOR UPDATE",
+    )
+    .bind(fixture.hosted_connection)
+    .fetch_one(&mut *spine)
+    .await;
+    assert!(
+        fan_out.is_ok(),
+        "PostgreSQL aborted the spine, not the tap — the tap had waited longest, so rerun this: {fan_out:?}"
+    );
+    spine.commit().await.expect("the spine commits its message");
+
+    let (status, _h, body) = decision.await.expect("the decision task");
+    assert_eq!(
+        status, 200,
+        "the tap was the deadlock's victim and must have been run again: {body}"
+    );
+    assert_eq!(
+        agent_run_references(&su, ws, fixture.hosted_connection).await,
+        vec![(run, fixture.channel)],
+        "the retry wrote the proposer's reference once"
+    );
+    assert_eq!(approval_status_3708(&su, card).await, "approved");
+}
