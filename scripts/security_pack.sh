@@ -111,17 +111,34 @@ run_target() {
   echo "$passed"
 }
 
+# 측정용 출력(#4696). ok 줄의 `seconds` 는 cargo 한 번(컴파일·링크 + 시험 실행)의 합이라 「준비」와 「시험」이
+# 안 갈렸다. cargo 가 로그에 남기는 두 시간을 덧붙여 CI 로그만으로 대상별 고정비를 읽게 한다:
+# build = `Finished … in`(컴파일·링크, `1m 02s` 꼴도 초로), run = libtest `finished in`(시험 실행).
+# 어느 쪽도 판정에 쓰지 않는다. 못 찾으면 `?`.
+log_build_secs() {
+  local v
+  v="$(sed -nE 's/^[[:space:]]*Finished .* in (([0-9]+)m )?([0-9.]+)s$/\2 \3/p' "$1" 2>/dev/null \
+    | tail -n 1 | awk 'NF == 2 { print $1 * 60 + $2; next } NF == 1 { print $1 }')" || true
+  echo "${v:-?}"
+}
+log_run_secs() {
+  local v
+  v="$(sed -nE 's/^test result: .* finished in ([0-9.]+)s$/\1/p' "$1" 2>/dev/null | tail -n 1)" || true
+  echo "${v:-?}"
+}
+
 cmd_run() {
   cmd_lint
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
   mkdir -p "$OUT"
-  local total=0 targets=0 start now t0 pkg test n
+  local total=0 targets=0 start now t0 pkg test n log
   start="$(date +%s)"
   while read -r _d pkg test; do
     t0="$(date +%s)"
-    n="$(run_target "$pkg" "$test" "$OUT/$pkg.$test.log")"
+    log="$OUT/$pkg.$test.log"
+    n="$(run_target "$pkg" "$test" "$log")"
     total=$((total + n)); targets=$((targets + 1))
-    echo "[security-pack] ok $pkg/$test passed=$n seconds=$(( $(date +%s) - t0 ))"
+    echo "[security-pack] ok $pkg/$test passed=$n seconds=$(( $(date +%s) - t0 )) build=$(log_build_secs "$log") run=$(log_run_secs "$log")"
   done < <(entries)
   now="$(date +%s)"
   echo "[security-pack] PASS targets=$targets tests=$total seconds=$((now - start))"
@@ -152,7 +169,10 @@ cmd_nightly() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
   mkdir -p "$OUT"
   export_pg_env "$DATABASE_URL"
-  local rc=0 skips="" t
+  local rc=0 skips t
+  # momo-blind-pty/tests/loopback.rs 는 PG 시험이 아니라 성능 측정이다(#4696). PR CI 에서 빼며 `#[ignore]` 가
+  # 됐고 perf-nightly.yml 이 릴리스 빌드로 돌린다. 여기서는 건너뛰기만 한다(디버그 빌드로 164초를 또 쓰지 않는다).
+  skips=" --skip handshake_echo_latency_and_reconnect_over_loopback_tcp"
   # prod_role_conformance_pg 는 cluster-global 역할 비밀번호를 재설정해 이후 타깃을 오염시킨다.
   # 1) 그 타깃의 시험만 건너뛰고 나머지 전량을 돌린 뒤, 2) 마지막 순서로 따로 돌린다.
   for t in every_notifier_job_iteration_runs_as_its_production_role \

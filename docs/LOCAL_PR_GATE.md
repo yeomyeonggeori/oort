@@ -11,6 +11,8 @@ Public-repository `pr-ci` is active for PRs into `main`, `track/engine`, and `tr
 - `PR CI gate` and base-trusted `Policy integrity gate` are the two stable branch-protection contexts (ADR-0153 D5).
 - Local evidence remains the primary runtime merge gate because PR CI does not boot PostgreSQL/Centrifugo/Docker e2e or external providers.
 - Workers open a PR and hand it off; workers do not merge. `momo-main` owns review, final local gate, merge, issue close, and post-merge verification.
+- `pr-ci` selects lanes by changed paths: `rust`, `node` (one job per tree: core, web, mobile) and `policy` (the gate-script regression fixtures: `scripts/`, `.github/`, policy files, `REVIEW.md` and every `rust`-lane path). `PR CI gate` cross-checks each selected lane. `security-nightly` runs the PG tests PR CI leaves out; `perf-nightly` runs the performance measurements moved out of PR CI (#4696).
+- What a review blocks on, how findings are written, how many review rounds a PR gets and the risk-grade path table are in [`REVIEW.md`](../REVIEW.md). It does not change the contract above.
 
 ## 1. Rule
 
@@ -34,7 +36,7 @@ The live name list is `scripts/local_gate.sh --help`. Snapshot:
 
 | Profile | Use when |
 |---|---|
-| `docs` | docs/spec/script-only changes (static + public-edge contract + SH tests including `test_oort_day2.sh`/`test_oort_doctor.sh` + oort dispatcher/lib `bash -n`/shellcheck (#2124) + live `scripts/check_release_manifest.sh` against `releases/latest.json` (#1984) + live `scripts/tests/test_pgbackrest_pitr_contract.sh` (#2157; docker missing is RED, same harness guard as day-2/doctor) + GATED_DOCS SELF_HOST family en+ko (#2124) + platform template contract `scripts/tests/test_railway_template.sh` (#2297, ADR-0184 D5) + AWS T1 recipe `scripts/tests/test_aws_recipe.sh` (#2377; terraform is an optional tool) — local/docs-profile only; `pr-ci` has no docs lane, its rust/node lanes skip on infra/scripts-only paths) |
+| `docs` | docs/spec/script-only changes (static + public-edge contract + SH tests including `test_oort_day2.sh`/`test_oort_doctor.sh` + oort dispatcher/lib `bash -n`/shellcheck (#2124) + live `scripts/check_release_manifest.sh` against `releases/latest.json` (#1984) + live `scripts/tests/test_pgbackrest_pitr_contract.sh` (#2157; docker missing is RED, same harness guard as day-2/doctor) + GATED_DOCS SELF_HOST family en+ko (#2124) + platform template contract `scripts/tests/test_railway_template.sh` (#2297, ADR-0184 D5) + AWS T1 recipe `scripts/tests/test_aws_recipe.sh` (#2377; terraform is an optional tool) — local/docs-profile only; `pr-ci` has no docs lane, its rust/node lanes skip on infra/scripts-only paths and scripts-only PRs run the policy regression lane) |
 | `diagnostics` | diagnostics bundle changes |
 | `staging-smoke` | staging/self-host config without real VPS secrets |
 | `backup` | pgBackRest PITR / migrate-gate changes |
