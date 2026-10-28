@@ -135,7 +135,9 @@ pub fn dev_refresh_workspace_id(raw: &str) -> Option<Uuid> {
     envelope_workspace_id(raw, DEV_REFRESH_PREFIX)
 }
 
-fn envelope_workspace_id(raw: &str, prefix: &str) -> Option<Uuid> {
+/// Shared with [`crate::dev_login`], whose authorization-code envelope has the
+/// same `<prefix>.<lowercase uuid>.<≥43 base64url>` shape under its own prefix.
+pub(crate) fn envelope_workspace_id(raw: &str, prefix: &str) -> Option<Uuid> {
     let mut parts = raw.split('.');
     let presented_prefix = parts.next()?;
     let workspace = parts.next()?;
@@ -1568,7 +1570,7 @@ async fn revoke_dev_card(
     Ok(rows.len() as u64)
 }
 
-async fn revoke_dev_lineage(
+pub(crate) async fn revoke_dev_lineage(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
@@ -1642,8 +1644,9 @@ const REVOKE_MEMBER_DEV_SQL: &str = "UPDATE token \
     RETURNING id";
 
 /// Every developer token of one member — cards and every lineage (access and
-/// refresh). Called from `token_store::revoke_member_session_tokens`, so a
-/// password change or reset ends them in the same transaction (D7, R9).
+/// refresh) — plus the browser-login codes still waiting for their exchange.
+/// Called from `token_store::revoke_member_session_tokens`, so a password change
+/// or reset ends them in the same transaction (D7, R9).
 pub async fn revoke_member_dev_tokens_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1660,6 +1663,10 @@ pub async fn revoke_member_dev_tokens_in_tx(
         .bind(member_id)
         .fetch_all(&mut *conn)
         .await?;
+    // A browser approval that has not been exchanged yet would open a brand-new
+    // lineage moments after this sweep (D7 / R9, #4700): burn it under the same
+    // lock, in the same transaction. The returned count stays "tokens ended".
+    crate::dev_login::invalidate_pending_dev_logins_in_tx(conn, workspace_id, member_id).await?;
     Ok(rows.len() as u64)
 }
 
