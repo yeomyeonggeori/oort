@@ -282,6 +282,46 @@ pub async fn open_direct_message_in_tx(
     })
 }
 
+/// Take the row lock a send into the pair's DM takes **first** — its `channel_seq` row — when
+/// that DM already exists, and answer its id (`None`: no DM yet, so nothing to lock and nobody
+/// who could be sending into it).
+///
+/// For a transaction that will write a message into a DM **after** it has taken other locks
+/// (ADR-0186 증보 v5 U-a, review L8). A person's send into a DM takes `channel_seq` first and then,
+/// for a hosted agent, share-locks the agent's connection and `member` row. The unasked-card
+/// producer takes the agent's `member` row `FOR NO KEY UPDATE` to serialise its own calls; if it
+/// reached `channel_seq` only afterwards — to write the card — the two would be the two halves of
+/// an AB/BA pair and one of them would be a deadlock victim. Taking `channel_seq` here, before
+/// that row, makes the order the same as the person's. The lock is held to the end of the
+/// caller's transaction and `send_message_in_tx` re-takes it as a no-op.
+pub async fn lock_direct_message_seq_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    first_member_id: Uuid,
+    second_member_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    let participant_key =
+        dm_participant_key(canonical_participants(first_member_id, second_member_id));
+    let channel: Option<Uuid> = sqlx::query_scalar(
+        "SELECT c.id FROM channel c \
+          WHERE c.workspace_id = $1 AND c.kind = 'dm' \
+            AND c.dm_key = encode(digest($2::text, 'sha256'), 'hex')",
+    )
+    .bind(workspace_id)
+    .bind(&participant_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(channel_id) = channel {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT channel_id FROM channel_seq WHERE channel_id = $1 FOR UPDATE",
+        )
+        .bind(channel_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    }
+    Ok(channel)
+}
+
 /// The caller's live DM channels, newest first (Swift `fetchDirectMessages`).
 ///
 /// Archived DMs are omitted; `member_ids` lists the participants who have not

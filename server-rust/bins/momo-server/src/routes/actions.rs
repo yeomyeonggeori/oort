@@ -223,6 +223,117 @@ mod tests {
         assert_eq!(spec_enum, registry, "openapi WorkspaceActionId vs ACTIONS");
     }
 
+    /// **ADR-0186 증보 v5 U-b-2 — the unasked-card ids are one list in three places, and the list
+    /// is exactly the four the ADR names.**
+    ///
+    /// The registry's `initiative` flag is the definition; `oort_action_initiate`'s `actionId`
+    /// enum (a deliberate copy — `momo-mcp` may not depend on `momo-agent`) and the published
+    /// `InitiativeActionId` are read back as their own lists. The fourth measurement is the
+    /// literal: with only three lists a fifth id added to all of them at once would pass, and
+    /// "exactly these four" is the security claim, not "these lists agree".
+    #[test]
+    fn the_initiative_ids_are_one_list_in_three_places() {
+        let flagged = actions::initiative_action_ids();
+        assert_eq!(
+            flagged,
+            vec![
+                "channel.create",
+                "channel.member.add",
+                "message.pin",
+                "message.unpin"
+            ],
+            "the registry's initiative flag is exactly the ADR's four"
+        );
+        let initiate = momo_mcp::TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == momo_mcp::TOOL_ACTION_INITIATE)
+            .expect("the initiate tool is in the catalog");
+        let tool_enum: Vec<String> = initiate.input_schema()["properties"]["actionId"]["enum"]
+            .as_array()
+            .expect("the initiate schema publishes an actionId enum")
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .expect("an enum member is a string")
+                    .to_string()
+            })
+            .collect();
+        assert_eq!(tool_enum, flagged, "oort_action_initiate enum vs the flag");
+        assert_eq!(
+            openapi_enum("InitiativeActionId"),
+            flagged,
+            "openapi InitiativeActionId vs the flag"
+        );
+        // And the args branches the tool offers are the registry's own for those ids.
+        let branches = initiate.input_schema()["properties"]["args"]["oneOf"]
+            .as_array()
+            .expect("args is a oneOf")
+            .iter()
+            .map(|branch| branch["title"].as_str().expect("titled").to_string())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            branches, flagged,
+            "the oneOf branches are the flagged actions, in order"
+        );
+    }
+
+    /// The structural half of the claim: an action that mints a value shown once, widens what an
+    /// agent can read, changes who or what an agent is, or is not an `Admin`-decided card (so the
+    /// owner's role gate is the one the door judges) is **never** initiative — measured over the
+    /// whole registry, so a new action starts closed and has to be opened on purpose.
+    #[test]
+    fn every_initiative_action_is_one_a_person_may_look_at() {
+        for action in actions::ACTIONS {
+            if !action.initiative {
+                continue;
+            }
+            assert_eq!(
+                action.secret_delivery,
+                actions::SecretDelivery::None,
+                "{} mints a value shown once",
+                action.id
+            );
+            assert!(
+                !actions::ONE_TIME_SECRET_ACTION_IDS.contains(&action.id),
+                "{} is a one-time-secret action",
+                action.id
+            );
+            assert_eq!(
+                action.required_role,
+                actions::RequiredRole::Admin,
+                "{}: the door judges only the Admin gate for the owner",
+                action.id
+            );
+            assert_eq!(
+                action.proposers,
+                actions::Proposers::Any,
+                "{} is not for external agents at all",
+                action.id
+            );
+            for closed in [
+                actions::ACTION_HOSTED_CHANNELS_GRANT,
+                actions::ACTION_AGENT_RENAME,
+                actions::ACTION_AGENT_PROFILE_UPDATE,
+                actions::ACTION_AGENT_INVITE,
+                actions::ACTION_INVITE_CREATE,
+                actions::ACTION_WORKSPACE_SETTINGS_UPDATE,
+                actions::ACTION_MEMBER_AVATAR_SET,
+            ] {
+                assert_ne!(action.id, closed, "{closed} may never be raised unasked");
+            }
+        }
+        // A team-AI-only id, an unknown id and a proposable-but-not-initiative id are one answer.
+        for id in [
+            actions::ACTION_WORKSPACE_UNFURL_UPDATE,
+            actions::ACTION_HOSTED_CHANNELS_GRANT,
+            "webhook.create",
+            "nope",
+        ] {
+            assert!(actions::initiative_action_by_id(id).is_none(), "{id}");
+        }
+    }
+
     /// **ADR-0201 증보 v2 H6-3 — the helper's ids are one list in three places.**
     ///
     /// `TEAM_AI_ACTION_IDS` is the definition; the worker tool
@@ -653,11 +764,11 @@ mod tests {
         // or line-wrapping, and order is not what they enforce.
         let expected: std::collections::BTreeSet<&str> =
             momo_auth::HOSTED_AGENT_SCOPES.iter().copied().collect();
-        let constraints = migration_087_scope_arrays();
+        let constraints = newest_scope_migration_arrays();
         assert_eq!(
             constraints.len(),
             3,
-            "087 must rewrite exactly three scope CHECK constraints, found {}",
+            "the newest scope migration must rewrite exactly three scope CHECK constraints, found {}",
             constraints.len()
         );
         for (constraint, values) in &constraints {
@@ -665,25 +776,40 @@ mod tests {
                 values.iter().map(String::as_str).collect();
             assert_eq!(
                 found, expected,
-                "{constraint} in 087 does not enumerate the same scope set as \
-                 momo_auth::HOSTED_AGENT_SCOPES"
+                "{constraint} in the newest scope migration does not enumerate the same scope set \
+                 as momo_auth::HOSTED_AGENT_SCOPES"
             );
         }
     }
 
-    /// The scope arrays of migration 087, as `(constraint name, values)`.
+    /// The scope arrays of the **newest** migration that rewrites the scope CHECK constraints (087
+    /// wrote them, 153 widened them for `workspace:initiate`; the next scope will be the next one),
+    /// as `(constraint name, values)`. Found by content rather than by number, so the migration can
+    /// be renumbered without this test quietly measuring an older file.
     ///
     /// A text scan for the same reason `openapi_enum` is one: the workspace
     /// carries no SQL parser and would not gain one for three literals. What it
     /// depends on is pinned by the caller — exactly three constraints, each
     /// naming a scope-shaped set — so a rewrite that moved these somewhere this
     /// scan cannot see fails loudly instead of quietly measuring nothing.
-    fn migration_087_scope_arrays() -> Vec<(String, Vec<String>)> {
-        let sql = std::fs::read_to_string(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../../server/Migrations/087_hosted_scope_workspace_propose.sql"
-        ))
-        .expect("migration 087 is readable from the server crate");
+    fn newest_scope_migration_arrays() -> Vec<(String, Vec<String>)> {
+        let dir =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../server/Migrations");
+        let mut rewriting: Vec<std::path::PathBuf> = std::fs::read_dir(&dir)
+            .expect("server/Migrations is readable from the server crate")
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
+            .filter(|path| {
+                std::fs::read_to_string(path).is_ok_and(|sql| {
+                    sql.contains("ADD CONSTRAINT hosted_agent_connection_scopes_ck")
+                })
+            })
+            .collect();
+        rewriting.sort();
+        let newest = rewriting
+            .last()
+            .expect("a migration rewrites the hosted scope CHECK constraints");
+        let sql = std::fs::read_to_string(newest).expect("the newest scope migration is readable");
         let mut found = Vec::new();
         let mut current: Option<String> = None;
         let mut buffer = String::new();

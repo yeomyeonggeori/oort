@@ -695,12 +695,16 @@ mod tests {
     /// single-transaction file cannot use the new enum value as a literal), a `BEFORE INSERT OR UPDATE OF
     /// kind, actor_member_id, workspace_id` trigger that lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
     /// per lineage, and `message.sent_via` (`NULL` or `'dev'`). No new table, so no new RLS policy.
+    ///
+    /// 153 is #4704's `workspace:initiate` (ADR-0186 증보 v5 U-b): the hosted scope vocabulary gains an
+    /// eighth value, so the three CHECK constraints 087 rewrote are rewritten again. No table, column,
+    /// index or row is added or changed; an existing connection's approved scopes stay exactly as they were.
     #[test]
     fn discovers_contiguous_migrations_001_to_152() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=152).collect();
+        let expected: Vec<i64> = (1..=153).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -708,11 +712,15 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=152 under {}",
+            "expected contiguous 001..=153 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
-        assert!(migrations.last().unwrap().name.starts_with("152_dev_token"));
+        assert!(migrations
+            .last()
+            .unwrap()
+            .name
+            .starts_with("153_hosted_scope_workspace_initiate"));
     }
 
     #[test]

@@ -157,6 +157,11 @@ impl WelcomeKind {
     }
 }
 
+/// The `agent_run.idempotency_key` prefix of an unasked card's run. The key is
+/// `agent_initiated:<AGENT>:<ID>` (ADR-0186 증보 v5 U-a); the rate window of PR B counts rows by
+/// this prefix, so it is one constant rather than a literal in two places.
+pub const AGENT_INITIATED_KEY_PREFIX: &str = "agent_initiated:";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTrigger {
     /// A message that mentioned the agent. The message id is also written to
@@ -191,6 +196,15 @@ pub enum RunTrigger {
         agent_member_id: Uuid,
         channel_id: Uuid,
         kind: WelcomeKind,
+    },
+    /// An approval card an agent raised **nobody asked for** (ADR-0186 증보 v5 U-a, #4704):
+    /// `oort_action_initiate`. There is no trigger message and no job — the run is born
+    /// `awaiting_approval` and ends only by the decision, the expiry sweep or a person's stop.
+    /// The key is the agent plus the `clientRequestId` it chose, so a retry of one proposal is the
+    /// same run (`agent_run_idem_uniq` is the data authority) and a different id is another.
+    AgentInitiated {
+        agent_member_id: Uuid,
+        client_request_id: Uuid,
     },
 }
 
@@ -237,6 +251,15 @@ impl RunTrigger {
                 member_id.to_string().to_uppercase(),
                 kind.as_key()
             ),
+            RunTrigger::AgentInitiated {
+                agent_member_id,
+                client_request_id,
+            } => format!(
+                "{}{}:{}",
+                AGENT_INITIATED_KEY_PREFIX,
+                agent_member_id.to_string().to_uppercase(),
+                client_request_id.to_string().to_uppercase()
+            ),
         }
     }
 
@@ -248,7 +271,9 @@ impl RunTrigger {
             RunTrigger::Mention { message_id, .. } | RunTrigger::ThreadReply { message_id, .. } => {
                 Some(*message_id)
             }
-            RunTrigger::Work { .. } | RunTrigger::Welcome { .. } => None,
+            RunTrigger::Work { .. }
+            | RunTrigger::Welcome { .. }
+            | RunTrigger::AgentInitiated { .. } => None,
         }
     }
 
@@ -264,6 +289,9 @@ impl RunTrigger {
                 agent_member_id, ..
             }
             | RunTrigger::Welcome {
+                agent_member_id, ..
+            }
+            | RunTrigger::AgentInitiated {
                 agent_member_id, ..
             } => *agent_member_id,
         }
@@ -931,7 +959,9 @@ pub async fn find_agent_run_by_trigger_in_tx(
 /// `input.hold = "channel_grant"`) is **not** counted: it has no job, nothing
 /// of it has reached the agent, and counting it against the default cap of 1
 /// would let one unanswered card in one room refuse every work request to that
-/// agent for up to an hour.
+/// agent for up to an hour. The same holds for a card the agent raised unasked
+/// (`input.hold = "agent_initiated"`, ADR-0186 증보 v5 U-a): it waits up to a day for its
+/// owner, and without this one unanswered card would answer 409 to every work request.
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -942,7 +972,7 @@ pub async fn live_run_count_in_tx(
           WHERE workspace_id = $1 AND agent_member_id = $2 \
             AND status IN ('queued','running','awaiting_approval','paused') \
             AND NOT (status = 'awaiting_approval' \
-                     AND input->>'hold' IS NOT DISTINCT FROM 'channel_grant')",
+                     AND input->>'hold' IN ('channel_grant', 'agent_initiated'))",
     )
     .bind(workspace_id)
     .bind(agent_member_id)

@@ -125,8 +125,8 @@ pub use channel_restriction::ChannelRestriction;
 pub use channel_viewing::{touch_channel_viewing_in_tx, ViewingOutcome, VIEWING_MIN_REFRESH_SECS};
 pub use dm::{
     canonical_participants, dm_lock_key, dm_participant_key, list_direct_messages,
-    open_direct_message_in_tx, validate_direct_message_target, DirectMessage,
-    DirectMessageTargetInvalid, OpenedDirectMessage, DM_LIST_LIMIT,
+    lock_direct_message_seq_in_tx, open_direct_message_in_tx, validate_direct_message_target,
+    DirectMessage, DirectMessageTargetInvalid, OpenedDirectMessage, DM_LIST_LIMIT,
 };
 pub use dm_closure::{close_dm_in_tx, reopen_dm_in_tx, DmClosureOutcome};
 pub use error::{MessagingError, ProvenanceRejected};

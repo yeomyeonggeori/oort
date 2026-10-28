@@ -421,6 +421,10 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
             .and_then(Value::as_str)
             .is_none_or(|id| {
                 action_by_id(id).is_none()
+                    // A card nobody asked for is never decided from a banner: the person did
+                    // not ask, so a 승인 button would consent to something they never looked at
+                    // (ADR-0186 증보 v5 U-c). Reads `origin`, a path the push projection carries.
+                    || crate::initiative::is_agent_initiated(payload)
                     || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
                     || (id == ACTION_AGENT_PROFILE_UPDATE && changes_avatar(payload))
                     // A picture cannot be judged from a banner — and this card has no
@@ -505,6 +509,13 @@ pub struct WorkspaceAction {
     pub secret_delivery: SecretDelivery,
     /// Which proposers may raise this card (ADR-0201 증보 v2 H6).
     pub proposers: Proposers,
+    /// May an agent raise this card **unasked**, through `oort_action_initiate`
+    /// (ADR-0186 증보 v5 U-b-2, #4704)? The one definition: the tool's `actionId` enum, the
+    /// OpenAPI `InitiativeActionId` and the catalog's `initiative` flag are all read from here
+    /// and measured against each other (`routes::actions`' drift test). Four actions are
+    /// `true`; never one that mints a value shown once, widens what an agent reads, or
+    /// changes who or what an agent is (`every_initiative_action_is_one_a_person_may_look_at`).
+    pub initiative: bool,
     /// What approving this executes, as a verb phrase. Only used to build
     /// [`proposal_summary`]; it lives here so a new action cannot be added
     /// without writing the sentence a person reads before consenting.
@@ -528,6 +539,12 @@ impl WorkspaceAction {
     /// domain validators then re-prove.
     pub fn args_schema(&self) -> Value {
         (self.args_schema)()
+    }
+
+    /// What approving this executes, as a verb phrase — for a card that builds its own summary
+    /// sentence ([`crate::initiative::initiative_summary`]).
+    pub fn effect_phrase(&self) -> &'static str {
+        self.effect
     }
 }
 
@@ -1279,6 +1296,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::Always,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "초대 링크를 만들어요",
         args_schema: invite_create_args_schema,
     },
@@ -1290,6 +1308,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: true,
         effect: "채널을 만들고, 표시된 대로 이 에이전트와 멤버를 그 채널에 넣어요",
         args_schema: channel_create_args_schema,
     },
@@ -1301,6 +1320,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: true,
         effect: "표시된 멤버를 그 채널에 넣어요",
         args_schema: channel_member_add_args_schema,
     },
@@ -1312,6 +1332,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::AgentEditor,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "대상 에이전트의 표시 이름을 바꿔요",
         args_schema: agent_rename_args_schema,
     },
@@ -1323,6 +1344,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "이 에이전트의 연결이 표시된 채널을 읽고 쓸 수 있게 해요",
         args_schema: hosted_channels_grant_args_schema,
     },
@@ -1334,6 +1356,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::WorkspaceOperator,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "표시된 설정(환영 문구·역할 이름)을 바꿔요",
         args_schema: workspace_settings_update_args_schema,
     },
@@ -1345,6 +1368,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::AgentEditor,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "대상 에이전트의 프로필(표시된 항목)을 바꿔요",
         args_schema: agent_profile_update_args_schema,
     },
@@ -1357,6 +1381,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         // The approver chooses at decision time (`deliverSecretToAgent`, default off).
         secret_delivery: SecretDelivery::OptIn,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "표시된 이름의 새 에이전트를 만들고, 승인한 사람이 소유자가 돼요",
         args_schema: agent_invite_args_schema,
     },
@@ -1368,6 +1393,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::RequestingMember,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: false,
         effect: "카드에 보이는 이미지로 내 프로필 사진을 바꿔요",
         args_schema: member_avatar_set_args_schema,
     },
@@ -1382,6 +1408,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: true,
         effect: "표시된 메시지를 그 채널에 고정해요",
         args_schema: message_pin_args_schema,
     },
@@ -1393,6 +1420,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::Any,
+        initiative: true,
         effect: "표시된 메시지의 고정을 풀어요",
         args_schema: message_pin_args_schema,
     },
@@ -1404,6 +1432,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::WorkspaceOperator,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::TeamAiOnly,
+        initiative: false,
         effect: "워크스페이스의 링크 미리보기를 표시된 대로 바꿔요",
         args_schema: workspace_unfurl_update_args_schema,
     },
@@ -1415,6 +1444,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::TeamAiOnly,
+        initiative: false,
         effect: "워크스페이스의 팀 기억을 표시된 대로 끄거나 멈춰요",
         args_schema: workspace_memory_update_args_schema,
     },
@@ -1426,6 +1456,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: RequiredRole::Admin,
         secret_delivery: SecretDelivery::None,
         proposers: Proposers::TeamAiOnly,
+        initiative: false,
         effect: "워크스페이스 기본 작업 이어가기 방식을 표시된 대로 바꿔요",
         args_schema: workspace_work_tier_update_args_schema,
     },
@@ -1440,6 +1471,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         required_role: PLUGIN_INSTALL_REQUIRED_ROLE,
         secret_delivery: PLUGIN_INSTALL_SECRET_DELIVERY,
         proposers: Proposers::TeamAiOnly,
+        initiative: false,
         effect: PLUGIN_INSTALL_EFFECT,
         args_schema: plugin_install_args_schema,
     },
@@ -1507,6 +1539,25 @@ pub fn proposable_action_ids(door: ProposalDoor) -> Vec<&'static str> {
 /// A team-AI-only id through the Agent Port answers exactly like an unknown id.
 pub fn proposable_action_by_id(id: &str, door: ProposalDoor) -> Option<&'static WorkspaceAction> {
     action_by_id(id).filter(|action| action.proposable_through(door))
+}
+
+/// The ids an agent may raise **unasked**, in catalog order (ADR-0186 증보 v5 U-b-2). Exactly
+/// `{channel.create, channel.member.add, message.pin, message.unpin}`; the Agent Port's
+/// `oort_action_initiate` enum and OpenAPI's `InitiativeActionId` are measured against this.
+pub fn initiative_action_ids() -> Vec<&'static str> {
+    ACTIONS
+        .iter()
+        .filter(|action| action.initiative)
+        .map(|action| action.id)
+        .collect()
+}
+
+/// The action `id` names **if an agent may raise it unasked**, or `None` — and `None` is the one
+/// answer for an unknown id, a team-AI-only id and every id that is proposable but not
+/// initiative, so the tool cannot be used to ask which actions exist.
+pub fn initiative_action_by_id(id: &str) -> Option<&'static WorkspaceAction> {
+    action_by_id(id)
+        .filter(|action| action.initiative && action.proposable_through(ProposalDoor::AgentPort))
 }
 
 /// The action `id` names, or `None`.
