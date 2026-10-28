@@ -37,6 +37,7 @@ import {
   installAppClock,
   SHELL_WAIT_TEST_TIMEOUT_MS,
 } from './fixtures/fakeClock';
+import {jsonResponse, resetSession} from './testkit';
 
 // =============================================================================
 // 앱이 앞에 있을 때 다른 대화의 새 메시지가 배너로 뜬다 (#4310, #4295 후속).
@@ -877,14 +878,6 @@ const REPLIES = [
   restMessage(5, {id: 'reply-5', rootId: ROOT_ID, body: '저도요'}),
 ];
 
-function jsonResponse(status: number, body: unknown): Response {
-  return {
-    status,
-    ok: status >= 200 && status < 300,
-    text: async () => JSON.stringify(body),
-  } as unknown as Response;
-}
-
 function installFetch(): jest.Mock {
   const mock = jest.fn(async (url: string) => {
     if (url.includes('/viewing')) return jsonResponse(200, {});
@@ -913,10 +906,6 @@ function installFetch(): jest.Mock {
   return mock;
 }
 
-const mmkvStore = (
-  jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
-).__store;
-
 jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
 
 describe('실제 화면: 진짜 AppShell 의 대화 화면이 올린 값을 처리기가 읽는다', () => {
@@ -924,9 +913,7 @@ describe('실제 화면: 진짜 AppShell 의 대화 화면이 올린 값을 처�
 
   beforeEach(() => {
     installAppClock();
-    mmkvStore.clear();
-    __resetSessionStore();
-    __resetServerBaseCache();
+    resetSession();
     setServerBase(BASE);
     sessionPort.applyLogin(LOGIN_BODY);
     installFetch();

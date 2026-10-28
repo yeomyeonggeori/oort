@@ -1,4 +1,4 @@
-import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React, {useContext, useEffect} from 'react';
@@ -9,6 +9,7 @@ import {ConversationLayout} from '../src/features/conversation/ConversationLayou
 import {createDockFollow, DockFollowContext} from '../src/features/conversation/dockFollow';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {installAppClock} from './fixtures/fakeClock';
+import {member} from './testkit';
 
 // =============================================================================
 // 입력창이 자라는 프레임에 목록이 같이 바닥을 따라가는 길 (#4518, design-review R2 B1)
@@ -94,22 +95,6 @@ describe('ConversationLayout 이 다리를 놓는다', () => {
 // ---- Timeline -----------------------------------------------------------------
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'bbbbbbbb-1111-4111-8111-bbbbbbbbbbbb';
-
-function member(over: Partial<RosterMember> & {id: string}): RosterMember {
-  return {
-    workspaceId: 'ws',
-    kind: 'human',
-    status: 'active',
-    displayName: '이름',
-    handle: 'handle',
-    channelCount: 0,
-    channelIds: [],
-    capabilities: [],
-    createdAtMs: 0,
-    updatedAtMs: 0,
-    ...over,
-  } as RosterMember;
-}
 
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '이도현', handle: 'dohyun'}),

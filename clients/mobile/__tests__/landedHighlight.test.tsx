@@ -1,4 +1,4 @@
-import type {Member, Message, RosterMember} from '@momo/core/lib/api';
+import type {Member, Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
@@ -28,6 +28,7 @@ import {MessageRow} from '../src/features/conversation/MessageRow';
 import {Timeline} from '../src/features/conversation/Timeline';
 import {LANDED_TINT_FADE_MS} from '../src/design/motion';
 import {SessionProvider} from '../src/session/useSession';
+import {member} from './testkit';
 
 // =============================================================================
 // #3921 — 알림 도착 강조(`rowLanded`)가 승인 뒤에도 남던 결함
@@ -56,22 +57,6 @@ const SELF = '11111111-1111-4111-8111-111111111111';
 const AGENT = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const BASE_MS = 1_700_000_000_000;
 const CH = 'ch';
-
-function member(over: Partial<RosterMember> & {id: string}): RosterMember {
-  return {
-    workspaceId: 'ws',
-    kind: 'human',
-    status: 'active',
-    displayName: '이름',
-    handle: 'handle',
-    channelCount: 0,
-    channelIds: [],
-    capabilities: [],
-    createdAtMs: 0,
-    updatedAtMs: 0,
-    ...over,
-  } as RosterMember;
-}
 
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),

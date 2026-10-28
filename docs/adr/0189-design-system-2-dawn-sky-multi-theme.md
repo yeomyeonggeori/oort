@@ -416,7 +416,7 @@ A 새벽하늘, B 흑연, C 노을띠 세 시안 가운데 성재는 A를 골랐
   - 수용한 비용: 다크를 고른 폰(또는 다크 기기에서 시스템을 고른 폰)은 JS가 첫 프레임을 다크로 그리기 전까지 라이트 면을 한 걸음 봐요. Debug 측정으로 전면 라이트가 약 0.5초 이어진 뒤 한 프레임 안에 다크로 바뀌어요(완충 없음, Release 미측정). 저장된 선택을 네이티브에서 읽어 이 걸음을 줄이는 길은 이번에 만들지 않았어요(후속 후보).
   - 하지 않는 것: 전체 외양을 라이트로 못 박는 `UIUserInterfaceStyle`·`overrideUserInterfaceStyle`(`traitOverrides`)·JS `Appearance.setColorScheme`은 쓰지 않아요. 앱의 `Appearance`가 라이트에 얼어 「시스템」 선택이 거짓이 되기 때문이에요.
   - 기계 가드: `projectShape.test.ts`의 #2668 묶음이 세 가지를 지켜요 — 색 자산은 변형 없는 라이트 한 색이다, 그 전제(폰의 기본 = 라이트)가 바뀌면 붉다, 위 네 모양의 전체 외양 고정이 없다(그 밖의 고정 방법은 안 봐요).
-- 키보드(planner 10-26): OS가 그리는 키보드는 앱이 서 있는 스킴을 따라요. 앱의 모든 `TextInput`이 `useKeyboardAppearance()`(고른 값이 아니라 풀린 스킴)를 `keyboardAppearance`로 들어요. 라이트 앱 위에 다크 키보드가 뜨지 않고, 다크를 고르면 기기가 라이트여도 다크 키보드예요. 입력창 전수는 `keyboardAppearance4526.test.tsx`의 구문 트리 스윕이 지켜요(`src`의 JSX 입력창만 봐요). 범위는 키보드까지예요 — 액션 시트(`ActionSheetIOS`)·권한 알림창·공유 시트 같은 나머지 OS 크롬은 이번에 만지지 않았어요(후속).
+- 키보드(planner 10-26): OS가 그리는 키보드는 앱이 서 있는 스킴을 따라요. 앱의 모든 `TextInput`이 `useKeyboardAppearance()`(고른 값이 아니라 풀린 스킴)를 `keyboardAppearance`로 들어요. 라이트 앱 위에 다크 키보드가 뜨지 않고, 다크를 고르면 기기가 라이트여도 다크 키보드예요. 입력창 전수는 `theme.test.tsx`(keyboardAppearance 묶음)의 구문 트리 스윕이 지켜요(`src`의 JSX 입력창만 봐요). 범위는 키보드까지예요 — 액션 시트(`ActionSheetIOS`)·권한 알림창·공유 시트 같은 나머지 OS 크롬은 이번에 만지지 않았어요(후속).
 
 ## 증보 6 — 대화 머리 컨트롤의 연한 선 (2026-10-26)
 

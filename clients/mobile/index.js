@@ -41,7 +41,7 @@ import {installForegroundNotificationHandler} from './src/push/foregroundPresent
  * React 트리가 서기도 전이고 첫 렌더·`useEffect` 를 기다리지 않는다. `AppRegistry.registerComponent`
  * 보다 앞이어야 하고, 아래 루트 바꿔치기(하네스)와 무관하게 걸린다. 이 앱에서 처리기를 거는 곳은
  * 이 한 줄뿐이다 — `setNotificationHandler` 는 부를 때마다 앞의 처리기를 갈아 끼운다
- * (`src/push/foregroundPresentation.ts` 머리말, 위치는 `foregroundPresentation4310.test.tsx` 가 잰다).
+ * (`src/push/foregroundPresentation.ts` 머리말, 위치는 `foregroundPresentation.test.tsx` 가 잰다).
  */
 installForegroundNotificationHandler();
 
