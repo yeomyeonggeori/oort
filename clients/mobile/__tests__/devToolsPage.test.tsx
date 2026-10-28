@@ -539,7 +539,10 @@ describe('연결이 끊긴 동안 (#4663)', () => {
     goOffline();
     expect(screen.getByTestId('dev-revoke-error')).toHaveTextContent(DEV_TOOLS_OFFLINE);
     fireEvent.press(screen.getByTestId('dev-revoke-confirm-button'));
+    // 질의 라이브러리는 눌린 다음 틱에 요청을 낸다. 한 틱 흘려 보낸 뒤에도 0건이고 확인 단계가 그대로여야 한다.
+    await act(async () => {});
     expect(revokeRequests()).toEqual([]);
+    expect(screen.getByTestId('dev-revoke-confirm')).toBeTruthy();
 
     goOnline();
     expect(screen.queryByTestId('dev-revoke-error')).toBeNull();
