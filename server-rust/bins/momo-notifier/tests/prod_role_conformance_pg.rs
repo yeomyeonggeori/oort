@@ -31,6 +31,7 @@
 //! | `a_dead_push_token_is_invalidated_by_the_production_notifier_role` (#3930) | drop `GRANT UPDATE (invalidated_at, updated_at) ON push_token TO momo_notifier` — the settle's `UPDATE push_token` dies with `permission denied for table push_token`, and rolls back to its savepoint, so ONLY this suite sees it; widen the grant past those two columns and the denied-write half goes red |
 //! | `closing_a_stream_enqueues_its_candidate_as_every_role_that_writes_a_stream` (ADR-0204 증보 1 D8-a, #3987) | revoke `INSERT` on `outbox` from `momo_app` or `momo_worker` (the stream's closing write enqueues the `push_candidate` as the invoking role — the same privilege the 011 trigger already needs for the opening INSERT), or give the outbox a kind-specific lockdown |
 //! | `a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_column_scoped_reads` (ADR-0200 증보 3 E7, #4284) | drop a column from the `hosted_agent_connection` / `hosted_agent_liveness` / `hosted_agent_doorbell_ring` / `agent_provider_pin` GRANT the woken verdict reads (the sweep dies with `permission denied for table …` and rolls back to its savepoint, so ONLY this suite sees it); or grant the notifier `token` / `hosted_agent_doorbell` / a table-level SELECT on the new tables (the denied-read half goes red) |
+//! | `an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_without_touching_the_inbox` (ADR-0186 증보 v5 U-f, #4702) | make the approval sweep write the proposer's inbox reference (`append_run_reference_in_tx` from `settle_expired_in_tx`): it dies with `permission denied for table token`, the whole workspace's sweep rolls back and the card stays `pending`; or grant the notifier `token` / a write on the inbox tables (the denied-write half goes red); or drop `momo_app`'s write on the inbox tables (the decision route's reference write goes red) |
 //!
 //! Why #3553 got through anyway: the first test below already called
 //! `judge_targets` as the notifier (Postgres checks table privileges when a
@@ -2660,5 +2661,276 @@ async fn a_woken_uncollected_run_is_ended_by_the_production_notifier_role_with_c
     ] {
         assert!(!privilege(sql).await, "RED: the notifier must NOT hold {what}");
     }
+    db.finish().await;
+}
+
+/// Make the seeded hosted connection a LIVE one — `active`, proved, with a real token row
+/// and the channel approved — the state a hosted proposer is in when its card lapses.
+async fn activate_seeded_hosted_connection(su: &PgPool, seeded: &HostedRun) -> Uuid {
+    let connection: Uuid = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id = $1 AND agent_member_id = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .fetch_one(su)
+    .await
+    .expect("the seeded connection");
+    // The reference writer's authority predicate joins the agent's workspace membership and
+    // profile rows too; the seeded work-run fixture does not need them and has neither.
+    sqlx::query(
+        "INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member') \
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .execute(su)
+    .await
+    .expect("agent workspace membership");
+    sqlx::query(
+        "INSERT INTO agent_profile(agent_member_id, workspace_id, updated_by, paused) \
+         VALUES($1,$2,$3,false) ON CONFLICT DO NOTHING",
+    )
+    .bind(seeded.agent)
+    .bind(seeded.workspace)
+    .bind(seeded.requester)
+    .execute(su)
+    .await
+    .expect("agent profile");
+    let scopes: Vec<String> = [
+        "agent:port:connect",
+        "agent:inbox:read",
+        "messages:read",
+        "messages:write",
+        "agent:jobs:read",
+        "agent:runs:callback",
+        "workspace:propose",
+    ]
+    .iter()
+    .map(|scope| (*scope).to_string())
+    .collect();
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET status = 'detected', pairing_consumed_at = now(), detected_at = now(), \
+                detected_by = $3, confirmed_by = $3, confirmed_at = now(), \
+                approved_channel_ids = $4, approved_scopes = $5 \
+          WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(connection)
+    .bind(seeded.requester)
+    .bind(vec![seeded.channel])
+    .bind(&scopes)
+    .execute(su)
+    .await
+    .expect("detected connection");
+    let token: Uuid = sqlx::query_scalar(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, token_hash, scopes, label, \
+                           credential_class, hosted_connection_id, audience, created_by) \
+         VALUES($1,'agent_bearer',$2,digest($3::text,'sha256'),$4,'h', \
+                'hosted_active',$5,'/v1/mcp/agent-port',$6) RETURNING id",
+    )
+    .bind(seeded.workspace)
+    .bind(seeded.agent)
+    .bind(format!(
+        "momo_agent_v1.{}.{}",
+        seeded.workspace,
+        Uuid::new_v4().simple()
+    ))
+    .bind(&scopes)
+    .bind(connection)
+    .bind(seeded.requester)
+    .fetch_one(su)
+    .await
+    .expect("token");
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status = 'active', active_token_id = $3, \
+                proved_at = now(), proved_by = $4 WHERE workspace_id = $1 AND id = $2",
+    )
+    .bind(seeded.workspace)
+    .bind(connection)
+    .bind(token)
+    .bind(seeded.agent)
+    .execute(su)
+    .await
+    .expect("activate");
+    connection
+}
+
+/// ADR-0186 증보 v5 U-f (#4702): a person's decision tells the hosted proposer through its
+/// inbox — and **an expiry does not**. The reason is a grant, so only the production roles
+/// can show it:
+///
+/// * the approval sweep runs as `momo_notifier`, which holds no column of `token` (a
+///   BYPASSRLS role never reads a credential) and no write on the inbox tables, so a sweep
+///   that wrote the proposer's reference would die with `permission denied`, roll the whole
+///   workspace's sweep back and leave the run `awaiting_approval`. The dev role file hands the
+///   notifier every table, and an inbox write there would pass.
+/// * the decision route runs as `momo_app`, whose production grants do cover the reference
+///   write — the two statements the approve and reject arms issue run here as that role.
+///
+/// | revert that makes it red |
+/// |---|
+/// | call `append_run_reference_in_tx` from `settle_expired_in_tx` (the sweep): `permission denied for table token`, the approval stays `pending` |
+/// | grant `momo_notifier` a write on `hosted_agent_inbox_event` / `_counter`, or any column of `token` |
+/// | drop `momo_app`'s write on the inbox tables: the reference write below fails |
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_without_touching_the_inbox(
+) {
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    let connection = activate_seeded_hosted_connection(&db.su, &seeded).await;
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let app = db.role("momo_app", "momo_app_dev_pw").await;
+
+    // A `workspace_action` the hosted agent proposed, parked on the seeded run and overdue.
+    let approval = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO approval \
+           (id, workspace_id, run_id, channel_id, requested_by, action_type, payload, status, \
+            expires_at) \
+         VALUES ($1, $2, $3, $4, $5, 'workspace_action', \
+                 jsonb_build_object('action', jsonb_build_object('id', 'channel.create', \
+                                                                  'args', jsonb_build_object())), \
+                 'pending', now() - interval '1 minute')",
+    )
+    .bind(approval)
+    .bind(seeded.workspace)
+    .bind(seeded.parked_run)
+    .bind(seeded.channel)
+    .bind(seeded.agent)
+    .execute(&db.su)
+    .await
+    .expect("an overdue workspace action");
+    // The fixture wrote its message row by hand; bring the channel's counter up to it, so the
+    // expiry line the sweep writes takes the next `seq` rather than colliding with it.
+    sqlx::query(
+        "UPDATE channel_seq SET last_seq = COALESCE((SELECT max(seq) FROM message WHERE channel_id = $1), 0) \
+          WHERE channel_id = $1",
+    )
+    .bind(seeded.channel)
+    .execute(&db.su)
+    .await
+    .expect("channel_seq catch-up");
+
+    let stats = approval_sweep::sweep_expired_approvals(&notifier, 32)
+        .await
+        .expect("the sweep runs as the production notifier role");
+    assert_eq!(
+        stats.expired, 1,
+        "the overdue card was settled — a sweep that tried to write the proposer's inbox \
+         would have been denied and rolled back: {stats:?}"
+    );
+    let (approval_status, run_status): (String, String) = sqlx::query_as(
+        "SELECT a.status::text, r.status::text FROM approval a JOIN agent_run r ON r.id = a.run_id \
+          WHERE a.id = $1",
+    )
+    .bind(approval)
+    .fetch_one(&db.su)
+    .await
+    .expect("the approval and its run");
+    assert_eq!(
+        (approval_status.as_str(), run_status.as_str()),
+        ("expired", "timed_out")
+    );
+    let inbox_rows = |su: PgPool| async move {
+        let events: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM hosted_agent_inbox_event WHERE connection_id = $1",
+        )
+        .bind(connection)
+        .fetch_one(&su)
+        .await
+        .expect("count inbox events");
+        let counter: i64 = sqlx::query_scalar(
+            "SELECT coalesce(max(last_seq), 0) FROM hosted_agent_inbox_counter \
+              WHERE connection_id = $1",
+        )
+        .bind(connection)
+        .fetch_one(&su)
+        .await
+        .expect("read the inbox counter");
+        (events, counter)
+    };
+    assert_eq!(
+        inbox_rows(db.su.clone()).await,
+        (0, 0),
+        "an expiry writes nothing to the proposer's inbox"
+    );
+
+    // The grants that keep it so.
+    let privilege = |sql: &'static str| {
+        let su = db.su.clone();
+        async move {
+            sqlx::query_scalar::<_, bool>(sql)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    for (what, sql) in [
+        (
+            "any column of token",
+            "SELECT has_any_column_privilege('momo_notifier','token','SELECT')",
+        ),
+        (
+            "INSERT on hosted_agent_inbox_event",
+            "SELECT has_table_privilege('momo_notifier','hosted_agent_inbox_event','INSERT')",
+        ),
+        (
+            "INSERT on hosted_agent_inbox_counter",
+            "SELECT has_table_privilege('momo_notifier','hosted_agent_inbox_counter','INSERT')",
+        ),
+        (
+            "UPDATE on hosted_agent_inbox_counter",
+            "SELECT has_table_privilege('momo_notifier','hosted_agent_inbox_counter','UPDATE')",
+        ),
+    ] {
+        assert!(
+            !privilege(sql).await,
+            "RED: the notifier must NOT hold {what}"
+        );
+    }
+
+    // The decision route's half, as `momo_app` under the production grants: the reference
+    // an approve or reject writes for a run — here the seeded, finished one — is written,
+    // and writing it again is the same row.
+    let finished_run: Uuid = sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id = $1 AND status = 'succeeded'",
+    )
+    .bind(seeded.workspace)
+    .fetch_one(&db.su)
+    .await
+    .expect("the seeded finished run");
+    let (workspace, agent, channel) = (seeded.workspace, seeded.agent, seeded.channel);
+    let mut sequences = Vec::new();
+    for _ in 0..2 {
+        let seq = momo_db::with_tenant_tx(&app, workspace, move |conn| {
+            Box::pin(async move {
+                momo_messaging::append_run_reference_in_tx(
+                    conn,
+                    workspace,
+                    agent,
+                    connection,
+                    channel,
+                    finished_run,
+                )
+                .await
+            })
+        })
+        .await
+        .expect("momo_app writes the proposer's reference under the production grants");
+        sequences.push(seq);
+    }
+    assert!(
+        sequences[0].is_some(),
+        "the live connection covers the room"
+    );
+    assert_eq!(sequences[0], sequences[1], "a replay is the same reference");
+    assert_eq!(
+        inbox_rows(db.su.clone()).await,
+        (1, 1),
+        "one run reference, one counter step"
+    );
+
     db.finish().await;
 }
