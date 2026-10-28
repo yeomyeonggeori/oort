@@ -29,4 +29,19 @@ export default class RetryRegistryRunner extends VitestTestRunner {
     registry ??= loadRegistry();
     task.retry = retriesFor(registry, testIdOf(task), Date.now());
   }
+
+  /**
+   * 다시 돌아서 끝난 시험은 로그에 한 줄을 남긴다. 재시도가 흔들림을 **가리지** 않게 하려는 것이다: 로그에서 이 줄을 세면 「같은 커밋을
+   * 다시 돌려 초록」인 시험이 보인다.
+   */
+  override onAfterRunTask(task: Task): void {
+    super.onAfterRunTask(task);
+    const retried = task.result?.retryCount ?? 0;
+    if (task.type !== "test" || retried === 0) return;
+    const id = testIdOf(task);
+    const issue = registry?.entries.find((entry) => entry.id === id)?.issue;
+    process.stderr.write(
+      `[test-retry] #${issue ?? "?"} ${id} — 첫 시도 실패, 재시도 ${retried}회 뒤 ${task.result?.state}\n`
+    );
+  }
 }

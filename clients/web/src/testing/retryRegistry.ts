@@ -16,6 +16,13 @@ import { fileURLToPath } from "node:url";
  *
  * 등록 밖 시험은 재시도 0 이다. 러너(`retryRunner.ts`)가 **모든** 시험의 `retry` 를 이 표로 덮어쓰므로 시험 파일의 `{ retry }` 옵션이나
  * CLI `--retry` 도 통하지 않는다. 한 번에 2회 이상은 없다(`RETRY_ATTEMPTS`).
+ *
+ * 등록하려면(최근 CI 빨강과 이슈가 있을 때만; 본업은 원인 결정화다) `clients/web/test-retry.json` 에 한 줄을 더한다:
+ *
+ *   { "id": "src/features/x/Y.test.tsx > describe 이름 > 시험 이름", "issue": 1234, "since": "2026-10-28", "expires": "2026-11-11" }
+ *
+ * 다시 돌아서 끝난 시험은 로그에 `[test-retry] #1234 …` 한 줄이 남는다. 폰(jest)은 `clients/mobile/test-retry.json` 과
+ * `jest.retryRegistry.js` 가 같은 규칙이다.
  */
 export const RETRY_ATTEMPTS = 1;
 export const MAX_LIFETIME_DAYS = 14;

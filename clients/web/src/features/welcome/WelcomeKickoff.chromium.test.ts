@@ -235,21 +235,31 @@ ${css}
 }
 
 /**
- * 한 프레임씩 `frames` 번 지켜보며 `sample` 을 부른다. 벽시계가 아니라 프레임 수가 창이다: 머신이 느리면 창이 길어질 뿐
- * 짧아지지 않아서, 「그동안 아무 일도 없었다」가 느린 머신에서 거짓이 되지 않는다.
+ * 화면을 프레임마다 지켜본다: 최소 `minMs` 가 흐르고 최소 `minFrames` 프레임이 지날 때까지. 「그동안 띠·쓰기 안내가 한 번도 안 보였다」를
+ * 재는 **부정 단정**의 창이다. 부정 단정은 창이 길수록 강하고, 창 안에 시험이 통제하지 않는 사건(타이머)이 끼어 있을 때만 거짓 빨강이
+ * 난다 — 명부 문을 시험이 쥐고 있으면 그런 사건이 없어서 창을 길게 잡아도 부하에 흔들리지 않는다. 시간과 프레임을 둘 다 요구하는 것은
+ * 느린 머신에서 프레임이 적게 그려져도, 빠른 머신에서 프레임이 많아도 창이 줄어들지 않게 하려는 것이다.
  */
-async function watchFrames(page: import("playwright").Page, frames: number) {
-  return await page.evaluate(async (count) => {
-    const rows: { write: boolean; stage: boolean }[] = [];
-    for (let i = 0; i < count; i += 1) {
-      rows.push({
-        write: Boolean(document.querySelector("[data-testid='timeline-empty-primary']")),
-        stage: Boolean(document.querySelector("[data-testid='welcome-kickoff-stage']")),
-      });
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    }
-    return rows;
-  }, frames);
+async function watchWindow(
+  page: import("playwright").Page,
+  minMs: number,
+  minFrames: number
+) {
+  return await page.evaluate(
+    async ({ minMs: ms, minFrames: frames }) => {
+      const rows: { write: boolean; stage: boolean }[] = [];
+      const start = performance.now();
+      while (performance.now() - start < ms || rows.length < frames) {
+        rows.push({
+          write: Boolean(document.querySelector("[data-testid='timeline-empty-primary']")),
+          stage: Boolean(document.querySelector("[data-testid='welcome-kickoff-stage']")),
+        });
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+      return rows;
+    },
+    { minMs, minFrames }
+  );
 }
 
 /** 푼 명부가 화면에 커밋될 때까지 기다린다(조건 기다림 — 시간이 아니다). */
@@ -274,13 +284,13 @@ describe("welcome kickoff Chromium harness", () => {
       });
       try {
         await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        // 명부가 풀리기 전: 문을 시험이 쥐고 있어 어느 타이머와도 경주하지 않는다.
-        const pending = await watchFrames(handle.page, 30);
+        // 명부가 풀리기 전: 문을 시험이 쥐고 있어 어느 타이머와도 경주하지 않는다. 예전 창(1800 ms)을 그대로 지킨다.
+        const pending = await watchWindow(handle.page, 1800, 30);
         expect(pending.every((row) => row.stage === false)).toBe(true);
         // 명부가 풀린 뒤에도 이미 에이전트의 말이 있으니 띠는 끝내 서지 않는다.
         await handle.page.evaluate(() => window.__welcomeKickoff.releaseDirectory());
         await waitForDirectorySettled(handle.page);
-        const settled = await watchFrames(handle.page, 30);
+        const settled = await watchWindow(handle.page, 500, 30);
         expect(settled.every((row) => row.stage === false)).toBe(true);
         expect(
           await handle.page.evaluate(() => window.__welcomeKickoff.stageSeenEver())
@@ -301,8 +311,8 @@ describe("welcome kickoff Chromium harness", () => {
       const handle = await launchWelcomeHarness({ holdDirectory: true });
       try {
         await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        // 명부가 풀리기 전에는 쓰기 안내도 띠도 없다.
-        const pending = await watchFrames(handle.page, 30);
+        // 명부가 풀리기 전에는 쓰기 안내도 띠도 없다. 예전 창(1800 ms)을 그대로 지킨다.
+        const pending = await watchWindow(handle.page, 1800, 30);
         expect(pending.every((row) => row.write === false)).toBe(true);
         expect(pending.every((row) => row.stage === false)).toBe(true);
         expect(
@@ -335,12 +345,14 @@ describe("welcome kickoff Chromium harness", () => {
         console.info(
           `welcome band product path ${JSON.stringify(measured)}`
         );
-        // (a) the row does not wait for the band (it is outside the list)
+        // (a) the row does not wait for the band (it is outside the list): a few frames, not the band's 1200 ms hold
         expect(measured.arrivalStartMs).toBeGreaterThan(0);
-        expect(measured.arrivalStartMs - measured.deliverMs).toBeLessThan(250);
+        expect(measured.arrivalFrame - measured.deliverFrame).toBeLessThanOrEqual(ARRIVAL_FRAME_BUDGET);
         // (b) the band shows joy around the same frame
         expect(measured.joyMs).toBeGreaterThan(0);
-        expect(Math.abs(measured.joyMs - measured.arrivalStartMs)).toBeLessThan(100);
+        expect(Math.abs(measured.joyFrame - measured.arrivalFrame)).toBeLessThanOrEqual(
+          JOY_BESIDE_ARRIVAL_FRAME_BUDGET
+        );
         // (c) the collapse ends after the arrival started, and after the joy hold
         expect(measured.collapseEndMs).toBeGreaterThan(measured.arrivalStartMs);
         expect(measured.collapseEndMs - measured.joyMs).toBeGreaterThanOrEqual(
@@ -361,6 +373,7 @@ describe("welcome kickoff Chromium harness", () => {
     "product path N=5: deliver→arrival and deliver→collapse-end deltas",
     async () => {
       const arrivals: number[] = [];
+      const arrivalFrames: number[] = [];
       const collapses: number[] = [];
       for (let sample = 0; sample < 5; sample += 1) {
         const handle = await launchWelcomeHarness();
@@ -369,6 +382,7 @@ describe("welcome kickoff Chromium harness", () => {
           expect(measured.overlapSeen).toBe(false);
           expect(measured.collapseEndMs).toBeGreaterThan(measured.arrivalStartMs);
           arrivals.push(measured.arrivalStartMs - measured.deliverMs);
+          arrivalFrames.push(measured.arrivalFrame - measured.deliverFrame);
           collapses.push(measured.collapseEndMs - measured.deliverMs);
         } finally {
           await handle.browser.close();
@@ -382,7 +396,7 @@ describe("welcome kickoff Chromium harness", () => {
         `welcome band N=5 deliver→arrival ${fmt(arrivals)} deliver→collapseEnd ${fmt(collapses)}`
       );
       expect(arrivals).toHaveLength(5);
-      expect(Math.max(...arrivals)).toBeLessThan(250);
+      expect(Math.max(...arrivalFrames)).toBeLessThanOrEqual(ARRIVAL_FRAME_BUDGET);
     },
     120_000
   );
@@ -408,7 +422,7 @@ describe("welcome kickoff Chromium harness", () => {
             }>((resolve, reject) => {
               const timeout = window.setTimeout(
                 () => reject(new Error("reduced band did not leave")),
-                5000
+                20_000
               );
               let collapseStarted = false;
               let joyFace: string | null = null;
@@ -471,8 +485,20 @@ describe("welcome kickoff Chromium harness", () => {
   );
 });
 
+/**
+ * 「바로 시작한다」의 단위는 밀리초가 아니라 **프레임**이다(#4708). 예전 단정은 `arrivalStartMs - deliverMs < 250` 였다: 브라우저가 CPU 를 못 받는
+ * 부하(로드 ~100)에서 439 ms 가 나와 빨개졌다 — 제품의 지연이 아니라 머신의 지연을 잰 것이다. 제품이 약속하는 것은 「밴드를 기다리지 않는다」(밴드의
+ * 기쁨 유지는 1200 ms 라서 기다렸다면 수십 프레임이다)이고, 프레임은 머신이 느려져도 같이 늘어나 그 약속을 그대로 잰다. 정상은 1~2 프레임이다.
+ */
+const ARRIVAL_FRAME_BUDGET = 6;
+/** 기쁨 표정과 도착 모션은 같은 커밋에서 선다 — 한두 프레임 안이다. */
+const JOY_BESIDE_ARRIVAL_FRAME_BUDGET = 3;
+
 type OpenerPath = {
   deliverMs: number;
+  deliverFrame: number;
+  arrivalFrame: number;
+  joyFrame: number;
   arrivalStartMs: number;
   joyMs: number;
   collapseEndMs: number;
@@ -493,11 +519,20 @@ async function measureOpenerPath(
       await new Promise<OpenerPath>((resolve, reject) => {
         const timeout = window.setTimeout(
           () => reject(new Error("opener path did not complete")),
-          6000
+          20_000
         );
         const phoneBeforeOpener = Boolean(
           document.querySelector("[data-testid='phone-link-card']")
         );
+        // 프레임 시계: rAF 콜백이 도는 횟수. 머신이 느려도 제품의 일이 몇 프레임 안에 끝나는지를 잰다.
+        let frame = 0;
+        const tick = () => {
+          frame += 1;
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+        let arrivalFrame = -1;
+        let joyFrame = -1;
         let arrivalStartMs = 0;
         let joyMs = 0;
         let collapseEndMs = 0;
@@ -507,6 +542,7 @@ async function measureOpenerPath(
           (event) => {
             if (event.animationName === arrivalName && arrivalStartMs === 0) {
               arrivalStartMs = performance.now();
+              arrivalFrame = frame;
             }
           },
           true
@@ -519,18 +555,23 @@ async function measureOpenerPath(
           true
         );
         const deliverMs = performance.now();
+        const deliverFrame = frame;
         const watch = new MutationObserver(() => {
           const band = document.querySelector("[data-testid='welcome-kickoff-stage']");
           const phone = document.querySelector("[data-testid='phone-link-card']");
           if (band && phone) overlapSeen = true;
           if (joyMs === 0 && band?.getAttribute("data-state") === "joy") {
             joyMs = performance.now();
+            joyFrame = frame;
           }
           if (phone) {
             watch.disconnect();
             window.clearTimeout(timeout);
             resolve({
               deliverMs,
+              deliverFrame,
+              arrivalFrame,
+              joyFrame,
               arrivalStartMs,
               joyMs,
               collapseEndMs,

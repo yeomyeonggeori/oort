@@ -35,13 +35,15 @@ const MAX_WORKERS = Math.min(8, Math.max(os.availableParallelism() - 1, 1));
  * 10-27). The test timeout must exceed the longest wait chain; 20 s covers two 8 s waits plus
  * render.
  *
- * This is a stopgap for the suites that still wait in REAL time, not the fix (#4708). The one that
- * actually failed — settingsPage "VoiceOver escape", two exits in a row — now runs on the fake app
- * clock (`__tests__/fixtures/fakeClock.ts`, #3796), where `waitFor`'s budget is a number of polls
- * instead of wall clock; so does sidebarRowSheet. Suites that still wait with a real-time
+ * This is a stopgap for the suites that still wait in REAL time, not the fix (#4708). Measured for
+ * settingsPage "VoiceOver escape" (idle machine): the layer exit timers are 150-180 ms of a ~1.8 s test;
+ * the rest is the shell re-rendering, and polling a big tree with `waitFor` (real or fake clock) is
+ * what made it slow, not the animation. That block now drives each exit by advancing the clock by
+ * exactly the layer's timer length (no polling, ~0.1 s a test), and sidebarRowSheet runs on the fake
+ * app clock (`__tests__/fixtures/fakeClock.ts`, #3796). Suites that still wait with a real-time
  * `{timeout: 8000}` (aiConnectSuggestion, sheetKeyboardAction, aiSheet, profileStatus, shellChrome,
- * sheetKit, home, memoryUi, ...) are why this stays at 20 s; each moves to the fake clock in its
- * own change, and this value comes down when the last one has.
+ * sheetKit, home, memoryUi, ...) are why this stays at 20 s; each moves in its own change, and this
+ * value comes down when the last one has.
  */
 const TEST_TIMEOUT_MS = 20_000;
 

@@ -129,6 +129,10 @@ describe("재시도 등록부 (#4708) — 이슈가 달린 시험만 · 1회 · 
         "option-flaky": 1,
       });
       expect(run.status).toBe(1); // 실패한 시험이 있으니 러너는 빨강으로 끝난다
+      // 다시 돌아서 끝난 시험은 로그에 이슈 번호와 함께 남는다 — 재시도가 흔들림을 가리지 않는다.
+      const log = `${run.stdout}\n${run.stderr}`;
+      expect(log).toContain(`[test-retry] #4708 ${id("listed: fails once then passes")}`);
+      expect(log).not.toContain(`[test-retry] #? `);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
