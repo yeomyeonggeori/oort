@@ -35,6 +35,9 @@ pub mod credits;
 pub(crate) mod deliver;
 /// ADR-0216 (#4660): developer tokens — issue, list, revoke, whoami, self-revoke.
 pub mod dev_access;
+/// ADR-0216 D6 (나) / #4700: `oort login` — the human-subject arm of the OAuth authorization
+/// server (browser consent, code exchange, refresh, revoke).
+pub mod dev_login_oauth;
 pub mod device_keys;
 pub mod device_link;
 pub mod devices;

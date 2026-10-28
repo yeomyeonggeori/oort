@@ -111,7 +111,7 @@ use crate::routes::webhooks::no_store;
 use crate::AppState;
 
 /// The switch every judgement here uses until it has storage (D3 「출시 순서」): `admins`.
-const POLICY: DevAccessPolicy = DEV_FIXED_POLICY;
+pub(crate) const POLICY: DevAccessPolicy = DEV_FIXED_POLICY;
 
 /// Wrong current passwords one member may enter per window (D6-가 2, D9 권장값). A
 /// constant on purpose: a guessable surface gets no knob that could turn it off (ADR-0180
@@ -120,22 +120,22 @@ pub(crate) const PASSWORD_RECHECK_FAILURES_PER_WINDOW: u32 = 5;
 
 /// Refusal codes a client branches on (`error.code`).
 const CODE_ROUTE_NOT_ALLOWED: &str = "dev_route_not_allowed";
-const CODE_ACCESS_DENIED: &str = "dev_access_denied";
-const CODE_CREDENTIAL_LIMIT: &str = "dev_credential_limit";
+pub(crate) const CODE_ACCESS_DENIED: &str = "dev_access_denied";
+pub(crate) const CODE_CREDENTIAL_LIMIT: &str = "dev_credential_limit";
 const CODE_CREDENTIAL_REQUIRED: &str = "dev_credential_required";
-const CODE_PASSWORD_INCORRECT: &str = "current_password_incorrect";
-const CODE_PASSWORD_UNAVAILABLE: &str = "current_password_unavailable";
+pub(crate) const CODE_PASSWORD_INCORRECT: &str = "current_password_incorrect";
+pub(crate) const CODE_PASSWORD_UNAVAILABLE: &str = "current_password_unavailable";
 
 /// Lifecycle audit (D9). `detail` is a closed vocabulary: never a name, a channel id, a
 /// body, a query, a password or a token.
 const AUDIT_ISSUED: &str = "dev_token.issued";
 const AUDIT_ISSUE_DENIED: &str = "dev_token.issue_denied";
-const AUDIT_REVOKED: &str = "dev_token.revoked";
+pub(crate) const AUDIT_REVOKED: &str = "dev_token.revoked";
 const SCHEMA_ISSUED: &str = "momo.dev_token.issued.v1";
 const SCHEMA_ISSUE_DENIED: &str = "momo.dev_token.issue_denied.v1";
-const SCHEMA_REVOKED: &str = "momo.dev_token.revoked.v1";
+pub(crate) const SCHEMA_REVOKED: &str = "momo.dev_token.revoked.v1";
 /// The audit target: the list's id — a card's token id, or a login lineage's id.
-const AUDIT_TARGET: &str = "dev_credential";
+pub(crate) const AUDIT_TARGET: &str = "dev_credential";
 
 const MILLIS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 
@@ -146,7 +146,7 @@ const MILLIS_PER_DAY: i64 = 24 * 60 * 60 * 1000;
 /// The second wall (module docs): a developer token on a route only a person's session
 /// may use. The same code and sentence the door's closed table answers with, so the two
 /// walls are indistinguishable from outside.
-fn refuse_developer_token(by_developer_token: bool) -> Result<(), ApiError> {
+pub(crate) fn refuse_developer_token(by_developer_token: bool) -> Result<(), ApiError> {
     if by_developer_token {
         return Err(ApiError::coded(
             StatusCode::FORBIDDEN,
@@ -186,7 +186,7 @@ fn wire_field(domain_field: &'static str) -> &'static str {
 }
 
 /// 429 + `Retry-After` for a full password-failure window.
-fn too_many_password_failures(retry_after_seconds: u64) -> ApiError {
+pub(crate) fn too_many_password_failures(retry_after_seconds: u64) -> ApiError {
     let mut error = ApiError::new(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
     error.retry_after_seconds = Some(retry_after_seconds.max(1));
     error
@@ -337,12 +337,12 @@ pub(crate) fn password_recheck_key(workspace_id: Uuid, member_id: Uuid) -> Strin
 
 /// The window every limiter in the process shares; floored at a second, as the env
 /// reader does, so a hand-built config cannot make the budget meaningless.
-fn password_recheck_window(config: &RateLimitConfig) -> Duration {
+pub(crate) fn password_recheck_window(config: &RateLimitConfig) -> Duration {
     Duration::from_secs(config.window_seconds.max(1))
 }
 
 /// The cheap look before any work: `Some(retry after)` when the window is already full.
-fn password_recheck_exhausted(
+pub(crate) fn password_recheck_exhausted(
     limiter: &SlidingWindowRateLimiter,
     key: &str,
     window: Duration,
@@ -352,7 +352,7 @@ fn password_recheck_exhausted(
 
 /// Take one slot, atomically, immediately before the comparison. `Ok(at)` names the slot
 /// for [`refund_password_recheck`]; `Err(verdict)` means the window is full.
-fn reserve_password_recheck(
+pub(crate) fn reserve_password_recheck(
     limiter: &SlidingWindowRateLimiter,
     key: &str,
     window: Duration,
@@ -367,11 +367,11 @@ fn reserve_password_recheck(
 }
 
 /// Give a slot back: the comparison was not a failure.
-fn refund_password_recheck(limiter: &SlidingWindowRateLimiter, key: &str, at: Instant) {
+pub(crate) fn refund_password_recheck(limiter: &SlidingWindowRateLimiter, key: &str, at: Instant) {
     limiter.forget_at(key, at);
 }
 
-fn log_password_budget_full(workspace_id: Uuid, member_id: Uuid) {
+pub(crate) fn log_password_budget_full(workspace_id: Uuid, member_id: Uuid) {
     // One line per burst. The ids are not secrets; nothing the request sent is logged.
     tracing::warn!(
         workspace_id = %workspace_id,

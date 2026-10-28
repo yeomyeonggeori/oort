@@ -18,8 +18,11 @@ openapi: 3.0.3
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
 # interactive Work Console control surfaces, and the ADR-0216 developer-token
-# door (`dev-access`, the `devTokenAuth` scheme, #4660). Workspace identity
-# GET/PATCH /v1/workspaces/{workspaceId} is documented (#2331 / ADR-0185 E1).
+# door (`dev-access`, the `devTokenAuth` scheme, #4660) with its browser-login
+# consent routes (`…/dev-access/authorization-requests/*`, #4700; the OAuth
+# endpoints they pair with stay undocumented here, like the hosted ones).
+# Workspace identity GET/PATCH /v1/workspaces/{workspaceId} is documented
+# (#2331 / ADR-0185 E1).
 # Other routes (legacy agent credential/run surfaces, cost projection,
 # platform admin, centrifugo proxy, health) remain intentionally undocumented
 # here. WorkspaceDto (roleLabels) is the identity projection schema (#1770).
@@ -114,6 +117,8 @@ tags:
       answers only `whoami` and `logout` here, plus the few reads and the one send
       named under the `devTokenAuth` security scheme. Human-only: an agent bearer,
       a work host and a push token are refused by the authentication middleware.
+      A person's session also decides a browser login request (`oort login`, #4700):
+      preview, approve with the current password, or deny.
   - name: work-sessions
     description: Host-owned interactive work session ledger bound to channel thread roots.
   - name: workstreams
@@ -2290,6 +2295,284 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/dev-access/authorization-requests/preview:
+    get:
+      tags: [dev-access]
+      operationId: previewDevLoginRequest
+      summary: Read what a browser login (`oort login`) asks the person to approve.
+      description: >
+        ADR-0216 D6 (나) (#4700). The consent screen's read. A person's app session
+        only: a developer token is refused with 403 `dev_route_not_allowed`, first by
+        the closed route table of the developer door and again by this handler.
+        `request` is the signed, ten-minute envelope that the unauthenticated half of
+        the flow handed the browser: `GET /v1/oauth/authorize?client_id=oort-cli`
+        (that half — `authorize`, `token` and `revoke` of the OAuth authorization
+        server — is mounted outside this file, like the hosted Agent Port's; the
+        built-in public client `oort-cli` redirects only to the fixed loopback list
+        `http://127.0.0.1:24681/callback` … `:24685/callback` and proves possession
+        with PKCE `S256` alone). Nothing is stored by this call. The answer is
+        `no-store`. `serverHost` is the host of the operator's configured issuer,
+        never a request header; `deviceName` is a label the connecting side chose and
+        is never verified; `canSend` says the request named `dev:messages:write`, so
+        the person may choose to let the tool send. A forged, expired, foreign or
+        stale envelope — and a server that has the login arm closed — is one and the
+        same 404 `dev_login_request_not_found`.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: request
+          in: query
+          required: true
+          description: The signed login-request envelope, exactly as the consent URL carried it.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: What the person is asked to approve.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevLoginPreviewResponse"
+        "400":
+          description: Invalid workspace id, or a query string that cannot be read. No `error.code`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` `dev_route_not_allowed` (a developer token) or
+            `dev_access_denied` (the workspace switch does not admit the caller's
+            role, or the caller is not a human or not an active member). Also a
+            workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            `error.code` `dev_login_request_not_found`: the envelope is forged,
+            expired, of another kind, for another client, names a resource or redirect
+            this server no longer holds, or the login arm is closed. One sentence for
+            all of them.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/workspaces/{workspaceId}/dev-access/authorization-requests/approve:
+    post:
+      tags: [dev-access]
+      operationId: approveDevLoginRequest
+      summary: Approve a browser login (`oort login`) with the current password.
+      description: >
+        ADR-0216 D6 (나) · D9 (#4700). A person's app session only (a developer token
+        is 403 `dev_route_not_allowed`, at the door and again in the handler). The
+        caller **re-enters the current password in the body on every approval**, and
+        the failures are counted in the **same** budget as `createDevCredential`
+        (`dev-pw:{workspace}:{member}`: 5 wrong passwords per member per window for a
+        card and a login together; in a full window even the right password is 429,
+        without being compared).
+
+
+        The call is one tenant transaction in the order `createDevCredential` uses:
+        the workspace's membership lock shared and without waiting (503 when busy),
+        the calling session still alive (401), the workspace switch (403
+        `dev_access_denied`), the live-login limit as a courtesy look (409
+        `dev_credential_limit` when the member already holds 10 live logins; no
+        password attempt is spent), then the password under the budget's atomic slot,
+        and only then the ledger row and its one-time code. Each refusal of the switch,
+        the limit or the password writes one audit row `dev_token.consent_refused`
+        (`detail.reason` `policy_denied`, `not_human`, `password_mismatch`,
+        `password_unavailable` or `limit`) and **no ledger row**; a success writes
+        `dev_token.consent_granted` with the scopes. An audit that fails to write
+        changes no answer.
+
+
+        Exactly one terminal decision exists per request, and it is recorded by the
+        insert — so it is discovered **after** the password comparison: a second
+        approval of the same request with the right password is 409
+        `dev_login_already_decided`, with a wrong one 403
+        `current_password_incorrect`. So is an approval after a denial.
+
+
+        `approvedScopes` omitted means 「읽기만」 ∩ what the request named
+        (`dev:identity`, `dev:channels:read`, `dev:messages:read`, `dev:inbox:read`).
+        A list is normalized (vocabulary, order, `dev:identity` always) and must be a
+        subset of what the request named; a scope the request did not name — or an
+        empty list, or `null` — is 400, and nothing is stored. The body is closed: any
+        other key is a 400, and the answer quotes nothing of it (it may hold a password
+        typed into the wrong field).
+
+
+        The 200 carries where the browser goes next, `redirectTo`, with the one-time
+        code (60 seconds, single use) — `http://127.0.0.1:<port>/callback?code=…&state=…&iss=…`
+        on the fixed loopback redirect the request was signed with (`state` only when
+        the request had one). The code is exchanged at `POST /v1/oauth/token`
+        (`authorization_code` + PKCE verifier) for a login lineage: a 15-minute access
+        and a refresh that lives 30 idle days, both capped at 90 days from now.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DevLoginApproveRequest"
+      responses:
+        "200":
+          description: Approved. `redirectTo` is shown to the browser once and holds the code.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevLoginDecisionResponse"
+        "400":
+          description: >
+            Not one JSON object of the documented shape, an unknown key, `invalid
+            currentPassword`, or `invalid approvedScopes` (outside the request, not in
+            the `dev:` vocabulary, empty or `null`). No `error.code`. Nothing is stored
+            and no password attempt is spent for a bad `approvedScopes`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` `dev_route_not_allowed` (a developer token), `dev_access_denied`
+            (the switch does not admit the caller's role, or the caller is not a human or
+            not an active member), `current_password_incorrect` (counts against the
+            5-failure budget) or `current_password_unavailable` (the account has no
+            password to confirm). Also a workspace scope mismatch. The refusals found
+            inside the transaction leave one `dev_token.consent_refused` audit row.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            `error.code` `dev_login_request_not_found`: the envelope is forged, expired,
+            of another kind, for another client or stale, or the login arm is closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `error.code` `dev_login_already_decided` (this request already has its one
+            decision — an approval or a denial) or `dev_credential_limit` (the member
+            already holds 10 live logins; ending one makes room).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/MembershipBusy"
+
+  /v1/workspaces/{workspaceId}/dev-access/authorization-requests/deny:
+    post:
+      tags: [dev-access]
+      operationId: denyDevLoginRequest
+      summary: Deny a browser login (`oort login`).
+      description: >
+        ADR-0216 D6 (나) (#4700). A person's app session only (a developer token is
+        403 `dev_route_not_allowed`, at the door and again in the handler). No password
+        is asked. A denial is the request's one terminal decision, so an approval
+        after it is 409 `dev_login_already_decided`; nothing is issued, and back, close
+        and timeout are equivalent to never calling this at all. The 200 carries
+        `redirectTo` — the same fixed loopback redirect with `error=access_denied`
+        (and `state` and `iss`) — so the terminal learns the answer. Audit
+        `dev_token.consent_denied`. Walls, ordering and refusals are those of
+        `approveDevLoginRequest` without the password and limit steps.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DevLoginDenyRequest"
+      responses:
+        "200":
+          description: Denied. `redirectTo` carries `error=access_denied`.
+          headers:
+            Cache-Control:
+              description: Always `no-store`.
+              schema:
+                type: string
+            Pragma:
+              description: Always `no-cache`.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DevLoginDecisionResponse"
+        "400":
+          description: Not one JSON object of the documented shape, or an unknown key. No `error.code`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            `error.code` `dev_route_not_allowed` (a developer token) or
+            `dev_access_denied` (the switch does not admit the caller's role, or the
+            caller is not a human or not an active member). Also a workspace scope
+            mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            `error.code` `dev_login_request_not_found`: the envelope is forged, expired,
+            of another kind, for another client or stale, or the login arm is closed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: >
+            `error.code` `dev_login_already_decided`: this request already has its one
+            decision.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/MembershipBusy"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members:
     post:
@@ -13989,8 +14272,9 @@ components:
         against that person's per-member send budget above. A 429 at that door
         does not touch `last_used_at` and writes no `used` audit row; at most one
         `auth.dev_token.rate_limited` row is kept per token per window.
-        `POST …/dev-access/credentials` has a failure budget of its own: 5 wrong
-        current passwords per member per window, after which even the right
+        `POST …/dev-access/credentials` and `POST …/dev-access/authorization-requests/approve`
+        share one failure budget of their own: 5 wrong current passwords per member
+        per window, a card and a browser login together, after which even the right
         password is 429, without being compared. A setting of 0, or one that
         cannot be read, keeps the default: none of these budgets can be switched
         off.
@@ -14816,6 +15100,127 @@ components:
           type: integer
           format: int64
           description: A login session's absolute cap (approval plus 90 days). Absent on a card.
+
+    DevLoginPreviewResponse:
+      type: object
+      additionalProperties: false
+      required: [clientName, clientId, issuer, serverHost, workspaceId, workspaceName, memberDisplayName, role, deviceName, requestedScopes, canSend, expiresAtMs, accessMinutes, idleDays, maxDays]
+      description: >
+        What a browser login (`oort login`) asks the person to approve (#4700). Every
+        field is server-derived or was validated when the request was signed. Unlike
+        the optional fields of this file, `deviceName` is always present — a string, or
+        `null` when the connecting side named none — because the consent screen
+        branches on it.
+      properties:
+        clientName:
+          type: string
+          enum: ["oort CLI"]
+          description: The built-in client's display name.
+        clientId:
+          type: string
+          enum: ["oort-cli"]
+        issuer:
+          type: string
+          description: The operator's configured issuer, one exact https origin.
+        serverHost:
+          type: string
+          description: >
+            The authority (`host[:port]`) of `issuer` — the server the person must
+            recognise as the one their terminal is talking to. Never taken from a
+            request header.
+        workspaceId:
+          type: string
+          format: uuid
+        workspaceName:
+          type: string
+        memberDisplayName:
+          type: string
+          description: The person approving — the caller.
+        role:
+          type: string
+          enum: [owner, admin, member, guest]
+          description: The caller's own workspace role.
+        deviceName:
+          type: string
+          nullable: true
+          description: >
+            A label the connecting side chose (at most 80 characters, no control
+            characters), shown as such and never verified. `null` when none was named.
+        requestedScopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/DevScope"
+          description: What the request named, `dev:identity` included, in `DevScope` order.
+        canSend:
+          type: boolean
+          description: The request named `dev:messages:write`, so the person may choose to let the tool send.
+        expiresAtMs:
+          type: integer
+          format: int64
+          description: When the request stops being approvable (ten minutes after it was signed).
+        accessMinutes:
+          type: integer
+          description: How long one access token lives (15).
+        idleDays:
+          type: integer
+          description: How many idle days a refresh survives (30).
+        maxDays:
+          type: integer
+          description: The absolute cap on a login from approval (90).
+
+    DevLoginApproveRequest:
+      type: object
+      additionalProperties: false
+      required: [request, currentPassword]
+      description: >
+        Closed: any other key is a 400, so a misspelt `approvedScopes` is loud instead
+        of quietly becoming 「읽기만」. `approvedScopes` tells "omitted" (the preset) from
+        an explicit `null` (a 400).
+      properties:
+        request:
+          type: string
+          description: The signed login-request envelope the consent screen was opened with.
+        currentPassword:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          description: >
+            The caller's current password, re-entered on every approval. Never logged,
+            stored or echoed.
+        approvedScopes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/DevScope"
+          description: >
+            Omit for 「읽기만」 ∩ the request's scopes. Otherwise a subset of
+            `requestedScopes` of the preview (case-insensitive after trimming;
+            `dev:identity` is always added). A scope the request did not name, an empty
+            list and `null` are a 400.
+
+    DevLoginDenyRequest:
+      type: object
+      additionalProperties: false
+      required: [request]
+      properties:
+        request:
+          type: string
+          description: The signed login-request envelope the consent screen was opened with.
+
+    DevLoginDecisionResponse:
+      type: object
+      additionalProperties: false
+      required: [redirectTo]
+      description: The only thing a decision hands back is where the browser goes next.
+      properties:
+        redirectTo:
+          type: string
+          readOnly: true
+          description: >
+            `http://127.0.0.1:<port>/callback?code=…&state=…&iss=<issuer>` for an
+            approval, `…?error=access_denied&state=…&iss=<issuer>` for a denial — on the
+            fixed loopback redirect the request was signed with, `state` only when the
+            request had one. The code is single use and valid for 60 seconds.
 
     LoginRequest:
       type: object
@@ -16616,7 +17021,27 @@ components:
         (`GET …/approvals/{approval}/avatar-preview?v=<sha256>`, readable by
         that person only) and its result `ref` is `{type: member, id: <the
         person>}`.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+        `message.pin` and `message.unpin` (`{messageId}`, `admin`; ADR-0186
+        증보 2026-10-27 v5 U-e, #4703) let an agent propose pinning or unpinning
+        **one text message of the conversation the run was raised in**. The
+        server reads the channel, the author and the words from the stored
+        message; the one argument is its id, so nothing an agent writes can
+        describe the target. A message in another channel, a deleted one, a
+        card or result line, one in an archived channel, a DM the agent's
+        connection does not cover, or (for `message.unpin`) one that is not
+        pinned is refused with the same invalid-arguments answer as a missing
+        id. The approval carries `{message, channel, bodySha256}` as its pins: a
+        message edited or deleted before the tap makes the tap
+        `action_args_invalid`, and the approval stays pending. Approving runs
+        the person's own pin function as the approver (they must be in that
+        channel; a channel holds 100 pins; a message already in the asked state
+        is a success that changes nothing) and its result `ref` is
+        `{type: message, id: <the message>}`. The card (`props.action.rows`)
+        quotes the first 120 characters and states the total length;
+        `props.action.preview` carries `{kind: message, messageId, channelId,
+        totalChars, truncated}` so a client can open the whole message. These
+        two are always decided in the app, never from a lock-screen action.
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
 
     SuggestableCommandId:
       type: string
@@ -23822,7 +24247,7 @@ components:
       properties:
         type:
           type: string
-          enum: [invite, channel, agent, hosted_connection, workspace_settings, member]
+          enum: [invite, channel, agent, hosted_connection, workspace_settings, member, message]
         id:
           type: string
           format: uuid

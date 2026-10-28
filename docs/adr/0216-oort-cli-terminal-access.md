@@ -482,3 +482,34 @@ oort는 에이전트가 1급 멤버인 메신저예요. Claude Code·Codex 같�
 ## 후속
 
 체크리스트 항목들(위 「이행 계획」)이 후속이에요. 이 ADR의 문장 중 구현으로 증명되는 것은 구현 이슈가 R번호 시험과 함께 가져오고, 그 뒤에 `claims.yaml`에 올려요.
+
+## 구현 메모 (#4700 — 브라우저 승인 서버 절반)
+
+D6 (나)의 서버 절반을 구현했어요. 「봉인은 구현 이슈에서」로 남겼던 값과, 이 ADR 문장과 다르게 정하거나 해석한 곳을 적어요. 기본은 **닫힘**이고 flag 개방(운영 결정)과 runtime proof는 이 구현이 열지 않아요(`runtime-unverified`).
+
+| 항목 | 봉인한 값 |
+|---|---|
+| 내장 클라이언트 | `oort-cli`. 운영자가 `MOMO_AGENT_PORT_OAUTH_CLIENTS`에 같은 id를 등록하면 부팅을 거절해요 |
+| 루프백 후보 | `http://127.0.0.1:24681/callback` … `http://127.0.0.1:24685/callback` 5개, 문자열 정확 일치만(전부 32768 미만이라 Linux 임시 포트 범위 밖). #4662의 CLI는 `momo_mcp::oauth::OORT_CLI_LOOPBACK_PORTS`를 그대로 가져가요 |
+| 설정 | `MOMO_DEV_LOGIN_OAUTH_ENABLED`(정확히 소문자 `true`만) · `MOMO_DEV_LOGIN_OAUTH_CONSENT_URL`(절대 https, 웹의 `/oauth/cli`) · issuer는 호스티드와 같은 `MOMO_AGENT_PORT_OAUTH_ISSUER`(https 단일 origin). 호스티드 flag와 독립이라 한쪽만 열 수 있고 호스티드 접근자(`is_enabled`·`issuer`·`resource`·`client`)의 뜻은 그대로예요 |
+| resource | `<issuer>/v1/mcp/me` — 호스티드 resource와 다른 audience예요 |
+| 코드 | `momo_devc_v1.<워크스페이스 id>.<비밀 43자>`, 60초·1회. 원장 `dev_login_authorization`(migration 153)에 봉투 **전체**의 SHA-256만 저장해요 |
+| 요청 봉투 | 서명 JWT(HS256, 10분). 호스티드와 **다른** 키 라벨(`momo.dev.login.request.v1.key`)과 `typ`(`momo.dev.login.request.v1`)이라 서로의 봉투를 받지 않아요 |
+| authorize | `scope`·`resource` 필수(호스티드와 같은 규칙), `device_name` 선택(80자 이하·제어 문자 불가, 연결하는 쪽이 정한 값). 성공은 **DB 쓰기 0**으로 서명 봉투를 동의 URL의 `?request=`로 302해요 |
+| 동의 라우트 | 세션 전용 3개 `…/dev-access/authorization-requests/{preview,approve,deny}`. 오류 코드 `dev_access_denied`·`current_password_incorrect`·`current_password_unavailable`·`dev_login_request_not_found`·`dev_login_already_decided`·`dev_credential_limit` |
+| 토큰 응답 | `{access_token, token_type:"Bearer", expires_in:900, refresh_token, scope, workspace_id}` + `no-store`. `workspace_id`는 CLI가 `/v1/workspaces/{ws}/…`를 부르는 데 써요 |
+| 감사 | `dev_token.consent_granted`·`consent_denied`·`consent_refused`·`login_issued`·`code_replayed`·`revoked` + 기존 `auth.dev_token.refresh_reuse_detected`. 기기 이름·채널·코드·토큰은 안 들어가요 |
+
+**ADR 문장과 다르게 정하거나 해석한 곳**
+1. 토큰 엔드포인트의 모든 실패는 **400 `invalid_grant`**예요(없음·만료·소비·불일치·정책·한도·재사용이 같은 바이트). 시작 프롬프트의 「재사용 → 401」은 OAuth 토큰 엔드포인트 표준과 호스티드 어댑터를 따라 바꿨어요. 재사용 감지는 tx를 Ok로 커밋한 **뒤** 응답해요.
+2. #4700 이슈 본문의 「루프백 임의 포트·`localhost`」는 D6(고정 후보·정확 일치)과 달라서 **D6을 따랐어요**. `localhost`·목록 밖 포트·끝 슬래시·`[::1]`·https·쿼리·경로 변형은 모두 리디렉트 없는 400이고 시험으로 못 박았어요. 임의 포트·`localhost`는 제3자 클라이언트 후속(ADR-0162 증보 필요)이에요.
+3. ADR-0162 「증보」 전문은 쓰지 않았어요. D6이 이 면을 이미 Accepted로 정했고, ADR-0162 머리에 역방향 한 줄만 남겼어요.
+4. 비밀번호 변경·재설정 sweep은 교환 대기 중인 로그인 코드도 같은 tx·같은 잠금 아래에서 `revoked`로 만들어요(안 하면 변경 직후 60초 안에 새 계보가 생겨요). 정지·제거·강등은 **교환 시점의 정책 재판정**(사람·활성·역할)이 코드를 태우고 `invalid_grant`예요.
+5. 교환의 잠금 순서는 `peek(잠금 없음) → 멤버 sweep 잠금 → 원장 행 FOR UPDATE → 재판정 → 발급 → 소비 표시`예요(`rotate_dev_refresh_in_tx`와 같은 순서, #3109). 만료는 잠금 대기 뒤를 재도록 `clock_timestamp()`로 판정해요.
+6. 로그인 계보 한도(10개)는 동의 때 사전 점검해서 409 `dev_credential_limit`이고, 교환 때 경합으로 한도에 닿으면 코드를 태우고 `invalid_grant`예요.
+7. 같은 nonce의 결정은 하나예요(approve 두 번·deny 뒤 approve·approve 뒤 deny는 409 `dev_login_already_decided`). 동의의 비밀번호 한도 키는 카드 발급과 같은 `dev-pw:{워크스페이스}:{멤버}`라서 두 경로를 합쳐 분당 5회예요.
+
+**한계·후속 (이 구현이 하지 않은 것)**
+- 공개 token·revoke 라우트에는 속도 제한이 없어요(안정 id가 DB 조회 뒤에야 알려져요). 코드는 256비트라 추측 대상은 아니지만 DB 조회 증폭 한도는 후속이에요.
+- 정지·제거·탈퇴의 `revoke_member_tokens_in_tx`는 #3109 sweep 잠금 없이 scan 순서로 `token` 행을 잡아서, 같은 멤버의 refresh 회전(sweep 잠금 + id 순)과 겹치면 PostgreSQL이 한쪽을 `40P01`로 중단시킬 수 있어요(재시도하면 되고 상태 불일치는 없어요). 이 ADR이 그 경로를 바꾸지 않는다고 못 박았고 이 구현도 바꾸지 않았어요. 잠금 순서 정리와 교착 시험은 후속이에요.
+- 소각·만료된 원장 행 청소, 「고른 채널만」 프리셋, 새 계보 알림, 동의 문구 다듬기, `docs/security/claims.yaml` 등재, flag 개방과 runtime proof.

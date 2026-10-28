@@ -7480,3 +7480,106 @@ pub struct DevAccessSelfResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lineage_expires_at_ms: Option<i64>,
 }
+
+// ---------------------------------------------------------------------------
+// developer login — `/v1/workspaces/{ws}/dev-access/authorization-requests/*`
+// (ADR-0216 D6 나, #4700): the human's half of `oort login`
+//
+// What the person sees and what they send. Nothing here carries a code, a token or a
+// digest except `DevLoginDecisionResponse.redirect_to` (an approval's one-time code,
+// inside the URL the browser is sent to next), and the one struct that carries a secret
+// the person typed (the approval's current password) writes its `Debug` by hand and
+// redacts it.
+// ---------------------------------------------------------------------------
+
+/// `GET …/authorization-requests/preview`: what the person is asked to approve.
+///
+/// Every field is server-derived or was validated by `GET /v1/oauth/authorize`.
+/// `deviceName` is the one value the connecting side chose, shown as such and never
+/// verified; `serverHost` comes from the operator's configured issuer, never from a
+/// request header, so a proxy cannot make the screen name a host the CLI is not
+/// talking to.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevLoginPreviewResponse {
+    pub client_name: &'static str,
+    pub client_id: &'static str,
+    pub issuer: String,
+    pub server_host: String,
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub member_display_name: String,
+    /// `owner` | `admin` | `member` | `guest` — the caller's own role.
+    pub role: &'static str,
+    /// Always present: a string, or `null` when the connecting side named none.
+    pub device_name: Option<String>,
+    pub requested_scopes: Vec<String>,
+    /// The request names `dev:messages:write`, so the person may choose to let the tool send.
+    pub can_send: bool,
+    pub expires_at_ms: i64,
+    pub access_minutes: i64,
+    pub idle_days: i64,
+    pub max_days: i64,
+}
+
+/// `POST …/authorization-requests/approve`. Closed: any other key is a 400, so a
+/// misspelt `approvedScopes` is loud instead of quietly becoming 「읽기만」.
+///
+/// `approvedScopes` tells "omitted" (the 「읽기만」 preset ∩ the request) from an explicit
+/// `null` (a 400), exactly as the card route does for `scopes`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DevLoginApproveRequest {
+    /// The signed, server-minted request envelope the consent screen was opened with.
+    pub request: String,
+    /// Re-entered on every approval (D6-가 2). Never logged, stored or echoed.
+    pub current_password: String,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub approved_scopes: OptionalPatch<Vec<String>>,
+}
+
+impl std::fmt::Debug for DevLoginApproveRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DevLoginApproveRequest")
+            .field("request", &"<envelope>")
+            .field("current_password", &"<redacted>")
+            .field("approved_scopes", &self.approved_scopes)
+            .finish()
+    }
+}
+
+/// `POST …/authorization-requests/deny`. Closed.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DevLoginDenyRequest {
+    pub request: String,
+}
+
+impl std::fmt::Debug for DevLoginDenyRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DevLoginDenyRequest")
+            .field("request", &"<envelope>")
+            .finish()
+    }
+}
+
+/// The only thing a decision hands back is where the browser goes next:
+/// `…?code=…&state=…&iss=…` (approve) or `…?error=access_denied&state=…&iss=…`
+/// (deny), on the fixed loopback redirect the request was signed with.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevLoginDecisionResponse {
+    pub redirect_to: String,
+}
+
+impl std::fmt::Debug for DevLoginDecisionResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The URL of an approval holds the one-time code.
+        formatter
+            .debug_struct("DevLoginDecisionResponse")
+            .field("redirect_to", &"<redacted>")
+            .finish()
+    }
+}

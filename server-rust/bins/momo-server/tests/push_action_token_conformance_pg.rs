@@ -1502,6 +1502,20 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
         None,
         w.agent,
     );
+    // ADR-0186 증보 v5 U-e (#4703): a pin card quotes a message the banner cannot show whole.
+    // The card names no message that exists — the refusal comes before anything is read.
+    let pin = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_MESSAGE_PIN,
+        &json!({"messageId": Uuid::new_v4().to_string()}),
+        None,
+        w.agent,
+    );
+    let unpin = momo_agent::actions::workspace_action_payload(
+        momo_agent::actions::ACTION_MESSAGE_UNPIN,
+        &json!({"messageId": Uuid::new_v4().to_string()}),
+        None,
+        w.agent,
+    );
     let members_before = w.count("member").await;
     let agents_before = w.count("agent").await;
     let invites_before = w.count("invite_code").await;
@@ -1517,6 +1531,8 @@ async fn a_lock_screen_tap_cannot_decide_what_must_be_opened_in_the_app() {
             "workspace_action",
             avatar_update,
         ),
+        ("message.pin", "workspace_action", pin),
+        ("message.unpin", "workspace_action", unpin),
     ] {
         let (_, approval) = w.seed_parked_approval(action_type, payload).await;
         seeded.push((label, approval));

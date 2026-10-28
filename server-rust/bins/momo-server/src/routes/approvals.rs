@@ -83,7 +83,7 @@ use momo_agent::actions::{
     AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
     AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
     LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
-    REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
+    REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_MESSAGE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
     SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
@@ -114,8 +114,9 @@ use momo_messaging::{
     create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
     lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
-    rename_agent_display_name_in_tx, send_message_in_tx, staged_image_matches_pin_in_tx, AgentCard,
-    AgentCardPatch, CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
+    rename_agent_display_name_in_tx, send_message_in_tx, set_pin_in_tx,
+    staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
+    MessageType, NewChannel, NewMessage, PinAction,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -138,8 +139,8 @@ use crate::plugin_writes::{self, Actor, Provenance};
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
     profile_changes, resolve_stored_action_in_tx, ActionArgs, AvatarIntent, GateSubject,
-    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, ResolvedPlugin,
-    SettingPatch, SettingsBefore, StatusIntent,
+    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, ResolvedMessage,
+    ResolvedPlugin, SettingPatch, SettingsBefore, StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1944,6 +1945,19 @@ async fn execute_workspace_action(
                 "channel.member.add resolved without a channel",
             ));
         }
+        ActionArgs::MessagePin {
+            change,
+            target: Some(message),
+            ..
+        } => match execute_message_pin(conn, approval, input, now, *change, message).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        // The resolver always fills the message; a pin with nothing named has nothing to
+        // pin, and rolling back is the safe answer.
+        ActionArgs::MessagePin { target: None, .. } => {
+            return Err(protocol_error("message pin resolved without a message"));
+        }
         ActionArgs::ChannelCreate {
             name,
             kind,
@@ -3471,6 +3485,82 @@ async fn execute_channel_member_add(
                 .collect::<Vec<_>>(),
             skipped,
         ),
+        secret_once: None,
+        next: None,
+    }))
+}
+
+/// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the pin a person does by hand, done
+/// **as the approver**, by the very function their own pin calls ([`set_pin_in_tx`]).
+///
+/// So the guards are theirs and not a copy: the approver must be a live member of the message's
+/// channel, a deleted message cannot be pinned, a channel holds 100, and the broadcast
+/// (`message.pinned` / `message.unpinned`) is the one every client already applies. `pinned_by`
+/// is the approver; that an agent proposed it is in the audit, never in the pin.
+///
+/// The resolver (re-run just before this, with the message row locked `FOR UPDATE` and the body
+/// hashed under that lock) has already proved that the message is still the one the card quoted,
+/// so nothing can change it between that read and this pin.
+///
+/// Every refusal `set_pin_in_tx` makes — not a member, a full channel, a tombstone — is the
+/// card's one word for a stale proposal, `action_args_invalid`, and it returns before the
+/// function's first write: **the approval is not consumed**. A message already in the asked
+/// state is a success that changes nothing (as it is for a person), and writes no pin audit
+/// row, because nothing happened.
+async fn execute_message_pin(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    change: PinAction,
+    message: &ResolvedMessage,
+) -> Result<Execution, momo_db::DbError> {
+    let delta = match set_pin_in_tx(
+        conn,
+        input.workspace_id,
+        message.id,
+        input.member_id,
+        change,
+    )
+    .await?
+    {
+        Ok(delta) => delta,
+        Err(_) => {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )))
+        }
+    };
+    let unpin = change == PinAction::Unpinned;
+    let mut audits = Vec::new();
+    if delta.changed {
+        // The same row, from the same builder, a person's own pin writes — plus who proposed it
+        // and which approval it was. Ids only: not a word of the message.
+        audits.push(crate::routes::messages::interaction_audit_entry(
+            input.workspace_id,
+            delta.channel_id,
+            message.id,
+            input.member_id,
+            input.via_token_id,
+            &format!("message.{}", delta.action.as_wire_label()),
+            &[
+                ("via_agent", approval.requested_by),
+                ("approval_id", approval.id),
+            ],
+        ));
+    }
+    let pinned_after = message.card.pinned_count
+        + match (delta.changed, unpin) {
+            (true, false) => 1,
+            (true, true) => -1,
+            (false, _) => 0,
+        };
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_MESSAGE,
+        ref_id: message.id,
+        result_body: momo_agent::actions::message_pin_result_body(unpin, delta.changed, message.id),
+        result_rows: momo_agent::actions::message_pin_result_rows(&message.card, pinned_after),
         secret_once: None,
         next: None,
     }))
