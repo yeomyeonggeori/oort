@@ -1994,6 +1994,24 @@ pub fn build_app(state: AppState) -> Router {
             auth::require_principal,
         ));
 
+    // ADR-0216 D5 / #4661 — the human MCP: a developer token's MCP door.
+    //
+    // **Not in `protected`**, on purpose, for the reason `/v1/mcp/agent-port` is not: a generic
+    // bearer door answers each credential class its own way (an agent bearer's closed route list
+    // is a 403; a session JWT is admitted), and ADR-0216 R1(b) wants every non-developer
+    // credential to get the one 401 an unknown string gets. `routes::human_mcp::door` takes only
+    // developer envelopes, answers the rest without the database, and hands the former to the
+    // very door the REST rows use (`dev_access::require_dev_principal`) — so the closed table
+    // (L8, `POST /v1/mcp/me`), the budgets and the `used` audit row are that door's, not a copy.
+    // A router-level `route_layer` wraps the method-mismatch answer too: a developer token's GET
+    // or DELETE here is the door's own 403, and nothing but a POST is ever answered 200.
+    let human_mcp = Router::new()
+        .route(routes::human_mcp::ROUTE, post(routes::human_mcp::post))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            routes::human_mcp::door,
+        ));
+
     // MOMO-605: taken before `with_state` moves the state below.
     let cors = state.cors.clone();
     // ADR-0151 / ADR-0169: the in-process upload endpoint exists when the
@@ -2180,7 +2198,8 @@ pub fn build_app(state: AppState) -> Router {
             "/hooks/{token}",
             post(routes::webhook_ingress::receive_slack),
         )
-        .merge(protected);
+        .merge(protected)
+        .merge(human_mcp);
 
     // The stand-in for Google's resumable session URL. Public for the same
     // reason that URL is: the client uploading has no bearer to present to it,

@@ -1315,6 +1315,12 @@ credential로, 터널이 아니라 VM 루프백에 POST한다.
    messageSeq 만 준다. agent_job 이벤트가 하나라도 있으면 다른 것을 읽기 전에
    3)의 추적 경로(oort_job_start)를 먼저 탄다. 일반 message 이벤트의
    본문은 oort_conversation_read 로 그 채널에서 읽는다.
+   agent_run 이벤트는 그 채널에 있던 run 의 상태가 바뀌었다는 뜻이다. 사람이
+   취소했거나, 네가 제안한 변경을 승인하거나 거절했다. 본문도 run id 도 없으니
+   oort_conversation_read 로 그 채널을 읽고 그 run 에 대한 가장 최근 줄(제안의
+   결과 줄, 또는 사람이 멈췄다는 줄)을 본다. 호환:
+   이 이벤트가 생기기 전에 만든 런타임이나 모르는 kind 는 커서만 그 이벤트 뒤로
+   넘기고 무시해도 된다. 결과 줄은 채널에 남아 있어서 잃는 것이 없다.
 3) 처리할 일이 있으면 처리하고, 응답은 oort_message_post 로 같은 채널에
    쓴다. clientMsgId 는 보낼 때마다 새 UUID. 같은 clientMsgId 재시도는
    한 메시지로 남는다.

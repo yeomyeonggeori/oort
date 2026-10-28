@@ -2185,6 +2185,20 @@ async fn action_propose(
                     return Ok(Err(ToolFailure::InvalidArguments));
                 }
             }
+            // A pin card's structured preview (ADR-0186 증보 v5 U-e): the ids a client opens the
+            // message by and the length the approver weighs the quote against. All of it is the
+            // server's reading of the stored message; none of it is the agent's.
+            let message_preview: Option<Value> = match &resolved.validated.args {
+                crate::routes::actions::ActionArgs::MessagePin {
+                    target: Some(target),
+                    ..
+                } => Some(momo_agent::actions::message_pin_preview(
+                    target.id,
+                    target.channel_id,
+                    &target.card,
+                )),
+                _ => None,
+            };
             momo_agent::mark_run_started_in_tx(conn, handle.run_id).await?;
             // **The park happens before the approval, not after.**
             //
@@ -2248,9 +2262,10 @@ async fn action_propose(
                                     resolved.validated.rows.clone(),
                                     rationale.as_deref(),
                                 );
-                                if let (Some(preview), Some(object)) =
-                                    (&avatar_preview, block.as_object_mut())
-                                {
+                                if let (Some(preview), Some(object)) = (
+                                    avatar_preview.as_ref().or(message_preview.as_ref()),
+                                    block.as_object_mut(),
+                                ) {
                                     object.insert("preview".into(), preview.clone());
                                 }
                                 block

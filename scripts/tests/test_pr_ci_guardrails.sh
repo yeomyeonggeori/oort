@@ -118,20 +118,150 @@ advisories_job_compliant() {
   return 0
 }
 
+# #4696: the Node lane is one job per tree and the gate-script regression fixtures
+# are a path-selected `policy` job. These helpers pin the parts of that structure
+# that decide whether a check can silently stop running. The anchors are exact
+# lines (grep -x), so a comment or a longer command that merely contains the text
+# cannot satisfy them.
+alignment_job_compliant() {
+  local alignment="$1"
+  [ -n "$alignment" ] || return 1
+  grep -Fq 'git show "origin/main:scripts/check_track_alignment.sh"' <<<"$alignment" || return 1
+  grep -Fq '915d00bff14fda55b909fcdda72067e3d480dbda|27718c0e68715ae44fc65cdb632e70b8a347ea7c|38587b53c088049e42f9fba1f8d0118985523faf)' \
+    <<<"$alignment" || return 1
+  # Repo-state check, not a gate-script regression: lockfile hashes and the
+  # Dockerfile COPY list can break on a PR no path filter would connect to it.
+  grep -Fxq '        run: scripts/check_ghcr_notice_bundle.sh --stale-only' <<<"$alignment" || return 1
+  # Always on, like gitleaks: the gate requires `success`, never `skipped`.
+  if grep -Fq '    if:' <<<"$alignment"; then
+    return 1
+  fi
+  if grep -Fq 'needs:' <<<"$alignment"; then
+    return 1
+  fi
+  return 0
+}
+
+policy_job_compliant() {
+  local policy="$1" fixture
+  [ -n "$policy" ] || return 1
+  grep -Fxq "    if: needs.changes.outputs.policy == 'true'" <<<"$policy" || return 1
+  grep -Fxq '    needs: changes' <<<"$policy" || return 1
+  for fixture in \
+    test_track_alignment_guard \
+    test_pr_ci_guardrails \
+    test_github_track_guardrails \
+    test_policy_integrity_gate \
+    test_trusted_policy_runner \
+    test_ghcr_notice_bundle; do
+    grep -Fxq "          scripts/tests/${fixture}.sh" <<<"$policy" || return 1
+  done
+  if grep -Eq 'continue-on-error|\|\| *true' <<<"$policy"; then
+    return 1
+  fi
+  return 0
+}
+
+node_jobs_compliant() {
+  local node_core="$1" node_web="$2" node_mobile="$3" node_job
+  for node_job in "$node_core" "$node_web" "$node_mobile"; do
+    [ -n "$node_job" ] || return 1
+    grep -Fxq "    if: needs.changes.outputs.node == 'true'" <<<"$node_job" || return 1
+    grep -Fxq '    needs: changes' <<<"$node_job" || return 1
+    # web and mobile consume @momo/core by path, whose third-party dependencies
+    # resolve from the root node_modules: every tree's job installs the root first.
+    grep -Fxq '        run: npm ci' <<<"$node_job" || return 1
+    # #1635: G3 (#1267/#1268) retired the node-lane bandages. vitest test.env is
+    # the TZ SoT — a runner TZ pin hides UTC-host local failures. inboxApproval
+    # is in the suite, not excluded by filename.
+    if grep -Fq 'TZ: Asia/Seoul' <<<"$node_job"; then
+      return 1
+    fi
+    if grep -Fq 'testPathIgnorePatterns' <<<"$node_job"; then
+      return 1
+    fi
+    if grep -Fq 'inboxApproval' <<<"$node_job"; then
+      return 1
+    fi
+    if grep -Eq 'continue-on-error|\|\| *true' <<<"$node_job"; then
+      return 1
+    fi
+  done
+  grep -Fxq '        run: node scripts/check_npm_licenses.mjs' <<<"$node_core" || return 1
+  grep -Fxq '        run: npm run typecheck --workspace @momo/core' <<<"$node_core" || return 1
+  grep -Fxq '        run: npm run test --workspace @momo/core' <<<"$node_core" || return 1
+  grep -Fxq '        run: npm --prefix clients/web run typecheck' <<<"$node_web" || return 1
+  grep -Fxq '        run: npm --prefix clients/web run test' <<<"$node_web" || return 1
+  grep -Fxq '        run: npm --prefix clients/mobile run typecheck' <<<"$node_mobile" || return 1
+  grep -Fxq '        run: npm --prefix clients/mobile run test' <<<"$node_mobile" || return 1
+  return 0
+}
+
+# shellcheck disable=SC2016 # Literal workflow shell contracts, not expansions.
+gate_job_compliant() {
+  local gate="$1" dependency wiring
+  [ -n "$gate" ] || return 1
+  for dependency in changes alignment gitleaks advisories policy rust security_pack node_core node_web node_mobile; do
+    grep -Fxq "      - $dependency" <<<"$gate" || return 1
+  done
+  if grep -Fq "      - contract" <<<"$gate"; then
+    return 1
+  fi
+  # The single `node` job no longer exists; a leftover dependency on it would
+  # make the gate wait for a job nobody defines.
+  if grep -Fxq "      - node" <<<"$gate"; then
+    return 1
+  fi
+  # Every *_RESULT env var reads its OWN job, as an exact line. A result wired to a
+  # neighbour (NODE_WEB_RESULT from node_core, say) keeps the job in `needs` and the
+  # require_optional_lane line in place, yet lets that job fail unseen (#4696).
+  for wiring in \
+    CHANGES_RESULT:changes ALIGNMENT_RESULT:alignment GITLEAKS_RESULT:gitleaks \
+    ADVISORIES_RESULT:advisories POLICY_RESULT:policy RUST_RESULT:rust \
+    SECURITY_PACK_RESULT:security_pack NODE_CORE_RESULT:node_core \
+    NODE_WEB_RESULT:node_web NODE_MOBILE_RESULT:node_mobile; do
+    grep -Fxq "      ${wiring%%:*}: \${{ needs.${wiring#*:}.result }}" <<<"$gate" || return 1
+  done
+  grep -Fq "      POLICY_SELECTED: \${{ needs.changes.outputs.policy }}" <<<"$gate" || return 1
+  grep -Fq "      RUST_SELECTED: \${{ needs.changes.outputs.rust }}" <<<"$gate" || return 1
+  grep -Fq "      NODE_SELECTED: \${{ needs.changes.outputs.node }}" <<<"$gate" || return 1
+  grep -Fq '    if: always()' <<<"$gate" || return 1
+  grep -Fq 'test "$CHANGES_RESULT" = success' <<<"$gate" || return 1
+  grep -Fq 'test "$ALIGNMENT_RESULT" = success' <<<"$gate" || return 1
+  grep -Fq 'test "$GITLEAKS_RESULT" = success' <<<"$gate" || return 1
+  grep -Fq 'test "$ADVISORIES_RESULT" = success' <<<"$gate" || return 1
+  grep -Fq 'true:success|false:skipped) ;;' <<<"$gate" || return 1
+  grep -Fq 'lane selection/result mismatch:' <<<"$gate" || return 1
+  # Every optional lane's result is checked against its own selection output: a
+  # selected lane that was skipped (or an unselected one that ran) is red.
+  grep -Fxq '          require_optional_lane "$POLICY_SELECTED" "$POLICY_RESULT" policy' <<<"$gate" || return 1
+  grep -Fxq '          require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust' <<<"$gate" || return 1
+  grep -Fxq '          require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack' <<<"$gate" || return 1
+  grep -Fxq '          require_optional_lane "$NODE_SELECTED" "$NODE_CORE_RESULT" node_core' <<<"$gate" || return 1
+  grep -Fxq '          require_optional_lane "$NODE_SELECTED" "$NODE_WEB_RESULT" node_web' <<<"$gate" || return 1
+  grep -Fxq '          require_optional_lane "$NODE_SELECTED" "$NODE_MOBILE_RESULT" node_mobile' <<<"$gate" || return 1
+  return 0
+}
+
 workflow_compliant() {
   local workflow="$1"
-  local bootstrap_allowlist changes alignment gitleaks advisories rust node contract gate
+  local changes alignment policy gitleaks advisories rust contract gate
+  local node_core node_web node_mobile
   changes="$(job_block "$workflow" changes)"
   alignment="$(job_block "$workflow" alignment)"
+  policy="$(job_block "$workflow" policy)"
   gitleaks="$(job_block "$workflow" gitleaks)"
   advisories="$(job_block "$workflow" advisories)"
   rust="$(job_block "$workflow" rust)"
-  node="$(job_block "$workflow" node)"
+  node_core="$(job_block "$workflow" node_core)"
+  node_web="$(job_block "$workflow" node_web)"
+  node_mobile="$(job_block "$workflow" node_mobile)"
   contract="$(job_block "$workflow" contract)"
   gate="$(job_block "$workflow" gate)"
 
-  [ -n "$changes" ] && [ -n "$alignment" ] && [ -n "$gitleaks" ] \
-    && [ -n "$rust" ] && [ -n "$node" ] && [ -n "$gate" ] \
+  [ -n "$changes" ] && [ -n "$alignment" ] && [ -n "$policy" ] && [ -n "$gitleaks" ] \
+    && [ -n "$rust" ] && [ -n "$node_core" ] && [ -n "$node_web" ] \
+    && [ -n "$node_mobile" ] && [ -n "$gate" ] \
     || return 1
   # #2142 / ADR-0183 D5: the web-legacy generated-contract lane must stay gone.
   [ -z "$contract" ] || return 1
@@ -169,57 +299,13 @@ workflow_compliant() {
   grep -Fq 'incomplete or duplicate changed-files response:' <<<"$changes" || return 1
   grep -Fq '(.filename, (.previous_filename // empty))' <<<"$changes" || return 1
   grep -Fq 'scripts/check_npm_licenses\.mjs$' <<<"$changes" || return 1
-  grep -Fq 'git show "origin/main:scripts/check_track_alignment.sh"' <<<"$alignment" || return 1
-  bootstrap_allowlist='915d00bff14fda55b909fcdda72067e3d480dbda|27718c0e68715ae44fc65cdb632e70b8a347ea7c|38587b53c088049e42f9fba1f8d0118985523faf)'
-  grep -Fq "$bootstrap_allowlist" <<<"$alignment" || return 1
-  grep -Fq 'scripts/tests/test_track_alignment_guard.sh' <<<"$alignment" || return 1
-  grep -Fq 'scripts/tests/test_pr_ci_guardrails.sh' <<<"$alignment" || return 1
-  grep -Fq 'scripts/tests/test_github_track_guardrails.sh' <<<"$alignment" || return 1
-  grep -Fq 'scripts/tests/test_policy_integrity_gate.sh' <<<"$alignment" || return 1
-  grep -Fq 'scripts/tests/test_trusted_policy_runner.sh' <<<"$alignment" || return 1
-  grep -Fq 'scripts/tests/test_ghcr_notice_bundle.sh' <<<"$alignment" || return 1
-  grep -Fq 'scripts/check_ghcr_notice_bundle.sh --stale-only' <<<"$alignment" || return 1
+  # #4696: topology + repo-state check stay in `alignment` (always on); the six
+  # gate-script regression fixtures run in the path-selected `policy` job.
+  alignment_job_compliant "$alignment" || return 1
+  policy_job_compliant "$policy" || return 1
   grep -Fq "if: needs.changes.outputs.rust == 'true'" <<<"$rust" || return 1
-  grep -Fq "if: needs.changes.outputs.node == 'true'" <<<"$node" || return 1
-  grep -Fq 'run: npm --prefix clients/web run test' <<<"$node" || return 1
-  grep -Fq 'run: npm --prefix clients/mobile run test' <<<"$node" || return 1
-  # #1635: G3 (#1267/#1268) retired the node-lane bandages. vitest test.env
-  # is the TZ SoT — a runner TZ pin hides UTC-host local failures.
-  # inboxApproval is in the suite, not excluded by filename.
-  if grep -Fq 'TZ: Asia/Seoul' <<<"$node"; then
-    return 1
-  fi
-  if grep -Fq 'testPathIgnorePatterns' <<<"$node"; then
-    return 1
-  fi
-  if grep -Fq 'inboxApproval' <<<"$node"; then
-    return 1
-  fi
-  for dependency in changes alignment gitleaks advisories rust node; do
-    grep -Fq "      - $dependency" <<<"$gate" || return 1
-  done
-  if grep -Fq "      - contract" <<<"$gate"; then
-    return 1
-  fi
-  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT ADVISORIES_RESULT RUST_RESULT NODE_RESULT; do
-    grep -Fq "      ${result}: \${{ needs." <<<"$gate" || return 1
-  done
-  for selected in RUST_SELECTED NODE_SELECTED; do
-    grep -Fq "      ${selected}: \${{ needs.changes.outputs." <<<"$gate" || return 1
-  done
-  grep -Fq "      RUST_SELECTED: \${{ needs.changes.outputs.rust }}" <<<"$gate" || return 1
-  grep -Fq "      NODE_SELECTED: \${{ needs.changes.outputs.node }}" <<<"$gate" || return 1
-  grep -Fq '    if: always()' <<<"$gate" || return 1
-  # shellcheck disable=SC2016 # These are literal workflow shell contracts.
-  grep -Fq 'test "$CHANGES_RESULT" = success' <<<"$gate" || return 1
-  # shellcheck disable=SC2016 # These are literal workflow shell contracts.
-  grep -Fq 'test "$ALIGNMENT_RESULT" = success' <<<"$gate" || return 1
-  # shellcheck disable=SC2016 # These are literal workflow shell contracts.
-  grep -Fq 'test "$GITLEAKS_RESULT" = success' <<<"$gate" || return 1
-  # shellcheck disable=SC2016 # These are literal workflow shell contracts.
-  grep -Fq 'test "$ADVISORIES_RESULT" = success' <<<"$gate" || return 1
-  grep -Fq 'true:success|false:skipped) ;;' <<<"$gate" || return 1
-  grep -Fq 'lane selection/result mismatch:' <<<"$gate" || return 1
+  node_jobs_compliant "$node_core" "$node_web" "$node_mobile" || return 1
+  gate_job_compliant "$gate" || return 1
 
   # Every third-party action in the required workflow is immutable.
   if grep -E '^[[:space:]]*(- )?uses:' "$workflow" \
@@ -446,6 +532,150 @@ if workflow_compliant "$TMP_DIR/advisories-osv-unpinned.yml"; then
   fail "unpinned osv-scanner version was accepted"
 fi
 
+# --- #4696: structure mutants. The Node lane is split per tree, the gate-script
+# fixtures are a path-selected job, and the gate cross-checks every one of them.
+# Each deletion below removes exactly one line inside one job and must turn the
+# static contract red: a check that can silently stop running is what this file
+# exists to prevent. (A control — the unmutated workflow — was accepted above.)
+mutate_in_job() { # <name> <job> <exact line to delete>
+  awk -v marker="  $2:" -v target="$3" '
+    $0 == marker { active = 1; print; next }
+    active && $0 ~ /^  [[:alnum:]_-]+:$/ { active = 0 }
+    active && $0 == target { next }
+    { print }
+  ' "$WORKFLOW" > "$TMP_DIR/$1.yml"
+  if cmp -s "$WORKFLOW" "$TMP_DIR/$1.yml"; then
+    fail "$1 mutation did not apply (anchor line changed): $3"
+  fi
+  if workflow_compliant "$TMP_DIR/$1.yml"; then
+    fail "$1 was accepted"
+  fi
+}
+
+for gate_dependency in policy node_core node_web node_mobile; do
+  mutate_in_job "gate-drops-$gate_dependency" gate "      - $gate_dependency"
+done
+# shellcheck disable=SC2016 # Literal workflow shell lines, not expansions.
+{
+  mutate_in_job gate-ignores-policy gate '          require_optional_lane "$POLICY_SELECTED" "$POLICY_RESULT" policy'
+  mutate_in_job gate-ignores-node-core gate '          require_optional_lane "$NODE_SELECTED" "$NODE_CORE_RESULT" node_core'
+  mutate_in_job gate-ignores-node-web gate '          require_optional_lane "$NODE_SELECTED" "$NODE_WEB_RESULT" node_web'
+  mutate_in_job gate-ignores-node-mobile gate '          require_optional_lane "$NODE_SELECTED" "$NODE_MOBILE_RESULT" node_mobile'
+}
+for fixture in \
+  test_track_alignment_guard test_pr_ci_guardrails test_github_track_guardrails \
+  test_policy_integrity_gate test_trusted_policy_runner test_ghcr_notice_bundle; do
+  mutate_in_job "policy-drops-$fixture" policy "          scripts/tests/${fixture}.sh"
+done
+mutate_in_job policy-unconditional policy "    if: needs.changes.outputs.policy == 'true'"
+mutate_in_job stale-check-dropped alignment '        run: scripts/check_ghcr_notice_bundle.sh --stale-only'
+mutate_in_job node-core-no-license-gate node_core '        run: node scripts/check_npm_licenses.mjs'
+mutate_in_job node-core-no-typecheck node_core '        run: npm run typecheck --workspace @momo/core'
+mutate_in_job node-core-no-test node_core '        run: npm run test --workspace @momo/core'
+mutate_in_job node-web-no-typecheck node_web '        run: npm --prefix clients/web run typecheck'
+mutate_in_job node-web-no-test node_web '        run: npm --prefix clients/web run test'
+mutate_in_job node-web-no-root-install node_web '        run: npm ci'
+mutate_in_job node-mobile-no-typecheck node_mobile '        run: npm --prefix clients/mobile run typecheck'
+mutate_in_job node-mobile-no-test node_mobile '        run: npm --prefix clients/mobile run test'
+mutate_in_job node-mobile-no-root-install node_mobile '        run: npm ci'
+
+mutate_in_job policy-no-needs policy '    needs: changes'
+for node_job_name in node_core node_web node_mobile; do
+  mutate_in_job "$node_job_name-unconditional" "$node_job_name" "    if: needs.changes.outputs.node == 'true'"
+  mutate_in_job "$node_job_name-no-needs" "$node_job_name" '    needs: changes'
+done
+# shellcheck disable=SC2016 # Literal workflow shell lines, not expansions.
+{
+  mutate_in_job gate-ignores-rust gate '          require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust'
+  # The security pack is a required lane too: dropping it from `needs`, from the
+  # env, or from the selection cross-check each lets it fail (or never run) unseen.
+  mutate_in_job gate-drops-security-pack gate '      - security_pack'
+  mutate_in_job gate-ignores-security-pack gate '          require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack'
+  mutate_in_job gate-security-pack-result-unset gate '      SECURITY_PACK_RESULT: ${{ needs.security_pack.result }}'
+}
+
+insert_after_in_job() { # <name> <job> <anchor line> <inserted line>
+  awk -v marker="  $2:" -v anchor="$3" -v ins="$4" '
+    $0 == marker { active = 1 }
+    active && $0 ~ /^  [[:alnum:]_-]+:$/ && $0 != marker { active = 0 }
+    { print }
+    active && $0 == anchor { print ins }
+  ' "$WORKFLOW" > "$TMP_DIR/$1.yml"
+  if cmp -s "$WORKFLOW" "$TMP_DIR/$1.yml"; then
+    fail "$1 mutation did not apply (anchor line changed): $3"
+  fi
+  if workflow_compliant "$TMP_DIR/$1.yml"; then
+    fail "$1 was accepted"
+  fi
+}
+mutate_sed() { # <name> <sed expression>
+  sed "$2" "$WORKFLOW" > "$TMP_DIR/$1.yml"
+  if cmp -s "$WORKFLOW" "$TMP_DIR/$1.yml"; then
+    fail "$1 mutation did not apply (anchor text changed)"
+  fi
+  if workflow_compliant "$TMP_DIR/$1.yml"; then
+    fail "$1 was accepted"
+  fi
+}
+insert_after_in_job alignment-has-needs alignment '    name: canonical track alignment' '    needs: changes'
+insert_after_in_job policy-soft policy '    name: 정책 회귀 fixtures' '    continue-on-error: true'
+insert_after_in_job node-web-soft node_web '    name: TS web — 타입체크 + 단위 시험' '    continue-on-error: true'
+# The trusted checker must come from main, never from the PR's own tree.
+mutate_sed alignment-checker-from-pr 's#git show "origin/main:scripts/check_track_alignment.sh"#git show "HEAD:scripts/check_track_alignment.sh"#'
+# The gate's own selection mapping and its two always-required results.
+mutate_sed policy-selection-mapped-to-rust 's/POLICY_SELECTED: \${{ needs.changes.outputs.policy }}/POLICY_SELECTED: ${{ needs.changes.outputs.rust }}/'
+mutate_sed rust-selection-mapped-to-node 's/      RUST_SELECTED: \${{ needs.changes.outputs.rust }}/      RUST_SELECTED: ${{ needs.changes.outputs.node }}/'
+# Each *_RESULT env var reads its own job: wiring one to a neighbour's result keeps
+# the job in `needs` and its require_optional_lane line in place, yet lets that job
+# fail unseen. One mutant per variable (<VAR>:<own job>:<neighbour job>).
+for wiring in \
+  CHANGES_RESULT:changes:alignment ALIGNMENT_RESULT:alignment:changes GITLEAKS_RESULT:gitleaks:changes \
+  ADVISORIES_RESULT:advisories:changes POLICY_RESULT:policy:alignment RUST_RESULT:rust:changes \
+  SECURITY_PACK_RESULT:security_pack:rust NODE_CORE_RESULT:node_core:node_web \
+  NODE_WEB_RESULT:node_web:node_core NODE_MOBILE_RESULT:node_mobile:node_core; do
+  IFS=: read -r wired_var wired_job wired_other <<<"$wiring"
+  mutate_sed "gate-${wired_var}-read-from-${wired_other}" \
+    "s/      ${wired_var}: \\\${{ needs.${wired_job}.result }}/      ${wired_var}: \\\${{ needs.${wired_other}.result }}/"
+done
+# shellcheck disable=SC2016 # Literal workflow shell lines, not expansions.
+{
+  mutate_sed changes-result-optional '/test "$CHANGES_RESULT" = success/d'
+  mutate_sed alignment-result-optional '/test "$ALIGNMENT_RESULT" = success/d'
+}
+mutate_sed gate-message-changed 's#lane selection/result mismatch:#lane mismatch:#'
+
+# The node-lane bandages stay retired one by one (#1635): each string alone is red.
+# (The `run:` line stays byte-identical here, so only the string guard can see it.)
+insert_after_in_job mobile-path-ignore-env node_mobile '      - name: test — clients/mobile (jest)' '        env:\n          JEST_ARGS: --testPathIgnorePatterns=flaky'
+insert_after_in_job mobile-name-filter-env node_mobile '      - name: test — clients/mobile (jest)' '        env:\n          SKIP_SUITE: inboxApproval'
+# The retired web-legacy contract lane may not come back through the gate either.
+awk '{ print } $0 == "      - node_mobile" { print "      - contract" }' "$WORKFLOW" > "$TMP_DIR/gate-needs-contract.yml"
+if cmp -s "$WORKFLOW" "$TMP_DIR/gate-needs-contract.yml"; then
+  fail "gate-needs-contract mutation did not apply"
+fi
+if workflow_compliant "$TMP_DIR/gate-needs-contract.yml"; then
+  fail "a gate that needs the retired contract lane was accepted"
+fi
+
+# The always-on repo-state check must not become path-selected, and a lane must
+# not quietly lose its selection condition.
+awk '{ print } $0 == "    name: canonical track alignment" { print "    if: needs.changes.outputs.policy == '\''true'\''" }' \
+  "$WORKFLOW" > "$TMP_DIR/alignment-conditional.yml"
+if cmp -s "$WORKFLOW" "$TMP_DIR/alignment-conditional.yml"; then
+  fail "alignment-conditional mutation did not apply"
+fi
+if workflow_compliant "$TMP_DIR/alignment-conditional.yml"; then
+  fail "a path-selected alignment job was accepted"
+fi
+# A leftover single `node` dependency would wait on a job nobody defines.
+awk '{ print } $0 == "      - node_mobile" { print "      - node" }' "$WORKFLOW" > "$TMP_DIR/gate-needs-node.yml"
+if cmp -s "$WORKFLOW" "$TMP_DIR/gate-needs-node.yml"; then
+  fail "gate-needs-node mutation did not apply"
+fi
+if workflow_compliant "$TMP_DIR/gate-needs-node.yml"; then
+  fail "a gate that still needs the removed node job was accepted"
+fi
+
 # Execute the exact embedded classifier with a fake GitHub API. These fixtures
 # prove behavior, rather than only asserting that policy-looking strings exist.
 FILTER_SCRIPT="$TMP_DIR/change-filter.sh"
@@ -471,6 +701,7 @@ assert_filter_fixture() {
   local pages_json="$3"
   local expected_rust="$4"
   local expected_node="$5"
+  local expected_policy="${6:-}"
   local fixture_dir="$TMP_DIR/fixture-$name"
   local key actual expected
 
@@ -496,9 +727,25 @@ assert_filter_fixture() {
       rust) expected="$expected_rust" ;;
       node) expected="$expected_node" ;;
     esac
+    # `any` = this fixture only asserts another lane (the policy-lane row probes).
+    [ "$expected" = any ] && continue
     [ "$actual" = "$expected" ] \
       || fail "$name expected $key=$expected, got ${actual:-<empty>}"
   done
+  # #4696: the policy lane (gate-script regression fixtures) must be emitted, and a
+  # Rust-lane PR always runs it too (test_pr_ci_guardrails.sh reads the Rust
+  # sources). An explicit expectation, when given, is exact.
+  actual="$(awk -F= '$1 == "policy" { value = $2 } END { print value }' "$fixture_dir/output")"
+  case "$actual" in
+    true|false) ;;
+    *) fail "$name classifier emitted no policy lane (got ${actual:-<empty>})" ;;
+  esac
+  if [ "$expected_rust" = true ] && [ "$actual" != true ]; then
+    fail "$name selected the rust lane but not the policy lane"
+  fi
+  if [ -n "$expected_policy" ] && [ "$actual" != "$expected_policy" ]; then
+    fail "$name expected policy=$expected_policy, got $actual"
+  fi
   if grep -Eq '^(contract)=' "$fixture_dir/output"; then
     fail "$name classifier still emitted a contract lane"
   fi
@@ -538,19 +785,19 @@ assert_filter_fixture api-neighbour-doc \
 assert_filter_fixture incomplete-pages \
   '{"changed_files":2}' \
   '[[{"filename":"docs/only-one.md","status":"modified"}]]' \
-  true true
+  true true true
 
 # Duplicate rows cannot masquerade as a complete two-file response.
 assert_filter_fixture duplicate-pages \
   '{"changed_files":2}' \
   '[[{"filename":"docs/same.md"},{"filename":"docs/same.md"}]]' \
-  true true
+  true true true
 
 # The API's documented maximum is ambiguous even before listing pages.
 assert_filter_fixture api-cap \
   '{"changed_files":3000}' \
   '[[{"filename":"docs/not-consulted.md"}]]' \
-  true true
+  true true true
 grep -Fq '3,000-file API cap is ambiguous' "$TMP_DIR/fixture-api-cap/log" \
   || fail "3,000-file fixture did not take the explicit cap fallback"
 
@@ -558,12 +805,12 @@ grep -Fq '3,000-file API cap is ambiguous' "$TMP_DIR/fixture-api-cap/log" \
 assert_filter_fixture malformed-metadata \
   '{"changed_files":"2"}' \
   '[[{"filename":"docs/not-consulted.md"}]]' \
-  true true
+  true true true
 
 assert_filter_fixture malformed-pages \
   '{"changed_files":1}' \
   '[[{"filename":17,"status":"modified"}]]' \
-  true true
+  true true true
 
 # The node lane is not under test here; this only keeps its expectation honest.
 node_expected_for() {
@@ -648,6 +895,222 @@ for neighbour in \
     false "$(node_expected_for "$neighbour")"
 done
 
+# --- #4696: the policy lane. policy=true is a superset of rust=true, plus every
+# path whose change should run the six gate-script regression fixtures. The
+# neighbours none of them read stay out: a web, phone or docs-only PR skips the
+# ~2 minutes, which is the point of the lane. The expectations are written per
+# path (rust node policy), so a drift in any one lane regex is visible.
+assert_policy_lane() { # <changed path> <rust> <node> <policy>
+  assert_filter_fixture "lane-$(printf '%s' "$1" | tr -c 'A-Za-z0-9\n' '_')" \
+    '{"changed_files":1}' \
+    "[[{\"filename\":\"$1\",\"status\":\"modified\"}]]" \
+    "$2" "$3" "$4"
+}
+assert_policy_lane scripts/new_gate.sh false false true
+assert_policy_lane scripts/tests/test_new_gate.sh false false true
+assert_policy_lane scripts/tests/fixtures/policy-integrity/case.json false false true
+assert_policy_lane scripts/check_npm_licenses.mjs false true true
+assert_policy_lane .github/workflows/security-nightly.yml false false true
+assert_policy_lane .github/labels.json false false true
+assert_policy_lane .github/ISSUE_TEMPLATE/chore.md false false true
+assert_policy_lane REVIEW.md false false true
+assert_policy_lane AGENTS.md false false true
+assert_policy_lane CONTRIBUTING.md false false true
+assert_policy_lane deny.toml true false true
+assert_policy_lane osv-scanner.toml false false true
+assert_policy_lane docs/security/claims.yaml false false true
+assert_policy_lane docs/GITHUB_OPS.md false false true
+assert_policy_lane docs/LOCAL_PR_GATE.md false false true
+assert_policy_lane docs/TRACKS.md false false true
+assert_policy_lane docs/adr/0153-ci-stack-selfhosted-runners.md false false true
+# A Rust-lane PR runs the policy fixtures too: test_pr_ci_guardrails.sh scans the
+# Rust sources for files read from outside the tree, and test_ghcr_notice_bundle.sh
+# copies legal/generated/spdx-texts.
+assert_policy_lane server-rust/crates/momo-wire/src/lib.rs true false true
+assert_policy_lane clients/desktop/src-tauri/src/main.rs true false true
+assert_policy_lane legal/generated/spdx-texts/MIT.txt true false true
+assert_policy_lane server/Migrations/999_new.sql true false true
+assert_policy_lane docs/api/openapi.yaml true false true
+# Neighbours none of the six fixtures read: skipped.
+assert_policy_lane clients/web/src/App.tsx false true false
+assert_policy_lane clients/mobile/src/App.tsx false true false
+assert_policy_lane packages/momo-core/src/lib/api.ts false true false
+assert_policy_lane docs/README.md false false false
+assert_policy_lane docs/api/notes.md false false false
+assert_policy_lane docs/adr/0214-security-claims-need-tests.md false false false
+assert_policy_lane README.md false false false
+assert_policy_lane CHANGELOG.md false false false
+assert_policy_lane infra/other.yml false false false
+# A rename out of a policy path still selects the policy lane.
+assert_filter_fixture policy-rename-source \
+  '{"changed_files":1}' \
+  '[[{"filename":"docs/renamed.md","previous_filename":"scripts/old_gate.sh","status":"renamed"}]]' \
+  false false true
+
+# Each way the classifier can lose the policy lane must turn these fixtures red.
+expect_filter_red() { # <classifier script> <assert_filter_fixture args...>
+  local script="$1"
+  shift
+  if ( FILTER_SCRIPT="$script"; assert_filter_fixture "$@" ) >/dev/null 2>&1; then
+    fail "a mutated classifier was accepted: $*"
+  fi
+}
+mutated_classifier() { # <name> <sed expression> -> path of the extracted classifier
+  sed "$2" "$WORKFLOW" > "$TMP_DIR/$1.yml"
+  if cmp -s "$WORKFLOW" "$TMP_DIR/$1.yml"; then
+    echo "$1 mutation did not apply (anchor text changed)" >&2
+    return 1
+  fi
+  extract_change_filter "$TMP_DIR/$1.yml" > "$TMP_DIR/$1-filter.sh"
+  [ -s "$TMP_DIR/$1-filter.sh" ] || return 1
+  printf '%s\n' "$TMP_DIR/$1-filter.sh"
+}
+one_file_pr() { # <path> -> pages json
+  printf '[[{"filename":"%s","status":"modified"}]]' "$1"
+}
+mutant="$(mutated_classifier policy-lane-lost-osv 's/osv-scanner\\\.toml\$|//')" \
+  || fail "policy-lane-lost-osv"
+expect_filter_red "$mutant" mutant-osv '{"changed_files":1}' "$(one_file_pr osv-scanner.toml)" false false true
+mutant="$(mutated_classifier policy-lane-lost-review 's/|REVIEW\\\.md\$//')" \
+  || fail "policy-lane-lost-review"
+expect_filter_red "$mutant" mutant-review '{"changed_files":1}' "$(one_file_pr REVIEW.md)" false false true
+mutant="$(mutated_classifier policy-lane-lost-github 's#|\\\.github/|REVIEW#|REVIEW#')" \
+  || fail "policy-lane-lost-github"
+expect_filter_red "$mutant" mutant-github '{"changed_files":1}' "$(one_file_pr .github/workflows/security-nightly.yml)" false false true
+mutant="$(mutated_classifier policy-lane-ignores-rust 's/^          policy="\$rust"$/          policy=false/')" \
+  || fail "policy-lane-ignores-rust"
+expect_filter_red "$mutant" mutant-rust-only '{"changed_files":1}' "$(one_file_pr server-rust/crates/momo-wire/src/lib.rs)" true false true
+mutant="$(mutated_classifier policy-lane-unknown-state '/^              echo "policy=true"$/d')" \
+  || fail "policy-lane-unknown-state"
+expect_filter_red "$mutant" mutant-unknown '{"changed_files":2}' '[[{"filename":"docs/only-one.md","status":"modified"}]]' true true true
+
+# --- #4696: REVIEW.md risk table <-> policy_path() <-> the policy lane ----------
+# This check reads two files and compares them; the issue asks for exactly that
+# lock ("the test locks the table"), so it exists despite the usual rule against
+# tests that read source. It still avoids asserting letters: the real policy_path()
+# is extracted and CALLED, and the real classifier is executed.
+RISK_DOC="$REPO_ROOT/REVIEW.md"
+POLICY_VERIFIER="$REPO_ROOT/scripts/verify_policy_integrity.sh"
+
+risk_table_policy_patterns() { # <doc> -> one backticked pattern per list row between the markers
+  awk '
+    index($0, "<!-- risk-tier:policy-paths:begin -->") { on = 1; next }
+    index($0, "<!-- risk-tier:policy-paths:end -->") { on = 0 }
+    on
+  ' "$1" | sed -n 's/^[[:space:]]*-[[:space:]]*`\([^`][^`]*\)`.*$/\1/p'
+}
+
+risk_table_matches_policy_path() { # <doc> <verifier script> -> 0 match, 1 drift (reasons on stdout)
+  local doc="$1" verifier="$2" patterns count dups files
+  [ -f "$doc" ] || { echo "risk table document is missing: $doc"; return 1; }
+  patterns="$(risk_table_policy_patterns "$doc")"
+  count="$(printf '%s\n' "$patterns" | grep -c . || true)"
+  if [ "$count" -lt 30 ]; then
+    echo "risk table lists only $count policy patterns (marker block missing or parser blind)"
+    return 1
+  fi
+  dups="$(printf '%s\n' "$patterns" | sort | uniq -d)"
+  if [ -n "$dups" ]; then
+    echo "risk table lists a policy pattern twice: $dups"
+    return 1
+  fi
+  files="$(git -C "$REPO_ROOT" ls-files)"
+  grep -Fxq AGENTS.md <<<"$files" || { echo "git ls-files did not list AGENTS.md (not a checkout?)"; return 1; }
+  (
+    src="$(sed -n '/^policy_path() {$/,/^}$/p' "$verifier")"
+    [ -n "$src" ] || { echo "policy_path() is not defined in $verifier"; exit 1; }
+    eval "$src"
+    rc=0
+    while IFS= read -r pattern; do
+      probe="${pattern//\*/x}"
+      if ! policy_path "$probe"; then
+        echo "risk table lists '$pattern' but policy_path() does not flag '$probe'"
+        rc=1
+      fi
+    done <<<"$patterns"
+    while IFS= read -r file; do
+      policy_path "$file" || continue
+      matched=0
+      while IFS= read -r pattern; do
+        # shellcheck disable=SC2254 # the table row is a glob on purpose
+        case "$file" in $pattern) matched=1; break ;; esac
+      done <<<"$patterns"
+      if [ "$matched" != 1 ]; then
+        echo "policy_path() flags '$file' but no risk table row covers it"
+        rc=1
+      fi
+    done <<<"$files"
+    exit "$rc"
+  )
+}
+
+risk_table_matches_policy_path "$RISK_DOC" "$POLICY_VERIFIER" > "$TMP_DIR/risk-real.out" 2>&1 \
+  || { sed 's/^/[risk-table] /' "$TMP_DIR/risk-real.out" >&2; fail "REVIEW.md risk table and policy_path() disagree"; }
+
+# Every row must also select the policy lane in the real classifier.
+risk_rows=0
+while IFS= read -r risk_pattern; do
+  risk_probe="${risk_pattern//\*/x}"
+  assert_filter_fixture "risk-row-$(printf '%s' "$risk_probe" | tr -c 'A-Za-z0-9\n' '_')" \
+    '{"changed_files":1}' "$(one_file_pr "$risk_probe")" any any true
+  risk_rows=$((risk_rows + 1))
+done < <(risk_table_policy_patterns "$RISK_DOC")
+[ "$risk_rows" -ge 30 ] || fail "only $risk_rows risk table rows reached the classifier check"
+
+# Mutation proofs: each drift is red AND red for the intended reason.
+RISK_MUT="$TMP_DIR/risk-mut"
+mkdir -p "$RISK_MUT"
+risk_expect_red() { # <name> <doc> <verifier> <expected reason fragment>
+  local out
+  if out="$(risk_table_matches_policy_path "$2" "$3" 2>&1)"; then
+    fail "risk table mutation '$1' was accepted"
+  fi
+  grep -Fq -- "$4" <<<"$out" || fail "risk table mutation '$1' went red for another reason: $out"
+}
+risk_mutation_applied() { # <original> <mutated> <name>
+  if cmp -s "$1" "$2"; then
+    fail "risk table mutation '$3' did not apply (anchor changed)"
+  fi
+}
+grep -vF '`deny.toml`' "$RISK_DOC" > "$RISK_MUT/missing-row.md" || true
+risk_mutation_applied "$RISK_DOC" "$RISK_MUT/missing-row.md" missing-row
+risk_expect_red missing-row "$RISK_MUT/missing-row.md" "$POLICY_VERIFIER" "policy_path() flags 'deny.toml'"
+awk '{ print } index($0, "<!-- risk-tier:policy-paths:begin -->") { print "- `docs/not-a-policy-file.md`" }' \
+  "$RISK_DOC" > "$RISK_MUT/extra-row.md"
+risk_mutation_applied "$RISK_DOC" "$RISK_MUT/extra-row.md" extra-row
+risk_expect_red extra-row "$RISK_MUT/extra-row.md" "$POLICY_VERIFIER" \
+  "risk table lists 'docs/not-a-policy-file.md' but policy_path() does not flag"
+awk '{ print } index($0, "<!-- risk-tier:policy-paths:begin -->") { print "- `AGENTS.md`" }' \
+  "$RISK_DOC" > "$RISK_MUT/duplicate-row.md"
+risk_mutation_applied "$RISK_DOC" "$RISK_MUT/duplicate-row.md" duplicate-row
+risk_expect_red duplicate-row "$RISK_MUT/duplicate-row.md" "$POLICY_VERIFIER" "lists a policy pattern twice"
+grep -vF 'risk-tier:policy-paths:begin' "$RISK_DOC" > "$RISK_MUT/no-marker.md" || true
+risk_mutation_applied "$RISK_DOC" "$RISK_MUT/no-marker.md" no-marker
+risk_expect_red no-marker "$RISK_MUT/no-marker.md" "$POLICY_VERIFIER" "lists only 0 policy patterns"
+# The probe must be a tracked file that the policy lane always has and policy_path()
+# does not flag today: REVIEW.md (this very test already requires it, and the lane
+# selects it). A probe outside the lane would make the proof depend on a file this
+# lane never sees. Pick another probe if REVIEW.md ever becomes a policy file.
+awk '{ print } /^    AGENTS\.md\|\\$/ { print "    REVIEW.md|\\" }' \
+  "$POLICY_VERIFIER" > "$RISK_MUT/verifier-gains-a-path.sh"
+risk_mutation_applied "$POLICY_VERIFIER" "$RISK_MUT/verifier-gains-a-path.sh" verifier-gains-a-path
+risk_expect_red verifier-gains-a-path "$RISK_DOC" "$RISK_MUT/verifier-gains-a-path.sh" \
+  "policy_path() flags 'REVIEW.md'"
+grep -vxF '    deny.toml|\' "$POLICY_VERIFIER" > "$RISK_MUT/verifier-loses-a-path.sh" || true
+risk_mutation_applied "$POLICY_VERIFIER" "$RISK_MUT/verifier-loses-a-path.sh" verifier-loses-a-path
+risk_expect_red verifier-loses-a-path "$RISK_DOC" "$RISK_MUT/verifier-loses-a-path.sh" \
+  "risk table lists 'deny.toml' but policy_path() does not flag 'deny.toml'"
+sed 's/^policy_path() {$/policy_path_renamed() {/' "$POLICY_VERIFIER" > "$RISK_MUT/verifier-without-function.sh"
+risk_mutation_applied "$POLICY_VERIFIER" "$RISK_MUT/verifier-without-function.sh" verifier-without-function
+risk_expect_red verifier-without-function "$RISK_DOC" "$RISK_MUT/verifier-without-function.sh" \
+  "policy_path() is not defined in"
+# Not a git checkout: `git ls-files` returns nothing, which must be red, not an empty pass.
+if out="$( ( REPO_ROOT="$TMP_DIR/not-a-checkout"; mkdir -p "$REPO_ROOT"; \
+  risk_table_matches_policy_path "$RISK_DOC" "$POLICY_VERIFIER" ) 2>&1 )"; then
+  fail "a risk table check outside a git checkout was accepted"
+fi
+grep -Fq "git ls-files did not list AGENTS.md" <<<"$out" || fail "not-a-checkout went red for another reason: $out"
+
 for required in \
   '  push:' \
   '  schedule:' \
@@ -657,4 +1120,4 @@ for required in \
   grep -Fq "$required" "$MONITOR" || fail "track monitor missing: $required"
 done
 
-echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures, retired web-legacy lane absence, gitleaks PR-range fail-closed lane, stable fail-closed gate, mutation proofs, and monitor triggers"
+echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures (rust/node/policy lanes), retired web-legacy lane absence, per-tree node jobs, path-selected policy job, gitleaks PR-range fail-closed lane, stable fail-closed gate, REVIEW.md risk table lock, mutation proofs, and monitor triggers"

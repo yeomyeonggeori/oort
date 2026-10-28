@@ -58,6 +58,8 @@ pub mod hosted_agent_doorbell;
 pub mod hosted_dm_approvals;
 /// ADR-0122 / HD-1 — voice huddle lifecycle and LiveKit room grants.
 pub mod huddles;
+/// ADR-0216 D5 / #4661 — the human MCP, `POST /v1/mcp/me` (a developer token's MCP door).
+pub mod human_mcp;
 pub mod inbox;
 pub mod invites;
 pub mod join;

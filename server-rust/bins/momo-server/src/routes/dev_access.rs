@@ -441,7 +441,7 @@ fn credential_dto(record: &DevCredentialRecord) -> DevCredentialDto {
     }
 }
 
-fn self_response(identity: &DevIdentity) -> DevAccessSelfResponse {
+pub(crate) fn self_response(identity: &DevIdentity) -> DevAccessSelfResponse {
     // A login session's row is its latest access half, minted at the last rotation; the
     // list dates a lineage from its approval (its cap minus 90 days), and so does whoami.
     let created_at_ms = match (identity.form, identity.lineage_expires_at_ms) {
