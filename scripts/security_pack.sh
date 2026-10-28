@@ -152,7 +152,10 @@ cmd_nightly() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
   mkdir -p "$OUT"
   export_pg_env "$DATABASE_URL"
-  local rc=0 skips="" t
+  local rc=0 skips t
+  # momo-blind-pty/tests/loopback.rs 는 PG 시험이 아니라 성능 측정이다(#4696). PR CI 에서 빼며 `#[ignore]` 가
+  # 됐고 perf-nightly.yml 이 릴리스 빌드로 돌린다. 여기서는 건너뛰기만 한다(디버그 빌드로 164초를 또 쓰지 않는다).
+  skips=" --skip handshake_echo_latency_and_reconnect_over_loopback_tcp"
   # prod_role_conformance_pg 는 cluster-global 역할 비밀번호를 재설정해 이후 타깃을 오염시킨다.
   # 1) 그 타깃의 시험만 건너뛰고 나머지 전량을 돌린 뒤, 2) 마지막 순서로 따로 돌린다.
   for t in every_notifier_job_iteration_runs_as_its_production_role \

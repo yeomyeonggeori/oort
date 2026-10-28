@@ -1,6 +1,14 @@
 //! ADR-0197 S2 acceptance ③: latency and reconnect over real TCP sockets on
 //! loopback, through a relay that is a plain byte pipe. `runtime-unverified`
 //! for WebSocket/TLS/Railway paths; numbers are printed, not asserted tightly.
+//!
+//! This is a performance measurement, not a contract (#4696): in the PR CI's
+//! debug build the 2 x 1000 round trips took ~164 s (P-256 and AES-GCM
+//! unoptimised), two thirds of all Rust test execution, for one loose bound. It
+//! is `#[ignore]`d there and runs in `.github/workflows/perf-nightly.yml`
+//! (nightly + manual, release profile), which also fails when it runs 0 tests.
+//! `scripts/security_pack.sh nightly` skips it so it is not run twice.
+//! By hand: `cargo test -p momo-blind-pty --test loopback --release -- --ignored --nocapture`
 
 use momo_blind_pty::codec::*;
 use momo_blind_pty::harness::Fixture;
@@ -74,6 +82,7 @@ async fn one_connection(fx: &mut Fixture, frames: usize) -> (f64, f64) {
 }
 
 #[tokio::test]
+#[ignore = "perf measurement: runs in perf-nightly (release, nightly + manual), not in PR CI (#4696)"]
 async fn handshake_echo_latency_and_reconnect_over_loopback_tcp() {
     let mut fx = Fixture::new();
     let (hs1, rt1) = one_connection(&mut fx, 1000).await;
