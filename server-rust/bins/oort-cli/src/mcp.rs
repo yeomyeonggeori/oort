@@ -30,6 +30,10 @@ use crate::session::{Active, Ctx};
 
 pub const LEGACY_VERSION: &str = "2025-11-25";
 const META_VERSION_KEY: &str = "io.modelcontextprotocol/protocolVersion";
+const META_CLIENT_INFO_KEY: &str = "io.modelcontextprotocol/clientInfo";
+/// The door's own bounds on `clientInfo` (`momo_mcp`: `name` and `title` ≤ 128, `version` ≤ 64).
+const MAX_CLIENT_NAME_CHARS: usize = 128;
+const MAX_CLIENT_VERSION_CHARS: usize = 64;
 /// The door buffers at most this much (`momo_mcp::MAX_BODY_BYTES`); a longer line is refused here.
 pub const MAX_LINE_BYTES: usize = 64 * 1024;
 
@@ -59,6 +63,8 @@ pub struct Forward {
     /// `None` for a notification: the door's answer is not forwarded to anyone.
     pub id: Option<Value>,
     pub rewritten_from: Option<String>,
+    /// The client's `clientInfo` carried fields the door does not accept, and they were dropped.
+    pub trimmed_client_info: bool,
 }
 
 fn rpc_error(id: Value, code: i64, message: &str, data: Option<Value>) -> Value {
@@ -67,6 +73,38 @@ fn rpc_error(id: Value, code: i64, message: &str, data: Option<Value>) -> Value 
         error["data"] = data;
     }
     json!({ "jsonrpc": "2.0", "id": id, "error": error })
+}
+
+/// A client's `clientInfo` as the door accepts it: `name`, `version` and, when there is one,
+/// `title` — nothing else.
+///
+/// The MCP specification's `Implementation` also carries `description`, `websiteUrl` and `icons`,
+/// and Claude Code sends the first two; the door's check is closed-world over three keys and
+/// answers `-32602` to anything more, so a real client would never get past `initialize`. The
+/// extra fields only describe the client to its server, so the bridge sends the three the door
+/// reads (cut to the door's bounds). Returns whether anything was dropped or cut.
+fn trim_implementation_info(info: &mut Value) -> bool {
+    fn text(value: Option<&Value>, max: usize) -> Option<String> {
+        value
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+            .map(|text| text.chars().take(max).collect())
+    }
+    let Value::Object(map) = info else {
+        return false;
+    };
+    let name = text(map.get("name"), MAX_CLIENT_NAME_CHARS).unwrap_or_else(|| "unknown".into());
+    let version = text(map.get("version"), MAX_CLIENT_VERSION_CHARS).unwrap_or_else(|| "0".into());
+    let title = text(map.get("title"), MAX_CLIENT_NAME_CHARS);
+    let mut trimmed = serde_json::Map::new();
+    trimmed.insert("name".into(), Value::String(name));
+    if let Some(title) = title {
+        trimmed.insert("title".into(), Value::String(title));
+    }
+    trimmed.insert("version".into(), Value::String(version));
+    let changed = *map != trimmed;
+    *map = trimmed;
+    changed
 }
 
 /// Decide what a line from the client becomes.
@@ -84,6 +122,7 @@ pub fn plan(line: &str) -> Plan {
             headers: vec![("MCP-Protocol-Version", LEGACY_VERSION.to_string())],
             id: Some(Value::Null),
             rewritten_from: None,
+            trimmed_client_info: false,
         });
     };
     let Some(method) = object
@@ -104,6 +143,7 @@ pub fn plan(line: &str) -> Plan {
         .map(str::to_string);
 
     let mut rewritten_from = None;
+    let mut trimmed_client_info = false;
     let mut headers: Vec<(&'static str, String)> = Vec::new();
     match modern_version {
         Some(version) => {
@@ -136,6 +176,21 @@ pub fn plan(line: &str) -> Plan {
             }
         }
     }
+    if method == "initialize" {
+        if let Some(info) = object
+            .get_mut("params")
+            .and_then(|params| params.get_mut("clientInfo"))
+        {
+            trimmed_client_info |= trim_implementation_info(info);
+        }
+    }
+    if let Some(info) = object
+        .get_mut("params")
+        .and_then(|params| params.get_mut("_meta"))
+        .and_then(|meta| meta.get_mut(META_CLIENT_INFO_KEY))
+    {
+        trimmed_client_info |= trim_implementation_info(info);
+    }
     let Ok(body) = serde_json::to_vec(&Value::Object(object)) else {
         return Plan::Local(rpc_error(
             id.unwrap_or(Value::Null),
@@ -149,6 +204,7 @@ pub fn plan(line: &str) -> Plan {
         headers,
         id,
         rewritten_from,
+        trimmed_client_info,
     })
 }
 
@@ -257,6 +313,7 @@ pub fn serve(ctx: &Ctx) -> Result<(), CliError> {
     let url = active.api().url(&Route::Mcp.fill("", None, None));
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
+    let mut said_client_info = false;
     loop {
         let line = match read_line(&mut input, MAX_LINE_BYTES) {
             Ok(Line::Eof) => return Ok(()),
@@ -282,6 +339,10 @@ pub fn serve(ctx: &Ctx) -> Result<(), CliError> {
             Plan::Ignore => None,
             Plan::Local(response) => Some(response),
             Plan::Forward(forward) => {
+                if forward.trimmed_client_info && !said_client_info {
+                    said_client_info = true;
+                    note("oort mcp: clientInfo는 name·title·version만 보내요(서버가 그 밖의 필드를 받지 않아요).");
+                }
                 if let Some(proposed) = &forward.rewritten_from {
                     note(&format!(
                         "oort mcp: initialize의 protocolVersion {}을 {LEGACY_VERSION}으로 맞춰 보내요.",
@@ -368,6 +429,62 @@ mod tests {
             r#"{"jsonrpc":"2.0","id":"a","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"c","version":"1"}}}"#,
         );
         assert_eq!(already.rewritten_from, None);
+    }
+
+    #[test]
+    fn a_real_clients_client_info_is_cut_to_the_three_keys_the_door_reads() {
+        // The shape Claude Code 2.1.312 sent (captured against the real door): the specification's
+        // `description` and `websiteUrl` are more than the door's closed check lets through.
+        let info = r#"{"name":"claude-code","title":"Claude Code","version":"2.1.312","description":"Anthropic's agentic coding tool","websiteUrl":"https://claude.com/claude-code","icons":[]}"#;
+        let legacy = forward(&format!(
+            r#"{{"jsonrpc":"2.0","id":0,"method":"initialize","params":{{"protocolVersion":"2025-11-25","capabilities":{{}},"clientInfo":{info}}}}}"#
+        ));
+        assert_eq!(
+            body(&legacy)["params"]["clientInfo"],
+            json!({"name":"claude-code","title":"Claude Code","version":"2.1.312"})
+        );
+        assert!(legacy.trimmed_client_info);
+        assert_eq!(
+            body(&legacy)["params"]["capabilities"],
+            json!({}),
+            "nothing else of the request changes"
+        );
+
+        let modern = forward(&format!(
+            r#"{{"jsonrpc":"2.0","id":"p","method":"server/discover","params":{{"_meta":{{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{info},"io.modelcontextprotocol/clientCapabilities":{{"roots":{{}}}}}}}}}}"#
+        ));
+        let meta = &body(&modern)["params"]["_meta"];
+        assert_eq!(
+            meta["io.modelcontextprotocol/clientInfo"],
+            json!({"name":"claude-code","title":"Claude Code","version":"2.1.312"})
+        );
+        assert_eq!(
+            meta["io.modelcontextprotocol/clientCapabilities"],
+            json!({"roots":{}})
+        );
+        assert!(modern.trimmed_client_info);
+
+        // a clientInfo the door already accepts is not touched, and is not reported as touched
+        let plain = forward(
+            r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"inspector-cli","version":"2.12.0"}}}"#,
+        );
+        assert_eq!(
+            body(&plain)["params"]["clientInfo"],
+            json!({"name":"inspector-cli","version":"2.12.0"})
+        );
+        assert!(!plain.trimmed_client_info);
+
+        // the door's bounds and its two required keys
+        let odd = forward(&format!(
+            r#"{{"jsonrpc":"2.0","id":2,"method":"initialize","params":{{"protocolVersion":"2025-11-25","capabilities":{{}},"clientInfo":{{"name":"{}","version":""}}}}}}"#,
+            "n".repeat(300)
+        ));
+        let cut = &body(&odd)["params"]["clientInfo"];
+        assert_eq!(
+            cut["name"].as_str().map(|name| name.chars().count()),
+            Some(128)
+        );
+        assert_eq!(cut["version"], "0");
     }
 
     #[test]

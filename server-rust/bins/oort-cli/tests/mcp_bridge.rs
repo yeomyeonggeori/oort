@@ -4,7 +4,7 @@
 //!
 //! | test | proves | goes red if |
 //! |---|---|---|
-//! | `the_bridge_speaks_the_doors_era_and_passes_its_answers_through` | initialize is proposed as 2025-11-25, every request carries the version header and the bearer, no Origin / Mcp-Method in that era, the 2026 era keeps its own headers, the door's answers (an error included) come back verbatim, standard output is JSON-RPC lines only | the version rewrite, a header or the pass-through is dropped |
+//! | `the_bridge_speaks_the_doors_era_and_passes_its_answers_through` | initialize is proposed as 2025-11-25, a real client's `clientInfo` extras (Claude Code sends `description` and `websiteUrl`) are cut to what the door reads, every request carries the version header and the bearer, no Origin / Mcp-Method in that era, the 2026 era keeps its own headers, the door's answers (an error included) come back verbatim, standard output is JSON-RPC lines only | the version rewrite, a header or the pass-through is dropped |
 //! | `a_ended_login_is_an_error_to_the_client_and_the_bridge_keeps_serving` | 401 → JSON-RPC -32001 with the request's id, the next request is still served | the bridge exits or answers nothing |
 //! | `an_overlong_line_is_refused_and_the_next_request_is_served` | 70 KiB line → -32600 id null, the next line intact | the line bound or the resync is dropped |
 //! | `without_a_login_the_bridge_exits_before_speaking` | exit 3, nothing on standard output | it starts serving without a credential |
@@ -31,6 +31,26 @@ fn door() -> impl Fn(&Request) -> Response + Send + Sync + 'static {
         }
         let body = request.json();
         let id = body.get("id").cloned().unwrap_or(Value::Null);
+        // The real door's check (`momo_mcp::valid_implementation_info`) is closed over three
+        // keys: a client's `description` or `websiteUrl` is a -32602 there, so it is here too.
+        let door_accepts = |info: &Value| {
+            info.as_object().is_some_and(|info| {
+                info.keys()
+                    .all(|key| ["name", "title", "version"].contains(&key.as_str()))
+                    && info.get("name").is_some_and(Value::is_string)
+                    && info.get("version").is_some_and(Value::is_string)
+            })
+        };
+        let legacy_info = &body["params"]["clientInfo"];
+        let modern_info = &body["params"]["_meta"]["io.modelcontextprotocol/clientInfo"];
+        let bad_legacy = body["method"] == "initialize" && !door_accepts(legacy_info);
+        let bad_modern = !modern_info.is_null() && !door_accepts(modern_info);
+        if bad_legacy || bad_modern {
+            return Response::json(
+                400,
+                &json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32602, "message": "invalid clientInfo"}}),
+            );
+        }
         match body["method"].as_str().unwrap_or("") {
             "initialize" => Response::json(
                 200,
@@ -89,7 +109,10 @@ fn the_bridge_speaks_the_doors_era_and_passes_its_answers_through() {
         rpc(
             1,
             "initialize",
-            json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "tool", "version": "1"}}),
+            json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {
+                "name": "tool", "title": "The Tool", "version": "1",
+                "description": "a client that describes itself", "websiteUrl": "https://tool.example",
+            }}),
         ),
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string(),
         rpc(2, "tools/list", json!({})),
@@ -105,6 +128,7 @@ fn the_bridge_speaks_the_doors_era_and_passes_its_answers_through() {
             "tools/call",
             json!({"name": "oort_me_whoami", "arguments": {}, "_meta": {
                 "io.modelcontextprotocol/protocolVersion": MODERN,
+                "io.modelcontextprotocol/clientInfo": {"name": "tool", "version": "1", "websiteUrl": "https://tool.example"},
                 "io.modelcontextprotocol/clientCapabilities": {},
             }}),
         ),
@@ -160,9 +184,9 @@ fn the_bridge_speaks_the_doors_era_and_passes_its_answers_through() {
         "the proposal was rewritten"
     );
     assert_eq!(
-        seen[0].json()["params"]["clientInfo"]["name"],
-        "tool",
-        "nothing else of it was"
+        seen[0].json()["params"]["clientInfo"],
+        json!({"name": "tool", "title": "The Tool", "version": "1"}),
+        "only the three keys the door reads are sent"
     );
     for request in &seen[..5] {
         assert_eq!(request.header("mcp-protocol-version"), Some(LEGACY));

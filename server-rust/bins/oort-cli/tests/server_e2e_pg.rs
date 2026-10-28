@@ -494,7 +494,11 @@ async fn the_stdio_bridge_works_against_the_real_door() {
         rpc(
             1,
             "initialize",
-            json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "e2e", "version": "1"}}),
+            // the shape Claude Code 2.1.312 sends: the extras are more than the real door accepts
+            json!({"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {
+                "name": "claude-code", "title": "Claude Code", "version": "2.1.312",
+                "description": "Anthropic's agentic coding tool", "websiteUrl": "https://claude.com/claude-code",
+            }}),
         ),
         json!({"jsonrpc": "2.0", "method": "notifications/initialized"}).to_string(),
         rpc(2, "tools/list", json!({})),
