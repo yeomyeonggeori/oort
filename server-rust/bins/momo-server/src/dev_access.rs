@@ -419,7 +419,7 @@ async fn decide(
             // largest denied `Retry-After` is truthful (rate_limit.rs).
             let token_key = format!("dev:token:{}", identity.token_id);
             let member_key = format!("dev:member:{}", identity.member_id);
-            let write_key = format!("dev:write:{}", identity.token_id);
+            let write_key = write_budget_key(identity.token_id);
             let mut axes = vec![
                 ("token", token_key.as_str(), config.per_token_limit),
                 ("member", member_key.as_str(), config.per_member_limit),
@@ -483,6 +483,48 @@ async fn decide(
     })
     .await
     .map_err(|error| ApiError::internal("auth.dev_token", error))
+}
+
+// ---------------------------------------------------------------------------
+// the send budget, shared with the human MCP
+// ---------------------------------------------------------------------------
+
+/// The limiter key of a developer token's **send** budget (D9: 30 per window by default).
+///
+/// One function, because two doors spend this one counter: the door itself, for
+/// `POST …/channels/{ch}/messages` (L6, in [`decide`]'s `check_many`), and the human
+/// MCP's `post` tool ([`spend_write_budget`]). The MCP row's own route scope is
+/// `dev:identity`, so [`decide`] cannot know that one of its JSON-RPC calls is a send;
+/// the tool spends the same key itself. Two spellings of this key would be two
+/// budgets, and a token could send 30 a window over each.
+pub(crate) fn write_budget_key(token_id: Uuid) -> String {
+    format!("dev:write:{token_id}")
+}
+
+/// Spend one unit of `token_id`'s send budget from the counter L6 spends: `Ok(())`
+/// admits, `Err(seconds)` is the refusal and its `Retry-After`. Reads the same
+/// [`crate::config::DevAccessConfig`] the door reads (normalised: a 0 is never "off"),
+/// over the same window, in the same limiter map (`agent_port.limiter`).
+pub(crate) fn spend_write_budget(state: &AppState, token_id: Uuid) -> Result<(), u64> {
+    let config = state.dev_access.normalized();
+    let verdict = state.agent_port.limiter.check(
+        &write_budget_key(token_id),
+        config.write_per_token_limit,
+        Duration::from_secs(config.window_seconds),
+    );
+    if verdict.allowed {
+        return Ok(());
+    }
+    if verdict.should_log {
+        tracing::warn!(
+            axis = "write",
+            limit = config.write_per_token_limit,
+            window_seconds = config.window_seconds,
+            token_id = %token_id,
+            "developer-token rate limit exceeded"
+        );
+    }
+    Err(verdict.retry_after_seconds.max(1))
 }
 
 // ---------------------------------------------------------------------------

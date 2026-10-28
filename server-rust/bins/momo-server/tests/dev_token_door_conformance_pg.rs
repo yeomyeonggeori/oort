@@ -1,6 +1,6 @@
 //! ADR-0216 (#4660) — the developer-token **door**, proved over the real router.
 //!
-//! Rows covered: R1(a), R2(i)(ii)(iii), R3(a)(b)(c)(d), R4 and both approval-decision routes
+//! Rows covered: R1(a)(b), R2(i)(ii)(iii), R3(a)(b)(c)(d), R4 and both approval-decision routes
 //! (the first layer: the closed table; the second: `decide()` itself). Every claim about a
 //! refusal is paired with a **positive control** in the same test — a request that must get
 //! through, from the same token over the same wiring — so "refused" cannot be an artifact of a
@@ -23,6 +23,7 @@
 //! | `the_data_door_takes_card_and_access_only_and_the_refresh_door_takes_refresh_only` | R2(ii): at the server and, calling the domain functions directly, in the SQL | the `dev_form` filter of the lookup or of the rotation is dropped |
 //! | `every_way_a_developer_token_can_fail_to_identify_is_the_same_401` | R2(iii): expired, revoked, unknown, another workspace's, malformed ×6 and a refresh envelope are byte-for-byte the unknown-string 401 | any one of them answers differently |
 //! | `a_developer_token_is_not_an_agent_port_credential` | R1(a): a card, an access, a refresh and a relabelled secret get an unknown string's answer at the Agent Port; the control agent bearer is admitted | the Agent Port takes a developer envelope |
+//! | `a_non_developer_credential_is_not_a_human_mcp_credential` | R1(b): a real agent bearer with the connect scope, the owner's real session JWT, a pairing value, a hosted OAuth access, a refresh half, a card's secret relabelled as each of those and a string nobody knows get an unknown string's 401 at `POST /v1/mcp/me`, and the agent's row is never touched; the controls (a card, a login's access half) are admitted and list the five tools | the route is mounted behind the generic bearer door (an agent bearer would answer 403, a JWT would be admitted) or the human MCP takes another class |
 //! | `a_live_token_is_refused_on_every_pair_off_the_table_and_the_database_is_unchanged` | R3(b) with a live all-scope owner token: the sweep, the database unchanged, the token untouched; then L1–L7 with real data | a refusal reaches a handler, or a table pair stops working |
 //! | `a_variant_of_a_table_path_never_reaches_a_handler_the_table_did_not_open` | R3(c): a static sibling of `{ch}` behind the real door, hit by every method and spelling, runs no handler; `%61rchived` and friends reach only the table row's | the key is the raw path's shape instead of the matched template |
 //! | `a_developer_token_cannot_issue_list_or_revoke_developer_tokens` | R3(d): the credential routes and the policy route are refused, nothing changes, a session is admitted on them | a credential route enters the table **and** its handler's own refusal (`refuse_developer_token`) is removed — either wall alone is defence in depth and stays green; the handler wall is asserted DB-free in `routes::dev_access::tests` |
@@ -2089,6 +2090,157 @@ async fn a_developer_token_is_not_an_agent_port_credential() {
         "{}",
         admitted.text()
     );
+}
+
+/// R1 (b): every credential that is not a developer token gets, at `POST /v1/mcp/me`, exactly the
+/// answer an unknown string gets — 401, the unknown-token body — and is never looked at: a real
+/// agent bearer holding the connect scope (a perfectly good Agent Port credential), the owner's
+/// real session JWT, a pairing value, a hosted OAuth access token, a refresh half, a card's secret
+/// relabelled as each of those, and a string nobody knows. The agent's own row is not touched (no
+/// `last_used_at`, no audit row): the door answered without the database. The controls on the same
+/// request: a card and a login's access half are admitted (200) and list exactly the five tools.
+#[tokio::test]
+#[ignore = "needs an isolated PostgreSQL 18 (ADR-0216 R1)"]
+async fn a_non_developer_credential_is_not_a_human_mcp_credential() {
+    let _guard = test_lock().await;
+    let w = World::boot().await;
+    let card = w.issue_card(w.owner, &DEV_SCOPES).await;
+    let login = w.issue_login(w.owner, &DEV_SCOPES).await;
+
+    let agent = seed_managed_agent(&w.su, w.ws, w.owner, "portbot").await;
+    let agent_bearer = envelope(AGENT_BEARER_PREFIX, w.ws, &random_secret());
+    let agent_token: Uuid = sqlx::query_scalar(
+        "INSERT INTO token(workspace_id, kind, actor_member_id, subject_member_id, token_hash, \
+                           scopes, label) \
+         VALUES($1,'agent_bearer',$2,NULL,digest($3::text,'sha256'), \
+                ARRAY['agent:port:connect']::text[],'door-fixture') RETURNING id",
+    )
+    .bind(w.ws)
+    .bind(agent.id)
+    .bind(&agent_bearer)
+    .fetch_one(&w.su)
+    .await
+    .expect("seed an agent bearer with the connect scope");
+
+    let tools_list = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {"_meta": {
+            "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+            "io.modelcontextprotocol/clientCapabilities": {},
+            "io.modelcontextprotocol/clientInfo": {"name": "oort-dev-door-conformance", "version": "1.0.0"}
+        }}
+    });
+    let post = |bearer: Option<String>| {
+        let http = w.http.clone();
+        let tools_list = tools_list.clone();
+        async move {
+            http.send_with(
+                "POST",
+                "/v1/mcp/me",
+                bearer.as_deref(),
+                &[
+                    ("content-type", "application/json"),
+                    ("accept", "application/json, text/event-stream"),
+                    ("mcp-protocol-version", "2026-07-28"),
+                    ("mcp-method", "tools/list"),
+                ],
+                Some(&tools_list),
+            )
+            .await
+        }
+    };
+
+    // The reference: what a string nobody knows is told here — and a well-formed developer
+    // envelope no row carries is told the very same.
+    let unknown = post(Some("not-a-token".to_string())).await;
+    assert_eq!(unknown.status, 401);
+    assert_eq!(
+        unknown.json(),
+        json!({"error": {"message": "invalid or expired token"}})
+    );
+    assert_eq!(
+        post(Some(envelope(DEV_TOKEN_PREFIX, w.ws, &random_secret()))).await,
+        unknown,
+        "an unknown developer envelope is an unknown string too"
+    );
+
+    let relabel = |prefix: &str| envelope(prefix, w.ws, secret_part(&card.secret));
+    for (name, bearer) in [
+        (
+            "a real agent bearer holding agent:port:connect",
+            agent_bearer.clone(),
+        ),
+        ("the owner's real session JWT", w.owner_jwt.clone()),
+        (
+            "a pairing value",
+            envelope("momo_pair_v1", w.ws, &random_secret()),
+        ),
+        (
+            "a hosted OAuth access token",
+            envelope("momo_oauth_at_v1", w.ws, &random_secret()),
+        ),
+        ("a refresh half", login.refresh.clone()),
+        (
+            "a card's secret relabelled as an agent bearer",
+            relabel(AGENT_BEARER_PREFIX),
+        ),
+        (
+            "a card's secret relabelled as a pairing value",
+            relabel("momo_pair_v1"),
+        ),
+        (
+            "a card's secret relabelled as an OAuth access",
+            relabel("momo_oauth_at_v1"),
+        ),
+    ] {
+        assert_eq!(
+            post(Some(bearer)).await,
+            unknown,
+            "{name} at the human MCP is an unknown string"
+        );
+    }
+    // The agent's row was never seen by this door (the door never touched the database).
+    assert!(
+        !w.last_used(agent_token).await,
+        "the agent bearer was touched"
+    );
+    assert_eq!(
+        w.audit_rows_via(agent_token).await,
+        0,
+        "the agent bearer left an audit row"
+    );
+    // No credential at all is a 401 as well (and says so).
+    let missing = post(None).await;
+    assert_eq!(missing.status, 401);
+
+    // The controls: the same request, a developer token — admitted, and the catalog is the five
+    // tools (so "refused" above is not an artifact of a dead route or a mistyped body).
+    for (name, bearer) in [
+        ("a card", card.secret.clone()),
+        ("a login's access half", login.access.clone()),
+    ] {
+        let admitted = post(Some(bearer)).await;
+        assert_eq!(admitted.status, 200, "{name}: {}", admitted.text());
+        let names: BTreeSet<String> = admitted.json()["result"]["tools"]
+            .as_array()
+            .unwrap_or_else(|| panic!("{name}: no tool list: {}", admitted.text()))
+            .iter()
+            .map(|tool| tool["name"].as_str().expect("a tool name").to_string())
+            .collect();
+        assert_eq!(
+            names,
+            BTreeSet::from([
+                "oort_me_whoami".to_string(),
+                "oort_me_channels".to_string(),
+                "oort_me_read".to_string(),
+                "oort_me_post".to_string(),
+                "oort_me_inbox".to_string(),
+            ]),
+            "{name}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

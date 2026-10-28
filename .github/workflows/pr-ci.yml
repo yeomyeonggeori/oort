@@ -26,10 +26,23 @@
 #   · **스위트를 확장한다**(#1243 적립 3): `cargo check` → `cargo test
 #     --workspace`, 타입체크 3트리 → 타입체크 + 단위 테스트 3트리.
 #
-# 확장을 기존 잡에 **흡수**시켰지 잡을 늘리지 않았다. `cargo test`는 lib·bin·
-# test 타깃을 전부 컴파일하므로 `cargo check --workspace`를 그대로 포함한다 —
-# 둘을 함께 두면 같은 크레이트를 두 번 컴파일한다. Node도 같은 이유로 한 잡
-# 안에서 `npm ci` 한 번에 타입체크와 테스트를 모두 태운다.
+# Rust는 확장을 기존 잡에 **흡수**시켰지 잡을 늘리지 않았다. `cargo test`는
+# lib·bin·test 타깃을 전부 컴파일하므로 `cargo check --workspace`를 그대로
+# 포함한다 — 둘을 함께 두면 같은 크레이트를 두 번 컴파일한다.
+#
+# ── 2026-10-28 구조 변경(#4696, 검수·시험 v2 T1) ───────────────────────────
+# 위 문단이 Node에 대해 한 말(「한 잡 안에서 `npm ci` 한 번」)은 폐기한다. 이유는
+# 실측이다(성공 18회 중앙값): TS 잡 524초 중 시험 3개가 직렬로 400초(web 217·
+# mobile 150·core 34)였고, 설치는 트리마다 3~15초뿐이었다. 그래서 Node 레인을
+# 트리별 3잡(`node_core`·`node_web`·`node_mobile`)으로 나눴다. 중복되는 비용은
+# 잡마다의 root `npm ci` 3초뿐이고, 대기는 가장 긴 줄(web)로 줄어든다. 시험
+# 수·명령·타입체크는 그대로다 — 줄인 검사는 0이다.
+# 같은 실측에서 「정책 회귀 fixtures」 114초가 `if:` 없이 모든 PR에서 돌았다.
+# 그 시험들의 입력은 게이트 스크립트·워크플로·정책 문서이고(`test_pr_ci_guardrails.sh`는
+# 거기에 더해 러스트 트리 밖에서 읽는 파일을 찾느라 러스트 소스 전체를 훑는다), 그래서
+# 별도 `policy` 잡으로 떼어 `changes`의 정책 레인에서만 돌린다. 레인 정의와 근거는
+# 아래 `changes` 잡에 있다.
+# `PR CI gate`는 새 잡을 모두 `needs`에 더하고 선택/결과를 교차검증한다.
 #
 # 스코프: 여전히 **전체 게이트가 아니다.** DB가 필요한 러스트 conformance
 # 테스트(`*_pg.rs`, 전부 `#[ignore]`)·런타임 검증기·Docker 스택·e2e·웹 e2e
@@ -73,6 +86,7 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       node: ${{ steps.filter.outputs.node }}
+      policy: ${{ steps.filter.outputs.policy }}
     steps:
       - id: filter
         env:
@@ -83,10 +97,11 @@ jobs:
           set -uo pipefail
 
           run_all() {
-            echo "→ rust=true node=true ($1)"
+            echo "→ rust=true node=true policy=true ($1)"
             {
               echo "rust=true"
               echo "node=true"
+              echo "policy=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
           }
@@ -193,10 +208,32 @@ jobs:
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
 
-          echo "→ rust=$rust node=$node"
+          # 정책 레인(#4696) — `policy` 잡의 시험 6개가 읽는 입력의 합집합이다.
+          #   · `scripts/`·`.github/`: 시험 대상인 게이트 스크립트·워크플로(트랙 정렬·
+          #     정책 무결성·보호 가드·GHCR 고지 묶음·pr-ci 자신).
+          #   · `policy_path()`(scripts/verify_policy_integrity.sh)가 정책 파일이라 부르는
+          #     문서·설정(AGENTS.md·CONTRIBUTING.md·deny.toml·osv-scanner.toml·
+          #     docs/security/claims.yaml·docs/GITHUB_OPS.md·docs/LOCAL_PR_GATE.md·
+          #     docs/TRACKS.md·docs/adr/0153-…). 정책 PR이면 정책 회귀가 돈다.
+          #   · `REVIEW.md`: 위험 등급 경로표를 `policy_path()`에 묶는 시험의 입력이다.
+          #   · **rust 레인 전체.** `test_pr_ci_guardrails.sh`는 server-rust·src-tauri 의
+          #     `.rs` 를 훑어 레포 안 다른 경로를 읽는 참조를 뽑고 위 rust 필터가 덮는지
+          #     확인한다(#4055). 러스트 소스만 바꾼 PR이 새 참조를 만들면 그 시험이
+          #     빨개져야 하므로, 이 시험은 스크립트·워크플로를 안 건드린 러스트 PR에도 돈다.
+          #     `test_ghcr_notice_bundle.sh`가 복사해 쓰는 legal/generated/spdx-texts 도
+          #     rust 필터가 덮는다.
+          # 그래서 policy=true ⊇ rust=true 다. 그 밖의 경로만 바뀐 PR(웹·폰·코어·문서)은
+          # 정책 회귀를 건너뛴다 — gate 가 선택/결과를 교차검증해 조용한 skip 은 빨강이다.
+          policy="$rust"
+          printf '%s\n' "$files" | grep -Eq \
+            '^(scripts/|\.github/|REVIEW\.md$|AGENTS\.md$|CONTRIBUTING\.md$|deny\.toml$|osv-scanner\.toml$|docs/security/claims\.yaml$|docs/GITHUB_OPS\.md$|docs/LOCAL_PR_GATE\.md$|docs/TRACKS\.md$|docs/adr/0153-ci-stack-selfhosted-runners\.md$)' \
+            && policy=true
+
+          echo "→ rust=$rust node=$node policy=$policy"
           {
             echo "rust=$rust"
             echo "node=$node"
+            echo "policy=$policy"
           } >> "$GITHUB_OUTPUT"
 
   # Every PR gets a topology check, including documentation-only changes. For
@@ -254,6 +291,33 @@ jobs:
             "$trusted_checker" --remote
           fi
 
+      # 상시 검사(#4696에서 정책 회귀 fixtures 6개를 `policy` 잡으로 떼어도 이것은
+      # 여기에 남긴다). 이 검사는 게이트 스크립트의 회귀 시험이 아니라 **레포 상태**
+      # 검사다: server-rust/Cargo.lock·clients/web/package-lock.json 해시가 커밋된 고지
+      # 묶음과 맞는지, server-rust/Dockerfile 의존 캐시 COPY 목록이 Cargo 워크스페이스와
+      # 맞는지(크레이트를 더하고 COPY 줄을 잊으면 이미지 빌드만 깨진다, #3876)를 본다.
+      # 락파일·크레이트만 바꾼 PR이 입력이라 경로 조건을 못 건다. 실측 0초.
+      - name: GHCR 고지 묶음 신선도 + Dockerfile COPY 목록(상시)
+        run: scripts/check_ghcr_notice_bundle.sh --stale-only
+
+  # ── ①-b 정책 회귀 레인 (#4696, 검수·시험 v2 T1) ──────────────────────────
+  # 게이트 스크립트·워크플로 자체의 회귀 시험 6개. 전에는 `alignment` 잡의 한 step 으로
+  # **모든 PR에서** 114초(실측 중앙값, 18/18)를 썼고, 로컬 실측(부하 낮은 때 아님)으로
+  # 그중 `test_github_track_guardrails.sh` 가 대부분이다. 입력이 바뀐 PR에서만 돌린다:
+  # `changes` 의 `policy` 출력(정의·근거는 그 잡의 주석). 웹·폰·코어·문서 PR은 건너뛴다.
+  # 별도 잡으로 둔 이유: `gate` 가 「선택됐는데 skip」을 빨강으로 잡으려면 잡 단위
+  # 결과가 필요하다(step 의 `if:` 는 오타가 나도 조용히 skip 된다).
+  policy:
+    name: 정책 회귀 fixtures
+    needs: changes
+    if: needs.changes.outputs.policy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
       - name: alignment/required-gate policy regression fixtures
         run: |
           scripts/tests/test_track_alignment_guard.sh
@@ -262,7 +326,6 @@ jobs:
           scripts/tests/test_policy_integrity_gate.sh
           scripts/tests/test_trusted_policy_runner.sh
           scripts/tests/test_ghcr_notice_bundle.sh
-          scripts/check_ghcr_notice_bundle.sh --stale-only
 
   # Role split with scripts/check_secrets.sh (#1236 local vs #1629 CI):
   # this job scans the PR commit range (base.sha..head.sha). Full-history
@@ -546,21 +609,24 @@ jobs:
       - name: 음성 대조 — FORCE 없는 테넌트 테이블이면 tenant_catalog_pg 가 빨강
         run: scripts/security_pack.sh negative
 
-  # ── ③ Node 레인 ─────────────────────────────────────────────────────────
-  # npm 라이선스 게이트 + 타입체크 3트리 + 단위 테스트 3트리.
-  #
-  # 한 잡 안에 둔다: `npm ci`가 3트리에서 가장 비싼 단계인데, 타입체크와
-  # 테스트를 잡으로 쪼개면 그 설치를 두 번 한다. 테스트는 각 트리가 이미 쓰는
-  # 스크립트를 그대로 호출한다(core·web = vitest, mobile = jest) — CI가 러너를
-  # 다시 고르면 개발자가 로컬에서 돌리는 것과 다른 명령이 된다.
-  node:
-    name: TS 타입체크 + 단위 테스트 + npm 라이선스 게이트
+  # ── ③ Node 레인 — 트리별 3잡 (#4696) ─────────────────────────────────────
+  # npm 라이선스 게이트 + 타입체크 3트리 + 단위 테스트 3트리를 트리마다 한 잡으로 나눴다
+  # (core·web·mobile). 전에는 한 잡 안에서 직렬이었다(성공 18회 중앙값 524초: 시험 400초 —
+  # web 217·mobile 150·core 34 — 와 타입체크 56초, 설치 25초, checkout 27초). 설치는
+  # 트리마다 3~15초뿐이라 잡을 나눠도 늘어나는 비용은 잡마다의 root `npm ci` 3초다.
+  # web·mobile 이 `@momo/core` 를 경로로 쓰고(core 의 서드파티 의존은 root node_modules 로
+  # 올라온다) 그래서 세 잡 모두 root `npm ci` 를 먼저 한다. 대기는 가장 긴 줄인 web 으로
+  # 줄어든다(예상 ≈ 300초). 시험은 각 트리가 이미 쓰는 스크립트를 그대로 호출한다
+  # (core·web = vitest, mobile = jest) — CI가 러너를 다시 고르면 개발자가 로컬에서 돌리는
+  # 것과 다른 명령이 된다. 셋 모두 `node` 레인 하나(`changes` 출력)로 선택되고, `gate` 가
+  # 잡마다 선택/결과를 교차검증한다.
+  node_core:
+    name: TS core — npm 라이선스 게이트 + 타입체크 + 단위 시험
     needs: changes
     if: needs.changes.outputs.node == 'true'
     runs-on: ubuntu-latest
-    # 러너 실측(이 PR): 잡 전체 1분32초(npm ci 3트리 29초 · 타입체크 3 16초 ·
-    # 테스트 3 38초). 15분은 그 ~10배 여유다.
-    timeout-minutes: 15
+    # 행 방지용 상한(실측 약 1분 10초의 ~10배).
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -572,15 +638,43 @@ jobs:
           # 선언 제약이고, 24는 개발 머신에서 실제로 npm ci가 도는 버전이다.
           node-version: '24'
           cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: npm 의존 라이선스 게이트(워크스페이스 루트 + web + mobile)
+        # 설치 전에 돈다 — 이 스크립트는 세 트리의 package-lock.json만 읽으므로 npm ci가
+        # 필요 없다. 이 게이트는 세 트리 전부를 한 번 보는 검사라서 가장 짧은 core 잡에 둔다.
+        run: node scripts/check_npm_licenses.mjs
+
+      - name: npm ci (워크스페이스 루트 = packages/momo-core)
+        run: npm ci
+
+      - name: typecheck — @momo/core
+        run: npm run typecheck --workspace @momo/core
+
+      # 타입체크가 초록이어도 동작은 틀릴 수 있다. 단위 테스트는 타입이 못 보는
+      # 계약(seq 순서·재연결 복원·카피·권한 표면)을 본다.
+      - name: test — @momo/core (vitest)
+        run: npm run test --workspace @momo/core
+
+  node_web:
+    name: TS web — 타입체크 + 단위 시험
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    # 행 방지용 상한(실측 약 5분의 3배).
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
           cache-dependency-path: |
             package-lock.json
             clients/web/package-lock.json
-            clients/mobile/package-lock.json
-
-      - name: npm 의존 라이선스 게이트(워크스페이스 루트 + web + mobile)
-        # 설치 전에 돈다 — 이 스크립트는 package-lock.json만 읽으므로 npm ci가
-        # 필요 없다. 라이선스가 막을 PR이면 3트리 설치를 태우기 전에 막는다.
-        run: node scripts/check_npm_licenses.mjs
 
       - name: npm ci (워크스페이스 루트 = packages/momo-core)
         run: npm ci
@@ -593,27 +687,42 @@ jobs:
           PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
         run: npm ci --prefix clients/web
 
-      - name: npm ci (clients/mobile)
-        run: npm ci --prefix clients/mobile
-
-      - name: typecheck — @momo/core
-        run: npm run typecheck --workspace @momo/core
-
       - name: typecheck — clients/web
         run: npm --prefix clients/web run typecheck
-
-      - name: typecheck — clients/mobile
-        run: npm --prefix clients/mobile run typecheck
-
-      # 타입체크가 초록이어도 동작은 틀릴 수 있다. 세 트리의 단위 테스트는
-      # 타입이 못 보는 계약(seq 순서·재연결 복원·카피·권한 표면)을 본다.
-      - name: test — @momo/core (vitest)
-        run: npm run test --workspace @momo/core
 
       - name: test — clients/web (vitest)
         # TZ 정본은 clients/web/vite.config.ts `test.env` (#1267).
         # 러너 env에 다시 박으면 UTC 호스트의 로컬 빨강을 가린다.
         run: npm --prefix clients/web run test
+
+  node_mobile:
+    name: TS mobile — 타입체크 + 단위 시험
+    needs: changes
+    if: needs.changes.outputs.node == 'true'
+    runs-on: ubuntu-latest
+    # 행 방지용 상한(실측 약 3분 30초의 ~4배).
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            clients/mobile/package-lock.json
+
+      - name: npm ci (워크스페이스 루트 = packages/momo-core)
+        run: npm ci
+
+      - name: npm ci (clients/mobile)
+        run: npm ci --prefix clients/mobile
+
+      - name: typecheck — clients/mobile
+        run: npm --prefix clients/mobile run typecheck
 
       - name: test — clients/mobile (jest)
         run: npm --prefix clients/mobile run test
@@ -621,6 +730,9 @@ jobs:
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.
   # alignment, gitleaks and advisories always run; a skip there is red.
+  # The context name `PR CI gate` is the contract (branch protection lists exactly
+  # this and `Policy integrity gate`); job keys behind it may be split or renamed
+  # as long as every one of them is in `needs` and cross-checked below (#4696).
   gate:
     name: PR CI gate
     needs:
@@ -628,9 +740,12 @@ jobs:
       - alignment
       - gitleaks
       - advisories
+      - policy
       - rust
       - security_pack
-      - node
+      - node_core
+      - node_web
+      - node_mobile
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -639,9 +754,13 @@ jobs:
       ALIGNMENT_RESULT: ${{ needs.alignment.result }}
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       ADVISORIES_RESULT: ${{ needs.advisories.result }}
+      POLICY_RESULT: ${{ needs.policy.result }}
       RUST_RESULT: ${{ needs.rust.result }}
       SECURITY_PACK_RESULT: ${{ needs.security_pack.result }}
-      NODE_RESULT: ${{ needs.node.result }}
+      NODE_CORE_RESULT: ${{ needs.node_core.result }}
+      NODE_WEB_RESULT: ${{ needs.node_web.result }}
+      NODE_MOBILE_RESULT: ${{ needs.node_mobile.result }}
+      POLICY_SELECTED: ${{ needs.changes.outputs.policy }}
       RUST_SELECTED: ${{ needs.changes.outputs.rust }}
       NODE_SELECTED: ${{ needs.changes.outputs.node }}
     steps:
@@ -661,6 +780,9 @@ jobs:
               *) echo "$label lane selection/result mismatch: selected=$selected result=$result" >&2; exit 1 ;;
             esac
           }
+          require_optional_lane "$POLICY_SELECTED" "$POLICY_RESULT" policy
           require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust
           require_optional_lane "$RUST_SELECTED" "$SECURITY_PACK_RESULT" security_pack
-          require_optional_lane "$NODE_SELECTED" "$NODE_RESULT" node
+          require_optional_lane "$NODE_SELECTED" "$NODE_CORE_RESULT" node_core
+          require_optional_lane "$NODE_SELECTED" "$NODE_WEB_RESULT" node_web
+          require_optional_lane "$NODE_SELECTED" "$NODE_MOBILE_RESULT" node_mobile
