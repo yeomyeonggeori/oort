@@ -146,6 +146,11 @@ reason = "vite 5.4.21 under vitest (dev-only): launch-editor NTLMv2 hash disclos
 # CLI release, i.e. an RN/Expo toolchain upgrade that is out of scope for a lockfile repair.
 
 [[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-01-26
+reason = "deepmerge 4.3.1 (mergeObject prototype poisoning, low; affected >=4.2.0 <=4.3.1, no patched release) via @react-native-community/cli 20.1.0 (+cli-config/cli-doctor), @expo/config 57.0.6 and jest-config 29.7.0: build/test tooling that merges the project's own config objects on the build machine. Not in the app bundle (2026-10-28: a 12.9 MB Metro bundle has no node_modules/deepmerge module and no isMergeableObject). Follow-up: npm override to a fixed release when upstream ships."
+
+[[IgnoredVulns]]
 id = "GHSA-gh4j-gqv2-49f6"
 ignoreUntil = 2027-01-22
 reason = "fast-xml-parser 4.5.7 (XMLBuilder comment/CDATA delimiter injection) via @react-native-community/cli-config-android/-platform-apple 20.1.0 (RN CLI, build machine only, handles the project's own files). Fix = RN CLI 20.2.0 (toolchain upgrade); not in the Metro release bundle."
