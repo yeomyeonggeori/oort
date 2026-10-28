@@ -70,10 +70,7 @@ pub const OORT_CLI_REDIRECT_URIS: [&str; 5] = [
 /// client's fixed list — the same rule as [`redirect_uri_is_registered`], for a
 /// list that is not operator configuration.
 pub fn oort_cli_redirect_uri_is_registered(presented: &str) -> bool {
-    presented.len() <= MAX_REDIRECT_URI_BYTES
-        && OORT_CLI_REDIRECT_URIS
-            .iter()
-            .any(|allowed| *allowed == presented)
+    presented.len() <= MAX_REDIRECT_URI_BYTES && OORT_CLI_REDIRECT_URIS.contains(&presented)
 }
 
 /// The `.well-known` prefix RFC 9728 §3.1 reserves for a protected resource

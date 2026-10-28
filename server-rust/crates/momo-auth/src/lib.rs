@@ -130,8 +130,8 @@ pub use dev_login::{
     DEV_LOGIN_REQUEST_TYP,
 };
 pub use dev_token::{
-    dev_credential_owner_in_tx, dev_refresh_workspace_id, dev_token_workspace_id,
-    finalize_dev_use_in_tx, issue_dev_card_in_tx, issue_dev_login_in_tx,
+    count_live_dev_lineages_in_tx, dev_credential_owner_in_tx, dev_refresh_workspace_id,
+    dev_token_workspace_id, finalize_dev_use_in_tx, issue_dev_card_in_tx, issue_dev_login_in_tx,
     list_dev_credentials_in_tx, mint_dev_envelope, normalized_dev_channel_ids,
     normalized_dev_client, normalized_dev_device_name, normalized_dev_label, normalized_dev_scopes,
     required_dev_scope, resolve_dev_token_in_tx, revoke_dev_credential_in_tx,

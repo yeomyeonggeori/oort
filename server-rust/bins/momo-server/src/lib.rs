@@ -992,6 +992,24 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/dev-access/self",
             get(routes::dev_access::whoami).delete(routes::dev_access::revoke_self),
         )
+        // ADR-0216 D6 (나) / #4700 — the person's half of `oort login`: preview, approve (the
+        // current password again) and deny a browser login request. Person-session only, like the
+        // four routes above: not in the developer door's closed table (403 at the door), and each
+        // handler refuses a developer token again. The unauthenticated half of the flow is the
+        // OAuth authorization server below (`/v1/oauth/*`), which gained the built-in `oort-cli`
+        // client and mounts nothing new.
+        .route(
+            "/v1/workspaces/{ws}/dev-access/authorization-requests/preview",
+            get(routes::dev_login_oauth::preview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/authorization-requests/approve",
+            post(routes::dev_login_oauth::approve),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/authorization-requests/deny",
+            post(routes::dev_login_oauth::deny),
+        )
         // #1768 — ADR-0128 D2/D3. Role/status/ban mutations; leave `/me` stays
         // the more specific sibling registered above.
         .route(

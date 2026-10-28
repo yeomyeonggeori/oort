@@ -358,6 +358,10 @@ pub struct DevLoginCodeLock {
 
 /// Lock one presented authorization code.
 ///
+/// Expiry is judged with `clock_timestamp()`, not `now()`: `now()` is the
+/// transaction's start, and this function may have waited on the member's sweep
+/// lock, so the 60 seconds must be measured at the moment the row is read.
+///
 /// Returns the row whatever its state — `approved`, already `consumed`, `revoked`
 /// or past its expiry — because the caller has to tell a replay (which ends the
 /// lineage the first use opened) from a first use. `None` only when no row carries
@@ -384,7 +388,8 @@ pub async fn lock_dev_login_code_in_tx(
     let row = sqlx::query(
         "SELECT id, member_id, client_id, redirect_uri, resource, approved_scopes, \
                 code_challenge, device_name, status, \
-                (code_expires_at IS NULL OR code_expires_at <= now()) AS expired, session_id \
+                (code_expires_at IS NULL OR code_expires_at <= clock_timestamp()) AS expired, \
+                session_id \
            FROM dev_login_authorization \
           WHERE workspace_id = $1 AND code_hash = digest($2::text, 'sha256') \
           FOR UPDATE",

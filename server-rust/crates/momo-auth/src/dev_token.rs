@@ -425,13 +425,38 @@ pub fn normalized_dev_label(raw: &str) -> Result<String, DevIssueError> {
     bounded_text(raw, MAX_LABEL_CHARS, "name")
 }
 
+/// Characters that change how a line of text *looks* without being visible
+/// themselves: the zero-width and direction marks (U+200B..U+200F), the embedding
+/// and override controls (U+202A..U+202E), the word joiner and invisible operators
+/// (U+2060..U+2064), the isolates (U+2066..U+2069) and the byte-order mark
+/// (U+FEFF). They are category Cf, so [`char::is_control`] does not see them.
+fn is_display_spoofing_character(c: char) -> bool {
+    matches!(
+        c,
+        '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{FEFF}'
+    )
+}
+
 /// A login lineage's device name (chosen by the connecting side): absent or
-/// blank is `None`; otherwise as [`normalized_dev_label`].
+/// blank is `None`; otherwise as [`normalized_dev_label`], and additionally free of
+/// [`is_display_spoofing_character`]s. This name is what the consent screen shows
+/// next to the server host so a person can tell their own terminal from a relayed
+/// one (ADR-0216 D6 나, RFC 8628 §5.4): a name that can reorder or hide the text
+/// around it defeats that comparison.
 pub fn normalized_dev_device_name(raw: Option<&str>) -> Result<Option<String>, DevIssueError> {
     match raw {
         None => Ok(None),
         Some(value) if value.trim().is_empty() => Ok(None),
-        Some(value) => bounded_text(value, MAX_LABEL_CHARS, "device_name").map(Some),
+        Some(value) => {
+            if value.chars().any(is_display_spoofing_character) {
+                return Err(DevIssueError::InvalidInput("device_name"));
+            }
+            bounded_text(value, MAX_LABEL_CHARS, "device_name").map(Some)
+        }
     }
 }
 
@@ -876,6 +901,27 @@ const COUNT_LIVE_LINEAGES_SQL: &str = "SELECT COUNT(DISTINCT session_id)::bigint
         AND dev_form = 'refresh' \
         AND revoked_at IS NULL \
         AND expires_at > now()";
+
+/// How many login lineages the member holds right now (a lineage is live while
+/// its refresh half is), by the same predicate [`issue_dev_login_in_tx`] enforces
+/// [`MAX_LIVE_LINEAGES`] with.
+///
+/// This is a **courtesy look**, not the limit: it takes no lock, so the browser
+/// approval (#4700) uses it only to refuse early — before it spends a current-password
+/// attempt on a login that the exchange would be unable to open. The limit itself is
+/// still judged again, under the per-member issuance lock, when the code is
+/// redeemed.
+pub async fn count_live_dev_lineages_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar(COUNT_LIVE_LINEAGES_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .fetch_one(&mut *conn)
+        .await
+}
 
 /// `expires_at` is `now()` plus whole seconds: the same transaction timestamp
 /// `created_at` defaults to, and no calendar arithmetic (migration 152 measures
@@ -2132,6 +2178,26 @@ mod tests {
         );
         assert!(normalized_dev_device_name(Some(&"x".repeat(81))).is_err());
         assert!(normalized_dev_device_name(Some("a\rb")).is_err());
+        // Direction overrides, isolates, zero-width marks and the BOM can reorder or hide
+        // the text next to the server host on the consent screen: refused (Cf, not Cc).
+        for spoof in [
+            "oort\u{202E}gnp.exe",
+            "oort\u{2066}CLI",
+            "oort\u{200B}CLI",
+            "oort\u{200F}CLI",
+            "oort\u{2060}CLI",
+            "\u{FEFF}oort CLI",
+        ] {
+            assert!(
+                normalized_dev_device_name(Some(spoof)).is_err(),
+                "{spoof:?} must be refused"
+            );
+        }
+        // Ordinary non-ASCII names are fine.
+        assert_eq!(
+            normalized_dev_device_name(Some("이도현의 맥북")).unwrap(),
+            Some("이도현의 맥북".to_string())
+        );
         assert_eq!(normalized_dev_client("oort-cli").unwrap(), "oort-cli");
         assert!(normalized_dev_client("").is_err());
         assert!(normalized_dev_client(&"c".repeat(201)).is_err());
