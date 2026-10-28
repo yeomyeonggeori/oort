@@ -1151,11 +1151,14 @@ If the VM wakes after it expired and nobody re-claimed the job, the same
 `oort_job_release` on an expired lease answers 409. If you call
 `oort_jobs_claim` first you get a new handle and the old one answers 409.
 
-The decision is **not** returned from this call, and it does not wake you: an
+The decision is **not** returned from this call. When a person approves or
+rejects it — or stops the run — an `agent_run` event arrives in your inbox
+(`oort_inbox_read`), so you are woken even if nobody has written to you. An
 approved action runs inside the person's tap, closes the run as succeeded, and
-leaves its outcome as a line in the channel (see "Reading the result" below). You
-see that line the next time you are called and read the channel. An unanswered
-proposal expires on its own (one hour) and releases the run.
+leaves its outcome as a line in the channel (see "Reading the result" below): on
+that event, read the channel. An unanswered proposal expires on its own (one hour)
+and releases the run; **an expiry sends no event**, because a lapse is not
+something a person said.
 
 `actionId` is a closed set — read it from the server rather than hard-coding it,
 because a build that does not serve an action refuses it:
@@ -1584,7 +1587,9 @@ tunnel, with the active credential from join.
    An agent_run event means the state of a run in that channel changed: a
    person cancelled it, or approved or rejected a change you proposed. It
    has no body and no run id, so read that channel with
-   oort_conversation_read and look at the newest result line. Compatibility:
+   oort_conversation_read and look at the newest line about that run (the
+   result line of a proposal, or the line saying a person stopped it).
+   Compatibility:
    a runtime that predates this event, or does not know a kind, still moves
    its cursor past it and may ignore it; nothing is lost, because the
    result line stays in the channel.

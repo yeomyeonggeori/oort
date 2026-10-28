@@ -315,6 +315,21 @@ const OPENS_IN_APP: &str = "opens_in_app";
 /// genuine `sqlx::Error::Protocol` message from the driver.
 const RUN_NOT_PARKED_SENTINEL: &str = "momo.approvals.run_not_parked.v1";
 
+/// How many times a decision is run when it keeps being chosen as a deadlock's victim: the
+/// first, and one more. See [`decide`].
+const DECISION_ATTEMPTS: u32 = 2;
+
+/// Is this PostgreSQL's `deadlock_detected` (SQLSTATE `40P01`) — the rollback of a transaction
+/// that lost a lock cycle, with nothing committed — rather than a failure that running the
+/// decision again would only repeat?
+fn is_deadlock_victim(error: &momo_db::DbError) -> bool {
+    matches!(
+        error,
+        momo_db::DbError::Sqlx(momo_db::sqlx::Error::Database(database))
+            if database.code().as_deref() == Some("40P01")
+    )
+}
+
 /// Is this the rollback [`RUN_NOT_PARKED`] asked for, rather than a real
 /// database failure?
 fn is_run_not_parked(error: &momo_db::DbError) -> bool {
@@ -566,32 +581,61 @@ async fn decide(
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
     let context_max_messages = state.mentions.context_max_messages;
 
-    let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            decide_in_tx(
-                conn,
-                DecisionInput {
-                    workspace_id,
-                    approval_id,
-                    route_run_id,
-                    member_id,
-                    via_token_id,
-                    credential_via,
-                    approve,
-                    reason: reason.as_deref(),
-                    client_decision_id,
-                    selected_host_id,
-                    public_origin: public_origin.as_deref(),
-                    claude_subscription_agents_enabled,
-                    operator_scope,
-                    deliver_secret_to_agent,
-                    context_max_messages,
-                },
-            )
-            .await
+    // **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
+    //
+    // A decision is one transaction with no effect outside the database, and its replay is
+    // idempotent by `client_decision_id` — so a rollback by `40P01` committed nothing and the
+    // whole remedy is to run it again. It is needed because the decision's lock order cannot be
+    // made to agree with every writer it meets: it takes the proposer's hosted connection and
+    // inbox counter *before* the channel's `channel_seq` (ADR-0186 증보 v5 U-f, so that two
+    // decisions on one DM do not deadlock with each other), while the message spine takes the
+    // channel first and fans out to the same connection after. A message sent into that room in
+    // the same instant is the other half of an AB/BA pair, and without this the loser of the
+    // pair — here, the person's tap — answered 500. (#4702 security review.) Once, not in a
+    // loop: a second deadlock is a different problem and answers as it always did.
+    let mut attempt = 1;
+    let outcome: DbRejectable<Decision> = loop {
+        let outcome = agent_tenant_tx(&state.pool, workspace_id, {
+            let reason = reason.clone();
+            let public_origin = public_origin.clone();
+            move |conn| {
+                Box::pin(async move {
+                    decide_in_tx(
+                        conn,
+                        DecisionInput {
+                            workspace_id,
+                            approval_id,
+                            route_run_id,
+                            member_id,
+                            via_token_id,
+                            credential_via,
+                            approve,
+                            reason: reason.as_deref(),
+                            client_decision_id,
+                            selected_host_id,
+                            public_origin: public_origin.as_deref(),
+                            claude_subscription_agents_enabled,
+                            operator_scope,
+                            deliver_secret_to_agent,
+                            context_max_messages,
+                        },
+                    )
+                    .await
+                })
+            }
         })
-    })
-    .await;
+        .await;
+        match &outcome {
+            Err(error) if attempt < DECISION_ATTEMPTS && is_deadlock_victim(error) => {
+                attempt += 1;
+                tracing::warn!(
+                    approval_id = %approval_id,
+                    "an approval decision was the victim of a deadlock; running it once more"
+                );
+            }
+            _ => break outcome,
+        }
+    };
 
     let decision = match outcome {
         // The action was executed and then un-executed: the transaction rolled
@@ -2206,9 +2250,10 @@ async fn execute_workspace_action(
     // ---- the proposer's inbox, BEFORE the outcome line (ADR-0186 증보 v5 U-f) ----
     //
     // After the in-place arm above on purpose: that card releases a job, which is
-    // its own wake-up (and its channel is not one the connection covers yet), and
-    // writes no outcome line. Before `send_message_in_tx` below for the lock
-    // order `wake_proposer_in_tx` states.
+    // its own wake-up, and writes no outcome line — and the grant executor has just
+    // covered its channel in this very transaction, so the early return above is the
+    // only thing that keeps a second wake from being written for it. Before
+    // `send_message_in_tx` below for the lock order `wake_proposer_in_tx` states.
     wake_proposer_in_tx(conn, approval).await?;
 
     // ---- the outcome line, authored by the agent ---------------------------
