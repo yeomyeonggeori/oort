@@ -59,7 +59,6 @@ const CHANNEL = 'jump-latest-capture';
 const DRAFT_KEY = 'measure:jump-latest';
 const NO_TOP = {paddingTop: 0} as const;
 const NOOP = () => {};
-const MENU = [{label: '고정', run: NOOP}] as const;
 const NO_PENDING: PendingMessage[] = [];
 const NO_REACTIONS: ReactionMap = {};
 
@@ -835,7 +834,9 @@ export function JumpLatestSurface({which}: {which: string}): React.JSX.Element {
         kind="public"
         directory={DIRECTORY}
         onBack={NOOP}
-        menu={MENU}
+        onOpenMenu={NOOP}
+        // 가운데 알약은 단추다(#4319) — 실제 대화 화면과 같은 머리 모양으로 찍는다(머리 높이 불변이 이 하네스의 전제다).
+        onOpenInfo={NOOP}
         railStatus="connected"
       />
       <ConversationLayout
