@@ -9,7 +9,8 @@
 #   run       선택 시험을 `--ignored --test-threads=1` 로 실행. 타깃마다 `N passed`(N>0)·failed 0 을 요구한다.
 #   negative  일회용 DB 에 FORCE 없는 테넌트 테이블 픽스처를 얹고 tenant_catalog_pg 가
 #             **그 테이블을 이름으로 지목하며** 빨강인지 확인한다(다른 이유의 빨강은 실패).
-#   nightly   선택 밖 PG 시험까지 전부(`--workspace --ignored`) — 야간 잡용. 끝에 요약(report)을 낸다.
+#   nightly   선택 밖 PG 시험까지 전부(`--workspace --ignored`) — 야간 잡용. 시험 실행 파일마다 새 DB(템플릿 복제,
+#             scripts/nightly_target_db.sh)에서 돌아 타깃 간 오염이 없다. 끝에 요약(report)을 낸다.
 #   report    야간 로그를 읽어 요약(markdown)·실패 시험 상세·격리 현황을 낸다.
 #             `report <전량 로그> <prod_role 로그> <격리 로그>` — DB·cargo 없이 돌아서 시험할 수 있다.
 #
@@ -23,7 +24,8 @@
 #       SECURITY_PACK_QUARANTINE(기본 infra/security-pack/nightly-quarantine.txt),
 #       SECURITY_PACK_ROOT(기본 레포 루트, 시험 편의), SECURITY_PACK_OUT(로그 디렉터리),
 #       SECURITY_PACK_TODAY(YYYY-MM-DD, 기한 판정용 오늘 — 시험 편의),
-#       SECURITY_PACK_MIN_PASSED(전량 실행 통과 하한, 기본 500 — 빈 초록 방지),
+#       SECURITY_PACK_TARGET_DB(0 이면 야간도 한 DB 에서 전부 — 진단·시험 편의, 기본 1),
+#       SECURITY_PACK_MIN_PASSED(전량 실행 통과 하한, 기본 1200 — 빈 초록 방지. 2026-10-28 실측 1,855개),
 #       DATABASE_URL, PSQL_BIN. 시크릿은 출력하지 않는다(DB URL은 로그에 안 찍는다).
 # =============================================================================
 set -euo pipefail
@@ -43,7 +45,7 @@ entries() { grep -Ev '^[[:space:]]*(#|$)' "$SELECTION"; }
 
 QUARANTINE="${SECURITY_PACK_QUARANTINE:-$ROOT/infra/security-pack/nightly-quarantine.txt}"
 QUARANTINE_MAX_DAYS=60
-MIN_PASSED="${SECURITY_PACK_MIN_PASSED:-500}"
+MIN_PASSED="${SECURITY_PACK_MIN_PASSED:-1200}"
 
 # 격리 목록의 유효 줄(`패키지 타깃 시험 #이슈 기한 사유…`)만. 파일이 없으면 격리가 없는 것이다.
 quarantine_entries() {
@@ -350,12 +352,43 @@ nightly_quarantine_pass() {
   done <<<"$groups"
 }
 
+# ── 타깃마다 새 DB (#4707) ────────────────────────────────────────────────────
+# 야간 전량은 273개 실행 파일을 한 DB 에서 차례로 돌려서, 앞 타깃이 남긴 것(대기 작업·DDL 찌꺼기·테이블 팽창)이
+# 뒤 타깃을 깼다. setup 이 끝난 DB 를 템플릿으로 한 번 복제해 두고, scripts/nightly_target_db.sh 를 cargo 실행기
+# (`CARGO_TARGET_<TRIPLE>_RUNNER`)로 걸어 `#[ignore]` 시험이 있는 실행 파일마다 그 복제본을 새로 준다.
+# SECURITY_PACK_TARGET_DB=0 이면 예전처럼 한 DB 에서 전부 돈다(진단·시험 편의).
+NIGHTLY_TEMPLATE="nt_template"
+nightly_admin() { # <SQL> — 접속 DB 와 같은 서버의 postgres DB 로 실행
+  local base="${DATABASE_URL%%\?*}" query
+  query="${DATABASE_URL#"$base"}"
+  "$(psql_bin)" "${base%/*}/postgres${query}" -qAt -v ON_ERROR_STOP=1 -c "$1" >/dev/null
+}
+nightly_target_db_setup() {
+  local triple var curdb
+  triple="$(rustc -vV | sed -n 's/^host: //p')"
+  [ -n "$triple" ] || die "rustc 호스트 트리플을 알 수 없어요"
+  var="CARGO_TARGET_$(printf '%s' "$triple" | tr 'a-z-' 'A-Z_')_RUNNER"
+  curdb="${DATABASE_URL##*/}"; curdb="${curdb%%\?*}"
+  nightly_admin "DROP DATABASE IF EXISTS \"$NIGHTLY_TEMPLATE\" WITH (FORCE)"
+  nightly_admin "CREATE DATABASE \"$NIGHTLY_TEMPLATE\" TEMPLATE \"$curdb\" ALLOW_CONNECTIONS false" \
+    || die "템플릿 DB 를 만들 수 없어요('$curdb' 에 다른 연결이 있나요?)"
+  export NIGHTLY_DB_TEMPLATE="$NIGHTLY_TEMPLATE" PSQL_BIN
+  PSQL_BIN="$(psql_bin)"
+  export "$var=$SCRIPT_DIR/nightly_target_db.sh"
+  echo "[security-pack] 시험 실행 파일마다 새 DB 에서 돌려요(템플릿 $NIGHTLY_TEMPLATE ← $curdb, 실행기 $var)"
+}
+nightly_target_db_teardown() { nightly_admin "DROP DATABASE IF EXISTS \"$NIGHTLY_TEMPLATE\" WITH (FORCE)" 2>/dev/null || true; }
+
 cmd_nightly() {
   [ -n "${DATABASE_URL:-}" ] || die "DATABASE_URL(슈퍼유저)이 필요해요"
   cmd_quarantine_lint
   mkdir -p "$OUT"
   export_pg_env "$DATABASE_URL"
   local rc=0 skips="" t quarantined=""
+  if [ "${SECURITY_PACK_TARGET_DB:-1}" != 0 ]; then
+    nightly_target_db_setup
+    trap nightly_target_db_teardown EXIT
+  fi
   # prod_role_conformance_pg 는 cluster-global 역할 비밀번호를 재설정해 이후 타깃을 오염시킨다.
   # 1) 그 타깃의 시험만 건너뛰고 나머지 전량을 돌린 뒤, 2) 마지막 순서로 따로 돌린다.
   for t in every_notifier_job_iteration_runs_as_its_production_role \

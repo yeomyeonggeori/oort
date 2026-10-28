@@ -14,7 +14,7 @@ cargo test --manifest-path server-rust/Cargo.toml --workspace
 
 fmt는 workspace 전체 기준이다. 기존 formatting drift가 있으면 영향과 정리를 기록한다. sqlx는 라이브 DB 없이 빌드되는 런타임 쿼리 API를 사용한다.
 
-`#[ignore]` PG 시험은 PR 대신 야간(`security-nightly`)이 지킨다. **야간이 초록이어야 그 시험이 있는 것이다** — 아무도 지키지 않는 `#[ignore]` 시험을 늘리지 않는다. 야간이 빨강이면 고친다. 지금 못 고치는 시험만 `infra/security-pack/nightly-quarantine.txt`에 시험 함수 이름·소유 이슈(`#번호`)·기한(오늘부터 60일 이내)·사유로 올린다. 격리 시험은 전량 실행에서 빠지지만 따로 계속 돌아 결과가 야간 요약에 늘 보이고, 기한이 지나면 야간이 빨강이 된다. 보안 주장(`docs/security/claims.yaml`)의 증거 시험은 격리할 수 없다. 시험 하나가 DDL로 만든 것(테이블·함수·트리거)은 그 시험이 끝에서 지운다 — 같은 DB를 쓰는 뒤 시험이 깨진다.
+`#[ignore]` PG 시험은 PR 대신 야간(`security-nightly`)이 지킨다. **야간이 초록이어야 그 시험이 있는 것이다** — 아무도 지키지 않는 `#[ignore]` 시험을 늘리지 않는다. 야간이 빨강이면 고친다. 지금 못 고치는 시험만 `infra/security-pack/nightly-quarantine.txt`에 시험 함수 이름·소유 이슈(`#번호`)·기한(오늘부터 60일 이내)·사유로 올린다. 격리 시험은 전량 실행에서 빠지지만 따로 계속 돌아 결과가 야간 요약에 늘 보이고, 기한이 지나면 야간이 빨강이 된다. 보안 주장(`docs/security/claims.yaml`)의 증거 시험은 격리할 수 없다. 야간은 시험 실행 파일마다 새 DB(템플릿 복제, `scripts/nightly_target_db.sh`)에서 돌아 한 타깃이 남긴 상태가 다른 타깃을 깨지 못한다. 그래도 한 실행 파일 안의 시험끼리와 PR의 Security pack(한 DB를 공유)에서는, 시험이 DDL로 만든 것(테이블·함수·트리거)을 그 시험이 단정보다 앞서 지운다.
 
 ## 웹·폰·공유 코어
 npm lockfile은 루트(packages), clients/web, clients/mobile 세 곳이다. 관련 의존성이 설치돼 있으면 매번 재설치하지 않는다. 처음 준비할 때:
