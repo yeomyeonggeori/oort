@@ -592,7 +592,8 @@ export function SelectField({
  * is the consumer's re-entry guard, not a second native disable). The consumer
  * side of the same discipline: `canSave` must never be computed FROM the
  * in-flight state (`dirty && !save.isPending` smuggles the fold back through
- * the prop); `settingsFieldsBusy.test.ts` scans every call site for that.
+ * the prop); the lint rule `momo/in-flight-lock-props` (eslint-rules/busyLockGrammar.js)
+ * scans every call site for that.
  */
 export function SaveButton({
   label,

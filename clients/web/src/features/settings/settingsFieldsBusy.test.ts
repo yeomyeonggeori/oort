@@ -3,11 +3,11 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // =============================================================================
-// (#4711) RED PROOF ② 의 두 단정(busy 가 aria-disabled 식·흐림 식에 없다), #1558 의 SaveButton
-// 잠금·흐림 단정, 소비처 canSave 그물은 린트 규칙이 됐다: `momo/busy-lock-grammar`(selfLock ·
-// opacityFollowsLock, SettingsFields.tsx 포함)와 `momo/in-flight-lock-props`(features 전수).
-// 변조마다의 양성 fixture 는 clients/web/eslint-rules/busyLockGrammar.test.ts. 아래에는 컴포넌트
-// 내부의 배선(낱말 갈아 끼우기·가드·이름)의 핀이 남았다.
+// (#4711) RED PROOF ② 의 부정 단정(busy 가 aria-disabled 식·흐림 식에 없다)과 소비처 canSave 그물은
+// 린트 규칙이 됐다: `momo/busy-lock-grammar`(selfLock · opacityFollowsLock, SettingsFields.tsx 포함)와
+// `momo/in-flight-lock-props`(features 전수). 변조마다의 양성 fixture 는
+// clients/web/eslint-rules/busyLockGrammar.test.ts. 잠금 속성이 **있다**는 긍정 핀(ConfirmButton)과
+// SaveButton 의 식 등치, 컴포넌트 내부 배선(낱말 갈아 끼우기·가드·이름)의 핀은 시험에 남았다.
 //
 // #1490 — 한 폼의 두 갈래가 진행을 같은 문법으로 말한다.
 //
@@ -110,8 +110,17 @@ describe("RED PROOF ① 처분 확정에도 진행 낱말이 있다", () => {
 });
 
 describe("RED PROOF ② 진행은 잠금으로 그려지지 않는다", () => {
-  // busy 가 aria-disabled 식·흐림(opacity-50) 식에 없다는 두 단정은 린트 selfLock ·
-  // opacityFollowsLock 이 됐다(별칭 뒤에 숨은 접힘까지 편다).
+  it("ConfirmButton 의 잠금은 aria-disabled 와 흐림(opacity-50)으로 말하고, 흐림을 켜는 것은 disabled 하나다", () => {
+    // busy 가 그 식들에 끼지 않는다는 부정 단정은 린트 selfLock · opacityFollowsLock 이 됐다(별칭
+    // 뒤에 숨은 접힘까지 편다). 여기에는 그 식들이 **있다**는 긍정 핀이 남았다: 속성을 지우면 린트는
+    // 잠금 식이 없는 버튼을 볼 수 없으므로(검사할 식이 없다) 이 핀이 붉어야 한다.
+    // 트리거와 확정 버튼, 둘이 각자 잠금 속성과 흐림을 든다(하나가 빠져도 붉다).
+    const locks = expressions(CONFIRM, "aria-disabled");
+    expect(locks).toHaveLength(2);
+    const dims = CONFIRM.match(/className=\{cn\([^)]*\)\}/g) ?? [];
+    expect(dims).toHaveLength(2);
+    for (const dim of dims) expect(dim).toContain("disabled &&");
+  });
 
   it("잠긴 이유는 여전히 disabled 만 가리킨다", () => {
     // 진행 중에 「왜 못 하는지」를 읽어 주면 하지 못하는 중이라는 뜻이 된다.
@@ -153,8 +162,20 @@ describe("RED PROOF ③ 두 번째 Enter 는 삼켜진다", () => {
 // =============================================================================
 
 describe("#1558 RED PROOF — SaveButton 의 진행은 잠금으로 그려지지 않는다", () => {
-  // SaveButton 의 잠금·흐림이 canSave 하나에서만 온다는 두 단정(#1558)은 린트 selfLock ·
-  // opacityFollowsLock 이 됐다(원형 `blocked = !canSave || busy` 가 fixture 로 붉다).
+  // 원형 `blocked = !canSave || busy` 는 린트 selfLock · opacityFollowsLock 의 fixture 로도 붉다.
+  // 아래 두 등치는 그대로 남겼다: 린트는 「busy 가 끼지 않았다」만 보고 「잠금 속성이 있다 · 잠금은
+  // canSave 하나에서만 온다」는 보지 않는다(속성을 지우거나 다른 사유를 얹어도 린트는 초록).
+
+  it("잠금은 canSave 하나에서만 온다 — aria-disabled", () => {
+    expect(expressions(SAVE, "aria-disabled")).toEqual([
+      "aria-disabled={!canSave || undefined}",
+    ]);
+  });
+
+  it("흐림도 canSave 하나에서만 온다 — opacity-50", () => {
+    const dims = SAVE.match(/className=\{cn\([^)]*\)\}/g) ?? [];
+    expect(dims).toEqual(['className={cn(!canSave && "opacity-50")}']);
+  });
 
   it("진행은 낱말과 aria-busy 로만 말한다", () => {
     expect(SAVE).toContain("aria-busy={busy || undefined}");

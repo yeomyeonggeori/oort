@@ -11,12 +11,12 @@
  * 속성을 뽑아 비교했는데, 그 방식은 줄바꿈·주석·별칭에 약해서 별칭을 따라가는 그물을
  * 한 겹씩 더 파야 했다(#1595 H1). 여기서는 같은 규칙을 AST 로 건다. 린트는 바뀐 파일이
  * 저장될 때 바로 빨갛고, 주석은 노드가 아니라서 「주석에 반례를 인용했다가 걸리는」 일이
- * 없다.
+ * 없다(식 안 주석은 판정 전에 공백으로 지운다).
  *
- * ── 규칙 둘 ────────────────────────────────────────────────────────────────
+ * ── 규칙 셋 ────────────────────────────────────────────────────────────────
  *
  * 1. `momo/busy-lock-grammar` — 쓰기를 내는 설정·호스티드 표면 열한 파일에만 건다
- *    (범위는 eslint.config.js 의 BUSY_LOCK_GRAMMAR_FILES). 새 파일은 자동으로 들어오지
+ *    (범위는 busyLockScope.js 의 BUSY_LOCK_GRAMMAR_FILES). 새 파일은 자동으로 들어오지
  *    않는다: 옛 시험도 이름을 단 파일 목록만 재었고, 범위를 글롭으로 넓히는 것은
  *    다른 워커가 같은 디렉터리에 새 카드를 세우는 동안 하지 않는다.
  *
@@ -28,41 +28,65 @@
  *      잠금 식(`aria-disabled` · 흐림 조건 · `disabled`)이 **자기 진행**을 그대로 들고
  *      있다. 쓰기를 낸 그 버튼이 자기가 켠 busy 로 자기를 잠그면 화면에 하나뿐인 진행
  *      낱말이 흐림 아래에서 죽고 낭독은 「…하는 중, 사용 안 함」이 된다(#1403 H-1).
- *      잠금 식은 `const x = …;` 별칭을 네 겹까지 따라가 편 뒤에 잰다 — 결함은 `busy`
- *      라는 글자가 아니라 접힘 변수 뒤에 숨어 있었다(#1558 · #1595 H1). 형제 쓰기로
- *      잠기는 것(`busy && !자기진행`)은 갈라내는 문법 그대로라 통과한다.
- *    · opacityFollowsLock — `aria-disabled={L}` 이 있으면 흐림은 **같은 식 L** 이 켠다
- *      (`cn(…, L && "opacity-50")`), 고정 클래스에는 흐림 계열이 없다. 흐림 없는 잠금은
- *      회색이 아닌 죽은 버튼이고, 늘 흐린 버튼은 잠기지 않았는데 잠긴 것처럼 읽힌다
- *      (#2923 · review-2909).
+ *      잠금 식은 `const x = …;` 별칭을 네 겹까지 따라가 편 뒤에 잰다(`Boolean(…)` ·
+ *      `as boolean` · `useMemo(() => …)` 로 감싼 별칭도 벗겨서 본다) — 결함은 `busy`
+ *      라는 글자가 아니라 접힘 변수 뒤에 숨어 있었다(#1558 · #1595 H1). 재는 방법은 둘이다:
+ *      (가) 식에 진행 어휘가 남았는데 자기 진행의 부정(`!자기`)이 없다, (나) 진행 어휘가
+ *      아닌 이름 뒤에 숨은 접힘까지 보려고 불리언 식으로 접어 「자기 진행 하나만으로 잠금이
+ *      켜지는 맥락」이 있는지 진리표로 확인한다. 자기 진행이 별칭으로 `a || b` 처럼 펴지면
+ *      구성 진행 하나하나가 자기다. 형제 쓰기로 잠기는 것(`busy && !자기진행`)은 갈라내는
+ *      문법 그대로라 통과한다. 식이 진리표 상한보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다.
+ *    · opacityFollowsLock / opacityOutsideLock — `aria-disabled={L}` 이 있으면 흐림은
+ *      **같은 식 L** 하나가 켠다(`cn(…, L && "opacity-50")`). 흐림 없는 잠금은 회색이 아닌
+ *      죽은 버튼이고, 다른 조건·삼항 가지·고정 클래스·템플릿에 선 흐림(`opacity-*`)은 진행을
+ *      잠금처럼 그리거나 잠기지 않았는데 늘 흐린 버튼을 만든다(#2923 · review-2909 · #1558).
+ *      옛 시험은 모르는 꼴이면 빨갰으므로(전문 정규식·등치), 이 규칙도 흐림 토큰이 잠금 인자
+ *      밖에 보이면 모양과 상관없이 붉다.
  *    · reasonBreakKeep — id 에 reason·note 가 든 `<p>`·`<span>` 은 한글 줄바꿈 규칙
  *      (`break-keep`)을 든다. 사유는 두세 어절이라 좁은 칸에서 어절 중간이 끊긴다(#1595 M6).
  *    · offlineQueuePromise — 「그대로 보내져요」 문장과 `networkMode`·`onlineManager`.
  *      이 클라이언트에는 오프라인 큐가 없으므로 사유 문장이 큐를 약속하면 거짓이다.
  *      큐가 생기는 날 이 검사가 먼저 붉어지고, 그때 문장을 되돌리는 것이 옳은 순서다(#1595 H4).
  *
- * 2. `momo/in-flight-lock-props` — `src/features/**` 전수. 새 소비처도 자동으로 이 규율
- *    아래 선다.
+ * 2. `momo/in-flight-lock-props` — `src/features/**` 전수(시험 제외). 새 소비처도 자동으로
+ *    이 규율 아래 선다. 옛 그물처럼 식의 **글자**를 본다(문자열 상태 낱말 `status !== "saving"`
+ *    이나 `save["isPending"]` 도 걸린다). 별칭은 따라가지 않는다 — 따라가면 지금 한 자리가 더
+ *    붉다(PR 본문 「후속」).
  *
  *    · `<SaveButton canSave={…진행 어휘…}>` — 진행이 prop 을 타고 잠금으로 되돌아온다(#1558).
+ *    · `<SaveButton>` 에 `canSave={식}` 이 없다(생략·축약) — 잠금이 어디서 오는지 볼 수 없다.
  *    · `<ChoiceRadios disabled={…진행 어휘…}>` — `<fieldset disabled>` 는 초점을 쥔 라디오를
  *      끄고 초점을 <body> 로 떨어뜨린다(#1595 H3).
- *    범위는 옛 시험과 같게 식에 **직접** 적힌 낱말만 본다(별칭은 따라가지 않는다).
- *    별칭을 따라가면 지금 한 자리가 더 붉다(PR 본문 「후속」).
+ *
+ * 3. `momo/busy-lock-primitives` — `SettingsFields.tsx` 에만. 위 규칙들이 JSX 이름으로
+ *    겨누는 컴포넌트(SaveButton · ConfirmButton · ChoiceRadios)가 정의 파일에 아직 있는가.
+ *    옛 시험은 소비처가 하나도 안 잡히면 붉어서 이름을 바꿔도 눈먼 초록이 되지 못했다.
  *
  * 양성 fixture: `busyLockGrammar.test.ts` — 위 변조마다 소스 한 조각이 이 규칙으로 실제로
- * 빨간지 잰다.
+ * 빨간지 잰다(실제 `eslint.config.js` 로 린트해서 범위 연결까지 한 번에 건다).
  */
 
 /** 진행을 말하는 낱말. 잠금 식에 맨몸으로 남으면 그 진행이 자기 잠금에 끼어든 것이다. */
 const IN_FLIGHT =
   /\b(isPending|busy|rotating|revoking|saving|checking|uploading|creating|toggling|removing|clearing|unlinking|sending|loading)\b/;
 
-/** `canSave` 에 접혀 들어오면 안 되는 진행 어휘(#1558). 대소문자 무시. */
-const CAN_SAVE_IN_FLIGHT = /^(busy|isPending|isLoading|isFetching|saving)$/i;
+/** `canSave` 에 접혀 들어오면 안 되는 진행 어휘(#1558). 옛 그물과 같은 글자 검사, 대소문자 무시. */
+const CAN_SAVE_IN_FLIGHT = /\b(busy|isPending|isLoading|isFetching|saving)\b/i;
 
 /** 별칭을 따라가는 깊이. 옛 시험과 같다. */
 const ALIAS_DEPTH = 4;
+
+/** 진리표를 다 도는 알갱이 수의 상한. 잠금 식이 이보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다. */
+const MAX_OTHER_ATOMS = 14;
+
+/** 흐림 계열 클래스 토큰(변형 접두 포함): `opacity-50` · `hover:opacity-70`. */
+const OPACITY_TOKEN = /(^|:)opacity-/;
+
+/** 잠금이 켜는 흐림. 다른 값은 잠금 인자 안에서도 붉다. */
+const LOCK_OPACITY = "opacity-50";
+
+/** 위 규칙들이 JSX 이름으로 겨누는 컴포넌트. 정의 파일이 이 셋을 export 해야 한다. */
+const REQUIRED_PRIMITIVES = ["SaveButton", "ConfirmButton", "ChoiceRadios"];
 
 /** 공백과 괄호를 걷어낸 꼴. `!(create.isPending)` 과 `!create.isPending` 은 같다. */
 const flat = (text) => text.replace(/[\s()]/g, "");
@@ -84,6 +108,12 @@ function exprOf(attr) {
   return attr && attr.value && attr.value.type === "JSXExpressionContainer"
     ? attr.value.expression
     : null;
+}
+
+/** className 속성의 값 노드: `{식}` 이면 그 식, `"문자열"` 이면 그 리터럴. */
+function classValueOf(attr) {
+  if (!attr || !attr.value) return null;
+  return attr.value.type === "JSXExpressionContainer" ? attr.value.expression : attr.value;
 }
 
 /** `X || undefined` 꼬리는 잠금·진행의 사실이 아니라 속성을 비우는 표기다. */
@@ -112,6 +142,79 @@ function walk(node, visitorKeys, visit) {
   for (const child of childNodes(node, visitorKeys)) walk(child, visitorKeys, visit);
 }
 
+/**
+ * 노드의 원문. 노드 안 주석은 같은 길이의 공백으로 지운다 — 식 안에 「saving 중에는 …」 같은 설명
+ * 주석이 있다고 어휘 검사가 붉어지면 안 된다(주석은 노드가 아니다). 길이를 보존하므로 노드 시작을
+ * 기준으로 한 위치 계산은 그대로 맞는다.
+ */
+function textOf(sourceCode, node) {
+  let text = sourceCode.getText(node);
+  const base = node.range[0];
+  for (const comment of sourceCode.getCommentsInside(node)) {
+    const from = comment.range[0] - base;
+    const to = comment.range[1] - base;
+    text = text.slice(0, from) + text.slice(from, to).replace(/[^\n]/g, " ") + text.slice(to);
+  }
+  return text;
+}
+
+const TS_WRAPPERS = new Set([
+  "TSAsExpression",
+  "TSNonNullExpression",
+  "TSSatisfiesExpression",
+  "TSTypeAssertion",
+]);
+
+function isUseMemoCallee(callee) {
+  return (
+    (callee.type === "Identifier" && callee.name === "useMemo") ||
+    (callee.type === "MemberExpression" &&
+      !callee.computed &&
+      callee.property.type === "Identifier" &&
+      callee.property.name === "useMemo")
+  );
+}
+
+/**
+ * 값을 감싸기만 하는 꺼풀을 벗긴다: `x as boolean` · `x!` · `Boolean(x)` ·
+ * `useMemo(() => x, deps)`(식 몸통 또는 return 하나뿐인 블록). 벗기지 않으면 별칭을
+ * 이 꺼풀로 감싸는 것만으로 접힘 검사를 피해 간다.
+ */
+function unwrapValue(node) {
+  let current = node;
+  for (let guard = 0; guard < 8; guard += 1) {
+    if (TS_WRAPPERS.has(current.type)) {
+      current = current.expression;
+      continue;
+    }
+    if (current.type === "CallExpression") {
+      const { callee, arguments: args } = current;
+      if (callee.type === "Identifier" && callee.name === "Boolean" && args.length === 1) {
+        current = args[0];
+        continue;
+      }
+      const fn = args[0];
+      if (
+        isUseMemoCallee(callee) &&
+        fn &&
+        (fn.type === "ArrowFunctionExpression" || fn.type === "FunctionExpression")
+      ) {
+        if (fn.body.type !== "BlockStatement") {
+          current = fn.body;
+          continue;
+        }
+        const statements = fn.body.body;
+        if (statements.length === 1 && statements[0].type === "ReturnStatement" && statements[0].argument) {
+          current = statements[0].argument;
+          continue;
+        }
+      }
+    }
+    break;
+  }
+  return current;
+}
+
 /** 별칭 본문이 될 수 있는 모양. 호출·객체·함수는 값이 아니라 계산이라 펴지 않는다. */
 const ALIAS_INIT_TYPES = new Set([
   "LogicalExpression",
@@ -131,13 +234,14 @@ function lookupVariable(scope, name) {
   return null;
 }
 
-/** `const NAME = <식>;` 한 줄 별칭의 우변. 구조분해·let·함수 인자는 별칭이 아니다. */
+/** `const NAME = <식>;` 한 줄 별칭의 우변(꺼풀을 벗긴 것). 구조분해·let·함수 인자는 별칭이 아니다. */
 function aliasInit(variable) {
   if (!variable || variable.defs.length !== 1) return null;
   const def = variable.defs[0];
   if (def.type !== "Variable" || def.parent.kind !== "const") return null;
   if (def.node.id.type !== "Identifier" || !def.node.init) return null;
-  return ALIAS_INIT_TYPES.has(def.node.init.type) ? def.node.init : null;
+  const init = unwrapValue(def.node.init);
+  return ALIAS_INIT_TYPES.has(init.type) ? init : null;
 }
 
 /**
@@ -161,7 +265,7 @@ function createExpander(sourceCode) {
         replacements.push([inner.range[0] - base, inner.range[1] - base, `(${expand(init, depth - 1)})`]);
       });
     }
-    let text = sourceCode.getText(node);
+    let text = textOf(sourceCode, node);
     for (const [from, to, replacement] of replacements.sort((a, b) => b[0] - a[0])) {
       text = text.slice(0, from) + replacement + text.slice(to);
     }
@@ -170,26 +274,14 @@ function createExpander(sourceCode) {
   return (node) => expand(node, ALIAS_DEPTH);
 }
 
-/** 식 안의 모든 Identifier 이름(멤버 접근의 속성 이름 포함). */
-function identifierNames(node, visitorKeys) {
-  const names = [];
-  walk(node, visitorKeys, (inner) => {
-    if (inner.type === "Identifier") names.push(inner.name);
-  });
-  return names;
-}
-
 /**
  * 잠금 식을 불리언 식 트리로 접는다 — 별칭을 따라가며, 비교·호출·멤버 읽기는 한 알갱이(atom)다.
  * 알갱이의 열쇠는 공백·괄호를 걷은 원문이라 `create.isPending` 이 별칭 안팎에서 같은 알갱이가 된다.
  */
-function toBoolTree(sourceCode, node, depth) {
-  const atom = () => ({ op: "atom", key: flat(sourceCode.getText(node)) });
+function toBoolTree(sourceCode, rawNode, depth) {
+  const node = unwrapValue(rawNode);
+  const atom = () => ({ op: "atom", key: flat(textOf(sourceCode, node)) });
   switch (node.type) {
-    case "TSNonNullExpression":
-    case "TSAsExpression":
-    case "TSSatisfiesExpression":
-      return toBoolTree(sourceCode, node.expression, depth);
     case "Literal":
       return { op: "const", value: Boolean(node.value) };
     case "Identifier": {
@@ -258,9 +350,6 @@ function evalTree(tree, env) {
   }
 }
 
-/** 진리표를 다 도는 알갱이 수의 상한. 넘으면 이 검사는 건너뛰고 어휘 검사(inFlightWithoutOwnNegation)만 남는다. */
-const MAX_OTHER_ATOMS = 14;
-
 /**
  * 자기 진행(own) 하나만 켜져도 잠금이 켜지는 맥락이 있는가.
  * 같은 맥락에서 own=꺼짐이면 꺼져 있고 own=켜짐이면 켜지는 환경이 하나라도 있으면 접힌 것이다.
@@ -270,7 +359,6 @@ function ownBusyFlipsLock(lockTree, ownKey) {
   const keys = [...atomKeys(lockTree)];
   if (!keys.includes(ownKey)) return false;
   const others = keys.filter((key) => key !== ownKey);
-  if (others.length > MAX_OTHER_ATOMS) return false;
   for (let mask = 0; mask < 2 ** others.length; mask += 1) {
     const env = new Map(others.map((key, index) => [key, Boolean(mask & (1 << index))]));
     env.set(ownKey, false);
@@ -281,34 +369,55 @@ function ownBusyFlipsLock(lockTree, ownKey) {
   return false;
 }
 
-/** `cn(…, L && "opacity-50")` 의 L 들과 고정 문자열 인자들. */
-function opacityParts(classNameExpr) {
-  const out = { conditions: [], fixed: [] };
-  if (
-    !classNameExpr ||
-    classNameExpr.type !== "CallExpression" ||
-    classNameExpr.callee.type !== "Identifier" ||
-    classNameExpr.callee.name !== "cn"
-  ) {
-    return out;
+/** 문자열 리터럴·템플릿 조각 안의 흐림 계열 토큰. 논리식·삼항 가지·중첩 호출 속 문자열까지 훑는다. */
+function opacityTokensIn(node, visitorKeys) {
+  const tokens = [];
+  walk(node, visitorKeys, (inner) => {
+    let text = null;
+    if (inner.type === "Literal" && typeof inner.value === "string") text = inner.value;
+    else if (inner.type === "TemplateElement") text = inner.value.cooked ?? inner.value.raw;
+    if (text === null) return;
+    for (const token of text.split(/\s+/)) if (OPACITY_TOKEN.test(token)) tokens.push(token);
+  });
+  return tokens;
+}
+
+/**
+ * className 식을 흐림 관점으로 가른다.
+ *  - dimming: `L && "…"` 꼴 인자 중 문자열에 흐림 토큰이 든 것({ condition: L, tokens }).
+ *  - strays:  그 밖의 자리(고정 문자열 · 삼항 가지 · 템플릿 · 중첩 호출 · 다른 꼴의 인자)에 선 흐림 토큰.
+ * `cn(…)` 호출이 아닌 className 식은 통째로 strays 다.
+ */
+function opacityShape(classNameExpr, visitorKeys) {
+  const shape = { dimming: [], strays: [] };
+  if (!classNameExpr) return shape;
+  const isCn =
+    classNameExpr.type === "CallExpression" &&
+    classNameExpr.callee.type === "Identifier" &&
+    classNameExpr.callee.name === "cn";
+  if (!isCn) {
+    shape.strays.push(...opacityTokensIn(classNameExpr, visitorKeys));
+    return shape;
   }
   for (const arg of classNameExpr.arguments) {
     if (
       arg.type === "LogicalExpression" &&
       arg.operator === "&&" &&
       arg.right.type === "Literal" &&
-      arg.right.value === "opacity-50"
+      typeof arg.right.value === "string"
     ) {
-      out.conditions.push(arg.left);
-    } else if (arg.type === "Literal" && typeof arg.value === "string") {
-      out.fixed.push(arg.value);
+      const tokens = opacityTokensIn(arg.right, visitorKeys);
+      // 조건(arg.left) 안의 문자열은 클래스가 아니다 — 훑지 않는다.
+      if (tokens.length > 0) shape.dimming.push({ condition: arg.left, tokens });
+    } else {
+      shape.strays.push(...opacityTokensIn(arg, visitorKeys));
     }
   }
-  return out;
+  return shape;
 }
 
 /** 진행을 말하는 컨트롤이면 { busy, locks } 를, 아니면 null. */
-function busyControl(opening) {
+function busyControl(opening, visitorKeys) {
   const name = tagName(opening);
   if (name !== null && /^Button/.test(name)) {
     const busy = exprOf(attrOf(opening, "aria-busy"));
@@ -316,8 +425,12 @@ function busyControl(opening) {
     const locks = [];
     const disabled = exprOf(attrOf(opening, "aria-disabled"));
     if (disabled) locks.push(withoutUndefinedTail(disabled));
-    // 흐림도 잠금이다. `cn(x && "opacity-50")` 의 x 가 그 식이다.
-    locks.push(...opacityParts(exprOf(attrOf(opening, "className"))).conditions);
+    // 흐림도 잠금이다. `cn(x && "opacity-…")` 의 x 가 그 식이다.
+    locks.push(
+      ...opacityShape(classValueOf(attrOf(opening, "className")), visitorKeys).dimming.map(
+        (dim) => dim.condition
+      )
+    );
     return { busy: withoutUndefinedTail(busy), locks };
   }
   if (name === "ConfirmButton") {
@@ -351,10 +464,12 @@ export const busyLockGrammar = {
         "<Button disabled> 는 잠긴 버튼을 tab order 에서 빼고 사유를 닿을 수 없는 곳에 둔다. aria-disabled={잠금 || undefined} + 흐림 + 사유 + 클릭 가드로 잠근다 (진행·잠금 문법 #1486 · #1541).",
       selfLock:
         "진행을 말하는 컨트롤의 잠금 식이 자기 진행({{busy}})을 그대로 든다. 쓰기를 낸 버튼이 자기 busy 로 자기를 잠그면 진행 낱말이 흐림 아래서 죽는다. 잠금은 `형제진행 && !{{busy}}` 로 갈라낸다 (#1403 H-1 · #1558 · #1595 H1). 펼친 식: {{opened}}",
+      lockTooComplex:
+        "잠금 식이 너무 커서 진행이 자기 잠금에 끼는지 확인할 수 없다(서로 다른 항 {{count}}개). 별칭 하나로 나눠 이름을 붙인다.",
       opacityFollowsLock:
         "흐림(`cn(…, L && \"opacity-50\")`)의 조건이 aria-disabled 의 잠금 식과 같지 않다. 잠금과 흐림은 한 식에서 나온다 (#2923).",
-      opacityFixed:
-        "고정 클래스에 흐림 계열(opacity-*)이 있다. 잠기지 않은 버튼이 늘 흐려진다 (#2923 · review-2909).",
+      opacityOutsideLock:
+        "흐림({{tokens}})이 잠금 식과 같은 조건 하나(`cn(…, L && \"opacity-50\")`) 밖에 선다. 다른 조건·삼항·고정 클래스·템플릿의 흐림은 진행을 잠금처럼 그리거나 잠기지 않았는데 늘 흐린 버튼을 만든다 (#2923 · review-2909 · #1558).",
       reasonBreakKeep:
         "사유·안내 문장 노드(id 에 reason·note)는 `break-keep` 을 든다. 좁은 칸에서 어절 중간이 끊긴다 (#1595 M6).",
       offlineQueuePromise:
@@ -363,6 +478,7 @@ export const busyLockGrammar = {
   },
   create(context) {
     const sourceCode = context.sourceCode;
+    const { visitorKeys } = sourceCode;
     const expand = createExpander(sourceCode);
     return {
       JSXOpeningElement(node) {
@@ -375,19 +491,25 @@ export const busyLockGrammar = {
         }
 
         // 2) 자기 진행을 잠금 식에 다시 끼우지 않는다
-        const control = busyControl(node);
+        const control = busyControl(node, visitorKeys);
         if (control) {
           const own = flat(expand(control.busy));
-          const negated = `!${own}`;
-          const ownTree = toBoolTree(sourceCode, control.busy, ALIAS_DEPTH);
-          const ownKey = ownTree.op === "atom" ? ownTree.key : null;
+          // 자기 진행이 별칭으로 `a || b` 처럼 펴져도 구성 진행 하나하나가 자기다.
+          const ownKeys = [...atomKeys(toBoolTree(sourceCode, control.busy, ALIAS_DEPTH))];
           for (const lock of control.locks) {
             const opened = flat(expand(lock));
-            // (가) 옛 별칭 스캔: 진행 어휘가 남아 있으면 자기 진행의 부정이 함께 서 있어야 한다.
-            const inFlightWithoutOwnNegation = IN_FLIGHT.test(opened) && !opened.includes(negated);
+            // (가) 옛 별칭 스캔: 진행 어휘가 남아 있으면 자기 진행(복합이면 구성 진행 하나하나)의 부정이 함께 서 있어야 한다.
+            const everyOwnNegated = ownKeys.every((key) => opened.includes(`!${key}`));
+            const inFlightWithoutOwnNegation = IN_FLIGHT.test(opened) && !everyOwnNegated;
             // (나) 옛 ConfirmButton 검사를 의미로 올린 것: 자기 진행 하나만으로 잠금이 켜지는 맥락이 없다.
-            const selfFolded =
-              ownKey !== null && ownBusyFlipsLock(toBoolTree(sourceCode, lock, ALIAS_DEPTH), ownKey);
+            const lockTree = toBoolTree(sourceCode, lock, ALIAS_DEPTH);
+            const atomCount = atomKeys(lockTree).size;
+            // 건너뛰면 큰 식일수록 조용히 통과한다. 못 재면 붉힌다.
+            const tooComplex = atomCount > MAX_OTHER_ATOMS + 1;
+            if (tooComplex) {
+              context.report({ node: lock, messageId: "lockTooComplex", data: { count: String(atomCount) } });
+            }
+            const selfFolded = !tooComplex && ownKeys.some((ownKey) => ownBusyFlipsLock(lockTree, ownKey));
             if (selfFolded || inFlightWithoutOwnNegation) {
               context.report({
                 node: lock,
@@ -398,19 +520,31 @@ export const busyLockGrammar = {
           }
         }
 
-        // 3) 흐림은 aria-disabled 의 같은 식이 켠다
+        // 3) 흐림은 aria-disabled 의 같은 식 하나가 켠다
         if (name === "Button") {
           const ariaDisabled = exprOf(attrOf(node, "aria-disabled"));
-          if (ariaDisabled) {
-            const lock = flat(sourceCode.getText(withoutUndefinedTail(ariaDisabled)));
-            const { conditions, fixed } = opacityParts(exprOf(attrOf(node, "className")));
-            if (!conditions.some((condition) => flat(sourceCode.getText(condition)) === lock)) {
-              context.report({ node: attrOf(node, "className") ?? node, messageId: "opacityFollowsLock" });
+          if (ariaDisabled || attrOf(node, "aria-busy")) {
+            const classAttr = attrOf(node, "className");
+            const shape = opacityShape(classValueOf(classAttr), visitorKeys);
+            const lock = ariaDisabled ? flat(textOf(sourceCode, withoutUndefinedTail(ariaDisabled))) : null;
+            const sameAsLock = (dim) => lock !== null && flat(textOf(sourceCode, dim.condition)) === lock;
+            const reportNode = classAttr ?? node;
+            const conditionBroken = Boolean(ariaDisabled) && !shape.dimming.some(sameAsLock);
+            if (conditionBroken) {
+              context.report({ node: reportNode, messageId: "opacityFollowsLock" });
             }
-            for (const classes of fixed) {
-              if (classes.split(/\s+/).some((cls) => /(^|:)opacity-/.test(cls))) {
-                context.report({ node: attrOf(node, "className") ?? node, messageId: "opacityFixed" });
-              }
+            const strays = [...shape.strays];
+            for (const dim of shape.dimming) {
+              // 조건이 틀렸다는 말은 위 메시지가 이미 했다 — 같은 원인을 두 번 말하지 않는다.
+              if (conditionBroken) continue;
+              strays.push(...(sameAsLock(dim) ? dim.tokens.filter((token) => token !== LOCK_OPACITY) : dim.tokens));
+            }
+            if (strays.length > 0) {
+              context.report({
+                node: reportNode,
+                messageId: "opacityOutsideLock",
+                data: { tokens: [...new Set(strays)].join(", ") },
+              });
             }
           }
         }
@@ -420,8 +554,8 @@ export const busyLockGrammar = {
           const idExpr = exprOf(attrOf(node, "id"));
           if (
             idExpr &&
-            /reason|note/i.test(sourceCode.getText(idExpr)) &&
-            !sourceCode.getText(node).includes("break-keep")
+            /reason|note/i.test(textOf(sourceCode, idExpr)) &&
+            !textOf(sourceCode, node).includes("break-keep")
           ) {
             context.report({ node, messageId: "reasonBreakKeep" });
           }
@@ -455,24 +589,75 @@ export const inFlightLockProps = {
     messages: {
       saveButtonCanSave:
         "<SaveButton canSave> 에 진행 어휘({{word}})가 접혀 들어왔다. 잠금은 !canSave 하나에서만 오고 진행은 낱말과 aria-busy 로만 말한다 (#1558).",
+      saveButtonCanSaveMissing:
+        "<SaveButton> 에는 canSave={식} 이 있어야 한다. 잠금이 어디서 오는지 식으로 적혀 있지 않으면(생략·축약) 린트도 사람도 진행이 접혔는지 볼 수 없다 (#1558).",
       choiceRadiosDisabled:
         "<ChoiceRadios disabled> 에 진행 어휘({{word}})가 있다. `<fieldset disabled>` 는 초점을 쥔 라디오를 끄고 초점을 <body> 로 떨어뜨린다. 진행은 ChoiceRadios 의 busy 로 말한다 (#1595 H3).",
     },
   },
   create(context) {
-    const { visitorKeys } = context.sourceCode;
+    const sourceCode = context.sourceCode;
     return {
       JSXOpeningElement(node) {
         const name = tagName(node);
         if (name === "SaveButton") {
-          const expr = exprOf(attrOf(node, "canSave"));
-          const word = expr && identifierNames(expr, visitorKeys).find((id) => CAN_SAVE_IN_FLIGHT.test(id));
-          if (word) context.report({ node: attrOf(node, "canSave"), messageId: "saveButtonCanSave", data: { word } });
+          const attr = attrOf(node, "canSave");
+          const expr = exprOf(attr);
+          if (!expr) {
+            // 옛 소비처 그물은 모든 <SaveButton> 에 canSave={…} 가 있을 것을 요구했다(없으면 붉다).
+            context.report({ node: attr ?? node, messageId: "saveButtonCanSaveMissing" });
+          } else {
+            const word = CAN_SAVE_IN_FLIGHT.exec(textOf(sourceCode, expr))?.[1];
+            if (word) context.report({ node: attr, messageId: "saveButtonCanSave", data: { word } });
+          }
         }
         if (name === "ChoiceRadios") {
-          const expr = exprOf(attrOf(node, "disabled"));
-          const word = expr && identifierNames(expr, visitorKeys).find((id) => IN_FLIGHT.test(id));
-          if (word) context.report({ node: attrOf(node, "disabled"), messageId: "choiceRadiosDisabled", data: { word } });
+          const attr = attrOf(node, "disabled");
+          const expr = exprOf(attr);
+          const word = expr && IN_FLIGHT.exec(textOf(sourceCode, expr))?.[1];
+          if (word) context.report({ node: attr, messageId: "choiceRadiosDisabled", data: { word } });
+        }
+      },
+    };
+  },
+};
+
+/**
+ * 규칙이 이름으로 겨누는 컴포넌트가 정의 파일에 아직 있는가.
+ *
+ * `in-flight-lock-props` 는 `<SaveButton>`·`<ChoiceRadios>` 를, `busy-lock-grammar` 는 `<ConfirmButton>` 을
+ * JSX 이름으로 찾는다. 옛 시험은 소비처가 하나도 안 잡히면(`seen >= 5`) 붉어서 이름을 바꿔도 눈먼 초록이
+ * 되지 못했다. 린트 규칙에는 그 장치가 없으므로 정의 파일이 세 이름을 export 하는지를 한 번 더 잰다.
+ * 이름을 바꿨다면 이 파일의 대상 이름도 함께 바꾼다.
+ *
+ * @type {import("eslint").Rule.RuleModule}
+ */
+export const busyLockPrimitives = {
+  meta: {
+    type: "problem",
+    schema: [],
+    messages: {
+      missingPrimitive:
+        "진행·잠금 규칙이 이름으로 겨누는 컴포넌트({{names}})가 이 파일에서 export 되지 않는다. 이름을 바꿨거나 옮겼다면 eslint-rules/busyLockGrammar.js 의 대상 이름과 범위를 함께 바꾼다(규칙이 조용히 눈먼 채 초록이 되지 않게).",
+    },
+  },
+  create(context) {
+    return {
+      "Program:exit"(program) {
+        const exported = new Set();
+        for (const statement of program.body) {
+          if (statement.type !== "ExportNamedDeclaration") continue;
+          const declaration = statement.declaration;
+          if (declaration?.type === "FunctionDeclaration" && declaration.id) exported.add(declaration.id.name);
+          if (declaration?.type === "VariableDeclaration") {
+            for (const item of declaration.declarations) {
+              if (item.id.type === "Identifier") exported.add(item.id.name);
+            }
+          }
+        }
+        const missing = REQUIRED_PRIMITIVES.filter((name) => !exported.has(name));
+        if (missing.length > 0) {
+          context.report({ node: program, messageId: "missingPrimitive", data: { names: missing.join(", ") } });
         }
       },
     };
@@ -484,5 +669,6 @@ export const busyLockPlugin = {
   rules: {
     "busy-lock-grammar": busyLockGrammar,
     "in-flight-lock-props": inFlightLockProps,
+    "busy-lock-primitives": busyLockPrimitives,
   },
 };
