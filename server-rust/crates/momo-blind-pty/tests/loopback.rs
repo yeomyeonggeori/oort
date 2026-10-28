@@ -2,11 +2,18 @@
 //! loopback, through a relay that is a plain byte pipe. `runtime-unverified`
 //! for WebSocket/TLS/Railway paths; numbers are printed, not asserted tightly.
 //!
-//! This is a performance measurement, not a contract (#4696): in the PR CI's
-//! debug build the 2 x 1000 round trips took ~164 s (P-256 and AES-GCM
-//! unoptimised), two thirds of all Rust test execution, for one loose bound. It
-//! is `#[ignore]`d there and runs in `.github/workflows/perf-nightly.yml`
-//! (nightly + manual, release profile), which also fails when it runs 0 tests.
+//! This is a performance measurement, not a contract (#4696): on the Linux CI
+//! runner the 2 x 1000 round trips took ~164 s (~82 ms per round trip) in the
+//! debug build and in the release build alike, about three quarters of all Rust
+//! test execution in PR CI, for one loose bound. It is not the crypto: these
+//! sockets set no TCP_NODELAY and every frame is written as two small writes
+//! (length, then body), so on Linux Nagle's algorithm waits for a delayed ACK
+//! (~40 ms) twice per round trip. Same pattern outside Rust (Python repro, PR
+//! #4724): 86.8 ms per round trip on Linux, 0.09 ms with TCP_NODELAY or a single
+//! write; macOS loopback does not stall (0.15 s for the whole test). The number
+//! printed here is therefore a property of this test's sockets, not of the product.
+//! It is `#[ignore]`d in PR CI and runs in `.github/workflows/perf-nightly.yml`
+//! (nightly + manual), which also fails when it runs 0 tests.
 //! `scripts/security_pack.sh nightly` skips it so it is not run twice.
 //! By hand: `cargo test -p momo-blind-pty --test loopback --release -- --ignored --nocapture`
 
