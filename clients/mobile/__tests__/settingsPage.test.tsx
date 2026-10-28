@@ -31,6 +31,7 @@ import {LAYER_POP_MS, LAYER_PUSH_MS, LAYER_RISE_MS, LAYER_SINK_MS} from '../src/
 import {dividerIndent} from '../src/design/sheetModel';
 import {ChoiceRow, ConfirmStep} from '../src/design/sheetParts';
 import {ThemeProvider} from '../src/design/theme';
+import {installAppClock} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
@@ -883,8 +884,19 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
   // (`layerMotion4457.test.tsx` 는 층 부품 홀로의 약속이다): 첫 장은 올라오고 X 는 내려가며 걷고, 안쪽 장은 밀려
   // 들어오고 ‹ 는 물러나며 걷는다.
   const WINDOW = Dimensions.get('window');
-  // 퇴장 타이머(150~180ms)는 실시간이다 — 로드가 높은 머신에서 `waitFor` 기본 1초(벽시계)가 모자란 전례(`fixtures/fakeClock.ts`).
+  // 퇴장은 앱의 타이머(150~180ms)가 부른다. 실시간이면 `waitFor` 의 벽시계 예산이 머신의 사정을 탄다: 퇴장 두 번을 차례로 기다리는
+  // 「VoiceOver escape」 시험이 느린 CI 에서 5초를 넘겼다(#4633; 부하를 건 기준선 8회 중 3회 빨강). 가짜 시계(`fixtures/fakeClock.ts`,
+  // #3796)에서는 `waitFor` 의 예산이 벽시계가 아니라 폴링 횟수라서(8000ms = 160번, 한 번에 가짜 시계 50ms) 머신이 느려도 예산이 줄지
+  // 않고, 150~180ms 타이머는 몇 번째 폴링에서 결정적으로 터진다. 제품 쪽 단정(움직임 설정·두 번째 퇴장)은 그대로다.
   const EXIT_WAIT = {timeout: 8000};
+
+  beforeEach(() => {
+    installAppClock();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
 
   it('설정 첫 장은 올라오고, X 는 내려간 뒤에야 페이지를 걷는다', async () => {
     releaseMotion?.();
@@ -952,8 +964,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
       expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
     );
     await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
-    // 실제 퇴장 애니메이션 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다린다. 제한 시간은
-    // jest.config.js 의 testTimeout(20 s, #4633)이 진다 — 결정화(가짜 시계)는 #4633.
+    // 퇴장 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다리지만 앱 시계는 가짜라 두 번 합쳐도 폴링 몇 번이다.
   });
 });
 

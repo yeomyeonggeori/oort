@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import {
   ENTER_CONVERSATION_ANIMATION_NAME,
   ENTER_CONVERSATION_CLASS,
@@ -71,12 +71,88 @@ declare global {
       onSubscribed: () => void;
       deliverOpener: () => void;
       stageSeenEver: () => boolean;
+      releaseDirectory: () => void;
+      directorySettled: () => boolean;
     };
   }
 }
 
+type HarnessBuild = { js: string; css: string };
+
+let harnessBuild: Promise<HarnessBuild> | null = null;
+
+/**
+ * 하네스 번들(esbuild)과 CSS(tailwind 컴파일)는 옵션과 무관하고 비싸다. 예전에는 `launchWelcomeHarness` 가 시험마다(이 파일에서
+ * 아홉 번) 다시 만들었고, 그 CPU 가 시험 하나의 제한 시간(30 s)을 먹었다 — 부하 60~70 에서 첫 시험이 제한 시간에 걸렸다(#4708).
+ * 파일에서 한 번만 만들고(`beforeAll`), 시험은 브라우저를 띄우고 옵션을 건네는 일만 한다.
+ */
+function buildHarness(): Promise<HarnessBuild> {
+  harnessBuild ??= (async () => {
+    const esbuild = await import("esbuild");
+    const bundled = await esbuild.build({
+      absWorkingDir: WEB_ROOT,
+      entryPoints: [HARNESS],
+      bundle: true,
+      write: false,
+      format: "iife",
+      platform: "browser",
+      jsx: "automatic",
+      alias: { "@": SRC, "@momo/core": CORE_SRC },
+      define: {
+        "import.meta.env": JSON.stringify({
+          DEV: false,
+          PROD: true,
+          MODE: "test",
+          SSR: false,
+        }),
+        "import.meta.url": JSON.stringify(
+          "https://example.test/welcome-kickoff-harness.js"
+        ),
+      },
+      loader: { ".png": "dataurl" },
+      logLevel: "silent",
+    });
+    const js = bundled.outputFiles[0]?.text;
+    if (!js) throw new Error("esbuild produced no welcome kickoff harness");
+    const tokensPath = join(HERE, "../../design/tokens.css");
+    const compiler = await compile(readFileSync(tokensPath, "utf8"), {
+      base: dirname(tokensPath),
+      loadStylesheet: async (id: string, base: string) => {
+        if (id === "tailwindcss" || id.endsWith("tailwindcss/index.css")) {
+          const path = require_.resolve("tailwindcss/index.css");
+          return {
+            path,
+            base: dirname(path),
+            content: readFileSync(path, "utf8"),
+          };
+        }
+        const path = id.startsWith(".") || id.startsWith("/") ? `${base}/${id}` : id;
+        return { path, base: dirname(path), content: readFileSync(path, "utf8") };
+      },
+    });
+    const candidates = [
+      WELCOME_KICKOFF_EXIT_CLASS,
+      ENTER_CONVERSATION_CLASS,
+      "h-full",
+      "relative",
+      ...quotedClassTokens(readFileSync(join(HERE, "WelcomeKickoffStage.tsx"), "utf8")),
+      ...quotedClassTokens(readFileSync(join(HERE, "PhoneLinkChannelCard.tsx"), "utf8")),
+      ...quotedClassTokens(readFileSync(HARNESS, "utf8")),
+      ...quotedClassTokens(readFileSync(join(HERE, "../timeline/Timeline.tsx"), "utf8")),
+      ...quotedClassTokens(
+        readFileSync(join(HERE, "../timeline/ChannelIntroBlock.tsx"), "utf8")
+      ),
+      ...quotedClassTokens(readFileSync(join(HERE, "../timeline/MessageRow.tsx"), "utf8")),
+    ];
+    const css = compiler.build([...new Set(candidates)]);
+    return { js, css };
+  })();
+  return harnessBuild;
+}
+
 async function launchWelcomeHarness(opts: {
-  directoryDelayMs?: number;
+  /** 참이면 명부가 `window.__welcomeKickoff.releaseDirectory()` 까지 「불러오는 중」이다(실시간 타이머가 아니다). */
+  holdDirectory?: boolean;
   backlogAgent?: boolean;
   reducedMotion?: boolean;
 } = {}): Promise<{
@@ -84,63 +160,7 @@ async function launchWelcomeHarness(opts: {
   page: import("playwright").Page;
 }> {
   const { chromium } = await import("playwright");
-  const esbuild = await import("esbuild");
-  const bundled = await esbuild.build({
-    absWorkingDir: WEB_ROOT,
-    entryPoints: [HARNESS],
-    bundle: true,
-    write: false,
-    format: "iife",
-    platform: "browser",
-    jsx: "automatic",
-    alias: { "@": SRC, "@momo/core": CORE_SRC },
-    define: {
-      "import.meta.env": JSON.stringify({
-        DEV: false,
-        PROD: true,
-        MODE: "test",
-        SSR: false,
-      }),
-      "import.meta.url": JSON.stringify(
-        "https://example.test/welcome-kickoff-harness.js"
-      ),
-    },
-    loader: { ".png": "dataurl" },
-    logLevel: "silent",
-  });
-  const js = bundled.outputFiles[0]?.text;
-  if (!js) throw new Error("esbuild produced no welcome kickoff harness");
-  const tokensPath = join(HERE, "../../design/tokens.css");
-  const compiler = await compile(readFileSync(tokensPath, "utf8"), {
-    base: dirname(tokensPath),
-    loadStylesheet: async (id: string, base: string) => {
-      if (id === "tailwindcss" || id.endsWith("tailwindcss/index.css")) {
-        const path = require_.resolve("tailwindcss/index.css");
-        return {
-          path,
-          base: dirname(path),
-          content: readFileSync(path, "utf8"),
-        };
-      }
-      const path = id.startsWith(".") || id.startsWith("/") ? `${base}/${id}` : id;
-      return { path, base: dirname(path), content: readFileSync(path, "utf8") };
-    },
-  });
-  const candidates = [
-    WELCOME_KICKOFF_EXIT_CLASS,
-    ENTER_CONVERSATION_CLASS,
-    "h-full",
-    "relative",
-    ...quotedClassTokens(readFileSync(join(HERE, "WelcomeKickoffStage.tsx"), "utf8")),
-    ...quotedClassTokens(readFileSync(join(HERE, "PhoneLinkChannelCard.tsx"), "utf8")),
-    ...quotedClassTokens(readFileSync(HARNESS, "utf8")),
-    ...quotedClassTokens(readFileSync(join(HERE, "../timeline/Timeline.tsx"), "utf8")),
-    ...quotedClassTokens(
-      readFileSync(join(HERE, "../timeline/ChannelIntroBlock.tsx"), "utf8")
-    ),
-    ...quotedClassTokens(readFileSync(join(HERE, "../timeline/MessageRow.tsx"), "utf8")),
-  ];
-  const css = compiler.build([...new Set(candidates)]);
+  const { js, css } = await buildHarness();
   const browser = await chromium.launch();
   const page = await browser.newPage();
   const pageErrors: string[] = [];
@@ -152,7 +172,7 @@ async function launchWelcomeHarness(opts: {
   });
   await page.setViewportSize({ width: 1280, height: 800 });
   const boot = JSON.stringify({
-    directoryDelayMs: opts.directoryDelayMs ?? 0,
+    holdDirectory: Boolean(opts.holdDirectory),
     backlogAgent: Boolean(opts.backlogAgent),
     reducedMotion: Boolean(opts.reducedMotion),
   });
@@ -214,17 +234,54 @@ ${css}
   return { browser, page };
 }
 
+/**
+ * 한 프레임씩 `frames` 번 지켜보며 `sample` 을 부른다. 벽시계가 아니라 프레임 수가 창이다: 머신이 느리면 창이 길어질 뿐
+ * 짧아지지 않아서, 「그동안 아무 일도 없었다」가 느린 머신에서 거짓이 되지 않는다.
+ */
+async function watchFrames(page: import("playwright").Page, frames: number) {
+  return await page.evaluate(async (count) => {
+    const rows: { write: boolean; stage: boolean }[] = [];
+    for (let i = 0; i < count; i += 1) {
+      rows.push({
+        write: Boolean(document.querySelector("[data-testid='timeline-empty-primary']")),
+        stage: Boolean(document.querySelector("[data-testid='welcome-kickoff-stage']")),
+      });
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+    return rows;
+  }, frames);
+}
+
+/** 푼 명부가 화면에 커밋될 때까지 기다린다(조건 기다림 — 시간이 아니다). */
+async function waitForDirectorySettled(page: import("playwright").Page) {
+  await page.waitForFunction(() => window.__welcomeKickoff.directorySettled(), undefined, {
+    timeout: 20_000,
+  });
+}
+
 describe("welcome kickoff Chromium harness", () => {
+  // 번들·CSS 는 한 번만 만든다. 이 단계의 시간은 시험 하나의 제한 시간에서 빠진다.
+  beforeAll(async () => {
+    if (chromiumAvailable) await buildHarness();
+  }, 120_000);
+
   it.skipIf(!chromiumAvailable)(
-    "agent backlog + roster delayed 2000ms → no stage at any point",
+    "agent backlog + roster held → no stage at any point",
     async () => {
       const handle = await launchWelcomeHarness({
-        directoryDelayMs: 2000,
+        holdDirectory: true,
         backlogAgent: true,
       });
       try {
         await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        await handle.page.waitForTimeout(2500);
+        // 명부가 풀리기 전: 문을 시험이 쥐고 있어 어느 타이머와도 경주하지 않는다.
+        const pending = await watchFrames(handle.page, 30);
+        expect(pending.every((row) => row.stage === false)).toBe(true);
+        // 명부가 풀린 뒤에도 이미 에이전트의 말이 있으니 띠는 끝내 서지 않는다.
+        await handle.page.evaluate(() => window.__welcomeKickoff.releaseDirectory());
+        await waitForDirectorySettled(handle.page);
+        const settled = await watchFrames(handle.page, 30);
+        expect(settled.every((row) => row.stage === false)).toBe(true);
         expect(
           await handle.page.evaluate(() => window.__welcomeKickoff.stageSeenEver())
         ).toBe(false);
@@ -235,40 +292,30 @@ describe("welcome kickoff Chromium harness", () => {
         await handle.browser.close();
       }
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
-    "empty channel + roster delayed 2000ms → stage only after roster settles",
+    "empty channel + roster held → stage only after roster settles",
     async () => {
-      const handle = await launchWelcomeHarness({ directoryDelayMs: 2000 });
+      const handle = await launchWelcomeHarness({ holdDirectory: true });
       try {
         await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        const pendingLog = await handle.page.evaluate(async () => {
-          const rows: { t: number; write: boolean; stage: boolean }[] = [];
-          const start = performance.now();
-          while (performance.now() - start < 1800) {
-            rows.push({
-              t: Math.round(performance.now() - start),
-              write: Boolean(
-                document.querySelector("[data-testid='timeline-empty-primary']")
-              ),
-              stage: Boolean(
-                document.querySelector("[data-testid='welcome-kickoff-stage']")
-              ),
-            });
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-          }
-          return rows;
-        });
-        expect(pendingLog.every((row) => row.write === false)).toBe(true);
-        expect(pendingLog.every((row) => row.stage === false)).toBe(true);
+        // 명부가 풀리기 전에는 쓰기 안내도 띠도 없다.
+        const pending = await watchFrames(handle.page, 30);
+        expect(pending.every((row) => row.write === false)).toBe(true);
+        expect(pending.every((row) => row.stage === false)).toBe(true);
         expect(
           await handle.page.locator("[data-testid='welcome-kickoff-stage']").count()
         ).toBe(0);
+        expect(
+          await handle.page.evaluate(() => window.__welcomeKickoff.stageSeenEver())
+        ).toBe(false);
+        // 명부를 풀면 띠가 선다 — 시각이 아니라 조건을 기다린다.
+        await handle.page.evaluate(() => window.__welcomeKickoff.releaseDirectory());
         await handle.page
           .locator("[data-testid='welcome-kickoff-stage']")
-          .waitFor({ state: "attached", timeout: 4000 });
+          .waitFor({ state: "attached", timeout: 20_000 });
         expect(
           await handle.page.evaluate(() => window.__welcomeKickoff.stageSeenEver())
         ).toBe(true);
@@ -276,7 +323,7 @@ describe("welcome kickoff Chromium harness", () => {
         await handle.browser.close();
       }
     },
-    30_000
+    60_000
   );
 
   it.skipIf(!chromiumAvailable)(
