@@ -92,7 +92,7 @@ export function ConversationHeaderSurface({which}: {which: string}): React.JSX.E
             kind="dm"
             peerId={HELPER_ID}
             peerStatusTone="ok"
-            peerStatusLabel="응답함"
+            peerStatusLabel="응답함 3분 전"
             directory={DIRECTORY}
             onBack={noop}
             onOpenMenu={noop}
@@ -139,7 +139,7 @@ export function ConversationHeaderSurface({which}: {which: string}): React.JSX.E
             kind="dm"
             peerId={LONG_ID}
             peerStatusTone="ok"
-            peerStatusLabel="응답함"
+            peerStatusLabel="응답함 3분 전"
             directory={DIRECTORY}
             onBack={noop}
             onOpenMenu={noop}
