@@ -21,3 +21,5 @@ momo-agent-worker memory_embed_conformance_pg real_model_recall_through_the_serv
 momo-server box_runner_e2e the_runner_creates_starts_stops_and_deletes_a_real_hardened_box #4730 2026-11-30 Docker + momo-box-runner + 박스 이미지(MOMO_M2_E2E_*)가 필요, 지금은 infra/personal-box/verify-m2.sh 가 구동
 momo-workd codex_isolation_real a_codex_command_sees_no_credential_from_the_host_or_the_owners_shell_files #4730 2026-11-30 codex-cli 0.155.1 바이너리(MOMO_WORKD_CODEX_BIN)가 야간 러너에 없음
 momo-workd codex_isolation_real codex_loads_no_skill_from_the_owners_home #4730 2026-11-30 codex-cli 0.155.1 바이너리(MOMO_WORKD_CODEX_BIN)가 야간 러너에 없음
+# ── #4740: 러너 속도에 기대는 간헐 실패(서버의 10초 디코드 제한) ─────────────────────────────────────────
+momo-server agent_port_tools_conformance_pg member_avatar_set_accepts_a_phone_size_photo_and_stores_it_shrunk #4740 2026-11-11 서버의 10초 디코드 제한(AVATAR_PROCESS_TIMEOUT)이 느린 러너의 디버그 빌드 12MP 디코드에서 간헐적으로 넘음(같은 코드가 공용 DB 실행에서는 통과)
