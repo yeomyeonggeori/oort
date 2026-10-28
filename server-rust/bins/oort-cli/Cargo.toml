@@ -61,6 +61,11 @@ momo-server = { path = "../momo-server" }
 momo-db = { path = "../../crates/momo-db" }
 momo-auth = { path = "../../crates/momo-auth" }
 momo-mcp = { path = "../../crates/momo-mcp" }
+# `tests/server_e2e_pg.rs` reuses momo-server's PostgreSQL fixtures (`tests/common/apps_pg.rs`), which
+# build the app state from these three.
+momo-provider-probe = { path = "../../crates/momo-provider-probe" }
+momo-settings = { path = "../../crates/momo-settings" }
+momo-outbox = { path = "../../crates/momo-outbox" }
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "time", "rt-multi-thread", "macros"] }
 tempfile = "3"
