@@ -1307,11 +1307,11 @@ pub fn is_overdue(expires_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool
 /// already settled stays what it was settled as (ADR-0186 증보 v5 U-f: 「만료는
 /// 재호출이 파생해서 말한다」 — the expiry is never written to the proposer's inbox,
 /// so this derivation is how an agent learns of it).
-pub fn effective_status<'a>(
-    status: &'a str,
+pub fn effective_status(
+    status: &str,
     expires_at: Option<DateTime<Utc>>,
     now: DateTime<Utc>,
-) -> &'a str {
+) -> &str {
     if status == "pending" && is_overdue(expires_at, now) {
         "expired"
     } else {
