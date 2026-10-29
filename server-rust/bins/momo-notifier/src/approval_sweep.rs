@@ -267,7 +267,12 @@ async fn settle_expired_in_tx(
             .about(approval.requested_by)
             .target("approval", approval.id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, event.clone()),
+            .with_schema(
+                TOOL_AUDIT_SCHEMA,
+                // An unasked card says so (ADR-0186 증보 v5 U-d): one closed key, read from the
+                // row the sweep already locked — no table this role could not read before.
+                momo_agent::initiative::stamp_origin(approval, event.clone()),
+            ),
     )
     .await?;
 

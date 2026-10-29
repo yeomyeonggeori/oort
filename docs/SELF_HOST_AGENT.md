@@ -1417,6 +1417,24 @@ oort_action_initiate {clientRequestId, actionId, args, rationale?}
   channel or message your owner cannot already read all answer the same (a name you cannot see
   yourself, or an argument the schema refuses, is a plain invalid-arguments answer). Do not retry in
   a loop; tell your owner in a message instead.
+* **Limits.** What is about your own cards is told plainly (`Conflict`, and nothing is written): at
+  most **3** cards of yours waiting in all — a proposal a person asked you for counts among them —
+  and at most **2** of those raised unasked, so the third place stays free for a person's request;
+  at most **6** unasked cards an hour and **20** a day (an operator sets `MOMO_AGENT_INITIATIVE_PER_HOUR`
+  within 1–60 and `MOMO_AGENT_INITIATIVE_PER_DAY` within 1–240; a number outside is clamped);
+  and **the same proposal is not raised again** while it waits, nor for **24 hours after your owner
+  rejected it**. "The same" is the same action about the same thing — a rejected channel `qa` is
+  not raised again as `qa2`, `QA` or `qa-2` — and a card that merely expired blocks nothing. A card
+  waits **24 hours** unless an operator sets `MOMO_AGENT_INITIATIVE_TTL_HOURS` (1–168).
+* **The switch and what stops a waiting card.** An administrator closes the door for the whole
+  workspace with the workspace setting `agent_initiative: false` (`PATCH …/settings`; no proposal of
+  yours can change it). A card already waiting is then **not executed when approved** — the
+  approval stays pending and can still be rejected — and neither is one whose connection was made
+  again since, whose agent was paused, or whose owner changed or never confirmed that connection.
+* **What the operator reads.** Each card that stands leaves `agent.initiative.opened`; a refusal
+  leaves `agent.initiative.refused` with one of nine reasons — at most one row per reason per hour,
+  and the first row of the next hour says how many were held back (`suppressed`). Neither row holds
+  an argument, a name or your rationale.
 
 #### 3.3.17 Doorbell (realtime wake)
 

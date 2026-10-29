@@ -704,12 +704,16 @@ mod tests {
     /// 154 is #4704's `workspace:initiate` (ADR-0186 증보 v5 U-b): the hosted scope vocabulary gains an
     /// eighth value, so the three CHECK constraints 087 rewrote are rewritten again. No table, column,
     /// index or row is added or changed; an existing connection's approved scopes stay exactly as they were.
+    ///
+    /// 155 is #4704's PR B (ADR-0186 증보 v5 U-d): two partial indexes (the rate window over `agent_run`,
+    /// the duplicate and cooldown reads over `approval`) and `agent_initiative_refusal`, the per-(agent,
+    /// reason) one-hour window of the refusal audit row, under RLS ENABLE + FORCE and `ws_isolation`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_154() {
+    fn discovers_contiguous_migrations_001_to_155() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=154).collect();
+        let expected: Vec<i64> = (1..=155).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -717,7 +721,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=154 under {}",
+            "expected contiguous 001..=155 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -725,7 +729,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("154_hosted_scope_workspace_initiate"));
+            .starts_with("155_agent_initiative_limits"));
     }
 
     #[test]

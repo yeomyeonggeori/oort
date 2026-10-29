@@ -20,22 +20,39 @@
 //!    about its own card and about nothing else);
 //! 3. the rest of the door: the workspace switch (3), an active human owner who confirmed this
 //!    connection (4), and that owner passing the action's role gate *now* (5);
-//! 4. *(ceilings and rate: PR B — before the resolution, so an agent at its ceiling learns nothing
-//!    from whether a name resolves, review M1)*;
+//! 4. the **ceilings and the rate** (7): three cards waiting in all, two of them unasked, six an
+//!    hour and twenty a day — **before** the resolution, so an agent at its ceiling learns nothing
+//!    from whether a name resolves (review M1: a resolution ahead of the limit is a free
+//!    enumeration oracle);
 //! 5. the arguments resolved **for the owner's eyes** (6): a channel or message the owner could
 //!    not already read is the owner's side of the door;
-//! 6. only now the owner's direct message is opened (idempotent), then the run, the approval and
-//!    the card. Any failure after this point rolls all five tables back (run, approval, message,
-//!    channel, membership).
+//! 6. **duplicates and the cooldown** (7): the same proposal already waiting, or rejected by a
+//!    person less than a day ago, judged on what the server resolved (review M7) — after the
+//!    resolution because the key is built from it;
+//! 7. only now the owner's direct message is opened (idempotent), then the run, the approval, the
+//!    card and the `agent.initiative.opened` row. Any failure after this point rolls all five
+//!    tables back (run, approval, message, channel, membership) and the row with them.
 //!
 //! ## Answers
 //!
 //! Doors 1–6 answer one `ToolFailure::Unavailable`, byte for byte, whichever failed — an agent
 //! must not be able to feel its owner's role or its connection's makeup (V1-b). What is the agent's
-//! own — malformed arguments, a name it cannot see — is `InvalidArguments`. The ceilings and
-//! duplicates (7, PR B) are `Conflict`: they are about the agent's own proposals and hide nothing.
-//! (A **paused** agent never gets here: its tool list is already empty, so every tool answers it as
-//! an unknown one; the check inside is for a pause that lands between the list and the call.)
+//! own — malformed arguments, a name it cannot see — is `InvalidArguments`. The ceilings, the rate,
+//! the duplicates and the cooldown (7) are `Conflict`: they are about the agent's own proposals and
+//! hide nothing. (A **paused** agent never gets here: its tool list is already empty, so every tool
+//! answers it as an unknown one; the check inside is for a pause that lands between the list and
+//! the call.)
+//!
+//! ## What the operator reads
+//!
+//! Every refusal that has a reason in the closed vocabulary of nine
+//! ([`momo_agent::initiative::RefusalReason`]) leaves **one** `agent.initiative.refused` row per
+//! (agent, reason) per hour, the first row of the next hour carrying how many were held back; a
+//! card that stands leaves `agent.initiative.opened`. What no reason names writes no row: a miss at
+//! doors 1–2 (the credential is not an unasked-card credential, so nobody is to be told anything),
+//! an argument the schema refuses before any transaction opens, and a re-ask of a card already
+//! raised (it reads, writes nothing, and says what the agent's own card is). Neither row holds an
+//! argument, a name, a rationale or an id the agent chose.
 //!
 //! ## Lock order — no exclusive lock on a row anybody else shares
 //!
@@ -45,6 +62,9 @@
 //! and the DM's `channel` / `membership` rows (only when the DM is not already open) → `agent_run` →
 //! `approval` → `message` (its `channel_seq` is already ours).
 //!
+//! * A person's proposal (`oort_action_propose`) takes **the same advisory lock first** too: the
+//!   pending ceiling is shared between what a person asked for and what the agent raised unasked,
+//!   so the two producers' count-then-insert must not interleave (PR B).
 //! * The first lock is advisory, not a row lock on the agent's `member`: a `FOR NO KEY UPDATE` there
 //!   is exclusive against the `FOR SHARE` every message write, every decision's wake and the identity
 //!   proof itself take, so it made two simultaneous calls of one agent deadlock every time and formed
@@ -66,6 +86,7 @@
 //!   A transaction that loses a lock cycle to someone else commits nothing, and is run once more.
 
 use chrono::Utc;
+use momo_agent::LockedApproval;
 use momo_auth::{active_workspace_role, SCOPE_WORKSPACE_INITIATE};
 use momo_db::{DbError, PgConnection};
 use momo_mcp::ToolFailure;
@@ -80,14 +101,40 @@ use momo_workspace_actions::action_resolve::{
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use momo_agent::initiative::RefusalReason;
+
 use crate::routes::agent_port_tools::{
     arguments, authorize_in_tx, internal, optional_str, required_str, required_uuid, HostedCaller,
 };
 use crate::AppState;
 
-/// The workspace settings key that switches unasked cards off for the whole workspace
-/// (ADR-0186 증보 v5 U-b-3). Absent reads as **on**; `false` is off.
-const SETTING_AGENT_INITIATIVE: &str = "agent_initiative";
+/// One refusal of the door: what the agent is told and why, for the operator.
+///
+/// Built where the door decides and **recorded** (`record`) at the same place: the audit row and
+/// the window counter it may bump are written in this very transaction, which commits a handled
+/// refusal (`with_tenant_tx`), so a refusal leaves exactly what it should and a call that rolls
+/// back leaves nothing.
+struct Refusal {
+    workspace_id: Uuid,
+    agent: Uuid,
+    action_id: &'static str,
+    reason: RefusalReason,
+    failure: ToolFailure,
+}
+
+impl Refusal {
+    async fn record(self, conn: &mut PgConnection) -> Result<Result<Value, ToolFailure>, DbError> {
+        momo_agent::initiative::record_refused_in_tx(
+            conn,
+            self.workspace_id,
+            self.agent,
+            Some(self.action_id),
+            self.reason,
+        )
+        .await?;
+        Ok(Err(self.failure))
+    }
+}
 
 /// A transaction that lost a lock cycle to a person's concurrent send and committed nothing is run
 /// once more: it is one transaction with no effect outside the database, and its replay is
@@ -102,6 +149,76 @@ fn is_deadlock_victim(error: &DbError) -> bool {
         DbError::Sqlx(momo_db::sqlx::Error::Database(database))
             if database.code().as_deref() == Some("40P01")
     )
+}
+
+/// The decision's re-proof of an unasked card (ADR-0186 증보 v5 U-d 「재증명」), in the
+/// transaction of the person's tap. `true` only if **everything that let the agent raise it still
+/// holds**, judged on the facts as they are now — not on what the row says:
+///
+/// 1. the workspace switch is on (the very reading the door makes, [`switch_is_on`]);
+/// 2. the connection the card was raised through (`payload.initiative.connection_id`, written by
+///    the server at that moment) is still **the agent's live connection** — so a connection torn
+///    down and made again does not bring old cards back — and it still carries the human's
+///    approval of `workspace:initiate`, and the agent is an active member whose profile is not
+///    paused;
+/// 3. the person deciding **is the agent's current owner** and that owner is the one who confirmed
+///    this connection (`confirmed_by == owner`, review L2) — the same facts the door's condition 4
+///    reads ([`initiative_facts_in_tx`]);
+/// 4. the action is still on the initiative list — the caller's check, made before this one.
+///
+/// A card whose payload carries no connection (a row written by nobody this code knows) fails
+/// closed. Plain reads, no lock: the tap is already serialised on the approval row, and a switch or a
+/// disconnect that commits a moment after the read is, to the person who tapped, a tap that came
+/// first.
+///
+/// [`switch_is_on`]: momo_agent::initiative::switch_is_on
+/// [`initiative_facts_in_tx`]: momo_agent::initiative::initiative_facts_in_tx
+pub(crate) async fn card_still_stands_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    approval: &LockedApproval,
+    decider: Uuid,
+) -> Result<bool, DbError> {
+    let agent = approval.requested_by;
+    // 1. the switch.
+    let settings = momo_settings::read_workspace_settings(conn, workspace_id).await?;
+    if !momo_agent::initiative::switch_is_on(settings.as_ref()) {
+        return Ok(false);
+    }
+    // 2. the connection, the scope, the agent.
+    let Some(connection_id) = approval
+        .payload
+        .pointer("/initiative/connection_id")
+        .and_then(Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+    else {
+        return Ok(false);
+    };
+    let live = momo_auth::active_hosted_connection_in_tx(conn, workspace_id, agent)
+        .await
+        .map_err(DbError::from)?;
+    if live != Some(connection_id) {
+        return Ok(false);
+    }
+    if !momo_agent::initiative::initiative_standing_in_tx(
+        conn,
+        workspace_id,
+        agent,
+        connection_id,
+        SCOPE_WORKSPACE_INITIATE,
+    )
+    .await?
+    {
+        return Ok(false);
+    }
+    // 3. the owner now, who confirmed this connection, is the person tapping.
+    let Some(facts) =
+        momo_agent::initiative::initiative_facts_in_tx(conn, workspace_id, agent, connection_id)
+            .await?
+    else {
+        return Ok(false);
+    };
+    Ok(facts.owner_member_id == decider)
 }
 
 /// `oort_action_initiate { clientRequestId, actionId, args, rationale? }`.
@@ -225,19 +342,23 @@ async fn initiate_in_tx(
     }
 
     // ---- doors 3, 4, 5 -----------------------------------------------------------------------
-    // 3. the workspace switch (absent = on; a non-boolean or unreadable value = off).
-    // Only an absent key or a literal `true` is on: a value that is not a boolean (`"false"`, `0`)
-    // is not a switch somebody meant to leave on, and the door fails closed on it.
-    let switch_on = match momo_settings::read_workspace_settings(conn, workspace_id).await? {
-        Some(bag) => match bag.get(SETTING_AGENT_INITIATIVE) {
-            None => true,
-            Some(Value::Bool(on)) => *on,
-            Some(_) => false,
-        },
-        None => false,
+    //
+    // Every refusal from here on is written down for the operator (one row per reason per hour,
+    // `refuse` below) and answered to the agent in the bytes its kind has.
+    let refuse = |reason: RefusalReason, failure: ToolFailure| Refusal {
+        workspace_id,
+        agent,
+        action_id: action.id,
+        reason,
+        failure,
     };
-    if !switch_on {
-        return Ok(Err(ToolFailure::Unavailable));
+    // 3. the workspace switch (absent = on; a non-boolean or unreadable value = off — one
+    // definition for the door and for the decision that re-proves it).
+    let settings = momo_settings::read_workspace_settings(conn, workspace_id).await?;
+    if !momo_agent::initiative::switch_is_on(settings.as_ref()) {
+        return refuse(RefusalReason::SwitchOff, ToolFailure::Unavailable)
+            .record(conn)
+            .await;
     }
     // 4. an active human owner who confirmed this very connection.
     let Some(facts) = momo_agent::initiative::initiative_facts_in_tx(
@@ -248,7 +369,9 @@ async fn initiate_in_tx(
     )
     .await?
     else {
-        return Ok(Err(ToolFailure::Unavailable));
+        return refuse(RefusalReason::NoOwner, ToolFailure::Unavailable)
+            .record(conn)
+            .await;
     };
     let owner = facts.owner_member_id;
     // 5. the owner passes this action's role gate **now**. Only `Admin` is spelled: an action
@@ -263,10 +386,42 @@ async fn initiate_in_tx(
         _ => false,
     };
     if !gate_open {
-        return Ok(Err(ToolFailure::Unavailable));
+        return refuse(RefusalReason::OwnerCannotDecide, ToolFailure::Unavailable)
+            .record(conn)
+            .await;
     }
 
-    // ---- ceilings, rate: PR B (before the resolution, ADR U-d / review M1) -------------------
+    // ---- 7a. ceilings, rate (before the resolution, ADR U-d / review M1) ---------------------
+    //
+    // Behind the agent's advisory lock, so two calls cannot both read "two waiting" and both
+    // raise a third (and a person's proposal takes the same lock first, so it cannot slip a card
+    // in between the count and the insert either — `action_propose`). Both are `Conflict`, and
+    // both are judged **before** the arguments are resolved: an agent at its ceiling is told so
+    // whatever it asked for, so the ceiling cannot be used to learn which names exist.
+    //
+    // The pending ceiling counts the unasked cards among the three (an unasked card is the
+    // agent's `workspace_action` like any other), and holds the unasked ones to two, so the third
+    // place is always one a person's own proposal can still take.
+    let pending =
+        momo_agent::count_pending_workspace_actions_in_tx(conn, workspace_id, agent).await?;
+    if pending.all >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS
+        || pending.unasked >= momo_agent::initiative::MAX_PENDING_INITIATIVE
+    {
+        return refuse(RefusalReason::PendingFull, ToolFailure::Conflict)
+            .record(conn)
+            .await;
+    }
+    // The rate: what was *raised* in the window (a refused call raises nothing, so it does not
+    // lengthen its own window), counted in the database on its clock.
+    let limits = crate::config::initiative_limits();
+    let recent =
+        momo_agent::initiative::count_recent_initiative_runs_in_tx(conn, workspace_id, agent)
+            .await?;
+    if recent.last_hour >= limits.per_hour || recent.last_day >= limits.per_day {
+        return refuse(RefusalReason::RateLimited, ToolFailure::Conflict)
+            .record(conn)
+            .await;
+    }
 
     // ---- 6. the arguments, resolved for the owner's eyes --------------------------------------
     let now = Utc::now();
@@ -284,18 +439,56 @@ async fn initiate_in_tx(
         Ok(resolved) => resolved,
         // The owner's side of the door: the same bytes as every other door refusal.
         Err(error) if error.message == OWNER_CANNOT_SEE => {
-            return Ok(Err(ToolFailure::Unavailable))
+            return refuse(RefusalReason::TargetUnavailable, ToolFailure::Unavailable)
+                .record(conn)
+                .await;
         }
         // The agent's own: a name it cannot see, an argument the domain refuses.
-        Err(_) => return Ok(Err(ToolFailure::InvalidArguments)),
+        Err(_) => {
+            return refuse(
+                RefusalReason::InvalidArguments,
+                ToolFailure::InvalidArguments,
+            )
+            .record(conn)
+            .await;
+        }
     };
     // The resolver's normalisation is the one the card is drawn from and the decision re-proves;
     // it must be the one the re-ask compares.
     if &resolved.validated.normalized != normalized {
-        return Ok(Err(ToolFailure::InvalidArguments));
+        return refuse(
+            RefusalReason::InvalidArguments,
+            ToolFailure::InvalidArguments,
+        )
+        .record(conn)
+        .await;
     }
 
-    // ---- duplicates, cooldown: PR B ------------------------------------------------------------
+    // ---- 7b. duplicates, cooldown (after the resolution: the key is built from it) -----------
+    //
+    // The same proposal already waiting is `Conflict`; so is one a person rejected less than a day
+    // ago. The key is what the server resolved — a channel name reduced so that `qa` → `qa2` is
+    // the same proposal (review M7), ids as they are — never the agent's spelling. An expired card
+    // blocks nothing (nobody said no) and a person's own proposal has no cooldown at all: this
+    // reads the unasked cards only.
+    let key = momo_agent::initiative::initiative_key(
+        action.id,
+        &resolved.validated.normalized,
+        &resolved.pins,
+    );
+    match momo_agent::initiative::find_blocker_in_tx(conn, workspace_id, agent, &key).await? {
+        Some(momo_agent::initiative::Blocker::Pending) => {
+            return refuse(RefusalReason::Duplicate, ToolFailure::Conflict)
+                .record(conn)
+                .await;
+        }
+        Some(momo_agent::initiative::Blocker::Cooldown) => {
+            return refuse(RefusalReason::Cooldown, ToolFailure::Conflict)
+                .record(conn)
+                .await;
+        }
+        None => {}
+    }
 
     // ---- 7. only now: the owner's DM, then the run, the approval and the card -----------------
     //
@@ -303,15 +496,21 @@ async fn initiate_in_tx(
     // before anything here could take an exclusive lock on the DM's membership rows (module
     // header) — and an already-open DM is not opened again: the open's upsert would take both
     // membership rows exclusively even though it changes nothing.
-    let dm_channel = match lock_direct_message_seq_in_tx(conn, workspace_id, agent, owner).await? {
-        Some(dm) if dm.open => dm.channel_id,
-        _ => match open_direct_message_in_tx(conn, workspace_id, agent, owner).await? {
-            OpenedDirectMessage::Opened { channel, .. } => channel.id,
-            OpenedDirectMessage::TargetNotFound => return Ok(Err(ToolFailure::Unavailable)),
-        },
-    };
-    let expires_at =
-        momo_agent::default_expires_at(now, momo_agent::initiative::INITIATIVE_TTL_SECONDS);
+    let (dm_channel, dm_created) =
+        match lock_direct_message_seq_in_tx(conn, workspace_id, agent, owner).await? {
+            Some(dm) if dm.open => (dm.channel_id, false),
+            _ => match open_direct_message_in_tx(conn, workspace_id, agent, owner).await? {
+                OpenedDirectMessage::Opened { channel, created } => (channel.id, created),
+                // The owner is not somebody a direct message can be opened with: the owner's
+                // side of the door, and nothing has been written yet.
+                OpenedDirectMessage::TargetNotFound => {
+                    return refuse(RefusalReason::NoOwner, ToolFailure::Unavailable)
+                        .record(conn)
+                        .await;
+                }
+            },
+        };
+    let expires_at = momo_agent::default_expires_at(now, limits.ttl_seconds);
     let created = momo_agent::create_held_agent_run_in_tx(
         conn,
         workspace_id,
@@ -351,6 +550,18 @@ async fn initiate_in_tx(
             // The ids the names resolved to, for the decision to compare.
             action_block.insert("pins".into(), resolved.pins.clone());
         }
+        // The server's own bookkeeping, **beside** `action` and not inside `pins` (the decision
+        // compares `pins` with what the names resolve to now, and these are not names): the key
+        // the duplicate and cooldown reads match on, and the connection the card was raised
+        // through — the decision re-proves that very connection, so a connection torn down and
+        // made again does not bring old cards back to life.
+        object.insert(
+            "initiative".into(),
+            json!({
+                "key": key,
+                "connection_id": identity.connection_id.to_string(),
+            }),
+        );
     }
     let approval_id = momo_agent::create_pending_approval_in_tx(
         conn,
@@ -426,6 +637,19 @@ async fn initiate_in_tx(
     .await?;
     momo_agent::attach_request_message_in_tx(conn, workspace_id, approval_id, card.message.id)
         .await?;
+    // The row that says a card stands — in the card's own transaction, so a card that rolls back
+    // leaves no row claiming it did.
+    momo_agent::initiative::record_opened_in_tx(
+        conn,
+        workspace_id,
+        agent,
+        owner,
+        action.id,
+        approval_id,
+        created.id,
+        dm_created,
+    )
+    .await?;
 
     Ok(Ok(json!({
         "approvalId": approval_id,

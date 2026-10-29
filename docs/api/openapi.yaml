@@ -1502,8 +1502,13 @@ paths:
         switching on also registers the helper's aliases `oort`·`오르트`·`claude`
         where no member's handle already holds them, and records the outcome in
         the server-written `team_ai_alias_status`, which is not writable either),
-        and `team_ai_web_search` (boolean, ADR-0201 증보 v2 H5: absent = on;
-        false withholds the provider's server-side web search from the helper).
+        `team_ai_web_search` (boolean, ADR-0201 증보 v2 H5: absent = on;
+        false withholds the provider's server-side web search from the helper),
+        and `agent_initiative` (boolean, ADR-0186 증보 v5 U-b-3: absent = on;
+        false closes the door for cards an agent raises nobody asked for —
+        `oort_action_initiate` is refused, and a card already waiting is not
+        executed when approved, while rejecting it still works; only an
+        administrator writes it here, never an agent proposal).
         `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
@@ -22313,6 +22318,11 @@ components:
           description: Server-written (ADR-0201 D8); not PATCH-able.
         team_ai_web_search:
           type: boolean
+        agent_initiative:
+          type: boolean
+          description: >
+            ADR-0186 증보 v5 U-b-3: the switch for cards an agent raises
+            unasked. Absent = on; false = off.
         team_ai_alias_status:
           type: object
           description: >
@@ -22376,6 +22386,18 @@ components:
             ADR-0201 증보 v2 H5: the helper's provider-side web search.
             Absent = on (only when the team key's wire supports it); false
             withholds the search tool.
+        agent_initiative:
+          nullable: true
+          type: boolean
+          description: >
+            ADR-0186 증보 v5 U-b-3: the switch for cards an agent raises
+            nobody asked for. Absent = on. false refuses new
+            `oort_action_initiate` calls and stops a card already waiting from
+            executing when it is approved (the approval stays pending;
+            rejecting is always possible). null deletes the key (on). Only a
+            boolean is stored: a string or a number is 400, because the door
+            reads anything else as off. An agent's
+            `workspace.settings.update` proposal cannot name this key.
 
     RoleLabels:
       type: object

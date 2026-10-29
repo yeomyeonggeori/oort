@@ -3174,6 +3174,41 @@ pub fn bounded_integer(
 mod tests {
     use super::*;
 
+    /// ADR-0186 증보 v5 U-b-3 (#4704): the switch that bounds an agent's unasked cards is **not**
+    /// something a proposal can write. `workspace.settings.update` takes exactly two keys, and
+    /// `agent_initiative` — spelled as the bag spells it or as the wire would — is neither: refused,
+    /// alone or beside a legal key, and absent from the schema the tool advertises.
+    #[test]
+    fn a_settings_proposal_cannot_name_the_initiative_switch() {
+        let action =
+            actions::action_by_id(actions::ACTION_WORKSPACE_SETTINGS_UPDATE).expect("registered");
+        for args in [
+            json!({"agentInitiative": false}),
+            json!({"agent_initiative": false}),
+            json!({"welcomePrompt": "환영해요", "agentInitiative": false}),
+            json!({"welcomePrompt": "환영해요", "agent_initiative": true}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // The two keys a proposal may write, by the names the bag stores them under.
+        let stored: Vec<&str> = SETTINGS_KEYS.iter().map(|(_, stored, _)| *stored).collect();
+        assert_eq!(stored, ["welcome_prompt", "role_labels"]);
+        // And the schema an agent reads lists the same two and closes the object.
+        let schema = action.args_schema();
+        let mut advertised: Vec<String> = schema["properties"]
+            .as_object()
+            .expect("an object schema")
+            .keys()
+            .cloned()
+            .collect();
+        advertised.sort();
+        assert_eq!(advertised, ["roleLabels", "welcomePrompt"]);
+        assert_eq!(schema["additionalProperties"], json!(false));
+    }
+
     /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the proposal is one message id
     /// and nothing else — no channel, no link, no text can be spelled — and the id is stored in
     /// its one canonical spelling, so the pin's comparison cannot be defeated by writing it

@@ -1084,3 +1084,17 @@ owner가 고를 것은 아래 여섯이다. 권장대로면 이 증보는 그대
 | Q6 | U-e | 메시지 고정·풀기도 승인 카드를 거치나 | 거친다 | 에이전트가 쓴 글만 승인 없이 · 모두 승인 없이 |
 
 planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자리는 소유자 1:1 DM(C1), 카드 수명 24시간, 대기 먼저 제안 2개, 결과 알림은 승인·거절 때 인박스 참조 + 같은 id 재호출(F2, 만료는 재호출이 파생), 고정 승인자는 기존 `admin`.
+
+### U-n. 구현 중 확인된 사실과 문구 정정 (2026-10-29, #4704 PR A·B)
+
+결정은 바뀌지 않았다. 코드로 N3를 짓다가 문장이 사실과 달랐거나 비어 있던 곳을 적는다(V3-13과 같은 방식).
+
+| 절 | 문장 | 정정·확정 |
+|---|---|---|
+| U-a ① | 「에이전트 `member` 행 잠금(…`lock_agent_and_count_pending_workspace_actions_in_tx`와 같은 잠금)」 | **에이전트별 advisory 락이 첫 락이다**(`momo_agent::initiative::lock_agent_initiative_in_tx`, 키는 `initiative_lock_key`). `member` 행의 `FOR NO KEY UPDATE`는 모든 메시지 쓰기·결정의 wake·신원 증명이 쥐는 `FOR SHARE`와 충돌해서 같은 에이전트의 동시 호출이 구조적으로 교착했다(PR A 보안 검수 M1). 사람이 시킨 제안(`oort_action_propose`)도 **같은 락을 첫 문장으로** 잡는다(PR B): 합계 대기 3개는 두 생산자가 나눠 쓰는 자리라서, 한쪽이 센 뒤 쓰기 전에 다른 쪽이 끼어들면 넷이 된다. 락이 첫째일 때만 이 문이 쥔 락 말고는 아무것도 기다리지 않는다 |
+| U-d 속도 | 「`agent_run`에서 `agent_initiated:<에이전트>:` 키의 행 수를 센다」 | `agent_member_id` + 접두 `agent_initiated:`(`run::AGENT_INITIATED_KEY_PREFIX`)로 센다 — 두 값은 한 생산자가 같은 입력으로 쓰므로 같은 행 집합이다. 부분 인덱스 `agent_run_initiative_rate_idx`(migration 155)가 받치고, 조회 문장은 같은 술어를 리터럴로 적는다(L5). 환경변수는 `MOMO_AGENT_INITIATIVE_PER_HOUR`(기본 6, 1..=60)·`_PER_DAY`(20, 1..=240)·`_TTL_HOURS`(24, 1..=168)이고 범위 밖은 가장 가까운 끝값으로, 숫자가 아니면 기본값으로 쓰며 부팅 때 한 번 경고한다(L6) |
+| U-d 중복 | 「같은 (에이전트, 행동, 서버가 해석한 정규화 인자)」 | 키는 `payload.initiative.key`에 서버가 해석 뒤에 쓴다(`pins` 밖: 결정이 `pins`를 지금의 해석과 비교한다). `channel.create`는 이름을 소문자로 하고 `-`·`_`를 빼고 끝 숫자를 떼어 줄인다(`qa`·`QA`·`qa2`·`qa-2`가 한 키, `qa-team`은 다른 키, 숫자뿐인 이름은 그대로). 나머지는 id다(`channel.member.add`는 채널 id + 사람 id 집합, 핀은 메시지 id). 쿨다운은 **거절(`rejected`)만** 시작한다: 만료는 아무도 「그만」이라 하지 않은 것이고, `cancelled`는 사람의 run 취소뿐 아니라 시스템 정리에서도 나오므로 사람의 말로 읽지 않는다 |
+| U-d 재증명 | 「제안 에이전트가 활성…연결이 active·증명됐으며…결정자가 현재 소유자」 | 카드가 선 **그 연결**을 `payload.initiative.connection_id`에 적고, 결정 때 그 연결이 여전히 에이전트의 살아 있는 연결(`active_hosted_connection_in_tx`)이어야 한다 — 연결을 끊었다 다시 만들어도 옛 카드는 살아나지 않는다. 연결 확인자 == 소유자(L2)와 결정자 == 현재 소유자는 문의 조건 4와 같은 술어(`initiative_facts_in_tx`)로 읽고, 끄개는 문과 같은 읽기(`switch_is_on`)다. 연결 표지가 없는 카드는 닫힌 쪽(`action_args_invalid`)이다 |
+| U-d 감사 | 「합쳐서 가려지는 횟수는 후속에서 다음 창의 첫 행에 싣는 방안을 본다」 | 구현했다. (워크스페이스, 에이전트, reason)마다 한 시간 창을 `agent_initiative_refusal`(migration 155)이 쥐고, 첫 거절만 행을 쓰며 나머지는 `suppressed`를 올리고, 창이 지난 뒤 첫 거절의 행이 그 수를 `detail.suppressed`로 싣고 0에서 다시 시작한다(항상 키가 있고 없으면 0). 이미 쓴 감사 행은 고치지 않는다. 행이 없는 거절: 문 1·2의 실패(이 자격증명은 먼저 제안 자격이 아니다), 트랜잭션 전에 스키마가 거르는 인자, 같은 id의 재호출(읽기이고 아무것도 쓰지 않는다) — 아홉 이유 밖이고 열 번째를 만들지 않았다 |
+| U-k 5 | 「정지는 같은 `Unavailable`」 | 정지·연결 해제된 에이전트는 도구 목록이 비어(`resolve_hosted_tool_identity_in_tx`가 `paused=false`를 요구) **어느 도구든 「알 수 없는 도구」**(400, -32602)로 답한다. `Unavailable`은 목록과 호출 사이에 정지가 끼어든 경우의 몫이다 |
+| U-c 시험 의무 | 「비멤버 admin은 거절된다(현행은 403)」 | 결정 라우트는 소유자 DM 밖의 누구에게든 **없는 승인과 같은 404**로 답한다(인플레이스 카드와 같은 분기, 두 표지 중 하나면 먼저 제안 카드). 미리보기(`avatar-preview`)는 먼저 제안이 사진을 올리지 않으므로 처음부터 모두에게 404다 |

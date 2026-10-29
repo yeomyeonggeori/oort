@@ -851,7 +851,15 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         // (possibly private) and who called whom there. To somebody outside that
         // room, an admin included, it answers exactly as a missing approval does,
         // so the id teaches them nothing.
-        if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+        //
+        // ADR-0186 증보 v5 U-c (#4704 PR B, review M8) — the same for a card an agent raised
+        // unasked: it stands in its owner's one-to-one direct message and says what the agent
+        // wants to do there, so to anybody outside that room — a workspace admin included — the
+        // id answers as a missing approval does (`403 forbidden` would confirm the card exists,
+        // and whose room it is in). Judged by either server-written marker, like the executor.
+        if momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
+            || momo_agent::initiative::is_unasked_card(&approval)
+        {
             return Ok(Ok(refusal(
                 input.approval_id,
                 input.member_id,
@@ -1239,8 +1247,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .with_schema(
                 TOOL_AUDIT_SCHEMA,
                 // A copy: `event` is also the resume job's input and the
-                // broadcast, and neither is told which credential decided.
-                stamp_via(input.credential_via, event.clone()),
+                // broadcast, and neither is told which credential decided
+                // (nor that the card was raised unasked: the audit row says so).
+                momo_agent::initiative::stamp_origin(
+                    &approval,
+                    stamp_via(input.credential_via, event.clone()),
+                ),
             ),
     )
     .await?;
@@ -1682,9 +1694,27 @@ async fn execute_workspace_action(
     // was dropped is still an unasked card while its run says so — and an unasked card can only ever
     // name an initiative action, so a tampered `action.id` is refused rather than judged by the
     // looser rules of a card a person asked for (security review of #4704, M2).
-    let initiated = momo_agent::initiative::is_agent_initiated(&approval.payload)
-        || momo_agent::initiative::is_held_for_agent_initiative(&approval.run_input);
+    let initiated = momo_agent::initiative::is_unasked_card(approval);
     if initiated && !action.initiative {
+        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+    }
+    // **The decision proves the door again** (ADR-0186 증보 v5 U-d 「재증명」): a card may be a day
+    // old, and everything that let an agent raise it can have changed since. The switch is on, the
+    // connection it was raised through is still the agent's live one and still carries the
+    // approval of `workspace:initiate`, the agent is active and not paused, the person deciding is
+    // the agent's **current** owner and the one who confirmed that connection, and (above) the
+    // action is still on the list. One `action_args_invalid` for any of them (409, the approval
+    // is **not** consumed): a card that no longer stands is not a card to run, and a rejection
+    // never comes through here, so a person can always say no.
+    if initiated
+        && !crate::routes::agent_initiative::card_still_stands_in_tx(
+            conn,
+            input.workspace_id,
+            approval,
+            input.member_id,
+        )
+        .await?
+    {
         return Ok(Ok(args_invalid_refusal(approval, input, now)));
     }
     let resolution = if initiated {
@@ -2134,7 +2164,12 @@ async fn execute_workspace_action(
     // coincidence.
     let action_ref_value = action_ref(executed.ref_type, executed.ref_id);
     for entry in &executed.audits {
-        write_audit(conn, entry).await?;
+        // An unasked card's rows say so (`origin`); every other card's are written as they were.
+        let stamped = AuditEntry {
+            detail: momo_agent::initiative::stamp_origin(approval, entry.detail.clone()),
+            ..entry.clone()
+        };
+        write_audit(conn, &stamped).await?;
     }
     write_audit(
         conn,
@@ -2148,15 +2183,18 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                stamp_via(
-                    input.credential_via,
-                    json!({
-                        "action_id": action.id,
-                        "approval_id": approval.id.to_string(),
-                        "proposed_by": approval.requested_by.to_string(),
-                        "decided_by": input.member_id.to_string(),
-                        "ref": action_ref_value,
-                    }),
+                momo_agent::initiative::stamp_origin(
+                    approval,
+                    stamp_via(
+                        input.credential_via,
+                        json!({
+                            "action_id": action.id,
+                            "approval_id": approval.id.to_string(),
+                            "proposed_by": approval.requested_by.to_string(),
+                            "decided_by": input.member_id.to_string(),
+                            "ref": action_ref_value,
+                        }),
+                    ),
                 ),
             ),
     )
@@ -3912,7 +3950,13 @@ async fn settle_expired(
             .target("approval", approval.id)
             .via_token(via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, stamp_via(credential_via, event.clone())),
+            .with_schema(
+                TOOL_AUDIT_SCHEMA,
+                momo_agent::initiative::stamp_origin(
+                    approval,
+                    stamp_via(credential_via, event.clone()),
+                ),
+            ),
     )
     .await?;
 

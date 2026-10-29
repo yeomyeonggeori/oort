@@ -1049,6 +1049,46 @@ fn liveness_thresholds_from_env() -> Result<momo_agent::LivenessThresholds, Conf
     })
 }
 
+/// ADR-0186 증보 v5 U-d (#4704 PR B) — the rate and the lifetime of a card an agent raises
+/// **unasked**, read once from the environment: `MOMO_AGENT_INITIATIVE_PER_HOUR` (default 6,
+/// 1..=60), `MOMO_AGENT_INITIATIVE_PER_DAY` (20, 1..=240) and `MOMO_AGENT_INITIATIVE_TTL_HOURS`
+/// (24, 1..=168). Each is clamped to its range and a value that is not a number falls back to the
+/// default, both with a warning at first use: a typo must not close the door (a zero) nor open it
+/// past the ceiling, and an abuse limit is not worth a failed boot. A process-wide read for the
+/// reason `liveness_thresholds` is: the fixtures that build [`AgentPortConfig`] literally are
+/// untouched.
+pub fn initiative_limits() -> momo_agent::initiative::InitiativeLimits {
+    static LIMITS: std::sync::OnceLock<momo_agent::initiative::InitiativeLimits> =
+        std::sync::OnceLock::new();
+    *LIMITS.get_or_init(|| {
+        let names = [
+            "MOMO_AGENT_INITIATIVE_PER_HOUR",
+            "MOMO_AGENT_INITIATIVE_PER_DAY",
+            "MOMO_AGENT_INITIATIVE_TTL_HOURS",
+        ];
+        let (limits, readings) = momo_agent::initiative::InitiativeLimits::from_env_values(
+            env(names[0]).as_deref(),
+            env(names[1]).as_deref(),
+            env(names[2]).as_deref(),
+        );
+        for (name, reading) in names.into_iter().zip(readings) {
+            match reading {
+                momo_agent::initiative::LimitReading::Clamped { requested } => tracing::warn!(
+                    variable = name,
+                    requested,
+                    "an agent-initiative limit is outside its range and was clamped"
+                ),
+                momo_agent::initiative::LimitReading::Unparsable => tracing::warn!(
+                    variable = name,
+                    "an agent-initiative limit is not a number; using the default"
+                ),
+                _ => {}
+            }
+        }
+        limits
+    })
+}
+
 impl AgentPortConfig {
     pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
         let defaults = AgentPortConfig::default();
