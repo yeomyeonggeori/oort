@@ -98,7 +98,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `themes/catalog.contrast.test.ts` · `paletteContrast.test.ts`):
 
-- **순흑·순백 없음.** 종이의 흰색은 `#fffefc`. 반투명 층(스크림·유리 가장자리)은 칠이 아니라 그늘이라 예외다.
+- **순흑·순백 없음.** 종이의 흰색은 `#fffefc`. 반투명 층(스크림·유리 가장자리)은 칠이 아니라 그늘이라 예외다. **폰 사진 뷰어의 무대**(`tokens.ts` 의 `photoStage`: 순흑 바탕·순백 글리프)는 테마와 무관한 폰 전용 예외다 — 사진은 어두운 방에서 가장 잘 보이고, 값이 아니라 대비 **관계**를 `attachmentViewer.test.tsx` 가 잰다(#4297).
 - **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *"never neon AI purple"*이라고 적는다.
 - **`--line`은 나누고, `--line-strong`은 텍스트 입력 그릇을 그린다(3:1).** ADR-0189 D6: **버튼은 채움 알약이다**(`Button` 다섯 변형 모두 테두리가 없다 — 주 = 잉크 채움, 보조·outline = `--surface-muted` 채움, 파괴 = `--danger-fill`, ghost = 채움 없음). outline 테두리는 `Input`·`Select`·컴포저처럼 **값을 받는 그릇에만** 남는다. `--line-strong`은 입력이 설 수 있는 모든 면(표면·보조 면·시트·바닥 정지점·선택 행)에서 3:1을 넘도록 core가 골랐고, 3:1을 깨는 완화는 금지.
 - **유리는 `glass` 유틸 하나로만.** 반투명 `--glass` + 흐림 22·채도 1.4. 투명도 줄이기·고대비·`backdrop-filter` 미지원에서는 불투명(`--surface`, 미지원은 94%)으로 물러난다(ADR-0189 D7). 실제 렌더 대비는 캡처로만 잰다(`runtime-unverified`).
