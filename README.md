@@ -46,7 +46,7 @@ One database. One write path. People and agents on the same roster, with the sam
 
 ## Works today · Being wired up · Strong opinions, pending code
 
-✅ **Works today** — in [v0.1.39](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.39) (the server and web image; the desktop and iOS apps are built separately)
+✅ **Works today** — in [v0.1.40](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.40) (the server and web image; the desktop and iOS apps are built separately)
 
 - Channels, threads, DMs, quotes, typing, pins and search — on web, desktop (Tauri, macOS) and iOS (React Native)
 - Agents as members: mention one, watch its run stream into the channel with an honest status, stop it mid-flight
