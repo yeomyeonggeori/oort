@@ -1,52 +1,27 @@
 import type {DividerSegment} from '@momo/core/features/timeline/divider';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {
+  ds2Radius,
   font,
   line,
   radius,
   slopTo,
   space,
+  TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
+import {GlassSurface} from '../../design/glass';
 import {useStyles} from '../../design/theme';
 import {useKeyboardShown} from '../../lib/useKeyboardShown';
 
 // =============================================================================
-// 타임라인 점프 필 (#1892 — 웹 `UnreadPill` 의 폰판).
-//
-// 위 「안읽음으로」와 아래 「최신으로」는 목적지만 다르고 옷은 같다. 두 벌을 그리면
-// 한쪽만 손대는 다음 티켓이 얼굴을 가른다 — 웹과 같은 이유로 `direction` 하나로
-// 같은 버튼을 쓴다.
-//
-// 옷은 웹 `UNREAD_PILL_CLASS` 를 폰 토큰으로 옮긴 것이다:
-//
-//   bg-surface-raised → surface         border-line-strong → textFaint (3:1)
-//   rounded-sm → radius.sm              px-3 → space.md · gap-2 → space.sm
-//   text-meta text-ink → font.meta · text   shadow-lg → 팔레트 그림자
-//   h-control-sm (28) → PILL_HEIGHT     터치 44 → slopTo (웹과 다르다, 아래)
+// 타임라인 점프 필 — 위는 안 읽음 문장, 아래는 44pt 유리 원 (#4789).
+// 목적지·낭독 문구는 jumpPills.ts가 계속 정한다.
 // =============================================================================
 
-/**
- * 필의 보이는 높이 = 웹 `--spacing-control-sm`(28px). 짝은
- * `__tests__/designSystem.test.ts` 가 웹 `tokens.css` 를 읽어 대조한다.
- *
- * ## 터치 44 는 웹과 다른 길로 채운다 — 폰의 결정이다 (design-review 2594 R1 M-5)
- *
- * 웹은 터치 기기에서 필 **자체를** 44 로 키운다(`tokens.css` 의
- * `@media (hover: none) { [data-unread-pill] { min-block-size: var(--tap-target) } }`
- * 와 폭 600 미만 규칙). 그래서 같은 폰에서 oort 웹은 44 짜리 필을, 이 앱은 28 짜리
- * 필을 그린다. 첫 판의 주석은 「웹이 같은 거래를 한다」고 적었고, 그것은 사실이
- * 아니었다.
- *
- * 폰이 28 을 지키는 이유는 **필이 타임라인 위에 떠 있기 때문이다.** 떠 있는 것은
- * 자기 높이만큼 아래 줄을 덮고, 44 면 그 덮는 띠가 한 줄 반이 된다. 웹은 CSS 에
- * 누르는 영역만 넓히는 수단이 없어 상자를 키울 수밖에 없지만, RN 에는 `hitSlop` 이
- * 있다. 그래서 보이는 상자는 웹의 컨트롤 높이 그대로 두고, 손가락이 받는 44 는
- * `slopTo` 가 채운다. Fabric 은 자식의 `hitSlop` 을 부모의 `overflowInset` 에
- * 넣으므로(`YogaLayoutableShadowNode.cpp`, `RCTViewComponentView.mm`) 필을 띄우는
- * 띠 밖으로 나간 여유 영역도 실제로 눌린다 — design-review R1 이 소스로 확인했다.
- */
+/** 위쪽 안 읽음 필은 기존 높이와 44pt 터치 여유를 유지한다. */
 export const PILL_HEIGHT = 28;
 const PILL_HIT_SLOP = {
   top: slopTo(PILL_HEIGHT),
@@ -61,6 +36,7 @@ export function JumpPill({
   accessibilityLabel,
   onPress,
   testID,
+  newCount = 0,
 }: {
   direction: 'up' | 'down';
   segments: readonly DividerSegment[];
@@ -68,8 +44,28 @@ export function JumpPill({
   accessibilityLabel: string;
   onPress: () => void;
   testID: string;
+  /** 아래 최신 단추의 새 글 수. 낭독은 기존 전체 문장을 유지한다. */
+  newCount?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  if (direction === 'down') {
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        onPress={onPress}
+        style={({pressed}) => [styles.latest, pressed && styles.pressed]}
+        testID={testID}>
+        <GlassSurface radius={ds2Radius.pill} style={StyleSheet.absoluteFill} testID={`${testID}-glass`} />
+        <Text style={styles.latestArrow} accessibilityElementsHidden importantForAccessibility="no">↓</Text>
+        {newCount > 0 ? (
+          <View style={styles.badge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" testID={`${testID}-badge`}>
+            <Text style={styles.badgeText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>{newCount > 99 ? '99+' : newCount}</Text>
+          </View>
+        ) : null}
+      </Pressable>
+    );
+  }
   return (
     <Pressable
       accessibilityRole="button"
@@ -83,7 +79,7 @@ export function JumpPill({
         style={styles.arrow}
         accessibilityElementsHidden
         importantForAccessibility="no">
-        {direction === 'up' ? '↑' : '↓'}
+        ↑
       </Text>
       {/* 라벨은 한 조각. 쪼개서 flex 자식으로 두면 gap 이 낱말 사이에 끼어
           「새 메시지  1  개」가 된다(웹 같은 자리의 주석). 숫자만 자릿폭을 고정한다. */}
@@ -163,6 +159,27 @@ const buildStyles = (color: Palette) =>
       shadowOpacity: 0.18,
       shadowRadius: 10,
     },
+    latest: {
+      width: TOUCH_TARGET,
+      height: TOUCH_TARGET,
+      borderRadius: ds2Radius.pill,
+      alignItems: 'center',
+      justifyContent: 'center',
+      boxShadow: color.elevationRest,
+    },
+    latestArrow: {fontSize: font.title, lineHeight: line.title, color: color.text},
+    badge: {
+      position: 'absolute',
+      top: -space.xs,
+      right: -space.sm,
+      minWidth: line.heading,
+      paddingHorizontal: space.xs,
+      paddingVertical: space.xs,
+      borderRadius: ds2Radius.pill,
+      alignItems: 'center',
+      backgroundColor: color.primary,
+    },
+    badgeText: {fontSize: font.caption, lineHeight: line.caption, fontWeight: '600', color: color.onPrimary, fontVariant: ['tabular-nums']},
     pressed: {backgroundColor: color.surfacePressed},
     arrow: {fontSize: font.label, lineHeight: line.meta, color: color.text},
     label: {fontSize: font.meta, lineHeight: line.meta, color: color.text},

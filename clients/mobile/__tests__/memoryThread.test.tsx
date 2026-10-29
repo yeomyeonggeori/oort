@@ -11,6 +11,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import {ThreadPanel} from '../src/features/conversation/ThreadPanel';
 import type {UseTimelineResult} from '../src/features/conversation/useTimeline';
@@ -133,6 +134,27 @@ describe('스레드 요약 카드', () => {
     renderThread(REPLIES, {sinceSeq: 30, headSeq: 30, onOpenEvidenceOutside: jest.fn()});
     await act(async () => {});
     expect(mockList).not.toHaveBeenCalled();
+  });
+
+  it.each([0, 5])('S1 #4789 High 1: 안읽음 %i·요약 닫힘에서 스레드 머리 여백은 목록 안 한 번뿐이다', async unread => {
+    mockList.mockResolvedValue({digests: [digest('reply-22')], afterSeq: 15, summarizedThroughSeq: 24});
+    renderThread(REPLIES, {sinceSeq: unread === 0 ? 30 : 15, headSeq: 24, onOpenEvidenceOutside: jest.fn()});
+    if (unread > 0) {
+      await waitFor(() => expect(screen.getByTestId('missed-digest-ready')).toBeTruthy());
+      // 실제 카드가 스크롤 목록 안에 있어야 한다.
+      expect(screen.getByTestId('timeline-list').findByProps({testID: 'missed-digest-ready'})).toBeTruthy();
+      fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
+    } else {
+      await act(async () => {});
+    }
+    expect(screen.queryByTestId('missed-digest-card')).toBeNull();
+    const list = screen.getByTestId('timeline-list');
+    expect(StyleSheet.flatten(list.props.contentContainerStyle).paddingTop).toBe(62);
+    let node = list.parent;
+    while (node) {
+      if (node.type === 'View') expect(StyleSheet.flatten(node.props.style)?.paddingTop ?? 0).toBe(0);
+      node = node.parent;
+    }
   });
 
   it('memory 가 없으면 카드도 요청도 없다 (옛 호출자)', async () => {

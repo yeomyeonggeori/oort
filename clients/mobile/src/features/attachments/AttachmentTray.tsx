@@ -35,12 +35,12 @@ import {
   font,
   line,
   radius,
-  SAFE_GUTTER,
   space,
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
 import {useStyles} from '../../design/theme';
+import {CONV} from '../conversation/convDesign';
 
 export function AttachmentTray({
   drafts,
@@ -317,7 +317,7 @@ function DraftRow({
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
     root: {
-      paddingHorizontal: SAFE_GUTTER,
+      paddingHorizontal: CONV.composerDockInset,
       paddingVertical: space.sm,
       borderBottomWidth: StyleSheet.hairlineWidth,
       borderBottomColor: color.border,
