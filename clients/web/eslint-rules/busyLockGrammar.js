@@ -18,7 +18,9 @@
  * 1. `momo/busy-lock-grammar` — 쓰기를 내는 설정·호스티드 표면 열한 파일에만 건다
  *    (범위는 busyLockScope.js 의 BUSY_LOCK_GRAMMAR_FILES). 새 파일은 자동으로 들어오지
  *    않는다: 옛 시험도 이름을 단 파일 목록만 재었고, 범위를 글롭으로 넓히는 것은
- *    다른 워커가 같은 디렉터리에 새 카드를 세우는 동안 하지 않는다.
+ *    다른 워커가 같은 디렉터리에 새 카드를 세우는 동안 하지 않는다. (실측: 이 규칙을
+ *    `src/features/**\/*.tsx` 전체에 강제로 걸면 213건이 나온다 — 대부분 범위 밖 파일의 native
+ *    disabled 와 옛 문법이라, 범위 확장은 파일 하나씩 고치고 목록에 더하는 방식으로 한다.)
  *
  *    · nativeDisabled — `<Button disabled=…>`. 잠긴 버튼은 tab order 를 떠나고 사유가
  *      키보드·AT 로 닿을 수 없는 곳에 놓이며, 초점을 쥔 채 잠기면 초점이 <body> 로
@@ -38,6 +40,8 @@
  *      (자기=켜짐, 잠금=켜짐)이 둘 다 나오면 접힌 것이다. 형제 쓰기로 잠기는 것
  *      (`busy && !자기진행`, 자기진행이 `a || b` 든 `a && b` 든)은 갈라내는 문법 그대로라 통과한다.
  *      식이 진리표 상한보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다.
+ *      **알려진 구멍**(조용히 통과): 값을 감싸는 억지스러운 꼴 — `useMemo(() => { const x = …; return …; })` ·
+ *      `useCallback(…)()` · `[…].some(Boolean)` · `Boolean(x, 1)` · `Boolean(...[x])`(옛 그물도 못 봤다).
  *    · opacityFollowsLock / opacityOutsideLock — `aria-disabled={L}` 이 있으면 흐림은
  *      **같은 식 L** 하나가 켠다(`cn(…, L && "opacity-50")`). 흐림 없는 잠금은 회색이 아닌
  *      죽은 버튼이고, 다른 조건·삼항 가지·고정 클래스·템플릿에 선 흐림(`opacity-*`)은 진행을

@@ -324,6 +324,25 @@ describe("rawControlBusySplit 별칭 스캔 · confirmBusySplit ② · settingsF
     expect(await findings(folded, GRAMMAR_FILE)).toEqual(["selfLock"]);
   });
 
+  it("다른 컨트롤의 진행 어휘가 잠금 식에 자기 진행의 부정 없이 남으면 붉다 — 옛 별칭 스캔의 어휘 검사", async () => {
+    // 옛 스캔은 잠금 식을 편 뒤 진행 어휘가 남아 있으면 `!자기진행` 을 요구했다. 자기 진행(saving)은 잠금에
+    // 나오지 않으므로 진리표(나)는 못 보고, 어휘 검사(가)만 이 자리를 본다.
+    const bare = component(
+      "",
+      button({ lock: "offline || creating", busy: "saving", cn: '(offline || creating) && "opacity-50"' })
+    );
+    const split = component(
+      "",
+      button({
+        lock: "offline || (creating && !saving)",
+        busy: "saving",
+        cn: '(offline || (creating && !saving)) && "opacity-50"',
+      })
+    );
+    expect(await findings(bare, GRAMMAR_FILE)).toEqual(["selfLock"]);
+    expect(await findings(split, GRAMMAR_FILE)).toEqual([]);
+  });
+
   it("식 안의 설명 주석이 어휘 검사를 붉히지 않는다 — 주석은 노드가 아니다", async () => {
     const lockComment = component(
       "",
