@@ -51,7 +51,12 @@ import {
   viewerScrimPlateau,
   viewerStamp,
 } from '../src/features/attachments/viewerDesign';
+import {
+  DOUBLE_TAP_MS,
+  ZOOMED_A11Y_VALUE,
+} from '../src/features/attachments/viewerZoom';
 import { retainReduceMotion } from '../src/lib/useReduceMotion';
+import { installTimersOnlyClock } from './fixtures/fakeClock';
 
 jest.mock('../src/session/useSession', () => ({
   useSession: () => ({
@@ -344,6 +349,23 @@ function dragSlowly(touch: ReturnType<typeof finger>, x: number, y0: number, tot
   touch.move(x, y0 + total, 50);
 }
 
+/**
+ * 가짜 시계 안에서 `run` 을 하고 두 번 탭 문턱(`DOUBLE_TAP_MS`)이 지나게 한다 (#4769). 첫 탭은 두 번째 탭이 오는지 보려고 그만큼 기다린 **뒤에야**
+ * 한 번 탭(조작 숨김·나타남)이 된다. 그래서 탭의 결과를 보는 단정은 문턱이 지난 뒤에 해야 한다 — 안 그러면 「탭해도 조작이 안 숨는다」는 단정이
+ * 타이머가 아직 안 울렸다는 이유로 초록이 된다(실패할 수 없는 단정). 시계는 이 안에서만 가짜다: 미리보기를 기다리는 `mount` 는 진짜 시계로 돈다.
+ */
+function afterTapWindow(run: () => void) {
+  installTimersOnlyClock();
+  try {
+    run();
+    act(() => {
+      jest.advanceTimersByTime(DOUBLE_TAP_MS);
+    });
+  } finally {
+    jest.useRealTimers();
+  }
+}
+
 interface Mounted {
   onClose: jest.Mock;
   progress: { current: number | null };
@@ -626,7 +648,8 @@ describe('② 아래로 쓸어 닫기', () => {
     touch.down(200, 300);
     touch.move(200, 307);
     expect(progress.current).toBeNull();
-    touch.up();
+    // #4769: 한 번 탭은 두 번 탭 문턱만큼 늦다 — 문턱이 지난 뒤에 조작이 숨는다.
+    afterTapWindow(() => touch.up());
     expect(onClose).not.toHaveBeenCalled();
     // #4297: 사진을 한 번 누르면 조작이 숨는다 — 숨은 단추는 눌리지 않는다. 한 번 더 눌러 돌아오면 뒤로의 탭이 산다.
     // (숨은 덩어리는 접근성 트리에서 빠지므로 렌더러의 기본 질의에는 잡히지 않는다 — 숨은 것을 보려면 명시한다.)
@@ -634,7 +657,7 @@ describe('② 아래로 쓸어 닫기', () => {
     expect(hiddenBar().props.pointerEvents).toBe('none');
     const again = finger(photo());
     again.down(200, 300);
-    again.up();
+    afterTapWindow(() => again.up());
     expect(hiddenBar().props.pointerEvents).toBe('box-none');
     fireEvent.press(screen.getByTestId('attachment-viewer-back'));
     expect(onClose).toHaveBeenCalledTimes(1);
@@ -1161,11 +1184,14 @@ describe('대화에서 연 뷰어', () => {
 // =============================================================================
 
 /** 사진을 한 번 누른다(탭): 닿고, 문턱 안에서 뗀다. */
-function tap(target: Instance = photo()) {
+function tap(target: Instance = photo(), x = 200, y = 300) {
   const touch = finger(target);
-  touch.down(200, 300);
+  touch.down(x, y);
   touch.up();
 }
+
+/** 한 번 탭이 **일어난 뒤까지** 간다: 탭하고 두 번 탭 문턱이 지나게 한다(`afterTapWindow`). */
+const tapOnce = (target?: Instance) => afterTapWindow(() => tap(target));
 
 // 숨은 덩어리는 접근성 트리에서 빠진다(`accessibilityElementsHidden`) — 렌더러의 기본 질의는 그런 요소를 건너뛰므로 숨은 상태를
 // 읽는 이 도우미들은 숨은 것도 포함해 묻는다.
@@ -1193,7 +1219,7 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
     const { onClose } = await mount();
     expect(chromeIsShown()).toBe(true);
     expect(bar().props.accessibilityElementsHidden).toBe(false);
-    tap();
+    tapOnce();
     for (const block of [bar(), actionsBlock()]) {
       expect(block.props.pointerEvents).toBe('none');
       expect(block.props.accessibilityElementsHidden).toBe(true);
@@ -1209,9 +1235,9 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
 
   it('다시 탭하면 돌아온다 — 두 덩어리가 같이, 읽히는 것도 같이', async () => {
     const { onClose } = await mount();
-    tap();
+    tapOnce();
     expect(chromeIsShown()).toBe(false);
-    tap();
+    tapOnce();
     expect(chromeIsShown()).toBe(true);
     for (const block of [bar(), actionsBlock()]) {
       expect(block.props.accessibilityElementsHidden).toBe(false);
@@ -1224,18 +1250,19 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
 
   it('탭은 닫지도 끌지도 않는다', async () => {
     const { onClose, progress } = await mount();
-    tap();
+    tapOnce();
     expect(onClose).not.toHaveBeenCalled();
     expect(progress.current).toBeNull();
   });
 
   it('끌기·가로 넘김·핀치·빼앗김은 탭이 아니다 — 조작이 숨지 않는다', async () => {
     await mount();
+    // 각 손짓은 두 번 탭 문턱이 **지난 뒤에** 본다: 탭으로 세었다면 그때 조작이 숨는다(문턱 전에 보면 타이머가 안 울렸을 뿐이라 헛돈다).
     // 아래로 끌다 모자라게 놓는다.
     const drag = finger(photo());
     drag.down(200, 300);
     dragSlowly(drag, 200, 300, 60);
-    drag.up();
+    afterTapWindow(() => drag.up());
     expect(chromeIsShown()).toBe(true);
     // 옆으로 넘기던 손가락(스크롤뷰가 응답을 가져간다 — 놓음이 아니라 빼앗김).
     const swipe = finger(photo());
@@ -1247,25 +1274,25 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
     ] as const) {
       swipe.move(x, y);
     }
-    swipe.terminate();
+    afterTapWindow(() => swipe.terminate());
     expect(chromeIsShown()).toBe(true);
     // 가로로 문턱을 넘은 뒤 그대로 떼도(응답을 안 빼앗겼어도) 탭이 아니다.
     const lateral = finger(photo());
     lateral.down(300, 400);
     lateral.move(260, 402);
-    lateral.up();
+    afterTapWindow(() => lateral.up());
     expect(chromeIsShown()).toBe(true);
     // 두 손가락이 한꺼번에 닿았다 떼도 탭이 아니다.
     const pinch = finger(photo());
     pinch.down(200, 300, 2);
-    pinch.up();
+    afterTapWindow(() => pinch.up());
     expect(chromeIsShown()).toBe(true);
   });
 
   it('숨김·나타남은 불투명도 하나다 — 나타남 240 · 사라짐 180(사다리), 곡선 EASE_OUT, 네이티브 구동', async () => {
     const timing = jest.spyOn(Animated, 'timing');
     await mount();
-    tap();
+    tapOnce();
     const configs = () => timing.mock.calls.map(call => call[1] as unknown as Record<string, unknown>);
     expect(configs()).toContainEqual(
       expect.objectContaining({
@@ -1275,7 +1302,7 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
         useNativeDriver: true,
       }),
     );
-    tap();
+    tapOnce();
     expect(configs()).toContainEqual(
       expect.objectContaining({
         toValue: 1,
@@ -1293,9 +1320,9 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
     const timing = jest.spyOn(Animated, 'timing');
     await mount();
     await act(async () => {}); // 설정의 답이 도착한다
-    tap();
+    tapOnce();
     expect(chromeIsShown()).toBe(false);
-    tap();
+    tapOnce();
     expect(chromeIsShown()).toBe(true);
     expect(timing).not.toHaveBeenCalled();
   });
@@ -1304,7 +1331,7 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
     a11y.isScreenReaderEnabled.mockImplementation(() => Promise.resolve(true));
     await mount();
     await act(async () => {}); // 보조기술의 답이 도착한다
-    tap();
+    tapOnce();
     expect(chromeIsShown()).toBe(true);
     expect(bar().props.accessibilityElementsHidden).toBe(false);
   });
@@ -1692,7 +1719,7 @@ describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에�
       expect(fadeStyle.height).toBe(VIEWER.scrimReach);
       expect(fadeStyle.experimental_backgroundImage).toBe(viewerScrimFade(which === 'top' ? 'down' : 'up'));
     }
-    tap();
+    tapOnce();
     expect(bar().props.pointerEvents).toBe('none'); // 스크림은 덩어리 안이라 같이 숨는다.
   });
 
@@ -1739,5 +1766,254 @@ describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에�
     expect(style.backgroundColor).toBe(VIEWER_GLASS_TONE.fallback);
     expect(contrast(composite(VIEWER_STAGE.danger, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(composite(VIEWER_STAGE.ink, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
+  });
+});
+
+// =============================================================================
+// 사진 뷰어의 확대 (#4769): 두 손가락 확대와 두 번 탭.
+//
+// 확대 자체는 iOS 스크롤뷰가 한다. jest 에는 네이티브 스크롤뷰가 없어 「실제로 커지는가」와 「원래 크기에서 가로 넘김·쓸어 닫기가 산다」는 못 잰다 —
+// 그것은 Maestro 120 이 잰다(두 번 탭 → 확대 중 넘기기 안 됨 → 다시 두 번 탭 → 넘기기 됨). 여기서 재는 것은 **JS 가 정하는 것**이다: 스크롤뷰의
+// 설정, 응답자의 자리, 두 번 탭의 판정과 네이티브에 넘기는 사각형, 확대 상태에 따른 잠금, 장이 바뀔 때의 풀림, 접근성 값, 동작 줄이기.
+// 네이티브가 알려 주는 배율은 `onScroll`·`onScrollEndDrag` 의 `zoomScale` 로 흉내 낸다(`scrollViewDidZoom`·`scrollViewDidEndZooming` 이 보내는 모양).
+// =============================================================================
+describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
+  const { width, height } = Dimensions.get('window');
+  const zoomScroll = (index = 0) => screen.getAllByTestId('attachment-viewer-zoom')[index] as Instance;
+  /** 네이티브 확대 스크롤뷰가 받은 `zoomToRect` 요청(`scrollResponderZoomTo`) — jest 의 스크롤뷰 대역이다. */
+  const zoomTo = () => ScrollView.prototype.scrollResponderZoomTo as unknown as jest.Mock;
+  /** 네이티브가 알려 주는 배율을 `index` 쪽의 확대 스크롤뷰에 흉내 낸다. */
+  const zoomBy = (scale: number, index = 0, event: 'scroll' | 'scrollEndDrag' = 'scroll') =>
+    act(() => {
+      fireEvent(zoomScroll(index), event, { nativeEvent: { zoomScale: scale } });
+    });
+  /** 같은 자리를 연달아 두 번 누른다(문턱 안). 문턱이 지난 뒤까지 간다. */
+  const doubleTap = (x = 300, y = 500) =>
+    afterTapWindow(() => {
+      tap(photo(), x, y);
+      tap(photo(), x, y);
+    });
+  const FULL = { x: 0, y: 0, width, height };
+
+  beforeEach(() => {
+    zoomTo().mockClear();
+  });
+
+  it('쪽마다 확대 스크롤뷰다 — 1~3배, 원래 크기보다 작아지지 않고, 원래 크기에서는 팬을 시작하지 못한다', async () => {
+    await mount();
+    const zooms = screen.getAllByTestId('attachment-viewer-zoom');
+    expect(zooms).toHaveLength(IMAGES.length);
+    for (const zoom of zooms) {
+      expect(zoom.props.minimumZoomScale).toBe(1); // 원래 크기보다 작아지지 않는다
+      expect(zoom.props.maximumZoomScale).toBe(3);
+      expect(zoom.props.bouncesZoom).toBe(true); // 모자라게 줄여도 놓으면 1 로 돌아온다
+      expect(zoom.props.centerContent).toBe(true);
+      // 세로 스크롤뷰의 기본은 `alwaysBounceVertical` 참이다 — 그러면 원래 크기에서도 스크롤뷰가 아래로 쓸기를 가져가 쓸어 닫기가 죽는다.
+      expect(zoom.props.alwaysBounceVertical).toBe(false);
+      expect(zoom.props.alwaysBounceHorizontal).toBe(false);
+    }
+  });
+
+  it('사진이 오기 전에는 키울 것이 없다 — 최대 배율이 최소와 같고, 사진이 서면 3배다', async () => {
+    render(
+      <AttachmentViewer workspaceId="ws" channelId="ch" images={IMAGES} startIndex={0} onClose={jest.fn()} />,
+    );
+    expect(zoomScroll().props.maximumZoomScale).toBe(1);
+    await screen.findAllByTestId('attachment-viewer-image');
+    expect(zoomScroll().props.maximumZoomScale).toBe(3);
+  });
+
+  it('사진 위에 닿은 손가락을 쥐는 뷰는 확대 스크롤뷰의 조상이 아니다 — 조상이 응답자이면 iOS 스크롤뷰는 확대·팬을 시작하지 못한다', async () => {
+    await mount();
+    for (const index of [0, 1, 2]) {
+      const pages = screen.getAllByTestId('attachment-viewer-page');
+      for (const target of [photo(index), pages[index] as Instance]) {
+        const touch = finger(target);
+        expect(touch.down(200, 300).granted).toBe(true);
+        const grabbed = touch.responder as Instance;
+        // iOS 가 스크롤을 막는 조건의 거울상(`_shouldDisableScrollInteraction`): 응답자는 스크롤뷰의 superview 사슬에 있으면 안 된다.
+        expect(isAncestor(grabbed, zoomScroll(index))).toBe(false);
+        // 쥔 것은 확대 스크롤뷰 **안**의 쪽 View 다(스크롤뷰 안의 `Pressable` 과 같은 모양).
+        expect(isAncestor(zoomScroll(index), grabbed)).toBe(true);
+        expect(grabbed.props.testID).toBe('attachment-viewer-page');
+        touch.up();
+      }
+    }
+  });
+
+  it('한 번 탭(조작 숨김)은 두 번 탭 문턱만큼 늦다 — 두 번째 탭이 오는지 보고서야 숨긴다', async () => {
+    await mount();
+    installTimersOnlyClock();
+    try {
+      tap();
+      expect(chromeIsShown()).toBe(true); // 아직이다
+      act(() => {
+        jest.advanceTimersByTime(DOUBLE_TAP_MS - 1);
+      });
+      expect(chromeIsShown()).toBe(true); // 문턱 직전까지도
+      act(() => {
+        jest.advanceTimersByTime(1);
+      });
+      expect(chromeIsShown()).toBe(false); // 문턱에서
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('두 번 탭: 탭한 곳이 가운데 오게 2배로 키운다 — 조작은 깜박이지 않는다', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    const { onClose } = await mount();
+    doubleTap(300, 500);
+    expect(zoomTo()).toHaveBeenLastCalledWith(
+      { x: 300 - width / 4, y: 500 - height / 4, width: width / 2, height: height / 2, animated: true },
+      true,
+    );
+    // 첫 탭의 한 번 탭은 두 번째 탭이 취소했다 — 문턱이 지난 뒤에도 조작이 그대로이고 숨었다 돌아오는 움직임도 없었다.
+    expect(chromeIsShown()).toBe(true);
+    expect(timing).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('모서리를 두 번 탭해도 사각형은 쪽 안에 있고 탭한 곳을 품는다 — 사진 밖 빈자리를 보여 주지 않는다', async () => {
+    await mount();
+    for (const [x, y] of [
+      [4, 4],
+      [width - 4, 4],
+      [4, height - 4],
+      [width - 4, height - 4],
+    ] as const) {
+      zoomTo().mockClear();
+      doubleTap(x, y);
+      const [rect] = zoomTo().mock.lastCall as [{ x: number; y: number; width: number; height: number }];
+      expect([rect.width, rect.height]).toEqual([width / 2, height / 2]);
+      expect(rect.x).toBeGreaterThanOrEqual(0);
+      expect(rect.y).toBeGreaterThanOrEqual(0);
+      expect(rect.x + rect.width).toBeLessThanOrEqual(width);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(height);
+      expect(x).toBeGreaterThanOrEqual(rect.x);
+      expect(x).toBeLessThanOrEqual(rect.x + rect.width);
+      expect(y).toBeGreaterThanOrEqual(rect.y);
+      expect(y).toBeLessThanOrEqual(rect.y + rect.height);
+    }
+  });
+
+  it('멀리 떨어진 두 탭은 두 번 탭이 아니다 — 한 번 탭 둘이다(확대하지 않는다)', async () => {
+    await mount();
+    installTimersOnlyClock();
+    try {
+      tap(photo(), 60, 300);
+      tap(photo(), 360, 300);
+      // 첫 탭은 둘째 탭이 온 순간 한 번 탭으로 일어나 조작이 숨었고, 둘째 탭은 문턱 뒤에 일어나 다시 나타난다.
+      expect(chromeIsShown()).toBe(false);
+      act(() => {
+        jest.advanceTimersByTime(DOUBLE_TAP_MS);
+      });
+      expect(chromeIsShown()).toBe(true);
+    } finally {
+      jest.useRealTimers();
+    }
+    expect(zoomTo()).not.toHaveBeenCalled();
+  });
+
+  it('문턱을 넘겨 다시 누른 두 탭도 두 번 탭이 아니다 — 한 번 탭 둘이다', async () => {
+    await mount();
+    tapOnce();
+    expect(chromeIsShown()).toBe(false);
+    tapOnce();
+    expect(chromeIsShown()).toBe(true);
+    expect(zoomTo()).not.toHaveBeenCalled();
+  });
+
+  it('핀치(두 손가락)는 두 번 탭이 아니다 — 연달아 두 번 해도 확대 요청이 없다(확대는 스크롤뷰가 한다)', async () => {
+    await mount();
+    afterTapWindow(() => {
+      for (let n = 0; n < 2; n += 1) {
+        const pinch = finger(photo());
+        pinch.down(200, 300, 2);
+        pinch.up();
+      }
+    });
+    expect(zoomTo()).not.toHaveBeenCalled();
+    expect(chromeIsShown()).toBe(true);
+  });
+
+  it('확대 중 두 번 탭은 원래 크기로 돌린다 — 쪽 전체 사각형', async () => {
+    await mount();
+    zoomBy(2);
+    doubleTap(300, 500);
+    expect(zoomTo()).toHaveBeenLastCalledWith({ ...FULL, animated: true }, true);
+  });
+
+  it('확대 중에는 가로 넘기기와 쓸어 닫기가 꺼지고, 원래 크기로 돌아오면 다시 켜진다', async () => {
+    const { onClose, progress } = await mount();
+    expect(scrollView().props.scrollEnabled).toBe(true);
+    zoomBy(2);
+    expect(scrollView().props.scrollEnabled).toBe(false); // 가로 넘기기
+    const zoomedDrag = finger(photo());
+    zoomedDrag.down(200, 300);
+    dragSlowly(zoomedDrag, 200, 300, DISMISS_DISTANCE_PT + 80);
+    expect(progress.current).toBeNull(); // 쓸어 닫기: 사진을 가져가지 않는다
+    zoomedDrag.up();
+    expect(onClose).not.toHaveBeenCalled();
+    zoomBy(1);
+    expect(scrollView().props.scrollEnabled).toBe(true);
+    const drag = finger(photo());
+    drag.down(200, 300);
+    dragSlowly(drag, 200, 300, DISMISS_DISTANCE_PT + 80);
+    drag.up();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('핀치가 끝나는 순간의 배율(끝 이벤트)로도 잠금이 풀린다 — 원래 크기로 돌아온 손가락이 막힌 채 남지 않는다', async () => {
+    await mount();
+    zoomBy(2.4);
+    expect(scrollView().props.scrollEnabled).toBe(false);
+    zoomBy(1, 0, 'scrollEndDrag');
+    expect(scrollView().props.scrollEnabled).toBe(true);
+  });
+
+  it('1 에 가까운 배율(부동소수 찌꺼기)은 확대로 세지 않는다 — 넘기기·쓸어 닫기가 꺼지지 않는다', async () => {
+    await mount();
+    zoomBy(1.000001);
+    expect(scrollView().props.scrollEnabled).toBe(true);
+  });
+
+  it('다른 쪽의 확대 알림은 현재 쪽의 잠금을 건드리지 않는다', async () => {
+    await mount();
+    zoomBy(2, 1);
+    expect(scrollView().props.scrollEnabled).toBe(true);
+  });
+
+  it('다른 장으로 넘기면 앞 장의 확대가 풀린다 — 새 장은 원래 크기에서 시작하고 넘기기가 다시 켜진다', async () => {
+    await mount();
+    zoomBy(2);
+    expect(scrollView().props.scrollEnabled).toBe(false);
+    zoomTo().mockClear();
+    fireEvent.press(screen.getAllByTestId('attachment-viewer-thumb')[2] as Instance);
+    expect(scrollView().props.scrollEnabled).toBe(true);
+    // 앞 장을 원래 크기(쪽 전체)로 되돌리라고 네이티브에 청한다.
+    expect(zoomTo()).toHaveBeenLastCalledWith({ ...FULL, animated: true }, true);
+  });
+
+  it('동작 줄이기면 두 번 탭이 움직임 없이 바로 바뀐다 — 사각형도 둘째 인자도 움직이지 않는다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    await mount();
+    await act(async () => {}); // 설정의 답이 도착한다
+    doubleTap(300, 500);
+    expect(zoomTo()).toHaveBeenLastCalledWith(expect.objectContaining({ animated: false }), false);
+    zoomBy(2);
+    doubleTap(300, 500);
+    expect(zoomTo()).toHaveBeenLastCalledWith({ ...FULL, animated: false }, false);
+  });
+
+  it('확대 상태는 접근성 값으로 알린다 — 원래 크기에서는 사진 이름만 읽힌다', async () => {
+    await mount();
+    expect(photo().props.accessible).toBe(true); // 보조기술이 사진에 닿아야 값을 읽는다
+    expect(photo().props.accessibilityRole).toBe('image');
+    expect(photo().props.accessibilityValue).toBeUndefined();
+    zoomBy(2);
+    expect(photo().props.accessibilityValue).toEqual({ text: ZOOMED_A11Y_VALUE });
+    zoomBy(1);
+    expect(photo().props.accessibilityValue).toBeUndefined();
   });
 });

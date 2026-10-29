@@ -9,6 +9,7 @@ import React, {
   useMemo,
   useRef,
   useState,
+  type MutableRefObject,
 } from 'react';
 import {
   AccessibilityInfo,
@@ -17,6 +18,8 @@ import {
   type GestureResponderHandlers,
   Image,
   Modal,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StatusBar,
@@ -49,7 +52,12 @@ import { useReduceMotion } from '../../lib/useReduceMotion';
 import { useAttachmentPreview } from './content';
 import { useShareAttachment } from './useShareAttachment';
 import { useViewerDismiss, type ViewerProgressRef } from './useViewerDismiss';
-import { backdropStops, chromeStops, scaleStops } from './viewerDismiss';
+import {
+  backdropStops,
+  chromeStops,
+  scaleStops,
+  type DragPoint,
+} from './viewerDismiss';
 import {
   VIEWER,
   VIEWER_GLASS_TONE,
@@ -62,6 +70,17 @@ import {
   viewerScrimPlateau,
   viewerStripOffset,
 } from './viewerDesign';
+import {
+  DOUBLE_TAP_MS,
+  fullRect,
+  isDoubleTap,
+  isZoomed,
+  ZOOM_MAX,
+  ZOOM_MIN,
+  ZOOMED_A11Y_VALUE,
+  zoomRectAt,
+  type ZoomRect,
+} from './viewerZoom';
 
 // =============================================================================
 // 사진 전체 화면 보기 (#1681 · #3820 → #4293 → #4297).
@@ -112,6 +131,23 @@ import {
 // (보이지 않는 44pt 단추가 눌리지 않게). 이 구조를 지키는 것은 `attachmentViewer.test.tsx` 의 「조작 덩어리는 빈 곳을 통과시킨다」와
 // 「사진 위에 닿은 손가락을 쥐는 뷰는 가로 스크롤뷰의 조상이 아니다」, 그리고 Maestro 105 의 「3장 중 3번」 단정이다.
 //
+// ## 확대 (#4769) — 쪽 안의 스크롤뷰가 하고, 응답자는 그 **안**에 있다
+//
+// 쪽마다 iOS 스크롤뷰(`maximumZoomScale` 3 · `minimumZoomScale` 1 · `centerContent`)를 두고 사진을 그 안에 놓는다 — 두 손가락 확대·끌어 옮기기·
+// 놓으면 1 로 돌아오기는 UIKit 이 한다(새 의존 없음). JS 가 하는 일은 셋이다(값과 계산은 `viewerZoom.ts`).
+//   ① 확대 상태를 `onScroll`·`onScrollEndDrag` 의 `zoomScale` 로 읽어, 확대 중이면 가로 넘기기(`scrollEnabled`)와 쓸어 닫기(`enabled`)를 끈다.
+//      원래 크기로 돌아오면 다시 켠다.
+//   ② 두 번 탭이면 `scrollResponderZoomTo` 로 탭한 곳 둘레 2배 ↔ 원래 크기(동작 줄이기면 움직임 없이 바로).
+//   ③ 장이 바뀌면(썸네일·넘기기) 앞 장의 확대를 푼다.
+//
+// **응답자는 확대 스크롤뷰의 자손이어야 한다.** 위 「응답을 쥐는 자리」와 같은 까닭이다: iOS 스크롤뷰는 superview 사슬에 JS 응답자가 있으면 스크롤·확대를
+// 시작하지 못한다. 그래서 `pageHandlers` 는 쪽 바깥이 아니라 확대 스크롤뷰의 **첫 자식 View**(`attachment-viewer-page`)에 펼친다 — 스크롤뷰 안의
+// `Pressable` 과 같은 모양이다. 이 View 는 확대 스크롤뷰의 내용이라 확대 중에도 탭(조작 숨김·두 번 탭)을 받는다. 확대 스크롤뷰는
+// `alwaysBounceVertical`·`alwaysBounceHorizontal` 이 꺼져 있어 **원래 크기에서는 팬을 시작하지 못한다** — 아래로 쓸어 닫기와 가로 넘김이 그대로 산다
+// (jest 에는 네이티브 스크롤뷰가 없어 이것은 Maestro 의 확대 흐름이 잰다).
+//
+// **한 번 탭은 두 번 탭 문턱(`DOUBLE_TAP_MS`)만큼 늦다**: 두 번째 탭이 오는지 보고서야 조작을 숨긴다(안 그러면 두 번 탭이 조작을 깜박이게 한다).
+//
 // ## 조작을 숨길 때 보조기술
 //
 // 숨은 조작은 보이지 않을 뿐 아니라 **읽히지도 않는다**(`accessibilityElementsHidden`) — 보이지 않는 단추에 초점이 가면 사람은
@@ -119,20 +155,40 @@ import {
 // 길이 화면의 빈 곳을 누르는 것뿐이라, 화면을 보지 않는 사람에게는 닫는 길(뒤로)을 잃는 일이다.
 // =============================================================================
 
-/** 전체 화면 보기의 한 쪽. 쪽마다 자기 미리보기를 받는다. */
+/** 쪽이 프레임에 내미는 확대 손잡이. 프레임이 두 번 탭·장 바뀜을 쪽에 전한다. */
+interface PageZoom {
+  /** 두 번 탭: 확대 중이면 원래 크기로, 아니면 `point`(창 좌표) 둘레 2배로. */
+  toggleAt: (point: DragPoint, animated: boolean) => void;
+  /** 원래 크기로 되돌린다(다른 장으로 넘어갔을 때). 확대돼 있지 않으면 아무것도 하지 않는다. */
+  reset: (animated: boolean) => void;
+}
+
+/** 전체 화면 보기의 한 쪽. 쪽마다 자기 미리보기를 받고, 확대 스크롤뷰 안에 사진을 놓는다. */
 function ViewerPage({
   workspaceId,
   channelId,
   attachment,
+  position,
   width,
+  height,
   responder,
+  zoomPages,
+  onZoomedChange,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
+  /** 0부터. 프레임이 확대 손잡이를 이 번호로 찾는다. */
+  position: number;
   width: number;
-  /** 사진 위에 닿은 손가락을 쥐는 핸들러 — 쪽은 가로 ScrollView 의 자손이라 스크롤을 막지 않는다. */
+  /** 쪽의 높이 — 사진은 화면 가득이라 창 높이다(두 번 탭이 키울 사각형의 크기). */
+  height: number;
+  /** 사진 위에 닿은 손가락을 쥐는 핸들러 — 확대 스크롤뷰의 **자손**에 펼친다(파일 머리 「확대」). */
   responder: GestureResponderHandlers;
+  /** 프레임이 쥔 확대 손잡이 모음. 쪽은 올라와 있는 동안 자기 자리를 채운다. */
+  zoomPages: MutableRefObject<Array<PageZoom | null>>;
+  /** 이 쪽의 확대 여부가 **바뀔 때만** 부른다. */
+  onZoomedChange: (position: number, zoomed: boolean) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const preview = useAttachmentPreview(
@@ -141,30 +197,96 @@ function ViewerPage({
     attachment,
     true,
   );
+  const ready = preview.status === 'ready';
+  const zoomRef = useRef<ScrollView>(null);
+  const [zoomed, setZoomed] = useState(false);
+  const zoomedRef = useRef(false);
+
+  // 네이티브가 알려 주는 배율(`zoomScale`)이 확대 여부의 유일한 출처다. 문턱을 넘을 때만 상태를 바꾼다(핀치 중 매 프레임 다시 그리지 않는다).
+  const report = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const next = isZoomed(event.nativeEvent.zoomScale);
+      if (zoomedRef.current === next) return;
+      zoomedRef.current = next;
+      setZoomed(next);
+      onZoomedChange(position, next);
+    },
+    [onZoomedChange, position],
+  );
+
+  const handle = useMemo<PageZoom>(() => {
+    // RN 0.86 의 `scrollResponderZoomTo`: 움직임 여부는 **둘째 인자**가 정한다(안 주면 언제나 움직인다). 첫 인자의 `animated` 는 그 값을
+    // 따로 적어 둘 뿐 네이티브 명령에 닿지 않는다. 둘 다 같은 값을 줘야 꺼지고, 둘째 인자만 주면 폐기 경고가 뜬다.
+    const zoomTo = (rect: ZoomRect, animated: boolean) =>
+      zoomRef.current?.scrollResponderZoomTo({ ...rect, animated }, animated);
+    const size = { width, height };
+    return {
+      toggleAt: (point, animated) => {
+        if (zoomedRef.current) zoomTo(fullRect(size), animated);
+        else if (ready) zoomTo(zoomRectAt(point, size), animated);
+      },
+      reset: animated => {
+        if (zoomedRef.current) zoomTo(fullRect(size), animated);
+      },
+    };
+  }, [width, height, ready]);
+  useEffect(() => {
+    const pages = zoomPages.current; // 모음 자체는 바뀌지 않는다 — 칸만 채우고 비운다
+    pages[position] = handle;
+    return () => {
+      pages[position] = null;
+    };
+  }, [zoomPages, position, handle]);
+
   return (
-    <View
-      style={[styles.viewerPage, { width }]}
-      // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
-      collapsable={false}
-      testID="attachment-viewer-page"
-      {...responder}
+    <ScrollView
+      ref={zoomRef}
+      style={[styles.zoomScroll, { width }]}
+      contentContainerStyle={styles.zoomContent}
+      // 사진이 아직 없으면 키울 것이 없다(「불러오는 중」 글자를 키우지 않는다) — 최소와 같으면 iOS 는 확대를 켜지 않는다.
+      maximumZoomScale={ready ? ZOOM_MAX : ZOOM_MIN}
+      minimumZoomScale={ZOOM_MIN}
+      bouncesZoom
+      centerContent
+      // 원래 크기에서 팬을 시작하지 못하게 한다 — 이 둘이 켜져 있으면(세로 스크롤뷰의 기본) 스크롤뷰가 아래로 쓸기·옆으로 넘기기를 가져간다.
+      alwaysBounceVertical={false}
+      alwaysBounceHorizontal={false}
+      showsVerticalScrollIndicator={false}
+      showsHorizontalScrollIndicator={false}
+      scrollEventThrottle={16}
+      onScroll={report}
+      // 핀치가 끝나는 순간의 마지막 배율은 이 끝 이벤트로 온다(`scrollViewDidEndZooming`).
+      onScrollEndDrag={report}
+      testID="attachment-viewer-zoom"
     >
-      {preview.status === 'ready' ? (
-        <Image
-          source={{ uri: preview.uri }}
-          resizeMode="contain"
-          style={styles.viewerImage}
-          accessibilityLabel={attachmentDisplayName(attachment)}
-          testID="attachment-viewer-image"
-        />
-      ) : (
-        <Text style={styles.viewerState}>
-          {preview.status === 'loading'
-            ? ATTACH_COPY.previewLoading
-            : ATTACH_COPY.previewFailed}
-        </Text>
-      )}
-    </View>
+      <View
+        style={styles.viewerPage}
+        // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
+        collapsable={false}
+        testID="attachment-viewer-page"
+        {...responder}
+      >
+        {ready ? (
+          <Image
+            source={{ uri: preview.uri }}
+            resizeMode="contain"
+            style={styles.viewerImage}
+            // 확대 상태는 접근성 값이다(원래 크기에서는 말하지 않는다). `accessible` 이 있어야 보조기술이 사진에 닿아 값을 읽는다.
+            accessible
+            accessibilityRole="image"
+            accessibilityLabel={attachmentDisplayName(attachment)}
+            accessibilityValue={zoomed ? { text: ZOOMED_A11Y_VALUE } : undefined}
+            testID="attachment-viewer-image"
+          />
+        ) : (
+          <Text style={styles.viewerState}>
+            {preview.status === 'loading'
+              ? ATTACH_COPY.previewLoading
+              : ATTACH_COPY.previewFailed}
+          </Text>
+        )}
+      </View>
+    </ScrollView>
   );
 }
 
@@ -305,8 +427,8 @@ export interface AttachmentViewerProps {
   /** 보낸 시각(ms). 위쪽 띠의 둘째 줄이다. 모르거나 유한하지 않으면 줄이 서지 않는다. */
   sentAtMs?: number;
   /**
-   * 아래로 쓸어 닫기가 켜져 있는가. 기본은 참이다. 확대된 사진을 끌어 옮기는 손가락이
-   * 뷰어를 닫으면 안 되므로, 확대를 들이는 쪽이 확대 중에 거짓을 넘긴다.
+   * 호출부가 아래로 쓸어 닫기를 끌 수 있는가. 기본은 참이다. 확대 중에는 뷰어가 **스스로** 끈다(`dismissEnabled && !zoomed`, #4769) —
+   * 확대된 사진을 끌어 옮기는 손가락이 뷰어를 닫으면 안 되기 때문이다. 호출부가 확대 때문에 이 값을 거짓으로 넘길 일은 없다.
    */
   dismissEnabled?: boolean;
   /** 시험이 끄는 거리를 읽는 이음매(`EdgeSwipeBack` 의 `progressRef` 와 같다). */
@@ -379,15 +501,67 @@ function ViewerFrame({
     current as MessageAttachment,
   );
   const toggleChrome = useCallback(() => setHidden(value => !value), []);
+
+  // ---- 확대 (#4769) -----------------------------------------------------------------------
+  // 현재 쪽이 확대돼 있는가. 확대 중에는 가로 넘기기와 쓸어 닫기가 꺼진다. 쪽이 `zoomScale` 로 알려 온다(다른 쪽의 알림은 무시한다).
+  const [zoomed, setZoomed] = useState(false);
+  const zoomPages = useRef<Array<PageZoom | null>>([]);
+  const indexRef = useRef(index);
+  indexRef.current = index;
+  const onZoomedChange = useCallback((position: number, next: boolean) => {
+    if (position === indexRef.current) setZoomed(next);
+  }, []);
+
+  // 첫 탭은 두 번째 탭이 오는지 보고서야 한 번 탭(조작 숨김)이 된다. 두 번째 탭이 같은 자리에 문턱 안에 오면 두 번 탭 — 확대한다.
+  const pendingTap = useRef<{
+    point: DragPoint;
+    timer: ReturnType<typeof setTimeout>;
+  } | null>(null);
+  const onTap = (point: DragPoint) => {
+    const pending = pendingTap.current;
+    pendingTap.current = null;
+    if (pending !== null) {
+      clearTimeout(pending.timer);
+      if (isDoubleTap(pending.point, point)) {
+        zoomPages.current[index]?.toggleAt(point, !reduceMotion);
+        return;
+      }
+      toggleChrome(); // 앞 탭은 멀리 떨어진 한 번 탭이었다 — 지금 일어난다
+    }
+    pendingTap.current = {
+      point,
+      timer: setTimeout(() => {
+        pendingTap.current = null;
+        toggleChrome();
+      }, DOUBLE_TAP_MS),
+    };
+  };
+  useEffect(
+    () => () => {
+      if (pendingTap.current !== null) clearTimeout(pendingTap.current.timer);
+    },
+    [],
+  );
+
   const { drag, pageHandlers, frameHandlers } = useViewerDismiss({
-    enabled: dismissEnabled,
+    enabled: dismissEnabled && !zoomed,
     height,
     onDismiss: onClose,
     progressRef,
     onDraggingChange: setDragging,
-    onTap: toggleChrome,
+    onTap,
   });
   const shown = !hidden || screenReader;
+
+  // 다른 장으로 넘어가면(썸네일·넘기기) 앞 장의 확대가 풀린다. 이 장은 원래 크기에서 시작한다.
+  useEffect(() => {
+    setZoomed(false);
+    zoomPages.current.forEach((page, position) => {
+      if (position !== index) page?.reset(!reduceMotion);
+    });
+    // `reduceMotion` 은 일부러 뺐다: 장이 바뀔 때만 푼다.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [index]);
 
   // 끌기가 쥐어지거나 끝나면 현재 쪽의 정확한 자리에 다시 맞춘다. 잠기기 전에 스크롤뷰가 가로로 몇 pt 따라갔다면 그
   // 어긋남이 끌기가 끝난 뒤에도 남는다(`pagingEnabled` 는 스스로 맞추지 않는다). 첫 렌더에서는 이미 맞다.
@@ -537,7 +711,8 @@ function ViewerFrame({
           ref={scrollRef}
           horizontal
           pagingEnabled
-          scrollEnabled={!dragging}
+          // 끌기를 쥔 동안과 확대 중에는 넘기지 않는다 — 확대된 사진을 끌어 옮기는 손가락이 옆 장을 끌어오면 안 된다.
+          scrollEnabled={!dragging && !zoomed}
           testID="attachment-viewer-scroll"
           showsHorizontalScrollIndicator={false}
           contentOffset={{ x: startIndex * width, y: 0 }}
@@ -545,14 +720,18 @@ function ViewerFrame({
             setIndex(Math.round(event.nativeEvent.contentOffset.x / width))
           }
         >
-          {images.map(image => (
+          {images.map((image, position) => (
             <ViewerPage
               key={image.id}
               workspaceId={workspaceId}
               channelId={channelId}
               attachment={image}
+              position={position}
               width={width}
+              height={height}
               responder={pageHandlers}
+              zoomPages={zoomPages}
+              onZoomedChange={onZoomedChange}
             />
           ))}
         </ScrollView>
@@ -755,6 +934,10 @@ const buildStyles = (_color: Palette) =>
     backdrop: { backgroundColor: VIEWER_STAGE.bg },
     // 사진은 화면 가득이다 — 조작이 그 위에 뜬다.
     pager: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
+    // 쪽 하나 = 확대 스크롤뷰(폭은 창 폭, 높이는 가로 스크롤뷰가 채운다). 늘어나거나 줄지 않는다 — 폭이 쪽 간격이다.
+    zoomScroll: { flexGrow: 0, flexShrink: 0 },
+    // 내용이 스크롤뷰와 **정확히 같은 크기**여야 원래 크기에서 팬이 시작하지 않는다(1pt 라도 남으면 쓸어 닫기를 스크롤뷰가 가져간다).
+    zoomContent: { flexGrow: 1 },
     viewerPage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
     viewerImage: { width: '100%', height: '100%' },
     viewerState: {
