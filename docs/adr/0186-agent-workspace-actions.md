@@ -1211,6 +1211,7 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 | 값 | 어디 | 비고 |
 |---|---|---|
 | `props.status` · `props.code` · `props.result{status,rows,ref,next,line}` | 승인 카드 | 종결 패치. `result`는 부록 B 객체 + `line` |
+| `props.intent` · `action.rows[].before` / `.after` | 승인 카드(제안 때) | 머리 문장의 「하려는 일」 한 구절(행동마다 서버가 만든다: 이름은 작성자에서 읽고 문장에 굽지 않는다, 부록 A 메모)과 값 칩의 이전 → 이후 구조. 구조가 없는 옛 카드는 한 줄 값(`value`)으로 그린다 |
 | `props.decision_mode` (`inline`/`open`) | 승인 카드 · 승인 목록 | `opens_in_app()` 한 함수의 결과(ADR-0204 증보 5) |
 | `props.bundle_of` · `props.announce` | 운반체 줄 · 채널에도 줄 | 클라이언트 접기 · 푸시 조용 |
 | `receipt.line` | 결정 응답(영수증) | 잠금 화면 결과 알림 문장. 구버전 폴백 있음 |
