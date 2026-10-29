@@ -20,6 +20,7 @@ export function AttachmentDownloadButton({
   joinsMessageRow = false,
   busy: controlledBusy,
   tapTarget = false,
+  className,
   onBusyChange,
   onStarted,
   onFailed,
@@ -33,6 +34,8 @@ export function AttachmentDownloadButton({
   busy?: boolean;
   /** 좁은 화면에서도 독립 조작점인 경우 44px 터치 타깃을 보장한다. */
   tapTarget?: boolean;
+  /** 이 버튼이 선 표면이 모양을 바꿀 때(라이트박스의 둥근 유리 버튼). 기본 모양 뒤에 합쳐지므로 같은 축은 이쪽이 이긴다. */
+  className?: string;
   onBusyChange?: (busy: boolean) => void;
   onStarted?: () => void;
   onFailed?: () => void;
@@ -66,7 +69,8 @@ export function AttachmentDownloadButton({
       className={cn(
         tapTarget ? "tap-target" : "touch-target",
         "flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted",
-        "press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+        "press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
+        className
       )}
     >
       {busy ? (
