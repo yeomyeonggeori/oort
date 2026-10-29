@@ -1,6 +1,7 @@
 import type {DividerSegment} from '@momo/core/features/timeline/divider';
 import React from 'react';
 import {Pressable, StyleSheet, Text, View} from 'react-native';
+import {BAR_CONTROL_MAX_SCALE} from '../../design/atoms';
 import {
   ds2Radius,
   font,
@@ -59,7 +60,7 @@ export function JumpPill({
         <Text style={styles.latestArrow} accessibilityElementsHidden importantForAccessibility="no">↓</Text>
         {newCount > 0 ? (
           <View style={styles.badge} accessibilityElementsHidden importantForAccessibility="no-hide-descendants" testID={`${testID}-badge`}>
-            <Text style={styles.badgeText} maxFontSizeMultiplier={1}>{newCount > 99 ? '99+' : newCount}</Text>
+            <Text style={styles.badgeText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>{newCount > 99 ? '99+' : newCount}</Text>
           </View>
         ) : null}
       </Pressable>
