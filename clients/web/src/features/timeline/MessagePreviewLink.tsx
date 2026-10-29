@@ -14,10 +14,12 @@ import {
 // =============================================================================
 export function MessagePreviewLink({ preview }: { preview: MessagePreview }) {
   return (
-    <div className="border-t border-line px-3 py-2" data-testid="approval-message-preview">
+    <div className="border-t border-line px-3 py-1" data-testid="approval-message-preview">
+      {/* 눌리는 면은 28px(손가락은 44px)이다: 글자 높이만 한 링크는 포인터로도 맞히기 어렵다
+          (`EvidenceLinks` 의 칩과 같은 `h-control-sm tap-target`). */}
       <a
         href={`#${messageAnchorPath(preview.channelId, preview.messageId)}`}
-        className="press rounded-sm text-meta text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+        className="press inline-flex h-control-sm tap-target items-center rounded-sm text-meta text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
         data-testid="approval-message-preview-link"
       >
         {MESSAGE_PREVIEW_LINK_LABEL}
