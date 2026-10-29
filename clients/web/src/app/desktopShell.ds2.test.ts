@@ -385,11 +385,14 @@ describe("전체 화면에서는 신호등 자리 인셋을 접는다 (#4591, pl
     expect(TOKENS).toMatch(/--spacing-3: 12px;/);
   });
 
-  it("인셋을 읽는 자리는 상단 줄과 온보딩 스텝 줄이고, 둘 다 같은 한 값을 따른다", () => {
+  it("인셋을 읽는 자리는 상단 줄·온보딩 스텝 줄·이미지 미리보기의 위 줄이고, 셋 다 같은 한 값을 따른다", () => {
+    // 닫힌 목록이다: 읽는 자리가 하나 더 생기면 이 줄을 의도적으로 늘린다(#4751: 미리보기가 창 전체를 덮어 신호등 자리까지 가리므로
+    // 위 줄이 같은 값만큼 비운다). 값을 따로 적은 읽는 자리가 생기면 전체 화면에서 그 자리만 접히지 않아 죽은 빈 공간이 남는다.
     const readers = [...TOKENS.matchAll(/padding-inline-start: var\(--titlebar-inset\);/g)];
-    expect(readers).toHaveLength(2);
+    expect(readers).toHaveLength(3);
     expect(utility("app-titlebar")).toMatch(/padding-inline-start: var\(--titlebar-inset\);/);
     expect(utility("onboarding-step-chrome")).toMatch(/padding-inline-start: var\(--titlebar-inset\);/);
+    expect(utility("lightbox-chrome")).toMatch(/padding-inline-start: var\(--titlebar-inset\);/);
   });
 
   it("표지는 넓은 값(`:root` 선언)보다 우선순위가 높아 순서와 상관없이 이긴다", () => {

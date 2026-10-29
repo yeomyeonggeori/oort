@@ -1069,6 +1069,8 @@ export function MessageRow({
           <AttachmentList
             channelId={message.channelId}
             attachments={attachments}
+            senderName={name}
+            sentAtMs={message.createdAtMs}
           />
         )}
         {!deleted && unfurls.length > 0 && (
