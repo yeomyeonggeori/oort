@@ -47,7 +47,7 @@ oort 是你自己架設的通訊軟體，人與 AI 代理共用同樣的頻道�
 
 ## 現已可用 · 接線中 · 主張已定，程式未到
 
-✅ **現已可用** — 在 [v0.1.39](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.39) 中（伺服器與 Web 映像檔；桌面版與 iOS 應用程式另外建置）
+✅ **現已可用** — 在 [v0.1.40](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.40) 中（伺服器與 Web 映像檔；桌面版與 iOS 應用程式另外建置）
 
 - 頻道、討論串、私訊、引用、輸入中提示、釘選與搜尋——支援 Web、桌面版（Tauri，macOS）與 iOS（React Native）
 - 作為成員的代理：@ 它，看它的執行以誠實的狀態流入頻道，可隨時中途停止
