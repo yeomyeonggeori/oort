@@ -127,7 +127,7 @@ jest.mock('expo-notifications', () => ({
   getLastNotificationResponse: jest.fn(() => null),
   clearLastNotificationResponse: jest.fn(),
   // #4310 — the foreground presentation handler. `index.js` installs it once, at
-  // module evaluation; a no-op by default. `__tests__/foregroundPresentation4310.test.tsx`
+  // module evaluation; a no-op by default. `__tests__/foregroundPresentation.test.tsx`
   // reads the handler it was given (and evaluates `index.js` to see when it is installed).
   setNotificationHandler: jest.fn(),
   // #2670 — the app icon badge. `true` is what the native side answers when the

@@ -1,10 +1,10 @@
-import type {Message, RosterMember} from '@momo/core/lib/api';
+import type {Message} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {Animated, Pressable, StyleSheet, Text} from 'react-native';
+import {Animated, Pressable, Text} from 'react-native';
 
 import {FixedScheme, ThemeProvider, useTheme} from '../src/design/theme';
 import {SEND_ARRIVE_EASE, SEND_ARRIVE_MS} from '../src/design/motion';
@@ -12,6 +12,7 @@ import {ReduceMotionRefContext} from '../src/features/conversation/LandedTintFad
 import {MessageRow, PendingRow} from '../src/features/conversation/MessageRow';
 import {resetArrivedForTest} from '../src/features/conversation/sendArrival';
 import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
+import {flat, member} from './testkit';
 
 // =============================================================================
 // #4383 — 외양 저장소의 말풍선 덮어쓰기(`layout: 'row'` 포함)가 화면까지 닿는다 +
@@ -23,22 +24,6 @@ import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
 const SELF = '11111111-1111-4111-8111-111111111111';
 const OTHER = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
 const BASE_MS = 1_700_000_000_000;
-
-function member(over: Partial<RosterMember> & {id: string}): RosterMember {
-  return {
-    workspaceId: 'ws',
-    kind: 'human',
-    status: 'active',
-    displayName: '이름',
-    handle: 'handle',
-    channelCount: 0,
-    channelIds: [],
-    capabilities: [],
-    createdAtMs: 0,
-    updatedAtMs: 0,
-    ...over,
-  } as RosterMember;
-}
 
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '박서연', handle: 'seoyeon'}),
@@ -67,9 +52,6 @@ const ACTIONS = {
   onEdit: async () => {},
   onDelete: async () => {},
 };
-
-const flat = (style: unknown): Record<string, any> =>
-  (StyleSheet.flatten(style as never) ?? {}) as Record<string, any>;
 
 function memoryStore() {
   const map = new Map<string, string>();

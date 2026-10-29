@@ -15,13 +15,14 @@ import '../src/boot/coreHost';
 
 import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
 import AppShell from '../src/shell/AppShell';
-import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
-import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {sessionPort} from '../src/storage/secureSession';
+import {setServerBase} from '../src/storage/serverBase';
 import {openPinList} from './fixtures/conversationMenu';
 import {
   installAppClock,
   SHELL_WAIT_TEST_TIMEOUT_MS,
 } from './fixtures/fakeClock';
+import {resetSession} from './testkit';
 
 // =============================================================================
 // 폰의 점프 앵커 둘 (#1196) — 검색 진입은 **착지**하고, 고정은 **자기 낱말**로 말한다
@@ -213,9 +214,6 @@ function installFetch(
 }
 
 const centrifugeMock = jest.requireMock('centrifuge') as {__reset: () => void};
-const mmkvStore = (
-  jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
-).__store;
 
 let queryClient: QueryClient | null = null;
 
@@ -285,9 +283,7 @@ jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
 
 beforeEach(() => {
   installAppClock();
-  mmkvStore.clear();
-  __resetSessionStore();
-  __resetServerBaseCache();
+  resetSession();
   setServerBase(BASE);
   centrifugeMock.__reset();
   sessionPort.applyLogin(LOGIN_BODY);

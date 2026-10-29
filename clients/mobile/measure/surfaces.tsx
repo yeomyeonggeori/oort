@@ -3172,7 +3172,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
     // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
     // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
-    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight3921.test.tsx`
+    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
     // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
     //
     // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
