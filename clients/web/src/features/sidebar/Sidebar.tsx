@@ -129,6 +129,7 @@ import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { cn } from "@/design/lib/cn";
 import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
+import { globalShortcutsHeld } from "@/app/globalShortcutHold";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { useOpenNewDm } from "@/features/directory/useNewDm";
 import { mayActOnLiveness } from "@momo/core/features/agents/liveness";
@@ -625,6 +626,8 @@ export function Sidebar({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      // 한 번만 보이는 값이 떠 있는 동안은 이동하지 않는다(`globalShortcutHold`).
+      if (globalShortcutsHeld()) return;
       if (!MOVE_UNREAD_CHANNEL_SHORTCUT.matches(event)) return;
       if (unreadChannels.length === 0) return;
       event.preventDefault();
