@@ -157,10 +157,11 @@ fn is_deadlock_victim(error: &DbError) -> bool {
 ///
 /// 1. the workspace switch is on (the very reading the door makes, [`switch_is_on`]);
 /// 2. the connection the card was raised through (`payload.initiative.connection_id`, written by
-///    the server at that moment) is still **the agent's live connection** — so a connection torn
-///    down and made again does not bring old cards back — and it still carries the human's
-///    approval of `workspace:initiate`, and the agent is an active member whose profile is not
-///    paused;
+///    the server at that moment) is still **that connection, `active` and proved** — read from the
+///    connection's own status, not from the freshness of its credential (an OAuth connection's
+///    30-minute access token has long expired when a card waits a day) — so a connection torn down
+///    and made again does not bring old cards back; it still carries the human's approval of
+///    `workspace:initiate`, and the agent is an active member whose profile is not paused;
 /// 3. the person deciding **is the agent's current owner** and that owner is the one who confirmed
 ///    this connection (`confirmed_by == owner`, review L2) — the same facts the door's condition 4
 ///    reads ([`initiative_facts_in_tx`]);
@@ -194,12 +195,6 @@ pub(crate) async fn card_still_stands_in_tx(
     else {
         return Ok(false);
     };
-    let live = momo_auth::active_hosted_connection_in_tx(conn, workspace_id, agent)
-        .await
-        .map_err(DbError::from)?;
-    if live != Some(connection_id) {
-        return Ok(false);
-    }
     if !momo_agent::initiative::initiative_standing_in_tx(
         conn,
         workspace_id,

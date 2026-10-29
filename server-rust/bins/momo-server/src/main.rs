@@ -122,6 +122,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
              terminal or Remote Control is unaffected either way. Enable only knowingly."
         );
     }
+    // ADR-0186 증보 v5 U-d: read the unasked-card limits once, here, so an out-of-range or
+    // unparsable `MOMO_AGENT_INITIATIVE_*` value is said at startup (the clamp applies either way).
+    let _ = momo_server::config::initiative_limits();
     if config.rate_limit.per_ip_limit == 0 {
         tracing::warn!(
             "RATE_LIMIT_PER_IP=0 disables the per-IP limiter on POST /v1/join; \

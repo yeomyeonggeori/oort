@@ -24603,6 +24603,37 @@ async fn the_same_proposal_is_not_raised_while_it_waits_nor_for_a_day_after_a_no
         "a card past its deadline blocks nothing: {raised}"
     );
 
+    // Only a **person's no** starts the cooldown: a card that ended any other way — the run a
+    // person cancelled (or a system clean-up did), or a sweep that expired it — blocks nothing.
+    // (This test has raised six cards in the hour by now, which is the hourly rate: age them, so
+    // the answers below are about the cooldown and not about the rate.)
+    age_initiative_runs(&su, &fixture, "2 hours").await;
+    expire_every_pending_card(&su, ws).await;
+    for (how, status_after) in [("cancelled", "cancelled"), ("expired", "expired")] {
+        let (status, raised) = raise(&client, &base, &fixture, "ops").await;
+        assert_eq!(status, 200, "{how}: {raised}");
+        sqlx::query(
+            "UPDATE approval SET status = $2::approval_status, decided_at = now() WHERE id=$1",
+        )
+        .bind(approval_of(&raised))
+        .bind(status_after)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    let (status, raised) = raise(&client, &base, &fixture, "ops").await;
+    assert_eq!(
+        status, 200,
+        "neither a cancelled nor an expired card started a cooldown: {raised}"
+    );
+    let (status, rejected) = reject(&client, &base, &fixture, approval_of(&raised)).await;
+    assert_eq!(status, 200, "{rejected}");
+    let (status, refused) = raise(&client, &base, &fixture, "ops").await;
+    assert!(
+        is_conflict(status, &refused),
+        "a person's no did: {refused}"
+    );
+
     // A pin is the same proposal by the message's id, not by anything the agent spelled.
     expire_every_pending_card(&su, ws).await;
     let message = human_says(&client, &base, &fixture, fixture.channel, "고정할 글").await;
@@ -24669,6 +24700,32 @@ async fn a_card_is_proved_again_at_the_tap_and_a_person_can_always_say_no() {
         assert_eq!(status, 200, "{approved}");
         assert_eq!(channel_named(&su, fixture.workspace, &name).await, 1);
         assert_eq!(approval_status(&su, card).await, "approved");
+    }
+
+    // The agent's credential is not what the owner's yes depends on. An OAuth connection's access
+    // token lives thirty minutes and the card waits a day, so by the tap the token has lapsed — and
+    // the connection is exactly as `active` and proved as it was (security review of #4704 PR B,
+    // H1: reading "the connection is live" from the token's freshness made every such card
+    // unapprovable until the agent renewed).
+    {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let name = unique_channel_name();
+        let (status, raised) = raise(&client, &base, &fixture, &name).await;
+        assert_eq!(status, 200, "{raised}");
+        let card = approval_of(&raised);
+        sqlx::query("UPDATE token SET expires_at = now() - interval '1 hour' WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(fixture.hosted_token)
+            .execute(&su)
+            .await
+            .unwrap();
+        let (status, approved) = approve(&client, &base, &fixture, card).await;
+        assert_eq!(
+            status, 200,
+            "a lapsed access token does not stop the owner's yes: {approved}"
+        );
+        assert_eq!(channel_named(&su, fixture.workspace, &name).await, 1);
     }
 
     for drift in [
@@ -24786,6 +24843,161 @@ async fn a_card_is_proved_again_at_the_tap_and_a_person_can_always_say_no() {
     }
 }
 
+/// **Only the agent's owner decides an unasked card — even somebody else who is in the room.** A
+/// direct message has two people, so this is a belt: should a third admin ever be a member of the
+/// owner's DM (a future path, a data repair), their tap must not run what the agent asked of the
+/// owner — the executor's own admin gate would let them, and the card was drawn for the owner's
+/// eyes. Refused as a card that no longer stands; the approval stays pending, and the owner's own
+/// tap on the same card then runs it (the control).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn somebody_else_in_the_owners_dm_cannot_decide_the_card_but_the_owner_can() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let name = unique_channel_name();
+    let (status, raised) = raise(&client, &base, &fixture, &name).await;
+    assert_eq!(status, 200, "{raised}");
+    let card = approval_of(&raised);
+    let dm = owner_dm(&su, &fixture).await.expect("the DM is open");
+    let (third, third_jwt) = seed_human_3708(&su, &fixture, "third", "admin").await;
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(ws)
+        .bind(dm)
+        .bind(third)
+        .execute(&su)
+        .await
+        .expect("seat a third admin in the owner's DM");
+
+    for approve in [true] {
+        let (status, _headers, refused) = decide_as(
+            &client,
+            &base,
+            ws,
+            &third_jwt,
+            card,
+            approve,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 409, "{refused}");
+        assert_eq!(refused["status"], "action_args_invalid");
+    }
+    assert_eq!(approval_status(&su, card).await, "pending");
+    assert_eq!(channel_named(&su, ws, &name).await, 0);
+
+    let (status, approved) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(
+        status, 200,
+        "the owner's tap runs the same card: {approved}"
+    );
+    assert_eq!(channel_named(&su, ws, &name).await, 1);
+}
+
+/// **The decision's standing check, one clause at a time (ADR U-d 「재증명」 ②).** The resolver the
+/// decision runs next judges the agent too, so through the route a paused or suspended agent is
+/// refused twice over; this asks the building block itself, with the connection, its scope and the
+/// agent each taken away on their own, so none of its clauses can be deleted unnoticed. The control
+/// is the same call with nothing taken away.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_standing_check_names_the_connection_the_scope_and_the_agent_one_by_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Taken {
+        Nothing,
+        ConnectionStatus,
+        ConnectionNotProved,
+        AnotherConnection,
+        Scope,
+        AgentPaused,
+        AgentSuspended,
+        AgentDeleted,
+        AnotherAgent,
+    }
+    for taken in [
+        Taken::Nothing,
+        Taken::ConnectionStatus,
+        Taken::ConnectionNotProved,
+        Taken::AnotherConnection,
+        Taken::Scope,
+        Taken::AgentPaused,
+        Taken::AgentSuspended,
+        Taken::AgentDeleted,
+        Taken::AnotherAgent,
+    ] {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let ws = fixture.workspace;
+        let mut asked_connection = fixture.hosted_connection;
+        let mut asked_agent = fixture.hosted_agent;
+        match taken {
+            Taken::Nothing => {}
+            Taken::ConnectionStatus => {
+                sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::ConnectionNotProved => {
+                sqlx::query("UPDATE hosted_agent_connection SET status='detected', proved_at=NULL, proved_by=NULL WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::AnotherConnection => asked_connection = Uuid::new_v4(),
+            Taken::Scope => {
+                sqlx::query("UPDATE hosted_agent_connection SET approved_scopes = array_remove(approved_scopes, 'workspace:initiate') WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::AgentPaused => {
+                sqlx::query("UPDATE agent_profile SET paused = true WHERE workspace_id=$1 AND agent_member_id=$2")
+                    .bind(ws).bind(fixture.hosted_agent).execute(&su).await.unwrap();
+            }
+            Taken::AgentSuspended => {
+                sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_agent)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Taken::AgentDeleted => {
+                sqlx::query("UPDATE member SET deleted_at = now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_agent)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Taken::AnotherAgent => asked_agent = fixture.managed_agent,
+        }
+        let standing = momo_db::with_tenant_tx(&su, ws, move |conn| {
+            Box::pin(async move {
+                momo_agent::initiative::initiative_standing_in_tx(
+                    conn,
+                    ws,
+                    asked_agent,
+                    asked_connection,
+                    "workspace:initiate",
+                )
+                .await
+            })
+        })
+        .await
+        .expect("the standing check runs");
+        assert_eq!(
+            standing,
+            matches!(taken, Taken::Nothing),
+            "{taken:?}: the check is true only when nothing was taken away"
+        );
+    }
+}
+
 /// **Who may see or decide a card an agent raised unasked (ADR U-c, review M8).** It stands in its
 /// owner's one-to-one DM, so to anybody outside — a workspace admin included — the id answers as a
 /// missing approval does (a `403` would confirm the card exists and whose room it is in); and the
@@ -24837,6 +25049,51 @@ async fn a_person_outside_the_owners_dm_is_told_nothing_of_the_card() {
         approval_status(&su, card).await,
         "pending",
         "nobody outside decided it"
+    );
+
+    // The other decision route — by run — says the same, whichever run is named. A run in the path
+    // that is not the card's must not tell an outsider that "there is such a card" (400) from "there
+    // is none" (404) (security review of #4704 PR B, M1).
+    let by_run = |jwt: String, run: Uuid, approval: Uuid| {
+        let (client, url) = (
+            client.clone(),
+            format!("{base}/v1/agent-runs/{run}/approval-decisions"),
+        );
+        async move {
+            let response = client
+                .post(url)
+                .bearer_auth(jwt)
+                .json(&json!({"approvalId": approval, "approve": true, "clientDecisionId": Uuid::new_v4()}))
+                .send()
+                .await
+                .expect("by-run decision responds");
+            (
+                response.status().as_u16(),
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+    let cards_run = run_of_approval(&su, card).await;
+    for (who, jwt) in [("admin", &admin_jwt), ("plain member", &plain_jwt)] {
+        let (status, missing) = by_run(jwt.clone(), Uuid::new_v4(), Uuid::new_v4()).await;
+        assert_eq!(status, 404, "{who}: {missing}");
+        for (label, run) in [("another run", Uuid::new_v4()), ("its own run", cards_run)] {
+            let (status, answered) = by_run(jwt.clone(), run, card).await;
+            assert_eq!(status, 404, "{who}, {label}: {answered}");
+            assert_eq!(answered["status"], missing["status"], "{who}, {label}");
+            assert_eq!(
+                answered["decisionReason"], missing["decisionReason"],
+                "{who}, {label}"
+            );
+        }
+    }
+    // The one person in the room is still told the plain truth about a run that is not the card's.
+    let (status, mismatch) = by_run(fixture.human_jwt.clone(), Uuid::new_v4(), card).await;
+    assert_eq!(status, 400, "{mismatch}");
+    assert_eq!(
+        approval_status(&su, card).await,
+        "pending",
+        "nothing above decided it"
     );
 
     // The picture preview is the same not-found for the owner and for the outsiders alike.
@@ -25264,7 +25521,15 @@ async fn a_card_that_stands_leaves_one_opened_row_and_its_decision_rows_say_wher
     let (status, raised) = raise(&client, &base, &fixture, "alpha").await;
     assert_eq!(status, 200, "{raised}");
     let card_a = approval_of(&raised);
-    let (status, raised) = raise(&client, &base, &fixture, "beta").await;
+    // `beta` carries a sentence of the agent's own, which no decision-side row may repeat.
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        json!({"clientRequestId": Uuid::new_v4(), "actionId": "channel.create",
+               "args": {"name": "beta"}, "rationale": "정기 점검용 방이에요"}),
+    )
+    .await;
     assert_eq!(status, 200, "{raised}");
     let card_b = approval_of(&raised);
 
@@ -25353,6 +25618,30 @@ async fn a_card_that_stands_leaves_one_opened_row_and_its_decision_rows_say_wher
     let rejections = audit_details_of(&su, ws, "approval.rejected").await;
     assert_eq!(rejections.len(), 1, "{rejections:?}");
     assert_eq!(rejections[0]["origin"], "agent_initiated");
+    // The decision event carries the whole stored payload — the agent's own words among it. For an
+    // unasked card the audit copy leaves it out: the row holds ids, the status, who and when, and
+    // not one word the agent wrote (security review of #4704 PR B, M2).
+    let decision_keys = [
+        "action",
+        "action_type",
+        "approval_id",
+        "channel_id",
+        "decided_at_ms",
+        "decided_by",
+        "decision_reason",
+        "origin",
+        "requested_by",
+        "run_id",
+        "schema",
+        "status",
+    ];
+    assert_eq!(detail_keys(&rejections[0]), decision_keys);
+    assert!(
+        !rejections[0].to_string().contains("beta")
+            && !rejections[0].to_string().contains("정기 점검용"),
+        "no name the agent chose: {}",
+        rejections[0]
+    );
 
     // Expired — by a late tap, and by the sweep.
     let overdue = |approval: Uuid| {
@@ -25396,6 +25685,11 @@ async fn a_card_that_stands_leaves_one_opened_row_and_its_decision_rows_say_wher
     assert_eq!(expiries.len(), 2, "{expiries:?}");
     for row in &expiries {
         assert_eq!(row["origin"], "agent_initiated", "{row}");
+        assert_eq!(detail_keys(row), decision_keys, "{row}");
+        assert!(
+            !row.to_string().contains("gamma") && !row.to_string().contains("delta"),
+            "no name the agent chose: {row}"
+        );
     }
 
     // A card a person asked for says nothing of an origin: its rows are what they always were.
@@ -25482,15 +25776,19 @@ async fn claim_proposal_handle(
         .to_string()
 }
 
-/// Sessions of this database waiting on an advisory lock.
-async fn advisory_waiters(su: &PgPool) -> i64 {
+/// Sessions waiting on **this** advisory key (`pg_locks` stores a bigint key as its high half in
+/// `classid` and its low half in `objid`) — not on any advisory lock of the database, which another
+/// test's waiter could fill.
+async fn advisory_waiters(su: &PgPool, key: &str) -> i64 {
     sqlx::query_scalar(
-        "SELECT count(*) FROM pg_stat_activity \
-          WHERE datname = current_database() AND wait_event_type = 'Lock' AND wait_event = 'advisory'",
+        "SELECT count(*) FROM pg_locks \
+          WHERE locktype = 'advisory' AND NOT granted \
+            AND ((classid::bigint << 32) | objid::bigint) = hashtextextended($1::text, 0)",
     )
+    .bind(key)
     .fetch_one(su)
     .await
-    .expect("count advisory waiters")
+    .expect("count waiters on one advisory key")
 }
 
 /// **A person's proposal and an unasked card take the same lock first (ADR U-d, PR A's follow-up).**
@@ -25549,7 +25847,8 @@ async fn a_persons_proposal_and_an_unasked_card_queue_behind_one_agent_lock() {
 
     // Both are queued behind the one lock: that is what "the same lock, first" means.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while advisory_waiters(&su).await < 2 {
+    let lock_key = momo_agent::initiative::initiative_lock_key(ws, fixture.hosted_agent);
+    while advisory_waiters(&su, &lock_key).await < 2 {
         assert!(
             std::time::Instant::now() < deadline,
             "a person's proposal and an unasked card must both wait on the agent's lock"

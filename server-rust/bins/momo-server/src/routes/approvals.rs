@@ -770,6 +770,15 @@ fn deliver_flag_refused(
     deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
 }
 
+/// Is this card one that answers a person **outside its room** as a missing approval does? The
+/// in-place channel-grant card (it names a room and who called whom there) and the card an agent
+/// raised unasked (it stands in its owner's one-to-one direct message and says what the agent wants
+/// to do there). One definition for both decision routes' two places that ask.
+fn card_is_hidden_from_outsiders(approval: &LockedApproval) -> bool {
+    momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
+        || momo_agent::initiative::is_unasked_card(approval)
+}
+
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
     let now = Utc::now();
     let desired_status = if input.approve {
@@ -835,6 +844,23 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
 
     if let Some(route_run_id) = input.route_run_id {
         if route_run_id != approval.run_id {
+            // A card that is hidden from outsiders (below) is hidden here too: whether the run in
+            // the path is the card's must not be a way to tell "there is such a card" from "there
+            // is none" — to anybody outside the room it answers what a missing approval answers
+            // (review of #4704 PR B, M1; the in-place card had the same gap).
+            if card_is_hidden_from_outsiders(&approval)
+                && !is_active_channel_member_in_tx(conn, approval.channel_id, input.member_id)
+                    .await?
+            {
+                return Ok(Ok(refusal(
+                    input.approval_id,
+                    input.member_id,
+                    "not_found",
+                    "approval not found",
+                    StatusCode::NOT_FOUND,
+                    now,
+                )));
+            }
             return Ok(Ok(refusal(
                 approval.id,
                 input.member_id,
@@ -857,9 +883,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         // wants to do there, so to anybody outside that room — a workspace admin included — the
         // id answers as a missing approval does (`403 forbidden` would confirm the card exists,
         // and whose room it is in). Judged by either server-written marker, like the executor.
-        if momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
-            || momo_agent::initiative::is_unasked_card(&approval)
-        {
+        if card_is_hidden_from_outsiders(&approval) {
             return Ok(Ok(refusal(
                 input.approval_id,
                 input.member_id,
@@ -1249,7 +1273,7 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
                 // A copy: `event` is also the resume job's input and the
                 // broadcast, and neither is told which credential decided
                 // (nor that the card was raised unasked: the audit row says so).
-                momo_agent::initiative::stamp_origin(
+                momo_agent::initiative::decision_audit_detail(
                     &approval,
                     stamp_via(input.credential_via, event.clone()),
                 ),
@@ -2166,7 +2190,7 @@ async fn execute_workspace_action(
     for entry in &executed.audits {
         // An unasked card's rows say so (`origin`); every other card's are written as they were.
         let stamped = AuditEntry {
-            detail: momo_agent::initiative::stamp_origin(approval, entry.detail.clone()),
+            detail: momo_agent::initiative::decision_audit_detail(approval, entry.detail.clone()),
             ..entry.clone()
         };
         write_audit(conn, &stamped).await?;
@@ -2183,7 +2207,7 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                momo_agent::initiative::stamp_origin(
+                momo_agent::initiative::decision_audit_detail(
                     approval,
                     stamp_via(
                         input.credential_via,
@@ -3952,7 +3976,7 @@ async fn settle_expired(
             .run(approval.run_id)
             .with_schema(
                 TOOL_AUDIT_SCHEMA,
-                momo_agent::initiative::stamp_origin(
+                momo_agent::initiative::decision_audit_detail(
                     approval,
                     stamp_via(credential_via, event.clone()),
                 ),

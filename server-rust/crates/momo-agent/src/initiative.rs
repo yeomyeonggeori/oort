@@ -326,10 +326,17 @@ pub async fn find_blocker_in_tx(
 // ---------------------------------------------------------------------------
 
 /// The part of the decision-time re-proof only the database can answer, for the connection the
-/// card was raised through: the **agent** is still an active, un-paused agent member, and the
-/// human's approval of that connection still names `scope` (`workspace:initiate`). The
-/// connection being live and proved is `active_hosted_connection_in_tx`'s (the one definition the
-/// wake already uses); the owner is [`initiative_facts_in_tx`]'s; the switch is [`switch_is_on`]'s.
+/// card was raised through:
+///
+/// * that very connection is still **the agent's connection and still `active` and proved** — its
+///   `status`, not the freshness of a credential: an OAuth connection's `active_token_id` is a
+///   30-minute access token that is renewed on use, so a card that waited for its owner past the
+///   token's expiry must not read as "the connection is gone" (security review of #4704 PR B, H1);
+///   a connection torn down and made again is another id and is not this one;
+/// * the human's approval of that connection still names `scope` (`workspace:initiate`);
+/// * the **agent** is still an active member and its profile is not paused.
+///
+/// The owner is [`initiative_facts_in_tx`]'s; the switch is [`switch_is_on`]'s.
 pub async fn initiative_standing_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -344,6 +351,7 @@ pub async fn initiative_standing_in_tx(
              JOIN agent_profile ap \
                ON ap.workspace_id = hc.workspace_id AND ap.agent_member_id = hc.agent_member_id \
             WHERE hc.workspace_id = $1 AND hc.id = $2 AND hc.agent_member_id = $3 \
+              AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
               AND $4 = ANY(hc.approved_scopes) \
               AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
               AND ap.paused = false)",
@@ -579,13 +587,20 @@ pub fn is_unasked_card(approval: &LockedApproval) -> bool {
     is_agent_initiated(&approval.payload) || is_held_for_agent_initiative(&approval.run_input)
 }
 
-/// Add `origin: "agent_initiated"` to the `detail` of a decision-side audit row of an unasked card
-/// (`action.approved`, the domain row, `approval.rejected`, `approval.expired`) — and leave every
-/// other card's row exactly as it was. The key is one closed token the server wrote; it holds
-/// nothing the agent said. An `origin` the row already carries wins.
-pub fn stamp_origin(approval: &LockedApproval, mut detail: Value) -> Value {
+/// The `detail` of a decision-side audit row (`action.approved`, the domain row,
+/// `approval.rejected`, `approval.expired`) for the card `approval`.
+///
+/// A card a person asked for is returned exactly as it was. A card the agent raised **unasked**
+/// gets two changes, both closed: `origin: "agent_initiated"` (one token the server wrote), and the
+/// stored `payload` is **taken out** — the generic decision event carries the whole approval
+/// payload, which for this card holds the agent's own words (`rationale`, the names it chose), and
+/// ADR-0186 증보 v5 U-d says no decision-side row carries them (review of #4704 PR B, M2). What
+/// remains is ids, the status, who decided and when. (The domain rows' own detail, ADR V6's, is the
+/// executed fact and is not touched here beyond `origin`.) An `origin` the row already carries wins.
+pub fn decision_audit_detail(approval: &LockedApproval, mut detail: Value) -> Value {
     if is_unasked_card(approval) {
         if let Some(object) = detail.as_object_mut() {
+            object.remove("payload");
             object
                 .entry("origin")
                 .or_insert_with(|| Value::String(APPROVAL_ORIGIN_AGENT_INITIATED.into()));

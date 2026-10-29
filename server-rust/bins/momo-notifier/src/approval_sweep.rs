@@ -271,7 +271,7 @@ async fn settle_expired_in_tx(
                 TOOL_AUDIT_SCHEMA,
                 // An unasked card says so (ADR-0186 증보 v5 U-d): one closed key, read from the
                 // row the sweep already locked — no table this role could not read before.
-                momo_agent::initiative::stamp_origin(approval, event.clone()),
+                momo_agent::initiative::decision_audit_detail(approval, event.clone()),
             ),
     )
     .await?;
