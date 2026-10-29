@@ -278,10 +278,6 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   // ADR-0201 D6-3. 도우미 카드의 「도우미 제안 · 요청: ○○」 줄이 **그리는** 블록이다
   // (`teamAi.ts`). 위 `action` 과 같은 이유로 숨김이 아니다.
   "proposed_via",
-  // ADR-0186 증보 v5 U-c (#4705). 「먼저 제안」 줄이 읽고 그리는 키다(`agentInitiative.ts`).
-  // 모르는 값이면 줄이 서지 않지만, 위 `momo.action_result` 의 미래 판과 같은 이유로 숨김으로
-  // 세지 않는다: 그 사실은 개수가 아니라 「표시 없이 그대로 서는 카드」가 말한다.
-  "origin",
 ]);
 
 export interface PayloadRow {
@@ -373,7 +369,12 @@ export function payloadDetail(props: Props): PayloadDetail {
   }
   let withheld = 0;
   for (const key of Object.keys(props ?? {})) {
-    if (!PARSED_KEYS.has(key)) withheld += 1;
+    if (PARSED_KEYS.has(key)) continue;
+    // ADR-0186 증보 v5 U-c (#4705): `origin` 은 **알아본 값**일 때만 카드가 그리는 키다
+    // (「먼저 제안」 줄). 다른 값(인플레이스 카드의 `server_in_place` 등)은 지금까지처럼 이 빌드가
+    // 읽지 않은 키이므로 숨김으로 센다 — 집합에 넣으면 그 카드들의 정직 카운트가 조용히 줄어든다.
+    if (key === "origin" && props?.[key] === AGENT_INITIATED_ORIGIN) continue;
+    withheld += 1;
   }
   return { rows, withheld };
 }

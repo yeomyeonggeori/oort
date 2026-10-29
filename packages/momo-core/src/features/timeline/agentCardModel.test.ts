@@ -794,10 +794,15 @@ describe("먼저 제안 카드와 고정 카드의 읽기 (ADR-0186 증보 v5 U-
     expect("agentInitiated" in pinCard({ origin: true })).toBe(false);
   });
 
-  it("origin 은 카드가 그리는 키라 숨김으로 세지 않는다", () => {
-    const withOrigin = pinCard({ origin: "agent_initiated" });
+  it("알아본 origin 은 카드가 그리는 키라 숨김으로 세지 않고, 모르는 origin 은 지금처럼 센다", () => {
     const without = pinCard();
-    expect(withOrigin.detail.withheld).toBe(without.detail.withheld);
+    expect(pinCard({ origin: "agent_initiated" }).detail.withheld).toBe(
+      without.detail.withheld
+    );
+    // 인플레이스 카드의 origin 처럼 이 빌드가 읽지 않는 값은 정직 카운트에 남는다.
+    expect(pinCard({ origin: "server_in_place" }).detail.withheld).toBe(
+      without.detail.withheld + 1
+    );
   });
 
   it("고정 카드의 대상 메시지를 읽고, 서버 행은 그대로 둔다", () => {

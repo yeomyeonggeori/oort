@@ -1,20 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
+  AGENT_INITIATIVE_LABEL,
   AGENT_INITIATIVE_RATIONALE_LABEL,
-  agentInitiativeLine,
+  approvalHeadTitle,
   rationaleTag,
 } from "./agentInitiative";
 import { TEAM_AI_RATIONALE_LABEL } from "./teamAi";
 
-describe("먼저 제안 줄과 사유 꼬리표", () => {
-  it("제안자 이름에 주격 조사를 받침에 맞게 붙이고, 이름을 모르면 이름을 짓지 않는다", () => {
-    expect(agentInitiativeLine("김인턴")).toContain("김인턴이");
-    expect(agentInitiativeLine("planner")).toContain("planner가");
-    for (const unknown of [null, "", "   "]) {
-      const line = agentInitiativeLine(unknown);
-      expect(line).toContain("에이전트가");
-      expect(line).not.toContain("null");
-    }
+describe("먼저 제안 꼬리표와 사유 이름표", () => {
+  it("먼저 제안 카드만 제목 끝에 꼬리표가 붙고, 서버 제목은 그대로다", () => {
+    const title = "승인 요청: 메시지 고정";
+    expect(approvalHeadTitle({ title })).toBe(title);
+    expect(approvalHeadTitle({ title, agentInitiated: true })).toBe(
+      `${title} · ${AGENT_INITIATIVE_LABEL}`
+    );
   });
 
   it("사유 이름표는 도우미 카드, 먼저 제안, 그 밖의 순서로 고른다", () => {
@@ -23,9 +22,11 @@ describe("먼저 제안 줄과 사유 꼬리표", () => {
     });
     expect(team.label).toBe(TEAM_AI_RATIONALE_LABEL);
     expect(team.note).not.toBeNull();
-    const initiated = rationaleTag({ agentInitiated: true });
-    expect(initiated.label).toBe(AGENT_INITIATIVE_RATIONALE_LABEL);
-    expect(initiated.note).not.toBeNull();
+    // 먼저 제안은 이름표만이다: 아래 줄을 더 세우지 않는다.
+    expect(rationaleTag({ agentInitiated: true })).toEqual({
+      label: AGENT_INITIATIVE_RATIONALE_LABEL,
+      note: null,
+    });
     // 둘 다 서면 도우미 쪽이 이긴다(먼저 제안은 호스티드 에이전트만 올린다).
     expect(
       rationaleTag({

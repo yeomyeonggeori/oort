@@ -21,7 +21,10 @@ import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
-import { AGENT_INITIATIVE_RATIONALE_LABEL } from "@momo/core/features/timeline/agentInitiative";
+import {
+  AGENT_INITIATIVE_LABEL,
+  AGENT_INITIATIVE_RATIONALE_LABEL,
+} from "@momo/core/features/timeline/agentInitiative";
 
 // =============================================================================
 // AX-4 (#2510): 행동 승인 카드 · 1회 링크 · 영속 결과 카드.
@@ -803,36 +806,6 @@ describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
   const PLANNER = "019f9a01-0000-7000-8000-0000000004a1";
   const TARGET_CHANNEL = "00000000-0000-7000-8000-000000000302";
   const TARGET_MESSAGE = "0199AA11-2222-7000-8000-0000000000C1";
-  const planner_directory = makeDirectory([
-    {
-      id: OWNER,
-      workspaceId: WORKSPACE_ID,
-      kind: "human",
-      status: "active",
-      role: "owner",
-      displayName: "이도현",
-      handle: "dohyun",
-      channelCount: 1,
-      channelIds: [],
-      capabilities: [],
-      createdAtMs: 0,
-      updatedAtMs: 0,
-    },
-    {
-      id: PLANNER,
-      workspaceId: WORKSPACE_ID,
-      kind: "agent",
-      status: "active",
-      role: "member",
-      displayName: "플래너",
-      handle: "planner",
-      channelCount: 1,
-      channelIds: [],
-      capabilities: [],
-      createdAtMs: 0,
-      updatedAtMs: 0,
-    },
-  ] as never);
 
   function pinProps(over: Record<string, unknown> = {}): Record<string, unknown> {
     return {
@@ -860,73 +833,47 @@ describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
     };
   }
 
-  function mountWith(
-    message_over: Partial<Message>,
-    directory = planner_directory
-  ): HTMLElement {
-    const card = agentCardModel(message(message_over));
-    if (card === null) throw new Error("no card for these props");
-    mountHost = document.createElement("div");
-    document.body.append(mountHost);
-    mountedRoot = createRoot(mountHost);
-    act(() => {
-      mountedRoot?.render(
-        createElement(
-          SessionProvider,
-          { value: sessionValue() },
-          createElement(AgentCard, { card, directory })
-        )
-      );
-    });
-    return mountHost;
-  }
-
   function mountPin(props: Record<string, unknown>): HTMLElement {
-    return mountWith({ type: "approval_request", authorMemberId: PLANNER, props });
+    return mountCard(props, { authorMemberId: PLANNER });
   }
 
-  it("먼저 제안 줄에 제안자(카드 작성자)가 서고, 사유에 에이전트 글 꼬리표가 붙는다", () => {
+  const headTitle = (host: HTMLElement) =>
+    byTestId(host, "agent-card")[0]?.getAttribute("aria-label") ?? "";
+
+  it("제목 끝에 짧은 꼬리표가 붙고, 사유 이름표가 에이전트 글이다(새 행은 없다)", () => {
     const host = mountPin(pinProps());
-    const row = byTestId(host, "approval-initiative")[0];
-    expect(row).toBeDefined();
-    expect(row?.textContent).toContain("플래너");
-    expect(byTestId(host, "approval-initiative-note")).toHaveLength(1);
+    expect(headTitle(host)).toContain(AGENT_INITIATIVE_LABEL);
+    expect(headTitle(host).startsWith("승인 요청")).toBe(true);
     const rationale = byTestId(host, "approval-action-rationale")[0];
     expect(rationale?.textContent).toContain(AGENT_INITIATIVE_RATIONALE_LABEL);
-    expect(byTestId(host, "approval-initiative-rationale-note")).toHaveLength(1);
-    // 사유는 평문이다: 링크나 서식으로 바뀌지 않는다.
+    // 사유는 평문이다: 링크나 서식으로 바뀌지 않고, 아래 줄을 더 세우지 않는다.
     expect(rationale?.querySelectorAll("a, strong, em, code")).toHaveLength(0);
+    expect(byTestId(host, "approval-team-ai-rationale-note")).toHaveLength(0);
+    // 서버 행 둘과 요청 줄이 전부다: 먼저 제안이 행을 더 세우지 않는다.
+    expect(byTestId(host, "approval-action-row")).toHaveLength(2);
   });
 
-  it("origin 이 없으면 지금까지의 카드 그대로다(줄도 꼬리표도 없다)", () => {
+  it("origin 이 없으면 지금까지의 카드 그대로다(꼬리표도 이름표도 없다)", () => {
     const props = pinProps();
     delete props.origin;
     const host = mountPin(props);
-    expect(byTestId(host, "approval-initiative")).toHaveLength(0);
-    expect(byTestId(host, "approval-initiative-rationale-note")).toHaveLength(0);
+    expect(headTitle(host)).not.toContain(AGENT_INITIATIVE_LABEL);
     expect(byTestId(host, "approval-action-rationale")[0]?.textContent).not.toContain(
       AGENT_INITIATIVE_RATIONALE_LABEL
     );
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
   });
 
-  it("작성자가 디렉터리에 없으면 이름을 짓지 않는다", () => {
-    const host = mountWith(
-      { type: "approval_request", authorMemberId: HERMES, props: pinProps() },
-      DIRECTORY
-    );
-    const row = byTestId(host, "approval-initiative")[0];
-    expect(row).toBeDefined();
-    expect(row?.textContent).not.toContain("플래너");
-    expect(row?.textContent).not.toContain("undefined");
+  it("모르는 origin 값은 꼬리표를 세우지 않는다", () => {
+    const host = mountPin(pinProps({ origin: "scheduled" }));
+    expect(headTitle(host)).not.toContain(AGENT_INITIATIVE_LABEL);
   });
 
-  it("결정이 난 카드에는 「아직 아무것도 바뀌지 않았어요」가 서지 않고 줄은 남는다", () => {
+  it("결정이 난 카드는 꼬리표가 남고 전문 보기 문은 없다", () => {
     const host = mountPin(
       pinProps({ status: "approved", approval_status: "approved", decided_by: OWNER })
     );
-    expect(byTestId(host, "approval-initiative")).toHaveLength(1);
-    expect(byTestId(host, "approval-initiative-note")).toHaveLength(0);
+    expect(headTitle(host)).toContain(AGENT_INITIATIVE_LABEL);
     expect(byTestId(host, "approval-message-preview-link")).toHaveLength(0);
   });
 
@@ -937,8 +884,6 @@ describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
     expect(link.getAttribute("href")).toBe(
       `#/c/${TARGET_CHANNEL}?msg=${TARGET_MESSAGE.toLowerCase()}`
     );
-    // 총 글자 수가 문 옆에 숫자로 선다.
-    expect(link.querySelector("[data-numeric]")?.textContent).toContain("1,234");
     // 서버 행은 그대로 서고, 문은 결정 버튼과 함께 있다.
     expect(byTestId(host, "approval-action-row")).toHaveLength(2);
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
@@ -952,14 +897,68 @@ describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
     expect(byTestId(host, "approval-action-row")).toHaveLength(2);
   });
 
-  it("글자 수를 모르는 미리보기는 문만 서고 숫자를 짓지 않는다", () => {
-    const props = pinProps();
-    (props.action as { preview: Record<string, unknown> }).preview.totalChars = null;
-    const host = mountPin(props);
-    const link = byTestId(host, "approval-message-preview-link")[0];
-    expect(link).toBeDefined();
-    expect(link?.querySelector("[data-numeric]")).toBeNull();
-  });
+  // 먼저 제안이 올릴 수 있는 네 행동(ADR U-b-2) 모두 같은 카드 몸으로 선다: 서버 행이 그대로 서고,
+  // 꼬리표와 결정 컨트롤이 있고, 전문 보기 문은 고정 둘에만 있다.
+  const INITIATIVE_ACTIONS: ReadonlyArray<{
+    id: string;
+    rows: Array<{ label: string; value: string }>;
+    pin: boolean;
+  }> = [
+    {
+      id: "channel.create",
+      rows: [
+        { label: "채널 이름", value: "qa" },
+        { label: "공개 범위", value: "비공개" },
+        { label: "이 에이전트도 참여", value: "예" },
+      ],
+      pin: false,
+    },
+    {
+      id: "channel.member.add",
+      rows: [
+        { label: "채널", value: "#qa" },
+        { label: "추가할 멤버", value: "박서연" },
+      ],
+      pin: false,
+    },
+    {
+      id: "message.pin",
+      rows: [
+        { label: "채널", value: "#qa" },
+        { label: "글자 수", value: "40자" },
+      ],
+      pin: true,
+    },
+    {
+      id: "message.unpin",
+      rows: [
+        { label: "채널", value: "#qa" },
+        { label: "고정한 사람", value: "최민수" },
+        { label: "글자 수", value: "40자" },
+      ],
+      pin: true,
+    },
+  ];
+
+  for (const action of INITIATIVE_ACTIONS) {
+    it(`${action.id} 먼저 제안 카드도 서버 행 그대로 서고 결정 컨트롤이 있다`, () => {
+      const block = pinProps().action as Record<string, unknown>;
+      const props = pinProps({
+        action: {
+          ...block,
+          id: action.id,
+          rows: action.rows,
+          ...(action.pin ? {} : { preview: undefined }),
+        },
+      });
+      const host = mountPin(props);
+      expect(headTitle(host)).toContain(AGENT_INITIATIVE_LABEL);
+      expect(byTestId(host, "approval-action-row")).toHaveLength(action.rows.length);
+      expect(byTestId(host, "approval-approve")).toHaveLength(1);
+      expect(byTestId(host, "approval-reject")).toHaveLength(1);
+      expect(byTestId(host, "approval-message-preview-link")).toHaveLength(action.pin ? 1 : 0);
+    });
+  }
 });
 
 describe("만료 스윕이 남긴 줄 (#4705, 검수 L4)", () => {

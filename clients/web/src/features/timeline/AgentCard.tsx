@@ -107,9 +107,7 @@ import {
   teamAiProposalLine,
 } from "@momo/core/features/timeline/teamAi";
 import {
-  AGENT_INITIATIVE_AUTHORITY,
-  AGENT_INITIATIVE_LABEL,
-  agentInitiativeLine,
+  approvalHeadTitle,
   rationaleTag,
 } from "@momo/core/features/timeline/agentInitiative";
 import { MessagePreviewLink } from "./MessagePreviewLink";
@@ -503,7 +501,8 @@ function ApprovalBody({
     <CardFrame
       sectionRef={cardRef}
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
-      title={card.title}
+      // 먼저 제안 카드는 제목 끝의 짧은 꼬리표 하나로만 말한다(#4705). 제안자는 카드 작성자라 줄이 이미 말한다.
+      title={approvalHeadTitle(card)}
       chip={<ApprovalChip status={status} />}
       status={status}
       kind="approval"
@@ -633,24 +632,6 @@ function ApprovalBody({
           </span>
         </LabeledRow>
       )}
-      {/* 먼저 제안 (ADR-0186 증보 v5 U-c, #4705). 아무도 부르지 않았는데 에이전트가 소유자와의
-          대화에 올린 카드다. 제안자는 카드 작성자(이름은 디렉터리가 푼다)이고, 결정 **전에**만
-          「아직 아무것도 바뀌지 않았어요」를 말한다. */}
-      {card.agentInitiated && (
-        <LabeledRow label={AGENT_INITIATIVE_LABEL} testId="approval-initiative">
-          {agentInitiativeLine(
-            memberFor(directory, card.requestedByMemberId)?.displayName ?? null
-          )}
-          {!settled && (
-            <span
-              className="mt-1 block text-meta text-ink-muted"
-              data-testid="approval-initiative-note"
-            >
-              {AGENT_INITIATIVE_AUTHORITY}
-            </span>
-          )}
-        </LabeledRow>
-      )}
       {card.summary && <LabeledRow label="요청">{card.summary}</LabeledRow>}
       {/* 워크스페이스 행동의 행 (ADR-0186 부록 A).
           서버가 이름 붙여 보낸 것만, 보낸 순서대로. 이 카드가 두 얼굴을 갖되
@@ -703,11 +684,7 @@ function ApprovalBody({
           {rationaleTag(card).note !== null && (
             <span
               className="mt-1 block text-meta text-ink-muted"
-              data-testid={
-                card.proposedVia
-                  ? "approval-team-ai-rationale-note"
-                  : "approval-initiative-rationale-note"
-              }
+              data-testid="approval-team-ai-rationale-note"
             >
               {rationaleTag(card).note}
             </span>

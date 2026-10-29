@@ -98,12 +98,12 @@ export function setAgentInitiativeSwitch(
 export const AGENT_INITIATIVE_SECTION_TITLE = "에이전트의 먼저 제안";
 
 export const AGENT_INITIATIVE_SECTION_DESCRIPTION =
-  "허락을 받은 에이전트가 부르지 않아도 소유자와의 대화에 승인 카드를 올릴 수 있어요. 카드는 비공개 채널 만들기, 채널에 멤버 넣기, 메시지 고정과 고정 풀기뿐이고, 실행은 사람이 승인한 뒤에만 일어나요.";
+  "허락을 받은 에이전트가 부르지 않아도 소유자와의 대화에 승인 카드를 올릴 수 있어요. 실행은 사람이 승인한 뒤에만 일어나요.";
 
 export const AGENT_INITIATIVE_SWITCH_LABEL = "먼저 제안 받기";
 
 export const AGENT_INITIATIVE_SWITCH_DESCRIPTION =
-  "끄면 모든 에이전트가 새 카드를 올리지 못해요. 이미 올라온 카드는 승인해도 실행되지 않고, 거절은 언제나 할 수 있어요.";
+  "끄면 새 카드가 올라오지 않고, 이미 올라온 카드는 승인해도 실행되지 않아요.";
 
 export function agentInitiativeBusyLabel(next: boolean): string {
   return next ? "먼저 제안 켜는 중" : "먼저 제안 끄는 중";
