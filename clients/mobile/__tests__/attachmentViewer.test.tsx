@@ -1684,9 +1684,11 @@ describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에�
       const plateStyle = flatten(plate.props.style);
       expect({ top: plateStyle.top, right: plateStyle.right, bottom: plateStyle.bottom, left: plateStyle.left }).toEqual(fill);
       expect(plateStyle.experimental_backgroundImage).toBe(viewerScrimPlateau(which === 'top' ? 'down' : 'up'));
-      // 자락: 덩어리 **밖**(위쪽 덩어리는 아래로, 아래쪽 덩어리는 위로) 풀린다.
+      // 자락: 덩어리 **밖**(위쪽 덩어리는 아래로, 아래쪽 덩어리는 위로) 풀린다. 자리는 음수 오프셋이다 — 퍼센트는 Yoga 가 부모의 **안쪽 높이(패딩을 뺀)** 로
+      // 풀어 안전 영역 패딩을 진 덩어리에서 자락이 덩어리 안으로 들어온다(시뮬레이터 캡처에서 이중으로 어두운 띠가 보였다 — jest 는 이 계산을 못 한다).
       const fadeStyle = flatten(fade.props.style);
-      expect(which === 'top' ? fadeStyle.top : fadeStyle.bottom).toBe('100%');
+      expect(which === 'top' ? fadeStyle.bottom : fadeStyle.top).toBe(-VIEWER.scrimReach);
+      expect(which === 'top' ? fadeStyle.top : fadeStyle.bottom).toBeUndefined();
       expect(fadeStyle.height).toBe(VIEWER.scrimReach);
       expect(fadeStyle.experimental_backgroundImage).toBe(viewerScrimFade(which === 'top' ? 'down' : 'up'));
     }

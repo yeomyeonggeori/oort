@@ -790,7 +790,9 @@ const buildStyles = (_color: Palette) =>
     },
 
     // 조작 덩어리 뒤의 스크림 두 겹(`design/tokens.ts` 의 `photoStage.scrim`). 판은 덩어리 안을 가득 덮고(덩어리가 글자와 함께 자라므로
-    // 접근성 큰 글씨에서도 글자는 판 위에 선다), 자락은 덩어리 **밖**으로 `scrimReach` 만큼 풀린다.
+    // 접근성 큰 글씨에서도 글자는 판 위에 선다), 자락은 덩어리 **밖**으로 `scrimReach` 만큼 풀린다. 자락의 자리는 **음수 오프셋**이다(`bottom: -reach`):
+    // 퍼센트(`top: '100%'`)는 쓰지 않는다 — Yoga 가 퍼센트를 부모의 **안쪽 높이(패딩을 뺀)** 로 풀어, 안전 영역 패딩을 진 덩어리에서는 자락이 덩어리 안으로
+    // 들어와 판과 겹쳤다(밝은 사진 캡처에서 이중으로 어두운 띠와 단차가 보였다).
     scrimTop: {
       position: 'absolute',
       top: 0,
@@ -801,7 +803,7 @@ const buildStyles = (_color: Palette) =>
     },
     scrimTopFade: {
       position: 'absolute',
-      top: '100%',
+      bottom: -VIEWER.scrimReach,
       right: 0,
       left: 0,
       height: VIEWER.scrimReach,
@@ -817,7 +819,7 @@ const buildStyles = (_color: Palette) =>
     },
     scrimBottomFade: {
       position: 'absolute',
-      bottom: '100%',
+      top: -VIEWER.scrimReach,
       right: 0,
       left: 0,
       height: VIEWER.scrimReach,
