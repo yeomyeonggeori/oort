@@ -88,11 +88,11 @@ pub fn login(ctx: &Ctx, args: &LoginArgs) -> Result<(), CliError> {
             StorageKind::Keychain => "키체인",
             StorageKind::File => "파일(권한 0600)",
         };
-        println!("로그인했어요.");
-        println!("서버: {}", outcome.server);
-        println!("워크스페이스: {}", outcome.workspace_id);
-        println!("범위: {}", outcome.scopes.join(", "));
-        println!("저장 위치: {place}");
+        crate::outln!("로그인했어요.");
+        crate::outln!("서버: {}", outcome.server);
+        crate::outln!("워크스페이스: {}", outcome.workspace_id);
+        crate::outln!("범위: {}", outcome.scopes.join(", "));
+        crate::outln!("저장 위치: {place}");
     }
     Ok(())
 }

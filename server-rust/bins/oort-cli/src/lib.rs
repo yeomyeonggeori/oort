@@ -80,7 +80,7 @@ where
         }
     };
     if cli.version {
-        println!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
+        outln!("{} {}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
         return 0;
     }
     let ctx = Ctx {

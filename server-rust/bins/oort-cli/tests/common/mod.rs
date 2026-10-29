@@ -125,9 +125,9 @@ fn percent_decode(text: &str) -> String {
 fn decode_pairs(text: &str) -> HashMap<String, String> {
     text.split('&')
         .filter(|pair| !pair.is_empty())
-        .filter_map(|pair| {
+        .map(|pair| {
             let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
-            Some((percent_decode(key), percent_decode(value)))
+            (percent_decode(key), percent_decode(value))
         })
         .collect()
 }

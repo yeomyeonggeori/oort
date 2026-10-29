@@ -9,9 +9,37 @@ use serde::Serialize;
 pub fn print_json<T: Serialize>(value: &T) -> std::io::Result<()> {
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
-    serde_json::to_writer(&mut handle, value).map_err(std::io::Error::other)?;
-    handle.write_all(b"\n")?;
-    handle.flush()
+    let written = serde_json::to_writer(&mut handle, value)
+        .map_err(std::io::Error::other)
+        .and_then(|()| handle.write_all(b"\n"))
+        .and_then(|()| handle.flush());
+    match written {
+        // The reader went away (`oort read --json | head -c0`): nothing is left to tell it.
+        Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
+}
+
+/// One line of a command's own result on standard output. A reader that closed the pipe
+/// (`oort read | head -1`) ends the command quietly instead of with a panic — the standard
+/// `println!` panics on a broken pipe — and any other write failure is an exit 1.
+pub fn out_line(text: &str) {
+    let mut handle = std::io::stdout().lock();
+    if let Err(error) = writeln!(handle, "{text}") {
+        if error.kind() != std::io::ErrorKind::BrokenPipe {
+            let _ = writeln!(std::io::stderr().lock(), "오류: 표준출력에 쓰지 못했어요.");
+            std::process::exit(1);
+        }
+        std::process::exit(0);
+    }
+}
+
+/// `println!` for a command's result, without the panic on a closed pipe.
+#[macro_export]
+macro_rules! outln {
+    ($($arg:tt)*) => {
+        $crate::output::out_line(&format!($($arg)*))
+    };
 }
 
 /// One line on standard error (messages, warnings): never data.

@@ -100,12 +100,12 @@ pub fn whoami(ctx: &Ctx) -> Result<(), CliError> {
     } else {
         "로그인 세션"
     };
-    println!("서버: {}", active.server);
-    println!("워크스페이스: {}", info.workspace_id);
-    println!("나(멤버 id): {}", info.member_id);
-    println!("자격: {kind} · {}", sanitize(&info.name));
-    println!("범위: {}", info.scopes.join(", "));
-    println!(
+    crate::outln!("서버: {}", active.server);
+    crate::outln!("워크스페이스: {}", info.workspace_id);
+    crate::outln!("나(멤버 id): {}", info.member_id);
+    crate::outln!("자격: {kind} · {}", sanitize(&info.name));
+    crate::outln!("범위: {}", info.scopes.join(", "));
+    crate::outln!(
         "채널 제한: {}",
         if info.channel_restricted {
             "있어요"
@@ -113,13 +113,13 @@ pub fn whoami(ctx: &Ctx) -> Result<(), CliError> {
             "없어요"
         }
     );
-    println!("만든 때: {}", rfc3339(info.created_at_ms));
-    println!("만료: {}", rfc3339(info.expires_at_ms));
+    crate::outln!("만든 때: {}", rfc3339(info.created_at_ms));
+    crate::outln!("만료: {}", rfc3339(info.expires_at_ms));
     if let Some(cap) = info.lineage_expires_at_ms {
-        println!("로그인 최대 기한: {}", rfc3339(cap));
+        crate::outln!("로그인 최대 기한: {}", rfc3339(cap));
     }
     if let Some(used) = info.last_used_at_ms {
-        println!("직전 사용: {}", rfc3339(used));
+        crate::outln!("직전 사용: {}", rfc3339(used));
     }
     let place = match (active.source, storage) {
         (Source::Env, _) => "환경 변수 OORT_TOKEN".to_string(),
@@ -127,7 +127,7 @@ pub fn whoami(ctx: &Ctx) -> Result<(), CliError> {
         (_, Some(other)) => format!("{other}(권한 0600)"),
         _ => "-".to_string(),
     };
-    println!("저장 위치: {place}");
+    crate::outln!("저장 위치: {place}");
     Ok(())
 }
 
@@ -161,7 +161,7 @@ pub fn logout(ctx: &Ctx) -> Result<(), CliError> {
         if ctx.json {
             return emit(&doc);
         }
-        println!("저장된 로그인이 없어요.");
+        crate::outln!("저장된 로그인이 없어요.");
         if ctx.env.token.is_some() {
             note("OORT_TOKEN은 환경 변수라 이 명령이 지우지 않아요. 서버의 카드는 설정 › 연결 › 명령줄·AI 도구에서 폐기해 주세요.");
         }
@@ -216,7 +216,7 @@ pub fn logout(ctx: &Ctx) -> Result<(), CliError> {
     if ctx.json {
         emit(&doc)?;
     } else {
-        println!("이 컴퓨터에서 로그아웃했어요.");
+        crate::outln!("이 컴퓨터에서 로그아웃했어요.");
     }
     if revocation == "unreachable" {
         let mut error = CliError::new(
@@ -266,7 +266,7 @@ pub fn channels(ctx: &Ctx) -> Result<(), CliError> {
         });
     }
     if channels.is_empty() {
-        println!("볼 수 있는 채널이 없어요.");
+        crate::outln!("볼 수 있는 채널이 없어요.");
     }
     for channel in &channels {
         let name = match &channel.name {
@@ -278,7 +278,7 @@ pub fn channels(ctx: &Ctx) -> Result<(), CliError> {
         } else {
             ""
         };
-        println!("{name}\t{}\t{}{mark}", channel.kind, channel.id);
+        crate::outln!("{name}\t{}\t{}{mark}", channel.kind, channel.id);
     }
     Ok(())
 }
@@ -438,7 +438,7 @@ pub fn read(ctx: &Ctx, args: &ReadArgs) -> Result<(), CliError> {
         });
     }
     if page.messages.is_empty() {
-        println!("(메시지가 없어요)");
+        crate::outln!("(메시지가 없어요)");
     }
     for message in &page.messages {
         print_message(message);
@@ -467,13 +467,13 @@ fn print_message(message: &Message) {
         sanitize(message.body.as_deref().unwrap_or(""))
     };
     let mut lines = body.lines();
-    println!(
+    crate::outln!(
         "[{}] {when} {who}{via}  {}",
         message.seq,
         lines.next().unwrap_or("")
     );
     for line in lines {
-        println!("    {line}");
+        crate::outln!("    {line}");
     }
 }
 
@@ -550,7 +550,7 @@ pub fn post(ctx: &Ctx, args: &PostArgs) -> Result<(), CliError> {
             message: &message,
         });
     }
-    println!("보냈어요: [{}] {}", message.seq, message.id);
+    crate::outln!("보냈어요: [{}] {}", message.seq, message.id);
     Ok(())
 }
 
@@ -593,7 +593,7 @@ pub fn inbox(ctx: &Ctx, args: &InboxArgs) -> Result<(), CliError> {
             next_cursor: page.next_cursor.as_deref(),
         });
     }
-    println!("읽지 않은 항목: {}", page.unread_count);
+    crate::outln!("읽지 않은 항목: {}", page.unread_count);
     for item in &page.items {
         let channel = match &item.channel.name {
             Some(name) => format!("#{}", sanitize(name)),
@@ -601,7 +601,7 @@ pub fn inbox(ctx: &Ctx, args: &InboxArgs) -> Result<(), CliError> {
         };
         let unread = if item.read_at.is_none() { "●" } else { " " };
         let first_line = sanitize(&item.message.preview);
-        println!(
+        crate::outln!(
             "{unread} {channel} [{}] {}  {}",
             item.message.seq,
             short_id(&item.actor_member_id),
@@ -650,6 +650,6 @@ pub fn token(ctx: &Ctx, args: &TokenArgs) -> Result<(), CliError> {
             source: active.source.label(),
         });
     }
-    println!("{}", token.expose());
+    crate::outln!("{}", token.expose());
     Ok(())
 }
