@@ -30,7 +30,7 @@ import {
 // 단정도 그렇게 쓰여 있다 — 당기기 전후로 **같은 라우트**가 다시 불렸는가.
 //
 // Owner 2026-10-30 (#4783): 「대화 화면 당겨서 새로고침 = 다시 맞추기」.
-// 이전 이력이 더 있을 때는 페이지네이션이 우선하고, 다 읽은 뒤에만 새로 맞춘다.
+// connected 에서는 이전 이력을 다 읽은 뒤에만, 복구 중에는 이력이 남아 있어도 다시 맞춘다.
 // =============================================================================
 
 const WS = '22222222-2222-4222-8222-222222222222';
@@ -322,13 +322,42 @@ describe('대화 당겨서 다시 맞추기 — owner 10-30 (#4783)', () => {
     expect(client.connectCount).toBe(connects + 1);
   });
 
-  it('더 읽을 이전 이력이 있으면 당김 컨트롤을 붙이지 않는다', async () => {
-    installFetch({timelineHasOlder: true});
+  it.each([0, 10_000])('연결 복구 %dms 뒤에도 이전 이력이 남은 방을 당기면 다시 맞춘다', async elapsedMs => {
+    const fetchMock = installFetch({timelineHasOlder: true});
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
     await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
     expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined();
+    const clients = (jest.requireMock('centrifuge') as {
+      __clients: {connectCount: number; disconnect: () => void}[];
+    }).__clients;
+    const client = clients[clients.length - 1];
+    act(() => {
+      client.disconnect();
+      jest.advanceTimersByTime(elapsedMs);
+    });
+    await waitFor(() => expect(screen.getByTestId('timeline-list').props.refreshControl).toBeTruthy());
+    const connects = client.connectCount;
+    const reads = callsTo(fetchMock, '/messages');
+    pull('timeline-list');
+    await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
+    expect(client.connectCount).toBe(connects + 1);
+    await waitFor(() => expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined());
+  });
+
+  it('연결됐고 더 읽을 이전 이력이 있으면 당김 대신 이전 대화를 불러온다', async () => {
+    const fetchMock = installFetch({timelineHasOlder: true});
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
+    await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
+    expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined();
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    const reads = callsTo(fetchMock, '/messages');
+    fireEvent(screen.getByTestId('timeline-list'), 'startReached', {distanceFromStart: 0});
+    await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('before=1'))).toBe(true);
   });
 });
 

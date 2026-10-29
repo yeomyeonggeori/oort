@@ -855,6 +855,7 @@ function TimelineInner({
   myMemberId,
   loadingOlder,
   reachedStart,
+  realtimeConnected = true,
   nowMs,
   onStartReached,
   onRefresh,
@@ -942,6 +943,8 @@ function TimelineInner({
   myMemberId: string;
   loadingOlder?: boolean;
   reachedStart?: boolean;
+  /** 연결 복구 중에는 이전 이력이 남아 있어도 당겨서 다시 맞출 수 있다. */
+  realtimeConnected?: boolean;
   nowMs: number;
   onStartReached?: () => void;
   onRefresh?: () => Promise<void>;
@@ -3256,9 +3259,9 @@ function TimelineInner({
     [tailNodeRef, styles, tailGap],
   );
 
-  // Owner 2026-10-30 (#4783) reverses the old exclusion: pull means resync,
-  // only after all older history is loaded, so pagination owns its gesture first.
-  const pullEnabled = reachedStart === true && !loadingOlder && onRefresh !== undefined;
+  // #4783: 연결 복구 중에는 언제든 당겨서 다시 맞춘다. 연결됐으면 이전 이력을 다 읽은 뒤에만 켠다.
+  const pullEnabled = onRefresh !== undefined &&
+    (!realtimeConnected || (reachedStart === true && !loadingOlder));
   const pull = usePullRefresh(onRefresh ?? noRefresh, 'timeline-refresh', {resetKey: channelId});
   const pullScroll = useMemo(
     () => withPullScroll(onScroll, pullEnabled ? pull.scrollProps : undefined),

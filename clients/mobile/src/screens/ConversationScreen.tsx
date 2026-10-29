@@ -2044,6 +2044,7 @@ export default function ConversationScreen({
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
+              realtimeConnected={railLive}
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
