@@ -1,0 +1,74 @@
+[package]
+name = "oort-cli"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "oort — the terminal CLI of ADR-0216 D10: login, logout, whoami, channels, read, post, inbox, token, mcp"
+
+# ADR-0216 D10 / #4662. The user-facing binary is `oort`; the crate is `oort-cli` (the
+# operator script `scripts/oort` keeps its name and the two never meet on PATH).
+#
+# `src/lib.rs` + `src/main.rs` are the default paths on purpose: `server-rust/Dockerfile`'s
+# dependency-layer stub loop writes exactly those two files for every workspace member.
+#
+# **This binary links no server crate.** The wire constants it shares with the server
+# (`oort-cli` client id, the fixed loopback ports) are retyped in `src/login.rs` and tied to
+# `momo_mcp::oauth` by a test in `tests/` that depends on `momo-mcp` as a dev-dependency only.
+[lib]
+name = "oort_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "oort"
+path = "src/main.rs"
+
+[dependencies]
+# New in the lock (the only new third-party family of this crate). Minimal feature set: no
+# colour stack (`anstream`/`anstyle`), so the binary never colours anything and NO_COLOR is
+# honoured vacuously.
+clap = { version = "4", default-features = false, features = ["std", "derive", "help", "usage", "error-context"] }
+# `blocking`: one synchronous client keeps the whole CLI a plain sequential program (the
+# refresh lock, the loopback receiver and the stdio bridge are all easier to reason about).
+reqwest = { workspace = true, features = ["blocking"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+base64.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+# PKCE verifier and `state` come from the OS CSPRNG (same crate/version momo-workd and
+# momo-mcp already use; already in the lock).
+getrandom = "0.2"
+
+# Advisory file lock (`flock`) that serialises refresh-token rotation across processes, the
+# effective uid for the credential-file ownership check, and `O_NOFOLLOW`. rustix is already in
+# the lock (tempfile -> rustix); its `fs`/`process` calls are safe functions, which is what
+# lets this crate keep `unsafe_code = "forbid"` with no allowlist entry.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "1", default-features = false, features = ["std", "fs", "process"] }
+
+# macOS Keychain. Already a dependency of momo-workd (so already in the lock and in NOTICE);
+# this crate uses the *login* keychain through the safe `passwords` API, not workd's
+# data-protection keychain (that one needs an entitlement an unsigned CLI does not have).
+[target.'cfg(target_os = "macos")'.dependencies]
+security-framework = "3.7"
+
+[dev-dependencies]
+# Drift guard (tests/wire_constants.rs) and the PG end-to-end (tests/e2e_pg.rs) boot the real
+# router. Dev-only: nothing of the server is linked into the shipped binary.
+momo-server = { path = "../momo-server" }
+momo-db = { path = "../../crates/momo-db" }
+momo-auth = { path = "../../crates/momo-auth" }
+momo-mcp = { path = "../../crates/momo-mcp" }
+# `tests/server_e2e_pg.rs` reuses momo-server's PostgreSQL fixtures (`tests/common/apps_pg.rs`), which
+# build the app state from these three.
+momo-provider-probe = { path = "../../crates/momo-provider-probe" }
+momo-settings = { path = "../../crates/momo-settings" }
+momo-outbox = { path = "../../crates/momo-outbox" }
+axum.workspace = true
+tokio = { workspace = true, features = ["net", "time", "rt-multi-thread", "macros"] }
+tempfile = "3"
+
+[lints]
+workspace = true

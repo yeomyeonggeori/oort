@@ -227,9 +227,12 @@ pub struct InteractionMessage {
 
 /// The `message.*` columns an interaction returns, shared by the edit/delete
 /// `RETURNING` clauses and the re-read of an already-deleted row.
+///
+/// `sent_via` (ADR-0216 D8) is read back but never written here: every `UPDATE` in this
+/// module names the columns it changes, so an edit keeps a developer token's marker.
 const INTERACTION_COLS: &str = "id, workspace_id, channel_id, seq, hlc_ts, hlc_count, \
      author_member_id, type::text AS message_type, state::text AS state, body, props, \
-     root_id, reply_to_id, created_at, edited_at, deleted_at, run_id, client_msg_id";
+     root_id, reply_to_id, created_at, edited_at, deleted_at, sent_via, run_id, client_msg_id";
 
 fn decode_interaction(row: &sqlx::postgres::PgRow) -> Result<InteractionMessage, sqlx::Error> {
     Ok(InteractionMessage {
@@ -318,6 +321,9 @@ pub fn build_message_edited_payload(workspace_id: Uuid, projection: &Interaction
     );
     payload.insert("edited_at_ms".into(), json!(edited_at_ms));
     payload.insert("deleted_at_ms".into(), json!(deleted_at_ms));
+    // ADR-0216 D8 — an edit re-publishes the whole message, so it carries the marker the
+    // edit kept; absent (not null) for every message that has none, as on `message.new`.
+    crate::message::insert_sent_via(&mut payload, message.sent_via);
 
     interaction_envelope(
         workspace_id,
@@ -1852,6 +1858,7 @@ mod tests {
             created_at: DateTime::from_timestamp_millis(1_700_000_000_000).expect("timestamp"),
             edited_at: DateTime::from_timestamp_millis(1_700_000_777_000),
             deleted_at: None,
+            sent_via: None,
         }
     }
 
@@ -1954,6 +1961,24 @@ mod tests {
             json!(1_700_000_777_000_i64),
             "ts is the edit's own instant, not the original hlc"
         );
+    }
+
+    /// ADR-0216 D8 — an edit re-publishes the whole message, so a developer token's marker
+    /// rides it (the author's edit keeps the marker on the row and on the wire); a message
+    /// without one keeps the edit frame it always had, with no `sent_via` key at all.
+    #[test]
+    fn the_edit_payload_keeps_the_sent_via_marker_and_adds_none_to_a_plain_message() {
+        let plain = build_message_edited_payload(Uuid::from_u128(2), &projection(3));
+        assert!(
+            plain["data"]["payload"].get("sent_via").is_none(),
+            "{plain}"
+        );
+
+        let mut marked = projection(3);
+        marked.message.sent_via = Some(crate::message::SentVia::Dev);
+        let payload = build_message_edited_payload(Uuid::from_u128(2), &marked);
+        assert_eq!(payload["data"]["payload"]["sent_via"], json!("dev"));
+        assert_eq!(payload["data"]["payload"]["body"], json!("after"));
     }
 
     /// #1130 전제① — a message that has never streamed reads as revision `0`,

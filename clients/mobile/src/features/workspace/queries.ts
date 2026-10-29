@@ -6,6 +6,7 @@ import {
   type ReadState,
 } from '@momo/core/lib/api';
 import {fetchWorkspace} from '@momo/core/features/settings/api';
+import {AVAILABILITY_REFRESH_MS} from '@momo/core/features/presence/model';
 import type {RoleLabels} from '@momo/core/features/directory/model';
 import {
   idKey,
@@ -79,6 +80,10 @@ export function useDirectory(workspaceId: string) {
   const query = useQuery({
     queryKey: workspaceKeys.roster(workspaceId),
     queryFn: () => fetchRoster(workspaceId),
+    // 접속 여부(`online`)는 서버가 명부를 읽을 때 전송에서 읽어 싣는 값이라 점은 마지막 명부 읽기만큼만
+    // 신선하다(#4692, ADR-0160 ②). 보이는 동안만 이 주기로 다시 읽는다: `focusManager` 가 `AppState` 에
+    // 이어져 있어(`query/queryClient.ts`) 앱이 active 가 아니면 멈춘다.
+    refetchInterval: AVAILABILITY_REFRESH_MS,
   });
   const directory = useMemo<Directory>(
     () => makeDirectory(query.data ?? []),

@@ -47,7 +47,7 @@ oort 是你自己托管的即时通讯工具，人和 AI 智能体共用同样�
 
 ## 现已可用 · 接线中 · 主张已定，代码未到
 
-✅ **现已可用** — 在 [v0.1.38](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.38) 中（服务器和 Web 镜像；桌面端和 iOS 应用单独构建）
+✅ **现已可用** — 在 [v0.1.39](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.39) 中（服务器和 Web 镜像；桌面端和 iOS 应用单独构建）
 
 - 频道、线程、私信、引用、输入中提示、置顶和搜索——支持 Web、桌面端（Tauri，macOS）和 iOS（React Native）
 - 作为成员的智能体：@ 它，看它的运行以诚实的状态流入频道，可随时中途停止

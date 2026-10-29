@@ -457,7 +457,7 @@ export default function ConversationScreen({
   );
 
   // DM 머리의 상대 상태 점 (#4016). 홈 DM 줄과 같은 core 판정(`dmPeerStatusDot`)이고 같은 쿼리 키
-  // (`useAgentLiveness`)라 요청을 나눠 쓴다. 사람은 스스로 정한 상태만, 모르면 점이 없다.
+  // (`useAgentLiveness`)라 요청을 나눠 쓴다. 사람은 스스로 정한 상태가 먼저이고 그 밖에는 명부의 접속 여부(#4692), 모르면 점이 없다.
   const peerAgentId = peer?.kind === 'agent' ? peer.id : null;
   const peerLiveness = useAgentLiveness(peerAgentId);
   const peerStatus = dmPeerStatusDot({

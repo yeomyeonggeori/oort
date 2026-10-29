@@ -7,6 +7,30 @@
 //!
 //! Reset links are operator-mediated and out-of-band (invite convention).
 //! There is no mailer. The raw token leaves the server once in the 201 body.
+//!
+//! ## The change is one transaction, under the workspace's membership lock (#4636)
+//!
+//! The standing check, the current-password check, the new hash, the sweep of the
+//! member's sessions, the audit row and the new session's pair are **one tenant
+//! transaction** whose first statement takes the workspace's membership lock
+//! **exclusively** ([`lock_membership_mutation`]) — the lock a suspension, removal or
+//! departure takes. The doors that sign someone in (login, join) hold it shared, so a
+//! sign-in in flight finishes first and its pair is swept with the rest, or starts after
+//! the change and reads the new password: the sweep never runs between a sign-in's checks
+//! and its recording. A suspension that overlaps a change waits for its commit and
+//! revokes the pair it recorded; one that committed first is found **inside** the lock
+//! (the middleware judged the bearer before the lock was had, and a request can be
+//! waiting for the lock while the member is suspended), which refuses the change before
+//! anything is written.
+//!
+//! Lock order: membership lock → `human` row → member-wide sweep lock → `token` rows.
+//! The membership lock is always first. The operator's reissue (`issue_password_reset`)
+//! takes it first too, exclusively: it locks a member row and then that member's open link,
+//! the opposite order of a claim that spends the link and then needs the member row for its
+//! audit row, so without the shared first lock the two could wait for each other. Row locks
+//! that a foreign key takes (an `audit_log` or `token` insert needs the member row) are not
+//! part of this order: transactions that start with the membership lock are serialized by it
+//! and cannot meet there; paths that do not start with it are outside this change.
 
 use std::time::Duration;
 
@@ -15,6 +39,7 @@ use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
+use momo_auth::IssuedToken;
 use momo_auth::{
     active_workspace_role, change_own_password_in_tx, issue_password_reset_in_tx,
     mint_owner_claim_token, normalized_current_password, normalized_new_password,
@@ -22,13 +47,14 @@ use momo_auth::{
     CLAIM_KIND_PASSWORD_RESET,
 };
 use momo_db::audit::{write_audit, AuditEntry};
-use momo_messaging::{get_member, RevocationCause};
+use momo_messaging::{get_member, Member, RevocationCause};
+use momo_settings::lock_membership_mutation;
 use uuid::Uuid;
 
 use crate::dto::{ChangePasswordRequest, LoginResponse, MemberDto, PasswordResetClaimResponse};
 use crate::error::ApiError;
 use crate::rate_limit::client_ip;
-use crate::routes::auth_routes::{base_scopes, issue_and_record_session};
+use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
 use crate::routes::shared::{
     agent_tenant_tx, audit_via_token_id, path_uuid, require_human, settle_db, workspace_scope,
     DbRejectable,
@@ -109,9 +135,20 @@ pub async fn issue_password_reset(
         let token = token.clone();
         move |conn| {
             Box::pin(async move {
+                // Someone who is not an operator is refused here, before the lock: a request that
+                // cannot succeed must not be able to queue every sign-in of the workspace behind
+                // it. This is only the cheap refusal; whether *this* operator may reset *this*
+                // member is judged by `issue_password_reset_in_tx` under the lock.
                 if let Err(rejection) = require_admin(conn, workspace_id, actor_id).await? {
                     return Ok(Err(rejection));
                 }
+                // The membership lock, exclusive, before any member row is locked, like every
+                // other transaction that does: a reissue locks the target's member row and then
+                // the target's open link, and the claim that spends that link holds the link and
+                // then needs the member row (its audit row references it). Two transactions that
+                // take those rows in opposite orders wait for each other until the database ends
+                // one of them; behind this lock they cannot meet.
+                lock_membership_mutation(conn, workspace_id).await?;
                 match issue_password_reset_in_tx(conn, workspace_id, actor_id, target_id, &token)
                     .await?
                 {
@@ -164,6 +201,19 @@ pub async fn issue_password_reset(
         .into_response())
 }
 
+/// What the change transaction decided, mapped to HTTP outside it.
+enum PasswordChanged {
+    /// The current password did not match, or there is none: nothing was written.
+    Refused(PasswordChangeMutation),
+    /// The password is changed, the member's other sessions are swept, and the caller's
+    /// new pair is recorded — in the same transaction that holds the membership lock.
+    Applied {
+        member: Member,
+        access: IssuedToken,
+        refresh: IssuedToken,
+    },
+}
+
 pub async fn change_own_password(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -183,10 +233,22 @@ pub async fn change_own_password(
         return Err(ApiError::bad_request("new password must be different"));
     }
     let via_token = audit_via_token_id(&principal);
+    let jwt_secret = state.jwt_secret.clone();
 
-    let outcome: DbRejectable<PasswordChangeMutation> =
+    let outcome: DbRejectable<PasswordChanged> =
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
+                // The membership lock, exclusive and first (see the module docs).
+                lock_membership_mutation(conn, workspace_id).await?;
+                // The standing is read under the lock and before the first write: the
+                // bearer was judged before the lock was had, and a suspension or removal
+                // that committed in between has already revoked it.
+                let Some(member) = get_member(conn, member_id).await? else {
+                    return Ok(Err(ApiError::forbidden("not a workspace member")));
+                };
+                if member.status != "active" {
+                    return Ok(Err(ApiError::forbidden("member is not active")));
+                }
                 let mutation = change_own_password_in_tx(
                     conn,
                     workspace_id,
@@ -195,62 +257,71 @@ pub async fn change_own_password(
                     &new_password,
                 )
                 .await?;
-                if let PasswordChangeMutation::Applied { sessions_revoked } = mutation {
-                    // The change revoked every session of the member (the
-                    // caller gets a fresh one below); every phone registered
-                    // under them stops receiving pushes now (#2677).
-                    end_member_sessions_in_tx(
-                        conn,
-                        workspace_id,
-                        member_id,
-                        RevocationCause::PasswordChanged,
-                    )
-                    .await?;
-                    write_audit(
-                        conn,
-                        &AuditEntry::new(workspace_id, "member.password_changed")
-                            .by(member_id)
-                            .target("member", member_id)
-                            .via_token(via_token)
-                            .with_schema(
-                                "momo.member.password_changed.v1",
-                                serde_json::json!({
-                                    "sessions_revoked": sessions_revoked.to_string()
-                                }),
-                            ),
-                    )
-                    .await?;
-                }
-                Ok(Ok(mutation))
+                let PasswordChangeMutation::Applied { sessions_revoked } = mutation else {
+                    return Ok(Ok(PasswordChanged::Refused(mutation)));
+                };
+                // The change revoked every session of the member (the caller gets a
+                // fresh one below); every phone registered under them stops receiving
+                // pushes now (#2677).
+                end_member_sessions_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    RevocationCause::PasswordChanged,
+                )
+                .await?;
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "member.password_changed")
+                        .by(member_id)
+                        .target("member", member_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.member.password_changed.v1",
+                            serde_json::json!({
+                                "sessions_revoked": sessions_revoked.to_string()
+                            }),
+                        ),
+                )
+                .await?;
+                // The new session's pair, on THIS connection and after the sweep above, so
+                // the sweep cannot take it and a suspension that follows can.
+                let (access, refresh) = mint_and_record_session_in_tx(
+                    conn,
+                    &jwt_secret,
+                    workspace_id,
+                    member_id,
+                    base_scopes(),
+                )
+                .await?;
+                Ok(Ok(PasswordChanged::Applied {
+                    member,
+                    access,
+                    refresh,
+                }))
             })
         })
         .await;
 
-    match settle_db("password.change", outcome)? {
-        PasswordChangeMutation::CurrentMismatch => {
+    let (member, access, refresh) = match settle_db("password.change", outcome)? {
+        PasswordChanged::Refused(PasswordChangeMutation::CurrentMismatch) => {
             return Err(ApiError::forbidden("current password is incorrect"));
         }
-        PasswordChangeMutation::NoPassword => {
+        PasswordChanged::Refused(PasswordChangeMutation::NoPassword) => {
             return Err(ApiError::new(StatusCode::CONFLICT, "no password to change"));
         }
-        PasswordChangeMutation::Applied { .. } => {}
-    }
-
-    let member = momo_db::with_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move { get_member(conn, member_id).await })
-    })
-    .await
-    .map_err(|error| crate::error::db_error("password.change.member", error))?
-    .ok_or_else(|| ApiError::forbidden("not a workspace member"))?;
-
-    let (access, refresh) = issue_and_record_session(
-        &state,
-        workspace_id,
-        member_id,
-        base_scopes(),
-        "password.change.session",
-    )
-    .await?;
+        PasswordChanged::Refused(PasswordChangeMutation::Applied { .. }) => {
+            return Err(ApiError::internal(
+                "password.change.unexpected_applied",
+                "applied mapped as a refusal",
+            ));
+        }
+        PasswordChanged::Applied {
+            member,
+            access,
+            refresh,
+        } => (member, access, refresh),
+    };
 
     Ok(Json(LoginResponse {
         access_token: access.token,

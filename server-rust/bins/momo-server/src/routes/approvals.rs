@@ -83,13 +83,13 @@ use momo_agent::actions::{
     AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
     AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
     LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
-    REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
+    REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_MESSAGE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
     SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
     decision_stamp_in_tx, default_execution_host, existing_decision_in_tx,
-    is_active_channel_member_in_tx, is_active_human_member_in_tx, list_approvals_in_tx,
+    is_active_channel_member_in_tx, is_active_human_member_in_tx, is_overdue, list_approvals_in_tx,
     lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
     normalized_reason, offers_host_choice, record_decision_in_tx, reference_execution_host,
     resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
@@ -102,9 +102,9 @@ use momo_agent::{
     succeed_parked_run_in_tx, RunStatus,
 };
 use momo_auth::{
-    append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION,
-    MAX_HOSTED_APPROVED_CHANNELS,
+    active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
+    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -114,8 +114,9 @@ use momo_messaging::{
     create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
     lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
-    rename_agent_display_name_in_tx, send_message_in_tx, staged_image_matches_pin_in_tx, AgentCard,
-    AgentCardPatch, CardStatusPatch, FieldPatch, MessageType, NewChannel, NewMessage,
+    rename_agent_display_name_in_tx, send_message_in_tx, set_pin_in_tx,
+    staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
+    MessageType, NewChannel, NewMessage, PinAction,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -128,6 +129,7 @@ use uuid::Uuid;
 
 use crate::auth::PushActionCredential;
 use crate::config::T3Settings;
+use crate::dev_credential::DevCredential;
 use crate::dto::{
     ApprovalDecisionReceipt, ApprovalDecisionRequest, ApprovalDto, ApprovalListQuery,
     ApprovalListResponse, SecretOnceDto,
@@ -136,9 +138,10 @@ use crate::error::ApiError;
 use crate::plugin_writes::{self, Actor, Provenance};
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
-    profile_changes, resolve_stored_action_in_tx, ActionArgs, AvatarIntent, GateSubject,
-    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, ResolvedPlugin,
-    SettingPatch, SettingsBefore, StatusIntent,
+    profile_changes, resolve_stored_action_in_tx, resolve_stored_initiative_action_in_tx,
+    ActionArgs, AvatarIntent, GateSubject, ResolvedAgentTarget, ResolvedChannel,
+    ResolvedConnection, ResolvedMember, ResolvedMessage, ResolvedPlugin, SettingPatch,
+    SettingsBefore, StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -277,6 +280,14 @@ const REJECTED_TOOL_RESULT_BODY: &str = "Tool call rejected by human approval.";
 /// refused with: 「결정 라우트는 사람 principal만 받는다」.
 const HUMAN_PRINCIPAL_REQUIRED: &str = "human_principal_required";
 
+/// ADR-0216 D4 / #4660 — the receipt `status` a **developer token** is refused with: a
+/// token a person minted for a terminal tool never decides an approval. The closed
+/// route table already keeps both decision routes off the developer door (first
+/// layer, judged before the database); this is the second layer, inside the one
+/// function both routes share, so a future change to either the table or a route's
+/// extractors cannot quietly reopen the decision to a tool.
+const DEV_CANNOT_DECIDE: &str = "dev_cannot_decide";
+
 /// The one expected failure this route discovers **after** its first write, and
 /// the receipt `status` it answers with.
 ///
@@ -305,6 +316,21 @@ const OPENS_IN_APP: &str = "opens_in_app";
 /// The sentinel itself. Namespaced and versioned so it cannot collide with a
 /// genuine `sqlx::Error::Protocol` message from the driver.
 const RUN_NOT_PARKED_SENTINEL: &str = "momo.approvals.run_not_parked.v1";
+
+/// How many times a decision is run when it keeps being chosen as a deadlock's victim: the
+/// first, and one more. See [`decide`].
+const DECISION_ATTEMPTS: u32 = 2;
+
+/// Is this PostgreSQL's `deadlock_detected` (SQLSTATE `40P01`) — the rollback of a transaction
+/// that lost a lock cycle, with nothing committed — rather than a failure that running the
+/// decision again would only repeat?
+fn is_deadlock_victim(error: &momo_db::DbError) -> bool {
+    matches!(
+        error,
+        momo_db::DbError::Sqlx(momo_db::sqlx::Error::Database(database))
+            if database.code().as_deref() == Some("40P01")
+    )
+}
 
 /// Is this the rollback [`RUN_NOT_PARKED`] asked for, rather than a real
 /// database failure?
@@ -396,6 +422,9 @@ pub async fn decide_by_approval(
     // never a reason to allow anything an access token could not, because the token
     // adds no authority.
     credential: Option<Extension<PushActionCredential>>,
+    // Present only when the middleware verified a developer token (ADR-0216, #4660).
+    // It can only make this route refuse (`decide` answers `dev_cannot_decide`).
+    dev_credential: Option<Extension<DevCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -415,6 +444,7 @@ pub async fn decide_by_approval(
         &headers,
         request,
         credential.map(|_| AUDIT_VIA_PUSH_ACTION),
+        dev_credential.is_some(),
     )
     .await
 }
@@ -430,6 +460,9 @@ pub async fn decide_by_run(
     Extension(principal): Extension<Principal>,
     Path(run): Path<String>,
     headers: HeaderMap,
+    // See `decide_by_approval`: present only for a developer token, and only able to
+    // make `decide` refuse. Taken by BOTH routes so neither is a way around the check.
+    dev_credential: Option<Extension<DevCredential>>,
     Json(request): Json<ApprovalDecisionRequest>,
 ) -> Result<Response, ApiError> {
     let run_id = path_uuid(&run, "invalid run id")?;
@@ -446,6 +479,7 @@ pub async fn decide_by_run(
         &headers,
         request,
         None,
+        dev_credential.is_some(),
     )
     .await
 }
@@ -486,7 +520,27 @@ async fn decide(
     headers: &HeaderMap,
     request: ApprovalDecisionRequest,
     credential_via: Option<&'static str>,
+    by_dev_credential: bool,
 ) -> Result<Response, ApiError> {
+    // **ADR-0216 D4 (#4660) — a developer token never decides.**
+    //
+    // A developer token authenticates as a *person* (the `Principal` it travels with is
+    // `Human`), so the kind check right below does not stop it, and the closed route
+    // table is the first and only other layer. This is the second: it sits in the one
+    // function both decision routes call, before the idempotency replay and before any
+    // row is read, so a tool cannot read a stored receipt through this route either.
+    // The marker is inserted only by the developer-token branch of the middleware.
+    if by_dev_credential {
+        return respond(refusal(
+            approval_id,
+            principal.member_id,
+            DEV_CANNOT_DECIDE,
+            "approval decisions are not available to a developer token",
+            StatusCode::FORBIDDEN,
+            Utc::now(),
+        ));
+    }
+
     // **ADR-0188 D3 (R0) — the decision route takes a person, and only a
     // person.**
     //
@@ -529,32 +583,61 @@ async fn decide(
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
     let context_max_messages = state.mentions.context_max_messages;
 
-    let outcome: DbRejectable<Decision> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            decide_in_tx(
-                conn,
-                DecisionInput {
-                    workspace_id,
-                    approval_id,
-                    route_run_id,
-                    member_id,
-                    via_token_id,
-                    credential_via,
-                    approve,
-                    reason: reason.as_deref(),
-                    client_decision_id,
-                    selected_host_id,
-                    public_origin: public_origin.as_deref(),
-                    claude_subscription_agents_enabled,
-                    operator_scope,
-                    deliver_secret_to_agent,
-                    context_max_messages,
-                },
-            )
-            .await
+    // **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
+    //
+    // A decision is one transaction with no effect outside the database, and its replay is
+    // idempotent by `client_decision_id` — so a rollback by `40P01` committed nothing and the
+    // whole remedy is to run it again. It is needed because the decision's lock order cannot be
+    // made to agree with every writer it meets: it takes the proposer's hosted connection and
+    // inbox counter *before* the channel's `channel_seq` (ADR-0186 증보 v5 U-f, so that two
+    // decisions on one DM do not deadlock with each other), while the message spine takes the
+    // channel first and fans out to the same connection after. A message sent into that room in
+    // the same instant is the other half of an AB/BA pair, and without this the loser of the
+    // pair — here, the person's tap — answered 500. (#4702 security review.) Once, not in a
+    // loop: a second deadlock is a different problem and answers as it always did.
+    let mut attempt = 1;
+    let outcome: DbRejectable<Decision> = loop {
+        let outcome = agent_tenant_tx(&state.pool, workspace_id, {
+            let reason = reason.clone();
+            let public_origin = public_origin.clone();
+            move |conn| {
+                Box::pin(async move {
+                    decide_in_tx(
+                        conn,
+                        DecisionInput {
+                            workspace_id,
+                            approval_id,
+                            route_run_id,
+                            member_id,
+                            via_token_id,
+                            credential_via,
+                            approve,
+                            reason: reason.as_deref(),
+                            client_decision_id,
+                            selected_host_id,
+                            public_origin: public_origin.as_deref(),
+                            claude_subscription_agents_enabled,
+                            operator_scope,
+                            deliver_secret_to_agent,
+                            context_max_messages,
+                        },
+                    )
+                    .await
+                })
+            }
         })
-    })
-    .await;
+        .await;
+        match &outcome {
+            Err(error) if attempt < DECISION_ATTEMPTS && is_deadlock_victim(error) => {
+                attempt += 1;
+                tracing::warn!(
+                    approval_id = %approval_id,
+                    "an approval decision was the victim of a deadlock; running it once more"
+                );
+            }
+            _ => break outcome,
+        }
+    };
 
     let decision = match outcome {
         // The action was executed and then un-executed: the transaction rolled
@@ -687,6 +770,15 @@ fn deliver_flag_refused(
     deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
 }
 
+/// Is this card one that answers a person **outside its room** as a missing approval does? The
+/// in-place channel-grant card (it names a room and who called whom there) and the card an agent
+/// raised unasked (it stands in its owner's one-to-one direct message and says what the agent wants
+/// to do there). One definition for both decision routes' two places that ask.
+fn card_is_hidden_from_outsiders(approval: &LockedApproval) -> bool {
+    momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
+        || momo_agent::initiative::is_unasked_card(approval)
+}
+
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
     let now = Utc::now();
     let desired_status = if input.approve {
@@ -752,6 +844,23 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
 
     if let Some(route_run_id) = input.route_run_id {
         if route_run_id != approval.run_id {
+            // A card that is hidden from outsiders (below) is hidden here too: whether the run in
+            // the path is the card's must not be a way to tell "there is such a card" from "there
+            // is none" — to anybody outside the room it answers what a missing approval answers
+            // (review of #4704 PR B, M1; the in-place card had the same gap).
+            if card_is_hidden_from_outsiders(&approval)
+                && !is_active_channel_member_in_tx(conn, approval.channel_id, input.member_id)
+                    .await?
+            {
+                return Ok(Ok(refusal(
+                    input.approval_id,
+                    input.member_id,
+                    "not_found",
+                    "approval not found",
+                    StatusCode::NOT_FOUND,
+                    now,
+                )));
+            }
             return Ok(Ok(refusal(
                 approval.id,
                 input.member_id,
@@ -768,7 +877,13 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         // (possibly private) and who called whom there. To somebody outside that
         // room, an admin included, it answers exactly as a missing approval does,
         // so the id teaches them nothing.
-        if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+        //
+        // ADR-0186 증보 v5 U-c (#4704 PR B, review M8) — the same for a card an agent raised
+        // unasked: it stands in its owner's one-to-one direct message and says what the agent
+        // wants to do there, so to anybody outside that room — a workspace admin included — the
+        // id answers as a missing approval does (`403 forbidden` would confirm the card exists,
+        // and whose room it is in). Judged by either server-written marker, like the executor.
+        if card_is_hidden_from_outsiders(&approval) {
             return Ok(Ok(refusal(
                 input.approval_id,
                 input.member_id,
@@ -1021,7 +1136,11 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
     }
 
     // ---- expiry: settle it rather than merely refusing (Swift :198-221) ----
-    if approval.expires_at.is_some_and(|expires| expires <= now) {
+    //
+    // `is_overdue` is the one definition of 「past its deadline」 (ADR-0186 증보 v5
+    // U-f): the status an agent is told on a re-ask reads the same predicate on the
+    // same application clock, so the two agree at the boundary.
+    if is_overdue(approval.expires_at, now) {
         // An expired proposal's staged avatar image dies with it.
         discard_staged_avatar_in_tx(conn, &approval).await?;
         return Ok(Ok(settle_expired(
@@ -1152,8 +1271,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .with_schema(
                 TOOL_AUDIT_SCHEMA,
                 // A copy: `event` is also the resume job's input and the
-                // broadcast, and neither is told which credential decided.
-                stamp_via(input.credential_via, event.clone()),
+                // broadcast, and neither is told which credential decided
+                // (nor that the card was raised unasked: the audit row says so).
+                momo_agent::initiative::decision_audit_detail(
+                    &approval,
+                    stamp_via(input.credential_via, event.clone()),
+                ),
             ),
     )
     .await?;
@@ -1322,6 +1445,77 @@ async fn announce_card_edit(
     message_id: Uuid,
 ) -> Result<(), momo_db::DbError> {
     emit_message_edited_in_tx(conn, workspace_id, message_id).await?;
+    Ok(())
+}
+
+/// Tell the agent that **proposed a workspace action** that a person has decided
+/// it — one `agent_run` reference in its hosted inbox, in the decision's own
+/// transaction (ADR-0186 증보 v5 U-f, #4702).
+///
+/// ## Why this exists
+///
+/// The outcome line is written through the raw spine ([`send_message_in_tx`]),
+/// which projects nothing into an inbox, and its author is the proposing agent —
+/// which the inbox would skip anyway. So the outcome of every proposal was visible
+/// only to an agent that happened to wake up and re-read the conversation, and
+/// nothing woke it. The reference is that signal (the doorbell rings on any inbox
+/// growth, ADR-0171). A proposal a person asked for gets it exactly as a proposal
+/// nobody asked for does.
+///
+/// ## Who gets one — and who does not
+///
+/// Only the proposer's **own** live hosted connection, and only when the run's
+/// channel is one that connection covers (`append_run_reference_in_tx`'s own
+/// authority predicate is the judge; nothing is added here). A managed agent has no
+/// hosted connection and gets nothing — no regression for them. Another hosted
+/// agent in the same room gets nothing: the target is explicit, never a fan-out.
+/// A replay writes nothing new (the writer is idempotent per run and connection).
+///
+/// ## Where it sits — before the outcome line
+///
+/// Every caller writes this **before** its `channel_seq` bump. The reference takes
+/// the connection first (the hosted canon's lock order: connection → … →
+/// counter), and several executors already hold that row `FOR UPDATE`
+/// (`channel.create`, `hosted.channels.grant`) before the outcome line; a decision
+/// that locked the channel first and the connection second would deadlock against
+/// one of those on a DM that carries two cards.
+///
+/// ## What it never does: expiry
+///
+/// Neither the sweep nor the late-tap arm calls this. The sweep runs as
+/// `momo_notifier`, which holds no grant on `token` or on the inbox tables on
+/// purpose (`bootstrap_runtime_roles.sql`: that role is BYPASSRLS and must not
+/// read credentials), so an inbox write there would raise `permission denied` in
+/// production, roll the workspace's whole sweep back, and leave every run
+/// `awaiting_approval`. A lapse is also not something a person said — waking an
+/// agent for it would invite a new proposal every deadline. Expiry is told on a
+/// re-ask instead ([`momo_agent::approval::effective_status`]).
+///
+/// Only `workspace_action` approvals are told. Every other approval kind belongs to
+/// a managed agent's own tool loop, which has its own resume job.
+async fn wake_proposer_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+) -> Result<(), momo_db::DbError> {
+    if approval.action_type != ACTION_TYPE_WORKSPACE_ACTION {
+        return Ok(());
+    }
+    let Some(connection_id) =
+        active_hosted_connection_in_tx(conn, approval.workspace_id, approval.requested_by)
+            .await
+            .map_err(momo_db::DbError::from)?
+    else {
+        return Ok(());
+    };
+    momo_messaging::append_run_reference_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.requested_by,
+        connection_id,
+        approval.channel_id,
+        approval.run_id,
+    )
+    .await?;
     Ok(())
 }
 
@@ -1514,18 +1708,78 @@ async fn execute_workspace_action(
     // write `approval.payload`. Re-proving is the difference between "a person
     // approved these values" and "a person approved a row".
     let now_ms = now.timestamp_millis();
-    let resolved = match resolve_stored_action_in_tx(
-        conn,
-        input.workspace_id,
-        approval.requested_by,
-        Some(approval.run_id),
-        action,
-        proposed_args(&approval.payload),
-        now_ms,
-        approval.id,
-    )
-    .await?
-    {
+    // A card nobody asked for was drawn for **its reader's** eyes (ADR-0186 증보 v5 U-b-4 6): the
+    // channel or message it quotes had to be one the reader could already read, and a
+    // `channel.create` had to be private. The same rules are judged again here, for the member who
+    // is deciding it — who must be able to read what the card quotes, and, for a pin, to pin it.
+    //
+    // Which rules apply is decided by **either** marker: the payload's `origin` and the run's
+    // `input.hold` (written by the server alone, and the run is born with it). A row whose `origin`
+    // was dropped is still an unasked card while its run says so — and an unasked card can only ever
+    // name an initiative action, so a tampered `action.id` is refused rather than judged by the
+    // looser rules of a card a person asked for (security review of #4704, M2).
+    let initiated = momo_agent::initiative::is_unasked_card(approval);
+    if initiated && !action.initiative {
+        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+    }
+    // **The decision proves the door again** (ADR-0186 증보 v5 U-d 「재증명」): a card may be a day
+    // old, and everything that let an agent raise it can have changed since. The switch is on, the
+    // connection it was raised through still stands (that connection, active and proved, its
+    // credential not revoked — a credential that merely lapsed is routine, an OAuth access token
+    // lives thirty minutes and the card a day), the human's approval of it still names
+    // `workspace:initiate`, the agent is active and not paused, the person deciding is the agent's
+    // **current** owner and the one who confirmed that connection, and (above) the action is still on
+    // the list. One `action_args_invalid` for any of them (409, the approval is **not** consumed): a
+    // card that no longer stands is not a card to run, and a rejection never comes through here, so a
+    // person can always say no.
+    //
+    // What comes back is the connection the card stands on. It is what the resolver below reads
+    // coverage from and what `channel.create` widens — the row that was just proved, and not
+    // whichever connection happens to hold a fresh credential at this instant (security review of
+    // #4704 PR B, round 2, H1).
+    let card_connection = if initiated {
+        match crate::routes::agent_initiative::card_still_stands_in_tx(
+            conn,
+            input.workspace_id,
+            approval,
+            input.member_id,
+        )
+        .await?
+        {
+            Some(connection) => Some(connection),
+            None => return Ok(Ok(args_invalid_refusal(approval, input, now))),
+        }
+    } else {
+        None
+    };
+    let resolution = if let Some(card_connection) = card_connection {
+        resolve_stored_initiative_action_in_tx(
+            conn,
+            input.workspace_id,
+            approval.requested_by,
+            input.member_id,
+            Some(approval.run_id),
+            action,
+            proposed_args(&approval.payload),
+            now_ms,
+            approval.id,
+            card_connection,
+        )
+        .await?
+    } else {
+        resolve_stored_action_in_tx(
+            conn,
+            input.workspace_id,
+            approval.requested_by,
+            Some(approval.run_id),
+            action,
+            proposed_args(&approval.payload),
+            now_ms,
+            approval.id,
+        )
+        .await?
+    };
+    let resolved = match resolution {
         Ok(resolved) => resolved,
         Err(error) if error.message == crate::routes::actions::AVATAR_UNRESOLVED => {
             // The avatar check runs **after** the target resolved, so the target is
@@ -1788,6 +2042,19 @@ async fn execute_workspace_action(
                 "channel.member.add resolved without a channel",
             ));
         }
+        ActionArgs::MessagePin {
+            change,
+            target: Some(message),
+            ..
+        } => match execute_message_pin(conn, approval, input, now, *change, message).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
+        // The resolver always fills the message; a pin with nothing named has nothing to
+        // pin, and rolling back is the safe answer.
+        ActionArgs::MessagePin { target: None, .. } => {
+            return Err(protocol_error("message pin resolved without a message"));
+        }
         ActionArgs::ChannelCreate {
             name,
             kind,
@@ -1806,6 +2073,7 @@ async fn execute_workspace_action(
                 topic.as_deref(),
                 *add_proposer,
                 members,
+                card_connection,
             )
             .await?
             {
@@ -1933,7 +2201,12 @@ async fn execute_workspace_action(
     // coincidence.
     let action_ref_value = action_ref(executed.ref_type, executed.ref_id);
     for entry in &executed.audits {
-        write_audit(conn, entry).await?;
+        // An unasked card's rows say so (`origin`); every other card's are written as they were.
+        let stamped = AuditEntry {
+            detail: momo_agent::initiative::decision_audit_detail(approval, entry.detail.clone()),
+            ..entry.clone()
+        };
+        write_audit(conn, &stamped).await?;
     }
     write_audit(
         conn,
@@ -1947,15 +2220,18 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                stamp_via(
-                    input.credential_via,
-                    json!({
-                        "action_id": action.id,
-                        "approval_id": approval.id.to_string(),
-                        "proposed_by": approval.requested_by.to_string(),
-                        "decided_by": input.member_id.to_string(),
-                        "ref": action_ref_value,
-                    }),
+                momo_agent::initiative::decision_audit_detail(
+                    approval,
+                    stamp_via(
+                        input.credential_via,
+                        json!({
+                            "action_id": action.id,
+                            "approval_id": approval.id.to_string(),
+                            "proposed_by": approval.requested_by.to_string(),
+                            "decided_by": input.member_id.to_string(),
+                            "ref": action_ref_value,
+                        }),
+                    ),
                 ),
             ),
     )
@@ -2091,6 +2367,15 @@ async fn execute_workspace_action(
         }));
     }
 
+    // ---- the proposer's inbox, BEFORE the outcome line (ADR-0186 증보 v5 U-f) ----
+    //
+    // After the in-place arm above on purpose: that card releases a job, which is
+    // its own wake-up, and writes no outcome line — and the grant executor has just
+    // covered its channel in this very transaction, so the early return above is the
+    // only thing that keeps a second wake from being written for it. Before
+    // `send_message_in_tx` below for the lock order `wake_proposer_in_tx` states.
+    wake_proposer_in_tx(conn, approval).await?;
+
     // ---- the outcome line, authored by the agent ---------------------------
     //
     // Same authorship rule as the rejection's (`reject_run`): the proposal was
@@ -2190,13 +2475,43 @@ async fn execute_channel_create(
     topic: Option<&str>,
     add_proposer: bool,
     members: &[ResolvedMember],
+    card_connection: Option<Uuid>,
 ) -> Result<Execution, momo_db::DbError> {
     // The connection is the FIRST lock of the hosted canon, so it is taken before
     // the channel and membership rows this transaction is about to write.
+    //
+    // A card an agent raised unasked names its own connection — the one it was raised through, which
+    // the decision proved to stand a moment ago — and that very row is locked and later widened,
+    // whether or not the agent holds a fresh credential at the instant a person taps. The generic
+    // read finds the connection *through the credential's expiry*; for a card that waited a day it
+    // finds nothing, and the agent would be seated in a room its connection does not cover with the
+    // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
     let connection = if add_proposer {
-        lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-            .await
-            .map_err(momo_db::DbError::from)?
+        match card_connection {
+            Some(card_connection) => {
+                let locked = lock_hosted_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                    card_connection,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?;
+                // An unasked card never half-executes: the connection stood a moment ago in this very
+                // transaction, so if it does not any more the card is stale — refused before any write.
+                let Some(covered) = locked else {
+                    return Ok(Execution::Refused(args_invalid_refusal(
+                        approval, input, now,
+                    )));
+                };
+                Some((card_connection, covered))
+            }
+            None => {
+                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
+                    .await
+                    .map_err(momo_db::DbError::from)?
+            }
+        }
     } else {
         None
     };
@@ -3311,6 +3626,82 @@ async fn execute_channel_member_add(
     }))
 }
 
+/// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the pin a person does by hand, done
+/// **as the approver**, by the very function their own pin calls ([`set_pin_in_tx`]).
+///
+/// So the guards are theirs and not a copy: the approver must be a live member of the message's
+/// channel, a deleted message cannot be pinned, a channel holds 100, and the broadcast
+/// (`message.pinned` / `message.unpinned`) is the one every client already applies. `pinned_by`
+/// is the approver; that an agent proposed it is in the audit, never in the pin.
+///
+/// The resolver (re-run just before this, with the message row locked `FOR UPDATE` and the body
+/// hashed under that lock) has already proved that the message is still the one the card quoted,
+/// so nothing can change it between that read and this pin.
+///
+/// Every refusal `set_pin_in_tx` makes — not a member, a full channel, a tombstone — is the
+/// card's one word for a stale proposal, `action_args_invalid`, and it returns before the
+/// function's first write: **the approval is not consumed**. A message already in the asked
+/// state is a success that changes nothing (as it is for a person), and writes no pin audit
+/// row, because nothing happened.
+async fn execute_message_pin(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    change: PinAction,
+    message: &ResolvedMessage,
+) -> Result<Execution, momo_db::DbError> {
+    let delta = match set_pin_in_tx(
+        conn,
+        input.workspace_id,
+        message.id,
+        input.member_id,
+        change,
+    )
+    .await?
+    {
+        Ok(delta) => delta,
+        Err(_) => {
+            return Ok(Execution::Refused(args_invalid_refusal(
+                approval, input, now,
+            )))
+        }
+    };
+    let unpin = change == PinAction::Unpinned;
+    let mut audits = Vec::new();
+    if delta.changed {
+        // The same row, from the same builder, a person's own pin writes — plus who proposed it
+        // and which approval it was. Ids only: not a word of the message.
+        audits.push(crate::routes::messages::interaction_audit_entry(
+            input.workspace_id,
+            delta.channel_id,
+            message.id,
+            input.member_id,
+            input.via_token_id,
+            &format!("message.{}", delta.action.as_wire_label()),
+            &[
+                ("via_agent", approval.requested_by),
+                ("approval_id", approval.id),
+            ],
+        ));
+    }
+    let pinned_after = message.card.pinned_count
+        + match (delta.changed, unpin) {
+            (true, false) => 1,
+            (true, true) => -1,
+            (false, _) => 0,
+        };
+    Ok(Execution::Ran(Executed {
+        audits,
+        ref_type: REF_TYPE_MESSAGE,
+        ref_id: message.id,
+        result_body: momo_agent::actions::message_pin_result_body(unpin, delta.changed, message.id),
+        result_rows: momo_agent::actions::message_pin_result_rows(&message.card, pinned_after),
+        secret_once: None,
+        next: None,
+    }))
+}
+
 /// `invite.create`: mint the code as the approver and show the link once.
 async fn execute_invite_create(
     conn: &mut PgConnection,
@@ -3505,6 +3896,12 @@ async fn reject_run(
         return Ok(());
     }
 
+    // ADR-0186 증보 v5 U-f — the proposer's inbox hears the rejection too, and
+    // **before** the outcome line below (`wake_proposer_in_tx` says why). Behind
+    // the `ended` guard: a run a person cancelled first already wrote its own
+    // reference, and a decision that moved nothing announces nothing.
+    wake_proposer_in_tx(conn, approval).await?;
+
     // The rail hears it (goal SRV-B3c). A parked run renders as 승인 대기, not
     // 작업 중 — but it is still an entry in the client's run table, and a
     // rejection that published nothing would leave it there until the 120s
@@ -3620,7 +4017,13 @@ async fn settle_expired(
             .target("approval", approval.id)
             .via_token(via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, stamp_via(credential_via, event.clone())),
+            .with_schema(
+                TOOL_AUDIT_SCHEMA,
+                momo_agent::initiative::decision_audit_detail(
+                    approval,
+                    stamp_via(credential_via, event.clone()),
+                ),
+            ),
     )
     .await?;
 

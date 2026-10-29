@@ -38,6 +38,7 @@ use serde_json::{json, Value};
 use sqlx::Row;
 use uuid::Uuid;
 
+use crate::channel_restriction::ChannelRestriction;
 use crate::read_state::read_state_channel;
 
 /// Page size when the caller names none.
@@ -247,6 +248,56 @@ pub async fn list_inbox_in_tx(
     limit: i64,
     show_muted: bool,
 ) -> Result<InboxPage, DbError> {
+    list_inbox_within_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        filter,
+        cursor,
+        limit,
+        show_muted,
+        ChannelRestriction::Unrestricted,
+    )
+    .await
+}
+
+/// The inbox's channel restriction predicate, or nothing (ADR-0216 D4 · F17, #4660).
+///
+/// Appended to a statement that already selects through [`VISIBLE_FROM_WHERE`] — whose
+/// `membership` join is what keeps a left channel out — so a restriction narrows that
+/// visibility to the intersection and can never widen it. `$n` is the next free bind of
+/// the statement it joins. Empty for [`ChannelRestriction::Unrestricted`], so every
+/// caller that predates developer tokens runs the statement it always ran.
+fn restriction_predicate(restriction: ChannelRestriction<'_>, n: u8) -> String {
+    match restriction.listed() {
+        None => String::new(),
+        Some(_) => format!(" AND i.channel_id = ANY(${n}::uuid[])"),
+    }
+}
+
+/// [`list_inbox_in_tx`], narrowed by a developer token's channel restriction (ADR-0216
+/// D4 · R11 · F17, #4660).
+///
+/// The restriction is an argument of the **statement**, not a filter over its rows: the
+/// page's `LIMIT`, its `next_cursor` and the `unread_count` beside it are all computed
+/// over the restricted set, so none of the three can disagree with the items (a page
+/// filtered afterwards would come back short, page on past the end, and count unread
+/// items from channels it does not show). The quoted message of an item is joined with
+/// `q.channel_id = m.channel_id`, so it is always from the item's own channel and follows
+/// the restriction with it.
+///
+/// Read-only: a page marks nothing read.
+#[allow(clippy::too_many_arguments)]
+pub async fn list_inbox_within_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    filter: InboxFilter,
+    cursor: Option<InboxCursor>,
+    limit: i64,
+    show_muted: bool,
+    restriction: ChannelRestriction<'_>,
+) -> Result<InboxPage, DbError> {
     let sql = format!(
         "SELECT i.id, i.kind, i.reasons, i.channel_id, i.message_id, i.seq, \
                 i.actor_member_id, i.created_at, i.read_at, \
@@ -258,20 +309,23 @@ pub async fn list_inbox_in_tx(
                 (q.deleted_at IS NOT NULL OR q.state::text = 'deleted') AS q_deleted \
          {VISIBLE_FROM_WHERE} \
            AND {filter_sql} \
-           AND ($4::timestamptz IS NULL OR (i.created_at, i.id) < ($4, $5)) \
+           AND ($4::timestamptz IS NULL OR (i.created_at, i.id) < ($4, $5)){restriction_sql} \
          ORDER BY i.created_at DESC, i.id DESC \
          LIMIT $6",
         filter_sql = filter.sql(),
+        restriction_sql = restriction_predicate(restriction, 7),
     );
-    let rows = sqlx::query(&sql)
+    let mut query = sqlx::query(&sql)
         .bind(workspace_id)
         .bind(member_id)
         .bind(show_muted)
         .bind(cursor.map(|c| c.created_at))
         .bind(cursor.map(|c| c.id).unwrap_or_else(Uuid::nil))
-        .bind(limit + 1)
-        .fetch_all(&mut *conn)
-        .await?;
+        .bind(limit + 1);
+    if let Some(channel_ids) = restriction.listed() {
+        query = query.bind(channel_ids);
+    }
+    let rows = query.fetch_all(&mut *conn).await?;
 
     let has_more = rows.len() as i64 > limit;
     let mut items = Vec::with_capacity(rows.len().min(limit as usize));
@@ -330,7 +384,11 @@ pub async fn list_inbox_in_tx(
     } else {
         None
     };
-    let unread_count = inbox_unread_count_in_tx(conn, workspace_id, member_id, show_muted).await?;
+    // ADR-0216 F17 — the same restriction as the page, or `unreadCount` would keep counting
+    // the channels the page just left out.
+    let unread_count =
+        inbox_unread_count_within_in_tx(conn, workspace_id, member_id, show_muted, restriction)
+            .await?;
     Ok(InboxPage {
         items,
         next_cursor,
@@ -345,16 +403,39 @@ pub async fn inbox_unread_count_in_tx(
     member_id: Uuid,
     show_muted: bool,
 ) -> Result<i64, DbError> {
+    inbox_unread_count_within_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        show_muted,
+        ChannelRestriction::Unrestricted,
+    )
+    .await
+}
+
+/// [`inbox_unread_count_in_tx`] over a developer token's channel restriction (ADR-0216
+/// D4 · F17, #4660): the unread items of the restricted channels the member still
+/// belongs to, and nothing else.
+pub async fn inbox_unread_count_within_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    show_muted: bool,
+    restriction: ChannelRestriction<'_>,
+) -> Result<i64, DbError> {
     let sql = format!(
-        "SELECT count(*) FROM (SELECT 1 {VISIBLE_FROM_WHERE} AND i.read_at IS NULL LIMIT {cap}) capped",
-        cap = INBOX_UNREAD_COUNT_CAP + 1
+        "SELECT count(*) FROM (SELECT 1 {VISIBLE_FROM_WHERE} AND i.read_at IS NULL{restriction_sql} LIMIT {cap}) capped",
+        cap = INBOX_UNREAD_COUNT_CAP + 1,
+        restriction_sql = restriction_predicate(restriction, 4),
     );
-    let count: i64 = sqlx::query_scalar(&sql)
+    let mut query = sqlx::query_scalar(&sql)
         .bind(workspace_id)
         .bind(member_id)
-        .bind(show_muted)
-        .fetch_one(&mut *conn)
-        .await?;
+        .bind(show_muted);
+    if let Some(channel_ids) = restriction.listed() {
+        query = query.bind(channel_ids);
+    }
+    let count: i64 = query.fetch_one(&mut *conn).await?;
     Ok(count.min(INBOX_UNREAD_COUNT_CAP))
 }
 

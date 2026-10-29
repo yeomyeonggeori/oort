@@ -18,20 +18,29 @@
 //! | `channel_list_excludes_left_and_archived_and_honours_include_archived` | default list = active memberships of non-archived channels; `include_archived=true` (and the camel alias) adds archived channels with `archivedAtMs`, never a left one; every row's `workspaceId` is the requested workspace; names are returned; no-membership token 403; cross-tenant 403/isolation |
 //! | `invite_create_and_regenerate_contract_and_admin_signup_chain` | default expiry is exactly 7 days; create body keys; `invite.created` audit target; `role:"owner"` is 400 with no row; regenerate revokes the old row (`revoked_by`, reason) and preserves role/max_uses of the new row, audit detail; admin-role invite makes an admin; that admin can create a member invite whose row is `created_by` the admin; the joiner can read the joined channel |
 //! | `empty_password_login_is_401` | `password: ""` is 401 even for an account whose stored hash is the hash of `""` |
+//! | `roster_online_is_read_from_the_transport_only_for_rows_the_viewer_may_see` | #4692: `online` is set on human rows the roster query returned and nowhere else — an agent row has no key, a guest's roster holds only people sharing a channel with them and nothing about anyone else the broker listed (an agent, a suspended member, another tenant's member, a person outside the guest's channels), and a client id the broker reported never reaches a response. Sabotage: pass `viewer_is_guest = false` to the roster query; drop the `kind != Human` guard in `apply_availability`; ask the broker for another workspace's channel |
+//! | `roster_online_is_absent_not_false_when_the_broker_cannot_answer` | #4692: a broker that answers 503, an error envelope or nothing at all, and an instance with no transport credential, all return the same roster **without an `online` key on any row** — unknown is not offline. Sabotage: map `OnlineRead::Unavailable` to an empty set in `read_availability` |
 //!
 //! Harness contract is the same as `invite_lifecycle_conformance_pg.rs`:
 //! `DATABASE_URL` connects as a superuser (migrations + `bootstrap_roles.sql`).
 //! Fixture people are fictional (이도현·박서연·최민수·정하윤, `@example.test`).
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+
+use axum::extract::State as AxumState;
+use axum::http::StatusCode;
+use axum::routing::post;
+use axum::{Json as AxumJson, Router};
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
+use momo_server::config::EphemeralSettings;
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -1261,4 +1270,486 @@ async fn empty_password_login_is_401() {
     // The same account is not simply unusable.
     let ok = try_login(&http, &base, workspace, &person.email, OWNER_PASSWORD).await;
     assert_eq!(ok.status, 200, "{}", ok.body);
+}
+
+// ---------------------------------------------------------------------------
+// 5 — roster availability (#4692, ADR-0160 ②)
+// ---------------------------------------------------------------------------
+//
+// The roster carries `online` on a human row: does this person have a live
+// connection to the workspace. It is read from Centrifugo's presence table by the
+// api and **only ever looked up by rows the roster query already returned**, so
+// what a viewer can learn is exactly the roster they may already read. The
+// broker here is a stand-in that reports a presence table on purpose stuffed with
+// people the viewer must never hear about.
+
+/// A fragment no real id contains: if it shows up in a response, a presence
+/// entry's `client` field (a device) leaked.
+const BROKER_CLIENT_SENTINEL: &str = "broker-client-sentinel-";
+const TEST_CENT_API_KEY: &str = "sec07-online-conformance-api-key";
+
+type Rolls = Arc<HashMap<String, Vec<String>>>;
+
+/// A Centrifugo that answers `POST /presence` for the channels it is given and
+/// says `unknown channel` for every other — so a handler that asked about the
+/// wrong workspace gets an error, not somebody else's table.
+async fn spawn_presence_broker(rolls: HashMap<String, Vec<String>>) -> String {
+    let app = Router::new()
+        .route(
+            "/presence",
+            post(
+                |AxumState(rolls): AxumState<Rolls>, AxumJson(body): AxumJson<Value>| async move {
+                    let channel = body["channel"].as_str().unwrap_or_default().to_string();
+                    match rolls.get(&channel) {
+                        Some(users) => {
+                            let mut presence = serde_json::Map::new();
+                            for (index, user) in users.iter().enumerate() {
+                                let client =
+                                    format!("{BROKER_CLIENT_SENTINEL}{index}-{}", Uuid::new_v4());
+                                presence.insert(
+                                    client.clone(),
+                                    json!({"user": user, "client": client}),
+                                );
+                            }
+                            AxumJson(json!({"result": {"presence": presence}}))
+                        }
+                        None => {
+                            AxumJson(json!({"error": {"code": 102, "message": "unknown channel"}}))
+                        }
+                    }
+                },
+            ),
+        )
+        .with_state(Arc::new(rolls));
+    serve_on_loopback(app).await
+}
+
+/// A Centrifugo that is up and answers every call with a 503.
+async fn spawn_failing_broker() -> String {
+    let app = Router::new().route(
+        "/presence",
+        post(|| async { StatusCode::SERVICE_UNAVAILABLE }),
+    );
+    serve_on_loopback(app).await
+}
+
+async fn serve_on_loopback(app: Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind broker stand-in");
+    let address: SocketAddr = listener.local_addr().expect("broker address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+async fn start_server_with_broker(pool: PgPool, cent_api_url: Option<&str>) -> String {
+    let mut state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    );
+    if let Some(url) = cent_api_url {
+        state = state.with_ephemeral(EphemeralSettings {
+            cent_api_url: Some(url.to_string()),
+            cent_api_key: Some(TEST_CENT_API_KEY.to_string()),
+            ..EphemeralSettings::default()
+        });
+    }
+    let app = build_app(state);
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind momo-server");
+    let address: SocketAddr = listener.local_addr().expect("server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{address}")
+}
+
+/// What the broker reports for a member: upper-case, as the connection token's
+/// `sub` is.
+fn broker_user(id: Uuid) -> String {
+    id.to_string().to_uppercase()
+}
+
+struct Team {
+    workspace: Uuid,
+    owner: Person,
+    alice: Person,
+    bob: Person,
+    guest: Person,
+    agent: Uuid,
+    suspended: Person,
+}
+
+/// One workspace, arranged so that every kind of person the broker might list
+/// is present: a non-guest viewer (owner), two members (one connected, one not),
+/// a guest who shares a channel with alice **only**, an agent, and a suspended
+/// member.
+async fn seed_team(su: &PgPool) -> Team {
+    let workspace = seed_workspace(su, "sec07-online").await;
+    let owner = seed_person(
+        su,
+        workspace,
+        Some("owner"),
+        "이도현",
+        "owner",
+        OWNER_PASSWORD,
+    )
+    .await;
+    let alice = seed_person(
+        su,
+        workspace,
+        Some("member"),
+        "박서연",
+        "alice",
+        MEMBER_PASSWORD,
+    )
+    .await;
+    let bob = seed_person(
+        su,
+        workspace,
+        Some("member"),
+        "최민수",
+        "bob",
+        MEMBER_PASSWORD,
+    )
+    .await;
+    let guest = seed_person(
+        su,
+        workspace,
+        Some("guest"),
+        "정하윤",
+        "guest",
+        MEMBER_PASSWORD,
+    )
+    .await;
+    let suspended = seed_person(
+        su,
+        workspace,
+        Some("member"),
+        "한지우",
+        "suspended",
+        MEMBER_PASSWORD,
+    )
+    .await;
+    sqlx::query("UPDATE member SET status = 'suspended' WHERE id = $1")
+        .bind(suspended.id)
+        .execute(su)
+        .await
+        .expect("suspend a member");
+    let agent = seed_agent(su, workspace, owner.id, "helper").await;
+
+    // `shared`: the guest and alice. `private`: the owner and bob. The guest
+    // shares nothing with the owner or bob.
+    let shared = seed_channel(su, workspace, "public", "shared", None, alice.id, false).await;
+    seed_channel_member(su, workspace, shared, alice.id, "owner", false).await;
+    seed_channel_member(su, workspace, shared, guest.id, "member", false).await;
+    let private = seed_channel(su, workspace, "private", "private", None, owner.id, false).await;
+    seed_channel_member(su, workspace, private, owner.id, "owner", false).await;
+    seed_channel_member(su, workspace, private, bob.id, "member", false).await;
+
+    Team {
+        workspace,
+        owner,
+        alice,
+        bob,
+        guest,
+        agent,
+        suspended,
+    }
+}
+
+fn ids_of(body: &Value) -> Vec<String> {
+    members(body)
+        .iter()
+        .map(|row| row["id"].as_str().unwrap_or_default().to_string())
+        .collect()
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn roster_online_is_read_from_the_transport_only_for_rows_the_viewer_may_see() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let team = seed_team(&su).await;
+
+    // Another tenant, with its own person and its own connected table. Its member
+    // is in the presence table of the workspace under test **on purpose**: a broker
+    // that listed a stranger there must still leave no trace in any response.
+    let other_workspace = seed_workspace(&su, "sec07-online-other").await;
+    let stranger = seed_person(
+        &su,
+        other_workspace,
+        Some("owner"),
+        "윤재민",
+        "stranger",
+        OWNER_PASSWORD,
+    )
+    .await;
+
+    let mut rolls = HashMap::new();
+    rolls.insert(
+        momo_ephemeral::online_channel(team.workspace),
+        vec![
+            broker_user(team.owner.id),
+            // lower-case on purpose: the id is the same person however it is spelled
+            team.alice.id.to_string().to_lowercase(),
+            broker_user(team.guest.id),
+            // people the roster never lists to anyone:
+            broker_user(team.agent),
+            broker_user(team.suspended.id),
+            broker_user(stranger.id),
+            // a connection that names nobody
+            String::new(),
+        ],
+    );
+    rolls.insert(
+        momo_ephemeral::online_channel(other_workspace),
+        vec![broker_user(stranger.id)],
+    );
+    let broker = spawn_presence_broker(rolls).await;
+    let base = start_server_with_broker(app_pool, Some(&broker)).await;
+    let http = reqwest::Client::new();
+    let roster_path = format!("/v1/workspaces/{}/roster", team.workspace);
+
+    // -- a non-guest viewer: every person the roster lists, with their availability --
+    let owner_token = login(
+        &http,
+        &base,
+        team.workspace,
+        &team.owner.email,
+        OWNER_PASSWORD,
+    )
+    .await;
+    let owner_view = get(&http, &base, &owner_token, &roster_path).await;
+    assert_eq!(owner_view.status, 200, "{}", owner_view.body);
+    let body = &owner_view.body;
+    assert_eq!(
+        row_by_id(body, team.owner.id)["online"],
+        json!(true),
+        "{body}"
+    );
+    assert_eq!(
+        row_by_id(body, team.alice.id)["online"],
+        json!(true),
+        "the broker spelled her id in lower case; it is still her: {body}"
+    );
+    assert_eq!(
+        row_by_id(body, team.guest.id)["online"],
+        json!(true),
+        "{body}"
+    );
+    assert_eq!(
+        row_by_id(body, team.bob.id)["online"],
+        json!(false),
+        "bob is on the roster and the broker does not list him: offline, not unknown: {body}"
+    );
+    assert!(
+        row_by_id(body, team.agent).get("online").is_none(),
+        "an agent's liveness is its agent_run: the key is absent, not false (ADR-0160 D4): {body}"
+    );
+    let owner_ids = ids_of(body);
+    assert!(
+        !owner_ids.contains(&team.suspended.id.to_string()),
+        "a suspended member is not on the roster, whatever the broker says: {body}"
+    );
+    let owner_text = body.to_string();
+    for forbidden in [
+        stranger.id.to_string(),
+        BROKER_CLIENT_SENTINEL.to_string(),
+        "conn_info".to_string(),
+    ] {
+        assert!(
+            !owner_text.contains(&forbidden),
+            "{forbidden} reached a response: {owner_text}"
+        );
+    }
+
+    // -- a guest: the roster's own narrowing, and nothing the broker said widens it --
+    let guest_token = login(
+        &http,
+        &base,
+        team.workspace,
+        &team.guest.email,
+        MEMBER_PASSWORD,
+    )
+    .await;
+    let guest_view = get(&http, &base, &guest_token, &roster_path).await;
+    assert_eq!(guest_view.status, 200, "{}", guest_view.body);
+    let body = &guest_view.body;
+    let mut guest_ids = ids_of(body);
+    guest_ids.sort();
+    let mut expected = vec![team.guest.id.to_string(), team.alice.id.to_string()];
+    expected.sort();
+    assert_eq!(
+        guest_ids, expected,
+        "a guest sees only people who share a channel with them: {body}"
+    );
+    assert_eq!(
+        row_by_id(body, team.alice.id)["online"],
+        json!(true),
+        "{body}"
+    );
+    assert_eq!(
+        row_by_id(body, team.guest.id)["online"],
+        json!(true),
+        "{body}"
+    );
+    let guest_text = body.to_string();
+    for (what, hidden) in [
+        ("the owner", team.owner.id.to_string()),
+        ("the owner's handle", team.owner.handle.clone()),
+        ("the owner's name", team.owner.display.clone()),
+        ("bob", team.bob.id.to_string()),
+        ("bob's handle", team.bob.handle.clone()),
+        ("the agent", team.agent.to_string()),
+        ("the suspended member", team.suspended.id.to_string()),
+        ("another tenant's member", stranger.id.to_string()),
+        (
+            "a presence entry's device id",
+            BROKER_CLIENT_SENTINEL.to_string(),
+        ),
+    ] {
+        assert!(
+            !guest_text.contains(&hidden),
+            "{what} is outside this guest's roster and must leave no trace: {guest_text}"
+        );
+    }
+
+    // -- the other tenant: its own table, none of ours --
+    let stranger_token = login(
+        &http,
+        &base,
+        other_workspace,
+        &stranger.email,
+        OWNER_PASSWORD,
+    )
+    .await;
+    let stranger_view = get(
+        &http,
+        &base,
+        &stranger_token,
+        &format!("/v1/workspaces/{other_workspace}/roster"),
+    )
+    .await;
+    assert_eq!(stranger_view.status, 200, "{}", stranger_view.body);
+    assert_eq!(ids_of(&stranger_view.body), vec![stranger.id.to_string()]);
+    assert_eq!(
+        row_by_id(&stranger_view.body, stranger.id)["online"],
+        json!(true)
+    );
+    let stranger_text = stranger_view.body.to_string();
+    for ours in [team.owner.id, team.alice.id, team.bob.id, team.guest.id] {
+        assert!(
+            !stranger_text.contains(&ours.to_string()),
+            "another tenant's roster must not mention {ours}: {stranger_text}"
+        );
+    }
+
+    // -- an agents-only listing has no human row to annotate --
+    let agents_only = get(
+        &http,
+        &base,
+        &owner_token,
+        &format!("{roster_path}?kind=agent"),
+    )
+    .await;
+    assert_eq!(agents_only.status, 200, "{}", agents_only.body);
+    assert!(members(&agents_only.body)
+        .iter()
+        .all(|row| row.get("online").is_none()));
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn roster_online_is_absent_not_false_when_the_broker_cannot_answer() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let team = seed_team(&su).await;
+    let roster_path = format!("/v1/workspaces/{}/roster", team.workspace);
+    let http = reqwest::Client::new();
+
+    // The control: a broker that answers. Without it, "no online key anywhere"
+    // below would also pass on a server that never reads availability at all.
+    let mut rolls = HashMap::new();
+    rolls.insert(
+        momo_ephemeral::online_channel(team.workspace),
+        vec![broker_user(team.owner.id)],
+    );
+    let healthy = spawn_presence_broker(rolls).await;
+    let base = start_server_with_broker(app_pool.clone(), Some(&healthy)).await;
+    let token = login(
+        &http,
+        &base,
+        team.workspace,
+        &team.owner.email,
+        OWNER_PASSWORD,
+    )
+    .await;
+    let answered = get(&http, &base, &token, &roster_path).await;
+    assert_eq!(answered.status, 200, "{}", answered.body);
+    assert_eq!(
+        row_by_id(&answered.body, team.owner.id)["online"],
+        json!(true)
+    );
+    assert_eq!(
+        row_by_id(&answered.body, team.alice.id)["online"],
+        json!(false)
+    );
+
+    // Three ways of not answering, and the instance that was never given a transport.
+    let failing = spawn_failing_broker().await;
+    let silent_about_this_workspace = spawn_presence_broker(HashMap::new()).await; // `unknown channel`
+    let refused = {
+        // A port nothing listens on: bind, note the address, drop.
+        let probe = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let address = probe.local_addr().expect("addr");
+        drop(probe);
+        format!("http://{address}")
+    };
+    let cases: [(&str, Option<&str>); 4] = [
+        ("a broker answering 503", Some(&failing)),
+        (
+            "a broker with no such namespace",
+            Some(&silent_about_this_workspace),
+        ),
+        ("a broker that refuses connections", Some(&refused)),
+        ("an instance with no CENT_API_URL/KEY", None),
+    ];
+    for (what, url) in cases {
+        let base = start_server_with_broker(app_pool.clone(), url).await;
+        let token = login(
+            &http,
+            &base,
+            team.workspace,
+            &team.owner.email,
+            OWNER_PASSWORD,
+        )
+        .await;
+        let view = get(&http, &base, &token, &roster_path).await;
+        assert_eq!(
+            view.status, 200,
+            "{what}: the roster itself must not depend on the broker: {}",
+            view.body
+        );
+        assert!(
+            ids_of(&view.body).contains(&team.alice.id.to_string()),
+            "{what}: the roster is otherwise unchanged: {}",
+            view.body
+        );
+        assert!(
+            members(&view.body)
+                .iter()
+                .all(|row| row.get("online").is_none()),
+            "{what}: unknown must not be reported as offline (no row may carry `online`): {}",
+            view.body
+        );
+    }
 }

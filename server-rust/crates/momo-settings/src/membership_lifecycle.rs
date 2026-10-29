@@ -3,6 +3,23 @@
 //! Port of Swift `MemberLifecycleRoutes` domain writes. Authorization is judged
 //! here — actor and target roles are loaded in the same tenant transaction —
 //! so a route-layer admin check is never the authority (#1798 pattern).
+//!
+//! ## The order inside a mutation (#4636)
+//!
+//! 1. **A caller who may not do this at all is refused first, by a read that takes no lock.**
+//!    Suspending, reinstating, removing and changing a role take the workspace's membership
+//!    lock exclusively, and the doors anyone can knock on (login, join) do not wait for that
+//!    lock: they answer 503 while it is held. A request that is going to be refused anyway
+//!    must therefore not be able to hold it, or any member could keep every new sign-in of
+//!    the workspace waiting just by sending requests that fail. The refusal is the one the
+//!    authoritative check below would give, from the same function.
+//! 2. **The lock is taken, and then the same check is made again under it**, with the rows
+//!    locked. That second answer is the one that counts: it is the first statement that
+//!    can rely on what it read, because nothing can change the workspace's membership
+//!    underneath it.
+//!
+//! What remains refusable *under* the lock — hierarchy, last owner, the status already
+//! being what was asked — is reachable only by someone who may manage members.
 
 use momo_auth::{active_workspace_role, active_workspace_role_for_update, WorkspaceRole};
 use momo_db::{DbError, PgConnection};
@@ -293,6 +310,9 @@ pub async fn change_workspace_role_in_tx(
     target_id: Uuid,
     requested: WorkspaceRole,
 ) -> Result<Result<RoleChangeApplied, MembershipLifecycleError>, DbError> {
+    if let Err(error) = require_workspace_admin(conn, workspace_id, actor_id, false).await? {
+        return Ok(Err(error));
+    }
     lock_membership_mutation(conn, workspace_id).await?;
     let actor_role = match require_workspace_admin(conn, workspace_id, actor_id, true).await? {
         Ok(role) => role,
@@ -336,20 +356,36 @@ pub async fn change_workspace_role_in_tx(
     }))
 }
 
-pub async fn change_channel_role_in_tx(
+/// What a channel role change needs of its actor, judged from one read: an active workspace
+/// member who is a workspace admin or an admin of this channel, and a live channel membership
+/// to change. `for_update` is the authoritative judgment, under the membership lock, with the
+/// member rows and the target's channel row locked; without it this is the read that refuses
+/// before the lock. The refusals come in the same order in both.
+///
+/// On success: the target's channel membership row, the target's role in the channel, and the
+/// role the actor acts with.
+async fn judge_channel_role_actor(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     channel_id: Uuid,
     actor_id: Uuid,
     target_id: Uuid,
-    requested: WorkspaceRole,
-) -> Result<Result<ChannelRoleApplied, MembershipLifecycleError>, DbError> {
-    lock_membership_mutation(conn, workspace_id).await?;
-    let workspace_role = match require_active_member(conn, workspace_id, actor_id, true).await? {
-        Ok(role) => role,
-        Err(error) => return Ok(Err(error)),
+    for_update: bool,
+) -> Result<
+    Result<(sqlx::postgres::PgRow, WorkspaceRole, WorkspaceRole), MembershipLifecycleError>,
+    DbError,
+> {
+    let workspace_role =
+        match require_active_member(conn, workspace_id, actor_id, for_update).await? {
+            Ok(role) => role,
+            Err(error) => return Ok(Err(error)),
+        };
+    let lock = if for_update {
+        " FOR UPDATE OF target"
+    } else {
+        ""
     };
-    let row = sqlx::query(
+    let row = sqlx::query(&format!(
         "SELECT target.id, target.role::text, actor.role::text AS actor_channel_role \
            FROM membership target \
            JOIN channel c \
@@ -362,9 +398,8 @@ pub async fn change_channel_role_in_tx(
             AND target.channel_id = $2 \
             AND target.member_id = $4 \
             AND target.left_at IS NULL \
-            AND c.archived_at IS NULL \
-          FOR UPDATE OF target",
-    )
+            AND c.archived_at IS NULL{lock}"
+    ))
     .bind(workspace_id)
     .bind(channel_id)
     .bind(actor_id)
@@ -390,6 +425,31 @@ pub async fn change_channel_role_in_tx(
             _ => return Ok(Err(MembershipLifecycleError::ChannelAdminRequired)),
         }
     };
+    Ok(Ok((row, target_role, actor_role)))
+}
+
+pub async fn change_channel_role_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    actor_id: Uuid,
+    target_id: Uuid,
+    requested: WorkspaceRole,
+) -> Result<Result<ChannelRoleApplied, MembershipLifecycleError>, DbError> {
+    // Refused by a read that takes no lock when the caller may not do this (module docs).
+    if let Err(error) =
+        judge_channel_role_actor(conn, workspace_id, channel_id, actor_id, target_id, false).await?
+    {
+        return Ok(Err(error));
+    }
+    lock_membership_mutation(conn, workspace_id).await?;
+    let (row, target_role, actor_role) =
+        match judge_channel_role_actor(conn, workspace_id, channel_id, actor_id, target_id, true)
+            .await?
+        {
+            Ok(judged) => judged,
+            Err(error) => return Ok(Err(error)),
+        };
     if let Err(error) = require_can_manage(
         actor_id,
         actor_role,
@@ -420,6 +480,9 @@ pub async fn set_member_status_in_tx(
     target_id: Uuid,
     transition: StatusTransition,
 ) -> Result<Result<StatusChangeApplied, MembershipLifecycleError>, DbError> {
+    if let Err(error) = require_workspace_admin(conn, workspace_id, actor_id, false).await? {
+        return Ok(Err(error));
+    }
     lock_membership_mutation(conn, workspace_id).await?;
     let actor_role = match require_workspace_admin(conn, workspace_id, actor_id, true).await? {
         Ok(role) => role,
@@ -467,6 +530,9 @@ pub async fn remove_workspace_member_in_tx(
     ban: bool,
     reason: Option<&str>,
 ) -> Result<Result<RemoveApplied, MembershipLifecycleError>, DbError> {
+    if let Err(error) = require_workspace_admin(conn, workspace_id, actor_id, false).await? {
+        return Ok(Err(error));
+    }
     lock_membership_mutation(conn, workspace_id).await?;
     let actor_role = match require_workspace_admin(conn, workspace_id, actor_id, true).await? {
         Ok(role) => role,

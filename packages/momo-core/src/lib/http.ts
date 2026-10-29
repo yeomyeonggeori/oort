@@ -75,6 +75,11 @@ export interface HttpResponse {
    */
   readonly date?: string | null;
   /**
+   * The raw `Retry-After` header, or null. A 429 or 503 that says when to come
+   * back says it here and nowhere else (the error envelope carries no seconds).
+   */
+  readonly retryAfter?: string | null;
+  /**
    * Retry-After (#4663, additive): the `Retry-After` header as whole seconds, only when the
    * server sent it as a plain integer (a 429 or 503 does). Absent when the header is missing
    * or in any other form (an HTTP date, a fraction, text). Absent means "the server did not
@@ -92,13 +97,15 @@ function httpResponse(
   ok: boolean,
   text: string,
   date: string | null = null,
-  retryAfterSeconds?: number
+  retryAfter: string | null = null
 ): HttpResponse {
+  const retryAfterSeconds = parseRetryAfterSeconds(retryAfter);
   return {
     status,
     ok,
     text,
     date,
+    retryAfter,
     ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
     json<T>(): T {
       return JSON.parse(text) as T;
@@ -166,7 +173,7 @@ export async function fetchWithDeadline(
       res.ok,
       text,
       res.headers?.get?.("Date") ?? null,
-      parseRetryAfterSeconds(res.headers?.get?.("Retry-After"))
+      res.headers?.get?.("Retry-After") ?? null
     );
   } catch (error) {
     if (timedOut) throw new NetworkError("timeout", timeoutMs, error);

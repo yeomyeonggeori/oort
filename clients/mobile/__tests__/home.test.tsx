@@ -625,7 +625,56 @@ describe('홈 — DM 줄의 상태 점 (#3964)', () => {
     expect([lightPalette.danger, darkPalette.danger]).toContain(bg(dnd));
   });
 
-  it('사람: 평소(auto)에는 점이 없다 — 근거 없는 온라인·회색 오프라인 점 금지', async () => {
+  it('사람: 접속 중은 채운 초록 점, 접속 없음은 속이 빈 회색 고리 — 에이전트의 두 끝과 같은 모양 (#4692)', async () => {
+    const HUMAN2 = 'dddddddd-1111-4111-8111-dddddddddddd';
+    await mountHome({
+      roster: [
+        ...asRoster({[HUMAN_ID]: {online: true}}),
+        rosterMember({id: HUMAN2, displayName: '이도현', handle: 'dohyun', online: false}),
+      ],
+      channels: [
+        ...CHANNELS,
+        {id: 'ch-dm-human2', workspaceId: WS, kind: 'dm', muted: false, memberIds: [SELF_ID, HUMAN2]},
+      ],
+    });
+    const on = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-human');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.ok, darkPalette.ok]).toContain(bg(on));
+    const off = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-human2');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    // 속이 빈 고리: 면 채움 + 선 색(textFaint) 둘레. 채운 초록과 한 점이 되지 않는다.
+    expect([lightPalette.surface, darkPalette.surface]).toContain(bg(off));
+    expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(border(off));
+    expect(bg(on)).not.toBe(bg(off));
+    // 낱말은 낭독 라벨이 잇는다(점은 보조기술에서 숨는다).
+    expect(screen.getByTestId('sidebar-row-dm:ch-dm-human').props.accessibilityLabel).toMatch(
+      /, 온라인$/,
+    );
+    expect(screen.getByTestId('sidebar-row-dm:ch-dm-human2').props.accessibilityLabel).toMatch(
+      /, 오프라인$/,
+    );
+  });
+
+  it('사람: 스스로 정한 자리 비움은 접속 여부보다 먼저다 (#4692)', async () => {
+    await mountHome({roster: asRoster({[HUMAN_ID]: {presenceStatus: 'away', online: true}})});
+    const away = await waitFor(() => {
+      const node = dotOf('dm:ch-dm-human');
+      expect(node).toBeTruthy();
+      return node!;
+    });
+    expect([lightPalette.warn, darkPalette.warn]).toContain(bg(away));
+    expect(screen.getByTestId('sidebar-row-dm:ch-dm-human').props.accessibilityLabel).toMatch(
+      /, 자리 비움$/,
+    );
+  });
+
+  it('사람: 평소(auto)이고 접속 여부를 서버가 말하지 않았으면 점이 없다 — 근거 없는 온라인·회색 오프라인 점 금지', async () => {
     await mountHome({roster: asRoster({[HUMAN_ID]: {presenceStatus: 'auto'}})});
     await waitFor(() => expect(screen.getByTestId('sidebar-row-dm:ch-dm-human')).toBeTruthy());
     expect(dotOf('dm:ch-dm-human')).toBeNull();

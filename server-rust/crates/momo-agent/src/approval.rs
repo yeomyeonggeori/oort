@@ -234,8 +234,39 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
     .bind(agent_member_id)
     .fetch_optional(&mut *conn)
     .await?;
-    let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM approval \
+    Ok(
+        count_pending_workspace_actions_in_tx(conn, workspace_id, agent_member_id)
+            .await?
+            .all,
+    )
+}
+
+/// What an agent has waiting, as the ceiling counts it (see
+/// [`count_pending_workspace_actions_in_tx`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingWorkspaceActions {
+    /// Every pending, unexpired `workspace_action` of the agent except an in-place grant card —
+    /// the number [`crate::actions::MAX_PENDING_WORKSPACE_ACTIONS`] caps.
+    pub all: i64,
+    /// Of those, the ones the agent raised **unasked** (`payload.origin = agent_initiated`,
+    /// ADR-0186 증보 v5 U-d: at most [`crate::initiative::MAX_PENDING_INITIATIVE`]).
+    pub unasked: i64,
+}
+
+/// The **one definition** of "pending" for an agent's ceiling — read with no lock. A person's
+/// proposal ([`lock_agent_and_count_pending_workspace_actions_in_tx`], which locks first) and an
+/// unasked card (`routes::agent_initiative`, behind its advisory lock) count the same rows the
+/// same way, so neither can drift from the other: an unasked card is a `workspace_action` of the
+/// agent like any other and takes its place among the three.
+pub async fn count_pending_workspace_actions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<PendingWorkspaceActions, DbError> {
+    let (all, unasked): (i64, i64) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE payload->>'origin' = 'agent_initiated') \
+           FROM approval \
           WHERE workspace_id = $1 AND requested_by = $2 \
             AND action_type = 'workspace_action' AND status = 'pending' \
             AND (expires_at IS NULL OR expires_at > now()) \
@@ -245,7 +276,7 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
     .bind(agent_member_id)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(pending)
+    Ok(PendingWorkspaceActions { all, unasked })
 }
 
 /// Whether a `workspace_action` of `action_id` is already `pending` against
@@ -1282,6 +1313,43 @@ pub fn default_expires_at(now: DateTime<Utc>, ttl_seconds: i64) -> DateTime<Utc>
     now + Duration::seconds(ttl_seconds.max(1))
 }
 
+/// Has `expires_at` been reached at `now`? **The one definition of "past its
+/// deadline" for every reader that answers from the application's clock.**
+///
+/// The decision route settles a late tap with this predicate, and the status an
+/// agent is told on a re-ask ([`effective_status`], ADR-0186 증보 v5 U-f) is read
+/// through it too — so the two cannot disagree at the boundary. The instant itself
+/// counts as expired (`<=`), exactly as the sweep's SQL (`expires_at <= now()`)
+/// and the route have always judged it.
+///
+/// `now` is a **parameter**, never read here: the caller takes the clock once,
+/// and the application's clock is the route's. A re-ask that compared against the
+/// database's `now()` instead would call an approval `pending` in the very
+/// millisecond the route settles it as `expired` (or the reverse).
+pub fn is_overdue(expires_at: Option<DateTime<Utc>>, now: DateTime<Utc>) -> bool {
+    expires_at.is_some_and(|expires| expires <= now)
+}
+
+/// The status an approval **reads as** at `now`.
+///
+/// A `pending` approval whose deadline has passed is `expired` — before the
+/// notifier's sweep has written it down. Every other status is returned as stored:
+/// the sweep and the decision route are the only writers of `expired`, and a row
+/// already settled stays what it was settled as (ADR-0186 증보 v5 U-f: 「만료는
+/// 재호출이 파생해서 말한다」 — the expiry is never written to the proposer's inbox,
+/// so this derivation is how an agent learns of it).
+pub fn effective_status(
+    status: &str,
+    expires_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> &str {
+    if status == "pending" && is_overdue(expires_at, now) {
+        "expired"
+    } else {
+        status
+    }
+}
+
 /// Swift `validatedStatus` (:487-497).
 pub fn validated_status(raw: Option<&str>) -> Option<String> {
     let status = raw.map(|raw| raw.trim().to_lowercase());
@@ -1707,5 +1775,43 @@ mod tests {
         );
         assert_eq!(receipt["decidedBy"], Value::Null);
         assert_eq!(receipt["status"], "expired");
+    }
+
+    /// ADR-0186 증보 v5 U-f (#4702): a pending approval past its deadline reads as
+    /// `expired` before any sweep has written it, and the deadline instant itself is
+    /// already past — the same `<=` the decision route and the sweep's SQL use.
+    #[test]
+    fn a_pending_approval_reads_as_expired_from_the_deadline_instant_on() {
+        let deadline = DateTime::from_timestamp(1_000, 0).expect("epoch");
+        let just_before = deadline - Duration::milliseconds(1);
+        let just_after = deadline + Duration::milliseconds(1);
+
+        assert_eq!(
+            effective_status("pending", Some(deadline), just_before),
+            "pending"
+        );
+        assert_eq!(
+            effective_status("pending", Some(deadline), deadline),
+            "expired"
+        );
+        assert_eq!(
+            effective_status("pending", Some(deadline), just_after),
+            "expired"
+        );
+        assert!(!is_overdue(Some(deadline), just_before));
+        assert!(is_overdue(Some(deadline), deadline));
+    }
+
+    /// Only `pending` is derived. A settled approval keeps the status it was settled
+    /// with even when its deadline is long gone, and one with no deadline never lapses.
+    #[test]
+    fn only_a_pending_approval_is_derived_to_expired() {
+        let long_ago = DateTime::from_timestamp(0, 0).expect("epoch");
+        let now = DateTime::from_timestamp(86_400, 0).expect("a day later");
+        for settled in ["approved", "rejected", "expired", "cancelled"] {
+            assert_eq!(effective_status(settled, Some(long_ago), now), settled);
+        }
+        assert_eq!(effective_status("pending", None, now), "pending");
+        assert!(!is_overdue(None, now));
     }
 }

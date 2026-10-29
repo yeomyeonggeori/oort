@@ -92,6 +92,9 @@ pub struct Config {
     /// These knobs are separate from the public join limiter so changing one
     /// surface can never silently widen the other.
     pub agent_port: AgentPortConfig,
+    /// ADR-0216 D9 (#4660) — the developer-token door's budgets. Never off: 0 and
+    /// garbage keep the default.
+    pub dev_access: DevAccessConfig,
     /// Mention→run routing knobs (B5.2). Always on; only the history window is
     /// configurable.
     pub mentions: MentionSettings,
@@ -649,11 +652,27 @@ pub struct AgentPortOauthConfig {
     /// Absolute https URL of the resource owner's consent screen (#1369).
     consent_url: Option<String>,
     clients: Vec<RegisteredOauthClient>,
+    /// ADR-0216 D6 (나) / #4700 — the **human-subject arm** (`oort login`).
+    ///
+    /// Independent of the hosted arm above: an operator may open either, both or
+    /// neither, and the hosted accessors ([`Self::is_enabled`], [`Self::issuer`],
+    /// [`Self::consent_url`], [`Self::resource`], [`Self::client`]) mean exactly what
+    /// they meant before this arm existed — they never answer for it, so turning
+    /// this arm on cannot advertise the hosted resource or accept a hosted client.
+    /// The two arms share one issuer (`MOMO_AGENT_PORT_OAUTH_ISSUER`): a server has
+    /// one authorization-server identity.
+    dev_login_enabled: bool,
+    /// Absolute https URL of the developer-login consent screen (`/oauth/cli`).
+    dev_login_consent_url: Option<String>,
 }
 
+/// The canonical resource of the human-subject arm, derived from the issuer so the
+/// two can never disagree. It is the human MCP endpoint's path (ADR-0216 D5).
+pub const DEV_LOGIN_RESOURCE_PATH: &str = "/v1/mcp/me";
+
 impl AgentPortOauthConfig {
-    /// The one predicate every OAuth surface asks. False means 404, not 503:
-    /// a disabled authorization server does not exist, it is not merely busy.
+    /// The one predicate every **hosted** OAuth surface asks. False means 404, not
+    /// 503: a disabled authorization server does not exist, it is not merely busy.
     pub fn is_enabled(&self) -> bool {
         self.enabled
             && self.issuer.is_some()
@@ -696,7 +715,46 @@ impl AgentPortOauthConfig {
             .flatten()
     }
 
+    /// The human-subject arm's predicate. False means the built-in `oort-cli`
+    /// client does not exist: a request naming it is answered exactly like one
+    /// naming an unknown client.
+    pub fn dev_login_enabled(&self) -> bool {
+        self.dev_login_enabled && self.issuer.is_some() && self.dev_login_consent_url.is_some()
+    }
+
+    pub fn dev_login_issuer(&self) -> Option<&str> {
+        self.dev_login_enabled()
+            .then_some(self.issuer.as_deref())
+            .flatten()
+    }
+
+    pub fn dev_login_consent_url(&self) -> Option<&str> {
+        self.dev_login_enabled()
+            .then_some(self.dev_login_consent_url.as_deref())
+            .flatten()
+    }
+
+    /// The human-subject arm's canonical resource (issuer + `/v1/mcp/me`). Not the
+    /// hosted [`Self::resource`]: the two audiences are different credentials.
+    pub fn dev_login_resource(&self) -> Option<String> {
+        self.dev_login_issuer()
+            .map(|issuer| format!("{issuer}{DEV_LOGIN_RESOURCE_PATH}"))
+    }
+
+    pub fn dev_login_endpoint(&self, path: &str) -> Option<String> {
+        self.dev_login_issuer()
+            .map(|issuer| format!("{issuer}{path}"))
+    }
+
+    /// The issuer an authorization-server **metadata** document may name: either
+    /// arm being open is enough, and a document never advertises an arm that is
+    /// closed. `None` when both are closed (the well-known is then 404).
+    pub fn server_issuer(&self) -> Option<&str> {
+        self.issuer().or_else(|| self.dev_login_issuer())
+    }
+
     /// Construct directly (fixtures and verifiers), bypassing the environment.
+    /// Opens the hosted arm only.
     pub fn for_tests(
         issuer: &str,
         consent_url: &str,
@@ -707,49 +765,101 @@ impl AgentPortOauthConfig {
             issuer: Some(issuer.to_string()),
             consent_url: Some(consent_url.to_string()),
             clients,
+            dev_login_enabled: false,
+            dev_login_consent_url: None,
         }
     }
 
+    /// Fixtures: the human-subject arm alone (the hosted arm stays closed).
+    pub fn for_tests_dev_login(issuer: &str, consent_url: &str) -> AgentPortOauthConfig {
+        AgentPortOauthConfig {
+            issuer: Some(issuer.to_string()),
+            dev_login_enabled: true,
+            dev_login_consent_url: Some(consent_url.to_string()),
+            ..AgentPortOauthConfig::default()
+        }
+    }
+
+    /// Fixtures: this config with the human-subject arm opened as well. The two
+    /// arms share the issuer already in `self`.
+    pub fn with_dev_login_for_tests(mut self, consent_url: &str) -> AgentPortOauthConfig {
+        self.dev_login_enabled = true;
+        self.dev_login_consent_url = Some(consent_url.to_string());
+        self
+    }
+
     fn from_env() -> Result<AgentPortOauthConfig, ConfigError> {
-        // Exactly one spelling opens it, the same discipline the hosted
+        Self::from_lookup(env)
+    }
+
+    /// The environment grammar, over an injectable lookup so it is testable
+    /// without touching the process environment.
+    pub fn from_lookup(
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Result<AgentPortOauthConfig, ConfigError> {
+        let value = |name: &str| lookup(name).filter(|raw| !raw.trim().is_empty());
+        // Exactly one spelling opens an arm, the same discipline the hosted
         // delivery gate uses: a capability a typo can enable is a capability
         // nobody decided to enable.
-        let enabled =
-            env("MOMO_AGENT_PORT_OAUTH_ENABLED").is_some_and(|value| value.trim() == "true");
-        if !enabled {
+        let opted_in = |name: &str| value(name).is_some_and(|raw| raw.trim() == "true");
+        let enabled = opted_in("MOMO_AGENT_PORT_OAUTH_ENABLED");
+        let dev_login_enabled = opted_in("MOMO_DEV_LOGIN_OAUTH_ENABLED");
+        if !enabled && !dev_login_enabled {
             return Ok(AgentPortOauthConfig::default());
         }
-        let issuer = env("MOMO_AGENT_PORT_OAUTH_ISSUER")
+        let https_url = |raw: String| {
+            let trimmed = raw.trim().to_string();
+            (trimmed.starts_with("https://") && !trimmed.contains(['#', ' '])).then_some(trimmed)
+        };
+        // One server, one authorization-server identity: both arms need it.
+        let issuer = value("MOMO_AGENT_PORT_OAUTH_ISSUER")
             .as_deref()
             .and_then(normalized_origin)
             .filter(|origin| origin.starts_with("https://"))
             .ok_or(ConfigError::InvalidSecurity(
                 "MOMO_AGENT_PORT_OAUTH_ISSUER must be one exact https origin",
             ))?;
-        let consent_url = env("MOMO_AGENT_PORT_OAUTH_CONSENT_URL")
-            .map(|value| value.trim().to_string())
-            .filter(|value| value.starts_with("https://") && !value.contains(['#', ' ']))
+        let (consent_url, clients) = if enabled {
+            let consent_url = value("MOMO_AGENT_PORT_OAUTH_CONSENT_URL")
+                .and_then(https_url)
+                .ok_or(ConfigError::InvalidSecurity(
+                    "MOMO_AGENT_PORT_OAUTH_CONSENT_URL must be one absolute https URL",
+                ))?;
+            let clients = parse_registered_oauth_clients(
+                value("MOMO_AGENT_PORT_OAUTH_CLIENTS")
+                    .as_deref()
+                    .unwrap_or(""),
+            )
             .ok_or(ConfigError::InvalidSecurity(
-                "MOMO_AGENT_PORT_OAUTH_CONSENT_URL must be one absolute https URL",
+                "MOMO_AGENT_PORT_OAUTH_CLIENTS must be id=https://redirect[|https://redirect] entries (the id oort-cli is built in and cannot be registered)",
             ))?;
-        let clients = parse_registered_oauth_clients(
-            env("MOMO_AGENT_PORT_OAUTH_CLIENTS")
-                .as_deref()
-                .unwrap_or(""),
-        )
-        .ok_or(ConfigError::InvalidSecurity(
-            "MOMO_AGENT_PORT_OAUTH_CLIENTS must be id=https://redirect[|https://redirect] entries",
-        ))?;
-        if clients.is_empty() {
-            return Err(ConfigError::InvalidSecurity(
-                "MOMO_AGENT_PORT_OAUTH_CLIENTS must register at least one public client",
-            ));
-        }
+            if clients.is_empty() {
+                return Err(ConfigError::InvalidSecurity(
+                    "MOMO_AGENT_PORT_OAUTH_CLIENTS must register at least one public client",
+                ));
+            }
+            (Some(consent_url), clients)
+        } else {
+            (None, Vec::new())
+        };
+        let dev_login_consent_url = if dev_login_enabled {
+            Some(
+                value("MOMO_DEV_LOGIN_OAUTH_CONSENT_URL")
+                    .and_then(https_url)
+                    .ok_or(ConfigError::InvalidSecurity(
+                        "MOMO_DEV_LOGIN_OAUTH_CONSENT_URL must be one absolute https URL",
+                    ))?,
+            )
+        } else {
+            None
+        };
         Ok(AgentPortOauthConfig {
             enabled,
             issuer: Some(issuer),
-            consent_url: Some(consent_url),
+            consent_url,
             clients,
+            dev_login_enabled,
+            dev_login_consent_url,
         })
     }
 }
@@ -769,7 +879,10 @@ fn parse_registered_oauth_clients(raw: &str) -> Option<Vec<RegisteredOauthClient
     {
         let (client_id, redirects) = entry.split_once('=')?;
         let client_id = client_id.trim();
+        // `oort-cli` is the built-in human-subject client (ADR-0216 D6): its
+        // redirects are the sealed loopback list, never an operator's string.
         if client_id.is_empty()
+            || client_id == momo_mcp::oauth::OORT_CLI_CLIENT_ID
             || client_id.len() > 200
             || !client_id
                 .bytes()
@@ -936,6 +1049,58 @@ fn liveness_thresholds_from_env() -> Result<momo_agent::LivenessThresholds, Conf
     })
 }
 
+/// The three variables an operator sets, in the order [`InitiativeLimits::from_env_values`] takes
+/// their values: cards an hour, cards a day, hours a card waits.
+///
+/// [`InitiativeLimits::from_env_values`]: momo_agent::initiative::InitiativeLimits::from_env_values
+const INITIATIVE_LIMIT_VARIABLES: [&str; 3] = [
+    "MOMO_AGENT_INITIATIVE_PER_HOUR",
+    "MOMO_AGENT_INITIATIVE_PER_DAY",
+    "MOMO_AGENT_INITIATIVE_TTL_HOURS",
+];
+
+/// ADR-0186 증보 v5 U-d (#4704 PR B) — the rate and the lifetime of a card an agent raises
+/// **unasked**, read once from the environment: `MOMO_AGENT_INITIATIVE_PER_HOUR` (default 6,
+/// 1..=60), `MOMO_AGENT_INITIATIVE_PER_DAY` (20, 1..=240) and `MOMO_AGENT_INITIATIVE_TTL_HOURS`
+/// (24, 1..=168). Each is clamped to its range and a value that is not a number falls back to the
+/// default, both with a warning when it is read (at startup: `main` asks once): a typo must not close
+/// the door (a zero) nor open it past the ceiling, and an abuse limit is not worth a failed boot. A
+/// process-wide read for the reason `liveness_thresholds` is: the fixtures that build
+/// [`AgentPortConfig`] literally are untouched.
+pub fn initiative_limits() -> momo_agent::initiative::InitiativeLimits {
+    static LIMITS: std::sync::OnceLock<momo_agent::initiative::InitiativeLimits> =
+        std::sync::OnceLock::new();
+    *LIMITS.get_or_init(|| initiative_limits_from(env))
+}
+
+/// [`initiative_limits`] over any source of variables, so a test can say which name feeds which
+/// number (a variable misnamed here would be an operator's setting silently ignored).
+fn initiative_limits_from(
+    read: impl Fn(&str) -> Option<String>,
+) -> momo_agent::initiative::InitiativeLimits {
+    let [per_hour, per_day, ttl_hours] = INITIATIVE_LIMIT_VARIABLES;
+    let (limits, readings) = momo_agent::initiative::InitiativeLimits::from_env_values(
+        read(per_hour).as_deref(),
+        read(per_day).as_deref(),
+        read(ttl_hours).as_deref(),
+    );
+    for (name, reading) in INITIATIVE_LIMIT_VARIABLES.into_iter().zip(readings) {
+        match reading {
+            momo_agent::initiative::LimitReading::Clamped { requested } => tracing::warn!(
+                variable = name,
+                requested,
+                "an agent-initiative limit is outside its range and was clamped"
+            ),
+            momo_agent::initiative::LimitReading::Unparsable => tracing::warn!(
+                variable = name,
+                "an agent-initiative limit is not a number; using the default"
+            ),
+            _ => {}
+        }
+    }
+    limits
+}
+
 impl AgentPortConfig {
     pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
         let defaults = AgentPortConfig::default();
@@ -983,6 +1148,192 @@ impl AgentPortConfig {
                 .zip(self.external_origin.as_ref())
                 .is_some_and(|(presented, expected)| &presented == expected),
         }
+    }
+}
+
+/// ADR-0216 D9 (#4660) — the developer-token door's three budgets: per token, per
+/// member, and the write row (L6, `dev:messages:write`) per token. The counters are
+/// keyed on stable ids (`token.id`, `member.id`), never an address, and live in the
+/// Agent Port limiter map under `dev:` keys (`crate::dev_access`).
+///
+/// **No off switch** (ADR-0180 C6). A developer token is a person's credential driven
+/// by a program, so every knob here is a ceiling an operator may move but not remove:
+/// 0, a negative number, a blank value and anything that does not parse all keep the
+/// default. That is the opposite of [`AgentPortConfig`], where 0 disables an axis and
+/// garbage fails the boot (`env_number`), and the same discipline as
+/// [`RateLimitConfig::password_guess_per_account_limit`]. The door applies
+/// [`DevAccessConfig::normalized`] again at use, so a config built by hand with a 0
+/// cannot unbudget the door either.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DevAccessConfig {
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_WINDOW_SECONDS` (default 60).
+    pub window_seconds: u64,
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_PER_TOKEN` (default 240 per window — the Agent
+    /// Port's per-token number).
+    pub per_token_limit: u32,
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_PER_MEMBER` (default 480 per window — the Agent
+    /// Port's per-agent number), shared by every developer token of one member.
+    pub per_member_limit: u32,
+    /// `MOMO_DEV_ACCESS_RATE_LIMIT_WRITE_PER_TOKEN` (default 30 per window): the send
+    /// row only. Counted on top of the per-token budget, never instead of it.
+    pub write_per_token_limit: u32,
+}
+
+impl Default for DevAccessConfig {
+    fn default() -> Self {
+        DevAccessConfig {
+            window_seconds: 60,
+            per_token_limit: 240,
+            per_member_limit: 480,
+            write_per_token_limit: 30,
+        }
+    }
+}
+
+impl DevAccessConfig {
+    pub fn from_env() -> DevAccessConfig {
+        Self::from_lookup(env)
+    }
+
+    /// [`from_env`](Self::from_env) over any lookup, so every env name and the
+    /// "no off switch" rule are testable without touching the process environment.
+    pub fn from_lookup(lookup: impl Fn(&str) -> Option<String>) -> DevAccessConfig {
+        let defaults = DevAccessConfig::default();
+        DevAccessConfig {
+            window_seconds: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_WINDOW_SECONDS"),
+                defaults.window_seconds,
+            ),
+            per_token_limit: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_PER_TOKEN"),
+                defaults.per_token_limit,
+            ),
+            per_member_limit: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_PER_MEMBER"),
+                defaults.per_member_limit,
+            ),
+            write_per_token_limit: Self::positive_or(
+                lookup("MOMO_DEV_ACCESS_RATE_LIMIT_WRITE_PER_TOKEN"),
+                defaults.write_per_token_limit,
+            ),
+        }
+    }
+
+    /// Every 0 replaced by its default. The limiter reads a limit of 0 as "this axis
+    /// is off", which is exactly what this config must never mean.
+    pub fn normalized(self) -> DevAccessConfig {
+        let defaults = DevAccessConfig::default();
+        let keep = |value: u32, fallback: u32| if value == 0 { fallback } else { value };
+        DevAccessConfig {
+            window_seconds: if self.window_seconds == 0 {
+                defaults.window_seconds
+            } else {
+                self.window_seconds
+            },
+            per_token_limit: keep(self.per_token_limit, defaults.per_token_limit),
+            per_member_limit: keep(self.per_member_limit, defaults.per_member_limit),
+            write_per_token_limit: keep(self.write_per_token_limit, defaults.write_per_token_limit),
+        }
+    }
+
+    /// A strictly positive number, or `fallback` for anything else (absent, blank,
+    /// 0, negative, not a number).
+    fn positive_or<T>(raw: Option<String>, fallback: T) -> T
+    where
+        T: std::str::FromStr + PartialOrd + Default,
+    {
+        raw.and_then(|value| value.trim().parse::<T>().ok())
+            .filter(|value| *value > T::default())
+            .unwrap_or(fallback)
+    }
+}
+
+#[cfg(test)]
+mod dev_access_config_tests {
+    use super::DevAccessConfig;
+
+    fn lookup_all(value: &'static str) -> impl Fn(&str) -> Option<String> {
+        move |key: &str| {
+            key.starts_with("MOMO_DEV_ACCESS_RATE_LIMIT_")
+                .then(|| value.to_string())
+        }
+    }
+
+    /// ADR-0216 D9: the ADR's numbers when nothing is configured.
+    #[test]
+    fn nothing_configured_is_the_adr_numbers() {
+        let config = DevAccessConfig::from_lookup(|_| None);
+        assert_eq!(config, DevAccessConfig::default());
+        assert_eq!(
+            (
+                config.window_seconds,
+                config.per_token_limit,
+                config.per_member_limit,
+                config.write_per_token_limit
+            ),
+            (60, 240, 480, 30)
+        );
+    }
+
+    /// ADR-0180 C6 / ADR-0216 R13: no value turns a budget off. 0, garbage, a negative
+    /// number and a blank value all keep the default, on every knob.
+    #[test]
+    fn zero_garbage_negative_and_blank_keep_the_default() {
+        for raw in ["0", "abc", "-5", "   ", "", "1.5", "0x10"] {
+            assert_eq!(
+                DevAccessConfig::from_lookup(lookup_all(raw)),
+                DevAccessConfig::default(),
+                "raw value {raw:?} must not change any budget"
+            );
+        }
+    }
+
+    /// A real number is taken as written (surrounding whitespace from an env file
+    /// trimmed), each knob from its own name.
+    #[test]
+    fn a_positive_value_is_taken_from_its_own_name() {
+        let config = DevAccessConfig::from_lookup(|key| {
+            Some(
+                match key {
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_WINDOW_SECONDS" => "120",
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_PER_TOKEN" => " 3\n",
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_PER_MEMBER" => "7",
+                    "MOMO_DEV_ACCESS_RATE_LIMIT_WRITE_PER_TOKEN" => "2",
+                    _ => return None,
+                }
+                .to_string(),
+            )
+        });
+        assert_eq!(
+            config,
+            DevAccessConfig {
+                window_seconds: 120,
+                per_token_limit: 3,
+                per_member_limit: 7,
+                write_per_token_limit: 2,
+            }
+        );
+    }
+
+    /// A config built by hand (a fixture, a future caller) with 0s is normalized back
+    /// to the defaults before the door reads it; non-zero values are kept.
+    #[test]
+    fn normalizing_replaces_only_the_zeros() {
+        let hand_built = DevAccessConfig {
+            window_seconds: 0,
+            per_token_limit: 0,
+            per_member_limit: 9,
+            write_per_token_limit: 0,
+        };
+        assert_eq!(
+            hand_built.normalized(),
+            DevAccessConfig {
+                window_seconds: 60,
+                per_token_limit: 240,
+                per_member_limit: 9,
+                write_per_token_limit: 30,
+            }
+        );
     }
 }
 
@@ -2649,6 +3000,8 @@ impl Config {
             login_relay,
             rate_limit: RateLimitConfig::from_env(),
             agent_port: AgentPortConfig::from_env()?,
+            // ADR-0216 D9: never fatal and never off — a bad value keeps the default.
+            dev_access: DevAccessConfig::from_env(),
             mentions: MentionSettings::from_env(),
             scheduler: SchedulerSettings::from_env(),
             attachment_reclaim: AttachmentReclaimSettings::from_env(),
@@ -2866,6 +3219,60 @@ mod tests {
         ] {
             assert!(!hosted_inplace_grant_switch_on(off), "{off:?}");
         }
+    }
+
+    /// ADR-0186 증보 v5 U-d (#4704 PR B, L6): each `MOMO_AGENT_INITIATIVE_*` variable feeds **its own**
+    /// number and nothing else, under the names the runbook gives — a swapped or misspelled name would
+    /// be an operator's setting silently ignored, which the pure parser's own test cannot see.
+    #[test]
+    fn each_initiative_variable_sets_its_own_number_under_the_name_the_runbook_gives() {
+        use std::collections::HashMap;
+        let defaults = momo_agent::initiative::InitiativeLimits::default();
+        let limits = |set: &[(&str, &str)]| {
+            let set: HashMap<String, String> = set
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect();
+            initiative_limits_from(|name| set.get(name).cloned())
+        };
+        assert_eq!(limits(&[]), defaults, "nothing set: the defaults");
+        // One at a time: the other two stay what they were.
+        let hour = limits(&[("MOMO_AGENT_INITIATIVE_PER_HOUR", "3")]);
+        assert_eq!(
+            (hour.per_hour, hour.per_day, hour.ttl_seconds),
+            (3, defaults.per_day, defaults.ttl_seconds)
+        );
+        let day = limits(&[("MOMO_AGENT_INITIATIVE_PER_DAY", "50")]);
+        assert_eq!(
+            (day.per_hour, day.per_day, day.ttl_seconds),
+            (defaults.per_hour, 50, defaults.ttl_seconds)
+        );
+        let ttl = limits(&[("MOMO_AGENT_INITIATIVE_TTL_HOURS", "48")]);
+        assert_eq!(
+            (ttl.per_hour, ttl.per_day, ttl.ttl_seconds),
+            (defaults.per_hour, defaults.per_day, 48 * 3600)
+        );
+        // And the range is applied to what the operator wrote, not only in the parser's own test.
+        let wild = limits(&[
+            ("MOMO_AGENT_INITIATIVE_PER_HOUR", "0"),
+            ("MOMO_AGENT_INITIATIVE_PER_DAY", "100000"),
+            ("MOMO_AGENT_INITIATIVE_TTL_HOURS", "banana"),
+        ]);
+        assert_eq!((wild.per_hour, wild.per_day), (1, 240));
+        assert_eq!(
+            wild.ttl_seconds, defaults.ttl_seconds,
+            "not a number: the default"
+        );
+        // The names themselves are pinned, so renaming one is a deliberate act: the runbook and the
+        // ADR spell exactly these, and an operator's environment file has them by heart.
+        assert_eq!(
+            INITIATIVE_LIMIT_VARIABLES,
+            [
+                "MOMO_AGENT_INITIATIVE_PER_HOUR",
+                "MOMO_AGENT_INITIATIVE_PER_DAY",
+                "MOMO_AGENT_INITIATIVE_TTL_HOURS"
+            ]
+        );
     }
 
     /// #4443: the api process's reclaim tick reads the notifier's variable names with the
@@ -4255,5 +4662,176 @@ mod tests {
                 .is_err(),
             "staging without the opt-in: refused"
         );
+    }
+
+    // ----- AgentPortOauthConfig: the human-subject arm (ADR-0216 D6 나) ---------
+
+    fn oauth_lookup(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<&'static str, &'static str> =
+            pairs.iter().copied().collect();
+        move |key: &str| map.get(key).map(|value| (*value).to_string())
+    }
+
+    const OAUTH_ISSUER: (&str, &str) = ("MOMO_AGENT_PORT_OAUTH_ISSUER", "https://oort.example");
+    const DEV_ON: (&str, &str) = ("MOMO_DEV_LOGIN_OAUTH_ENABLED", "true");
+    const DEV_CONSENT: (&str, &str) = (
+        "MOMO_DEV_LOGIN_OAUTH_CONSENT_URL",
+        "https://oort.example/oauth/cli",
+    );
+    const HOSTED_ON: (&str, &str) = ("MOMO_AGENT_PORT_OAUTH_ENABLED", "true");
+    const HOSTED_CONSENT: (&str, &str) = (
+        "MOMO_AGENT_PORT_OAUTH_CONSENT_URL",
+        "https://oort.example/oauth/consent",
+    );
+    const HOSTED_CLIENTS: (&str, &str) = (
+        "MOMO_AGENT_PORT_OAUTH_CLIENTS",
+        "some-client=https://client.example/cb",
+    );
+
+    #[test]
+    fn the_oauth_server_stays_closed_unless_an_arm_is_opted_in_with_exactly_true() {
+        for spelling in ["True", "1", "yes", "TRUE", "false", " "] {
+            let config = AgentPortOauthConfig::from_lookup(|key| match key {
+                "MOMO_DEV_LOGIN_OAUTH_ENABLED" | "MOMO_AGENT_PORT_OAUTH_ENABLED" => {
+                    Some(spelling.to_string())
+                }
+                "MOMO_AGENT_PORT_OAUTH_ISSUER" => Some("https://oort.example".to_string()),
+                _ => None,
+            })
+            .expect("a closed server needs no other variable");
+            assert_eq!(config, AgentPortOauthConfig::default(), "{spelling:?}");
+            assert!(!config.dev_login_enabled() && !config.is_enabled());
+            assert_eq!(config.server_issuer(), None);
+        }
+    }
+
+    #[test]
+    fn the_developer_login_arm_opens_alone_without_opening_any_hosted_surface() {
+        let config =
+            AgentPortOauthConfig::from_lookup(oauth_lookup(&[OAUTH_ISSUER, DEV_ON, DEV_CONSENT]))
+                .expect("the dev arm needs only the shared issuer and its own consent URL");
+        assert!(config.dev_login_enabled());
+        assert_eq!(config.dev_login_issuer(), Some("https://oort.example"));
+        assert_eq!(
+            config.dev_login_consent_url(),
+            Some("https://oort.example/oauth/cli")
+        );
+        assert_eq!(
+            config.dev_login_resource().as_deref(),
+            Some("https://oort.example/v1/mcp/me")
+        );
+        assert_eq!(config.server_issuer(), Some("https://oort.example"));
+        // The hosted accessors keep their pre-existing meaning: they answer for the
+        // hosted arm only, so the dev arm cannot advertise the hosted resource.
+        assert!(!config.is_enabled());
+        assert_eq!(config.issuer(), None);
+        assert_eq!(config.consent_url(), None);
+        assert_eq!(config.resource(), None);
+        assert_eq!(config.endpoint("/v1/oauth/token"), None);
+        assert!(config.client("oort-cli").is_none());
+    }
+
+    #[test]
+    fn each_arm_demands_the_values_it_needs_and_a_missing_one_refuses_to_boot() {
+        // The dev arm without the shared issuer, or without its own consent URL.
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[DEV_ON, DEV_CONSENT])).is_err());
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[OAUTH_ISSUER, DEV_ON])).is_err());
+        // Not https, or carrying a fragment, is refused.
+        for bad in [
+            "http://oort.example/oauth/cli",
+            "https://oort.example/oauth/cli#x",
+        ] {
+            let config = AgentPortOauthConfig::from_lookup(|key| match key {
+                "MOMO_DEV_LOGIN_OAUTH_ENABLED" => Some("true".to_string()),
+                "MOMO_AGENT_PORT_OAUTH_ISSUER" => Some("https://oort.example".to_string()),
+                "MOMO_DEV_LOGIN_OAUTH_CONSENT_URL" => Some(bad.to_string()),
+                _ => None,
+            });
+            assert!(config.is_err(), "{bad}");
+        }
+        // The hosted arm still demands its consent URL and at least one client.
+        assert!(
+            AgentPortOauthConfig::from_lookup(oauth_lookup(&[OAUTH_ISSUER, HOSTED_ON])).is_err()
+        );
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn the_hosted_arm_alone_leaves_the_developer_arm_closed_and_both_can_be_open() {
+        let hosted = AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT,
+            HOSTED_CLIENTS,
+        ]))
+        .expect("hosted arm");
+        assert!(hosted.is_enabled());
+        assert!(!hosted.dev_login_enabled());
+        assert_eq!(hosted.dev_login_issuer(), None);
+        assert_eq!(hosted.dev_login_resource(), None);
+        assert_eq!(hosted.server_issuer(), Some("https://oort.example"));
+        assert_eq!(
+            hosted.resource().as_deref(),
+            Some("https://oort.example/v1/mcp/agent-port")
+        );
+
+        let both = AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT,
+            HOSTED_CLIENTS,
+            DEV_ON,
+            DEV_CONSENT,
+        ]))
+        .expect("both arms");
+        assert!(both.is_enabled() && both.dev_login_enabled());
+        // Two audiences, never one: the resources differ.
+        assert_ne!(both.resource(), both.dev_login_resource());
+    }
+
+    #[test]
+    fn the_built_in_client_id_cannot_be_registered_by_an_operator() {
+        assert!(parse_registered_oauth_clients("oort-cli=https://evil.example/cb").is_none());
+        assert!(parse_registered_oauth_clients(
+            "some-client=https://client.example/cb;oort-cli=http://127.0.0.1:24681/callback"
+        )
+        .is_none());
+        assert!(parse_registered_oauth_clients("some-client=https://client.example/cb").is_some());
+        // And through the environment grammar: the whole variable is refused.
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT,
+            (
+                "MOMO_AGENT_PORT_OAUTH_CLIENTS",
+                "oort-cli=https://evil.example/cb"
+            ),
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn the_fixture_constructors_open_exactly_the_arm_they_name() {
+        let dev = AgentPortOauthConfig::for_tests_dev_login(
+            "https://oort.example",
+            "https://oort.example/oauth/cli",
+        );
+        assert!(dev.dev_login_enabled() && !dev.is_enabled());
+        let hosted = AgentPortOauthConfig::for_tests(
+            "https://oort.example",
+            "https://oort.example/oauth/consent",
+            vec![RegisteredOauthClient {
+                client_id: "some-client".to_string(),
+                redirect_uris: vec!["https://client.example/cb".to_string()],
+            }],
+        );
+        assert!(hosted.is_enabled() && !hosted.dev_login_enabled());
+        let both = hosted.with_dev_login_for_tests("https://oort.example/oauth/cli");
+        assert!(both.is_enabled() && both.dev_login_enabled());
     }
 }

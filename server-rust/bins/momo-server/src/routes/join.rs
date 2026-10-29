@@ -15,6 +15,8 @@
 //!   → 409 join_email_unavailable                          existing account that a public
 //!                                                         code may not resume
 //!   → 429 (+ Retry-After)                                 that account's guess budget is spent
+//!   → 503 (+ Retry-After)                                 a membership change holds the lock
+//!                                                         this door stands in line for
 //! ```
 //!
 //! ## An existing account needs proof (#4625)
@@ -26,7 +28,8 @@
 //! before every other check that discusses the account, are in `momo_settings::join`;
 //! this route only translates them: [`JoinRejection::InvalidCredentials`] and
 //! [`JoinRejection::EmailUnavailable`] carry their `error.code`, and a spent budget
-//! becomes a 429 with the `Retry-After` an `ApiError` has no slot for.
+//! becomes a 429 with its `Retry-After`. A membership lock that is not free is a 503 with
+//! its own (`ApiError::busy`, #4636): the door does not wait for it.
 //!
 //! ## Why it is mounted outside the auth middleware
 //!
@@ -78,7 +81,9 @@ use momo_settings::{
 use crate::dto::{InviteCodeDto, JoinMembershipDto, JoinRequest, JoinResponse, MemberDto};
 use crate::error::ApiError;
 use crate::rate_limit::{too_many_requests, AccountGuessBudget};
-use crate::routes::auth_routes::{base_scopes, mint_and_record_session_in_tx};
+use crate::routes::auth_routes::{
+    base_scopes, mint_and_record_session_in_tx, MEMBERSHIP_BUSY_RETRY_SECONDS,
+};
 use crate::routes::shared::join_tenant_tx;
 use crate::AppState;
 
@@ -110,6 +115,10 @@ fn join_error(error: JoinError) -> ApiError {
 }
 
 fn rejection_error(rejection: JoinRejection) -> ApiError {
+    // The one refusal that needs a header: `Retry-After`, which `ApiError::busy` carries.
+    if rejection == JoinRejection::MembershipBusy {
+        return ApiError::busy(MEMBERSHIP_BUSY_RETRY_SECONDS);
+    }
     let status =
         StatusCode::from_u16(rejection.status_code()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
     // The code comes from the domain type, beside the status and the sentence, so the
@@ -259,8 +268,9 @@ pub async fn join(
     .await;
     let (outcome, access, refresh) = match joined {
         Ok(joined) => joined,
-        // A spent guess budget is the one refusal that needs a header: `ApiError` has
-        // no slot for `Retry-After`, so it is answered here, as the per-IP gate does.
+        // A spent guess budget answers with a `Retry-After` of its own (the account's
+        // window, not the lock's one second), so it is answered here, as the per-IP gate
+        // does.
         Err(JoinError::Rejected(JoinRejection::PasswordGuessLimited {
             retry_after_seconds,
         })) => return Ok(too_many_requests(retry_after_seconds)),
@@ -385,6 +395,11 @@ mod tests {
                 429,
                 "rate limit exceeded",
             ),
+            (
+                JoinRejection::MembershipBusy,
+                503,
+                "the server is busy; retry shortly",
+            ),
         ];
         for (rejection, status, message) in cases {
             let api = rejection_error(rejection);
@@ -419,9 +434,22 @@ mod tests {
             },
             JoinRejection::HandleTaken,
             JoinRejection::NoPublicChannels,
+            JoinRejection::MembershipBusy,
         ] {
             assert_eq!(rejection_error(rejection).code, None, "{rejection:?}");
         }
+    }
+
+    /// A join that would have waited for the membership lock is told when to come back:
+    /// the 503 carries `Retry-After`, like the 429 does.
+    #[test]
+    fn a_busy_membership_lock_is_a_503_that_says_when_to_retry() {
+        let busy = rejection_error(JoinRejection::MembershipBusy);
+        assert_eq!(busy.status, StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(
+            busy.retry_after_seconds,
+            Some(MEMBERSHIP_BUSY_RETRY_SECONDS)
+        );
     }
 
     /// A `410 Gone` is not a stylistic choice: expired and revoked links are

@@ -21089,3 +21089,5345 @@ async fn member_avatar_set_is_limited_to_ten_proposals_per_person_per_hour() {
     assert_eq!(status, 200, "{ok}");
     assert_eq!(staged_rows_3787(su, ws).await, 1);
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v5 U-f (#4702) — a person's decision wakes the proposer's inbox
+// ---------------------------------------------------------------------------
+//
+// The caller-visible facts: what a hosted agent reads from `oort_inbox_read`, and the
+// reference rows under it. A run reference carries only the run and its channel.
+//
+// Sabotage (each goes red on its own):
+//  * delete `wake_proposer_in_tx` from the approve arm   -> `…leaves_one_agent_run_reference…`
+//  * delete it from `reject_run`                          -> the reject half of the same test
+//  * give it another agent's connection (a fan-out)       -> the second agent's empty inbox
+//  * drop the `ended` guard / run it for expiry           -> the expiry test
+//  * delete the active-connection read                    -> `…no_live_hosted_connection…`
+
+/// `(run, channel)` of every `agent_run` reference one hosted connection's inbox holds,
+/// oldest first.
+async fn agent_run_references(su: &PgPool, workspace: Uuid, connection: Uuid) -> Vec<(Uuid, Uuid)> {
+    sqlx::query_as(
+        "SELECT source_run_id, source_channel_id FROM hosted_agent_inbox_event \
+          WHERE workspace_id=$1 AND connection_id=$2 AND event_kind='agent_run' \
+          ORDER BY inbox_seq",
+    )
+    .bind(workspace)
+    .bind(connection)
+    .fetch_all(su)
+    .await
+    .expect("agent_run references")
+}
+
+async fn run_of_approval(su: &PgPool, approval: Uuid) -> Uuid {
+    sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .expect("the approval's run")
+}
+
+/// Turn the fixture's second hosted agent into a **full** inbox reader of the very
+/// channel the first one proposes in, so that a reference written to the wrong
+/// connection would land somewhere that could receive it. Returns its connection.
+async fn make_second_hosted_agent_an_inbox_reader(su: &PgPool, fixture: &Fixture) -> Uuid {
+    let connection: Uuid = sqlx::query_scalar(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connect_only_agent)
+    .fetch_one(su)
+    .await
+    .expect("the second agent's connection");
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET approved_scopes = ARRAY['agent:port:connect','agent:inbox:read']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(connection)
+    .execute(su)
+    .await
+    .expect("approve the inbox scope");
+    sqlx::query(
+        "UPDATE token SET scopes = ARRAY['agent:port:connect','agent:inbox:read']::text[] \
+          WHERE workspace_id=$1 AND actor_member_id=$2 AND kind='agent_bearer'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.connect_only_agent)
+    .execute(su)
+    .await
+    .expect("grant the inbox scope on the token");
+    connection
+}
+
+/// What `oort_inbox_read` shows an agent: the `channelId` of each `agent_run` event.
+async fn inbox_agent_run_channels(
+    client: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+) -> Vec<String> {
+    let (status, read) = call(
+        client,
+        base,
+        bearer,
+        "oort_inbox_read",
+        json!({"limit": 100}),
+    )
+    .await;
+    assert_eq!(status, 200, "{read}");
+    structured(&read)["events"]
+        .as_array()
+        .expect("events")
+        .iter()
+        .filter(|event| event["kind"] == "agent_run")
+        .map(|event| event["channelId"].as_str().expect("channelId").to_string())
+        .collect()
+}
+
+/// The workspace owner approves; the answer is the receipt.
+async fn approve(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval: Uuid,
+) -> (u16, Value) {
+    let (status, _headers, body) = decide_as(
+        client,
+        base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    (status, body)
+}
+
+fn unique_channel_name() -> String {
+    format!("plan-{}", &Uuid::new_v4().simple().to_string()[..8])
+}
+
+/// Approve and reject each leave **one** `agent_run` reference for the agent that
+/// proposed — a proposal a person asked for is the same case — and for nobody else; a
+/// replay and a second tap leave none more. What the agent reads from its inbox says so.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_on_a_proposal_leaves_one_agent_run_reference_for_its_proposer_only() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = make_second_hosted_agent_an_inbox_reader(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let mine = fixture.hosted_connection;
+
+    // A proposal alone tells nobody. `channel.create` takes the connection row
+    // `FOR UPDATE` in its executor, so the approval below also proves the reference
+    // can follow that lock inside one transaction.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": unique_channel_name()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approved_card = proposed_approval_3706(&proposed);
+    let approved_run = run_of_approval(&su, approved_card).await;
+    assert!(agent_run_references(&su, ws, mine).await.is_empty());
+
+    let decision = Uuid::new_v4();
+    let (status, _h, approved) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approved_card,
+        true,
+        decision,
+    )
+    .await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        agent_run_references(&su, ws, mine).await,
+        vec![(approved_run, fixture.channel)],
+        "an approval tells the proposer, once, which room's run changed"
+    );
+    assert!(
+        agent_run_references(&su, ws, other).await.is_empty(),
+        "another hosted agent that covers the same room is not told"
+    );
+
+    // The same tap again (a retry) and a different tap on a settled card add nothing.
+    let (status, _h, replayed) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approved_card,
+        true,
+        decision,
+    )
+    .await;
+    assert_eq!(status, 200, "{replayed}");
+    let (status, _h, again) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        approved_card,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(agent_run_references(&su, ws, mine).await.len(), 1);
+
+    // What the agent itself sees.
+    assert_eq!(
+        inbox_agent_run_channels(&client, &base, &fixture.hosted_bearer).await,
+        vec![fixture.channel.to_string()]
+    );
+    assert!(
+        inbox_agent_run_channels(&client, &base, &fixture.connect_only_bearer)
+            .await
+            .is_empty()
+    );
+
+    // A rejection tells it too — on a proposal a person asked for, which this is.
+    let rejected_card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let rejected_run = run_of_approval(&su, rejected_card).await;
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        rejected_card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(
+        agent_run_references(&su, ws, mine).await,
+        vec![
+            (approved_run, fixture.channel),
+            (rejected_run, fixture.channel)
+        ]
+    );
+    assert!(agent_run_references(&su, ws, other).await.is_empty());
+    assert_eq!(
+        inbox_agent_run_channels(&client, &base, &fixture.hosted_bearer)
+            .await
+            .len(),
+        2
+    );
+}
+
+/// A person stopping the parked run is the third way a proposal ends, and it leaves one
+/// reference as well; stopping it again changes nothing.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_person_cancelling_a_parked_run_leaves_one_agent_run_reference() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let other = make_second_hosted_agent_an_inbox_reader(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let run = run_of_approval(&su, card).await;
+    assert!(agent_run_references(&su, ws, fixture.hosted_connection)
+        .await
+        .is_empty());
+
+    for _ in 0..2 {
+        let status = client
+            .post(format!("{base}/v1/workspaces/{ws}/agent-runs/{run}/cancel"))
+            .bearer_auth(&fixture.human_jwt)
+            .send()
+            .await
+            .expect("cancel responds")
+            .status()
+            .as_u16();
+        assert_eq!(status, 200);
+        assert_eq!(
+            agent_run_references(&su, ws, fixture.hosted_connection).await,
+            vec![(run, fixture.channel)],
+            "one reference whether the stop is the first or a repeat"
+        );
+    }
+    assert!(agent_run_references(&su, ws, other).await.is_empty());
+}
+
+/// An expiry is not a person's word, so it tells nobody — whether a late tap settles the
+/// card or the notifier's sweep does.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_expired_proposal_leaves_no_agent_run_reference_by_late_tap_or_by_sweep() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let overdue = |approval: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+                .bind(approval)
+                .execute(&su)
+                .await
+                .expect("make the card overdue");
+        }
+    };
+
+    // a late tap
+    let tapped = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    overdue(tapped).await;
+    let (status, _h, settled) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        tapped,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 409, "{settled}");
+    assert_eq!(settled["status"], json!("expired"));
+
+    // the sweep
+    let swept = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    overdue(swept).await;
+    let notifier = momo_notifier_pool().await;
+    let stats = momo_notifier::approval_sweep::sweep_expired_approvals(&notifier, 50)
+        .await
+        .expect("the sweep runs");
+    assert!(stats.expired >= 1, "{stats:?}");
+    for card in [tapped, swept] {
+        let status: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+            .bind(card)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+        assert_eq!(status, "expired");
+    }
+
+    assert!(
+        agent_run_references(&su, ws, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "neither expiry path writes the proposer's inbox"
+    );
+    assert!(
+        inbox_agent_run_channels(&client, &base, &fixture.hosted_bearer)
+            .await
+            .is_empty()
+    );
+}
+
+/// Where the proposer has no live hosted connection covering the run's room, a decision
+/// tells nobody and nothing else changes: the team AI (a managed agent), a hosted agent
+/// whose connection is no longer proved, and one whose connection no longer covers the
+/// room.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_writes_no_agent_run_reference_without_a_live_covering_hosted_connection() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let worker = momo_worker_pool_3900().await;
+    let fixture = seed(&su).await;
+    let other = make_second_hosted_agent_an_inbox_reader(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let nobody_was_told = |label: &'static str| {
+        let su = su.clone();
+        let mine = fixture.hosted_connection;
+        async move {
+            assert!(
+                agent_run_references(&su, ws, mine).await.is_empty(),
+                "{label}: the hosted proposer's inbox"
+            );
+            assert!(
+                agent_run_references(&su, ws, other).await.is_empty(),
+                "{label}: the other hosted agent's inbox"
+            );
+        }
+    };
+
+    // a managed agent (the team AI) — approve, then reject. The second card asks for the
+    // opposite value: a switch already at the asked value is no card at all.
+    let helper = enable_helper_3900(&su, &fixture).await;
+    for (approve, enabled) in [(true, false), (false, true)] {
+        let proposed = helper_propose_3900(
+            &su,
+            &worker,
+            &fixture,
+            helper,
+            "workspace.unfurl.update",
+            json!({"enabled": enabled}),
+        )
+        .await
+        .unwrap_or_else(|refusal| panic!("{refusal:?}"));
+        let (status, _h, decided) = decide_as(
+            &client,
+            &base,
+            ws,
+            &fixture.human_jwt,
+            proposed.approval_id,
+            approve,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 200, "{decided}");
+    }
+    nobody_was_told("a managed proposer").await;
+
+    // a hosted proposer whose connection is no longer proved when the card is tapped
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='detected', proved_at=NULL, proved_by=NULL \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, decided) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    nobody_was_told("a connection that is not live").await;
+
+    // …and one that is live but no longer covers the room the card stands in
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET status='active', proved_at=now(), proved_by=$3 \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = ARRAY[]::uuid[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, _h, decided) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{decided}");
+    nobody_was_told("a connection that no longer covers the room").await;
+}
+
+/// **The lock order, measured as database state.** A decision takes the proposer's hosted
+/// connection **before** the channel's sequence counter: the hosted canon locks the
+/// connection first, and some executors already hold it `FOR UPDATE` when they reach the
+/// outcome line, so a decision that took the channel first would deadlock with one of those
+/// on a DM carrying two cards.
+///
+/// Another transaction holds the connection row the way such a decision does; the tap then
+/// stops at the reference write, and **while it is stopped there** the channel's counter row
+/// must still be free (`FOR UPDATE NOWAIT` from a third connection). Written the other way
+/// round — reference after the outcome line — the tap would be holding the counter, and this
+/// goes red. Both arms: approve and reject.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_waits_for_the_proposers_connection_before_it_takes_the_channels_counter() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    for approve in [true, false] {
+        let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+
+        let mut holder = su.begin().await.expect("holder transaction");
+        sqlx::query("SELECT 1 FROM hosted_agent_connection WHERE id=$1 FOR UPDATE")
+            .bind(fixture.hosted_connection)
+            .fetch_one(&mut *holder)
+            .await
+            .expect("hold the connection row");
+        let holder_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+            .fetch_one(&mut *holder)
+            .await
+            .expect("the holder's backend");
+
+        let decision = tokio::spawn({
+            let client = client.clone();
+            let base = base.clone();
+            let jwt = fixture.human_jwt.clone();
+            let workspace = fixture.workspace;
+            async move {
+                decide_as(
+                    &client,
+                    &base,
+                    workspace,
+                    &jwt,
+                    card,
+                    approve,
+                    Uuid::new_v4(),
+                )
+                .await
+            }
+        });
+
+        // Wait for a condition, not for a time: some backend is parked behind the holder —
+        // the only thing the holder holds is the connection row.
+        let mut parked = false;
+        for _ in 0..400 {
+            let waiting: i64 = sqlx::query_scalar(
+                "SELECT count(*) FROM pg_stat_activity \
+                  WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))",
+            )
+            .bind(holder_pid)
+            .fetch_one(&su)
+            .await
+            .expect("read pg_stat_activity");
+            if waiting > 0 {
+                parked = true;
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(
+            parked,
+            "approve={approve}: the decision never reached the reference write while the \
+             connection row was held"
+        );
+
+        let mut probe = su.begin().await.expect("probe transaction");
+        let counter =
+            sqlx::query("SELECT 1 FROM channel_seq WHERE channel_id=$1 FOR UPDATE NOWAIT")
+                .bind(fixture.channel)
+                .fetch_optional(&mut *probe)
+                .await;
+        probe.rollback().await.expect("release the probe");
+        assert!(
+            counter.is_ok(),
+            "approve={approve}: the decision waits on the connection while holding the \
+             channel's counter — the deadlock order: {counter:?}"
+        );
+
+        holder.commit().await.expect("release the connection row");
+        let (status, _h, body) = decision.await.expect("the decision task");
+        assert_eq!(status, 200, "approve={approve}: {body}");
+    }
+}
+
+/// A tap the server **refuses** tells nobody: `with_tenant_tx` commits a refusal that is answered
+/// as a value, so a reference written before the gate or the executor spoke would stay. A plain
+/// member's tap (`role_required`) and an admin's tap on a card that went stale (the channel name
+/// was taken meanwhile) both leave the inbox empty; the decision that then goes through leaves
+/// exactly one.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_refused_tap_leaves_no_agent_run_reference_and_the_decision_after_it_leaves_one() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+
+    // A name somebody already took: the proposal is drawn, the admin's tap is refused as stale.
+    let taken = unique_channel_name();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, created_by) \
+         VALUES($1,$2,'private',$3,$4)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(ws)
+    .bind(&taken)
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": taken}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let card = proposed_approval_3706(&proposed);
+
+    let (status, _h, refused) =
+        decide_as(&client, &base, ws, &plain_jwt, card, true, Uuid::new_v4()).await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(
+        agent_run_references(&su, ws, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "a tap refused for want of a role tells nobody"
+    );
+
+    let (status, stale) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 409, "{stale}");
+    assert_eq!(approval_status_3708(&su, card).await, "pending");
+    assert!(
+        agent_run_references(&su, ws, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "a tap refused as stale tells nobody either"
+    );
+
+    // The decision that does go through (a rejection of the stale card) tells it, once.
+    let run = run_of_approval(&su, card).await;
+    let (status, _h, rejected) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        card,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(
+        agent_run_references(&su, ws, fixture.hosted_connection).await,
+        vec![(run, fixture.channel)]
+    );
+}
+
+/// **The reference's lock order against the message spine, measured as an outcome.** The tap
+/// takes the proposer's connection and inbox counter *before* the channel's counter; the spine
+/// takes the channel first and fans out to the same connection after. Here the spine holds the
+/// channel's counter and then asks for the inbox counter the tap holds — a cycle — and
+/// PostgreSQL aborts the one that has waited longest, the person's tap. The tap must be run again
+/// and succeed (once, one reference, 200), not answer 500.
+///
+/// Timing-shaped: the spine's second statement follows the tap's park within a few tens of
+/// milliseconds, well inside `deadlock_timeout` (1 s), so the tap — the longer waiter — is the one
+/// PostgreSQL aborts. Sabotage: delete the retry in `decide` and this answers 500.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_succeeds() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let card = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let run = run_of_approval(&su, card).await;
+    // The inbox counter exists already (any earlier fan-out creates it): the spine's next step is
+    // a plain lock of that row, as it is for every message after the first.
+    sqlx::query(
+        "INSERT INTO hosted_agent_inbox_counter(workspace_id, agent_member_id, connection_id) \
+         VALUES($1,$2,$3) ON CONFLICT DO NOTHING",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // The spine's transaction holds the channel's counter, as the insert of a message does.
+    let mut spine = su.begin().await.expect("the spine's transaction");
+    sqlx::query("SELECT 1 FROM channel_seq WHERE channel_id=$1 FOR UPDATE")
+        .bind(fixture.channel)
+        .fetch_one(&mut *spine)
+        .await
+        .expect("hold the channel counter");
+    let spine_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *spine)
+        .await
+        .expect("the spine's backend");
+
+    let decision = tokio::spawn({
+        let client = client.clone();
+        let base = base.clone();
+        let jwt = fixture.human_jwt.clone();
+        async move { decide_as(&client, &base, ws, &jwt, card, true, Uuid::new_v4()).await }
+    });
+
+    // Wait for a condition: the tap has written its reference and is parked behind the spine,
+    // waiting for the channel's counter for its outcome line.
+    let mut parked = false;
+    for _ in 0..400 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))",
+        )
+        .bind(spine_pid)
+        .fetch_one(&su)
+        .await
+        .expect("read pg_stat_activity");
+        if waiting > 0 {
+            parked = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        parked,
+        "the tap never reached its outcome line behind the spine"
+    );
+
+    // The spine fans the message out to the same connection: it wants the inbox counter the tap
+    // holds. PostgreSQL breaks the cycle by aborting the tap, which has waited longest.
+    let fan_out = sqlx::query(
+        "SELECT last_seq FROM hosted_agent_inbox_counter WHERE connection_id=$1 FOR UPDATE",
+    )
+    .bind(fixture.hosted_connection)
+    .fetch_one(&mut *spine)
+    .await;
+    assert!(
+        fan_out.is_ok(),
+        "PostgreSQL aborted the spine, not the tap — the tap had waited longest, so rerun this: {fan_out:?}"
+    );
+    spine.commit().await.expect("the spine commits its message");
+
+    let (status, _h, body) = decision.await.expect("the decision task");
+    assert_eq!(
+        status, 200,
+        "the tap was the deadlock's victim and must have been run again: {body}"
+    );
+    assert_eq!(
+        agent_run_references(&su, ws, fixture.hosted_connection).await,
+        vec![(run, fixture.channel)],
+        "the retry wrote the proposer's reference once"
+    );
+    assert_eq!(approval_status_3708(&su, card).await, "approved");
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v5 U-e (#4703) — message.pin / message.unpin
+// ---------------------------------------------------------------------------
+//
+// Sabotage (each goes red on its own):
+//  * drop `bodySha256` from the pins                         -> the edit/delete test
+//  * write the pin with a direct INSERT, not `set_pin_in_tx`  -> the full-channel test
+//  * drop the `m.type = 'text'` condition                     -> the refusal table (the card line)
+//  * drop the run-channel join                                -> the refusal table (the other room)
+//  * drop `message.pin|unpin` from `opens_in_app`             -> `push_conformance_pg` / `momo-agent` tables
+
+/// One plain text message the fixture's human writes in `channel`; its id.
+async fn human_says(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    channel: Uuid,
+    body: &str,
+) -> Uuid {
+    let sent: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{channel}/messages",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": body}))
+        .send()
+        .await
+        .expect("message send")
+        .json()
+        .await
+        .expect("message body");
+    Uuid::parse_str(
+        sent["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no id in {sent}")),
+    )
+    .expect("a message id")
+}
+
+/// A text message written through the raw spine: nothing reads it as a mention, so a message in a
+/// DM with an agent raises no job for it (a message sent over REST into such a DM does — and the
+/// agent's claim would then take that job instead of the one a test means to claim).
+async fn raw_says(su: &PgPool, fixture: &Fixture, channel: Uuid, body: &str) -> Uuid {
+    let (workspace, human, body) = (fixture.workspace, fixture.human, body.to_string());
+    momo_db::with_tenant_tx(su, workspace, move |conn| {
+        let body = body.clone();
+        Box::pin(async move {
+            let sent = momo_messaging::send_message_in_tx(
+                conn,
+                workspace,
+                momo_messaging::NewMessage::text(channel, human, body),
+            )
+            .await?;
+            Ok::<_, momo_db::DbError>(sent.message.id)
+        })
+    })
+    .await
+    .expect("a raw text message")
+}
+
+/// `(message, pinned_by)` of the channel's pins, oldest first.
+async fn pins_in(su: &PgPool, channel: Uuid) -> Vec<(Uuid, Uuid)> {
+    sqlx::query_as(
+        "SELECT message_id, pinned_by FROM message_pin WHERE channel_id=$1 ORDER BY pinned_at, id",
+    )
+    .bind(channel)
+    .fetch_all(su)
+    .await
+    .expect("the channel's pins")
+}
+
+async fn message_props(su: &PgPool, message: Uuid) -> Value {
+    sqlx::query_scalar("SELECT props FROM message WHERE id=$1")
+        .bind(message)
+        .fetch_one(su)
+        .await
+        .expect("message props")
+}
+
+fn card_row(props: &Value, label: &str) -> Option<String> {
+    props["action"]["rows"]
+        .as_array()?
+        .iter()
+        .find(|row| row["label"] == label)
+        .and_then(|row| row["value"].as_str().map(str::to_string))
+}
+
+async fn pin_broadcasts(su: &PgPool, workspace: Uuid, event: &str, message: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
+           AND payload->'data'->>'type' = $2 \
+           AND payload->'data'->'payload'->>'message_id' = $3",
+    )
+    .bind(workspace)
+    .bind(event)
+    .bind(message.to_string())
+    .fetch_one(su)
+    .await
+    .expect("count pin broadcasts")
+}
+
+async fn audit_details_of(su: &PgPool, workspace: Uuid, action: &str) -> Vec<Value> {
+    sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action=$2 ORDER BY created_at",
+    )
+    .bind(workspace)
+    .bind(action)
+    .fetch_all(su)
+    .await
+    .expect("audit details")
+}
+
+/// Propose `action_id` for `message` (the human mentions the agent, the agent claims the job
+/// and proposes), answering the raw tool result.
+async fn propose_pin(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+    action_id: &str,
+    message: Uuid,
+) -> (u16, Value) {
+    try_propose_action_3706(
+        client,
+        base,
+        su,
+        fixture,
+        action_id,
+        json!({"messageId": message.to_string()}),
+    )
+    .await
+}
+
+/// **message.pin, end to end (증보 v5 U-e).** The card is the server's reading of the stored
+/// message (channel, author, length, the pin count), a plain member's tap is refused, and an
+/// admin's tap pins it **as themselves** through the person's own function: one `message_pin` row
+/// by the approver, one `message.pinned` broadcast, the same audit row a hand pin writes plus
+/// `via_agent` and `approval_id` — and not one word of the message in any audit row. Pinning
+/// again is a success that changes nothing; `message.unpin` mirrors it and says who pinned.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_approved_pin_is_the_approvers_own_pin_and_no_audit_row_holds_a_word_of_the_message() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let ws = fixture.workspace;
+    let secret_word = format!("달무리구호{}", &Uuid::new_v4().simple().to_string()[..12]);
+    let text = format!("새 분기 일정은 마지막 금요일에 확정돼요. {secret_word}");
+    let said = human_says(&client, &base, &fixture, fixture.channel, &text).await;
+
+    // ---- the proposal: a card drawn from the stored message ---------------------------
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", said).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+    let props = message_props(&su, card).await;
+    assert_eq!(props["action"]["id"], json!("message.pin"));
+    assert_eq!(props["action"]["required_role"], json!("admin"));
+    assert_eq!(
+        card_row(&props, "채널").as_deref(),
+        Some(format!("#{}", fixture_channel_name(&su, fixture.channel).await).as_str())
+    );
+    assert!(card_row(&props, "쓴 사람").is_some_and(|who| who.contains("Tools Human")));
+    assert_eq!(
+        card_row(&props, "글자 수").as_deref(),
+        Some(format!("{}자", text.chars().count()).as_str())
+    );
+    assert_eq!(card_row(&props, "지금 고정된 수").as_deref(), Some("0/100"));
+    assert!(
+        card_row(&props, "전문").is_none(),
+        "a short message needs no 「read it whole」 row"
+    );
+    assert_eq!(props["action"]["preview"]["kind"], json!("message"));
+    assert_eq!(
+        props["action"]["preview"]["messageId"],
+        json!(said.to_string())
+    );
+    assert_eq!(
+        props["action"]["preview"]["totalChars"],
+        json!(text.chars().count())
+    );
+    let stored: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        stored["action"]["args"],
+        json!({"messageId": said.to_string()})
+    );
+    assert_eq!(stored["action"]["pins"]["message"], json!(said.to_string()));
+    assert_eq!(
+        stored["action"]["pins"]["channel"],
+        json!(fixture.channel.to_string())
+    );
+    assert_eq!(
+        stored["action"]["pins"]["bodySha256"]
+            .as_str()
+            .map(str::len),
+        Some(64)
+    );
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+
+    // ---- a plain member's tap pins nothing ---------------------------------------------
+    let (status, _h, refused) = decide_as(
+        &client,
+        &base,
+        ws,
+        &plain_jwt,
+        approval,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(status, 403, "{refused}");
+    assert_eq!(refused["status"], "role_required");
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+
+    // ---- the admin's tap: the approver's own pin ----------------------------------------
+    let jobs_before = agent_job_count(&su, ws, fixture.hosted_agent).await;
+    let (status, approved) = approve(&client, &base, &fixture, approval).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(approved["result"]["actionId"], json!("message.pin"));
+    assert_eq!(
+        approved["result"]["ref"],
+        json!({"type": "message", "id": said.to_string()})
+    );
+    assert_eq!(
+        pins_in(&su, fixture.channel).await,
+        vec![(said, fixture.human)],
+        "pinned_by is the APPROVER, the agent that proposed it pins nothing"
+    );
+    assert_eq!(pin_broadcasts(&su, ws, "message.pinned", said).await, 1);
+    let pinned_rows = audit_details_of(&su, ws, "message.pinned").await;
+    assert_eq!(pinned_rows.len(), 1, "{pinned_rows:?}");
+    assert_eq!(
+        pinned_rows[0]["via_agent"],
+        json!(fixture.hosted_agent.to_string())
+    );
+    assert_eq!(pinned_rows[0]["approval_id"], json!(approval.to_string()));
+    assert_eq!(
+        pinned_rows[0]["channel_id"],
+        json!(fixture.channel.to_string())
+    );
+    let approved_rows = audit_details_of(&su, ws, "action.approved").await;
+    assert_eq!(approved_rows.len(), 1);
+    assert_eq!(approved_rows[0]["action_id"], json!("message.pin"));
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND detail::text LIKE $2",
+    )
+    .bind(ws)
+    .bind(format!("%{secret_word}%"))
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "no audit row holds a word of the message");
+    let line: (String, Value) = sqlx::query_as(
+        "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
+           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(ws)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        line.0.contains(&said.to_string()) && line.0.contains("고정했어요"),
+        "{}",
+        line.0
+    );
+    assert_eq!(
+        line.1["momo.action_result"]["ref"]["type"],
+        json!("message")
+    );
+    assert_eq!(
+        agent_job_count(&su, ws, fixture.hosted_agent).await,
+        jobs_before,
+        "an executed action leaves no job behind"
+    );
+
+    // ---- pinning what is already pinned succeeds and changes nothing ---------------------
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", said).await;
+    assert_eq!(status, 200, "{proposed}");
+    let again = proposed_approval_3706(&proposed);
+    let props = message_props(
+        &su,
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(card_row(&props, "지금 고정된 수").as_deref(), Some("1/100"));
+    let (status, approved) = approve(&client, &base, &fixture, again).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 1);
+    assert_eq!(pin_broadcasts(&su, ws, "message.pinned", said).await, 1);
+    assert_eq!(
+        audit_details_of(&su, ws, "message.pinned").await.len(),
+        1,
+        "a pin that changed nothing writes no pin audit row"
+    );
+    assert_eq!(
+        audit_details_of(&su, ws, "action.approved").await.len(),
+        2,
+        "…but the approval itself is recorded"
+    );
+
+    // ---- message.unpin mirrors it, and says who pinned it --------------------------------
+    let (status, proposed) =
+        propose_pin(&client, &base, &su, &fixture, "message.unpin", said).await;
+    assert_eq!(status, 200, "{proposed}");
+    let unpin = proposed_approval_3706(&proposed);
+    let props = message_props(
+        &su,
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert!(card_row(&props, "고정한 사람").is_some_and(|who| who.contains("Tools Human")));
+    assert!(card_row(&props, "고정한 시각").is_some());
+    let (status, approved) = approve(&client, &base, &fixture, unpin).await;
+    assert_eq!(status, 200, "{approved}");
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+    assert_eq!(pin_broadcasts(&su, ws, "message.unpinned", said).await, 1);
+    let unpinned_rows = audit_details_of(&su, ws, "message.unpinned").await;
+    assert_eq!(unpinned_rows.len(), 1);
+    assert_eq!(unpinned_rows[0]["approval_id"], json!(unpin.to_string()));
+}
+
+/// **What may be pinned: a live text message of the conversation the run was raised in.** Every
+/// other target is the same refusal, and none of them raises a card: a message that does not
+/// exist, a deleted one, an approval card, a message of another room — **even one the agent's
+/// connection covers** (the card would carry that room's words into this one) — a room the
+/// connection does not cover, a DM, an archived channel, an `unpin` of a message that is not
+/// pinned, and every malformed argument.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_pin_of_anything_but_a_live_text_message_of_this_conversation_is_refused_alike() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let ok = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "여기 있는 글이에요",
+    )
+    .await;
+    // A second room the connection covers, with the agent in it.
+    let (covered, _name) =
+        seed_channel_3707(&su, &fixture, "public", &[(fixture.hosted_agent, "member")]).await;
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_channel_ids = approved_channel_ids || $2 \
+          WHERE id=$1",
+    )
+    .bind(fixture.hosted_connection)
+    .bind(covered)
+    .execute(&su)
+    .await
+    .unwrap();
+    let elsewhere = human_says(&client, &base, &fixture, covered, "다른 방의 글이에요").await;
+    // A room the agent sits in that its connection does NOT cover, and a DM it is in.
+    let uncovered = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.private_channel,
+        "승인 밖의 글",
+    )
+    .await;
+    let dm = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO channel(id, workspace_id, kind, name, dm_key, created_by) \
+         VALUES($1,$2,'dm',$3,$4,$5)",
+    )
+    .bind(dm)
+    .bind(ws)
+    .bind(format!("dm-{}", &dm.simple().to_string()[..10]))
+    .bind(dm.to_string())
+    .bind(fixture.human)
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)")
+        .bind(dm)
+        .bind(ws)
+        .execute(&su)
+        .await
+        .unwrap();
+    for member in [fixture.human, fixture.hosted_agent] {
+        sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+            .bind(ws)
+            .bind(dm)
+            .bind(member)
+            .execute(&su)
+            .await
+            .unwrap();
+    }
+    let in_dm = raw_says(&su, &fixture, dm, "둘만의 글").await;
+    let deleted = human_says(&client, &base, &fixture, fixture.channel, "지울 글").await;
+    let status = client
+        .delete(format!("{base}/v1/workspaces/{ws}/messages/{deleted}"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("delete responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+
+    // An approval card is a message of this very channel that is not plain text: the
+    // control proposal raises one, and it must not be pinnable.
+    let (status, control) = propose_pin(&client, &base, &su, &fixture, "message.pin", ok).await;
+    assert_eq!(status, 200, "{control}");
+    let card_line =
+        Uuid::parse_str(structured(&control)["cardMessageId"].as_str().unwrap()).unwrap();
+
+    let approvals_before = approval_count_3900(&su, ws).await;
+    let cards_before: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='approval_request'",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let mut answers = Vec::new();
+    for (label, action, args) in [
+        (
+            "no such message",
+            "message.pin",
+            json!({"messageId": Uuid::new_v4().to_string()}),
+        ),
+        (
+            "a deleted message",
+            "message.pin",
+            json!({"messageId": deleted.to_string()}),
+        ),
+        (
+            "an approval card",
+            "message.pin",
+            json!({"messageId": card_line.to_string()}),
+        ),
+        (
+            "another room the connection covers",
+            "message.pin",
+            json!({"messageId": elsewhere.to_string()}),
+        ),
+        (
+            "a room the connection does not cover",
+            "message.pin",
+            json!({"messageId": uncovered.to_string()}),
+        ),
+        (
+            "a DM",
+            "message.pin",
+            json!({"messageId": in_dm.to_string()}),
+        ),
+        (
+            "unpin of a message that is not pinned",
+            "message.unpin",
+            json!({"messageId": ok.to_string()}),
+        ),
+    ] {
+        let (status, refused) =
+            try_propose_action_3706(&client, &base, &su, &fixture, action, args).await;
+        answers.push((label, status, refused["error"].clone()));
+    }
+    for (label, status, error) in &answers {
+        assert_eq!(*status, 400, "{label}: {error}");
+        assert_eq!(
+            error, &answers[0].2,
+            "{label}: every unresolvable target is the same answer"
+        );
+    }
+    for (label, args) in [
+        (
+            "an id that is not an id",
+            json!({"messageId": "not-a-uuid"}),
+        ),
+        ("no id", json!({})),
+        (
+            "a channel beside the id",
+            json!({"messageId": ok.to_string(), "channel": "x"}),
+        ),
+        (
+            "text beside the id",
+            json!({"messageId": ok.to_string(), "body": "hi"}),
+        ),
+        ("an id that is a number", json!({"messageId": 7})),
+    ] {
+        let (status, refused) =
+            try_propose_action_3706(&client, &base, &su, &fixture, "message.pin", args).await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    assert_eq!(
+        approval_count_3900(&su, ws).await,
+        approvals_before,
+        "no refused proposal left an approval"
+    );
+    let cards_after: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='approval_request'",
+    )
+    .bind(ws)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cards_after, cards_before, "and no card was drawn");
+
+    // The channel the run stands in may be archived: nothing in it can be pinned then.
+    let handle_name = hosted_handle(&su, fixture.hosted_agent).await;
+    client
+        .post(format!(
+            "{base}/v1/workspaces/{ws}/channels/{}/messages",
+            fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": format!("@{handle_name} 하나 더")}))
+        .send()
+        .await
+        .expect("mention");
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string();
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE id=$1")
+        .bind(fixture.channel)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "message.pin",
+               "args": {"messageId": ok.to_string()}}),
+    )
+    .await;
+    assert_eq!(
+        status, 400,
+        "an archived channel's message is not pinnable: {refused}"
+    );
+    assert_eq!(
+        refused["error"], answers[0].2,
+        "the same answer as every other refusal"
+    );
+}
+
+/// **The pin holds what the approver read.** The card pins the message, its channel and a hash of
+/// its words: a message **edited or deleted** after the card was drawn makes the tap
+/// `action_args_invalid` — the approval stays pending and nothing is pinned — and an unchanged one
+/// pins.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_message_edited_or_deleted_after_its_card_was_drawn_cannot_be_approved() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let edited = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "처음 쓴 글이에요",
+    )
+    .await;
+    let removed = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "곧 지울 글이에요",
+    )
+    .await;
+    let kept = human_says(
+        &client,
+        &base,
+        &fixture,
+        fixture.channel,
+        "그대로 둔 글이에요",
+    )
+    .await;
+
+    let (status, proposed) =
+        propose_pin(&client, &base, &su, &fixture, "message.pin", edited).await;
+    assert_eq!(status, 200, "{proposed}");
+    let edited_card = proposed_approval_3706(&proposed);
+    let (status, proposed) =
+        propose_pin(&client, &base, &su, &fixture, "message.pin", removed).await;
+    assert_eq!(status, 200, "{proposed}");
+    let removed_card = proposed_approval_3706(&proposed);
+
+    // The author rewrites one and deletes the other after the cards were drawn.
+    let status = client
+        .patch(format!("{base}/v1/workspaces/{ws}/messages/{edited}"))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({"body": "전혀 다른 내용으로 고쳤어요"}))
+        .send()
+        .await
+        .expect("edit responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+    let status = client
+        .delete(format!("{base}/v1/workspaces/{ws}/messages/{removed}"))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("delete responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+
+    for (label, card) in [("edited", edited_card), ("deleted", removed_card)] {
+        let (status, refused) = approve(&client, &base, &fixture, card).await;
+        assert_eq!(status, 409, "{label}: {refused}");
+        assert_eq!(refused["status"], "action_args_invalid", "{label}");
+        assert_eq!(
+            approval_status_3708(&su, card).await,
+            "pending",
+            "{label}: the tap spent nothing"
+        );
+    }
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+
+    // An unchanged message still pins.
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", kept).await;
+    assert_eq!(status, 200, "{proposed}");
+    let (status, approved) =
+        approve(&client, &base, &fixture, proposed_approval_3706(&proposed)).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        pins_in(&su, fixture.channel).await,
+        vec![(kept, fixture.human)]
+    );
+}
+
+/// **The person's own limits are the agent's.** A full channel (100 pins) refuses the tap with
+/// `action_args_invalid` and the approval stays pending — it was not spent — and the very same
+/// card is approvable the moment a slot frees. A long message's card states its real length and
+/// where to read it whole.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_full_channel_refuses_the_tap_without_spending_the_approval_and_a_long_card_says_so() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    // A hundred pins, made the way a person makes them.
+    let (channel, human) = (fixture.channel, fixture.human);
+    let pinned_ids = momo_db::with_tenant_tx(&su, ws, move |conn| {
+        Box::pin(async move {
+            let mut ids = Vec::new();
+            for index in 0..momo_messaging::CHANNEL_PIN_LIMIT {
+                let sent = momo_messaging::send_message_in_tx(
+                    conn,
+                    ws,
+                    momo_messaging::NewMessage::text(channel, human, format!("고정 {index}")),
+                )
+                .await?;
+                momo_messaging::set_pin_in_tx(
+                    conn,
+                    ws,
+                    sent.message.id,
+                    human,
+                    momo_messaging::PinAction::Pinned,
+                )
+                .await?
+                .expect("a member may pin up to the cap");
+                ids.push(sent.message.id);
+            }
+            Ok::<_, momo_db::DbError>(ids)
+        })
+    })
+    .await
+    .expect("fill the channel");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 100);
+
+    let long_text = "가".repeat(5_000);
+    let long = human_says(&client, &base, &fixture, fixture.channel, &long_text).await;
+    let (status, proposed) = propose_pin(&client, &base, &su, &fixture, "message.pin", long).await;
+    assert_eq!(
+        status, 200,
+        "a card for a full channel may still be drawn: {proposed}"
+    );
+    let card = proposed_approval_3706(&proposed);
+    let props = message_props(
+        &su,
+        Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap(),
+    )
+    .await;
+    assert_eq!(
+        card_row(&props, "지금 고정된 수").as_deref(),
+        Some("100/100")
+    );
+    assert_eq!(card_row(&props, "글자 수").as_deref(), Some("5000자"));
+    assert!(
+        card_row(&props, "전문").is_some_and(|text| text.contains("앱")),
+        "a message cut short on the card says where to read it whole"
+    );
+    assert_eq!(props["action"]["preview"]["totalChars"], json!(5000));
+    assert_eq!(props["action"]["preview"]["truncated"], json!(true));
+    let excerpt = card_row(&props, "내용").expect("the quote row");
+    assert!(
+        excerpt.chars().count() <= 121 && excerpt.ends_with('…'),
+        "a quote of at most 120 characters and an ellipsis: {}",
+        excerpt.chars().count()
+    );
+
+    let (status, refused) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert_eq!(approval_status_3708(&su, card).await, "pending");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 100);
+    assert_eq!(pin_broadcasts(&su, ws, "message.pinned", long).await, 0);
+
+    // A slot frees (a person unpins one by hand); the same card now goes through.
+    let status = client
+        .delete(format!(
+            "{base}/v1/workspaces/{ws}/messages/{}/pin",
+            pinned_ids[0]
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .send()
+        .await
+        .expect("unpin responds")
+        .status()
+        .as_u16();
+    assert_eq!(status, 200);
+    let (status, approved) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(pins_in(&su, fixture.channel).await.len(), 100);
+    assert!(pins_in(&su, fixture.channel)
+        .await
+        .iter()
+        .any(|(message, _)| *message == long));
+}
+
+/// **A pin in the owner's 1:1 DM with the agent** — the room this action is most often asked in.
+/// A DM has no name (`channel.name` is NULL there, 001_init.sql), so its card says 「1:1 대화」 and
+/// has no 공개 범위 row. Reading that name as text made every proposal in such a room answer 500,
+/// while every other pin test here draws its card in a named channel.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_pin_in_the_owners_dm_with_the_agent_is_drawn_without_a_name_and_pins_on_approval() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    // The agent's owner's 1:1 DM is covered automatically once they also confirmed the
+    // connection (ADR-0162 증보 2 B6): the fixture's human did both.
+    set_agent_owner_3708(&su, fixture.hosted_agent, Some(fixture.human)).await;
+    let dm = seed_dm_2915(
+        &su,
+        ws,
+        fixture.human,
+        &[fixture.human, fixture.hosted_agent],
+    )
+    .await;
+    let name: Option<String> = sqlx::query_scalar("SELECT name FROM channel WHERE id=$1")
+        .bind(dm)
+        .fetch_one(&su)
+        .await
+        .expect("the DM row");
+    assert_eq!(
+        name, None,
+        "the DM this test draws a card in is nameless, as a product DM is"
+    );
+    let said = raw_says(&su, &fixture, dm, "금요일 배포는 이대로 가요").await;
+
+    // The person asks in the DM (a REST send there raises the job the agent claims).
+    human_says(&client, &base, &fixture, dm, "방금 그 메시지 고정해 줘").await;
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("the DM message reached the agent as a job")
+        .to_string();
+    let (status, proposed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "message.pin",
+               "args": {"messageId": said.to_string()}}),
+    )
+    .await;
+    remember_handle_3789(&proposed, &handle);
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
+    let props = message_props(&su, card).await;
+    assert_eq!(card_row(&props, "채널").as_deref(), Some("1:1 대화"));
+    assert!(
+        card_row(&props, "공개 범위").is_none(),
+        "a DM has no 공개 범위 row"
+    );
+    assert!(pins_in(&su, dm).await.is_empty());
+
+    // The admin's tap pins it, as themselves, in the DM.
+    let (status, approved) = approve(&client, &base, &fixture, approval).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(pins_in(&su, dm).await, vec![(said, fixture.human)]);
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v5 U-a~U-d (#4704, N3 PR A) — an approval card nobody asked for, in the
+// owner's direct message
+//
+// The fixture's hosted credential carries `workspace:propose` and not
+// `workspace:initiate` (nothing in the product asks for it by default), so every test below
+// first gives the connection that scope on both halves, the way a re-connect would.
+// ---------------------------------------------------------------------------
+
+const INITIATE: &str = "oort_action_initiate";
+
+/// Give the hosted fixture connection `workspace:initiate` on the human's approval **and** the
+/// credential.
+async fn open_initiative_door(su: &PgPool, fixture: &Fixture) {
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET approved_scopes = approved_scopes || ARRAY['workspace:initiate']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .execute(su)
+    .await
+    .expect("approve workspace:initiate");
+    sqlx::query(
+        "UPDATE token SET scopes = scopes || ARRAY['workspace:initiate']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_token)
+    .execute(su)
+    .await
+    .expect("carry workspace:initiate");
+}
+
+fn initiate_body(action: &str, args: Value) -> Value {
+    json!({"clientRequestId": Uuid::new_v4(), "actionId": action, "args": args})
+}
+
+async fn initiate(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    body: Value,
+) -> (u16, Value) {
+    call(client, base, &fixture.hosted_bearer, INITIATE, body).await
+}
+
+/// The five tables a half-written card would leave rows in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Residue {
+    runs: i64,
+    approvals: i64,
+    messages: i64,
+    channels: i64,
+    memberships: i64,
+}
+
+async fn residue(su: &PgPool, workspace: Uuid) -> Residue {
+    async fn count(su: &PgPool, table: &str, workspace: Uuid) -> i64 {
+        sqlx::query_scalar(&format!(
+            "SELECT count(*) FROM {table} WHERE workspace_id = $1"
+        ))
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .expect("count rows")
+    }
+    Residue {
+        runs: count(su, "agent_run", workspace).await,
+        approvals: count(su, "approval", workspace).await,
+        messages: count(su, "message", workspace).await,
+        channels: count(su, "channel", workspace).await,
+        memberships: count(su, "membership", workspace).await,
+    }
+}
+
+fn without_id(mut body: Value) -> Value {
+    body.as_object_mut().expect("json-rpc body").remove("id");
+    body
+}
+
+/// Take every pending unasked card of the workspace out of its agent's waiting places, as an expiry
+/// would (nobody said no), so a test that raises several cards in a row stays under the ceiling of two
+/// without saying anything about the cards it has already examined.
+async fn expire_pending_unasked_cards(su: &PgPool, workspace: Uuid) {
+    sqlx::query(
+        "UPDATE approval SET status = 'expired', decided_at = now() \
+          WHERE workspace_id = $1 AND status = 'pending' AND payload->>'origin' = 'agent_initiated'",
+    )
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("expire the pending unasked cards");
+}
+
+/// The owner's 1:1 DM with the agent, if one exists.
+async fn owner_dm(su: &PgPool, fixture: &Fixture) -> Option<Uuid> {
+    sqlx::query_scalar(
+        "SELECT c.id FROM channel c \
+           JOIN membership a ON a.channel_id = c.id AND a.member_id = $2 AND a.left_at IS NULL \
+           JOIN membership h ON h.channel_id = c.id AND h.member_id = $3 AND h.left_at IS NULL \
+          WHERE c.workspace_id = $1 AND c.kind = 'dm'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.human)
+    .fetch_optional(su)
+    .await
+    .expect("find the owner dm")
+}
+
+/// One call, one card: the run, the approval and the card in the owner's DM, no job.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_unasked_card_stands_in_the_owners_dm_with_one_run_one_approval_and_no_job() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    assert!(
+        list_tools(&client, &base, &fixture.hosted_bearer)
+            .await
+            .contains(&INITIATE.to_string()),
+        "with the scope on both halves the tool is listed"
+    );
+    assert!(owner_dm(&su, &fixture).await.is_none(), "no DM yet");
+    let jobs_before = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+    let before = residue(&su, fixture.workspace).await;
+
+    let name = unique_channel_name();
+    let body = initiate_body(
+        "channel.create",
+        json!({"name": name, "kind": "private", "addProposer": true}),
+    );
+    let (status, answer) = initiate(&client, &base, &fixture, body.clone()).await;
+    assert_eq!(status, 200, "{answer}");
+    let out = structured(&answer);
+    assert_eq!(out["status"], "pending");
+    assert!(out["expiresAtMs"].is_i64());
+    let approval = Uuid::parse_str(out["approvalId"].as_str().unwrap()).unwrap();
+    let card = Uuid::parse_str(out["cardMessageId"].as_str().unwrap()).unwrap();
+
+    // One run, one approval, one card, one new DM with its two memberships — nothing else.
+    let after = residue(&su, fixture.workspace).await;
+    assert_eq!(
+        after,
+        Residue {
+            runs: before.runs + 1,
+            approvals: before.approvals + 1,
+            messages: before.messages + 1,
+            channels: before.channels + 1,
+            memberships: before.memberships + 2,
+        }
+    );
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before,
+        "an unasked card writes no job"
+    );
+    let dm = owner_dm(&su, &fixture)
+        .await
+        .expect("the owner's DM was opened");
+
+    // The run: born held, no trigger message, and an input that holds nothing the agent wrote.
+    let (run_status, trigger, input, key): (String, Option<Uuid>, Value, String) = sqlx::query_as(
+        "SELECT r.status::text, r.trigger_message_id, r.input, r.idempotency_key \
+           FROM agent_run r JOIN approval a ON a.run_id = r.id \
+          WHERE a.workspace_id = $1 AND a.id = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(run_status, "awaiting_approval");
+    assert!(trigger.is_none());
+    assert_eq!(input, json!({"hold": "agent_initiated"}));
+    assert!(key.starts_with("agent_initiated:"), "{key}");
+
+    // The approval and the card: the agent asked, the DM holds the card, and it says it was unasked.
+    let (requested_by, channel_id, payload): (Uuid, Uuid, Value) = sqlx::query_as(
+        "SELECT requested_by, channel_id, payload FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(requested_by, fixture.hosted_agent);
+    assert_eq!(channel_id, dm);
+    assert_eq!(payload["origin"], "agent_initiated");
+    let props = message_props(&su, card).await;
+    assert_eq!(props["origin"], "agent_initiated");
+    assert_eq!(props["channel_id"], json!(dm.to_string()));
+    assert!(
+        card_row(&props, "이 에이전트도 참여")
+            .as_deref()
+            .is_some_and(|value| value.starts_with("예")),
+        "the 「이 에이전트도 참여」 row is always on the card"
+    );
+    let card_channel: Uuid = sqlx::query_scalar("SELECT channel_id FROM message WHERE id=$1")
+        .bind(card)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(card_channel, dm, "the card stands in the owner's DM");
+    assert!(
+        momo_agent::actions::opens_in_app(momo_agent::ACTION_TYPE_WORKSPACE_ACTION, &payload),
+        "an unasked card is never decided from a lock screen"
+    );
+    // It waits a day, not the hour of a card a person asked for.
+    let waits_seconds: f64 = sqlx::query_scalar(
+        "SELECT extract(epoch FROM (expires_at - created_at))::float8 FROM approval \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert!(
+        (86_390.0..=86_410.0).contains(&waits_seconds),
+        "an unasked card waits 24 hours, not {waits_seconds} seconds"
+    );
+
+    // The owner taps: the private channel is made as them, and a re-ask reads the outcome.
+    let (status, approved) = approve(&client, &base, &fixture, approval).await;
+    assert_eq!(status, 200, "{approved}");
+    // The tap tells the agent, once: one `agent_run` reference to the run behind its card, in the
+    // DM it stands in — that is what wakes a runtime that raised a card and ended its turn.
+    assert_eq!(
+        agent_run_references(&su, fixture.workspace, fixture.hosted_connection).await,
+        vec![(run_of_approval(&su, approval).await, dm)]
+    );
+    let (channel, kind): (Uuid, String) =
+        sqlx::query_as("SELECT id, kind::text FROM channel WHERE workspace_id=$1 AND name=$2")
+            .bind(fixture.workspace)
+            .bind(&name)
+            .fetch_one(&su)
+            .await
+            .expect("the approved channel exists");
+    assert_eq!(kind, "private");
+    let settled = residue(&su, fixture.workspace).await;
+    let (status, reask) = initiate(&client, &base, &fixture, body).await;
+    assert_eq!(status, 200, "{reask}");
+    let out = structured(&reask);
+    assert_eq!(out["status"], "approved");
+    assert_eq!(out["approvalId"], json!(approval.to_string()));
+    assert_eq!(out["ref"]["type"], "channel");
+    assert_eq!(out["ref"]["id"], json!(channel.to_string()));
+    assert!(out["decidedAtMs"].is_i64());
+    assert!(out.get("expiresAtMs").is_none());
+    assert_eq!(
+        residue(&su, fixture.workspace).await,
+        settled,
+        "a re-ask writes nothing"
+    );
+}
+
+/// The tool exists only when `workspace:initiate` is on both halves, and the propose scope the
+/// fixture already holds opens nothing of it — listed or called.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_initiate_tool_is_not_there_without_its_scope_on_both_halves() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let body = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+    let before = residue(&su, fixture.workspace).await;
+
+    // `workspace:propose` is not it.
+    assert!(!list_tools(&client, &base, &fixture.hosted_bearer)
+        .await
+        .contains(&INITIATE.to_string()));
+    let (status, refused) = initiate(&client, &base, &fixture, body.clone()).await;
+    assert_eq!(status, 400, "{refused}");
+    assert_eq!(error_code(&refused), -32602, "invisible reads as unknown");
+
+    // Carried by the credential but never approved by a person: still closed.
+    sqlx::query(
+        "UPDATE token SET scopes = scopes || ARRAY['workspace:initiate']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_token)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = initiate(&client, &base, &fixture, body.clone()).await;
+    assert_eq!((status, error_code(&refused)), (400, -32602));
+
+    // Approved by a person but not carried by the credential: closed too.
+    sqlx::query("UPDATE token SET scopes = array_remove(scopes, 'workspace:initiate') WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(fixture.hosted_token)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(
+        "UPDATE hosted_agent_connection \
+            SET approved_scopes = approved_scopes || ARRAY['workspace:initiate']::text[] \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, refused) = initiate(&client, &base, &fixture, body).await;
+    assert_eq!((status, error_code(&refused)), (400, -32602));
+    assert_eq!(residue(&su, fixture.workspace).await, before);
+}
+
+/// **The door.** Every way the owner's side of it can be closed — the switch, no owner, a
+/// connection confirmed by somebody else, an owner who is gone, an owner who is not an admin, a
+/// channel or a message the owner is not in — answers the **same bytes**, and leaves no run, no
+/// approval, no card and no DM. What is the agent's own stays its own: a name it cannot see is
+/// `InvalidArguments`, and a public channel is not spellable at all.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn every_closed_condition_of_the_door_answers_the_same_bytes_and_writes_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // (name, how the owner's side of the door is closed, and what is asked)
+    #[derive(Clone, Copy)]
+    enum Closed {
+        SwitchOff,
+        SwitchNotABoolean,
+        NoOwner,
+        ConfirmedBySomeoneElse,
+        OwnerGone,
+        OwnerNotAdmin,
+        ChannelOwnerIsNotIn,
+        MessageOwnerIsNotIn,
+    }
+    let mut bodies: Vec<(&'static str, u16, Value)> = Vec::new();
+    for (label, closed) in [
+        ("switch_off", Closed::SwitchOff),
+        ("switch_not_a_boolean", Closed::SwitchNotABoolean),
+        ("no_owner", Closed::NoOwner),
+        ("confirmed_by_someone_else", Closed::ConfirmedBySomeoneElse),
+        ("owner_gone", Closed::OwnerGone),
+        ("owner_not_admin", Closed::OwnerNotAdmin),
+        ("channel_owner_is_not_in", Closed::ChannelOwnerIsNotIn),
+        ("message_owner_is_not_in", Closed::MessageOwnerIsNotIn),
+    ] {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let mut ask = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+        match closed {
+            Closed::SwitchOff => {
+                sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": false}'::jsonb WHERE id=$1")
+                    .bind(fixture.workspace)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Closed::SwitchNotABoolean => {
+                // A value that is not a switch somebody meant to leave on: the door fails closed.
+                sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": \"false\"}'::jsonb WHERE id=$1")
+                    .bind(fixture.workspace)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Closed::NoOwner => {
+                sqlx::query(
+                    "UPDATE agent SET owner_human_id = NULL WHERE workspace_id=$1 AND member_id=$2",
+                )
+                .bind(fixture.workspace)
+                .bind(fixture.hosted_agent)
+                .execute(&su)
+                .await
+                .unwrap();
+            }
+            Closed::ConfirmedBySomeoneElse => {
+                let other = Uuid::new_v4();
+                sqlx::query("INSERT INTO member(id, workspace_id, kind, display_name, handle) VALUES($1,$2,'human','Other Admin',$3)")
+                    .bind(other)
+                    .bind(fixture.workspace)
+                    .bind(format!("other-{}", other.simple()))
+                    .execute(&su)
+                    .await
+                    .unwrap();
+                sqlx::query("INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)")
+                    .bind(other)
+                    .bind(fixture.workspace)
+                    .bind(format!("{other}@tools.test"))
+                    .execute(&su)
+                    .await
+                    .unwrap();
+                sqlx::query("INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'admin')")
+                    .bind(fixture.workspace)
+                    .bind(other)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+                sqlx::query("UPDATE hosted_agent_connection SET confirmed_by=$3 WHERE workspace_id=$1 AND id=$2")
+                    .bind(fixture.workspace)
+                    .bind(fixture.hosted_connection)
+                    .bind(other)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Closed::OwnerGone => {
+                sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+                    .bind(fixture.workspace)
+                    .bind(fixture.human)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Closed::OwnerNotAdmin => {
+                sqlx::query("UPDATE workspace_membership SET role='member' WHERE workspace_id=$1 AND member_id=$2")
+                    .bind(fixture.workspace)
+                    .bind(fixture.human)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Closed::ChannelOwnerIsNotIn | Closed::MessageOwnerIsNotIn => {
+                // A private room only the agent is in, covered by its connection.
+                let hush = Uuid::new_v4();
+                let hush_name = format!("hush-{}", hush.simple());
+                sqlx::query(
+                    "INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'private',$3)",
+                )
+                .bind(hush)
+                .bind(fixture.workspace)
+                .bind(&hush_name)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query(
+                    "INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)",
+                )
+                .bind(hush)
+                .bind(fixture.workspace)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query(
+                    "INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)",
+                )
+                .bind(fixture.workspace)
+                .bind(hush)
+                .bind(fixture.hosted_agent)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query("UPDATE hosted_agent_connection SET approved_channel_ids = approved_channel_ids || $3 WHERE workspace_id=$1 AND id=$2")
+                    .bind(fixture.workspace)
+                    .bind(fixture.hosted_connection)
+                    .bind(vec![hush])
+                    .execute(&su)
+                    .await
+                    .unwrap();
+                if matches!(closed, Closed::ChannelOwnerIsNotIn) {
+                    // Somebody to add, with a handle the workspace's own rule accepts (the
+                    // fixture's handles are longer than 32 characters).
+                    let guest = Uuid::new_v4();
+                    let guest_handle = format!("guest-{}", &guest.simple().to_string()[..8]);
+                    sqlx::query("INSERT INTO member(id, workspace_id, kind, display_name, handle) VALUES($1,$2,'human','Guest',$3)")
+                        .bind(guest)
+                        .bind(fixture.workspace)
+                        .bind(&guest_handle)
+                        .execute(&su)
+                        .await
+                        .unwrap();
+                    sqlx::query("INSERT INTO human(member_id, workspace_id, email, email_verified) VALUES($1,$2,$3,true)")
+                        .bind(guest)
+                        .bind(fixture.workspace)
+                        .bind(format!("{guest}@tools.test"))
+                        .execute(&su)
+                        .await
+                        .unwrap();
+                    sqlx::query("INSERT INTO workspace_membership(workspace_id, member_id, role) VALUES($1,$2,'member')")
+                        .bind(fixture.workspace)
+                        .bind(guest)
+                        .execute(&su)
+                        .await
+                        .unwrap();
+                    ask = initiate_body(
+                        "channel.member.add",
+                        json!({"channel": hush_name, "memberHandles": [guest_handle]}),
+                    );
+                } else {
+                    let (status, posted) = call(
+                        &client,
+                        &base,
+                        &fixture.hosted_bearer,
+                        "oort_message_post",
+                        json!({"channelId": hush, "clientMsgId": Uuid::new_v4(), "body": "hush"}),
+                    )
+                    .await;
+                    assert_eq!(status, 200, "{posted}");
+                    ask = initiate_body(
+                        "message.pin",
+                        json!({"messageId": structured(&posted)["messageId"]}),
+                    );
+                }
+            }
+        }
+        let before = residue(&su, fixture.workspace).await;
+        let (status, refused) = initiate(&client, &base, &fixture, ask).await;
+        assert_eq!(
+            residue(&su, fixture.workspace).await,
+            before,
+            "{label}: a refused call leaves no run, no approval, no card and no DM"
+        );
+        assert!(owner_dm(&su, &fixture).await.is_none(), "{label}: no DM");
+        // A refusal of this door is the door doing its job: it must not turn the CONNECTION
+        // `error` on the card a person reads about it.
+        let recorded: Option<Option<String>> = sqlx::query_scalar(
+            "SELECT last_tool_error_code FROM hosted_agent_liveness WHERE workspace_id=$1",
+        )
+        .bind(fixture.workspace)
+        .fetch_optional(&su)
+        .await
+        .unwrap();
+        assert_eq!(
+            recorded.flatten(),
+            None,
+            "{label}: a refused unasked card is not a connection fault"
+        );
+        bodies.push((label, status, without_id(refused)));
+    }
+    let (first_label, first_status, first_body) = bodies[0].clone();
+    assert_eq!((first_status, error_code(&first_body)), (409, -32004));
+    for (label, status, body) in &bodies {
+        assert_eq!(
+            (status, body),
+            (&first_status, &first_body),
+            "{label} must answer exactly what {first_label} answers"
+        );
+    }
+
+    // What is the agent's own is its own: an unseen name is `InvalidArguments`, and the schema
+    // has no spelling for a public channel — neither writes anything.
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let before = residue(&su, fixture.workspace).await;
+    for ask in [
+        initiate_body(
+            "channel.member.add",
+            json!({"channel": "no-such-room", "memberHandles": ["nobody"]}),
+        ),
+        initiate_body("channel.create", json!({"name": "qa", "kind": "public"})),
+    ] {
+        let (status, refused) = initiate(&client, &base, &fixture, ask).await;
+        assert_eq!((status, error_code(&refused)), (400, -32602), "{refused}");
+    }
+    assert_eq!(residue(&su, fixture.workspace).await, before);
+}
+
+/// A re-ask is the same card, not another; the same id asked for something else is `Conflict`; a
+/// card past its deadline reads `expired` before any sweep wrote it down; and a re-ask is allowed
+/// while the workspace switch is off (it tells the agent about its own card and nothing else).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_reask_is_the_same_card_and_a_changed_ask_under_the_same_id_conflicts() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let body = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+    let (status, first) = initiate(&client, &base, &fixture, body.clone()).await;
+    assert_eq!(status, 200, "{first}");
+    let approval = structured(&first)["approvalId"].clone();
+    let settled = residue(&su, fixture.workspace).await;
+
+    // The same id, asked again: the same card (one run, one approval, one card, one DM).
+    let (status, again) = initiate(&client, &base, &fixture, body.clone()).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(structured(&again)["approvalId"], approval);
+    assert_eq!(structured(&again)["status"], "pending");
+    assert_eq!(residue(&su, fixture.workspace).await, settled);
+
+    // The same id with another name, another action: `Conflict`, and nothing is written.
+    for changed in [
+        json!({"clientRequestId": body["clientRequestId"], "actionId": "channel.create",
+               "args": {"name": unique_channel_name()}}),
+        json!({"clientRequestId": body["clientRequestId"], "actionId": "message.pin",
+               "args": {"messageId": Uuid::new_v4()}}),
+    ] {
+        let (status, refused) = initiate(&client, &base, &fixture, changed).await;
+        assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    }
+    assert_eq!(residue(&su, fixture.workspace).await, settled);
+
+    // A different rationale is commentary, not another card.
+    let mut reworded = body.clone();
+    reworded["rationale"] = json!("다시 말해요");
+    let (status, again) = initiate(&client, &base, &fixture, reworded).await;
+    assert_eq!(status, 200, "{again}");
+    assert_eq!(structured(&again)["approvalId"], approval);
+
+    // Past its deadline, before any sweep: expired — and a re-ask still answers with the switch off.
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(Uuid::parse_str(approval.as_str().unwrap()).unwrap())
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": false}'::jsonb WHERE id=$1")
+        .bind(fixture.workspace)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, expired) = initiate(&client, &base, &fixture, body).await;
+    assert_eq!(status, 200, "{expired}");
+    assert_eq!(structured(&expired)["status"], "expired");
+    assert!(structured(&expired).get("expiresAtMs").is_none());
+    // …while a NEW ask with the switch off is the door's answer.
+    let (status, closed) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": unique_channel_name()})),
+    )
+    .await;
+    assert_eq!((status, error_code(&closed)), (409, -32004));
+}
+
+/// Everything is one transaction: when the card cannot be written, the run, the approval, the
+/// DM (a channel and its memberships) and the card are **all** absent.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_failure_after_the_dm_is_opened_leaves_nothing_in_the_five_tables() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let before = residue(&su, fixture.workspace).await;
+
+    // The injected DbError: writing the card (the last write) raises, for this workspace only.
+    let trigger = format!("fail_card_{}", fixture.workspace.simple());
+    sqlx::query(&format!(
+        "CREATE FUNCTION {trigger}() RETURNS trigger LANGUAGE plpgsql AS \
+         $f$ BEGIN RAISE EXCEPTION 'injected card failure'; END $f$"
+    ))
+    .execute(&su)
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        "CREATE TRIGGER {trigger} BEFORE INSERT ON message FOR EACH ROW \
+         WHEN (NEW.type = 'approval_request' AND NEW.workspace_id = '{}') \
+         EXECUTE FUNCTION {trigger}()",
+        fixture.workspace
+    ))
+    .execute(&su)
+    .await
+    .unwrap();
+
+    let ask = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+    let (status, failed) = initiate(&client, &base, &fixture, ask.clone()).await;
+    let after = residue(&su, fixture.workspace).await;
+    sqlx::query(&format!("DROP TRIGGER {trigger} ON message"))
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query(&format!("DROP FUNCTION {trigger}()"))
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(status, 500, "{failed}");
+    assert_eq!(
+        after, before,
+        "a failure leaves no run, approval, card, DM or membership"
+    );
+    assert!(owner_dm(&su, &fixture).await.is_none());
+    assert!(
+        audit_details_of(&su, fixture.workspace, "agent.initiative.opened")
+            .await
+            .is_empty(),
+        "no row says a card stood that was rolled back"
+    );
+
+    // And the same ask, now that nothing stands in the way, is a card (nothing was half-made).
+    let (status, ok) = initiate(&client, &base, &fixture, ask).await;
+    assert_eq!(status, 200, "{ok}");
+}
+
+/// Lock order (review L8). A person's send into a DM — and a decision's wake — share-lock the agent's
+/// membership row in that DM (`cm`) while they hold or are about to ask for the DM's `channel_seq`. The
+/// producer writes that row exclusively only when it has to **re-open** the DM, so here the DM is
+/// archived (which forces the open) and a transaction plays the person: it holds `channel_seq`, waits
+/// until the producer is blocked, and then share-locks `cm`. With the producer taking `channel_seq`
+/// **before** the open, it is blocked at that first lock holding nothing the person wants, and the
+/// request is granted at once; with the opposite order the producer would already hold `cm`
+/// exclusively and the lock timeout (0.5 s) fails the person's side.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_persons_send_into_a_dm_that_must_be_reopened_and_an_unasked_card_never_wait_on_each_other(
+) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // The first card opens the DM; the DM is then archived, so the next card has to re-open it.
+    let (status, first) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": unique_channel_name()})),
+    )
+    .await;
+    assert_eq!(status, 200, "{first}");
+    let dm = owner_dm(&su, &fixture).await.expect("the DM exists now");
+    sqlx::query("UPDATE channel SET archived_at = now() WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(dm)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    let mut person = su.begin().await.unwrap();
+    let person_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *person)
+        .await
+        .unwrap();
+    sqlx::query("SELECT channel_id FROM channel_seq WHERE channel_id=$1 FOR UPDATE")
+        .bind(dm)
+        .fetch_one(&mut *person)
+        .await
+        .unwrap();
+
+    let second = {
+        let client = client.clone();
+        let base = base.clone();
+        let bearer = fixture.hosted_bearer.clone();
+        tokio::spawn(async move {
+            call(
+                &client,
+                &base,
+                &bearer,
+                INITIATE,
+                initiate_body("channel.create", json!({"name": unique_channel_name()})),
+            )
+            .await
+        })
+    };
+    // Wait for the condition, not for a time: the producer's own backend is blocked on a lock.
+    let mut blocked = false;
+    for _ in 0..400 {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND pid <> $1 AND usename = 'momo_app' \
+                AND wait_event_type = 'Lock' AND state = 'active'",
+        )
+        .bind(person_pid)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        if waiting > 0 {
+            blocked = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        blocked,
+        "the producer must be waiting on the person's channel_seq lock"
+    );
+
+    sqlx::query("SET LOCAL lock_timeout = '500ms'")
+        .execute(&mut *person)
+        .await
+        .unwrap();
+    let granted = sqlx::query(
+        "SELECT member_id FROM membership \
+          WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3 FOR SHARE",
+    )
+    .bind(fixture.workspace)
+    .bind(dm)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&mut *person)
+    .await;
+    assert!(
+        granted.is_ok(),
+        "the person's share lock on the agent's DM membership row must be granted at once: {granted:?}"
+    );
+    person.commit().await.unwrap();
+    let (status, second) = second.await.unwrap();
+    assert_eq!(status, 200, "{second}");
+    assert_eq!(structured(&second)["status"], "pending");
+    let archived_after: Option<chrono::DateTime<chrono::Utc>> =
+        sqlx::query_scalar("SELECT archived_at FROM channel WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(dm)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert!(
+        archived_after.is_none(),
+        "the card re-opened the DM it stands in"
+    );
+}
+
+/// A decision's wake share-locks the agent's membership row in the DM (`cm`) and only then asks for
+/// the DM's `channel_seq`; an unasked call that wrote that row exclusively — which re-opening an
+/// already-open DM does, even though it changes nothing — would hold `channel_seq` and wait for
+/// the tap while the tap waits for it. So an already-open DM is not opened again: here another
+/// transaction holds the agent's DM membership row `FOR SHARE` (the wake's first lock) and the call
+/// must still land. (The DM's membership is not a row the transport's own proof locks, unlike the
+/// agent's `member` row, so nothing but this producer can make the call wait.)
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_unasked_call_into_an_open_dm_lands_while_a_wake_share_locks_the_agents_dm_membership() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let (status, first) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": unique_channel_name()})),
+    )
+    .await;
+    assert_eq!(status, 200, "{first}");
+    let dm = owner_dm(&su, &fixture).await.expect("the DM is open now");
+
+    let mut wake = su.begin().await.unwrap();
+    sqlx::query(
+        "SELECT member_id FROM membership \
+          WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3 FOR SHARE",
+    )
+    .bind(fixture.workspace)
+    .bind(dm)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&mut *wake)
+    .await
+    .unwrap();
+    let landed = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        initiate(
+            &client,
+            &base,
+            &fixture,
+            initiate_body("channel.create", json!({"name": unique_channel_name()})),
+        ),
+    )
+    .await;
+    wake.rollback().await.unwrap();
+    let (status, answer) =
+        landed.expect("the call must not wait for the wake's share lock on the DM membership");
+    assert_eq!(status, 200, "{answer}");
+}
+
+/// The run behind an unasked card belongs to the server: no tool the agent holds can close,
+/// release, report on or re-park it — not even with a perfectly sealed handle that names it — it
+/// holds no concurrency slot, and the expiry sweep ends it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_server_owns_the_run_behind_an_unasked_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": unique_channel_name()})),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let approval = Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    let (run, dm): (Uuid, Uuid) =
+        sqlx::query_as("SELECT run_id, channel_id FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+
+    // A handle sealed with the server's own key, naming this very run and its DM: it opens, binds
+    // to the agent and the connection — and there is no job behind it, so every verb refuses it.
+    let sealed = momo_mcp::encode_lease_handle(
+        momo_mcp::LeaseHandle {
+            workspace_id: fixture.workspace,
+            agent_member_id: fixture.hosted_agent,
+            connection_id: fixture.hosted_connection,
+            channel_id: dm,
+            run_id: run,
+            job_id: 1,
+            lease_id: Uuid::new_v4(),
+        },
+        &format!("oort/agent-port/envelope/v1|{TEST_JWT_SECRET}"),
+    )
+    .expect("a handle can be sealed with the test key");
+    for (tool, arguments) in [
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": sealed, "status": "succeeded", "body": "done"}),
+        ),
+        ("oort_job_release", json!({"leaseHandle": sealed})),
+        (
+            "oort_run_event",
+            json!({"leaseHandle": sealed, "status": "running"}),
+        ),
+        (
+            "oort_action_propose",
+            json!({"handle": sealed, "actionId": "message.pin",
+                   "args": {"messageId": Uuid::new_v4()}}),
+        ),
+    ] {
+        let (status, refused) = call(&client, &base, &fixture.hosted_bearer, tool, arguments).await;
+        assert!(
+            matches!(status, 400 | 403 | 409),
+            "{tool} must refuse the handle with a refusal, not a 200 or a 500: {status} {refused}"
+        );
+    }
+    let (run_status, approval_status): (String, String) = sqlx::query_as(
+        "SELECT r.status::text, a.status::text FROM agent_run r \
+           JOIN approval a ON a.run_id = r.id WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (run_status.as_str(), approval_status.as_str()),
+        ("awaiting_approval", "pending"),
+        "no agent tool moved the run or the approval"
+    );
+
+    // It holds no concurrency slot: a card waiting a day must not answer 409 to every work request.
+    let mut conn = su.acquire().await.unwrap();
+    assert_eq!(
+        momo_agent::live_run_count_in_tx(&mut conn, fixture.workspace, fixture.hosted_agent)
+            .await
+            .unwrap(),
+        0,
+        "an unasked run is not a live run for the agent's cap"
+    );
+    // …and the other direction, which the zero above cannot see: an ordinary approval-held run
+    // (no `hold` key at all) is still counted. A `NULL`-unsafe predicate drops it from the cap.
+    sqlx::query(
+        "INSERT INTO agent_run(id, workspace_id, agent_member_id, channel_id, status, step_count, \
+                               max_steps, depth, input, idempotency_key, deadline_at) \
+         VALUES($1,$2,$3,$4,'awaiting_approval',0,8,0,'{}'::jsonb,$5, now() + interval '1 hour')",
+    )
+    .bind(Uuid::new_v4())
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .bind(format!("plain-held-{}", Uuid::new_v4()))
+    .execute(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        momo_agent::live_run_count_in_tx(&mut conn, fixture.workspace, fixture.hosted_agent)
+            .await
+            .unwrap(),
+        1,
+        "a plain approval-held run still holds its concurrency slot"
+    );
+    sqlx::query(
+        "DELETE FROM agent_run WHERE workspace_id=$1 AND idempotency_key LIKE 'plain-held-%'",
+    )
+    .bind(fixture.workspace)
+    .execute(&su)
+    .await
+    .unwrap();
+    drop(conn);
+
+    // The REAL sweep ends it: timed out, the approval expired — no trigger message needed.
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE workspace_id=$1 AND id=$2")
+        .bind(fixture.workspace)
+        .bind(approval)
+        .execute(&su)
+        .await
+        .unwrap();
+    let notifier = momo_notifier_pool().await;
+    momo_notifier::approval_sweep::sweep_expired_approvals(&notifier, 50)
+        .await
+        .expect("the production sweep settles an unasked run");
+    let (run_status, approval_status): (String, String) = sqlx::query_as(
+        "SELECT r.status::text, a.status::text FROM agent_run r \
+           JOIN approval a ON a.run_id = r.id WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        (run_status.as_str(), approval_status.as_str()),
+        ("timed_out", "expired")
+    );
+    assert!(
+        agent_run_references(&su, fixture.workspace, fixture.hosted_connection)
+            .await
+            .is_empty(),
+        "an expiry is never written to the agent's inbox (the sweep may not, and a lapse is not something a person said)"
+    );
+    let (status, reask) = initiate(
+        &client,
+        &base,
+        &fixture,
+        json!({"clientRequestId": sqlx::query_scalar::<_, String>(
+                    "SELECT split_part(idempotency_key, ':', 3) FROM agent_run WHERE id=$1")
+                .bind(run).fetch_one(&su).await.unwrap().to_lowercase(),
+               "actionId": "channel.create",
+               "args": {"name": sqlx::query_scalar::<_, String>(
+                    "SELECT payload #>> '{action,args,name}' FROM approval WHERE id=$1")
+                .bind(approval).fetch_one(&su).await.unwrap()}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{reask}");
+    assert_eq!(structured(&reask)["status"], "expired");
+}
+
+/// A pin raised unasked is judged for the owner's eyes: a message in **another** channel the owner
+/// is in is pinnable there (the run's channel is the DM, which is not where the message is), and
+/// it is the owner's own pin function, as the owner, that runs.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_unasked_pin_in_a_channel_the_owner_is_in_pins_as_the_owner() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": fixture.channel, "clientMsgId": Uuid::new_v4(), "body": "안내: 오늘 배포 후 확인해 주세요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+    let message = Uuid::parse_str(structured(&posted)["messageId"].as_str().unwrap()).unwrap();
+
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("message.pin", json!({"messageId": message})),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let approval = Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    let card = Uuid::parse_str(structured(&raised)["cardMessageId"].as_str().unwrap()).unwrap();
+    let dm = owner_dm(&su, &fixture).await.unwrap();
+    assert_ne!(dm, fixture.channel);
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+    let props = message_props(&su, card).await;
+    assert_eq!(props["origin"], "agent_initiated");
+    assert_eq!(
+        props["action"]["preview"]["channelId"],
+        json!(fixture.channel.to_string())
+    );
+
+    let (status, approved) = approve(&client, &base, &fixture, approval).await;
+    assert_eq!(status, 200, "{approved}");
+    assert_eq!(
+        pins_in(&su, fixture.channel).await,
+        vec![(message, fixture.human)],
+        "pinned in the channel the message is in, by the person who tapped"
+    );
+}
+
+/// What was true when the card was raised is proved again when it is tapped, for the person
+/// tapping: an owner who has since left the channel the card quotes, and a stored `channel.create`
+/// that was turned into a public channel, both leave the approval pending and write nothing.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_unasked_card_is_proved_again_for_the_person_who_taps_it() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // A pin card for a message in a channel the owner is in…
+    let (status, posted) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_message_post",
+        json!({"channelId": fixture.channel, "clientMsgId": Uuid::new_v4(), "body": "고정할 안내"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{posted}");
+    let message = Uuid::parse_str(structured(&posted)["messageId"].as_str().unwrap()).unwrap();
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("message.pin", json!({"messageId": message})),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let pin_card = Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    // …and the owner leaves that channel before tapping.
+    sqlx::query("UPDATE membership SET left_at = now() WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3")
+        .bind(fixture.workspace)
+        .bind(fixture.channel)
+        .bind(fixture.human)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = approve(&client, &base, &fixture, pin_card).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    assert!(pins_in(&su, fixture.channel).await.is_empty());
+    let still: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(pin_card)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(still, "pending", "the approval is not spent");
+    // (The agent may have two unasked cards waiting; this test raises several in a row, so each one
+    // it has finished with stands down before the next is raised.)
+    expire_pending_unasked_cards(&su, fixture.workspace).await;
+
+    // A stored `channel.create` turned public after the fact is not something the tool could ask
+    // for, and the decision refuses it though the row says so.
+    let name = unique_channel_name();
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": name})),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let channel_card =
+        Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE approval SET payload = jsonb_set(payload, '{action,args,kind}', '\"public\"') WHERE id=$1")
+        .bind(channel_card)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = approve(&client, &base, &fixture, channel_card).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    let made: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id=$1 AND name=$2")
+            .bind(fixture.workspace)
+            .bind(&name)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(made, 0, "no public channel was made from a tampered row");
+    expire_pending_unasked_cards(&su, fixture.workspace).await;
+
+    // A row whose `origin` was dropped is still an unasked card while its run says so (the run's
+    // `input.hold` is the server's alone): the same refusal. And an unasked card can only name an
+    // initiative action — an `action.id` swapped for an invite (with the pins dropped too, so the pin
+    // comparison would not refuse it for us) is refused, not judged by the looser rules of a card a
+    // person asked for.
+    let name = unique_channel_name();
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": name})),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let stripped = Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    sqlx::query("UPDATE approval SET payload = jsonb_set(payload - 'origin', '{action,args,kind}', '\"public\"') WHERE id=$1")
+        .bind(stripped)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = approve(&client, &base, &fixture, stripped).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    let made: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id=$1 AND name=$2")
+            .bind(fixture.workspace)
+            .bind(&name)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        made, 0,
+        "dropping `origin` does not turn the row into a looser card"
+    );
+    expire_pending_unasked_cards(&su, fixture.workspace).await;
+
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("channel.create", json!({"name": unique_channel_name()})),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let swapped = Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    let invites_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    sqlx::query("UPDATE approval SET payload = jsonb_set(jsonb_set(payload - 'origin', '{action,id}', '\"invite.create\"'), '{action,args}', '{}'::jsonb) #- '{action,pins}' WHERE id=$1")
+        .bind(swapped)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = approve(&client, &base, &fixture, swapped).await;
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid");
+    let invites_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM invite_code WHERE workspace_id=$1")
+            .bind(fixture.workspace)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        invites_after, invites_before,
+        "no invite was minted from a swapped action id"
+    );
+}
+
+/// The agent's own words on an unasked card (`rationale`, and `channel.create`'s `topic`) are the
+/// one place it can speak to a person who did not ask: a link, a mention, markdown, a control
+/// character or more than 140 characters is refused with nothing written, and what is stored is the
+/// sentence as the profile-tagline rules normalised it.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_unasked_card_refuses_words_that_could_pass_for_somebody_elses() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let before = residue(&su, fixture.workspace).await;
+
+    let too_long = "가".repeat(141);
+    let bad_words = [
+        "https://evil.example/approve-me",
+        "@owner 지금 승인해 주세요",
+        "[승인](https://evil.example)",
+        "첫 줄\n둘째 줄",
+        "관리자\u{200b}가 시켰어요",
+        too_long.as_str(),
+    ];
+    for words in bad_words {
+        let mut ask = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+        ask["rationale"] = json!(words);
+        let (status, refused) = initiate(&client, &base, &fixture, ask).await;
+        assert_eq!(
+            (status, error_code(&refused)),
+            (400, -32602),
+            "rationale {words:?}: {refused}"
+        );
+
+        let ask = initiate_body(
+            "channel.create",
+            json!({"name": unique_channel_name(), "topic": words}),
+        );
+        let (status, refused) = initiate(&client, &base, &fixture, ask).await;
+        assert_eq!(
+            (status, error_code(&refused)),
+            (400, -32602),
+            "topic {words:?}: {refused}"
+        );
+    }
+    assert_eq!(
+        residue(&su, fixture.workspace).await,
+        before,
+        "a refused sentence writes no run, approval, card or DM"
+    );
+
+    // A plain sentence passes, and what the card and the stored arguments carry is the normalised one.
+    let mut ask = initiate_body(
+        "channel.create",
+        json!({"name": unique_channel_name(), "topic": "  QA   채널  "}),
+    );
+    ask["rationale"] = json!("  릴리스 점검용   채널이에요 ");
+    let (status, raised) = initiate(&client, &base, &fixture, ask).await;
+    assert_eq!(status, 200, "{raised}");
+    let approval = Uuid::parse_str(structured(&raised)["approvalId"].as_str().unwrap()).unwrap();
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(payload["action"]["args"]["topic"], "QA 채널");
+    assert_eq!(payload["action"]["rationale"], "릴리스 점검용 채널이에요");
+}
+
+/// One agent's simultaneous calls wait on nobody's lock cycle, never pass the ceiling of two unasked
+/// cards, and a repeat of an id is the card that id raised.
+///
+/// With the DM already open and one card waiting, four calls at once (three new cards and a repeat of
+/// the first) answer: the repeat is the first card, **exactly one** of the three new ones lands (the
+/// second place) and the other two are `Conflict` — the count and the insert of the agent's calls are
+/// one at a time behind its advisory lock, so no interleaving reads "one" twice. (Before the ceilings
+/// existed all three landed; that was true only because nothing counted, not because anything made
+/// them concurrent-safe.) Two simultaneous tool transactions of one agent that each share-lock the
+/// agent's `member` row and then ask to make it exclusive are a deadlock — the very thing the first
+/// lock being an advisory one prevents (security review of #4704, M1) — and PostgreSQL only notices
+/// after `deadlock_timeout`. The test sets that to **20 s for the app role** before the pool exists,
+/// so a cycle costs 20 s by construction instead of the usual second, and the four calls must finish
+/// in under 15: a clock with a fivefold gap on both sides, not a hope that the machine is fast.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn one_agents_simultaneous_unasked_calls_wait_on_no_cycle_and_never_pass_the_ceiling() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    // Before the pool exists, and put back by the guard even if this test fails.
+    let slow = SlowDeadlockDetection::begin(&su).await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let first = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+    let (status, raised) = initiate(&client, &base, &fixture, first.clone()).await;
+    assert_eq!(status, 200, "{raised}");
+    let first_approval = structured(&raised)["approvalId"].clone();
+    assert!(
+        owner_dm(&su, &fixture).await.is_some(),
+        "the DM is open now"
+    );
+    let before = residue(&su, fixture.workspace).await;
+
+    // Names that cannot be taken for one another (a name differing only by a trailing number or a
+    // separator is the same proposal — see the duplicate rule).
+    let asks = [
+        initiate_body("channel.create", json!({"name": "alpha"})),
+        initiate_body("channel.create", json!({"name": "beta"})),
+        initiate_body("channel.create", json!({"name": "gamma"})),
+        first,
+    ];
+    let started = std::time::Instant::now();
+    let answers = futures::future::join_all(asks.iter().map(|ask| {
+        let (client, base, bearer, ask) = (
+            client.clone(),
+            base.clone(),
+            fixture.hosted_bearer.clone(),
+            ask.clone(),
+        );
+        async move { call(&client, &base, &bearer, INITIATE, ask).await }
+    }))
+    .await;
+    let elapsed = started.elapsed();
+    drop(slow);
+    assert!(
+        elapsed < std::time::Duration::from_secs(15),
+        "four simultaneous calls of one agent took {elapsed:?}: with deadlock detection slowed to 20 s, \
+         that is a lock cycle between them"
+    );
+    assert_eq!(
+        (answers[3].0, &structured(&answers[3].1)["approvalId"]),
+        (200, &first_approval),
+        "the repeat of the first ask is the first card"
+    );
+    let landed = answers[..3]
+        .iter()
+        .filter(|(status, _)| *status == 200)
+        .count();
+    let conflicted = answers[..3]
+        .iter()
+        .filter(|(status, answer)| is_conflict(*status, answer))
+        .count();
+    assert_eq!(
+        (landed, conflicted),
+        (1, 2),
+        "the second place is taken by exactly one of three simultaneous calls: {answers:?}"
+    );
+    let after = residue(&su, fixture.workspace).await;
+    assert_eq!(after.runs, before.runs + 1);
+    assert_eq!(after.approvals, before.approvals + 1);
+    assert_eq!(after.messages, before.messages + 1);
+    let waiting: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM approval WHERE workspace_id=$1 AND status='pending' \
+            AND payload->>'origin' = 'agent_initiated'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(waiting, 2, "never a third, however the calls interleave");
+
+    // The very first call of an agent — no DM yet, so nothing to pre-lock — raced by its own repeat:
+    // the second must read the first's card, never fail after it and never raise another.
+    let fresh = seed(&su).await;
+    open_initiative_door(&su, &fresh).await;
+    let ask = initiate_body("channel.create", json!({"name": unique_channel_name()}));
+    let before = residue(&su, fresh.workspace).await;
+    let pair = futures::future::join_all((0..2).map(|_| {
+        let (client, base, bearer, ask) = (
+            client.clone(),
+            base.clone(),
+            fresh.hosted_bearer.clone(),
+            ask.clone(),
+        );
+        async move { call(&client, &base, &bearer, INITIATE, ask).await }
+    }))
+    .await;
+    for (status, answer) in &pair {
+        assert_eq!(*status, 200, "{answer}");
+    }
+    assert_eq!(
+        structured(&pair[0].1)["approvalId"],
+        structured(&pair[1].1)["approvalId"],
+        "two first calls of one id are one card"
+    );
+    let after = residue(&su, fresh.workspace).await;
+    assert_eq!(
+        (after.runs, after.approvals, after.messages, after.channels),
+        (
+            before.runs + 1,
+            before.approvals + 1,
+            before.messages + 1,
+            before.channels + 1
+        )
+    );
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 v5 U-b·U-d (#4704, N3 PR B) — the ceilings, the rate, the same proposal, the
+// switch, the decision's proof and the audit of the cards an agent raises unasked
+// ---------------------------------------------------------------------------
+
+/// `(409, -32005)`: the agent's own proposals are in the way (the ceilings, the rate, the same
+/// proposal) — told plainly, unlike the door.
+fn is_conflict(status: u16, answer: &Value) -> bool {
+    (status, answer["error"]["code"].as_i64()) == (409, Some(-32005))
+}
+
+/// `(409, -32004)`: one of the six conditions of the door, whichever it was.
+fn is_unavailable(status: u16, answer: &Value) -> bool {
+    (status, answer["error"]["code"].as_i64()) == (409, Some(-32004))
+}
+
+/// Raise an unasked `channel.create` named `name`; the raw answer.
+async fn raise(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    name: &str,
+) -> (u16, Value) {
+    initiate(
+        client,
+        base,
+        fixture,
+        initiate_body("channel.create", json!({"name": name})),
+    )
+    .await
+}
+
+fn approval_of(answer: &Value) -> Uuid {
+    Uuid::parse_str(
+        structured(answer)["approvalId"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no approval id in {answer}")),
+    )
+    .expect("an approval id")
+}
+
+/// A person says no, as the fixture's human.
+async fn reject(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval: Uuid,
+) -> (u16, Value) {
+    let (status, _headers, body) = decide_as(
+        client,
+        base,
+        fixture.workspace,
+        &fixture.human_jwt,
+        approval,
+        false,
+        Uuid::new_v4(),
+    )
+    .await;
+    (status, body)
+}
+
+async fn approval_status(su: &PgPool, approval: Uuid) -> String {
+    sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(su)
+        .await
+        .expect("approval status")
+}
+
+async fn channel_named(su: &PgPool, workspace: Uuid, name: &str) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM channel WHERE workspace_id=$1 AND name=$2")
+        .bind(workspace)
+        .bind(name)
+        .fetch_one(su)
+        .await
+        .expect("count channels by name")
+}
+
+/// Every pending approval of the workspace, as if each had run out (nobody said no).
+async fn expire_every_pending_card(su: &PgPool, workspace: Uuid) {
+    sqlx::query(
+        "UPDATE approval SET status = 'expired', decided_at = now() \
+          WHERE workspace_id = $1 AND status = 'pending'",
+    )
+    .bind(workspace)
+    .execute(su)
+    .await
+    .expect("expire the pending cards");
+}
+
+/// `count` runs the unasked-card producer would have written for the fixture's agent, `age` old
+/// (`'10 minutes'`, `'2 hours'`): the rate window counts rows, and a row is a row whoever wrote it.
+async fn backdated_initiative_runs(su: &PgPool, fixture: &Fixture, count: i32, age: &str) {
+    sqlx::query(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, idempotency_key, created_at) \
+         SELECT $1, $2, $3, 'succeeded', \
+                'agent_initiated:' || upper($2::text) || ':' || upper(gen_random_uuid()::text), \
+                now() - $4::interval \
+           FROM generate_series(1, $5)",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .bind(age)
+    .bind(count)
+    .execute(su)
+    .await
+    .expect("backdated initiative runs");
+}
+
+/// Move every unasked-card run of the agent to `age` ago.
+async fn age_initiative_runs(su: &PgPool, fixture: &Fixture, age: &str) {
+    sqlx::query(
+        "UPDATE agent_run SET created_at = now() - $3::interval \
+          WHERE workspace_id=$1 AND agent_member_id=$2 AND idempotency_key LIKE 'agent_initiated:%'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(age)
+    .execute(su)
+    .await
+    .expect("age the initiative runs");
+}
+
+async fn initiative_runs(su: &PgPool, fixture: &Fixture) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM agent_run \
+          WHERE workspace_id=$1 AND agent_member_id=$2 AND idempotency_key LIKE 'agent_initiated:%'",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(su)
+    .await
+    .expect("count initiative runs")
+}
+
+/// `(reason, detail)` of every `agent.initiative.refused` row of the workspace, oldest first.
+async fn refused_rows(su: &PgPool, workspace: Uuid) -> Vec<(String, Value)> {
+    audit_details_of(su, workspace, "agent.initiative.refused")
+        .await
+        .into_iter()
+        .map(|detail| (detail["reason"].as_str().unwrap_or("").to_string(), detail))
+        .collect()
+}
+
+fn refused_with(rows: &[(String, Value)], reason: &str) -> Vec<Value> {
+    rows.iter()
+        .filter(|(found, _)| found == reason)
+        .map(|(_, detail)| detail.clone())
+        .collect()
+}
+
+/// What the window table holds back for (agent, reason): the refusals that wrote no row.
+async fn suppressed_of(su: &PgPool, fixture: &Fixture, reason: &str) -> Option<i32> {
+    sqlx::query_scalar(
+        "SELECT suppressed FROM agent_initiative_refusal \
+          WHERE workspace_id=$1 AND agent_member_id=$2 AND reason=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(reason)
+    .fetch_optional(su)
+    .await
+    .expect("read the refusal window")
+}
+
+fn detail_keys(detail: &Value) -> Vec<String> {
+    let mut keys: Vec<String> = detail
+        .as_object()
+        .expect("an object detail")
+        .keys()
+        .cloned()
+        .collect();
+    keys.sort();
+    keys
+}
+
+/// **The ceilings (ADR U-d).** Three cards of an agent may wait in all — a card a person asked for
+/// is one of them — and two of those may be unasked, so the third place is always one a person's
+/// own proposal can still take. A refused call writes nothing but its audit row.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_pending_ceiling_counts_unasked_cards_among_the_three_and_holds_them_to_two() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // Two unasked cards stand; the third is the ceiling of two, though three places are free.
+    for name in ["alpha", "beta"] {
+        let (status, raised) = raise(&client, &base, &fixture, name).await;
+        assert_eq!(status, 200, "{raised}");
+    }
+    let before = residue(&su, fixture.workspace).await;
+    let (status, refused) = raise(&client, &base, &fixture, "gamma").await;
+    assert!(is_conflict(status, &refused), "{refused}");
+    assert_eq!(
+        residue(&su, fixture.workspace).await,
+        before,
+        "a refused call leaves no run, no approval, no card and no DM"
+    );
+    assert_eq!(channel_named(&su, fixture.workspace, "gamma").await, 0);
+    // Behind the ceiling an agent learns nothing from whether a name resolves (review M1): a
+    // channel that does not exist is the same `Conflict`, not the `InvalidArguments` it would
+    // get with room to spare — a resolution ahead of the limit would be a free enumeration oracle.
+    let (status, unseen) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body(
+            "channel.member.add",
+            json!({"channel": "no-such-room", "memberHandles": ["nobody"]}),
+        ),
+    )
+    .await;
+    assert!(is_conflict(status, &unseen), "{unseen}");
+
+    // The third place is a person's: a proposal a person asked for still lands…
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": unique_channel_name()}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "two unasked cards leave the third place: {proposed}"
+    );
+    // …and with three waiting in all, the next person's proposal is full too.
+    let (status, full) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": unique_channel_name()}),
+    )
+    .await;
+    assert!(is_conflict(status, &full), "{full}");
+
+    // The other direction: a card is refused when the agent already has three waiting in all, even
+    // when none of them is unasked (a person's three fill the agent's places).
+    expire_every_pending_card(&su, fixture.workspace).await;
+    for _ in 0..momo_agent::MAX_PENDING_WORKSPACE_ACTIONS {
+        let (status, proposed) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "channel.create",
+            json!({"name": unique_channel_name()}),
+        )
+        .await;
+        assert_eq!(status, 200, "{proposed}");
+    }
+    let (status, refused) = raise(&client, &base, &fixture, "delta").await;
+    assert!(
+        is_conflict(status, &refused),
+        "three waiting in all close the door whoever raised them: {refused}"
+    );
+    assert_eq!(channel_named(&su, fixture.workspace, "delta").await, 0);
+
+    // The three refusals (gamma, the name that does not resolve, delta) were all `pending_full`:
+    // one audit row for the hour, the other two counted.
+    let rows = refused_rows(&su, fixture.workspace).await;
+    assert_eq!(refused_with(&rows, "pending_full").len(), 1, "{rows:?}");
+    assert_eq!(rows.len(), 1, "no other reason was refused: {rows:?}");
+    assert_eq!(suppressed_of(&su, &fixture, "pending_full").await, Some(2));
+}
+
+/// **The rate (ADR U-d): six an hour, twenty a day**, counted from the runs the producer wrote —
+/// the Nth call lands and the N+1th is `Conflict`, a refusal raises nothing so it does not lengthen
+/// its own window, and a run older than the window is not counted (`created_at` is what moves it).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_rate_is_six_an_hour_and_twenty_a_day_counted_from_what_was_raised() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    // The hour. Five runs ten minutes old: the sixth lands, the seventh is the limit.
+    backdated_initiative_runs(&su, &fixture, 5, "10 minutes").await;
+    let (status, sixth) = raise(&client, &base, &fixture, "room-six").await;
+    assert_eq!(status, 200, "the sixth of an hour lands: {sixth}");
+    expire_every_pending_card(&su, fixture.workspace).await;
+    assert_eq!(initiative_runs(&su, &fixture).await, 6);
+    for name in ["room-seven", "room-eight"] {
+        let (status, refused) = raise(&client, &base, &fixture, name).await;
+        assert!(is_conflict(status, &refused), "{name}: {refused}");
+        assert_eq!(channel_named(&su, fixture.workspace, name).await, 0);
+    }
+    assert_eq!(
+        initiative_runs(&su, &fixture).await,
+        6,
+        "a refusal raises nothing, so it does not lengthen its own window"
+    );
+    // At the limit a name that does not resolve is the same `Conflict` (review M1).
+    let (status, unseen) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body(
+            "channel.member.add",
+            json!({"channel": "no-such-room", "memberHandles": ["nobody"]}),
+        ),
+    )
+    .await;
+    assert!(is_conflict(status, &unseen), "{unseen}");
+    let rows = refused_rows(&su, fixture.workspace).await;
+    assert_eq!(refused_with(&rows, "rate_limited").len(), 1, "{rows:?}");
+    assert_eq!(
+        suppressed_of(&su, &fixture, "rate_limited").await,
+        Some(2),
+        "three refusals in the hour: one row, two counted"
+    );
+
+    // The window is `created_at`: the same six runs an hour and a minute old are not this hour's.
+    age_initiative_runs(&su, &fixture, "61 minutes").await;
+    let (status, ninth) = raise(&client, &base, &fixture, "room-nine").await;
+    assert_eq!(
+        status, 200,
+        "runs older than the hour do not count: {ninth}"
+    );
+    expire_every_pending_card(&su, fixture.workspace).await;
+
+    // The day. Thirteen more, two hours old: 6 + 1 + 13 = 20 in the last day, 1 in the last hour.
+    backdated_initiative_runs(&su, &fixture, 13, "2 hours").await;
+    let (status, refused) = raise(&client, &base, &fixture, "room-ten").await;
+    assert!(
+        is_conflict(status, &refused),
+        "twenty in a day is the limit though the hour holds one: {refused}"
+    );
+    assert_eq!(channel_named(&su, fixture.workspace, "room-ten").await, 0);
+
+    // …and a run older than a day is not counted at all.
+    age_initiative_runs(&su, &fixture, "25 hours").await;
+    let (status, eleventh) = raise(&client, &base, &fixture, "room-eleven").await;
+    assert_eq!(
+        status, 200,
+        "runs older than the day do not count: {eleventh}"
+    );
+}
+
+/// **The same proposal (ADR U-d, review M7).** It is not raised again while it waits, nor for a day
+/// after a person rejected it; "the same" is what the server resolved — a channel name reduced so
+/// that `qa` → `qa2` is not a way round — and an expired card blocks nothing. A person's own
+/// proposal has no cooldown.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_same_proposal_is_not_raised_while_it_waits_nor_for_a_day_after_a_no() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let (status, raised) = raise(&client, &base, &fixture, "qa").await;
+    assert_eq!(status, 200, "{raised}");
+    let card_a = approval_of(&raised);
+
+    // While it waits: the same name, and every respelling of it, is `Conflict`.
+    for respelled in ["qa", "QA", "qa2", "qa-2", "qa_02"] {
+        let (status, refused) = raise(&client, &base, &fixture, respelled).await;
+        assert!(is_conflict(status, &refused), "{respelled}: {refused}");
+        assert_eq!(channel_named(&su, ws, respelled).await, 0);
+    }
+    // …another room is another proposal.
+    let (status, raised) = raise(&client, &base, &fixture, "qa-team").await;
+    assert_eq!(status, 200, "{raised}");
+    let card_b = approval_of(&raised);
+    let rows = refused_rows(&su, ws).await;
+    assert_eq!(refused_with(&rows, "duplicate").len(), 1, "{rows:?}");
+    assert_eq!(suppressed_of(&su, &fixture, "duplicate").await, Some(4));
+
+    // A person says no: for a day the same proposal is `Conflict` again, by its reduced name too.
+    let (status, rejected) = reject(&client, &base, &fixture, card_a).await;
+    assert_eq!(status, 200, "{rejected}");
+    assert_eq!(rejected["status"], "rejected");
+    for respelled in ["qa", "qa2"] {
+        let (status, refused) = raise(&client, &base, &fixture, respelled).await;
+        assert!(is_conflict(status, &refused), "{respelled}: {refused}");
+    }
+    let rows = refused_rows(&su, ws).await;
+    assert_eq!(refused_with(&rows, "cooldown").len(), 1, "{rows:?}");
+
+    // …but what a person asked for has no cooldown: the same words by the handle path land.
+    let (status, asked) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": "qa"}),
+    )
+    .await;
+    assert_eq!(status, 200, "a person's proposal has no cooldown: {asked}");
+    let asked_card = proposed_approval_3706(&asked);
+    sqlx::query("UPDATE approval SET status='expired', decided_at=now() WHERE id=$1")
+        .bind(asked_card)
+        .execute(&su)
+        .await
+        .unwrap();
+
+    // Twenty-three hours on it still stands; a day and an hour on it has lapsed.
+    sqlx::query("UPDATE approval SET decided_at = now() - interval '23 hours' WHERE id=$1")
+        .bind(card_a)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, refused) = raise(&client, &base, &fixture, "qa").await;
+    assert!(
+        is_conflict(status, &refused),
+        "a no of twenty-three hours ago still holds: {refused}"
+    );
+    sqlx::query("UPDATE approval SET decided_at = now() - interval '25 hours' WHERE id=$1")
+        .bind(card_a)
+        .execute(&su)
+        .await
+        .unwrap();
+    let (status, raised) = raise(&client, &base, &fixture, "qa").await;
+    assert_eq!(
+        status, 200,
+        "a rejection older than a day blocks nothing: {raised}"
+    );
+
+    // An expired card blocks nothing either — nobody said no — and one past its deadline that no
+    // sweep has written down yet is as expired as one the sweep did.
+    let (status, refused) = raise(&client, &base, &fixture, "qa-team").await;
+    assert!(
+        is_conflict(status, &refused),
+        "card B still waits: {refused}"
+    );
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+        .bind(card_b)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert_eq!(
+        approval_status(&su, card_b).await,
+        "pending",
+        "no sweep has run"
+    );
+    let (status, raised) = raise(&client, &base, &fixture, "qa-team").await;
+    assert_eq!(
+        status, 200,
+        "a card past its deadline blocks nothing: {raised}"
+    );
+
+    // Only a **person's no** starts the cooldown: a card that ended any other way — the run a
+    // person cancelled (or a system clean-up did), or a sweep that expired it — blocks nothing.
+    // (This test has raised six cards in the hour by now, which is the hourly rate: age them, so
+    // the answers below are about the cooldown and not about the rate.)
+    age_initiative_runs(&su, &fixture, "2 hours").await;
+    expire_every_pending_card(&su, ws).await;
+    for (how, status_after) in [("cancelled", "cancelled"), ("expired", "expired")] {
+        let (status, raised) = raise(&client, &base, &fixture, "ops").await;
+        assert_eq!(status, 200, "{how}: {raised}");
+        sqlx::query(
+            "UPDATE approval SET status = $2::approval_status, decided_at = now() WHERE id=$1",
+        )
+        .bind(approval_of(&raised))
+        .bind(status_after)
+        .execute(&su)
+        .await
+        .unwrap();
+    }
+    let (status, raised) = raise(&client, &base, &fixture, "ops").await;
+    assert_eq!(
+        status, 200,
+        "neither a cancelled nor an expired card started a cooldown: {raised}"
+    );
+    let (status, rejected) = reject(&client, &base, &fixture, approval_of(&raised)).await;
+    assert_eq!(status, 200, "{rejected}");
+    let (status, refused) = raise(&client, &base, &fixture, "ops").await;
+    assert!(
+        is_conflict(status, &refused),
+        "a person's no did: {refused}"
+    );
+
+    // A pin is the same proposal by the message's id, not by anything the agent spelled.
+    expire_every_pending_card(&su, ws).await;
+    let message = human_says(&client, &base, &fixture, fixture.channel, "고정할 글").await;
+    let pin = initiate_body("message.pin", json!({"messageId": message}));
+    let (status, raised) = initiate(&client, &base, &fixture, pin.clone()).await;
+    assert_eq!(status, 200, "{raised}");
+    let again = initiate_body("message.pin", json!({"messageId": message}));
+    let (status, refused) = initiate(&client, &base, &fixture, again).await;
+    assert!(
+        is_conflict(status, &refused),
+        "the same message twice: {refused}"
+    );
+    // Another message is another proposal.
+    let other = human_says(&client, &base, &fixture, fixture.channel, "또 하나").await;
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        initiate_body("message.pin", json!({"messageId": other})),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "another message is not the same proposal: {raised}"
+    );
+}
+
+/// **The switch, and the decision's proof (ADR U-b-3, U-d 「재증명」).** A card may be a day old, and
+/// everything that let the agent raise it can have changed: each way below leaves the approval
+/// pending (409 `action_args_invalid`, nothing spent), writes nothing, and **a person can still say
+/// no**. With nothing changed the same card runs (the control).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_card_is_proved_again_at_the_tap_and_a_person_can_always_say_no() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    #[derive(Clone, Copy, Debug)]
+    enum Drift {
+        SwitchOff,
+        SwitchNotABoolean,
+        ConnectionBeingTornDown,
+        CredentialRevoked,
+        CardNamesAnotherConnection,
+        CardNamesNoConnection,
+        ScopeWithdrawn,
+        AgentPaused,
+        AgentSuspended,
+        OwnerChanged,
+        ConnectionConfirmedBySomeoneElse,
+    }
+
+    // The control: nothing changed, the card runs.
+    {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let name = unique_channel_name();
+        let (status, raised) = raise(&client, &base, &fixture, &name).await;
+        assert_eq!(status, 200, "{raised}");
+        let card = approval_of(&raised);
+        let (status, approved) = approve(&client, &base, &fixture, card).await;
+        assert_eq!(status, 200, "{approved}");
+        assert_eq!(channel_named(&su, fixture.workspace, &name).await, 1);
+        assert_eq!(approval_status(&su, card).await, "approved");
+    }
+
+    // (A credential that merely lapsed is not drift: see
+    // `a_lapsed_credential_does_not_stop_the_owners_yes_for_any_of_the_four_actions`.)
+    for drift in [
+        Drift::SwitchOff,
+        Drift::SwitchNotABoolean,
+        Drift::ConnectionBeingTornDown,
+        Drift::CredentialRevoked,
+        Drift::CardNamesAnotherConnection,
+        Drift::CardNamesNoConnection,
+        Drift::ScopeWithdrawn,
+        Drift::AgentPaused,
+        Drift::AgentSuspended,
+        Drift::OwnerChanged,
+        Drift::ConnectionConfirmedBySomeoneElse,
+    ] {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let (name, spare) = (unique_channel_name(), unique_channel_name());
+        let (status, raised) = raise(&client, &base, &fixture, &name).await;
+        assert_eq!(status, 200, "{drift:?}: {raised}");
+        let card = approval_of(&raised);
+        let (status, raised) = raise(&client, &base, &fixture, &spare).await;
+        assert_eq!(status, 200, "{drift:?}: {raised}");
+        let spare_card = approval_of(&raised);
+        let ws = fixture.workspace;
+        match drift {
+            Drift::SwitchOff => {
+                sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": false}'::jsonb WHERE id=$1")
+                    .bind(ws).execute(&su).await.unwrap();
+            }
+            Drift::SwitchNotABoolean => {
+                sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": \"true\"}'::jsonb WHERE id=$1")
+                    .bind(ws).execute(&su).await.unwrap();
+            }
+            Drift::ConnectionBeingTornDown => {
+                sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Drift::CredentialRevoked => {
+                // Deliberate, unlike a lapse: an operator's emergency revoke, a refresh-token reuse.
+                sqlx::query("UPDATE token SET revoked_at = now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_token)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Drift::CardNamesAnotherConnection => {
+                sqlx::query("UPDATE approval SET payload = jsonb_set(payload, '{initiative,connection_id}', to_jsonb($2::text)) WHERE workspace_id=$1 AND status='pending'")
+                    .bind(ws).bind(Uuid::new_v4().to_string()).execute(&su).await.unwrap();
+            }
+            Drift::CardNamesNoConnection => {
+                sqlx::query("UPDATE approval SET payload = payload - 'initiative' WHERE workspace_id=$1 AND status='pending'")
+                    .bind(ws).execute(&su).await.unwrap();
+            }
+            Drift::ScopeWithdrawn => {
+                sqlx::query("UPDATE hosted_agent_connection SET approved_scopes = array_remove(approved_scopes, 'workspace:initiate') WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Drift::AgentPaused => {
+                sqlx::query("UPDATE agent_profile SET paused = true WHERE workspace_id=$1 AND agent_member_id=$2")
+                    .bind(ws).bind(fixture.hosted_agent).execute(&su).await.unwrap();
+            }
+            Drift::AgentSuspended => {
+                sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_agent)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Drift::OwnerChanged => {
+                let (new_owner, _) = seed_human_3708(&su, &fixture, "newowner", "admin").await;
+                sqlx::query(
+                    "UPDATE agent SET owner_human_id=$3 WHERE workspace_id=$1 AND member_id=$2",
+                )
+                .bind(ws)
+                .bind(fixture.hosted_agent)
+                .bind(new_owner)
+                .execute(&su)
+                .await
+                .unwrap();
+            }
+            Drift::ConnectionConfirmedBySomeoneElse => {
+                let (other, _) = seed_human_3708(&su, &fixture, "other", "admin").await;
+                sqlx::query("UPDATE hosted_agent_connection SET confirmed_by=$3 WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).bind(other).execute(&su).await.unwrap();
+            }
+        }
+
+        // Approving is refused, the approval is not spent, and nothing was made.
+        for (card, name) in [(card, &name), (spare_card, &spare)] {
+            let (status, refused) = approve(&client, &base, &fixture, card).await;
+            assert_eq!(status, 409, "{drift:?}: {refused}");
+            assert_eq!(refused["status"], "action_args_invalid", "{drift:?}");
+            assert_eq!(approval_status(&su, card).await, "pending", "{drift:?}");
+            assert_eq!(channel_named(&su, ws, name).await, 0, "{drift:?}");
+        }
+        for audit in ["action.approved", "channel.created"] {
+            assert!(
+                audit_details_of(&su, ws, audit).await.is_empty(),
+                "{drift:?}: a refused tap writes no {audit} row"
+            );
+        }
+        // …and a person can always say no.
+        let (status, rejected) = reject(&client, &base, &fixture, card).await;
+        assert_eq!(status, 200, "{drift:?}: {rejected}");
+        assert_eq!(approval_status(&su, card).await, "rejected", "{drift:?}");
+        assert_eq!(channel_named(&su, ws, &name).await, 0, "{drift:?}");
+
+        // The proof is made at the tap, so what drifted can drift back: the switch turned on again
+        // runs the card that was refused while it was off.
+        if matches!(drift, Drift::SwitchOff | Drift::SwitchNotABoolean) {
+            sqlx::query(
+                "UPDATE workspace SET settings = settings - 'agent_initiative' WHERE id=$1",
+            )
+            .bind(ws)
+            .execute(&su)
+            .await
+            .unwrap();
+            let (status, approved) = approve(&client, &base, &fixture, spare_card).await;
+            assert_eq!(status, 200, "{drift:?}: {approved}");
+            assert_eq!(channel_named(&su, ws, &spare).await, 1, "{drift:?}");
+        }
+    }
+}
+
+/// **Only the agent's owner decides an unasked card — even somebody else who is in the room.** A
+/// direct message has two people, so this is a belt: should a third admin ever be a member of the
+/// owner's DM (a future path, a data repair), their tap must not run what the agent asked of the
+/// owner — the executor's own admin gate would let them, and the card was drawn for the owner's
+/// eyes. Refused as a card that no longer stands; the approval stays pending, and the owner's own
+/// tap on the same card then runs it (the control).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn somebody_else_in_the_owners_dm_cannot_decide_the_card_but_the_owner_can() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let name = unique_channel_name();
+    let (status, raised) = raise(&client, &base, &fixture, &name).await;
+    assert_eq!(status, 200, "{raised}");
+    let card = approval_of(&raised);
+    let dm = owner_dm(&su, &fixture).await.expect("the DM is open");
+    let (third, third_jwt) = seed_human_3708(&su, &fixture, "third", "admin").await;
+    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+        .bind(ws)
+        .bind(dm)
+        .bind(third)
+        .execute(&su)
+        .await
+        .expect("seat a third admin in the owner's DM");
+
+    for approve in [true] {
+        let (status, _headers, refused) = decide_as(
+            &client,
+            &base,
+            ws,
+            &third_jwt,
+            card,
+            approve,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 409, "{refused}");
+        assert_eq!(refused["status"], "action_args_invalid");
+    }
+    assert_eq!(approval_status(&su, card).await, "pending");
+    assert_eq!(channel_named(&su, ws, &name).await, 0);
+
+    let (status, approved) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(
+        status, 200,
+        "the owner's tap runs the same card: {approved}"
+    );
+    assert_eq!(channel_named(&su, ws, &name).await, 1);
+}
+
+/// **The standing of the connection a card was raised through, one clause at a time (ADR U-d
+/// 「재증명」 ②).** The resolver the decision runs next judges the agent too, so through the route a
+/// paused or suspended agent is refused twice over; this asks the composition itself —
+/// `card_connection_stands_in_tx`, the crate-owned halves together — with the connection, its
+/// scope, its credential and the agent each taken away on their own, so none of its clauses can be
+/// deleted unnoticed. Two controls: nothing taken away, and a credential that merely **lapsed**
+/// (routine — an OAuth access token lives thirty minutes and the card a day), which stands.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_standing_check_names_the_connection_the_scope_the_credential_and_the_agent_one_by_one()
+{
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+
+    #[derive(Clone, Copy, Debug)]
+    enum Taken {
+        Nothing,
+        CredentialLapsed,
+        ConnectionNotActive,
+        ConnectionBeingTornDown,
+        CredentialRevoked,
+        AnotherConnection,
+        Scope,
+        AgentPaused,
+        AgentSuspended,
+        AgentDeleted,
+        AnotherAgent,
+    }
+    for taken in [
+        Taken::Nothing,
+        Taken::CredentialLapsed,
+        Taken::ConnectionNotActive,
+        Taken::ConnectionBeingTornDown,
+        Taken::CredentialRevoked,
+        Taken::AnotherConnection,
+        Taken::Scope,
+        Taken::AgentPaused,
+        Taken::AgentSuspended,
+        Taken::AgentDeleted,
+        Taken::AnotherAgent,
+    ] {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let ws = fixture.workspace;
+        let mut asked_connection = fixture.hosted_connection;
+        let mut asked_agent = fixture.hosted_agent;
+        match taken {
+            Taken::Nothing => {}
+            Taken::CredentialLapsed => {
+                sqlx::query("UPDATE token SET expires_at = now() - interval '1 hour' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_token).execute(&su).await.unwrap();
+            }
+            Taken::ConnectionNotActive => {
+                // (`active` with no proof cannot exist — the table's CHECK — so a connection that
+                // is not proved is one that is not active.)
+                sqlx::query("UPDATE hosted_agent_connection SET status='detected', proved_at=NULL, proved_by=NULL WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::ConnectionBeingTornDown => {
+                sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::CredentialRevoked => {
+                sqlx::query("UPDATE token SET revoked_at = now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_token)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Taken::AnotherConnection => asked_connection = Uuid::new_v4(),
+            Taken::Scope => {
+                sqlx::query("UPDATE hosted_agent_connection SET approved_scopes = array_remove(approved_scopes, 'workspace:initiate') WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::AgentPaused => {
+                sqlx::query("UPDATE agent_profile SET paused = true WHERE workspace_id=$1 AND agent_member_id=$2")
+                    .bind(ws).bind(fixture.hosted_agent).execute(&su).await.unwrap();
+            }
+            Taken::AgentSuspended => {
+                sqlx::query("UPDATE member SET status='suspended' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_agent)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Taken::AgentDeleted => {
+                sqlx::query("UPDATE member SET deleted_at = now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_agent)
+                    .execute(&su)
+                    .await
+                    .unwrap();
+            }
+            Taken::AnotherAgent => asked_agent = fixture.managed_agent,
+        }
+        // The composition AND each of its two halves, because a guard that two layers repeat is a
+        // guard whose removal from one layer nobody sees: the composition alone stays "no" when
+        // either half still says it.
+        let (composed, connection_half, agent_half) =
+            momo_db::with_tenant_tx(&su, ws, move |conn| {
+                Box::pin(async move {
+                    let composed =
+                        momo_server::routes::agent_initiative::card_connection_stands_in_tx(
+                            conn,
+                            ws,
+                            asked_agent,
+                            asked_connection,
+                        )
+                        .await?;
+                    let connection_half = momo_auth::hosted_connection_stands_in_tx(
+                        conn,
+                        ws,
+                        asked_agent,
+                        asked_connection,
+                    )
+                    .await
+                    .map_err(momo_db::DbError::from)?;
+                    let agent_half =
+                        momo_agent::initiative::initiative_scope_and_agent_stand_in_tx(
+                            conn,
+                            ws,
+                            asked_agent,
+                            asked_connection,
+                            "workspace:initiate",
+                        )
+                        .await?;
+                    Ok::<_, momo_db::DbError>((composed, connection_half, agent_half))
+                })
+            })
+            .await
+            .expect("the standing checks run");
+        // What each half answers when exactly one thing is taken away. The connection half
+        // (`momo-auth`) knows the connection, the agent it belongs to and its credential — and
+        // nothing of the scope or of the agent's own standing; the agent half (`momo-agent`) knows
+        // the scope and the agent — and nothing of the connection's status or its credential.
+        let (want_connection_half, want_agent_half) = match taken {
+            Taken::Nothing | Taken::CredentialLapsed => (true, true),
+            Taken::ConnectionNotActive
+            | Taken::ConnectionBeingTornDown
+            | Taken::CredentialRevoked => (false, true),
+            Taken::Scope | Taken::AgentPaused | Taken::AgentSuspended | Taken::AgentDeleted => {
+                (true, false)
+            }
+            Taken::AnotherConnection | Taken::AnotherAgent => (false, false),
+        };
+        assert_eq!(
+            (connection_half, agent_half),
+            (want_connection_half, want_agent_half),
+            "{taken:?}: each half answers only for what it owns"
+        );
+        assert_eq!(
+            composed,
+            matches!(taken, Taken::Nothing | Taken::CredentialLapsed),
+            "{taken:?}: the composition is true only when nothing was taken away (a lapsed credential is not that)"
+        );
+    }
+}
+
+/// **A lapsed credential does not stop the owner's yes — for any of the four actions (security
+/// review of #4704 PR B, H1 and round 2's High-1).** An OAuth connection's access token lives thirty
+/// minutes and a card waits a day, so by the tap the credential has lapsed while the connection is
+/// exactly as `active` and proved as it was. Each action is raised with a live credential, the
+/// credential lapses, and the owner approves: the **whole** effect lands — not merely the part
+/// that happens to read no credential. The pins pin as the owner; the member is added; and
+/// `channel.create` seats the agent *and* writes the room into the connection's coverage *and*
+/// leaves the `channels_granted` row (before the second review a lapsed credential left the agent
+/// seated in a room its connection did not cover, with neither).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_lapsed_credential_does_not_stop_the_owners_yes_for_any_of_the_four_actions() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        ChannelCreate,
+        ChannelMemberAdd,
+        MessagePin,
+        MessageUnpin,
+    }
+    for action in [
+        Action::ChannelCreate,
+        Action::ChannelMemberAdd,
+        Action::MessagePin,
+        Action::MessageUnpin,
+    ] {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let ws = fixture.workspace;
+        let label = format!("{action:?}");
+
+        // What is asked, raised while the credential is live.
+        let channel_name = unique_channel_name();
+        let message = human_says(&client, &base, &fixture, fixture.channel, "고정 대상").await;
+        let mut guest: Option<Uuid> = None;
+        let ask = match action {
+            Action::ChannelCreate => initiate_body("channel.create", json!({"name": channel_name})),
+            Action::ChannelMemberAdd => {
+                // A channel the connection covers and the owner is in, and somebody to add.
+                let (member, handle) = seed_extra_member_3706(&su, &fixture, "guest").await;
+                guest = Some(member);
+                let room = Uuid::new_v4();
+                let room_name = format!("room-{}", room.simple());
+                sqlx::query(
+                    "INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'private',$3)",
+                )
+                .bind(room)
+                .bind(ws)
+                .bind(&room_name)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query(
+                    "INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)",
+                )
+                .bind(room)
+                .bind(ws)
+                .execute(&su)
+                .await
+                .unwrap();
+                for who in [fixture.hosted_agent, fixture.human] {
+                    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+                        .bind(ws).bind(room).bind(who).execute(&su).await.unwrap();
+                }
+                sqlx::query("UPDATE hosted_agent_connection SET approved_channel_ids = approved_channel_ids || $3 WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).bind(vec![room]).execute(&su).await.unwrap();
+                initiate_body(
+                    "channel.member.add",
+                    json!({"channel": room_name, "memberHandles": [handle]}),
+                )
+            }
+            Action::MessagePin => initiate_body("message.pin", json!({"messageId": message})),
+            Action::MessageUnpin => {
+                sqlx::query("INSERT INTO message_pin(workspace_id, channel_id, message_id, pinned_by) VALUES($1,$2,$3,$4)")
+                    .bind(ws).bind(fixture.channel).bind(message).bind(fixture.human)
+                    .execute(&su).await.unwrap();
+                initiate_body("message.unpin", json!({"messageId": message}))
+            }
+        };
+        let (status, raised) = initiate(&client, &base, &fixture, ask).await;
+        assert_eq!(status, 200, "{label}: {raised}");
+        let card = approval_of(&raised);
+
+        // The credential lapses (and the connection is exactly what it was).
+        sqlx::query("UPDATE token SET expires_at = now() - interval '1 hour' WHERE workspace_id=$1 AND id=$2")
+            .bind(ws).bind(fixture.hosted_token).execute(&su).await.unwrap();
+        let connection_status: String = sqlx::query_scalar(
+            "SELECT status FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2",
+        )
+        .bind(ws)
+        .bind(fixture.hosted_connection)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(connection_status, "active", "{label}");
+
+        let (status, approved) = approve(&client, &base, &fixture, card).await;
+        assert_eq!(
+            status, 200,
+            "{label}: a lapsed credential does not stop the owner's yes: {approved}"
+        );
+        assert_eq!(approval_status(&su, card).await, "approved", "{label}");
+
+        // The whole effect.
+        match action {
+            Action::ChannelCreate => {
+                let created: Option<Uuid> =
+                    sqlx::query_scalar("SELECT id FROM channel WHERE workspace_id=$1 AND name=$2")
+                        .bind(ws)
+                        .bind(&channel_name)
+                        .fetch_optional(&su)
+                        .await
+                        .unwrap();
+                let created = created.unwrap_or_else(|| panic!("{label}: the channel was made"));
+                let seated: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM membership WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3 AND left_at IS NULL",
+                )
+                .bind(ws).bind(created).bind(fixture.hosted_agent).fetch_one(&su).await.unwrap();
+                assert_eq!(seated, 1, "{label}: the agent is seated");
+                let covered: bool = sqlx::query_scalar(
+                    "SELECT $3 = ANY(approved_channel_ids) FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2",
+                )
+                .bind(ws).bind(fixture.hosted_connection).bind(created).fetch_one(&su).await.unwrap();
+                assert!(
+                    covered,
+                    "{label}: the connection covers the room the agent was seated in"
+                );
+                let granted = audit_details_of(&su, ws, "hosted_connection.channels_granted").await;
+                assert_eq!(granted.len(), 1, "{label}: {granted:?}");
+                assert_eq!(granted[0]["approval_id"], card.to_string(), "{label}");
+                assert_eq!(granted[0]["origin"], "agent_initiated", "{label}");
+            }
+            Action::ChannelMemberAdd => {
+                let added: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM membership WHERE workspace_id=$1 AND member_id=$2 AND left_at IS NULL \
+                        AND channel_id IN (SELECT id FROM channel WHERE workspace_id=$1 AND name LIKE 'room-%')",
+                )
+                .bind(ws).bind(guest.expect("a guest")).fetch_one(&su).await.unwrap();
+                assert_eq!(added, 1, "{label}: the guest is in the room");
+            }
+            Action::MessagePin => {
+                assert_eq!(
+                    pins_in(&su, fixture.channel).await,
+                    vec![(message, fixture.human)],
+                    "{label}: pinned, by the person who tapped"
+                );
+            }
+            Action::MessageUnpin => {
+                assert!(
+                    pins_in(&su, fixture.channel).await.is_empty(),
+                    "{label}: the pin is gone"
+                );
+            }
+        }
+        assert_eq!(
+            audit_details_of(&su, ws, "action.approved").await.len(),
+            1,
+            "{label}: one approval row"
+        );
+    }
+}
+
+/// **An unasked card never half-executes (security review of #4704 PR B, round 2's High-1).** The
+/// decision proves the card's connection stands, then — a statement later — locks that row to widen
+/// it. If the connection stops being `active` in between (an operator's disconnect, committing
+/// exactly then), the card is stale: **refused before any write**, not executed into a room the
+/// connection does not cover. The race is played, not asserted: a transaction holds the
+/// connection row, the owner's tap runs up to the executor's lock and waits there, the holder
+/// ends the connection and lets go, and the waiting tap re-reads the row it was waiting for.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_connection_that_ends_between_the_proof_and_the_write_leaves_the_card_unexecuted() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let name = unique_channel_name();
+    let (status, raised) = raise(&client, &base, &fixture, &name).await;
+    assert_eq!(status, 200, "{raised}");
+    let card = approval_of(&raised);
+    let before = residue(&su, ws).await;
+
+    // Hold the connection row: the tap will get as far as the executor's `FOR UPDATE` and wait.
+    let mut holder = su
+        .begin()
+        .await
+        .expect("a transaction to hold the connection row");
+    sqlx::query(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2 FOR UPDATE",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .fetch_one(&mut *holder)
+    .await
+    .expect("hold the connection row");
+    let tap = tokio::spawn({
+        let (client, base, fixture_jwt) = (client.clone(), base.clone(), fixture.human_jwt.clone());
+        async move {
+            let (status, _headers, body) =
+                decide_as(&client, &base, ws, &fixture_jwt, card, true, Uuid::new_v4()).await;
+            (status, body)
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND query LIKE '%cardinality(approved_channel_ids)%FOR UPDATE%'",
+        )
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        if waiting >= 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the tap must reach the executor's lock on the connection row"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    // The connection ends — and the waiting tap now re-reads the row it queued for.
+    sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
+        .bind(ws)
+        .bind(fixture.hosted_connection)
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    holder.commit().await.unwrap();
+    let (status, refused) = tap.await.unwrap();
+
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid", "{refused}");
+    assert_eq!(
+        approval_status(&su, card).await,
+        "pending",
+        "the approval is not spent"
+    );
+    assert_eq!(channel_named(&su, ws, &name).await, 0, "no room was made");
+    assert_eq!(
+        residue(&su, ws).await,
+        before,
+        "nothing was written: no channel, no seat, no card line"
+    );
+    assert!(
+        audit_details_of(&su, ws, "hosted_connection.channels_granted")
+            .await
+            .is_empty()
+    );
+}
+
+/// **Who may see or decide a card an agent raised unasked (ADR U-c, review M8).** It stands in its
+/// owner's one-to-one DM, so to anybody outside — a workspace admin included — the id answers as a
+/// missing approval does (a `403` would confirm the card exists and whose room it is in); and the
+/// avatar-preview route, which an unasked card never stages an image for, is the same not-found for
+/// everyone.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_person_outside_the_owners_dm_is_told_nothing_of_the_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let (_admin, admin_jwt) = seed_human_3708(&su, &fixture, "outsider", "admin").await;
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let (status, raised) = raise(&client, &base, &fixture, &unique_channel_name()).await;
+    assert_eq!(status, 200, "{raised}");
+    let card = approval_of(&raised);
+
+    // What a made-up id answers, for each outsider: the shape every answer must have.
+    for (who, jwt) in [("admin", &admin_jwt), ("plain member", &plain_jwt)] {
+        let (status, _headers, missing) = decide_as(
+            &client,
+            &base,
+            ws,
+            jwt,
+            Uuid::new_v4(),
+            true,
+            Uuid::new_v4(),
+        )
+        .await;
+        assert_eq!(status, 404, "{who}: {missing}");
+        for approve in [true, false] {
+            let (status, _headers, answered) =
+                decide_as(&client, &base, ws, jwt, card, approve, Uuid::new_v4()).await;
+            assert_eq!(status, 404, "{who} (approve={approve}): {answered}");
+            assert_eq!(answered["status"], missing["status"], "{who}");
+            assert_eq!(
+                answered["decisionReason"], missing["decisionReason"],
+                "{who}"
+            );
+        }
+    }
+    assert_eq!(
+        approval_status(&su, card).await,
+        "pending",
+        "nobody outside decided it"
+    );
+
+    // The other decision route — by run — says the same, whichever run is named. A run in the path
+    // that is not the card's must not tell an outsider that "there is such a card" (400) from "there
+    // is none" (404) (security review of #4704 PR B, M1).
+    let by_run = |jwt: String, run: Uuid, approval: Uuid| {
+        let (client, url) = (
+            client.clone(),
+            format!("{base}/v1/agent-runs/{run}/approval-decisions"),
+        );
+        async move {
+            let response = client
+                .post(url)
+                .bearer_auth(jwt)
+                .json(&json!({"approvalId": approval, "approve": true, "clientDecisionId": Uuid::new_v4()}))
+                .send()
+                .await
+                .expect("by-run decision responds");
+            (
+                response.status().as_u16(),
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+    let cards_run = run_of_approval(&su, card).await;
+    for (who, jwt) in [("admin", &admin_jwt), ("plain member", &plain_jwt)] {
+        let (status, missing) = by_run(jwt.clone(), Uuid::new_v4(), Uuid::new_v4()).await;
+        assert_eq!(status, 404, "{who}: {missing}");
+        for (label, run) in [("another run", Uuid::new_v4()), ("its own run", cards_run)] {
+            let (status, answered) = by_run(jwt.clone(), run, card).await;
+            assert_eq!(status, 404, "{who}, {label}: {answered}");
+            assert_eq!(answered["status"], missing["status"], "{who}, {label}");
+            assert_eq!(
+                answered["decisionReason"], missing["decisionReason"],
+                "{who}, {label}"
+            );
+        }
+    }
+    // The one person in the room is still told the plain truth about a run that is not the card's.
+    let (status, mismatch) = by_run(fixture.human_jwt.clone(), Uuid::new_v4(), card).await;
+    assert_eq!(status, 400, "{mismatch}");
+    assert_eq!(
+        approval_status(&su, card).await,
+        "pending",
+        "nothing above decided it"
+    );
+
+    // The picture preview is the same not-found for the owner and for the outsiders alike.
+    for jwt in [&fixture.human_jwt, &admin_jwt, &plain_jwt] {
+        let response = client
+            .get(format!(
+                "{base}/v1/workspaces/{ws}/approvals/{card}/avatar-preview"
+            ))
+            .bearer_auth(jwt)
+            .send()
+            .await
+            .expect("preview responds");
+        assert_eq!(response.status().as_u16(), 404);
+    }
+
+    // The one person in the room still decides it.
+    let (status, approved) = approve(&client, &base, &fixture, card).await;
+    assert_eq!(status, 200, "{approved}");
+}
+
+/// **The switch is written by an administrator and by nobody an agent can reach (ADR U-b-3).**
+/// `PATCH …/settings` takes `agent_initiative` as a boolean from an owner or admin and from nobody
+/// else, a string or a number is refused (the door would read it as *off*), and the key the REST
+/// route writes is the key the door reads: switched off, the tool is refused; `null`, it lands.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_administrator_flips_the_switch_by_rest_and_the_door_follows() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+    let plain_jwt = seed_plain_member(&su, &fixture).await;
+    let patch = |jwt: String, body: Value| {
+        let (client, url) = (
+            client.clone(),
+            format!("{base}/v1/workspaces/{ws}/settings"),
+        );
+        async move {
+            let response = client
+                .patch(url)
+                .bearer_auth(jwt)
+                .json(&body)
+                .send()
+                .await
+                .expect("settings patch responds");
+            (
+                response.status().as_u16(),
+                response.json::<Value>().await.unwrap_or(Value::Null),
+            )
+        }
+    };
+
+    // A person who is not an administrator cannot write it; nor can a non-boolean be stored.
+    let (status, _) = patch(plain_jwt, json!({"agent_initiative": false})).await;
+    assert_eq!(status, 403);
+    for not_a_switch in [json!("false"), json!(0), json!({})] {
+        let (status, body) = patch(
+            fixture.human_jwt.clone(),
+            json!({"agent_initiative": not_a_switch}),
+        )
+        .await;
+        assert_eq!(status, 400, "{body}");
+    }
+
+    // Off: the door is closed (the same bytes as every other closed door), nothing is raised.
+    let (status, stored) = patch(
+        fixture.human_jwt.clone(),
+        json!({"agent_initiative": false}),
+    )
+    .await;
+    assert_eq!(status, 200, "{stored}");
+    assert_eq!(stored["agent_initiative"], json!(false));
+    let before = residue(&su, ws).await;
+    let (status, refused) = raise(&client, &base, &fixture, "alpha").await;
+    assert!(is_unavailable(status, &refused), "{refused}");
+    assert_eq!(residue(&su, ws).await, before);
+    let rows = refused_rows(&su, ws).await;
+    assert_eq!(refused_with(&rows, "switch_off").len(), 1, "{rows:?}");
+
+    // `null` takes the key out: absent is on.
+    let (status, stored) =
+        patch(fixture.human_jwt.clone(), json!({"agent_initiative": null})).await;
+    assert_eq!(status, 200, "{stored}");
+    assert!(stored.get("agent_initiative").is_none());
+    let (status, raised) = raise(&client, &base, &fixture, "alpha").await;
+    assert_eq!(status, 200, "{raised}");
+}
+
+/// **No proposal can flip the switch that bounds proposals (ADR U-b-3).** An agent's
+/// `workspace.settings.update` names two keys, and `agentInitiative` (or the stored spelling) is
+/// neither: refused as an argument, whichever way it is written, alone or beside a legal key.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_agents_settings_proposal_cannot_name_the_initiative_switch() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    for args in [
+        json!({"agentInitiative": false}),
+        json!({"agent_initiative": false}),
+        json!({"welcomePrompt": "환영해요", "agentInitiative": false}),
+    ] {
+        let (status, refused) = try_propose_action_3706(
+            &client,
+            &base,
+            &su,
+            &fixture,
+            "workspace.settings.update",
+            args.clone(),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&refused)),
+            (400, -32602),
+            "{args}: {refused}"
+        );
+    }
+    // The control: the two keys the action does take are proposable.
+    let (status, proposed) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "workspace.settings.update",
+        json!({"welcomePrompt": "환영해요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let settings: Value = sqlx::query_scalar("SELECT settings FROM workspace WHERE id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert!(settings.get("agent_initiative").is_none(), "{settings}");
+}
+
+/// **Every refusal leaves one closed row, and a flood leaves one row an hour (ADR U-d, review M5).**
+/// The nine reasons, each driven from its own situation: exactly one `agent.initiative.refused` row
+/// whose keys are the schema's, with the reason, an action id from the closed list, and nothing the
+/// agent said — no name, no rationale. Then a flood of one reason: one row, the rest counted, and the
+/// next window's first row carries the count.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn every_refusal_leaves_one_closed_row_and_a_flood_leaves_one_row_an_hour() {
+    use momo_agent::initiative::RefusalReason as R;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let rationale = "정기 점검에 쓸 채널이에요";
+
+    // (reason, the answer the agent is given: Unavailable | Conflict | InvalidArguments)
+    #[derive(Clone, Copy, PartialEq, Debug)]
+    enum Told {
+        Unavailable,
+        Conflict,
+        Invalid,
+    }
+    let nine: [(R, Told); 9] = [
+        (R::SwitchOff, Told::Unavailable),
+        (R::NoOwner, Told::Unavailable),
+        (R::OwnerCannotDecide, Told::Unavailable),
+        (R::TargetUnavailable, Told::Unavailable),
+        (R::RateLimited, Told::Conflict),
+        (R::PendingFull, Told::Conflict),
+        (R::Duplicate, Told::Conflict),
+        (R::Cooldown, Told::Conflict),
+        (R::InvalidArguments, Told::Invalid),
+    ];
+    assert_eq!(
+        nine.map(|(reason, _)| reason),
+        R::ALL,
+        "this table drives exactly the closed vocabulary"
+    );
+
+    for (reason, told) in nine {
+        let code = reason.code();
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let ws = fixture.workspace;
+        let secret_name = format!("zz-{}", &Uuid::new_v4().simple().to_string()[..8]);
+        let mut ask = json!({
+            "clientRequestId": Uuid::new_v4(),
+            "actionId": "channel.create",
+            "args": {"name": secret_name},
+            "rationale": rationale,
+        });
+        match reason {
+            R::SwitchOff => {
+                sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": false}'::jsonb WHERE id=$1")
+                    .bind(ws).execute(&su).await.unwrap();
+            }
+            R::NoOwner => {
+                sqlx::query(
+                    "UPDATE agent SET owner_human_id = NULL WHERE workspace_id=$1 AND member_id=$2",
+                )
+                .bind(ws)
+                .bind(fixture.hosted_agent)
+                .execute(&su)
+                .await
+                .unwrap();
+            }
+            R::OwnerCannotDecide => {
+                sqlx::query("UPDATE workspace_membership SET role='member' WHERE workspace_id=$1 AND member_id=$2")
+                    .bind(ws).bind(fixture.human).execute(&su).await.unwrap();
+            }
+            R::TargetUnavailable => {
+                // A private room only the agent is in, covered by its connection; the owner is not in it.
+                let hush = Uuid::new_v4();
+                let hush_name = format!("hush-{}", hush.simple());
+                sqlx::query(
+                    "INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'private',$3)",
+                )
+                .bind(hush)
+                .bind(ws)
+                .bind(&hush_name)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query(
+                    "INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)",
+                )
+                .bind(hush)
+                .bind(ws)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query(
+                    "INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)",
+                )
+                .bind(ws)
+                .bind(hush)
+                .bind(fixture.hosted_agent)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query("UPDATE hosted_agent_connection SET approved_channel_ids = approved_channel_ids || $3 WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).bind(vec![hush]).execute(&su).await.unwrap();
+                let (_guest, guest_handle) = seed_extra_member_3706(&su, &fixture, "guest").await;
+                ask = json!({
+                    "clientRequestId": Uuid::new_v4(),
+                    "actionId": "channel.member.add",
+                    "args": {"channel": hush_name, "memberHandles": [guest_handle]},
+                    "rationale": rationale,
+                });
+            }
+            R::RateLimited => {
+                backdated_initiative_runs(&su, &fixture, 6, "10 minutes").await;
+            }
+            R::PendingFull => {
+                for name in ["alpha", "beta"] {
+                    let (status, raised) = raise(&client, &base, &fixture, name).await;
+                    assert_eq!(status, 200, "{raised}");
+                }
+            }
+            R::Duplicate => {
+                let (status, raised) = raise(&client, &base, &fixture, &secret_name).await;
+                assert_eq!(status, 200, "{raised}");
+            }
+            R::Cooldown => {
+                let (status, raised) = raise(&client, &base, &fixture, &secret_name).await;
+                assert_eq!(status, 200, "{raised}");
+                let (status, rejected) =
+                    reject(&client, &base, &fixture, approval_of(&raised)).await;
+                assert_eq!(status, 200, "{rejected}");
+            }
+            R::InvalidArguments => {
+                // The agent's own: a channel it cannot see by name.
+                ask = json!({
+                    "clientRequestId": Uuid::new_v4(),
+                    "actionId": "channel.member.add",
+                    "args": {"channel": "no-such-room", "memberHandles": ["nobody"]},
+                    "rationale": rationale,
+                });
+            }
+        }
+        let (status, refused) = initiate(&client, &base, &fixture, ask.clone()).await;
+        match told {
+            Told::Unavailable => assert!(is_unavailable(status, &refused), "{code}: {refused}"),
+            Told::Conflict => assert!(is_conflict(status, &refused), "{code}: {refused}"),
+            Told::Invalid => assert_eq!(
+                (status, error_code(&refused)),
+                (400, -32602),
+                "{code}: {refused}"
+            ),
+        }
+
+        let rows = refused_rows(&su, ws).await;
+        assert_eq!(
+            rows.len(),
+            1,
+            "{code}: exactly one refused row, and it is this one: {rows:?}"
+        );
+        let detail = &rows[0].1;
+        assert_eq!(rows[0].0, code);
+        assert_eq!(
+            detail_keys(detail),
+            ["action_id", "reason", "schema", "suppressed"],
+            "{code}: the detail's keys are the closed schema's"
+        );
+        assert_eq!(detail["schema"], "momo.agent.initiative.v1");
+        assert_eq!(detail["suppressed"], 0);
+        assert!(
+            [
+                "channel.create",
+                "channel.member.add",
+                "message.pin",
+                "message.unpin"
+            ]
+            .contains(&detail["action_id"].as_str().unwrap()),
+            "{code}: {detail}"
+        );
+        let text = detail.to_string();
+        for word in [secret_name.as_str(), rationale, "no-such-room", "hush-"] {
+            assert!(
+                !text.contains(word),
+                "{code}: the row holds a word the agent said: {text}"
+            );
+        }
+        // Who it is about: the agent, and no target.
+        let who: (Option<Uuid>, Option<Uuid>, Option<String>) = sqlx::query_as(
+            "SELECT actor_member_id, target_id, target_type FROM audit_log \
+              WHERE workspace_id=$1 AND action='agent.initiative.refused'",
+        )
+        .bind(ws)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(who, (Some(fixture.hosted_agent), None, None), "{code}");
+    }
+
+    // The flood: twenty-five refusals of one reason in a minute are one row.
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let ws = fixture.workspace;
+    sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": false}'::jsonb WHERE id=$1")
+        .bind(ws).execute(&su).await.unwrap();
+    for _ in 0..25 {
+        let (status, refused) = raise(&client, &base, &fixture, "alpha").await;
+        assert!(is_unavailable(status, &refused), "{refused}");
+    }
+    let rows = refused_rows(&su, ws).await;
+    assert_eq!(
+        refused_with(&rows, "switch_off").len(),
+        1,
+        "a flood is one row: {rows:?}"
+    );
+    assert_eq!(suppressed_of(&su, &fixture, "switch_off").await, Some(24));
+
+    // Another reason of the same agent in the same hour has its own window and its own row.
+    sqlx::query("UPDATE workspace SET settings = settings - 'agent_initiative' WHERE id=$1")
+        .bind(ws)
+        .execute(&su)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE agent SET owner_human_id = NULL WHERE workspace_id=$1 AND member_id=$2")
+        .bind(ws)
+        .bind(fixture.hosted_agent)
+        .execute(&su)
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        let (status, refused) = raise(&client, &base, &fixture, "alpha").await;
+        assert!(is_unavailable(status, &refused), "{refused}");
+    }
+    let rows = refused_rows(&su, ws).await;
+    assert_eq!(refused_with(&rows, "switch_off").len(), 1, "{rows:?}");
+    assert_eq!(refused_with(&rows, "no_owner").len(), 1, "{rows:?}");
+    assert_eq!(suppressed_of(&su, &fixture, "no_owner").await, Some(2));
+
+    // An hour on: the next refusal writes the second row, and **it carries the 24** the first
+    // window held back; the window starts again from zero.
+    sqlx::query("UPDATE agent_initiative_refusal SET window_started_at = now() - interval '61 minutes' WHERE workspace_id=$1 AND reason='switch_off'")
+        .bind(ws).execute(&su).await.unwrap();
+    sqlx::query("UPDATE workspace SET settings = settings || '{\"agent_initiative\": false}'::jsonb WHERE id=$1")
+        .bind(ws).execute(&su).await.unwrap();
+    let (status, refused) = raise(&client, &base, &fixture, "alpha").await;
+    assert!(is_unavailable(status, &refused), "{refused}");
+    let rows = refused_rows(&su, ws).await;
+    let switch_off = refused_with(&rows, "switch_off");
+    assert_eq!(switch_off.len(), 2, "{rows:?}");
+    assert_eq!(switch_off[0]["suppressed"], 0);
+    assert_eq!(
+        switch_off[1]["suppressed"], 24,
+        "the next window's first row carries the count"
+    );
+    assert_eq!(suppressed_of(&su, &fixture, "switch_off").await, Some(0));
+    let (status, _) = raise(&client, &base, &fixture, "alpha").await;
+    assert_eq!(status, 409);
+    assert_eq!(
+        refused_with(&refused_rows(&su, ws).await, "switch_off").len(),
+        2,
+        "still one row for this window"
+    );
+    assert_eq!(suppressed_of(&su, &fixture, "switch_off").await, Some(1));
+}
+
+/// **A card that stands leaves one `opened` row, and the decision's rows say where it came from
+/// (ADR U-d 감사).** The `opened` row's keys are the schema's; its actor is the agent, its subject
+/// the owner, its target the approval; it says whether this call opened the DM. Then every
+/// decision-side row of an unasked card — `action.approved`, the domain row, `approval.rejected`,
+/// `approval.expired` by a late tap and by the sweep — carries `origin`, and a card a person asked
+/// for carries none (its rows are exactly what they were).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_card_that_stands_leaves_one_opened_row_and_its_decision_rows_say_where_it_came_from() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let (status, raised) = raise(&client, &base, &fixture, "alpha").await;
+    assert_eq!(status, 200, "{raised}");
+    let card_a = approval_of(&raised);
+    // `beta` carries a sentence of the agent's own, which no decision-side row may repeat.
+    let (status, raised) = initiate(
+        &client,
+        &base,
+        &fixture,
+        json!({"clientRequestId": Uuid::new_v4(), "actionId": "channel.create",
+               "args": {"name": "beta"}, "rationale": "정기 점검용 방이에요"}),
+    )
+    .await;
+    assert_eq!(status, 200, "{raised}");
+    let card_b = approval_of(&raised);
+
+    let opened = audit_details_of(&su, ws, "agent.initiative.opened").await;
+    assert_eq!(
+        opened.len(),
+        2,
+        "one row for each card that stands: {opened:?}"
+    );
+    for row in &opened {
+        assert_eq!(
+            detail_keys(row),
+            ["action_id", "approval_id", "dm_created", "run_id", "schema"],
+            "the keys are the closed schema's: {row}"
+        );
+        assert_eq!(row["schema"], "momo.agent.initiative.v1");
+        assert_eq!(row["action_id"], "channel.create");
+    }
+    assert_eq!(opened[0]["approval_id"], card_a.to_string());
+    assert_eq!(
+        opened[0]["dm_created"], true,
+        "the first call opened the DM"
+    );
+    assert_eq!(opened[1]["approval_id"], card_b.to_string());
+    assert_eq!(opened[1]["dm_created"], false, "the second found it open");
+    let run_a = run_of_approval(&su, card_a).await;
+    assert_eq!(opened[0]["run_id"], run_a.to_string());
+    // (actor, subject, target type, target id, run)
+    type WhoAndWhat = (
+        Option<Uuid>,
+        Option<Uuid>,
+        Option<String>,
+        Option<Uuid>,
+        Option<Uuid>,
+    );
+    let who: WhoAndWhat = sqlx::query_as(
+        "SELECT actor_member_id, subject_member_id, target_type, target_id, run_id \
+               FROM audit_log WHERE workspace_id=$1 AND action='agent.initiative.opened' \
+                AND detail->>'approval_id' = $2",
+    )
+    .bind(ws)
+    .bind(card_a.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        who,
+        (
+            Some(fixture.hosted_agent),
+            Some(fixture.human),
+            Some("approval".to_string()),
+            Some(card_a),
+            Some(run_a)
+        )
+    );
+    assert!(
+        refused_rows(&su, ws).await.is_empty(),
+        "a call that stood is not a refusal"
+    );
+
+    // Approved: the `action.approved` row and the domain row say so, once each.
+    let (status, approved) = approve(&client, &base, &fixture, card_a).await;
+    assert_eq!(status, 200, "{approved}");
+    let said = audit_details_of(&su, ws, "action.approved").await;
+    assert_eq!(said.len(), 1, "{said:?}");
+    assert_eq!(
+        detail_keys(&said[0]),
+        [
+            "action_id",
+            "approval_id",
+            "decided_by",
+            "origin",
+            "proposed_by",
+            "ref",
+            "schema"
+        ]
+    );
+    assert_eq!(said[0]["origin"], "agent_initiated");
+    let domain = audit_details_of(&su, ws, "channel.created").await;
+    assert_eq!(domain.len(), 1, "{domain:?}");
+    assert_eq!(domain[0]["origin"], "agent_initiated", "{}", domain[0]);
+
+    // Rejected.
+    let (status, rejected) = reject(&client, &base, &fixture, card_b).await;
+    assert_eq!(status, 200, "{rejected}");
+    let rejections = audit_details_of(&su, ws, "approval.rejected").await;
+    assert_eq!(rejections.len(), 1, "{rejections:?}");
+    assert_eq!(rejections[0]["origin"], "agent_initiated");
+    // The decision event carries the whole stored payload — the agent's own words among it. For an
+    // unasked card the audit copy leaves it out: the row holds ids, the status, who and when, and
+    // not one word the agent wrote (security review of #4704 PR B, M2).
+    let decision_keys = [
+        "action",
+        "action_type",
+        "approval_id",
+        "channel_id",
+        "decided_at_ms",
+        "decided_by",
+        "decision_reason",
+        "origin",
+        "requested_by",
+        "run_id",
+        "schema",
+        "status",
+    ];
+    assert_eq!(detail_keys(&rejections[0]), decision_keys);
+    assert!(
+        !rejections[0].to_string().contains("beta")
+            && !rejections[0].to_string().contains("정기 점검용"),
+        "no name the agent chose: {}",
+        rejections[0]
+    );
+
+    // Expired — by a late tap, and by the sweep.
+    let overdue = |approval: Uuid| {
+        let su = su.clone();
+        async move {
+            sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+                .bind(approval)
+                .execute(&su)
+                .await
+                .expect("make the card overdue");
+        }
+    };
+    let (status, raised) = raise(&client, &base, &fixture, "gamma").await;
+    assert_eq!(status, 200, "{raised}");
+    let late = approval_of(&raised);
+    overdue(late).await;
+    let (status, _headers, settled) = decide_as(
+        &client,
+        &base,
+        ws,
+        &fixture.human_jwt,
+        late,
+        true,
+        Uuid::new_v4(),
+    )
+    .await;
+    assert_eq!(
+        (status, &settled["status"]),
+        (409, &json!("expired")),
+        "{settled}"
+    );
+    let (status, raised) = raise(&client, &base, &fixture, "delta").await;
+    assert_eq!(status, 200, "{raised}");
+    overdue(approval_of(&raised)).await;
+    let notifier = momo_notifier_pool().await;
+    let stats = momo_notifier::approval_sweep::sweep_expired_approvals(&notifier, 50)
+        .await
+        .expect("the sweep runs");
+    assert!(stats.expired >= 1, "{stats:?}");
+    let expiries = audit_details_of(&su, ws, "approval.expired").await;
+    assert_eq!(expiries.len(), 2, "{expiries:?}");
+    for row in &expiries {
+        assert_eq!(row["origin"], "agent_initiated", "{row}");
+        assert_eq!(detail_keys(row), decision_keys, "{row}");
+        assert!(
+            !row.to_string().contains("gamma") && !row.to_string().contains("delta"),
+            "no name the agent chose: {row}"
+        );
+    }
+
+    // A card a person asked for says nothing of an origin: its rows are what they always were.
+    let (status, asked) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": unique_channel_name()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{asked}");
+    let asked_card = proposed_approval_3706(&asked);
+    let (status, approved) = approve(&client, &base, &fixture, asked_card).await;
+    assert_eq!(status, 200, "{approved}");
+    let said = audit_details_of(&su, ws, "action.approved").await;
+    let ours = said
+        .iter()
+        .find(|row| row["approval_id"] == asked_card.to_string())
+        .expect("the person's card has its action.approved row");
+    assert_eq!(
+        detail_keys(ours),
+        [
+            "action_id",
+            "approval_id",
+            "decided_by",
+            "proposed_by",
+            "ref",
+            "schema"
+        ],
+        "a card a person asked for has no `origin`"
+    );
+    let domain = audit_details_of(&su, ws, "channel.created").await;
+    assert_eq!(domain.len(), 2);
+    assert!(
+        domain
+            .iter()
+            .filter(|row| row.get("origin").is_none())
+            .count()
+            == 1,
+        "exactly the person's own card's domain row has no origin: {domain:?}"
+    );
+}
+
+/// The proposal's lease handle, claimed ahead of time (the person mentions the agent, the agent
+/// claims the job), so a test can race the **proposal call** itself.
+async fn claim_proposal_handle(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> String {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 채널 하나 더 부탁해")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string()
+}
+
+/// Sessions waiting on **this** advisory key (`pg_locks` stores a bigint key as its high half in
+/// `classid` and its low half in `objid`) — not on any advisory lock of the database, which another
+/// test's waiter could fill.
+async fn advisory_waiters(su: &PgPool, key: &str) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM pg_locks \
+          WHERE locktype = 'advisory' AND NOT granted \
+            AND ((classid::bigint << 32) | objid::bigint) = hashtextextended($1::text, 0)",
+    )
+    .bind(key)
+    .fetch_one(su)
+    .await
+    .expect("count waiters on one advisory key")
+}
+
+/// **`advisory_waiters` counts one key's waiters and no other's.** The test below proves "both calls
+/// are queued behind the agent's lock" by counting waiters on that key; a count that also saw another
+/// key's waiter (a neighbouring test, another agent) would reach its target without the calls ever
+/// queueing, and the proof would be a number from somebody else's lock. So the counter is itself put
+/// to the question: a transaction holds key A, a second waits on A, a third waits on B behind a
+/// holder of B — A's count is 1, B's is 1, an unrelated key's is 0 (never the sum).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_advisory_waiter_count_is_one_keys_and_never_the_databases() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let key_a = format!("oort:test:waiters:{}", Uuid::new_v4());
+    let key_b = format!("oort:test:waiters:{}", Uuid::new_v4());
+    let key_unrelated = format!("oort:test:waiters:{}", Uuid::new_v4());
+
+    let lock = |key: String| async move {
+        let mut tx = superuser_pool()
+            .await
+            .begin()
+            .await
+            .expect("a lock transaction");
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .expect("take the advisory lock");
+        tx
+    };
+    let holder_a = lock(key_a.clone()).await;
+    let holder_b = lock(key_b.clone()).await;
+    let waiter_a = tokio::spawn(lock(key_a.clone()));
+    let waiter_b = tokio::spawn(lock(key_b.clone()));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let (a, b) = (
+            advisory_waiters(&su, &key_a).await,
+            advisory_waiters(&su, &key_b).await,
+        );
+        if (a, b) == (1, 1) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "each of the two waiters should be seen on its own key (saw {a} and {b})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        advisory_waiters(&su, &key_unrelated).await,
+        0,
+        "a key nobody waits on has no waiters, however many others there are"
+    );
+    holder_a.commit().await.unwrap();
+    holder_b.commit().await.unwrap();
+    waiter_a.await.unwrap().commit().await.unwrap();
+    waiter_b.await.unwrap().commit().await.unwrap();
+}
+
+/// **A person's proposal and an unasked card take the same lock first (ADR U-d, PR A's follow-up).**
+/// Three places are shared between what a person asked for and what the agent raised unasked, and
+/// each producer counts and then inserts, so the two must not interleave: with two places taken, a
+/// proposal and an unasked card both reading "two" would both land and leave **four**. The lock is
+/// held from outside — the very key, from `initiative_lock_key` — and both calls are shown to be
+/// queued behind it; released, exactly one lands.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_persons_proposal_and_an_unasked_card_queue_behind_one_agent_lock() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    // Two of the three places: one unasked card, one a person asked for.
+    let (status, raised) = raise(&client, &base, &fixture, "alpha").await;
+    assert_eq!(status, 200, "{raised}");
+    let (status, asked) = try_propose_action_3706(
+        &client,
+        &base,
+        &su,
+        &fixture,
+        "channel.create",
+        json!({"name": unique_channel_name()}),
+    )
+    .await;
+    assert_eq!(status, 200, "{asked}");
+    let handle = claim_proposal_handle(&client, &base, &su, &fixture).await;
+
+    let mut holder = su.begin().await.expect("a transaction to hold the lock");
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+        .bind(momo_agent::initiative::initiative_lock_key(
+            ws,
+            fixture.hosted_agent,
+        ))
+        .execute(&mut *holder)
+        .await
+        .expect("hold the agent's lock");
+    let proposal = tokio::spawn({
+        let (client, base, bearer) = (client.clone(), base.clone(), fixture.hosted_bearer.clone());
+        let args = json!({"handle": handle, "actionId": "channel.create",
+                          "args": {"name": unique_channel_name()}});
+        async move { call(&client, &base, &bearer, "oort_action_propose", args).await }
+    });
+    let unasked = tokio::spawn({
+        let (client, base, bearer) = (client.clone(), base.clone(), fixture.hosted_bearer.clone());
+        let args = initiate_body("channel.create", json!({"name": "gamma"}));
+        async move { call(&client, &base, &bearer, INITIATE, args).await }
+    });
+
+    // Both are queued behind the one lock: that is what "the same lock, first" means.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let lock_key = momo_agent::initiative::initiative_lock_key(ws, fixture.hosted_agent);
+    while advisory_waiters(&su, &lock_key).await < 2 {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "a person's proposal and an unasked card must both wait on the agent's lock"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    holder.commit().await.expect("release the lock");
+    let results = [proposal.await.unwrap(), unasked.await.unwrap()];
+    let landed = results.iter().filter(|(status, _)| *status == 200).count();
+    let conflicts = results
+        .iter()
+        .filter(|(status, answer)| is_conflict(*status, answer))
+        .count();
+    assert_eq!(
+        (landed, conflicts),
+        (1, 1),
+        "one takes the third place and the other is told it is full: {results:?}"
+    );
+    let waiting: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM approval WHERE workspace_id=$1 AND requested_by=$2 \
+            AND action_type='workspace_action' AND status='pending'",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(waiting, 3, "three, never four");
+}
+
+/// **An owner who left the DM is brought back by the next card (PR A's follow-up).** The DM an
+/// unasked card stands in counts as *open* only while it is unarchived and **both** people are live
+/// in it; with the owner gone it is not, and the card re-opens the room — the same room, the owner
+/// back in it. (Skipping the re-open would leave the card in a room its owner is not in.)
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn an_owner_who_left_the_dm_is_brought_back_by_the_next_card() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let (status, raised) = raise(&client, &base, &fixture, "alpha").await;
+    assert_eq!(status, 200, "{raised}");
+    let dm = owner_dm(&su, &fixture).await.expect("the DM is open");
+    sqlx::query("UPDATE membership SET left_at = now() WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3")
+        .bind(ws)
+        .bind(dm)
+        .bind(fixture.human)
+        .execute(&su)
+        .await
+        .unwrap();
+    assert!(
+        owner_dm(&su, &fixture).await.is_none(),
+        "the owner is out of the room"
+    );
+
+    let (status, raised) = raise(&client, &base, &fixture, "beta").await;
+    assert_eq!(status, 200, "{raised}");
+    assert_eq!(
+        owner_dm(&su, &fixture).await,
+        Some(dm),
+        "the same room, with the owner back in it"
+    );
+    let cards: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE channel_id=$1 AND type='approval_request'",
+    )
+    .bind(dm)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cards, 2, "both cards stand in the one room");
+}
+
+/// **The rate window is counted from an index (PR B, review L5).** The rows of the window are read
+/// through `agent_run_initiative_rate_idx` — the partial index over the unasked cards' keys — and
+/// not by a scan of every run of the workspace: with twenty thousand ordinary runs beside three
+/// thousand unasked ones, the planner is asked about the very statement the producer runs.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_rate_window_is_counted_through_the_partial_index() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    sqlx::query(
+        "INSERT INTO agent_run (workspace_id, agent_member_id, channel_id, status, idempotency_key, created_at) \
+         SELECT $1, $2, $3, 'succeeded', 'plain:' || gen_random_uuid()::text, now() - (g || ' seconds')::interval \
+           FROM generate_series(1, 20000) g",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .bind(fixture.channel)
+    .execute(&su)
+    .await
+    .unwrap();
+    backdated_initiative_runs(&su, &fixture, 3000, "2 hours").await;
+    sqlx::query("ANALYZE agent_run").execute(&su).await.unwrap();
+
+    let mut tx = su.begin().await.unwrap();
+    sqlx::query("SET LOCAL enable_seqscan = off")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    let plan: Vec<String> = sqlx::query_scalar(&format!(
+        "EXPLAIN {}",
+        momo_agent::initiative::recent_runs_statement()
+    ))
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    let plan = plan.join("\n");
+    assert!(
+        plan.contains("agent_run_initiative_rate_idx"),
+        "the window is read through the partial index:\n{plan}"
+    );
+    tx.rollback().await.unwrap();
+
+    // And the number it reads is the right one: 3000 in the last day, none in the last hour.
+    let mut conn = su.acquire().await.unwrap();
+    let counted = momo_agent::initiative::count_recent_initiative_runs_in_tx(
+        &mut conn,
+        fixture.workspace,
+        fixture.hosted_agent,
+    )
+    .await
+    .unwrap();
+    assert_eq!((counted.last_hour, counted.last_day), (0, 3000));
+}
+
+/// Slow the app role's deadlock detection to 20 s for one test and put it back — **even when the
+/// test panics**, so a failure cannot leave every later test of the run with a slow detector (PR A's
+/// second review, Low 4). The put-back runs on a thread of its own with its own runtime, because a
+/// `Drop` cannot await and a panicking test may no longer have a runtime to ask.
+struct SlowDeadlockDetection {
+    database_url: String,
+}
+
+impl SlowDeadlockDetection {
+    async fn begin(su: &PgPool) -> SlowDeadlockDetection {
+        sqlx::query("ALTER ROLE momo_app SET deadlock_timeout = '20s'")
+            .execute(su)
+            .await
+            .expect("slow the app role's deadlock detection for this test");
+        SlowDeadlockDetection {
+            database_url: database_url(),
+        }
+    }
+}
+
+impl Drop for SlowDeadlockDetection {
+    fn drop(&mut self) {
+        let url = self.database_url.clone();
+        let _ = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime to put the deadlock timeout back");
+            runtime.block_on(async move {
+                if let Ok(pool) = PgPoolOptions::new().max_connections(1).connect(&url).await {
+                    let _ = sqlx::query("ALTER ROLE momo_app RESET deadlock_timeout")
+                        .execute(&pool)
+                        .await;
+                }
+            });
+        })
+        .join();
+    }
+}
+
+async fn app_role_deadlock_timeout(su: &PgPool) -> Option<String> {
+    let settings: Option<Vec<String>> =
+        sqlx::query_scalar("SELECT rolconfig FROM pg_roles WHERE rolname = 'momo_app'")
+            .fetch_one(su)
+            .await
+            .expect("read the app role's settings");
+    settings.and_then(|settings| {
+        settings
+            .into_iter()
+            .find(|setting| setting.starts_with("deadlock_timeout="))
+    })
+}
+
+/// The guard puts the setting back when its test **fails**: the panic unwinds through the guard's
+/// `Drop`, and the app role has no `deadlock_timeout` of its own afterwards.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_failing_test_puts_the_slow_deadlock_detection_back() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let guard = SlowDeadlockDetection::begin(&su).await;
+    assert_eq!(
+        app_role_deadlock_timeout(&su).await.as_deref(),
+        Some("deadlock_timeout=20s"),
+        "the guard slowed it"
+    );
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+        let _guard = guard;
+        panic!("a test failed while detection was slow");
+    }));
+    assert!(unwound.is_err());
+    assert_eq!(
+        app_role_deadlock_timeout(&su).await,
+        None,
+        "a panic does not leave the slow detector behind"
+    );
+}

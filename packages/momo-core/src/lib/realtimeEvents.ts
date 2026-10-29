@@ -487,6 +487,21 @@ export function centrifugoTypingChannelName(
   return `typing:ws${workspaceId.toUpperCase()}.${channelId.toUpperCase()}`;
 }
 
+// ---- 작업공간 출석부 (ADR-0160 ② 가용성, #4692) -----------------------------
+// `online:ws<workspace>` 는 **대화가 이름에 없는** 유일한 레일이다. 클라이언트는 이 채널을
+// 읽으려고 구독하는 것이 아니라 **세어지려고** 구독한다: Centrifugo 의 presence 표가
+// 「이 사람이 이 작업공간에 연결돼 있다」를 기록하고, 그 표는 **서버만** 읽어 명부 행의
+// `online` 으로 싣는다. 네임스페이스는 누구에게도 presence·history·publish·join/leave 를
+// 주지 않는다(`infra/centrifugo.json`, 철도 카탈로그 검사가 모양을 고정한다). 그래서 이 구독에서
+// 클라이언트가 **받는 것은 없다** - 핸들러도 없다.
+//
+// 구독 인가(서버 `routes::realtime::parse_channel`): 그 작업공간 명부에 오를 수 있는 사람(활성
+// 사람 멤버)만. 에이전트·정지·삭제·다른 테넌트는 거절된다. 이름은 `ch:` 와 같은 대문자 id 다.
+
+export function centrifugoOnlineChannelName(workspaceId: string): string {
+  return `online:ws${workspaceId.toUpperCase()}`;
+}
+
 // ---- agent progress rail (AX-5 / MOMO-613) ---------------------------------
 // `agent:ws<workspace>.<channel>.<agentMember>` is the exact-channel observable
 // progress namespace (research/11-agent-runtime/14, verified by
@@ -1095,6 +1110,23 @@ export interface RealtimeHandle {
       onUnfurl?: (event: UnfurlEvent) => void;
     }
   ) => () => void;
+  /**
+   * Be counted in the workspace roll-call (ADR-0160 ②, #4692): subscribe to
+   * `online:ws<WS>` and listen to nothing. Centrifugo's presence table then records
+   * that this person is connected, which the server reads into the roster's
+   * `online`. Returns the matching leave.
+   *
+   * Join once per signed-in workspace for as long as the app wants to count as
+   * online (the subscription follows the socket: it re-subscribes on reconnect and
+   * leaves with it, so a phone parked in the background stops being counted when
+   * its socket is parked). A refused or unknown-namespace subscribe (an older
+   * server or broker) ends that subscription alone and leaves the connection as it
+   * was: the roster then simply shows this person as not connected.
+   *
+   * Optional so a runtime that has not wired it, and every test double, keeps
+   * compiling; such a runtime is never counted.
+   */
+  joinOnlineRollCall?: (workspaceId: string) => () => void;
   /**
    * Watch one agent's progress inside one channel (`agent.status` /
    * `agent.partial`). Same refcount as `subscribeChannel`, so two surfaces may

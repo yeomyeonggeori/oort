@@ -16,6 +16,7 @@ use momo_db::{with_tenant_tx, DbError, PgPool};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
+use crate::channel_restriction::ChannelRestriction;
 use crate::error::MessagingError;
 
 /// `channel_kind` enum (`001_init.sql:13`).
@@ -635,7 +636,44 @@ pub async fn list_workspace_channels(
     include_archived: bool,
     limit: i64,
 ) -> Result<Vec<ChannelSummary>, DbError> {
-    let rows = sqlx::query(
+    list_workspace_channels_within(
+        conn,
+        workspace_id,
+        member_id,
+        include_archived,
+        limit,
+        ChannelRestriction::Unrestricted,
+    )
+    .await
+}
+
+/// [`list_workspace_channels`], narrowed by a developer token's channel restriction
+/// (ADR-0216 D4 · R11, #4660).
+///
+/// The restriction is a **predicate in the statement**, beside the membership join that
+/// already is the access control, so the list is the intersection of the token's channels
+/// with the member's live memberships — a listed channel the member has since left is not
+/// in it. It is not a filter applied to the result: `LIMIT` has to count only the channels
+/// the caller may see, or a restricted list would come back short (or empty) whenever the
+/// member belongs to more than `limit` channels.
+///
+/// [`ChannelRestriction::Unrestricted`] runs the statement [`list_workspace_channels`]
+/// always ran, byte for byte: the predicate and its bind exist only for a restriction.
+pub async fn list_workspace_channels_within(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    include_archived: bool,
+    limit: i64,
+    restriction: ChannelRestriction<'_>,
+) -> Result<Vec<ChannelSummary>, DbError> {
+    let listed = restriction.listed();
+    let restriction_sql = if listed.is_some() {
+        "AND c.id = ANY($5::uuid[]) "
+    } else {
+        ""
+    };
+    let sql = format!(
         "SELECT c.id, \
                 c.workspace_id, \
                 c.kind::text AS kind, \
@@ -651,8 +689,8 @@ pub async fn list_workspace_channels(
                          FROM membership participant \
                         WHERE participant.channel_id = c.id \
                           AND participant.left_at IS NULL \
-                     ), '{}'::uuid[]) \
-                     ELSE '{}'::uuid[] \
+                     ), '{{}}'::uuid[]) \
+                     ELSE '{{}}'::uuid[] \
                 END AS member_ids, \
                 EXISTS ( \
                   SELECT 1 FROM notification_pref np \
@@ -668,21 +706,24 @@ pub async fn list_workspace_channels(
             AND actor_membership.left_at IS NULL \
           WHERE c.workspace_id = $1 \
             AND ($3 OR c.archived_at IS NULL) \
-          ORDER BY CASE c.kind::text \
+          {restriction_sql}ORDER BY CASE c.kind::text \
                      WHEN 'public' THEN 0 \
                      WHEN 'private' THEN 1 \
                      ELSE 2 \
                    END, \
                    lower(COALESCE(c.name, '')), \
                    c.id \
-          LIMIT $4",
-    )
-    .bind(workspace_id)
-    .bind(member_id)
-    .bind(include_archived)
-    .bind(limit)
-    .fetch_all(&mut *conn)
-    .await?;
+          LIMIT $4"
+    );
+    let mut query = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(include_archived)
+        .bind(limit);
+    if let Some(channel_ids) = listed {
+        query = query.bind(channel_ids);
+    }
+    let rows = query.fetch_all(&mut *conn).await?;
     rows.iter()
         .map(decode_channel_summary)
         .collect::<Result<_, _>>()
