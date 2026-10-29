@@ -41,10 +41,10 @@
 | 변경 | 필수 검증 |
 |---|---|
 | Rust 서버 | workspace `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
-| 웹·폰·공유 코어 | 해당 트리 typecheck/test 및 해당 표면 게이트, `scripts/verify_merge_tree.sh`로 병합 트리 확인 |
+| 웹·폰·공유 코어 | 해당 트리 typecheck/test 및 해당 표면 게이트, `scripts/verify_merge_tree.sh`로 병합 트리 확인(스택 PR은 착륙 때 `--typecheck-only`, 전체는 스택 검증 1회) |
 | SQL·infra·runtime | 실제 적용 가능한 격리 PG/Docker 검증. 외부 의존은 실제 또는 mock으로 범위를 나눠 기록 |
 | 문서·운영 스크립트의 PR/통합 | `scripts/local_gate.sh --profile docs` + 변경된 실행 도구의 관련 시험 |
-| UI | 해당 표면 preflight와 독립 design-review **Blocker 0·High 0**; 미실행 캡처/실기기는 미검증으로 기록 |
+| UI | 해당 표면 preflight와 독립 design-review **Blocker 0·High 0**; 미실행 캡처/실기기는 미검증으로 기록. 스택 PR은 스택 검증에서 한 번에 받고 승격 전에 끝낸다([PIPELINE](docs/planning/PIPELINE.md) §5) |
 
 - 검증하지 않은 runtime은 `runtime-unverified`로 표기한다. 버그 회귀 시험은 실제 실패를 잡는 증거를 낸다. 모든 문장·단정에 일률적인 변조 시험을 요구하지 않는다.
 - PR은 자기 **track/** 대상으로, 통합자만 순차 머지한다. current HEAD의 **PR CI gate·Policy integrity gate**와 local evidence를 확인하고, 머지 직전 **현재 exact canonical base에서 추출한 verifier**로 `scripts/verify_policy_integrity_from_base.sh`를 실행한다. 후보 verifier나 같은 이름의 status만 믿지 않는다.
