@@ -2,7 +2,7 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 import { Fragment, useId, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Loader2 } from "lucide-react";
+import { Bell, BellOff, Check, Loader2 } from "lucide-react";
 import {
   removeChannelMember,
   setChannelNotificationPref,
@@ -175,6 +175,7 @@ export function useChannelActions({
   const location = useLocation();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const [error, setError] = useState<string | null>(null);
+  const [optimisticMute, setOptimisticMute] = useState<{ channelId: string; muted: boolean } | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -190,14 +191,34 @@ export function useChannelActions({
   const muteMutation = useMutation({
     mutationFn: (muted: boolean) =>
       setChannelNotificationPref(workspaceId, channel.id, muted),
+    onMutate: async (muted: boolean) => {
+      setError(null);
+      setOptimisticMute({ channelId: channel.id, muted });
+      const queryKey = ["channels", workspaceId];
+      await client.cancelQueries({ queryKey });
+      const previous = client.getQueryData<Channel[]>(queryKey)
+        ?.find((row) => uuidEq(row.id, channel.id))?.muted ?? channel.muted;
+      client.setQueryData<Channel[]>(queryKey, (rows) =>
+        rows?.map((row) => uuidEq(row.id, channel.id) ? { ...row, muted } : row)
+      );
+      return { previous };
+    },
     onSuccess: () => {
       setError(null);
       onActionSucceeded();
-      // 서버가 진실이다: 무효화하면 새 muted 가 흘러 내려와 다음에 열 때 낱말이
-      // 뒤집힌다.
-      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
     },
-    onError: () => setError(CHANNEL_MUTE_FAILURE),
+    onError: (_error, _muted, context) => {
+      setOptimisticMute(null);
+      client.setQueryData<Channel[]>(["channels", workspaceId], (rows) =>
+        rows?.map((row) => uuidEq(row.id, channel.id)
+          ? { ...row, muted: context?.previous ?? channel.muted } : row)
+      );
+      setError(CHANNEL_MUTE_FAILURE);
+    },
+    onSettled: async () => {
+      await client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+      setOptimisticMute(null);
+    },
   });
 
   // 「읽음 처리」는 새 서버 표면이 아니다: ChatShell 이 채널을 열었을 때 미는 것과
@@ -337,7 +358,7 @@ export function useChannelActions({
   );
 
   const state: ChannelActionState = {
-    muted: channel.muted,
+    muted: optimisticMute?.channelId === channel.id ? optimisticMute.muted : channel.muted,
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
     copiedId: idCopy.copied,
@@ -597,7 +618,14 @@ function ChannelActionMenuRow({
       if (!channelActionKeepsMenuOpen(item.key)) onHandOff(item.key);
       actions.run(item.key);
     },
-    children: busy ? item.busyLabel ?? item.label : item.label,
+    children: item.key === "mute" ? (
+      <>
+        {actions.state.muted
+          ? <BellOff className="size-4 shrink-0" aria-hidden="true" />
+          : <Bell className="size-4 shrink-0" aria-hidden="true" />}
+        {item.label}
+      </>
+    ) : busy ? item.busyLabel ?? item.label : item.label,
   };
   return surface === "header" ? (
     <DropdownMenuItem {...props} />

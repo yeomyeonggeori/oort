@@ -9,7 +9,7 @@ import {
 } from '@momo/core/features/channels/model';
 import type {Channel} from '@momo/core/lib/api';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {StyleSheet, Text} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
@@ -29,14 +29,14 @@ import {
 //
 //   카드 1 (이 대화)  대화 정보 · 고정한 메시지 · 작업 맡기기 — 다른 곳으로 가는 문. 행 끝에 ›.
 //                     정보는 `onOpenInfo` 가 있을 때만, 작업 맡기기는 일대일 에이전트 DM 에서만 선다. 고정은 늘 선다.
-//   카드 2 (알림)     알림 끄기 / 알림 켜기 — 코어 표의 낱말.
+//   카드 2 (알림)     알림 켜짐 / 알림 꺼짐 — 코어 표의 낱말.
 //   카드 3 (떠나기)   DM 은 대화 닫기, 채널은 채널 나가기 — 둘은 한 대화에 함께 서지 않는다. 채널 나가기만 위험색이고 확인 단계를 지난다.
 //
 // ## 닫는 길이 행마다 다르다 (`phone-sheets.md` §2 「행동은 시트가 내려간 뒤에」)
 //
 // * 첫 카드의 행 셋은 **다른 곳으로 가는 문**이다(정보 화면 · 고정 목록 · 작업 시트) — `closesSheet`: 시트가 먼저 미끄러져 내리고 그 뒤에
 //   문이 한 번 열린다. Modal 위에 화면을 쌓지 않는다(§1 규칙 2). 행 끝의 ›(`chevron`)가 그 뜻이다.
-// * 알림 · 닫기 · 나가기는 **서버에 닿는 행동**이라 시트가 진행(「알림 끄는 중」)과 실패를 스스로 보여야 한다 — `closesSheet` 가 아니다.
+// * 알림 · 닫기 · 나가기는 **서버에 닿는 행동**이라 시트가 현재 알림 상태와 실패를 스스로 보여야 한다 — `closesSheet` 가 아니다.
 //   성공하면 훅(`useChannelRowActions`)이 시트를 걷고 낭독한다. 실패는 시트가 열린 채 그 자리에서 말한다. DM 닫기·채널 나가기가 성공하면
 //   열려 있던 대화도 걷힌다(훅의 `onLeft` → 화면의 뒤로).
 //
@@ -101,6 +101,7 @@ export function ConversationMenuSheet({
     return (
       <ListRow
         title={busy && item.busyLabel ? item.busyLabel : item.label}
+        leading={item.icon ? <Text accessible={false}>{item.icon}</Text> : undefined}
         tone={item.tone === 'danger' ? 'danger' : 'default'}
         busy={busy}
         // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」과 실패를 스스로 보이는 면이라 행동이 끝날 때까지 떠 있어야 한다.

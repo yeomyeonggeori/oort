@@ -11,7 +11,7 @@ import {
 } from '@momo/core/features/timeline/quote';
 import {
   typingLabel,
-  typingSegments,
+  typingVisualSegments,
   TYPING_AGGREGATE_THRESHOLD_FALLBACK,
 } from '@momo/core/features/chat/typing';
 import {
@@ -867,7 +867,7 @@ export default function ConversationScreen({
     [typists, directory],
   );
   const typingParts = useMemo(
-    () => typingSegments(typistNames, TYPING_AGGREGATE_THRESHOLD_FALLBACK),
+    () => typingVisualSegments(typistNames),
     [typistNames],
   );
   const typingA11y = useMemo(

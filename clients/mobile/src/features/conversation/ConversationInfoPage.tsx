@@ -162,6 +162,7 @@ function InfoBody({
       <ListRow
         key={found.key}
         title={busy && found.busyLabel ? found.busyLabel : found.label}
+        leading={found.icon ? <Text accessible={false}>{found.icon}</Text> : undefined}
         tone={found.tone === 'danger' ? 'danger' : 'default'}
         accessory={accessory}
         busy={busy}

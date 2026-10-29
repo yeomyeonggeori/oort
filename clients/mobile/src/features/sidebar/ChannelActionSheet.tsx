@@ -10,7 +10,7 @@ import {
   channelLeaveConfirmBody,
 } from '@momo/core/features/channels/model';
 import React from 'react';
-import {StyleSheet} from 'react-native';
+import {StyleSheet, Text} from 'react-native';
 import {Sentence} from '../../design/atoms';
 import {PageSheet} from '../../design/PageSheet';
 import {SheetHeader} from '../../design/SheetChrome';
@@ -133,6 +133,7 @@ export function ChannelActionSheet({
                     <ListRow
                       key={item.key}
                       title={busy && item.busyLabel ? item.busyLabel : item.label}
+                      leading={item.icon ? <Text accessible={false}>{item.icon}</Text> : undefined}
                       tone={item.tone === 'danger' ? 'danger' : 'default'}
                       busy={busy}
                       // 닫는 길로 보내지 않는다: 이 시트는 왕복 중의 「…하는 중」·「복사됨」·실패를 스스로
