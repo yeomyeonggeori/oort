@@ -11,10 +11,12 @@ import {
   listHostedConnections,
   regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
+import { scopeActionList } from "@momo/core/features/hostedAgents/approval";
 import {
   HOSTED_AGENT_LABEL_FALLBACK,
   HOSTED_AGENT_MISSING_NAME,
   HOSTED_AGENT_PORT_AUDIENCE,
+  HOSTED_AGENT_SCOPES,
 } from "@momo/core/features/hostedAgents/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { HostedAgentWizard } from "./HostedAgentWizard";
@@ -359,5 +361,38 @@ describe("위저드 4단계 이름 보간 (#2327)", () => {
     expect(name?.textContent).toBe(HOSTED_AGENT_MISSING_NAME);
     expect(name?.textContent).not.toBe("");
     expect(row?.textContent).toContain("감지됨");
+  });
+});
+
+describe("승인 단계 권한 목록의 먼저 제안 (workspace:initiate, ADR-0186 증보 v5)", () => {
+  it("먼저 제안 체크박스는 목록 맨 끝에 꺼진 채로 서고, 켜면 결과 문장이 그 권한을 말한다", async () => {
+    mountWizard("그록봇");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-scopes-row"]') !== null,
+      "scope rows"
+    );
+    const rows = [
+      ...document.querySelectorAll<HTMLElement>('[data-testid="hosted-scopes-row"]'),
+    ];
+    // 화면의 줄은 코어 목록과 같은 순서로 하나도 빠짐없이 선다(접속이 맨 위, 먼저 제안이 맨 끝).
+    expect(rows.map((row) => row.dataset.choiceId)).toEqual([...HOSTED_AGENT_SCOPES]);
+    const initiate = rows.find((row) => row.dataset.choiceId === "workspace:initiate");
+    const box = initiate?.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(box).not.toBeNull();
+    // 기본 요청에 섞이지 않는다: 사람이 직접 켜야 한다.
+    expect(box?.checked).toBe(false);
+    expect(box?.disabled).toBe(false);
+
+    await selectTwoChannels();
+    const phrase = scopeActionList(["workspace:initiate"])[0] ?? "";
+    expect(phrase).not.toBe("");
+    const sentence = () =>
+      document.querySelector('[data-testid="hosted-consequence"]')?.textContent ?? "";
+    expect(sentence()).not.toContain(phrase);
+    await act(async () => {
+      box?.click();
+    });
+    expect(box?.checked).toBe(true);
+    expect(sentence()).toContain(phrase);
   });
 });

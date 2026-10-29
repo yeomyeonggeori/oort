@@ -206,6 +206,7 @@ import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
+import {PinApprovalSurface} from './pinApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
 
@@ -2304,6 +2305,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4394: member.avatar.set 승인 카드(제안된 사진·본인만 볼 수 있다는 줄). 사진은 avatar-stub.mjs 가 답한다.
   if (name.startsWith('avatar-approval')) {
     return <AvatarApprovalSurface which={name.slice('avatar-approval'.length).replace(/^-/, '')} />;
+  }
+
+  // #4705: 먼저 제안한 고정 카드(꼬리표 · 에이전트가 쓴 글 · 전문 보기)와 만료 스윕 줄.
+  if (name.startsWith('pin-approval')) {
+    return <PinApprovalSurface which={name.slice('pin-approval'.length).replace(/^-/, '')} />;
   }
 
   // #4526: 화면 모드의 기본·저장·시스템 추종. 안쪽에 진짜 ThemeProvider 를 세운다(바깥 FixedScheme 을 이긴다).
