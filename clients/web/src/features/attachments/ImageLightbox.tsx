@@ -293,7 +293,7 @@ export function ImageLightbox({
         <DialogTitle className="sr-only">{fileName}</DialogTitle>
         <DialogDescription className="sr-only">
           {selected
-            ? `전체 ${images.length}개 중 ${selectedIndex + 1}번째 이미지입니다. 왼쪽과 오른쪽 화살표로 이미지를 이동합니다.`
+            ? `${lightboxPositionLabel(selectedIndex, images.length)} 이미지입니다. 왼쪽과 오른쪽 화살표로 이미지를 이동합니다.`
             : "표시할 이미지가 없습니다."}
         </DialogDescription>
 
@@ -304,6 +304,18 @@ export function ImageLightbox({
           data-thumbs={multi ? "" : undefined}
           onClick={closeOnStageClick}
         >
+          {/* 내려받기 실패는 사진 위 무대 흐름에 선다(전에는 머리 띠 아래 전폭 배너였다). 위 줄(칩·버튼)에 끼우면 좁은 폭이나
+              긴 이름에서 폭이 0으로 눌린다. 면은 유리가 아니라 불투명한 `surface-raised`다: 위험 글자(--danger)의 대비는 그 면과
+              짝으로만 재어져 있고, 반투명 유리 위에서는 바닥에 따라 4.5:1 아래로 내려갔다. */}
+          {downloadFailed ? (
+            <div className="pointer-events-auto mb-3 w-full max-w-pane-md shrink-0 overflow-hidden rounded-lg bg-surface-raised shadow-lg">
+              <InlineBanner
+                separator={false}
+                message="파일을 내려받지 못했습니다. 연결을 확인한 뒤 다시 시도하세요."
+                testId="image-lightbox-download-error"
+              />
+            </div>
+          ) : null}
           {selected ? (
             <LightboxImage
               key={selected.id}
@@ -342,6 +354,8 @@ export function ImageLightbox({
             <div
               data-testid="image-lightbox-info"
               title={info.fileName}
+              // 두 줄 모두 `--ink`다(보조 글자색 아님). 칩은 반투명 유리라 바닥이 사이드바 띠(어두운 테마에서는 짙은 남색)여도 글자가
+              // 읽혀야 하고, `--ink-muted`는 그 바닥에서 3.7~4.4:1까지 내려갔다(design-review). 위계는 굵기와 크기가 진다.
               className="glass pointer-events-auto flex min-w-0 max-w-pane flex-col rounded-lg px-3 py-1 text-ink"
             >
               <span className="truncate text-label font-semibold">
@@ -355,7 +369,7 @@ export function ImageLightbox({
                       ? new Date(sentAtMs).toISOString()
                       : undefined
                   }
-                  className="truncate text-meta text-ink-muted"
+                  className="truncate text-meta"
                   data-testid="image-lightbox-sent-at"
                 >
                   {info.secondary}
@@ -365,18 +379,6 @@ export function ImageLightbox({
           ) : (
             <span aria-hidden="true" />
           )}
-
-          <div className="flex min-w-0 flex-1 justify-center">
-            {downloadFailed ? (
-              <div className="glass pointer-events-auto overflow-hidden rounded-lg">
-                <InlineBanner
-                  separator={false}
-                  message="파일을 내려받지 못했습니다. 연결을 확인한 뒤 다시 시도하세요."
-                  testId="image-lightbox-download-error"
-                />
-              </div>
-            ) : null}
-          </div>
 
           <div className="flex shrink-0 items-center gap-2">
             {selected ? (

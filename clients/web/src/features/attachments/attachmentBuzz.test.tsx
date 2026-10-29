@@ -197,6 +197,8 @@ describe("image lightbox, floating glass controls", () => {
     expect(info.textContent).toContain(lightboxSentAtLabel(SENT) ?? "(no label)");
     expect(info.textContent).not.toContain("간판-시안.webp");
     expect(info.getAttribute("title")).toBe("간판-시안.webp");
+    // 둘째 줄도 주 글자색이다: 보조 글자색은 반투명 유리 칩이 어두운 사이드바 띠 위에 설 때 4.5:1 아래로 내려갔다(design-review #4751).
+    expect(lb('[data-testid="image-lightbox-sent-at"]')!.className).not.toContain("text-ink-muted");
     const dialog = lb('[role="dialog"]')!;
     const title = document.getElementById(dialog.getAttribute("aria-labelledby") ?? "");
     expect(title?.textContent).toBe("간판-시안.webp");
@@ -245,6 +247,25 @@ describe("image lightbox, floating glass controls", () => {
     expect(lb('[data-testid="image-lightbox-position"]')?.textContent).toBe(lightboxPositionLabel(0, 3));
     act(() => lb('[data-testid="image-lightbox-previous"]')?.click());
     expect(lb('[data-testid="image-lightbox-position"]')?.textContent).toBe(lightboxPositionLabel(2, 3));
+  });
+
+  it("puts a failed download's banner in the stage on an opaque face, outside the top row of chips", async () => {
+    // 위 줄(칩·버튼)에 끼우면 좁은 폭에서 폭이 눌리고, 유리 위에서는 위험 글자가 4.5:1 아래로 내려갔다(design-review #4751).
+    render([img("i1")], { senderName: "이도현", sentAtMs: SENT });
+    openFirst();
+    act(() => lb('[data-testid="attachment-download"]')?.click());
+    for (let turn = 0; turn < 50 && lb('[data-testid="image-lightbox-download-error"]') === null; turn += 1) {
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 0));
+      });
+    }
+    const banner = lb('[data-testid="image-lightbox-download-error"]');
+    expect(banner, "the failed download is told").not.toBeNull();
+    expect(banner!.closest('[data-testid="image-lightbox-stage"]'), "in the stage flow").not.toBeNull();
+    expect(banner!.closest(".lightbox-chrome"), "not squeezed into the top row").toBeNull();
+    const face = banner!.parentElement!;
+    expect(face.classList.contains("bg-surface-raised"), "opaque face").toBe(true);
+    expect(face.classList.contains("glass"), "not translucent glass").toBe(false);
   });
 
   it("draws every control as a named icon button with a touch target and focuses close first", () => {

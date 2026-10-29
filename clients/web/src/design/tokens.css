@@ -4121,17 +4121,19 @@
   }
 }
 
-/* 사진이 서는 자리. 남는 영역 전체에 `object-contain`으로 가장 크게, 가운데에 둔다. 둘레 여백: 가로 32, 세로 52(위 칩 줄 40 + 12,
- * 아래는 같은 값이라 사진이 창 가운데에 선다). 2장 이상이면 양옆 이전/다음 버튼(34 + 바깥 8 + 사이 8)이 선 자리만큼 가로가
- * 넓어지고(`data-multi`), 썸네일 줄이 있으면 그 높이(56 + 사진과의 사이 16)만큼 아래가 더 비는다(`data-thumbs`). 폰 폭(600
- * 미만)은 버튼이 44px 터치 타깃으로 자란다. */
+/* 사진이 서는 자리. 남는 영역 전체에 `object-contain`으로 가장 크게, 가운데에 둔다. 흐름은 세로다: 내려받기 실패 배너가 있으면 그것이
+ * 위에, 사진(또는 불러오는 중·실패 칸)이 남는 높이에 선다. 둘레 여백: 가로 32, 세로 64(위 칩 줄 40 + 24: 칩이 두 줄이라 글자를 크게
+ * 하면 52를 넘는데 52로 두면 가로 사진이 칩 아래 가장자리에 붙었다, 아래는 같은 값이라 사진이 창 가운데에 선다). 2장 이상이면
+ * 양옆 이전/다음 버튼(34 + 바깥 8 + 사이 8)이 선 자리만큼 가로가 넓어지고(`data-multi`), 썸네일 줄이 있으면 그 높이(56 + 사진과의
+ * 사이 16)만큼 아래가 더 비는다(`data-thumbs`). 폰 폭(600 미만)은 버튼이 44px 터치 타깃으로 자란다. */
 @utility lightbox-body {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding-block: calc(var(--spacing-control-lg) + var(--spacing-3));
+  padding-block: calc(var(--spacing-control-lg) + var(--spacing-6));
   padding-inline: var(--spacing-8);
 
   &[data-multi] {
