@@ -240,6 +240,118 @@ describe('키보드가 올라와 있으면 첫 탭은 닫기다', () => {
   });
 });
 
+// =============================================================================
+// 이름 줄은 프로필 문이 아니다 (#4666, owner 10-27 3056 실기 「채팅에서 이름부분을 클릭해도 프로필이
+// 열리는데, 프로필 이미지쪽을 눌러야만 열리게」).
+//
+// 작성자 줄은 행 전체 폭이라, 답글(행 탭 = 스레드)을 달려던 손이 이름을 짚어 프로필이 뜨는 오탭이 났다.
+// 이제 프로필 문은 얼굴과 멘션뿐이다. 이 줄은 **행의 일부**라서 탭은 행 탭(스레드·키보드 닫기)이, 길게 누르기는
+// 행의 시트가 받는다 — 이름 단추가 따로 하던 길게 누르기도 행이 이어받아 끊기지 않는다.
+// 멘션은 글 속의 낱말이라 문이 된다: 멤버를 아는 멘션만 프로필을 열고, 그 길게 누르기는 시트로 간다.
+// =============================================================================
+describe('프로필 문은 얼굴과 멘션뿐이다 — 이름 줄은 행 탭이 받는다', () => {
+  const NAME = '김인턴';
+  const MENTION = message({
+    id: 'mention-1',
+    seq: 12,
+    authorMemberId: SELF,
+    body: '@intern-kim 확인 부탁해요.',
+    createdAtMs: BASE_MS + 90_000,
+  });
+
+  function profileActions(openThread: jest.Mock | undefined = jest.fn()) {
+    return {...actions(openThread), onOpenProfile: jest.fn()};
+  }
+
+  /** 길게 누르기의 시작 터치 — 코어의 10px 게이트가 이 자리에서 잰다. */
+  function touchRow(index = 0) {
+    fireEvent(screen.getAllByTestId('message-row')[index], 'touchStart', {
+      nativeEvent: {pageX: 100, pageY: 200, locationX: 100, locationY: 200},
+    });
+  }
+
+  it('이름 줄이 눌리는 단추로 그려지지 않는다', () => {
+    renderTimeline([LONE], profileActions());
+    expect(screen.queryByTestId('profile-author-target')).toBeNull();
+    // 대조: 얼굴은 문으로 남는다 — 위 「없음」이 행을 못 그려서 통과한 것이 아니다.
+    expect(screen.getByTestId('profile-avatar-target')).toBeTruthy();
+  });
+
+  it('이름을 눌러도 프로필이 아니라 행 탭(스레드)이 받는다 — 답글 달려던 손의 오탭', () => {
+    const openThread = jest.fn();
+    const row = profileActions(openThread);
+    renderTimeline([LONE], row);
+
+    fireEvent.press(screen.getByText(NAME));
+    expect(row.onOpenProfile).not.toHaveBeenCalled();
+    expect(openThread).toHaveBeenCalledTimes(1);
+    expect(openThread.mock.calls[0][0].id).toBe(ROOT_ID);
+
+    // 대조: 같은 행의 얼굴은 같은 멤버의 프로필을 연다.
+    fireEvent.press(screen.getByTestId('profile-avatar-target'));
+    expect(row.onOpenProfile).toHaveBeenCalledTimes(1);
+    expect(row.onOpenProfile).toHaveBeenCalledWith(OTHER);
+    expect(openThread).toHaveBeenCalledTimes(1);
+  });
+
+  it('자판이 올라와 있으면 이름 줄의 첫 탭도 닫기다 — 프로필도 스레드도 열리지 않는다', () => {
+    keyboardUp.mockReturnValue(true);
+    const openThread = jest.fn();
+    const row = profileActions(openThread);
+    renderTimeline([LONE], row);
+
+    fireEvent.press(screen.getByText(NAME));
+    expect(dismiss).toHaveBeenCalledTimes(1);
+    expect(openThread).not.toHaveBeenCalled();
+    expect(row.onOpenProfile).not.toHaveBeenCalled();
+  });
+
+  it('이름 줄에서 길게 눌러도 메시지 시트가 열리고, 떼며 따라 울리는 탭은 프로필도 스레드도 열지 않는다', () => {
+    const openThread = jest.fn();
+    const row = profileActions(openThread);
+    renderTimeline([LONE], row);
+
+    // 시트가 열리면 시트 제목에도 같은 이름이 서므로, 이름 줄의 글자는 열기 **전에** 잡아 둔다.
+    const name = screen.getByText(NAME);
+    touchRow();
+    fireEvent(name, 'longPress');
+    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
+    fireEvent.press(name); // 떼면서 따라오는 탭
+    expect(row.onOpenProfile).not.toHaveBeenCalled();
+    expect(openThread).not.toHaveBeenCalled();
+  });
+
+  it('멘션을 누르면 그 멤버의 프로필이 열리고 행 탭(스레드)은 일어나지 않는다', () => {
+    const openThread = jest.fn();
+    const row = profileActions(openThread);
+    renderTimeline([MENTION], row);
+
+    fireEvent.press(screen.getByTestId('message-mention'));
+    expect(row.onOpenProfile).toHaveBeenCalledTimes(1);
+    expect(row.onOpenProfile).toHaveBeenCalledWith(OTHER);
+    expect(openThread).not.toHaveBeenCalled();
+  });
+
+  it('멘션을 길게 누르면 시트가 열리고, 떼며 따라 울리는 탭은 프로필을 열지 않는다', () => {
+    const row = profileActions();
+    renderTimeline([MENTION], row);
+
+    touchRow();
+    fireEvent(screen.getByTestId('message-mention'), 'longPress');
+    expect(screen.getByTestId('message-action-sheet')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('message-mention'));
+    expect(row.onOpenProfile).not.toHaveBeenCalled();
+  });
+
+  it('프로필 문이 없는 화면에서는 멘션이 글자일 뿐이다 — 눌러도 행 탭이 받는다', () => {
+    const openThread = jest.fn();
+    renderTimeline([MENTION], actions(openThread));
+
+    fireEvent.press(screen.getByTestId('message-mention'));
+    expect(openThread).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('길게 누르기와 다투지 않는다', () => {
   it('시트를 연 손가락을 떼며 따라 울리는 탭은 스레드를 열지 않는다', () => {
     const openThread = jest.fn();

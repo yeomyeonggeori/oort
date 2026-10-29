@@ -33,7 +33,17 @@ const MAX_WORKERS = Math.min(8, Math.max(os.availableParallelism() - 1, 1));
  * hosts, so on a slow CI runner Jest killed the test before `waitFor` could finish — the
  * failure said "Exceeded timeout of 5000 ms", not that the UI was wrong (#4629/#4638/#4641 CI,
  * 10-27). The test timeout must exceed the longest wait chain; 20 s covers two 8 s waits plus
- * render. Determinizing these tests with fake timers stays open in #4633.
+ * render.
+ *
+ * This is a stopgap for the suites that still wait in REAL time, not the fix (#4708). Measured for
+ * settingsPage "VoiceOver escape" (idle machine): the layer exit timers are 150-180 ms of a ~1.8 s test;
+ * the rest is the shell re-rendering, and polling a big tree with `waitFor` (real or fake clock) is
+ * what made it slow, not the animation. That block now drives each exit by advancing the clock by
+ * exactly the layer's timer length (no polling, ~0.1 s a test), and sidebarRowSheet runs on the fake
+ * app clock (`__tests__/fixtures/fakeClock.ts`, #3796). Suites that still wait with a real-time
+ * `{timeout: 8000}` (aiConnectSuggestion, sheetKeyboardAction, aiSheet, profileStatus, shellChrome,
+ * sheetKit, home, memoryUi, ...) are why this stays at 20 s; each moves in its own change, and this
+ * value comes down when the last one has.
  */
 const TEST_TIMEOUT_MS = 20_000;
 
@@ -63,7 +73,8 @@ module.exports = {
   // Runs after the test framework is installed, because it needs `beforeAll`.
   // See the header of `jest.warm.js` for why a cold transform cache needs it.
   setupFilesAfterEnv: ['<rootDir>/jest.warm.js'],
-  testEnvironment: 'node',
+  // `node` 환경에 재시도 등록부(#4708)를 얹은 것: 등록된 시험만 1회 다시 돈다. `jest.environment.js` 머리말 참고.
+  testEnvironment: '<rootDir>/jest.environment.js',
   // Explicit, so a shared fixture placed next to the tests is not itself
   // collected as a suite and failed for containing no tests.
   testMatch: ['<rootDir>/__tests__/**/*.test.{ts,tsx,js,jsx}'],

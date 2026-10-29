@@ -1,0 +1,51 @@
+appId: app.momo.ios
+name: 118-sheet-drag-probe
+env:
+  # 16 Pro 기본값. probe 시트는 큰 단이다(위 66). 다른 기기의 값은 구동 스크립트가 계산한다(이 파일은 틀이다).
+  HX: "201"
+  ROWY: "250" # 누르는 줄(짝수 줄, Pressable) y — 맨 위
+  DOWN_B: "370" # 거기서 아래로 120 끈 자리(문턱 202 아래 — 닫히지 않는다)
+  UP_A: "560" # 눌리지 않는 줄(홀수 줄) y — 여기서 시작해 스크롤한다
+  UP_B: "260" # 손가락을 300 올린다
+  BACK_A: "250" # 스크롤된 채 되돌려 끌기: BACK_A → BACK_B
+  BACK_B: "550"
+  SHOT: "sheet-drag-probe"
+---
+# 118-sheet-drag-probe — 결정 2 계측: 끄는 동안 본문 contentOffset 이 움직이는가(iOS 이중 이동) + 스크롤이 죽지 않는가 (#4612 2단계).
+#
+# 표면 `-momoMeasure SHEETDRAG-PROBE-STD|FREEZE|NONE -momoGapSink 127.0.0.1:<포트>`. 끌기(터치 시작 → 끝 + 600ms)마다 표면이 onScroll 표본과 시트
+# 본문의 창 좌표 변위를 `measure/gap-sink.mjs` 로 한 줄 보낸다(`kind: drag-probe`). 이 흐름은 손가락만 놀리고, 단정은 구동 스크립트가 싱크에서 한다.
+#   STD     배송되는 `SheetScroll`(고무줄 없음 + 쥐면 얼림)   FREEZE  날 ScrollView(고무줄 있음) + 얼림만   NONE  날 ScrollView + 아무 방어 없음(대조군)
+#
+# 목록은 넘친다(40줄) — 그래서 본문은 시작 응답자를 잡지 않는다(`claimsSheetTouchStart`). 짝수 줄은 Pressable, 홀수 줄은 눌리지 않는 View 다.
+#
+#   P1 맨 위의 누르는 줄에서 아래로 120 끌기(느리게, 문턱 아래 — 시트가 따라왔다 돌아온다)   → contentOffset 이 가만히 있어야 한다(비영점 0), 시트 변위 > 0
+#   P0 맨 위의 **눌리지 않는 줄**을 짚고 손가락을 올린다(스크롤)                         → 스크롤이 산다: 표본 > 0, y 가 양수로 올라간다, 시트 변위 0
+#                                                                                     (시작 응답자를 잡던 때는 표본 0 — 스크롤이 죽었다)
+#   P3 스크롤된 채 아래로 끌기                                                      → 시트는 안 움직인다(시트 변위 0), y 가 줄어든다
+- extendedWaitUntil:
+    visible:
+      id: "sheetdrag-probe-body"
+    timeout: 60000
+- waitForAnimationToEnd
+# P1
+- swipe:
+    start: "${HX}, ${ROWY}"
+    end: "${HX}, ${DOWN_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-1
+# P0
+- swipe:
+    start: "${HX}, ${UP_A}"
+    end: "${HX}, ${UP_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-0
+# P3
+- swipe:
+    start: "${HX}, ${BACK_A}"
+    end: "${HX}, ${BACK_B}"
+    duration: 1500
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-3

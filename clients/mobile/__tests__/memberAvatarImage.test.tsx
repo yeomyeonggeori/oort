@@ -2,6 +2,7 @@ import {login} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {RosterMember} from '@momo/core/lib/api';
 import {act, cleanup, render, waitFor} from '@testing-library/react-native';
+import {requireOptionalNativeModule} from 'expo-modules-core';
 import React from 'react';
 
 import '../src/boot/polyfills';
@@ -17,6 +18,7 @@ import {
   memberAvatarGeneration,
   seedMemberAvatar,
 } from '../src/features/conversation/memberAvatarImage';
+import {clearPresentationState, setPushShowSender} from '../src/push/presentation';
 import {__resetSessionStore} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -352,5 +354,75 @@ describe('Avatar 가 그린다', () => {
     const view = render(<Avatar directory={dir(agentPath)} memberId={AGENT} />);
     await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
     expect(view.getByTestId('avatar-agent', HIDDEN)).toBeTruthy();
+  });
+});
+
+describe('그려진 얼굴은 알림 확장에게도 한 번 건넨다 (ADR-0204 증보 5)', () => {
+  const HIDDEN = {includeHiddenElements: true} as const;
+  const requireNative = requireOptionalNativeModule as unknown as jest.Mock;
+  const mmkvStore = (
+    jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
+  ).__store;
+  let exportAvatar: jest.Mock;
+
+  beforeEach(async () => {
+    mmkvStore.clear();
+    setServerBase(BASE);
+    requireNative.mockImplementation(() => null);
+    await clearPresentationState();
+    exportAvatar = jest.fn(async () => true);
+    requireNative.mockImplementation((name: string) =>
+      name === 'MomoPushNative'
+        ? {exportAvatar, setPresentationSettings: jest.fn(async () => true), clearPresentation: jest.fn(async () => true)}
+        : null,
+    );
+  });
+
+  afterEach(() => {
+    requireNative.mockImplementation(() => null);
+  });
+
+  it('받은 파일(file://)이 화면에 서면 서버·워크스페이스·멤버·버전과 함께 한 번 간다', async () => {
+    const view = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+    const uri = view.getByTestId('avatar-image', HIDDEN).props.source.uri as string;
+    await waitFor(() => expect(exportAvatar).toHaveBeenCalledTimes(1));
+    expect(exportAvatar).toHaveBeenCalledWith(BASE, WS, SELF, 'media-1', uri);
+    expect(isFile(uri)).toBe(true);
+  });
+
+  it('같은 얼굴이 여러 자리에 그려져도, 다시 마운트돼도 이 실행에서는 한 번이다', async () => {
+    const d = dir(PATH_A);
+    const first = render(
+      <>
+        <Avatar directory={d} memberId={SELF} />
+        <Avatar directory={d} memberId={SELF} size={48} />
+      </>,
+    );
+    await waitFor(() => expect(first.getAllByTestId('avatar-image', HIDDEN)).toHaveLength(2));
+    first.unmount();
+    render(<Avatar directory={d} memberId={SELF} />);
+    await act(async () => {});
+    expect(exportAvatar).toHaveBeenCalledTimes(1);
+  });
+
+  it('받는 중(이니셜)에는 건네지 않는다 — 파일이 생기기 전에는 줄 것이 없다', () => {
+    fsMock.__state.failures = [new Error('HTTP 404')];
+    render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    expect(exportAvatar).not.toHaveBeenCalled();
+  });
+
+  it('옛 절대 avatarUrl(다른 주소)은 건네지 않는다', () => {
+    render(<Avatar directory={dir(`${BASE}/legacy/me.png`)} memberId={SELF} />);
+    expect(exportAvatar).not.toHaveBeenCalled();
+  });
+
+  it('「보낸 사람 표시」가 꺼져 있으면 건네지 않고, 켜면 이미 그려진 얼굴이 건너간다', async () => {
+    setPushShowSender(false);
+    const view = render(<Avatar directory={dir(PATH_A)} memberId={SELF} />);
+    await waitFor(() => expect(view.getByTestId('avatar-image', HIDDEN)).toBeTruthy());
+    expect(exportAvatar).not.toHaveBeenCalled();
+    act(() => setPushShowSender(true));
+    await waitFor(() => expect(exportAvatar).toHaveBeenCalledTimes(1));
   });
 });

@@ -31,6 +31,7 @@ import {
 } from '../nav/state';
 import {DeviceKeyLinkGate} from '../features/deviceKey/DeviceKeyLinkSheet';
 import {NotificationPrimerGate} from '../features/onboarding/NotificationPrimer';
+import PushPresentationSync from '../push/PushPresentationSync';
 import PushProvider from '../push/PushProvider';
 import {useNotificationTapRouting} from '../push/useNotificationTapRouting';
 import {RealtimeProvider} from '../realtime/RealtimeProvider';
@@ -117,6 +118,8 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
           <NotificationPrimerGate />
           {/* QR 연결 직후 기기 키 등록과 맥 승인 대기(#3026). M3 뒤에 선다. */}
           <DeviceKeyLinkGate />
+          {/* 알림 확장에게 건네는 것: 설정 둘, 채널 이름(#4316). 화면은 없다. */}
+          <PushPresentationSync />
         </RealtimeProvider>
       </PushProvider>
     </SessionProvider>
@@ -215,6 +218,11 @@ export function Shell({
   // 홈 머리의 내 얼굴 → 「설정」 페이지(층, #4457).
   const onOpenSettings = useCallback(
     () => dispatch({type: 'openSettings'}),
+    [],
+  );
+  // 대화 안의 내 프로필 시트의 「설정 열기」(#4319). 설정 층은 대화 층 **밑**에 그려지므로 대화와 그 밑의 층을 걷고 연다(`navReducer`).
+  const onOpenSettingsFromConversation = useCallback(
+    () => dispatch({type: 'openSettingsFromConversation'}),
     [],
   );
   const onOpenAgent = useCallback(
@@ -577,6 +585,7 @@ export function Shell({
             onDelegateWork={onDelegateWork}
             onOpenWorkSession={workConsole ? onOpenWorkSession : undefined}
             onOpenWorkList={onOpenWorkList}
+            onOpenSettings={onOpenSettingsFromConversation}
           />
         </EdgeSwipeBack>
       ) : null}

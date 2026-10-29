@@ -43,7 +43,7 @@ function member(patch: Partial<RosterMember>): RosterMember {
     ...patch,
   };
 }
-const self = member({ id: ME, displayName: "곽성재", handle: "kwak" });
+const self = member({ id: ME, displayName: "구민수", handle: "gu" });
 
 function dm(memberIds: string[]): Channel {
   return { id: "c", workspaceId: "w", kind: "dm", muted: false, memberIds } as Channel;

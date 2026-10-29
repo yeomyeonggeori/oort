@@ -1,0 +1,15 @@
+appId: app.momo.ios
+name: list-tap-rested
+---
+# 목록을 누른 **뒤**의 기대 (#4614). 환경: LAST = 마지막 동작 정규식(「-」면 아무 동작도 안 일어났다), DRAFT = 남아 있어야 할 초안(줄바꿈은 「⏎」).
+#   자판이 내려갔다 · 입력창이 쉬는 알약으로 접혔다(도구 줄이 없다) · 자기 동작이 있으면 그 동작이 일어났다 · 쓰던 글이 그대로다.
+# 접힘이 끝나는 것을 기다린 **뒤에** 읽는다: 자판을 내릴 때 iOS 가 자동 고침·조합 중인 글자를 확정하고(그 `onChangeText` 가 알림 **뒤에** 온다) 낡은 구현은 그 한 번에 입력창이 도로 펼쳐졌다.
+- extendedWaitUntil:
+    visible: ".*kb=down.*"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 6000
+- assertNotVisible:
+    id: "composer-tools"
+- assertVisible: ".*last=${LAST} .*"
+- assertVisible: ".*draft=${DRAFT}$"

@@ -41,7 +41,7 @@ function channels(): ApprovalChannelInput[] {
     { id: GENERAL, label: "#general", kind: "public" },
     { id: ENGINE, label: "#엔진", kind: "private" },
     { id: ARCHIVED, label: "#지난-스프린트", kind: "public", archivedAtMs: 1 },
-    { id: DM, label: "성재", kind: "dm" },
+    { id: DM, label: "민수", kind: "dm" },
   ];
 }
 

@@ -25,6 +25,12 @@ export const CONV = {
   titleGlyph: 16,
   /** `.a-stack .av{width:28px}` — DM 머리의 상대 얼굴. */
   titleFace: 28,
+  /**
+   * 머리 가운데 알약(이름 + 보조 글, #4319)의 안쪽 좌우 여백과 칸 사이 간격. 높이는 원(`circle` 42)과 같은 최소 높이라 머리 줄(`headHeight` 62)이
+   * 움직이지 않는다 — 알약은 줄 안에서 원과 같은 키로 선다.
+   */
+  headPillPadX: 12,
+  headPillGap: 8,
 
   // ---- 날짜 알약 (`.a-day`) -------------------------------------------------
   /** `.a-day span{padding:3px 11px}`. */

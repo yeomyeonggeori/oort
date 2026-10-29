@@ -14,7 +14,7 @@ describe("koreanParticle", () => {
     expect(attachParticle("김인턴")).toBe("김인턴이");
     expect(attachParticle("Hermes")).toBe("Hermes가");
     expect(attachParticle("에이전트")).toBe("에이전트가");
-    expect(attachParticle("곽성재")).toBe("곽성재가");
+    expect(attachParticle("구민수")).toBe("구민수가");
     expect(attachParticle("박지훈")).toBe("박지훈이");
   });
 
@@ -31,7 +31,7 @@ describe("koreanParticle", () => {
     expect(attachParticle("김인턴", "with")).toBe("김인턴과");
     expect(attachParticle("Hermes", "with")).toBe("Hermes와");
     expect(attachParticle("헤르메스", "with")).toBe("헤르메스와");
-    expect(particleFor("곽성재", "with")).toBe("와");
+    expect(particleFor("구민수", "with")).toBe("와");
     expect(particleFor("박지훈", "with")).toBe("과");
   });
 

@@ -82,6 +82,15 @@ export const NON_SECRET_KEYS = {
    */
   pushOptOut: 'momo.mobile.push.opt-out.v1',
   /**
+   * 「메시지 미리보기」 (#4316, ADR-0204 증보 5, 설정 › 알림). 값 `'0'` 이 **끔**이고, 키가 없으면 켬이다 —
+   * 한 번도 건드리지 않은 폰이 켠 채로 오게 하려고 「끈 것」만 적는다. 이 폰의 선택이라 로그아웃에도 남는다
+   * (테마와 같은 종류: 사람 데이터가 아니라 기기 취향). 확장은 MMKV 를 읽지 못해서, 바꿀 때마다
+   * `src/push/presentation.ts` 가 App Group 으로도 쓴다. 비밀이 아니다.
+   */
+  pushPreview: 'momo.mobile.push.preview.v1',
+  /** 「보낸 사람 표시」 (#4316). 위와 같은 규칙(`'0'` = 끔, 없으면 켬). 끄면 건넨 캐시도 지운다. */
+  pushShowSender: 'momo.mobile.push.show-sender.v1',
+  /**
    * 아직 보내지 않은 글 (goal U4-6M · 감사 H-10). 채널·스레드별 한 덩이의 JSON
    * 지도이고, 접기·수명 규칙은 `features/conversation/drafts.ts` 가 진다.
    *

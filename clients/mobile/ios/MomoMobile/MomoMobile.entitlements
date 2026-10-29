@@ -7,6 +7,16 @@
 	     NOT declare aps-environment (see MomoMobileNotificationService.entitlements). -->
 	<key>aps-environment</key>
 	<string>$(APS_ENVIRONMENT)</string>
+	<!-- APP TARGET ONLY (#4316, ADR-0204 증보 5). The Communication Notifications capability: what lets the
+	     notification extension turn a push into a communication notification (the sender's round photo,
+	     the app icon small at its corner) with `INSendMessageIntent`. Apple names the APP target for it
+	     ("Enable the Communication Notifications capability in your app target"), and Buzz ships the same
+	     way: the extension declares nothing (see MomoMobileNotificationService.entitlements). It is an
+	     App ID capability: the App Store Connect API cannot switch it on (its `capabilityType` list has no
+	     such entry), so it is one click in the developer portal and a regenerated Xcode-managed profile
+	     (docs/runbooks/ios-testflight.md). Without it in the profile an archive fails signing, loudly. -->
+	<key>com.apple.developer.usernotifications.communication</key>
+	<true/>
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.app.momo.ios</string>

@@ -18,6 +18,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { IS_TAURI } from "@/lib/env";
 import { UpdateSection } from "@/features/updates/UpdateSection";
+import { DevAccessSection } from "./DevAccessSection";
 import { DevicesSection } from "./DevicesSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { ShortcutsSection } from "./ShortcutsSection";
@@ -355,6 +356,14 @@ function SectionPage({
       );
     case "updates":
       return <UpdateSection />;
+    case "devTools":
+      return (
+        <DevAccessSection
+          workspaceId={workspaceId}
+          memberId={memberId}
+          offline={offline}
+        />
+      );
     default:
       return null;
   }

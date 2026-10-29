@@ -48,7 +48,7 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 }
 
 const DIRECTORY = makeDirectory([
-  member({id: SELF, displayName: 'kwak', handle: 'kwak'}),
+  member({id: SELF, displayName: 'lee', handle: 'lee'}),
   member({id: GROK, kind: 'agent', displayName: '김인턴', handle: 'intern'}),
 ]);
 
@@ -100,7 +100,9 @@ export function AttachMenuSurface({which}: {which: string}): React.JSX.Element {
         peerStatusTone="ok"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
+        // 가운데 알약은 단추다(#4319) — 정보 페이지로 가는 문이 있는 실제 대화 화면과 같은 모양으로 찍는다(머리 높이 불변이 이 하네스의 전제다).
+        onOpenInfo={() => {}}
         railStatus="connected"
       />
       <ConversationLayout

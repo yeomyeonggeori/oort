@@ -3,6 +3,8 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
+import { busyLockPlugin } from "./eslint-rules/busyLockGrammar.js";
+import { BUSY_LOCK_GRAMMAR_FILES, BUSY_LOCK_PRIMITIVES_FILE } from "./eslint-rules/busyLockScope.js";
 
 /**
  * Flat config (ESLint 9). Beyond the stock TS/React rules this file carries two
@@ -51,6 +53,31 @@ export default tseslint.config(
         },
       ],
     },
+  },
+  {
+    // 진행·잠금 문법의 전수 규칙 (#4711, 옛 settingsFieldsBusy·rawControlBusySplit 의 그물).
+    // `<SaveButton canSave>`·`<ChoiceRadios disabled>` 에 진행 어휘가 접혀 들어오지 않는다.
+    // 규칙 정의와 이유는 eslint-rules/busyLockGrammar.js. 시험 파일(.test.tsx)은 뺀다: 진행 중
+    // 상태를 일부러 그려 보이는 식을 쓸 수 있다(옛 그물은 시험 .tsx 도 훑었지만 그 안에 두
+    // 컴포넌트의 소비는 하나도 없었다).
+    files: ["src/features/**/*.tsx"],
+    ignores: ["**/*.test.tsx"],
+    plugins: { momo: busyLockPlugin },
+    rules: { "momo/in-flight-lock-props": "error" },
+  },
+  {
+    // 쓰기를 내는 설정·호스티드 표면의 진행·잠금 문법 (#4711). 범위 목록과 이유는
+    // eslint-rules/busyLockScope.js (옛 시험 셋이 이름을 달아 재던 열한 파일).
+    files: BUSY_LOCK_GRAMMAR_FILES,
+    plugins: { momo: busyLockPlugin },
+    rules: { "momo/busy-lock-grammar": "error" },
+  },
+  {
+    // 위 규칙이 이름으로 겨누는 컴포넌트(SaveButton·ConfirmButton·ChoiceRadios)의 정의 파일 (#4711).
+    // 이름이 바뀌어 규칙이 조용히 눈먼 초록이 되지 않게 한다.
+    files: [BUSY_LOCK_PRIMITIVES_FILE],
+    plugins: { momo: busyLockPlugin },
+    rules: { "momo/busy-lock-primitives": "error" },
   },
   {
     // Vendored shadcn/ui primitives export their cva() variants by convention.

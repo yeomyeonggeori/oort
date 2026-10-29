@@ -22,7 +22,13 @@ import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidG
 import {HOME_ICONS} from '../src/design/icons';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
 import {GroupCard, InputPill} from '../src/design/sheetParts';
-import {describeCloseContract, imageSources, radioRows} from './fixtures/sheetContract';
+import {
+  FAR_SLOW_DRAG,
+  describeCloseContract,
+  dragBody,
+  imageSources,
+  radioRows,
+} from './fixtures/sheetContract';
 import {Avatar} from '../src/features/conversation/Avatar';
 import {
   darkPalette,
@@ -1398,4 +1404,56 @@ describeCloseContract({
   closeLabel: '새 채널 닫기',
   scrimTestID: 'page-sheet-scrim',
   scrimLabel: '새 채널 닫기',
+});
+
+// ---- 새 DM 시트: 긴 목록은 날 `FlatList` 라 스스로 시트에 알려야 한다 (#4612) ----------------------------------
+
+async function openNewDm() {
+  installFetch();
+  await renderReady();
+  openMenu();
+  await waitFor(() => expect(screen.getByTestId('plus-menu-dm')).toBeTruthy());
+  fireEvent.press(screen.getByTestId('plus-menu-dm'));
+  // 목록 컨테이너는 명단이 오기 전에도 서 있다 — 끌기 시험에는 줄이 필요 없다(시트에 알리는 쪽은 목록 컨테이너다).
+  await waitFor(() => expect(screen.getByTestId('new-dm-list')).toBeTruthy());
+}
+
+describeCloseContract({
+  name: 'NewMessageSheet',
+  open: openNewDm,
+  closedCount: () => (screen.queryByTestId('new-dm-sheet') === null ? 1 : 0),
+  closeTestID: 'new-dm-close',
+  closeLabel: '새 DM 닫기',
+  scrimTestID: 'page-sheet-scrim',
+  scrimLabel: '새 DM 닫기',
+});
+
+describe('새 DM 시트 — 긴 목록의 끌기 넘겨받기 (#4612)', () => {
+  // FlatList 의 `onScroll` 은 `layoutMeasurement`·`contentSize` 까지 읽는다 — 실제 이벤트와 같은 모양으로 보낸다.
+  const scrollList = (y: number) =>
+    act(() => {
+      fireEvent.scroll(screen.getByTestId('new-dm-list'), {
+        nativeEvent: {
+          contentOffset: {x: 0, y},
+          contentSize: {width: 390, height: 2400},
+          layoutMeasurement: {width: 390, height: 700},
+        },
+      });
+    });
+
+  it('목록이 맨 위일 때만 본문 끌기가 시트를 가져가고, 중간이면 목록이 스크롤한다 — 맨 위로 돌아오면 다시 가져간다', async () => {
+    await openNewDm();
+    scrollList(120);
+    expect(dragBody(FAR_SLOW_DRAG)).toBe(false);
+    expect(screen.getByTestId('new-dm-sheet')).toBeTruthy();
+    scrollList(0);
+    expect(dragBody(FAR_SLOW_DRAG)).toBe(true);
+  });
+
+  it('목록은 시트의 표준 스크롤이다 — 고무줄 없음·16ms 간격 보고(맨 위에서 아래로 끄는 손가락이 목록을 당겨 이중으로 움직이지 않는다)', async () => {
+    await openNewDm();
+    const list = screen.getByTestId('new-dm-list');
+    expect(list.props.bounces).toBe(false);
+    expect(list.props.scrollEventThrottle).toBe(16);
+  });
 });

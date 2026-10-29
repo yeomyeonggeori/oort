@@ -6,7 +6,7 @@ import React, {useMemo, useState} from 'react';
 import {FlatList, StyleSheet, View} from 'react-native';
 
 import {FailureBanner, Sentence} from '../design/atoms';
-import {PageSheet} from '../design/PageSheet';
+import {PageSheet, usePageSheetScrollProps} from '../design/PageSheet';
 import {SheetHeader} from '../design/SheetChrome';
 import {GroupCardItem, GroupLabel, InputPill, ListRow} from '../design/sheetParts';
 import {useStyles} from '../design/theme';
@@ -70,6 +70,9 @@ function SheetBody({
   onClose: () => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  // 목록은 날 `FlatList` 라 스스로 시트에 알려야 한다(#4612): 맨 위에서 아래로 끌면 시트가 따라오고, 중간이면 목록이 스크롤한다.
+  // 알리지 않으면 시트는 이 목록을 모르는 스크롤로 보고 본문 끌기를 꺼 둔다(머리만 끌린다).
+  const sheetScroll = usePageSheetScrollProps();
   const {member, workspaceId} = useSession();
   const directoryQuery = useDirectory(workspaceId);
   const [query, setQuery] = useState('');
@@ -137,6 +140,7 @@ function SheetBody({
     <View style={styles.body}>
       <SheetHeader title="새 DM" closeLabel="새 DM 닫기" closeTestID="new-dm-close" />
       <FlatList
+        {...sheetScroll}
         data={people}
         keyExtractor={candidate => candidate.id}
         ListHeaderComponent={listHeader}

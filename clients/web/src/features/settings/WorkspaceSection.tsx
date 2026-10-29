@@ -67,6 +67,7 @@ import { SettingsRow } from "./shell/SettingsRow";
 import { SettingsSection } from "./shell/SettingsSection";
 import { CardBody } from "./workTierPolicy";
 import { TeamAiSetting } from "./TeamAiSetting";
+import { AgentInitiativeSetting } from "./AgentInitiativeSetting";
 
 // =============================================================================
 // 워크스페이스 (R-1 §5 / ADR-0117 · ADR-0161): read the current tenant, set its
@@ -1251,6 +1252,8 @@ export function WorkspaceSection({
       <WorkspaceUnfurlSetting workspaceId={workspaceId} offline={offline} />
 
       <TeamAiSetting workspaceId={workspaceId} offline={offline} />
+
+      <AgentInitiativeSetting workspaceId={workspaceId} offline={offline} />
 
       {query.data && (
         <RoleLabelsEditor

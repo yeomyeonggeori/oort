@@ -331,7 +331,7 @@ export function useBubbleChoice(): BubbleChoice | undefined {
  * (다음에 올라올 때 맞는다).
  *
  * 앱의 입력창(`<TextInput>`)은 **하나도 빠짐없이** 이 값을 든다. 하나라도 빠지면 그 입력창만 기기 외양을
- * 따른다. 그 전수는 `__tests__/keyboardAppearance4526.test.tsx` 가 구문 트리로 훑어 지킨다. 훑는 것은
+ * 따른다. 그 전수는 `__tests__/theme.test.tsx`(keyboardAppearance 묶음) 가 구문 트리로 훑어 지킨다. 훑는 것은
  * `src/**` 의 `.tsx` 에 있는 JSX 태그(`<…TextInput>`)다 — 별칭 import(`TextInput as Field`)·
  * `createElement(TextInput)`·애니메이션 래퍼처럼 JSX 가 아닌 모양과 `measure/` 하네스는 안 본다(지금 앱에는 없다).
  */

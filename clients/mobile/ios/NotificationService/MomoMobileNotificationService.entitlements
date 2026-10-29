@@ -7,6 +7,9 @@
 	     registered for. Declaring aps-environment on the extension would demand a
 	     Push Notifications capability on the extension's App ID that it never
 	     uses. -->
+	<!-- NO com.apple.developer.usernotifications.communication here either (#4316). The capability is the
+	     APP target's: the extension donates and re-dresses content inside the app's bundle, which is
+	     what Apple's "Implementing communication notifications" and Buzz's shipped entitlements both say. -->
 	<key>com.apple.security.application-groups</key>
 	<array>
 		<string>group.app.momo.ios</string>

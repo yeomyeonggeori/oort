@@ -52,14 +52,14 @@ const TWO = {
   devices: [
     {
       id: CURRENT_ID,
-      label: "성재 iMac, 집 작업실",
+      label: "민수 iMac, 집 작업실",
       platform: "macos",
       linkedAt: 1_800_000_000_000,
       current: true,
     },
     {
       id: OTHER_ID,
-      label: "성재 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대",
+      label: "민수 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대",
       platform: "ios",
       linkedAt: 1_800_000_100_000,
       current: false,

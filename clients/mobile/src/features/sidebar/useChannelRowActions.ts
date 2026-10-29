@@ -47,6 +47,12 @@ import {
 // 실패 문장이 화면에 도달하지 못한다.
 // =============================================================================
 
+/**
+ * 시트를 연 손짓. 행을 **길게 누르기**는 「잡혔다」는 무거운 한 번(`medium`)이고, 단추 **탭**(대화 머리의 ⋮, #4319)은 + 메뉴·AI
+ * 시트처럼 시트가 열리는 누름에 가벼운 한 번(`light`)이다 — 탭에 길게 누르기의 진동을 주지 않는다.
+ */
+export type RowActionsOpenGesture = 'longPress' | 'tap';
+
 export interface ChannelRowActions {
   /** 시트가 열려 있는 행. 없으면 시트가 없다. */
   active: ChannelRowTarget | null;
@@ -57,7 +63,8 @@ export interface ChannelRowActions {
   /** 항목 자리에서 하는 말. 토스트가 아니다. */
   error: string | null;
   leave: {pending: boolean; error: string | null};
-  open: (target: ChannelRowTarget) => void;
+  /** `gesture` 를 생략하면 길게 누르기다(사이드바 행이 그대로 `onOpenActions={open}` 으로 넘긴다). */
+  open: (target: ChannelRowTarget, gesture?: RowActionsOpenGesture) => void;
   close: () => void;
   run: (target: ChannelRowTarget, key: ChannelActionKey) => void;
   confirmLeave: () => void;
@@ -110,9 +117,10 @@ export function useChannelRowActions(
   }, []);
 
   const open = useCallback(
-    (target: ChannelRowTarget) => {
+    (target: ChannelRowTarget, gesture: RowActionsOpenGesture = 'longPress') => {
       reset();
-      haptics.medium();
+      if (gesture === 'tap') haptics.light();
+      else haptics.medium();
       setActive(target);
     },
     [reset],

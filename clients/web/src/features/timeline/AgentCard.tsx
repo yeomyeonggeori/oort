@@ -104,10 +104,13 @@ import { APPROVAL_NOTE_TONE_CLASS } from "./approvalNoteTone";
 import {
   TEAM_AI_PROPOSAL_AUTHORITY,
   TEAM_AI_PROPOSAL_LABEL,
-  TEAM_AI_RATIONALE_LABEL,
-  TEAM_AI_RATIONALE_NOTE,
   teamAiProposalLine,
 } from "@momo/core/features/timeline/teamAi";
+import {
+  approvalHeadTitle,
+  rationaleTag,
+} from "@momo/core/features/timeline/agentInitiative";
+import { MessagePreviewLink } from "./MessagePreviewLink";
 import {
   rememberSettledApproval,
   useSettledApproval,
@@ -498,7 +501,8 @@ function ApprovalBody({
     <CardFrame
       sectionRef={cardRef}
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
-      title={card.title}
+      // 먼저 제안 카드는 제목 끝의 짧은 꼬리표 하나로만 말한다(#4705). 제안자는 카드 작성자라 줄이 이미 말한다.
+      title={approvalHeadTitle(card)}
       chip={<ApprovalChip status={status} />}
       status={status}
       kind="approval"
@@ -529,6 +533,9 @@ function ApprovalBody({
               memberFor(directory, card.requestedByMemberId)?.displayName ?? null
             }
           />
+        ) : !settled && card.action?.messagePreview !== undefined ? (
+          // 고정·고정 풀기 카드(#4705): 앞 120자만 보고 누르지 않게 전문으로 가는 문 하나.
+          <MessagePreviewLink preview={card.action.messagePreview} />
         ) : undefined
       }
       footer={
@@ -672,17 +679,14 @@ function ApprovalBody({
       {card.action?.rationale && (
         // 도우미 카드의 사유는 모델이 쓴 글이다. 서버가 검증한 위 행과 다른 층이라는
         // 것을 이름과 한 줄로 말한다(ADR-0201 D6-1 ③: 모델 출력을 믿지 않는다).
-        <LabeledRow
-          label={card.proposedVia ? TEAM_AI_RATIONALE_LABEL : "사유"}
-          testId="approval-action-rationale"
-        >
+        <LabeledRow label={rationaleTag(card).label} testId="approval-action-rationale">
           {card.action.rationale}
-          {card.proposedVia && (
+          {rationaleTag(card).note !== null && (
             <span
               className="mt-1 block text-meta text-ink-muted"
               data-testid="approval-team-ai-rationale-note"
             >
-              {TEAM_AI_RATIONALE_NOTE}
+              {rationaleTag(card).note}
             </span>
           )}
         </LabeledRow>
@@ -1167,7 +1171,14 @@ function ToolBody({ card }: { card: AgentToolCard }) {
     <CardFrame
       icon={<Terminal className="size-4" aria-hidden="true" />}
       title={card.title}
-      chip={<TurnChip status={card.status} />}
+      // 서버 만료 스윕이 남긴 줄은 실패가 아니라 소식이 없는 것이다(#4705, L4): 중립의 「만료됨」.
+      chip={
+        card.approvalExpired ? (
+          <ApprovalChip status="expired" />
+        ) : (
+          <TurnChip status={card.status} />
+        )
+      }
       status={card.status}
       kind="tool"
       detail={card.detail}
