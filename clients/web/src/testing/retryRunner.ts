@@ -41,7 +41,7 @@ export default class RetryRegistryRunner extends VitestTestRunner {
     const id = testIdOf(task);
     const issue = registry?.entries.find((entry) => entry.id === id)?.issue;
     process.stderr.write(
-      `[test-retry] #${issue ?? "?"} ${id} — 첫 시도 실패, 재시도 ${retried}회 뒤 ${task.result?.state}\n`
+      `[test-retry] #${issue ?? "?"} ${id}: 첫 시도 실패, 재시도 ${retried}회 뒤 ${task.result?.state}\n`
     );
   }
 }

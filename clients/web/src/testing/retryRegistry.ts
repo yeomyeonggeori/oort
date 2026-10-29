@@ -130,11 +130,11 @@ export function ruleProblems(registry: RetryRegistry, now: number): string[] {
     const span = (endOfDayKst(entry.expires) - endOfDayKst(entry.since)) / DAY_MS;
     if (!(span >= 0)) out.push(`기한이 등록일보다 앞서요: ${entry.id}`);
     else if (span > MAX_LIFETIME_DAYS) {
-      out.push(`기한이 ${MAX_LIFETIME_DAYS}일을 넘어요(#${entry.issue}): ${entry.id} — 이슈에 사유를 남기고 원인을 고치세요.`);
+      out.push(`기한이 ${MAX_LIFETIME_DAYS}일을 넘어요(#${entry.issue}): ${entry.id}. 이슈에 사유를 남기고 원인을 고치세요.`);
     }
     if (isExpired(entry, now)) {
       out.push(
-        `재시도 기한이 지났어요(#${entry.issue}, ${entry.expires}): ${entry.id} — 원인을 고쳐 항목을 지우거나, 이슈에 사유를 남기고 새 기한으로 다시 등록하세요. 러너는 이미 이 시험을 재시도하지 않아요.`
+        `재시도 기한이 지났어요(#${entry.issue}, ${entry.expires}): ${entry.id}. 원인을 고쳐 항목을 지우거나, 이슈에 사유를 남기고 새 기한으로 다시 등록하세요. 러너는 이미 이 시험을 재시도하지 않아요.`
       );
     }
   }
