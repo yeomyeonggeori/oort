@@ -74,3 +74,41 @@ it('폰은 응답 전에 알림을 바꾸고 중복 요청을 막으며 실패�
   expect(result.current.error).toBeNull();
   unmount(); client.clear();
 });
+
+it.each(['ws', 'other-ws'])('폰은 요청 중 %s의 다른 채널을 열어도 원래 채널만 되돌려요', async nextWorkspaceId => {
+  const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: Infinity}}});
+  const original: Channel = {id: 'c1', workspaceId: 'ws', kind: 'public', name: 'one', muted: false};
+  const other: Channel = {id: 'c2', workspaceId: 'ws', kind: 'public', name: 'two', muted: true};
+  const elsewhere: Channel = {...other, id: 'c1', workspaceId: 'other-ws'};
+  client.setQueryData(['channels', 'ws'], [original, other]);
+  client.setQueryData(['channels', 'other-ws'], [elsewhere]);
+  const invalidate = jest.spyOn(client, 'invalidateQueries');
+  const target: ChannelRowTarget = {channel: original, title: 'one', muted: false, selfRole: 'owner', readState: null};
+  const nextChannel = nextWorkspaceId === 'ws' ? other : elsewhere;
+  const nextTarget: ChannelRowTarget = {...target, channel: nextChannel, title: 'two', muted: true};
+  const {result, rerender, unmount} = renderHook(({workspaceId}: {workspaceId: string}) => useChannelRowActions(workspaceId, 'me'), {
+    initialProps: {workspaceId: 'ws'},
+    wrapper: ({children}) => <QueryClientProvider client={client}>{children}</QueryClientProvider>,
+  });
+  let reject!: (reason: Error) => void;
+  const api = jest.mocked(setChannelNotificationPref);
+  api.mockReset();
+  api.mockImplementationOnce(() => new Promise((_, no) => { reject = no; }));
+  try {
+    act(() => { result.current.open(target); result.current.run(target, 'mute'); });
+    await act(async () => {});
+    expect(client.getQueryData<Channel[]>(['channels', 'ws'])![0].muted).toBe(true);
+    rerender({workspaceId: nextWorkspaceId});
+    act(() => result.current.open(nextTarget));
+    expect(api).toHaveBeenCalledTimes(1);
+    expect(api).toHaveBeenCalledWith('ws', 'c1', true);
+    await act(async () => { reject(new Error('offline')); });
+    expect(client.getQueryData<Channel[]>(['channels', 'ws'])).toEqual([original, other]);
+    expect(client.getQueryData<Channel[]>(['channels', 'other-ws'])).toEqual([elsewhere]);
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({queryKey: ['channels', 'ws']});
+  } finally {
+    unmount();
+    client.clear();
+  }
+});

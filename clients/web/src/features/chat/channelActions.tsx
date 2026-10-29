@@ -175,7 +175,7 @@ export function useChannelActions({
   const location = useLocation();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const [error, setError] = useState<string | null>(null);
-  const [optimisticMute, setOptimisticMute] = useState<{ channelId: string; muted: boolean } | null>(null);
+  const [optimisticMute, setOptimisticMute] = useState<{ workspaceId: string; channelId: string; muted: boolean } | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -189,34 +189,32 @@ export function useChannelActions({
   const idCopy = useClipboardCopy(channel.id);
 
   const muteMutation = useMutation({
-    mutationFn: (muted: boolean) =>
-      setChannelNotificationPref(workspaceId, channel.id, muted),
-    onMutate: async (muted: boolean) => {
+    // 진행 중 채널/워크스페이스가 바뀌어도 요청 당시 대상만 갱신·복구한다.
+    mutationFn: (target: { workspaceId: string; channelId: string; previousMuted: boolean; muted: boolean }) =>
+      setChannelNotificationPref(target.workspaceId, target.channelId, target.muted),
+    onMutate: async (target) => {
       setError(null);
-      setOptimisticMute({ channelId: channel.id, muted });
-      const queryKey = ["channels", workspaceId];
+      setOptimisticMute(target);
+      const queryKey = ["channels", target.workspaceId];
       await client.cancelQueries({ queryKey });
-      const previous = client.getQueryData<Channel[]>(queryKey)
-        ?.find((row) => uuidEq(row.id, channel.id))?.muted ?? channel.muted;
       client.setQueryData<Channel[]>(queryKey, (rows) =>
-        rows?.map((row) => uuidEq(row.id, channel.id) ? { ...row, muted } : row)
+        rows?.map((row) => uuidEq(row.id, target.channelId) ? { ...row, muted: target.muted } : row)
       );
-      return { previous };
     },
     onSuccess: () => {
       setError(null);
       onActionSucceeded();
     },
-    onError: (_error, _muted, context) => {
+    onError: (_error, target) => {
       setOptimisticMute(null);
-      client.setQueryData<Channel[]>(["channels", workspaceId], (rows) =>
-        rows?.map((row) => uuidEq(row.id, channel.id)
-          ? { ...row, muted: context?.previous ?? channel.muted } : row)
+      client.setQueryData<Channel[]>(["channels", target.workspaceId], (rows) =>
+        rows?.map((row) => uuidEq(row.id, target.channelId)
+          ? { ...row, muted: target.previousMuted } : row)
       );
       setError(CHANNEL_MUTE_FAILURE);
     },
-    onSettled: async () => {
-      await client.invalidateQueries({ queryKey: ["channels", workspaceId] });
+    onSettled: async (_data, _error, target) => {
+      await client.invalidateQueries({ queryKey: ["channels", target.workspaceId] });
       setOptimisticMute(null);
     },
   });
@@ -358,7 +356,8 @@ export function useChannelActions({
   );
 
   const state: ChannelActionState = {
-    muted: optimisticMute?.channelId === channel.id ? optimisticMute.muted : channel.muted,
+    muted: optimisticMute?.workspaceId === workspaceId && optimisticMute.channelId === channel.id
+      ? optimisticMute.muted : channel.muted,
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
     copiedId: idCopy.copied,
@@ -398,9 +397,12 @@ export function useChannelActions({
     if (key === "mark-read" && markReadMutation.isPending) return;
     if (key === "mark-unread" && markUnreadMutation.isPending) return;
     switch (key) {
-      case "mute":
-        muteMutation.mutate(!channel.muted);
+      case "mute": {
+        const previousMuted = client.getQueryData<Channel[]>(["channels", workspaceId])
+          ?.find((row) => uuidEq(row.id, channel.id))?.muted ?? channel.muted;
+        muteMutation.mutate({ workspaceId, channelId: channel.id, previousMuted, muted: !previousMuted });
         return;
+      }
       case "mark-read":
         markReadMutation.mutate();
         return;
