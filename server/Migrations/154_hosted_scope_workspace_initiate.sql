@@ -1,5 +1,5 @@
 -- =============================================================================
--- 153_hosted_scope_workspace_initiate.sql — ADR-0186 증보 v5 U-b (#4704, N3-A)
+-- 154_hosted_scope_workspace_initiate.sql — ADR-0186 증보 v5 U-b (#4704, N3-A)
 --
 -- hosted 스코프 어휘에 `workspace:initiate` 한 줄을 더한다. 사람이 부르지 않았는데
 -- 에이전트가 소유자 DM에 승인 카드를 올리는 도구(`oort_action_initiate`)의 문이다.

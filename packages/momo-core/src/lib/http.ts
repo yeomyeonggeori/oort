@@ -74,6 +74,11 @@ export interface HttpResponse {
    * (`refresh_proof_stale`, #3106).
    */
   readonly date?: string | null;
+  /**
+   * The raw `Retry-After` header, or null. A 429 or 503 that says when to come
+   * back says it here and nowhere else (the error envelope carries no seconds).
+   */
+  readonly retryAfter?: string | null;
   /** Parsed body. Throws on a body that is not JSON, like `Response.json()`. */
   json<T>(): T;
   /** Parsed body, or null when there is none or it is not JSON. */
@@ -84,13 +89,15 @@ function httpResponse(
   status: number,
   ok: boolean,
   text: string,
-  date: string | null = null
+  date: string | null = null,
+  retryAfter: string | null = null
 ): HttpResponse {
   return {
     status,
     ok,
     text,
     date,
+    retryAfter,
     json<T>(): T {
       return JSON.parse(text) as T;
     },
@@ -138,7 +145,13 @@ export async function fetchWithDeadline(
     // Still under the same signal: a body that stalls after the headers is the
     // same infinite wait, and it aborts on the same deadline.
     const text = await res.text();
-    return httpResponse(res.status, res.ok, text, res.headers?.get?.("Date") ?? null);
+    return httpResponse(
+      res.status,
+      res.ok,
+      text,
+      res.headers?.get?.("Date") ?? null,
+      res.headers?.get?.("Retry-After") ?? null
+    );
   } catch (error) {
     if (timedOut) throw new NetworkError("timeout", timeoutMs, error);
     if (callerSignal?.aborted) throw error; // the caller cancelled; not a failure

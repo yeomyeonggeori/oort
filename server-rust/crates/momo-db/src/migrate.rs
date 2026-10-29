@@ -696,15 +696,20 @@ mod tests {
     /// kind, actor_member_id, workspace_id` trigger that lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
     /// per lineage, and `message.sent_via` (`NULL` or `'dev'`). No new table, so no new RLS policy.
     ///
-    /// 153 is #4704's `workspace:initiate` (ADR-0186 증보 v5 U-b): the hosted scope vocabulary gains an
+    /// 153 is #4700's `oort login` browser-approval ledger (ADR-0216 D6 나): the new tenant table
+    /// `dev_login_authorization` (one terminal decision per signed request nonce, a 60 s single-use code
+    /// stored only as a digest, the lineage a consumed code opened) under RLS ENABLE + FORCE and the
+    /// standard `ws_isolation` policy, with a conditional `momo_app` grant.
+    ///
+    /// 154 is #4704's `workspace:initiate` (ADR-0186 증보 v5 U-b): the hosted scope vocabulary gains an
     /// eighth value, so the three CHECK constraints 087 rewrote are rewritten again. No table, column,
     /// index or row is added or changed; an existing connection's approved scopes stay exactly as they were.
     #[test]
-    fn discovers_contiguous_migrations_001_to_152() {
+    fn discovers_contiguous_migrations_001_to_154() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=153).collect();
+        let expected: Vec<i64> = (1..=154).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -712,7 +717,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=153 under {}",
+            "expected contiguous 001..=154 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -720,7 +725,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("153_hosted_scope_workspace_initiate"));
+            .starts_with("154_hosted_scope_workspace_initiate"));
     }
 
     #[test]

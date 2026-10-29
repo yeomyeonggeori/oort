@@ -57,6 +57,7 @@ use crate::dto::{
     HostedOauthDecisionResponse,
 };
 use crate::error::ApiError;
+use crate::routes::dev_login_oauth;
 use crate::routes::shared::{agent_tenant_tx, require_human, settle_db, workspace_scope};
 use crate::AppState;
 
@@ -79,7 +80,7 @@ const REPLAY_SCHEMA: &str = "oort.hosted_agent.oauth.replay.v1";
 /// Every OAuth response is `no-store`. RFC 6749 §5.1 requires it of the token
 /// endpoint, and the rest of this surface carries authorization decisions that
 /// no cache may ever replay to a second browser.
-fn no_store(mut response: Response) -> Response {
+pub(super) fn no_store(mut response: Response) -> Response {
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
@@ -89,7 +90,7 @@ fn no_store(mut response: Response) -> Response {
     response
 }
 
-fn oauth_failure(error: OauthError) -> Response {
+pub(super) fn oauth_failure(error: OauthError) -> Response {
     let status = StatusCode::from_u16(error.status()).unwrap_or(StatusCode::BAD_REQUEST);
     no_store((status, Json(error.body())).into_response())
 }
@@ -102,7 +103,7 @@ fn oauth_failure(error: OauthError) -> Response {
 /// RFC 6749 §4.1.2.1 says to inform the resource owner directly rather than
 /// redirect when the client or the redirect URI cannot be trusted, and this is
 /// that answer.
-fn authorization_refusal(error: OauthError) -> Response {
+pub(super) fn authorization_refusal(error: OauthError) -> Response {
     no_store((StatusCode::BAD_REQUEST, Json(error.body())).into_response())
 }
 
@@ -123,7 +124,7 @@ fn metadata(document: serde_json::Value) -> Response {
     response
 }
 
-fn found(location: &str) -> Response {
+pub(super) fn found(location: &str) -> Response {
     match HeaderValue::from_str(location) {
         Ok(value) => {
             let mut response = StatusCode::FOUND.into_response();
@@ -159,22 +160,31 @@ pub async fn protected_resource(State(state): State<AppState>) -> Response {
 }
 
 /// `GET /.well-known/oauth-authorization-server`
+///
+/// One document for the server's one authorization-server identity: it is served
+/// while **either** the hosted arm or the human-subject arm (`oort login`, #4700)
+/// is open, and 404 only when both are closed. `scopes_supported` is the union of the
+/// open arms' vocabularies — hosted first, then the `dev:` scopes — so a document never
+/// advertises a scope of an arm that answers 404. With only the hosted arm open the
+/// bytes are exactly what they were before the second arm existed.
 pub async fn authorization_server(State(state): State<AppState>) -> Response {
     let oauth = &state.agent_port.config.oauth;
-    let (Some(issuer), Some(authorize), Some(token), Some(revoke)) = (
-        oauth.issuer(),
-        oauth.endpoint("/v1/oauth/authorize"),
-        oauth.endpoint("/v1/oauth/token"),
-        oauth.endpoint("/v1/oauth/revoke"),
-    ) else {
+    let Some(issuer) = oauth.server_issuer() else {
         return not_found();
     };
+    let mut scopes: Vec<&str> = Vec::new();
+    if oauth.is_enabled() {
+        scopes.extend(HOSTED_AGENT_SCOPES.iter().copied());
+    }
+    if oauth.dev_login_enabled() {
+        scopes.extend(dev_login_oauth::SCOPES_SUPPORTED.iter().copied());
+    }
     metadata(authorization_server_metadata(
         issuer,
-        &authorize,
-        &token,
-        &revoke,
-        &HOSTED_AGENT_SCOPES,
+        &format!("{issuer}/v1/oauth/authorize"),
+        &format!("{issuer}/v1/oauth/token"),
+        &format!("{issuer}/v1/oauth/revoke"),
+        &scopes,
     ))
 }
 
@@ -184,14 +194,18 @@ pub async fn authorization_server(State(state): State<AppState>) -> Response {
 
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeQuery {
-    response_type: Option<String>,
-    client_id: Option<String>,
-    redirect_uri: Option<String>,
-    scope: Option<String>,
-    state: Option<String>,
-    code_challenge: Option<String>,
-    code_challenge_method: Option<String>,
-    resource: Option<String>,
+    pub(super) response_type: Option<String>,
+    pub(super) client_id: Option<String>,
+    pub(super) redirect_uri: Option<String>,
+    pub(super) scope: Option<String>,
+    pub(super) state: Option<String>,
+    pub(super) code_challenge: Option<String>,
+    pub(super) code_challenge_method: Option<String>,
+    pub(super) resource: Option<String>,
+    /// `oort-cli` only (#4700): the label the connecting side gives the device. The hosted
+    /// arm never reads it.
+    #[serde(default)]
+    pub(super) device_name: Option<String>,
 }
 
 /// `GET /v1/oauth/authorize`
@@ -210,6 +224,9 @@ pub async fn authorize(
     Query(query): Query<AuthorizeQuery>,
 ) -> Response {
     let oauth = &state.agent_port.config.oauth;
+    if dev_login_oauth::takes(oauth, query.client_id.as_deref()) {
+        return dev_login_oauth::authorize(&state, &query);
+    }
     let (Some(issuer), Some(canonical_resource), Some(consent_url)) =
         (oauth.issuer(), oauth.resource(), oauth.consent_url())
     else {
@@ -305,7 +322,7 @@ pub async fn authorize(
 
 /// Wall-clock seconds. Isolated so the one place this surface reads a clock is
 /// visible.
-fn chrono_now_seconds() -> i64 {
+pub(super) fn chrono_now_seconds() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs() as i64)
@@ -641,18 +658,21 @@ fn refusal_error(refusal: HostedOauthRefusal) -> ApiError {
 
 #[derive(Debug, Deserialize)]
 pub struct TokenForm {
-    grant_type: Option<String>,
-    client_id: Option<String>,
-    code: Option<String>,
-    code_verifier: Option<String>,
-    redirect_uri: Option<String>,
-    refresh_token: Option<String>,
-    resource: Option<String>,
+    pub(super) grant_type: Option<String>,
+    pub(super) client_id: Option<String>,
+    pub(super) code: Option<String>,
+    pub(super) code_verifier: Option<String>,
+    pub(super) redirect_uri: Option<String>,
+    pub(super) refresh_token: Option<String>,
+    pub(super) resource: Option<String>,
 }
 
 /// `POST /v1/oauth/token`
 pub async fn token(State(state): State<AppState>, Form(form): Form<TokenForm>) -> Response {
     let oauth = &state.agent_port.config.oauth;
+    if dev_login_oauth::takes(oauth, form.client_id.as_deref()) {
+        return dev_login_oauth::token(&state, &form).await;
+    }
     let Some(canonical_resource) = oauth.resource() else {
         return not_found();
     };
@@ -918,8 +938,8 @@ fn settle_token(
 
 #[derive(Debug, Deserialize)]
 pub struct RevokeForm {
-    token: Option<String>,
-    client_id: Option<String>,
+    pub(super) token: Option<String>,
+    pub(super) client_id: Option<String>,
 }
 
 /// `POST /v1/oauth/revoke`
@@ -932,6 +952,9 @@ pub struct RevokeForm {
 /// not asked for the refresh credential to keep minting new ones.
 pub async fn revoke(State(state): State<AppState>, Form(form): Form<RevokeForm>) -> Response {
     let oauth = &state.agent_port.config.oauth;
+    if dev_login_oauth::takes(oauth, form.client_id.as_deref()) {
+        return dev_login_oauth::revoke(&state, &form).await;
+    }
     if !oauth.is_enabled() {
         return not_found();
     }

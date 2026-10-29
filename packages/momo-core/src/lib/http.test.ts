@@ -135,3 +135,27 @@ describe("reading the body", () => {
     expect(res.jsonOrNull()).toBeNull();
   });
 });
+
+describe("reading the Retry-After header", () => {
+  it("hands the raw header to a caller that is told to come back later", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ error: { message: "rate limit exceeded" } }), {
+            status: 429,
+            headers: { "Content-Type": "application/json", "Retry-After": "17" },
+          })
+      )
+    );
+    const res = await fetchWithDeadline("http://server.test/v1/ping");
+    expect(res.status).toBe(429);
+    expect(res.retryAfter).toBe("17");
+  });
+
+  it("is null when the server did not say", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ ok: true })));
+    const res = await fetchWithDeadline("http://server.test/v1/ping");
+    expect(res.retryAfter).toBeNull();
+  });
+});

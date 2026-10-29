@@ -652,11 +652,27 @@ pub struct AgentPortOauthConfig {
     /// Absolute https URL of the resource owner's consent screen (#1369).
     consent_url: Option<String>,
     clients: Vec<RegisteredOauthClient>,
+    /// ADR-0216 D6 (나) / #4700 — the **human-subject arm** (`oort login`).
+    ///
+    /// Independent of the hosted arm above: an operator may open either, both or
+    /// neither, and the hosted accessors ([`Self::is_enabled`], [`Self::issuer`],
+    /// [`Self::consent_url`], [`Self::resource`], [`Self::client`]) mean exactly what
+    /// they meant before this arm existed — they never answer for it, so turning
+    /// this arm on cannot advertise the hosted resource or accept a hosted client.
+    /// The two arms share one issuer (`MOMO_AGENT_PORT_OAUTH_ISSUER`): a server has
+    /// one authorization-server identity.
+    dev_login_enabled: bool,
+    /// Absolute https URL of the developer-login consent screen (`/oauth/cli`).
+    dev_login_consent_url: Option<String>,
 }
 
+/// The canonical resource of the human-subject arm, derived from the issuer so the
+/// two can never disagree. It is the human MCP endpoint's path (ADR-0216 D5).
+pub const DEV_LOGIN_RESOURCE_PATH: &str = "/v1/mcp/me";
+
 impl AgentPortOauthConfig {
-    /// The one predicate every OAuth surface asks. False means 404, not 503:
-    /// a disabled authorization server does not exist, it is not merely busy.
+    /// The one predicate every **hosted** OAuth surface asks. False means 404, not
+    /// 503: a disabled authorization server does not exist, it is not merely busy.
     pub fn is_enabled(&self) -> bool {
         self.enabled
             && self.issuer.is_some()
@@ -699,7 +715,46 @@ impl AgentPortOauthConfig {
             .flatten()
     }
 
+    /// The human-subject arm's predicate. False means the built-in `oort-cli`
+    /// client does not exist: a request naming it is answered exactly like one
+    /// naming an unknown client.
+    pub fn dev_login_enabled(&self) -> bool {
+        self.dev_login_enabled && self.issuer.is_some() && self.dev_login_consent_url.is_some()
+    }
+
+    pub fn dev_login_issuer(&self) -> Option<&str> {
+        self.dev_login_enabled()
+            .then_some(self.issuer.as_deref())
+            .flatten()
+    }
+
+    pub fn dev_login_consent_url(&self) -> Option<&str> {
+        self.dev_login_enabled()
+            .then_some(self.dev_login_consent_url.as_deref())
+            .flatten()
+    }
+
+    /// The human-subject arm's canonical resource (issuer + `/v1/mcp/me`). Not the
+    /// hosted [`Self::resource`]: the two audiences are different credentials.
+    pub fn dev_login_resource(&self) -> Option<String> {
+        self.dev_login_issuer()
+            .map(|issuer| format!("{issuer}{DEV_LOGIN_RESOURCE_PATH}"))
+    }
+
+    pub fn dev_login_endpoint(&self, path: &str) -> Option<String> {
+        self.dev_login_issuer()
+            .map(|issuer| format!("{issuer}{path}"))
+    }
+
+    /// The issuer an authorization-server **metadata** document may name: either
+    /// arm being open is enough, and a document never advertises an arm that is
+    /// closed. `None` when both are closed (the well-known is then 404).
+    pub fn server_issuer(&self) -> Option<&str> {
+        self.issuer().or_else(|| self.dev_login_issuer())
+    }
+
     /// Construct directly (fixtures and verifiers), bypassing the environment.
+    /// Opens the hosted arm only.
     pub fn for_tests(
         issuer: &str,
         consent_url: &str,
@@ -710,49 +765,101 @@ impl AgentPortOauthConfig {
             issuer: Some(issuer.to_string()),
             consent_url: Some(consent_url.to_string()),
             clients,
+            dev_login_enabled: false,
+            dev_login_consent_url: None,
         }
     }
 
+    /// Fixtures: the human-subject arm alone (the hosted arm stays closed).
+    pub fn for_tests_dev_login(issuer: &str, consent_url: &str) -> AgentPortOauthConfig {
+        AgentPortOauthConfig {
+            issuer: Some(issuer.to_string()),
+            dev_login_enabled: true,
+            dev_login_consent_url: Some(consent_url.to_string()),
+            ..AgentPortOauthConfig::default()
+        }
+    }
+
+    /// Fixtures: this config with the human-subject arm opened as well. The two
+    /// arms share the issuer already in `self`.
+    pub fn with_dev_login_for_tests(mut self, consent_url: &str) -> AgentPortOauthConfig {
+        self.dev_login_enabled = true;
+        self.dev_login_consent_url = Some(consent_url.to_string());
+        self
+    }
+
     fn from_env() -> Result<AgentPortOauthConfig, ConfigError> {
-        // Exactly one spelling opens it, the same discipline the hosted
+        Self::from_lookup(env)
+    }
+
+    /// The environment grammar, over an injectable lookup so it is testable
+    /// without touching the process environment.
+    pub fn from_lookup(
+        lookup: impl Fn(&str) -> Option<String>,
+    ) -> Result<AgentPortOauthConfig, ConfigError> {
+        let value = |name: &str| lookup(name).filter(|raw| !raw.trim().is_empty());
+        // Exactly one spelling opens an arm, the same discipline the hosted
         // delivery gate uses: a capability a typo can enable is a capability
         // nobody decided to enable.
-        let enabled =
-            env("MOMO_AGENT_PORT_OAUTH_ENABLED").is_some_and(|value| value.trim() == "true");
-        if !enabled {
+        let opted_in = |name: &str| value(name).is_some_and(|raw| raw.trim() == "true");
+        let enabled = opted_in("MOMO_AGENT_PORT_OAUTH_ENABLED");
+        let dev_login_enabled = opted_in("MOMO_DEV_LOGIN_OAUTH_ENABLED");
+        if !enabled && !dev_login_enabled {
             return Ok(AgentPortOauthConfig::default());
         }
-        let issuer = env("MOMO_AGENT_PORT_OAUTH_ISSUER")
+        let https_url = |raw: String| {
+            let trimmed = raw.trim().to_string();
+            (trimmed.starts_with("https://") && !trimmed.contains(['#', ' '])).then_some(trimmed)
+        };
+        // One server, one authorization-server identity: both arms need it.
+        let issuer = value("MOMO_AGENT_PORT_OAUTH_ISSUER")
             .as_deref()
             .and_then(normalized_origin)
             .filter(|origin| origin.starts_with("https://"))
             .ok_or(ConfigError::InvalidSecurity(
                 "MOMO_AGENT_PORT_OAUTH_ISSUER must be one exact https origin",
             ))?;
-        let consent_url = env("MOMO_AGENT_PORT_OAUTH_CONSENT_URL")
-            .map(|value| value.trim().to_string())
-            .filter(|value| value.starts_with("https://") && !value.contains(['#', ' ']))
+        let (consent_url, clients) = if enabled {
+            let consent_url = value("MOMO_AGENT_PORT_OAUTH_CONSENT_URL")
+                .and_then(https_url)
+                .ok_or(ConfigError::InvalidSecurity(
+                    "MOMO_AGENT_PORT_OAUTH_CONSENT_URL must be one absolute https URL",
+                ))?;
+            let clients = parse_registered_oauth_clients(
+                value("MOMO_AGENT_PORT_OAUTH_CLIENTS")
+                    .as_deref()
+                    .unwrap_or(""),
+            )
             .ok_or(ConfigError::InvalidSecurity(
-                "MOMO_AGENT_PORT_OAUTH_CONSENT_URL must be one absolute https URL",
+                "MOMO_AGENT_PORT_OAUTH_CLIENTS must be id=https://redirect[|https://redirect] entries (the id oort-cli is built in and cannot be registered)",
             ))?;
-        let clients = parse_registered_oauth_clients(
-            env("MOMO_AGENT_PORT_OAUTH_CLIENTS")
-                .as_deref()
-                .unwrap_or(""),
-        )
-        .ok_or(ConfigError::InvalidSecurity(
-            "MOMO_AGENT_PORT_OAUTH_CLIENTS must be id=https://redirect[|https://redirect] entries",
-        ))?;
-        if clients.is_empty() {
-            return Err(ConfigError::InvalidSecurity(
-                "MOMO_AGENT_PORT_OAUTH_CLIENTS must register at least one public client",
-            ));
-        }
+            if clients.is_empty() {
+                return Err(ConfigError::InvalidSecurity(
+                    "MOMO_AGENT_PORT_OAUTH_CLIENTS must register at least one public client",
+                ));
+            }
+            (Some(consent_url), clients)
+        } else {
+            (None, Vec::new())
+        };
+        let dev_login_consent_url = if dev_login_enabled {
+            Some(
+                value("MOMO_DEV_LOGIN_OAUTH_CONSENT_URL")
+                    .and_then(https_url)
+                    .ok_or(ConfigError::InvalidSecurity(
+                        "MOMO_DEV_LOGIN_OAUTH_CONSENT_URL must be one absolute https URL",
+                    ))?,
+            )
+        } else {
+            None
+        };
         Ok(AgentPortOauthConfig {
             enabled,
             issuer: Some(issuer),
-            consent_url: Some(consent_url),
+            consent_url,
             clients,
+            dev_login_enabled,
+            dev_login_consent_url,
         })
     }
 }
@@ -772,7 +879,10 @@ fn parse_registered_oauth_clients(raw: &str) -> Option<Vec<RegisteredOauthClient
     {
         let (client_id, redirects) = entry.split_once('=')?;
         let client_id = client_id.trim();
+        // `oort-cli` is the built-in human-subject client (ADR-0216 D6): its
+        // redirects are the sealed loopback list, never an operator's string.
         if client_id.is_empty()
+            || client_id == momo_mcp::oauth::OORT_CLI_CLIENT_ID
             || client_id.len() > 200
             || !client_id
                 .bytes()
@@ -4446,5 +4556,176 @@ mod tests {
                 .is_err(),
             "staging without the opt-in: refused"
         );
+    }
+
+    // ----- AgentPortOauthConfig: the human-subject arm (ADR-0216 D6 나) ---------
+
+    fn oauth_lookup(pairs: &[(&'static str, &'static str)]) -> impl Fn(&str) -> Option<String> {
+        let map: std::collections::HashMap<&'static str, &'static str> =
+            pairs.iter().copied().collect();
+        move |key: &str| map.get(key).map(|value| (*value).to_string())
+    }
+
+    const OAUTH_ISSUER: (&str, &str) = ("MOMO_AGENT_PORT_OAUTH_ISSUER", "https://oort.example");
+    const DEV_ON: (&str, &str) = ("MOMO_DEV_LOGIN_OAUTH_ENABLED", "true");
+    const DEV_CONSENT: (&str, &str) = (
+        "MOMO_DEV_LOGIN_OAUTH_CONSENT_URL",
+        "https://oort.example/oauth/cli",
+    );
+    const HOSTED_ON: (&str, &str) = ("MOMO_AGENT_PORT_OAUTH_ENABLED", "true");
+    const HOSTED_CONSENT: (&str, &str) = (
+        "MOMO_AGENT_PORT_OAUTH_CONSENT_URL",
+        "https://oort.example/oauth/consent",
+    );
+    const HOSTED_CLIENTS: (&str, &str) = (
+        "MOMO_AGENT_PORT_OAUTH_CLIENTS",
+        "some-client=https://client.example/cb",
+    );
+
+    #[test]
+    fn the_oauth_server_stays_closed_unless_an_arm_is_opted_in_with_exactly_true() {
+        for spelling in ["True", "1", "yes", "TRUE", "false", " "] {
+            let config = AgentPortOauthConfig::from_lookup(|key| match key {
+                "MOMO_DEV_LOGIN_OAUTH_ENABLED" | "MOMO_AGENT_PORT_OAUTH_ENABLED" => {
+                    Some(spelling.to_string())
+                }
+                "MOMO_AGENT_PORT_OAUTH_ISSUER" => Some("https://oort.example".to_string()),
+                _ => None,
+            })
+            .expect("a closed server needs no other variable");
+            assert_eq!(config, AgentPortOauthConfig::default(), "{spelling:?}");
+            assert!(!config.dev_login_enabled() && !config.is_enabled());
+            assert_eq!(config.server_issuer(), None);
+        }
+    }
+
+    #[test]
+    fn the_developer_login_arm_opens_alone_without_opening_any_hosted_surface() {
+        let config =
+            AgentPortOauthConfig::from_lookup(oauth_lookup(&[OAUTH_ISSUER, DEV_ON, DEV_CONSENT]))
+                .expect("the dev arm needs only the shared issuer and its own consent URL");
+        assert!(config.dev_login_enabled());
+        assert_eq!(config.dev_login_issuer(), Some("https://oort.example"));
+        assert_eq!(
+            config.dev_login_consent_url(),
+            Some("https://oort.example/oauth/cli")
+        );
+        assert_eq!(
+            config.dev_login_resource().as_deref(),
+            Some("https://oort.example/v1/mcp/me")
+        );
+        assert_eq!(config.server_issuer(), Some("https://oort.example"));
+        // The hosted accessors keep their pre-existing meaning: they answer for the
+        // hosted arm only, so the dev arm cannot advertise the hosted resource.
+        assert!(!config.is_enabled());
+        assert_eq!(config.issuer(), None);
+        assert_eq!(config.consent_url(), None);
+        assert_eq!(config.resource(), None);
+        assert_eq!(config.endpoint("/v1/oauth/token"), None);
+        assert!(config.client("oort-cli").is_none());
+    }
+
+    #[test]
+    fn each_arm_demands_the_values_it_needs_and_a_missing_one_refuses_to_boot() {
+        // The dev arm without the shared issuer, or without its own consent URL.
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[DEV_ON, DEV_CONSENT])).is_err());
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[OAUTH_ISSUER, DEV_ON])).is_err());
+        // Not https, or carrying a fragment, is refused.
+        for bad in [
+            "http://oort.example/oauth/cli",
+            "https://oort.example/oauth/cli#x",
+        ] {
+            let config = AgentPortOauthConfig::from_lookup(|key| match key {
+                "MOMO_DEV_LOGIN_OAUTH_ENABLED" => Some("true".to_string()),
+                "MOMO_AGENT_PORT_OAUTH_ISSUER" => Some("https://oort.example".to_string()),
+                "MOMO_DEV_LOGIN_OAUTH_CONSENT_URL" => Some(bad.to_string()),
+                _ => None,
+            });
+            assert!(config.is_err(), "{bad}");
+        }
+        // The hosted arm still demands its consent URL and at least one client.
+        assert!(
+            AgentPortOauthConfig::from_lookup(oauth_lookup(&[OAUTH_ISSUER, HOSTED_ON])).is_err()
+        );
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn the_hosted_arm_alone_leaves_the_developer_arm_closed_and_both_can_be_open() {
+        let hosted = AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT,
+            HOSTED_CLIENTS,
+        ]))
+        .expect("hosted arm");
+        assert!(hosted.is_enabled());
+        assert!(!hosted.dev_login_enabled());
+        assert_eq!(hosted.dev_login_issuer(), None);
+        assert_eq!(hosted.dev_login_resource(), None);
+        assert_eq!(hosted.server_issuer(), Some("https://oort.example"));
+        assert_eq!(
+            hosted.resource().as_deref(),
+            Some("https://oort.example/v1/mcp/agent-port")
+        );
+
+        let both = AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT,
+            HOSTED_CLIENTS,
+            DEV_ON,
+            DEV_CONSENT,
+        ]))
+        .expect("both arms");
+        assert!(both.is_enabled() && both.dev_login_enabled());
+        // Two audiences, never one: the resources differ.
+        assert_ne!(both.resource(), both.dev_login_resource());
+    }
+
+    #[test]
+    fn the_built_in_client_id_cannot_be_registered_by_an_operator() {
+        assert!(parse_registered_oauth_clients("oort-cli=https://evil.example/cb").is_none());
+        assert!(parse_registered_oauth_clients(
+            "some-client=https://client.example/cb;oort-cli=http://127.0.0.1:24681/callback"
+        )
+        .is_none());
+        assert!(parse_registered_oauth_clients("some-client=https://client.example/cb").is_some());
+        // And through the environment grammar: the whole variable is refused.
+        assert!(AgentPortOauthConfig::from_lookup(oauth_lookup(&[
+            OAUTH_ISSUER,
+            HOSTED_ON,
+            HOSTED_CONSENT,
+            (
+                "MOMO_AGENT_PORT_OAUTH_CLIENTS",
+                "oort-cli=https://evil.example/cb"
+            ),
+        ]))
+        .is_err());
+    }
+
+    #[test]
+    fn the_fixture_constructors_open_exactly_the_arm_they_name() {
+        let dev = AgentPortOauthConfig::for_tests_dev_login(
+            "https://oort.example",
+            "https://oort.example/oauth/cli",
+        );
+        assert!(dev.dev_login_enabled() && !dev.is_enabled());
+        let hosted = AgentPortOauthConfig::for_tests(
+            "https://oort.example",
+            "https://oort.example/oauth/consent",
+            vec![RegisteredOauthClient {
+                client_id: "some-client".to_string(),
+                redirect_uris: vec!["https://client.example/cb".to_string()],
+            }],
+        );
+        assert!(hosted.is_enabled() && !hosted.dev_login_enabled());
+        let both = hosted.with_dev_login_for_tests("https://oort.example/oauth/cli");
+        assert!(both.is_enabled() && both.dev_login_enabled());
     }
 }

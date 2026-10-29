@@ -72,6 +72,7 @@
 pub mod agent_bearer;
 pub mod agent_credential;
 pub mod agent_scope;
+pub mod dev_login;
 pub mod dev_token;
 pub mod device_key;
 pub mod device_link;
@@ -118,9 +119,19 @@ pub use agent_scope::{
     SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
     SCOPE_WORKSPACE_INITIATE, SCOPE_WORKSPACE_PROPOSE,
 };
+pub use dev_login::{
+    approve_dev_login_request_in_tx, deny_dev_login_request_in_tx, dev_login_code_workspace_id,
+    dev_login_request_key, invalidate_pending_dev_logins_in_tx, lock_dev_login_code_in_tx,
+    redeem_dev_login_code_in_tx, resolve_dev_login_revocation_target_in_tx,
+    revoke_dev_login_lineage_in_tx, sign_dev_login_request, verify_dev_login_request,
+    DevLoginApproval, DevLoginCodeLock, DevLoginRedeem, DevLoginRefusal, DevLoginRequestClaims,
+    DevLoginRequestSeed, DevLoginRevocationTarget, DEV_LOGIN_CODE_PREFIX,
+    DEV_LOGIN_CODE_TTL_SECONDS, DEV_LOGIN_LABEL, DEV_LOGIN_REQUEST_TTL_SECONDS,
+    DEV_LOGIN_REQUEST_TYP,
+};
 pub use dev_token::{
-    dev_credential_owner_in_tx, dev_refresh_workspace_id, dev_token_workspace_id,
-    finalize_dev_use_in_tx, issue_dev_card_in_tx, issue_dev_login_in_tx,
+    count_live_dev_lineages_in_tx, dev_credential_owner_in_tx, dev_refresh_workspace_id,
+    dev_token_workspace_id, finalize_dev_use_in_tx, issue_dev_card_in_tx, issue_dev_login_in_tx,
     list_dev_credentials_in_tx, mint_dev_envelope, normalized_dev_channel_ids,
     normalized_dev_client, normalized_dev_device_name, normalized_dev_label, normalized_dev_scopes,
     required_dev_scope, resolve_dev_token_in_tx, revoke_dev_credential_in_tx,

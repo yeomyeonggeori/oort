@@ -710,14 +710,18 @@ assert_filter_fixture() {
   printf '%s\n' "$pages_json" > "$fixture_dir/pages.json"
   : > "$fixture_dir/output"
 
+  # `bash -e` is what Actions runs for a `run:` step without `shell:`; the script's
+  # own `set -uo pipefail` adds -u and pipefail but does not switch -e off.
   if ! PATH="$FAKE_BIN:$PATH" \
     FAKE_GH_METADATA="$fixture_dir/metadata.json" \
     FAKE_GH_FILES="$fixture_dir/pages.json" \
     GITHUB_OUTPUT="$fixture_dir/output" \
     RUNNER_TEMP="$fixture_dir/runner" \
     GH_TOKEN=test REPO=example/oort PR=42 \
-    bash "$FILTER_SCRIPT" > "$fixture_dir/log" 2>&1; then
-    sed 's/^/[classifier] /' "$fixture_dir/log" >&2
+    bash -e "$FILTER_SCRIPT" > "$fixture_dir/log" 2>&1; then
+    # The log starts with the changed-path list (up to 2,999 lines for the big-PR
+    # fixtures) and ends with the reason, so show the tail.
+    tail -n 40 "$fixture_dir/log" | sed 's/^/[classifier] /' >&2
     fail "$name classifier fixture exited non-zero"
   fi
 
@@ -984,6 +988,191 @@ mutant="$(mutated_classifier policy-lane-unknown-state '/^              echo "po
   || fail "policy-lane-unknown-state"
 expect_filter_red "$mutant" mutant-unknown '{"changed_files":2}' '[[{"filename":"docs/only-one.md","status":"modified"}]]' true true true
 
+# --- #4728: a big PR must not lose a lane, and a classifier fault is never "no match" ---
+# The old lane lines were `printf '%s\n' "$files" | grep -Eq <pattern> && lane=true`.
+# When grep matched an early line and exited, printf (still writing a list larger than
+# the pipe buffer) died of SIGPIPE; pipefail turned that into a failed pipeline, so the
+# `&&` never ran and every lane stayed false while the step still succeeded: rust, the
+# security pack, node and policy were all skipped and the gate was green. These fixtures
+# run the real classifier on big PRs whose FIRST path matches. The API cap (3,000) is
+# handled earlier by `run_all` (fixture api-cap), so 2,999 is the largest list that
+# reaches the matcher.
+big_pr_pad="$(printf '%*s' 120 '' | tr ' ' p)"
+big_pr_pages() { # <file count> <first path, or "" for a PR that matches no lane> -> REST pages of 100
+  jq -cn --argjson n "$1" --arg first "$2" --arg pad "$big_pr_pad" '
+    [ (if $first == "" then empty else $first end) ]
+    + [ range(0; $n - (if $first == "" then 0 else 1 end))
+        | "x-bulk/section-\(. / 100 | floor)/file-\(.)-\($pad).md" ]
+    | map({filename: ., status: "modified"})
+    | [ range(0; length; 100) as $i | .[$i:$i+100] ]'
+}
+# A fixture that is too small to fill two pipe buffers could not catch the old form.
+[ "$(big_pr_pages 1000 NOTICE | jq -r '.[][].filename' | wc -c | tr -d ' ')" -gt 131072 ] \
+  || fail "the 1,000-file fixture no longer exceeds two pipe buffers"
+assert_big_pr() { # <file count> <first path or ""> <rust> <node> <policy>
+  assert_filter_fixture "big-$1-$(printf '%s' "${2:-none}" | tr -c 'A-Za-z0-9\n' '_')" \
+    "{\"changed_files\":$1}" "$(big_pr_pages "$1" "$2")" "$3" "$4" "$5"
+}
+for big_count in 1000 2999; do
+  # The workflow itself matches all three patterns on the very first line.
+  assert_big_pr "$big_count" .github/workflows/pr-ci.yml true true true
+  # One lane per row: the first line matches only that lane (policy always includes rust).
+  assert_big_pr "$big_count" NOTICE true false true
+  assert_big_pr "$big_count" clients/web/src/early.ts false true false
+  assert_big_pr "$big_count" AGENTS.md false false true
+  # Control: a big PR that matches nothing stays false, so the classifier is not match-all.
+  assert_big_pr "$big_count" '' false false false
+done
+
+# Sabotage 1: put ONE lane line back into the old pipe form (echo and printf are both
+# builtins, so the SIGPIPE is the same). Its own big-PR row must come out false.
+old_form_lane_mutant() { # <name> <n> -> classifier whose n-th lane line is piped again
+  awk -v nth="$2" '
+    $0 == "          lane_hit \\" && ++seen == nth { print "          echo \"$files\" | grep -Eq \\"; next }
+    { print }
+  ' "$WORKFLOW" > "$TMP_DIR/$1.yml"
+  if cmp -s "$WORKFLOW" "$TMP_DIR/$1.yml"; then
+    echo "$1 mutation did not apply (lane line $2 not found)" >&2
+    return 1
+  fi
+  extract_change_filter "$TMP_DIR/$1.yml" > "$TMP_DIR/$1-filter.sh"
+  [ -s "$TMP_DIR/$1-filter.sh" ] || return 1
+  printf '%s\n' "$TMP_DIR/$1-filter.sh"
+}
+expect_lane_lost() { # <classifier script> <lane> <assert_big_pr args...> -> red because that lane is false
+  local script="$1" lane="$2" out
+  shift 2
+  if out="$( ( FILTER_SCRIPT="$script"; assert_big_pr "$@" ) 2>&1 )"; then
+    fail "a classifier with the old pipe form for the $lane lane was accepted: $*"
+  fi
+  grep -Fq "expected $lane=true, got false" <<<"$out" \
+    || fail "the old-form $lane mutant went red for another reason: $(tail -c 600 <<<"$out")"
+}
+mutant="$(old_form_lane_mutant old-form-rust 1)" || fail "old-form-rust"
+expect_lane_lost "$mutant" rust 1000 NOTICE true false true
+mutant="$(old_form_lane_mutant old-form-node 2)" || fail "old-form-node"
+expect_lane_lost "$mutant" node 1000 clients/web/src/early.ts false true false
+mutant="$(old_form_lane_mutant old-form-policy 3)" || fail "old-form-policy"
+expect_lane_lost "$mutant" policy 1000 AGENTS.md false false true
+mutant="$(old_form_lane_mutant old-form-rust-3k 1)" || fail "old-form-rust-3k"
+expect_lane_lost "$mutant" rust 2999 .github/workflows/pr-ci.yml true true true
+
+# A grep failure (bad regex after an edit, unreadable file) is neither a match nor "no
+# match": the step must fail so the changes job, and with it the gate, goes red. The fault
+# is injected with a grep that always exits 2; the caller-visible result is the step's exit
+# status and the absence of any lane output.
+GREP_FAULT_BIN="$TMP_DIR/grep-fault-bin"
+mkdir -p "$GREP_FAULT_BIN"
+printf '#!/usr/bin/env bash\nexit 2\n' > "$GREP_FAULT_BIN/grep"
+chmod +x "$GREP_FAULT_BIN/grep"
+assert_step_fails_on_grep_error() { # <classifier script> <name>
+  local script="$1" name="$2" fixture_dir="$TMP_DIR/fixture-grep-fault-$2"
+  mkdir -p "$fixture_dir/runner"
+  printf '{"changed_files":1}\n' > "$fixture_dir/metadata.json"
+  printf '[[{"filename":"docs/a.md","status":"modified"}]]\n' > "$fixture_dir/pages.json"
+  : > "$fixture_dir/output"
+  if PATH="$GREP_FAULT_BIN:$FAKE_BIN:$PATH" \
+    FAKE_GH_METADATA="$fixture_dir/metadata.json" \
+    FAKE_GH_FILES="$fixture_dir/pages.json" \
+    GITHUB_OUTPUT="$fixture_dir/output" \
+    RUNNER_TEMP="$fixture_dir/runner" \
+    GH_TOKEN=test REPO=example/oort PR=42 \
+    bash -e "$script" > "$fixture_dir/log" 2>&1; then
+    fail "$name: the classifier step succeeded although grep failed"
+  fi
+  if grep -Eq '^(rust|node|policy)=' "$fixture_dir/output"; then
+    fail "$name: the classifier wrote lane outputs although grep failed"
+  fi
+}
+assert_step_fails_on_grep_error "$FILTER_SCRIPT" real-classifier
+# Sabotage 2: swallow the fault as "no match" (the old behaviour). Red for this reason only.
+mutant="$(mutated_classifier grep-error-swallowed \
+  's/lane classifier failed: grep exit \$rc"; exit 1; }/lane classifier failed: grep exit $rc"; return 1; }/')" \
+  || fail "grep-error-swallowed"
+if out="$( ( assert_step_fails_on_grep_error "$mutant" swallowed ) 2>&1 )"; then
+  fail "a classifier that reads a grep failure as 'no match' was accepted"
+fi
+grep -Fq 'the classifier step succeeded although grep failed' <<<"$out" \
+  || fail "the grep-error-swallowed mutant went red for another reason: $(tail -c 600 <<<"$out")"
+
+# The gate itself, executed: it must never be green when classification failed or a lane
+# output is missing. The gate step is extracted and run under a full environment (every
+# variable Actions would set), so these are verdicts, not string checks.
+extract_gate_step() { # <workflow> -> the shell script of the gate's check step
+  job_block "$1" gate | awk '
+    $0 == "      - name: required and selected lanes are green" { saw = 1; next }
+    saw && $0 == "        run: |" { in_script = 1; next }
+    in_script && $0 == "" { print; next }
+    in_script && substr($0, 1, 10) == "          " { print substr($0, 11); next }
+    in_script { exit }
+  '
+}
+GATE_STEP="$TMP_DIR/gate-step.sh"
+extract_gate_step "$WORKFLOW" > "$GATE_STEP"
+[ -s "$GATE_STEP" ] || fail "could not extract the gate step"
+gate_verdict() { # <gate script> [VAR=value ...] -> exit status; defaults describe a docs-only PR
+  local script="$1"
+  shift
+  env -i PATH="$PATH" \
+    CHANGES_RESULT=success ALIGNMENT_RESULT=success GITLEAKS_RESULT=success ADVISORIES_RESULT=success \
+    POLICY_SELECTED=false RUST_SELECTED=false NODE_SELECTED=false \
+    POLICY_RESULT=skipped RUST_RESULT=skipped SECURITY_PACK_RESULT=skipped \
+    NODE_CORE_RESULT=skipped NODE_WEB_RESULT=skipped NODE_MOBILE_RESULT=skipped \
+    "$@" bash -e "$script" > /dev/null 2>&1
+}
+gate_expect_green() { # <why> [VAR=value ...]
+  gate_verdict "$GATE_STEP" "${@:2}" || fail "the gate was red for a legitimate state: $1"
+}
+gate_expect_red() { # <why> [VAR=value ...]
+  if gate_verdict "$GATE_STEP" "${@:2}"; then fail "the gate was green for: $1"; fi
+}
+all_lanes_green=(
+  POLICY_SELECTED=true RUST_SELECTED=true NODE_SELECTED=true
+  POLICY_RESULT=success RUST_RESULT=success SECURITY_PACK_RESULT=success
+  NODE_CORE_RESULT=success NODE_WEB_RESULT=success NODE_MOBILE_RESULT=success
+)
+gate_expect_green "docs-only PR, every optional lane unselected and skipped"
+gate_expect_green "every lane selected and green" "${all_lanes_green[@]}"
+for changes_result in failure cancelled skipped; do
+  gate_expect_red "classification $changes_result with lane outputs that look consistent" \
+    CHANGES_RESULT="$changes_result"
+done
+gate_expect_red "classification failed after selecting every lane" CHANGES_RESULT=failure "${all_lanes_green[@]}"
+for lane_output in POLICY_SELECTED RUST_SELECTED NODE_SELECTED; do
+  gate_expect_red "$lane_output empty (the classifier wrote nothing)" "$lane_output="
+  gate_expect_red "$lane_output malformed" "$lane_output=maybe"
+done
+gate_expect_red "rust selected but its jobs were skipped" RUST_SELECTED=true
+gate_expect_red "node selected but its jobs were skipped" NODE_SELECTED=true
+gate_expect_red "policy selected but its job was skipped" POLICY_SELECTED=true
+gate_expect_red "rust ran although it was not selected" RUST_RESULT=success
+gate_expect_red "a selected lane failed" "${all_lanes_green[@]}" NODE_WEB_RESULT=failure
+gate_expect_red "alignment skipped" ALIGNMENT_RESULT=skipped
+gate_expect_red "gitleaks skipped" GITLEAKS_RESULT=skipped
+gate_expect_red "advisories failed" ADVISORIES_RESULT=failure
+# Sabotage 3: each mutated gate must turn the matching fixture green, i.e. the fixtures above
+# would catch it. (Only the mutated gate is run here, and it must wrongly succeed.)
+gate_mutant() { # <name> <sed expression> -> path of the mutated gate step
+  sed "$2" "$WORKFLOW" > "$TMP_DIR/$1.yml"
+  if cmp -s "$WORKFLOW" "$TMP_DIR/$1.yml"; then
+    echo "$1 mutation did not apply (anchor text changed)" >&2
+    return 1
+  fi
+  extract_gate_step "$TMP_DIR/$1.yml" > "$TMP_DIR/$1-gate.sh"
+  [ -s "$TMP_DIR/$1-gate.sh" ] || return 1
+  printf '%s\n' "$TMP_DIR/$1-gate.sh"
+}
+mutant="$(gate_mutant gate-ignores-classification 's/^          test "\$CHANGES_RESULT" = success$/          true/')" \
+  || fail "gate-ignores-classification"
+gate_verdict "$mutant" CHANGES_RESULT=failure \
+  || fail "the failed-classification fixture cannot tell a gate that ignores the changes job"
+mutant="$(gate_mutant gate-accepts-any-lane-state 's/true:success|false:skipped) ;;/*) ;;/')" \
+  || fail "gate-accepts-any-lane-state"
+gate_verdict "$mutant" RUST_SELECTED=true \
+  || fail "the silent-skip fixture cannot tell a gate that accepts any lane state"
+gate_verdict "$mutant" RUST_SELECTED= \
+  || fail "the empty-output fixture cannot tell a gate that accepts any lane state"
+
 # --- #4696: REVIEW.md risk table <-> policy_path() <-> the policy lane ----------
 # This check reads two files and compares them; the issue asks for exactly that
 # lock ("the test locks the table"), so it exists despite the usual rule against
@@ -1120,4 +1309,4 @@ for required in \
   grep -Fq "$required" "$MONITOR" || fail "track monitor missing: $required"
 done
 
-echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures (rust/node/policy lanes), retired web-legacy lane absence, per-tree node jobs, path-selected policy job, gitleaks PR-range fail-closed lane, stable fail-closed gate, REVIEW.md risk table lock, mutation proofs, and monitor triggers"
+echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures (rust/node/policy lanes), big-PR lane matching without SIGPIPE, classifier faults failing the step, executed gate verdicts, retired web-legacy lane absence, per-tree node jobs, path-selected policy job, gitleaks PR-range fail-closed lane, stable fail-closed gate, REVIEW.md risk table lock, mutation proofs, and monitor triggers"

@@ -49,6 +49,8 @@ import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
 import { WorkRoute } from "@/features/workTab/WorkRoute";
 import { OAuthConsentRoute } from "@/features/hostedAgents/OAuthConsentRoute";
 import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
+import { CliConsentRoute } from "@/features/cliLogin/CliConsentRoute";
+import { isCliConsentPath } from "@/features/cliLogin/cliConsentPath";
 import type { LoginResponse, Member } from "@momo/core/lib/api";
 import { FirstAgentStage } from "@/features/welcome/FirstAgentStage";
 import { readFirstAgentCapturePoseFromLocation } from "@/features/welcome/firstAgent";
@@ -234,6 +236,12 @@ export function App() {
     return (
       <OAuthConsentRoute status={status} session={session} onLoggedIn={signIn} />
     );
+  }
+
+  // oort CLI 브라우저 로그인 동의(#4700)도 같은 이유로 HashRouter 밖의 실경로다:
+  // 서버의 authorize 가 `/oauth/cli?request=...` 로 넘긴다(cliConsentPath.ts).
+  if (isCliConsentPath(window.location.pathname)) {
+    return <CliConsentRoute status={status} session={session} onLoggedIn={signIn} />;
   }
 
   if (status === "restoring") {
