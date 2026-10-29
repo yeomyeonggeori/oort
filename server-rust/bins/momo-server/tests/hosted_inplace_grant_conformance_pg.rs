@@ -1234,6 +1234,28 @@ async fn only_an_admin_in_the_room_can_decide_and_outsiders_see_nothing() {
     assert_eq!((status, unknown_status), (404, 404), "{outsider} {unknown}");
     assert_eq!(outsider["status"], unknown["status"]);
     assert_eq!(outsider["decisionReason"], unknown["decisionReason"]);
+    // The other decision route — by run — says the same, whichever run is named: a run in the path
+    // that is not the card's must not tell an outsider "there is such a card" (400) from "there is
+    // none" (404). (The card's own run is the card's room's business; a run that is not its own is
+    // the case this closes — security review of #4704 PR B, M1, which widened the hiding of an
+    // unasked card to the in-place card's shared definition.)
+    for (label, run_in_path) in [("another run", Uuid::new_v4()), ("its own run", run)] {
+        let response = client
+            .post(format!("{base}/v1/agent-runs/{run_in_path}/approval-decisions"))
+            .bearer_auth(&f.outsider_admin.jwt)
+            .json(&json!({"approvalId": approval, "approve": true, "clientDecisionId": Uuid::new_v4()}))
+            .send()
+            .await
+            .expect("by-run decision responds");
+        let by_run_status = response.status().as_u16();
+        let by_run: Value = response.json().await.unwrap_or(Value::Null);
+        assert_eq!(by_run_status, 404, "outsider, {label}: {by_run}");
+        assert_eq!(by_run["status"], unknown["status"], "outsider, {label}");
+        assert_eq!(
+            by_run["decisionReason"], unknown["decisionReason"],
+            "outsider, {label}"
+        );
+    }
     // …and cannot read the card's room at all.
     let messages = client
         .get(format!(

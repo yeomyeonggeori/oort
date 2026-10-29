@@ -1431,8 +1431,12 @@ oort_action_initiate {clientRequestId, actionId, args, rationale?}
   yours can change it). A card already waiting is then **not executed when approved** — the
   approval stays pending and can still be rejected — and neither is one whose connection was made
   again since, whose agent was paused, or whose owner changed or never confirmed that connection.
-  (A lapsed access token is none of these: the check reads the connection, not the credential, so
-  a card that waited a day is still your owner's to approve.)
+  (A credential that merely **lapsed** is none of these: an OAuth access token lives thirty minutes
+  and a card waits a day, so the check reads the connection and not the credential's freshness, and
+  the card is still your owner's to approve — every effect of it, the room you are seated in
+  included. A credential that was **revoked** is: it ends the card. After such a late approval no
+  inbox reference is written for you — ask again with the same `clientRequestId` to read the
+  outcome.)
 * **What the operator reads.** Each card that stands leaves `agent.initiative.opened`; a refusal
   leaves `agent.initiative.refused` with one of nine reasons — at most one row per reason per hour,
   and the first row of the next hour says how many were held back (`suppressed`). Neither row holds

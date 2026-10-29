@@ -103,8 +103,8 @@ use momo_agent::{
 };
 use momo_auth::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION,
-    MAX_HOSTED_APPROVED_CHANNELS,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
+    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -1724,24 +1724,35 @@ async fn execute_workspace_action(
     }
     // **The decision proves the door again** (ADR-0186 증보 v5 U-d 「재증명」): a card may be a day
     // old, and everything that let an agent raise it can have changed since. The switch is on, the
-    // connection it was raised through is still the agent's live one and still carries the
-    // approval of `workspace:initiate`, the agent is active and not paused, the person deciding is
-    // the agent's **current** owner and the one who confirmed that connection, and (above) the
-    // action is still on the list. One `action_args_invalid` for any of them (409, the approval
-    // is **not** consumed): a card that no longer stands is not a card to run, and a rejection
-    // never comes through here, so a person can always say no.
-    if initiated
-        && !crate::routes::agent_initiative::card_still_stands_in_tx(
+    // connection it was raised through still stands (that connection, active and proved, its
+    // credential not revoked — a credential that merely lapsed is routine, an OAuth access token
+    // lives thirty minutes and the card a day), the human's approval of it still names
+    // `workspace:initiate`, the agent is active and not paused, the person deciding is the agent's
+    // **current** owner and the one who confirmed that connection, and (above) the action is still on
+    // the list. One `action_args_invalid` for any of them (409, the approval is **not** consumed): a
+    // card that no longer stands is not a card to run, and a rejection never comes through here, so a
+    // person can always say no.
+    //
+    // What comes back is the connection the card stands on. It is what the resolver below reads
+    // coverage from and what `channel.create` widens — the row that was just proved, and not
+    // whichever connection happens to hold a fresh credential at this instant (security review of
+    // #4704 PR B, round 2, H1).
+    let card_connection = if initiated {
+        match crate::routes::agent_initiative::card_still_stands_in_tx(
             conn,
             input.workspace_id,
             approval,
             input.member_id,
         )
         .await?
-    {
-        return Ok(Ok(args_invalid_refusal(approval, input, now)));
-    }
-    let resolution = if initiated {
+        {
+            Some(connection) => Some(connection),
+            None => return Ok(Ok(args_invalid_refusal(approval, input, now))),
+        }
+    } else {
+        None
+    };
+    let resolution = if let Some(card_connection) = card_connection {
         resolve_stored_initiative_action_in_tx(
             conn,
             input.workspace_id,
@@ -1752,6 +1763,7 @@ async fn execute_workspace_action(
             proposed_args(&approval.payload),
             now_ms,
             approval.id,
+            card_connection,
         )
         .await?
     } else {
@@ -2061,6 +2073,7 @@ async fn execute_workspace_action(
                 topic.as_deref(),
                 *add_proposer,
                 members,
+                card_connection,
             )
             .await?
             {
@@ -2462,13 +2475,43 @@ async fn execute_channel_create(
     topic: Option<&str>,
     add_proposer: bool,
     members: &[ResolvedMember],
+    card_connection: Option<Uuid>,
 ) -> Result<Execution, momo_db::DbError> {
     // The connection is the FIRST lock of the hosted canon, so it is taken before
     // the channel and membership rows this transaction is about to write.
+    //
+    // A card an agent raised unasked names its own connection — the one it was raised through, which
+    // the decision proved to stand a moment ago — and that very row is locked and later widened,
+    // whether or not the agent holds a fresh credential at the instant a person taps. The generic
+    // read finds the connection *through the credential's expiry*; for a card that waited a day it
+    // finds nothing, and the agent would be seated in a room its connection does not cover with the
+    // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
     let connection = if add_proposer {
-        lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-            .await
-            .map_err(momo_db::DbError::from)?
+        match card_connection {
+            Some(card_connection) => {
+                let locked = lock_hosted_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                    card_connection,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?;
+                // An unasked card never half-executes: the connection stood a moment ago in this very
+                // transaction, so if it does not any more the card is stale — refused before any write.
+                let Some(covered) = locked else {
+                    return Ok(Execution::Refused(args_invalid_refusal(
+                        approval, input, now,
+                    )));
+                };
+                Some((card_connection, covered))
+            }
+            None => {
+                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
+                    .await
+                    .map_err(momo_db::DbError::from)?
+            }
+        }
     } else {
         None
     };

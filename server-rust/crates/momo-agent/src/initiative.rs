@@ -325,19 +325,36 @@ pub async fn find_blocker_in_tx(
 // the decision's re-proof (ADR-0186 증보 v5 U-d 「재증명」)
 // ---------------------------------------------------------------------------
 
-/// The part of the decision-time re-proof only the database can answer, for the connection the
+/// The server's bookkeeping on an unasked card, stored beside `action` (never inside its `pins`,
+/// which the decision compares with what the names resolve to now): the **key** the duplicate and
+/// cooldown reads match on ([`initiative_key`]), and the **connection** the card was raised through
+/// — which the decision proves again and then reads coverage from, so a connection torn down and
+/// made again does not bring old cards back to life.
+pub fn card_bookkeeping(key: &str, connection_id: Uuid) -> Value {
+    json!({ "key": key, "connection_id": connection_id.to_string() })
+}
+
+/// The connection an unasked card was raised through ([`card_bookkeeping`]'s other half), or `None`
+/// for a card that carries none — which the decision treats as a card that no longer stands.
+pub fn card_connection_id(payload: &Value) -> Option<Uuid> {
+    payload
+        .pointer("/initiative/connection_id")
+        .and_then(Value::as_str)
+        .and_then(|id| Uuid::parse_str(id).ok())
+}
+
+/// The part of the decision-time re-proof that is **momo-agent's to answer**, for the connection the
 /// card was raised through:
 ///
-/// * that very connection is still **the agent's connection and still `active` and proved** — its
-///   `status`, not the freshness of a credential: an OAuth connection's `active_token_id` is a
-///   30-minute access token that is renewed on use, so a card that waited for its owner past the
-///   token's expiry must not read as "the connection is gone" (security review of #4704 PR B, H1);
-///   a connection torn down and made again is another id and is not this one;
 /// * the human's approval of that connection still names `scope` (`workspace:initiate`);
 /// * the **agent** is still an active member and its profile is not paused.
 ///
-/// The owner is [`initiative_facts_in_tx`]'s; the switch is [`switch_is_on`]'s.
-pub async fn initiative_standing_in_tx(
+/// What this does *not* ask is whether the connection itself is still the agent's, `active`, proved
+/// and not revoked — that is `momo_auth::hosted_connection_stands_in_tx`, the one definition of it
+/// (this crate does not depend on `momo-auth`), and the route composes the two
+/// (`routes::agent_initiative::card_connection_stands_in_tx`). The owner is
+/// [`initiative_facts_in_tx`]'s; the switch is [`switch_is_on`]'s.
+pub async fn initiative_scope_and_agent_stand_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     agent_member_id: Uuid,
@@ -351,7 +368,6 @@ pub async fn initiative_standing_in_tx(
              JOIN agent_profile ap \
                ON ap.workspace_id = hc.workspace_id AND ap.agent_member_id = hc.agent_member_id \
             WHERE hc.workspace_id = $1 AND hc.id = $2 AND hc.agent_member_id = $3 \
-              AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
               AND $4 = ANY(hc.approved_scopes) \
               AND m.kind = 'agent' AND m.status = 'active' AND m.deleted_at IS NULL \
               AND ap.paused = false)",
@@ -959,6 +975,27 @@ mod tests {
 
     /// The nine reasons are the ADR's list and nothing else: closed, distinct, and written the way
     /// the table's CHECK (migration 155) spells them.
+    /// The card's bookkeeping is written and read by one pair of functions: what the door writes is
+    /// what the decision reads, and a card without it (or with a connection that is not an id) reads
+    /// as having none — which the decision refuses.
+    #[test]
+    fn the_cards_connection_is_read_back_exactly_as_it_was_written() {
+        let connection = Uuid::from_u128(0xabc);
+        let bookkeeping = card_bookkeeping("channel.create:qa", connection);
+        assert_eq!(bookkeeping["key"], "channel.create:qa");
+        let payload = json!({"origin": "agent_initiated", "initiative": bookkeeping});
+        assert_eq!(card_connection_id(&payload), Some(connection));
+        for none in [
+            json!({}),
+            json!({"initiative": {}}),
+            json!({"initiative": {"connection_id": 7}}),
+            json!({"initiative": {"connection_id": "not-a-uuid"}}),
+            json!({"action": {"initiative": {"connection_id": connection.to_string()}}}),
+        ] {
+            assert_eq!(card_connection_id(&none), None, "{none}");
+        }
+    }
+
     #[test]
     fn the_refusal_reasons_are_the_nine_of_the_adr() {
         let codes: Vec<&str> = RefusalReason::ALL

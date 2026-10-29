@@ -24679,6 +24679,7 @@ async fn a_card_is_proved_again_at_the_tap_and_a_person_can_always_say_no() {
         SwitchOff,
         SwitchNotABoolean,
         ConnectionBeingTornDown,
+        CredentialRevoked,
         CardNamesAnotherConnection,
         CardNamesNoConnection,
         ScopeWithdrawn,
@@ -24702,36 +24703,13 @@ async fn a_card_is_proved_again_at_the_tap_and_a_person_can_always_say_no() {
         assert_eq!(approval_status(&su, card).await, "approved");
     }
 
-    // The agent's credential is not what the owner's yes depends on. An OAuth connection's access
-    // token lives thirty minutes and the card waits a day, so by the tap the token has lapsed — and
-    // the connection is exactly as `active` and proved as it was (security review of #4704 PR B,
-    // H1: reading "the connection is live" from the token's freshness made every such card
-    // unapprovable until the agent renewed).
-    {
-        let fixture = seed(&su).await;
-        open_initiative_door(&su, &fixture).await;
-        let name = unique_channel_name();
-        let (status, raised) = raise(&client, &base, &fixture, &name).await;
-        assert_eq!(status, 200, "{raised}");
-        let card = approval_of(&raised);
-        sqlx::query("UPDATE token SET expires_at = now() - interval '1 hour' WHERE workspace_id=$1 AND id=$2")
-            .bind(fixture.workspace)
-            .bind(fixture.hosted_token)
-            .execute(&su)
-            .await
-            .unwrap();
-        let (status, approved) = approve(&client, &base, &fixture, card).await;
-        assert_eq!(
-            status, 200,
-            "a lapsed access token does not stop the owner's yes: {approved}"
-        );
-        assert_eq!(channel_named(&su, fixture.workspace, &name).await, 1);
-    }
-
+    // (A credential that merely lapsed is not drift: see
+    // `a_lapsed_credential_does_not_stop_the_owners_yes_for_any_of_the_four_actions`.)
     for drift in [
         Drift::SwitchOff,
         Drift::SwitchNotABoolean,
         Drift::ConnectionBeingTornDown,
+        Drift::CredentialRevoked,
         Drift::CardNamesAnotherConnection,
         Drift::CardNamesNoConnection,
         Drift::ScopeWithdrawn,
@@ -24762,6 +24740,15 @@ async fn a_card_is_proved_again_at_the_tap_and_a_person_can_always_say_no() {
             Drift::ConnectionBeingTornDown => {
                 sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
                     .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Drift::CredentialRevoked => {
+                // Deliberate, unlike a lapse: an operator's emergency revoke, a refresh-token reuse.
+                sqlx::query("UPDATE token SET revoked_at = now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_token)
+                    .execute(&su)
+                    .await
+                    .unwrap();
             }
             Drift::CardNamesAnotherConnection => {
                 sqlx::query("UPDATE approval SET payload = jsonb_set(payload, '{initiative,connection_id}', to_jsonb($2::text)) WHERE workspace_id=$1 AND status='pending'")
@@ -24900,22 +24887,27 @@ async fn somebody_else_in_the_owners_dm_cannot_decide_the_card_but_the_owner_can
     assert_eq!(channel_named(&su, ws, &name).await, 1);
 }
 
-/// **The decision's standing check, one clause at a time (ADR U-d 「재증명」 ②).** The resolver the
-/// decision runs next judges the agent too, so through the route a paused or suspended agent is
-/// refused twice over; this asks the building block itself, with the connection, its scope and the
-/// agent each taken away on their own, so none of its clauses can be deleted unnoticed. The control
-/// is the same call with nothing taken away.
+/// **The standing of the connection a card was raised through, one clause at a time (ADR U-d
+/// 「재증명」 ②).** The resolver the decision runs next judges the agent too, so through the route a
+/// paused or suspended agent is refused twice over; this asks the composition itself —
+/// `card_connection_stands_in_tx`, the crate-owned halves together — with the connection, its
+/// scope, its credential and the agent each taken away on their own, so none of its clauses can be
+/// deleted unnoticed. Two controls: nothing taken away, and a credential that merely **lapsed**
+/// (routine — an OAuth access token lives thirty minutes and the card a day), which stands.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
-async fn the_standing_check_names_the_connection_the_scope_and_the_agent_one_by_one() {
+async fn the_standing_check_names_the_connection_the_scope_the_credential_and_the_agent_one_by_one()
+{
     ensure_schema_and_roles();
     let su = superuser_pool().await;
 
     #[derive(Clone, Copy, Debug)]
     enum Taken {
         Nothing,
-        ConnectionStatus,
-        ConnectionNotProved,
+        CredentialLapsed,
+        ConnectionNotActive,
+        ConnectionBeingTornDown,
+        CredentialRevoked,
         AnotherConnection,
         Scope,
         AgentPaused,
@@ -24925,8 +24917,10 @@ async fn the_standing_check_names_the_connection_the_scope_and_the_agent_one_by_
     }
     for taken in [
         Taken::Nothing,
-        Taken::ConnectionStatus,
-        Taken::ConnectionNotProved,
+        Taken::CredentialLapsed,
+        Taken::ConnectionNotActive,
+        Taken::ConnectionBeingTornDown,
+        Taken::CredentialRevoked,
         Taken::AnotherConnection,
         Taken::Scope,
         Taken::AgentPaused,
@@ -24941,13 +24935,27 @@ async fn the_standing_check_names_the_connection_the_scope_and_the_agent_one_by_
         let mut asked_agent = fixture.hosted_agent;
         match taken {
             Taken::Nothing => {}
-            Taken::ConnectionStatus => {
+            Taken::CredentialLapsed => {
+                sqlx::query("UPDATE token SET expires_at = now() - interval '1 hour' WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_token).execute(&su).await.unwrap();
+            }
+            Taken::ConnectionNotActive => {
+                // (`active` with no proof cannot exist — the table's CHECK — so a connection that
+                // is not proved is one that is not active.)
+                sqlx::query("UPDATE hosted_agent_connection SET status='detected', proved_at=NULL, proved_by=NULL WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            }
+            Taken::ConnectionBeingTornDown => {
                 sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
                     .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
             }
-            Taken::ConnectionNotProved => {
-                sqlx::query("UPDATE hosted_agent_connection SET status='detected', proved_at=NULL, proved_by=NULL WHERE workspace_id=$1 AND id=$2")
-                    .bind(ws).bind(fixture.hosted_connection).execute(&su).await.unwrap();
+            Taken::CredentialRevoked => {
+                sqlx::query("UPDATE token SET revoked_at = now() WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws)
+                    .bind(fixture.hosted_token)
+                    .execute(&su)
+                    .await
+                    .unwrap();
             }
             Taken::AnotherConnection => asked_connection = Uuid::new_v4(),
             Taken::Scope => {
@@ -24978,12 +24986,11 @@ async fn the_standing_check_names_the_connection_the_scope_and_the_agent_one_by_
         }
         let standing = momo_db::with_tenant_tx(&su, ws, move |conn| {
             Box::pin(async move {
-                momo_agent::initiative::initiative_standing_in_tx(
+                momo_server::routes::agent_initiative::card_connection_stands_in_tx(
                     conn,
                     ws,
                     asked_agent,
                     asked_connection,
-                    "workspace:initiate",
                 )
                 .await
             })
@@ -24992,10 +24999,272 @@ async fn the_standing_check_names_the_connection_the_scope_and_the_agent_one_by_
         .expect("the standing check runs");
         assert_eq!(
             standing,
-            matches!(taken, Taken::Nothing),
-            "{taken:?}: the check is true only when nothing was taken away"
+            matches!(taken, Taken::Nothing | Taken::CredentialLapsed),
+            "{taken:?}: true only when nothing was taken away (a lapsed credential is not that)"
         );
     }
+}
+
+/// **A lapsed credential does not stop the owner's yes — for any of the four actions (security
+/// review of #4704 PR B, H1 and round 2's High-1).** An OAuth connection's access token lives thirty
+/// minutes and a card waits a day, so by the tap the credential has lapsed while the connection is
+/// exactly as `active` and proved as it was. Each action is raised with a live credential, the
+/// credential lapses, and the owner approves: the **whole** effect lands — not merely the part
+/// that happens to read no credential. The pins pin as the owner; the member is added; and
+/// `channel.create` seats the agent *and* writes the room into the connection's coverage *and*
+/// leaves the `channels_granted` row (before the second review a lapsed credential left the agent
+/// seated in a room its connection did not cover, with neither).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_lapsed_credential_does_not_stop_the_owners_yes_for_any_of_the_four_actions() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    #[derive(Clone, Copy, Debug)]
+    enum Action {
+        ChannelCreate,
+        ChannelMemberAdd,
+        MessagePin,
+        MessageUnpin,
+    }
+    for action in [
+        Action::ChannelCreate,
+        Action::ChannelMemberAdd,
+        Action::MessagePin,
+        Action::MessageUnpin,
+    ] {
+        let fixture = seed(&su).await;
+        open_initiative_door(&su, &fixture).await;
+        let ws = fixture.workspace;
+        let label = format!("{action:?}");
+
+        // What is asked, raised while the credential is live.
+        let channel_name = unique_channel_name();
+        let message = human_says(&client, &base, &fixture, fixture.channel, "고정 대상").await;
+        let mut guest: Option<Uuid> = None;
+        let ask = match action {
+            Action::ChannelCreate => initiate_body("channel.create", json!({"name": channel_name})),
+            Action::ChannelMemberAdd => {
+                // A channel the connection covers and the owner is in, and somebody to add.
+                let (member, handle) = seed_extra_member_3706(&su, &fixture, "guest").await;
+                guest = Some(member);
+                let room = Uuid::new_v4();
+                let room_name = format!("room-{}", room.simple());
+                sqlx::query(
+                    "INSERT INTO channel(id, workspace_id, kind, name) VALUES($1,$2,'private',$3)",
+                )
+                .bind(room)
+                .bind(ws)
+                .bind(&room_name)
+                .execute(&su)
+                .await
+                .unwrap();
+                sqlx::query(
+                    "INSERT INTO channel_seq(channel_id, workspace_id, last_seq) VALUES($1,$2,0)",
+                )
+                .bind(room)
+                .bind(ws)
+                .execute(&su)
+                .await
+                .unwrap();
+                for who in [fixture.hosted_agent, fixture.human] {
+                    sqlx::query("INSERT INTO membership(workspace_id, channel_id, member_id) VALUES($1,$2,$3)")
+                        .bind(ws).bind(room).bind(who).execute(&su).await.unwrap();
+                }
+                sqlx::query("UPDATE hosted_agent_connection SET approved_channel_ids = approved_channel_ids || $3 WHERE workspace_id=$1 AND id=$2")
+                    .bind(ws).bind(fixture.hosted_connection).bind(vec![room]).execute(&su).await.unwrap();
+                initiate_body(
+                    "channel.member.add",
+                    json!({"channel": room_name, "memberHandles": [handle]}),
+                )
+            }
+            Action::MessagePin => initiate_body("message.pin", json!({"messageId": message})),
+            Action::MessageUnpin => {
+                sqlx::query("INSERT INTO message_pin(workspace_id, channel_id, message_id, pinned_by) VALUES($1,$2,$3,$4)")
+                    .bind(ws).bind(fixture.channel).bind(message).bind(fixture.human)
+                    .execute(&su).await.unwrap();
+                initiate_body("message.unpin", json!({"messageId": message}))
+            }
+        };
+        let (status, raised) = initiate(&client, &base, &fixture, ask).await;
+        assert_eq!(status, 200, "{label}: {raised}");
+        let card = approval_of(&raised);
+
+        // The credential lapses (and the connection is exactly what it was).
+        sqlx::query("UPDATE token SET expires_at = now() - interval '1 hour' WHERE workspace_id=$1 AND id=$2")
+            .bind(ws).bind(fixture.hosted_token).execute(&su).await.unwrap();
+        let connection_status: String = sqlx::query_scalar(
+            "SELECT status FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2",
+        )
+        .bind(ws)
+        .bind(fixture.hosted_connection)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert_eq!(connection_status, "active", "{label}");
+
+        let (status, approved) = approve(&client, &base, &fixture, card).await;
+        assert_eq!(
+            status, 200,
+            "{label}: a lapsed credential does not stop the owner's yes: {approved}"
+        );
+        assert_eq!(approval_status(&su, card).await, "approved", "{label}");
+
+        // The whole effect.
+        match action {
+            Action::ChannelCreate => {
+                let created: Option<Uuid> =
+                    sqlx::query_scalar("SELECT id FROM channel WHERE workspace_id=$1 AND name=$2")
+                        .bind(ws)
+                        .bind(&channel_name)
+                        .fetch_optional(&su)
+                        .await
+                        .unwrap();
+                let created = created.unwrap_or_else(|| panic!("{label}: the channel was made"));
+                let seated: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM membership WHERE workspace_id=$1 AND channel_id=$2 AND member_id=$3 AND left_at IS NULL",
+                )
+                .bind(ws).bind(created).bind(fixture.hosted_agent).fetch_one(&su).await.unwrap();
+                assert_eq!(seated, 1, "{label}: the agent is seated");
+                let covered: bool = sqlx::query_scalar(
+                    "SELECT $3 = ANY(approved_channel_ids) FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2",
+                )
+                .bind(ws).bind(fixture.hosted_connection).bind(created).fetch_one(&su).await.unwrap();
+                assert!(
+                    covered,
+                    "{label}: the connection covers the room the agent was seated in"
+                );
+                let granted = audit_details_of(&su, ws, "hosted_connection.channels_granted").await;
+                assert_eq!(granted.len(), 1, "{label}: {granted:?}");
+                assert_eq!(granted[0]["approval_id"], card.to_string(), "{label}");
+                assert_eq!(granted[0]["origin"], "agent_initiated", "{label}");
+            }
+            Action::ChannelMemberAdd => {
+                let added: i64 = sqlx::query_scalar(
+                    "SELECT count(*) FROM membership WHERE workspace_id=$1 AND member_id=$2 AND left_at IS NULL \
+                        AND channel_id IN (SELECT id FROM channel WHERE workspace_id=$1 AND name LIKE 'room-%')",
+                )
+                .bind(ws).bind(guest.expect("a guest")).fetch_one(&su).await.unwrap();
+                assert_eq!(added, 1, "{label}: the guest is in the room");
+            }
+            Action::MessagePin => {
+                assert_eq!(
+                    pins_in(&su, fixture.channel).await,
+                    vec![(message, fixture.human)],
+                    "{label}: pinned, by the person who tapped"
+                );
+            }
+            Action::MessageUnpin => {
+                assert!(
+                    pins_in(&su, fixture.channel).await.is_empty(),
+                    "{label}: the pin is gone"
+                );
+            }
+        }
+        assert_eq!(
+            audit_details_of(&su, ws, "action.approved").await.len(),
+            1,
+            "{label}: one approval row"
+        );
+    }
+}
+
+/// **An unasked card never half-executes (security review of #4704 PR B, round 2's High-1).** The
+/// decision proves the card's connection stands, then — a statement later — locks that row to widen
+/// it. If the connection stops being `active` in between (an operator's disconnect, committing
+/// exactly then), the card is stale: **refused before any write**, not executed into a room the
+/// connection does not cover. The race is played, not asserted: a transaction holds the
+/// connection row, the owner's tap runs up to the executor's lock and waits there, the holder
+/// ends the connection and lets go, and the waiting tap re-reads the row it was waiting for.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_connection_that_ends_between_the_proof_and_the_write_leaves_the_card_unexecuted() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    open_initiative_door(&su, &fixture).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+    let ws = fixture.workspace;
+
+    let name = unique_channel_name();
+    let (status, raised) = raise(&client, &base, &fixture, &name).await;
+    assert_eq!(status, 200, "{raised}");
+    let card = approval_of(&raised);
+    let before = residue(&su, ws).await;
+
+    // Hold the connection row: the tap will get as far as the executor's `FOR UPDATE` and wait.
+    let mut holder = su
+        .begin()
+        .await
+        .expect("a transaction to hold the connection row");
+    sqlx::query(
+        "SELECT id FROM hosted_agent_connection WHERE workspace_id=$1 AND id=$2 FOR UPDATE",
+    )
+    .bind(ws)
+    .bind(fixture.hosted_connection)
+    .fetch_one(&mut *holder)
+    .await
+    .expect("hold the connection row");
+    let tap = tokio::spawn({
+        let (client, base, fixture_jwt) = (client.clone(), base.clone(), fixture.human_jwt.clone());
+        async move {
+            let (status, _headers, body) =
+                decide_as(&client, &base, ws, &fixture_jwt, card, true, Uuid::new_v4()).await;
+            (status, body)
+        }
+    });
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let waiting: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM pg_stat_activity \
+              WHERE datname = current_database() AND wait_event_type = 'Lock' \
+                AND query LIKE '%cardinality(approved_channel_ids)%FOR UPDATE%'",
+        )
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        if waiting >= 1 {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the tap must reach the executor's lock on the connection row"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    // The connection ends — and the waiting tap now re-reads the row it queued for.
+    sqlx::query("UPDATE hosted_agent_connection SET status='cleanup_pending' WHERE workspace_id=$1 AND id=$2")
+        .bind(ws)
+        .bind(fixture.hosted_connection)
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    holder.commit().await.unwrap();
+    let (status, refused) = tap.await.unwrap();
+
+    assert_eq!(status, 409, "{refused}");
+    assert_eq!(refused["status"], "action_args_invalid", "{refused}");
+    assert_eq!(
+        approval_status(&su, card).await,
+        "pending",
+        "the approval is not spent"
+    );
+    assert_eq!(channel_named(&su, ws, &name).await, 0, "no room was made");
+    assert_eq!(
+        residue(&su, ws).await,
+        before,
+        "nothing was written: no channel, no seat, no card line"
+    );
+    assert!(
+        audit_details_of(&su, ws, "hosted_connection.channels_granted")
+            .await
+            .is_empty()
+    );
 }
 
 /// **Who may see or decide a card an agent raised unasked (ADR U-c, review M8).** It stands in its

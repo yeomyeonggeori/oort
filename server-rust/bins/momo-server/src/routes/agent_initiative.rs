@@ -151,26 +151,61 @@ fn is_deadlock_victim(error: &DbError) -> bool {
     )
 }
 
+/// Does the connection an unasked card was raised through **still stand**, for the agent that
+/// raised it? The three questions, composed from the crate that owns each:
+///
+/// 1. it is still *that* connection, the agent's own, `active`, proved, with its current credential
+///    **not revoked** (`momo_auth::hosted_connection_stands_in_tx`) — and not that the credential
+///    is *fresh*: an OAuth connection's access token lives thirty minutes and the card waits a
+///    day, so a lapsed credential is routine and a revoked one is deliberate (security review of
+///    #4704 PR B, H1 and round 2's Medium-1);
+/// 2. the human's approval of the connection still names `workspace:initiate`;
+/// 3. the agent is an active member whose profile is not paused.
+///
+/// Public so the building block can be asked clause by clause (the PG suite does).
+pub async fn card_connection_stands_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent: Uuid,
+    connection_id: Uuid,
+) -> Result<bool, DbError> {
+    if !momo_auth::hosted_connection_stands_in_tx(conn, workspace_id, agent, connection_id)
+        .await
+        .map_err(DbError::from)?
+    {
+        return Ok(false);
+    }
+    momo_agent::initiative::initiative_scope_and_agent_stand_in_tx(
+        conn,
+        workspace_id,
+        agent,
+        connection_id,
+        SCOPE_WORKSPACE_INITIATE,
+    )
+    .await
+}
+
 /// The decision's re-proof of an unasked card (ADR-0186 증보 v5 U-d 「재증명」), in the
-/// transaction of the person's tap. `true` only if **everything that let the agent raise it still
-/// holds**, judged on the facts as they are now — not on what the row says:
+/// transaction of the person's tap. `Some(connection)` — **the connection the card stands on** — only
+/// if everything that let the agent raise it still holds, judged on the facts as they are now and not
+/// on what the row says; `None` otherwise (the caller refuses with `action_args_invalid` and the
+/// approval is not spent):
 ///
 /// 1. the workspace switch is on (the very reading the door makes, [`switch_is_on`]);
-/// 2. the connection the card was raised through (`payload.initiative.connection_id`, written by
-///    the server at that moment) is still **that connection, `active` and proved** — read from the
-///    connection's own status, not from the freshness of its credential (an OAuth connection's
-///    30-minute access token has long expired when a card waits a day) — so a connection torn down
-///    and made again does not bring old cards back; it still carries the human's approval of
-///    `workspace:initiate`, and the agent is an active member whose profile is not paused;
+/// 2. the connection the card was raised through (`payload.initiative.connection_id`, written by the
+///    server at that moment) still stands ([`card_connection_stands_in_tx`]) — so a connection torn
+///    down and made again does not bring old cards back;
 /// 3. the person deciding **is the agent's current owner** and that owner is the one who confirmed
 ///    this connection (`confirmed_by == owner`, review L2) — the same facts the door's condition 4
 ///    reads ([`initiative_facts_in_tx`]);
 /// 4. the action is still on the initiative list — the caller's check, made before this one.
 ///
-/// A card whose payload carries no connection (a row written by nobody this code knows) fails
-/// closed. Plain reads, no lock: the tap is already serialised on the approval row, and a switch or a
-/// disconnect that commits a moment after the read is, to the person who tapped, a tap that came
-/// first.
+/// The returned connection is then what the resolver reads coverage from and what the executor
+/// widens: the same row that was just proved, whether or not the agent holds a fresh credential at
+/// the instant a person taps. A card whose payload carries no connection (a row written by nobody
+/// this code knows) fails closed. Plain reads, no lock: the tap is already serialised on the approval
+/// row, and a switch or a disconnect that commits a moment after the read is, to the person who
+/// tapped, a tap that came first.
 ///
 /// [`switch_is_on`]: momo_agent::initiative::switch_is_on
 /// [`initiative_facts_in_tx`]: momo_agent::initiative::initiative_facts_in_tx
@@ -179,41 +214,28 @@ pub(crate) async fn card_still_stands_in_tx(
     workspace_id: Uuid,
     approval: &LockedApproval,
     decider: Uuid,
-) -> Result<bool, DbError> {
+) -> Result<Option<Uuid>, DbError> {
     let agent = approval.requested_by;
     // 1. the switch.
     let settings = momo_settings::read_workspace_settings(conn, workspace_id).await?;
     if !momo_agent::initiative::switch_is_on(settings.as_ref()) {
-        return Ok(false);
+        return Ok(None);
     }
     // 2. the connection, the scope, the agent.
-    let Some(connection_id) = approval
-        .payload
-        .pointer("/initiative/connection_id")
-        .and_then(Value::as_str)
-        .and_then(|id| Uuid::parse_str(id).ok())
-    else {
-        return Ok(false);
+    let Some(connection_id) = momo_agent::initiative::card_connection_id(&approval.payload) else {
+        return Ok(None);
     };
-    if !momo_agent::initiative::initiative_standing_in_tx(
-        conn,
-        workspace_id,
-        agent,
-        connection_id,
-        SCOPE_WORKSPACE_INITIATE,
-    )
-    .await?
-    {
-        return Ok(false);
+    if !card_connection_stands_in_tx(conn, workspace_id, agent, connection_id).await? {
+        return Ok(None);
     }
     // 3. the owner now, who confirmed this connection, is the person tapping.
     let Some(facts) =
         momo_agent::initiative::initiative_facts_in_tx(conn, workspace_id, agent, connection_id)
             .await?
     else {
-        return Ok(false);
+        return Ok(None);
     };
-    Ok(facts.owner_member_id == decider)
+    Ok((facts.owner_member_id == decider).then_some(connection_id))
 }
 
 /// `oort_action_initiate { clientRequestId, actionId, args, rationale? }`.
@@ -552,10 +574,7 @@ async fn initiate_in_tx(
         // made again does not bring old cards back to life.
         object.insert(
             "initiative".into(),
-            json!({
-                "key": key,
-                "connection_id": identity.connection_id.to_string(),
-            }),
+            momo_agent::initiative::card_bookkeeping(&key, identity.connection_id),
         );
     }
     let approval_id = momo_agent::create_pending_approval_in_tx(
