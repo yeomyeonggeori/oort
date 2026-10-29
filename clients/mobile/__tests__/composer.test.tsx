@@ -1,3 +1,4 @@
+import {measureComposerText} from './fixtures/composerMeasurement';
 // composer — 입력창 (Composer)
 // 합친 원본: composerHaptics4331.test.tsx, composerRest4614.test.tsx
 // 이슈 번호는 아래 묶음 `describe` 이름과 주석에 남아 있다.
@@ -477,7 +478,7 @@ describe('composerRest (#4614)', () => {
       mount();
       reportLayout(natural);
       typeAndSettle(natural >= 3 * line.body * fontScale() + INPUT_CHROME ? '첫 줄\n둘째 줄\n셋째 줄' : '한 줄');
-      fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 280, height: natural - 2}}});
+      measureComposerText(natural - INPUT_CHROME);
       reportLayout(natural);
       expect(footprint(natural)).toBe(natural); // 대조: 서 있는 동안은 자연 높이다 — 아래 「줄어든다」가 알림 없이도 통과하지 않는다
     }
@@ -580,10 +581,10 @@ describe('composerRest (#4614)', () => {
       expect(boxes[boxes.length - 1]).toBe(collapsed());
     });
 
-    it('작은 contentSize가 와도 큰 글자의 첫 줄 바닥보다 낮아지지 않는다 (#4790)', () => {
+    it('작은 거울 측정값이 와도 큰 글자의 첫 줄 바닥보다 낮아지지 않는다 (#4790)', () => {
       mount();
       typeAndSettle('한 줄 gypp');
-      fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 280, height: 20}}});
+      measureComposerText(4);
       expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
       reportLayout(collapsed());
       rest();

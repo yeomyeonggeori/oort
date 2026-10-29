@@ -1,3 +1,4 @@
+import {measureComposerText} from './fixtures/composerMeasurement';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {act, cleanup, fireEvent, render, screen} from '@testing-library/react-native';
 import React from 'react';
@@ -816,7 +817,7 @@ describe('아래로 끌어 자판 내리기', () => {
     const dismiss = jest.spyOn(Keyboard, 'dismiss');
     mount();
     fireEvent.changeText(input(), '긴 글');
-    fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 200, height: 4000}}});
+    measureComposerText(4000);
     fireEvent(bar(), 'touchStart', touch(100, 100));
     fireEvent(bar(), 'touchMove', touch(100, 200));
     expect(dismiss).not.toHaveBeenCalled();

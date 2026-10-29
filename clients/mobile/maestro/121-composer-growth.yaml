@@ -2,29 +2,45 @@ appId: app.momo.ios
 name: 121-composer-growth
 ---
 # #4790 스택 검증용. 실행·캡처는 planner가 스택 착륙 뒤 수행한다.
-# DM-STEADY-LIVE 또는 일반/스레드 대화의 입력창 하나가 보인 상태에서 시작한다.
+# 일반·스레드·작업 대화 각각의 입력창이 보인 상태에서 반복한다.
 # SE·Pro 밝음/어두움, 기본·AX1~AX5(특히 AX3), 동작 줄이기 on/off로 반복한다.
 # 실제 보이는 줄 수·전체 높이·접힘 전이의 목록 바닥은 #4331 계측/실기기로 판독한다.
 - extendedWaitUntil:
     visible:
-      id: "composer-input"
+      id: "(composer-input|work-chat-input)"
     timeout: 30000
 - tapOn:
-    id: "composer-input"
+    id: "(composer-input|work-chat-input)"
+- eraseText: 2000
+# 명시 개행 없이 타이핑한다. Fabric의 contentSizeChange를 기다리는 구현은
+# 여기서 한 줄에 멈춘다. 기본 크기에서 약 네 줄, AX에서는 네 줄 상한을 판독한다.
+- inputText: "This paragraph keeps growing while I type without pressing return. The editor should grow with the wrapped words and keep four rows visible."
+- waitForAnimationToEnd
+- takeScreenshot: "4790-composer-wrap-4rows"
+- inputText: " More words now continue into the fifth row and beyond. The caret must remain visible while the editor scrolls inside its four row limit."
+- waitForAnimationToEnd
+- takeScreenshot: "4790-composer-wrap-5plus-scroll"
 - eraseText: 2000
 - inputText: "first line gypp\nsecond line\nthird line\nfourth line"
+- waitForAnimationToEnd
 - takeScreenshot: "4790-composer-4rows"
-- inputText: "\nfifth line\nsixth line\nseventh line\neighth line\nninth line\ntenth line"
-- takeScreenshot: "4790-composer-10rows-scroll"
+- inputText: "\nfifth line"
+- waitForAnimationToEnd
+- takeScreenshot: "4790-composer-5rows-scroll"
 # 목록 탭이 쉬는 초안 접힘을 연다. SE·AX는 116-list-tap-rest의 LIST_POINT로 따로 잰다.
+- runFlow:
+    when:
+      visible:
+        id: "composer-input"
+    commands:
+      - tapOn:
+          point: "50%,25%"
+      - waitForAnimationToEnd:
+          timeout: 6000
+      - assertNotVisible:
+          id: "composer-tools"
+      - takeScreenshot: "4790-composer-draft-rest"
 - tapOn:
-    point: "50%,25%"
-- waitForAnimationToEnd:
-    timeout: 6000
-- assertNotVisible:
-    id: "composer-tools"
-- takeScreenshot: "4790-composer-draft-rest"
-- tapOn:
-    id: "composer-input"
+    id: "(composer-input|work-chat-input)"
 - eraseText: 2000
 - takeScreenshot: "4790-composer-empty-long-room"

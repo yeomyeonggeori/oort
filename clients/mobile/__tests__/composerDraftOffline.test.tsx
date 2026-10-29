@@ -1,3 +1,4 @@
+import {measureComposerText} from './fixtures/composerMeasurement';
 import {
   composerFieldLabel,
   composerPlaceholder,
@@ -25,6 +26,7 @@ import {
   PILL_CHROME,
   COMPOSER_OFFLINE_COPY,
   INPUT_CHROME,
+  INPUT_CHROME_X,
   mentionRowHeight,
   mentionSheetMaxHeight,
   PLACEHOLDER_MAX_LINES,
@@ -352,7 +354,28 @@ describe('오프라인 — 지금은 못 보낸다고 말하고, 실제로 막�
 describe('#4790 입력창 성장', () => {
   const input = () => screen.getByTestId('composer-input');
   const style = () => StyleSheet.flatten(input().props.style);
-  const measure = (height: number) => fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 250, height}}});
+  const measure = (height: number) => measureComposerText(height - 16);
+
+  it.each([channelDraftKey('growth'), threadDraftKey('growth')])(
+    '일반·스레드 %s: 입력창 이벤트 없이 거울이 자동 줄바꿈을 재고 다섯째 명시 줄도 스크롤한다',
+    draftKey => {
+      setWindow({fontScale: 1, height: 874});
+      composer({draftKey});
+      fireEvent.changeText(input(), '개행 없이 이어지는 긴 문단'.repeat(20));
+      measure(4 * line.body + 16);
+      const mirror = screen.getByTestId('composer-content-mirror', {includeHiddenElements: true});
+      expect(StyleSheet.flatten(mirror.props.style).width).toBe(280 - INPUT_CHROME_X);
+      expect(mirror.props.numberOfLines).toBeUndefined();
+      expect(input().props.onContentSizeChange).toBeUndefined();
+      expect(style().height).toBe(4 * line.body + INPUT_CHROME);
+      expect(input().props.scrollEnabled).toBe(false);
+      fireEvent.changeText(input(), '첫 줄\n둘째 줄\n셋째 줄\n넷째 줄\n다섯째 줄');
+      expect(input().props.scrollEnabled).toBe(true);
+      fireEvent.changeText(input(), '');
+      expect(style().height).toBe(44);
+      expect(input().props.scrollEnabled).toBe(false);
+    },
+  );
 
   it('폰 4줄과 도구 줄 44pt를 포함한 전체 상한을 잠근다', () => {
     expect(COMPOSER_MAX_ROWS).toBe(4);
@@ -363,6 +386,7 @@ describe('#4790 입력창 성장', () => {
       measure(600);
       expect(style().height).toBe(4 * line.body + INPUT_CHROME);
       expect(input().props.scrollEnabled).toBe(true);
+      expect(input().props.onContentSizeChange).toBeUndefined();
       expect(style().height + 44 + PILL_CHROME).toBe(composerExpandedMaxHeight(1, height));
       expect(composerExpandedMaxHeight(1, height)).toBe(164);
       view.unmount();

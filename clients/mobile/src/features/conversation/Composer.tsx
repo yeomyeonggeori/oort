@@ -68,6 +68,7 @@ import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
 import {CONV, composerFloat, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 import {DockFollowContext} from './dockFollow';
+import {COMPOSER_INPUT_TYPOGRAPHY, useComposerInputLayout} from './useComposerInputLayout';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {Avatar} from './Avatar';
 import {
@@ -1926,20 +1927,13 @@ export function Composer({
   }, [inputRef]);
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
-  // Fabric의 내재 크기 재측정에 기대지 않는다(#4615). contentSize는 패딩을
-  // 포함하므로 테두리만 더한다. 측정 전에는 하드 개행 수를 최소 높이로 쓴다.
-  const [contentHeight, setContentHeight] = useState(0);
-  useLayoutEffect(() => {
-    if (text === '') setContentHeight(0);
-  }, [text]);
-  const explicitRows = text === '' ? 1 : Math.min(COMPOSER_MAX_ROWS, text.split('\n').length);
-  const wantedHeight = Math.max(
-    collapsedHeight,
-    explicitRows * line.body * fontScale + INPUT_CHROME,
-    text === '' ? 0 : contentHeight + INPUT_BORDER * 2,
-  );
-  const inputHeight = Math.min(maxHeight, wantedHeight);
-  const inputOverflows = text !== '' && wantedHeight > maxHeight;
+  const inputSizing = useComposerInputLayout({
+    text, fontScale, minHeight: collapsedHeight, maxHeight,
+    chrome: INPUT_CHROME, horizontalChrome: INPUT_CHROME_X,
+    testID: 'composer-content-mirror',
+  });
+  const inputHeight = inputSizing.height;
+  const inputOverflows = inputSizing.scrollEnabled;
   overflowRef.current = inputOverflows;
   // 쉬는 초안의 알약은 **첫 줄 하나만** 보인다 (#4614). 엄지 높이(44)에 둘째 줄의 윗부분이 걸려 잘려 보이던 것을, 입력창을 첫 줄의 아랫선까지(위 여백 + 한 줄)만으로 줄이고 남는 높이를 입력창
   // **밖**(margin)으로 돌려 해결한다 — 알약의 높이는 그대로고 첫 줄은 글이 한 줄일 때와 같은 자리(가운데)에 선다. 글이 없는 접힘은 한 줄뿐이라 이 계산이 필요 없다.
@@ -2038,7 +2032,9 @@ export function Composer({
   // 입력창이 자기 폭을 알린 뒤에야 프로브가 설 수 있다 — 자와 상자의 폭이 다르면
   // 그 답은 이 상자에 대한 답이 아니다.
   const [inputWidth, setInputWidth] = useState<number | null>(null);
+  const onSizingLayout = inputSizing.onLayout;
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
+    onSizingLayout(event);
     // 쉬는 움직임이 글 칸을 잘라 두는 동안(`restFrom`)의 높이는 자연 높이가 아니다 — 그 높이를 적으면 다음에 쉬러 갈 때 시작값이 줄어든 높이가 된다(#4614).
     if (restFromRef.current === null) inputHeightRef.current = event.nativeEvent.layout.height;
     // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305). 펼치는 중·접히는 중의 폭도 아니므로
@@ -2046,7 +2042,7 @@ export function Composer({
     if (shownRef.current) return;
     const {width} = event.nativeEvent.layout;
     setInputWidth(previous => (previous === width ? previous : width));
-  }, []);
+  }, [onSizingLayout]);
   const probeWidth =
     inputWidth === null ? null : inputWidth - INPUT_CHROME_X;
 
@@ -2404,6 +2400,8 @@ export function Composer({
         </View>
       )}
 
+      {inputSizing.mirror}
+
       {/* 떠 있는 알약 하나 (DS2-4 #2716, owner 표 + 시안 A `.a-comp`): 안쪽 왼쪽 +
           원 · 입력 · 오른쪽 잉크 ↑ 원. 옛 판은 네모 [+] · 두 줄 상자 · 글자 버튼
           「보내기」가 따로 놀았다. 알약 밖 도크는 투명이라 바닥이 비친다. */}
@@ -2464,20 +2462,13 @@ export function Composer({
           onTouchCancel={onFieldTouchCancel}>
         <TextInput
           ref={inputRef}
-          // 빈 칸 → 붙여넣기·초안 복원에서도 명시 높이를 계속 준다(#4615).
-          // flex:1 + 고정 높이 해제 + scrollEnabled=true 경로는 Yoga/Fabric의
-          // 내재 크기에 의존해 긴 글도 작은 편집 창에 머물 수 있었다.
+          // 높이는 별도 Text 거울이 정한다. 입력창 자체의 contentSize 이벤트를
+          // 기다리면 고정 레이아웃에서 자동 줄바꿈·5번째 줄을 알 수 없다(#4790).
           style={[
             styles.input,
             {maxHeight, minHeight: collapsedHeight, height: inputHeight},
             rested && !clipRest && restedStyle,
           ]}
-          onContentSizeChange={event => {
-            // 쉬는 한 줄·접힘 애니메이션이 자연 높이 측정을 덮어쓰지 않게 한다.
-            if (text === '' || rested || restFromRef.current !== null) return;
-            const measured = event.nativeEvent.contentSize.height;
-            setContentHeight(previous => previous === measured ? previous : measured);
-          }}
           onLayout={onInputLayout}
           value={text}
           onChangeText={onChangeText}
@@ -2750,7 +2741,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     borderColor: 'transparent',
     // 16 is where iOS stops zooming a focused field; anything smaller makes the
     // whole screen lurch the first time someone taps to type.
-    fontSize: font.body,
+    ...COMPOSER_INPUT_TYPOGRAPHY,
     color: color.text,
     // 스케일에서 나온다. 옛 값 21 은 `font.body`(16) 옆의 손으로 적은 숫자였고,
     // 같은 크기 글자가 화면의 다른 자리(본문·「작업 중」)에서는 22 를 썼다.
@@ -2759,7 +2750,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     // 아니라 화면에 그려지는 22 × 글자 배수**가. iOS 가 선언된 줄 상자에 동적
     // 타입 배수를 곱하므로(머리말의 `RCTAttributedTextUtils` 인용) 상한도 같은
     // 배수를 곱해야 같은 줄 수를 뜻한다. 그것이 #1443 이 고친 자리다.
-    lineHeight: line.body,
   },
   /**
    * 잉크 ↑ 원 — + 와 같은 지름이다. 한 줄 입력창(44) 가운데에 앉고, 글이 자라면 마지막

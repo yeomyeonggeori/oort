@@ -1,3 +1,4 @@
+import {measureComposerText} from './fixtures/composerMeasurement';
 import {AttachmentTray} from '../src/features/attachments/AttachmentTray';
 import {QuoteDraftBar} from '../src/features/conversation/Quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -276,11 +277,14 @@ describe('작업 대화 입력 알약 — 같은 자', () => {
       const input = () => screen.getByTestId('work-chat-input');
       expect(flat(input().props.style).minHeight).toBeGreaterThanOrEqual(Math.ceil(line.body * fontScale) + 18);
       fireEvent.changeText(input(), '긴 지시'.repeat(100));
-      fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 250, height: 1000}}});
+      measureComposerText(1000, true);
       expect(flat(input().props.style).height).toBe(4 * line.body * fontScale + 18);
       expect(input().props.scrollEnabled).toBe(true);
+      expect(input().props.onContentSizeChange).toBeUndefined();
       fireEvent.changeText(input(), '');
       expect(input().props.scrollEnabled).toBe(false);
+      fireEvent.changeText(input(), '첫 줄\n둘째 줄\n셋째 줄\n넷째 줄\n다섯째 줄');
+      expect(input().props.scrollEnabled).toBe(true);
       view.unmount();
     }
   });

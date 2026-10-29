@@ -40,6 +40,7 @@ import {
 import {haptics} from '../../lib/haptics';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
 import {CONV, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from '../conversation/convDesign';
+import {COMPOSER_INPUT_TYPOGRAPHY, useComposerInputLayout} from '../conversation/useComposerInputLayout';
 import {ConversationLayout} from '../conversation/ConversationLayout';
 import {
   buildConversation,
@@ -464,10 +465,12 @@ function ChatComposer({
   const keyboardAppearance = useKeyboardAppearance();
   const [text, setText] = useState(initialText ?? '');
   const {fontScale} = useWindowDimensions();
-  const [contentHeight, setContentHeight] = useState(0);
-  useEffect(() => {
-    if (text === '') setContentHeight(0);
-  }, [text]);
+  const minHeight = Math.max(TOUCH_TARGET, Math.ceil(line.body * fontScale) + CONV.composerTextInset * 2);
+  const maxHeight = line.body * fontScale * COMPOSER_MAX_ROWS + CONV.composerTextInset * 2;
+  const inputSizing = useComposerInputLayout({
+    text, fontScale, minHeight, maxHeight, chrome: CONV.composerTextInset * 2,
+    horizontalChrome: 0, testID: 'work-chat-content-mirror',
+  });
   const [interrupt, setInterrupt] = useState(false);
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -524,13 +527,6 @@ function ChatComposer({
     );
   }
 
-  const minHeight = Math.max(TOUCH_TARGET, Math.ceil(line.body * fontScale) + CONV.composerTextInset * 2);
-  const maxHeight = line.body * fontScale * COMPOSER_MAX_ROWS + CONV.composerTextInset * 2;
-  const wantedHeight = Math.max(
-    minHeight,
-    Math.min(COMPOSER_MAX_ROWS, text.split('\n').length) * line.body * fontScale + CONV.composerTextInset * 2,
-    text === '' ? 0 : contentHeight,
-  );
   return (
     <View style={styles.dock} testID="work-chat-dock">
       {gate.kind === 'closed' ? (
@@ -567,12 +563,13 @@ function ChatComposer({
           {note}
         </Sentence>
       ) : null}
+      {inputSizing.mirror}
       <View style={styles.pill}>
         <TextInput
           lineBreakStrategyIOS="hangul-word"
-          style={[styles.input, {minHeight, maxHeight, height: Math.min(maxHeight, wantedHeight)}]}
-          onContentSizeChange={event => setContentHeight(event.nativeEvent.contentSize.height)}
-          scrollEnabled={text !== '' && wantedHeight > maxHeight}
+          style={[styles.input, {minHeight, maxHeight, height: inputSizing.height}]}
+          onLayout={inputSizing.onLayout}
+          scrollEnabled={inputSizing.scrollEnabled}
           value={text}
           onChangeText={value => {
             setText(value);
@@ -930,8 +927,8 @@ const buildStyles = (color: Palette) =>
       flex: 1,
       minHeight: TOUCH_TARGET,
       paddingVertical: CONV.composerTextInset,
-      fontSize: font.body,
-      lineHeight: line.body,
+      paddingHorizontal: 0,
+      ...COMPOSER_INPUT_TYPOGRAPHY,
       color: color.text,
     },
     send: {
