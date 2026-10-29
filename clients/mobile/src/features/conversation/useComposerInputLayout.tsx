@@ -1,5 +1,5 @@
 import React, {useCallback, useState} from 'react';
-import {Text, View, StyleSheet, type LayoutChangeEvent} from 'react-native';
+import {Text, View, type LayoutChangeEvent, type ViewStyle} from 'react-native';
 import {font, line} from '../../design/tokens';
 import {
   composerInputLayout,
@@ -34,7 +34,7 @@ export function useComposerInputLayout({
   // This unconstrained sibling Text lays out whenever text/width/font change, even
   // while the input is fixed at one/four lines or clipped by the resting animation.
   const mirror = width > 0 ? (
-    <View style={styles.host} pointerEvents="none" accessibilityElementsHidden
+    <View style={MIRROR_HOST_STYLE} pointerEvents="none" accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants">
       <Text
         testID={testID}
@@ -55,4 +55,5 @@ export function useComposerInputLayout({
   return {...layout, onLayout, mirror};
 }
 
-const styles = StyleSheet.create({host: {position: 'absolute', top: 0, left: 0, opacity: 0}});
+// Geometry only: no palette values are captured at module load.
+const MIRROR_HOST_STYLE: ViewStyle = {position: 'absolute', top: 0, left: 0, opacity: 0};

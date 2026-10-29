@@ -1215,7 +1215,8 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     composer({placeholder: '답글 쓰기'});
     layoutInput();
     expect(probes()).toHaveLength(0);
-    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe('답글 쓰기');
+    expect(screen.getByPlaceholderText('답글 쓰기')).toBe(input());
+    expect(screen.queryByTestId('composer-placeholder', {includeHiddenElements: true})).toBeNull();
     // 빠진 절이 없으니 힌트도 없다(#4179).
     expect(input().props.accessibilityHint).toBeUndefined();
   });

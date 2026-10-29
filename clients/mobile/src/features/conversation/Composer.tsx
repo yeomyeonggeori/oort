@@ -365,19 +365,41 @@ export const INPUT_CHROME_X = INPUT_PAD_X * 2 + INPUT_BORDER * 2;
 
 /**
  * 펼친 알약 전체 상한(글 칸 + 44pt 도구 줄 + 알약 위아래 여백·선).
- * 네 줄과 창 예산 중 작은 값이며, 큰 글자에서 두 줄의 편집 바닥을 지킨다.
+ * 네 줄과 창 예산 중 작은 값이며, 고지가 없으면 편집 두 줄 바닥을 지킨다.
+ * 고지가 보이는 큰 글자에서는 입력 한 줄을 남기고 나머지를 스크롤한다.
  * 입력창에는 이 값에서 도구 줄과 알약 크롬을 뺀 값을 준다.
  */
-export function composerExpandedMaxHeight(fontScale: number, windowHeight: number): number {
+export function composerExpandedMaxHeight(
+  fontScale: number, windowHeight: number, agentNoticeShown = false,
+): number {
   const row = line.body * fontScale;
   const chrome = INPUT_CHROME + COMPOSER_TOOLS_HEIGHT + PILL_CHROME;
   const byRows = COMPOSER_MAX_ROWS * row + chrome;
   const byWindow = conversationColumn(windowHeight) * COMPOSER_COLUMN_SHARE;
-  return Math.max(MIN_ROWS * row + chrome, Math.min(byRows, byWindow));
+  const normalMax = Math.max(MIN_ROWS * row + chrome, Math.min(byRows, byWindow));
+  if (!agentNoticeShown) return normalMax;
+  // #4790: the notice shares this column with the expanded pill. Reserve its
+  // visible scaled lines AND top padding before assigning the editor's height.
+  // At AX sizes keep one whole editor row and scroll the rest. On SE the notice
+  // itself scrolls when two notice rows and one editor row cannot coexist.
+  const noticeRoom = conversationColumn(windowHeight) - CONV.composerTopAir -
+    composerAgentNoticeMaxHeight(fontScale, windowHeight);
+  const oneRowPill = composerCollapsedHeight(fontScale) + COMPOSER_TOOLS_HEIGHT + PILL_CHROME;
+  return Math.max(oneRowPill, Math.min(normalMax, noticeRoom));
 }
 
-export function composerMaxHeight(fontScale: number, windowHeight: number): number {
-  return composerExpandedMaxHeight(fontScale, windowHeight) - COMPOSER_TOOLS_HEIGHT - PILL_CHROME;
+export function composerMaxHeight(
+  fontScale: number, windowHeight: number, agentNoticeShown = false,
+): number {
+  return composerExpandedMaxHeight(fontScale, windowHeight, agentNoticeShown) - COMPOSER_TOOLS_HEIGHT - PILL_CHROME;
+}
+
+/** Two notice lines normally; one scrollable line when SE + AX needs the space. */
+export function composerAgentNoticeMaxHeight(fontScale: number, windowHeight: number): number {
+  const oneEditorRow = composerCollapsedHeight(fontScale);
+  const room = conversationColumn(windowHeight) - oneEditorRow - DOCK_CHROME - AGENT_NOTICE_PAD_TOP;
+  const rows = Math.max(1, Math.min(AGENT_NOTICE_MAX_LINES, Math.floor(room / (line.meta * fontScale))));
+  return rows * line.meta * fontScale + AGENT_NOTICE_PAD_TOP;
 }
 
 /**
@@ -433,16 +455,17 @@ export function composerColumnBudget(
   fontScale: number,
   windowHeight: number,
   annotated = false,
+  agentNoticeShown = false,
 ): ComposerColumnBudget {
   const column = conversationColumn(windowHeight);
-  const composer = composerMaxHeight(fontScale, windowHeight);
+  const composer = composerMaxHeight(fontScale, windowHeight, agentNoticeShown);
   return {
     keyboard: windowHeight * KEYBOARD_WINDOW_SHARE,
     chrome: windowHeight * CONVERSATION_CHROME_WINDOW_SHARE,
     column,
     composer,
     list: column - composer,
-    dockChrome: DOCK_CHROME,
+    dockChrome: DOCK_CHROME + (agentNoticeShown ? AGENT_NOTICE_PAD_TOP : 0),
     mentions: mentionSheetMaxHeight(fontScale, windowHeight, annotated),
   };
 }
@@ -594,6 +617,8 @@ const BAR_PAD_Y = BAR_PAD_X - (TOUCH_TARGET - CONV.composerCircle) / 2;
  */
 export const PILL_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2;
 const DOCK_CHROME = PILL_CHROME + COMPOSER_TOOLS_HEIGHT + CONV.composerTopAir;
+const AGENT_NOTICE_MAX_LINES = 2;
+const AGENT_NOTICE_PAD_TOP = space.sm;
 
 /** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
@@ -1193,7 +1218,6 @@ export function Composer({
   // `useWindowDimensions` 는 동적 타입이 바뀌는 순간에도 다시 그린다(RN 은
   // `RCTAccessibilityManager` 의 배수 변경을 Dimensions 변경으로 내보낸다).
   const {fontScale, width: windowWidth, height: windowHeight} = useWindowDimensions();
-  const maxHeight = composerMaxHeight(fontScale, windowHeight);
   // 알약이 화면 가장자리에서 뜬 거리 (#4179). 폭과 글자 배수가 정하므로 스타일시트가 아니라 여기서.
   const floatInset = composerFloat(windowWidth, fontScale);
   // 유리 재료. 리퀴드 글래스는 가장자리를 네이티브가 그리므로 우리 선은 투명이고(이중선 방지),
@@ -1446,6 +1470,9 @@ export function Composer({
   // 때 VoiceOver 에 직접 알린다. 같은 말은 다시 읽지 않고(글을 치는 동안 효과가 되돌지 않게
   // 의존성은 문장 하나), Android 는 live region 이 이미 하므로 겹쳐 읽지 않는다.
   const noticeShown = agentNotice !== null && !showMentions && !showSlash;
+  const maxHeight = composerMaxHeight(fontScale, windowHeight, noticeShown);
+  const noticeMaxHeight = composerAgentNoticeMaxHeight(fontScale, windowHeight);
+  const noticeScrolls = noticeMaxHeight < AGENT_NOTICE_MAX_LINES * line.meta * fontScale + AGENT_NOTICE_PAD_TOP;
   const spokenNotice = noticeShown ? agentNotice : null;
   useEffect(() => {
     if (spokenNotice !== null && Platform.OS === 'ios') {
@@ -2077,7 +2104,8 @@ export function Composer({
           return height !== undefined && height <= fitRoom;
         });
   const shownPlaceholder = withLatinWordBreaks(keptPlaceholder);
-  // #4790: 한 줄 말줄임 Text는 장식이며 native placeholder는 비어 있다.
+  // #4790: 방 이름은 한 줄 말줄임 Text로, 스레드의 짧은 초대는 native
+  // placeholder로 표시한다(#4690). 같은 문장을 두 번 그리지 않는다.
   // 필드 라벨이 방 이름 전체를 읽고, 멘션 안내는 보이는 절의 길이와 무관하게
   // 빈 입력창의 힌트로 읽는다. 글을 쓰기 시작하면 힌트도 걷는다.
   const placeholderHint =
@@ -2318,19 +2346,25 @@ export function Composer({
         // 줄) 대신 들어갈 자리가 없고, 그래서 입력창 바로 위 한 줄이다.
         // `color.warn` 인 이유: 오프라인 줄이 앰버가 아닌 것(U4-6 M-2)은 「지금은 못 보낸다」라는
         // 때의 문제라서였다. 이 줄은 반대로 「보내기 전에 볼 것」 — `warn` 이 뜻하는 그 한 가지다.
-        <Text
-          style={styles.agentNotice}
-          accessibilityRole="alert"
-          accessibilityLiveRegion="polite"
-          lineBreakStrategyIOS="hangul-word"
-          // 최대 두 줄 — 도크가 열 안에 들게(design-review H2). 열 예산(`composerColumnBudget`)은
-          // 이 줄을 세지 않으므로 상한이 곧 예산이다: 두 줄 × `line.meta` × 글자 배수가 가장 큰
-          // 배수에서도 입력창 상한 뒤 열에 든다(`mentionAiAnnotation.test.tsx`). 잘린 문장은 라벨이 끝까지 읽는다.
-          numberOfLines={2}
-          accessibilityLabel={agentNotice ?? undefined}
-          testID="composer-agent-notice">
-          {agentNotice}
-        </Text>
+        <ScrollView
+          style={{maxHeight: noticeMaxHeight, flexGrow: 0}}
+          scrollEnabled={noticeScrolls}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+          testID="composer-agent-notice-scroll">
+          <Text
+            style={styles.agentNotice}
+            accessibilityRole="alert"
+            accessibilityLiveRegion="polite"
+            lineBreakStrategyIOS="hangul-word"
+            // 고지와 패딩을 먼저 확보한 뒤 입력창 상한을 정한다.
+            // SE + AX에서는 고지 한 줄씩 스크롤하며, 라벨은 전문을 읽는다.
+            numberOfLines={AGENT_NOTICE_MAX_LINES}
+            accessibilityLabel={agentNotice ?? undefined}
+            testID="composer-agent-notice">
+            {agentNotice}
+          </Text>
+        </ScrollView>
       ) : null}
 
       {keyBlocked ? (
@@ -2483,7 +2517,7 @@ export function Composer({
           // `fitComposerPlaceholder` 이고, 「이 상자에 드는가」만 위의 프로브가
           // 답한다 — 그 분업과 그것이 구하지 못하는 띠는 이 파일의 「절 예산」
           // 머리말에 있다.
-          placeholder=""
+          placeholder={placeholder ?? ''}
           // 자리 글자가 이제 「@로 부르기」를 알리는 유일한 문장이다 — 시안의 @ 도구
           // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
           placeholderTextColor={palette.textMuted}
@@ -2561,7 +2595,7 @@ export function Composer({
         />
         {/* 쉬는 알약의 눌리는 면 (#4614 H1) — 쉬는 초안이 포커스를 받기 전까지 선다. **움직이는 중에도 서 있어야 한다**: 손이 닿는 순간 펼침이 시작되고(#4518) 그 렌더에서 이 면이 사라지면
             눌리던 손의 `onPress` 가 오지 않는다(시뮬레이터 실측: `pressIn` 만 오고 `onPress` 가 없었다). 접근성 요소가 아니다(글 칸이 그 몫을 한다). */}
-        {text === '' ? (
+        {text === '' && placeholder === undefined ? (
           <Text
             pointerEvents="none"
             accessible={false}
@@ -2979,7 +3013,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   agentNotice: {
     paddingHorizontal: CONV.composerDockInset,
-    paddingTop: space.sm,
+    paddingTop: AGENT_NOTICE_PAD_TOP,
     fontSize: font.meta,
     lineHeight: line.meta,
     color: color.warn,

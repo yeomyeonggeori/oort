@@ -1,11 +1,11 @@
+import type {TextStyle} from 'react-native';
+
 /** A native Text mirror measures glyphs; this pure function owns the height/scroll decision. */
 export type ComposerTextGeometry = Readonly<{
   text: string;
   width: number;
-  fontSize: number;
-  lineHeight: number;
   fontScale: number;
-}>;
+} & Required<Pick<TextStyle, 'fontSize' | 'lineHeight'>>>;
 
 export type ComposerTextMeasurement = Readonly<{
   geometry: ComposerTextGeometry;
