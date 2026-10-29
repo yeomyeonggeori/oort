@@ -4,6 +4,7 @@ import {AppState, Platform} from 'react-native';
 import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
 
 // User events only. Never queue a suppressed pulse; visuals must stand on their own.
+// 동작 줄이기는 햅틱 설정과 별개이며(research-1029/haptics/report.md:55), 시스템 진동 끔은 iOS 피드백 생성기가 지킨다.
 export type HapticMode = 'rich' | 'basic' | 'off';
 export const HAPTIC_MODES = [
   { value: 'rich', label: '풍부' },
@@ -21,6 +22,7 @@ type Pattern =
 const events = {
   messageMenu: ['medium', 'basic'],
   reactionChanged: ['selection', 'basic'],
+  actionFailed: ['error', 'basic'],
   reactionCandidateChanged: ['selection', 'basic'],
   profileOpened: ['light', 'basic'],
   jumpToLatest: ['light', 'rich'],
