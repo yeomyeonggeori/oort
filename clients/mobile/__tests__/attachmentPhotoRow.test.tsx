@@ -774,3 +774,71 @@ describe('attachmentSize (#4455)', () => {
     });
   });
 });
+
+// =============================================================================
+// 사진 뷰어의 보낸 사람·시각 (#4297) — 행이 목록에 넘기고, 목록이 뷰어에 넘긴다. 이음매가 세 개(행 → 목록 → 뷰어)라 화면에서 끝까지 읽는다.
+// =============================================================================
+describe('사진 뷰어에 보낸 사람·시각이 선다 (#4297)', () => {
+  interface FileSystemMock {
+    __reset: () => void;
+  }
+  const fileSystem = jest.requireMock('expo-file-system') as FileSystemMock;
+  /** 지역 시간으로 지어 시험이 어느 시간대에서 돌아도 같은 글이 된다. */
+  const SENT_AT = new Date(2026, 9, 29, 14, 55).getTime();
+  const FILE: MessageAttachment = {id: 'att-4297', name: '현장.png', mime: 'image/png', sizeBytes: 4096};
+
+  beforeEach(() => {
+    fileSystem.__reset();
+    resetAttachmentContentForTest();
+  });
+
+  afterEach(async () => {
+    await drainRender();
+    await act(async () => {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    });
+    cleanup();
+  });
+
+  async function openViewer() {
+    fireEvent.press(screen.getByTestId('attachment-item'));
+    await screen.findByTestId('attachment-viewer-image');
+  }
+
+  it('받은 사진을 열면 보낸 사람 이름과 보낸 시각이 위쪽 띠에 선다', async () => {
+    const message: Message = {
+      id: 'msg-4297',
+      channelId: CHANNEL,
+      seq: 7,
+      hlcTs: 7,
+      hlcCount: 0,
+      authorMemberId: OTHER,
+      type: 'text',
+      body: '',
+      state: 'sent',
+      createdAtMs: SENT_AT,
+      attachments: [FILE],
+    };
+    render(<MessageRow message={message} startsGroup directory={DIRECTORY} chips={[]} nowMs={SENT_AT} />);
+    await openViewer();
+    expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('이도현');
+    expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
+  });
+
+  it('보낸 사진의 메아리도 같다 — 내 이름과 보낸 시각이고, 서버 사본이 대체해도 띠가 같다', async () => {
+    const pending: PendingMessage = {
+      clientMsgId: 'c-4297',
+      channelId: CHANNEL,
+      authorMemberId: SELF,
+      body: '',
+      createdAtMs: SENT_AT,
+      sinceSeq: 6,
+      status: 'sending',
+      attachments: [FILE],
+    };
+    render(<PendingRow pending={pending} startsGroup directory={DIRECTORY} />);
+    await openViewer();
+    expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('박서연');
+    expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
+  });
+});

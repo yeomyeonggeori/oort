@@ -7,8 +7,9 @@
  * 그 한 길만 대신 답한다. 그래서 **배송되는 내려받기 코드가 그대로 돈다** — 앱 코드에 시험용 틈을
  * 내지 않았다.
  *
- * 답하는 그림은 **요청 때 만든 단색 PNG** 다(저장소에 사진 파일이 없다). 첨부 id 가 색과 비율을 정한다:
- *
+ * 답하는 그림은 **요청 때 만든 그라데이션 PNG** 다(저장소에 사진 파일이 없다). 하늘(위가 밝고 아래가 어둡다) · 어두운 땅(아래 1/3) · 오른쪽 위의
+ * 해 모양 하이라이트가 있어서, 사진 **위에 뜬 반투명 유리**(#4297)가 무엇을 흐리는지 캡처에서 읽힌다 — 단색 위의 유리는 흐림이 보이지 않는다.
+ * 첨부 id 가 색과 비율을 정한다:
  *   photo-solo   세로 3:4   청록
  *   photo-a      가로 4:3   주황
  *   photo-b      가로 4:3   남색
@@ -51,20 +52,32 @@ function chunk(type, data) {
   return Buffer.concat([length, body, crc]);
 }
 
-/** 8비트 RGB 단색 PNG 한 장. */
-function solidPng({width, height, rgb}) {
+const clamp = value => Math.max(0, Math.min(255, Math.round(value)));
+
+/** 8비트 RGB 그라데이션 PNG 한 장(위 머리말의 하늘·땅·해). */
+function picturePng({width, height, rgb}) {
   const header = Buffer.alloc(13);
   header.writeUInt32BE(width, 0);
   header.writeUInt32BE(height, 4);
   header[8] = 8; // 비트 깊이
   header[9] = 2; // 색 유형: RGB
-  const row = Buffer.alloc(1 + width * 3); // 첫 바이트는 필터 0
-  for (let x = 0; x < width; x += 1) {
-    row[1 + x * 3] = rgb[0];
-    row[2 + x * 3] = rgb[1];
-    row[3 + x * 3] = rgb[2];
+  const stride = 1 + width * 3; // 첫 바이트는 필터 0
+  const raw = Buffer.alloc(height * stride);
+  for (let y = 0; y < height; y += 1) {
+    const t = y / (height - 1);
+    // 하늘: 위가 밝고 아래가 어둡다. 아래 1/3 은 땅이라 한 단 더 어둡다.
+    const base = (1.3 - 0.75 * t) * (t > 0.68 ? 0.62 : 1);
+    for (let x = 0; x < width; x += 1) {
+      // 오른쪽 위의 해: 부드러운 원형 하이라이트(가로 폭 비율을 보정해 원으로 둔다).
+      const reach = Math.hypot((x / width - 0.78) * (width / height), t - 0.2) / 0.22;
+      const glow = Math.max(0, 1 - reach);
+      const k = base + 0.5 * glow * glow;
+      const at = y * stride + 1 + x * 3;
+      raw[at] = clamp(rgb[0] * k);
+      raw[at + 1] = clamp(rgb[1] * k);
+      raw[at + 2] = clamp(rgb[2] * k);
+    }
   }
-  const raw = Buffer.concat(Array.from({length: height}, () => row));
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', header),
@@ -84,7 +97,7 @@ createServer((request, response) => {
     response.writeHead(404).end();
     return;
   }
-  const png = solidPng(picture);
+  const png = picturePng(picture);
   process.stdout.write(`200 ${url.pathname} (${png.length} bytes)\n`);
   response.writeHead(200, {'Content-Type': 'image/png', 'Content-Length': png.length});
   response.end(png);

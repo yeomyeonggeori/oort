@@ -101,6 +101,14 @@ import {
 // 본 것 — `directionalLockEnabled` 는 이 경우를 막지 못했다). 그래서 끌기를 쥐는 순간 호출부에 알려
 // (`onDraggingChange`) 스크롤뷰의 `scrollEnabled` 를 끄고, 끌기가 끝나면(놓음·빼앗김·취소) 켠다.
 //
+// ## 탭은 이 훅이 판정한다 (#4297 — 사진을 한 번 누르면 조작이 사라지고 다시 나타난다)
+//
+// 쪽 위의 `Pressable` 로 탭을 받으면 안 된다: `Pressable` 은 쪽보다 **깊어서** 닿는 순간 응답을 쥐고, 끌기를 쥘 쪽(쪽)이
+// 빈다 — 아래로 쓸어 닫기가 죽는다. 탭은 이미 응답을 쥔 쪽의 **놓음**에서 읽는다. 규칙 상태가 이미 알고 있다:
+// 놓는 순간 `claimed` 도 `dead` 도 아니면 손가락은 문턱(8pt) 안에서 한 손가락으로 떼어졌다(탭). 문턱을 넘어 가로·위로 갔으면
+// `dead`, 아래로 가져갔으면 `claimed`, 둘째 손가락이 닿았으면 `dead` 다. 가로로 넘기던 손가락은 스크롤뷰가 응답을 가져가
+// 놓음이 아니라 **빼앗김**(`Terminate`)으로 끝나므로 탭으로 세지 않는다.
+//
 // ## 양보는 쥐기 전까지다
 //
 // `onPanResponderTerminationRequest` 는 **끌기를 가져가기 전에는 양보하고, 가져간 뒤에는 거절한다.**
@@ -165,6 +173,7 @@ export function useViewerDismiss({
   onDismiss,
   progressRef,
   onDraggingChange,
+  onTap,
 }: {
   /** 켜져 있는가. 확대 중이면 꺼야 한다(#4297). */
   enabled: boolean;
@@ -178,6 +187,10 @@ export function useViewerDismiss({
    * 잠근다(위 ⑤). 바뀔 때만 부른다.
    */
   onDraggingChange?: (dragging: boolean) => void;
+  /**
+   * 한 손가락이 문턱 안에서 떨어졌다(탭). 쪽·뿌리 어디서 쥐었든 부른다. 쓸어 닫기가 꺼져 있어도(확대 중) 탭은 탭이다.
+   */
+  onTap?: () => void;
 }): ViewerDismiss {
   const drag = useRef(new Animated.Value(0)).current;
   const reduceMotion = useReduceMotionRef();
@@ -193,6 +206,8 @@ export function useViewerDismiss({
   progressRefRef.current = progressRef;
   const onDraggingChangeRef = useRef(onDraggingChange);
   onDraggingChangeRef.current = onDraggingChange;
+  const onTapRef = useRef(onTap);
+  onTapRef.current = onTap;
   /** 지금 알려 둔 끌기 상태. 바뀔 때만 호출부에 알린다. */
   const draggingRef = useRef(false);
   const stateRef = useRef<ViewerDragState>(IDLE);
@@ -279,10 +294,14 @@ export function useViewerDismiss({
       onPanResponderTerminationRequest: (event, gesture) =>
         !stateRef.current.claimed && touchesDown(event, gesture) <= 1,
       onPanResponderRelease: (_event, gesture) => {
-        const claimed = stateRef.current.claimed;
+        const {claimed, dead, origin} = stateRef.current;
         stateRef.current = IDLE;
         setDragging(false);
-        if (!claimed) return; // 탭이거나, 가로·위로 간 손가락이거나, 둘째 손가락으로 이미 취소됐다
+        if (!claimed) {
+          // 탭이거나, 가로·위로 간 손가락이거나, 둘째 손가락으로 이미 취소됐다. 앞의 것만 탭이다(위 「탭은 이 훅이 판정한다」).
+          if (!dead && origin !== null) onTapRef.current?.();
+          return;
+        }
         if (settles({offset: atRef.current, velocityPtPerMs: gesture.vy}) === 'dismiss') {
           onDismissRef.current();
           return;

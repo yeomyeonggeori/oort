@@ -155,6 +155,23 @@ export function useGlassMaterial(): GlassMaterial {
 export const GLASS_BLUR_INTENSITY = 60;
 
 /**
+ * 유리의 **톤 덮어쓰기** (#4297). 기본 유리는 앱 테마(라이트·다크)를 따라 틴트와, 흐림·리퀴드가 따르는 색 스킴을 고른다.
+ * 테마와 무관한 어두운 무대(사진 뷰어의 검정 바닥)는 라이트 테마에서도 어두운 유리를 입어야 한다 — 밝은 틴트는 검정 위에서
+ * 우윳빛이 되고 흰 글리프가 묻힌다. 이 값이 세 갈래(불투명·대체·블러)의 색과 스킴을 한꺼번에 정한다. 주지 않으면 기존
+ * 모양 그대로다(탭바가 쓰는 길은 한 줄도 달라지지 않는다).
+ */
+export interface GlassTone {
+  /** 블러·리퀴드가 따르는 스킴. */
+  scheme: 'light' | 'dark';
+  /** 블러 갈래에서 흐림 위에 얹는 틴트. */
+  tint: string;
+  /** 블러 모듈이 없을 때의 면. */
+  fallback: string;
+  /** 투명도 줄이기가 켜졌을 때의 면(불투명). */
+  opaque: string;
+}
+
+/**
  * 유리 면. 자식은 유리 **위**에 선다. 모양(반경·크기)은 `style`이 정한다.
  *
  * 재료는 `testID` 뒤에 `-opaque`·`-fallback`·`-blur`를 붙인 자식으로 드러나서,
@@ -165,15 +182,19 @@ export function GlassSurface({
   style,
   children,
   testID,
+  tone,
 }: {
   /** 흐림과 틴트를 자르는 반경. 모양의 반경과 같은 값을 준다. */
   radius: number;
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
   testID?: string;
+  /** 테마와 무관한 톤(위 `GlassTone`). 없으면 앱 테마를 따른다. */
+  tone?: GlassTone;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const {scheme} = useTheme();
+  const theme = useTheme();
+  const scheme = tone?.scheme ?? theme.scheme;
   const material = useGlassMaterial();
 
   let layer: React.ReactNode;
@@ -200,16 +221,24 @@ export function GlassSurface({
           tint={scheme === 'light' ? 'light' : 'dark'}
           style={StyleSheet.absoluteFill}
         />
-        <View style={[StyleSheet.absoluteFill, styles.tint]} testID={testID && `${testID}-blur`} />
+        <View
+          style={[StyleSheet.absoluteFill, tone ? {backgroundColor: tone.tint} : styles.tint]}
+          testID={testID && `${testID}-blur`}
+        />
       </>
     );
   } else {
+    const flat =
+      material === 'opaque'
+        ? tone
+          ? {backgroundColor: tone.opaque}
+          : styles.opaque
+        : tone
+          ? {backgroundColor: tone.fallback}
+          : styles.fallback;
     layer = (
       <View
-        style={[
-          StyleSheet.absoluteFill,
-          material === 'opaque' ? styles.opaque : styles.fallback,
-        ]}
+        style={[StyleSheet.absoluteFill, flat]}
         testID={testID && `${testID}-${material}`}
       />
     );

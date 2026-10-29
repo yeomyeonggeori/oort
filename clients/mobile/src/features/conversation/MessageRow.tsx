@@ -3142,6 +3142,9 @@ function MessageRowInner({
                 channelId={message.channelId}
                 attachments={message.attachments}
                 gesture={attachmentGesture}
+                // 사진을 열면 뷰어 위쪽에 보낸 사람·시각이 선다(#4297).
+                senderName={authorLabel}
+                sentAtMs={message.createdAtMs}
               />
             ) : null}
 
@@ -3959,6 +3962,15 @@ export function PendingRow({
             channelId={pending.channelId}
             attachments={pending.attachments}
             muted={failed}
+            // 메아리는 언제나 내 글이다 — 서버 사본이 대체해도 뷰어 위쪽 띠가 바뀌지 않는다(#4297).
+            senderName={
+              memberNameParts(
+                directory,
+                pending.authorMemberId,
+                missingMemberLabel(directory),
+              ).name
+            }
+            sentAtMs={pending.createdAtMs}
           />
         ) : null}
         {failed ? (
