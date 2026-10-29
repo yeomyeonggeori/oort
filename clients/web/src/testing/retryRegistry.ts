@@ -76,11 +76,11 @@ export function shapeProblems(raw: unknown): string[] {
   const keys = Object.keys(raw);
   const out: string[] = [];
   if (keys.length !== 1 || keys[0] !== "entries") {
-    out.push(`등록부의 맨 위에는 entries 만 있어야 해요(받은 키: ${keys.join(", ") || "없음"}). 재시도 횟수는 코드의 RETRY_ATTEMPTS 가 정해요.`);
+    out.push(`등록부의 맨 위에는 entries만 있어야 해요(받은 키: ${keys.join(", ") || "없음"}). 재시도 횟수는 코드의 RETRY_ATTEMPTS가 정해요.`);
   }
   const entries = (raw as { entries?: unknown }).entries;
   if (!Array.isArray(entries)) {
-    out.push("entries 는 배열이어야 해요.");
+    out.push("entries는 배열이어야 해요.");
     return out;
   }
   entries.forEach((entry, index) => {
@@ -112,7 +112,7 @@ export function shapeProblems(raw: unknown): string[] {
 
 export function parseRegistry(raw: unknown): RetryRegistry {
   const problems = shapeProblems(raw);
-  if (problems.length > 0) throw new Error(`test-retry.json 이 올바르지 않아요:\n- ${problems.join("\n- ")}`);
+  if (problems.length > 0) throw new Error(`test-retry.json이 올바르지 않아요:\n- ${problems.join("\n- ")}`);
   return raw as RetryRegistry;
 }
 

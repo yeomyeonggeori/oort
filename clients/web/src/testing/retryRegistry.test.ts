@@ -68,7 +68,7 @@ describe("재시도 등록부 (#4708) — 이슈가 달린 시험만 · 1회 · 
       expect(shapeProblems({ entries: [{ ...entry(), issue: 0 }] }).join("\n")).toContain("issue");
       expect(shapeProblems({ entries: [{ ...entry(), issue: "4708" }] }).join("\n")).toContain("issue");
       expect(shapeProblems({ entries: [{ ...entry(), retries: 3 }] }).join("\n")).toContain("키는 정확히");
-      expect(shapeProblems({ entries: [], retries: 3 }).join("\n")).toContain("entries 만");
+      expect(shapeProblems({ entries: [], retries: 3 }).join("\n")).toContain("entries만");
       expect(shapeProblems({ entries: [{ ...entry(), expires: "2026-02-30" }] }).join("\n")).toContain("expires");
       expect(shapeProblems({ entries: [{ ...entry(), id: "no-separator" }] }).join("\n")).toContain("id");
       expect(shapeProblems([]).join("\n")).toContain("맨 위");
