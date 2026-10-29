@@ -123,7 +123,7 @@
 
 - 교환권은 ADR-0180 D1·D3 토큰 모양을 그대로 따른다: **TTL 120초, 1회 소비, 해시 저장, 원문은 응답(리다이렉트 URL)에만 실리고 로그·감사·진단 번들에 남지 않는다**(ADR-0004). 교환권 자체로는 어떤 API도 부를 수 없다.
 - **PKCE식 결속(S256).** 앱이 브라우저를 열기 전에 verifier를 만들고, 그 SHA-256 해시를 「앱 로그인」 URL에 싣는다. 서버는 브라우저 패스키 로그인이 성공하면 그 해시에 결속된 교환권을 발급해 `oort://auth?server=…&code=…`로 돌려준다. 교환할 때 verifier가 맞아야 한다. 그래서 `oort://` 콜백 URL만 가로챈 다른 앱은 교환하지 못한다.
-- 교환 라우트는 공개(인증 미들웨어 밖)이고 per-IP 레이트리밋을 둔다. 교환에 성공하면 기존 `issue_and_record_session`(`auth_routes.rs:146`)으로 `LoginResponse`와 같은 모양의 세션을 발급한다. 감사에 로그인 방법 `passkey`를 적는다.
+- 교환 라우트는 공개(인증 미들웨어 밖)이고 per-IP 레이트리밋을 둔다. 교환에 성공하면 `mint_and_record_session_in_tx`(`auth_routes.rs`)로 `LoginResponse`와 같은 모양의 세션을 발급한다. 이 함수는 호출자의 트랜잭션에서만 기록하므로(자기 트랜잭션을 여는 발급 함수는 #4636에서 없앴다) 이 문도 교환권 소비와 같은 트랜잭션에서, 멤버십 잠금 아래서 발급한다([ADR-0215](0215-login-recovery-v2-password-change-and-reset.md) 증보 2 K1·K3). 감사에 로그인 방법 `passkey`를 적는다.
 - 발급자는 **브라우저의 패스키 로그인 성공 그 자체**다. 로그인된 세션이 교환권을 따로 찍어 내는 경로는 만들지 않는다(그건 ADR-0180 QR 경로다).
 - `oort://auth` 형식은 P6이 `docs/onboarding-deeplink.md`에 절로 더한다.
 

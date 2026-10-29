@@ -229,6 +229,47 @@ pub async fn is_active_agent(
     Ok(active)
 }
 
+/// Is `member_id` an **active human** on `workspace_id`'s roster (any workspace
+/// role, a guest included)? The subscribe rule of the `online:` roll-call
+/// (ADR-0160 ②, #4692).
+///
+/// The predicate is the roster's **row filter, word for word**: the roster
+/// (`list_workspace_roster`) lists a member only when there is a
+/// `workspace_membership` row, `status = 'active'` and `deleted_at IS NULL`; this
+/// adds `kind = 'human'` because availability is a human signal (ADR-0160 D4 — an
+/// agent's liveness is its `agent_run`). Anyone who passes here is therefore
+/// someone the roster could list, and anyone the roster would never list (invited,
+/// suspended, deleted, an agent, another tenant's member) cannot appear in the
+/// roll-call. Keeping the two in step is the whole privacy argument: availability
+/// is reported only for rows the roster already shows.
+///
+/// `conn` carries the tenant GUC (`with_tenant_tx`), so RLS already refuses another
+/// tenant's rows; `workspace_id` is bound as well because a subscribe callback is
+/// worth the one extra parameter.
+pub async fn is_active_human_member(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, DbError> {
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS( \
+           SELECT 1 \
+             FROM member m \
+             JOIN workspace_membership wm \
+               ON wm.workspace_id = m.workspace_id AND wm.member_id = m.id \
+            WHERE m.id = $2 \
+              AND m.workspace_id = $1 \
+              AND m.kind = 'human' \
+              AND m.status = 'active' \
+              AND m.deleted_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    Ok(allowed)
+}
+
 /// A member's authority **in the workspace** (`workspace_membership.role`,
 /// migration 026 / ADR-0128). Channel roles never imply workspace authority.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

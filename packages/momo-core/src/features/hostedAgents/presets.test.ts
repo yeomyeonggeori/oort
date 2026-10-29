@@ -235,9 +235,128 @@ describe("routine 이름과 지시", () => {
     });
   });
 
-  it("routine 지시는 inbox 확인, claim, 원래 자리 게시 셋을 말한다", () => {
+  it("routine 지시는 inbox 확인과 claim으로 시작한다", () => {
     expect(HOSTED_ROUTINE_TEMPLATE).toContain("inbox");
     expect(HOSTED_ROUTINE_TEMPLATE).toContain("claim");
-    expect(HOSTED_ROUTINE_TEMPLATE).toContain("thread");
+  });
+});
+
+// =============================================================================
+// #4622 / ADR-0200 증보 5 — routine 지시가 싣는 행동 규칙.
+//
+// 규칙은 문장이 아니라 **핵심 낱말 집합**이다. 지시문 한 줄 안에 모든 낱말 묶음이 있어야
+// 하고(묶음 안의 대안 중 하나면 된다), 낱말이 다른 곳에 있다고 통과하지 않는다. 시험은 스스로
+// 실패할 수 있음을 세 번 보인다:
+//   ① 각 규칙은 #4622 이전 문장(`OLD_ROUTINE_TEMPLATE`, track/engine 9fbdfeb4d)에서 붉다.
+//   ② 실제 문장에서 묶음 하나를 지우면 정확히 그 규칙·묶음이 붉어진다.
+//   ③ 규칙과 상관없는 문장은 아무 규칙도 채우지 못한다.
+// 못 보는 것: 낱말이 그대로인 채 부정문으로 바뀐 경우, 모델이 실제로 따르는지(ADR-0200 증보 5 「한계」).
+// Rust 쪽 짝: server-rust/bins/momo-server/tests/agent_conversation_rules.rs
+// =============================================================================
+
+interface ConversationRule {
+  name: string;
+  /** 묶음마다 하나의 생각. 묶음 안의 낱말은 대안이라 하나만 있으면 채워진다. */
+  groups: readonly (readonly string[])[];
+}
+
+const OLD_ROUTINE_TEMPLATE =
+  "oort inbox를 확인하고, 할 일이 있으면 claim한 뒤 결과를 원래 thread에 게시한다.";
+
+const ROUTINE_RULES: readonly ConversationRule[] = [
+  { name: "진행은 stage로 보낸다", groups: [["진행은"], ["oort_run_event"], ["stage"]] },
+  {
+    name: "최종 답은 oort가 올리는 body다",
+    groups: [["oort_run_complete"], ["body"], ["결과는"]],
+  },
+  {
+    name: "대화에는 결과·막힌 점·사람이 할 일만 쓴다",
+    groups: [["대화에는"], ["막힌 점"], ["사람이 할 일"], ["만 쓰고"]],
+  },
+  {
+    name: "빈 인사와 진행 중계는 쓰지 않는다",
+    groups: [["빈 인사"], ["확인했어요"], ["진행 중계"], ["쓰지 않는다"]],
+  },
+  {
+    name: "직접 올리는 메시지는 물어본 자리에 답한다",
+    groups: [["물어본 자리"], ["1:1 DM은 본류"], ["최상위 멘션"], ["thread 안은 같은 thread"]],
+  },
+];
+
+const normalized = (text: string): string =>
+  text.split(/\s+/).filter(Boolean).join(" ").toLowerCase();
+
+const hasGroup = (scope: string, group: readonly string[]): boolean =>
+  group.some((alternative) => scope.includes(alternative.toLowerCase()));
+
+/** 채워지지 않은 묶음을 `규칙 이름#묶음 번호`로 돌려준다. */
+function missingGroups(text: string, rules: readonly ConversationRule[]): string[] {
+  const scope = normalized(text);
+  return rules.flatMap((rule) =>
+    rule.groups.flatMap((group, index) => (hasGroup(scope, group) ? [] : [`${rule.name}#${index}`]))
+  );
+}
+
+/** 묶음의 모든 대안을 고정점까지 지운 문장. 지운 자리가 이웃을 이어 붙여 새 대안을 만들 수 있어서 한 번으로 끝내지 않는다. */
+function withoutGroup(text: string, group: readonly string[]): string {
+  let current = normalized(text);
+  for (;;) {
+    const before = current;
+    for (const alternative of group) current = current.split(alternative.toLowerCase()).join("");
+    if (current === before) return current;
+  }
+}
+
+describe("#4622 routine 지시가 행동 규칙을 싣는다 (핵심 낱말 집합 + 사보타주)", () => {
+  it("실제 지시문은 모든 규칙의 모든 낱말 묶음을 채운다", () => {
+    expect(missingGroups(HOSTED_ROUTINE_TEMPLATE, ROUTINE_RULES)).toEqual([]);
+  });
+
+  it("각 규칙은 #4622 이전 문장에서 붉었다 (원래 있던 낱말로 채워지는 규칙은 아무것도 증명하지 않는다)", () => {
+    const old = missingGroups(OLD_ROUTINE_TEMPLATE, ROUTINE_RULES);
+    for (const rule of ROUTINE_RULES) {
+      expect(
+        old.some((gap) => gap.startsWith(`${rule.name}#`)),
+        rule.name
+      ).toBe(true);
+    }
+  });
+
+  it("묶음 하나를 지우면 정확히 그 규칙·묶음이 붉어진다 (사보타주)", () => {
+    for (const rule of ROUTINE_RULES) {
+      rule.groups.forEach((group, index) => {
+        const sabotaged = withoutGroup(HOSTED_ROUTINE_TEMPLATE, group);
+        expect(missingGroups(sabotaged, ROUTINE_RULES), `${rule.name} / ${group.join("|")}`).toContain(
+          `${rule.name}#${index}`
+        );
+      });
+    }
+  });
+
+  it("규칙과 상관없는 문장은 아무 낱말 묶음도 채우지 못한다", () => {
+    const total = ROUTINE_RULES.reduce((sum, rule) => sum + rule.groups.length, 0);
+    expect(missingGroups("the quick brown fox jumps over the lazy dog", ROUTINE_RULES)).toHaveLength(
+      total
+    );
+  });
+
+  it("검사기 자체의 약속: 대소문자·줄바꿈은 상관없고, 지운 묶음만 붉어진다", () => {
+    const rules: readonly ConversationRule[] = [
+      { name: "r", groups: [["Alpha", "beta"], ["gamma delta"]] },
+    ];
+    expect(missingGroups("ALPHA  gamma\n delta", rules)).toEqual([]);
+    expect(missingGroups("alpha only", rules)).toEqual(["r#1"]);
+    expect(withoutGroup("aalphalpha", ["alpha"])).toBe("");
+    expect(missingGroups(withoutGroup("alpha gamma delta", ["Alpha", "beta"]), rules)).toEqual(["r#0"]);
+    expect(missingGroups(withoutGroup("alpha gamma delta", ["gamma delta"]), rules)).toEqual(["r#1"]);
+  });
+
+  it("지시문은 한 줄이고 최종 답의 자리를 약속하지 않는다 (서버가 정한다)", () => {
+    // routine 구획의 `- 지시: …` 한 줄에 들어가는 문장이라 줄바꿈이 있으면 구획이 깨진다.
+    expect(HOSTED_ROUTINE_TEMPLATE).not.toMatch(/\n/);
+    // 「원래 thread에 게시한다」는 서버가 하는 일과 달라서 뺐다(ADR-0200 증보 5 「바뀌는 기존 결정」).
+    // 최종 답은 `oort_run_complete` 가 올리고 자리는 서버가 정한다(규칙 10, #4646 이 한 번 더 바꾼다).
+    expect(HOSTED_ROUTINE_TEMPLATE).not.toContain("원래 thread");
+    expect(HOSTED_ROUTINE_TEMPLATE).not.toContain("에 게시한다");
   });
 });

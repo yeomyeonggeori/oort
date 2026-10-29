@@ -581,6 +581,16 @@ pub struct MessageDto {
     /// a reader needs it, the row does not own it.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub run_ended: bool,
+    /// ADR-0216 D8 (#4660) — how the message was sent, when the server has to say so:
+    /// `"dev"` = with the author's developer token (the clients say 「명령줄에서」).
+    ///
+    /// The server writes it from the **authenticated credential** of the send, never from
+    /// the request (`SendMessageRequest` is closed-world, so a `sentVia` key is refused,
+    /// and `props` cannot reach this column), and an author's edit keeps it. **Omitted
+    /// when the column is NULL**, like every other optional key here: every message sent
+    /// through the app answers exactly the bytes it did before the column existed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sent_via: Option<&'static str>,
 }
 
 // ---------------------------------------------------------------------------
@@ -3016,6 +3026,23 @@ pub struct RosterMemberDto {
     /// ADR-0124 증보 2: running DND expiry (epoch ms), omitted otherwise.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dnd_until_ms: Option<i64>,
+    /// ADR-0160 ② **availability**, human only (#4692): does this person have a
+    /// live connection to the workspace right now? The second input of
+    /// `f(presence_status, online)`; the wire never carries the effective dot.
+    ///
+    /// **Absent is a real answer, and it is not `false`.** The key is omitted for
+    /// an agent (D4: an agent's liveness is its `agent_run`), and for every row of a
+    /// response whose availability could not be established — the instance has no
+    /// `CENT_API_*`, or Centrifugo did not answer in time. A client reads absence
+    /// as 「unknown」 and draws no dot; collapsing it to `false` would paint
+    /// everyone offline whenever the broker hiccups.
+    ///
+    /// Derived from the transport at read time and never stored. It is only ever
+    /// set on a row the roster query already returned, so what the viewer may
+    /// learn about availability is exactly the roster they may already read
+    /// (guard 5: the guest narrowing is the query's, and nothing here widens it).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub online: Option<bool>,
     /// ADR-0176 custom status, human only, omitted when unset/expired/agent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status_emoji: Option<String>,
@@ -4879,6 +4906,8 @@ pub struct HostedLivenessDto {
     /// When the oldest such run was queued.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oldest_waiting_at_ms: Option<i64>,
+    /// ADR-0200 증보 6 (#4621): how often this agent comes to the Agent Port.
+    pub cadence: AgentCadenceDto,
 }
 
 /// openapi `AgentLiveness` — what any member who shares a channel with the agent may
@@ -4890,6 +4919,43 @@ pub struct AgentLivenessDto {
     pub state: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub last_signal_at_ms: Option<i64>,
+    /// ADR-0200 증보 6 (#4621): how often this agent comes to the Agent Port, so a screen
+    /// can say "다음 확인 때 가져가요" instead of "연결이 꺼져 있을 수 있어요".
+    pub cadence: AgentCadenceDto,
+}
+
+/// openapi `AgentCadence` (ADR-0200 증보 6, #4621) — derived by the server from the agent's
+/// admitted Agent Port calls; a client draws it and estimates nothing.
+///
+/// `routine` carries all three of `typicalMinutes`, `expectedCheckAtMs` and `late`; `realtime`
+/// and `unknown` carry none of them. No row, no call time and no count leaves the server.
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentCadenceDto {
+    /// `realtime` | `routine` | `unknown`.
+    pub kind: String,
+    /// The usual gap between the agent's wakes, in whole minutes (at least 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub typical_minutes: Option<i64>,
+    /// When a request that is still waiting stops being explained by the beat: the newest
+    /// wake's start plus two usual gaps. A deadline, not a forecast; it may already be past.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_check_at_ms: Option<i64>,
+    /// No call for more than three usual gaps: the beat is broken.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub late: Option<bool>,
+}
+
+impl From<&momo_agent::Cadence> for AgentCadenceDto {
+    fn from(cadence: &momo_agent::Cadence) -> Self {
+        let routine = cadence.kind == momo_agent::CadenceKind::Routine;
+        AgentCadenceDto {
+            kind: cadence.kind.as_wire().to_string(),
+            typical_minutes: cadence.typical_minutes,
+            expected_check_at_ms: cadence.expected_check_at.map(|at| at.timestamp_millis()),
+            late: routine.then_some(cadence.late),
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -6401,6 +6467,7 @@ mod tests {
             attachments: Vec::new(),
             thread: None,
             run_ended: false,
+            sent_via: None,
         };
         let json = serde_json::to_value(&dto).expect("serialize");
         assert_eq!(json["seq"], 3);
@@ -6422,6 +6489,8 @@ mod tests {
         // "absence is not an ending", and a `runEnded: false` would be the
         // first thing to tempt a reader into treating a silence as an answer.
         assert!(json.get("runEnded").is_none(), "{json}");
+        // ADR-0216 D8 — a message sent through the app carries no marker key at all.
+        assert!(json.get("sentVia").is_none(), "{json}");
     }
 
     /// The two B11 keys, once they exist, are camelCase millisecond integers —
@@ -6450,11 +6519,14 @@ mod tests {
             attachments: Vec::new(),
             thread: None,
             run_ended: false,
+            sent_via: Some("dev"),
         })
         .expect("serialize");
         assert_eq!(json["state"], "edited");
         assert_eq!(json["editedAtMs"], 1_700_000_000_123_i64);
         assert!(json.get("deletedAtMs").is_none());
+        // ADR-0216 D8 — an edit keeps the marker, under its camelCase key.
+        assert_eq!(json["sentVia"], "dev");
     }
 
     #[test]
@@ -7232,4 +7304,282 @@ pub struct CloudBoxReconcileEntryDto {
 #[derive(Debug, Serialize)]
 pub struct CloudBoxReconcileResponse {
     pub boxes: Vec<CloudBoxReconcileEntryDto>,
+}
+
+// ---------------------------------------------------------------------------
+// developer tokens — `/v1/workspaces/{ws}/dev-access…` (ADR-0216 D2·D3·D6-가·D7, #4660)
+//
+// The secret leaves the server once, in `CreateDevCredentialResponse.token`, answered
+// `no-store`. No other struct here has a field for it, for its hash, or for the channel ids
+// a token is limited to — only whether there is a limit. The two structs that hold a secret
+// (the request's current password, the response's token) write their `Debug` by hand and
+// redact it, so a `{:?}` in a log line cannot print one.
+// ---------------------------------------------------------------------------
+
+/// `GET …/dev-access`: the workspace switch (D3) and what it means for the caller.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevAccessPolicyResponse {
+    /// `admins` | `members` | `off`. #4660 ships `admins` as a constant.
+    pub policy: &'static str,
+    /// The caller's role is one the switch admits, so the create button is live.
+    pub can_create: bool,
+    /// Owner or admin: may list every member's credentials and revoke down the ladder.
+    pub can_manage_all: bool,
+}
+
+/// `POST …/dev-access/credentials` (D6-가). Closed: any other key is a 400.
+///
+/// The three optional fields tell "omitted" (the default) from an explicit `null` (a 400):
+/// `expiresInDays: null` must not quietly become 30 days, `channelIds: null` must not
+/// quietly become "every channel", and `scopes: null` is refused for the same reason.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateDevCredentialRequest {
+    /// 1..=80 characters after trimming, no control characters.
+    pub name: String,
+    /// `claude_code` | `codex` | `cli` | `other` — what the maker says it is for, never a
+    /// verified fact.
+    pub tool: String,
+    /// Omitted = the 「읽기만」 preset. `dev:identity` is always added.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub scopes: OptionalPatch<Vec<String>>,
+    /// Omitted = no channel restriction; otherwise 1..=50 channels the caller is in.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub channel_ids: OptionalPatch<Vec<Uuid>>,
+    /// Omitted = 30; otherwise a whole number of days, 1..=90.
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub expires_in_days: OptionalPatch<i64>,
+    /// Re-entered on every issuance (D6-가 2). Never logged, never stored, never echoed.
+    pub current_password: String,
+}
+
+impl std::fmt::Debug for CreateDevCredentialRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CreateDevCredentialRequest")
+            .field("name", &self.name)
+            .field("tool", &self.tool)
+            .field("scopes", &self.scopes)
+            .field("channel_ids", &self.channel_ids)
+            .field("expires_in_days", &self.expires_in_days)
+            .field("current_password", &"<redacted>")
+            .finish()
+    }
+}
+
+/// The 201 of `POST …/dev-access/credentials`. `token` is the only copy of the secret that
+/// ever leaves the server; there is no route that shows it again.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreateDevCredentialResponse {
+    pub id: String,
+    /// Always `card` here (a login session is opened by the browser approval, #4700).
+    pub kind: &'static str,
+    pub name: String,
+    pub tool: &'static str,
+    pub scopes: Vec<String>,
+    /// Echoes the caller's own choice back once; the list never shows it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub channel_ids: Option<Vec<String>>,
+    pub created_at_ms: i64,
+    pub expires_at_ms: i64,
+    /// `momo_dev_v1.<workspace>.<secret>` — shown once.
+    pub token: String,
+}
+
+impl std::fmt::Debug for CreateDevCredentialResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("CreateDevCredentialResponse")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("name", &self.name)
+            .field("tool", &self.tool)
+            .field("scopes", &self.scopes)
+            .field("channel_ids", &self.channel_ids)
+            .field("created_at_ms", &self.created_at_ms)
+            .field("expires_at_ms", &self.expires_at_ms)
+            .field("token", &"<redacted>")
+            .finish()
+    }
+}
+
+/// `GET …/dev-access/credentials[?scope=all]`.
+#[derive(Debug, Default, Deserialize)]
+pub struct DevCredentialListQuery {
+    /// Absent = the caller's own; `all` = the workspace's (owner/admin). Anything else is a 400.
+    #[serde(default)]
+    pub scope: Option<String>,
+}
+
+/// One credential in the list: a card, or a login lineage (`id` is then the lineage id).
+/// No secret, no hash, no channel ids.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevCredentialDto {
+    pub id: String,
+    pub member_id: String,
+    /// `card` | `session`.
+    pub kind: &'static str,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    pub scopes: Vec<String>,
+    pub channel_restricted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    pub created_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at_ms: Option<i64>,
+    pub expires_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage_expires_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DevCredentialListResponse {
+    pub credentials: Vec<DevCredentialDto>,
+}
+
+/// `DELETE …/dev-access/credentials/{id}` and `DELETE …/dev-access/self` (both idempotent).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeDevCredentialResponse {
+    pub id: String,
+    /// `card` | `session`.
+    pub kind: &'static str,
+    /// `false` when it had already ended (a repeated call, or a sweep got there first).
+    pub revoked_now: bool,
+}
+
+/// `GET …/dev-access/self` (L1, `oort whoami`): the calling developer token itself.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevAccessSelfResponse {
+    /// The list's id for this credential: the card, or the login lineage.
+    pub id: String,
+    /// `card` | `session`.
+    pub kind: &'static str,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool: Option<String>,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub scopes: Vec<String>,
+    pub channel_restricted: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_name: Option<String>,
+    pub created_at_ms: i64,
+    /// This token's own expiry (a login session's access half: minutes).
+    pub expires_at_ms: i64,
+    /// The use before this one; absent on a first use.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_used_at_ms: Option<i64>,
+    /// A login session's absolute cap (approval + 90 days).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lineage_expires_at_ms: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// developer login — `/v1/workspaces/{ws}/dev-access/authorization-requests/*`
+// (ADR-0216 D6 나, #4700): the human's half of `oort login`
+//
+// What the person sees and what they send. Nothing here carries a code, a token or a
+// digest except `DevLoginDecisionResponse.redirect_to` (an approval's one-time code,
+// inside the URL the browser is sent to next), and the one struct that carries a secret
+// the person typed (the approval's current password) writes its `Debug` by hand and
+// redacts it.
+// ---------------------------------------------------------------------------
+
+/// `GET …/authorization-requests/preview`: what the person is asked to approve.
+///
+/// Every field is server-derived or was validated by `GET /v1/oauth/authorize`.
+/// `deviceName` is the one value the connecting side chose, shown as such and never
+/// verified; `serverHost` comes from the operator's configured issuer, never from a
+/// request header, so a proxy cannot make the screen name a host the CLI is not
+/// talking to.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevLoginPreviewResponse {
+    pub client_name: &'static str,
+    pub client_id: &'static str,
+    pub issuer: String,
+    pub server_host: String,
+    pub workspace_id: String,
+    pub workspace_name: String,
+    pub member_display_name: String,
+    /// `owner` | `admin` | `member` | `guest` — the caller's own role.
+    pub role: &'static str,
+    /// Always present: a string, or `null` when the connecting side named none.
+    pub device_name: Option<String>,
+    pub requested_scopes: Vec<String>,
+    /// The request names `dev:messages:write`, so the person may choose to let the tool send.
+    pub can_send: bool,
+    pub expires_at_ms: i64,
+    pub access_minutes: i64,
+    pub idle_days: i64,
+    pub max_days: i64,
+}
+
+/// `POST …/authorization-requests/approve`. Closed: any other key is a 400, so a
+/// misspelt `approvedScopes` is loud instead of quietly becoming 「읽기만」.
+///
+/// `approvedScopes` tells "omitted" (the 「읽기만」 preset ∩ the request) from an explicit
+/// `null` (a 400), exactly as the card route does for `scopes`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DevLoginApproveRequest {
+    /// The signed, server-minted request envelope the consent screen was opened with.
+    pub request: String,
+    /// Re-entered on every approval (D6-가 2). Never logged, stored or echoed.
+    pub current_password: String,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub approved_scopes: OptionalPatch<Vec<String>>,
+}
+
+impl std::fmt::Debug for DevLoginApproveRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DevLoginApproveRequest")
+            .field("request", &"<envelope>")
+            .field("current_password", &"<redacted>")
+            .field("approved_scopes", &self.approved_scopes)
+            .finish()
+    }
+}
+
+/// `POST …/authorization-requests/deny`. Closed.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DevLoginDenyRequest {
+    pub request: String,
+}
+
+impl std::fmt::Debug for DevLoginDenyRequest {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("DevLoginDenyRequest")
+            .field("request", &"<envelope>")
+            .finish()
+    }
+}
+
+/// The only thing a decision hands back is where the browser goes next:
+/// `…?code=…&state=…&iss=…` (approve) or `…?error=access_denied&state=…&iss=…`
+/// (deny), on the fixed loopback redirect the request was signed with.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DevLoginDecisionResponse {
+    pub redirect_to: String,
+}
+
+impl std::fmt::Debug for DevLoginDecisionResponse {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // The URL of an approval holds the one-time code.
+        formatter
+            .debug_struct("DevLoginDecisionResponse")
+            .field("redirect_to", &"<redacted>")
+            .finish()
+    }
 }

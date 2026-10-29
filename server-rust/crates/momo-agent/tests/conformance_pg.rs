@@ -46,6 +46,7 @@
 //! | `b26_2_one_trigger_produces_one_live_run` | drop `agent_run_idem_uniq`, or replace the `ON CONFLICT … DO NOTHING` with a read-then-write |
 //! | `b26_3_an_unauthorized_gateway_callback_is_refused` | widen `gateway_lease_authorized`, or drop the run/agent binding from `lock_gateway_lease_in_tx` |
 //! | `b26_4_the_shared_schema_still_carries_this_batchs_columns` | any migration edit that moves `usage_ledger.effort`, the `agent_run` idempotency key, or the 008 lease columns |
+//! | `t4622_the_snapshot_names_the_live_thread_the_trigger_sits_in` | stop reading the trigger's root (every answer leaves its thread again), or drop one of the root's three conditions — still live by `deleted_at`, still live by `state`, itself top-level, in this run's channel — so a deleted, nested or foreign root becomes the place an answer is written |
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -59,6 +60,7 @@ use momo_agent::{
 };
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::{with_tenant_tx, PgPool};
+use momo_messaging::{send_message_in_tx, NewMessage};
 use momo_outbox::{
     claim_gateway_jobs_in_tx, emit_outbox, gateway_lease_authorized, lock_gateway_lease_in_tx,
     GatewayLeaseBinding, OutboxKind,
@@ -996,5 +998,199 @@ async fn b5a_the_work_surface_reads_the_profiles_tools() {
         serde_json::json!("operator_thing"),
         "and the operator's own provider JSON rides along: {:?}",
         armed.tool_schema
+    );
+}
+
+// ---------------------------------------------------------------------------
+// #4622 — the thread a run's final answer belongs in
+// ---------------------------------------------------------------------------
+
+/// A second channel in the tenant (the human is in it), for a root that is in the wrong room.
+async fn seed_other_channel(su: &PgPool, tenant: &Tenant) -> Uuid {
+    let channel_id = Uuid::new_v4();
+    sqlx::query("INSERT INTO channel (id, workspace_id, kind, name) VALUES ($1, $2, 'public', $3)")
+        .bind(channel_id)
+        .bind(tenant.workspace_id)
+        .bind(format!("t4622-{}", &channel_id.simple().to_string()[..8]))
+        .execute(su)
+        .await
+        .expect("seed the other channel");
+    sqlx::query("INSERT INTO channel_seq (channel_id, workspace_id, last_seq) VALUES ($1, $2, 0)")
+        .bind(channel_id)
+        .bind(tenant.workspace_id)
+        .execute(su)
+        .await
+        .expect("seed the other channel's seq");
+    sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id) VALUES ($1, $2, $3)")
+        .bind(tenant.workspace_id)
+        .bind(channel_id)
+        .bind(tenant.human_id)
+        .execute(su)
+        .await
+        .expect("seed the other channel's membership");
+    channel_id
+}
+
+/// The human says `body` in `channel` — inside the thread of `root` when given — and the id comes back.
+async fn say(app: &PgPool, tenant: &Tenant, channel: Uuid, root: Option<Uuid>, body: &str) -> Uuid {
+    let (workspace_id, human_id, body) = (tenant.workspace_id, tenant.human_id, body.to_string());
+    with_tenant_tx(app, workspace_id, move |conn| {
+        Box::pin(async move {
+            let said = NewMessage {
+                root_id: root,
+                ..NewMessage::text(channel, human_id, body)
+            };
+            Ok(send_message_in_tx(conn, workspace_id, said)
+                .await?
+                .message
+                .id)
+        })
+    })
+    .await
+    .expect("the human says something")
+}
+
+/// A run raised by `trigger` (a work run with no trigger when `None`), read back the way every writer of a
+/// final answer reads it: `(trigger_message_id, trigger_root_id)` off [`lock_gateway_run_in_tx`], as the
+/// `momo_app` runtime role under RLS.
+async fn trigger_and_root_of_a_run_raised_by(
+    app: &PgPool,
+    tenant: &Tenant,
+    trigger: Option<Uuid>,
+) -> (Option<Uuid>, Option<Uuid>) {
+    let (workspace_id, channel_id, agent_id) =
+        (tenant.workspace_id, tenant.channel_id, tenant.agent_id);
+    let run_trigger = match trigger {
+        Some(message_id) => RunTrigger::Mention {
+            message_id,
+            agent_member_id: agent_id,
+        },
+        None => work_trigger(tenant, Uuid::new_v4()),
+    };
+    with_tenant_tx(app, workspace_id, move |conn| {
+        Box::pin(async move {
+            let created = create_agent_run_in_tx(
+                conn,
+                workspace_id,
+                NewAgentRun {
+                    channel_id,
+                    trigger: run_trigger,
+                    parent_run_id: None,
+                    max_steps: 50,
+                    depth: 0,
+                    input: work_input("t4622"),
+                },
+            )
+            .await?;
+            let run = lock_gateway_run_in_tx(conn, workspace_id, created.id)
+                .await?
+                .expect("the run is callable");
+            Ok((run.trigger_message_id, run.trigger_root_id))
+        })
+    })
+    .await
+    .expect("raise a run and lock it")
+}
+
+/// **The one place a run's final answer learns its thread.** `lock_gateway_run_in_tx` reads the trigger's root
+/// in the statement that locks the run, so the gateway completion, the managed worker (commit and streamed
+/// opening write) and the team AI all get the same answer — and a root they must not write under comes back
+/// as `None`, which is the main flow they always used.
+///
+/// Each defensive condition has its own case, because the four behaviour suites only ever meet a *live*
+/// root and would stay green if one of them were dropped: a root deleted by `deleted_at` alone, one deleted
+/// by `state` alone, one that is itself a reply (a thread has one level), and one that sits in another
+/// channel. The seeding of the last three bypasses the product's validation on purpose (an UPDATE as the
+/// superuser) — they are exactly the rows a bug elsewhere could leave behind.
+#[tokio::test]
+#[ignore = "requires a live pgvector/pg18 database (docker gate)"]
+async fn t4622_the_snapshot_names_the_live_thread_the_trigger_sits_in() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let tenant = seed_tenant(&su).await;
+    let other_channel = seed_other_channel(&su, &tenant).await;
+    let here = tenant.channel_id;
+
+    let root = say(&app, &tenant, here, None, "다음 주 배포 일정").await;
+
+    // A request at the top level: no thread.
+    let top = say(&app, &tenant, here, None, "@hermes 정리해줘").await;
+    assert_eq!(
+        trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(top)).await,
+        (Some(top), None),
+        "a top-level trigger belongs to no thread"
+    );
+
+    // A request inside a live thread: that thread's root.
+    let asked = say(&app, &tenant, here, Some(root), "@hermes 이어서 정리해줘").await;
+    assert_eq!(
+        trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(asked)).await,
+        (Some(asked), Some(root)),
+        "an in-thread trigger names the thread's root"
+    );
+
+    // A run nobody said anything to raise (a work run): nothing to belong to.
+    assert_eq!(
+        trigger_and_root_of_a_run_raised_by(&app, &tenant, None).await,
+        (None, None),
+        "a run with no trigger has no thread"
+    );
+
+    // A root that was deleted — spelled either way the schema allows — is no place to answer.
+    for (spelling, set) in [
+        ("deleted_at only", "deleted_at = now()"),
+        ("state only", "state = 'deleted'"),
+    ] {
+        let gone = say(&app, &tenant, here, None, "곧 지울 글").await;
+        let under_gone = say(&app, &tenant, here, Some(gone), "@hermes 이어서").await;
+        sqlx::query(&format!("UPDATE message SET {set} WHERE id = $1"))
+            .bind(gone)
+            .execute(&su)
+            .await
+            .expect("delete the root");
+        assert_eq!(
+            trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(under_gone)).await,
+            (Some(under_gone), None),
+            "a root deleted ({spelling}) is not a thread an answer may join"
+        );
+    }
+
+    // A root that is itself a reply: a thread has one level, so it is not a root.
+    let nested = say(&app, &tenant, here, Some(root), "스레드 안의 답글").await;
+    let under_nested = say(&app, &tenant, here, None, "@hermes 중첩").await;
+    sqlx::query("UPDATE message SET root_id = $2 WHERE id = $1")
+        .bind(under_nested)
+        .bind(nested)
+        .execute(&su)
+        .await
+        .expect("point a message at a reply as if it were a root");
+    assert_eq!(
+        trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(under_nested)).await,
+        (Some(under_nested), None),
+        "a reply is not a thread root"
+    );
+
+    // A root in another channel: the answer would be written in this run's channel under a foreign root.
+    let foreign_root = say(&app, &tenant, other_channel, None, "다른 채널의 글").await;
+    let stray = say(&app, &tenant, here, None, "@hermes 엉뚱한 root").await;
+    sqlx::query("UPDATE message SET root_id = $2 WHERE id = $1")
+        .bind(stray)
+        .bind(foreign_root)
+        .execute(&su)
+        .await
+        .expect("point a message at another channel's root");
+    assert_eq!(
+        trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(stray)).await,
+        (Some(stray), None),
+        "a root in another channel is not this run's thread"
+    );
+
+    // The live case still answers after all of that: nothing above turned the read into a constant `None`.
+    let again = say(&app, &tenant, here, Some(root), "@hermes 한 번 더").await;
+    assert_eq!(
+        trigger_and_root_of_a_run_raised_by(&app, &tenant, Some(again)).await,
+        (Some(again), Some(root)),
+        "the live thread is still named"
     );
 }

@@ -34,12 +34,23 @@
 //! 3. **The channel's own rule.** `ch:`/`dm:`/`typing:` = live channel
 //!    membership. `agent:` = observer and agent are BOTH live members of that
 //!    exact channel. `agentwork:` = only that agent, and only while it is
-//!    active.
+//!    active. `online:` (#4692) = an **active human on that workspace's roster**.
 //!
 //! `typing:` (ADR-0149) joins the first group rather than getting a rule of its
 //! own, and that is the point: 「작성 중」 carries no text, but *who is typing in
 //! which channel* is exactly as sensitive as the channel's membership list, so
 //! it is authorized by the same predicate and cannot drift away from it.
+//!
+//! `online:ws<WS>` (ADR-0160 ②, #4692) is the one rail with **no conversation in
+//! its name**: it is the workspace roll-call. A client subscribes to it for the
+//! sole purpose of being counted — Centrifugo's presence table then records
+//! 「this person is connected」, which the roster reads (never the client; the
+//! namespace grants no presence, history, publish or join/leave to anyone). The
+//! rule is therefore about *who may be counted*, not about who may read: only
+//! someone the roster itself could list (an active human of that workspace) can
+//! appear in it, so availability can never be reported for a person the roster
+//! would not show. Another tenant's credential dies at the credential gate, like
+//! every other rail.
 //!
 //! Everything unrecognised fails closed with a deny, never an allow.
 
@@ -51,7 +62,9 @@ use momo_auth::{
     sign_centrifugo_connection, Principal, PrincipalKind, SCOPE_REALTIME_SUBSCRIBE,
 };
 use momo_db::{with_tenant_tx, DbError};
-use momo_messaging::{can_observe_agent, get_member, is_active_agent, is_channel_member};
+use momo_messaging::{
+    can_observe_agent, get_member, is_active_agent, is_active_human_member, is_channel_member,
+};
 use uuid::Uuid;
 
 use crate::config::constant_time_eq;
@@ -195,6 +208,9 @@ pub enum ParsedChannel {
     },
     /// `agentwork:ws<WS>.<AGENT>` — the agent's PRIVATE job stream.
     AgentWork { workspace: Uuid, agent_member: Uuid },
+    /// `online:ws<WS>` — the workspace roll-call (ADR-0160 ②, #4692). One segment:
+    /// it names the workspace, not a conversation inside it. See the module docs.
+    WorkspaceOnline { workspace: Uuid },
 }
 
 impl ParsedChannel {
@@ -202,7 +218,8 @@ impl ParsedChannel {
         match self {
             ParsedChannel::Channel { workspace, .. }
             | ParsedChannel::Agent { workspace, .. }
-            | ParsedChannel::AgentWork { workspace, .. } => workspace,
+            | ParsedChannel::AgentWork { workspace, .. }
+            | ParsedChannel::WorkspaceOnline { workspace } => workspace,
         }
     }
 
@@ -213,6 +230,7 @@ impl ParsedChannel {
             ParsedChannel::Channel { .. } => "not a member of this channel",
             ParsedChannel::Agent { .. } => "not allowed to observe this agent",
             ParsedChannel::AgentWork { .. } => "not allowed to consume this agent work stream",
+            ParsedChannel::WorkspaceOnline { .. } => "not an active member of this workspace",
         }
     }
 }
@@ -229,6 +247,14 @@ pub fn parse_channel(name: &str) -> Option<ParsedChannel> {
     let (namespace, body) = name.split_once(':')?;
     let after_ws = body.strip_prefix("ws")?;
     let segments: Vec<&str> = after_ws.split('.').collect();
+
+    // `online:ws<WS>` — the workspace roll-call is the only rail with a single
+    // segment. `online:ws<WS>.<anything>` is deliberately not it: the `>= 2` arm
+    // below has no `online` branch, so a conversation-shaped name fails closed.
+    if namespace == momo_ephemeral::ONLINE_NAMESPACE && segments.len() == 1 {
+        let workspace = Uuid::parse_str(segments[0]).ok()?;
+        return Some(ParsedChannel::WorkspaceOnline { workspace });
+    }
 
     if segments.len() >= 2 {
         if let Ok(workspace) = Uuid::parse_str(segments[0]) {
@@ -361,6 +387,13 @@ pub async fn subscribe(
                     // The private job stream: the subscriber must BE the agent.
                     user_member_id == agent_member
                         && is_active_agent(conn, agent_member, workspace_id).await?
+                }
+                // The roll-call (#4692): you may be counted iff the roster could
+                // list you — an active human of THIS workspace. An agent, an
+                // invited/suspended/deleted member and every other tenant's
+                // member are refused, so none of them can ever be reported.
+                ParsedChannel::WorkspaceOnline { .. } => {
+                    is_active_human_member(conn, workspace_id, user_member_id).await?
                 }
             };
             Ok(Some(allowed))
@@ -540,6 +573,54 @@ mod tests {
         assert_eq!(parse_channel(&format!("presence:ws.{channel}")), None);
     }
 
+    /// #4692: the roll-call is the one rail whose name is the **workspace and
+    /// nothing below it**. It must parse to its own variant (its rule is "may be
+    /// counted", not "is in this channel"), and every conversation-shaped spelling
+    /// of it must fail closed rather than be read as a channel rail.
+    #[test]
+    fn the_online_rollcall_is_the_one_single_segment_rail() {
+        let workspace = Uuid::new_v4();
+        let channel = Uuid::new_v4();
+        let agent = Uuid::new_v4();
+        let name = momo_ephemeral::online_channel(workspace);
+        assert_eq!(
+            parse_channel(&name),
+            Some(ParsedChannel::WorkspaceOnline { workspace }),
+            "{name}"
+        );
+        assert_ne!(
+            parse_channel(&name),
+            parse_channel(&cent_channel(workspace, channel)),
+            "the roll-call has its own rule, never the channel rule"
+        );
+        assert_eq!(
+            parse_channel(&name).expect("parsed").workspace_id(),
+            workspace
+        );
+        for conversation_shaped in [
+            format!("online:ws{workspace}.{channel}"),
+            format!("online:ws{workspace}.{channel}.{agent}"),
+            format!("online:ws.{channel}"),
+            "online:ws".to_string(),
+            "online:wsnot-a-uuid".to_string(),
+            format!("online:{workspace}"),
+        ] {
+            assert_eq!(
+                parse_channel(&conversation_shaped),
+                None,
+                "{conversation_shaped} must not be a rail"
+            );
+        }
+        // A single segment is not a back door into the other namespaces.
+        for other in ["ch", "dm", "typing", "presence", "agent", "agentwork"] {
+            assert_eq!(
+                parse_channel(&format!("{other}:ws{workspace}")),
+                None,
+                "{other}:ws<WS> has no channel and must stay unparseable"
+            );
+        }
+    }
+
     #[test]
     fn agentwork_is_a_separate_namespace_from_agent() {
         let workspace = Uuid::new_v4();
@@ -633,6 +714,10 @@ mod tests {
             }
             .deny_reason(),
             "not allowed to consume this agent work stream"
+        );
+        assert_eq!(
+            ParsedChannel::WorkspaceOnline { workspace }.deny_reason(),
+            "not an active member of this workspace"
         );
     }
 }

@@ -5,6 +5,7 @@
 - Deciders: 성재
 - 역방향: 2026-10-16 [ADR-0113](0113-connector-credential-plugin-boundary.md) 증보 2 E4가 `action_type='connector_tool'`(실행 없는 결정 전달 — Hermes 쓰기 2단계, ADR-0203 증보 K6, Proposed)을 더한다. D2의 같은 tx 실행은 workspace_action에 그대로다. 본문 결정은 바꾸지 않았다.
 - 역방향: 2026-10-25 `host.session.open`·`host.install` 행동 어휘의 방향은 [ADR-0210](0210-host-ops-team-box-shell-curated-install.md)(#4347) D3·D5가 정한다. `host.session.open`은 D2의 결정 방식을 확장한다: 승인 결정 입력에 서명 필드가 있고 행동별 승인 대기 TTL(10분)이 레지스트리의 새 속성이다. 레지스트리 등록과 증보는 그 문서의 HO-15가 한다. 이 ADR의 기존 본문 결정은 바꾸지 않고 확장만 한다.
+- 증보(Accepted, 2026-10-27 owner 결재): 2026-10-27 **v5 「먼저 제안과 메시지 고정」**(#4659) — 사람이 부르지 않은 에이전트의 제안(`oort_action_initiate`)과 `message.pin`·`message.unpin`을 정한다. §2의 run-less 승인 기각은 유지하되 그 이유 (c)의 전제를 푼다. owner가 2026-10-27 질문 일곱 개를 모두 권장안으로 결재했다(「권장대로 진행하면서」). 파일 끝 「증보 2026-10-27」 절.
 - 발제: 성재 2026-09-22 「에이전트한테 웹훅 발급해줘 같은 내부 기능을 요청해도 수행하고, OpenUI 같은 철학 기반으로 gen UI로 뭔가 보여주면 좋겠다(테마 바꿔줘·누구 초대해줘·훅 발급하고 연동해줘). 유즈케이스 기반으로 AI 활용도를 극대화」
 - Consumes: ADR-0101(에이전트=1급 멤버) · ADR-0114(승인 게이트) · ADR-0162(Agent Port·hosted durable inbox) · ADR-0171(도어벨) · ADR-0174(외양=이 기기 localStorage) · ADR-0182(일시 확인 3형, 토스트 금지) · ADR-0004 증보 4(webhook 마스터키 분리 — `webhook.create` 실행기의 선행) · ADR-0159(디자인 시스템 네 상태)
 - 시장 근거(2026-09-22 조사, `docs/planning/2026-09-22-plan-revision.md` §2): Meta Muse의 「백그라운드로 일하다 승인이 필요할 때 돌아온다 + 전체 감사 기록」, Slack Code의 Plan/Task **Block Kit 허용목록 카드**, OpenUI 「State of Generative UI」의 **선언형 카탈로그 기본·오픈엔드 HTML은 샌드박스 슬롯 한정** 권고
@@ -32,7 +33,7 @@ Agent Port 도구는 7개다(`server-rust/crates/momo-mcp/src/tools.rs`): `oort_
 
 - **에이전트에게 admin 스코프 부여(직접 실행)**: 에이전트 토큰 유출 = 워크스페이스 장악. Muse조차 「민감 행동 전 확인」을 문법으로 둔다. 기각.
 - **자유 생성 UI(에이전트가 HTML/JSX를 내보냄)**: raw color·토큰 게이트·네 상태 규칙을 전부 우회한다. OpenUI 보고서도 프로덕션은 선언형이라고 말한다. 기각. 샌드박스 슬롯도 v1 밖.
-- **run과 분리된 승인 레코드(run-less approval)**: `approval.run_id NOT NULL`을 풀어야 하고 만료 스윕·레일 표시가 갈라진다. hosted 제안은 항상 claim한 job의 run 안에서 일어나므로 필요 없다. 기각.
+- **run과 분리된 승인 레코드(run-less approval)**: `approval.run_id NOT NULL`을 풀어야 하고 만료 스윕·레일 표시가 갈라진다. hosted 제안은 항상 claim한 job의 run 안에서 일어나므로 필요 없다. 기각. **→ 증보 2026-10-27(v5, Accepted)**: 기각은 유지한다. 단 이유 마지막 문장의 전제(「항상 job의 run 안」)를 푼다. 사람이 부르지 않은 제안은 job이 없는 run(`awaiting_approval`로 태어남)에 묶는다(U-a).
 - **클라이언트가 서버 없이 초대를 실행(에이전트 제안 → 브라우저가 REST 호출)**: 감사 행에 「에이전트가 제안했다」가 남지 않고, 폰·다른 기기에서 결정할 수 없다. 기각. 단, **서버 상태를 바꾸지 않는 클라이언트 명령**(테마·밀도)은 이 모양이 맞다(D3 risk none).
 
 ## 3. 결정
@@ -45,7 +46,7 @@ Agent Port 도구는 7개다(`server-rust/crates/momo-mcp/src/tools.rs`): `oort_
 
 ### D2. 제안 → 승인 → 실행 — 기존 폐곡선 재사용, run은 park
 - 새 스코프 **`workspace:propose`**(momo-mcp `SCOPE_WORKSPACE_PROPOSE`). 기본 페어링은 요청하지 않는다. 에이전트가 요청하면 동의 화면(`packages/momo-core/src/features/hostedAgents/model.ts` 스코프 목록·라벨)에 「워크스페이스 변경을 **제안**할 수 있음(실행은 사람 승인)」으로 표시된다. 이 스코프는 어떤 REST도 열지 않는다.
-- 새 Agent Port 도구 **`oort_action_propose { handle, actionId, args, rationale }`** (`handle` = `oort_jobs_claim`의 lease handle, `bound_handle` 검사 동일). 서버는 같은 tx에서 ①`args`를 레지스트리 스키마로 검증 ②`approval` 행 생성(`action_type='workspace_action'`, `payload = {action:{id,args,rationale}, proposed_by}`, `run_id` = handle의 run, `channel_id` = run 채널, `expires_at` = 기존 TTL) ③에이전트 명의 `approval_request` 메시지(부록 A props) ④run → `awaiting_approval`. 응답 `{approvalId, status:"pending", expiresAtMs, cardMessageId}`.
+- 새 Agent Port 도구 **`oort_action_propose { handle, actionId, args, rationale }`** (`handle` = `oort_jobs_claim`의 lease handle, `bound_handle` 검사 동일). 서버는 같은 tx에서 ①`args`를 레지스트리 스키마로 검증 ②`approval` 행 생성(`action_type='workspace_action'`, `payload = {action:{id,args,rationale}, proposed_by}`, `run_id` = handle의 run, `channel_id` = run 채널, `expires_at` = 기존 TTL) ③에이전트 명의 `approval_request` 메시지(부록 A props) ④run → `awaiting_approval`. 응답 `{approvalId, status:"pending", expiresAtMs, cardMessageId}`. **→ 증보 2026-10-27(v5, Accepted)**: 이 도구의 handle 필수는 그대로다. 사람이 부르지 않은 제안은 handle이 없는 새 도구 `oort_action_initiate`로 한다(U-a).
 - **run 가드**: `awaiting_approval`인 run에 `oort_run_complete`·`oort_job_release`가 오면 도구 실패 `approval_pending`(409 계열). 에이전트는 「승인 기다리는 중」이라고 말하고 turn을 끝내면 된다. 사람의 run cancel(`agent_runs.rs`)은 기존대로 pending 승인을 함께 취소한다.
 - **결정**은 기존 라우트 2개 그대로다(`POST …/approvals/{id}/decision`, `POST /v1/agent-runs/{run}/approval-decisions`). `action_type='workspace_action'` 분기만 신설한다:
   - 승인: 결정자가 해당 행동의 `required_role`을 만족하는지 검사(초대 = 기존 `require_admin`과 같은 판정). 아니면 403 `role_required` — 카드는 「관리자가 승인해야 합니다」로 남는다(승인은 소모되지 않음). 만족하면 **같은 tx에서 실행기**(초대 = `create_invite`)를 결정자 명의로 호출 → 감사: 기존 `invite.created`에 `via_agent`(제안자 member id)·`approval_id` 추가 + `action.approved` 1행 → 승인 카드 props 패치(decided) → 에이전트 명의 `tool_result` 메시지(부록 B `momo.action_result.v1`) → run `succeeded`(output `{actionId, ref}`), resume job **없음**.
@@ -774,3 +775,328 @@ Accepted 본문의 수치·모양 중 구현에서 측정으로 바뀐 것만 �
 - M2(Medium) 거절 시험의 대조군이 새 시간당 한도에 걸릴 수 있다 → **수리**(시험이 대조군 앞에서 거절 기록을 2시간 전으로 민다). 한도 시험은 경계(10건이면 거절·9건이면 통과)와 다른 사람의 기록·한 시간 지난 기록을 센다.
 - M3(Medium) 메모리 실측에 최악 형식이 없다 → **측정해 V4-4에 추가**(16비트 RGBA PNG 174 MB, 프로그레시브 JPEG 145 MB).
 - L1~L5: 한도 검사의 락 없음(동시에 오면 10을 조금 넘길 수 있다 — 허용), 사람 한도는 에이전트별이 아니라 사람별이라 한 에이전트가 다른 에이전트의 몫을 쓸 수 있다(의도), 감사 홍수는 인증된 에이전트에 한한다, 사진 주인이 아닌 방 멤버도 카드를 **거절**은 할 수 있다(모든 승인 카드의 기존 규칙, 얼굴은 바뀌지 않는다), 148은 131의 「주인=에이전트」 DB 가드를 코드 가드(resolver 주체·`prepared.for_member` 일치·`kind` 분기)로 옮겼다(시험 있음), V4-2 표 갱신. 모두 수용 또는 문서화.
+
+## 증보 2026-10-27 — 먼저 제안과 메시지 고정: `oort_action_initiate`·`message.pin`·`message.unpin` (v5, #4659)
+
+- Status: **Accepted** (2026-10-27, owner 결재 — planner가 U-m 질문 일곱 개를 권장안과 함께 물어 「권장대로 진행하면서」. 일곱 개 모두 권장안이다). 독립 보안 검수 기록(U-l)은 붙었다(r1: Blocker 0 · High 3 수정, 확인 1회에서 H1·H2 닫힘, H3 잔여는 검수자 수정안대로 반영했고 재확인은 하지 않았다). 결재로 ADR-0100 머지 조건이 충족됐다. 다만 N3(먼저 제안 서버)는 U-g 선행 조건(개발자·CLI 토큰의 결정 차단, #4660)이 충족된 뒤에만 머지한다.
+- 발제: owner 2026-10-27 요청의 요지. planner(터미널의 Claude Code)가 oort 에이전트로 연결돼 있을 때(#4616), 누가 시키지 않아도 「비공개 채널 `qa`를 만들까요?」 승인 카드를 올린다. owner는 승인 탭만 누른다. 승인되면 에이전트가 안내문을 올리고 **고정**한다(#4290). 지금은 둘 다 막혀 있다. 제안은 job의 handle이 있어야 하고(§1.2·D2), 메시지 고정은 에이전트가 할 수 있는 행동에 없다.
+- 기안: Sonnet 5.5 엔진 워커 (#4659). 근거는 이슈 #4659·#4616·#4290·#4617 본문, planner 리서치(2026-10-27, 비공개)의 「oort 현재 상태」 8·9번 요지, 그리고 아래 U-0의 코드 실측이다.
+- Consumes: 이 ADR의 §2·D1~D4·V1·V3·V3-6·V4-1·V4-10 · ADR-0162 D3·D4·증보 2(B2·B6-1)·증보 5(G2) · ADR-0199 · ADR-0200 D1·증보 4 · ADR-0214 · ADR-0100
+- 표기: [V] 코드·문서 직접 확인(track/engine `16ad74731`, 읽기만 했고 실행하지 않았다 — `runtime-unverified`) · [추정] 이 증보가 정한 값 · [확인 필요] 구현 전 실측
+- 이 증보가 **의도적으로 바꾸는 것** 다섯:
+  1. §2의 「run과 분리된 승인 레코드」 기각은 그대로다(안 A1). 기각 이유 (c) 「hosted 제안은 항상 claim한 job의 run 안에서 일어난다」의 **전제만** 푼다. 승인은 항상 run 안에서 일어나지만, 그 run이 job에서만 태어나지는 않는다(U-a).
+  2. `oort_action_propose`는 handle 필수 그대로다. 사람이 부르지 않은 제안은 handle 없는 새 도구 `oort_action_initiate`로 한다. ADR-0162 D3의 닫힌 tool→scope 표에 한 줄을 더하고, hosted 승인 가능 scope 집합에 항목 하나를 더한다(U-b).
+  3. V3-6 「제안 시간당 상한 없음」은 사람이 시킨 제안에 그대로 유효하다. 아무도 부르지 않은 제안에는 상한을 둔다(U-d).
+  4. 모든 `workspace_action`의 결과(승인·거절·만료)가 hosted 연결이 있는 제안자의 인박스에 `agent_run` 참조로 간다. 사람이 시킨 제안에도 적용된다(U-f).
+  5. 에이전트가 메시지를 고정·해제하는 행동 둘을 레지스트리에 더한다(U-e). 에이전트 bearer가 고정 REST를 직접 부르는 길은 계속 닫혀 있다.
+- **바꾸지 않는 것**: D2(제안 → 승인 → 실행, 실행은 승인자의 권한) · D3 위험 등급(모든 변경은 `approval`) · D4(1회 시크릿) · 한 run 한 제안 · V1-a~e · `instructions` 불가침 · 무승인 위임 미룸(V7) · hosted 연결의 confirm은 사람의 행동 · `approval.run_id NOT NULL` · `schema_v0.sql`.
+
+### U-0. 코드로 확인한 사실 (2026-10-27)
+
+1. **제안 도구는 handle이 필수다.** `oort_action_propose`의 입력 `required`는 `["handle","actionId","args"]`다(`server-rust/crates/momo-mcp/src/tools.rs:808`). 서버는 handle을 `bound_handle`(`bins/momo-server/src/routes/agent_port_tools.rs:1484-1503`: 워크스페이스·에이전트·연결·승인 채널)과 job lease 잠금(`:1976-1991`)으로 증명한다. handle은 `oort_jobs_claim`·`oort_job_start`가 내준 job의 것뿐이다. 그래서 사람이 부르지 않은 run에서는 제안할 수 없다.
+2. **막힌 것은 제안 하나뿐이다.** `oort_message_post`는 승인 채널과 멤버십 두 조건만 보고 handle 없이 쓰며 `{messageId, seq}`를 돌려준다(`agent_port_tools.rs:948-`). `oort_conversation_read`는 메시지 `id`를 낸다(`:841`).
+3. **승인은 run에 묶인다.** `approval.run_id`는 `NOT NULL`이다(`server/Migrations/001_init.sql:310`). 결정자는 `approval.channel_id`의 활성 멤버여야 한다(`routes/approvals.rs:766`). 만료는 notifier 스윕이 run을 `timed_out`으로 끝낸다(`bins/momo-notifier/src/approval_sweep.rs`, 결정 쪽은 `approvals.rs:3656` `expire_run`).
+4. **서버가 run을 직접 낳아 승인에 묶는 선례가 있다.** 인플레이스 채널 승인(ADR-0162 증보 5 G2)은 run을 `awaiting_approval`로 태어나게 하고(`crates/momo-agent/src/run.rs:417` `create_held_agent_run_in_tx`) job을 쓰지 않는다. 동시 실행 상한은 이 run을 세지 않는다(`run.rs:935-957`, `input.hold='channel_grant'`).
+5. **동시 실행 상한을 읽는 곳**은 work 요청 생성(`routes/agent_runs.rs:400-412`, `live > max`이면 409)과 관리형 worker다. 승인 대기 run 하나가 그 에이전트의 work 요청을 막는 문제는 notifier 스윕 머리말이 이미 적었다(`approval_sweep.rs` 앞머리). hosted 멘션은 상한으로 막히지 않는다.
+6. **승인 결과는 제안 에이전트의 인박스에 가지 않는다.** 결과 줄은 raw 경로 `send_message_in_tx`로 쓰여 인박스에 투영되지 않는다. 투영하는 곳은 제품 send spine·`oort_message_post`·게이트웨이 완료뿐이다(`crates/momo-messaging/src/message.rs:921-934` 주석). 투영돼도 작성자는 건너뛴다(`hosted_inbox.rs:423`). 결과 줄의 작성자는 제안한 에이전트다(`approvals.rs:2099-2128`). 사람이 run을 취소할 때만 `agent_run` 참조가 간다(`agent_runs.rs:1364`). 즉 지금 모든 `workspace_action`의 결과는 에이전트가 깨어나 대화를 다시 읽어야만 보이고, 깨울 신호가 없다.
+7. **사람의 고정 경로가 있다.** `PUT/DELETE /v1/workspaces/{ws}/messages/{id}/pin`(`bins/momo-server/src/lib.rs:729`) → `momo_messaging::set_pin_in_tx`(`crates/momo-messaging/src/interaction.rs:1555`). 채널 활성 멤버면 누구나 하고, 한 채널 100개(`CHANNEL_PIN_LIMIT` `:84`)이며, 삭제된 메시지는 고정할 수 없다. 방송 `message.pinned`·`message.unpinned`와 감사 `message.pinned`·`message.unpinned`가 같은 트랜잭션에 나간다(`routes/messages.rs:926` `record_interaction_audit`). 에이전트 bearer 표에 이 경로는 없다(`crates/momo-auth/src/agent_scope.rs:373-390` 시험). 에이전트가 고정하는 행동은 `ACTIONS`에도 없다(`crates/momo-agent/src/actions.rs:1054-1202`).
+8. **소유자 1:1 DM은 연결이 자동으로 덮는다.** 단 에이전트에게 소유자가 있고 그 연결을 confirm한 사람이 소유자일 때만이다(ADR-0162 증보 2 B2·B6-1). DM 열기는 멱등이다(`crates/momo-messaging/src/dm.rs:154` `open_direct_message_in_tx`, 쌍 유일 인덱스). 사람이 닫은 DM도 워터마크보다 큰 seq의 메시지가 오면 다시 보인다(`crates/momo-messaging/src/dm_closure.rs` 머리말).
+9. **사람을 run에서 도출하는 함수는 트리거 메시지가 있는 run만 사람을 낸다**(`crates/momo-messaging/src/agent_avatar.rs:772` `requester_of_run_in_tx`, 메시지 JOIN). 트리거 메시지가 없는 run에서는 `member.avatar.set`과 `oort_card_suggest`가 거절된다.
+10. **대기 3개 상한**은 `server_in_place` 출처만 빼고 센다(`crates/momo-agent/src/approval.rs:225-249`). 인플레이스 문서는 「다른 모든 workspace_action은 에이전트가 제안했고 origin이 없다」고 적는다(`in_place_grant.rs:37-39`). 이 문장은 이 증보로 바뀐다.
+11. **제안 속도 제한은 일부러 없다.** V3-6 결재 4. 이유는 「매번 사람 승인」이었다.
+12. **hosted scope 어휘는 `text[]` 열 외에 CHECK 3개가 열거한다**(069·074·074). `workspace:propose`를 더한 087이 셋을 다시 썼다. 동의 화면 문구는 코어 `hostedAgents/approval.ts`·`model.ts`에 있다.
+13. **워크스페이스 설정 bag에는 불리언 키 선례가 있다**(`team_ai_fast_path`, `crates/momo-settings/src/workspace_settings.rs:126`). 에이전트의 `workspace.settings.update`가 바꿀 수 있는 키는 `welcome_prompt`·`role_labels` 둘뿐이다(V7).
+14. **잠금 화면 승인은 앱에서 열어야 하는 카드에 닫혀 있다.** `opens_in_app`(`actions.rs:390`)이 읽는 payload 경로는 푸시 투영에 실린 것뿐이고, `origin`은 이미 실린다(`crates/momo-agent/src/decider.rs` 머리말).
+
+### U-1. 결정 요약
+
+| 결정 | 정한 것 | 권장 | 결재 |
+|---|---|---|---|
+| U-a 그릇 | 한 호출이 run(`awaiting_approval`)·승인·카드를 낳는 새 도구 | A3 한 호출 | owner (Q1) — §2 기각을 다시 여는 일이라서 |
+| U-b 누가·무엇을 | 연결 scope + 닫힌 4종 + 워크스페이스 끄개 | P1 scope, K1 설정 키 | owner (Q2·Q3·Q4) |
+| U-c 카드 자리 | 소유자와의 1:1 DM, 항상 앱에서 연다 | C1 | planner 위임 기본값 |
+| U-d 남용 방지 | 대기·속도·중복·수명·재증명·감사 | 시간당 6·하루 20 | owner (Q5: 숫자만) |
+| U-e 메시지 고정 | `message.pin`·`message.unpin`, 승인 필요, 승인자 명의로 같은 함수 | E1 승인 필요 | owner (Q6) |
+| U-f 결과 알림 | 승인·거절 때 인박스 `agent_run` 참조 + 같은 id 재호출(만료는 재호출이 파생) | F2 | planner 위임 기본값 |
+
+### U-a. 시키지 않은 제안의 그릇 (이슈 D-a)
+
+§2는 「run과 분리된 승인 레코드」를 기각하며 이유 셋을 댔다. (a) `approval.run_id NOT NULL`을 풀어야 한다. (b) 만료 스윕·레일 표시가 갈라진다. (c) hosted 제안은 항상 claim한 job의 run 안에서 일어나므로 필요 없다. 이 증보는 (c)의 전제가 깨졌다고 본다. 아무도 부르지 않은 제안에는 job이 없다. 대안이 세 이유에 어떻게 답하는지 본다.
+
+| 안 | 모양 | 세 이유에 대한 답 | 비용 |
+|---|---|---|---|
+| A1 run 없는 승인 | `approval.run_id`를 nullable로 | (a) 정면으로 푼다. (b) 갈라진다 | DDL 변경에 더해 `LockedApproval`·`OverdueApproval`·run 경유 결정 라우트·인박스 투영·푸시 대상·run 원장 트리거(128)·TS `runId` 모델이 모두 None을 배워야 한다. 동시 실행 상한·park 가드·`oort_run_complete` 가드가 승인 쪽에서 사라진다 |
+| A2 두 단계 | `oort_run_open`이 handle을 주고, 그 handle로 기존 `oort_action_propose` | (a)(b) 지킨다. (c)는 job을 흉내 낸다 | 봉인된 handle이 `job_id`·`lease_id`에 묶여(`momo-mcp/src/handle.rs:43`) job 없는 handle을 만들려면 태어날 때 lease가 잡힌 outbox job이 필요하고, 그 job이 인박스에 비치지 않게 막아야 한다. 제안 없이 떠난 run은 `running`으로 남아 lease 스윕(+2시간, ADR-0200 D1-4)까지 동시 실행 상한을 먹는다. 호출이 둘이고 상태가 둘이다 |
+| **A3 한 호출 (권장)** | 새 도구 `oort_action_initiate`가 run을 `awaiting_approval`로 태어나게 하고 승인·카드를 한 트랜잭션에 쓴다 | (a)(b) 그대로 지킨다. (c)는 「승인은 항상 run 안에서 일어난다」로 고친다 | 새 도구 1·새 trigger 1·새 scope 1(U-b)·hold 값 1. job·handle·outbox는 없다. 선례가 있다(U-0 4) |
+| A4 handle 선택화 | `oort_action_propose`가 handle 대신 `channelId`를 받는다 | A3와 같다 | 도구는 늘지 않지만 `required`가 흔들려 기존 계약 시험과 모델의 사용 규칙이 바뀐다. 더 나쁜 점은 이미 `workspace:propose`를 승인한 연결이 새 scope 없이 먼저 제안하게 된다는 것이다. 사람이 동의 화면에서 읽은 「요청받았을 때의 제안」을 조용히 넓힌다 |
+| A5 클라이언트 실행 | 에이전트는 카드만 남기고, 사람이 누르면 클라이언트가 REST를 부른다 | §2가 이미 기각했다 | 「에이전트가 제안했다」 감사가 없고 폰·다른 기기에서 결정할 수 없다 |
+
+**권장: A3.** 이유는 셋이다. 첫째, `approval.run_id NOT NULL`·만료 스윕·레일·원장·결정 라우트·`oort_run_complete` 가드를 하나도 건드리지 않는다. DDL은 U-b의 scope 어휘 CHECK 재작성 한 건뿐이다. 둘째, 선례가 있어 새 상태가 없다. 셋째, 새 능력에 새 이름(도구·scope)이 붙어서 기존 연결이 조용히 넓어지지 않는다.
+
+**A3 계약**
+- 입력은 `{clientRequestId, actionId, args, rationale?}`다(`additionalProperties:false`). `clientRequestId`는 uuid 필수다. handle·채널·수신자·카드 자리를 받는 키는 없다.
+- 한 트랜잭션(`momo_db::with_tenant_tx`)에서 차례로 한다. ① 에이전트 `member` 행 잠금(대기·속도 계산을 직렬화한다. 기존 `lock_agent_and_count_pending_workspace_actions_in_tx`와 같은 잠금) ② 문 조건(U-b-4) ③ 인자 검증·해석(기존 `validated_action_args`·`resolve_action_in_tx`. 이름·핸들·채널을 서버가 해석한다, V1-a/b) ④ 대기·속도·중복 검사(U-d) ⑤ 위 조건이 **모두 통과한 뒤에만** 소유자 1:1 DM을 멱등으로 연다(U-c) ⑥ run을 `awaiting_approval`로 태어나게 한다(`create_held_agent_run_in_tx`, 새 trigger) ⑦ 승인 INSERT(`payload.origin="agent_initiated"`) ⑧ 카드(`send_message_in_tx`) ⑨ 감사. 하나라도 실패하면 전부 없다.
+- run은 `trigger_message_id`가 NULL이고 `input = {"hold":"agent_initiated"}`다. `agent_run.input`에는 에이전트가 쓴 문자열이 없다. 새 trigger `RunTrigger::AgentInitiated { agent_member_id, client_request_id }`의 멱등 키는 `agent_initiated:<AGENT>:<ID>`다(`agent_run_idem_uniq`가 DB에서 중복을 막는다). job·outbox `gateway` 행·인박스 `agent_job` 참조는 0이다.
+- **수명은 서버가 소유한다.** 에이전트에게는 이 run을 닫거나 갱신할 handle이 없다. 승인 → `succeed_parked_run_in_tx`, 거절 → `cancelled`, 만료 → `timed_out{approval_expired}`, 사람의 run 취소 → 기존 경로다. 만료 줄은 답할 트리거 메시지가 없어 조용하다(`approval_sweep.rs`의 기존 규칙).
+- **동시 실행 상한에서 뺀다.** `live_run_count_in_tx`의 hold 술어를 `IN ('channel_grant','agent_initiated')`로 넓힌다. 빼지 않으면 먼저 제안 카드 하나가 소유자의 응답을 기다리는 동안 그 에이전트의 work 요청이 409가 된다(U-0 5).
+- 응답은 `{approvalId, status:"pending", expiresAtMs, cardMessageId}`다. 같은 `clientRequestId`로 다시 부르면 지금 상태를 돌려준다(U-f). 같은 id에 다른 `actionId`·`args`면 `Conflict`다. 비교는 승인 payload의 정규화 인자와 pins로 한다(run `input`은 상수라 비교할 수 없다. 충돌을 409로 답하는 모양만 work 요청의 `client_run_id` 규칙을 따른다, `agent_runs.rs:381-389`).
+- 도구 설명문(모델이 읽는 곳)에는 네 가지를 못박는다. 아무도 부탁하지 않은 일에만 쓴다. 소유자가 DM 카드에서 결정한다. 거절된 제안을 같은 모양으로 다시 올리지 않는다. 카드를 올린 뒤 턴을 끝내고 결과는 같은 `clientRequestId`로 확인한다. 키워드는 골든 시험으로 잠근다(`agent_conversation_rules.rs` 방식).
+
+**시험 의무 (ADR-0214: 아래는 해당 분기를 지우면 빨개져야 한다)**
+- `approval.run_id`는 마이그레이션 뒤에도 `NOT NULL`이다(스키마 시험).
+- 한 호출은 run 1·approval 1·카드 1이고 job·outbox `gateway`·인박스 `agent_job` 참조는 0이다. 카드 쓰기를 실패시키면 run·approval·새 DM이 0이다(트랜잭션 경계를 지우면 실패).
+- 에이전트의 어떤 도구도 이 run을 닫거나 바꾸지 못한다. 다른 run의 handle로도 닿지 않는다.
+- 만료 스윕이 이 run을 `timed_out{approval_expired}`로 끝내고, 어떤 스톨 스윕(`run_stall_sweep`)도 건드리지 않는다. 트리거 메시지가 없어도 스윕이 정상 종결한다.
+- **대기 중 `agent_initiated` run이 있어도 work 요청이 상한에 막히지 않는다**(hold 술어를 되돌리면 실패).
+- 같은 `clientRequestId` 재호출은 run 1·approval 1이다.
+- 이 run에서 `member.avatar.set`·`oort_card_suggest`는 거절된다(트리거 메시지 없음).
+- 회귀: `oort_action_propose`의 `required`는 `handle`을 그대로 포함한다.
+
+### U-b. 누가, 무엇까지 (이슈 D-b)
+
+**U-b-1. 허가를 어디에 적나**
+
+| 안 | 모양 | 장점 | 비용 |
+|---|---|---|---|
+| **P1 연결 scope (권장)** | 새 scope `workspace:initiate`. 관리자가 연결을 confirm(또는 OAuth consent)할 때 한 번 승인한다. 기본 요청에는 넣지 않는다 | ADR-0162 D3·D4의 방식 그대로다. `tools/list`가 토큰∩승인 교집합만 보이므로 허가 없는 연결에는 도구가 목록에도 호출에도 없다(unknown tool). 기존 연결은 승인 범위가 그대로라 조용한 승격이 없다. 「이 연결이 무엇을 할 수 있나」를 승인 화면 한 곳에서 읽는다 | hosted scope CHECK 3개(069·074·074) 재작성 migration 1건(087 방식), Rust 상수 `HOSTED_AGENT_SCOPES`(`momo-auth/src/hosted_connection.rs:32`, 7개에서 8개로)와 OpenAPI `HostedAgentScope`·`momo-mcp` scope 시험·동의 화면 줄(`hostedAgents/model.ts`·`approval.ts`), ADR-0162 D3 닫힌 표 한 줄. 바꾸려면 재연결이다 |
+| P2 에이전트 열 | `agent.initiative_enabled boolean NOT NULL DEFAULT false`(134 `thread_reply_wake` 선례). 기존 `workspace:propose`로 도구가 보이고 호출 때 열을 증명한다. 소유자·admin이 프로필 PUT 선택 필드로 켜고 끈다 | CHECK 무접촉. 아무 때나 켜고 끌 수 있다. 재연결이 필요 없다 | 능력이 자격증명에 적히지 않아 승인 화면에서 읽을 수 없다. `workspace:propose`를 가진 연결의 도구 목록에는 꺼져 있어도 늘 보여 모델이 시도한다. 재연결 때 값을 되돌리는 규칙이 따로 필요하다 |
+| P3 워크스페이스 스위치만 | 에이전트별 구분 없음 | 가장 단순하다 | 한 에이전트를 열면 모두 열린다. 기각 |
+
+**권장: P1.** 이유는 이 문이 Agent Port에서 처음 생기는 「시키지 않아도 사람을 부르는」 능력이라는 점이다. Agent Port의 능력은 지금까지 전부 사람이 승인한 scope로 자격증명에 적혀 왔다(`workspace:propose`·`messages:write` 등). 이번만 열에 적으면 「이 연결이 할 수 있는 일」이 두 곳으로 갈린다. P1의 비용(CHECK migration, 재연결)은 087이 한 번 치른 모양 그대로이고, planner 연결(#4616)을 이 기능이 나온 뒤에 하면 재연결 마찰도 없다. 먼저 했다면 한 번 다시 연결한다. 순간 끄기는 U-b-3의 끄개와 에이전트 정지가 맡는다.
+
+**U-b-2. 먼저 제안이 닫힌 목록 (정의는 한 곳)**
+
+레지스트리 `WorkspaceAction`에 필드 `initiative: bool`을 둔다(D1: 정의는 한 곳). `oort_action_initiate`의 `actionId` enum과 OpenAPI enum은 거기서 파생되고, 드리프트 시험이 셋을 잰다(`the_action_ids_are_one_list_in_three_places`와 같은 자리).
+
+| 행동 | 먼저 제안 | 이유 |
+|---|---|---|
+| `channel.create` | 허용. **`kind`는 `private`만** | 공개 채널은 워크스페이스 전체에 보이는 면이라 사람이 시킬 때만. `addProposer`(기본 true)는 허용한다(V3). 이 행이 에이전트의 읽기 범위를 새 채널 하나만큼 넓히므로 카드의 「이 에이전트도 참여」 행을 늘 보인다(Q4) |
+| `channel.member.add` | 허용 | 에이전트가 볼 수 있는 채널에 한하고 역할은 `member` 고정(V1·V2). 카드가 서버가 해석한 이름을 보인다 |
+| `message.pin` | 허용 | U-e |
+| `message.unpin` | 허용 | U-e |
+| `hosted.channels.grant` | **제외** | 이미 있는 채널로 에이전트가 자기 읽기 범위를 넓히는 유일한 길이다(V5가 가장 좁게 둔 이유). 시키지 않았는데 청하는 것은 권한 상승의 정석이다 |
+| `agent.rename`·`agent.profile.update` | 제외 | 신원·사칭 표면이고 다른 에이전트가 대상이 될 수 있다(V4·V4-M) |
+| `agent.invite` | 제외 | 새 에이전트를 데려오고 연결 코드가 따른다 |
+| `invite.create` | 제외 | 가입 자격(1회 시크릿)이다 |
+| `workspace.settings.update` | 제외 | 환영 문구는 다른 에이전트의 지시문이다(V7) |
+| `member.avatar.set` | 제외 | 사람의 얼굴이고 요청자가 필요하다. 트리거 메시지가 없는 run에서는 구조적으로 불가능하다(U-0 9) |
+| `member.role.set`·`webhook.create` | 해당 없음 | 실행기가 없다 |
+| 팀 AI 전용 4종 | 해당 없음 | 에이전트 포트에서 제외(기존) |
+
+1회 시크릿을 만들거나(`secret_delivery`가 `None`이 아닌 행동) 에이전트·지시문·읽기 범위를 건드리는 행동은 `initiative`가 켜지지 않는다. 시험이 이 불변식을 레지스트리 전수로 잰다.
+
+**U-b-3. 관리자 끄개 (이슈 D-d의 kill switch)**
+
+| 안 | 모양 | 판정 |
+|---|---|---|
+| **K1 설정 키 (권장)** | 워크스페이스 설정 bag의 불리언 키 `agent_initiative`(없으면 켜짐). admin이 기존 설정 REST로 바꾼다. `ALLOWED_SETTINGS_KEYS`와 `validate_settings_value`에 한 줄 | 즉시 효력, DDL 없음, 선례(`team_ai_fast_path`)가 있다. **에이전트의 `workspace.settings.update`는 이 키를 바꾸지 못한다**(허용 키는 두 개뿐) |
+| K2 운영자 환경변수 | 인스턴스 전체 | 재시작이 필요하고 워크스페이스 admin이 만질 수 없다 |
+| K3 에이전트 정지만 | 기존 `agent_profile.paused` | 있는 장치지만 그 에이전트의 모든 도구가 같이 멎는다. 보조 수단으로 남는다 |
+
+끄면 새 `oort_action_initiate`는 모두 같은 `Unavailable`이고(감사 reason `switch_off`), 이미 올라온 카드는 결정 때 재증명에서 걸려 실행되지 않는다(U-d 「재증명」 행). 거절은 언제나 가능하다.
+
+**U-b-4. 먼저 제안이 열리는 조건 (모두 만족해야 한다. 1~6이 아니면 에이전트에게는 같은 `Unavailable`, 7이 아니면 `Conflict`)**
+1. 연결이 active·증명됐고 `workspace:initiate`가 토큰과 승인 양쪽에 있다(도구 가시성이 걸러 주지만 호출 안에서 다시 증명한다. ADR-0162 증보 4 J2 방식).
+2. 에이전트가 활성이고 정지 상태가 아니다.
+3. 워크스페이스 끄개가 켜져 있다.
+4. 에이전트에게 활성 사람 소유자가 있고 그 연결을 confirm한 사람이 소유자다. 소유자 DM이 이 연결에 덮이는 조건(증보 2 B6-1)과 같은 술어를 쓴다.
+5. 소유자가 **지금** 이 행동의 역할 게이트를 통과한다(`Admin`이면 소유자가 워크스페이스 admin). 죽은 카드를 올리지 않기 위한 사전 거절이다. 보안 경계는 결정 때의 게이트다.
+6. 행동별 조건. 카드에 나오는 채널은 소유자가 이미 볼 수 있어야 한다(공개 채널이거나 소유자가 live 멤버). 카드가 소유자에게 비공개 채널의 이름이나 내용을 처음 알려 주면 안 된다. `message.pin`·`message.unpin`은 더 좁게, 소유자가 대상 메시지 채널의 live 멤버여야 한다(승인자 명의로 실행하므로, U-e).
+7. 대기·속도·중복 한도 안이다(U-d).
+
+에이전트가 소유자의 역할이나 연결 구성을 더듬을 수 없게(V1-b) 1~6은 한 가지로 답한다. 7은 에이전트 자신의 몫이라 숨길 것이 없어 `Conflict`로 답한다. 운영자는 감사 reason으로 구분한다(U-d).
+
+### U-c. 카드가 서는 곳 (이슈 D-c)
+
+| 안 | 모양 | 장점 | 비용 |
+|---|---|---|---|
+| **C1 소유자 1:1 DM (권장)** | 서버가 정한다. 에이전트는 채널을 지정하지 않는다 | 소유자만 본다. 비공개 채널 이름·구성원이 새지 않고 공개 채널에 소음이 없다. 결정자 = DM의 유일한 사람 = 소유자라서 결정 라우트의 멤버십 게이트(`approvals.rs:766`)와 맞는다. 증보 2 B2로 DM이 연결에 자동으로 덮여 에이전트가 결과 줄을 읽을 수 있다 | 소유자가 결정할 수 없는 행동은 죽은 카드가 되므로 사전 거절한다(U-b-4 5). 닫아 둔 DM도 새 카드의 seq가 워터마크를 넘어서 다시 보인다(기존 DM 규칙). 이 문은 U-d의 한도와 끄개가 묶는다 |
+| C2 에이전트가 속한 채널 | 에이전트가 채널을 지정한다 | 그 채널의 admin 여럿이 결정할 수 있다 | 채널 전체에 소음과 내용 노출이다. 소음 자리를 에이전트가 고른다. 결정자는 그 채널 멤버여야 해서 admin이 없는 채널은 죽은 카드다 |
+| C3 별도 승인함 | 새 표면 | — | 새 채널 종류·화면·푸시가 필요하고 `approval.channel_id NOT NULL`·멤버십 게이트와 부딪힌다. 대기 승인은 이미 인박스 응답에 합쳐진다(ADR-0199 D2·D6 `approvalsPending`) |
+
+**권장: C1.** 규칙은 다음과 같다.
+- **DM은 서버가 열고, 모든 조건이 통과한 뒤에만 연다.** `with_tenant_tx`는 처리된 거절에서도 커밋하므로(`agent_port_tools.rs:2199` 주석), 순서가 곧 보안이다. 거절된 호출이 DM을 남기면 안 된다. 대안은 「소유자가 먼저 연 DM에만 올린다」(C1-b)다. 더 보수적이지만 터미널의 에이전트가 처음 제안하는 날 소유자가 DM을 한 번도 열지 않았다면 첫 제안이 이유 없이 `Unavailable`이 되고, 에이전트는 그 이유를 알 길이 없다(V1-b). 그래서 서버가 소유자와 에이전트 쌍의 DM 하나를 멱등으로 연다(쌍 유일 인덱스). 결과를 숨기지 않는다. 허가가 있는 에이전트는 이 DM에 기존 `oort_message_post` 규칙으로 쓸 수 있게 된다. 새 쓰기 권한은 아니다. 같은 에이전트가 승인 채널에는 이미 승인 없이 쓴다.
+- **카드에는 출처가 보인다.** `payload.origin="agent_initiated"`를 props `origin`으로도 싣는다. 클라이언트는 「먼저 제안」 표시를 그린다. 제안자는 카드 작성자(에이전트)로 이미 보이며 props에 이름을 굽지 않는다(인플레이스 카드와 같은 이유, 이름 변경 뒤 낡는다). 요약문은 서버가 정한다.
+- **사유는 에이전트가 쓴 글이다.** 시킨 사람이 없어 에이전트의 문장이 유일한 설득 수단이라 사칭 표면이다. 먼저 제안의 `rationale`은 ≤140자이고 `agent.profile.update` tagline 규칙(제어·서식 문자, `@ < > [ ] ( ) : /` 거절, V3-2)을 재사용한다. 카드는 평문으로 「에이전트가 쓴 글」이라는 꼬리표와 함께 보인다. 서버가 해석한 행(rows)이 진실의 원천이다.
+- **항상 앱에서 연다.** `opens_in_app`이 `payload.origin == "agent_initiated"`에 true를 낸다(이미 투영된 키 `origin`만 읽는다). 시킨 일이 아니라서 잠금 화면의 승인 버튼으로 결정하지 않는다.
+
+**시험 의무**: 에이전트가 채널·수신자를 지정하는 키는 스키마에 없다(알 수 없는 키 → `InvalidArguments`). 카드는 소유자 DM에만 서고 DM 밖 누구도 결정·미리보기를 못 한다(비멤버 admin은 거절된다. 현행은 403이고, 인플레이스 카드처럼 404로 숨기는 분기(`approvals.rs:771-780`)는 구현 슬라이스의 후속 선택이다). 거절된 호출은 새 DM을 남기지 않는다(DM 열기를 앞으로 옮기면 실패). 링크·멘션·마크다운이 든 `rationale`은 거절된다. `opens_in_app`이 `agent_initiated`와 `message.pin|unpin`에 true다(푸시 투영 시험의 표와 같은 자리).
+
+### U-d. 남용 방지 (이슈 D-d)
+
+V3-6은 owner가 제안 속도 제한을 기각한 기록이다(인사 시즌에는 많이 필요할 수 있다는 이유). 그 근거는 연결·초대가 매번 사람 승인이고 승인 전 폭주는 대기 3개가 막는다는 것이었다. 먼저 제안은 두 가지가 다르다. 사람이 부른 적이 없어 요청의 맥락이 없고, 거절·만료 뒤 같은 에이전트가 새 run으로 다시 올릴 수 있어서 대기 상한이 시간 축으로는 아무것도 막지 못한다. 그래서 **먼저 제안에만** 상한을 둔다. 사람이 시킨 제안(handle 경로)은 V3-6 그대로 상한이 없다.
+
+| 층 | 규칙 | 값·이유 |
+|---|---|---|
+| 문 | U-b-4의 일곱 조건. 끄개·정지·연결 해제로 즉시 닫힌다 | — |
+| 대기 | 에이전트당 대기 승인은 기존 합계 3개(`MAX_PENDING_WORKSPACE_ACTIONS`)에 먼저 제안도 **센다**(`server_in_place`만 빼는 기존 술어를 유지한다). 그 안에서 먼저 제안 대기는 2개까지다 | 먼저 제안이 사람이 시킨 제안을 밀어내지 않게 한다 |
+| 속도 | 에이전트당 시간당 6·하루 20 [추정]. `agent_run`에서 `agent_initiated:<에이전트>:` 키의 행 수를 DB에서 센다(재시작·복제본에 안전). 한도 거절 자체는 세지 않는다(V4-10 5 방식). 환경변수로 봉인한다(`MOMO_AGENT_INITIATIVE_PER_HOUR`·`_PER_DAY`) | 숫자는 owner 질문 5 |
+| 중복 | 같은 (에이전트, 행동, 서버가 해석한 정규화 인자)가 대기 중이면 `Conflict`다. 거절된 뒤 24시간도 `Conflict`다. 만료 뒤에는 다시 올릴 수 있다. 사람이 시킨 제안(handle 경로)에는 이 쿨다운이 없다 | 거절은 사람의 「그만」이다. 비교는 jsonb 동등이고 에이전트가 쓴 문자열이 아니라 `pins`까지 포함한 해석값으로 한다 |
+| 수명 | 먼저 제안 카드의 TTL은 24시간이다 [추정] (`MOMO_AGENT_INITIATIVE_TTL_HOURS`) | 기본 1시간(`approval.rs:76`)은 승인 대기 run이 동시 실행 상한을 쥐는 비용 때문이었다(`approval.rs` 머리말). 먼저 제안 run은 상한에서 빠져(U-a) 그 비용이 없다. 소유자가 자리에 없을 때 올라온 카드가 곧바로 사라지지 않게 한다. 오래된 카드의 위험은 결정 때 재증명이 막는다 |
+| 재증명 | 승인 때 기존 V1-d에 더해 ① 끄개가 켜져 있다 ② 제안 에이전트가 활성·미정지이고 연결이 active·증명됐으며 `workspace:initiate`가 승인 범위에 있다 ③ 결정자가 에이전트의 **현재** 소유자다 ④ 행동이 아직 `initiative` 목록에 있다. 하나라도 어긋나면 기존 `action_args_invalid`(409, 승인 소모 없음)다. **거절은 항상 가능하다** | 새 영수증 어휘를 만들지 않는다(V1-d) |
+| 끄기 | 끄개 · 에이전트 정지 · 연결 해제. 끄개를 꺼도 대기 카드를 일괄 취소하지는 않는다. 재증명이 실행을 막고 TTL이 정리한다 | 일괄 취소는 쓰기 경로를 하나 더 만든다 |
+
+**감사(닫힌 어휘, 본문 없음)**
+- `agent.initiative.opened`: 행위자 에이전트, 대상 소유자. detail은 `{schema:"momo.agent.initiative.v1", action_id, approval_id, run_id, dm_created}`뿐이다.
+- `agent.initiative.refused`: detail은 `{schema, action_id(닫힌 목록 또는 "other"), reason}`다. `reason ∈ {switch_off, no_owner, owner_cannot_decide, target_unavailable, rate_limited, pending_full, duplicate, cooldown, invalid_arguments}`. 같은 (에이전트, reason)당 시간당 1행으로 합친다(홍수 방지). `agent_port.call`(ADR-0200 증보 4)은 도구 이름과 결과 코드만 담고 자격당 시간당 240행에서 멈추므로 합친 행의 대체물이 아니다. 합쳐서 가려지는 횟수는 후속에서 다음 창의 첫 행에 싣는 방안을 본다.
+- 결정은 기존 `action.approved`·도메인 행·`approval.rejected`·`approval.expired`에 `origin:"agent_initiated"` 키를 더한다.
+- 어느 행에도 인자 값·`rationale`·메시지 본문·채널 이름이 없다(V6 기조: 키 이름과 id만).
+
+**시험 의무**: 시간당·하루 한도의 경계(N번째 통과, N+1번째 거절)와 한도 거절이 창을 늘리지 않는다는 것을 시간 주입으로 잰다. 먼저 제안 대기가 2개여도 사람이 시킨 제안은 선다(합계 3 중 1을 남기는 분기를 지우면 실패). 같은 제안 대기·거절 24시간·만료 뒤 허용을 각각 잰다. 재증명 네 항목이 각각 `action_args_invalid`와 승인 pending 유지를 낸다. 끄개를 끈 뒤 올라온 카드를 승인하면 실행이 0이다(재증명을 지우면 채널이 생겨 실패). 감사 어느 행에도 인자·사유·이름이 없다(grep 시험).
+
+### U-e. 메시지 고정 행동 (이슈 D-e)
+
+사람의 고정 경로가 이미 있다(U-0 7). 필요한 서버 작업은 새 도메인 함수가 아니라 **같은 함수를 승인자 명의로 부르는 실행기**다. 모자란 것은 ① 레지스트리의 행동 둘 ② 에이전트 쪽 대상 해석 ③ 감사 writer(`record_interaction_audit`, 지금은 `routes/messages.rs`의 비공개 함수)를 실행기에서 부를 수 있게 여는 일이다.
+
+**어휘와 인자**
+
+| id | args | 위험 | 승인자 | 실행 |
+|---|---|---|---|---|
+| `message.pin` | `{messageId}` | `approval` | `admin` | `set_pin_in_tx(…, 승인자, Pinned)` |
+| `message.unpin` | `{messageId}` | `approval` | `admin` | `set_pin_in_tx(…, 승인자, Unpinned)` |
+
+- `messageId`는 `oort_conversation_read`나 `oort_message_post`가 내는 메시지 id다(U-0 2). 채널·작성자·본문은 서버가 id로 읽는다. 에이전트가 쓴 문자열이 카드의 대상 표시가 되는 길은 없다(V1-a). 인자는 이것 하나이고 채널·URL·본문 키는 스키마에 없다.
+- **대상 조건**: 아래가 하나라도 아니면 모두 같은 `InvalidArguments`다(V1-b: 존재를 더듬을 수 없다). 메시지가 있고 삭제되지 않았다 · 채널이 연결의 승인 채널(덮이는 DM 포함)이고 에이전트가 live 멤버다 · 채널이 보관되지 않았다 · 메시지 종류가 `text`다(승인 카드·결과 줄·시스템 줄은 상태가 바뀌므로 고정 대상이 아니다) · `message.unpin`은 지금 고정돼 있다.
+- **카드를 보는 사람이 이미 볼 수 있는 것만 싣는다.** 카드 행에는 메시지 발췌·쓴 사람·채널 이름이 들어가고 카드는 영속 props다. handle 경로에서는 카드가 run의 채널에 서므로 대상 메시지가 **그 run의 채널 안**에 있어야 한다(다른 승인 채널의 메시지면 같은 `InvalidArguments`). 먼저 제안에서는 카드가 소유자 DM이므로 소유자가 대상 채널의 live 멤버여야 한다(U-b-4 6. 결정 때 다시 증명한다). 그렇지 않으면 승인자가 대상 채널의 비멤버라서 고정이 막히기 전에 카드가 이미 다른 채널의 내용을 사람들에게 흘린다.
+- **핀(재증명 키)**: `pins = {message, channel, bodySha256}`. 키 이름을 `target`으로 하지 않는 것은 `pins.target`을 멤버 id로 읽는 곳이 있어서다(`decider.rs`의 `pinned_target_agent`, `approval.rs`의 `lock_target_and_find_pending_action_in_tx`). 결정 때 서버가 메시지를 다시 읽어 본문 해시·채널·삭제 여부가 같은지 확인하고, 어긋나면 `action_args_invalid`(승인 소모 없음)다. 승인자가 읽은 것과 고정되는 것이 같아야 한다. 본문이 없는 메시지(첨부만)는 첨부 id 목록을 해시에 넣는다.
+- **카드 행**(서버가 읽은 값): 채널(이름·공개 범위), 쓴 사람, 쓴 시각, 내용 앞 120자(평문), 지금 고정 수/100. `message.unpin`은 고정한 사람·시각을 보인다. 항상 앱에서 연다(`opens_in_app`에 추가. 메시지는 배너로 판단할 수 없다. V4-1 7과 같은 이유).
+
+**사람 경로와 같은 함수를 쓰나: 쓴다.**
+- 실행은 승인자의 멤버 id로 `set_pin_in_tx`를 부른다. 그래서 사람이 손으로 하는 고정과 가드가 같다. 승인자가 대상 채널의 활성 멤버여야 하고, 삭제된 메시지는 고정되지 않으며, 한 채널 100개 한도(채널 advisory lock과 062 트리거)와 방송 `message.pinned`·`message.unpinned`가 같다. `pinned_by`는 승인자이고, 에이전트가 제안했다는 사실은 감사에 남는다.
+- 승인자가 대상 채널의 멤버가 아니거나 100개를 넘으면 실행기는 쓰기 0으로 기존 `action_args_invalid`(409, 승인 소모 없음)로 답한다. 이미 고정돼 있으면 사람 경로처럼 no-op 성공이다.
+- 에이전트 bearer가 고정 REST를 직접 부르는 길은 열지 않는다. 이 증보는 `agent_scope.rs` 표를 건드리지 않는다.
+
+**승인이 필요한가**
+
+| 안 | 모양 | 판정 |
+|---|---|---|
+| **E1 승인 필요 (권장)** | D3 그대로. 고정·해제 모두 승인 카드 | 고정은 채널 머리의 신뢰 표면이다(고정이 보증처럼 읽힌다). 승인이 없으면 에이전트가 사람의 글(프롬프트 주입으로 심은 글 포함)을 끌어올리거나 100개 한도를 채워 사람의 고정을 막을 수 있다. 무승인 위임은 아직 ADR이 없다(V7) |
+| E2 자기 글만 무승인 | 에이전트가 쓴 메시지의 고정만 승인 없이 | owner 시나리오(안내문 고정)에서 탭 하나를 아낀다. 그러나 「에이전트가 쓴 글인가」라는 판정 하나로 고정 면이 열리고 한도 채우기는 그대로 가능하다. 위임 ADR이 생길 때의 첫 후보로 둔다 |
+| E3 전부 무승인 | — | 기각. D3와 V7에 반한다 |
+
+반대 논거도 적어 둔다. 고정은 되돌리기 쉽다(채널 멤버 누구나 풀 수 있다). 사람도 이미 손으로 한다. 그래서 위험이 가장 낮은 승인 행동이고, 무승인 위임이 생기면 첫 후보다. 승인 한 번의 비용은 owner 시나리오에서 탭 하나다(채널 만들기 한 번, 고정 한 번).
+
+**승인자 역할: `admin` (v1).** 대안은 「대상 채널의 멤버면 누구나」(사람이 손으로 하는 권한과 같다)다. 이 역할은 새 `RequiredRole`과 `GatePlan` 갈래, 푸시 대상 판정, TS `actionRole.ts` 표를 함께 늘려야 하고(V4-3 전례), `execute_workspace_action`이 역할 없는 workspace action을 프로토콜 오류로 다루는 현재 불변식(`approvals.rs:1457-1461`)과도 부딪힌다. 기존 `Admin`을 재사용하면 게이트 코드가 0이다. 넓히는 일은 필요가 보일 때 별도 증보로 한다.
+
+**감사**: 사람 경로와 같은 도메인 행 `message.pinned`·`message.unpinned`(같은 writer)와 `action.approved`가 쓰인다. 도메인 행 detail에 `via_agent`·`approval_id`와 먼저 제안일 때의 `origin`을 더한다. 메시지 내용은 싣지 않는다(id와 채널 id만).
+
+**시험 의무**: 비-admin 결정자는 403 `role_required`이고 고정 0이다. 승인자가 대상 채널의 멤버가 아니면 `action_args_invalid`·고정 0·승인 pending이다. 승인 전에 메시지가 수정되거나 삭제되면 `action_args_invalid`다(해시 핀을 지우면 실패). 수정이 없으면 고정되고 방송 `message.pinned` 1건, 감사 2행(`action.approved` + `message.pinned`)이다. 에이전트가 볼 수 없는 채널·덮이지 않는 DM·없는 id·삭제된 메시지·`text`가 아닌 메시지는 같은 `InvalidArguments`다. **교차 채널 카드는 0이다**: handle 경로에서 run 채널 밖의 메시지는 같은 `InvalidArguments`이고 카드가 서지 않는다(채널 조건을 지우면 다른 채널의 내용이 카드에 실려 실패). 먼저 제안에서 소유자가 멤버가 아닌 채널은 `Unavailable`이고 run·승인·새 DM이 0이다. 101번째 고정은 `action_args_invalid`(승인 소모 없음)이고 이미 고정된 메시지는 no-op 성공이다. 에이전트 bearer가 `PUT …/pin`을 직접 부르면 계속 거절된다(기존 시험 유지). 드리프트: `ACTIONS` id 집합 = 도구 enum = OpenAPI enum(11개).
+
+### U-f. 실행 뒤 알림 (이슈 D-f)
+
+**빈칸은 먼저 제안만의 것이 아니다.** 결과 줄(승인·거절·만료)은 인박스에 투영되지 않고(U-0 6) 깨울 신호도 없다. 지금 모든 `workspace_action`의 결과는 에이전트가 스스로 깨어나 대화를 다시 읽어야만 보인다. V6의 「다음 턴에 `oort_conversation_read`로 읽는다」는 깨울 신호가 있어야 성립하는 문장이었다. 사람이 run을 취소할 때만 `agent_run` 참조가 간다(`agent_runs.rs:1364`).
+
+| 안 | 모양 | 판정 |
+|---|---|---|
+| F1 결과 줄만 (현행) | 변경 없음 | 깨움이 없고, 소유자 DM이 연결에 덮이지 않으면 읽을 수도 없다 |
+| **F2 인박스 참조 + 같은 id 재호출 (권장)** | 사람이 승인·거절할 때 제안 에이전트의 활성 hosted 연결에 `agent_run` 인박스 참조를 같은 트랜잭션에 쓴다. 만료는 쓰지 않는다. `oort_action_initiate`를 같은 `clientRequestId`로 다시 부르면 지금 상태를 돌려준다. 결과 줄은 그대로다 | 새 도구·새 이벤트 종류가 없다. 도어벨이 인박스 증가에 울리므로(ADR-0171) 루틴이 깨어난다. 사람이 시킨 제안도 같은 혜택을 받는다. 루틴은 `agent_run`을 「이 run의 상태가 바뀜」로 읽는다(`docs/SELF_HOST_AGENT.md`는 kind와 channelId만 준다고 적는다). 문서 한 줄을 더한다 |
+| F3 읽기 도구 `oort_action_status` | 새 도구 | 의미가 또렷하다. 그러나 도구가 15개가 되고 닫힌 표에 한 줄과 새 읽기 면이 생긴다. F2의 재호출이 같은 답을 주므로 얻는 것이 적다 |
+
+**권장: F2.** 세부는 다음과 같다.
+- **쓰는 곳은 결정 라우트의 승인·거절 arm 둘과 이미 있는 사람 취소다.** 셋 다 `momo_app` 역할의 요청 트랜잭션이다. 제안자의 활성 hosted 연결이 있고 run의 채널이 그 연결에 덮일 때만 쓴다(`append_run_reference_in_tx`의 기존 권한 술어). 아니면 조용히 0건이다. 관리형 에이전트는 회귀가 0이다.
+- **만료는 쓰지 않는다.** 만료를 정하는 notifier 스윕은 `momo_notifier` 역할로 도는데, 인박스 참조의 권한 술어는 `token`·`agent_profile`·`workspace_membership`을 JOIN해 `FOR SHARE`로 잠그고(`hosted_inbox.rs:527-559`) 인박스 두 표에 INSERT/UPDATE한다(`:564-648`). 운영 역할 파일은 notifier에 `hosted_agent_connection`의 열 8개 읽기만 주고, `token`은 BYPASSRLS 역할이 자격증명을 읽지 않도록 일부러 뺐으며, 인박스 표 grant는 없다(`infra/rust/sql/bootstrap_runtime_roles.sql:655-690`). grant를 여는 것은 AGENTS.md의 BYPASSRLS 예외 원칙에 어긋난다. 운영 역할 grant로 시험하지 않으면 초록이어도 운영에서는 `permission denied`가 되고, 스윕이 워크스페이스당 한 트랜잭션이라 그 워크스페이스의 만료 전부가 롤백되어 run이 `awaiting_approval`에 박힌다(`approval_sweep.rs:7-16`, `:124-155`). 또 만료는 사람이 아무 말도 하지 않은 일이다. 깨우면 에이전트가 사람 없이 새 제안을 올리는 24시간 주기 반복이 생길 수 있다(U-d는 만료 뒤 재제안을 허용한다).
+- **만료는 재호출이 파생해서 말한다.** `status='pending'`이고 `expires_at`이 지났으면 스윕 전이라도 재호출 응답은 `expired`다. 에이전트는 깨우는 신호 없이도 자기 `clientRequestId`로 언제든 확인할 수 있다.
+- 재호출 응답은 `{approvalId, status, expiresAtMs?, decidedAtMs?, ref?}`다. `status ∈ {pending, approved, rejected, expired, cancelled}`이다. `ref`는 `approved`일 때만 `{type, id}`다(채널 id·메시지 id 같은 비밀 아닌 값, `agent_run.output.ref`). 비밀 값은 어떤 경우에도 없다(먼저 제안 목록에는 1회 시크릿 행동이 없다). 응답은 호출한 에이전트 자신의 제안만 말한다(키가 에이전트별이다).
+- 결과 줄 본문에 채널 id가 평문으로 들어가는 현행(`channel_create_result_body`)은 유지한다.
+- 이 참조의 원인은 사람의 결정이라 에이전트 자기 발화가 자기 인박스와 도어벨을 도는 순환(ADR-0171 Q-LOOP)이 아니다. 결과를 받을 때마다 새 제안을 올리는 루틴이 있어도 U-d 한도가 묶는다.
+- owner 시나리오의 흐름: planner가 `channel.create`(비공개 `qa`)를 먼저 제안한다 → owner가 DM 카드를 탭한다 → 인박스에 `agent_run`이 와서 깨운다 → 재호출이 `approved`와 `ref`(새 채널 id)를 준다 → 새 채널이 연결의 승인 채널에 이미 올라 있으므로(V3) `oort_message_post`로 안내문을 올린다 → 돌려받은 `messageId`로 `message.pin`을 먼저 제안한다 → 같은 방식으로 결과를 확인한다.
+
+**시험 의무**: 승인·거절·사람 취소 각 한 번에 제안 에이전트 인박스에 `agent_run` 참조가 정확히 1건이다(재생해도 1건). 다른 에이전트 인박스는 0건이다. hosted 연결이 없는 제안자는 0건이다(관리형 회귀 0). **만료는 0건이다.** 스윕이 인박스 표를 쓰게 바꾸면 운영 역할 grant로 도는 시험이 실패해야 한다(이 슬라이스의 시험은 운영 역할 스위트로 돈다). `status='pending'`이고 `expires_at`이 지난 제안은 스윕 전에도 재호출이 `expired`로 답한다(파생을 지우면 실패). 재호출은 다섯 상태를 정확히 말하고 `approved`에서만 `ref`가 있다. 같은 id에 다른 내용이면 `Conflict`다.
+
+### U-g. 사람 CLI 토큰과의 경계 (#4617)
+
+사람 개발자 토큰(CLI·Claude Code·Codex가 쓰는 것)은 **사람의 권한 그대로** 일한다. 메시지 고정은 `PUT …/messages/{id}/pin`을 그 사람으로 부르면 되므로(U-0 7) 제안도 승인도 필요 없다. 이 증보의 문(`oort_action_initiate`)은 Agent Port의 에이전트 신원 전용이고, 사람 토큰으로는 열리지 않는다(Agent Port는 에이전트 bearer만 받는다). 사람 토큰의 범위·CLI 명령 규칙·로그인은 ADR-0216(#4617)이 정한다. 이 증보는 그 문서를 건드리지 않는다.
+
+**이 경계에는 조건이 하나 붙는다.** 결정 라우트는 `PrincipalKind::Human` 자격이면 누구든 받는다(`approvals.rs:504-513`). 같은 터미널에 에이전트 신원(Agent Port)과 사람 개발자 토큰이 함께 있으면(planner가 그 예다), 주입된 에이전트가 자기 제안을 같은 프로세스의 사람 토큰으로 승인할 수 있다. 그러면 DM 카드·앱에서 열기·생체 확인이 모두 무의미해지고 「에이전트는 사람 승인 없이 바꾸지 못한다」가 거짓이 된다. 반대로 카드 글(에이전트가 쓴 것)이 소유자의 CLI 에이전트에 주입돼 승인을 유도할 수도 있다. 그래서 다음을 건다.
+- **N3 머지의 선행 조건**: 개발자·CLI 토큰으로는 승인 결정을 하지 못한다. 승인은 사람이 앱(웹·데스크탑·폰)에서 하는 일이다. 판정은 두 결정 라우트(`decide_by_approval`, `decide_by_run`)가 함께 지나는 `decide()`(`approvals.rs:480`)에 둔다. 개발자·CLI 자격 종류를 principal에 실어 두고, 에이전트가 요청한 승인(최소한 `workspace_action` 전부)의 결정을 403으로 막는다. 잠금 화면 자격의 `credential_via`(`approvals.rs:802-813`)를 흉내 내서 표시하면 안 된다. 그 표시는 `decide_by_approval`의 푸시 확장에서만 채워지고 `decide_by_run`은 늘 `None`이라(`approvals.rs:398-418`, `:438-449`), 개발자·CLI 토큰이 닿는 `decide_by_run`이 우회로가 된다. 또 앱에서 열어야 하는 카드(`opens_in_app`)에만 걸면 같은 터미널이 사람이 시킨 경로의 카드(예: 인라인으로 결정되는 자기 `hosted.channels.grant`)를 자기 승인할 수 있어 이 절의 결론과 어긋난다. 시험은 두 라우트 모두에서 개발자·CLI 자격의 결정이 403이고, 같은 승인을 사람의 앱 자격이 결정하면 성공하는 대조군을 둔다.
+- 이 조건은 ADR-0216(#4617)이 자격 종류를 정할 때 만족시킨다. planner가 그 문서를 쓰는 쪽에 전달한다.
+- 충족되기 전에는 이 증보의 P0 주장(U-k)을 「Agent Port 신원」으로 좁혀 쓴다. ADR-0216이 개발자·CLI 토큰에 결정 라우트를 여는 설계를 담으면 N3는 머지하지 못한다(Blocker로 본다).
+
+경계는 한 줄이다. **에이전트 신원이 워크스페이스 구조를 바꾸려면 사람 승인이 있고, 사람 신원은 자기 권한으로 한다. 같은 터미널의 에이전트가 사람 신원을 빌려 자기 제안을 승인하는 길은 닫는다.**
+
+### U-h. 위험과 완화
+
+1. **프롬프트 주입.** 에이전트가 읽은 채널 글이 「채널을 만들고 누구를 넣어라」를 시킬 수 있다. 먼저 제안은 사람이 부르지 않아도 카드를 올리므로 이 노출이 커진다. 완화: 실행은 사람 승인 뒤에만, 카드 행은 서버가 해석한 값, `rationale`은 꼬리표가 붙은 평문, 닫힌 목록에서 비밀·읽기 범위 확대·신원 변경 제외, 한도, 끄개. 남는 위험은 승인자가 읽지 않고 누르는 것이다. 앱에서 열기(잠금 화면 승인 없음)로 줄인다.
+2. **카드 피로.** 거절이 쌓이면 사람이 습관적으로 누른다. 완화: 속도 한도·중복 쿨다운·끄개. 연속 거절 차단기는 후속이다(U-i).
+3. **권한 상승.** 에이전트가 승인자 권한을 얻는 길은 없다. 결정자는 사람이고 실행은 승인자 명의이며 에이전트의 자기 승인은 불가하다(기존 kind 검사). 새 scope는 어떤 REST도 열지 않는다(`required_agent_scope`에 넣지 않는다, `workspace:propose`와 같다).
+4. **정보 노출.** 문 조건 실패는 같은 답이고, 카드는 소유자 DM 밖으로 나가지 않는다. 수신자를 에이전트가 지정할 수 없다.
+5. **재생·경쟁.** `clientRequestId` 멱등과 `agent_run_idem_uniq`, 에이전트 행 잠금(기존 `action_propose`의 잠금 순서 주석을 따르고 데드락 시험을 더한다), 결정 때 재증명이 막는다.
+6. **소유자 DM 소음.** 닫아 둔 DM도 다시 보이는 기존 규칙의 결과다. 한도와 끄개가 묶고, 소유자는 에이전트 정지나 연결 해제로 끌 수 있다.
+
+### U-i. 이 증보가 열지 않는 것
+
+무승인 위임(V7) · 연속 거절 차단기 · 에이전트가 지정하는 카드 자리(C2)와 별도 승인함(C3) · `hosted.channels.grant`·`agent.*`·`invite.create`·`workspace.settings.update`의 먼저 제안 · 공개 채널을 먼저 만드는 일 · 에이전트가 소유자가 아닌 사람과 DM을 여는 일 · 팀 AI(oort 도우미)의 먼저 제안(팀 AI는 사람이 부른 run 안에서 일한다) · 사람 토큰 규칙(ADR-0216) · 카드·설정 화면 구현(UXUI 후속) · `docs/security/claims.yaml` 편집(정책 파일이라 구현 이슈가 owner audit과 함께 한다).
+
+### U-j. 구현 슬라이스
+
+한 슬라이스 = 한 이슈 = 한 브랜치·PR, base `track/engine`이다. 이슈는 owner 결재 뒤 planner가 만든다. 초안은 PR 본문에 있다.
+
+| ID | 내용 | 선행 | 크기 |
+|---|---|---|---|
+| N1 | 결과 알림(U-f): 결정 라우트의 승인·거절 arm에서 제안자 `agent_run` 인박스 참조(만료는 쓰지 않는다), `SELF_HOST_AGENT.md` 문구. 시험은 운영 역할 grant로 | 이 ADR Accepted | S |
+| N2 | `message.pin`·`message.unpin`(U-e): 레지스트리·대상 해석·실행기·핀 해시·감사 writer 공개·`opens_in_app`·OpenAPI·드리프트·도구 설명 | 이 ADR Accepted | M |
+| N3 | 먼저 제안 서버(U-a~U-d): scope CHECK migration, `workspace:initiate`, `oort_action_initiate`, 레지스트리 `initiative`, `RunTrigger::AgentInitiated`, hold 술어, DM 열기, 한도·중복, 끄개 키, 재증명, 재호출 상태, 감사 | N1, 이 ADR Accepted (N2는 순서 권장) | L (두 PR 권장: 문+생성 / 한도·감사·끄개·재증명) |
+| N4 (UXUI) | 카드 「먼저 제안」 표시·에이전트 글 꼬리표, 고정 카드 행, `actionRole.ts`·동의 화면 문구, 설정 끄개 토글. 계약 변경: 카드 props `origin`, 새 scope 문구 | N3 계약 | M |
+| N5 (ops) | planner 운영 절차: `oort_action_initiate`로 QA 채널 세팅(#4616의 증거 이슈에 기록) | N3, N4 | S |
+
+N2는 사람이 시킨 제안(handle 경로)에서도 열리므로 N3와 독립이다. 그 경로에서는 run 채널 안의 메시지만 대상이다(U-e). N1도 사람이 시킨 제안의 빈칸을 고친다.
+
+### U-k. 수용 기준과 ADR-0214 연결
+
+각 결정 절의 「시험 의무」가 수용 기준이다. 각 시험은 해당 분기를 지우면 실패해야 하고, 그 RED를 구현 PR 본문 사보타주 표에 남긴다. 아래 다섯은 특히 **독립 보안 검수가 사보타주할 대상**으로 넘긴다.
+1. 대기 중 `agent_initiated` run이 있어도 work 요청이 상한에 막히지 않는다(hold 술어).
+2. 소유자 없음·비소유자 confirm 연결·소유자의 역할 미충족·대상 채널 비멤버·정지는 같은 `Unavailable`이고 run·approval·새 DM이 0이다(조건 하나를 지우면 해당 사례가 카드를 만든다).
+3. `addProposer:true`인 먼저 제안 카드는 「이 에이전트도 참여」 행이 늘 있고, 승인으로 늘어나는 `approved_channel_ids`는 새로 만든 그 채널 하나뿐이다.
+4. 끄개가 꺼진 뒤 올라온 카드는 승인해도 실행 0이고 승인 pending이 유지된다. 거절은 된다.
+5. 승인·거절 뒤 제안 에이전트 인박스에 `agent_run` 참조가 정확히 1건이고, 만료 뒤에는 0건이다(스윕은 인박스를 쓰지 못한다. 운영 역할 grant로 시험한다).
+
+**주장 후보(ADR-0214 D1~D4).** 구현 이슈가 `docs/security/claims.yaml`에 아래 문장을 시험과 함께 더한다. 시험이 붙기 전에는 SECURITY.md 등 공개 문서에 쓰지 않는다. P0는 저장소 안 음성 대조(사보타주 증거)를 갖춘다.
+- (P0) 에이전트는 사람의 승인 없이 먼저 제안으로 워크스페이스를 바꿀 수 없다. 한 호출이 만드는 것은 run·승인·카드·(필요하면) 소유자 DM뿐이다. 범위는 Agent Port 신원이다. U-g의 선행 조건이 충족되기 전에는 사람 토큰까지 넓혀 쓰지 않는다.
+- (P0) 연결 scope와 워크스페이스 끄개가 없으면 먼저 제안은 열리지 않는다. scope가 없으면 도구가 목록에도 호출에도 없다.
+- (P1) 사람이 거절한 제안은 24시간 안에 같은 모양으로 다시 올라오지 않는다.
+- (P1) 에이전트는 사람이 카드에서 읽고 승인한 메시지만 고정하거나 푼다.
+
+### U-l. 독립 보안 검수 기록 (2026-10-27, r1, 새 검수자 1회)
+
+판정: **Blocker 0 · High 3 · Medium 9 · Low 8.** 설계대로 구현해도 승인 없이 상태가 바뀌거나 권한이 오르는 길은 찾지 못했다. 확인한 불변식: `approval.run_id NOT NULL`과 hold된 run의 선례, 스톨 스윕이 이 run을 끝내지 못함(`end_stalled_run_in_tx`는 `queued/running`만), 결정자는 활성 사람이면서 채널 멤버이고 에이전트의 자기 승인은 불가, 소유자 DM의 결정자는 구조상 소유자 한 명, 실행은 저장 인자를 다시 해석해 pins와 비교하고 승인자 권한으로만 일어남, `/pin`은 에이전트 scope 표 밖. 처리는 다음과 같다.
+
+| 지적 | 처리 |
+|---|---|
+| H1 U-f의 notifier 스윕 쓰기는 운영 역할로 실행 불가(`token`·인박스 grant 없음, 시험은 개발 역할에서만 초록) | **수정.** 만료는 인박스 참조를 쓰지 않고 재호출이 만료를 파생해서 말한다. N1은 승인·거절 arm만, 시험은 운영 역할 grant로(U-f, U-j, U-k 5). 같은 수정이 M6(만료가 사람 없이 도어벨을 울려 재제안 루프를 만듦)도 없앤다 |
+| H2 handle 경로의 `message.pin`·`message.unpin` 카드가 다른 채널의 메시지 내용을 run 채널 전원에게 노출 | **수정.** handle 경로는 대상 메시지가 run 채널 안일 때만, 먼저 제안은 소유자가 대상 채널 멤버일 때만. 교차 채널 카드 0 시험(U-e, U-b-4 6) |
+| H3 사람 개발자 토큰이 결정 라우트를 부르면 「사람 승인」이 같은 터미널 에이전트의 자기 승인 | **수정.** N3 머지의 선행 조건과 P0 주장 범위 한정(U-g, U-k). 확인에서 잔여 둘이 나왔다. `credential_via` 방식은 `decide_by_run`이 우회로가 되고, `opens_in_app` 카드만 막으면 handle 경로 카드를 자기 승인할 수 있다. 검수자의 한 줄 수정안(`decide()`에서 개발자·CLI 자격이 에이전트가 요청한 승인 전체를 결정하지 못하게)을 그대로 반영했다. ADR-0216 쪽이 만족시킬 항목으로 planner가 전달한다 |
+| 코드 인용 오류 8건 | **문구 정정**(U-0 2·6, U-a 계약, U-b-1·U-b-4, U-c 시험, U-d 감사) |
+| Medium 9 · Low 8 | **이 증보에서 설계를 바꾸지 않았다.** 목록과 이유는 PR 본문 「후속」에 있다. 문장이 사실과 달랐던 곳(M2·M3·M5·M8의 인용 부분)만 문구를 바로잡았다 |
+
+수정 확인(r1-c): High 세 곳의 수정 부분만 검수자가 1회 확인했다. H1·H2는 닫혔고 H3은 잔여 둘(위)이 나와 한 줄 수정안을 반영했다. 새 Blocker·High는 없다. 재검수 라운드는 없다. 확인에서 나온 Low 둘(재호출의 DB 시계와 결정 라우트의 앱 시계 경계 차이, 승인 arm 안에서 인박스 참조를 결과 줄보다 먼저 써야 하는 락 순서)은 PR 본문의 구현 이슈 초안 N1에 적었다.
+
+### U-m. 결재 대기 (owner 질문, 권장 표시)
+
+owner가 고를 것은 아래 여섯이다. 권장대로면 이 증보는 그대로 Accepted로 간다. 다르게 고르면 해당 절을 고쳐 다시 올린다. 질문 문장은 PR 본문에 쉬운 말로 적었다.
+
+| # | 절 | 질문 | 권장 | 다른 선택지 |
+|---|---|---|---|---|
+| Q1 | U-a | 시키지 않은 제안을 어디에 담나 | A3: 한 호출로 짧은 작업 하나를 서버가 열어 승인에 묶는다 | A1 작업 없는 승인(구조 변경이 큼) · A2 두 단계 |
+| Q2 | U-b-1 | 「먼저 제안」 허가를 어디에 적나 | P1: 연결할 때 관리자가 한 번 허락한다(권한 한 줄 추가, 바꾸려면 재연결) | P2 에이전트 허브의 스위치(아무 때나 켜고 끈다, 권한 줄에는 안 적힌다) |
+| Q3 | U-b-2 | 먼저 제안이 할 수 있는 일 | 4가지: 비공개 채널 만들기 · 멤버 추가 · 메시지 고정 · 고정 풀기 | 채널 만들기만 · 공개 채널 만들기와 에이전트 이름·프로필 변경까지 |
+| Q4 | U-b-2 | 채널을 만들 때 에이전트 자신도 그 채널에 들어가게 하나 | 들어간다. 카드에 「이 에이전트도 참여」가 늘 보인다 | 먼저 제안에서는 못 들어간다(들어가려면 사람이 따로 시킨다) |
+| Q5 | U-d | 먼저 제안 횟수 제한 | 시간당 6번 · 하루 20번 | 시간당 20 · 하루 100 · 제한 없음(V3-6처럼 승인만) |
+| Q6 | U-e | 메시지 고정·풀기도 승인 카드를 거치나 | 거친다 | 에이전트가 쓴 글만 승인 없이 · 모두 승인 없이 |
+
+planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자리는 소유자 1:1 DM(C1), 카드 수명 24시간, 대기 먼저 제안 2개, 결과 알림은 승인·거절 때 인박스 참조 + 같은 id 재호출(F2, 만료는 재호출이 파생), 고정 승인자는 기존 `admin`.
+
+### U-n. 구현 중 확인된 사실과 문구 정정 (2026-10-29, #4704 PR A·B)
+
+결정은 바뀌지 않았다. 코드로 N3를 짓다가 문장이 사실과 달랐거나 비어 있던 곳을 적는다(V3-13과 같은 방식).
+
+| 절 | 문장 | 정정·확정 |
+|---|---|---|
+| U-a ① | 「에이전트 `member` 행 잠금(…`lock_agent_and_count_pending_workspace_actions_in_tx`와 같은 잠금)」 | **에이전트별 advisory 락이 첫 락이다**(`momo_agent::initiative::lock_agent_initiative_in_tx`, 키는 `initiative_lock_key`). `member` 행의 `FOR NO KEY UPDATE`는 모든 메시지 쓰기·결정의 wake·신원 증명이 쥐는 `FOR SHARE`와 충돌해서 같은 에이전트의 동시 호출이 구조적으로 교착했다(PR A 보안 검수 M1). 사람이 시킨 제안(`oort_action_propose`)도 **같은 락을 첫 문장으로** 잡는다(PR B): 합계 대기 3개는 두 생산자가 나눠 쓰는 자리라서, 한쪽이 센 뒤 쓰기 전에 다른 쪽이 끼어들면 넷이 된다. 락이 첫째일 때만 이 문이 쥔 락 말고는 아무것도 기다리지 않는다 |
+| U-d 속도 | 「`agent_run`에서 `agent_initiated:<에이전트>:` 키의 행 수를 센다」 | `agent_member_id` + 접두 `agent_initiated:`(`run::AGENT_INITIATED_KEY_PREFIX`)로 센다 — 두 값은 한 생산자가 같은 입력으로 쓰므로 같은 행 집합이다. 부분 인덱스 `agent_run_initiative_rate_idx`(migration 155)가 받치고, 조회 문장은 같은 술어를 리터럴로 적는다(L5). 환경변수는 `MOMO_AGENT_INITIATIVE_PER_HOUR`(기본 6, 1..=60)·`_PER_DAY`(20, 1..=240)·`_TTL_HOURS`(24, 1..=168)이고 범위 밖은 가장 가까운 끝값으로, 숫자가 아니면 기본값으로 쓰며 부팅 때 한 번 경고한다(L6) |
+| U-d 중복 | 「같은 (에이전트, 행동, 서버가 해석한 정규화 인자)」 | 키는 `payload.initiative.key`에 서버가 해석 뒤에 쓴다(`pins` 밖: 결정이 `pins`를 지금의 해석과 비교한다). `channel.create`는 이름을 소문자로 하고 `-`·`_`를 빼고 끝 숫자를 떼어 줄인다(`qa`·`QA`·`qa2`·`qa-2`가 한 키, `qa-team`은 다른 키, 숫자뿐인 이름은 그대로). 나머지는 id다(`channel.member.add`는 채널 id + 사람 id 집합, 핀은 메시지 id). 쿨다운은 **거절(`rejected`)만** 시작한다: 만료는 아무도 「그만」이라 하지 않은 것이고, `cancelled`는 사람의 run 취소뿐 아니라 시스템 정리에서도 나오므로 사람의 말로 읽지 않는다 |
+| U-d 재증명 | 「제안 에이전트가 활성…연결이 active·증명됐으며…결정자가 현재 소유자」 | 카드가 선 **그 연결**을 `payload.initiative.connection_id`에 적고(`card_bookkeeping`/`card_connection_id` 한 쌍), 결정 때 그 연결이 **여전히 그 에이전트의 `active`·증명된 연결이고 현재 자격증명이 revoke되지 않았는지**를 본다(`momo_auth::hosted_connection_stands_in_tx` — 정의는 한 곳). 자격증명의 **만료는 보지 않는다**: OAuth 연결의 `active_token_id`는 30분짜리 access token이라 하루 기다린 카드에서는 늘 만료돼 있고(루틴), revoke(운영자의 긴급 폐기·refresh 재사용 탐지)는 의도된 일이라 카드를 끝낸다(PR B 보안 검수 H1·2회차 Medium-1). 끊었다 다시 만든 연결은 다른 id라 옛 카드는 살아나지 않는다. 증명된 연결 id는 그대로 **해석기(핀의 "덮임")와 `channel.create` 실행기(잠금·`approved_channel_ids` 추가·`channels_granted` 감사)로 넘어간다** — 한 군데만 고치면 같은 읽기를 쓰는 뒷 단계가 만료된 토큰을 「연결 없음」으로 읽어 핀은 409, `channel.create`는 에이전트만 방에 앉히고 덮임·감사를 건너뛰는 반쪽 실행이 된다(2회차 High-1). 이 연결이 증명과 쓰기 사이에 끝나면(경주) 쓰기 전에 거절한다 — 먼저 제안 카드는 반쪽으로 실행되지 않는다. scope·에이전트(활성·미정지)는 `initiative_scope_and_agent_stand_in_tx`, 연결 확인자 == 소유자(L2)와 결정자 == 현재 소유자는 문의 조건 4와 같은 술어(`initiative_facts_in_tx`)로 읽고, 끄개는 문과 같은 읽기(`switch_is_on`)다. 연결 표지가 없는 카드는 닫힌 쪽(`action_args_invalid`)이다. 결정자 비교는 DM이 두 사람뿐이라 실제 경로에서는 겹치는 띠지만, 방에 소유자가 아닌 admin이 있게 되면(미래 경로·데이터 보정) 그 사람의 탭이 소유자 눈으로 그려진 카드를 실행하지 못하게 하는 유일한 지점이다 — 시험이 세 번째 admin으로 잰다. 사람이 시킨 카드는 이 경로를 타지 않고 지금처럼 살아 있는 연결을 신선한 자격증명으로 찾는다(후속 참고) |
+| U-d 감사(결정 쪽) | 「어느 행에도 인자 값·rationale·메시지 본문·채널 이름이 없다」 | 이 문장은 **새 행(`opened`·`refused`)과 결정 쪽 `approval.*` 행**에 적용한다. 일반 결정 이벤트(`decision_event_payload`)는 저장된 payload 전체를 싣는데 먼저 제안 카드에서 그것은 에이전트의 글(`rationale`·고른 이름)이라, 감사용 사본에서는 `payload`를 빼고 `origin`만 더한다(`decision_audit_detail`; PR B 보안 검수 M2). **도메인 행**(`channel.created` 등)은 V6가 정한 모양 그대로다 — 사람이 승인해 이미 세상에 존재하게 된 사실(만들어진 채널의 이름)을 적는 기존 행이고, 먼저 제안이라고 형태가 바뀌지 않는다(`origin`만 더한다) |
+| U-d 감사 | 「합쳐서 가려지는 횟수는 후속에서 다음 창의 첫 행에 싣는 방안을 본다」 | 구현했다. (워크스페이스, 에이전트, reason)마다 한 시간 창을 `agent_initiative_refusal`(migration 155)이 쥐고, 첫 거절만 행을 쓰며 나머지는 `suppressed`를 올리고, 창이 지난 뒤 첫 거절의 행이 그 수를 `detail.suppressed`로 싣고 0에서 다시 시작한다(항상 키가 있고 없으면 0). 이미 쓴 감사 행은 고치지 않는다. 행이 없는 거절: 문 1·2의 실패(이 자격증명은 먼저 제안 자격이 아니다), 트랜잭션 전에 스키마가 거르는 인자, 같은 id의 재호출(읽기이고 아무것도 쓰지 않는다) — 아홉 이유 밖이고 열 번째를 만들지 않았다 |
+| U-k 5 | 「정지는 같은 `Unavailable`」 | 정지·연결 해제된 에이전트는 도구 목록이 비어(`resolve_hosted_tool_identity_in_tx`가 `paused=false`를 요구) **어느 도구든 「알 수 없는 도구」**(400, -32602)로 답한다. `Unavailable`은 목록과 호출 사이에 정지가 끼어든 경우의 몫이다 |
+| U-c 시험 의무 | 「비멤버 admin은 거절된다(현행은 403)」 | 결정 라우트는 소유자 DM 밖의 누구에게든 **없는 승인과 같은 404**로 답한다(인플레이스 카드와 같은 분기, 두 표지 중 하나면 먼저 제안 카드). 미리보기(`avatar-preview`)는 먼저 제안이 사진을 올리지 않으므로 처음부터 모두에게 404다 |
+| U-f 알림 | 「승인·거절 때 제안 에이전트 인박스에 `agent_run` 참조가 정확히 1건」 | 인박스 참조의 권한 술어(`append_reference_in_tx`)는 자격증명이 **신선**할 것을 요구한다(인박스는 그 자격증명으로 읽는 것이라서). 자격증명이 만료된 연결에서는 승인·거절이 성립하되 참조가 쓰이지 않는다(관리형·연결 없는 제안자와 같은 「조용히 0건」). 에이전트는 같은 `clientRequestId`로 다시 물어 `approved`·`ref`를 받는다 — U-f가 처음부터 재호출을 정본으로 둔 이유다. 갱신 뒤 알림을 받게 하려면 별도 결정이 필요하다(후속) |

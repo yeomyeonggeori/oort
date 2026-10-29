@@ -33,6 +33,10 @@ pub mod attachment_reclaim;
 pub mod auth;
 pub mod config;
 pub mod cors;
+/// ADR-0216 (#4660): the developer-token door — limits, audit and the refresh wrapper.
+pub mod dev_access;
+/// ADR-0216 (#4660): the request-extension marker a developer token travels with.
+pub mod dev_credential;
 pub mod dto;
 pub mod error;
 /// ADR-0203 증보 2026-10-25 (#4337): which platform this process runs on, as a closed enum.
@@ -143,6 +147,12 @@ impl AgentPortState {
 pub struct EphemeralState {
     pub settings: EphemeralSettings,
     pub publisher: Option<momo_ephemeral::EphemeralPublisher>,
+    /// The read half (ADR-0160 ②, #4692): 「who is connected to this workspace」,
+    /// asked of Centrifugo's own presence table. Built from the **same** credential
+    /// as `publisher` and absent exactly when it is, so an instance that never
+    /// configured the transport reports no availability (the roster then carries no
+    /// `online`, which clients read as unknown, never as offline).
+    pub presence_reader: Option<momo_ephemeral::PresenceReader>,
 }
 
 impl EphemeralState {
@@ -162,9 +172,19 @@ impl EphemeralState {
                 }
             }
         });
+        let presence_reader = settings.transport().and_then(|(url, key)| {
+            match momo_ephemeral::PresenceReader::new(url, key) {
+                Ok(reader) => Some(reader),
+                Err(error) => {
+                    tracing::error!(%error, "presence reader unavailable; roster carries no availability");
+                    None
+                }
+            }
+        });
         EphemeralState {
             settings,
             publisher,
+            presence_reader,
         }
     }
 }
@@ -217,6 +237,11 @@ pub struct AppState {
     /// ADR-0162 Agent Port transport policy. It carries no session or product
     /// data; only trusted origin input and process-local abuse counters.
     pub agent_port: Arc<AgentPortState>,
+    /// ADR-0216 D9 (#4660) — the developer-token door's budgets (per token, per
+    /// member, the send row per token). Knobs only: the counters live in
+    /// `agent_port.limiter` under `dev:` keys, one more set of axes on that one map.
+    /// **On by default and never off** (0 and garbage keep the default).
+    pub dev_access: Arc<config::DevAccessConfig>,
     /// Mention→run routing knobs (B5.2). The default is the shipped one, not a
     /// disabled state: routing an `@mention` to its agent is the product, so an
     /// instance that configured nothing still does it.
@@ -344,6 +369,7 @@ impl AppState {
             settings: Arc::new(SettingsConfig::default()),
             rate_limit: Arc::new(RateLimitState::default()),
             agent_port: Arc::new(AgentPortState::default()),
+            dev_access: Arc::new(config::DevAccessConfig::default()),
             mentions: Arc::new(MentionSettings::default()),
             scheduler: Arc::new(SchedulerSettings::default()),
             scheduler_blocked: Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -584,6 +610,15 @@ impl AppState {
         self
     }
 
+    /// Attach the developer-token door's budgets (ADR-0216 D9, #4660). Normalized on
+    /// the way in, so a hand-built config with a 0 keeps that budget's default rather
+    /// than switching the axis off. The counters are not replaced here: they live in
+    /// the Agent Port limiter map, which [`AppState::with_agent_port`] owns.
+    pub fn with_dev_access(mut self, config: config::DevAccessConfig) -> Self {
+        self.dev_access = Arc::new(config.normalized());
+        self
+    }
+
     /// Attach the mention-routing knobs (B5.2).
     pub fn with_mentions(mut self, settings: MentionSettings) -> Self {
         self.mentions = Arc::new(settings);
@@ -685,7 +720,13 @@ pub fn build_app(state: AppState) -> Router {
     let protected = Router::new()
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
+            // ADR-0216 D4 · R12 (#4660): the developer-token body allow-list, on the send
+            // only and inside the member write budget. It reads a body only when the
+            // request carries the developer marker; every other send passes untouched.
             post(routes::messages::send)
+                .route_layer(axum::middleware::from_fn(
+                    routes::messages::dev_send_body_gate,
+                ))
                 .route_layer(member_write(rate_limit::MemberWrite::MessageSend))
                 .get(routes::messages::history),
         )
@@ -929,6 +970,45 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/members/{member}/password-reset",
             post(routes::password::issue_password_reset),
+        )
+        // ADR-0216 (#4660) — developer tokens. The first three paths take a person's session
+        // only: the developer door's closed table does not list them, and each handler refuses
+        // a developer token again. `…/dev-access/self` is the reverse — a developer token's own
+        // whoami (L1) and logout (L2), the two rows of the table that live here; its template
+        // must stay byte-identical to `momo_auth::dev_token::DEV_ROUTE_TABLE`.
+        .route(
+            "/v1/workspaces/{ws}/dev-access",
+            get(routes::dev_access::policy),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/credentials",
+            get(routes::dev_access::list).post(routes::dev_access::issue),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/credentials/{id}",
+            delete(routes::dev_access::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/self",
+            get(routes::dev_access::whoami).delete(routes::dev_access::revoke_self),
+        )
+        // ADR-0216 D6 (나) / #4700 — the person's half of `oort login`: preview, approve (the
+        // current password again) and deny a browser login request. Person-session only, like the
+        // four routes above: not in the developer door's closed table (403 at the door), and each
+        // handler refuses a developer token again. The unauthenticated half of the flow is the
+        // OAuth authorization server below (`/v1/oauth/*`), which gained the built-in `oort-cli`
+        // client and mounts nothing new.
+        .route(
+            "/v1/workspaces/{ws}/dev-access/authorization-requests/preview",
+            get(routes::dev_login_oauth::preview),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/authorization-requests/approve",
+            post(routes::dev_login_oauth::approve),
+        )
+        .route(
+            "/v1/workspaces/{ws}/dev-access/authorization-requests/deny",
+            post(routes::dev_login_oauth::deny),
         )
         // #1768 — ADR-0128 D2/D3. Role/status/ban mutations; leave `/me` stays
         // the more specific sibling registered above.
@@ -1914,6 +1994,24 @@ pub fn build_app(state: AppState) -> Router {
             auth::require_principal,
         ));
 
+    // ADR-0216 D5 / #4661 — the human MCP: a developer token's MCP door.
+    //
+    // **Not in `protected`**, on purpose, for the reason `/v1/mcp/agent-port` is not: a generic
+    // bearer door answers each credential class its own way (an agent bearer's closed route list
+    // is a 403; a session JWT is admitted), and ADR-0216 R1(b) wants every non-developer
+    // credential to get the one 401 an unknown string gets. `routes::human_mcp::door` takes only
+    // developer envelopes, answers the rest without the database, and hands the former to the
+    // very door the REST rows use (`dev_access::require_dev_principal`) — so the closed table
+    // (L8, `POST /v1/mcp/me`), the budgets and the `used` audit row are that door's, not a copy.
+    // A router-level `route_layer` wraps the method-mismatch answer too: a developer token's GET
+    // or DELETE here is the door's own 403, and nothing but a POST is ever answered 200.
+    let human_mcp = Router::new()
+        .route(routes::human_mcp::ROUTE, post(routes::human_mcp::post))
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            routes::human_mcp::door,
+        ));
+
     // MOMO-605: taken before `with_state` moves the state below.
     let cors = state.cors.clone();
     // ADR-0151 / ADR-0169: the in-process upload endpoint exists when the
@@ -2100,7 +2198,8 @@ pub fn build_app(state: AppState) -> Router {
             "/hooks/{token}",
             post(routes::webhook_ingress::receive_slack),
         )
-        .merge(protected);
+        .merge(protected)
+        .merge(human_mcp);
 
     // The stand-in for Google's resumable session URL. Public for the same
     // reason that URL is: the client uploading has no bearer to present to it,

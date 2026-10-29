@@ -345,6 +345,37 @@ describe("memberRowLabel", () => {
     );
   });
 
+  it("says what the avatar-corner dot says: availability and declared status, humans only (#4692)", () => {
+    // The dot is shape and colour; the accessible name is where it becomes a word.
+    const NOW = 1_800_000_000_000;
+    const person = (over: Partial<RosterMember>) =>
+      member({
+        id: "00000000-0000-7000-8000-0000000009a4",
+        displayName: "박서연",
+        handle: "seoyeon",
+        role: "admin",
+        ...over,
+      });
+    expect(memberRowLabel(person({ online: true }), null, undefined, NOW)).toBe(
+      "박서연 @seoyeon, 관리자, 온라인, 다이렉트 메시지 열기"
+    );
+    expect(memberRowLabel(person({ online: false }), null, undefined, NOW)).toBe(
+      "박서연 @seoyeon, 관리자, 오프라인, 다이렉트 메시지 열기"
+    );
+    // A declared status wins over connection, exactly as the dot does.
+    expect(
+      memberRowLabel(person({ online: true, presenceStatus: "away" }), null, undefined, NOW)
+    ).toBe("박서연 @seoyeon, 관리자, 자리 비움, 다이렉트 메시지 열기");
+    // Unknown availability says nothing: absence is not 오프라인.
+    expect(memberRowLabel(person({}), null, undefined, NOW)).toBe(
+      "박서연 @seoyeon, 관리자, 다이렉트 메시지 열기"
+    );
+    // An agent's liveness is its own chip; `online` is never read for it.
+    expect(
+      memberRowLabel({ ...INTERN_AGENT, online: true } as RosterMember, DEMO.displayName)
+    ).toBe("김인턴 @kim-intern, 에이전트, 데모 사용자 님이 관리, 다이렉트 메시지 열기");
+  });
+
   it("includes custom status text and not the emoji when both are present", () => {
     const working = member({
       id: MINSU.id,

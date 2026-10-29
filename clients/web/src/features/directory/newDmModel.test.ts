@@ -61,21 +61,40 @@ describe("newDmCandidates", () => {
 
 describe("peerDot", () => {
   const now = 1_000;
-  it("사람은 스스로 정한 자리 비움·방해 금지만 점이 된다", () => {
-    expect(peerDot(member({ presenceStatus: "away" }), now)).toBe("away");
-    expect(peerDot(member({ presenceStatus: "dnd" }), now)).toBe("dnd");
-    expect(peerDot(member({ presenceStatus: "auto" }), now)).toBeNull();
-    expect(peerDot(member({}), now)).toBeNull();
+  const word = (m: Parameters<typeof peerDot>[0]) => peerDot(m, now)?.label ?? null;
+
+  it("사람: 선언 상태(자리 비움·방해 금지)가 먼저이고 접속 여부와 무관하다", () => {
+    expect(word(member({ presenceStatus: "away" }))).toBe("자리 비움");
+    expect(word(member({ presenceStatus: "dnd" }))).toBe("방해 금지");
+    expect(word(member({ presenceStatus: "away", online: true }))).toBe("자리 비움");
+    expect(word(member({ presenceStatus: "dnd", online: false }))).toBe("방해 금지");
   });
-  it("만료된 방해 금지는 점이 아니다", () => {
-    expect(peerDot(member({ presenceStatus: "dnd", dndUntilMs: 999 }), now)).toBeNull();
-    expect(peerDot(member({ presenceStatus: "dnd", dndUntilMs: 5_000 }), now)).toBe("dnd");
+
+  it("사람: 선언이 없으면 접속 여부를 말한다 — 접속 없음이 「방해 금지」로 읽히면 안 된다 (#4692)", () => {
+    expect(word(member({ online: true }))).toBe("온라인");
+    expect(word(member({ online: false }))).toBe("오프라인");
+    expect(word(member({ presenceStatus: "auto", online: false }))).toBe("오프라인");
+    // 에이전트의 「연결됨」이 아니라 사람의 「온라인」이다.
+    expect(word(member({ online: true }))).not.toBe("연결됨");
   });
-  it("에이전트는 호스트가 닿아 있을 때만 점이다", () => {
-    expect(peerDot(member({ kind: "agent", hostOnline: true }), now)).toBe("online");
-    expect(peerDot(member({ kind: "agent", hostOnline: false }), now)).toBeNull();
-    expect(peerDot(member({ kind: "agent" }), now)).toBeNull();
+
+  it("사람: 접속 여부를 모르면 아무 말도 하지 않는다 — 모름은 오프라인이 아니다", () => {
+    expect(word(member({ presenceStatus: "auto" }))).toBeNull();
+    expect(word(member({}))).toBeNull();
   });
+
+  it("만료된 방해 금지는 선언이 아니다: 접속 여부로 내려가고, 모르면 말이 없다", () => {
+    expect(word(member({ presenceStatus: "dnd", dndUntilMs: 999 }))).toBeNull();
+    expect(word(member({ presenceStatus: "dnd", dndUntilMs: 999, online: true }))).toBe("온라인");
+    expect(word(member({ presenceStatus: "dnd", dndUntilMs: 5_000 }))).toBe("방해 금지");
+  });
+
+  it("에이전트는 호스트가 닿아 있을 때만 「연결됨」이고 `online` 은 읽지 않는다", () => {
+    expect(word(member({ kind: "agent", hostOnline: true }))).toBe("연결됨");
+    expect(word(member({ kind: "agent", hostOnline: false, online: true }))).toBeNull();
+    expect(word(member({ kind: "agent" }))).toBeNull();
+  });
+
   it("상대를 모르면 null이다", () => {
     expect(peerDot(null, now)).toBeNull();
   });

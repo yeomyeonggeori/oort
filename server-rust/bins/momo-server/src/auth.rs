@@ -52,7 +52,13 @@
 //! 2. **`momo_agent_v1.…` envelope** → the agent bearer. The route must be on the
 //!    allow-list (`momo_auth::required_agent_scope`) *before* the database is
 //!    touched, and the row must carry that scope.
-//! 3. **anything else** → the App JWT path above.
+//! 3. **`momo_dev_v1.…` / `momo_devr_v1.…` envelope** → the human developer token
+//!    (ADR-0216, #4660), in [`crate::dev_access`]. The closed table
+//!    (`momo_auth::dev_token::required_dev_scope`, keyed on the router's
+//!    `MatchedPath` template, never the raw path) is judged *before* the database;
+//!    a refresh envelope or a malformed one is the same 401 as an unknown string;
+//!    nothing on this arm ever falls through to the App JWT path.
+//! 4. **anything else** → the App JWT path above.
 //!
 //! The work-host branch above is the credential B2.6 left out. It stays thin on
 //! purpose: this module decides *which* credential a request presented, and
@@ -725,6 +731,14 @@ pub async fn require_principal(
             authenticate_agent(&state, &raw_token, claimed_workspace, &method, &path).await?;
         request.extensions_mut().insert(principal);
         return Ok(next.run(request).await);
+    }
+    // ADR-0216 (#4660): a developer envelope — `momo_dev_v1…` (card, access) or
+    // `momo_devr_v1…` (refresh), well-formed or not — is the developer door's alone.
+    // Whatever it decides is final: such a bearer never falls through to the App JWT
+    // verifier below. The closed table, the lookup, the budgets and the audit live in
+    // `crate::dev_access`.
+    if crate::dev_access::is_dev_envelope(&raw_token) {
+        return crate::dev_access::require_dev_principal(&state, &raw_token, request, next).await;
     }
     let mut narrow: Option<NarrowToken> = None;
     let mut principal = match verify_app_access(&raw_token, &state.jwt_secret) {

@@ -22,14 +22,17 @@ pub const HOSTED_AGENT_INERT_BASE_URL: &str = "https://hosted-agent.invalid/disa
 /// connection and the only ones its credential may carry.
 ///
 /// `workspace:propose` (ADR-0186 D2) is the seventh and the first one that is
-/// **not** about reading or speaking. It is here because a scope a human cannot
+/// **not** about reading or speaking. `workspace:initiate` (ADR-0186 증보 v5 U-b,
+/// #4704) is the eighth: the first scope that lets an agent raise a card **nobody
+/// asked for**. It is never in a default request, and an existing connection's
+/// approval is unchanged by its arrival (migration 154 only widens the vocabulary). It is here because a scope a human cannot
 /// approve is a tool nobody can ever reach; it is *not* in
 /// `momo_auth::agent_credential`'s grantable set, because generic agent bearers
 /// never reach Agent Port tools at all
 /// ([`resolve_hosted_tool_identity_in_tx`] requires a hosted credential class),
 /// and it is not in the client's default request list (ADR-0186 D2: 기본 페어링은
 /// 요청하지 않는다).
-pub const HOSTED_AGENT_SCOPES: [&str; 7] = [
+pub const HOSTED_AGENT_SCOPES: [&str; 8] = [
     "agent:port:connect",
     "agent:inbox:read",
     "messages:read",
@@ -37,6 +40,7 @@ pub const HOSTED_AGENT_SCOPES: [&str; 7] = [
     "agent:jobs:read",
     "agent:runs:callback",
     "workspace:propose",
+    "workspace:initiate",
 ];
 
 const SECRET_BYTES: usize = 32;
@@ -1013,6 +1017,44 @@ pub async fn active_hosted_connection_in_tx(
     .await
 }
 
+/// Is `connection_id` still `agent_member_id`'s own connection — `active`, proved, and its current
+/// credential **not revoked**? The one question a long-waiting card must ask of the connection it
+/// was raised through (ADR-0186 증보 v5 U-d 「재증명」).
+///
+/// It is [`active_hosted_connection_in_tx`] with the one clause a day-old card cannot meet taken
+/// out: the credential's **expiry**. An OAuth connection's `active_token_id` is a 30-minute access
+/// token that is renewed when the agent next calls, so by the time a person taps a card that waited
+/// for them it has long lapsed — and a lapsed credential is routine, not a reason to refuse the
+/// person's yes. A **revoked** one is deliberate (an operator's emergency revoke, a refresh-token
+/// reuse, a disconnect) and still ends the card; so does a connection that is no longer `active`,
+/// not proved, another agent's, or a different id (a connection torn down and made again is another
+/// connection). Nothing here reads the bearer: the caller holds none (a person is deciding).
+pub async fn hosted_connection_stands_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS ( \
+           SELECT 1 FROM hosted_agent_connection hc \
+             JOIN token t ON t.workspace_id=hc.workspace_id AND t.id=hc.active_token_id \
+            WHERE hc.workspace_id=$1 AND hc.id=$2 AND hc.agent_member_id=$3 \
+              AND hc.status='active' AND hc.proved_at IS NOT NULL \
+              AND t.kind='agent_bearer' \
+              AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+              AND t.revoked_at IS NULL \
+              AND t.hosted_connection_id=hc.id AND t.actor_member_id=hc.agent_member_id \
+              AND t.audience=$4)",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .bind(agent_member_id)
+    .bind(HOSTED_AGENT_PORT_AUDIENCE)
+    .fetch_one(&mut *conn)
+    .await
+}
+
 /// One hosted connection may name at most this many approved channels
 /// (ADR-0186 증보 V5). `confirm`/`consent` never had a ceiling; the grant paths
 /// that widen a connection *after* the human's confirm do, so a connection's
@@ -1037,6 +1079,26 @@ pub async fn lock_active_hosted_connection_in_tx(
     else {
         return Ok(None);
     };
+    Ok(
+        lock_hosted_connection_in_tx(conn, workspace_id, agent_member_id, connection_id)
+            .await?
+            .map(|count| (connection_id, count)),
+    )
+}
+
+/// [`lock_active_hosted_connection_in_tx`] for a connection the caller has **already named and
+/// proved** (by [`hosted_connection_stands_in_tx`]): lock that very row `FOR UPDATE` and say how
+/// many channels it covers, or `None` if it is not the agent's `active`, proved connection. The
+/// lock order is the same (the connection is the first lock of the hosted canon).
+///
+/// For the decision of a card that waited for its owner: the connection it was raised through is
+/// the one to write coverage onto, whether or not the agent's credential has lapsed meanwhile.
+pub async fn lock_hosted_connection_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+) -> Result<Option<usize>, sqlx::Error> {
     let count: Option<i32> = sqlx::query_scalar(
         "SELECT cardinality(approved_channel_ids) FROM hosted_agent_connection \
           WHERE workspace_id=$1 AND id=$2 AND agent_member_id=$3 \
@@ -1047,7 +1109,7 @@ pub async fn lock_active_hosted_connection_in_tx(
     .bind(agent_member_id)
     .fetch_optional(&mut *conn)
     .await?;
-    Ok(count.map(|count| (connection_id, usize::try_from(count).unwrap_or(usize::MAX))))
+    Ok(count.map(|count| usize::try_from(count).unwrap_or(usize::MAX)))
 }
 
 /// Widen a **live** hosted connection's approved channels by `channel_ids` and

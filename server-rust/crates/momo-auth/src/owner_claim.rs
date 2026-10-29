@@ -113,6 +113,73 @@ pub async fn resolve_claim_workspace(
         .await
 }
 
+/// What a claim token **already** refuses, by reading only — it takes no lock of its own:
+/// no such token, spent, expired, an owner-bootstrap token for an account that has a
+/// password by now, or a member who is not active. `None` means nothing this read can see
+/// refuses it; [`consume_claim_in_tx`] judges the same things again under the caller's
+/// locks and its answer is the one that counts.
+///
+/// **Why it exists.** `POST /v1/claim` is public, and it takes the workspace's
+/// membership lock exclusively (ADR-0215 증보 2 K3). A request that holds or waits for
+/// that lock makes every sign-in of the workspace wait or retry, so a token that can
+/// never be spent must not be able to do that: the route asks this first and answers a
+/// refusal with the answers [`consume_claim_in_tx`] has, *before* the lock. It asks again
+/// once it holds the lock, where nothing can change underneath the read, so that what
+/// became true while it waited (a suspension, a claim that spent the token first) is
+/// refused before anything is written, in the same words.
+///
+/// **Why a read without a lock is enough before the lock.** It can only be wrong in the
+/// safe direction. A token is never un-spent and never un-expired, an account never
+/// loses its password, and a member that looks inactive because a reinstatement is in
+/// flight is refused, not admitted. A token it lets through is read again under the lock.
+///
+/// The order of the refusals is [`consume_claim_in_tx`]'s, so the same request gets the
+/// same answer from either.
+pub async fn claim_refusal_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    token: &str,
+) -> Result<Option<ClaimMutation>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT oc.kind::text AS claim_kind, \
+                oc.expires_at <= now() AS expired, \
+                oc.consumed_at IS NOT NULL AS consumed, \
+                (h.password_hash IS NOT NULL AND h.password_hash <> '') AS password_present, \
+                (m.status = 'active' AND m.deleted_at IS NULL) AS member_active \
+           FROM credential_claim oc \
+           JOIN human h \
+             ON h.member_id = oc.member_id \
+            AND h.workspace_id = oc.workspace_id \
+           JOIN member m \
+             ON m.id = oc.member_id \
+            AND m.workspace_id = oc.workspace_id \
+          WHERE oc.workspace_id = $1 \
+            AND oc.token_hash = digest($2::text, 'sha256')",
+    )
+    .bind(workspace_id)
+    .bind(token)
+    .fetch_optional(&mut *conn)
+    .await?;
+
+    let Some(row) = row else {
+        return Ok(Some(ClaimMutation::NotFound));
+    };
+    let claim_kind: String = row.try_get("claim_kind")?;
+    if row.try_get::<bool, _>("consumed")? {
+        return Ok(Some(ClaimMutation::AlreadyUsed));
+    }
+    if row.try_get::<bool, _>("expired")? {
+        return Ok(Some(ClaimMutation::Expired));
+    }
+    if claim_kind == CLAIM_KIND_OWNER_BOOTSTRAP && row.try_get::<bool, _>("password_present")? {
+        return Ok(Some(ClaimMutation::PasswordPresent));
+    }
+    if !row.try_get::<bool, _>("member_active")? {
+        return Ok(Some(ClaimMutation::NotFound));
+    }
+    Ok(None)
+}
+
 pub async fn consume_claim_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

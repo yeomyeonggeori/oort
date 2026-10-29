@@ -28,7 +28,7 @@
 //! an answer still marked `streaming: true` than it can be `succeeded` without
 //! the answer.
 //!
-//! ## The three rules a producer must not get wrong
+//! ## The rules a producer must not get wrong
 //!
 //! 1. **The accumulator is the writer's.** `body` on the wire is absolute — the
 //!    whole text so far, every time — so a retry re-states rather than
@@ -51,10 +51,16 @@
 //!    merged in here rather than trusted to the caller: ADR-0155's defensive
 //!    render ("run ended, stream still open") has no other way to find the run
 //!    behind a half-written message.
+//! 5. **The opening write fixes the answer's place.** `root_id` is the thread the
+//!    request was made in (`GatewayRunSnapshot::trigger_root_id`, #4622), `None` for
+//!    the main flow. The commit joins this row rather than writing its own, so a
+//!    stream opened in the main flow for a request made inside a thread would leave
+//!    the answer outside it for good; the constructor takes the root for that reason
+//!    and has no default.
 
 use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
-    open_stream_message_for_run_in_tx, opening_stream_props, send_message_in_tx,
+    open_stream_message_for_run_in_tx, opening_stream_props, send_thread_notice_in_tx,
     stream_message_body_in_tx, InteractionRefused, MessageType, NewMessage, StreamCloseOutcome,
     StreamEdit, StreamOutcome, STREAM_PROPS_KEY,
 };
@@ -123,6 +129,8 @@ pub struct MessageStream {
     /// Doubles as the opening write's `client_msg_id` — see rule 3.
     run_id: Uuid,
     reply_to_id: Option<Uuid>,
+    /// The thread the answer belongs in, `None` for the main flow (#4622) — see rule 5.
+    root_id: Option<Uuid>,
     /// What the message says about itself, from its first slice — see rule 4.
     props: Value,
     message_id: Option<Uuid>,
@@ -131,6 +139,10 @@ pub struct MessageStream {
 }
 
 impl MessageStream {
+    /// `root_id` is a required argument on purpose (rule 5): a stream that could be built without
+    /// deciding its thread would open every answer in the main flow, and the commit — a dedupe onto
+    /// this row — could never move it. The extra argument is the price of that.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         pool: PgPool,
         workspace_id: Uuid,
@@ -138,6 +150,7 @@ impl MessageStream {
         author_member_id: Uuid,
         run_id: Uuid,
         reply_to_id: Option<Uuid>,
+        root_id: Option<Uuid>,
         props: Value,
     ) -> Self {
         MessageStream {
@@ -147,6 +160,7 @@ impl MessageStream {
             author_member_id,
             run_id,
             reply_to_id,
+            root_id,
             props: opening_props(props, run_id),
             message_id: None,
             rev: 0,
@@ -230,12 +244,17 @@ impl MessageStream {
         let author_member_id = self.author_member_id;
         let run_id = self.run_id;
         let reply_to_id = self.reply_to_id;
+        let root_id = self.root_id;
         let body = self.visible().to_string();
         let props = self.props.clone();
 
         let sent = with_tenant_tx(&self.pool, workspace_id, move |conn| {
             Box::pin(async move {
-                send_message_in_tx(
+                // The spine that keeps the thread's rollup (#4622): when `root_id` is
+                // set this is the write that creates the answer *inside* the thread,
+                // so it is also the one that must move the root's 「답글 N개」. With
+                // `root_id` `None` it is the write it always was.
+                send_thread_notice_in_tx(
                     conn,
                     workspace_id,
                     NewMessage {
@@ -249,7 +268,10 @@ impl MessageStream {
                         // end of the turn presents the same `client_msg_id` and
                         // so dedupes, and a deduped send updates nothing.
                         props,
-                        root_id: None,
+                        // Rule 5 — the place is fixed by the *opening* write too. The commit
+                        // dedupes onto this row and a deduped send updates nothing, so a
+                        // root left out here is a root the answer never gets.
+                        root_id,
                         // ADR-0148 규칙 6 — the answer quotes the utterance that
                         // raised it, exactly as `commit_turn` does. Streaming
                         // changes when the message appears, not what it points at.

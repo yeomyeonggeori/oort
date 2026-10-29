@@ -34,14 +34,43 @@
 //! learn this today by typing an `@`. What stays behind the profile gate is the
 //! rest — `instructions`, `enabled_tools`, `triggers` — which is why exactly one
 //! boolean crossed the line and not an embedded profile object.
+//!
+//! ## #4692 — `online` on a human row (ADR-0160 ② 가용성)
+//!
+//! Each human row carries `online`: does this person have a live connection to the
+//! workspace right now. It is the **second input** of the dot a client draws
+//! (`f(presenceStatus, online)`, D3); the wire never carries the effective value.
+//!
+//! Four properties, each of which is the point rather than a detail:
+//!   * **It is read from the transport, never stored.** One `presence` call to
+//!     Centrifugo ([`momo_ephemeral::PresenceReader`]); no column, no outbox row,
+//!     no Postgres write (D1, guard 2).
+//!   * **It rides the roster, so it cannot outrun the roster.** The set Centrifugo
+//!     returns is only ever *looked up by the rows this query returned*; it is never
+//!     iterated into the response. Whatever the guest narrowing in
+//!     `list_workspace_roster` hides, availability hides with it, and a connected
+//!     person the viewer cannot see leaves no trace in the body (guard 5).
+//!   * **Humans only.** An agent row carries no `online` key (D4: 사람은 온라인,
+//!     에이전트는 작업 중) — the same shape rule as `paused` and `presenceStatus`.
+//!   * **Unknown is not offline.** When the instance has no transport credential or
+//!     Centrifugo does not answer, **no row carries the key** and the roster is
+//!     otherwise unchanged. Painting people offline because the broker was slow
+//!     would be a lie told on the busiest read in the product.
+//!
+//! The read runs **beside** the Postgres read (`join!`), so a slow broker costs the
+//! roster at most `PRESENCE_READ_TIMEOUT` and a healthy one costs it nothing.
+
+use std::collections::HashSet;
 
 use axum::extract::{Path, Query, State};
 use axum::{Extension, Json};
 use momo_auth::Principal;
+use momo_ephemeral::OnlineRead;
 use momo_messaging::{
     active_workspace_role, clamp_roster_limit, list_workspace_roster, parse_roster_kind_filter,
     MemberKind, RosterMember, WorkspaceRole,
 };
+use uuid::Uuid;
 
 use crate::dto::{RosterMemberDto, RosterQuery, WorkspaceRosterResponse};
 use crate::error::ApiError;
@@ -99,6 +128,9 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         status_emoji: member.status_emoji.clone(),
         status_text: member.status_text.clone(),
         dnd_until_ms: member.dnd_until_ms,
+        // Availability is not a column: `roster` fills it from the transport after
+        // the roster query, for human rows only (`apply_availability`).
+        online: None,
         status_expires_at_ms: member.status_expires_at_ms,
         created_at_ms: member.created_at_ms,
         updated_at_ms: member.updated_at_ms,
@@ -109,6 +141,50 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         brain_unavailable_reason: None,
         personal_agent: None,
         subscription_retired: None,
+    }
+}
+
+/// What this request may say about availability: the broker's answer, or nothing.
+///
+/// `None` is **unknown**, and it is what every non-answer becomes: an instance with
+/// no `CENT_API_*`, a refused connection, a timeout, a body this reader does not
+/// understand. It is deliberately not an empty set (see [`OnlineRead`]).
+async fn read_availability(
+    state: &AppState,
+    workspace_id: Uuid,
+    kind_filter: Option<MemberKind>,
+) -> Option<HashSet<Uuid>> {
+    // An agents-only listing has no human row to annotate: do not ask the broker.
+    if kind_filter == Some(MemberKind::Agent) {
+        return None;
+    }
+    let reader = state.ephemeral.presence_reader.as_ref()?;
+    match reader.online_members(workspace_id).await {
+        OnlineRead::Known(members) => Some(members),
+        OnlineRead::Unavailable(reason) => {
+            tracing::warn!(%reason, "roster availability unavailable; rows carry no `online`");
+            None
+        }
+    }
+}
+
+/// Set `online` on a row that may carry it. **A lookup, never a source of rows**:
+/// `connected` is only ever asked about a member the roster query returned.
+///
+/// Humans only (ADR-0160 D4) and only `active` ones — the same predicate the
+/// `online:` subscribe rule uses (`momo_messaging::is_active_human_member`), so a
+/// person the roster would not list can neither be in the roll-call nor be
+/// reported from it.
+fn apply_availability(
+    dto: &mut RosterMemberDto,
+    member: &RosterMember,
+    connected: Option<&HashSet<Uuid>>,
+) {
+    if member.kind != MemberKind::Human || member.status != "active" {
+        return;
+    }
+    if let Some(connected) = connected {
+        dto.online = Some(connected.contains(&member.id));
     }
 }
 
@@ -127,37 +203,40 @@ pub async fn roster(
     let limit = query.limit();
     let viewer = principal.member_id;
 
-    let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>, bool)> =
-        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
-            Box::pin(async move {
-                let Some(role) =
-                    active_workspace_role(conn, workspace_id, principal.member_id).await?
-                else {
-                    return Ok(Err(ApiError::forbidden("not a workspace member")));
-                };
-                let members = list_workspace_roster(
-                    conn,
-                    workspace_id,
-                    principal.member_id,
-                    role == WorkspaceRole::Guest,
-                    kind_filter,
-                    limit,
-                )
-                .await?;
-                // #3392 AIH-2 — the read contract for the agents this viewer may
-                // see (the guest narrowing above already decided which). Same
-                // transaction, so a row and its facts are one snapshot.
-                let agent_ids: Vec<uuid::Uuid> = members
-                    .iter()
-                    .filter(|member| member.kind == MemberKind::Agent)
-                    .map(|member| member.id)
-                    .collect();
-                let facts =
-                    momo_agent::load_agent_read_facts_in_tx(conn, workspace_id, &agent_ids).await?;
-                Ok(Ok((members, facts, role == WorkspaceRole::Guest)))
-            })
+    let roster_read = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let Some(role) = active_workspace_role(conn, workspace_id, principal.member_id).await?
+            else {
+                return Ok(Err(ApiError::forbidden("not a workspace member")));
+            };
+            let members = list_workspace_roster(
+                conn,
+                workspace_id,
+                principal.member_id,
+                role == WorkspaceRole::Guest,
+                kind_filter,
+                limit,
+            )
+            .await?;
+            // #3392 AIH-2 — the read contract for the agents this viewer may
+            // see (the guest narrowing above already decided which). Same
+            // transaction, so a row and its facts are one snapshot.
+            let agent_ids: Vec<uuid::Uuid> = members
+                .iter()
+                .filter(|member| member.kind == MemberKind::Agent)
+                .map(|member| member.id)
+                .collect();
+            let facts =
+                momo_agent::load_agent_read_facts_in_tx(conn, workspace_id, &agent_ids).await?;
+            Ok(Ok((members, facts, role == WorkspaceRole::Guest)))
         })
-        .await;
+    });
+    // Beside the Postgres read, not after it (see the module docs).
+    let (outcome, connected) = tokio::join!(
+        roster_read,
+        read_availability(&state, workspace_id, kind_filter)
+    );
+    let outcome: DbRejectable<(Vec<RosterMember>, Vec<momo_agent::AgentReadFacts>, bool)> = outcome;
 
     let claude_enabled = state.agent_port.config.claude_subscription_agents_enabled;
     let (members, facts, viewer_is_guest) = settle_db("roster.list", outcome)?;
@@ -174,6 +253,7 @@ pub async fn roster(
             .iter()
             .map(|member| {
                 let mut dto = roster_dto(member);
+                apply_availability(&mut dto, member, connected.as_ref());
                 if let Some(facts) = facts.iter().find(|f| f.agent_member_id == member.id) {
                     dto.apply_read_facts(facts, claude_enabled);
                     dto.apply_personal_facts(facts, viewer);

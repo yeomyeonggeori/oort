@@ -5,6 +5,8 @@ pub mod actions;
 pub mod agent_connector_owner;
 pub mod agent_credentials;
 pub mod agent_gateway;
+/// ADR-0186 증보 v5 U-a~U-d / #4704 — `oort_action_initiate`: an approval card nobody asked for.
+pub mod agent_initiative;
 pub mod agent_mentions;
 /// ADR-0162 / HAP-E2 — stateless dual-era MCP Agent Port.
 pub mod agent_port;
@@ -33,6 +35,11 @@ pub mod cohosted_agent;
 pub mod credits;
 /// ADR-0208 D4 — the send composition `POST …/messages` and the scheduler share.
 pub(crate) mod deliver;
+/// ADR-0216 (#4660): developer tokens — issue, list, revoke, whoami, self-revoke.
+pub mod dev_access;
+/// ADR-0216 D6 (나) / #4700: `oort login` — the human-subject arm of the OAuth authorization
+/// server (browser consent, code exchange, refresh, revoke).
+pub mod dev_login_oauth;
 pub mod device_keys;
 pub mod device_link;
 pub mod devices;
@@ -53,6 +60,8 @@ pub mod hosted_agent_doorbell;
 pub mod hosted_dm_approvals;
 /// ADR-0122 / HD-1 — voice huddle lifecycle and LiveKit room grants.
 pub mod huddles;
+/// ADR-0216 D5 / #4661 — the human MCP, `POST /v1/mcp/me` (a developer token's MCP door).
+pub mod human_mcp;
 pub mod inbox;
 pub mod invites;
 pub mod join;

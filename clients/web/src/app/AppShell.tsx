@@ -49,6 +49,7 @@ import { ApprovalsLiveSync } from "@/features/inbox/ApprovalsLiveSync";
 import { DockBadge } from "@/features/notifications/DockBadge";
 import { TabTitleCount } from "@/features/notifications/TabTitleCount";
 import { WorkHostNotices } from "@/features/notifications/WorkHostNotices";
+import { OnlineRollCall } from "@/features/presence/OnlineRollCall";
 import { LegacyAgentPortCleanup } from "@/features/welcome/harnessLogin/LegacyAgentPortCleanup";
 import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
@@ -501,6 +502,8 @@ export function AppShell({
           {!stress && <DockBadge />}
           {!stress && <TabTitleCount />}
           {!stress && <WorkHostNotices />}
+          {/* 출석부에 세어진다(ADR-0160 ②, #4692). 아무것도 그리지 않고 받는 것도 없다. */}
+          {!stress && <OnlineRollCall />}
           {!stress && <LegacyAgentPortCleanup />}
           {!stress && <ReminderDueWatcher />}
           {/* Renders nothing; watches every agent's progress channel so the

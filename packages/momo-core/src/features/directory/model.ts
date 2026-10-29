@@ -7,6 +7,7 @@ import {
 } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import { customStatusAccessibleText } from "../presence/customStatus";
+import { humanPresenceDot } from "../presence/statusDot";
 
 // =============================================================================
 // 멤버 디렉터리 model (parity G-3/G-4). Everything on this surface that can be
@@ -262,6 +263,10 @@ export function memberRowLabel(
   }
   const status = statusLabel(member);
   if (status) parts.push(status);
+  // 사람의 점이 눈에 말하는 것(온라인·오프라인·자리 비움·방해 금지)을 접근 가능한 이름이 이어 말한다. 색과 모양만으로
+  // 말하지 않는다(#4692). 에이전트의 생존감은 행의 생존 칩과 그 곁 낱말이 말하므로 여기서 더하지 않는다.
+  const presence = member.kind === "human" ? humanPresenceDot(member, nowMs) : null;
+  if (presence) parts.push(presence.label);
   const custom = customStatusAccessibleText(member, nowMs);
   if (custom) parts.push(custom);
   return `${parts.join(", ")}, 다이렉트 메시지 열기`;

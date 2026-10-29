@@ -41,9 +41,10 @@ use axum::http::StatusCode;
 use momo_agent::{authorize_run_binding_in_tx, RequestedRouting, RunBindingRejected};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
-    is_channel_member, resolve_member_signing_key, send_message_with_mentions_in_tx,
+    is_channel_member, resolve_member_signing_key, send_message_with_mentions_via_in_tx,
     validate_quote_target_in_tx, validate_thread_root_in_tx, MessageSignature, MessageType,
-    NewMessage, QuoteTargetInvalid, SendExtras, SendRejected, SentMessage, ThreadRootInvalid,
+    NewMessage, QuoteTargetInvalid, SendExtras, SendRejected, SentMessage, SentVia,
+    ThreadRootInvalid,
 };
 use serde_json::{Map, Value};
 use uuid::Uuid;
@@ -194,6 +195,23 @@ pub(crate) async fn deliver_message_in_tx(
     conn: &mut PgConnection,
     request: DeliverRequest,
 ) -> Result<Result<SentMessage, DeliverRefusal>, DbError> {
+    deliver_message_via_in_tx(conn, request, None).await
+}
+
+/// [`deliver_message_in_tx`], stamping **how** the message was sent (`message.sent_via`,
+/// ADR-0216 D8 · R12, #4660).
+///
+/// `sent_via` is a parameter beside the request rather than a field of
+/// [`DeliverRequest`] so the scheduler — which builds that request too, and is never a
+/// developer token — cannot be asked to have an opinion about it. The REST send passes
+/// `Some(SentVia::Dev)` exactly when the request was authenticated by a developer token
+/// (the [`crate::dev_credential::DevCredential`] marker only the auth middleware
+/// inserts), and nothing in the request body can choose it.
+pub(crate) async fn deliver_message_via_in_tx(
+    conn: &mut PgConnection,
+    request: DeliverRequest,
+    sent_via: Option<SentVia>,
+) -> Result<Result<SentMessage, DeliverRefusal>, DbError> {
     let DeliverRequest {
         workspace_id,
         mut message,
@@ -267,7 +285,7 @@ pub(crate) async fn deliver_message_in_tx(
             })
         }
     };
-    let sent = match send_message_with_mentions_in_tx(
+    let sent = match send_message_with_mentions_via_in_tx(
         conn,
         workspace_id,
         message,
@@ -279,6 +297,7 @@ pub(crate) async fn deliver_message_in_tx(
             subscription_agents_disabled: !gates.subscription_agents_enabled,
             claude_subscription_agents_disabled: !gates.claude_subscription_agents_enabled,
         },
+        sent_via,
     )
     .await?
     {

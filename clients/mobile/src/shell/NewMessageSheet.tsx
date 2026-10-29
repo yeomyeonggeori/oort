@@ -1,6 +1,6 @@
-import {openDirectMessage, uuidEq} from '@momo/core/lib/api';
+import {openDirectMessage, uuidEq, type RosterMember} from '@momo/core/lib/api';
 import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
-import {channelLabel} from '@momo/core/features/workspace/directory';
+import {channelLabel, type Directory} from '@momo/core/features/workspace/directory';
 import {useMutation} from '@tanstack/react-query';
 import React, {useMemo, useState} from 'react';
 import {FlatList, StyleSheet, View} from 'react-native';
@@ -13,6 +13,8 @@ import {useStyles} from '../design/theme';
 import {font, SAFE_GUTTER, SHEET, space, type Palette} from '../design/tokens';
 import {SHELL_ICONS} from '../design/icons';
 import {Avatar} from '../features/conversation/Avatar';
+import {FaceWithStatusDot} from '../features/presence/FaceWithStatusDot';
+import {useHumanStatusDot} from '../features/presence/useHumanStatusDot';
 import {useDirectory, useRememberOpenedDm} from '../features/workspace/queries';
 import {openDmFailureCopy} from '../screens/SidebarScreen';
 import {useSession} from '../session/useSession';
@@ -152,37 +154,74 @@ function SheetBody({
               : `'${query.trim()}'에 맞는 사람이 없습니다.`}
           </Sentence>
         }
-        renderItem={({item, index}) => {
-          const busy = openDm.isPending && openDm.variables === item.id;
-          const kind = item.kind === 'agent' ? '에이전트' : '사람';
-          return (
-            <GroupCardItem index={index} count={people.length} inset={AVATAR_SIZE}>
-              <ListRow
-                // 카드(`surface`) 위의 아바타 — 기본 `ground='surface'` 는 카드에 녹아 이니셜만 떠 보인다
-                // (`Avatar.ground` 주석이 말한 그 실패). `muted` 로 원이 선다.
-                leading={
-                  <Avatar
-                    directory={directoryQuery.directory}
-                    memberId={item.id}
-                    ground="muted"
-                  />
-                }
-                leadingWidth={AVATAR_SIZE}
-                title={item.displayName}
-                detail={`@${item.handle} · ${kind}`}
-                accessibilityLabel={`${item.displayName}, @${item.handle}, ${kind}`}
-                accessibilityHint="대화를 엽니다."
-                busy={busy}
-                disabled={openDm.isPending}
-                onPress={() => openDm.mutate(item.id)}
-                testID={`new-dm-person-${item.handle}`}
-              />
-            </GroupCardItem>
-          );
-        }}
+        renderItem={({item, index}) => (
+          <PersonRow
+            member={item}
+            directory={directoryQuery.directory}
+            index={index}
+            count={people.length}
+            busy={openDm.isPending && openDm.variables === item.id}
+            disabled={openDm.isPending}
+            onPress={() => openDm.mutate(item.id)}
+          />
+        )}
         testID="new-dm-list"
       />
     </View>
+  );
+}
+
+/**
+ * 받는 사람 한 줄. 훅(`useHumanStatusDot`)이 줄마다 서야 해서 렌더 함수에서 꺼냈다. 점과 접근 가능한 이름이
+ * **같은 판정**을 읽는다: 사람의 점이 눈에 말하는 것(온라인·오프라인·자리 비움·방해 금지)을 이름이 귀에 이어
+ * 말하고, 모르면 둘 다 아무 말도 하지 않는다(#4692). 에이전트 줄에는 점이 없다(훅이 사람에게만 답한다).
+ */
+function PersonRow({
+  member,
+  directory,
+  index,
+  count,
+  busy,
+  disabled,
+  onPress,
+}: {
+  member: RosterMember;
+  directory: Directory;
+  index: number;
+  count: number;
+  busy: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}): React.JSX.Element {
+  const kind = member.kind === 'agent' ? '에이전트' : '사람';
+  const dot = useHumanStatusDot(member);
+  const base = `${member.displayName}, @${member.handle}, ${kind}`;
+  return (
+    <GroupCardItem index={index} count={count} inset={AVATAR_SIZE}>
+      <ListRow
+        // 카드(`surface`) 위의 아바타 — 기본 `ground='surface'` 는 카드에 녹아 이니셜만 떠 보인다
+        // (`Avatar.ground` 주석이 말한 그 실패). `muted` 로 원이 선다.
+        leading={
+          <FaceWithStatusDot
+            size={AVATAR_SIZE}
+            dot={dot}
+            testID={`new-dm-status-dot-${member.handle}`}
+            face={
+              <Avatar directory={directory} memberId={member.id} ground="muted" />
+            }
+          />
+        }
+        leadingWidth={AVATAR_SIZE}
+        title={member.displayName}
+        detail={`@${member.handle} · ${kind}`}
+        accessibilityLabel={dot === null ? base : `${base}, ${dot.label}`}
+        accessibilityHint="대화를 엽니다."
+        busy={busy}
+        disabled={disabled}
+        onPress={onPress}
+        testID={`new-dm-person-${member.handle}`}
+      />
+    </GroupCardItem>
   );
 }
 

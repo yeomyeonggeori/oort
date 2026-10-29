@@ -689,12 +689,31 @@ mod tests {
     /// `attachment.upload_started` rows written before schema v2 (a file name can be a person's), with
     /// a `row_security = off` safety line and before/after row counts in a `NOTICE`. Data only: no
     /// column, no function, no grant — and the only migration that edits audit rows.
+    ///
+    /// 152 is #4660's human developer token (ADR-0216 D2·D3·D4·D7·D8): `token_kind` gains `dev`, `token`
+    /// gains nullable `dev_*` columns under named CHECKs (all written on `kind::text`, because the same
+    /// single-transaction file cannot use the new enum value as a literal), a `BEFORE INSERT OR UPDATE OF
+    /// kind, actor_member_id, workspace_id` trigger that lets only a `human` member own a `dev` row, a partial unique index of one live access/refresh pair
+    /// per lineage, and `message.sent_via` (`NULL` or `'dev'`). No new table, so no new RLS policy.
+    ///
+    /// 153 is #4700's `oort login` browser-approval ledger (ADR-0216 D6 나): the new tenant table
+    /// `dev_login_authorization` (one terminal decision per signed request nonce, a 60 s single-use code
+    /// stored only as a digest, the lineage a consumed code opened) under RLS ENABLE + FORCE and the
+    /// standard `ws_isolation` policy, with a conditional `momo_app` grant.
+    ///
+    /// 154 is #4704's `workspace:initiate` (ADR-0186 증보 v5 U-b): the hosted scope vocabulary gains an
+    /// eighth value, so the three CHECK constraints 087 rewrote are rewritten again. No table, column,
+    /// index or row is added or changed; an existing connection's approved scopes stay exactly as they were.
+    ///
+    /// 155 is #4704's PR B (ADR-0186 증보 v5 U-d): two partial indexes (the rate window over `agent_run`,
+    /// the duplicate and cooldown reads over `approval`) and `agent_initiative_refusal`, the per-(agent,
+    /// reason) one-hour window of the refusal audit row, under RLS ENABLE + FORCE and `ws_isolation`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_151() {
+    fn discovers_contiguous_migrations_001_to_155() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=151).collect();
+        let expected: Vec<i64> = (1..=155).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -702,7 +721,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=151 under {}",
+            "expected contiguous 001..=155 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -710,7 +729,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("151_audit_attachment_name_scrub"));
+            .starts_with("155_agent_initiative_limits"));
     }
 
     #[test]
