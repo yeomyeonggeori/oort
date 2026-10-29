@@ -60,7 +60,7 @@ import {
 } from './jumpPills';
 import {EmptyState, ErrorState, LoadingState} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
-import {usePullRefresh, withPullScroll} from '../../design/refresh';
+import {PULL_FILL, usePullRefresh, withPullScroll} from '../../design/refresh';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
@@ -265,7 +265,7 @@ import {
 // is shorter, the rows sit on top of the composer where a lift cannot reach them.
 // It is also what every messenger does with a new conversation, for this reason
 // rather than for a stylistic one.
-const CONTENT_ALIGNMENT = {flexGrow: 1, justifyContent: 'flex-end'} as const;
+const CONTENT_ALIGNMENT = {...PULL_FILL, justifyContent: 'flex-end'} as const;
 
 /** How near the bottom still counts as "following", in points. */
 const FOLLOW_THRESHOLD_PX = 120;
@@ -3262,10 +3262,12 @@ function TimelineInner({
   // #4783: 연결 복구 중에는 언제든 당겨서 다시 맞춘다. 연결됐으면 이전 이력을 다 읽은 뒤에만 켠다.
   const pullEnabled = onRefresh !== undefined &&
     (!realtimeConnected || (reachedStart === true && !loadingOlder));
-  const pull = usePullRefresh(onRefresh ?? noRefresh, 'timeline-refresh', {resetKey: channelId});
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
+    onRefresh ?? noRefresh, 'timeline-refresh', {resetKey: channelId},
+  );
   const pullScroll = useMemo(
-    () => withPullScroll(onScroll, pullEnabled ? pull.scrollProps : undefined),
-    [onScroll, pullEnabled, pull.scrollProps],
+    () => withPullScroll(onScroll, pullEnabled ? scrollProps : undefined),
+    [onScroll, pullEnabled, scrollProps],
   );
 
   if (status === 'error') {
@@ -3291,12 +3293,12 @@ function TimelineInner({
     const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null);
     return (
       <>
-        {pull.notice}
+        {notice}
         <EmptyState
           headline={copy.headline}
           detail={copy.detail}
-          refreshControl={pullEnabled ? pull.refreshControl : undefined}
-          scrollProps={pullEnabled ? pull.scrollProps : undefined}
+          refreshControl={pullEnabled ? refreshControl : undefined}
+          scrollProps={pullEnabled ? scrollProps : undefined}
           testID="timeline-empty"
         />
       </>
@@ -3336,7 +3338,7 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      refreshControl={pullEnabled ? pull.refreshControl : undefined}
+      refreshControl={pullEnabled ? refreshControl : undefined}
       onScroll={pullScroll.onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}
@@ -3402,7 +3404,7 @@ function TimelineInner({
   // 부모의 직접 자식)은 그대로다.
   const motionScope = (
     <ReduceMotionRefContext.Provider value={reduceMotionRef}>
-      {pull.notice}
+      {notice}
       {list}
     </ReduceMotionRefContext.Provider>
   );
