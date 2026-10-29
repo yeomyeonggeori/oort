@@ -745,6 +745,145 @@ mod tests {
         assert_eq!(address.port(), port);
     }
 
+    /// One raw request to the receiver and everything it answered (the receiver closes the
+    /// connection after answering, so reading to the end terminates). Write and read errors end
+    /// the exchange rather than panic: a receiver that answers an oversized request and closes
+    /// while the client is still sending is allowed to reset the connection.
+    fn raw_exchange(port: u16, request: &[u8]) -> String {
+        let mut stream = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connect");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        let _ = stream.write_all(request);
+        let mut answer = Vec::new();
+        let _ = stream.read_to_end(&mut answer);
+        String::from_utf8_lossy(&answer).into_owned()
+    }
+
+    fn status_line(answer: &str) -> &str {
+        answer.lines().next().unwrap_or("")
+    }
+
+    #[test]
+    fn the_receiver_counts_one_callback_of_its_own_host_and_path_and_then_closes() {
+        let (listener, port) = bind_receiver().expect("a free candidate port");
+        let waiter =
+            std::thread::spawn(move || wait_for_callback(listener, port, Duration::from_secs(30)));
+        let host = format!("127.0.0.1:{port}");
+        let callback_path = "/callback?code=CODE&state=S&iss=I";
+
+        // None of these is a callback, and none of them ends the wait: a page on another origin
+        // that was pointed at this port (DNS rebinding sends its own Host), a browser's favicon
+        // probe, a POST, a header that never ends.
+        for (label, request, wanted) in [
+            (
+                "another origin's Host",
+                format!("GET {callback_path} HTTP/1.1\r\nHost: evil.example:{port}\r\n\r\n"),
+                " 400 ",
+            ),
+            (
+                "no Host at all",
+                format!("GET {callback_path} HTTP/1.1\r\n\r\n"),
+                " 400 ",
+            ),
+            (
+                "another path",
+                format!("GET /favicon.ico HTTP/1.1\r\nHost: {host}\r\n\r\n"),
+                " 404 ",
+            ),
+            (
+                "the path with a longer name",
+                format!("GET /callback/x?code=C&state=S&iss=I HTTP/1.1\r\nHost: {host}\r\n\r\n"),
+                " 404 ",
+            ),
+            (
+                "another method",
+                format!("POST /callback HTTP/1.1\r\nHost: {host}\r\nContent-Length: 0\r\n\r\n"),
+                " 405 ",
+            ),
+            (
+                "an oversized head",
+                format!(
+                    "GET /callback?{} HTTP/1.1\r\nHost: {host}\r\n",
+                    "a".repeat(9000)
+                ),
+                " 431 ",
+            ),
+        ] {
+            let answer = raw_exchange(port, request.as_bytes());
+            // An oversized head is refused as soon as the bound is crossed, which can reset the
+            // connection under the client's still-unsent bytes: what is required of it is that it
+            // is not counted and that nothing but a 431 ever comes back.
+            let reset_is_fine = wanted == " 431 " && answer.is_empty();
+            assert!(
+                reset_is_fine || status_line(&answer).contains(wanted),
+                "{label}: {answer:?}"
+            );
+            assert!(
+                !answer.contains("CODE"),
+                "{label}: the answer repeats the code"
+            );
+            assert!(
+                !waiter.is_finished(),
+                "{label} must not count as the callback"
+            );
+        }
+
+        // the one callback: held open (the page is written once the exchange is settled)
+        let mut browser = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connect");
+        browser
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("timeout");
+        browser
+            .write_all(format!("GET {callback_path} HTTP/1.1\r\nHost: {host}\r\n\r\n").as_bytes())
+            .expect("write");
+        let (callback, pending) = waiter.join().expect("join").expect("a callback");
+        assert_eq!(callback.code.as_ref().map(Secret::expose), Some("CODE"));
+        assert_eq!(callback.state.as_deref(), Some("S"));
+        assert_eq!(callback.iss.as_deref(), Some("I"));
+        assert!(!callback.ambiguous && callback.error.is_none());
+
+        // and the receiver is closed from then on: nothing is listening on the port any more
+        assert!(
+            TcpStream::connect((Ipv4Addr::LOCALHOST, port)).is_err(),
+            "the receiver must close after its one callback"
+        );
+
+        // the page that finally answers the browser holds no code and forbids caching and referrers
+        pending.finish(true);
+        let mut page = Vec::new();
+        let _ = browser.read_to_end(&mut page);
+        let page = String::from_utf8_lossy(&page).into_owned();
+        assert!(status_line(&page).contains(" 200 "), "{page:?}");
+        for header in ["Cache-Control: no-store", "Referrer-Policy: no-referrer"] {
+            assert!(page.contains(header), "{header} missing: {page:?}");
+        }
+        assert!(
+            !page.contains("CODE") && !page.contains("code="),
+            "{page:?}"
+        );
+    }
+
+    #[test]
+    fn a_parameter_that_must_appear_once_and_appears_twice_is_flagged() {
+        let (listener, port) = bind_receiver().expect("a free candidate port");
+        let waiter =
+            std::thread::spawn(move || wait_for_callback(listener, port, Duration::from_secs(30)));
+        let mut browser = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).expect("connect");
+        browser
+            .write_all(
+                format!(
+                    "GET /callback?code=A&code=B&state=S&iss=I HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .expect("write");
+        let (callback, pending) = waiter.join().expect("join").expect("a callback");
+        assert!(callback.ambiguous, "two `code` values must not pick one");
+        assert!(accepted_code(&callback, "S", "I").is_err());
+        pending.finish(false);
+    }
+
     fn callback(state: Option<&str>, iss: Option<&str>) -> Callback {
         Callback {
             code: Some(Secret::new("the-code")),
