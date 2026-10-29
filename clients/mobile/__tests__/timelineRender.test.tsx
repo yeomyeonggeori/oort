@@ -267,6 +267,34 @@ describe('행이 말하는 것', () => {
     expect(screen.getAllByTestId('day-divider')).toHaveLength(2);
   });
 
+  // #4749 — 날이 바뀐 뒤 처음 보내는 글. 날짜 줄이 확정본에만 서던 때는 POST 가 답하는 순간 이미 본 행 위에 줄이 새로 끼어서
+  // 행이 줄 높이만큼 밀리고 목록이 한 번 더 올라갔다(첫 보내기에서 두 번 출렁). 줄은 에코일 때부터 서 있고, 확정으로 바뀌어도 그대로다.
+  it('날이 바뀐 뒤 처음 보내는 글은 에코일 때부터 날짜 구분선이 서고, 확정으로 바뀌어도 줄이 같다', () => {
+    const echo: PendingMessage = {
+      clientMsgId: 'c1',
+      channelId: 'ch',
+      authorMemberId: SELF_ID,
+      body: '오늘 첫 마디',
+      createdAtMs: BASE_MS + DAY,
+      sinceSeq: 1,
+      status: 'sending',
+    };
+    const shared = {
+      directory: DIRECTORY,
+      status: 'ready' as const,
+      myMemberId: SELF_ID,
+      nowMs: BASE_MS + DAY + 60_000,
+    };
+    const view = render(<Timeline {...shared} messages={[message(1)]} pending={[echo]} />);
+    expect(screen.getAllByTestId('day-divider')).toHaveLength(2);
+    expect(screen.getByTestId('pending-row')).toBeTruthy();
+
+    const confirmed = message(2, {authorMemberId: SELF_ID, body: '오늘 첫 마디', createdAtMs: BASE_MS + DAY + 800});
+    view.rerender(<Timeline {...shared} messages={[message(1), confirmed]} pending={[]} />);
+    expect(screen.queryByTestId('pending-row')).toBeNull();
+    expect(screen.getAllByTestId('day-divider')).toHaveLength(2);
+  });
+
   it('안 읽은 경계를 서버가 준 수로 그린다', () => {
     renderTimeline({
       messages: [message(1), message(2), message(3)],
