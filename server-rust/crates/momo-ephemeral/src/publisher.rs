@@ -125,7 +125,7 @@ impl EphemeralPublisher {
 /// so a naive `status.is_success()` would report a dropped publish as a
 /// success. Same rule as `momo-relay`, and it is one of the two behaviours the
 /// two writers must agree on.
-fn logical_error(body: &str) -> Option<String> {
+pub(crate) fn logical_error(body: &str) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(body).ok()?;
     let error = value.get("error")?.as_object()?;
     let message = error

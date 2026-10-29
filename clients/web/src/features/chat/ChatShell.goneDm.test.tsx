@@ -424,3 +424,49 @@ describe("ChatShell · 명부를 못 받았을 때의 이름 (#4252)", () => {
     expect(last.recipient).toBe("place");
   });
 });
+
+// #4692: 사람과의 DM 머리는 상대가 지금 접속해 있는지(또는 스스로 정한 자리 비움·방해 금지)를 점과 낱말로 말한다.
+// 모르면(서버가 접속 여부를 말하지 않았다) 아무것도 서지 않는다.
+describe("ChatShell · DM 머리의 상대 상태 (#4692)", () => {
+  const PEER = "00000000-0000-7000-8000-0000000001b1";
+  const peer = (patch: Partial<RosterMember>): RosterMember => ({
+    ...self,
+    id: PEER,
+    displayName: "이도현",
+    handle: "dohyun",
+    role: "member",
+    ...patch,
+  });
+  const liveDm = () => {
+    channelsState.groups = {
+      channels: [],
+      dms: [
+        { id: DM_ID, workspaceId: WS, kind: "dm", muted: false, memberIds: [ME, PEER] } as Channel,
+      ],
+    };
+  };
+  const chip = (host: HTMLElement) =>
+    host.querySelector<HTMLElement>(
+      '[data-testid="channel-header"] [data-testid="human-presence"]'
+    );
+
+  it.each([
+    [{ online: true }, "온라인", "ok"],
+    [{ online: false }, "오프라인", "muted"],
+    [{ online: true, presenceStatus: "dnd" as const }, "방해 금지", "danger"],
+  ] as const)("%j → 머리에 「%s」", async (patch, word, tone) => {
+    rosterMembers = [self, peer(patch)];
+    liveDm();
+    const host = await mount();
+    expect(chip(host)?.textContent).toBe(word);
+    expect(chip(host)?.getAttribute("data-tone")).toBe(tone);
+  });
+
+  it("접속 여부를 모르면 머리에 아무것도 서지 않는다 — 모름은 오프라인이 아니다", async () => {
+    rosterMembers = [self, peer({})];
+    liveDm();
+    const host = await mount();
+    expect(host.querySelector('[data-testid="channel-header"]')?.textContent).toContain("이도현");
+    expect(chip(host)).toBeNull();
+  });
+});

@@ -99,6 +99,15 @@ const roster = [
   member(PEER_AGENT, { displayName: "김인턴", handle: "intern", kind: "agent", hostOnline: true }),
 ];
 
+/** 시험이 `online` 을 실은 행을 되돌리는 원본(#4692). 행 객체는 바꾸지 않고 자리에 새 객체를 넣는다. */
+const ROSTER_FIXTURE = [...roster];
+/** 명부의 사람 행에 접속 여부를 싣는다(서버가 읽어 싣는 `online`). `undefined` 는 「서버가 말하지 않았다」다. */
+function setOnline(byId: Record<string, boolean | undefined>): void {
+  roster.forEach((row, index) => {
+    if (row.id in byId) roster[index] = { ...row, online: byId[row.id] };
+  });
+}
+
 function dm(id: string, others: string[]): Channel {
   return {
     id,
@@ -377,6 +386,7 @@ beforeAll(() => {
 beforeEach(() => {
   rosterPhase.pending = false;
   rosterPhase.failed = false;
+  roster.splice(0, roster.length, ...ROSTER_FIXTURE);
   liveness.byAgent.clear();
   revival.pages.clear();
   revival.calls.length = 0;
@@ -1190,7 +1200,39 @@ describe("DM 행의 상태 점 (#3964)", () => {
     expect(dmRow(host, DM_ID(3)).querySelector(".sr-only")?.textContent).toBe(", 자리 비움");
   });
 
-  it("**회색 점은 에이전트에만 선다** — 평범한 사람·나간 멤버에는 점이 없다", async () => {
+  it("사람: 접속 중은 채운 초록, 접속 없음은 속 빈 고리 — 낱말은 숨은 글과 툴팁에 있다 (#4692)", async () => {
+    setOnline({ [PEER_PLAIN]: true, [PEER_PHOTO]: false });
+    const host = await mount();
+    await settle();
+
+    const on = dotOf(host, DM_ID(1))!;
+    expect(on.getAttribute("data-tone")).toBe("ok");
+    expect(on.className).toContain("bg-ok");
+    expect(dmRow(host, DM_ID(1)).querySelector(".sr-only")?.textContent).toBe(", 온라인");
+    expect(
+      dmRow(host, DM_ID(1)).querySelector('[data-testid="dm-avatar"]')?.getAttribute("title")
+    ).toBe("온라인");
+
+    const off = dotOf(host, DM_ID(2))!;
+    expect(off.getAttribute("data-tone")).toBe("muted");
+    // 속이 빈 고리: 채운 점과 한 점이 되지 않는다(살아 있음과 꺼짐은 모양이 다르다).
+    expect(off.className).toContain("bg-surface");
+    expect(off.className).toContain("border-line-strong");
+    expect(off.className).not.toContain("bg-ok");
+    expect(dmRow(host, DM_ID(2)).querySelector(".sr-only")?.textContent).toBe(", 오프라인");
+  });
+
+  it("사람: 스스로 정한 자리 비움은 접속 여부보다 먼저다, 서버가 말하지 않은 사람은 그대로 점이 없다 (#4692)", async () => {
+    setOnline({ [PEER_AWAY]: true });
+    const host = await mount();
+    await settle();
+    expect(dotOf(host, DM_ID(3))!.getAttribute("data-tone")).toBe("warn");
+    expect(dmRow(host, DM_ID(3)).querySelector(".sr-only")?.textContent).toBe(", 자리 비움");
+    // PEER_PLAIN 의 `online` 은 비어 있다: 모름은 오프라인이 아니다.
+    expect(dotOf(host, DM_ID(1))).toBeNull();
+  });
+
+  it("**근거 없는 회색은 없다** — 접속 여부를 모르는 사람·나간 멤버에는 점이 없고, 이 명부의 회색은 에이전트 행뿐이다", async () => {
     liveness.byAgent.set(PEER_AGENT, "inactive");
     showGhostRow();
     const host = await mount();

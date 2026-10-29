@@ -25,7 +25,8 @@ use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::PgPool;
 use momo_server::config::{
-    AgentGatewayMode, AgentGatewaySettings, AgentPortConfig, CohostedAgentConfig, SettingsConfig,
+    AgentGatewayMode, AgentGatewaySettings, AgentPortConfig, AgentPortOauthConfig,
+    CohostedAgentConfig, SettingsConfig,
 };
 use momo_server::{build_app, AppState};
 use uuid::Uuid;
@@ -128,6 +129,9 @@ pub struct ServerOptions {
     /// The Agent Port admission limits as `(per token, per agent)` calls per window. `None` leaves
     /// both axes off (`0`), which is what every suite but the ones that test refusal wants (#4618).
     pub agent_port_limits: Option<(u32, u32)>,
+    /// The OAuth authorization server's arms (ADR-0162 hosted, ADR-0216 D6 human-subject). The default is
+    /// **both arms closed**, which is the default server.
+    pub oauth: AgentPortOauthConfig,
 }
 
 impl ServerOptions {
@@ -141,6 +145,12 @@ impl ServerOptions {
     /// Turn the Agent Port admission limiter on (calls per 60 s window, `0` = that axis stays off).
     pub fn with_agent_port_limits(mut self, per_token: u32, per_agent: u32) -> Self {
         self.agent_port_limits = Some((per_token, per_agent));
+        self
+    }
+
+    /// Open the OAuth authorization server's arms as `oauth` says (the default server has both closed).
+    pub fn with_oauth(mut self, oauth: AgentPortOauthConfig) -> Self {
+        self.oauth = oauth;
         self
     }
 
@@ -190,7 +200,7 @@ pub async fn start_server(pool: PgPool, options: ServerOptions) -> String {
         subscription_agents_enabled: true,
         claude_subscription_agents_enabled: true,
         hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
-        oauth: Default::default(),
+        oauth: options.oauth,
     });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await

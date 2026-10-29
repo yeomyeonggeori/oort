@@ -62,9 +62,18 @@
 //! `momo-ephemeral` holds neither crypto nor a database — which is exactly what
 //! makes the 휘발 publish path provably Postgres-free (ADR-0149 guard 3).
 
+//! ADR-0216 (#4660) adds the **human developer token** ([`dev_token`] — a
+//! `token` row with `kind = 'dev'`, presented as `momo_dev_v1.<ws>.<secret>`
+//! or, for a login session's refresh half, `momo_devr_v1.…`): a person's own
+//! narrow credential for the CLI and AI tools, with its closed route table
+//! ([`dev_token::required_dev_scope`]) beside the agent one for the same
+//! reason — which routes a credential reaches is a property of the credential.
+
 pub mod agent_bearer;
 pub mod agent_credential;
 pub mod agent_scope;
+pub mod dev_login;
+pub mod dev_token;
 pub mod device_key;
 pub mod device_link;
 pub mod ephemeral_grant;
@@ -108,7 +117,36 @@ pub use agent_credential::{
 pub use agent_scope::{
     is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_INBOX_READ, SCOPE_AGENT_JOBS_READ,
     SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
-    SCOPE_WORKSPACE_PROPOSE,
+    SCOPE_WORKSPACE_INITIATE, SCOPE_WORKSPACE_PROPOSE,
+};
+pub use dev_login::{
+    approve_dev_login_request_in_tx, deny_dev_login_request_in_tx, dev_login_code_workspace_id,
+    dev_login_request_key, invalidate_pending_dev_logins_in_tx, lock_dev_login_code_in_tx,
+    redeem_dev_login_code_in_tx, resolve_dev_login_revocation_target_in_tx,
+    revoke_dev_login_lineage_in_tx, sign_dev_login_request, verify_dev_login_request,
+    DevLoginApproval, DevLoginCodeLock, DevLoginRedeem, DevLoginRefusal, DevLoginRequestClaims,
+    DevLoginRequestSeed, DevLoginRevocationTarget, DEV_LOGIN_CODE_PREFIX,
+    DEV_LOGIN_CODE_TTL_SECONDS, DEV_LOGIN_LABEL, DEV_LOGIN_REQUEST_TTL_SECONDS,
+    DEV_LOGIN_REQUEST_TYP,
+};
+pub use dev_token::{
+    count_live_dev_lineages_in_tx, dev_credential_owner_in_tx, dev_refresh_workspace_id,
+    dev_token_workspace_id, finalize_dev_use_in_tx, issue_dev_card_in_tx, issue_dev_login_in_tx,
+    list_dev_credentials_in_tx, mint_dev_envelope, normalized_dev_channel_ids,
+    normalized_dev_client, normalized_dev_device_name, normalized_dev_label, normalized_dev_scopes,
+    required_dev_scope, resolve_dev_token_in_tx, revoke_dev_credential_in_tx,
+    revoke_dev_self_in_tx, revoke_member_dev_tokens_in_tx, rotate_dev_refresh_in_tx,
+    validated_dev_card_days, verify_current_password_in_tx, DevAccessPolicy, DevCredentialRecord,
+    DevForm, DevIdentity, DevIssueError, DevListScope, DevResolution, DevRotation, DevRoute,
+    DevTool, IssuedDevCard, IssuedDevLogin, NewDevCard, NewDevLogin, PasswordCheck,
+    ACCESS_TTL_SECONDS as DEV_ACCESS_TTL_SECONDS, DEFAULT_CARD_DAYS as DEV_DEFAULT_CARD_DAYS,
+    DEV_CREDENTIAL_KIND_CARD, DEV_CREDENTIAL_KIND_SESSION, DEV_READ_ONLY_SCOPES,
+    DEV_REFRESH_PREFIX, DEV_ROUTE_TABLE, DEV_SCOPES, DEV_SCOPE_SEARCH_RESERVED, DEV_TOKEN_PREFIX,
+    FIXED_POLICY as DEV_FIXED_POLICY, MAX_CHANNEL_IDS as DEV_MAX_CHANNEL_IDS,
+    MAX_LIFETIME_DAYS as DEV_MAX_LIFETIME_DAYS, MAX_LIVE_CARDS as DEV_MAX_LIVE_CARDS,
+    MAX_LIVE_LINEAGES as DEV_MAX_LIVE_LINEAGES, REFRESH_IDLE_DAYS as DEV_REFRESH_IDLE_DAYS,
+    SCOPE_DEV_CHANNELS_READ, SCOPE_DEV_IDENTITY, SCOPE_DEV_INBOX_READ, SCOPE_DEV_MESSAGES_READ,
+    SCOPE_DEV_MESSAGES_WRITE,
 };
 pub use device_link::{
     confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,
@@ -130,14 +168,15 @@ pub use ephemeral_grant::{
 pub use hosted_connection::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx,
     confirm_hosted_connection_in_tx, create_hosted_connection_in_tx, detect_pairing_in_tx,
-    get_hosted_connection_in_tx, grant_hosted_channels_in_tx, is_hosted_agent_activated_in_tx,
-    is_hosted_agent_in_tx, latest_hosted_connection_for_agent_in_tx, list_hosted_connections_in_tx,
-    lock_active_hosted_connection_in_tx, pairing_workspace_id, prove_hosted_binding_in_tx,
-    regenerate_pairing_in_tx, resolve_hosted_tool_identity_in_tx, resolve_pairing_in_tx,
-    validate_channel_ids, validate_hosted_scopes, HostedActivationIssuance, HostedConnection,
-    HostedConnectionApproval, HostedInputError, HostedMutation, HostedPairingIssuance, HostedProof,
-    HostedToolIdentity, HOSTED_AGENT_INERT_BASE_URL, HOSTED_AGENT_MODEL,
-    HOSTED_AGENT_PORT_AUDIENCE, HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX,
+    get_hosted_connection_in_tx, grant_hosted_channels_in_tx, hosted_connection_stands_in_tx,
+    is_hosted_agent_activated_in_tx, is_hosted_agent_in_tx,
+    latest_hosted_connection_for_agent_in_tx, list_hosted_connections_in_tx,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, pairing_workspace_id,
+    prove_hosted_binding_in_tx, regenerate_pairing_in_tx, resolve_hosted_tool_identity_in_tx,
+    resolve_pairing_in_tx, validate_channel_ids, validate_hosted_scopes, HostedActivationIssuance,
+    HostedConnection, HostedConnectionApproval, HostedInputError, HostedMutation,
+    HostedPairingIssuance, HostedProof, HostedToolIdentity, HOSTED_AGENT_INERT_BASE_URL,
+    HOSTED_AGENT_MODEL, HOSTED_AGENT_PORT_AUDIENCE, HOSTED_AGENT_SCOPES, HOSTED_PAIRING_PREFIX,
     HOSTED_PAIRING_TTL_SECONDS, MAX_HOSTED_APPROVED_CHANNELS,
 };
 pub use hosted_disconnect::{
@@ -173,11 +212,12 @@ pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
 };
 pub use owner_claim::{
-    change_own_password_in_tx, consume_claim_in_tx, issue_password_reset_in_tx,
-    mint_owner_claim_token, normalized_claim_token, resolve_claim_workspace, ClaimInputError,
-    ClaimMutation, ClaimOutcome, ClaimSpecInvalid, IssuedPasswordReset, PasswordChangeMutation,
-    PasswordResetIssueError, CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET,
-    OWNER_CLAIM_TOKEN_LEN, OWNER_CLAIM_TTL_SECONDS,
+    change_own_password_in_tx, claim_refusal_in_tx, consume_claim_in_tx,
+    issue_password_reset_in_tx, mint_owner_claim_token, normalized_claim_token,
+    resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
+    IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
+    CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET, OWNER_CLAIM_TOKEN_LEN,
+    OWNER_CLAIM_TTL_SECONDS,
 };
 pub use password_rules::{
     normalized_current_password, normalized_new_password, CurrentPasswordInvalid,

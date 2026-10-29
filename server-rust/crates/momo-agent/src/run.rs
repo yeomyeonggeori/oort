@@ -157,6 +157,11 @@ impl WelcomeKind {
     }
 }
 
+/// The `agent_run.idempotency_key` prefix of an unasked card's run. The key is
+/// `agent_initiated:<AGENT>:<ID>` (ADR-0186 증보 v5 U-a); the rate window of PR B counts rows by
+/// this prefix, so it is one constant rather than a literal in two places.
+pub const AGENT_INITIATED_KEY_PREFIX: &str = "agent_initiated:";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTrigger {
     /// A message that mentioned the agent. The message id is also written to
@@ -191,6 +196,15 @@ pub enum RunTrigger {
         agent_member_id: Uuid,
         channel_id: Uuid,
         kind: WelcomeKind,
+    },
+    /// An approval card an agent raised **nobody asked for** (ADR-0186 증보 v5 U-a, #4704):
+    /// `oort_action_initiate`. There is no trigger message and no job — the run is born
+    /// `awaiting_approval` and ends only by the decision, the expiry sweep or a person's stop.
+    /// The key is the agent plus the `clientRequestId` it chose, so a retry of one proposal is the
+    /// same run (`agent_run_idem_uniq` is the data authority) and a different id is another.
+    AgentInitiated {
+        agent_member_id: Uuid,
+        client_request_id: Uuid,
     },
 }
 
@@ -237,6 +251,15 @@ impl RunTrigger {
                 member_id.to_string().to_uppercase(),
                 kind.as_key()
             ),
+            RunTrigger::AgentInitiated {
+                agent_member_id,
+                client_request_id,
+            } => format!(
+                "{}{}:{}",
+                AGENT_INITIATED_KEY_PREFIX,
+                agent_member_id.to_string().to_uppercase(),
+                client_request_id.to_string().to_uppercase()
+            ),
         }
     }
 
@@ -248,7 +271,9 @@ impl RunTrigger {
             RunTrigger::Mention { message_id, .. } | RunTrigger::ThreadReply { message_id, .. } => {
                 Some(*message_id)
             }
-            RunTrigger::Work { .. } | RunTrigger::Welcome { .. } => None,
+            RunTrigger::Work { .. }
+            | RunTrigger::Welcome { .. }
+            | RunTrigger::AgentInitiated { .. } => None,
         }
     }
 
@@ -264,6 +289,9 @@ impl RunTrigger {
                 agent_member_id, ..
             }
             | RunTrigger::Welcome {
+                agent_member_id, ..
+            }
+            | RunTrigger::AgentInitiated {
                 agent_member_id, ..
             } => *agent_member_id,
         }
@@ -931,7 +959,14 @@ pub async fn find_agent_run_by_trigger_in_tx(
 /// `input.hold = "channel_grant"`) is **not** counted: it has no job, nothing
 /// of it has reached the agent, and counting it against the default cap of 1
 /// would let one unanswered card in one room refuse every work request to that
-/// agent for up to an hour.
+/// agent for up to an hour. The same holds for a card the agent raised unasked
+/// (`input.hold = "agent_initiated"`, ADR-0186 증보 v5 U-a): it waits up to a day for its
+/// owner, and without this one unanswered card would answer 409 to every work request.
+///
+/// `COALESCE`, not a bare `IN`: an ordinary approval-held run has **no** `hold` key, `NULL IN (…)` is
+/// `NULL`, and `NOT (TRUE AND NULL)` is `NULL` — which `WHERE` drops, so every plain
+/// `awaiting_approval` run would have silently left the cap (the original `IS NOT DISTINCT FROM`
+/// was null-safe for the same reason).
 pub async fn live_run_count_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -942,7 +977,7 @@ pub async fn live_run_count_in_tx(
           WHERE workspace_id = $1 AND agent_member_id = $2 \
             AND status IN ('queued','running','awaiting_approval','paused') \
             AND NOT (status = 'awaiting_approval' \
-                     AND input->>'hold' IS NOT DISTINCT FROM 'channel_grant')",
+                     AND COALESCE(input->>'hold', '') IN ('channel_grant', 'agent_initiated'))",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
@@ -1216,6 +1251,24 @@ pub struct GatewayRunSnapshot {
     /// from — `resume_job_payload` carries no trigger, but the run row never
     /// stopped holding one.
     pub trigger_message_id: Option<Uuid>,
+    /// The thread the trigger was said in — and so the thread the run's **final answer**
+    /// belongs in (#4622, ADR-0148 증보 2026-10-27).
+    ///
+    /// `Some(root)` only when the trigger sits inside a thread whose root is still a **live
+    /// top-level message of this run's channel** — the test the REST send applies to a reply
+    /// (`momo_messaging::validate_thread_root_in_tx`, state `Live`), made here by
+    /// construction because the answer is written on the raw spine, whose thread-rollup bump
+    /// trusts its caller to have validated the root. `None` for a trigger at the channel's top
+    /// level or in a DM's main flow (unchanged: main flow + quote), a run with no trigger, and
+    /// a thread whose root was deleted since — an answer a person could not have posted there
+    /// falls back to where it always went, instead of failing the turn.
+    ///
+    /// Read in the same locked statement as [`Self::trigger_message_id`], for the same
+    /// reason: every writer of a final answer (gateway completion, the managed worker's commit
+    /// **and** its streamed opening write, the team AI) already reads this row, so the place is
+    /// decided in one spot and the paths cannot drift. The streamed opening write matters most:
+    /// it is the write that creates the message, and the commit's send is a dedupe onto it.
+    pub trigger_root_id: Option<Uuid>,
     /// `agent.model` — the ledger's fallback when the adapter reports none.
     pub model: String,
     /// ADR-0134 D2 ledger fallbacks, read on the already-locked row: what the run
@@ -1270,7 +1323,8 @@ pub async fn lock_gateway_run_in_tx(
 ) -> Result<Option<GatewayRunSnapshot>, DbError> {
     let row = sqlx::query(
         "SELECT r.agent_member_id, r.channel_id, r.status::text AS status_label, \
-                r.trigger_message_id, r.started_at, now() AS observed_at, a.model, \
+                r.trigger_message_id, trig_root.id AS trigger_root_id, \
+                r.started_at, now() AS observed_at, a.model, \
                 r.input->'routing'->>'effort' AS requested_effort, \
                 ap.effort_pref AS profile_effort_pref \
            FROM agent_run r \
@@ -1285,6 +1339,17 @@ pub async fn lock_gateway_run_in_tx(
            LEFT JOIN agent_profile ap \
              ON ap.workspace_id = a.workspace_id \
             AND ap.agent_member_id = a.member_id \
+           LEFT JOIN message trig \
+             ON trig.id = r.trigger_message_id \
+            AND trig.workspace_id = $1 \
+            AND trig.channel_id = r.channel_id \
+           LEFT JOIN message trig_root \
+             ON trig_root.id = trig.root_id \
+            AND trig_root.workspace_id = $1 \
+            AND trig_root.channel_id = r.channel_id \
+            AND trig_root.root_id IS NULL \
+            AND trig_root.deleted_at IS NULL \
+            AND trig_root.state::text <> 'deleted' \
           WHERE r.id = $2 \
             AND r.workspace_id = $1 \
             AND EXISTS ( \
@@ -1310,6 +1375,7 @@ pub async fn lock_gateway_run_in_tx(
         channel_id: row.try_get("channel_id")?,
         status,
         trigger_message_id: row.try_get("trigger_message_id")?,
+        trigger_root_id: row.try_get("trigger_root_id")?,
         model: row.try_get("model")?,
         requested_effort: row.try_get("requested_effort")?,
         profile_effort_pref: row.try_get("profile_effort_pref")?,

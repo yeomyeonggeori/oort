@@ -15,6 +15,7 @@ import {
   asWorkSessionToolTransitionFrame,
   centrifugoAgentChannelName,
   centrifugoChannelName,
+  centrifugoOnlineChannelName,
   centrifugoTypingChannelName,
   createReplayGate,
   type AgentProgressEvent,
@@ -112,6 +113,13 @@ export type ChannelRail = Pick<
   | 'subscribeWorkSession'
 > & {
   /**
+   * 작업공간 출석부에 **세어진다**(ADR-0160 ② 가용성, #4692). `online:ws<WS>` 에 붙어 있는 동안 Centrifugo 의
+   * presence 표에 「이 사람은 연결돼 있다」가 적히고, 그 표는 서버만 읽어 명부 행의 `online` 으로 싣는다. 이
+   * 구독에서 **받는 것은 없다**(핸들러가 없다). 다른 구독과 같은 refcount·같은 소켓이고, 소켓이 백그라운드
+   * 정책으로 내려가면 함께 내려가서 그동안 이 폰은 「접속 없음」으로 보인다(그것이 폰에서 「온라인」의 뜻이다).
+   */
+  joinOnlineRollCall: (workspaceId: string) => () => void;
+  /**
    * 팀 작업 보드의 **신호**(#2864, ADR-0194 D8). 한 채널의 공유 변화·세션 수명주기·도구
    * 전환 프레임을 듣고, 프레임 안의 값은 하나도 넘기지 않는다: 받은 쪽은 REST 로 다시
    * 읽고 그 답이 진실이다. 재구독(되쏘기 포함)도 같은 신호다. 메시지 레일과 같은 구독을
@@ -191,6 +199,15 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
   }
 
   return {
+    // 복구도 위치 추적도 요구하지 않는다: 되살릴 과거가 없는 레일이다(`history_size: 0`). 거절(구서버·구설정의
+    // `unknown channel`, 자격 만료의 403)은 이 구독 하나만 끝내고 연결은 그대로다(실측).
+    joinOnlineRollCall(workspaceId) {
+      return attach(
+        centrifugoOnlineChannelName(workspaceId),
+        {recoverable: false, positioned: false},
+        () => () => {},
+      );
+    },
     subscribeChannel(workspaceId, channelId, handlers: ChannelHandlers) {
       return attach(
         centrifugoChannelName(workspaceId, channelId),

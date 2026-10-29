@@ -29,9 +29,11 @@
 //!     the request never supplies it. No signature grants any capability; it
 //!     only records who asserted the content.
 
-use axum::extract::{Path, Query, State};
+use axum::body::Body;
+use axum::extract::{Path, Query, Request, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::middleware::Next;
+use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_agent::{terminal_run_ids_in_tx, RunBindingRejected, PROP_ANSWERS_MESSAGE_ID};
 use momo_auth::Principal;
@@ -42,24 +44,29 @@ use momo_messaging::{
     delete_message_in_tx, edit_message_in_tx, is_channel_member, list_channel_page,
     list_thread_replies, open_stream_run_id, parse_replies_cursor, set_pin_in_tx,
     set_reaction_in_tx, stream_message_body_in_tx, validate_harness_refine,
-    validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected, HarnessRefine,
-    HarnessRefineInvalid, HistoryCursor, InteractionMessage, InteractionRefused, MessageAttachment,
-    MessageType, NewMessage, PagedMessage, PinAction, PinnedMessage, ProvenanceRejected,
-    QuoteTargetInvalid, QuotedMessage, ReactionAction, ReactionSnapshot, SendRejected,
-    StoredMessage, StreamCloseOutcome, StreamEdit, ThreadRollup, ThreadRootInvalid,
-    HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV, STREAM_PROPS_KEY,
+    validate_reaction_emoji, validate_replies_root_in_tx, AttachmentLinkRejected,
+    ChannelRestriction, HarnessRefine, HarnessRefineInvalid, HistoryCursor, InteractionMessage,
+    InteractionRefused, MessageAttachment, MessageType, NewMessage, PagedMessage, PinAction,
+    PinnedMessage, ProvenanceRejected, QuoteTargetInvalid, QuotedMessage, ReactionAction,
+    ReactionSnapshot, SendRejected, SentVia, StoredMessage, StreamCloseOutcome, StreamEdit,
+    ThreadRollup, ThreadRootInvalid, HARNESS_REFINE_PROPS_KEY, OPENING_STREAM_REV,
+    STREAM_PROPS_KEY,
 };
+use serde::de::{self, Deserialize, Deserializer, IgnoredAny, MapAccess, Visitor};
 use serde_json::{Map, Value};
 use std::collections::HashSet;
 use uuid::Uuid;
 
+use crate::dev_credential::DevCredential;
 use crate::dto::{
     EditMessageRequest, HistoryQuery, MessageDto, MessagePage, PinDeltaDto, PinListDto,
     PinnedMessageDto, QuotedMessageDto, ReactionDeltaDto, RepliesQuery, SendMessageRequest,
     StreamEditRequest, ThreadRepliesPage, ThreadRollupDto,
 };
 use crate::error::{db_error, ApiError};
-use crate::routes::deliver::{deliver_message_in_tx, DeliverGates, DeliverRefusal, DeliverRequest};
+use crate::routes::deliver::{
+    deliver_message_via_in_tx, DeliverGates, DeliverRefusal, DeliverRequest,
+};
 use crate::routes::shared::audit_via_token_id;
 use crate::AppState;
 
@@ -221,6 +228,10 @@ fn message_dto(
         attachments: attachments.to_vec(),
         thread: thread.map(thread_dto),
         run_ended,
+        // ADR-0216 D8 — straight from the row, on every projection that has the row (send
+        // echo, history, thread replies, edits). The column is the only source; nothing
+        // here looks at the request that is being answered.
+        sent_via: message.sent_via.map(SentVia::as_db_label),
     }
 }
 
@@ -374,7 +385,8 @@ fn send_rejection(rejected: SendRejected) -> ApiError {
 
 /// A refused delivery → its response (ADR-0208 D4). Each variant maps to the exact
 /// status and sentence the inline branch it replaced produced, so extracting the
-/// composition into [`deliver_message_in_tx`] moved no byte of what REST answers.
+/// composition into [`deliver_message_in_tx`](crate::routes::deliver::deliver_message_in_tx)
+/// moved no byte of what REST answers.
 fn delivery_refusal(refusal: DeliverRefusal) -> ApiError {
     match refusal {
         DeliverRefusal::NotMember => ApiError::forbidden("not a member of this channel"),
@@ -584,9 +596,24 @@ pub async fn send(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path((workspace, channel)): Path<(String, String)>,
+    // ADR-0216 (#4660): present only when the auth middleware verified a developer token.
+    // It narrows this send (the channel restriction) and stamps it (`sent_via`); it never
+    // lets the send do anything a person's own session could not. Its body was already
+    // held to the allow-list by [`dev_send_body_gate`] before this handler ran.
+    dev_credential: Option<Extension<DevCredential>>,
     Json(request): Json<SendMessageRequest>,
-) -> Result<impl IntoResponse, ApiError> {
+    // `Result<(StatusCode, Json<MessageDto>), _>` rather than `impl IntoResponse`: the human MCP's
+    // `post` tool (ADR-0216 D5, #4661) calls this very function and reads the echoed message.
+) -> Result<(StatusCode, Json<MessageDto>), ApiError> {
     let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
+    let dev_credential = dev_credential.map(|Extension(credential)| credential);
+    // ADR-0216 D8 · R12 — the 「명령줄에서」 marker comes from the credential that
+    // authenticated this request and from nothing in it: the body has no field for it
+    // (`SendMessageRequest` is closed-world), and `props` never reaches the column.
+    let sent_via = dev_credential.as_ref().map(|_| SentVia::Dev);
+    // ADR-0216 D4 — the restriction half of the reach, decided now as a plain bool so the
+    // transaction below owns it; the membership half is `deliver`'s first step, today.
+    let channel_in_reach = dev_restriction(dev_credential.as_ref()).admits(channel_id);
     // #1173 — shape only, and before any connection is taken, for the same
     // reason `routing` is validated here: a malformed declaration is the
     // caller's mistake and costs nothing to answer.
@@ -697,7 +724,15 @@ pub async fn send(
     // scheduler (ADR-0208 D4); only the refine audit below is REST's alone.
     let sent = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            let sent = match deliver_message_in_tx(conn, delivery).await? {
+            // ADR-0216 D4 · R11 — a channel outside a developer token's restriction is
+            // refused where, and exactly as, a channel the author is not a member of is
+            // (or one that does not exist): the same `None`, so the same 403 below, byte
+            // for byte. A restricted token cannot tell an unreachable channel from a
+            // missing one. Nothing has been written at this point.
+            if !channel_in_reach {
+                return Ok(None);
+            }
+            let sent = match deliver_message_via_in_tx(conn, delivery, sent_via).await? {
                 Ok(sent) => sent,
                 Err(DeliverRefusal::NotMember) => return Ok(None),
                 Err(refusal) => return Err(SendFailure::Rejected(delivery_refusal(refusal))),
@@ -755,6 +790,173 @@ pub async fn send(
     ))
 }
 
+// ---------------------------------------------------------------------------
+// ADR-0216 D4 · D8 · R11 · R12 (#4660) — what a developer token may reach and send.
+//
+// A developer token authenticates as its person (`PrincipalKind::Human`), so every
+// existing person check passes for it. What narrows it on these routes is the
+// `DevCredential` marker the auth middleware inserts for that token and for nothing
+// else. With no marker, nothing below changes a byte of what the routes answer.
+// ---------------------------------------------------------------------------
+
+/// The channel restriction a request carries: a developer token's chosen channels, or
+/// none. `None` (no marker — a person's session, an agent) is no restriction at all.
+fn dev_restriction(dev_credential: Option<&DevCredential>) -> ChannelRestriction<'_> {
+    ChannelRestriction::from_channel_ids(
+        dev_credential.and_then(|credential| credential.channel_ids.as_deref()),
+    )
+}
+
+/// The only keys a developer-token send may carry (ADR-0216 D4 본문 제한, R12).
+///
+/// An **allow-list**, on purpose. `SendMessageRequest` grows a field every few batches,
+/// and every one so far is something a terminal tool must not reach: a server-vouched
+/// marker could be imitated through `props` (D8, F6), `runId` binds an agent's run,
+/// `signature`/`stream`/`harnessRefine` belong to the device-key and agent boundaries,
+/// `attachmentIds` binds files, `routing` picks a model and `apps` an app. A key added to
+/// the DTO tomorrow stays closed to this door until someone names it here.
+const DEV_SEND_ALLOWED_KEYS: [&str; 5] = ["clientMsgId", "rootId", "replyToId", "body", "type"];
+
+/// The one value `type` may hold on a developer-token send. Present means exactly this
+/// string — not `null`, not another type: a tool posts text, never a `system` line or a
+/// card.
+const DEV_SEND_TYPE: &str = "text";
+
+/// The largest developer-token send body read: axum's own `Json` default, the ceiling the
+/// handler holds every caller to, so the gate refuses nothing for size that the handler
+/// would have taken.
+const DEV_SEND_BODY_LIMIT_BYTES: usize = 2 * 1024 * 1024;
+
+/// `error.code` of a developer-token send carrying a key outside the allow-list (R12).
+const DEV_FIELD_NOT_ALLOWED: &str = "dev_field_not_allowed";
+
+/// Why a developer-token send body was refused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DevSendBodyRefusal {
+    /// Not one JSON object with unique keys: not JSON, not an object, trailing bytes, or a
+    /// key given twice. Closed here rather than left to the handler's decoder, so the door
+    /// never depends on which of two repeated values a decoder would have kept.
+    Malformed,
+    /// A key outside [`DEV_SEND_ALLOWED_KEYS`], or a `type` other than `"text"`.
+    FieldNotAllowed,
+}
+
+/// What one pass over the top-level object found.
+struct DevSendKeys {
+    outside_allow_list: bool,
+}
+
+impl<'de> Deserialize<'de> for DevSendKeys {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(DevSendKeysVisitor)
+    }
+}
+
+struct DevSendKeysVisitor;
+
+impl<'de> Visitor<'de> for DevSendKeysVisitor {
+    type Value = DevSendKeys;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("one JSON object")
+    }
+
+    /// Keys are compared **decoded** (a JSON-escaped `"\u0070rops"` is `props`), exactly as the
+    /// handler's decoder will read them. Values are skipped unread except `type`'s; a
+    /// repeat is tracked only among the allowed keys, because any key outside them is a
+    /// refusal however often it appears. Constant memory for any body.
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<DevSendKeys, A::Error> {
+        let mut seen = [false; DEV_SEND_ALLOWED_KEYS.len()];
+        let mut outside_allow_list = false;
+        while let Some(key) = map.next_key::<String>()? {
+            let Some(index) = DEV_SEND_ALLOWED_KEYS
+                .iter()
+                .position(|allowed| *allowed == key)
+            else {
+                outside_allow_list = true;
+                map.next_value::<IgnoredAny>()?;
+                continue;
+            };
+            if std::mem::replace(&mut seen[index], true) {
+                return Err(de::Error::custom("a key is repeated"));
+            }
+            if key == "type" {
+                let value: Value = map.next_value()?;
+                if value.as_str() != Some(DEV_SEND_TYPE) {
+                    outside_allow_list = true;
+                }
+            } else {
+                map.next_value::<IgnoredAny>()?;
+            }
+        }
+        Ok(DevSendKeys { outside_allow_list })
+    }
+}
+
+/// The body allow-list judgement, on the raw bytes (ADR-0216 D4 · R12). Pure: no
+/// database, no request — the gate below and the unit tests call the same function.
+fn judge_dev_send_body(bytes: &[u8]) -> Result<(), DevSendBodyRefusal> {
+    // `from_slice` also refuses trailing bytes after the object.
+    match serde_json::from_slice::<DevSendKeys>(bytes) {
+        Err(_) => Err(DevSendBodyRefusal::Malformed),
+        Ok(keys) if keys.outside_allow_list => Err(DevSendBodyRefusal::FieldNotAllowed),
+        Ok(_) => Ok(()),
+    }
+}
+
+fn dev_send_body_refusal(refusal: DevSendBodyRefusal) -> ApiError {
+    match refusal {
+        DevSendBodyRefusal::Malformed => ApiError::bad_request(
+            "a developer-token send must be one JSON object with no repeated keys",
+        ),
+        // A fixed sentence: the refused key is the caller's own input and is not echoed.
+        DevSendBodyRefusal::FieldNotAllowed => ApiError::coded(
+            StatusCode::BAD_REQUEST,
+            DEV_FIELD_NOT_ALLOWED,
+            "a developer token may send only clientMsgId, rootId, replyToId, body and type \
+             \"text\"",
+        ),
+    }
+}
+
+/// The developer-token half of [`dev_send_body_gate`]: the request to hand on, or the
+/// refusal to answer with.
+///
+/// A request without the [`DevCredential`] marker is returned as it came — the body is not
+/// read, so a person's or an agent's send reaches the handler exactly as before and gets
+/// exactly the answer it always got, error sentences included.
+async fn screen_dev_send(request: Request) -> Result<Request, ApiError> {
+    if request.extensions().get::<DevCredential>().is_none() {
+        return Ok(request);
+    }
+    let (parts, body) = request.into_parts();
+    // Same ceiling and same answer as the Agent Port's own buffered read
+    // (`routes::agent_port`): a body that cannot be buffered within it is a 413.
+    let bytes = axum::body::to_bytes(body, DEV_SEND_BODY_LIMIT_BYTES)
+        .await
+        .map_err(|_| {
+            ApiError::new(
+                StatusCode::PAYLOAD_TOO_LARGE,
+                "a developer-token send body must be at most 2 MiB",
+            )
+        })?;
+    judge_dev_send_body(&bytes).map_err(dev_send_body_refusal)?;
+    Ok(Request::from_parts(parts, Body::from(bytes)))
+}
+
+/// `route_layer` on `POST …/channels/{ch}/messages` (ADR-0216 D4 · R12): a developer-token
+/// send whose body leaves the allow-list is refused **before the handler runs** — before
+/// any transaction, `channel_seq` bump, message row, mention or outbox row — so a refusal
+/// leaves no trace anywhere.
+///
+/// It sits inside `auth::require_principal`, which is the only inserter of the marker.
+pub(crate) async fn dev_send_body_gate(request: Request, next: Next) -> Response {
+    match screen_dev_send(request).await {
+        Ok(request) => next.run(request).await,
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
 /// `GET /v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies` — one
 /// oldest-first page of a thread (Swift `MessageRoutes.replies`, :520-624).
 ///
@@ -767,8 +969,16 @@ pub async fn replies(
     Extension(principal): Extension<Principal>,
     Path((workspace, channel, root)): Path<(String, String, String)>,
     Query(query): Query<RepliesQuery>,
+    // ADR-0216 (#4660): a developer token's marker — it can only narrow (see `send`).
+    dev_credential: Option<Extension<DevCredential>>,
 ) -> Result<Json<ThreadRepliesPage>, ApiError> {
     let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
+    let channel_in_reach = dev_restriction(
+        dev_credential
+            .as_ref()
+            .map(|Extension(credential)| credential),
+    )
+    .admits(channel_id);
     let root_id =
         Uuid::parse_str(&root).map_err(|_| ApiError::bad_request("invalid thread root id"))?;
     let limit = clamp_replies_limit(query.limit.as_deref().and_then(|raw| raw.parse().ok()));
@@ -779,7 +989,13 @@ pub async fn replies(
     // channel mid-flight cannot still receive the page their check passed for.
     let (page, ended_runs) = tenant_tx_or_reject(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            if !is_channel_member(conn, channel_id, principal.member_id).await? {
+            // ADR-0216 D4 · R11 — the reach is the restriction ∩ today's membership, and
+            // a channel outside it takes the non-member branch itself: same status, same
+            // sentence, same point in the order (after the shape checks above, before the
+            // root lookup), so it reads exactly like a channel that does not exist.
+            if !channel_in_reach
+                || !is_channel_member(conn, channel_id, principal.member_id).await?
+            {
                 return Err(SendFailure::Rejected(ApiError::forbidden(
                     "not a member of this channel",
                 )));
@@ -823,14 +1039,26 @@ pub async fn history(
     Extension(principal): Extension<Principal>,
     Path((workspace, channel)): Path<(String, String)>,
     Query(query): Query<HistoryQuery>,
+    // ADR-0216 (#4660): a developer token's marker — it can only narrow (see `send`).
+    dev_credential: Option<Extension<DevCredential>>,
 ) -> Result<Json<MessagePage>, ApiError> {
     let (workspace_id, channel_id) = scope_ids(&workspace, &channel, &principal)?;
+    let channel_in_reach = dev_restriction(
+        dev_credential
+            .as_ref()
+            .map(|Extension(credential)| credential),
+    )
+    .admits(channel_id);
     let limit = clamp_history_limit(query.limit());
     let cursor = HistoryCursor::from_query(query.before(), query.after());
 
     let page = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            if !is_channel_member(conn, channel_id, principal.member_id).await? {
+            // ADR-0216 D4 · R11 — restriction ∩ today's membership, refused through the
+            // very branch a non-member (or a channel that does not exist) takes.
+            if !channel_in_reach
+                || !is_channel_member(conn, channel_id, principal.member_id).await?
+            {
                 return Ok(None);
             }
             let messages = list_channel_page(conn, channel_id, cursor, limit).await?;
@@ -932,20 +1160,48 @@ async fn record_interaction_audit(
     via_token_id: Option<Uuid>,
     action: &str,
 ) -> Result<(), DbError> {
-    let entry = AuditEntry::new(workspace_id, action)
+    let entry = interaction_audit_entry(
+        workspace_id,
+        channel_id,
+        message_id,
+        actor_member_id,
+        via_token_id,
+        action,
+        &[],
+    );
+    write_audit(conn, &entry).await?;
+    Ok(())
+}
+
+/// The row [`record_interaction_audit`] writes, as a value — **the one place its shape is
+/// decided**, for the two doors that pin a message: a person's own request (above) and an
+/// approved agent proposal (`routes::approvals`' `message.pin` executor, ADR-0186 증보 v5 U-e),
+/// which adds `via_agent` and `approval_id` through `extra_detail`. The detail names ids and the
+/// channel only, never a word of the message.
+pub(crate) fn interaction_audit_entry(
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    message_id: Uuid,
+    actor_member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    action: &str,
+    extra_detail: &[(&str, Uuid)],
+) -> AuditEntry {
+    let mut detail = serde_json::json!({
+        "channel_id": channel_id,
+        "event_type": action,
+    });
+    if let Some(object) = detail.as_object_mut() {
+        for (key, value) in extra_detail {
+            object.insert((*key).to_string(), serde_json::json!(value));
+        }
+    }
+    AuditEntry::new(workspace_id, action)
         .by(actor_member_id)
         .about_optional(None)
         .target("message", message_id)
         .via_token(via_token_id)
-        .with_schema(
-            "momo.message_interaction.v1",
-            serde_json::json!({
-                "channel_id": channel_id,
-                "event_type": action,
-            }),
-        );
-    write_audit(conn, &entry).await?;
-    Ok(())
+        .with_schema("momo.message_interaction.v1", detail)
 }
 
 /// `PATCH /v1/workspaces/{ws}/messages/{id}` — rewrite one's own message.
@@ -2310,6 +2566,7 @@ mod tests {
                 .expect("timestamp"),
             edited_at: None,
             deleted_at: None,
+            sent_via: None,
         }
     }
 
@@ -2717,5 +2974,241 @@ mod tests {
             wire.get("pinned").is_none(),
             "an unpin must not carry a body back out: {wire}"
         );
+    }
+
+    // -----------------------------------------------------------------------
+    // ADR-0216 D4 · D8 · R11 · R12 (#4660) — the developer-token limits.
+    // -----------------------------------------------------------------------
+
+    fn dev_credential(channel_ids: Option<Vec<Uuid>>) -> DevCredential {
+        DevCredential {
+            token_id: Uuid::from_u128(0xd0),
+            form: momo_auth::dev_token::DevForm::Card,
+            scopes: vec!["dev:identity".into(), "dev:messages:write".into()],
+            channel_ids,
+        }
+    }
+
+    fn judge(body: &str) -> Result<(), DevSendBodyRefusal> {
+        judge_dev_send_body(body.as_bytes())
+    }
+
+    /// R12 — the four keys and `type: "text"` pass, in any combination; their values are
+    /// the handler's to judge, not the gate's.
+    #[test]
+    fn a_developer_send_may_carry_the_allowed_keys_and_nothing_else_is_needed() {
+        let client = Uuid::from_u128(0xc1);
+        for body in [
+            format!(r#"{{"clientMsgId":"{client}","body":"오늘 배포 끝났어요"}}"#),
+            format!(
+                r#"{{"clientMsgId":"{client}","rootId":"{client}","replyToId":"{client}","body":"네","type":"text"}}"#
+            ),
+            format!(r#"{{"clientMsgId":"{client}","rootId":null,"body":null}}"#),
+            // Keys are compared decoded, as the handler's decoder reads them.
+            format!(r#"{{"clientMsgId":"{client}","\u0062ody":"hi"}}"#),
+            "{}".to_string(),
+        ] {
+            assert_eq!(judge(&body), Ok(()), "{body}");
+        }
+    }
+
+    /// R12 — every key outside the allow-list is refused, the ones ADR-0216 names and the
+    /// ones no DTO has yet; an escaped spelling of a refused key is still that key.
+    #[test]
+    fn every_key_outside_the_allow_list_is_refused_as_dev_field_not_allowed() {
+        for key in [
+            "props",
+            "runId",
+            "attachmentIds",
+            "routing",
+            "signature",
+            "stream",
+            "harnessRefine",
+            "apps",
+            "sentVia",
+            "sent_via",
+            "Body",
+            "client_msg_id",
+            "aFieldAddedTomorrow",
+            r"\u0070rops",
+        ] {
+            let body = format!(
+                r#"{{"clientMsgId":"{}","body":"x","{key}":{{}}}}"#,
+                Uuid::nil()
+            );
+            assert_eq!(
+                judge(&body),
+                Err(DevSendBodyRefusal::FieldNotAllowed),
+                "{body}"
+            );
+        }
+        // However often a refused key appears, it is the same refusal.
+        assert_eq!(
+            judge(r#"{"props":{"a":"b"},"props":{"c":"d"}}"#),
+            Err(DevSendBodyRefusal::FieldNotAllowed)
+        );
+    }
+
+    /// R12 — `type` is absent or exactly `"text"`; `null`, another type, another case or
+    /// another JSON shape is a refusal (a tool posts text, never a system line or a card).
+    #[test]
+    fn type_must_be_absent_or_exactly_text() {
+        assert_eq!(judge(r#"{"type":"text"}"#), Ok(()));
+        for value in [
+            r#""system""#,
+            r#""approval_request""#,
+            r#""TEXT""#,
+            r#""text ""#,
+            "null",
+            "1",
+            r#"["text"]"#,
+            r#"{"type":"text"}"#,
+        ] {
+            let body = format!(r#"{{"body":"x","type":{value}}}"#);
+            assert_eq!(
+                judge(&body),
+                Err(DevSendBodyRefusal::FieldNotAllowed),
+                "{body}"
+            );
+        }
+    }
+
+    /// The door closes on anything that is not one JSON object with unique keys, instead
+    /// of leaving the choice between two repeated values to a decoder.
+    #[test]
+    fn a_body_that_is_not_one_object_with_unique_keys_is_malformed() {
+        for body in [
+            "",
+            "not json",
+            "[]",
+            r#""clientMsgId""#,
+            "null",
+            r#"{"body":"a","body":"b"}"#,
+            r#"{"type":"text","type":"system"}"#,
+            r#"{"clientMsgId":"x","clientMsgId":"y"}"#,
+            r#"{"body":"a"} {}"#,
+            r#"{"body":"a"}x"#,
+            r#"{"body":"a""#,
+        ] {
+            assert_eq!(judge(body), Err(DevSendBodyRefusal::Malformed), "{body:?}");
+        }
+    }
+
+    #[test]
+    fn the_refusals_answer_400_and_only_the_allow_list_one_is_coded() {
+        let not_allowed = dev_send_body_refusal(DevSendBodyRefusal::FieldNotAllowed);
+        assert_eq!(not_allowed.status, StatusCode::BAD_REQUEST);
+        assert_eq!(not_allowed.code, Some("dev_field_not_allowed"));
+        let malformed = dev_send_body_refusal(DevSendBodyRefusal::Malformed);
+        assert_eq!(malformed.status, StatusCode::BAD_REQUEST);
+        assert_eq!(malformed.code, None);
+    }
+
+    fn dev_http_send(body: &str, dev: Option<DevCredential>) -> Request {
+        let mut request = axum::http::Request::builder()
+            .method("POST")
+            .uri("/v1/workspaces/w/channels/c/messages")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .expect("request");
+        if let Some(dev) = dev {
+            request.extensions_mut().insert(dev);
+        }
+        request
+    }
+
+    async fn body_text(body: Body) -> String {
+        let bytes = axum::body::to_bytes(body, usize::MAX).await.expect("body");
+        String::from_utf8(bytes.to_vec()).expect("utf-8")
+    }
+
+    /// The invariant the gate is built around: a request **without** the developer marker
+    /// is handed on untouched — even a body the developer door would refuse — so a
+    /// person's and an agent's send keep every byte of their old behaviour.
+    #[tokio::test]
+    async fn a_request_without_the_developer_marker_passes_the_gate_untouched() {
+        let body = r#"{"clientMsgId":"x","props":{"sentVia":"dev"},"body":"x","body":"y"}"#;
+        let screened = screen_dev_send(dev_http_send(body, None))
+            .await
+            .expect("no marker, no judgement");
+        assert!(screened.extensions().get::<DevCredential>().is_none());
+        assert_eq!(body_text(screened.into_body()).await, body);
+    }
+
+    /// An allowed developer send reaches the handler with the very bytes it was sent with
+    /// (the marker still on it, for the handler's `sent_via` and channel checks).
+    #[tokio::test]
+    async fn an_allowed_developer_send_reaches_the_handler_with_its_own_bytes() {
+        let body = format!(
+            r#"{{"clientMsgId":"{}","body":"배포 끝","type":"text"}}"#,
+            Uuid::from_u128(0xc2)
+        );
+        let screened = screen_dev_send(dev_http_send(&body, Some(dev_credential(None))))
+            .await
+            .expect("allowed");
+        assert!(screened.extensions().get::<DevCredential>().is_some());
+        assert_eq!(body_text(screened.into_body()).await, body);
+    }
+
+    /// R12 on the wire: the coded 400 envelope, before any handler (and so before any
+    /// write) could run.
+    #[tokio::test]
+    async fn a_developer_send_with_props_is_refused_with_the_coded_400() {
+        let refusal = screen_dev_send(dev_http_send(
+            r#"{"clientMsgId":"x","body":"x","props":{"sentVia":"dev"}}"#,
+            Some(dev_credential(None)),
+        ))
+        .await
+        .expect_err("props is outside the allow-list");
+        let response = refusal.into_response();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let envelope: Value =
+            serde_json::from_str(&body_text(response.into_body()).await).expect("json");
+        assert_eq!(envelope["error"]["code"], "dev_field_not_allowed");
+        assert!(
+            !envelope.to_string().contains("sentVia"),
+            "the refused input is not echoed: {envelope}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_developer_send_over_the_body_ceiling_is_413() {
+        let huge = format!(
+            r#"{{"body":"{}"}}"#,
+            "가".repeat(DEV_SEND_BODY_LIMIT_BYTES / 3 + 1)
+        );
+        let refusal = screen_dev_send(dev_http_send(&huge, Some(dev_credential(None))))
+            .await
+            .expect_err("over the ceiling");
+        assert_eq!(refusal.status, StatusCode::PAYLOAD_TOO_LARGE);
+    }
+
+    /// R11's restriction half, as the three channel routes read it from the marker: no
+    /// marker or no stored list restricts nothing; a stored list admits only itself.
+    #[test]
+    fn the_channel_restriction_comes_from_the_marker_alone() {
+        let listed = Uuid::from_u128(0xa1);
+        let other = Uuid::from_u128(0xb2);
+        assert!(dev_restriction(None).admits(other));
+        assert!(dev_restriction(Some(&dev_credential(None))).admits(other));
+        let restricted = dev_credential(Some(vec![listed]));
+        assert!(dev_restriction(Some(&restricted)).admits(listed));
+        assert!(!dev_restriction(Some(&restricted)).admits(other));
+    }
+
+    /// ADR-0216 D8 — every projection built from a row carries the row's marker, and a
+    /// row without one projects no `sentVia` key at all.
+    #[test]
+    fn the_message_projection_carries_sent_via_from_the_row_only() {
+        let plain = stored_message();
+        let json = serde_json::to_value(message_dto(&plain, None, true, None, None, &[], false))
+            .expect("serialize");
+        assert!(json.get("sentVia").is_none(), "{json}");
+
+        let mut dev = stored_message();
+        dev.sent_via = Some(SentVia::Dev);
+        let json = serde_json::to_value(message_dto(&dev, None, true, None, None, &[], false))
+            .expect("serialize");
+        assert_eq!(json["sentVia"], "dev");
     }
 }

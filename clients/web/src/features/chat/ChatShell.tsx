@@ -78,6 +78,7 @@ import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { usePersonalCall } from "@/features/chat/usePersonalCall";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import { AgentLivenessLabel } from "@/features/agents/AgentLivenessLabel";
+import { HumanPresenceLabel } from "@/features/presence/HumanPresence";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import { useTypingReceive } from "@/features/chat/useTyping";
@@ -1138,6 +1139,11 @@ export function ChatShell() {
           {/* 에이전트와의 DM 머리: 지금 살아 있는가(ADR-0200 D4). */}
           {stressCount === 0 && channel?.kind === "dm" && peer?.kind === "agent" && (
             <AgentLivenessLabel agentId={peer.id} className="wide-only" />
+          )}
+          {/* 사람과의 DM 머리: 지금 접속해 있는가, 또는 스스로 정한 자리 비움·방해 금지(ADR-0160, #4692).
+              모르면 아무것도 서지 않는다. */}
+          {stressCount === 0 && channel?.kind === "dm" && peer?.kind === "human" && (
+            <HumanPresenceLabel member={peer} className="wide-only" />
           )}
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개

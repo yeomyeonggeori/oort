@@ -1,0 +1,76 @@
+# oort — 성능 측정 야간·수동 실행 (#4696). PR CI 에서 뺀 성능 측정 시험의 집이다.
+#
+# 왜 있나: `momo-blind-pty/tests/loopback.rs`(ADR-0197 S2 지연 측정)는 PR CI 에서 164초(Rust 시험
+# 실행의 약 3/4)를 쓰면서 느슨한 상한 하나만 단정했다. 그래서 `#[ignore]` 로 PR 경로에서 뺐고,
+# `#[ignore]` 만 하면 아무 데서도 안 도는 시험이 되므로(시험 정리 원칙 8) 이 워크플로가 그 시험을 돌린다.
+# 릴리스 프로필로도 Linux 러너에서 같은 164초다(이 PR 의 실행 실측, 잡 약 4분): 암호 계산이 아니라
+# 시험 소켓 때문이다 — TCP_NODELAY 없이 프레임마다 write 를 두 번 해서 Linux 에서 Nagle × 지연 ACK 가
+# 왕복마다 약 82ms 를 먹는다(macOS 로컬은 0.15초, PR #4724 의 Python 재현: 86.8ms ↔ 0.09ms).
+# 그래서 아래 출력 줄의 지연 숫자는 제품 지연이 아니라 시험 소켓의 성질이다.
+#
+# 언제 도나:
+#   · schedule(매일) · workflow_dispatch(수동): 기본 브랜치(main)의 이 파일로 돈다.
+#   · pull_request(paths: 이 파일만): **이 파일을 고친 PR에서만** 한 번 돌려 배선이 살아 있음을 증명한다.
+#     다른 PR 에서는 돌지 않는다(PR 경로에서 뺀다는 이 파일의 목적 그대로).
+# `scripts/security_pack.sh nightly`(PG 시험 전량 야간)는 이 시험을 건너뛴다 — 두 번 돌지 않게.
+# 시크릿 없음(`contents: read`), DB 없음.
+name: perf-nightly
+
+on:
+  schedule:
+    - cron: "47 19 * * *"
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - main
+      - track/engine
+      - track/uxui
+    paths:
+      - ".github/workflows/perf-nightly.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  blind-pty-loopback:
+    name: blind-pty loopback 지연 측정(릴리스)
+    runs-on: ubuntu-latest
+    # 행 방지용 상한. 릴리스 빌드(의존 컴파일 포함) + 측정은 분 단위다.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: cargo 캐시(레지스트리 + target)
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          workspaces: server-rust
+
+      - name: loopback 지연 측정(--ignored, 릴리스 프로필)
+        run: |
+          set -euo pipefail
+          log="$RUNNER_TEMP/loopback.log"
+          cargo test --locked --manifest-path server-rust/Cargo.toml \
+            -p momo-blind-pty --test loopback --release -- --ignored --nocapture 2>&1 | tee "$log"
+          # 0개를 돌리고 초록이 되는 것을 막는다(시험 이름이 바뀌거나 지워진 경우).
+          grep -Eq '^test result: ok\. 1 passed; 0 failed' "$log" || {
+            echo "loopback 시험 1개 통과를 확인하지 못했어요(0개를 돌렸거나 실패)" >&2
+            exit 1
+          }
+          line="$(grep -E '^S2 loopback: ' "$log" | tail -n 1 || true)"
+          [ -n "$line" ] || {
+            echo "측정 줄(S2 loopback: …)이 출력되지 않았어요" >&2
+            exit 1
+          }
+          {
+            echo '### blind-pty loopback 지연 측정(릴리스)'
+            echo
+            echo '```'
+            echo "$line"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

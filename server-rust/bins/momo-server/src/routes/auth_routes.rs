@@ -23,7 +23,19 @@
 //!     `label='access'|'refresh'`, only `sha256(jwt)` stored) — Swift
 //!     `recordSessionTokens` (`AuthRoutes.swift:412-426`). This is what makes the
 //!     middleware's MOMO-300 revocation check meaningful: minting without a row
-//!     would turn every subsequent request into a 401 `unknown token`.
+//!     would turn every subsequent request into a 401 `unknown token`;
+//!   * **the password check, the status read and both session rows are one
+//!     transaction under the workspace's membership lock** (#4636; the pattern
+//!     `POST /v1/join` has, #4625). Shared, so logins do not wait for each other, and
+//!     taken without waiting: a login that finds the lock held answers 503 with
+//!     `Retry-After` and has written nothing. A suspension, removal, departure or
+//!     credential change that overlaps a login is ordered wholly before it or wholly
+//!     after it, so "a suspension ends every session" (ADR-0128 D3) holds at the
+//!     boundary too. The same lock, exclusive, is taken by `claim` and the password
+//!     change, which are the other doors that end a member's sessions as they sign in.
+//!     Lock order for all three: membership lock → (claim row →) `human` row →
+//!     member-wide sweep lock → `token` rows. The membership lock is always the first
+//!     lock a transaction takes, so no cycle can close through it.
 //!
 //! ## `POST /v1/auth/refresh` (B1.6)
 //!
@@ -142,7 +154,8 @@ use momo_auth::{
     SESSION_LABEL_REFRESH,
 };
 use momo_db::{with_tenant_tx, DbError, PgConnection};
-use momo_messaging::{get_member, verify_password_login, PasswordLogin};
+use momo_messaging::{get_member, verify_password_login, Member, PasswordLogin};
+use momo_settings::try_share_membership_state;
 use uuid::Uuid;
 
 use crate::auth::bearer_token;
@@ -168,8 +181,8 @@ pub(crate) fn base_scopes() -> Vec<String> {
     vec!["messages:write".to_string(), "messages:read".to_string()]
 }
 
-/// The freshly minted pair, moved into the recording transaction. Holds raw
-/// tokens only long enough to hash them inside Postgres — nothing here is logged.
+/// The freshly minted pair, held only long enough to hash it inside Postgres —
+/// nothing here is logged.
 struct SessionTokens {
     member_id: Uuid,
     scopes: Vec<String>,
@@ -181,85 +194,15 @@ struct SessionTokens {
     session_id: Uuid,
 }
 
-/// Mint an access+refresh pair for `member_id` and record **both halves** in one
-/// tenant transaction, returning the pair. Swift `recordSessionTokens`
-/// (`AuthRoutes.swift:412-426`), shared by login and refresh so the two paths
-/// cannot drift in what they persist.
-///
-/// One transaction rather than Swift's two connections: a session whose access
-/// row committed but whose refresh row did not would be unrevocable by a single
-/// logout, so the pair is atomic here. Recording is also what makes the
-/// middleware's MOMO-300 revocation check meaningful — minting without a row
-/// would turn every subsequent request into a 401 `unknown token`.
-///
-/// `pub(crate)` since B4.3 so the other doors that sign someone in (claim, password
-/// change) mint through this and not a copy: a session must be revocable exactly
-/// like a logged-in one. `POST /v1/join` signs in inside its own transaction
-/// ([`mint_and_record_session_in_tx`], #4625) and shares the recording with this
-/// function ([`record_session_pair`]), so what a session persists is still said once.
-///
-/// Every caller of this name starts a NEW session (login, claim, password change),
-/// so it opens a fresh lineage (#2677). A refresh continues one and
-/// goes through [`issue_and_record_session_in_lineage`] instead.
-pub(crate) async fn issue_and_record_session(
-    state: &AppState,
-    workspace_id: Uuid,
-    member_id: Uuid,
-    scopes: Vec<String>,
-    context: &str,
-) -> Result<(IssuedToken, IssuedToken), ApiError> {
-    issue_and_record_session_in_lineage(
-        state,
-        workspace_id,
-        member_id,
-        scopes,
-        new_session_id(),
-        context,
-    )
-    .await
-}
-
-/// [`issue_and_record_session`] for a pair that continues `session_id` — the
-/// refresh rotation. Both halves carry the lineage, so a push token registered
-/// under the first pair is still this session's after any number of rotations.
-async fn issue_and_record_session_in_lineage(
-    state: &AppState,
-    workspace_id: Uuid,
-    member_id: Uuid,
-    scopes: Vec<String>,
-    session_id: Uuid,
-    context: &str,
-) -> Result<(IssuedToken, IssuedToken), ApiError> {
-    let access = sign_access(member_id, workspace_id, &scopes, &state.jwt_secret)
-        .map_err(|error| ApiError::internal(&format!("{context}.sign_access"), error))?;
-    let refresh = sign_refresh(member_id, workspace_id, &scopes, &state.jwt_secret)
-        .map_err(|error| ApiError::internal(&format!("{context}.sign_refresh"), error))?;
-
-    let session = SessionTokens {
-        member_id,
-        scopes,
-        access_token: access.token.clone(),
-        access_expires_at: access.expires_at,
-        refresh_token: refresh.token.clone(),
-        refresh_expires_at: refresh.expires_at,
-        session_id,
-    };
-    with_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move {
-            record_session_pair(conn, workspace_id, &session).await?;
-            Ok::<(), DbError>(())
-        })
-    })
-    .await
-    .map_err(|error| db_error(&format!("{context}.record_session"), error))?;
-
-    Ok((access, refresh))
-}
-
 /// Record both halves of one session pair on `conn`, in the order and with the
-/// labels every session has. The single place that says what a session persists:
-/// [`issue_and_record_session_in_lineage`] and [`mint_and_record_session_in_tx`]
-/// both end here.
+/// labels every session has. The single place that says what a session persists
+/// (Swift `recordSessionTokens`, `AuthRoutes.swift:412-426`): [`mint_and_record_session_in_tx`]
+/// ends here.
+///
+/// Both halves go in one transaction: a session whose access row committed but whose
+/// refresh row did not would be unrevocable by a single logout. Recording is also what
+/// makes the middleware's MOMO-300 revocation check meaningful — minting without a row
+/// would turn every subsequent request into a 401 `unknown token`.
 async fn record_session_pair(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -291,16 +234,24 @@ async fn record_session_pair(
 
 /// Mint a NEW session's pair for `member_id` and record it **on `conn`**, a
 /// connection that already carries the tenant GUC and belongs to a transaction the
-/// caller commits — for a caller whose decision to sign someone in must not be
-/// separable from the pair that decision produces.
+/// caller commits. **This is the only way a door creates a session** — login, claim,
+/// password change and join all end here — because a door's decision to sign someone
+/// in must not be separable from the pair that decision produces.
 ///
-/// `POST /v1/join` is that caller: it holds the workspace's membership lock (shared)
-/// from its first statement to its commit, so a suspension or removal that follows
-/// waits, then revokes the pair this function recorded. Minting after the commit
-/// instead lets that revocation run in between and miss a pair that does not exist
-/// yet. A signing failure surfaces as a `sqlx::Error::Protocol`: it cannot happen
-/// with a configured secret, and the caller answers it as the opaque 500 any other
-/// failure of that transaction is.
+/// The caller holds the workspace's membership lock from its first statement to its
+/// commit: shared when it only reads who the member is (login, join), exclusive when it
+/// also writes the credential and ends the member's other sessions (claim, password
+/// change). A suspension or removal that follows waits for the commit and then revokes
+/// the pair recorded here; a credential change that follows waits and sweeps it with the
+/// rest. Minting after the commit instead lets either of them run in between and miss a
+/// pair that does not exist yet. There is deliberately no variant that opens a
+/// transaction of its own (there used to be one): a new door has to say which lock it
+/// holds.
+///
+/// A signing failure surfaces as a `sqlx::Error::Protocol`: it cannot happen with a
+/// configured secret, and the caller answers it as the opaque 500 any other failure of
+/// that transaction is. Every caller starts a NEW session, so this opens a fresh lineage
+/// (#2677); a refresh continues one and goes through its own rotation path.
 pub(crate) async fn mint_and_record_session_in_tx(
     conn: &mut PgConnection,
     jwt_secret: &str,
@@ -368,6 +319,29 @@ fn resolve_login_workspace(raw: Option<&str>) -> Result<Uuid, ApiError> {
     Uuid::parse_str(named).map_err(|_| ApiError::bad_request(WORKSPACE_NOT_AN_ID))
 }
 
+/// What the login transaction decided. Everything below is read and written in ONE
+/// tenant transaction that holds the workspace's membership lock (shared) from its first
+/// statement, and mapped to HTTP outside it, like [`RefreshGate`].
+enum LoginGate {
+    /// The lock could not be had without waiting. Nothing was read or written.
+    Busy,
+    /// The password was right and the member is suspended → 403.
+    Suspended,
+    /// Unknown address, wrong password, or any state but active/suspended → 401.
+    Invalid,
+    /// The password was right, the member is active, and the pair is recorded — in the
+    /// same transaction that read the password and the status.
+    Issued {
+        member: Member,
+        access: IssuedToken,
+        refresh: IssuedToken,
+    },
+}
+
+/// `Retry-After` for a login (or any door) that found the membership lock taken: a
+/// membership change takes milliseconds, so one second is the honest smallest value.
+pub(crate) const MEMBERSHIP_BUSY_RETRY_SECONDS: u64 = 1;
+
 pub async fn login(
     State(state): State<AppState>,
     uri: axum::http::Uri,
@@ -380,22 +354,62 @@ pub async fn login(
     // scoped to the workspace being logged into (invariant #6).
     let email = request.email.clone();
     let password = request.password.clone();
-    let resolution = with_tenant_tx(&state.pool, workspace_id, move |conn| {
-        Box::pin(async move { verify_password_login(conn, &email, &password).await })
+    let jwt_secret = state.jwt_secret.clone();
+    let gate = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            // 0) Stand in line with the membership mutations (suspend, reinstate, remove,
+            //    leave, role changes, and the credential writers: password change and
+            //    claim). Shared, so logins do not wait for each other; first, before any
+            //    read the rest relies on; and without waiting, because this door is open
+            //    to anyone and a wait here keeps a pooled connection while it lasts.
+            if !try_share_membership_state(conn, workspace_id).await? {
+                return Ok::<_, DbError>(LoginGate::Busy);
+            }
+            // 1) The password is checked **inside** Postgres, under the lock, so the answer
+            //    and the status read beside it are the workspace's state at one instant:
+            //    a change that follows waits for this transaction, and one that came first
+            //    has already committed.
+            match verify_password_login(conn, &email, &password).await? {
+                PasswordLogin::Suspended => Ok(LoginGate::Suspended),
+                PasswordLogin::Invalid => Ok(LoginGate::Invalid),
+                PasswordLogin::Active(member) => {
+                    // 2) Both halves are recorded (MOMO-300) on THIS connection, so the
+                    //    pair is born before the lock is released. Minted after the commit,
+                    //    it could be born just after a suspension had revoked every token
+                    //    that existed and escape it.
+                    let (access, refresh) = mint_and_record_session_in_tx(
+                        conn,
+                        &jwt_secret,
+                        workspace_id,
+                        member.id,
+                        base_scopes(),
+                    )
+                    .await?;
+                    Ok(LoginGate::Issued {
+                        member,
+                        access,
+                        refresh,
+                    })
+                }
+            }
+        })
     })
     .await
     .map_err(|error| db_error("auth.login", error))?;
 
-    let member = match resolution {
-        PasswordLogin::Suspended => return Err(ApiError::forbidden("member is suspended")),
-        PasswordLogin::Invalid => return Err(ApiError::unauthorized("invalid credentials")),
-        PasswordLogin::Active(member) => member,
+    let (member, access, refresh) = match gate {
+        LoginGate::Busy => {
+            tracing::debug!("auth.login: the membership lock is taken; answering 503");
+            return Err(ApiError::busy(MEMBERSHIP_BUSY_RETRY_SECONDS));
+        }
+        LoginGate::Suspended => return Err(ApiError::forbidden("member is suspended")),
+        LoginGate::Invalid => return Err(ApiError::unauthorized("invalid credentials")),
+        LoginGate::Issued {
+            member,
+            access,
+            refresh,
+        } => (member, access, refresh),
     };
-
-    // Record both halves so they can be revoked later (MOMO-300).
-    let (access, refresh) =
-        issue_and_record_session(&state, workspace_id, member.id, base_scopes(), "auth.login")
-            .await?;
 
     Ok(Json(LoginResponse {
         access_token: access.token,
@@ -1260,7 +1274,7 @@ struct RotatedPair<'a> {
 
 /// Mint the replacement pair and record both halves (and, for a labelled
 /// session, rebind the device link) on the caller's transaction — the rows
-/// [`issue_and_record_session_in_lineage`] writes for a sign-in, plus the
+/// [`record_session_pair`] writes for a sign-in, plus the
 /// ADR-0180 label and rebind the labelled rotation always carried.
 async fn record_rotated_pair_in_tx(
     conn: &mut PgConnection,

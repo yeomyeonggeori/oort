@@ -274,7 +274,10 @@ write_local_centrifugo_config() {
         "channel_regex": "^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$" },
       { "name": "user", "history_size": 50, "history_ttl": "168h",
         "history_meta_ttl": "192h", "force_recovery": true,
-        "allow_user_limited_channels": true }
+        "allow_user_limited_channels": true },
+      { "name": "online", "presence": true, "history_size": 0, "history_ttl": "0s",
+        "subscribe_proxy_enabled": true,
+        "channel_regex": "^ws[0-9A-Fa-f-]{36}$" }
     ],
     "proxy": {
       "subscribe": {

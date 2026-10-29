@@ -149,10 +149,12 @@ pub mod decider;
 pub mod dm;
 pub mod effort;
 pub mod error;
+pub mod hosted_cadence;
 pub mod hosted_dm;
 pub mod hosted_liveness;
 pub mod hosted_notice;
 pub mod in_place_grant;
+pub mod initiative;
 pub mod korean;
 pub mod memory;
 pub mod memory_cons;
@@ -199,17 +201,17 @@ pub use actions::{
 };
 pub use approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
-    cancel_pending_approvals_for_run_in_tx, create_pending_approval_in_tx, decided_props_patch,
-    decision_broadcast_payload, decision_event_payload, decision_receipt, default_expires_at,
-    existing_decision_in_tx, grant_secret_claim_in_tx, is_active_channel_member_in_tx,
-    is_active_human_member_in_tx, list_approvals_in_tx,
-    lock_agent_and_count_pending_workspace_actions_in_tx, lock_approval_in_tx,
-    lock_target_and_find_pending_action_in_tx, login_handoff_session_id,
+    cancel_pending_approvals_for_run_in_tx, count_pending_workspace_actions_in_tx,
+    create_pending_approval_in_tx, decided_props_patch, decision_broadcast_payload,
+    decision_event_payload, decision_receipt, default_expires_at, existing_decision_in_tx,
+    grant_secret_claim_in_tx, is_active_channel_member_in_tx, is_active_human_member_in_tx,
+    list_approvals_in_tx, lock_agent_and_count_pending_workspace_actions_in_tx,
+    lock_approval_in_tx, lock_target_and_find_pending_action_in_tx, login_handoff_session_id,
     login_handoff_session_id_dropped_detail, mark_approval_decided_in_tx,
     mark_approval_expired_in_tx, normalized_reason, overdue_approvals_in_tx, record_decision_in_tx,
     resume_job_payload, stamp_secret_claimed_in_tx, tool_grants_from_payload, validated_limit,
     validated_status, workspaces_with_overdue_approvals, ApprovalListRow, ExistingDecision,
-    HandoffSessionId, LockedApproval, NewApproval, OverdueApproval,
+    HandoffSessionId, LockedApproval, NewApproval, OverdueApproval, PendingWorkspaceActions,
     AUDIT_LOGIN_HANDOFF_SESSION_ID_DROPPED, AUDIT_SCHEMA_LOGIN_HANDOFF_SESSION_ID_DROPPED,
     DEFAULT_TTL_SECONDS, LISTABLE_STATUSES, RESUME_MODEL, RUN_CANCELLED_DECISION_REASON,
 };
@@ -255,6 +257,11 @@ pub use effort::{
     MAX_EFFORT_LENGTH,
 };
 pub use error::AgentError;
+// ADR-0200 증보 6 (#4621) — how often a hosted agent comes to the Agent Port.
+pub use hosted_cadence::{
+    derive_cadence, load_agent_call_times_in_tx, Cadence, CadenceKind, CadenceParams,
+    AGENT_PORT_CALL_ACTION, AGENT_PORT_CALL_PATH, CALL_READ_TIMEOUT, CALL_TIMES_SQL,
+};
 pub use hosted_dm::{
     hosted_dm_approval_state, hosted_dm_delivery, list_hosted_agent_dms_in_tx,
     load_hosted_dm_connection_in_tx, set_hosted_dm_approval_in_tx, unapproved_dm_reason,
@@ -280,7 +287,7 @@ pub use mention::{
     load_mention_candidates_in_tx, max_output_tokens, mention_diagnostic_detail,
     mention_job_broadcast_payload, mention_job_payload, mention_run_input, message_source,
     paused_mention_body, paused_mention_props, resolve_mention_routing, MentionCandidate,
-    MentionRouting, MentionTrigger, AGENT_INTERACTION_SAFETY_PREAMBLE,
+    MentionRouting, MentionTrigger, AGENT_CONVERSATION_PREAMBLE, AGENT_INTERACTION_SAFETY_PREAMBLE,
     AGENT_PROFILE_POLICY_PREAMBLE, MENTION_JOB_CREATED_FROM, MENTION_JOB_METHOD_GATEWAY,
     MENTION_JOB_METHOD_WORKER, MENTION_RUN_INPUT_SCHEMA,
 };

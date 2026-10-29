@@ -127,14 +127,20 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
+/** 시험이 명부의 「박세은」 행에 싣는 접속 여부(#4692). `undefined` 는 서버가 말하지 않았다는 뜻이다. */
+let personOnline: boolean | undefined;
+
 function installFetch(
   mentions = 0,
   selfRole?: 'owner' | 'admin' | 'member',
   createStatus: number | 'hang' = 201,
 ): jest.Mock {
-  const roster = ROSTER.map(row =>
-    (row as {id?: string}).id === SELF_ID && selfRole ? {...row, role: selfRole} : row,
-  );
+  const roster = ROSTER.map(row => {
+    const id = (row as {id?: string}).id;
+    if (id === SELF_ID && selfRole) return {...row, role: selfRole};
+    if (id === PERSON_ID && personOnline !== undefined) return {...row, online: personOnline};
+    return row;
+  });
   // 만든 뒤의 재조회는 끝나지 않는다 — 새 채널이 캐시에 있다면 그것은 재조회가 아니라
   // 시트의 업서트(`upsertChannel`)가 넣은 것이다.
   let createdOnce = false;
@@ -231,6 +237,7 @@ const mmkvStore = (
 jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
 
 beforeEach(() => {
+  personOnline = undefined;
   installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
@@ -433,6 +440,69 @@ describe('탭 셋과 + (ADR-0189 D1, #2750)', () => {
     const avatars = within(screen.getByTestId('new-dm-list')).UNSAFE_getAllByType(Avatar);
     expect(avatars.length).toBeGreaterThan(0);
     for (const avatar of avatars) expect(avatar.props.ground).toBe('muted');
+  });
+
+  describe('새 DM 의 사람 줄: 접속 점 (#4692)', () => {
+    const dotOf = () =>
+      within(screen.getByTestId('new-dm-person-seeun')).queryByTestId('new-dm-status-dot-seeun', {
+        includeHiddenElements: true,
+      });
+    const openSheet = async () => {
+      await renderReady();
+      openMenu();
+      fireEvent.press(screen.getByTestId('plus-menu-dm'));
+      await waitFor(() => expect(screen.getByTestId('new-dm-person-seeun')).toBeTruthy());
+    };
+
+    it('접속 중은 채운 초록 점이고, 낭독 라벨이 낱말을 잇는다', async () => {
+      personOnline = true;
+      installFetch();
+      await openSheet();
+      await waitFor(() => expect(dotOf()).toBeTruthy());
+      expect([lightPalette.ok, darkPalette.ok]).toContain(
+        StyleSheet.flatten(dotOf()!.props.style).backgroundColor,
+      );
+      expect(screen.getByTestId('new-dm-person-seeun')).toHaveProp(
+        'accessibilityLabel',
+        '박세은, @seeun, 사람, 온라인',
+      );
+    });
+
+    it('접속 없음은 속이 빈 회색 고리다 — 채운 점과 한 점이 되지 않는다', async () => {
+      personOnline = false;
+      installFetch();
+      await openSheet();
+      await waitFor(() => expect(dotOf()).toBeTruthy());
+      const style = StyleSheet.flatten(dotOf()!.props.style);
+      expect([lightPalette.surface, darkPalette.surface]).toContain(style.backgroundColor);
+      expect([lightPalette.textFaint, darkPalette.textFaint]).toContain(style.borderColor);
+      expect(screen.getByTestId('new-dm-person-seeun')).toHaveProp(
+        'accessibilityLabel',
+        '박세은, @seeun, 사람, 오프라인',
+      );
+    });
+
+    it('서버가 접속 여부를 말하지 않았으면 점도 낱말도 없다 — 모름은 오프라인이 아니다', async () => {
+      installFetch();
+      await openSheet();
+      expect(dotOf()).toBeNull();
+      expect(screen.getByTestId('new-dm-person-seeun')).toHaveProp(
+        'accessibilityLabel',
+        '박세은, @seeun, 사람',
+      );
+    });
+
+    it('에이전트 줄에는 점이 없다', async () => {
+      personOnline = true;
+      installFetch();
+      await openSheet();
+      expect(
+        within(screen.getByTestId('new-dm-person-kim-intern')).queryByTestId(
+          'new-dm-status-dot-kim-intern',
+          {includeHiddenElements: true},
+        ),
+      ).toBeNull();
+    });
   });
 
   it('새 DM 의 빈 상태 문장이 `hangul-word` 줄바꿈 전략을 든다 (design-review #4318 r4 M3)', async () => {
