@@ -396,3 +396,13 @@ describe('행이 말하는 것', () => {
     expect(screen.getByTestId('message-resend')).toBeTruthy();
   });
 });
+
+
+it('S1 #4789 머리 여백은 스크롤 안에 있고 날짜·안 읽음 자리는 머리 아래다', () => {
+  renderTimeline({contentTopInset: 121, topPillInset: 121, jumpPills: true, loadingOlder: true});
+  const list = screen.getByTestId('timeline-list');
+  expect(StyleSheet.flatten(list.props.contentContainerStyle)).toMatchObject({paddingTop: 121, flexGrow: 1, justifyContent: 'flex-end'});
+  expect(StyleSheet.flatten(list.props.style)?.paddingTop).toBeUndefined();
+  expect(StyleSheet.flatten(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121);
+  expect(screen.UNSAFE_getAllByType(require('react-native').ActivityIndicator)).toHaveLength(1);
+});
