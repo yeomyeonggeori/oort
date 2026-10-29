@@ -57,7 +57,9 @@ import {
   viewerCaption,
   viewerCaptionLabel,
   viewerStamp,
-  viewerScrim,
+  VIEWER_TEXT_SHADOW,
+  viewerScrimFade,
+  viewerScrimPlateau,
   viewerStripOffset,
 } from './viewerDesign';
 
@@ -263,7 +265,7 @@ function GlassButton({
   );
 }
 
-/** VoiceOver·스위치 컨트롤이 켜져 있는가. 켜져 있으면 조작을 숨기지 않는다(파일 머리 「조작을 숨길 때 보조기술」). */
+/** VoiceOver 가 켜져 있는가. 켜져 있으면 조작을 숨기지 않는다(파일 머리 「조작을 숨길 때 보조기술」). */
 function useScreenReader(): boolean {
   const [on, setOn] = useState(false);
   useEffect(() => {
@@ -577,6 +579,11 @@ function ViewerFrame({
             style={styles.scrimTop}
             testID="attachment-viewer-scrim-top"
           />
+          <View
+            pointerEvents="none"
+            style={styles.scrimTopFade}
+            testID="attachment-viewer-scrim-top-fade"
+          />
           <GlassButton
             label="뒤로"
             onPress={onClose}
@@ -636,6 +643,11 @@ function ViewerFrame({
             pointerEvents="none"
             style={styles.scrimBottom}
             testID="attachment-viewer-scrim-bottom"
+          />
+          <View
+            pointerEvents="none"
+            style={styles.scrimBottomFade}
+            testID="attachment-viewer-scrim-bottom-fade"
           />
           {download.status !== 'idle' ? (
             <Text
@@ -767,36 +779,49 @@ const buildStyles = (_color: Palette) =>
       lineHeight: line.heading,
       fontWeight: '600',
       color: VIEWER_STAGE.ink,
-      textShadowColor: VIEWER_STAGE.inkShadow,
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 3,
+      ...VIEWER_TEXT_SHADOW,
     },
     stampTime: {
       fontSize: font.meta,
       lineHeight: line.meta,
       color: VIEWER_STAGE.inkMuted,
       fontVariant: ['tabular-nums'],
-      textShadowColor: VIEWER_STAGE.inkShadow,
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 3,
+      ...VIEWER_TEXT_SHADOW,
     },
 
-    // 조작 덩어리 뒤의 스크림. 덩어리 바깥쪽으로 `scrimReach` 만큼 번져 부드럽게 사라진다.
+    // 조작 덩어리 뒤의 스크림 두 겹(`design/tokens.ts` 의 `photoStage.scrim`). 판은 덩어리 안을 가득 덮고(덩어리가 글자와 함께 자라므로
+    // 접근성 큰 글씨에서도 글자는 판 위에 선다), 자락은 덩어리 **밖**으로 `scrimReach` 만큼 풀린다.
     scrimTop: {
       position: 'absolute',
       top: 0,
       right: 0,
-      bottom: -VIEWER.scrimReach,
+      bottom: 0,
       left: 0,
-      experimental_backgroundImage: viewerScrim('down'),
+      experimental_backgroundImage: viewerScrimPlateau('down'),
+    },
+    scrimTopFade: {
+      position: 'absolute',
+      top: '100%',
+      right: 0,
+      left: 0,
+      height: VIEWER.scrimReach,
+      experimental_backgroundImage: viewerScrimFade('down'),
     },
     scrimBottom: {
       position: 'absolute',
-      top: -VIEWER.scrimReach,
+      top: 0,
       right: 0,
       bottom: 0,
       left: 0,
-      experimental_backgroundImage: viewerScrim('up'),
+      experimental_backgroundImage: viewerScrimPlateau('up'),
+    },
+    scrimBottomFade: {
+      position: 'absolute',
+      bottom: '100%',
+      right: 0,
+      left: 0,
+      height: VIEWER.scrimReach,
+      experimental_backgroundImage: viewerScrimFade('up'),
     },
 
     // ---- 아래: 안내 · 썸네일 줄 · 캡션 · [저장] [공유] ---------------------------------
@@ -844,9 +869,7 @@ const buildStyles = (_color: Palette) =>
       color: VIEWER_STAGE.inkMuted,
       textAlign: 'center',
       fontVariant: ['tabular-nums'],
-      textShadowColor: VIEWER_STAGE.inkShadow,
-      textShadowOffset: { width: 0, height: 1 },
-      textShadowRadius: 3,
+      ...VIEWER_TEXT_SHADOW,
     },
     // 상태 안내(내려받는 중·실패)는 어두운 알약 위에 선다 — 어떤 사진 위에서도 읽혀야 하는 피드백이다(스크림이 약한 맨 위 줄이라 따로 면을 깐다).
     notice: {

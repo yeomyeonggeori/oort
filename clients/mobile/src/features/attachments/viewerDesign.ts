@@ -62,12 +62,14 @@ export const VIEWER = {
 } as const;
 
 /**
- * 스크림의 검정 불투명도. `fraction` 은 조작 덩어리의 바깥 끝 0 → 안쪽 끝 1(`photoStage.scrim.stops` 의 위치와 같다). 마디 사이는 선형이다.
- * 화면은 이 표를 `linear-gradient` 로 그리고(`viewerScrim`), 시험은 같은 표로 글자 줄이 어느 불투명도 위에 서는지 잰다.
+ * 스크림의 **자락**(덩어리 밖으로 풀리는 부분)의 검정 불투명도. `fraction` 은 덩어리 끝 0 → 사라지는 곳 1(`photoStage.scrim.fade` 의 위치와
+ * 같다). 마디 사이는 선형이다. 화면은 같은 표를 `linear-gradient` 로 그리고(`viewerScrimFade`), 시험은 이 함수로 단조롭게 풀리는지 잰다.
  */
-export function viewerScrimAlpha(fraction: number): number {
-  const stops = photoStage.scrim.stops;
+export function viewerScrimFadeAlpha(fraction: number): number {
+  const stops = photoStage.scrim.fade;
+  const last = stops[stops.length - 1] as readonly [number, number];
   if (fraction <= stops[0][0]) return stops[0][1];
+  if (fraction >= last[0]) return last[1]; // 끝 마디는 보간하지 않는다(부동소수 찌꺼기 없이 정확히 0)
   for (let i = 1; i < stops.length; i += 1) {
     const [at, alpha] = stops[i] as readonly [number, number];
     const [from, fromAlpha] = stops[i - 1] as readonly [number, number];
@@ -79,18 +81,35 @@ export function viewerScrimAlpha(fraction: number): number {
   return stops[stops.length - 1]?.[1] ?? 0;
 }
 
+const black = (alpha: number) => `rgba(${photoStage.scrim.rgb}, ${alpha})`;
+
 /**
- * 조작 뒤의 어두운 그라데이션 스크림. `down` 은 위쪽 덩어리(맨 위가 가장 어둡다), `up` 은 아래쪽 덩어리(맨 아래가 가장 어둡다). 스크림이
- * 없으면 밝은 사진(스크린샷의 흰 바탕) 위에서 흰 이름·시각이 사라진다.
+ * 스크림의 **판** — 조작 덩어리 안을 가득 덮는 그라데이션. `down` 은 위쪽 덩어리(맨 위가 가장 어둡다), `up` 은 아래쪽 덩어리(맨 아래가
+ * 가장 어둡다). 판이 없으면 밝은 사진(스크린샷의 흰 바탕) 위에서 흰 이름·시각이 사라진다.
  */
-export function viewerScrim(direction: 'down' | 'up'): string {
-  const marks = photoStage.scrim.stops.map(
-    ([at, alpha]) => `rgba(0, 0, 0, ${alpha}) ${at * 100}%`,
+export function viewerScrimPlateau(direction: 'down' | 'up'): string {
+  const [outer, inner] = photoStage.scrim.plateau;
+  return `linear-gradient(${direction === 'down' ? 180 : 0}deg, ${black(
+    outer,
+  )} 0%, ${black(inner)} 100%)`;
+}
+
+/** 스크림의 **자락** — 덩어리 밖에서 판의 안쪽 끝 불투명도로 시작해 0 으로 풀린다. `down` 은 아래로, `up` 은 위로 풀린다. */
+export function viewerScrimFade(direction: 'down' | 'up'): string {
+  const marks = photoStage.scrim.fade.map(
+    ([at, alpha]) => `${black(alpha)} ${at * 100}%`,
   );
   return `linear-gradient(${direction === 'down' ? 180 : 0}deg, ${marks.join(
     ', ',
   )})`;
 }
+
+/** 글자 곁의 가는 그림자 — 스크림이 못 닿는 가장자리의 보조다(이름·시각·캡션이 같은 모양을 쓴다). */
+export const VIEWER_TEXT_SHADOW = {
+  textShadowColor: photoStage.inkShadow,
+  textShadowOffset: { width: 0, height: 1 },
+  textShadowRadius: 3,
+} as const;
 
 /** 「3장 중 2번」 — 위치는 1부터다. */
 export function viewerCaption(position: number, total: number): string {

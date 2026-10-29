@@ -26,7 +26,7 @@ import {
 
 import { BAR_CONTROL_MAX_SCALE } from '../src/design/atoms';
 import { CONV_ICONS, SHEET_ICONS, VIEWER_ICONS } from '../src/design/icons';
-import { line, TOUCH_TARGET } from '../src/design/tokens';
+import { photoStage, TOUCH_TARGET } from '../src/design/tokens';
 import {
   EASE_OUT,
   VIEWER_CHROME_HIDE_MS,
@@ -46,8 +46,9 @@ import {
   VIEWER,
   VIEWER_GLASS_TONE,
   VIEWER_STAGE,
-  viewerScrim,
-  viewerScrimAlpha,
+  viewerScrimFade,
+  viewerScrimFadeAlpha,
+  viewerScrimPlateau,
   viewerStamp,
 } from '../src/features/attachments/viewerDesign';
 import { retainReduceMotion } from '../src/lib/useReduceMotion';
@@ -92,7 +93,7 @@ const hex = (value: string): Rgb => [
   parseInt(value.slice(5, 7), 16),
 ];
 /** `rgba(r, g, b, a)` 또는 `#rrggbb` 를 `base` 위에 합성한 색. */
-const over = (color: string, base: Rgb): Rgb => {
+const composite = (color: string, base: Rgb): Rgb => {
   if (color.startsWith('#')) return hex(color);
   const [r, g, b, a] = (color.match(/[\d.]+/g) ?? []).map(Number) as [number, number, number, number];
   return [r, g, b].map((channel, i) => Math.round(channel * a + (base[i] as number) * (1 - a))) as Rgb;
@@ -1524,16 +1525,16 @@ describe('⑧ 검정 무대는 테마와 무관하다 (폰 전용 값 — 값이
   // 관계: ① 무대 위 글자·글리프는 무대와 7:1 이상 ② 어두운 유리 면(대체·불투명) 위 글리프도 ③ 밝은 사진(순백) 위에 얹힌
   // 대체 면 위에서도 읽힌다. 색 값이 바뀌어도 이 관계가 살아야 한다.
   it('무대 위 글자·글리프는 무대와 7:1 이상이다', () => {
-    expect(contrast(over(VIEWER_STAGE.ink, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
-    expect(contrast(over(VIEWER_STAGE.inkMuted, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
-    expect(contrast(over(VIEWER_STAGE.danger, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
+    expect(contrast(composite(VIEWER_STAGE.ink, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
+    expect(contrast(composite(VIEWER_STAGE.inkMuted, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
+    expect(contrast(composite(VIEWER_STAGE.danger, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
   });
 
   it('어두운 유리의 불투명·대체 면 위 글리프도 7:1 이상이다 — 라이트 테마의 밝은 면 위 밝은 글리프가 되지 않는다', () => {
-    const ink = over(VIEWER_STAGE.ink, BLACK);
-    expect(contrast(ink, over(VIEWER_GLASS_TONE.opaque, BLACK))).toBeGreaterThanOrEqual(7);
+    const ink = composite(VIEWER_STAGE.ink, BLACK);
+    expect(contrast(ink, composite(VIEWER_GLASS_TONE.opaque, BLACK))).toBeGreaterThanOrEqual(7);
     // 대체 면은 반투명이라 아래 사진이 비친다 — 최악은 순백 사진이다.
-    expect(contrast(ink, over(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
+    expect(contrast(ink, composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
   });
 });
 
@@ -1660,61 +1661,71 @@ describe('⑩ 보낸 사람·날짜·시각', () => {
 });
 
 describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에서도 글자가 읽힌다', () => {
-  // 순백 사진(스크린샷의 흰 바탕)이 최악이다. 흰 글자·글리프의 최소 대비는 3:1(큰 글자·그래픽 요소, WCAG 1.4.3·1.4.11)로 잡는다 —
-  // 4.5:1 에는 조작 뒤에 불투명한 띠가 있어야 하고, 그 띠는 사진을 가린다. 값이 아니라 관계를 잰다: 마디가 바뀌어도 이 관계가 살아야 한다.
-  const whitePhoto = (alpha: number): Rgb => over(`rgba(0, 0, 0, ${alpha})`, WHITE);
+  // 순백 사진(스크린샷의 흰 바탕)이 최악이다. 글자 대비는 **실제로 그려지는 색**으로 잰다 — 이름은 `ink`(순백), 날짜·캡션은 `inkMuted`(80% 흰색)이고
+  // 후자는 배경이 비쳐 합성된다(앞 판은 둘 다 `WHITE` 로 재서 날짜 줄이 2.5:1 인 것을 놓쳤다, design-review M1). 스크림의 **판**은 조작 덩어리 안을 가득
+  // 덮으므로 글자가 어느 크기로 서든(접근성 큰 글씨에서는 이름·날짜 줄이 단추보다 높다) 판 위에 선다 — 대비가 기기·글자 크기의 산수에 안 걸린다.
+  const PLATEAU_INNER = photoStage.scrim.plateau[1];
+  const plateauOverWhite = () => composite(`rgba(0, 0, 0, ${PLATEAU_INNER})`, WHITE);
 
-  it('스크림은 두 덩어리 안에 있고 닿지 않는다 — 덩어리와 같이 숨고, 옆으로 넘기기를 가로막지 않는다', async () => {
+  it('스크림은 두 덩어리 안에 있다 — 판은 덩어리를 가득 덮고, 자락은 덩어리 밖에서 풀리며, 모두 닿지 않고 덩어리와 같이 숨는다', async () => {
     await mount();
+    const fill = { top: 0, right: 0, bottom: 0, left: 0 };
     for (const [block, which] of [
       [bar(), 'top'],
       [actionsBlock(), 'bottom'],
     ] as const) {
-      const scrim = within(block).getByTestId(`attachment-viewer-scrim-${which}`);
-      expect(scrim.props.pointerEvents).toBe('none');
-      expect(scrim.props.onStartShouldSetResponder).toBeUndefined();
-      // 바깥 끝에서 안쪽으로 어두워졌다가 풀린다 — 위쪽은 아래 방향(180deg), 아래쪽은 위 방향(0deg).
-      expect(flatten(scrim.props.style).experimental_backgroundImage).toBe(
-        viewerScrim(which === 'top' ? 'down' : 'up'),
-      );
+      const plate = within(block).getByTestId(`attachment-viewer-scrim-${which}`);
+      const fade = within(block).getByTestId(`attachment-viewer-scrim-${which}-fade`);
+      for (const node of [plate, fade]) {
+        expect(node.props.pointerEvents).toBe('none');
+        expect(node.props.onStartShouldSetResponder).toBeUndefined();
+      }
+      // 판: 덩어리 안을 가득. 위쪽은 아래 방향(180deg)·아래쪽은 위 방향(0deg)으로 바깥 끝이 가장 어둡다.
+      const plateStyle = flatten(plate.props.style);
+      expect({ top: plateStyle.top, right: plateStyle.right, bottom: plateStyle.bottom, left: plateStyle.left }).toEqual(fill);
+      expect(plateStyle.experimental_backgroundImage).toBe(viewerScrimPlateau(which === 'top' ? 'down' : 'up'));
+      // 자락: 덩어리 **밖**(위쪽 덩어리는 아래로, 아래쪽 덩어리는 위로) 풀린다.
+      const fadeStyle = flatten(fade.props.style);
+      expect(which === 'top' ? fadeStyle.top : fadeStyle.bottom).toBe('100%');
+      expect(fadeStyle.height).toBe(VIEWER.scrimReach);
+      expect(fadeStyle.experimental_backgroundImage).toBe(viewerScrimFade(which === 'top' ? 'down' : 'up'));
     }
     tap();
     expect(bar().props.pointerEvents).toBe('none'); // 스크림은 덩어리 안이라 같이 숨는다.
   });
 
-  it('스크림의 표는 바깥 끝이 가장 어둡고 안쪽 끝이 0 이다 — 글자 줄 뒤에서 띠 모양의 경계가 남지 않게 단조롭게 풀린다', () => {
+  it('판 위에서 순백 사진 위의 이름은 4.5:1, 날짜·캡션은 3.2:1 이상이다 — 그려지는 색(80% 흰색의 합성)으로 잰다', () => {
+    const bg = plateauOverWhite();
+    expect(contrast(composite(VIEWER_STAGE.ink, bg), bg)).toBeGreaterThanOrEqual(4.5);
+    // `inkMuted` 는 반투명이라 배경이 비친다 — 합성한 색으로 잰다.
+    expect(contrast(composite(VIEWER_STAGE.inkMuted, bg), bg)).toBeGreaterThanOrEqual(3.2);
+  });
+
+  it('판의 안쪽 끝이 가장 밝은 자리다 — 바깥 끝은 같거나 더 어둡다(글자가 서는 가장 밝은 자리를 잰다)', () => {
+    const [outer, inner] = photoStage.scrim.plateau;
+    expect(outer).toBeGreaterThanOrEqual(inner);
+  });
+
+  it('자락은 판의 안쪽 끝 불투명도로 시작해 단조롭게 0 으로 풀리고, 끝에서 가장 완만하다 — 끝 선이 줄무늬로 남지 않는다', () => {
+    expect(viewerScrimFadeAlpha(0)).toBe(PLATEAU_INNER);
+    expect(viewerScrimFadeAlpha(1)).toBe(0);
     let previous = Number.POSITIVE_INFINITY;
-    for (let step = 0; step <= 20; step += 1) {
-      const alpha = viewerScrimAlpha(step / 20);
+    for (let step = 0; step <= 40; step += 1) {
+      const alpha = viewerScrimFadeAlpha(step / 40);
       expect(alpha).toBeLessThanOrEqual(previous);
       previous = alpha;
     }
-    expect(viewerScrimAlpha(1)).toBe(0);
-    expect(viewerScrimAlpha(0)).toBeGreaterThan(viewerScrimAlpha(0.5));
-  });
-
-  it.each(Object.entries(DEVICES))('%s: 위쪽 이름·시각 줄은 순백 사진 위에서도 흰 글자가 3:1 이상이다', (_name, insets) => {
-    const textHeight = line.heading + line.meta;
-    const rowsTop = insets.top + (VIEWER.control - textHeight) / 2;
-    const length = insets.top + VIEWER.control + VIEWER.scrimReach;
-    for (const bottomEdge of [rowsTop + line.heading, rowsTop + textHeight]) {
-      const alpha = viewerScrimAlpha(bottomEdge / length);
-      expect(contrast(WHITE, whitePhoto(alpha))).toBeGreaterThanOrEqual(3);
-    }
-  });
-
-  it.each(Object.entries(DEVICES))('%s: 아래쪽 캡션 줄은 순백 사진 위에서도 흰 글자가 3:1 이상이다', (_name, insets) => {
-    const pad = insets.bottom + VIEWER.bottomLift;
-    const height = pad + VIEWER.control + VIEWER.stackStep + line.label + VIEWER.stackStep + VIEWER.thumb;
-    const length = height + VIEWER.scrimReach;
-    const captionTopFromBottom = pad + VIEWER.control + VIEWER.stackStep + line.label;
-    const alpha = viewerScrimAlpha(captionTopFromBottom / length);
-    expect(contrast(WHITE, whitePhoto(alpha))).toBeGreaterThanOrEqual(3);
+    // 마디 사이 기울기(불투명도/위치): 마지막 구간이 가장 가파른 구간의 절반 아래다 — 선형으로 끊으면 끝 선이 밝은 사진 위에서 마하 띠로 보인다.
+    const stops = photoStage.scrim.fade;
+    const slopes = stops
+      .slice(1)
+      .map(([at, alpha], i) => Math.abs(alpha - stops[i][1]) / (at - stops[i][0]));
+    expect(slopes[slopes.length - 1]).toBeLessThan(Math.max(...slopes) / 2);
   });
 
   it('블러 갈래의 어두운 틴트는 순백 사진 위에서도 흰 글리프가 3:1 이상이다', () => {
     // 순백을 흐려도 순백이라 틴트 아래는 순백이다 — 합성이 정확하다.
-    expect(contrast(WHITE, over(VIEWER_GLASS_TONE.tint, WHITE))).toBeGreaterThanOrEqual(3);
+    expect(contrast(WHITE, composite(VIEWER_GLASS_TONE.tint, WHITE))).toBeGreaterThanOrEqual(3);
   });
 
   it('상태 안내는 어두운 알약 위에 선다 — 어떤 사진 위에서도 읽혀야 하는 피드백이다', async () => {
@@ -1724,7 +1735,7 @@ describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에�
     const notice = await screen.findByTestId('attachment-viewer-status');
     const style = flatten(notice.props.style);
     expect(style.backgroundColor).toBe(VIEWER_GLASS_TONE.fallback);
-    expect(contrast(over(VIEWER_STAGE.danger, BLACK), over(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(4.5);
-    expect(contrast(over(VIEWER_STAGE.ink, BLACK), over(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
+    expect(contrast(composite(VIEWER_STAGE.danger, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(composite(VIEWER_STAGE.ink, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
   });
 });
