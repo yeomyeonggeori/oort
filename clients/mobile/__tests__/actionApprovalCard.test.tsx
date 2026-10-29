@@ -797,6 +797,23 @@ describe('#4705 — 먼저 제안 카드 (ADR-0186 증보 v5 U-c)', () => {
     expect(screen.getByTestId(`${PREFIX}-reject`)).toBeTruthy();
   });
 
+  it('에이전트가 쓴 사유는 평문이다 — 링크·멘션·서식이 와도 글자 그대로 한 덩어리고 누를 곳이 없다', () => {
+    // 서버는 이런 글을 거절하지만(`rationale` ≤140자, `@ < > [ ] ( ) : /` 불가), 시킨 사람이 없는 카드에서
+    // 이 글이 유일한 설득 수단이라 클라이언트도 믿지 않는다(깊은 방어).
+    const hostile =
+      'https://evil.test/x <b>굵게</b> @planner **굵게** `코드` [링크](https://a.test) <script>x</script>';
+    const base = pinProps();
+    renderPin(
+      pinProps({action: {...(base.action as Record<string, unknown>), rationale: hostile}}),
+    );
+    const rationale = screen.getByTestId('approval-action-rationale');
+    // 글자 그대로 한 Text 하나다: 쪼개지거나 다른 글자로 바뀌지 않았다.
+    expect(within(rationale).getByText(hostile)).toBeTruthy();
+    // 누를 수 있는 것이 이 줄 안에 없다(링크로 바뀌지 않았다).
+    expect(within(rationale).queryAllByRole('link')).toHaveLength(0);
+    expect(within(rationale).queryAllByRole('button')).toHaveLength(0);
+  });
+
   it('origin 이 없거나 모르는 값이면 지금까지의 카드 그대로다 — 꼬리표도 이름표도 없다', () => {
     const plainLabel = rationaleTag({}).label;
     expect(plainLabel).not.toBe(AGENT_INITIATIVE_RATIONALE_LABEL);

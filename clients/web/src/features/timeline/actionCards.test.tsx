@@ -853,6 +853,22 @@ describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
     expect(byTestId(host, "approval-action-row")).toHaveLength(2);
   });
 
+  it("에이전트가 쓴 사유는 평문이다: 링크·멘션·서식이 와도 요소가 되지 않고 글자 그대로 선다", () => {
+    // 서버는 이런 글을 거절하지만(`rationale` ≤140자, `@ < > [ ] ( ) : /` 불가), 시킨 사람이 없는 카드에서
+    // 이 글이 유일한 설득 수단이라 클라이언트도 믿지 않는다(깊은 방어).
+    const hostile = "https://evil.test/x <b>굵게</b> @planner **굵게** `코드` [링크](https://a.test) <script>x</script>";
+    const base = pinProps();
+    const host = mountPin(
+      pinProps({ action: { ...(base.action as Record<string, unknown>), rationale: hostile } })
+    );
+    const row = byTestId(host, "approval-action-rationale")[0];
+    expect(row).toBeDefined();
+    expect(row?.querySelectorAll("a, b, strong, em, code, script, img")).toHaveLength(0);
+    expect(row?.textContent).toContain(hostile);
+    // 이 시험이 실제로 잡는지: 같은 글이 값 칸에 요소 없이 한 글자열로만 들어 있다.
+    expect(row?.querySelector("dd")?.children.length ?? 0).toBe(0);
+  });
+
   it("origin 이 없으면 지금까지의 카드 그대로다(꼬리표도 이름표도 없다)", () => {
     const props = pinProps();
     delete props.origin;
