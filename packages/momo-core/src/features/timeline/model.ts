@@ -1006,6 +1006,24 @@ export function buildTimelineItems(
   // regardless of whether the POST response or the realtime frame won the race.
   let previousRow: GroupingRow | undefined = previous;
   for (const row of unsettledPending(messages, pending)) {
+    // The echo that opens a new local day carries the day line itself (#4749).
+    // The confirmed twin gets one from the loop above (`day-<key>`, the same key
+    // for the same day), so without this the line appeared only when the POST
+    // answered: the row the person had just seen arrive was pushed down by the
+    // line's height and the list had to travel a second time (SE, first send of
+    // the day: content +78.5 at the echo, +44 at the swap, 33pt jump, two
+    // glides). With the line already in place the swap changes nothing above the
+    // row. Same condition as the confirmed loop, on the echo's own clock.
+    if (
+      !previousRow ||
+      dayKey(previousRow.createdAtMs) !== dayKey(row.createdAtMs)
+    ) {
+      items.push({
+        kind: "day",
+        key: `day-${dayKey(row.createdAtMs)}`,
+        atMs: row.createdAtMs,
+      });
+    }
     items.push({
       kind: "pending",
       key: `p-${row.clientMsgId}`,

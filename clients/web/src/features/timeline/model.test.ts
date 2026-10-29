@@ -271,6 +271,53 @@ describe("optimistic insert (M10)", () => {
     expect(pendingKeys(items)).toEqual(["k1"]);
   });
 
+  // 오늘 처음 보내는 글(#4749): 확정본에만 날짜 줄이 서던 때는 POST 가 답하는 순간 이미 본 행이
+  // 줄 높이만큼 아래로 밀리고 목록이 한 번 더 올라갔다(첫 보내기에서 두 번 출렁). 에코도 자기 줄을
+  // 갖는다 — 같은 날이면 같은 키라서, 에코 → 확정 교체가 행 위의 줄들을 바꾸지 않는다.
+  it("puts the day line above the echo that opens a new day, so the swap changes nothing above the row", () => {
+    const body = "오늘 첫 메시지";
+    const yesterday = mine(10, "어제 마지막", {
+      createdAtMs: new Date(2026, 6, 24, 23, 0, 0).getTime(),
+    });
+    const echo = pending("k1", body); // createdAtMs: DAY (7월 25일)
+    const above = (items: TimelineItem[]) =>
+      items.slice(0, -1).map((item) => `${item.kind}:${item.key}`);
+
+    const whileSending = buildTimelineItems([yesterday], { pending: [echo] });
+    const confirmed = buildTimelineItems([yesterday, mine(11, body)], {
+      pending: [echo],
+    });
+
+    expect(whileSending.map((i) => i.kind)).toEqual([
+      "day",
+      "message",
+      "day",
+      "pending",
+    ]);
+    expect(above(confirmed)).toEqual(above(whileSending));
+  });
+
+  it("draws the new day's line once for several echoes, and none when the echo is on the same day as the last message", () => {
+    const yesterday = mine(10, "어제 마지막", {
+      createdAtMs: new Date(2026, 6, 24, 23, 0, 0).getTime(),
+    });
+    const burst = buildTimelineItems([yesterday], {
+      pending: [pending("k1", "하나"), pending("k2", "둘")],
+    });
+    expect(burst.map((i) => i.kind)).toEqual([
+      "day",
+      "message",
+      "day",
+      "pending",
+      "pending",
+    ]);
+    const sameDay = buildTimelineItems(
+      [mine(10, "같은 날", { createdAtMs: DAY - 60_000 })],
+      { pending: [pending("k1", "하나")] }
+    );
+    expect(sameDay.map((i) => i.kind)).toEqual(["day", "message", "pending"]);
+  });
+
   it("replaces the echo with the confirmed row once its seq arrives", () => {
     const body = "CI 초록 뜨면 머지할게요";
     const echo = pending("k1", body);
@@ -437,11 +484,18 @@ describe("optimistic insert (M10)", () => {
     expect(row?.kind === "pending" && row.startsGroup).toBe(true);
   });
 
-  it("carries the first message of an empty channel", () => {
+  it("carries the first message of an empty channel, under the day line its confirmed twin will have", () => {
     const items = buildTimelineItems([], {
       pending: [pending("k1", "첫 메시지입니다", { sinceSeq: null })],
     });
-    expect(items.map((i) => i.kind)).toEqual(["pending"]);
+    // 예전 단정은 ["pending"] 이었다: 에코에는 날짜 줄이 없고 확정본(["day", "message"])에만 있어서, POST 가 답하는 순간
+    // 줄이 새로 끼어 이미 본 행이 밀렸다(#4749). 에코도 같은 줄을 먼저 갖는다.
+    expect(items.map((i) => i.kind)).toEqual(["day", "pending"]);
+    const confirmed = buildTimelineItems([mine(11, "첫 메시지입니다")], {
+      pending: [],
+    });
+    expect(confirmed.map((i) => i.kind)).toEqual(["day", "message"]);
+    expect(items[0].key).toBe(confirmed[0].key);
   });
 });
 
