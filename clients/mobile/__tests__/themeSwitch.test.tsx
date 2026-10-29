@@ -281,7 +281,7 @@ describe('저장 — 다음 실행이 고른 것으로 시작한다', () => {
     expect(store.map.has(NON_SECRET_KEYS.themeChoice)).toBe(false);
   });
 
-  it('새로 마운트하면 저장된 것으로 서 있다 (첫 렌더 기록은 themeDefault4526 이 잰다)', () => {
+  it('새로 마운트하면 저장된 것으로 서 있다 (첫 렌더 기록은 theme.test.tsx 의 themeDefault 묶음이 잰다)', () => {
     store.map.set(NON_SECRET_KEYS.themeChoice, 'dark');
     // 시스템이 라이트라서 「다크」는 저장에서만 올 수 있다.
     act(() => setSystemColorScheme('light'));

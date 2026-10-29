@@ -27,7 +27,7 @@
 | 액션 분기·워크스페이스 가드·재시도 정책 | `clients/mobile/__tests__/push*.test.ts` |
 | 잠금 화면 승인·거절 네이티브 처리기(#3931)의 **판정 전부** — 멱등 키(독립 계산한 벡터와 일치), 페이로드·자격 읽기, 요청 모양, 응답 → 결과 문장, 키체인 읽기·생성 논리(키체인 호출은 가짜) | `bash clients/mobile/modules/momo-push-action-native/sim-check/run.sh`(이 Mac) · `…/run.sh <시뮬레이터 UDID>`(iOS SDK). `__tests__/pushActionContract.test.ts` 가 macOS 에서 이것을 컴파일해 돌린다 |
 | JS ↔ Swift 계약(키체인 항목 주소, JSON 키, 알림 어휘, 모듈 이름), 처리기가 붙었을 때만 JS 가 물러남, 결과 줄 탭이 카드로 감, 자격이 앱 전용 그룹 밖으로 나가지 않음 | `__tests__/pushActionContract.test.ts` · `pushActionNative.test.ts` · `pushActionSession.test.ts` · `pushActionCredential.test.tsx` · `pushTap.test.tsx` |
-| **앱이 앞에 있을 때의 푸시 표시**(#4310, #4295 후속): 다른 대화의 알림은 배너 + 알림 센터 목록, 지금 보는 대화(스레드 답글이면 열린 스레드)의 알림은 배너·소리·목록 모두 없음, 승인 요청은 같은 방에서도 배너, 못 읽는 봉투는 배너, 앱이 배경이면 처리기가 불리지 않고 iOS 가 직접 표시, 배너를 누르면 기존 tap 경로로 그 대화에 착지. 처리기는 `index.js` 의 모듈 평가 시점에 한 번 걸린다 | `__tests__/foregroundPresentation4310.test.tsx`(결정 표·expo 에 건넨 답의 모양·진짜 `AppShell` 이 올린 화면 상태·`index.js` 를 실제로 평가한 호출 순서) + 시뮬레이터(16 Pro, iOS 26.5, 격리 스택·가상 인물)에서 `xcrun simctl push` 로 릴레이 봉투를 쏜 캡처 `clients/mobile/measure/captures/4310/`. 재현은 §5 의 «포그라운드 표시» |
+| **앱이 앞에 있을 때의 푸시 표시**(#4310, #4295 후속): 다른 대화의 알림은 배너 + 알림 센터 목록, 지금 보는 대화(스레드 답글이면 열린 스레드)의 알림은 배너·소리·목록 모두 없음, 승인 요청은 같은 방에서도 배너, 못 읽는 봉투는 배너, 앱이 배경이면 처리기가 불리지 않고 iOS 가 직접 표시, 배너를 누르면 기존 tap 경로로 그 대화에 착지. 처리기는 `index.js` 의 모듈 평가 시점에 한 번 걸린다 | `__tests__/foregroundPresentation.test.tsx`(결정 표·expo 에 건넨 답의 모양·진짜 `AppShell` 이 올린 화면 상태·`index.js` 를 실제로 평가한 호출 순서) + 시뮬레이터(16 Pro, iOS 26.5, 격리 스택·가상 인물)에서 `xcrun simctl push` 로 릴레이 봉투를 쏜 캡처 `clients/mobile/measure/captures/4310/`. 재현은 §5 의 «포그라운드 표시» |
 | **커뮤니케이션 알림의 판정**(#4316, ADR-0204 증보 5) — 무엇을 어떻게 보여 줄지(보낸 사람·방 이름·스레드 표시·미리보기 끔·보낸 사람 표시 끔·승인은 숨기지 않음), 사진 순서(App Group 캐시 → 한 번의 제한된 읽기 → 앱 규칙의 이니셜), 캐시 한도·만료·버전 키, 정리와 재시도, 실제 `INSendMessageIntent` 필드와 기부 뒤 재확인 | `bash clients/mobile/modules/momo-push-native/sim-check/run.sh`(이 Mac: Intents 밖 전부) · `…/run.sh <시뮬레이터 UDID>`(시뮬레이터 안: Intents 포함). `__tests__/pushContract.test.ts` 가 macOS 에서 앞의 것을 컴파일해 돌리고, 앱↔확장 권한·Info.plist 비대칭과 JS↔Swift 함수 이름을 맞댄다. `pushPresentation.test.tsx`·`settingsPage.test.tsx`·`signOutPushRevoke.test.tsx`·`memberAvatarImage.test.tsx` 가 JS 쪽을 잰다 |
 | **커뮤니케이션 알림의 모양**(#4316): 보낸 사람의 둥근 사진 + 우하단의 작은 앱 아이콘 + 이름(방이면 `#방이름` 줄) + 미리보기, 라이트·다크, 배너·잠금 화면 | 시뮬레이터 캡처(16 Pro, iOS 26.5, 가상 인물): **확장 프로세스가 아니라** 확장의 `NotificationService` 클래스를 앱 안에서 그대로 호출해 로컬 알림으로 올린 장면이다 — `simctl push` 는 이 시뮬레이터에서 확장을 **시작하지 않는다**(시스템 로그에 확장 프로세스가 없고 서버에 `push-fetch` 요청이 없다, 2026-10-28 실측, #4310 의 기록과 같다). 확장 프로세스·실제 APNs 경로는 아래 K~M 이다 |
 
@@ -341,7 +341,7 @@ E 의 18칸(+ 아래 4칸):
   않았고 결과 줄도 같았다 — 실패 글(「…하지 못했어요 / 눌러서 앱에서 마무리해 주세요」)은 앱이 앞이면 보이지 않았고, 원래 알림은
   그 보이지 않는 줄로 교체되어 알림 센터에서 사라졌다. #4310 이후 결과 줄도 처리기를 지난다: 원문(`content.data.origin`)을
   봉투로 읽고(원격 푸시의 `trigger.payload` 가 있으면 그것만 읽는다) 그 봉투는 승인 봉투라서 승인 예외에 걸린다. 그래서 **앱이
-  앞이면 같은 방을 보고 있어도 배너 + 목록으로 보이도록** 짜여 있다(시험: `foregroundPresentation4310.test.tsx`).
+  앞이면 같은 방을 보고 있어도 배너 + 목록으로 보이도록** 짜여 있다(시험: `foregroundPresentation.test.tsx`).
   - 확인하지 못한 것(`runtime-unverified`): 네이티브가 성공 줄은 `interruptionLevel = .passive`(목록에만, 화면을 켜지 않음),
     실패 줄은 `.active` 로 올리므로, 앞에서 배너가 실제로 뜨는지는 iOS 의 중단 수준과의 상호작용이라 기기에서 봐야 한다. §3-4
     의 «앞» 행 기대는 그 확인 뒤에 «배너가 뜨고 알림이 교체되고 카드가 바뀐다/대기 중이다» 로 고정한다.

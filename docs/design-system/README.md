@@ -289,7 +289,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 
 오르트 로더(#3961, 시안 A 「공전」, owner 2026-10-17)는 연결 끊김·다시 연결 중·첫 로딩에서 도는 브랜드 표시다. 링은 가만히 있고 위성이 홈에서 나와 한 바퀴 돌고 다시 꽂힌다(한 주기 1.8s). 움직이는 속성은 `transform`·`opacity`뿐이다. 감소된 동작에서는 회전 대신 정지 마크 + 투명도 1↔0.5이고, 진행 중이 아닌 자리(오프라인·재시도 실패)는 정지 마크다(움직임이 곧 「지금 시도 중」이라는 주장이라서). 마크 사용 규칙은 `docs/brand/mark/README.md` 「로더」.
 
-폰 사다리는 웹과 이름·값이 같다(**사다리 칸 중에서는** 폰 전용 `send-arrive` 300ms 하나만 웹에 짝이 없다 — §6 「폰에 값을 더할 때」대로 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival4455.test.tsx` 가 단정한다. 사다리 밖의 폰 값(탭 페이드 150ms 등)은 이 문장의 대상이 아니다). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
+폰 사다리는 웹과 이름·값이 같다(**사다리 칸 중에서는** 폰 전용 `send-arrive` 300ms 하나만 웹에 짝이 없다 — §6 「폰에 값을 더할 때」대로 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival.test.tsx` 가 단정한다. 사다리 밖의 폰 값(탭 페이드 150ms 등)은 이 문장의 대상이 아니다). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
 
 아직 이 축이 안 재는 것(owed, 이 PR이 닫지 않음):
 
