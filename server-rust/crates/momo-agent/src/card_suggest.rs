@@ -1160,7 +1160,9 @@ mod tests {
             .collect();
         assert!(!left_out.is_empty(), "the AI hub link row is a nav id");
         assert!(
-            left_out.iter().all(|id| ["ai", "aiHub", "devTools"].contains(id)),
+            left_out
+                .iter()
+                .all(|id| ["ai", "aiHub", "devTools"].contains(id)),
             "unexpected nav ids outside settings.open: {left_out:?}"
         );
         // Everything else is a nav id, except the apps alias, which core owns.
