@@ -566,6 +566,11 @@ services:
       MOMO_ENV: ${MOMO_ENV:-staging}
       # momo_worker — BYPASSRLS drain across tenants (bootstrap_roles.sql).
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
+      # #4791: read requester-owned profile images through the same archive as api.
+      MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
+      MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
+      MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
+      MOMO_DRIVE_LOCAL_DIR: ${MOMO_DRIVE_LOCAL_DIR:-}
       PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
       # SH-6a-e / #2215 — same two keys as api. The worker is the process that
       # actually dials the host provider; extra_hosts below makes
@@ -585,6 +590,9 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+      # API boot initializes the archive directories before the read-only worker opens them.
+      api:
+        condition: service_healthy
     networks:
       - private
     extra_hosts:

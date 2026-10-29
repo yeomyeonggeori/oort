@@ -3,16 +3,21 @@ import {
   AVATAR_PREVIEW_CAPTION,
   AVATAR_PREVIEW_UNAVAILABLE,
   approvalAvatarPreviewPath,
-  memberAvatarSetHeadline,
+  profileAvatarHeadline,
 } from '@momo/core/features/approvals/avatarPreview';
-import type {AgentApprovalCard} from '@momo/core/features/timeline/agentCardModel';
-import React, {useEffect, useState} from 'react';
-import {Image, StyleSheet, View} from 'react-native';
-import {font, line, radius, space, type Palette} from '../../design/tokens';
-import {Sentence} from '../../design/atoms';
-import {useStyles} from '../../design/theme';
-import {useSession} from '../../session/useSession';
-import {loadMemberAvatar, memberAvatarCacheKey, peekMemberAvatar} from './memberAvatarImage';
+import type { AgentApprovalCard } from '@momo/core/features/timeline/agentCardModel';
+import React, { useEffect, useState } from 'react';
+import { Image, StyleSheet, View } from 'react-native';
+import { font, line, radius, space, type Palette } from '../../design/tokens';
+import { Sentence } from '../../design/atoms';
+import { useStyles } from '../../design/theme';
+import { useSession } from '../../session/useSession';
+import {
+  loadMemberAvatar,
+  memberAvatarCacheKey,
+  peekMemberAvatar,
+  useMemberAvatarUri,
+} from './memberAvatarImage';
 
 // =============================================================================
 // `member.avatar.set` 승인 카드의 머리: 한 문장 + 제안된 사진 (#4394, ADR-0186 증보 v4)
@@ -28,7 +33,7 @@ import {loadMemberAvatar, memberAvatarCacheKey, peekMemberAvatar} from './member
 /** 사진 원의 지름. 아바타(32)와 프로필 시트의 큰 얼굴 사이, 결정할 만큼 알아보이는 크기. */
 const PREVIEW_SIZE = 80;
 
-type Loaded = {path: string; uri: string | null};
+type Loaded = { path: string; uri: string | null };
 
 export function ApprovalAvatarPreview({
   card,
@@ -38,23 +43,30 @@ export function ApprovalAvatarPreview({
   agentName: string | null;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
-  const {workspaceId} = useSession();
+  const { workspaceId } = useSession();
   const action = card.action;
-  const path = approvalAvatarPreviewPath(workspaceId, card.approvalId, action?.preview ?? null);
+  const path = approvalAvatarPreviewPath(
+    workspaceId,
+    card.approvalId,
+    action?.preview ?? null,
+  );
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const previous = useMemberAvatarUri(
+    action?.preview?.previousAvatarUrl ?? null,
+  );
 
   useEffect(() => {
     if (path === null) return undefined;
     let alive = true;
     void loadMemberAvatar(path).then(uri => {
-      if (alive) setLoaded({path, uri});
+      if (alive) setLoaded({ path, uri });
     });
     return () => {
       alive = false;
     };
   }, [path]);
 
-  const headline = memberAvatarSetHeadline(action?.id, agentName);
+  const headline = profileAvatarHeadline(action?.id, agentName);
   if (headline === null) return null;
 
   // 받아 둔 파일은 첫 프레임부터 이미지다. 결과는 어느 주소의 것인지 함께 들고 있어서,
@@ -62,9 +74,11 @@ export function ApprovalAvatarPreview({
   const uri =
     path === null
       ? null
-      : (peekMemberAvatar(memberAvatarCacheKey(path)) ??
-        (loaded?.path === path ? loaded.uri : null));
-  const unavailable = path === null || (loaded?.path === path && loaded.uri === null && uri === null);
+      : peekMemberAvatar(memberAvatarCacheKey(path)) ??
+        (loaded?.path === path ? loaded.uri : null);
+  const unavailable =
+    path === null ||
+    (loaded?.path === path && loaded.uri === null && uri === null);
 
   return (
     <View style={styles.box} testID="approval-avatar-preview">
@@ -72,37 +86,75 @@ export function ApprovalAvatarPreview({
         {headline}
       </Sentence>
       <View style={styles.row}>
-        <View
-          style={styles.frame}
-          testID="approval-avatar-frame"
-          accessibilityElementsHidden={uri === null}>
-          {uri !== null ? (
-            <Image
-              source={{uri}}
-              style={styles.image}
-              accessibilityLabel={AVATAR_PREVIEW_ALT}
-              testID="approval-avatar-image"
-            />
-          ) : null}
+        <View style={styles.column}>
+          <Sentence style={styles.caption}>바꾸기 전</Sentence>
+          <View style={styles.frame}>
+            {previous !== null ? (
+              <Image
+                source={{ uri: previous }}
+                style={styles.image}
+                accessibilityLabel="바꾸기 전 프로필 사진"
+              />
+            ) : (
+              <Sentence style={styles.caption}>
+                {action?.preview?.previousAvatarUrl
+                  ? '사진을 불러와요'
+                  : '사진 없음'}
+              </Sentence>
+            )}
+          </View>
         </View>
-        <Sentence style={styles.caption} testID="approval-avatar-caption">
-          {unavailable ? AVATAR_PREVIEW_UNAVAILABLE : AVATAR_PREVIEW_CAPTION}
-        </Sentence>
+        <View style={styles.column}>
+          <Sentence style={styles.caption}>바꾼 뒤</Sentence>
+          <View
+            style={styles.frame}
+            testID="approval-avatar-frame"
+            accessibilityElementsHidden={uri === null}
+          >
+            {uri !== null ? (
+              <Image
+                source={{ uri }}
+                style={styles.image}
+                accessibilityLabel={
+                  action?.id === 'agent.profile.update'
+                    ? '에이전트의 프로필 사진으로 제안된 사진'
+                    : AVATAR_PREVIEW_ALT
+                }
+                testID="approval-avatar-image"
+              />
+            ) : null}
+          </View>
+        </View>
       </View>
+      <Sentence style={styles.caption} testID="approval-avatar-caption">
+        {unavailable
+          ? action?.id === 'agent.profile.update'
+            ? '사진을 불러오지 못했어요. 다시 열어 확인해 주세요.'
+            : AVATAR_PREVIEW_UNAVAILABLE
+          : action?.id === 'agent.profile.update'
+          ? '승인하면 에이전트의 프로필 사진이 이 사진으로 바뀌어요.'
+          : AVATAR_PREVIEW_CAPTION}
+      </Sentence>
     </View>
   );
 }
 
 const buildStyles = (color: Palette) =>
   StyleSheet.create({
-    box: {gap: space.sm, paddingTop: space.sm},
+    box: { gap: space.sm, paddingTop: space.sm },
     headline: {
       fontSize: font.label,
       lineHeight: line.label,
       fontWeight: '600',
       color: color.text,
     },
-    row: {flexDirection: 'row', alignItems: 'center', gap: space.md},
+    row: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      alignItems: 'flex-start',
+      gap: space.md,
+    },
+    column: { gap: space.xs },
     frame: {
       width: PREVIEW_SIZE,
       height: PREVIEW_SIZE,
@@ -112,7 +164,13 @@ const buildStyles = (color: Palette) =>
       borderWidth: 1,
       borderColor: color.border,
       backgroundColor: color.surfacePressed,
+      justifyContent: 'center',
+      alignItems: 'center',
     },
-    image: {width: PREVIEW_SIZE, height: PREVIEW_SIZE},
-    caption: {flex: 1, fontSize: font.meta, lineHeight: line.label, color: color.textMuted},
+    image: { width: PREVIEW_SIZE, height: PREVIEW_SIZE },
+    caption: {
+      fontSize: font.meta,
+      lineHeight: line.label,
+      color: color.textMuted,
+    },
   });
