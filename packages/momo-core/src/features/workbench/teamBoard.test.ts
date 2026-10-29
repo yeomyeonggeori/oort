@@ -29,7 +29,7 @@ function row(overrides: Partial<SharedWorkSession> = {}): SharedWorkSession {
     label: "한글 입력 이중 전송 수리",
     folderLabel: "momo",
     status: "running",
-    owner: { memberId: "00000000-0000-7000-8000-000000000101", displayName: "곽성재" },
+    owner: { memberId: "00000000-0000-7000-8000-000000000101", displayName: "구민수" },
     homeChannel: { id: "00000000-0000-7000-8000-000000000201", name: "workbench" },
     startedAtMs: NOW - 3_600_000,
     endedAtMs: null,
@@ -56,7 +56,7 @@ describe("팀 보드 말 (#2863)", () => {
 
   it("레인 말: 로컬은 「로컬 · 공유됨」, 에이전트는 주인이 시킨 말", () => {
     expect(laneLabel(row())).toBe("로컬 · 공유됨");
-    expect(laneLabel(row({ origin: "host" }))).toBe("에이전트 · 곽성재가 시킴");
+    expect(laneLabel(row({ origin: "host" }))).toBe("에이전트 · 구민수가 시킴");
     expect(laneLabel(row({ origin: "host", owner: { memberId: "x", displayName: "김여명" } }))).toBe(
       "에이전트 · 김여명이 시킴"
     );
@@ -64,7 +64,7 @@ describe("팀 보드 말 (#2863)", () => {
 
   it("상태 문장: 기다림은 주인 이름과 분 단위 경과를 말한다", () => {
     const waiting = row({ state: "waiting", lastActivityAt: SEC(NOW - 3 * 60_000) });
-    expect(stateSentence(waiting, NOW)).toBe("곽성재의 응답이 필요해요 · 3분째");
+    expect(stateSentence(waiting, NOW)).toBe("구민수의 응답이 필요해요 · 3분째");
   });
 
   it("묶기: 서버 순서를 지키고 사람마다 한 묶음이다", () => {
@@ -75,7 +75,7 @@ describe("팀 보드 말 (#2863)", () => {
       row({ sessionId: "c" }),
     ]);
     expect(groups.map((g) => [g.ownerName, g.items.map((i) => i.sessionId)])).toEqual([
-      ["곽성재", ["a", "c"]],
+      ["구민수", ["a", "c"]],
       ["박세은", ["b"]],
     ]);
   });
@@ -190,7 +190,7 @@ describe("폰 한 열 판: 상태 순서와 내 것 (#2864)", () => {
     const mine = at("e1", "waiting");
     const agentMine = at("e2", "running", { origin: "host" });
     const theirs = at("e3", "running", { owner: { memberId: OTHER, displayName: "김인턴" } });
-    const upper = at("e4", "review", { owner: { memberId: ME.toUpperCase(), displayName: "곽성재" } });
+    const upper = at("e4", "review", { owner: { memberId: ME.toUpperCase(), displayName: "구민수" } });
     expect(ownedBy([mine, theirs, agentMine, upper], ME).map((i) => i.sessionId)).toEqual([
       mine.sessionId,
       agentMine.sessionId,
@@ -198,7 +198,7 @@ describe("폰 한 열 판: 상태 순서와 내 것 (#2864)", () => {
     ]);
   });
 
-  it("「확인 기다림」은 어디에도 없다(성재 결정 2026-10-01)", () => {
+  it("「확인 기다림」은 어디에도 없다(민수 결정 2026-10-01)", () => {
     expect(JSON.stringify(TEAM_BOARD_COPY)).not.toContain("확인 기다림");
     expect(JSON.stringify(SESSION_STATUS_LABEL)).not.toContain("확인 기다림");
   });

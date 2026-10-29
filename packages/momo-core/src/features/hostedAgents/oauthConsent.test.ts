@@ -68,7 +68,7 @@ function previewWire(overrides: Record<string, unknown> = {}): unknown {
 function channels(): ApprovalChannelInput[] {
   return [
     { id: GENERAL, label: "#general", kind: "public" },
-    { id: DM, label: "성재", kind: "dm" },
+    { id: DM, label: "민수", kind: "dm" },
   ];
 }
 
@@ -195,6 +195,23 @@ describe("RED PROOF ② 승인 범위는 요청된 상한을 넘지 못한다", 
       "messages:write",
     ]);
     expect(rows[0]?.required).toBe(true);
+  });
+
+  it("먼저 제안(workspace:initiate)은 요청했을 때만 줄이 서고, 요청하지 않으면 승인 본문에도 없다", () => {
+    // ADR-0186 증보 v5 U-b: 기본 요청에 섞이지 않고, 요청된 상한을 넘어 고를 수도 없다.
+    expect(oauthScopeChoices(requested).map((row) => row.id)).not.toContain(
+      "workspace:initiate"
+    );
+    expect(normalizeOauthScopes(requested, ["workspace:initiate"])).not.toContain(
+      "workspace:initiate"
+    );
+    const asked = [...requested, "workspace:initiate" as const];
+    const rows = oauthScopeChoices(asked);
+    expect(rows.at(-1)?.id).toBe("workspace:initiate");
+    expect(rows.at(-1)?.required).toBe(false);
+    expect(normalizeOauthScopes(asked, ["workspace:initiate"])).toContain(
+      "workspace:initiate"
+    );
   });
 
   it("approve 본문은 자격 없는 채널과 요청 밖 scope 를 싣지 않는다", () => {

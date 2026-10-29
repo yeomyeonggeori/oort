@@ -122,7 +122,12 @@ import {
 import {noteConnectRoute} from '../src/features/onboarding/phoneFlow';
 import {measureMode} from './root';
 import {Shell} from '../src/shell/AppShell';
+import {SheetDragSurface} from './sheetDrag';
 import {SheetKitSurface} from './sheetKit';
+import {ProfileSheetSurface} from './profileSheet';
+import {ConversationMenuSurface} from './conversationMenu';
+import {ConversationHeaderSurface} from './conversationHeader';
+import {ConversationInfoPageSurface} from './conversationInfoPage';
 import {
   DelegateWorkSheet,
   type DelegatePreview,
@@ -188,6 +193,9 @@ import {PullRefreshSurface} from './pullRefresh';
 import {DmConversationSurface} from './dmConversation';
 import {BubbleSurface} from './bubbleConv';
 import {DockGapSurface} from './dockGap';
+import {TapDismissSurface} from './tapDismiss';
+import {JumpLatestSurface} from './jumpLatest';
+import {ThreadPanelSurface} from './threadPanel';
 import {ComposerNewlineSurface} from './composerNewline';
 import {SteadySurface, seedSteady} from './steady';
 import {ActivityRowsSurface} from './activityRows';
@@ -198,6 +206,7 @@ import {OortLoaderSurface} from './oortLoader';
 import {PhotoCardSurface} from './photoCard';
 import {AttachMenuSurface} from './attachMenu';
 import {AvatarApprovalSurface} from './avatarApproval';
+import {PinApprovalSurface} from './pinApproval';
 import {ThemeLiveSurface} from './themeLive';
 import {PhotoViewerSurface} from './photoViewer';
 
@@ -382,19 +391,9 @@ import type {
 // =============================================================================
 LogBox.ignoreAllLogs(true);
 
-// 공개 레포의 캡처에 실명을 싣지 않는다(#4458). 공용 스트레스 로스터(core)의 첫 두 사람(「나」와 첫 동료)은 실제 팀원 이름이라 하네스에서
-// 가상 인물로 덮는다 — 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다. id 는 그대로라 대화·멘션·인용의 연결은
-// 변하지 않는다. 이름으로 짚지 않고 순서로 짚는다(`SELF` 도 「첫 사람」이다): 그래야 실명이 이 파일의 새 줄에 다시 적히지 않는다.
-const VIRTUAL_PEOPLE = [
-  {displayName: '이도현', handle: 'dohyun'},
-  {displayName: '박서연', handle: 'seoyeon'},
-];
-let virtualSeen = 0;
-const ROSTER = makeStressRoster().map(member => {
-  if (member.kind !== 'human') return member;
-  const virtual = VIRTUAL_PEOPLE[virtualSeen++];
-  return virtual ? {...member, ...virtual} : member;
-});
+// 스트레스 로스터(core)의 사람들은 처음부터 가상 인물이다(#4632): 홈 화면 오른쪽 위 아바타의 한 글자와 대화 작성자 줄이 이 로스터에서 온다.
+// 예전에는 첫 두 사람이 실제 팀원 이름이라 이 하네스가 순서로 덮었다(#4458). 그 우회는 걷었다. 재유입은 design_preflight_names 가 막는다.
+const ROSTER = makeStressRoster();
 const DIRECTORY = makeDirectory(ROSTER);
 const SELF = (ROSTER.find(m => m.kind === 'human') ?? ROSTER[0]).id;
 // 인용의 **원본 저자**. 자기 말을 자기가 인용하는 화면은 이 기능이 실제로 쓰이는
@@ -592,7 +591,7 @@ const ADE_HOSTS = [
     scope: 'member',
     ownerMemberId: SELF,
     type: 'app',
-    displayName: '성재 맥북',
+    displayName: '도현 맥북',
     capabilities: {},
     createdAtMs: 0,
     online: true,
@@ -1002,7 +1001,7 @@ function PlaceholderProbe(): React.JSX.Element {
  *
  * ## 첫 줄이 **긴 이름**인 이유 (design-review 회전 1 H2)
  *
- * 첫 판의 픽스처는 곽성재·박다연·김인턴·동료1~9 로 **전부 짧았고**, 그래서
+ * 첫 판의 픽스처는 이도현·박서연·김인턴·동료1~9 로 **전부 짧았고**, 그래서
  * 사진은 행이 폭에서 어떻게 지는지를 한 번도 안 보여 줬다. 그 자리에 실제로 결함이
  * 있었다: 행의 세 조각 중 양보할 수 있는 것이 `mentionHandle` 하나뿐이라, 긴 한글
  * 이름 + 행 끝의 「에이전트」 표지 조합에서 행은 **잘리는 대신 넘쳤고** 넘쳐서
@@ -1063,7 +1062,7 @@ const AI_BASE = {
   kind: 'agent' as const,
   status: 'active' as const,
 };
-const AI_OWNER = {id: OTHER, displayName: '박다연'};
+const AI_OWNER = {id: OTHER, displayName: '박서연'};
 const AI_MEMBERS: RosterMember[] = [
   {
     ...AI_BASE,
@@ -1081,14 +1080,14 @@ const AI_MEMBERS: RosterMember[] = [
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: SELF,
-    owner: {id: SELF, displayName: '곽성재'},
+    owner: {id: SELF, displayName: '이도현'},
     hostOnline: true,
   },
   {
     ...AI_BASE,
     id: 'ai-other-sub',
-    displayName: '다연의 Claude Code',
-    handle: 'dayeon-claude',
+    displayName: '서연의 Claude Code',
+    handle: 'seoyeon-claude',
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: AI_OWNER.id,
@@ -1098,8 +1097,8 @@ const AI_MEMBERS: RosterMember[] = [
   {
     ...AI_BASE,
     id: 'ai-other-key',
-    displayName: '다연 키',
-    handle: 'dayeon-key',
+    displayName: '서연 키',
+    handle: 'seoyeon-key',
     brain: 'personal_key',
     callableBy: 'owner_only',
     ownerHumanId: AI_OWNER.id,
@@ -1113,7 +1112,7 @@ const AI_MEMBERS: RosterMember[] = [
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: SELF,
-    owner: {id: SELF, displayName: '곽성재'},
+    owner: {id: SELF, displayName: '이도현'},
     hostOnline: true,
     brainUnavailableReason: CLAUDE_SUBSCRIPTION_AGENT_PAUSED,
   },
@@ -1125,7 +1124,7 @@ const AI_MEMBERS: RosterMember[] = [
     brain: 'subscription',
     callableBy: 'owner_only',
     ownerHumanId: SELF,
-    owner: {id: SELF, displayName: '곽성재'},
+    owner: {id: SELF, displayName: '이도현'},
     hostOnline: false,
   },
 ] as RosterMember[];
@@ -2148,7 +2147,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       chips={CHIPS}
       availability={AVAILABILITY}
       pinned={pinned}
-      authorLabel="곽성재"
+      authorLabel="이도현"
       onClose={() => {}}
       onToggleReaction={() => {}}
       onReply={() => {}}
@@ -2164,7 +2163,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
       message={MESSAGE}
       chips={CHIPS}
       availability={AVAILABILITY}
-      authorLabel="곽성재"
+      authorLabel="이도현"
       startInDeleteConfirm={confirm}
       onClose={() => {}}
       onToggleReaction={() => {}}
@@ -2211,6 +2210,26 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   if (name === 'sheetkit' || name.startsWith('sheetkit-')) {
     return <SheetKitSurface which={name.slice('sheetkit'.length).replace(/^-/, '')} />;
   }
+  // #4319: 다른 사람 프로필 시트(`measure/profileSheet.tsx`, 배송되는 시트 + 고정 데이터·합성 사진, 가상 인물).
+  if (name === 'profilesheet' || name.startsWith('profilesheet-')) {
+    return <ProfileSheetSurface which={name.slice('profilesheet'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화 머리 ⋮ 시트(`measure/conversationMenu.tsx`, 배송되는 시트 + 고정 데이터, 가상 인물).
+  if (name === 'convmenu' || name.startsWith('convmenu-')) {
+    return <ConversationMenuSurface which={name.slice('convmenu'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화 머리 가운데 이름·상태 알약(`measure/conversationHeader.tsx`, 배송되는 머리 + 고정 데이터, 가상 인물).
+  if (name === 'convheader' || name.startsWith('convheader-')) {
+    return <ConversationHeaderSurface which={name.slice('convheader'.length).replace(/^-/, '')} />;
+  }
+  // #4319: 대화·채널 정보 페이지(`measure/conversationInfoPage.tsx`, 배송되는 페이지 + 고정 데이터·합성 사진, 가상 인물).
+  if (name === 'infopage' || name.startsWith('infopage-')) {
+    return <ConversationInfoPageSurface which={name.slice('infopage'.length).replace(/^-/, '')} />;
+  }
+  // #4612: 시트 끌어내려 닫기 계측(`measure/sheetDrag.tsx`, 배송되는 시트 + 결정 2 probe, 가상 인물).
+  if (name === 'sheetdrag' || name.startsWith('sheetdrag-')) {
+    return <SheetDragSurface which={name.slice('sheetdrag'.length).replace(/^-/, '')} />;
+  }
   // #3951: 폰 「앱」 읽기 화면(목록·상세·네 상태).
   if (name.startsWith('apps-') && !name.startsWith('apps-tail')) {
     return <AppsSurface which={name.slice('apps-'.length)} />;
@@ -2234,6 +2253,18 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4264: 마지막 행 아래 → 알약 위 간격. 대화 화면의 도크 스택 그대로 + 레이아웃 값 계측.
   if (name === 'gap' || name.startsWith('gap-')) {
     return <DockGapSurface which={name.slice('gap'.length).replace(/^-/, '')} />;
+  }
+  // #4614: 대화 목록을 눌러 자판·입력창을 내린다. 대화 화면 그대로(행이 눌리는 `actions` 포함) + 터치·자판 기록.
+  if (name === 'tap' || name.startsWith('tap-')) {
+    return <TapDismissSurface which={name.slice('tap'.length).replace(/^-/, '')} />;
+  }
+  // #4689: 멀리 올라간 채 아래 알약 「최신으로」를 누르면 마지막 메시지가 보이기까지 얼마나 걸리고 몇 번에 나눠 내려가는가. 진짜 대화 화면 + 스크롤 기록(`measure/jumpLatest.tsx`).
+  if (name === 'jump-latest' || name.startsWith('jump-latest-') || name.startsWith('jump-latest+')) {
+    return <JumpLatestSurface which={name.slice('jump-latest'.length).replace(/^[-+]/, '')} />;
+  }
+  // #4690: 스레드 패널(답글 0개·2개). 배송되는 `ThreadPanel` 그대로 + 고정 데이터·가상 인물.
+  if (name === 'thread' || name.startsWith('thread-')) {
+    return <ThreadPanelSurface which={name.slice('thread'.length).replace(/^-/, '')} />;
   }
   // #4321: 「가 ⏎ 나」를 보내면 줄바꿈이 어느 단계에서 사라지는가. 배송되는 컴포저 + 맨 입력창 + 모의 API.
   if (name === 'composer-newline' || name.startsWith('composer-newline-')) {
@@ -2274,6 +2305,11 @@ export function Surface({name}: {name: string}): React.JSX.Element {
   // #4394: member.avatar.set 승인 카드(제안된 사진·본인만 볼 수 있다는 줄). 사진은 avatar-stub.mjs 가 답한다.
   if (name.startsWith('avatar-approval')) {
     return <AvatarApprovalSurface which={name.slice('avatar-approval'.length).replace(/^-/, '')} />;
+  }
+
+  // #4705: 먼저 제안한 고정 카드(꼬리표 · 에이전트가 쓴 글 · 전문 보기)와 만료 스윕 줄.
+  if (name.startsWith('pin-approval')) {
+    return <PinApprovalSurface which={name.slice('pin-approval'.length).replace(/^-/, '')} />;
   }
 
   // #4526: 화면 모드의 기본·저장·시스템 추종. 안쪽에 진짜 ThemeProvider 를 세운다(바깥 FixedScheme 을 이긴다).
@@ -2793,7 +2829,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
             message={{...MESSAGE, id: 'buzz-sh-1', seq: 81, body: '@claude-code ㅎㅇ', createdAtMs: NOW - 60_000, thread: undefined} as unknown as Message}
             chips={[]}
             availability={AVAILABILITY}
-            authorLabel="곽성재"
+            authorLabel="이도현"
             onClose={() => {}}
             onToggleReaction={() => {}}
             onReply={() => {}}
@@ -3142,7 +3178,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
     // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
     // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
-    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight3921.test.tsx`
+    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
     // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
     //
     // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
@@ -3602,7 +3638,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         unavailable_reason,
       });
       const candidates = [
-        host('h-1', '성재 맥북', 'local', 'app', true, null),
+        host('h-1', '도현 맥북', 'local', 'app', true, null),
         host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
         host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
         host('h-4', 'oort Cloud', 'cloud', 'cloud', false, 't3_disabled'),
@@ -3683,7 +3719,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         unavailable_reason,
       });
       const rows = [
-        host('h-1', '성재 맥북', 'local', 'app', true, null),
+        host('h-1', '도현 맥북', 'local', 'app', true, null),
         host('h-2', '팀 VPS (서울)', 'remote', 'workd', true, null),
         host('h-3', '작업실 아이맥', 'local', 'app', false, 'offline'),
       ];
@@ -4129,7 +4165,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     case 'composer-agent-notice': {
       // 글에 못 부르는 에이전트가 있는 두 입력창: 남의 구독(위) · 쉬는 중(아래). 초안은 배송되는
       // 경로(`saveDraft` → `draftKey`)로 심는다 — 한 줄은 캐럿이 아니라 글을 읽는다.
-      saveDraft('measure:agent-notice-other', '@dayeon-claude 이번 배포 확인해 줘');
+      saveDraft('measure:agent-notice-other', '@seoyeon-claude 이번 배포 확인해 줘');
       saveDraft('measure:agent-notice-paused', '@paused-claude 어제 건 이어서 봐 줘');
       return (
         <Frame label="입력창 위 한 줄 — 못 부르는 · 쉬는 에이전트 (AIH-9b)">
@@ -4198,7 +4234,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
                   nowMs={Date.now()}
                   live
                 />
-                <TypingBar segments={typingSegments(['박다연'])} />
+                <TypingBar segments={typingSegments(['박서연'])} />
                 <Composer recipient="place"
                   channelLabel="배포"
                   directory={ADE_DIRECTORY}
@@ -4802,6 +4838,33 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4663: 설정 › 「명령줄·AI 도구」 장(목록·지우기). 진짜 셸 위의 진짜 설정 페이지가 이 장으로 열린다(`initialPage="devTools"`).
+    //   (기본)    소유자: 연결 넷(카드 · 한 번도 안 쓴 카드 · 로그인 세션 · 직접 정한 범위) + 「컴퓨터에서 만든다」·관리자 안내
+    //   -member   만들 수 없는 멤버: 같은 목록 + 「관리자가 켜 줘야 해요」
+    //   -empty · -loading · -error · -offline   나머지 상태. 지우기 확인은 눌러야 서므로 `maestro/119-dev-tools-capture.yaml`.
+    //   -entry    설정 본 페이지의 「연결」 카드(아래로 끝까지): 「명령줄·AI 도구 ›」 행이 선 모습.
+    case 'shell-dev-tools':
+    case 'shell-dev-tools-member':
+    case 'shell-dev-tools-empty':
+    case 'shell-dev-tools-loading':
+    case 'shell-dev-tools-error':
+    case 'shell-dev-tools-offline':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <SettingsOverlay
+            initialPage="devTools"
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
+    case 'shell-dev-tools-entry':
+      return <SettingsBottomSurface devTools />;
     // #4457: 테마 안쪽 장. 진짜 셸 위의 설정 페이지가 테마 장으로 열린다(`initialPage="theme"`) — 화면 모드·테마·강조색·배경
     // 네 묶음이 한 장에 선다(스크롤은 `shell-settings-theme-*` 가 아니라 Maestro 가 한다).
     case 'shell-settings-theme':
@@ -4877,11 +4940,13 @@ export function Surface({name}: {name: string}): React.JSX.Element {
         </View>
       );
     // #3342: 프로필의 「알림」 묶음 — 푸시 종류 스위치. 시트를 알림 묶음이 보이도록 끌어올려 찍는다.
+    // #4316: 묶음에 두 줄(「메시지 미리보기」「보낸 사람 표시」)이 늘어 카드가 그만큼 길어졌다 — 맨 위 「푸시 알림」 줄이
+    // 상태 막대 밑으로 잘리지 않게 끌어올림을 560 에서 500 으로 줄였다.
     case 'shell-profile-notify':
       return (
         <Screen>
           <View style={{flex: 1, overflow: 'hidden'}}>
-            <View style={{marginTop: -560, height: 3000}}>
+            <View style={{marginTop: -500, height: 3000}}>
               <View style={styles.settingsBody}>
                 <SettingsContent
                   workspaceId={HARNESS_MEMBER.workspaceId}
@@ -5509,7 +5574,7 @@ function SearchResults(): React.JSX.Element {
           hit={item}
           query="배포"
           channelTitle={item.channelId === 'ch-1' ? '#배포' : '#일반'}
-          authorName="곽성재"
+          authorName="이도현"
           onPress={() => {}}
         />
       )}
@@ -5549,8 +5614,8 @@ const HARNESS_MEMBER = {
   id: SELF,
   workspaceId: HARNESS_WS,
   kind: 'human',
-  displayName: HARNESS_SELF?.displayName ?? '곽성재',
-  handle: HARNESS_SELF?.handle ?? 'seongjae',
+  displayName: HARNESS_SELF?.displayName ?? '이도현',
+  handle: HARNESS_SELF?.handle ?? 'dohyun',
 } as Member;
 /** 설정 표면의 나(가상 인물, `settingsOverlay.tsx`) — 캡처가 레포에 남는다. */
 const SETTINGS_ME = {...HARNESS_MEMBER, ...SETTINGS_PERSONA} as Member;
@@ -5585,8 +5650,8 @@ export default function SurfacesHarness({
 const AIH4_WS = '00000000-0000-7000-8000-0000000000a1';
 const AIH4_ME = '00000000-0000-7000-8000-0000000000a2';
 const AIH4_ROSTER = [
-  {id: AIH4_ME, workspaceId: AIH4_WS, kind: 'human', status: 'active', displayName: '곽성재', handle: 'seongjae', role: 'owner', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
-  {id: '00000000-0000-7000-8000-0000000000a3', workspaceId: AIH4_WS, kind: 'agent', status: 'active', displayName: '성재-claude', handle: 'seongjae-claude', channelCount: 1, channelIds: [], capabilities: [], ownerHumanId: AIH4_ME, createdAtMs: 0, updatedAtMs: 0},
+  {id: AIH4_ME, workspaceId: AIH4_WS, kind: 'human', status: 'active', displayName: '이도현', handle: 'dohyun', role: 'owner', channelCount: 1, channelIds: [], capabilities: [], createdAtMs: 0, updatedAtMs: 0},
+  {id: '00000000-0000-7000-8000-0000000000a3', workspaceId: AIH4_WS, kind: 'agent', status: 'active', displayName: '도현-claude', handle: 'dohyun-claude', channelCount: 1, channelIds: [], capabilities: [], ownerHumanId: AIH4_ME, createdAtMs: 0, updatedAtMs: 0},
 ];
 const AIH4_CONNECTIONS = [
   {id: 'c1', agentMemberId: '00000000-0000-7000-8000-0000000000a3', status: 'active', authMode: 'bearer', audience: 'oort', approvedChannelIds: [], approvedScopes: [], createdAtMs: 1, updatedAtMs: 1, invocationScope: 'owner_only', subscriptionHarness: 'claude_code'},
@@ -5886,7 +5951,7 @@ const AGENT_DETAIL_HOSTS: WorkHost[] = [
     scope: 'member',
     ownerMemberId: SELF,
     type: 'app',
-    displayName: '성재 맥북',
+    displayName: '도현 맥북',
     capabilities: {},
     createdAtMs: 0,
     online: true,
@@ -6474,7 +6539,7 @@ function seedAi(surface: string): void {
       personalAgent: {
         label: '내 Claude Code',
         ownerId: SELF,
-        ownerDisplayName: '곽성재',
+        ownerDisplayName: '이도현',
         harness: 'claude',
         enabled: true,
         mentionable: true,
@@ -6505,7 +6570,7 @@ function seedAi(surface: string): void {
 // 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
 /** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
 /** #4457: 설정 페이지 내용을 진짜 스크롤뷰에 얹고 끝까지 내려 선다(`shell-profile-bottom`). */
-function SettingsBottomSurface(): React.JSX.Element {
+function SettingsBottomSurface({devTools = false}: {devTools?: boolean}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const scroll = React.useRef<ScrollView>(null);
@@ -6528,6 +6593,7 @@ function SettingsBottomSurface(): React.JSX.Element {
           onOpenTheme={() => {}}
           onOpenStatus={() => {}}
           onOpenDeviceKey={() => {}}
+          onOpenDevTools={devTools ? () => {} : undefined}
           onOpenPauseUntil={() => {}}
           onOpenDndUntil={() => {}}
           onOpenAvatar={() => {}}
@@ -6902,6 +6968,89 @@ function seedAvatarSheet(surface: string): void {
   }));
 }
 
+// ---- #4663: 설정 › 명령줄·AI 도구 ------------------------------------------------
+// 가상 인물(이도현)의 연결 넷. 서버의 `DevCredential` JSON 모양 그대로다: 카드에는 기기 이름이 없고, 로그인 세션에는 도구가
+// 없고 기기 이름이 있다. 시각은 지금 기준이라 「3일 전」·「20일 뒤」가 사진마다 같다.
+const DEV_TOOLS_READ = ['dev:identity', 'dev:channels:read', 'dev:messages:read', 'dev:inbox:read'];
+const DEV_TOOLS_WRITE = [...DEV_TOOLS_READ, 'dev:messages:write'];
+
+// Maestro 흐름(`119-dev-tools-capture.yaml`)이 첫 줄(`aaaaaaaa-0000-4000-8000-000000000001`)의 「지우기」를 누른다.
+function devToolsRows(): Record<string, unknown>[] {
+  const now = Date.now();
+  const day = 86_400_000;
+  const card = (n: number, over: Record<string, unknown>) => ({
+    id: `aaaaaaaa-0000-4000-8000-00000000000${n}`,
+    memberId: SELF,
+    kind: 'card',
+    channelRestricted: false,
+    createdAtMs: now - 10 * day,
+    ...over,
+  });
+  return [
+    card(1, {
+      name: 'Claude Code 노트북',
+      tool: 'claude_code',
+      scopes: DEV_TOOLS_READ,
+      lastUsedAtMs: now - 3 * day,
+      expiresAtMs: now + 20 * day,
+    }),
+    // 한 번도 안 쓴 카드: 읽기 + 보내기, 고른 채널만.
+    card(2, {
+      name: 'Codex 작업용',
+      tool: 'codex',
+      scopes: DEV_TOOLS_WRITE,
+      channelRestricted: true,
+      createdAtMs: now - 2 * day,
+      expiresAtMs: now + 88 * day,
+    }),
+    // 로그인 세션: 도구가 없고 기기 이름이 있다. 만료는 살아 있는 갱신 쪽의 것이라 며칠 단위다.
+    card(3, {
+      kind: 'session',
+      name: 'oort 로그인',
+      scopes: DEV_TOOLS_WRITE,
+      deviceName: '이도현의 MacBook Pro',
+      createdAtMs: now - 12 * day,
+      lastUsedAtMs: now - 5 * 60_000,
+      expiresAtMs: now + 30 * day,
+      lineageExpiresAtMs: now + 78 * day,
+    }),
+    // 두 프리셋 어느 쪽도 아닌 범위.
+    card(4, {
+      name: '배포 스크립트',
+      tool: 'cli',
+      scopes: ['dev:identity', 'dev:messages:read'],
+      lastUsedAtMs: now - 2 * 60 * 60_000,
+      expiresAtMs: now + 5 * day,
+    }),
+  ];
+}
+
+function seedDevTools(surface: string): void {
+  // 시뮬레이터의 NetInfo 는 시작 직후 「끊김」으로 읽히기도 해서 연결 신호를 못 박는다(`-offline` 만 끊김).
+  forceNetwork(surface !== 'shell-dev-tools-offline');
+  const member = surface === 'shell-dev-tools-member';
+  harnessClient.setQueryData(['settings', 'dev-access', 'policy', ADE_WS], {
+    policy: 'admins',
+    canCreate: !member,
+    canManageAll: !member,
+  });
+  if (surface === 'shell-dev-tools-loading') return;
+  if (surface === 'shell-dev-tools-error') {
+    // 목록 요청만 전송 오류로 끝난다(코어가 「서버에 닿지 못했어요」로 바꾼다). 세션 만료(401)가 아니라 캐시는 그대로다.
+    globalThis.fetch = (async (input: unknown) => {
+      if (String(input).includes('/dev-access/credentials')) {
+        throw new TypeError('Network request failed');
+      }
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    return;
+  }
+  harnessClient.setQueryData(
+    ['settings', 'dev-access', 'credentials', ADE_WS],
+    surface === 'shell-dev-tools-empty' ? [] : devToolsRows(),
+  );
+}
+
 function seedShell(surface: string): void {
   // 셸은 명시적으로 켜진 질의(인박스·에이전트 레일)도 세운다. 서버가 없는 하네스에서
   // 그 요청이 실패하면 세션 만료로 읽혀 캐시가 통째로 지워지고(`useSession` 의
@@ -7058,7 +7207,7 @@ function seedShell(surface: string): void {
 
 // ---- #2864: 「작업」 팀 보드 한 열 판 --------------------------------------------
 //
-// 서버가 보는 사람(SELF = 곽성재)의 채널 멤버십으로 이미 걸러 준 공유 세션이다. 로컬 공유
+// 서버가 보는 사람(SELF = 이도현)의 채널 멤버십으로 이미 걸러 준 공유 세션이다. 로컬 공유
 // 세션과 에이전트 레인(origin=host) 세션이 섞여 있고, 두 줄이 내 것이다(하나는 A 레인).
 // 시각은 찍는 순간 기준으로 잡는다(「3분 전」이 사진마다 어긋나지 않게).
 const TB_OTHER = '00000000-0000-7000-8000-00000000b002';
@@ -7667,9 +7816,10 @@ if (
   LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
-  if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
+  if (isPauseSurface(LAUNCHED.name) || LAUNCHED.name.startsWith('shell-dev-tools')) keepPauseSeeds();
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-avatar-')) seedAvatarSheet(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-dev-tools')) seedDevTools(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);

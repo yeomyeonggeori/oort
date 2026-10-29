@@ -86,7 +86,7 @@ describe("deviceLink wire", () => {
     const consumed = parseDeviceLinkStatus({
       status: "consumed",
       device: {
-        name: "성재 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대",
+        name: "민수 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대",
         platform: "ios",
       },
     });

@@ -200,15 +200,15 @@ describe("연결 명령", () => {
 describe("구독으로 쓰는 에이전트 정체성", () => {
   it("names the agent after its owner and picks a free handle", () => {
     expect(
-      subscriptionAgentIdentity("claude", { displayName: "성재", handle: "seongjae" }, new Set())
-    ).toEqual({ displayName: "성재의 Claude", handle: "seongjae-claude" });
+      subscriptionAgentIdentity("claude", { displayName: "민수", handle: "minsu" }, new Set())
+    ).toEqual({ displayName: "민수의 Claude", handle: "minsu-claude" });
     expect(
       subscriptionAgentIdentity(
         "codex",
-        { displayName: "성재", handle: "seongjae" },
-        new Set(["seongjae-codex", "seongjae-codex-2"])
+        { displayName: "민수", handle: "minsu" },
+        new Set(["minsu-codex", "minsu-codex-2"])
       )
-    ).toEqual({ displayName: "성재의 Codex", handle: "seongjae-codex-3" });
+    ).toEqual({ displayName: "민수의 Codex", handle: "minsu-codex-3" });
   });
 
   it("keeps the handle within the server rule", () => {
@@ -222,7 +222,7 @@ describe("구독으로 쓰는 에이전트 정체성", () => {
   });
 
   it("joined line reads naturally", () => {
-    expect(joinJoinedLine("성재의 Claude")).toBe("성재의 Claude가 들어왔어요.");
+    expect(joinJoinedLine("민수의 Claude")).toBe("민수의 Claude가 들어왔어요.");
     expect(aiConnectFoundLine("claude")).toBe("이 맥에서 Claude Code를 찾았어요.");
   });
 });

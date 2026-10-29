@@ -17,6 +17,11 @@
 //             작업 중 → 결과)과 일마다 걸린 시간(대기 → 작업 → 총), 원장의 깨우는 신호 줄
 //             (접어 횟수), 이 앱이 모르는 원장 종류가 와도 깨지지 않는 기록.
 //
+// #4619로 갱신: 대화 안의 표시가 바뀌었다(docs/design-system/agent-work-display.md). 입력창 레일은 한 줄
+// 「이름 · 낱말 · 최근 단계」이고 누르면 팝오버가 열려 에이전트 행이 작업 패널을 연다(경과·「가져간 뒤 N분째 소식이 없어요」는
+// 팝오버에서만). 메시지 아래 문장 행(d1)은 없어졌고 머리 칩과 예외 줄(아직 받지 않았어요·깨우는 신호가 닿지 않음·실패·시간 초과)이
+// 대신한다. 이 파일의 슬라이스는 그 말에 맞춰 이식됐다.
+//
 // 라이트·다크 × 1440×900. 백엔드는 없다: `/v1/**`는 ADR-0200 응답 모양의 고정
 // 응답이고, 서버 프레임(`agent.run.event`)은 가짜 소켓으로 밀어 넣는다. 화면이
 // 다시 읽는지(프레임 → GET progress)는 요청 수로 단정한다.
@@ -235,7 +240,8 @@ async function open(browser, origin, scheme, scene, hash) {
   await page.getByTestId("login-email").fill("capture@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
-  await page.getByTestId("nav-team").waitFor({ timeout: 20_000 });
+  // `nav-team`은 ADR-0202 D6(#3842)이 사이드바를 「작업」 한 줄로 합치며 걷었다. 로그인이 끝났다는 신호는 채널 목록이다.
+  await page.getByTestId("channel-item").first().waitFor({ timeout: 20_000 });
   await page.evaluate((h) => { location.hash = h; }, hash);
   return { context, page };
 }
@@ -268,29 +274,35 @@ async function u1(browser, origin, scheme) {
   const scene = newScene();
   const now = Date.now();
   const { context, page } = await open(browser, origin, scheme, scene, `/c/${CH}`);
+  // 내 메시지 하나가 run의 트리거다(예외 줄과 머리 칩이 서려면 run이 가리키는 메시지가 화면에 있어야 한다).
+  const TRIGGER = "00000000-0000-7000-8000-0000000a0001";
 
-  // ① 대기 2번째: 11분 전에 올라왔고 아직 아무도 가져가지 않았다. 옛 화면은 이미
-  //    「신호 소실」이었다.
+  // ① 기다린 지 11분: 5분 유예를 넘었으니 입력창 레일에서는 빠지고 메시지 아래 예외 줄이 「아직 받지 않았어요」라고 말한다.
+  //    옛 화면은 이미 「신호 소실」이었다. 경과(「11분째」)는 대화에 말하지 않는다(초·분 단위 없음).
   scene.runs = [
     progress(now, { id: RUN_C, agentMemberId: otherAgentId, phase: "claimed", status: "queued", leaseState: "live", claimedAtMs: now - 2 * MIN, createdAtMs: now - 14 * MIN }),
-    progress(now, { id: RUN_A, queuePosition: 2, aheadTotal: 1, ahead: [{ runId: RUN_C, channelId: CH }], triggerSummary: "채널 하나 만들어 줄래요?" }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, queuePosition: 2, aheadTotal: 1, ahead: [{ runId: RUN_C, channelId: CH }], triggerSummary: "채널 하나 만들어 줄래요?" }),
   ];
   await serverMoves(page, scene, scene.runs, "queued");
   await pill(page).first().waitFor({ timeout: 15_000 });
   const pillText = ((await pill(page).first().textContent()) ?? "").replace(/\s+/g, " ");
   check(`${tag} queued: 알약이 「작업 중」이 아니다`, !pillText.includes("작업 중"), pillText);
-  const lineText = (await page.getByTestId("composer-working").textContent()) ?? "";
-  check(`${tag} queued: 활동 줄이 「대기 2번째」와 「11분째 기다려요」를 말한다`, lineText.includes("대기 2번째") && lineText.includes("11분째 기다려요"), lineText);
-  check(`${tag} queued: 「신호 소실」이 없다 (11분이 지났는데도)`, !(await page.locator("body").textContent())?.includes("신호 소실"));
-  await page.getByTestId("composer-working-open").filter({ hasText: "그록봇" }).first().click();
+  await page.getByTestId("run-exception").waitFor({ timeout: 15_000 });
+  const lineText = ((await page.getByTestId("run-exception-text").first().textContent()) ?? "").trim();
+  check(`${tag} queued: 예외 줄이 「아직 받지 않았어요」를 말한다`, lineText === "그록봇: 아직 받지 않았어요", lineText);
+  check(`${tag} queued: 대화에 경과 숫자가 없다(「11분째」)`, !/\d+\s*(시간|분|초)/.test(lineText), lineText);
+  // 화면에 **보이는** 글이다(`innerText`): 칩의 폭을 지키는 보이지 않는 유령 낱말(`invisible`, `aria-hidden`)에는 「신호 소실」이 있다.
+  check(`${tag} queued: 「신호 소실」이 보이지 않는다 (11분이 지났는데도)`, !(await page.locator("body").innerText())?.includes("신호 소실"));
+  check(`${tag} queued: 머리 칩도 같은 낱말`, ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "아직 받지 않았어요");
+  await page.getByTestId("run-exception-open").click();
   await page.getByTestId("agent-work-panel").waitFor();
   const chip = ((await page.getByTestId("agent-work-panel-state").textContent()) ?? "").trim();
-  check(`${tag} queued: 패널 머리가 서버 낱말`, chip === "가져감" || chip.startsWith("대기"), chip);
+  check(`${tag} queued: 패널 머리가 같은 낱말(카드·줄·칩과 한 상수)`, chip === "아직 받지 않았어요", chip);
   await page.screenshot({ path: shot("1-queued") });
 
-  // ② 가져감 (소식 없음): 11분 만에 수령, lease는 그 뒤 만료.
+  // ② 가져감 (소식 없음): 11분 만에 수령, lease는 그 뒤 만료. 레일의 한 줄은 「가져감」이다(여럿이면 +N으로 합쳐진다).
   await serverMoves(page, scene, [
-    progress(now, { id: RUN_A, phase: "claimed", status: "queued", leaseState: "live", claimedAtMs: now - 20_000 }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "claimed", status: "queued", leaseState: "live", claimedAtMs: now - 20_000 }),
   ], "claimed");
   await page.waitForTimeout(300);
   let text = (await page.getByTestId("composer-working").textContent()) ?? "";
@@ -299,33 +311,40 @@ async function u1(browser, origin, scheme) {
   await page.screenshot({ path: shot("2-claimed") });
 
   await serverMoves(page, scene, [
-    progress(now, { id: RUN_A, phase: "claimed", status: "queued", leaseState: "stale", claimedAtMs: now - 34 * MIN }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "claimed", status: "queued", leaseState: "stale", claimedAtMs: now - 34 * MIN }),
   ], "claimed");
-  text = (await page.getByTestId("composer-working").textContent()) ?? "";
-  check(`${tag} claimed-stale: 「가져간 뒤 34분째 소식이 없어요」 (끊김이라 하지 않는다)`, text.includes("가져간 뒤 34분째 소식이 없어요") && !text.includes("끊"), text);
+  // 경과 근거는 팝오버에만 있다(레일의 줄에는 없다): 줄을 눌러 팝오버를 열어 읽는다.
+  await page.getByTestId("composer-working-open").first().click();
+  await page.getByTestId("composer-working-popover").waitFor();
+  text = (await page.getByTestId("composer-working-popover").textContent()) ?? "";
+  check(`${tag} claimed-stale: 팝오버가 「가져간 뒤 34분째 소식이 없어요」 (끊김이라 하지 않는다)`, text.includes("가져간 뒤 34분째 소식이 없어요") && !text.includes("끊"), text);
+  check(`${tag} claimed-stale: 레일의 줄에는 경과가 없다`, !((await page.getByTestId("composer-working-text").textContent()) ?? "").includes("34분"));
   await page.screenshot({ path: shot("3-claimed-stale") });
+  await page.keyboard.press("Escape");
 
   // ③ 진행 단계 — 에이전트가 보고한 만큼만.
   for (const [i, stage] of ["시작: 채널 이름 확인", "grokbot-lab 이름 점검", "승인 카드 제안 준비"].entries()) {
     await serverMoves(page, scene, [
-      progress(now, { id: RUN_A, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 3 * MIN, startedAtMs: now - 2 * MIN, lastEventAtMs: now - 5_000, latestStage: stage, stepCount: i + 1 }),
+      progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 3 * MIN, startedAtMs: now - 2 * MIN, lastEventAtMs: now - 5_000, latestStage: stage, stepCount: i + 1 }),
     ], "stage");
     text = (await page.getByTestId("composer-working").textContent()) ?? "";
     check(`${tag} running-${i + 1}: 에이전트가 보고한 단계가 선다`, text.includes(stage), text);
+    check(`${tag} running-${i + 1}: 머리 칩은 「작업 중」`, ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "작업 중");
     if (i === 0 || i === 2) await page.screenshot({ path: shot(`4-running-${i + 1}`) });
   }
 
   // ④ 승인 대기.
   await serverMoves(page, scene, [
-    progress(now, { id: RUN_A, phase: "awaiting_approval", status: "awaiting_approval", leaseState: "live", claimedAtMs: now - 6 * MIN, startedAtMs: now - 5 * MIN, lastEventAtMs: now - MIN, approvalId: "0199aa11-2222-7000-8000-0000000000d1", approvalExpiresAtMs: now + 50 * MIN }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "awaiting_approval", status: "awaiting_approval", leaseState: "live", claimedAtMs: now - 6 * MIN, startedAtMs: now - 5 * MIN, lastEventAtMs: now - MIN, approvalId: "0199aa11-2222-7000-8000-0000000000d1", approvalExpiresAtMs: now + 50 * MIN }),
   ], "approval_requested");
   const waitingPill = ((await pill(page).first().textContent()) ?? "").replace(/\s+/g, " ");
   check(`${tag} awaiting_approval: 알약 「승인 대기」`, waitingPill.includes("승인 대기"), waitingPill);
+  check(`${tag} awaiting_approval: 레일도 칩도 같은 낱말`, ((await page.getByTestId("composer-working").textContent()) ?? "").includes("승인 대기") && ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "승인 대기");
   await page.screenshot({ path: shot("5-awaiting-approval") });
 
   // ⑤ 끝(사유): 승인 만료로 시간 초과, 그리고 서버가 소식 끊김으로 끝낸 것.
   await serverMoves(page, scene, [
-    progress(now, { id: RUN_A, phase: "timed_out", status: "timed_out", leaseState: "live", claimedAtMs: now - 70 * MIN, startedAtMs: now - 69 * MIN, finishedAtMs: now - MIN, endReason: "approval_expired" }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "timed_out", status: "timed_out", leaseState: "live", claimedAtMs: now - 70 * MIN, startedAtMs: now - 69 * MIN, finishedAtMs: now - MIN, endReason: "approval_expired" }),
   ], "timed_out");
   await page.waitForTimeout(300);
   const soft = async (id) => ((await page.getByTestId(id).textContent({ timeout: 3000 }).catch(() => "")) ?? "").trim();
@@ -335,24 +354,37 @@ async function u1(browser, origin, scheme) {
   // #3824: 근거 줄은 걸린 시간을 먼저 말한다(「10분 걸림 · 승인이 만료됐어요」).
   check(`${tag} ended: 「시간 초과 · … 걸림 · 승인이 만료됐어요」`, ended === "시간 초과" && /걸림 · 승인이 만료됐어요$/.test(endedDetail), `${ended} / ${endedDetail}`);
   check(`${tag} ended: 알약이 사라진다`, (await pill(page).count()) === 0);
+  check(`${tag} ended: 메시지 아래 예외 줄이 「시간 초과 · 승인이 만료됐어요」`, ((await page.getByTestId("run-exception-text").first().textContent()) ?? "").includes("시간 초과 · 승인이 만료됐어요"));
   await page.screenshot({ path: shot("6-ended-approval-expired") });
 
   await serverMoves(page, scene, [
-    progress(now, { id: RUN_A, phase: "timed_out", status: "timed_out", leaseState: "stale", claimedAtMs: now - 200 * MIN, finishedAtMs: now - MIN, endReason: "lease_abandoned" }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "timed_out", status: "timed_out", leaseState: "stale", claimedAtMs: now - 200 * MIN, finishedAtMs: now - MIN, endReason: "lease_abandoned" }),
   ], "timed_out");
   await page.waitForTimeout(300);
   const lost = ((await page.getByTestId("agent-work-panel-state").textContent()) ?? "").trim();
   check(`${tag} ended: 「신호 소실」은 서버가 lease_abandoned로 알렸을 때만`, lost === "신호 소실", lost);
+  // design-review r1 H2: 칩도 줄과 같은 낱말·같은 경고 톤이다(서버가 `failed`로 끝낸 것만 「실패」·위험 톤, ADR-0132: 부재를 오류로 올리지 않는다).
+  const lostChip = page.getByTestId("trigger-chip").first();
+  const lostChipClass = (await lostChip.getAttribute("class")) ?? "";
+  check(`${tag} ended: 줄도 칩도 같은 낱말(신호 소실)이고 칩은 경고 톤이다(위험 톤 아님)`,
+    ((await page.getByTestId("run-exception-text").first().textContent()) ?? "").includes("신호 소실") &&
+      ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim() === "신호 소실" &&
+      (await lostChip.getAttribute("data-kind")) === "timed_out" && /bg-warn-soft/.test(lostChipClass) && !/danger/.test(lostChipClass), lostChipClass);
   await page.screenshot({ path: shot("7-ended-lease-abandoned") });
 
-  // ⑥ 여러 run 병렬: 두 에이전트가 동시에.
+  // ⑥ 여러 run 병렬: 두 에이전트가 동시에. 레일은 한 줄(이끄는 쪽 + N)이고 둘은 팝오버에서 각자의 낱말로 나란히 선다.
   await serverMoves(page, scene, [
-    progress(now, { id: RUN_A, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 3 * MIN, startedAtMs: now - 2 * MIN, lastEventAtMs: now - 5_000, latestStage: "채널 이름 확인" }),
+    progress(now, { id: RUN_A, triggerMessageId: TRIGGER, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 3 * MIN, startedAtMs: now - 2 * MIN, lastEventAtMs: now - 5_000, latestStage: "채널 이름 확인" }),
     progress(now, { id: RUN_C, agentMemberId: otherAgentId, phase: "queued", status: "queued", queuePosition: 1, createdAtMs: now - 3 * MIN }),
   ], "queued");
-  text = (await page.getByTestId("composer-working").textContent()) ?? "";
-  check(`${tag} parallel: 진행 중 하나와 대기 하나가 각자의 낱말로 나란히`, text.includes("채널 이름 확인") && text.includes("대기 1번째"), text);
+  text = ((await page.getByTestId("composer-working-text").textContent()) ?? "").replace(/\s+/g, " ").trim();
+  check(`${tag} parallel: 레일은 한 줄로 합친다(「그록봇 +1」)`, text === "그록봇 +1", text);
+  await page.getByTestId("composer-working-open").first().click();
+  await page.getByTestId("composer-working-popover").waitFor();
+  const parallel = (await page.getByTestId("composer-working-agent").allTextContents()).join(" | ");
+  check(`${tag} parallel: 진행 중 하나와 대기 하나가 팝오버에서 각자의 낱말로 나란히`, parallel.includes("채널 이름 확인") && parallel.includes("받음"), parallel);
   await page.screenshot({ path: shot("8-parallel") });
+  await page.keyboard.press("Escape");
   await context.close();
 
   // ⑦ 구 서버: 진행 경로가 404 → 한 번만 확인하고 옛 규칙으로.
@@ -379,9 +411,20 @@ async function open2(browser, origin, scheme, scene) {
   return opened;
 }
 
-async function openPanelFor(page, who) {
-  await page.getByTestId("composer-working-open").filter({ hasText: who }).first().click();
+/**
+ * 레일의 줄을 눌러 팝오버를 열고(#4619), 그 에이전트의 행을 눌러 작업 패널을 연다. 줄은 이끄는 에이전트(+N)만 이름으로
+ * 말하므로 `who`는 팝오버 행으로 고른다.
+ */
+async function openPanelViaRail(page, who) {
+  await page.getByTestId("composer-working-open").first().click();
+  const rows = page.getByTestId("composer-working-agent");
+  await rows.first().waitFor({ timeout: 5_000 });
+  await (who ? rows.filter({ hasText: who }) : rows).first().click();
   await page.getByTestId("agent-work-panel").waitFor();
+}
+
+async function openPanelFor(page, who) {
+  await openPanelViaRail(page, who);
 }
 
 async function stop(browser, origin, scheme) {
@@ -573,8 +616,7 @@ async function u2(browser, origin, scheme) {
     [`agent:ws${workspaceId.toUpperCase()}.${CH.toUpperCase()}.${agentId.toUpperCase()}`, RUN_B, agentId, CH]
   );
   await second.page.getByTestId("composer-working-open").first().waitFor({ timeout: 10_000 });
-  await second.page.getByTestId("composer-working-open").first().click();
-  await second.page.getByTestId("agent-work-panel").waitFor();
+  await openPanelViaRail(second.page);
   const local = ((await second.page.getByTestId("agent-work-panel-limit").textContent()) ?? "").trim();
   check(`${tag} local: 서버가 모르는 run은 「이 화면에만 있어요」`, local === "이 기록은 이 화면에만 있어요. 패널을 닫으면 사라져요.", local);
   check(`${tag} local: 서버 원장 영역이 없다`, (await second.page.getByTestId("agent-work-panel-ledger").count()) === 0 && (await second.page.getByTestId("agent-work-panel-runs").count()) === 0);
@@ -653,12 +695,13 @@ async function u3(browser, origin, scheme) {
   const listLabels = await page.locator('[data-testid="agent-liveness"]').evaluateAll((els) => els.length);
   check(`${tag} hub: 목록 행에도 「활성」 곁에 라벨이 있다`, listLabels >= 6, String(listLabels));
   // ③ 작업 패널 머리
-  admin.runs = [progress(now, { id: RUN_A, agentMemberId: A.desk, phase: "queued", status: "queued", queuePosition: 1, createdAtMs: now - 25 * MIN, triggerSummary: "일정 정리" })];
+  // 25분 기다린 요청: 5분 유예를 넘었으니 입력창 레일에서는 빠지고 그 메시지 아래 예외 줄이 선다(#4619). 그 줄의 글이 작업 패널의 입구다.
+  admin.runs = [progress(now, { id: RUN_A, agentMemberId: A.desk, phase: "queued", status: "queued", queuePosition: 1, createdAtMs: now - 25 * MIN, triggerSummary: "일정 정리", triggerMessageId: "00000000-0000-7000-8000-0000000a0001" })];
   await serverMoves(page, admin, admin.runs, "queued");
   // desk 에이전트의 DM이 아니라 #계획 채널의 run이므로 계획 채널로 간다.
   await page.evaluate((id) => { location.hash = `/c/${id}`; }, CH);
-  await page.getByTestId("composer-working-open").first().waitFor({ timeout: 15_000 });
-  await page.getByTestId("composer-working-open").first().click();
+  await page.getByTestId("run-exception-open").first().waitFor({ timeout: 15_000 });
+  await page.getByTestId("run-exception-open").first().click();
   await page.getByTestId("agent-work-panel").waitFor();
   await page.getByTestId("agent-work-panel").getByTestId("agent-liveness").waitFor({ timeout: 10_000 });
   const panelLabel = ((await page.getByTestId("agent-work-panel").getByTestId("agent-liveness").textContent()) ?? "");
@@ -709,7 +752,11 @@ async function u3(browser, origin, scheme) {
   await third.context.close();
 }
 
-// ---- d1 (#3824): 보낸 메시지 아래 상태 줄 · 걸린 시간 · 깨우는 신호 -------------------
+// ---- d1 (#3824 → #4619): 보낸 메시지의 상태 · 걸린 시간 · 깨우는 신호 --------------------
+//
+// #3824의 메시지 아래 상태 줄(받았어요 → 깨우는 신호 보냄 → 가져감 → 작업 중 → 결과)은 없어졌다(#4619, owner 「ㄱㄱ」).
+// 같은 사실이 이제 머리 칩(받음 → 가져감 → 작업 중 → 답함), 입력창 레일, 예외 줄(깨우는 신호가 닿지 않음 · 아직 받지
+// 않았어요 · 실패 · 시간 초과)로 나뉘어 말해진다. 작업 패널의 원장·걸린 시간은 그대로다.
 
 const MSG_SENT = "00000000-0000-7000-8000-0000000a0009";
 
@@ -718,7 +765,7 @@ async function d1(browser, origin, scheme) {
   const shot = (name) => resolve(OUT_DIR, `d1-${name}-${tag}.png`);
   const scene = newScene();
   const now = Date.now();
-  // 방금 보낸 메시지 하나(내가 썼다). 상태 줄은 내 메시지 아래에만 선다.
+  // 방금 보낸 메시지 하나(내가 썼다).
   scene.messageRows = [
     {
       id: MSG_SENT, channelId: CH, seq: 12, hlcTs: now - 4_000, hlcCount: 0,
@@ -728,32 +775,48 @@ async function d1(browser, origin, scheme) {
   ];
   const base = { id: RUN_A, triggerMessageId: MSG_SENT, triggerSummary: "채널 하나 만들어 줄래요?", createdAtMs: now - 3_000, updatedAtMs: now - 3_000 };
   scene.ledgers[RUN_A] = [{ ordinal: 1, kind: "queued", createdAtMs: now - 3_000 }];
+  scene.liveness = { [agentId]: { state: "woken_not_collected", lastSignalAtMs: now - 40 * MIN } };
   scene.runs = [progress(now, { ...base, queuePosition: 1, aheadTotal: 0 })];
   const { context, page } = await open(browser, origin, scheme, scene, `/c/${CH}`);
-  const status = () => page.getByTestId("message-run-status-row").first();
-  const statusText = async () => ((await status().textContent()) ?? "").replace(/\s+/g, " ").trim();
+  const chipWord = async () => ((await page.getByTestId("trigger-chip-word").first().textContent()) ?? "").trim();
+  const bodyText = async () => (await page.locator("body").textContent()) ?? "";
 
-  // ① 받았어요: 진행 읽기에 run이 서면 곧바로.
-  await status().waitFor({ timeout: 15_000 });
-  let text = await statusText();
-  check(`${tag} received: 「받았어요」와 기다린 초`, text.includes("받았어요") && /\d+초째 기다려요/.test(text), text);
-  check(`${tag} received: 깨우는 신호 행이 없으면 그 단계를 지어내지 않는다`, !text.includes("깨우는 신호"), text);
+  // ① 받음: 진행 읽기에 run이 서면 곧바로. 문장 행은 없고, 평소의 진행에는 예외 줄도 없다.
+  await page.getByTestId("trigger-chip-word").first().waitFor({ timeout: 15_000 });
+  check(`${tag} received: 머리 칩 「받음」`, (await chipWord()) === "받음", await chipWord());
+  check(`${tag} received: 문장 행(「받았어요 → …」)이 없다`, (await page.getByTestId("message-run-status-row").count()) === 0 && !(await bodyText()).includes("받았어요 →"));
+  check(`${tag} received: 예외 줄이 없다`, (await page.getByTestId("run-exception").count()) === 0);
+  check(`${tag} received: 대화에 초 단위 숫자가 없다(「n초째 기다려요」)`, !/\d+초째/.test(await bodyText()));
   await page.screenshot({ path: shot("1-received") });
 
-  // ② 깨우는 신호 보냄: 원장에 doorbell_rung 행, 프레임 하나. 진행 지문은 그대로다.
+  // ② 깨우는 신호가 닿았다: 원장에 doorbell_rung 행, 프레임 하나. 화면은 조용하다(칩은 그대로 「받음」, 예외 줄 없음).
+  //    원장은 `?include=doorbell`로 읽는다.
   scene.ledgers[RUN_A] = [
     { ordinal: 1, kind: "queued", createdAtMs: now - 3_000 },
     { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: now - 2_500 },
   ];
   const ledgerBefore = scene.ledgerCalls;
   await serverMoves(page, scene, scene.runs, "doorbell_rung");
-  await page.waitForFunction(() => /깨우는 신호 보냄/.test(document.querySelector('[data-testid="message-run-status-row"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
-  text = await statusText();
-  check(`${tag} woken: 프레임 하나로 「받았어요 → 깨우는 신호 보냄」`, text.includes("받았어요 → 깨우는 신호 보냄"), text);
+  await page.waitForTimeout(500);
   check(`${tag} woken: 원장을 다시 읽었고 ?include=doorbell로 물었다`, scene.ledgerCalls > ledgerBefore && scene.ledgerIncludes.every((v) => v === "doorbell"), JSON.stringify(scene.ledgerIncludes));
+  check(`${tag} woken: 신호가 닿았으면 줄이 서지 않는다(칩은 그대로)`, (await page.getByTestId("run-exception").count()) === 0 && (await chipWord()) === "받음");
   await page.screenshot({ path: shot("2-woken") });
 
-  // ③ 가져감 → 작업 중: 12분째 · 마지막 보고 1분 전.
+  // ③ 깨우는 신호가 닿지 않았다(#4619 planner 결정 5): 유예를 기다리지 않고 예외 줄이 서고 「다시 깨우기」(owner)가 곁에 선다.
+  scene.ledgers[RUN_A] = [
+    { ordinal: 1, kind: "queued", createdAtMs: now - 3_000 },
+    { ordinal: 2, kind: "doorbell_rung", code: "leading_failed", createdAtMs: now - 2_500 },
+  ];
+  await serverMoves(page, scene, scene.runs, "doorbell_rung");
+  await page.getByTestId("run-exception").waitFor({ timeout: 5_000 });
+  const failedLine = ((await page.getByTestId("run-exception-text").textContent()) ?? "").trim();
+  check(`${tag} wake-failed: 예외 줄 「깨우는 신호가 닿지 않음」(폰과 같은 낱말)`, failedLine.startsWith("그록봇: 깨우는 신호가 닿지 않음"), failedLine);
+  check(`${tag} wake-failed: 칩은 아직 진행 낱말(「받음」)이다`, (await chipWord()) === "받음");
+  await page.getByTestId("run-exception").getByTestId("wake-agent-button").waitFor({ timeout: 10_000 });
+  check(`${tag} wake-failed: 「다시 깨우기」와 「취소」가 줄 안에 선다`, (await page.getByTestId("run-exception").getByTestId("wake-agent-button").count()) === 1 && (await page.getByTestId("run-exception").getByTestId("agent-work-panel-stop-arm").count()) === 1);
+  await page.screenshot({ path: shot("3-wake-failed") });
+
+  // ④ 가져감 → 작업 중. 줄은 걷히고 칩 「작업 중」과 레일(「그록봇 · 작업 중 · 단계」)이 말한다. 걸린 시간은 패널에 있다.
   scene.ledgers[RUN_A] = [
     { ordinal: 1, kind: "queued", createdAtMs: now - 12 * MIN - 20_000 },
     { ordinal: 2, kind: "doorbell_rung", code: "leading_ok", createdAtMs: now - 12 * MIN - 19_000 },
@@ -766,15 +829,18 @@ async function d1(browser, origin, scheme) {
   await serverMoves(page, scene, [
     progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "running", status: "running", leaseState: "live", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, lastEventAtMs: now - MIN - 5_000, latestStage: "grokbot-lab 이름 점검", stepCount: 1 }),
   ], "stage");
-  await page.waitForFunction(() => /작업 중/.test(document.querySelector('[data-testid="message-run-status-row"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
-  text = await statusText();
-  check(`${tag} working: 「… 가져감 → 작업 중 · 12분째 · 마지막 보고 1분 전」`, text.includes("받았어요 → 깨우는 신호 보냄 → 가져감 → 작업 중") && text.includes("12분째 · 마지막 보고 1분 전"), text);
-  const activity = ((await page.getByTestId("composer-working").textContent().catch(() => "")) ?? "");
-  check(`${tag} working: 활동 줄에 영어 시계(12m)가 없다`, !/\d+m \d+s/.test(activity), activity);
+  await page.waitForFunction(() => document.querySelector('[data-testid="run-exception"]') === null, null, { timeout: 5_000 }).catch(() => {});
+  check(`${tag} working: 줄이 걷히고 칩이 「작업 중」`, (await page.getByTestId("run-exception").count()) === 0 && (await chipWord()) === "작업 중");
+  const activity = ((await page.getByTestId("composer-working").textContent().catch(() => "")) ?? "").replace(/\s+/g, " ").trim();
+  check(`${tag} working: 레일 「그록봇 · 작업 중 · 단계」, 경과·영어 시계가 없다`, activity.includes("그록봇 · 작업 중 · grokbot-lab 이름 점검") && !/\d+m \d+s|\d+분째|\d+초/.test(activity), activity);
   await page.screenshot({ path: shot("3-working") });
 
-  // ④ 상태 줄을 누르면 작업 패널: 걸린 시간 줄 · 접힌 깨우는 신호 · 모르는 종류.
-  await status().click();
+  // ⑤ 레일 → 팝오버 → 작업 패널: 걸린 시간 줄 · 접힌 깨우는 신호 · 모르는 종류. 경과는 팝오버와 패널에서만 말한다.
+  await page.getByTestId("composer-working-open").first().click();
+  await page.getByTestId("composer-working-popover").waitFor();
+  const popover = ((await page.getByTestId("composer-working-popover").textContent()) ?? "");
+  check(`${tag} popover: 경과가 1분 단위로(「12분째」)`, popover.includes("12분째"), popover);
+  await page.getByTestId("composer-working-agent").first().click();
   await page.getByTestId("agent-work-panel").waitFor();
   await page.getByTestId("agent-work-panel-ledger").waitFor({ timeout: 5_000 });
   const durations = ((await page.getByTestId("agent-work-panel-durations").textContent()) ?? "").trim();
@@ -784,7 +850,7 @@ async function d1(browser, origin, scheme) {
   check(`${tag} panel: 모르는 종류가 와도 기록이 선다`, ledgerText.includes("이 앱이 아직 모르는 기록이에요") && ledgerText.includes("grokbot-lab 이름 점검"), ledgerText);
   await page.screenshot({ path: shot("4-panel-ledger") });
 
-  // ⑤ 결과: 완료 · 3분 12초 걸림.
+  // ⑥ 결과: 답함 · 3분 12초 걸림(패널). 이 run의 답 메시지를 모르면 칩은 눌리지 않는다.
   scene.ledgers[RUN_A] = [
     ...scene.ledgers[RUN_A],
     { ordinal: 8, kind: "succeeded", createdAtMs: now - 12 * MIN - 20_000 + 192_000 },
@@ -792,22 +858,22 @@ async function d1(browser, origin, scheme) {
   await serverMoves(page, scene, [
     progress(now, { ...base, createdAtMs: now - 12 * MIN - 20_000, phase: "succeeded", status: "succeeded", leaseState: "none", claimedAtMs: now - 12 * MIN - 8_000, startedAtMs: now - 12 * MIN, finishedAtMs: now - 12 * MIN - 20_000 + 192_000 }),
   ], "succeeded");
-  await page.waitForFunction(() => /걸림/.test(document.querySelector('[data-testid="message-run-status-row"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
-  text = await statusText();
-  check(`${tag} done: 「… → 완료 · 3분 12초 걸림」`, text.includes("가져감 → 완료") && text.includes("3분 12초 걸림"), text);
+  await page.waitForFunction(() => /답함/.test(document.querySelector('[data-testid="trigger-chip-word"]')?.textContent ?? ""), null, { timeout: 3_000 }).catch(() => {});
+  check(`${tag} done: 머리 칩 「답함」`, (await chipWord()) === "답함", await chipWord());
+  check(`${tag} done: 답을 모르면 칩은 눌리지 않는다(죽은 단추 없음)`, (await page.getByTestId("trigger-chip").first().evaluate((el) => el.tagName)) === "SPAN");
   const doneDurations = ((await page.getByTestId("agent-work-panel-durations").textContent()) ?? "").trim();
   check(`${tag} done: 「대기 12초 → 작업 2분 52초 → 총 3분 12초」`, doneDurations === "대기 12초 → 작업 2분 52초 → 총 3분 12초", doneDurations);
   await page.screenshot({ path: shot("5-done") });
   await context.close();
 
-  // ⑥ 옛 서버(진행 읽기 없음): 상태 줄이 없고 예전 화면 그대로.
+  // ⑦ 옛 서버(진행 읽기 없음): 칩도 줄도 없고 예전 화면 그대로.
   const legacy = newScene();
   legacy.legacyServer = true;
   legacy.messageRows = scene.messageRows;
   const old = await open(browser, origin, scheme, legacy, `/c/${CH}`);
   await old.page.getByText("grokbot-lab으로요").first().waitFor({ timeout: 15_000 });
   await old.page.waitForTimeout(800);
-  check(`${tag} legacy: 진행 읽기가 없는 서버에서는 상태 줄이 없다`, (await old.page.getByTestId("message-run-status-row").count()) === 0);
+  check(`${tag} legacy: 진행 읽기가 없는 서버에서는 칩도 예외 줄도 없다`, (await old.page.getByTestId("trigger-chip").count()) === 0 && (await old.page.getByTestId("run-exception").count()) === 0);
   await old.page.screenshot({ path: shot("6-legacy-server") });
   await old.context.close();
 }

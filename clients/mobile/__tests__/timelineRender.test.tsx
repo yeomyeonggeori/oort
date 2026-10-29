@@ -3,8 +3,10 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {PendingMessage} from '@momo/core/features/timeline/model';
 import {cleanup, render, screen} from '@testing-library/react-native';
 import React from 'react';
+import {StyleSheet} from 'react-native';
 
 import {WorkingRow} from '../src/features/conversation/MessageRow';
+import {NEUTRAL_ANCHOR_TEST_ID} from '../src/features/conversation/neutralAnchor';
 import {Timeline} from '../src/features/conversation/Timeline';
 
 // =============================================================================
@@ -83,6 +85,21 @@ function renderTimeline(props: Partial<React.ComponentProps<typeof Timeline>> = 
 
 afterEach(cleanup);
 
+type ReactTestInstance = ReturnType<typeof screen.getByTestId>;
+
+/** 합성 노드 아래의 첫 호스트 뷰 — 셀 래퍼들이 한 겹씩 싸고 있다. */
+function firstHost(node: ReactTestInstance): ReactTestInstance {
+  let cursor: ReactTestInstance = node;
+  while (typeof cursor.type !== 'string') {
+    const next = (cursor.children as unknown[]).find(
+      (child): child is ReactTestInstance => typeof child !== 'string',
+    );
+    if (next === undefined) return cursor;
+    cursor = next;
+  }
+  return cursor;
+}
+
 describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
   it('maintainVisibleContentPosition 으로 위쪽 삽입을 보정한다', () => {
     renderTimeline();
@@ -98,6 +115,37 @@ describe('리스트 구성 — 정방향과 프리펜드 보정', () => {
     expect(list.props.maintainVisibleContentPosition).toEqual({
       minIndexForVisible: 1,
     });
+  });
+
+  // #4689 — 먼 「최신으로」는 위 prop 을 떼지 않는 대신, 헤더 바로 뒤의 보초 뷰가 네이티브 앵커가 된다(`neutralAnchor.tsx`). 아래 둘은 그 자리·모양이 바뀌면 빨개진다:
+  // 앞은 네이티브 스캔이 `minIndexForVisible`(0 + 헤더 1)에서 시작하므로 보초가 서브뷰 1번이어야 한다는 것, 뒤는 평상의 보초가 어느 앵커 스캔에도 안 걸리고 손도 안 받는다는 것.
+  it('보초는 헤더 바로 뒤에 선다 — 네이티브 앵커 스캔의 첫 후보 자리', () => {
+    renderTimeline({messages: [message(1), message(2), message(3)]});
+    const sentinel = screen.getByTestId(NEUTRAL_ANCHOR_TEST_ID, {includeHiddenElements: true});
+    let container: ReactTestInstance | null = sentinel.parent;
+    while (container !== null && typeof container.type !== 'string') container = container.parent;
+    const hosts = ((container?.children ?? []) as unknown[])
+      .filter((child): child is ReactTestInstance => typeof child !== 'string')
+      .map(firstHost);
+    expect(hosts.indexOf(sentinel)).toBe(1);
+    // 셀들과 꼬리가 그 뒤에 이어진다 — 보초는 목록의 끝이 아니다.
+    expect(hosts.length).toBeGreaterThan(3);
+  });
+
+  it('평상의 보초는 앵커 스캔에 걸리지 않는 높이 0 뷰이고, 터치도 접근성도 받지 않는다', () => {
+    renderTimeline();
+    const sentinel = screen.getByTestId(NEUTRAL_ANCHOR_TEST_ID, {includeHiddenElements: true});
+    // y + 높이 < 오프셋(오버스크롤 포함)이라 「보이는 첫 뷰」가 될 수 없다 — 앵커는 지금까지처럼 첫 보이는 셀이다.
+    expect(StyleSheet.flatten(sentinel.props.style)).toMatchObject({
+      position: 'absolute',
+      top: -1000,
+      height: 0,
+    });
+    // 네이티브 뷰로 남아야 서브뷰 목록에 있다(납작해지면 앵커가 될 수 없다).
+    expect(sentinel.props.collapsable).toBe(false);
+    expect(sentinel.props.pointerEvents).toBe('none');
+    expect(sentinel.props.accessible).toBe(false);
+    expect(sentinel.props.accessibilityElementsHidden).toBe(true);
   });
 
   it('최신이 아래다 — 배열 순서 그대로 그린다', () => {
@@ -216,6 +264,34 @@ describe('행이 말하는 것', () => {
     renderTimeline({
       messages: [message(1), message(2, {createdAtMs: BASE_MS + DAY})],
     });
+    expect(screen.getAllByTestId('day-divider')).toHaveLength(2);
+  });
+
+  // #4749 — 날이 바뀐 뒤 처음 보내는 글. 날짜 줄이 확정본에만 서던 때는 POST 가 답하는 순간 이미 본 행 위에 줄이 새로 끼어서
+  // 행이 줄 높이만큼 밀리고 목록이 한 번 더 올라갔다(첫 보내기에서 두 번 출렁). 줄은 에코일 때부터 서 있고, 확정으로 바뀌어도 그대로다.
+  it('날이 바뀐 뒤 처음 보내는 글은 에코일 때부터 날짜 구분선이 서고, 확정으로 바뀌어도 줄이 같다', () => {
+    const echo: PendingMessage = {
+      clientMsgId: 'c1',
+      channelId: 'ch',
+      authorMemberId: SELF_ID,
+      body: '오늘 첫 마디',
+      createdAtMs: BASE_MS + DAY,
+      sinceSeq: 1,
+      status: 'sending',
+    };
+    const shared = {
+      directory: DIRECTORY,
+      status: 'ready' as const,
+      myMemberId: SELF_ID,
+      nowMs: BASE_MS + DAY + 60_000,
+    };
+    const view = render(<Timeline {...shared} messages={[message(1)]} pending={[echo]} />);
+    expect(screen.getAllByTestId('day-divider')).toHaveLength(2);
+    expect(screen.getByTestId('pending-row')).toBeTruthy();
+
+    const confirmed = message(2, {authorMemberId: SELF_ID, body: '오늘 첫 마디', createdAtMs: BASE_MS + DAY + 800});
+    view.rerender(<Timeline {...shared} messages={[message(1), confirmed]} pending={[]} />);
+    expect(screen.queryByTestId('pending-row')).toBeNull();
     expect(screen.getAllByTestId('day-divider')).toHaveLength(2);
   });
 

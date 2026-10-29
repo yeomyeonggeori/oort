@@ -9,7 +9,7 @@ import {
   type AgentDmDeliveryState,
 } from "./dmApproval";
 
-const names = { agentSubject: "Claude Code가", agentName: "Claude Code", ownerName: "성재" };
+const names = { agentSubject: "Claude Code가", agentName: "Claude Code", ownerName: "민수" };
 
 describe("DM composer hint (#2891)", () => {
   it("promises a reply only where the server says the DM is delivered", () => {
@@ -31,13 +31,13 @@ describe("DM composer hint (#2891)", () => {
     }
     expect(dmComposerHint("open", names)).toBe("멘션 없이 바로 말하면 Claude Code가 답해요");
     expect(dmComposerHint("awaiting_owner", names)).toBe(
-      "성재님이 이 대화를 열어야 Claude Code가 답해요"
+      "민수님이 이 대화를 열어야 Claude Code가 답해요"
     );
     expect(dmComposerHint("awaiting_owner", { ...names, ownerName: null })).toBe(
       "소유자가 이 대화를 열어야 Claude Code가 답해요"
     );
     expect(dmComposerHint("owner_only", names)).toBe(
-      "성재님의 개인 에이전트라 이 대화에는 답하지 않아요"
+      "민수님의 개인 에이전트라 이 대화에는 답하지 않아요"
     );
   });
 

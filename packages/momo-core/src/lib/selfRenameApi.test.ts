@@ -31,8 +31,8 @@ const MEMBER = {
   id: "00000000-0000-7000-8000-000000000101",
   workspaceId: WS,
   kind: "human" as const,
-  displayName: "성재",
-  handle: "seongjae",
+  displayName: "민수",
+  handle: "minsu",
 };
 
 describe("memberFromWire", () => {
@@ -41,7 +41,7 @@ describe("memberFromWire", () => {
   });
 
   it("refuses a body without member fields", () => {
-    expect(() => memberFromWire({ displayName: "성재" })).toThrow(WireShapeError);
+    expect(() => memberFromWire({ displayName: "민수" })).toThrow(WireShapeError);
   });
 });
 
@@ -58,14 +58,14 @@ describe("changeMyProfile", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(
-      changeMyProfile(WS, { handle: "seongjae", displayName: "성재" })
+      changeMyProfile(WS, { handle: "minsu", displayName: "민수" })
     ).resolves.toEqual(MEMBER);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       `https://oort.test/v1/workspaces/${WS}/members/me`,
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ displayName: "성재", handle: "seongjae" }),
+        body: JSON.stringify({ displayName: "민수", handle: "minsu" }),
       })
     );
   });
@@ -83,13 +83,13 @@ describe("changeMyDisplayName", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(changeMyDisplayName(WS, "성재")).resolves.toEqual(MEMBER);
+    await expect(changeMyDisplayName(WS, "민수")).resolves.toEqual(MEMBER);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       `https://oort.test/v1/workspaces/${WS}/members/me`,
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ displayName: "성재" }),
+        body: JSON.stringify({ displayName: "민수" }),
       })
     );
   });
@@ -118,7 +118,7 @@ describe("changeMyDisplayName", () => {
 describe("changeMyHandle", () => {
   it("PATCHes members/me with handle and returns the member envelope", async () => {
     installHost();
-    const renamed = { ...MEMBER, handle: "seongjae-new" };
+    const renamed = { ...MEMBER, handle: "minsu-new" };
     const fetchMock = vi.fn(
       async () =>
         new Response(JSON.stringify({ member: renamed }), {
@@ -128,13 +128,13 @@ describe("changeMyHandle", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(changeMyHandle(WS, "seongjae-new")).resolves.toEqual(renamed);
+    await expect(changeMyHandle(WS, "minsu-new")).resolves.toEqual(renamed);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock).toHaveBeenCalledWith(
       `https://oort.test/v1/workspaces/${WS}/members/me`,
       expect.objectContaining({
         method: "PATCH",
-        body: JSON.stringify({ handle: "seongjae-new" }),
+        body: JSON.stringify({ handle: "minsu-new" }),
       })
     );
   });

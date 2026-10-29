@@ -44,6 +44,12 @@ production code catches a panic or keeps a hasher alive. Not upgradable yet: 0.1
 wry 0.57.1 and tauri-codegen 2.7.4 still pin sha2 ^0.10. Follow-up: ask RustCrypto/utils to narrow the GHSA `introduced` to 0.11.0 (then drop this entry); \
 at renewal re-check those upstreams and the RustSec alias; keep server-rust's block-buffer 0.12.x >= 0.12.1. Upgrade issue: #4644."""
 
+# ---- clients/desktop/src-tauri (Rust, Windows-only dependency) -------------
+[[IgnoredVulns]]
+id = "GHSA-m665-v7pm-7grj"
+ignoreUntil = 2026-12-28
+reason = "zip 4.6.1 (critical: ZipArchive/ZipStreamReader header differential) only via tauri-plugin-updater 2.10.1, which declares zip under cfg(target_os = \"windows\"); oort ships the desktop app for macOS only, so zip is not compiled (cargo tree -i zip for the host target prints nothing) and the updater verifies the update signature before unpacking. Fix = tauri-plugin-updater 2.14.x (zip ^9, patched 9.0.5); follow-up issue. Short expiry because severity is critical."
+
 # ---- clients/web (npm, runtime) ----------------------------------------------
 
 [[IgnoredVulns]]
@@ -144,6 +150,11 @@ reason = "vite 5.4.21 under vitest (dev-only): launch-editor NTLMv2 hash disclos
 # --all`) all run through Metro, the RN community CLI, or the Expo CLI / config-plugins. They
 # execute on the build machine only. Fixes need a Metro, RN CLI 20.2 (pulls body-parser 2) or Expo
 # CLI release, i.e. an RN/Expo toolchain upgrade that is out of scope for a lockfile repair.
+
+[[IgnoredVulns]]
+id = "GHSA-gcqx-w48m-w2h4"
+ignoreUntil = 2027-01-26
+reason = "deepmerge 4.3.1 (mergeObject prototype poisoning, low; affected >=4.2.0 <=4.3.1, no patched release) via @react-native-community/cli 20.1.0 (+cli-config/cli-doctor), @expo/config 57.0.6 and jest-config 29.7.0: build/test tooling that merges the project's own config objects on the build machine. Not in the app bundle (2026-10-28: a 12.9 MB Metro bundle has no node_modules/deepmerge module and no isMergeableObject). Follow-up: npm override to a fixed release when upstream ships."
 
 [[IgnoredVulns]]
 id = "GHSA-gh4j-gqv2-49f6"

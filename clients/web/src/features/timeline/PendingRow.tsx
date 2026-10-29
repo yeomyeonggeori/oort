@@ -109,6 +109,7 @@ export function PendingRow({
           <AttachmentList
             channelId={pending.channelId}
             attachments={pending.attachments ?? []}
+            senderName={name}
             muted
           />
         )}

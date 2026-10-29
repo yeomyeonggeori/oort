@@ -1,0 +1,340 @@
+appId: app.momo.ios
+name: 115-list-tap-dismiss
+---
+# 115-list-tap-dismiss — 입력 중에 **대화 목록을 한 번 누르면** 자판이 내려가고 쓰던 글은 쉬는 알약으로 접히는가 (#4614, owner 10-26 「입력한 상태에서나 메세지 보낸 이후에 채팅창을 최소화하기 너무 어려워」).
+#
+# 읽는 것은 **화면이 말하는 것**이다 — 계측 표면(`TAP-…+PROBE`)이 화면 맨 위에 적는 한 줄(`tap-probe`: `kb=up|down dismiss=<n> last=<마지막 동작> draft=<초안>`)과 입력창의 도구 줄(`composer-tools`: 펼쳐 있을 때만
+# 선다). 자판 상태는 앱이 받은 네이티브 자판 이벤트고, 초안은 입력창이 글자마다 쓰는 저장소다. 단정은 일부러 깨 보면 빨개진다(PR 본문의 사보타주 표 — 이 흐름은 소스를 깨고 다시 돌려 빨강을 확인했다).
+#
+# 한 번에 한 CASE 다(`-e CASE=…`). 표면은 `measure/run-list-tap.sh` 가 CASE 에 맞춰 띄우고 같은 구동기가 녹화한다:
+#   body         말풍선 본문(자기 동작 없음)을 누른다        → 자판 내림 · 접힘 · 글 유지 · 스레드가 안 열린다
+#   reopen-edge  쉬는 알약의 **아래 띠**(글 칸 밖)를 다시 누른다 → 자판이 오르고 알약이 펼쳐진다(알약 전체가 눌리는 면)
+#   empty        목록의 빈 곳(짧은 대화 위쪽)을 누른다        → 자판 내림 · 접힘 · 글 유지
+#   send         보낸 직후(포커스·빈 펼침 입력창)에 누른다    → 자판 내림 · 접힘(글이 없어 포커스를 잃는 길이 접는다)
+#   link         링크를 누른다                               → 링크가 열리고(그 자리에서 `Linking.openURL`) 자판도 내린다 · 접힘 · 글 유지
+#   chip         반응 칩을 누른다                            → 반응이 토글되고 자판도 내린다 · 접힘 · 글 유지
+#   author       작성자 줄의 **빈 곳**(이름에서 먼 오른쪽)을 누른다 → 프로필이 열리고 자판도 내린다
+#   avatar       아바타를 누른다                             → 프로필이 열리고 자판도 내린다
+#   replymark    답글 표식을 누른다                          → 스레드가 열리고 자판도 내린다
+#   rollup       스레드 롤업 「답글 N개」를 누른다            → 스레드가 열리고 자판도 내린다
+#   drag         목록을 **빠르게** 훑는다(120ms)              → 자판은 `on-drag` 가 내리고 우리 판정은 안 불린다(dismiss=0) · 입력창은 펼친 채(스크롤만)
+#   hold         목록 빈 곳을 길게 누른다(시트 없음)           → 탭이 아니다: dismiss=0 · 입력창 펼친 채 · 글 유지(자판은 RN 이 기존 길로 거둘 수 있다)
+#   long         본문을 길게 누른다                          → 탭이 아니다(시트가 열린 사진에 dismiss=0) · 시트를 닫으면 자판이 돌아오고 입력창은 펼친 채(planner 결정 4)
+#   autocorrect  영어 자판에서 「Teh」를 쳐 자동 고침을 대기시킨 채 누른다 → 「The」로 확정돼도 접힌 채다
+#   hangul       한글 자판에서 「한」을 조합하는 중에 누른다    → 확정돼도 접힌 채다
+#
+#   measure/run-list-tap.sh <udid> <CASE> <Metro 포트> [rec.mp4] [light]
+#
+# 시뮬레이터는 키보드가 처음 오를 때 받아쓰기·슬라이드 입력 안내를 띄울 수 있다 — `list-tap-ready` 앞에서 닫는다.
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+# ---------------------------------------------------------------- body
+- runFlow:
+    when:
+      true: ${CASE == 'body'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      # 말풍선 **본문**: 그 글이 든 행(`message-press`)의 말풍선(`message-bubble`) 한가운데. 행 전체(작성자 줄·아바타 포함)의 중심이 아니다.
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+      - runFlow:
+          file: subflows/list-tap-reopen.yaml
+          env:
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- reopen-edge
+- runFlow:
+    when:
+      true: ${CASE == 'reopen-edge'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+      # 쉬는 알약의 **아래 띠**(글 칸 밖, 알약 안쪽)를 누른다. 쉬는 글 칸은 둘째 줄이 안 걸리게 첫 줄 높이로 줄어 있어서 알약 52pt 중 글 칸은 30pt 였다 — 그 밖의 띠를 누르면 예전 판은
+      # 알약이 열렸다 포커스가 안 와 도로 닫혔다(design-review r1 H1). 알약 전체가 눌리는 면이어야 자판이 오르고 알약이 펼쳐진다.
+      - tapOn:
+          id: "composer-pill"
+          point: "50%,85%"
+      - extendedWaitUntil:
+          visible: ".*kb=up.*"
+          timeout: 15000
+      - waitForAnimationToEnd:
+          timeout: 6000
+      - assertVisible:
+          id: "composer-tools"
+      - assertVisible: ".*draft=오늘 리뷰 끝나면 알려줄게요$"
+# ---------------------------------------------------------------- empty
+- runFlow:
+    when:
+      true: ${CASE == 'empty'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn:
+          point: "50%,17%"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+      - runFlow:
+          file: subflows/list-tap-reopen.yaml
+          env:
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- send
+- runFlow:
+    when:
+      true: ${CASE == 'send'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - inputText: "보낼 글이에요"
+      - extendedWaitUntil:
+          visible: ".*draft=보낼 글이에요$"
+          timeout: 10000
+      - tapOn:
+          id: "composer-send"
+      - extendedWaitUntil:
+          visible: ".*last=send .*"
+          timeout: 10000
+      # 보낸 뒤에도 포커스가 남는다: 자판이 그대로 올라와 있고 입력창은 빈 펼침이다(도구 줄이 서 있다). 이 대조가 없으면 아래 「내려갔다·접혔다」는 탭 없이도 통과한다.
+      - assertVisible: ".*kb=up.*"
+      - assertVisible:
+          id: "composer-tools"
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "send"
+            DRAFT: ""
+# ---------------------------------------------------------------- link
+- runFlow:
+    when:
+      true: ${CASE == 'link'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      # 링크 글자는 계층에 따로 서지 않는다 — 글이 링크 하나뿐인 행의 말풍선 한가운데를 누르면 그 링크가 눌린다.
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*example.com/plan.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "link"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- chip
+- runFlow:
+    when:
+      true: ${CASE == 'chip'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn:
+          id: "reaction-chip-👍"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "reaction"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- author
+- runFlow:
+    when:
+      true: ${CASE == 'author'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn: ".*최민수 프로필 보기.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "profile"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- avatar
+- runFlow:
+    when:
+      true: ${CASE == 'avatar'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn: "최"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "profile"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- replymark
+- runFlow:
+    when:
+      true: ${CASE == 'replymark'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn:
+          id: "reply-marker"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "thread"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- rollup
+- runFlow:
+    when:
+      true: ${CASE == 'rollup'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - tapOn:
+          id: "thread-rollup"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "thread"
+            DRAFT: "오늘 리뷰 끝나면 알려줄게요"
+# ---------------------------------------------------------------- drag
+- runFlow:
+    when:
+      true: ${CASE == 'drag'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      # **빠른** 끌기(훑기): 손가락이 250ms 안에 떨어지므로 시간만으로는 탭과 가를 수 없다 — 10pt 넘게 움직였다는 판정만이 이것을 탭에서 가른다.
+      - swipe:
+          start: "50%,20%"
+          end: "50%,34%"
+          duration: 120
+      - extendedWaitUntil:
+          visible: ".*kb=down.*"
+          timeout: 15000
+      - waitForAnimationToEnd:
+          timeout: 6000
+      # 끌기는 탭이 아니다: 우리 판정이 `Keyboard.dismiss` 를 한 번도 안 불렀고(자판은 ScrollView 의 `on-drag` 가 내렸다), 글이 있으니 입력창은 #4456 대로 펼친 채다.
+      - assertVisible: ".*dismiss=0 .*"
+      - assertVisible:
+          id: "composer-tools"
+      - assertVisible: ".*last=- .*"
+      - assertVisible: ".*draft=오늘 리뷰 끝나면 알려줄게요$"
+# ---------------------------------------------------------------- long
+- runFlow:
+    when:
+      true: ${CASE == 'long'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - longPressOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      - extendedWaitUntil:
+          visible:
+            id: "sheet-preview-body"
+          timeout: 10000
+      # 시트가 열려 있는 동안은 아래 화면(계측 한 줄 포함)이 계층에서 가려지므로 그 순간은 사진으로 남긴다(`takeScreenshot`): 한 줄이 `kb=down dismiss=0 last=-` 이다 — 길게 누르기 자체는 우리 탭 판정을 부르지 않았고
+      # 자판은 시트가 내렸다(기존 길). 사진은 사람이 읽는 증거이고, 아래 단정은 닫은 **뒤**의 결과로 같은 사실을 자동으로 잰다.
+      - takeScreenshot: ${SHOT:-long-sheet-open}
+      - tapOn:
+          id: "sheet-close"
+      - extendedWaitUntil:
+          visible: ".*kb=.*"
+          timeout: 10000
+      - waitForAnimationToEnd:
+          timeout: 6000
+      # 길게 누르기는 탭이 아니다. 탭으로 판정됐다면 길게 누른 손을 뗄 때 `Keyboard.dismiss()` 가 입력창의 포커스를 거두고 쉬라는 알림이 입력창을 접어, 시트를 닫은 뒤에도 자판이 안 올라오고 도구 줄이 없다.
+      # 탭이 아니면 입력창은 시트 내내 포커스를 쥐고(iOS 가 시트가 떠 있는 동안만 자판을 숨긴다) 닫으면 자판이 돌아오고 입력창은 #4456 대로 펼친 채다(planner 결정 4).
+      - assertVisible: ".*kb=up.*"
+      - assertVisible:
+          id: "composer-tools"
+      - assertVisible: ".*last=- .*"
+      - assertVisible: ".*draft=오늘 리뷰 끝나면 알려줄게요$"
+# ---------------------------------------------------------------- hold
+- runFlow:
+    when:
+      true: ${CASE == 'hold'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      # 목록의 빈 곳(짧은 대화 위쪽)을 **길게** 누른다 — 시트가 없으니 길게 누른 손이 그대로 떨어진다. 움직임이 없으므로 시간 판정만이 이것을 탭에서 가른다.
+      - longPressOn:
+          point: "50%,17%"
+      - waitForAnimationToEnd:
+          timeout: 4000
+      # 길게 누른 손은 우리 탭 판정이 아니다: 판정이 `Keyboard.dismiss()` 를 부르지 않았고(dismiss=0) 입력창은 쉬러 가지 않았다(도구 줄이 선 채, 글 유지).
+      # (자판 자체는 RN `ScrollView` 가 빈 곳에서 손을 뗄 때 거두는 기존 길로 내려갈 수 있다 — 시간 제한이 없는 그 길은 이 변경 전과 같고 그래서 여기서 단정하지 않는다.)
+      - assertVisible: ".*dismiss=0 .*"
+      - assertVisible:
+          id: "composer-tools"
+      - assertVisible: ".*draft=오늘 리뷰 끝나면 알려줄게요$"
+# ---------------------------------------------------------------- autocorrect
+- runFlow:
+    when:
+      true: ${CASE == 'autocorrect'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - runFlow:
+          file: subflows/pick-keyboard.yaml
+          env:
+            KEY: "(?i)q"
+      # 자판이 바뀌는 움직임이 끝나기를 기다린 **뒤** 영어 자판인지 확인하고 친다 — 바뀌는 도중에 누르면 한글 자판의 글쇠가 눌린다.
+      - waitForAnimationToEnd:
+          timeout: 4000
+      - assertVisible: "(?i)q"
+      - tapOn: "(?i)t"
+      - tapOn: "(?i)e"
+      - tapOn: "(?i)h"
+      - extendedWaitUntil:
+          visible: ".*draft=Teh$"
+          timeout: 10000
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      # 자판을 내리며 iOS 가 대기 중이던 후보를 확정한다: 글이 「The」로 바뀌고, 입력창은 접힌 채 그대로다(낡은 구현은 그 한 번에 도로 펼쳐졌다).
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "The"
+# ---------------------------------------------------------------- hangul
+- runFlow:
+    when:
+      true: ${CASE == 'hangul'}
+    commands:
+      - runFlow: subflows/list-tap-ready.yaml
+      - runFlow:
+          file: subflows/pick-keyboard.yaml
+          env:
+            KEY: "ㄱ"
+      - waitForAnimationToEnd:
+          timeout: 4000
+      - assertVisible: "ㄱ"
+      - tapOn: "ㅎ"
+      - tapOn: "ㅏ"
+      - tapOn: "ㄴ"
+      - extendedWaitUntil:
+          visible: ".*draft=한$"
+          timeout: 10000
+      - tapOn:
+          id: "message-bubble"
+          childOf:
+            id: "message-press"
+            text: ".*명단은 오후에 보낼게요.*"
+      - runFlow:
+          file: subflows/list-tap-rested.yaml
+          env:
+            LAST: "-"
+            DRAFT: "한"

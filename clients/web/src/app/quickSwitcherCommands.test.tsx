@@ -19,6 +19,7 @@ import {
   vi,
 } from "vitest";
 import type { Channel, RosterMember } from "@momo/core/lib/api";
+import { holdGlobalShortcuts } from "@/app/globalShortcutHold";
 import { visibleCommands } from "@momo/core/features/commands/registry";
 import {
   COMMAND_USAGE_STORAGE_KEY,
@@ -1014,5 +1015,55 @@ describe("⌘K 걸러내기 (#4111)", () => {
     await mount({ path: `/c/${CH}` });
     await typeQuery("nav");
     expect(commandRows()).toEqual([]);
+  });
+});
+
+// 한 번만 보이는 값(연결 값)이 떠 있는 동안 창의 단축키가 그 화면을 떠나게 하지 않는다 (#4663).
+// 걸이는 `globalShortcutHold`, 값 화면이 거는 쪽은 `DevAccessSection.test.tsx`가 잰다.
+describe("한 번만 보이는 값이 떠 있는 동안의 창 단축키", () => {
+  const paletteIsOpen = () => document.querySelector("[cmdk-input]") !== null;
+
+  async function press(init: KeyboardEventInit): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
+      );
+      await Promise.resolve();
+    });
+    await settle();
+  }
+
+  it("⌘K는 걸린 동안 팔레트를 열지 않고, 풀리면 연다", async () => {
+    await mount({ path: "/settings" });
+    await act(async () => setPaletteOpen?.(false));
+    await settle();
+    expect(paletteIsOpen()).toBe(false);
+
+    const release = holdGlobalShortcuts();
+    try {
+      await press({ key: "k", metaKey: true });
+      expect(paletteIsOpen()).toBe(false);
+    } finally {
+      release();
+    }
+
+    await press({ key: "k", metaKey: true });
+    expect(paletteIsOpen()).toBe(true);
+  });
+
+  it("⌘⇧K는 걸린 동안 열린 팔레트를 닫지도 않는다(새 다이렉트 메시지로 건너가지 않는다)", async () => {
+    await mount({ path: "/settings" });
+    expect(paletteIsOpen()).toBe(true);
+
+    const release = holdGlobalShortcuts();
+    try {
+      await press({ key: "k", metaKey: true, shiftKey: true });
+      expect(paletteIsOpen()).toBe(true);
+    } finally {
+      release();
+    }
+
+    await press({ key: "k", metaKey: true, shiftKey: true });
+    expect(paletteIsOpen()).toBe(false);
   });
 });

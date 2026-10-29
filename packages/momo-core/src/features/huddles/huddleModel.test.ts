@@ -25,7 +25,7 @@ const ACTIVE: Huddle = {
   participants: [
     {
       memberId: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
-      displayName: "곽성재",
+      displayName: "구민수",
       joinedAtMs: 1_722_000_001_000,
     },
     {
@@ -216,7 +216,7 @@ describe("huddle user states", () => {
   });
 
   it("keeps a dense participant summary while preserving mixed team names", () => {
-    expect(huddleParticipantSummary(ACTIVE)).toBe("곽성재, Nadia Rahman");
+    expect(huddleParticipantSummary(ACTIVE)).toBe("구민수, Nadia Rahman");
     expect(
       huddleParticipantSummary({
         ...ACTIVE,
@@ -229,6 +229,6 @@ describe("huddle user states", () => {
           },
         ],
       })
-    ).toBe("곽성재, Nadia Rahman 외 1명");
+    ).toBe("구민수, Nadia Rahman 외 1명");
   });
 });

@@ -47,10 +47,10 @@ const DEMO = member({
   handle: "demo",
   role: "owner",
 });
-const SEONGJAE = member({
+const MINSU = member({
   id: "00000000-0000-7000-8000-0000000005d1",
-  displayName: "곽성재",
-  handle: "seongjae",
+  displayName: "구민수",
+  handle: "minsu",
   role: "admin",
 });
 const INTERN_HUMAN = member({
@@ -76,12 +76,12 @@ const HERMES = member({
   ownerHumanId: DEMO.id,
 });
 
-const ROSTER = [HERMES, INTERN_AGENT, DEMO, INTERN_HUMAN, SEONGJAE];
+const ROSTER = [HERMES, INTERN_AGENT, DEMO, INTERN_HUMAN, MINSU];
 
 describe("roleLabel", () => {
   it("names the human workspace role in Korean", () => {
     expect(roleLabel(DEMO)).toBe("소유자");
-    expect(roleLabel(SEONGJAE)).toBe("관리자");
+    expect(roleLabel(MINSU)).toBe("관리자");
     expect(roleLabel(INTERN_HUMAN)).toBe("멤버");
     expect(roleLabel(member({ id: "g", role: "guest" }))).toBe("게스트");
   });
@@ -98,7 +98,7 @@ describe("roleLabel", () => {
   it("prefers a workspace override and ignores empty or whitespace values", () => {
     const labels = { owner: "마스터", admin: " 리드 ", member: "", guest: "   " };
     expect(roleLabel(DEMO, labels)).toBe("마스터");
-    expect(roleLabel(SEONGJAE, labels)).toBe("리드");
+    expect(roleLabel(MINSU, labels)).toBe("리드");
     expect(roleLabel(INTERN_HUMAN, labels)).toBe("멤버");
     expect(roleLabel(member({ id: "g", role: "guest" }), labels)).toBe("게스트");
   });
@@ -142,13 +142,13 @@ describe("canChangeWorkspaceRole", () => {
 
   it("offers the control to an operator looking at a human who is not self", () => {
     expect(canChangeWorkspaceRole("owner", DEMO.id, INTERN_HUMAN)).toBe(true);
-    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_HUMAN)).toBe(
+    expect(canChangeWorkspaceRole("admin", MINSU.id, INTERN_HUMAN)).toBe(
       true
     );
   });
 
   it("hides the control when the target is an agent", () => {
-    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_AGENT)).toBe(
+    expect(canChangeWorkspaceRole("admin", MINSU.id, INTERN_AGENT)).toBe(
       false
     );
     expect(canChangeWorkspaceRole("owner", DEMO.id, HERMES)).toBe(false);
@@ -196,9 +196,9 @@ describe("normalizeQuery / matchesQuery", () => {
   });
 
   it("matches a partial display name", () => {
-    expect(matchesQuery(SEONGJAE, "성재")).toBe(true);
-    expect(matchesQuery(SEONGJAE, "곽")).toBe(true);
-    expect(matchesQuery(SEONGJAE, "인턴")).toBe(false);
+    expect(matchesQuery(MINSU, "민수")).toBe(true);
+    expect(matchesQuery(MINSU, "구")).toBe(true);
+    expect(matchesQuery(MINSU, "인턴")).toBe(false);
   });
 
   it("matches the handle case-insensitively, which is what separates the two 김인턴", () => {
@@ -212,9 +212,9 @@ describe("normalizeQuery / matchesQuery", () => {
 describe("groupDirectory", () => {
   it("splits humans from agents and orders each by name", () => {
     const groups = groupDirectory(ROSTER, "");
-    // 곽 → 김 → 데, Korean collation, not code points.
+    // 구 → 김 → 데, Korean collation, not code points.
     expect(groups.people.map((m) => m.handle)).toEqual([
-      "seongjae",
+      "minsu",
       "intern-kim",
       "demo",
     ]);
@@ -300,11 +300,11 @@ describe("countLabel", () => {
 
 describe("memberRowLabel", () => {
   it("names the human, the handle and the workspace role before the action", () => {
-    expect(memberRowLabel(SEONGJAE, null)).toBe(
-      "곽성재 @seongjae, 관리자, 다이렉트 메시지 열기"
+    expect(memberRowLabel(MINSU, null)).toBe(
+      "구민수 @minsu, 관리자, 다이렉트 메시지 열기"
     );
-    expect(memberRowLabel(SEONGJAE, null, { admin: "리드" })).toBe(
-      "곽성재 @seongjae, 리드, 다이렉트 메시지 열기"
+    expect(memberRowLabel(MINSU, null, { admin: "리드" })).toBe(
+      "구민수 @minsu, 리드, 다이렉트 메시지 열기"
     );
   });
 
@@ -347,15 +347,15 @@ describe("memberRowLabel", () => {
 
   it("includes custom status text and not the emoji when both are present", () => {
     const working = member({
-      id: SEONGJAE.id,
-      displayName: SEONGJAE.displayName,
-      handle: SEONGJAE.handle,
+      id: MINSU.id,
+      displayName: MINSU.displayName,
+      handle: MINSU.handle,
       role: "admin",
       statusEmoji: "📅",
       statusText: "회의 중",
     });
     expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).toBe(
-      "곽성재 @seongjae, 관리자, 회의 중, 다이렉트 메시지 열기"
+      "구민수 @minsu, 관리자, 회의 중, 다이렉트 메시지 열기"
     );
     expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).not.toContain(
       "📅"
@@ -364,29 +364,29 @@ describe("memberRowLabel", () => {
 
   it("includes the emoji in the accessible name when that is the only fact", () => {
     const emojiOnly = member({
-      id: SEONGJAE.id,
-      displayName: SEONGJAE.displayName,
-      handle: SEONGJAE.handle,
+      id: MINSU.id,
+      displayName: MINSU.displayName,
+      handle: MINSU.handle,
       role: "admin",
       statusEmoji: "🤒",
     });
     expect(memberRowLabel(emojiOnly, null, undefined, 1_800_000_000_000)).toBe(
-      "곽성재 @seongjae, 관리자, 🤒, 다이렉트 메시지 열기"
+      "구민수 @minsu, 관리자, 🤒, 다이렉트 메시지 열기"
     );
   });
 
   it("omits an expired custom status from the accessible name", () => {
     const expired = member({
-      id: SEONGJAE.id,
-      displayName: SEONGJAE.displayName,
-      handle: SEONGJAE.handle,
+      id: MINSU.id,
+      displayName: MINSU.displayName,
+      handle: MINSU.handle,
       role: "admin",
       statusEmoji: "📅",
       statusText: "회의 중",
       statusExpiresAtMs: 1,
     });
     expect(memberRowLabel(expired, null, undefined, 1_800_000_000_000)).toBe(
-      "곽성재 @seongjae, 관리자, 다이렉트 메시지 열기"
+      "구민수 @minsu, 관리자, 다이렉트 메시지 열기"
     );
   });
 
@@ -432,7 +432,7 @@ describe("dmAvailability", () => {
 
   it("offers a DM to any other active member, agent or human", () => {
     expect(dmAvailability(HERMES, DEMO.id)).toEqual({ kind: "ready" });
-    expect(dmAvailability(SEONGJAE, DEMO.id)).toEqual({ kind: "ready" });
+    expect(dmAvailability(MINSU, DEMO.id)).toEqual({ kind: "ready" });
   });
 
   it("states why an inactive member cannot be a DM target", () => {
@@ -464,12 +464,12 @@ describe("switcherPeople", () => {
       "hermes",
       "kim-intern",
       "intern-kim",
-      "seongjae",
+      "minsu",
     ]);
   });
 
   it("offers every active member, agents included", () => {
-    const rows = switcherPeople([HERMES, SEONGJAE], DEMO.id);
+    const rows = switcherPeople([HERMES, MINSU], DEMO.id);
     expect(rows.every((r) => r.selectable)).toBe(true);
     expect(rows.every((r) => r.reason === null)).toBe(true);
   });
@@ -479,7 +479,7 @@ describe("switcherPeople", () => {
     // offer one destination twice (and pay a POST to learn what it knew).
     const rows = switcherPeople(ROSTER, DEMO.id, [
       INTERN_AGENT.id.toUpperCase(),
-      SEONGJAE.id,
+      MINSU.id,
     ]);
     expect(rows.map((r) => r.member.handle)).toEqual(["hermes", "intern-kim"]);
   });
@@ -553,19 +553,19 @@ describe("upsertChannel", () => {
 
 describe("openDmErrorMessage", () => {
   it("says who is missing and what to do about it", () => {
-    expect(openDmErrorMessage(new ApiError(404, "not found"), "곽성재")).toBe(
-      "곽성재님은 이 워크스페이스의 활성 멤버가 아닙니다. 명부를 새로 고친 뒤 다시 시도하세요."
+    expect(openDmErrorMessage(new ApiError(404, "not found"), "구민수")).toBe(
+      "구민수님은 이 워크스페이스의 활성 멤버가 아닙니다. 명부를 새로 고친 뒤 다시 시도하세요."
     );
   });
 
   it("separates a refusal from a rate limit", () => {
-    expect(openDmErrorMessage(new ApiError(403, "no"), "곽성재")).toContain(
+    expect(openDmErrorMessage(new ApiError(403, "no"), "구민수")).toContain(
       "권한이 없습니다"
     );
-    expect(openDmErrorMessage(new ApiError(429, "slow"), "곽성재")).toContain(
+    expect(openDmErrorMessage(new ApiError(429, "slow"), "구민수")).toContain(
       "잠시 뒤에 다시 시도"
     );
-    expect(openDmErrorMessage(new ApiError(400, "self"), "곽성재")).toContain(
+    expect(openDmErrorMessage(new ApiError(400, "self"), "구민수")).toContain(
       "자기 자신과는"
     );
   });
@@ -592,7 +592,7 @@ describe("openDmErrorMessage", () => {
       new NetworkError("unreachable", 15_000),
       new Error("x"),
     ]) {
-      const message = openDmErrorMessage(error, "곽성재");
+      const message = openDmErrorMessage(error, "구민수");
       expect(message).not.toContain("죄송");
       expect(message).not.toContain("알 수 없");
     }

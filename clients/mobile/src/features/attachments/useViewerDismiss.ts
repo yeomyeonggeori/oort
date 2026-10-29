@@ -12,6 +12,7 @@ import {
   IDLE,
   settles,
   viewerDragStep,
+  type DragPoint,
   type ViewerDragInput,
   type ViewerDragState,
 } from './viewerDismiss';
@@ -78,8 +79,8 @@ import {
 //     **시작하지 못한다**(이미 시작한 팬을 멈추지는 않는다).
 //   · 뒤의 행(`Pressable`)이 참을 주면: 쥔 쪽이 양보하면 응답이 행으로 넘어가 탭이 행을 열고, 거절해도 행은 이미
 //     Grant 를 받아 **길게 누르기 타이머**(500ms)를 시작한다 — 손가락을 떼지 않고 10px 넘게 움직이지 않으면(행의 게이트가
-//     그 밖은 거른다) 행 시트가 뜬다. 사진 뷰어에서 가장 자연스러운 손짓이 핀치이고 확대(#4297)가 아직 없어 사람이
-//     거듭 시도한다.
+//     그 밖은 거른다) 행 시트가 뜬다. 사진 뷰어에서 가장 자연스러운 손짓이 핀치라 사람이
+//     거듭 시도한다(확대는 #4769 가 들였다 — 핀치는 쪽 안의 확대 스크롤뷰가 받는다).
 //   · 두 손가락이 한꺼번에 닿으면(핀치) 쥔 쪽이 아직 없어서 가드가 거짓을 주면 행이 곧바로 응답자가 된다.
 // 그래서 셋을 이렇게 닫는다.
 //   ① 시작 가드: **이미 쥔 손가락이 있는데 둘째 손가락이 닿은 것**일 때만 거절한다(`stateRef.origin`). 아무것도 쥐고
@@ -100,6 +101,14 @@ import {
 // 동안 스크롤뷰도 같은 손가락의 가로 성분을 따라 스크롤해 **옆 장이 끌려 들어온다**(시뮬레이터 대각선 끌기에서
 // 본 것 — `directionalLockEnabled` 는 이 경우를 막지 못했다). 그래서 끌기를 쥐는 순간 호출부에 알려
 // (`onDraggingChange`) 스크롤뷰의 `scrollEnabled` 를 끄고, 끌기가 끝나면(놓음·빼앗김·취소) 켠다.
+//
+// ## 탭은 이 훅이 판정한다 (#4297 — 사진을 한 번 누르면 조작이 사라지고 다시 나타난다)
+//
+// 쪽 위의 `Pressable` 로 탭을 받으면 안 된다: `Pressable` 은 쪽보다 **깊어서** 닿는 순간 응답을 쥐고, 끌기를 쥘 쪽(쪽)이
+// 빈다 — 아래로 쓸어 닫기가 죽는다. 탭은 이미 응답을 쥔 쪽의 **놓음**에서 읽는다. 규칙 상태가 이미 알고 있다:
+// 놓는 순간 `claimed` 도 `dead` 도 아니면 손가락은 문턱(8pt) 안에서 한 손가락으로 떼어졌다(탭). 문턱을 넘어 가로·위로 갔으면
+// `dead`, 아래로 가져갔으면 `claimed`, 둘째 손가락이 닿았으면 `dead` 다. 가로로 넘기던 손가락은 스크롤뷰가 응답을 가져가
+// 놓음이 아니라 **빼앗김**(`Terminate`)으로 끝나므로 탭으로 세지 않는다.
 //
 // ## 양보는 쥐기 전까지다
 //
@@ -165,8 +174,9 @@ export function useViewerDismiss({
   onDismiss,
   progressRef,
   onDraggingChange,
+  onTap,
 }: {
-  /** 켜져 있는가. 확대 중이면 꺼야 한다(#4297). */
+  /** 켜져 있는가. 확대 중이면 꺼야 한다(#4769 — 호출부가 `dismissEnabled && !zoomed` 를 넘긴다). */
   enabled: boolean;
   /** 창 높이. 끄는 거리의 상한이다. */
   height: number;
@@ -178,6 +188,11 @@ export function useViewerDismiss({
    * 잠근다(위 ⑤). 바뀔 때만 부른다.
    */
   onDraggingChange?: (dragging: boolean) => void;
+  /**
+   * 한 손가락이 문턱 안에서 떨어졌다(탭). 쪽·뿌리 어디서 쥐었든 부른다. 쓸어 닫기가 꺼져 있어도(확대 중) 탭은 탭이다.
+   * 탭한 점(처음 댄 점, page 좌표)을 넘긴다 — 두 번 탭이 그 둘레로 확대한다(#4769).
+   */
+  onTap?: (point: DragPoint) => void;
 }): ViewerDismiss {
   const drag = useRef(new Animated.Value(0)).current;
   const reduceMotion = useReduceMotionRef();
@@ -193,6 +208,8 @@ export function useViewerDismiss({
   progressRefRef.current = progressRef;
   const onDraggingChangeRef = useRef(onDraggingChange);
   onDraggingChangeRef.current = onDraggingChange;
+  const onTapRef = useRef(onTap);
+  onTapRef.current = onTap;
   /** 지금 알려 둔 끌기 상태. 바뀔 때만 호출부에 알린다. */
   const draggingRef = useRef(false);
   const stateRef = useRef<ViewerDragState>(IDLE);
@@ -279,10 +296,14 @@ export function useViewerDismiss({
       onPanResponderTerminationRequest: (event, gesture) =>
         !stateRef.current.claimed && touchesDown(event, gesture) <= 1,
       onPanResponderRelease: (_event, gesture) => {
-        const claimed = stateRef.current.claimed;
+        const {claimed, dead, origin} = stateRef.current;
         stateRef.current = IDLE;
         setDragging(false);
-        if (!claimed) return; // 탭이거나, 가로·위로 간 손가락이거나, 둘째 손가락으로 이미 취소됐다
+        if (!claimed) {
+          // 탭이거나, 가로·위로 간 손가락이거나, 둘째 손가락으로 이미 취소됐다. 앞의 것만 탭이다(위 「탭은 이 훅이 판정한다」).
+          if (!dead && origin !== null) onTapRef.current?.(origin);
+          return;
+        }
         if (settles({offset: atRef.current, velocityPtPerMs: gesture.vy}) === 'dismiss') {
           onDismissRef.current();
           return;

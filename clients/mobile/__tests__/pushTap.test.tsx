@@ -36,7 +36,7 @@ import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
 // 이 파일은 알림이 **어디에 착지하는가**를 잰다. 착지 틴트가 스스로 물러나는 시한(이동이
-// 끝난 뒤 2초, #3921)은 `landedHighlight3921.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
+// 끝난 뒤 2초, #3921)은 `landedHighlight.test.tsx` 가 가짜 시계로 잰다. 여기서는 실시계
 // 위에서 「제목을 기다린 뒤 `landedIds()`」를 읽는데, 차가운 워커에서 그 사이가 2초를
 // 넘으면 착지가 정상이어도 틴트가 이미 물러나 있다 — 관측이 시한에 기대지 않게 시한만
 // 늘려 둔다. 나머지(결정·손가락)는 진짜 그대로다.
@@ -1199,6 +1199,24 @@ describe('갈 수 없으면 한 문장 — 조용히 무시하지 않는다 (#25
     const expected = jumpMissedNotice('unknown', 'notification');
     await expectSentence('jump-missed', expected.headline);
     expect(announce).toHaveBeenCalledWith(jumpNoticeSpeech(expected));
+  });
+
+  it('대화·채널 정보 페이지가 열려 있어도 같은 방으로 착지하는 알림은 페이지를 걷고 그 줄로 데려간다', async () => {
+    installFetch();
+    renderShell();
+    await waitForSidebar();
+    await tapWhileRunning(apnsPayload({messageId: PLAIN}));
+    await expectLanded('general', PLAIN, false);
+
+    // 정보 페이지를 연다 — 대화를 덮는 한 겹이다.
+    fireEvent.press(await screen.findByTestId('conversation-info-button'));
+    await screen.findByTestId('conversation-info-page');
+
+    // 같은 방을 가리키는 두 번째 알림: 착지는 덮개(고정 목록·프로필 시트처럼 정보 페이지도)를 걷는다 — 안 걷으면 그 줄이 페이지 밑에서 말한다.
+    await tapWhileRunning(apnsPayload({messageId: UNLOADED}));
+    await waitFor(() => expect(screen.queryByTestId('conversation-info-page')).toBeNull());
+    const expected = jumpMissedNotice('unknown', 'notification');
+    await expectSentence('jump-missed', expected.headline);
   });
 
   it('문장은 닫을 수 있는 영수증이다', async () => {

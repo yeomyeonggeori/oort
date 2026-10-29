@@ -303,14 +303,16 @@ describe('잠금 화면에 올라가는 글', () => {
   const swiftFiles = [
     ...readdirSync(join(MODULE, 'ios')).filter(name => name.endsWith('.swift')).map(name => join(MODULE, 'ios', name)),
     join(APP_ROOT, 'ios/MomoPushKit/PushNotification.swift'),
+    join(APP_ROOT, 'ios/MomoPushKit/PushCommunication.swift'),
     join(APP_ROOT, 'ios/NotificationService/NotificationService.swift'),
+    join(APP_ROOT, 'modules/momo-push-native/ios/MomoPushPresentationStore.swift'),
   ];
 
   it('Swift 코드(주석 제외)의 어떤 문자열에도 em dash(U+2014)·en dash(U+2013)가 없다', () => {
     const offenders = swiftFiles.filter(file => /[\u2013\u2014]/.test(code(read(file))));
     expect(offenders).toEqual([]);
     // 검사가 헛돌지 않는다: 주석에는 줄표가 있고(여기서 걷어 낸다), 파일들은 실제로 읽혔다.
-    expect(swiftFiles.length).toBeGreaterThanOrEqual(7);
+    expect(swiftFiles.length).toBeGreaterThanOrEqual(9);
     expect(read(join(MODULE, 'ios/MomoPushActionCore.swift'))).toMatch(/[\u2013\u2014]/);
   });
 
@@ -409,5 +411,19 @@ describe('NSE: 본문을 못 채운 승인은 「열어서 결정」으로 낮�
     expect(body.indexOf('MomoPushCategoryDemotion.categoryIdentifier(')).toBeLessThan(body.indexOf('guard let envelope'));
     expect(body).toMatch(/if resolved \{\s*updated\.categoryIdentifier = originalCategory/);
     expect(body).toMatch(/let resolved = display\.title != fallback\.title \|\| display\.body != fallback\.body/);
+  });
+
+  // #4316: 미리보기·보낸 사람 표시를 끈 알림은 본문이 「새 메시지」라서 `resolved` 가 참이어도 무엇인지 말하지 않는다.
+  // 서버가 승인 카테고리를 메시지 이유와 짝지어 보내면(파서는 둘을 묶지 않는다) 위 되돌림이 승인·거절 단추를 되살린다.
+  // 그 줄은 확장(컴파일되지 않는 쪽)에만 있어서 `sim-check` 가 못 잰다 — 순서와 조건을 글자로 못박는다.
+  it('글을 숨긴 알림은 단추를 되돌린 **뒤에** 다시 낮춘다 (ADR-0204 D7, 미리보기·보낸 사람 표시)', () => {
+    const body = code(NSE);
+    const restore = body.search(/if resolved \{\s*updated\.categoryIdentifier = originalCategory/);
+    const again = body.indexOf('if !result.presentation.showsResolvedText');
+    expect(restore).toBeGreaterThan(-1);
+    expect(again).toBeGreaterThan(restore);
+    expect(body.slice(again)).toMatch(
+      /MomoPushCategoryDemotion\.categoryIdentifier\(\s*current: updated\.categoryIdentifier, resolved: false\)/,
+    );
   });
 });

@@ -8,6 +8,10 @@
 //     (`PushAttachmentCopy`: 「사진 1장」, 「파일 2개」, same sentences as the core's
 //     `ATTACH_PREVIEW_COPY`), not left on the relay's 「새 알림」 placeholder. Only `dm` / `mention`
 //     pushes: an approval keeps ADR-0204 D7's rule (no body → no 승인·거절 buttons).
+//   - #4316: the REST read also says WHO wrote the message (`PushResolution.author`: id, name, human or
+//     agent, and the roster's avatar content path when it is exactly this member's — never any other
+//     URL), so `PushCommunication.swift` can dress the push as a communication notification. `fetch`
+//     still answers with the display alone, byte for byte as before.
 //
 // Origin: clients/iOS/MomoiOSKit/Sources/MomoiOSPushKit/PushNotification.swift
 // Inherited by: goal RN-N1 (ADR-0137 이행 순서 5), 2026-08-03.
@@ -289,6 +293,67 @@ public protocol PushMessageFetching: Sendable {
     func fetch(envelope: MomoPushEnvelope, session: PushFetchSession) async throws -> PushDisplayContent
 }
 
+/// The picture the roster names for a member: a path on THIS server the push-fetch session's workspace
+/// owns, shaped exactly `/v1/workspaces/{ws}/members/{member}/avatar/content?v={version}`.
+///
+/// The roster's `avatarUrl` is not always that: an older member may carry any string at all (a legacy
+/// `avatar_url`, even an address on another host). The extension sends a bearer, so it takes ONLY the
+/// one shape it can prove is this workspace's, this member's picture, and builds the request itself from
+/// the session's base URL — it never follows a string it was handed. `?v=` is required: the version is
+/// what keys the cache, and a picture without one cannot be told from a replaced one.
+public struct PushAvatarReference: Equatable, Sendable {
+    public let path: String
+    public let version: String
+
+    public static func parse(_ raw: String?, workspaceID: String, memberID: String) -> PushAvatarReference? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else { return nil }
+        let prefix = "/v1/workspaces/\(workspaceID.lowercased())/members/\(memberID.lowercased())/avatar/content?v="
+        guard raw.lowercased().hasPrefix(prefix) else { return nil }
+        let version = String(raw.dropFirst(prefix.count)).lowercased()
+        guard isValidVersion(version) else { return nil }
+        return PushAvatarReference(path: prefix + version, version: version)
+    }
+
+    /// A media id's alphabet and nothing else, so no separator, dot or percent-escape can ride in.
+    static func isValidVersion(_ version: String) -> Bool {
+        !version.isEmpty && version.count <= 64 && version.unicodeScalars.allSatisfy {
+            ($0.value >= 0x30 && $0.value <= 0x39) || ($0.value >= 0x61 && $0.value <= 0x7A) || $0 == "-" || $0 == "_"
+        }
+    }
+}
+
+/// Who wrote the message, as far as the roster says. Identity only: the text is `PushResolution.display`.
+public struct PushResolvedAuthor: Equatable, Sendable {
+    public let memberID: String
+    public let displayName: String
+    public let isAgent: Bool
+    /// Nil when the member has no uploaded picture, or when the roster's value is not the one shape above.
+    public let avatar: PushAvatarReference?
+
+    public init(memberID: String, displayName: String, isAgent: Bool, avatar: PushAvatarReference?) {
+        self.memberID = memberID
+        self.displayName = displayName
+        self.isAgent = isAgent
+        self.avatar = avatar
+    }
+}
+
+/// What one REST read of a push says: the lines to show and, when a person or an agent wrote the message,
+/// who. `author == nil` for the fixed-copy pushes (`work_*`) and whenever the extension fell back.
+public struct PushResolution: Equatable, Sendable {
+    public let display: PushDisplayContent
+    public let author: PushResolvedAuthor?
+
+    public init(display: PushDisplayContent, author: PushResolvedAuthor?) {
+        self.display = display
+        self.author = author
+    }
+}
+
+public protocol PushMessageResolving: Sendable {
+    func resolve(envelope: MomoPushEnvelope, session: PushFetchSession) async throws -> PushResolution
+}
+
 public struct PushNotificationResolver: Sendable {
     private let fetcher: any PushMessageFetching
 
@@ -308,6 +373,26 @@ public struct PushNotificationResolver: Sendable {
             return try await fetcher.fetch(envelope: envelope, session: session)
         } catch {
             return fallback
+        }
+    }
+
+    /// `resolve`, plus the author when the fetcher can say who it is. Same guard and same fallback: a read
+    /// that fails is the fallback with no author, which the caller shows exactly as it always has.
+    public func resolveDetailed(
+        envelope: MomoPushEnvelope,
+        session: PushFetchSession,
+        fallback: PushDisplayContent = .placeholder
+    ) async -> PushResolution {
+        guard envelope.workspaceID.lowercased() == session.workspaceID.lowercased() else {
+            return PushResolution(display: fallback, author: nil)
+        }
+        do {
+            if let resolving = fetcher as? any PushMessageResolving {
+                return try await resolving.resolve(envelope: envelope, session: session)
+            }
+            return PushResolution(display: try await fetcher.fetch(envelope: envelope, session: session), author: nil)
+        } catch {
+            return PushResolution(display: fallback, author: nil)
         }
     }
 }
@@ -395,7 +480,7 @@ public enum PushAttachmentCopy {
     }
 }
 
-public actor MomoPushRESTFetcher: PushMessageFetching {
+public actor MomoPushRESTFetcher: PushMessageFetching, PushMessageResolving {
     private struct MessagePage: Decodable {
         let messages: [Message]
     }
@@ -481,6 +566,10 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
     private struct Member: Decodable {
         let id: String
         let displayName: String
+        /// Read as leniently as `Props` and `Attachments` (#4316): a member whose `kind` or `avatarUrl` has an
+        /// odd shape costs the notification its picture, never its name.
+        let kind: LenientText?
+        let avatarUrl: LenientText?
     }
 
     private let session: URLSession
@@ -491,16 +580,24 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
     }
 
     public func fetch(envelope: MomoPushEnvelope, session fetchSession: PushFetchSession) async throws -> PushDisplayContent {
+        try await resolve(envelope: envelope, session: fetchSession).display
+    }
+
+    public func resolve(envelope: MomoPushEnvelope, session fetchSession: PushFetchSession) async throws -> PushResolution {
         let root = "/v1/workspaces/\(fetchSession.workspaceID)"
         async let messageData = get(
             root + "/channels/\(envelope.channelID)/messages?limit=200",
             fetchSession: fetchSession
         )
+        // 이름 목록은 메시지 쪽과 **동시에** 읽는다(#4316: 왕복 하나를 아낀다) — 그 목록이 늘 필요한 푸시만.
+        // `work_*` 두 갈래는 아래 주석대로 목록을 읽지 않거나 카드를 본 뒤에야 안다.
+        let readsRosterAlways = envelope.reason != "work_run_done" && envelope.reason != "work_session_idle"
+        async let earlyRoster: Data? = readsRosterAlways ? get(root + "/roster", fetchSession: fetchSession) : nil
         // `work_run_done` 은 메시지를 읽기 전에 고정 문구로 끝낸다: 본문(에이전트의 답·오류)을
         // 디코드하지도 않는다. 일반 경로로 새면 잠금 화면에 답 전문이 뜬다.
         if envelope.reason == "work_run_done" {
             _ = try await messageData
-            return PushWorkRunDoneCopy.display()
+            return PushResolution(display: PushWorkRunDoneCopy.display(), author: nil)
         }
         let page = try decoder.decode(MessagePage.self, from: try await messageData)
         // 「작업 끝남」 카드의 작성자는 **받는 사람 본인**(세션을 시작한 사람)이라, 아래의
@@ -515,9 +612,16 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
             let rootLabel = page.messages
                 .first(where: { $0.id.lowercased() == (card.rootID ?? "").lowercased() })?
                 .props?.label
-            return PushWorkCompleteCopy.display(label: rootLabel, ranMs: card.props?.ranMs)
+            return PushResolution(
+                display: PushWorkCompleteCopy.display(label: rootLabel, ranMs: card.props?.ranMs), author: nil)
         }
-        let roster = try decoder.decode(Roster.self, from: try await get(root + "/roster", fetchSession: fetchSession))
+        let rosterData: Data
+        if let early = try await earlyRoster {
+            rosterData = early
+        } else {
+            rosterData = try await get(root + "/roster", fetchSession: fetchSession)
+        }
+        let roster = try decoder.decode(Roster.self, from: rosterData)
         guard let message = page.messages.first(where: { $0.id.lowercased() == envelope.messageID.lowercased() }),
               let body = Self.displayBody(of: message, for: envelope),
               let author = roster.members.first(where: {
@@ -527,7 +631,14 @@ public actor MomoPushRESTFetcher: PushMessageFetching {
         else {
             throw MomoPushError.messageUnavailable
         }
-        return PushDisplayContent(title: author.displayName, body: body)
+        return PushResolution(
+            display: PushDisplayContent(title: author.displayName, body: body),
+            author: PushResolvedAuthor(
+                memberID: author.id.lowercased(),
+                displayName: author.displayName,
+                isAgent: author.kind?.value == "agent",
+                avatar: PushAvatarReference.parse(
+                    author.avatarUrl?.value, workspaceID: fetchSession.workspaceID, memberID: author.id)))
     }
 
     /// 알림 본문: 글이 있으면 글. 글 없이 첨부만 있으면 개수 문구(#4294) — `PushAttachmentCopy.announces`

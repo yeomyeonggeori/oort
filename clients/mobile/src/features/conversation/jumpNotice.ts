@@ -61,7 +61,8 @@ export type JumpSubject =
   | 'search'
   | 'session'
   | 'notification'
-  | 'memory';
+  | 'memory'
+  | 'approval';
 
 /**
  * 「위쪽에 있다」고 **단정할 수 있는** 주어의 문장.
@@ -147,6 +148,16 @@ export function jumpMissedNotice(
         reason === 'older'
           ? '근거 메시지는 이 대화의 더 위쪽에 있어요'
           : '근거 메시지를 이 화면에서 찾지 못했어요',
+      detail: ASK,
+    };
+  }
+  if (subject === 'approval') {
+    // 일곱 번째 주어 (#4705). 고정·고정 풀기 승인 카드의 「전문 보기」를 누른 사람은 인용도
+    // 고정 목록도 누른 적이 없고, ADE 카드의 「이 작업을 시작한 메시지」를 찾는 것도 아니다.
+    // 카드는 메시지·채널 id 만 나르므로(순서값 없음) 세션 앵커처럼 `reason` 을 보지 않는다.
+    // 이 갈래도 해요체다(새 표면).
+    return {
+      headline: '카드가 가리킨 메시지를 이 화면에서 찾지 못했어요',
       detail: ASK,
     };
   }

@@ -33,7 +33,7 @@ function dm(memberIds: string[]): Channel {
   return { id: "c", workspaceId: "w", kind: "dm", muted: false, memberIds } as Channel;
 }
 
-const self = member({ id: ME, displayName: "곽성재", handle: "kwak" });
+const self = member({ id: ME, displayName: "구민수", handle: "gu" });
 
 describe("channelLabelParts · DM 이름 해석", () => {
   it("상대가 명부에 있으면 그 이름이다. 에이전트면 isAgent", () => {
@@ -78,9 +78,9 @@ describe("channelLabelParts · DM 이름 해석", () => {
 
   it("나 혼자뿐인 DM은 「이름 (나)」다", () => {
     const dir = makeDirectory([self]);
-    expect(channelLabelParts(dm([ME]), dir, ME).text).toBe("곽성재 (나)");
-    expect(channelLabelParts(dm([ME]), makeDirectory([]), ME, { selfName: "곽성재" }).text).toBe(
-      "곽성재 (나)"
+    expect(channelLabelParts(dm([ME]), dir, ME).text).toBe("구민수 (나)");
+    expect(channelLabelParts(dm([ME]), makeDirectory([]), ME, { selfName: "구민수" }).text).toBe(
+      "구민수 (나)"
     );
   });
 

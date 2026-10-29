@@ -30,7 +30,7 @@ import {viewedConversation, type ViewedConversation} from './viewedConversation'
 // 사라진다. 그 틈은 네이티브 쪽 기본 처리기가 있어야 닫히며 이 변경의 범위 밖이다(별도 이슈).
 //
 // `setNotificationHandler` 는 부를 때마다 앞의 처리기를 **갈아 끼우므로** 다른 곳에서 한 번 더 부르면 이
-// 규칙이 조용히 꺼진다 — 호출 자리가 이 앱에 하나뿐(`index.js`)임을 `foregroundPresentation4310.test.tsx`
+// 규칙이 조용히 꺼진다 — 호출 자리가 이 앱에 하나뿐(`index.js`)임을 `foregroundPresentation.test.tsx`
 // 가 소스에서 센다.
 //
 // ## 규칙: 보고 있는 대화의 알림만 숨긴다 — 승인 요청은 빼고

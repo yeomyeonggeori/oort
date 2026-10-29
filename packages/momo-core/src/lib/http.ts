@@ -74,6 +74,13 @@ export interface HttpResponse {
    * (`refresh_proof_stale`, #3106).
    */
   readonly date?: string | null;
+  /**
+   * Retry-After (#4663, additive): the `Retry-After` header as whole seconds, only when the
+   * server sent it as a plain integer (a 429 or 503 does). Absent when the header is missing
+   * or in any other form (an HTTP date, a fraction, text). Absent means "the server did not
+   * say how long", never "no wait", so a caller must not default it to a number.
+   */
+  readonly retryAfterSeconds?: number;
   /** Parsed body. Throws on a body that is not JSON, like `Response.json()`. */
   json<T>(): T;
   /** Parsed body, or null when there is none or it is not JSON. */
@@ -84,13 +91,15 @@ function httpResponse(
   status: number,
   ok: boolean,
   text: string,
-  date: string | null = null
+  date: string | null = null,
+  retryAfterSeconds?: number
 ): HttpResponse {
   return {
     status,
     ok,
     text,
     date,
+    ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
     json<T>(): T {
       return JSON.parse(text) as T;
     },
@@ -103,6 +112,20 @@ function httpResponse(
       }
     },
   };
+}
+
+/**
+ * Retry-After (#4663, additive): the delta-seconds form of the header, or `undefined`.
+ * Only a plain run of digits that fits a safe integer counts. The HTTP-date form, a negative
+ * or fractional number and any text are `undefined`: a client that guessed a wait from them
+ * would be inventing a number the server never gave.
+ */
+export function parseRetryAfterSeconds(value: string | null | undefined): number | undefined {
+  if (value === null || value === undefined) return undefined;
+  const text = value.trim();
+  if (!/^\d+$/.test(text)) return undefined;
+  const seconds = Number(text);
+  return Number.isSafeInteger(seconds) ? seconds : undefined;
 }
 
 /**
@@ -138,7 +161,13 @@ export async function fetchWithDeadline(
     // Still under the same signal: a body that stalls after the headers is the
     // same infinite wait, and it aborts on the same deadline.
     const text = await res.text();
-    return httpResponse(res.status, res.ok, text, res.headers?.get?.("Date") ?? null);
+    return httpResponse(
+      res.status,
+      res.ok,
+      text,
+      res.headers?.get?.("Date") ?? null,
+      parseRetryAfterSeconds(res.headers?.get?.("Retry-After"))
+    );
   } catch (error) {
     if (timedOut) throw new NetworkError("timeout", timeoutMs, error);
     if (callerSignal?.aborted) throw error; // the caller cancelled; not a failure

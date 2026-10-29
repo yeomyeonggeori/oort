@@ -52,3 +52,14 @@ name: 112-enter-steady
     commands:
       - tapOn:
           id: "composer-send"
+# #4749 「접속 후 첫 보내기」: 한 번에 열 자 안팎의 글을 치는 두 단계 — `send` 는 위와 같다. 첫 보내기 = typeA → send, 두 번째 = typeB → send.
+- runFlow:
+    when:
+      true: ${STEP == 'typeA'}
+    commands:
+      - inputText: "확인했어요 고마워요"
+- runFlow:
+    when:
+      true: ${STEP == 'typeB'}
+    commands:
+      - inputText: "그럼 이따 봐요"

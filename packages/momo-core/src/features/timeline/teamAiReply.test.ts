@@ -110,7 +110,7 @@ function ctx(overrides: Partial<AppsTailContext> = {}): AppsTailContext {
       ["gmail", GMAIL],
       ["github", GITHUB],
     ]),
-    onBehalfOf: "곽성재",
+    onBehalfOf: "구민수",
     site: "hermes",
     audience: null,
     ...overrides,
@@ -124,7 +124,7 @@ describe("쓴 앱 꼬리", () => {
     expect(meta?.appsLine).toBe("쓴 앱: Gmail 검색 2회");
     expect(meta?.appsDetails).toEqual([
       "Hermes에서 실행했어요.",
-      "곽성재 명의로 썼어요.",
+      "구민수 명의로 썼어요.",
       "연결: gmailmcp.googleapis.com",
       APPS_TAIL_SELF_REPORT,
     ]);

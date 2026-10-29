@@ -8,6 +8,7 @@ import type {FlatList} from 'react-native';
 
 import type {ApprovalGate} from '../src/features/conversation/approvalGate';
 import {Timeline} from '../src/features/conversation/Timeline';
+import {NEUTRAL_ANCHOR_TEST_ID} from '../src/features/conversation/neutralAnchor';
 import {installAppClock} from './fixtures/fakeClock';
 import {SessionProvider} from '../src/session/useSession';
 
@@ -368,7 +369,12 @@ function contentChildren(): ReactTestInstance[] {
     if (kids.length !== 1) break;
     container = kids[0];
   }
-  return (container.children as unknown[]).filter(isInstance).map(firstHost);
+  return (container.children as unknown[])
+    .filter(isInstance)
+    .map(firstHost)
+    // 보초(#4689, `neutralAnchor.tsx`)는 이 이중이 모델하는 머리·셀·꼬리가 아니다. 평상에서는 어느 앵커 스캔에도 걸리지 않는
+    // 높이 0 의 뷰라서(`y + h < offset`), 이중의 자식 목록에서 빼는 것이 네이티브와 같다.
+    .filter(host => host.props.testID !== NEUTRAL_ANCHOR_TEST_ID);
 }
 
 function isInstance(child: unknown): child is ReactTestInstance {
