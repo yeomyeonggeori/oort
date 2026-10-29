@@ -32,6 +32,7 @@ import {
   Composer,
   composerColumnBudget,
   composerMaxHeight,
+  COMPOSER_MAX_ROWS,
   INPUT_CHROME,
   INPUT_CHROME_X,
   mentionAnnotationLines,
@@ -1295,7 +1296,7 @@ function GrowthProbe({
         {`대화 열 ${budget.column.toFixed(1)}pt = 목록 ${budget.list.toFixed(1)} + 입력창 ${budget.composer.toFixed(1)} — 목록 ≥ 입력창 ${budget.list >= budget.composer ? '참' : '거짓'}`}
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
-        {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · 5줄이면 ${(5 * row + space.sm * 2 + 2).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
+        {`상한 ${cap.toFixed(1)}pt = ${((cap - space.sm * 2 - 2) / row).toFixed(1)}줄 · ${COMPOSER_MAX_ROWS}줄이면 ${(COMPOSER_MAX_ROWS * row + INPUT_CHROME).toFixed(1)}pt · 실제 상자 ${boxHeight.toFixed(1)}pt`}
       </Text>
       <Text allowFontScaling={false} style={styles.probeRead}>
         {`글폭 ${Math.round(content)}pt 에서 끊기는 자리 — ${broken}`}
