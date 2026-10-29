@@ -1,3 +1,4 @@
+import {haptics} from '../lib/haptics';
 import {
   openDirectMessage,
   uuidEq,
@@ -441,6 +442,7 @@ export default function ConversationScreen({
   });
   const showMemberProfile = useCallback(
     (memberId: string) => {
+      haptics.event('profileOpened');
       resetProfileDm();
       setProfileMemberId(memberId);
     },
@@ -1033,8 +1035,9 @@ export default function ConversationScreen({
   const openInfo = useCallback(() => {
     // 머리 알약은 모달이 아니라서(⋮ 시트와 달리 iOS 가 자판을 접어 주지 않는다) 자판이 올라온 채 누르면 페이지 위로 자판이 남는다 — 먼저 접는다.
     Keyboard.dismiss();
+    if (channel?.kind === 'dm') haptics.event('profileOpened');
     setInfoOpen(true);
-  }, []);
+  }, [channel?.kind]);
   // 페이지를 걷으면 훅의 상태(복사 영수증·실패 문장·나가기 확인)도 비운다 — 다시 열었을 때 지난 영수증이 남아 있지 않게.
   const closeInfo = useCallback(() => {
     setInfoOpen(false);
