@@ -295,6 +295,35 @@ describe("optimistic insert (M10)", () => {
       "pending",
     ]);
     expect(above(confirmed)).toEqual(above(whileSending));
+    // 줄의 라벨 시각은 에코 자신의 시각이다(직전 행의 시각이 아니다).
+    const line = whileSending[2];
+    expect(line.kind === "day" && line.atMs).toBe(echo.createdAtMs);
+  });
+
+  // 에코는 seq 가 없어서 더 새로운 행 밑에 설 수 있다(자정을 넘겨 남은 실패한 전송, 자정 직전에 보냈는데 POST 가 도는 사이 자정 뒤에
+  // 상대 글이 도착). 확정본 루프는 「날이 다르다 = 새 날」이라고 읽어도 되지만(seq 순서가 시간을 앞으로 보낸다) 에코에게는 그렇지 않다 —
+  // 옛 날의 줄을 또 내면 같은 키가 목록에 두 번 나오고 오늘 행 밑에 어제 줄이 선다.
+  it("does not draw a day line above an echo that is older than the row above it", () => {
+    const yesterday = mine(10, "어제 마지막", {
+      createdAtMs: new Date(2026, 6, 24, 23, 0, 0).getTime(),
+    });
+    const today = msg(11, "자정 뒤에 도착", {
+      authorMemberId: OTHER,
+      createdAtMs: new Date(2026, 6, 25, 0, 1, 0).getTime(),
+    });
+    const lateEcho = pending("k1", "자정 직전에 보냄", {
+      createdAtMs: new Date(2026, 6, 24, 23, 59, 30).getTime(),
+    });
+    const items = buildTimelineItems([yesterday, today], { pending: [lateEcho] });
+    expect(items.map((i) => i.kind)).toEqual([
+      "day",
+      "message",
+      "day",
+      "message",
+      "pending",
+    ]);
+    const dayKeys = items.filter((i) => i.kind === "day").map((i) => i.key);
+    expect(new Set(dayKeys).size).toBe(dayKeys.length);
   });
 
   it("draws the new day's line once for several echoes, and none when the echo is on the same day as the last message", () => {

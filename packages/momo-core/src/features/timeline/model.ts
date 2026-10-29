@@ -1013,10 +1013,18 @@ export function buildTimelineItems(
     // line's height and the list had to travel a second time (SE, first send of
     // the day: content +78.5 at the echo, +44 at the swap, 33pt jump, two
     // glides). With the line already in place the swap changes nothing above the
-    // row. Same condition as the confirmed loop, on the echo's own clock.
+    // row.
+    //
+    // Only when the echo is LATER than the row above it. The confirmed loop can
+    // read "the day differs" as "a new day starts" because seq order keeps time
+    // moving forward; an echo has no seq, and one can sit below a newer row — a
+    // failed send left overnight, or a reply that landed after midnight while the
+    // POST was in flight. Drawing its (older) day there would repeat a `day-<key>`
+    // already in the stream and put yesterday's line under today's rows.
     if (
       !previousRow ||
-      dayKey(previousRow.createdAtMs) !== dayKey(row.createdAtMs)
+      (row.createdAtMs > previousRow.createdAtMs &&
+        dayKey(previousRow.createdAtMs) !== dayKey(row.createdAtMs))
     ) {
       items.push({
         kind: "day",
