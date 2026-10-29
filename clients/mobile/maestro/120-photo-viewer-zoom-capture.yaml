@@ -11,6 +11,8 @@ name: "120-photo-viewer-zoom-capture"
 #   ③ 확대한 채 아래로 길게 쓴다 — 닫히지 않는다(뷰어가 그대로 서 있다, **단정한다**).
 #   ④ 다시 두 번 탭한다 — 원래 크기로 돌아온다.
 #   ⑤ 옆으로 쓴다 — 이번에는 넘어간다(「3장 중 3번」, **단정한다**: 확대 상태가 풀렸음을 네이티브 확대 스크롤뷰가 알렸다는 증거다).
+#   ⑤b 이 장(3번)을 다시 두 번 탭해 확대한 채 썸네일로 첫 장에 간다 — 첫 장은 원래 크기라 넘기기가 산다(「3장 중 1번」 → 「3장 중 2번」 → 「3장 중 3번」,
+#       **단정한다**: 장이 바뀌면 앞 장의 확대가 풀리고 `zoomed` 도 풀렸다는 증거다. 풀리지 않았다면 넘기기가 꺼진 채라 첫 쓸기에서 멈춘다).
 #   ⑥ 아래로 길게 쓴다 — 닫힌다(쓸어 닫기가 다시 켜졌다는 증거다).
 #
 # jest 에는 네이티브 스크롤뷰가 없어 이 길을 못 잰다. 응답자가 확대 스크롤뷰의 조상이면 iOS 는 스크롤뷰의 팬·핀치를 막는데(jest 는 그것을 「누가 쥐는가」로만 잰다),
@@ -101,6 +103,34 @@ name: "120-photo-viewer-zoom-capture"
 - assertVisible:
     id: "attachment-viewer-position"
     text: "3장 중 3번.*"
+# ⑤b 확대한 채 다른 장으로 넘기면 앞 장의 확대가 풀린다: 이 장(3번)을 확대하고 썸네일로 첫 장에 가면 첫 장은 원래 크기이고 넘기기가 산다.
+- doubleTapOn:
+    point: 50%,45%
+- waitForAnimationToEnd
+- tapOn:
+    id: "attachment-viewer-thumb"
+    index: 0
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 1번.*"
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 2번.*"
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 3번.*"
+- takeScreenshot: ${SHOT}-page3-after-thumb-trip
 # ⑥ 쓸어 닫기도 다시 산다.
 - swipe:
     start: 50%, 30%
