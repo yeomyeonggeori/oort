@@ -31,7 +31,7 @@ function wireRun(over: Record<string, unknown> = {}) {
   return {
     source: "run",
     runId: RUN_ID,
-    requestedBy: { memberId: HUMAN, displayName: "곽성재" },
+    requestedBy: { memberId: HUMAN, displayName: "구민수" },
     stepCount: 3,
     commits: 2,
     pr: { url: "https://github.com/acme/oort/pull/12", number: 12 },
@@ -62,8 +62,8 @@ describe("보드 줄 읽기: 실행(run) 줄 (#3518)", () => {
     expect(item.sessionId).toBe(RUN_ID);
     expect(isRunItem(item)).toBe(true);
     expect(item.diff.ahead).toBe(2);
-    expect(item.requestedBy?.displayName).toBe("곽성재");
-    expect(laneLabel(item)).toBe("에이전트 · 곽성재가 시킴");
+    expect(item.requestedBy?.displayName).toBe("구민수");
+    expect(laneLabel(item)).toBe("에이전트 · 구민수가 시킴");
     expect(stateChipLabel(item)).toBe("끝남 · PR");
   });
 
@@ -99,7 +99,7 @@ describe("보드 줄 읽기: 실행(run) 줄 (#3518)", () => {
       sessionId: "s1",
       origin: "local_pty",
       label: "x",
-      owner: { memberId: HUMAN, displayName: "곽성재" },
+      owner: { memberId: HUMAN, displayName: "구민수" },
       homeChannel: { id: "c1", name: null },
       state: "waiting",
       stages: [],
@@ -114,7 +114,7 @@ describe("보드 줄 읽기: 실행(run) 줄 (#3518)", () => {
     const run = sharedWorkSessionFromWire(wireRun())!;
     const orphan = sharedWorkSessionFromWire(wireRun({ runId: "r2", requestedBy: undefined }))!;
     const groups = groupByOwner([run, orphan]);
-    expect(groups.map((g) => g.ownerName)).toEqual(["곽성재", "그록봇"]);
+    expect(groups.map((g) => g.ownerName)).toEqual(["구민수", "그록봇"]);
     expect(ownedBy([run, orphan], HUMAN)).toEqual([run]);
     expect(laneLabel(orphan)).toBe("에이전트 작업");
   });

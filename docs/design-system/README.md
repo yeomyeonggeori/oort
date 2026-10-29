@@ -43,6 +43,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | 아이콘을 고른다 | §2.8 — lucide 한 벌, 16px 단일 기본. 예외는 컴포넌트가 사유를 진다. |
 | 버튼 두 개를 나란히 세운다 | §3 위계 — 파괴 > 주 > 보조. 값이 아니라 **관계**다. |
 | 새 표면을 만든다 | §4 상태 — 빈·로딩·오류·오프라인 넷이 다 있어야 출하다. 폰이면 시트·페이지·드로어 고르기와 공용 부품은 [phone-sheets.md](phone-sheets.md). |
+| 대화 안에서 에이전트가 일하는 모습(레일·칩·예외 줄)을 건드린다 | [agent-work-display.md](agent-work-display.md) — 어느 자리가 무엇을 말하는지, 유예·낱말을 한 곳이 정하는 규칙, Buzz 대비. |
+| 에이전트에게 부탁한 일의 제안·결정·결과(묶음 카드·상태 칩·생각 줄·푸시 문장·인박스 「승인」 칸)를 건드린다 | [agent-request-loop.md](agent-request-loop.md) — 한 요청 한 묶음의 카드 문법과 상태표, 요청 스레드 자리 규칙, 푸시 문장과 바로 승인 기준, 승인 고리의 말 사전. |
 | "이거 기계가 잡나?"를 묻는다 | §5 강제 기제 지도. **§5.3이 안 잡는 것 목록**이다. |
 | 스케일에 값을 하나 더하고 싶다 | §6. 대개 답은 "더하지 말고 이름을 지어라"다. |
 
@@ -96,7 +98,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `themes/catalog.contrast.test.ts` · `paletteContrast.test.ts`):
 
-- **순흑·순백 없음.** 종이의 흰색은 `#fffefc`. 반투명 층(스크림·유리 가장자리)은 칠이 아니라 그늘이라 예외다.
+- **순흑·순백 없음.** 종이의 흰색은 `#fffefc`. 반투명 층(스크림·유리 가장자리)은 칠이 아니라 그늘이라 예외다. **폰 사진 뷰어의 무대**(`tokens.ts` 의 `photoStage`: 순흑 바탕·순백 글리프)는 테마와 무관한 폰 전용 예외다 — 사진은 어두운 방에서 가장 잘 보이고, 값이 아니라 대비 **관계**를 `attachmentViewer.test.tsx` 가 잰다(#4297).
 - **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *"never neon AI purple"*이라고 적는다.
 - **`--line`은 나누고, `--line-strong`은 텍스트 입력 그릇을 그린다(3:1).** ADR-0189 D6: **버튼은 채움 알약이다**(`Button` 다섯 변형 모두 테두리가 없다 — 주 = 잉크 채움, 보조·outline = `--surface-muted` 채움, 파괴 = `--danger-fill`, ghost = 채움 없음). outline 테두리는 `Input`·`Select`·컴포저처럼 **값을 받는 그릇에만** 남는다. `--line-strong`은 입력이 설 수 있는 모든 면(표면·보조 면·시트·바닥 정지점·선택 행)에서 3:1을 넘도록 core가 골랐고, 3:1을 깨는 완화는 금지.
 - **유리는 `glass` 유틸 하나로만.** 반투명 `--glass` + 흐림 22·채도 1.4. 투명도 줄이기·고대비·`backdrop-filter` 미지원에서는 불투명(`--surface`, 미지원은 94%)으로 물러난다(ADR-0189 D7). 실제 렌더 대비는 캡처로만 잰다(`runtime-unverified`).
@@ -288,7 +290,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 
 오르트 로더(#3961, 시안 A 「공전」, owner 2026-10-17)는 연결 끊김·다시 연결 중·첫 로딩에서 도는 브랜드 표시다. 링은 가만히 있고 위성이 홈에서 나와 한 바퀴 돌고 다시 꽂힌다(한 주기 1.8s). 움직이는 속성은 `transform`·`opacity`뿐이다. 감소된 동작에서는 회전 대신 정지 마크 + 투명도 1↔0.5이고, 진행 중이 아닌 자리(오프라인·재시도 실패)는 정지 마크다(움직임이 곧 「지금 시도 중」이라는 주장이라서). 마크 사용 규칙은 `docs/brand/mark/README.md` 「로더」.
 
-폰 사다리는 웹과 이름·값이 같다(**사다리 칸 중에서는** 폰 전용 `send-arrive` 300ms 하나만 웹에 짝이 없다 — §6 「폰에 값을 더할 때」대로 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival4455.test.tsx` 가 단정한다. 사다리 밖의 폰 값(탭 페이드 150ms 등)은 이 문장의 대상이 아니다). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
+폰 사다리는 웹과 이름·값이 같다(**사다리 칸 중에서는** 폰 전용 `send-arrive` 300ms 하나만 웹에 짝이 없다 — §6 「폰에 값을 더할 때」대로 값이 아니라 관계 `standard < send-arrive < arrival` 을 `sendArrival.test.tsx` 가 단정한다. 사다리 밖의 폰 값(탭 페이드 150ms 등)은 이 문장의 대상이 아니다). 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
 
 아직 이 축이 안 재는 것(owed, 이 PR이 닫지 않음):
 
@@ -472,7 +474,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | 층 | 어디 | 무엇 |
 |---|---|---|
-| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 14분류 + 코어 5분류, **하드 제로** |
+| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 14분류 + 코어 5분류, **하드 제로**. 끝 단계로 실명 재유입 검사(`design_preflight_names.mjs`, #4632: 코어 `src`·폰 `measure/`의 시험 고정값에 실제 사람 이름이 다시 들어오면 빨강, 금지 목록은 SHA-256 해시뿐) |
 | **단위 스위트 단정** | `clients/web/src/**/*.test.ts` · `clients/mobile/__tests__/*` | 토큰 산술 · 소스 전수 스윕 · 렌더 트리 실측 |
 | **Playwright 게이트** | `clients/web/gates/gate-*.mjs` (24개) | 티켓별 기하·상태·회귀. 셋만 렌더 대비를 계산한다 |
 | **캡처 레인** | `clients/web/scripts/capture-screens.mjs` · `clients/mobile/measure/*` | 사진 + 단정(가로 오버플로 0 · 탭 타깃 · 상단 여백 · 컴포저 가시성) |
@@ -492,6 +494,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
 | **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서·바닥(`z-50` 위)·`data-overlay-layer` 여섯 파일 + 잔량 허용목록. `appPaneIsolation.browser.test.ts`(#4587) — 판(`app-pane`)이 `isolate`일 때의 순서를 WebKit·Chromium의 **그려진 픽셀**로 잰다(포털 스크림 > 판 안의 덮는 판, 서랍 > 덮는 판, 덮는 판 > 머리, 띠의 알약 > 머리, 그리고 판 격리로 **바뀐** 두 관계: 띠의 알약 > 덮는 판, 사이드바 스크림 > 덮는 판). 히트 테스트와 **루트 스윕**(이름 밖 수치 z = 0)은 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **창 띠·머리 컨트롤** (§2.9) | `desktopShell.band.browser.test.ts`(WebKit·Chromium 계산 기하: 띠 40 · 토글 중심 20 · 판 위쪽 셸 40/웹 8 · 머리 선 0 · `--head-edge` · 단추 선 `--line` · 툴팁 알약 · 전체 화면 인셋 · 판 바깥 = 사이드바 색 픽셀(팔레트 3 × 스킴 2 × 장면 4) · 노을띠 「내 작업」 윗줄 픽셀) + `AppTitlebar.shell.test.tsx`(셸 끌기 판정, 다운로드 단추를 채운 오른쪽 자리) + `features/downloads/*.test.*`(진행·기록·단추 상태·웹에서 숨김·셸과 번들의 약속) + `ChatShell.header.test.ts`·`channelHeaderControls.tooltip.test.tsx`(머리 단추는 전부 툴팁, `title` 없음) | 비해당(폰은 창 띠가 없다) | — |
+| **대화 안 에이전트 작업 표시** ([agent-work-display.md](agent-work-display.md)) | 코어 `runExceptionChipParity.test`(카드·줄·칩·레일이 **같은 시각에 같은 판정·같은 낱말**, 시간 초과·신호 소실은 칩도 줄과 같은 낱말·경고 톤, 박자 3종 × phase 9 × 종료 코드 9 × 시각 11) + `ActivityRail.browser.test`(레일 칸의 바닥 행 y 이동 0, 끊긴 레일의 한정 문장이 안 잘리고 에이전트 글은 접힘·이름만·전문 중 하나라 낱말 중간에서 끊기지 않음(14폭), `popover-fit`의 폭 계산, 줄의 누르는 면 = 칸 24, WebKit·Chromium × 두 스킴) + `composerRailReservation.browser.test`(**진짜 `Composer` 마크업**: 에이전트 대화 간격 24 불변 · 사람만 있는 대화 8(폰 13) 불변) + `TriggerChip.browser.test`(칩 폭·높이 고정, 낱말·아이콘 두 모양, 좁은 줄 383/384 경계, 「답함」 누르는 면 +4px) + `MessageRow.triggerChip.browser.test`(**진짜 `MessageRow` 마크업**: 이름 2~40자 × 열 폭 6종 줄바꿈 0 · 이름 열 글자 이상 · 거터 칩의 행 높이 불변·hover 양보·터치) + `runStatus.test`(칩 대상) + `MessageRunStatus.test`(행동은 요청자·owner/admin에게만, 취소 영수증) + `iconSystem.test`(칩 글리프는 전부 lucide) | 폰은 같은 코어 모델을 #4620이 읽는다(그때까지 폰 표면은 옛 문장 행) | 낱말·판정은 코어 한 곳(`runWaiting`·`runException`·`triggerChip`) |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
@@ -519,6 +522,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | — | **실제 Tauri 창이 띠를 잡고 움직이는가**(§2.9) | 번들 시험은 속성과 Tauri `drag.js`의 판정 사본까지만 잰다. 진짜 WKWebView에서 마우스로 끌리는지, 신호등 중심과 띠의 시각 정렬, 전체 화면·좁은 창의 모양은 데스크탑 빌드를 사람이 확인한다(PR의 실제 앱 캡처) |
 | — | **웹의 렌더된 컨트롤 경계·터치 크기 전수** | 지금은 토큰 층과 프리미티브 층까지만 잰다. 렌더 스윕은 미구현(감사 §C-3-b·c) |
 | — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`에 남아 있고(`AgentHubRoute` 자리는 #1957이 닫음), **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |
+| — | **외부 에이전트의 실제 답이 칩의 「답함 ✓」과 이어지는가**(agent-work-display §3) | 이동의 근거는 에이전트의 최종 답이 트리거를 인용(`replyToId`, ADR-0148 규칙 6)하거나 정산된 턴 기록(`props.run_id`)에 있다는 것이다. Agent Port(`oort_message_post`)로 쓰는 외부 에이전트(grok 등)의 글이 그것을 달고 오는지는 **실제 에이전트가 답해 봐야** 안다(runtime-unverified). 안 달리면 칩은 「답함」을 말하되 눌리지 않는다 — 죽은 단추는 없지만 이동도 없다 |
 | — | **hover·선택 상태의 사진** | 이 시스템의 게이트는 마우스를 일부러 치워 둔다(`gate-workstream.mjs:875` — hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 그래서 **이 문서가 다루는 결함(그릇이 hover에서 사라진다)을 찍은 레인이 하나도 없었다**: 회전 2의 1.000 두 건은 리뷰어가 손으로 hover 프레임을 계측해 찾았다. `gate-my-sessions`에 rest/hover 짝 캡처를 신설해 그 공백의 첫 칸을 메웠다(아래 §5.4 레인) — 나머지 표면은 미구현 |
 | — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |
 | — | **아이콘 규칙의 나머지 전부**(§2.8) | `iconSystem.test.ts`는 예외 목록과 import 형태 **둘만** 잰다. 16px 단일 기본·`strokeWidth` 재지정 금지·`currentColor` 상속·`aria-hidden`(잔량 57곳/인접 레이블 없는 36곳)·CSS 도형/아이콘 폰트/기능 이모지 회피·`src/**` 아래 SVG 자산 유입·**`.ts` 파일 안 손제작 SVG·`createElement("svg")`**(둘 다 초록 통과 실증) — 전부 무검사다. §2.8이 잔량을 세어 둔 이유다 |

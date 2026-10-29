@@ -55,11 +55,10 @@ export function OortLoaderSurface({which}: {which: string}): React.JSX.Element {
     <View style={styles.screen}>
       <ConversationHeader
         title="agent-lab"
-        subtitle="6명"
+        memberCount="6명"
         kind="public"
         directory={DIRECTORY}
         onBack={() => {}}
-        menu={[]}
         railStatus={status}
       />
     </View>

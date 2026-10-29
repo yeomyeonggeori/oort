@@ -32,7 +32,7 @@ function wireRun(over: Record<string, unknown> = {}) {
   return {
     source: "run",
     runId: "00000000-0000-7000-8000-0000000000c1",
-    requestedBy: { memberId: ME, displayName: "곽성재" },
+    requestedBy: { memberId: ME, displayName: "구민수" },
     stepCount: 3,
     origin: "agent_run",
     label: "온보딩 문구 다듬기",
@@ -162,7 +162,7 @@ describe("줄 모델 (ADR-0202 D1)", () => {
       ),
       NOW
     );
-    expect(requesterToAgent(job)).toBe("곽성재 → 그록봇");
+    expect(requesterToAgent(job)).toBe("구민수 → 그록봇");
     expect(job.agentIsMember).toBe(true);
     expect(job.finished).toBe(true);
     expect(job.duration?.kind).toBe("worked");

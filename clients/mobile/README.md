@@ -160,6 +160,18 @@ npm run lane:phone          # the whole phone check, unattended (below)
 
 `ios/` requires `pod install` once (`cd ios && pod install`).
 
+### Writing a test
+
+Import the shared tools from `__tests__/testkit` instead of declaring them again in the file
+(`member`, `message`, `jsonResponse`, `installFetch`, `mmkvStore`, `resetSession`/`signIn`,
+`makeQueryClient`, `flat`, `settle` ...; the header of `testkit/index.ts` lists them). Find things
+on screen by accessibility role and label (`control('button', copy.SAVE)`), not by a Korean sentence
+typed into the test: `control`/`labelled` throw on an empty label instead of matching every node.
+Add a case to the file that already tests the same component or module, and name a new file after
+its target, never after an issue number (the issue goes in the `describe` title or a comment).
+A test that wraps its body in `describe` and has its own `afterEach` should start that hook with
+`await drainRender()` (see `testkit/render.tsx` for why).
+
 ### `Podfile.lock` 이 경로에 안 흔들리는 이유 (건드리기 전에 읽을 것)
 
 `ios/Podfile` 맨 위에는 hermes-engine 체크섬을 정규화하는 짧은 CocoaPods 훅이 있다.

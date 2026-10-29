@@ -157,7 +157,7 @@ export function matchesQuery(member: RosterMember, rawQuery: string): boolean {
 
 /**
  * Name order, Korean-aware: `ko` collation puts Hangul ahead of Latin, so a
- * roster of 곽성재 / 김인턴 / Hermes reads in the order a Korean team expects
+ * roster of 구민수 / 김인턴 / Hermes reads in the order a Korean team expects
  * rather than in code-point order. The handle breaks ties between the duplicate
  * display names this workspace really has.
  */

@@ -167,3 +167,18 @@ export const SHEET_ICON_SIZE: Readonly<Record<SheetIconName, number>> = {
   copy: 22,
   chevron: 18,
 };
+
+// ---- 사진 뷰어 아이콘 둘 (#4297) ---------------------------------------------
+// Lucide `download`·`share`(ISC, 웹이 `lucide-react` 로 쓰는 같은 집합 — 경로 그대로), 같은 레시피(선 1.8, viewBox 24,
+// 22pt 의 1·2·3배). 뷰어 맨 아래 둥근 유리 [저장]·[공유] 안에 선다. 「share」는 iOS 의 공유 글리프(네모 + 위 화살표)와
+// 같은 뜻이라 시스템 공유 시트가 뜬다는 예고가 된다. 다시 만드는 법: `rsvg-convert -w <22|44|66> -h <22|44|66>`.
+
+export const VIEWER_ICONS = {
+  download: require('./download22.png') as ImageSourcePropType,
+  share: require('./share22.png') as ImageSourcePropType,
+} as const;
+
+export type ViewerIconName = keyof typeof VIEWER_ICONS;
+
+/** 둥근 유리 단추 안 글리프 22 — 뒤로(`CONV_ICON_SIZE.left`)와 같은 크기라 세 단추의 글리프가 한 무게로 읽힌다. */
+export const VIEWER_ICON_SIZE = 22;

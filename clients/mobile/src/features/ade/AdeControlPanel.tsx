@@ -128,8 +128,11 @@ const buildDurabilityText = (
   warn: {color: color.warn},
 });
 
-/** 명부가 아직이거나 내가 못 보는 방. 방 이름을 지어내지 않는다(웹과 같은 낱말). */
-const UNRESOLVED_CHANNEL = '다른 채널';
+/**
+ * 명부가 아직이거나 내가 못 보는 방. 방 이름을 지어내지 않는다(웹과 같은 낱말). 고정 카드의
+ * 「전문 보기」(#4705)가 같은 앵커 열기를 탈 때도 이 낱말로 말한다.
+ */
+export const UNRESOLVED_CHANNEL = '다른 채널';
 
 /**
  * 「대화로」의 글자 (#1193 · 리뷰 H1).

@@ -1,0 +1,49 @@
+appId: app.momo.ios
+name: 117-list-tap-capture
+---
+# 117-list-tap-capture — 입력 중 대화 목록을 눌러 입력창을 쉬게 한 **모양**을 찍는다 (#4614, design-review 용). 단정은 `115-list-tap-dismiss` 가 하고 여기는 사진만 만든다 — 그래서 계측 한 줄(`probe`)을
+# 켜지 않은 표면에서 돈다(캡처에 계측 글자가 찍히지 않는다).
+#
+# 표면 `TAP-UP+TYPED`(한 줄 초안) · `TAP-UP+LONG`(여러 줄 초안, 첫 줄이 길다)을 다크로, `LIGHT-TAP-UP+…` 을 라이트로 띄운다. 입력창이 1.5초 뒤 포커스를 받아 자판이 올라오고, 흐름이 차례로
+#   1-up        자판이 올라온 입력 중 — 쓰던 글이 있다(탭 전)
+#   2-rested    목록을 한 번 눌렀다 — 자판이 내려가고 입력창이 쉬는 알약(첫 줄)으로 접혔다
+#   3-reopen    쉬는 알약을 눌렀다 — 같은 자리에서 펼쳐지고 글·캐럿이 그대로다
+# 를 찍는다. 사진은 결과 폴더 `~/.maestro/tests/<시각>/117-list-tap-capture/takeScreenshot/<SHOT>-….png`(끝난 뒤 `measure/run-list-tap.sh` 가 복사한다).
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure TAP-UP+TYPED -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test -e SHOT=16pro-dark-typed -e LIST_POINT="50%,25%" clients/mobile/maestro/117-list-tap-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+# 자판이 올라온 것(지구본 키가 계층에 선다)과 입력창의 펼침을 기다린다.
+- extendedWaitUntil:
+    visible: "Next keyboard"
+    timeout: 60000
+- runFlow:
+    when:
+      visible: "Continue"
+    commands:
+      - tapOn: "Continue"
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${SHOT}-1-up
+# 목록의 보이는 윗부분을 한 번 누른다(`-e LIST_POINT`, 기본 화면 높이 25%). 접근성 큰 글씨(AX5)에서는 도크가 커져 목록이 위쪽 뼘밖에 안 남으므로 더 위(`50%,15%`)를 준다.
+- tapOn:
+    point: ${LIST_POINT}
+- extendedWaitUntil:
+    notVisible:
+      id: "composer-tools"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 6000
+- takeScreenshot: ${SHOT}-2-rested
+# 쉬는 알약을 다시 누른다.
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible: "Next keyboard"
+    timeout: 20000
+- waitForAnimationToEnd:
+    timeout: 6000
+- takeScreenshot: ${SHOT}-3-reopen

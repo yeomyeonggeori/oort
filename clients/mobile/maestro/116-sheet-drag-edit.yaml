@@ -1,0 +1,104 @@
+appId: app.momo.ios
+name: 116-sheet-drag-edit
+env:
+  # 16 Pro(402×874) 기본값 — 키보드가 올라온 중간 단의 머리 줄이다(시트 위 66). `measure/sheet-drag-run.mjs` 가 기기마다 읽어 덮어쓴다.
+  # SE(375×667) 등 다른 기기의 값은 구동 스크립트가 계산한다(수동 실행은 `--render-only` 로 만든 파일을 쓴다 — 이 파일은 틀이다).
+  HX: "201"
+  HY: "115" # 머리 제목 줄 y
+  HY_SHORT: "175"
+  HY_FAR: "415"
+  HY_FLICK: "296"
+  FLICK_MS: "60" # 튕김 시간(ms)
+  FLICK_SKIP: "false" # 튕김 거리가 100pt 미만인 작은 시트(SE 편집 시트)는 합성 스와이프가 속도 문턱을 못 넘어 ⑤ 를 뺀다
+  INPUTY: "187" # 입력 상자 y — 입력은 응답자라 시트가 이동에서 가로채야 한다
+  INPUT_FAR: "365"
+  BLANKY: "301" # 입력 상자 아래 빈 본문 y(눌리지 않는 자리 — 시작 응답자 길)
+  BLANK_FAR: "479"
+  SHOT: "sheet-drag-edit"
+---
+# 116-sheet-drag-edit — 편집 시트(메시지 고치기, 중간 단, 키보드 위)의 끌어내리기와 저장 안 한 입력 확인 (#4612 2단계).
+#
+# 표면 `-momoMeasure SHEETDRAG-EDIT`(다크) · `LIGHT-SHEETDRAG-EDIT`(라이트)는 배송되는 `MessageEditorSheet` 를 세운다. 입력이 자동으로
+# 초점을 얻어 소프트 키보드가 올라오고 시트의 바닥이 키보드 윗면에 앉는다(`phone-sheets.md` §2). 닫히면 무대에 「닫힘 N」과 「시트 다시 열기」.
+#
+#   ① 모자란 끌기(머리, 느리게)                       닫히지 않고 제자리로 — 키보드는 그대로
+#   ② 깨끗한 시트의 머리 끌기(문턱 위)                 묻지 않고 닫힌다(닫힘 1)
+#   ③ 입력한 뒤(저장 안 한 입력) 머리 끌기              닫지 않고 「버릴까요?」 — 「계속 편집」이면 시트·입력이 그대로다
+#   ④ 입력한 뒤 입력 상자 아래 빈 본문에서 끌기          같은 확인 — 「버리기」를 고르면 닫힌다(닫힘 2). (입력 상자 **위**에서 시작한 끌기는 아래 ⑥)
+#   ⑤ 깨끗한 시트의 빠른 튕김                         묻지 않고 닫힌다(닫힘 3)
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 60000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-0-open
+# ① 모자란 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_SHORT}"
+    duration: 1500
+- waitForAnimationToEnd
+- assertVisible:
+    id: "editor-input"
+# ② 깨끗한 머리 끌기
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "닫힘 1"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-2-clean-closed
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 10000
+- waitForAnimationToEnd
+# ③ 입력한 뒤 머리 끌기 — 「버릴까요?」
+- inputText: "추가로 적은 문장"
+- waitForAnimationToEnd
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "버릴까요?"
+    timeout: 8000
+- takeScreenshot: ${SHOT}-3-discard-prompt
+- tapOn: "계속 편집"
+- waitForAnimationToEnd
+- assertVisible:
+    id: "editor-input"
+- takeScreenshot: ${SHOT}-3-kept
+# ④ 입력 상자 아래 빈 본문에서 끌기 — 같은 확인, 「버리기」면 닫힌다
+- swipe:
+    start: "${HX}, ${BLANKY}"
+    end: "${HX}, ${BLANK_FAR}"
+    duration: 1200
+- extendedWaitUntil:
+    visible: "버릴까요?"
+    timeout: 8000
+- tapOn: "버리기"
+- extendedWaitUntil:
+    visible: "닫힘 2"
+    timeout: 8000
+- tapOn:
+    id: "sheetdrag-reopen"
+- extendedWaitUntil:
+    visible:
+      id: "editor-input"
+    timeout: 10000
+- waitForAnimationToEnd
+# @skip-when FLICK_SKIP
+# ⑤ 깨끗한 시트의 빠른 튕김 — 합성 스와이프가 속도 문턱을 넘을 수 있는 시트(튕김 거리 ≥ 100pt)에서만. SE 의 편집 시트는 문턱 거리가 87pt 라
+# 그 아래 거리(78pt)로는 측정 속도가 0.52~0.63px/ms 에 그쳐 못 닫는다(시트 판정은 옳다 — 하네스의 한계). 속도 문턱은 순수 판정 시험과 16 Pro 가 잰다.
+- swipe:
+    start: "${HX}, ${HY}"
+    end: "${HX}, ${HY_FLICK}"
+    duration: ${FLICK_MS}
+- extendedWaitUntil:
+    visible: "닫힘 3"
+    timeout: 8000
+# @end

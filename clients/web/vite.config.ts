@@ -180,7 +180,12 @@ export default defineConfig({
   // merge-tree gate shares it with other gates and reviewers). On a smaller
   // machine `availableParallelism() - 1` keeps the default, so a 4-vCPU CI
   // runner still gets 3.
+  //
+  // Retry policy (#4708). Every test's `retry` is set from `test-retry.json` by the custom runner:
+  // only registered, unexpired tests re-run, once. Everything else is 0 — a per-test `{ retry }`
+  // option or `--retry` cannot get around the registry. See `src/testing/retryRegistry.ts`.
   test: {
+    runner: path.resolve(__dirname, "src/testing/retryRunner.ts"),
     env: {
       TZ: "Asia/Seoul",
     },
@@ -194,6 +199,7 @@ export default defineConfig({
   },
 } as import("vite").UserConfig & {
   test: {
+    runner: string;
     env: { TZ: string };
     poolOptions: { forks: { minForks: number; maxForks: number } };
   };

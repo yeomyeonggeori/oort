@@ -22,7 +22,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 
 import {ROW_GLYPH_MAX_SCALE, Sentence, STACK_PILL_SCALE} from './atoms';
 import {HOME_ICONS, HOME_ICON_SIZE, SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
-import {usePageSheetAction, usePageSheetKeyboard} from './PageSheet';
+import {usePageSheetAction, usePageSheetKeyboard, usePageSheetScrollProps} from './PageSheet';
 import {cardPosition, cardRing, dividerIndent, type CardInset} from './sheetModel';
 import {useKeyboardAppearance, usePalette, useStyles, useTheme} from './theme';
 import {
@@ -582,6 +582,7 @@ export function ConfirmStep({
   confirmLabel,
   pendingLabel,
   pending = false,
+  confirmDisabled = false,
   cancelLabel = '취소',
   onCancel,
   onConfirm,
@@ -599,6 +600,12 @@ export function ConfirmStep({
   /** 왕복 중의 낱말(「지우는 중…」). */
   pendingLabel: string;
   pending?: boolean;
+  /**
+   * 위험 단추를 잠근다(끊긴 동안처럼 지금은 눌러도 소용없을 때). `pending` 과 달리 낱말은 그대로이고 단추가 흐려지며
+   * `accessibilityState.disabled` 가 선다. 왜 잠겼는지는 `error` 가 말한다(눌러도 반응 없는 단추를 살아 있는 듯
+   * 두지 않는다).
+   */
+  confirmDisabled?: boolean;
   cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -645,10 +652,14 @@ export function ConfirmStep({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={confirmLabel}
-          accessibilityState={{busy: pending, disabled: pending}}
-          disabled={pending}
+          accessibilityState={{busy: pending, disabled: pending || confirmDisabled}}
+          disabled={pending || confirmDisabled}
           onPress={onConfirm}
-          style={({pressed}) => [styles.destructive, pressed && styles.confirmPressed]}
+          style={({pressed}) => [
+            styles.destructive,
+            pressed && styles.confirmPressed,
+            confirmDisabled && !pending && styles.rowDisabled,
+          ]}
           testID={confirmTestID}>
           <Sentence style={styles.destructiveLabel}>{pending ? pendingLabel : confirmLabel}</Sentence>
         </Pressable>
@@ -677,6 +688,11 @@ export function SheetScroll({
   testID,
   onLayout,
   onContentSizeChange,
+  onScroll,
+  onScrollEndDrag,
+  onMomentumScrollEnd,
+  scrollEnabled = true,
+  contentContainerStyle,
   ...scroll
 }: ScrollViewProps & {children: React.ReactNode; testID?: string}): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -703,18 +719,28 @@ export function SheetScroll({
     flashWhenCut();
     onContentSizeChange?.(width, height);
   };
+  // 시트에 자기를 알린다(#4612): 맨 위일 때만 시트가 본문 끌기를 가져가고, 시트가 끌기를 쥐는 동안은 스크롤을 얼린다. 크기(레이아웃·내용
+  // 크기)도 함께 알린다 — 내용이 뷰포트를 넘치면 본문은 시작 응답자를 잡지 않는다(스크롤을 죽이지 않으려고, `claimsSheetTouchStart`).
+  const sheetScroll = usePageSheetScrollProps({
+    onScroll,
+    onScrollEndDrag,
+    onMomentumScrollEnd,
+    onLayout: handleLayout,
+    onContentSizeChange: handleContentSize,
+    scrollEnabled,
+  });
   return (
     <ScrollView
       ref={ref}
-      bounces={false}
       showsVerticalScrollIndicator
       indicatorStyle={scheme === 'light' ? 'black' : 'white'}
       keyboardShouldPersistTaps="handled"
-      contentContainerStyle={[styles.scrollContent, {paddingBottom: bottom}]}
       testID={testID}
+      {...sheetScroll}
       {...scroll}
-      onLayout={handleLayout}
-      onContentSizeChange={handleContentSize}>
+      // 호출자의 몸 스타일은 기본(가로 여백·위 여백·gap)과 키보드를 아는 바닥 여백 **위에 얹는다** — 덮어쓰지 않는다. 카드가 스스로
+      // 가로 여백을 지는 몸(지시 기기 패널)은 `paddingHorizontal: 0` 만 얹어 위·바닥 여백과 키보드 처리는 그대로 받는다.
+      contentContainerStyle={[styles.scrollContent, {paddingBottom: bottom}, contentContainerStyle]}>
       {children}
     </ScrollView>
   );

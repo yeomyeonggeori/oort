@@ -630,7 +630,9 @@ const SEND_SLOP = slopTo(CONV.composerCircle);
 // (한 줄 + 도구 줄)다. 여러 줄 높이는 남지 않는다.
 //
 // 접힘은 포커스를 잃고(`onBlur` — 끌어 내리기·`Keyboard.dismiss`·다른 화면으로 감이 모두 이 길이다) 글도 없을
-// 때다. 글이 남아 있으면 포커스를 잃어도 펼친 채다. 펼침은 **입력창이 포커스를 쥔 동안**이지 키보드가 보이는
+// 때다. 글이 남아 있으면 포커스를 잃어도 펼친 채다 — **단 하나의 길만 예외다(#4614, owner 10-26)**: 대화 목록을 눌러 입력창을 쉬게 하면(`dockFollow.rest`) 글이 있어도
+// 접힌다. 글은 지우지 않고(초안 유지) 접힌 알약이 첫 줄을 보인다. 쉬는 상태는 **사용자가 다시 닿을 때까지**(포커스)다 — 글이 그 사이에 바뀌어도 이어진다(자판을 내리며 iOS 가 자동 고침·조합 중인 글자를
+// 확정하는 `onChangeText` 가 쉬라는 알림 **뒤에** 도착한다: 시뮬레이터 실측 「Teh」→「The」). 펼침은 **입력창이 포커스를 쥔 동안**이지 키보드가 보이는
 // 동안이 아니다 — 하드웨어 키보드로 캐럿이 서 있을 때도 펼침이다. 키보드만 내려가고 포커스가 남는 길(앱이 백그라운드로
 // 갔다 옴·하드웨어 키보드)은 일부러 듣지 않는다: 포커스가 곧 「입력 중」이고, iOS 는 돌아올 때 자판을 되살린다.
 //
@@ -1263,6 +1265,21 @@ export function Composer({
   // depend on it — a changing identity there would rebuild the handler on every
   // keystroke, which is exactly the churn this file is careful about.
   const currentTextRef = useRef(text);
+  // 쉬는 초안 (#4614). 대화 목록을 눌러 입력창을 쉬게 한 뒤 **사용자가 다시 닿을 때까지** 이어지는 상태다 — 포커스가 오면 `onInputFocus` 가, 방이 바뀌면 `draftKey` 효과가, 글이 비면 아래 효과가 놓는다.
+  // 글이 **같은지는 보지 않는다**: 자판을 내리면 iOS 가 그 자리에서 자동 고침 후보·조합 중인 글자를 확정하고 그 `onChangeText` 는 쉬라는 알림 **뒤에** 온다(시뮬레이터 실측: 「Teh」→「The」가 목록을 누른 뒤
+  // 도착했다 — 글이 같아야 쉬는 것으로 보던 첫 판에서는 그 한 번에 입력창이 다시 펼쳐졌다). 포커스 없이 글을 바꾸는 것은 그 확정뿐이고, 글을 치는 손은 먼저 포커스를 준다.
+  // 접힌 알약은 같은 `TextInput` 이 높이만 한 줄로 못 박힌 모양이라 글은 지워지지도 옮겨지지도 않는다.
+  const [restedFlag, setRestedFlag] = useState(false);
+  // 위의 **동기** 사본 — `onBlur`·목록의 알림이 렌더 없이 읽는다(접히는 움직임을 열지 말지가 같은 핸들러 안에서 정해져야 한다, `collapseWithMotion`).
+  const restedRef = useRef(false);
+  // 쉬러 갈 때의 글 칸 **자연 높이**(#4614). 여러 줄 초안이 쉬는 알약으로 접히거나 다시 펼쳐질 때 글 칸의 높이를 한 프레임에 줄이거나 키우지 않고, 도구 줄과 **같은 스프링**으로 잇는 데 쓴다 —
+  // 한 프레임에 줄면 그 위 대화가 그만큼 한 번에 뛴다(시뮬레이터 실측, 세 줄: 도크 43pt 가 한 프레임에 줄고 목록이 1~2프레임 늦게 따라와 틈이 43pt 벌어졌다).
+  // 쉬는 동안 계속 들고 있다가 펼침의 스프링이 끝나면 버린다. `null` 이면 이 움직임이 없다(쉬지 않는 글·높이를 모를 때).
+  const [restFrom, setRestFrom] = useState<number | null>(null);
+  // 위의 **동기** 사본 — 입력창의 `onLayout` 이 「잘려 있는 중의 높이」를 자연 높이로 적지 않게 읽는다.
+  const restFromRef = useRef<number | null>(null);
+  // 입력창이 **자기 크기로 서 있을 때** 마지막으로 알려 온 높이(`onInputLayout`). 쉬러 가는 순간 이 값이 `restFrom` 이 된다.
+  const inputHeightRef = useRef(0);
   // 끌어 내리기가 읽는 것들 (#4305). 글자 범위를 잡고 있거나(선택 손잡이를 끄는 중) 글이 상한을 넘어 안에서
   // 스크롤되는 중이면 아래로 끄는 손가락은 자판을 내리려는 것이 아니다.
   const selectionRangeRef = useRef(false);
@@ -1371,6 +1388,11 @@ export function Composer({
     draftKeyRef.current = draftKey;
     const restored = draftKey === undefined ? '' : readDraft(draftKey);
     currentTextRef.current = restored;
+    // 다른 방의 초안은 그 방의 규칙으로 돌아온다 — 쉬던 방의 표식이 따라오지 않는다(#4614).
+    restedRef.current = false;
+    setRestedFlag(false);
+    restFromRef.current = null;
+    setRestFrom(null);
     setText(restored);
     setCaret(restored.length);
     setMentionOpen(false);
@@ -1541,6 +1563,9 @@ export function Composer({
     // 누름이 건 스프링은 끊기지 않고 이어진다. 유예 시계도 여기서 멈춘다.
     pressingRef.current = false;
     clearPressGrace();
+    // 다시 눌러 포커스가 왔다: 쉬던 초안은 같은 자리에서 펼친다(#4614).
+    restedRef.current = false;
+    setRestedFlag(false);
     setPressing(false);
     setFocused(true);
   }, [setKeyBlocked, clearPressGrace]);
@@ -1717,7 +1742,17 @@ export function Composer({
   // 누르는 중 **또는** 포커스 **또는** 글. 펼침의 첫 프레임은 이 조건이 처음 참이 되는 렌더이고, 아래 효과가 같은 커밋에서 스프링을 건다.
   // 누르는 중(`pressing`)이 있는 까닭은 **시작 시각**이다: 포커스 이벤트는 손을 뗀 뒤 RN `onPress → focus()` · 네이티브 · JS 를 돌아 와서 첫 포커스에서
   // `keyboardWillShow` 보다도 39~120ms 늦게 닿았다(시뮬레이터 실측, #4456). 손이 닿는 순간 시작하면(owner 10-25 「누르는 순간 바로」) 그 지연이 없다.
-  const expanded = pressing || focused || text !== '';
+  // 글이 있어도 입력창이 **쉬는 중**이면 그 글은 펼침의 이유가 아니다(위 `restedFlag`). 포커스·누름은 여전히 이유다. 글이 없으면 쉴 것이 없으니 표식은 글이 있을 때만 읽는다.
+  const rested = restedFlag && text !== '';
+  // 글이 비면(보냄·명령) 표식을 걷는다 — 걷지 않으면 이 방에서 포커스 없이 글이 다시 채워지는 길이 생길 때 낡은 표식이 그 글을 쉬는 초안으로 되살린다. 지금 그런 길은 없어서(글을 치려면 포커스가 먼저다) 방어선이다.
+  useEffect(() => {
+    if (!restedFlag || text !== '') return;
+    restedRef.current = false;
+    setRestedFlag(false);
+    restFromRef.current = null;
+    setRestFrom(null);
+  }, [restedFlag, text]);
+  const expanded = pressing || focused || (text !== '' && !rested);
   const reduceMotion = useReduceMotionRef();
   const progress = useRef(new Animated.Value(expanded ? 1 : 0)).current;
   const dockFollow = useContext(DockFollowContext);
@@ -1736,9 +1771,10 @@ export function Composer({
     shownRef.current = shown;
   }, [shown]);
   // 펼친 알약이 글 없이 접힐 때의 움직임을 연다. 포커스를 잃어서(`onInputBlur`)와 누름이 포커스로 이어지지 않아서(`releasePress`)가 **같은 판정**이다.
-  // 움직이며 접히는 것은 **펼친 알약이 펼침의 이유(포커스·누름)만 잃고 글이 없을 때**뿐이다. 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
+  // 움직이며 접히는 것은 **펼친 알약이 펼침의 이유(포커스·누름)만 잃고 글이 없거나 글이 쉬는 초안일 때**뿐이다(#4614: 목록을 눌러 접는 길도 같은 스프링이다 — 자판이 내려가기 시작하는 프레임에
+  // 알약이 한 번에 줄면 그 위 대화가 튄다). 그 밖에 글이 남았으면 접힘이 없고, 동작 줄이기면 효과가 즉시 접는다.
   const collapseWithMotion = useCallback(() => {
-    if (expandedRef.current && currentTextRef.current === '' && !reduceMotion.current) {
+    if (expandedRef.current && (currentTextRef.current === '' || restedRef.current) && !reduceMotion.current) {
       setCollapsing(true);
     }
   }, [reduceMotion]);
@@ -1747,6 +1783,22 @@ export function Composer({
     collapseWithMotion();
     setFocused(false);
   }, [collapseWithMotion]);
+  // 대화 목록을 눌렀다 (#4614, `tapDismiss.ts` → `dockFollow.rest`). 자판은 목록이 이미 내렸다(`Keyboard.dismiss`) — 여기서는 **글이 남은 입력창을 접는 것**만 한다. 글이 없으면 할 일이 없다:
+  // 접힘은 포커스를 놓는 `onBlur` 가 그대로 맡는다. 포커스가 아직 안 풀렸어도(네이티브 `onBlur` 가 곧 온다) 지금 이 글을 쉬는 초안으로 적고 `collapsing` 을 같은 배치로 올린다 — 접히는 움직임을
+  // 열지 말지는 `onBlur` 가 읽는 동기 사본(`restedRef`)이 정하므로 **순서가 중요하다**: 사본을 먼저 쓰고, 그다음 `collapseWithMotion`, 그다음 상태.
+  useEffect(() => {
+    if (dockFollow === null) return undefined;
+    return dockFollow.registerRest(() => {
+      if (currentTextRef.current === '' || restedRef.current) return;
+      restedRef.current = true;
+      // 접히는 스프링의 **시작값**: 지금 글 칸이 서 있는 높이. 모르면(아직 한 번도 재지 않았다) 이 움직임 없이 바로 접는다.
+      const natural = inputHeightRef.current;
+      restFromRef.current = natural > 0 ? natural : null;
+      collapseWithMotion();
+      setRestedFlag(true);
+      setRestFrom(restFromRef.current);
+    });
+  }, [dockFollow, collapseWithMotion]);
   useEffect(() => {
     if (expandedRef.current === expanded) return;
     expandedRef.current = expanded;
@@ -1770,6 +1822,12 @@ export function Composer({
         if (result.finished) done?.();
       });
     };
+    // 쉬던 초안의 글 칸 움직임(`restFrom`)은 펼침이 **끝나야** 버린다 — 포커스가 오는 순간(`onInputFocus`)이 아니라. 포커스는 스프링 한가운데에 닿고(눌림이 먼저 펼침을 연다),
+    // 그때 글 칸을 자연 높이로 되돌리면 남은 높이가 한 프레임에 열린다.
+    const endRestClip = () => {
+      restFromRef.current = null;
+      setRestFrom(null);
+    };
     if (expanded) {
       setCollapsing(false);
       if (reduceMotion.current) {
@@ -1781,7 +1839,8 @@ export function Composer({
         // 접힘 쪽은 알리지 않는다: 같은 프레임 접힘은 보낸 말의 활강과 겹칠 수 있고, 동작 줄이기의 접힘은 간격이 변하지 않았다(녹화 6번, 변화 ≤1px).
         progress.setValue(1);
         dockFollow?.notify();
-      } else spring(1);
+        endRestClip();
+      } else spring(1, endRestClip);
       return;
     }
     // 접힘은 두 갈래다.
@@ -1875,7 +1934,44 @@ export function Composer({
     releasePress();
   }, [releasePress, unlockFocusSoon]);
 
+  // 쉬는 알약 **전체**가 누르는 면이다 (#4614, design-review r1 H1). 쉬는 글 칸은 둘째 줄이 안 걸리게 첫 줄 높이로 줄어 있어서(아래 `restedStyle`) 알약 높이(52pt) 중 글 칸 30pt 만 입력창이 받았다 —
+  // 알약의 아래 16pt 를 누르면 `composer-field` 의 누름 표식만 켜져 알약이 열렸다 포커스가 안 와서 도로 닫혔다. 글 칸 위에 알약 높이만큼 투명한 누름 면을 얹어 **어디를 눌러도** 포커스를 준다.
+  // 포커스는 JS 가 준다(`focus()`): 글 칸의 네이티브 탭 길은 글자 크기에 따라 닿기도 안 닿기도 해서(AX5 에서는 글 칸이 알약 전체라 눌린 자리에 캐럿이 갔고 기본 크기에서는 끝에 있었다) 캐럿이 글자 크기마다 달랐다 —
+  // 이 면이 받으면 캐럿은 쉬기 전 그 자리(보통 끝)에 그대로 있다. 끌기를 알아챈 손(#4518 D2 잠금)은 포커스로 잇지 않는다.
+  const onRestedPress = useCallback(() => {
+    if (focusLockRef.current) return;
+    inputRef.current?.focus();
+  }, [inputRef]);
+
   const collapsedHeight = composerCollapsedHeight(fontScale);
+  // 쉬는 초안의 알약은 **첫 줄 하나만** 보인다 (#4614). 엄지 높이(44)에 둘째 줄의 윗부분이 걸려 잘려 보이던 것을, 입력창을 첫 줄의 아랫선까지(위 여백 + 한 줄)만으로 줄이고 남는 높이를 입력창
+  // **밖**(margin)으로 돌려 해결한다 — 알약의 높이는 그대로고 첫 줄은 글이 한 줄일 때와 같은 자리(가운데)에 선다. 글이 없는 접힘은 한 줄뿐이라 이 계산이 필요 없다.
+  const restedLine = Math.ceil(line.body * fontScale);
+  // 위 여백 + 위 테두리 + 한 줄 + **아래 테두리**(design-review r1 N1: 아래 테두리 몫이 빠져 글 상자가 줄 높이보다 1pt 낮았다 — 라틴 첫 줄의 g·y·p 아랫부분이 걸릴 수 있다).
+  const restedBox = INPUT_PAD_Y + INPUT_BORDER * 2 + restedLine;
+  const restedMarginTop = Math.max(0, Math.floor((collapsedHeight - restedLine) / 2) - INPUT_PAD_Y - INPUT_BORDER);
+  const restedMarginBottom = Math.max(0, collapsedHeight - restedMarginTop - restedBox);
+  const restedStyle = {
+    height: restedBox,
+    minHeight: restedBox,
+    paddingBottom: 0,
+    marginTop: restedMarginTop,
+    marginBottom: restedMarginBottom,
+  };
+  // 접히거나 펼쳐지는 **움직임 동안**(`shown`)에는 글 칸을 못 박지 않고 그것을 감싼 상자(`composer-field`)를 같은 진행값으로 줄이고 키운다(#4614): 상자의 높이가 쉬는 알약의 첫 줄 상자 ↔ 쉬러 갈 때의
+  // 자연 높이(`restFrom`)를 오가고, 위·아래 여백이 쉬는 알약의 값 ↔ 0 을 오간다 — 그래서 상자가 차지하는 높이(높이 + 여백)는 `collapsedHeight` ↔ `restFrom` 을 **도구 줄과 같은 스프링으로** 오간다.
+  // 상자는 안을 잘라서(`overflow`) 첫 줄이 위에 붙은 채 줄어든다. 움직임이 끝나면(`shown` 거짓 = 쉬는 알약) 끝 모양과 **같은** 못 박힘으로 바톤을 넘긴다: 높이 + 여백이 같아 한 프레임도 안 튄다.
+  const clipRest = restFrom !== null && shown;
+  const restClipStyle = clipRest
+    ? {
+        // 끝값은 쉬러 갈 때의 자연 높이 **그대로**다 — 쉬는 글 상자(`restedBox`)보다 낮아도(접근성 큰 글씨: 펼친 칸은 한 줄 높이에 갇히고 쉬는 알약은 큰 글자의 한 줄이다, design-review r2 L4) 끝값을 올리지 않는다.
+        // 올리면 움직임이 시작·끝나는 프레임에 그 차이만큼 칸이 한 번에 뛴다. 높이가 이 값을 오가는 동안 위·아래 여백이 함께 줄어 칸이 차지하는 높이는 `collapsedHeight` ↔ `restFrom` 을 매끈히 오간다.
+        height: progress.interpolate({inputRange: [0, 1], outputRange: [restedBox, restFrom]}),
+        marginTop: progress.interpolate({inputRange: [0, 1], outputRange: [restedMarginTop, 0]}),
+        marginBottom: progress.interpolate({inputRange: [0, 1], outputRange: [restedMarginBottom, 0]}),
+        overflow: 'hidden' as const,
+      }
+    : null;
   // 펼침(또는 접히는 중)일 때만 글 칸이 원 자리(양옆 원 지름)를 풀고, 도구 줄이 선다. 접힘은 숫자 그대로라 첫 프레임에 간다.
   //
   // 「동작 줄이기」는 글 칸 여백을 **진행값을 거치지 않고** 상태가 정한 숫자로 쓴다(#4518). 움직임이 없으니 보간할 것이 없다. 보간 값은 JS 구동이라 `setValue` 가 네이티브를 리액트 밖에서 직접 고치는데,
@@ -1946,6 +2042,8 @@ export function Composer({
   // 그 답은 이 상자에 대한 답이 아니다.
   const [inputWidth, setInputWidth] = useState<number | null>(null);
   const onInputLayout = useCallback((event: LayoutChangeEvent) => {
+    // 쉬는 움직임이 글 칸을 잘라 두는 동안(`restFrom`)의 높이는 자연 높이가 아니다 — 그 높이를 적으면 다음에 쉬러 갈 때 시작값이 줄어든 높이가 된다(#4614).
+    if (restFromRef.current === null) inputHeightRef.current = event.nativeEvent.layout.height;
     // 펼친 폭은 자리표시가 서는 폭이 아니다 — 자는 접힘 알약의 한 줄에서만 잰다(#4305). 펼치는 중·접히는 중의 폭도 아니므로
     // 접힘이 끝나 도구 줄이 내려간 뒤(`shown` 이 거짓, 접힌 폭)에서만 잰다(#4456 → #4518: 진행값 리스너는 첫 접힘 뒤 사라진다, 위 `shownRef`).
     if (shownRef.current) return;
@@ -2366,7 +2464,7 @@ export function Composer({
           </Pressable>
         )}
         <Animated.View
-          style={{marginLeft: inputInset, marginRight: inputInset}}
+          style={[{marginLeft: inputInset, marginRight: inputInset}, restClipStyle]}
           testID="composer-field"
           // 누름 (#4518): 입력창에 닿는 터치만 듣는다 — 이 상자는 입력창만 감싼다(+ · 보내기 · 도구 줄은 형제다). 관찰만 하고 응답자를 잡지 않는다.
           onTouchStart={onFieldTouchStart}
@@ -2387,6 +2485,9 @@ export function Composer({
             styles.input,
             {maxHeight},
             text === '' && {height: collapsedHeight},
+            // 쉬는 초안도 한 줄로 못 박는다(#4614) — 안 그러면 접힌 알약이 여러 줄 높이로 서 있다. 위 `restedStyle` 이 왜 `collapsedHeight` 가 아닌지 말한다.
+            // 움직이는 동안은 못 박지 않는다 — 그동안은 감싼 상자(`restClipStyle`)가 같은 일을 진행값으로 한다.
+            rested && !clipRest && restedStyle,
           ]}
           onContentSizeChange={event => {
             overflowRef.current =
@@ -2414,6 +2515,8 @@ export function Composer({
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
           accessibilityHint={droppedHint}
           multiline
+          // 쉬는 초안(#4614)은 스크롤하지 않는다: 입력창 안이 끝 쪽으로 스크롤된 채(캐럿이 끝에 있었다) 한 줄로 줄면 그 스크롤이 남아 첫 줄이 아니라 중간 줄이 알약에 보였다(시뮬레이터 실측).
+          scrollEnabled={!rested}
           // 끌기 잠금(#4518 D2): 접힌 빈 입력창을 눌러 끌기 문턱을 넘은 손이 닿아 있는 동안만 `false` 다 — 손을 뗄 때 네이티브가 포커스를 주지 못하게 한다(`onFieldTouchMove`).
           // 그 밖에는 언제나 `true` 라서(기본값과 같다) 다른 터치·포커스·글자 선택은 지금 그대로다.
           editable={!focusLock}
@@ -2480,6 +2583,18 @@ export function Composer({
           textAlignVertical="top"
           testID="composer-input"
         />
+        {/* 쉬는 알약의 눌리는 면 (#4614 H1) — 쉬는 초안이 포커스를 받기 전까지 선다. **움직이는 중에도 서 있어야 한다**: 손이 닿는 순간 펼침이 시작되고(#4518) 그 렌더에서 이 면이 사라지면
+            눌리던 손의 `onPress` 가 오지 않는다(시뮬레이터 실측: `pressIn` 만 오고 `onPress` 가 없었다). 접근성 요소가 아니다(글 칸이 그 몫을 한다). */}
+        {rested && !focused ? (
+          <Pressable
+            accessible={false}
+            importantForAccessibility="no"
+            accessibilityElementsHidden
+            onPress={onRestedPress}
+            style={StyleSheet.absoluteFill}
+            testID="composer-rested-target"
+          />
+        ) : null}
         </Animated.View>
         {shown ? (
           <Animated.View

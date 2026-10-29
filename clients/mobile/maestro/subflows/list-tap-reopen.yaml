@@ -1,0 +1,14 @@
+appId: app.momo.ios
+name: list-tap-reopen
+---
+# 쉬는 알약을 다시 누르면 **같은 자리에서** 펼친다 (#4614). 환경: DRAFT. 도구 줄이 다시 서고 자판이 올라오고 글은 그대로다.
+- tapOn:
+    id: "composer-input"
+- extendedWaitUntil:
+    visible: ".*kb=up.*"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 6000
+- assertVisible:
+    id: "composer-tools"
+- assertVisible: ".*draft=${DRAFT}$"

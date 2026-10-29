@@ -54,7 +54,7 @@ function host(overrides: Partial<WorkHost> = {}): WorkHost {
     scope: "workspace",
     ownerMemberId: alice,
     type: "app",
-    displayName: "성재 맥북",
+    displayName: "민수 맥북",
     capabilities: {},
     createdAtMs: 0,
     online: true,

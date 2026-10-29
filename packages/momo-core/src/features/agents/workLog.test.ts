@@ -259,7 +259,7 @@ describe("workLog — 도구 단계", () => {
       partial(T0, {
         tool_call_id: "call-1",
         tool_call_name: "work.session.end",
-        tool_call_args: { session: "A", path: "/Users/seongjae/secret" },
+        tool_call_args: { session: "A", path: "/Users/minsu/secret" },
         tool_call_args_truncated: true,
       }),
       T0
@@ -271,7 +271,7 @@ describe("workLog — 도구 단계", () => {
     expect(entry.argFieldsHidden).toBe(0);
     expect(entry.argWithheld).toBe(2);
     // 값은 직렬화해도 어디에도 없다. 이것이 이 타입의 요점이다.
-    expect(JSON.stringify(entry)).not.toContain("/Users/seongjae/secret");
+    expect(JSON.stringify(entry)).not.toContain("/Users/minsu/secret");
     expect(JSON.stringify(entry)).not.toContain('"A"');
   });
 
@@ -313,9 +313,9 @@ describe("workLog — 도구 단계", () => {
         tool_call_name: "fs.patch",
         // map형 인자에서는 키가 스키마가 아니라 사람의 데이터다.
         tool_call_args: {
-          "/Users/seongjae/projects/momo/secret-plan.md": "…",
+          "/Users/minsu/projects/momo/secret-plan.md": "…",
           "https://internal.example/deploy?token=abc": "…",
-          "C:\\Users\\seongjae\\notes.txt": "…",
+          "C:\\Users\\minsu\\notes.txt": "…",
           "~/.ssh/config": "…",
           "배포 되돌리기 절차": "…",
           dryRun: true,

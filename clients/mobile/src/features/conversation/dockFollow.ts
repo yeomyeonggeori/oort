@@ -13,6 +13,9 @@ import {createContext} from 'react';
 // 탭에서 이 한 번이 없으면 마지막 말풍선이 1~8프레임 가려졌다(시뮬레이터: 알림이 없으면 8번 모두, 알리면 28번 중 2번 — 한가할 때 1번(68ms)·부하 속 1번(30ms); 첫 프레임에서 목록이 한 박자 늦는 경합은 남고 키보드 준비가 그 상태를 얼리면 길어진다).
 //
 // 이 파일은 둘 사이의 얇은 다리다: `ConversationLayout` 이 다리를 하나 만들어 목록 자리와 도크 자리의 후손에게 컨텍스트로 준다. 다리가 없는 곳(시험·하네스 일부)에서는 아무 일도 안 한다.
+//
+// **반대 방향도 한 줄 있다** (#4614). 목록을 눌러 입력창을 쉬게 할 때(`tapDismiss.ts`) 목록이 도크에게 「쉬어라」를 알린다. 자판을 내리는 것은 목록이 `Keyboard.dismiss()` 로 직접 하고,
+// 이 길은 **글이 남은 입력창을 접는 것**만 맡는다 — 글이 있는 입력창은 포커스를 잃어도 펼친 채라는 #4456 의 규칙을 이 한 길에서만 깬다(끌어서 내리기·보내기 등 다른 길은 그대로다).
 // =============================================================================
 
 export interface DockFollow {
@@ -20,10 +23,15 @@ export interface DockFollow {
   register: (follow: () => void) => () => void;
   /** 도크의 높이가 이번 프레임에 바뀌었다 — 걸려 있는 처리기를 부른다. */
   notify: () => void;
+  /** 입력창이 「목록을 눌렀으니 쉬는 모양으로 간다」는 처리기를 건다(#4614). 푸는 함수를 돌려준다(마지막으로 건 처리기만 산다). */
+  registerRest: (rest: () => void) => () => void;
+  /** 목록을 눌렀다 — 걸려 있는 처리기를 부른다. 걸린 입력창이 없으면 아무 일도 없다. */
+  rest: () => void;
 }
 
 export function createDockFollow(): DockFollow {
   let current: (() => void) | null = null;
+  let restHandler: (() => void) | null = null;
   return {
     register(follow) {
       current = follow;
@@ -33,6 +41,15 @@ export function createDockFollow(): DockFollow {
     },
     notify() {
       current?.();
+    },
+    registerRest(rest) {
+      restHandler = rest;
+      return () => {
+        if (restHandler === rest) restHandler = null;
+      };
+    },
+    rest() {
+      restHandler?.();
     },
   };
 }

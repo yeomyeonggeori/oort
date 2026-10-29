@@ -56,6 +56,16 @@ import {
 import {useNow} from '../../lib/useNow';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
+  PUSH_PREVIEW_DETAIL,
+  PUSH_PREVIEW_LABEL,
+  PUSH_SHOW_SENDER_DETAIL,
+  PUSH_SHOW_SENDER_LABEL,
+  setPushPreview,
+  setPushShowSender,
+  usePushPreview,
+  usePushShowSender,
+} from '../../push/presentation';
+import {
   PUSH_SWITCH_LABEL,
   PUSH_SWITCH_OFF_FAILED,
   pushSwitchDetail,
@@ -86,6 +96,13 @@ import {DEVICE_KEY_TITLE, deviceKeyCopy} from '../deviceKey/copy';
 import {DeviceKeyPanel} from '../deviceKey/DeviceKeyPanel';
 import {useDeviceKey} from '../deviceKey/useDeviceKey';
 import {MemoryPauseSection} from '../memory/MemoryPauseSection';
+import {
+  DEV_TOOLS_ROW_HINT,
+  DEV_TOOLS_TITLE,
+  DevToolsPage,
+  devToolsCountLabel,
+} from './DevToolsPage';
+import {useDevToolsEntry} from './devTools';
 
 // =============================================================================
 // 「설정」 페이지 — 홈 머리의 내 얼굴이 여는 전체 화면 (#4457, owner 2026-10-25; 옛 `ProfileSheet` 의 자리).
@@ -97,12 +114,13 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 // ## 페이지이지 시트가 아니다 — 전환 방식은 스택
 //
 // `docs/design-system/phone-sheets.md` §1 의 표가 정한다: 여러 묶음의 설정은 **페이지**이고, 페이지는
-// 화면 스택에 쌓여 가장자리 밀기로 닫히며(`EdgeSwipeBack`), 머리 **왼쪽**에 원형 X 가 선다. §5 분류표도
+// 화면 스택에 쌓여 가장자리 밀기로 닫히며(`EdgeSwipeBack`), 머리 **오른쪽 위**에 원형 X 가 선다(#4691 — 닫기 X 는
+// 시트와 같은 자리다. 안쪽 장의 ‹ 뒤로는 왼쪽). §5 분류표도
 // 「내 프로필·설정 → 페이지(설정 페이지)」다. 그래서 이 화면은 셸의 한 층(`nav.settings`)이고 `Modal` 이
 // 아니다. 모달 페이지로 지으면 ① 왼쪽 가장자리 밀기가 없고 ② 그 위의 「상태 설정」 시트와 새 버전 시트가
 // **Modal 위의 Modal**이 된다(§1 규칙 2: Modal 위에 화면을 쌓지 않는다). 층은 그 둘을 한 번에 푼다.
 //
-// 이 안의 장(테마·지시 기기·프로필 사진·알림 일시 중지 기한·방해 금지 기한)은 설정 페이지 **위에 한 겹
+// 이 안의 장(테마·지시 기기·명령줄·AI 도구·프로필 사진·알림 일시 중지 기한·방해 금지 기한)은 설정 페이지 **위에 한 겹
 // 더** 쌓이고, 그 머리의 **‹ 뒤로**(첫 장의 X 와 다르다: X 는 설정 전체를 닫고 ‹ 는 한 겹만 벗긴다)와
 // 왼쪽 가장자리 밀기는 **한 겹만** 벗긴다(설정 페이지는 남는다 — 안쪽 `EdgeSwipeBack` 이 바깥을 무장 해제한다). 시트가 하던 「장 바꾸기」(`page` 상태로 한 화면을 갈아
 // 끼움)와 다른 점: 설정 페이지는 마운트된 채 밑에 남아 스크롤 자리와 읽던 값이 그대로다.
@@ -117,7 +135,8 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 //   ④ 알림 토글들               푸시 · 일시 중지(→ 기한 장) · 작업 끝남 · 항상 오는 알림
 //   ⑤ 기억                      내 일시정지
 //   ⑥ 보기 › 테마               → 테마 장
-//   ⑦ 연결                      서버(보조 줄) · 지시 기기 ›(→ 지시 기기 장)
+//   ⑦ 연결                      서버(보조 줄) · 지시 기기 ›(→ 지시 기기 장) · 명령줄·AI 도구 ›(→ 목록·지우기 장, 쓸 수
+//                               있는 사람에게만 선다: `devTools.ts` `useDevToolsEntry`)
 //   ⑧ 계정                      로그아웃 — **마지막, 위험 행**
 //   바닥        버전 줄(길게 누르면 연결 기록 복사)
 //
@@ -151,6 +170,7 @@ import {MemoryPauseSection} from '../memory/MemoryPauseSection';
 export type SettingsSubPage =
   | 'theme'
   | 'deviceKey'
+  | 'devTools'
   | 'avatar'
   | 'pauseUntil'
   | 'dndUntil';
@@ -162,6 +182,7 @@ const SUB_PAGE_TOP = space.md;
 const SUB_PAGE_TITLE: Record<SettingsSubPage, string> = {
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
+  devTools: DEV_TOOLS_TITLE,
   avatar: '프로필 사진',
   pauseUntil: NOTIFICATION_PAUSE_LABEL,
   dndUntil: declaredStatusLabel('dnd'),
@@ -238,6 +259,7 @@ export function SettingsPage({
             onOpenTheme={() => setPage('theme')}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
+            onOpenDevTools={() => setPage('devTools')}
             onOpenPauseUntil={() => setPage('pauseUntil')}
             onOpenDndUntil={() => setPage('dndUntil')}
             onOpenAvatar={() => setPage('avatar')}
@@ -301,6 +323,11 @@ function SubPage({
       scrollRef.current?.scrollTo({y: y + SUB_PAGE_TOP - space.md, animated: true}),
     [],
   );
+  // 긴 목록 장의 확인 단계가 서면 맨 위로 올린다: 목록 중간까지 내려 본 사람의 확인 카드가 화면 밖에 서지 않게.
+  const scrollToTop = useCallback(
+    () => scrollRef.current?.scrollTo({y: 0, animated: false}),
+    [],
+  );
   const title = SUB_PAGE_TITLE[page];
   // ‹ · VoiceOver escape · 「기한/사진을 고른 뒤 돌아가기」는 모두 같은 길로 한 겹만 벗긴다: 들어온 길의 반대로
   // 물러난 뒤 `onBack`(층 밖에서는 곧바로 `onBack`).
@@ -335,6 +362,8 @@ function SubPage({
             <ThemePage />
           ) : page === 'deviceKey' ? (
             <DeviceKeyPage workspaceId={workspaceId} />
+          ) : page === 'devTools' ? (
+            <DevToolsPage workspaceId={workspaceId} selfId={member.id} onTop={scrollToTop} />
           ) : page === 'avatar' ? (
             <AvatarPage
               workspaceId={workspaceId}
@@ -388,6 +417,7 @@ export function SettingsContent({
   onOpenTheme,
   onOpenStatus,
   onOpenDeviceKey,
+  onOpenDevTools,
   onOpenPauseUntil,
   onOpenDndUntil,
   onOpenAvatar,
@@ -403,6 +433,11 @@ export function SettingsContent({
   /** 「상태 설정」 바텀시트를 연다. */
   onOpenStatus: () => void;
   onOpenDeviceKey: () => void;
+  /**
+   * 「명령줄·AI 도구」 장(내 연결 목록·지우기)을 연다. 없으면 행이 서지 않고 아무것도 읽지 않는다(캡처 하네스가 이
+   * 컴포넌트를 직접 부른다).
+   */
+  onOpenDevTools?: () => void;
   /** 알림 일시 중지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="pause"`). */
   onOpenPauseUntil: () => void;
   /** 방해 금지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="dnd"`). */
@@ -423,6 +458,10 @@ export function SettingsContent({
   const faceRing = useFaceRing();
   const {choice, themeId} = useTheme();
   const push = usePushSwitch(workspaceId, member.id);
+  // 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5): 이 폰의 선택 둘. 서버 값이 아니라 기기에 있어서
+  // 읽는 중·못 읽음이 없고, 켜 두는 것이 처음 상태다.
+  const previewOn = usePushPreview();
+  const showSenderOn = usePushShowSender();
   const setPresence = useSetPresence(workspaceId, member.id);
   const pause = usePauseNotifications(workspaceId);
   const kinds = usePushKinds(workspaceId);
@@ -510,6 +549,8 @@ export function SettingsContent({
   // 줄의 값만 읽는다 — 승인을 기다리며 목록을 되읽는 일은 그 장이 열렸을 때만 한다.
   const deviceKey = deviceKeyCopy(useDeviceKey(workspaceId, {poll: false}).view);
   const themeValue = themeSummary(themeId, choice);
+  // 만들 수 있거나 이미 만든 연결이 있는 사람에게만 행이 선다(`useDevToolsEntry`). 정책이 오기 전에는 서지 않는다.
+  const devTools = useDevToolsEntry(workspaceId, member.id, onOpenDevTools !== undefined);
 
   return (
     <>
@@ -691,6 +732,37 @@ export function SettingsContent({
             }
             testID="profile-push-row"
           />
+          {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
+              MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
+              끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}
+          <SwitchRow
+            title={PUSH_PREVIEW_LABEL}
+            detail={PUSH_PREVIEW_DETAIL}
+            checked={previewOn}
+            onPress={() => setPushPreview(!previewOn)}
+            accessibilityHint={PUSH_PREVIEW_DETAIL}
+            control={{
+              kind: 'switch',
+              value: previewOn,
+              onValueChange: setPushPreview,
+              testID: 'profile-preview-switch',
+            }}
+            testID="profile-preview-row"
+          />
+          <SwitchRow
+            title={PUSH_SHOW_SENDER_LABEL}
+            detail={PUSH_SHOW_SENDER_DETAIL}
+            checked={showSenderOn}
+            onPress={() => setPushShowSender(!showSenderOn)}
+            accessibilityHint={PUSH_SHOW_SENDER_DETAIL}
+            control={{
+              kind: 'switch',
+              value: showSenderOn,
+              onValueChange: setPushShowSender,
+              testID: 'profile-show-sender-switch',
+            }}
+            testID="profile-show-sender-row"
+          />
           <SwitchRow
             title={NOTIFICATION_PAUSE_LABEL}
             detail={pauseDetail}
@@ -842,6 +914,16 @@ export function SettingsContent({
           accessibilityHint="이 폰이 에이전트에게 지시할 수 있는지와 지문을 봅니다."
           testID="profile-device-key-row"
         />
+        {devTools.visible && onOpenDevTools ? (
+          <ListRow
+            title={DEV_TOOLS_TITLE}
+            value={devTools.count ? devToolsCountLabel(devTools.count) : undefined}
+            accessory="chevron"
+            onPress={onOpenDevTools}
+            accessibilityHint={DEV_TOOLS_ROW_HINT}
+            testID="profile-dev-tools-row"
+          />
+        ) : null}
       </GroupCard>
 
       {/* ⑧ 계정 — 마지막, 위험 행. 확인을 한 번 거친다. */}

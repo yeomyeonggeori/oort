@@ -288,8 +288,8 @@ function nameText(name: MemberNameParts): string {
 }
 
 /**
- * 남에게 보이는 한 줄. 「곽성재에게 AI 계정 연결을 제안했어요」.
- * `settings.open`은 「곽성재에게 「알림 설정 열기」 카드를 제안했어요」 — 깨진 제안
+ * 남에게 보이는 한 줄. 「구민수에게 AI 계정 연결을 제안했어요」.
+ * `settings.open`은 「구민수에게 「알림 설정 열기」 카드를 제안했어요」 — 깨진 제안
  * (`section` 없음)은 어느 화면인지 말하지 않고 「설정 열기」만 말한다.
  */
 export function commandSuggestOneLine(card: CommandSuggestCard): string {

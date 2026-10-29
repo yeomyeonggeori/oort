@@ -846,7 +846,6 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
         kind="public"
         directory={makeDirectory([])}
         onBack={() => {}}
-        menu={[]}
         railStatus={railStatus}
       />,
     );
@@ -919,7 +918,6 @@ describe('배선 — 연결 띠(대화 머리)와 첫 로딩(Booting)', () => {
         kind="public"
         directory={makeDirectory([])}
         onBack={() => {}}
-        menu={[]}
         railStatus="connected"
       />,
     );

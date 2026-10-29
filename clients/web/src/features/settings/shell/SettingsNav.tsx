@@ -12,6 +12,7 @@ import {
   Palette,
   Server,
   Sparkles,
+  Terminal,
   UserRound,
   UsersRound,
   type LucideIcon,
@@ -42,6 +43,7 @@ const ICONS: Record<SettingsSectionId, LucideIcon> = {
   usage: ChartColumn,
   code: Server,
   updates: Download,
+  devTools: Terminal,
   aiHub: Sparkles,
 };
 

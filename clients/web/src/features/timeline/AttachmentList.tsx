@@ -350,11 +350,17 @@ export function AttachmentList({
   channelId,
   attachments,
   muted,
+  senderName,
+  sentAtMs,
 }: {
   /** 첨부는 채널에 속한다. 프록시 주소가 그 사실 위에 서 있다. */
   channelId: string;
   attachments: MessageAttachment[];
   muted?: boolean;
+  /** 이미지 미리보기 위 왼쪽 칩에 쓰는 보낸 사람(#4751). 모르면 칩이 파일 이름을 대신 쓴다. */
+  senderName?: string;
+  /** 같은 칩의 보낸 시각. 서버 시각이 아직 없는 echo 행은 넘기지 않는다. */
+  sentAtMs?: number;
 }) {
   // 워크스페이스는 셸이 이미 알고 있다. 타임라인 전체에 프롭으로 흘려보내는 대신
   // 여기서 읽는다 — `Composer` 가 같은 값을 같은 방법으로 읽는다.
@@ -405,6 +411,8 @@ export function AttachmentList({
         selectedId={lightbox?.attachmentId ?? null}
         opener={lightboxOpener.current}
         offline={connStatus === "disconnected"}
+        senderName={senderName ?? null}
+        sentAtMs={sentAtMs ?? null}
         onSelect={(attachmentId) =>
           setLightbox((current) =>
             current === null ? null : { ...current, attachmentId }
