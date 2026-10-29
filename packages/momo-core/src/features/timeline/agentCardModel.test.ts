@@ -860,6 +860,32 @@ describe("만료 스윕이 남긴 줄 (검수 L4, #4705)", () => {
     expect(card.detail).toEqual({ rows: [], withheld: 0 });
   });
 
+  it("서버가 이미 한국어로 쓴 만료 줄(인플레이스 카드)은 그 문장을 그대로 두고 칩만 중립이다", () => {
+    const korean = "시간이 지나 요청을 처리하지 않았어요. 다시 불러 주세요.";
+    const card = agentCardModel(
+      msg({
+        type: "tool_result",
+        body: korean,
+        props: { ...SWEEP_PROPS, output: korean },
+      })
+    );
+    if (card?.kind !== "tool") throw new Error("tool card expected");
+    expect(card.approvalExpired).toBe(true);
+    expect(card.status).not.toBe("error");
+    // 다음 행동(「다시 불러 주세요」)을 일반 문장으로 덮지 않는다.
+    expect(card.frame.outcome).toBe(korean);
+  });
+
+  it("본문이 비어 있으면 한국어 기본 한 줄이다", () => {
+    const card = agentCardModel(
+      msg({ type: "tool_result", body: undefined, props: { ...SWEEP_PROPS, output: "" } })
+    );
+    if (card?.kind !== "tool") throw new Error("tool card expected");
+    expect(card.approvalExpired).toBe(true);
+    expect(card.frame.outcome).toMatch(/[가-힣]/);
+    expect(card.frame.outcome).not.toBe("");
+  });
+
   it("어느 승인의 줄인지 모르거나 expired 가 아니면 지금까지의 도구 카드다", () => {
     const noApproval = agentCardModel(
       msg({

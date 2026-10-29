@@ -1,5 +1,9 @@
-import type {Member, Message, RosterMember} from '@momo/core/lib/api';
-import {makeDirectory} from '@momo/core/features/workspace/directory';
+import type {Channel, Member, Message, RosterMember} from '@momo/core/lib/api';
+import {
+  channelLabel,
+  makeDirectory,
+  type Directory,
+} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
@@ -22,6 +26,18 @@ import {LINK_ONCE_LEAD} from '@momo/core/features/approvals/secretOnce';
 import {
   roleRequiredCopy,
 } from '@momo/core/features/approvals/actionRole';
+import {EXPIRED_LINE_NOTE} from '@momo/core/features/approvals/expiry';
+import {MESSAGE_PREVIEW_LINK_LABEL} from '@momo/core/features/approvals/messagePreview';
+import {
+  AGENT_INITIATIVE_LABEL,
+  AGENT_INITIATIVE_RATIONALE_LABEL,
+  approvalHeadTitle,
+  rationaleTag,
+} from '@momo/core/features/timeline/agentInitiative';
+import {
+  APPROVAL_STATUS_LABEL,
+  TURN_STATUS_LABEL,
+} from '@momo/core/features/timeline/agentCardModel';
 import {
   ACTION_RESULT_SECRET_ONCE_NOTE,
   ACTION_RESULT_STATUS_LABEL,
@@ -30,14 +46,16 @@ import {
 } from '@momo/core/features/timeline/actionResultCard';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {RowPresentation} from '@momo/core/features/timeline/rowModel';
-import {color} from '../src/design/tokens';
+import {color, TOUCH_TARGET} from '../src/design/tokens';
 import {
   linkOnceFrom,
   type ApprovalGate,
   type ApprovalReceipt,
 } from '../src/features/conversation/approvalGate';
 import {COPY_RECEIPT_MS} from '../src/features/conversation/copy';
-import {MessageRow} from '../src/features/conversation/MessageRow';
+import {MESSAGE_PREVIEW_ACTION_NAME} from '../src/features/conversation/ApprovalMessagePreview';
+import {jumpMissedNotice} from '../src/features/conversation/jumpNotice';
+import {MessageRow, type MessageRowActions} from '../src/features/conversation/MessageRow';
 import PushProvider from '../src/push/PushProvider';
 import {RealtimeProvider} from '../src/realtime/RealtimeProvider';
 import ConversationScreen from '../src/screens/ConversationScreen';
@@ -350,6 +368,9 @@ function renderRow(props: {
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
   onSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
   nowMs?: number;
+  /** 행이 할 수 있는 일(#4705: 「전문 보기」가 여는 곳). 없으면 읽기 전용 표면이다. */
+  actions?: MessageRowActions;
+  directory?: Directory;
 }) {
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}},
@@ -360,13 +381,14 @@ function renderRow(props: {
         <MessageRow
           message={props.message ?? approvalMessage()}
           startsGroup
-          directory={DIRECTORY}
+          directory={props.directory ?? DIRECTORY}
           chips={[]}
           nowMs={props.nowMs ?? BASE_MS}
           approvalGates={props.gates ?? new Map([[APPROVAL_ID, GATE]])}
           approvalReceipts={props.receipts}
           approvalsProvided
           onApprovalSettled={props.onSettled ?? (() => {})}
+          actions={props.actions}
         />
       </SessionProvider>
     </QueryClientProvider>,
@@ -641,6 +663,320 @@ describe('#2513 — 행동 승인 카드의 행·사유·결정 권한 (부록 A
     expect(screen.queryByTestId('approval-action-rows')).toBeNull();
     expect(screen.queryByTestId('approval-action-role')).toBeNull();
     expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
+  });
+});
+
+// =============================================================================
+// #4705 — 먼저 제안 카드 · 고정 카드 · 만료 줄 (ADR-0186 증보 v5 U-c·U-e)
+//
+// 픽스처는 서버 PR A(`agent_initiative.rs`)가 쓰는 모양 그대로다: `props.origin` 은 최상위,
+// `props.action.preview` 는 `{kind:"message", messageId, channelId, totalChars, truncated}`,
+// 만료 줄은 `tool_result` 의 `{call_id:"", output:<영어 본문>, is_error:true, status:"expired", …}`.
+// 웹 시험(`actionCards.test.tsx`)과 같은 글자다. 서버가 아직 이 트랙에 없으므로 실서버 확인은
+// 승격 뒤다(runtime-unverified).
+//
+// 카드의 모양은 다음 묶음에서 새로 짠다(2026-10-29 범위 조정). 그래서 여기서 재는 것은 셋뿐이다:
+// 제목 끝 꼬리표와 사유 이름표 · 고정 카드의 링크 하나(결정 전에만, 열 곳이 있을 때만) · 만료 줄이
+// 실패의 얼굴을 입지 않는 것.
+// =============================================================================
+
+const PLANNER_ID = '019f9a01-0000-7000-8000-0000000004a1';
+const PIN_CHANNEL = '00000000-0000-7000-8000-000000000302';
+const PIN_MESSAGE = '0199aa11-2222-7000-8000-0000000000c1';
+const PIN_TITLE = '승인 요청: 메시지 고정';
+const PIN_RATIONALE = '안내문을 채널 맨 위에 두고 싶어요';
+const PIN_ROWS = [
+  {label: '채널', value: '#달무리 공지'},
+  {label: '쓴 사람', value: '박서연'},
+  {label: '글자 수', value: '1234자'},
+];
+const EXPIRY_BODY = 'Tool call expired without a human approval.';
+
+/** 이도현(나)과 플래너(에이전트)만 있는 명부. 카드 작성자는 플래너다. */
+const PIN_ROSTER = [
+  rosterMember(SELF_ID, {displayName: '이도현', handle: 'dohyun'}),
+  rosterMember(PLANNER_ID, {kind: 'agent', displayName: '플래너', handle: 'planner'}),
+];
+const PIN_DIRECTORY = makeDirectory(PIN_ROSTER);
+
+/** 서버가 먼저 제안한 고정 카드에 싣는 props. */
+function pinProps(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return appendixA({
+    title: PIN_TITLE,
+    origin: 'agent_initiated',
+    summary: '플래너가 먼저 제안했어요.',
+    action: {
+      id: 'message.pin',
+      rows: PIN_ROWS,
+      rationale: PIN_RATIONALE,
+      required_role: 'admin',
+      preview: {
+        kind: 'message',
+        messageId: PIN_MESSAGE,
+        channelId: PIN_CHANNEL,
+        totalChars: 1234,
+        truncated: true,
+      },
+    },
+    ...over,
+  });
+}
+
+function pinMessage(props: Record<string, unknown> = pinProps()): Message {
+  return {...approvalMessage(props), authorMemberId: PLANNER_ID} as Message;
+}
+
+/** 이 카드를 어떤 표면에 그리는가: 열 곳(`onOpenMessage`)을 아는가 모르는가. */
+function pinActions(over: Partial<MessageRowActions> = {}): MessageRowActions {
+  return {
+    myMemberId: SELF_ID,
+    onToggleReaction: async () => {},
+    onEdit: async () => {},
+    onDelete: async () => {},
+    ...over,
+  };
+}
+
+function renderPin(
+  props: Record<string, unknown> = pinProps(),
+  over: Parameters<typeof renderRow>[0] = {},
+) {
+  return renderRow({message: pinMessage(props), directory: PIN_DIRECTORY, ...over});
+}
+
+/** 로터 행동의 이름들. 행은 접근성 요소 하나라 카드 안 링크에는 로터로만 닿는다. */
+function rotorNames(): string[] {
+  const actions = (screen.getByTestId('message-row').props.accessibilityActions ??
+    []) as {name: string}[];
+  return actions.map(action => action.name);
+}
+
+/** 렌더 트리의 testID 를 눈이 읽는 순서(문서 순서)대로. 「결정 버튼 위」를 재는 데 쓴다. */
+function testIdsInOrder(): string[] {
+  const out: string[] = [];
+  const walk = (node: unknown): void => {
+    if (node === null || typeof node !== 'object') return;
+    if (Array.isArray(node)) {
+      node.forEach(walk);
+      return;
+    }
+    const element = node as {
+      props?: Record<string, unknown>;
+      children?: unknown[] | null;
+    };
+    const id = element.props?.testID;
+    if (typeof id === 'string') out.push(id);
+    element.children?.forEach(walk);
+  };
+  walk(screen.toJSON());
+  return out;
+}
+
+const SETTLED_APPROVED = new Map<string, ApprovalReceipt>([
+  [APPROVAL_ID, {note: '승인을 기록했어요.', status: 'approved'}],
+]);
+
+// =============================================================================
+describe('#4705 — 먼저 제안 카드 (ADR-0186 증보 v5 U-c)', () => {
+  it('제목 끝에 꼬리표가 붙고 사유 이름표가 「에이전트가 쓴 글」이다 — 새 행은 서지 않는다', () => {
+    renderPin();
+    const head = screen.getByTestId('approval-card-title').props.children as string;
+    expect(head).toBe(approvalHeadTitle({title: PIN_TITLE, agentInitiated: true}));
+    // 위 문장이 코어와 같다는 것만으로는 꼬리표가 있다는 증거가 못 된다 — 눈에 닿는 글자를 잰다.
+    expect(head.startsWith(PIN_TITLE)).toBe(true);
+    expect(head).toContain(AGENT_INITIATIVE_LABEL);
+    const rationale = screen.getByTestId('approval-action-rationale');
+    expect(within(rationale).getByText(AGENT_INITIATIVE_RATIONALE_LABEL)).toBeTruthy();
+    expect(within(rationale).getByText(PIN_RATIONALE)).toBeTruthy();
+    // 이름표뿐이다: 사유 아래 줄을 더 세우지 않고, 서버 행 말고는 행이 없다.
+    expect(screen.queryByTestId('approval-action-rationale-note')).toBeNull();
+    expect(screen.getAllByTestId('approval-action-row')).toHaveLength(PIN_ROWS.length);
+    expect(screen.queryByTestId('approval-initiative')).toBeNull();
+    // 결정 컨트롤은 그대로 선다.
+    expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
+    expect(screen.getByTestId(`${PREFIX}-reject`)).toBeTruthy();
+  });
+
+  it('origin 이 없거나 모르는 값이면 지금까지의 카드 그대로다 — 꼬리표도 이름표도 없다', () => {
+    const plainLabel = rationaleTag({}).label;
+    expect(plainLabel).not.toBe(AGENT_INITIATIVE_RATIONALE_LABEL);
+    const withoutOrigin = pinProps();
+    delete withoutOrigin.origin;
+    for (const props of [withoutOrigin, pinProps({origin: 'scheduled'})]) {
+      const view = renderPin(props);
+      expect(screen.getByTestId('approval-card-title').props.children).toBe(PIN_TITLE);
+      const rationale = screen.getByTestId('approval-action-rationale');
+      expect(within(rationale).queryByText(AGENT_INITIATIVE_RATIONALE_LABEL)).toBeNull();
+      expect(within(rationale).getByText(plainLabel)).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it('결정이 난 카드에도 꼬리표는 남는다 — 이 카드가 무엇이었는지는 바뀌지 않는다', () => {
+    renderPin(pinProps(), {gates: new Map(), receipts: SETTLED_APPROVED});
+    expect(screen.getByTestId('approval-card-title').props.children).toContain(
+      AGENT_INITIATIVE_LABEL,
+    );
+  });
+});
+
+// =============================================================================
+describe('#4705 — 고정·고정 풀기 카드의 「전문 보기」 (ADR-0186 증보 v5 U-e)', () => {
+  it('미리보기와 열 곳이 있으면 결정 버튼 위에 링크가 서고, 누르면 (채널, 메시지)로 연다', () => {
+    const onOpenMessage = jest.fn();
+    renderPin(pinProps(), {actions: pinActions({onOpenMessage})});
+    const link = screen.getByTestId('approval-message-preview-link');
+    expect(link.props.accessibilityRole).toBe('link');
+    expect(within(link).getByText(MESSAGE_PREVIEW_LINK_LABEL)).toBeTruthy();
+    // 누르는 면은 44 이상이다(글자는 한 줄이지만 손가락은 그보다 크다).
+    expect(flat(link.props.style).minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    // 사실 행 아래, 결정 버튼 위 — 앞 120자만 보고 누르지 않게 버튼 바로 앞에 선다.
+    const order = testIdsInOrder();
+    const at = order.indexOf('approval-message-preview-link');
+    expect(at).toBeGreaterThan(order.indexOf('approval-action-rows'));
+    expect(at).toBeLessThan(order.indexOf('approval-action-footer'));
+    expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
+    fireEvent.press(link);
+    expect(onOpenMessage).toHaveBeenCalledTimes(1);
+    expect(onOpenMessage).toHaveBeenCalledWith(PIN_CHANNEL, PIN_MESSAGE);
+  });
+
+  it('VoiceOver 는 로터로 같은 문에 닿는다 — 승인·거부보다 앞이다', () => {
+    const onOpenMessage = jest.fn();
+    renderPin(pinProps(), {actions: pinActions({onOpenMessage})});
+    const row = screen.getByTestId('message-row');
+    // 행이 접근성 요소 하나라는 전제부터 잰다(위 1회 링크 시험과 같은 이유).
+    expect(row.props.accessible).toBe(true);
+    const rotor = (row.props.accessibilityActions ?? []) as {name: string; label: string}[];
+    const names = rotor.map(action => action.name);
+    expect(names).toContain(MESSAGE_PREVIEW_ACTION_NAME);
+    expect(rotor.find(action => action.name === MESSAGE_PREVIEW_ACTION_NAME)?.label).toBe(
+      MESSAGE_PREVIEW_LINK_LABEL,
+    );
+    expect(names.indexOf(MESSAGE_PREVIEW_ACTION_NAME)).toBeLessThan(
+      names.indexOf('momoApprove'),
+    );
+    fireEvent(row, 'accessibilityAction', {
+      nativeEvent: {actionName: MESSAGE_PREVIEW_ACTION_NAME},
+    });
+    expect(onOpenMessage).toHaveBeenCalledWith(PIN_CHANNEL, PIN_MESSAGE);
+  });
+
+  it('열 곳을 모르는 표면에는 링크도 로터 행동도 없다 — 눌러도 아무 일 없는 버튼을 두지 않는다', () => {
+    // 읽기 전용 표면(actions 없음)과, 행동은 있으나 열 곳은 없는 표면.
+    for (const actions of [undefined, pinActions()]) {
+      const view = renderPin(pinProps(), actions === undefined ? {} : {actions});
+      expect(screen.queryByTestId('approval-message-preview-link')).toBeNull();
+      expect(rotorNames()).not.toContain(MESSAGE_PREVIEW_ACTION_NAME);
+      // 서버 행과 결정 컨트롤은 그대로다.
+      expect(screen.getAllByTestId('approval-action-row')).toHaveLength(PIN_ROWS.length);
+      expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it('대상 메시지가 없거나 모르는 종류의 미리보기, 고정이 아닌 카드에는 링크가 없다', () => {
+    const onOpenMessage = jest.fn();
+    const noPreview = pinProps();
+    delete (noPreview.action as Record<string, unknown>).preview;
+    const unknownKind = pinProps();
+    (unknownKind.action as Record<string, unknown>).preview = {kind: 'thread'};
+    for (const props of [noPreview, unknownKind, appendixA()]) {
+      const view = renderPin(props, {actions: pinActions({onOpenMessage})});
+      expect(screen.queryByTestId('approval-message-preview-link')).toBeNull();
+      expect(rotorNames()).not.toContain(MESSAGE_PREVIEW_ACTION_NAME);
+      view.unmount();
+    }
+    expect(onOpenMessage).not.toHaveBeenCalled();
+  });
+
+  it('결정이 난 카드에는 링크도 로터 행동도 없다 — 이 문은 결정 전에 읽는 것이다', () => {
+    const onOpenMessage = jest.fn();
+    const decided = pinProps({
+      status: 'approved',
+      approval_status: 'approved',
+      decided_by: SELF_ID,
+      decided_at_ms: BASE_MS + 60_000,
+    });
+    const cases: Parameters<typeof renderRow>[0][] = [
+      // 이 기기에서 방금 결정한 영수증(승인·거부).
+      {gates: new Map(), receipts: SETTLED_APPROVED},
+      {
+        gates: new Map(),
+        receipts: new Map([[APPROVAL_ID, {note: '거부를 기록했어요.', status: 'rejected'}]]),
+      },
+      // 서버가 카드 props 에 결정을 기록해 보낸 스냅샷.
+      {gates: new Map()},
+    ];
+    cases.forEach((over, index) => {
+      const view = renderPin(index === 2 ? decided : pinProps(), {
+        ...over,
+        actions: pinActions({onOpenMessage}),
+      });
+      expect(screen.queryByTestId('approval-message-preview-link')).toBeNull();
+      expect(rotorNames()).not.toContain(MESSAGE_PREVIEW_ACTION_NAME);
+      view.unmount();
+    });
+    expect(onOpenMessage).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+describe('#4705 — 만료 스윕이 남긴 줄은 실패가 아니다 (검수 L4, ADR-0132)', () => {
+  /** 서버 `approval_sweep.rs` 가 만료한 승인마다 쓰는 줄. 본문은 영어 기본 문구다. */
+  function expiryMessage(props: Record<string, unknown> = {}): Message {
+    return {
+      ...resultMessage({
+        call_id: '',
+        output: EXPIRY_BODY,
+        is_error: true,
+        approval_id: APPROVAL_ID,
+        run_id: '0199aa11-2222-7000-8000-0000000000b2',
+        status: 'expired',
+        decided_at_ms: BASE_MS + 3_600_000,
+        ...props,
+      }),
+      authorMemberId: PLANNER_ID,
+      body: EXPIRY_BODY,
+    } as Message;
+  }
+
+  it('조용한 한국어 한 줄이다: 결과 문장 하나, 중립의 「만료됨」, 실패가 아닌 빈 표지', () => {
+    renderRow({message: expiryMessage(), gates: new Map(), directory: PIN_DIRECTORY});
+    const steps = screen.getByTestId('agent-card-steps');
+    // 문장은 결과 한 줄뿐이다(「동사 → 결과」로 잇지 않는다).
+    expect(within(steps).getByText(EXPIRED_LINE_NOTE)).toBeTruthy();
+    expect(within(steps).queryByText(/→/)).toBeNull();
+    const meta = within(steps).getByText(APPROVAL_STATUS_LABEL.expired);
+    expect(flat(meta.props.style).color).not.toBe(color.danger);
+    // 표지는 실패의 ✕ 가 아니라 빈 원이다.
+    expect(within(steps).getByTestId('step-mark-idle')).toBeTruthy();
+    expect(screen.queryByTestId('step-mark-fail')).toBeNull();
+    // 영어 본문도 「실패」 낱말도 화면에 없다.
+    expect(screen.queryByText(EXPIRY_BODY)).toBeNull();
+    expect(screen.queryByText(TURN_STATUS_LABEL.error)).toBeNull();
+    // 조용한 한 줄이다: 「표시하지 않은 항목 N개」 줄도 서지 않는다(코어가 이 줄의 숨김 수를 0으로 준다).
+    expect(screen.queryByTestId('agent-card-withheld')).toBeNull();
+  });
+
+  it('스윕 줄이 아닌 같은 is_error 도구 실패는 지금까지처럼 실패로 선다 (회귀 0)', () => {
+    renderRow({
+      message: expiryMessage({
+        call_id: 'call-1',
+        tool_name: 'github.search_issues',
+        output: '요청이 거절됐어요.',
+        status: undefined,
+        approval_id: undefined,
+      }),
+      gates: new Map(),
+      directory: PIN_DIRECTORY,
+    });
+    expect(screen.getByTestId('step-mark-fail')).toBeTruthy();
+    expect(screen.getByText(TURN_STATUS_LABEL.error)).toBeTruthy();
+    expect(screen.queryByTestId('step-mark-idle')).toBeNull();
+    // 위 스윕 줄의 「숨김 줄 없음」 단정이 헛초록이 아님을 같은 자로 보인다: 읽지 않는 키(`call_id`·`output`)가
+    // 있는 보통의 도구 카드에는 그 줄이 선다.
+    expect(screen.getByTestId('agent-card-withheld')).toBeTruthy();
   });
 });
 
@@ -1235,6 +1571,176 @@ describe('D4 — 1회 링크는 폰 메모리에만 있고, 다시 열면 사라
     expect(
       Object.keys(pkg.dependencies).filter(name => /async-storage/i.test(name)),
     ).toEqual([]);
+  });
+});
+
+// =============================================================================
+// #4705 — 「전문 보기」는 화면의 앵커 열기를 탄다 (ADE 카드의 「대화로」와 같은 기계)
+//
+// 가짜는 `fetch` 하나뿐이다. 타임라인·채널 목록·셸·점프 기계는 전부 진짜이고, 그래서 이 단정들은
+// 「호출했는가」가 아니라 **화면이 무엇을 받았는가**에 대한 것이다. 링크가 새 길을 만들지 않고 이미
+// 있는 점프를 탄다는 것(같은 방은 방을 다시 열지 않고, 다른 방은 셸이 열고, 못 찾으면 자기 낱말로
+// 말한다)이 이 묶음의 주장이다.
+// =============================================================================
+
+const PIN_TARGET_TEXT = '이번 주 배포 순서는 이 글이 정본이에요.';
+const OTHER_CHANNEL_WIRE = {
+  id: OTHER,
+  workspaceId: WS,
+  kind: 'public',
+  name: 'random',
+  muted: false,
+};
+
+function pinTargetMessage(channelId: string): Message {
+  return {
+    id: PIN_MESSAGE,
+    channelId,
+    seq: 3,
+    hlcTs: 3,
+    hlcCount: 0,
+    authorMemberId: SELF_ID,
+    type: 'text',
+    body: PIN_TARGET_TEXT,
+    state: 'sent',
+    createdAtMs: BASE_MS - 60_000,
+  } as unknown as Message;
+}
+
+/** GENERAL 의 먼저 제안 카드. 가리키는 메시지는 `targetChannelId` 방에 있다. */
+function pinCardIn(targetChannelId: string): Message {
+  const props = pinProps();
+  (props.action as {preview: Record<string, unknown>}).preview.channelId = targetChannelId;
+  return pinMessage(props);
+}
+
+function installPinServer(pages: Record<string, Message[]>): void {
+  globalThis.fetch = jest.fn(async (url: string) => {
+    const target = String(url);
+    if (target.includes('/approvals')) {
+      return jsonResponse(200, {
+        approvals: [
+          {
+            id: APPROVAL_ID,
+            workspaceId: WS,
+            runId: 'run-1',
+            channelId: GENERAL,
+            requestedBy: PLANNER_ID,
+            actionType: 'workspace_action',
+            status: 'pending',
+            expiresAtMs: BASE_MS + 600_000,
+            createdAtMs: BASE_MS,
+          },
+        ],
+      });
+    }
+    if (target.includes('/messages')) {
+      const channel = target.includes(`/channels/${OTHER}/`) ? OTHER : GENERAL;
+      return jsonResponse(200, {messages: pages[channel] ?? []});
+    }
+    if (target.includes('/reactions')) return jsonResponse(200, {});
+    if (target.includes('/channels')) {
+      return jsonResponse(200, {
+        channels: [
+          {id: GENERAL, workspaceId: WS, kind: 'public', name: 'general', muted: false},
+          OTHER_CHANNEL_WIRE,
+        ],
+      });
+    }
+    if (target.includes('/roster')) return jsonResponse(200, {members: PIN_ROSTER});
+    if (target.includes('/read-state')) return jsonResponse(200, {read_states: []});
+    if (target.includes('/agent-runs') || target.includes('/runs')) {
+      return jsonResponse(200, {runs: []});
+    }
+    if (target.includes('/work-sessions')) return jsonResponse(200, {workSessions: []});
+    if (target.includes('/work-hosts')) return jsonResponse(200, {workHosts: []});
+    throw new Error(`unrouted request: ${target}`);
+  }) as unknown as typeof fetch;
+}
+
+/** 화면이 목록에 건 점프. `Timeline` 이 받는 프롭을 그대로 읽는다(`anchorJump.test` 와 같은 자). */
+function jumpTargetOf(): {messageId: string; seq: number | null} | null {
+  const nodes = screen.UNSAFE_root.findAll(
+    (node: {props?: Record<string, unknown>}) => node.props?.jumpTarget !== undefined,
+  );
+  return (nodes[0]?.props?.jumpTarget as {messageId: string; seq: number | null}) ?? null;
+}
+
+/** 대화 화면 하나(셸 없이). `onOpenConversation` 이 있어야 「전문 보기」가 선다. */
+function mountConversation(onOpenConversation: (channelId: string, title: string) => void) {
+  shellClient = new QueryClient({
+    defaultOptions: {
+      queries: {retry: false, gcTime: 0},
+      mutations: {retry: false, gcTime: 0},
+    },
+  });
+  return render(
+    <QueryClientProvider client={shellClient}>
+      <SessionProvider member={ME}>
+        <PushProvider>
+          <RealtimeProvider>
+            <ConversationScreen
+              channelId={GENERAL}
+              title="general"
+              onBack={() => {}}
+              onOpenConversation={onOpenConversation}
+            />
+          </RealtimeProvider>
+        </PushProvider>
+      </SessionProvider>
+    </QueryClientProvider>,
+  );
+}
+
+describe('#4705 — 「전문 보기」는 화면의 앵커 점프를 탄다', () => {
+  it('같은 방의 메시지면 방을 다시 열지 않고 그 메시지로 점프한다', async () => {
+    installPinServer({[GENERAL]: [pinTargetMessage(GENERAL), pinCardIn(GENERAL)]});
+    const onOpenConversation = jest.fn();
+    mountConversation(onOpenConversation);
+    const link = await screen.findByTestId('approval-message-preview-link', {}, SETTLE);
+    await act(async () => {
+      fireEvent.press(link);
+    });
+    await waitFor(() => expect(jumpTargetOf()?.messageId).toBe(PIN_MESSAGE), SETTLE);
+    // 이미 그 방이다 — 셸에 같은 대화를 한 번 더 밀지 않는다.
+    expect(onOpenConversation).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
+  });
+
+  it('불러온 목록에 그 메시지가 없으면 「카드가 가리킨 메시지」라고 말한다 — 남의 낱말이 아니라', async () => {
+    installPinServer({[GENERAL]: [pinCardIn(GENERAL)]});
+    mountConversation(jest.fn());
+    const link = await screen.findByTestId('approval-message-preview-link', {}, SETTLE);
+    await act(async () => {
+      fireEvent.press(link);
+    });
+    await waitFor(() => expect(screen.getByTestId('jump-missed')).toBeTruthy(), SETTLE);
+    const notice = jumpMissedNotice('unknown', 'approval');
+    expect(screen.getByTestId('jump-missed')).toHaveTextContent(notice.headline, {exact: false});
+    // ADE 카드의 「이 작업을 시작한 메시지」 주어를 빌려 말하지 않는다.
+    expect(notice.headline).not.toBe(jumpMissedNotice('unknown', 'session').headline);
+  });
+
+  it('다른 방의 메시지면 셸이 그 방(이름은 명부에서 푼다)을 열고 그 메시지로 점프한다', async () => {
+    installPinServer({
+      [GENERAL]: [pinCardIn(OTHER)],
+      [OTHER]: [pinTargetMessage(OTHER)],
+    });
+    mountShell();
+    await openGeneral();
+    const link = await screen.findByTestId('approval-message-preview-link', {}, SETTLE);
+    await act(async () => {
+      fireEvent.press(link);
+    });
+    await waitFor(
+      () =>
+        expect(screen.getByTestId('conversation-title')).toHaveTextContent(
+          channelLabel(OTHER_CHANNEL_WIRE as unknown as Channel, PIN_DIRECTORY, SELF_ID),
+        ),
+      SETTLE,
+    );
+    await waitFor(() => expect(jumpTargetOf()?.messageId).toBe(PIN_MESSAGE), SETTLE);
+    expect(screen.queryByTestId('jump-missed')).toBeNull();
   });
 });
 

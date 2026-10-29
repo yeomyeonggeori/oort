@@ -19,8 +19,8 @@ import {
 import { parseTeamAiProposal, type TeamAiProposal } from "./teamAi";
 import { AGENT_INITIATED_ORIGIN } from "./agentInitiative";
 import {
-  EXPIRED_LINE_NOTE,
   EXPIRED_LINE_TITLE,
+  expiryLineSentence,
   isApprovalExpiryLine,
 } from "../approvals/expiry";
 import {
@@ -786,7 +786,12 @@ function toolCard(message: Message, props: Props): AgentToolCard {
       kind: "tool",
       title: EXPIRED_LINE_TITLE,
       status: "cancelled",
-      frame: { verb: EXPIRED_LINE_TITLE, object: null, outcome: EXPIRED_LINE_NOTE },
+      frame: {
+        verb: EXPIRED_LINE_TITLE,
+        object: null,
+        // 영어 기본 문구만 한국어로 바꾼다. 서버가 이미 한국어로 쓴 줄은 그 문장 그대로다.
+        outcome: expiryLineSentence(message.body ?? readString(props, "output")),
+      },
       approvalExpired: true,
       // 「조용한 한 줄」이어야 하므로 「표시하지 않은 항목 N개」도 세우지 않는다. 이 줄이 싣는 것은
       // 영어 본문의 사본(`output`)과 비어 있는 `call_id`·id 들이라 읽을 값이 없고, 그 승인의 내용은

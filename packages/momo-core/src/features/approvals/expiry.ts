@@ -85,6 +85,17 @@ export const EXPIRED_ROW_COPY = "시간이 지났어요";
 export const EXPIRED_LINE_TITLE = "승인 시간이 지났어요";
 export const EXPIRED_LINE_NOTE = "기한이 지나 실행하지 않았어요.";
 
+/**
+ * 스윕 줄이 말할 문장. 서버가 이미 **한국어**로 쓴 줄(인플레이스 카드의 「시간이 지나 요청을 처리하지
+ * 않았어요. 다시 불러 주세요.」)은 다음 행동까지 말하므로 그대로 두고, 영어 기본 문구(한글이 하나도
+ * 없는 본문)와 빈 본문만 위의 한국어 한 줄로 바꾼다. 영어 문구의 글자를 맞춰 보지 않는다: 서버가
+ * 문구를 바꿔도(한국어로 고쳐도) 이 판정은 그대로 맞다.
+ */
+export function expiryLineSentence(body: string | null | undefined): string {
+  const text = typeof body === "string" ? body.trim() : "";
+  return /[\u3131-\u318e\uac00-\ud7a3]/.test(text) ? text : EXPIRED_LINE_NOTE;
+}
+
 /** 스윕이 남긴 줄인가: `status` 가 정확히 `expired` 이고 어느 승인의 줄인지(`approval_id`)를 안다. */
 export function isApprovalExpiryLine(
   props: Record<string, unknown> | undefined
