@@ -259,6 +259,7 @@ function ViewerPage({
     return {
       toggleAt: (point, animated) => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
+        // centerContent places the fitted content at the hero's window-space origin.
         else if (ready) zoomTo(zoomRectAt({x: point.x - fitted.x, y: point.y - fitted.y}, size), animated);
       },
       reset: animated => {
@@ -278,7 +279,7 @@ function ViewerPage({
     <View style={{width, height}} {...blankResponder}>
     <ScrollView
       ref={zoomRef}
-      style={[styles.zoomScroll, { width }]}
+      style={[styles.zoomScroll, { width, height }]}
       contentContainerStyle={[styles.zoomContent, {width: fitted.width, height: fitted.height}]}
       // 사진이 아직 없으면 키울 것이 없다(「불러오는 중」 글자를 키우지 않는다) — 최소와 같으면 iOS 는 확대를 켜지 않는다.
       maximumZoomScale={ready ? ZOOM_MAX : ZOOM_MIN}
@@ -1066,10 +1067,10 @@ const buildStyles = (_color: Palette) =>
     backdrop: { backgroundColor: VIEWER_STAGE.bg },
     // 사진은 화면 가득이다 — 조작이 그 위에 뜬다.
     pager: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
-    // 쪽 하나 = 확대 스크롤뷰(폭은 창 폭, 높이는 가로 스크롤뷰가 채운다). 늘어나거나 줄지 않는다 — 폭이 쪽 간격이다.
+    // 확대 프레임은 창 전체다. 높이를 생략하면 가로 사진의 맞춤 높이로 줄어 hero 도착 위치와 어긋나고 확대가 잘린다.
     zoomScroll: { flexGrow: 0, flexShrink: 0 },
-    // 내용이 스크롤뷰와 **정확히 같은 크기**여야 원래 크기에서 팬이 시작하지 않는다(1pt 라도 남으면 쓸어 닫기를 스크롤뷰가 가져간다).
     heroHidden: {opacity: 0},
+    // 내용만 맞춤 사진 크기다. centerContent가 창 중앙에 놓아 hero·두 번 탭이 같은 fitted 원점을 쓴다.
     zoomContent: { alignItems: 'center', justifyContent: 'center' },
     viewerPage: { alignItems: 'center', justifyContent: 'center' },
     viewerImage: { width: '100%', height: '100%' },

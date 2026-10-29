@@ -41,7 +41,7 @@ import {
 import { AttachmentList } from '../src/features/attachments/AttachmentList';
 import { AttachmentViewer } from '../src/features/attachments/AttachmentViewer';
 import {StageHero} from '../src/features/attachments/StageHero';
-import { resetAttachmentContentForTest } from '../src/features/attachments/content';
+import { rememberAttachmentSize, resetAttachmentContentForTest } from '../src/features/attachments/content';
 import { DISMISS_DISTANCE_PT } from '../src/features/attachments/viewerDismiss';
 import {
   VIEWER,
@@ -2031,6 +2031,56 @@ describe('hero4775', () => {
     }));
     return () => act(() => { callbacks.splice(0).forEach(callback => callback({finished: true})); });
   }
+  it.each([
+    {shape: '세로', natural: {width: 200, height: 800}, fitted: {x: 100, y: 0, width: 200, height: 800}},
+    {shape: '정사각', natural: {width: 800, height: 800}, fitted: {x: 0, y: 200, width: 400, height: 400}},
+    {shape: '가로', natural: {width: 1600, height: 800}, fitted: {x: 0, y: 300, width: 400, height: 200}},
+  ])('전체 화면 확대 프레임: $shape 사진의 콘텐츠·hero·두 번 탭 중심이 일치한다', async ({natural, fitted}) => {
+    jest.spyOn(require('react-native'), 'useWindowDimensions').mockReturnValue({
+      width: 400, height: 800, scale: 2, fontScale: 1,
+    });
+    rememberAttachmentSize('a', natural.width, natural.height);
+    const arrive = springs();
+    await mount({images: [IMAGES[0] as MessageAttachment], origin: source});
+
+    const zoom = screen.getByTestId('attachment-viewer-zoom');
+    const frame = flatten(zoom.props.style);
+    const content = flatten(zoom.props.contentContainerStyle);
+    const page = flatten(screen.getByTestId('attachment-viewer-page', {includeHiddenElements: true}).props.style);
+    expect(frame).toMatchObject({width: 400, height: 800, flexShrink: 0});
+    expect(content).toMatchObject({width: fitted.width, height: fitted.height});
+    expect(page).toMatchObject({width: fitted.width, height: fitted.height});
+    expect(photo().props.style).toMatchObject({width: '100%', height: '100%'});
+    expect(zoom.props.centerContent).toBe(true);
+    // RN centers smaller content with half the frame/content difference as its inset.
+    // Jest has no native layout: assert the inputs to that centering and the hero destination.
+    const origin = {
+      x: (Number(frame.width) - Number(content.width)) / 2,
+      y: (Number(frame.height) - Number(content.height)) / 2,
+    };
+    expect(origin).toEqual({x: fitted.x, y: fitted.y});
+    expect(screen.UNSAFE_getByType(StageHero).props.to).toEqual({...origin, width: content.width, height: content.height});
+    arrive();
+
+    // Off-center taps expose a missing/wrong fitted.x or fitted.y subtraction.
+    const point = {x: fitted.width * 0.6, y: fitted.height * 0.4};
+    const zoomTo = ScrollView.prototype.scrollResponderZoomTo as unknown as jest.Mock;
+    zoomTo.mockClear();
+    afterTapWindow(() => {
+      tap(photo(), origin.x + point.x, origin.y + point.y);
+      tap(photo(), origin.x + point.x, origin.y + point.y);
+    });
+    expect(zoomTo).toHaveBeenCalledTimes(1);
+    expect(zoomTo).toHaveBeenLastCalledWith({
+      x: point.x - fitted.width / 4,
+      y: point.y - fitted.height / 4,
+      width: fitted.width / 2,
+      height: fitted.height / 2,
+      animated: true,
+    }, true);
+    const [rect] = zoomTo.mock.lastCall as [{x: number; y: number; width: number; height: number}];
+    expect({x: rect.x + rect.width / 2, y: rect.y + rect.height / 2}).toEqual(point);
+  });
   it('opens from the measured source, exposes controls on arrival, and exits to the CURRENT page source', async () => {
     const arrive = springs();
     const measureSource = jest.fn().mockResolvedValue({...source, x: 180});
