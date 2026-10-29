@@ -30,6 +30,7 @@ import {
   TURN_STATUS_LABEL,
   APPROVAL_STATUS_LABEL,
   type AgentApprovalAction,
+  type AgentApprovalCard,
   type AgentCardModel,
 } from '@momo/core/features/timeline/agentCardModel';
 import {
@@ -151,11 +152,22 @@ import {
   type TeamAiDelegate,
   TEAM_AI_PROPOSAL_AUTHORITY,
   TEAM_AI_PROPOSAL_LABEL,
-  TEAM_AI_RATIONALE_LABEL,
-  TEAM_AI_RATIONALE_NOTE,
   teamAiCallNames,
   teamAiProposalLine,
 } from '@momo/core/features/timeline/teamAi';
+// 「먼저 제안」(ADR-0186 증보 v5 U-c, #4705): 아무도 부르지 않았는데 에이전트가 올린 카드의 표시는
+// 카드 머리 제목 끝의 꼬리표(`approvalHeadTitle`)와 사유 줄의 이름표(`rationaleTag`: 도우미 · 먼저
+// 제안 · 평문의 세 갈래) 둘뿐이다. 웹과 같은 함수를 코어에서 읽는다.
+import {
+  approvalHeadTitle,
+  rationaleTag,
+} from '@momo/core/features/timeline/agentInitiative';
+import {MESSAGE_PREVIEW_LINK_LABEL} from '@momo/core/features/approvals/messagePreview';
+import {
+  ApprovalMessagePreview,
+  MESSAGE_PREVIEW_ACTION_NAME,
+  openableMessagePreview,
+} from './ApprovalMessagePreview';
 import {
   isWorkspaceWideAction,
   WORKSPACE_WIDE_LABEL,
@@ -1521,14 +1533,18 @@ function ApprovalFooter({
  */
 function ApprovalActionRows({
   action,
-  teamAi,
+  origin,
   styles,
 }: {
   action: AgentApprovalAction;
-  /** 도우미가 올린 카드면 참(ADR-0201 D6-3). 사유가 AI가 쓴 글이라고 말한다. */
-  teamAi: boolean;
+  /**
+   * 사유가 누구의 글인지 가르는 카드의 두 사실(ADR-0201 D6-3 도우미 · ADR-0186 v5 먼저 제안).
+   * 꼬리표는 코어 `rationaleTag` 가 웹과 같은 갈래로 고른다.
+   */
+  origin: Pick<AgentApprovalCard, 'proposedVia' | 'agentInitiated'>;
   styles: ReturnType<typeof buildStyles>;
 }): React.JSX.Element {
+  const tag = rationaleTag(origin);
   return (
     <View style={styles.factRows} testID="approval-action-rows">
       {action.rows.map(row => (
@@ -1560,9 +1576,9 @@ function ApprovalActionRows({
       ) : null}
       {action.rationale !== null ? (
         <FactRow
-          label={teamAi ? TEAM_AI_RATIONALE_LABEL : '사유'}
+          label={tag.label}
           value={action.rationale}
-          {...(teamAi ? {note: TEAM_AI_RATIONALE_NOTE} : {})}
+          {...(tag.note !== null ? {note: tag.note} : {})}
           styles={styles}
           testID="approval-action-rationale"
         />
@@ -1655,6 +1671,7 @@ function AgentCard({
   approvalsProvided,
   nowMs,
   onApprovalSettled,
+  onOpenMessage,
   decisionRef,
 }: {
   card: AgentCardModel;
@@ -1669,6 +1686,11 @@ function AgentCard({
   approvalsProvided?: boolean;
   nowMs: number;
   onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
+  /**
+   * 고정·고정 풀기 카드의 「전문 보기」가 여는 곳 (#4705). 없으면(열 곳을 모르는 표면) 링크도
+   * 서지 않는다.
+   */
+  onOpenMessage?: (channelId: string, messageId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
@@ -1683,11 +1705,19 @@ function AgentCard({
       approvalOffline,
       approvalsProvided,
     });
+    // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
+    const messagePreview = openableMessagePreview(
+      card,
+      settledStatus,
+      onOpenMessage !== undefined,
+    );
     return (
       <AgentCardFrame testID="agent-card">
         <View style={styles.cardHead}>
-          <Text style={styles.cardTitle} numberOfLines={2}>
-            {card.title}
+          {/* 먼저 제안 카드(#4705)는 제목 끝에 「 · 먼저 제안」 꼬리표 하나가 붙는다. 새 행도 배지도
+              없다 — 제안자는 메시지 줄이 이미 말한다. */}
+          <Text style={styles.cardTitle} numberOfLines={2} testID="approval-card-title">
+            {approvalHeadTitle(card)}
           </Text>
           {/* 원장이 방금 답해 준 상태가 있으면 그것이 이긴다. 없으면 스냅샷.
               둘을 섞지 않는 이유는 사진이 잡아냈다 — 영수증이 「승인을
@@ -1730,7 +1760,7 @@ function AgentCard({
         {card.action !== null ? (
           <ApprovalActionRows
             action={card.action}
-            teamAi={card.proposedVia !== undefined}
+            origin={card}
             styles={styles}
           />
         ) : null}
@@ -1741,6 +1771,11 @@ function AgentCard({
             card={card}
             agentName={memberFor(directory, card.requestedByMemberId)?.displayName ?? null}
           />
+        ) : null}
+        {/* 고정·고정 풀기 카드(#4705): 앞 120자만 보고 누르지 않게 전문으로 가는 문 하나가
+            결정 버튼 바로 위에 선다. 결정이 난 카드와 열 곳을 모르는 표면에는 서지 않는다. */}
+        {messagePreview !== null && onOpenMessage !== undefined ? (
+          <ApprovalMessagePreview preview={messagePreview} onOpen={onOpenMessage} />
         ) : null}
         {/* =====================================================================
             여기 있던 문장은 이랬다 (감사 H-1):
@@ -1867,11 +1902,23 @@ function AgentCard({
         // 표지(완료·진행·실패) · 무엇을 했나 · 상태 낱말(`.mt`). 한 턴의 여러 도구를
         // 한 카드로 모으는 것은 타임라인 묶음의 일이라 이 PR 밖이다(남은 일).
         <View style={styles.steps} testID="agent-card-steps">
-          <StepRow
-            state={stepStateForTurn(card.status)}
-            label={frameSentence(card.frame)}
-            meta={TURN_STATUS_LABEL[card.status]}
-          />
+          {card.approvalExpired === true ? (
+            // 서버 만료 스윕이 승인 카드 아래에 남긴 줄(#4705, 검수 L4)은 실패가 아니라 소식이
+            // 없는 것이다(ADR-0132): 결과 문장 하나, 중립의 「만료됨」, 빈 표지(`idle`).
+            // 「동사 → 결과」로 잇지 않는다(이 줄에는 동사가 없다). 표지를 모델의 상태에서
+            // 읽지 않고 못 박는 이유는 이 줄이 어떤 경우에도 실패의 얼굴을 입지 않게 하려는 것이다.
+            <StepRow
+              state="idle"
+              label={card.frame.outcome ?? card.title}
+              meta={APPROVAL_STATUS_LABEL.expired}
+            />
+          ) : (
+            <StepRow
+              state={stepStateForTurn(card.status)}
+              label={frameSentence(card.frame)}
+              meta={TURN_STATUS_LABEL[card.status]}
+            />
+          )}
         </View>
       ) : (
         <View style={styles.cardHead}>
@@ -1924,7 +1971,7 @@ function AgentCard({
             </View>
           ))}
           {card.detail.withheld > 0 ? (
-            <Text style={styles.cardMeta}>
+            <Text style={styles.cardMeta} testID="agent-card-withheld">
               {`표시하지 않은 항목 ${card.detail.withheld}개`}
             </Text>
           ) : null}
@@ -2123,6 +2170,12 @@ export interface MessageRowActions {
   workspaceId?: string;
   /** 칩 시트의 근거를 누르면 그 메시지로 데려간다. */
   onOpenMemoryEvidence?: (link: MemoryEvidenceLink) => void;
+  /**
+   * 고정·고정 풀기 승인 카드의 「전문 보기」가 그 메시지(다른 채널일 수 있다)로 데려간다 (#4705).
+   * 화면의 앵커 열기를 그대로 쓴다(ADE 카드의 「대화로」와 같은 기계). 없으면 링크도 로터 행동도
+   * 서지 않는다: 열 곳을 모르는 표면에 눌러도 아무 일 없는 버튼을 두지 않는다.
+   */
+  onOpenMessage?: (channelId: string, messageId: string) => void;
 }
 
 export interface MessageRowProps {
@@ -2427,6 +2480,28 @@ function MessageRowInner({
     approvalOffline,
     approvalsProvided,
   ]);
+  // 고정·고정 풀기 카드의 「전문 보기」 (#4705). 같은 이유로 — 행이 요소 하나라 카드 안의 링크에
+  // VoiceOver 가 닿지 못한다 — 로터에 세운다. 서는 조건은 카드가 링크를 세우는 조건과 **같은
+  // 함수**(`openableMessagePreview`)의 답이다: 결정이 나지 않았고, 대상 메시지를 알고, 열 곳을 안다.
+  const onOpenMessage = actions?.onOpenMessage;
+  const messageRotor = useMemo(() => {
+    const card = presentation.card;
+    if (card?.kind !== 'approval') return null;
+    const read = readApprovalCard(card, {
+      approvalGates,
+      approvalReceipts,
+      approvalOffline,
+      approvalsProvided,
+    });
+    return openableMessagePreview(card, read.settledStatus, onOpenMessage !== undefined);
+  }, [
+    presentation.card,
+    approvalGates,
+    approvalReceipts,
+    approvalOffline,
+    approvalsProvided,
+    onOpenMessage,
+  ]);
   const deleted = message.state === 'deleted';
   const rollup =
     rollupOverride === undefined ? threadRollup(message) : rollupOverride;
@@ -2650,6 +2725,11 @@ function MessageRowInner({
         case 'momoCopyCode':
           if (affordances.firstCode) void copyText(affordances.firstCode);
           return;
+        case MESSAGE_PREVIEW_ACTION_NAME:
+          if (messageRotor !== null) {
+            onOpenMessage?.(messageRotor.channelId, messageRotor.messageId);
+          }
+          return;
         case 'momoApprove':
           decisionRef.current?.decide('approve');
           return;
@@ -2708,6 +2788,8 @@ function MessageRowInner({
       presentation.artifact,
       togglePin,
       linkOnce,
+      messageRotor,
+      onOpenMessage,
       teamAiSend,
       teamAiReply,
       appNoticeWebUrl,
@@ -2721,6 +2803,11 @@ function MessageRowInner({
     const list: {name: string; label: string}[] = [];
     // 맨 앞이다: 「지금 전달하세요」라고 말한 값이고, 이 화면을 떠나면 다시 없다.
     if (linkOnce) list.push({name: 'momoCopyLinkOnce', label: '링크 복사하기'});
+    // 결정 **앞**이다: 고정할 글은 승인하기 전에 전문을 읽는 것이 이 링크의 일이다(눈에서도
+    // 링크가 결정 버튼 위에 선다). 낱말은 링크와 같다.
+    if (messageRotor !== null && !deleted) {
+      list.push({name: MESSAGE_PREVIEW_ACTION_NAME, label: MESSAGE_PREVIEW_LINK_LABEL});
+    }
     // 그다음이 기다리는 결정이다. 낱말은 버튼과 같다(「승인」·「거부」).
     if (decisionRotor !== null && !deleted) {
       if (decisionRotor.canApprove) list.push({name: 'momoApprove', label: '승인'});
@@ -2794,6 +2881,7 @@ function MessageRowInner({
     directory,
     message.authorMemberId,
     linkOnce,
+    messageRotor,
     decisionRotor,
     teamAiSend.pressable,
     teamAiReply,
@@ -3094,6 +3182,7 @@ function MessageRowInner({
                 approvalsProvided={approvalsProvided}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
+                onOpenMessage={actions?.onOpenMessage}
                 decisionRef={decisionRef}
               />
             ) : null}
