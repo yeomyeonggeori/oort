@@ -38,6 +38,8 @@ export interface AvatarImagePreview {
   sizeBytes: number;
   /** 사진의 출처 코드(`attachment` 등). 화면 글자가 아니다. */
   origin: string;
+  /** Authenticated, versioned server path to the picture being replaced. */
+  previousAvatarUrl?: string | null;
 }
 
 const SHA256 = /^[0-9a-f]{64}$/;
@@ -77,7 +79,22 @@ export function parseAvatarImagePreview(value: unknown): AvatarImagePreview | nu
   ) {
     return null;
   }
-  return { kind: "avatar_image", imageId, sha256: raw.sha256, mime, width, height, sizeBytes, origin };
+  const previousAvatarUrl = typeof raw.previousAvatarUrl === "string" &&
+    /^\/v1\/workspaces\/[A-Za-z0-9_-]+\/members\/[A-Za-z0-9_-]+\/avatar\/content\?v=[A-Za-z0-9_-]+$/.test(raw.previousAvatarUrl)
+    ? raw.previousAvatarUrl : null;
+  return { kind: "avatar_image", imageId, sha256: raw.sha256, mime, width, height, sizeBytes, origin,
+    ...(Object.prototype.hasOwnProperty.call(raw, "previousAvatarUrl") ? { previousAvatarUrl } : {}),
+  };
+}
+
+export function hasProfileAvatarPreview(action: { id: string; preview?: AvatarImagePreview } | null | undefined): boolean {
+  return isMemberAvatarSetAction(action?.id) ||
+    (action?.id === "agent.profile.update" && action.preview !== undefined);
+}
+
+export function profileAvatarHeadline(actionId: string | null | undefined, agentName: string | null | undefined): string | null {
+  return memberAvatarSetHeadline(actionId, agentName) ??
+    (actionId === "agent.profile.update" ? "에이전트의 프로필 사진을 바꾸려고 해요" : null);
 }
 
 /** `GET …/approvals/{approval}/avatar-preview?v={sha256}` 의 모양. 베어러를 싣기 전에 대조한다. */

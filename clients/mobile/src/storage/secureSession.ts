@@ -384,6 +384,14 @@ export function applyRotation(newAccess: string, newRefresh: string): void {
   notify();
 }
 
+/** Adopt a server-confirmed self profile without touching either credential. */
+export function replacePersistedMember(member: LoginResponse['member']): void {
+  if (!persisted || persisted.member.id !== member.id || persisted.member.workspaceId !== member.workspaceId) return;
+  persisted = {...persisted, member};
+  writeMetadata(persisted);
+  notify();
+}
+
 /**
  * Complete local erasure. The in-memory half is gone the instant this returns;
  * the keychain delete is queued behind any write still in flight, so the
