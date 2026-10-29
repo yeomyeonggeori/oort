@@ -14,6 +14,7 @@
 //! | `no_argument_can_carry_a_token_and_a_mistyped_one_is_not_echoed` | R16 (c): exit 2, no request, the parser's complaint holds no token | a token flag appears, or the complaint prints it |
 //! | `eight_processes_with_an_expired_login_rotate_it_once` | R17: one refresh request, none refused as a reuse, eight successes | the store lock around refresh is removed |
 //! | `logout_ends_the_stored_login_with_its_own_token_and_leaves_an_env_token_alone` | logout presents only the stored login's token; an `OORT_TOKEN` card is never presented | logout resolves the env token first |
+//! | `a_reader_that_closes_the_pipe_ends_a_command_quietly` | `oort read | head -c 1` ends with status 0 and no panic | an output path goes back to `println!` |
 //! | `a_redirect_is_never_followed` | R18: the other host sees nothing, the credential went only to the named server | the redirect policy follows |
 //! | `a_plain_http_server_off_the_loopback_is_refused_before_any_connection` | R18: exit 2 at once | the scheme check is removed |
 //! | `every_command_prints_its_json_document_and_no_secret` | R19: goldens for 9 commands, marker sweep | a document gains a token field |
@@ -818,6 +819,49 @@ fn logout_removes_the_local_login_even_when_the_server_cannot_be_reached() {
         "the secret is gone locally whatever the network said"
     );
     assert_no_leak("logout stderr", &stderr(&out), &leak_needles(&card()));
+}
+
+#[test]
+fn a_reader_that_closes_the_pipe_ends_a_command_quietly() {
+    // `oort read | head -c 1`: the reader is gone after one byte. The standard `println!` panics
+    // (exit 101, a backtrace hint on standard error) when that happens; the command must end
+    // without either. The output is made much larger than a pipe's buffer so the write really
+    // meets a closed pipe.
+    let big = "가".repeat(4000);
+    let token = card();
+    let mock = Mock::start(move |request| {
+        if request.header("authorization") != Some(format!("Bearer {token}").as_str()) {
+            return Response::json(401, &json!({"error": {"message": "invalid token"}}));
+        }
+        let messages: Vec<Value> = (1..=200)
+            .map(|seq| server_message(seq, MEMBER, &big, 1_793_179_800_000 + seq, None))
+            .collect();
+        Response::json(200, &json!({"messages": messages, "nextBefore": 1}))
+    });
+    let home = Home::new();
+    let script = r#"set -o pipefail; "$OORT_BIN" read "$OORT_CHANNEL" | head -c 1 > /dev/null; echo "status=$?""#;
+    let out = Command::new("bash")
+        .arg("-c")
+        .arg(script)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("HOME", home.home())
+        .env("XDG_CONFIG_HOME", home.xdg())
+        .env("OORT_BIN", env!("CARGO_BIN_EXE_oort"))
+        .env("OORT_CHANNEL", CHANNEL)
+        .env("OORT_TOKEN", card())
+        .env("OORT_SERVER", mock.origin())
+        .stdin(Stdio::null())
+        .output()
+        .expect("run bash");
+    assert!(
+        stdout(&out).contains("status=0"),
+        "{} / {}",
+        stdout(&out),
+        stderr(&out)
+    );
+    assert!(!stderr(&out).contains("panicked"), "{}", stderr(&out));
+    assert_no_leak("stderr", &stderr(&out), &leak_needles(&card()));
 }
 
 #[test]
