@@ -50,7 +50,7 @@ describe('프로필 사진 뷰어의 모양', () => {
     expect(screen.queryByText('공유')).toBeNull();
     // Maestro 105 가 짚는 첨부 뷰어의 이름을 이 뷰어가 가로채지 않는다.
     expect(screen.queryByTestId('attachment-viewer')).toBeNull();
-    expect(screen.queryByTestId('attachment-viewer-close')).toBeNull();
+    expect(screen.queryByTestId('attachment-viewer-back')).toBeNull();
   });
 
   it('닫기는 글자가 아니라 시트와 같은 X 글리프이고, 어느 사진을 닫는지 이름이 말하며, 누르는 면은 44pt 이상이다', () => {

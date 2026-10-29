@@ -8,7 +8,7 @@ name: "107-photo-viewer-diagonal-drag-capture"
 # 녹화에서 본 것 — `directionalLockEnabled` 는 이를 막지 못했다). 끌기를 쥐면 스크롤을 잠그고(`scrollEnabled`),
 # 끝나면 풀어 현재 쪽에 다시 맞춘다. 표면은 105 와 같다(`-momoMeasure PHOTO-VIEWER-MULTI`).
 #
-#   ① 모자라게(약 70pt 아래 · 32pt 옆, 느리게) 대각선으로 내렸다 놓는다 — 제자리로 돌아오고 「2 / 3」 그대로다.
+#   ① 모자라게(약 70pt 아래 · 32pt 옆, 느리게) 대각선으로 내렸다 놓는다 — 제자리로 돌아오고 「3장 중 2번」 그대로다.
 #      이 사진(`-diagonal-short-stays`)은 열린 직후(`-open-2of3`)와 **바이트까지 같아야 한다**: 한 픽셀이라도
 #      옆으로 어긋나 있으면(잠금이 새거나 다시 맞추지 않았거나) 다르다. Maestro 는 바이트를 비교하지 못하므로 PR
 #      본문이 두 해시를 비교해 적는다.
@@ -34,7 +34,7 @@ name: "107-photo-viewer-diagonal-drag-capture"
 - waitForAnimationToEnd
 - assertVisible:
     id: "attachment-viewer-position"
-    text: "2 / 3"
+    text: "3장 중 2번.*"
 - takeScreenshot: ${SHOT}-open-2of3
 # ① 모자라게 대각선으로 — 제자리로.
 - swipe:
@@ -44,7 +44,7 @@ name: "107-photo-viewer-diagonal-drag-capture"
 - waitForAnimationToEnd
 - assertVisible:
     id: "attachment-viewer-position"
-    text: "2 / 3"
+    text: "3장 중 2번.*"
 - takeScreenshot: ${SHOT}-diagonal-short-stays
 # ② 충분히 대각선으로 — 닫힌다.
 - swipe:

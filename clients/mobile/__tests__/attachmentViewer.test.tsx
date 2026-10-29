@@ -5,28 +5,52 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within,
 } from '@testing-library/react-native';
 import React from 'react';
 import {
   AccessibilityInfo,
+  ActivityIndicator,
   Animated,
   Dimensions,
   Image,
   Pressable,
   ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
   View,
   type NativeTouchEvent,
 } from 'react-native';
 
 import { BAR_CONTROL_MAX_SCALE } from '../src/design/atoms';
-import { SHEET_ICONS } from '../src/design/icons';
-import { space, TOUCH_TARGET } from '../src/design/tokens';
-import { VIEWER_SNAP_SPRING } from '../src/design/motion';
+import { CONV_ICONS, SHEET_ICONS, VIEWER_ICONS } from '../src/design/icons';
+import { photoStage, TOUCH_TARGET } from '../src/design/tokens';
+import {
+  EASE_OUT,
+  VIEWER_CHROME_HIDE_MS,
+  VIEWER_CHROME_SHOW_MS,
+  VIEWER_SNAP_SPRING,
+} from '../src/design/motion';
+import { FixedScheme } from '../src/design/theme';
+import {
+  resetBlurSupportForTests,
+  resetLiquidGlassSupportForTests,
+} from '../src/design/glass';
 import { AttachmentList } from '../src/features/attachments/AttachmentList';
 import { AttachmentViewer } from '../src/features/attachments/AttachmentViewer';
 import { resetAttachmentContentForTest } from '../src/features/attachments/content';
 import { DISMISS_DISTANCE_PT } from '../src/features/attachments/viewerDismiss';
+import {
+  VIEWER,
+  VIEWER_GLASS_TONE,
+  VIEWER_STAGE,
+  viewerScrimFade,
+  viewerScrimFadeAlpha,
+  viewerScrimPlateau,
+  viewerStamp,
+} from '../src/features/attachments/viewerDesign';
 import { retainReduceMotion } from '../src/lib/useReduceMotion';
 
 jest.mock('../src/session/useSession', () => ({
@@ -57,6 +81,36 @@ const IMAGES: MessageAttachment[] = ['a', 'b', 'c'].map(id => ({
   mime: 'image/png',
   sizeBytes: 4096,
 }));
+
+/** 보낸 시각 — 지역 시간으로 지어 시험이 어느 시간대에서 돌아도 같은 글이 된다. */
+const SENT_AT = new Date(2026, 9, 29, 14, 55).getTime();
+
+// ---- 색 관계를 재는 도구(⑧·⑪) ------------------------------------------------------------
+type Rgb = [number, number, number];
+const hex = (value: string): Rgb => [
+  parseInt(value.slice(1, 3), 16),
+  parseInt(value.slice(3, 5), 16),
+  parseInt(value.slice(5, 7), 16),
+];
+/** `rgba(r, g, b, a)` 또는 `#rrggbb` 를 `base` 위에 합성한 색. */
+const composite = (color: string, base: Rgb): Rgb => {
+  if (color.startsWith('#')) return hex(color);
+  const [r, g, b, a] = (color.match(/[\d.]+/g) ?? []).map(Number) as [number, number, number, number];
+  return [r, g, b].map((channel, i) => Math.round(channel * a + (base[i] as number) * (1 - a))) as Rgb;
+};
+const luminance = ([r, g, b]: Rgb) => {
+  const lin = (c: number) => {
+    const x = c / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+const contrast = (a: Rgb, b: Rgb) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+};
+const BLACK = hex(VIEWER_STAGE.bg);
+const WHITE: Rgb = [255, 255, 255];
 
 /** 한 기기의 인셋(pt). 값은 실기기의 것이다. */
 const DEVICES = {
@@ -333,8 +387,10 @@ async function mount(
       viewer
     ),
   );
-  // 쪽마다 미리보기를 받는다 — 도착을 기다려 둬야 act 밖의 갱신이 시험 밖으로 새지 않는다.
+  // 쪽마다 미리보기를 받는다 — 도착을 기다려 둬야 act 밖의 갱신이 시험 밖으로 새지 않는다. 썸네일(여러 장일 때)도 같은 미리보기를 받고,
+  // 「동작 줄이기」·보조기술의 첫 답도 이 틱에 도착한다.
   await screen.findAllByTestId('attachment-viewer-image');
+  await act(async () => {});
   return { onClose, progress, rowGrants };
 }
 
@@ -345,11 +401,16 @@ const scrollView = () => screen.getByTestId('attachment-viewer-scroll');
 
 const a11y = AccessibilityInfo as unknown as {
   isReduceMotionEnabled: jest.Mock;
+  isScreenReaderEnabled: jest.Mock;
+  isReduceTransparencyEnabled: jest.Mock;
 };
 
 beforeEach(() => {
   resetAttachmentContentForTest();
+  // 이 셋은 RN 의 대역이 하나의 jest.fn 이라 `spyOn` 으로 바꾼 답이 시험 사이로 샌다 — 시험마다 꺼짐으로 되돌린다.
   a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(false));
+  a11y.isScreenReaderEnabled.mockImplementation(() => Promise.resolve(false));
+  a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(false));
 });
 
 afterEach(() => {
@@ -364,20 +425,30 @@ describe('① 단추 띠는 안전 영역 안에 선다', () => {
     useInsets(insets);
     await mount();
     const bar = flatten(screen.getByTestId('attachment-viewer-bar').props.style);
-    // 이 한 줄이 이슈의 P0 다: 닫기·공유의 윗면이 인셋(상태 막대·다이내믹 아일랜드) 위로 올라가면 안 된다.
+    // 이 한 줄이 이슈의 P0 다: 뒤로의 윗면이 인셋(상태 막대·다이내믹 아일랜드) 위로 올라가면 안 된다.
     expect(bar.paddingTop).toBe(insets.top);
     // 가로 여백은 평소 여백보다 좁아지지 않고, 노치 쪽 인셋보다도 좁아지지 않는다.
-    expect(bar.paddingLeft).toBe(Math.max(space.md, insets.left));
-    expect(bar.paddingRight).toBe(Math.max(space.md, insets.right));
-    // 띠는 흐름 안에 선다 — 절대 위치로 위에 얹혀 인셋을 넘어가지 않는다.
-    expect(bar.position).toBeUndefined();
+    expect(bar.paddingLeft).toBe(Math.max(VIEWER.edge, insets.left));
+    expect(bar.paddingRight).toBe(Math.max(VIEWER.edge, insets.right));
+    // #4297: 띠는 사진 **위에 뜬다**(화면 가득인 사진 위 절대 위치, 맨 위 0). 앞 판의 단정 「띠는 흐름 안에 선다」는 막대가
+    // 사진 영역을 깎던 배치를 전제했다. 인셋을 넘지 않는다는 보장은 위치가 아니라 위 `paddingTop === insets.top` 이 진다.
+    expect(bar.position).toBe('absolute');
+    expect(bar.top).toBe(0);
   });
 
-  it.each(Object.entries(DEVICES))('%s: 사진 영역은 홈 인디케이터 위에서 끝난다', async (_name, insets) => {
+  it.each(Object.entries(DEVICES))('%s: 아래 조작은 홈 인디케이터 위에서 끝나고, 사진은 화면 가득이다', async (_name, insets) => {
     useInsets(insets);
     await mount();
+    const actions = flatten(screen.getByTestId('attachment-viewer-actions').props.style);
+    // 앞 판의 단정 「사진 영역이 인셋 위에서 끝난다」(`pager.paddingBottom === insets.bottom`)는 사진이 막대 사이에 끼던
+    // 배치의 것이다. 이제 사진은 화면 가득이고(아래 단정), 홈 인디케이터를 피하는 것은 그 위에 뜬 조작이다.
+    expect(actions.paddingBottom).toBeGreaterThanOrEqual(insets.bottom);
+    expect(actions.paddingBottom).toBe(insets.bottom + VIEWER.bottomLift);
+    expect(actions.position).toBe('absolute');
+    expect(actions.bottom).toBe(0);
     const pager = flatten(screen.getByTestId('attachment-viewer-pager').props.style);
-    expect(pager.paddingBottom).toBe(insets.bottom);
+    expect([pager.top, pager.right, pager.bottom, pager.left]).toEqual([0, 0, 0, 0]);
+    expect(pager.paddingBottom).toBeUndefined();
   });
 
   it('인셋이 0 인 기기에서는 0 이다 — 값을 지어내지 않는다', async () => {
@@ -386,37 +457,43 @@ describe('① 단추 띠는 안전 영역 안에 선다', () => {
     expect(bar.paddingTop).toBe(0);
   });
 
-  it('닫기·공유는 두 변 모두 44pt 이상이다', async () => {
+  it('뒤로·저장·공유는 두 변 모두 44pt 이상이다 — 둥근 단추라 두 변이 같다', async () => {
     useInsets(DEVICES['다이내믹 아일랜드(16 Pro)']);
     await mount();
-    for (const id of ['attachment-viewer-close', 'attachment-viewer-share']) {
+    for (const id of ['attachment-viewer-back', 'attachment-viewer-save', 'attachment-viewer-share']) {
       const style = flatten(screen.getByTestId(id).props.style);
       expect(style.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
       expect(style.minWidth).toBeGreaterThanOrEqual(TOUCH_TARGET);
+      expect(style.width).toBe(style.height);
     }
   });
 
-  it('띠의 글자는 크롬이라 글자 크기 상한을 갖는다 — 가장 큰 글자 크기에서 띠가 사진 영역을 먹지 않는다', async () => {
-    // 띠는 흐름 안에 서므로 글자가 무한히 자라면 사진 영역이 줄어든다. 상한 정책(`atoms.tsx`): 크롬만 상한을 갖는다.
-    await mount();
+  it('조작의 글자는 크롬이라 글자 크기 상한을 갖는다 — 가장 큰 글자 크기에서 이름·캡션이 사진을 덮지 않는다', async () => {
+    // 조작은 사진 위에 뜨므로 글자가 무한히 자라면 사진을 가린다. 상한 정책(`atoms.tsx`): 크롬만 상한을 갖는다.
+    await mount({ senderName: '박서연', sentAtMs: SENT_AT });
     for (const label of [
+      screen.getByTestId('attachment-viewer-sender'),
+      screen.getByTestId('attachment-viewer-sent-at'),
       screen.getByTestId('attachment-viewer-position'),
-      screen.getByText('공유'),
     ]) {
       expect(label.props.maxFontSizeMultiplier).toBe(BAR_CONTROL_MAX_SCALE);
     }
   });
 
-  it('닫기는 글자가 아니라 시트와 같은 X 글리프다 — 이름·누르는 면은 그대로이고 글자 「닫기」는 없다 (#4458)', async () => {
+  it('뒤로는 글자가 아니라 ‹ 글리프다 — 이름은 「뒤로」이고 글자는 없다 (#4297: X 가 아니라 페이지의 나가는 문)', async () => {
+    // 앞 판의 단정 「닫기는 시트와 같은 X 글리프다」(#4458)는 이 전체 화면이 시트처럼 X 로 닫히던 때의 것이다. 이 화면은 대화
+    // 위에 한 겹 쌓이는 페이지라 한 겹 벗기고 돌아가는 문은 ‹ 이다(`phone-sheets.md` §3). 같은 단정이 지키던 것 — 글자가 아니라
+    // 글리프이고, 이름·누르는 면이 정해져 있다 — 은 그대로 잰다.
     await mount();
-    const close = screen.getByTestId('attachment-viewer-close');
-    expect(close.props.accessibilityLabel).toBe('닫기');
-    expect(within(close).UNSAFE_getByType(Image).props.source).toBe(SHEET_ICONS.close);
-    expect(screen.queryByText('닫기')).toBeNull();
-    // 글리프는 크롬이라 글자 배율을 따라가지 않는다(이미지) — 누르는 면은 글리프가 아니라 단추 상자가 정한다.
-    const style = flatten(close.props.style);
-    expect(style.minHeight).toBeGreaterThanOrEqual(TOUCH_TARGET);
-    expect(style.minWidth).toBeGreaterThanOrEqual(TOUCH_TARGET);
+    const back = screen.getByTestId('attachment-viewer-back');
+    expect(back.props.accessibilityLabel).toBe('뒤로');
+    expect(within(back).UNSAFE_getByType(Image).props.source).toBe(CONV_ICONS.left);
+    expect(screen.queryByText('뒤로')).toBeNull();
+    // X 는 없다(옛 닫기).
+    expect(screen.queryByTestId('attachment-viewer-close')).toBeNull();
+    for (const node of screen.UNSAFE_queryAllByType(Image)) {
+      expect(node.props.source).not.toBe(SHEET_ICONS.close);
+    }
   });
 
   it('인셋은 Modal **안의** SafeAreaProvider 가 준다 — Modal 은 앱 루트와 다른 네이티브 계층이다', async () => {
@@ -437,18 +514,20 @@ describe('① 단추 띠는 안전 영역 안에 선다', () => {
   });
 });
 
-describe('VoiceOver: 닫기에 닿고 「닫기」로 읽힌다', () => {
-  it('닫기는 버튼이고 이름이 「닫기」다', async () => {
+describe('VoiceOver: 뒤로에 닿고 「뒤로」로 읽힌다', () => {
+  it('뒤로는 버튼이고 이름이 「뒤로」다', async () => {
     await mount();
-    const close = screen.getByTestId('attachment-viewer-close');
-    expect(close.props.accessibilityRole).toBe('button');
-    expect(close.props.accessibilityLabel).toBe('닫기');
+    const back = screen.getByTestId('attachment-viewer-back');
+    expect(back.props.accessibilityRole).toBe('button');
+    expect(back.props.accessibilityLabel).toBe('뒤로');
   });
 
-  it('읽는 순서에서 닫기가 첫 번째다 — 사람은 뷰어에 들어서자마자 닫을 길을 만난다', async () => {
+  it('읽는 순서에서 뒤로가 첫 번째다 — 사람은 뷰어에 들어서자마자 나갈 길을 만난다', async () => {
     await mount();
     const order = screen.getAllByRole('button').map(button => button.props.testID);
-    expect(order[0]).toBe('attachment-viewer-close');
+    expect(order[0]).toBe('attachment-viewer-back');
+    // 아래 조작은 그 뒤에 선다: 저장·공유(썸네일은 그 사이 — 여러 장일 때).
+    expect(order.slice(-2)).toEqual(['attachment-viewer-save', 'attachment-viewer-share']);
   });
 
   it('뷰어가 모달 경계다 — VoiceOver 가 뒤의 대화로 새지 않는다', async () => {
@@ -464,9 +543,9 @@ describe('VoiceOver: 닫기에 닿고 「닫기」로 읽힌다', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('단추 탭은 그대로 닫는다', async () => {
+  it('뒤로 탭은 그대로 닫는다', async () => {
     const { onClose } = await mount();
-    fireEvent.press(screen.getByTestId('attachment-viewer-close'));
+    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
@@ -541,7 +620,7 @@ describe('② 아래로 쓸어 닫기', () => {
     expect(capture).toBe(false);
   });
 
-  it('문턱 안의 움직임과 탭은 아무것도 끌지 않는다 — 닫기 단추의 탭이 산다', async () => {
+  it('문턱 안의 움직임과 탭은 아무것도 끌지 않는다 — 뒤로 단추의 탭이 산다', async () => {
     const { onClose, progress } = await mount();
     const touch = finger(photo());
     touch.down(200, 300);
@@ -549,7 +628,15 @@ describe('② 아래로 쓸어 닫기', () => {
     expect(progress.current).toBeNull();
     touch.up();
     expect(onClose).not.toHaveBeenCalled();
-    fireEvent.press(screen.getByTestId('attachment-viewer-close'));
+    // #4297: 사진을 한 번 누르면 조작이 숨는다 — 숨은 단추는 눌리지 않는다. 한 번 더 눌러 돌아오면 뒤로의 탭이 산다.
+    // (숨은 덩어리는 접근성 트리에서 빠지므로 렌더러의 기본 질의에는 잡히지 않는다 — 숨은 것을 보려면 명시한다.)
+    const hiddenBar = () => screen.getByTestId('attachment-viewer-bar', { includeHiddenElements: true });
+    expect(hiddenBar().props.pointerEvents).toBe('none');
+    const again = finger(photo());
+    again.down(200, 300);
+    again.up();
+    expect(hiddenBar().props.pointerEvents).toBe('box-none');
+    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -668,7 +755,7 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
     }
   });
 
-  it('사진 밖(단추 띠의 빈 곳·홈 인디케이터 인셋)에 닿은 손가락은 뿌리가 쥔다 — 뒤의 메시지 행이 가져가지 못한다', async () => {
+  it('사진 밖(조작 덩어리 자체·사진 영역 자체)에 닿은 손가락은 뿌리가 쥔다 — 뒤의 메시지 행이 가져가지 못한다', async () => {
     useInsets(DEVICES['다이내믹 아일랜드(16 Pro)']);
     const { rowGrants } = await mount({}, { inRow: true });
     for (const id of ['attachment-viewer-bar', 'attachment-viewer-pager']) {
@@ -790,9 +877,9 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('닫기 단추는 쪽·뿌리보다 깊어서 자기 탭을 그대로 쥔다 — 응답을 뷰어가 가로채지 않는다', async () => {
+  it('뒤로 단추는 쪽·뿌리보다 깊어서 자기 탭을 그대로 쥔다 — 응답을 뷰어가 가로채지 않는다', async () => {
     const { onClose } = await mount({}, { inRow: true });
-    const close = screen.getByTestId('attachment-viewer-close');
+    const close = screen.getByTestId('attachment-viewer-back');
     // Pressable 은 자기 핸들러로 쥔다 — 뷰어의 부분 집합이 아니라 단추가 먼저 묻는다.
     const chain = hostChain(close);
     const first = chain.find(node => typeof node.props.onStartShouldSetResponder === 'function');
@@ -1050,7 +1137,7 @@ describe('대화에서 연 뷰어', () => {
     expect(screen.getByTestId('attachment-item')).toBeTruthy();
   });
 
-  it('다이내믹 아일랜드 기기에서도 단추 띠가 인셋 아래에서 시작하고, 닫기 탭이 닫는다', async () => {
+  it('다이내믹 아일랜드 기기에서도 단추 띠가 인셋 아래에서 시작하고, 뒤로 탭이 닫는다', async () => {
     useInsets(DEVICES['다이내믹 아일랜드(16 Pro)']);
     await renderList();
     fireEvent.press(screen.getByTestId('attachment-item'));
@@ -1058,7 +1145,599 @@ describe('대화에서 연 뷰어', () => {
     expect(
       flatten(screen.getByTestId('attachment-viewer-bar').props.style).paddingTop,
     ).toBe(59);
-    fireEvent.press(screen.getByTestId('attachment-viewer-close'));
+    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
     expect(screen.queryByTestId('attachment-viewer')).toBeNull();
+  });
+});
+
+
+// =============================================================================
+// 사진 뷰어 (#4297): 검정 무대 위에 떠 있는 유리 조작, 탭으로 숨김, 썸네일 줄.
+//
+// 위 여섯 묶음이 #4293 의 안전 영역·쓸어 닫기·응답 자리를 지킨다. 아래는 #4297 이 더한 것이다. 조작이 사진 **위에 뜨면서**
+// 앞 판의 구조 보장(조작은 사진 밖이라 응답을 가져가지 않는다)이 자동으로는 성립하지 않게 됐다 — 그래서 첫 묶음이 그것을
+// 렌더 트리의 `pointerEvents` 로 다시 못 박는다(jest 에는 네이티브 스크롤뷰가 없어 「옆으로 넘기기가 산다」를 직접 못 재므로 이
+// 형태가 기계로 잴 수 있는 유일한 모양이다 — 실제로 살아 있는지는 Maestro 105 가 잰다).
+// =============================================================================
+
+/** 사진을 한 번 누른다(탭): 닿고, 문턱 안에서 뗀다. */
+function tap(target: Instance = photo()) {
+  const touch = finger(target);
+  touch.down(200, 300);
+  touch.up();
+}
+
+// 숨은 덩어리는 접근성 트리에서 빠진다(`accessibilityElementsHidden`) — 렌더러의 기본 질의는 그런 요소를 건너뛰므로 숨은 상태를
+// 읽는 이 도우미들은 숨은 것도 포함해 묻는다.
+const bar = () => screen.getByTestId('attachment-viewer-bar', { includeHiddenElements: true });
+const actionsBlock = () => screen.getByTestId('attachment-viewer-actions', { includeHiddenElements: true });
+const chromeIsShown = () =>
+  bar().props.pointerEvents === 'box-none' && actionsBlock().props.pointerEvents === 'box-none';
+
+describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시키고, 숨으면 닿지도 읽히지도 않는다', () => {
+  it('보일 때 두 덩어리는 빈 곳을 통과시킨다(box-none) — 글자는 닿지 않는다(none)', async () => {
+    await mount({ senderName: '박서연', sentAtMs: SENT_AT });
+    // 단추 옆·썸네일 줄 둘레의 빈 곳에 닿은 손가락이 위로 번져 뿌리에 닿으면 뿌리가 JS 응답자가 되어 그 아래 쪽의 옆으로
+    // 넘기기가 죽는다(r2 B-1 의 재발 길). 덩어리가 통과시키면 손가락은 아래 쪽에 닿는다.
+    expect(bar().props.pointerEvents).toBe('box-none');
+    expect(actionsBlock().props.pointerEvents).toBe('box-none');
+    expect(screen.getByTestId('attachment-viewer-stamp').props.pointerEvents).toBe('none');
+    // 덩어리 자신은 응답자가 아니다(단추·줄이 자기 일을 쥐고 나머지는 통과한다).
+    for (const block of [bar(), actionsBlock()]) {
+      expect(block.props.onStartShouldSetResponder).toBeUndefined();
+      expect(block.props.onMoveShouldSetResponder).toBeUndefined();
+    }
+  });
+
+  it('탭하면 두 덩어리가 통째로 닿지 않고 읽히지 않는다 — 보이지 않는 44pt 단추가 남지 않는다', async () => {
+    const { onClose } = await mount();
+    expect(chromeIsShown()).toBe(true);
+    expect(bar().props.accessibilityElementsHidden).toBe(false);
+    tap();
+    for (const block of [bar(), actionsBlock()]) {
+      expect(block.props.pointerEvents).toBe('none');
+      expect(block.props.accessibilityElementsHidden).toBe(true);
+      expect(block.props.importantForAccessibility).toBe('no-hide-descendants');
+    }
+    // 숨은 뒤로·저장·공유는 읽히지 않고(접근성 트리에서 빠진다) 눌리지도 않는다(렌더러가 `pointerEvents` 를 존중한다).
+    expect(screen.queryByTestId('attachment-viewer-back')).toBeNull();
+    expect(screen.queryByRole('button', { name: '저장' })).toBeNull();
+    const hiddenBack = screen.getByTestId('attachment-viewer-back', { includeHiddenElements: true });
+    fireEvent.press(hiddenBack);
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('다시 탭하면 돌아온다 — 두 덩어리가 같이, 읽히는 것도 같이', async () => {
+    const { onClose } = await mount();
+    tap();
+    expect(chromeIsShown()).toBe(false);
+    tap();
+    expect(chromeIsShown()).toBe(true);
+    for (const block of [bar(), actionsBlock()]) {
+      expect(block.props.accessibilityElementsHidden).toBe(false);
+    }
+    // 돌아온 조작은 다시 읽히고 눌린다.
+    expect(screen.getByRole('button', { name: '저장' })).toBeTruthy();
+    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('탭은 닫지도 끌지도 않는다', async () => {
+    const { onClose, progress } = await mount();
+    tap();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(progress.current).toBeNull();
+  });
+
+  it('끌기·가로 넘김·핀치·빼앗김은 탭이 아니다 — 조작이 숨지 않는다', async () => {
+    await mount();
+    // 아래로 끌다 모자라게 놓는다.
+    const drag = finger(photo());
+    drag.down(200, 300);
+    dragSlowly(drag, 200, 300, 60);
+    drag.up();
+    expect(chromeIsShown()).toBe(true);
+    // 옆으로 넘기던 손가락(스크롤뷰가 응답을 가져간다 — 놓음이 아니라 빼앗김).
+    const swipe = finger(photo());
+    swipe.down(300, 400);
+    for (const [x, y] of [
+      [270, 405],
+      [200, 410],
+      [120, 415],
+    ] as const) {
+      swipe.move(x, y);
+    }
+    swipe.terminate();
+    expect(chromeIsShown()).toBe(true);
+    // 가로로 문턱을 넘은 뒤 그대로 떼도(응답을 안 빼앗겼어도) 탭이 아니다.
+    const lateral = finger(photo());
+    lateral.down(300, 400);
+    lateral.move(260, 402);
+    lateral.up();
+    expect(chromeIsShown()).toBe(true);
+    // 두 손가락이 한꺼번에 닿았다 떼도 탭이 아니다.
+    const pinch = finger(photo());
+    pinch.down(200, 300, 2);
+    pinch.up();
+    expect(chromeIsShown()).toBe(true);
+  });
+
+  it('숨김·나타남은 불투명도 하나다 — 나타남 240 · 사라짐 180(사다리), 곡선 EASE_OUT, 네이티브 구동', async () => {
+    const timing = jest.spyOn(Animated, 'timing');
+    await mount();
+    tap();
+    const configs = () => timing.mock.calls.map(call => call[1] as unknown as Record<string, unknown>);
+    expect(configs()).toContainEqual(
+      expect.objectContaining({
+        toValue: 0,
+        duration: VIEWER_CHROME_HIDE_MS,
+        easing: EASE_OUT,
+        useNativeDriver: true,
+      }),
+    );
+    tap();
+    expect(configs()).toContainEqual(
+      expect.objectContaining({
+        toValue: 1,
+        duration: VIEWER_CHROME_SHOW_MS,
+        easing: EASE_OUT,
+        useNativeDriver: true,
+      }),
+    );
+    // 사다리의 비대칭: 사라짐은 나타남보다 짧다.
+    expect(VIEWER_CHROME_HIDE_MS).toBeLessThan(VIEWER_CHROME_SHOW_MS);
+  });
+
+  it('동작 줄이기면 즉시 바뀐다 — 타이밍을 부르지 않는다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    const timing = jest.spyOn(Animated, 'timing');
+    await mount();
+    await act(async () => {}); // 설정의 답이 도착한다
+    tap();
+    expect(chromeIsShown()).toBe(false);
+    tap();
+    expect(chromeIsShown()).toBe(true);
+    expect(timing).not.toHaveBeenCalled();
+  });
+
+  it('VoiceOver 가 켜져 있으면 탭이 숨기지 않는다 — 숨은 조작을 다시 불러올 길이 빈 곳 누르기뿐이라 나가는 길을 잃는다', async () => {
+    a11y.isScreenReaderEnabled.mockImplementation(() => Promise.resolve(true));
+    await mount();
+    await act(async () => {}); // 보조기술의 답이 도착한다
+    tap();
+    expect(chromeIsShown()).toBe(true);
+    expect(bar().props.accessibilityElementsHidden).toBe(false);
+  });
+
+  it('상태 막대 글자는 무대에 맞춰 밝다 — 앱 바탕이 라이트여도', async () => {
+    await mount();
+    expect(screen.UNSAFE_getByType(StatusBar).props.barStyle).toBe('light-content');
+  });
+});
+
+describe('⑥ 썸네일 줄과 「N장 중 n번」', () => {
+  const { width } = Dimensions.get('window');
+  const scrollTo = () => ScrollView.prototype.scrollTo as unknown as jest.Mock;
+  const thumbs = () => screen.getAllByTestId('attachment-viewer-thumb');
+  const selected = () => thumbs().map(node => node.props.accessibilityState?.selected === true);
+  const caption = () => screen.getByTestId('attachment-viewer-position').props.children;
+
+  beforeEach(() => {
+    scrollTo().mockClear();
+  });
+
+  it('두 장 이상이면 줄이 서고, 고른 장만 고른 표시이며, 캡션이 「3장 중 2번」이다', async () => {
+    await mount({ startIndex: 1 });
+    expect(thumbs()).toHaveLength(3);
+    expect(selected()).toEqual([false, true, false]);
+    expect(caption()).toBe('3장 중 2번');
+    // 보조기술은 「n번째 사진」으로 읽는다.
+    expect(screen.getByLabelText('3장 중 2번째 사진')).toBeTruthy();
+    // 썸네일마다 사진이 서고, 쪽의 큰 사진과 testID 가 다르다(쪽을 세는 시험·손가락 시험이 어긋나지 않게).
+    await waitFor(() => expect(screen.getAllByTestId('attachment-viewer-thumb-image')).toHaveLength(3));
+    expect(screen.getAllByTestId('attachment-viewer-image')).toHaveLength(3);
+  });
+
+  it('고른 썸네일은 흰 테두리, 안 고른 것은 같은 두께의 투명 테두리다 — 고를 때 자리가 안 움직인다', async () => {
+    await mount({ startIndex: 0 });
+    const [first, second] = thumbs().map(node => flatten(node.props.style));
+    expect(first?.borderColor).toBe(VIEWER_STAGE.ring);
+    expect(second?.borderColor).toBe('transparent');
+    expect(first?.borderWidth).toBe(VIEWER.thumbRing);
+    expect(second?.borderWidth).toBe(VIEWER.thumbRing);
+    // 카카오톡 노랑이 아니다.
+    expect(String(first?.borderColor).toLowerCase()).not.toBe('#fee500');
+  });
+
+  it('썸네일을 누르면 그 장으로 간다 — 사진 스크롤뷰가 그 자리로 가고, 고른 표시와 캡션이 같이 바뀐다', async () => {
+    await mount();
+    fireEvent.press(thumbs()[2] as Instance);
+    expect(scrollTo()).toHaveBeenCalledWith({ x: 2 * width, y: 0, animated: true });
+    expect(selected()).toEqual([false, false, true]);
+    expect(caption()).toBe('3장 중 3번');
+    fireEvent.press(thumbs()[0] as Instance);
+    expect(scrollTo()).toHaveBeenCalledWith({ x: 0, y: 0, animated: true });
+    expect(selected()).toEqual([true, false, false]);
+    expect(caption()).toBe('3장 중 1번');
+  });
+
+  it('동작 줄이기면 썸네일로의 이동이 즉시다', async () => {
+    a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
+    await mount();
+    await act(async () => {});
+    scrollTo().mockClear();
+    fireEvent.press(thumbs()[1] as Instance);
+    expect(scrollTo()).toHaveBeenCalledWith({ x: width, y: 0, animated: false });
+    expect(caption()).toBe('3장 중 2번');
+  });
+
+  it('옆으로 넘겨 장이 바뀌면 캡션과 고른 표시가 따라간다', async () => {
+    await mount();
+    expect(caption()).toBe('3장 중 1번');
+    act(() => {
+      fireEvent(scrollView(), 'momentumScrollEnd', {
+        nativeEvent: { contentOffset: { x: width, y: 0 } },
+      });
+    });
+    expect(caption()).toBe('3장 중 2번');
+    expect(selected()).toEqual([false, true, false]);
+  });
+
+  it('한 장이면 줄도 캡션도 없다 — 위의 같은 자리가 두 장 이상에서는 서 있다', async () => {
+    await mount({ images: [IMAGES[0] as MessageAttachment] });
+    expect(screen.queryByTestId('attachment-viewer-strip')).toBeNull();
+    expect(screen.queryAllByTestId('attachment-viewer-thumb')).toHaveLength(0);
+    expect(screen.queryByTestId('attachment-viewer-position')).toBeNull();
+    // 저장·공유는 한 장이어도 선다.
+    expect(screen.getByTestId('attachment-viewer-save')).toBeTruthy();
+    expect(screen.getByTestId('attachment-viewer-share')).toBeTruthy();
+  });
+
+  it('줄이 화면보다 길면 고른 장이 보이는 자리에서 시작한다', async () => {
+    const many: MessageAttachment[] = Array.from({ length: 20 }, (_, n) => ({
+      id: `m${n}`,
+      name: `m${n}.png`,
+      mime: 'image/png',
+      sizeBytes: 4096,
+    }));
+    await mount({ images: many, startIndex: 19 });
+    const strip = screen.getByTestId('attachment-viewer-strip');
+    const offset = (strip.props.contentOffset as { x: number }).x;
+    const viewport = width - 2 * VIEWER.edge;
+    const left = 19 * (VIEWER.thumb + VIEWER.thumbStep);
+    expect(offset).toBeGreaterThan(0);
+    // 고른 썸네일 전체가 보이는 창 안에 있다.
+    expect(left).toBeGreaterThanOrEqual(offset);
+    expect(left + VIEWER.thumb).toBeLessThanOrEqual(offset + viewport);
+  });
+});
+
+describe('⑦ 저장·공유 — 같은 공유 시트를 연다', () => {
+  const save = () => screen.getByTestId('attachment-viewer-save');
+  const share = () => screen.getByTestId('attachment-viewer-share');
+
+  it('저장도 공유도 내려받아 iOS 공유 시트에 사진 파일을 넘긴다', async () => {
+    const sheet = jest.spyOn(Share, 'share').mockResolvedValue({ action: 'sharedAction' } as never);
+    await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(1));
+    expect(sheet.mock.calls[0]?.[0]).toMatchObject({ title: 'a.png', url: expect.any(String) });
+    // 시트가 닫힌 뒤(성공) 단추가 다시 눌린다.
+    await waitFor(() => expect(share().props.accessibilityState?.disabled).toBeFalsy());
+    fireEvent.press(share());
+    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(2));
+    expect(sheet.mock.calls[1]?.[0]).toMatchObject({ title: 'a.png', url: expect.any(String) });
+  });
+
+  it('저장은 보조기술에 「공유 시트가 열려요 — 이미지 저장을 고르세요」라고 말한다 — 사진 보관함에 직접 쓰지 않는다', async () => {
+    await mount();
+    expect(save().props.accessibilityLabel).toBe('저장');
+    expect(save().props.accessibilityHint).toContain('공유 시트');
+    expect(save().props.accessibilityHint).toContain('이미지 저장');
+    expect(share().props.accessibilityLabel).toBe('공유');
+    expect(share().props.accessibilityHint).toBeUndefined();
+    // 글리프는 둘이 다르다(저장 = 내려받기, 공유 = 네모+위 화살표).
+    expect(within(save()).UNSAFE_getByType(Image).props.source).toBe(VIEWER_ICONS.download);
+    expect(within(share()).UNSAFE_getByType(Image).props.source).toBe(VIEWER_ICONS.share);
+  });
+
+  it('내려받는 동안 두 단추가 잠기고 누른 쪽만 돈다', async () => {
+    let finish: () => void = () => {};
+    jest.spyOn(Share, 'share').mockImplementation(
+      () =>
+        new Promise(resolve => {
+          finish = () => resolve({ action: 'sharedAction' } as never);
+        }),
+    );
+    await mount();
+    fireEvent.press(save());
+    await waitFor(() => expect(save().props.accessibilityState?.disabled).toBe(true));
+    expect(share().props.accessibilityState?.disabled).toBe(true);
+    expect(within(save()).UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(1);
+    expect(within(share()).UNSAFE_queryAllByType(ActivityIndicator)).toHaveLength(0);
+    expect(screen.getByTestId('attachment-viewer-status').props.children).toBe('내려받는 중');
+    await act(async () => {
+      finish();
+    });
+    await waitFor(() => expect(save().props.accessibilityState?.disabled).toBeFalsy());
+    expect(screen.queryByTestId('attachment-viewer-status')).toBeNull();
+  });
+
+  it('실패하면 안내가 서고(보조기술에도 알린다) 다시 누를 수 있다', async () => {
+    const sheet = jest.spyOn(Share, 'share').mockRejectedValueOnce(new Error('boom'));
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    await mount();
+    fireEvent.press(share());
+    await waitFor(() =>
+      expect(screen.getByTestId('attachment-viewer-status').props.children).toBe('내려받기 실패 · 다시 시도'),
+    );
+    expect(announce).toHaveBeenCalledWith('내려받기 실패. 다시 시도');
+    // 다시 누르면 다시 시도한다 — 단추는 잠기지 않았다.
+    sheet.mockResolvedValueOnce({ action: 'sharedAction' } as never);
+    fireEvent.press(share());
+    await waitFor(() => expect(sheet).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId('attachment-viewer-status')).toBeNull());
+  });
+
+  it('격자(모아보기)·삭제·편집 같은 죽은 단추는 없다 — 있는 단추는 뒤로·썸네일·저장·공유뿐이다', async () => {
+    await mount();
+    const ids = screen.getAllByRole('button').map(node => node.props.testID);
+    expect(ids).toEqual([
+      'attachment-viewer-back',
+      'attachment-viewer-thumb',
+      'attachment-viewer-thumb',
+      'attachment-viewer-thumb',
+      'attachment-viewer-save',
+      'attachment-viewer-share',
+    ]);
+  });
+});
+
+describe('⑧ 검정 무대는 테마와 무관하다 (폰 전용 값 — 값이 아니라 관계를 잰다)', () => {
+  async function mountIn(scheme: 'light' | 'dark') {
+    render(
+      <FixedScheme scheme={scheme}>
+        <AttachmentViewer
+          workspaceId="ws"
+          channelId="ch"
+          images={IMAGES}
+          startIndex={0}
+          onClose={jest.fn()}
+          senderName="박서연"
+          sentAtMs={SENT_AT}
+        />
+      </FixedScheme>,
+    );
+    await screen.findAllByTestId('attachment-viewer-image');
+  }
+
+  it.each(['light', 'dark'] as const)('%s 테마에서도 바닥은 순흑이고 글자·글리프는 무대 위의 밝은 색이다', async scheme => {
+    await mountIn(scheme);
+    expect(flatten(screen.getByTestId('attachment-viewer-backdrop').props.style).backgroundColor).toBe('#000000');
+    expect(flatten(screen.getByTestId('attachment-viewer-sender').props.style).color).toBe(VIEWER_STAGE.ink);
+    expect(flatten(screen.getByTestId('attachment-viewer-sent-at').props.style).color).toBe(VIEWER_STAGE.inkMuted);
+    expect(flatten(screen.getByTestId('attachment-viewer-position').props.style).color).toBe(VIEWER_STAGE.inkMuted);
+    expect(within(screen.getByTestId('attachment-viewer-back')).UNSAFE_getByType(Image).props.style).toMatchObject({
+      tintColor: VIEWER_STAGE.ink,
+    });
+  });
+
+  // 관계: ① 무대 위 글자·글리프는 무대와 7:1 이상 ② 어두운 유리 면(대체·불투명) 위 글리프도 ③ 밝은 사진(순백) 위에 얹힌
+  // 대체 면 위에서도 읽힌다. 색 값이 바뀌어도 이 관계가 살아야 한다.
+  it('무대 위 글자·글리프는 무대와 7:1 이상이다', () => {
+    expect(contrast(composite(VIEWER_STAGE.ink, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
+    expect(contrast(composite(VIEWER_STAGE.inkMuted, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
+    expect(contrast(composite(VIEWER_STAGE.danger, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
+  });
+
+  it('어두운 유리의 불투명·대체 면 위 글리프도 7:1 이상이다 — 라이트 테마의 밝은 면 위 밝은 글리프가 되지 않는다', () => {
+    const ink = composite(VIEWER_STAGE.ink, BLACK);
+    expect(contrast(ink, composite(VIEWER_GLASS_TONE.opaque, BLACK))).toBeGreaterThanOrEqual(7);
+    // 대체 면은 반투명이라 아래 사진이 비친다 — 최악은 순백 사진이다.
+    expect(contrast(ink, composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
+  });
+});
+
+describe('⑨ 유리 — 블러 + 어두운 틴트다. 리퀴드는 쓰지 않는다', () => {
+  const glass = (id: string) => `attachment-viewer-${id}-glass`;
+  const IDS = ['back', 'save', 'share'] as const;
+
+  afterEach(() => {
+    resetBlurSupportForTests(null);
+    resetLiquidGlassSupportForTests(null);
+  });
+
+  it('블러 모듈이 없으면 대체 면이 어둡다(톤 덮어쓰기) — 앱 테마의 밝은 대체 면이 아니다', async () => {
+    resetBlurSupportForTests(false);
+    await mount();
+    for (const id of IDS) {
+      const layer = screen.getByTestId(`${glass(id)}-fallback`);
+      expect(flatten(layer.props.style).backgroundColor).toBe(VIEWER_GLASS_TONE.fallback);
+    }
+  });
+
+  it('블러가 서는 기기에서는 어두운 흐림 + 어두운 틴트다 — 라이트 테마에서도', async () => {
+    resetBlurSupportForTests(true);
+    render(
+      <FixedScheme scheme="light">
+        <AttachmentViewer
+          workspaceId="ws"
+          channelId="ch"
+          images={IMAGES}
+          startIndex={0}
+          onClose={jest.fn()}
+        />
+      </FixedScheme>,
+    );
+    await screen.findAllByTestId('attachment-viewer-image');
+    const blurs = screen.getAllByTestId('blur-view');
+    expect(blurs).toHaveLength(IDS.length);
+    for (const node of blurs) expect(node.props.tint).toBe('dark');
+    for (const id of IDS) {
+      expect(flatten(screen.getByTestId(`${glass(id)}-blur`).props.style).backgroundColor).toBe(
+        VIEWER_GLASS_TONE.tint,
+      );
+    }
+  });
+
+  it('iOS 26 리퀴드 글래스가 가능한 기기에서도 뷰어의 조작은 블러다 — 조상의 불투명도가 움직이는 곳에서 리퀴드는 평평해진다', async () => {
+    resetBlurSupportForTests(true);
+    resetLiquidGlassSupportForTests(true);
+    await mount();
+    for (const id of IDS) {
+      expect(screen.queryByTestId(`${glass(id)}-liquid`)).toBeNull();
+      expect(screen.getByTestId(`${glass(id)}-blur`)).toBeTruthy();
+    }
+  });
+
+  it('투명도 줄이기가 켜지면 어두운 불투명 면이다 — 밝은 면 위 흰 글리프가 되지 않는다', async () => {
+    a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(true));
+    await mount();
+    await act(async () => {});
+    for (const id of IDS) {
+      const layer = screen.getByTestId(`${glass(id)}-opaque`);
+      expect(flatten(layer.props.style).backgroundColor).toBe(VIEWER_GLASS_TONE.opaque);
+    }
+  });
+
+  it('가는 테두리는 유리 위에 그려지고 닿지 않는다 — 누르는 면이 그 안에 선다', async () => {
+    await mount();
+    const surface = screen.getByTestId(glass('back'));
+    const rings = within(surface)
+      .UNSAFE_getAllByType(View)
+      .filter(
+        node =>
+          node.props.pointerEvents === 'none' &&
+          flatten(node.props.style).borderWidth === StyleSheet.hairlineWidth,
+      );
+    expect(rings).toHaveLength(1);
+    expect(flatten(rings[0]?.props.style).borderColor).toBe(VIEWER_STAGE.glassBorder);
+    expect(within(surface).getByTestId('attachment-viewer-back')).toBeTruthy();
+  });
+});
+
+describe('⑩ 보낸 사람·날짜·시각', () => {
+  it('이름과 날짜·시각이 위쪽 띠에 서고, 한 요소로 읽히며, 닿지 않는다 — 갈 곳이 없다', async () => {
+    await mount({ senderName: '박서연', sentAtMs: SENT_AT });
+    expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('박서연');
+    expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
+    expect(viewerStamp(SENT_AT)).toBe('2026년 10월 29일 14:55');
+    const stamp = screen.getByTestId('attachment-viewer-stamp');
+    expect(stamp.props.accessible).toBe(true);
+    expect(stamp.props.accessibilityLabel).toBe('박서연, 2026년 10월 29일 14:55');
+    expect(stamp.props.pointerEvents).toBe('none');
+    expect(within(stamp).queryAllByRole('button')).toHaveLength(0);
+    // 이름은 굵게, 날짜·시각은 그 아래 한 줄.
+    expect(flatten(screen.getByTestId('attachment-viewer-sender').props.style).fontWeight).toBe('600');
+  });
+
+  it.each([
+    ['아무것도 모르면', {}, { sender: false, sentAt: false }],
+    ['이름이 공백뿐이고 시각이 유한하지 않으면', { senderName: '  ', sentAtMs: Number.NaN }, { sender: false, sentAt: false }],
+    ['이름만 알면', { senderName: '박서연' }, { sender: true, sentAt: false }],
+    ['시각만 알면', { sentAtMs: SENT_AT }, { sender: false, sentAt: true }],
+  ])('%s 아는 줄만 선다', async (_name, props, expected) => {
+    await mount(props);
+    expect(screen.queryByTestId('attachment-viewer-sender') !== null).toBe(expected.sender);
+    expect(screen.queryByTestId('attachment-viewer-sent-at') !== null).toBe(expected.sentAt);
+    expect(screen.queryByTestId('attachment-viewer-stamp') !== null).toBe(expected.sender || expected.sentAt);
+  });
+
+  it('대화에서 연 뷰어에 목록이 받은 보낸 사람·시각이 그대로 선다', async () => {
+    render(
+      <AttachmentList
+        channelId="ch"
+        attachments={[{ id: 'p1', name: '현장.png', mime: 'image/png', sizeBytes: 4096 }]}
+        senderName="최민수"
+        sentAtMs={SENT_AT}
+      />,
+    );
+    await act(async () => {});
+    fireEvent.press(screen.getByTestId('attachment-item'));
+    await screen.findByTestId('attachment-viewer-image');
+    expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('최민수');
+    expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
+  });
+});
+
+describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에서도 글자가 읽힌다', () => {
+  // 순백 사진(스크린샷의 흰 바탕)이 최악이다. 글자 대비는 **실제로 그려지는 색**으로 잰다 — 이름은 `ink`(순백), 날짜·캡션은 `inkMuted`(80% 흰색)이고
+  // 후자는 배경이 비쳐 합성된다(앞 판은 둘 다 `WHITE` 로 재서 날짜 줄이 2.5:1 인 것을 놓쳤다, design-review M1). 스크림의 **판**은 조작 덩어리 안을 가득
+  // 덮으므로 글자가 어느 크기로 서든(접근성 큰 글씨에서는 이름·날짜 줄이 단추보다 높다) 판 위에 선다 — 대비가 기기·글자 크기의 산수에 안 걸린다.
+  const PLATEAU_INNER = photoStage.scrim.plateau[1];
+  const plateauOverWhite = () => composite(`rgba(0, 0, 0, ${PLATEAU_INNER})`, WHITE);
+
+  it('스크림은 두 덩어리 안에 있다 — 판은 덩어리를 가득 덮고, 자락은 덩어리 밖에서 풀리며, 모두 닿지 않고 덩어리와 같이 숨는다', async () => {
+    await mount();
+    const fill = { top: 0, right: 0, bottom: 0, left: 0 };
+    for (const [block, which] of [
+      [bar(), 'top'],
+      [actionsBlock(), 'bottom'],
+    ] as const) {
+      const plate = within(block).getByTestId(`attachment-viewer-scrim-${which}`);
+      const fade = within(block).getByTestId(`attachment-viewer-scrim-${which}-fade`);
+      for (const node of [plate, fade]) {
+        expect(node.props.pointerEvents).toBe('none');
+        expect(node.props.onStartShouldSetResponder).toBeUndefined();
+      }
+      // 판: 덩어리 안을 가득. 위쪽은 아래 방향(180deg)·아래쪽은 위 방향(0deg)으로 바깥 끝이 가장 어둡다.
+      const plateStyle = flatten(plate.props.style);
+      expect({ top: plateStyle.top, right: plateStyle.right, bottom: plateStyle.bottom, left: plateStyle.left }).toEqual(fill);
+      expect(plateStyle.experimental_backgroundImage).toBe(viewerScrimPlateau(which === 'top' ? 'down' : 'up'));
+      // 자락: 덩어리 **밖**(위쪽 덩어리는 아래로, 아래쪽 덩어리는 위로) 풀린다. 자리는 음수 오프셋이다 — 퍼센트는 Yoga 가 부모의 **안쪽 높이(패딩을 뺀)** 로
+      // 풀어 안전 영역 패딩을 진 덩어리에서 자락이 덩어리 안으로 들어온다(시뮬레이터 캡처에서 이중으로 어두운 띠가 보였다 — jest 는 이 계산을 못 한다).
+      const fadeStyle = flatten(fade.props.style);
+      expect(which === 'top' ? fadeStyle.bottom : fadeStyle.top).toBe(-VIEWER.scrimReach);
+      expect(which === 'top' ? fadeStyle.top : fadeStyle.bottom).toBeUndefined();
+      expect(fadeStyle.height).toBe(VIEWER.scrimReach);
+      expect(fadeStyle.experimental_backgroundImage).toBe(viewerScrimFade(which === 'top' ? 'down' : 'up'));
+    }
+    tap();
+    expect(bar().props.pointerEvents).toBe('none'); // 스크림은 덩어리 안이라 같이 숨는다.
+  });
+
+  it('판 위에서 순백 사진 위의 이름은 4.5:1, 날짜·캡션은 3.2:1 이상이다 — 그려지는 색(80% 흰색의 합성)으로 잰다', () => {
+    const bg = plateauOverWhite();
+    expect(contrast(composite(VIEWER_STAGE.ink, bg), bg)).toBeGreaterThanOrEqual(4.5);
+    // `inkMuted` 는 반투명이라 배경이 비친다 — 합성한 색으로 잰다.
+    expect(contrast(composite(VIEWER_STAGE.inkMuted, bg), bg)).toBeGreaterThanOrEqual(3.2);
+  });
+
+  it('판의 안쪽 끝이 가장 밝은 자리다 — 바깥 끝은 같거나 더 어둡다(글자가 서는 가장 밝은 자리를 잰다)', () => {
+    const [outer, inner] = photoStage.scrim.plateau;
+    expect(outer).toBeGreaterThanOrEqual(inner);
+  });
+
+  it('자락은 판의 안쪽 끝 불투명도로 시작해 단조롭게 0 으로 풀리고, 끝에서 가장 완만하다 — 끝 선이 줄무늬로 남지 않는다', () => {
+    expect(viewerScrimFadeAlpha(0)).toBe(PLATEAU_INNER);
+    expect(viewerScrimFadeAlpha(1)).toBe(0);
+    let previous = Number.POSITIVE_INFINITY;
+    for (let step = 0; step <= 40; step += 1) {
+      const alpha = viewerScrimFadeAlpha(step / 40);
+      expect(alpha).toBeLessThanOrEqual(previous);
+      previous = alpha;
+    }
+    // 마디 사이 기울기(불투명도/위치): 마지막 구간이 가장 가파른 구간의 절반 아래다 — 선형으로 끊으면 끝 선이 밝은 사진 위에서 마하 띠로 보인다.
+    const stops = photoStage.scrim.fade;
+    const slopes = stops
+      .slice(1)
+      .map(([at, alpha], i) => Math.abs(alpha - stops[i][1]) / (at - stops[i][0]));
+    expect(slopes[slopes.length - 1]).toBeLessThan(Math.max(...slopes) / 2);
+  });
+
+  it('블러 갈래의 어두운 틴트는 순백 사진 위에서도 흰 글리프가 3:1 이상이다', () => {
+    // 순백을 흐려도 순백이라 틴트 아래는 순백이다 — 합성이 정확하다.
+    expect(contrast(WHITE, composite(VIEWER_GLASS_TONE.tint, WHITE))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('상태 안내는 어두운 알약 위에 선다 — 어떤 사진 위에서도 읽혀야 하는 피드백이다', async () => {
+    jest.spyOn(Share, 'share').mockRejectedValueOnce(new Error('boom'));
+    await mount();
+    fireEvent.press(screen.getByTestId('attachment-viewer-share'));
+    const notice = await screen.findByTestId('attachment-viewer-status');
+    const style = flatten(notice.props.style);
+    expect(style.backgroundColor).toBe(VIEWER_GLASS_TONE.fallback);
+    expect(contrast(composite(VIEWER_STAGE.danger, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(composite(VIEWER_STAGE.ink, BLACK), composite(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
   });
 });
