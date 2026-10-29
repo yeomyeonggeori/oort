@@ -18,6 +18,7 @@ import {
   typingLabel,
   typingLead,
   typingSegments,
+  typingVisualSegments,
   typingSentence,
   typingTail,
   withTypingGrant,
@@ -851,3 +852,13 @@ describe("Esc keeps one meaning per open thing", () => {
     ).toBe("pass");
   });
 });
+
+ it("화면은 한 명·두 명·나머지 수를 이름과 함께 쓰고 낭독 문장은 유지해요", () => {
+   const text = (names: string[]) => typingVisualSegments(names).map(part => part.text).join("");
+   expect(text([])).toBe("");
+   expect(text(["A"])).toBe("A 작성 중");
+   expect(text(["A", "B"])).toBe("A, B 작성 중");
+   expect(text(["A", "B", "C"])).toBe("A 외 2명 작성 중");
+   expect(text(["A", "B", "C", "D"])).toBe("A 외 3명 작성 중");
+   expect(typingLabel(["A", "B", "C"])).toBe("3명이 작성 중");
+ });
