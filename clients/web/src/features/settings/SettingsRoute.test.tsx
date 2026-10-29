@@ -4,10 +4,12 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { SettingsRoute } from "./SettingsRoute";
+import { SETTINGS_SECTIONS } from "./settingsNav";
 
 vi.mock("@momo/core/features/auth/linkedDevices", async (importOriginal) => {
   const actual =
@@ -142,6 +144,26 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+/**
+ * 명령줄·AI 도구 페이지는 열자마자 서버에 묻는다(`GET …/dev-access`와 목록). 서버 쪽만 가짜로
+ * 두고(HTTP `fetch`) 페이지와 코어는 진짜로 돌린다.
+ */
+function stubDevAccessFetch(): void {
+  const answer = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  vi.stubGlobal("fetch", async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/dev-access")) {
+      return answer({ policy: "admins", canCreate: false, canManageAll: false });
+    }
+    if (url.includes("/dev-access/credentials")) return answer({ credentials: [] });
+    return answer({ members: [], channels: [] });
+  });
+}
+
 function mountRoute(path = "/settings"): HTMLElement {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
@@ -190,7 +212,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     ).toBe(false);
   });
 
-  it("개인 그룹 최상단이 프로필이고 12행이 세 그룹에 선다", () => {
+  it("개인 그룹 최상단이 프로필이고 13행이 세 그룹에 선다", () => {
     const host = mountRoute();
     const nav = host.querySelector('[data-testid="settings-nav"]');
     expect(nav?.textContent).toContain("개인");
@@ -210,6 +232,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
       "settings-nav-members",
       "settings-nav-memory",
       "settings-nav-usage",
+      "settings-nav-devTools",
       "settings-nav-aiHub",
     ]);
     // 닫힌 네 행(앱·외부 에이전트 연결·채널로 들어오는 주소·밖으로 보내는 알림)은 목차에 없다.
@@ -394,6 +417,34 @@ describe("SettingsRoute 전면 레이아웃", () => {
       expect(host.querySelector('[data-testid="settings-route"]'), legacy).not.toBeNull();
       expect(host.querySelector(`[data-testid="${nav}"]`)?.getAttribute("aria-current"), legacy).toBe("page");
     }
+  });
+
+  it("명령줄·AI 도구: 딥링크와 목차 클릭이 같은 페이지에 도착한다 (#4663)", async () => {
+    stubDevAccessFetch();
+    const label = SETTINGS_SECTIONS.find((item) => item.id === "devTools")?.label;
+    // `?section=devTools`로 열면 그 행이 현재 행이고 머리가 그 이름이다.
+    const linked = mountRoute("/settings?section=devTools");
+    expect(linked.querySelector('[data-testid="dev-access-page"]')).not.toBeNull();
+    expect(
+      linked.querySelector('[data-testid="settings-nav-devTools"]')?.getAttribute("aria-current")
+    ).toBe("page");
+    expect(linked.querySelector("h1")?.textContent).toBe(label);
+    // 서버가 답하면 이 계정이 만들 수 있는지 한 문장으로 말한다(폼이 아니라 이유).
+    await waitFor(() =>
+      expect(linked.querySelector('[data-testid="dev-access-gate"]')).not.toBeNull()
+    );
+
+    // 다른 페이지에서 목차의 이 행을 눌러도 같은 페이지다. 링크 행이 아니므로 설정 안에 머문다.
+    const host = mountRoute("/settings?section=profile");
+    expect(host.querySelector('[data-testid="dev-access-page"]')).toBeNull();
+    act(() => {
+      (host.querySelector('[data-testid="settings-nav-devTools"]') as HTMLButtonElement).click();
+    });
+    expect(host.querySelector('[data-testid="dev-access-page"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="settings-route"]')).not.toBeNull();
+    expect(
+      host.querySelector('[data-testid="settings-nav-devTools"]')?.getAttribute("aria-current")
+    ).toBe("page");
   });
 
   it("키보드: 목록에서 ↑↓가 행을 옮기고 끝에서 돌아온다", () => {

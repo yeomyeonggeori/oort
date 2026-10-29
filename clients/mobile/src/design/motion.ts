@@ -179,7 +179,7 @@ export const COMPOSER_EXPAND_SPRING = {stiffness: 816, damping: 52.55, mass: 1} 
 // owner 의 「쫀득한」 — 같은 곡선을 standard 240 에 얹으면 끝에 닿는 때가 ≈ 185ms 로 빨라져 쫀득함이
 // 줄어든다. 웹에는 짝 토큰이 없다(웹·데스크탑 등장은 후속): README §6 「폰에 값을 더할 때」대로 값이
 // 아니라 **관계**를 단정한다 — standard < 300 < arrival, 등장 < 자격 창 < 느린 전송 기준
-// (`sendArrival4455.test.tsx`).
+// (`sendArrival.test.tsx`).
 //
 // ## 곡선인가 스프링인가 — 재서 골랐다 (이어지는 행 52pt × 1.5 = 78pt 기준. 머리 행 76pt × 2.5 =
 // 190pt 는 넘침·속도가 2.4배)

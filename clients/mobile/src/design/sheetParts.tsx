@@ -582,6 +582,7 @@ export function ConfirmStep({
   confirmLabel,
   pendingLabel,
   pending = false,
+  confirmDisabled = false,
   cancelLabel = '취소',
   onCancel,
   onConfirm,
@@ -599,6 +600,12 @@ export function ConfirmStep({
   /** 왕복 중의 낱말(「지우는 중…」). */
   pendingLabel: string;
   pending?: boolean;
+  /**
+   * 위험 단추를 잠근다(끊긴 동안처럼 지금은 눌러도 소용없을 때). `pending` 과 달리 낱말은 그대로이고 단추가 흐려지며
+   * `accessibilityState.disabled` 가 선다. 왜 잠겼는지는 `error` 가 말한다(눌러도 반응 없는 단추를 살아 있는 듯
+   * 두지 않는다).
+   */
+  confirmDisabled?: boolean;
   cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
@@ -645,10 +652,14 @@ export function ConfirmStep({
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={confirmLabel}
-          accessibilityState={{busy: pending, disabled: pending}}
-          disabled={pending}
+          accessibilityState={{busy: pending, disabled: pending || confirmDisabled}}
+          disabled={pending || confirmDisabled}
           onPress={onConfirm}
-          style={({pressed}) => [styles.destructive, pressed && styles.confirmPressed]}
+          style={({pressed}) => [
+            styles.destructive,
+            pressed && styles.confirmPressed,
+            confirmDisabled && !pending && styles.rowDisabled,
+          ]}
           testID={confirmTestID}>
           <Sentence style={styles.destructiveLabel}>{pending ? pendingLabel : confirmLabel}</Sentence>
         </Pressable>

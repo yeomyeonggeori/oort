@@ -1,7 +1,7 @@
 // =============================================================================
 // 설정 전면 페이지의 목차 (#1867 → #3578 S1).
 //
-// 12행, 세 그룹. 그룹은 권한이 아니라 **범위**다: 개인(나와 이 기기), 워크스페이스
+// 13행, 세 그룹. 그룹은 권한이 아니라 **범위**다: 개인(나와 이 기기), 워크스페이스
 // (이 워크스페이스 전체), 앱·연결(이 앱과 바깥으로 가는 문). 각 운영 패널의 403은
 // 섹션이 서버에 물어 답한다. 범위는 페이지 머리의 `ScopeChip`이 사람에게 말한다.
 //
@@ -27,6 +27,7 @@ export type SettingsSectionId =
   | "usage"
   | "code"
   | "updates"
+  | "devTools"
   | "aiHub";
 
 export type SettingsGroupId = "개인" | "워크스페이스" | "앱·연결";
@@ -109,6 +110,11 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
     desktopAlways: true,
   },
   { id: "updates", label: "업데이트", group: "앱·연결", scope: "device", desktopOnly: true },
+  // 명령줄·AI 도구(#4663, ADR-0216): 터미널과 Claude Code·Codex가 내 계정으로 들어오는 연결 값을
+  // 만들고 지우는 화면이다. AI 허브가 아니다: 개발자 토큰은 사람이 자기 도구에 쥐여 주는 「내 도구」
+  // (ADR-0198)이고 에이전트 멤버의 자격이 아니다. 설정 안의 페이지라 링크 행(`aiHub`)보다 앞에 두어,
+  // 그룹의 끝은 계속 바깥으로 나가는 문이다.
+  { id: "devTools", label: "명령줄·AI 도구", group: "앱·연결", scope: "account" },
   // AI 설정은 AI 허브 한 곳이다(#4141). 목차의 「AI」 행은 화면이 아니라 허브로 가는 문이다.
   // 옛 「AI 연결」 화면(`?section=ai`)과 그 묘비 줄(「AI 화면으로 옮겼어요」)은 걷었다.
   { id: "aiHub", label: "AI", group: "앱·연결", link: "ai-hub" },

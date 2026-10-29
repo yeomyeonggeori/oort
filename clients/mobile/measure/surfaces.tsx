@@ -3172,7 +3172,7 @@ export function Surface({name}: {name: string}): React.JSX.Element {
     //   decided  결정 뒤   — 「승인됨」 칩과 영수증, 틴트 없음.
     // 성재가 본 모순은 「승인됨」 옆에서 앰버가 남은 것이었다. 두 번째 사진에서 그 모순이
     // 사라졌는지가 논점이라 두 장을 같은 배치로 찍는다. 물러나는 **시간**(이동이 끝난 뒤
-    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight3921.test.tsx`
+    // 2초, 불투명도 240ms)은 사진에 나오지 않는다 — `__tests__/landedHighlight.test.tsx`
     // 가 가짜 시계로 잰다. 여기 `landed` 는 목록이 건네는 값을 그대로 건넨 것이다.
     //
     // 바닥은 `ConversationFloor` — 실제 대화 화면의 바닥이다. 틴트는 바닥 위의 **상대적인**
@@ -4832,6 +4832,33 @@ export function Surface({name}: {name: string}): React.JSX.Element {
           />
         </View>
       );
+    // #4663: 설정 › 「명령줄·AI 도구」 장(목록·지우기). 진짜 셸 위의 진짜 설정 페이지가 이 장으로 열린다(`initialPage="devTools"`).
+    //   (기본)    소유자: 연결 넷(카드 · 한 번도 안 쓴 카드 · 로그인 세션 · 직접 정한 범위) + 「컴퓨터에서 만든다」·관리자 안내
+    //   -member   만들 수 없는 멤버: 같은 목록 + 「관리자가 켜 줘야 해요」
+    //   -empty · -loading · -error · -offline   나머지 상태. 지우기 확인은 눌러야 서므로 `maestro/119-dev-tools-capture.yaml`.
+    //   -entry    설정 본 페이지의 「연결」 카드(아래로 끝까지): 「명령줄·AI 도구 ›」 행이 선 모습.
+    case 'shell-dev-tools':
+    case 'shell-dev-tools-member':
+    case 'shell-dev-tools-empty':
+    case 'shell-dev-tools-loading':
+    case 'shell-dev-tools-error':
+    case 'shell-dev-tools-offline':
+      return (
+        <View style={styles.fill}>
+          <Shell />
+          <SettingsOverlay
+            initialPage="devTools"
+            workspaceId={HARNESS_MEMBER.workspaceId}
+            member={SETTINGS_ME}
+            directory={settingsDirectory(SHELL_ROSTER)}
+            connected
+            onSignOut={() => {}}
+            onClose={() => {}}
+          />
+        </View>
+      );
+    case 'shell-dev-tools-entry':
+      return <SettingsBottomSurface devTools />;
     // #4457: 테마 안쪽 장. 진짜 셸 위의 설정 페이지가 테마 장으로 열린다(`initialPage="theme"`) — 화면 모드·테마·강조색·배경
     // 네 묶음이 한 장에 선다(스크롤은 `shell-settings-theme-*` 가 아니라 Maestro 가 한다).
     case 'shell-settings-theme':
@@ -6537,7 +6564,7 @@ function seedAi(surface: string): void {
 // 닿지 않는다(`pushOptOut.ts`). 켬·거부 판은 그 기억을 지워 두고 시작한다.
 /** `shell-profile-notify` 와 같은 끌어올림: 알림 묶음 머리가 화면 위쪽에 오게. */
 /** #4457: 설정 페이지 내용을 진짜 스크롤뷰에 얹고 끝까지 내려 선다(`shell-profile-bottom`). */
-function SettingsBottomSurface(): React.JSX.Element {
+function SettingsBottomSurface({devTools = false}: {devTools?: boolean}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const scroll = React.useRef<ScrollView>(null);
@@ -6560,6 +6587,7 @@ function SettingsBottomSurface(): React.JSX.Element {
           onOpenTheme={() => {}}
           onOpenStatus={() => {}}
           onOpenDeviceKey={() => {}}
+          onOpenDevTools={devTools ? () => {} : undefined}
           onOpenPauseUntil={() => {}}
           onOpenDndUntil={() => {}}
           onOpenAvatar={() => {}}
@@ -6932,6 +6960,89 @@ function seedAvatarSheet(surface: string): void {
     canAskAgain: false,
     expires: 'never',
   }));
+}
+
+// ---- #4663: 설정 › 명령줄·AI 도구 ------------------------------------------------
+// 가상 인물(이도현)의 연결 넷. 서버의 `DevCredential` JSON 모양 그대로다: 카드에는 기기 이름이 없고, 로그인 세션에는 도구가
+// 없고 기기 이름이 있다. 시각은 지금 기준이라 「3일 전」·「20일 뒤」가 사진마다 같다.
+const DEV_TOOLS_READ = ['dev:identity', 'dev:channels:read', 'dev:messages:read', 'dev:inbox:read'];
+const DEV_TOOLS_WRITE = [...DEV_TOOLS_READ, 'dev:messages:write'];
+
+// Maestro 흐름(`119-dev-tools-capture.yaml`)이 첫 줄(`aaaaaaaa-0000-4000-8000-000000000001`)의 「지우기」를 누른다.
+function devToolsRows(): Record<string, unknown>[] {
+  const now = Date.now();
+  const day = 86_400_000;
+  const card = (n: number, over: Record<string, unknown>) => ({
+    id: `aaaaaaaa-0000-4000-8000-00000000000${n}`,
+    memberId: SELF,
+    kind: 'card',
+    channelRestricted: false,
+    createdAtMs: now - 10 * day,
+    ...over,
+  });
+  return [
+    card(1, {
+      name: 'Claude Code 노트북',
+      tool: 'claude_code',
+      scopes: DEV_TOOLS_READ,
+      lastUsedAtMs: now - 3 * day,
+      expiresAtMs: now + 20 * day,
+    }),
+    // 한 번도 안 쓴 카드: 읽기 + 보내기, 고른 채널만.
+    card(2, {
+      name: 'Codex 작업용',
+      tool: 'codex',
+      scopes: DEV_TOOLS_WRITE,
+      channelRestricted: true,
+      createdAtMs: now - 2 * day,
+      expiresAtMs: now + 88 * day,
+    }),
+    // 로그인 세션: 도구가 없고 기기 이름이 있다. 만료는 살아 있는 갱신 쪽의 것이라 며칠 단위다.
+    card(3, {
+      kind: 'session',
+      name: 'oort 로그인',
+      scopes: DEV_TOOLS_WRITE,
+      deviceName: '이도현의 MacBook Pro',
+      createdAtMs: now - 12 * day,
+      lastUsedAtMs: now - 5 * 60_000,
+      expiresAtMs: now + 30 * day,
+      lineageExpiresAtMs: now + 78 * day,
+    }),
+    // 두 프리셋 어느 쪽도 아닌 범위.
+    card(4, {
+      name: '배포 스크립트',
+      tool: 'cli',
+      scopes: ['dev:identity', 'dev:messages:read'],
+      lastUsedAtMs: now - 2 * 60 * 60_000,
+      expiresAtMs: now + 5 * day,
+    }),
+  ];
+}
+
+function seedDevTools(surface: string): void {
+  // 시뮬레이터의 NetInfo 는 시작 직후 「끊김」으로 읽히기도 해서 연결 신호를 못 박는다(`-offline` 만 끊김).
+  forceNetwork(surface !== 'shell-dev-tools-offline');
+  const member = surface === 'shell-dev-tools-member';
+  harnessClient.setQueryData(['settings', 'dev-access', 'policy', ADE_WS], {
+    policy: 'admins',
+    canCreate: !member,
+    canManageAll: !member,
+  });
+  if (surface === 'shell-dev-tools-loading') return;
+  if (surface === 'shell-dev-tools-error') {
+    // 목록 요청만 전송 오류로 끝난다(코어가 「서버에 닿지 못했어요」로 바꾼다). 세션 만료(401)가 아니라 캐시는 그대로다.
+    globalThis.fetch = (async (input: unknown) => {
+      if (String(input).includes('/dev-access/credentials')) {
+        throw new TypeError('Network request failed');
+      }
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+    return;
+  }
+  harnessClient.setQueryData(
+    ['settings', 'dev-access', 'credentials', ADE_WS],
+    surface === 'shell-dev-tools-empty' ? [] : devToolsRows(),
+  );
 }
 
 function seedShell(surface: string): void {
@@ -7699,9 +7810,10 @@ if (
   LAUNCHED.kind === 'surface' &&
   LAUNCHED.name.startsWith('shell-')
 ) {
-  if (isPauseSurface(LAUNCHED.name)) keepPauseSeeds();
+  if (isPauseSurface(LAUNCHED.name) || LAUNCHED.name.startsWith('shell-dev-tools')) keepPauseSeeds();
   seedShell(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-avatar-')) seedAvatarSheet(LAUNCHED.name);
+  if (LAUNCHED.name.startsWith('shell-dev-tools')) seedDevTools(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-delegate-')) seedDelegate(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ask-')) seedAsk(LAUNCHED.name);
   if (LAUNCHED.name.startsWith('shell-ai-')) seedAi(LAUNCHED.name);
