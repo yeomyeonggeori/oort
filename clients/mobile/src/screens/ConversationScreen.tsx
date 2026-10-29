@@ -60,7 +60,7 @@ import type {
 import {AiConnectCard} from '../features/aiConnect/AiConnectCard';
 import {font, SAFE_GUTTER, space, type Palette} from '../design/tokens';
 import {useStyles} from '../design/theme';
-import {AdeControlPanel} from '../features/ade/AdeControlPanel';
+import {AdeControlPanel, UNRESOLVED_CHANNEL} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
 import {AvatarViewer} from '../features/directory/AvatarViewer';
@@ -1323,6 +1323,8 @@ export default function ConversationScreen({
   const [pendingAnchor, setPendingAnchor] = useState<{
     channelId: string;
     messageId: string;
+    /** 못 찾았을 때 고지가 누구의 낱말로 말하는가(`jumpNotice`). ADE 는 `session`, 고정 카드는 `approval`. */
+    subject: JumpSubject;
   } | null>(null);
   useEffect(() => {
     if (pendingAnchor === null) return undefined;
@@ -1340,13 +1342,19 @@ export default function ConversationScreen({
     if (!timelineHoldsThisChannel) return;
     setPendingAnchor(null);
     // 세션 원장은 순서값을 나르지 않는다. 없는 seq 를 지어내지 않고, 그 대가로
-    // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다.
-    requestJump('session', pendingAnchor.messageId, null);
+    // 못 찾았을 때의 문장은 「더 위에 있다」로 정밀해지지 못한다. 고정 카드의 대상 메시지도
+    // 같다: 카드는 메시지·채널 id 만 나른다.
+    requestJump(pendingAnchor.subject, pendingAnchor.messageId, null);
   }, [pendingAnchor, channelId, timelineHoldsThisChannel, requestJump]);
 
-  const onOpenAdeAnchor = useCallback(
-    (targetChannelId: string, targetTitle: string, messageId: string) => {
-      setPendingAnchor({channelId: targetChannelId, messageId});
+  const openAnchorIn = useCallback(
+    (
+      targetChannelId: string,
+      targetTitle: string,
+      messageId: string,
+      subject: JumpSubject,
+    ) => {
+      setPendingAnchor({channelId: targetChannelId, messageId, subject});
       // 이미 그 방이면 방을 다시 열지 않는다. 셸에 같은 대화를 한 번 더 밀어도
       // 화면은 그대로지만, 그 왕복은 「눌렀는데 아무 일도 안 일어난 것 같은」
       // 한 프레임을 만든다.
@@ -1354,6 +1362,41 @@ export default function ConversationScreen({
       onOpenConversation?.(targetChannelId, targetTitle);
     },
     [channelId, onOpenConversation],
+  );
+  const onOpenAdeAnchor = useCallback(
+    (targetChannelId: string, targetTitle: string, messageId: string) =>
+      openAnchorIn(targetChannelId, targetTitle, messageId, 'session'),
+    [openAnchorIn],
+  );
+
+  // ---- 고정·고정 풀기 카드의 「전문 보기」 (#4705) ------------------------------
+  //
+  // ADE 카드의 「대화로」와 **같은 앵커 열기**를 탄다(새 길을 만들지 않는다). 다른 점은 둘이다:
+  // 방 이름을 이 화면이 푼다(`AdeControlPanel` 이 같은 명부로 푸는 것과 같은 규칙), 그리고 못 찾았을
+  // 때 고지가 `approval` 주어로 말한다 — 카드의 대상 메시지를 누른 사람은 「이 작업을 시작한
+  // 메시지」를 찾은 적이 없다.
+  //
+  // 방 이름을 푸는 명부는 **ref 로** 든다: 이 콜백은 행의 `actions` 에 실리고 `sameMessageRowProps` 가
+  // `actions` 를 동일성으로 보므로, 채널 목록이 갱신될 때마다 콜백이 새로 만들어지면 붙어 있는 행이
+  // 전부 다시 그려진다(`jumpTargetRef` 와 같은 모양).
+  const channelNamesRef = useRef({groups, directory, selfId: member.id});
+  channelNamesRef.current = {groups, directory, selfId: member.id};
+  const openApprovalMessage = useCallback(
+    (targetChannelId: string, messageId: string) => {
+      const known = channelNamesRef.current;
+      const target = [...known.groups.channels, ...known.groups.dms].find(candidate =>
+        uuidEq(candidate.id, targetChannelId),
+      );
+      openAnchorIn(
+        targetChannelId,
+        target === undefined
+          ? UNRESOLVED_CHANNEL
+          : channelLabel(target, known.directory, known.selfId),
+        messageId,
+        'approval',
+      );
+    },
+    [openAnchorIn],
   );
 
   // ===========================================================================
@@ -1573,10 +1616,14 @@ export default function ConversationScreen({
       onOpenProfile: showMemberProfile,
       workspaceId,
       onOpenMemoryEvidence: openMemoryEvidence,
+      // 다른 방으로 건너갈 셸이 없으면 열 곳이 없다 — 그때 「전문 보기」는 서지 않는다(#4705).
+      ...(onOpenConversation !== undefined ? {onOpenMessage: openApprovalMessage} : {}),
     }),
     [
       workspaceId,
       openMemoryEvidence,
+      onOpenConversation,
+      openApprovalMessage,
       member.id,
       toggleReaction,
       togglePin,

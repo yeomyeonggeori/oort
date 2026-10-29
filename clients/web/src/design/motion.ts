@@ -19,6 +19,14 @@ export const MODAL_OVERLAY_MOTION =
 export const MODAL_CONTENT_MOTION =
   "origin-center data-[state=open]:motion-modal-enter-zoom data-[state=closed]:motion-modal-exit-zoom data-[state=closed]:pointer-events-none! motion-reduce:animate-none";
 
+/**
+ * 이미지 라이트박스의 무대 (#4751). 화면 전체가 뷰어라서 패널처럼 줌하지 않고 **불투명도만** 움직인다: 열림은 사다리의
+ * standard(`motion-enter`), 닫힘은 fast(`motion-exit`). 새 시간·곡선 값을 만들지 않고 사다리 유틸을 그대로 쓴다.
+ * 동작 줄이기에서는 사다리가 0이고 `animate-none`도 함께 건다(D9).
+ */
+export const STAGE_MOTION =
+  "data-[state=open]:motion-enter data-[state=closed]:motion-exit data-[state=closed]:pointer-events-none! motion-reduce:animate-none";
+
 export const POPOVER_MOTION =
   "data-[state=open]:pointer-events-auto data-[state=closed]:pointer-events-none data-[state=open]:motion-enter data-[state=closed]:motion-exit motion-reduce:animate-none";
 

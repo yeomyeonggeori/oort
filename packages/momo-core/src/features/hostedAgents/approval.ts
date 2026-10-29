@@ -119,6 +119,17 @@ export const HOSTED_SCOPE_CHOICES: readonly HostedScopeChoice[] = [
       "워크스페이스 변경을 제안할 수 있음(실행은 사람 승인). 제안은 채널에 승인 카드로 서고, 승인하면 승인한 사람의 권한으로 실행돼요.",
     required: false,
   },
+  {
+    // ADR-0186 증보 v5 U-b (#4704). 「제안」과 다른 점 하나가 문장의 중심이다: **아무도
+    // 부르지 않아도** 올린다는 것. 그래서 첫 문장이 그것을 말하고, 둘째 문장이 이 줄도
+    // 사람 승인 앞에서 끝난다는 것을 말한다(읽고 넘기는 사람이 「먼저 바꾼다」로 읽지
+    // 않게). 카드가 서는 곳이 소유자와의 대화뿐이라는 것도 빼지 않는다.
+    id: "workspace:initiate",
+    label: "먼저 제안",
+    detail:
+      "먼저 제안할 수 있음: 부르지 않아도 소유자와의 대화에 승인 카드를 올려요. 실행은 사람 승인 뒤에만 일어나요.",
+    required: false,
+  },
 ];
 
 /** 서버가 반드시 요구하는 권한 (`validate_hosted_scopes`). */
@@ -275,6 +286,9 @@ function scopeAction(scope: HostedAgentScope): string | null {
       // 하나씩 붙어 한 문장이 되므로, 여기서 「워크스페이스 변경」이라고만 쓰면
       // 요약 문장이 권한을 과장한다.
       return "워크스페이스 변경 제안(실행은 사람 승인)";
+    case "workspace:initiate":
+      // 「먼저」가 이 줄의 전부다. 빠지면 요약 문장에서 이 권한이 「제안」과 같아진다.
+      return "부르지 않아도 먼저 제안(실행은 사람 승인)";
   }
 }
 

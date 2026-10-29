@@ -21,6 +21,10 @@ import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
+import {
+  AGENT_INITIATIVE_LABEL,
+  AGENT_INITIATIVE_RATIONALE_LABEL,
+} from "@momo/core/features/timeline/agentInitiative";
 
 // =============================================================================
 // AX-4 (#2510): 행동 승인 카드 · 1회 링크 · 영속 결과 카드.
@@ -787,5 +791,237 @@ describe("서버가 이미 결정한 옛 카드는 버튼이 없다 (#3818)", ()
     const host = mountCard(approvalProps());
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
     expect(byTestId(host, "approval-reject")).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// 먼저 제안 카드·고정 카드·만료 줄 (ADR-0186 증보 v5 U-c·U-e, #4705).
+//
+// 픽스처는 서버 PR A(`agent_initiative.rs`)가 쓰는 모양 그대로다: `props.origin`은 최상위,
+// `props.action.preview`는 `{kind:"message", messageId, channelId, totalChars, truncated}`.
+// 서버가 아직 이 트랙에 없으므로 실서버 확인은 승격 뒤다(runtime-unverified).
+// =============================================================================
+describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
+  const OWNER = "00000000-0000-7000-8000-0000000001a1";
+  const PLANNER = "019f9a01-0000-7000-8000-0000000004a1";
+  const TARGET_CHANNEL = "00000000-0000-7000-8000-000000000302";
+  const TARGET_MESSAGE = "0199AA11-2222-7000-8000-0000000000C1";
+
+  function pinProps(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...approvalProps(),
+      title: "승인 요청: 메시지 고정",
+      origin: "agent_initiated",
+      summary: "플래너가 먼저 제안했어요.",
+      action: {
+        id: "message.pin",
+        rows: [
+          { label: "채널", value: "#qa" },
+          { label: "글자 수", value: "1234자" },
+        ],
+        rationale: "안내문을 채널 맨 위에 두고 싶어요",
+        required_role: "admin",
+        preview: {
+          kind: "message",
+          messageId: TARGET_MESSAGE,
+          channelId: TARGET_CHANNEL,
+          totalChars: 1234,
+          truncated: true,
+        },
+      },
+      ...over,
+    };
+  }
+
+  function mountPin(props: Record<string, unknown>): HTMLElement {
+    return mountCard(props, { authorMemberId: PLANNER });
+  }
+
+  const headTitle = (host: HTMLElement) =>
+    byTestId(host, "agent-card")[0]?.getAttribute("aria-label") ?? "";
+
+  it("제목 끝에 짧은 꼬리표가 붙고, 사유 이름표가 에이전트 글이다(새 행은 없다)", () => {
+    const host = mountPin(pinProps());
+    expect(headTitle(host)).toContain(AGENT_INITIATIVE_LABEL);
+    expect(headTitle(host).startsWith("승인 요청")).toBe(true);
+    const rationale = byTestId(host, "approval-action-rationale")[0];
+    expect(rationale?.textContent).toContain(AGENT_INITIATIVE_RATIONALE_LABEL);
+    // 사유는 평문이다: 링크나 서식으로 바뀌지 않고, 아래 줄을 더 세우지 않는다.
+    expect(rationale?.querySelectorAll("a, strong, em, code")).toHaveLength(0);
+    expect(byTestId(host, "approval-team-ai-rationale-note")).toHaveLength(0);
+    // 서버 행 둘과 요청 줄이 전부다: 먼저 제안이 행을 더 세우지 않는다.
+    expect(byTestId(host, "approval-action-row")).toHaveLength(2);
+  });
+
+  it("에이전트가 쓴 사유는 평문이다: 링크·멘션·서식이 와도 요소가 되지 않고 글자 그대로 선다", () => {
+    // 서버는 이런 글을 거절하지만(`rationale` ≤140자, `@ < > [ ] ( ) : /` 불가), 시킨 사람이 없는 카드에서
+    // 이 글이 유일한 설득 수단이라 클라이언트도 믿지 않는다(깊은 방어).
+    const hostile = "https://evil.test/x <b>굵게</b> @planner **굵게** `코드` [링크](https://a.test) <script>x</script>";
+    const base = pinProps();
+    const host = mountPin(
+      pinProps({ action: { ...(base.action as Record<string, unknown>), rationale: hostile } })
+    );
+    const row = byTestId(host, "approval-action-rationale")[0];
+    expect(row).toBeDefined();
+    expect(row?.querySelectorAll("a, b, strong, em, code, script, img")).toHaveLength(0);
+    expect(row?.textContent).toContain(hostile);
+    // 이 시험이 실제로 잡는지: 같은 글이 값 칸에 요소 없이 한 글자열로만 들어 있다.
+    expect(row?.querySelector("dd")?.children.length ?? 0).toBe(0);
+  });
+
+  it("origin 이 없으면 지금까지의 카드 그대로다(꼬리표도 이름표도 없다)", () => {
+    const props = pinProps();
+    delete props.origin;
+    const host = mountPin(props);
+    expect(headTitle(host)).not.toContain(AGENT_INITIATIVE_LABEL);
+    expect(byTestId(host, "approval-action-rationale")[0]?.textContent).not.toContain(
+      AGENT_INITIATIVE_RATIONALE_LABEL
+    );
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+
+  it("모르는 origin 값은 꼬리표를 세우지 않는다", () => {
+    const host = mountPin(pinProps({ origin: "scheduled" }));
+    expect(headTitle(host)).not.toContain(AGENT_INITIATIVE_LABEL);
+  });
+
+  it("결정이 난 카드는 꼬리표가 남고 전문 보기 문은 없다", () => {
+    const host = mountPin(
+      pinProps({ status: "approved", approval_status: "approved", decided_by: OWNER })
+    );
+    expect(headTitle(host)).toContain(AGENT_INITIATIVE_LABEL);
+    expect(byTestId(host, "approval-message-preview-link")).toHaveLength(0);
+  });
+
+  it("고정 카드는 전문 보기 문을 결정 전에 세우고, 문은 그 메시지의 자리로 간다", () => {
+    const host = mountPin(pinProps());
+    const link = byTestId(host, "approval-message-preview-link")[0] as HTMLAnchorElement;
+    expect(link).toBeDefined();
+    expect(link.getAttribute("href")).toBe(
+      `#/c/${TARGET_CHANNEL}?msg=${TARGET_MESSAGE.toLowerCase()}`
+    );
+    // 서버 행은 그대로 서고, 문은 결정 버튼과 함께 있다.
+    expect(byTestId(host, "approval-action-row")).toHaveLength(2);
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+
+  it("미리보기가 없거나 모르는 종류면 문이 없고 서버 행만 선다", () => {
+    const props = pinProps();
+    (props.action as Record<string, unknown>).preview = { kind: "thread" };
+    const host = mountPin(props);
+    expect(byTestId(host, "approval-message-preview")).toHaveLength(0);
+    expect(byTestId(host, "approval-action-row")).toHaveLength(2);
+  });
+
+  // 먼저 제안이 올릴 수 있는 네 행동(ADR U-b-2) 모두 같은 카드 몸으로 선다: 서버 행이 그대로 서고,
+  // 꼬리표와 결정 컨트롤이 있고, 전문 보기 문은 고정 둘에만 있다.
+  const INITIATIVE_ACTIONS: ReadonlyArray<{
+    id: string;
+    rows: Array<{ label: string; value: string }>;
+    pin: boolean;
+  }> = [
+    {
+      id: "channel.create",
+      rows: [
+        { label: "채널 이름", value: "qa" },
+        { label: "공개 범위", value: "비공개" },
+        { label: "이 에이전트도 참여", value: "예" },
+      ],
+      pin: false,
+    },
+    {
+      id: "channel.member.add",
+      rows: [
+        { label: "채널", value: "#qa" },
+        { label: "추가할 멤버", value: "박서연" },
+      ],
+      pin: false,
+    },
+    {
+      id: "message.pin",
+      rows: [
+        { label: "채널", value: "#qa" },
+        { label: "글자 수", value: "40자" },
+      ],
+      pin: true,
+    },
+    {
+      id: "message.unpin",
+      rows: [
+        { label: "채널", value: "#qa" },
+        { label: "고정한 사람", value: "최민수" },
+        { label: "글자 수", value: "40자" },
+      ],
+      pin: true,
+    },
+  ];
+
+  for (const action of INITIATIVE_ACTIONS) {
+    it(`${action.id} 먼저 제안 카드도 서버 행 그대로 서고 결정 컨트롤이 있다`, () => {
+      const block = pinProps().action as Record<string, unknown>;
+      const props = pinProps({
+        action: {
+          ...block,
+          id: action.id,
+          rows: action.rows,
+          ...(action.pin ? {} : { preview: undefined }),
+        },
+      });
+      const host = mountPin(props);
+      expect(headTitle(host)).toContain(AGENT_INITIATIVE_LABEL);
+      expect(byTestId(host, "approval-action-row")).toHaveLength(action.rows.length);
+      expect(byTestId(host, "approval-approve")).toHaveLength(1);
+      expect(byTestId(host, "approval-reject")).toHaveLength(1);
+      expect(byTestId(host, "approval-message-preview-link")).toHaveLength(action.pin ? 1 : 0);
+    });
+  }
+});
+
+describe("만료 스윕이 남긴 줄 (#4705, 검수 L4)", () => {
+  function mountSweepLine(over: Record<string, unknown> = {}): HTMLElement {
+    const card = agentCardModel(
+      message({
+        type: "tool_result",
+        body: "Tool call expired without a human approval.",
+        props: {
+          call_id: "",
+          output: "Tool call expired without a human approval.",
+          is_error: true,
+          approval_id: APPROVAL_ID,
+          run_id: "0199aa11-2222-7000-8000-0000000000b2",
+          status: "expired",
+          decided_at_ms: 1_753_400_000_000,
+          ...over,
+        },
+      })
+    );
+    if (card === null) throw new Error("no card for the sweep line");
+    mountHost = document.createElement("div");
+    document.body.append(mountHost);
+    mountedRoot = createRoot(mountHost);
+    act(() => {
+      mountedRoot?.render(
+        createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(AgentCard, { card, directory: DIRECTORY })
+        )
+      );
+    });
+    return mountHost;
+  }
+
+  it("실패 칩이 아니라 중립의 만료 칩이고, 영어 문장이 화면에 없다", () => {
+    const host = mountSweepLine();
+    const chip = byTestId(host, "agent-status-chip")[0];
+    expect(chip?.dataset.status).toBe("expired");
+    expect(byTestId(host, "agent-frame")[0]?.textContent).toMatch(/[가-힣]/);
+    expect(host.textContent).not.toMatch(/expired without/i);
+    expect(byTestId(host, "tool-error")).toHaveLength(0);
+  });
+
+  it("스윕 줄이 아닌 오류 도구 결과는 지금처럼 실패 칩이다", () => {
+    const host = mountSweepLine({ status: "failed", output: "boom" });
+    expect(byTestId(host, "agent-status-chip")[0]?.dataset.status).toBe("error");
   });
 });

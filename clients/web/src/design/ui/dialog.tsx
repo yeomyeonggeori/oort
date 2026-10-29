@@ -114,8 +114,10 @@ export const DialogContent = React.forwardRef<
     opener?: DialogFocusTarget | null;
     /** 포털 목적지. 생략하면 document.body. */
     container?: HTMLElement | null;
+    /** 패널 움직임. 생략하면 `MODAL_CONTENT_MOTION`(줌 + 페이드). 화면 전체가 뷰어인 표면(라이트박스)이 불투명도만 쓰려고 바꾼다. */
+    motion?: string;
   }
->(({ className, children, onCloseAutoFocus, opener, container, ...props }, ref) => {
+>(({ className, children, onCloseAutoFocus, opener, container, motion, ...props }, ref) => {
   // `document.activeElement` 추정은 Chromium에서만 맞다. WebKit은 마우스 클릭으로
   // <button>에 포커스를 주지 않아 캡처값이 <body>가 되고, 닫힐 때 돌려줄 자리가
   // 사라진다 — 데스크톱 셸이 WKWebView이므로 배포 대상의 절반이 그쪽이다.
@@ -133,7 +135,7 @@ export const DialogContent = React.forwardRef<
         ref={ref}
         className={cn(
           "dialog-panel layer-overlay-surface fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-2xl border border-line bg-surface-raised text-ink shadow-lg",
-          MODAL_CONTENT_MOTION,
+          motion ?? MODAL_CONTENT_MOTION,
           className
         )}
         onCloseAutoFocus={(event) => {
