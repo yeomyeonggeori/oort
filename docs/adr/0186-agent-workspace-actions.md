@@ -1110,7 +1110,7 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 5. 만료 줄: 본문 영어 `"Tool call expired without a human approval."`(인플레이스는 한국어 상수), `is_error` 도구 결과, props `status:"expired"`·`decided_at_ms`와, 트리거가 있으면 `answers_message_id`. 푸시가 묻는 사람을 찾는다(ADR-0204 D8).
 6. 행동 승인의 성공은 `momo.action_result.v1` 영속 카드를 `tool_result`로 쓴다. 부록 B가 정한 `status ∈ executed | rejected | expired | role_required` 가운데 서버가 쓰는 것은 `executed`뿐이다. 인플레이스 채널 승인은 결과 줄을 쓰지 않는다(카드 패치가 「승인됨」을 말한다).
 7. 카드 `body`는 행동 승인이 `"승인 요청: {title}"`(`workspace_action_request_body`), 도구 승인이 영어 `"Approval required: {tool}"`이다. 푸시 본문과 카드를 모르는 옛 클라이언트의 폴백이 이 `body`를 그대로 읽는다.
-8. 카드 · 도구 줄 · 결과 · 만료 · 거부 줄은 모두 `root_id: None`이다. 최종 답만 `trigger_root_id`를 따른다(ADR-0148 증보, ADR-0200 증보 5의 「답 자리 현황」 표가 「어긋남」으로 적었다).
+8. 행동 제안 카드(`oort_action_propose`, `agent_port_tools.rs`)와 결과 · 거부 · 만료 줄(`approval_sweep.rs` 포함)은 `root_id: None`이다. 인플레이스 채널 승인 카드와 호출 불가 안내 줄만 서버가 「말한 자리」(`root_id: send.root_id`, `agent_mentions.rs`)를 따른다. 최종 답만 `trigger_root_id`를 따른다(ADR-0148 증보). ADR-0200 증보 5의 「답 자리 현황」 표가 이 갈림을 「어긋남」으로 적었다.
 9. 조사 노트가 가리킨 「한 카드 밑에 줄 둘을 피하려는」 주석(`actions.rs` 2206-2213)은 이 트리에서 **찾지 못했다**. 이 증보는 그 이유를 근거로 쓰지 않고, 확인된 두 이유만 다룬다: ADR-0182 ③(다시 찾을 결과는 지속 카드)과 위 3번의 멱등 키 분리. [확인 필요: 없음 확인]
 10. `momo_notifier`는 `message`에 SELECT·INSERT·UPDATE grant가 있다(`infra/rust/sql/bootstrap_runtime_roles.sql` 472).
 
@@ -1187,7 +1187,8 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 | `Approval expired before a human decision.` | — | 감사 사유라서 화면에 나오지 않는다. 그대로 |
 
 3. 코드→문장 표는 서버와 코어가 **같은 골든 데이터 한 파일**을 읽는 시험으로 잠근다(소스 글자를 단정하지 않고 데이터를 읽는다).
-4. 말 사전(승인의 반대 낱말 「거부」 등)은 `docs/design-system/agent-request-loop.md` 7절이 정한다. 반대 낱말은 ADR-0204 증보 2 D6(Accepted)을 따른다.
+4. **낱말은 한 곳이 정한다.** 클라이언트 코어의 `runPhaseLabel`이 종료 코드 `approval_expired`에서 「만료」, `approval_rejected`에서 「거부」를 정하고 칩 · 카드 · 인박스 행이 그것을 읽는다. 지금 같은 run(`timed_out` + `approval_expired`)은 칩이 「만료」인데 예외 줄 머리말이 「시간 초과」(`runException`이 `runPhaseLabel`을 읽고 `END_REASON_TEXT` 「승인이 만료됐어요」를 붙인다)라서 한 행에 두 낱말이 선다. 그래서 **승인으로 끝난 run에는 예외 줄을 세우지 않는다**(칩이 말하고 묶음 카드가 설명한다, 디자인 시스템 §1·§7). #4705가 영어 스윕 줄을 클라이언트에서 임시로 번역한 `EXPIRED_LINE_TITLE` · `EXPIRED_LINE_NOTE` · `EXPIRED_ROW_COPY`는 이 문장 · 낱말로 대체된다(`EXPIRED_CARD_COPY`는 결정하려던 사람에게 컨트롤 자리에서 말하는 안내라 그대로다).
+5. 말 사전(승인의 반대 낱말 「거부」 등)은 `docs/design-system/agent-request-loop.md` 7절이 정한다. 반대 낱말은 ADR-0204 증보 2 D6(Accepted)을 따른다.
 
 ### R-e. 「채널에도 한 줄」과 판단 칸
 
@@ -1211,12 +1212,12 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 | 값 | 어디 | 비고 |
 |---|---|---|
 | `props.status` · `props.code` · `props.result{status,rows,ref,next,line}` | 승인 카드 | 종결 패치. `result`는 부록 B 객체 + `line` |
-| `props.intent` · `action.rows[].before` / `.after` | 승인 카드(제안 때) | 머리 문장의 「하려는 일」 한 구절(행동마다 서버가 만든다: 이름은 작성자에서 읽고 문장에 굽지 않는다, 부록 A 메모)과 값 칩의 이전 → 이후 구조. 구조가 없는 옛 카드는 한 줄 값(`value`)으로 그린다 |
+| `props.intent` · `action.rows[].before` / `.after` | 승인 카드(제안 때) | 머리 문장의 「하려는 일」 한 구절(행동마다 서버가 만든다: 이름은 작성자에서 읽고 문장에 굽지 않는다, 증보 v5 U-c와 `proposal_summary`의 문서)과 값 칩의 이전 → 이후 구조. 구조가 없는 옛 카드는 한 줄 값(`value`)으로 그린다 |
 | `props.decision_mode` (`inline`/`open`) | 승인 카드 · 승인 목록 | `opens_in_app()` 한 함수의 결과(ADR-0204 증보 5) |
 | `props.bundle_of` · `props.announce` | 운반체 줄 · 채널에도 줄 | 클라이언트 접기 · 푸시 조용 |
 | `receipt.line` | 결정 응답(영수증) | 잠금 화면 결과 알림 문장. 구버전 폴백 있음 |
 | `AgentRunProgress.bundle{approvalId,status,decisionMode,canDecide,line}` | run 진행 읽기 | 채널의 상태 칩과 스레드 요약 줄. `canDecide`는 보는 사람 기준 |
-| 승인 목록: 모든 상태 · 결정자 · 결정 시각 · 결과 요약 · 자리(채널 · root · DM 여부) · 쪽매김 | 승인 읽기 | 인박스 「승인」 칸. 채널 멤버십으로 서버가 거른다(ADR-0199 D2·D6와 같은 규칙) |
+| 승인 목록: 모든 상태 · 결정자 · 결정 시각 · 결과 요약 · 자리(채널 · root · DM 여부) · 쪽매김 | 승인 읽기 | 인박스 「승인」 칸. 채널 멤버십으로 서버가 거른다(ADR-0199 D4의 조회 시 가시성 재판정, D5의 수신자 격리와 같은 규칙) |
 | `announce`(행동 속성) | 레지스트리 | R-e |
 
 - 새 테이블 · 새 컬럼 · 새 outbox 생산자 · BYPASSRLS가 없다. 모든 쓰기는 기존 `agent_tenant_tx` / `momo_app` 트랜잭션 안이고, 만료 스윕은 기존대로 `momo_notifier`의 워크스페이스별 tenant tx 안이다.
