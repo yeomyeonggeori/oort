@@ -8,6 +8,7 @@ import {ApiError} from '@momo/core/lib/api';
 import {onlineManager, QueryClient, QueryClientProvider, QueryObserver} from '@tanstack/react-query';
 import {withPullScroll, usePullRefresh} from '../src/design/refresh';
 import {haptics, hapticScope, getHapticMode, setHapticMode, type HapticEvent} from '../src/lib/haptics';
+import {NON_SECRET_KEYS, nonSecretStore} from '../src/storage/kv';
 import {invalidateAndReport} from '../src/query/invalidateReport';
 import {PULL_FILL, PULL_TRIGGER} from '../src/design/pullRefresh';
 import {HOME_ANGLE, OPTICAL, PHASE, SCRUB_FILL_MIN} from '../src/design/brand/oortLoaderTimeline';
@@ -21,7 +22,7 @@ import {lightPalette} from '../src/design/tokens';
 //   · 임계 통과의 가벼운 햅틱 1회: 표준 컨트롤이 새로고침을 세우는 순간(`onRefresh`)에 낸다. 이 컨트롤은
 //     손가락이 닿은 채로 임계를 넘는 순간 `onRefresh` 를 부른다(iOS 26.5 시뮬레이터에서 잰 것). 한 번의
 //     새로고침에 한 번이고, 스크롤 이벤트로는 울리지 않는다(`lib/haptics.ts` 계약)
-//   · 성공은 무음, 실패 warning. 실패하면 「새로고침하지 못했어요. 다시 당겨 보세요.」 한 줄이 목록 위에 서고
+//   · 기본은 기존 success/warning, 풍부는 성공 무음·실패 warning. 실패하면 「새로고침하지 못했어요. 다시 당겨 보세요.」 한 줄이 목록 위에 서고
 //     **시간으로 사라지지 않는다**: 다음 당김이 서거나, 실패한 쿼리가 다시 읽히거나, 화면을 떠날 때까지 남는다
 //   · 시스템 스피너를 감췄으므로 「새로고침 중」을 접근성으로 낭독하고 머리가 이름을 진다
 //   · 실제 재조회(onRefresh)는 한 당김에 한 번이고, 끝나면 표시가 물러난다
@@ -1544,6 +1545,22 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
 
 // #4298: native call map; tactile quality remains owner-device verification.
 describe('사건 햅틱 공통 정책 (#4298)', () => {
+  it('설정이 없으면 기본이고 첫 누름부터 기존 light·selection을 횟수 그대로 낸다', () => {
+    nonSecretStore().remove(NON_SECRET_KEYS.hapticMode);
+    expect(getHapticMode()).toBe('basic');
+    haptics.light(); haptics.light(); haptics.selection();
+    expect(haptic.__calls).toEqual(['impact:light', 'impact:light', 'selection']);
+  });
+
+  it('기본 당김은 문턱 light와 성공 success를 각각 한 번 보존한다', async () => {
+    setHapticMode('basic');
+    render(<Harness onRefresh={() => Promise.resolve([{status: 'success'}])} />);
+    release();
+    expect(haptic.__calls).toEqual(['impact:light']);
+    await flush(500);
+    expect(haptic.__calls).toEqual(['impact:light', 'notification:success']);
+  });
+
   it('기본 모드도 당김 문턱에서 즉시 한 번 울리고 진행 중 반복 신호는 무음이다', () => {
     setHapticMode('basic');
     render(<Harness onRefresh={() => new Promise(() => undefined)} />);
@@ -1575,14 +1592,17 @@ describe('사건 햅틱 공통 정책 (#4298)', () => {
     }
   });
 
-  it('기본은 핵심 사건만, 끔은 legacy를 포함해 앱 호출 0회이며 선택은 저장된다', () => {
+  it('기본은 기존 호출을 보존하고 추가 사건은 무음, 끔은 앱 호출 0회이며 선택은 저장된다', () => {
     setHapticMode('basic');
     expect(getHapticMode()).toBe('basic');
     for (const event of ['tabChanged', 'filterChanged', 'jumpToLatest', 'deleteConfirmed'] as const) {
       haptics.event(event);
     }
-    haptics.light(); haptics.selection();
     expect(haptic.__calls).toEqual([]);
+    // CI 수리: legacy light/selection도 기본에서 보존한다. 옛 0회 기대는 #3580 계약을 깼다.
+    haptics.light(); haptics.selection();
+    expect(haptic.__calls).toEqual(['impact:light', 'selection']);
+    haptic.__calls.length = 0;
     for (const event of ['messageMenu', 'reactionChanged', 'profileOpened', 'refreshThreshold'] as const) {
       jest.advanceTimersByTime(100);
       haptics.event(event);

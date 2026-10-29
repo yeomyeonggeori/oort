@@ -1117,7 +1117,6 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     expect(hapticCalls).toEqual(['selection']);
     fireEvent.press(screen.getByTestId('tab-inbox'));
     expect(hapticCalls).toEqual(['selection']);
-    act(() => jest.advanceTimersByTime(100));
     fireEvent.press(screen.getByTestId('tab-search'));
     expect(hapticCalls).toEqual(['selection', 'selection']);
   });
@@ -1154,7 +1153,6 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     await renderReady();
     const toggle = screen.getAllByTestId(/^home-section-toggle-/)[0];
     fireEvent.press(toggle);
-    act(() => jest.advanceTimersByTime(100));
     fireEvent.press(toggle);
     expect(hapticCalls).toEqual(['selection', 'selection']);
   });
@@ -1261,7 +1259,8 @@ describe('탭 전환 모션 — 캡슐과 페이드 (#3580)', () => {
       66 + SHELL.barGap,
       (66 + SHELL.barGap) * 2,
     ]);
-    expect(hapticCalls).toEqual(['selection']); // same 100ms window suppresses only the second pulse
+    // CI 수리: 기본의 서로 다른 누름은 각각 울린다. #4298 전 base의 2회 기대를 복원한다.
+    expect(hapticCalls).toEqual(['selection', 'selection']);
     spring.mockRestore();
   });
 

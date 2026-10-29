@@ -84,7 +84,8 @@ import {font, radius, SAFE_GUTTER, space, type Palette} from './tokens';
 // 진행 중에는 `busyRef` 가 막아 한 번의 새로고침에 한 번이다. 계약의 「스크롤에서는 부르지 않는다」를
 // 그대로 지킨다.
 //
-// 성공은 무음이고 실패만 `warning`이다(#4298). 요청을 시작한 화면·대상이 그대로 있고 앱이 앞에 있을 때만
+// 기본은 기존 success/warning을 보존하고 풍부는 성공 무음·실패 warning이다(#4298).
+// 요청을 시작한 화면·대상이 그대로 있고 앱이 앞에 있을 때만
 // 결과를 전한다. 화면을 떠났다가 돌아와도 이전 당김의 늦은 결과는 울리지 않는다.
 //
 // ## 실패는 시각으로도 서고, 시간으로 사라지지 않는다 (#3992)
@@ -401,7 +402,10 @@ export function usePullRefresh(
         // 새로고침은 여기서 끝난다: 컨트롤이 닫혀야 다음 당김이 선다. 실패 안내는 머리가 아니라 목록 위에 남는다.
         busyRef.current = false;
         setRefreshing(false);
-        if (!isFailed) return;
+        if (!isFailed) {
+          resultHaptic('refreshSucceeded');
+          return;
+        }
         // A result from a departed screen/app stays silent, including after returning.
         resultHaptic('refreshFailed');
         // 응답이 오기 전에 화면을 떠났으면(탭을 옮겼으면) 안내를 세우지 않는다: 돌아왔을 때 옛 실패가 서 있게 된다.

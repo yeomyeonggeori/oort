@@ -32,6 +32,7 @@ const events = {
   recordingStarted: ['light', 'basic'],
   recordingStopped: ['medium', 'basic'],
   refreshThreshold: ['light', 'basic'],
+  refreshSucceeded: ['success', 'basic'],
   refreshFailed: ['warning', 'basic'],
 } as const satisfies Record<string, readonly [Pattern, 'rich' | 'basic']>;
 export type HapticEvent = keyof typeof events;
@@ -45,7 +46,8 @@ function subscribe(listener: () => void): () => void {
 }
 export function getHapticMode(): HapticMode {
   const stored = nonSecretStore().getString(NON_SECRET_KEYS.hapticMode);
-  return stored === 'basic' || stored === 'off' ? stored : 'rich';
+  // An unset preference preserves the existing screens' feedback. Extra pulses are opt-in.
+  return stored === 'rich' || stored === 'off' ? stored : 'basic';
 }
 export function setHapticMode(mode: HapticMode): void {
   if (getHapticMode() === mode) return;
@@ -87,7 +89,9 @@ function fire(pattern: Pattern, level: 'basic' | 'rich' = 'basic'): void {
   const mode = getHapticMode();
   if (mode === 'off' || (mode === 'basic' && level === 'rich')) return;
   const now = performance.now(); // monotonic, shared across ALL callers, including legacy APIs
-  if (now - lastAt < 100) return;
+  // Basic keeps one request per existing action, including separate rapid taps.
+  // The rich mode's extra events share a window; it must not swallow basic actions.
+  if (mode === 'rich' && now - lastAt < 100) return;
   const native = load();
   if (!native) return;
   lastAt = now;
@@ -125,18 +129,20 @@ function fire(pattern: Pattern, level: 'basic' | 'rich' = 'basic'): void {
   }
 }
 
-// Keep these names: other S1 slots own their call sites. Rich-only legacy light/selection
-// cover send, custom sheet, tab/filter; semantic base events use event() explicitly.
+// Existing screens keep their patterns/counts in basic mode. New optional feedback
+// uses rich-level semantic events rather than changing these compatibility APIs.
 export const haptics = {
   event(event: HapticEvent): void {
+    // Rich uses the threshold pulse; basic preserves the existing success feedback.
+    if (event === 'refreshSucceeded' && getHapticMode() === 'rich') return;
     const [pattern, level] = events[event];
     fire(pattern, level);
   },
   selection(): void {
-    fire('selection', 'rich');
+    fire('selection');
   },
   light(): void {
-    fire('light', 'rich');
+    fire('light');
   },
   medium(): void {
     fire('medium');
