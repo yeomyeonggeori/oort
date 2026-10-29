@@ -15,7 +15,8 @@ Closes #<issue>
 <!-- 변경에 해당하는 등급과 실제 명령·결과·환경. clean HEAD의 Local Gate 원문/로그를 링크한다.
 Rust는 fmt --all / clippy -D warnings / workspace tests.
 웹·폰·코어는 해당 트리와 병합 트리. UI는 독립 design-review B0/H0.
-문서·운영 스크립트는 docs 게이트 및 관련 동작 시험. -->
+문서·운영 스크립트는 docs 게이트 및 관련 동작 시험.
+스택 PR(docs/planning/PIPELINE.md §5)은 「스택 검증 메모」와 병합 트리 모드를 적고, 화면 검수는 「스택 S<n> 검증에서」로 적는다. -->
 - 검증 등급:
 - 실행 결과 / 증거:
 - runtime-unverified / 남은 검증:

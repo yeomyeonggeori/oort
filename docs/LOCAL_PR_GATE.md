@@ -65,7 +65,7 @@ Optional maintainer pre-push hook: `scripts/install_branch_skew_hook.sh`.
 
 ## 3. PR Body Evidence
 
-Paste the `## Local Gate` block the script prints (result, profile, run id, commands, coverage, not-covered). UI PRs also need design-review evidence (Blocker 0) per `AGENTS.md`.
+Paste the `## Local Gate` block the script prints (result, profile, run id, commands, coverage, not-covered). UI PRs also need design-review evidence (Blocker 0) per `AGENTS.md`; a stack PR gets it from the stack verification before promotion and says so in its body (`docs/planning/PIPELINE.md` §5).
 
 ## 4. Worker Handoff And Merge Cycle
 
@@ -74,4 +74,4 @@ Paste the `## Local Gate` block the script prints (result, profile, run id, comm
 3. Worker does **not** merge, close, or retarget ROADMAP.
 4. `momo-main` reviews current-head local evidence, re-runs affected gates after changes or integration differences, checks PR CI + Policy integrity and the exact-base verifier, then merges to the track branch.
 
-Cross-client landings also need `scripts/verify_merge_tree.sh` green (merged tree, not branch-alone).
+Cross-client landings also need `scripts/verify_merge_tree.sh` green (merged tree, not branch-alone). A stack PR lands with `scripts/verify_merge_tree.sh --base origin/track/<track> --head <PR branch> --typecheck-only` (evidence names the mode) plus PR CI, Policy integrity and the exact-base verifier; the full run happens once on the stack's combined tree before promotion, and a track holding stack PRs is not promoted before that stack verification passes (`docs/planning/PIPELINE.md` §5).
