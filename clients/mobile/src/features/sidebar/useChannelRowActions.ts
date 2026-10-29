@@ -40,9 +40,9 @@ import {
 // 표면이 하나라 훅이 **대상을 인자로** 받는다: 행마다 훅을 두면 수십 줄이 각자 상태를 든다.
 // 시트는 화면에 하나이고(`active`), VoiceOver 로터는 시트를 열지 않고 같은 `run` 을 부른다.
 //
-// ## 낙관 갱신이 없다
+// ## 알림은 낙관 갱신한다
 //
-// 알림 끄기·읽음·안 읽음·나가기는 전부 서버가 답한 **뒤에** 캐시를 건드린다. 웹 `leaveMutation`
+// 알림은 채널을 제거하지 않으므로 먼저 상태를 바꾸고 실패하면 되돌린다. 읽음·안 읽음·나가기는 서버가 답한 **뒤에** 캐시를 건드린다. 웹 `leaveMutation`
 // 머리말이 적은 이유가 그대로다: 시트를 이고 있는 행이 낙관 편집으로 언마운트되면 「나가는 중」과
 // 실패 문장이 화면에 도달하지 못한다.
 // =============================================================================
@@ -96,6 +96,7 @@ export function useChannelRowActions(
   const [leaveError, setLeaveError] = useState<string | null>(null);
   const receiptTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mounted = useRef(true);
+  const muteInFlight = useRef(new Set<string>());
 
   useEffect(
     () => () => {
@@ -246,17 +247,36 @@ export function useChannelRowActions(
           return;
         }
         case 'mute': {
+          if (muteInFlight.current.has(channel.id)) return;
+          muteInFlight.current.add(channel.id);
+          setError(null);
           const next = !target.muted;
+          const queryKey = workspaceKeys.channels(workspaceId);
+          const patchMuted = (muted: boolean) => {
+            client.setQueryData<Channel[]>(queryKey, previous =>
+              previous?.map(row => uuidEq(row.id, channel.id) ? {...row, muted} : row),
+            );
+            if (mounted.current) {
+              setActive(previous => previous && uuidEq(previous.channel.id, channel.id)
+                ? {...previous, muted} : previous);
+            }
+          };
           void track(
             key,
             target,
             CHANNEL_MUTE_FAILURE,
             async () => {
-              await setChannelNotificationPref(workspaceId, channel.id, next);
-              // 서버가 진실이다: 무효화하면 새 muted 가 흘러 내려와 행이 같은 말을 한다.
-              await client.invalidateQueries({
-                queryKey: workspaceKeys.channels(workspaceId),
-              });
+              try {
+                await client.cancelQueries({queryKey});
+                patchMuted(next);
+                await setChannelNotificationPref(workspaceId, channel.id, next);
+              } catch (cause) {
+                patchMuted(target.muted);
+                throw cause;
+              } finally {
+                muteInFlight.current.delete(channel.id);
+                void client.invalidateQueries({queryKey});
+              }
             },
             next ? '알림을 껐습니다.' : '알림을 켰습니다.',
           );

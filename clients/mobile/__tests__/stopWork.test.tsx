@@ -14,7 +14,9 @@ import {StopWorkControl} from '../src/features/work/StopWorkControl';
 import {haptics} from '../src/lib/haptics';
 
 jest.mock('../src/lib/haptics', () => ({
+  ...jest.requireActual('../src/lib/haptics'),
   haptics: {
+    event: jest.fn(),
     selection: jest.fn(),
     light: jest.fn(),
     medium: jest.fn(),

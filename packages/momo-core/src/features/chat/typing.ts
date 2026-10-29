@@ -485,6 +485,23 @@ export function typingSegments(
   return segments;
 }
 
+/** 화면용 이름 나열. 낭독 문장(`typingLabel`)의 존대·집계 규칙은 유지한다. */
+export function typingVisualSegments(names: string[]): TypingSegment[] {
+  if (names.length === 0) return [];
+  const segments: TypingSegment[] = [{ kind: "name", text: names[0] }];
+  if (names.length === 2) {
+    segments.push({ kind: "plain", text: ", " }, { kind: "name", text: names[1] });
+  } else if (names.length > 2) {
+    segments.push(
+      { kind: "plain", text: " 외 " },
+      { kind: "count", text: `${names.length - 1}` },
+      { kind: "plain", text: "명" }
+    );
+  }
+  segments.push({ kind: "plain", text: " 작성 중" });
+  return segments;
+}
+
 /**
  * 컴포저 하단의 한 줄 (입력창 **아래**, 작업 중 줄 바로 위). 1차 독스트링은 이것을
  * 「컴포저 위」라고 적었는데 렌더는 아래였다 — 문서와 화면이 다른 배치를 말하고

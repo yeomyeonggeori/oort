@@ -1,3 +1,4 @@
+import {haptics} from '../src/lib/haptics';
 import {ApiError} from '@momo/core/lib/api';
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
@@ -510,5 +511,41 @@ describe('고정 — 로터와 되돌림', () => {
     expect(screen.getByText(/100개를 넘었습니다/)).toBeTruthy();
     expect(screen.getByText(/고정 목록에서 하나를 해제한 뒤/)).toBeTruthy();
     expect(screen.queryByText(/channel pin limit reached/)).toBeNull();
+  });
+});
+
+// #4298 exercises the real row handlers, not only the event registry.
+describe('메시지 사건 햅틱 (#4298)', () => {
+  it('메뉴가 열릴 때 medium 1회, 손 떼기와 스크롤 취소에는 0회', () => {
+    const pulse = jest.spyOn(haptics, 'event');
+    renderRow();
+    longPress(MOVE_TOLERANCE_PX + 1);
+    expect(pulse).not.toHaveBeenCalled();
+    longPress();
+    expect(pulse.mock.calls).toEqual([['messageMenu']]);
+    fireEvent(screen.getByTestId('message-row'), 'touchEnd', touch(100, 200));
+    fireEvent.press(screen.getByTestId('message-press', {includeHiddenElements: true}));
+    expect(pulse.mock.calls).toEqual([['messageMenu']]);
+    pulse.mockRestore();
+  });
+
+  it.each([false, true])('칩의 반응 토글(mine=%s)은 selection 사건 1회다', mine => {
+    const pulse = jest.spyOn(haptics, 'event');
+    renderRow({chips: [{emoji: '👍', count: 1, mine}]});
+    fireEvent.press(screen.getByTestId('reaction-chip-👍'));
+    expect(pulse.mock.calls).toEqual([['reactionChanged']]);
+    pulse.mockRestore();
+  });
+
+  it('삭제 취소는 무음이고 삭제 확인만 medium 사건이다', async () => {
+    const pulse = jest.spyOn(haptics, 'event');
+    renderRow();
+    longPress();
+    pulse.mockClear();
+    fireEvent.press(screen.getByTestId('sheet-delete'));
+    expect(pulse).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.press(screen.getByTestId('delete-confirm-button')); });
+    expect(pulse.mock.calls).toEqual([['deleteConfirmed']]);
+    pulse.mockRestore();
   });
 });
