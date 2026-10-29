@@ -5,6 +5,8 @@ pub mod actions;
 pub mod agent_connector_owner;
 pub mod agent_credentials;
 pub mod agent_gateway;
+/// ADR-0186 증보 v5 U-a~U-d / #4704 — `oort_action_initiate`: an approval card nobody asked for.
+pub mod agent_initiative;
 pub mod agent_mentions;
 /// ADR-0162 / HAP-E2 — stateless dual-era MCP Agent Port.
 pub mod agent_port;

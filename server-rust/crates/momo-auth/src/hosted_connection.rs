@@ -22,14 +22,17 @@ pub const HOSTED_AGENT_INERT_BASE_URL: &str = "https://hosted-agent.invalid/disa
 /// connection and the only ones its credential may carry.
 ///
 /// `workspace:propose` (ADR-0186 D2) is the seventh and the first one that is
-/// **not** about reading or speaking. It is here because a scope a human cannot
+/// **not** about reading or speaking. `workspace:initiate` (ADR-0186 증보 v5 U-b,
+/// #4704) is the eighth: the first scope that lets an agent raise a card **nobody
+/// asked for**. It is never in a default request, and an existing connection's
+/// approval is unchanged by its arrival (migration 154 only widens the vocabulary). It is here because a scope a human cannot
 /// approve is a tool nobody can ever reach; it is *not* in
 /// `momo_auth::agent_credential`'s grantable set, because generic agent bearers
 /// never reach Agent Port tools at all
 /// ([`resolve_hosted_tool_identity_in_tx`] requires a hosted credential class),
 /// and it is not in the client's default request list (ADR-0186 D2: 기본 페어링은
 /// 요청하지 않는다).
-pub const HOSTED_AGENT_SCOPES: [&str; 7] = [
+pub const HOSTED_AGENT_SCOPES: [&str; 8] = [
     "agent:port:connect",
     "agent:inbox:read",
     "messages:read",
@@ -37,6 +40,7 @@ pub const HOSTED_AGENT_SCOPES: [&str; 7] = [
     "agent:jobs:read",
     "agent:runs:callback",
     "workspace:propose",
+    "workspace:initiate",
 ];
 
 const SECRET_BYTES: usize = 32;

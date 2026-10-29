@@ -282,6 +282,73 @@ pub async fn open_direct_message_in_tx(
     })
 }
 
+/// The pair's DM as [`lock_direct_message_seq_in_tx`] found it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockedDirectMessage {
+    pub channel_id: Uuid,
+    /// Unarchived, both members live, `channel_seq` present: opening it again would change nothing,
+    /// so a caller may skip [`open_direct_message_in_tx`] — whose upsert takes **both membership
+    /// rows exclusively even when it changes nothing**, the very rows the hosted inbox fan-out of
+    /// every send and every decision share-locks before it asks for `channel_seq`.
+    pub open: bool,
+}
+
+/// Take the row lock a send into the pair's DM takes **first** — its `channel_seq` row — when that
+/// DM already exists, and say whether it is already open (`None`: no DM yet, so nothing to lock and
+/// nobody who could be sending into it).
+///
+/// For a transaction that will write a message into a DM **after** it has taken other locks
+/// (ADR-0186 증보 v5 U-a, review L8). A person's send into a DM takes `channel_seq` first and then
+/// reads — and for a hosted agent share-locks — the DM's membership rows and the agent's hosted rows.
+/// [`open_direct_message_in_tx`] updates both membership rows (exclusively, even when nothing
+/// changes), so a producer that opened the DM and only afterwards wrote its card — which needs
+/// `channel_seq` — would be the other half of an AB/BA pair with that send. Taking `channel_seq` here,
+/// before the open, makes the order the same as the person's. The lock is held to the end of the
+/// caller's transaction and `send_message_in_tx` re-takes it as a no-op.
+pub async fn lock_direct_message_seq_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    first_member_id: Uuid,
+    second_member_id: Uuid,
+) -> Result<Option<LockedDirectMessage>, DbError> {
+    let participants = canonical_participants(first_member_id, second_member_id);
+    let participant_key = dm_participant_key(participants);
+    let channel: Option<Uuid> = sqlx::query_scalar(
+        "SELECT c.id FROM channel c \
+          WHERE c.workspace_id = $1 AND c.kind = 'dm' \
+            AND c.dm_key = encode(digest($2::text, 'sha256'), 'hex')",
+    )
+    .bind(workspace_id)
+    .bind(&participant_key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(channel_id) = channel else {
+        return Ok(None);
+    };
+    let seq_present = sqlx::query_scalar::<_, Uuid>(
+        "SELECT channel_id FROM channel_seq WHERE channel_id = $1 FOR UPDATE",
+    )
+    .bind(channel_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .is_some();
+    // Read after the lock, plain: nobody can be writing into the room between the lock and here.
+    let open: bool = seq_present
+        && sqlx::query_scalar(
+            "SELECT c.archived_at IS NULL \
+                    AND (SELECT count(*) FROM membership m \
+                          WHERE m.workspace_id = c.workspace_id AND m.channel_id = c.id \
+                            AND m.member_id = ANY($2) AND m.left_at IS NULL) = 2 \
+               FROM channel c WHERE c.workspace_id = $1 AND c.id = $3",
+        )
+        .bind(workspace_id)
+        .bind(participants.to_vec())
+        .bind(channel_id)
+        .fetch_one(&mut *conn)
+        .await?;
+    Ok(Some(LockedDirectMessage { channel_id, open }))
+}
+
 /// The caller's live DM channels, newest first (Swift `fetchDirectMessages`).
 ///
 /// Archived DMs are omitted; `member_ids` lists the participants who have not

@@ -138,9 +138,10 @@ use crate::error::ApiError;
 use crate::plugin_writes::{self, Actor, Provenance};
 use crate::realtime_advert::derive_same_origin_http_base;
 use crate::routes::actions::{
-    profile_changes, resolve_stored_action_in_tx, ActionArgs, AvatarIntent, GateSubject,
-    ResolvedAgentTarget, ResolvedChannel, ResolvedConnection, ResolvedMember, ResolvedMessage,
-    ResolvedPlugin, SettingPatch, SettingsBefore, StatusIntent,
+    profile_changes, resolve_stored_action_in_tx, resolve_stored_initiative_action_in_tx,
+    ActionArgs, AvatarIntent, GateSubject, ResolvedAgentTarget, ResolvedChannel,
+    ResolvedConnection, ResolvedMember, ResolvedMessage, ResolvedPlugin, SettingPatch,
+    SettingsBefore, StatusIntent,
 };
 use crate::routes::agents::require_profile_editor_in_tx;
 use crate::routes::invites::require_admin;
@@ -1671,18 +1672,48 @@ async fn execute_workspace_action(
     // write `approval.payload`. Re-proving is the difference between "a person
     // approved these values" and "a person approved a row".
     let now_ms = now.timestamp_millis();
-    let resolved = match resolve_stored_action_in_tx(
-        conn,
-        input.workspace_id,
-        approval.requested_by,
-        Some(approval.run_id),
-        action,
-        proposed_args(&approval.payload),
-        now_ms,
-        approval.id,
-    )
-    .await?
-    {
+    // A card nobody asked for was drawn for **its reader's** eyes (ADR-0186 증보 v5 U-b-4 6): the
+    // channel or message it quotes had to be one the reader could already read, and a
+    // `channel.create` had to be private. The same rules are judged again here, for the member who
+    // is deciding it — who must be able to read what the card quotes, and, for a pin, to pin it.
+    //
+    // Which rules apply is decided by **either** marker: the payload's `origin` and the run's
+    // `input.hold` (written by the server alone, and the run is born with it). A row whose `origin`
+    // was dropped is still an unasked card while its run says so — and an unasked card can only ever
+    // name an initiative action, so a tampered `action.id` is refused rather than judged by the
+    // looser rules of a card a person asked for (security review of #4704, M2).
+    let initiated = momo_agent::initiative::is_agent_initiated(&approval.payload)
+        || momo_agent::initiative::is_held_for_agent_initiative(&approval.run_input);
+    if initiated && !action.initiative {
+        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+    }
+    let resolution = if initiated {
+        resolve_stored_initiative_action_in_tx(
+            conn,
+            input.workspace_id,
+            approval.requested_by,
+            input.member_id,
+            Some(approval.run_id),
+            action,
+            proposed_args(&approval.payload),
+            now_ms,
+            approval.id,
+        )
+        .await?
+    } else {
+        resolve_stored_action_in_tx(
+            conn,
+            input.workspace_id,
+            approval.requested_by,
+            Some(approval.run_id),
+            action,
+            proposed_args(&approval.payload),
+            now_ms,
+            approval.id,
+        )
+        .await?
+    };
+    let resolved = match resolution {
         Ok(resolved) => resolved,
         Err(error) if error.message == crate::routes::actions::AVATAR_UNRESOLVED => {
             // The avatar check runs **after** the target resolved, so the target is
