@@ -49,7 +49,8 @@ is license-gated by scripts/check_cargo_licenses.sh.
 Direct server dependencies an ADR introduced are named in
 legal/THIRD_PARTY_NOTICES.md ("Server direct additions"), currently p256
 (Apache-2.0 OR MIT) and unicode-normalization (MIT OR Apache-2.0),
-ADR-0146 amendment 2026-09-28; both are also in the generated bundle.
+ADR-0146 amendment 2026-09-28, and clap (MIT OR Apache-2.0, command-line
+parsing of the `oort` CLI, ADR-0216 D10); all are also in the generated bundle.
 
 The agent-worker image also carries a local sentence-embedding model and ONNX Runtime for team-memory
 search (ADR-0196 D8 증보, #3173): intfloat/multilingual-e5-small weights (MIT, unmodified int8 ONNX

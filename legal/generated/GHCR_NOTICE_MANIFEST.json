@@ -1,21 +1,21 @@
 {
   "counts": {
-    "cargo": 402,
+    "cargo": 407,
     "npm": 469,
-    "unique_blobs": 439
+    "unique_blobs": 441
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "cbbcbd1e30a09e8f6222f68d93a3cfd9babccd53b28d0600b1bcdbdbf6f671b3",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "2d96d648984ce1c7b665b07ccb3e800cb0bd6434b54e00213a14047ae09485ff",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-    "NOTICE": "9cf9d9ee4d11959ba3499ac2c8f88f6fe41608f8369997110f19220359185598",
-    "THIRD_PARTY_NOTICES.md": "9e44a2137e02ca98de95b0278a41abe6430c3b584ff6526063758e53790fe501"
+    "NOTICE": "0969ac3365cbe4976ba0784e945743706deb5672732aa0bdb34930c04f4ce201",
+    "THIRD_PARTY_NOTICES.md": "70470c5b91723ff8ca63e75099807ab89cb236fb16886bb1de71baa17d46101c"
   },
   "inputs": {
     "clarify_sha256": "366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3",
     "clients_web_package_lock_sha256": "f1bc70d19c96ea279755dc0abb0c4315e65b9f4cfd1243b9b06d9f9306d02b68",
-    "server_rust_cargo_lock_sha256": "f077d25781f098941c9bd0e46ba3eef359dd14dd3782d78b17ee866adc85437e",
+    "server_rust_cargo_lock_sha256": "4af5b67e4ecb10ffc014d84639745dbd28bda035a726544e22829efa15e645ad",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "cbbcbd1e30a09e8f6222f68d93a3cfd9babccd53b28d0600b1bcdbdbf6f671b3",
-    "sha256_manifest_sha256": "2a66d4c888293f88634ef8cfd382af903c8532f9cf97b5a16dd28d4b8c582753"
+    "bundle_sha256": "2d96d648984ce1c7b665b07ccb3e800cb0bd6434b54e00213a14047ae09485ff",
+    "sha256_manifest_sha256": "e42533e1a64672d86adf891faa170fbe814c2d5643413d4f1af0bd0f75d0edf0"
   },
   "packages": [
     {
@@ -210,6 +210,27 @@
       "source": "package-tree",
       "spdx": "MIT/Apache-2.0",
       "version": "0.1.5"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "anstyle",
+      "repository": "https://github.com/rust-cli/anstyle.git",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.0.14"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -715,6 +736,90 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.4.4"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright Individual contributors",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "clap",
+      "repository": "https://github.com/clap-rs/clap",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "4.6.7"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright Individual contributors",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "clap_builder",
+      "repository": "https://github.com/clap-rs/clap",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "4.6.7"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright Individual contributors",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "clap_derive",
+      "repository": "https://github.com/clap-rs/clap",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "4.6.7"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright Individual contributors",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "249fdb6694467dd615b259f7ddde07be3f8ae5a72cecebb0e24f6629af4215fe",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "clap_lex",
+      "repository": "https://github.com/clap-rs/clap",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "1.1.1"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
