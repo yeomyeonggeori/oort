@@ -33,15 +33,22 @@
  *      라는 글자가 아니라 접힘 변수 뒤에 숨어 있었다(#1558 · #1595 H1). 재는 방법은 둘이다:
  *      (가) 식에 진행 어휘가 남았는데 자기 진행의 부정(`!자기`)이 없다, (나) 진행 어휘가
  *      아닌 이름 뒤에 숨은 접힘까지 보려고 불리언 식으로 접어 「자기 진행 하나만으로 잠금이
- *      켜지는 맥락」이 있는지 진리표로 확인한다. 자기 진행이 별칭으로 `a || b` 처럼 펴지면
- *      구성 진행 하나하나가 자기다. 형제 쓰기로 잠기는 것(`busy && !자기진행`)은 갈라내는
- *      문법 그대로라 통과한다. 식이 진리표 상한보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다.
+ *      켜지는 맥락」이 있는지 진리표로 확인한다. 자기 진행은 파생값이다: `a || b`·`a && b` 로
+ *      펴져도 자기 항 배정을 모두 돌며, 같은 다른-항 환경에서 (자기=꺼짐, 잠금=꺼짐)과
+ *      (자기=켜짐, 잠금=켜짐)이 둘 다 나오면 접힌 것이다. 형제 쓰기로 잠기는 것
+ *      (`busy && !자기진행`, 자기진행이 `a || b` 든 `a && b` 든)은 갈라내는 문법 그대로라 통과한다.
+ *      식이 진리표 상한보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다.
  *    · opacityFollowsLock / opacityOutsideLock — `aria-disabled={L}` 이 있으면 흐림은
  *      **같은 식 L** 하나가 켠다(`cn(…, L && "opacity-50")`). 흐림 없는 잠금은 회색이 아닌
  *      죽은 버튼이고, 다른 조건·삼항 가지·고정 클래스·템플릿에 선 흐림(`opacity-*`)은 진행을
  *      잠금처럼 그리거나 잠기지 않았는데 늘 흐린 버튼을 만든다(#2923 · review-2909 · #1558).
- *      옛 시험은 모르는 꼴이면 빨갰으므로(전문 정규식·등치), 이 규칙도 흐림 토큰이 잠금 인자
- *      밖에 보이면 모양과 상관없이 붉다.
+ *      옛 시험은 모르는 꼴이면 빨갰으므로(전문 정규식·등치), 이 규칙은 흐림 토큰이 잠금 인자
+ *      밖에 보이면 붉다. 토큰은 **문자열 리터럴 · 템플릿 조각 · 풀리는 `const` 별칭(네 겹)** 에서
+ *      읽는다 — selfLock 이 별칭을 펴는 것과 같은 방식이다.
+ *      **알려진 구멍**(조용히 통과): 풀리지 않는 값(prop `triggerClassName`·import·함수 인자),
+ *      멤버 읽기(`styles.dim`)·호출 결과(`getDim(x)`)·JSX 스프레드(`{...props}`), 쪼갠 토큰
+ *      (`"opaci" + "ty-70"`), 자식 노드의 흐림. 풀리지 않는 값은 `SettingsFields.tsx` 의
+ *      `triggerClassName` 처럼 정당하게도 쓰이므로 붉힐 수 없다.
  *    · reasonBreakKeep — id 에 reason·note 가 든 `<p>`·`<span>` 은 한글 줄바꿈 규칙
  *      (`break-keep`)을 든다. 사유는 두세 어절이라 좁은 칸에서 어절 중간이 끊긴다(#1595 M6).
  *    · offlineQueuePromise — 「그대로 보내져요」 문장과 `networkMode`·`onlineManager`.
@@ -76,8 +83,11 @@ const CAN_SAVE_IN_FLIGHT = /\b(busy|isPending|isLoading|isFetching|saving)\b/i;
 /** 별칭을 따라가는 깊이. 옛 시험과 같다. */
 const ALIAS_DEPTH = 4;
 
-/** 진리표를 다 도는 알갱이 수의 상한. 잠금 식이 이보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다. */
-const MAX_OTHER_ATOMS = 14;
+/**
+ * 진리표를 다 도는 알갱이 수의 상한(잠금 식의 알갱이와 자기 진행의 알갱이의 합집합).
+ * 이보다 크면 건너뛰지 않고 lockTooComplex 로 붉힌다. 비용은 2^(다른 항) × 2^(자기 항) = 2^합집합.
+ */
+const MAX_ATOMS = 15;
 
 /** 흐림 계열 클래스 토큰(변형 접두 포함): `opacity-50` · `hover:opacity-70`. */
 const OPACITY_TOKEN = /(^|:)opacity-/;
@@ -351,36 +361,67 @@ function evalTree(tree, env) {
 }
 
 /**
- * 자기 진행(own) 하나만 켜져도 잠금이 켜지는 맥락이 있는가.
- * 같은 맥락에서 own=꺼짐이면 꺼져 있고 own=켜짐이면 켜지는 환경이 하나라도 있으면 접힌 것이다.
- * `offline || (busy && !creating)` 는 busy 가 creating 을 품은 별칭이어도 그런 환경이 없다.
+ * 자기 진행(own)이 잠금을 켜는가. 자기 진행은 **파생값**이다: `creating`(알갱이 하나)일 수도,
+ * `creating || rotating`·`pending && variables === id`(여러 알갱이의 식)일 수도 있다.
+ * 잠금에 나오지 않는 다른 항의 환경마다 자기 항의 모든 배정을 돌아, (자기=꺼짐, 잠금=꺼짐)과
+ * (자기=켜짐, 잠금=켜짐)이 둘 다 나오면 접힌 것이다 — 그 환경에서 자기 진행이 잠금을 쥔다.
+ * `offline || (busy && !creating)` 는 busy 가 creating 을 품은 별칭이어도 그런 환경이 없고,
+ * 자기 진행이 `a || b`·`a && b` 로 펴진 올바른 꼴(`busy && !자기`)도 마찬가지다.
  */
-function ownBusyFlipsLock(lockTree, ownKey) {
-  const keys = [...atomKeys(lockTree)];
-  if (!keys.includes(ownKey)) return false;
-  const others = keys.filter((key) => key !== ownKey);
+function ownBusyFlipsLock(lockTree, ownTree) {
+  const ownKeys = [...atomKeys(ownTree)];
+  const lockKeys = [...atomKeys(lockTree)];
+  if (!ownKeys.some((key) => lockKeys.includes(key))) return false;
+  const others = lockKeys.filter((key) => !ownKeys.includes(key));
   for (let mask = 0; mask < 2 ** others.length; mask += 1) {
-    const env = new Map(others.map((key, index) => [key, Boolean(mask & (1 << index))]));
-    env.set(ownKey, false);
-    const off = evalTree(lockTree, env);
-    env.set(ownKey, true);
-    if (!off && evalTree(lockTree, env)) return true;
+    const base = new Map(others.map((key, index) => [key, Boolean(mask & (1 << index))]));
+    const seen = new Set();
+    for (let own = 0; own < 2 ** ownKeys.length; own += 1) {
+      const env = new Map(base);
+      ownKeys.forEach((key, index) => env.set(key, Boolean(own & (1 << index))));
+      seen.add(`${evalTree(ownTree, env)}/${evalTree(lockTree, env)}`);
+    }
+    if (seen.has("false/false") && seen.has("true/true")) return true;
   }
   return false;
 }
 
-/** 문자열 리터럴·템플릿 조각 안의 흐림 계열 토큰. 논리식·삼항 가지·중첩 호출 속 문자열까지 훑는다. */
-function opacityTokensIn(node, visitorKeys) {
+/** `const NAME = <무엇이든>;` 의 우변. 클래스 문자열을 담은 변수를 따라가는 데 쓴다(불리언 꼴로 한정하지 않는다). */
+function constInit(variable) {
+  if (!variable || variable.defs.length !== 1) return null;
+  const def = variable.defs[0];
+  if (def.type !== "Variable" || def.parent.kind !== "const") return null;
+  if (def.node.id.type !== "Identifier" || !def.node.init) return null;
+  return def.node.init;
+}
+
+/**
+ * 문자열 리터럴·템플릿 조각 안의 흐림 계열 토큰. 논리식·삼항 가지·중첩 호출 속 문자열까지 훑고,
+ * 풀리는 `const` 별칭(`const dimClass = toggling ? "opacity-60" : ""`)은 우변까지 따라간다.
+ * 풀리지 않는 식별자(prop·import·함수 인자)는 속을 모르므로 건너뛴다.
+ */
+function opacityTokensIn(node, sourceCode, depth = ALIAS_DEPTH) {
   const tokens = [];
-  walk(node, visitorKeys, (inner) => {
-    let text = null;
-    if (inner.type === "Literal" && typeof inner.value === "string") text = inner.value;
-    else if (inner.type === "TemplateElement") text = inner.value.cooked ?? inner.value.raw;
-    if (text === null) return;
-    for (const token of text.split(/\s+/)) if (OPACITY_TOKEN.test(token)) tokens.push(token);
+  walk(node, sourceCode.visitorKeys, (inner) => {
+    if (inner.type === "Literal" && typeof inner.value === "string") {
+      for (const token of inner.value.split(/\s+/)) if (OPACITY_TOKEN.test(token)) tokens.push(token);
+    } else if (inner.type === "TemplateElement") {
+      for (const token of (inner.value.cooked ?? inner.value.raw).split(/\s+/)) {
+        if (OPACITY_TOKEN.test(token)) tokens.push(token);
+      }
+    } else if (inner.type === "Identifier" && depth > 0) {
+      const parent = inner.parent;
+      if (parent?.type === "MemberExpression" && parent.property === inner && !parent.computed) return;
+      if (parent?.type === "Property" && parent.key === inner && !parent.computed) return;
+      const init = constInit(lookupVariable(sourceCode.getScope(inner), inner.name));
+      if (init) tokens.push(...opacityTokensIn(init, sourceCode, depth - 1));
+    }
   });
   return tokens;
 }
+
+/** 잠금 인자(`L && 오른쪽`)의 오른쪽이 될 수 있는 모양: 문자열 · 템플릿 · 풀리는 별칭. */
+const LOCK_ARG_RIGHT = new Set(["Literal", "TemplateLiteral", "Identifier"]);
 
 /**
  * className 식을 흐림 관점으로 가른다.
@@ -388,7 +429,7 @@ function opacityTokensIn(node, visitorKeys) {
  *  - strays:  그 밖의 자리(고정 문자열 · 삼항 가지 · 템플릿 · 중첩 호출 · 다른 꼴의 인자)에 선 흐림 토큰.
  * `cn(…)` 호출이 아닌 className 식은 통째로 strays 다.
  */
-function opacityShape(classNameExpr, visitorKeys) {
+function opacityShape(classNameExpr, sourceCode) {
   const shape = { dimming: [], strays: [] };
   if (!classNameExpr) return shape;
   const isCn =
@@ -396,28 +437,23 @@ function opacityShape(classNameExpr, visitorKeys) {
     classNameExpr.callee.type === "Identifier" &&
     classNameExpr.callee.name === "cn";
   if (!isCn) {
-    shape.strays.push(...opacityTokensIn(classNameExpr, visitorKeys));
+    shape.strays.push(...opacityTokensIn(classNameExpr, sourceCode));
     return shape;
   }
   for (const arg of classNameExpr.arguments) {
-    if (
-      arg.type === "LogicalExpression" &&
-      arg.operator === "&&" &&
-      arg.right.type === "Literal" &&
-      typeof arg.right.value === "string"
-    ) {
-      const tokens = opacityTokensIn(arg.right, visitorKeys);
+    if (arg.type === "LogicalExpression" && arg.operator === "&&" && LOCK_ARG_RIGHT.has(arg.right.type)) {
+      const tokens = opacityTokensIn(arg.right, sourceCode);
       // 조건(arg.left) 안의 문자열은 클래스가 아니다 — 훑지 않는다.
       if (tokens.length > 0) shape.dimming.push({ condition: arg.left, tokens });
     } else {
-      shape.strays.push(...opacityTokensIn(arg, visitorKeys));
+      shape.strays.push(...opacityTokensIn(arg, sourceCode));
     }
   }
   return shape;
 }
 
 /** 진행을 말하는 컨트롤이면 { busy, locks } 를, 아니면 null. */
-function busyControl(opening, visitorKeys) {
+function busyControl(opening, sourceCode) {
   const name = tagName(opening);
   if (name !== null && /^Button/.test(name)) {
     const busy = exprOf(attrOf(opening, "aria-busy"));
@@ -427,7 +463,7 @@ function busyControl(opening, visitorKeys) {
     if (disabled) locks.push(withoutUndefinedTail(disabled));
     // 흐림도 잠금이다. `cn(x && "opacity-…")` 의 x 가 그 식이다.
     locks.push(
-      ...opacityShape(classValueOf(attrOf(opening, "className")), visitorKeys).dimming.map(
+      ...opacityShape(classValueOf(attrOf(opening, "className")), sourceCode).dimming.map(
         (dim) => dim.condition
       )
     );
@@ -478,7 +514,6 @@ export const busyLockGrammar = {
   },
   create(context) {
     const sourceCode = context.sourceCode;
-    const { visitorKeys } = sourceCode;
     const expand = createExpander(sourceCode);
     return {
       JSXOpeningElement(node) {
@@ -491,25 +526,26 @@ export const busyLockGrammar = {
         }
 
         // 2) 자기 진행을 잠금 식에 다시 끼우지 않는다
-        const control = busyControl(node, visitorKeys);
+        const control = busyControl(node, sourceCode);
         if (control) {
           const own = flat(expand(control.busy));
-          // 자기 진행이 별칭으로 `a || b` 처럼 펴져도 구성 진행 하나하나가 자기다.
-          const ownKeys = [...atomKeys(toBoolTree(sourceCode, control.busy, ALIAS_DEPTH))];
+          const ownTree = toBoolTree(sourceCode, control.busy, ALIAS_DEPTH);
+          // 자기 진행이 별칭으로 `a || b`·`a && b` 로 펴져도 구성 알갱이 하나하나의 부정, 또는 식 전체의 부정이면 된다.
+          const ownKeys = [...atomKeys(ownTree)];
           for (const lock of control.locks) {
             const opened = flat(expand(lock));
-            // (가) 옛 별칭 스캔: 진행 어휘가 남아 있으면 자기 진행(복합이면 구성 진행 하나하나)의 부정이 함께 서 있어야 한다.
-            const everyOwnNegated = ownKeys.every((key) => opened.includes(`!${key}`));
-            const inFlightWithoutOwnNegation = IN_FLIGHT.test(opened) && !everyOwnNegated;
-            // (나) 옛 ConfirmButton 검사를 의미로 올린 것: 자기 진행 하나만으로 잠금이 켜지는 맥락이 없다.
+            // (가) 옛 별칭 스캔: 진행 어휘가 남아 있으면 자기 진행의 부정이 함께 서 있어야 한다.
+            const ownNegated = opened.includes(`!${own}`) || ownKeys.every((key) => opened.includes(`!${key}`));
+            const inFlightWithoutOwnNegation = IN_FLIGHT.test(opened) && !ownNegated;
+            // (나) 옛 ConfirmButton 검사를 의미로 올린 것: 자기 진행이 잠금을 쥐는 맥락이 없다.
             const lockTree = toBoolTree(sourceCode, lock, ALIAS_DEPTH);
-            const atomCount = atomKeys(lockTree).size;
+            const atomCount = new Set([...atomKeys(lockTree), ...ownKeys]).size;
             // 건너뛰면 큰 식일수록 조용히 통과한다. 못 재면 붉힌다.
-            const tooComplex = atomCount > MAX_OTHER_ATOMS + 1;
+            const tooComplex = atomCount > MAX_ATOMS;
             if (tooComplex) {
               context.report({ node: lock, messageId: "lockTooComplex", data: { count: String(atomCount) } });
             }
-            const selfFolded = !tooComplex && ownKeys.some((ownKey) => ownBusyFlipsLock(lockTree, ownKey));
+            const selfFolded = !tooComplex && ownBusyFlipsLock(lockTree, ownTree);
             if (selfFolded || inFlightWithoutOwnNegation) {
               context.report({
                 node: lock,
@@ -525,7 +561,7 @@ export const busyLockGrammar = {
           const ariaDisabled = exprOf(attrOf(node, "aria-disabled"));
           if (ariaDisabled || attrOf(node, "aria-busy")) {
             const classAttr = attrOf(node, "className");
-            const shape = opacityShape(classValueOf(classAttr), visitorKeys);
+            const shape = opacityShape(classValueOf(classAttr), sourceCode);
             const lock = ariaDisabled ? flat(textOf(sourceCode, withoutUndefinedTail(ariaDisabled))) : null;
             const sameAsLock = (dim) => lock !== null && flat(textOf(sourceCode, dim.condition)) === lock;
             const reportNode = classAttr ?? node;

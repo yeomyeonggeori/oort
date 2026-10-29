@@ -278,6 +278,52 @@ describe("rawControlBusySplit 별칭 스캔 · confirmBusySplit ② · settingsF
     expect(await findings(ok, GRAMMAR_FILE)).toEqual([]);
   });
 
+  it("자기 진행이 `a || b` 로 펴진 올바른 꼴은 붉지 않다 — 식 전체의 부정으로 가르든 직접 쓰든", async () => {
+    const aliases = `const creating = create.isPending;
+  const rotating = rotate.isPending;
+  const writing = creating || rotating;
+  const busy = create.isPending || rotate.isPending || revoke.isPending;`;
+    const viaAlias = component(
+      `${aliases}\n  const locked = offline || (busy && !writing);`,
+      button({ lock: "locked", busy: "writing", cn: 'locked && "opacity-50"' })
+    );
+    const inline = component(
+      "const busy = create.isPending || rotate.isPending || revoke.isPending;",
+      `<ConfirmButton label="지우기" disabled={offline || (busy && !(create.isPending || rotate.isPending))} busy={create.isPending || rotate.isPending} />`
+    );
+    expect(await findings(viaAlias, GRAMMAR_FILE)).toEqual([]);
+    expect(await findings(inline, GRAMMAR_FILE)).toEqual([]);
+  });
+
+  it("자기 진행이 `a && b` 로 펴진 올바른 꼴도 붉지 않고, 자기 진행을 맨몸으로 든 꼴은 붉다", async () => {
+    // 실제 모양: GithubOperatorBlock(attach.isPending && attach.variables === id) ·
+    // DmApprovalSection(write.isPending && write.variables?.row.channelId === row.channelId).
+    const attaching = "const attaching = attach.isPending && attach.variables === installation.installationId;";
+    const ok = component(
+      attaching,
+      `<ConfirmButton label="연결" disabled={offline || (attach.isPending && !attaching)} busy={attaching} />`
+    );
+    const okButton = component(
+      `const rotating = rotate.isPending && rotate.variables?.id === installation.id;
+  const busy = rotate.isPending || revoke.isPending;
+  const rotateLocked = offline || (busy && !rotating);`,
+      button({ lock: "rotateLocked", busy: "rotating", cn: 'rotateLocked && "opacity-50"' })
+    );
+    const dmApproval = component(
+      `const busy = write.isPending && write.variables?.row.channelId === row.channelId;
+  const locked = offline || write.isPending;`,
+      `<ConfirmButton label="닫기" disabled={locked && !busy} busy={busy} />`
+    );
+    const folded = component(
+      attaching,
+      `<ConfirmButton label="연결" disabled={offline || attaching} busy={attaching} />`
+    );
+    expect(await findings(ok, GRAMMAR_FILE)).toEqual([]);
+    expect(await findings(okButton, GRAMMAR_FILE)).toEqual([]);
+    expect(await findings(dmApproval, GRAMMAR_FILE)).toEqual([]);
+    expect(await findings(folded, GRAMMAR_FILE)).toEqual(["selfLock"]);
+  });
+
   it("식 안의 설명 주석이 어휘 검사를 붉히지 않는다 — 주석은 노드가 아니다", async () => {
     const lockComment = component(
       "",
@@ -338,6 +384,44 @@ describe("rawControlBusySplit ③ · settingsFieldsBusy ② — 흐림은 aria-d
       button({ lock: "toggleLocked", busy: "toggling", cn: 'toggleLocked && "opacity-50", toggling ? "opacity-60" : ""' })
     );
     expect(await findings(code, GRAMMAR_FILE)).toEqual(["opacityOutsideLock"]);
+  });
+
+  it.each([
+    ["const 별칭(삼항)", 'const dimClass = toggling ? "opacity-60" : "";', 'toggleLocked && "opacity-50", dimClass'],
+    ["조건부 별칭", 'const dimClass = "opacity-60";', 'toggleLocked && "opacity-50", other && dimClass'],
+    ["겹친 별칭", 'const base = "opacity-60";\n  const dimClass = base;', 'toggleLocked && "opacity-50", dimClass'],
+    ["배열 별칭 스프레드", 'const extra = ["opacity-70"];', 'toggleLocked && "opacity-50", ...extra'],
+    ["별칭 안의 cn 호출", 'const dim = cn("p-2", "opacity-60");', 'toggleLocked && "opacity-50", dim'],
+  ])("변수에 담긴 클래스 문자열도 따라간다 — %s", async (_name, decl, args) => {
+    const code = component(decl, button({ lock: "toggleLocked", busy: "toggling", cn: args }));
+    expect(await findings(code, GRAMMAR_FILE)).toContain("opacityOutsideLock");
+  });
+
+  it("진행만 있는 버튼의 className 이 별칭이어도 따라가고, 풀리지 않는 값(prop)은 건드리지 않는다", async () => {
+    const aliasClass = component(
+      'const dimClass = "opacity-50";',
+      '<Button aria-busy={creating || undefined} className={dimClass}>저장</Button>'
+    );
+    const unresolved = component("", button({ lock: "disabled", cn: 'triggerClassName, disabled && "opacity-50"' }));
+    expect(await findings(aliasClass, GRAMMAR_FILE)).toEqual(["opacityOutsideLock"]);
+    expect(await findings(unresolved, GRAMMAR_FILE)).toEqual([]);
+  });
+
+  it("잠금 인자의 오른쪽이 별칭이어도 값이 opacity-50 이면 붉지 않고, 다른 값이면 붉다", async () => {
+    const same = component('const LOCK_DIM = "opacity-50";', button({ lock: "locked", cn: "locked && LOCK_DIM" }));
+    const other = component('const LOCK_DIM = "opacity-70";', button({ lock: "locked", cn: "locked && LOCK_DIM" }));
+    expect(await findings(same, GRAMMAR_FILE)).toEqual([]);
+    expect(await findings(other, GRAMMAR_FILE)).toEqual(["opacityOutsideLock"]);
+  });
+
+  it("템플릿 조각의 흐림도 붉고, 흐림이 아닌 조건부 클래스는 붉지 않다", async () => {
+    const quasi = component("", button({ lock: "locked", cn: 'locked && "opacity-50", `opacity-70 p-2`' }));
+    const cursor = component(
+      "",
+      button({ lock: "locked", busy: "creating", cn: 'locked && "opacity-50", creating && "cursor-wait"' })
+    );
+    expect(await findings(quasi, GRAMMAR_FILE)).toEqual(["opacityOutsideLock"]);
+    expect(await findings(cursor, GRAMMAR_FILE)).toEqual([]);
   });
 
   it("잠금 인자라도 값이 opacity-50 이 아니면 붉고, 진행만 있는 버튼의 흐림은 전부 붉다", async () => {
