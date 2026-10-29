@@ -24984,23 +24984,65 @@ async fn the_standing_check_names_the_connection_the_scope_the_credential_and_th
             }
             Taken::AnotherAgent => asked_agent = fixture.managed_agent,
         }
-        let standing = momo_db::with_tenant_tx(&su, ws, move |conn| {
-            Box::pin(async move {
-                momo_server::routes::agent_initiative::card_connection_stands_in_tx(
-                    conn,
-                    ws,
-                    asked_agent,
-                    asked_connection,
-                )
-                .await
+        // The composition AND each of its two halves, because a guard that two layers repeat is a
+        // guard whose removal from one layer nobody sees: the composition alone stays "no" when
+        // either half still says it.
+        let (composed, connection_half, agent_half) =
+            momo_db::with_tenant_tx(&su, ws, move |conn| {
+                Box::pin(async move {
+                    let composed =
+                        momo_server::routes::agent_initiative::card_connection_stands_in_tx(
+                            conn,
+                            ws,
+                            asked_agent,
+                            asked_connection,
+                        )
+                        .await?;
+                    let connection_half = momo_auth::hosted_connection_stands_in_tx(
+                        conn,
+                        ws,
+                        asked_agent,
+                        asked_connection,
+                    )
+                    .await
+                    .map_err(momo_db::DbError::from)?;
+                    let agent_half =
+                        momo_agent::initiative::initiative_scope_and_agent_stand_in_tx(
+                            conn,
+                            ws,
+                            asked_agent,
+                            asked_connection,
+                            "workspace:initiate",
+                        )
+                        .await?;
+                    Ok::<_, momo_db::DbError>((composed, connection_half, agent_half))
+                })
             })
-        })
-        .await
-        .expect("the standing check runs");
+            .await
+            .expect("the standing checks run");
+        // What each half answers when exactly one thing is taken away. The connection half
+        // (`momo-auth`) knows the connection, the agent it belongs to and its credential — and
+        // nothing of the scope or of the agent's own standing; the agent half (`momo-agent`) knows
+        // the scope and the agent — and nothing of the connection's status or its credential.
+        let (want_connection_half, want_agent_half) = match taken {
+            Taken::Nothing | Taken::CredentialLapsed => (true, true),
+            Taken::ConnectionNotActive
+            | Taken::ConnectionBeingTornDown
+            | Taken::CredentialRevoked => (false, true),
+            Taken::Scope | Taken::AgentPaused | Taken::AgentSuspended | Taken::AgentDeleted => {
+                (true, false)
+            }
+            Taken::AnotherConnection | Taken::AnotherAgent => (false, false),
+        };
         assert_eq!(
-            standing,
+            (connection_half, agent_half),
+            (want_connection_half, want_agent_half),
+            "{taken:?}: each half answers only for what it owns"
+        );
+        assert_eq!(
+            composed,
             matches!(taken, Taken::Nothing | Taken::CredentialLapsed),
-            "{taken:?}: true only when nothing was taken away (a lapsed credential is not that)"
+            "{taken:?}: the composition is true only when nothing was taken away (a lapsed credential is not that)"
         );
     }
 }
@@ -26058,6 +26100,65 @@ async fn advisory_waiters(su: &PgPool, key: &str) -> i64 {
     .fetch_one(su)
     .await
     .expect("count waiters on one advisory key")
+}
+
+/// **`advisory_waiters` counts one key's waiters and no other's.** The test below proves "both calls
+/// are queued behind the agent's lock" by counting waiters on that key; a count that also saw another
+/// key's waiter (a neighbouring test, another agent) would reach its target without the calls ever
+/// queueing, and the proof would be a number from somebody else's lock. So the counter is itself put
+/// to the question: a transaction holds key A, a second waits on A, a third waits on B behind a
+/// holder of B — A's count is 1, B's is 1, an unrelated key's is 0 (never the sum).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_advisory_waiter_count_is_one_keys_and_never_the_databases() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let key_a = format!("oort:test:waiters:{}", Uuid::new_v4());
+    let key_b = format!("oort:test:waiters:{}", Uuid::new_v4());
+    let key_unrelated = format!("oort:test:waiters:{}", Uuid::new_v4());
+
+    let lock = |key: String| async move {
+        let mut tx = superuser_pool()
+            .await
+            .begin()
+            .await
+            .expect("a lock transaction");
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))")
+            .bind(&key)
+            .execute(&mut *tx)
+            .await
+            .expect("take the advisory lock");
+        tx
+    };
+    let holder_a = lock(key_a.clone()).await;
+    let holder_b = lock(key_b.clone()).await;
+    let waiter_a = tokio::spawn(lock(key_a.clone()));
+    let waiter_b = tokio::spawn(lock(key_b.clone()));
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let (a, b) = (
+            advisory_waiters(&su, &key_a).await,
+            advisory_waiters(&su, &key_b).await,
+        );
+        if (a, b) == (1, 1) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "each of the two waiters should be seen on its own key (saw {a} and {b})"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(
+        advisory_waiters(&su, &key_unrelated).await,
+        0,
+        "a key nobody waits on has no waiters, however many others there are"
+    );
+    holder_a.commit().await.unwrap();
+    holder_b.commit().await.unwrap();
+    waiter_a.await.unwrap().commit().await.unwrap();
+    waiter_b.await.unwrap().commit().await.unwrap();
 }
 
 /// **A person's proposal and an unasked card take the same lock first (ADR U-d, PR A's follow-up).**
