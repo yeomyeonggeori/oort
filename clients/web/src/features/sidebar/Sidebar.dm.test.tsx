@@ -3,6 +3,7 @@
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
+import { holdGlobalShortcuts } from "@/app/globalShortcutHold";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Channel, ReadState, RosterMember } from "@momo/core/lib/api";
@@ -1938,5 +1939,40 @@ describe("DM 닫기 · 서버 갈래 (#4228)", () => {
     await settle();
     expect(foldLine(host)).toBeNull();
     expect(closedCount(host)).toBe(1);
+  });
+});
+
+// ⌥↑·⌥↓는 안 읽은 채널로 간다. 한 번만 보이는 값(연결 값)이 떠 있는 동안은 가지 않는다(#4663):
+// 가면 값을 쥔 설정 화면이 내려가 다시 볼 수 없는 값이 사라진다. 걸이는 `@/app/globalShortcutHold`.
+describe("안 읽은 채널로 가는 전역 단축키 (⌥↑·⌥↓)", () => {
+  const unreadBadge = (host: HTMLElement) =>
+    dmRow(host, DM_ID(2)).querySelector('[data-testid="unread-count"]');
+
+  async function pressAltArrow(key: "ArrowUp" | "ArrowDown"): Promise<void> {
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key, altKey: true, bubbles: true, cancelable: true })
+      );
+      await Promise.resolve();
+    });
+  }
+
+  it("안 읽은 DM 으로 가고, 걸린 동안은 가지 않는다", async () => {
+    setReadStates([readState(DM_ID(2), 9, 3)]);
+    const host = await mount("/c/none");
+    // 장면이 섰는가: 안 읽은 DM 의 줄에 안 읽음 수가 있다.
+    expect(unreadBadge(host)).not.toBeNull();
+
+    const release = holdGlobalShortcuts();
+    try {
+      await pressAltArrow("ArrowDown");
+      expect(unreadBadge(host)).not.toBeNull();
+    } finally {
+      release();
+    }
+
+    await pressAltArrow("ArrowDown");
+    // 갔다: 지금 열려 있는 DM 은 읽고 있는 것이라 안 읽음 수가 없다.
+    expect(unreadBadge(host)).toBeNull();
   });
 });

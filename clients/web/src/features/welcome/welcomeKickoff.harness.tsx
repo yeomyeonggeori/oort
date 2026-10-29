@@ -125,14 +125,19 @@ function backlogAgentMessage(): Message {
 }
 
 type HarnessOpts = {
-  directoryDelayMs: number;
+  /**
+   * 참이면 명부가 시험이 `releaseDirectory()` 를 부를 때까지 「불러오는 중」으로 선다. 예전에는 마운트 때 시작하는 실시간
+   * 타이머(`directoryDelayMs`)였다: 시험의 관찰 창은 마운트 뒤 `onSubscribed` 왕복이 끝나야 시작하는데, 부하에서 그 사이가
+   * 벌어지면 타이머가 관찰 창 안에서 터져 「명부가 풀리기 전에는 띠가 없다」가 거짓으로 빨개졌다(#4708).
+   */
+  holdDirectory: boolean;
   backlogAgent: boolean;
 };
 
 function readOpts(): HarnessOpts {
   const given = window.__welcomeKickoffOpts;
   return {
-    directoryDelayMs: given?.directoryDelayMs ?? 0,
+    holdDirectory: Boolean(given?.holdDirectory),
     backlogAgent: Boolean(given?.backlogAgent),
   };
 }
@@ -182,21 +187,40 @@ function sessionValue(): SessionContextValue {
   };
 }
 
+/**
+ * 명부의 문. `release` 는 화면이 서면 자리를 잡고, 그 전에 `releaseDirectory()` 가 불렸으면 자리를 잡는 순간 바로 연다.
+ * `settled` 는 풀린 명부가 화면(React 커밋)에 닿았다는 신호다: 시험은 이 신호 뒤에 「이후에도 띠가 없다」를 몇 프레임 지켜본다.
+ */
+const directoryGate: {
+  releasedEarly: boolean;
+  release: (() => void) | null;
+  settled: boolean;
+} = { releasedEarly: false, release: null, settled: false };
+
 function WelcomeTimeline(): ReactElement {
   const [directory, setDirectory] = useState(
-    opts.directoryDelayMs > 0 ? emptyDirectory : fullDirectory
+    opts.holdDirectory ? emptyDirectory : fullDirectory
   );
   const [directoryStatus, setDirectoryStatus] = useState<
     "pending" | "success" | "error"
-  >(opts.directoryDelayMs > 0 ? "pending" : "success");
+  >(opts.holdDirectory ? "pending" : "success");
   useEffect(() => {
-    if (opts.directoryDelayMs <= 0) return;
-    const timer = window.setTimeout(() => {
+    if (!opts.holdDirectory) return;
+    const open = () => {
       setDirectory(fullDirectory);
       setDirectoryStatus("success");
-    }, opts.directoryDelayMs);
-    return () => window.clearTimeout(timer);
+    };
+    directoryGate.release = open;
+    if (directoryGate.releasedEarly) open();
+    return () => {
+      directoryGate.release = null;
+    };
   }, []);
+  useEffect(() => {
+    if (opts.holdDirectory && directoryStatus === "success") {
+      directoryGate.settled = true;
+    }
+  }, [directoryStatus]);
   const timeline = useTimeline(realtime, WS, CH, ME);
   const welcome = useWelcomeKickoff({
     workspaceId: WS,
@@ -317,12 +341,17 @@ window.__welcomeKickoff = {
     } as never);
   },
   stageSeenEver: () => stageSeenEver,
+  releaseDirectory: () => {
+    directoryGate.releasedEarly = true;
+    directoryGate.release?.();
+  },
+  directorySettled: () => directoryGate.settled,
 };
 
 declare global {
   interface Window {
     __welcomeKickoffOpts?: {
-      directoryDelayMs?: number;
+      holdDirectory?: boolean;
       backlogAgent?: boolean;
       reducedMotion?: boolean;
     };
@@ -330,6 +359,10 @@ declare global {
       onSubscribed: () => void;
       deliverOpener: () => void;
       stageSeenEver: () => boolean;
+      /** `holdDirectory` 로 세운 명부를 푼다. */
+      releaseDirectory: () => void;
+      /** 푼 명부가 화면에 커밋됐는가. */
+      directorySettled: () => boolean;
     };
   }
 }

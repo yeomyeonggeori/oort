@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { NetworkError, fetchWithDeadline } from "./http";
+import { NetworkError, fetchWithDeadline, parseRetryAfterSeconds } from "./http";
 
 // The bug this file exists for (MOMO-609 / parity gate G-1): a connect attempt
 // against a name the webview could not resolve left `fetch` pending, so the
@@ -133,5 +133,82 @@ describe("reading the body", () => {
     const res = await fetchWithDeadline("http://server.test/v1/ping");
     expect(res.text).toBe("");
     expect(res.jsonOrNull()).toBeNull();
+  });
+});
+
+// #4663: a 429 or 503 says how long to wait in `Retry-After`. The answer exposes it as
+// whole seconds, or says nothing, and never guesses a number the server did not give.
+describe("Retry-After", () => {
+  it.each([
+    ["7", 7],
+    ["  12 ", 12],
+    ["0", 0],
+    ["120", 120],
+  ])("reads %j as %i seconds", (header, seconds) => {
+    expect(parseRetryAfterSeconds(header)).toBe(seconds);
+  });
+
+  it.each([
+    "",
+    "soon",
+    "1.5",
+    "-3",
+    "+5",
+    "7s",
+    "Wed, 21 Oct 2026 07:28:00 GMT",
+    "9".repeat(30),
+  ])("reads %j as no answer at all", (header) => {
+    expect(parseRetryAfterSeconds(header)).toBeUndefined();
+  });
+
+  it("reads a missing header as no answer", () => {
+    expect(parseRetryAfterSeconds(null)).toBeUndefined();
+    expect(parseRetryAfterSeconds(undefined)).toBeUndefined();
+  });
+
+  it("hands the seconds of a 429 to the caller, whatever the header's letter case", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => jsonResponse({ error: { message: "slow down" } }, 429))
+    );
+    const plain = await fetchWithDeadline("http://server.test/v1/ping");
+    expect("retryAfterSeconds" in plain).toBe(false);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("{}", { status: 429, headers: { "rEtRy-AfTeR": "11" } })
+      )
+    );
+    const limited = await fetchWithDeadline("http://server.test/v1/ping");
+    expect(limited.status).toBe(429);
+    expect(limited.retryAfterSeconds).toBe(11);
+  });
+
+  it("gives nothing for an HTTP-date wait, which it will not turn into a guess", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response("{}", {
+            status: 503,
+            headers: { "Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT" },
+          })
+      )
+    );
+    const res = await fetchWithDeadline("http://server.test/v1/ping");
+    expect(res.status).toBe(503);
+    expect(res.retryAfterSeconds).toBeUndefined();
+  });
+
+  it("still answers when fetch hands back something with no headers at all", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ status: 429, ok: false, text: async () => "{}" }))
+    );
+    const res = await fetchWithDeadline("http://server.test/v1/ping");
+    expect(res.status).toBe(429);
+    expect(res.retryAfterSeconds).toBeUndefined();
   });
 });

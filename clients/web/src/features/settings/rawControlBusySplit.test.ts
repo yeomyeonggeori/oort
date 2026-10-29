@@ -1,9 +1,16 @@
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // =============================================================================
+// (#4711) 이 파일이 들던 **그물**(native disabled 스캔 · 별칭 스캔 · fieldset · 사유 노드
+// break-keep · 거짓 약속 · 낱말꼴)과 자리별 핀 중 규칙이 되는 부분(native disabled 없음 ·
+// 잠금 식이 자기 진행을 안 든다 · 흐림이 잠금과 한 식이다)은 린트 규칙
+// `momo/busy-lock-grammar` · `momo/in-flight-lock-props` 로 옮겼다
+// (clients/web/eslint-rules/busyLockGrammar.js, 변조마다의 양성 fixture 는 같은 폴더 .test.ts).
+// 아래에는 규칙이 잡지 못하는 것 — 호출부 배선(aria-busy·aria-disabled 이름, 가드, 사유 id,
+// 착지)과 문장 — 의 핀만 남았다. 그 핀은 렌더 행동 시험으로 바꿀 후속 후보다.
+//
 // #1541 · #1542 · #1543 — 같은 다섯 파일, 세 잔여.
 //
 // #1502 가 `ConfirmButton` 소비처 여섯 자리에서 진행을 잠금에서 갈라낸 뒤에도,
@@ -225,21 +232,17 @@ const SITES = [
   guard: string;
 }[];
 
-describe("RED PROOF ① 여섯 자리 어디에도 native disabled 가 없다", () => {
+describe("RED PROOF ① 여섯 자리의 잠금은 aria-disabled 로 말한다 (native disabled 금지는 린트)", () => {
   for (const site of SITES) {
     it(`${site.file} · ${site.testId}`, () => {
       const { tag } = control(site.file, site.testId);
-      // `aria-disabled` 를 부분 문자열로 갖는 이름이라, 앞이 속성 경계인지 본다.
-      expect(/(^|\s)disabled=/.test(tag), "native disabled 가 붙어 있다").toBe(
-        false
-      );
       expect(tag).toContain(`aria-disabled={${site.lock} || undefined}`);
       if (site.lockVia !== null) expect(FILES[site.file]).toContain(site.lockVia);
     });
   }
 });
 
-describe("RED PROOF ② 진행은 잠금 식에 끼어들지 않고 낱말로 말해진다", () => {
+describe("RED PROOF ② 진행은 aria-busy 와 낱말로 말해진다", () => {
   for (const site of SITES) {
     it(`${site.file} · ${site.testId}`, () => {
       const { tag, body } = control(site.file, site.testId);
@@ -250,11 +253,7 @@ describe("RED PROOF ② 진행은 잠금 식에 끼어들지 않고 낱말로 �
         return;
       }
       expect(tag).toContain(`aria-busy={${site.busy} || undefined}`);
-      // 잠금 식에 진행이 그대로 들어 있지 않다. 부정된 등장(`!saving`)은 통과 —
-      // 그것이 갈라내는 문법이다. 막는 것은 `aria-disabled={… || saving}` 로
-      // 되돌아가는 길이다.
-      const lockExpr = (site.lockVia ?? "").split(`!${site.busy}`).join("");
-      expect(new RegExp(`\\b${site.busy}\\b`).test(lockExpr)).toBe(false);
+      // (잠금 식에 진행이 끼지 않는다는 것은 린트 `selfLock` 이 별칭까지 펴서 잰다.)
       // 낱말은 실제로 보인다. 흐리지 않는 진행이 눈에 보이는 방법은 이것뿐이다.
       if (site.rendersVia === null) {
         for (const word of site.words) expect(body).toContain(word);
@@ -266,14 +265,6 @@ describe("RED PROOF ② 진행은 잠금 식에 끼어들지 않고 낱말로 �
       }
     });
   }
-
-  it("낱말꼴은 「명사 + 중」이다", () => {
-    // 한자어 동작명사가 있으면 「명사 + 중」(저장·확인), 없을 때만 고유어 동사가
-    // 「-는 중」(멈추다·보내다·올리다·만들다) — #1490 전수 조사 → #1501 정본.
-    for (const [name, file] of Object.entries(FILES)) {
-      expect(file.match(/[가-힣]+하는 중/g) ?? [], name).toEqual([]);
-    }
-  });
 
   it("보이는 낱말이 바뀌면 낭독되는 이름도 함께 움직인다", () => {
     // 목록이 줄마다 내는 버튼이라 이름이 행을 져야 하는데(3개의 「전송 멈추기」는
@@ -287,20 +278,9 @@ describe("RED PROOF ② 진행은 잠금 식에 끼어들지 않고 낱말로 �
   });
 });
 
-describe("RED PROOF ③ 잠금은 흐림과 가드를 함께 진다", () => {
+describe("RED PROOF ③ 잠금은 가드를 함께 진다 (흐림이 잠금과 한 식인지는 린트)", () => {
   for (const site of SITES) {
     it(`${site.file} · ${site.testId}`, () => {
-      const { tag } = control(site.file, site.testId);
-      // 흐림은 잠금 조건 하나에 묶인다. 앞에 고정 클래스(탭 타깃·판 위 표면)가
-      // 붙는 것은 허용한다(#2877 곁판의 sheet 문법). 조건이 바뀌면 여전히 실패한다.
-      const split = tag.match(
-        new RegExp(`className=\\{cn\\((?:"([^"]*)", )?${site.lock} && "opacity-50"\\)\\}`)
-      );
-      expect(split).not.toBeNull();
-      // 고정 클래스는 늘 붙는다. 거기에 흐림 계열(opacity-*, 변형 접두 포함)이 들어가면
-      // 잠기지 않은 버튼도 늘 흐리다 — 위 정규식만으로는 못 잡던 빈틈(#2923, review-2909).
-      const fixed = split?.[1] ?? "";
-      expect(fixed.split(/\s+/).filter((cls) => /(^|:)opacity-/.test(cls))).toEqual([]);
       // aria-disabled 는 클릭을 막지 않는다. 가드가 없으면 회색으로 칠한 살아
       // 있는 버튼이고, 두 번째 Enter 가 두 번째 쓰기를 낸다.
       expect(FILES[site.file]).toContain(site.guard);
@@ -515,18 +495,11 @@ const REMAINDER = [
   guard: string;
 }[];
 
-describe("#1559 RED PROOF ① 다섯 자리 어디에도 native disabled 가 없다", () => {
+describe("#1559 RED PROOF ① 다섯 자리의 잠금은 aria-disabled 로 말한다 (native disabled 금지 · 흐림이 잠금과 한 식임은 린트)", () => {
   for (const site of REMAINDER) {
     it(site.name, () => {
       const { tag } = controlByMarker(site.file, site.marker);
-      expect(/(^|\s)disabled=/.test(tag), "native disabled 가 붙어 있다").toBe(
-        false
-      );
       expect(tag).toContain(`aria-disabled={${site.lock} || undefined}`);
-      // `cn(…)` 의 전문이 아니라 흐림 항만 잰다: 같은 `cn` 이 폭 예약
-      // (`min-w-action-sm`)도 나르므로(회전 1 Low), 전문 등치는 잠금과 무관한
-      // 클래스가 하나 붙을 때마다 깨진다. 잰다고 말한 것은 흐림의 출처다.
-      expect(tag).toContain(`${site.lock} && "opacity-50"`);
     });
   }
 });
@@ -610,7 +583,6 @@ describe("#1559 RED PROOF ③ 잠금은 가드를 함께 진다", () => {
       "WebhookSection.tsx",
       "data-testid={`webhook-${asking}-${installation.id}-cancel`}"
     ).tag;
-    expect(/(^|\s)disabled=/.test(cancel)).toBe(false);
     expect(cancel).not.toContain("aria-disabled=");
   });
 });
@@ -715,142 +687,10 @@ describe("#1559 RED PROOF ④ 잠긴 컨트롤이 사유를 든다", () => {
   });
 });
 
-const IN_FLIGHT =
-  /\b(isPending|busy|rotating|revoking|saving|checking|uploading|creating|toggling|removing|clearing|unlinking|sending|loading)\b/;
-
-describe("#1559 스캔 — 설정 표면의 버튼에 in-flight native disabled 가 남지 않았다", () => {
-  // 이 스위트가 자리를 하나씩 세는 동안 **빠뜨린 자리**를 잡는 그물이다. 새
-  // 컨트롤이 `disabled={…isPending…}` 으로 들어오면 목록에 없어도 여기서 붉다.
-  for (const [name, file] of Object.entries(FILES)) {
-    it(name, () => {
-      const offenders: string[] = [];
-      for (const chunk of file.split("<Button").slice(1)) {
-        const tag = openingTag(chunk);
-        const native = tag.match(/(?:^|\s)disabled=\{([^}]*)\}/);
-        if (native && IN_FLIGHT.test(native[1])) offenders.push(native[0].trim());
-      }
-      expect(offenders).toEqual([]);
-    });
-  }
-});
-
-// =============================================================================
-// #1559 회전 1 — design-review #1595.
-//
-// 위 스캔이 `webhook-create` 를 통과시켰다. 그 자리는 #1558 이 정본에서 걷어낸
-// 것과 **같은 결함**을 들고 있었는데(`submitBlocked = offline || busy || …`,
-// `busy` 가 자기 `create.isPending` 을 포함), 접힘이 native `disabled` 속성이
-// 아니라 **별칭 뒤**에 있어 속성만 보는 그물에 걸리지 않았다. #1558 의 red proof
-// 주석이 경고한 그것이다: "결함은 `busy` 라는 글자가 아니라 접힘 변수 뒤에 숨어
-// 있었다".
-//
-// 그래서 스캔을 한 겹 더 판다. 재는 규칙은 이렇다 — **진행을 낭독하는 버튼
-// (`aria-busy`)의 잠금 식에는 그 진행의 부정이 서 있어야 한다.** 잠금 식을 별칭이
-// 다 풀릴 때까지 펴고, 그 안에 in-flight 어휘가 남으면 `!<자기 진행>` 을 요구한다.
-// 없는 진행에 대해서는(확인 그룹의 확정처럼 `aria-busy` 가 없는 자리) 아무것도
-// 묻지 않는다 — 접을 진행이 없으므로 접힘도 없다.
-// =============================================================================
-
-/**
- * `const NAME = <한 줄 식>;` 의 우변. 중괄호가 든 우변(`useMutation({…})`)은
- * 값이 아니라 호출이므로 펴지 않는다.
- */
-function aliasBody(file: string, name: string): string | null {
-  const match = file.match(
-    new RegExp(`\\bconst\\s+${name}\\s*=\\s*([^;\\n{}]+);`)
-  );
-  return match ? match[1] : null;
-}
-
-/** 별칭이 다 풀릴 때까지 편다. `submitBlocked` -> `offline || busy || …` -> …. */
-function expandAliases(file: string, expr: string, depth = 4): string {
-  if (depth === 0) return expr;
-  let out = expr;
-  for (const id of new Set(expr.match(/\b[A-Za-z_$][\w$]*\b/g) ?? [])) {
-    const body = aliasBody(file, id);
-    if (body === null) continue;
-    out = out.replace(
-      new RegExp(`\\b${id}\\b`, "g"),
-      `(${expandAliases(file, body, depth - 1)})`
-    );
-  }
-  return out;
-}
-
-/** 공백과 괄호를 걷어낸 꼴. `!(create.isPending)` 과 `!create.isPending` 은 같다. */
-function flat(expr: string): string {
-  return expr.replace(/[\s()]/g, "");
-}
-
-/** `attr={…}` 한 속성의 안쪽. `|| undefined` 꼬리는 잠금 사실이 아니다. */
-function attrExpr(tag: string, attr: string): string | null {
-  const at = tag.indexOf(`${attr}={`);
-  if (at === -1) return null;
-  const from = at + attr.length + 2;
-  let depth = 0;
-  for (let i = from; i < tag.length; i += 1) {
-    if (tag[i] === "{") depth += 1;
-    else if (tag[i] === "}") {
-      if (depth === 0) return tag.slice(from, i).replace("|| undefined", "");
-      depth -= 1;
-    }
-  }
-  return null;
-}
-
-describe("#1559 회전 1 · 별칭 스캔 — 접힘은 이름 뒤에도 숨지 못한다", () => {
-  for (const [name, file] of Object.entries(FILES)) {
-    it(name, () => {
-      const offenders: string[] = [];
-      for (const chunk of file.split("<Button").slice(1)) {
-        const tag = openingTag(chunk);
-        const busy = attrExpr(tag, "aria-busy");
-        // 진행을 낭독하지 않는 버튼은 접을 진행이 없다.
-        if (busy === null) continue;
-        const locks = [
-          attrExpr(tag, "aria-disabled"),
-          // 흐림도 잠금이다. `cn(x && "opacity-50")` 의 x 가 그 식이다.
-          tag.match(/className=\{cn\(([\s\S]*?)"opacity-50"\)\}/)?.[1] ?? null,
-        ].filter((lock): lock is string => lock !== null);
-
-        for (const lock of locks) {
-          const opened = expandAliases(file, lock);
-          if (!IN_FLIGHT.test(opened)) continue;
-          // in-flight 가 잠금에 남아 있다면, 그것을 가르는 부정이 함께 있어야
-          // 한다. `busy && !rotating` 은 통과하고 `offline || busy` 는 붉다.
-          const negated = `!${flat(expandAliases(file, busy))}`;
-          if (!flat(opened).includes(negated)) {
-            offenders.push(`${tag.slice(0, 60).trim()}… lock=${lock.trim()}`);
-          }
-        }
-      }
-      expect(offenders).toEqual([]);
-    });
-  }
-
-  it("그물이 실제로 그 결함을 잡는다 — 초판 webhook-create 로 재현", () => {
-    // 그물이 아무것도 안 잡는 그물일 수 있으므로, 회전 1 이 고친 그 식을 그대로
-    // 되돌린 소스에 대고 한 번 돌린다.
-    const broken = FILES["WebhookSection.tsx"]
-      .replace(
-        "const createLocked = offline || noChannels || (busy && !creating);",
-        "const submitBlocked = offline || busy || channelChoices.length === 0;"
-      )
-      .replace("aria-disabled={createLocked || undefined}", "aria-disabled={submitBlocked || undefined}")
-      .replace('className={cn(createLocked && "opacity-50")}', 'className={cn(submitBlocked && "opacity-50")}');
-    const tag = openingTag(
-      broken.split("<Button").find((c) => c.includes('data-testid="webhook-create"')) ?? ""
-    );
-    const lock = attrExpr(tag, "aria-disabled") ?? "";
-    const busy = attrExpr(tag, "aria-busy") ?? "";
-    expect(IN_FLIGHT.test(expandAliases(broken, lock))).toBe(true);
-    expect(
-      flat(expandAliases(broken, lock)).includes(
-        `!${flat(expandAliases(broken, busy))}`
-      )
-    ).toBe(false);
-  });
-});
+// #1559 스캔(설정 표면 버튼의 in-flight native disabled)과 #1559 회전 1 별칭 스캔(접힘은 이름
+// 뒤에도 숨지 못한다, design-review #1595 H1)은 린트 규칙 `momo/busy-lock-grammar` 의
+// nativeDisabled · selfLock 이 됐다. 별칭을 따라가는 방식과 「초판 webhook-create 로 재현」
+// 자기 시험은 eslint-rules/busyLockGrammar.test.ts 의 양성 fixture 로 옮겼다.
 
 describe("#1559 회전 1 · 웹훅 만들기가 사유를 든다 (#1595 H2)", () => {
   const file = FILES["WebhookSection.tsx"];
@@ -895,23 +735,8 @@ describe("#1559 회전 1 · 웹훅 만들기가 사유를 든다 (#1595 H2)", ()
 });
 
 describe("#1559 회전 1 · 거짓 약속 (#1595 H4)", () => {
-  it("어느 표면도 오프라인 큐를 약속하지 않는다", () => {
-    // 이 클라이언트에 오프라인 큐는 없다. 아래 단정이 그 사실 자체를 잰다.
-    for (const [name, file] of Object.entries(FILES)) {
-      expect(copyOnly(file), name).not.toContain("그대로 보내져요");
-    }
-  });
-
-  it("없는 것이 정말 없다 — networkMode·onlineManager 부재", () => {
-    // 문장이 거짓인 근거는 이것이다. 큐가 생기는 날 이 단정이 먼저 붉어지고,
-    // 그때 문장을 되돌리는 것이 옳은 순서다.
-    for (const [name, file] of Object.entries(FILES)) {
-      expect(copyOnly(file), name).not.toMatch(
-        /\bnetworkMode\b|\bonlineManager\b/
-      );
-    }
-  });
-
+  // 「그대로 보내져요」 부재와 networkMode·onlineManager 부재(오프라인 큐가 없다는 사실의 보초)는
+  // 린트 `offlineQueuePromise` 가 됐다. 남은 것은 세 표면이 같은 사실을 같은 문장으로 말하는지다.
   it("두 표면이 같은 잠금에 같은 사실을 말한다", () => {
     expect(FILES["EventSubscriptionSection.tsx"]).toContain(
       "서버와 연결이 끊겨 지금은 만들 수 없어요. 다시 연결되면 이어서 만들 수 있어요."
@@ -921,41 +746,8 @@ describe("#1559 회전 1 · 거짓 약속 (#1595 H4)", () => {
   });
 });
 
-describe("#1559 회전 1 · in-flight 는 fieldset 을 끄지 않는다 (#1595 H3)", () => {
-  // `<fieldset disabled>` 는 초점을 쥔 라디오를 끄고 초점을 <body> 로 떨어뜨린다.
-  // `ChoiceRadios.busy` 가 정확히 그 용도로 있고 독스트링이 그 실패를 적어 두었다.
-  // 자리 목록이 아니라 features/ 전수인 이유는 #1558 의 canSave 스캔과 같다: 새
-  // 소비처도 자동으로 이 규율 아래 선다.
-  const FEATURES_DIR = fileURLToPath(new URL("..", import.meta.url));
-
-  function tsxFiles(dir: string): string[] {
-    return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) return tsxFiles(path);
-      return entry.name.endsWith(".tsx") ? [path] : [];
-    });
-  }
-
-  it("모든 ChoiceRadios 소비처의 disabled 식에 진행 어휘가 없다", () => {
-    let seen = 0;
-    for (const path of tsxFiles(FEATURES_DIR)) {
-      const text = readFileSync(path, "utf8");
-      for (const chunk of text.split("<ChoiceRadios").slice(1)) {
-        const end = chunk.indexOf("/>");
-        const call = chunk.slice(0, end === -1 ? undefined : end);
-        seen += 1;
-        const disabled = call.match(/\sdisabled=\{([^}]*)\}/)?.[1];
-        if (disabled === undefined) continue;
-        expect(
-          IN_FLIGHT.test(disabled),
-          `${path}: disabled={${disabled}} 가 in-flight 로 fieldset 을 끈다`
-        ).toBe(false);
-      }
-    }
-    // 하나도 안 잡히면 이 단정은 공허하게 초록이다. 오늘의 실측은 다섯이다(#3578 S5a가 터미널 색을 세그먼트로 옮긴 뒤; S4 뒤 여섯, 그 전에는 일곱).
-    expect(seen).toBeGreaterThanOrEqual(5);
-  });
-});
+// in-flight 가 `<ChoiceRadios disabled>` 로 fieldset 을 끄지 않는다(#1595 H3)는 features 전수 그물은
+// 린트 `momo/in-flight-lock-props` 가 됐다.
 
 describe("#1559 회전 1 · 되돌리기가 사유 없이 침묵하지 않는다 (#1595 M5)", () => {
   const file = source("./workTierPolicy.tsx");
@@ -1024,20 +816,5 @@ describe("#1559 회전 1 · 줄의 이름과 폭 (#1595 Low 둘)", () => {
   });
 });
 
-describe("#1559 회전 1 · 사유 문장은 한글 규칙으로 접힌다 (#1595 M6)", () => {
-  // 사유는 두세 어절 문장이라 좁은 칸에서 어절 중간이 끊긴다. 이 diff 가 세운
-  // 사유 노드 전부가 `break-keep` 을 갖는다 — 하나만 빠지면 그 하나만 다르게
-  // 접힌다.
-  for (const [name, file] of Object.entries(FILES)) {
-    it(name, () => {
-      const offenders: string[] = [];
-      for (const tagMatch of file.matchAll(/<(?:p|span)\s[\s\S]*?>/g)) {
-        const tag = tagMatch[0];
-        const id = tag.match(/\bid=\{([^}]*)\}/)?.[1] ?? "";
-        if (!/reason|note/i.test(id)) continue;
-        if (!tag.includes("break-keep")) offenders.push(id);
-      }
-      expect(offenders).toEqual([]);
-    });
-  }
-});
+// 사유 노드(id 에 reason·note)가 `break-keep` 을 든다(#1595 M6)는 파일별 그물은 린트
+// `reasonBreakKeep` 이 됐다.

@@ -1,0 +1,46 @@
+appId: app.momo.ios
+name: 119-dev-tools-capture
+---
+# 119-dev-tools-capture: 설정 › 「명령줄·AI 도구」 장의 장면들 (#4663).
+#
+# `measure/` 표면은 저 혼자 서서 찍히는데, 「지우기」 확인 단계는 눌러야 선다. 진짜 설정 페이지·진짜 장이 그대로 돌고(서버
+# 자리만 하네스의 가짜 씨앗), 이 흐름은 기다리고 누른 뒤 `takeScreenshot` 으로 찍는다. 로그인도 서버도 필요 없고
+# `launchApp` 도 없다(앱을 다시 띄우면 계측 인자가 아니라 보통의 앱이 뜬다).
+#
+# 환경 넷(모두 넘긴다. 비울 것은 빈 값으로):
+#   WAIT   찍기 전에 보여야 하는 id (장면마다 다르다: 아래 표)
+#   TAP    누를 id (없으면 빈 값)
+#   THEN   TAP 뒤에 보여야 하는 id (TAP 이 없으면 빈 값)
+#   OUT    사진 이름 접두(**상대 경로**, 확장자 없이). 사진은 결과 폴더
+#          `~/.maestro/tests/<시각>/119-dev-tools-capture/takeScreenshot/<OUT>.png` 안에 쌓인다(끝난 뒤 거기서 복사한다).
+#
+# 표면별 WAIT (표면은 `-momoMeasure shell-dev-tools…`, 앞에 `light-` 를 붙이면 라이트):
+#   shell-dev-tools          dev-tools-list     (목록)   · 확인 단계는 TAP=dev-credential-aaaaaaaa-0000-4000-8000-000000000001-revoke THEN=dev-revoke-confirm
+#   shell-dev-tools-member   dev-tools-list     (만들 수 없는 멤버)
+#   shell-dev-tools-empty    dev-tools-empty    (빈)
+#   shell-dev-tools-loading  dev-tools-loading  (읽는 중)
+#   shell-dev-tools-error    dev-tools-error    (읽지 못함 + 다시 불러오기)
+#   shell-dev-tools-offline  dev-tools-offline  (끊김: 지우기가 잠긴다)
+#   shell-dev-tools-entry    profile-dev-tools-row  (설정 본 페이지의 「연결」 카드)
+#
+#   xcrun simctl launch <udid> app.momo.ios --args -momoMeasure shell-dev-tools -RCT_jsLocation 127.0.0.1:$PORT
+#   maestro --device <udid> test -e WAIT=dev-tools-list -e TAP= -e THEN= -e OUT=16pro-dark-list \
+#     clients/mobile/maestro/119-dev-tools-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: ${WAIT}
+    timeout: 60000
+- runFlow:
+    when:
+      true: ${TAP != ''}
+    commands:
+      - tapOn:
+          id: ${TAP}
+      - extendedWaitUntil:
+          visible:
+            id: ${THEN}
+          timeout: 10000
+# 안쪽 장은 오른쪽에서 밀려 들어온다(240ms). 다 선 모양을 찍는다.
+- waitForAnimationToEnd:
+    timeout: 5000
+- takeScreenshot: ${OUT}
