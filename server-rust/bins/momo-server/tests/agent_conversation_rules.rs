@@ -33,7 +33,8 @@ use momo_agent::{
     effective_system_prompt, AGENT_CONVERSATION_PREAMBLE, AGENT_INTERACTION_SAFETY_PREAMBLE,
 };
 use momo_mcp::{
-    TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_MESSAGE_POST, TOOL_RUN_COMPLETE, TOOL_RUN_EVENT,
+    TOOL_ACTION_INITIATE, TOOL_CARD_SUGGEST, TOOL_CATALOG, TOOL_MESSAGE_POST, TOOL_RUN_COMPLETE,
+    TOOL_RUN_EVENT,
 };
 use momo_workspace_actions::team_ai::{system_prompt, Roster, WebSearch};
 use std::path::PathBuf;
@@ -450,6 +451,51 @@ fn the_message_tools_carry_the_conversation_rules() {
         description(TOOL_CARD_SUGGEST),
         OLD_CARD_SUGGEST,
         CARD_SUGGEST_RULES,
+    );
+}
+
+/// ADR-0186 증보 v5 U-a (#4704): the four things the model must be told about the tool that raises
+/// a card **nobody asked for** — when to use it, who decides and where, what a decline means, and
+/// to end the turn and read the outcome by the same id. There is no text from before this tool, so
+/// "red on the old text" is red on the empty one (and each group is still deleted in turn).
+const INITIATE_RULES: &[Rule] = &[
+    Rule {
+        name: "only for what nobody asked",
+        groups: &[
+            &["nobody asked you for"],
+            &["no person asked you"],
+            &["oort_action_propose"],
+        ],
+    },
+    Rule {
+        name: "the owner decides, in the app, from a card in the direct message",
+        groups: &[
+            &["your owner's direct message"],
+            &["only your owner decides"],
+            &["in the app"],
+        ],
+    },
+    Rule {
+        name: "a declined proposal is not raised again",
+        groups: &[&["declined"], &["same shape"], &["24 hours"]],
+    },
+    Rule {
+        name: "end the turn and read the outcome by the same id",
+        groups: &[
+            &["end your turn"],
+            &["same clientrequestid"],
+            &["do not retry in a loop"],
+        ],
+    },
+];
+
+#[test]
+fn the_initiate_tool_carries_its_four_rules() {
+    assert_golden(
+        TOOL_ACTION_INITIATE,
+        description(TOOL_ACTION_INITIATE),
+        "",
+        INITIATE_RULES,
     );
 }
 

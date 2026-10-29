@@ -56,6 +56,52 @@ impl ActionRejection {
 
 pub type ResolveOutcome<T> = Result<Result<T, ActionRejection>, DbError>;
 
+/// The rejection message of a card whose target the **owner** could not already read
+/// (ADR-0186 증보 v5 U-b-4 condition 6). The one resolution failure that is the owner's side of
+/// the door rather than the agent's: the producer answers it `Unavailable`, like every other
+/// refusal of the door, and the agent's own failures stay `InvalidArguments`.
+pub const OWNER_CANNOT_SEE: &str = "owner cannot see the target";
+
+/// Whose eyes a card is drawn for — the one place a resolution rule depends on where the card
+/// will stand.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CardAudience {
+    /// A card a person asked for: it stands in the run's channel, and everything it names is
+    /// judged from the **proposer's** point of view (the rules every action had before v5).
+    RunChannel,
+    /// A card nobody asked for: it stands in `owner`'s one-to-one direct message, so everything
+    /// it names must be something `owner` could already read — a public channel or one `owner`
+    /// is a live member of — and a pinned message may be in **any** such channel, not only the
+    /// run's (the run's channel is the DM itself). A card must never be the first to tell its
+    /// owner that a private room, or what is said in it, exists (ADR-0186 증보 v5 U-b-4 6, U-c).
+    Owner(Uuid),
+}
+
+/// The checks only an **unasked** card adds on top of the action's own normaliser, run on the
+/// proposal and again on the stored arguments at decision time (so a tampered row cannot ask
+/// for more than the tool could):
+///
+/// * `channel.create` is a **private** channel — a public one is the whole workspace's room,
+///   and only a person asks for one;
+/// * its `topic`, like the card's `rationale`, is the agent's own sentence to a person who did
+///   not ask: at most 140 characters
+///   under the profile-tagline rules (no controls, links or mentions), and what is stored is the
+///   sentence **as those rules normalised it** (review M4).
+pub fn initiative_args_checks(validated: &mut ValidatedActionArgs) -> Result<(), ActionRejection> {
+    if let ActionArgs::ChannelCreate { kind, topic, .. } = &mut validated.args {
+        if *kind != "private" {
+            return Err(ActionRejection::new("channel kind is not proposable"));
+        }
+        if let Some(raw) = topic.as_deref() {
+            let plain = validated_agent_tagline(raw)
+                .map_err(|_| ActionRejection::new("channel topic is not allowed"))?;
+            *topic = Some(plain.clone());
+            validated.normalized["topic"] = Value::String(plain);
+        }
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // argument normalisation — the registry's schema, proved by the domain
 // ---------------------------------------------------------------------------
@@ -1896,7 +1942,63 @@ pub async fn resolve_pin_target_in_tx(
     change: PinAction,
     lock: bool,
 ) -> Result<Option<ResolvedMessage>, momo_db::DbError> {
+    resolve_pin_target_scoped_in_tx(
+        conn,
+        workspace_id,
+        proposer_member_id,
+        PinScope::RunChannel(run_id),
+        message_id,
+        change,
+        lock,
+    )
+    .await
+}
+
+/// Where a pinned message may be, beyond everything [`resolve_pin_target_in_tx`] already requires
+/// of the proposer (a live connection that covers the channel, a live membership, a plain
+/// undeleted message in an unarchived channel, a pin to take off).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PinScope {
+    /// A card a person asked for: the message must be in **the run's own channel** (review H2).
+    RunChannel(Uuid),
+    /// An unasked card in `owner`'s direct message: the message may be in any channel, but
+    /// `owner` must be a live member of it, so the card never quotes a room its reader is not in.
+    Owner(Uuid),
+    /// Only the proposer's own view — used by a producer to tell *who* failed the other scopes
+    /// (the agent, or the owner), never to raise a card.
+    AgentOnly,
+}
+
+/// [`resolve_pin_target_in_tx`] with its channel rule named (see [`PinScope`]).
+pub async fn resolve_pin_target_scoped_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    scope: PinScope,
+    message_id: Uuid,
+    change: PinAction,
+    lock: bool,
+) -> Result<Option<ResolvedMessage>, momo_db::DbError> {
     use momo_db::sqlx::Row;
+
+    // `$3` is the scope's subject in every variant — the run, the owner, or the nil uuid — and is
+    // always referenced, so the statement's parameter list never changes shape.
+    let (subject, run_join, scope_clause) = match scope {
+        PinScope::RunChannel(run_id) => (
+            run_id,
+            "JOIN agent_run r ON r.workspace_id = m.workspace_id AND r.id = $3 \
+                           AND r.agent_member_id = $2 AND r.channel_id = m.channel_id",
+            "",
+        ),
+        PinScope::Owner(owner) => (
+            owner,
+            "",
+            "AND EXISTS (SELECT 1 FROM membership o \
+                          WHERE o.workspace_id = m.workspace_id AND o.channel_id = m.channel_id \
+                            AND o.member_id = $3 AND o.left_at IS NULL)",
+        ),
+        PinScope::AgentOnly => (Uuid::nil(), "", "AND $3::uuid IS NOT NULL"),
+    };
 
     // The proposer's own live connection — the only way a channel is "covered". No argument can
     // name another agent's.
@@ -1927,8 +2029,7 @@ pub async fn resolve_pin_target_in_tx(
                 pinner.kind::text AS pinner_kind \
            FROM message m \
            JOIN channel c ON c.workspace_id = m.workspace_id AND c.id = m.channel_id \
-           JOIN agent_run r ON r.workspace_id = m.workspace_id AND r.id = $3 \
-                           AND r.agent_member_id = $2 AND r.channel_id = m.channel_id \
+           {run_join} \
            JOIN member a ON a.workspace_id = m.workspace_id AND a.id = m.author_member_id \
            LEFT JOIN message_pin pin ON pin.message_id = m.id \
            LEFT JOIN member pinner \
@@ -1940,13 +2041,14 @@ pub async fn resolve_pin_target_in_tx(
                          WHERE p.workspace_id = m.workspace_id AND p.channel_id = m.channel_id \
                            AND p.member_id = $2 AND p.left_at IS NULL) \
             AND m.channel_id = ANY(hosted_connection_channel_ids($1, $5)) \
-            AND ($6 = false OR pin.message_id IS NOT NULL){}",
-        if lock { " FOR UPDATE OF m" } else { "" }
+            {scope_clause} \
+            AND ($6 = false OR pin.message_id IS NOT NULL){lock_clause}",
+        lock_clause = if lock { " FOR UPDATE OF m" } else { "" }
     );
     let Some(row) = momo_db::sqlx::query(&sql)
         .bind(workspace_id)
         .bind(proposer_member_id)
-        .bind(run_id)
+        .bind(subject)
         .bind(message_id)
         .bind(connection_id)
         .bind(change == PinAction::Unpinned)
@@ -2021,6 +2123,24 @@ pub async fn proposer_is_live_agent_in_tx(
     .await?)
 }
 
+/// Is `member_id` a live member of `channel_id`? (`membership.left_at IS NULL`.)
+pub async fn member_is_live_in_channel_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, momo_db::DbError> {
+    Ok(momo_db::sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM membership \
+          WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3 AND left_at IS NULL)",
+    )
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(member_id)
+    .fetch_one(&mut *conn)
+    .await?)
+}
+
 /// What the role gate of a [`actions::RequiredRole`] is judged against.
 ///
 /// Most roles are about the workspace as a whole and need no subject. The
@@ -2091,6 +2211,65 @@ pub async fn resolve_action_in_tx(
         now_ms,
         ArgsOrigin::Proposal,
         None,
+        CardAudience::RunChannel,
+    )
+    .await
+}
+
+/// [`resolve_action_in_tx`] for a card **nobody asked for** (ADR-0186 증보 v5 U-b-4 6): the
+/// card will stand in `owner`'s direct message, so the arguments are judged for that reader
+/// ([`CardAudience::Owner`]) and there is no run yet to name (it is born after this passes).
+#[allow(clippy::too_many_arguments)]
+pub async fn resolve_initiative_action_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    owner_member_id: Uuid,
+    action: &WorkspaceAction,
+    args: &Value,
+    now_ms: i64,
+) -> ResolveOutcome<ResolvedAction> {
+    resolve_action_with_origin_in_tx(
+        conn,
+        workspace_id,
+        proposer_member_id,
+        None,
+        action,
+        args,
+        now_ms,
+        ArgsOrigin::Proposal,
+        None,
+        CardAudience::Owner(owner_member_id),
+    )
+    .await
+}
+
+/// [`resolve_stored_action_in_tx`] for an unasked card: the decision's re-proof, judged for the
+/// `reader` — the member who is deciding it, who must be able to read everything the card
+/// quotes (and, for a pin, to pin it: `set_pin_in_tx` requires the approver's own membership).
+#[allow(clippy::too_many_arguments)]
+pub async fn resolve_stored_initiative_action_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    proposer_member_id: Uuid,
+    reader_member_id: Uuid,
+    run_id: Option<Uuid>,
+    action: &WorkspaceAction,
+    args: &Value,
+    now_ms: i64,
+    approval_id: Uuid,
+) -> ResolveOutcome<ResolvedAction> {
+    resolve_action_with_origin_in_tx(
+        conn,
+        workspace_id,
+        proposer_member_id,
+        run_id,
+        action,
+        args,
+        now_ms,
+        ArgsOrigin::Stored,
+        Some(approval_id),
+        CardAudience::Owner(reader_member_id),
     )
     .await
 }
@@ -2118,6 +2297,7 @@ pub async fn resolve_stored_action_in_tx(
         now_ms,
         ArgsOrigin::Stored,
         Some(approval_id),
+        CardAudience::RunChannel,
     )
     .await
 }
@@ -2133,11 +2313,19 @@ pub async fn resolve_action_with_origin_in_tx(
     now_ms: i64,
     origin: ArgsOrigin,
     decision_approval_id: Option<Uuid>,
+    audience: CardAudience,
 ) -> ResolveOutcome<ResolvedAction> {
     let mut validated = match validated_action_args_from(action, args, now_ms, origin) {
         Ok(validated) => validated,
         Err(error) => return Ok(Err(error)),
     };
+    // An unasked card adds its own checks to the action's — on the proposal and on the stored
+    // arguments alike (`initiative_args_checks`).
+    if matches!(audience, CardAudience::Owner(_)) {
+        if let Err(error) = initiative_args_checks(&mut validated) {
+            return Ok(Err(error));
+        }
+    }
     // Exhaustive on purpose: a new `ActionArgs` variant must say here whether it
     // resolves anything and whom its role gate is about.
     let subject = match &mut validated.args {
@@ -2746,24 +2934,60 @@ pub async fn resolve_action_with_origin_in_tx(
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
             }
-            // A card stands in a run's channel and quotes the message: with no run (the team AI
-            // has none to stand on) there is nowhere the card could safely quote it.
-            let Some(run_id) = run_id else {
-                return Ok(Err(ActionRejection::new("message did not resolve")));
-            };
             // The decision's re-read takes the row lock (`decision_approval_id` is only set
             // there); a proposal reads without one.
-            let Some(found) = resolve_pin_target_in_tx(
-                conn,
-                workspace_id,
-                proposer_member_id,
-                run_id,
-                *message_id,
-                *change,
-                decision_approval_id.is_some(),
-            )
-            .await?
-            else {
+            let lock = decision_approval_id.is_some();
+            let found = match audience {
+                // A card stands in a run's channel and quotes the message: with no run (the team
+                // AI has none to stand on) there is nowhere the card could safely quote it.
+                CardAudience::RunChannel => {
+                    let Some(run_id) = run_id else {
+                        return Ok(Err(ActionRejection::new("message did not resolve")));
+                    };
+                    resolve_pin_target_scoped_in_tx(
+                        conn,
+                        workspace_id,
+                        proposer_member_id,
+                        PinScope::RunChannel(run_id),
+                        *message_id,
+                        *change,
+                        lock,
+                    )
+                    .await?
+                }
+                // An unasked card has no run at proposal time, and the run's channel is the DM
+                // itself: the message may be in any channel its reader is in.
+                CardAudience::Owner(reader) => {
+                    let found = resolve_pin_target_scoped_in_tx(
+                        conn,
+                        workspace_id,
+                        proposer_member_id,
+                        PinScope::Owner(reader),
+                        *message_id,
+                        *change,
+                        lock,
+                    )
+                    .await?;
+                    if found.is_none()
+                        && resolve_pin_target_scoped_in_tx(
+                            conn,
+                            workspace_id,
+                            proposer_member_id,
+                            PinScope::AgentOnly,
+                            *message_id,
+                            *change,
+                            false,
+                        )
+                        .await?
+                        .is_some()
+                    {
+                        // The agent can see it and its reader cannot: the owner's side.
+                        return Ok(Err(ActionRejection::new(OWNER_CANNOT_SEE)));
+                    }
+                    found
+                }
+            };
+            let Some(found) = found else {
                 return Ok(Err(ActionRejection::new("message did not resolve")));
             };
             validated.rows = actions::message_pin_rows(*change == PinAction::Unpinned, &found.card);
@@ -2788,6 +3012,18 @@ pub async fn resolve_action_with_origin_in_tx(
             else {
                 return Ok(Err(ActionRejection::new("channel did not resolve")));
             };
+            // An unasked card stands in the owner's DM and names this channel: a private room
+            // its reader is not in must not be named to them by a card (ADR U-b-4 6). Judged
+            // after the agent's own view, so the two failures stay distinguishable to the
+            // producer (and only to it).
+            if let CardAudience::Owner(reader) = audience {
+                if found.kind != "public"
+                    && !member_is_live_in_channel_in_tx(conn, workspace_id, found.id, reader)
+                        .await?
+                {
+                    return Ok(Err(ActionRejection::new(OWNER_CANNOT_SEE)));
+                }
+            }
             let Some(found_members) =
                 resolve_member_handles_in_tx(conn, workspace_id, handles).await?
             else {

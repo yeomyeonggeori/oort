@@ -154,6 +154,7 @@ pub mod hosted_dm;
 pub mod hosted_liveness;
 pub mod hosted_notice;
 pub mod in_place_grant;
+pub mod initiative;
 pub mod korean;
 pub mod memory;
 pub mod memory_cons;

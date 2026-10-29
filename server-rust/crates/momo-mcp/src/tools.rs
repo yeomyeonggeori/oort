@@ -220,6 +220,10 @@ pub const TOOL_ACTION_PROPOSE: &str = "oort_action_propose";
 /// (an invite link, or a pairing code the approver chose to hand over). Same scope as
 /// the proposal that produced it; no new scope.
 pub const TOOL_ACTION_CLAIM_SECRET: &str = "oort_action_claim_secret";
+/// ADR-0186 증보 v5 U-a (#4704) — raise ONE approval card in the agent's **owner's** direct
+/// message that nobody asked for. The one tool that needs no lease handle, and therefore
+/// the one with its own scope ([`SCOPE_WORKSPACE_INITIATE`]) and its own closed action list.
+pub const TOOL_ACTION_INITIATE: &str = "oort_action_initiate";
 /// ADR-0186 증보 2026-09-27 G1 — suggest a client-command card to the person
 /// who asked. Opened by `messages:write`: it writes one message in the run's
 /// own channel and grants nothing more (G5).
@@ -245,6 +249,10 @@ pub const SCOPE_RUNS_CALLBACK: &str = "agent:runs:callback";
 /// human to change the workspace and can do nothing to the workspace itself, so
 /// a leaked hosted bearer buys an attacker a card somebody has to tap.
 pub const SCOPE_WORKSPACE_PROPOSE: &str = "workspace:propose";
+/// ADR-0186 증보 v5 U-b — the **initiate** class: the first scope that lets an agent raise a
+/// card nobody asked for. It opens exactly one tool and no REST route, is never in a default
+/// request, and is approved by the administrator when the connection is confirmed.
+pub const SCOPE_WORKSPACE_INITIATE: &str = "workspace:initiate";
 
 /// The note every length-bounded string carries.
 ///
@@ -642,6 +650,24 @@ const WORKSPACE_ACTION_IDS: [&str; 11] = [
     "message.unpin",
 ];
 
+/// The `actionId` enum of [`action_initiate_schema`] — ADR-0186 증보 v5 U-b-2.
+///
+/// **A deliberate third copy**, for the reason [`WORKSPACE_ACTION_IDS`] is a second one: this
+/// crate may not depend on `momo-agent`. `momo-server`'s drift test measures this list, the
+/// registry's `initiative` flag and `docs/api/openapi.yaml`'s `InitiativeActionId` against each
+/// other, and against the four literals the ADR names — so a fifth id cannot arrive by editing
+/// one place.
+const INITIATIVE_ACTION_IDS: [&str; 4] = [
+    "channel.create",
+    "channel.member.add",
+    "message.pin",
+    "message.unpin",
+];
+
+/// `rationale` on an unasked card: 140 characters (the `agent.profile.update` tagline rule), so
+/// at most this many UTF-8 bytes. The server judges the characters and the forbidden ones.
+const INITIATIVE_RATIONALE_MAX_BYTES: u64 = 560;
+
 // The argument vocabulary the registry publishes, restated here for the same
 // reason the ids are: `momo-mcp` may not depend on `momo-agent`, and
 // `the_protocol_crate_cannot_reach_transport_database_or_product_crates`
@@ -984,6 +1010,58 @@ fn action_propose_schema() -> Value {
     })
 }
 
+/// The `oneOf` branches of `oort_action_initiate`'s `args`: the registry's own branch for each
+/// initiative id (so the two tools cannot describe one action two ways), with
+/// `channel.create` narrowed to a **private** channel — a public channel is the whole
+/// workspace's room, and only a person asks for one (ADR-0186 증보 v5 U-b-2).
+fn initiative_args_branches() -> Vec<Value> {
+    action_args_branches()
+        .into_iter()
+        .filter(|branch| {
+            branch["title"]
+                .as_str()
+                .is_some_and(|id| INITIATIVE_ACTION_IDS.contains(&id))
+        })
+        .map(|mut branch| {
+            if branch["title"] == "channel.create" {
+                branch["properties"]["kind"] =
+                    nullable(json!({"type": "string", "enum": ["private"]}));
+                branch["description"] = json!(
+                    "kind can only be private when you raise this unasked: a public channel \
+                     is the whole workspace's room, and only a person asks for one. topic is \
+                     plain text of at most 140 characters (no links, @mentions or markdown)."
+                );
+            }
+            branch
+        })
+        .collect()
+}
+
+/// `oort_action_initiate` — ADR-0186 증보 v5 U-a.
+///
+/// **No `handle`, no channel, no recipient.** The one thing that identifies a call is
+/// `clientRequestId`, a uuid the agent makes up: the server keys the run on it
+/// (`agent_initiated:<AGENT>:<ID>`), so a retry is the same proposal and the same id asked
+/// again is how the agent reads the outcome. Where the card stands (the owner's direct
+/// message) and who decides (the owner) are the server's, so the schema has no key for either.
+fn action_initiate_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["clientRequestId", "actionId", "args"],
+        "properties": {
+            "clientRequestId": uuid_property(),
+            "actionId": {"type": "string", "enum": INITIATIVE_ACTION_IDS},
+            "args": {
+                "type": "object",
+                "description": "The arguments of the action named by actionId; each oneOf branch is titled with its action id.",
+                "oneOf": initiative_args_branches()
+            },
+            "rationale": nullable(text(INITIATIVE_RATIONALE_MAX_BYTES))
+        }
+    })
+}
+
 /// The `commandId` enum of [`card_suggest_schema`] — ADR-0186 증보 G2.
 ///
 /// **A deliberate second copy** of `momo_agent::card_suggest::SUGGESTABLE_COMMANDS`'
@@ -1057,7 +1135,7 @@ fn card_suggest_schema() -> Value {
 
 /// The complete catalog. Order is the `tools/list` order and is stable so a
 /// client diffing two listings sees only real capability changes.
-pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
+pub const TOOL_CATALOG: [ToolDescriptor; 14] = [
     ToolDescriptor {
         name: TOOL_INBOX_READ,
         title: "Read the hosted inbox",
@@ -1218,6 +1296,28 @@ pub const TOOL_CATALOG: [ToolDescriptor; 13] = [
         annotations: None,
     },
     ToolDescriptor {
+        name: TOOL_ACTION_INITIATE,
+        title: "Raise an unasked workspace card",
+        // ADR-0186 증보 v5 U-a: the four sentences a model must read. The golden in
+        // `bins/momo-server/tests/agent_conversation_rules.rs` holds the key words of each;
+        // keep the two in step.
+        description: "Raise ONE approval card that nobody asked you for: use it only when no \
+                      person asked you to do this (when a person asked, use \
+                      oort_action_propose). It can create a private channel, add people to a \
+                      channel you can already see, or pin or unpin one message; name channels \
+                      and people by name or handle, and a message by its id. The card stands \
+                      in your owner's direct message with you and only your owner decides it, \
+                      in the app; nothing changes before that. Never raise a proposal your \
+                      owner declined again in the same shape: a declined one stays refused for \
+                      24 hours. After raising a card, end your turn; read the outcome \
+                      (pending, approved, rejected, expired, cancelled) by calling this tool \
+                      again with the same clientRequestId. A refusal says nothing about why: \
+                      do not retry in a loop, tell your owner in a message instead.",
+        required_scope: SCOPE_WORKSPACE_INITIATE,
+        schema: action_initiate_schema,
+        annotations: None,
+    },
+    ToolDescriptor {
         name: TOOL_CARD_SUGGEST,
         title: "Suggest a card",
         description: "Answer the person who asked with a card they can act on in place \
@@ -1271,6 +1371,7 @@ impl ToolCapability {
             TOOL_RUN_COMPLETE,
             TOOL_ACTION_PROPOSE,
             TOOL_ACTION_CLAIM_SECRET,
+            TOOL_ACTION_INITIATE,
             TOOL_CARD_SUGGEST,
             TOOL_PING,
         ],
@@ -2039,7 +2140,7 @@ mod tests {
     }
 
     #[test]
-    fn the_catalog_is_exactly_the_thirteen_named_tools() {
+    fn the_catalog_is_exactly_the_fourteen_named_tools() {
         assert_eq!(
             TOOL_CATALOG.iter().map(|t| t.name).collect::<Vec<_>>(),
             vec![
@@ -2054,6 +2155,7 @@ mod tests {
                 "oort_run_complete",
                 "oort_action_propose",
                 "oort_action_claim_secret",
+                "oort_action_initiate",
                 "oort_card_suggest",
                 "oort_ping",
             ]
@@ -2083,9 +2185,10 @@ mod tests {
             SCOPE_JOBS_READ,
             SCOPE_RUNS_CALLBACK,
             SCOPE_WORKSPACE_PROPOSE,
+            SCOPE_WORKSPACE_INITIATE,
         ]);
         let view = ToolView::intersect(&all, &all, ToolCapability::FULL);
-        assert_eq!(view.names().len(), 13);
+        assert_eq!(view.names().len(), 14);
         for (name, scope) in [
             (TOOL_INBOX_READ, SCOPE_INBOX_READ),
             (TOOL_CONVERSATION_READ, SCOPE_MESSAGES_READ),
@@ -2098,6 +2201,7 @@ mod tests {
             (TOOL_RUN_COMPLETE, SCOPE_RUNS_CALLBACK),
             (TOOL_ACTION_PROPOSE, SCOPE_WORKSPACE_PROPOSE),
             (TOOL_ACTION_CLAIM_SECRET, SCOPE_WORKSPACE_PROPOSE),
+            (TOOL_ACTION_INITIATE, SCOPE_WORKSPACE_INITIATE),
             (TOOL_CARD_SUGGEST, SCOPE_MESSAGES_WRITE),
             (TOOL_PING, SCOPE_INBOX_READ),
         ] {
@@ -2200,6 +2304,124 @@ mod tests {
                 json!({"handle": "h", "actionId": "invite.create", "args": {},
                         "rationale": hangul})
             ),
+            Err(ToolFailure::InvalidArguments)
+        );
+    }
+
+    /// **ADR-0186 증보 v5 U-b-1.** The unasked-card tool is invisible *and* uncallable unless
+    /// `workspace:initiate` is on both halves of the intersection, and `workspace:propose` — the
+    /// scope an agent already holds for a card a person asked for — opens nothing of it.
+    #[test]
+    fn the_initiate_tool_needs_its_own_scope_on_both_halves() {
+        let propose_only = scopes(&[
+            SCOPE_PORT_CONNECT,
+            SCOPE_INBOX_READ,
+            SCOPE_MESSAGES_READ,
+            SCOPE_MESSAGES_WRITE,
+            SCOPE_JOBS_READ,
+            SCOPE_RUNS_CALLBACK,
+            SCOPE_WORKSPACE_PROPOSE,
+        ]);
+        let view = ToolView::intersect(&propose_only, &propose_only, ToolCapability::FULL);
+        assert!(
+            view.callable(TOOL_ACTION_PROPOSE).is_some(),
+            "the propose scope still opens the propose tool"
+        );
+        assert!(
+            !view.names().contains(&TOOL_ACTION_INITIATE),
+            "no other scope, `workspace:propose` included, may open the initiate tool"
+        );
+        assert_eq!(
+            view.callable(TOOL_ACTION_INITIATE),
+            view.callable("oort_nope"),
+            "invisible and unknown must be the same answer"
+        );
+        let mut with = propose_only.clone();
+        with.push(SCOPE_WORKSPACE_INITIATE.to_string());
+        // Approved but not carried, and carried but not approved: both closed.
+        assert!(
+            ToolView::intersect(&with, &propose_only, ToolCapability::FULL)
+                .callable(TOOL_ACTION_INITIATE)
+                .is_none()
+        );
+        assert!(
+            ToolView::intersect(&propose_only, &with, ToolCapability::FULL)
+                .callable(TOOL_ACTION_INITIATE)
+                .is_none()
+        );
+        assert!(ToolView::intersect(&with, &with, ToolCapability::FULL)
+            .callable(TOOL_ACTION_INITIATE)
+            .is_some());
+        // And the reverse: initiate alone opens no other action tool.
+        let initiate_only = scopes(&[SCOPE_PORT_CONNECT, SCOPE_WORKSPACE_INITIATE]);
+        assert_eq!(
+            ToolView::intersect(&initiate_only, &initiate_only, ToolCapability::FULL).names(),
+            vec![TOOL_ACTION_INITIATE]
+        );
+    }
+
+    /// The initiate schema names no place, no recipient and no lease: the call is identified
+    /// by `clientRequestId` alone, and only the four unasked actions are spellable — with
+    /// `channel.create` limited to a private channel.
+    #[test]
+    fn the_initiate_schema_admits_only_the_four_unasked_actions() {
+        let initiate = TOOL_CATALOG
+            .iter()
+            .find(|tool| tool.name == TOOL_ACTION_INITIATE)
+            .expect("catalog");
+        let call = |arguments: Value| validate_arguments(initiate, &arguments);
+        let id = "11111111-2222-4333-8444-555555555555";
+        for accepted in [
+            json!({"clientRequestId": id, "actionId": "channel.create", "args": {"name": "qa"}}),
+            json!({"clientRequestId": id, "actionId": "channel.create",
+                   "args": {"name": "qa", "kind": "private", "addProposer": true,
+                            "memberHandles": ["hermes"]},
+                   "rationale": "QA 채널이 필요해요"}),
+            json!({"clientRequestId": id, "actionId": "channel.member.add",
+                   "args": {"channel": "qa", "memberHandles": ["hermes"]}}),
+            json!({"clientRequestId": id, "actionId": "message.pin",
+                   "args": {"messageId": id}}),
+            json!({"clientRequestId": id, "actionId": "message.unpin",
+                   "args": {"messageId": id}, "rationale": null}),
+        ] {
+            assert_eq!(call(accepted.clone()), Ok(()), "{accepted}");
+        }
+        for refused in [
+            // the five actions an agent never raises unasked (ADR U-b-2), by id
+            json!({"clientRequestId": id, "actionId": "hosted.channels.grant", "args": {"channels": ["qa"]}}),
+            json!({"clientRequestId": id, "actionId": "agent.rename", "args": {"displayName": "x"}}),
+            json!({"clientRequestId": id, "actionId": "invite.create", "args": {}}),
+            json!({"clientRequestId": id, "actionId": "agent.invite",
+                   "args": {"platform": "other", "displayName": "x", "handle": "xx"}}),
+            json!({"clientRequestId": id, "actionId": "workspace.settings.update", "args": {"welcomePrompt": "x"}}),
+            json!({"clientRequestId": id, "actionId": "member.avatar.set", "args": {}}),
+            // a public channel is a person's to ask for
+            json!({"clientRequestId": id, "actionId": "channel.create", "args": {"name": "qa", "kind": "public"}}),
+            // no lease, no place, no recipient, no card position
+            json!({"handle": "h", "clientRequestId": id, "actionId": "message.pin", "args": {"messageId": id}}),
+            json!({"clientRequestId": id, "actionId": "message.pin", "args": {"messageId": id}, "channelId": id}),
+            json!({"clientRequestId": id, "actionId": "message.pin", "args": {"messageId": id}, "recipient": "owner"}),
+            json!({"clientRequestId": id, "actionId": "message.pin", "args": {"messageId": id, "channel": "qa"}}),
+            // the id is required and is a uuid
+            json!({"actionId": "message.pin", "args": {"messageId": id}}),
+            json!({"clientRequestId": "not-a-uuid", "actionId": "message.pin", "args": {"messageId": id}}),
+            json!({"clientRequestId": null, "actionId": "message.pin", "args": {"messageId": id}}),
+            json!({"clientRequestId": id, "args": {"messageId": id}}),
+            json!({"clientRequestId": id, "actionId": "message.pin"}),
+        ] {
+            assert_eq!(
+                call(refused.clone()),
+                Err(ToolFailure::InvalidArguments),
+                "{refused}"
+            );
+        }
+        // 560 **bytes**: 141 Korean characters are 423 bytes and pass the schema; the server
+        // judges the 140-character rule itself. 187 characters are 561 bytes and do not.
+        let long = "가".repeat(187);
+        assert_eq!(long.len(), 561);
+        assert_eq!(
+            call(json!({"clientRequestId": id, "actionId": "message.pin",
+                        "args": {"messageId": id}, "rationale": long})),
             Err(ToolFailure::InvalidArguments)
         );
     }

@@ -1383,6 +1383,41 @@ oort_card_suggest {handle, clientMsgId, commandId: "ai.connect", args, body}
   code | updates | plugins` (`plugins` is the apps page). A section id, never
   a path; any other value is refused, so answer in text instead.
 
+#### 3.3.16d Raising a card nobody asked for: `workspace:initiate`
+
+ADR-0186 증보 v5 adds an eighth hosted scope, **`workspace:initiate`**, and one Agent Port tool,
+`oort_action_initiate`. `oort_action_propose` answers a request a person made (it needs the lease
+handle of that job). This one is for something **nobody asked you to do** — the planner terminal
+noticing that a private `qa` channel would help, say. It opens no REST route, it is not in the default
+pairing request (the human ticks it on the confirm screen, and a connection approved before it
+existed does not gain it), and the workspace setting `agent_initiative` (absent means on, `false`
+closes the door for every agent) can switch it off.
+
+```text
+oort_action_initiate {clientRequestId, actionId, args, rationale?}
+  -> {approvalId, status: "pending", expiresAtMs, cardMessageId}
+```
+
+* `actionId` is one of **`channel.create`** (a private channel only), **`channel.member.add`**,
+  **`message.pin`**, **`message.unpin`**. Nothing else can be raised unasked — not an invite, not
+  another agent, not your own reach.
+* There is no handle, no channel and no recipient to name. The server stands the card in **your
+  owner's** one-to-one direct message with you, and only your owner decides it, in the app. A card
+  that names a channel or a message your owner could not already read is refused.
+* `clientRequestId` is a uuid you make up. It is the whole idempotency story: the same id asked again
+  is the same card and answers `{approvalId, status, expiresAtMs?, decidedAtMs?, ref?}` with
+  `status` one of `pending`, `approved`, `rejected`, `expired`, `cancelled` — a card past its deadline
+  reads `expired` before anything swept it. The same id with different arguments is a `Conflict`.
+  `ref` (`{type, id}`) is there only when `approved`.
+* Raise the card, then **end your turn**. The outcome reaches you as an inbox `agent_run` reference
+  (the status of that run changed) and, at any time, by asking again with the same `clientRequestId`.
+* `rationale` is at most 140 characters of plain text (no links, no `@`, no markdown); the card shows
+  it labelled as your own words.
+* A refusal at this door says nothing about why — the switch, your owner, your owner's role and a
+  channel or message your owner cannot already read all answer the same (a name you cannot see
+  yourself, or an argument the schema refuses, is a plain invalid-arguments answer). Do not retry in
+  a loop; tell your owner in a message instead.
+
 #### 3.3.17 Doorbell (realtime wake)
 
 Accelerator after join (§3.3.16). Durable inbox remains the canon delivery

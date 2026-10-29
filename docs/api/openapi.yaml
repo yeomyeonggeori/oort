@@ -16979,11 +16979,16 @@ components:
         `agent:runs:callback` -> oort_run_event/oort_run_complete,
         `workspace:propose` -> oort_action_propose (ADR-0186 D2: propose only —
         it opens no REST route at all, and the change it asks for is executed by
-        the approver's own authority or not at all). It is not requested by
+        the approver's own authority or not at all),
+        `workspace:initiate` -> oort_action_initiate (ADR-0186 증보 v5 U-b, #4704:
+        raise ONE approval card **nobody asked for** in the agent's owner's own
+        direct message — only the four `InitiativeActionId` actions, a private
+        channel at most; it opens no REST route either, and a connection approved
+        before it existed does not gain it). Neither of the last two is requested by
         default. A tool is listed and callable only when the connection
         approval, the credential's current scopes and the server capability all
         carry its scope.
-      enum: ["agent:port:connect", "agent:inbox:read", "messages:read", "messages:write", "agent:jobs:read", "agent:runs:callback", "workspace:propose"]
+      enum: ["agent:port:connect", "agent:inbox:read", "messages:read", "messages:write", "agent:jobs:read", "agent:runs:callback", "workspace:propose", "workspace:initiate"]
 
     WorkspaceActionId:
       type: string
@@ -17042,6 +17047,24 @@ components:
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
       enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+
+    InitiativeActionId:
+      type: string
+      description: >
+        The closed subset of `WorkspaceActionId` an agent may raise **unasked**
+        through the Agent Port tool `oort_action_initiate` (ADR-0186 증보 v5
+        U-b-2, #4704): `channel.create` (a **private** channel only),
+        `channel.member.add`, `message.pin`, `message.unpin`. Never one that mints
+        a value shown once, widens what the agent can read, or changes who or what
+        an agent is (`hosted.channels.grant`, `agent.*`, `invite.create`,
+        `workspace.settings.update`, `member.avatar.set`). The canonical list is
+        the registry's `initiative` flag (`momo_agent::actions::ACTIONS`); this
+        enum, that flag, the tool's `actionId` enum and the four literals of the
+        ADR are held equal by one test
+        (`routes::actions::the_initiative_ids_are_one_list_in_three_places`).
+        The card stands in the agent's owner's one-to-one direct message with
+        `props.origin = "agent_initiated"` and is always decided in the app.
+      enum: ["channel.create", "channel.member.add", "message.pin", "message.unpin"]
 
     SuggestableCommandId:
       type: string

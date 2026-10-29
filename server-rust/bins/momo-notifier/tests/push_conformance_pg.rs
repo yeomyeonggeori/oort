@@ -2617,6 +2617,20 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             label: "message.unpin: admins; the same card, the same app",
             action_type: "workspace_action",
             payload: workspace_action("message.unpin", json!({})),
+            audience: admins.clone(),
+            category: open,
+        },
+        // ADR-0186 증보 v5 U-c (#4704): nobody asked for this card, so a 승인 button on the lock
+        // screen would consent to something its reader never looked at. `channel.create` is
+        // otherwise decided inline (above); the origin alone moves it to the app.
+        Card {
+            label: "channel.create raised unasked (origin agent_initiated): the app opens it",
+            action_type: "workspace_action",
+            payload: {
+                let mut payload = workspace_action("channel.create", json!({}));
+                payload["origin"] = json!("agent_initiated");
+                payload
+            },
             audience: admins,
             category: open,
         },

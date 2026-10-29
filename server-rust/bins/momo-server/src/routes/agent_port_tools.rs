@@ -251,6 +251,9 @@ pub(crate) async fn execute(
         momo_mcp::TOOL_RUN_EVENT => run_event(state, caller, &call.arguments).await,
         momo_mcp::TOOL_RUN_COMPLETE => run_complete(state, caller, &call.arguments).await,
         momo_mcp::TOOL_ACTION_PROPOSE => action_propose(state, caller, &call.arguments).await,
+        momo_mcp::TOOL_ACTION_INITIATE => {
+            crate::routes::agent_initiative::action_initiate(state, caller, &call.arguments).await
+        }
         momo_mcp::TOOL_ACTION_CLAIM_SECRET => {
             action_claim_secret(state, caller, &call.arguments).await
         }
@@ -345,6 +348,10 @@ async fn record_liveness(
             )
             .await
         }
+        // A refusal of the unasked-card door is the door doing its job (the owner has not
+        // opened it, a limit was reached): it says nothing about the CONNECTION, and recording
+        // it would turn the connection `error` for a person reading the connection card.
+        Err(_) if tool == momo_mcp::TOOL_ACTION_INITIATE => return,
         Err(failure @ (ToolFailure::Unavailable | ToolFailure::NotAuthorized)) => {
             let code = if *failure == ToolFailure::Unavailable {
                 "unavailable"
@@ -570,11 +577,14 @@ async fn ping(
 // argument readers — every one of them fail-closed on shape
 // ---------------------------------------------------------------------------
 
-fn arguments(value: &Value) -> Result<&Map<String, Value>, ToolFailure> {
+pub(crate) fn arguments(value: &Value) -> Result<&Map<String, Value>, ToolFailure> {
     value.as_object().ok_or(ToolFailure::InvalidArguments)
 }
 
-fn optional_uuid(args: &Map<String, Value>, key: &str) -> Result<Option<Uuid>, ToolFailure> {
+pub(crate) fn optional_uuid(
+    args: &Map<String, Value>,
+    key: &str,
+) -> Result<Option<Uuid>, ToolFailure> {
     match args.get(key) {
         None | Some(Value::Null) => Ok(None),
         Some(Value::String(raw)) => Uuid::parse_str(raw)
@@ -584,7 +594,7 @@ fn optional_uuid(args: &Map<String, Value>, key: &str) -> Result<Option<Uuid>, T
     }
 }
 
-fn required_uuid(args: &Map<String, Value>, key: &str) -> Result<Uuid, ToolFailure> {
+pub(crate) fn required_uuid(args: &Map<String, Value>, key: &str) -> Result<Uuid, ToolFailure> {
     optional_uuid(args, key)?.ok_or(ToolFailure::InvalidArguments)
 }
 
@@ -599,7 +609,7 @@ fn optional_i64(args: &Map<String, Value>, key: &str) -> Result<Option<i64>, Too
     }
 }
 
-fn optional_str<'a>(
+pub(crate) fn optional_str<'a>(
     args: &'a Map<String, Value>,
     key: &str,
     max_bytes: usize,
@@ -611,7 +621,7 @@ fn optional_str<'a>(
     }
 }
 
-fn required_str<'a>(
+pub(crate) fn required_str<'a>(
     args: &'a Map<String, Value>,
     key: &str,
     max_bytes: usize,
@@ -626,7 +636,7 @@ fn required_str<'a>(
 /// The mapping is by status, not by message, because the messages are written
 /// for humans reading an API and this surface must not hand a hosted adapter a
 /// sentence that answers a question it was not allowed to ask.
-fn failure_of(error: &ApiError) -> ToolFailure {
+pub(crate) fn failure_of(error: &ApiError) -> ToolFailure {
     match error.status {
         StatusCode::BAD_REQUEST => ToolFailure::InvalidArguments,
         StatusCode::UNAUTHORIZED | StatusCode::FORBIDDEN => ToolFailure::NotAuthorized,
@@ -649,19 +659,19 @@ fn lease_failure_of(error: &ApiError) -> ToolFailure {
 
 /// A transaction failure → `Internal`, with the cause logged and nothing about
 /// it on the wire.
-fn internal(context: &str, error: DbError) -> ToolFailure {
+pub(crate) fn internal(context: &str, error: DbError) -> ToolFailure {
     tracing::error!(error = %error, context, "Agent Port tool transaction failed");
     ToolFailure::Internal
 }
 
-fn has_scope(identity: &HostedToolIdentity, scope: &str) -> bool {
+pub(crate) fn has_scope(identity: &HostedToolIdentity, scope: &str) -> bool {
     identity.token_scopes.iter().any(|value| value == scope)
         && identity.approved_scopes.iter().any(|value| value == scope)
 }
 
 /// Re-prove the connection inside the caller's own transaction and require one
 /// scope on both halves of the intersection.
-async fn authorize_in_tx(
+pub(crate) async fn authorize_in_tx(
     conn: &mut PgConnection,
     caller: HostedCaller,
     scope: &str,

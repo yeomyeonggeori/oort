@@ -74,6 +74,10 @@ pub const SCOPE_MESSAGES_READ: &str = "messages:read";
 /// card a human has to tap. Nothing here, and nothing in ADR-0186, ever puts an
 /// agent on the executing side of a workspace change.
 pub const SCOPE_WORKSPACE_PROPOSE: &str = "workspace:propose";
+/// `oort_action_initiate` on the Agent Port (ADR-0186 증보 v5 U-b, #4704): raise a card
+/// nobody asked for. **Absent from [`required_agent_scope`] for the same reason
+/// [`SCOPE_WORKSPACE_PROPOSE`] is** — it buys one card in the owner's DM and no REST route.
+pub const SCOPE_WORKSPACE_INITIATE: &str = "workspace:initiate";
 
 /// The scope an agent bearer must carry to reach `method path`, or `None` when
 /// no agent credential may reach it at all.
@@ -625,6 +629,30 @@ mod tests {
             None
         );
         assert_ne!(SCOPE_WORKSPACE_PROPOSE, SCOPE_WORK_CONTROL);
+    }
+
+    /// ADR-0186 증보 v5 U-b (#4704) — `workspace:initiate` opens zero REST either: every
+    /// route the propose test names, and the decision route, stay closed to it.
+    #[test]
+    fn the_initiate_scope_names_no_route_at_all() {
+        for (method, path) in [
+            ("POST", format!("/v1/workspaces/{WS}/invites")),
+            ("POST", format!("/v1/workspaces/{WS}/channels")),
+            ("PUT", format!("/v1/workspaces/{WS}/messages/{RUN}/pin")),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/approvals/{RUN}/decision"),
+            ),
+            ("PUT", format!("/v1/workspaces/{WS}/settings")),
+            ("POST", "/v1/mcp/agent-port".to_string()),
+        ] {
+            assert_ne!(
+                required_agent_scope(method, &path),
+                Some(SCOPE_WORKSPACE_INITIATE),
+                "{method} {path} must never be reachable with the initiate scope"
+            );
+        }
+        assert_ne!(SCOPE_WORKSPACE_INITIATE, SCOPE_WORKSPACE_PROPOSE);
     }
 
     /// ADR-0177 증보 D7 (#4227): closing a DM is a person tidying their own list, not an act an agent
