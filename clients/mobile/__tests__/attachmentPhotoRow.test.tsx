@@ -803,6 +803,8 @@ describe('사진 뷰어에 보낸 사람·시각이 선다 (#4297)', () => {
   async function openViewer() {
     fireEvent.press(screen.getByTestId('attachment-item'));
     await screen.findByTestId('attachment-viewer-image');
+    // #4775: sender/time controls become accessible after measurement and the opening hero.
+    await screen.findByTestId('attachment-viewer-bar');
   }
 
   it('받은 사진을 열면 보낸 사람 이름과 보낸 시각이 위쪽 띠에 선다', async () => {

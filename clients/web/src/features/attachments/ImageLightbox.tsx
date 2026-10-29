@@ -293,7 +293,7 @@ export function ImageLightbox({
   const [interactive, setInteractive] = useState(false);
   const [photoNode, setPhotoNode] = useState<HTMLImageElement | null>(null);
   const zoom = useImageLightboxZoom({ resetKey: open ? (selected?.id ?? null) : null, enabled: interactive });
-  const hero = useStageHero({open, selectedId, source, fitBeforeClose: zoom.fitForClose, onClose: () => onOpenChange(false)});
+  const hero = useStageHero({open, selectedId, source, onClose: () => onOpenChange(false)});
   const {state: stageState, content: heroContent, panel: heroPanel, enter: enterHero, noPhoto: noHeroContent} = hero;
   const zoomPhotoRef = zoom.photo.ref;
   const zoomViewerRef = zoom.viewerRef;
@@ -334,7 +334,7 @@ export function ImageLightbox({
   };
 
   return (
-    <Dialog open={open} onOpenChange={value => { if (!value) requestClose(); }}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         ref={panelRef}
         opener={opener}

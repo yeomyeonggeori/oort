@@ -358,7 +358,7 @@ export function AttachmentList({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const { workspaceId } = useSession();
-  const [viewing, setViewing] = useState<{index: number; origin: StageRect | null} | null>(null);
+  const [viewing, setViewing] = useState<{index: number; origin: StageRect | null; pending: boolean} | null>(null);
   const sources = useHeroSources();
   if (attachments.length === 0) return null;
   const images = attachments.filter(showsInlinePreview);
@@ -382,7 +382,12 @@ export function AttachmentList({
               gesture={gesture}
               registerSource={sources.register}
               onOpen={() => {
-                void sources.measure(attachment.id).then(origin => setViewing({index: position, origin}));
+                // Present immediately; native measurement prepares only the floating picture.
+                const opening = {index: position, origin: null, pending: sources.has(attachment.id)};
+                setViewing(opening);
+                if (opening.pending) void sources.measure(attachment.id).then(origin => {
+                  setViewing(current => current === opening ? {...opening, origin, pending: false} : current);
+                });
               }}
             />
           ))}
@@ -404,7 +409,8 @@ export function AttachmentList({
           images={images}
           startIndex={viewing.index}
           origin={viewing.origin}
-          measureSource={sources.measure}
+          originPending={viewing.pending}
+          measureSource={sources.has(images[viewing.index]?.id ?? '') ? sources.measure : undefined}
           senderName={senderName}
           sentAtMs={sentAtMs}
           onClose={() => setViewing(null)}

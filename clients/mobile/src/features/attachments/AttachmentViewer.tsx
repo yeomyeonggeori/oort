@@ -473,8 +473,10 @@ export interface AttachmentViewerProps {
   dismissEnabled?: boolean;
   /** 시험이 끄는 거리를 읽는 이음매(`EdgeSwipeBack` 의 `progressRef` 와 같다). */
   progressRef?: ViewerProgressRef;
-  /** Snapshot before presenting the Modal; destinations are remeasured by ID when closing. */
+  /** Opening source in window coordinates; destinations are remeasured by ID when closing. */
   origin?: StageRect | null;
+  /** Present the Modal while its opening source is still being measured. */
+  originPending?: boolean;
   measureSource?: MeasureHeroSource;
 }
 
@@ -523,6 +525,7 @@ function ViewerFrame({
   dismissEnabled = true,
   progressRef,
   origin = null,
+  originPending = false,
   measureSource,
   closeRequest,
   presented,
@@ -533,7 +536,7 @@ function ViewerFrame({
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const reduceMotion = useReduceMotion(false);
-  const [transition, dispatch] = useReducer(stageTransition, reduceMotion || origin === null, initialStage);
+  const [transition, dispatch] = useReducer(stageTransition, reduceMotion || (!originPending && origin === null), initialStage);
   const stageFade = useRef(new Animated.Value(transition.phase === 'opening' ? 0 : 1)).current;
   const heroRect = useRef<StageRect | null>(origin);
   const [closingFrame, setClosingFrame] = useState<{from: StageRect; to: StageRect} | null>(null);
@@ -569,9 +572,16 @@ function ViewerFrame({
   const fitted = fitStageRect(natural, {width, height});
   const requestClose = useCallback(() => {
     if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
-    dispatch({type: 'close', zoomed, reduceMotion});
-  }, [zoomed, reduceMotion]);
+    dispatch({type: 'close', zoomed, reduceMotion: reduceMotion || (!origin && !measureSource)});
+  }, [zoomed, reduceMotion, origin, measureSource]);
   closeRequest.current = requestClose;
+  useEffect(() => {
+    if (origin && heroRect.current === null) heroRect.current = origin;
+    if (!originPending && origin === null && transition.phase === 'opening') {
+      stageFade.setValue(1);
+      dispatch({type: 'arrived', ticket: transition.ticket});
+    }
+  }, [originPending, origin, transition.phase, transition.ticket, stageFade]);
   useEffect(() => {
     if (reduceMotion) dispatch({type: 'reduce'});
   }, [reduceMotion]);
@@ -610,7 +620,7 @@ function ViewerFrame({
   const heroActive = !reduceMotion && ((transition.phase === 'opening' && origin !== null) ||
     (transition.phase === 'closing' && closingFrame !== null));
   useEffect(() => {
-    if (!presented || (transition.phase === 'closing' && !closingFrame)) return;
+    if (!presented || originPending || (transition.phase === 'closing' && !closingFrame)) return;
     if (transition.phase !== 'opening' && transition.phase !== 'closing') return;
     const ticket = transition.ticket;
     const animation = Animated.spring(stageFade, {
@@ -621,7 +631,7 @@ function ViewerFrame({
       if (finished && !heroActive) dispatch({type: 'arrived', ticket});
     });
     return () => animation.stop();
-  }, [presented, transition.phase, transition.ticket, closingFrame, heroActive, stageFade]);
+  }, [presented, originPending, transition.phase, transition.ticket, closingFrame, heroActive, stageFade]);
   useEffect(() => {
     if (!presented || !heroActive) return;
     const ticket = transition.ticket;
@@ -802,13 +812,19 @@ function ViewerFrame({
       : ('no-hide-descendants' as const),
   };
 
+  // The retained native Modal paints only an inaccessible exit stage after close.
+  const exiting = (origin !== null || measureSource !== undefined) &&
+    (transition.phase === 'fitting' || transition.phase === 'closing' || transition.phase === 'closed');
   return (
     <View
-      accessibilityViewIsModal
+      accessibilityViewIsModal={!exiting}
+      accessibilityElementsHidden={exiting}
+      importantForAccessibility={exiting ? 'no-hide-descendants' : 'auto'}
+      pointerEvents={exiting ? 'none' : 'auto'}
       // VoiceOver 두 손가락 문지르기(escape)가 닫는다 — 단추를 찾지 못하는 사람의 길이다.
       onAccessibilityEscape={requestClose}
       style={styles.viewer}
-      testID="attachment-viewer"
+      testID={exiting ? "attachment-viewer-exit" : "attachment-viewer"}
       // 사진 밖에 닿은 손가락만 쥔다(부분 집합). 사진 위는 쪽이 쥔다 — 위 「응답을 쥐는 자리」.
       {...frameHandlers}
     >
@@ -834,7 +850,7 @@ function ViewerFrame({
           horizontal
           pagingEnabled
           // 끌기를 쥔 동안과 확대 중에는 넘기지 않는다 — 확대된 사진을 끌어 옮기는 손가락이 옆 장을 끌어오면 안 된다.
-          scrollEnabled={!dragging && !zoomed && transition.phase === 'open'}
+          scrollEnabled={!dragging && !zoomed}
           testID="attachment-viewer-scroll"
           showsHorizontalScrollIndicator={false}
           contentOffset={{ x: startIndex * width, y: 0 }}
@@ -870,7 +886,7 @@ function ViewerFrame({
         onArrive={() => dispatch({type: 'arrived', ticket: transition.ticket})}
       /> : null}
       {/* 리퀴드 글래스는 조상의 불투명도가 움직이는 곳에서 쓸 수 없다 — 파일 머리 「조작은 리퀴드 글래스를 쓰지 않는다」. */}
-      <LiquidGlassAllowed.Provider value={false}>
+      {!exiting ? <LiquidGlassAllowed.Provider value={false}>
         <Animated.View
           {...chromeProps}
           style={[
@@ -1052,7 +1068,7 @@ function ViewerFrame({
             </GlassButton>
           </View>
         </Animated.View>
-      </LiquidGlassAllowed.Provider>
+      </LiquidGlassAllowed.Provider> : null}
     </View>
   );
 }

@@ -62,28 +62,48 @@ describe('hero4775', () => {
     expect(stage().dataset.stagePhase).toBe('open');
     click(q('[data-testid="image-lightbox-next"]'));
     click(q('[data-testid="image-lightbox-close"]'));
-    expect(stage().dataset.stagePhase).toBe('closing');
+    // #4775 close contract: the dialog is gone; only a noninteractive snapshot exits.
+    expect(stage()).toBeNull();
     expect(motions.find(motion => motion.node.matches('.stage-hero'))!.frames.at(-1)).toMatchObject({left: '180px', top: '120px', width: '136px'});
     await finish();
     expect(document.querySelector('[data-testid="image-lightbox"]')).toBeNull();
   });
-  it('waits for the zoom fit transition before starting the exit on Escape', async () => {
+  it('closes the dialog immediately, then fits the detached snapshot before its exit on Escape', async () => {
     open(); await finish();
     act(() => photo().dispatchEvent(new MouseEvent('dblclick', {bubbles: true, clientX: 500, clientY: 350})));
     expect(photo().dataset.zoomed).toBe('');
     act(() => stage().dispatchEvent(new KeyboardEvent('keydown', {key: 'Escape', bubbles: true})));
-    expect(stage().dataset.stagePhase).toBe('fitting');
-    expect(photo().style.getPropertyValue('--lightbox-zoom')).toBe('1');
-    expect(motions).toHaveLength(0);
-    await act(async () => {
-      const end = new Event('transitionend', {bubbles: true});
-      Object.defineProperty(end, 'propertyName', {value: 'transform'});
-      photo().dispatchEvent(end);
-    });
-    expect(stage().dataset.stagePhase).toBe('closing');
-    expect(motions.some(motion => motion.node.matches('.stage-hero'))).toBe(true);
+    // #4775: fit/exit now belongs to an inert layer outside the already closed Dialog.
+    expect(stage()).toBeNull();
+    expect(q('.stage-hero-layer').inert).toBe(true);
+    expect(q('.stage-hero-layer').getAttribute('aria-hidden')).toBe('true');
+    const fit = motions.find(motion => motion.node.matches('.stage-hero'))!;
+    expect(fit.frames.at(-1)).toMatchObject({width: '600px', height: '400px'});
+    await finish(); // fit completion starts the return to the thumbnail
+    expect(motions.find(motion => motion.node.matches('.stage-hero'))!.frames.at(-1))
+      .toMatchObject({left: '30px', top: '120px', width: '136px'});
     await finish();
-    expect(document.querySelector('[data-testid="image-lightbox"]')).toBeNull();
+    expect(document.querySelector('.stage-hero-layer')).toBeNull();
+  });
+  it('fits from the currently painted pan when a smooth zoom is interrupted', async () => {
+    open(); await finish();
+    act(() => photo().dispatchEvent(new MouseEvent('dblclick', {bubbles: true, clientX: 600, clientY: 350})));
+    photo().style.setProperty('--lightbox-pan-x', '-100px'); // target, still in flight
+    const nativeStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation(node => {
+      const style = nativeStyle(node);
+      if (node === photo()) Object.defineProperty(style, 'transform', {value: 'matrix(2, 0, 0, 2, -30, 0)'});
+      return style;
+    });
+    vi.spyOn(photo(), 'getBoundingClientRect').mockReturnValue({
+      x: -130, y: -50, width: 1200, height: 800,
+      left: -130, top: -50, right: 1070, bottom: 750, toJSON: () => ({}),
+    });
+    click(q('[data-testid="image-lightbox-close"]'));
+    expect(stage()).toBeNull();
+    expect(motions.find(motion => motion.node.matches('.stage-hero'))!.frames.at(-1))
+      .toMatchObject({left: '200px', top: '150px', width: '600px', height: '400px'});
+    await finish(); await finish();
   });
   it('reduced motion opens and closes immediately without any WAAPI animation', () => {
     reduce = true;

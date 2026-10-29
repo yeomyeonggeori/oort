@@ -1153,6 +1153,8 @@ describe('대화에서 연 뷰어', () => {
     await renderList();
     fireEvent.press(screen.getByTestId('attachment-item'));
     await screen.findByTestId('attachment-viewer-image');
+    // #4775: loaded pixels can precede the opening hero's interactive controls.
+    await screen.findByTestId('attachment-viewer-bar');
     expect(screen.getByTestId('attachment-viewer')).toBeTruthy(); // 정말 열려 있었다
     const touch = finger(photo());
     touch.down(200, 300);
@@ -1167,6 +1169,8 @@ describe('대화에서 연 뷰어', () => {
     await renderList();
     fireEvent.press(screen.getByTestId('attachment-item'));
     await screen.findByTestId('attachment-viewer-image');
+    // #4775: loaded pixels can precede the opening hero's interactive controls.
+    await screen.findByTestId('attachment-viewer-bar');
     expect(
       flatten(screen.getByTestId('attachment-viewer-bar').props.style).paddingTop,
     ).toBe(59);
@@ -1684,6 +1688,8 @@ describe('⑩ 보낸 사람·날짜·시각', () => {
     await act(async () => {});
     fireEvent.press(screen.getByTestId('attachment-item'));
     await screen.findByTestId('attachment-viewer-image');
+    // #4775: loaded pixels can precede the opening hero's interactive controls.
+    await screen.findByTestId('attachment-viewer-bar');
     expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('최민수');
     expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
   });
@@ -1795,7 +1801,11 @@ describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
       tap(photo(), x, y);
       tap(photo(), x, y);
     });
-  const FULL = { x: 0, y: 0, width, height };
+  // #4775 deliberately fits native zoom content to the photograph (the default image fixture is 4:3).
+  // Hero and zoom now share this content rectangle; the full window includes blank margins.
+  const photoHeight = width * 3 / 4;
+  const photoTop = (height - photoHeight) / 2;
+  const FULL = { x: 0, y: 0, width, height: photoHeight };
 
   beforeEach(() => {
     zoomTo().mockClear();
@@ -1865,9 +1875,9 @@ describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
   it('두 번 탭: 탭한 곳이 가운데 오게 2배로 키운다 — 조작은 깜박이지 않는다', async () => {
     const timing = jest.spyOn(Animated, 'timing');
     const { onClose } = await mount();
-    doubleTap(300, 500);
+    doubleTap(300, photoTop + photoHeight / 2);
     expect(zoomTo()).toHaveBeenLastCalledWith(
-      { x: 300 - width / 4, y: 500 - height / 4, width: width / 2, height: height / 2, animated: true },
+      { x: 300 - width / 4, y: photoHeight / 4, width: width / 2, height: photoHeight / 2, animated: true },
       true,
     );
     // 첫 탭의 한 번 탭은 두 번째 탭이 취소했다 — 문턱이 지난 뒤에도 조작이 그대로이고 숨었다 돌아오는 움직임도 없었다.
@@ -1881,17 +1891,17 @@ describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
     for (const [x, y] of [
       [4, 4],
       [width - 4, 4],
-      [4, height - 4],
-      [width - 4, height - 4],
+      [4, photoHeight - 4],
+      [width - 4, photoHeight - 4],
     ] as const) {
       zoomTo().mockClear();
-      doubleTap(x, y);
+      doubleTap(x, photoTop + y);
       const [rect] = zoomTo().mock.lastCall as [{ x: number; y: number; width: number; height: number }];
-      expect([rect.width, rect.height]).toEqual([width / 2, height / 2]);
+      expect([rect.width, rect.height]).toEqual([width / 2, photoHeight / 2]);
       expect(rect.x).toBeGreaterThanOrEqual(0);
       expect(rect.y).toBeGreaterThanOrEqual(0);
       expect(rect.x + rect.width).toBeLessThanOrEqual(width);
-      expect(rect.y + rect.height).toBeLessThanOrEqual(height);
+      expect(rect.y + rect.height).toBeLessThanOrEqual(photoHeight);
       expect(x).toBeGreaterThanOrEqual(rect.x);
       expect(x).toBeLessThanOrEqual(rect.x + rect.width);
       expect(y).toBeGreaterThanOrEqual(rect.y);
@@ -2031,6 +2041,17 @@ describe('hero4775', () => {
     }));
     return () => act(() => { callbacks.splice(0).forEach(callback => callback({finished: true})); });
   }
+  it('opens immediately while measuring and shows the stage when no source rectangle arrives', async () => {
+    const props = {workspaceId: 'ws', channelId: 'ch', images: [IMAGES[0] as MessageAttachment], startIndex: 0, onClose: jest.fn()};
+    const {rerender} = render(<AttachmentViewer {...props} originPending />);
+    expect(screen.getByTestId('attachment-viewer')).toBeTruthy();
+    expect(screen.queryByTestId('attachment-viewer-back')).toBeNull();
+    fireEvent(screen.getByTestId('attachment-viewer-modal'), 'show');
+    rerender(<AttachmentViewer {...props} originPending={false} origin={null} />);
+    await screen.findByTestId('attachment-viewer-back');
+    // RN's animated host resolves the composed opacity in this renderer.
+    expect(flatten(screen.getByTestId('attachment-viewer-backdrop').props.style).opacity).toBe(1);
+  });
   it.each([
     {shape: '세로', natural: {width: 200, height: 800}, fitted: {x: 100, y: 0, width: 200, height: 800}},
     {shape: '정사각', natural: {width: 800, height: 800}, fitted: {x: 0, y: 200, width: 400, height: 400}},

@@ -450,13 +450,7 @@ describe("image lightbox zoom", () => {
     act(() => lb('[data-testid="image-lightbox-stage"]')?.click());
     expect(lb('[data-testid="image-lightbox"]')).not.toBeNull();
     press({key: "Escape"});
-    expect(isZoomed()).toBe(false);
-    expect(lb('[data-testid="image-lightbox"]')?.dataset.stagePhase).toBe('fitting');
-    await act(async () => {
-      const end = new Event('transitionend', {bubbles: true});
-      Object.defineProperty(end, 'propertyName', {value: 'transform'});
-      photo()?.dispatchEvent(end);
-    });
+    // #4775: fit/exit is an inert snapshot outside the Dialog; close releases its tree immediately.
     expect(lb('[data-testid="image-lightbox"]')).toBeNull();
   });
 

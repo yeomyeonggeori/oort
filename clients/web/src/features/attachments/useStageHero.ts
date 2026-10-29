@@ -4,7 +4,6 @@ import {
   type StageRect, type StageTransition, type StageEvent,
 } from "@momo/core/lib/stageTransition";
 import { STAGE_HERO_SPRING, STAGE_HERO_WINDOW_MS } from "@/design/motion";
-import "./stageHero.css";
 
 export type StageSource = (id: string) => HTMLElement | null;
 const reduced = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
@@ -27,13 +26,12 @@ function springFrames(from: StageRect, to: StageRect): Keyframe[] {
   });
 }
 
-/** Reusable photo/decision stage lifecycle. The caller keeps its Dialog mounted until closed.
+/** Reusable photo/decision stage lifecycle. Closing releases the Dialog immediately; a silent snapshot exits.
  * No scroll, focus or layout writes to the source. Source IDs are resolved again on every close. */
-export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose }: {
+export function useStageHero({ open, selectedId, source, onClose }: {
   open: boolean;
   selectedId: string | null;
   source?: StageSource;
-  fitBeforeClose: () => Promise<void>;
   onClose: () => void;
 }) {
   const [state, setState] = useState<StageTransition>({ phase: "closed", ticket: 0 });
@@ -42,12 +40,13 @@ export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose
   const scrim = useRef<HTMLDivElement | null>(null);
   const backdrop = useRef<HTMLDivElement | null>(null);
   const content = useRef<HTMLElement | null>(null);
+  const exitLayer = useRef<HTMLElement | null>(null);
   const clone = useRef<HTMLElement | null>(null);
   const animations = useRef<Animation[]>([]);
   const origin = useRef<StageRect | null>(null);
   const wasOpen = useRef(false);
-  const callbacks = useRef({ selectedId, source, onClose, fitBeforeClose });
-  callbacks.current = { selectedId, source, onClose, fitBeforeClose };
+  const callbacks = useRef({ selectedId, source, onClose });
+  callbacks.current = { selectedId, source, onClose };
 
   const send = useCallback((event: StageEvent) => {
     const next = stageTransition(machine.current, event);
@@ -60,16 +59,17 @@ export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose
     animations.current = [];
     clone.current?.remove();
     clone.current = null;
-    if (content.current) content.current.style.visibility = "";
+    exitLayer.current?.remove();
+    exitLayer.current = null;
+    content.current?.classList.remove("invisible");
   }, []);
   const animate = useCallback((closing: boolean, ticket: number) => {
     const node = content.current;
     const host = panel.current;
     const done = () => {
       if (machine.current.ticket !== ticket) return;
-      const next = send({ type: "arrived", ticket });
+      send({ type: "arrived", ticket });
       cleanup();
-      if (next.phase === "closed") callbacks.current.onClose();
     };
     if (!node || !host || reduced() || !node.animate) { done(); return; }
     const fitted = rectOf(node);
@@ -88,12 +88,10 @@ export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose
     floating.setAttribute("aria-hidden", "true");
     floating.classList.remove("lightbox-photo");
     floating.classList.add("stage-hero");
-    floating.style.transform = "none";
-    floating.style.visibility = "visible";
     floating.style.borderRadius = getComputedStyle(thumbnail ?? node).borderRadius;
     host.appendChild(floating);
     clone.current = floating;
-    node.style.visibility = "hidden";
+    node.classList.add("invisible");
     const frames = springFrames(from, to);
     const sourceRadius = getComputedStyle(thumbnail ?? node).borderRadius;
     frames[0].borderRadius = closing ? getComputedStyle(node).borderRadius : sourceRadius;
@@ -108,6 +106,7 @@ export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose
 
   useLayoutEffect(() => {
     if (open && !wasOpen.current) {
+      cleanup();
       wasOpen.current = true;
       const id = callbacks.current.selectedId;
       const thumbnail = id ? callbacks.current.source?.(id) : null;
@@ -119,9 +118,12 @@ export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose
       setState(next);
     } else if (!open && wasOpen.current) {
       wasOpen.current = false;
-      cleanup();
-      machine.current = { phase: "closed", ticket: machine.current.ticket + 1 };
-      setState(machine.current);
+      // A closed Dialog has no focus trap or controls. Its detached exit snapshot owns its animation.
+      if (machine.current.phase !== "closing" && machine.current.phase !== "fitting") {
+        cleanup();
+        machine.current = { phase: "closed", ticket: machine.current.ticket + 1 };
+        setState(machine.current);
+      }
     }
   }, [open, cleanup]);
   useLayoutEffect(() => {
@@ -149,15 +151,81 @@ export function useStageHero({ open, selectedId, source, fitBeforeClose, onClose
     const previous = machine.current;
     const next = send({ type: "close", zoomed, reduceMotion: reduced() });
     if (next === previous) return;
-    if (next.phase === "closed") { cleanup(); callbacks.current.onClose(); return; }
-    if (next.phase === "fitting") {
-      void callbacks.current.fitBeforeClose().then(() => {
-        if (machine.current.phase !== "fitting" || machine.current.ticket !== next.ticket) return;
-        const closing = send({ type: "fit" });
-        animate(true, closing.ticket);
+    const node = content.current;
+    if (next.phase === "closed" || !node || !node.animate) {
+      cleanup();
+      send({type: "reduce"});
+      callbacks.current.onClose();
+      return;
+    }
+    const painted = clone.current ? rectOf(clone.current) : rectOf(node);
+    const box = rectOf(node);
+    // Layout dimensions exclude zoom; the painted center includes the current pan.
+    const width = node.offsetWidth;
+    const height = node.offsetHeight;
+    // A smooth zoom can be interrupted between frames: inline variables describe its TARGET,
+    // whereas the computed transform describes the same painted instant as the bounding box.
+    const matrix = getComputedStyle(node).transform.match(/^matrix(3d)?\((.+)\)$/);
+    const values = matrix?.[2].split(",").map(Number);
+    const panX = values?.[matrix?.[1] ? 12 : 4] ?? 0;
+    const panY = values?.[matrix?.[1] ? 13 : 5] ?? 0;
+    const fitted = {
+      x: box.x + box.width / 2 - panX - width / 2,
+      y: box.y + box.height / 2 - panY - height / 2,
+      width, height,
+    };
+    const id = callbacks.current.selectedId;
+    const thumbnail = id ? callbacks.current.source?.(id) : null;
+    const destination = stageExitRect(thumbnail?.isConnected ? rectOf(thumbnail) : null,
+      fitted, {width: innerWidth, height: innerHeight});
+    const floating = node.cloneNode(true) as HTMLElement;
+    floating.removeAttribute("id");
+    floating.removeAttribute("data-testid");
+    floating.classList.remove("lightbox-photo", "invisible");
+    floating.classList.add("stage-hero");
+    floating.setAttribute("aria-hidden", "true");
+    const radius = getComputedStyle(thumbnail ?? node).borderRadius;
+    const photoRadius = getComputedStyle(node).borderRadius;
+    cleanup();
+    const layer = document.createElement("div");
+    layer.className = "stage-hero-layer layer-overlay-surface";
+    layer.setAttribute("aria-hidden", "true");
+    layer.inert = true;
+    const backgrounds = [scrim.current, backdrop.current].filter((n): n is HTMLDivElement => n !== null)
+      .map(original => {
+        const background = original.cloneNode(true) as HTMLElement;
+        // The detached layer supplies the modal elevation; its scrim must stay BELOW the photo.
+        background.classList.remove("layer-overlay-scrim");
+        return background;
       });
-    } else animate(true, next.ticket);
-  }, [send, cleanup, animate]);
+    layer.append(...backgrounds, floating);
+    document.body.append(layer);
+    exitLayer.current = layer;
+    clone.current = floating;
+    const ticket = next.ticket;
+    const exit = () => {
+      if (machine.current.ticket !== ticket) return;
+      const closing = machine.current.phase === "fitting" ? send({type: "fit"}) : machine.current;
+      const frames = springFrames(zoomed ? fitted : painted, destination);
+      frames[0].borderRadius = photoRadius;
+      frames[frames.length - 1].borderRadius = radius;
+      const motion = floating.animate(frames, {duration: STAGE_HERO_WINDOW_MS, fill: "both"});
+      animations.current.push(motion, ...backgrounds.map(background => background.animate(
+        [{opacity: 1}, {opacity: 0}], {duration: STAGE_HERO_WINDOW_MS, fill: "both"})));
+      void motion.finished.then(() => {
+        if (machine.current.ticket !== closing.ticket) return;
+        send({type: "arrived", ticket: closing.ticket});
+        cleanup();
+      }, () => {});
+    };
+    if (zoomed) {
+      const fit = floating.animate(springFrames(painted, fitted), {duration: STAGE_HERO_WINDOW_MS, fill: "both"});
+      animations.current.push(fit);
+      void fit.finished.then(exit, () => {});
+    } else exit();
+    // This callback removes the Dialog now, including its Escape layer and focus trap.
+    callbacks.current.onClose();
+  }, [send, cleanup]);
   // Loading/error/empty states have no photograph to animate. They must still have a working close path.
   const noPhoto = useCallback(() => {
     if (machine.current.phase === "opening") send({ type: "arrived", ticket: machine.current.ticket });

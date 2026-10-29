@@ -1,9 +1,0 @@
-/* The stage's reusable floating crop. It never occupies conversation layout. */
-.stage-hero {
-  position: fixed;
-  object-fit: cover;
-  pointer-events: none;
-  max-width: none;
-  max-height: none;
-  z-index: 1;
-}

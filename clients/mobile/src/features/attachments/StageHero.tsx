@@ -2,7 +2,8 @@ import React, {useEffect, useMemo, useRef} from 'react';
 import {Animated, Image, StyleSheet} from 'react-native';
 import type {StageRect} from '@momo/core/lib/stageTransition';
 import {VIEWER_SNAP_SPRING} from '../../design/motion';
-import {radius} from '../../design/tokens';
+import {radius, type Palette} from '../../design/tokens';
+import {useStyles} from '../../design/theme';
 
 /** Shared native stage shell: crop changes with the frame, content keeps its aspect ratio.
  * Mounted separately from the pager so no message or zoom layout participates in the spring. */
@@ -16,6 +17,7 @@ export function StageHero({uri, from, to, closing, running = true, onArrive, rec
   rectRef: React.MutableRefObject<StageRect | null>;
   onArrive: () => void;
 }): React.JSX.Element {
+  const styles = useStyles(buildStyles);
   const progress = useRef(new Animated.Value(0)).current;
   const arrived = useRef(onArrive);
   arrived.current = onArrive;
@@ -48,4 +50,4 @@ export function StageHero({uri, from, to, closing, running = true, onArrive, rec
     {children ?? (uri ? <Image source={{uri}} resizeMode="cover" style={StyleSheet.absoluteFill} /> : null)}
   </Animated.View>;
 }
-const styles = StyleSheet.create({frame: {position: 'absolute', overflow: 'hidden'}});
+const buildStyles = (_color: Palette) => StyleSheet.create({frame: {position: 'absolute', overflow: 'hidden'}});

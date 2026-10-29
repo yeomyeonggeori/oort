@@ -21,5 +21,6 @@ export function useHeroSources() {
       resolve(nodes.current.get(id) === node && validStageRect(rect) ? rect : null);
     });
   }), []);
-  return {register, measure};
+  const has = (id: string) => nodes.current.has(id);
+  return {register, measure, has};
 }
