@@ -26,7 +26,7 @@ import {
   type RefreshControlProps,
   type ScrollViewProps,
 } from 'react-native';
-import {haptics} from '../lib/haptics';
+import {haptics, hapticScope} from '../lib/haptics';
 import {useReduceMotionRef} from '../lib/useReduceMotion';
 import {OortLoader} from './brand/OortLoader';
 import {
@@ -84,9 +84,8 @@ import {font, radius, SAFE_GUTTER, space, type Palette} from './tokens';
 // 진행 중에는 `busyRef` 가 막아 한 번의 새로고침에 한 번이다. 계약의 「스크롤에서는 부르지 않는다」를
 // 그대로 지킨다.
 //
-// 완료(`success`/`warning`)는 사용자의 당김에 대한 **응답**이 도착해 화면이 바뀌는 순간이다(성공은 표시가
-// 물러나기 시작할 때, 실패는 실패 안내가 서는 때). 애니메이션의 끝이 아니라 요청의 결과를 손에 전하는
-// 일이라 계약 1·2번의 결과 햅틱 쪽이다(S2 의 전송 확정·실패와 같다). 햅틱이 꺼진 기기·설정은 OS 가 처리한다.
+// 성공은 무음이고 실패만 `warning`이다(#4298). 요청을 시작한 화면·대상이 그대로 있고 앱이 앞에 있을 때만
+// 결과를 전한다. 화면을 떠났다가 돌아와도 이전 당김의 늦은 결과는 울리지 않는다.
 //
 // ## 실패는 시각으로도 서고, 시간으로 사라지지 않는다 (#3992)
 //
@@ -276,6 +275,10 @@ export function usePullRefresh(
   const mountedRef = useRef(true);
   const activeRef = useRef(active);
   activeRef.current = active;
+  const hapticVisit = useRef({active, resetKey, version: 0});
+  if (hapticVisit.current.active !== active || !Object.is(hapticVisit.current.resetKey, resetKey)) {
+    hapticVisit.current = {active, resetKey, version: hapticVisit.current.version + 1};
+  }
   /** 최소 표시 창을 재는 타이머. */
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   /** 재조회를 기다리는 시간의 상한 타이머. */
@@ -350,10 +353,12 @@ export function usePullRefresh(
   }, []);
 
   const handleRefresh = useCallback(() => {
-    if (busyRef.current) return;
+    if (busyRef.current || !activeRef.current || !mountedRef.current) return;
     busyRef.current = true;
     // 임계 통과: 표준 컨트롤이 새로고침을 세우는 이 순간이 곧 햅틱이 울릴 때다(위 「햅틱」).
-    haptics.light();
+    haptics.event('refreshThreshold');
+    const visit = hapticVisit.current.version;
+    const resultHaptic = hapticScope(() => mountedRef.current && activeRef.current && hapticVisit.current.version === visit);
     // 다음 당김이 섰다: 이전 실패는 더 말하지 않는다(위 「안내는 시간으로 사라지지 않는다」 1).
     setNotice(null);
     setShown(true);
@@ -396,13 +401,9 @@ export function usePullRefresh(
         // 새로고침은 여기서 끝난다: 컨트롤이 닫혀야 다음 당김이 선다. 실패 안내는 머리가 아니라 목록 위에 남는다.
         busyRef.current = false;
         setRefreshing(false);
-        if (!isFailed) {
-          // 표시가 물러나는 순간이 곧 응답이 손에 닿는 순간이다.
-          haptics.success();
-          return;
-        }
-        // 실패: 안내가 서는 순간이 곧 응답이 손에 닿는 순간이다.
-        haptics.warning();
+        if (!isFailed) return;
+        // A result from a departed screen/app stays silent, including after returning.
+        resultHaptic('refreshFailed');
         // 응답이 오기 전에 화면을 떠났으면(탭을 옮겼으면) 안내를 세우지 않는다: 돌아왔을 때 옛 실패가 서 있게 된다.
         if (!activeRef.current) return;
         // 안내는 컨트롤이 다 닫힌 뒤에 선다(위 `NOTICE_FIRST_MS`).

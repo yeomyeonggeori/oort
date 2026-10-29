@@ -1,26 +1,76 @@
-// =============================================================================
-// 햅틱 — 사용자가 만든 순간에 한 번, 시각과 같은 프레임에 (#3580).
-//
-// emil `animate-expo` §8 의 세 규칙이 이 파일의 계약이다:
-//   1. 시각과 **같은 프레임** — 누름·임계의 햅틱은 핸들러 안에서 동기로 한다(await·타이머 없음).
-//      요청의 결과(S2 전송 확정·실패, #3962 새로고침 완료·실패)는 응답이 도착해 화면이 바뀌는 그 프레임에 낸다.
-//   2. **사용자 행동 1회 = 호출 1회** — 스크롤·프레임·실시간 수신·애니메이션 끝에서는 부르지 않는다.
-//   3. **유일한 피드백이 아니다** — 시스템 햅틱 설정이 꺼져 있으면 OS 가 아무것도 내지 않는다
-//      (앱이 그 설정을 따로 읽을 필요가 없다). 시각이 단독으로도 서야 한다.
-//
-// 당겨서 새로고침(`design/refresh.tsx`, #3962)은 이 계약 안에서 호출한다: 임계 통과의 `light` 는 표준
-// 컨트롤이 새로고침을 세우는 순간(`onRefresh`, 사용자의 당김이 만든 한 번)이고 스크롤 이벤트에서는 부르지
-// 않는다. 완료의 `success`/`warning` 은 그 당김에 대한 응답이 도착해 화면이 바뀌는 순간이다(실패는 화면에도
-// 「새로고침하지 못했어요」가 선다: 계약 3번).
-//
-// 모듈은 지연 로드한다: 네이티브 모듈이 없는 빌드(구 빌드·Jest)에서 import 가 던지면
-// 탭 한 번이 앱을 죽인다. 실패는 삼킨다 — 햅틱이 기능을 깨뜨리면 안 된다.
-// =============================================================================
+import {useSyncExternalStore} from 'react';
+import {AppState, Platform} from 'react-native';
+
+import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
+
+// User events only. Never queue a suppressed pulse; visuals must stand on their own.
+export type HapticMode = 'rich' | 'basic' | 'off';
+export const HAPTIC_MODES = [
+  { value: 'rich', label: '풍부' },
+  { value: 'basic', label: '기본' },
+  { value: 'off', label: '끔' },
+] as const;
+
+type Pattern =
+  | 'selection'
+  | 'light'
+  | 'medium'
+  | 'success'
+  | 'warning'
+  | 'error';
+const events = {
+  messageMenu: ['medium', 'basic'],
+  reactionChanged: ['selection', 'basic'],
+  reactionCandidateChanged: ['selection', 'basic'],
+  profileOpened: ['light', 'basic'],
+  jumpToLatest: ['light', 'rich'],
+  tabChanged: ['selection', 'rich'],
+  filterChanged: ['selection', 'rich'],
+  deleteConfirmed: ['medium', 'rich'],
+  recordingStarted: ['light', 'basic'],
+  recordingStopped: ['medium', 'basic'],
+  refreshThreshold: ['light', 'basic'],
+  refreshFailed: ['warning', 'basic'],
+} as const satisfies Record<string, readonly [Pattern, 'rich' | 'basic']>;
+export type HapticEvent = keyof typeof events;
+
+const listeners = new Set<() => void>();
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+export function getHapticMode(): HapticMode {
+  const stored = nonSecretStore().getString(NON_SECRET_KEYS.hapticMode);
+  return stored === 'basic' || stored === 'off' ? stored : 'rich';
+}
+export function setHapticMode(mode: HapticMode): void {
+  if (getHapticMode() === mode) return;
+  nonSecretStore().set(NON_SECRET_KEYS.hapticMode, mode);
+  listeners.forEach(listener => listener());
+}
+export function useHapticMode(): HapticMode {
+  return useSyncExternalStore(subscribe, getHapticMode, getHapticMode);
+}
+
+let appEpoch = 0;
+AppState.addEventListener('change', state => {
+  if (state !== 'active') appEpoch += 1;
+});
+/** Capture at the user action. Leaving the app/screen cancels late results, even after returning. */
+export function hapticScope(
+  isCurrent: () => boolean,
+): (event: HapticEvent) => void {
+  const epoch = appEpoch;
+  return event => {
+    if (epoch === appEpoch && isCurrent()) haptics.event(event);
+  };
+}
 
 type HapticsModule = typeof import('expo-haptics');
-
 let cached: HapticsModule | null | undefined;
-
+let lastAt = -Infinity;
 function load(): HapticsModule | null {
   if (cached !== undefined) return cached;
   try {
@@ -30,42 +80,77 @@ function load(): HapticsModule | null {
   }
   return cached;
 }
-
-function fire(run: (haptics: HapticsModule) => Promise<void>): void {
-  const haptics = load();
-  if (haptics === null) return;
+function fire(pattern: Pattern, level: 'basic' | 'rich' = 'basic'): void {
+  if (AppState.currentState !== 'active') return;
+  const mode = getHapticMode();
+  if (mode === 'off' || (mode === 'basic' && level === 'rich')) return;
+  const now = performance.now(); // monotonic, shared across ALL callers, including legacy APIs
+  if (now - lastAt < 100) return;
+  const native = load();
+  if (!native) return;
+  lastAt = now;
   try {
-    run(haptics).catch(() => {
-      /* 햅틱이 없는 기기·설정 끔 — 조용히 */
-    });
+    let result: Promise<void>;
+    if (Platform.OS === 'android') {
+      // Android's semantic path respects system touch-feedback settings; no Vibrator fallback.
+      const kind = {
+        selection: native.AndroidHaptics.Segment_Tick,
+        light: native.AndroidHaptics.Context_Click,
+        medium: native.AndroidHaptics.Long_Press,
+        success: native.AndroidHaptics.Confirm,
+        warning: native.AndroidHaptics.Reject,
+        error: native.AndroidHaptics.Reject,
+      }[pattern];
+      result = native.performAndroidHapticsAsync(kind);
+    } else if (pattern === 'selection') result = native.selectionAsync();
+    else if (pattern === 'light' || pattern === 'medium') {
+      result = native.impactAsync(
+        pattern === 'light'
+          ? native.ImpactFeedbackStyle.Light
+          : native.ImpactFeedbackStyle.Medium,
+      );
+    } else {
+      const kind = {
+        success: native.NotificationFeedbackType.Success,
+        warning: native.NotificationFeedbackType.Warning,
+        error: native.NotificationFeedbackType.Error,
+      }[pattern];
+      result = native.notificationAsync(kind);
+    }
+    void result.catch(() => undefined);
   } catch {
-    /* 동기 예외도 같다 */
+    /* Missing engine/module must never break an action. */
   }
 }
 
+// Keep these names: other S1 slots own their call sites. Rich-only legacy light/selection
+// cover send, custom sheet, tab/filter; semantic base events use event() explicitly.
 export const haptics = {
-  /** 값이 한 칸 넘어갈 때 — 탭 전환·필터·섹션 접기. */
+  event(event: HapticEvent): void {
+    const [pattern, level] = events[event];
+    fire(pattern, level);
+  },
   selection(): void {
-    fire(h => h.selectionAsync());
+    fire('selection', 'rich');
   },
-  /** 무언가 열리거나 자리 잡을 때 — 프로필·+ 메뉴. */
   light(): void {
-    fire(h => h.impactAsync(h.ImpactFeedbackStyle.Light));
+    fire('light', 'rich');
   },
-  /** 무거운 것이 내려앉거나 파괴적 행동이 나갈 때(S2). */
   medium(): void {
-    fire(h => h.impactAsync(h.ImpactFeedbackStyle.Medium));
+    fire('medium');
   },
-  /** 작업이 끝났다(S2: 전송 확정). */
   success(): void {
-    fire(h => h.notificationAsync(h.NotificationFeedbackType.Success));
+    fire('success');
   },
-  /** 되돌릴 수 없는 일을 확인하고 나갈 때 - 멈추기(N4 #3596), 새로고침이 실패했을 때(#3962). 한 번에 한 번. */
   warning(): void {
-    fire(h => h.notificationAsync(h.NotificationFeedbackType.Warning));
+    fire('warning');
   },
-  /** 작업이 실패했다(S2: 전송 실패). */
   error(): void {
-    fire(h => h.notificationAsync(h.NotificationFeedbackType.Error));
+    fire('error');
   },
 };
+
+/** Test clocks restart between cases; production never resets its monotonic window. */
+export function __resetHapticClockForTests(): void {
+  lastAt = -Infinity;
+}

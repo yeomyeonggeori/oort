@@ -1,3 +1,4 @@
+import {haptics} from '../../lib/haptics';
 import {isMemberAvatarSetAction} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
@@ -2586,9 +2587,10 @@ function MessageRowInner({
 
   const openSheet = useCallback(() => {
     setRowError(null);
+    if (!sheetOpen) haptics.event('messageMenu');
     setSheetOpen(true);
     actions?.onLongPressUsed?.();
-  }, [actions]);
+  }, [actions, sheetOpen]);
 
   const longPress = useLongPress({enabled: actionable, onFire: openSheet});
   const attachmentGesture = useMemo(
@@ -2673,6 +2675,7 @@ function MessageRowInner({
     (emoji: string) => {
       if (!actions) return;
       setRowError(null);
+      haptics.event('reactionChanged');
       void actions.onToggleReaction(message, emoji).catch((error: unknown) => {
         setRowError(reactionFailureMessage(error));
       });
@@ -3469,6 +3472,7 @@ function MessageRowInner({
             setEditing(true);
           }}
           onDelete={() => {
+            haptics.event('deleteConfirmed');
             setDeletePending(true);
             setRowError(null);
             void actions

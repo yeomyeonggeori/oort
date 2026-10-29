@@ -2,11 +2,12 @@ import {act, cleanup, fireEvent, render, screen, within} from '@testing-library/
 import fs from 'node:fs';
 import path from 'node:path';
 import React from 'react';
-import {AccessibilityInfo, Animated, FlatList, LayoutAnimation, StyleSheet, Text} from 'react-native';
+import {AccessibilityInfo, AppState, Animated, Platform, FlatList, LayoutAnimation, StyleSheet, Text} from 'react-native';
 
 import {ApiError} from '@momo/core/lib/api';
 import {onlineManager, QueryClient, QueryClientProvider, QueryObserver} from '@tanstack/react-query';
 import {withPullScroll, usePullRefresh} from '../src/design/refresh';
+import {haptics, hapticScope, getHapticMode, setHapticMode, type HapticEvent} from '../src/lib/haptics';
 import {invalidateAndReport} from '../src/query/invalidateReport';
 import {PULL_FILL, PULL_TRIGGER} from '../src/design/pullRefresh';
 import {HOME_ANGLE, OPTICAL, PHASE, SCRUB_FILL_MIN} from '../src/design/brand/oortLoaderTimeline';
@@ -20,7 +21,7 @@ import {lightPalette} from '../src/design/tokens';
 //   · 임계 통과의 가벼운 햅틱 1회: 표준 컨트롤이 새로고침을 세우는 순간(`onRefresh`)에 낸다. 이 컨트롤은
 //     손가락이 닿은 채로 임계를 넘는 순간 `onRefresh` 를 부른다(iOS 26.5 시뮬레이터에서 잰 것). 한 번의
 //     새로고침에 한 번이고, 스크롤 이벤트로는 울리지 않는다(`lib/haptics.ts` 계약)
-//   · 완료 success, 실패 warning. 실패하면 「새로고침하지 못했어요. 다시 당겨 보세요.」 한 줄이 목록 위에 서고
+//   · 성공은 무음, 실패 warning. 실패하면 「새로고침하지 못했어요. 다시 당겨 보세요.」 한 줄이 목록 위에 서고
 //     **시간으로 사라지지 않는다**: 다음 당김이 서거나, 실패한 쿼리가 다시 읽히거나, 화면을 떠날 때까지 남는다
 //   · 시스템 스피너를 감췄으므로 「새로고침 중」을 접근성으로 낭독하고 머리가 이름을 진다
 //   · 실제 재조회(onRefresh)는 한 당김에 한 번이고, 끝나면 표시가 물러난다
@@ -66,6 +67,7 @@ const flatten = (style: unknown) =>
 const haptic = jest.requireMock('expo-haptics') as {__calls: string[]};
 beforeEach(() => {
   haptic.__calls.length = 0;
+  setHapticMode('rich');
   // 로더의 감소된 동작 훅은 초기값이 true 다. 시험 대역이 false 로 답하면 비동기 응답이 act 밖에서
   // 상태를 바꿔 소음이 된다. 움직이는 쪽을 보는 시험만 `reduceMotion(false)` 로 바꾸고 응답을 비운다.
   jest.spyOn(AccessibilityInfo, 'isReduceMotionEnabled').mockResolvedValue(true);
@@ -245,11 +247,11 @@ describe('임계 햅틱 (표준 컨트롤이 새로고침을 세우는 순간)',
     expect(haptic.__calls).toEqual([]);
   });
 
-  it('햅틱이 먼저, 완료가 나중이다', async () => {
+  it('문턱만 울리고 성공은 무음이다', async () => {
     render(<Harness onRefresh={() => Promise.resolve([{status: 'success'}])} />);
     release();
     await flush(500);
-    expect(haptic.__calls).toEqual(['impact:light', 'notification:success']);
+    expect(haptic.__calls).toEqual(['impact:light']);
   });
 
   it('평소 스크롤(양수 오프셋)은 햅틱도 머리도 건드리지 않는다', () => {
@@ -261,14 +263,14 @@ describe('임계 햅틱 (표준 컨트롤이 새로고침을 세우는 순간)',
 });
 
 describe('완료와 실패 햅틱', () => {
-  it('재조회가 끝나 표시가 물러나는 순간 success 한 번', async () => {
+  it('재조회가 끝나 표시가 물러나도 성공 햅틱은 없다', async () => {
     render(<Harness onRefresh={() => Promise.resolve([{status: 'success'}])} />);
     release();
     await flush(0);
     // 최소 표시 창(450ms) 안에서는 아직이다.
     expect(notifications()).toEqual([]);
     await flush(460);
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
   });
 
   it('던진 재조회는 warning 이다(success 가 아니다)', async () => {
@@ -296,11 +298,11 @@ describe('완료와 실패 햅틱', () => {
     expect(notifications()).toEqual(['notification:warning']);
   });
 
-  it('결과를 모르는(void) 재조회는 실패라고 단정하지 않는다: success', async () => {
+  it('결과를 모르는(void) 재조회는 실패라고 단정하지 않는다: 무음', async () => {
     render(<Harness onRefresh={() => undefined} />);
     release();
     await flush(500);
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
   });
 
   it('끝나기 전에 화면이 닫히면 햅틱도 상태 갱신도 없다', async () => {
@@ -610,7 +612,7 @@ describe('실패는 시각으로도 서고, 시간으로 사라지지 않는다 
     release();
     await flush(500);
     expect(notice()).toBeNull();
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
   });
 
   it('실패하면 새로고침이 끝난다: 컨트롤이 닫혀(refreshing 거짓) 안내가 떠 있어도 다음 당김이 선다', async () => {
@@ -1196,9 +1198,9 @@ describe('오프라인과 늦은 응답', () => {
     render(<Harness onRefresh={() => Promise.resolve([{status: 'success'}])} />);
     release();
     await flush(500);
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
     await flush(25_000);
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
   });
 
   it('동기로 던지는 재조회도 실패로 끝난다(핸들러가 터지지 않는다)', async () => {
@@ -1229,7 +1231,7 @@ describe('실제 react-query 실패 경로 (결과를 버리는 무효화 모양
     stop();
   });
 
-  it('invalidateAndReport: 쿼리가 성공하면 success 이다', async () => {
+  it('invalidateAndReport: 쿼리가 성공하면 무음이다', async () => {
     const client = newClient();
     const stop = controlledQuery(client, 'good', {ok: true});
     await queriesSettle();
@@ -1237,7 +1239,7 @@ describe('실제 react-query 실패 경로 (결과를 버리는 무효화 모양
     release();
     await queriesSettle();
     await flush(500);
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
     expect(notice()).toBeNull();
     stop();
   });
@@ -1252,7 +1254,7 @@ describe('실제 react-query 실패 경로 (결과를 버리는 무효화 모양
     await flush(500);
     // 쿼리는 오류 상태인데도 당김은 성공으로 끝난다. 이 시험은 그 한계를 못 박아 둔다(고치는 길은 invalidateAndReport).
     expect(client.getQueryState(['bad', 'ws'])?.status).toBe('error');
-    expect(notifications()).toEqual(['notification:success']);
+    expect(notifications()).toEqual([]);
     stop();
   });
 
@@ -1536,6 +1538,106 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
   it('옛 훅 이름(useRefreshControl)은 어디에도 남지 않았다', () => {
     for (const {rel, text} of sources) {
       expect(`${rel}:${text.includes('useRefreshControl')}`).toBe(`${rel}:false`);
+    }
+  });
+});
+
+// #4298: native call map; tactile quality remains owner-device verification.
+describe('사건 햅틱 공통 정책 (#4298)', () => {
+  it('기본 모드도 당김 문턱에서 즉시 한 번 울리고 진행 중 반복 신호는 무음이다', () => {
+    setHapticMode('basic');
+    render(<Harness onRefresh={() => new Promise(() => undefined)} />);
+    release(); release(); release();
+    expect(haptic.__calls).toEqual(['impact:light']);
+  });
+
+  it('사건마다 해당 패턴 한 번이고, legacy API와도 99ms는 버리고 100ms는 허용한다', () => {
+    const map: [HapticEvent, string][] = [
+      ['messageMenu', 'impact:medium'], ['reactionChanged', 'selection'],
+      ['reactionCandidateChanged', 'selection'], ['profileOpened', 'impact:light'],
+      ['jumpToLatest', 'impact:light'], ['tabChanged', 'selection'],
+      ['filterChanged', 'selection'], ['deleteConfirmed', 'impact:medium'],
+      ['recordingStarted', 'impact:light'], ['recordingStopped', 'impact:medium'],
+      ['refreshThreshold', 'impact:light'], ['refreshFailed', 'notification:warning'],
+    ];
+    for (const [event, pattern] of map) {
+      jest.advanceTimersByTime(100);
+      haptic.__calls.length = 0;
+      haptics.event(event);
+      expect(haptic.__calls).toEqual([pattern]);
+      jest.advanceTimersByTime(99);
+      jest.setSystemTime(Date.now() + 100_000); // wall-clock correction must not bypass the window
+      haptics.light();
+      expect(haptic.__calls).toEqual([pattern]);
+      jest.advanceTimersByTime(1);
+      haptics.selection();
+      expect(haptic.__calls).toEqual([pattern, 'selection']);
+    }
+  });
+
+  it('기본은 핵심 사건만, 끔은 legacy를 포함해 앱 호출 0회이며 선택은 저장된다', () => {
+    setHapticMode('basic');
+    expect(getHapticMode()).toBe('basic');
+    for (const event of ['tabChanged', 'filterChanged', 'jumpToLatest', 'deleteConfirmed'] as const) {
+      haptics.event(event);
+    }
+    haptics.light(); haptics.selection();
+    expect(haptic.__calls).toEqual([]);
+    for (const event of ['messageMenu', 'reactionChanged', 'profileOpened', 'refreshThreshold'] as const) {
+      jest.advanceTimersByTime(100);
+      haptics.event(event);
+    }
+    expect(haptic.__calls).toEqual(['impact:medium', 'selection', 'impact:light', 'impact:light']);
+    setHapticMode('off');
+    haptic.__calls.length = 0;
+    jest.advanceTimersByTime(100);
+    haptics.event('messageMenu'); haptics.medium(); haptics.warning();
+    expect(haptic.__calls).toEqual([]);
+  });
+
+  it('앱 비활성은 무음이고, 화면을 떠난 비동기 사건도 무음이다', () => {
+    AppState.currentState = 'background';
+    haptics.event('messageMenu'); haptics.error();
+    expect(haptic.__calls).toEqual([]);
+    AppState.currentState = 'active';
+    const departed = hapticScope(() => false);
+    departed('refreshFailed');
+    expect(haptic.__calls).toEqual([]);
+    haptics.event('messageMenu');
+    expect(haptic.__calls).toEqual(['impact:medium']);
+  });
+
+  it('화면을 떠났다가 돌아와도 옛 당김의 실패는 울리지 않는다', async () => {
+    let answer!: (value: unknown) => void;
+    const onRefresh = () => new Promise(resolve => { answer = resolve; });
+    const view = render(<Harness active onRefresh={onRefresh} />);
+    release();
+    view.rerender(<Harness active={false} onRefresh={onRefresh} />);
+    view.rerender(<Harness active onRefresh={onRefresh} />);
+    answer({isError: true});
+    await flush(500);
+    expect(haptic.__calls).toEqual(['impact:light']);
+  });
+});
+
+
+describe('Android 사건 경로 (#4298)', () => {
+  it('시스템 설정을 따르는 semantic API만 부르고 Vibrator 경로는 쓰지 않는다', () => {
+    const native = jest.requireMock('expo-haptics');
+    const os = jest.replaceProperty(Platform, 'OS', 'android');
+    native.AndroidHaptics = {Segment_Tick: 'tick', Context_Click: 'click', Long_Press: 'hold', Confirm: 'confirm', Reject: 'reject'};
+    native.performAndroidHapticsAsync = jest.fn().mockResolvedValue(undefined);
+    try {
+      for (const event of ['reactionChanged', 'profileOpened', 'messageMenu', 'refreshFailed'] as const) {
+        jest.advanceTimersByTime(100);
+        haptics.event(event);
+      }
+      expect(native.performAndroidHapticsAsync.mock.calls).toEqual([['tick'], ['click'], ['hold'], ['reject']]);
+      expect(haptic.__calls).toEqual([]);
+    } finally {
+      os.restore();
+      delete native.AndroidHaptics;
+      delete native.performAndroidHapticsAsync;
     }
   });
 });

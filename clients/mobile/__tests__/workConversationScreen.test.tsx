@@ -39,7 +39,9 @@ import {
 } from '../src/features/work/workStreamTiming';
 
 jest.mock('../src/lib/haptics', () => ({
+  ...jest.requireActual('../src/lib/haptics'),
   haptics: {
+    event: jest.fn(),
     selection: jest.fn(),
     light: jest.fn(),
     medium: jest.fn(),

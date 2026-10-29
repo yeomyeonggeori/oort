@@ -1,3 +1,4 @@
+import {haptics} from '../lib/haptics';
 import type {SharedWorkSession} from '@momo/core/lib/api';
 import {uuidEq} from '@momo/core/lib/api';
 import {
@@ -329,7 +330,7 @@ function FilterBar({
             accessibilityRole="tab"
             accessibilityState={{selected}}
             accessibilityLabel={label}
-            onPress={() => onChange(value)}
+            onPress={() => { if (!selected) haptics.event('filterChanged'); onChange(value); }}
             style={({pressed}) => [
               styles.filter,
               selected && styles.filterSelected,
