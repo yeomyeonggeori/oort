@@ -31,10 +31,12 @@ import {LAYER_POP_MS, LAYER_PUSH_MS, LAYER_RISE_MS, LAYER_SINK_MS} from '../src/
 import {dividerIndent} from '../src/design/sheetModel';
 import {ChoiceRow, ConfirmStep} from '../src/design/sheetParts';
 import {ThemeProvider} from '../src/design/theme';
+import {installAppClock} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
+import {devToolsCountLabel} from '../src/features/profile/DevToolsPage';
 import {PROFILE_FACE} from '../src/features/profile/ProfileFace';
 import {
   SettingsPage,
@@ -125,8 +127,45 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
+/**
+ * 「명령줄·AI 도구」(#4663): 정책과 내 연결 목록. 기본은 **만들 수 없고 연결도 없는 멤버**라 행이 서지 않는다(기존 시험의 단정이
+ * 그대로다). 행이 서는 조건은 아래 「연결 카드의 명령줄·AI 도구 행」이 표본을 바꿔 세운다.
+ */
+type DevAccessReply = {status: number; body: unknown} | 'hang';
+const DEV_CARD = {
+  id: 'aaaaaaaa-0000-4000-8000-000000000001',
+  memberId: SELF_ID,
+  kind: 'card',
+  name: 'Claude Code 노트북',
+  tool: 'claude_code',
+  scopes: ['dev:identity', 'dev:channels:read', 'dev:messages:read', 'dev:inbox:read'],
+  channelRestricted: false,
+  createdAtMs: Date.now() - 86_400_000,
+  expiresAtMs: Date.now() + 20 * 86_400_000,
+};
+const DEV_CARD_2 = {...DEV_CARD, id: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Codex 작업용'};
+let devAccess: {policy: DevAccessReply; list: DevAccessReply; revoked: string[]};
+/** 끝나지 않는 답. 코어의 15초 기한 타이머가 시험 뒤에 남지 않도록 시험이 끝날 때 실패로 풀어 준다. */
+const devAccessHeld: ((error: Error) => void)[] = [];
+const DEV_ROOT = `/v1/workspaces/${WS}/dev-access`;
+
 function installFetch(): void {
-  globalThis.fetch = jest.fn(async (url: string) => {
+  globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes(DEV_ROOT)) {
+      const pathname = new URL(url).pathname;
+      const pick = (reply: DevAccessReply) =>
+        reply === 'hang'
+          ? new Promise<Response>((_resolve, reject) => {
+              devAccessHeld.push(reject);
+            })
+          : jsonResponse(reply.status, reply.body);
+      if (init?.method === 'DELETE') {
+        const id = pathname.split('/').pop() as string;
+        devAccess.revoked.push(id);
+        return jsonResponse(200, {id, kind: 'card', revokedNow: true});
+      }
+      return pick(pathname.endsWith('/credentials') ? devAccess.list : devAccess.policy);
+    }
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
@@ -191,6 +230,11 @@ beforeEach(async () => {
   __resetServerBaseCache();
   setServerBase(BASE);
   sessionPort.applyLogin(LOGIN_BODY);
+  devAccess = {
+    policy: {status: 200, body: {policy: 'admins', canCreate: false, canManageAll: false}},
+    list: {status: 200, body: {credentials: []}},
+    revoked: [],
+  };
   installFetch();
 });
 
@@ -200,6 +244,7 @@ afterEach(() => {
   releaseMotion = null;
   queryClient?.clear();
   queryClient = null;
+  devAccessHeld.splice(0).forEach(release => release(new TypeError('Network request failed')));
   permissions.mockImplementation(async () => ({
     granted: true,
     canAskAgain: true,
@@ -597,6 +642,7 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
   const SUB_PAGES: Record<SettingsSubPage, true> = {
     theme: true,
     deviceKey: true,
+    devTools: true,
     avatar: true,
     pauseUntil: true,
     dndUntil: true,
@@ -883,8 +929,41 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
   // (`layerMotion4457.test.tsx` 는 층 부품 홀로의 약속이다): 첫 장은 올라오고 X 는 내려가며 걷고, 안쪽 장은 밀려
   // 들어오고 ‹ 는 물러나며 걷는다.
   const WINDOW = Dimensions.get('window');
-  // 퇴장 타이머(150~180ms)는 실시간이다 — 로드가 높은 머신에서 `waitFor` 기본 1초(벽시계)가 모자란 전례(`fixtures/fakeClock.ts`).
-  const EXIT_WAIT = {timeout: 8000};
+
+  // 층을 걷는 것은 애니메이션 완료가 아니라 앱의 타이머다(`useLayerClose`: 내려감 150ms·물러남 180ms 뒤 `onBack`). 예전에는 실시간으로
+  // `waitFor(…, {timeout: 8000})` 를 걸어 그 타이머와 셸의 다시 그리기를 기다렸다(#4633). 실측(유휴 머신, 시험 하나): 퇴장 하나가 ~0.75초이고 그중
+  // 타이머는 0.15~0.18초뿐이다 — 나머지는 층이 걷힌 뒤 셸이 다시 그려지는 CPU 다. 그래서 느린 CI 에서 5초 제한을 넘긴 것은 기다림이 아니라
+  // 「퇴장 두 번 + 셸 다시 그리기 + 두 번째 열기」를 한 시험에 담은 합이다(`VoiceOver escape` 가 가장 길다). 가짜 시계 위에서 `waitFor` 로
+  // 폴링하면 한 번에 50ms 가짜 시간 + 한 번의 act 라서 오히려 느려진다(같은 조건 실측 퇴장당 ~1.25초). 폴링 없이 **타이머의 길이만큼 시계를
+  // 밀어** 한 번의 act 안에서 걷힘을 끝낸다: 벽시계에도 머신 속도에도 기대지 않고, 「한 틱 모자라면 아직 서 있고 정확히 그 길이에 걷힌다」까지
+  // 단정한다.
+  beforeEach(() => {
+    installAppClock();
+  });
+
+  // 순서는 `layerMotion4457.test.tsx` 와 같다: 먼저 내리고(층의 퇴장 타이머는 언마운트가 거둔다), 남은 가짜 타이머를 비운 뒤에 진짜 시계로
+  // 돌아간다. 가짜 시계 아래서 만든 타이머를 진짜 시계로 바꾼 뒤에 거두면 아무도 거두지 않는다.
+  afterEach(() => {
+    cleanup();
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
+    jest.useRealTimers();
+  });
+
+  /** 앱 시계를 `ms` 만큼 밀어 그 사이의 타이머를 한 번의 act 안에서 끝낸다 — 폴링도 벽시계도 없다. */
+  const advance = (ms: number) =>
+    act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+
+  /** 층이 `ms` 에 정확히 걷힌다: 한 틱 모자라면 아직 서 있고, 마지막 한 틱이 걷는다. */
+  const standsUntil = async (ms: number, testID: string) => {
+    await advance(ms - 1);
+    expect(screen.getByTestId(testID)).toBeTruthy();
+    await advance(1);
+    expect(screen.queryByTestId(testID)).toBeNull();
+  };
 
   it('설정 첫 장은 올라오고, X 는 내려간 뒤에야 페이지를 걷는다', async () => {
     releaseMotion?.();
@@ -902,7 +981,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     );
     // 내려가는 동안에는 아직 서 있다 — 누른 즉시 사라지지 않는다.
     expect(screen.getByTestId('settings-page')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
+    await standsUntil(LAYER_SINK_MS, 'settings-page');
     expect(screen.getByTestId('sidebar-list')).toBeTruthy();
   });
 
@@ -924,7 +1003,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
       expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
     );
     expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull(), EXIT_WAIT);
+    await standsUntil(LAYER_POP_MS, 'settings-sub-pane');
     // 설정 페이지는 남는다 — 한 겹만 벗겼다.
     expect(screen.getByTestId('settings-page')).toBeTruthy();
   });
@@ -942,7 +1021,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     expect(timing.mock.calls.map(call => call[1])).toContainEqual(
       expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
     );
-    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull(), EXIT_WAIT);
+    await standsUntil(LAYER_POP_MS, 'settings-sub-pane');
 
     timing.mockClear();
     act(() => {
@@ -951,9 +1030,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     expect(timing.mock.calls.map(call => call[1])).toContainEqual(
       expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
     );
-    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
-    // 실제 퇴장 애니메이션 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다린다. 제한 시간은
-    // jest.config.js 의 testTimeout(20 s, #4633)이 진다 — 결정화(가짜 시계)는 #4633.
+    await standsUntil(LAYER_SINK_MS, 'settings-page');
   });
 });
 
@@ -1106,5 +1183,125 @@ describe('알림이 보이는 모양 — 두 줄 (#4316)', () => {
     await act(async () => {});
     const after = (globalThis.fetch as jest.Mock).mock.calls.slice(before).map(call => String(call[0]));
     expect(after.filter(url => /notification|push|device|prefs|presence/i.test(url))).toEqual([]);
+  });
+});
+
+// =============================================================================
+// #4663: 「연결」 카드의 「명령줄·AI 도구 ›」 행은 쓸 수 있는 사람에게만 선다.
+//
+// 접근하지 못하는 기능을 광고하지 않는다: 내가 만들 수 있거나(소유자·관리자) 이미 만든 연결이 있을 때만이다. 정책 조회가 끝나기
+// 전에는 서지 않는다(모르는 것을 약속하지 않는다). 행이 **없다**는 단정은 두 질의가 끝난 뒤에만 뜻이 있다(읽는 중에도 행은
+// 없으니), 그래서 끝났는지를 먼저 본다.
+// =============================================================================
+describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => {
+  const ROW = 'profile-dev-tools-row';
+
+  /** 두 질의(정책·목록)가 모두 답을 받아 쉬는 때. 이 뒤의 「행이 없다」가 뜻이 있다. */
+  const devAccessSettled = () =>
+    waitFor(() => {
+      const queries = queryClient!
+        .getQueryCache()
+        .findAll({queryKey: ['settings', 'dev-access']});
+      expect(queries).toHaveLength(2);
+      expect(queries.every(query => query.state.fetchStatus === 'idle')).toBe(true);
+    });
+
+  it('만들 수 없고 연결도 없는 멤버에게는 행이 없다', async () => {
+    const page = await openPage();
+    await devAccessSettled();
+    expect(within(page).queryByTestId(ROW)).toBeNull();
+    // 이웃 행은 그대로 서 있다(카드 전체가 사라진 것이 아니다).
+    expect(within(page).getByTestId('profile-device-key-row')).toBeTruthy();
+  });
+
+  it('만들 수 있는 사람에게는 연결이 없어도 행이 서고, 값(개수)은 없다', async () => {
+    devAccess.policy = {
+      status: 200,
+      body: {policy: 'admins', canCreate: true, canManageAll: true},
+    };
+    const page = await openPage();
+    expect(await within(page).findByTestId(ROW)).toBeTruthy();
+    await devAccessSettled();
+    expect(within(page).queryByTestId(`${ROW}-value`)).toBeNull();
+  });
+
+  it('만들 수 없어도 이미 만든 연결이 있으면 행이 서고, 값이 그 개수다', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD, DEV_CARD_2]}};
+    const page = await openPage();
+    expect(await within(page).findByTestId(ROW)).toBeTruthy();
+    await waitFor(() =>
+      expect(within(page).getByTestId(`${ROW}-value`)).toHaveTextContent(devToolsCountLabel(2)),
+    );
+  });
+
+  it('정책을 읽는 동안에는 목록이 이미 와 있어도 서지 않는다', async () => {
+    devAccess.policy = 'hang';
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    await waitFor(() =>
+      expect(
+        queryClient!.getQueryState(['settings', 'dev-access', 'credentials', WS])?.status,
+      ).toBe('success'),
+    );
+    expect(within(page).queryByTestId(ROW)).toBeNull();
+  });
+
+  it('서버에 이 길이 없으면(404) 행이 없다: 모르는 것을 만들 수 있다고 읽지 않는다', async () => {
+    devAccess.policy = {status: 404, body: {error: {message: 'no route'}}};
+    devAccess.list = {status: 404, body: {error: {message: 'no route'}}};
+    const page = await openPage();
+    await devAccessSettled();
+    expect(within(page).queryByTestId(ROW)).toBeNull();
+  });
+
+  it('정책을 못 읽어도 내 연결이 있으면 행이 서서 지우러 올 길을 막지 않는다', async () => {
+    devAccess.policy = {status: 500, body: {error: {message: 'boom'}}};
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    expect(await within(page).findByTestId(ROW)).toBeTruthy();
+  });
+
+  it('행은 연결 카드 안에서 지시 기기 다음에 서고, 누르면 안쪽 장이 열리며 ‹ 가 한 겹만 벗긴다', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    await within(page).findByTestId(ROW);
+    const order = flatten(screen.toJSON());
+    expect(order.indexOf(ROW)).toBeGreaterThan(order.indexOf('profile-device-key-row'));
+    expect(order.indexOf(ROW)).toBeLessThan(order.indexOf('sign-out'));
+
+    fireEvent.press(within(page).getByTestId(ROW));
+    expect(await screen.findByTestId('dev-tools-page')).toBeTruthy();
+    expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
+    // 안쪽 장이 선 동안에도 설정 페이지는 밑에 남는다.
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('settings-back'));
+    expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+  });
+
+  it('장에서 연결을 지우면 돌아온 설정 행의 개수도 줄어든다', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD, DEV_CARD_2]}};
+    const page = await openPage();
+    fireEvent.press(await within(page).findByTestId(ROW));
+    const base = `dev-credential-${DEV_CARD.id}`;
+    fireEvent.press(await screen.findByTestId(`${base}-revoke`));
+    fireEvent.press(await screen.findByTestId('dev-revoke-confirm-button'));
+    await waitFor(() => expect(screen.queryByTestId(base)).toBeNull());
+    expect(devAccess.revoked).toEqual([DEV_CARD.id]);
+    fireEvent.press(screen.getByTestId('settings-back'));
+    await waitFor(() =>
+      expect(within(page).getByTestId(`${ROW}-value`)).toHaveTextContent(devToolsCountLabel(1)),
+    );
+  });
+
+  it('마지막 연결을 지우면 만들 수 없는 사람의 행이 사라진다(광고하지 않는다)', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    fireEvent.press(await within(page).findByTestId(ROW));
+    fireEvent.press(await screen.findByTestId(`dev-credential-${DEV_CARD.id}-revoke`));
+    fireEvent.press(await screen.findByTestId('dev-revoke-confirm-button'));
+    await waitFor(() => expect(screen.getByTestId('dev-tools-empty')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('settings-back'));
+    await waitFor(() => expect(within(page).queryByTestId(ROW)).toBeNull());
   });
 });

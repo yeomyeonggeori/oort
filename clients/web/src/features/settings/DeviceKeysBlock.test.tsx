@@ -197,10 +197,20 @@ function mount(): HTMLElement {
   return hostEl;
 }
 
+/**
+ * 조건이 설 때까지 `act` 한 바퀴씩 기다린다. 마감은 **바퀴 수**다 — 벽시계가 아니다(#3489).
+ *
+ * 이 파일의 대기는 전부 한 바퀴(≈23ms)면 끝난다(측정: 대기 60여 곳의 최대 1바퀴). 예전의 `Date.now() - started > 4000` 마감은 제품이
+ * 걸리는 시간이 아니라 **테스트 프로세스가 멈춘 시간**을 쟀다: 부하가 걸린 CI 가 4초 넘게 멎으면 조건이 이미 섰어도 마감이 먼저 와서
+ * "네이티브 확인 창에서 취소…" 가 시간 초과로 빨개졌다. 바퀴 수 마감은 멈춤이 얼마나 길든 줄어들지 않고, 끝내 서지 않는 조건만 잡는다.
+ */
+const WAIT_TURNS = 200;
+// 끝내 서지 않는 조건이 바퀴 수 마감까지 가서 이름을 대고 빨개질 방. 통과하는 시험은 이 시간을 쓰지 않는다.
+vi.setConfig({ testTimeout: 30_000 });
+
 async function waitFor(predicate: () => boolean, label: string): Promise<void> {
-  const started = Date.now();
-  while (!predicate()) {
-    if (Date.now() - started > 4000) throw new Error(label);
+  for (let turn = 0; !predicate(); turn += 1) {
+    if (turn >= WAIT_TURNS) throw new Error(label);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 20));
     });
