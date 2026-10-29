@@ -74,4 +74,4 @@ Paste the `## Local Gate` block the script prints (result, profile, run id, comm
 3. Worker does **not** merge, close, or retarget ROADMAP.
 4. `momo-main` reviews current-head local evidence, re-runs affected gates after changes or integration differences, checks PR CI + Policy integrity and the exact-base verifier, then merges to the track branch.
 
-Cross-client landings also need `scripts/verify_merge_tree.sh` green (merged tree, not branch-alone). A stack PR lands with `--typecheck-only` on the exact landing tree plus PR CI; the full run happens once on the stack's combined tree before promotion (`docs/planning/PIPELINE.md` §5).
+Cross-client landings also need `scripts/verify_merge_tree.sh` green (merged tree, not branch-alone). A stack PR lands with `scripts/verify_merge_tree.sh --base origin/track/<track> --head <PR branch> --typecheck-only` (evidence names the mode) plus PR CI, Policy integrity and the exact-base verifier; the full run happens once on the stack's combined tree before promotion, and a track holding stack PRs is not promoted before that stack verification passes (`docs/planning/PIPELINE.md` §5).
