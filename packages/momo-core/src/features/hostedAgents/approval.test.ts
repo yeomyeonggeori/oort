@@ -203,7 +203,29 @@ describe("RED PROOF ④ 접속 권한은 꺼지지 않는다", () => {
       "agent:jobs:read",
       "agent:runs:callback",
       "workspace:propose",
+      "workspace:initiate",
     ]);
+  });
+
+  it("먼저 제안 권한도 기본으로 요청하지 않고, 문장이 「부르지 않아도」와 「사람 승인」을 말한다", () => {
+    // ADR-0186 증보 v5 U-b: 아무도 부르지 않았는데 카드를 올리는 권한이라 기본값에 섞이면
+    // 사람이 승인한 줄도 모른 채 열린다. 그리고 한 문장에 두 가지가 다 있어야 한다:
+    // 「먼저」(제안과 다른 점)와 「실행은 사람 승인」(그래도 사람이 정한다는 점).
+    expect(DEFAULT_HOSTED_SCOPES).not.toContain("workspace:initiate");
+    const initiative = HOSTED_SCOPE_CHOICES.find(
+      (choice) => choice.id === "workspace:initiate"
+    );
+    expect(initiative?.required).toBe(false);
+    expect(initiative?.detail).toContain("부르지 않아도");
+    expect(initiative?.detail).toContain("소유자와의 대화");
+    expect(initiative?.detail).toContain("사람 승인 뒤에만");
+    expect(normalizeScopes(["workspace:initiate"])).toEqual([
+      "agent:port:connect",
+      "workspace:initiate",
+    ]);
+    expect(
+      scopeActionList(["agent:port:connect", "workspace:initiate"])
+    ).toEqual(["부르지 않아도 먼저 제안(실행은 사람 승인)"]);
   });
 
   it("제안 권한은 기본으로 요청하지 않고, 껐다 켤 수 있다", () => {
