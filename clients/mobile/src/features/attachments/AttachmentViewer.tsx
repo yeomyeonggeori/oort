@@ -57,6 +57,7 @@ import {
   viewerCaption,
   viewerCaptionLabel,
   viewerStamp,
+  viewerScrim,
   viewerStripOffset,
 } from './viewerDesign';
 
@@ -570,6 +571,12 @@ function ViewerFrame({
           ]}
           testID="attachment-viewer-bar"
         >
+          {/* 글자 뒤의 어두운 스크림 — 밝은 사진 위에서도 이름·시각·상태 막대 글자가 읽힌다. 덩어리 안이라 같이 숨고, 닿지 않는다. */}
+          <View
+            pointerEvents="none"
+            style={styles.scrimTop}
+            testID="attachment-viewer-scrim-top"
+          />
           <GlassButton
             label="뒤로"
             onPress={onClose}
@@ -625,13 +632,18 @@ function ViewerFrame({
           ]}
           testID="attachment-viewer-actions"
         >
+          <View
+            pointerEvents="none"
+            style={styles.scrimBottom}
+            testID="attachment-viewer-scrim-bottom"
+          />
           {download.status !== 'idle' ? (
             <Text
               pointerEvents="none"
               maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}
               style={[
-                styles.caption,
-                download.status === 'failed' && styles.captionFailed,
+                styles.notice,
+                download.status === 'failed' && styles.noticeFailed,
               ]}
               testID="attachment-viewer-status"
             >
@@ -769,6 +781,24 @@ const buildStyles = (_color: Palette) =>
       textShadowRadius: 3,
     },
 
+    // 조작 덩어리 뒤의 스크림. 덩어리 바깥쪽으로 `scrimReach` 만큼 번져 부드럽게 사라진다.
+    scrimTop: {
+      position: 'absolute',
+      top: 0,
+      right: 0,
+      bottom: -VIEWER.scrimReach,
+      left: 0,
+      experimental_backgroundImage: viewerScrim('down'),
+    },
+    scrimBottom: {
+      position: 'absolute',
+      top: -VIEWER.scrimReach,
+      right: 0,
+      bottom: 0,
+      left: 0,
+      experimental_backgroundImage: viewerScrim('up'),
+    },
+
     // ---- 아래: 안내 · 썸네일 줄 · 캡션 · [저장] [공유] ---------------------------------
     bottomChrome: {
       position: 'absolute',
@@ -818,7 +848,20 @@ const buildStyles = (_color: Palette) =>
       textShadowOffset: { width: 0, height: 1 },
       textShadowRadius: 3,
     },
-    captionFailed: { color: VIEWER_STAGE.danger },
+    // 상태 안내(내려받는 중·실패)는 어두운 알약 위에 선다 — 어떤 사진 위에서도 읽혀야 하는 피드백이다(스크림이 약한 맨 위 줄이라 따로 면을 깐다).
+    notice: {
+      alignSelf: 'center',
+      overflow: 'hidden',
+      paddingHorizontal: VIEWER.noticePadX,
+      paddingVertical: VIEWER.noticePadY,
+      borderRadius: radius.pill,
+      backgroundColor: VIEWER_GLASS_TONE.fallback,
+      fontSize: font.label,
+      lineHeight: line.label,
+      color: VIEWER_STAGE.ink,
+      textAlign: 'center',
+    },
+    noticeFailed: { color: VIEWER_STAGE.danger },
     actionRow: {
       flexDirection: 'row',
       alignItems: 'center',

@@ -26,7 +26,7 @@ import {
 
 import { BAR_CONTROL_MAX_SCALE } from '../src/design/atoms';
 import { CONV_ICONS, SHEET_ICONS, VIEWER_ICONS } from '../src/design/icons';
-import { TOUCH_TARGET } from '../src/design/tokens';
+import { line, TOUCH_TARGET } from '../src/design/tokens';
 import {
   EASE_OUT,
   VIEWER_CHROME_HIDE_MS,
@@ -46,6 +46,8 @@ import {
   VIEWER,
   VIEWER_GLASS_TONE,
   VIEWER_STAGE,
+  viewerScrim,
+  viewerScrimAlpha,
   viewerStamp,
 } from '../src/features/attachments/viewerDesign';
 import { retainReduceMotion } from '../src/lib/useReduceMotion';
@@ -81,6 +83,33 @@ const IMAGES: MessageAttachment[] = ['a', 'b', 'c'].map(id => ({
 
 /** 보낸 시각 — 지역 시간으로 지어 시험이 어느 시간대에서 돌아도 같은 글이 된다. */
 const SENT_AT = new Date(2026, 9, 29, 14, 55).getTime();
+
+// ---- 색 관계를 재는 도구(⑧·⑪) ------------------------------------------------------------
+type Rgb = [number, number, number];
+const hex = (value: string): Rgb => [
+  parseInt(value.slice(1, 3), 16),
+  parseInt(value.slice(3, 5), 16),
+  parseInt(value.slice(5, 7), 16),
+];
+/** `rgba(r, g, b, a)` 또는 `#rrggbb` 를 `base` 위에 합성한 색. */
+const over = (color: string, base: Rgb): Rgb => {
+  if (color.startsWith('#')) return hex(color);
+  const [r, g, b, a] = (color.match(/[\d.]+/g) ?? []).map(Number) as [number, number, number, number];
+  return [r, g, b].map((channel, i) => Math.round(channel * a + (base[i] as number) * (1 - a))) as Rgb;
+};
+const luminance = ([r, g, b]: Rgb) => {
+  const lin = (c: number) => {
+    const x = c / 255;
+    return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+};
+const contrast = (a: Rgb, b: Rgb) => {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+};
+const BLACK = hex(VIEWER_STAGE.bg);
+const WHITE: Rgb = [255, 255, 255];
 
 /** 한 기기의 인셋(pt). 값은 실기기의 것이다. */
 const DEVICES = {
@@ -371,11 +400,16 @@ const scrollView = () => screen.getByTestId('attachment-viewer-scroll');
 
 const a11y = AccessibilityInfo as unknown as {
   isReduceMotionEnabled: jest.Mock;
+  isScreenReaderEnabled: jest.Mock;
+  isReduceTransparencyEnabled: jest.Mock;
 };
 
 beforeEach(() => {
   resetAttachmentContentForTest();
+  // 이 셋은 RN 의 대역이 하나의 jest.fn 이라 `spyOn` 으로 바꾼 답이 시험 사이로 샌다 — 시험마다 꺼짐으로 되돌린다.
   a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(false));
+  a11y.isScreenReaderEnabled.mockImplementation(() => Promise.resolve(false));
+  a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(false));
 });
 
 afterEach(() => {
@@ -1266,7 +1300,7 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
   });
 
   it('VoiceOver 가 켜져 있으면 탭이 숨기지 않는다 — 숨은 조작을 다시 불러올 길이 빈 곳 누르기뿐이라 나가는 길을 잃는다', async () => {
-    jest.spyOn(AccessibilityInfo, 'isScreenReaderEnabled').mockResolvedValue(true);
+    a11y.isScreenReaderEnabled.mockImplementation(() => Promise.resolve(true));
     await mount();
     await act(async () => {}); // 보조기술의 답이 도착한다
     tap();
@@ -1489,32 +1523,6 @@ describe('⑧ 검정 무대는 테마와 무관하다 (폰 전용 값 — 값이
 
   // 관계: ① 무대 위 글자·글리프는 무대와 7:1 이상 ② 어두운 유리 면(대체·불투명) 위 글리프도 ③ 밝은 사진(순백) 위에 얹힌
   // 대체 면 위에서도 읽힌다. 색 값이 바뀌어도 이 관계가 살아야 한다.
-  type Rgb = [number, number, number];
-  const hex = (value: string): Rgb => [
-    parseInt(value.slice(1, 3), 16),
-    parseInt(value.slice(3, 5), 16),
-    parseInt(value.slice(5, 7), 16),
-  ];
-  /** `rgba(r, g, b, a)` 또는 `#rrggbb` 를 `base` 위에 합성한 색. */
-  const over = (color: string, base: Rgb): Rgb => {
-    if (color.startsWith('#')) return hex(color);
-    const [r, g, b, a] = (color.match(/[\d.]+/g) ?? []).map(Number) as [number, number, number, number];
-    return [r, g, b].map((channel, i) => Math.round(channel * a + (base[i] as number) * (1 - a))) as Rgb;
-  };
-  const luminance = ([r, g, b]: Rgb) => {
-    const lin = (c: number) => {
-      const x = c / 255;
-      return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
-    };
-    return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
-  };
-  const contrast = (a: Rgb, b: Rgb) => {
-    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
-    return (hi + 0.05) / (lo + 0.05);
-  };
-  const BLACK = hex(VIEWER_STAGE.bg);
-  const WHITE: Rgb = [255, 255, 255];
-
   it('무대 위 글자·글리프는 무대와 7:1 이상이다', () => {
     expect(contrast(over(VIEWER_STAGE.ink, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
     expect(contrast(over(VIEWER_STAGE.inkMuted, BLACK), BLACK)).toBeGreaterThanOrEqual(7);
@@ -1582,7 +1590,7 @@ describe('⑨ 유리 — 블러 + 어두운 틴트다. 리퀴드는 쓰지 않�
   });
 
   it('투명도 줄이기가 켜지면 어두운 불투명 면이다 — 밝은 면 위 흰 글리프가 되지 않는다', async () => {
-    jest.spyOn(AccessibilityInfo, 'isReduceTransparencyEnabled').mockResolvedValue(true);
+    a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(true));
     await mount();
     await act(async () => {});
     for (const id of IDS) {
@@ -1648,5 +1656,75 @@ describe('⑩ 보낸 사람·날짜·시각', () => {
     await screen.findByTestId('attachment-viewer-image');
     expect(screen.getByTestId('attachment-viewer-sender').props.children).toBe('최민수');
     expect(screen.getByTestId('attachment-viewer-sent-at').props.children).toBe('2026년 10월 29일 14:55');
+  });
+});
+
+describe('⑪ 조작 뒤의 스크림과 유리 틴트 — 밝은 사진 위에서도 글자가 읽힌다', () => {
+  // 순백 사진(스크린샷의 흰 바탕)이 최악이다. 흰 글자·글리프의 최소 대비는 3:1(큰 글자·그래픽 요소, WCAG 1.4.3·1.4.11)로 잡는다 —
+  // 4.5:1 에는 조작 뒤에 불투명한 띠가 있어야 하고, 그 띠는 사진을 가린다. 값이 아니라 관계를 잰다: 마디가 바뀌어도 이 관계가 살아야 한다.
+  const whitePhoto = (alpha: number): Rgb => over(`rgba(0, 0, 0, ${alpha})`, WHITE);
+
+  it('스크림은 두 덩어리 안에 있고 닿지 않는다 — 덩어리와 같이 숨고, 옆으로 넘기기를 가로막지 않는다', async () => {
+    await mount();
+    for (const [block, which] of [
+      [bar(), 'top'],
+      [actionsBlock(), 'bottom'],
+    ] as const) {
+      const scrim = within(block).getByTestId(`attachment-viewer-scrim-${which}`);
+      expect(scrim.props.pointerEvents).toBe('none');
+      expect(scrim.props.onStartShouldSetResponder).toBeUndefined();
+      // 바깥 끝에서 안쪽으로 어두워졌다가 풀린다 — 위쪽은 아래 방향(180deg), 아래쪽은 위 방향(0deg).
+      expect(flatten(scrim.props.style).experimental_backgroundImage).toBe(
+        viewerScrim(which === 'top' ? 'down' : 'up'),
+      );
+    }
+    tap();
+    expect(bar().props.pointerEvents).toBe('none'); // 스크림은 덩어리 안이라 같이 숨는다.
+  });
+
+  it('스크림의 표는 바깥 끝이 가장 어둡고 안쪽 끝이 0 이다 — 글자 줄 뒤에서 띠 모양의 경계가 남지 않게 단조롭게 풀린다', () => {
+    let previous = Number.POSITIVE_INFINITY;
+    for (let step = 0; step <= 20; step += 1) {
+      const alpha = viewerScrimAlpha(step / 20);
+      expect(alpha).toBeLessThanOrEqual(previous);
+      previous = alpha;
+    }
+    expect(viewerScrimAlpha(1)).toBe(0);
+    expect(viewerScrimAlpha(0)).toBeGreaterThan(viewerScrimAlpha(0.5));
+  });
+
+  it.each(Object.entries(DEVICES))('%s: 위쪽 이름·시각 줄은 순백 사진 위에서도 흰 글자가 3:1 이상이다', (_name, insets) => {
+    const textHeight = line.heading + line.meta;
+    const rowsTop = insets.top + (VIEWER.control - textHeight) / 2;
+    const length = insets.top + VIEWER.control + VIEWER.scrimReach;
+    for (const bottomEdge of [rowsTop + line.heading, rowsTop + textHeight]) {
+      const alpha = viewerScrimAlpha(bottomEdge / length);
+      expect(contrast(WHITE, whitePhoto(alpha))).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it.each(Object.entries(DEVICES))('%s: 아래쪽 캡션 줄은 순백 사진 위에서도 흰 글자가 3:1 이상이다', (_name, insets) => {
+    const pad = insets.bottom + VIEWER.bottomLift;
+    const height = pad + VIEWER.control + VIEWER.stackStep + line.label + VIEWER.stackStep + VIEWER.thumb;
+    const length = height + VIEWER.scrimReach;
+    const captionTopFromBottom = pad + VIEWER.control + VIEWER.stackStep + line.label;
+    const alpha = viewerScrimAlpha(captionTopFromBottom / length);
+    expect(contrast(WHITE, whitePhoto(alpha))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('블러 갈래의 어두운 틴트는 순백 사진 위에서도 흰 글리프가 3:1 이상이다', () => {
+    // 순백을 흐려도 순백이라 틴트 아래는 순백이다 — 합성이 정확하다.
+    expect(contrast(WHITE, over(VIEWER_GLASS_TONE.tint, WHITE))).toBeGreaterThanOrEqual(3);
+  });
+
+  it('상태 안내는 어두운 알약 위에 선다 — 어떤 사진 위에서도 읽혀야 하는 피드백이다', async () => {
+    jest.spyOn(Share, 'share').mockRejectedValueOnce(new Error('boom'));
+    await mount();
+    fireEvent.press(screen.getByTestId('attachment-viewer-share'));
+    const notice = await screen.findByTestId('attachment-viewer-status');
+    const style = flatten(notice.props.style);
+    expect(style.backgroundColor).toBe(VIEWER_GLASS_TONE.fallback);
+    expect(contrast(over(VIEWER_STAGE.danger, BLACK), over(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(4.5);
+    expect(contrast(over(VIEWER_STAGE.ink, BLACK), over(VIEWER_GLASS_TONE.fallback, WHITE))).toBeGreaterThanOrEqual(7);
   });
 });

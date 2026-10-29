@@ -14,6 +14,7 @@
  *   photo-a      가로 4:3   주황
  *   photo-b      가로 4:3   남색
  *   photo-c      가로 4:3   겨자
+ *   photo-tall   세로 9:19.5 밝은 모래색 — 화면을 거의 채워 유리 조작이 사진 위에 겹친다(흰 글자·글리프의 최악)
  *
  * 그 밖의 id 는 404 다 — 실패 상태를 찍을 때 쓴다.
  *
@@ -29,6 +30,7 @@ const PICTURES = {
   'photo-a': {width: 1200, height: 900, rgb: [217, 123, 79]},
   'photo-b': {width: 1200, height: 900, rgb: [108, 123, 217]},
   'photo-c': {width: 1200, height: 900, rgb: [201, 180, 88]},
+  'photo-tall': {width: 900, height: 1950, rgb: [226, 206, 168]},
 };
 
 const CRC_TABLE = new Uint32Array(256).map((_, n) => {

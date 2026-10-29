@@ -54,7 +54,43 @@ export const VIEWER = {
   thumbDim: 0.72,
   /** 캡션 앞 사진 글리프의 크기. */
   captionGlyph: 16,
+  /** 조작 덩어리 둘레로 스크림이 더 번지는 거리 — 글자 줄에서 갑자기 끊기지 않고 부드럽게 풀린다(띠 모양의 경계가 남지 않는다). */
+  scrimReach: space.xl * 3,
+  /** 상태 안내(내려받는 중·실패) 알약의 안쪽 여백 — 어떤 사진 위에서도 읽히도록 어두운 면을 깐다. */
+  noticePadX: space.md,
+  noticePadY: space.xs,
 } as const;
+
+/**
+ * 스크림의 검정 불투명도. `fraction` 은 조작 덩어리의 바깥 끝 0 → 안쪽 끝 1(`photoStage.scrim.stops` 의 위치와 같다). 마디 사이는 선형이다.
+ * 화면은 이 표를 `linear-gradient` 로 그리고(`viewerScrim`), 시험은 같은 표로 글자 줄이 어느 불투명도 위에 서는지 잰다.
+ */
+export function viewerScrimAlpha(fraction: number): number {
+  const stops = photoStage.scrim.stops;
+  if (fraction <= stops[0][0]) return stops[0][1];
+  for (let i = 1; i < stops.length; i += 1) {
+    const [at, alpha] = stops[i] as readonly [number, number];
+    const [from, fromAlpha] = stops[i - 1] as readonly [number, number];
+    if (fraction <= at)
+      return (
+        fromAlpha + ((alpha - fromAlpha) * (fraction - from)) / (at - from)
+      );
+  }
+  return stops[stops.length - 1]?.[1] ?? 0;
+}
+
+/**
+ * 조작 뒤의 어두운 그라데이션 스크림. `down` 은 위쪽 덩어리(맨 위가 가장 어둡다), `up` 은 아래쪽 덩어리(맨 아래가 가장 어둡다). 스크림이
+ * 없으면 밝은 사진(스크린샷의 흰 바탕) 위에서 흰 이름·시각이 사라진다.
+ */
+export function viewerScrim(direction: 'down' | 'up'): string {
+  const marks = photoStage.scrim.stops.map(
+    ([at, alpha]) => `rgba(0, 0, 0, ${alpha}) ${at * 100}%`,
+  );
+  return `linear-gradient(${direction === 'down' ? 180 : 0}deg, ${marks.join(
+    ', ',
+  )})`;
+}
 
 /** 「3장 중 2번」 — 위치는 1부터다. */
 export function viewerCaption(position: number, total: number): string {

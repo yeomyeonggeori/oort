@@ -22,6 +22,7 @@ import {setServerBase} from '../src/storage/serverBase';
 //
 //   solo   사진 한 장짜리 메시지 — 뷰어는 한 쪽이다.
 //   multi  사진 세 장짜리 메시지 — 격자에서 가운데 장을 누르면 「3장 중 2번」으로 열린다(아래 썸네일 줄·캡션이 선다, #4297).
+//   tall   화면을 거의 채우는 밝은 세로 사진 한 장 — 유리 조작이 사진 위에 겹친다(#4297).
 //
 // 사진은 스텁이 만든 **그라데이션 PNG**(하늘·땅·해 모양 하이라이트)라서 사진 속 사람·글자가 없다. 이름은 가상 인물(이도현·박서연,
 // 회사 「달무리 스튜디오」)이다 — 공개 저장소의 캡처에 실제 팀원·대화를 쓰지 않는다.
@@ -113,6 +114,12 @@ const MULTI: Message[] = [
   ]),
 ];
 
+/** 화면을 거의 다 채우는 세로 사진 한 장 — 조작(유리)이 **사진 위에** 겹치는 경우를 찍는다(#4297). 밝은 사진이라 흰 글자·글리프의 최악이다. */
+const TALL: Message[] = [
+  ...TEXT,
+  message(3, PEER, '전체 모습이에요.', [photo('photo-tall')]),
+];
+
 const FILL = {flex: 1} as const;
 const WENT_BACK_TEXT = {padding: 24} as const;
 
@@ -157,7 +164,7 @@ export function PhotoViewerSurface({which}: {which: string}): React.JSX.Element 
         <ConversationLayout
           list={
             <Timeline
-              messages={which === 'multi' ? MULTI : SOLO}
+              messages={which === 'multi' ? MULTI : which === 'tall' ? TALL : SOLO}
               directory={DIRECTORY}
               status="ready"
               channelKind="dm"
