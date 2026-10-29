@@ -15,6 +15,8 @@ import {join} from 'path';
 import React from 'react';
 import {AccessibilityInfo, FlatList, Keyboard, StyleSheet} from 'react-native';
 
+import {JumpPill} from '../src/features/conversation/JumpPill';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 import {
   countNewerThan,
@@ -290,6 +292,8 @@ function bottomPill() {
 /** 필 안의 보이는 문장(화살표 글리프 제외). */
 function pillSentence(testID: string): string {
   const pill = screen.getByTestId(testID);
+  // 최신 원은 아이콘과 뱃지만 보이고 같은 전체 문장을 낭독한다 (#4789).
+  if (testID === 'jump-latest') return pill.props.accessibilityLabel;
   const texts = within(pill).queryAllByText(/보기|이동/);
   const label = texts[texts.length - 1];
   const flatten = (node: unknown): string => {
@@ -2202,5 +2206,25 @@ describe('필을 켜지 않은 표면', () => {
     expect(bottomPill()).toBeNull();
     expect(topPill()).toBeNull();
     expect(list().props.onViewableItemsChanged).toBeUndefined();
+  });
+});
+
+
+describe('S1 #4789 최신 원형 유리 단추', () => {
+  it.each([0, 1, 100])('새 글 %i개: 44pt·99+ 뱃지와 기존 낭독·누름을 지킨다', async newCount => {
+    const onPress = jest.fn();
+    render(<JumpPill direction="down" newCount={newCount} segments={jumpLatestSegments(newCount)} accessibilityLabel={jumpLatestAccessibilityLabel(newCount)} onPress={onPress} testID="jump-latest" />);
+    await act(async () => {});
+    const button = screen.getByTestId('jump-latest');
+    const shape = StyleSheet.flatten(button.props.style);
+    expect([shape.width, shape.height]).toEqual([TOUCH_TARGET, TOUCH_TARGET]);
+    expect(shape.borderRadius).toBeGreaterThanOrEqual(TOUCH_TARGET / 2);
+    expect(screen.getByTestId('jump-latest-glass-fallback')).toBeTruthy();
+    expect(button.props.accessibilityLabel).toBe(jumpLatestAccessibilityLabel(newCount));
+    expect(within(button).queryAllByText(/보기|이동/)).toHaveLength(0);
+    if (newCount === 0) expect(screen.queryByTestId('jump-latest-badge', {includeHiddenElements: true})).toBeNull();
+    else expect(screen.getByText(newCount > 99 ? '99+' : String(newCount), {includeHiddenElements: true})).toBeTruthy();
+    fireEvent.press(button);
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 });

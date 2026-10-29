@@ -46,9 +46,11 @@ import {
   StyleSheet,
   Text,
   View,
+  type LayoutChangeEvent,
   type AppStateStatus,
   type TextInput,
 } from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {NoticeBlock, Screen} from '../design/atoms';
 import {AppBackground} from '../design/background/AppBackground';
 import type {
@@ -376,9 +378,15 @@ export default function ConversationScreen({
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
   const {rail, status: railStatus} = useRealtime();
-  // 뜬 연결 띠가 목록 위 가장자리를 가린 높이(#4292). 띠는 목록 위에 떠서 목록의 높이를 바꾸지 않는 대신, 같은 자리를 쓰는
-  // 목록의 위쪽 필이 그 밑에 쌓이도록 이 값을 `Timeline` 에 건넨다. 띠가 걷히면 0.
+  // 연결 띠는 머리 아래에 뜨고 목록의 viewport·첫 여백을 바꾸지 않는다.
+  // 날짜·안 읽음 필만 띠의 실제 높이만큼 더 내려간다(#4292).
   const [bannerInset, setBannerInset] = useState(0);
+  const insets = useSafeAreaInsets();
+  const [measuredHeaderHeight, setHeaderHeight] = useState<number>(CONV.headHeight);
+  const headerInset = insets.top + measuredHeaderHeight;
+  const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
+    setHeaderHeight(event.nativeEvent.layout.height - insets.top);
+  }, [insets.top]);
   const nowMs = useNow();
 
   const {directory, data: rosterMembers} = useDirectory(workspaceId);
@@ -1903,6 +1911,9 @@ export default function ConversationScreen({
     }));
   }, [awaitingJump, awaitingArrived]);
 
+  // 목록 밖 영수증·요약이 있으면 그 첫 표면이 머리 여백을 진다. 목록에서 중복으로 세지 않는다.
+  const hasTopNotice = Boolean(jumpMissed || (notificationNotice && !notificationNotice.inThread) || (boundary !== null && memoryEligible));
+
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
     <Screen style={styles.screen}>
@@ -1920,6 +1931,7 @@ export default function ConversationScreen({
           목록으로 올라와 자식(머리, `zIndex` 1)이 `Screen` 직속 형제와 함께 정렬되고, 그러면 틀이 아무것도 가두지 못한다(시뮬레이터 캡처로 확인:
           `measure/captures/steady4292-panel-*`). 안쪽 들여쓰기는 더하지 않았다 — 이 구간을 만지는 형제 이슈(#4305·#4300)와의 병합 충돌을 줄이려는 것이다. */}
       <View collapsable={false} style={styles.column} testID="conversation-column">
+      <View pointerEvents="box-none" style={styles.headerOverlay} onLayout={onHeaderLayout} testID="conversation-header-overlay">
       <ConversationHeader
         title={title}
         memberCount={channelMemberCountLabel(channel)}
@@ -1934,16 +1946,17 @@ export default function ConversationScreen({
         onOpenInfo={channel !== null ? openInfo : undefined}
         railStatus={railStatus}
         onBannerInset={setBannerInset}
-      />
+      >
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
           컴포저 액세서리 스택이 아니다(`AdeSummaryLine` 머리말의 세 근거). */}
-      {isSurfaceProvided('ade') ? (
-        <AdeSummaryLine onPress={openAde} />
-      ) : null}
+      {isSurfaceProvided('ade') ? <AdeSummaryLine onPress={openAde} /> : null}
+      </ConversationHeader>
+      </View>
       <ConversationLayout
         list={
           <>
+            <View style={hasTopNotice ? {paddingTop: headerInset} : undefined}>
             {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
                 인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
                 사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
@@ -2016,6 +2029,7 @@ export default function ConversationScreen({
                 onOpenEvidence={openMemoryEvidence}
               />
             ) : null}
+            </View>
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
@@ -2054,7 +2068,8 @@ export default function ConversationScreen({
               // 목록 꼬리는 0 이다(#4264): 도크 맨 위의 「작성 중」 예약 줄이 그 자리를 지켜서, 꼬리까지 두면
               // 마지막 행 → 알약 간격이 같은 공기를 두 번 센다. 근거와 산수는 `CONV.listPillGap`.
               tailGap={CONV.conversationTail}
-              topPillInset={bannerInset}
+              contentTopInset={hasTopNotice ? 0 : headerInset}
+              topPillInset={(hasTopNotice ? 0 : headerInset) + bannerInset}
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
@@ -2326,6 +2341,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   notice: {padding: space.md},
   /** 머리 · 요약 줄 · 목록의 틀(#4292). `Screen` 의 남은 높이를 다 쓴다 — 이 틀 안에서만 머리의 `zIndex` 가 겨룬다. */
   column: {flex: 1},
+  headerOverlay: {position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1},
   /**
    * 시안 A `.a-conv{background:linear-gradient(180deg,var(--bgTop) 0,var(--surface) 210px)}`
    * (다크는 `var(--bgMid) 220px`). 머리 유리가 비치는 바닥이다. 210/844 ≈ 25%.

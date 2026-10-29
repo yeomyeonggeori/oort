@@ -634,11 +634,16 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     expect(screen.queryByTestId('connection-banner-layer')).toBeNull();
   });
 
-  it('띠의 높이는 목록의 위쪽 필 틀로 건너가 필이 띠 밑에 쌓이고, 그 일로 셀은 다시 그려지지 않는다', async () => {
+  it('S1 #4789 머리·연결 띠 높이는 목록 안 여백과 위 필로 건너가며 셀은 다시 그려지지 않는다', async () => {
     await openDm();
     const topPills = () => flat(screen.getByTestId('timeline-top-pills').props.style);
-    // 띠가 없으면 필은 목록 위 가장자리에 선다.
-    expect(topPills().top).toBe(0);
+    const overlay = () => screen.getByTestId('conversation-header-overlay');
+    expect(flat(overlay().props.style)).toMatchObject({position: 'absolute', top: 0, zIndex: 1});
+    expect(topPills().top).toBe(62);
+    // 큰 글자 등으로 커진 실제 머리 높이를 네이티브가 보고한다.
+    fireEvent(overlay(), 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121}}});
+    expect(topPills().top).toBe(121);
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121);
     resetMessageRowRenderCount();
     resetTimelineRenderItemCount();
 
@@ -654,7 +659,8 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await act(async () => {
       fireEvent(layer, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 36.7}}});
     });
-    expect(topPills().top).toBe(36.7);
+    expect(topPills().top).toBe(157.7);
+    expect(flat(screen.getByTestId('timeline-list').props.contentContainerStyle).paddingTop).toBe(121);
 
     // 이어져 띠가 걷히면 필 틀도 제자리로 돌아온다 — 사라진 띠 밑에 필이 떠 있지 않다.
     await act(async () => {
@@ -663,7 +669,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     });
     await settle(25);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
-    expect(topPills().top).toBe(0);
+    expect(topPills().top).toBe(121);
 
     // 필 틀이 두 번 움직이는 동안 목록의 셀은 한 번도 다시 그려지지 않았다.
     expect(timelineRenderItemCount()).toBe(0);

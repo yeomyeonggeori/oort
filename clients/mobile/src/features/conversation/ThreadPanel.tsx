@@ -2,12 +2,15 @@ import {uuidEq, type Message} from '@momo/core/lib/api';
 import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {StyleSheet} from 'react-native';
-import {ErrorState, NoticeBlock, Screen, ScreenHeader} from '../../design/atoms';
+import {StyleSheet, View, type LayoutChangeEvent} from 'react-native';
+import {useSafeAreaInsets} from 'react-native-safe-area-context';
+import {ErrorState, NoticeBlock, Screen} from '../../design/atoms';
 import type {Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {Composer, type ComposerSendOptions} from './Composer';
+import {ConversationHeader} from './ConversationHeader';
+import {CONV} from './convDesign';
 import {ConversationLayout} from './ConversationLayout';
 import {threadDraftKey} from './drafts';
 import {useOnline} from '../inbox/useOnline';
@@ -291,12 +294,24 @@ export function ThreadPanel({
     [sendReply, root.id, onReplySent],
   );
 
+  const insets = useSafeAreaInsets();
+  const [headerHeight, setHeaderHeight] = useState<number>(CONV.headHeight);
+  const headerInset = insets.top + headerHeight;
+  const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
+    setHeaderHeight(event.nativeEvent.layout.height - insets.top);
+  }, [insets.top]);
+
+  const hasTopNotice = Boolean(notice || (memory !== undefined && workspaceId !== undefined && channelId !== undefined && status === 'ready'));
+
   if (status === 'error') {
     return (
       <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
-        <Screen>
-          <ScreenHeader
+        <Screen style={styles.screen}>
+          <ConversationHeader
             title="스레드"
+            kind={undefined}
+            directory={directory}
+            railStatus="connected"
             onBack={onClose}
             backLabel="스레드 닫기"
             titleTestID="thread-title"
@@ -319,25 +334,22 @@ export function ThreadPanel({
     // 남는다. 뒤로가기가 한 번에 한 겹씩만 벗겨진다는 것은 헤더의 「‹」 버튼이
     // 이미 지키던 규칙이고, 제스처가 그것을 다르게 해석하면 안 된다.
     <EdgeSwipeBack style={styles.overlay} onBack={onClose}>
-      <Screen>
-        {/* ## 부제에 「답글 N개」를 적지 않는다 (goal RN-U2)
-            성재: "답글에서 개수 업데이트는 굳이 왜 해? 목록에 나오면 몇 개의
-            reply가 있는지는 자연스러운데, 답글에서 '답글 1개' 이런 식으로 보이는
-            건 자연스럽지 않은 거 같아."
-
-            루트 행의 롤업과 **같은 결함이고, 더 눈에 띄는 쪽이다** — 답글을 하나
-            달 때마다 화면 맨 위의 숫자가 오른다. 이미 이 스레드 안에 있는 사람에게
-            그 숫자는 정보가 0이다. 세는 일이 필요한 곳은 "여기 스레드가 있다"를
-            알려야 하는 채널 목록이지 스레드 안이 아니다. */}
-        <ScreenHeader
-          title="스레드"
-          onBack={onClose}
-          backLabel="스레드 닫기"
-          titleTestID="thread-title"
-        />
+      <Screen style={styles.screen}>
+        <View pointerEvents="box-none" style={styles.headerOverlay} onLayout={onHeaderLayout} testID="thread-header-overlay">
+          <ConversationHeader
+            title="스레드"
+            kind={undefined}
+            directory={directory}
+            railStatus="connected"
+            onBack={onClose}
+            backLabel="스레드 닫기"
+            titleTestID="thread-title"
+          />
+        </View>
         <ConversationLayout
           list={
             <>
+              <View style={hasTopNotice ? {paddingTop: headerInset} : undefined}>
               {notice ? (
                 <NoticeBlock
                   headline={notice.text}
@@ -360,7 +372,9 @@ export function ThreadPanel({
                   onOpenEvidence={openEvidence}
                 />
               ) : null}
+              </View>
               <Timeline
+                contentTopInset={hasTopNotice ? 0 : headerInset}
                 messages={messages}
                 directory={directory}
                 // The root is always present, so this list is never empty. There is
@@ -430,6 +444,8 @@ export function ThreadPanel({
 }
 
 const buildStyles = (color: Palette) => StyleSheet.create({
+  screen: {paddingTop: 0},
+  headerOverlay: {position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1},
   overlay: {
     position: 'absolute',
     top: 0,

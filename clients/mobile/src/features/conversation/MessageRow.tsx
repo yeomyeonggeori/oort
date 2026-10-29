@@ -108,6 +108,7 @@ import {
   type StyleProp,
   type TextStyle,
 } from 'react-native';
+import {GlassSurface} from '../../design/glass';
 import {font, line, radius, SAFE_GUTTER, slopTo, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {pressFace, ROW_FACE} from './rowFace';
 import {usePalette, useStyles} from '../../design/theme';
@@ -514,13 +515,11 @@ export function FloatingDayPill({
       importantForAccessibility="no-hide-descendants"
       style={styles.dayFloat}
       testID="floating-day">
-      <View style={styles.dayPillFloat}>
-        <DividerLabel
-          segments={dayDividerSegments(atMs, nowMs)}
-          tone={DIVIDER_TONE.day}
-          strong
-        />
-      </View>
+      <GlassSurface radius={radius.pill} style={styles.dayPillFloat} testID="floating-day-glass">
+        <Text style={styles.dayFloatLabel} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+          {dayDividerSegments(atMs, nowMs).map(segment => segment.text).join('')}
+        </Text>
+      </GlassSurface>
     </View>
   );
 }
@@ -4486,20 +4485,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     right: 0,
     alignItems: 'center',
   },
-  /**
-   * 떠 있는 알약 — **불투명** surface 위에 선과 sh1 (DS2-4 검수 B-1). 시안은 유리지만,
-   * 12pt 글자가 얇은 유리 위에 서면 밑의 16pt 본문 획과 섞여 둘 다 읽히지 않았다
-   * (실데이터 캡처). Buzz 의 알약도 불투명에 가까운 흰 바탕이다.
-   */
+  /** 떠 있는 유리 알약. 공용 재료가 투명도 줄이기에서는 불투명 surface로 물러난다. */
   dayPillFloat: {
-    backgroundColor: color.surface,
-    paddingVertical: CONV.dayPadY,
-    paddingHorizontal: CONV.dayPadX,
+    paddingVertical: space.sm,
+    paddingHorizontal: space.lg,
     borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: color.glassLine,
     boxShadow: color.elevationRest,
   },
+  dayFloatLabel: {fontSize: font.heading, lineHeight: line.heading, fontWeight: '600', color: color.text},
   /** 숫자만 자릿폭 고정 — 조사·단위가 함께 받으면 음절 사이가 벌어진다. */
   dividerFigure: {fontVariant: ['tabular-nums']},
   dividerLabelBoundary: {color: color.warn, fontWeight: '600'},
