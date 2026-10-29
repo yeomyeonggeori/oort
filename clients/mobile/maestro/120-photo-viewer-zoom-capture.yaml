@@ -1,0 +1,110 @@
+appId: app.momo.ios
+name: "120-photo-viewer-zoom-capture"
+---
+# 120-photo-viewer-zoom-capture — 사진 뷰어 확대: 두 번 탭으로 확대·복귀, 확대 중에는 넘기기·쓸어 닫기가 꺼진다 (#4769).
+#
+# 표면은 105 와 같다(`-momoMeasure PHOTO-VIEWER-MULTI`, 사진 세 장). 가운데 장을 눌러 「3장 중 2번」으로 연 뒤:
+#
+#   ⓪ 사진을 **한 번** 누르면 조작이 숨고, 한 번 더 누르면 돌아온다(한 번 탭은 두 번 탭 문턱 400ms 만큼 늦다).
+#   ① 사진을 **두 번** 탭한다 — 확대한다. 조작은 그대로다(두 번 탭이 한 번 탭을 두 번 하지 않는다, **단정한다**).
+#   ② 확대한 채 옆으로 쓴다 — 넘어가지 않는다(「3장 중 2번」 그대로, **단정한다**).
+#   ③ 확대한 채 아래로 길게 쓴다 — 닫히지 않는다(뷰어가 그대로 서 있다, **단정한다**).
+#   ④ 다시 두 번 탭한다 — 원래 크기로 돌아온다.
+#   ⑤ 옆으로 쓴다 — 이번에는 넘어간다(「3장 중 3번」, **단정한다**: 확대 상태가 풀렸음을 네이티브 확대 스크롤뷰가 알렸다는 증거다).
+#   ⑥ 아래로 길게 쓴다 — 닫힌다(쓸어 닫기가 다시 켜졌다는 증거다).
+#
+# jest 에는 네이티브 스크롤뷰가 없어 이 길을 못 잰다: 응답자가 확대 스크롤뷰의 조상이면 iOS 가 확대·팬을 시작하지 못하고(①이 빨갛다고 보지는 못해도 스크린샷이
+# 원래 크기 그대로다), 원래 크기에서 스크롤뷰가 팬을 가져가면 ⑥이 빨갛다. 두 손가락 확대(핀치)는 Maestro 가 못 한다 — 같은 UIScrollView 이므로 두 번 탭이
+# 확대한다는 것이 핀치도 시작할 수 있다는 증거가 되는 것은 아니다(사람 손이나 시뮬레이터의 Option 드래그로 본다).
+#
+#   node clients/mobile/measure/photo-stub.mjs &      # PHOTO_STUB_PORT 로 포트
+#   xcrun simctl launch <udid> app.momo.ios --args \
+#     -momoMeasure PHOTO-VIEWER-MULTI -RCT_jsLocation 127.0.0.1:$PORT -momoPhotoStub 127.0.0.1:$STUB
+#   maestro --udid <udid> test -e SHOT=zoom-dark clients/mobile/maestro/120-photo-viewer-zoom-capture.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-item"
+    timeout: 60000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- tapOn:
+    id: "attachment-item"
+    index: 1
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer"
+    timeout: 10000
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 2번.*"
+- takeScreenshot: ${SHOT}-open-2of3
+# ⓪ 한 번 탭: 조작이 숨는다(두 번 탭 문턱이 지난 뒤), 한 번 더 누르면 돌아온다.
+- tapOn:
+    point: 50%,45%
+- extendedWaitUntil:
+    notVisible:
+      id: "attachment-viewer-back"
+    timeout: 4000
+- tapOn:
+    point: 50%,45%
+- extendedWaitUntil:
+    visible:
+      id: "attachment-viewer-back"
+    timeout: 4000
+# ① 두 번 탭 → 확대. 조작은 그대로다.
+- doubleTapOn:
+    point: 50%,45%
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-back"
+- takeScreenshot: ${SHOT}-zoomed
+# ② 확대한 채 옆으로 써도 넘어가지 않는다.
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 2번.*"
+# ③ 확대한 채 아래로 길게 써도 닫히지 않는다.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 75%
+    duration: 400
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer"
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 2번.*"
+- takeScreenshot: ${SHOT}-zoomed-after-drags
+# ④ 다시 두 번 탭 → 원래 크기.
+- doubleTapOn:
+    point: 50%,45%
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-zoomed-out
+# ⑤ 원래 크기에서는 넘기기가 다시 산다.
+- swipe:
+    start: 85%, 50%
+    end: 15%, 50%
+    duration: 300
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 3번.*"
+# ⑥ 쓸어 닫기도 다시 산다.
+- swipe:
+    start: 50%, 30%
+    end: 50%, 75%
+    duration: 400
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+- assertVisible:
+    id: "attachment-item"
+- takeScreenshot: ${SHOT}-closed
