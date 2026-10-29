@@ -35,6 +35,7 @@ import {pinReduceMotion} from './fixtures/reduceMotion';
 import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
 import {appVersionLabel} from '../src/features/profile/appVersion';
+import {devToolsCountLabel} from '../src/features/profile/DevToolsPage';
 import {PROFILE_FACE} from '../src/features/profile/ProfileFace';
 import {
   SettingsPage,
@@ -125,8 +126,45 @@ function jsonResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
+/**
+ * 「명령줄·AI 도구」(#4663): 정책과 내 연결 목록. 기본은 **만들 수 없고 연결도 없는 멤버**라 행이 서지 않는다(기존 시험의 단정이
+ * 그대로다). 행이 서는 조건은 아래 「연결 카드의 명령줄·AI 도구 행」이 표본을 바꿔 세운다.
+ */
+type DevAccessReply = {status: number; body: unknown} | 'hang';
+const DEV_CARD = {
+  id: 'aaaaaaaa-0000-4000-8000-000000000001',
+  memberId: SELF_ID,
+  kind: 'card',
+  name: 'Claude Code 노트북',
+  tool: 'claude_code',
+  scopes: ['dev:identity', 'dev:channels:read', 'dev:messages:read', 'dev:inbox:read'],
+  channelRestricted: false,
+  createdAtMs: Date.now() - 86_400_000,
+  expiresAtMs: Date.now() + 20 * 86_400_000,
+};
+const DEV_CARD_2 = {...DEV_CARD, id: 'aaaaaaaa-0000-4000-8000-000000000002', name: 'Codex 작업용'};
+let devAccess: {policy: DevAccessReply; list: DevAccessReply; revoked: string[]};
+/** 끝나지 않는 답. 코어의 15초 기한 타이머가 시험 뒤에 남지 않도록 시험이 끝날 때 실패로 풀어 준다. */
+const devAccessHeld: ((error: Error) => void)[] = [];
+const DEV_ROOT = `/v1/workspaces/${WS}/dev-access`;
+
 function installFetch(): void {
-  globalThis.fetch = jest.fn(async (url: string) => {
+  globalThis.fetch = jest.fn(async (url: string, init?: RequestInit) => {
+    if (url.includes(DEV_ROOT)) {
+      const pathname = new URL(url).pathname;
+      const pick = (reply: DevAccessReply) =>
+        reply === 'hang'
+          ? new Promise<Response>((_resolve, reject) => {
+              devAccessHeld.push(reject);
+            })
+          : jsonResponse(reply.status, reply.body);
+      if (init?.method === 'DELETE') {
+        const id = pathname.split('/').pop() as string;
+        devAccess.revoked.push(id);
+        return jsonResponse(200, {id, kind: 'card', revokedNow: true});
+      }
+      return pick(pathname.endsWith('/credentials') ? devAccess.list : devAccess.policy);
+    }
     if (url.includes('/reactions')) return jsonResponse(200, {});
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
@@ -191,6 +229,11 @@ beforeEach(async () => {
   __resetServerBaseCache();
   setServerBase(BASE);
   sessionPort.applyLogin(LOGIN_BODY);
+  devAccess = {
+    policy: {status: 200, body: {policy: 'admins', canCreate: false, canManageAll: false}},
+    list: {status: 200, body: {credentials: []}},
+    revoked: [],
+  };
   installFetch();
 });
 
@@ -200,6 +243,7 @@ afterEach(() => {
   releaseMotion = null;
   queryClient?.clear();
   queryClient = null;
+  devAccessHeld.splice(0).forEach(release => release(new TypeError('Network request failed')));
   permissions.mockImplementation(async () => ({
     granted: true,
     canAskAgain: true,
@@ -597,6 +641,7 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
   const SUB_PAGES: Record<SettingsSubPage, true> = {
     theme: true,
     deviceKey: true,
+    devTools: true,
     avatar: true,
     pauseUntil: true,
     dndUntil: true,
@@ -1106,5 +1151,125 @@ describe('알림이 보이는 모양 — 두 줄 (#4316)', () => {
     await act(async () => {});
     const after = (globalThis.fetch as jest.Mock).mock.calls.slice(before).map(call => String(call[0]));
     expect(after.filter(url => /notification|push|device|prefs|presence/i.test(url))).toEqual([]);
+  });
+});
+
+// =============================================================================
+// #4663: 「연결」 카드의 「명령줄·AI 도구 ›」 행은 쓸 수 있는 사람에게만 선다.
+//
+// 접근하지 못하는 기능을 광고하지 않는다: 내가 만들 수 있거나(소유자·관리자) 이미 만든 연결이 있을 때만이다. 정책 조회가 끝나기
+// 전에는 서지 않는다(모르는 것을 약속하지 않는다). 행이 **없다**는 단정은 두 질의가 끝난 뒤에만 뜻이 있다(읽는 중에도 행은
+// 없으니), 그래서 끝났는지를 먼저 본다.
+// =============================================================================
+describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => {
+  const ROW = 'profile-dev-tools-row';
+
+  /** 두 질의(정책·목록)가 모두 답을 받아 쉬는 때. 이 뒤의 「행이 없다」가 뜻이 있다. */
+  const devAccessSettled = () =>
+    waitFor(() => {
+      const queries = queryClient!
+        .getQueryCache()
+        .findAll({queryKey: ['settings', 'dev-access']});
+      expect(queries).toHaveLength(2);
+      expect(queries.every(query => query.state.fetchStatus === 'idle')).toBe(true);
+    });
+
+  it('만들 수 없고 연결도 없는 멤버에게는 행이 없다', async () => {
+    const page = await openPage();
+    await devAccessSettled();
+    expect(within(page).queryByTestId(ROW)).toBeNull();
+    // 이웃 행은 그대로 서 있다(카드 전체가 사라진 것이 아니다).
+    expect(within(page).getByTestId('profile-device-key-row')).toBeTruthy();
+  });
+
+  it('만들 수 있는 사람에게는 연결이 없어도 행이 서고, 값(개수)은 없다', async () => {
+    devAccess.policy = {
+      status: 200,
+      body: {policy: 'admins', canCreate: true, canManageAll: true},
+    };
+    const page = await openPage();
+    expect(await within(page).findByTestId(ROW)).toBeTruthy();
+    await devAccessSettled();
+    expect(within(page).queryByTestId(`${ROW}-value`)).toBeNull();
+  });
+
+  it('만들 수 없어도 이미 만든 연결이 있으면 행이 서고, 값이 그 개수다', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD, DEV_CARD_2]}};
+    const page = await openPage();
+    expect(await within(page).findByTestId(ROW)).toBeTruthy();
+    await waitFor(() =>
+      expect(within(page).getByTestId(`${ROW}-value`)).toHaveTextContent(devToolsCountLabel(2)),
+    );
+  });
+
+  it('정책을 읽는 동안에는 목록이 이미 와 있어도 서지 않는다', async () => {
+    devAccess.policy = 'hang';
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    await waitFor(() =>
+      expect(
+        queryClient!.getQueryState(['settings', 'dev-access', 'credentials', WS])?.status,
+      ).toBe('success'),
+    );
+    expect(within(page).queryByTestId(ROW)).toBeNull();
+  });
+
+  it('서버에 이 길이 없으면(404) 행이 없다: 모르는 것을 만들 수 있다고 읽지 않는다', async () => {
+    devAccess.policy = {status: 404, body: {error: {message: 'no route'}}};
+    devAccess.list = {status: 404, body: {error: {message: 'no route'}}};
+    const page = await openPage();
+    await devAccessSettled();
+    expect(within(page).queryByTestId(ROW)).toBeNull();
+  });
+
+  it('정책을 못 읽어도 내 연결이 있으면 행이 서서 지우러 올 길을 막지 않는다', async () => {
+    devAccess.policy = {status: 500, body: {error: {message: 'boom'}}};
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    expect(await within(page).findByTestId(ROW)).toBeTruthy();
+  });
+
+  it('행은 연결 카드 안에서 지시 기기 다음에 서고, 누르면 안쪽 장이 열리며 ‹ 가 한 겹만 벗긴다', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    await within(page).findByTestId(ROW);
+    const order = flatten(screen.toJSON());
+    expect(order.indexOf(ROW)).toBeGreaterThan(order.indexOf('profile-device-key-row'));
+    expect(order.indexOf(ROW)).toBeLessThan(order.indexOf('sign-out'));
+
+    fireEvent.press(within(page).getByTestId(ROW));
+    expect(await screen.findByTestId('dev-tools-page')).toBeTruthy();
+    expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
+    // 안쪽 장이 선 동안에도 설정 페이지는 밑에 남는다.
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+    fireEvent.press(screen.getByTestId('settings-back'));
+    expect(screen.queryByTestId('settings-sub-pane')).toBeNull();
+    expect(screen.getByTestId('settings-page')).toBeTruthy();
+  });
+
+  it('장에서 연결을 지우면 돌아온 설정 행의 개수도 줄어든다', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD, DEV_CARD_2]}};
+    const page = await openPage();
+    fireEvent.press(await within(page).findByTestId(ROW));
+    const base = `dev-credential-${DEV_CARD.id}`;
+    fireEvent.press(await screen.findByTestId(`${base}-revoke`));
+    fireEvent.press(await screen.findByTestId('dev-revoke-confirm-button'));
+    await waitFor(() => expect(screen.queryByTestId(base)).toBeNull());
+    expect(devAccess.revoked).toEqual([DEV_CARD.id]);
+    fireEvent.press(screen.getByTestId('settings-back'));
+    await waitFor(() =>
+      expect(within(page).getByTestId(`${ROW}-value`)).toHaveTextContent(devToolsCountLabel(1)),
+    );
+  });
+
+  it('마지막 연결을 지우면 만들 수 없는 사람의 행이 사라진다(광고하지 않는다)', async () => {
+    devAccess.list = {status: 200, body: {credentials: [DEV_CARD]}};
+    const page = await openPage();
+    fireEvent.press(await within(page).findByTestId(ROW));
+    fireEvent.press(await screen.findByTestId(`dev-credential-${DEV_CARD.id}-revoke`));
+    fireEvent.press(await screen.findByTestId('dev-revoke-confirm-button'));
+    await waitFor(() => expect(screen.getByTestId('dev-tools-empty')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('settings-back'));
+    await waitFor(() => expect(within(page).queryByTestId(ROW)).toBeNull());
   });
 });

@@ -5,6 +5,7 @@ import { useAddChannelMemberOpen } from "@/features/channels/useAddChannelMember
 import { useAgentProfileOpen } from "@/features/routing/useAgentProfile";
 import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
 import { OPEN_INBOX_SHORTCUT } from "@/app/keyboardShortcuts";
+import { globalShortcutsHeld } from "@/app/globalShortcutHold";
 
 /**
  * ⌘⇧A opens the inbox from anywhere (R-1 §2 키보드 경로). It lives in the shell
@@ -30,7 +31,8 @@ export function InboxHotkeys() {
     createChannelOpen || addMemberOpen || agentProfileOpen || addWorkspaceOpen;
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (formDialogOpen) return;
+      // 한 번만 보이는 값이 떠 있으면 그것도 모달이다(`globalShortcutHold`).
+      if (formDialogOpen || globalShortcutsHeld()) return;
       if (!OPEN_INBOX_SHORTCUT.matches(event)) return;
       event.preventDefault();
       navigate("/inbox");
