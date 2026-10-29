@@ -31,6 +31,7 @@ import {LAYER_POP_MS, LAYER_PUSH_MS, LAYER_RISE_MS, LAYER_SINK_MS} from '../src/
 import {dividerIndent} from '../src/design/sheetModel';
 import {ChoiceRow, ConfirmStep} from '../src/design/sheetParts';
 import {ThemeProvider} from '../src/design/theme';
+import {installAppClock} from './fixtures/fakeClock';
 import {pinReduceMotion} from './fixtures/reduceMotion';
 import {GroupSection, STACK_PILL_SCALE} from '../src/design/atoms';
 import {darkPalette, lightPalette, radius} from '../src/design/tokens';
@@ -928,8 +929,41 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
   // (`layerMotion4457.test.tsx` 는 층 부품 홀로의 약속이다): 첫 장은 올라오고 X 는 내려가며 걷고, 안쪽 장은 밀려
   // 들어오고 ‹ 는 물러나며 걷는다.
   const WINDOW = Dimensions.get('window');
-  // 퇴장 타이머(150~180ms)는 실시간이다 — 로드가 높은 머신에서 `waitFor` 기본 1초(벽시계)가 모자란 전례(`fixtures/fakeClock.ts`).
-  const EXIT_WAIT = {timeout: 8000};
+
+  // 층을 걷는 것은 애니메이션 완료가 아니라 앱의 타이머다(`useLayerClose`: 내려감 150ms·물러남 180ms 뒤 `onBack`). 예전에는 실시간으로
+  // `waitFor(…, {timeout: 8000})` 를 걸어 그 타이머와 셸의 다시 그리기를 기다렸다(#4633). 실측(유휴 머신, 시험 하나): 퇴장 하나가 ~0.75초이고 그중
+  // 타이머는 0.15~0.18초뿐이다 — 나머지는 층이 걷힌 뒤 셸이 다시 그려지는 CPU 다. 그래서 느린 CI 에서 5초 제한을 넘긴 것은 기다림이 아니라
+  // 「퇴장 두 번 + 셸 다시 그리기 + 두 번째 열기」를 한 시험에 담은 합이다(`VoiceOver escape` 가 가장 길다). 가짜 시계 위에서 `waitFor` 로
+  // 폴링하면 한 번에 50ms 가짜 시간 + 한 번의 act 라서 오히려 느려진다(같은 조건 실측 퇴장당 ~1.25초). 폴링 없이 **타이머의 길이만큼 시계를
+  // 밀어** 한 번의 act 안에서 걷힘을 끝낸다: 벽시계에도 머신 속도에도 기대지 않고, 「한 틱 모자라면 아직 서 있고 정확히 그 길이에 걷힌다」까지
+  // 단정한다.
+  beforeEach(() => {
+    installAppClock();
+  });
+
+  // 순서는 `layerMotion4457.test.tsx` 와 같다: 먼저 내리고(층의 퇴장 타이머는 언마운트가 거둔다), 남은 가짜 타이머를 비운 뒤에 진짜 시계로
+  // 돌아간다. 가짜 시계 아래서 만든 타이머를 진짜 시계로 바꾼 뒤에 거두면 아무도 거두지 않는다.
+  afterEach(() => {
+    cleanup();
+    act(() => {
+      jest.runOnlyPendingTimers();
+    });
+    jest.useRealTimers();
+  });
+
+  /** 앱 시계를 `ms` 만큼 밀어 그 사이의 타이머를 한 번의 act 안에서 끝낸다 — 폴링도 벽시계도 없다. */
+  const advance = (ms: number) =>
+    act(async () => {
+      jest.advanceTimersByTime(ms);
+    });
+
+  /** 층이 `ms` 에 정확히 걷힌다: 한 틱 모자라면 아직 서 있고, 마지막 한 틱이 걷는다. */
+  const standsUntil = async (ms: number, testID: string) => {
+    await advance(ms - 1);
+    expect(screen.getByTestId(testID)).toBeTruthy();
+    await advance(1);
+    expect(screen.queryByTestId(testID)).toBeNull();
+  };
 
   it('설정 첫 장은 올라오고, X 는 내려간 뒤에야 페이지를 걷는다', async () => {
     releaseMotion?.();
@@ -947,7 +981,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     );
     // 내려가는 동안에는 아직 서 있다 — 누른 즉시 사라지지 않는다.
     expect(screen.getByTestId('settings-page')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
+    await standsUntil(LAYER_SINK_MS, 'settings-page');
     expect(screen.getByTestId('sidebar-list')).toBeTruthy();
   });
 
@@ -969,7 +1003,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
       expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
     );
     expect(screen.getByTestId('settings-sub-pane')).toBeTruthy();
-    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull(), EXIT_WAIT);
+    await standsUntil(LAYER_POP_MS, 'settings-sub-pane');
     // 설정 페이지는 남는다 — 한 겹만 벗겼다.
     expect(screen.getByTestId('settings-page')).toBeTruthy();
   });
@@ -987,7 +1021,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     expect(timing.mock.calls.map(call => call[1])).toContainEqual(
       expect.objectContaining({toValue: WINDOW.width, duration: LAYER_POP_MS}),
     );
-    await waitFor(() => expect(screen.queryByTestId('settings-sub-pane')).toBeNull(), EXIT_WAIT);
+    await standsUntil(LAYER_POP_MS, 'settings-sub-pane');
 
     timing.mockClear();
     act(() => {
@@ -996,9 +1030,7 @@ describe('층의 움직임 배선 — 셸 안에서 (#4457)', () => {
     expect(timing.mock.calls.map(call => call[1])).toContainEqual(
       expect.objectContaining({toValue: WINDOW.height, duration: LAYER_SINK_MS}),
     );
-    await waitFor(() => expect(screen.queryByTestId('settings-page')).toBeNull(), EXIT_WAIT);
-    // 실제 퇴장 애니메이션 두 번(안쪽 장 물러남 → 첫 장 내려감)을 차례로 기다린다. 제한 시간은
-    // jest.config.js 의 testTimeout(20 s, #4633)이 진다 — 결정화(가짜 시계)는 #4633.
+    await standsUntil(LAYER_SINK_MS, 'settings-page');
   });
 });
 
