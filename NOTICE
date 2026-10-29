@@ -49,7 +49,8 @@ is license-gated by scripts/check_cargo_licenses.sh.
 Direct server dependencies an ADR introduced are named in
 legal/THIRD_PARTY_NOTICES.md ("Server direct additions"), currently p256
 (Apache-2.0 OR MIT) and unicode-normalization (MIT OR Apache-2.0),
-ADR-0146 amendment 2026-09-28; both are also in the generated bundle.
+ADR-0146 amendment 2026-09-28, and clap (MIT OR Apache-2.0, command-line
+parsing of the `oort` CLI, ADR-0216 D10); all are also in the generated bundle.
 
 The agent-worker image also carries a local sentence-embedding model and ONNX Runtime for team-memory
 search (ADR-0196 D8 증보, #3173): intfloat/multilingual-e5-small weights (MIT, unmodified int8 ONNX
@@ -72,6 +73,11 @@ file carries its origin and a change notice in its header, and legal/THIRD_PARTY
 and prompts") carries the row. The theme catalog also bundles a handful of colors read from 57 third-party
 MIT and Apache-2.0 VS Code color themes; their upstream notices are in legal/THIRD_PARTY_NOTICES.md ("Theme
 palette seeds") and the full texts in legal/generated/THEME_PALETTE_NOTICES.txt.
+
+iOS communication notifications (ADR-0204 증보 5, #4316): the donate-then-update flow with a privacy fence, the deletion
+retry rule and the avatar size ceiling are adapted from Buzz (https://github.com/block/buzz, commit af5bb0a, Apache-2.0,
+Copyright 2026 Block, Inc.), `mobile/ios/BuzzPushKit`; each adapted file carries its origin and a change notice in its
+header, and legal/THIRD_PARTY_NOTICES.md ("Adapted designs and prompts") carries the row.
 
 Named runtime companions operators actually run next to these images:
 

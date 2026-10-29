@@ -1947,6 +1947,23 @@ async fn action_propose(
                 momo_messaging::lock_display_name_namespace_in_tx(conn, caller.workspace_id)
                     .await?;
             }
+            // **The agent's unasked-card lock, also first** (ADR-0186 증보 v5 U-d, #4704 PR B —
+            // the follow-up of PR A's second security review). The three places an agent may have
+            // waiting are shared between what a person asked for (this call) and what the agent
+            // raised unasked (`oort_action_initiate`), and each counts and then inserts. The
+            // unasked door counts behind this very advisory lock and takes no row lock on the
+            // agent's `member`, so the `FOR NO KEY UPDATE` the count below takes would not keep it
+            // out: a person's proposal and an unasked card could both read "two" and both raise a
+            // third. Taking the lock **before** `authorize_in_tx` (whose identity read share-locks
+            // the member row) is the only order that cannot cycle with that door, which holds the
+            // lock and then only share-locks. Nothing else takes this key, so it waits on nothing
+            // but the agent's own other calls.
+            momo_agent::initiative::lock_agent_initiative_in_tx(
+                conn,
+                caller.workspace_id,
+                caller.agent_member_id,
+            )
+            .await?;
             let identity =
                 match authorize_in_tx(conn, caller, momo_auth::SCOPE_WORKSPACE_PROPOSE).await? {
                     Ok(identity) => identity,

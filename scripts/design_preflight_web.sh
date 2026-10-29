@@ -719,6 +719,31 @@ run_core_stage() {
   fi
 }
 
+# ---- 실명 재유입 단계 (이슈 #4632) --------------------------------------------
+#
+# 시험 고정값·측정 하네스에 실제 사람 이름이 다시 들어오면 빨갛다. 금지 목록은 SHA-256
+# 해시뿐이고 평문은 어디에도 없다(규칙·한계·범위는 design_preflight_names.mjs 머리말).
+# 코어 단계와 같은 규칙으로, node 가 없으면 건너뛰지 않고 실패한다.
+NAMES_SCAN="$SCRIPT_DIR/design_preflight_names.mjs"
+
+run_names_stage() {
+  # $1: "" | --list | --selftest
+  if [ ! -f "$NAMES_SCAN" ]; then
+    echo "design pre-flight (names): $NAMES_SCAN 없음" >&2
+    return 2
+  fi
+  if ! command -v node >/dev/null 2>&1; then
+    echo "design pre-flight (names): node 가 없다 — 실명 단계를 돌릴 수 없다." >&2
+    echo "  (이 단계는 건너뛰지 않는다: 안 돈 것을 초록으로 세지 않기 위해서다)" >&2
+    return 2
+  fi
+  if [ -n "${1:-}" ]; then
+    node "$NAMES_SCAN" "$1"
+  else
+    node "$NAMES_SCAN"
+  fi
+}
+
 MODE="check"
 case "${1:-}" in
   --list) MODE="list" ;;
@@ -743,11 +768,14 @@ case "${1:-}" in
     run_core_stage --selftest
     core_rc=$?
     echo ""
-    if [ "$web_rc" -ne 0 ] || [ "$motion_rc" -ne 0 ] || [ "$motion_lib_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
-      echo "SELFTEST: FAIL (web raw_color=$web_rc, raw_motion=$motion_rc, motion_lib_scope=$motion_lib_rc, web strings=$strings_rc, core separation=$core_rc)"
+    run_names_stage --selftest
+    names_rc=$?
+    echo ""
+    if [ "$web_rc" -ne 0 ] || [ "$motion_rc" -ne 0 ] || [ "$motion_lib_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ] || [ "$names_rc" -ne 0 ]; then
+      echo "SELFTEST: FAIL (web raw_color=$web_rc, raw_motion=$motion_rc, motion_lib_scope=$motion_lib_rc, web strings=$strings_rc, core separation=$core_rc, names=$names_rc)"
       exit 1
     fi
-    echo "SELFTEST: PASS (web raw_color + raw_motion + motion_lib_scope + web strings + core separation rule)"
+    echo "SELFTEST: PASS (web raw_color + raw_motion + motion_lib_scope + web strings + core separation rule + names)"
     exit 0
     ;;
   --help|-h)
@@ -768,6 +796,7 @@ case "${1:-}" in
     echo "tokens: .claude/skills/momo-design-taste-web/references/tokens.md"
     echo "emdash: scripts/design_preflight_web_strings.mjs (이슈 #1141 — 웹 AST 단계)"
     echo "core:  scripts/design_preflight_core.mjs (이슈 #1141 — 분리 규칙과 근거)"
+    echo "names: scripts/design_preflight_names.mjs (이슈 #4632 — 실명 재유입, 해시 목록)"
     echo "규칙 구현: scripts/design_preflight_ast.mjs (둘이 함께 쓰는 스캐너)"
     exit 0
     ;;
@@ -790,6 +819,8 @@ if [ "$MODE" = "list" ]; then
   done
   echo ""
   run_core_stage --list
+  echo ""
+  run_names_stage --list
   exit 0
 fi
 
@@ -828,6 +859,14 @@ if [ "$core_rc" -ne 0 ]; then
   overall=1
 fi
 
+# 실명 단계도 앞 단계가 붉어도 돈다(같은 이유).
+echo ""
+run_names_stage
+names_rc=$?
+if [ "$names_rc" -ne 0 ]; then
+  overall=1
+fi
+
 echo ""
 if [ "$overall" -ne 0 ]; then
   echo "RESULT: FAIL, design pre-flight violation."
@@ -837,7 +876,7 @@ if [ "$overall" -ne 0 ]; then
   exit 1
 fi
 
-echo "RESULT: PASS, web 14/14 + core 6/6 categories clean."
+echo "RESULT: PASS, web 14/14 + core 6/6 categories + names (실명 재유입 0) clean."
 echo "  Still manual (SKILL §10 checklist): light AND dark reviewed, four states"
 echo "  present, keyboard path exists, long Korean strings do not overflow."
 exit 0

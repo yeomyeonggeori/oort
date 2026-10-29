@@ -94,10 +94,10 @@ describe("myHostView", () => {
 
 describe("개인 에이전트 별칭", () => {
   it("소문자로 접고 @를 뗀다", () => {
-    expect(normalizePersonalAlias(" @Kwak-Claude ")).toBe("kwak-claude");
+    expect(normalizePersonalAlias(" @Gu-Claude ")).toBe("gu-claude");
   });
   it("2~32자 a-z0-9_-", () => {
-    expect(personalAliasValid("kwak-claude")).toBe(true);
+    expect(personalAliasValid("gu-claude")).toBe(true);
     expect(personalAliasValid("a")).toBe(false);
     expect(personalAliasValid("a".repeat(33))).toBe(false);
     expect(personalAliasValid("한글")).toBe(false);

@@ -177,7 +177,7 @@ function durationTextOf(
   return span === undefined ? "방금 시작" : `${span}째`;
 }
 
-/** 「곽성재 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
+/** 「구민수 → 그록봇」. 맡긴 사람 기록이 없으면 에이전트만. */
 export function requesterToAgent(row: WorkJobRow): string {
   return row.requester === null
     ? row.agentName

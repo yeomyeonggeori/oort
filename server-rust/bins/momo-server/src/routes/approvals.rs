@@ -103,8 +103,8 @@ use momo_agent::{
 };
 use momo_auth::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION,
-    MAX_HOSTED_APPROVED_CHANNELS,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
+    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -770,6 +770,15 @@ fn deliver_flag_refused(
     deliver_requested && !(action_type == ACTION_TYPE_WORKSPACE_ACTION && approve && offers_opt_in)
 }
 
+/// Is this card one that answers a person **outside its room** as a missing approval does? The
+/// in-place channel-grant card (it names a room and who called whom there) and the card an agent
+/// raised unasked (it stands in its owner's one-to-one direct message and says what the agent wants
+/// to do there). One definition for both decision routes' two places that ask.
+fn card_is_hidden_from_outsiders(approval: &LockedApproval) -> bool {
+    momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
+        || momo_agent::initiative::is_unasked_card(approval)
+}
+
 async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRejectable<Decision> {
     let now = Utc::now();
     let desired_status = if input.approve {
@@ -835,6 +844,23 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
 
     if let Some(route_run_id) = input.route_run_id {
         if route_run_id != approval.run_id {
+            // A card that is hidden from outsiders (below) is hidden here too: whether the run in
+            // the path is the card's must not be a way to tell "there is such a card" from "there
+            // is none" — to anybody outside the room it answers what a missing approval answers
+            // (review of #4704 PR B, M1; the in-place card had the same gap).
+            if card_is_hidden_from_outsiders(&approval)
+                && !is_active_channel_member_in_tx(conn, approval.channel_id, input.member_id)
+                    .await?
+            {
+                return Ok(Ok(refusal(
+                    input.approval_id,
+                    input.member_id,
+                    "not_found",
+                    "approval not found",
+                    StatusCode::NOT_FOUND,
+                    now,
+                )));
+            }
             return Ok(Ok(refusal(
                 approval.id,
                 input.member_id,
@@ -851,7 +877,13 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
         // (possibly private) and who called whom there. To somebody outside that
         // room, an admin included, it answers exactly as a missing approval does,
         // so the id teaches them nothing.
-        if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
+        //
+        // ADR-0186 증보 v5 U-c (#4704 PR B, review M8) — the same for a card an agent raised
+        // unasked: it stands in its owner's one-to-one direct message and says what the agent
+        // wants to do there, so to anybody outside that room — a workspace admin included — the
+        // id answers as a missing approval does (`403 forbidden` would confirm the card exists,
+        // and whose room it is in). Judged by either server-written marker, like the executor.
+        if card_is_hidden_from_outsiders(&approval) {
             return Ok(Ok(refusal(
                 input.approval_id,
                 input.member_id,
@@ -1239,8 +1271,12 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             .with_schema(
                 TOOL_AUDIT_SCHEMA,
                 // A copy: `event` is also the resume job's input and the
-                // broadcast, and neither is told which credential decided.
-                stamp_via(input.credential_via, event.clone()),
+                // broadcast, and neither is told which credential decided
+                // (nor that the card was raised unasked: the audit row says so).
+                momo_agent::initiative::decision_audit_detail(
+                    &approval,
+                    stamp_via(input.credential_via, event.clone()),
+                ),
             ),
     )
     .await?;
@@ -1682,12 +1718,41 @@ async fn execute_workspace_action(
     // was dropped is still an unasked card while its run says so — and an unasked card can only ever
     // name an initiative action, so a tampered `action.id` is refused rather than judged by the
     // looser rules of a card a person asked for (security review of #4704, M2).
-    let initiated = momo_agent::initiative::is_agent_initiated(&approval.payload)
-        || momo_agent::initiative::is_held_for_agent_initiative(&approval.run_input);
+    let initiated = momo_agent::initiative::is_unasked_card(approval);
     if initiated && !action.initiative {
         return Ok(Ok(args_invalid_refusal(approval, input, now)));
     }
-    let resolution = if initiated {
+    // **The decision proves the door again** (ADR-0186 증보 v5 U-d 「재증명」): a card may be a day
+    // old, and everything that let an agent raise it can have changed since. The switch is on, the
+    // connection it was raised through still stands (that connection, active and proved, its
+    // credential not revoked — a credential that merely lapsed is routine, an OAuth access token
+    // lives thirty minutes and the card a day), the human's approval of it still names
+    // `workspace:initiate`, the agent is active and not paused, the person deciding is the agent's
+    // **current** owner and the one who confirmed that connection, and (above) the action is still on
+    // the list. One `action_args_invalid` for any of them (409, the approval is **not** consumed): a
+    // card that no longer stands is not a card to run, and a rejection never comes through here, so a
+    // person can always say no.
+    //
+    // What comes back is the connection the card stands on. It is what the resolver below reads
+    // coverage from and what `channel.create` widens — the row that was just proved, and not
+    // whichever connection happens to hold a fresh credential at this instant (security review of
+    // #4704 PR B, round 2, H1).
+    let card_connection = if initiated {
+        match crate::routes::agent_initiative::card_still_stands_in_tx(
+            conn,
+            input.workspace_id,
+            approval,
+            input.member_id,
+        )
+        .await?
+        {
+            Some(connection) => Some(connection),
+            None => return Ok(Ok(args_invalid_refusal(approval, input, now))),
+        }
+    } else {
+        None
+    };
+    let resolution = if let Some(card_connection) = card_connection {
         resolve_stored_initiative_action_in_tx(
             conn,
             input.workspace_id,
@@ -1698,6 +1763,7 @@ async fn execute_workspace_action(
             proposed_args(&approval.payload),
             now_ms,
             approval.id,
+            card_connection,
         )
         .await?
     } else {
@@ -2007,6 +2073,7 @@ async fn execute_workspace_action(
                 topic.as_deref(),
                 *add_proposer,
                 members,
+                card_connection,
             )
             .await?
             {
@@ -2134,7 +2201,12 @@ async fn execute_workspace_action(
     // coincidence.
     let action_ref_value = action_ref(executed.ref_type, executed.ref_id);
     for entry in &executed.audits {
-        write_audit(conn, entry).await?;
+        // An unasked card's rows say so (`origin`); every other card's are written as they were.
+        let stamped = AuditEntry {
+            detail: momo_agent::initiative::decision_audit_detail(approval, entry.detail.clone()),
+            ..entry.clone()
+        };
+        write_audit(conn, &stamped).await?;
     }
     write_audit(
         conn,
@@ -2148,15 +2220,18 @@ async fn execute_workspace_action(
             .run(approval.run_id)
             .with_schema(
                 ACTION_APPROVED_AUDIT_SCHEMA,
-                stamp_via(
-                    input.credential_via,
-                    json!({
-                        "action_id": action.id,
-                        "approval_id": approval.id.to_string(),
-                        "proposed_by": approval.requested_by.to_string(),
-                        "decided_by": input.member_id.to_string(),
-                        "ref": action_ref_value,
-                    }),
+                momo_agent::initiative::decision_audit_detail(
+                    approval,
+                    stamp_via(
+                        input.credential_via,
+                        json!({
+                            "action_id": action.id,
+                            "approval_id": approval.id.to_string(),
+                            "proposed_by": approval.requested_by.to_string(),
+                            "decided_by": input.member_id.to_string(),
+                            "ref": action_ref_value,
+                        }),
+                    ),
                 ),
             ),
     )
@@ -2400,13 +2475,43 @@ async fn execute_channel_create(
     topic: Option<&str>,
     add_proposer: bool,
     members: &[ResolvedMember],
+    card_connection: Option<Uuid>,
 ) -> Result<Execution, momo_db::DbError> {
     // The connection is the FIRST lock of the hosted canon, so it is taken before
     // the channel and membership rows this transaction is about to write.
+    //
+    // A card an agent raised unasked names its own connection — the one it was raised through, which
+    // the decision proved to stand a moment ago — and that very row is locked and later widened,
+    // whether or not the agent holds a fresh credential at the instant a person taps. The generic
+    // read finds the connection *through the credential's expiry*; for a card that waited a day it
+    // finds nothing, and the agent would be seated in a room its connection does not cover with the
+    // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
     let connection = if add_proposer {
-        lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-            .await
-            .map_err(momo_db::DbError::from)?
+        match card_connection {
+            Some(card_connection) => {
+                let locked = lock_hosted_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                    card_connection,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?;
+                // An unasked card never half-executes: the connection stood a moment ago in this very
+                // transaction, so if it does not any more the card is stale — refused before any write.
+                let Some(covered) = locked else {
+                    return Ok(Execution::Refused(args_invalid_refusal(
+                        approval, input, now,
+                    )));
+                };
+                Some((card_connection, covered))
+            }
+            None => {
+                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
+                    .await
+                    .map_err(momo_db::DbError::from)?
+            }
+        }
     } else {
         None
     };
@@ -3912,7 +4017,13 @@ async fn settle_expired(
             .target("approval", approval.id)
             .via_token(via_token_id)
             .run(approval.run_id)
-            .with_schema(TOOL_AUDIT_SCHEMA, stamp_via(credential_via, event.clone())),
+            .with_schema(
+                TOOL_AUDIT_SCHEMA,
+                momo_agent::initiative::decision_audit_detail(
+                    approval,
+                    stamp_via(credential_via, event.clone()),
+                ),
+            ),
     )
     .await?;
 

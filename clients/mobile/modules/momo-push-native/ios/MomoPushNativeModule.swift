@@ -1,12 +1,27 @@
 import ExpoModulesCore
 
 // =============================================================================
-// MomoPushNative — the smallest possible native surface (goal RN-N1).
+// MomoPushNative — a small native surface (goal RN-N1; widened once, #4316).
 //
-// It reads two Info.plist keys and stops. It deliberately does NOT touch the
-// keychain, UNUserNotificationCenter, or the APNs registration: all of that
-// lives in JS on top of expo-notifications, and every native line added here
-// would be a line the RN migration was supposed to delete.
+// It reads two Info.plist keys. It deliberately does NOT touch the keychain,
+// UNUserNotificationCenter, or the APNs registration: all of that lives in JS on top of
+// expo-notifications, and every native line added here would be a line the RN migration was supposed to
+// delete.
+//
+// ## The one widening: the App Group presentation state (#4316, ADR-0204 증보 5)
+//
+// A notification extension cannot run the app's React tree, and its credential may read two server routes
+// only, so what it needs to dress a push as a communication notification — the sender's photo, the
+// channel's name, the person's two display switches — has to be handed to it through the App Group, by the
+// app, in native code (JS has no path into a group container). Four functions and nothing else:
+//
+//   setPresentationSettings(previewEnabled, showSender)    the two switches of 설정 › 알림
+//   exportAvatar(baseUrl, workspaceId, memberId, version, fileUri)   a face the app already downloaded
+//   exportChannels(baseUrl, workspaceId, channels)         ids → kind and name
+//   clearPresentation()                                    sign-out / switch off: cache gone, donations asked to go
+//
+// The layout and every limit are in `MomoPushPresentationStore.swift` (compiled by the extension too);
+// `MomoPushPresentationBridge.swift` is the app-only half. `src/push/presentation.ts` is the only caller.
 //
 // Why these two values cannot be JS constants:
 //
@@ -39,6 +54,31 @@ public class MomoPushNativeModule: Module {
       "apnsEnvironment": momoInfoValue("MomoAPNSEnvironment"),
       "keychainAccessGroup": momoInfoValue("MomoKeychainAccessGroup")
     ])
+
+    // A deletion of the donated interactions that an earlier run began and did not finish (the process
+    // was suspended, the system was busy) is finished here, before JS has any say.
+    OnCreate {
+      MomoPushPresentationBridge.retryPendingCleanup()
+    }
+
+    // None of these throws into JS: a write that did not happen answers `false` (see the Bridge).
+    AsyncFunction("setPresentationSettings") { (previewEnabled: Bool, showSender: Bool) -> Bool in
+      MomoPushPresentationBridge.setSettings(previewEnabled: previewEnabled, showSender: showSender)
+    }
+
+    AsyncFunction("exportAvatar") {
+      (baseUrl: String, workspaceId: String, memberId: String, version: String, fileUri: String) -> Bool in
+      MomoPushPresentationBridge.exportAvatar(
+        baseURL: baseUrl, workspaceID: workspaceId, memberID: memberId, version: version, fileURI: fileUri)
+    }
+
+    AsyncFunction("exportChannels") { (baseUrl: String, workspaceId: String, channels: [[String: Any]]) -> Bool in
+      MomoPushPresentationBridge.exportChannels(baseURL: baseUrl, workspaceID: workspaceId, channels: channels)
+    }
+
+    AsyncFunction("clearPresentation") { (promise: Promise) in
+      MomoPushPresentationBridge.clear { confirmed in promise.resolve(confirmed) }
+    }
   }
 }
 

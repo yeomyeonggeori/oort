@@ -234,8 +234,39 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
     .bind(agent_member_id)
     .fetch_optional(&mut *conn)
     .await?;
-    let pending: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM approval \
+    Ok(
+        count_pending_workspace_actions_in_tx(conn, workspace_id, agent_member_id)
+            .await?
+            .all,
+    )
+}
+
+/// What an agent has waiting, as the ceiling counts it (see
+/// [`count_pending_workspace_actions_in_tx`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingWorkspaceActions {
+    /// Every pending, unexpired `workspace_action` of the agent except an in-place grant card —
+    /// the number [`crate::actions::MAX_PENDING_WORKSPACE_ACTIONS`] caps.
+    pub all: i64,
+    /// Of those, the ones the agent raised **unasked** (`payload.origin = agent_initiated`,
+    /// ADR-0186 증보 v5 U-d: at most [`crate::initiative::MAX_PENDING_INITIATIVE`]).
+    pub unasked: i64,
+}
+
+/// The **one definition** of "pending" for an agent's ceiling — read with no lock. A person's
+/// proposal ([`lock_agent_and_count_pending_workspace_actions_in_tx`], which locks first) and an
+/// unasked card (`routes::agent_initiative`, behind its advisory lock) count the same rows the
+/// same way, so neither can drift from the other: an unasked card is a `workspace_action` of the
+/// agent like any other and takes its place among the three.
+pub async fn count_pending_workspace_actions_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<PendingWorkspaceActions, DbError> {
+    let (all, unasked): (i64, i64) = sqlx::query_as(
+        "SELECT count(*), \
+                count(*) FILTER (WHERE payload->>'origin' = 'agent_initiated') \
+           FROM approval \
           WHERE workspace_id = $1 AND requested_by = $2 \
             AND action_type = 'workspace_action' AND status = 'pending' \
             AND (expires_at IS NULL OR expires_at > now()) \
@@ -245,7 +276,7 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
     .bind(agent_member_id)
     .fetch_one(&mut *conn)
     .await?;
-    Ok(pending)
+    Ok(PendingWorkspaceActions { all, unasked })
 }
 
 /// Whether a `workspace_action` of `action_id` is already `pending` against

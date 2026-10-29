@@ -182,14 +182,29 @@ export function bodyAffordances(body: string): BodyAffordances {
   };
 }
 
+/**
+ * 멘션을 누르면 그 멤버의 프로필을 연다 (#4319, owner 10-27 — 프로필 문은 얼굴과 멘션뿐이다).
+ * 길게 누르기와 그 뒤 따라 울리는 탭은 행의 제스처(`useLongPress`)가 받는다: 멘션이 시트를 여는 손가락을 가로채지 않는다.
+ */
+export interface MentionTap {
+  onOpen: (memberId: string) => void;
+  onLongPress?: () => void;
+  consumeTap?: () => boolean;
+}
+
 interface MentionRendering {
   activeHandles: ReadonlySet<string>;
   selfHandle: string | null;
+  /** 핸들(소문자) → 멤버 id. 모르면 `null` — 별칭처럼 멤버가 아닌 이름은 누를 수 없다. */
+  memberIdOf: (handle: string) => string | null;
+  tap: MentionTap | undefined;
 }
 
 const NO_MENTIONS: MentionRendering = {
   activeHandles: new Set<string>(),
   selfHandle: null,
+  memberIdOf: () => null,
+  tap: undefined,
 };
 
 /**
@@ -257,11 +272,25 @@ function InlineNode({
   if (node.kind === 'mention') {
     if (!mentions.activeHandles.has(node.handle)) return <>{node.raw}</>;
     const self = mentions.selfHandle === node.handle;
+    const tap = mentions.tap;
+    const openId = tap ? mentions.memberIdOf(node.handle) : null;
     return (
       <Text
         // 내 말풍선 위의 「나를 부름」 칩은 신호색 채움이 말풍선과 같아 사라진다 — 그때는 남의
         // 멘션과 같은 칩(옅은 채움)에 굵기로만 갈린다.
         style={[styles.mention, self && !ink?.mine && styles.mentionSelf, self && ink?.mine && styles.mentionSelfOnMine]}
+        // 링크와 같은 문법이다: 행은 접근성 원소 하나이고 멘션은 그 문장 안의 낱말로 읽힌다. 멤버를 알 때만 눌린다.
+        accessibilityRole={openId !== null ? 'link' : undefined}
+        onPress={
+          tap && openId !== null
+            ? () => {
+                // 길게 눌러 시트를 연 손가락을 떼면 따라 울리는 탭은 그 제스처의 것이다.
+                if (tap.consumeTap?.()) return;
+                tap.onOpen(openId);
+              }
+            : undefined
+        }
+        onLongPress={tap && openId !== null ? tap.onLongPress : undefined}
         testID={self ? 'message-self-mention' : 'message-mention'}>
         {node.raw}
       </Text>
@@ -515,6 +544,7 @@ export function MessageBody({
   directory,
   selfMemberId,
   bubble = null,
+  mentionTap,
 }: {
   body: string;
   /**
@@ -540,6 +570,8 @@ export function MessageBody({
    * 꺼내는 **유일한** 길인 행)에서 그 길이 사라졌다. BL-2 의 잔여였다.
    */
   selectable?: boolean;
+  /** 주면 멘션이 그 멤버의 프로필로 가는 문이 된다(#4319). 안 주면 멘션은 예전처럼 글자 스타일뿐이다. */
+  mentionTap?: MentionTap;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const blocks = useMemo(
@@ -586,8 +618,11 @@ export function MessageBody({
     return {
       activeHandles,
       selfHandle: self?.handle.toLowerCase() ?? null,
+      memberIdOf: handle =>
+        directory.members.find(candidate => candidate.handle.toLowerCase() === handle)?.id ?? null,
+      tap: mentionTap,
     };
-  }, [blocks, directory, selfMemberId]);
+  }, [blocks, directory, selfMemberId, mentionTap]);
 
   if (blocks === null || blocks.length === 0) {
     return (

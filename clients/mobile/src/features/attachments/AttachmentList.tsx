@@ -334,11 +334,17 @@ export function AttachmentList({
   attachments,
   muted,
   gesture,
+  senderName,
+  sentAtMs,
 }: {
   channelId: string;
   attachments: MessageAttachment[];
   muted?: boolean;
   gesture?: AttachmentGesture;
+  /** 이 메시지를 보낸 사람 — 사진을 열면 뷰어 위쪽 띠에 선다(#4297). */
+  senderName?: string;
+  /** 이 메시지를 보낸 시각(ms) — 이름 아래 날짜·시각이 된다. */
+  sentAtMs?: number;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const { workspaceId } = useSession();
@@ -383,6 +389,8 @@ export function AttachmentList({
           channelId={channelId}
           images={images}
           startIndex={viewing}
+          senderName={senderName}
+          sentAtMs={sentAtMs}
           onClose={() => setViewing(null)}
         />
       ) : null}

@@ -3,6 +3,12 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 // =============================================================================
+// (#4711) RED PROOF ② (진행이 자기 잠금 식에 다시 끼어들지 않는다)와 낱말꼴 「명사 + 중」은 규칙이
+// 됐다: 린트 `momo/busy-lock-grammar` 의 selfLock(별칭까지 펴서, 자기 진행 하나로 잠금이 켜지는
+// 맥락이 없는지 잰다)과 프리플라이트 `progress_word`. 변조마다의 양성 fixture 는
+// clients/web/eslint-rules/busyLockGrammar.test.ts. 아래에는 호출부 배선·잠금 식 원문·노드 교체
+// 금지의 핀이 남았다 — 렌더 행동 시험으로 바꿀 후속 후보다.
+//
 // #1502 — 진행을 잠금에서 갈라낸다. 여섯 자리, 다섯 파일.
 //
 // `ConfirmButton` 소비처들이 in-flight 를 `disabled` 에 접어 넣고 있었다
@@ -172,31 +178,9 @@ describe("RED PROOF ① 여섯 자리 전부 보이는 진행 낱말을 든다",
   }
 });
 
-describe("RED PROOF ② 진행이 자기 잠금 식에 다시 끼어들지 않는다", () => {
-  for (const site of SITES) {
-    it(`${site.file} · ${site.testId} 의 disabled 에 ${site.busy} 가 그대로 없다`, () => {
-      const call = confirmCall(site.file, site.testId);
-      // 부정된 등장(`!clearing`)은 통과시킨다 — 그것이 바로 갈라내는 문법이다.
-      // 여기서 막는 것은 `disabled={offline || clearing}` 로 되돌아가는 길이다.
-      const lock = prop(call, "disabled").split(`!${site.busy}`).join("");
-      const bare = new RegExp(
-        `(^|[^.\\w])${site.busy.replace(".", "\\.")}([^\\w]|$)`
-      );
-      expect(bare.test(lock), `disabled 가 ${site.busy} 를 그대로 든다`).toBe(
-        false
-      );
-    });
-  }
-
-  it("흐림과 낭독은 잠금에만 붙는다 — 공용 컴포넌트가 지는 몫", () => {
-    // 호출부가 아무리 옳아도 `ConfirmButton` 이 busy 를 잠금처럼 그리면 소용이
-    // 없다. 그 불변식은 `settingsFieldsBusy.test.ts` 가 재고 있고, 이 줄은 그
-    // 스위트가 사라지지 않았다는 사실만 확인한다.
-    const spec = source("./settingsFieldsBusy.test.ts");
-    expect(spec).toContain("busy 가 aria-disabled 식에 없다");
-    expect(spec).toContain("busy 가 흐림(opacity-50) 식에 없다");
-  });
-});
+// RED PROOF ② — 진행이 자기 잠금 식에 다시 끼어들지 않는다(`disabled={offline || clearing}` 로
+// 되돌아가는 길) — 는 린트 selfLock 이 됐다. 「흐림과 낭독은 잠금에만 붙는다」는 settingsFieldsBusy
+// 시험의 제목을 읽던 확인이었고, 그 불변식도 같은 규칙(SettingsFields.tsx 포함)이 지닌다.
 
 describe("RED PROOF ③ 잠금은 사라지지 않았다", () => {
   for (const site of SITES) {
@@ -247,14 +231,5 @@ describe("RED PROOF ④ 진행은 노드를 갈아 끼우지 않는다", () => {
     const file = FILES["LeaveWorkspaceRow.tsx"];
     expect(file).not.toContain("workspace-leave-pending");
     expect(file.split("나가는 중").length - 1).toBe(1);
-  });
-
-  it("낱말꼴은 「명사 + 중」이다", () => {
-    // 한자어 동작명사가 있으면 「명사 + 중」, 없을 때만 고유어 동사가 「-는 중」
-    // (#1490 전수 조사 → #1501 정본화). 이 goal 이 새로 세운 낱말 여섯이 그
-    // 규칙 아래 있다: 해제·확정은 명사꼴, 지우다·나가다는 고유어라 「-는 중」.
-    for (const [name, file] of Object.entries(FILES)) {
-      expect(file.match(/[가-힣]+하는 중/g) ?? [], `${name}`).toEqual([]);
-    }
   });
 });

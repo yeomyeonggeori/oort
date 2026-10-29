@@ -18,6 +18,7 @@ import {AGENT_LIST_ACTION} from '../src/screens/SidebarScreen';
 import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
+import {installAppClock} from './fixtures/fakeClock';
 
 // =============================================================================
 // 사이드바 행 길게 누르기 → 시트 (#4229, Buzz식). 행 → 시트 → 서버 요청까지 **실제 화면**으로 잰다:
@@ -230,6 +231,10 @@ const mmkvStore = (
 const clipboard = jest.requireMock('expo-clipboard') as {__box: {value: string | null}};
 
 beforeEach(() => {
+  // 셸을 통째로 마운트하고 `waitFor` 로 기다리는 파일이라 앱 시계를 가짜로 둔다(`fixtures/fakeClock.ts`, #3796). 실시간이면 `waitFor` 의
+  // 1초가 벽시계라서, 시트가 슬라이드로 닫히는 260ms(`SHEET_SLIDE_MS`)와 셸의 무거운 렌더가 부하에서 그 1초를 넘긴다 — 「확인하면 내 멤버십을
+  // 지우고, 서버가 답한 뒤에 시트가 닫힌다」가 그렇게 흔들렸다(#4727 병합 트리 게이트, #4708). 가짜 시계에서는 예산이 폴링 횟수라 머신이 느려도 줄지 않는다.
+  installAppClock();
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -248,6 +253,7 @@ afterEach(() => {
   queryClient?.clear();
   queryClient = null;
   jest.restoreAllMocks();
+  jest.useRealTimers();
 });
 
 /** 폰이 실제로 보내는 제스처: 손가락이 닿고(무장), 플랫폼 타이머가 울린다. */
@@ -287,6 +293,15 @@ describe('길게 누르기가 시트를 연다', () => {
       'mute-toggle',
       'leave',
     ]);
+  });
+
+  it('길게 누르기는 무거운 햅틱 한 번이다 — 대화 머리 ⋮ 의 탭(가벼운 한 번)과 갈린다 (#4319)', async () => {
+    const haptics = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
+    await mount();
+    haptics.length = 0;
+    longPress('sidebar-row-channel:ch-general');
+    expect(screen.getByTestId('channel-action-sheet')).toBeTruthy();
+    expect(haptics).toEqual(['impact:medium']);
   });
 
   it('그냥 탭은 시트를 열지 않는다', async () => {

@@ -1950,6 +1950,7 @@ pub async fn resolve_pin_target_in_tx(
         message_id,
         change,
         lock,
+        None,
     )
     .await
 }
@@ -1970,6 +1971,16 @@ pub enum PinScope {
 }
 
 /// [`resolve_pin_target_in_tx`] with its channel rule named (see [`PinScope`]).
+///
+/// `covering_connection` names **which connection decides what is "covered"**. `None` is the
+/// proposer's own live connection, found by its fresh credential — right for a card a person asked
+/// for, whose agent was just called. `Some(id)` is a connection the caller has already proved to
+/// stand ([`momo_auth::hosted_connection_stands_in_tx`]) and is the one to read: the decision of a
+/// card an agent raised unasked, which waited for its owner past the lifetime of the OAuth access
+/// token it was raised under, must be judged by the connection the card stands on and not by
+/// whether the agent happens to hold a fresh credential at the moment a person taps (security
+/// review of #4704 PR B, round 2, H1).
+#[allow(clippy::too_many_arguments)]
 pub async fn resolve_pin_target_scoped_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -1978,6 +1989,7 @@ pub async fn resolve_pin_target_scoped_in_tx(
     message_id: Uuid,
     change: PinAction,
     lock: bool,
+    covering_connection: Option<Uuid>,
 ) -> Result<Option<ResolvedMessage>, momo_db::DbError> {
     use momo_db::sqlx::Row;
 
@@ -2000,12 +2012,18 @@ pub async fn resolve_pin_target_scoped_in_tx(
         PinScope::AgentOnly => (Uuid::nil(), "", "AND $3::uuid IS NOT NULL"),
     };
 
-    // The proposer's own live connection — the only way a channel is "covered". No argument can
-    // name another agent's.
-    let Some(connection_id) =
-        active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
-    else {
-        return Ok(None);
+    // The proposer's own connection — the only way a channel is "covered". No argument can name
+    // another agent's: it is either the live one found here, or the one the caller proved.
+    let connection_id = match covering_connection {
+        Some(connection_id) => connection_id,
+        None => {
+            let Some(live) =
+                active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
+            else {
+                return Ok(None);
+            };
+            live
+        }
     };
     let sql = format!(
         "SELECT m.channel_id, m.created_at, m.body, \
@@ -2212,6 +2230,7 @@ pub async fn resolve_action_in_tx(
         ArgsOrigin::Proposal,
         None,
         CardAudience::RunChannel,
+        None,
     )
     .await
 }
@@ -2240,6 +2259,8 @@ pub async fn resolve_initiative_action_in_tx(
         ArgsOrigin::Proposal,
         None,
         CardAudience::Owner(owner_member_id),
+        // The door is authenticated by the very credential the connection is found through.
+        None,
     )
     .await
 }
@@ -2247,6 +2268,10 @@ pub async fn resolve_initiative_action_in_tx(
 /// [`resolve_stored_action_in_tx`] for an unasked card: the decision's re-proof, judged for the
 /// `reader` — the member who is deciding it, who must be able to read everything the card
 /// quotes (and, for a pin, to pin it: `set_pin_in_tx` requires the approver's own membership).
+///
+/// `card_connection` is the connection the card was raised through, which the caller has already
+/// proved to stand; what the agent's connection covers is read from **it** (see
+/// [`resolve_pin_target_scoped_in_tx`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_stored_initiative_action_in_tx(
     conn: &mut PgConnection,
@@ -2258,6 +2283,7 @@ pub async fn resolve_stored_initiative_action_in_tx(
     args: &Value,
     now_ms: i64,
     approval_id: Uuid,
+    card_connection: Uuid,
 ) -> ResolveOutcome<ResolvedAction> {
     resolve_action_with_origin_in_tx(
         conn,
@@ -2270,6 +2296,7 @@ pub async fn resolve_stored_initiative_action_in_tx(
         ArgsOrigin::Stored,
         Some(approval_id),
         CardAudience::Owner(reader_member_id),
+        Some(card_connection),
     )
     .await
 }
@@ -2298,10 +2325,14 @@ pub async fn resolve_stored_action_in_tx(
         ArgsOrigin::Stored,
         Some(approval_id),
         CardAudience::RunChannel,
+        None,
     )
     .await
 }
 
+/// The core of every resolution above. `covering_connection` is [`resolve_pin_target_scoped_in_tx`]'s:
+/// `None` finds the proposer's live connection by its fresh credential, `Some(id)` reads the one the
+/// caller has proved (the decision of an unasked card).
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_action_with_origin_in_tx(
     conn: &mut PgConnection,
@@ -2314,6 +2345,7 @@ pub async fn resolve_action_with_origin_in_tx(
     origin: ArgsOrigin,
     decision_approval_id: Option<Uuid>,
     audience: CardAudience,
+    covering_connection: Option<Uuid>,
 ) -> ResolveOutcome<ResolvedAction> {
     let mut validated = match validated_action_args_from(action, args, now_ms, origin) {
         Ok(validated) => validated,
@@ -2952,6 +2984,7 @@ pub async fn resolve_action_with_origin_in_tx(
                         *message_id,
                         *change,
                         lock,
+                        covering_connection,
                     )
                     .await?
                 }
@@ -2966,6 +2999,7 @@ pub async fn resolve_action_with_origin_in_tx(
                         *message_id,
                         *change,
                         lock,
+                        covering_connection,
                     )
                     .await?;
                     if found.is_none()
@@ -2977,6 +3011,7 @@ pub async fn resolve_action_with_origin_in_tx(
                             *message_id,
                             *change,
                             false,
+                            covering_connection,
                         )
                         .await?
                         .is_some()
@@ -3173,6 +3208,41 @@ pub fn bounded_integer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0186 증보 v5 U-b-3 (#4704): the switch that bounds an agent's unasked cards is **not**
+    /// something a proposal can write. `workspace.settings.update` takes exactly two keys, and
+    /// `agent_initiative` — spelled as the bag spells it or as the wire would — is neither: refused,
+    /// alone or beside a legal key, and absent from the schema the tool advertises.
+    #[test]
+    fn a_settings_proposal_cannot_name_the_initiative_switch() {
+        let action =
+            actions::action_by_id(actions::ACTION_WORKSPACE_SETTINGS_UPDATE).expect("registered");
+        for args in [
+            json!({"agentInitiative": false}),
+            json!({"agent_initiative": false}),
+            json!({"welcomePrompt": "환영해요", "agentInitiative": false}),
+            json!({"welcomePrompt": "환영해요", "agent_initiative": true}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, 0).is_err(),
+                "{args} must be refused"
+            );
+        }
+        // The two keys a proposal may write, by the names the bag stores them under.
+        let stored: Vec<&str> = SETTINGS_KEYS.iter().map(|(_, stored, _)| *stored).collect();
+        assert_eq!(stored, ["welcome_prompt", "role_labels"]);
+        // And the schema an agent reads lists the same two and closes the object.
+        let schema = action.args_schema();
+        let mut advertised: Vec<String> = schema["properties"]
+            .as_object()
+            .expect("an object schema")
+            .keys()
+            .cloned()
+            .collect();
+        advertised.sort();
+        assert_eq!(advertised, ["roleLabels", "welcomePrompt"]);
+        assert_eq!(schema["additionalProperties"], json!(false));
+    }
 
     /// `message.pin` / `message.unpin` (ADR-0186 증보 v5 U-e): the proposal is one message id
     /// and nothing else — no channel, no link, no text can be spelled — and the id is stored in

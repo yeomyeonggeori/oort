@@ -255,7 +255,7 @@ oort는 에이전트가 1급 멤버인 메신저예요. Claude Code·Codex 같�
 - **자격 보관.** 키체인이 있으면 키체인(macOS Keychain)을 써요. 없는 환경(헤드리스 Linux·CI)에서만 `$XDG_CONFIG_HOME/oort/`의 **0600 파일**(디렉터리 0700, 처음부터 그 권한으로 만들어요. 만든 뒤 바꾸지 않아요)로 내려가고, 내려갈 때 표준에러로 알리고 `whoami --json`의 `storage`가 `file`을 말해요. **조용한 강등은 없어요**: 키체인이 있는데 쓰기가 실패하면(잠김·거부) 파일로 몰래 쓰지 않고 오류를 내며, 사람이 `--storage file`로 명시할 때만 파일을 써요. 파일 권한이 넓으면 읽기를 거절해요. 프로필의 키는 (서버 origin, 워크스페이스 id)예요. 환경 변수 `OORT_TOKEN`이 있으면 그것이 저장된 자격보다 우선하고(`whoami`가 `source: env`로 밝혀요) 저장·갱신을 하지 않아요.
 - **갱신 직렬화.** 로그인 세션의 access가 만료됐을 때 갱신은 **파일 잠금**으로 직렬화하고, 잠금을 얻은 뒤 저장소를 다시 읽어서 다른 프로세스가 이미 회전했으면 그 결과를 써요(이중 확인). 서버의 refresh 재사용 감지(D2)가 동시 갱신을 침해로 읽어 계보를 끝내는 것을 막으려는 거예요. 응답이 유실된 재시도도 재사용으로 읽혀 계보가 끝날 수 있어요(알려진 한계, 다시 `oort login`하면 돼요).
 - **전송 규칙.** 서버는 `https`만(`http`는 루프백 주소에서만 허용). 비밀은 `Authorization` 헤더로만 보내요. 다른 호스트로 리디렉트되면 자격을 보내지 않아요. TLS 검증을 끄는 플래그가 없어요. 서버 외에 어디도 호출하지 않아요(원격 계측·자체 업데이트 확인 없음).
-- **비밀을 argv에 두지 않기.** AI 도구에 붙일 때의 순위는 ① `oort mcp`(stdio, 설정 파일에 비밀이 없어요) ② `oort token`을 헤더 도우미로(Claude Code `headersHelper`, Codex `http_headers_helper`) ③ 환경 변수 참조(`${OORT_TOKEN}`을 작은따옴표로 감싸 확장 시점을 늦추거나 Codex `bearer_token_env_var`)예요. **비밀 값이 든 한 줄 명령은 만들지 않아요**(ADR-0190 D3-h가 실측한 argv·쉘 기록 노출). 환경 변수는 AI 도구가 띄우는 하위 프로세스에 상속된다는 한계가 있어서 ③은 마지막 수단이에요. ①②는 `runtime-unverified`이고 #4662의 완료 조건에서 실제 클라이언트로 확인해요(확인 전에는 광고하지 않아요, ADR-0190 D3-h의 AIH-5와 같아요).
+- **비밀을 argv에 두지 않기.** AI 도구에 붙일 때의 순위는 ① `oort mcp`(stdio, 설정 파일에 비밀이 없어요) ② `oort token`을 헤더 도우미로(Claude Code `headersHelper`, Codex `http_headers_helper`) ③ 환경 변수 참조(`${OORT_TOKEN}`을 작은따옴표로 감싸 확장 시점을 늦추거나 Codex `bearer_token_env_var`)예요. **비밀 값이 든 한 줄 명령은 만들지 않아요**(ADR-0190 D3-h가 실측한 argv·쉘 기록 노출). 환경 변수는 AI 도구가 띄우는 하위 프로세스에 상속된다는 한계가 있어서 ③은 마지막 수단이에요. ①은 #4662에서 실제 클라이언트로 확인했고 ②는 서버가 `clientInfo` 추가 키를 받을 때까지 광고하지 않아요(「구현 메모 (#4662)」, ADR-0190 D3-h의 AIH-5와 같은 규칙이에요).
 - 신규 의존(`clap`·`keyring` 등 후보)은 허용 라이선스를 확인하고 NOTICE/귀속을 반영해요(AGENTS.md).
 - **시험 의무: R16·R17·R18·R19**
 
@@ -391,6 +391,16 @@ oort는 에이전트가 1급 멤버인 메신저예요. Claude Code·Codex 같�
 - **문이 이 라우트에 걸지 못하는 두 예산(R13)**: L8의 범위가 `dev:identity`라서 문은 한 호출이 전송인지 몰라요. `post` 도구가 토큰의 전송 예산(`dev:write:{토큰}`)과 멤버의 전송 예산(`write:send:{멤버}`, `POST …/messages`가 라우트 계층으로 쓰는 것)을 REST와 같은 키·같은 함수로 직접 소비해요. 초과는 429 + `Retry-After` + JSON-RPC -32029예요. 그때 문의 `used` 행은 이미 쓰인 뒤예요(그 POST도 한 번의 사용이고, 토큰당 분당 240이 그 행의 상한이에요).
 - **본문 허용목록(D4)**: 도구 입력 스키마가 닫혀 있어(`additionalProperties: false`) 전송의 인자는 `channelId`·`clientMsgId`·`body`·`rootId`·`replyToId` 다섯뿐이에요. REST 요청은 이 다섯에서만 만들고 나머지 필드는 구조체 리터럴에 「없음」으로 적어서, REST 본문에 필드가 늘면 이 곳이 컴파일되지 않아요(허용목록 방식).
 
+**구현 메모 (#4662, 2026-10-28)** — 결정은 바꾸지 않고, 구현이 정한 것과 실제 클라이언트로 확인한 것만 적어요.
+- **크레이트**: `server-rust/bins/oort-cli`(crate `oort-cli`, lib `oort_cli`, 바이너리 `oort`). 서버 크레이트를 링크하지 않아요. 서버와 나눠 쓰는 값(클라이언트 id·루프백 포트 5개·콜백 경로·resource 경로·범위 어휘·봉투 접두와 문법·MCP 시대·닫힌 표 L1~L8)은 `tests/wire_constants.rs`가 서버 쪽 정의와 대조해요(서버는 dev-dependency로만 끌어와요). 신규 의존은 `clap`(MIT OR Apache-2.0, 파생 매크로만. `anstyle`·`clap_builder`·`clap_derive`·`clap_lex` 포함)뿐이고 NOTICE·GHCR 번들에 반영했어요. 키체인은 `momo-workd`가 이미 쓰는 `security-framework`, 파일 잠금은 락에 이미 있던 `rustix`예요.
+- **종료 코드 5(없음)**: #4660 구현 메모가 남긴 질문의 답이에요. `error.code`가 없는 403(없는 채널·비멤버·채널 제한 밖이 모두 같은 응답)은 5로, 코드가 붙은 403(`dev_scope_denied`·`dev_access_denied`·`dev_route_not_allowed`)은 4로 가요. 3은 401과 로그인 없음(`login_required`)·끝난 계보(`login_expired`), 7은 5xx·네트워크·리디렉트(따라가지 않아요)예요.
+- **자격 보관**: macOS는 **로그인 키체인**(서비스 `oort-cli`, 계정 `<origin>|<워크스페이스 id>`, 값은 자격 JSON, iCloud 동기화 끔)이에요. 데이터 보호 키체인(`momo-workd`가 쓰는 것)이 아니에요 — 서명하지 않은 CLI는 `keychain-access-groups` entitlement가 없어 `errSecMissingEntitlement`가 나요. 그 밖의 환경은 `$XDG_CONFIG_HOME/oort/credentials/<해시>.json`(디렉터리 0700·파일 0600을 만들 때부터 그 권한으로, 임시 파일에 쓰고 rename)이에요. 읽을 때는 연 핸들에서 소유자·권한·일반 파일을 검사하고 링크는 `O_NOFOLLOW`로 거절해요. 현재 프로필 포인터 `current.json`(비밀 없음)과 갱신 잠금 `lock`은 키체인이든 파일이든 설정 디렉터리에 있어요. 키체인 쓰기 실패는 오류이고, 파일은 사람이 `--storage file`을 줄 때만 써요. 서명 없는 개발 빌드는 빌드마다 키체인 접근 확인을 물을 수 있어요(서명·공증은 M7 배포 몫, `runtime-unverified`).
+- **갱신 직렬화**: `flock` 비차단 + 20ms 폴링(30초 제한) → 잠금 뒤 저장소를 다시 읽어 다른 프로세스가 이미 회전했으면 그 결과를 써요. 토큰 엔드포인트는 로그인 때 메타데이터에서 읽어 자격과 함께 저장하고(갱신 때 다시 발견하지 않아요) 서버 origin과 같을 때만 써요. 회전한 새 쌍을 저장하지 못하면 「다시 로그인」을 말해요(옛 refresh는 이미 죽었어요).
+- **`logout`**: 저장된 로그인만 대상이에요. `OORT_TOKEN`은 건드리지도 폐기하지도 않아요(배포가 둔 값이에요). 서버에 닿지 않으면 로컬은 지우고 종료 코드 7로 「설정에서 지워 주세요」를 말해요.
+- **브라우저 승인**: 메타데이터의 issuer와 세 엔드포인트가 모두 사용자가 준 서버 origin일 때만 진행해요. 수신기는 `127.0.0.1`의 첫 빈 후보 포트에만 바인드하고, `Host`가 `127.0.0.1:<포트>`인 `GET /callback` 하나만 콜백으로 받아요(그 밖의 요청은 콜백으로 세지 않아요). `state`·`iss`는 상수 시간 비교이고 불일치나 `error`는 교환 전에 중단해요. 응답 페이지는 코드를 되풀이하지 않아요(`no-store`·`Referrer-Policy: no-referrer`·CSP `default-src 'none'`). 교환은 서버 origin의 `token_endpoint`에만 가고, 저장에 실패하면 서버에 열린 세션을 바로 `revoke`해요. 범위는 5개를 모두 요청하고 동의 화면에서 사람이 좁혀요(「읽기만」이 기본) — 「읽기만」 로그인의 `post`는 403 `dev_scope_denied`(종료 코드 4)예요.
+- **`mcp` 브리지**: stdin 줄 단위 JSON-RPC → `POST /v1/mcp/me`. 시대는 클라이언트 몫이에요 — `_meta`에 2026-07-28 버전이 있으면 그 헤더(`MCP-Protocol-Version`·`Mcp-Method`·`Mcp-Name`)로, 아니면 2025-11-25로 보내요(`initialize`의 제안이 다르면 2025-11-25로 바꿔 보내고 표준에러에 알려요). 문의 JSON-RPC 응답은 상태와 무관하게 그대로 통과하고(-32601 포함), JSON-RPC 본문이 없는 실패(로그인 없음 -32001·허용 안 됨 -32003·한도 -32029·그 밖 -32603)만 닫힌 어휘로 합성해요. 표준출력은 JSON-RPC만이고, 줄 상한은 문과 같은 64 KiB이며, 로그인이 없으면 말을 시작하기 전에 종료 코드 3으로 끝나요.
+- **실제 클라이언트 확인 (이 이슈의 완료 조건)**: 비밀 없는 설정(저장된 로그인만 읽어요)으로 MCP Inspector CLI 2.12.0·Claude Code 2.1.312(`--mcp-config`)·Codex 0.158.0(`-c mcp_servers…`)을 실제 서버·실 PG에 붙여 `tools/list`와 `tools/call`(`oort_me_whoami`)을 확인했어요. Inspector는 2025-11-25를 제안했고, Codex는 2025-06-18을 제안해 브리지가 2025-11-25로 바꿨고 문이 2025-11-25로 답했으며 Codex가 받아들였어요. Claude Code는 먼저 2026-07-28 `server/discover`를 찾아 본 뒤 `initialize`는 2025-11-25로 보내요. **처음 시도에서 Claude Code는 연결에 실패했어요**: 문의 `valid_implementation_info`가 `clientInfo`를 `name`·`title`·`version` 세 키로만 받는데, 사양의 `description`·`websiteUrl`을 함께 보내는 Claude Code가 `-32602`를 받았어요. 브리지가 `clientInfo`를 세 키(문의 길이 한도)로 줄여 보내게 고쳐서 연결돼요(시험: 모의 문도 실제 문처럼 엄격하게, PG 종단 시험은 Claude Code가 실제로 보내는 모양으로). **② 헤더 도우미(`type: http` + `headersHelper`)는 같은 이유로 지금은 연결되지 않아요** — 헬퍼(`oort token --headers`)는 인증을 통과하지만(401이 아니에요) 문이 `initialize`를 400으로 거절해요. 서버 쪽(momo-mcp) 수정 전까지 ②는 광고하지 않아요(후속). Codex의 `http_headers_helper`는 확인하지 않았어요.
+
 **시험 없이 증명하는 것**: 배포(D11)는 M7 게이트 기록, 업계 사실(위 [S])은 출처 링크예요.
 
 ## 이행 계획
@@ -415,7 +425,8 @@ oort는 에이전트가 1급 멤버인 메신저예요. Claude Code·Codex 같�
 - [ ] 「명령줄에서」 표식의 웹·데스크탑·폰 표시, 폰 승인 화면(장치 코드 단계에 맞춰)
 - [ ] 새 개발자 토큰 발급을 다른 세션에 알리는 앱 안 알림(ADR-0195 D-8 모양)
 - [x] 역방향 줄: ADR-0162·ADR-0173·ADR-0198 머리에 이 ADR 한 줄(#4660의 PR에서)
-- [ ] `scripts/oort help` 첫 줄 안내(#4662의 PR에서), 레포 비밀 스캔 규칙에 `momo_devr?_v1` 패턴 추가 검토(#4660)
+- [x] `scripts/oort help` 첫 줄 안내(#4662의 PR에서 했어요)
+- [ ] 레포 비밀 스캔 규칙에 `momo_devr?_v1` 패턴 추가 검토(#4660)
 - [ ] `docs/security/claims.yaml` 등재: 시험이 생긴 주장만(ADR-0214)
 
 ## 이 ADR이 열지 않는 것
@@ -438,7 +449,7 @@ oort는 에이전트가 1급 멤버인 메신저예요. Claude Code·Codex 같�
 
 **`runtime-unverified`**
 - 사람 JWT의 Agent Port 거절, 현행 허용목록에서 Claude Code의 `localhost` 임의 포트가 등록되지 않는다는 점은 코드·문서로만 확인했어요(F1·F7). Codex의 고정 포트 통과는 추정이에요.
-- `headersHelper`(Claude Code)·`http_headers_helper`(Codex)의 실행·출력 계약과 stdio MCP 호환(`oort mcp`)은 실제 클라이언트로 확인하지 못했어요. ADR-0190 D3-h도 헬퍼를 저장까지만 확인했어요.
+- `headersHelper`(Claude Code)·`http_headers_helper`(Codex)의 실행·출력 계약과 stdio MCP 호환(`oort mcp`)은 #4662에서 실제 클라이언트로 확인했어요(위 「구현 메모 (#4662)」): stdio는 Inspector·Claude Code·Codex에서 동작하고, Claude Code의 `headersHelper`는 실행·인증되지만 문이 `clientInfo`의 추가 키를 거절해 연결되지 않아요. Codex의 `http_headers_helper`는 확인하지 못했어요.
 - 번들 안 바이너리의 코드 서명·공증 요건, 공개 Homebrew의 M7-S 해당 여부, `keyring` 크레이트의 서명 없는 개발 빌드·헤드리스 Linux 동작, 파일 잠금의 네트워크 파일시스템 동작은 실행하지 않았어요.
 - `ALTER TYPE … ADD VALUE`와 CHECK 제약이 포함된 migration의 실제 동작(Postgres 18), 확장한 폐기 sweep의 교착 여부는 실행하지 않았어요(R9가 잡아요).
 - OAuth 서버는 flag로 닫혀 있고 runtime proof가 없어요. 1단계(브라우저 로그인)는 그 뒤의 일이에요.

@@ -1049,6 +1049,58 @@ fn liveness_thresholds_from_env() -> Result<momo_agent::LivenessThresholds, Conf
     })
 }
 
+/// The three variables an operator sets, in the order [`InitiativeLimits::from_env_values`] takes
+/// their values: cards an hour, cards a day, hours a card waits.
+///
+/// [`InitiativeLimits::from_env_values`]: momo_agent::initiative::InitiativeLimits::from_env_values
+const INITIATIVE_LIMIT_VARIABLES: [&str; 3] = [
+    "MOMO_AGENT_INITIATIVE_PER_HOUR",
+    "MOMO_AGENT_INITIATIVE_PER_DAY",
+    "MOMO_AGENT_INITIATIVE_TTL_HOURS",
+];
+
+/// ADR-0186 증보 v5 U-d (#4704 PR B) — the rate and the lifetime of a card an agent raises
+/// **unasked**, read once from the environment: `MOMO_AGENT_INITIATIVE_PER_HOUR` (default 6,
+/// 1..=60), `MOMO_AGENT_INITIATIVE_PER_DAY` (20, 1..=240) and `MOMO_AGENT_INITIATIVE_TTL_HOURS`
+/// (24, 1..=168). Each is clamped to its range and a value that is not a number falls back to the
+/// default, both with a warning when it is read (at startup: `main` asks once): a typo must not close
+/// the door (a zero) nor open it past the ceiling, and an abuse limit is not worth a failed boot. A
+/// process-wide read for the reason `liveness_thresholds` is: the fixtures that build
+/// [`AgentPortConfig`] literally are untouched.
+pub fn initiative_limits() -> momo_agent::initiative::InitiativeLimits {
+    static LIMITS: std::sync::OnceLock<momo_agent::initiative::InitiativeLimits> =
+        std::sync::OnceLock::new();
+    *LIMITS.get_or_init(|| initiative_limits_from(env))
+}
+
+/// [`initiative_limits`] over any source of variables, so a test can say which name feeds which
+/// number (a variable misnamed here would be an operator's setting silently ignored).
+fn initiative_limits_from(
+    read: impl Fn(&str) -> Option<String>,
+) -> momo_agent::initiative::InitiativeLimits {
+    let [per_hour, per_day, ttl_hours] = INITIATIVE_LIMIT_VARIABLES;
+    let (limits, readings) = momo_agent::initiative::InitiativeLimits::from_env_values(
+        read(per_hour).as_deref(),
+        read(per_day).as_deref(),
+        read(ttl_hours).as_deref(),
+    );
+    for (name, reading) in INITIATIVE_LIMIT_VARIABLES.into_iter().zip(readings) {
+        match reading {
+            momo_agent::initiative::LimitReading::Clamped { requested } => tracing::warn!(
+                variable = name,
+                requested,
+                "an agent-initiative limit is outside its range and was clamped"
+            ),
+            momo_agent::initiative::LimitReading::Unparsable => tracing::warn!(
+                variable = name,
+                "an agent-initiative limit is not a number; using the default"
+            ),
+            _ => {}
+        }
+    }
+    limits
+}
+
 impl AgentPortConfig {
     pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
         let defaults = AgentPortConfig::default();
@@ -3167,6 +3219,60 @@ mod tests {
         ] {
             assert!(!hosted_inplace_grant_switch_on(off), "{off:?}");
         }
+    }
+
+    /// ADR-0186 증보 v5 U-d (#4704 PR B, L6): each `MOMO_AGENT_INITIATIVE_*` variable feeds **its own**
+    /// number and nothing else, under the names the runbook gives — a swapped or misspelled name would
+    /// be an operator's setting silently ignored, which the pure parser's own test cannot see.
+    #[test]
+    fn each_initiative_variable_sets_its_own_number_under_the_name_the_runbook_gives() {
+        use std::collections::HashMap;
+        let defaults = momo_agent::initiative::InitiativeLimits::default();
+        let limits = |set: &[(&str, &str)]| {
+            let set: HashMap<String, String> = set
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect();
+            initiative_limits_from(|name| set.get(name).cloned())
+        };
+        assert_eq!(limits(&[]), defaults, "nothing set: the defaults");
+        // One at a time: the other two stay what they were.
+        let hour = limits(&[("MOMO_AGENT_INITIATIVE_PER_HOUR", "3")]);
+        assert_eq!(
+            (hour.per_hour, hour.per_day, hour.ttl_seconds),
+            (3, defaults.per_day, defaults.ttl_seconds)
+        );
+        let day = limits(&[("MOMO_AGENT_INITIATIVE_PER_DAY", "50")]);
+        assert_eq!(
+            (day.per_hour, day.per_day, day.ttl_seconds),
+            (defaults.per_hour, 50, defaults.ttl_seconds)
+        );
+        let ttl = limits(&[("MOMO_AGENT_INITIATIVE_TTL_HOURS", "48")]);
+        assert_eq!(
+            (ttl.per_hour, ttl.per_day, ttl.ttl_seconds),
+            (defaults.per_hour, defaults.per_day, 48 * 3600)
+        );
+        // And the range is applied to what the operator wrote, not only in the parser's own test.
+        let wild = limits(&[
+            ("MOMO_AGENT_INITIATIVE_PER_HOUR", "0"),
+            ("MOMO_AGENT_INITIATIVE_PER_DAY", "100000"),
+            ("MOMO_AGENT_INITIATIVE_TTL_HOURS", "banana"),
+        ]);
+        assert_eq!((wild.per_hour, wild.per_day), (1, 240));
+        assert_eq!(
+            wild.ttl_seconds, defaults.ttl_seconds,
+            "not a number: the default"
+        );
+        // The names themselves are pinned, so renaming one is a deliberate act: the runbook and the
+        // ADR spell exactly these, and an operator's environment file has them by heart.
+        assert_eq!(
+            INITIATIVE_LIMIT_VARIABLES,
+            [
+                "MOMO_AGENT_INITIATIVE_PER_HOUR",
+                "MOMO_AGENT_INITIATIVE_PER_DAY",
+                "MOMO_AGENT_INITIATIVE_TTL_HOURS"
+            ]
+        );
     }
 
     /// #4443: the api process's reclaim tick reads the notifier's variable names with the

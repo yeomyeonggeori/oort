@@ -18,14 +18,14 @@ const WEB_SRC = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const idsIn = (group: (typeof SETTINGS_SECTIONS)[number]["group"]) =>
   SETTINGS_SECTIONS.filter((item) => item.group === group).map((item) => item.id);
 
-describe("settingsNav (#3578 S1 · #4141: 12행, 세 그룹)", () => {
-  it("개인 / 워크스페이스 / 앱·연결 세 그룹에 12행이다", () => {
+describe("settingsNav (#3578 S1 · #4141 · #4663: 13행, 세 그룹)", () => {
+  it("개인 / 워크스페이스 / 앱·연결 세 그룹에 13행이다", () => {
     expect(DEFAULT_SETTINGS_SECTION).toBe("profile");
     expect(SETTINGS_GROUPS).toEqual(["개인", "워크스페이스", "앱·연결"]);
-    expect(SETTINGS_SECTIONS).toHaveLength(12);
+    expect(SETTINGS_SECTIONS).toHaveLength(13);
     expect(idsIn("개인")).toEqual(["profile", "appearance", "notifications", "shortcuts", "devices"]);
     expect(idsIn("워크스페이스")).toEqual(["workspace", "members", "memory", "usage", "code"]);
-    expect(idsIn("앱·연결")).toEqual(["updates", "aiHub"]);
+    expect(idsIn("앱·연결")).toEqual(["updates", "devTools", "aiHub"]);
     expect(SETTINGS_SECTIONS.map((item) => item.label)).toEqual([
       "프로필",
       "모양",
@@ -38,8 +38,23 @@ describe("settingsNav (#3578 S1 · #4141: 12행, 세 그룹)", () => {
       "사용량",
       "실행 호스트",
       "업데이트",
+      "명령줄·AI 도구",
       "AI",
     ]);
+  });
+
+  it("명령줄·AI 도구 행은 설정 안의 페이지이고 어느 빌드에서나 도착한다 (#4663)", () => {
+    const row = SETTINGS_SECTIONS.find((item) => item.id === "devTools");
+    expect(row).toMatchObject({ label: "명령줄·AI 도구", group: "앱·연결", scope: "account" });
+    // 링크 행(AI 허브로 나가는 문)이 아니고, 데스크톱 전용도 서버 표면 의존도 아니다.
+    expect(row?.link).toBeUndefined();
+    expect(row?.desktopOnly).toBeUndefined();
+    expect(row?.surface).toBeUndefined();
+    // 그룹의 끝은 계속 바깥으로 나가는 문이다.
+    expect(idsIn("앱·연결").at(-1)).toBe("aiHub");
+    expect(resolveSettingsSection("devTools")).toEqual({ kind: "section", id: "devTools", alias: null });
+    expect(isReachableSettingsSection("devTools")).toBe(true);
+    expect(reachableSettingsSections().map((item) => item.id)).toContain("devTools");
   });
 
   it("모든 행은 범위 칩을 갖고, 링크 행(AI 허브)만 칩이 없다", () => {

@@ -2,9 +2,9 @@ import {uuidEq, type Message} from '@momo/core/lib/api';
 import {THREAD_COMPOSER_PLACEHOLDER} from '@momo/core/features/chat/composerCopy';
 import type {Directory} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useState} from 'react';
-import {StyleSheet, Text, View} from 'react-native';
+import {StyleSheet} from 'react-native';
 import {ErrorState, NoticeBlock, Screen, ScreenHeader} from '../../design/atoms';
-import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import type {Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
 import {Composer, type ComposerSendOptions} from './Composer';
@@ -363,8 +363,9 @@ export function ThreadPanel({
               <Timeline
                 messages={messages}
                 directory={directory}
-                // The root is always present, so this list is never empty and the
-                // "no replies yet" invitation belongs beside the composer instead.
+                // The root is always present, so this list is never empty. There is
+                // no "no replies yet" line beside the composer either (#4690): the
+                // composer's own placeholder 「답글 쓰기」 is the whole invitation.
                 status="ready"
                 pending={pending}
                 reactions={timeline.reactions}
@@ -399,35 +400,28 @@ export function ThreadPanel({
             </>
           }
           composer={
-            <View>
-              {status === 'ready' && replies.length === 0 ? (
-                <Text style={styles.invite} testID="thread-empty">
-                  첫 답글을 남겨 이 대화를 이어가세요.
-                </Text>
-              ) : null}
-              <Composer
-                channelLabel="스레드"
-                // 스레드는 방이다. 이 호출은 플레이스홀더를 덮어써서 조사가
-                // 문장에 닿지도 않지만, 그래도 적는다 — 기본값이 없어야 다음
-                // 호출자가 모르는 채로 지나가지 못한다 (#1384).
-                recipient="place"
-                directory={directory}
-                viewerHumanId={myMemberId}
-                // 채널과 **다른 이름 공간**이다(`drafts.ts`). 스레드에 쓰다 만
-                // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.
-                draftKey={threadDraftKey(root.id)}
-                attachmentTarget={
-                  workspaceId === undefined || channelId === undefined
-                    ? undefined
-                    : {workspaceId, channelId, rootId: root.id}
-                }
-                offline={!online}
-                // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
-                placeholder={THREAD_COMPOSER_PLACEHOLDER}
-                sendLabel="답글 보내기"
-                onSend={onSend}
-              />
-            </View>
+            <Composer
+              channelLabel="스레드"
+              // 스레드는 방이다. 이 호출은 플레이스홀더를 덮어써서 조사가
+              // 문장에 닿지도 않지만, 그래도 적는다 — 기본값이 없어야 다음
+              // 호출자가 모르는 채로 지나가지 못한다 (#1384).
+              recipient="place"
+              directory={directory}
+              viewerHumanId={myMemberId}
+              // 채널과 **다른 이름 공간**이다(`drafts.ts`). 스레드에 쓰다 만
+              // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.
+              draftKey={threadDraftKey(root.id)}
+              attachmentTarget={
+                workspaceId === undefined || channelId === undefined
+                  ? undefined
+                  : {workspaceId, channelId, rootId: root.id}
+              }
+              offline={!online}
+              // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
+              placeholder={THREAD_COMPOSER_PLACEHOLDER}
+              sendLabel="답글 보내기"
+              onSend={onSend}
+            />
           }
         />
       </Screen>
@@ -443,11 +437,5 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: color.bg,
-  },
-  invite: {
-    paddingHorizontal: SAFE_GUTTER,
-    paddingTop: space.sm,
-    fontSize: font.meta,
-    color: color.textFaint,
   },
 });

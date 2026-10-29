@@ -1,0 +1,45 @@
+appId: app.momo.ios
+name: 119-jump-latest
+---
+# 119-jump-latest — 멀리 올라간 채 아래 알약 「최신으로」(`jump-latest`)를 **정말로 누른다** (#4689).
+#
+# 재는 것은 앱이 한다(`measure/jumpLatest.tsx`: 목록을 새로 세워 바닥에 앉힌 뒤 사람이 올라가듯 올리고, 누른 순간부터 프레임마다 스크롤 기하·알약·마지막 행의 창 좌표·
+# 스크롤 보고 전부를 싱크로 보낸다). 분석은 `measure/jump-latest-windows.mjs`. 이 흐름은 **누르기만** 한다 — 표면이 스스로 스크롤해 「착지」를 흉내 내면 사진은 알약이 아니라 흉내를 찍는다
+# (`91-jump-pills-capture` 머리말과 같은 까닭: 로그인도 서버도 필요 없고, 앱을 다시 띄우지 않으므로 `launchApp` 이 없다).
+#
+#   measure/run-jump-latest.sh <udid> <태그> JUMP-LATEST+n300 <Metro 포트> <싱크 포트 파일> <싱크 태그 파일> <싱크 jsonl> [rec.mp4]
+#   구동기가 `-e TRIALS=<시험 수> -e QUIET_MS=<ms>` 를 준다(시험 수 = 거리 수 × 반복, 기본 4 × 3 = 12). 직접 돌릴 때도 `-e TRIALS=` 는 **반드시** 준다 —
+#   이 파일 머리의 `env:` 기본값은 `-e` 를 이긴다(Maestro 2.8 실측: `env: TRIALS: 12` 를 두자 `-e TRIALS=1` 이 무시돼 12번을 돌았다), 그래서 기본값을 두지 않는다.
+#
+# 한 시험 = 표식이 `ARMED <k>` 가 되면 알약을 누르고, 표면이 기록을 보내 `DONE <k>` 가 될 때까지 기다린다. 표면의 표식은 ARMED → RUN(누른 순간부터) → DONE(기록을 보낸 뒤,
+# 다음 시험의 ARMED 직전까지 남는다) 순서라서 앞 시험의 DONE 이 다음 시험의 ARMED 로 오인되지 않고, 눌림이 안 먹으면 ARMED 가 그대로 남아 다시 누른다.
+#
+# **측정을 건드리는 것 둘** (그래서 결과를 읽을 때 같이 적는다):
+#   · `extendedWaitUntil` 은 기다리는 동안 앱의 접근성 계층을 계속 읽는다 — 그 부하가 달리는 중의 JS·메인 스레드에 얹힌다(112 머리말도 같은 말).
+#     `-e QUIET_MS=<ms>` 를 주면 누른 뒤 그 시간 동안 **앱을 읽지 않고** 호스트에서 기다린다(`evalScript` 의 바쁜 대기). 이때는 DONE 을 기다리지 않는다
+#     (DONE 은 다음 시험의 준비 동안만 남는다) — 대신 ms 가 한 시험보다 길어야 한다(누른 뒤 최대 6초 + 1.2초 + 전송 → 8000 이상).
+#   · 탭 뒤에 Maestro 가 「화면이 멈출 때까지」 스크린샷을 비교한다(`waitToSettleTimeoutMs`). 아래 `tapOn` 은 그 대기를 0 으로 둔다.
+- repeat:
+    times: ${TRIALS}
+    commands:
+      # 진입(최대 4초)·올림(가장 긴 거리는 수십 초)·쉼이 끝나 표식이 켜질 때까지.
+      - extendedWaitUntil:
+          visible: ".*ARMED.*"
+          timeout: 300000
+      - tapOn:
+          id: "jump-latest"
+          waitToSettleTimeoutMs: 1
+      - runFlow:
+          when:
+            true: ${typeof QUIET_MS !== 'undefined' && Number(QUIET_MS) > 0}
+          commands:
+            # 앱을 읽지 않는 기다림. (`java` 는 GraalJS 샌드박스에 없다 — 호스트의 한 코어를 잠깐 태우는 바쁜 대기다.)
+            - evalScript: ${(function () { var end = new Date().getTime() + Number(QUIET_MS); while (new Date().getTime() < end) {} return 0; })()}
+      - runFlow:
+          when:
+            true: ${typeof QUIET_MS === 'undefined' || !(Number(QUIET_MS) > 0)}
+          commands:
+            - extendedWaitUntil:
+                visible: ".*DONE.*"
+                timeout: 60000
+- takeScreenshot: jump-latest-final

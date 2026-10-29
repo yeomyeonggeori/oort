@@ -1,6 +1,6 @@
 import type {Message, MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import type {MessageNewEvent, RealtimeStatus} from '@momo/core/lib/realtimeEvents';
-import type {AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
+import {parseTurnPlaceholderKey, turnPlaceholderKey, type AgentWorkingSignal} from '@momo/core/features/agents/workingSignal';
 import {activityDetail, activityLines, MAX_ACTIVITY_LINES, UNKNOWN_AGENT_NAME, type AgentLivenessLookup} from '@momo/core/features/agents/turnCopy';
 import {typingSegments} from '@momo/core/features/chat/typing';
 import {makeDirectory, memberNameParts} from '@momo/core/features/workspace/directory';
@@ -28,7 +28,7 @@ import {ConversationLayout} from '../src/features/conversation/ConversationLayou
 import {CONV} from '../src/features/conversation/convDesign';
 import type {MessageRowActions} from '../src/features/conversation/MessageRow';
 import {PinListPanel} from '../src/features/conversation/PinListPanel';
-import {clearDraft, readDraft} from '../src/features/conversation/drafts';
+import {clearDraft, readDraft, saveDraft} from '../src/features/conversation/drafts';
 import {Timeline, type PillState, type ScrollLogEntry, type TimelineGeometry} from '../src/features/conversation/Timeline';
 import {TypingBar} from '../src/features/conversation/TypingBar';
 import {useTimeline} from '../src/features/conversation/useTimeline';
@@ -88,6 +88,10 @@ import {setServerBase} from '../src/storage/serverBase';
 //                         글을 남긴 채 내리고·지운 채 내린다(`maestro/110-focus-steady.yaml`). 포커스·자판(`keyboardWill/Did*` 의 높이·길이)·
 //                         초안·보냄을 표식으로 남기고 프레임마다 포커스 여부를 적는다. 맨 아래 행이 **입력창 높이가 바뀐 만큼만** 움직였는지
 //                         (틈 = 도크 윗면 − 목록 꼬리가 변하지 않는가)는 호스트가 표식 창으로 잘라 본다(`measure/focus-windows.mjs`).
+//             `focus+draft<N>`(#4614) 는 N줄(최대 8) 초안을 **들고 시작한다**(초안 복원 길). 타자로 친 줄은 이 빌드에서 입력창을 키우지 못해서(#4615) 쉬는 알약으로 접히는 순간의 높이 변화를
+//                         재려면 복원으로 키가 큰 입력창을 세운다.
+//             `focus+actions`(#4614) 는 행에 **실제 행 동작**(`actions`)을 주고 `Keyboard.dismiss` 호출을 `dismiss` 표식으로 남긴다 — 목록을 눌러 자판을 내리고 입력창이 접히는 길
+//                         (행이 눌리는 표면)의 이동을 `focus-windows.mjs` 가 `dismiss` 창으로 잰다(`maestro/116-list-tap-rest.yaml`). `actions` 가 없으면 행이 비활성이라 그 길을 안 탄다.
 //             `focus+T<초>` 는 재는 시간을 줄인다(기본 140초; 예: `DM-STEADY-FOCUS+T130`). #4518 부터 **손이 닿는 순간**의 표식도 남긴다 —
 //                         `touch-down-x<pageX>-y<pageY>` · `touch-drag-d<거리>`(끌기 문턱 10pt 를 처음 넘는 때) · `touch-up` · `touch-cancel`(입력창에 닿은
 //                         터치를 도크 상자가 위로 받는다) 과 컴포저가 다시 그려진 커밋의 `render-<phase>-<ms>ms`(React `Profiler`). 흐름은
@@ -101,6 +105,13 @@ import {setServerBase} from '../src/storage/serverBase';
 //             `+ahead2`   근거 글 끝에 「에이전트 앞에 2건」.   `+grok` 에이전트 이름을 짧게(grok). 글자 크기는 `xcrun simctl ui <udid> content_size <단계>` 로 바꾼다(활동 줄 줄바꿈은 폭 × 글자 크기 × 문구의 곱이다).
 //             `+T<초>`    재는 시간. 프레임마다 맨 아래 행 y·목록 높이·입력창 높이·도크 높이·알약·포커스를 남기고, 스크롤 보고마다 출처(손가락/목록이 낸 것)와
 //             `chasingTail` 전이를 `scrollLog` 로, 햅틱 호출을 `haptics` 로(`expo-haptics` 를 이 하네스가 감싼다 — 배포 코드 무영향) 싱크에 보낸다.
+//
+//   #4749 「접속 후 첫 보내기에서 대화가 출렁이는가」 — 같은 `enter` 틀에서 사람(Maestro)이 입력창을 누르고 글을 쳐 **첫 번째 · 두 번째 보내기**를 한다
+//             (`maestro/112-enter-steady.yaml` 의 `typeA`·`typeB`·`send`, 구동 `measure/run-first-send.sh`, 분석 `measure/first-send-windows.mjs`).
+//             `+human`    사람 DM(활동 줄 없음).  `+newday` 기록의 마지막 말이 어제라서 오늘 첫 보내기가 날짜 구분선을 새로 세운다(안 주면 시계에 따라 갈린다).
+//             `+nobar`    에이전트 DM 인데 활동 줄 없음.
+//             `+runafter<ms>` 보낼 때마다 <ms> 뒤에 활동 줄(대기)이 선다(6초 뒤 걷음).  `+runflow` 쉬는 에이전트에게 말한 길 전부(0.4초 대기 줄 → 1.8초 일하는 중 + 목록 끝 「작업 중」 자리 → 4.5초 답)를 보낼 때마다.
+//             `+runflowlong` 첫 보내기에서만 시작하고 답은 70초 뒤 — 두 번째 보내기가 이미 열린 턴 위에 겹친다.  `+d<ms>` 가짜 서버가 보내기에 답하는 시간(기본 250).
 //
 // **대화 화면이 세우는 순서 그대로** 세운다: 머리(연결 띠가 서는 자리) · 레이아웃(목록 / 도크) · 도크의 「작업 중」·
 // 「작성 중」 줄 · 컴포저. 목록의 데이터는 **진짜 `useTimeline`** 이 만든다 — 서버와 소켓만 이 파일의 가짜다
@@ -133,6 +144,17 @@ const SEND_ACTIONS: MessageRowActions = {
   onDelete: async () => {},
 };
 const TARGET = {workspaceId: WS, channelId: CHANNEL};
+/** `focus+draft<N>`(#4614)의 초안 줄들 — 가상 문구, 줄마다 한 줄에 들어가는 길이(SE 폭에서도). */
+const DRAFT_SAMPLE: readonly string[] = [
+  '내일 리뷰 열 시예요',
+  '자료는 공유 폴더에요',
+  '빠진 건 알려 주세요',
+  '명단은 오후에 보내요',
+  '회의록은 끝나고 정리',
+  '다음 주 일정도 부탁',
+  '장소는 회의실 B예요',
+  '점심은 각자 챙겨요',
+];
 
 function member(over: Partial<RosterMember> & {id: string}): RosterMember {
   return {
@@ -191,6 +213,24 @@ function queuedTurn(ageMs: number, ahead = 0): AgentWorkingSignal {
     headlines: [],
     lastActivityAtMs: now,
     server: {phase: 'queued', leaseState: 'none', queuePosition: 1, aheadTotal: ahead, queuedAtMs: now - ageMs},
+  };
+}
+
+/**
+ * 일하는 중인 run 하나(`runflow`, #4749). 활동 줄이 「답하는 중」 줄이 되고, 목록 끝에 「작업 중」 자리(`working` — 실제 화면은 `turnPlaceholderKey(turns)` 로 정한다)가 선다.
+ */
+function workingTurn(startedAtMs: number): AgentWorkingSignal {
+  const now = Date.now();
+  return {
+    memberId: AGENT,
+    channelId: CHANNEL,
+    state: 'working',
+    source: 'run',
+    runId: AGENT_RUN,
+    startedAtMs,
+    headlines: ['일정을 정리하는 중'],
+    lastActivityAtMs: now,
+    server: {phase: 'running', leaseState: 'live', queuedAtMs: startedAtMs, claimedAtMs: startedAtMs + 800, startedAtMs: startedAtMs + 1_200},
   };
 }
 
@@ -256,6 +296,17 @@ const PHOTOS: Readonly<Record<string, MessageAttachment>> = {
   'photo-a': {id: 'photo-a', name: '시안 가로.png', mime: 'image/png', sizeBytes: 48_000},
   'photo-solo': {id: 'photo-solo', name: '시안 세로.png', mime: 'image/png', sizeBytes: 48_000},
 };
+
+/** `+newday`(#4749): 기록 전체를 같은 간격 그대로 옮겨 마지막 말이 어제 23시가 되게 한다. */
+function pinHistoryToYesterday(): void {
+  const last = server.messages[server.messages.length - 1];
+  if (last === undefined) return;
+  const target = new Date();
+  target.setDate(target.getDate() - 1);
+  target.setHours(23, 0, 0, 0);
+  const delta = target.getTime() - last.createdAtMs;
+  for (const message of server.messages) message.createdAtMs += delta;
+}
 
 function resetServer(agentDm = false): void {
   if (agentDm) {
@@ -846,6 +897,14 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
     // 사람이 누르고 친다(#4456; `enter` 는 #4613 — 같은 표식에 글자 수(`chars`)를 더한다). 포커스·자판·초안·보냄이 바뀔 때마다 표식을 남겨 프레임과 맞춘다. 자판 표식에는 높이(pt)와 iOS 가
     // 준 길이(ms)를 담는다 — 알약이 자판과 같은 박자로 오르내리는지 보는 근거다.
     c.mark('focus-start');
+    // `+actions`(#4614): 목록을 눌러 자판을 내리는 호출(`Timeline` 의 `onListTap`·행 `onRowPress`)을 표식으로 남긴다 — 입력창이 쉬러 가는 첫 순간이다. 원본은 그대로 부르고 장면이 끝나면 돌려 놓는다.
+    const originalDismiss = Keyboard.dismiss;
+    if (c.hasMod('actions')) {
+      Keyboard.dismiss = () => {
+        c.mark('dismiss');
+        originalDismiss.call(Keyboard);
+      };
+    }
     const keyboardEvents = ['keyboardWillShow', 'keyboardDidShow', 'keyboardWillHide', 'keyboardDidHide'] as const;
     const subscriptions = keyboardEvents.map(kind =>
       Keyboard.addListener(kind, event =>
@@ -875,6 +934,7 @@ async function runScenario(name: ScenarioName, c: Controls): Promise<void> {
       await wait(16);
     }
     for (const subscription of subscriptions) subscription.remove();
+    Keyboard.dismiss = originalDismiss;
     return;
   }
   if (name === 'own') {
@@ -982,16 +1042,21 @@ function Narrow({by, children}: {by: number | null; children: React.ReactNode}):
 export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // `type+nobar` 처럼 `+` 뒤는 옵션이다(#4331).
   const [base = '', ...mods] = which.split('+');
-  const agentDm = INPUT_SCENES.includes(base);
+  const inputScene = INPUT_SCENES.includes(base);
+  // `enter+human`(#4749): 사람 DM — 활동 줄 없이 사람 대화 기록으로 열어, 보내기 뒤에 에이전트 줄이 서는 길과 갈라 본다.
+  const humanDm = base === 'enter' && mods.includes('human');
+  const agentDm = inputScene && !humanDm;
   // `hold-unread`: 같은 `hold` 장면에 안 읽은 줄이 있는 대화(위쪽 필이 서는 대화)로 연다.
   const unread = which === 'hold-unread';
   const panelOpen = which === 'panel' || which === 'panel-flat';
   // #4455 보내기 장면. `send20+d80+relay60+anchor` 처럼 옵션이 붙을 수 있다.
   const sendScene = base === 'send20' || base === 'rec' || base === 'namefit';
+  // #4614 `+actions`: 행이 눌리는 표면(`actions` 가 있으면 행이 활성이다) — 목록을 눌러 자판을 내리는 실제 길을 탄다.
+  const rowActions = inputScene && mods.includes('actions');
   const [narrowBy, setNarrowBy] = useState<number | null>(null);
   const scenarios: readonly ScenarioName[] = unread || panelOpen
     ? ['hold']
-    : agentDm
+    : inputScene
       ? [base as ScenarioName]
       : (ALL as readonly string[]).includes(which) ||
           which === 'hold' ||
@@ -1021,6 +1086,8 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   // 에이전트 DM 은 자기 대화 기록으로 연다 — 첫 렌더 한 번, `useTimeline` 이 읽기 전.
   useState(() => {
     if (agentDm) resetServer(true);
+    // `+newday`(#4749): 기록의 마지막 말이 **어제**다 — 오늘 첫 보내기가 날짜 구분선을 새로 세운다. 안 주면 시계에 따라 같은 날일 수도 어제일 수도 있어서 실행마다 갈린다.
+    if (inputScene && mods.includes('newday')) pinHistoryToYesterday();
     return null;
   });
   // `enter` 변형(#4613): `+grok` 짧은 이름 · `+ahead2` 「에이전트 앞에 2건」.
@@ -1060,14 +1127,54 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     agentDm && base !== 'bar' && !mods.includes('nobar') ? [queuedTurn(startAge, ahead)] : [],
   );
   const turnNowMs = useTickingNow(turns.length > 0);
+  // `markRef` 는 아래 메아리·서버 사본 표식(#4455)과 같은 것이다 — 장면이 도는 동안 장면의 `mark` 를 가리킨다.
+  const markRef = useRef<((what: string) => void) | null>(null);
   const [selfSendToken, setSelfSendToken] = useState(0);
   const sendMessage = timeline.send;
+  // `+runafter<ms>`(#4749): 보낼 때마다 서버가 run 을 만들어 활동 줄이 **<ms> 뒤에** 선다(POST 응답 + 진행 읽기 한 바퀴를 흉내 — 쉬는 에이전트에게 말한 길). 6초 뒤 걷는다(다음 보내기 앞).
+  // 앱의 길은 `nudgeRunProgress`(내 새 행이 마운트되면 한 번 GET) → `queued` 신호 → 활동 줄이다. 줄이 서는 높이 변화가 보내기의 이동과 겹치는지를 본다.
+  const runAfterMs = (() => {
+    const found = mods.map(mod => /^runafter(\d+)$/.exec(mod)).find(match => match !== null);
+    return found ? Number(found[1]) : null;
+  })();
+  // `+runflow`(#4749): 쉬는 에이전트에게 말한 길 전부 — 보낸 뒤 0.4초에 활동 줄(대기)이 서고, 1.8초에 일하는 중(활동 줄이 「답하는 중」·목록 끝 「작업 중」 자리)이 되고, 4.5초에 답이 와서
+  // 둘 다 걷힌다. 보낼 때마다 되풀이한다. `+runflowlong` 은 **첫 보내기에서만** 시작하고 답을 70초 뒤에 준다 — 두 번째 보내기는 이미 열린 턴 위에 겹친다(열린 턴이 있는 대화).
+  const flowMode = mods.includes('runflowlong') ? 'long' : mods.includes('runflow') ? 'short' : null;
+  const flowStartedRef = useRef(false);
   const onSend = useCallback(
     (body: string) => {
       setSelfSendToken(token => token + 1);
       void sendMessage(body);
+      if (runAfterMs !== null) {
+        setTimeout(() => {
+          markRef.current?.('run-bar-on');
+          setTurns([queuedTurn(0)]);
+        }, runAfterMs);
+        setTimeout(() => setTurns([]), 6_000);
+      }
+      if (flowMode !== null && !(flowMode === 'long' && flowStartedRef.current)) {
+        flowStartedRef.current = true;
+        const sentAt = Date.now();
+        setTimeout(() => {
+          markRef.current?.('run-bar-on');
+          setTurns([queuedTurn(0)]);
+        }, 400);
+        setTimeout(() => {
+          markRef.current?.('run-working');
+          setTurns([workingTurn(sentAt)]);
+        }, 1_800);
+        setTimeout(() => {
+          markRef.current?.('run-reply');
+          setTurns([]);
+          const seq = (server.messages[server.messages.length - 1]?.seq ?? 0) + 1;
+          const reply = wireMessage(seq, AGENT, '알겠어요. 바로 정리해서 올릴게요');
+          reply.createdAtMs = Date.now();
+          server.messages.push(reply);
+          fake.current?.message(reply);
+        }, flowMode === 'long' ? 70_000 : 4_500);
+      }
     },
-    [sendMessage],
+    [sendMessage, runAfterMs, flowMode],
   );
   // #4455: 장면이 부르는 보내기. `onSend`(컴포저)와 같은 길이고 사진·파일 첨부를 더 받는다. 장면은 한 번 만든 `Controls` 를 끝까지 쓰므로 ref 로 최신을 부른다.
   const sendWithRef = useRef<(body: string, attachments?: MessageAttachment[]) => void>(() => {});
@@ -1080,7 +1187,6 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   pendCountRef.current = timeline.pending.length;
   const rowsRef = useRef(0);
   rowsRef.current = timeline.state.messages.length;
-  const markRef = useRef<((what: string) => void) | null>(null);
   const seenPendingRef = useRef(0);
   const pendingNow = timeline.pending.length;
   useEffect(() => {
@@ -1110,6 +1216,9 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
     if (base === 'enter' && barDetail !== undefined) markRef.current?.(`txt:${barDetail}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [barDetail]);
+  // 실제 화면과 같은 길: 열린 턴 중 `working` 인 것만 목록 끝 자리를 얻는다(키로 memo — 스트리밍 청크마다 새 배열이면 목록이 다시 그려진다).
+  const workingKey = turnPlaceholderKey(turns);
+  const workingFromTurns = useMemo(() => parseTurnPlaceholderKey(workingKey), [workingKey]);
   const pillsRef = useRef<PillState | null>(null);
   const barRef = useRef<View | null>(null);
   const palette = usePalette();
@@ -1184,7 +1293,11 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
 
   useState(() => {
-    clearDraft(DRAFT_KEY);
+    // `+draft<N>`(#4614): 장면이 **N줄짜리 초안을 들고 시작한다**(초안 복원 길 — 입력창이 마운트 때 그 줄 수만큼의 높이로 선다). 쉬는 알약으로 접힐 때 글 칸이 한 프레임에 줄어드는 한 걸음을
+    // 재려면 키가 큰 입력창이 있어야 하는데, 타자로 친 줄은 이 빌드에서 입력창을 키우지 못한다(#4615) — 복원은 처음부터 콘텐츠 높이로 선다. 줄은 한 줄에 다 들어가는 짧은 가상 문구라 줄 수 = 눈에 보이는 줄 수다.
+    const restored = mods.map(mod => /^draft(\d+)$/.exec(mod)).find(match => match !== null);
+    if (restored) saveDraft(DRAFT_KEY, DRAFT_SAMPLE.slice(0, Number(restored[1])).join('\n'));
+    else clearDraft(DRAFT_KEY);
     return null;
   });
 
@@ -1356,7 +1469,9 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
         peerId={peerId}
         directory={directory}
         onBack={() => {}}
-        menu={[{label: '고정', run: () => {}}]}
+        onOpenMenu={() => {}}
+        // 가운데 알약은 단추다(#4319) — 정보 페이지로 가는 문이 있는 실제 대화 화면과 같은 모양으로 찍는다(머리 높이 불변이 이 하네스의 전제다).
+        onOpenInfo={() => {}}
         railStatus={status}
         onBannerInset={setBannerInset}
       />
@@ -1375,8 +1490,8 @@ export function SteadySurface({which}: {which: string}): React.JSX.Element {
             unreadCount={unread ? HISTORY_BODIES.length - 1 : 0}
             pending={timeline.pending}
             // `+working`: 스트림 맨 끝에 「작업 중」 자리를 세운다(#4455 r4 H4 — 사진 뒤에 서 있는 행). 에이전트가 일하는 대화에서 사진을 보내는 경우다.
-            working={mods.includes('working') ? WORKING_PEER : undefined}
-            actions={sendScene ? SEND_ACTIONS : undefined}
+            working={mods.includes('working') ? WORKING_PEER : flowMode !== null ? workingFromTurns : undefined}
+            actions={sendScene || rowActions ? SEND_ACTIONS : undefined}
             reactions={timeline.reactions}
             pins={timeline.pins}
             loadingOlder={timeline.loadingOlder}

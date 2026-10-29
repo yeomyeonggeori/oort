@@ -14,6 +14,11 @@
  *
  * 창 안의 나머지 숫자: 도크 높이 시작→끝, 도크 윗면·목록 꼬리의 순이동, 두 값의 방향 뒤집힘 횟수(출렁임), 프레임 간격(부하 표지).
  *
+ * #4614 `dismiss` 창: `DM-STEADY-FOCUS+actions` 장면(`maestro/116-list-tap-rest.yaml`, 구동기 `run-list-rest.sh`)은 목록을 눌러 `Keyboard.dismiss` 가 불린 순간을 `dismiss` 표식으로 남긴다 — 입력창이
+ * 쉬러 가는 첫 순간이다. 그 창에서 읽는 것: 틈 편차(목록 꼬리가 도크가 줄어든 만큼만 같이 움직였는가), 뒤집힘(0 이어야 한다), **최대 한 걸음**(한 프레임에 도크 높이가 뛴 가장 큰 양 — 사건 직전 마지막
+ * 프레임에서 사건 뒤 첫 프레임으로 가는 걸음도 센다. 스프링으로 줄면 프레임당 한 자릿수~십수 pt 이고, 글 칸이 한 프레임에 줄면 그 줄어든 양 전부가 한 걸음으로 나온다).
+ * `+draft<N>` 은 N줄 초안을 들고 시작해 키 큰 입력창을 세운다(타자로 친 줄은 이 빌드에서 입력창을 못 키운다 — #4615).
+ *
  * #4518 「누름 → 자판」 창: 입력창은 이제 포커스가 아니라 **손이 닿는 순간**(`touch-down` 표식) 펼침을 시작하므로 `focus` 사건 둘레 창으로는 시작 시각을 잴 수 없다
  * (그 프레임들은 이미 움직이는 중이다). 그래서 `keyboardWillShow`(높이 > 0) 하나마다 앞선 `touch-down` 을 짝지어 별도 줄로 낸다:
  *   - 닿음→자판 ms        손이 닿은 때부터 iOS 가 자판을 올린다고 알려 온 때까지(탭 길이 + 네이티브 지연)
@@ -94,7 +99,8 @@ for (const record of records) {
         : event.what.startsWith('touch-drag')
           ? 'touch-drag'
           : event.what;
-    if (!['focus', 'blur', 'sent', 'draft', 'touch-down', 'touch-drag', 'touch-up', 'touch-cancel'].includes(kind)) continue;
+    // `dismiss`(#4614 `+actions`): 목록을 눌러 `Keyboard.dismiss` 가 불린 순간 = 입력창이 쉬러 가는 첫 순간.
+    if (!['focus', 'blur', 'sent', 'draft', 'touch-down', 'touch-drag', 'touch-up', 'touch-cancel', 'dismiss'].includes(kind)) continue;
     // 글자 하나마다 초안 표식이 남는다 — 줄 수가 바뀐 표식만 창으로 자른다.
     if (kind === 'draft') {
       if (event.what === lastDraft) continue;
@@ -140,7 +146,9 @@ for (const record of records) {
         const moved = after.find(frame => Math.abs(frame.dockH - base.dockH) > 0.5);
         return moved === undefined ? null : round(moved.t - event.t);
       })(),
-      maxDockHStep: round(Math.max(0, ...after.slice(1).map((frame, index) => Math.abs(frame.dockH - after[index].dockH)))),
+      // 사건 **직전 마지막 프레임**(`base`)에서 사건 뒤 첫 프레임으로 가는 한 걸음도 센다(#4614): 입력창이 사건 순간 한 프레임에 줄어드는 단차는 정확히 그 걸음이다.
+      // (전에는 `after` 안의 걸음만 세서, 사건 프레임에서 뛴 높이를 못 봤다 — 틈 편차(`gapDevMax`)만 그 단차를 알렸다.)
+      maxDockHStep: round(Math.max(0, ...[base, ...after].slice(1).map((frame, index) => Math.abs(frame.dockH - [base, ...after][index].dockH)))),
       focusedAtEvent: after[0].focused,
     });
     if (tableFor !== null && event.what.startsWith(tableFor === true ? 'focus' : tableFor)) {

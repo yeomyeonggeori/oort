@@ -585,11 +585,19 @@ export class ApiError extends Error {
    * every error older than ADR-0188 R0 and for bodies without one.
    */
   readonly code: string | undefined;
-  constructor(status: number, message: string, code?: string) {
+  /**
+   * Retry-After (#4663, additive): the answer's `Retry-After` in whole seconds, when the server
+   * sent it as an integer (a 429 or 503 does). `parseError` is the only writer. `undefined`
+   * means the server did not say how long, never "retry now", so no caller may default it.
+   * (`DoorbellRingLimitedError` below narrows this to a required number.)
+   */
+  readonly retryAfterSeconds?: number;
+  constructor(status: number, message: string, code?: string, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
+    if (retryAfterSeconds !== undefined) this.retryAfterSeconds = retryAfterSeconds;
   }
 }
 
@@ -835,7 +843,12 @@ function parseError(res: HttpResponse): ApiError {
   const body = res.jsonOrNull<{ error?: { message?: string; code?: unknown } }>();
   const message = body?.error?.message ?? `HTTP ${res.status}`;
   const code = body?.error?.code;
-  return new ApiError(res.status, message, typeof code === "string" && code !== "" ? code : undefined);
+  return new ApiError(
+    res.status,
+    message,
+    typeof code === "string" && code !== "" ? code : undefined,
+    res.retryAfterSeconds
+  );
 }
 
 // ---- refresh rotation (single flight) ---------------------------------------

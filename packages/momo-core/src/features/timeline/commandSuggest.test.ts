@@ -36,7 +36,7 @@ function member(id: string, kind: "human" | "agent", displayName: string, handle
 }
 
 const directory = makeDirectory([
-  member(HUMAN, "human", "곽성재", "sj"),
+  member(HUMAN, "human", "구민수", "sj"),
   member(OTHER, "human", "김하늘", "sky"),
   member(AGENT, "agent", "hermes", "hermes"),
 ]);
@@ -79,7 +79,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
       agentName: "hermes",
     });
     expect(commandSuggestHead(card!)).toBe("hermes가 제안했어요");
-    expect(commandSuggestOneLine(card!)).toBe("곽성재에게 AI 계정 연결을 제안했어요");
+    expect(commandSuggestOneLine(card!)).toBe("구민수에게 AI 계정 연결을 제안했어요");
   });
 
   it("평범한 에이전트 문장처럼 턴 카드를 만들지 않는다(본문은 그대로 남는다)", () => {
@@ -159,7 +159,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
 
   it("받침에 맞는 조사: 김인턴이 제안했어요", () => {
     const dir = makeDirectory([
-      member(HUMAN, "human", "곽성재", "sj"),
+      member(HUMAN, "human", "구민수", "sj"),
       member(AGENT, "agent", "김인턴", "kim"),
     ]);
     const card = commandSuggestCard(suggestMessage(G3), dir)!;
@@ -168,7 +168,7 @@ describe("command_suggest(ai.connect) 파서 (ADR-0186 G3·G4, #2948)", () => {
 
   it("운영자에게 부탁하기: owner·admin 사람만, 나는 빼고 멘션만", () => {
     const dir = makeDirectory([
-      { ...member(HUMAN, "human", "곽성재", "sj"), role: "owner" },
+      { ...member(HUMAN, "human", "구민수", "sj"), role: "owner" },
       { ...member(OTHER, "human", "김하늘", "sky"), role: "admin" },
       { ...member(AGENT, "agent", "hermes", "hermes"), role: "admin" },
       { ...member("m4", "human", "이도윤", "doyun"), role: "member" },
@@ -261,7 +261,7 @@ describe("command_suggest(settings.open) (U-S6)", () => {
       directory
     )!;
     expect(commandSuggestOneLine(card)).not.toContain("비밀번호");
-    expect(commandSuggestOneLine(card)).toBe("곽성재에게 「알림 설정 열기」 카드를 제안했어요");
+    expect(commandSuggestOneLine(card)).toBe("구민수에게 「알림 설정 열기」 카드를 제안했어요");
   });
 
   it("section 파서는 서버 normalize와 같다", () => {

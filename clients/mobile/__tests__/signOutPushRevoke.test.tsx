@@ -1,11 +1,13 @@
 import {refreshSessionOutcome} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {render, waitFor} from '@testing-library/react-native';
+import {requireOptionalNativeModule} from 'expo-modules-core';
 import React from 'react';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
+import {isPushPreviewOn, isPushShowSenderOn, setPushPreview, setPushShowSender} from '../src/push/presentation';
 import {SessionProvider, useSession} from '../src/session/useSession';
 import {__setNonSecretStore, NON_SECRET_KEYS} from '../src/storage/kv';
 import {
@@ -177,6 +179,74 @@ describe('로그아웃 — 이 폰의 푸시 등록을 지운다 (#2677)', () =>
     expect(calls.filter(call => call.method === 'DELETE')).toEqual([]);
     // 로그아웃이 기기 id를 새로 발급하면 다음 등록이 서버에 죽은 행을 하나 더 남긴다.
     expect(store.map.has(NON_SECRET_KEYS.pushDeviceId)).toBe(false);
+  });
+});
+
+// =============================================================================
+// #4316 (ADR-0204 증보 5) — 로그아웃하면 알림 확장에게 건넨 것도 지운다.
+//
+// 앞 사람의 얼굴·채널 이름이 App Group 에 남으면 다음 사람의 알림에 앞 사람이 아는 것이 그려질 수 있고,
+// 시스템에 기부한 커뮤니케이션 기록은 앞 사람 이름으로 이 폰의 제안(Siri·공유)에 남는다. 그래서 로그아웃이
+// 네이티브에게 「지워라」(`clearPresentation`)를 한다. 「메시지 미리보기」·「보낸 사람 표시」는 이 폰의
+// 취향이라 지우지 않는다.
+// =============================================================================
+describe('로그아웃 — 알림 확장에게 건넨 것을 지운다 (#4316)', () => {
+  const requireNative = requireOptionalNativeModule as unknown as jest.Mock;
+  let clearPresentation: jest.Mock;
+
+  beforeEach(() => {
+    clearPresentation = jest.fn(async () => true);
+    requireNative.mockImplementation((name: string) =>
+      name === 'MomoPushNative'
+        ? {clearPresentation, setPresentationSettings: jest.fn(async () => true)}
+        : null,
+    );
+  });
+
+  afterEach(() => {
+    requireNative.mockImplementation(() => null);
+  });
+
+  it('로그아웃은 건넨 캐시를 지우라고 한 번 하고, 사람은 그것을 기다리지 않는다', async () => {
+    signOutFromApp()();
+    // 동기로 이미 불렸다: 망도 시스템 응답도 기다리지 않는다.
+    expect(getAccessToken()).toBeNull();
+    expect(clearPresentation).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true));
+    expect(clearPresentation).toHaveBeenCalledTimes(1);
+  });
+
+  it('지우지 못해도(거절·오류) 로그아웃은 끝까지 간다', async () => {
+    clearPresentation.mockImplementation(async () => Promise.reject(new Error('no group')));
+    signOutFromApp()();
+    expect(getAccessToken()).toBeNull();
+    await waitFor(() => expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true));
+  });
+
+  it('토큰 만료·계정 교체로 세션 provider 가 내려갈 때도 지운다 — 앞 사람의 것이 다음 사람에게 남지 않는다', () => {
+    const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
+    const view = render(
+      <QueryClientProvider client={client}>
+        <SessionProvider member={LOGIN_BODY.member as never}>
+          <></>
+        </SessionProvider>
+      </QueryClientProvider>,
+    );
+    expect(clearPresentation).not.toHaveBeenCalled();
+    view.unmount();
+    expect(clearPresentation).toHaveBeenCalledTimes(1);
+  });
+
+  it('두 설정은 지우지 않는다 — 이 폰의 취향이다', async () => {
+    setPushPreview(false);
+    setPushShowSender(false);
+    clearPresentation.mockClear();
+    signOutFromApp()();
+    await waitFor(() => expect(calls.some(call => call.path === LOGOUT_PATH)).toBe(true));
+    expect(isPushPreviewOn()).toBe(false);
+    expect(isPushShowSenderOn()).toBe(false);
+    expect(store.map.get(NON_SECRET_KEYS.pushPreview)).toBe('0');
+    expect(store.map.get(NON_SECRET_KEYS.pushShowSender)).toBe('0');
   });
 });
 

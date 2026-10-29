@@ -72,3 +72,39 @@ export function reproposeDraft(handle: string): string {
  * 서지 않는다(`FeedItem.deadlinePassed`) — 여기는 그 줄이 무엇을 말하는지만 정한다.
  */
 export const EXPIRED_ROW_COPY = "시간이 지났어요";
+
+/**
+ * 서버 만료 스윕이 승인 카드 아래에 남기는 줄의 한국어 문구 (#4705, ADR-0186 v5 검수 L4).
+ *
+ * 스윕(`approval_sweep.rs`)은 만료한 승인마다 `tool_result` 한 줄을 쓰고 본문은 영어 기본
+ * 문구(「Tool call expired without a human approval.」), props 는 `is_error: true` 에
+ * `status: "expired"` 다. 그대로 그리면 소유자 1:1 대화에 영어 문장과 「실패」 칩이 선다. 아무도
+ * 부르지 않은 카드가 조용히 만료된 것은 실패가 아니라 소식이 없는 것이다(ADR-0132: 침묵은 실패가
+ * 아니다). 그래서 한국어 한 줄과 「만료됨」(중립)으로 그린다.
+ */
+export const EXPIRED_LINE_TITLE = "승인 시간이 지났어요";
+export const EXPIRED_LINE_NOTE = "기한이 지나 실행하지 않았어요.";
+
+/**
+ * 스윕 줄이 말할 문장. 서버가 이미 **한국어**로 쓴 줄(인플레이스 카드의 「시간이 지나 요청을 처리하지
+ * 않았어요. 다시 불러 주세요.」)은 다음 행동까지 말하므로 그대로 두고, 영어 기본 문구(한글이 하나도
+ * 없는 본문)와 빈 본문만 위의 한국어 한 줄로 바꾼다. 영어 문구의 글자를 맞춰 보지 않는다: 서버가
+ * 문구를 바꿔도(한국어로 고쳐도) 이 판정은 그대로 맞다.
+ */
+export function expiryLineSentence(body: string | null | undefined): string {
+  const text = typeof body === "string" ? body.trim() : "";
+  return /[\u3131-\u318e\uac00-\ud7a3]/.test(text) ? text : EXPIRED_LINE_NOTE;
+}
+
+/** 스윕이 남긴 줄인가: `status` 가 정확히 `expired` 이고 어느 승인의 줄인지(`approval_id`)를 안다. */
+export function isApprovalExpiryLine(
+  props: Record<string, unknown> | undefined
+): boolean {
+  if (props === undefined || props === null) return false;
+  const approvalId = props["approval_id"];
+  return (
+    props["status"] === "expired" &&
+    typeof approvalId === "string" &&
+    approvalId !== ""
+  );
+}

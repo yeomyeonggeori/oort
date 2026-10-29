@@ -18,7 +18,7 @@ import { refreshSessionOutcome, restoreSession } from "./api";
 const persisted = {
   userId: "u-1",
   email: "a@b.test",
-  displayName: "성재",
+  displayName: "민수",
   workspaceId: "w-1",
   memberId: "m-1",
   refreshToken: "refresh-1",

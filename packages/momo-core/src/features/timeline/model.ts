@@ -924,6 +924,10 @@ export function buildTimelineItems(
   } = options;
   const items: TimelineItem[] = [];
   let previous: Message | undefined;
+  // The newest `createdAtMs` among the rows laid so far — confirmed rows in the
+  // loop below, echoes after it. The echo day line reads this and not `previous`:
+  // an older echo sitting above a newer one must not lower the bar (#4749).
+  let latestMs: number | undefined;
   let unreadPlaced = false;
   // A divider cuts the visual thread of an author group, so the row on the far
   // side of it must re-introduce its author. Without this the first row under
@@ -998,6 +1002,10 @@ export function buildTimelineItems(
       dividerAbove = true;
     }
     previous = message;
+    latestMs =
+      latestMs === undefined
+        ? message.createdAtMs
+        : Math.max(latestMs, message.createdAtMs);
   }
 
   // Pending rows close the stream: they are always the newest thing the user
@@ -1006,6 +1014,34 @@ export function buildTimelineItems(
   // regardless of whether the POST response or the realtime frame won the race.
   let previousRow: GroupingRow | undefined = previous;
   for (const row of unsettledPending(messages, pending)) {
+    // The echo that opens a new local day carries the day line itself (#4749).
+    // The confirmed twin gets one from the loop above (`day-<key>`, the same key
+    // for the same day), so without this the line appeared only when the POST
+    // answered: the row the person had just seen arrive was pushed down by the
+    // line's height and the list had to travel a second time (SE, first send of
+    // the day: content +78.5 at the echo, +44 at the swap, 33pt jump, two
+    // glides). With the line already in place the swap changes nothing above the
+    // row.
+    //
+    // Only when the echo is LATER than everything laid so far. The confirmed loop
+    // can read "the day differs" as "a new day starts" because seq order keeps
+    // time moving forward; an echo has no seq, and one can sit below a newer row
+    // (a failed send left overnight, a reply that landed after midnight while the
+    // POST was in flight) or below a newer echo. Judged against the row right
+    // above it, an older echo would repeat a `day-<key>` already in the stream or
+    // put yesterday's line under today's rows, and an echo after it would draw
+    // today's line a second time.
+    if (
+      latestMs === undefined ||
+      (row.createdAtMs > latestMs &&
+        dayKey(latestMs) !== dayKey(row.createdAtMs))
+    ) {
+      items.push({
+        kind: "day",
+        key: `day-${dayKey(row.createdAtMs)}`,
+        atMs: row.createdAtMs,
+      });
+    }
     items.push({
       kind: "pending",
       key: `p-${row.clientMsgId}`,
@@ -1014,6 +1050,10 @@ export function buildTimelineItems(
     });
     dividerAbove = false;
     previousRow = row;
+    latestMs =
+      latestMs === undefined
+        ? row.createdAtMs
+        : Math.max(latestMs, row.createdAtMs);
   }
 
   return items;

@@ -58,7 +58,7 @@ function row(overrides: Partial<DeviceKey> = {}): Record<string, unknown> {
     alg: "p256",
     publicKey: PHONE_KEY,
     platform: "ios",
-    label: "성재의 iPhone",
+    label: "민수의 iPhone",
     state: "unendorsed",
     canInstruct: false,
     current: false,
@@ -105,7 +105,7 @@ describe("deviceKeys wire (E2 DeviceKeyDto)", () => {
     expect(await listDeviceKeys(WS)).toHaveLength(1);
     const error = await registerRootDeviceKey(WS, {
       publicKey: MAC_KEY,
-      label: "성재의 MacBook Pro",
+      label: "민수의 MacBook Pro",
       currentPassword: "pw",
     }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(ApiError);
@@ -115,7 +115,7 @@ describe("deviceKeys wire (E2 DeviceKeyDto)", () => {
       alg: "p256",
       publicKey: MAC_KEY,
       platform: "macos",
-      label: "성재의 MacBook Pro",
+      label: "민수의 MacBook Pro",
       currentPassword: "pw",
     });
   });
@@ -278,7 +278,7 @@ describe("rebind (#3103, ADR-0146 D-7 증보 #3097)", () => {
 describe("deviceKeys views", () => {
   const keys = [
     parseDeviceKey(row({ id: "a", createdAtMs: 1 })),
-    parseDeviceKey(row({ id: "b", label: "성재의 iPad", createdAtMs: 2 })),
+    parseDeviceKey(row({ id: "b", label: "민수의 iPad", createdAtMs: 2 })),
     parseDeviceKey(row({ id: "c", state: "revoked", createdAtMs: 3 })),
     parseDeviceKey(
       row({ id: "m", platform: "macos", publicKey: MAC_KEY, state: "root", current: true })
@@ -359,13 +359,13 @@ describe("deviceKeys views", () => {
 
   it("maps a linked device to a key only when exactly one live phone key matches", () => {
     expect(
-      phoneKeyForLinkedDevice(keys, { label: "성재의 iPhone", platform: "ios" })?.id
+      phoneKeyForLinkedDevice(keys, { label: "민수의 iPhone", platform: "ios" })?.id
     ).toBe("a");
     const twin = [...keys, parseDeviceKey(row({ id: "d", createdAtMs: 4 }))];
-    expect(phoneKeyForLinkedDevice(twin, { label: "성재의 iPhone", platform: "ios" })).toBe(
+    expect(phoneKeyForLinkedDevice(twin, { label: "민수의 iPhone", platform: "ios" })).toBe(
       undefined
     );
-    expect(phoneKeyForLinkedDevice(keys, { label: "성재의 iPhone", platform: "macos" })).toBe(
+    expect(phoneKeyForLinkedDevice(keys, { label: "민수의 iPhone", platform: "macos" })).toBe(
       undefined
     );
   });

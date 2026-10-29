@@ -26,6 +26,12 @@ pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
     // ADR-0201 증보 v2 H5: the helper's provider-side web search (absent = on).
     // `team_ai_alias_status` is server-written and deliberately NOT here.
     "team_ai_web_search",
+    // ADR-0186 증보 v5 U-b-3 (#4704): the switch for cards an agent raises nobody asked for
+    // (absent = on). A bool, written by an administrator through `PATCH …/settings` — and
+    // deliberately **not** by an agent: `workspace.settings.update` takes two other keys
+    // (`welcomePrompt`, `roleLabels`), so no proposal can flip the switch that bounds proposals.
+    // `momo_agent::initiative::SETTING_AGENT_INITIATIVE` spells the same key for the reader.
+    "agent_initiative",
 ];
 
 /// Human membership roles that may carry a display override. Agent labels are
@@ -74,6 +80,8 @@ pub enum WorkspaceSettingsInvalid {
     TeamAiFastPathShape,
     #[error("team_ai_web_search must be true or false")]
     TeamAiWebSearchShape,
+    #[error("agent_initiative must be true or false")]
+    AgentInitiativeShape,
     #[error("welcome_prompt must be a string")]
     WelcomePromptShape,
     #[error("welcome_prompt must be at most {MAX_WELCOME_PROMPT_CHARS} characters")]
@@ -135,6 +143,16 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
                 Ok(())
             } else {
                 Err(WorkspaceSettingsInvalid::TeamAiWebSearchShape)
+            }
+        }
+        // A literal boolean or nothing: the door reads anything else as *off* (it fails closed),
+        // so a string `"false"` stored here would silently be a switch somebody meant to leave
+        // on. Refuse it at the one place a person writes it.
+        "agent_initiative" => {
+            if value.is_boolean() {
+                Ok(())
+            } else {
+                Err(WorkspaceSettingsInvalid::AgentInitiativeShape)
             }
         }
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
@@ -425,6 +443,43 @@ mod tests {
         let merged =
             merge_workspace_settings(&json!({}), &json!({"allowed_agent_models": []})).unwrap();
         assert_eq!(merged, json!({"allowed_agent_models": []}));
+    }
+
+    /// ADR-0186 증보 v5 U-b-3: the unasked-card switch is a writable boolean — a literal `true` or
+    /// `false`, never a string or a number the door would have to read as *off* — and `null` takes
+    /// the key out (absent = on).
+    #[test]
+    fn agent_initiative_is_a_writable_boolean_switch() {
+        for on_or_off in [true, false] {
+            let merged =
+                merge_workspace_settings(&json!({}), &json!({"agent_initiative": on_or_off}))
+                    .expect("a boolean is a switch");
+            assert_eq!(merged["agent_initiative"], json!(on_or_off));
+        }
+        for not_a_switch in [
+            json!("false"),
+            json!("true"),
+            json!(0),
+            json!(1),
+            json!([]),
+            json!({}),
+        ] {
+            assert_eq!(
+                merge_workspace_settings(&json!({}), &json!({"agent_initiative": not_a_switch})),
+                Err(WorkspaceSettingsInvalid::AgentInitiativeShape),
+                "{not_a_switch} is not a switch"
+            );
+        }
+        let cleared = merge_workspace_settings(
+            &json!({"agent_initiative": false, "role_labels": {"owner": "대표"}}),
+            &json!({"agent_initiative": null}),
+        )
+        .unwrap();
+        assert!(
+            cleared.get("agent_initiative").is_none(),
+            "null = back to on"
+        );
+        assert_eq!(cleared["role_labels"], json!({"owner": "대표"}));
     }
 
     /// ADR-0181 D8 / #1960: `welcome_prompt` is a writable settings key.
