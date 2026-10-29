@@ -1,4 +1,5 @@
 import type {Member} from '@momo/core/lib/api';
+import * as memoryApi from '@momo/core/features/memory/api';
 import {
   centrifugoChannelName,
   centrifugoTypingChannelName,
@@ -171,6 +172,8 @@ function frame(seq: number, author: string = PEER_ID) {
 }
 
 /** 서버가 가진 메시지. 시험이 덧붙이면 REST 읽기가 그것을 답한다. */
+let peerKind: 'human' | 'agent' = 'human';
+let serverUnread: number | null = null;
 let serverMessages = Array.from({length: HISTORY_COUNT}, (_, i) => restMessage(i + 1));
 
 function jsonResponse(status: number, body: unknown): Response {
@@ -196,8 +199,11 @@ function installFetch(): jest.Mock {
     if (url.includes('/channels') && !url.includes('/messages')) {
       return jsonResponse(200, {channels: CHANNELS});
     }
-    if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER});
-    if (url.includes('/read-state')) return jsonResponse(200, {read_states: []});
+    if (url.includes('/roster')) return jsonResponse(200, {members: ROSTER.map((row, index) => index === 1 ? {...row, kind: peerKind} : row)});
+    if (url.includes('/read-state')) return jsonResponse(200, {read_states: serverUnread === null ? [] : [{
+      channel_id: DM, last_read_seq: HISTORY_COUNT - serverUnread, latest_seq: HISTORY_COUNT,
+      unread_count: serverUnread, mention_count: 0, marked_unread_before_seq: null,
+    }]});
     if (url.includes('/work-sessions')) return jsonResponse(200, {workSessions: []});
     if (url.includes('/work-hosts')) return jsonResponse(200, {workHosts: []});
     if (url.includes('/profile')) {
@@ -354,6 +360,8 @@ jest.setTimeout(SHELL_WAIT_TEST_TIMEOUT_MS);
 
 beforeEach(() => {
   installAppClock();
+  peerKind = 'human';
+  serverUnread = null;
   mmkvStore.clear();
   __resetSessionStore();
   __resetServerBaseCache();
@@ -632,6 +640,35 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await settle(25);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.queryByTestId('connection-banner-layer')).toBeNull();
+  });
+
+  it.each([0, 6])('S1 #4789 High 1: 읽음 상태가 로드된 에이전트 DM의 안읽음 %i·요약 닫힘은 목록 안 머리 여백 하나뿐이다', async unread => {
+    peerKind = 'agent';
+    serverUnread = unread;
+    jest.spyOn(memoryApi, 'getMemorySettings').mockResolvedValue({
+      workspace: {enabled: true, paused: false, resetEpoch: 0}, channels: [], me: {paused: false},
+    });
+    jest.spyOn(memoryApi, 'listMemoryDigests').mockResolvedValue({
+      digests: [], afterSeq: HISTORY_COUNT - unread, summarizedThroughSeq: HISTORY_COUNT,
+    });
+    await openDm();
+    if (unread > 0) {
+      await waitFor(() => expect(screen.getByTestId('missed-digest-dismiss')).toBeTruthy());
+      expect(within(screen.getByTestId('timeline-list')).getByTestId('missed-digest-dismiss')).toBeTruthy();
+      fireEvent.press(screen.getByTestId('missed-digest-dismiss'));
+    }
+    expect(screen.queryByTestId('missed-digest-card')).toBeNull();
+    fireEvent(screen.getByTestId('conversation-header-overlay'), 'layout', {
+      nativeEvent: {layout: {x: 0, y: 0, width: 390, height: 121}},
+    });
+    const list = screen.getByTestId('timeline-list');
+    expect(flat(list.props.contentContainerStyle).paddingTop).toBe(121);
+    expect(flat(screen.getByTestId('timeline-top-pills').props.style).top).toBe(121);
+    let node = list.parent;
+    while (node) {
+      if (node.type === 'View') expect(flat(node.props.style).paddingTop ?? 0).toBe(0);
+      node = node.parent;
+    }
   });
 
   it('S1 #4789 머리·연결 띠 높이는 목록 안 여백과 위 필로 건너가며 셀은 다시 그려지지 않는다', async () => {

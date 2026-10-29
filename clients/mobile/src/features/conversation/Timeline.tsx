@@ -16,6 +16,7 @@ import {
   ActivityIndicator,
   FlatList,
   Keyboard,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -874,6 +875,7 @@ function TimelineInner({
   pillsRef,
   tailRef,
   tailGap,
+  headerContent,
   contentTopInset = 0,
   topPillInset = 0,
   metricsRef,
@@ -1076,6 +1078,8 @@ function TimelineInner({
    * 컨트롤이 된다. 대화 화면은 머리의 실제 높이 + 안전 영역 + 띠 높이를 준다. 이 값 자체는 목록의 배치를 바꾸지 않는다.
    */
   topPillInset?: number;
+  /** 실제 그려지는 고지·요약. null 인 카드는 목록 안에서 높이를 차지하지 않는다. */
+  headerContent?: React.ReactNode;
   /** 떠 있는 머리의 실제 높이 + 위 안전 영역. 스크롤 안쪽 여백이라 목록은 머리 뒤로 흐른다. */
   contentTopInset?: number;
   /**
@@ -1662,6 +1666,7 @@ function TimelineInner({
    * `onScrollToIndexFailed` 의 회복이 같은 자리에 다시 놓으려면 이 값을 알아야 한다.
    */
   const scrollViewPositionRef = useRef(0.5);
+  const scrollViewOffsetRef = useRef(0);
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -1969,14 +1974,15 @@ function TimelineInner({
 
   /** 걸린 이동 안에서만 `scrollToIndex` 를 부른다. 이 파일의 유일한 호출이다. */
   const scrollToIndexInTravel = useCallback(
-    (index: number, viewPosition: number, animated: boolean) => {
+    (index: number, viewPosition: number, animated: boolean, viewOffset = 0) => {
       if (jumpTravelRef.current === null) {
         failWithoutTravel('scrollToIndex was asked for outside a jump travel');
         return;
       }
       // `onScrollToIndexFailed` 의 회복이 같은 자리에 다시 놓으려면 이 값을 안다.
       scrollViewPositionRef.current = viewPosition;
-      listRef.current?.scrollToIndex({index, viewPosition, animated});
+      scrollViewOffsetRef.current = viewOffset;
+      listRef.current?.scrollToIndex({index, viewPosition, viewOffset, animated});
     },
     [listRef],
   );
@@ -1991,9 +1997,10 @@ function TimelineInner({
       viewPosition: number,
       animated: boolean,
       onLanded?: (delayMs: number) => void,
+      viewOffset = 0,
     ) => {
       beginJumpTravel(onLanded);
-      scrollToIndexInTravel(index, viewPosition, animated);
+      scrollToIndexInTravel(index, viewPosition, animated, viewOffset);
     },
     [beginJumpTravel, scrollToIndexInTravel],
   );
@@ -2745,15 +2752,19 @@ function TimelineInner({
     // VoiceOver 가 한 번 더 스크롤한다. 착지가 틈을 메우는 활강을 걸었으면 그 활강이
     // 끝난 뒤다(#2618 N-2).
     const focusTarget = firstMessageIdAfter(itemsRef.current, index);
-    travelToIndex(index, 0, !reduceMotionRef.current, delayMs =>
-      focusRow(focusTarget, delayMs),
+    travelToIndex(
+      index, 0, !reduceMotionRef.current,
+      delayMs => focusRow(focusTarget, delayMs),
+      Math.max(contentTopInset, topPillInset),
     );
   }, [
     cancelConvergence,
     cancelFocus,
+    contentTopInset,
     focusRow,
     reduceMotionRef,
     settleEntry,
+    topPillInset,
     travelToIndex,
   ]);
 
@@ -3170,7 +3181,7 @@ function TimelineInner({
       travel.recovering = true;
       travel.lastMotionAt = Date.now();
       listRef.current?.scrollToOffset({
-        offset: info.averageItemLength * info.index,
+        offset: Math.max(0, info.averageItemLength * info.index - scrollViewOffsetRef.current),
         animated: false,
       });
       if (recoveryFrameRef.current !== undefined) {
@@ -3182,7 +3193,7 @@ function TimelineInner({
         travel.recovering = false;
         travel.lastMotionAt = Date.now();
         // 실패하기 전 그 요청이 원한 자리 — 인용은 가운데, 안읽음 필은 위 (#1892).
-        scrollToIndexInTravel(info.index, scrollViewPositionRef.current, false);
+        scrollToIndexInTravel(info.index, scrollViewPositionRef.current, false, scrollViewOffsetRef.current);
       });
     },
     [listRef, scrollToIndexInTravel],
@@ -3216,18 +3227,21 @@ function TimelineInner({
   );
   const listHeader = useMemo(
     () => (
-      <View style={styles.header}>
-        {loadingOlder ? (
-          <ActivityIndicator color={palette.accentText} />
-        ) : reachedStart && items.length > 0 ? (
-          <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
-        ) : null}
-      </View>
+      <>
+        {headerContent}
+        <View style={styles.header}>
+          {loadingOlder ? (
+            <ActivityIndicator color={palette.accentText} />
+          ) : reachedStart && items.length > 0 ? (
+            <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
+          ) : null}
+        </View>
+      </>
     ),
     // 스킴이 바뀌면 `styles` 는 **다른 객체**가 되고, 그때 이 메모도 다시 계산되어야
     // 한다 (U2). `useStyles` 의 캐시가 (팩토리 × 스킴) 당 하나이므로 같은 스킴이
     // 이어지는 동안 이 참조는 변하지 않고, 메모는 스킴이 실제로 바뀔 때만 깨진다.
-    [loadingOlder, reachedStart, items.length, palette, styles],
+    [headerContent, loadingOlder, reachedStart, items.length, palette, styles],
   );
 
   // 정리(cleanup) 형식의 ref — `renderItem` 안의 앵커 래퍼와 같은 이유다: 떼어내는
@@ -3259,8 +3273,16 @@ function TimelineInner({
     [tailNodeRef, styles, tailGap],
   );
 
+  // 빈 목록·로딩·오류에서도 원래 제공하던 고지의 닫기·근거 동작을 유지한다.
+  const withNotices = (state: React.ReactElement) => headerContent ? (
+    <ScrollView contentContainerStyle={contentStyle}>
+      {headerContent}
+      {state}
+    </ScrollView>
+  ) : state;
+
   if (status === 'error') {
-    return (
+    return withNotices(
       <ErrorState
         headline="이 대화를 불러오지 못했습니다."
         detail="연결을 확인한 뒤 다시 시도하세요."
@@ -3275,12 +3297,12 @@ function TimelineInner({
   const empty = messages.length === 0 && items.length === 0;
 
   if (status === 'loading' && empty) {
-    return <LoadingState label="대화를 불러오는 중입니다." testID="timeline-loading" />;
+    return withNotices(<LoadingState label="대화를 불러오는 중입니다." testID="timeline-loading" />);
   }
 
   if (status === 'ready' && empty) {
     const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null);
-    return (
+    return withNotices(
       <EmptyState
         headline={copy.headline}
         detail={copy.detail}

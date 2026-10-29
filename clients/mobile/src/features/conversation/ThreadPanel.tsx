@@ -301,7 +301,32 @@ export function ThreadPanel({
     setHeaderHeight(event.nativeEvent.layout.height - insets.top);
   }, [insets.top]);
 
-  const hasTopNotice = Boolean(notice || (memory !== undefined && workspaceId !== undefined && channelId !== undefined && status === 'ready'));
+  const topNotice = useMemo(() => (
+    <>
+      {notice ? (
+        <NoticeBlock
+          headline={notice.text}
+          onDismiss={notice.onDismiss}
+          testID="notification-landing-notice"
+        />
+      ) : null}
+      {/* 안 읽은 동안 요약 (#3166): 채널이 얼린 경계 뒤에 온 남의 답글이 있을 때만. */}
+      {memory !== undefined &&
+      workspaceId !== undefined &&
+      channelId !== undefined &&
+      status === 'ready' ? (
+        <MissedDigestCard
+          workspaceId={workspaceId}
+          channelId={channelId}
+          threadRootId={root.id}
+          sinceSeq={memory.sinceSeq}
+          unreadCount={unreadReplies}
+          headSeq={memory.headSeq}
+          onOpenEvidence={openEvidence}
+        />
+      ) : null}
+    </>
+  ), [notice, memory, workspaceId, channelId, status, root.id, unreadReplies, openEvidence]);
 
   if (status === 'error') {
     return (
@@ -349,32 +374,9 @@ export function ThreadPanel({
         <ConversationLayout
           list={
             <>
-              <View style={hasTopNotice ? {paddingTop: headerInset} : undefined}>
-              {notice ? (
-                <NoticeBlock
-                  headline={notice.text}
-                  onDismiss={notice.onDismiss}
-                  testID="notification-landing-notice"
-                />
-              ) : null}
-              {/* 안 읽은 동안 요약 (#3166): 채널이 얼린 경계 뒤에 온 남의 답글이 있을 때만. */}
-              {memory !== undefined &&
-              workspaceId !== undefined &&
-              channelId !== undefined &&
-              status === 'ready' ? (
-                <MissedDigestCard
-                  workspaceId={workspaceId}
-                  channelId={channelId}
-                  threadRootId={root.id}
-                  sinceSeq={memory.sinceSeq}
-                  unreadCount={unreadReplies}
-                  headSeq={memory.headSeq}
-                  onOpenEvidence={openEvidence}
-                />
-              ) : null}
-              </View>
               <Timeline
-                contentTopInset={hasTopNotice ? 0 : headerInset}
+                headerContent={topNotice}
+                contentTopInset={headerInset}
                 messages={messages}
                 directory={directory}
                 // The root is always present, so this list is never empty. There is

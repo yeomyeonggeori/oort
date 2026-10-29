@@ -1911,8 +1911,83 @@ export default function ConversationScreen({
     }));
   }, [awaitingJump, awaitingArrived]);
 
-  // 목록 밖 영수증·요약이 있으면 그 첫 표면이 머리 여백을 진다. 목록에서 중복으로 세지 않는다.
-  const hasTopNotice = Boolean(jumpMissed || (notificationNotice && !notificationNotice.inThread) || (boundary !== null && memoryEligible));
+  // 고지·요약도 스크롤 안에 둔다. 카드가 null 이거나 닫히면 별도 머리 여백이 남지 않는다.
+  const topNotice = useMemo(() => (
+    <>
+      {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
+          인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
+          사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
+          이제는 두 벌을 그릴 수도 없다: 검색 진입이 같은 착지 기계를 타므로
+          두 고지를 두면 못 찾은 한 번에 같은 문장이 **두 줄** 선다.
+          (M1 이 두 배너에 같은 모양을 쓰게 한 판단의 끝이 이것이다.)
+
+          옛 검색 배너는 닫기가 없었다 — 「이 화면은 당신이 찾아온 메시지를
+          아직 안 들고 있다」는 **상태**라는 근거였다. 그 근거가 이 커밋에서
+          바뀐다: 이제 그 문장은 사람이 누른 결과에 대한 답이고(눌렀고, 갔고,
+          거기 없었다), 시킨 대로 위로 올려 그 줄이 도착하면 **스스로 물러난다**
+          (두 번째 발이 착지하며 `onJumpLanded`). 닫을 수 있는 영수증의 조건을
+          그대로 갖췄다(`NoticeBlock.onDismiss` 독스트링). */}
+      {/* ===================================================
+          실패가 아니라 **사실 진술**이다 (design-review H-5).
+
+          사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다.
+          빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는
+          「내가 뭔가 잘못했다」를 말한다. `atoms` 에 이 경우를 위한
+          컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로
+          *"A statement of fact that is not a failure … Deliberately has
+          no retry and no danger colour."*
+
+          닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인
+          알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이
+          방금 한 동작(인용 탭)에 대한 답이고, 한 번 읽으면 목록 아래에
+          영영 붙어 있을 이유가 없다. 서버가 못 하는 일에 대한 고지가
+          아니다.
+
+          점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
+
+          그리고 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`, #1209
+          리뷰 Medium). 이 상자는 이제 서 있는 동안 「그 줄이 오면 데려간다」는
+          의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는
+          것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
+          않는다.
+          =================================================== */}
+      {jumpMissed ? (
+        <View style={styles.notice}>
+          <NoticeBlock
+            headline={jumpMissed.headline}
+            detail={jumpMissed.detail}
+            onDismiss={cancelJump}
+            testID="jump-missed"
+          />
+        </View>
+      ) : null}
+      {/* 알림이 가리킨 것이 사라졌거나 스레드를 못 열었을 때의 한 문장
+          (#2569). 착지는 이미 일어났고 이것은 그 착지가 **무엇에** 내려앉았는지를
+          말하는 영수증이라, 점프 고지와 같은 자리·같은 상자를 쓴다. */}
+      {notificationNotice && !notificationNotice.inThread ? (
+        <View style={styles.notice}>
+          <NoticeBlock
+            headline={notificationNotice.text}
+            onDismiss={dismissNotificationNotice}
+            testID="notification-landing-notice"
+          />
+        </View>
+      ) : null}
+      {/* 안 읽은 동안 요약 (#3166, plan.md §5 V1). 목록 머리에 선다 — 타임라인
+          꼬리가 아니다: 돌아온 사람이 처음 읽을 자리이고, 닫을 수 있다. 경계는
+          구분선과 같은 얼린 스냅샷이다. */}
+      {boundary !== null && memoryEligible ? (
+        <MissedDigestCard
+          workspaceId={workspaceId}
+          channelId={channelId}
+          sinceSeq={boundary.lastReadSeq}
+          unreadCount={boundary.unreadCount}
+          headSeq={memoryHeadSeq}
+          onOpenEvidence={openMemoryEvidence}
+        />
+      ) : null}
+    </>
+  ), [jumpMissed, cancelJump, notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
@@ -1956,80 +2031,6 @@ export default function ConversationScreen({
       <ConversationLayout
         list={
           <>
-            <View style={hasTopNotice ? {paddingTop: headerInset} : undefined}>
-            {/* 점프가 빈손으로 돌아온 자리. **하나뿐이다** (#1196).
-                인용·고정·세션 앵커·검색 진입 넷이 같은 배너를 쓴다 — 같은
-                사실("이 화면에 그 줄이 없다")을 두 가지 모양으로 말할 이유가 없고,
-                이제는 두 벌을 그릴 수도 없다: 검색 진입이 같은 착지 기계를 타므로
-                두 고지를 두면 못 찾은 한 번에 같은 문장이 **두 줄** 선다.
-                (M1 이 두 배너에 같은 모양을 쓰게 한 판단의 끝이 이것이다.)
-
-                옛 검색 배너는 닫기가 없었다 — 「이 화면은 당신이 찾아온 메시지를
-                아직 안 들고 있다」는 **상태**라는 근거였다. 그 근거가 이 커밋에서
-                바뀐다: 이제 그 문장은 사람이 누른 결과에 대한 답이고(눌렀고, 갔고,
-                거기 없었다), 시킨 대로 위로 올려 그 줄이 도착하면 **스스로 물러난다**
-                (두 번째 발이 착지하며 `onJumpLanded`). 닫을 수 있는 영수증의 조건을
-                그대로 갖췄다(`NoticeBlock.onDismiss` 독스트링). */}
-            {/* ===================================================
-                실패가 아니라 **사실 진술**이다 (design-review H-5).
-
-                사람이 인용을 눌렀고, 원본은 존재하며, 아직 안 불러왔을 뿐이다.
-                빨간 상자(`FailureBanner` = dangerSurface + dangerBorder)는
-                「내가 뭔가 잘못했다」를 말한다. `atoms` 에 이 경우를 위한
-                컴포넌트가 이미 있었다 — `NoticeBlock`, 독스트링 그대로
-                *"A statement of fact that is not a failure … Deliberately has
-                no retry and no danger colour."*
-
-                닫는 길도 준다. `NoticeBlock` 의 `onDismiss` 독스트링이 「영수증인
-                알림에만」이라고 못박아 두었는데, 이 줄은 정확히 그것이다: 사람이
-                방금 한 동작(인용 탭)에 대한 답이고, 한 번 읽으면 목록 아래에
-                영영 붙어 있을 이유가 없다. 서버가 못 하는 일에 대한 고지가
-                아니다.
-
-                점프가 성공하면 스스로도 물러난다(`clearJumpNotice`).
-
-                그리고 닫기는 **뒤에 걸린 기다림도 접는다**(`cancelJump`, #1209
-                리뷰 Medium). 이 상자는 이제 서 있는 동안 「그 줄이 오면 데려간다」는
-                의도를 함께 들고 있으므로, 상자를 물리는 것이 곧 그 의도를 무르는
-                것이다 — 물리고 자기 이유로 위로 올라간 사람을 나중에 끌어가지
-                않는다.
-                =================================================== */}
-            {jumpMissed ? (
-              <View style={styles.notice}>
-                <NoticeBlock
-                  headline={jumpMissed.headline}
-                  detail={jumpMissed.detail}
-                  onDismiss={cancelJump}
-                  testID="jump-missed"
-                />
-              </View>
-            ) : null}
-            {/* 알림이 가리킨 것이 사라졌거나 스레드를 못 열었을 때의 한 문장
-                (#2569). 착지는 이미 일어났고 이것은 그 착지가 **무엇에** 내려앉았는지를
-                말하는 영수증이라, 점프 고지와 같은 자리·같은 상자를 쓴다. */}
-            {notificationNotice && !notificationNotice.inThread ? (
-              <View style={styles.notice}>
-                <NoticeBlock
-                  headline={notificationNotice.text}
-                  onDismiss={dismissNotificationNotice}
-                  testID="notification-landing-notice"
-                />
-              </View>
-            ) : null}
-            {/* 안 읽은 동안 요약 (#3166, plan.md §5 V1). 목록 밖·위에 선다 — 타임라인
-                꼬리가 아니다: 돌아온 사람이 처음 읽을 자리이고, 닫을 수 있다. 경계는
-                구분선과 같은 얼린 스냅샷이다. */}
-            {boundary !== null && memoryEligible ? (
-              <MissedDigestCard
-                workspaceId={workspaceId}
-                channelId={channelId}
-                sinceSeq={boundary.lastReadSeq}
-                unreadCount={boundary.unreadCount}
-                headSeq={memoryHeadSeq}
-                onOpenEvidence={openMemoryEvidence}
-              />
-            ) : null}
-            </View>
             <Timeline
               approvalGates={approvalGates}
               approvalReceipts={approvalReceipts}
@@ -2068,8 +2069,9 @@ export default function ConversationScreen({
               // 목록 꼬리는 0 이다(#4264): 도크 맨 위의 「작성 중」 예약 줄이 그 자리를 지켜서, 꼬리까지 두면
               // 마지막 행 → 알약 간격이 같은 공기를 두 번 센다. 근거와 산수는 `CONV.listPillGap`.
               tailGap={CONV.conversationTail}
-              contentTopInset={hasTopNotice ? 0 : headerInset}
-              topPillInset={(hasTopNotice ? 0 : headerInset) + bannerInset}
+              headerContent={topNotice}
+              contentTopInset={headerInset}
+              topPillInset={headerInset + bannerInset}
               // 위 「안읽음으로」·아래 「최신으로」 (#1892). 위 필의 N 은 위의
               // 동결 스냅샷(`unreadCount`) 그대로다 — 구분선과 같은 수.
               jumpPills
