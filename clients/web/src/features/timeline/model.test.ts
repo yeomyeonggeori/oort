@@ -326,6 +326,60 @@ describe("optimistic insert (M10)", () => {
     expect(new Set(dayKeys).size).toBe(dayKeys.length);
   });
 
+  // 위 규칙을 「바로 위 행」으로 판정하면 옛 에코가 기준을 낮춰서, 그 뒤의 새 에코가 오늘 줄을 한 번 더 낸다(검수 2회차 High):
+  // 어제 못 간 실패한 글이 남은 채 오늘 새로 보내거나, 자정 직전 POST 가 도는 사이 자정 뒤에 두 번째를 보내는 길이다.
+  // 기준은 「지금까지 깔린 것 중 가장 늦은 시각」이다(묶음 판정은 바로 위 행 그대로).
+  it("draws each day's line once when an older echo sits above a newer one", () => {
+    const at = (day: number, h: number, mi = 0, s = 0) =>
+      new Date(2026, 6, day, h, mi, s).getTime();
+    const dayKeysOf = (items: TimelineItem[]) =>
+      items.filter((i) => i.kind === "day").map((i) => i.key);
+
+    // 어제 못 간 실패한 글 + 오늘 새로 보낸 글, 오늘 행은 이미 그려져 있다.
+    const stale = buildTimelineItems(
+      [
+        mine(10, "어제 낮", { createdAtMs: at(24, 10) }),
+        msg(11, "오늘 아침", { authorMemberId: OTHER, createdAtMs: at(25, 9) }),
+      ],
+      {
+        pending: [
+          pending("old", "어제 못 간 글", {
+            status: "failed",
+            createdAtMs: at(24, 23, 30),
+          }),
+          pending("new", "오늘 새로 보냄", { createdAtMs: at(25, 10) }),
+        ],
+      }
+    );
+    expect(stale.map((i) => i.kind)).toEqual([
+      "day",
+      "message",
+      "day",
+      "message",
+      "pending",
+      "pending",
+    ]);
+    expect(dayKeysOf(stale)).toEqual(["day-2026-7-24", "day-2026-7-25"]);
+
+    // 자정 직전에 보냈는데 POST 가 도는 사이 자정 뒤 상대 글이 도착, 이어서 두 번째 글.
+    const race = buildTimelineItems(
+      [
+        mine(10, "자정 전", { createdAtMs: at(24, 23, 59) }),
+        msg(11, "자정 뒤 도착", {
+          authorMemberId: OTHER,
+          createdAtMs: at(25, 0, 0, 3),
+        }),
+      ],
+      {
+        pending: [
+          pending("a", "자정 직전에 보냄", { createdAtMs: at(24, 23, 59, 58) }),
+          pending("b", "이어서 보냄", { createdAtMs: at(25, 0, 0, 10) }),
+        ],
+      }
+    );
+    expect(dayKeysOf(race)).toEqual(["day-2026-7-24", "day-2026-7-25"]);
+  });
+
   it("draws the new day's line once for several echoes, and none when the echo is on the same day as the last message", () => {
     const yesterday = mine(10, "어제 마지막", {
       createdAtMs: new Date(2026, 6, 24, 23, 0, 0).getTime(),
