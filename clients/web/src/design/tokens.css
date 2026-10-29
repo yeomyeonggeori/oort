@@ -4183,6 +4183,49 @@
   pointer-events: none;
 }
 
+/* 확대한 사진 (#4770). 변환은 CSS 변수가 든다: `useImageLightboxZoom`이 CSSOM으로 `--lightbox-zoom`·`--lightbox-pan-x`·
+ * `--lightbox-pan-y`를 꽂는다(이 코드베이스는 인라인 style 속성을 쓰지 않는다). 사진 중심이 축이라 레이아웃 상자(맞춤 크기)는
+ * 그대로이고, 맞춤일 때는 항등 변환이다. `will-change`는 일부러 없다: 레이어를 굳히면 크게 확대했을 때 글자가 뭉개진다.
+ * 이행은 띄엄띄엄한 단계(두 번 클릭·키)에만 켜진다(`data-smooth`): 휠·핀치·끌기는 손가락을 따라가야 해서 이행이 없다.
+ * 동작 줄이기에서는 이행이 없다. 확대 중에는 끌 수 있다는 뜻으로 `grab`(끄는 중에는 `grabbing`)이고, 터치 포인터의 끌기는
+ * 브라우저의 스크롤·확대가 가져가지 않게 `touch-action: none`이다. */
+@utility lightbox-photo {
+  transform: translate(var(--lightbox-pan-x, 0px), var(--lightbox-pan-y, 0px))
+    scale(var(--lightbox-zoom, 1));
+  transform-origin: center;
+  -webkit-user-select: none;
+  user-select: none;
+
+  &[data-zoomed] {
+    cursor: grab;
+    touch-action: none;
+  }
+
+  &[data-dragging] {
+    cursor: grabbing;
+  }
+
+  &[data-smooth] {
+    transition: transform var(--motion-fast) var(--motion-ease-standard);
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+}
+
+/* 확대 비율 칩이 서는 자리 (#4770). 아래 줄(`lightbox-foot`)의 윗변에 얹힌다: 썸네일 줄이 있든 없든 그 바로 위에 뜨고, 칩이
+ * 서고 걷혀도 아래 줄의 자리를 밀지 않는다(흐름 밖). 칸은 포인터를 받지 않는다. */
+@utility lightbox-zoom-slot {
+  position: absolute;
+  inset-inline: 0;
+  inset-block-end: 100%;
+  display: flex;
+  justify-content: center;
+  padding-block-end: var(--spacing-2);
+  pointer-events: none;
+}
+
 /* Marketplace is a decision surface: on a wide viewport its chosen app must
  * remain beside the catalog, not below five rows and outside the viewport.
  * The 2:3 split is named here rather than written as an arbitrary component

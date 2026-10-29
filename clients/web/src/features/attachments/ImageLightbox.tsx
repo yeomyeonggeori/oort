@@ -19,6 +19,10 @@ import {
   nextImageLightboxIndex,
   updateAttachmentIdSet,
 } from "@/features/attachments/imageLightboxModel";
+import {
+  useImageLightboxZoom,
+  type LightboxPhotoBindings,
+} from "@/features/attachments/useImageLightboxZoom";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { IS_TAURI } from "@/lib/env";
 import {
@@ -40,6 +44,10 @@ import {
 //
 // 칩과 버튼은 전부 `glass`다: 유리를 끄면(투명도 줄이기·고대비) 같은 유틸이 불투명 면으로 돌아가고, 무대도 불투명한 어두운
 // 면이 된다(`tokens.css`의 `--lightbox-stage`). 글자는 칩 위에만 서므로 대비는 칩의 면과 짝이다.
+//
+// 확대 (#4770): 맞춤~4배. 트랙패드 오므리기·벌리기와 ⌘+스크롤은 커서가 중심이고, 두 번 클릭은 맞춤 ↔ 실제 크기, ⌘+ ⌘- ⌘0은
+// 키보드 길이다. 확대 중에는 끌어서 움직이고, 빈 무대 클릭 닫기와 ←/→ 넘기기는 꺼진다. Esc는 확대 중이면 맞춤으로, 맞춤이면
+// 닫는다. 다른 장으로 넘기면 맞춤으로 돌아온다. 입력·계산은 `useImageLightboxZoom.ts`와 `imageLightboxModel.ts`가 한다.
 // =============================================================================
 
 /**
@@ -53,12 +61,15 @@ function LightboxImage({
   channelId,
   attachment,
   offline,
+  photo,
   onStageClick,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
   offline: boolean;
+  /** 사진에 펼치는 확대 묶음(끌기·두 번 클릭·변환 변수). */
+  photo: LightboxPhotoBindings;
   /** 사진 둘레의 빈 무대를 눌렀을 때(바깥 클릭: 닫기). */
   onStageClick: (event: MouseEvent<HTMLElement>) => void;
 }) {
@@ -141,10 +152,18 @@ function LightboxImage({
         onClick={onStageClick}
       >
         <img
+          ref={photo.ref}
           src={preview.dataUrl}
           alt={attachmentDisplayName(attachment)}
           draggable={false}
-          className="max-h-full max-w-full object-contain"
+          data-zoomed={photo.zoomed ? "" : undefined}
+          data-dragging={photo.dragging ? "" : undefined}
+          className="lightbox-photo max-h-full max-w-full object-contain"
+          onPointerDown={photo.onPointerDown}
+          onPointerMove={photo.onPointerMove}
+          onPointerUp={photo.onPointerUp}
+          onPointerCancel={photo.onPointerCancel}
+          onDoubleClick={photo.onDoubleClick}
         />
       </div>
     </div>
@@ -259,6 +278,8 @@ export function ImageLightbox({
   const info = selected
     ? lightboxInfoLines({ senderName, sentAtMs, fileName })
     : null;
+  // 열린 사진이 바뀌거나(넘기기) 닫혔다 다시 열리면 맞춤에서 시작한다.
+  const zoom = useImageLightboxZoom({ resetKey: open ? (selected?.id ?? null) : null });
 
   const move = (key: string) => {
     const next = nextImageLightboxIndex(selectedIndex, images.length, key);
@@ -267,14 +288,17 @@ export function ImageLightbox({
   };
 
   // 바깥 클릭. 무대가 창 전체라서 Radix는 「바깥」을 못 본다(패널 안이 곧 창이다): 빈 무대 자신이 눌렸을 때만 닫는다.
-  // 칩·버튼·사진을 누른 클릭은 target이 달라 닫지 않는다.
+  // 칩·버튼·사진을 누른 클릭은 target이 달라 닫지 않는다. 확대 중에는 꺼진다: 끌다 놓은 자리나 사진 둘레의 빈 곳이
+  // 닫기로 읽히면 안 된다(맞춤으로 돌아오면 다시 켜진다).
   const closeOnStageClick = (event: MouseEvent<HTMLElement>) => {
+    if (zoom.isZoomed()) return;
     if (event.target === event.currentTarget) onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        ref={zoom.viewerRef}
         opener={opener}
         motion={STAGE_MOTION}
         data-testid="image-lightbox"
@@ -283,7 +307,20 @@ export function ImageLightbox({
           event.preventDefault();
           closeRef.current?.focus();
         }}
+        // Esc: 확대 중이면 맞춤으로 돌아오고, 맞춤이면 Radix가 닫는다.
+        onEscapeKeyDown={(event) => {
+          if (!zoom.isZoomed()) return;
+          event.preventDefault();
+          zoom.reset();
+        }}
         onKeyDown={(event) => {
+          // ⌘+ ⌘- ⌘0. 먹었으면 브라우저·웹뷰의 쪽 확대는 막는다.
+          if (zoom.handleKey(event)) {
+            event.preventDefault();
+            return;
+          }
+          // ←/→ 넘기기는 확대 중에 꺼진다(맞춤으로 돌아오면 다시 켜진다).
+          if (zoom.isZoomed()) return;
           if (!move(event.key)) return;
           event.preventDefault();
         }}
@@ -323,6 +360,7 @@ export function ImageLightbox({
               channelId={channelId}
               attachment={selected}
               offline={offline}
+              photo={zoom.photo}
               onStageClick={closeOnStageClick}
             />
           ) : (
@@ -452,8 +490,25 @@ export function ImageLightbox({
                 <ChevronRight aria-hidden="true" />
               </Button>
             </div>
+          </>
+        ) : null}
 
-            <div className="lightbox-foot">
+        <div className="lightbox-foot">
+          {/* 확대 비율 칩. 아래 줄 윗변에 얹히고(흐름 밖) 마지막 확대 뒤 잠깐 머문다. 칸은 늘 서 있는 알림 영역이라 칩이
+              들어올 때 보조 기술이 읽는다. 움직임은 불투명도만(사다리 `motion-enter`), 동작 줄이기면 애니메이션이 없다. */}
+          <div role="status" className="lightbox-zoom-slot">
+            {zoom.chip !== null ? (
+              <span
+                data-numeric
+                data-testid="image-lightbox-zoom"
+                className="glass flex h-control-sm items-center rounded-full px-3 text-meta text-ink motion-enter motion-reduce:animate-none"
+              >
+                {zoom.chip}
+              </span>
+            ) : null}
+          </div>
+          {multi ? (
+            <>
               <div
                 role="group"
                 aria-label="이미지 목록"
@@ -482,9 +537,9 @@ export function ImageLightbox({
               >
                 {lightboxPositionLabel(selectedIndex, images.length)}
               </p>
-            </div>
-          </>
-        ) : null}
+            </>
+          ) : null}
+        </div>
       </DialogContent>
     </Dialog>
   );

@@ -52,6 +52,9 @@ export const ENTER_CONVERSATION_ANIMATION_NAME = "motion-enter-conversation";
 export const WELCOME_KICKOFF_EXIT_CLASS = "welcome-kickoff-exit";
 export const WELCOME_KICKOFF_EXIT_ANIMATION_NAME = "motion-welcome-band-collapse";
 
+/** 이미지 미리보기의 확대 비율 칩 (#4770). 마지막 확대 뒤 이만큼 머물렀다가 걷힌다(움직임이 아니라 머무는 시간). 숫자는 여기 한 곳이다. */
+export const ZOOM_CHIP_LINGER_MS = 1200;
+
 /** 공용 툴팁 (#4324). 가리켜서 뜨는 지연. 키보드 초점은 지연 없이 즉시 뜬다.
  * 숫자는 여기 한 곳이다: 표면은 `\d+`ms를 직접 적지 않는다. */
 export const TOOLTIP_DELAY_MS = 500;
