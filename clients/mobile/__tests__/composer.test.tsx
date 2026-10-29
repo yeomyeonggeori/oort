@@ -190,8 +190,8 @@ describe('composerRest (#4614)', () => {
     fireEvent.changeText(input(), text);
     settle();
     expect(hasTools()).toBe(true);
-    expect(inputStyle().height).toBeUndefined();
-    expect(input().props.scrollEnabled).not.toBe(false);
+    expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
+    expect(input().props.scrollEnabled).toBe(false);
   }
 
   describe('쉬라는 알림 — 글이 있어도 접힌다 (#4456 의 「글이 남으면 펼친 채」를 이 한 길에서만 깬다)', () => {
@@ -311,11 +311,11 @@ describe('composerRest (#4614)', () => {
       fireEvent.changeText(input(), '새 글'); // 포커스 없이 다시 채워진다
       settle();
       expect(hasTools()).toBe(true);
-      expect(inputStyle().height).toBeUndefined();
-      expect(input().props.scrollEnabled).not.toBe(false);
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
+      expect(input().props.scrollEnabled).toBe(false);
     });
 
-    it('다시 눌러 포커스가 오면 같은 자리에서 펼친다 — 글 그대로, 안의 스크롤도 다시 된다', () => {
+    it('다시 눌러 포커스가 오면 같은 자리에서 펼친다 — 글 그대로, 측정한 높이로 돌아온다', () => {
       mount();
       typeAndSettle();
       rest();
@@ -326,8 +326,8 @@ describe('composerRest (#4614)', () => {
       settle();
       expect(hasTools()).toBe(true);
       expect(input().props.value).toBe('쓰던 글');
-      expect(inputStyle().height).toBeUndefined();
-      expect(input().props.scrollEnabled).not.toBe(false);
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
+      expect(input().props.scrollEnabled).toBe(false);
     });
 
     it('쉬었다 다시 쓴 입력창은 이제 지금처럼이다 — 다른 길(끌어 내리기)로 포커스를 잃으면 글이 있으니 펼친 채다', () => {
@@ -341,7 +341,7 @@ describe('composerRest (#4614)', () => {
       blur(); // 알림 없이 포커스만 잃는다(끌어서 자판을 내림)
       settle();
       expect(hasTools()).toBe(true);
-      expect(inputStyle().height).toBeUndefined();
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
     });
 
     it('알림이 없으면 #4456 그대로다: 글이 남은 채 포커스를 잃으면 펼친 채다 — 규칙을 깨는 것은 목록의 알림 하나뿐이다', () => {
@@ -350,7 +350,7 @@ describe('composerRest (#4614)', () => {
       blur();
       settle();
       expect(hasTools()).toBe(true);
-      expect(inputStyle().height).toBeUndefined();
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
     });
 
     describe('방이 바뀌면 쉬던 초안도 풀린다', () => {
@@ -455,7 +455,7 @@ describe('composerRest (#4614)', () => {
     beforeEach(() => {
       if (scale !== 2) jest.spyOn(Dimensions, 'get').mockReturnValue({...Dimensions.get('window'), fontScale: scale});
     });
-    const NATURAL = 110; // 다섯 줄쯤의 글 칸(5 × 22 + 크롬 18)
+    const NATURAL = Math.max(110, 3 * line.body * scale + INPUT_CHROME); // 세 줄 이상인 실제 글 칸
 
     const fieldBox = () => screen.getByTestId('composer-field');
     const outerStyle = () => flat(fieldBox().props.style);
@@ -476,7 +476,9 @@ describe('composerRest (#4614)', () => {
     function mountMultiline(natural = NATURAL) {
       mount();
       reportLayout(natural);
-      typeAndSettle('첫 줄\n둘째 줄\n셋째 줄');
+      typeAndSettle(natural >= 3 * line.body * fontScale() + INPUT_CHROME ? '첫 줄\n둘째 줄\n셋째 줄' : '한 줄');
+      fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 280, height: natural - 2}}});
+      reportLayout(natural);
       expect(footprint(natural)).toBe(natural); // 대조: 서 있는 동안은 자연 높이다 — 아래 「줄어든다」가 알림 없이도 통과하지 않는다
     }
     const frames = (count: number, natural = NATURAL) => {
@@ -505,7 +507,7 @@ describe('composerRest (#4614)', () => {
       expect(steps(boxes).filter(step => step < -0.5).length).toBeGreaterThanOrEqual(5); // 여러 프레임에 걸쳐 움직인다
     });
 
-    it('움직이는 동안은 상자가 안을 자르고 입력창은 못 박히지 않는다 — 못 박힘의 여백과 상자의 여백이 겹쳐 첫 줄이 밀리지 않는다', () => {
+    it('움직이는 동안은 상자가 안을 자르고 입력창은 콘텐츠 높이를 유지한다 — 못 박힘의 여백과 상자의 여백이 겹쳐 첫 줄이 밀리지 않는다', () => {
       mountMultiline();
       rest();
       blur();
@@ -513,7 +515,7 @@ describe('composerRest (#4614)', () => {
       expect(hasTools()).toBe(true); // 전제: 아직 움직이는 중이다
       expect(outerStyle().overflow).toBe('hidden');
       expect(typeof outerStyle().height).toBe('number');
-      expect(inputStyle().height).toBeUndefined();
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
       expect(inputStyle().marginTop).toBeUndefined();
       expect(inputStyle().marginBottom).toBeUndefined();
     });
@@ -554,10 +556,10 @@ describe('composerRest (#4614)', () => {
       expect(Math.max(...steps(boxes).map(Math.abs))).toBeLessThan((NATURAL - collapsed()) / 2);
       expect(boxes[boxes.length - 1]).toBe(NATURAL);
       expect(steps(boxes).filter(step => step > 0.5).length).toBeGreaterThanOrEqual(5);
-      // 끝나면 상자가 걷히고 입력창은 자연 높이다(못 박힘 없음).
+      // 끝나면 상자가 걷히고 입력창은 명시한 콘텐츠 높이다(#4790).
       expect(outerStyle().height).toBeUndefined();
-      expect(inputStyle().height).toBeUndefined();
-      expect(input().props.scrollEnabled).not.toBe(false);
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
+      expect(input().props.scrollEnabled).toBe(false);
     });
 
     it('왕복을 되풀이해도 시작값은 늘 자연 높이다 — 잘려 있는 동안 입력창이 알려 온 높이는 자연 높이로 적히지 않는다', () => {
@@ -578,19 +580,16 @@ describe('composerRest (#4614)', () => {
       expect(boxes[boxes.length - 1]).toBe(collapsed());
     });
 
-    it('자연 높이가 쉬는 글 상자보다 낮아도(접근성 큰 글씨의 펼친 칸) 시작은 자연 높이 그대로이고 한 걸음이 반을 넘지 않는다 (design-review r2 L4)', () => {
-      // 글자 배수 2(jest 기본)에서 쉬는 글 상자는 56pt, 알약은 64pt 다 — 자연 높이 40 은 둘 다보다 낮다.
-      const natural = 40;
-      mountMultiline(natural);
+    it('작은 contentSize가 와도 큰 글자의 첫 줄 바닥보다 낮아지지 않는다 (#4790)', () => {
+      mount();
+      typeAndSettle('한 줄 gypp');
+      fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 280, height: 20}}});
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
+      reportLayout(collapsed());
       rest();
       blur();
-      const boxes = [footprint(natural), ...frames(40, natural)];
-      expect(boxes[0]).toBe(natural); // 끝값을 쉬는 글 상자로 올리면 첫 렌더가 그만큼 뛴다
-      boxes.forEach((box, index) => {
-        if (index > 0) expect(box).toBeGreaterThanOrEqual(boxes[index - 1] as number);
-      });
-      expect(boxes[boxes.length - 1]).toBe(collapsed());
-      expect(Math.max(...steps(boxes).map(Math.abs))).toBeLessThan((collapsed() - natural) / 2 + 0.01);
+      const boxes = [footprint(collapsed()), ...frames(40, collapsed())];
+      expect(new Set(boxes)).toEqual(new Set([collapsed()]));
     });
 
     it('한 줄 초안은 높이가 변하지 않는다 — 알약 높이와 자연 높이가 같다', () => {
@@ -627,7 +626,7 @@ describe('composerRest (#4614)', () => {
       focus();
       expect(hasTools()).toBe(true);
       expect(outerStyle().height).toBeUndefined();
-      expect(inputStyle().height).toBeUndefined();
+      expect(Number(inputStyle().height)).toBeGreaterThanOrEqual(collapsed());
     });
 
     describe('쉬던 초안의 높이 기억은 쉬는 상태와 함께 풀린다', () => {

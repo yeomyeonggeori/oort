@@ -66,7 +66,7 @@ import {GlassSurface, useGlassMaterial} from '../../design/glass';
 import {CONV_ICONS, CONV_ICON_SIZE, HOME_ICONS} from '../../design/icons';
 import {CARD_ICONS} from '../../design/icons/cardIcons';
 import {isPhoneSlashRow} from '../aiConnect/AiConnectCard';
-import {CONV, composerFloat} from './convDesign';
+import {CONV, composerFloat, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 import {DockFollowContext} from './dockFollow';
 import {clearDraft, readDraft, saveDraft} from './drafts';
 import {Avatar} from './Avatar';
@@ -105,6 +105,8 @@ import {
 } from '../../design/motion';
 import {haptics} from '../../lib/haptics';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
+
+export {PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from './convDesign';
 
 // =============================================================================
 // The composer.
@@ -192,6 +194,9 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 // 문제가 아니다 — **사람이 친 글도 같은 상한에 걸린다.** #1422 는 이 띠를 사진과
 // 이름으로만 남기고 갔고(그 배치의 범위는 카피였다), 이 파일이 그 주인이다.
 //
+// #4790 현행: 폰 네 줄, 전체 상한에 도구 줄 44pt·알약 크롬 포함, 열 몫 .65.
+// 아래 #1443·#1480 실측 숫자는 당시 5줄·열 몫 .5의 역사이고 현행 상수는 아래 함수다.
+//
 // ## 상한의 **단위**가 바뀐다 — 줄 수에서 열의 몫으로
 //
 // 「5줄」은 값이 아니라 **기본 크기에서의 답**이었다. 그 뒤에 있던 진짜 불변식은
@@ -274,33 +279,10 @@ import {useReduceMotionRef} from '../../lib/useReduceMotion';
 //                                                  (다섯 줄이 그대로 다 보인다)
 // =============================================================================
 
-/**
- * 입력창이 자라는 최대 줄 수. 넘으면 상자는 그대로 있고 안에서 스크롤한다.
- *
- * 다섯인 이유: 이 제품에서 한 번에 보내는 글은 대부분 한두 줄이고, 다섯 줄이면
- * 문단 하나를 통째로 보면서 고칠 수 있다. 그 위는 목록을 먹기 시작한다 —
- * 키보드가 올라와 있을 때 대화가 보이는 높이는 이 상한이 정한다.
- *
- * **줄 수이지 높이가 아니다.** 큰 글자에서 이 다섯이 그대로 지켜지면 상자가 창의
- * 41.6% 가 되므로, 거기서는 아래 세 몫(`KEYBOARD_WINDOW_SHARE` ·
- * `CONVERSATION_CHROME_WINDOW_SHARE` · `COMPOSER_COLUMN_SHARE`)이 정하는 상한이
- * 먼저 걸린다.
- */
-const MAX_ROWS = 5;
-
-/**
- * 상한이 절대로 내려가지 않는 줄 수. **쓰고 있는 줄과 그 앞 줄** — 그 아래로는
- * 고쳐 쓰기가 한 줄 창이 되고, 한 줄 창은 자기가 무엇을 지웠는지 안 보여 준다.
- *
- * **가장 작은 창에서 가장 큰 글자를 고르면 걸린다** — 그리고 그때 이 바닥이 위
- * 불변식을 이긴다(SE 667pt · AX-XXL: 몫 130.1pt < 바닥 156.3pt). 그것이 의도다:
- * 「목록이 입력창보다 크다」는 좋은 화면의 조건이고, 「쓰고 있는 줄이 보인다」는
- * 쓸 수 있는 화면의 조건이다. 조건이 부딪히면 뒤가 이긴다.
- *
- * 첫 판의 이 자리에는 「오늘 배송되는 어느 기기에서도 안 걸린다」고 적혀 있었다.
- * 창 몫이 크롬을 안 빼던 때의 산수였고, 크롬을 빼면 그 문장은 위처럼 좁아진다.
- */
+/** 작은 창·큰 글자에서도 편집 중인 줄과 그 앞 줄을 남긴다. */
 const MIN_ROWS = 2;
+/** 펼침 도구 줄도 전체 높이 예산 안에 든다(#4467). */
+export const COMPOSER_TOOLS_HEIGHT = TOUCH_TARGET;
 
 /** 입력창 상하 패딩 한쪽. 상한 계산과 실제 스타일이 같은 값을 읽는다. */
 const INPUT_PAD_Y = space.sm;
@@ -359,11 +341,13 @@ const KEYBOARD_WINDOW_SHARE = 0.38;
 const CONVERSATION_CHROME_WINDOW_SHARE = 0.23;
 
 /**
- * 키보드와 크롬을 뺀 **대화 열**에서 입력창이 가져갈 수 있는 최대 몫. **절반이다**
- * — 넘는 순간 목록이 입력창보다 작아지고, 그때 「키보드가 올라와도 대화가
- * 남는다」는 말이 거짓이 된다.
+ * 키보드와 크롬을 뺀 대화 열에서 펼친 알약이 가져가는 최대 몫.
+ * #4790의 네 줄·도구 줄을 SE에서도 담도록 0.65로 조정했다.
+ * 큰 글자에서는 편집 두 줄 바닥이 우선하며 실제 목록 몫은 스택 검증에서 잰다.
  */
-const COMPOSER_COLUMN_SHARE = 0.5;
+// 기본 글자 SE(667pt)에서도 네 줄 + 도구 줄 + 알약 여백(164pt)이 든다:
+// 667 × (1 − .38 − .23) × .65 = 169pt. 큰 글자는 두 줄 바닥이 우선한다.
+const COMPOSER_COLUMN_SHARE = 0.65;
 
 /**
  * 상한과 실제 상자가 함께 지는 세로 크롬(패딩·테두리). 글자를 안 따라간다.
@@ -379,23 +363,20 @@ export const INPUT_CHROME = INPUT_PAD_Y * 2 + INPUT_BORDER * 2;
 export const INPUT_CHROME_X = INPUT_PAD_X * 2 + INPUT_BORDER * 2;
 
 /**
- * 자라기를 멈추는 높이 — **두 상한 중 작은 것**, 그리고 바닥은 두 줄.
- *
- * `fontScale` 은 `useWindowDimensions()` 가 주는 동적 타입 배수이고, 그것이 곧
- * 화면의 줄 상자를 정하는 그 수다(위 머리말의 `RCTAttributedTextUtils` 인용).
- * `windowHeight` 는 목록이 남을 자리를 정한다.
- *
- * 이름이 있고 export 되는 이유: 같은 산수를 계측 하네스와 테스트가 **다시 적지
- * 않고** 읽는다. 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
+ * 펼친 알약 전체 상한(글 칸 + 44pt 도구 줄 + 알약 위아래 여백·선).
+ * 네 줄과 창 예산 중 작은 값이며, 큰 글자에서 두 줄의 편집 바닥을 지킨다.
+ * 입력창에는 이 값에서 도구 줄과 알약 크롬을 뺀 값을 준다.
  */
-export function composerMaxHeight(
-  fontScale: number,
-  windowHeight: number,
-): number {
+export function composerExpandedMaxHeight(fontScale: number, windowHeight: number): number {
   const row = line.body * fontScale;
-  const byRows = MAX_ROWS * row + INPUT_CHROME;
+  const chrome = INPUT_CHROME + COMPOSER_TOOLS_HEIGHT + PILL_CHROME;
+  const byRows = COMPOSER_MAX_ROWS * row + chrome;
   const byWindow = conversationColumn(windowHeight) * COMPOSER_COLUMN_SHARE;
-  return Math.max(MIN_ROWS * row + INPUT_CHROME, Math.min(byRows, byWindow));
+  return Math.max(MIN_ROWS * row + chrome, Math.min(byRows, byWindow));
+}
+
+export function composerMaxHeight(fontScale: number, windowHeight: number): number {
+  return composerExpandedMaxHeight(fontScale, windowHeight) - COMPOSER_TOOLS_HEIGHT - PILL_CHROME;
 }
 
 /**
@@ -605,12 +586,13 @@ const BAR_PAD_X = CONV.composerGap - PILL_EDGE;
 const BAR_PAD_Y = BAR_PAD_X - (TOUCH_TARGET - CONV.composerCircle) / 2;
 
 /**
- * 도크가 시트·입력창 **말고** 지는 세로 — `styles.bar` 의 위아래 여백 (#1480).
+ * 글 칸 밖의 세로: 알약 선·위아래 여백 + 펼침 도구 줄 44pt + 도크 위 여백.
  *
  * 상수로 이름을 갖는 이유는 `INPUT_CHROME` 과 같다: 산수와 실제 스타일이 같은 값을
  * 읽어야 하고, 사본을 두면 사본이 거짓말한다(디자인 시스템 §5.5).
  */
-const DOCK_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2 + CONV.composerTopAir;
+export const PILL_CHROME = (PILL_EDGE + BAR_PAD_Y) * 2;
+const DOCK_CHROME = PILL_CHROME + COMPOSER_TOOLS_HEIGHT + CONV.composerTopAir;
 
 /** 알약 안 두 원(36)을 엄지 44 로 만드는 여유 — 도출한다(감사 M-14). */
 const ATTACH_SLOP = slopTo(CONV.composerCircle);
@@ -1944,6 +1926,21 @@ export function Composer({
   }, [inputRef]);
 
   const collapsedHeight = composerCollapsedHeight(fontScale);
+  // Fabric의 내재 크기 재측정에 기대지 않는다(#4615). contentSize는 패딩을
+  // 포함하므로 테두리만 더한다. 측정 전에는 하드 개행 수를 최소 높이로 쓴다.
+  const [contentHeight, setContentHeight] = useState(0);
+  useLayoutEffect(() => {
+    if (text === '') setContentHeight(0);
+  }, [text]);
+  const explicitRows = text === '' ? 1 : Math.min(COMPOSER_MAX_ROWS, text.split('\n').length);
+  const wantedHeight = Math.max(
+    collapsedHeight,
+    explicitRows * line.body * fontScale + INPUT_CHROME,
+    text === '' ? 0 : contentHeight + INPUT_BORDER * 2,
+  );
+  const inputHeight = Math.min(maxHeight, wantedHeight);
+  const inputOverflows = text !== '' && wantedHeight > maxHeight;
+  overflowRef.current = inputOverflows;
   // 쉬는 초안의 알약은 **첫 줄 하나만** 보인다 (#4614). 엄지 높이(44)에 둘째 줄의 윗부분이 걸려 잘려 보이던 것을, 입력창을 첫 줄의 아랫선까지(위 여백 + 한 줄)만으로 줄이고 남는 높이를 입력창
   // **밖**(margin)으로 돌려 해결한다 — 알약의 높이는 그대로고 첫 줄은 글이 한 줄일 때와 같은 자리(가운데)에 선다. 글이 없는 접힘은 한 줄뿐이라 이 계산이 필요 없다.
   const restedLine = Math.ceil(line.body * fontScale);
@@ -1991,7 +1988,7 @@ export function Composer({
         : CONV.composerCircle;
   const toolsHeight = progress.interpolate({
     inputRange: [0, 1],
-    outputRange: [0, TOUCH_TARGET],
+    outputRange: [0, COMPOSER_TOOLS_HEIGHT],
   });
 
   /** 「@」 도구: 끝에 @ 를 붙여 입력창이 이미 가진 멘션 후보를 연다(별도 선택기를 만들지 않는다). */
@@ -2084,19 +2081,13 @@ export function Composer({
           return height !== undefined && height <= fitRoom;
         });
   const shownPlaceholder = withLatinWordBreaks(keptPlaceholder);
-  // **눈에서 빠진 절이 귀에서도 빠지지 않게 한다 (#4179).** RN iOS 의 멀티라인 입력창
-  // (`RCTUITextView.accessibilityLabel`)은 빈 칸일 때 「JS 라벨 + 보이는 플레이스홀더」를 읽는다 —
-  // 그래서 한 줄 예산이 뒷절(「@로 부르기」)을 화면에서 빼면 VoiceOver 도 그 절을 못 읽는다. 라벨은
-  // 그대로 두고(필드 이름 — 줄 예산과 무관), 빠진 절을 **코어가 지은 그 글자 그대로** 힌트로 잇는다:
-  // 새 문장은 아니고, 귀는 「라벨 + 보이는 절 + 힌트」로 문장 전체를 듣는다. 글이 있으면 플레이스홀더가
-  // 안 보이므로 힌트도 없다.
-  const droppedHint =
+  // #4790: 한 줄 말줄임 Text는 장식이며 native placeholder는 비어 있다.
+  // 필드 라벨이 방 이름 전체를 읽고, 멘션 안내는 보이는 절의 길이와 무관하게
+  // 빈 입력창의 힌트로 읽는다. 글을 쓰기 시작하면 힌트도 걷는다.
+  const placeholderHint =
     clauses === null || text !== ''
       ? undefined
-      : clauses
-          .filter(clause => !keptPlaceholder.includes(clause.text))
-          .map(clause => clause.text)
-          .join(' ') || undefined;
+      : clauses.find(clause => clause.id === 'mention-affordance')?.text;
 
   return (
     <View style={styles.root} testID="composer-root">
@@ -2473,25 +2464,19 @@ export function Composer({
           onTouchCancel={onFieldTouchCancel}>
         <TextInput
           ref={inputRef}
-          // 글이 비면 높이를 **명시**한다 (#4305, owner 10-24): 값만 비우면 iOS(Fabric)가 멀티라인 입력창의
-          // 내재 크기를 다시 재지 않아 두 줄 높이가 다시 칠 때까지 남았다. 글이 있을 때는 예전처럼 콘텐츠가
-          // 정한다(`maxHeight` 까지).
-          //
-          // **조건은 `text === ''` 이지 「접힘」이 아니다** (#4456). 포커스로 펼친 빈 입력창도, 포커스가 남은 채
-          // 보내서 빈 입력창도 같은 한 줄로 못 박힌다 — 그래서 보낸 뒤의 높이는 한 줄 + 도구 줄(빈 펼침 높이)이고
-          // 여러 줄 높이가 남지 않는다. 여기를 `!expanded` 로 바꾸면 보낸 직후(포커스가 남은 펼침)가 못 박히지
-          // 않아 owner 10-24 의 결함이 그대로 돌아온다.
+          // 빈 칸 → 붙여넣기·초안 복원에서도 명시 높이를 계속 준다(#4615).
+          // flex:1 + 고정 높이 해제 + scrollEnabled=true 경로는 Yoga/Fabric의
+          // 내재 크기에 의존해 긴 글도 작은 편집 창에 머물 수 있었다.
           style={[
             styles.input,
-            {maxHeight},
-            text === '' && {height: collapsedHeight},
-            // 쉬는 초안도 한 줄로 못 박는다(#4614) — 안 그러면 접힌 알약이 여러 줄 높이로 서 있다. 위 `restedStyle` 이 왜 `collapsedHeight` 가 아닌지 말한다.
-            // 움직이는 동안은 못 박지 않는다 — 그동안은 감싼 상자(`restClipStyle`)가 같은 일을 진행값으로 한다.
+            {maxHeight, minHeight: collapsedHeight, height: inputHeight},
             rested && !clipRest && restedStyle,
           ]}
           onContentSizeChange={event => {
-            overflowRef.current =
-              event.nativeEvent.contentSize.height + INPUT_CHROME >= maxHeight - 1;
+            // 쉬는 한 줄·접힘 애니메이션이 자연 높이 측정을 덮어쓰지 않게 한다.
+            if (text === '' || rested || restFromRef.current !== null) return;
+            const measured = event.nativeEvent.contentSize.height;
+            setContentHeight(previous => previous === measured ? previous : measured);
           }}
           onLayout={onInputLayout}
           value={text}
@@ -2507,16 +2492,16 @@ export function Composer({
           // `fitComposerPlaceholder` 이고, 「이 상자에 드는가」만 위의 프로브가
           // 답한다 — 그 분업과 그것이 구하지 못하는 띠는 이 파일의 「절 예산」
           // 머리말에 있다.
-          placeholder={shownPlaceholder}
+          placeholder=""
           // 자리 글자가 이제 「@로 부르기」를 알리는 유일한 문장이다 — 시안의 @ 도구
           // 버튼을 뺐으므로(DS2-4 검수 M-4). `textFaint` 는 알약 위 3.6~3.8:1 이었다.
           placeholderTextColor={palette.textMuted}
           keyboardAppearance={keyboardAppearance}
           accessibilityLabel={placeholder ?? composerFieldLabel(channelLabel, recipient)}
-          accessibilityHint={droppedHint}
+          accessibilityHint={placeholderHint}
           multiline
           // 쉬는 초안(#4614)은 스크롤하지 않는다: 입력창 안이 끝 쪽으로 스크롤된 채(캐럿이 끝에 있었다) 한 줄로 줄면 그 스크롤이 남아 첫 줄이 아니라 중간 줄이 알약에 보였다(시뮬레이터 실측).
-          scrollEnabled={!rested}
+          scrollEnabled={!rested && inputOverflows}
           // 끌기 잠금(#4518 D2): 접힌 빈 입력창을 눌러 끌기 문턱을 넘은 손이 닿아 있는 동안만 `false` 다 — 손을 뗄 때 네이티브가 포커스를 주지 못하게 한다(`onFieldTouchMove`).
           // 그 밖에는 언제나 `true` 라서(기본값과 같다) 다른 터치·포커스·글자 선택은 지금 그대로다.
           editable={!focusLock}
@@ -2585,6 +2570,19 @@ export function Composer({
         />
         {/* 쉬는 알약의 눌리는 면 (#4614 H1) — 쉬는 초안이 포커스를 받기 전까지 선다. **움직이는 중에도 서 있어야 한다**: 손이 닿는 순간 펼침이 시작되고(#4518) 그 렌더에서 이 면이 사라지면
             눌리던 손의 `onPress` 가 오지 않는다(시뮬레이터 실측: `pressIn` 만 오고 `onPress` 가 없었다). 접근성 요소가 아니다(글 칸이 그 몫을 한다). */}
+        {text === '' ? (
+          <Text
+            pointerEvents="none"
+            accessible={false}
+            accessibilityElementsHidden
+            importantForAccessibility="no-hide-descendants"
+            numberOfLines={1}
+            ellipsizeMode="tail"
+            style={[styles.placeholder, {color: palette.textMuted}]}
+            testID="composer-placeholder">
+            {shownPlaceholder}
+          </Text>
+        ) : null}
         {rested && !focused ? (
           <Pressable
             accessible={false}
@@ -2658,7 +2656,7 @@ export function Composer({
 const buildStyles = (color: Palette) => StyleSheet.create({
   /**
    * 도크. 선도 바닥색도 없다 — 알약이 바닥 위에 뜬다(시안 `.a-comp`). 위 여백과
-   * 알약 안 위아래 여백의 합이 `DOCK_CHROME` 이다(시트 상한 산수가 읽는 그 수).
+   * 알약 안 위아래 여백은 `PILL_CHROME`이며 도구 줄과 함께 `DOCK_CHROME`에 든다.
    */
   root: {paddingTop: CONV.composerTopAir},
   /**
@@ -2724,8 +2722,17 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   attachDisabled: {backgroundColor: color.surfaceMuted},
   attachGlyph: {width: CONV_ICON_SIZE.plus, height: CONV_ICON_SIZE.plus},
+  placeholder: {
+    position: 'absolute',
+    top: INPUT_BORDER,
+    left: INPUT_BORDER,
+    right: INPUT_BORDER,
+    paddingHorizontal: INPUT_PAD_X,
+    paddingVertical: INPUT_PAD_Y,
+    fontSize: font.body,
+    lineHeight: line.body,
+  },
   input: {
-    flex: 1,
     // 한 줄일 때도 엄지가 닿는 크기. 도출된 한 줄 상자(23 + 8·8 + 1·1 = 41)보다
     // 크므로 이 값이 이긴다 — 그것이 의도다.
     minHeight: TOUCH_TARGET,
@@ -2981,7 +2988,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     transform: [{translateY: -3}, {rotate: '45deg'}],
   },
   agentNotice: {
-    paddingHorizontal: SAFE_GUTTER,
+    paddingHorizontal: CONV.composerDockInset,
     paddingTop: space.sm,
     fontSize: font.meta,
     lineHeight: line.meta,
@@ -3004,7 +3011,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     color: color.agent,
   },
   hint: {
-    paddingHorizontal: SAFE_GUTTER,
+    paddingHorizontal: CONV.composerDockInset,
     paddingTop: space.sm,
     fontSize: font.meta,
     color: color.textFaint,
@@ -3047,7 +3054,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
    * `approvalCard.test.tsx` 의 대조 고정 단정이다.
    */
   offline: {
-    paddingHorizontal: SAFE_GUTTER,
+    paddingHorizontal: CONV.composerDockInset,
     paddingTop: space.sm,
     fontSize: font.meta,
     color: color.text,
@@ -3088,7 +3095,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   // 여기서 사람이 할 일(키를 빼고 보내기)이 실제로 남아 있다. 위 `offline`이
   // 앰버를 뺀 이유(아무도 부르지 않는 차단)와 반대 경우다.
   keyBlock: {
-    marginHorizontal: SAFE_GUTTER,
+    marginHorizontal: CONV.composerDockInset,
     marginTop: space.sm,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,

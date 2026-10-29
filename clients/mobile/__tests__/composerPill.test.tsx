@@ -1,3 +1,5 @@
+import {AttachmentTray} from '../src/features/attachments/AttachmentTray';
+import {QuoteDraftBar} from '../src/features/conversation/Quote';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {contrast} from '@momo/core/design/color';
 import {cleanup, fireEvent, render, screen, waitFor} from './fixtures/darkWorld';
@@ -8,7 +10,7 @@ import {
   resetBlurSupportForTests,
   resetLiquidGlassSupportForTests,
 } from '../src/design/glass';
-import {darkPalette, ds2Radius, lightPalette, slopTo, space, TOUCH_TARGET} from '../src/design/tokens';
+import {darkPalette, ds2Radius, lightPalette, line, slopTo, space, TOUCH_TARGET} from '../src/design/tokens';
 import {
   Composer,
   composerColumnBudget,
@@ -56,6 +58,7 @@ function setWindow(next: {width?: number; fontScale?: number; height?: number}) 
 const a11y = AccessibilityInfo as unknown as {isReduceTransparencyEnabled: jest.Mock};
 
 beforeEach(() => {
+  setWindow({fontScale: 1});
   a11y.isReduceTransparencyEnabled.mockImplementation(() => Promise.resolve(false));
 });
 
@@ -266,6 +269,22 @@ describe('작업 대화 입력 알약 — 같은 자', () => {
     );
   }
 
+  it('#4790 작업 대화도 네 줄 뒤 스크롤하고 큰 글자 첫 줄이 잘리지 않는다', () => {
+    for (const fontScale of [1, 1.786, 2.143, 2.643, 3.143, 3.571]) {
+      setWindow({fontScale});
+      const view = work();
+      const input = () => screen.getByTestId('work-chat-input');
+      expect(flat(input().props.style).minHeight).toBeGreaterThanOrEqual(Math.ceil(line.body * fontScale) + 18);
+      fireEvent.changeText(input(), '긴 지시'.repeat(100));
+      fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 250, height: 1000}}});
+      expect(flat(input().props.style).height).toBe(4 * line.body * fontScale + 18);
+      expect(input().props.scrollEnabled).toBe(true);
+      fireEvent.changeText(input(), '');
+      expect(input().props.scrollEnabled).toBe(false);
+      view.unmount();
+    }
+  });
+
   it('원 지름·반경·눌림이 대화 컴포저와 같다', () => {
     work();
     const send = screen.getByTestId('work-chat-send');
@@ -325,101 +344,34 @@ describe('작업 대화 입력 알약 — 같은 자', () => {
   });
 });
 
-describe('알약이 화면 가장자리에서 뜬 거리 — Buzz 만큼, 글 칸이 모자라면 줄어든다', () => {
-  const AX_XXL = 3.143;
-
-  it('글 칸이 남는 폭에서는 Buzz 값이다', () => {
-    // 글 칸 바닥(214) + 108 + 2 × 40 = 402(= Buzz 기준 폭) 이상이면 Buzz 값 그대로다.
-    const enough = CONV.composerTextMin + COMPOSER_CHROME_X + 2 * CONV.composerFloatMax;
-    expect(composerFloat(enough, 1)).toBe(CONV.composerFloatMax);
-    expect(composerFloat(enough + 100, 1)).toBe(CONV.composerFloatMax);
-    expect(composerFloat(enough - 2, 1)).toBe(CONV.composerFloatMax - 1);
+describe('#4790 도크 8pt', () => {
+  it('첨부 트레이와 인용 바도 알약의 8pt 가장자리에서 시작한다', () => {
+    const tray = render(<AttachmentTray drafts={[]} pickerIssue="permission-denied"
+      onRemove={() => {}} onRetry={() => {}} onClear={() => {}} />);
+    expect(flat(screen.getByTestId('attachment-tray').props.style).paddingHorizontal).toBe(8);
+    tray.unmount();
+    render(<QuoteDraftBar block={{kind: 'unresolved', targetId: 'quoted', targetSeq: null}}
+      directory={DIRECTORY} onCancel={() => {}} />);
+    expect(flat(screen.getByTestId('quote-draft').props.style).paddingLeft).toBe(8);
+    expect(flat(screen.getByTestId('quote-draft').props.style).paddingRight).toBe(8);
   });
 
-  it('글 칸이 바닥 아래로 내려가려 하면 그만큼 줄고, 그때도 글 칸은 바닥을 지킨다', () => {
-    for (const width of [320, 340, 360, 375, 390, 393, 402, 430]) {
-      for (const fontScale of [0.823, 1, 1.118, 1.235, 1.353]) {
-        const float = composerFloat(width, fontScale);
-        expect([width, fontScale, float >= CONV.composerFloatMin]).toEqual([width, fontScale, true]);
-        expect([width, fontScale, float <= CONV.composerFloatMax]).toEqual([width, fontScale, true]);
-        // 바닥에 닿지 않은 자리(= 줄어든 자리)에서는 글 칸이 정확히 바닥 이상이다.
-        if (float > CONV.composerFloatMin && float < CONV.composerFloatMax) {
-          expect(composerTextColumn(width, fontScale)).toBeGreaterThanOrEqual(
-            CONV.composerTextMin * fontScale,
-          );
+  it('폭·글자 배수와 무관하게 입력창과 형제 줄이 8pt 선에 선다', () => {
+    expect(CONV.composerDockInset).toBe(8);
+    for (const width of [320, 375, 393, 402, 440]) {
+      for (const fontScale of [1, 1.786, 2.643, 3.571]) {
+        setWindow({width, fontScale});
+        const view = render(<Composer recipient="place" channelLabel="긴-방-이름"
+          directory={DIRECTORY} attachmentTarget={TARGET} offline dmHint="안내" onSend={() => {}} />);
+        expect(composerFloat(width, fontScale)).toBe(8);
+        expect(composerTextColumn(width, fontScale)).toBe(width - 16 - COMPOSER_CHROME_X);
+        expect(flat(screen.getByTestId('composer-pill').props.style).marginHorizontal).toBe(8);
+        for (const id of ['composer-offline', 'composer-dm-hint']) {
+          expect(flat(screen.getByTestId(id).props.style).paddingHorizontal).toBe(8);
         }
+        view.unmount();
       }
     }
-  });
-
-  it('창이 좁아질수록·글자가 커질수록 거리는 줄기만 한다', () => {
-    let previous = Infinity;
-    for (let width = 430; width >= 280; width -= 1) {
-      const float = composerFloat(width, 1);
-      expect(float).toBeLessThanOrEqual(previous);
-      previous = float;
-    }
-    previous = Infinity;
-    for (const fontScale of [0.823, 0.882, 0.941, 1, 1.118, 1.235, 1.353, 1.786, 2.143, 2.643, 3.143, 3.571]) {
-      const float = composerFloat(393, fontScale);
-      expect(float).toBeLessThanOrEqual(previous);
-      previous = float;
-    }
-  });
-
-  it('접근성 큰 글자에서는 옛 값(12)까지 내려온다', () => {
-    expect(composerFloat(393, AX_XXL)).toBe(CONV.composerFloatMin);
-    expect(composerFloat(375, AX_XXL)).toBe(CONV.composerFloatMin);
-  });
-
-  it('렌더가 그 식을 읽는다 — 스타일시트에 못 박히지 않는다', () => {
-    for (const [width, fontScale] of [
-      [402, 1],
-      [440, 1],
-      [393, 2.143],
-    ] as const) {
-      setWindow({width, fontScale});
-      const view = composer();
-      const pill = flat(screen.getByTestId('composer-pill').props.style);
-      expect([width, fontScale, pill.marginHorizontal]).toEqual([
-        width,
-        fontScale,
-        composerFloat(width, fontScale),
-      ]);
-      view.unmount();
-    }
-  });
-
-  it('실측 폭 표 — PR 본문에 적은 숫자가 식에서 나온다', () => {
-    // [창 폭, 뜬 거리, 글 칸] @ 글자 배수 1. 아이폰 16 Pro·17(402) · 15·16·17 기본(393) ·
-    // 14·15 기본(390) · SE 3세대(375) · Pro Max(440). 글 칸 = 폭 − 2 × 거리 − 108.
-    const table = [402, 393, 390, 375, 440].map(width => [
-      width,
-      composerFloat(width, 1),
-      composerTextColumn(width, 1),
-    ]);
-    expect(table).toEqual([
-      [402, 40, 214],
-      [393, 35, 215],
-      [390, 34, 214],
-      [375, 26, 215],
-      [440, 40, 252],
-    ]);
-  });
-
-  it('글 칸 바닥은 Buzz 가 기준 폭에서 가진 글 칸이다 — 기준 폭에서는 Buzz 값(40)이 그대로 선다', () => {
-    // Buzz 캡처는 402pt 이고 알약이 40 떠 있다(픽셀 실측 40.3~40.7). 그때 글 칸이 402 − 80 − 108 =
-    // 214 다. 규칙은 그 칸 아래로 안 내려가게 좁은 창에서만 거리를 줄인다 — 기준 폭에서 이 규칙이
-    // 걸리면(옛 판이 258 로 그랬다) 오너가 고른 레퍼런스를 규칙이 다시 해석하는 것이다.
-    const BUZZ_REFERENCE_WIDTH = 402;
-    expect(BUZZ_REFERENCE_WIDTH - 2 * CONV.composerFloatMax - COMPOSER_CHROME_X).toBe(
-      CONV.composerTextMin,
-    );
-    expect(composerFloat(BUZZ_REFERENCE_WIDTH, 1)).toBe(CONV.composerFloatMax);
-    expect(composerTextColumn(BUZZ_REFERENCE_WIDTH, 1)).toBe(CONV.composerTextMin);
-    // 기준 폭보다 넓은 창은 Buzz 값 그대로, 좁은 창은 줄어든다(글 칸은 바닥을 지킨다).
-    expect(composerFloat(BUZZ_REFERENCE_WIDTH + 38, 1)).toBe(CONV.composerFloatMax);
-    expect(composerFloat(BUZZ_REFERENCE_WIDTH - 2, 1)).toBeLessThan(CONV.composerFloatMax);
   });
 });
 
@@ -470,10 +422,10 @@ describe('도크 산수는 실제 알약을 읽는다', () => {
     const {bar, edge} = pillAndBar();
     const budget = composerColumnBudget(1, 874);
     expect(budget.dockChrome).toBeCloseTo(
-      2 * (edge + (bar.paddingVertical as number)) + space.sm,
+      2 * (edge + (bar.paddingVertical as number)) + 44 + space.sm,
       10,
     );
     // 선 + 안쪽 줄 위아래 여백 = 5 라 도크 크롬은 18 이다 — 옛 알약은 16 이었다(#4179).
-    expect(budget.dockChrome).toBe(18);
+    expect(budget.dockChrome).toBe(62);
   });
 });

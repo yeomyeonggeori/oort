@@ -10,6 +10,9 @@
 // 무엇보다 다음 사람이 「이 12 는 어디서 왔나」를 한 자리에서 읽지 못한다.
 // =============================================================================
 
+/** owner 10-30 #4790: 일반·스레드·작업 대화의 폰 입력 상한. */
+export const PHONE_COMPOSER_MAX_ROWS = 4;
+
 export const CONV = {
   // ---- 머리 (`.a-hd`) -------------------------------------------------------
   /** `.a-cbtn{width:42px;height:42px;border-radius:50%}` — 뒤로·⋮ 원. */
@@ -130,34 +133,11 @@ export const CONV = {
    * `Composer` 의 `INPUT_PAD_X + INPUT_BORDER` 와 같아야 하고 시험이 그것을 묶는다.
    */
   composerTextInset: 9,
-  /** 알약이 화면 가장자리에서 뜬 거리 — 글 칸이 넉넉할 때. Buzz 40.3~40.7pt. */
-  composerFloatMax: 40,
-  /** 글 칸이 모자라면 줄어드는 바닥 — 옛 값(`.a-comp{left:12px;right:12px}`). */
-  composerFloatMin: 12,
-  /**
-   * 글 칸의 바닥(글자 배수 1 에서, pt) — 이 아래로 좁아지면 띄운 거리를 줄인다.
-   *
-   * **값의 출처는 Buzz 기준 폭이다.** Buzz 캡처(402pt)에서 알약이 가장자리에서 40 떠 있을 때 글
-   * 칸이 `402 − 2 × 40 − 108 = 214pt` 이다. 기준 폭(과 더 넓은 창)에서는 거리가 Buzz 값 40 그대로이고,
-   * 그보다 좁은 창(SE 375pt 등)이나 큰 글자에서는 글 칸이 이 214 아래로 내려가지 않도록 거리를 줄인다
-   * — 이슈의 「글 칸이 지나치게 좁아지면 비례로 줄이는 규칙」. 시험이 이 관계를 값으로 든다.
-   *
-   * **이 값의 대가 — 기준 폭에서 안내 문장의 뒷절이 빠진다. 오너가 알고 고른 거래다.**
-   * 「{이름}에 메시지 보내기, @로 부르기」는 코어 폭표(`composerCopy.ts`, 폰 16pt)로 일반 215.5 ·
-   * grok 232.3 · 김인턴 243.2 · hermes 256.0 이라 글 칸 214 에는 어느 것도 한 줄에 안 든다. 성재
-   * 결정(2026-10-21, 「40 + 문장 한 줄」): 여백은 Buzz 값 40 을 지키고 안내 문장은 한 줄
-   * 예산(`Composer.tsx` 의 `PLACEHOLDER_MAX_LINES`)이라, 한 줄에 안 드는 이름은 뒷절(「@로 부르기」)이
-   * 절 경계에서 빠지고 머리 절만 남는다 — 빈 알약이 Buzz 와 같은 한 줄(54)로 선다(머리 절 자체가
-   * 안 드는 긴 이름은 예외, #4202; `composerDraftOffline.test.tsx` 「기본 글자 크기에서도 한 줄
-   * 예산이다」가 이 규칙을 잰다). 기각한 쪽은 이 수를
-   * **258**(= hermes 256.0 + 2)로 올려 문장을 한 줄로 지키는 길이다: 거리가 402pt 에서 18 · 393pt 13 ·
-   * SE 12 로 줄어 Buzz 값 40 을 잃는다. 뒷절을 살리는 길은 여백이 아니라 문장(코어 카피)이고 그 결정은
-   * 오너 몫으로 #4201 에 있다.
-   */
-  composerTextMin: 214,
+  /** owner 10-30 #4790: 입력 알약과 도크 형제 줄의 공통 바깥 여백. */
+  composerDockInset: 8,
   /**
    * 작업 대화 독(안내 줄·「끼어들기」 칩·알약)의 좌우 여백. 옛 알약의 바깥 여백(12)과 같은 값이지만
-   * **다른 축이다** — 대화 컴포저의 `composerFloatMin`(떠 있는 거리의 바닥)이 움직여도 이 독은
+   * **다른 축이다** — 대화 컴포저의 `composerDockInset`(바깥 여백)이 움직여도 이 독은
    * 안 움직인다.
    */
   workDockInset: 12,
@@ -211,22 +191,9 @@ export const CONV = {
 export const COMPOSER_CHROME_X =
   2 * (CONV.composerGap + CONV.composerCircle + CONV.composerTextInset);
 
-/**
- * 알약이 화면 가장자리에서 뜬 거리 (#4179).
- *
- * Buzz 만큼(`composerFloatMax` 40) 띄우되, 글 칸이 `composerTextMin × 글자 배수` 아래로
- * 내려가려 하면 그만큼 줄여 바닥(`composerFloatMin`, 옛 값 12)까지 내려간다. 글 칸 =
- * 창 폭 − 2 × 거리 − `COMPOSER_CHROME_X`. 거리는 **내림**이라 줄어든 자리에서도 글 칸이 바닥을
- * 지킨다(올림이면 1pt 모자란다).
- *
- * 글자 배수를 곱하는 이유는 접근성 큰 글자다: 같은 pt 폭이 담는 글자 수가 배수만큼 준다 —
- * 배수가 커지면 거리가 먼저 바닥으로 내려가 글 칸을 지킨다.
- */
-export function composerFloat(windowWidth: number, fontScale: number): number {
-  const spare = Math.floor(
-    (windowWidth - COMPOSER_CHROME_X - CONV.composerTextMin * fontScale) / 2,
-  );
-  return Math.min(CONV.composerFloatMax, Math.max(CONV.composerFloatMin, spare));
+/** #4790: 창 폭·글자 크기와 무관하게 도크 전체가 같은 8pt 선에 선다. */
+export function composerFloat(_windowWidth: number, _fontScale: number): number {
+  return CONV.composerDockInset;
 }
 
 /** 그 거리에서 글 칸의 폭 — PR 의 「실측 폭」 표와 시험이 같은 식을 읽는다. */

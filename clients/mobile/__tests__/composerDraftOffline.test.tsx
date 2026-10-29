@@ -19,6 +19,10 @@ import {
   Composer,
   composerColumnBudget,
   composerMaxHeight,
+  composerExpandedMaxHeight,
+  composerCollapsedHeight,
+  COMPOSER_MAX_ROWS,
+  PILL_CHROME,
   COMPOSER_OFFLINE_COPY,
   INPUT_CHROME,
   mentionRowHeight,
@@ -345,217 +349,71 @@ describe('오프라인 — 지금은 못 보낸다고 말하고, 실제로 막�
 });
 
 // -----------------------------------------------------------------------------
-describe('성장 정책 — 상한이 도출된 숫자다', () => {
-  const inputStyle = () => {
-    composer();
-    return StyleSheet.flatten(screen.getByTestId('composer-input').props.style);
-  };
+describe('#4790 입력창 성장', () => {
+  const input = () => screen.getByTestId('composer-input');
+  const style = () => StyleSheet.flatten(input().props.style);
+  const measure = (height: number) => fireEvent(input(), 'contentSizeChange', {nativeEvent: {contentSize: {width: 250, height}}});
 
-  it('줄 상자가 스케일에서 나온다 — 21 이라는 손으로 적은 숫자가 아니다', () => {
-    // `font.body`(16) 짜리 글자는 화면의 다른 자리에서 `line.body`(23) 를 쓴다.
-    // 입력창만 21 을 들고 있었다.
-    expect(inputStyle().lineHeight).toBe(line.body);
+  it('폰 4줄과 도구 줄 44pt를 포함한 전체 상한을 잠근다', () => {
+    expect(COMPOSER_MAX_ROWS).toBe(4);
+    for (const height of [667, 852, 874, 956]) {
+      setWindow({height, fontScale: 1});
+      const view = composer();
+      fireEvent.changeText(input(), '긴 문단'.repeat(100));
+      measure(600);
+      expect(style().height).toBe(4 * line.body + INPUT_CHROME);
+      expect(input().props.scrollEnabled).toBe(true);
+      expect(style().height + 44 + PILL_CHROME).toBe(composerExpandedMaxHeight(1, height));
+      expect(composerExpandedMaxHeight(1, height)).toBe(164);
+      view.unmount();
+    }
   });
 
-  it('기본 글자 크기의 상한 = 5줄 + 패딩 + 테두리 (133)', () => {
-    // 손으로 적은 120 이 아니라 도출된 값이다. 줄 상자가 바뀌면 같이 움직인다.
-    // #1443 이 이 값을 **안 바꾼다**는 것이 그 배치의 무회귀 주장이다.
-    setWindow({fontScale: 1});
-    expect(inputStyle().maxHeight).toBe(5 * line.body + 8 * 2 + 1 * 2);
+  it('타이핑·붙여넣기·초안 복원 모두 측정한 감긴 줄로 자라고 줄어든다', () => {
+    setWindow({fontScale: 1, height: 874});
+    for (const restored of [false, true]) {
+      if (restored) saveDraft(CH, '복원한 문단'.repeat(40));
+      const view = composer(restored ? {draftKey: CH} : {});
+      if (!restored) fireEvent.changeText(input(), '긴 문단'.repeat(40));
+      measure(3 * line.body + 16);
+      expect(style().height).toBe(3 * line.body + INPUT_CHROME);
+      expect(input().props.scrollEnabled).toBe(false);
+      measure(4 * line.body + 16);
+      expect(style().height).toBe(4 * line.body + INPUT_CHROME);
+      expect(input().props.scrollEnabled).toBe(false);
+      measure(5 * line.body + 16);
+      expect(style().height).toBe(4 * line.body + INPUT_CHROME);
+      expect(input().props.scrollEnabled).toBe(true);
+      fireEvent.changeText(input(), '짧은 글');
+      measure(line.body + 16);
+      expect(style().height).toBe(44);
+      expect(input().props.scrollEnabled).toBe(false);
+      fireEvent.changeText(input(), '');
+      expect(style().height).toBe(44);
+      view.unmount();
+    }
   });
 
-  it('한 줄일 때도 엄지가 닿는다 — 도출된 한 줄 상자보다 44 가 크다', () => {
-    const style = inputStyle();
-    expect(style.minHeight).toBe(44);
-    expect(line.body + 8 * 2 + 1 * 2).toBeLessThan(style.minHeight as number);
-  });
-
-  it('감긴 줄에도 자란다 — 웹의 개행 세기 결함이 여기엔 없다', () => {
-    // 감사 H-10 이 웹에서 잡은 것: `Math.min(MAX_ROWS, text.split("\n").length)`
-    // 는 하드 개행만 세므로 길게 감긴 한 줄 문단에서는 상자가 안 자란다.
-    //
-    // RN 은 `multiline` 입력창을 **콘텐츠 높이**로 재고 감긴 줄도 콘텐츠다. 즉
-    // 그 계산이 여기 있으면 안 되고(있으면 OS 의 답을 덮어쓴다), 줄 수를 못
-    // 박는 prop 도 없어야 하며, 높이는 min/max 로만 묶여야 한다.
-    composer();
-    const input = screen.getByTestId('composer-input');
-    expect(input.props.multiline).toBe(true);
-    expect(input.props.numberOfLines).toBeUndefined();
-    // 글이 있는 동안 높이는 못 박히지 않는다. (비었을 때만 접힘 높이를 명시한다 — #4305,
-    // `composerTwoState.test.tsx` 가 그 쪽을 든다.)
-    fireEvent.changeText(input, '아주 길게 감기는 한 줄 문단');
-    const style = StyleSheet.flatten(
-      screen.getByTestId('composer-input').props.style,
-    ) as {height?: number};
-    expect(style.height).toBeUndefined();
-    // 그리고 텍스트가 늘어도 스타일은 그대로다 — 높이를 정하는 것은 이 파일이
-    // 아니라 OS 다.
-    fireEvent.changeText(input, '아주 길게 감기는 한 줄 문단'.repeat(20));
-    expect(
-      StyleSheet.flatten(screen.getByTestId('composer-input').props.style),
-    ).toEqual(style);
-  });
-});
-
-// -----------------------------------------------------------------------------
-// #1443 (#1422 이월) — 상한이 **글자 크기를 따라간다**.
-//
-// 실측이 이 블록의 근거다(iPhone 17 Pro / iOS 26.5,
-// `accessibility-extra-extra-large` = 글자 배수 3.143, 창 874pt): 옛 상한 128pt
-// 는 그 크기에서 1.6줄이었고 화면에는 한 줄만 섰다 — **사람이 친 글도** 같은
-// 상한에 걸린다. 캡처는 `measure/captures/grow1443-composer-*`.
-//
-// 여기서 재는 것은 사진이 아니라 **식**이다: 줄 수는 기본 크기의 상한으로 남고,
-// 큰 글자에서는 **대화 열의 몫**이 상한을 진다.
-describe('#1443 성장 상한 — 동적 타입 비례', () => {
-  const inputMaxHeight = () => {
-    composer();
-    const style = StyleSheet.flatten(
-      screen.getByTestId('composer-input').props.style,
-    ) as {maxHeight?: number; minHeight?: number};
-    return style;
-  };
-
-  /** AX-XXL. RN 의 배수표(`RCTAccessibilityManager.mm`)가 든 값 그대로. */
-  const AX_XXL = 3.143;
-  const IPHONE_17_PRO_H = 874;
-  /**
-   * 입력창 패딩(8·8)과 테두리(1·1). **손 사본이지만 묶여 있다** (회전 1 M4):
-   * 아래 한 줄이 배송되는 상수와 이 수를 못으로 박으므로, 크롬이 바뀌는 날 이
-   * 파일은 조용히 옛 수로 초록을 내지 못한다 — 같은 describe 의 `BAR_CHROME` 이
-   * `budget.dockChrome` 으로 묶인 것과 같은 장치다.
-   */
-  const CHROME = 8 * 2 + 1 * 2;
-  it('크롬 사본이 배송되는 값과 같다', () => {
-    expect(CHROME).toBe(INPUT_CHROME);
-  });
-  /**
-   * 대화 열 위의 크롬 **실측**(iPhone 17 Pro / AX-XXL): 세이프 62.0 + 헤더 131.3.
-   * `measure/` 의 `composer-growth` 계측 줄이 매 캡처마다 다시 내는 숫자이고,
-   * 아래 단정이 모델을 이 값에 묶는다.
-   */
-  const MEASURED_CHROME = 193.3;
-
-  it('식 자체 — 줄 상자에 배수가 곱해진다 (기본 크기는 그대로)', () => {
-    // 5줄이 아직 열의 몫보다 작은 구간: 상한 = 5 × (22 × 배수) + 크롬.
-    expect(composerMaxHeight(1, IPHONE_17_PRO_H)).toBe(5 * line.body + CHROME);
-    expect(composerMaxHeight(1.235, IPHONE_17_PRO_H)).toBeCloseTo(
-      5 * line.body * 1.235 + CHROME,
-      5,
-    );
-  });
-
-  it('열의 몫이 상한을 진다 — 큰 글자에서 5줄을 그대로 지키면 목록이 사라진다', () => {
-    const byRows = 5 * line.body * AX_XXL + CHROME; // 379.8 — 창의 43.5%
-    const cap = composerMaxHeight(AX_XXL, IPHONE_17_PRO_H);
-    expect(byRows).toBeGreaterThan(cap);
-    // 키보드(38%)와 대화 열 위 크롬(23%)을 뺀 열의 절반.
-    expect(cap).toBeCloseTo(IPHONE_17_PRO_H * 0.39 * 0.5, 5);
-    // 그리고 그것이 옛 상한보다 **더 많이** 보여 준다: 1.5줄 → 2.1줄 (줄 상자 23 기준).
-    const row = line.body * AX_XXL;
-    expect((128 - CHROME) / row).toBeLessThan(2);
-    expect((cap - CHROME) / row).toBeGreaterThan(2.1);
-  });
-
-  // ---------------------------------------------------------------------------
-  // 리뷰어 C M-1 — 몫이 갈리는 곳은 **창이 아니라 대화 열**이다.
-  //
-  // 첫 판은 `창 × (1 − 0.38) × 0.5` 로 갈랐고, 그래서 자기가 든 불변식(「목록이
-  // 입력창보다 작아지지 않는다」)이 자기 측정 지점에서 이미 거짓이었다: 창의
-  // 위쪽에는 목록이 한 줄도 못 쓰는 띠 둘(세이프 에리어 62.0 + 헤더 131.3)이
-  // 있는데 산수가 그것을 뺀 적이 없었다. 아래 셋이 그 자리를 잠근다.
-  it('불변식이 산수로 참이다 — 목록 몫 ≥ 입력창 몫', () => {
-    for (const fontScale of [1, 1.235, 2, 3.143, 3.571]) {
-      for (const height of [667, 812, 874, 956, 1366]) {
-        const budget = composerColumnBudget(fontScale, height);
-        expect(budget.column).toBeCloseTo(budget.list + budget.composer, 5);
-        if (budget.composer > 2 * line.body * fontScale + CHROME) {
-          // 바닥(두 줄)이 안 걸린 구간에서는 예외가 없다.
-          expect(budget.list).toBeGreaterThanOrEqual(budget.composer);
-        }
+  it('AX1~AX5: 접힘·펼침 첫 줄과 자리표시가 배수를 따라 온전히 선다', () => {
+    for (const fontScale of [1.786, 2.143, 2.643, 3.143, 3.571]) {
+      for (const height of [667, 874]) {
+        setWindow({fontScale, height});
+        const view = composer({channelLabel: 'release-2026-08-아주-긴-방-이름'});
+        const collapsed = composerCollapsedHeight(fontScale);
+        expect(style().height).toBeGreaterThanOrEqual(Math.ceil(line.body * fontScale) + INPUT_CHROME);
+        const placeholder = screen.getByTestId('composer-placeholder', {includeHiddenElements: true});
+        expect(placeholder.props.numberOfLines).toBe(1);
+        expect(placeholder.props.ellipsizeMode).toBe('tail');
+        fireEvent(input(), 'focus');
+        expect(style().height).toBe(collapsed);
+        fireEvent.changeText(input(), '첫 줄 gypp');
+        measure(line.body * fontScale + 16);
+        expect(style().height).toBeGreaterThanOrEqual(collapsed);
+        expect(style().maxHeight + 44 + PILL_CHROME).toBeCloseTo(composerExpandedMaxHeight(fontScale, height));
+        expect(composerMaxHeight(fontScale, height)).toBeGreaterThanOrEqual(2 * line.body * fontScale + INPUT_CHROME - 0.001);
+        view.unmount();
       }
     }
-  });
-
-  it('크롬 몫이 실측보다 작지 않다 — 틀리는 방향은 목록 쪽이어야 한다', () => {
-    const budget = composerColumnBudget(AX_XXL, IPHONE_17_PRO_H);
-    expect(budget.chrome).toBeGreaterThanOrEqual(MEASURED_CHROME);
-    // 그래서 화면에서 목록이 실제로 받는 것은 모델이 준 몫보다 **크다**:
-    // 874 − 키보드 336(하네스 실측 상수) − 크롬 193.3 − 입력창.
-    const onScreenList =
-      IPHONE_17_PRO_H - 336 - MEASURED_CHROME - budget.composer;
-    expect(onScreenList).toBeGreaterThanOrEqual(budget.composer);
-  });
-
-  it('첫 판의 식이었다면 그 자리에서 거짓이다 — 회귀 표식', () => {
-    // 크롬을 안 빼는 식. 이 줄이 다시 초록이 되면 M-1 이 되돌아온 것이다.
-    const firstDraft = IPHONE_17_PRO_H * (1 - 0.38) * 0.5; // 270.94
-    const onScreenList = IPHONE_17_PRO_H - 336 - MEASURED_CHROME - firstDraft;
-    expect(onScreenList).toBeLessThan(firstDraft);
-    // 목록에 남는 것이 73.8pt — 줄 상자 69.1pt 짜리 **한 줄**이고 두 줄이 안 된다.
-    expect(onScreenList).toBeLessThan(2 * line.body * AX_XXL);
-    expect(onScreenList).toBeLessThan(firstDraft / 3);
-  });
-
-  it('바닥은 두 줄 — 상한이 `minHeight` 아래로 못 내려간다', () => {
-    // 창이 아무리 낮고 글자가 아무리 커도 상자는 쓰고 있는 줄과 그 앞 줄을 든다.
-    for (const fontScale of [1, 2, 3.143, 3.571]) {
-      for (const height of [200, 667, 874, 1366]) {
-        const cap = composerMaxHeight(fontScale, height);
-        expect(cap).toBeGreaterThanOrEqual(2 * line.body * fontScale + CHROME);
-        expect(cap).toBeGreaterThan(44); // minHeight
-      }
-    }
-  });
-
-  it('바닥이 불변식을 이기는 자리가 있다 — 가장 작은 창 · 가장 큰 글자', () => {
-    // SE(667pt) · AX-XXL 에서 열의 몫(130.1)이 두 줄(156.3)보다 작다. 그때는
-    // 바닥이 이긴다: 「목록이 크다」는 좋은 화면의 조건이고 「쓰고 있는 줄이
-    // 보인다」는 쓸 수 있는 화면의 조건이라, 부딪히면 뒤가 이긴다.
-    const floor = 2 * line.body * AX_XXL + CHROME;
-    expect(667 * 0.39 * 0.5).toBeLessThan(floor);
-    expect(composerMaxHeight(AX_XXL, 667)).toBeCloseTo(floor, 5);
-  });
-
-  it('기본 글자 크기에서 몫이 걸리는 창은 682pt 아래뿐이다', () => {
-    // 걸리려면 창이 682pt 아래여야 한다(133 ÷ 0.195). 본문 줄 높이 22 → 23(#3774)이
-    // 5줄 상한을 128 → 133 으로 올렸고, 그래서 문턱이 656 에서 682 로 올랐다.
-    // iOS 26 이 도는 가장 작은 아이폰(667pt)은 이제 몫이 먼저 물어 130.1pt(4.9줄)다 —
-    // 5줄에서 0.1줄 모자라는 값이고, 그 위의 모든 창은 그대로 133 이다.
-    for (const height of [812, 844, 874, 896, 956, 1366]) {
-      expect(composerMaxHeight(1, height)).toBe(5 * line.body + CHROME);
-    }
-    expect(composerMaxHeight(1, 667)).toBeCloseTo(667 * 0.39 * 0.5, 5);
-    expect(composerMaxHeight(1, 667)).toBeLessThan(5 * line.body + CHROME);
-  });
-
-  it('상자가 그 식을 실제로 든다 — 렌더된 스타일에서', () => {
-    setWindow({fontScale: AX_XXL, height: IPHONE_17_PRO_H});
-    expect(inputMaxHeight().maxHeight).toBeCloseTo(
-      composerMaxHeight(AX_XXL, IPHONE_17_PRO_H),
-      5,
-    );
-    setWindow({fontScale: 1, height: IPHONE_17_PRO_H});
-    expect(inputMaxHeight().maxHeight).toBe(5 * line.body + CHROME);
-  });
-
-  it('사람이 친 글도 같은 상한을 받는다 — 플레이스홀더만의 수리가 아니다', () => {
-    setWindow({fontScale: AX_XXL, height: IPHONE_17_PRO_H});
-    composer({draftKey: CH});
-    const input = screen.getByTestId('composer-input');
-    fireEvent.changeText(
-      input,
-      '금요일 배포 건입니다.\n릴레이를 먼저 재시작하고\n그다음 워커를 올립니다.\n로그는 여기에\n남깁니다.',
-    );
-    const style = StyleSheet.flatten(
-      screen.getByTestId('composer-input').props.style,
-    ) as {maxHeight?: number; height?: number};
-    expect(style.maxHeight).toBeCloseTo(
-      composerMaxHeight(AX_XXL, IPHONE_17_PRO_H),
-      5,
-    );
-    // 그리고 높이는 여전히 OS 의 것이다 — 이 파일은 min/max 만 든다.
-    expect(style.height).toBeUndefined();
   });
 });
 
@@ -588,7 +446,7 @@ describe('#1443 라틴 낱말 절단 — 토큰의 자기 경계에서 끊긴다
   it('플레이스홀더에만 걸린다 — **사람이 친 글은 우리 것이 아니다**', () => {
     composer({channelLabel: 'release-2026-08'});
     const input = screen.getByTestId('composer-input');
-    expect(input.props.placeholder).toContain('release-​2026-​08');
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toContain('release-​2026-​08');
     // 같은 문자열을 이름으로 읽어 주는 자리에는 안 들어간다.
     expect(input.props.accessibilityLabel).not.toContain('​');
     // 그리고 값은 친 그대로다 — 이 파일의 첫 번째 규칙(머리말)이다.
@@ -634,7 +492,7 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
    * 말고 지는 것. 알약이 Buzz 동심(원 36 · 여백 9, #4179)이 되면서 선 + 안쪽 줄 여백이 4 → 5 라
    * 16 → **18** 이다.
    */
-  const BAR_CHROME = 5 * 2 + 8;
+  const BAR_CHROME = 5 * 2 + 44 + 8;
 
   /**
    * iOS 동적 타입 배수 **사다리 전부** (`RCTAccessibilityManager` 기본표).
@@ -692,7 +550,7 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
   it('기본 크기에서 담는 수는 그대로 넷이다 — 다섯째 행의 이마만 없어진다', () => {
     // 옛 값 180 은 4행(176)에 4pt 가 붙은 값이었다. 그 4pt 가 화면에서 하는 일은
     // 다섯째 이름의 윗동을 보여 주는 것 하나이고, 그것이 §5.3 이 세는 반노출이다.
-    expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
+    expect(mentionSheetMaxHeight(1, H)).toBe(3 * TOUCH_TARGET);
     expect(180 - 4 * TOUCH_TARGET).toBe(4); // 회귀 표식: 옛 값의 나머지
   });
 
@@ -728,10 +586,10 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     // 기기)에서 열이 허락하는 정수 행이 정확히 넷이고, 다섯은 안 든다.
     const budget = composerColumnBudget(1, H);
     const room = budget.column - budget.composer - BAR_CHROME;
-    expect(room).toBeCloseTo(189.9, 1); // #4179 전 191.9 — 도크 크롬 16 → 18
-    expect(Math.floor(room / TOUCH_TARGET)).toBe(4);
+    expect(room).toBeCloseTo(168.9, 1); // #4179 전 191.9 — 도크 크롬 16 → 18
+    expect(Math.floor(room / TOUCH_TARGET)).toBe(3);
     expect(5 * TOUCH_TARGET).toBeGreaterThan(room);
-    expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
+    expect(mentionSheetMaxHeight(1, H)).toBe(3 * TOUCH_TARGET);
   });
 
   it('상한 4가 실제로 무는 창은 큰 것들뿐이다 — 그 아래는 열이 먼저 문다', () => {
@@ -744,17 +602,17 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
         const room = budget.column - budget.composer - BAR_CHROME;
         return Math.floor(room / mentionRowHeight(fontScale)) > 4;
       });
-    expect(capBindsAt(1)).toEqual([956, 1024, 1032, 1080, 1180, 1366]);
+    expect(capBindsAt(1)).toEqual([1024, 1032, 1080, 1180, 1366]);
     // 그 문턱 자체도 값이다(창 × 0.39 − 입력창 133 − 도크 크롬 18 ≥ 5 × 44):
     // 926 은 안 물고 956 은 문다. (#4179 전 크롬 16 → 문턱 946, 지금 951)
-    expect((926 * 0.39 - 133 - BAR_CHROME) / TOUCH_TARGET).toBeLessThan(5);
-    expect((956 * 0.39 - 133 - BAR_CHROME) / TOUCH_TARGET).toBeGreaterThanOrEqual(5);
+    expect((1000 * 0.39 - 110 - BAR_CHROME) / TOUCH_TARGET).toBeLessThan(5);
+    expect((1024 * 0.39 - 110 - BAR_CHROME) / TOUCH_TARGET).toBeGreaterThanOrEqual(5);
 
     // **946 은 배수 1 한정이다** (회전 2 nitpick). 사다리 아래쪽에서는 입력창이
     // 작아져 문턱이 내려가고 — 0.823 에서는 883.5pt 라 926 도 문다 — 위쪽에서는
     // 행이 자라 문턱이 올라가서 3.571 에서는 어느 배송 높이도 안 문다. 한정 없이
     // 적힌 946 은 「이 상한은 큰 창에서만 논다」를 사다리 전체의 사실처럼 읽힌다.
-    expect(capBindsAt(0.823)).toContain(926);
+    expect(capBindsAt(0.823)).toContain(1024);
     expect(capBindsAt(3.571)).toEqual([]);
   });
 
@@ -782,8 +640,8 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     // a11y-large(2.143)에서 시트가 3행이 되는 것은 행이 커져서가 아니다 — 행은
     // 그대로 44 이고, 줄어든 것은 열이 시트에 주는 몫이다.
     expect(mentionRowHeight(2.143)).toBe(mentionRowHeight(1));
-    expect(mentionSheetMaxHeight(2.143, H)).toBe(3 * TOUCH_TARGET);
-    expect(mentionSheetMaxHeight(1, H)).toBe(4 * TOUCH_TARGET);
+    expect(mentionSheetMaxHeight(2.143, H)).toBe(2 * TOUCH_TARGET);
+    expect(mentionSheetMaxHeight(1, H)).toBe(3 * TOUCH_TARGET);
     // 그리고 AX-XXL 에서는 행 자체가 자란다 — 캡처가 그 띠를 든다.
     expect(mentionRowHeight(AX_XXL)).toBeCloseTo(47.1, 1);
   });
@@ -810,15 +668,32 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
    * 마지막 칸이 이 배치의 방향을 든다: 같은 자리에서 옛 고정 180 은 **훨씬 더**
    * 넘었다. 이 띠는 새로 생긴 결함이 아니라 좁아진 옛 결함이다.
    */
+  // #4790: 도구 줄 44pt를 포함한 정직한 잔량이다. 큰 글자·작은 창의
+  // 두 줄 편집 바닥과 시트 두 행 바닥이 겹칠 때 열을 넘는 기존 한계도 기록한다.
   const FLOOR_WINS: ReadonlyArray<readonly [number, number, number, number]> = [
-    // 초과분은 #4179 로 안쪽 줄 여백이 4 → 5 가 되며 각각 +2 다(도크 크롬 16 → 18).
-    // 자리 자체는 그대로 네 곳이다 — 새로 거짓이 되는 자리는 없다.
-    [667, 3.143, 14.7, 100.4],
-    [667, 3.571, 47.3, 120.1],
-    // 736(iPhone 8 Plus)은 지원 하한이 iOS 16.4 라서 목록에 있다 — 격자를 「iOS
-    // 26 이 도는 기기」로 세웠던 첫 판은 이 줄을 통째로 못 봤다(회전 2 M2).
-    [736, 3.571, 20.4, 93.2],
-    [744, 3.571, 17.2, 90.1],
+    [667, 1.118, 5.0, 97.0],
+    [667, 1.235, 5.0, 97.0],
+    [667, 1.353, 5.0, 97.0],
+    [667, 1.786, 5.0, 97.0],
+    [667, 2.143, 6.4, 98.4],
+    [667, 2.643, 29.4, 121.4],
+    [736, 2.643, 2.5, 94.5],
+    [667, 3.143, 58.7, 144.4],
+    [736, 3.143, 31.8, 117.5],
+    [744, 3.143, 28.7, 114.4],
+    [810, 3.143, 3.0, 88.7],
+    [812, 3.143, 2.2, 87.9],
+    [667, 3.571, 91.3, 164.1],
+    [736, 3.571, 64.4, 137.2],
+    [744, 3.571, 61.2, 134.1],
+    [810, 3.571, 35.5, 108.4],
+    [812, 3.571, 34.7, 107.6],
+    [820, 3.571, 31.6, 104.5],
+    [834, 3.571, 26.1, 99.0],
+    [844, 3.571, 22.2, 95.1],
+    [852, 3.571, 19.1, 92.0],
+    [874, 3.571, 10.5, 83.4],
+    [896, 3.571, 2.0, 74.8],
   ];
 
   const dockOf = (fontScale: number, height: number) =>
@@ -882,7 +757,7 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
     // 티켓이 인용한 산수: 도크 366.4 vs 열 340.9 — #4179 로 바 여백이 16 → 18 이라 도크 368.4.
     const budget = composerColumnBudget(AX_XXL, H);
     expect(180 + budget.composer + BAR_CHROME).toBeGreaterThan(budget.column);
-    expect(180 + budget.composer + BAR_CHROME).toBeCloseTo(368.4, 1);
+    expect(180 + budget.composer + BAR_CHROME).toBeCloseTo(409.6, 1);
     expect(budget.column).toBeCloseTo(340.9, 1);
   });
 
@@ -935,7 +810,7 @@ describe('#1480 멘션 시트 상한 — 동적 타입 비례 + 도크가 열을
   it('기본 크기에서도 같은 식이 든다 — 오늘 화면은 4행 그대로다', () => {
     setWindow({fontScale: 1, height: H});
     composer({directory: makeDirectory([AGENT])});
-    expect(sheetStyle().maxHeight).toBe(4 * TOUCH_TARGET);
+    expect(sheetStyle().maxHeight).toBe(3 * TOUCH_TARGET);
   });
 
   it('행의 **세** 조각이 선언된 같은 줄 상자를 든다 — 한 줄로 읽힌다', () => {
@@ -1120,13 +995,13 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     for (const fontScale of [1, AX_XXL]) {
       setWindow({fontScale, height: H});
       const view = composer();
-      expect(input().props.placeholder).toBe(HEAD());
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
       // 입력창이 폭을 알려도(프로브가 서도) 프로브가 답하기 전까지는 머리 절이다.
       layoutInput();
-      expect(input().props.placeholder).toBe(HEAD());
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
       // 한 줄로 든다는 답이 오면 그제야 뒷절이 붙는다 — 글자만, 높이는 그대로.
       measureProbe([line.body * fontScale]);
-      expect(input().props.placeholder).toBe(FULL());
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(FULL());
       view.unmount();
     }
   });
@@ -1138,10 +1013,10 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     const row = line.body * AX_XXL; // 화면의 줄 상자 — 72.3pt
     // 문장 4줄 = 289.2pt. 문턱은 한 줄 반(108.4pt) — 못 선다.
     measureProbe([row, row, row, row]);
-    expect(input().props.placeholder).toBe('배포에 메시지 보내기');
-    expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe('배포에 메시지 보내기');
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).not.toContain(MENTION_AFFORDANCE);
     // 절 경계에서 끝났다 — 반쪽 절이 아니다.
-    expect(input().props.placeholder.endsWith(',')).toBe(false);
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children.endsWith(',')).toBe(false);
   });
 
   it('칸이 다시 넓어져 한 줄에 들면 광고가 돌아온다 — 접힘은 상태가 아니라 답이다', () => {
@@ -1150,14 +1025,14 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     layoutInput();
     const row = line.body * AX_XXL;
     measureProbe([row, row, row, row]);
-    expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).not.toContain(MENTION_AFFORDANCE);
     // 같은 표면을 두 줄로 다시 재도(옛 판은 여기서 돌아왔다 — 상자 글자리 152.4pt 에 두 줄은
     // 들었다) 한 줄 예산에서는 여전히 안 든다.
     measureProbe([row, row]);
-    expect(input().props.placeholder).toBe(HEAD());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
     // 회전·iPad 로 한 줄에 서면 그제야 돌아온다.
     measureProbe([row]);
-    expect(input().props.placeholder).toBe(FULL());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(FULL());
   });
 
   it('기본 글자 크기에서도 한 줄 예산이다 (#4179) — 두 줄이면 뒷절이 빠지고 한 줄이면 문장 전체다', () => {
@@ -1167,11 +1042,11 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     composer();
     layoutInput();
     measureProbe([line.body, line.body]);
-    expect(input().props.placeholder).toBe(HEAD());
-    expect(input().props.placeholder).not.toContain(MENTION_AFFORDANCE);
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).not.toContain(MENTION_AFFORDANCE);
     measureProbe([line.body]);
-    expect(input().props.placeholder).toBe(FULL());
-    expect(input().props.placeholder).toContain(MENTION_AFFORDANCE);
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(FULL());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toContain(MENTION_AFFORDANCE);
   });
 
   it('경계값: 한 줄은 반올림 잡음이 있어도 접지 않고, 두 줄은 접는다', () => {
@@ -1182,15 +1057,15 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     // 네이티브가 줄 상자를 픽셀 격자에 반올림해 한 줄이 0.4pt 더 커도 한 줄이다 — 이 오답은
     // **들어가는 문장의 뒷절을 지운다.**
     measureProbe([row + 0.4]);
-    expect(input().props.placeholder).toBe(FULL());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(FULL());
     // 합이 정확히 문턱인 판 — 부동소수 잡음으로 접으면 안 된다.
     measureProbe([placeholderRoom(AX_XXL)]);
-    expect(input().props.placeholder).toBe(FULL());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(FULL());
     // 문턱을 조금만 넘어도 접힌다. 두 줄은 문턱(한 줄 반)을 한 줄의 절반이나 넘는다.
     measureProbe([placeholderRoom(AX_XXL) + 0.01]);
-    expect(input().props.placeholder).toBe(HEAD());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
     measureProbe([row, row]);
-    expect(input().props.placeholder).toBe(HEAD());
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
   });
 
   it('문턱은 한 줄과 두 줄 사이다 — 배수 사다리 전부에서 (#4179)', () => {
@@ -1213,11 +1088,11 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
       const allowed = [HEAD(), FULL()];
       for (const lines of [[row], [row, row], [row, row, row], [row, row, row, row]]) {
         measureProbe(lines);
-        expect(allowed).toContain(input().props.placeholder);
-        expect(input().props.placeholder).toBe(lines.length === 1 ? FULL() : HEAD());
+        expect(allowed).toContain(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children);
+        expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(lines.length === 1 ? FULL() : HEAD());
       }
       // 머리 절이 한 줄을 넘는 크기(접근성 쪽)에서도 머리 절은 안 버린다 — 버릴 절이 없다.
-      expect(input().props.placeholder.startsWith(HEAD())).toBe(true);
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children.startsWith(HEAD())).toBe(true);
     },
   );
 
@@ -1232,9 +1107,9 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
       expect(input().props.accessibilityLabel).toBe(label);
       measureProbe([line.body * fontScale, line.body * fontScale]);
       // 보이는 글은 머리 절로 줄었어도 라벨은 안 줄었다 — 같은 문자열이 아니다.
-      expect(input().props.placeholder).toBe(HEAD());
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
       expect(input().props.accessibilityLabel).toBe(label);
-      expect(input().props.accessibilityLabel).not.toBe(input().props.placeholder);
+      expect(input().props.accessibilityLabel).not.toBe(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children);
       view.unmount();
     }
   });
@@ -1244,7 +1119,7 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     // (`RCTUITextView.mm` 의 `accessibilityLabel`). 그래서 보이는 글이 줄면 귀도 줄고, 힌트가 그 몫을 받는다.
     const clauses = composerPlaceholderClauses('배포', 'place');
     const heard = () =>
-      [input().props.placeholder, input().props.accessibilityHint]
+      [screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children, input().props.accessibilityHint]
         .filter(Boolean)
         .join(' ')
         .replace(/\u200b/g, '');
@@ -1258,13 +1133,13 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
       for (const clause of clauses) expect(heard()).toContain(clause.text);
       // 두 줄 → 뒷절이 빠지고 힌트가 정확히 그 절이다.
       measureProbe([row, row]);
-      expect(input().props.placeholder).toBe(HEAD());
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(HEAD());
       expect(input().props.accessibilityHint).toBe(MENTION_AFFORDANCE);
       for (const clause of clauses) expect(heard()).toContain(clause.text);
-      // 한 줄 → 문장 전체가 보이고 힌트는 없다 — 같은 절을 두 번 읽지 않는다.
+      // 한 줄 → 장식 Text는 낭독하지 않으므로 멘션 힌트는 계속 남는다(#4790).
       measureProbe([row]);
-      expect(input().props.placeholder).toBe(FULL());
-      expect(input().props.accessibilityHint).toBeUndefined();
+      expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe(FULL());
+      expect(input().props.accessibilityHint).toBe(MENTION_AFFORDANCE);
       for (const clause of clauses) expect(heard()).toContain(clause.text);
       view.unmount();
     }
@@ -1316,7 +1191,7 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     composer({placeholder: '답글 쓰기'});
     layoutInput();
     expect(probes()).toHaveLength(0);
-    expect(input().props.placeholder).toBe('답글 쓰기');
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toBe('답글 쓰기');
     // 빠진 절이 없으니 힌트도 없다(#4179).
     expect(input().props.accessibilityHint).toBeUndefined();
   });
@@ -1353,7 +1228,7 @@ describe('#1479 절 예산 · #4179 한 줄 문턱 — 한 줄에 못 서는 문
     layoutInput();
     // 한 줄에 든다는 답이 와야 광고 절이 붙는다(#4179: 재기 전에는 머리 절이다).
     measureProbe([line.body]);
-    expect(input().props.placeholder).toContain('@\u2060로 부르기');
+    expect(screen.getByTestId('composer-placeholder', {includeHiddenElements: true}).props.children).toContain('@\u2060로 부르기');
     // withLatinWordBreaks 는 라틴/숫자 사이만 만지므로 joiner 를 안 건드린다.
     expect(withLatinWordBreaks('@\u2060로 부르기')).toBe('@\u2060로 부르기');
   });

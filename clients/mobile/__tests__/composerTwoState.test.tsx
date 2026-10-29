@@ -118,12 +118,12 @@ describe('접힘 ↔ 펼침', () => {
     expect(composerCollapsedHeight(Dimensions.get('window').fontScale)).toBe(collapsed());
   });
 
-  it('글을 치면 펼침이다: 도구 줄과 「@」가 서고 높이는 콘텐츠가 정한다(명시 높이 없음)', () => {
+  it('글을 치면 펼침이다: 도구 줄과 「@」가 서고 높이는 콘텐츠 측정 전 한 줄로 명시한다', () => {
     mount();
     fireEvent.changeText(input(), '가');
     expect(hasTools()).toBe(true);
     expect(screen.getByTestId('composer-tool-mention')).toBeTruthy();
-    expect(inputHeight()).toBeUndefined();
+    expect(inputHeight()).toBe(Math.max(collapsed(), Math.min(4, input().props.value.split('\n').length) * line.body * Dimensions.get('window').fontScale + INPUT_CHROME));
   });
 
   // 포커스가 없는 쪽 — 자판을 내린 채 글이 남아 있다가 보낸다(포커스가 남은 쪽은 아래 「포커스 (#4456)」).
@@ -131,7 +131,7 @@ describe('접힘 ↔ 펼침', () => {
     const sent: string[] = [];
     mount(body => sent.push(body));
     fireEvent.changeText(input(), '첫 줄\n둘째 줄');
-    expect(inputHeight()).toBeUndefined();
+    expect(inputHeight()).toBe(Math.max(collapsed(), Math.min(4, input().props.value.split('\n').length) * line.body * Dimensions.get('window').fontScale + INPUT_CHROME));
     expect(hasTools()).toBe(true);
     fireEvent.press(screen.getByTestId('composer-send'));
     expect(sent).toEqual(['첫 줄\n둘째 줄']);
@@ -154,7 +154,7 @@ describe('접힘 ↔ 펼침', () => {
     fireEvent.press(screen.getByTestId('composer-send'));
     fireEvent.changeText(input(), '둘');
     expect(hasTools()).toBe(true);
-    expect(inputHeight()).toBeUndefined();
+    expect(inputHeight()).toBe(Math.max(collapsed(), Math.min(4, input().props.value.split('\n').length) * line.body * Dimensions.get('window').fontScale + INPUT_CHROME));
   });
 
   it('「@」 도구는 끝에 @ 를 붙인다 — 공백 뒤면 그대로, 낱말 뒤면 한 칸 띄운다', () => {
@@ -225,7 +225,7 @@ describe('포커스 (#4456) — 포커스만으로 펼치고, 포커스를 잃�
     blur();
     settle();
     expect(hasTools()).toBe(true);
-    expect(inputHeight()).toBeUndefined();
+    expect(inputHeight()).toBe(Math.max(collapsed(), Math.min(4, input().props.value.split('\n').length) * line.body * Dimensions.get('window').fontScale + INPUT_CHROME));
     // 포커스 없이 글이 비는 접힘은 **같은 프레임**이다(움직임 없음, 시간을 흘리지 않았다).
     fireEvent.changeText(input(), '');
     expect(hasTools()).toBe(false);
@@ -238,7 +238,7 @@ describe('포커스 (#4456) — 포커스만으로 펼치고, 포커스를 잃�
     focus();
     fireEvent.changeText(input(), '첫 줄\n둘째 줄\n셋째 줄');
     // 전제: 여러 줄이 서 있다 — 콘텐츠가 높이를 정하고 못 박힌 높이가 없다.
-    expect(inputHeight()).toBeUndefined();
+    expect(inputHeight()).toBe(Math.max(collapsed(), Math.min(4, input().props.value.split('\n').length) * line.body * Dimensions.get('window').fontScale + INPUT_CHROME));
     fireEvent.press(sendButton());
     expect(sent).toEqual(['첫 줄\n둘째 줄\n셋째 줄']);
     expect(input().props.value).toBe('');
@@ -256,7 +256,7 @@ describe('포커스 (#4456) — 포커스만으로 펼치고, 포커스를 잃�
     expect(inputHeight()).toBe(collapsed());
     fireEvent.changeText(input(), '둘\n셋');
     expect(hasTools()).toBe(true);
-    expect(inputHeight()).toBeUndefined();
+    expect(inputHeight()).toBe(Math.max(collapsed(), Math.min(4, input().props.value.split('\n').length) * line.body * Dimensions.get('window').fontScale + INPUT_CHROME));
   });
 
   it('포커스 → 블러 → 포커스: 다시 펼쳐진다(한 번 접힌 채 굳지 않는다)', () => {

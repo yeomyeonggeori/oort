@@ -17,6 +17,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -38,7 +39,7 @@ import {
 } from '../../design/tokens';
 import {haptics} from '../../lib/haptics';
 import {useReduceMotionRef} from '../../lib/useReduceMotion';
-import {CONV} from '../conversation/convDesign';
+import {CONV, PHONE_COMPOSER_MAX_ROWS as COMPOSER_MAX_ROWS} from '../conversation/convDesign';
 import {ConversationLayout} from '../conversation/ConversationLayout';
 import {
   buildConversation,
@@ -156,9 +157,6 @@ export function ModeSwitch({
 export type SendOutcome = {ok: true} | {ok: false; text: string};
 
 const TIME = new Intl.DateTimeFormat('ko-KR', {hour: 'numeric', minute: '2-digit'});
-
-/** 입력창이 자라는 상한(줄 수). */
-const COMPOSER_MAX_ROWS = 5;
 
 /** 36pt 원을 44pt 눌림 영역까지 키우는 여백(손으로 적은 숫자가 아니라 도출). */
 const SEND_SLOP = slopTo(CONV.composerCircle);
@@ -465,6 +463,11 @@ function ChatComposer({
   const palette = usePalette();
   const keyboardAppearance = useKeyboardAppearance();
   const [text, setText] = useState(initialText ?? '');
+  const {fontScale} = useWindowDimensions();
+  const [contentHeight, setContentHeight] = useState(0);
+  useEffect(() => {
+    if (text === '') setContentHeight(0);
+  }, [text]);
   const [interrupt, setInterrupt] = useState(false);
   const [sending, setSending] = useState(false);
   const [note, setNote] = useState<string | null>(null);
@@ -521,7 +524,13 @@ function ChatComposer({
     );
   }
 
-  const maxHeight = line.body * COMPOSER_MAX_ROWS + CONV.composerTextInset * 2;
+  const minHeight = Math.max(TOUCH_TARGET, Math.ceil(line.body * fontScale) + CONV.composerTextInset * 2);
+  const maxHeight = line.body * fontScale * COMPOSER_MAX_ROWS + CONV.composerTextInset * 2;
+  const wantedHeight = Math.max(
+    minHeight,
+    Math.min(COMPOSER_MAX_ROWS, text.split('\n').length) * line.body * fontScale + CONV.composerTextInset * 2,
+    text === '' ? 0 : contentHeight,
+  );
   return (
     <View style={styles.dock} testID="work-chat-dock">
       {gate.kind === 'closed' ? (
@@ -561,7 +570,9 @@ function ChatComposer({
       <View style={styles.pill}>
         <TextInput
           lineBreakStrategyIOS="hangul-word"
-          style={[styles.input, {maxHeight}]}
+          style={[styles.input, {minHeight, maxHeight, height: Math.min(maxHeight, wantedHeight)}]}
+          onContentSizeChange={event => setContentHeight(event.nativeEvent.contentSize.height)}
+          scrollEnabled={text !== '' && wantedHeight > maxHeight}
           value={text}
           onChangeText={value => {
             setText(value);
