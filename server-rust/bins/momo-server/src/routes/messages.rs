@@ -115,7 +115,12 @@ const SERVER_OWNED_PROPS_KEYS: [&str; 5] = [
 /// somewhere those can be sourced from. Only the completion transaction and the
 /// sweeps write them ([`momo_agent::SERVER_OWNED_APP_PROPS_KEYS`]).
 pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
-    SERVER_OWNED_PROPS_KEYS.contains(&key) || momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key)
+    SERVER_OWNED_PROPS_KEYS.contains(&key)
+        || momo_agent::SERVER_OWNED_APP_PROPS_KEYS.contains(&key)
+        || matches!(
+            key,
+            "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
+        )
 }
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
@@ -143,7 +148,10 @@ fn props_value(props: Option<&std::collections::BTreeMap<String, String>>) -> Va
     let mut object = Map::new();
     if let Some(props) = props {
         for (key, value) in props {
-            if is_server_owned_props_key(key) || momo_webhook::is_github_owned_prop(key, value) {
+            if is_server_owned_props_key(key)
+                || momo_webhook::is_github_owned_prop(key, value)
+                || (key == "kind" && value == "dm_agent_membership")
+            {
                 continue;
             }
             object.insert(key.clone(), Value::String(value.clone()));

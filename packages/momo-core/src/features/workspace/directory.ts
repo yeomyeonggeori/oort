@@ -115,6 +115,7 @@ export function dmPeer(
   selfMemberId: string
 ): RosterMember | null {
   if (channel.kind !== "dm") return null;
+  if ((channel.memberIds ?? []).length !== 2) return null;
   const other = (channel.memberIds ?? []).find(
     (id) => idKey(id) !== idKey(selfMemberId)
   );
@@ -158,6 +159,7 @@ export function dmAutoReplyAgent(
 export type ChannelLabelKind =
   | "channel"
   | "peer"
+  | "group"
   | "self"
   | "pending"
   | "gone";
@@ -237,6 +239,13 @@ export function channelLabelParts(
       isAgent: false,
       kind: "channel",
     };
+  }
+  if ((channel.memberIds ?? []).length > 2) {
+    const names = (channel.memberIds ?? [])
+      .filter((id) => idKey(id) !== idKey(selfMemberId))
+      .map((id) => memberNameParts(directory, id, missingMemberLabel(directory)))
+      .map((part) => part.handle ? `${part.name} ${part.handle}` : part.name);
+    return { text: `${names.join(", ")} · ${channel.memberIds!.length}명`, handle: null, isAgent: false, kind: "group" };
   }
   const member = dmPeer(channel, directory, selfMemberId);
   if (member) {

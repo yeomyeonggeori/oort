@@ -205,6 +205,12 @@ async fn settle_expired_in_tx(
         }
     }
 
+    // ADR-0217: a lapsed admission never speaks as the unseated agent. The
+    // per-person card's deadline/status already says it expired; no job exists.
+    if approval.payload["origin"] == "dm_agent_admission" {
+        return Ok(true);
+    }
+
     // Tell the channel, through the message spine like everything else — the
     // person who asked deserves to see that the request lapsed rather than to
     // find a conversation that simply stops.

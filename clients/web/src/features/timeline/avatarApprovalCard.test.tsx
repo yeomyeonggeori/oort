@@ -159,7 +159,7 @@ afterEach(() => {
 const TURNS = 1000;
 
 /** 마운트까지만 — 첫 렌더와 effect 를 act 하나로 비운다. 미리보기 요청은 이 안에서 나가고, 응답은 기다리지 않는다. */
-async function mountCardOnly(props: Record<string, unknown>): Promise<HTMLElement> {
+async function mountCardOnly(props: Record<string, unknown>, viewerMemberId?: string): Promise<HTMLElement> {
   const card = agentCardModel(message(props));
   if (card === null) throw new Error("no card for these props");
   mountHost = document.createElement("div");
@@ -168,7 +168,7 @@ async function mountCardOnly(props: Record<string, unknown>): Promise<HTMLElemen
   const tree: ReactElement = createElement(
     SessionProvider,
     { value: sessionValue() },
-    createElement(AgentCard, { card, directory: DIRECTORY })
+    createElement(AgentCard, { card, directory: DIRECTORY, viewerMemberId })
   );
   await act(async () => {
     mountedRoot?.render(tree);
@@ -426,4 +426,13 @@ describe("member.avatar.set 결과 카드 (#4394)", () => {
     await settleCard(reopened);
     expect(byTestId(reopened, "approval-avatar-image")).toHaveLength(1);
   });
+});
+
+
+it("DM admission only offers decision controls to the server-named participant", async () => {
+  const props = avatarProps({ title: "에이전트 들이기", expires_at_ms: Date.now() + 900_000,
+    action: { id: "dm.agent.admit", rows: [], required_role: "dm_participant", target_member_id: ME } });
+  const host = await mountCardOnly(props, AGENT);
+  expect(host.textContent).toContain("이 카드에 표시된 참여자의 허락을 기다려요.");
+  expect(host.querySelector('[data-testid$="-approve"]')).toBeNull();
 });

@@ -1,3 +1,4 @@
+import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
   useEffect,
   useMemo,
@@ -239,6 +240,7 @@ function withoutAgent(target: MentionRoutingTarget, memberId: string | undefined
 export function Composer({
   workspaceId,
   channelId,
+  channel,
   directory,
   channels,
   channelLabel,
@@ -253,6 +255,7 @@ export function Composer({
   workspaceId: string;
   /** Scopes the agent working signal to this channel; sending goes via onSend. */
   channelId: string;
+  channel?: Channel | null;
   directory: Directory;
   /**
    * `#` 자동완성의 후보 (#1930). 이미 받아 둔 채널 스토어를 그대로 받는다 —
@@ -318,7 +321,7 @@ export function Composer({
   const { session, connStatus } = useSession();
   const autocomplete = useComposerAutocomplete({
     value: text,
-    members: directory.members,
+    members: dmAdmissionCandidates(channel, directory.members, session.member.id),
     viewerHumanId: session.member.id,
     channels,
     inputRef,
@@ -427,7 +430,8 @@ export function Composer({
    * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
    * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
-  const dmHint = useDmDeliveryHint({ workspaceId, channelId, directory, dmAgent });
+  const deliveryHint = useDmDeliveryHint({ workspaceId, channelId, directory, dmAgent });
+  const dmHint = dmAdmissionHint(text, channel, directory, session.member.id) ?? deliveryHint;
   const pendingLink = composerFormatHasPendingLink(text);
   const metaMode = composerMetaMode({
     typistCount: typists.length,

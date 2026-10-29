@@ -13854,6 +13854,33 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspace}/channels/{channel}/dm-agents/{agent}:
+    delete:
+      operationId: removeDmAgent
+      summary: Remove a consented agent from the same DM (ADR-0217).
+      description: >
+        Any active human participant of this DM may remove an agent admitted by
+        unanimous consent. Revokes the current admission and membership and cancels
+        live runs in one transaction. Further reads and writes are refused, including
+        writes by the worker. Existing human/agent one-to-one DM opening is unchanged.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: workspace, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: channel, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: agent, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The agent left this DM.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties: {removed: {type: boolean, enum: [true]}}
+        '401': {description: Authentication required.}
+        '403': {description: An active human DM participant is required.}
+        '404': {description: No current consented agent seat visible to this participant.}
+
 components:
   securitySchemes:
     bearerAuth:
@@ -16998,6 +17025,8 @@ components:
     WorkspaceActionId:
       type: string
       description: >
+        `dm.agent.admit` is raised only by the server after a human DM mention,
+        with one approval per other human participant (ADR-0217); agents cannot propose it.
         The closed set of workspace actions an agent may propose (ADR-0186 D1).
         The canonical list is `momo_agent::actions::ACTIONS`; this enum and that
         registry are held equal by one test
@@ -17051,7 +17080,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -17129,9 +17158,11 @@ components:
         workspace owner/admin or a platform operator. `requesting_member` is
         **the person the action changes and nobody else** (`member.avatar.set`:
         the human who called the agent, derived by the server from the run).
+        `dm_participant` is the exact other human named on a DM admission card,
+        without an admin or agent-owner override (ADR-0217).
         The canonical list is `momo_agent::actions::RequiredRole`; held equal by
         `routes::actions::the_required_roles_are_one_list_in_two_places`.
-      enum: ["admin", "agent_editor", "requesting_member", "workspace_operator"]
+      enum: ["admin", "agent_editor", "requesting_member", "dm_participant", "workspace_operator"]
 
     ListWorkspaceActionsResponse:
       type: object

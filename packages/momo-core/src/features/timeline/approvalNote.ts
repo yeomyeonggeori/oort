@@ -170,6 +170,7 @@ export const APPROVAL_NOTE_BLOCKED_TWIN = "composer-offline";
  * 서로 다르고 테스트·게이트는 이유로 지목해야 한다.
  */
 export type ApprovalNoteKind =
+  | "participant"
   | "receipt"
   | "offline"
   | "elsewhere"
@@ -186,6 +187,8 @@ export interface ApprovalCardNote {
 }
 
 export interface ApprovalCardNoteInput {
+  /** ADR-0217: this card belongs to another named participant. */
+  waitingForParticipant?: boolean;
   /**
    * 원장이 방금 답해 준 영수증 문장. 있으면 이 사람은 **이미 결정했다**.
    *
@@ -289,6 +292,9 @@ export function approvalCardNote(
       tone: "guidance",
       text: APPROVAL_ELSEWHERE_COPY,
     };
+  }
+  if (input.waitingForParticipant) {
+    return { kind: "participant", tone: "guidance", text: "이 카드에 표시된 참여자의 허락을 기다려요." };
   }
   if (input.offline) {
     return { kind: "offline", tone: "blocked", text: APPROVAL_OFFLINE_COPY };

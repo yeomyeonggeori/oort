@@ -64,6 +64,9 @@ pub const ACTION_CHANNEL_CREATE: &str = "channel.create";
 /// can see (ADR-0186 증보 V1-b).
 pub const ACTION_CHANNEL_MEMBER_ADD: &str = "channel.member.add";
 
+/// ADR-0217: server-raised, one card per other human in this DM.
+pub const ACTION_DM_AGENT_ADMIT: &str = "dm.agent.admit";
+
 /// `agent.rename` — change an agent's display name: the proposer's own, or that
 /// of another agent of the same owner (ADR-0186 증보 V4 / V4-M).
 pub const ACTION_AGENT_RENAME: &str = "agent.rename";
@@ -170,6 +173,8 @@ pub enum RequiredRole {
     /// workspace admin may not put on somebody's face). Judged against a subject the
     /// resolver derives from the run, never from an argument.
     RequestingMember,
+    /// ADR-0217: this card's named other human DM participant.
+    DmParticipant,
     /// `routes::shared::require_workspace_operator`'s set: a workspace
     /// owner/admin, or a principal carrying the platform operator scope.
     WorkspaceOperator,
@@ -181,6 +186,7 @@ impl RequiredRole {
             RequiredRole::Admin => "admin",
             RequiredRole::AgentEditor => "agent_editor",
             RequiredRole::RequestingMember => "requesting_member",
+            RequiredRole::DmParticipant => "dm_participant",
             RequiredRole::WorkspaceOperator => "workspace_operator",
         }
     }
@@ -192,15 +198,17 @@ impl RequiredRole {
             RequiredRole::Admin | RequiredRole::WorkspaceOperator => "관리자",
             RequiredRole::AgentEditor => "대상 에이전트의 소유자 또는 관리자",
             RequiredRole::RequestingMember => "사진 주인 본인",
+            RequiredRole::DmParticipant => "카드에 표시된 대화 참여자",
         }
     }
 
     /// Every variant, so a test can measure the wire vocabulary against the
     /// OpenAPI enum without a hand-copied list that could omit a new role.
-    pub const ALL: [RequiredRole; 4] = [
+    pub const ALL: [RequiredRole; 5] = [
         RequiredRole::Admin,
         RequiredRole::AgentEditor,
         RequiredRole::RequestingMember,
+        RequiredRole::DmParticipant,
         RequiredRole::WorkspaceOperator,
     ];
 }
@@ -214,6 +222,8 @@ impl RequiredRole {
 /// (「에이전트에게는 문구 2개만」) still holds for the Agent Port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Proposers {
+    /// Only the human DM admission flow; never a model-selected action.
+    ServerOnly,
     /// Any agent that may propose: the Agent Port's `oort_action_propose` and the
     /// team AI (when the id is also on [`TEAM_AI_ACTION_IDS`]).
     Any,
@@ -235,6 +245,7 @@ impl WorkspaceAction {
     /// May a proposal through `door` name this action?
     pub fn proposable_through(&self, door: ProposalDoor) -> bool {
         match (self.proposers, door) {
+            (Proposers::ServerOnly, _) => false,
             (Proposers::Any, _) => true,
             (Proposers::TeamAiOnly, ProposalDoor::TeamAi) => true,
             (Proposers::TeamAiOnly, ProposalDoor::AgentPort) => false,
@@ -430,6 +441,7 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
                     // A picture cannot be judged from a banner — and this card has no
                     // other kind of proposal, so it is always opened (ADR-0186 증보 v4).
                     || id == ACTION_MEMBER_AVATAR_SET
+                    || id == ACTION_DM_AGENT_ADMIT
                     // A message cannot be judged from a banner either: the card shows the
                     // first 120 characters of something that can be thousands (ADR-0186
                     // 증보 v5 U-e, review M4), so the approver reads it in the app.
@@ -1197,7 +1209,7 @@ fn pin_time_text(at: chrono::DateTime<chrono::Utc>) -> String {
 pub fn message_pin_rows(unpin: bool, message: &PinCardMessage) -> Vec<Value> {
     let mut rows = Vec::new();
     if message.channel_kind == "dm" {
-        rows.push(action_row("채널", "1:1 대화"));
+        rows.push(action_row("채널", "이 대화"));
     } else {
         rows.push(action_row("채널", format!("#{}", message.channel_name)));
         rows.push(action_row(
@@ -1275,7 +1287,7 @@ pub fn message_pin_result_body(unpin: bool, changed: bool, message_id: Uuid) -> 
 /// The result rows of a pin action: where, and how many pins the channel holds after.
 pub fn message_pin_result_rows(message: &PinCardMessage, pinned_after: i64) -> Vec<Value> {
     let mut rows = vec![if message.channel_kind == "dm" {
-        action_row("채널", "1:1 대화")
+        action_row("채널", "이 대화")
     } else {
         action_row("채널", format!("#{}", message.channel_name))
     }];
@@ -1474,6 +1486,18 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: false,
         effect: PLUGIN_INSTALL_EFFECT,
         args_schema: plugin_install_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_DM_AGENT_ADMIT,
+        title: "에이전트 들이기",
+        summary: "대화의 다른 사람이 모두 허락하면 에이전트가 들어와 이후 대화를 봐요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::DmParticipant,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::ServerOnly,
+        initiative: false,
+        effect: "대화의 다른 사람이 모두 허락하면 에이전트를 이 대화에 들여요",
+        args_schema: || json!({"type": "object", "additionalProperties": false, "properties": {}}),
     },
 ];
 
@@ -2463,7 +2487,8 @@ mod tests {
                 "workspace.unfurl.update",
                 "workspace.memory.update",
                 "workspace.work_tier.update",
-                "plugin.install"
+                "plugin.install",
+                "dm.agent.admit"
             ]
         );
         assert_eq!(
@@ -2546,7 +2571,19 @@ mod tests {
             );
             assert!(action_by_id(id).is_some(), "{id} is still in the catalog");
         }
-        assert_eq!(proposable_action_ids(ProposalDoor::TeamAi), action_ids());
+        assert_eq!(
+            proposable_action_ids(ProposalDoor::TeamAi),
+            action_ids()
+                .into_iter()
+                .filter(|id| *id != ACTION_DM_AGENT_ADMIT)
+                .collect::<Vec<_>>()
+        );
+        for door in [ProposalDoor::AgentPort, ProposalDoor::TeamAi] {
+            assert!(
+                proposable_action_by_id(ACTION_DM_AGENT_ADMIT, door).is_none(),
+                "only a human DM call may raise consent"
+            );
+        }
     }
 
     /// H6-1: the memory card can only turn memory OFF — `enabled` is `const:false`
@@ -3127,6 +3164,7 @@ mod tests {
                 "admin",
                 "agent_editor",
                 "requesting_member",
+                "dm_participant",
                 "workspace_operator"
             ]
         );
@@ -3373,6 +3411,7 @@ mod tests {
             // `a_pin_card_always_opens_in_the_app`).
             if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id)
                 && action.id != ACTION_MEMBER_AVATAR_SET
+                && action.id != ACTION_DM_AGENT_ADMIT
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
             {
@@ -3446,8 +3485,9 @@ mod tests {
     #[test]
     fn every_registered_action_has_a_recorded_lock_screen_decision() {
         let recorded: &[(&str, bool)] = &[
-            (ACTION_INVITE_CREATE, true), // the invite link is shown once
-            (ACTION_AGENT_INVITE, true),  // the pairing code is shown once
+            (ACTION_DM_AGENT_ADMIT, true), // privacy consent is read in the conversation
+            (ACTION_INVITE_CREATE, true),  // the invite link is shown once
+            (ACTION_AGENT_INVITE, true),   // the pairing code is shown once
             (ACTION_CHANNEL_CREATE, false),
             (ACTION_CHANNEL_MEMBER_ADD, false),
             (ACTION_AGENT_RENAME, false),

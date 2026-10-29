@@ -871,6 +871,7 @@ async fn requester_could_approve_in_tx(
         }
         // Only the person the action changes (the team AI cannot propose it today — it is
         // not on `TEAM_AI_ACTION_IDS` — but the match stays exhaustive and fail-closed).
+        RequiredRole::DmParticipant => false,
         RequiredRole::RequestingMember => {
             matches!(subject, GateSubject::Member(target) if target == requester)
         }

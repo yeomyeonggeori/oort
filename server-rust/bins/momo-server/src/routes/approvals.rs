@@ -600,6 +600,7 @@ async fn decide(
         let outcome = agent_tenant_tx(&state.pool, workspace_id, {
             let reason = reason.clone();
             let public_origin = public_origin.clone();
+            let admission_state = state.clone();
             move |conn| {
                 Box::pin(async move {
                     decide_in_tx(
@@ -620,6 +621,7 @@ async fn decide(
                             operator_scope,
                             deliver_secret_to_agent,
                             context_max_messages,
+                            admission_state: Some(&admission_state),
                         },
                     )
                     .await
@@ -719,6 +721,7 @@ struct DecisionInput<'a> {
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
+    admission_state: Option<&'a AppState>,
 }
 
 /// Name the door a decision came through in one of its OWN audit rows
@@ -775,6 +778,9 @@ fn deliver_flag_refused(
 /// raised unasked (it stands in its owner's one-to-one direct message and says what the agent wants
 /// to do there). One definition for both decision routes' two places that ask.
 fn card_is_hidden_from_outsiders(approval: &LockedApproval) -> bool {
+    if super::dm_agents::is_admission(&approval.payload) {
+        return true;
+    }
     momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
         || momo_agent::initiative::is_unasked_card(approval)
 }
@@ -972,6 +978,83 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             status: StatusCode::CONFLICT,
             secret_once: None,
         }));
+    }
+
+    if super::dm_agents::is_admission(&approval.payload) {
+        let Some(state) = input.admission_state else {
+            return Err(protocol_error("missing DM admission settings"));
+        };
+        let status = match super::dm_agents::vote_in_tx(
+            conn,
+            &approval,
+            input.member_id,
+            input.approve,
+            state,
+        )
+        .await?
+        {
+            Ok(status) => status,
+            Err(code) => {
+                return Ok(Ok(refusal(
+                    approval.id,
+                    input.member_id,
+                    code,
+                    "only the named DM participant may decide an unchanged request",
+                    StatusCode::FORBIDDEN,
+                    now,
+                )))
+            }
+        };
+        let decided_by = (status != "expired").then_some(input.member_id);
+        let receipt = decision_receipt(approval.id, status, decided_by, now, input.reason);
+        if let Some(message_id) = approval.request_message_id {
+            patch_and_prune_message_props_in_tx(
+                conn,
+                input.workspace_id,
+                message_id,
+                &decided_props_patch(status, decided_by, now, input.reason),
+                &[LAST_ATTEMPT_PROPS_KEY],
+            )
+            .await?;
+            announce_card_edit(conn, input.workspace_id, message_id).await?;
+        }
+        record_decision_in_tx(
+            conn,
+            input.workspace_id,
+            approval.id,
+            input.client_decision_id,
+            input.member_id,
+            input.approve,
+            status,
+            input.reason,
+            &receipt,
+        )
+        .await?;
+        let event = decision_event_payload(&approval, status, decided_by, now, input.reason);
+        emit_outbox(
+            &mut *conn,
+            input.workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &decision_broadcast_payload(
+                &cent_channel(input.workspace_id, approval.channel_id),
+                &approval,
+                status,
+                &event,
+                now,
+            ),
+            Some(approval.channel_id),
+        )
+        .await?;
+        write_audit(
+            conn,
+            &AuditEntry::new(input.workspace_id, format!("dm.agent.consent.{status}"))
+                .by(input.member_id)
+                .target("approval", approval.id)
+                .via_token(input.via_token_id),
+        )
+        .await?;
+        return Ok(Ok(Decision::ok(receipt)));
     }
 
     // The `work_control` this approval owns, if any (Swift :196). A malformed
@@ -1548,7 +1631,7 @@ async fn role_required_refusal(
             Some(RequiredRole::AgentEditor) => {
                 "this workspace action must be approved by the target agent's owner or a workspace admin"
             }
-            Some(RequiredRole::RequestingMember) => {
+            Some(RequiredRole::RequestingMember | RequiredRole::DmParticipant) => {
                 "this workspace action must be approved by the member it changes"
             }
             Some(RequiredRole::WorkspaceOperator) => {
@@ -4573,6 +4656,7 @@ mod tests {
             operator_scope: false,
             deliver_secret_to_agent: false,
             context_max_messages: 30,
+            admission_state: None,
         }
     }
 
