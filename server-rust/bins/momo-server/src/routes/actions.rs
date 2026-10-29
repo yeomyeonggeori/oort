@@ -783,7 +783,7 @@ mod tests {
     }
 
     /// The scope arrays of the **newest** migration that rewrites the scope CHECK constraints (087
-    /// wrote them, 153 widened them for `workspace:initiate`; the next scope will be the next one),
+    /// wrote them, 154 widened them for `workspace:initiate`; the next scope will be the next one),
     /// as `(constraint name, values)`. Found by content rather than by number, so the migration can
     /// be renumbered without this test quietly measuring an older file.
     ///
