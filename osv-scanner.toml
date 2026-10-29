@@ -50,6 +50,16 @@ id = "GHSA-m665-v7pm-7grj"
 ignoreUntil = 2026-12-28
 reason = "zip 4.6.1 (critical: ZipArchive/ZipStreamReader header differential) only via tauri-plugin-updater 2.10.1, which declares zip under cfg(target_os = \"windows\"); oort ships the desktop app for macOS only, so zip is not compiled (cargo tree -i zip for the host target prints nothing) and the updater verifies the update signature before unpacking. Fix = tauri-plugin-updater 2.14.x (zip ^9, patched 9.0.5); follow-up issue. Short expiry because severity is critical."
 
+[[IgnoredVulns]]
+id = "GHSA-q7v9-x93c-xqv3"
+ignoreUntil = 2026-12-28
+reason = "zip 4.6.1 (high: ZipArchive::extract_internal symlink branch reserves the declared uncompressed size up front, so a crafted archive aborts the extracting process) only via tauri-plugin-updater 2.10.1 under cfg(target_os = \"windows\"); oort ships the desktop app for macOS only, so zip is not compiled (cargo tree -i zip for the host target prints nothing) and the updater verifies the update signature before unpacking. Fix = tauri-plugin-updater 2.14.x (zip ^9, patched 9.0.0) or turning the updater's zip feature off (#4748); same expiry as GHSA-m665-v7pm-7grj."
+
+[[IgnoredVulns]]
+id = "GHSA-8hxf-qr8p-62x4"
+ignoreUntil = 2026-12-28
+reason = "zip 4.6.1 (moderate: AES reader skips the HMAC check when the archive ends before the declared compressed size, so by_index_decrypt() can return truncated unauthenticated plaintext) only via tauri-plugin-updater 2.10.1 under cfg(target_os = \"windows\"); not compiled for the macOS-only desktop app, and oort never opens password-protected archives. Fix = tauri-plugin-updater 2.14.x (zip ^9, patched 9.0.0) or #4748; same expiry as GHSA-m665-v7pm-7grj."
+
 # ---- clients/web (npm, runtime) ----------------------------------------------
 
 [[IgnoredVulns]]
