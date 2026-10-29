@@ -1422,6 +1422,12 @@ describe("이미지 라이트박스 칩 (#4751)", () => {
       }
     });
 
+    it(`${label}: 칩이 기대는 유리(--glass)는 70% 이상 불투명하다(글자 대비가 이 가정 위에 선다)`, () => {
+      // 위 합성은 유리 알파 .72~.74를 전제한다. 알파를 낮추면 바닥이 더 비쳐 칩 글자가 사이드바 띠·사진 어둠에 먹히므로, 값이 내려가는 날
+      // 이 단정이 먼저 빨개진다(합성 단정은 순백·순흑 두 끝만 보므로 알파 하락을 늦게 잡는다).
+      expect(GLASS[scheme].alpha).toBeGreaterThanOrEqual(0.7);
+    });
+
     it(`${label}: 내려받기 실패 문구(--danger)는 불투명한 --surface-raised 위에서 4.5:1 이상이다(배너는 유리가 아니라 이 면에 선다)`, () => {
       expect(contrast(pick("danger", scheme), pick("surface-raised", scheme))).toBeGreaterThanOrEqual(4.5);
     });
