@@ -1374,3 +1374,74 @@ describe("avatar tones (#4148)", () => {
     }
   });
 });
+
+// 이미지 라이트박스의 칩 (#4751). 칩은 `glass` 위에 서고, 그 유리는 블러된 앱 위의 무대(공용 스크림 + `--lightbox-stage` 한 겹)
+// 위에 선다. 유리는 반투명이라 위 표로 잴 수 없으므로(tokens.css 「유리·스크림」) 여기서 최악 합성을 직접 만들어 잰다:
+// 앱 바닥 → 공용 스크림 → 무대 한 겹 → 유리 → 글자. 블러는 평균색을 옮기지 않으므로 합성만 재고, `glass`의 saturate(1.4)는 재지 않는다.
+describe("이미지 라이트박스 칩 (#4751)", () => {
+  type Rgb = [number, number, number];
+  const alphaPair = (name: string): [ScrimLayer, ScrimLayer] => {
+    const rgba = String.raw`rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)(?:\s*[,/]\s*([\d.]+))?\s*\)`;
+    const m = css.match(new RegExp(String.raw`--${name}:\s*light-dark\(\s*${rgba}\s*,\s*${rgba}\s*\)`));
+    if (!m) throw new Error(`--${name} missing from tokens.css, or not light-dark(rgba(...), rgba(...))`);
+    const layer = (o: number): ScrimLayer => ({
+      rgb: [Number(m[o]), Number(m[o + 1]), Number(m[o + 2])],
+      alpha: m[o + 3] === undefined ? 1 : Number(m[o + 3]),
+    });
+    return [layer(1), layer(5)];
+  };
+  const GLASS = alphaPair("glass");
+  const STAGE = alphaPair("lightbox-stage");
+  const STAGE_SOLID = alphaPair("lightbox-stage-solid");
+  const over = (layer: ScrimLayer, under: Rgb): Rgb =>
+    under.map((c, i) => layer.rgb[i] * layer.alpha + c * (1 - layer.alpha)) as Rgb;
+  const hexRgb = (hex: string): Rgb => channels(hex).map((c) => c * 255) as Rgb;
+  const contrastRGB = (a: Rgb, b: Rgb): number => {
+    const [hi, lo] = [luminanceRGB(a), luminanceRGB(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  };
+  /** 앱 바닥 → 공용 스크림 → 무대 한 겹 → 유리: 칩 글자가 실제로 올라서는 색. */
+  const chipGround = (scheme: 0 | 1, backdrop: Rgb): Rgb =>
+    over(GLASS[scheme], over(STAGE[scheme], over(SCRIM[scheme], backdrop)));
+
+  for (const [scheme, label] of [[0, "라이트"], [1, "다크"]] as const) {
+    it(`${label}: 칩의 주 글자(--ink)가 어느 앱 바닥 위에서도 7:1 이상이다`, () => {
+      for (const bg of SURFACES) {
+        const ground = chipGround(scheme, hexRgb(pick(bg, scheme)));
+        expect(contrastRGB(hexRgb(pick("ink", scheme)), ground), `ink on glass over ${bg}`).toBeGreaterThanOrEqual(7);
+      }
+    });
+
+    it(`${label}: 칩의 보조 글자(--ink-muted, 날짜·시각)가 앱 바닥 위에서 4.5:1 이상이다`, () => {
+      for (const bg of SURFACES) {
+        const ground = chipGround(scheme, hexRgb(pick(bg, scheme)));
+        expect(contrastRGB(hexRgb(pick("ink-muted", scheme)), ground), `ink-muted on glass over ${bg}`).toBeGreaterThanOrEqual(4.5);
+      }
+    });
+
+    it(`${label}: 앱 내용이 순백·순흑이어도 칩 아이콘(--ink)과 보조 글자(--ink-muted)는 3:1 이상이다`, () => {
+      for (const backdrop of [[255, 255, 255], [0, 0, 0]] as Rgb[]) {
+        const ground = chipGround(scheme, backdrop);
+        expect(contrastRGB(hexRgb(pick("ink", scheme)), ground), `ink, backdrop ${backdrop}`).toBeGreaterThanOrEqual(3);
+        expect(contrastRGB(hexRgb(pick("ink-muted", scheme)), ground), `ink-muted, backdrop ${backdrop}`).toBeGreaterThanOrEqual(3);
+      }
+    });
+
+    it(`${label}: 유리를 끈 무대는 불투명하고 어둡고, 칩의 가는 테두리(--line-strong)가 그 위에서 3:1 이상이다`, () => {
+      const solid = STAGE_SOLID[scheme];
+      expect(solid.alpha, "opaque").toBe(1);
+      expect(luminanceRGB(solid.rgb), "dark stage").toBeLessThanOrEqual(0.02);
+      expect(contrastRGB(hexRgb(pick("line-strong", scheme)), solid.rgb), "line-strong on the solid stage").toBeGreaterThanOrEqual(3);
+    });
+
+    it(`${label}: 비치는 무대 한 겹은 반투명이고 흰색이 아니다(공용 스크림 위에 어둠만 더한다)`, () => {
+      const layer = STAGE[scheme];
+      expect(layer.alpha, "translucent").toBeLessThan(1);
+      expect(layer.rgb.join(","), "tint").not.toBe("255,255,255");
+      for (const bg of SURFACES) {
+        const under = over(SCRIM[scheme], hexRgb(pick(bg, scheme)));
+        expect(luminanceRGB(over(layer, under)), `stage over scrim over ${bg}`).toBeLessThanOrEqual(luminanceRGB(under));
+      }
+    });
+  }
+});
