@@ -37,6 +37,8 @@ import {
   type MeasuredSize,
 } from './content';
 import { AttachmentViewer } from './AttachmentViewer';
+import {useHeroSources} from './heroSource';
+import type {StageRect} from '@momo/core/lib/stageTransition';
 import { useShareAttachment, type DownloadState } from './useShareAttachment';
 
 // =============================================================================
@@ -101,6 +103,7 @@ function ImageTile({
   layout,
   gesture,
   onOpen,
+  registerSource,
 }: {
   workspaceId: string;
   channelId: string;
@@ -108,6 +111,7 @@ function ImageTile({
   layout: 'single' | 'grid-2' | 'grid-3';
   gesture?: AttachmentGesture;
   onOpen: () => void;
+  registerSource: (id: string, node: View | null) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const label = attachmentDisplayName(attachment);
@@ -125,7 +129,7 @@ function ImageTile({
   );
   const uri = preview.status === 'ready' ? preview.uri : null;
   React.useEffect(() => {
-    if (uri === null || layout !== 'single') return undefined;
+    if (uri === null) return undefined;
     const known = measuredAttachmentSize(attachment.id);
     if (known !== null) {
       // 잰 값이 있으면 다시 재지 않는다 — 같은 그림의 크기는 바뀌지 않는다. 마운트 뒤에 다른 타일이 먼저 쟀을 수도 있어서
@@ -182,6 +186,8 @@ function ImageTile({
       testID="attachment-item"
     >
       <View
+        ref={node => registerSource(attachment.id, node)}
+        collapsable={false}
         style={[styles.previewFrame, frameStyle]}
         testID="attachment-preview"
         accessibilityLabel={
@@ -196,6 +202,10 @@ function ImageTile({
         {preview.status === 'ready' ? (
           <Image
             source={{ uri: preview.uri }}
+            onLoad={event => {
+              const {width, height} = event.nativeEvent.source;
+              setNatural(rememberAttachmentSize(attachment.id, width, height));
+            }}
             resizeMode={layout === 'single' ? 'contain' : 'cover'}
             style={styles.previewImage}
             testID="attachment-preview-image"
@@ -348,7 +358,8 @@ export function AttachmentList({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const { workspaceId } = useSession();
-  const [viewing, setViewing] = useState<number | null>(null);
+  const [viewing, setViewing] = useState<{index: number; origin: StageRect | null} | null>(null);
+  const sources = useHeroSources();
   if (attachments.length === 0) return null;
   const images = attachments.filter(showsInlinePreview);
   const files = attachments.filter(
@@ -369,7 +380,10 @@ export function AttachmentList({
               attachment={attachment}
               layout={layout}
               gesture={gesture}
-              onOpen={() => setViewing(position)}
+              registerSource={sources.register}
+              onOpen={() => {
+                void sources.measure(attachment.id).then(origin => setViewing({index: position, origin}));
+              }}
             />
           ))}
         </View>
@@ -388,7 +402,9 @@ export function AttachmentList({
           workspaceId={workspaceId}
           channelId={channelId}
           images={images}
-          startIndex={viewing}
+          startIndex={viewing.index}
+          origin={viewing.origin}
+          measureSource={sources.measure}
           senderName={senderName}
           sentAtMs={sentAtMs}
           onClose={() => setViewing(null)}

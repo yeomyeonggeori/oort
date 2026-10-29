@@ -40,6 +40,7 @@ import {
 } from '../src/design/glass';
 import { AttachmentList } from '../src/features/attachments/AttachmentList';
 import { AttachmentViewer } from '../src/features/attachments/AttachmentViewer';
+import {StageHero} from '../src/features/attachments/StageHero';
 import { resetAttachmentContentForTest } from '../src/features/attachments/content';
 import { DISMISS_DISTANCE_PT } from '../src/features/attachments/viewerDismiss';
 import {
@@ -409,6 +410,7 @@ async function mount(
       viewer
     ),
   );
+  fireEvent(screen.getByTestId('attachment-viewer-modal'), 'show');
   // 쪽마다 미리보기를 받는다 — 도착을 기다려 둬야 act 밖의 갱신이 시험 밖으로 새지 않는다. 썸네일(여러 장일 때)도 같은 미리보기를 받고,
   // 「동작 줄이기」·보조기술의 첫 답도 이 틱에 도착한다.
   await screen.findAllByTestId('attachment-viewer-image');
@@ -562,13 +564,13 @@ describe('VoiceOver: 뒤로에 닿고 「뒤로」로 읽힌다', () => {
     act(() => {
       (root().props.onAccessibilityEscape as () => void)();
     });
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('뒤로 탭은 그대로 닫는다', async () => {
     const { onClose } = await mount();
     fireEvent.press(screen.getByTestId('attachment-viewer-back'));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -590,7 +592,7 @@ describe('② 아래로 쓸어 닫기', () => {
     touch.down(200, 300);
     dragSlowly(touch, 200, 300, DISMISS_DISTANCE_PT + 1);
     touch.up();
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('짧아도 빠르게(0.75px/ms = 750pt/s) 튕기면 닫는다', async () => {
@@ -601,7 +603,7 @@ describe('② 아래로 쓸어 닫기', () => {
     flick.move(200, 324, 16); // 12pt / 16ms = 0.75px/ms
     flick.up();
     expect(progress.current).toBe(24); // 100pt 에는 한참 모자라다
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('같은 거리를 0.65px/ms(650pt/s)로 튕기면 돌아간다 — 문턱은 700 이다', async () => {
@@ -660,7 +662,7 @@ describe('② 아래로 쓸어 닫기', () => {
     afterTapWindow(() => again.up());
     expect(hiddenBar().props.pointerEvents).toBe('box-none');
     fireEvent.press(screen.getByTestId('attachment-viewer-back'));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('가로로 넘기는 손가락은 가져가지 않고, 응답도 양보한다 — 페이지 넘김의 길이다', async () => {
@@ -897,7 +899,7 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
     dragSlowly(touch, 200, 70, DISMISS_DISTANCE_PT + 40);
     expect(progress.current).toBe(DISMISS_DISTANCE_PT + 40);
     touch.up();
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('뒤로 단추는 쪽·뿌리보다 깊어서 자기 탭을 그대로 쥔다 — 응답을 뷰어가 가로채지 않는다', async () => {
@@ -909,7 +911,7 @@ describe('③ 응답을 쥐는 자리 — 가로 넘김을 죽이지 않는다 (
     expect(first === undefined).toBe(false);
     expect(first === root()).toBe(false);
     fireEvent.press(close);
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 });
 
@@ -1034,12 +1036,12 @@ describe('동작 줄이기', () => {
     expect(progress.current).toBe(0);
   });
 
-  it('Modal 은 평소 투명으로 서고 시스템 페이드로 나타난다·사라진다', async () => {
+  it('Modal 은 투명으로 서고 시스템 전환은 없다(hero가 전환한다)', async () => {
     await mount();
     const modal = screen.getByTestId('attachment-viewer-modal');
     // 투명이어야 끄는 동안 배경이 옅어져 뒤의 대화가 비친다.
     expect(modal.props.transparent).toBe(true);
-    expect(modal.props.animationType).toBe('fade');
+    expect(modal.props.animationType).toBe('none');
   });
 
   it('켜져 있으면 Modal 이 페이드 없이 바로 선다·내려간다', async () => {
@@ -1087,29 +1089,29 @@ describe('동작 줄이기', () => {
       }
     });
 
-    it('앱이 꺼져 있음을 이미 알면, 첫 렌더부터 시스템 페이드로 선다', async () => {
+    it('앱이 꺼져 있음을 이미 알면, 첫 렌더부터 시스템 전환 없이 선다', async () => {
       const release = await appKnows(false);
       try {
-        expect(open()).toBe('fade');
+        expect(open()).toBe('none');
         await screen.findAllByTestId('attachment-viewer-image');
       } finally {
         release();
       }
     });
 
-    it('앱이 아직 모르면 모두의 첫 모습은 평소대로 페이드다 — 켠 사람은 답이 오면 그때부터 페이드가 없다', async () => {
+    it('앱이 아직 몰라도 Modal 자체는 전환하지 않는다', async () => {
       a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(true));
-      expect(open()).toBe('fade'); // 아직 모른다: 켠 사람의 첫 모습을 위해 모두의 모습을 바꾸지 않는다
+      expect(open()).toBe('none'); // 아직 모른다: 켠 사람의 첫 모습을 위해 모두의 모습을 바꾸지 않는다
       await act(async () => {}); // 설정의 답이 도착한다
       expect(opening()).toBe('none');
       await screen.findAllByTestId('attachment-viewer-image');
     });
 
-    it('꺼진 기기에서 모르는 동안의 첫 모습도 페이드다 — 모르는 동안을 「켜짐」으로 보면 모두의 첫 모습이 바뀐다', async () => {
+    it('꺼진 기기에서 모르는 동안에도 Modal 자체는 전환하지 않는다', async () => {
       a11y.isReduceMotionEnabled.mockImplementation(() => Promise.resolve(false));
-      expect(open()).toBe('fade');
+      expect(open()).toBe('none');
       await screen.findAllByTestId('attachment-viewer-image');
-      expect(opening()).toBe('fade');
+      expect(opening()).toBe('none');
     });
 
     it('앱이 알고 있는 동안 설정이 바뀌면, 이후에 열리는 뷰어가 새 값으로 선다', async () => {
@@ -1245,7 +1247,7 @@ describe('⑤ 조작 덩어리는 사진 위에 뜬다 — 빈 곳을 통과시�
     // 돌아온 조작은 다시 읽히고 눌린다.
     expect(screen.getByRole('button', { name: '저장' })).toBeTruthy();
     fireEvent.press(screen.getByTestId('attachment-viewer-back'));
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('탭은 닫지도 끌지도 않는다', async () => {
@@ -1961,7 +1963,7 @@ describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
     drag.down(200, 300);
     dragSlowly(drag, 200, 300, DISMISS_DISTANCE_PT + 80);
     drag.up();
-    expect(onClose).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
   it('핀치가 끝나는 순간의 배율(끝 이벤트)로도 잠금이 풀린다 — 원래 크기로 돌아온 손가락이 막힌 채 남지 않는다', async () => {
@@ -2015,5 +2017,74 @@ describe('⑫ 확대 — 두 손가락 확대와 두 번 탭 (#4769)', () => {
     expect(photo().props.accessibilityValue).toEqual({ text: ZOOMED_A11Y_VALUE });
     zoomBy(1);
     expect(photo().props.accessibilityValue).toBeUndefined();
+  });
+});
+
+// #4775: focused worker evidence; native animation callbacks are driven explicitly (no simulator).
+describe('hero4775', () => {
+  const source = {x: 30, y: 120, width: 136, height: 136};
+  function springs() {
+    const callbacks: Array<(result: {finished: boolean}) => void> = [];
+    jest.spyOn(Animated, 'spring').mockImplementation((_value, _config) => ({
+      start: callback => { if (callback) callbacks.push(callback); },
+      stop: jest.fn(), reset: jest.fn(),
+    }));
+    return () => act(() => { callbacks.splice(0).forEach(callback => callback({finished: true})); });
+  }
+  it('opens from the measured source, exposes controls on arrival, and exits to the CURRENT page source', async () => {
+    const arrive = springs();
+    const measureSource = jest.fn().mockResolvedValue({...source, x: 180});
+    const {onClose} = await mount({origin: source, measureSource});
+    expect(screen.getByTestId('attachment-viewer-bar', {includeHiddenElements: true}).props.accessibilityElementsHidden).toBe(true);
+    expect(screen.UNSAFE_getByType(StageHero).props.from).toEqual(source);
+    arrive();
+    expect(screen.getByTestId('attachment-viewer-bar', {includeHiddenElements: true}).props.accessibilityElementsHidden).toBe(false);
+    fireEvent.press(screen.getAllByTestId('attachment-viewer-thumb')[1]);
+    const fingerOnCurrentPhoto = finger(photo(1));
+    fingerOnCurrentPhoto.down(200, 300);
+    dragSlowly(fingerOnCurrentPhoto, 200, 300, 140);
+    fingerOnCurrentPhoto.up();
+    await act(async () => {});
+    expect(measureSource).toHaveBeenCalledWith('b');
+    expect(screen.UNSAFE_getByType(StageHero).props.to).toEqual({...source, x: 180});
+    expect(screen.UNSAFE_getByType(StageHero).props.from.y).toBeGreaterThan(0);
+    expect(onClose).not.toHaveBeenCalled();
+    arrive();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it('waits for native fit before measuring and starting the close hero', async () => {
+    const arrive = springs();
+    const measureSource = jest.fn().mockResolvedValue(null);
+    const {onClose} = await mount({origin: source, measureSource});
+    arrive();
+    const zoom = screen.getAllByTestId('attachment-viewer-zoom')[0] as Instance;
+    fireEvent.scroll(zoom, {nativeEvent: {zoomScale: 2}});
+    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
+    expect(ScrollView.prototype.scrollResponderZoomTo).toHaveBeenLastCalledWith(expect.objectContaining({animated: true}), true);
+    expect(measureSource).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.scroll(zoom, {nativeEvent: {zoomScale: 1}});
+    await act(async () => {});
+    expect(measureSource).toHaveBeenCalledWith('a');
+    const hero = screen.getByTestId('attachment-viewer-hero', {includeHiddenElements: true});
+    expect(hero).toBeTruthy();
+    expect(screen.UNSAFE_getByType(StageHero).props.to.y).toBe(Dimensions.get('window').height);
+    arrive();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+  it('300ms single tap and reduced motion: no hero, no close animation', async () => {
+    a11y.isReduceMotionEnabled.mockResolvedValue(true);
+    const release = retainReduceMotion();
+    try {
+      await act(async () => {});
+      const {onClose} = await mount({origin: source, measureSource: jest.fn()});
+      expect(screen.queryByTestId('attachment-viewer-hero', {includeHiddenElements: true})).toBeNull();
+      expect(screen.getByTestId('attachment-viewer-modal').props.animationType).toBe('none');
+      expect(DOUBLE_TAP_MS).toBe(300);
+      afterTapWindow(() => tap(photo()));
+      expect(screen.getByTestId('attachment-viewer-bar', {includeHiddenElements: true}).props.accessibilityElementsHidden).toBe(true);
+      fireEvent(root(), 'accessibilityEscape');
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally { release(); }
   });
 });

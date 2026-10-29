@@ -441,26 +441,23 @@ describe("image lightbox zoom", () => {
     expect(chip()?.textContent).toBe("200%");
   });
 
-  it("turns off outside-click closing and the arrow keys while zoomed, and Escape steps back to fit before it closes", () => {
+  it("turns off outside-click closing and arrow keys while zoomed, and Escape fits before closing", async () => {
     open(3);
-    expect(position()).toBe(lightboxPositionLabel(0, 3));
     doubleClick();
     expect(isZoomed()).toBe(true);
-
-    press({ key: "ArrowRight" });
-    expect(position(), "arrow keys do not turn the page while zoomed").toBe(lightboxPositionLabel(0, 3));
+    press({key: "ArrowRight"});
+    expect(position()).toBe(lightboxPositionLabel(0, 3));
     act(() => lb('[data-testid="image-lightbox-stage"]')?.click());
-    expect(lb('[data-testid="image-lightbox"]'), "an empty-stage click does not close while zoomed").not.toBeNull();
-
-    press({ key: "Escape" });
-    expect(lb('[data-testid="image-lightbox"]'), "Escape only steps back to fit").not.toBeNull();
+    expect(lb('[data-testid="image-lightbox"]')).not.toBeNull();
+    press({key: "Escape"});
     expect(isZoomed()).toBe(false);
-    expect(chip()?.textContent).toBe("맞춤");
-
-    press({ key: "ArrowRight" });
-    expect(position(), "back at fit, the arrow keys turn the page again").toBe(lightboxPositionLabel(1, 3));
-    press({ key: "Escape" });
-    expect(lb('[data-testid="image-lightbox"]'), "Escape at fit closes").toBeNull();
+    expect(lb('[data-testid="image-lightbox"]')?.dataset.stagePhase).toBe('fitting');
+    await act(async () => {
+      const end = new Event('transitionend', {bubbles: true});
+      Object.defineProperty(end, 'propertyName', {value: 'transform'});
+      photo()?.dispatchEvent(end);
+    });
+    expect(lb('[data-testid="image-lightbox"]')).toBeNull();
   });
 
   it("closes on an empty-stage click again once back at fit", () => {

@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 import { cn } from "@/design/lib/cn";
-import { STAGE_MOTION } from "@/design/motion";
+import {useStageHero, type StageSource} from "./useStageHero";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -46,8 +46,7 @@ import {
 // 면이 된다(`tokens.css`의 `--lightbox-stage`). 글자는 칩 위에만 서므로 대비는 칩의 면과 짝이다.
 //
 // 확대 (#4770): 맞춤~4배. 트랙패드 오므리기·벌리기와 ⌘+스크롤은 커서가 중심이고, 두 번 클릭은 맞춤 ↔ 실제 크기, ⌘+ ⌘- ⌘0은
-// 키보드 길이다. 확대 중에는 끌어서 움직이고, 빈 무대 클릭 닫기와 ←/→ 넘기기는 꺼진다. Esc는 확대 중이면 맞춤으로, 맞춤이면
-// 닫는다. 다른 장으로 넘기면 맞춤으로 돌아온다. 입력·계산은 `useImageLightboxZoom.ts`와 `imageLightboxModel.ts`가 한다.
+// 키보드 길이다. 확대 중에는 끌어서 움직이고, 빈 무대 클릭 닫기와 ←/→ 넘기기는 꺼진다. Esc·닫기는 확대 중이면 맞춤을 마친 뒤 hero로 닫는다. 다른 장으로 넘기면 맞춤으로 돌아온다. 입력·계산은 `useImageLightboxZoom.ts`와 `imageLightboxModel.ts`가 한다.
 // =============================================================================
 
 /**
@@ -63,6 +62,8 @@ function LightboxImage({
   offline,
   photo,
   onStageClick,
+  onReady,
+  onUnavailable,
 }: {
   workspaceId: string;
   channelId: string;
@@ -70,6 +71,8 @@ function LightboxImage({
   offline: boolean;
   /** 사진에 펼치는 확대 묶음(끌기·두 번 클릭·변환 변수). */
   photo: LightboxPhotoBindings;
+  onReady: () => void;
+  onUnavailable: () => void;
   /** 사진 둘레의 빈 무대를 눌렀을 때(바깥 클릭: 닫기). */
   onStageClick: (event: MouseEvent<HTMLElement>) => void;
 }) {
@@ -84,6 +87,10 @@ function LightboxImage({
     previewStatus: preview.status,
     offline,
   });
+
+  useEffect(() => {
+    if (state !== 'ready') onUnavailable();
+  }, [state, onUnavailable]);
 
   if (state === "loading") {
     return (
@@ -153,6 +160,8 @@ function LightboxImage({
       >
         <img
           ref={photo.ref}
+          onLoad={onReady}
+          onError={onUnavailable}
           src={preview.dataUrl}
           alt={attachmentDisplayName(attachment)}
           draggable={false}
@@ -239,6 +248,7 @@ export function ImageLightbox({
   images,
   selectedId,
   opener,
+  source,
   offline,
   senderName,
   sentAtMs,
@@ -251,6 +261,7 @@ export function ImageLightbox({
   images: MessageAttachment[];
   selectedId: string | null;
   opener: DialogFocusTarget | null;
+  source?: StageSource;
   offline: boolean;
   /** 위 왼쪽 칩의 첫 줄(보낸 사람). 모르면 파일 이름이 대신 선다. */
   senderName?: string | null;
@@ -279,10 +290,37 @@ export function ImageLightbox({
     ? lightboxInfoLines({ senderName, sentAtMs, fileName })
     : null;
   // 열린 사진이 바뀌거나(넘기기) 닫혔다 다시 열리면 맞춤에서 시작한다.
-  const zoom = useImageLightboxZoom({ resetKey: open ? (selected?.id ?? null) : null });
+  const [interactive, setInteractive] = useState(false);
+  const [photoNode, setPhotoNode] = useState<HTMLImageElement | null>(null);
+  const zoom = useImageLightboxZoom({ resetKey: open ? (selected?.id ?? null) : null, enabled: interactive });
+  const hero = useStageHero({open, selectedId, source, fitBeforeClose: zoom.fitForClose, onClose: () => onOpenChange(false)});
+  const {state: stageState, content: heroContent, panel: heroPanel, enter: enterHero, noPhoto: noHeroContent} = hero;
+  const zoomPhotoRef = zoom.photo.ref;
+  const zoomViewerRef = zoom.viewerRef;
+  const requestClose = () => hero.requestClose(zoom.isZoomed());
+  useLayoutEffect(() => {
+    setInteractive(stageState.phase === 'open');
+    if (stageState.phase === 'opening') {
+      if (photoNode && (photoNode.complete || !photoNode.animate)) enterHero();
+      else if (selected === null) noHeroContent();
+    }
+  }, [stageState.phase, enterHero, noHeroContent, photoNode, selected]);
+  useEffect(() => {
+    if (open && interactive) closeRef.current?.focus({preventScroll: true});
+  }, [open, interactive]);
+  const photoRef = useCallback((node: HTMLImageElement | null) => {
+    zoomPhotoRef(node);
+    heroContent.current = node;
+    setPhotoNode(node);
+  }, [zoomPhotoRef, heroContent]);
+  const panelRef = useCallback((node: HTMLDivElement | null) => {
+    zoomViewerRef(node);
+    heroPanel.current = node;
+  }, [zoomViewerRef, heroPanel]);
 
   const move = (key: string) => {
     const next = nextImageLightboxIndex(selectedIndex, images.length, key);
+    if (stageState.phase !== 'open') return false;
     if (next !== null) onSelect(images[next].id);
     return next !== null;
   };
@@ -292,28 +330,30 @@ export function ImageLightbox({
   // 닫기로 읽히면 안 된다(맞춤으로 돌아오면 다시 켜진다).
   const closeOnStageClick = (event: MouseEvent<HTMLElement>) => {
     if (zoom.isZoomed()) return;
-    if (event.target === event.currentTarget) onOpenChange(false);
+    if (event.target === event.currentTarget) requestClose();
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={value => { if (!value) requestClose(); }}>
       <DialogContent
-        ref={zoom.viewerRef}
+        ref={panelRef}
         opener={opener}
-        motion={STAGE_MOTION}
+        motion=""
+        overlayMotion={stageState.phase === "opening" || stageState.phase === "closed" ? "opacity-0" : ""}
+        overlayRef={hero.scrim}
+        data-stage-phase={stageState.phase}
         data-testid="image-lightbox"
-        className="lightbox-panel left-0 top-0 h-full max-w-none translate-x-0 gap-0 overflow-hidden rounded-none border-0 bg-lightbox-stage"
+        className="lightbox-panel left-0 top-0 h-full max-w-none translate-x-0 gap-0 overflow-hidden rounded-none border-0 bg-transparent"
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           closeRef.current?.focus();
         }}
-        // Esc: 확대 중이면 맞춤으로 돌아오고, 맞춤이면 Radix가 닫는다.
         onEscapeKeyDown={(event) => {
-          if (!zoom.isZoomed()) return;
           event.preventDefault();
-          zoom.reset();
+          requestClose();
         }}
         onKeyDown={(event) => {
+          if (stageState.phase !== 'open') { event.preventDefault(); return; }
           // ⌘+ ⌘- ⌘0. 먹었으면 브라우저·웹뷰의 쪽 확대는 막는다.
           if (zoom.handleKey(event)) {
             event.preventDefault();
@@ -325,7 +365,11 @@ export function ImageLightbox({
           event.preventDefault();
         }}
         onClick={closeOnStageClick}
+        onPointerDownCapture={event => {
+          if (!interactive) { event.preventDefault(); event.stopPropagation(); }
+        }}
       >
+        <div ref={hero.backdrop} className={cn("pointer-events-none absolute inset-0 bg-lightbox-stage", (stageState.phase === "opening" || stageState.phase === "closed") && "opacity-0")} aria-hidden="true" />
         {/* 대화상자의 이름은 파일 이름이다. 눈에 보이는 첫 줄은 보낸 사람이라 이 둘을 따로 둔다. */}
         <DialogTitle className="sr-only">{fileName}</DialogTitle>
         <DialogDescription className="sr-only">
@@ -360,7 +404,9 @@ export function ImageLightbox({
               channelId={channelId}
               attachment={selected}
               offline={offline}
-              photo={zoom.photo}
+              photo={{...zoom.photo, ref: photoRef}}
+              onReady={enterHero}
+              onUnavailable={noHeroContent}
               onStageClick={closeOnStageClick}
             />
           ) : (
@@ -373,7 +419,7 @@ export function ImageLightbox({
                   variant="outline"
                   size="sm"
                   className="tap-target"
-                  onClick={() => onOpenChange(false)}
+                  onClick={requestClose}
                 >
                   닫기
                 </Button>
@@ -385,7 +431,7 @@ export function ImageLightbox({
         </div>
 
         <div
-          className="lightbox-chrome"
+          className={cn("lightbox-chrome", !interactive && "invisible")}
           data-desktop-shell={IS_TAURI ? "" : undefined}
         >
           {info ? (
@@ -450,7 +496,7 @@ export function ImageLightbox({
               variant="ghost"
               size="icon"
               className={GLASS_ROUND_BUTTON}
-              onClick={() => onOpenChange(false)}
+              onClick={requestClose}
               aria-label="닫기"
               title="닫기"
               data-testid="image-lightbox-close"
@@ -462,7 +508,7 @@ export function ImageLightbox({
 
         {multi ? (
           <>
-            <div className="lightbox-side" data-side="start">
+            <div className={cn("lightbox-side", !interactive && "invisible")} data-side="start">
               <Button
                 type="button"
                 variant="ghost"
@@ -476,7 +522,7 @@ export function ImageLightbox({
                 <ChevronLeft aria-hidden="true" />
               </Button>
             </div>
-            <div className="lightbox-side" data-side="end">
+            <div className={cn("lightbox-side", !interactive && "invisible")} data-side="end">
               <Button
                 type="button"
                 variant="ghost"
@@ -493,7 +539,7 @@ export function ImageLightbox({
           </>
         ) : null}
 
-        <div className="lightbox-foot">
+        <div className={cn("lightbox-foot", !interactive && "invisible")}>
           {/* 확대 비율 칩. 아래 줄 윗변에 얹히고(흐름 밖) 마지막 확대 뒤 잠깐 머문다. 칸은 늘 서 있는 알림 영역이라 칩이
               들어올 때 보조 기술이 읽는다. 움직임은 불투명도만(사다리 `motion-enter`), 동작 줄이기면 애니메이션이 없다. */}
           <div role="status" className="lightbox-zoom-slot">
@@ -524,7 +570,7 @@ export function ImageLightbox({
                     index={index}
                     count={images.length}
                     selected={image.id === selected.id}
-                    onSelect={onSelect}
+                    onSelect={id => { if (interactive) onSelect(id); }}
                   />
                 ))}
               </div>
