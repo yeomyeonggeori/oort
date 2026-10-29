@@ -5,13 +5,14 @@ import NetInfo from '@react-native-community/netinfo';
 import {BACKGROUND_GRACE_MS} from '../src/realtime/backgroundPolicy';
 import {
   createRealtimeTransport,
-  REALTIME_TOKEN_STALE_MS,
+  TOKEN_RESPONSE_MAX_AGE_MS,
   type RealtimeTransport,
 } from '../src/realtime/centrifugeTransport';
 import {DISPLAY_GRACE_MS} from '../src/realtime/connectionDisplay';
 import {
   formatRealtimeDiagnostics,
   realtimeDiagnostics,
+  recordRealtimeDiagnostic,
   resetRealtimeDiagnostics,
 } from '../src/realtime/diagnostics';
 
@@ -101,7 +102,7 @@ afterEach(() => {
 });
 
 describe('display grace, through the transport', () => {
-  it('a network-type force-reconnect never shows 「연결이 끊겼습니다」', () => {
+  it('a short network reconnect heals; a persistent gap is shown only after ten seconds', () => {
     const client = start();
     expect(statuses).toEqual(['connected']);
     netInfo.__emit({type: 'wifi', isConnected: true});
@@ -112,20 +113,16 @@ describe('display grace, through the transport', () => {
     expect(client.disconnectCount).toBe(1);
     expect(client.connectCount).toBe(2);
     advance(DISPLAY_GRACE_MS * 3);
-    expect(statuses).toEqual(['connected']);
-  });
-
-  it('a reconnect loop longer than the grace is shown, once, at the grace', () => {
-    const client = start();
+    expect(statuses).toEqual(['connected', 'connecting', 'connected']);
     client.state = 'connecting';
     client.__emit('connecting', {code: 1, reason: 'transport closed'});
     advance(DISPLAY_GRACE_MS - 1);
-    expect(statuses).toEqual(['connected']);
+    expect(statuses.slice(-1)).toEqual(['connecting']);
     advance(1);
-    expect(statuses).toEqual(['connected', 'disconnected']);
+    expect(statuses.slice(-2)).toEqual(['connecting', 'disconnected']);
     client.__emit('connecting', {code: 1, reason: 'transport closed'});
     advance(DISPLAY_GRACE_MS * 3);
-    expect(statuses).toEqual(['connected', 'disconnected']);
+    expect(statuses.slice(-2)).toEqual(['connecting', 'disconnected']);
   });
 });
 
@@ -158,13 +155,13 @@ describe('foreground return', () => {
     expect(client.disconnectCount).toBe(disconnectsBefore);
   });
 
-  it('leaves a socket that survived the absence alone', () => {
+  it('reopens even a seemingly connected socket after absence', () => {
     const client = start();
     emitAppState('background');
     advance(1_000);
     emitAppState('active');
-    expect(client.disconnectCount).toBe(0);
-    expect(client.connectCount).toBe(1);
+    expect(client.disconnectCount).toBe(1);
+    expect(client.connectCount).toBe(2);
   });
 
   it('reconnects after the grace dropped the socket', () => {
@@ -183,18 +180,18 @@ describe('foreground return', () => {
     await client.options.getToken(); // centrifuge-js fetched a token at t=0
     emitAppState('background');
     advance(BACKGROUND_GRACE_MS);
-    advance(REALTIME_TOKEN_STALE_MS);
+    advance(TOKEN_RESPONSE_MAX_AGE_MS);
     emitAppState('active');
     expect(client.setTokenCalls).toEqual(['']);
   });
 
-  it('keeps a fresh token', async () => {
+  it('replaces even a young token because access expiry can cap its lifetime', async () => {
     const client = start();
     await client.options.getToken();
     emitAppState('background');
     advance(BACKGROUND_GRACE_MS);
     emitAppState('active');
-    expect(client.setTokenCalls ?? []).toEqual([]);
+    expect(client.setTokenCalls).toEqual(['']);
   });
 });
 
@@ -226,8 +223,8 @@ describe('the stale-token threshold (review Low)', () => {
       .map(part => Number(part.trim()))
       .reduce((a, b) => a * b, 1);
     expect(ttlSeconds).toBe(300);
-    expect(REALTIME_TOKEN_STALE_MS).toBeLessThan(ttlSeconds * 1000);
-    expect(REALTIME_TOKEN_STALE_MS).toBeGreaterThan(0);
+    expect(TOKEN_RESPONSE_MAX_AGE_MS).toBeLessThan(ttlSeconds * 1000);
+    expect(TOKEN_RESPONSE_MAX_AGE_MS).toBeGreaterThan(0);
   });
 });
 
@@ -255,17 +252,18 @@ describe('instrumentation (#2751)', () => {
     client.__emit('connected', {});
     advance(3_000);
     client.state = 'connecting';
-    client.__emit('connecting', {code: 3, reason: 'subscribe timeout'});
+    client.__emit('connecting', {code: 3, reason: 'private message text token=secret-fixture'});
     client.__emit('error', {
       type: 'connectToken',
       error: {code: 10, message: 'https://secret.example/v1/auth user@example.com'},
     });
     netInfo.__emit({type: 'wifi', isConnected: true});
     netInfo.__emit({type: 'cellular', isConnected: true});
+    recordRealtimeDiagnostic({at: Date.now(), kind: 'policy', detail: 'private message token=secret-fixture'});
     const out = formatRealtimeDiagnostics();
-    expect(out).toMatch(/connecting code=3 subscribe timeout lifetime=3\.0s/);
+    expect(out).toMatch(/connecting code=3 lifetime=3\.0s/);
     expect(out).toMatch(/error code=10 connectToken/);
     expect(out).toMatch(/network wifi->cellular/);
-    expect(out).not.toMatch(/secret\.example|user@example\.com|example\.invalid/);
+    expect(out).not.toMatch(/secret\.example|user@example\.com|example\.invalid|private message|secret-fixture/);
   });
 });

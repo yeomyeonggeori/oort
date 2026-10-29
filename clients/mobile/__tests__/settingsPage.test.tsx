@@ -617,14 +617,14 @@ describe('설정 페이지', () => {
     expect(screen.getByTestId('profile-version')).toHaveTextContent('oort 9.8.7 (65)');
   });
 
-  it('버전 줄을 길게 누르면 실시간 연결 기록이 복사된다 — 식별 정보 없이 (#2751)', async () => {
+  it('정보의 연결 기록 복사를 누르면 식별 정보 없이 복사한다 (#4783)', async () => {
     const clipboard = jest.requireMock('expo-clipboard') as {
       __box: {value: string | null};
     };
     clipboard.__box.value = null;
     await openPage();
     await act(async () => {
-      fireEvent(screen.getByTestId('profile-version'), 'longPress');
+      fireEvent.press(screen.getByTestId('settings-copy-connection-log'));
     });
     const copied = clipboard.__box.value ?? '';
     expect(copied.split('\n')[0]).toBe('oort 9.8.7 (65)');

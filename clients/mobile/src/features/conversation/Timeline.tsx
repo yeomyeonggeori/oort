@@ -60,6 +60,7 @@ import {
 } from './jumpPills';
 import {EmptyState, ErrorState, LoadingState} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {usePullRefresh, withPullScroll} from '../../design/refresh';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
@@ -78,6 +79,7 @@ import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
+const noRefresh = async (): Promise<void> => {};
 const NO_RUNS: readonly AgentRunProgress[] = [];
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
@@ -855,6 +857,7 @@ function TimelineInner({
   reachedStart,
   nowMs,
   onStartReached,
+  onRefresh,
   onRetry,
   onResend,
   onResendPending,
@@ -941,6 +944,7 @@ function TimelineInner({
   reachedStart?: boolean;
   nowMs: number;
   onStartReached?: () => void;
+  onRefresh?: () => Promise<void>;
   onRetry?: () => void;
   onResend?: (message: Message) => void;
   onResendPending?: (clientMsgId: string) => void;
@@ -3252,6 +3256,15 @@ function TimelineInner({
     [tailNodeRef, styles, tailGap],
   );
 
+  // Owner 2026-10-30 (#4783) reverses the old exclusion: pull means resync,
+  // only after all older history is loaded, so pagination owns its gesture first.
+  const pullEnabled = reachedStart === true && !loadingOlder && onRefresh !== undefined;
+  const pull = usePullRefresh(onRefresh ?? noRefresh, 'timeline-refresh', {resetKey: channelId});
+  const pullScroll = useMemo(
+    () => withPullScroll(onScroll, pullEnabled ? pull.scrollProps : undefined),
+    [onScroll, pullEnabled, pull.scrollProps],
+  );
+
   if (status === 'error') {
     return (
       <ErrorState
@@ -3274,11 +3287,16 @@ function TimelineInner({
   if (status === 'ready' && empty) {
     const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null);
     return (
-      <EmptyState
-        headline={copy.headline}
-        detail={copy.detail}
-        testID="timeline-empty"
-      />
+      <>
+        {pull.notice}
+        <EmptyState
+          headline={copy.headline}
+          detail={copy.detail}
+          refreshControl={pullEnabled ? pull.refreshControl : undefined}
+          scrollProps={pullEnabled ? pull.scrollProps : undefined}
+          testID="timeline-empty"
+        />
+      </>
     );
   }
 
@@ -3315,7 +3333,8 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      onScroll={onScroll}
+      refreshControl={pullEnabled ? pull.refreshControl : undefined}
+      onScroll={pullScroll.onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}
       onTouchMove={tapTouch.onTouchMove}
@@ -3380,6 +3399,7 @@ function TimelineInner({
   // 부모의 직접 자식)은 그대로다.
   const motionScope = (
     <ReduceMotionRefContext.Provider value={reduceMotionRef}>
+      {pull.notice}
       {list}
     </ReduceMotionRefContext.Provider>
   );

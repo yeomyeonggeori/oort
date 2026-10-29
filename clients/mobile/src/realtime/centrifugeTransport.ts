@@ -1,6 +1,6 @@
 import NetInfo from '@react-native-community/netinfo';
 import {Centrifuge} from 'centrifuge';
-import {fetchRealtimeToken} from '@momo/core/lib/api';
+import {fetchFreshRealtimeToken} from '@momo/core/lib/api';
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {AppState, type AppStateStatus} from 'react-native';
 import {
@@ -72,6 +72,8 @@ export interface RealtimeTransport {
   start(): void;
   /** Close it and stop reacting to app-state or network changes. */
   stop(): void;
+  /** Check/reopen now, retaining subscription recovery positions. */
+  reconnect(): Promise<void>;
   /** The underlying client, for the batch that implements `RealtimeHandle`. */
   client(): Centrifuge;
   /** Release the AppState/NetInfo listeners. */
@@ -88,8 +90,8 @@ export interface RealtimeTransportOptions {
    */
   url: string;
   /**
-   * The status to SHOW, not the raw socket state: reconnects shorter than
-   * `DISPLAY_GRACE_MS` are absorbed (see `./connectionDisplay.ts`, #2751).
+   * The status to SHOW: recovering reads `connecting` for ten seconds before
+   * admitting an outage (see `./connectionDisplay.ts`, #4783).
    */
   onStatus?: (status: RealtimeStatus) => void;
   /**
@@ -106,7 +108,7 @@ export interface RealtimeTransportOptions {
    */
   onPolicy?: (state: RealtimePolicyState) => void;
   /**
-   * Token source. Defaults to the core's `fetchRealtimeToken`, which is the
+   * Token source. Defaults to the core's `fetchFreshRealtimeToken`, which is the
    * point — the token is minted by an authenticated REST call that already
    * knows about rotation and 401 handling, and none of that is re-implemented
    * here. Overridable so a test does not need a server.
@@ -118,17 +120,8 @@ export interface RealtimeTransportOptions {
 
 type Timer = ReturnType<typeof setTimeout>;
 
-/**
- * When a cached connection token is too old to present again.
- *
- * The server mints it for 300 s (`connection_token_ttl_seconds`,
- * `server-rust/.../routes/realtime.rs`). Reconnecting with an expired one costs
- * a guaranteed round-trip to be told so (`109 token expired`, then centrifuge-js
- * fetches a new one and tries again) — seen in the RCA trace at 03:18:55 as a
- * 0.4-second socket in front of every return from a long absence. 30 s of margin
- * covers clock skew and the handshake itself.
- */
-export const REALTIME_TOKEN_STALE_MS = 270_000;
+/** Do not use a token response that iOS held across suspension (#4783). */
+export const TOKEN_RESPONSE_MAX_AGE_MS = 30_000;
 
 export function createRealtimeTransport(
   options: RealtimeTransportOptions,
@@ -137,24 +130,27 @@ export function createRealtimeTransport(
     url,
     onStatus,
     onPolicy,
-    getToken: fetchToken = fetchRealtimeToken,
     now = Date.now,
+    getToken: fetchToken = () => fetchFreshRealtimeToken(now()),
   } = options;
 
   let client: Centrifuge | null = null;
   let graceTimer: Timer | null = null;
-  /** When the cached token was minted (by our clock), null before the first. */
-  let tokenAt: number | null = null;
   /** When the current connection reached `connected`, null while it is not. */
   let connectedAt: number | null = null;
   const display = createConnectionDisplay(status => onStatus?.(status));
 
   // Every token centrifuge-js presents comes through here — the first connect,
-  // a 109 retry and the scheduled refresh alike — so this one stamp is always
-  // the age of the token it is holding.
+  // a 109 retry and the scheduled refresh alike.
   const getToken = async (): Promise<string> => {
-    const token = await fetchToken();
-    tokenAt = now();
+    let requestedAt = now();
+    let token = await fetchToken();
+    // A token request itself may have been suspended by iOS. Do not hand a
+    // response held across a long lock straight to the socket.
+    while (now() - requestedAt >= TOKEN_RESPONSE_MAX_AGE_MS) {
+      requestedAt = now();
+      token = await fetchToken();
+    }
     recordRealtimeDiagnostic({at: Date.now(), kind: 'token'});
     return token;
   };
@@ -213,7 +209,7 @@ export function createRealtimeTransport(
    */
   function leave(
     status: 'connecting' | 'disconnected',
-    ctx: {code?: number; reason?: string} | undefined,
+    ctx: {code?: number} | undefined,
   ): void {
     const lifetimeMs = connectedAt === null ? undefined : now() - connectedAt;
     connectedAt = null;
@@ -221,40 +217,28 @@ export function createRealtimeTransport(
       at: Date.now(),
       kind: status,
       code: ctx?.code,
-      detail: ctx?.reason,
       lifetimeMs,
     });
     display.push({kind: 'raw', status});
   }
 
-  /**
-   * The person is back. Make a socket happen now, with a token that will be
-   * accepted, without touching one that survived.
+  /** Reopen on the SAME client: even `connected` can be a half-open socket
+   * after an inactive-only lock. Reopening checks the route immediately rather
+   * than waiting 35 seconds for the ping timer, and preserves recovery offsets.
    */
   function resume(): void {
+    if (!state.wantConnected) return;
     const current = ensureClient();
-    const socketState = String(current.state);
-    if (socketState === 'connected') return;
-    // Stale token first: a reconnect would present it and be refused (109).
-    // Emptying it makes centrifuge-js call `getToken` before opening.
-    if (tokenAt !== null && now() - tokenAt >= REALTIME_TOKEN_STALE_MS) {
-      current.setToken('');
-      tokenAt = null;
-      recordRealtimeDiagnostic({
-        at: Date.now(),
-        kind: 'policy',
-        detail: 'token-cleared',
-      });
-    }
     display.push({kind: 'resume'});
-    if (socketState === 'connecting' && !attemptInFlight(current)) {
-      // `connect()` is a no-op while connecting, and the client may be sitting
-      // in a backoff of up to 20 s. Closing and opening again resets it. An
-      // attempt already in flight (token fetch, handshake) is left to finish:
-      // cutting it would only start the same attempt over (review M2).
-      current.disconnect();
-    }
-    current.connect();
+    // Do not duplicate an opening token request/handshake. Its token source
+    // refreshes access first, and discards responses held across suspension.
+    if (String(current.state) === 'connecting' && attemptInFlight(current)) return;
+    // Connection tokens are capped by ACCESS expiry too, so age alone (270 s)
+    // cannot prove one is usable after returning. Get one for this handshake.
+    current.disconnect();
+    current.setToken('');
+    recordRealtimeDiagnostic({at: now(), kind: 'policy', detail: 'token-cleared'});
+    current.connect(); // public connect() resets retry attempts to zero
   }
 
   function ensureClient(): Centrifuge {
@@ -299,7 +283,7 @@ export function createRealtimeTransport(
           }
           break;
         case 'resume':
-          resume();
+          if (visibility === 'active') resume();
           break;
         case 'force-reconnect':
           // Disconnect and connect on the SAME client rather than rebuilding:
@@ -307,8 +291,7 @@ export function createRealtimeTransport(
           // what lets `createReplayGate` receive a recovery batch instead of a
           // cold subscribe. A fresh client would throw that away and force the
           // full REST re-sync this product deliberately does not do.
-          client?.disconnect();
-          ensureClient().connect();
+          resume();
           break;
         default:
           break;
@@ -322,11 +305,15 @@ export function createRealtimeTransport(
     apply(step.actions);
   }
 
+  let visibility = AppState.currentState;
   const appStateSub = AppState.addEventListener(
     'change',
     (status: AppStateStatus) => {
       recordRealtimeDiagnostic({at: Date.now(), kind: 'app-state', detail: String(status)});
+      const inactiveReturn = visibility === 'inactive' && status === 'active' && state.foreground;
+      visibility = status;
       dispatch({kind: 'visibility', status: toVisibility(status)});
+      if (inactiveReturn) resume();
     },
   );
 
@@ -356,6 +343,10 @@ export function createRealtimeTransport(
       const step = policyStop(state);
       commit(step.state);
       apply(step.actions);
+    },
+    reconnect() {
+      resume();
+      return ensureClient().ready(10_000);
     },
     client: ensureClient,
     dispose() {
