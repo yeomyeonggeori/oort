@@ -267,6 +267,11 @@ import {
 // rather than for a stylistic one.
 const CONTENT_ALIGNMENT = {...PULL_FILL, justifyContent: 'flex-end'} as const;
 
+// RN 0.86의 FlatList는 scroll/refresh props만 바뀌어도 renderItem을 새 함수로 감싼다.
+// 당김 컨트롤의 연결 상태·로더·고지는 셀 데이터가 아니다. RN의 renderer memo를 켜서
+// renderItem/extraData가 바뀔 때만 셀로 전달한다. legacy TS 표에는 없는 RN 정식 prop이다.
+const MEMOIZED_ITEM_RENDERER = {strictMode: true};
+
 /** How near the bottom still counts as "following", in points. */
 const FOLLOW_THRESHOLD_PX = 120;
 
@@ -3313,6 +3318,7 @@ function TimelineInner({
       testID="timeline-list"
       data={items}
       renderItem={renderItem}
+      {...MEMOIZED_ITEM_RENDERER}
       keyExtractor={keyExtractor}
       onScrollToIndexFailed={onScrollToIndexFailed}
       // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
