@@ -15,6 +15,8 @@ import {join} from 'path';
 import React from 'react';
 import {AccessibilityInfo, FlatList, Keyboard, StyleSheet} from 'react-native';
 
+import {JumpPill} from '../src/features/conversation/JumpPill';
+import {TOUCH_TARGET} from '../src/design/tokens';
 import {Timeline, type PillState} from '../src/features/conversation/Timeline';
 import {
   countNewerThan,
@@ -106,6 +108,8 @@ interface MountProps {
   working?: readonly {memberId: string}[];
   jumpTarget?: {messageId: string; seq: number | null; token: number};
   selfSendToken?: number;
+  contentTopInset?: number;
+  topPillInset?: number;
 }
 
 /** 진입이 앉았는지를 읽는 자리 — `settleAtBottom` 이 기다린다. 마운트마다 새로 만든다. */
@@ -125,6 +129,8 @@ function element(listRef: ListRef, over: MountProps = {}) {
       working={over.working}
       jumpTarget={over.jumpTarget}
       selfSendToken={over.selfSendToken}
+      contentTopInset={over.contentTopInset}
+      topPillInset={over.topPillInset}
       jumpPills={over.jumpPills ?? true}
       listRef={listRef}
       pillsRef={pills}
@@ -290,6 +296,8 @@ function bottomPill() {
 /** 필 안의 보이는 문장(화살표 글리프 제외). */
 function pillSentence(testID: string): string {
   const pill = screen.getByTestId(testID);
+  // 최신 원은 아이콘과 뱃지만 보이고 같은 전체 문장을 낭독한다 (#4789).
+  if (testID === 'jump-latest') return pill.props.accessibilityLabel;
   const texts = within(pill).queryAllByText(/보기|이동/);
   const label = texts[texts.length - 1];
   const flatten = (node: unknown): string => {
@@ -513,6 +521,7 @@ describe('위 필 「안읽음으로」', () => {
     expect(spy).toHaveBeenCalledWith({
       index: dividerIndex(),
       viewPosition: 0,
+      viewOffset: 0,
       animated: true,
     });
     expect(topPill()).toBeNull();
@@ -520,6 +529,35 @@ describe('위 필 「안읽음으로」', () => {
     reportDividerAbove();
     expect(topPill()).toBeNull();
   });
+
+  it.each([[121, 0, 121], [121, 157.7, 157.7]])(
+    'S1 #4789 High 2: 머리 %ipt·위 겹침 %ipt에서 안읽음 착지와 실패 재시도는 %ipt 아래다',
+    async (contentTopInset, topPillInset, viewOffset) => {
+      const {listRef} = mount({contentTopInset, topPillInset});
+      await settleAtBottom();
+      reportDividerAbove();
+      const toOffset = jest.spyOn(listRef.current!, 'scrollToOffset').mockImplementation(() => {});
+      const toIndex = jest.spyOn(listRef.current!, 'scrollToIndex')
+        .mockImplementationOnce(function (this: FlatList<TimelineStreamItem>, params) {
+          this.props.onScrollToIndexFailed?.({
+            index: params.index, averageItemLength: 100, highestMeasuredFrameIndex: 1,
+          });
+        })
+        .mockImplementation(() => {});
+
+      fireEvent.press(screen.getByTestId('jump-unread'));
+      expect(toIndex).toHaveBeenNthCalledWith(1, {
+        index: dividerIndex(), viewPosition: 0, viewOffset, animated: true,
+      });
+      expect(toOffset).toHaveBeenLastCalledWith({
+        offset: Math.max(0, 100 * dividerIndex() - viewOffset), animated: false,
+      });
+      await sleep(20);
+      expect(toIndex).toHaveBeenNthCalledWith(2, {
+        index: dividerIndex(), viewPosition: 0, viewOffset, animated: false,
+      });
+    },
+  );
 
   it('누른 뒤 VoiceOver 초점은 구분선 아래 첫 메시지로 간다 — 낭독이 아니라 초점이다 (R1 M-3)', async () => {
     // 웹 `jumpToUnread` 가 초점을 두는 행과 같다(`firstUnreadMessageSeq`). 첫 판은
@@ -2202,5 +2240,25 @@ describe('필을 켜지 않은 표면', () => {
     expect(bottomPill()).toBeNull();
     expect(topPill()).toBeNull();
     expect(list().props.onViewableItemsChanged).toBeUndefined();
+  });
+});
+
+
+describe('S1 #4789 최신 원형 유리 단추', () => {
+  it.each([0, 1, 100])('새 글 %i개: 44pt·99+ 뱃지와 기존 낭독·누름을 지킨다', async newCount => {
+    const onPress = jest.fn();
+    render(<JumpPill direction="down" newCount={newCount} segments={jumpLatestSegments(newCount)} accessibilityLabel={jumpLatestAccessibilityLabel(newCount)} onPress={onPress} testID="jump-latest" />);
+    await act(async () => {});
+    const button = screen.getByTestId('jump-latest');
+    const shape = StyleSheet.flatten(button.props.style);
+    expect([shape.width, shape.height]).toEqual([TOUCH_TARGET, TOUCH_TARGET]);
+    expect(shape.borderRadius).toBeGreaterThanOrEqual(TOUCH_TARGET / 2);
+    expect(screen.getByTestId('jump-latest-glass-fallback')).toBeTruthy();
+    expect(button.props.accessibilityLabel).toBe(jumpLatestAccessibilityLabel(newCount));
+    expect(within(button).queryAllByText(/보기|이동/)).toHaveLength(0);
+    if (newCount === 0) expect(screen.queryByTestId('jump-latest-badge', {includeHiddenElements: true})).toBeNull();
+    else expect(screen.getByText(newCount > 99 ? '99+' : String(newCount), {includeHiddenElements: true})).toBeTruthy();
+    fireEvent.press(button);
+    expect(onPress).toHaveBeenCalledTimes(1);
   });
 });
