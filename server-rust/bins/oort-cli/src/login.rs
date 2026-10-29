@@ -376,6 +376,9 @@ fn open_browser(url: &str) -> bool {
     };
     Command::new(program)
         .arg(url)
+        // The browser is somebody else's process: a card token a deployment left in this
+        // process's environment is not handed to it.
+        .env_remove("OORT_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
