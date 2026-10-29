@@ -856,6 +856,8 @@ describe("만료 스윕이 남긴 줄 (검수 L4, #4705)", () => {
     expect(card.frame.outcome).toMatch(/[가-힣]/);
     // 서버의 영어 본문이 카드 위에 한 번 더 서지 않는다.
     expect(cardKeepsBody(card)).toBe(false);
+    // 조용한 한 줄: 「표시하지 않은 항목 N개」도, 펼칠 원본도 없다.
+    expect(card.detail).toEqual({ rows: [], withheld: 0 });
   });
 
   it("어느 승인의 줄인지 모르거나 expired 가 아니면 지금까지의 도구 카드다", () => {

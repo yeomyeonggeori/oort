@@ -788,7 +788,10 @@ function toolCard(message: Message, props: Props): AgentToolCard {
       status: "cancelled",
       frame: { verb: EXPIRED_LINE_TITLE, object: null, outcome: EXPIRED_LINE_NOTE },
       approvalExpired: true,
-      detail: payloadDetail(props),
+      // 「조용한 한 줄」이어야 하므로 「표시하지 않은 항목 N개」도 세우지 않는다. 이 줄이 싣는 것은
+      // 영어 본문의 사본(`output`)과 비어 있는 `call_id`·id 들이라 읽을 값이 없고, 그 승인의 내용은
+      // 바로 위 카드가 말한다.
+      detail: { rows: [], withheld: 0 },
     };
   }
   const toolName = readString(props, "tool_name") ?? readString(props, "tool");
