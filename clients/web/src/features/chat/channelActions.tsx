@@ -12,6 +12,7 @@ import {
   type ReadState,
 } from "@momo/core/lib/api";
 import { composedUnreadCount } from "@momo/core/features/readState/model";
+import { useChannelNotificationMutation } from "./useChannelNotificationMutation";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
   channelLeaveConfirmBody,
@@ -175,7 +176,6 @@ export function useChannelActions({
   const location = useLocation();
   const invalidateReadStates = useInvalidateReadStates(workspaceId);
   const [error, setError] = useState<string | null>(null);
-  const [optimisticMute, setOptimisticMute] = useState<{ workspaceId: string; channelId: string; muted: boolean } | null>(null);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
 
@@ -188,35 +188,17 @@ export function useChannelActions({
   const nameCopy = useClipboardCopy(title);
   const idCopy = useClipboardCopy(channel.id);
 
-  const muteMutation = useMutation({
-    // 진행 중 채널/워크스페이스가 바뀌어도 요청 당시 대상만 갱신·복구한다.
-    mutationFn: (target: { workspaceId: string; channelId: string; previousMuted: boolean; muted: boolean }) =>
+  // 알림의 낙관 갱신은 행을 지우지 않는다. 나가기와 달리 전용 훅이 상태·복구를 맡고,
+  // API 호출은 여기 한 벌을 유지해 헤더와 사이드바가 같은 실행 경로를 쓴다.
+  const {mutation: muteMutation, optimisticMute} = useChannelNotificationMutation({
+    mutationFn: (target) =>
       setChannelNotificationPref(target.workspaceId, target.channelId, target.muted),
-    onMutate: async (target) => {
-      setError(null);
-      setOptimisticMute(target);
-      const queryKey = ["channels", target.workspaceId];
-      await client.cancelQueries({ queryKey });
-      client.setQueryData<Channel[]>(queryKey, (rows) =>
-        rows?.map((row) => uuidEq(row.id, target.channelId) ? { ...row, muted: target.muted } : row)
-      );
-    },
+    onStart: () => setError(null),
     onSuccess: () => {
       setError(null);
       onActionSucceeded();
     },
-    onError: (_error, target) => {
-      setOptimisticMute(null);
-      client.setQueryData<Channel[]>(["channels", target.workspaceId], (rows) =>
-        rows?.map((row) => uuidEq(row.id, target.channelId)
-          ? { ...row, muted: target.previousMuted } : row)
-      );
-      setError(CHANNEL_MUTE_FAILURE);
-    },
-    onSettled: async (_data, _error, target) => {
-      await client.invalidateQueries({ queryKey: ["channels", target.workspaceId] });
-      setOptimisticMute(null);
-    },
+    onError: () => setError(CHANNEL_MUTE_FAILURE),
   });
 
   // 「읽음 처리」는 새 서버 표면이 아니다: ChatShell 이 채널을 열었을 때 미는 것과
