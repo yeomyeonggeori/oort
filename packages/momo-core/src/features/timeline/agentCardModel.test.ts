@@ -743,3 +743,137 @@ describe("승인 카드의 기한·요청자 (#3738)", () => {
   });
 });
 
+
+describe("먼저 제안 카드와 고정 카드의 읽기 (ADR-0186 증보 v5 U-c·U-e, #4705)", () => {
+  const AGENT = "019f9a01-0000-7000-8000-000000000401";
+  const PIN_PREVIEW = {
+    kind: "message",
+    messageId: "0199aa11-2222-7000-8000-0000000000c1",
+    channelId: "00000000-0000-7000-8000-000000000202",
+    totalChars: 1234,
+    truncated: true,
+  };
+  const PIN_ACTION = {
+    id: "message.pin",
+    rows: [
+      { label: "채널", value: "#qa" },
+      { label: "글자 수", value: "1234자" },
+    ],
+    rationale: "안내문을 채널 맨 위에 두고 싶어요",
+    required_role: "admin",
+    preview: PIN_PREVIEW,
+  };
+
+  function pinCard(extra: Record<string, unknown> = {}, action: unknown = PIN_ACTION) {
+    const card = agentCardModel(
+      msg({
+        type: "approval_request",
+        authorMemberId: AGENT,
+        props: approvalProps({
+          action_type: "workspace_action",
+          title: "메시지 고정",
+          action,
+          ...extra,
+        }),
+      })
+    );
+    if (card?.kind !== "approval") throw new Error("approval card expected");
+    return card;
+  }
+
+  it("props.origin 이 agent_initiated 이면 표시 키가 서고, 제안자는 카드 작성자다", () => {
+    const card = pinCard({ origin: "agent_initiated" });
+    expect(card.agentInitiated).toBe(true);
+    expect(card.requestedByMemberId).toBe(AGENT);
+  });
+
+  it("origin 이 없거나 모르는 값이면 표시 키 자체가 없다(카드는 지금까지 그대로)", () => {
+    expect("agentInitiated" in pinCard()).toBe(false);
+    expect("agentInitiated" in pinCard({ origin: "scheduled" })).toBe(false);
+    expect("agentInitiated" in pinCard({ origin: "AGENT_INITIATED" })).toBe(false);
+    expect("agentInitiated" in pinCard({ origin: true })).toBe(false);
+  });
+
+  it("origin 은 카드가 그리는 키라 숨김으로 세지 않는다", () => {
+    const withOrigin = pinCard({ origin: "agent_initiated" });
+    const without = pinCard();
+    expect(withOrigin.detail.withheld).toBe(without.detail.withheld);
+  });
+
+  it("고정 카드의 대상 메시지를 읽고, 서버 행은 그대로 둔다", () => {
+    const card = pinCard({ origin: "agent_initiated" });
+    expect(card.action?.messagePreview).toEqual(PIN_PREVIEW);
+    expect(card.action?.rows).toEqual(PIN_ACTION.rows);
+    // 사진 미리보기와 갈린다: 같은 `preview` 칸이지만 `kind` 가 열쇠다.
+    expect(card.action?.preview).toBeUndefined();
+  });
+
+  it("모르는 preview kind·어긋난 모양이면 미리보기 키가 없고 행은 그대로다", () => {
+    const wrongKind = pinCard({}, { ...PIN_ACTION, preview: { ...PIN_PREVIEW, kind: "thread" } });
+    expect(wrongKind.action?.messagePreview).toBeUndefined();
+    expect(wrongKind.action?.rows).toHaveLength(2);
+    const noIds = pinCard({}, { ...PIN_ACTION, preview: { kind: "message", totalChars: 3 } });
+    expect(noIds.action?.messagePreview).toBeUndefined();
+    const notObject = pinCard({}, { ...PIN_ACTION, preview: "message" });
+    expect(notObject.action?.messagePreview).toBeUndefined();
+  });
+
+  it("글자 수를 모르는 미리보기는 totalChars 가 null 이고, 수를 지어내지 않는다", () => {
+    const attachmentOnly = pinCard(
+      {},
+      { ...PIN_ACTION, preview: { ...PIN_PREVIEW, totalChars: null, truncated: false } }
+    );
+    expect(attachmentOnly.action?.messagePreview?.totalChars).toBeNull();
+    const negative = pinCard({}, { ...PIN_ACTION, preview: { ...PIN_PREVIEW, totalChars: -1 } });
+    expect(negative.action?.messagePreview?.totalChars).toBeNull();
+  });
+});
+
+describe("만료 스윕이 남긴 줄 (검수 L4, #4705)", () => {
+  const SWEEP_PROPS = {
+    call_id: "",
+    output: "Tool call expired without a human approval.",
+    is_error: true,
+    approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+    run_id: "0199aa11-2222-7000-8000-0000000000b2",
+    status: "expired",
+    decided_at_ms: 1_753_400_000_000,
+  };
+
+  it("영어 본문과 is_error 로 와도 중립의 만료 줄로 읽는다(실패 칩이 아니다)", () => {
+    const card = agentCardModel(
+      msg({ type: "tool_result", body: SWEEP_PROPS.output, props: SWEEP_PROPS })
+    );
+    if (card?.kind !== "tool") throw new Error("tool card expected");
+    expect(card.approvalExpired).toBe(true);
+    expect(card.status).not.toBe("error");
+    expect(card.frame.outcome).not.toBe(SWEEP_PROPS.output);
+    expect(card.frame.outcome).toMatch(/[가-힣]/);
+    // 서버의 영어 본문이 카드 위에 한 번 더 서지 않는다.
+    expect(cardKeepsBody(card)).toBe(false);
+  });
+
+  it("어느 승인의 줄인지 모르거나 expired 가 아니면 지금까지의 도구 카드다", () => {
+    const noApproval = agentCardModel(
+      msg({
+        type: "tool_result",
+        body: "boom",
+        props: { call_id: "c1", output: "boom", is_error: true, status: "expired" },
+      })
+    );
+    if (noApproval?.kind !== "tool") throw new Error("tool card expected");
+    expect("approvalExpired" in noApproval).toBe(false);
+    expect(noApproval.status).toBe("error");
+
+    const plainError = agentCardModel(
+      msg({
+        type: "tool_result",
+        body: "boom",
+        props: { ...SWEEP_PROPS, status: "failed", output: "boom" },
+      })
+    );
+    if (plainError?.kind !== "tool") throw new Error("tool card expected");
+    expect("approvalExpired" in plainError).toBe(false);
+    expect(plainError.status).toBe("error");
+  });
+});

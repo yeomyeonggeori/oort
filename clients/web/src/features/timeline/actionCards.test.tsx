@@ -21,6 +21,7 @@ import { resetSettledApprovalsForTest } from "./settledApprovals";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
 import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
+import { AGENT_INITIATIVE_RATIONALE_LABEL } from "@momo/core/features/timeline/agentInitiative";
 
 // =============================================================================
 // AX-4 (#2510): 행동 승인 카드 · 1회 링크 · 영속 결과 카드.
@@ -787,5 +788,225 @@ describe("서버가 이미 결정한 옛 카드는 버튼이 없다 (#3818)", ()
     const host = mountCard(approvalProps());
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
     expect(byTestId(host, "approval-reject")).toHaveLength(1);
+  });
+});
+
+// =============================================================================
+// 먼저 제안 카드·고정 카드·만료 줄 (ADR-0186 증보 v5 U-c·U-e, #4705).
+//
+// 픽스처는 서버 PR A(`agent_initiative.rs`)가 쓰는 모양 그대로다: `props.origin`은 최상위,
+// `props.action.preview`는 `{kind:"message", messageId, channelId, totalChars, truncated}`.
+// 서버가 아직 이 트랙에 없으므로 실서버 확인은 승격 뒤다(runtime-unverified).
+// =============================================================================
+describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
+  const OWNER = "00000000-0000-7000-8000-0000000001a1";
+  const PLANNER = "019f9a01-0000-7000-8000-0000000004a1";
+  const TARGET_CHANNEL = "00000000-0000-7000-8000-000000000302";
+  const TARGET_MESSAGE = "0199AA11-2222-7000-8000-0000000000C1";
+  const planner_directory = makeDirectory([
+    {
+      id: OWNER,
+      workspaceId: WORKSPACE_ID,
+      kind: "human",
+      status: "active",
+      role: "owner",
+      displayName: "이도현",
+      handle: "dohyun",
+      channelCount: 1,
+      channelIds: [],
+      capabilities: [],
+      createdAtMs: 0,
+      updatedAtMs: 0,
+    },
+    {
+      id: PLANNER,
+      workspaceId: WORKSPACE_ID,
+      kind: "agent",
+      status: "active",
+      role: "member",
+      displayName: "플래너",
+      handle: "planner",
+      channelCount: 1,
+      channelIds: [],
+      capabilities: [],
+      createdAtMs: 0,
+      updatedAtMs: 0,
+    },
+  ] as never);
+
+  function pinProps(over: Record<string, unknown> = {}): Record<string, unknown> {
+    return {
+      ...approvalProps(),
+      title: "승인 요청: 메시지 고정",
+      origin: "agent_initiated",
+      summary: "플래너가 먼저 제안했어요.",
+      action: {
+        id: "message.pin",
+        rows: [
+          { label: "채널", value: "#qa" },
+          { label: "글자 수", value: "1234자" },
+        ],
+        rationale: "안내문을 채널 맨 위에 두고 싶어요",
+        required_role: "admin",
+        preview: {
+          kind: "message",
+          messageId: TARGET_MESSAGE,
+          channelId: TARGET_CHANNEL,
+          totalChars: 1234,
+          truncated: true,
+        },
+      },
+      ...over,
+    };
+  }
+
+  function mountWith(
+    message_over: Partial<Message>,
+    directory = planner_directory
+  ): HTMLElement {
+    const card = agentCardModel(message(message_over));
+    if (card === null) throw new Error("no card for these props");
+    mountHost = document.createElement("div");
+    document.body.append(mountHost);
+    mountedRoot = createRoot(mountHost);
+    act(() => {
+      mountedRoot?.render(
+        createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(AgentCard, { card, directory })
+        )
+      );
+    });
+    return mountHost;
+  }
+
+  function mountPin(props: Record<string, unknown>): HTMLElement {
+    return mountWith({ type: "approval_request", authorMemberId: PLANNER, props });
+  }
+
+  it("먼저 제안 줄에 제안자(카드 작성자)가 서고, 사유에 에이전트 글 꼬리표가 붙는다", () => {
+    const host = mountPin(pinProps());
+    const row = byTestId(host, "approval-initiative")[0];
+    expect(row).toBeDefined();
+    expect(row?.textContent).toContain("플래너");
+    expect(byTestId(host, "approval-initiative-note")).toHaveLength(1);
+    const rationale = byTestId(host, "approval-action-rationale")[0];
+    expect(rationale?.textContent).toContain(AGENT_INITIATIVE_RATIONALE_LABEL);
+    expect(byTestId(host, "approval-initiative-rationale-note")).toHaveLength(1);
+    // 사유는 평문이다: 링크나 서식으로 바뀌지 않는다.
+    expect(rationale?.querySelectorAll("a, strong, em, code")).toHaveLength(0);
+  });
+
+  it("origin 이 없으면 지금까지의 카드 그대로다(줄도 꼬리표도 없다)", () => {
+    const props = pinProps();
+    delete props.origin;
+    const host = mountPin(props);
+    expect(byTestId(host, "approval-initiative")).toHaveLength(0);
+    expect(byTestId(host, "approval-initiative-rationale-note")).toHaveLength(0);
+    expect(byTestId(host, "approval-action-rationale")[0]?.textContent).not.toContain(
+      AGENT_INITIATIVE_RATIONALE_LABEL
+    );
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+
+  it("작성자가 디렉터리에 없으면 이름을 짓지 않는다", () => {
+    const host = mountWith(
+      { type: "approval_request", authorMemberId: HERMES, props: pinProps() },
+      DIRECTORY
+    );
+    const row = byTestId(host, "approval-initiative")[0];
+    expect(row).toBeDefined();
+    expect(row?.textContent).not.toContain("플래너");
+    expect(row?.textContent).not.toContain("undefined");
+  });
+
+  it("결정이 난 카드에는 「아직 아무것도 바뀌지 않았어요」가 서지 않고 줄은 남는다", () => {
+    const host = mountPin(
+      pinProps({ status: "approved", approval_status: "approved", decided_by: OWNER })
+    );
+    expect(byTestId(host, "approval-initiative")).toHaveLength(1);
+    expect(byTestId(host, "approval-initiative-note")).toHaveLength(0);
+    expect(byTestId(host, "approval-message-preview-link")).toHaveLength(0);
+  });
+
+  it("고정 카드는 전문 보기 문을 결정 전에 세우고, 문은 그 메시지의 자리로 간다", () => {
+    const host = mountPin(pinProps());
+    const link = byTestId(host, "approval-message-preview-link")[0] as HTMLAnchorElement;
+    expect(link).toBeDefined();
+    expect(link.getAttribute("href")).toBe(
+      `#/c/${TARGET_CHANNEL}?msg=${TARGET_MESSAGE.toLowerCase()}`
+    );
+    // 총 글자 수가 문 옆에 숫자로 선다.
+    expect(link.querySelector("[data-numeric]")?.textContent).toContain("1,234");
+    // 서버 행은 그대로 서고, 문은 결정 버튼과 함께 있다.
+    expect(byTestId(host, "approval-action-row")).toHaveLength(2);
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+
+  it("미리보기가 없거나 모르는 종류면 문이 없고 서버 행만 선다", () => {
+    const props = pinProps();
+    (props.action as Record<string, unknown>).preview = { kind: "thread" };
+    const host = mountPin(props);
+    expect(byTestId(host, "approval-message-preview")).toHaveLength(0);
+    expect(byTestId(host, "approval-action-row")).toHaveLength(2);
+  });
+
+  it("글자 수를 모르는 미리보기는 문만 서고 숫자를 짓지 않는다", () => {
+    const props = pinProps();
+    (props.action as { preview: Record<string, unknown> }).preview.totalChars = null;
+    const host = mountPin(props);
+    const link = byTestId(host, "approval-message-preview-link")[0];
+    expect(link).toBeDefined();
+    expect(link?.querySelector("[data-numeric]")).toBeNull();
+  });
+});
+
+describe("만료 스윕이 남긴 줄 (#4705, 검수 L4)", () => {
+  function mountSweepLine(over: Record<string, unknown> = {}): HTMLElement {
+    const card = agentCardModel(
+      message({
+        type: "tool_result",
+        body: "Tool call expired without a human approval.",
+        props: {
+          call_id: "",
+          output: "Tool call expired without a human approval.",
+          is_error: true,
+          approval_id: APPROVAL_ID,
+          run_id: "0199aa11-2222-7000-8000-0000000000b2",
+          status: "expired",
+          decided_at_ms: 1_753_400_000_000,
+          ...over,
+        },
+      })
+    );
+    if (card === null) throw new Error("no card for the sweep line");
+    mountHost = document.createElement("div");
+    document.body.append(mountHost);
+    mountedRoot = createRoot(mountHost);
+    act(() => {
+      mountedRoot?.render(
+        createElement(
+          SessionProvider,
+          { value: sessionValue() },
+          createElement(AgentCard, { card, directory: DIRECTORY })
+        )
+      );
+    });
+    return mountHost;
+  }
+
+  it("실패 칩이 아니라 중립의 만료 칩이고, 영어 문장이 화면에 없다", () => {
+    const host = mountSweepLine();
+    const chip = byTestId(host, "agent-status-chip")[0];
+    expect(chip?.dataset.status).toBe("expired");
+    expect(byTestId(host, "agent-frame")[0]?.textContent).toMatch(/[가-힣]/);
+    expect(host.textContent).not.toMatch(/expired without/i);
+    expect(byTestId(host, "tool-error")).toHaveLength(0);
+  });
+
+  it("스윕 줄이 아닌 오류 도구 결과는 지금처럼 실패 칩이다", () => {
+    const host = mountSweepLine({ status: "failed", output: "boom" });
+    expect(byTestId(host, "agent-status-chip")[0]?.dataset.status).toBe("error");
   });
 });

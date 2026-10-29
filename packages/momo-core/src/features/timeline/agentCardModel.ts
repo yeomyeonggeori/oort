@@ -17,6 +17,16 @@ import {
   type AgentActionResultCard,
 } from "./actionResultCard";
 import { parseTeamAiProposal, type TeamAiProposal } from "./teamAi";
+import { AGENT_INITIATED_ORIGIN } from "./agentInitiative";
+import {
+  EXPIRED_LINE_NOTE,
+  EXPIRED_LINE_TITLE,
+  isApprovalExpiryLine,
+} from "../approvals/expiry";
+import {
+  parseMessagePreview,
+  type MessagePreview,
+} from "../approvals/messagePreview";
 
 // =============================================================================
 // Agent card model (R-1 §4). Pure: no DOM, no fetch, no React, so the status
@@ -268,6 +278,10 @@ const PARSED_KEYS: ReadonlySet<string> = new Set([
   // ADR-0201 D6-3. 도우미 카드의 「도우미 제안 · 요청: ○○」 줄이 **그리는** 블록이다
   // (`teamAi.ts`). 위 `action` 과 같은 이유로 숨김이 아니다.
   "proposed_via",
+  // ADR-0186 증보 v5 U-c (#4705). 「먼저 제안」 줄이 읽고 그리는 키다(`agentInitiative.ts`).
+  // 모르는 값이면 줄이 서지 않지만, 위 `momo.action_result` 의 미래 판과 같은 이유로 숨김으로
+  // 세지 않는다: 그 사실은 개수가 아니라 「표시 없이 그대로 서는 카드」가 말한다.
+  "origin",
 ]);
 
 export interface PayloadRow {
@@ -475,6 +489,12 @@ export interface AgentApprovalAction {
    * 비워 두는 이유: 사진이 없는 압도적 다수 카드의 모델이 한 글자도 달라지지 않는다.
    */
   preview?: AvatarImagePreview;
+  /**
+   * `message.pin`·`message.unpin` 카드의 대상 메시지(`action.preview`, kind `message`, #4705).
+   * 전문을 읽을 수 있는 곳으로 가는 문 하나를 세우는 데 쓴다. 없거나 모양이 어긋나면 **키 자체가
+   * 없고** 카드는 서버 행만 그린다(위 `preview` 와 같은 이유).
+   */
+  messagePreview?: MessagePreview;
 }
 
 /** 승인 카드가 그리는 행동 행의 상한. 결과 카드와 같은 자(`MAX_ACTION_RESULT_ROWS`). */
@@ -518,6 +538,7 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
   }
 
   const preview = parseAvatarImagePreview(raw.preview);
+  const messagePreview = parseMessagePreview(raw.preview);
   return {
     id,
     rows,
@@ -531,6 +552,7 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
         ? raw.required_role
         : null,
     ...(preview !== null ? { preview } : {}),
+    ...(messagePreview !== null ? { messagePreview } : {}),
   };
 }
 
@@ -580,6 +602,12 @@ export interface AgentApprovalCard {
    * 없으면 지금까지의 카드 그대로다. 모르는 `kind` 도 없음으로 읽는다(`teamAi.ts`).
    */
   proposedVia?: TeamAiProposal;
+  /**
+   * 아무도 부르지 않았는데 에이전트가 먼저 올린 카드인가 (ADR-0186 증보 v5 U-c, `props.origin`).
+   * **참일 때만 키가 있다**: 압도적 다수 카드의 모델은 한 글자도 달라지지 않는다. 제안자는
+   * `requestedByMemberId`(카드 작성자)이고 이름은 props 에서 읽지 않는다(`agentInitiative.ts`).
+   */
+  agentInitiated?: true;
   detail: PayloadDetail;
 }
 
@@ -590,6 +618,11 @@ export interface AgentToolCard {
   frame: ActionFrame;
   /** Server-sanitised failure text, same `error` prop the turn record uses. */
   errorNote?: string;
+  /**
+   * 서버 만료 스윕이 승인 카드 아래에 남긴 줄인가 (#4705, 검수 L4). **참일 때만 키가 있다.**
+   * 칩은 「실패」가 아니라 중립의 「만료됨」이고 문장은 한국어 한 줄이다(`approvals/expiry.ts`).
+   */
+  approvalExpired?: true;
   detail: PayloadDetail;
 }
 
@@ -740,10 +773,23 @@ function approvalCard(
   if (message.channelId !== "") card.channelId = message.channelId;
   const proposedVia = parseTeamAiProposal(props["proposed_via"]);
   if (proposedVia !== null) card.proposedVia = proposedVia;
+  if (props["origin"] === AGENT_INITIATED_ORIGIN) card.agentInitiated = true;
   return card;
 }
 
 function toolCard(message: Message, props: Props): AgentToolCard {
+  // 만료 스윕의 줄은 `is_error: true` 와 영어 본문으로 오므로 먼저 가른다. 그대로 두면 아무도 부르지
+  // 않은 카드가 조용히 만료된 자리에 「실패」 칩과 영어 문장이 선다(L4, ADR-0132).
+  if (isApprovalExpiryLine(props)) {
+    return {
+      kind: "tool",
+      title: EXPIRED_LINE_TITLE,
+      status: "cancelled",
+      frame: { verb: EXPIRED_LINE_TITLE, object: null, outcome: EXPIRED_LINE_NOTE },
+      approvalExpired: true,
+      detail: payloadDetail(props),
+    };
+  }
   const toolName = readString(props, "tool_name") ?? readString(props, "tool");
   const isError = readBoolean(props, "is_error") === true;
   const status =
