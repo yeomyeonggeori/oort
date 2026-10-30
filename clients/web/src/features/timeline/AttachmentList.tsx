@@ -82,6 +82,7 @@ function ImageTile({
   layout,
   position,
   onOpen,
+  registerSource,
 }: {
   workspaceId: string;
   channelId: string;
@@ -90,6 +91,7 @@ function ImageTile({
   /** 여러 장일 때의 「n/N」. 같은 이름(「이미지」)의 버튼들이 서로 구별되게 한다. */
   position: string | null;
   onOpen: (opener: HTMLButtonElement) => void;
+  registerSource: (id: string, node: HTMLImageElement | null) => void;
 }) {
   const [failed, setFailed] = useState(false);
   const { revealed, handlers } = useRevealOnHover();
@@ -130,6 +132,7 @@ function ImageTile({
       >
         {preview.status === "ready" ? (
           <img
+            ref={node => registerSource(attachment.id, node)}
             src={preview.dataUrl}
             alt={label}
             className={
@@ -188,11 +191,13 @@ function ImageGroup({
   channelId,
   images,
   onOpen,
+  registerSource,
 }: {
   workspaceId: string;
   channelId: string;
   images: MessageAttachment[];
   onOpen: (attachmentId: string, opener: HTMLButtonElement) => void;
+  registerSource: (id: string, node: HTMLImageElement | null) => void;
 }) {
   const columns = imageGridColumns(images.length);
   const tiles = images.map((attachment, index) => (
@@ -202,6 +207,7 @@ function ImageGroup({
       channelId={channelId}
       attachment={attachment}
       layout={columns === 1 ? "single" : columns === 2 ? "grid-2" : "grid-3"}
+      registerSource={registerSource}
       position={images.length > 1 ? `${index + 1}/${images.length}` : null}
       onOpen={(opener) => onOpen(attachment.id, opener)}
     />
@@ -370,6 +376,7 @@ export function AttachmentList({
   } | null>(null);
   // 닫힘 state를 먼저 반영해도 opener 자체는 남아 있어야 Radix의 closeAutoFocus가
   // WebKit에서도 원래 미리보기 버튼으로 돌아간다(dialog.tsx의 명시 opener 계약).
+  const sources = useRef(new Map<string, HTMLImageElement>());
   const lightboxOpener = useRef<HTMLButtonElement | null>(null);
   const images = lightboxAttachments(attachments);
   const files = attachments.filter((attachment) => !showsInlinePreview(attachment));
@@ -386,6 +393,10 @@ export function AttachmentList({
               workspaceId={workspaceId}
               channelId={channelId}
               images={images}
+              registerSource={(id, node) => {
+                if (node) sources.current.set(id, node);
+                else sources.current.delete(id);
+              }}
               onOpen={(attachmentId, opener) => {
                 lightboxOpener.current = opener;
                 setLightbox({ attachmentId });
@@ -410,6 +421,7 @@ export function AttachmentList({
         images={images}
         selectedId={lightbox?.attachmentId ?? null}
         opener={lightboxOpener.current}
+        source={id => sources.current.get(id) ?? null}
         offline={connStatus === "disconnected"}
         senderName={senderName ?? null}
         sentAtMs={sentAtMs ?? null}

@@ -1259,6 +1259,7 @@ describe('탭 전환 모션 — 캡슐과 페이드 (#3580)', () => {
       66 + SHELL.barGap,
       (66 + SHELL.barGap) * 2,
     ]);
+    // CI 수리: 기본의 서로 다른 누름은 각각 울린다. #4298 전 base의 2회 기대를 복원한다.
     expect(hapticCalls).toEqual(['selection', 'selection']);
     spring.mockRestore();
   });

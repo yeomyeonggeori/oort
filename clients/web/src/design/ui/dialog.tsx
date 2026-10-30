@@ -72,13 +72,13 @@ export function useRestoreFocusOnClose(open: boolean, opener: DialogOpener): voi
  */
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
-  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
+  React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay> & { motion?: string }
+>(({ className, motion, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
       "fixed inset-0 bg-scrim scrim-blur layer-overlay-scrim",
-      MODAL_OVERLAY_MOTION,
+      motion ?? MODAL_OVERLAY_MOTION,
       className
     )}
     {...props}
@@ -116,8 +116,11 @@ export const DialogContent = React.forwardRef<
     container?: HTMLElement | null;
     /** 패널 움직임. 생략하면 `MODAL_CONTENT_MOTION`(줌 + 페이드). 화면 전체가 뷰어인 표면(라이트박스)이 불투명도만 쓰려고 바꾼다. */
     motion?: string;
+    /** Stages animate their scrim beside a floating hero while keeping the focus trap open. */
+    overlayMotion?: string;
+    overlayRef?: React.Ref<HTMLDivElement>;
   }
->(({ className, children, onCloseAutoFocus, opener, container, motion, ...props }, ref) => {
+>(({ className, children, onCloseAutoFocus, opener, container, motion, overlayMotion, overlayRef, ...props }, ref) => {
   // `document.activeElement` 추정은 Chromium에서만 맞다. WebKit은 마우스 클릭으로
   // <button>에 포커스를 주지 않아 캡처값이 <body>가 되고, 닫힐 때 돌려줄 자리가
   // 사라진다 — 데스크톱 셸이 WKWebView이므로 배포 대상의 절반이 그쪽이다.
@@ -130,7 +133,7 @@ export const DialogContent = React.forwardRef<
 
   return (
     <DialogPortal container={container ?? undefined}>
-      <DialogOverlay />
+      <DialogOverlay ref={overlayRef} motion={overlayMotion} />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

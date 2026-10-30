@@ -1,3 +1,4 @@
+import {haptics, hapticScope} from '../../lib/haptics';
 import {isMemberAvatarSetAction} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
@@ -2585,9 +2586,10 @@ function MessageRowInner({
 
   const openSheet = useCallback(() => {
     setRowError(null);
+    if (!sheetOpen) haptics.event('messageMenu');
     setSheetOpen(true);
     actions?.onLongPressUsed?.();
-  }, [actions]);
+  }, [actions, sheetOpen]);
 
   const longPress = useLongPress({enabled: actionable, onFire: openSheet});
   const attachmentGesture = useMemo(
@@ -2668,12 +2670,21 @@ function MessageRowInner({
     if (threadTarget) actions?.onOpenThread?.(threadTarget);
   }, [longPress, threadTarget, actions]);
 
+  const reactionEpochRef = useRef(0);
+  useEffect(() => () => {
+    reactionEpochRef.current += 1;
+  }, [message.id, message.channelId, actions?.workspaceId]);
+
   const toggleReaction = useCallback(
     (emoji: string) => {
       if (!actions) return;
       setRowError(null);
+      haptics.event('reactionChanged');
+      const epoch = reactionEpochRef.current;
+      const feedback = hapticScope(() => reactionEpochRef.current === epoch);
       void actions.onToggleReaction(message, emoji).catch((error: unknown) => {
         setRowError(reactionFailureMessage(error));
+        feedback('actionFailed');
       });
     },
     [actions, message],
@@ -3468,6 +3479,7 @@ function MessageRowInner({
             setEditing(true);
           }}
           onDelete={() => {
+            haptics.event('deleteConfirmed');
             setDeletePending(true);
             setRowError(null);
             void actions

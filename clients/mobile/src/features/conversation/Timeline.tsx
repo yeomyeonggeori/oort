@@ -1,3 +1,4 @@
+import {haptics} from '../../lib/haptics';
 import {uuidEq, type Channel, type Message, type RosterMember} from '@momo/core/lib/api';
 import {
   buildTimelineItems,
@@ -2784,6 +2785,7 @@ function TimelineInner({
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
   // 벌어야 한다.
   const jumpToLatest = useCallback(() => {
+    haptics.event('jumpToLatest');
     convergeToEnd('latest');
   }, [convergeToEnd]);
 

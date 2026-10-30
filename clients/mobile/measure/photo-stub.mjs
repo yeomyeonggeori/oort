@@ -21,6 +21,7 @@
  * Run:  node measure/photo-stub.mjs            (포트 18993, `PHOTO_STUB_PORT` 로 바꾼다)
  */
 import {createServer} from 'node:http';
+import {execFile} from 'node:child_process';
 import {deflateSync} from 'node:zlib';
 
 const PORT = Number(process.env.PHOTO_STUB_PORT ?? 18993);
@@ -92,6 +93,22 @@ const CONTENT = /\/attachments\/([^/]+)\/content$/;
 
 createServer((request, response) => {
   const url = new URL(request.url ?? '/', 'http://stub');
+  // #4775 test-only native double tap. Unlike Maestro's two XCTest calls, one macOS dc event has no RPC gap.
+  // Opt in with PHOTO_NATIVE_TAP_X/Y (desktop points over the foreground simulator's photo).
+  // Never enabled in the app; browser-origin requests cannot drive host input.
+  if (url.pathname === '/test/native-double-tap' && request.method === 'POST') {
+    const x = Number(process.env.PHOTO_NATIVE_TAP_X);
+    const y = Number(process.env.PHOTO_NATIVE_TAP_Y);
+    if (request.headers.origin || !Number.isInteger(x) || !Number.isInteger(y) || x < 0 || y < 0) {
+      response.writeHead(412).end('Set PHOTO_NATIVE_TAP_X/Y to the foreground simulator photo');
+      return;
+    }
+    execFile('cliclick', [`dc:${x},${y}`], {timeout: 2000}, error => {
+      response.writeHead(error ? 500 : 200).end(error ? 'Native double tap failed (cliclick/accessibility)' : 'ok');
+    });
+    return;
+  }
+
   const id = CONTENT.exec(url.pathname)?.[1];
   const picture = id === undefined ? undefined : PICTURES[decodeURIComponent(id)];
   if (picture === undefined) {

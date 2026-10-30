@@ -53,6 +53,7 @@ import {
   TOUCH_TARGET,
   type Palette,
 } from '../../design/tokens';
+import {HAPTIC_MODES, setHapticMode, useHapticMode} from '../../lib/haptics';
 import {useNow} from '../../lib/useNow';
 import {EdgeSwipeBack, useLayerClose} from '../../nav/EdgeSwipeBack';
 import {
@@ -460,6 +461,7 @@ export function SettingsContent({
   const push = usePushSwitch(workspaceId, member.id);
   // 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5): 이 폰의 선택 둘. 서버 값이 아니라 기기에 있어서
   // 읽는 중·못 읽음이 없고, 켜 두는 것이 처음 상태다.
+  const hapticMode = useHapticMode();
   const previewOn = usePushPreview();
   const showSenderOn = usePushShowSender();
   const setPresence = useSetPresence(workspaceId, member.id);
@@ -730,6 +732,18 @@ export function SettingsContent({
             }
             testID="profile-push-row"
           />
+          <View accessibilityRole="radiogroup" accessibilityLabel="햅틱" testID="settings-haptics">
+            {HAPTIC_MODES.map(option => (
+              <ChoiceRow
+                key={option.value}
+                title={`햅틱: ${option.label}`}
+                selected={hapticMode === option.value}
+                onPress={() => setHapticMode(option.value)}
+                testID={`haptics-${option.value}`}
+              />
+            ))}
+          </View>
+          <SettingsNote>끔은 앱이 더하는 햅틱을 꺼요. 시스템 컨트롤의 햅틱은 기기 설정을 따라요.</SettingsNote>
           {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
               MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
               끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}

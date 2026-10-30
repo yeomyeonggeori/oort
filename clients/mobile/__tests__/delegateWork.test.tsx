@@ -56,7 +56,9 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 // 햅틱은 래퍼(`lib/haptics`) 한 곳으로만 부른다(#3585). 네이티브 모듈이 없는 Jest 에서는
 // 래퍼를 가짜로 두고 **언제 불렸는가**만 잰다 — 실기기 감각은 runtime-unverified.
 jest.mock('../src/lib/haptics', () => ({
+  ...jest.requireActual('../src/lib/haptics'),
   haptics: {
+    event: jest.fn(),
     selection: jest.fn(),
     light: jest.fn(),
     medium: jest.fn(),

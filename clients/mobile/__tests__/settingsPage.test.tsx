@@ -1,9 +1,11 @@
+import {getHapticMode} from '../src/lib/haptics';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
   cleanup,
+  cleanupAsync,
   fireEvent,
   render,
   screen,
@@ -1303,5 +1305,22 @@ describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => 
     await waitFor(() => expect(screen.getByTestId('dev-tools-empty')).toBeTruthy());
     fireEvent.press(screen.getByTestId('settings-back'));
     await waitFor(() => expect(within(page).queryByTestId(ROW)).toBeNull());
+  });
+});
+
+
+describe('햅틱 설정 (#4298)', () => {
+  // CI 수리: 기본 설정은 기존 화면의 햅틱을 보존하고 풍부는 명시적으로 고른다.
+  it('기본으로 시작하고 풍부·끔 선택은 저장되며 다시 열어도 남는다', async () => {
+    await openPage();
+    expect(screen.getByTestId('haptics-basic').props.accessibilityState.selected).toBe(true);
+    fireEvent.press(screen.getByTestId('haptics-rich'));
+    expect(getHapticMode()).toBe('rich');
+    expect(screen.getByTestId('haptics-rich').props.accessibilityState.selected).toBe(true);
+    fireEvent.press(screen.getByTestId('haptics-off'));
+    expect(getHapticMode()).toBe('off');
+    await cleanupAsync();
+    await openPage();
+    expect(screen.getByTestId('haptics-off').props.accessibilityState.selected).toBe(true);
   });
 });
