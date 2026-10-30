@@ -137,3 +137,58 @@ probes (0/1/2/1.5/1,000,000). UI capture, design review, merge-tree/full stack g
 and actual Hermes execution are deferred to planner; no simulator, Xcode, Docker
 or capture was used. No Rust `include_str!` input was added. No commit/push/PR
 was made; planner owns those delivery steps.
+
+## P0-5 — pseudo locale and direct-copy CI (#4834)
+
+`tooling/pseudo.mjs` exports `pseudoCatalog(compiledCatalog)` for development and
+stack QA. Pass its result to `createMessageService({messageLocale: 'en-XA', catalog})`.
+It clones ICU ASTs, accents only literal characters, adds `[` / `]` boundaries,
+and expands the total literal length by 35%, including markers. Padding rounds
+to whole Unicode code points; labels shorter than 7 code points and argument-only
+messages cannot always fit the 30–40% band while retaining both markers. For
+branching messages the budget covers all branch literals, rather than the length
+of runtime argument values. Keys, arguments, selectors, plural offsets, pound,
+tags and number/date skeletons are preserved. Tags remain subject to P0-1's
+approved-adapter restriction. This tool and its output are **not exported or
+loaded by product entries**; never commit a pseudo catalog to `generated/`.
+
+Existing `generation.test.ts` already runs the P0-1 compiler with `check: true`
+under core `npm test`: missing/blank keys, ICU parsing, argument name/type mismatch
+and stale generated files fail there. No second validator or workflow change is
+needed. `pseudo.test.ts` proves AST preservation and real service formatting.
+
+`tooling/direct-copy-baseline.json` records the fixed starting HEAD
+`078f76b1056191fdfc1664f9c837ffa6fbf0482c` and **file → occurrence count** for
+web/mobile production JS/TS sources (including mobile `App.tsx`/`index.js`).
+`tooling/direct-copy.mjs` uses the existing
+TypeScript parser, not a Korean-only regex: JSX text, accessible names, known copy
+properties, Korean literals, English phrases and standalone English words are
+counted, including template segments. This deliberately conservative English
+rule also budgets standalone technical enum words. Comments, imports/types,
+property names, non-copy JSX attributes, diagnostic calls (`console`, `logger`,
+`log`, Error constructors/assertions), test/fixture/testkit files, generated files
+are excluded. Product design controls remain included. Dynamic user content has
+no literal to count;
+message keys/arguments are validated by the dictionary and typed service instead.
+Literal `formatMessage` references are checked against every English feature JSON.
+
+One test in each client's existing `npm test` invokes the scanner with Node.
+**Increases fail per file**, including previously absent files. Reductions also
+fail with an instruction to shrink that file's committed allowance (remove zero
+entries), preventing future copy from spending stale budget. Moving lines leaves
+counts unchanged. Equal-count replacement is intentionally not a content diff;
+review must still enforce dictionary-only new user copy. This does not migrate
+existing screen copy (P1), inspect shared-core copy, or infer runtime/dataflow
+strings. Extracted copy text and user data are not written to the ledger.
+
+```sh
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs web
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs mobile
+# Audit/reproduce the original baseline; emit only, never auto-update allowances:
+node packages/momo-core/src/i18n/tooling/direct-copy.mjs --baseline 078f76b1056191fdfc1664f9c837ffa6fbf0482c
+```
+
+For P1, lower only the migrated files' counts after reviewing the scanner output;
+do not regenerate against a later HEAD to bless additions. Stack QA should check
+buttons, settings rows, errors, accessible names and multiline text in en-XA,
+including narrow widths and large type. This change itself renders no screens.
