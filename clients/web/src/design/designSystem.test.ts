@@ -503,6 +503,9 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
     "features/chat/placeholderFit.ts",
     "features/common/States.tsx",
     "design/wallpaper/runtime.ts",
+    // #4775: thumbnail/photo computed border radius is measured at runtime; the crop's WAAPI
+    // frames likewise interpolate getBoundingClientRect geometry. Fixed visibility/transform live in CSS.
+    "features/attachments/useStageHero.ts",
   ];
 
   it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {
