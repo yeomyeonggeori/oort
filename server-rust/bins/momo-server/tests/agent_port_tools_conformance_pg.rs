@@ -1419,6 +1419,18 @@ async fn the_job_and_run_tools_share_the_gateway_lease_and_terminal_rules() {
     .await
     .unwrap();
     assert_eq!(usage_rows, 1, "a replayed completion must not bill twice");
+    let source: String = sqlx::query_scalar(
+        "SELECT source FROM usage_ledger WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        source, "self_reported",
+        "Agent Port token counts are the agent's own report"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -2133,6 +2145,24 @@ async fn a_managed_mention_job_survives_the_whole_rest_gateway_round_trip() {
     assert_eq!(renewed.status().as_u16(), 200, "renew must find the lease");
 
     // ---- complete over REST ------------------------------------------------
+    let invalid = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
+            fixture.workspace
+        ))
+        .bearer_auth(&gateway_bearer)
+        .json(
+            &json!({"job_id":job_id,"lease_id":lease_id,"status":"succeeded",
+            "usage":{"promptTokens":-2147483648,"cachedTokens":1}}),
+        )
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        invalid.status().as_u16(),
+        400,
+        "a bad token report must not settle the lease or poison cost reads"
+    );
     let completed = client
         .post(format!(
             "{base}/v1/workspaces/{}/agent-runs/{run_id}/gateway/complete",
@@ -2196,6 +2226,18 @@ async fn a_managed_mention_job_survives_the_whole_rest_gateway_round_trip() {
     .await
     .unwrap();
     assert_eq!(managed_events, 0);
+    let source: String = sqlx::query_scalar(
+        "SELECT source FROM usage_ledger WHERE workspace_id=$1 AND agent_member_id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.managed_agent)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        source, "self_reported",
+        "REST callback token counts are the agent's own report"
+    );
 }
 
 // ---------------------------------------------------------------------------
