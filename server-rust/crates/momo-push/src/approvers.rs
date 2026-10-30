@@ -62,7 +62,9 @@
 
 use momo_agent::approval::reference_execution_host;
 use momo_agent::provisioning::agent_owner_in_tx;
-use momo_agent::{decider_gate, pinned_target_agent, pinned_target_member, GatePlan};
+use momo_agent::{
+    decider_gate, pinned_expression_subject, pinned_target_agent, pinned_target_member, GatePlan,
+};
 use momo_db::DbError;
 use momo_t3::{remote_host_owner_in_tx, T3Error};
 use serde_json::Value;
@@ -90,6 +92,8 @@ pub struct CardAudience {
     target_agent: Option<Uuid>,
     /// The `requesting_member` card's person (`action.pins.target`, `member.avatar.set`).
     target_member: Option<Uuid>,
+    /// The face an `expression.create` card names (`action.pins.subject`), if any.
+    expression_subject: Option<Uuid>,
     /// ADR-0188 D3: the owner of the member-scoped machine this card is about — set
     /// only when the card's host is somebody's own. A workspace host, no host at
     /// all, or a host this workspace does not have say nothing here.
@@ -114,6 +118,7 @@ impl CardAudience {
             plan: decider_gate(&card.action_type, &card.payload, true),
             target_agent: pinned_target_agent(&card.payload),
             target_member: pinned_target_member(&card.payload),
+            expression_subject: pinned_expression_subject(&card.payload),
             host_owner,
         })
     }
@@ -152,6 +157,22 @@ impl CardAudience {
             // route's gate compares the decider with the same pin; a card that pinned
             // nobody has nobody to wake (and the route fails it closed).
             GatePlan::RequestingMember => Ok(self.target_member == Some(member_id)),
+            // `expression.create`: the ONE predicate the decision route also asks
+            // (`momo_expressions::adder_allows_in_tx`): a human, not a guest, within the add
+            // policy as it is now and, for a face, that very person. No admin proxy.
+            GatePlan::ExpressionAdder => momo_expressions::store::adder_allows_in_tx(
+                conn,
+                workspace_id,
+                member_id,
+                self.expression_subject,
+            )
+            .await
+            .map_err(|error| match error {
+                momo_expressions::Error::Db(error) => error,
+                other => DbError::Sqlx(sqlx::Error::Protocol(format!(
+                    "expression adder judgment failed: {other}"
+                ))),
+            }),
             // `require_profile_editor_in_tx`: an active workspace member who is an
             // admin or the target agent's owner. The target is the card's pin; a
             // card that pinned none has nobody to judge the owner arm against, so

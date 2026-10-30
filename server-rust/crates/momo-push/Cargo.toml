@@ -24,6 +24,10 @@ momo-auth = { path = "../momo-auth" }
 # momo-db, momo-provider, momo-wire), so the edges add no cycle.
 momo-agent = { path = "../momo-agent" }
 momo-t3 = { path = "../momo-t3" }
+# ADR-0186 v8 X8-3: who may decide an `expression.create` card is the ONE predicate
+# `momo_expressions::adder_allows_in_tx` (the decision route calls it too). momo-expressions
+# depends on momo-db/-outbox/-wire only, so the edge adds no cycle.
+momo-expressions = { path = "../momo-expressions" }
 
 async-trait.workspace = true
 chrono.workspace = true

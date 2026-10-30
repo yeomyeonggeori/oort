@@ -11,6 +11,20 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 const SECRET: &str = "expression-conformance-only";
+
+/// The deployment sampler imports a link that cannot resolve (`.invalid`, #4829). Answer
+/// it the way a failed DNS lookup would, without this test touching any network.
+struct NoNetwork;
+#[async_trait::async_trait]
+impl momo_unfurl::UnfurlHttp for NoNetwork {
+    async fn fetch(
+        &self,
+        _url: &str,
+        _kind: momo_unfurl::FetchKind,
+    ) -> Result<momo_unfurl::Fetched, momo_unfurl::FetchError> {
+        Err(momo_unfurl::FetchError::Failed("dns".into()))
+    }
+}
 struct Person {
     actor: Actor,
     token: String,
@@ -136,6 +150,7 @@ async fn expression_http_openapi_and_unchanged_send_reaction_spine() {
         "ws://localhost:8000/connection/websocket".to_string(),
     )
     .with_drive(archive)
+    .with_unfurl_http(Arc::new(NoNetwork))
     .with_realtime(RealtimeSettings {
         cent_token_hmac: Some(SECRET.into()),
         cent_proxy_secret: Some(SECRET.into()),

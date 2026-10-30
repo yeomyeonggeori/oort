@@ -77,6 +77,12 @@ pub enum GatePlan {
     /// enough. The pin is the person the *server* derived from the run, so the card was
     /// drawn for exactly one human.
     RequestingMember,
+    /// **ADR-0186 v8 X8-3** (`expression.create`): a live human member of the card's channel
+    /// who is not a guest, satisfies the workspace's *current* add policy and — when the card
+    /// names a face ([`pinned_expression_subject`]) — is that very person. No admin or
+    /// agent-owner proxy. Evaluated by the one predicate `momo_expressions::adder_allows`
+    /// in the route, the push audience and the preview, never re-implemented here.
+    ExpressionAdder,
 }
 
 /// The `required_role` the registry publishes for this proposal's action.
@@ -104,6 +110,7 @@ pub fn gate_plan(role: Option<RequiredRole>) -> GatePlan {
             GatePlan::RequestingMember
         }
         Some(RequiredRole::WorkspaceOperator) => GatePlan::Operator,
+        Some(RequiredRole::ExpressionAdder) => GatePlan::ExpressionAdder,
         Some(RequiredRole::Admin) | None => GatePlan::Admin,
     }
 }
@@ -155,6 +162,18 @@ pub fn pinned_target_agent(payload: &Value) -> Option<Uuid> {
 /// audience should not have to know that an agent pin and a member pin share a key.
 pub fn pinned_target_member(payload: &Value) -> Option<Uuid> {
     pinned_target_agent(payload)
+}
+
+/// The face an `expression.create` card names (`action.pins.subject`), or `None` when the
+/// proposer declared that nobody's face is in the picture. The decision route proves the
+/// stored pin against the proposal's own candidates; the push audience reads the same pin.
+pub fn pinned_expression_subject(payload: &Value) -> Option<Uuid> {
+    payload
+        .get("action")
+        .and_then(|action| action.get("pins"))
+        .and_then(|pins| pins.get("subject"))
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
 }
 
 #[cfg(test)]

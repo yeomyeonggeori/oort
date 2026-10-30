@@ -331,6 +331,10 @@ pub struct AppState {
     /// ADR-0170 — the only object in this process that can GET a remote URL.
     /// Default is the SSRF-guarded transport. Tests inject a loopback client.
     pub unfurl_http: Arc<dyn momo_unfurl::UnfurlHttp>,
+    /// `MOMO_UNFURL_ENABLED == 1` at start-up: the instance's switch for every request this
+    /// server makes to an outside address on someone's behalf (ADR-0170 D3). The expression
+    /// link import honours it (ADR-0218 D5, planner decision 3).
+    pub unfurl_enabled: bool,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
     /// #2960 — 「연결 확인」: the only object in this process that can call a
     /// provider, and all it can do is one guarded read-only GET per hop
@@ -385,6 +389,7 @@ impl AppState {
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
+            unfurl_enabled: momo_unfurl::enabled_from_env(),
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
                 momo_provider_probe::GuardedProviderProbe::new(
@@ -469,6 +474,11 @@ impl AppState {
     }
 
     /// Replace the unfurl HTTP hop (conformance tests with a mock origin).
+    pub fn with_unfurl_enabled(mut self, enabled: bool) -> Self {
+        self.unfurl_enabled = enabled;
+        self
+    }
+
     pub fn with_unfurl_http(mut self, http: Arc<dyn momo_unfurl::UnfurlHttp>) -> Self {
         self.unfurl_http = http;
         self
@@ -729,6 +739,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/expressions/from-attachment",
             post(routes::expressions::from_attachment),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/import",
+            post(routes::expressions::import),
         )
         .route(
             "/v1/workspaces/{ws}/expression-drafts/{draftId}",

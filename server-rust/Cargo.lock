@@ -1783,6 +1783,7 @@ version = "0.0.0"
 dependencies = [
  "chrono",
  "momo-db",
+ "momo-expressions",
  "momo-messaging",
  "momo-outbox",
  "serde_json",
@@ -2118,6 +2119,7 @@ dependencies = [
  "momo-agent",
  "momo-auth",
  "momo-db",
+ "momo-expressions",
  "momo-messaging",
  "momo-t3",
  "serde",
@@ -2383,6 +2385,7 @@ dependencies = [
  "momo-auth",
  "momo-db",
  "momo-drive",
+ "momo-expressions",
  "momo-messaging",
  "momo-settings",
  "serde_json",

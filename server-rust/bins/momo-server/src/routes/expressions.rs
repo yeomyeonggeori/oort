@@ -6,11 +6,12 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::{Principal, PrincipalKind};
 use momo_expressions::{
-    self as expressions, media, Actor, Choice, Error, Metadata, Origin, Patch, Report,
+    self as expressions, intake, media, Actor, Choice, Error, Metadata, Origin, Patch, Report,
 };
+use momo_unfurl::{fetch_source, parse_source_url, SOURCE_DEADLINE};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{error::ApiError, AppState};
@@ -204,11 +205,45 @@ pub async fn replace(
         .map_err(failure)?;
     let (_, bytes) = multipart(&state, request, false).await?;
     let media = media::process(bytes).await.map_err(media_error)?;
-    Ok(Json(
-        expressions::replace_draft(&state.pool, actor, id, media)
-            .await
-            .map_err(failure)?,
-    ))
+    let replaced = match expressions::replace_draft(&state.pool, actor, id, media.clone()).await {
+        // Not the caller's own direct draft: it may be a candidate of an open approval card.
+        Err(Error::NotFound) => replace_candidate(&state, actor, id, media).await,
+        other => other,
+    };
+    Ok(Json(replaced.map_err(failure)?))
+}
+
+/// ADR-0186 v8 X8-4: a candidate of an open `expression.create` card, replaced by a direct
+/// upload. One transaction swaps the pixels (same draft id, origin, name, face and TTL;
+/// revision + 1) and rewrites the card's `action.expression`, then announces the edit on the
+/// request card so every open view shows the new picture and the old choice goes stale.
+async fn replace_candidate(
+    state: &AppState,
+    actor: Actor,
+    id: Uuid,
+    media: media::Processed,
+) -> Result<Value, Error> {
+    expressions::transaction(&state.pool, actor, move |conn| {
+        Box::pin(async move {
+            let replaced =
+                expressions::action::replace_candidate_in_tx(conn, actor, id, &media).await?;
+            if let Some(message_id) = replaced.request_message_id {
+                momo_db::sqlx::query(
+                    "UPDATE message SET props = jsonb_set(COALESCE(props, '{}'::jsonb), '{action,expression}', $3, true) \
+                      WHERE workspace_id = $1 AND id = $2 AND props #> '{action}' IS NOT NULL",
+                )
+                .bind(actor.workspace)
+                .bind(message_id)
+                .bind(&replaced.card)
+                .execute(&mut *conn)
+                .await?;
+                momo_messaging::emit_message_edited_in_tx(conn, actor.workspace, message_id)
+                    .await?;
+            }
+            Ok(replaced.draft)
+        })
+    })
+    .await
 }
 pub async fn activate(
     State(state): State<AppState>,
@@ -393,4 +428,96 @@ pub async fn from_attachment(
         .await
         .map_err(failure)?;
     prepare(&state, actor, meta, Origin::attachment(), bytes).await
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ImportRequest {
+    name: String,
+    display_name: String,
+    tags: Vec<String>,
+    subject_member_id: Value,
+    url: String,
+}
+
+/// ADR-0218 appendix A `POST /expressions/import`. The server fetches a public HTTPS
+/// image link a member typed in through the guarded transport (momo-unfurl) and
+/// stages it exactly like an upload; everything the fetch cannot do ends as a manual
+/// card (`200`, `manual_upload_required`) that keeps the safe source link and the
+/// upload control, never as an error.
+///
+/// Nothing in here may put the link's query, the transport's error text or a body
+/// in a log: every failure maps to a closed code or a coded 4xx, and no
+/// `ApiError::internal` is reachable from the fetch.
+pub async fn import(
+    State(state): State<AppState>,
+    Extension(p): Extension<Principal>,
+    Path(ws): Path<String>,
+    request: Request,
+) -> Result<Response, ApiError> {
+    human(&p)?;
+    let actor = actor(&ws, &p)?;
+    // Role, add policy and the live-draft quota are proved before the server makes a
+    // request for this person; `create_draft` proves them again afterwards.
+    expressions::preflight_import(&state.pool, actor)
+        .await
+        .map_err(failure)?;
+    let r: ImportRequest = json(request).await?;
+    let meta: Metadata = serde_json::from_value(json!({
+        "name": r.name, "displayName": r.display_name,
+        "tags": r.tags, "subjectMemberId": r.subject_member_id
+    }))
+    .map_err(|_| invalid())?;
+    meta.validate().map_err(failure)?;
+    // D6: a face means its owner registers it. Re-proved in `create_draft`; stopping
+    // here only saves a fetch that could never end in a draft.
+    if meta.subject_member_id.is_some_and(|s| s != actor.member) {
+        return Err(failure(Error::Role));
+    }
+    // A link that is malformed, carries credentials/fragment, or is private from the
+    // start (any spelling of loopback, link-local, metadata, RFC 1918) is a 400:
+    // nothing is resolved, connected to or stored.
+    let source = parse_source_url(&r.url).map_err(|_| invalid())?;
+    // The instance's outgoing-request switch (`MOMO_UNFURL_ENABLED`, default off, ADR-0170 D3):
+    // off means this server makes no request on anyone's behalf. The link is kept as a manual
+    // card with the safe source and the upload control, and the person finishes it by hand.
+    let (media, code) = if !state.unfurl_enabled {
+        (None, Some("source_unavailable"))
+    } else {
+        let permit = intake::import_slots()
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| ApiError::busy(2))?;
+        let outcome = match fetch_source(&*state.unfurl_http, &source, SOURCE_DEADLINE).await {
+            // A busy decoder is the server's retryable state, not the picture's: a 503 with
+            // `Retry-After` and no draft, never a `source_timeout` card.
+            Ok(bytes) => match intake::picture_or_reason(bytes, None).await {
+                Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
+                Ok(intake::Picture::Manual(reason)) => (None, Some(reason)),
+                Err(intake::DecoderBusy) => return Err(ApiError::busy(2)),
+            },
+            // The first hop is the address the caller named: private from the start is a
+            // 400 with nothing stored, like a literal. (A refusal after a redirect is a card.)
+            Err(refused) if refused.is_private_origin() => return Err(invalid()),
+            Err(refused) => (None, Some(refused.code())),
+        };
+        drop(permit);
+        outcome
+    };
+    let status = if media.is_some() {
+        StatusCode::CREATED
+    } else {
+        StatusCode::OK
+    };
+    let draft = expressions::create_draft(
+        &state.pool,
+        actor,
+        meta,
+        Origin::url(source.origin()),
+        media,
+        code,
+    )
+    .await
+    .map_err(failure)?;
+    Ok((status, Json(draft)).into_response())
 }

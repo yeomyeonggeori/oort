@@ -27281,3 +27281,1357 @@ async fn agent_port_four_profile_conversations_in_dm_4791() {
     assert!(member_pointers_4385(&w.su, person).await.1.is_some());
     assert!(member_pointers_4385(&w.su, agent).await.1.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-30 v8 (#4829 stage 2) — expression.create
+//
+// 「에이전트가 찾아 등록하기」: an agent offers 1-4 candidate pictures; a person looks at the
+// STORED pixels, picks one and approves; exactly that one is registered. Sabotage targets
+// (recorded in the stage-2 handoff):
+//   * `adder_allows`: drop the subject arm / the guest arm / the policy arm      → admin
+//     proxy, guest, or a narrowed policy approves (`..._only_the_face_...`);
+//   * `choose_in_tx`: drop the re-hash, the revision check, the membership check, the
+//     name/quota checks, or `reclaim_in_tx`                                       → red below;
+//   * `candidate_row`: drop the channel-membership / approval-pending / adder arm → a
+//     stranger or another room previews the picture;
+//   * `replace_candidate_in_tx`: drop `revision+1` or the adder arm              → stale choice
+//     passes / a stranger replaces;
+//   * `expression_choice_refused`: always None                                   → choice
+//     accepted on a reject / another action / absent on approve;
+//   * `is_expression_create_call` / the 64 KiB bound                              → budget tests.
+// ---------------------------------------------------------------------------
+
+struct Mock4829 {
+    calls: std::sync::Mutex<Vec<String>>,
+    replies: std::sync::Mutex<
+        std::collections::HashMap<String, Result<Vec<u8>, momo_unfurl::FetchError>>,
+    >,
+}
+
+#[async_trait::async_trait]
+impl momo_unfurl::UnfurlHttp for Mock4829 {
+    async fn fetch(
+        &self,
+        url: &str,
+        _kind: momo_unfurl::FetchKind,
+    ) -> Result<momo_unfurl::Fetched, momo_unfurl::FetchError> {
+        self.calls.lock().unwrap().push(url.to_string());
+        let key = url.split('?').next().unwrap_or(url).to_string();
+        match self.replies.lock().unwrap().get(&key).cloned() {
+            Some(Ok(body)) => Ok(momo_unfurl::Fetched {
+                final_url: url.to_string(),
+                content_type: "image/gif".into(),
+                body,
+            }),
+            Some(Err(error)) => Err(error),
+            None => Err(momo_unfurl::FetchError::Failed("unscripted".into())),
+        }
+    }
+}
+
+struct World4829 {
+    su: PgPool,
+    app: PgPool,
+    base: String,
+    client: reqwest::Client,
+    fixture: Fixture,
+    drive: Arc<MemDrive3787>,
+    mock: Arc<Mock4829>,
+    requester: Uuid,
+    requester_jwt: String,
+    face: Uuid,
+    face_jwt: String,
+    guest: Uuid,
+    guest_jwt: String,
+    outsider_jwt: String,
+}
+
+async fn world_4829() -> World4829 {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let mock = Arc::new(Mock4829 {
+        calls: Default::default(),
+        replies: Default::default(),
+    });
+    let state = AppState::new(
+        app.clone(),
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(drive.clone())
+    .with_unfurl_http(mock.clone())
+    .with_unfurl_enabled(true)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit: 0,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    let (requester, requester_jwt) = seed_human_3708(&su, &fixture, "req", "member").await;
+    let (face, face_jwt) = seed_human_3708(&su, &fixture, "face", "member").await;
+    let (guest, guest_jwt) = seed_human_3708(&su, &fixture, "guest", "guest").await;
+    let (outsider, outsider_jwt) = seed_human_3708(&su, &fixture, "out", "member").await;
+    sqlx::query("DELETE FROM membership WHERE member_id=$1")
+        .bind(outsider)
+        .execute(&su)
+        .await
+        .unwrap();
+    World4829 {
+        su,
+        app,
+        base: format!("http://{address}"),
+        client: reqwest::Client::new(),
+        fixture,
+        drive,
+        mock,
+        requester,
+        requester_jwt,
+        face,
+        face_jwt,
+        guest,
+        guest_jwt,
+        outsider_jwt,
+    }
+}
+
+fn noise_png_4829(side: u32, seed: u32) -> Vec<u8> {
+    let mut state = 0x9E37_79B9u32 ^ seed;
+    let image = image::RgbaImage::from_fn(side, side, |_, _| {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let b = state.to_le_bytes();
+        image::Rgba([b[0], b[1], b[2], 255])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+fn gif_4829() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..3u8 {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(8, 8, image::Rgba([20 + n * 60, 200, 50, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+fn candidate_4829(name: &str, subject: Value, image: Value) -> Value {
+    json!({"name": name, "displayName": name, "tags": ["t"], "subjectMemberId": subject, "image": image})
+}
+
+fn generated_4829(bytes: &[u8], prompt: &str) -> Value {
+    json!({"source": "generated", "mime": "image/png", "dataBase64": b64_3787(bytes), "prompt": prompt})
+}
+
+async fn propose_4829(w: &World4829, candidates: Value) -> (u16, Value) {
+    propose_requester_action_4791(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        "expression.create",
+        json!({"candidates": candidates}),
+    )
+    .await
+}
+
+async fn decide_4829(
+    w: &World4829,
+    jwt: &str,
+    approval: Uuid,
+    approve: bool,
+    choice: Option<Value>,
+) -> (u16, Value) {
+    let mut body =
+        json!({"approvalId": approval, "approve": approve, "clientDecisionId": Uuid::new_v4()});
+    if let Some(choice) = choice {
+        body["expressionChoice"] = choice;
+    }
+    let response = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/approvals/{approval}/decision",
+            w.base, w.fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("decision responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn card_4829(w: &World4829, approval: Uuid) -> Value {
+    sqlx::query_scalar(
+        "SELECT m.props FROM message m JOIN approval a ON a.request_message_id=m.id WHERE a.id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap()
+}
+
+/// `{draftId, revision, sha256}` of candidate `index` as the card shows it.
+fn choice_4829(card: &Value, index: usize) -> Value {
+    let draft = &card["action"]["expression"]["candidates"][index];
+    json!({"draftId": draft["draftId"], "revision": draft["revision"], "sha256": draft["media"]["large"]["sha256"]})
+}
+
+async fn draft_get_4829(w: &World4829, jwt: &str, draft: &Value, path: &str) -> reqwest::Response {
+    let id = draft["draftId"].as_str().unwrap();
+    let url = match path {
+        "image" => format!(
+            "{}/v1/workspaces/{}/expression-drafts/{id}/image?size=large&v={}",
+            w.base,
+            w.fixture.workspace,
+            draft["media"]["large"]["sha256"]
+                .as_str()
+                .unwrap_or(&"0".repeat(64))
+        ),
+        _ => format!(
+            "{}/v1/workspaces/{}/expression-drafts/{id}",
+            w.base, w.fixture.workspace
+        ),
+    };
+    w.client.get(url).bearer_auth(jwt).send().await.unwrap()
+}
+
+async fn open_images_4829(w: &World4829, approval: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM expression_draft_image i JOIN expression_draft d ON (d.workspace_id,d.id)=(i.workspace_id,i.draft_id) WHERE d.approval_id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap()
+}
+
+/// The whole loop with all three sources, a failed link, a direct upload that replaces a
+/// candidate, a stale choice, two decisions racing, and the reclaim of what was not chosen.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_offers_three_sources_and_registers_exactly_the_one_chosen() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    // The requester's own attachment in this conversation + a link + a failing link + bytes.
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine".into(), tiny_png_3787());
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    w.mock.replies.lock().unwrap().insert(
+        "https://cdn.example.test/blocked.gif".into(),
+        Err(momo_unfurl::FetchError::Blocked),
+    );
+    let prompt = "고양이가 춤추는 그림 PROMPT-SECRET";
+    let (status, proposed) = propose_4829(&w, json!([
+        candidate_4829("from_attachment", Value::Null, json!({"source": "attachment", "attachmentId": attachment.to_string()})),
+        candidate_4829("from_link", Value::Null, json!({"source": "url", "url": "https://cdn.example.test/ok.gif?token=Q-SECRET"})),
+        candidate_4829("from_blocked", Value::Null, json!({"source": "url", "url": "https://cdn.example.test/blocked.gif?token=Q-SECRET2"})),
+        candidate_4829("from_agent", Value::Null, generated_4829(&tiny_png_3787(), prompt)),
+    ])).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    assert!(
+        w.mock
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.contains("Q-SECRET")),
+        "the query is used to fetch"
+    );
+
+    // ---- what was stored: drafts behind the approval, never bytes/prompt/query in args ----
+    let rows: Vec<(String, Option<String>, i32, bool)> = sqlx::query_as(
+        "SELECT d.state, d.code, d.candidate_index, d.expires_at = a.expires_at FROM expression_draft d JOIN approval a ON (a.workspace_id,a.id)=(d.workspace_id,d.approval_id) WHERE a.id=$1 ORDER BY d.candidate_index")
+        .bind(approval).fetch_all(&w.su).await.unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.0.as_str(), r.1.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("ready", None),
+            ("ready", None),
+            ("manual_upload_required", Some("source_blocked")),
+            ("ready", None)
+        ]
+    );
+    assert!(
+        rows.iter().all(|r| r.3),
+        "an action draft follows the approval's own expiry"
+    );
+    let (status_text, payload): (String, Value) =
+        sqlx::query_as("SELECT status::text, payload FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(status_text, "pending");
+    let stored = payload.to_string();
+    assert_eq!(
+        payload["action"]["args"]["drafts"].as_array().map(Vec::len),
+        Some(4),
+        "{payload}"
+    );
+    assert!(payload["action"]["pins"]["subject"].is_null());
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64", "mine"] {
+        assert!(
+            !stored.contains(secret),
+            "the stored arguments carry {secret}: {stored}"
+        );
+    }
+    let audits: String = sqlx::query_scalar("SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1 AND action IN ('expression.staged')")
+        .bind(ws).fetch_one(&w.su).await.unwrap();
+    assert!(
+        audits.contains("source_blocked") && audits.contains("cdn.example.test"),
+        "{audits}"
+    );
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
+        assert!(!audits.contains(secret), "audit carries {secret}");
+    }
+    let card = card_4829(&w, approval).await;
+    let candidates = card["action"]["expression"]["candidates"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(candidates.len(), 4);
+    assert_eq!(candidates[2]["state"], "manual_upload_required");
+    assert_eq!(
+        candidates[2]["origin"]["sourceUrl"],
+        "https://cdn.example.test/blocked.gif"
+    );
+    assert_eq!(
+        candidates[3]["origin"]["prompt"], prompt,
+        "the card shows the agent's prompt"
+    );
+    assert!(
+        card.to_string().contains("보관 범위"),
+        "an attachment source widens the keeping scope on the card"
+    );
+    assert!(!card.to_string().contains("Q-SECRET"));
+
+    // ---- preview: the exact stored bytes, to people who may decide, nobody else --------
+    let ready = &candidates[0];
+    let image = draft_get_4829(&w, &w.requester_jwt, ready, "image").await;
+    assert_eq!(image.status(), 200);
+    assert_eq!(image.headers()["cache-control"], "private, no-store");
+    assert_eq!(
+        draft_get_4829(&w, &admin_jwt, ready, "image")
+            .await
+            .status(),
+        200,
+        "an admin may decide a faceless card"
+    );
+    assert_eq!(
+        draft_get_4829(&w, &w.guest_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "a guest may not"
+    );
+    assert_eq!(
+        draft_get_4829(&w, &w.outsider_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "nor a member of another room"
+    );
+    let foreign = seed(&w.su).await;
+    assert_eq!(
+        draft_get_4829(&w, &foreign.human_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "nor another tenant"
+    );
+    let mut wrong = ready.clone();
+    wrong["media"]["large"]["sha256"] = json!("0".repeat(64));
+    assert_eq!(
+        draft_get_4829(&w, &w.requester_jwt, &wrong, "image")
+            .await
+            .status(),
+        404,
+        "a wrong hash is the same 404"
+    );
+
+    // ---- refusals that spend nothing -------------------------------------------------
+    let good = choice_4829(&card, 0);
+    for (label, jwt, approve, choice, want) in [
+        (
+            "no choice",
+            &w.requester_jwt,
+            true,
+            None,
+            (400, "expression_choice_required"),
+        ),
+        (
+            "choice on a rejection",
+            &w.requester_jwt,
+            false,
+            Some(good.clone()),
+            (400, "expression_choice_not_allowed"),
+        ),
+        (
+            "a guest",
+            &w.guest_jwt,
+            true,
+            Some(good.clone()),
+            (403, "role_required"),
+        ),
+        (
+            "the failed link",
+            &w.requester_jwt,
+            true,
+            Some(
+                json!({"draftId": candidates[2]["draftId"], "revision": "1", "sha256": "0".repeat(64)}),
+            ),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a wrong hash",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": ready["draftId"], "revision": "1", "sha256": "1".repeat(64)})),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a stranger's draft",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": Uuid::new_v4(), "revision": "1", "sha256": "1".repeat(64)})),
+            (409, "expression_preview_stale"),
+        ),
+    ] {
+        let (status, receipt) = decide_4829(&w, jwt, approval, approve, choice).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            want,
+            "{label}: {receipt}"
+        );
+        let pending: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        assert_eq!(pending, "pending", "{label} must not spend the approval");
+    }
+    // another action's decision rejects the field too, and does not run
+    let (invite, _) = propose_invite(&w.client, &w.base, &w.su, &w.fixture, json!({})).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, invite, true, Some(good.clone())).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (400, "expression_choice_not_allowed"),
+        "{receipt}"
+    );
+    assert_eq!(approval_status_4385(&w.su, invite).await, "pending");
+    let (status, _) = decide_4829(&w, &admin_jwt, invite, false, None).await;
+    assert_eq!(
+        status, 200,
+        "the invite card is rejected to free the pending slot"
+    );
+
+    // ---- a direct upload replaces the failed link; a replaced picture makes the old choice stale
+    let put = |jwt: String, draft: String, bytes: Vec<u8>| {
+        let (client, url) = (
+            w.client.clone(),
+            format!(
+                "{}/v1/workspaces/{ws}/expression-drafts/{draft}/file",
+                w.base
+            ),
+        );
+        async move {
+            let boundary = "oort-expr-4829";
+            let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
+            body.extend_from_slice(&bytes);
+            body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+            client
+                .put(url)
+                .bearer_auth(jwt)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        put(
+            w.guest_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 1)
+        )
+        .await
+        .status(),
+        403,
+        "a guest cannot replace (the add role)"
+    );
+    assert_eq!(
+        put(
+            w.outsider_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 1)
+        )
+        .await
+        .status(),
+        404,
+        "nor another room"
+    );
+    let replaced = put(
+        w.face_jwt.clone(),
+        candidates[2]["draftId"].as_str().unwrap().into(),
+        noise_png_4829(20, 1),
+    )
+    .await;
+    assert_eq!(
+        replaced.status(),
+        200,
+        "any current decider may upload by hand"
+    );
+    let replaced: Value = replaced.json().await.unwrap();
+    assert_eq!(
+        (replaced["state"].as_str(), replaced["revision"].as_str()),
+        (Some("ready"), Some("2"))
+    );
+    assert_eq!(
+        replaced["origin"], candidates[2]["origin"],
+        "the origin is kept, never laundered into an upload"
+    );
+    let card2 = card_4829(&w, approval).await;
+    assert_eq!(
+        card2["action"]["expression"]["candidates"][2]["revision"], "2",
+        "the card shows the new revision"
+    );
+    // The old choice on a candidate whose picture was just replaced is stale; the replaced one is chosen later.
+    // The NEW hash with the OLD revision: only the revision guard can refuse it.
+    let stale_choice = json!({"draftId": candidates[2]["draftId"], "revision": "1",
+        "sha256": card2["action"]["expression"]["candidates"][2]["media"]["large"]["sha256"]});
+    let (status, receipt) =
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(stale_choice)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_preview_stale"),
+        "{receipt}"
+    );
+    // The preview of the replaced picture is the new one.
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.requester_jwt,
+            &card2["action"]["expression"]["candidates"][2],
+            "image"
+        )
+        .await
+        .status(),
+        200
+    );
+
+    // ---- two decisions race (an admin and the requester): exactly one registers -----------
+    let pick = choice_4829(&card2, 1);
+    let (a, b) = tokio::join!(
+        decide_4829(&w, &admin_jwt, approval, true, Some(pick.clone())),
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())),
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort_unstable();
+    assert_eq!(
+        statuses,
+        [200, 409],
+        "one wins, the other sees an approved card: {a:?} {b:?}"
+    );
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(registered, 1, "a row lock registers it once");
+    let (name, created_by, proposed_by): (String, Uuid, Uuid) =
+        sqlx::query_as("SELECT name, created_by, proposed_by FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(name, "from_link");
+    assert_eq!(proposed_by, w.fixture.hosted_agent);
+    assert!(
+        [w.fixture.human, w.requester].contains(&created_by),
+        "the deciding person is the creator"
+    );
+    let images: i64 = sqlx::query_scalar("SELECT count(*) FROM expression_image i JOIN expression e ON (e.workspace_id,e.id)=(i.workspace_id,i.expression_id) WHERE e.approval_id=$1").bind(approval).fetch_one(&w.su).await.unwrap();
+    assert_eq!(images, 3);
+    assert_eq!(
+        open_images_4829(&w, approval).await,
+        0,
+        "every draft's bytes are gone, the chosen one's moved to the expression"
+    );
+    let states: Vec<String> = sqlx::query_scalar(
+        "SELECT state FROM expression_draft WHERE approval_id=$1 ORDER BY candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(states, ["expired", "activated", "expired", "expired"]);
+    // The card settled in place with the result, and the audit has no bytes/prompt.
+    let settled = card_4829(&w, approval).await;
+    assert_eq!(
+        settled["result"]["expression"]["name"], "from_link",
+        "{settled}"
+    );
+    assert_eq!(settled["result"]["expression"]["token"], ":from_link:");
+    let changed: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'").bind(ws).fetch_one(&w.su).await.unwrap();
+    assert!(changed >= 1);
+    let all_audit: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
+        assert!(!all_audit.contains(secret), "audit carries {secret}");
+    }
+    // The outbox: the agent's prompt is only in the approval CARD's own broadcast (it must be, to
+    // be drawn); the link's query and any base64 are in no outbox row at all, and the
+    // `expression.changed` / decision events never carry a prompt.
+    let card_message: Uuid =
+        sqlx::query_scalar("SELECT request_message_id FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let prompt_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT payload::text FROM outbox WHERE workspace_id=$1 AND payload::text LIKE '%PROMPT-SECRET%'",
+    )
+    .bind(ws)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        !prompt_rows.is_empty(),
+        "the card itself carries the prompt it shows"
+    );
+    for row in &prompt_rows {
+        assert!(
+            row.contains(&card_message.to_string()),
+            "a prompt outside the card's own broadcast: {row}"
+        );
+    }
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND (payload::text LIKE '%Q-SECRET%' OR payload::text LIKE '%dataBase64%')",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "no outbox row carries a link query or base64");
+    let created_audit: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.created' AND detail->>'approval_id'=$2").bind(ws).bind(approval.to_string()).fetch_one(&w.su).await.unwrap();
+    assert_eq!(created_audit, 1);
+    // A late replacement on a settled card is gone.
+    assert_eq!(
+        put(
+            w.requester_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 2)
+        )
+        .await
+        .status(),
+        404
+    );
+    // And no plain message can dress itself as one of these cards.
+    let forged = w.client.post(format!("{}/v1/workspaces/{ws}/channels/{}/messages", w.base, w.fixture.channel)).bearer_auth(&w.requester_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": ":from_link:", "props": {"action": "x", "result": "y", "expression": "z"}})).send().await.unwrap();
+    assert!(forged.status().is_success());
+    let forged: Value = forged.json().await.unwrap();
+    let stored_props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1::uuid")
+        .bind(forged["id"].as_str().unwrap())
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    for key in ["action", "result", "expression"] {
+        assert!(
+            stored_props.get(key).is_none(),
+            "{key} survived into {stored_props}"
+        );
+    }
+    assert_eq!(forged["type"].as_str().unwrap_or("text"), "text");
+}
+
+async fn set_policy_4829(w: &World4829, policy: &str) {
+    sqlx::query("INSERT INTO expression_catalog(workspace_id, add_policy) VALUES($1,$2) ON CONFLICT (workspace_id) DO UPDATE SET add_policy=EXCLUDED.add_policy")
+        .bind(w.fixture.workspace)
+        .bind(policy)
+        .execute(&w.su)
+        .await
+        .unwrap();
+}
+
+/// Who the push would wake, by the ONE predicate the decision route asks too.
+async fn may_approve_4829(w: &World4829, approval: Uuid, member: Uuid) -> bool {
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let mut conn = w.su.acquire().await.unwrap();
+    momo_push::may_approve_in_tx(
+        &mut conn,
+        w.fixture.workspace,
+        &momo_push::ApprovalCard {
+            approval_id: approval,
+            action_type: "workspace_action".into(),
+            payload,
+        },
+        member,
+    )
+    .await
+    .unwrap()
+}
+
+/// A face means that person AND the add policy as it is now: no admin proxy, no guest, and a
+/// policy narrowed after the proposal is read again by the decision, the push audience and the
+/// preview alike.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_only_the_face_who_the_policy_allows_decides() {
+    let w = world_4829().await;
+    let admin = w.fixture.human;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "my_face",
+            json!(w.face.to_string()),
+            generated_4829(&tiny_png_3787(), "p"),
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = card_4829(&w, approval).await;
+    let choice = choice_4829(&card, 0);
+    assert!(
+        card.to_string().contains("그 본인만"),
+        "the card says only that person approves"
+    );
+    // The push audience and the route agree about every person: only the face.
+    for (who, label, want) in [
+        (admin, "admin", false),
+        (w.requester, "requester", false),
+        (w.guest, "guest", false),
+        (w.face, "face", true),
+    ] {
+        assert_eq!(
+            may_approve_4829(&w, approval, who).await,
+            want,
+            "audience: {label}"
+        );
+    }
+    for (jwt, label) in [
+        (&admin_jwt, "an admin"),
+        (&w.requester_jwt, "the requester"),
+        (&w.guest_jwt, "a guest"),
+    ] {
+        let (status, receipt) = decide_4829(&w, jwt, approval, true, Some(choice.clone())).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (403, "role_required"),
+            "{label}: {receipt}"
+        );
+    }
+    // Neither does the face's picture preview leak to a non-decider: the admin may preview
+    // only because they are... not the face: 404.
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &admin_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        404,
+        "an admin who may not decide may not preview a face"
+    );
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.face_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        200
+    );
+    // The policy is narrowed AFTER the proposal: the face (a plain member) is now refused,
+    // and nobody can approve (the admin is not the face).
+    set_policy_4829(&w, "admins").await;
+    let (status, receipt) =
+        decide_4829(&w, &w.face_jwt, approval, true, Some(choice.clone())).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (403, "role_required"),
+        "{receipt}"
+    );
+    assert!(
+        !may_approve_4829(&w, approval, w.face).await,
+        "the push audience reads the policy now"
+    );
+    assert!(
+        !may_approve_4829(&w, approval, admin).await,
+        "an admin is still not the face"
+    );
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.face_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        404,
+        "the preview reads the policy now"
+    );
+    set_policy_4829(&w, "members").await;
+    let (status, receipt) = decide_4829(&w, &w.face_jwt, approval, true, Some(choice)).await;
+    assert_eq!(status, 200, "{receipt}");
+    let subject: Option<Uuid> =
+        sqlx::query_scalar("SELECT subject_member_id FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(subject, Some(w.face));
+    // A faceless card under an admins-only policy: an admin may, a plain member may not.
+    set_policy_4829(&w, "admins").await;
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "no_face",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let faceless = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, faceless).await, 0);
+    assert_eq!(
+        decide_4829(&w, &w.requester_jwt, faceless, true, Some(pick.clone()))
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        decide_4829(&w, &admin_jwt, faceless, true, Some(pick))
+            .await
+            .0,
+        200
+    );
+    set_policy_4829(&w, "members").await;
+    // The name is permanent: a second card for a name already registered is refused at the
+    // decision (409), nothing spent, nothing registered.
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "no_face",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let taken = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, taken).await, 0);
+    let (status, receipt) = decide_4829(&w, &admin_jwt, taken, true, Some(pick)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_name_reserved"),
+        "{receipt}"
+    );
+    assert_eq!(approval_status_4385(&w.su, taken).await, "pending");
+    // The library is full at 1,000 (active + hidden): the same card is refused for room.
+    sqlx::query("INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, version) SELECT $1, 'fill_' || g, 'f', '[]'::jsonb, '{\"kind\":\"upload\",\"sourceUrl\":null,\"prompt\":null}'::jsonb, $2, 100 + g FROM generate_series(1, 999) g")
+        .bind(w.fixture.workspace)
+        .bind(w.requester)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "one_too_many",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let last = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, last).await, 0);
+    let (status, receipt) = decide_4829(&w, &admin_jwt, last, true, Some(pick)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_quota"),
+        "{receipt}"
+    );
+    assert_eq!(
+        approval_status_4385(&w.su, last).await,
+        "pending",
+        "a full library spends nothing"
+    );
+}
+
+/// What the server refuses before it stores anything, and the transport budget that belongs to
+/// this action alone.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("theirs".into(), tiny_png_3787());
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("elsewhere".into(), tiny_png_3787());
+    let theirs_msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.face, "남의 사진").await;
+    let theirs = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.face,
+        Some(theirs_msg),
+        "theirs",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let else_msg =
+        seed_message_4385(&w.su, ws, w.fixture.private_channel, w.requester, "다른 방").await;
+    let elsewhere = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.private_channel,
+        w.requester,
+        Some(else_msg),
+        "elsewhere",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock.replies.lock().unwrap().insert(
+        "https://inside.example.test/x.gif".into(),
+        Err(momo_unfurl::FetchError::OriginBlocked),
+    );
+    let outsider: Uuid =
+        sqlx::query_scalar("SELECT id FROM member WHERE workspace_id=$1 AND handle LIKE 'out-%'")
+            .bind(ws)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let html = b64_3787(b"<html><script>alert(1)</script></html>");
+    let too_big = b64_3787(&vec![0u8; 1024 * 1024 + 1]);
+    let one = |image: Value| json!([candidate_4829("probe", Value::Null, image)]);
+    let png = generated_4829(&tiny_png_3787(), "p");
+    let cases: Vec<(&str, Value)> = vec![
+        (
+            "another person's attachment",
+            one(json!({"source": "attachment", "attachmentId": theirs.to_string()})),
+        ),
+        (
+            "the requester's file in another conversation",
+            one(json!({"source": "attachment", "attachmentId": elsewhere.to_string()})),
+        ),
+        (
+            "an unknown attachment id",
+            one(json!({"source": "attachment", "attachmentId": Uuid::new_v4().to_string()})),
+        ),
+        (
+            "a private literal",
+            one(json!({"source": "url", "url": "https://127.0.0.1/x.gif"})),
+        ),
+        (
+            "plain http",
+            one(json!({"source": "url", "url": "http://cdn.example.test/x.gif"})),
+        ),
+        (
+            "a port other than 443",
+            one(json!({"source": "url", "url": "https://cdn.example.test:8443/x.gif"})),
+        ),
+        (
+            "a name that resolves private at the first hop",
+            one(json!({"source": "url", "url": "https://inside.example.test/x.gif"})),
+        ),
+        (
+            "credentials in the link",
+            one(json!({"source": "url", "url": "https://u:p@cdn.example.test/x.gif"})),
+        ),
+        (
+            "a fifth candidate",
+            json!([0, 1, 2, 3, 4].map(|n| candidate_4829(
+                &format!("n{n}"),
+                Value::Null,
+                png.clone()
+            ))),
+        ),
+        (
+            "two different faces",
+            json!([
+                candidate_4829("a1", Value::Null, png.clone()),
+                candidate_4829("a2", json!(w.face.to_string()), png.clone())
+            ]),
+        ),
+        (
+            "a face outside this conversation",
+            json!([candidate_4829(
+                "a1",
+                json!(outsider.to_string()),
+                png.clone()
+            )]),
+        ),
+        (
+            "an absent face declaration",
+            json!([{"name": "a1", "displayName": "a1", "tags": [], "image": png.clone()}]),
+        ),
+        (
+            "invalid base64",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": "!!!!", "prompt": "p"}),
+            ),
+        ),
+        (
+            "a web page as bytes",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": html, "prompt": "p"}),
+            ),
+        ),
+        (
+            "more than 1 MiB decoded",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": too_big, "prompt": "p"}),
+            ),
+        ),
+        (
+            "an empty prompt",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": b64_3787(&tiny_png_3787()), "prompt": ""}),
+            ),
+        ),
+        (
+            "a bad name",
+            json!([candidate_4829("Bad Name!", Value::Null, png.clone())]),
+        ),
+    ];
+    let count = |sql: &'static str| {
+        let su = w.su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    let (approvals, drafts) = (
+        count("SELECT count(*) FROM approval").await,
+        count("SELECT count(*) FROM expression_draft").await,
+    );
+    for (label, candidates) in cases {
+        let (status, refused) = propose_4829(&w, candidates).await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    assert_eq!(
+        count("SELECT count(*) FROM approval").await,
+        approvals,
+        "no approval was created"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM expression_draft").await,
+        drafts,
+        "no draft was stored"
+    );
+
+    // ---- the budget: four ~1 MB candidates make it end to end (> 64 KiB, < 6 MiB) ------------
+    let big: Vec<Value> = (0..4u32)
+        .map(|n| {
+            candidate_4829(
+                &format!("big{n}"),
+                Value::Null,
+                generated_4829(&noise_png_4829(500, n), "p"),
+            )
+        })
+        .collect();
+    let body_len = serde_json::to_vec(&big).unwrap().len();
+    assert!(
+        body_len > 4_000_000 && body_len < 6 * 1024 * 1024,
+        "{body_len}"
+    );
+    let (status, proposed) = propose_4829(&w, json!(big)).await;
+    assert_eq!(status, 200, "four 1 MB candidates round-trip: {proposed}");
+    let big_approval = proposed_approval_3706(&proposed);
+    let ready: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression_draft WHERE approval_id=$1 AND state='ready'",
+    )
+    .bind(big_approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(ready, 4);
+    // Rejecting it reclaims all four pictures' bytes (and keeps the rows as records).
+    assert!(open_images_4829(&w, big_approval).await >= 12);
+    let (status, _) = decide_4829(&w, &w.requester_jwt, big_approval, false, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        open_images_4829(&w, big_approval).await,
+        0,
+        "a rejection reclaims the bytes"
+    );
+    let states: Vec<String> =
+        sqlx::query_scalar("SELECT state FROM expression_draft WHERE approval_id=$1")
+            .bind(big_approval)
+            .fetch_all(&w.su)
+            .await
+            .unwrap();
+    assert!(states.iter().all(|s| s == "expired"), "{states:?}");
+
+    // ---- other actions and other callers keep the 64 KiB ceiling --------------------------------
+    let handle = |bearer: String, extra: Value, name: &'static str| {
+        let (client, url) = (w.client.clone(), format!("{}{PATH}", w.base));
+        async move {
+            let body = modern_body(
+                "tools/call",
+                json!("1"),
+                json!({"name": name, "arguments": extra}),
+            );
+            client
+                .post(url)
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("mcp-protocol-version", MODERN_VERSION)
+                .header("mcp-method", "tools/call")
+                .header("mcp-name", name)
+                .bearer_auth(bearer)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+    let huge = "x".repeat(2 * 1024 * 1024);
+    assert_eq!(handle(w.fixture.hosted_bearer.clone(), json!({"handle": "h", "actionId": "member.avatar.set", "args": {"avatar": {"source": "generated", "dataBase64": huge.clone()}}, "rationale": "expression.create"}), "oort_action_propose").await, 413, "avatar.set cannot borrow the budget");
+    assert_eq!(
+        handle(
+            w.fixture.hosted_bearer.clone(),
+            json!({"pad": huge.clone(), "actionId": "expression.create"}),
+            "oort_ping"
+        )
+        .await,
+        413,
+        "another tool cannot"
+    );
+    assert_eq!(
+        handle(
+            "not-a-token".into(),
+            json!({"handle": "h", "actionId": "expression.create", "args": {"pad": huge.clone()}}),
+            "oort_action_propose"
+        )
+        .await,
+        401,
+        "authentication comes before the large body is collected"
+    );
+    let over = "y".repeat(6 * 1024 * 1024 + 10);
+    assert_eq!(
+        handle(
+            w.fixture.hosted_bearer.clone(),
+            json!({"handle": "h", "actionId": "expression.create", "args": {"pad": over}}),
+            "oort_action_propose"
+        )
+        .await,
+        413,
+        "past 6 MiB is refused"
+    );
+
+    // ---- RLS: another tenant sees no draft of this approval ------------------------------------
+    let foreign = seed(&w.su).await;
+    let seen: i64 = momo_db::with_tenant_tx(&w.app, foreign.workspace, move |conn| {
+        Box::pin(async move {
+            Ok::<_, momo_db::DbError>(
+                sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE approval_id=$1")
+                    .bind(big_approval)
+                    .fetch_one(&mut *conn)
+                    .await?,
+            )
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(seen, 0);
+    let unprivileged: (bool, bool) =
+        sqlx::query_as("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            .fetch_one(&w.app)
+            .await
+            .unwrap();
+    assert_eq!(
+        unprivileged,
+        (false, false),
+        "the runtime role under test is not privileged"
+    );
+}
+
+/// Every way a card closes takes its candidates' bytes with it: a late tap that settles it as
+/// expired, the TTL sweep, and a run that is cancelled.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_every_close_reclaims_the_candidate_bytes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let mut propose = |name: &'static str| {
+        let w = &w;
+        async move {
+            let (status, proposed) = propose_4829(
+                w,
+                json!([candidate_4829(
+                    name,
+                    Value::Null,
+                    generated_4829(&tiny_png_3787(), "p")
+                )]),
+            )
+            .await;
+            assert_eq!(status, 200, "{proposed}");
+            proposed_approval_3706(&proposed)
+        }
+    };
+    // (1) a late tap: the approval is past its expiry, so approving settles it as expired.
+    let late = propose("late_tap").await;
+    let pick = choice_4829(&card_4829(&w, late).await, 0);
+    assert_eq!(open_images_4829(&w, late).await, 3);
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+        .bind(late)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, receipt) = decide_4829(&w, &w.requester_jwt, late, true, Some(pick)).await;
+    assert_ne!(status, 200, "an expired card registers nothing: {receipt}");
+    assert_eq!(
+        open_images_4829(&w, late).await,
+        0,
+        "the expiry arm reclaims"
+    );
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
+            .bind(late)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(registered, 0);
+    // (2) the TTL sweep: a draft past its own expiry loses its bytes without any decision.
+    let swept = propose("ttl_sweep").await;
+    let mut clock = w.su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft DISABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_draft SET expires_at = clock_timestamp() - interval '1 second' WHERE approval_id=$1").bind(swept).execute(&mut *clock).await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft ENABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    clock.commit().await.unwrap();
+    assert_eq!(open_images_4829(&w, swept).await, 3);
+    momo_expressions::sweep_expired(&w.su, &w.app)
+        .await
+        .unwrap();
+    assert_eq!(open_images_4829(&w, swept).await, 0, "the sweep reclaims");
+    // (3) a run that is cancelled retires its pending card and the candidates with it.
+    let cancelled = propose("cancel_run").await;
+    let run: Uuid = sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
+        .bind(cancelled)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(open_images_4829(&w, cancelled).await, 3);
+    momo_db::with_tenant_tx(&w.app, ws, move |conn| {
+        Box::pin(async move {
+            momo_agent::approval::cancel_pending_approvals_for_run_in_tx(
+                conn,
+                ws,
+                run,
+                chrono::Utc::now(),
+            )
+            .await?;
+            Ok::<_, momo_db::DbError>(())
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        open_images_4829(&w, cancelled).await,
+        0,
+        "a cancelled run reclaims"
+    );
+    let _ = &mut propose;
+}

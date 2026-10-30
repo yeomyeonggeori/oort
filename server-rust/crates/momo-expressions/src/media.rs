@@ -31,6 +31,11 @@ pub enum Rejected {
     Video,
     #[error("image processing timed out")]
     Timeout,
+    /// Both decoder slots are taken. A retryable state of the **server**, not a property of
+    /// the picture and not a time limit it exceeded: a link import never records it as
+    /// `source_timeout` (ADR-0218 appendix C), it answers 503 or waits for a slot.
+    #[error("image processing is busy")]
+    Busy,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -66,6 +71,22 @@ pub async fn process(bytes: Vec<u8>) -> Result<Processed, Rejected> {
     supervised(bytes, decoder_path()?, DEADLINE, semaphore()).await
 }
 
+/// [`process`], but a busy decoder is **waited for** up to `wait` instead of refused at
+/// once. Used by the agent action, whose candidates are decoded one after another inside
+/// one deadline. The wait is the only difference: the input bound, the two slots, the
+/// supervised child and its limits are the same ones, and an exhausted wait is
+/// [`Rejected::Busy`], never `Timeout`.
+pub async fn process_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Processed, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    let permit = tokio::time::timeout(wait, semaphore().acquire_owned())
+        .await
+        .map_err(|_| Rejected::Busy)?
+        .map_err(|_| Rejected::Invalid)?;
+    run_with_permit(bytes, decoder_path()?, DEADLINE, permit).await
+}
+
 async fn supervised(
     bytes: Vec<u8>,
     path: std::path::PathBuf,
@@ -74,9 +95,16 @@ async fn supervised(
 ) -> Result<Processed, Rejected> {
     // Admission happens before detaching: canceled callers cannot accumulate
     // an unbounded queue of 5 MiB inputs waiting behind the two codec slots.
-    let permit = semaphore
-        .try_acquire_owned()
-        .map_err(|_| Rejected::Timeout)?;
+    let permit = semaphore.try_acquire_owned().map_err(|_| Rejected::Busy)?;
+    run_with_permit(bytes, path, deadline, permit).await
+}
+
+async fn run_with_permit(
+    bytes: Vec<u8>,
+    path: std::path::PathBuf,
+    deadline: Duration,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<Processed, Rejected> {
     // The supervisor survives cancellation of the HTTP request and retains its
     // permit until the actual child has exited and been reaped.
     let task = tokio::spawn(async move {
@@ -495,6 +523,47 @@ fn preflight(format: ImageFormat, b: &[u8]) -> Result<(u32, u32), Rejected> {
 #[cfg(test)]
 thread_local! { static CODEC_STARTS:std::cell::Cell<usize>=const {std::cell::Cell::new(0)}; }
 
+/// ISO base media (MP4/MOV) whose major brand is one of the video brands.
+fn is_mp4_video(bytes: &[u8]) -> bool {
+    bytes.get(4..8) == Some(b"ftyp")
+        && matches!(
+            bytes.get(8..12),
+            Some(b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"qt  ")
+        )
+}
+/// The EBML header that opens WebM/Matroska.
+fn is_ebml(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+}
+
+/// What a body's leading bytes claim to be (ADR-0218 D3: names, MIME types and
+/// extensions are never believed). Decoding stays the only authority on whether an
+/// image is acceptable. This only lets the link importer tell "a web page or some
+/// other format" (`source_unsupported`) from "an image we could not decode"
+/// (`source_invalid_media`) without starting a codec process for either (#4829).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sniffed {
+    /// PNG, JPEG, WebP or GIF magic: worth decoding.
+    Image,
+    /// MP4/MOV with a video brand, or WebM/Matroska: [`decode`] answers `Video`.
+    Video,
+    /// Anything else: HTML, SVG, HEIC/AVIF, a script, an empty body.
+    Unsupported,
+}
+
+/// Classify by magic only; never reads past the first bytes.
+pub fn sniff(bytes: &[u8]) -> Sniffed {
+    if is_mp4_video(bytes) || is_ebml(bytes) {
+        return Sniffed::Video;
+    }
+    match image::guess_format(bytes) {
+        Ok(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif) => {
+            Sniffed::Image
+        }
+        _ => Sniffed::Unsupported,
+    }
+}
+
 pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
@@ -503,16 +572,13 @@ pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
         return Err(Rejected::Timeout);
     }
     if bytes.get(4..8) == Some(b"ftyp") {
-        return if matches!(
-            bytes.get(8..12),
-            Some(b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"qt  ")
-        ) {
+        return if is_mp4_video(bytes) {
             Err(Rejected::Video)
         } else {
             Err(Rejected::Invalid)
         };
     }
-    if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+    if is_ebml(bytes) {
         return Err(Rejected::Video);
     }
     let format = image::guess_format(bytes).map_err(|_| Rejected::Invalid)?;
@@ -650,7 +716,7 @@ mod tests {
             )
             .await;
             assert!(
-                matches!(result, Ok(Err(Rejected::Timeout))),
+                matches!(result, Ok(Err(Rejected::Busy))),
                 "busy inputs must finish without a queued supervisor"
             );
         }

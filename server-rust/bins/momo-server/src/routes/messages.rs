@@ -121,6 +121,12 @@ pub(crate) fn is_server_owned_props_key(key: &str) -> bool {
             key,
             "origin" | "target_member_id" | "requested_for" | "dm_admission_id"
         )
+        // ADR-0218 appendix B / ADR-0186 v8: `action.expression` (the candidates a person is
+        // asked to choose from) and `result.expression` (what was saved) are written only by
+        // the server, inside an approval card's own transaction. A plain message can carry
+        // none of the three top-level names those blocks live under, so a member cannot dress
+        // a message as a trusted expression card.
+        || matches!(key, "action" | "result" | "expression")
 }
 
 /// `momo.instruction` — see [`crate::routes::work_instructions`].
@@ -1935,6 +1941,17 @@ mod tests {
         props.clear();
         props.insert("source".to_string(), "prime".to_string());
         assert_eq!(props_value(Some(&props))["source"], "prime");
+    }
+
+    #[test]
+    fn client_props_cannot_forge_an_expression_card() {
+        let mut props = BTreeMap::new();
+        for key in ["action", "result", "expression"] {
+            props.insert(key.to_string(), "{\"expression\":{}}".to_string());
+        }
+        props.insert("note".to_string(), "kept".to_string());
+        let value = props_value(Some(&props));
+        assert_eq!(value, serde_json::json!({"note": "kept"}));
     }
 
     #[test]

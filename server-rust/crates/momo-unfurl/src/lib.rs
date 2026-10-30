@@ -13,6 +13,8 @@
 //!
 //! * URL extract / normalise / OG+Twitter parse
 //! * the SSRF-guarded GET (OutboundHTTPPolicy reused, redirect ≤3 re-checked)
+//! * the link-receiving half of an expression import ([`source`]: which typed
+//!   links are accepted, the one deadline, the closed failure codes; #4829)
 //! * `message_unfurl` / cache / job / tombstone / workspace setting SQL
 //! * the drain loop the webhook-sender binary runs
 //!
@@ -26,6 +28,7 @@ pub mod parse;
 pub mod proxy;
 pub mod remove;
 pub mod settings;
+pub mod source;
 pub mod store;
 pub mod worker;
 
@@ -42,6 +45,10 @@ pub use proxy::{
 };
 pub use remove::{remove_unfurls_in_tx, RemoveOutcome};
 pub use settings::{load_setting_in_tx, upsert_setting_in_tx, UnfurlSetting};
+pub use source::{
+    fetch_source, parse_source_url, SourceFailure, SourceUrl, SourceUrlError, SOURCE_DEADLINE,
+    SOURCE_MAX_BYTES,
+};
 pub use store::{list_unfurls_in_tx, load_unfurl_in_tx, UnfurlRecord};
 pub use worker::{DrainStats, UnfurlWorker, NOTIFY_CHANNEL};
 

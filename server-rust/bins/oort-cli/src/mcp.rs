@@ -37,6 +37,29 @@ const MAX_CLIENT_VERSION_CHARS: usize = 64;
 /// The door buffers at most this much (`momo_mcp::MAX_BODY_BYTES`); a longer line is refused here.
 pub const MAX_LINE_BYTES: usize = 64 * 1024;
 
+/// ADR-0218 appendix A / ADR-0186 v8: the one request allowed past [`MAX_LINE_BYTES`] is a
+/// `tools/call` of `oort_action_propose` naming `expression.create`, up to 6 MiB (four 1 MiB
+/// generated candidates as base64 plus the envelope). Pinned equal to
+/// `momo_mcp::MAX_EXPRESSION_REQUEST_BYTES` by `tests/wire_constants.rs`.
+pub const MAX_EXPRESSION_LINE_BYTES: usize = 6 * 1024 * 1024;
+/// The action id that budget belongs to (pinned to `momo_mcp::EXPRESSION_CREATE_ACTION_ID`).
+pub const EXPRESSION_CREATE_ACTION_ID: &str = "expression.create";
+const PROPOSE_TOOL: &str = "oort_action_propose";
+
+/// Is this stdin line exactly an `expression.create` proposal? Only then may it be longer than
+/// [`MAX_LINE_BYTES`]; the server proves the same shape again before it reads past 64 KiB.
+fn is_expression_create_proposal(line: &str) -> bool {
+    let Ok(request) = serde_json::from_str::<Value>(line) else {
+        return false;
+    };
+    request.get("method").and_then(Value::as_str) == Some("tools/call")
+        && request.pointer("/params/name").and_then(Value::as_str) == Some(PROPOSE_TOOL)
+        && request
+            .pointer("/params/arguments/actionId")
+            .and_then(Value::as_str)
+            == Some(EXPRESSION_CREATE_ACTION_ID)
+}
+
 const RPC_PARSE_ERROR: i64 = -32700;
 const RPC_INVALID_REQUEST: i64 = -32600;
 const RPC_INTERNAL: i64 = -32603;
@@ -315,8 +338,22 @@ pub fn serve(ctx: &Ctx) -> Result<(), CliError> {
     let mut input = stdin.lock();
     let mut said_client_info = false;
     loop {
-        let line = match read_line(&mut input, MAX_LINE_BYTES) {
+        let line = match read_line(&mut input, MAX_EXPRESSION_LINE_BYTES) {
             Ok(Line::Eof) => return Ok(()),
+            Ok(Line::Text(text))
+                if text.len() > MAX_LINE_BYTES && !is_expression_create_proposal(&text) =>
+            {
+                let response = rpc_error(
+                    Value::Null,
+                    RPC_INVALID_REQUEST,
+                    "request is too large",
+                    None,
+                );
+                if write_json(&response).is_err() {
+                    return Ok(());
+                }
+                continue;
+            }
             Ok(Line::TooLong) => {
                 let response = rpc_error(
                     Value::Null,

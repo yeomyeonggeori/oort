@@ -17,6 +17,8 @@ momo-auth = { path = "../momo-auth" }
 momo-db = { path = "../momo-db" }
 momo-drive = { path = "../momo-drive" }
 momo-messaging = { path = "../momo-messaging" }
+# ADR-0186 v8: `expression.create` candidate metadata is validated by the one contract.
+momo-expressions = { path = "../momo-expressions" }
 momo-settings = { path = "../momo-settings" }
 
 sqlx.workspace = true
