@@ -59,6 +59,8 @@ pub struct RunUsageReport {
 /// without a database.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedUsage {
+    /// Set by the trusted writer, never accepted from a callback payload.
+    pub source: UsageSource,
     pub model: String,
     pub effort: Option<&'static str>,
     pub prompt_tokens: i32,
@@ -67,6 +69,21 @@ pub struct ResolvedUsage {
     pub reasoning_tokens: i32,
     pub cost_micro_usd: i64,
     pub was_estimated: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsageSource {
+    Measured,
+    SelfReported,
+}
+
+impl UsageSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Measured => "measured",
+            Self::SelfReported => "self_reported",
+        }
+    }
 }
 
 impl RunUsageReport {
@@ -94,6 +111,7 @@ impl RunUsageReport {
             &model,
         );
         ResolvedUsage {
+            source: UsageSource::SelfReported,
             effort,
             prompt_tokens: report.and_then(|usage| usage.prompt_tokens).unwrap_or(0),
             completion_tokens: report
@@ -129,8 +147,8 @@ pub async fn record_run_usage_in_tx(
         "INSERT INTO usage_ledger \
            (workspace_id, run_id, agent_member_id, channel_id, model, \
             prompt_tokens, completion_tokens, cached_tokens, reasoning_tokens, \
-            cost_micro_usd, was_estimated, effort) \
-         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12 \
+            cost_micro_usd, was_estimated, effort, source) \
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13 \
           WHERE NOT EXISTS ( \
             SELECT 1 FROM usage_ledger WHERE workspace_id = $1 AND run_id = $2 \
           )",
@@ -147,6 +165,7 @@ pub async fn record_run_usage_in_tx(
     .bind(usage.cost_micro_usd)
     .bind(usage.was_estimated)
     .bind(usage.effort)
+    .bind(usage.source.as_str())
     .execute(&mut *conn)
     .await?;
     Ok(inserted.rows_affected() > 0)
@@ -335,6 +354,18 @@ pub async fn usage_summary_in_tx(
     workspace_id: Uuid,
     window: UsageWindow,
 ) -> Result<UsageSummary, DbError> {
+    usage_summary_visible_in_tx(conn, workspace_id, window, None).await
+}
+
+/// The same projection with every aggregate restricted to the authorized ids.
+/// `None` preserves the administrator/legacy workspace response. Empty means
+/// no visible agents, never "all".
+pub async fn usage_summary_visible_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    window: UsageWindow,
+    visible_agents: Option<&[Uuid]>,
+) -> Result<UsageSummary, DbError> {
     let totals_row = sqlx::query(
         "SELECT COALESCE(sum(cost_micro_usd), 0)::bigint AS cost_micro_usd, \
                 COALESCE(sum(cost_micro_usd) FILTER (WHERE was_estimated), 0)::bigint \
@@ -342,11 +373,13 @@ pub async fn usage_summary_in_tx(
                 COALESCE(sum(prompt_tokens), 0)::bigint AS prompt_tokens, \
                 COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens \
            FROM usage_ledger \
-          WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3",
+          WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3 \
+            AND ($4::uuid[] IS NULL OR agent_member_id = ANY($4))",
     )
     .bind(workspace_id)
     .bind(window.from)
     .bind(window.to)
+    .bind(visible_agents)
     .fetch_one(&mut *conn)
     .await?;
     let totals = UsageTotals {
@@ -364,12 +397,14 @@ pub async fn usage_summary_in_tx(
                 COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens \
            FROM usage_ledger \
           WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3 \
+            AND ($5::uuid[] IS NULL OR agent_member_id = ANY($5)) \
           GROUP BY 1 ORDER BY 1",
     )
     .bind(workspace_id)
     .bind(window.from)
     .bind(window.to)
     .bind(window.bucket.as_str())
+    .bind(visible_agents)
     .fetch_all(&mut *conn)
     .await?;
     let buckets = bucket_rows
@@ -391,11 +426,13 @@ pub async fn usage_summary_in_tx(
                 COALESCE(sum(completion_tokens), 0)::bigint AS completion_tokens \
            FROM usage_ledger \
           WHERE workspace_id = $1 AND created_at >= $2 AND created_at <= $3 \
+            AND ($4::uuid[] IS NULL OR agent_member_id = ANY($4)) \
           GROUP BY model ORDER BY cost_micro_usd DESC, model ASC",
     )
     .bind(workspace_id)
     .bind(window.from)
     .bind(window.to)
+    .bind(visible_agents)
     .fetch_all(&mut *conn)
     .await?;
     let by_model = model_rows
@@ -420,12 +457,14 @@ pub async fn usage_summary_in_tx(
            LEFT JOIN member m \
              ON m.id = u.agent_member_id AND m.workspace_id = u.workspace_id \
           WHERE u.workspace_id = $1 AND u.created_at >= $2 AND u.created_at <= $3 \
+            AND ($4::uuid[] IS NULL OR u.agent_member_id = ANY($4)) \
           GROUP BY u.agent_member_id, m.display_name \
           ORDER BY cost_micro_usd DESC, u.agent_member_id ASC",
     )
     .bind(workspace_id)
     .bind(window.from)
     .bind(window.to)
+    .bind(visible_agents)
     .fetch_all(&mut *conn)
     .await?;
     let by_agent = agent_rows
@@ -705,6 +744,89 @@ pub async fn provider_spend_in_tx(
         .map_err(DbError::from)
 }
 
+/// One price/provenance bucket. No names, owners, channels or run ids leave the
+/// ledger reader. The route folds these into one row per authorized agent.
+#[derive(Debug, Clone)]
+pub struct AgentUsageRow {
+    pub agent_member_id: Uuid,
+    pub model: String,
+    pub source: Option<String>,
+    pub runs: i64,
+    pub reported_runs: i64,
+    pub prompt_tokens: i64,
+    pub completion_tokens: i64,
+    pub cached_tokens: i64,
+    pub cost_micro_usd: i64,
+    pub unpriced_runs: i64,
+    pub estimated_runs: i64,
+}
+
+/// Read-time token × USD list price. Callback-supplied dollars never determine
+/// this projection. Missing prices stay distinguishable from a priced zero.
+pub async fn agent_usage_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    window: UsageWindow,
+    visible_agents: &[Uuid],
+) -> Result<Vec<AgentUsageRow>, DbError> {
+    let rows = sqlx::query(
+        "WITH priced AS ( \
+           SELECT u.*, p.id AS price_id, \
+                  (GREATEST(u.prompt_tokens::bigint - GREATEST(u.cached_tokens::bigint, 0), 0) * p.input_micro_usd_per_token \
+                   + GREATEST(u.completion_tokens, 0)::numeric * p.output_micro_usd_per_token \
+                   + LEAST(GREATEST(u.cached_tokens, 0), GREATEST(u.prompt_tokens, 0))::numeric * p.cache_read_micro_usd_per_token) AS list_cost, \
+                  ((p.source_url = 'https://docs.x.ai/developers/pricing' AND u.prompt_tokens >= 200000) \
+                    OR (p.source_url = 'https://x.ai/news/grok-4-fast' AND u.prompt_tokens >= 128000)) AS tier_uncertain \
+             FROM usage_ledger u \
+             LEFT JOIN LATERAL ( \
+               SELECT mp.* FROM model_pricing mp \
+                WHERE (mp.workspace_id IS NULL OR mp.workspace_id = $1) \
+                  AND mp.currency = 'USD' AND mp.effective_from <= u.created_at \
+                  AND starts_with(replace(regexp_replace(lower(u.model), '^[^/]+/', ''), '.', '-'), mp.model) \
+                ORDER BY (mp.workspace_id IS NULL), length(mp.model) DESC, mp.effective_from DESC, mp.id \
+                LIMIT 1) p ON true \
+            WHERE u.workspace_id = $1 AND u.created_at >= $2 AND u.created_at <= $3 \
+              AND u.agent_member_id = ANY($4)) \
+         SELECT agent_member_id, model, source, count(*)::bigint AS runs, \
+                count(*) FILTER (WHERE prompt_tokens > 0 OR completion_tokens > 0 \
+                    OR cached_tokens > 0 OR reasoning_tokens > 0 \
+                    OR (source = 'measured' AND NOT was_estimated))::bigint AS reported_runs, \
+                COALESCE(sum(GREATEST(prompt_tokens, 0)), 0)::bigint AS prompt_tokens, \
+                COALESCE(sum(GREATEST(completion_tokens, 0)), 0)::bigint AS completion_tokens, \
+                COALESCE(sum(LEAST(GREATEST(cached_tokens, 0), GREATEST(prompt_tokens, 0))), 0)::bigint AS cached_tokens, \
+                round(COALESCE(sum(list_cost), 0))::bigint AS cost_micro_usd, \
+                count(*) FILTER (WHERE price_id IS NULL)::bigint AS unpriced_runs, \
+                count(*) FILTER (WHERE was_estimated OR tier_uncertain OR prompt_tokens < 0 OR completion_tokens < 0 \
+                    OR cached_tokens < 0 OR cached_tokens > prompt_tokens)::bigint AS estimated_runs \
+           FROM priced GROUP BY agent_member_id, model, source \
+          ORDER BY agent_member_id, model, source",
+    )
+    .bind(workspace_id)
+    .bind(window.from)
+    .bind(window.to)
+    .bind(visible_agents)
+    .fetch_all(&mut *conn)
+    .await?;
+    rows.iter()
+        .map(|row| {
+            Ok(AgentUsageRow {
+                agent_member_id: row.try_get("agent_member_id")?,
+                model: row.try_get("model")?,
+                source: row.try_get("source")?,
+                runs: row.try_get("runs")?,
+                reported_runs: row.try_get("reported_runs")?,
+                prompt_tokens: row.try_get("prompt_tokens")?,
+                completion_tokens: row.try_get("completion_tokens")?,
+                cached_tokens: row.try_get("cached_tokens")?,
+                cost_micro_usd: row.try_get("cost_micro_usd")?,
+                unpriced_runs: row.try_get("unpriced_runs")?,
+                estimated_runs: row.try_get("estimated_runs")?,
+            })
+        })
+        .collect::<Result<Vec<_>, sqlx::Error>>()
+        .map_err(DbError::from)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -723,6 +845,7 @@ mod tests {
         assert_eq!(
             resolved,
             ResolvedUsage {
+                source: UsageSource::SelfReported,
                 model: "hermes-agent".to_string(),
                 effort: None,
                 prompt_tokens: 0,

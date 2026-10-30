@@ -709,11 +709,11 @@ mod tests {
     /// the duplicate and cooldown reads over `approval`) and `agent_initiative_refusal`, the per-(agent,
     /// reason) one-hour window of the refusal audit row, under RLS ENABLE + FORCE and `ws_isolation`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_156() {
+    fn discovers_contiguous_migrations_001_to_157() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=156).collect();
+        let expected: Vec<i64> = (1..=157).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -721,7 +721,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=156 under {}",
+            "expected contiguous 001..=157 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -729,7 +729,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("156_dm_agent_admission"));
+            .starts_with("157_agent_usage_visibility"));
     }
 
     #[test]

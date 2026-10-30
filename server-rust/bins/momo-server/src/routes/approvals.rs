@@ -1703,6 +1703,50 @@ fn args_invalid_refusal(
     )
 }
 
+/// A connection mismatch is audited even when coverage or a stale target makes
+/// argument resolution fail before the ordinary pins comparison. Call only after
+/// the existing decider gate, so the refusal reveals nothing to an ineligible
+/// decider. Unasked cards keep their existing decision/audit path.
+async fn args_invalid_refusal_in_tx(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+) -> Result<Decision, momo_db::DbError> {
+    if momo_agent::initiative::is_unasked_card(approval) {
+        return Ok(args_invalid_refusal(approval, input, now));
+    }
+    let HostedActionConnection::Standing(connection) =
+        hosted_action_connection_in_tx(conn, input.workspace_id, approval.requested_by).await?
+    else {
+        return Ok(args_invalid_refusal(approval, input, now));
+    };
+    if approval.payload.pointer("/action/pins/hostedConnection") != Some(&json!(connection)) {
+        write_audit(
+            conn,
+            &AuditEntry::new(input.workspace_id, "action.refused")
+                .by(input.member_id)
+                .about(approval.requested_by)
+                .target("approval", approval.id)
+                .via_token(input.via_token_id)
+                .run(approval.run_id)
+                .with_schema(
+                    "momo.action.refused.v1",
+                    stamp_via(
+                        input.credential_via,
+                        json!({
+                            "action_id": approval.payload.pointer("/action/id"),
+                            "approval_id": approval.id.to_string(),
+                            "reason": "hosted_connection_changed",
+                        }),
+                    ),
+                ),
+        )
+        .await?;
+    }
+    Ok(args_invalid_refusal(approval, input, now))
+}
+
 /// Approve a `workspace_action`: run it here, now, as the person who said yes.
 async fn execute_workspace_action(
     conn: &mut PgConnection,
@@ -1804,7 +1848,9 @@ async fn execute_workspace_action(
     // looser rules of a card a person asked for (security review of #4704, M2).
     let initiated = momo_agent::initiative::is_unasked_card(approval);
     if initiated && !action.initiative {
-        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+        return Ok(Ok(
+            args_invalid_refusal_in_tx(conn, approval, input, now).await?
+        ));
     }
     // **The decision proves the door again** (ADR-0186 증보 v5 U-d 「재증명」): a card may be a day
     // old, and everything that let an agent raise it can have changed since. The switch is on, the
@@ -1831,7 +1877,11 @@ async fn execute_workspace_action(
         .await?
         {
             Some(connection) => Some(connection),
-            None => return Ok(Ok(args_invalid_refusal(approval, input, now))),
+            None => {
+                return Ok(Ok(
+                    args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                ))
+            }
         }
     } else {
         None
@@ -1882,7 +1932,9 @@ async fn execute_workspace_action(
             // to the person it was drawn for, and to nobody else.
             if required_role == Some(RequiredRole::RequestingMember) {
                 if pinned_target == Some(input.member_id) {
-                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                    return Ok(Ok(
+                        args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                    ));
                 }
                 return role_required_refusal(conn, approval, input, now, required_role).await;
             }
@@ -1891,7 +1943,9 @@ async fn execute_workspace_action(
                     .await?
                     .is_ok()
                 {
-                    return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                    return Ok(Ok(
+                        args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                    ));
                 }
             }
             return role_required_refusal(conn, approval, input, now, required_role).await;
@@ -1916,7 +1970,9 @@ async fn execute_workspace_action(
             {
                 return role_required_refusal(conn, approval, input, now, required_role).await;
             }
-            return Ok(Ok(args_invalid_refusal(approval, input, now)));
+            return Ok(Ok(
+                args_invalid_refusal_in_tx(conn, approval, input, now).await?
+            ));
         }
     };
 
@@ -1951,7 +2007,9 @@ async fn execute_workspace_action(
                 {
                     return role_required_refusal(conn, approval, input, now, required_role).await;
                 }
-                return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                return Ok(Ok(
+                    args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                ));
             }
             Err(_) => {
                 return role_required_refusal(conn, approval, input, now, required_role).await;
@@ -1984,7 +2042,9 @@ async fn execute_workspace_action(
         .and_then(|action| action.get("pins"))
         .unwrap_or(&Value::Null);
     if stored_pins != &resolved.pins {
-        return Ok(Ok(args_invalid_refusal(approval, input, now)));
+        return Ok(Ok(
+            args_invalid_refusal_in_tx(conn, approval, input, now).await?
+        ));
     }
 
     // ---- 3. the action's own executor --------------------------------------
@@ -2202,7 +2262,9 @@ async fn execute_workspace_action(
             )
             .await?
             else {
-                return Ok(Ok(args_invalid_refusal(approval, input, now)));
+                return Ok(Ok(
+                    args_invalid_refusal_in_tx(conn, approval, input, now).await?
+                ));
             };
             Executed {
                 audits: vec![AuditEntry::new(input.workspace_id, "member.renamed")

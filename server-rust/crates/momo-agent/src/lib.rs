@@ -385,11 +385,11 @@ pub use thread_wake::{
     UnclaimedThreadTurn, THREAD_REPLY_WAKE_REASON,
 };
 pub use usage::{
-    budget_state, chain_usage_in_tx, provider_spend_in_tx, record_run_usage_in_tx,
-    usage_summary_in_tx, validated_window, ChainUsage, ProviderModelSpend, ResolvedUsage,
-    RunUsageReport, UsageAgentRow, UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow,
-    UsageSummary, UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS,
-    MAX_RANGE_DAYS,
+    agent_usage_in_tx, budget_state, chain_usage_in_tx, provider_spend_in_tx,
+    record_run_usage_in_tx, usage_summary_in_tx, usage_summary_visible_in_tx, validated_window,
+    AgentUsageRow, ChainUsage, ProviderModelSpend, ResolvedUsage, RunUsageReport, UsageAgentRow,
+    UsageBucket, UsageBucketRow, UsageBudget, UsageModelRow, UsageSource, UsageSummary,
+    UsageTotals, UsageWindow, UsageWindowError, DEFAULT_LOOKBACK_DAYS, MAX_RANGE_DAYS,
 };
 pub use welcome::{
     configure_welcome_hosted_signal_hours, ensure_agent_in_general_in_tx,

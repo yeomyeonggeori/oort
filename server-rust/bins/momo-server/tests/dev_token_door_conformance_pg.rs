@@ -2365,7 +2365,6 @@ const MOUNTED_WITHOUT_CONTRACT: Drift = &[
             ("GET", "/v1/workspaces/{}/agents/{}/gateway/jobs/pending"),
             ("GET", "/v1/workspaces/{}/channels/{}/agent-runs"),
             ("GET", "/v1/workspaces/{}/devices"),
-            ("GET", "/v1/workspaces/{}/usage/summary"),
             ("POST", "/v1/agent-runs/{}/approval-decisions"),
             ("POST", "/v1/provider/link/test"),
             ("POST", "/v1/workspaces"),
