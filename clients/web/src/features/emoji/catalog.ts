@@ -20,45 +20,24 @@ import {
 // devDependency.
 // =============================================================================
 
-export const EMOJI_CATEGORY_IDS = [
-  "people",
-  "nature",
-  "foods",
-  "activity",
-  "places",
-  "objects",
-  "symbols",
-  "flags",
-] as const;
-
-export type EmojiCategoryId = (typeof EMOJI_CATEGORY_IDS)[number];
-
-export type CatalogEmoji = {
-  glyph: string;
-  name: string;
-  shortcodes: string[];
-  keywords: string[];
-  category: EmojiCategoryId;
-  skins?: string[];
-};
-
-type RawCatalog = {
-  v: number;
-  items: Array<
-    [string, string, string[], string[], number] | [string, string, string[], string[], number, string[]]
-  >;
-};
-
-export function parseCatalog(raw: RawCatalog): CatalogEmoji[] {
-  return raw.items.flatMap((row) => {
-    const [glyph, name, shortcodes, keywords, categoryIndex, skins] = row;
-    const category = EMOJI_CATEGORY_IDS[categoryIndex];
-    if (!glyph || !name || !category) return [];
-    const entry: CatalogEmoji = { glyph, name, shortcodes, keywords, category };
-    if (skins && skins.length === 5) entry.skins = skins;
-    return [entry];
-  });
-}
+export {
+  EMOJI_CATEGORY_IDS,
+  parseCatalog,
+  foldEmoji,
+  resolveCatalogEmoji,
+  displayGlyph,
+} from "@momo/core/features/emoji/catalog";
+export type {
+  EmojiCategoryId,
+  CatalogEmoji,
+  SkinTone,
+} from "@momo/core/features/emoji/catalog";
+import {
+  parseWebCatalog as parseCatalog,
+  type RawCatalog,
+  type CatalogEmoji,
+  type EmojiCategoryId,
+} from "@momo/core/features/emoji/catalog";
 
 // -----------------------------------------------------------------------------
 // 카탈로그 적재와 **재시도** (design-review #1930 H-3).
@@ -95,7 +74,7 @@ let importFailed = false;
 
 async function importCatalog(): Promise<CatalogEmoji[]> {
   const mod = await import("./emojiCatalog.json");
-  return parseCatalog(mod.default as RawCatalog);
+  return parseCatalog(mod.default as unknown as RawCatalog);
 }
 
 async function refetchCatalog(): Promise<CatalogEmoji[]> {
@@ -119,29 +98,6 @@ export function loadCatalog(): Promise<CatalogEmoji[]> {
 export function resetCatalogForTests(): void {
   catalogPromise = undefined;
   importFailed = false;
-}
-
-/** Strip VS16 so 👍 and 👍️ compare as the same picker identity. */
-export function foldEmoji(value: string): string {
-  return value.replaceAll("\uFE0F", "");
-}
-
-export function resolveCatalogEmoji(
-  entries: readonly CatalogEmoji[],
-  glyph: string
-): CatalogEmoji | undefined {
-  const folded = foldEmoji(glyph);
-  return (
-    entries.find((entry) => foldEmoji(entry.glyph) === folded) ??
-    entries.find((entry) => entry.skins?.some((skin) => foldEmoji(skin) === folded))
-  );
-}
-
-export type SkinTone = 0 | 1 | 2 | 3 | 4 | 5;
-
-export function displayGlyph(entry: CatalogEmoji, tone: SkinTone): string {
-  if (tone === 0 || !entry.skins) return entry.glyph;
-  return entry.skins[tone - 1] ?? entry.glyph;
 }
 
 export const EMOJI_CATEGORY_TABS: ReadonlyArray<{

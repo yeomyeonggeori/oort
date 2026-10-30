@@ -1,3 +1,4 @@
+import {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import {
@@ -35,13 +36,7 @@ import { useHoverNone } from "./useHoverNone";
 // 정본 프로그래매틱 패턴을 쓴다.
 // =============================================================================
 
-// eslint-disable-next-line react-refresh/only-export-components -- 테스트와 빈도 시드가 닫힌 32종을 직접 센다.
-export const PICKER_EMOJI = [
-  "👍", "👎", "✅", "❌", "🙏", "🎉", "👀", "😄",
-  "😂", "😅", "🤔", "😮", "😭", "🔥", "💯", "✨",
-  "🚀", "🐛", "🛠️", "📌", "📝", "🔍", "⏳", "⚠️",
-  "❤️", "💡", "🙌", "👏", "☕", "🍀", "🥲", "🫡",
-] as const;
+export {PICKER_EMOJI} from "@momo/core/features/emoji/choices";
 
 const COPY = {
   reaction: {

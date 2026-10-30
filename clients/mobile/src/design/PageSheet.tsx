@@ -356,6 +356,7 @@ function askDiscardDefault(discard: () => void): void {
 
 export function PageSheet({
   onClose,
+  onNavigateBack,
   accessibilityLabel,
   children,
   testID,
@@ -366,6 +367,10 @@ export function PageSheet({
   onDiscardPrompt,
 }: {
   onClose: () => void;
+  /** A nested picker replaces this sheet's content (#4322). Dismiss gestures
+   * return to its editor without dismissing the Modal or losing its draft.
+   * Committed actions (`usePageSheetAction`) still dismiss the whole sheet. */
+  onNavigateBack?: () => void;
   /** 시트가 무엇인지. 보조기술이 모달에 들어설 때 읽는다. */
   accessibilityLabel: string;
   children: React.ReactNode;
@@ -393,12 +398,13 @@ export function PageSheet({
       transparent
       animationType="none"
       statusBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={onNavigateBack ?? onClose}
       onDismiss={onClose}
       testID={testID}>
       <SafeAreaProvider>
         <SheetFrame
           onClose={onClose}
+          onNavigateBack={onNavigateBack}
           accessibilityLabel={accessibilityLabel}
           height={height}
           scrimTestID={scrimTestID}
@@ -420,6 +426,7 @@ const MAX_SAMPLES = 24;
 
 function SheetFrame({
   onClose,
+  onNavigateBack,
   accessibilityLabel,
   height: sheetHeight,
   scrimTestID,
@@ -429,6 +436,7 @@ function SheetFrame({
   children,
 }: {
   onClose: () => void;
+  onNavigateBack?: () => void;
   accessibilityLabel: string;
   height: SheetHeight;
   scrimTestID: string;
@@ -456,6 +464,8 @@ function SheetFrame({
   // 같은 이유로 `dirty`·묻기·시트 높이·스크롤 오프셋도 ref/Map 으로 읽는다 — 응답자의 의존성에 넣지 않는다.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const backRef = useRef(onNavigateBack);
+  backRef.current = onNavigateBack;
   const keyboardRef = useRef(keyboardHeight);
   keyboardRef.current = keyboardHeight;
   const dirtyRef = useRef(dirty);
@@ -535,6 +545,11 @@ function SheetFrame({
   }, [slideOut]);
   // 사용자가 부른 닫기(X·스크림·escape·끌기)가 지나는 문. 행동 누름(`closeThen`)은 이 문을 지나지 않는다.
   const close = useCallback(() => {
+    if (backRef.current && !closing.current) {
+      Keyboard.dismiss();
+      backRef.current();
+      return;
+    }
     if (dirtyRef.current && !closing.current) {
       askDiscard();
       return;
@@ -676,6 +691,12 @@ function SheetFrame({
             return;
           }
           // 저장 안 한 입력이 있으면 제자리로 돌아온 뒤에 묻는다.
+          if (backRef.current) {
+            settle();
+            Keyboard.dismiss();
+            backRef.current();
+            return;
+          }
           if (dirtyRef.current) {
             settle();
             askDiscard();
