@@ -948,9 +948,9 @@ describe('승인 푸시로 도착한 카드의 도착 강조는 결정되면 곧
     });
 
     await waitFor(() => expect(landedIds()).toHaveLength(0), SETTLE);
-    // 카드는 그 결정을 말한다 — 컨트롤이 물러나고 칩이 「승인됨」이다.
+    // 카드는 그 결정을 말한다 — 컨트롤이 물러나고 칩이 「끝」이다.
     expect(screen.queryByTestId(`card-approval-${APPROVAL_ID}-approve`)).toBeNull();
-    expect(screen.getByText('승인됨')).toBeTruthy();
+    expect(screen.getByTestId('agent-status-chip')).toHaveTextContent(/^끝$/);
   });
 });
 

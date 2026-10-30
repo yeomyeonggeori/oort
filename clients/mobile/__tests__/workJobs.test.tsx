@@ -29,7 +29,7 @@ import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
 // 폰 「작업」 한 화면 (ADR-0202 D1·D2·D6, U1 #3842). 화면 단위 시험이다: 기본 필터는 「내 것」,
 // 서버에 `who`로 묻고, 옛 서버면 팀 보드 한 벌로 물러서며, 줄은 결과(에이전트 보고 꼬리표)를
-// 말하고, 승인 대기 줄에는 결정 단추가 없다. 홈 「작업 중」 카드 머리의 「모두 보기」가 이 층을 연다.
+// 말하고, 승인 필요 줄에는 결정 단추가 없다. 홈 「작업 중」 카드 머리의 「모두 보기」가 이 층을 연다.
 
 const WS = '22222222-2222-4222-8222-222222222222';
 const SELF_ID = '11111111-1111-4111-8111-111111111111';
@@ -252,12 +252,12 @@ describe('결과 중심 줄 (ADR-0202 D1)', () => {
     expect(screen.getByText('지금 진행 1')).toBeTruthy();
   });
 
-  it('승인 대기 줄은 맨 위에 서고 「승인 대기」이며, 결정 단추 없이 카드 자리로 가는 길만 있다', async () => {
+  it('승인 필요 줄은 맨 위에 서고 「승인 필요」이며, 결정 단추 없이 카드 자리로 가는 길만 있다', async () => {
     installFetch();
     renderJobs();
     await waitFor(() => expect(screen.getByTestId('work-job-row-RUN-APPROVAL')).toBeTruthy());
     expect(rowIds()[0]).toBe('work-job-row-RUN-APPROVAL');
-    expect(screen.getByTestId('work-job-state-RUN-APPROVAL')).toHaveTextContent(/승인 대기/);
+    expect(screen.getByTestId('work-job-state-RUN-APPROVAL')).toHaveTextContent(/승인 필요/);
     expect(screen.getByTestId('work-job-approval-RUN-APPROVAL')).toHaveTextContent('승인은 그 카드에서 해요');
     fireEvent.press(screen.getByTestId('work-job-row-RUN-APPROVAL'));
     await waitFor(() => expect(screen.getByTestId('team-detail-approval-link')).toBeTruthy());

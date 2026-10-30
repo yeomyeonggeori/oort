@@ -222,14 +222,14 @@ describe("승인 카드 기한 (#3738)", () => {
     expect(document.activeElement).not.toBe(q(el, "agent-card"));
   });
 
-  it("기한이 지난 카드는 컨트롤이 없고 「다시 제안해 달라고 하기」가 선다", () => {
+  it("기한이 지난 카드는 컨트롤이 없고 「다시 요청」가 선다", () => {
     const el = mount(actionProps("channel.create", CHANNEL_CREATE_ROWS, "admin", T0 - 1_000));
     expect(q(el, "approval-approve")).toBeNull();
     expect(q(el, "approval-reject")).toBeNull();
     expect(q(el, "approval-expired")?.textContent).toContain(
       "승인 시간이 지나서 더 이상 결정할 수 없어요."
     );
-    expect(q(el, "approval-repropose")?.textContent).toBe("다시 제안해 달라고 하기");
+    expect(q(el, "approval-repropose")?.textContent).toBe("다시 요청");
   });
 
   it("버튼은 그 에이전트를 멘션한 초안을 그 채널의 입력창에 넣는다 (보내지 않는다)", () => {
