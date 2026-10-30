@@ -169,3 +169,16 @@ describe("서버 실물 표본 (격리 PG18, #4398)", () => {
     ).toMatch(/avatar-preview\?v=[0-9a-f]{64}$/);
   });
 });
+
+describe("프로필 전후 미리보기 (#4791)", () => {
+  it("서버의 버전별 이전 사진 경로만 남긴다", () => {
+    const path = '/v1/workspaces/ws/members/member/avatar/content?v=previous';
+    expect(parseAvatarImagePreview({...WIRE_PREVIEW, previousAvatarUrl:path})?.previousAvatarUrl).toBe(path);
+    for (const bad of ['https://evil.example/photo', '//evil.example/a', '/v1/workspaces/../members/a/avatar/content?v=x', '/v1/workspaces/ws/members/a/avatar/content?v=x&token=y']) {
+      expect(parseAvatarImagePreview({...WIRE_PREVIEW, previousAvatarUrl:bad})?.previousAvatarUrl).toBeNull();
+    }
+  });
+  it("새 이름 행동이 인박스에 사람 말로 나온다", () => {
+    expect(workspaceActionLabel('member.display_name.set')).toBe('내 이름 바꾸기');
+  });
+});

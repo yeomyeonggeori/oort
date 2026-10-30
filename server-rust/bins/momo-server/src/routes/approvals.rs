@@ -103,8 +103,8 @@ use momo_agent::{
 };
 use momo_auth::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
-    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
+    hosted_action_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
+    Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -2101,6 +2101,47 @@ async fn execute_workspace_action(
                 Execution::Refused(decision) => return Ok(Ok(decision)),
             }
         }
+        ActionArgs::MemberDisplayNameSet {
+            display_name,
+            target: Some(person),
+        } => {
+            if person.id != input.member_id {
+                return Err(protocol_error(
+                    "member.display_name.set reached another person",
+                ));
+            }
+            let Some(applied) = momo_messaging::rename_own_display_name_in_tx(
+                conn,
+                input.workspace_id,
+                input.member_id,
+                display_name,
+            )
+            .await?
+            else {
+                return Ok(Ok(args_invalid_refusal(approval, input, now)));
+            };
+            Executed {
+                audits: vec![AuditEntry::new(input.workspace_id, "member.renamed")
+                    .by(input.member_id).about(input.member_id).target("member", input.member_id)
+                    .via_token(input.via_token_id).run(approval.run_id)
+                    .with_schema("momo.member.renamed.v1", json!({
+                        "old": applied.previous_display_name, "new": applied.member.display_name,
+                        "via_agent": approval.requested_by.to_string(), "approval_id": approval.id.to_string(),
+                    }))],
+                ref_type: REF_TYPE_MEMBER, ref_id: input.member_id,
+                result_body: "내 이름을 바꿨어요".to_string(),
+                result_rows: vec![
+                    momo_agent::actions::action_row("바꾸기 전", &person.display_name),
+                    momo_agent::actions::action_row("바꾼 뒤", display_name),
+                ],
+                secret_once: None, next: None,
+            }
+        }
+        ActionArgs::MemberDisplayNameSet { target: None, .. } => {
+            return Err(protocol_error(
+                "member.display_name.set resolved without a person",
+            ));
+        }
         ActionArgs::MemberAvatarSet {
             avatar,
             target: Some(person),
@@ -2486,6 +2527,8 @@ async fn execute_channel_create(
     // read finds the connection *through the credential's expiry*; for a card that waited a day it
     // finds nothing, and the agent would be seated in a room its connection does not cover with the
     // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
+    // A requested card proves the proposer's own connection by the same standing rule. Only a
+    // managed proposer has no connection to widen; an ended hosted connection refuses the action.
     let connection = if add_proposer {
         match card_connection {
             Some(card_connection) => {
@@ -2507,9 +2550,37 @@ async fn execute_channel_create(
                 Some((card_connection, covered))
             }
             None => {
-                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-                    .await
-                    .map_err(momo_db::DbError::from)?
+                match hosted_action_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?
+                {
+                    HostedActionConnection::Managed => None,
+                    HostedActionConnection::Standing(connection_id) => {
+                        let Some(covered) = lock_hosted_connection_in_tx(
+                            conn,
+                            input.workspace_id,
+                            approval.requested_by,
+                            connection_id,
+                        )
+                        .await
+                        .map_err(momo_db::DbError::from)?
+                        else {
+                            return Ok(Execution::Refused(args_invalid_refusal(
+                                approval, input, now,
+                            )));
+                        };
+                        Some((connection_id, covered))
+                    }
+                    HostedActionConnection::Unavailable => {
+                        return Ok(Execution::Refused(args_invalid_refusal(
+                            approval, input, now,
+                        )));
+                    }
+                }
             }
         }
     } else {

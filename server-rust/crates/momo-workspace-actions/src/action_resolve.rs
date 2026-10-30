@@ -31,7 +31,8 @@ use momo_agent::actions::{
     INVITE_MAX_USES_CEILING, INVITE_PROPOSABLE_ROLES,
 };
 use momo_auth::{
-    active_hosted_connection_in_tx, lock_active_hosted_connection_in_tx,
+    active_hosted_connection_in_tx, hosted_action_connection_in_tx,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
     MAX_HOSTED_APPROVED_CHANNELS,
 };
 
@@ -157,6 +158,10 @@ pub enum ActionArgs {
     /// (never from an argument).
     MemberAvatarSet {
         avatar: AvatarIntent,
+        target: Option<ResolvedPerson>,
+    },
+    MemberDisplayNameSet {
+        display_name: String,
         target: Option<ResolvedPerson>,
     },
     InviteCreate {
@@ -486,6 +491,7 @@ pub fn validated_action_args_from(
         actions::ACTION_WORKSPACE_SETTINGS_UPDATE => workspace_settings_update_args(args),
         actions::ACTION_AGENT_PROFILE_UPDATE => agent_profile_update_args(args, origin),
         actions::ACTION_MEMBER_AVATAR_SET => member_avatar_set_args(args, origin),
+        actions::ACTION_MEMBER_DISPLAY_NAME_SET => member_display_name_set_args(args),
         actions::ACTION_MESSAGE_PIN => message_pin_args(args, PinAction::Pinned),
         actions::ACTION_MESSAGE_UNPIN => message_pin_args(args, PinAction::Unpinned),
         actions::ACTION_AGENT_INVITE => agent_invite_args(args),
@@ -1478,18 +1484,28 @@ pub fn member_avatar_set_args(
         .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
     let avatar = match origin {
         ArgsOrigin::Proposal => {
-            closed_keys(object, &["attachmentId"])?;
-            let raw = match object.get("attachmentId") {
-                Some(Value::String(raw)) => raw.as_str(),
-                Some(_) => return Err(ActionRejection::new("attachmentId must be a string")),
-                None => return Err(ActionRejection::new("attachmentId is required")),
-            };
-            if raw.len() as u64 > actions::AVATAR_ID_TEXT_MAX_CHARS {
-                return Err(ActionRejection::new("attachmentId is not allowed"));
+            closed_keys(object, &["attachmentId", "avatar"])?;
+            if object.contains_key("avatar") {
+                if object.contains_key("attachmentId") {
+                    return Err(ActionRejection::new("choose one image source"));
+                }
+                match avatar_intent(object, origin)? {
+                    generated @ AvatarIntent::Generated(_) => generated,
+                    _ => return Err(ActionRejection::new("avatar is not allowed")),
+                }
+            } else {
+                let raw = match object.get("attachmentId") {
+                    Some(Value::String(raw)) => raw.as_str(),
+                    Some(_) => return Err(ActionRejection::new("attachmentId must be a string")),
+                    None => return Err(ActionRejection::new("attachmentId is required")),
+                };
+                if raw.len() as u64 > actions::AVATAR_ID_TEXT_MAX_CHARS {
+                    return Err(ActionRejection::new("attachmentId is not allowed"));
+                }
+                let id = Uuid::parse_str(raw)
+                    .map_err(|_| ActionRejection::new("attachmentId must be an id"))?;
+                AvatarIntent::Attachment(id)
             }
-            let id = Uuid::parse_str(raw)
-                .map_err(|_| ActionRejection::new("attachmentId must be an id"))?;
-            AvatarIntent::Attachment(id)
         }
         ArgsOrigin::Stored => {
             closed_keys(object, &["avatar"])?;
@@ -1501,6 +1517,7 @@ pub fn member_avatar_set_args(
     };
     let normalized = match &avatar {
         AvatarIntent::Attachment(_) => json!({"avatar": {"source": "attachment"}}),
+        AvatarIntent::Generated(_) => json!({"avatar": {"source": "generated"}}),
         AvatarIntent::Staged {
             image_id,
             sha256,
@@ -1516,6 +1533,29 @@ pub fn member_avatar_set_args(
         rows: Vec::new(),
         args: ActionArgs::MemberAvatarSet {
             avatar,
+            target: None,
+        },
+    })
+}
+
+fn member_display_name_set_args(args: &Value) -> Result<ValidatedActionArgs, ActionRejection> {
+    let object = args
+        .as_object()
+        .ok_or_else(|| ActionRejection::new("action args must be an object"))?;
+    closed_keys(object, &["displayName"])?;
+    let raw = object
+        .get("displayName")
+        .and_then(Value::as_str)
+        .ok_or_else(|| ActionRejection::new("displayName is required"))?;
+    // Exactly PATCH /members/me's rules; this changes neither handle nor past mentions.
+    let display_name = momo_settings::normalized_join_display_name(raw)
+        .map_err(|_| ActionRejection::new("display name is not allowed"))?;
+    Ok(ValidatedActionArgs {
+        normalized: json!({"displayName": display_name}),
+        rows: Vec::new(),
+        summary: None,
+        args: ActionArgs::MemberDisplayNameSet {
+            display_name,
             target: None,
         },
     })
@@ -1973,10 +2013,10 @@ pub enum PinScope {
 /// [`resolve_pin_target_in_tx`] with its channel rule named (see [`PinScope`]).
 ///
 /// `covering_connection` names **which connection decides what is "covered"**. `None` is the
-/// proposer's own live connection, found by its fresh credential — right for a card a person asked
-/// for, whose agent was just called. `Some(id)` is a connection the caller has already proved to
+/// proposer's own live connection, found by its fresh credential at proposal time.
+/// `Some(id)` is a connection the caller has already proved to
 /// stand ([`momo_auth::hosted_connection_stands_in_tx`]) and is the one to read: the decision of a
-/// card an agent raised unasked, which waited for its owner past the lifetime of the OAuth access
+/// card, which waited for its approver past the lifetime of the OAuth access
 /// token it was raised under, must be judged by the connection the card stands on and not by
 /// whether the agent happens to hold a fresh credential at the moment a person taps (security
 /// review of #4704 PR B, round 2, H1).
@@ -2314,6 +2354,19 @@ pub async fn resolve_stored_action_in_tx(
     now_ms: i64,
     approval_id: Uuid,
 ) -> ResolveOutcome<ResolvedAction> {
+    // A person's approval can outlive the access token used to raise the card.
+    // Keep hosted-unavailable separate from managed, and share the proved
+    // connection with every coverage read below, just as unasked cards do.
+    let covering_connection =
+        match hosted_action_connection_in_tx(conn, workspace_id, proposer_member_id).await? {
+            HostedActionConnection::Managed => None,
+            HostedActionConnection::Standing(connection) => Some(connection),
+            HostedActionConnection::Unavailable => {
+                return Ok(Err(ActionRejection::new(
+                    "hosted connection is unavailable",
+                )))
+            }
+        };
     resolve_action_with_origin_in_tx(
         conn,
         workspace_id,
@@ -2325,14 +2378,14 @@ pub async fn resolve_stored_action_in_tx(
         ArgsOrigin::Stored,
         Some(approval_id),
         CardAudience::RunChannel,
-        None,
+        covering_connection,
     )
     .await
 }
 
 /// The core of every resolution above. `covering_connection` is [`resolve_pin_target_scoped_in_tx`]'s:
 /// `None` finds the proposer's live connection by its fresh credential, `Some(id)` reads the one the
-/// caller has proved (the decision of an unasked card).
+/// caller has proved (a human decision, requested or unasked).
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_action_with_origin_in_tx(
     conn: &mut PgConnection,
@@ -2566,9 +2619,14 @@ pub async fn resolve_action_with_origin_in_tx(
             // connection before channel and membership rows). Only the
             // proposer's OWN live connection can be found; no argument names
             // another agent's.
-            let Some((connection_id, approved_before)) =
+            let connection_state = if let Some(connection_id) = covering_connection {
+                lock_hosted_connection_in_tx(conn, workspace_id, proposer_member_id, connection_id)
+                    .await?
+                    .map(|count| (connection_id, count))
+            } else {
                 lock_active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
-            else {
+            };
+            let Some((connection_id, approved_before)) = connection_state else {
                 return Ok(Err(ActionRejection::new("no live hosted connection")));
             };
             let approved: Vec<Uuid> = momo_db::sqlx::query_scalar(
@@ -2817,12 +2875,56 @@ pub async fn resolve_action_with_origin_in_tx(
             *before = Some(card);
             subject
         }
+        ActionArgs::MemberDisplayNameSet {
+            display_name,
+            target,
+        } => {
+            if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
+                return Ok(Err(ActionRejection::new("proposer is not an active agent")));
+            }
+            let Some(run_id) = run_id else {
+                return Ok(Err(ActionRejection::new("requester did not resolve")));
+            };
+            let Some((requester, _)) = momo_messaging::requester_of_run_in_tx(
+                conn,
+                workspace_id,
+                run_id,
+                proposer_member_id,
+            )
+            .await?
+            else {
+                return Ok(Err(ActionRejection::new("requester did not resolve")));
+            };
+            let person: Option<(String, String)> = sqlx::query_as(
+                "SELECT display_name, handle FROM member WHERE workspace_id=$1 AND id=$2 \
+                 AND EXISTS (SELECT 1 FROM workspace_membership WHERE workspace_id=$1 AND member_id=$2) \
+                 FOR NO KEY UPDATE",
+            ).bind(workspace_id).bind(requester).fetch_optional(&mut *conn).await?;
+            let Some((previous, handle)) = person else {
+                return Ok(Err(ActionRejection::new("requester did not resolve")));
+            };
+            validated.rows = vec![
+                actions::action_row(
+                    "대상",
+                    actions::member_card_label(&previous, &handle, false),
+                ),
+                actions::action_row("바꾸기 전", &previous),
+                actions::action_row("바꾼 뒤", &*display_name),
+            ];
+            *target = Some(ResolvedPerson {
+                id: requester,
+                display_name: previous,
+                handle,
+                had_avatar: false,
+            });
+            GateSubject::Member(requester)
+        }
         ActionArgs::MemberAvatarSet { avatar, target } => {
             if !proposer_is_live_agent_in_tx(conn, workspace_id, proposer_member_id).await? {
                 return Ok(Err(ActionRejection::new("proposer is not an active agent")));
             }
             // **The person is the one who called this agent, found from the run — never
-            // from an argument.** No run (the team AI), another agent's run, a run nobody
+            // from an argument.** No run, another agent's run, a run nobody
             // addressed, a trigger an agent wrote: the same refusal.
             let Some(run_id) = run_id else {
                 return Ok(Err(ActionRejection::new("avatar target did not resolve")));
@@ -2878,6 +2980,7 @@ pub async fn resolve_action_with_origin_in_tx(
                         return Ok(Err(ActionRejection::new("avatar is not allowed")));
                     }
                 }
+                AvatarIntent::Generated(_) if origin == ArgsOrigin::Proposal => {}
                 // A decision: the image the person was shown must still be the proposer's
                 // own staging for **this person**, still `staged`, bound to the approval
                 // being decided, and its stored bytes must still hash to the pin.
@@ -2920,6 +3023,13 @@ pub async fn resolve_action_with_origin_in_tx(
                 &person.handle,
                 person.had_avatar,
             );
+            if matches!(avatar, AvatarIntent::Generated(_))
+                || matches!(avatar, AvatarIntent::Staged { origin, .. } if origin == "generated")
+            {
+                if let Some(row) = validated.rows.last_mut() {
+                    *row = actions::action_row("사진 출처", "에이전트가 가져온 이미지");
+                }
+            }
             let subject = GateSubject::Member(requester);
             *target = Some(person);
             subject
@@ -3137,6 +3247,10 @@ pub async fn resolve_action_with_origin_in_tx(
         ActionArgs::MemberAvatarSet { avatar, target } => json!({
             "target": target.as_ref().map(|person| person.id.to_string()),
             "avatar": avatar_pin(avatar),
+        }),
+        ActionArgs::MemberDisplayNameSet { target, .. } => json!({
+            "target": target.as_ref().map(|person| person.id.to_string()),
+            "name": target.as_ref().map(|person| person.display_name.clone()),
         }),
         ActionArgs::InviteCreate { .. } => Value::Null,
         // What the card said 「현재」 was: a switch flipped in between re-asks.

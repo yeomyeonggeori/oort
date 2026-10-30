@@ -32,10 +32,10 @@
 //! first byte too many. Only a complete, accepted body is renamed into
 //! `objects/`, and only after its session is spent.
 //!
-//! **One process per archive directory.** Spending a session is serialized by
-//! this process's lock, not by the filesystem. A second process on the same
-//! directory is unsupported — and its `open` would clear the first's pending
-//! sessions.
+//! **One writing process per archive directory.** Spending a session is serialized
+//! by this process's lock, not by the filesystem. A second writer is unsupported
+//! — its `open` would clear the first's pending sessions. Other processes may use
+//! [`LocalDriveArchive::open_reader`] to read landed objects without that cleanup.
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -103,9 +103,29 @@ pub struct LocalDriveArchive {
     base_url: String,
     session_ttl: Duration,
     lock: Mutex<()>,
+    read_only: bool,
 }
 
 impl LocalDriveArchive {
+    /// A second process may read landed objects without boot cleanup, directory
+    /// creation or a write probe (#4791). In particular, starting the agent worker
+    /// must never cancel an API upload that is still in progress.
+    pub fn open_reader(dir: Option<&str>) -> Result<LocalDriveArchive, DriveError> {
+        let root = PathBuf::from(nonempty(dir).ok_or(DriveError::Unavailable)?)
+            .canonicalize()
+            .map_err(|_| DriveError::Unavailable)?;
+        if !root.is_dir() || !root.join(OBJECTS_DIR).is_dir() {
+            return Err(DriveError::Unavailable);
+        }
+        Ok(LocalDriveArchive {
+            root,
+            base_url: String::new(),
+            session_ttl: UPLOAD_SESSION_TTL,
+            lock: Mutex::new(()),
+            read_only: true,
+        })
+    }
+
     /// Create (if missing) and pin a writable archive directory, and clear
     /// what the previous process left pending (#2628): upload sessions, bodies
     /// it was receiving, and interrupted writes. Landed objects are untouched.
@@ -125,6 +145,7 @@ impl LocalDriveArchive {
             base_url: base_url.trim_end_matches('/').to_string(),
             session_ttl: UPLOAD_SESSION_TTL,
             lock: Mutex::new(()),
+            read_only: false,
         })
     }
 
@@ -139,6 +160,9 @@ impl LocalDriveArchive {
     /// Remove a stored object. Not on [`DriveArchive`]: v0 routes never delete.
     /// Tests (and a future janitor) call this directly.
     pub async fn delete(&self, file_id: &str) -> Result<(), DriveError> {
+        if self.read_only {
+            return Err(DriveError::AccessDenied);
+        }
         let _guard = self.lock.lock().await;
         let object = object_path(&self.root, file_id)?;
         let meta = meta_path(&self.root, file_id)?;
@@ -402,7 +426,7 @@ fn read_meta(root: &Path, file_id: &str) -> Result<StoredMeta, DriveError> {
 #[async_trait]
 impl DriveArchive for LocalDriveArchive {
     fn accepts_stub_uploads(&self) -> bool {
-        true
+        !self.read_only
     }
 
     async fn create_resumable_upload(
@@ -412,6 +436,9 @@ impl DriveArchive for LocalDriveArchive {
         mime: &str,
         size_bytes: i64,
     ) -> Result<DriveUploadSession, DriveError> {
+        if self.read_only {
+            return Err(DriveError::AccessDenied);
+        }
         if !(0..=MAX_ATTACHMENT_BYTES).contains(&size_bytes) {
             return Err(DriveError::ContentTooLarge);
         }
@@ -460,6 +487,9 @@ impl DriveArchive for LocalDriveArchive {
     }
 
     async fn delete_file(&self, file_id: &str) -> Result<(), DriveError> {
+        if self.read_only {
+            return Err(DriveError::AccessDenied);
+        }
         let _guard = self.lock.lock().await;
         // `object_path` rejects anything outside the id alphabet, so a stored id
         // can never name a path outside `objects/`.
@@ -505,6 +535,9 @@ impl DriveArchive for LocalDriveArchive {
         content_length: Option<u64>,
         body: UploadBody,
     ) -> Result<(), DriveError> {
+        if self.read_only {
+            return Err(DriveError::AccessDenied);
+        }
         // 1–2. The capability and the headers, before a byte is pulled.
         let first = {
             let _guard = self.lock.lock().await;
@@ -1953,5 +1986,57 @@ mod tests {
                 "#2631: {linked}: the start-up clearing reached through the link"
             );
         }
+    }
+    #[tokio::test]
+    async fn a_profile_reader_keeps_live_uploads_and_cannot_mutate_the_archive_4791() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").unwrap();
+        let pending = archive
+            .create_resumable_upload(Uuid::nil(), "profile.png", "image/png", 5)
+            .await
+            .unwrap();
+        let token = token_from(&pending);
+        let reader = LocalDriveArchive::open_reader(dir.to_str()).unwrap();
+        assert!(!reader.accepts_stub_uploads());
+        assert_eq!(
+            reader
+                .create_resumable_upload(Uuid::nil(), "no.png", "image/png", 5)
+                .await
+                .unwrap_err(),
+            DriveError::AccessDenied
+        );
+        assert_eq!(
+            reader
+                .accept_stub_upload(&token, Some("image/png"), None, body(b"hello"))
+                .await
+                .unwrap_err(),
+            DriveError::AccessDenied
+        );
+        assert_eq!(
+            reader
+                .delete_file(&pending.drive_file_id)
+                .await
+                .unwrap_err(),
+            DriveError::AccessDenied
+        );
+        // Opening the reader did not spend/clear the API's live upload capability.
+        archive
+            .accept_stub_upload(&token, Some("image/png"), None, body(b"hello"))
+            .await
+            .unwrap();
+        assert_eq!(
+            collect(
+                reader
+                    .file_content(&pending.drive_file_id, 5)
+                    .await
+                    .unwrap()
+            )
+            .await,
+            b"hello"
+        );
+        assert_eq!(
+            reader.delete(&pending.drive_file_id).await.unwrap_err(),
+            DriveError::AccessDenied
+        );
     }
 }

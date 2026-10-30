@@ -1761,6 +1761,7 @@ dependencies = [
  "chrono",
  "momo-agent",
  "momo-db",
+ "momo-drive",
  "momo-egress",
  "momo-embed",
  "momo-messaging",
@@ -2313,14 +2314,17 @@ dependencies = [
 name = "momo-workspace-actions"
 version = "0.0.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "momo-agent",
  "momo-auth",
  "momo-db",
+ "momo-drive",
  "momo-messaging",
  "momo-settings",
  "serde_json",
  "sqlx",
+ "tokio",
  "uuid",
 ]
 

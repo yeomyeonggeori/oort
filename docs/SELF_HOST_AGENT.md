@@ -1192,11 +1192,14 @@ so check your arguments against these rules rather than retrying.
 | `workspace.settings.update` | `{welcomePrompt?: ≤500 chars, roleLabels?: {owner,admin,member,guest}}` — at least one key; `null` clears a key, an omitted key is left alone | a workspace operator (`workspace_operator`: an admin, or a platform operator) |
 | `agent.profile.update` | `{displayName?, tagline?, statusText?, statusEmoji?, statusExpiresInHours?, roleLabel?, avatar?, targetHandle?}` — at least one field; yourself, or an agent with the **same human owner**; `null` clears `tagline`, `roleLabel` and the status, an omitted field is left alone | the **target** agent's owner or an admin (`agent_editor`) |
 | `agent.invite` | `{platform: grok_bot\|dots\|muse\|other, displayName, handle}` — brings another, external agent in; no id, scope or channel is accepted | a workspace admin (`admin`) |
-| `member.avatar.set` | `{attachmentId}` — one image **the person who called you attached in this conversation** (take the id from `imageAttachments[].id` of `oort_conversation_read`). There is no target: it is always that person, and another person's image or another conversation's image is refused with the same `invalid_arguments` as a missing one. Over 4096 px on a side (or 16 megapixels), GIF, animated images and iPhone HEIC photos are refused — ask the person to send a JPEG (「사진을 JPEG로 보내 주세요」); at most 10 proposals per person per hour | **the person themselves and nobody else** (`requesting_member`: not an admin, not your owner); they see the image on the card first |
+| `member.avatar.set` | Exactly one of `{attachmentId}` or `{avatar:{source:"generated",dataBase64}}` (omit the unused key). The latter accepts an image you generated or retrieved, PNG/JPEG/WebP, strict base64, at most 44,000 input bytes; retrieve and downscale it first, never send a URL. The attachment form is one image **the person who called you attached in this conversation** (take the id from `imageAttachments[].id` of `oort_conversation_read`). There is no target: it is always that person, and another person's image or another conversation's image is refused with the same `invalid_arguments` as a missing one. Over 4096 px on a side (or 16 megapixels), GIF, animated images and iPhone HEIC photos are refused — ask the person to send a JPEG (「사진을 JPEG로 보내 주세요」); at most 10 proposals per person per hour | **the person themselves and nobody else** (`requesting_member`: not an admin, not your owner); they see the image on the card first |
+| `member.display_name.set` | `{displayName}` — the requesting human's own display name, normalized like `PATCH …/members/me` (trim, 1–100 characters). There is no target argument. Handle and past mentions stay unchanged; a changed before-name makes the card stale | **the requesting person only** (`requesting_member`), including when another person is an admin or your owner |
 | `message.pin` | `{messageId}` — one **plain-text** message of **this conversation** (the `id` from `oort_conversation_read`, or the `messageId` that `oort_message_post` answered). A message in another channel, a deleted one, an approval card or result line, one in an archived channel, a DM your connection does not cover, or a channel that already holds 100 pins is refused with the same `invalid_arguments` as a missing id | `admin`; the card shows the channel, the author, the time, the first 120 characters and the **total length**, and is decided in the app |
 | `message.unpin` | `{messageId}` — a message of this conversation that is **pinned** right now; the same refusals, and a message that is not pinned is refused like a missing one | `admin`; the card also says who pinned it and when |
 
 What each one does, and what to expect:
+
+- Four profile requests are supported: **their name** → `member.display_name.set`, **their photo** → `member.avatar.set`, **your name** → `agent.rename`, **your photo** → `agent.profile.update` with `avatar`. Propose the card, then stop the turn; never claim it is already done.
 
 - **`channel.create`** makes the channel as the **approver** (they own it). With
   `addProposer` (the default) one approval also puts *you* in the channel **and**
@@ -1267,7 +1270,11 @@ What each one does, and what to expect:
   `imageAttachments` in `oort_conversation_read` — and end the turn. There is **no
   target argument and none can be added**: the picture is always for the person who
   called you (the author of the message that started this run), the server derives
-  them, and it is not yours to choose. The image must be **theirs** (written by
+  them, and it is not yours to choose. Alternatively, use
+  `{avatar:{source:"generated",dataBase64}}` for an image you generated or retrieved:
+  a finished PNG/JPEG/still WebP in strict base64, at most 44,000 input bytes.
+  Retrieve and downscale it first; a URL is never an argument the server fetches.
+  For the `attachmentId` form, the image must be **theirs** (written by
   them) and from **this conversation** (this channel or this DM); a file somebody
   else attached, one from another channel, a deleted message, or anything that is
   not a finished PNG/JPEG/still WebP of at most 5 MiB and 4096 px on a side (16 megapixels) is
