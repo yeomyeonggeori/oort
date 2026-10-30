@@ -495,6 +495,47 @@ fn preflight(format: ImageFormat, b: &[u8]) -> Result<(u32, u32), Rejected> {
 #[cfg(test)]
 thread_local! { static CODEC_STARTS:std::cell::Cell<usize>=const {std::cell::Cell::new(0)}; }
 
+/// ISO base media (MP4/MOV) whose major brand is one of the video brands.
+fn is_mp4_video(bytes: &[u8]) -> bool {
+    bytes.get(4..8) == Some(b"ftyp")
+        && matches!(
+            bytes.get(8..12),
+            Some(b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"qt  ")
+        )
+}
+/// The EBML header that opens WebM/Matroska.
+fn is_ebml(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+}
+
+/// What a body's leading bytes claim to be (ADR-0218 D3: names, MIME types and
+/// extensions are never believed). Decoding stays the only authority on whether an
+/// image is acceptable. This only lets the link importer tell "a web page or some
+/// other format" (`source_unsupported`) from "an image we could not decode"
+/// (`source_invalid_media`) without starting a codec process for either (#4829).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sniffed {
+    /// PNG, JPEG, WebP or GIF magic: worth decoding.
+    Image,
+    /// MP4/MOV with a video brand, or WebM/Matroska: [`decode`] answers `Video`.
+    Video,
+    /// Anything else: HTML, SVG, HEIC/AVIF, a script, an empty body.
+    Unsupported,
+}
+
+/// Classify by magic only; never reads past the first bytes.
+pub fn sniff(bytes: &[u8]) -> Sniffed {
+    if is_mp4_video(bytes) || is_ebml(bytes) {
+        return Sniffed::Video;
+    }
+    match image::guess_format(bytes) {
+        Ok(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif) => {
+            Sniffed::Image
+        }
+        _ => Sniffed::Unsupported,
+    }
+}
+
 pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
@@ -503,16 +544,13 @@ pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
         return Err(Rejected::Timeout);
     }
     if bytes.get(4..8) == Some(b"ftyp") {
-        return if matches!(
-            bytes.get(8..12),
-            Some(b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"qt  ")
-        ) {
+        return if is_mp4_video(bytes) {
             Err(Rejected::Video)
         } else {
             Err(Rejected::Invalid)
         };
     }
-    if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+    if is_ebml(bytes) {
         return Err(Rejected::Video);
     }
     let format = image::guess_format(bytes).map_err(|_| Rejected::Invalid)?;

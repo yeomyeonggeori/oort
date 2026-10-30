@@ -103,6 +103,18 @@ def main():
     attachment_metadata = dict(metadata, name="file_" + uuid.uuid4().hex[:20], attachmentId=upload["id"], channelId=args.channel)
     value, _ = request("POST", prefix + "/expressions/from-attachment", attachment_metadata, expected=201)
     record("POST", "/expressions/from-attachment", 201, value)
+    # Link import (#4829). The gate has no outbound network to fetch a picture from, so it
+    # samples the contract's other branch on the real route: `.invalid` never resolves
+    # (RFC 6761), so the live answer is 200 + a manual_upload_required card carrying
+    # source_unavailable (or source_timeout if the gate's DNS hangs past the 5 s deadline).
+    import_request = dict(metadata, name="link_" + uuid.uuid4().hex[:20],
+                          url="https://expression-import.invalid/gate.gif?token=gate")
+    value, _ = request("POST", prefix + "/expressions/import", import_request, expected=200)
+    if value.get("state") != "manual_upload_required" or value.get("code") not in ("source_unavailable", "source_timeout"):
+        raise SystemExit("expression sampler: import of an unresolvable link must be a manual card")
+    if "token=gate" in json.dumps(value):
+        raise SystemExit("expression sampler: the link's query reached the response")
+    record("POST", "/expressions/import", 200, value)
     value, _ = request("POST", prefix + expression_path + "/report", {"reason": "other"})
     record("POST", "/expressions/{id}/report", 200, value)
     value, _ = request("DELETE", prefix + expression_path)

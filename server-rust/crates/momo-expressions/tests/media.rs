@@ -179,3 +179,81 @@ fn rendition_overflow_fails_without_truncating_or_substituting_pixels() {
     assert!(input.get_ref().len() > 1024 * 1024);
     assert!(process(input.get_ref()).is_err());
 }
+
+/// #4829: `sniff` is how the link importer tells "not an image at all" from "an image
+/// we could not decode" without starting a codec. It must never disagree with `decode`.
+#[test]
+fn sniff_classifies_by_magic_alone_and_agrees_with_decode() {
+    use momo_expressions::media::{sniff, Sniffed};
+    let mut jpeg = Cursor::new(Vec::new());
+    DynamicImage::new_rgb8(20, 10)
+        .write_to(&mut jpeg, ImageFormat::Jpeg)
+        .unwrap();
+    let mut webp = Cursor::new(Vec::new());
+    DynamicImage::new_rgba8(20, 10)
+        .write_to(&mut webp, ImageFormat::WebP)
+        .unwrap();
+    let mut mp4 = vec![0, 0, 0, 0x18];
+    mp4.extend_from_slice(b"ftypisom\0\0\x02\0isomiso2mp41");
+    mp4.extend_from_slice(&[0; 64]);
+    let mut quicktime = vec![0, 0, 0, 0x14];
+    quicktime.extend_from_slice(b"ftypqt  \0\0\0\0qt  ");
+    quicktime.extend_from_slice(&[0; 64]);
+    let mut webm = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f];
+    webm.extend_from_slice(&[0; 64]);
+    let mut heic = vec![0, 0, 0, 0x18];
+    heic.extend_from_slice(b"ftypheic\0\0\0\0mif1heic");
+    heic.extend_from_slice(&[0; 64]);
+
+    let images: Vec<(&str, Vec<u8>)> = vec![
+        ("png", still()),
+        ("gif", gif(3, 80)),
+        ("jpeg", jpeg.into_inner()),
+        ("webp", webp.into_inner()),
+    ];
+    for (what, bytes) in &images {
+        assert_eq!(sniff(bytes), Sniffed::Image, "{what}");
+        assert!(process(bytes).is_ok(), "{what}: sniffed Image, decodes");
+    }
+    // Magic is all it reads: a header that claims PNG is Image even if nothing follows,
+    // and decode is what then says it is invalid.
+    let hollow = b"\x89PNG\r\n\x1a\n".to_vec();
+    assert_eq!(sniff(&hollow), Sniffed::Image);
+    assert_eq!(process(&hollow).unwrap_err(), Rejected::Invalid);
+
+    for (what, bytes) in [("mp4", &mp4), ("quicktime", &quicktime), ("webm", &webm)] {
+        assert_eq!(sniff(bytes), Sniffed::Video, "{what}");
+        assert_eq!(
+            process(bytes).unwrap_err(),
+            Rejected::Video,
+            "{what}: sniffed Video, decode agrees"
+        );
+    }
+    let page = b"<!doctype html><html><body>not a picture</body></html>".to_vec();
+    let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1\" height=\"1\"/>".to_vec();
+    let xml = b"<?xml version=\"1.0\"?><svg/>".to_vec();
+    let script = b"alert(document.cookie)".to_vec();
+    let mut tail_only = vec![0; 32];
+    tail_only.extend_from_slice(b"\x89PNG\r\n\x1a\n");
+    let mut avif = vec![0, 0, 0, 0x18];
+    avif.extend_from_slice(b"ftypavif\0\0\0\0mif1avif");
+    avif.extend_from_slice(&[0; 64]);
+    for (what, bytes) in [
+        ("empty", Vec::new()),
+        ("one byte", vec![0x89]),
+        ("html page", page),
+        ("svg", svg),
+        ("xml", xml),
+        ("javascript", script),
+        ("png magic that does not start the body", tail_only),
+        ("heic", heic),
+        ("avif", avif),
+        ("zeroes", vec![0; 4096]),
+    ] {
+        assert_eq!(sniff(&bytes), Sniffed::Unsupported, "{what}");
+        assert!(
+            process(&bytes).is_err(),
+            "{what}: sniffed Unsupported, never decodes"
+        );
+    }
+}

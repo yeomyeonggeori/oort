@@ -731,6 +731,10 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::expressions::from_attachment),
         )
         .route(
+            "/v1/workspaces/{ws}/expressions/import",
+            post(routes::expressions::import),
+        )
+        .route(
             "/v1/workspaces/{ws}/expression-drafts/{draftId}",
             get(routes::expressions::get_draft),
         )

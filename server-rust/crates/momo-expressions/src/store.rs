@@ -8,7 +8,7 @@ use sqlx::{postgres::PgRow, Row};
 use uuid::Uuid;
 
 use crate::media::{Processed, Rendition};
-use crate::{hash, version, Choice, Error, Metadata, Origin, Patch, Report, QUOTA};
+use crate::{hash, version, Choice, Error, Metadata, Origin, Patch, Report, LIVE_DRAFTS, QUOTA};
 
 #[derive(Clone, Copy, Debug)]
 pub struct Actor {
@@ -81,6 +81,32 @@ async fn can_add(
         // authorize already locked the subject's active human membership.
     }
     Ok(())
+}
+
+/// How many direct drafts this person holds that are still live (not activated,
+/// expired or approval-owned).
+async fn live_drafts(conn: &mut PgConnection, actor: Actor) -> Result<i64, Error> {
+    Ok(sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE workspace_id=$1 AND creator=$2 AND approval_id IS NULL AND state IN ('ready','manual_upload_required') AND expires_at>clock_timestamp()")
+        .bind(actor.workspace).bind(actor.member).fetch_one(&mut *conn).await?)
+}
+
+/// Link-import preflight (#4829): the add role/policy and the person's live-draft
+/// quota, proved BEFORE the server makes an outbound request on their behalf. Every
+/// import that fetches ends in a draft row (ready, or a manual card), so this is
+/// also what bounds how often one person can make the server fetch. `create_draft`
+/// re-proves both after the fetch; this only refuses early.
+pub async fn preflight_import(pool: &PgPool, actor: Actor) -> Result<(), Error> {
+    transaction(pool, actor, move |conn| {
+        Box::pin(async move {
+            let (_, policy) = catalog(conn, actor.workspace).await?;
+            can_add(conn, actor, &policy, None).await?;
+            if live_drafts(conn, actor).await? >= LIVE_DRAFTS {
+                return Err(Error::Quota);
+            }
+            Ok(())
+        })
+    })
+    .await
 }
 
 pub async fn preflight_add(pool: &PgPool, actor: Actor) -> Result<(), Error> {
@@ -246,13 +272,9 @@ pub async fn create_draft(
     code: Option<&str>,
 ) -> Result<Value, Error> {
     meta.validate()?;
-    // This direct API never accepts caller-supplied origin/prompts/cards.
-    if !["upload", "attachment"].contains(&origin.kind.as_str())
-        || origin.source_url.is_some()
-        || origin.prompt.is_some()
-        || (media.is_none() && code != Some("video_processing_unavailable"))
-        || (media.is_some() && code.is_some())
-    {
+    // This direct API never accepts caller-supplied prompts or cards; a link's origin
+    // is accepted only in its storable form (no query, credentials or fragment).
+    if !crate::draft_origin_ok(&origin, media.is_some(), code) {
         return Err(Error::Invalid);
     }
     let code = code.map(str::to_owned);
@@ -260,9 +282,7 @@ pub async fn create_draft(
         let (_,policy)=catalog(conn,actor.workspace).await?;
         can_add(conn,actor,&policy,meta.subject_member_id).await?;
         sweep_in_tx(conn,actor.workspace).await?;
-        let n:i64=sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE workspace_id=$1 AND creator=$2 AND approval_id IS NULL AND state IN ('ready','manual_upload_required') AND expires_at>clock_timestamp()")
-            .bind(actor.workspace).bind(actor.member).fetch_one(&mut *conn).await?;
-        if n>=4 {return Err(Error::Quota);}
+        if live_drafts(conn,actor).await?>=LIVE_DRAFTS {return Err(Error::Quota);}
         let row=sqlx::query("INSERT INTO expression_draft(workspace_id,name,display_name,tags,subject_member_id,origin,creator,state,code) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *")
             .bind(actor.workspace).bind(&meta.name).bind(&meta.display_name).bind(json!(meta.tags)).bind(meta.subject_member_id).bind(json!(origin)).bind(actor.member)
             .bind(if media.is_some(){"ready"}else{"manual_upload_required"}).bind(code).fetch_one(&mut *conn).await?;
