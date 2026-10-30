@@ -1,3 +1,5 @@
+import {AgentMonthlyReport} from '../agents/AgentUsage';
+import {AGENT_USAGE_COPY} from '@momo/core/features/settings/agentUsage';
 import {
   declaredStatusLabel,
   effectivePresenceLabel,
@@ -168,6 +170,7 @@ import {useDevToolsEntry} from './devTools';
 
 /** 설정 페이지 위에 한 겹 더 쌓이는 장. `main` 은 설정 페이지 자신이다. */
 export type SettingsSubPage =
+  | 'usage'
   | 'theme'
   | 'deviceKey'
   | 'devTools'
@@ -180,6 +183,7 @@ export type SettingsPageName = 'main' | SettingsSubPage;
 const SUB_PAGE_TOP = space.md;
 
 const SUB_PAGE_TITLE: Record<SettingsSubPage, string> = {
+  usage: AGENT_USAGE_COPY.report,
   theme: '테마',
   deviceKey: DEVICE_KEY_TITLE,
   devTools: DEV_TOOLS_TITLE,
@@ -256,6 +260,7 @@ export function SettingsPage({
             member={member}
             directory={directory}
             connected={connected}
+            onOpenUsage={() => setPage('usage')}
             onOpenTheme={() => setPage('theme')}
             onOpenStatus={() => setStatusOpen(true)}
             onOpenDeviceKey={() => setPage('deviceKey')}
@@ -358,7 +363,9 @@ function SubPage({
             {paddingBottom: Math.max(insets.bottom, space.lg) + space.lg},
           ]}
           testID="settings-sub-scroll">
-          {page === 'theme' ? (
+          {page === 'usage' ? (
+            <AgentMonthlyReport workspaceId={workspaceId} />
+          ) : page === 'theme' ? (
             <ThemePage />
           ) : page === 'deviceKey' ? (
             <DeviceKeyPage workspaceId={workspaceId} />
@@ -418,6 +425,7 @@ export function SettingsContent({
   onOpenStatus,
   onOpenDeviceKey,
   onOpenDevTools,
+  onOpenUsage,
   onOpenPauseUntil,
   onOpenDndUntil,
   onOpenAvatar,
@@ -438,6 +446,7 @@ export function SettingsContent({
    * 컴포넌트를 직접 부른다).
    */
   onOpenDevTools?: () => void;
+  onOpenUsage?: () => void;
   /** 알림 일시 중지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="pause"`). */
   onOpenPauseUntil: () => void;
   /** 방해 금지를 켜거나 기한을 바꾸는 장(`PauseUntilPage kind="dnd"`). */
@@ -925,6 +934,12 @@ export function SettingsContent({
           />
         ) : null}
       </GroupCard>
+
+      {onOpenUsage && (memberFor(directory, member.id)?.role === 'owner' || memberFor(directory, member.id)?.role === 'admin') ? (
+        <GroupCard label="관리자 설정">
+          <ListRow title={AGENT_USAGE_COPY.report} accessory="chevron" onPress={onOpenUsage} testID="settings-agent-usage" />
+        </GroupCard>
+      ) : null}
 
       {/* ⑧ 계정 — 마지막, 위험 행. 확인을 한 번 거친다. */}
       <GroupCard label="계정" testID="settings-account-card">
