@@ -221,3 +221,74 @@ async fn invalid_origin_traffic_cannot_bypass_the_socket_peer_axis() {
     assert_eq!(second.status(), 429);
     assert!(header(&second, "retry-after").is_some());
 }
+
+/// One raw HTTP/1.1 POST to the Agent Port: the request head (which declares
+/// `content_length`), then `sent` bytes of the body, then silence. The first line of the answer, if
+/// one comes within `patience`. Raw TCP on purpose: a client library would not stop in the middle
+/// of a body, and the whole point is a server that must answer without the rest of it.
+async fn raw_post(
+    base: &str,
+    bearer: Option<&str>,
+    content_length: usize,
+    sent: &[u8],
+    patience: Duration,
+) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = base.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect to the transport test server");
+    let mut head = format!(
+        "POST /v1/mcp/agent-port HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: 2026-07-28\r\n\
+         Mcp-Method: tools/call\r\nMcp-Name: oort_action_propose\r\n"
+    );
+    if let Some(bearer) = bearer {
+        head += &format!("Authorization: Bearer {bearer}\r\n");
+    }
+    head += &format!("Content-Length: {content_length}\r\nConnection: close\r\n\r\n");
+    let mut wire = head.into_bytes();
+    wire.extend_from_slice(sent);
+    let _ = stream.write_all(&wire).await;
+    let mut answer = vec![0u8; 512];
+    match tokio::time::timeout(patience, stream.read(&mut answer)).await {
+        Ok(Ok(read)) if read > 0 => Some(
+            String::from_utf8_lossy(&answer[..read])
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// **A declared 6 MiB proposal is judged from its head, not its body** (ADR-0218 appendix A:
+/// authentication and scope before the large bytes are collected; #4829 review round 1). The
+/// request announces `Content-Length: 6 MiB` and `tools/call` of `oort_action_propose`, carries a
+/// credential that cannot be a credential — or none — and sends 1 KiB and then nothing. An
+/// answer that arrives is a server that did not wait for the body: `401` at once. A server that
+/// first reads the budget it was about to grant says nothing at all, and this test is red.
+///
+/// (The database is unreachable on purpose, as everywhere in this file: none of these
+/// credentials is even well-formed enough to ask it.)
+#[tokio::test]
+async fn a_declared_big_proposal_with_no_credential_is_answered_before_its_body_is_read() {
+    let base = serve().await;
+    let six_mib = 6 * 1024 * 1024;
+    let kib = vec![b'x'; 1024];
+    for (label, bearer) in [
+        ("no credential", None),
+        ("a malformed credential", Some("not-a-token")),
+        (
+            "an App JWT, which is never tried here",
+            Some("eyJhbGciOiJIUzI1NiJ9.e30.signature"),
+        ),
+    ] {
+        let answer = raw_post(&base, bearer, six_mib, &kib, Duration::from_secs(3)).await;
+        assert!(
+            answer.as_deref().is_some_and(|line| line.contains(" 401")),
+            "{label}: answered without waiting for the body: {answer:?}"
+        );
+    }
+}

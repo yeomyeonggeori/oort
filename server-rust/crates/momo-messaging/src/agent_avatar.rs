@@ -790,6 +790,39 @@ pub async fn requester_of_run_in_tx(
     .await?)
 }
 
+/// What a requester's attachment is wanted **for**. The media type the database recorded is a
+/// first narrowing (the bytes still decide, later, in the decoder); the two uses differ in
+/// which types are worth fetching at all.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequesterAttachmentUse {
+    /// A person's or an agent's avatar: PNG, JPEG, WebP. Never an animation, never a video
+    /// (ADR-0186 P7-2: "GIF·SVG·애니메이션·HEIC는 열지 않는다").
+    Avatar,
+    /// The source of an expression (ADR-0186 X8-1/X8-2, ADR-0218 D3/D4): the avatar types plus
+    /// **GIF**, which goes through the decoder's full-frame check, and the **video** types,
+    /// which end as the `video_processing_unavailable` card (D4 is on hold). Nothing here
+    /// widens what the decoder accepts: it decides on the bytes.
+    ExpressionSource,
+}
+
+impl RequesterAttachmentUse {
+    /// The recorded (lower-cased) media types this use accepts.
+    pub const fn mimes(self) -> &'static [&'static str] {
+        match self {
+            RequesterAttachmentUse::Avatar => &["image/png", "image/jpeg", "image/webp"],
+            RequesterAttachmentUse::ExpressionSource => &[
+                "image/png",
+                "image/jpeg",
+                "image/webp",
+                "image/gif",
+                "video/mp4",
+                "video/quicktime",
+                "video/webm",
+            ],
+        }
+    }
+}
+
 /// The attachment a person may turn into **their own** avatar through an agent: complete,
 /// a PNG/JPEG/WebP within `max_bytes`, on a live message **written by `requester`** in
 /// **`channel_id`** — the conversation the agent was called in. Anything else (a file
@@ -800,6 +833,9 @@ pub async fn requester_of_run_in_tx(
 /// Unlike [`find_visible_image_attachment_in_tx`] this does not exclude DMs: the person
 /// talks to their agent in a DM as often as in a channel, and the conversation **is** the
 /// boundary here (the run's own channel), not the agent's approved-channel set.
+///
+/// This is [`find_requester_attachment_for_in_tx`] for [`RequesterAttachmentUse::Avatar`]; the
+/// avatar rules are exactly what they were before the expression source existed.
 pub async fn find_requester_attachment_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -808,6 +844,31 @@ pub async fn find_requester_attachment_in_tx(
     attachment_id: Uuid,
     max_bytes: i64,
 ) -> Result<Option<AvatarAttachmentSource>, DbError> {
+    find_requester_attachment_for_in_tx(
+        conn,
+        workspace_id,
+        requester,
+        channel_id,
+        attachment_id,
+        max_bytes,
+        RequesterAttachmentUse::Avatar,
+    )
+    .await
+}
+
+/// [`find_requester_attachment_in_tx`] for one **use**: the same author, conversation,
+/// completeness, deletion and size judgement, with the media types of `usage` as the only
+/// difference. One statement, so the two uses cannot drift apart in anything but the types.
+#[allow(clippy::too_many_arguments)]
+pub async fn find_requester_attachment_for_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    requester: Uuid,
+    channel_id: Uuid,
+    attachment_id: Uuid,
+    max_bytes: i64,
+    usage: RequesterAttachmentUse,
+) -> Result<Option<AvatarAttachmentSource>, DbError> {
     let row = sqlx::query(
         "SELECT a.id, a.channel_id, a.drive_file_id, a.size_bytes \
            FROM attachment a \
@@ -815,7 +876,7 @@ pub async fn find_requester_attachment_in_tx(
            JOIN message m ON m.workspace_id = a.workspace_id AND m.id = a.message_id \
           WHERE a.workspace_id = $1 AND a.id = $2 AND a.status = 'complete' \
             AND a.drive_file_id IS NOT NULL \
-            AND a.mime IN ('image/png', 'image/jpeg', 'image/webp') \
+            AND a.mime = ANY($6) \
             AND a.size_bytes BETWEEN 1 AND $5 \
             AND m.state <> 'deleted' AND m.deleted_at IS NULL \
             AND m.author_member_id = $4 \
@@ -826,6 +887,7 @@ pub async fn find_requester_attachment_in_tx(
     .bind(channel_id)
     .bind(requester)
     .bind(max_bytes)
+    .bind(usage.mimes())
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else { return Ok(None) };

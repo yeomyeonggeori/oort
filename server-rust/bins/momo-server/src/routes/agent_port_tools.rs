@@ -1872,6 +1872,129 @@ async fn run_complete(
 // oort_action_propose
 // ---------------------------------------------------------------------------
 
+/// The refusals of a proposal that cost one lock each and no work, **in the order the
+/// proposal's transaction has always made them**:
+///
+/// 1. **the lease must still be live and still ours** — the judgement `oort_run_complete`
+///    makes through `complete_gateway_run_in_tx`, applied to proposing because parking a run is
+///    no less consequential than settling one. `bound_handle` proves *identity* (workspace,
+///    agent, connection, approved channel) and nothing about the lease: a handle whose lease
+///    expired and whose job was re-claimed by a newer worker still decodes and still binds.
+///    Without this check that stale handle could park the run, and the worker that actually
+///    holds the job would then get 409 on every `oort_run_complete` until the one-hour TTL — a
+///    turn nobody can finish, caused by a proposal nobody asked for. ADR-0186 D2 gives the
+///    park to the lease holder; this is what makes that true. `allow_settled: false` — a done
+///    job may be replayed into `run_complete` (the retry window), but never into a new
+///    proposal;
+/// 2. the handle and the run are about the same work: the channel sealed into the handle is
+///    the one the human approved for this connection and the run's own channel is where the
+///    card must land. They are the same channel by construction — a disagreement means the
+///    handle and the run are not about the same work, and guessing which to believe is not an
+///    option;
+/// 3. a run already parked, already settled, or paused cannot raise a second card.
+///    `park_run_for_approval_in_tx` would refuse anyway; answering here means the refusal is
+///    `Conflict` rather than an indistinguishable late failure after three writes.
+///
+/// The proposal's transaction asks this, and so does `prepare_expression` **before it fetches
+/// or decodes a single picture**: one function, so the cheap answer and the authoritative one
+/// cannot become two judgements. (The pending ceiling is the fourth cheap refusal:
+/// [`pending_ceiling_reached_in_tx`].)
+async fn refuse_unusable_run_in_tx(
+    conn: &mut PgConnection,
+    caller: HostedCaller,
+    handle: &LeaseHandle,
+    run: &momo_agent::GatewayRunSnapshot,
+) -> Result<Result<(), ToolFailure>, DbError> {
+    let lease_snapshot = momo_outbox::lock_gateway_lease_in_tx(
+        conn,
+        caller.workspace_id,
+        handle.run_id,
+        run.agent_member_id,
+        GatewayLeaseBinding {
+            job_id: handle.job_id,
+            lease_id: handle.lease_id,
+        },
+    )
+    .await
+    .map_err(DbError::from)?;
+    if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false) {
+        return Ok(Err(ToolFailure::Conflict));
+    }
+    if run.agent_member_id != caller.agent_member_id || run.channel_id != handle.channel_id {
+        return Ok(Err(ToolFailure::HandleRefused));
+    }
+    if run.status.is_approval_held() || run.status.is_terminal() {
+        return Ok(Err(ToolFailure::Conflict));
+    }
+    Ok(Ok(()))
+}
+
+/// Does the agent already have the most `workspace_action` cards waiting that it may
+/// (ADR-0186 증보 V1-e, [`momo_agent::MAX_PENDING_WORKSPACE_ACTIONS`])?
+///
+/// This is the count the proposal's transaction takes behind a `FOR NO KEY UPDATE` lock on the
+/// agent's `member` row (`lock_agent_and_count_pending_workspace_actions_in_tx` is exactly
+/// `count_pending_workspace_actions_in_tx(..).all`), read here **without** the lock:
+/// `prepare_expression` asks it only to spare a call that is going to be refused its fetches
+/// and decodes. The proposal's own transaction asks again under the lock and stays the
+/// authority — taking that lock in a read-only step would only invite the lock-order cycle the
+/// proposal's first lines are written to avoid.
+async fn pending_ceiling_reached_in_tx(
+    conn: &mut PgConnection,
+    caller: HostedCaller,
+) -> Result<bool, DbError> {
+    Ok(momo_agent::count_pending_workspace_actions_in_tx(
+        conn,
+        caller.workspace_id,
+        caller.agent_member_id,
+    )
+    .await?
+    .all >= momo_agent::MAX_PENDING_WORKSPACE_ACTIONS)
+}
+
+/// The agents whose `expression.create` candidates are being fetched and decoded right now.
+fn preparing_agents() -> &'static std::sync::Mutex<std::collections::HashSet<Uuid>> {
+    static PREPARING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<Uuid>>> =
+        std::sync::OnceLock::new();
+    PREPARING.get_or_init(Default::default)
+}
+
+/// **The one preparation an agent may have under way** (#4829 review round 1). A proposal's
+/// candidates are fetched (up to 5 MiB each) and decoded (the process-wide, two-slot decoder)
+/// before any transaction writes; an agent that starts several at once multiplies that work for
+/// nothing a person can use, because one proposal parks its run and the ceiling is three.
+/// Entering takes the agent's place and **dropping the guard gives it back** — also when the
+/// request is cancelled with a half-finished preparation — so a dropped connection cannot lock an
+/// agent out. The set holds ids of agents that are preparing *now*, so it cannot grow.
+struct Preparing {
+    agent: Uuid,
+}
+
+impl Preparing {
+    fn enter(agent: Uuid) -> Option<Preparing> {
+        let mut preparing = preparing_agents()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        // Not `bool::then_some`: it builds the guard even when the agent is already preparing,
+        // and dropping that guard would take this very lock again (and, if it did not block,
+        // would remove the *other* preparation's entry).
+        if preparing.insert(agent) {
+            Some(Preparing { agent })
+        } else {
+            None
+        }
+    }
+}
+
+impl Drop for Preparing {
+    fn drop(&mut self) {
+        preparing_agents()
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&self.agent);
+    }
+}
+
 /// Ask a person to make one workspace change (ADR-0186 D2).
 ///
 /// The whole tool is the approval producer #979 already wrote, called with a
@@ -1993,55 +2116,14 @@ async fn action_propose(
             else {
                 return Ok(Err(ToolFailure::Unavailable));
             };
-            // **The lease must still be live and still ours** — the same
-            // judgment `oort_run_complete` makes through
-            // `complete_gateway_run_in_tx`, applied here because parking a run
-            // is no less consequential than settling one.
-            //
-            // `bound_handle` above proves *identity* (workspace, agent,
-            // connection, approved channel) and nothing about the lease: a
-            // handle whose lease expired and whose job was re-claimed by a
-            // newer worker still decodes and still binds. Without this check
-            // that stale handle could park the run, and the worker that
-            // actually holds the job would then get 409 on every
-            // `oort_run_complete` until the one-hour TTL — a turn nobody can
-            // finish, caused by a proposal nobody asked for. ADR-0186 D2 gives
-            // the park to the lease holder; this is what makes that true.
-            //
-            // `allow_settled: false` — a done job may be replayed into
-            // `run_complete` (the retry window), but never into a new proposal.
-            let lease_snapshot = momo_outbox::lock_gateway_lease_in_tx(
-                conn,
-                caller.workspace_id,
-                handle.run_id,
-                run.agent_member_id,
-                GatewayLeaseBinding {
-                    job_id: handle.job_id,
-                    lease_id: handle.lease_id,
-                },
-            )
-            .await
-            .map_err(DbError::from)?;
-            if !momo_outbox::gateway_lease_authorized_hosted(lease_snapshot, handle.lease_id, false)
-            {
-                return Ok(Err(ToolFailure::Conflict));
-            }
-            if run.agent_member_id != caller.agent_member_id
-                // The channel sealed into the handle is the one the human
-                // approved for this connection; the run's own channel is where
-                // the card must land. They are the same channel by construction
-                // — a disagreement means the handle and the run are not about
-                // the same work, and guessing which to believe is not an option.
-                || run.channel_id != handle.channel_id
-            {
-                return Ok(Err(ToolFailure::HandleRefused));
-            }
-            // A run already parked, already settled, or paused cannot raise a
-            // second card. `park_run_for_approval_in_tx` would refuse anyway;
-            // answering here means the refusal is `Conflict` rather than an
-            // indistinguishable late failure after three writes.
-            if run.status.is_approval_held() || run.status.is_terminal() {
-                return Ok(Err(ToolFailure::Conflict));
+            // **The lease must still be live and still ours, the handle and the run must be
+            // about the same work, and the run must not already be parked, settled or
+            // paused** — the three refusals `prepare_expression` already made, before it
+            // fetched or decoded anything, from this same function (#4829 review round 1).
+            // Judged again here because this transaction is the authority: the first answer
+            // was given without holding anything for the seconds the preparation took.
+            if let Err(failure) = refuse_unusable_run_in_tx(conn, caller, &handle, &run).await? {
+                return Ok(Err(failure));
             }
             // **The two "already full" answers come first — for the two actions whose
             // text is judged against the roster** (증보 v3, security review of #3797):
@@ -2488,10 +2570,20 @@ async fn action_propose(
 /// `expression.create`'s preparation (ADR-0186 v8 X8-1, ADR-0218 D3/D5), all of it **before**
 /// any transaction that writes. One short read transaction proves who may propose and which
 /// attachments are the requester's (V4's own judgement); then each candidate, in turn and inside
-/// one deadline, is fetched and decoded:
+/// one deadline, is fetched and decoded.
+///
+/// **The cheap refusals come first, the expensive work last** (#4829 review round 1). The pending
+/// ceiling of three is the one flood defence this door has, and it only defends if the work that
+/// costs something happens after it. So, in this order: (1) the read transaction refuses — with
+/// the proposal's own predicates — a lease that is stale, a run that is parked, settled or
+/// paused, and an agent that already has three cards waiting; (2) one preparation per agent at a
+/// time; (3) a candidate stands in the decoder's line for a few seconds at most, in a line of two
+/// at most (`media::process_waiting`); (4) a link's fetch slot is given back as soon as the
+/// bytes are here, before any wait for the decoder.
 ///
 /// * `attachment`: the file from Drive, then the isolated decoder. A file that is not a
-///   picture is the same `InvalidArguments` a stranger's photo is; a video is a manual card
+///   picture is the same `InvalidArguments` a stranger's photo is; a GIF takes the decoder's
+///   full-frame check like any other source; a video is a manual card
 ///   (`video_processing_unavailable`, D4 on hold).
 /// * `url`: the link through `momo-unfurl`'s guard (HTTPS, 443, address pin, hops, 5 s, 5 MiB).
 ///   A link that is private **from the start** refuses the whole proposal; every other
@@ -2542,6 +2634,15 @@ async fn prepare_expression(
             else {
                 return Ok(Err(ToolFailure::Unavailable));
             };
+            // The refusals that cost nothing, before anything that does: the proposal's
+            // own predicates (`refuse_unusable_run_in_tx` is the function its transaction
+            // calls), then the ceiling of three cards waiting.
+            if let Err(failure) = refuse_unusable_run_in_tx(conn, caller, &handle, &run).await? {
+                return Ok(Err(failure));
+            }
+            if pending_ceiling_reached_in_tx(conn, caller).await? {
+                return Ok(Err(ToolFailure::Conflict));
+            }
             let Some((requester, channel_id)) = momo_messaging::requester_of_run_in_tx(
                 conn,
                 caller.workspace_id,
@@ -2557,13 +2658,16 @@ async fn prepare_expression(
                 sources.push(match attachment {
                     None => None,
                     Some(id) => {
-                        let found = momo_messaging::find_requester_attachment_in_tx(
+                        let found = momo_messaging::find_requester_attachment_for_in_tx(
                             conn,
                             caller.workspace_id,
                             requester,
                             channel_id,
                             *id,
                             momo_expressions::INPUT_BYTES as i64,
+                            // A GIF and a video are sources too (ADR-0186 X8-1/X8-2); the
+                            // resolver in the proposal's transaction asks for the same use.
+                            momo_messaging::RequesterAttachmentUse::ExpressionSource,
                         )
                         .await?;
                         match found {
@@ -2578,6 +2682,10 @@ async fn prepare_expression(
     })
     .await
     .map_err(|error| internal("agent_port.expression_prepare", error))??;
+
+    // One preparation per agent at a time: a second one (another run, a retry that did not wait
+    // for the answer) is told to come back, and fetches nothing.
+    let _preparing = Preparing::enter(caller.agent_member_id).ok_or(ToolFailure::Unavailable)?;
 
     let mut prepared = Vec::with_capacity(candidates.len());
     for (candidate, source) in candidates.iter().zip(looked_up) {
@@ -2622,18 +2730,22 @@ async fn prepare_expression(
                     // The instance's outgoing-request switch is off: no request is made.
                     (origin, (None, Some("source_unavailable")))
                 } else {
-                    let permit = intake::import_slots()
-                        .clone()
-                        .try_acquire_owned()
-                        .map_err(|_| ToolFailure::Unavailable)?;
-                    let deadline = remaining().min(momo_unfurl::SOURCE_DEADLINE);
-                    let outcome = match momo_unfurl::fetch_source(
-                        &*state.unfurl_http,
-                        &url,
-                        deadline,
-                    )
-                    .await
-                    {
+                    // The fetch slot (eight at a time, process-wide) is held for the fetch
+                    // and **given back as soon as the bytes are here** — before the wait for
+                    // a decoder slot, which is somebody else's queue and must not keep a
+                    // fetch slot (and so a person's `/import`) hostage.
+                    let fetched = {
+                        let permit = intake::import_slots()
+                            .clone()
+                            .try_acquire_owned()
+                            .map_err(|_| ToolFailure::Unavailable)?;
+                        let deadline = remaining().min(momo_unfurl::SOURCE_DEADLINE);
+                        let fetched =
+                            momo_unfurl::fetch_source(&*state.unfurl_http, &url, deadline).await;
+                        drop(permit);
+                        fetched
+                    };
+                    let outcome = match fetched {
                         Ok(bytes) => {
                             match intake::picture_or_reason(bytes, Some(remaining())).await {
                                 Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
@@ -2646,7 +2758,6 @@ async fn prepare_expression(
                         }
                         Err(refused) => (None, Some(refused.code())),
                     };
-                    drop(permit);
                     (origin, outcome)
                 }
             }
@@ -4398,5 +4509,33 @@ mod tests {
             "named once each, in the closed list's order"
         );
         assert_eq!(everything.wire(), (400, -32602, "invalid tool arguments"));
+    }
+
+    /// #4829 review round 1: an agent has one place to prepare an `expression.create` in. It is
+    /// its own, another agent's is separate, and **dropping the guard gives it back** — the
+    /// way a request that is cancelled mid-fetch gives it back — so a dropped connection cannot
+    /// lock an agent out.
+    #[test]
+    fn an_agent_has_one_place_to_prepare_in_and_a_dropped_guard_gives_it_back() {
+        let (one, other) = (Uuid::new_v4(), Uuid::new_v4());
+        let place = Preparing::enter(one).expect("a free agent gets its place");
+        // The refusal is asked on its own thread and under a clock: a refusal that took the
+        // set's lock a second time would hang this test instead of failing it.
+        let (answer, heard) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = answer.send(Preparing::enter(one).is_none());
+        });
+        assert_eq!(
+            heard.recv_timeout(std::time::Duration::from_secs(5)),
+            Ok(true),
+            "a second preparation of the same agent is refused, and refused at once"
+        );
+        let elsewhere = Preparing::enter(other).expect("another agent is not in the way");
+        drop(place);
+        let again = Preparing::enter(one).expect("the dropped guard gave the place back");
+        drop((again, elsewhere));
+        let held = preparing_agents().lock().unwrap().contains(&one)
+            || preparing_agents().lock().unwrap().contains(&other);
+        assert!(!held, "nothing is left behind, so the set cannot grow");
     }
 }

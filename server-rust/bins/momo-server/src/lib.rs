@@ -340,6 +340,10 @@ pub struct AppState {
     /// `OORT_EXPRESSION_ASSEMBLER`, else beside this executable (like the decoder). A test sets
     /// a path here instead of the process-wide variable, which concurrent tests would race on.
     pub assembler_program: Option<Arc<std::path::PathBuf>>,
+    /// The longest an authenticated Agent Port caller may take to send the 6 MiB
+    /// `expression.create` body (#4829): `routes::agent_port::LARGE_BODY_DEADLINE` unless a
+    /// test shortens it. The ordinary 64 KiB body has no such deadline.
+    pub large_body_deadline: std::time::Duration,
     pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
     /// #2960 — 「연결 확인」: the only object in this process that can call a
     /// provider, and all it can do is one guarded read-only GET per hop
@@ -396,6 +400,7 @@ impl AppState {
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
             unfurl_enabled: momo_unfurl::enabled_from_env(),
             assembler_program: None,
+            large_body_deadline: routes::agent_port::LARGE_BODY_DEADLINE,
             unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
             provider_probe: Arc::new(routes::provider_link::ProviderProbeState::new(Arc::new(
                 momo_provider_probe::GuardedProviderProbe::new(
@@ -489,6 +494,12 @@ impl AppState {
     /// (conformance tests: a built binary, or a path that does not exist).
     pub fn with_assembler_program(mut self, program: impl Into<std::path::PathBuf>) -> Self {
         self.assembler_program = Some(Arc::new(program.into()));
+        self
+    }
+
+    /// Shorten (conformance tests) the time an Agent Port caller has for the 6 MiB body.
+    pub fn with_large_body_deadline(mut self, deadline: std::time::Duration) -> Self {
+        self.large_body_deadline = deadline;
         self
     }
 
