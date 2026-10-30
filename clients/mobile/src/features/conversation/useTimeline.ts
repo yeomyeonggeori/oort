@@ -1,3 +1,4 @@
+import {useExpressionStore} from '../expressions/ExpressionProvider';
 import {
   deleteMessage as deleteMessageRequest,
   editMessage as editMessageRequest,
@@ -244,6 +245,7 @@ export function useTimeline(
   channelId: string | null,
   authorMemberId: string,
 ): UseTimelineResult {
+  const expressionStore = useExpressionStore();
   const [state, setState] = useState<TimelineState>(emptyTimeline);
   const [status, setStatus] = useState<UseTimelineResult['status']>('loading');
   const [loadedChannelId, setLoadedChannelId] = useState<string | null>(null);
@@ -405,6 +407,7 @@ export function useTimeline(
         // merging it is not optimistic rendering: it is the same reconcile the
         // realtime frame gets, and whichever arrives second dedupes by seq.
         if (channelRef.current === row.channelId) applyBatch([confirmed]);
+        expressionStore?.recordSuccess(`message:${row.clientMsgId}`, row.body);
         updatePending(list => removePending(list, row.clientMsgId));
       } catch {
         // The row stays where it is and states 전송 실패 with a retry, in place.
@@ -413,7 +416,7 @@ export function useTimeline(
         updatePending(list => failPending(list, row.clientMsgId));
       }
     },
-    [workspaceId, applyBatch, updatePending],
+    [workspaceId, applyBatch, updatePending, expressionStore],
   );
 
   const send = useCallback(
@@ -568,6 +571,7 @@ export function useTimeline(
       applyReaction(change);
       try {
         await setReaction(workspaceId, message.id, emoji, action);
+        if (action === 'added') expressionStore?.recordSuccess(`reaction:${message.id}:${emoji}:${Date.now()}`, emoji);
       } catch (error) {
         // Put it back, and say so on the row. The inverse is safe even if the
         // realtime echo of a successful twin already landed: the delta is
@@ -580,7 +584,7 @@ export function useTimeline(
         throw error;
       }
     },
-    [workspaceId, authorMemberId, applyReaction],
+    [workspaceId, authorMemberId, applyReaction, expressionStore],
   );
 
   const editBody = useCallback(

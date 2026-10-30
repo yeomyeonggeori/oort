@@ -41,6 +41,8 @@ export interface NonSecretStore {
  * anticipated, and a deny-list is exactly the shape that loses that race.
  */
 export const NON_SECRET_KEYS = {
+  /** Scoped device expression usage; metadata only, never media or credentials (#4678). */
+  expressionUsage: 'momo.mobile.expressions.usage.v1',
   /** Local emoji usage counts and global tone, shared reaction/status picker (#4322). */
   emojiFrequency: 'momo.mobile.emoji.frequency.v1',
   emojiSkinTone: 'momo.mobile.emoji.skin.v1',

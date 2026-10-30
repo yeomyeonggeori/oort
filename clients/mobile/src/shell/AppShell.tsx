@@ -1,3 +1,4 @@
+import {ExpressionProvider} from '../features/expressions/ExpressionProvider';
 import type {Member} from '@momo/core/lib/api';
 import {canCreateChannelNow} from '@momo/core/features/channels/model';
 import {memberFor} from '@momo/core/features/workspace/directory';
@@ -113,7 +114,7 @@ export default function AppShell({member}: {member: Member}): React.JSX.Element 
     <SessionProvider member={member}>
       <PushProvider>
         <RealtimeProvider>
-          <Shell />
+          <ExpressionProvider><Shell /></ExpressionProvider>
           {/* M3 알림 미리 안내(#2820). 권한이 아직 안 물어졌을 때만 셸 위에 선다. */}
           <NotificationPrimerGate />
           {/* QR 연결 직후 기기 키 등록과 맥 승인 대기(#3026). M3 뒤에 선다. */}
