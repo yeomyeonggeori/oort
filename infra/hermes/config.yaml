@@ -2,8 +2,12 @@
 # and the Railway `hermes` service receives it base64 in HERMES_CONFIG_B64. It is copied to /opt/data/config.yaml on
 # EVERY start and checked by lockgate.py BEFORE the Hermes entrypoint (so before any listener) runs.
 # api_server selects the search-only `search` toolset, never the combined `web` toolset (#4794).
-# agent.disabled_toolsets keeps the other locks; lockgate.py checks the final tool names and search backend.
-# Surface: memory, todo, session_search + Codex subscription web_search. web_extract stays outside the allow-list.
+# api_server also selects `image_gen` (image_generate) with the Codex subscription provider only (#4820).
+# agent.disabled_toolsets keeps the other locks; lockgate.py checks the final tool names, search backend and image provider.
+# Surface: memory, todo, session_search + Codex subscription web_search + Codex subscription image_generate.
+# web_extract stays outside the allow-list. image_generate takes model-chosen image addresses that Hermes would fetch itself, so
+# the oort-owned plugin below refuses every address, path and non-inline value BEFORE the tool runs (ADR-0203 augmentation of
+# 2026-10-30, I1-I4); lockgate.py pins the plugin's bytes, requires it here, and exercises it with a canary at every start.
 #
 # No `model:` section and no `mcp_servers` on purpose. Model auth (API key / OAuth) is a separate step
 # (#4073): without it Hermes still starts and answers /health and /v1/models, and the first chat turn fails
@@ -20,7 +24,6 @@ agent:
     - cronjob         # cronjob_manage: unattended scheduled runs that outlive the chat
     - computer_use    # desktop control (Hermes already drops it for api_server; explicit on purpose)
     - vision          # vision_analyze: model-chosen image URLs or paths
-    - image_gen       # image_generate (outbound provider call)
     - video           # video_analyze
     - video_gen       # video generation and editing
     - x_search        # X (Twitter) search
@@ -40,10 +43,16 @@ platform_toolsets:
     - todo
     - session_search
     - search          # Hermes v0.22.2: web_search only; adding `web` would fail the lockgate
+    - image_gen       # Hermes v0.22.2: image_generate only; the provider below is the only one the lockgate accepts (#4820)
 web:
   search_backend: openai-native  # Codex Responses server-side search; requires existing openai-codex OAuth
   keyless_fallback: false        # no anonymous third-party search fallback
-# Connector mode is a separate config: it MUST disable the entire `web` toolset (ADR-0203 K4-1).
+image_gen:
+  provider: openai-codex         # gpt-image-2 via the existing Codex OAuth (no OPENAI_API_KEY); unset/fal/openai/... and any other key here fail the lockgate
+plugins:
+  enabled:
+    - oort-image-guard           # pre_tool_call guard for image_generate (infra/hermes/plugins/oort-image-guard); exactly this one, or the lockgate refuses
+# Connector mode is a separate config: it MUST disable the entire `web` toolset AND `image_gen` (ADR-0203 K4-1, I3).
 approvals:
   mode: manual            # never "off"; no HERMES_YOLO_MODE
   unattended_mode: deny   # API sessions cannot approve anything

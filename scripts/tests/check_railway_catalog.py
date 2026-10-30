@@ -106,6 +106,7 @@ HERMES_SHARED_KEY = "${{shared.HERMES_API_KEY}}"
 HERMES_RELAY_SHARED_KEY = "${{shared.HERMES_LOGIN_RELAY_KEY}}"
 HERMES_PORT = 8642
 HERMES_DATA = "/opt/data"
+HERMES_GUARD_DIR = HERMES_DATA + "/plugins/oort-image-guard"  # #4820 review: the oort image_generate guard plugin
 HERMES_KEYS = {"public", "image", "startCommand", "port", "privateHostname", "volume", "variables"}
 HERMES_PY = "/opt/hermes/.venv/bin/python"
 REF_RE = re.compile(r"\$\{\{([^}]*)\}\}")
@@ -231,7 +232,7 @@ COMPOSE_TWINS: dict[str, tuple[list[tuple[str, str]], set[str]]] = {
     "agent-worker": ([("docker-compose.rust.yml", "agent-worker")], set()),
     # compose mounts config.yaml and lockgate.py read-only; Railway has no bind mount, so
     # both arrive as base64 variables the start command decodes.
-    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"}),
+    "hermes": ([("docker-compose.rust.yml", "hermes")], {"HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_IMAGE_GUARD_B64", "HERMES_IMAGE_GUARD_MANIFEST_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"}),
     "postgres": ([("docker-compose.rust.yml", "postgres")], set()),
     # compose mounts infra/centrifugo.json; these four env literals replace it.
     "centrifugo": ([("docker-compose.rust.yml", "centrifugo")], set(CENTRIFUGO_DERIVED)),
@@ -286,7 +287,7 @@ KNOWN_CENTRIFUGO_SETTINGS = {
 
 
 def hermes_canonical(
-    config_sha: str, gate_sha: str, relay_sha: str, probe_sha: str
+    config_sha: str, gate_sha: str, guard_sha: str, manifest_sha: str, relay_sha: str, probe_sha: str
 ) -> list[tuple[object, list[object]]]:
     """#4072: config and gate arrive as base64 variables and are PINNED to the repo bytes.
 
@@ -299,19 +300,32 @@ def hermes_canonical(
     process, the Q3 off switch). With a key, the sidecar and probe are decoded, PINNED to the repo bytes (a stale
     sidecar would be a stale security boundary) and launched in the background (`launch` moves the key into a 0400
     file of a dedicated uid and starts `serve` as that uid). The key variables are UNSET before `exec`, so the
-    gateway and every `hermes` child inherit no copy."""
+    gateway and every `hermes` child inherit no copy.
+
+    #4820 review: the oort-owned image guard plugin (a Hermes user plugin, `pre_tool_call`) is decoded into
+    /opt/data/plugins/oort-image-guard BEFORE the gate, both files pinned to the repo bytes, because the gate
+    verifies those bytes again, loads them into its scratch home and calls the real dispatch path with a canary."""
     return [
         ("", ["set", "-eu"]),
         (";", ["umask", "022"]),
-        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${API_SERVER_KEY:?}"]),
-        (";", ["mkdir", "-p", HERMES_DATA]),
+        (";", [":", "${HERMES_CONFIG_B64:?}", "${HERMES_LOCKGATE_B64:?}", "${HERMES_IMAGE_GUARD_B64:?}",
+               "${HERMES_IMAGE_GUARD_MANIFEST_B64:?}", "${API_SERVER_KEY:?}"]),
+        (";", ["mkdir", "-p", HERMES_GUARD_DIR]),
         (";", ["printf", "%s", "$HERMES_CONFIG_B64"]),
         ("|", ["base64", "-d", ">", HERMES_DATA + "/config.yaml"]),
         (";", ["printf", "%s", "$HERMES_LOCKGATE_B64"]),
         ("|", ["base64", "-d", ">", "/tmp/lockgate.py"]),
+        (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_B64"]),
+        ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/__init__.py"]),
+        (";", ["printf", "%s", "$HERMES_IMAGE_GUARD_MANIFEST_B64"]),
+        ("|", ["base64", "-d", ">", HERMES_GUARD_DIR + "/plugin.yaml"]),
         (";", ["echo", "%s  %s" % (config_sha, HERMES_DATA + "/config.yaml")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", ["echo", "%s  %s" % (gate_sha, "/tmp/lockgate.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["echo", "%s  %s" % (guard_sha, HERMES_GUARD_DIR + "/__init__.py")]),
+        ("|", ["sha256sum", "-c", "-"]),
+        (";", ["echo", "%s  %s" % (manifest_sha, HERMES_GUARD_DIR + "/plugin.yaml")]),
         ("|", ["sha256sum", "-c", "-"]),
         (";", [HERMES_PY, "/tmp/lockgate.py", "gate", HERMES_DATA + "/config.yaml"]),
         (";", ["[", "-z", "${HERMES_LOGIN_RELAY_KEY:-}", "]"]),
@@ -719,17 +733,19 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     if extra_keys:
         errors.append("hermes has keys the catalog does not review (domain? replicas? restart?): %s" % ",".join(extra_keys))
     shas = []
-    for name in ("config.yaml", "lockgate.py", "login_relay.py", "mcp_login_probe.py"):
+    for name in ("config.yaml", "lockgate.py", "plugins/oort-image-guard/__init__.py",
+                 "plugins/oort-image-guard/plugin.yaml", "login_relay.py", "mcp_login_probe.py"):
         try:
             shas.append(hashlib.sha256((repo_root / "infra" / "hermes" / name).read_bytes()).hexdigest())
         except OSError as exc:
             errors.append("infra/hermes/%s unreadable: %s" % (name, exc.__class__.__name__))
-    if len(shas) == 4:
+    if len(shas) == 6:
         diff = canonical_diff(shell_commands(shell_script(hermes.get("startCommand"))), hermes_canonical(*shas))
         if diff:
             errors.append(
-                "hermes start command is not the canonical command list (gate-first, fail-closed, config and gate "
-                "pinned to the sha256 of infra/hermes/config.yaml and lockgate.py; the login relay block only with a key, "
+                "hermes start command is not the canonical command list (gate-first, fail-closed, config, gate and "
+                "the two image-guard plugin files pinned to the sha256 of infra/hermes/config.yaml, lockgate.py and "
+                "plugins/oort-image-guard/*, the plugin installed before the gate; the login relay block only with a key, "
                 "its two files pinned the same way, key variables unset before exec): %s" % diff
             )
     if (hermes.get("volume") or {}).get("mountPath") != HERMES_DATA:
@@ -753,7 +769,8 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
             "hermes HERMES_LOGIN_RELAY_KEY %r must be %s (its own shared secret, not the chat key)"
             % (variables.get("HERMES_LOGIN_RELAY_KEY"), HERMES_RELAY_SHARED_KEY)
         )
-    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"):
+    for name in ("HERMES_CONFIG_B64", "HERMES_LOCKGATE_B64", "HERMES_IMAGE_GUARD_B64", "HERMES_IMAGE_GUARD_MANIFEST_B64",
+                 "HERMES_LOGIN_RELAY_B64", "HERMES_LOGIN_PROBE_B64"):
         if not str(variables.get(name, "")).startswith("<operator:"):
             errors.append("hermes %s must be an <operator: …> placeholder (base64 of the repo file)" % name)
     if hermes.get("healthcheckPath") is not None:
@@ -1209,6 +1226,19 @@ def mutate_catalog(kind: str, data: dict) -> None:
         services["relay"]["variables"]["MIGRATE_DATABASE_URL"] = "${{shared.MIGRATE_DATABASE_URL}}"
     elif kind == "sender-cent-api-key":  # G10
         services["webhook-sender"]["variables"]["CENT_API_KEY"] = "${{shared.CENT_API_KEY}}"
+    elif kind == "hermes-guard-sha-stale":  # #4820 review: the pinned guard bytes no longer match the plugin file
+        command = services["hermes"]["startCommand"]
+        stale = re.search(r"echo \"([0-9a-f]{64})  /opt/data/plugins/oort-image-guard/__init__\.py", command)
+        if stale is None:
+            raise SystemExit("mutation %s: no guard sha in the hermes start command" % kind)
+        services["hermes"]["startCommand"] = command.replace(stale.group(1), "0" * 64, 1)
+    elif kind == "hermes-no-guard-install":  # the guard is not decoded: the gate would refuse, but nothing may assume that
+        services["hermes"]["startCommand"] = replace_once(
+            services["hermes"]["startCommand"],
+            'printf %s "$HERMES_IMAGE_GUARD_B64" | base64 -d > /opt/data/plugins/oort-image-guard/__init__.py; ',
+            "",
+            kind,
+        )
     elif kind == "hermes-no-gate":  # #4072: the lock gate line removed
         services["hermes"]["startCommand"] = replace_once(
             services["hermes"]["startCommand"],
@@ -1384,6 +1414,8 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("hermes-extra-key", "hermes has keys the catalog does not review"),
     ("hermes-gate-sha-stale", "hermes start command is not the canonical command list"),
     ("hermes-no-sha-check", "hermes start command is not the canonical command list"),
+    ("hermes-guard-sha-stale", "hermes start command is not the canonical command list"),
+    ("hermes-no-guard-install", "hermes start command is not the canonical command list"),
     ("hermes-image-floating", "hermes image"),
     ("hermes-oort-secret", "hermes variables outside its compose twin"),
     ("hermes-cors-open", "hermes variables outside its compose twin"),

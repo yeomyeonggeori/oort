@@ -120,7 +120,7 @@ class RenderedConfigKeepsTheLock(unittest.TestCase):
             out = self.rendered(**kwargs)
             off = DEFAULT.disabled_toolsets(out)
             self.assertEqual(off, DEFAULT.disabled_toolsets(BASE))
-            self.assertEqual(len(off), 23)
+            self.assertEqual(len(off), 22)
             self.assertTrue(DEFAULT.MANDATED <= set(off))
             self.assertNotIn("mcp_servers", DEFAULT.top_level_keys(out))
             self.assertRegex(out, r"(?m)^  mode: manual\b")

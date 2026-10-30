@@ -2477,8 +2477,9 @@ generator now do for you; you still read the lock, and the model key stays yours
 - **Railway:** `infra/railway/railway.json` has the `hermes` service (private,
   digest-pinned official image, `/opt/data` volume) and the api/agent-worker
   variables of step 6-7. Create the shared variable `HERMES_API_KEY`
-  (`openssl rand -hex 32`), paste `infra/hermes/config.yaml` and
-  `infra/hermes/lockgate.py` as the two base64 variables, deploy, and read one
+  (`openssl rand -hex 32`), paste `infra/hermes/config.yaml`,
+  `infra/hermes/lockgate.py` and the two files of `infra/hermes/plugins/oort-image-guard/`
+  as the four base64 variables, deploy, and read one
   `LOCKGATE {"ok": true, …}` line in the hermes deploy log. The start command runs
   the gate before the Hermes entrypoint, so a refused config means a service that
   never listens. See `infra/railway/README.md` (Hermes).
@@ -2488,8 +2489,8 @@ generator now do for you; you still read the lock, and the model key stays yours
   with the exact host `hermes`, and `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`; then
   `scripts/self_host_env.sh --compose up -d --wait` starts Hermes with the rest.
   The `hermes` service has no `ports:` (not reachable from the host), mounts the
-  config and the gate read-only, and runs `lockgate.py gate` before the
-  entrypoint. On an existing env the generated key is never replaced and the other keys
+  config, the gate and the image guard plugin read-only, and runs `lockgate.py gate`
+  before the entrypoint. On an existing env the generated key is never replaced and the other keys
   are set to the bundled values; the flag refuses an env that already declares
   another `HERMES_BASE_URL`.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` stays **your own declaration**. In both
