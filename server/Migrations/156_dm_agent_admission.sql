@@ -55,30 +55,40 @@ CREATE POLICY dm_agent_read_boundary ON message AS RESTRICTIVE FOR SELECT
 -- Only the new consent-managed seats/rooms use this departure gate. Legacy
 -- personal-agent notices, persona cards and their historical edits keep their
 -- existing write contract. Even an unseated agent is gated in an admitted room.
--- All writers (including BYPASSRLS workers and SELECT-only membership readers)
--- take a shared transaction advisory lock; admission/removal takes its exclusive
+-- All INSERT writers (including BYPASSRLS workers and SELECT-only membership
+-- readers) take a shared transaction advisory lock; admission/removal takes its exclusive
 -- counterpart before changing the seat. No membership UPDATE privilege is needed.
+CREATE FUNCTION dm_agent_can_speak(p_ws uuid, p_channel uuid, p_agent uuid)
+RETURNS boolean LANGUAGE plpgsql
+SET search_path = pg_catalog, public AS $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM channel c WHERE c.id = p_channel AND c.workspace_id = p_ws AND c.kind = 'dm'
+                 AND (c.dm_key LIKE 'admitted:%' OR EXISTS (
+                     SELECT 1 FROM dm_agent_admission d WHERE d.workspace_id = p_ws
+                       AND d.channel_id = p_channel AND d.agent_member_id = p_agent)))
+       AND EXISTS (SELECT 1 FROM member WHERE id = p_agent AND workspace_id = p_ws AND kind = 'agent') THEN
+        PERFORM pg_advisory_xact_lock_shared(hashtextextended(
+            'dm-agent:' || p_ws::text || ':' || p_channel::text || ':' || p_agent::text, 0));
+        PERFORM 1 FROM membership ms JOIN member m ON m.id = ms.member_id AND m.workspace_id = ms.workspace_id
+            WHERE ms.workspace_id = p_ws AND ms.channel_id = p_channel
+              AND ms.member_id = p_agent AND ms.left_at IS NULL
+              AND m.status = 'active' AND m.deleted_at IS NULL;
+        RETURN FOUND;
+    END IF;
+    RETURN true;
+END $$;
+
+-- UPDATE is server bookkeeping (including the body of an existing card).
+-- Authenticated agent edits are refused at the request boundary after departure.
 CREATE FUNCTION guard_dm_agent_write() RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, public AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM channel c WHERE c.id = NEW.channel_id AND c.workspace_id = NEW.workspace_id AND c.kind = 'dm'
-                 AND (c.dm_key LIKE 'admitted:%' OR EXISTS (
-                     SELECT 1 FROM dm_agent_admission d WHERE d.workspace_id = NEW.workspace_id
-                       AND d.channel_id = NEW.channel_id AND d.agent_member_id = NEW.author_member_id)))
-       AND EXISTS (SELECT 1 FROM member WHERE id = NEW.author_member_id AND workspace_id = NEW.workspace_id AND kind = 'agent') THEN
-        PERFORM pg_advisory_xact_lock_shared(hashtextextended(
-            'dm-agent:' || NEW.workspace_id::text || ':' || NEW.channel_id::text || ':' || NEW.author_member_id::text, 0));
-        PERFORM 1 FROM membership ms JOIN member m ON m.id = ms.member_id AND m.workspace_id = ms.workspace_id
-            WHERE ms.workspace_id = NEW.workspace_id AND ms.channel_id = NEW.channel_id
-              AND ms.member_id = NEW.author_member_id AND ms.left_at IS NULL
-              AND m.status = 'active' AND m.deleted_at IS NULL;
-        IF NOT FOUND THEN
-            RAISE EXCEPTION 'agent is not an active DM member' USING ERRCODE = '42501';
-        END IF;
+    IF NOT dm_agent_can_speak(NEW.workspace_id, NEW.channel_id, NEW.author_member_id) THEN
+        RAISE EXCEPTION 'agent is not an active DM member' USING ERRCODE = '42501';
     END IF;
     RETURN NEW;
 END $$;
-CREATE TRIGGER dm_agent_write_boundary BEFORE INSERT OR UPDATE ON message
+CREATE TRIGGER dm_agent_write_boundary BEFORE INSERT ON message
     FOR EACH ROW EXECUTE FUNCTION guard_dm_agent_write();
 
 -- Keep ADR-0162's 1:1 coverage verbatim and add only a consented current seat,

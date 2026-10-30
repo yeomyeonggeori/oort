@@ -409,11 +409,16 @@ pub async fn remove(
     let found = momo_db::with_tenant_tx(&state.pool, ws, move |conn| Box::pin(async move {
         if !lock_room(conn, ws, channel).await? || !humans(conn,ws,channel).await?.contains(&principal.member_id) { return Ok(false); }
         lock_agent_seat(conn, ws, channel, agent).await?;
+        let seated: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM dm_agent_admission WHERE workspace_id=$1 AND channel_id=$2 AND agent_member_id=$3 AND admitted_at IS NOT NULL AND revoked_at IS NULL)")
+            .bind(ws).bind(channel).bind(agent).fetch_one(&mut *conn).await?;
+        if !seated { return Ok(false); }
+        // The standard hosted reference needs the still-valid seat. Its stop
+        // and the revocation below commit together under the exclusive lock.
+        super::agent_runs::cancel_agent_runs_in_tx(conn, ws, agent, Some(channel), principal.member_id).await?;
         let changed = sqlx::query("UPDATE dm_agent_admission SET revoked_at = clock_timestamp() WHERE workspace_id = $1 AND channel_id = $2 AND agent_member_id = $3 AND admitted_at IS NOT NULL AND revoked_at IS NULL")
             .bind(ws).bind(channel).bind(agent).execute(&mut *conn).await?.rows_affected();
         if changed == 0 { return Ok(false); }
         sqlx::query("UPDATE membership SET left_at = clock_timestamp() WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3 AND left_at IS NULL").bind(ws).bind(channel).bind(agent).execute(&mut *conn).await?;
-        sqlx::query("UPDATE agent_run SET status = 'cancelled', finished_at = now(), updated_at = now() WHERE workspace_id = $1 AND channel_id = $2 AND agent_member_id = $3 AND status IN ('queued','running','awaiting_approval','paused')").bind(ws).bind(channel).bind(agent).execute(&mut *conn).await?;
         let name: String = sqlx::query_scalar("SELECT display_name FROM member WHERE workspace_id = $1 AND id = $2").bind(ws).bind(agent).fetch_one(&mut *conn).await?;
         system_line(conn,ws,channel,principal.member_id,agent,&format!("{name}을 내보냈어요 · 이제 이 대화를 보지 못해요"),"removed").await?;
         write_audit(conn,&AuditEntry::new(ws,"dm.agent.removed").by(principal.member_id).about(agent).target("channel",channel)).await?;

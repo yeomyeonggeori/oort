@@ -975,7 +975,13 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
                 decided_at,
                 Some(&format!("approval is already {status}")),
             ),
-            status: StatusCode::CONFLICT,
+            // The server has already stopped this action. Acknowledge the
+            // terminal card without resurrecting work or recording a new vote.
+            status: if status == "cancelled" {
+                StatusCode::OK
+            } else {
+                StatusCode::CONFLICT
+            },
             secret_once: None,
         }));
     }
@@ -2505,36 +2511,45 @@ async fn execute_workspace_action(
     // Same authorship rule as the rejection's (`reject_run`): the proposal was
     // the agent's utterance, so its outcome belongs to the same speaker. Who
     // decided is in the props, not in the authorship.
-    send_message_in_tx(
+    if momo_messaging::dm::dm_agent_can_speak_in_tx(
         conn,
         input.workspace_id,
-        NewMessage {
-            channel_id: approval.channel_id,
-            author_member_id: approval.requested_by,
-            message_type: MessageType::ToolResult,
-            body: Some(executed.result_body),
-            props: action_result_props(&ActionResult {
-                action_id: action.id,
-                status: ACTION_RESULT_EXECUTED,
-                approval_id: approval.id,
-                decided_by: input.member_id,
-                ref_type: executed.ref_type,
-                ref_id: executed.ref_id,
-                rows: executed.result_rows,
-                secret_shown_once: executed.secret_once.is_some(),
-                next: executed.next,
-            }),
-            root_id: None,
-            reply_to_id: None,
-            // NOT `approval.id` — that key belongs to the rejection and expiry
-            // lines (`momo_agent::actions::result_client_msg_id`).
-            client_msg_id: Some(result_client_msg_id(approval.id)),
-            run_id: Some(approval.run_id),
-            hlc_ts: None,
-            hlc_count: None,
-        },
+        approval.channel_id,
+        approval.requested_by,
     )
-    .await?;
+    .await?
+    {
+        send_message_in_tx(
+            conn,
+            input.workspace_id,
+            NewMessage {
+                channel_id: approval.channel_id,
+                author_member_id: approval.requested_by,
+                message_type: MessageType::ToolResult,
+                body: Some(executed.result_body),
+                props: action_result_props(&ActionResult {
+                    action_id: action.id,
+                    status: ACTION_RESULT_EXECUTED,
+                    approval_id: approval.id,
+                    decided_by: input.member_id,
+                    ref_type: executed.ref_type,
+                    ref_id: executed.ref_id,
+                    rows: executed.result_rows,
+                    secret_shown_once: executed.secret_once.is_some(),
+                    next: executed.next,
+                }),
+                root_id: None,
+                reply_to_id: None,
+                // NOT `approval.id` — that key belongs to the rejection and expiry
+                // lines (`momo_agent::actions::result_client_msg_id`).
+                client_msg_id: Some(result_client_msg_id(approval.id)),
+                run_id: Some(approval.run_id),
+                hlc_ts: None,
+                hlc_count: None,
+            },
+        )
+        .await?;
+    }
 
     // ---- the run ends here, succeeded, with no job behind it ---------------
     if !succeed_parked_run_in_tx(
@@ -4057,6 +4072,16 @@ async fn reject_run(
         object.insert("reason".into(), json!(reason));
     }
 
+    if !momo_messaging::dm::dm_agent_can_speak_in_tx(
+        conn,
+        approval.workspace_id,
+        approval.channel_id,
+        approval.requested_by,
+    )
+    .await?
+    {
+        return Ok(());
+    }
     send_message_in_tx(
         conn,
         approval.workspace_id,

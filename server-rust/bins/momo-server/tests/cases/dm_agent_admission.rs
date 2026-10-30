@@ -127,6 +127,63 @@ impl Fixture {
             .await
             .unwrap()
     }
+    async fn pending_tool(&self) -> (Uuid, Uuid, Uuid) {
+        let (ws, channel, agent) = (self.tenant.workspace, self.channel, self.agent);
+        momo_db::with_tenant_tx(&self.app, ws, move |conn| Box::pin(async move {
+            let run = Uuid::new_v4();
+            sqlx::query("INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,status,input,idempotency_key) VALUES($1,$2,$3,$4,'awaiting_approval','{}',$5)")
+                .bind(run).bind(ws).bind(agent).bind(channel).bind(format!("r2:{run}")).execute(&mut *conn).await?;
+            let approval = momo_agent::approval::create_pending_approval_in_tx(conn, ws, momo_agent::approval::NewApproval {
+                run_id: run, channel_id: channel, requested_by: agent, action_type: "tool_call".into(),
+                payload: json!({"tool_call":{"call_id":run.to_string(),"name":"github.search_issues","arguments":{}}}),
+                expires_at: chrono::Utc::now()+chrono::Duration::hours(1),
+            }).await?;
+            let mut message = momo_messaging::NewMessage::text(channel, agent, "approval card");
+            message.message_type = momo_messaging::MessageType::ApprovalRequest;
+            message.run_id = Some(run);
+            message.props = json!({"approval_id":approval,"status":"pending","last_attempt":"role_required"});
+            let card = momo_messaging::send_message_in_tx(conn,ws,message).await?.message.id;
+            momo_agent::approval::attach_request_message_in_tx(conn,ws,approval,card).await?;
+            momo_outbox::emit_outbox(conn,ws,momo_outbox::OutboxKind::AgentJob,"publish",&json!({"run_id":run,"channel_id":channel,"agent_member_id":agent}),Some(agent)).await?;
+            Ok((run,approval,card))
+        })).await.unwrap()
+    }
+    async fn assert_cancelled(&self, run: Uuid, approval: Uuid, card: Uuid) {
+        let (status, by, reason): (String, Option<Uuid>, Option<String>) = sqlx::query_as(
+            "SELECT status::text,decided_by,decision_reason FROM approval WHERE id=$1",
+        )
+        .bind(approval)
+        .fetch_one(&self.su)
+        .await
+        .unwrap();
+        assert_eq!(
+            status, "cancelled",
+            "departure uses standard approval cancellation"
+        );
+        assert_eq!(by, None);
+        assert_eq!(
+            reason.as_deref(),
+            Some(momo_agent::approval::RUN_CANCELLED_DECISION_REASON)
+        );
+        let (status, last_attempt): (String, bool) = sqlx::query_as(
+            "SELECT props->>'status',props ? 'last_attempt' FROM message WHERE id=$1",
+        )
+        .bind(card)
+        .fetch_one(&self.su)
+        .await
+        .unwrap();
+        assert_eq!(status, "cancelled", "the durable card is terminal too");
+        assert!(!last_attempt);
+        let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&self.su)
+            .await
+            .unwrap();
+        assert_eq!(status, "cancelled");
+        let pending: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' AND payload->>'run_id'=$2 AND status IN ('pending','processing')")
+            .bind(self.tenant.workspace).bind(run.to_string()).fetch_one(&self.su).await.unwrap();
+        assert_eq!(pending, 0, "the cancelled run has no deliverable job");
+    }
     async fn seats(&self) -> i64 {
         sqlx::query_scalar("SELECT count(*) FROM membership WHERE workspace_id = $1 AND channel_id = $2 AND member_id = $3 AND left_at IS NULL").bind(self.tenant.workspace).bind(self.channel).bind(self.agent).fetch_one(&self.su).await.unwrap()
     }
@@ -371,64 +428,45 @@ async fn dm_admission_an_unseated_agent_cannot_write_in_an_admitted_room() {
 
 #[tokio::test]
 #[ignore = "dedicated real PG"]
-async fn dm_admission_removal_waits_for_an_inflight_message_edit_then_rejects_later_edits() {
+async fn dm_admission_server_card_updates_survive_departure_but_agent_edits_do_not() {
     let f = Fixture::new().await;
     f.admit().await;
-    let (ws, channel, agent) = (f.tenant.workspace, f.channel, f.agent);
-    let sent = momo_db::with_tenant_tx(&f.su, ws, move |conn| {
-        Box::pin(async move {
-            momo_messaging::send_message_in_tx(
-                conn,
-                ws,
-                momo_messaging::NewMessage::text(channel, agent, "answer".to_string()),
-            )
-            .await
-        })
-    })
-    .await
-    .unwrap();
-    // An edit holds no channel_seq lock: only the trigger's shared advisory
-    // lock can make the HTTP remover wait for this transaction.
-    let mut edit = f.su.begin().await.unwrap();
-    let holder: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(&mut *edit)
+    let (_, _, card) = f.pending_tool().await;
+    f.remove().await;
+    let (ws, agent) = (f.tenant.workspace, f.agent);
+    momo_db::with_tenant_tx(&f.app, ws, move |conn| Box::pin(async move {
+        // Server-owned card updates can include body as well as props.
+        sqlx::query("UPDATE message SET body='closed by server', props=props || '{\"server_closed\":true}'::jsonb WHERE id=$1")
+            .bind(card).execute(&mut *conn).await?;
+        Ok(())
+    })).await.unwrap();
+    let closed: bool = sqlx::query_scalar("SELECT body='closed by server' AND props->>'server_closed'='true' FROM message WHERE id=$1")
+        .bind(card).fetch_one(&f.su).await.unwrap();
+    assert!(
+        closed,
+        "server bookkeeping commits after the agent has left"
+    );
+    let edit = momo_db::tenant::REQUEST_AGENT_MEMBER
+        .scope(
+            agent,
+            momo_db::with_tenant_tx(&f.app, ws, move |conn| {
+                Box::pin(async move {
+                    momo_messaging::edit_message_in_tx(
+                        conn,
+                        ws,
+                        card,
+                        agent,
+                        "agent after departure",
+                    )
+                    .await
+                })
+            }),
+        )
         .await
         .unwrap();
-    sqlx::query("UPDATE message SET body='edited before removal' WHERE id=$1")
-        .bind(sent.message.id)
-        .execute(&mut *edit)
-        .await
-        .unwrap();
-    let client = f.http.clone();
-    let url = format!(
-        "{}/v1/workspaces/{ws}/channels/{channel}/dm-agents/{agent}",
-        f.base
-    );
-    let token = f.peer_token.clone();
-    let removal =
-        tokio::spawn(async move { client.delete(url).bearer_auth(token).send().await.unwrap() });
-    let waiting = tokio::time::timeout(std::time::Duration::from_secs(3), async {
-        loop {
-            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND mode='ExclusiveLock' AND NOT granted AND $1=ANY(pg_blocking_pids(pid)))")
-                .bind(holder).fetch_one(&f.su).await.unwrap();
-            if blocked { break; }
-            assert!(!removal.is_finished(), "removal must wait for the in-flight edit's shared seat lock");
-            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-        }
-    }).await;
-    edit.commit().await.unwrap();
     assert!(
-        waiting.is_ok(),
-        "the real remover must acquire the exclusive seat lock"
-    );
-    assert_eq!(removal.await.unwrap().status(), 200);
-    let late = sqlx::query("UPDATE message SET body='edited after removal' WHERE id=$1")
-        .bind(sent.message.id)
-        .execute(&f.su)
-        .await;
-    assert!(
-        late.is_err(),
-        "even a superuser cannot edit as the removed agent"
+        edit.is_err(),
+        "an authenticated agent cannot use the server UPDATE path"
     );
 }
 
@@ -734,7 +772,15 @@ async fn dm_admission_hosted_port_reads_only_the_consented_runtime_and_current_s
         .await
         .unwrap();
     let single = seed_dm(&f.su, &f.tenant, f.tenant.human, f.agent).await;
+    let (pending_run, approval, card) = f.pending_tool().await;
     f.remove().await;
+    f.assert_cancelled(pending_run, approval, card).await;
+    let references: i64=sqlx::query_scalar("SELECT count(*) FROM hosted_agent_inbox_event WHERE connection_id=$1 AND event_kind='agent_run' AND source_run_id=$2")
+        .bind(connection).bind(pending_run).fetch_one(&f.su).await.unwrap();
+    assert_eq!(
+        references, 1,
+        "the hosted runtime hears the standard run cancellation"
+    );
     let removed = read(&f, &raw).await;
     assert_eq!(
         removed.0, 409,
@@ -806,4 +852,126 @@ async fn dm_admission_retains_the_callers_routing_choice_and_rejects_invalid_cho
         input["routing"]["model"], AGENT_MODEL,
         "the admitted turn retains the caller override"
     );
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG"]
+async fn dm_admission_remove_cancels_pending_approvals_and_a_human_can_close_the_card() {
+    let f = Fixture::new().await;
+    f.admit().await;
+    let (run, approval, card) = f.pending_tool().await;
+    f.remove().await;
+    f.assert_cancelled(run, approval, card).await;
+    let response = f.decide(approval, false, &f.peer_token).await;
+    assert_eq!(
+        response.status(),
+        200,
+        "a click on the cancelled card is acknowledged"
+    );
+    let body: Value = response.json().await.unwrap();
+    assert_eq!(
+        body["status"], "cancelled",
+        "a late click cannot resurrect the action"
+    );
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG"]
+async fn dm_admission_member_suspend_and_retire_reuse_standard_cancellation() {
+    for retire in [false, true] {
+        let f = Fixture::new().await;
+        f.admit().await;
+        let (run, approval, card) = f.pending_tool().await;
+        let url = format!(
+            "{}/v1/workspaces/{}/members/{}",
+            f.base, f.tenant.workspace, f.agent
+        );
+        let response = if retire {
+            f.http.delete(url)
+        } else {
+            f.http.post(format!("{url}/suspend"))
+        }
+        .bearer_auth(&f.caller_token)
+        .send()
+        .await
+        .unwrap();
+        let status = response.status();
+        let body = response.text().await.unwrap();
+        assert_eq!(status, 200, "lifecycle retire={retire}: {body}");
+        f.assert_cancelled(run, approval, card).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG"]
+async fn dm_admission_a_human_can_reject_a_legacy_orphan_after_departure() {
+    for state in ["removed", "suspended", "deleted"] {
+        let f = Fixture::new().await;
+        f.admit().await;
+        let (_, approval, card) = f.pending_tool().await;
+        // Old deployments may have left a pending card behind. Exercise the
+        // decision path itself, rather than relying on new departure cleanup.
+        if state == "removed" {
+            sqlx::query("UPDATE membership SET left_at=now() WHERE channel_id=$1 AND member_id=$2")
+                .bind(f.channel)
+                .bind(f.agent)
+                .execute(&f.su)
+                .await
+                .unwrap();
+            sqlx::query("UPDATE dm_agent_admission SET revoked_at=now() WHERE channel_id=$1")
+                .bind(f.channel)
+                .execute(&f.su)
+                .await
+                .unwrap();
+        } else {
+            sqlx::query("UPDATE member SET status=$2::member_status WHERE id=$1")
+                .bind(f.agent)
+                .bind(state)
+                .execute(&f.su)
+                .await
+                .unwrap();
+        }
+        let response = f.decide(approval, false, &f.peer_token).await;
+        let status = response.status();
+        let body = response.text().await.unwrap();
+        assert_eq!(
+            status, 200,
+            "the old card can be closed after {state}: {body}"
+        );
+        let closed: bool=sqlx::query_scalar("SELECT a.status='rejected' AND m.props->>'status'='rejected' FROM approval a JOIN message m ON m.id=a.request_message_id WHERE a.id=$1 AND m.id=$2")
+            .bind(approval).bind(card).fetch_one(&f.su).await.unwrap();
+        assert!(closed, "both the ledger and card close after {state}");
+    }
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG"]
+async fn dm_admission_consent_cards_do_not_consume_the_agents_action_ceiling() {
+    let f = Fixture::new().await;
+    f.propose().await;
+    let (ws, agent) = (f.tenant.workspace, f.agent);
+    let counts = momo_db::with_tenant_tx(&f.app, ws, move |conn| {
+        Box::pin(
+            async move { momo_agent::count_pending_workspace_actions_in_tx(conn, ws, agent).await },
+        )
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        (counts.all, counts.unasked),
+        (0, 0),
+        "a real consent card is not an agent proposal"
+    );
+    let run: Uuid=sqlx::query_scalar("SELECT run_id FROM approval WHERE workspace_id=$1 AND payload->>'origin'='dm_agent_admission' LIMIT 1")
+        .bind(ws).fetch_one(&f.su).await.unwrap();
+    momo_db::with_tenant_tx(&f.app,ws,move |conn|Box::pin(async move {
+        momo_agent::approval::create_pending_approval_in_tx(conn,ws,momo_agent::approval::NewApproval {
+            run_id:run, channel_id:f.channel, requested_by:agent, action_type:"workspace_action".into(),
+            payload:json!({"origin":"agent_initiated","action":{"id":"channel.create","args":{}}}),
+            expires_at:chrono::Utc::now()+chrono::Duration::hours(1),
+        }).await?;
+        let counts=momo_agent::count_pending_workspace_actions_in_tx(conn,ws,agent).await?;
+        assert_eq!((counts.all,counts.unasked),(1,1),"ordinary agent proposals still consume the ceiling");
+        Ok(())
+    })).await.unwrap();
 }

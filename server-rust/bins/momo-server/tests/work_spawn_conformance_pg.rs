@@ -3515,3 +3515,54 @@ async fn invisible_and_carriage_return_text_is_refused_before_the_nonce_is_spent
         "refused before the signature spent a nonce"
     );
 }
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_unseated_personal_alias_in_an_admitted_dm_skips_notice_and_refuses_spawn_cleanly() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("admitted-personal");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let dm = s.open_dm(&s.access, s.teammate).await;
+    // Same canonical marker written when unanimous consent makes a group DM.
+    sqlx::query("UPDATE channel SET dm_key='admitted:' || id::text WHERE id=$1")
+        .bind(dm)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let other = s
+        .say(&s.other_access, dm, None, &format!("@{alias} 확인해 줘"))
+        .await;
+    assert_eq!(
+        s.skip_reason(other, agent).await.as_deref(),
+        Some("owner_only_non_owner")
+    );
+    assert!(
+        s.spoken_by(agent).await.is_empty(),
+        "no unseated alias notice is inserted"
+    );
+    let persisted: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM message WHERE id=$1)")
+        .bind(other)
+        .fetch_one(&s.su)
+        .await
+        .unwrap();
+    assert!(
+        persisted,
+        "the human send commits even though the alias cannot speak"
+    );
+    let origin = s
+        .say(&s.access, dm, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    let mut req = s.req();
+    req.channel = dm;
+    req.agent = Some(agent);
+    req.origin = Some(origin);
+    let (status, body, _) = s.spawn(&req).await;
+    assert_eq!(
+        status, 409,
+        "personal spawn has a deliberate refusal: {body}"
+    );
+    assert_eq!(code(&body), Some("dm_agent_consent_required"));
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
+}

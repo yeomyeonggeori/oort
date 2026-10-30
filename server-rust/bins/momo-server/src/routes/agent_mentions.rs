@@ -1798,6 +1798,18 @@ async fn subscription_notice(
 ) -> Result<(), DbError> {
     // E3 (#3938): the connector sentence needs only the connector owner's name —
     // an agent that is not `owner_only` has no `OwnerOnlyScope` to read it from.
+    if !momo_messaging::dm::dm_agent_can_speak_in_tx(
+        conn,
+        send.workspace_id,
+        send.channel_id,
+        agent.member_id,
+    )
+    .await?
+    {
+        // ADR-0217: retain the audited skip and the human's message. An alias
+        // outside a consent-managed DM cannot post its subscription notice.
+        return Ok(());
+    }
     let body = if let Some(stop) = kind.connector_trial_stop() {
         // #3948: the trial sentences name nobody; only the owner is ever told.
         momo_agent::connector_trial_notice_body(stop).to_string()
