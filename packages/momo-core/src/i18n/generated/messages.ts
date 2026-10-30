@@ -3,6 +3,24 @@ export const messageKeys = [
   "common.feedback.unavailable",
   "common.invitation.received",
   "common.members.count",
+  "desktop.menu.close",
+  "desktop.menu.copy",
+  "desktop.menu.cut",
+  "desktop.menu.edit",
+  "desktop.menu.file",
+  "desktop.menu.fullscreen",
+  "desktop.menu.help",
+  "desktop.menu.hide",
+  "desktop.menu.hideOthers",
+  "desktop.menu.maximize",
+  "desktop.menu.minimize",
+  "desktop.menu.paste",
+  "desktop.menu.quit",
+  "desktop.menu.redo",
+  "desktop.menu.selectAll",
+  "desktop.menu.undo",
+  "desktop.menu.view",
+  "desktop.menu.window",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -23,6 +41,24 @@ export const argumentSpecs = {
   "common.members.count": {
     "count": "number"
   },
+  "desktop.menu.close": {},
+  "desktop.menu.copy": {},
+  "desktop.menu.cut": {},
+  "desktop.menu.edit": {},
+  "desktop.menu.file": {},
+  "desktop.menu.fullscreen": {},
+  "desktop.menu.help": {},
+  "desktop.menu.hide": {},
+  "desktop.menu.hideOthers": {},
+  "desktop.menu.maximize": {},
+  "desktop.menu.minimize": {},
+  "desktop.menu.paste": {},
+  "desktop.menu.quit": {},
+  "desktop.menu.redo": {},
+  "desktop.menu.selectAll": {},
+  "desktop.menu.undo": {},
+  "desktop.menu.view": {},
+  "desktop.menu.window": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -39,6 +75,24 @@ export interface MessageArgs {
   "common.feedback.unavailable": Record<string, never>;
   "common.invitation.received": { actorName: string };
   "common.members.count": { count: number };
+  "desktop.menu.close": Record<string, never>;
+  "desktop.menu.copy": Record<string, never>;
+  "desktop.menu.cut": Record<string, never>;
+  "desktop.menu.edit": Record<string, never>;
+  "desktop.menu.file": Record<string, never>;
+  "desktop.menu.fullscreen": Record<string, never>;
+  "desktop.menu.help": Record<string, never>;
+  "desktop.menu.hide": Record<string, never>;
+  "desktop.menu.hideOthers": Record<string, never>;
+  "desktop.menu.maximize": Record<string, never>;
+  "desktop.menu.minimize": Record<string, never>;
+  "desktop.menu.paste": Record<string, never>;
+  "desktop.menu.quit": Record<string, never>;
+  "desktop.menu.redo": Record<string, never>;
+  "desktop.menu.selectAll": Record<string, never>;
+  "desktop.menu.undo": Record<string, never>;
+  "desktop.menu.view": Record<string, never>;
+  "desktop.menu.window": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
