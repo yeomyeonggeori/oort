@@ -77,6 +77,19 @@ async function invoke<T>(command: string, args?: Record<string, unknown>): Promi
   return call<T>(command, args);
 }
 
+/** Installation-wide language, in the shell's existing app-data directory (ADR-0213 §5). */
+export function readLocalePreference(): Promise<unknown> {
+  return invoke("locale_preference_read");
+}
+
+export function writeLocalePreference(preference: import("@momo/core/i18n").LocalePreference): Promise<void> {
+  return invoke("locale_preference_write", { preference });
+}
+
+export function setLocaleMenu(labels: ReturnType<typeof import("@/i18n/desktopMenu").desktopMenuLabels>): Promise<void> {
+  return invoke("locale_menu_set", { labels });
+}
+
 /** No-op unsubscribe, so callers can treat browser and desktop identically. */
 const noop = () => {};
 
