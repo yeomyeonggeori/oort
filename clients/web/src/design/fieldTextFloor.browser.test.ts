@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * 입력 칸의 글자는 손가락 화면에서 16px 밑으로 내려가지 않는다 (#2616).
@@ -51,6 +52,8 @@ const FLOOR_PX = 16;
 type EngineName = "webkit" | "chromium";
 
 function engineMissing(name: EngineName): string | null {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return blocked;
   try {
     const playwright = require_("playwright") as typeof import("playwright");
     const exe = playwright[name].executablePath();
