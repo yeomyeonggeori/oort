@@ -205,6 +205,11 @@ async fn propose_with_auth(
         payload["origin"], "agent_initiated",
         "the human-requested path"
     );
+    assert_eq!(
+        payload["action"]["pins"]["hostedConnection"],
+        fixture.hosted_connection.to_string(),
+        "every requested card pins the authenticated proposal connection"
+    );
     Trial {
         fixture,
         approval,
@@ -379,6 +384,188 @@ async fn ended_human_requested_connections_leave_every_action_pending_and_write_
     }
 }
 
+// Compare actual rows as well as counts: refusing a stale connection must not
+// settle the run/decision, change coverage or memberships, or enqueue anything.
+async fn decision_effects(su: &PgPool, workspace: Uuid) -> Value {
+    let mut snapshot = json!({});
+    for table in [
+        "channel",
+        "channel_seq",
+        "membership",
+        "message_pin",
+        "message",
+        "outbox",
+        "approval",
+        "approval_decision",
+        "agent_run",
+        "hosted_agent_connection",
+    ] {
+        let rows: Value = sqlx::query_scalar(&format!(
+            "SELECT coalesce(jsonb_agg(to_jsonb(t) ORDER BY to_jsonb(t)::text), '[]'::jsonb) \
+               FROM {table} t WHERE workspace_id=$1"
+        ))
+        .bind(workspace)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        snapshot[table] = rows;
+    }
+    snapshot
+}
+
+async fn assert_connection_refusal(
+    su: &PgPool,
+    client: &reqwest::Client,
+    base: &str,
+    trial: &Trial,
+) {
+    let f = &trial.fixture;
+    let before = decision_effects(su, f.workspace).await;
+    let audits_before: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+            .bind(f.workspace)
+            .fetch_one(su)
+            .await
+            .unwrap();
+    let (status, answer) = approve(client, base, f, trial.approval).await;
+    assert_eq!(status, 409, "{answer}");
+    assert_eq!(answer["status"], "action_args_invalid");
+    assert_eq!(approval_status(su, trial.approval).await, "pending");
+    assert_eq!(decision_effects(su, f.workspace).await, before);
+    let audits_after: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1")
+            .bind(f.workspace)
+            .fetch_one(su)
+            .await
+            .unwrap();
+    assert_eq!(audits_after, audits_before + 1, "exactly one refusal audit");
+    let refusals = audit_details_of(su, f.workspace, "action.refused").await;
+    assert_eq!(refusals.len(), 1);
+    assert_eq!(refusals[0]["schema"], "momo.action.refused.v1");
+    assert_eq!(refusals[0]["reason"], "hosted_connection_changed");
+    assert_eq!(refusals[0]["approval_id"], trial.approval.to_string());
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn reconnected_human_requested_cards_keep_the_original_connection_and_execute_nothing() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server_with_oauth(momo_app_pool().await).await;
+    let client = reqwest::Client::new();
+    for action in ACTIONS {
+        let mut trial = propose(&su, &client, &base, action).await;
+        let original = trial.fixture.hosted_connection;
+        // Replace the original with an equally authorised, proved OAuth
+        // connection for the SAME agent, owner and channel. The connection id
+        // alone must make this otherwise executable card stale.
+        trial.fixture = oauth_fixture(&su, trial.fixture).await;
+        assert_ne!(trial.fixture.hosted_connection, original);
+        let (workspace, agent, connection) = (
+            trial.fixture.workspace,
+            trial.fixture.hosted_agent,
+            trial.fixture.hosted_connection,
+        );
+        let stands = momo_db::with_tenant_tx(&momo_app_pool().await, workspace, move |conn| {
+            Box::pin(async move {
+                Ok::<_, momo_db::DbError>(
+                    momo_auth::hosted_connection_stands_in_tx(conn, workspace, agent, connection)
+                        .await?,
+                )
+            })
+        })
+        .await
+        .unwrap();
+        assert!(stands, "the replacement connection itself is valid");
+        assert_connection_refusal(&su, &client, &base, &trial).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn connection_refusals_are_audited_even_when_target_resolution_already_fails() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server_with_oauth(momo_app_pool().await).await;
+    let client = reqwest::Client::new();
+    for drift in ["coverage", "deleted", "legacy_deleted"] {
+        let mut trial = propose(&su, &client, &base, Action::Pin).await;
+        if drift == "legacy_deleted" {
+            sqlx::query(
+                "UPDATE approval SET payload=payload #- '{action,pins,hostedConnection}' WHERE id=$1",
+            )
+            .bind(trial.approval)
+            .execute(&su)
+            .await
+            .unwrap();
+        } else {
+            trial.fixture = oauth_fixture(&su, trial.fixture).await;
+        }
+        let f = &trial.fixture;
+        if drift == "coverage" {
+            sqlx::query(
+                "UPDATE hosted_agent_connection SET approved_channel_ids='{}' WHERE workspace_id=$1 AND id=$2",
+            )
+            .bind(f.workspace)
+            .bind(f.hosted_connection)
+            .execute(&su)
+            .await
+            .unwrap();
+        } else {
+            sqlx::query("UPDATE message SET deleted_at=now() WHERE workspace_id=$1 AND id=$2")
+                .bind(f.workspace)
+                .bind(trial.message)
+                .execute(&su)
+                .await
+                .unwrap();
+        }
+        assert_connection_refusal(&su, &client, &base, &trial).await;
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn legacy_human_requested_cards_without_a_connection_pin_allow_only_rejection_or_expiry() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    for expired in [false, true] {
+        let trial = propose(&su, &client, &base, Action::Create).await;
+        let f = &trial.fixture;
+        sqlx::query(
+            "UPDATE approval SET payload=payload #- '{action,pins,hostedConnection}', \
+               expires_at=CASE WHEN $2 THEN now()-interval '1 minute' \
+                               ELSE now()+interval '24 hours' END WHERE id=$1",
+        )
+        .bind(trial.approval)
+        .bind(expired)
+        .execute(&su)
+        .await
+        .unwrap();
+        if expired {
+            let (status, answer) = approve(&client, &base, f, trial.approval).await;
+            assert_eq!(status, 409, "{answer}");
+            assert_eq!(answer["status"], "expired");
+            assert_eq!(approval_status(&su, trial.approval).await, "expired");
+        } else {
+            assert_connection_refusal(&su, &client, &base, &trial).await;
+            let (status, answer) = reject(&client, &base, f, trial.approval).await;
+            assert_eq!(status, 200, "{answer}");
+            assert_eq!(approval_status(&su, trial.approval).await, "rejected");
+        }
+        let created: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM channel WHERE workspace_id=$1 AND name=$2)",
+        )
+        .bind(f.workspace)
+        .bind(&trial.name)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+        assert!(!created, "legacy cards never execute");
+    }
+}
+
 async fn seed_managed_create_approval(su: &PgPool, trial: &Trial) -> Uuid {
     let f = &trial.fixture;
     // A separate stored managed action: never rewrite an inbox-referenced run.
@@ -388,6 +575,10 @@ async fn seed_managed_create_approval(su: &PgPool, trial: &Trial) -> Uuid {
         .await
         .unwrap();
     payload["proposed_by"] = json!(f.managed_agent);
+    payload["action"]["pins"]
+        .as_object_mut()
+        .unwrap()
+        .remove("hostedConnection");
     let run: Uuid = sqlx::query_scalar("INSERT INTO agent_run(workspace_id,agent_member_id,channel_id,status) VALUES($1,$2,$3,'awaiting_approval') RETURNING id")
         .bind(f.workspace).bind(f.managed_agent).bind(f.channel).fetch_one(su).await.unwrap();
     sqlx::query_scalar::<_, Uuid>("INSERT INTO approval(workspace_id,run_id,channel_id,requested_by,action_type,payload,status,expires_at) VALUES($1,$2,$3,$4,'workspace_action',$5,'pending',now()+interval '1 hour') RETURNING id")
