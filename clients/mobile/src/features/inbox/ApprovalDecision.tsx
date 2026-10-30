@@ -93,6 +93,7 @@ export function ApprovalDecision({
   forbiddenCopy = null,
   lead = DEFAULT_DECISION_LEAD,
   shape = 'box',
+  subject,
   decisionRef,
 }: {
   /** 로터 동작이 같은 결정을 부를 손잡이 (#2595). 인박스는 버튼에 직접 닿으므로 넘기지 않는다. */
@@ -101,7 +102,8 @@ export function ApprovalDecision({
    * 버튼 모양. `pill` 은 대화 안 에이전트 카드의 행동 줄(DS2-4, 시안 A `.a-pill`:
    * 주 = 잉크, 보조 = surface2, 반경 알약)이다. 인박스·잠금화면은 `box` 그대로다.
    */
-  shape?: 'box' | 'pill';
+  shape?: 'box' | 'pill' | 'request';
+  subject?: string;
   approvalId: string;
   /**
    * 기한이 이미 지난 대기 행인가 (2R M4).
@@ -145,7 +147,8 @@ export function ApprovalDecision({
   lead?: string | null;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
-  const pill = shape === 'pill';
+  const pill = shape === 'pill' || shape === 'request';
+  const request = shape === 'request';
   const {workspaceId} = useSession();
   /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
   const [sending, setSending] = useState<Direction | null>(null);
@@ -272,7 +275,7 @@ export function ApprovalDecision({
       <View style={styles.buttons}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="거부"
+          accessibilityLabel={subject ? `${subject} 거부` : '거부'}
           accessibilityState={{disabled: busy, busy: sending === 'reject'}}
           disabled={busy}
           onPress={() => void commit('reject')}
@@ -281,6 +284,7 @@ export function ApprovalDecision({
             styles.buttonQuiet,
             pill && styles.pillButton,
             pill && styles.pillQuiet,
+            request && styles.requestQuiet,
             // 잠긴 모양은 **반대편**만 입는다. 자기 결정이 나가는 중인 버튼은 흐리지
             // 않는다 — 「보내는 중」은 지금 읽혀야 하는 낱말이다(#3829 M4).
             sending === 'approve' && styles.buttonInert,
@@ -293,7 +297,7 @@ export function ApprovalDecision({
         </Pressable>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="승인"
+          accessibilityLabel={subject ? `${subject} 승인` : '승인'}
           // 진짜로 할 수 없다: 자격 있는 호스트가 하나도 없으면 서버는 이 승인에
           // 409로 답한다. 이유는 픽커 아래에 이미 서 있으므로, 꺼진 버튼이 설명
           // 없이 서 있는 경우가 아니다.
@@ -370,6 +374,7 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   pillBar: {paddingBottom: 0},
   /** `.a-pill.sec{background:var(--surface2);color:var(--ink)}`. */
   pillQuiet: {borderWidth: 0, backgroundColor: color.surfaceMuted},
+  requestQuiet: {borderWidth: 1, borderColor: color.textFaint, backgroundColor: 'transparent'},
   /** `.a-pill.pri{background:var(--primary);color:var(--onPrimary)}`. */
   pillCommit: {backgroundColor: color.primary},
   pillCommitPressed: {opacity: 0.85},

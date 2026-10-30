@@ -3,6 +3,10 @@ import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanup, fireEvent, render, screen, waitFor, within} from '@testing-library/react-native';
 import React from 'react';
+import {AccessibilityInfo, StyleSheet} from 'react-native';
+import {RequestThinkingLine, REQUEST_THINKING_HEIGHT} from '../src/features/agents/RequestThinkingLine';
+import {RealtimeContext} from '../src/realtime/RealtimeProvider';
+import type {AgentProgressEvent} from '@momo/core/lib/realtimeEvents';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -91,9 +95,73 @@ function progress(extra: Partial<AgentRunProgress> = {}): AgentRunProgress {
 }
 
 function wrap(ui: React.ReactElement): React.ReactElement {
-  client = new QueryClient({defaultOptions: {queries: {retry: false}}});
+  client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
   return <QueryClientProvider client={client}>{ui}</QueryClientProvider>;
 }
+
+describe('요청 스레드의 생각 줄', () => {
+  beforeEach(() => mockFetchEvents.mockResolvedValue({runId: RUN, events: []}));
+  it('빈 예약 칸·생각·승인·끝·사라짐의 높이는 같아요', () => {
+    const view = render(wrap(<RequestThinkingLine directory={directory} nowMs={Date.now()} />));
+    const height = () => StyleSheet.flatten(screen.getByTestId('request-thinking-slot').props.style).minHeight;
+    const reserved = height();
+    expect(reserved).toBeGreaterThanOrEqual(REQUEST_THINKING_HEIGHT);
+    for (const phase of ['running', 'awaiting_approval', 'succeeded'] as const) {
+      view.rerender(<QueryClientProvider client={client!}><RequestThinkingLine progress={progress({phase})} directory={directory} nowMs={Date.now()} /></QueryClientProvider>);
+      expect(height()).toBe(reserved);
+    }
+    view.rerender(<QueryClientProvider client={client!}><RequestThinkingLine directory={directory} nowMs={Date.now()} /></QueryClientProvider>);
+    expect(height()).toBe(reserved);
+  });
+  it('단계는 40자까지이고 국면이 바뀔 때만 낭독해요', () => {
+    const announce = jest.spyOn(AccessibilityInfo, 'announceForAccessibility');
+    const view = render(wrap(<RequestThinkingLine progress={progress({phase: 'running', latestStage: '한'.repeat(80)})} directory={directory} nowMs={Date.now()} />));
+    announce.mockClear();
+    const update = (phase: AgentRunProgress['phase'], latestStage: string) => view.rerender(<QueryClientProvider client={client!}><RequestThinkingLine progress={progress({phase, latestStage})} directory={directory} nowMs={Date.now()} /></QueryClientProvider>);
+    expect(screen.getByTestId('request-thinking-line')).not.toHaveTextContent('한'.repeat(41));
+    update('running', '다음 단계');
+    expect(announce).not.toHaveBeenCalled();
+    update('awaiting_approval', '다음 단계');
+    expect(announce).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith('그록봇 · 승인 필요');
+    announce.mockRestore();
+  });
+  it('펼친 뒤 받은 흐르는 글만 보이고 접기·종결 뒤에는 남지 않아요', () => {
+    let receive: ((event: AgentProgressEvent) => void) | undefined;
+    const stop = jest.fn();
+    const rail = {subscribeAgent: (_ws: string, _ch: string, _agent: string, handlers: {onEvent: typeof receive}) => { receive = handlers.onEvent; return stop; }};
+    const ui = (phase: AgentRunProgress['phase']) => <QueryClientProvider client={client!}>
+      <RealtimeContext.Provider value={{rail: rail as never, status: 'connected', subscriptionsWanted: true}}>
+        <RequestThinkingLine progress={progress({phase})} directory={directory} nowMs={Date.now()} />
+      </RealtimeContext.Provider>
+    </QueryClientProvider>;
+    client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
+    const view = render(ui('running'));
+    fireEvent.press(screen.getByTestId('request-thinking-line'));
+    act(() => receive?.({type: 'agent.partial', v: 1, ts: Date.now(), payload: {run_id: RUN, channel_id: CH, text_delta: '이 칸을 연 뒤 온 글'}}));
+    expect(screen.getByTestId('request-thinking-stream')).toHaveTextContent('이 칸을 연 뒤 온 글');
+    fireEvent.press(screen.getByTestId('request-thinking-line'));
+    expect(stop).toHaveBeenCalled();
+    fireEvent.press(screen.getByTestId('request-thinking-line'));
+    expect(screen.queryByTestId('request-thinking-stream')).toBeNull();
+    act(() => receive?.({type: 'agent.partial', v: 1, ts: Date.now(), payload: {run_id: RUN, channel_id: CH, text_delta: '새 글'}}));
+    view.rerender(ui('succeeded'));
+    expect(screen.queryByTestId('request-thinking-stream')).toBeNull();
+  });
+  it('빈 과정과 원장 프레임 뒤 새 단계를 같은 펼친 칸에서 읽어요', async () => {
+    render(wrap(<RequestThinkingLine progress={progress({phase: 'running'})} directory={directory} nowMs={Date.now()} />));
+    fireEvent.press(screen.getByTestId('request-thinking-line'));
+    await waitFor(() => expect(screen.getByText('아직 받은 과정이 없어요')).toBeTruthy());
+    mockFetchEvents.mockResolvedValue({runId: RUN, events: [{ordinal: 1, kind: 'stage', stage: '프로필을 읽었어요', createdAtMs: Date.now()}]});
+    act(() => notifyRunLedgerFrame(RUN));
+    await waitFor(() => expect(screen.getByText('프로필을 읽었어요')).toBeTruthy());
+  });
+  it.each(['approval_rejected', 'approval_expired'])('%s는 예외 문장 줄이 서지 않아요', endReason => {
+    render(wrap(<MessageRunStatus messageId={MSG} channelId={CH} createdAtMs={0}
+      runs={[progress({phase: endReason === 'approval_rejected' ? 'cancelled' : 'timed_out', endReason})]} directory={directory} />));
+    expect(screen.queryByTestId(`message-run-status-row-${RUN}`)).toBeNull();
+  });
+});
 
 describe('폰 기록 시트 (#3824)', () => {
   it('모르는 원장 종류가 섞여 와도 기록이 서고, 깨우는 신호는 접혀 횟수가 붙는다', async () => {
