@@ -26768,6 +26768,29 @@ async fn requesting_member_generated_avatar_round_trip_4791() {
     assert_eq!(audit_count_4385(&w.su, ws, "member.avatar.set").await, 1);
 }
 
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_member_avatar_proposal_with_both_sources_is_http_400_4810() {
+    let w = world_4385().await;
+    let ws = w.fixture.workspace;
+    let before = approval_count_3900(&w.su, ws).await;
+    let (status, body) = propose_member_avatar_4385(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        json!({
+            "attachmentId": Uuid::new_v4().to_string(),
+            "avatar": {"source": "generated", "dataBase64": b64_3787(&tiny_png_3787())},
+        }),
+    )
+    .await;
+    assert_eq!(status, 400, "two image sources must be refused: {body}");
+    assert_eq!(approval_count_3900(&w.su, ws).await, before);
+    assert_eq!(staged_rows_3787(&w.su, ws).await, 0);
+}
+
 async fn assert_profile_result_broadcast_4791(pool: &PgPool, ws: Uuid, approval: Uuid) {
     let frames: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
