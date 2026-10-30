@@ -6,14 +6,12 @@ use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::{Principal, PrincipalKind};
 use momo_expressions::{
-    self as expressions, media, Actor, Choice, Error, Metadata, Origin, Patch, Report,
+    self as expressions, intake, media, Actor, Choice, Error, Metadata, Origin, Patch, Report,
 };
 use momo_unfurl::{fetch_source, parse_source_url, SOURCE_DEADLINE};
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::sync::{Arc, OnceLock};
-use tokio::sync::Semaphore;
 use uuid::Uuid;
 
 use crate::{error::ApiError, AppState};
@@ -207,11 +205,45 @@ pub async fn replace(
         .map_err(failure)?;
     let (_, bytes) = multipart(&state, request, false).await?;
     let media = media::process(bytes).await.map_err(media_error)?;
-    Ok(Json(
-        expressions::replace_draft(&state.pool, actor, id, media)
-            .await
-            .map_err(failure)?,
-    ))
+    let replaced = match expressions::replace_draft(&state.pool, actor, id, media.clone()).await {
+        // Not the caller's own direct draft: it may be a candidate of an open approval card.
+        Err(Error::NotFound) => replace_candidate(&state, actor, id, media).await,
+        other => other,
+    };
+    Ok(Json(replaced.map_err(failure)?))
+}
+
+/// ADR-0186 v8 X8-4: a candidate of an open `expression.create` card, replaced by a direct
+/// upload. One transaction swaps the pixels (same draft id, origin, name, face and TTL;
+/// revision + 1) and rewrites the card's `action.expression`, then announces the edit on the
+/// request card so every open view shows the new picture and the old choice goes stale.
+async fn replace_candidate(
+    state: &AppState,
+    actor: Actor,
+    id: Uuid,
+    media: media::Processed,
+) -> Result<Value, Error> {
+    expressions::transaction(&state.pool, actor, move |conn| {
+        Box::pin(async move {
+            let replaced =
+                expressions::action::replace_candidate_in_tx(conn, actor, id, &media).await?;
+            if let Some(message_id) = replaced.request_message_id {
+                momo_db::sqlx::query(
+                    "UPDATE message SET props = jsonb_set(COALESCE(props, '{}'::jsonb), '{action,expression}', $3, true) \
+                      WHERE workspace_id = $1 AND id = $2 AND props #> '{action}' IS NOT NULL",
+                )
+                .bind(actor.workspace)
+                .bind(message_id)
+                .bind(&replaced.card)
+                .execute(&mut *conn)
+                .await?;
+                momo_messaging::emit_message_edited_in_tx(conn, actor.workspace, message_id)
+                    .await?;
+            }
+            Ok(replaced.draft)
+        })
+    })
+    .await
 }
 pub async fn activate(
     State(state): State<AppState>,
@@ -398,16 +430,6 @@ pub async fn from_attachment(
     prepare(&state, actor, meta, Origin::attachment(), bytes).await
 }
 
-/// Link imports in flight at once. Each holds up to 5 MiB of fetched bytes and then
-/// waits for one of the two decoder slots, and a member can start many in parallel
-/// (the draft quota is only charged when the import ends). At the cap the next
-/// request is refused with a 503 before anything is fetched or written.
-const IMPORTS_IN_FLIGHT: usize = 8;
-fn import_slots() -> &'static Arc<Semaphore> {
-    static SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    SLOTS.get_or_init(|| Arc::new(Semaphore::new(IMPORTS_IN_FLIGHT)))
-}
-
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ImportRequest {
@@ -416,25 +438,6 @@ struct ImportRequest {
     tags: Vec<String>,
     subject_member_id: Value,
     url: String,
-}
-
-/// What a fetched body becomes: a picture, or the one reason it did not
-/// (ADR-0218 appendix C). The format is decided by the bytes, never by the
-/// `Content-Type` the server claimed.
-async fn picture_or_reason(bytes: Vec<u8>) -> (Option<media::Processed>, Option<&'static str>) {
-    if media::sniff(&bytes) == media::Sniffed::Unsupported {
-        // A web page, SVG, HEIC/AVIF, a script, an empty body: nothing to decode.
-        return (None, Some("source_unsupported"));
-    }
-    match media::process(bytes).await {
-        Ok(processed) => (Some(processed), None),
-        Err(media::Rejected::Video) => (None, Some("video_processing_unavailable")),
-        Err(media::Rejected::TooLarge) => (None, Some("source_too_large")),
-        // Decoder slots busy or the 10 s decode budget spent: a time limit on the
-        // import path, which D5 answers with a card, not an error.
-        Err(media::Rejected::Timeout) => (None, Some("source_timeout")),
-        Err(media::Rejected::Invalid) => (None, Some("source_invalid_media")),
-    }
 }
 
 /// ADR-0218 appendix A `POST /expressions/import`. The server fetches a public HTTPS
@@ -475,15 +478,32 @@ pub async fn import(
     // start (any spelling of loopback, link-local, metadata, RFC 1918) is a 400:
     // nothing is resolved, connected to or stored.
     let source = parse_source_url(&r.url).map_err(|_| invalid())?;
-    let permit = import_slots()
-        .clone()
-        .try_acquire_owned()
-        .map_err(|_| ApiError::busy(2))?;
-    let (media, code) = match fetch_source(&*state.unfurl_http, &source, SOURCE_DEADLINE).await {
-        Ok(bytes) => picture_or_reason(bytes).await,
-        Err(refused) => (None, Some(refused.code())),
+    // The instance's outgoing-request switch (`MOMO_UNFURL_ENABLED`, default off, ADR-0170 D3):
+    // off means this server makes no request on anyone's behalf. The link is kept as a manual
+    // card with the safe source and the upload control, and the person finishes it by hand.
+    let (media, code) = if !state.unfurl_enabled {
+        (None, Some("source_unavailable"))
+    } else {
+        let permit = intake::import_slots()
+            .clone()
+            .try_acquire_owned()
+            .map_err(|_| ApiError::busy(2))?;
+        let outcome = match fetch_source(&*state.unfurl_http, &source, SOURCE_DEADLINE).await {
+            // A busy decoder is the server's retryable state, not the picture's: a 503 with
+            // `Retry-After` and no draft, never a `source_timeout` card.
+            Ok(bytes) => match intake::picture_or_reason(bytes, None).await {
+                Ok(intake::Picture::Ready(processed)) => (Some(*processed), None),
+                Ok(intake::Picture::Manual(reason)) => (None, Some(reason)),
+                Err(intake::DecoderBusy) => return Err(ApiError::busy(2)),
+            },
+            // The first hop is the address the caller named: private from the start is a
+            // 400 with nothing stored, like a literal. (A refusal after a redirect is a card.)
+            Err(refused) if refused.is_private_origin() => return Err(invalid()),
+            Err(refused) => (None, Some(refused.code())),
+        };
+        drop(permit);
+        outcome
     };
-    drop(permit);
     let status = if media.is_some() {
         StatusCode::CREATED
     } else {

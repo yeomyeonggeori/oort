@@ -18829,6 +18829,18 @@ components:
         amendment v7, #4791) changes only the human who started the run, with
         that human's approval. It reuses PATCH /members/me normalization,
         rename, broadcast and audit. Handle and past mention text stay unchanged.
+        `expression.create` (`{candidates:[1-4 x {name,displayName,tags,subjectMemberId,
+        image:{source:attachment|url|generated}}]}`, `expression_adder`; ADR-0186
+        amendment v8, ADR-0218 appendix B, #4829) lets an external agent offer up to four
+        candidate pictures for ONE team expression. The server fetches/decodes every candidate
+        itself (an attachment of the person who called the agent in this conversation, one
+        public HTTPS link on port 443, or bytes the agent made, at most 1 MiB), stores each
+        as a draft, and the approval card (`props.action.expression`, ADR-0218 `Approval`)
+        shows the stored pictures; approving takes the person's
+        `expressionChoice:{draftId,revision,sha256}` and registers exactly that one. A
+        link that cannot be received stays on the card as `manual_upload_required` with a
+        closed reason code and the approval stays pending. Only this action's proposal may
+        be larger than 64 KiB (up to 6 MiB, base64 candidates).
         `member.avatar.set` (`{attachmentId}` or
         `{avatar:{source:generated,dataBase64}}`, `requesting_member`; ADR-0186
         증보 2026-10-25 v4, #4385) lets an agent propose that **the person who
@@ -18862,7 +18874,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "expression.create", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -18942,9 +18954,14 @@ components:
         the human who called the agent, derived by the server from the run).
         `dm_participant` is the exact other human named on a DM admission card,
         without an admin or agent-owner override (ADR-0217).
+        `expression_adder` (ADR-0186 amendment v8 X8-3) is a **dynamic judgement**, not a
+        stored role: a live human member of the card's channel who is not a guest and
+        satisfies the workspace's current expression add policy (members, or admins only),
+        and, when the card names a face, that very person. No admin or agent-owner proxy;
+        the decision route, the push audience and the preview ask one predicate.
         The canonical list is `momo_agent::actions::RequiredRole`; held equal by
         `routes::actions::the_required_roles_are_one_list_in_two_places`.
-      enum: ["admin", "agent_editor", "requesting_member", "dm_participant", "workspace_operator"]
+      enum: ["admin", "agent_editor", "requesting_member", "dm_participant", "workspace_operator", "expression_adder"]
 
     ListWorkspaceActionsResponse:
       type: object
@@ -26021,6 +26038,29 @@ components:
             rejection it is ignored (ADR-0188 R0.1): nothing runs, and the
             decision is judged on the host the card points at. Not part of the
             idempotency key: a replayed decision answers the original receipt.
+        expressionChoice:
+          type: object
+          additionalProperties: false
+          required: [draftId, revision, sha256]
+          properties:
+            draftId: {type: string, format: uuid}
+            revision: {type: string, pattern: '^(0|[1-9][0-9]*)$'}
+            sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+          description: >
+            ADR-0186 addendum v8 X8-2 / ADR-0218 `Decision`. The one picture chosen on
+            an `expression.create` card, exactly as shown (draft id, revision, large
+            sha256). **Required when approving that action and a 400 receipt
+            (`expression_choice_required`) without it; a 400 receipt
+            (`expression_choice_not_allowed`) on anything else** (another action, a
+            rejection, a non-workspace approval), judged before the status and expiry
+            arms. The decision transaction re-proves the approval is pending and
+            unexpired, the person's current membership, add policy and (for a face) that
+            they are the person shown, the candidate's membership of this card, its
+            revision, the stored bytes hashed again, the name and the quota; a failure is
+            a 409 receipt (`expression_preview_stale`, `expression_name_reserved`,
+            `expression_quota`) that spends nothing. Success registers that one picture,
+            reclaims every other candidate's bytes and writes `props.result.expression`
+            (`{id,name,token}`) on the card.
         deliverSecretToAgent:
           type: boolean
           default: false

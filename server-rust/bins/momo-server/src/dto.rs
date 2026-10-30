@@ -5759,6 +5759,11 @@ pub struct ApprovalDecisionRequest {
     /// move a session that already started.
     #[serde(default, rename = "host_id", alias = "hostId")]
     pub host_id: Option<Uuid>,
+    /// ADR-0186 v8 X8-2 / ADR-0218 `Decision`: the one picture chosen on an
+    /// `expression.create` card, `{draftId, revision, sha256}`. Accepted on approving that
+    /// action only (anything else is a 400) and parsed strictly by the route.
+    #[serde(default, rename = "expressionChoice", alias = "expression_choice")]
+    pub expression_choice: Option<serde_json::Value>,
     /// ADR-0186 증보 v3 V3-3a — 「에이전트에게 연결 코드 넘기기」. Default off.
     ///
     /// Judged against the **action's** `secret_delivery` (`OptIn` only), never

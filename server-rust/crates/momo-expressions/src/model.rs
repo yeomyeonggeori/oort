@@ -23,7 +23,7 @@ pub const SOURCE_CODES: [&str; 6] = [
 pub const INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const REQUEST_BYTES: usize = 6 * 1024 * 1024;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Metadata {
     pub name: String,

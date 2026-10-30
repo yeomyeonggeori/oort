@@ -31,6 +31,11 @@ pub enum Rejected {
     Video,
     #[error("image processing timed out")]
     Timeout,
+    /// Both decoder slots are taken. A retryable state of the **server**, not a property of
+    /// the picture and not a time limit it exceeded: a link import never records it as
+    /// `source_timeout` (ADR-0218 appendix C), it answers 503 or waits for a slot.
+    #[error("image processing is busy")]
+    Busy,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -66,6 +71,22 @@ pub async fn process(bytes: Vec<u8>) -> Result<Processed, Rejected> {
     supervised(bytes, decoder_path()?, DEADLINE, semaphore()).await
 }
 
+/// [`process`], but a busy decoder is **waited for** up to `wait` instead of refused at
+/// once. Used by the agent action, whose candidates are decoded one after another inside
+/// one deadline. The wait is the only difference: the input bound, the two slots, the
+/// supervised child and its limits are the same ones, and an exhausted wait is
+/// [`Rejected::Busy`], never `Timeout`.
+pub async fn process_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Processed, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    let permit = tokio::time::timeout(wait, semaphore().acquire_owned())
+        .await
+        .map_err(|_| Rejected::Busy)?
+        .map_err(|_| Rejected::Invalid)?;
+    run_with_permit(bytes, decoder_path()?, DEADLINE, permit).await
+}
+
 async fn supervised(
     bytes: Vec<u8>,
     path: std::path::PathBuf,
@@ -74,9 +95,16 @@ async fn supervised(
 ) -> Result<Processed, Rejected> {
     // Admission happens before detaching: canceled callers cannot accumulate
     // an unbounded queue of 5 MiB inputs waiting behind the two codec slots.
-    let permit = semaphore
-        .try_acquire_owned()
-        .map_err(|_| Rejected::Timeout)?;
+    let permit = semaphore.try_acquire_owned().map_err(|_| Rejected::Busy)?;
+    run_with_permit(bytes, path, deadline, permit).await
+}
+
+async fn run_with_permit(
+    bytes: Vec<u8>,
+    path: std::path::PathBuf,
+    deadline: Duration,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<Processed, Rejected> {
     // The supervisor survives cancellation of the HTTP request and retains its
     // permit until the actual child has exited and been reaped.
     let task = tokio::spawn(async move {
@@ -688,7 +716,7 @@ mod tests {
             )
             .await;
             assert!(
-                matches!(result, Ok(Err(Rejected::Timeout))),
+                matches!(result, Ok(Err(Rejected::Busy))),
                 "busy inputs must finish without a queued supervisor"
             );
         }

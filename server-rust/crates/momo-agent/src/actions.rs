@@ -133,6 +133,12 @@ pub const ACTION_MESSAGE_PIN: &str = "message.pin";
 /// card as [`ACTION_MESSAGE_PIN`]: clearing a pin is as visible to the channel as setting one.
 pub const ACTION_MESSAGE_UNPIN: &str = "message.unpin";
 
+/// `expression.create` — put one picture into the team's expression library after a
+/// person looked at the exact stored picture (ADR-0186 증보 v8 / ADR-0218 부록 B). Up to
+/// four candidates, one is chosen. Not on [`TEAM_AI_ACTION_IDS`] and not an initiative
+/// action: only an external agent a person asked, through `oort_action_propose`.
+pub const ACTION_EXPRESSION_CREATE: &str = "expression.create";
+
 /// What a person is consenting to when they approve (ADR-0186 D3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Risk {
@@ -180,6 +186,12 @@ pub enum RequiredRole {
     /// `routes::shared::require_workspace_operator`'s set: a workspace
     /// owner/admin, or a principal carrying the platform operator scope.
     WorkspaceOperator,
+    /// ADR-0186 v8 X8-3: a **dynamic** judgement, not a stored role. A live human member
+    /// of the card's channel who is not a guest and satisfies the workspace's *current*
+    /// add policy; when the card names a face (`subjectMemberId`), also that very person.
+    /// No admin or agent-owner proxy. One predicate (`momo_expressions::adder_allows`)
+    /// serves the decision route, the push audience and the preview.
+    ExpressionAdder,
 }
 
 impl RequiredRole {
@@ -190,6 +202,7 @@ impl RequiredRole {
             RequiredRole::RequestingMember => "requesting_member",
             RequiredRole::DmParticipant => "dm_participant",
             RequiredRole::WorkspaceOperator => "workspace_operator",
+            RequiredRole::ExpressionAdder => "expression_adder",
         }
     }
 
@@ -201,17 +214,19 @@ impl RequiredRole {
             RequiredRole::AgentEditor => "대상 에이전트의 소유자 또는 관리자",
             RequiredRole::RequestingMember => "요청한 본인",
             RequiredRole::DmParticipant => "카드에 표시된 대화 참여자",
+            RequiredRole::ExpressionAdder => "표현을 추가할 수 있는 멤버(얼굴이 있으면 그 본인)",
         }
     }
 
     /// Every variant, so a test can measure the wire vocabulary against the
     /// OpenAPI enum without a hand-copied list that could omit a new role.
-    pub const ALL: [RequiredRole; 5] = [
+    pub const ALL: [RequiredRole; 6] = [
         RequiredRole::Admin,
         RequiredRole::AgentEditor,
         RequiredRole::RequestingMember,
         RequiredRole::DmParticipant,
         RequiredRole::WorkspaceOperator,
+        RequiredRole::ExpressionAdder,
     ];
 }
 
@@ -465,6 +480,10 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
                     // 증보 v5 U-e, review M4), so the approver reads it in the app.
                     || id == ACTION_MESSAGE_PIN
                     || id == ACTION_MESSAGE_UNPIN
+                    // The picture is the whole point of the card, and the lock screen shows
+                    // none: the push says 「앱에서 확인」 and offers no 승인 button
+                    // (ADR-0186 증보 v8 X8-3).
+                    || id == ACTION_EXPRESSION_CREATE
             }),
         _ => true,
     }
@@ -807,6 +826,76 @@ fn member_avatar_set_args_schema() -> Value {
         }
     })
 }
+
+/// One expression candidate's picture, as the proposal names it (ADR-0218 부록 B
+/// `AgentImage`): the requester's attachment in this conversation, one public HTTPS link,
+/// or bytes the agent made itself. Closed keys; the domain normaliser enforces the rest.
+pub const EXPRESSION_CANDIDATES_MAX: u64 = 4;
+/// base64 of one generated candidate's at most 1 MiB (ADR-0218 D3).
+pub const EXPRESSION_GENERATED_B64_MAX_CHARS: u64 = 1_398_104;
+pub const EXPRESSION_PROMPT_MAX_BYTES: u64 = 8_000;
+pub const EXPRESSION_URL_MAX_BYTES: u64 = 2_048;
+
+fn expression_create_args_schema() -> Value {
+    json!({
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["candidates"],
+        "properties": {
+            "candidates": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": EXPRESSION_CANDIDATES_MAX,
+                "description": "1-4 candidates for ONE expression; every candidate names the same subjectMemberId. A person picks one after seeing the stored picture.",
+                "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "displayName", "tags", "image"],
+                    "properties": {
+                        "name": {"type": "string", "minLength": 2, "maxLength": 30, "description": "[a-z0-9_-], 2-30 characters, permanent once saved."},
+                        "displayName": {"type": "string", "minLength": 1, "maxLength": 160},
+                        "tags": {"type": "array", "maxItems": 8, "items": {"type": "string", "minLength": 1, "maxLength": 64}},
+                        "subjectMemberId": {"type": ["string", "null"], "maxLength": 36, "description": "REQUIRED to be present: null = nobody's face is in the picture (your declaration); otherwise the one workspace member whose face it is, and only that member can approve."},
+                        "image": {
+                            "type": "object",
+                            "oneOf": [
+                                {"type": "object", "additionalProperties": false, "required": ["source", "attachmentId"],
+                                 "properties": {"source": {"type": "string", "enum": ["attachment"]},
+                                                "attachmentId": {"type": "string", "minLength": 36, "maxLength": 36}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "url"],
+                                 "properties": {"source": {"type": "string", "enum": ["url"]},
+                                                "url": {"type": "string", "minLength": 8, "maxLength": EXPRESSION_URL_MAX_BYTES}}},
+                                {"type": "object", "additionalProperties": false, "required": ["source", "mime", "dataBase64", "prompt"],
+                                 "properties": {"source": {"type": "string", "enum": ["generated"]},
+                                                "mime": {"type": "string", "enum": ["image/png", "image/jpeg", "image/gif", "image/webp"]},
+                                                "dataBase64": {"type": "string", "minLength": 4, "maxLength": EXPRESSION_GENERATED_B64_MAX_CHARS},
+                                                "prompt": {"type": "string", "minLength": 1, "maxLength": EXPRESSION_PROMPT_MAX_BYTES}}}
+                            ]
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// The outcome line of `expression.create` (ADR-0218 부록 C).
+pub fn expression_create_result_body() -> String {
+    "팀 보관함에 저장했어요".to_string()
+}
+
+/// `ref.type` of an executed `expression.create`: the expression that was saved.
+pub const REF_TYPE_EXPRESSION: &str = "expression";
+
+/// `audit_log.action` / schema of an approved `expression.create`: ids, origin kind and
+/// domain, a sha256 **prefix**, the decider and the approval — never bytes, base64, the
+/// generation prompt or an original link.
+pub const AUDIT_EXPRESSION_CREATED: &str = "expression.created";
+/// A candidate that was staged for the card: origin kind/domain, the closed reason code if
+/// the receive failed, a sha256 prefix if it is a picture. Written for every candidate so
+/// the reason survives the TTL sweep that clears the draft's own `code` (ADR-0218 D6).
+pub const AUDIT_EXPRESSION_STAGED: &str = "expression.staged";
+pub const AUDIT_EXPRESSION_STAGED_SCHEMA: &str = "momo.expression.staged.v1";
 
 fn member_display_name_set_args_schema() -> Value {
     json!({
@@ -1480,6 +1569,19 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: true,
         effect: "표시된 메시지의 고정을 풀어요",
         args_schema: message_pin_args_schema,
+    },
+    // ADR-0186 증보 v8: a team-library picture, chosen by a person who saw the stored pixels.
+    WorkspaceAction {
+        id: ACTION_EXPRESSION_CREATE,
+        title: "팀 표현 추가",
+        summary: "에이전트가 찾았거나 만든 그림 후보(최대 4개) 중 하나를 팀 보관함에 저장해요. 저장될 그림을 직접 보고 고르며, 얼굴이 있으면 그 본인만 승인할 수 있어요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::ExpressionAdder,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
+        initiative: false,
+        effect: "카드에서 고른 그림 하나를 팀 보관함에 저장해요",
+        args_schema: expression_create_args_schema,
     },
     WorkspaceAction {
         id: ACTION_WORKSPACE_UNFURL_UPDATE,
@@ -2421,6 +2523,9 @@ pub struct ActionResult<'a> {
     /// ([`ACTION_RESULT_NEXT_HREF`]); a wrong link on another action's card would
     /// be worse than none (see the 정오표 on that constant).
     pub next: Option<ActionResultNext>,
+    /// ADR-0218 부록 B `Result` (`{id,name,token}`) of an executed `expression.create`: the
+    /// one value that is not generic. `None` for every other action.
+    pub expression: Option<Value>,
 }
 
 /// 부록 B `next` — a fixed in-app path and its label.
@@ -2461,6 +2566,9 @@ pub fn action_result_props(result: &ActionResult<'_>) -> Value {
             "next".into(),
             json!({"label": next.label, "href": next.href}),
         );
+    }
+    if let (Some(expression), Some(object)) = (&result.expression, card.as_object_mut()) {
+        object.insert("expression".into(), expression.clone());
     }
     json!({ ACTION_RESULT_PROPS_KEY: card })
 }
@@ -2529,6 +2637,7 @@ mod tests {
                 "member.display_name.set",
                 "message.pin",
                 "message.unpin",
+                "expression.create",
                 "workspace.unfurl.update",
                 "workspace.memory.update",
                 "workspace.work_tier.update",
@@ -2609,7 +2718,8 @@ mod tests {
                 "member.avatar.set",
                 "member.display_name.set",
                 "message.pin",
-                "message.unpin"
+                "message.unpin",
+                "expression.create"
             ]
         );
         for id in helper_only {
@@ -3019,6 +3129,7 @@ mod tests {
             ref_id: Uuid::from_u128(13),
             rows: invite_result_rows("member", "2026-09-29"),
             secret_shown_once: true,
+            expression: None,
             next: Some(INVITE_RESULT_NEXT),
         })
     }
@@ -3213,7 +3324,8 @@ mod tests {
                 "agent_editor",
                 "requesting_member",
                 "dm_participant",
-                "workspace_operator"
+                "workspace_operator",
+                "expression_adder"
             ]
         );
         wire.sort_unstable();
@@ -3240,6 +3352,7 @@ mod tests {
             ref_id: Uuid::from_u128(3),
             rows: vec![],
             secret_shown_once: false,
+            expression: None,
             next: None,
         });
         assert!(props[ACTION_RESULT_PROPS_KEY].get("next").is_none());
@@ -3464,6 +3577,7 @@ mod tests {
                 && action.id != ACTION_DM_AGENT_ADMIT
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
+                && action.id != ACTION_EXPRESSION_CREATE
             {
                 assert!(
                     !opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &card(action.id)),
@@ -3559,6 +3673,9 @@ mod tests {
             // Installs one official app; "the token is not stored in oort", so there is
             // no value to show the approver once (ADR-0113 P3, ADR-0201 증보 v2 H7).
             (ACTION_PLUGIN_INSTALL, false),
+            // The picture is the card, and a banner shows none: always opened in the app
+            // (ADR-0186 증보 v8 X8-3; no 승인 button on the lock screen).
+            (ACTION_EXPRESSION_CREATE, true),
         ];
         let registered: std::collections::BTreeSet<&str> =
             ACTIONS.iter().map(|action| action.id).collect();

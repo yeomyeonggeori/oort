@@ -307,6 +307,10 @@ async fn agent_bearer(su: &PgPool, ws: Uuid) -> String {
 }
 
 async fn boot() -> World {
+    boot_with(true).await
+}
+
+async fn boot_with(unfurl_enabled: bool) -> World {
     let url = std::env::var("DATABASE_URL").expect("dedicated DATABASE_URL");
     momo_db::migrate::run_migrations(
         &url,
@@ -359,6 +363,8 @@ async fn boot() -> World {
     )
     .with_drive(archive)
     .with_unfurl_http(mock.clone())
+    // The instance's outgoing-request switch is on for this suite (default off, ADR-0170 D3).
+    .with_unfurl_enabled(unfurl_enabled)
     .with_realtime(RealtimeSettings {
         cent_token_hmac: Some(SECRET.into()),
         cent_proxy_secret: Some(SECRET.into()),
@@ -550,7 +556,7 @@ async fn a_public_picture_link_becomes_a_ready_draft_and_activates_without_its_q
         w.mock.calls(),
         ["https://cdn.example.test/media/party.png?token=SECRET-QUERY-1&sig=SECRET-QUERY-2"]
     );
-    assert_eq!(w.mock.kinds(), [FetchKind::Image]);
+    assert_eq!(w.mock.kinds(), [FetchKind::Source]);
 
     // The draft is the submitter's alone.
     let id = draft["draftId"].as_str().unwrap();
@@ -1264,15 +1270,15 @@ async fn imports_in_flight_are_capped_and_the_slots_are_returned() {
     assert_eq!(w.mock.calls().len(), 8, "and was never fetched");
     assert_eq!(w.drafts_of(&w.other_member).await, 0, "nor stored");
     gate.add_permits(8);
-    // All eight finish together, but the decoder has two slots and admits without
-    // queuing (#4676, by design). So each one ends as a draft: a ready picture, or the
-    // `source_timeout` card for the ones that found both slots busy. None is an error,
-    // and none is lost.
+    // All eight finish together, but the decoder has two slots and admits without queuing
+    // (#4676, by design). A busy decoder is the SERVER's retryable state, never the
+    // picture's: the overflow answers 503 with `Retry-After` and writes no draft (planner
+    // decision 5, 10-30) instead of a `source_timeout` card. None is lost or mislabelled.
     let (mut ready, mut busy) = (0, 0);
     for task in tasks {
         match task.await.unwrap() {
             201 => ready += 1,
-            200 => busy += 1,
+            503 => busy += 1,
             other => panic!("an in-flight import ended as {other}"),
         }
     }
@@ -1280,26 +1286,23 @@ async fn imports_in_flight_are_capped_and_the_slots_are_returned() {
     assert!(ready >= 1 && ready + busy == 8, "ready={ready} busy={busy}");
     assert!(
         busy >= 1,
-        "two decoder slots cannot take eight simultaneous finishes: the overflow must be cards"
+        "two decoder slots cannot take eight simultaneous finishes: the overflow must be a 503"
     );
-    let busy_cards: i64 = sqlx::query_scalar(
+    assert_eq!(
+        w.drafts_of(&w.owner).await + w.drafts_of(&w.member).await,
+        ready,
+        "only the pictures that were decoded left a draft; a busy decoder wrote nothing"
+    );
+    let cards: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM expression_draft WHERE workspace_id=$1 AND state='manual_upload_required'",
     )
     .bind(w.ws)
     .fetch_one(&w.su)
     .await
     .unwrap();
-    assert_eq!(busy_cards, busy);
-    let other_codes: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM expression_draft WHERE workspace_id=$1 AND state='manual_upload_required' AND code IS DISTINCT FROM 'source_timeout'",
-    )
-    .bind(w.ws)
-    .fetch_one(&w.su)
-    .await
-    .unwrap();
     assert_eq!(
-        other_codes, 0,
-        "a busy decoder is a time limit, nothing else"
+        cards, 0,
+        "a busy decoder is not a card and not a source_timeout"
     );
     // The slots are back.
     let again = w
@@ -1356,10 +1359,8 @@ fn what_the_parser_emits_is_what_the_store_accepts() {
         "https://example.com",
         "https://example.com?x=1",
         "https://example.com:443/x.png",
-        "https://example.com:8443/x.png",
         "https://例え.jp/猫.gif",
         "https://[2606:4700::1111]/x.gif",
-        "https://[2606:4700::1111]:8443/x.gif",
         "https://93.184.216.34/x.gif",
         "https://example.com/a%20b.png",
         "https://example.com/a@b.png",
@@ -1381,4 +1382,141 @@ fn every_transport_failure_code_is_one_of_the_closed_source_codes() {
     for failure in [Blocked, Unavailable, TooLarge, Timeout] {
         assert!(e::SOURCE_CODES.contains(&failure.code()), "{failure:?}");
     }
+}
+
+// ── #4829 stage 2: the planner's decisions on the stage-1 route (10-30) ───────────────
+
+/// Decision 2: a name that resolves private at the FIRST hop is a 400 with no row and no card;
+/// the same refusal after a redirect is the `source_blocked` card. Decision 4: only port 443.
+/// Decision 1: the reason of a failed receive is in the `staged` audit row and survives the
+/// TTL sweep that clears the draft's own `code`.
+#[tokio::test]
+#[ignore = "real PG"]
+async fn a_private_first_hop_is_a_400_a_blocked_redirect_is_a_card_and_the_reason_is_audited() {
+    let w = boot().await;
+    // First hop private (a name that resolves to an inside address): 400, nothing stored.
+    w.mock.set(|_| Reply::Err(FetchError::OriginBlocked));
+    let before = w.drafts_of(&w.member).await;
+    let refused = w
+        .import(
+            &w.member,
+            &request(&unique("inside"), "https://inside.example.test/a.gif"),
+        )
+        .await;
+    assert_eq!(w.code_of(refused, 400).await, "expression_invalid");
+    assert_eq!(w.drafts_of(&w.member).await, before, "no draft row");
+    // A non-443 port never reaches the transport.
+    let calls = w.mock.calls().len();
+    let ported = w
+        .import(
+            &w.member,
+            &request(&unique("ported"), "https://files.example.test:8443/a.gif"),
+        )
+        .await;
+    assert_eq!(w.code_of(ported, 400).await, "expression_invalid");
+    assert_eq!(
+        w.mock.calls().len(),
+        calls,
+        "a refused port is never fetched"
+    );
+    // The guard refused AFTER a redirect from a public origin: a manual card.
+    w.mock.set(|_| Reply::Err(FetchError::Blocked));
+    let card = w
+        .json(
+            w.import(
+                &w.member,
+                &request(
+                    &unique("hopped"),
+                    "https://files.example.test/a.gif?token=Q-SECRET",
+                ),
+            )
+            .await,
+            200,
+        )
+        .await;
+    assert_eq!(card["state"], "manual_upload_required");
+    assert_eq!(card["code"], "source_blocked");
+    let draft = card["draftId"].as_str().unwrap().to_string();
+    let staged: Value = sqlx::query_scalar(
+        "SELECT detail FROM audit_log WHERE workspace_id=$1 AND action='expression.staged' AND detail->>'draft_id'=$2",
+    )
+    .bind(w.ws)
+    .bind(&draft)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(staged["code"], "source_blocked");
+    assert_eq!(staged["origin_kind"], "url");
+    assert_eq!(staged["origin_domain"], "files.example.test");
+    assert!(!staged.to_string().contains("Q-SECRET"), "{staged}");
+    // The TTL sweep clears the row's own reason; the audit row keeps it.
+    // `expires_at` is part of the draft's immutable identity: the fixture lifts the trigger
+    // for one statement, as the storage suite does.
+    let mut clock = w.su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft DISABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_draft SET expires_at = clock_timestamp() - interval '1 minute' WHERE workspace_id=$1 AND id=$2::uuid")
+        .bind(w.ws)
+        .bind(&draft)
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("ALTER TABLE expression_draft ENABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    clock.commit().await.unwrap();
+    momo_expressions::sweep_expired(&w.su, &w.api)
+        .await
+        .unwrap();
+    let (state, code): (String, Option<String>) = sqlx::query_as(
+        "SELECT state, code FROM expression_draft WHERE workspace_id=$1 AND id=$2::uuid",
+    )
+    .bind(w.ws)
+    .bind(&draft)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!((state.as_str(), code), ("expired", None));
+    let kept: String = sqlx::query_scalar(
+        "SELECT detail->>'code' FROM audit_log WHERE workspace_id=$1 AND action='expression.staged' AND detail->>'draft_id'=$2",
+    )
+    .bind(w.ws)
+    .bind(&draft)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept, "source_blocked",
+        "the reason outlives the sweep in the audit trail"
+    );
+}
+
+/// Decision 3: `MOMO_UNFURL_ENABLED` off means this server makes no outbound request for an
+/// import; the link is kept on a manual card the person finishes by hand.
+#[tokio::test]
+#[ignore = "real PG"]
+async fn an_instance_with_outgoing_requests_off_never_fetches_an_import() {
+    let w = boot_with(false).await;
+    w.mock
+        .set(|_| Reply::Err(FetchError::Failed("must not be called".into())));
+    let card = w
+        .json(
+            w.import(
+                &w.member,
+                &request(&unique("off"), "https://files.example.test/a.gif?token=Q"),
+            )
+            .await,
+            200,
+        )
+        .await;
+    assert_eq!(card["state"], "manual_upload_required");
+    assert_eq!(card["code"], "source_unavailable");
+    assert_eq!(
+        card["origin"]["sourceUrl"],
+        "https://files.example.test/a.gif"
+    );
+    assert!(w.mock.calls().is_empty(), "no outbound request was made");
 }

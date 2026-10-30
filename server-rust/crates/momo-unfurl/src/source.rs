@@ -106,17 +106,16 @@ pub fn parse_source_url(raw: &str) -> Result<SourceUrl, SourceUrlError> {
     if !origin_host(host) {
         return Err(Invalid);
     }
-    let port = match parsed.port() {
-        Some(0) => return Err(Invalid),
-        Some(port) => format!(":{port}"),
-        None => String::new(),
-    };
-    let origin = format!("https://{host}{port}{}", parsed.path());
+    let origin = format!("https://{host}{}", parsed.path());
     let fetch = parsed.as_str().to_string();
     // `validated_url` also bounds `fetch` to 2048 bytes. The origin is the same URL
     // without its query, so it is never longer: percent-encoding that would push the
     // stored link past the contract's 2048 is refused here (and again where it is stored).
     match validated_url(&fetch, false) {
+        // 443 only (planner, 10-30): `:443` normalises away, so any explicit port left is a
+        // link this endpoint does not fetch. Judged after the private check so a metadata
+        // address on any port stays a [`SourceUrlError::Private`].
+        Ok(_) if parsed.port().is_some() => Err(Invalid),
         Ok(_) => Ok(SourceUrl { fetch, origin }),
         Err(OutboundUrlError::PrivateAddress) => Err(Private),
         Err(_) => Err(Invalid),
@@ -145,6 +144,10 @@ pub enum SourceFailure {
     /// The guard refused: a hop or an answer was private, a scheme was not https,
     /// a redirect left the rules, or there were too many.
     Blocked,
+    /// The guard refused the **first** hop: the address the caller itself named resolves
+    /// private (or is not on 443). Not a card: the caller answers 400 and writes nothing
+    /// (ADR-0218 D5, planner decision 2). [`SourceFailure::code`] is only a total fallback.
+    PrivateOrigin,
     /// DNS, connect, a non-2xx answer, a truncated body, a redirect without Location.
     Unavailable,
     /// Declared or streamed past 5 MiB.
@@ -154,9 +157,14 @@ pub enum SourceFailure {
 }
 
 impl SourceFailure {
+    /// Refused at the first hop (see [`SourceFailure::PrivateOrigin`]).
+    pub fn is_private_origin(self) -> bool {
+        self == SourceFailure::PrivateOrigin
+    }
+
     pub fn code(self) -> &'static str {
         match self {
-            SourceFailure::Blocked => "source_blocked",
+            SourceFailure::Blocked | SourceFailure::PrivateOrigin => "source_blocked",
             SourceFailure::Unavailable => "source_unavailable",
             SourceFailure::TooLarge => "source_too_large",
             SourceFailure::Timeout => "source_timeout",
@@ -168,6 +176,7 @@ impl From<&FetchError> for SourceFailure {
     fn from(error: &FetchError) -> SourceFailure {
         match error {
             FetchError::Blocked | FetchError::TooManyRedirects => SourceFailure::Blocked,
+            FetchError::OriginBlocked => SourceFailure::PrivateOrigin,
             FetchError::TooLarge => SourceFailure::TooLarge,
             FetchError::Timeout => SourceFailure::Timeout,
             // `Failed` carries transport text. It is dropped here on purpose.
@@ -184,7 +193,7 @@ pub async fn fetch_source(
     url: &SourceUrl,
     deadline: Duration,
 ) -> Result<Vec<u8>, SourceFailure> {
-    let fetched = tokio::time::timeout(deadline, http.fetch(url.fetch_url(), FetchKind::Image))
+    let fetched = tokio::time::timeout(deadline, http.fetch(url.fetch_url(), FetchKind::Source))
         .await
         .map_err(|_| SourceFailure::Timeout)?
         .map_err(|error| SourceFailure::from(&error))?;
@@ -230,11 +239,6 @@ mod tests {
                 "https://example.com:443/x.png",
                 "https://example.com/x.png",
                 "https://example.com/x.png",
-            ),
-            (
-                "https://example.com:8443/x.png",
-                "https://example.com:8443/x.png",
-                "https://example.com:8443/x.png",
             ),
             (
                 "https://例え.jp/猫.gif",
@@ -309,6 +313,8 @@ mod tests {
                 "backslash path confusion",
             ),
             ("https://example.com:0/x.gif", "port 0"),
+            ("https://example.com:8443/x.png", "a port other than 443"),
+            ("https://example.com:444/x.png", "another port"),
             ("https://example.com:99999/x.gif", "port out of range"),
             ("https://example.com:abc/x.gif", "port not a number"),
             (
@@ -386,12 +392,20 @@ mod tests {
         );
     }
 
+    /// Planner decision 2 (10-30): a name that merely RESOLVES private cannot be known
+    /// without DNS, so parsing still accepts it; but the transport's first-hop refusal is a
+    /// private origin (the route answers 400 and stores nothing), while a refusal after a
+    /// redirect is the `source_blocked` card.
     #[test]
-    fn a_name_that_merely_resolves_private_is_not_decided_here() {
-        // Deciding it takes DNS; the transport's per-answer check refuses it and the
-        // route turns that into a `source_blocked` card, not a 400.
+    fn a_name_that_resolves_private_is_a_private_origin_not_a_card() {
         assert!(parse_source_url("https://metadata.google.internal/x.gif").is_ok());
         assert!(parse_source_url("https://127.0.0.1.nip.io/x.gif").is_ok());
+        assert!(SourceFailure::from(&FetchError::OriginBlocked).is_private_origin());
+        for card in [FetchError::Blocked, FetchError::TooManyRedirects] {
+            let failure = SourceFailure::from(&card);
+            assert!(!failure.is_private_origin());
+            assert_eq!(failure.code(), "source_blocked");
+        }
     }
 
     #[test]
@@ -474,7 +488,7 @@ mod tests {
             *http.asked.lock().unwrap(),
             [(
                 "https://example.com/a.png?token=SECRET".to_string(),
-                FetchKind::Image
+                FetchKind::Source
             )]
         );
     }

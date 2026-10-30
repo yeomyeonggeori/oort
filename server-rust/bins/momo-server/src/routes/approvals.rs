@@ -578,6 +578,26 @@ async fn decide(
         state.agent_port.config.claude_subscription_agents_enabled;
     let operator_scope = has_platform_read_scope(&principal);
     let deliver_secret_to_agent = request.deliver_secret_to_agent == Some(true);
+    // `expressionChoice` is parsed strictly (closed keys) before anything is read: a malformed
+    // one is a 400 of the request, not a verdict on the card.
+    let expression_choice: Option<momo_expressions::Choice> = match request
+        .expression_choice
+        .clone()
+        .map(serde_json::from_value)
+        .transpose()
+    {
+        Ok(choice) => choice,
+        Err(_) => {
+            return respond(refusal(
+                approval_id,
+                member_id,
+                "expression_choice_invalid",
+                "expressionChoice must be {draftId, revision, sha256}",
+                StatusCode::BAD_REQUEST,
+                Utc::now(),
+            ))
+        }
+    };
     let context_max_messages = state.mentions.context_max_messages;
 
     // **A decision that PostgreSQL picks as the victim of a deadlock is run once more.**
@@ -598,6 +618,7 @@ async fn decide(
             let reason = reason.clone();
             let public_origin = public_origin.clone();
             let admission_state = state.clone();
+            let expression_choice = expression_choice.clone();
             move |conn| {
                 Box::pin(async move {
                     decide_in_tx(
@@ -617,6 +638,7 @@ async fn decide(
                             claude_subscription_agents_enabled,
                             operator_scope,
                             deliver_secret_to_agent,
+                            expression_choice: expression_choice.clone(),
                             context_max_messages,
                             admission_state: Some(&admission_state),
                         },
@@ -715,6 +737,8 @@ struct DecisionInput<'a> {
     operator_scope: bool,
     /// `deliverSecretToAgent` as sent. Only `Some(true)` matters.
     deliver_secret_to_agent: bool,
+    /// ADR-0186 v8: the picture the person chose on an `expression.create` card.
+    expression_choice: Option<momo_expressions::Choice>,
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
@@ -947,6 +971,29 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
             input.member_id,
             DELIVER_SECRET_NOT_SUPPORTED,
             "deliverSecretToAgent applies only to approving a workspace action",
+            StatusCode::BAD_REQUEST,
+            now,
+        )));
+    }
+
+    // **`expressionChoice` belongs to approving an `expression.create` card, and to nothing
+    // else** (ADR-0186 v8 X8-2). Judged here for the reason `deliverSecretToAgent` is: before
+    // the status and expiry arms, so no settlement that writes can outrank it.
+    if let Some(code) = expression_choice_refused(
+        input.expression_choice.is_some(),
+        approval.action_type == ACTION_TYPE_WORKSPACE_ACTION
+            && approval
+                .payload
+                .pointer("/action/id")
+                .and_then(Value::as_str)
+                == Some(momo_agent::actions::ACTION_EXPRESSION_CREATE),
+        input.approve,
+    ) {
+        return Ok(Ok(refusal(
+            approval.id,
+            input.member_id,
+            code,
+            "expressionChoice applies only to approving an expression.create card",
             StatusCode::BAD_REQUEST,
             now,
         )));
@@ -1500,6 +1547,8 @@ struct Executed {
     /// nowhere else. `None` for every action but `invite.create`.
     secret_once: Option<SecretOnceDto>,
     next: Option<ActionResultNext>,
+    /// ADR-0218 `Result` of an executed `expression.create` (`props.result.expression`).
+    expression: Option<Value>,
 }
 
 /// An executor either ran, or refused **before its first write**.
@@ -1638,6 +1687,9 @@ async fn role_required_refusal(
             Some(RequiredRole::WorkspaceOperator) => {
                 "this workspace action must be approved by a workspace operator"
             }
+            Some(RequiredRole::ExpressionAdder) => {
+                "this workspace action must be approved by a member who may add expressions (the person shown, if a face is)"
+            }
             Some(RequiredRole::Admin) | None => {
                 "this workspace action must be approved by a workspace admin"
             }
@@ -1660,6 +1712,19 @@ async fn discard_staged_avatar_in_tx(
 ) -> Result<(), momo_db::DbError> {
     if approval.action_type != ACTION_TYPE_WORKSPACE_ACTION {
         return Ok(());
+    }
+    // An `expression.create` card's candidate pictures are reclaimed in the same
+    // transaction that rejects or expires it (ADR-0186 v8 X8-2): bytes only, the rows
+    // stay as the record of what was offered and why a receive failed.
+    if approval
+        .payload
+        .pointer("/action/id")
+        .and_then(Value::as_str)
+        == Some(momo_agent::actions::ACTION_EXPRESSION_CREATE)
+    {
+        momo_expressions::action::reclaim_in_tx(conn, approval.workspace_id, approval.id)
+            .await
+            .map_err(expression_db_error)?;
     }
     let avatar = approval
         .payload
@@ -1785,6 +1850,8 @@ async fn execute_workspace_action(
         GatePlan::TargetAgent => None,
         // Judged against the person the run was raised by, which step 2 resolves too.
         GatePlan::RequestingMember => None,
+        // Judged against the card's face, which step 2 derives from the stored drafts.
+        GatePlan::ExpressionAdder => None,
         GatePlan::Operator => Some(if input.operator_scope {
             Ok(())
         } else {
@@ -2029,6 +2096,29 @@ async fn execute_workspace_action(
         // `person` is the human the server derived from the run, so this one comparison
         // is the whole of "you may only change your own face".
         if person != input.member_id {
+            return role_required_refusal(conn, approval, input, now, required_role).await;
+        }
+    }
+
+    if required_role == Some(RequiredRole::ExpressionAdder) {
+        // **`expression_adder` (ADR-0186 v8 X8-3)**: the face comes from the drafts the card
+        // stands on (the resolver read it from the database), never from the payload, and the
+        // person is judged by the ONE predicate the push audience and the preview also ask
+        // (`adder_allows_in_tx`) against the policy as it is now. No admin or owner proxy.
+        let ActionArgs::ExpressionCreate { subject, .. } = &resolved.validated.args else {
+            return Err(protocol_error(
+                "expression_adder action resolved without its candidates",
+            ));
+        };
+        if !momo_expressions::store::adder_allows_in_tx(
+            conn,
+            input.workspace_id,
+            input.member_id,
+            *subject,
+        )
+        .await
+        .map_err(expression_db_error)?
+        {
             return role_required_refusal(conn, approval, input, now, required_role).await;
         }
     }
@@ -2280,7 +2370,7 @@ async fn execute_workspace_action(
                     momo_agent::actions::action_row("바꾸기 전", &person.display_name),
                     momo_agent::actions::action_row("바꾼 뒤", display_name),
                 ],
-                secret_once: None, next: None,
+                secret_once: None, next: None, expression: None,
             }
         }
         ActionArgs::MemberDisplayNameSet { target: None, .. } => {
@@ -2300,6 +2390,12 @@ async fn execute_workspace_action(
                 "member.avatar.set resolved without a person",
             ));
         }
+        ActionArgs::ExpressionCreate {
+            drafts, subject, ..
+        } => match execute_expression_create(conn, approval, input, now, drafts, *subject).await? {
+            Execution::Ran(executed) => executed,
+            Execution::Refused(decision) => return Ok(Ok(decision)),
+        },
         ActionArgs::PluginInstall {
             plugin_id,
             plugin: Some(plugin),
@@ -2576,6 +2672,7 @@ async fn execute_workspace_action(
             rows: executed.result_rows,
             secret_shown_once: executed.secret_once.is_some(),
             next: executed.next,
+            expression: executed.expression,
         });
         let outcome = approval_card_outcome(
             approval,
@@ -2842,6 +2939,7 @@ async fn execute_channel_create(
         result_rows: channel_create_result_rows(name, kind, add_proposer, added),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -2966,6 +3064,7 @@ async fn execute_workspace_settings_update(
         result_rows: rows,
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3012,6 +3111,7 @@ async fn execute_workspace_unfurl_update(
         result_rows: unfurl_update_rows(before.unwrap_or(!saved.enabled), saved.enabled),
         secret_once: None,
         next: None,
+        expression: None,
     })
 }
 
@@ -3068,6 +3168,7 @@ async fn execute_plugin_install(
             ),
             secret_once: None,
             next: None,
+            expression: None,
         })),
         Err(error) if error.status == StatusCode::FORBIDDEN => Ok(Execution::Refused(refusal(
             approval.id,
@@ -3145,6 +3246,7 @@ async fn execute_workspace_memory_update(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     })
 }
 
@@ -3232,6 +3334,7 @@ async fn execute_workspace_work_tier_update(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3302,6 +3405,7 @@ async fn execute_hosted_channels_grant(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3361,6 +3465,7 @@ async fn execute_agent_rename(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3448,6 +3553,7 @@ async fn execute_agent_invite(
             expires_at_ms: issuance.pairing_expires_at_ms,
         }),
         next: None,
+        expression: None,
     }))
 }
 
@@ -3684,6 +3790,7 @@ async fn execute_agent_profile_update(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3770,7 +3877,132 @@ async fn execute_member_avatar_set(
         ],
         secret_once: None,
         next: None,
+        expression: None,
     }))
+}
+
+/// A database error carried out of `momo-expressions`.
+pub(crate) fn expression_db_error(error: momo_expressions::Error) -> momo_db::DbError {
+    match error {
+        momo_expressions::Error::Db(error) => error,
+        other => protocol_error(&other.to_string()),
+    }
+}
+
+/// `expression.create` (ADR-0186 v8 X8-2): register the ONE candidate the person chose, in
+/// this decision's transaction. Every proof is re-run inside `choose_in_tx` (membership of
+/// the card, revision, TTL, the stored bytes hashed again, name, quota, the add role under
+/// the catalog lock) and happens before the first write; a failure is a 409 receipt that
+/// spends nothing and leaves every candidate as it was.
+async fn execute_expression_create(
+    conn: &mut PgConnection,
+    approval: &LockedApproval,
+    input: &DecisionInput<'_>,
+    now: chrono::DateTime<Utc>,
+    drafts: &[Uuid],
+    subject: Option<Uuid>,
+) -> Result<Execution, momo_db::DbError> {
+    let Some(choice) = input.expression_choice.as_ref() else {
+        // `expression_choice_refused` turns "approve without a choice" into a 400 before
+        // anything else; reaching here would mean a person approved nothing in particular.
+        return Err(protocol_error(
+            "expression.create approved without a choice",
+        ));
+    };
+    let actor = momo_expressions::Actor {
+        workspace: input.workspace_id,
+        member: input.member_id,
+    };
+    match momo_expressions::action::choose_in_tx(
+        conn,
+        actor,
+        approval.id,
+        approval.requested_by,
+        drafts,
+        subject,
+        choice,
+    )
+    .await
+    {
+        Ok(chosen) => Ok(Execution::Ran(Executed {
+            audits: Vec::new(),
+            ref_type: momo_agent::actions::REF_TYPE_EXPRESSION,
+            ref_id: chosen.expression_id,
+            result_body: momo_agent::actions::expression_create_result_body(),
+            result_rows: vec![
+                momo_agent::actions::action_row("이름", format!(":{}:", chosen.name)),
+                momo_agent::actions::action_row("보관", "팀 보관함에 저장했어요"),
+            ],
+            secret_once: None,
+            next: None,
+            expression: Some(json!({
+                "id": chosen.expression_id.to_string(),
+                "name": chosen.name,
+                "token": format!(":{}:", chosen.name),
+            })),
+        })),
+        Err(momo_expressions::Error::Role) => {
+            match role_required_refusal(
+                conn,
+                approval,
+                input,
+                now,
+                Some(RequiredRole::ExpressionAdder),
+            )
+            .await?
+            {
+                Ok(decision) => Ok(Execution::Refused(decision)),
+                Err(_) => Err(protocol_error("role refusal could not be built")),
+            }
+        }
+        Err(momo_expressions::Error::NameReserved) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_name_reserved",
+            "this expression name is already taken",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        Err(momo_expressions::Error::Quota) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_quota",
+            "the team's expression library is full",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        // Stale revision/hash, a candidate that is not this card's, an expired or already
+        // reclaimed picture: the person's choice no longer names what is stored.
+        Err(
+            momo_expressions::Error::Stale
+            | momo_expressions::Error::Expired
+            | momo_expressions::Error::NotFound
+            | momo_expressions::Error::Invalid,
+        ) => Ok(Execution::Refused(refusal(
+            approval.id,
+            input.member_id,
+            "expression_preview_stale",
+            "the picture you chose is no longer the one stored",
+            StatusCode::CONFLICT,
+            now,
+        ))),
+        Err(momo_expressions::Error::Db(error)) => Err(error),
+    }
+}
+
+/// `expressionChoice` is meaningful on exactly one request: **approving** an
+/// `expression.create` card, and there it is required (ADR-0186 v8 X8-2). Anywhere else it is
+/// a malformed request; approving without one names no picture. `None` = fine.
+fn expression_choice_refused(
+    present: bool,
+    is_expression_card: bool,
+    approve: bool,
+) -> Option<&'static str> {
+    match (present, is_expression_card && approve) {
+        (true, false) => Some("expression_choice_not_allowed"),
+        (false, true) => Some("expression_choice_required"),
+        _ => None,
+    }
 }
 
 /// `channel.member.add` (증보 V1/V6): seat each resolved member as `member`, as
@@ -3836,6 +4068,7 @@ async fn execute_channel_member_add(
         ),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -3912,6 +4145,7 @@ async fn execute_message_pin(
         result_rows: momo_agent::actions::message_pin_result_rows(&message.card, pinned_after),
         secret_once: None,
         next: None,
+        expression: None,
     }))
 }
 
@@ -4009,6 +4243,7 @@ async fn execute_invite_create(
             expires_at_ms: created.invite.expires_at_ms,
         }),
         next: Some(INVITE_RESULT_NEXT),
+        expression: None,
     }))
 }
 
@@ -4755,6 +4990,7 @@ mod tests {
             claude_subscription_agents_enabled: false,
             operator_scope: false,
             deliver_secret_to_agent: false,
+            expression_choice: None,
             context_max_messages: 30,
             admission_state: None,
         }

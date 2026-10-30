@@ -24,13 +24,19 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 pub enum FetchKind {
     Html,
     Image,
+    /// A picture link a MEMBER or an agent supplied for the expression library (ADR-0218
+    /// D5). Fetched exactly like [`FetchKind::Image`] (the same guard, hop checks and
+    /// 5 MiB stream cap) with two extra rules the link preview does not have: **port 443
+    /// only, on every hop**, and a refusal at the very first hop is told apart
+    /// ([`FetchError::OriginBlocked`]) from a refusal after a redirect.
+    Source,
 }
 
 impl FetchKind {
     fn max_bytes(self) -> usize {
         match self {
             FetchKind::Html => HTML_MAX_BYTES,
-            FetchKind::Image => IMAGE_MAX_BYTES,
+            FetchKind::Image | FetchKind::Source => IMAGE_MAX_BYTES,
         }
     }
 }
@@ -46,6 +52,11 @@ pub struct Fetched {
 pub enum FetchError {
     #[error("destination refused by SSRF guard")]
     Blocked,
+    /// [`FetchKind::Source`] only: the guard refused the **first** hop, the address the
+    /// caller itself named (a name that resolves private, a port other than 443). That is
+    /// not a public origin whose redirect went wrong, so it is a 400, not a card.
+    #[error("destination refused by SSRF guard at the first hop")]
+    OriginBlocked,
     #[error("too many redirects")]
     TooManyRedirects,
     #[error("response exceeded size limit")]
@@ -58,7 +69,10 @@ pub enum FetchError {
 
 impl FetchError {
     pub fn is_blocked(&self) -> bool {
-        matches!(self, FetchError::Blocked | FetchError::TooManyRedirects)
+        matches!(
+            self,
+            FetchError::Blocked | FetchError::OriginBlocked | FetchError::TooManyRedirects
+        )
     }
 }
 
@@ -194,7 +208,7 @@ impl PinnedGet for ReqwestGet {
 fn accept_for(kind: FetchKind) -> &'static str {
     match kind {
         FetchKind::Html => "text/html,application/xhtml+xml;q=0.9,*/*;q=0.1",
-        FetchKind::Image => "image/*,*/*;q=0.1",
+        FetchKind::Image | FetchKind::Source => "image/*,*/*;q=0.1",
     }
 }
 
@@ -231,27 +245,42 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
     let mut current = start.to_string();
     let mut redirects = 0u32;
     loop {
+        // What a refusal means depends on where it happens: the first hop is the address the
+        // caller named, a later hop is somewhere a redirect led.
+        let blocked = |redirects: u32| {
+            if kind == FetchKind::Source && redirects == 0 {
+                FetchError::OriginBlocked
+            } else {
+                FetchError::Blocked
+            }
+        };
         let parsed = match validated_url(&current, allow_development_http) {
             Ok(parsed) => parsed,
             Err(OutboundUrlError::PrivateAddress) | Err(OutboundUrlError::InvalidUrl) => {
-                return Err(FetchError::Blocked);
+                return Err(blocked(redirects));
             }
-            Err(OutboundUrlError::InsecureHttp) => return Err(FetchError::Blocked),
+            Err(OutboundUrlError::InsecureHttp) => return Err(blocked(redirects)),
             Err(OutboundUrlError::ResolutionFailed) => {
                 return Err(FetchError::Failed("dns".into()));
             }
         };
+        // ADR-0218 D5 (planner, 10-30): an imported picture is fetched on 443 only, on
+        // every hop. An explicit other port would let the status codes of this endpoint
+        // map a public host's open ports. Judged before any DNS query.
+        if kind == FetchKind::Source && parsed.port.is_some_and(|port| port != 443) {
+            return Err(blocked(redirects));
+        }
         let addresses = validated_resolved_addresses(&parsed, resolver)
             .await
             .map_err(|error| match error {
-                OutboundUrlError::PrivateAddress => FetchError::Blocked,
+                OutboundUrlError::PrivateAddress => blocked(redirects),
                 OutboundUrlError::ResolutionFailed => FetchError::Failed("dns".into()),
                 other => FetchError::Failed(other.to_string()),
             })?;
         let port = parsed
             .port
             .unwrap_or(if parsed.scheme == "https" { 443 } else { 80 });
-        let addr = SocketAddr::new(*addresses.first().ok_or(FetchError::Blocked)?, port);
+        let addr = SocketAddr::new(*addresses.first().ok_or_else(|| blocked(redirects))?, port);
         let response = getter.get(&parsed, addr, kind).await?;
         if (300..400).contains(&response.status) {
             if redirects >= MAX_REDIRECTS {
@@ -266,7 +295,7 @@ async fn fetch_guarded<R: HostResolver, G: PinnedGet>(
         }
         let content_type = response.content_type.unwrap_or_else(|| match kind {
             FetchKind::Html => "text/html".into(),
-            FetchKind::Image => "application/octet-stream".into(),
+            FetchKind::Image | FetchKind::Source => "application/octet-stream".into(),
         });
         return Ok(Fetched {
             final_url: parsed.absolute,
@@ -394,6 +423,94 @@ mod tests {
         .unwrap_err();
         assert_eq!(err, FetchError::Blocked);
         assert_eq!(getter.hops.load(Ordering::SeqCst), 0);
+    }
+
+    /// ADR-0218 D5 (planner decision 2 and 4, 10-30): for an imported picture the first hop
+    /// is the address the caller named, so a refusal there is `OriginBlocked` (a 400, no
+    /// card); a refusal after a redirect stays `Blocked` (a card); and only port 443 is
+    /// ever dialled, on every hop. The link-preview kinds keep their behaviour.
+    #[tokio::test]
+    async fn a_source_fetch_tells_the_first_hop_from_a_redirect_and_dials_443_only() {
+        let private = FixedResolver(vec!["10.0.0.7".parse().unwrap()]);
+        let none = || ScriptedGet {
+            hops: AtomicU32::new(0),
+            locations: Mutex::new(vec![]),
+        };
+        // First hop resolves private: OriginBlocked for Source, Blocked for the preview kinds.
+        let getter = none();
+        assert_eq!(
+            fetch_guarded(
+                "https://inside.example/a.gif",
+                FetchKind::Source,
+                false,
+                &private,
+                &getter
+            )
+            .await
+            .unwrap_err(),
+            FetchError::OriginBlocked
+        );
+        assert_eq!(
+            fetch_guarded(
+                "https://inside.example/a.gif",
+                FetchKind::Image,
+                false,
+                &private,
+                &getter
+            )
+            .await
+            .unwrap_err(),
+            FetchError::Blocked
+        );
+        // An explicit port other than 443 on the first hop: refused before DNS and the socket.
+        let public = FixedResolver(vec!["93.184.216.34".parse().unwrap()]);
+        assert_eq!(
+            fetch_guarded(
+                "https://example.com:8443/a.gif",
+                FetchKind::Source,
+                false,
+                &public,
+                &getter
+            )
+            .await
+            .unwrap_err(),
+            FetchError::OriginBlocked
+        );
+        assert_eq!(getter.hops.load(Ordering::SeqCst), 0);
+        // The preview kind still dials other ports.
+        assert!(fetch_guarded(
+            "https://example.com:8443/a.gif",
+            FetchKind::Image,
+            false,
+            &public,
+            &getter
+        )
+        .await
+        .is_ok());
+        // A redirect to another port or to a private name is `Blocked`, after exactly one request.
+        for location in [
+            "https://example.com:8443/b.gif",
+            "https://example.com:444/b.gif",
+        ] {
+            let getter = ScriptedGet {
+                hops: AtomicU32::new(0),
+                locations: Mutex::new(vec![location.into()]),
+            };
+            assert_eq!(
+                fetch_guarded(
+                    "https://example.com/a.gif",
+                    FetchKind::Source,
+                    false,
+                    &public,
+                    &getter
+                )
+                .await
+                .unwrap_err(),
+                FetchError::Blocked,
+                "{location}"
+            );
+            assert_eq!(getter.hops.load(Ordering::SeqCst), 1, "{location}");
+        }
     }
 
     #[tokio::test]

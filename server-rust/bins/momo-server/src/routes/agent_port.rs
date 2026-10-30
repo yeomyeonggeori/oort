@@ -84,6 +84,56 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     // cannot be introduced by a client or reverse proxy.
     let query_error = parts.uri.query().is_some();
 
+    // **`expression.create`'s 6 MiB budget is read only after the caller is authenticated and
+    // holds the propose scope** (ADR-0218 appendix A: 인증·scope 검사를 대형 바이트 수집 전에).
+    // Only a call that DECLARES itself `tools/call` of `oort_action_propose` in the mirrored
+    // transport headers is a candidate; any other request keeps the 64 KiB ceiling and the
+    // order it always had. The body's own shape (that it really is an `expression.create`
+    // proposal) is proved by `momo_mcp::dispatch_with_tools` once it is read, so a header alone
+    // never widens anything.
+    let declared_method = unique_named_text_header(&parts.headers, MCP_METHOD);
+    let declared_name = unique_named_text_header(&parts.headers, MCP_NAME);
+    let declares_propose = relevant_headers_bounded
+        && !query_error
+        && declared_method.value() == Some("tools/call")
+        && declared_name.value() == Some(momo_mcp::TOOL_ACTION_PROPOSE);
+    let mut pre_admission: Option<AgentPortAdmission> = None;
+    let mut body_cap = momo_mcp::MAX_BODY_BYTES;
+    if declares_propose {
+        pre_admission = Some(match &authorization {
+            UniqueHeader::Missing => return auth_failure(AgentPortAuthError::MissingCredential),
+            UniqueHeader::Invalid => return auth_failure(AgentPortAuthError::InvalidToken),
+            UniqueHeader::One(value) => {
+                match authenticate_and_admit_agent_port_credential(
+                    &state,
+                    Some(value),
+                    false,
+                    None,
+                    None,
+                    &serde_json::json!({}),
+                )
+                .await
+                {
+                    Ok(AgentPortAdmission::Allowed(principal)) => {
+                        if principal.kind == momo_auth::PrincipalKind::Agent
+                            && principal
+                                .scopes
+                                .iter()
+                                .any(|scope| scope == momo_auth::SCOPE_WORKSPACE_PROPOSE)
+                        {
+                            body_cap = momo_mcp::MAX_EXPRESSION_REQUEST_BYTES;
+                        }
+                        AgentPortAdmission::Allowed(principal)
+                    }
+                    Ok(AgentPortAdmission::RateLimited {
+                        retry_after_seconds,
+                    }) => return rate_limited(retry_after_seconds),
+                    Err(error) => return auth_failure(error),
+                }
+            }
+        });
+    }
+
     // Buffer no more than the contract ceiling plus one byte. A much larger
     // body is rejected without allocation proportional to attacker input.
     let (bytes, body_limit_error) = if !relevant_headers_bounded {
@@ -96,7 +146,7 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             )),
         )
     } else {
-        match to_bytes(body, momo_mcp::MAX_BODY_BYTES + 1).await {
+        match to_bytes(body, body_cap + 1).await {
             Ok(bytes) => (bytes, None),
             Err(_) => (
                 Default::default(),
@@ -125,7 +175,11 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
         || matches!(name, UniqueHeader::Invalid)
         || accept.is_err();
 
-    let foundation = if body_limit_error.is_none() && !query_error && !duplicate_transport_header {
+    let foundation = if body_limit_error.is_none()
+        && !query_error
+        && !duplicate_transport_header
+        && pre_admission.is_none()
+    {
         momo_mcp::classify_foundation_request(momo_mcp::HttpRequest {
             content_type: content_type.value(),
             accept: accept.as_ref().ok().and_then(Option::as_deref),
@@ -158,26 +212,26 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
     // Authentication happens even for a malformed protocol request so no wire
     // detail becomes an unauthenticated oracle. The body is already bounded,
     // and auth never receives or logs it.
-    let admission = match authorization {
-        UniqueHeader::Missing => {
+    let admission = match (pre_admission, authorization) {
+        // Authenticated above, before a large body was collected: not asked a second time.
+        (Some(admission), _) => admission,
+        (None, UniqueHeader::Missing) => {
             return auth_failure(AgentPortAuthError::MissingCredential);
         }
-        UniqueHeader::Invalid => return auth_failure(AgentPortAuthError::InvalidToken),
-        UniqueHeader::One(value) => {
-            match authenticate_and_admit_agent_port_credential(
-                &state,
-                Some(value),
-                foundation.is_some(),
-                detected_client_name.as_deref(),
-                detected_client_version.as_deref(),
-                &detected_capabilities,
-            )
-            .await
-            {
-                Ok(admission) => admission,
-                Err(error) => return auth_failure(error),
-            }
-        }
+        (None, UniqueHeader::Invalid) => return auth_failure(AgentPortAuthError::InvalidToken),
+        (None, UniqueHeader::One(value)) => match authenticate_and_admit_agent_port_credential(
+            &state,
+            Some(value),
+            foundation.is_some(),
+            detected_client_name.as_deref(),
+            detected_client_version.as_deref(),
+            &detected_capabilities,
+        )
+        .await
+        {
+            Ok(admission) => admission,
+            Err(error) => return auth_failure(error),
+        },
     };
     let principal = match admission {
         AgentPortAdmission::Allowed(principal) => principal,
