@@ -10,6 +10,9 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { AgentCard } from "./AgentCard";
+import { ThreadRequestSummary } from "./ThreadRequestSummary";
+import { RequestThoughtLine } from "@/features/agents/RequestThoughtLine";
+import { runBundleSnapshot } from "@momo/core/features/timeline/requestBundle";
 import { TeamAiDelegateStrip } from "./TeamAiDelegateStrip";
 import { teamAiDelegateFor } from "@momo/core/features/timeline/teamAi";
 import { teamAiReplyMetaFor } from "@momo/core/features/timeline/teamAiReply";
@@ -333,6 +336,7 @@ export function MessageRow({
   onEntranceConsumed,
   runStatus,
   runAnswers,
+  showThought = false,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -430,6 +434,8 @@ export function MessageRow({
    * 목록이 한 번 색인해 넣는다(`Timeline`). 없거나 모르는 run이면 칩은 누르는 것이 아니다.
    */
   runAnswers?: ReadonlyMap<string, AnswerRef>;
+  /** 요청 스레드 또는 에이전트 1:1 DM에서만 생각 줄을 세워요. */
+  showThought?: boolean;
 }) {
   const entrance = useConversationEntrance(playEntrance, onEntranceConsumed);
   const [resending, setResending] = useState(false);
@@ -469,6 +475,7 @@ export function MessageRow({
   // 에이전트를 부른 메시지(누가 불렀든, #4619): 칩이 서는 행이다. 칩이 있는 머리 줄은 줄바꿈이 없고, 머리 줄이 없는
   // 이어지는 행에서는 시각이 서는 거터 칸에 아이콘 칩이 선다.
   const hasRunChip = runStatus !== undefined && runStatus.length > 0;
+  const hasRequestBundle = runStatus?.some((run) => runBundleSnapshot(run) !== undefined) ?? false;
   const receiptRunId = receiptRunIdFor({
     message,
     isAgent,
@@ -970,6 +977,7 @@ export function MessageRow({
                 directory={directory}
                 {...(runAnswers !== undefined ? { runAnswers } : {})}
                 {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
+                {...(onOpenThread ? { onOpenBundle: () => onOpenThread(message) } : {})}
               />
             )}
           </div>
@@ -1211,11 +1219,12 @@ export function MessageRow({
             {/* 스레드 요약 줄의 「작업 중」 칩 (#4619 E). 답글이 달리는 루트를 **누가 불렀든** 그 일이 지금
                 진행 중이면 요약 줄에 같은 칩이 선다. 루트가 아닌 답글이 일으킨 run은 루트를 알 길이 없어
                 (진행 읽기에 rootId가 없다) 여기 서지 않는다. */}
-            {rollup && runStatus !== undefined && runStatus.length > 0 && (
+            {rollup && !hasRequestBundle && runStatus !== undefined && runStatus.length > 0 && (
               <ThreadWorkChip runs={runStatus} directory={directory} />
             )}
           </div>
         )}
+        {hasRequestBundle && showRollup && onOpenThread && runStatus && <ThreadRequestSummary runs={runStatus} onOpen={() => onOpenThread(message)} />}
         {/* 에이전트를 부른 메시지(누가 불렀든)의 **예외 줄** (#3824 → #4619): 평소의 진행은 레일과 칩이 말하고, 이 줄은
             아직 받지 않았어요·깨우는 신호가 닿지 않음·실패·시간 초과일 때만 선다. 행동 단추는 요청자와 owner/admin에게만. */}
         {runStatus !== undefined && (
@@ -1230,6 +1239,9 @@ export function MessageRow({
             />
           </div>
         )}
+        {showThought && runStatus !== undefined && (runStatus.length === 0
+          ? <div className="h-6 shrink-0" data-testid="request-thought-reserved" />
+          : runStatus.map((run) => <RequestThoughtLine key={run.id} run={run} directory={directory} />))}
         {actions && (
           <ReactionChips
             chips={actions.chips}

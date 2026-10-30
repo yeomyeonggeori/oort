@@ -18,11 +18,11 @@ import {
   windowIsFront,
   type ArmedOpen,
 } from "@momo/core/features/notifications/model";
-import { messageAnchorPath } from "@/features/inbox/anchor";
 import { notifyThisDevice } from "./deviceNotify";
 import { osNotifier, type OsNotifyKind } from "./osNotifier";
 import { setBrowserOpenHandler, useBrowserPermission } from "./browserNotify";
 import { useServerPause } from "./useServerPause";
+import { requestNotificationTarget } from "./requestNotificationTarget";
 
 // =============================================================================
 // Desktop notification rail (MOMO-607, ADR-0133 P2) — the trigger MOMO-603 left
@@ -75,6 +75,7 @@ export function DesktopNotifications() {
   );
   const announcedRef = useRef<string[]>([]);
   const armedRef = useRef<ArmedOpen | null>(null);
+  const armedThreadRef = useRef<{ messageId: string; rootId: string } | null>(null);
 
   const channels = useMemo(
     () => [...groups.channels, ...groups.dms],
@@ -142,7 +143,9 @@ export function DesktopNotifications() {
       nowMs,
     });
     if (!decision.show) return;
-    const { messageId, channelId, title, body } = decision.notification;
+    const { messageId, channelId, body } = decision.notification;
+    const approval = decision.notification.kind === "approval";
+    const title = approval ? memberFor(current.directory, event.payload.author_member_id)?.displayName ?? decision.notification.title : decision.notification.title;
     announcedRef.current = rememberAnnounced(announcedRef.current, messageId);
     // 데스크탑은 알림을 눌러 창이 앞에 오는 순간 이동한다(arm). 브라우저는 배너 클릭이 직접 간다.
     if (isDesktop()) {
@@ -154,6 +157,8 @@ export function DesktopNotifications() {
         // 승인 알림은 그 카드로 착지한다(#3738). 멘션·DM은 채널이다.
         decision.notification.kind === "approval" ? messageId : undefined
       );
+      armedThreadRef.current = armedRef.current.messageId && event.payload.root_id
+        ? { messageId: armedRef.current.messageId, rootId: event.payload.root_id } : null;
     }
     // 같은 종류는 한 묶음으로 쌓아 보낸다(osNotifier). 보내기는 fire and forget:
     // 브라우저나 거절된 권한은 false로 끝나는 정상 상태다.
@@ -171,7 +176,7 @@ export function DesktopNotifications() {
       // 위로 스크롤하다 만료를 맞이하지 않게. 멘션·DM은 지금까지처럼 채널이다.
       route:
         decision.notification.kind === "approval"
-          ? messageAnchorPath(channelId, messageId)
+          ? requestNotificationTarget(channelId, messageId, event.payload.root_id)
           : `/c/${channelId}`,
     });
   }, []);
@@ -206,8 +211,13 @@ export function DesktopNotifications() {
     if (!isDesktop()) return;
     const land = () => {
       focusedRef.current = true;
-      const route = openTarget(armedRef.current, Date.now());
+      let route = openTarget(armedRef.current, Date.now());
+      const thread = armedThreadRef.current;
+      if (route !== null && thread && armedRef.current?.channelId && armedRef.current.messageId === thread.messageId) {
+        route = requestNotificationTarget(armedRef.current.channelId, thread.messageId, thread.rootId);
+      }
       armedRef.current = null;
+      armedThreadRef.current = null;
       if (route !== null) navigate(route);
     };
     const leave = () => {
@@ -230,6 +240,7 @@ export function DesktopNotifications() {
   // target was there to answer; a later focus must not move them again.
   useEffect(() => {
     armedRef.current = null;
+    armedThreadRef.current = null;
   }, [location.key]);
 
   return null;
