@@ -3,8 +3,14 @@
 //! This is the sibling of the drafts in [`crate::action`], not a new place to put pictures: three
 //! renditions per candidate under 158's CHECKs (byte and dimension caps, GIF/PNG shape,
 //! `sha256 = sha256(bytes)`), the same one-hour TTL, the same reclaim (bytes deleted, the row
-//! stays as a record in state `expired`) and the same sweep ([`crate::store::sweep_in_tx`] calls
-//! [`sweep_in_tx`] here, so the notifier needs no new code).
+//! retired to state `expired` for the rest of its hour) and the same sweep entry point
+//! ([`crate::store::sweep_in_tx`] calls [`sweep_in_tx`] here, so the notifier needs no new code).
+//!
+//! One difference from a draft, on purpose: a draft's header stays after its hour as a record the
+//! immutability trigger protects, but a held assembly's header holds the agent's own words (the
+//! prompt, up to 2,000 characters) and nothing needs them once the hour is up. So the sweep
+//! **deletes** the row, bytes and header together, `ready` or already retired. The record that
+//! survives is the `expression.assembled` audit row: ids, motions and hash prefixes.
 //!
 //! A held assembly belongs to **one workspace, one agent and one person**: the agent that asked
 //! and the human the run was raised by. RLS holds the workspace (`ws_isolation`) and, inside an
@@ -390,8 +396,8 @@ pub async fn get_in_tx(
 }
 
 /// Reclaim the bytes of one assembly (a proposal that took what it needed, a cancelled or
-/// closed card). The row stays as a record, `expired`, like a draft; returns the rendition rows
-/// deleted. Idempotent.
+/// closed card). The row is retired (`expired`) and stays for the rest of its own hour, when the
+/// sweep deletes it ([`sweep_in_tx`]); returns the rendition rows deleted. Idempotent.
 pub async fn reclaim_in_tx(
     conn: &mut PgConnection,
     workspace: Uuid,
@@ -418,23 +424,28 @@ pub async fn reclaim_in_tx(
     Ok(freed)
 }
 
-/// The TTL half of [`crate::store::sweep_in_tx`]: every assembly of the tenant whose hour is up
-/// loses its bytes and becomes `expired`. Returns the rendition rows deleted.
+/// The TTL half of [`crate::store::sweep_in_tx`]: every assembly of the tenant whose hour is up is
+/// **deleted whole** (its bytes, then its header with the agent's prompt). A header still `ready`
+/// and one a reclaim already retired (`expired`) are due alike, so no prompt outlives the hour
+/// however the bytes went. Returns the rendition rows deleted.
+///
+/// Blanking the prompt instead is not on offer: the header's trigger lets only `state` change and
+/// the column must hold 1 to 2,000 characters. What is kept is the audit row.
 pub(crate) async fn sweep_in_tx(conn: &mut PgConnection, workspace: Uuid) -> Result<u64, Error> {
-    sqlx::query("SELECT id FROM expression_assembly WHERE workspace_id = $1 AND state = 'ready' AND expires_at <= clock_timestamp() FOR UPDATE")
+    sqlx::query("SELECT id FROM expression_assembly WHERE workspace_id = $1 AND expires_at <= clock_timestamp() FOR UPDATE")
         .bind(workspace)
         .fetch_all(&mut *conn)
         .await?;
     let freed = sqlx::query(
         "DELETE FROM expression_assembly_image i USING expression_assembly a \
           WHERE (i.workspace_id,i.assembly_id) = (a.workspace_id,a.id) AND a.workspace_id = $1 \
-            AND a.state = 'ready' AND a.expires_at <= clock_timestamp()",
+            AND a.expires_at <= clock_timestamp()",
     )
     .bind(workspace)
     .execute(&mut *conn)
     .await?
     .rows_affected();
-    sqlx::query("UPDATE expression_assembly SET state = 'expired' WHERE workspace_id = $1 AND state = 'ready' AND expires_at <= clock_timestamp()")
+    sqlx::query("DELETE FROM expression_assembly WHERE workspace_id = $1 AND expires_at <= clock_timestamp()")
         .bind(workspace)
         .execute(&mut *conn)
         .await?;

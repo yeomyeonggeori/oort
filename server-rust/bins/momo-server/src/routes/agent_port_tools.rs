@@ -3483,8 +3483,10 @@ struct AssembleLookup {
 ///    be a complete, live attachment **that person** wrote in **this** conversation (a stranger's
 ///    file and an unknown id are the same `InvalidArguments`), and the agent's twelve are
 ///    pre-counted so a call that cannot be kept is refused before it costs a decoder slot.
-/// 2. **Work.** The attachment is fetched from Drive outside any transaction, a slot is taken
-///    from the shared decoder semaphore (none free is `assembly_busy`, at once), and the child
+/// 2. **Work.** With an attachment source the shared decoder semaphore is looked at first (none
+///    free is `assembly_busy`, at once, and nothing is fetched). The attachment is then fetched
+///    from Drive outside any transaction, holding no slot; a slot is taken from the semaphore
+///    after the fetch (none free is `assembly_busy` again, at once, no queue), and the child
 ///    builds the candidates inside what is left of the call's one 10 s.
 /// 3. **Keep.** The scope is proved again, then [`momo_expressions::assembly::keep_in_tx`] stores
 ///    the result under the agent's own lock.
@@ -3606,6 +3608,16 @@ async fn expression_assemble(
     let (bytes, from) = match call.source {
         AssembleSource::Bytes(bytes) => (bytes, SourceFrom::Request),
         AssembleSource::Attachment(_) => {
+            // A call with no decoder slot to run in is refused before it costs a Drive read (up
+            // to 5 MiB of the shared service account's quota and memory): `assembly_busy` is the
+            // cheap answer and must not come after the expensive work. This only LOOKS at the
+            // pool and takes no permit, so none is held while the picture is on its way (network
+            // time is not decoder time, #4676). The slot is taken after the fetch by
+            // `try_assemble_with_program`, whose `try_acquire_owned` stays the authority: a slot
+            // taken in between is still `assembly_busy`, only after the fetch.
+            if momo_expressions::media::decoder_slots().available_permits() == 0 {
+                return Ok(assemble_refusal(&AssembleError::Busy));
+            }
             let source = lookup.source.ok_or(ToolFailure::InvalidArguments)?;
             let fetch = async {
                 let content = state
