@@ -522,6 +522,22 @@ pub async fn complete(
             }
         })?;
     let safe_error = sanitized_gateway_error(request.error.as_deref(), &state.agent_gateway.secret);
+    if request.usage.as_ref().is_some_and(|usage| {
+        [
+            usage.prompt_tokens,
+            usage.completion_tokens,
+            usage.cached_tokens,
+            usage.reasoning_tokens,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|tokens| tokens < 0)
+            || usage.cost_micro_usd.is_some_and(|cost| cost < 0)
+    }) {
+        return Err(ApiError::bad_request(
+            "usage counts and cost must be non-negative",
+        ));
+    }
     if let Some(unknown) = request
         .usage
         .as_ref()

@@ -447,6 +447,7 @@ fn run_complete_schema() -> Value {
             "body": nullable(text(8_000)),
             "error": nullable(text(4_000)),
             "usage": nullable(json!({
+                "description": "Report token counts only, never costs or prose; omit counts you cannot measure, and oort multiplies them by public prices and labels them self-reported.",
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
@@ -1241,6 +1242,8 @@ pub const TOOL_CATALOG: [ToolDescriptor; 14] = [
                       oort_message_post): only the result, a blocker (what stopped you and \
                       what you need) or what a person must do, with no empty greeting, no \
                       restated request and no step log (steps go to oort_run_event stage). \
+                      Report token counts only in usage, never costs or prose; omit counts you \
+                      cannot measure, and oort multiplies them by public prices and labels them self-reported. \
                       For a code \
                       task, report the result in artifacts: resultKind (pr_opened, \
                       branch_only, vm_only or no_change), tests {passed, failed, notRun}, \

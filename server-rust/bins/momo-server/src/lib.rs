@@ -1897,6 +1897,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/usage/summary",
             get(routes::usage::summary),
         )
+        .route(
+            "/v1/workspaces/{ws}/usage/agents",
+            get(routes::usage::agents),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/subscription-fee",
+            put(routes::usage::put_subscription_fee),
+        )
         // #1222 (T13) — the two webhook families, both workspace owner/admin.
         //
         // They are mounted together because they are one decision surface even

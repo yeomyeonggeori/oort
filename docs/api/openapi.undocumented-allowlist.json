@@ -62,10 +62,6 @@
       "path": "/v1/workspaces/{}/devices"
     },
     {
-      "method": "get",
-      "path": "/v1/workspaces/{}/usage/summary"
-    },
-    {
       "method": "post",
       "path": "/v1/agent-runs/{}/approval-decisions"
     },

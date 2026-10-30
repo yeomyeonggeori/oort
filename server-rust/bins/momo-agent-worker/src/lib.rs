@@ -2248,12 +2248,13 @@ impl AgentWorker {
                     // `totals.estimatedMicroUsd`.
                     was_estimated: Some(usage.is_none()),
                 };
-                let resolved = RunUsageReport::resolve(
+                let mut resolved = RunUsageReport::resolve(
                     Some(&report),
                     &fallback_model,
                     snapshot.requested_effort.as_deref(),
                     snapshot.profile_effort_pref.as_deref(),
                 );
+                resolved.source = momo_agent::UsageSource::Measured;
                 record_run_usage_in_tx(
                     conn,
                     workspace_id,
