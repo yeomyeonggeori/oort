@@ -104,6 +104,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting momo-agent-worker"
     );
 
+    // #4820 C2a: a set-but-unusable origin is a silent "no photo address" otherwise. Name the variable,
+    // never print its value.
+    if std::env::var("OORT_SELF_MEDIA_ORIGIN").is_ok_and(|raw| !raw.trim().is_empty())
+        && config.self_media_origin.is_none()
+    {
+        tracing::warn!(
+            "OORT_SELF_MEDIA_ORIGIN is set but is not a canonical origin (https://<lowercase host>[:port], \
+             no trailing slash); no picture address will be handed to the co-hosted Hermes"
+        );
+    }
     let worker = AgentWorker::connect(config).await?;
     worker.run(shutdown_signal()).await;
     Ok(())

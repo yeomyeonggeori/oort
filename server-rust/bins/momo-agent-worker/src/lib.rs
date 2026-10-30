@@ -87,6 +87,8 @@ pub mod payload;
 mod personal;
 pub mod provider;
 pub mod responses;
+/// #4820 C2a — the photo address the co-hosted Hermes' picture tool reads: the worker's half (mint + the one line).
+mod self_media;
 pub mod serving;
 pub mod sse;
 pub mod stream;
@@ -275,7 +277,7 @@ pub fn degraded_provider_message() -> &'static str {
 /// persisted (`outbox.last_error`), shown to a user (the degraded message), or
 /// logged.
 ///
-/// Two shapes are removed, because both can genuinely appear in a provider
+/// Three shapes are removed, because each can genuinely appear in a provider
 /// error string:
 ///
 /// * **the resolved bearer itself** — `reqwest`'s `Display` does not print
@@ -285,6 +287,11 @@ pub fn degraded_provider_message() -> &'static str {
 ///   *do* print the request URL, and an operator may have pasted credentials
 ///   into `provider_link.base_url`.
 ///
+/// * **a self-media address** (`…/v1/self-media/{workspace}/{token}`, #4820 C2a) — the photo address
+///   the turn handed the co-hosted Hermes. A picture tool's error body may echo the URL it failed to
+///   fetch, and that string is about to become `outbox.last_error`, `agent_run.error.reason` or a log
+///   line. The token part becomes `<redacted>` ([`momo_messaging::redact_self_media_urls`]).
+///
 /// This is the last line of defence, not the only one: nothing upstream ever
 /// puts the bearer in a payload, a row, or a log field (ADR-0004 Rules #2/#5).
 pub fn redact_secrets(text: &str, bearer: &str) -> String {
@@ -293,7 +300,7 @@ pub fn redact_secrets(text: &str, bearer: &str) -> String {
     if bearer.len() >= 4 {
         out = out.replace(bearer, "<redacted>");
     }
-    redact_url_userinfo(&out)
+    momo_messaging::redact_self_media_urls(&redact_url_userinfo(&out))
 }
 
 /// Rewrite every `scheme://user:pass@host` to `scheme://<redacted>@host`.
@@ -718,7 +725,11 @@ impl AgentWorker {
         // pair. Hermes ignores a bare `model` on /v1/chat/completions, so the pair
         // is the turn's model and is sent together or not at all.
         let mut pinned_route: Option<PinModelRoute> = None;
-        let mut transport = if let PinOutcome::Applied(pinned_transport, route) = pin {
+        // #4820 C2a: only the agent pinned to the operator's env link — the co-hosted Hermes — can be
+        // handed a photo address. A team link, the team's own resolution or a personal key never is.
+        let mut cohosted_pin = false;
+        let mut transport = if let PinOutcome::Applied(pinned_transport, route, kind) = pin {
+            cohosted_pin = matches!(kind, PinKind::OperatorEnv);
             if let Some(route) = route {
                 payload.model = route.model.clone();
                 pinned_route = Some(route);
@@ -959,6 +970,30 @@ impl AgentWorker {
                 .min(),
         )
         .await;
+        // #4820 C2a — the co-hosted Hermes' picture tool reads its source through `image_url`, so a turn
+        // whose trigger message carries the requester's own photo hands it one short-lived, single-use
+        // address of that photo (nothing else, no other id). Minted here, per turn, and never stored in
+        // the payload: the token must not ride the outbox. A database error is transient — the turn is
+        // retried rather than run without the photo it was asked about.
+        let self_media_line = if cohosted_pin && !payload.is_welcome() {
+            match self
+                .self_media_line(job.workspace_id, payload.agent_member_id, run_id)
+                .await
+            {
+                Ok(line) => line,
+                Err(error) => {
+                    return self
+                        .settle_retryable(
+                            &job,
+                            &format!("self media address not minted: {error}"),
+                            &transport.endpoint,
+                        )
+                        .await;
+                }
+            }
+        } else {
+            None
+        };
         let assembled = assemble(
             &payload.recent_messages,
             payload.agent_member_id,
@@ -979,6 +1014,7 @@ impl AgentWorker {
                 // #3169 — the rule and the `#number` handles ride together with the tool, or not at all.
                 memory_suggest: momo_agent::memory_suggest::directive(&momo_tools),
                 cite_seq: momo_agent::memory_suggest::is_offered(&momo_tools),
+                self_media: self_media_line.as_deref(),
                 memory: memory_block.as_deref(),
             },
             self.config.max_context_chars,
@@ -3564,7 +3600,7 @@ impl AgentWorker {
                 {
                     return unresolved("operator_env_not_configured", None);
                 }
-                PinOutcome::Applied(Box::new(env), pin.model_route.clone())
+                PinOutcome::Applied(Box::new(env), pin.model_route.clone(), pin.kind)
             }
             PinKind::TeamLink => {
                 let (Some(position), Some(stored_label)) =
@@ -3586,7 +3622,7 @@ impl AgentWorker {
                     if !self.provider_is_configured(&head) {
                         return unresolved("team_link_unusable", Some(now));
                     }
-                    return PinOutcome::Applied(Box::new(head), None);
+                    return PinOutcome::Applied(Box::new(head), None, pin.kind);
                 }
                 let chain = {
                     let mut conn = match self.pool.acquire().await {
@@ -3639,6 +3675,7 @@ impl AgentWorker {
                         link_updated_at_ms: None,
                     }),
                     None,
+                    pin.kind,
                 )
             }
         }
@@ -4178,8 +4215,9 @@ enum PinOutcome {
     NotPinned,
     /// Run on this transport. The team's row is not applied. The second field is
     /// the co-hosted pin's `(provider, model)` pair (#4143); `None` for every
-    /// other pin and for an `operator_env` pin that never chose a model.
-    Applied(Box<ResolvedTransport>, Option<PinModelRoute>),
+    /// other pin and for an `operator_env` pin that never chose a model. The third is the pin's kind:
+    /// `operator_env` is the co-hosted Hermes (#4820 C2a hands only that one a photo address).
+    Applied(Box<ResolvedTransport>, Option<PinModelRoute>, PinKind),
     /// The pin names a link that cannot be called. The turn is refused.
     Unresolved(PinUnresolved),
     /// The pin could not be read (DB trouble): retry, do not guess.
@@ -4520,6 +4558,31 @@ mod tests {
         // A too-short "bearer" must not turn every occurrence of a common
         // substring into <redacted> noise.
         assert_eq!(redact_secrets("abc def", "abc"), "abc def");
+    }
+
+    /// #4820 C2a: a picture tool's error body may echo the address it failed to fetch, and this string
+    /// is about to become `outbox.last_error`, `agent_run.error.reason` or a log line. The token is
+    /// scrubbed; the rest of the sentence stays so support can still read what failed.
+    #[test]
+    fn a_photo_address_echoed_by_the_provider_loses_its_token() {
+        let token = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo";
+        let url = format!(
+            "https://oort.example.com/v1/self-media/01234567-89ab-cdef-0123-456789abcdef/{token}"
+        );
+        let echoed = format!("image tool could not fetch {url}: 404");
+        let cleaned = redact_secrets(&echoed, "unrelated-bearer");
+        assert!(!cleaned.contains(token), "{cleaned}");
+        assert_eq!(
+            cleaned,
+            "image tool could not fetch https://oort.example.com/v1/self-media/01234567-89ab-cdef-0123-456789abcdef/<redacted>: 404"
+        );
+        // The bearer scrub and the userinfo scrub still run beside it.
+        let both = format!("key sk-live-abcdefgh then {url}");
+        let cleaned = redact_secrets(&both, "sk-live-abcdefgh");
+        assert!(
+            !cleaned.contains(token) && !cleaned.contains("sk-live-abcdefgh"),
+            "{cleaned}"
+        );
     }
 
     /// `reqwest` transport errors print the request URL, and an operator may

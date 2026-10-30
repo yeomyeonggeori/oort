@@ -2481,7 +2481,11 @@ generator now do for you; you still read the lock, and the model key stays yours
   as the four base64 variables, deploy, and read one
   `LOCKGATE {"ok": true, …}` line in the hermes deploy log. The start command runs
   the gate before the Hermes entrypoint, so a refused config means a service that
-  never listens. See `infra/railway/README.md` (Hermes).
+  never listens. See `infra/railway/README.md` (Hermes). The template also sets
+  `OORT_SELF_MEDIA_ORIGIN` (this edge's own public origin) on agent-worker and
+  hermes: with it, a request that carries a photo hands the agent's picture tool a
+  five-minute, single-use address of that photo so it can edit the photo; unset on
+  either service, no photo address is handed over (#4820).
 - **docker compose:** `scripts/self_host_env.sh --local-build --with-agents` (or
   `--published-image …`) writes `COMPOSE_PROFILES=agents`, a generated
   `HERMES_API_KEY`, `HERMES_BASE_URL=http://hermes:8642/v1`, the loopback opt-in
@@ -2491,7 +2495,11 @@ generator now do for you; you still read the lock, and the model key stays yours
   config, the gate and the image guard plugin read-only, and runs `lockgate.py gate`
   before the entrypoint. On an existing env the generated key is never replaced and the other keys
   are set to the bundled values; the flag refuses an env that already declares
-  another `HERMES_BASE_URL`.
+  another `HERMES_BASE_URL`. To let the agent edit a photo a requester attached,
+  also set `OORT_SELF_MEDIA_ORIGIN=https://<your public host>` in the env (compose
+  passes it to agent-worker and hermes; lowercase host, optional `:port`, no trailing
+  slash). Hermes downloads that address itself, so it must resolve to a public
+  address from Hermes (its private-address filter stays on); unset, nothing changes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` stays **your own declaration**. In both
   shipped shapes it is backed by the gate; if you edit the config, the gate or
   the start command, you take that backing back on yourself.

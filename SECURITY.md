@@ -222,18 +222,32 @@ the [default config](infra/hermes/config.yaml), and the offline
 
 The same default also selects Codex subscription image generation
 (`image_generate`, provider `openai-codex` only). The image prompt, and any
-inline `data:` picture the model passes as a source, go to OpenAI's image
-processing. Addresses are not accepted: an oort-owned Hermes plugin refuses every
+picture used as a source, go to OpenAI's image processing. Addresses the model
+chooses are not accepted: an oort-owned Hermes plugin refuses every
 `image_url` / `reference_image_urls` value that is not empty or a small inline
-picture before the tool runs, so through the image tool's source arguments Hermes
-never downloads an address the model chose and never reads a path it wrote. The lock gate requires that plugin (pinned
-bytes, enabled, and exercised with refused and accepted examples at every start),
+picture before the tool runs, so Hermes never downloads an address the model
+chose and never reads a path it wrote. There is one owner-approved exception
+(owner decision of 2026-10-30, so that an animated expression can be edited from
+the photo its requester attached): `image_url` alone may also be one short-lived
+address of that requester's own photo on this oort instance. The address is
+single-use, valid for five minutes, bound to the run, the conversation and that one
+attachment, and oort serves the bytes itself (no redirect, no Drive address); every
+refusal is the same 404, and oort stores only a hash of the token. The plugin
+compares the address as exact bytes against the one origin the operator configured
+plus a fixed path and token shape, never parsing or normalizing it; with no origin
+configured the exception is off. The photo's bytes then go to OpenAI's image
+processing like the prompt does, faces included. The lock gate requires that plugin (pinned
+bytes, enabled, and exercised with refused and accepted examples, including the
+one allowed address and its bypass variants, at every start),
 refuses the settings and environment variables that turn Hermes' private-address
-filter or the plugin off, and refuses other image providers, code execution and
+filter or the plugin off, refuses a malformed origin (and the origin in the
+volume's `.env`), and refuses other image providers, code execution and
 `web_extract`; connector configurations disable `image_gen` as well. Generated
 pictures are untrusted model output. We do not promise prompt redaction or no
 retention. This describes repository configuration, not a verified live
-deployment. See [ADR-0203 I1–I4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820), the offline
+deployment: whether the real Hermes downloads that address (its own private-address
+filter applies) is not verified. See [ADR-0203 I1–I4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820),
+[ADR-0218 G4·G8](docs/adr/0218-workspace-expressions.md), the offline
 [plugin](infra/hermes/test_image_guard.py) and
 [gate](infra/hermes/test_lockgate_image_guard.py) tests, and the in-image proof
 [`scripts/tests/test_hermes_image_guard_docker.sh`](scripts/tests/test_hermes_image_guard_docker.sh).

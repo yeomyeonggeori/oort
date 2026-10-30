@@ -191,7 +191,9 @@ class HealthyBoot(GateHarness):
         self.assertEqual((rc, record["problems"]), (0, []))
         guard = record["image_guard"]
         self.assertTrue(guard["files_verified"])
-        self.assertEqual(guard["canary"]["refused"], len(lockgate.IMAGE_GUARD_CANARY_REFUSED))
+        # No origin configured: the exception is off, and the canary adds one refused address of the allowed shape.
+        self.assertEqual(guard["canary"]["refused"],
+                         len(lockgate.IMAGE_GUARD_CANARY_REFUSED) + len(lockgate.canary_self_media_examples(None)[0]))
         self.assertEqual(guard["canary"]["accepted"], len(lockgate.IMAGE_GUARD_CANARY_ACCEPTED))
         self.assertEqual(guard["canary"]["plugin"][0]["name"], NAME)
         # The stand-in took every accepted call; the real handler never ran, and it is back in place afterwards.
@@ -428,6 +430,153 @@ class SsrfSwitches(GateHarness):
                 self.assertEqual((rc, kills), (3, [mock.call(1, lockgate.signal.SIGTERM)]))
 
 
+ORIGIN = "https://oort.example.com"
+VECTORS = json.load(open(os.path.join(HERE, "self_media_vectors.json"), encoding="utf-8"))["origin"]
+
+
+class SelfMediaOrigin(GateHarness):
+    """`OORT_SELF_MEDIA_ORIGIN` (owner 10-30 decision, #4820 C2a): the gate checks the variable's format, the volume's
+    `.env` may not carry it, an unset variable means the exception is off, and the canary proves the plugin about to run
+    accepts exactly one address and refuses its bypass variants."""
+
+    def test_a_canonical_origin_boots_and_the_canary_accepts_one_address_and_refuses_the_variants(self):
+        refused, accepted = lockgate.canary_self_media_examples(ORIGIN)
+        self.assertEqual(len(accepted), 1)
+        self.assertGreaterEqual(len(refused), 20)
+        for origin in VECTORS["accept"]:
+            with self.subTest(origin=origin):
+                rc, record, fake = self.boot(env={lockgate.SELF_ORIGIN_ENV: origin})
+                self.assertEqual((rc, record["problems"]), (0, []))
+                canary = record["image_guard"]["canary"]
+                refused, accepted = lockgate.canary_self_media_examples(origin)
+                self.assertEqual(canary["refused"], len(lockgate.IMAGE_GUARD_CANARY_REFUSED) + len(refused))
+                self.assertEqual(canary["accepted"], len(lockgate.IMAGE_GUARD_CANARY_ACCEPTED) + 1)
+                self.assertEqual(fake.real_calls, [], "the stand-in took every call, the real handler never ran")
+
+    def test_an_unset_or_empty_origin_means_the_exception_is_off_and_boot_is_fine(self):
+        for env in ({}, {lockgate.SELF_ORIGIN_ENV: ""}):
+            with self.subTest(env=env):
+                rc, record, _ = self.boot(env=env)
+                self.assertEqual((rc, record["problems"]), (0, []))
+                refused, accepted = lockgate.canary_self_media_examples(None)
+                self.assertEqual((len(refused), accepted), (1, []))
+                self.assertEqual(record["image_guard"]["canary"]["accepted"], len(lockgate.IMAGE_GUARD_CANARY_ACCEPTED))
+
+    def test_a_set_origin_that_is_not_canonical_is_refused_by_name_without_its_value(self):
+        bad = [origin for origin in VECTORS["reject"] if origin != ""]
+        self.assertGreaterEqual(len(bad), 25)
+        for origin in bad + ["https://secret-host-4820.example/"]:
+            with self.subTest(origin=origin):
+                rc, record, _ = self.boot(env={lockgate.SELF_ORIGIN_ENV: origin})
+                self.assertRefused(rc, record, lockgate.SELF_ORIGIN_ENV)
+                self.assertTrue(any("not a canonical origin" in p for p in record["problems"]), record["problems"])
+                self.assertNotIn("secret-host-4820", json.dumps(record))
+
+    def test_the_volumes_env_file_may_not_carry_the_variable_at_all(self):
+        for line in (lockgate.SELF_ORIGIN_ENV + "=" + ORIGIN, "export " + lockgate.SELF_ORIGIN_ENV + "=" + ORIGIN,
+                     lockgate.SELF_ORIGIN_ENV + '="' + ORIGIN + '"', lockgate.SELF_ORIGIN_ENV + "=https://evil.example",
+                     lockgate.SELF_ORIGIN_ENV + "="):
+            for process_env in ({}, {lockgate.SELF_ORIGIN_ENV: ORIGIN}):
+                with self.subTest(line=line, process=bool(process_env)):
+                    rc, record, _ = self.boot(env=process_env, env_file=("OPENROUTER_API_KEY=keep\n" + line + "\n").encode())
+                    self.assertRefused(rc, record, "the volume's .env sets " + lockgate.SELF_ORIGIN_ENV)
+                    self.assertNotIn("evil.example", json.dumps(record))
+        rc, record, _ = self.boot(env_file=b"# " + lockgate.SELF_ORIGIN_ENV.encode() + b"=" + ORIGIN.encode() + b"\n")
+        self.assertEqual((rc, record["problems"]), (0, []), "a comment is not an assignment")
+
+    def test_a_byte_order_mark_does_not_hide_the_variable_in_the_env_file(self):
+        rc, record, _ = self.boot(env_file=BOM + (lockgate.SELF_ORIGIN_ENV + "=" + ORIGIN + "\n").encode())
+        self.assertRefused(rc, record, "the volume's .env sets " + lockgate.SELF_ORIGIN_ENV)
+
+    def test_the_rules_apply_only_when_image_generation_is_exposed(self):
+        chat_only = TOOLS - {"image_generate"}
+        cfg = {"web": healthy_cfg()["web"]}
+        rc, record, _ = self.boot(cfg, chat_only, env={lockgate.SELF_ORIGIN_ENV: "https://Bad.Example/"}, install_guard=False)
+        self.assertEqual((rc, record["problems"]), (0, []))
+        rc, record, _ = self.boot(cfg, chat_only, env_file=(lockgate.SELF_ORIGIN_ENV + "=x\n").encode(), install_guard=False)
+        self.assertEqual((rc, record["problems"]), (0, []))
+
+    def test_the_same_rules_hold_on_the_live_volume_after_start(self):
+        rc, kills, record = self.monitor(healthy_cfg(), env={lockgate.SELF_ORIGIN_ENV: ORIGIN})
+        self.assertEqual(rc, 0, record)
+        self.assertEqual(kills, [])
+        rc, kills, record = self.monitor(healthy_cfg(), env={lockgate.SELF_ORIGIN_ENV: "https://Bad.Example/"})
+        self.assertEqual(rc, 3, record)
+        self.assertTrue(any(lockgate.SELF_ORIGIN_ENV in p for p in record["problems"]), record["problems"])
+        self.assertEqual(len(kills), 1, "a definitive violation asks PID 1 to stop")
+        rc, kills, record = self.monitor(healthy_cfg(), env={lockgate.SELF_ORIGIN_ENV: ORIGIN},
+                                         env_file=(lockgate.SELF_ORIGIN_ENV + "=" + ORIGIN + "\n").encode())
+        self.assertEqual(rc, 3, record)
+        self.assertTrue(any("the volume's .env" in p for p in record["problems"]), record["problems"])
+
+    def test_the_gate_and_the_shipped_plugin_agree_on_every_canary_example(self):
+        guard = load(os.path.join(PLUGIN_DIR, "__init__.py"), "oort_image_guard_for_self_media_canary")
+        for origin in VECTORS["accept"]:
+            refused, accepted = lockgate.canary_self_media_examples(origin)
+            with mock.patch.dict(os.environ, {lockgate.SELF_ORIGIN_ENV: origin}):
+                for field, value in refused:
+                    self.assertIsNotNone(guard.refusal_field({"prompt": "canary", field: value}), (origin, field, value))
+                for args in accepted:
+                    self.assertIsNone(guard.refusal_field(args), (origin, args))
+        refused, _ = lockgate.canary_self_media_examples(None)
+        with mock.patch.dict(os.environ):
+            os.environ.pop(lockgate.SELF_ORIGIN_ENV, None)
+            for field, value in refused:
+                self.assertIsNotNone(guard.refusal_field({"prompt": "canary", field: value}), (field, value))
+
+    def test_the_canary_catches_a_guard_that_compares_by_prefix_only(self):
+        """A plugin whose comparison were a bare startswith(origin + prefix) accepts the query, the dot segments and the
+        suffixes: the canary names the first variant it lets through."""
+        refused, accepted = lockgate.canary_self_media_examples(ORIGIN)
+        allowed_prefix = ORIGIN + lockgate.SELF_MEDIA_PATH_PREFIX
+
+        def weak_hook(args, call_id):
+            value = args.get("image_url") or ""
+            if isinstance(value, str) and value.startswith(allowed_prefix):
+                return None
+            return lockgate.IMAGE_GUARD_MARKER if (value or args.get("reference_image_urls")) else None
+
+        def weak_call(args, call_id):
+            return "canary_spy" if weak_hook(args, call_id) is None else lockgate.IMAGE_GUARD_MARKER
+
+        problems, _ = self.run_canary(weak_hook, weak_call)
+        self.assertTrue(problems, "a prefix-only comparison must be caught")
+        self.assertTrue(any("did not refuse the example" in p for p in problems), problems)
+
+    def test_the_canary_catches_a_guard_widened_to_every_https(self):
+        def wide_hook(args, call_id):
+            value = args.get("image_url")
+            if isinstance(value, str) and value.startswith("https://"):
+                return None
+            return lockgate.IMAGE_GUARD_MARKER if (value or args.get("reference_image_urls")) else None
+
+        def wide_call(args, call_id):
+            return "canary_spy" if wide_hook(args, call_id) is None else lockgate.IMAGE_GUARD_MARKER
+
+        problems, _ = self.run_canary(wide_hook, wide_call)
+        self.assertGreaterEqual(len(problems), 10, "every other https example is let through")
+
+    def test_the_canary_fails_the_positive_control_when_the_allowed_address_is_refused(self):
+        problems, _ = self.run_canary(lambda args, cid: lockgate.IMAGE_GUARD_MARKER if args.get("image_url") else None,
+                                      lambda args, cid: lockgate.IMAGE_GUARD_MARKER)
+        self.assertTrue(any("refused the allowed example" in p for p in problems), problems)
+
+    def run_canary(self, hook, call):
+        spy_holder = {}
+
+        def install(spy):
+            spy_holder["spy"] = spy
+            return lambda: None
+
+        def wrapped_call(args, cid):
+            result = call(args, cid)
+            if result == "canary_spy":
+                spy_holder["spy"](args)
+                return "canary_spy"
+            return result
+        return lockgate.run_image_guard_canary(hook, wrapped_call, install, ORIGIN)
+
+
 class CanaryBehavior(GateHarness):
     """The canary is a verdict from behavior: it fails for a guard that is wrong, absent, or not consulted."""
 
@@ -532,7 +681,9 @@ class CanaryBehavior(GateHarness):
 
         lockgate.run_image_guard_canary(hook, call, lambda spy: (lambda: None))
         self.assertEqual(len(seen), len(set(seen)))
-        self.assertEqual(len(seen), 2 * (len(lockgate.IMAGE_GUARD_CANARY_REFUSED) + len(lockgate.IMAGE_GUARD_CANARY_ACCEPTED)))
+        refused, accepted = lockgate.canary_self_media_examples(None)
+        self.assertEqual(len(seen), 2 * (len(lockgate.IMAGE_GUARD_CANARY_REFUSED) + len(refused)
+                                         + len(lockgate.IMAGE_GUARD_CANARY_ACCEPTED) + len(accepted)))
 
 
 if __name__ == "__main__":

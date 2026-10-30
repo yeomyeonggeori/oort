@@ -117,6 +117,14 @@ pub struct WorkerConfig {
     /// alternative to parsing an unexpected fence is printing raw JSON into a
     /// channel — worse than the card the operator declined.
     pub report_protocol_enabled: bool,
+    /// `OORT_SELF_MEDIA_ORIGIN` (#4820 C2a, ADR-0218 증보 G4·G8) — this instance's public origin as the
+    /// co-hosted Hermes' image guard accepts it: `https://<lowercase host>[:<port>]` and nothing more
+    /// ([`momo_messaging::canonical_origin`]). Set, a turn of an agent pinned to the co-hosted Hermes
+    /// whose trigger message carries a picture gets one more `system` line: the requester's photo as a
+    /// short-lived, single-use address under this origin. Unset **or not canonical** it is `None` and
+    /// no address is ever minted. A separate variable on purpose: `MOMO_PUBLIC_BASE_URL` reaches the api
+    /// only (ADR-0205 D1), and the same value goes to the Hermes service as the guard's one allowed origin.
+    pub self_media_origin: Option<String>,
     /// #3162 — the team-memory summary loop (`MEMORY_*` keys).
     pub memory: MemoryConfig,
     /// `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED` (#3431, ADR-0193 D18) — read
@@ -673,6 +681,8 @@ impl WorkerConfig {
             report_protocol_enabled: report_protocol_enabled(
                 env("AGENT_REPORT_PROTOCOL_ENABLED").as_deref(),
             ),
+            self_media_origin: env("OORT_SELF_MEDIA_ORIGIN")
+                .and_then(|raw| momo_messaging::canonical_origin(&raw).map(str::to_string)),
             memory: MemoryConfig::from_env()?,
             claude_subscription_agents_enabled: claude_subscription_agents_switch_on(
                 env("MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED").as_deref(),
@@ -718,6 +728,7 @@ impl WorkerConfig {
             utc_offset_minutes: 540,
             egress: momo_settings::EgressPolicy::default(),
             report_protocol_enabled: true,
+            self_media_origin: None,
             memory: MemoryConfig::default(),
             claude_subscription_agents_enabled: false,
             team_ai_daily_token_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_TOKEN_CAP,
@@ -729,6 +740,13 @@ impl WorkerConfig {
             ),
             team_ai_daily_search_cap: momo_workspace_actions::team_ai::DEFAULT_DAILY_SEARCH_CAP,
         }
+    }
+
+    /// The same config with the self-media origin set (#4820 C2a) — a value that is not a canonical
+    /// origin leaves it off, exactly as the environment does.
+    pub fn with_self_media_origin(mut self, origin: &str) -> WorkerConfig {
+        self.self_media_origin = momo_messaging::canonical_origin(origin).map(str::to_string);
+        self
     }
 
     /// The same config with an operator env key (`HERMES_API_KEY`) set — for

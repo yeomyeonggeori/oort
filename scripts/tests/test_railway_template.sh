@@ -275,13 +275,14 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   api-github-key-dropped worker-github-key hermes-github-key worker-github-key-renamed \
   extra-service-github-key api-public-base-dropped api-public-base-http \
   api-public-base-wrong-host worker-public-base \
+  worker-self-media-dropped hermes-self-media-wrong-host relay-self-media-origin \
   readme-row-missing centrifugo-json-new-key; do
   grep -Fq "mutation ${mutation} RED" "$TMP_ROOT/catalog.out" || \
     fail "catalog checker missing mutation proof: ${mutation}"
 done
 grep -Fq 'committed catalog still passes' "$TMP_ROOT/catalog.out" || \
   fail "catalog checker missing restore proof"
-pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221); 78 mutations RED"
+pass "catalog: start commands = canonical command lists (operators, order, values), pre-deploy sh -c + root→momo drop, Centrifugo v6 names + infra/centrifugo.json parity and settings set, api volume/UID/chown -R/setpriv/env -u, PG18+pgvector image+volume, push tmpfs guard/umask order/unset, variables ⊆ compose twin, shared refs ⊆ --claim keys, README hand-mapped table, hermes private + digest + gate-first/sha-pinned + no oort secret, GitHub App key + public address on api only (#4221), the self-media origin on agent-worker and hermes only (#4820 C2a); 81 mutations RED"
 
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that
@@ -301,7 +302,7 @@ bash "$ROOT/scripts/tests/test_hermes_image_guard_docker.sh" "$HERMES_GUARD_PROO
   cat "$TMP_ROOT/hermes-image-guard.out" >&2
   fail "in-image proof of the oort image guard failed (scripts/tests/test_hermes_image_guard_docker.sh)"
 }
-pass "hermes image guard in the pinned image, no network: gate passes with the plugin loaded by Hermes itself and a canary (10 refused before the tool, 4 accepted); missing/edited/widened plugin, plugins.enabled, SAFE_MODE, proxy, private-url switches and a BOM .env are refused; compose and railway start commands reach exec, an edited or missing guard variable stops them before the gate; a live gateway boots with a clean report"
+pass "hermes image guard in the pinned image, no network: gate passes with the plugin loaded by Hermes itself and a canary (10+1 refused before the tool, 4 accepted; with OORT_SELF_MEDIA_ORIGIN set 10+28 refused and 4+1 accepted, #4820 C2a); missing/edited/widened/prefix-only plugin, plugins.enabled, SAFE_MODE, proxy, private-url switches, a BOM .env, a malformed origin and the origin in the volume .env are refused; compose and railway start commands reach exec, an edited or missing guard variable stops them before the gate; a live gateway boots with a clean report"
 
 # ---------------------------------------------------------------------------
 # ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill

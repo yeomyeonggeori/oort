@@ -144,6 +144,11 @@ pub struct SystemBlocks<'a> {
     /// [`momo_agent::memory_suggest::MEMORY_SUGGEST_DIRECTIVE`]. A rule about behaviour, so it sits
     /// before the memory *data* block.
     pub memory_suggest: Option<&'a str>,
+    /// #4820 C2a — the one line that hands the co-hosted Hermes' picture tool the requester's own
+    /// photo: a short-lived, single-use address ([`momo_messaging::self_media`]). Present only for
+    /// a turn of an agent pinned to that Hermes whose trigger message carries a picture. A fact plus
+    /// the one use it is for, so it sits with the rules and before the memory *data* block.
+    pub self_media: Option<&'a str>,
     /// Print `#<seq> ` before each **person's** message (#3169): the handle the model cites as
     /// evidence when it calls `memory_suggest`. Off unless that tool is offered — an ordinary
     /// turn's window is byte-for-byte what it was before. The agent's own turns carry no number
@@ -199,6 +204,9 @@ pub fn assemble(
         .filter(|d| !d.is_empty())
     {
         head.push(ChatMessage::system(directive));
+    }
+    if let Some(line) = blocks.self_media.map(str::trim).filter(|l| !l.is_empty()) {
+        head.push(ChatMessage::system(line));
     }
     if let Some(memory) = blocks.memory.map(str::trim).filter(|m| !m.is_empty()) {
         head.push(ChatMessage::system(memory));
@@ -481,6 +489,68 @@ mod tests {
                 ChatMessage::system("you are hermes"),
                 ChatMessage::user("[성재] 안녕"),
             ]
+        );
+    }
+
+    /// #4820 C2a: the photo address is one `system` line, after the rules and before the memory data
+    /// block, and `None` adds nothing at all — the context is byte-identical to a turn without a photo.
+    #[test]
+    fn the_self_media_line_is_one_system_turn_and_absent_means_no_bytes() {
+        let window = vec![message(
+            1,
+            Some(5),
+            Some("성재"),
+            "@hermes 이 사진으로 이모티콘 만들어줘",
+        )];
+        let line = "첨부 사진 주소 — 그림 도구의 원본(image_url)으로만 쓰고, 5분 뒤 만료: https://oort.example.com/v1/self-media/w/t";
+        let assembled = |self_media: Option<&str>| {
+            assemble(
+                &window,
+                Uuid::from_u128(AGENT),
+                Some(Uuid::from_u128(1)),
+                "unused",
+                Some("you are hermes"),
+                SystemBlocks {
+                    now: Some("현재 시각: 2026-10-31"),
+                    memory_suggest: Some("memory rule"),
+                    self_media,
+                    memory: Some("memory data"),
+                    ..SystemBlocks::default()
+                },
+                10_000,
+            )
+        };
+        let with = assembled(Some(line));
+        let without = assembled(None);
+        let roles: Vec<(&str, &str)> = with
+            .messages
+            .iter()
+            .map(|m| (m.role.as_str(), m.content.as_str()))
+            .collect();
+        assert_eq!(
+            roles,
+            vec![
+                ("system", "you are hermes"),
+                ("system", "현재 시각: 2026-10-31"),
+                ("system", "memory rule"),
+                ("system", line),
+                ("system", "memory data"),
+                ("user", "[성재] @hermes 이 사진으로 이모티콘 만들어줘"),
+            ]
+        );
+        let mut stripped = with.messages.clone();
+        stripped.retain(|m| m.content != line);
+        assert_eq!(
+            stripped, without.messages,
+            "the line is the only difference"
+        );
+        assert_eq!(
+            without
+                .messages
+                .iter()
+                .filter(|m| m.content.contains("self-media"))
+                .count(),
+            0
         );
     }
 
