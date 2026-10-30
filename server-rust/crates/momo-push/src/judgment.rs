@@ -191,7 +191,7 @@
 //! through a **projection** of its payload: only the keys the shared functions
 //! read — the audience's (`action.id`, `action.pins`, `execution`, `origin`; see
 //! `momo_agent::decider`) and the open-in-app list's (`tool_call.name`, and a bare
-//! marker for whether `action.args` is an object with an `avatar` key; see
+//! marker for whether `action.args` is an object with an `avatar` or `displayName` key; see
 //! `momo_agent::actions::opens_in_app`) — never the card's argument values,
 //! `arguments` or rationale. That is a boundary (the card's text does not enter this
 //! process) and a bound (a model-sized tool input is not copied once per recipient
@@ -319,8 +319,9 @@ async fn judge_targets_for_source(
                               'pins', a.payload#>'{action,pins}', \
                               'args', CASE \
                                 WHEN jsonb_typeof(a.payload#>'{action,args}') = 'object' \
-                                 AND jsonb_exists(a.payload#>'{action,args}', 'avatar') \
-                                  THEN jsonb_build_object('avatar', true) \
+                                  THEN jsonb_strip_nulls(jsonb_build_object( \
+                                    'avatar', CASE WHEN jsonb_exists(a.payload#>'{action,args}', 'avatar') THEN true END, \
+                                    'displayName', CASE WHEN jsonb_exists(a.payload#>'{action,args}', 'displayName') THEN true END)) \
                                 ELSE '{}'::jsonb END), \
                   'tool_call', jsonb_build_object('name', a.payload#>'{tool_call,name}'), \
                   'execution', a.payload->'execution', \
