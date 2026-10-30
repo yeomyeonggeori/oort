@@ -103,8 +103,8 @@ use momo_agent::{
 };
 use momo_auth::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
-    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
+    hosted_action_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
+    Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -2625,6 +2625,8 @@ async fn execute_channel_create(
     // read finds the connection *through the credential's expiry*; for a card that waited a day it
     // finds nothing, and the agent would be seated in a room its connection does not cover with the
     // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
+    // A requested card proves the proposer's own connection by the same standing rule. Only a
+    // managed proposer has no connection to widen; an ended hosted connection refuses the action.
     let connection = if add_proposer {
         match card_connection {
             Some(card_connection) => {
@@ -2646,9 +2648,37 @@ async fn execute_channel_create(
                 Some((card_connection, covered))
             }
             None => {
-                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-                    .await
-                    .map_err(momo_db::DbError::from)?
+                match hosted_action_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?
+                {
+                    HostedActionConnection::Managed => None,
+                    HostedActionConnection::Standing(connection_id) => {
+                        let Some(covered) = lock_hosted_connection_in_tx(
+                            conn,
+                            input.workspace_id,
+                            approval.requested_by,
+                            connection_id,
+                        )
+                        .await
+                        .map_err(momo_db::DbError::from)?
+                        else {
+                            return Ok(Execution::Refused(args_invalid_refusal(
+                                approval, input, now,
+                            )));
+                        };
+                        Some((connection_id, covered))
+                    }
+                    HostedActionConnection::Unavailable => {
+                        return Ok(Execution::Refused(args_invalid_refusal(
+                            approval, input, now,
+                        )));
+                    }
+                }
             }
         }
     } else {
