@@ -1,3 +1,4 @@
+import {createFlush, createMount} from '@momo/core/testkit';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {act, cleanupAsync, render} from '@testing-library/react-native';
 import React from 'react';
@@ -42,11 +43,12 @@ export async function settle(ms = 25): Promise<void> {
 }
 
 /** 진짜 시계에서 이미 걸려 있는 약속과 한 번의 타이머 턴을 비운다. */
-export async function flush(): Promise<void> {
-  await act(async () => {
-    await new Promise(resolve => setTimeout(resolve, 0));
-  });
-}
+export const flush = createFlush(async work => { await act(work); });
+
+/** Shared mount ownership; call cleanupMounts in afterEach for this entry point. */
+const mounts = createMount(renderWithQuery, result => result.unmount());
+export const mount = mounts.mount;
+export const cleanupMounts = mounts.cleanup;
 
 // RNTL 의 자동 정리와 똑같이, 시험이 가짜 시계를 켜기 전에 진짜 `setImmediate` 를 집어 둔다.
 const realSetImmediate = setImmediate;

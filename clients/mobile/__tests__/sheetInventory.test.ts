@@ -152,9 +152,10 @@ describe('sheetInventory (#4458)', () => {
       expect(text).toMatch(/<SheetHeader\b/);
     });
 
-    it('`<Modal` 은 그릇(PageSheet)과 시트가 아닌 넷에만 있다', () => {
+    it('`<Modal` 은 공용 그릇과 명시한 전체 화면·팝오버에만 있다', () => {
       const allowed = new Set([
         'design/PageSheet.tsx',
+        'design/ThemePickerPage.tsx', // AP-6 테마 고르기: 완료로 돌아오는 전체 화면 페이지
         'features/deviceLink/QrScannerSheet.tsx', // 전체 화면 카메라
         'features/attachments/AttachMenu.tsx', // 앵커 팝오버 — 시트가 아니다
         'features/attachments/AttachmentViewer.tsx', // 전체 화면 사진 뷰어
@@ -165,6 +166,12 @@ describe('sheetInventory (#4458)', () => {
         .map(rel)
         .filter(name => !allowed.has(name));
       expect(offenders).toEqual([]);
+    });
+
+    it('AP-6 테마 고르기 예외는 전체 화면 페이지이고 바텀시트로 바뀌지 않는다', () => {
+      const picker = read(path.join(SRC, 'design/ThemePickerPage.tsx'));
+      expect(picker).toMatch(/presentationStyle="fullScreen"/);
+      expect(picker).not.toMatch(/<Modal[^>]*\btransparent\b/s);
     });
 
     it('옛 머리·옛 줄(SheetTitleRow·SheetRow)은 어디에도 없다', () => {

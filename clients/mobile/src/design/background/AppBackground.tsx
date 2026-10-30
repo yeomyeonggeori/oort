@@ -3,7 +3,7 @@ import {Image, StyleSheet, View} from 'react-native';
 
 import {usePalette, useStyles, useTheme} from '../theme';
 import type {Palette} from '../tokens';
-import {PRESETS, SOLIDS} from './model';
+import {PRESETS, SOLIDS} from '@momo/core/design/mobileBackground';
 import {backgroundPhotoUri} from './store';
 
 // =============================================================================

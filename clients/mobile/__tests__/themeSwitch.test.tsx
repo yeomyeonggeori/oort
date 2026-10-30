@@ -9,7 +9,7 @@ import type {Message, RosterMember} from '@momo/core/lib/api';
 
 import {ThemeControl} from '../src/design/ThemeControl';
 import {FixedScheme, ThemeProvider, useStyles} from '../src/design/theme';
-import {darkPalette, lightPalette, type Palette} from '../src/design/tokens';
+import {darkPalette, lightPalette, paletteFrom, type Palette} from '../src/design/tokens';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {NON_SECRET_KEYS, __setNonSecretStore} from '../src/storage/kv';
 
@@ -489,4 +489,21 @@ describe('useStyles 는 (팩토리 × 스킴) 당 한 벌만 만든다', () => {
     );
     expect(built).toBe(1);
   });
+});
+
+
+it('AP-6: 카탈로그 선택·완료·되돌리기가 실제 memo MessageRow까지 다시 칠해요', () => {
+  render(<ThemeProvider><ThemeControl /><Row /></ThemeProvider>);
+  const before = renderedBodyInk();
+  fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+  fireEvent.press(screen.getByTestId('theme-picker-filter-dark'));
+  fireEvent.press(screen.getByTestId('appearance-theme-catalog:nord'));
+  fireEvent.press(screen.getByTestId('theme-picker-done'));
+  expect(renderedBodyInk()).toBe(paletteFrom('catalog:nord', 'dark').text);
+  expect(renderedBodyInk()).not.toBe(before);
+  fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+  fireEvent.press(screen.getByTestId('appearance-theme-graphite'));
+  fireEvent.press(screen.getByTestId('theme-picker-undo'));
+  fireEvent.press(screen.getByTestId('theme-picker-done'));
+  expect(renderedBodyInk()).toBe(paletteFrom('catalog:nord', 'dark').text);
 });
