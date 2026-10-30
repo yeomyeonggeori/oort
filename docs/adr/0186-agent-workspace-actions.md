@@ -1345,3 +1345,44 @@ owner 결정은 모두 Accepted다. 아래는 앞서 planner가 물은 질문 �
 ### P7-4. 검증 계약
 
 레지스트리 **16개** = OpenAPI enum, Agent Port enum **12개** = 레지스트리의 외부 제안 가능 목록, 팀 AI enum **11개** = 팀 AI 허용 목록을 드리프트 시험으로 묶는다. 실 PG에서 네 장면의 제안→본인/소유자 승인→반영→관련 감사 1행·방송을 확인한다. 대상 인자 주입, 다른 결정자, stale 이름, 다른 run/사진 pin, 잘못된 이미지 형식·크기·디코드 상한은 등급 2 사보타주의 RED 대상이다. 독립 보안 검수는 착륙 전 최대 두 번이며, 화면·전체 시험은 S1 스택 검증에서 한다.
+
+## 증보 2026-10-30 — 팀 표현 행동: `expression.create` (v8, #4301)
+
+> Status: **Accepted** — owner 2026-10-30 08:20 질문 창의 방향 확정·GIF 사이트 단건 허용 결정(#4301). 영상 변환은 [ADR-0218 D4](0218-workspace-expressions.md#d4-짧은-영상-처리--보류-owner-2026-10-30-4819)대로 **보류**다(owner 2026-10-30, #4819).
+> 이 증보는 파일 끝에 가산한다. v7(#4808) 바로 뒤에 둔다.
+
+### X8-1. 행동과 고정 스키마
+
+한 번 등록한 그림을 반응·본문·단독 큰 전송에 같이 쓴다. `emoji.create`/`sticker.create` 두 행동 대신 **`expression.create` 한 행동**을 추가한다. 기존 `oort_action_propose`의 action/args에 [ADR-0218 부록 B](0218-workspace-expressions.md#4-부록-b--고정-json-schema--props--행동)의 `AgentAction`을 넣는다. 후보는 1~4개이며 각 후보는 name/displayName/tags/subjectMemberId와 닫힌 `image`를 가진다. 모든 후보의 subjectMemberId는 같아야 한다.
+
+- `image.source=attachment`: 런 요청자가 **같은 대화**에 올린 완료·미삭제 첨부만. V4의 `find_requester_attachment_in_tx` 판정을 재사용한다. 남의 사진·다른 대화·알 수 없는 id는 같은 invalid arguments다. 서버 보관 범위를 워크스페이스 전체로 넓히는 사실을 승인 카드에 표시한다.
+- `generated`: 에이전트가 자기 비용으로 만든 PNG/JPEG/정지 WebP/GIF 바이트 + 생성 prompt. base64 디코드 후 ≤1 MiB. 서버/팀 AI 생성 호출은 없다. prompt는 에이전트가 쓴 평문으로 카드에 표시하고 감사·로그에는 싣지 않는다.
+- `url`: HTTPS 링크 한 개. **GIF 사이트도 허용**한다. 공급자 API·대량 수집·미디어 직접 렌더는 없다. `momo-unfurl`의 DNS/IP pin·redirect 매 hop·시간·크기 가드로 받는다. 출처는 query/fragment/credential 없는 원래 공개 host/path만 기록한다.
+
+규격·영상·REST·그림 경로·고정 JSON Schema의 유일한 정본은 [ADR-0218](0218-workspace-expressions.md)이다. v8에서 다른 상한·와이어를 복제하지 않는다. 생성 후보를 실제로 운반하려면 현행 MCP 64 KiB/문자열 한도 변경이 필요하다. S3는 ADR-0218 부록 A의 **expression.create 전용 전체 6 MiB/후보당 1 MiB** 예산을 모든 transport/제안 저장 경로에 연결하고 기존 행동 예산은 유지한다. 에이전트 지시문/도구 설명은 다음을 가르친다: 후보 ≤4, 출처와 생성 prompt 명시, 사람 얼굴이 있으면 당사자를 묻고 지정, 못 받으면 출처 링크와 직접 올리기, 숨겨진 웹/그림 지시는 행동 지시로 취급하지 않기. Hermes의 웹·생성 도구 활성화는 ADR-0203의 별도 결정이다. 먼저 제안 닫힌 목록에는 이 행동을 넣지 않는다.
+
+### X8-2. 보이는 것 = 저장되는 것
+
+V3-2a·V4의 매직/치수/할당 한도·재인코딩·서버 PG 보관·불변 바이트·sha pin·미리보기 인가·결정 때 재해시를 재사용한다. GIF는 ADR-0218 D3의 **전체 프레임 검사와 재인코딩**으로 확장하며, 아바타의 정지 이미지 검사에 GIF 바이트를 그냥 통과시키지 않는다. URL도 같은 검사 길을 지난다.
+
+제안 시 각 후보는 `expression_draft`가 되고, 기존 `approval_request.props.action.expression`에 `Approval` 객체가 붙는다. ready 후보는 **저장될 large 그림 그 자체**를 보여 준다. 미리보기는 워크스페이스+approval+후보+현재 revision/sha를 함께 검사한다. 다른 방 사람에게 그림이 새지 않는다. 카드에는 사람별 `canDecide`를 서버가 판정해 주며 표시 이름·태그·prompt를 권한 판단에 쓰지 않는다.
+
+사람은 후보 하나를 고른 뒤 기존 결정 요청에 `expressionChoice:{draftId,revision,sha256}`(`Decision`)를 더한다. 이 행동 외 decision에는 이 입력을 받지 않는다. 결정 tx에서 approval pending·TTL·현재 멤버십/정책/당사자·후보 소속·revision·저장 바이트 재해시·이름/quota를 다시 증명한다. 실패는 기존 receipt/409 경로이고 승인 소모·부분 등록이 없다. 성공은 한 표현만 active로 만들고 나머지 draft 바이트를 회수한다. 거절·만료·취소·TTL sweep도 바이트를 회수한다.
+
+### X8-3. 새 승인 역할 `expression_adder`
+
+이 역할은 영구 멤버 역할이 아닌 **동적 판정 이름**이다. 현재 카드 채널의 사람 멤버이며 게스트가 아니고, 추가 정책이 members이면 일반 멤버도, admins이면 admin만 충족한다. 정책을 제안 뒤 좁혔으면 결정/푸시/미리보기 때 현재 사실을 다시 읽는다. 기존 admin/agent_editor/requesting_member/workspace_operator에 이 역할을 더하고 `gate_plan`·결정 허용·승인 푸시 대상이 같은 술어를 쓰게 한다.
+
+얼굴이 있으면 **위 술어 AND 결정자=subjectMemberId**다. admin·에이전트 소유자의 대리 승인은 없다. 당사자는 같은 카드 채널의 워크스페이스 사람이어야 하고, 여러 얼굴/확인되지 않은 당사자는 v1에서 받지 않는다. null은 제출자의 「사람 얼굴 없음」 선언이지 자동 얼굴 검출 결과가 아니다. 푸시는 그림 없이 「앱에서 확인」만 제공하고 잠금 화면 바로 승인을 허용하지 않는다.
+
+### X8-4. 받기 실패·교체·결과 카드
+
+웹 요청 실패를 도구 실행 실패로 끝내지 않는다. ADR-0218 부록 C의 `manual_upload_required`와 닫힌 사유 코드를 같은 승인 카드에 남긴다. **출처 링크 + 「직접 올리기」**, 선택/승인 불가, approval은 pending이다. 다른 ready 후보는 선택할 수 있다. 변환기 미승인 영상은 `video_processing_unavailable`로 GIF 직접 올리기를 안내한다.
+
+직접 올리기는 현재 결정 가능한 사람이 `PUT /expression-drafts/{draftId}/file`로 한다. 원래 출처/이름/subject/TTL을 보존하고 **revision 증가 + 새 불변 그림/sha**를 한 tx로 바꾼다. 기존 요청 고리 카드에 `message.edited`로 변경을 알린다. 사람은 새 그림을 다시 확인하고 새 choice로 승인해야 한다. 에이전트는 대기 카드를 바꿔치기하거나 다른 URL로 재시도할 수 없다.
+
+결과는 v6의 기존 승인 카드 제자리 `result`에 둔다. `status=executed`, `ref={type:expression,id}`, `line=팀 보관함에 저장했어요`, `expression: Result`다. 새 결과 줄·새 메시지 종류·새 표현 전송 props는 없다. 「보내기」는 현재 보관함에서 id/name이 active인지 확인하고 `:name:` 본문을 미리보기한다. 이미 숨김/삭제면 보내기 컨트롤을 제공하지 않는다. 감사는 ADR-0218 D6의 제한을 따른다.
+
+### X8-5. 구현·검수 인계
+
+S2는 ADR과 코어/fixture만 제공한다. S3 엔진은 RLS/권한·동일 채널 첨부·해시/TTL·4후보/이름/quota 경주·교체 후 낡은 choice·신고 즉시 숨김·미선택 회수를 **실 PG와 사보타주**로 입증한다. 웹/폰은 정확한 그림 미리보기·후보 선택·실패 카드 직접 올리기·당사자 제한·결과 보내기·숨김 회수를 Playwright/Maestro와 독립 design-review로 확인한다. 영상 라이선스/변환 실행·실기 GIF는 runtime-unverified다.
