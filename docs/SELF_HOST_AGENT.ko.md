@@ -2007,8 +2007,8 @@ agent:
 - **Railway:** `infra/railway/railway.json`에 `hermes` 서비스(비공개, digest 고정
   공식 이미지, `/opt/data` 볼륨)와 6~7번의 api·agent-worker 변수가 들어 있어요.
   shared variable `HERMES_API_KEY`(`openssl rand -hex 32`)를 만들고,
-  `infra/hermes/config.yaml`과 `infra/hermes/lockgate.py`를 base64 변수 두 개로
-  붙여 배포한 뒤, hermes 배포 로그에서 `LOCKGATE {"ok": true, …}` 한 줄을 읽어요.
+  `infra/hermes/config.yaml`, `infra/hermes/lockgate.py`, `infra/hermes/plugins/oort-image-guard/`의
+  파일 둘을 base64 변수 네 개로 붙여 배포한 뒤, hermes 배포 로그에서 `LOCKGATE {"ok": true, …}` 한 줄을 읽어요.
   시작 명령이 Hermes 엔트리포인트 앞에서 게이트를 돌리므로, 설정이 거절되면 서비스는
   아예 listen하지 않아요. `infra/railway/README.md`(Hermes)를 보세요.
 - **docker compose:** `scripts/self_host_env.sh --local-build --with-agents`(또는
@@ -2017,7 +2017,7 @@ agent:
   `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`을 써요. 이어서
   `scripts/self_host_env.sh --compose up -d --wait`로 나머지와 함께 Hermes가 떠요.
   `hermes` 서비스에는 `ports:`가 없고(호스트에서 닿지 않음), 설정과 게이트를
-  읽기 전용으로 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 기존
+  읽기 전용으로(그림 가드 플러그인도) 마운트하며, 엔트리포인트 앞에서 `lockgate.py gate`를 돌려요. 기존
   env에서는 생성된 키를 다시 만들지 않고 나머지 키를 번들 값으로 맞추며, 이미 다른
   `HERMES_BASE_URL`을 선언한 env는 거절해요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 여전히 **운영자 본인의 선언**이에요. 두

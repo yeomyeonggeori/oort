@@ -1,0 +1,7 @@
+name: oort-image-guard
+version: 1.0.0
+description: oort guard for image_generate. Refuses every image_url and reference_image_urls value that is not empty or a small inline data:image picture, before the tool runs (ADR-0203 I2).
+author: oort
+kind: standalone
+provides_hooks:
+  - pre_tool_call
