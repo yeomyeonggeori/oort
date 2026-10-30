@@ -1700,6 +1700,12 @@ function AgentCard({
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
+  const avatarKey = card.kind === 'approval' && hasProfileAvatarPreview(card.action)
+    ? `${card.approvalId}:${card.action?.preview?.sha256}` : null;
+  const [avatarReady, setAvatarReady] = useState<{key: string | null; ready: boolean} | null>(null);
+  const onAvatarReady = useCallback((ready: boolean) => {
+    setAvatarReady({key: avatarKey, ready});
+  }, [avatarKey]);
   if (card.kind === 'approval') {
     // 카드가 무엇을 말하는지(문장 / 컨트롤 / 둘 다 아님)는 `readApprovalCard` 한
     // 곳에서 읽는다. 행의 로터(#2595)도 같은 답을 보고 「승인」·「거부」를 세운다 —
@@ -1774,8 +1780,10 @@ function AgentCard({
             선다. 결정이 난 카드에는 서지 않는다 — 결과는 결과 카드가 말한다. */}
         {settledStatus === 'pending' && hasProfileAvatarPreview(card.action) ? (
           <ApprovalAvatarPreview
+            key={avatarKey}
             card={card}
             agentName={memberFor(directory, card.requestedByMemberId)?.displayName ?? null}
+            onReadyChange={onAvatarReady}
           />
         ) : null}
         {/* 고정·고정 풀기 카드(#4705): 앞 120자만 보고 누르지 않게 전문으로 가는 문 하나가
@@ -1825,6 +1833,7 @@ function AgentCard({
         ) : approval !== null ? (
           <ApprovalDecision
             approvalId={approval.approvalId}
+            approveDisabled={avatarKey !== null && !(avatarReady?.key === avatarKey && avatarReady.ready)}
             deadlinePassed={deadlinePassed(approval, nowMs)}
             forbiddenCopy={
               card.action?.requiredRole
