@@ -1,0 +1,35 @@
+[package]
+name = "momo-expressions"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "momo-expression-decoder"
+path = "src/main.rs"
+
+[dependencies]
+momo-db = { path = "../momo-db" }
+momo-outbox = { path = "../momo-outbox" }
+momo-wire = { path = "../momo-wire" }
+sqlx.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+futures.workspace = true
+tokio = { workspace = true, features = ["sync", "time", "process", "io-util"] }
+rlimit = "0.10"
+# ADR-0218 D3: GIF decoding/compositing and fresh pixel-only encoding.
+# image, gif, color_quant and weezl are MIT/Apache-2.0; no video codecs.
+image = { workspace = true, features = ["gif"] }
+
+[dev-dependencies]
+base64.workspace = true
+
+[lints]
+workspace = true

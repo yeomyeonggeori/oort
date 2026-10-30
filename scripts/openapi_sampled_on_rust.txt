@@ -1,4 +1,16 @@
 # openapi_sampled_on_rust.txt — 스펙-Rust 이중 샘플 매니페스트 (SRV-B7 / #1042).
+# ADR-0218 storage — sampled by sample_expression_contract.py on the same API.
+GET /v1/workspaces/{ws}/expressions
+POST /v1/workspaces/{ws}/expressions
+POST /v1/workspaces/{ws}/expressions/uploads
+POST /v1/workspaces/{ws}/expressions/from-attachment
+GET /v1/workspaces/{ws}/expression-drafts/{draftId}
+PUT /v1/workspaces/{ws}/expression-drafts/{draftId}/file
+GET /v1/workspaces/{ws}/expression-drafts/{draftId}/image
+GET /v1/workspaces/{ws}/expressions/{id}/image
+PATCH /v1/workspaces/{ws}/expressions/{id}
+DELETE /v1/workspaces/{ws}/expressions/{id}
+POST /v1/workspaces/{ws}/expressions/{id}/report
 #
 # 한 줄 = "METHOD /spec/path/{template}" — docs/api/openapi.yaml 이 쓰는 그 경로
 # 템플릿 그대로. 여기 실린 연산은 scripts/verify_openapi_contract_rust.sh 가
