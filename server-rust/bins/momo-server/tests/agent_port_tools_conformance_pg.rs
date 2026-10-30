@@ -27311,6 +27311,9 @@ struct Mock4829 {
     replies: std::sync::Mutex<
         std::collections::HashMap<String, Result<Vec<u8>, momo_unfurl::FetchError>>,
     >,
+    /// How long every outside request takes to answer, in milliseconds (0: at once). The
+    /// request is **counted before** it waits, so a test can see a fetch that has begun.
+    delay_ms: std::sync::atomic::AtomicU64,
 }
 
 #[async_trait::async_trait]
@@ -27321,6 +27324,10 @@ impl momo_unfurl::UnfurlHttp for Mock4829 {
         _kind: momo_unfurl::FetchKind,
     ) -> Result<momo_unfurl::Fetched, momo_unfurl::FetchError> {
         self.calls.lock().unwrap().push(url.to_string());
+        let delay = self.delay_ms.load(std::sync::atomic::Ordering::Relaxed);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
         let key = url.split('?').next().unwrap_or(url).to_string();
         match self.replies.lock().unwrap().get(&key).cloned() {
             Some(Ok(body)) => Ok(momo_unfurl::Fetched {
@@ -27360,6 +27367,7 @@ async fn world_4829() -> World4829 {
     let mock = Arc::new(Mock4829 {
         calls: Default::default(),
         replies: Default::default(),
+        delay_ms: Default::default(),
     });
     let state = AppState::new(
         app.clone(),
@@ -28049,6 +28057,35 @@ async fn may_approve_4829(w: &World4829, approval: Uuid, member: Uuid) -> bool {
     .unwrap()
 }
 
+/// What a registration writes **first** (`changed` in `store.rs`): the catalog's version, an
+/// `expression.created` audit row and an `expression.changed` outbox event. A refused decision
+/// commits (it answers a receipt), so anything written before the refusal would stay.
+async fn registration_writes_4829(w: &World4829) -> (i64, i64, i64) {
+    let ws = w.fixture.workspace;
+    let version: i64 = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT version FROM expression_catalog WHERE workspace_id=$1), 0)",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.created'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    (version, audits, events)
+}
+
 /// A face means that person AND the add policy as it is now: no admin proxy, no guest, and a
 /// policy narrowed after the proposal is read again by the decision, the push audience and the
 /// preview alike.
@@ -28179,6 +28216,7 @@ async fn expression_create_only_the_face_who_the_policy_allows_decides() {
     assert_eq!(status, 200, "{proposed}");
     let faceless = proposed_approval_3706(&proposed);
     let pick = choice_4829(&card_4829(&w, faceless).await, 0);
+    let before = registration_writes_4829(&w).await;
     assert_eq!(
         decide_4829(&w, &w.requester_jwt, faceless, true, Some(pick.clone()))
             .await
@@ -28186,10 +28224,21 @@ async fn expression_create_only_the_face_who_the_policy_allows_decides() {
         403
     );
     assert_eq!(
+        registration_writes_4829(&w).await,
+        before,
+        "a refused role wrote nothing"
+    );
+    assert_eq!(
         decide_4829(&w, &admin_jwt, faceless, true, Some(pick))
             .await
             .0,
         200
+    );
+    // The measurement can see a registration: exactly one version, one audit row, one event.
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        (before.0 + 1, before.1 + 1, before.2 + 1),
+        "a registration is one version, one `expression.created` row and one event"
     );
     set_policy_4829(&w, "members").await;
     // The name is permanent: a second card for a name already registered is refused at the
@@ -28206,6 +28255,7 @@ async fn expression_create_only_the_face_who_the_policy_allows_decides() {
     assert_eq!(status, 200, "{proposed}");
     let taken = proposed_approval_3706(&proposed);
     let pick = choice_4829(&card_4829(&w, taken).await, 0);
+    let written = registration_writes_4829(&w).await;
     let (status, receipt) = decide_4829(&w, &admin_jwt, taken, true, Some(pick)).await;
     assert_eq!(
         (status, receipt["status"].as_str().unwrap_or("")),
@@ -28213,6 +28263,14 @@ async fn expression_create_only_the_face_who_the_policy_allows_decides() {
         "{receipt}"
     );
     assert_eq!(approval_status_4385(&w.su, taken).await, "pending");
+    // The refusal commits, so anything the registration writes FIRST would still be here: a
+    // version bump, an `expression.created` audit row, an `expression.changed` event for an
+    // expression that was never made. Proofs first, writes after.
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        written,
+        "a reserved name wrote no version, no audit row and no event"
+    );
     // The library is full at 1,000 (active + hidden): the same card is refused for room.
     sqlx::query("INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, version) SELECT $1, 'fill_' || g, 'f', '[]'::jsonb, '{\"kind\":\"upload\",\"sourceUrl\":null,\"prompt\":null}'::jsonb, $2, 100 + g FROM generate_series(1, 999) g")
         .bind(w.fixture.workspace)
@@ -28232,6 +28290,7 @@ async fn expression_create_only_the_face_who_the_policy_allows_decides() {
     assert_eq!(status, 200, "{proposed}");
     let last = proposed_approval_3706(&proposed);
     let pick = choice_4829(&card_4829(&w, last).await, 0);
+    let written = registration_writes_4829(&w).await;
     let (status, receipt) = decide_4829(&w, &admin_jwt, last, true, Some(pick)).await;
     assert_eq!(
         (status, receipt["status"].as_str().unwrap_or("")),
@@ -28242,6 +28301,11 @@ async fn expression_create_only_the_face_who_the_policy_allows_decides() {
         approval_status_4385(&w.su, last).await,
         "pending",
         "a full library spends nothing"
+    );
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        written,
+        "a full library wrote no version, no audit row and no event"
     );
 }
 
@@ -28736,6 +28800,7 @@ async fn build_world_4820(
     let mock = Arc::new(Mock4829 {
         calls: Default::default(),
         replies: Default::default(),
+        delay_ms: Default::default(),
     });
     let served: Arc<dyn momo_drive::DriveArchive> = match drive_delay {
         Some(delay) => Arc::new(SlowDrive4820 {
@@ -30141,4 +30206,838 @@ async fn assemble_needs_the_propose_scope_and_a_handle_that_is_this_agents() {
         "a released lease: {answer}"
     );
     assert_eq!(assembly_rows_4820(&w.su, w.fixture.workspace).await, 0);
+}
+
+// ---------------------------------------------------------------------------
+// #4829 security review round 1 (planner decisions 10-31).
+//
+//   * the cheap refusals come BEFORE the fetch and the decode: a stale lease, a parked run and a
+//     full agent fetch nothing (`prepare_expression`'s read transaction);
+//   * one preparation per agent at a time;
+//   * the 6 MiB door's guarantees are measured **on the wire**, with raw TCP: it authenticates
+//     before it reads, it opens the budget only to an agent that holds the propose scope, it
+//     spends one rate-limit unit per call, and it reads under a deadline;
+//   * a GIF and a video are sources of an attachment (`find_requester_attachment_for_in_tx`).
+//
+// Sabotage targets (the fix handoff has the RED → GREEN table):
+//   * `prepare_expression`: the cheap gate after the fetch / its lease arm / its run-state arm /
+//     its ceiling arm / the `Preparing` guard      → `..._refuses_the_cheap_things_...`,
+//                                                    `..._prepares_one_proposal_per_agent_...`;
+//   * `media::process_waiting`: the line cap / the wait cap                   → unit tests there;
+//   * `agent_port::post`: the big body read before authentication / the scope check dropped /
+//     authentication asked twice / no deadline     → `the_big_body_...` (below, and
+//                                                    `agent_port_transport.rs`);
+//   * `choose_in_tx`: `changed()` ahead of the proofs → `..._only_the_face_...`;
+//   * the expression use of the attachment judgement → `..._gif_and_a_video_attachment_...`.
+// ---------------------------------------------------------------------------
+
+async fn mention_4829(w: &World4829) {
+    let handle_name = hosted_handle(&w.su, w.fixture.hosted_agent).await;
+    let trigger: Value = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/channels/{}/messages",
+            w.base, w.fixture.workspace, w.fixture.channel
+        ))
+        .bearer_auth(&w.requester_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 내 사진을 이걸로 바꿔 줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+}
+
+/// Claim every job that can be claimed; the lease handles.
+async fn claim_handles_4829(w: &World4829) -> Vec<String> {
+    let (status, claimed) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    structured(&claimed)["jobs"]
+        .as_array()
+        .expect("jobs")
+        .iter()
+        .map(|job| {
+            job["leaseHandle"]
+                .as_str()
+                .expect("a lease handle")
+                .to_string()
+        })
+        .collect()
+}
+
+/// `expression.create` with an existing lease handle (the proposal helpers above mention,
+/// claim and propose in one go; these tests need to propose again with the same handle).
+async fn propose_with_4829(w: &World4829, handle: &str, candidates: Value) -> (u16, Value) {
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "expression.create", "args": {"candidates": candidates}}),
+    )
+    .await;
+    remember_handle_3789(&answer, handle);
+    (status, answer)
+}
+
+/// How many requests the server has made to an outside address so far.
+fn fetches_4829(w: &World4829) -> usize {
+    w.mock.calls.lock().unwrap().len()
+}
+
+/// A count of this world's own workspace (`$1` in `sql`): the database is shared by every test.
+async fn count_4829(w: &World4829, sql: &'static str) -> i64 {
+    sqlx::query_scalar::<_, i64>(sql)
+        .bind(w.fixture.workspace)
+        .fetch_one(&w.su)
+        .await
+        .unwrap()
+}
+
+/// A picture that is tiny on the wire and slow to decode: 3000 x 3000 grey pixels of one
+/// value. It is inside every limit of the decoder (a side <= 4096, <= 16 MP) and inside the
+/// 1 MiB an agent may send, so only the order of the refusals keeps it from costing anything.
+fn heavy_png_4829() -> Vec<u8> {
+    use image::ImageEncoder;
+    let pixels = vec![127u8; 3000 * 3000];
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(&pixels, 3000, 3000, image::ExtendedColorType::L8)
+        .unwrap();
+    out
+}
+
+/// A person's own direct upload (`POST …/expressions/uploads`): the metadata part, then the file.
+async fn upload_4829(w: &World4829, jwt: &str, name: &str, file: &[u8]) -> u16 {
+    let boundary = "oort-4829-upload";
+    let metadata =
+        json!({"name": name, "displayName": name, "tags": [], "subjectMemberId": null}).to_string();
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes(),
+    );
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.png\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
+    );
+    body.extend_from_slice(file);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    w.client
+        .post(format!(
+            "{}/v1/workspaces/{}/expressions/uploads",
+            w.base, w.fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("upload responds")
+        .status()
+        .as_u16()
+}
+
+/// **The cheap refusals come before the fetch and the decode.** The pending ceiling of three is
+/// the only flood defence this door has; it defends only if what costs something happens after
+/// it. Every refusal below is the answer the proposal's own transaction gives (the same
+/// function), and every one is measured as a number: how many outside requests the server made.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    let link = |name: &str| {
+        candidate_4829(
+            name,
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
+        )
+    };
+    let heavy = heavy_png_4829();
+
+    // (1) A lease that is no longer ours: the job was taken over by a newer claim. The stale
+    // handle still decodes and still binds, and it is refused before a single request goes out.
+    mention_4829(&w).await;
+    let claimed = claim_handles_4829(&w).await;
+    assert_eq!(claimed.len(), 1);
+    let stale = claimed[0].clone();
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_agent)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let reclaimed = claim_handles_4829(&w).await;
+    assert_eq!(reclaimed.len(), 1);
+    let fresh = reclaimed[0].clone();
+    assert_ne!(
+        fresh, stale,
+        "a takeover must mint a new lease, or this proves nothing"
+    );
+    let (status, refused) = propose_with_4829(&w, &stale, json!([link("stale")])).await;
+    assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    assert_eq!(fetches_4829(&w), 0, "a stale lease fetches nothing");
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        0
+    );
+
+    // (2) The live lease proposes: one fetch, and the run is parked. A parked run refuses
+    // every further proposal on its handle, and it does so before any outside request or
+    // decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
+    // and leave a person's own upload (sent meanwhile) unhindered.
+    let (status, proposed) = propose_with_4829(&w, &fresh, json!([link("first")])).await;
+    assert_eq!(status, 200, "{proposed}");
+    assert_eq!(fetches_4829(&w), 1);
+    let approvals = count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await;
+    let drafts = count_4829(
+        &w,
+        "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+    )
+    .await;
+    let burst = (0..5).map(|n| {
+        propose_with_4829(
+            &w,
+            &fresh,
+            json!([
+                link(&format!("again_{n}")),
+                candidate_4829(
+                    &format!("heavy_{n}"),
+                    Value::Null,
+                    generated_4829(&heavy, "p")
+                )
+            ]),
+        )
+    });
+    let (answers, upload) = tokio::join!(futures::future::join_all(burst), async {
+        // Let the burst get going first: this is the person who arrives in the middle of it.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        upload_4829(&w, &w.requester_jwt, "my_own", &tiny_png_3787()).await
+    });
+    assert_eq!(
+        upload, 201,
+        "a person's own upload is not told 'busy' by an agent's refused repeats"
+    );
+    for (n, (status, answer)) in answers.iter().enumerate() {
+        assert_eq!(
+            (*status, error_code(answer)),
+            (409, -32005),
+            "repeat {n} of a parked run: {answer}"
+        );
+    }
+    assert_eq!(
+        fetches_4829(&w),
+        1,
+        "five refused repeats of a parked run made no outside request"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts + 1,
+        "only the person's own upload added a draft"
+    );
+
+    // (3) Three cards waiting is the most an agent may have: the fourth is refused before it
+    // fetches anything.
+    for name in ["second", "third"] {
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                name,
+                Value::Null,
+                generated_4829(&tiny_png_3787(), "p")
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{proposed}");
+    }
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM approval WHERE workspace_id=$1 AND status::text='pending' AND action_type='workspace_action'"
+        )
+        .await,
+        3
+    );
+    let before = fetches_4829(&w);
+    let (status, refused) = propose_4829(&w, json!([link("fourth")])).await;
+    assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    assert_eq!(fetches_4829(&w), before, "a full agent fetches nothing");
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals + 2,
+        "the refused fourth wrote no approval"
+    );
+}
+
+/// **One preparation per agent at a time.** Two runs of one agent propose at once with a slow
+/// link: one is prepared, the other is told to come back (409 / -32004) without a request of its
+/// own; when the first is done the agent prepares again at once.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
+    let w = world_4829().await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    w.mock
+        .delay_ms
+        .store(700, std::sync::atomic::Ordering::Relaxed);
+    mention_4829(&w).await;
+    mention_4829(&w).await;
+    let handles = claim_handles_4829(&w).await;
+    assert_eq!(handles.len(), 2, "two mentions, two jobs");
+    let link = |name: &str| {
+        candidate_4829(
+            name,
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
+        )
+    };
+    let (a, b) = tokio::join!(
+        propose_with_4829(&w, &handles[0], json!([link("slow_one")])),
+        propose_with_4829(&w, &handles[1], json!([link("slow_two")])),
+    );
+    let code = |answer: &Value| answer["error"]["code"].as_i64().unwrap_or(0);
+    let mut answers = vec![(a.0, code(&a.1)), (b.0, code(&b.1))];
+    answers.sort();
+    assert_eq!(
+        answers,
+        vec![(200, 0), (409, -32004)],
+        "one proposal is prepared, the other is told to come back: {a:?} {b:?}"
+    );
+    assert_eq!(
+        fetches_4829(&w),
+        1,
+        "the one that was told to come back made no outside request"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        1
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        1
+    );
+
+    // The place went back with the first preparation: the same agent prepares again at once.
+    w.mock
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "slow_three",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "the place is given back: {proposed}");
+}
+
+/// One raw HTTP/1.1 POST to the Agent Port: the request head (which declares `content_length`),
+/// then `sent` bytes of the body, then silence. The first line of the answer, if one comes within
+/// `patience`. Raw TCP on purpose: a client library would not stop in the middle of a body.
+async fn raw_post_4829(
+    base: &str,
+    bearer: Option<&str>,
+    declare_propose: bool,
+    content_length: usize,
+    sent: &[u8],
+    patience: std::time::Duration,
+) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = base.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect to the wire server");
+    let mut head = format!(
+        "POST {PATH} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: {MODERN_VERSION}\r\n"
+    );
+    if declare_propose {
+        head += "Mcp-Method: tools/call\r\nMcp-Name: oort_action_propose\r\n";
+    }
+    if let Some(bearer) = bearer {
+        head += &format!("Authorization: Bearer {bearer}\r\n");
+    }
+    head += &format!("Content-Length: {content_length}\r\nConnection: close\r\n\r\n");
+    let mut wire = head.into_bytes();
+    wire.extend_from_slice(sent);
+    // The server may answer (and close) before it has read all of this: that is the point.
+    let _ = stream.write_all(&wire).await;
+    let mut answer = vec![0u8; 512];
+    match tokio::time::timeout(patience, stream.read(&mut answer)).await {
+        Ok(Ok(read)) if read > 0 => Some(
+            String::from_utf8_lossy(&answer[..read])
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// A server with its own Agent Port limits and body deadline, for the tests that measure the wire.
+async fn start_wire_server_4829(
+    pool: PgPool,
+    per_token_limit: u32,
+    large_body_deadline: std::time::Duration,
+) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_large_body_deadline(large_body_deadline)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind wire server");
+    let address: SocketAddr = listener.local_addr().expect("wire server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    format!("http://{address}")
+}
+
+const SIX_MIB_4829: usize = 6 * 1024 * 1024;
+
+/// **The 6 MiB door authenticates before it reads, and only an agent that holds the propose scope
+/// is read that far.** A declared `oort_action_propose` whose credential is missing or wrong is
+/// answered `401` from the head alone (the body is never read: 1 KiB of 6 MiB is all that
+/// was sent, and nothing more will come); a live credential **without** the propose scope keeps
+/// the 64 KiB ceiling and is refused `413` at once; the propose-scoped agent is read from (it is
+/// still waiting for the rest of its body).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_door_reads_only_after_it_knows_who_asks_and_only_for_the_propose_scope() {
+    let w = world_4829().await;
+    let patience = std::time::Duration::from_secs(3);
+    let kib = vec![b'x'; 1024];
+    // (G1) refused from the head alone: no credential, a malformed one, a well-formed unknown one.
+    let unknown = raw_credential(w.fixture.workspace);
+    for (label, bearer) in [
+        ("no credential", None),
+        ("a malformed credential", Some("not-a-token")),
+        ("an unknown agent credential", Some(unknown.as_str())),
+    ] {
+        let answer = raw_post_4829(&w.base, bearer, true, SIX_MIB_4829, &kib, patience).await;
+        assert!(
+            answer.as_deref().is_some_and(|line| line.contains(" 401")),
+            "{label}: the body is not read before the credential is judged: {answer:?}"
+        );
+    }
+    // (G2) a live credential without the propose scope: the budget stays 64 KiB. Two bytes past
+    // it are enough to be refused, without waiting for the other 6 MiB.
+    let past_ceiling = vec![b'x'; momo_mcp::MAX_BODY_BYTES + 2];
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.connect_only_bearer),
+        true,
+        SIX_MIB_4829,
+        &past_ceiling,
+        patience,
+    )
+    .await;
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 413")),
+        "a credential without the propose scope is held to 64 KiB: {answer:?}"
+    );
+    // …and the propose-scoped agent is read from: the same bytes get no answer, because the
+    // server is waiting for the rest of a body it is allowed to read.
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.hosted_bearer),
+        true,
+        SIX_MIB_4829,
+        &past_ceiling,
+        std::time::Duration::from_millis(1200),
+    )
+    .await;
+    assert_eq!(
+        answer, None,
+        "the propose scope opens the 6 MiB budget, so the server is still reading"
+    );
+    // The same agent's request that does NOT declare itself `oort_action_propose` gets no
+    // budget at all: past 64 KiB it is refused at once, whatever its credential can do.
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.hosted_bearer),
+        false,
+        SIX_MIB_4829,
+        &past_ceiling,
+        patience,
+    )
+    .await;
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 413")),
+        "an undeclared body keeps the 64 KiB ceiling: {answer:?}"
+    );
+}
+
+/// **One call spends one rate-limit unit.** The credential is asked once, before the big body is
+/// read, and that answer is the one the request carries on: with 4 units a window, the first
+/// four declared proposals are answered and the fifth is `429`. (Asked twice, the second call
+/// would already be refused.) This is the only test that runs with the limit on.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_door_spends_one_rate_limit_unit_per_call() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base =
+        start_wire_server_4829(momo_app_pool().await, 4, std::time::Duration::from_secs(15)).await;
+    let client = reqwest::Client::new();
+    let mut statuses = Vec::new();
+    for _ in 0..5 {
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_action_propose",
+            json!({"handle": "not-a-lease", "actionId": "expression.create",
+                   "args": {"candidates": []}}),
+        )
+        .await;
+        statuses.push(status);
+    }
+    assert!(
+        statuses[..4].iter().all(|status| *status != 429),
+        "the first four calls fit the limit: {statuses:?}"
+    );
+    assert_eq!(
+        statuses[4], 429,
+        "the fifth is over it, and it is the fifth: {statuses:?}"
+    );
+    // The credential was used four times, not eight: one `used` audit row per call.
+    let used: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2 AND via_token_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(momo_auth::AUDIT_ACTION_USED)
+    .bind(fixture.hosted_token)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(used, 4, "one authentication per call");
+}
+
+/// **The 6 MiB body has a deadline.** An authenticated, propose-scoped agent that starts the big
+/// body and then goes quiet is answered `408` when the deadline passes (here 700 ms; 15 s in the
+/// server) instead of holding its connection and the part it sent as long as it likes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_has_a_deadline() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_wire_server_4829(
+        momo_app_pool().await,
+        0,
+        std::time::Duration::from_millis(700),
+    )
+    .await;
+    let started = std::time::Instant::now();
+    let answer = raw_post_4829(
+        &base,
+        Some(&fixture.hosted_bearer),
+        true,
+        SIX_MIB_4829,
+        &vec![b'x'; 1024],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    let took = started.elapsed();
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 408")),
+        "a body that stops coming is answered 408: {answer:?}"
+    );
+    assert!(
+        took >= std::time::Duration::from_millis(600) && took < std::time::Duration::from_secs(4),
+        "…when the deadline passes, not before and not much later: {took:?}"
+    );
+}
+
+fn animated_gif_4829(frames: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..frames {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(
+                        8,
+                        8,
+                        image::Rgba([((n * 7) % 200) as u8, 200, 50, 255]),
+                    ),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+fn mp4_4829() -> Vec<u8> {
+    let mut bytes = vec![0, 0, 0, 0x18];
+    bytes.extend_from_slice(b"ftypisom\0\0\x02\0isomiso2mp41");
+    bytes.extend_from_slice(&[0; 64]);
+    bytes
+}
+
+fn webm_4829() -> Vec<u8> {
+    let mut bytes = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f];
+    bytes.extend_from_slice(&[0; 64]);
+    bytes
+}
+
+/// **A GIF and a video are sources of an attachment** (ADR-0186 X8-1/X8-2): the media types the
+/// expression use of the attachment judgement accepts. A GIF goes through the decoder's
+/// full-frame check (ADR-0218 D3: 100 frames pass, 101 do not), a video becomes the
+/// `video_processing_unavailable` card (D4 is on hold), and the avatar use of the same judgement
+/// is exactly what it was: neither is a source of a person's avatar.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_takes_a_gif_and_a_video_attachment_as_sources() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let message =
+        seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "움직이는 그림").await;
+    let attach = |drive_id: &'static str, mime: &'static str, bytes: Vec<u8>| {
+        let w = &w;
+        async move {
+            w.drive.files.lock().unwrap().insert(drive_id.into(), bytes);
+            seed_attachment_4385(
+                &w.su,
+                ws,
+                w.fixture.channel,
+                w.requester,
+                Some(message),
+                drive_id,
+                mime,
+                "complete",
+            )
+            .await
+        }
+    };
+    let source = |id: Uuid| json!({"source": "attachment", "attachmentId": id.to_string()});
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::Relaxed)
+    };
+
+    // A GIF within the limits: accepted, and stored as a GIF with its frames.
+    let gif = attach("gif100", "image/gif", animated_gif_4829(100)).await;
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829("moving", Value::Null, source(gif))]),
+    )
+    .await;
+    assert_eq!(status, 200, "a GIF attachment is a source: {proposed}");
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    let draft = &card["action"]["expression"]["candidates"][0];
+    assert_eq!(draft["state"], "ready", "{draft}");
+    assert_eq!(draft["media"]["large"]["mime"], "image/gif", "{draft}");
+    assert_eq!(draft["media"]["large"]["frameCount"], 100, "{draft}");
+    assert_eq!(draft["origin"]["kind"], "attachment", "{draft}");
+
+    // One frame over the limit: found, fetched, and refused by the frame check — not by the
+    // lookup. (The read counter is what tells the two apart.)
+    let too_long = attach("gif101", "image/gif", animated_gif_4829(101)).await;
+    let (approvals, drafts) = (
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+        )
+        .await,
+    );
+    let before = reads();
+    let (status, refused) = propose_4829(
+        &w,
+        json!([candidate_4829("too_long", Value::Null, source(too_long))]),
+    )
+    .await;
+    assert_eq!(status, 400, "an animation over the limit: {refused}");
+    assert_eq!(
+        reads(),
+        before + 1,
+        "the file was found and fetched; the frame check refused it"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts,
+        "a refused animation leaves no draft"
+    );
+
+    // A video: the manual card, with the source kept as an attachment.
+    for (drive_id, mime, bytes) in [
+        ("video_mp4", "video/mp4", mp4_4829()),
+        ("video_webm", "video/webm", webm_4829()),
+    ] {
+        let video = attach(drive_id, mime, bytes).await;
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                &format!("clip_{}", &drive_id[6..]),
+                Value::Null,
+                source(video)
+            )]),
+        )
+        .await;
+        assert_eq!(
+            status, 200,
+            "{mime}: a video is a card, not an error: {proposed}"
+        );
+        let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+        let draft = &card["action"]["expression"]["candidates"][0];
+        assert_eq!(draft["state"], "manual_upload_required", "{mime}: {draft}");
+        assert_eq!(
+            draft["code"], "video_processing_unavailable",
+            "{mime}: {draft}"
+        );
+        assert_eq!(draft["origin"]["kind"], "attachment", "{mime}: {draft}");
+        assert!(draft["media"].is_null(), "{mime}: no picture was made");
+    }
+
+    // The avatar use is exactly what it was: a GIF is not a source of a person's avatar, and the
+    // refusal comes from the lookup (nothing was fetched).
+    let before = reads();
+    let (status, refused) = propose_member_avatar_4385(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        json!({"attachmentId": gif.to_string()}),
+    )
+    .await;
+    assert_eq!(status, 400, "an avatar is never an animation: {refused}");
+    assert_eq!(
+        reads(),
+        before,
+        "the avatar lookup did not even fetch the GIF"
+    );
+}
+
+/// **A link's fetch slot goes back as soon as the bytes are here**, before the wait for a decoder
+/// slot. The eight fetch slots are process-wide and a person's `/import` needs one; holding one
+/// through somebody else's decoding queue would let a slow picture starve them. The picture
+/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_decoder() {
+    let w = world_4829().await;
+    w.mock.replies.lock().unwrap().insert(
+        "https://cdn.example.test/heavy.png".into(),
+        Ok(heavy_png_4829()),
+    );
+    let slots = momo_expressions::intake::import_slots();
+    assert_eq!(
+        slots.available_permits(),
+        momo_expressions::intake::IMPORTS_IN_FLIGHT,
+        "no fetch is in flight when the test starts"
+    );
+    let ((status, proposed), (during_fetch_done, took_after_fetch)) = tokio::join!(
+        propose_4829(
+            &w,
+            json!([candidate_4829(
+                "heavy_link",
+                Value::Null,
+                json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
+            )])
+        ),
+        async {
+            // The fetch is made at once (the mock answers at once); what follows is the decode.
+            while fetches_4829(&w) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let fetched_at = std::time::Instant::now();
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            (slots.available_permits(), fetched_at.elapsed())
+        }
+    );
+    assert_eq!(status, 200, "{proposed}");
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    assert_eq!(
+        card["action"]["expression"]["candidates"][0]["state"], "ready",
+        "the picture was really decoded: {card}"
+    );
+    assert!(
+        took_after_fetch >= std::time::Duration::from_millis(250),
+        "{took_after_fetch:?}"
+    );
+    assert_eq!(
+        during_fetch_done,
+        momo_expressions::intake::IMPORTS_IN_FLIGHT,
+        "250 ms after the fetch, while the picture is still being decoded, the fetch slot is back"
+    );
 }

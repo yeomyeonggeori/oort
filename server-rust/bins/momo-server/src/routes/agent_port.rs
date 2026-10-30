@@ -31,6 +31,12 @@ pub(crate) const MAX_RELEVANT_HEADER_VALUES: usize = 16;
 /// from the same text the response carries (`momo_mcp::REFUSAL_REASONS` has a row for each).
 const MESSAGE_TRANSPORT_HEADERS: &str = "invalid Agent Port transport headers";
 const MESSAGE_BODY_TOO_LARGE: &str = "request body exceeds the limit";
+/// How long an authenticated caller has to deliver the **6 MiB** `expression.create` body
+/// (#4829 review round 1). A caller that dribbles it in a byte at a time would otherwise hold
+/// its connection and the part it has sent for as long as it likes, and the budget past 64 KiB
+/// is the only body this door reads for that long. The ordinary 64 KiB body keeps the rule it
+/// always had. [`AppState::large_body_deadline`] is this value; a test shortens it.
+pub(crate) const LARGE_BODY_DEADLINE: Duration = Duration::from_secs(15);
 
 /// One Agent Port POST. Every invocation independently authenticates and no
 /// request or response creates protocol-session authority.
@@ -156,7 +162,20 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             )),
         )
     } else {
-        match to_bytes(body, body_cap + 1).await {
+        // Only the big budget — granted above to an authenticated, propose-scoped agent — is read
+        // under a deadline. A body that is not here in time is answered `408` with nothing in it,
+        // like the other early refusals of this function (the closed refusal vocabulary and the
+        // call trace's `413 <-> body_too_large` rule are untouched).
+        let read = to_bytes(body, body_cap + 1);
+        let read = if body_cap > momo_mcp::MAX_BODY_BYTES {
+            match tokio::time::timeout(state.large_body_deadline, read).await {
+                Ok(read) => read,
+                Err(_) => return empty(StatusCode::REQUEST_TIMEOUT),
+            }
+        } else {
+            read.await
+        };
+        match read {
             Ok(bytes) => (bytes, None),
             Err(_) => (
                 Default::default(),
