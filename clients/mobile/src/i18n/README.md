@@ -42,15 +42,29 @@ ko/en 네이티브 기능을 확인한 뒤 Locale → PluralRules → RelativeTi
 - 설정 › 프로필 › 언어는 기존 ListRow/ChoiceRow/페이지 스택을 쓴다. 기기 언어가
   첫 행이고, 출시한 ko/en만 자칭 표기와 베타로 보인다. 공용 부분 지원 안내를 유지한다.
   선택은 다른 계정 트리를 다시 마운트하지 않는다. 큰 글자를 제한하는 행 높이·줄 수를
-  추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다.
+  추가하지 않았고 자칭 행은 자기 언어로 VoiceOver를 지정한다. 언어 행의 낭독 라벨은 화면에 보이는 베타 표시를
+포함한다(`한국어, 베타`·`English, 베타`, 영어 UI에서는 `…, Beta`).
 - 빈 저장값은 system 선택, 사전 로딩은 앱 진입 전 로더, 쓰는 중은 행 잠금/진행 표시,
-  저장 오류는 기존 언어를 유지한 인라인 재시도다. 두 사전은 Metro에 포함하므로
+  저장 오류는 기존 언어를 유지한 인라인 재시도다. 저장값을 읽지 못해도(`preference-read-failed`)
+  코어처럼 기기 언어(system)로 계속하고 코드만 보고한다(앱 전체를 안전 화면에 막지 않는다).
+  기기 언어를 읽지 못하면(`device-read-failed`) 시작할 언어가 없어 시작하지 않는다
+  (영어 `SAFE_MESSAGE`와 `mobile-locale-initialization-failed`). 두 사전은 Metro에 포함하므로
   오프라인 전환에 네트워크가 필요하지 않다. 키보드 입력은 없다. 뒤로/가장자리 밀기와
   VoiceOver escape·동작 줄이기는 기존 페이지 부품을 따른다.
 
 ## 출하 설정과 플랫폼 문구
 
-Metro는 워크스페이스 `node_modules`를 watch한다. Babel의 출하 static-block 변환은
+**폰이 출하하는 것은 폰이 선언한다(#4833 검수).** Xcode Cloud `ci_post_clone.sh`와
+`archive-release.sh`·`build-sim.sh`·`lane-phone.sh`는 `clients/mobile`만 `npm ci`하고 루트는 설치하지 않는다.
+그래서 `clients/mobile/package.json` `dependencies`는 코어의 런타임 의존(`@formatjs/intl`)을 코어와 **같은
+정확 핀**으로 적고, 전이 의존은 `clients/mobile/package-lock.json`이 고정한다. Metro는 `watchFolders`에
+코어 소스(`packages/momo-core/src`)만 더하고(루트 `node_modules`는 watch하지 않는다), `resolveRequest`가
+**코어 파일이 부른 bare 모듈**을 앱 루트에서 부른 것처럼 `clients/mobile/node_modules`에서만 푼다(계층 탐색
+끔: 폰이 선언하지 않은 import는 루트 설치가 있는 기기에서도 실패한다). jest는 같은 코어 의존 이름을
+`moduleNameMapper`로 `clients/mobile/node_modules`에 고정한다. 루트 설치가 있든 없든 번들·시험이 쓰는 사본이
+같고, 이전에 루트 `node_modules`를 watch하던 구성은 루트 없는 빌드 호스트에서 Metro가
+`Transformer.js ENOENT …/node_modules`로 시작도 못 했다. `__tests__/shippedCoreDependencies.test.ts`가
+세 가지(선언·잠금, Metro 해석, jest 해석)를 실제 값으로 잰다. Babel의 출하 static-block 변환은
 `intl-messageformat`과 static block이 있는 세 polyfill 패키지에만 적용한다.
 #4835의 `env.test` 설정은 유지했다. 런타임 조건 로드는 코드 분할을 뜻하지 않는다.
 Metro release에는 조건문이 참일 때 필요한 코드와 ko/en 데이터가 모두 패키지된다.
@@ -71,7 +85,10 @@ node clients/mobile/scripts/generate-intl-notices.mjs --check
 
 Intl 추가분 고지 묶음은 `legal/generated/MOBILE_INTL_NOTICES.txt`다. 코어 NOTICE와
 폰 polyfill 의존 closure의 전체 upstream 라이선스를 포함하며 폰 재배포 때 동봉한다.
-전체 React Native/CocoaPods 고지 묶음을 대체하지 않는다.
+전체 React Native/CocoaPods 고지 묶음을 대체하지 않는다. 폰이 `@formatjs/intl`을 직접 선언하므로 출하되는
+사본과 전이 closure(`fast-memoize`·`icu-messageformat-parser`·`icu-skeleton-parser`·`intl-messageformat`)는
+폰 lock이 정한다. 그 고지는 코어 NOTICE가 맡고, 생성기 `--check`가 코어 NOTICE가 **폰 lock의 정확한 버전**을
+싣는지 검사한다(다르면 실패).
 
 ## Hermes probe — 잠긴 엔진에서 실행한 결과
 
@@ -139,62 +156,79 @@ OS 차이를 출력 그대로 기록하되 악센트/NFC 동률은 ID로 안정�
 코어 README의 `measure-bundles.mjs mobile`과 같은 Metro release
 `dev=false,minify=true`·gzip level 9·Hermes `-O -emit-binary` 방식이다.
 `verify-intl-bundle.mjs`는 출하 설정을 그대로 쓰며, 방출된 모든 FormatJS 모듈의
-의존 대상이 실제 방출 집합에 있는지 검사해 null dependency를 거부한다. 생성 도구·TS
-컴파일러와 ko/en 이외 locale-data도 거부한다.
+의존 대상이 실제 방출 집합에 있는지 검사해 null dependency를 거부한다. 방출된 FormatJS 모듈이 모두
+`clients/mobile/node_modules` 아래인지(루트 설치 사본이 아닌지)도 검사한다. 생성 도구·TS
+컴파일러와 ko/en 이외 locale-data도 거부한다. git이 없는 소스 전용 사본에서도 돈다.
 
 ```sh
 node packages/momo-core/src/i18n/tooling/measure-bundles.mjs mobile
-node clients/mobile/scripts/verify-intl-bundle.mjs --baseline-ref c3edf8461f11dc67a12d80d8157d492cd9eb6cd9
+node clients/mobile/scripts/verify-intl-bundle.mjs --baseline-ref ea50be8c8e35ebe29758d572da88e3d6aa51d634
 node clients/mobile/scripts/verify-intl-bundle.mjs
 ```
 
 기준/도입 뒤는 같은 현재 설정·의존성으로 잰다. 기준에서만 App.tsx·
-SettingsPage.tsx·sheetParts.tsx의 source를 위 고정 HEAD에서 읽어 임시 transformer에 전달한다.
+SettingsPage.tsx·sheetParts.tsx의 source를 위 고정 ref(기능 이전의 track/uxui `ea50be8c8`)에서 읽어 임시 transformer에 전달한다.
 제품 파일은 고치지 않으며 resolver/Babel 옵션은 두 단계에서 동일하다. 도입 뒤는
 임시 transformer 없이 출하 entry 그대로다. 설치 가능한 앱 용량이나 실제 Hermes
 runtime 검증을 뜻하지 않는다.
 
 **최종 범위(Locale·PluralRules·RelativeTimeFormat 세 polyfill, NumberFormat polyfill 없음)**의
-실측(위 HEAD + 이 작업 diff, Node 24.14.0·Metro 0.84.4·Hermes compiler 250829098.0.16):
+실측(HEAD `82ebcc9a5` + 이 작업 diff, 기준 `ea50be8c8`, 폰이 FormatJS를 직접 선언한 뒤,
+Node 24.14.0·Metro 0.84.4·Hermes compiler 250829098.0.16):
 
-| bytes | 기준 | 도입 뒤 | 차이 |
+| bytes | 기준 `ea50be8c8` | 도입 뒤 | 차이 |
 |---|---:|---:|---:|
-| Metro iOS release JS | 3,856,835 | 4,291,936 | +435,101 |
-| gzip level 9 | 1,022,885 | 1,156,029 | +133,144 |
-| Hermes `-O -emit-binary` | 5,487,138 | 6,027,582 | +540,444 |
+| Metro iOS release JS | 3,878,072 | 4,314,854 | +436,782 |
+| gzip level 9 | 1,028,699 | 1,162,388 | +133,689 |
+| Hermes `-O -emit-binary` | 5,518,849 | 6,059,231 | +540,382 |
 
-같은 입력으로 도입 뒤를 두 번 재도 세 크기가 같았다(HBC는 바이트 배치만 실행마다 다를 수 있다).
-출하 그래프는 FormatJS 17모듈, PR/RTF 각각 en·ko 데이터 4파일, null 의존 0,
-tooling/TypeScript 포함 0이다. core README 명령도 추가 옵션 없이 통과했다.
-그 명령은 이미 도입된 제품에 retained probe를 더하는 비교라 +74 raw/+152 gzip/
-+800 HBC이며, 기능 도입 차이는 위 source 기준 표다.
+검수 값(+437,926 / +134,018 / +541,190)보다 1,144 / 329 / 808 작은 것은 이전 그래프가
+`@formatjs/fast-memoize`를 두 벌(루트 설치 사본 + 폰 사본) 실었기 때문이다: 지금은 폰 사본 한 벌만 싣는다
+(번들 안 그 모듈은 1,170B). 그래서 FormatJS가 17모듈에서 16모듈이 됐다.
+루트 `node_modules`가 없는 소스 전용 사본에서도 같은 명령이 같은 raw 4,314,854를 낸다
+(`react-native bundle` CLI와 verifier의 바이트 수가 같다).
+출하 그래프는 FormatJS 16모듈 전부 `clients/mobile/node_modules` 아래, PR/RTF 각각 en·ko 데이터 4파일,
+null 의존 0, tooling/TypeScript 포함 0이다. core README 명령도 추가 옵션 없이 통과했다.
+그 명령은 이미 도입된 제품에 retained probe를 더하는 비교라 +72 raw/+90 gzip이며(HBC는 배치만
+달라 변동), 기능 도입 차이는 위 source 기준 표다.
 
 ## 실행한 검증
 
-- 폰/코어 `typecheck`, 변경 폰 20파일·코어 6파일 ESLint, core `i18n:check`·`gate:purity`·
-  `gate:copy`, `git diff --check`: PASS.
-- `node scripts/check_npm_licenses.mjs`: 세 npm root 1,853패키지 PASS(의존 변경 없음).
-  권한/NOTICE 생성기 `--check`(폴리필 8패키지 + 코어), 세 iOS 리소스의 `plutil -lint`,
+- 폰/코어 `typecheck`(둘 다 exit 0), 변경·신규 폰 21파일 ESLint(exit 0), core `i18n:check`·`gate:purity`
+  (572파일, 0 escape)·`gate:copy`, 코어 `i18n` 시험(4파일 28 PASS), `git diff --check`: PASS.
+- 라이선스: `node scripts/check_npm_licenses.mjs`는 세 npm root 1,857패키지 PASS(폰 lock에 `@formatjs/intl`·
+  `icu-messageformat-parser`·`icu-skeleton-parser`·`intl-messageformat` 4항목이 늘었다). 권한/NOTICE 생성기
+  `--check`(폴리필 8패키지 + 코어, 폰 lock의 정확한 버전을 코어 NOTICE 5패키지가 싣는지 검사),
+  `npm ci --dry-run`(lock과 package.json 일치), 세 iOS 리소스의 `plutil -lint`,
   `scripts/tests/test_pr_ci_guardrails.sh`: PASS.
-- `npm --prefix clients/mobile test -- --watchman=false --runInBand __tests__/mobileLocale.test.tsx`:
-  **14 PASS**. MMKV 복원·로그아웃 보존, 앱 복귀, 실제 RN settingsUpdated 관찰, 지원 밖/오프라인,
-  원자적 전체 컨텍스트 전환과 마운트 보존, 저장 실패 재시도, 초기화 실패의 영어 안전 문구/진단,
-  조건 로드와 공식 ko/en 데이터, 그리고 Intl 세 모양: ① 엔진이 working `formatToParts`를 등록(Node),
-  ② Apple Hermes 모양(`formatToParts` 미등록 + `HermesInternal`)에서 실제 공식 polyfill이 초기화되어
-  `in 2 days`·`3 weeks ago`·`내일`·`12,345.67일 후`를 내고, ③ 등록은 됐지만 던지는 `formatToParts`는
-  호출된 채 `intl-polyfill-initialization-failed`로 닫힌다. 문구만 있는 반쪽 네이티브 RTF는 교체한다.
-- 기존 설정 머리 전수에 언어 장을 추가했다. 해당 전수 8 PASS. 코어 catalog 시험은
-  샘플 11키 상한 대신 비어 있지 않음·유일성·ko/en 집합 동등성을 계속 검사한다.
-- 끝에 `npm --prefix clients/mobile test -- --watchman=false` 전체 1회: **258 suite 통과(skip 1) ·
-  6,740 PASS · skip 5 · 실패 0**. retryRegistry의 중첩 Jest가 외부 Watchman 상태 폴더 권한에 걸리던
-  것은 중첩 명령에도 `--watchman=false`를 넣어 해결했다. 전체 실행 끝의 「worker failed to exit
-  gracefully」 경고는 `mobileLocale`을 뺀 전체에서도 나오는 기존 경고다. 코어는 이 마무리에서 다시
-  건드리지 않아 앞선 전체 1회(275파일·6,755 PASS, 기존 todo 1)를 재사용한다.
-- `node clients/mobile/scripts/sabotage-locale.mjs`: 변이마다 **원본으로 먼저 통과(control)** 를 확인하고
-  임시 사본에서 실제 assertion RED를 확인한다. ① 복수형 조건 제거(`Expected number of calls: 0`), ②
-  복귀 재평가 제거, ③ 지운 `HermesInternal` 차단을 되살림(Apple Hermes 모양 시험이 RED), ④ RTF 검사를
-  「문구가 있기만 하면 통과」로 약화(반쪽 RTF 시험이 RED), ⑤ 종료 후 재측정에서 RTF 제거(등록됐으나
-  동작 않는 `formatToParts` 시험이 RED). 원본은 변조하지 않았고 사본은 정리된다.
+- `npm --prefix clients/mobile test -- --watchman=false` 전체 1회: **260 suite 통과(skip 1) · 6,786 PASS ·
+  skip 5 · 실패 0**. retryRegistry는 track/uxui 판 그대로(중첩 Jest에 `--watchman=false` 없이)도 통과한다.
+- `__tests__/mobileLocale.test.tsx` **38 PASS**. MMKV 복원·로그아웃 보존, 앱 복귀, 실제 RN settingsUpdated 관찰,
+  지원 밖/오프라인, 원자적 전체 컨텍스트 전환과 마운트 보존(낭독 라벨에 베타 포함, 영어 UI는 `…, Beta`),
+  저장 실패 재시도, 초기화 실패의 영어 안전 문구/진단, 조건 로드와 공식 ko/en 데이터, Apple Hermes 모양
+  엔진의 공식 polyfill 초기화, 등록됐으나 던지는 `formatToParts` 닫힘. Intl 측정은 값으로 고정한다:
+  「등록됐지만 틀린」 Locale 2종(baseName·maximize)·PluralRules 2종(영어 1·한국어)·RelativeTimeFormat은
+  **교체**되고 로더가 틀린 것을 남기면 `intl-polyfill-initialization-failed`로 닫히며, `getCanonicalLocales`
+  없음/비정규화와 네이티브 DateTimeFormat·NumberFormat·Collator의 ko/en 목록 누락·빈 출력은 polyfill을
+  하나도 로드하지 않은 채 시작을 거부한다. 저장값 읽기 실패는 기기 언어로 계속하고(앱 안전 화면 없음),
+  기기 언어 읽기 실패는 시작을 막는다.
+- `__tests__/shippedCoreDependencies.test.ts` **7 PASS**: 폰 `dependencies`·lock이 코어 런타임 의존을 같은 정확 버전으로
+  싣는지·lock에 전이 closure가 있는지, 실제 `metro.config.js`를 실제 `metro-resolver`로 돌려 코어 파일의
+  `@formatjs/intl`이 `clients/mobile/node_modules`로 풀리는지·계층 탐색이 꺼져 루트 전용 패키지는 풀리지 않는지·
+  watchFolders가 코어 소스뿐인지, jest에서 코어가 폰과 같은 `@formatjs/intl` 모듈을 받는지.
+- 루트 `node_modules`가 없는 소스 전용 사본(소스만 꺼내고 `clients/mobile/node_modules`만 APFS 복제):
+  고치기 전 HEAD는 `react-native bundle`이 `Failed to construct transformer: ENOENT … /node_modules`
+  (`Transformer.js`)로 종료 1, jest는 `Cannot find module '@formatjs/intl' from …/service.ts`. 고친 뒤는 번들 exit 0
+  (4,314,854B), verifier 통과(null 0, FormatJS 16모듈 전부 폰 `node_modules`), jest 44 PASS(+1 skip)다.
+- `node clients/mobile/scripts/sabotage-locale.mjs`: 변이 20개마다 **원본으로 먼저 통과(control)** 를 확인하고 실제
+  assertion RED를 확인한다. ① 복수형 조건 제거 ② 복귀 재평가 제거 ③ 지운 `HermesInternal` 차단 부활 ④ RTF 검사를
+  「문구가 있기만 하면」으로 약화 ⑤ 재측정에서 RTF 제거 ⑥ 재측정에서 Locale 제거 ⑦ PluralRules 검사를
+  `supportedLocalesOf`만으로 축소 ⑧ 네이티브 DateTimeFormat/NumberFormat/Collator 검사 제거 ⑨ `bootFailed` 제거
+  ⑩ Locale 검사를 `typeof`만으로 축소 ⑪ `getCanonicalLocales` 검사 제거 ⑫ 재측정에서 PluralRules 제거
+  ⑬ 저장값 읽기 실패가 다시 시작을 막음 ⑭ 언어 행 라벨에서 베타 제거 ⑮ 폰이 `@formatjs/intl` 선언을 지움
+  ⑯ 정확 핀 대신 범위 ⑰ 루트 `node_modules`를 watch함 ⑱ 코어 bare import가 Metro 기본 탐색(루트가 이김)
+  ⑲ 계층 탐색 허용(루트로 폴백) ⑳ jest가 코어 의존을 위로 탐색(루트가 이김). 소스 변이는 임시 사본을 jest가
+  덮어쓰고, package.json·metro.config.js는 seam이 없어 제자리에서 고쳤다가 `finally`로 되돌린 뒤 해시를 비교한다.
   권한/NOTICE·빌드·스택 게이트의 미실행분을 runtime PASS로 세지 않는다.
 
 ## 스택 검증 메모

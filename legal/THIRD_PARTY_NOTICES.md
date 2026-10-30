@@ -197,6 +197,14 @@ Pinned phone polyfills are `@formatjs/intl-locale@5.3.12`,
 `@formatjs/intl-relativetimeformat@12.3.16` (MIT). Only ko/en per-language data is
 imported; Locale's built-in canonicalization/likely-subtag tables remain upstream.
 
+The phone also declares the core's one runtime dependency, `@formatjs/intl@6.1.4`
+(MIT), at the same exact version, so the copy that ships and its transitive closure
+(`@formatjs/fast-memoize`, `@formatjs/icu-messageformat-parser`,
+`@formatjs/icu-skeleton-parser`, `intl-messageformat` under BSD-3-Clause) come from
+`clients/mobile/package-lock.json`, never from a repo-root install. Their attribution
+stays `packages/momo-core/NOTICE`; the generator above checks it against those locked
+versions.
+
 Direct phone dependencies or copied assets that an ADR or design issue introduced. The
 full transitive graph is still only license-gated, not bundled.
 

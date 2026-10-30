@@ -1,13 +1,16 @@
 /* eslint-env node, es2022 */
 // Shipping Metro configuration, no transformer/resolver replacements.
-// Confirms the emitted dependency closure instead of accepting a smaller null graph.
+// Confirms the emitted dependency closure instead of accepting a smaller null graph, and that every
+// FormatJS module comes from clients/mobile/node_modules (what the phone declares), never from a
+// repo-root install: the build hosts `npm ci` only this project (#4833 review). Runs on a source-only
+// copy too (git archive of clients/mobile + packages/momo-core, no root node_modules, no .git).
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {mkdtempSync, statSync, writeFileSync} from 'node:fs';
 import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
-import {dirname, join, resolve} from 'node:path';
+import {dirname, join, resolve, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {gzipSync} from 'node:zlib';
 
@@ -52,8 +55,10 @@ const result = await metro.runBuild(metro.mergeConfig(config, {
 for (const pkg of baseline ? [] : ['@formatjs/intl', 'intl-messageformat', '@formatjs/intl-locale', '@formatjs/intl-pluralrules', '@formatjs/intl-relativetimeformat']) {
   assert([...emitted.keys()].some(path => path.includes(`/node_modules/${pkg}/`)), `Missing serialized package: ${pkg}`);
 }
+const projectModules = join(mobile, 'node_modules') + sep;
 for (const [path, module] of emitted) {
   if (!relevant(path)) continue;
+  assert(path.startsWith(projectModules), `FormatJS module outside clients/mobile/node_modules: ${path}`);
   const code = module.output.find(item => item.type.startsWith('js/'))?.data.code;
   assert(code && !/^\s*(?:null|undefined)\s*;?\s*$/.test(code), `Null FormatJS module: ${path}`);
   for (const dependency of module.dependencies.values()) {
@@ -71,10 +76,14 @@ const compiler = join(mobile, 'node_modules/hermes-compiler/hermesc/osx-bin/herm
 const version = execFileSync(compiler, ['-version'], {encoding: 'utf8'});
 assert(version.includes('250829098.0.16'), 'Hermes compiler version drift');
 execFileSync(compiler, ['-O', '-emit-binary', '-out', hbc, bundle]);
+const head = (() => {
+  try { return execFileSync('git', ['rev-parse', 'HEAD'], {cwd: mobile, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore']}).trim(); }
+  catch { return 'no git checkout (source-only copy)'; }
+})();
 const report = {
-  head: execFileSync('git', ['rev-parse', 'HEAD'], {cwd: mobile, encoding: 'utf8'}).trim(),
+  head,
   ...(baseline ? {baselineRef, baselineSources: ['App.tsx', 'src/features/profile/SettingsPage.tsx', 'src/design/sheetParts.tsx']} : {}),
-  entry, output, shippingConfig: true, nullFormatjsDependencies: 0,
+  entry, output, shippingConfig: true, nullFormatjsDependencies: 0, formatjsOutsideProjectNodeModules: 0,
   raw: Buffer.byteLength(result.code), gzip: gzipSync(result.code, {level: 9}).length, hermes: statSync(hbc).size,
   formatjsModules: [...emitted.keys()].filter(relevant).map(path => path.replace(resolve(mobile, '../..') + '/', '')),
   localeData: data.map(path => path.slice(path.lastIndexOf('@formatjs/'))),

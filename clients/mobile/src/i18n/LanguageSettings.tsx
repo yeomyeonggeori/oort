@@ -53,6 +53,7 @@ export function LanguageSettingsPage({onBack}: {onBack: () => void}): React.JSX.
   };
   const goBack = closeLayer ?? onBack;
   const label = locale.formatMessage('settings.profile.languageLabel');
+  const beta = locale.formatMessage('settings.profile.languageBeta');
   return (
     <View style={styles.root} onAccessibilityEscape={goBack} testID="settings-language-page">
       <Screen>
@@ -78,8 +79,10 @@ export function LanguageSettingsPage({onBack}: {onBack: () => void}): React.JSX.
                   <ChoiceRow
                     key={id}
                     title={localeAutonyms[id]}
+                    // The spoken label carries the on-screen beta tag too, not only the autonym.
+                    accessibilityLabel={`${localeAutonyms[id]}, ${beta}`}
                     accessibilityLanguage={id}
-                    detail={locale.formatMessage('settings.profile.languageBeta')}
+                    detail={beta}
                     selected={preference === id}
                     disabled={pending}
                     onPress={() => { void choose(id); }}

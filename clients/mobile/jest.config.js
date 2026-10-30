@@ -7,6 +7,26 @@ const path = require('path');
  * bundles one thing and the tests check another.
  */
 const CORE_SRC = path.resolve(__dirname, '../../packages/momo-core/src');
+const PROJECT_NODE_MODULES = path.resolve(__dirname, 'node_modules');
+
+/**
+ * What the core imports at runtime (ADR-0213: FormatJS). What the phone ships, the phone
+ * declares (#4833 review): `metro.config.js` takes these from `clients/mobile/node_modules`
+ * because the build hosts `npm ci` only this project, and the tests must use the same copy
+ * or they check one the bundle never contains. Jest's default walks up from the core file
+ * and finds a repo-root install first, so each name is pinned to this project's copy.
+ * `__tests__/shippedCoreDependencies.test.ts` measures that the core really gets it.
+ */
+const CORE_DEPENDENCIES = Object.keys(
+  require('../../packages/momo-core/package.json').dependencies ?? {},
+);
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const CORE_DEPENDENCY_MAPPINGS = Object.fromEntries(
+  CORE_DEPENDENCIES.flatMap(name => [
+    [`^${escapeRegExp(name)}$`, path.join(PROJECT_NODE_MODULES, name)],
+    [`^${escapeRegExp(name)}/(.*)$`, `${path.join(PROJECT_NODE_MODULES, name)}/$1`],
+  ]),
+);
 
 /**
  * Worker cap (#3796). Jest's default is `cores - 1`; on an 18-core machine that is
@@ -54,12 +74,13 @@ module.exports = {
   moduleNameMapper: {
     '^@momo/core/(.*)$': `${CORE_SRC}/$1`,
     // Core source is transpiled while living outside this project, so babel's
-    // runtime helpers have to be pinned to this project's copy. The core
-    // declares ZERO runtime dependencies by design and its own node_modules
-    // holds only typescript and vitest — there is no `@babel/runtime` over
-    // there to find, and there must not be. Same reason `metro.config.js`
-    // sets `extraNodeModules`.
+    // runtime helpers have to be pinned to this project's copy. The core's own
+    // node_modules holds only its devDependencies (typescript, vitest, eslint…)
+    // — there is no `@babel/runtime` over there to find, and there must not be.
+    // Same reason `metro.config.js` sets `extraNodeModules`.
     '^@babel/runtime/(.*)$': `${path.resolve(__dirname, 'node_modules/@babel/runtime')}/$1`,
+    // The core's runtime dependencies come from this project's install too (see above).
+    ...CORE_DEPENDENCY_MAPPINGS,
   },
   // Every one of these ships ESM, and node_modules is not transformed by
   // default. `react-native/Libraries/Blob/URL` is in the default allowance and

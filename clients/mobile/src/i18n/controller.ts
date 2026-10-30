@@ -47,7 +47,10 @@ export async function createMobileLocaleController(options: {
     let bootFailed = false;
     const preferences = await createLocalePreferences(options.port, {onDiagnostic: entry => {
       diagnostic(entry.code);
-      if (entry.code === 'preference-read-failed' || entry.code === 'device-read-failed') bootFailed = true;
+      // An unreadable stored choice continues as `system` (the device language), exactly as the core does,
+      // and is only reported: it must not shut the whole app behind the English safe screen. With no device
+      // language there is nothing to start from, so that alone stops boot.
+      if (entry.code === 'device-read-failed') bootFailed = true;
     }});
     if (bootFailed) throw new Error('mobile-locale-initialization-failed');
     const resolve = (value: LocalePreferenceSnapshot): MobileLocaleSnapshot => {
