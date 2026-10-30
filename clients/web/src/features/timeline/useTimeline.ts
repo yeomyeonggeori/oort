@@ -1,3 +1,4 @@
+import { useExpressions } from "@/features/expressions/context";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   pruneRecoveryMarkers,
@@ -472,6 +473,7 @@ export function useTimeline(
   // 개인 에이전트를 부른 전송의 계획. 코어 `PendingMessage`는 폰과 나눠 쓰므로 건드리지
   // 않고 이 훅 안에 clientMsgId로 둔다. 메시지가 확정되면(= 호출까지 끝나면) 지운다.
   const callSpecsRef = useRef(new Map<string, PersonalCallSpec>());
+  const { store: expressionStore } = useExpressions();
 
   const post = useCallback(
     async (row: PendingMessage) => {
@@ -516,6 +518,7 @@ export function useTimeline(
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
         // realtime frame gets, and whichever arrives second dedupes by seq.
+        expressionStore?.recordSuccess(row.body, confirmed.id);
         if (channelRef.current === row.channelId) applyBatch([confirmed]);
         updatePending((list) => removePending(list, row.clientMsgId));
         if (spec && callResult) {
@@ -530,7 +533,7 @@ export function useTimeline(
         updatePending((list) => failPending(list, row.clientMsgId));
       }
     },
-    [workspaceId, applyBatch, updatePending]
+    [workspaceId, applyBatch, updatePending, expressionStore]
   );
 
   const send = useCallback(
@@ -932,6 +935,7 @@ export function useTimeline(
       applyReaction(change);
       try {
         await setReaction(workspaceId, message.id, emoji, action);
+        if (action === "added") expressionStore?.recordSuccess(emoji, crypto.randomUUID());
       } catch (error) {
         applyReaction({
           ...change,
@@ -940,7 +944,7 @@ export function useTimeline(
         throw error;
       }
     },
-    [workspaceId, authorMemberId, applyReaction]
+    [workspaceId, authorMemberId, applyReaction, expressionStore]
   );
 
   /**

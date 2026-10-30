@@ -1103,6 +1103,7 @@ export function MessageRow({
             <AgentCard
               viewerMemberId={actions?.myMemberId}
               card={card}
+              expressionProps={message.props}
               directory={directory}
               {...(onOpenWorkSession !== undefined
                 ? { onOpenWorkSession }

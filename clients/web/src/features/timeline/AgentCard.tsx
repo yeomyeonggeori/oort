@@ -1,3 +1,5 @@
+import { ExpressionApprovalCard } from "@/features/expressions/ExpressionApprovalCard";
+import { expressionApprovalPayload, expressionResultPayload } from "@/features/expressions/cards";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { seedComposerText } from "@/features/chat/draftStore";
@@ -1396,11 +1398,13 @@ export function CardFrame({
 
 export function AgentCard({
   card,
+  expressionProps,
   directory,
   viewerMemberId,
   onOpenWorkSession,
 }: {
   card: AgentCardModel;
+  expressionProps?: unknown;
   directory: Directory;
   viewerMemberId?: string;
   /**
@@ -1410,6 +1414,7 @@ export function AgentCard({
   onOpenWorkSession?: OpenWorkSession;
 }) {
   if (card.kind === "approval") {
+    if (card.action?.id === "expression.create") return <ExpressionApprovalCard card={card} payload={expressionApprovalPayload(expressionProps)} result={expressionResultPayload(expressionProps)} />;
     return <ApprovalBody card={card} directory={directory} viewerMemberId={viewerMemberId} />;
   }
   if (card.kind === "login_handoff") {

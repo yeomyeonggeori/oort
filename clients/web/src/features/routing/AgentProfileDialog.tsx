@@ -1,3 +1,4 @@
+import { AgentUsageLine } from "@/features/settings/AgentUsage";
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/design/ui/button";
@@ -325,6 +326,7 @@ function AgentProfilePanel({
         footer={footer}
         blockClose={false}
       >
+        <AgentUsageLine agentId={agentMemberId} />
         <ProfileSkeleton />
       </Frame>
     );
@@ -338,6 +340,7 @@ function AgentProfilePanel({
         footer={footer}
         blockClose={false}
       >
+        <AgentUsageLine agentId={agentMemberId} />
         <InlineBanner
           message="에이전트 프로필을 불러오지 못했습니다."
           actionLabel="다시 시도"
@@ -377,6 +380,7 @@ function AgentProfilePanel({
       onKeyDown={onKeyDown}
       blockClose={handle.saving}
     >
+      <AgentUsageLine agentId={agentMemberId} />
       {handle.missing && (
         <InlineBanner
           tone="neutral"

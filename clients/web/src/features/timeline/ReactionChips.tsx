@@ -1,3 +1,4 @@
+import { ExpressionText } from "@/features/expressions/ExpressionText";
 import { useMemo } from "react";
 import { Smile } from "lucide-react";
 import { cn } from "@/design/lib/cn";
@@ -125,7 +126,7 @@ function ReactionChipButton({
           : "border-line bg-surface-raised text-ink-muted hover:bg-surface-hover"
       )}
     >
-      <span aria-hidden="true">{chip.emoji}</span>
+      <span aria-hidden="true"><ExpressionText text={chip.emoji} reaction /></span>
       <span aria-hidden="true" data-numeric>
         {chip.count}
       </span>
