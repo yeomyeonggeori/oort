@@ -67,7 +67,7 @@ module.exports = {
   // the polyfilled global — the measurement spike #837 gate 2 made on a device,
   // reproduced here so a regression is caught without one.
   transformIgnorePatterns: [
-    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|react-native-url-polyfill|react-native-keychain|react-native-mmkv|react-native-nitro-modules|react-native-safe-area-context|centrifuge|@tanstack)/)',
+    'node_modules/(?!((jest-)?react-native|@react-native(-community)?|react-native-url-polyfill|react-native-keychain|react-native-mmkv|react-native-nitro-modules|react-native-safe-area-context|centrifuge|@tanstack|@formatjs|intl-messageformat)/)',
   ],
   setupFiles: ['<rootDir>/jest.setup.js'],
   // Runs after the test framework is installed, because it needs `beforeAll`.

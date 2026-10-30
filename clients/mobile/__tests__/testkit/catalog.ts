@@ -1,19 +1,53 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import {messageKeys} from '@momo/core/i18n';
 
 /**
  * 문구 카탈로그 검사의 재료 — 「키 누락」과 「빈 문구」.
  *
- * 문장 사전(#4240)이 들어오면 두 가지를 사전 한 곳에서 잰다: 언어마다 같은 키를 갖는가(`missingKeys`),
- * 빈 문장이 없는가(`blankCopy`). 사전이 없는 지금은 소스의 `copy.ts` 류 모듈이 문구의 집이라서,
- * 거기서 내보낸 값을 같은 모양으로 잰다(`copyModules` 가 어디서 모으는지). 사전이 생기면 바뀌는 것은
- * 그 입력뿐이다.
- *
- * 키 누락이 지금은 컴파일러의 몫이기도 하다(`Record<Union, string>` 은 빠진 키가 있으면 tsc 가
- * 막는다). 이 함수는 키가 **런타임에 정해지는** 사전(언어별 파일)을 위한 것이다.
+ * 새 사전의 원문 JSON과 이관 전 `copy.ts` 모듈을 함께 검사한다(P1까지).
+ * 사전 원문은 fallback 서비스로 읽지 않는다. 파일 누락·빈 사전이 영어 fallback에 가려지면 안 된다.
  */
 
 export {blankCopy, copyStringCount, missingKeys} from '@momo/core/testkit/catalog';
+
+const CATALOGS = path.join(path.dirname(require.resolve('@momo/core/i18n')), 'catalogs');
+
+/** Translation review input, separate from role/key-based screen behavior tests. */
+export function readMessageCatalogs(
+  directory = CATALOGS,
+  required: readonly string[] = messageKeys,
+): Record<string, Record<string, string>> {
+  if (required.length === 0) throw new Error('Empty message key list');
+  const catalogs: Record<string, Record<string, string>> = {};
+  for (const locale of ['ko-KR', 'en-US']) {
+    const folder = path.join(directory, locale);
+    const files = fs.readdirSync(folder).filter(file => file.endsWith('.json')).sort();
+    if (files.length === 0) throw new Error(`Empty message catalog: ${locale}`);
+    const messages: Record<string, string> = Object.create(null);
+    for (const file of files) {
+      const source: unknown = JSON.parse(fs.readFileSync(path.join(folder, file), 'utf8'));
+      if (source === null || typeof source !== 'object' || Array.isArray(source) ||
+          Object.keys(source).length === 0) {
+        throw new Error(`Empty or invalid message catalog: ${locale}/${file}`);
+      }
+      for (const [key, value] of Object.entries(source)) {
+        if (typeof value !== 'string' || value.trim() === '') {
+          throw new Error(`Empty or invalid message: ${locale}/${key}`);
+        }
+        if (Object.hasOwn(messages, key)) throw new Error(`Duplicate message: ${locale}/${key}`);
+        messages[key] = value;
+      }
+    }
+    const missing = required.filter(key => !Object.hasOwn(messages, key));
+    const extra = Object.keys(messages).filter(key => !required.includes(key));
+    if (missing.length || extra.length) {
+      throw new Error(`Message keys differ: ${locale}; missing=${missing}; extra=${extra}`);
+    }
+    catalogs[locale] = messages;
+  }
+  return catalogs;
+}
 
 /**
  * `srcDir` 아래에서 이름에 `copy` 가 든 `.ts`·`.tsx` 모듈 경로(디렉터리 이름만 훑는다 — 파일 내용은
