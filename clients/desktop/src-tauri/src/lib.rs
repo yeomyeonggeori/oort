@@ -56,6 +56,8 @@ mod profile_signout;
 #[cfg(desktop)]
 mod harness_status;
 mod keychain;
+#[cfg(desktop)]
+mod locale;
 mod notification;
 // The shell's own refresh rotation with the refresh-key proof (#3106,
 // ADR-0146 D-7 증보 #3079): the webview asks for a rotation and gets the
@@ -181,6 +183,9 @@ pub fn run() {
             }
         })
         .invoke_handler(tauri::generate_handler![
+            locale::locale_preference_read,
+            locale::locale_preference_write,
+            locale::locale_menu_set,
             deeplink::deep_link_take_pending,
             discovery::discovery_start,
             discovery::discovery_stop,
