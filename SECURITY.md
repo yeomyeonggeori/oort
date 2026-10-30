@@ -225,8 +225,8 @@ The same default also selects Codex subscription image generation
 inline `data:` picture the model passes as a source, go to OpenAI's image
 processing. Addresses are not accepted: an oort-owned Hermes plugin refuses every
 `image_url` / `reference_image_urls` value that is not empty or a small inline
-picture before the tool runs, so Hermes never downloads an address the model
-chose and never reads a path it wrote. The lock gate requires that plugin (pinned
+picture before the tool runs, so through the image tool's source arguments Hermes
+never downloads an address the model chose and never reads a path it wrote. The lock gate requires that plugin (pinned
 bytes, enabled, and exercised with refused and accepted examples at every start),
 refuses the settings and environment variables that turn Hermes' private-address
 filter or the plugin off, and refuses other image providers, code execution and
