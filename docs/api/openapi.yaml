@@ -199,6 +199,238 @@ tags:
       (ADR-0181).
 
 paths:
+  # ADR-0218: direct expression storage. Import/actions are #4829.
+  /v1/workspaces/{ws}/expressions:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    get:
+      operationId: listExpressions
+      security: [{bearerAuth: []}]
+      parameters:
+      - in: query
+        name: since
+        schema:
+          type: string
+          pattern: ^(0|[1-9][0-9]*)$
+      responses:
+        '200':
+          description: Full or delta
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionList'
+    post:
+      operationId: activateExpression
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionChoice'
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionMutation'
+  /v1/workspaces/{ws}/expressions/uploads:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    post:
+      operationId: uploadExpression
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - metadata
+              - file
+              properties:
+                metadata:
+                  $ref: '#/components/schemas/ExpressionMetadata'
+                file:
+                  type: string
+                  format: binary
+            encoding:
+              metadata:
+                contentType: application/json
+      responses:
+        '201':
+          description: Ready draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+        '200':
+          description: Manual upload required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+  /v1/workspaces/{ws}/expressions/from-attachment:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    post:
+      operationId: createExpressionFromAttachment
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionAttachmentRequest'
+      responses:
+        '201':
+          description: Ready draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+        '200':
+          description: Video unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+  /v1/workspaces/{ws}/expression-drafts/{draftId}:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    - $ref: '#/components/parameters/ExpressiondraftId'
+    get:
+      operationId: getExpressionDraft
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Current draft
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+  /v1/workspaces/{ws}/expression-drafts/{draftId}/file:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    - $ref: '#/components/parameters/ExpressiondraftId'
+    put:
+      operationId: replaceExpressionDraftFile
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - file
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '200':
+          description: New revision
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionDraft'
+  /v1/workspaces/{ws}/expression-drafts/{draftId}/image:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    - $ref: '#/components/parameters/ExpressiondraftId'
+    - $ref: '#/components/parameters/Expressionsize'
+    - $ref: '#/components/parameters/Expressionv'
+    get:
+      operationId: getExpressionDraftImage
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Pinned authenticated draft bytes
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+  /v1/workspaces/{ws}/expressions/{id}/image:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    - $ref: '#/components/parameters/Expressionid'
+    - $ref: '#/components/parameters/Expressionsize'
+    - $ref: '#/components/parameters/Expressionv'
+    get:
+      operationId: getExpressionImage
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Active authenticated bytes
+          content:
+            image/png:
+              schema:
+                type: string
+                format: binary
+            image/gif:
+              schema:
+                type: string
+                format: binary
+  /v1/workspaces/{ws}/expressions/{id}:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    - $ref: '#/components/parameters/Expressionid'
+    patch:
+      operationId: updateExpressionMetadata
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionPatch'
+      responses:
+        '200':
+          description: Metadata updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionMutation'
+    delete:
+      operationId: deleteExpression
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Deleted tombstone
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionMutation'
+  /v1/workspaces/{ws}/expressions/{id}/report:
+    parameters:
+    - $ref: '#/components/parameters/Expressionws'
+    - $ref: '#/components/parameters/Expressionid'
+    post:
+      operationId: reportExpression
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExpressionReportRequest'
+      responses:
+        '200':
+          description: Immediately hidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExpressionMutation'
   /v1/auth/login:
     post:
       tags: [auth]
@@ -13975,6 +14207,44 @@ components:
         No approval route accepts this scheme (ADR-0188 D3).
 
   parameters:
+    Expressionws:
+      in: path
+      name: ws
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Expressionid:
+      in: path
+      name: id
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ExpressiondraftId:
+      in: path
+      name: draftId
+      required: true
+      schema:
+        type: string
+        format: uuid
+    Expressionsize:
+      in: query
+      name: size
+      required: true
+      schema:
+        type: string
+        enum:
+        - small
+        - large
+        - thumb
+    Expressionv:
+      in: query
+      name: v
+      required: true
+      schema:
+        type: string
+        pattern: ^[a-f0-9]{64}$
     WorkspaceId:
       name: workspaceId
       in: path
@@ -14363,6 +14633,843 @@ components:
             $ref: "#/components/schemas/AgentPortJSONRPCErrorResponse"
 
   schemas:
+    ExpressionMetadata:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+    ExpressionOrigin:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - sourceUrl
+        - prompt
+        properties:
+          kind:
+            enum:
+            - url
+          sourceUrl:
+            type: string
+            minLength: 8
+            maxLength: 2048
+            pattern: ^https://(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::[0-9]{1,5})?(?:/[^\s?#]*)?$
+          prompt:
+            nullable: true
+            enum:
+            - null
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - sourceUrl
+        - prompt
+        properties:
+          kind:
+            enum:
+            - upload
+            - attachment
+          sourceUrl:
+            oneOf:
+            - type: string
+              minLength: 8
+              maxLength: 2048
+              pattern: ^https://(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::[0-9]{1,5})?(?:/[^\s?#]*)?$
+            - nullable: true
+              enum:
+              - null
+          prompt:
+            nullable: true
+            enum:
+            - null
+      - type: object
+        additionalProperties: false
+        required:
+        - kind
+        - sourceUrl
+        - prompt
+        properties:
+          kind:
+            enum:
+            - generated
+          sourceUrl:
+            oneOf:
+            - type: string
+              minLength: 8
+              maxLength: 2048
+              pattern: ^https://(?:[a-z0-9.-]+|\[[0-9a-f:]+\])(?::[0-9]{1,5})?(?:/[^\s?#]*)?$
+            - nullable: true
+              enum:
+              - null
+          prompt:
+            type: string
+            minLength: 1
+            maxLength: 2000
+    ExpressionSmallImage:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - mime
+        - sha256
+        - bytes
+        - width
+        - height
+        - frameCount
+        - durationMs
+        properties:
+          mime:
+            enum:
+            - image/png
+          sha256:
+            type: string
+            minLength: 64
+            maxLength: 64
+            pattern: ^[a-f0-9]{64}$
+          bytes:
+            type: integer
+            minimum: 1
+            maximum: 262144
+          width:
+            type: integer
+            minimum: 1
+            maximum: 128
+          height:
+            type: integer
+            minimum: 1
+            maximum: 128
+          frameCount:
+            enum:
+            - 1
+          durationMs:
+            enum:
+            - 0
+      - type: object
+        additionalProperties: false
+        required:
+        - mime
+        - sha256
+        - bytes
+        - width
+        - height
+        - frameCount
+        - durationMs
+        properties:
+          mime:
+            enum:
+            - image/gif
+          sha256:
+            type: string
+            minLength: 64
+            maxLength: 64
+            pattern: ^[a-f0-9]{64}$
+          bytes:
+            type: integer
+            minimum: 1
+            maximum: 262144
+          width:
+            type: integer
+            minimum: 1
+            maximum: 128
+          height:
+            type: integer
+            minimum: 1
+            maximum: 128
+          frameCount:
+            type: integer
+            minimum: 2
+            maximum: 100
+          durationMs:
+            type: integer
+            minimum: 20
+            maximum: 10000
+    ExpressionLargeImage:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - mime
+        - sha256
+        - bytes
+        - width
+        - height
+        - frameCount
+        - durationMs
+        properties:
+          mime:
+            enum:
+            - image/png
+          sha256:
+            type: string
+            minLength: 64
+            maxLength: 64
+            pattern: ^[a-f0-9]{64}$
+          bytes:
+            type: integer
+            minimum: 1
+            maximum: 1048576
+          width:
+            type: integer
+            minimum: 1
+            maximum: 512
+          height:
+            type: integer
+            minimum: 1
+            maximum: 512
+          frameCount:
+            enum:
+            - 1
+          durationMs:
+            enum:
+            - 0
+      - type: object
+        additionalProperties: false
+        required:
+        - mime
+        - sha256
+        - bytes
+        - width
+        - height
+        - frameCount
+        - durationMs
+        properties:
+          mime:
+            enum:
+            - image/gif
+          sha256:
+            type: string
+            minLength: 64
+            maxLength: 64
+            pattern: ^[a-f0-9]{64}$
+          bytes:
+            type: integer
+            minimum: 1
+            maximum: 1048576
+          width:
+            type: integer
+            minimum: 1
+            maximum: 512
+          height:
+            type: integer
+            minimum: 1
+            maximum: 512
+          frameCount:
+            type: integer
+            minimum: 2
+            maximum: 100
+          durationMs:
+            type: integer
+            minimum: 20
+            maximum: 10000
+    ExpressionThumbImage:
+      type: object
+      additionalProperties: false
+      required:
+      - mime
+      - sha256
+      - bytes
+      - width
+      - height
+      - frameCount
+      - durationMs
+      properties:
+        mime:
+          enum:
+          - image/png
+        sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: ^[a-f0-9]{64}$
+        bytes:
+          type: integer
+          minimum: 1
+          maximum: 262144
+        width:
+          type: integer
+          minimum: 1
+          maximum: 128
+        height:
+          type: integer
+          minimum: 1
+          maximum: 128
+        frameCount:
+          enum:
+          - 1
+        durationMs:
+          enum:
+          - 0
+    ExpressionMedia:
+      type: object
+      additionalProperties: false
+      required:
+      - small
+      - large
+      - thumb
+      properties:
+        small:
+          $ref: '#/components/schemas/ExpressionSmallImage'
+        large:
+          $ref: '#/components/schemas/ExpressionLargeImage'
+        thumb:
+          $ref: '#/components/schemas/ExpressionThumbImage'
+    ExpressionExpression:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - id
+        - workspaceId
+        - name
+        - displayName
+        - tags
+        - subjectMemberId
+        - version
+        - origin
+        - createdBy
+        - createdAtMs
+        - status
+        - media
+        properties:
+          id:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          workspaceId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          name:
+            type: string
+            minLength: 2
+            maxLength: 30
+            pattern: ^[a-z0-9_-]{2,30}$
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 40
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          tags:
+            type: array
+            minItems: 0
+            maxItems: 8
+            items:
+              type: string
+              minLength: 1
+              maxLength: 16
+              pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+            uniqueItems: true
+          subjectMemberId:
+            oneOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            - nullable: true
+              enum:
+              - null
+          version:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+          origin:
+            $ref: '#/components/schemas/ExpressionOrigin'
+          createdBy:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          createdAtMs:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+          status:
+            enum:
+            - active
+          media:
+            $ref: '#/components/schemas/ExpressionMedia'
+      - type: object
+        additionalProperties: false
+        required:
+        - id
+        - workspaceId
+        - name
+        - displayName
+        - tags
+        - subjectMemberId
+        - version
+        - origin
+        - createdBy
+        - createdAtMs
+        - status
+        - media
+        properties:
+          id:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          workspaceId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          name:
+            type: string
+            minLength: 2
+            maxLength: 30
+            pattern: ^[a-z0-9_-]{2,30}$
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 40
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          tags:
+            type: array
+            minItems: 0
+            maxItems: 8
+            items:
+              type: string
+              minLength: 1
+              maxLength: 16
+              pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+            uniqueItems: true
+          subjectMemberId:
+            oneOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            - nullable: true
+              enum:
+              - null
+          version:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+          origin:
+            $ref: '#/components/schemas/ExpressionOrigin'
+          createdBy:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          createdAtMs:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+          status:
+            enum:
+            - hidden
+            - deleted
+          media:
+            nullable: true
+            enum:
+            - null
+    ExpressionList:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - workspaceId
+        - version
+        - addPolicy
+        - items
+        - reset
+        - baseVersion
+        properties:
+          workspaceId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          version:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+          addPolicy:
+            enum:
+            - members
+            - admins
+          items:
+            type: array
+            minItems: 0
+            maxItems: 1000
+            items:
+              $ref: '#/components/schemas/ExpressionExpression'
+          reset:
+            enum:
+            - true
+          baseVersion:
+            nullable: true
+            enum:
+            - null
+      - type: object
+        additionalProperties: false
+        required:
+        - workspaceId
+        - version
+        - addPolicy
+        - items
+        - reset
+        - baseVersion
+        properties:
+          workspaceId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          version:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+          addPolicy:
+            enum:
+            - members
+            - admins
+          items:
+            type: array
+            minItems: 0
+            maxItems: 1000
+            items:
+              $ref: '#/components/schemas/ExpressionExpression'
+          reset:
+            enum:
+            - false
+          baseVersion:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+    ExpressionDraft:
+      oneOf:
+      - type: object
+        additionalProperties: false
+        required:
+        - draftId
+        - workspaceId
+        - revision
+        - name
+        - displayName
+        - tags
+        - subjectMemberId
+        - origin
+        - expiresAtMs
+        - state
+        - code
+        - media
+        properties:
+          draftId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          workspaceId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          revision:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+          name:
+            type: string
+            minLength: 2
+            maxLength: 30
+            pattern: ^[a-z0-9_-]{2,30}$
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 40
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          tags:
+            type: array
+            minItems: 0
+            maxItems: 8
+            items:
+              type: string
+              minLength: 1
+              maxLength: 16
+              pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+            uniqueItems: true
+          subjectMemberId:
+            oneOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            - nullable: true
+              enum:
+              - null
+          origin:
+            $ref: '#/components/schemas/ExpressionOrigin'
+          expiresAtMs:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+          state:
+            enum:
+            - ready
+          code:
+            nullable: true
+            enum:
+            - null
+          media:
+            $ref: '#/components/schemas/ExpressionMedia'
+      - type: object
+        additionalProperties: false
+        required:
+        - draftId
+        - workspaceId
+        - revision
+        - name
+        - displayName
+        - tags
+        - subjectMemberId
+        - origin
+        - expiresAtMs
+        - state
+        - code
+        - media
+        properties:
+          draftId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          workspaceId:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          revision:
+            type: string
+            minLength: 1
+            maxLength: 19
+            pattern: ^(0|[1-9][0-9]*)$
+          name:
+            type: string
+            minLength: 2
+            maxLength: 30
+            pattern: ^[a-z0-9_-]{2,30}$
+          displayName:
+            type: string
+            minLength: 1
+            maxLength: 40
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          tags:
+            type: array
+            minItems: 0
+            maxItems: 8
+            items:
+              type: string
+              minLength: 1
+              maxLength: 16
+              pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+            uniqueItems: true
+          subjectMemberId:
+            oneOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            - nullable: true
+              enum:
+              - null
+          origin:
+            $ref: '#/components/schemas/ExpressionOrigin'
+          expiresAtMs:
+            type: integer
+            minimum: 0
+            maximum: 9007199254740991
+          state:
+            enum:
+            - manual_upload_required
+          code:
+            enum:
+            - source_blocked
+            - source_unavailable
+            - source_too_large
+            - source_unsupported
+            - source_timeout
+            - source_invalid_media
+            - video_processing_unavailable
+            - video_conversion_failed
+          media:
+            nullable: true
+            enum:
+            - null
+    ExpressionAttachmentRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - displayName
+      - tags
+      - subjectMemberId
+      - attachmentId
+      - channelId
+      properties:
+        name:
+          type: string
+          minLength: 2
+          maxLength: 30
+          pattern: ^[a-z0-9_-]{2,30}$
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+        subjectMemberId:
+          oneOf:
+          - type: string
+            minLength: 36
+            maxLength: 36
+            pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+          - nullable: true
+            enum:
+            - null
+        attachmentId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        channelId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+    ExpressionChoice:
+      type: object
+      additionalProperties: false
+      required:
+      - draftId
+      - revision
+      - sha256
+      properties:
+        draftId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        revision:
+          type: string
+          minLength: 1
+          maxLength: 19
+          pattern: ^(0|[1-9][0-9]*)$
+        sha256:
+          type: string
+          minLength: 64
+          maxLength: 64
+          pattern: ^[a-f0-9]{64}$
+    ExpressionMutation:
+      type: object
+      additionalProperties: false
+      required:
+      - workspaceId
+      - version
+      - expression
+      properties:
+        workspaceId:
+          type: string
+          minLength: 36
+          maxLength: 36
+          pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+        version:
+          type: string
+          minLength: 1
+          maxLength: 19
+          pattern: ^(0|[1-9][0-9]*)$
+        expression:
+          $ref: '#/components/schemas/ExpressionExpression'
+    ExpressionPatch:
+      type: object
+      additionalProperties: false
+      required: []
+      properties:
+        displayName:
+          type: string
+          minLength: 1
+          maxLength: 40
+          pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+        tags:
+          type: array
+          minItems: 0
+          maxItems: 8
+          items:
+            type: string
+            minLength: 1
+            maxLength: 16
+            pattern: ^[^\u0000-\u001f\u007f@<>\[\]`\\]+$
+          uniqueItems: true
+      minProperties: 1
+    ExpressionReportRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - reason
+      properties:
+        reason:
+          enum:
+          - copyright
+          - face
+          - other
+        detail:
+          type: string
+          minLength: 0
+          maxLength: 500
     # ---- Error envelope (Hummingbird HTTPError) ------------------------------
     ErrorResponse:
       type: object

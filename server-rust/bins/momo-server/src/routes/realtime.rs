@@ -63,7 +63,8 @@ use momo_auth::{
 };
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{
-    can_observe_agent, get_member, is_active_agent, is_active_human_member, is_channel_member,
+    active_workspace_role, can_observe_agent, get_member, is_active_agent, is_active_human_member,
+    is_channel_member,
 };
 use uuid::Uuid;
 
@@ -199,7 +200,10 @@ pub enum ParsedChannel {
     /// rule to live, and the two would eventually disagree: someone would see who
     /// is typing, or who is online, in a channel they were removed from. ADR-0160
     /// D5 makes this reuse explicit: 가용성 구독은 채널 멤버십 검사를 재사용한다.
-    Channel { workspace: Uuid, channel: Uuid },
+    Channel {
+        workspace: Uuid,
+        channel: Uuid,
+    },
     /// `agent:ws<WS>.<CHANNEL>.<AGENT>` — observable progress, per channel.
     Agent {
         workspace: Uuid,
@@ -207,10 +211,18 @@ pub enum ParsedChannel {
         agent_member: Uuid,
     },
     /// `agentwork:ws<WS>.<AGENT>` — the agent's PRIVATE job stream.
-    AgentWork { workspace: Uuid, agent_member: Uuid },
+    AgentWork {
+        workspace: Uuid,
+        agent_member: Uuid,
+    },
     /// `online:ws<WS>` — the workspace roll-call (ADR-0160 ②, #4692). One segment:
     /// it names the workspace, not a conversation inside it. See the module docs.
-    WorkspaceOnline { workspace: Uuid },
+    WorkspaceOnline {
+        workspace: Uuid,
+    },
+    WorkspaceExpressions {
+        workspace: Uuid,
+    },
 }
 
 impl ParsedChannel {
@@ -219,7 +231,8 @@ impl ParsedChannel {
             ParsedChannel::Channel { workspace, .. }
             | ParsedChannel::Agent { workspace, .. }
             | ParsedChannel::AgentWork { workspace, .. }
-            | ParsedChannel::WorkspaceOnline { workspace } => workspace,
+            | ParsedChannel::WorkspaceOnline { workspace }
+            | ParsedChannel::WorkspaceExpressions { workspace } => workspace,
         }
     }
 
@@ -231,6 +244,7 @@ impl ParsedChannel {
             ParsedChannel::Agent { .. } => "not allowed to observe this agent",
             ParsedChannel::AgentWork { .. } => "not allowed to consume this agent work stream",
             ParsedChannel::WorkspaceOnline { .. } => "not an active member of this workspace",
+            ParsedChannel::WorkspaceExpressions { .. } => "not an active member of this workspace",
         }
     }
 }
@@ -254,6 +268,13 @@ pub fn parse_channel(name: &str) -> Option<ParsedChannel> {
     if namespace == momo_ephemeral::ONLINE_NAMESPACE && segments.len() == 1 {
         let workspace = Uuid::parse_str(segments[0]).ok()?;
         return Some(ParsedChannel::WorkspaceOnline { workspace });
+    }
+    if namespace == "expressions" && segments.len() == 1 {
+        let workspace = Uuid::parse_str(segments[0]).ok()?;
+        if segments[0] != workspace.to_string().to_uppercase() {
+            return None;
+        }
+        return Some(ParsedChannel::WorkspaceExpressions { workspace });
     }
 
     if segments.len() >= 2 {
@@ -394,6 +415,11 @@ pub async fn subscribe(
                 // member are refused, so none of them can ever be reported.
                 ParsedChannel::WorkspaceOnline { .. } => {
                     is_active_human_member(conn, workspace_id, user_member_id).await?
+                }
+                ParsedChannel::WorkspaceExpressions { .. } => {
+                    active_workspace_role(conn, workspace_id, user_member_id)
+                        .await?
+                        .is_some()
                 }
             };
             Ok(Some(allowed))

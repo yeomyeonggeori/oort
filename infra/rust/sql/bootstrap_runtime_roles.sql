@@ -442,6 +442,9 @@ END $$;
 -- that shape (one table per GRANT, no DELETE).
 DO $$
 BEGIN
+  IF to_regclass('public.expression_draft') IS NOT NULL THEN
+    GRANT SELECT (workspace_id,state,expires_at) ON expression_draft TO momo_notifier;
+  END IF;
   IF to_regclass('public.outbox') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE outbox TO momo_notifier;
   END IF;

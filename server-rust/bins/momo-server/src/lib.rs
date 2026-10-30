@@ -719,6 +719,42 @@ pub fn build_app(state: AppState) -> Router {
     };
     let protected = Router::new()
         .route(
+            "/v1/workspaces/{ws}/expressions",
+            get(routes::expressions::list).post(routes::expressions::activate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/uploads",
+            post(routes::expressions::upload).layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/from-attachment",
+            post(routes::expressions::from_attachment),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-drafts/{draftId}",
+            get(routes::expressions::get_draft),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-drafts/{draftId}/file",
+            put(routes::expressions::replace).layer(axum::extract::DefaultBodyLimit::max(momo_expressions::REQUEST_BYTES)),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expression-drafts/{draftId}/image",
+            get(routes::expressions::draft_image),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/{id}",
+            patch(routes::expressions::patch).delete(routes::expressions::delete),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/{id}/image",
+            get(routes::expressions::expression_image),
+        )
+        .route(
+            "/v1/workspaces/{ws}/expressions/{id}/report",
+            post(routes::expressions::report),
+        )
+        .route(
             "/v1/workspaces/{ws}/channels/{ch}/messages",
             // ADR-0216 D4 · R12 (#4660): the developer-token body allow-list, on the send
             // only and inside the member write budget. It reads a body only when the

@@ -52,6 +52,15 @@ legal/THIRD_PARTY_NOTICES.md ("Server direct additions"), currently p256
 ADR-0146 amendment 2026-09-28, and clap (MIT OR Apache-2.0, command-line
 parsing of the `oort` CLI, ADR-0216 D10); all are also in the generated bundle.
 
+ADR-0218 D3 (#4676) enables image's GIF support: gif 0.14.2
+(MIT OR Apache-2.0), color_quant 1.1.0 (MIT), and weezl 0.1.12
+(MIT OR Apache-2.0). Axum multipart adds multer 3.1.0 (MIT),
+encoding_rs (Apache-2.0 OR MIT OR BSD-3-Clause), simdutf8 (MIT),
+core_detect (MIT OR Apache-2.0), and multiversion_no_op (MIT OR Apache-2.0).
+The isolated image decoder uses rlimit 0.10.2 (MIT) for resource limits.
+No video decoder or FFmpeg is included. The generated GHCR notice bundle
+includes the full license texts for these additions from Cargo.lock.
+
 The agent-worker image also carries a local sentence-embedding model and ONNX Runtime for team-memory
 search (ADR-0196 D8 증보, #3173): intfloat/multilingual-e5-small weights (MIT, unmodified int8 ONNX
 published by the model authors) and ONNX Runtime (MIT, Copyright (c) Microsoft Corporation; the

@@ -88,6 +88,16 @@ pub const SCOPE_WORKSPACE_INITIATE: &str = "workspace:initiate";
 pub fn required_agent_scope(method: &str, path: &str) -> Option<&'static str> {
     let method = method.to_ascii_uppercase();
     let segments: Vec<&str> = path.split('/').filter(|part| !part.is_empty()).collect();
+    // ADR-0218 A: roster members, including agents, may read active expressions.
+    // Direct writes and human preview drafts remain absent from the allow-list.
+    if method == "GET"
+        && segments.first() == Some(&"v1")
+        && segments.get(1) == Some(&"workspaces")
+        && segments.get(3) == Some(&"expressions")
+        && (segments.len() == 4 || (segments.len() == 6 && segments[5] == "image"))
+    {
+        return Some(SCOPE_MESSAGES_READ);
+    }
 
     // POST /v1/mcp/agent-port — the only Agent Port transport surface.
     // GET/SSE, DELETE and any sibling path stay absent so an agent bearer cannot
