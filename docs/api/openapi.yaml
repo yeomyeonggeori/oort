@@ -13044,7 +13044,11 @@ paths:
         the run read returns it as a top-level `appsUsed` array, absent when
         nothing was reported. The Hermes REST gateway completion accepts the same
         `appsUsed` (the code drops a malformed one so telemetry cannot cost the
-        answer; the Agent Port refuses it). ADR-0113 증보 2 E8·E10 (#4054):
+        answer; the Agent Port refuses it). The REST completion's optional
+        `usage.costMicroUsd` (alias `cost_micro_usd`) is an integer in
+        0..1000000000000 inclusive; `usage.model` is at most 128 UTF-8 bytes,
+        matching the Agent Port. Values outside these limits return HTTP 400.
+        ADR-0113 증보 2 E8·E10 (#4054):
         the answer message written by the completion now also carries the
         validated `appsUsed` in its own `props.appsUsed` (so a row need not
         fetch the run), and both doors accept one more optional argument,

@@ -538,6 +538,26 @@ pub async fn complete(
             "usage counts and cost must be non-negative",
         ));
     }
+    if request
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.cost_micro_usd)
+        .is_some_and(|cost| cost > 1_000_000_000_000)
+    {
+        return Err(ApiError::bad_request(
+            "usage cost must not exceed 1000000000000",
+        ));
+    }
+    if request
+        .usage
+        .as_ref()
+        .and_then(|usage| usage.model.as_ref())
+        .is_some_and(|model| model.len() > 128)
+    {
+        return Err(ApiError::bad_request(
+            "usage model must not exceed 128 bytes",
+        ));
+    }
     if let Some(unknown) = request
         .usage
         .as_ref()
