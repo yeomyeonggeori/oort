@@ -1,3 +1,4 @@
+import {AgentUsageStatus} from '../features/agents/AgentUsage';
 import {
   openDirectMessage,
   uuidEq,
@@ -188,6 +189,7 @@ export default function AgentDetailScreen({
           agentId={agent.memberId}
           testID="agent-detail-liveness"
         />
+        <AgentUsageStatus agentId={agent.memberId} />
         {/* ---- 프로필 ---------------------------------------------------- */}
         <SectionLabel label="프로필" />
         <View style={styles.card} testID="agent-profile-card">
