@@ -120,6 +120,7 @@ import {
   isSurfaceProvided,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
+import { approvalBundleCard, approvalBundleContext, openApprovalDecisionStage } from "@/features/decisionStage/stageEntry";
 import { requestBundleModel, requestBundleState, type RequestBundleModel } from "@momo/core/features/timeline/requestBundle";
 import { RequestBundleCard } from "./RequestBundleCard";
 
@@ -417,7 +418,7 @@ function ApprovalBody({
   directory: Directory;
   onOpenStage?: () => void;
 }) {
-  const { session } = useSession();
+  const { session, workspaceId } = useSession();
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
     decidedAtMs?: number;
@@ -462,24 +463,17 @@ function ApprovalBody({
   }) === "approval";
   const nowMs = useExpiryNow(card.expiresAtMs, watchesExpiry);
   const phase = watchesExpiry ? expiryPhase(card.expiresAtMs, nowMs) : "none";
-  const viewer = memberFor(directory, session.member.id) ?? session.member;
-  const role = memberFor(directory, session.member.id)?.role;
-  const isAdmin = role === "owner" || role === "admin";
-  // 서버의 can_decide가 정본이고, 값이 없는 옛 카드는 기존 결정 경로를 유지해요.
-  const bundle = card.isResumeOffer ? undefined : requestBundleModel({
-    ...card,
-    title: approvalHeadTitle(card),
-    status: resolvedStatus,
-    decidedByMemberId: receipt?.decidedByMemberId ?? card.decidedByMemberId,
-    ...(card.bundle ? { bundle: { ...card.bundle, ...(receipt ? { status: resolvedStatus } : {}) } } : {}),
-  }, {
-    nowMs,
-    viewerMemberId: session.member.id,
-    viewerKind: viewer.kind,
-    canDecide: card.bundle?.canDecide ?? true,
-    isWorkspaceAdmin: isAdmin,
-    nameFor: (id) => memberFor(directory, id)?.displayName,
-  });
+  const context = approvalBundleContext(card, session.member, directory);
+  const isAdmin = context.isWorkspaceAdmin;
+  const bundle = card.isResumeOffer ? undefined : requestBundleModel(
+    approvalBundleCard(card, receipt), { ...context, nowMs }
+  );
+  // open을 명시하지 않은 서버 카드는 인라인 [승인][거부]를 그대로 유지해요.
+  const openStage = card.bundle?.decisionMode === "open" ? (event?: React.MouseEvent<HTMLButtonElement>) => {
+    if (onOpenStage) { onOpenStage(); return; }
+    openApprovalDecisionStage({ card, member: session.member, directory, workspaceId,
+      opener: event?.currentTarget ?? null, source: () => cardRef.current });
+  } : undefined;
   const terminalStatus: Partial<Record<NonNullable<typeof bundle>["state"], ApprovalStatus>> = {
     done: "approved", executing: "approved", declined: "rejected", expired: "expired", failed: "cancelled", cancelled: "cancelled",
   };
@@ -532,7 +526,7 @@ function ApprovalBody({
       // 먼저 제안 카드는 제목 끝의 짧은 꼬리표 하나로만 말한다(#4705). 제안자는 카드 작성자라 줄이 이미 말한다.
       title={approvalHeadTitle(card)}
       bundle={bundle}
-      onOpenStage={onOpenStage}
+      onOpenStage={openStage}
       chip={<ApprovalChip status={status} />}
       status={status}
       kind="approval"
