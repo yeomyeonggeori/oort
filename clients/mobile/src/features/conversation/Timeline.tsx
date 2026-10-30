@@ -79,6 +79,12 @@ import {isStreamRunEnded} from '@momo/core/features/timeline/streamStop';
 import {useEndedRuns} from '../agents/endedRuns';
 import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
+import {triggerChip, type TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {shouldFoldBundleLine} from '@momo/core/features/timeline/requestBundle';
+import {memberNameParts} from '@momo/core/features/workspace/directory';
+import {hasRequestBundle, requestLoopIndex} from './requestLoop';
+import {agentCardModel} from '@momo/core/features/timeline/agentCardModel';
+import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
 const noRefresh = async (): Promise<void> => {};
@@ -874,6 +880,8 @@ function TimelineInner({
   selfSendToken,
   markReplies = true,
   showRollup = true,
+  requestThoughts = false,
+  requestRootId,
   arrivalSurface = ARRIVAL_SURFACE_CHANNEL,
   anchorSeq,
   anchorRef,
@@ -942,6 +950,8 @@ function TimelineInner({
    * 왜 카드 대신 원장을 봐야 하는지는 `approvalGate.ts` 머리말에 있다.
    */
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
+  requestThoughts?: boolean;
+  requestRootId?: string;
   /** 결정이 끝난 카드가 말할 영수증, `approvalId` 로. 컨트롤과 자리를 바꾼다. */
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   /** 연결이 끊겼는가 — 끊겼으면 컨트롤 대신 인박스와 같은 문장. */
@@ -1242,13 +1252,21 @@ function TimelineInner({
 
   const built = useMemo(
     () =>
-      buildTimelineItems(messages, {
+      buildTimelineItems(messages.filter(message => {
+        if (shouldFoldBundleLine(message, messages)) return false;
+        if (showRollup && channelKind !== 'dm' && message.rootId !== undefined &&
+          messages.some(root => root.id.toLowerCase() === message.rootId?.toLowerCase())) {
+          const card = agentCardModel(message);
+          if (card?.kind === 'approval' && hasRequestBundle(card)) return false;
+        }
+        return true;
+      }), {
         lastReadSeq,
         unreadCount,
         recoveryMarkers,
         pending,
       }),
-    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending],
+    [messages, lastReadSeq, unreadCount, recoveryMarkers, pending, showRollup, channelKind],
   );
   // 확정본이 등장 도중에 와도 오름이 도는 메아리를 그 자리에 둔다(#4455, design-review r1 H1). 폴드가 메아리를 걷고
   // 확정본(`m-<seq>`)으로 바꾼 자리를, 같은 키(`p-<clientMsgId>`)의 메아리로 되돌려 세운다 — 같은 컴포넌트가 이어져
@@ -2815,6 +2833,29 @@ function TimelineInner({
   const timelineChannelId = channelId ?? messages[0]?.channelId ?? null;
   const channelRuns = useChannelRuns(timelineChannelId);
   const runsByMessage = useMemo(() => runsByTriggerMessage(channelRuns), [channelRuns]);
+  const requests = useMemo(() => requestLoopIndex(messages, channelRuns), [messages, channelRuns]);
+  const requestChips = useMemo(() => {
+    const chips = new Map<string, TriggerChip>();
+    for (const [messageId, runs] of runsByMessage) {
+      const chip = triggerChip(runs, id => memberNameParts(directory, id, '에이전트'), nowMs, requests);
+      if (chip) chips.set(messageId, chip);
+    }
+    return chips;
+  }, [runsByMessage, directory, nowMs, requests]);
+  const thoughtProgress = useMemo(() => {
+    const byMessage = new Map<string, AgentRunProgress>();
+    for (const [messageId, runs] of runsByMessage) {
+      const run = runs[0];
+      if (run) {
+        const bundle = requests.bundleFor(run);
+        const progress = bundle === undefined ? run : {...run, bundle};
+        byMessage.set(messageId, progress);
+      }
+    }
+    return byMessage;
+  }, [runsByMessage, requests]);
+  // 에코가 확정본으로 바뀌어도 run 첫 읽기 전에 예약한 칸은 그대로 남아요.
+  const reservedRequests = useRef(new Set<string>());
 
   const renderItem = useCallback(
     ({item}: {item: FoldedTimelineItem}) => {
@@ -2828,7 +2869,7 @@ function TimelineInner({
         return <WorkingRow memberId={item.memberId} directory={directory} />;
       }
       if (item.kind === 'pending') {
-        return (
+        const pendingRow = (
           <PendingRow
             pending={item.pending}
             startsGroup={item.startsGroup}
@@ -2846,7 +2887,14 @@ function TimelineInner({
             arrivalSurface={arrivalSurface}
           />
         );
+        return requestThoughts && channelKind === 'dm' ? <View>{pendingRow}<RequestThinkingLine directory={directory} nowMs={nowMs} /></View> : pendingRow;
       }
+      const requestKey = item.message.id.toLowerCase();
+      const requestRuns = runsByMessage.get(requestKey) ?? NO_RUNS;
+      const leadingRun = requestRuns.find(run => run.id === requestChips.get(requestKey)?.runIds[0]) ?? requestRuns[0];
+      if (requestThoughts && channelKind === 'dm' && uuidEq(item.message.authorMemberId, myMemberId) &&
+        Date.now() - item.message.createdAtMs < 15_000) reservedRequests.current.add(requestKey);
+      const thinking = requestThoughts && (requestRuns.length > 0 || requestRootId === item.message.id || reservedRequests.current.has(requestKey));
       const row = (
         <MessageRow
           message={item.message}
@@ -2883,10 +2931,14 @@ function TimelineInner({
           onApprovalSettled={onApprovalSettled}
           runEnded={isStreamRunEnded(item.message, endedRuns)}
           runStatus={
-            uuidEq(item.message.authorMemberId, myMemberId)
-              ? (runsByMessage.get(item.message.id.toLowerCase()) ?? NO_RUNS)
+            uuidEq(item.message.authorMemberId, myMemberId) || thinking || requestRuns.length > 0
+              ? requestRuns
               : undefined
           }
+          requestChip={requestChips.get(requestKey)}
+          requestCardTarget={leadingRun ? requests.cardFor(leadingRun) : undefined}
+          requestRun={requests.runForCard.get(requestKey) ?? thoughtProgress.get(requestKey)}
+          requestThinking={thinking}
           // 필이 착지한 행에 초점을 줄 때만 읽는다(R1 M-3). 필이 없는 표면에서는
           // 모을 이유가 없다.
           registerRowNode={jumpPills ? registerRowNode : undefined}
@@ -2949,6 +3001,12 @@ function TimelineInner({
       endedRuns,
       // #3824. 채널 run이 바뀔 때만 새 표다.
       runsByMessage,
+      requests,
+      thoughtProgress,
+      requestChips,
+      requestThoughts,
+      requestRootId,
+      channelKind,
       // 둘 다 마운트 동안 바뀌지 않는다(`jumpPills` 는 규약, 등록 함수는 빈 의존성).
       jumpPills,
       registerRowNode,

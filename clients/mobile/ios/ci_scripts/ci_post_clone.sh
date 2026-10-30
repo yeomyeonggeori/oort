@@ -28,8 +28,14 @@
 # CocoaPods rather than at the missing step, which is why it is spelled out.
 #
 # The repo root is deliberately NOT `npm ci`-ed: this client consumes
-# `@momo/core` **by source path** through Metro (`metro.config.js:38,59,66`), so
-# `packages/momo-core/src` being checked out is the whole dependency.
+# `@momo/core` **by source path** through Metro (`CORE_SRC` and `resolveRequest`
+# in `metro.config.js`), so `packages/momo-core/src` being checked out is the
+# whole SOURCE dependency. The core's one runtime dependency (FormatJS,
+# `@formatjs/intl`, ADR-0213) is declared by THIS project instead: its
+# `package.json` `dependencies` list it at the core's exact version, this
+# `package-lock.json` pins the closure, and Metro resolves the core's bare
+# imports from `clients/mobile/node_modules`, so the `npm ci` below is all the
+# bundle needs (`__tests__/shippedCoreDependencies.test.ts` pins that).
 #
 # ## Running this locally
 #

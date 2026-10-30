@@ -16,7 +16,9 @@ import {fireEvent, screen} from '@testing-library/react-native';
  * 가리지 못한다. 그래서 이 파일의 조회는 레이블 자리에 `undefined`·빈 문자열이 오면 던진다.
  * 이름 조건 없이 역할만으로 찾으려면 두 번째 인자를 **아예 주지 않는다**.
  *
- * 문구 키는 `createCopy(copyModule)`로 묶어 `copy('EXPORT_KEY')`로 읽는다.
+ * 사전 키는 `createMessageCopy({messageLocale, catalog})`로 묶고
+ * `control('button', copy('settings.profile.languageRetry'))`로 조회한다.
+ * 이관 전 모듈은 `createCopy(copyModule)`로 묶어 `copy('EXPORT_KEY')`로 읽는다.
  * 그 결과를 이 파일의 역할·레이블 조회에 넘긴다.
  */
 
@@ -28,7 +30,7 @@ export type Role = Parameters<typeof screen.getByRole>[0];
 /** 화면에서 찾은 노드. RNTL 이 돌려주는 모양 그대로다. */
 export type ControlNode = ReturnType<typeof screen.getByRole>;
 
-/** 레이블을 화면에서 찾을 글자로 바꾸는 자리. 문장 사전이 생기면 여기서 키를 문장으로 푼다. */
+/** 이미 locale에 묶인 createMessageCopy 결과나 기존 레이블을 그대로 쓴다. */
 export function resolveCopy(label: Copy): Copy {
   return label;
 }

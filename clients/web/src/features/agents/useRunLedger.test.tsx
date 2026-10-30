@@ -41,12 +41,12 @@ let root: Root | null = null;
 let host: HTMLElement | null = null;
 let latest: RunLedgerView | null = null;
 
-function Probe({ runId, f }: { runId: string | null; f: ServerRunFacts | null }) {
-  latest = useRunLedger(runId, f);
+function Probe({ runId, f, counts }: { runId: string | null; f: ServerRunFacts | null; counts?: boolean }) {
+  latest = useRunLedger(runId, f, counts);
   return null;
 }
 
-function mount(runId: string | null, f: ServerRunFacts | null) {
+function mount(runId: string | null, f: ServerRunFacts | null, counts = false) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   host = document.createElement("div");
   document.body.appendChild(host);
@@ -58,7 +58,7 @@ function mount(runId: string | null, f: ServerRunFacts | null) {
         createElement(
           QueryClientProvider,
           { client },
-          createElement(SessionProvider, { value: session }, createElement(Probe, { runId: nextRun, f: nextFacts }))
+          createElement(SessionProvider, { value: session }, createElement(Probe, { runId: nextRun, f: nextFacts, counts }))
         )
       );
     });
@@ -150,5 +150,12 @@ describe("useRunLedger", () => {
     await settle();
     expect(latest?.isError).toBe(true);
     expect(fetchEvents).toHaveBeenCalledTimes(1);
+  });
+  it("도구 include/tally를 모르는 읽기에서 도구 횟수를 0으로 지어내지 않는다", async () => {
+    fetchEvents.mockResolvedValue(ledger("단계"));
+    mount(RUN, facts(), true);
+    await settle();
+    expect(latest?.counts).toEqual({ approvals: 0 });
+    expect(latest?.counts?.tools).toBeUndefined();
   });
 });

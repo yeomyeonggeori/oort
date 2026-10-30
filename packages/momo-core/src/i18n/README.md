@@ -43,6 +43,90 @@ FormatJS lifecycle and precompiled AST references:
 [intl API](https://formatjs.github.io/docs/intl/),
 [precompilation](https://formatjs.github.io/docs/guides/advanced-usage/).
 
+## P0-2 — device preference and shared format context (#4831)
+
+`createLocalePreferences(port)` awaits the installation's stored `system` or
+supported BCP 47 ID. P0-3/4 implement `readPreference`, `writePreference` and
+`readDevice` on a `LocalePreferencePort`; core never reads platform globals or
+storage. Keep this port/service outside account and workspace lifecycles, and
+keep its value on logout/removal. Writes are serialized and published only after
+successful persistence. `refresh()` rereads device facts on resume/OS changes;
+`subscribe()` supplies the new immutable preference/context snapshot.
+
+`matchDeviceLocale` canonicalizes tags independently and scans OS order for
+ko-KR, en-US, ja-JP, zh-Hans, zh-Hant, es-419 or fr-FR, then defaults to en-US.
+Chinese scripts take priority over region; TW/HK/MO imply Hant without a script.
+These are supported language IDs, **not a claim of translated catalog coverage**:
+only ko/en catalogs ship in P0-1. Adapters show the ADR's partial-support notice
+and load available catalogs before rendering a changed context.
+
+`resolveLocaleContext(preference, device, explicitTimeZone?)` returns
+`messageLocale`, regional `formatLocale`, `timeZone`, `hourCycle` and
+`weekStartsOn`. It preserves a host-supplied region, or the matching device tag's
+region (otherwise the first tag/default region), under the selected language.
+Chinese defaults to CN/TW; Spanish defaults to 419. A valid explicit device week
+setting (ISO Monday=1 through Sunday=7) wins, otherwise the small regional map
+uses [CLDR release 49 weekData](https://github.com/unicode-org/cldr/blob/release-49/common/supplemental/supplementalData.xml),
+without `Intl.Locale.weekInfo`. Timezone precedence is valid explicit IANA choice,
+device IANA zone, UTC; adapters must not pass a member's default UTC as an
+explicit user choice. Language selection never rewrites stored timestamps.
+
+```ts
+import { createLocalePreferences, createLocaleService, loadMessageCatalog } from '@momo/core/i18n';
+
+// The host owns this installation-scoped port, including OS regional settings.
+const preferences = await createLocalePreferences(port);
+const { context } = preferences.getSnapshot();
+const catalog = context.messageLocale === 'ko-KR'
+  ? await loadMessageCatalog('ko-KR') : undefined;
+const locale = createLocaleService({ ...context, catalog });
+locale.formatMessage('common.members.count', { count: 2 });
+locale.formatTime(message.createdAtMs); // epoch input, context zone/hour cycle
+locale.formatCurrency(cost.amount, cost.currency); // API ISO 4217 code required
+```
+
+`createLocaleService(context)` combines generated-key messages, basic dates/time,
+numbers/percentages, explicit-currency formatting and cardinal/ordinal plurals.
+`formatRelativeTime(epoch, now, unit)` takes a shared injected now; `day` compares
+context-zone calendar days across midnight and DST. `compareDisplay` takes
+explicit Collator options, normalizes NFC and breaks equivalent labels by stable
+ID; it is for display lists, never message seq/server search/page order.
+
+After loading the catalog, adapters call `updateContext({...next, catalog})`;
+it replaces message instances and all regional formatter caches, then notifies
+subscribers. Cache keys include locale, timezone and options; each regional cache
+is capped at 64 entries. Regional errors try English/UTC, then the existing
+catalog-independent `SAFE_MESSAGE`; failed plural rules return `other` and failed
+collation uses deterministic text/ID order. Diagnostics contain only codes and
+registered message keys; throwing observers cannot interrupt fallback or switches.
+No runtime dependency, polyfill or UI adapter is added. P0-4 must initialize its
+Intl prerequisites before constructing these services.
+
+Known follow-up (independent review, Medium): direct `formatTime` honors the
+context hour cycle, while an ICU time argument currently uses the locale's
+default hour cycle. The existing P0 catalog has no time argument. Before adding
+one, pass the context hour cycle through the message formatter too; timezone
+and regional locale already reach ICU date/time arguments.
+
+P0-2 validation on the resumed patch:
+
+- Core typecheck, `eslint src/i18n`, `gate:purity`, `gate:copy`, `i18n:check`
+  and `git diff --check`: PASS; no dependency/lockfile changes.
+- Added behavior tests: 14 PASS. Independent fresh code review: Blocker 0,
+  High 0, Medium 1 (hour-cycle follow-up above); isolated locale/context/service
+  tests: 21 PASS.
+- Isolated matching, timezone and formatter-cache sabotage each produced an
+  assertion failure; the workspace implementation was never mutated.
+- `npm --prefix packages/momo-core test`: run once at the end, 273 files PASS,
+  6,736 tests PASS, 1 existing todo. `scripts/tests/test_pr_ci_guardrails.sh`: PASS.
+- Stack verification memo: no screen changed; after P0-3/4, rerun profile-language
+  Playwright/Maestro paths for ko/en/system, partial support, failed load/retry,
+  restart/offline, app resume/OS language change and account/workspace switching.
+  Check regional dates, midnight/DST, explicit timezone, currency and plural
+  probes on Hermes. UI/design review, release runtime and merge-tree/full-stack
+  gates remain planner-owned (`runtime-unverified` for actual Hermes/hosts).
+  No Rust input, simulator, Xcode, Docker, capture, commit, push or PR was added.
+
 ## Dependencies and attribution
 
 Direct dependencies are exactly `@formatjs/intl@6.1.4` (runtime) and

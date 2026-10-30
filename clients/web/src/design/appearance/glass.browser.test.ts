@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import { blend } from "@momo/core/design/scrim";
 import { firstPartyGlassSources, glassChrome, glassFloor, glassVariables } from "@momo/core/design/glass";
 import { THEMES, type Mode, type ThemeId } from "@momo/core/design/themes";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * 유리 CSS가 **실제로 그리는 것**을 엔진이 계산한 픽셀로 잰다 (AP-3 #4190, AC 3·5·6).
@@ -34,6 +35,8 @@ const TOKENS = join(HERE, "..", "tokens.css");
 type EngineName = "webkit" | "chromium";
 
 function engineMissing(name: EngineName): string | null {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return blocked;
   try {
     const playwright = require_("playwright") as typeof import("playwright");
     const exe = playwright[name].executablePath();

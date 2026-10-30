@@ -7,6 +7,7 @@ import { exifSegment, injectExif, inspectJpeg } from "../../../scripts/lib/jpegE
 import { stripJpegMetadata } from "@momo/core/design/jpegMetadata";
 import { PHOTO_MAX_BYTES, PHOTO_MAX_LONG_SIDE, PHOTO_THUMB_LONG_SIDE } from "@momo/core/design/wallpaper";
 import type { RunResult, StoredView } from "./photo.browser.entry";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 // =============================================================================
 // 내 사진 → 상한 안의 JPEG: **진짜 브라우저**에서 앱이 쓰는 그 포트와 계단을 돌린다 (AP-4 #4191, 이슈 AC 3).
@@ -35,6 +36,8 @@ type EngineName = "webkit" | "chromium";
 type Playwright = typeof import("playwright");
 
 function engineMissing(name: EngineName): string | null {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return blocked;
   try {
     const playwright = require_("playwright") as Playwright;
     const exe = playwright[name].executablePath();

@@ -7,6 +7,9 @@
   ],
   "permissions": [
     "core:default",
+    "allow-locale-preference-read",
+    "allow-locale-preference-write",
+    "allow-locale-menu-set",
     "core:window:allow-start-dragging",
     "notification:allow-is-permission-granted",
     "allow-deep-link-take-pending",

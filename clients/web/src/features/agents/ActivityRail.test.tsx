@@ -2,7 +2,7 @@
 
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { act, createElement } from "react";
+import { act, createElement, Fragment } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ import {
 } from "./agentWorkingSignal";
 import { channelHasAgent, isRailReserved } from "./railReservation";
 import { closeWorkPanel, workPanelSnapshot } from "./workLogStore";
+import { useVisibleThoughtRun } from "./visibleThoughtRuns";
 
 const api = vi.hoisted(() => ({ fetchApprovals: vi.fn() }));
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -342,7 +343,9 @@ describe("컴포저가 꽂는 레일: 신호 스토어를 읽는다", () => {
     connStatus: "connected",
   } as unknown as SessionContextValue;
 
-  function mountRail(options: { reserved: boolean }) {
+  function VisibleThought() { useVisibleThoughtRun(RUN_A); return null; }
+
+  function mountRail(options: { reserved: boolean; visibleThought?: boolean }) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     host = document.createElement("div");
     document.body.append(host);
@@ -355,12 +358,12 @@ describe("컴포저가 꽂는 레일: 신호 스토어를 읽는다", () => {
           createElement(
             SessionProvider,
             { value: session },
-            createElement(ComposerActivityRail, {
+            createElement(Fragment, null, options.visibleThought ? createElement(VisibleThought) : null, createElement(ComposerActivityRail, {
               channelId: CH,
               directory,
               reserved: options.reserved,
               live: true,
-            })
+            }))
           )
         )
       )
@@ -376,6 +379,15 @@ describe("컴포저가 꽂는 레일: 신호 스토어를 읽는다", () => {
   it("예약된 채널에는 턴이 없어도 칸이 선다", () => {
     const el = mountRail({ reserved: true });
     expect(q(el, "composer-working")?.getAttribute("data-state")).toBe("idle");
+  });
+  it("화면에 생각 줄이 선 run은 레일에서 빼고, 그 줄이 닫히면 레일로 돌려준다", () => {
+    const el = mountRail({ reserved: true, visibleThought: true });
+    act(() => markAgentWorking(turn(RUNNING)));
+    expect(q(el, "composer-working-text")).toBeNull();
+    act(() => root?.unmount());
+    el.remove(); root = null;
+    const returned = mountRail({ reserved: true });
+    expect(q(returned, "composer-working-text")?.textContent).toContain("달무리봇");
   });
 
   it("턴이 열리면 줄이 서고, 끝나면 줄만 사라지고 칸은 남는다", () => {

@@ -50,6 +50,174 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.menu.close": [
+    {
+      "type": 0,
+      "value": "Close window"
+    }
+  ],
+  "desktop.menu.copy": [
+    {
+      "type": 0,
+      "value": "Copy"
+    }
+  ],
+  "desktop.menu.cut": [
+    {
+      "type": 0,
+      "value": "Cut"
+    }
+  ],
+  "desktop.menu.edit": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "desktop.menu.file": [
+    {
+      "type": 0,
+      "value": "File"
+    }
+  ],
+  "desktop.menu.fullscreen": [
+    {
+      "type": 0,
+      "value": "Enter full screen"
+    }
+  ],
+  "desktop.menu.help": [
+    {
+      "type": 0,
+      "value": "Help"
+    }
+  ],
+  "desktop.menu.hide": [
+    {
+      "type": 0,
+      "value": "Hide oort"
+    }
+  ],
+  "desktop.menu.hideOthers": [
+    {
+      "type": 0,
+      "value": "Hide others"
+    }
+  ],
+  "desktop.menu.maximize": [
+    {
+      "type": 0,
+      "value": "Zoom"
+    }
+  ],
+  "desktop.menu.minimize": [
+    {
+      "type": 0,
+      "value": "Minimize"
+    }
+  ],
+  "desktop.menu.paste": [
+    {
+      "type": 0,
+      "value": "Paste"
+    }
+  ],
+  "desktop.menu.quit": [
+    {
+      "type": 0,
+      "value": "Quit oort"
+    }
+  ],
+  "desktop.menu.redo": [
+    {
+      "type": 0,
+      "value": "Redo"
+    }
+  ],
+  "desktop.menu.selectAll": [
+    {
+      "type": 0,
+      "value": "Select all"
+    }
+  ],
+  "desktop.menu.undo": [
+    {
+      "type": 0,
+      "value": "Undo"
+    }
+  ],
+  "desktop.menu.view": [
+    {
+      "type": 0,
+      "value": "View"
+    }
+  ],
+  "desktop.menu.window": [
+    {
+      "type": 0,
+      "value": "Window"
+    }
+  ],
+  "mobile.connection.reconnectNow": [
+    {
+      "type": 0,
+      "value": "Reconnect now"
+    }
+  ],
+  "mobile.ios.cameraUsage": [
+    {
+      "type": 0,
+      "value": "Use the camera to attach photos to conversations or scan a QR code to connect this device to a workspace."
+    }
+  ],
+  "mobile.ios.faceIdUsage": [
+    {
+      "type": 0,
+      "value": "Use Face ID to confirm instructions sent to agents from this device."
+    }
+  ],
+  "mobile.ios.localNetworkUsage": [
+    {
+      "type": 0,
+      "value": "Use the local network to connect to an oort server on the same network."
+    }
+  ],
+  "mobile.ios.microphoneUsage": [
+    {
+      "type": 0,
+      "value": "oort does not record audio. All features work without microphone access."
+    }
+  ],
+  "mobile.ios.photoLibraryAddUsage": [
+    {
+      "type": 0,
+      "value": "oort does not save photos to your library. All features work without this permission."
+    }
+  ],
+  "mobile.ios.photoLibraryUsage": [
+    {
+      "type": 0,
+      "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
+    }
+  ],
+  "mobile.locale.backToSettings": [
+    {
+      "type": 0,
+      "value": "Back to settings"
+    }
+  ],
+  "mobile.locale.permissionNotice": [
+    {
+      "type": 0,
+      "value": "Permission prompts follow the iOS language setting. Changing the app language may not change these prompts immediately."
+    }
+  ],
+  "mobile.locale.saving": [
+    {
+      "type": 0,
+      "value": "Applying language…"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,

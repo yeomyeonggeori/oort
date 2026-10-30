@@ -34,6 +34,7 @@ export {keychainItems, loginBody, mmkvStore, resetSession, selfMember, signIn} f
 export {cleanupMounts, mount, drainRender, flat, flush, makeQueryClient, renderWithQuery, settle} from './render';
 export {control, controls, labelled, maybeControl, pressControl, typeInto} from './query';
 export type {ControlNode, Copy, Role} from './query';
-export {blankCopy, copyModules, copyStringCount, missingKeys} from './catalog';
+export {blankCopy, copyModules, copyStringCount, missingKeys, readMessageCatalogs} from './catalog';
 export {installAppClock, installTimersOnlyClock, SHELL_WAIT_TEST_TIMEOUT_MS} from '../fixtures/fakeClock';
 export {createCopy} from '@momo/core/testkit/copy';
+export {createMessageCopy} from '@momo/core/testkit/i18n';

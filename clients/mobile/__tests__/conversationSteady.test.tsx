@@ -229,6 +229,9 @@ interface FakeSubscription {
 
 interface FakeClient {
   state: string;
+  connectCount: number;
+  disconnectCount: number;
+  setTokenCalls?: string[];
   subs: Map<string, FakeSubscription>;
   getSubscription: (name: string) => FakeSubscription | null;
   __emit: (event: string, ctx: unknown) => void;
@@ -613,7 +616,11 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     const header = screen.getByTestId('conversation-header');
     const connectingLayer = within(header).getByTestId('connection-banner-layer');
     expect(within(connectingLayer).getByTestId('connection-banner')).toHaveTextContent('연결 중…');
-    expect(flat(connectingLayer.props.style)).toMatchObject({position: 'absolute', top: '100%'});
+    // 「연결 중…」은 이미 시도하는 중이라 누를 것이 없다 — 문장만 서고 손은 받지 않는다(#4895).
+    expect(connectingLayer.props.pointerEvents).toBe('none');
+    expect(within(connectingLayer).getByTestId('connection-banner').props.accessibilityRole).toBe('text');
+    fireEvent(header, 'layout', {nativeEvent: {layout: {x: 0, y: 0, width: 393, height: 124}}});
+    expect(flat(connectingLayer.props.style)).toMatchObject({position: 'absolute', top: 124});
     await settle(DISPLAY_GRACE_MS - 1_000);
     expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
     await settle(2_000);
@@ -624,15 +631,18 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     // (a) 띠를 진 층은 **흐름 밖**이다. 흐름 안에 있으면 띠가 설 때마다 머리가 자라 목록의 보이는 높이가 줄었다 돌아온다.
     const layer = within(header).getByTestId('connection-banner-layer');
     expect(layer).toBe(connectingLayer);
-    expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: '100%'});
+    expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: 124});
     // (b) 알약은 그 층 안에 있다 — 흐름에 끼는 형제로 따로 서 있지 않다.
     expect(within(layer).getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
     // (c) 머리 뿌리는 뒤 형제(목록) 위에 그려진다 — 아니면 매달린 띠가 목록 밑으로 숨는다.
     expect(Number(flat(header.props.style).zIndex ?? 0)).toBeGreaterThan(0);
-    // (d) 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가 눌려야 한다.
-    expect(layer.props.pointerEvents).toBe('none');
-    // (e) 낭독 속성(역할 · 라이브 리전)은 안쪽 알약에 있고 바깥 층에는 없다 — 층은 손만 막는 포장이다.
-    expect(banner.props.accessibilityRole).toBe('text');
+    // (d) 띠 바깥은 여전히 손을 받지 않는다 — 알약 밑의 메시지가 눌려야 한다. 끊김일 때만 알약 **자신**이 단추라(#4895,
+    // 옛 「재시도 단추 없음」을 뒤집었다) 층은 `box-none` 이고 손을 받는 것은 알약뿐이다.
+    expect(layer.props.pointerEvents).toBe('box-none');
+    // (e) 낭독 속성은 안쪽 알약에 있고 바깥 층에는 없다 — 이름은 행동(「지금 다시 연결」), 지금 상태는 값이다.
+    expect(banner.props.accessibilityRole).toBe('button');
+    expect(banner.props.accessibilityLabel).toBe('지금 다시 연결');
+    expect(banner.props.accessibilityValue).toEqual({text: '연결이 끊겼습니다'});
     expect(banner.props.accessibilityLiveRegion).toBe('polite');
     expect(layer.props.accessibilityRole).toBeUndefined();
     expect(layer.props.accessibilityLiveRegion).toBeUndefined();
@@ -645,6 +655,31 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
     await settle(25);
     expect(screen.queryByTestId('connection-banner')).toBeNull();
     expect(screen.queryByTestId('connection-banner-layer')).toBeNull();
+  });
+
+  it('끊김 띠를 누르면 전송의 resume 과 같은 길로 같은 클라이언트가 새 토큰으로 다시 붙는다 (#4895)', async () => {
+    await openDm();
+    const client = socket();
+    await act(async () => {
+      client.state = 'connecting';
+      client.__emit('connecting', {code: 1, reason: 'transport closed'});
+    });
+    await settle(DISPLAY_GRACE_MS + 1_000);
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');
+    const clientsBefore = centrifugeMock.__clients.length;
+    const disconnects = client.disconnectCount;
+    const connects = client.connectCount;
+
+    await act(async () => {
+      fireEvent.press(screen.getByTestId('connection-banner'));
+    });
+    // 새 클라이언트를 만들지 않는다(복구 위치를 지킨다). 닫고 · 토큰을 비우고 · 다시 연다 — 복귀와 같은 세 걸음.
+    expect(centrifugeMock.__clients.length).toBe(clientsBefore);
+    expect(client.disconnectCount).toBe(disconnects + 1);
+    expect(client.setTokenCalls?.slice(-1)).toEqual(['']);
+    expect(client.connectCount).toBe(connects + 1);
+    await settle(25);
+    expect(screen.queryByTestId('connection-banner')).toBeNull();
   });
 
   it.each([0, 6])('S1 #4789 High 1: 읽음 상태가 로드된 에이전트 DM의 안읽음 %i·요약 닫힘은 목록 안 머리 여백 하나뿐이다', async unread => {
