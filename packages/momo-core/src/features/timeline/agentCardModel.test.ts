@@ -910,3 +910,32 @@ describe("만료 스윕이 남긴 줄 (검수 L4, #4705)", () => {
     expect(plainError.status).toBe("error");
   });
 });
+
+
+describe("terminal approval card (#3982)", () => {
+  it.each([
+    ["rejected", "approval_rejected", "거부됐어요"],
+    ["expired", "approval_expired", "승인을 기다리다 만료됐어요"],
+    ["cancelled", "human_cancelled", "요청을 멈췄어요"],
+  ])("renders %s from its code on the same card", (status, code, summary) => {
+    const card = agentCardModel(msg({type: "approval_request", props: approvalProps({
+      status, code, summary: "old untranslated server sentence"
+    })}));
+    expect(card?.kind).toBe("approval");
+    if (card?.kind !== "approval") throw new Error("approval card required");
+    expect(card.status).toBe(status);
+    expect(card.summary).toBe(summary);
+  });
+  it("shows the action's result sentence and preserves a body-only fallback", () => {
+    const card = agentCardModel(msg({type: "approval_request", props: approvalProps({
+      status: "approved", code: "approval_approved",
+      result: {status: "executed", line: "소개를 바꿨어요"}
+    })}));
+    expect(card?.kind).toBe("approval");
+    if (card?.kind !== "approval") throw new Error("approval card required");
+    expect(card.summary).toBe("소개를 바꿨어요");
+    const legacy = agentCardModel(msg({type: "approval_request", props: approvalProps({status: "approved"})}));
+    if (legacy?.kind !== "approval") throw new Error("approval card required");
+    expect(card.detail.withheld).toBe(legacy.detail.withheld);
+  });
+});

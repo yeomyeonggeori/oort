@@ -440,6 +440,14 @@ pub async fn disable(
                     {
                         return Err(momo_db::DbError::from(momo_db::sqlx::Error::RowNotFound));
                     }
+                    super::agent_runs::cancel_agent_runs_in_tx(
+                        conn,
+                        workspace_id,
+                        row.id,
+                        None,
+                        actor,
+                    )
+                    .await?;
                     row.enabled = false;
                     row.owner_disabled = true;
                     audit(

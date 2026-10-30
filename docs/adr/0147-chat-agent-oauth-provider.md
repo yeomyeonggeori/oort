@@ -262,3 +262,45 @@
 - **사용량과 약관.** 구독 사용량은 그 Hermes **소유자의 구독**에서 나간다(팀원이 Hermes를 불러도 같다). 벤더 약관의 적합성 판단과 책임은 **운영자 몫**이고, oort는 판단하거나 보증하지 않는다. 이 증보 이전의 약관 판단(제3자가 claude.ai 로그인을 제공하거나 토큰을 수집·저장·중개할 수 없다)은 **oort가 하는 일**에 대한 것으로 그대로 남고, Hermes가 자기 볼륨의 구독으로 인증하는 경로의 적합성은 운영자가 판단한다.
 - **적용되지 않는 것(별개 경로).** oort 서버가 구독 CLI를 대신 구동하는 경로를 막는 ADR-0193 D6·D17·D18과 공용(워크스페이스·클라우드) work host 차단(`MOMO_SUBSCRIPTION_AGENTS_ENABLED`, `MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED`, `claude_subscription_agent_paused`)은 **Hermes 경로에는 적용되지 않는다.** 이 증보는 그 코드 동작을 바꾸지 않는다. 서버 내장 구독 에이전트 차단을 풀지는 별도 확인이 필요하다(owner 미결정).
 - **정정되는 곳.** 증보 2026-09-26의 「Claude(Pro·Max) 구독 토큰은 어떤 경로로도 금고에 넣지 않는다」와 「구독은 개인 경로로만 쓴다」는 원문 그대로 두고, 적용 범위를 oort 금고·oort 서버가 구동하는 경로로 좁힌다. 「금고에 구독 OAuth kind를 새로 더하지 않는다」「`oauth-openai` 새 링크 생성 불가」는 **유지**한다.
+
+
+---
+
+## 증보 2026-10-30 — 에이전트 비용과 개인 보임 경계 (#4781)
+
+- Status: **Accepted**. 읽기는 멤버 전원이며 관리자 전용 라우트를 만들지 않는다는 owner 결정(2026-10-30)을 따른다. 보임 모델 A는 리서치 초안에서 **Proposed**였으나 [이슈의 후속 owner 승인](https://github.com/yeomyeonggeori/oort/issues/4781#issuecomment-6510851651)으로 확정됐다. 이 승인 이전의 패킷에 남은 「owner 답 대기」를 대체한다.
+- 구현 경계: S2 서버·DB·OpenAPI, S3 코어 표시 모델·웹·데스크탑·폰. 정본 공개 JSON은 [OpenAPI](../api/openapi.yaml)의 `AgentUsageResponse`다.
+
+### D1. 누구나 읽되 모델 A로 거른다
+
+`GET /v1/workspaces/{ws}/usage/agents?from&to`는 활성 워크스페이스 멤버가 읽는다. 공동은 명부의 `AgentReadFacts.callable_by=everyone`, 개인은 `owner_only`다. 관리하는 사람이 채워졌다는 이유로 공동을 개인으로 분류하지 않는다. 일반 멤버는 공동 전부와 자기 개인 에이전트만 읽고, 남의 개인 에이전트는 행·모델·토큰·금액 없이 `hiddenPersonalAgents` 개수만 받는다. 게스트는 명부의 공유 채널 필터를 먼저 적용하며, 숨긴 개수에도 그 명부 밖 에이전트를 넣지 않는다. owner/admin은 전부 읽는다.
+
+응답은 에이전트마다 `agentMemberId`와 `runs`, `reportedRuns`, `promptTokens`, `completionTokens`, `cachedTokens`, `costMicroUsd`, `unpricedRuns`, `unpricedModels`(최대 8개), `estimatedRuns`, `source`, 선택적인 `subscriptionFee`다. 이름·소유자·brain은 응답에 복제하지 않고 명부에서 결합한다. 관리자 소유자별 묶음도 같은 명부의 owner를 쓴다. 채널별·run별·일별 계열·글 내용은 이 응답에 없다. `totals`는 `mine`과 `shared`이며 **owner/admin만** `workspace`를 추가로 받는다. 일반 멤버에게 전체 합계를 주면 차집합으로 개인 비용이 새므로 주지 않는다. RLS는 워크스페이스 격리, 보는 사람별 필터는 라우트의 공통 순수 판정이 맡는다.
+
+### D2. 기존 usage/summary에도 같은 필터를 적용한다
+
+`usage/summary`의 비관리자 응답은 `byAgent`만 줄이는 것이 아니라 `totals`, `buckets`, `byModel`까지 **보이는 에이전트의 행으로 다시 계산**한다. 전체 예산의 spent/reserved도 숨긴 비용을 드러내므로 `budget` 필드는 빼고 `scope: "visible"`을 추가한다. 관리자는 기존 응답 모양(이름 포함, `budget: null` 포함)과 원장에 기록된 달러 집계 의미를 유지한다. 새 `usage/agents`가 목록 단가로 계산한 금액과 기존 summary의 기록 금액은 서로 다른 의미다. S3는 비용 열에 새 계약을 쓰고, 기존 사용량에 「내가 볼 수 있는 범위 기준」을 표시한다.
+
+### D3. 정확·추정·자기 보고·구독 표지
+
+표지는 출처와 완전성 두 축이다. `source=measured`이며 `estimatedRuns=0`, `unpricedRuns=0`이면 토큰은 공급사에서 직접 받은 숫자다. `estimatedRuns>0` 또는 `unpricedRuns>0`이면 추정·부분이며 달러는 「이상」으로 표시한다. `source=self_reported`이면 에이전트가 알려 준 숫자로 oort가 검증하지 못했다. 혼합 행의 source는 자기 보고가 이기며 표시 우선순위는 자기 보고 > 추정 > 정확이다. `subscriptionFee`는 별도 월 정액이며 API 상당액에 더하지 않는다. 원장 행이 없는 에이전트는 `runs=0`, `source=null`이라 「측정한 0원」과 구별된다. `runs`는 해당 기간에 원장이 생긴 완료 실행 수, `reportedRuns`는 토큰 수를 알린 실행 수(직접 측정한 명시적 0 포함)다.
+
+### D4. 원장 출처와 읽을 때 계산하는 단가
+
+migration **157**은 `usage_ledger.source`에 nullable text와 `measured`/`self_reported` CHECK를 더한다. 새 워커 행은 measured, Agent Port와 REST 완료 콜백은 self_reported다. 외부 본문으로 출처를 지정하지 못한다. REST의 음수 토큰·음수 비용 보고는 원장 쓰기 전에 400으로 거절한다. 옛 NULL 행은 현재 명부 brain으로 추론한다(외부·구독=self_reported, 팀 키·개인 키·기본 AI=measured). 과거 출처를 확정하는 backfill은 하지 않는다. `oort_run_complete`의 usage 설명은 토큰 수만 보내고 재지 못한 수는 비우며, oort가 단가를 곱해 자기 보고로 표시한다고 안내한다.
+
+새 에이전트 비용은 원장의 비용 주장 대신 **토큰 × 해당 시점의 model_pricing USD 단가**로 읽을 때 계산한다. 단가 없는 행은 작업·토큰에 세되 달러에 넣지 않고 `unpricedRuns`와 모델 목록에 남긴다. 워크스페이스 단가가 전역 단가보다 우선하고 모델의 vendor 접두 제거·점→대시 정규화 뒤 가장 긴 접두 단가를 고른다. 캐시 읽기는 캐시 단가, 나머지 입력과 출력은 각 단가다. migration 157은 `source_url`·`verified_on` 열과 확인한 OpenAI·xAI 시드를 더한다. 출처는 [OpenAI 공식 가격표](https://developers.openai.com/api/docs/pricing), [xAI 공식 가격표](https://docs.x.ai/developers/pricing), [Grok 4.1 Fast](https://x.ai/news/grok-4-1-fast), [Grok 4 Fast](https://x.ai/news/grok-4-fast)다. 확인일 2026-10-30, 시드 적용 시작은 이번 UTC 월초이며 과거 가격 이력이라고 주장하지 않는다.
+
+### D5. 공유 에이전트의 월 정액 설정
+
+`agent_subscription_fee`는 `agent_member_id` PK, `workspace_id`, `monthly_micro_usd`, `label`, `updated_by/at`를 가진다. RLS ENABLE+FORCE이며 같은 워크스페이스만 읽고, 별도 transaction-local 쓰기 게이트 뒤에서만 쓴다. `PUT /v1/workspaces/{ws}/agents/{agent}/subscription-fee`는 **사람인 워크스페이스 owner/admin**만 허용한다. platform 읽기 스코프로 우회하지 못하고 에이전트 bearer는 403, `owner_only`는 409다. 금액은 0~1,000,000 USD/월, label 최대 120자, 닫힌 본문이다. `monthlyMicroUsd=null` 또는 생략은 해제다. 감사 `agent.subscription_fee.updated`의 detail은 금액만 남기며 label은 남기지 않는다. 읽는 비용과 총합에 정액을 더하지 않는다.
+
+### D6. 메신저 활동 통계와 요청자별 비용은 범위 밖
+
+#4346의 관리자 전용 개인 활동 통계 결정은 메신저 통계에 한정된다. 비용 읽기에 빌려 오지 않는다. 원장에는 요청자 열이 없으므로 이 계약의 소유자별 비용은 개인 에이전트를 owner로 묶은 값이다. 「누가 팀 AI를 많이 불렀나」를 계산하거나 그렇게 표시하지 않는다.
+
+### D7. 정직한 한계와 검증
+
+달러는 공급사의 청구서·잔액이 아니라 공개 단가로 구한 상당액이며 공급사 콘솔이 정본이다. 새 읽기의 기본 창은 **UTC 달력월의 월초~지금**, 명시한 from/to는 기존 summary와 같은 양끝 포함·최대 93일이다. 기존 summary의 기본 최근 30일은 호환을 위해 유지한다. 개인 구독(내 맥)은 원장 행이 없어 토큰을 재지 못한다. 캐시 쓰기는 원장에 별도 수가 없어 일반 입력 단가로 계산한다. 구독 정액은 현재 설정이며 월별 이력이 아니다. 옛 NULL source는 현재 brain에 따른 추론이고, 토큰이 모두 0인 옛 행은 무보고와 명시적 0을 항상 구별하지 못한다. 지역·서비스 등급·서버 도구 요금·할인 등 청구 조정은 원장에 없으므로 포함하지 않는다. xAI 장문 구간(현행 시드 200k, Grok 4 Fast 128k 이상)에 닿는 원장은 여러 요청의 합일 수 있어 요청별 배수를 복원할 수 없다. 기본 단가 상당액만 계산하고 `estimatedRuns`로 추정·하한임을 표시하며, 합계 토큰에 장문 배수를 곱하지 않는다. 잘못된 옛 REST 토큰 차원은 음수를 0으로, 캐시를 입력 이하로 제한해 계산하고 추정으로 표시한다.
+
+실 PG 수용 시험은 `agent_usage_conformance_pg.rs`의 9건(멤버·관리자 보임, 합계 누출, 게스트, 워크스페이스, 단가 없음, 정액 분리, 쓰기 권한, source/옛 행, 관리자 summary 호환)이다. 워커·Agent Port·REST 완료의 기존 실 PG 시험에서 각각 원장 source를 검증한다. 보임/집계/게스트/워크스페이스 조건/단가 없음/정액 합산/쓰기 권한/source를 변조해 회귀 시험이 실패하는지 별도로 확인한다. 실제 공급사 청구 대조와 S3 화면은 스택 검증 범위다.

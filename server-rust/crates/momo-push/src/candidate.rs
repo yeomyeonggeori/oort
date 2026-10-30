@@ -1,19 +1,9 @@
 //! The `momo.push_candidate.v1` outbox payload.
 //!
-//! Written by two writers, each in the same transaction as the write that earns
-//! the candidate — which is what makes a candidate impossible to lose and
-//! impossible to observe before its source commits (ADR-0120 D3):
-//! the `push_candidate_enqueue_trg` AFTER INSERT trigger on `message`
-//! (`011_push_notifier.sql:47-69`), and the closing write of a streamed message
-//! (`momo_outbox::emit_stream_closed_push_candidate`, ADR-0204 증보 1 D8-a). The
-//! second writer's rows carry one more key, `source: "stream_closed"`, which this
-//! decoder ignores like every key it does not need: judgment reads the *message*, so
-//! the notifier handles both writers' rows identically.
-//!
-//! The payload is id-only *by construction* — both writers emit ids and enum
-//! labels, never a body. This decoder therefore reads only the two ids the
-//! notifier needs and ignores the rest; it cannot accidentally surface content
-//! because there is none to surface.
+//! Written transactionally by the message INSERT trigger, stream close, and
+//! approval-card settlement (ADR-0204 addendum 6 D6-5). All are id-only.
+//! Unlike the first two sources, `approval_settled` must be read by judgment:
+//! it addresses the requester alone and must never re-enter the approval/DM arms.
 
 use serde::Deserialize;
 use uuid::Uuid;
@@ -27,9 +17,25 @@ use uuid::Uuid;
 pub struct PushCandidate {
     pub message_id: Uuid,
     pub channel_id: Uuid,
+    #[serde(default)]
+    pub source: Option<String>,
 }
 
 impl PushCandidate {
+    pub fn is_approval_settlement(&self) -> bool {
+        self.source.as_deref() == Some("approval_settled")
+    }
+
+    /// A settlement is a different fact from the proposal, so it cannot use
+    /// the proposal's dispatch-log key (ADR-0204 addendum 6 D6-5).
+    pub fn collapse_id(&self) -> String {
+        if self.is_approval_settlement() {
+            format!("as:{}", self.message_id)
+        } else {
+            crate::collapse_id(self.message_id)
+        }
+    }
+
     /// Decode one claimed outbox payload.
     pub fn decode(raw: &str) -> Result<Self, serde_json::Error> {
         serde_json::from_str(raw)

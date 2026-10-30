@@ -303,7 +303,16 @@ async fn settle_stalled_run_in_tx(
 
     // E4: nobody is waiting for a welcome run (the server raised it, not a person), so no
     // code says anything in the channel. The ledger and the audit row still record it.
-    if !ancient && !run.is_welcome {
+    if !ancient
+        && !run.is_welcome
+        && momo_messaging::dm::dm_agent_can_speak_in_tx(
+            conn,
+            workspace_id,
+            run.channel_id,
+            run.agent_member_id,
+        )
+        .await?
+    {
         let line = match run.kind {
             StallKind::LeaseAbandoned => LINE_LEASE_ABANDONED,
             StallKind::UnclaimedExpired => LINE_UNCLAIMED_EXPIRED,

@@ -1,4 +1,9 @@
 import {
+  dmMembershipRevision,
+  removableDmAgents,
+} from '@momo/core/features/agents/dmAdmission';
+import {removeDmAgent} from '@momo/core/lib/api';
+import {
   openDirectMessage,
   uuidEq,
   type Message,
@@ -381,8 +386,8 @@ export default function ConversationScreen({
   const [bannerInset, setBannerInset] = useState(0);
   const nowMs = useNow();
 
-  const {directory, data: rosterMembers} = useDirectory(workspaceId);
-  const {groups} = useChannels(workspaceId);
+  const {directory, data: rosterMembers, refetch: refetchDirectory} = useDirectory(workspaceId);
+  const {groups, refetch: refetchChannels} = useChannels(workspaceId);
   const readStates = useReadStates(workspaceId);
   const roleLabels = useRoleLabels(workspaceId);
   const markRead = useMarkRead();
@@ -1112,6 +1117,12 @@ export default function ConversationScreen({
   const composerInputRef = useRef<TextInput | null>(null);
 
   const messages = timeline.state.messages;
+  const membershipRevision = dmMembershipRevision(messages);
+  useEffect(() => {
+    if (membershipRevision === '') return;
+    void refetchChannels(); void refetchDirectory();
+  }, [membershipRevision, refetchChannels, refetchDirectory]);
+
   // 걸어 둔 원본이 지워졌다. 서버는 받아 주지만(같은 채널이면 묘비도 유효한
   // 대상이다) 그렇게 보낸 글은 태어날 때부터 「삭제된 메시지」를 가리킨다. 조용히
   // 떼는 것이 맞다 — 걸어 둔 사람은 그 삭제를 이미 화면에서 봤다.
@@ -2129,6 +2140,7 @@ export default function ConversationScreen({
             ) : null}
             <LongPressHint visible={hint.visible} onDismiss={hint.dismiss} />
             <Composer
+              channel={channel}
               channelLabel={title}
               // 조사를 정하는 사실 (#1384): DM 의 title 은 방 이름이 아니라 상대
               // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. 상대가 명부에 없어
@@ -2219,6 +2231,8 @@ export default function ConversationScreen({
       {/* 정보 페이지. 고정 목록 뒤 — 층은 JSX 순서다. 사진 뷰어는 아래 맨 끝이라 페이지 **위에** 선다(닫으면 이 페이지로 돌아온다). */}
       {infoOpen && channel !== null ? (
         <ConversationInfoPage
+          dmAgents={removableDmAgents(channel, directory)}
+          onRemoveDmAgent={async id => { await removeDmAgent(workspaceId, channelId, id); await Promise.all([refetchChannels(), refetchDirectory()]); }}
           kind={channel.kind}
           title={title}
           directory={directory}
