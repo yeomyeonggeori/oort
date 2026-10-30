@@ -307,6 +307,7 @@ pub(crate) async fn vote_in_tx(
         .bind(approval.channel_id)
         .fetch_one(&mut *conn)
         .await?;
+    lock_agent_seat(conn, approval.workspace_id, approval.channel_id, agent_id).await?;
     sqlx::query("UPDATE dm_agent_admission SET admitted_at = clock_timestamp(), admitted_after_seq = $3 WHERE workspace_id = $1 AND id = $2 AND admitted_at IS NULL AND revoked_at IS NULL").bind(approval.workspace_id).bind(id).bind(cutover).execute(&mut *conn).await?;
     sqlx::query("INSERT INTO membership (workspace_id, channel_id, member_id, role, joined_at) VALUES ($1,$2,$3,'member',clock_timestamp()) ON CONFLICT (channel_id,member_id) DO UPDATE SET left_at = NULL, joined_at = EXCLUDED.joined_at")
         .bind(approval.workspace_id).bind(approval.channel_id).bind(agent_id).execute(&mut *conn).await?;
@@ -407,6 +408,7 @@ pub async fn remove(
     }
     let found = momo_db::with_tenant_tx(&state.pool, ws, move |conn| Box::pin(async move {
         if !lock_room(conn, ws, channel).await? || !humans(conn,ws,channel).await?.contains(&principal.member_id) { return Ok(false); }
+        lock_agent_seat(conn, ws, channel, agent).await?;
         let changed = sqlx::query("UPDATE dm_agent_admission SET revoked_at = clock_timestamp() WHERE workspace_id = $1 AND channel_id = $2 AND agent_member_id = $3 AND admitted_at IS NOT NULL AND revoked_at IS NULL")
             .bind(ws).bind(channel).bind(agent).execute(&mut *conn).await?.rows_affected();
         if changed == 0 { return Ok(false); }
@@ -421,4 +423,21 @@ pub async fn remove(
         return Err(ApiError::not_found("DM agent membership not found"));
     }
     Ok(Json(json!({"removed":true})))
+}
+
+/// Same key as migration 156's message trigger, after the channel sequence lock.
+/// A writer keeps its shared lock until commit; no seat change can overtake it.
+async fn lock_agent_seat(
+    conn: &mut PgConnection,
+    ws: Uuid,
+    channel: Uuid,
+    agent: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('dm-agent:' || $1::text || ':' || $2::text || ':' || $3::text, 0))")
+        .bind(ws)
+        .bind(channel)
+        .bind(agent)
+        .execute(conn)
+        .await?;
+    Ok(())
 }

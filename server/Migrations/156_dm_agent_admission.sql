@@ -52,18 +52,26 @@ CREATE POLICY dm_agent_read_boundary ON message AS RESTRICTIVE FOR SELECT
         OR dm_agent_message_visible(workspace_id, channel_id,
              NULLIF(current_setting('app.agent_member_id', true), '')::uuid, id, created_at, seq));
 
--- All writers, including the BYPASSRLS worker, meet the same departure gate.
--- Lock the membership until commit, so removal waits for an in-flight write;
--- after removal commits no later write can pass. Server notices are human-authored.
+-- Only the new consent-managed seats/rooms use this departure gate. Legacy
+-- personal-agent notices, persona cards and their historical edits keep their
+-- existing write contract. Even an unseated agent is gated in an admitted room.
+-- All writers (including BYPASSRLS workers and SELECT-only membership readers)
+-- take a shared transaction advisory lock; admission/removal takes its exclusive
+-- counterpart before changing the seat. No membership UPDATE privilege is needed.
 CREATE FUNCTION guard_dm_agent_write() RETURNS trigger LANGUAGE plpgsql
 SET search_path = pg_catalog, public AS $$
 BEGIN
-    IF EXISTS (SELECT 1 FROM channel WHERE id = NEW.channel_id AND workspace_id = NEW.workspace_id AND kind = 'dm')
+    IF EXISTS (SELECT 1 FROM channel c WHERE c.id = NEW.channel_id AND c.workspace_id = NEW.workspace_id AND c.kind = 'dm'
+                 AND (c.dm_key LIKE 'admitted:%' OR EXISTS (
+                     SELECT 1 FROM dm_agent_admission d WHERE d.workspace_id = NEW.workspace_id
+                       AND d.channel_id = NEW.channel_id AND d.agent_member_id = NEW.author_member_id)))
        AND EXISTS (SELECT 1 FROM member WHERE id = NEW.author_member_id AND workspace_id = NEW.workspace_id AND kind = 'agent') THEN
+        PERFORM pg_advisory_xact_lock_shared(hashtextextended(
+            'dm-agent:' || NEW.workspace_id::text || ':' || NEW.channel_id::text || ':' || NEW.author_member_id::text, 0));
         PERFORM 1 FROM membership ms JOIN member m ON m.id = ms.member_id AND m.workspace_id = ms.workspace_id
             WHERE ms.workspace_id = NEW.workspace_id AND ms.channel_id = NEW.channel_id
               AND ms.member_id = NEW.author_member_id AND ms.left_at IS NULL
-              AND m.status = 'active' AND m.deleted_at IS NULL FOR SHARE OF ms;
+              AND m.status = 'active' AND m.deleted_at IS NULL;
         IF NOT FOUND THEN
             RAISE EXCEPTION 'agent is not an active DM member' USING ERRCODE = '42501';
         END IF;
@@ -104,5 +112,8 @@ DO $$ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_worker') THEN
         GRANT SELECT ON TABLE dm_agent_admission TO momo_worker;
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_helper_read') THEN
+        GRANT SELECT ON TABLE dm_agent_admission TO momo_helper_read;
     END IF;
 END $$;

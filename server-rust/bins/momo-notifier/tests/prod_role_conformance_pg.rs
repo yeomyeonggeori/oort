@@ -1332,6 +1332,94 @@ async fn the_run_stall_and_ledger_retention_sweeps_do_real_work_as_their_product
 
 #[tokio::test]
 #[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
+async fn dm_expiry_and_stall_lines_run_as_the_production_notifier_without_membership_writes() {
+    let db = ProdDb::create().await;
+    let seeded = seed_hosted_work_run(&db.su).await;
+    sqlx::query("UPDATE channel SET kind='dm', dm_key='admitted:' || id::text WHERE id=$1")
+        .bind(seeded.channel)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO dm_agent_admission(workspace_id,channel_id,agent_member_id,requested_by,trigger_message_id,required_human_ids,expires_at,admitted_at,admitted_after_seq) \
+        VALUES($1,$2,$3,$4,$5,ARRAY[$4::uuid],now()+interval '15 minutes',clock_timestamp(),1)")
+        .bind(seeded.workspace).bind(seeded.channel).bind(seeded.agent).bind(seeded.requester).bind(seeded.answer)
+        .execute(&db.su).await.unwrap();
+    sqlx::query("UPDATE channel_seq SET last_seq=1 WHERE channel_id=$1")
+        .bind(seeded.channel)
+        .execute(&db.su)
+        .await
+        .unwrap();
+    let approval = Uuid::new_v4();
+    sqlx::query("INSERT INTO approval(id,workspace_id,run_id,channel_id,requested_by,action_type,payload,status,expires_at) \
+        VALUES($1,$2,$3,$4,$5,'workspace_action','{\"action\":{\"id\":\"channel.create\",\"args\":{}}}','pending',now()-interval '1 minute')")
+        .bind(approval).bind(seeded.workspace).bind(seeded.parked_run).bind(seeded.channel).bind(seeded.agent)
+        .execute(&db.su).await.unwrap();
+    let stalled = Uuid::new_v4();
+    sqlx::query("INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,status,input,idempotency_key,started_at,updated_at) \
+        VALUES($1,$2,$3,$4,'running','{}',$5,now()-interval '5 hours',now()-interval '4 hours')")
+        .bind(stalled).bind(seeded.workspace).bind(seeded.agent).bind(seeded.channel).bind(format!("t:{stalled}"))
+        .execute(&db.su).await.unwrap();
+    sqlx::query("INSERT INTO outbox(workspace_id,kind,status,method,payload,partition_key,lease_owner,lease_acquired_at,lease_expires_at) \
+        VALUES($1,'agent_job','pending','gateway',$2,$3,uuidv7(),now()-interval '5 hours',now()-interval '4 hours')")
+        .bind(seeded.workspace).bind(serde_json::json!({"agent_member_id":seeded.agent,"run_id":stalled,"channel_id":seeded.channel}))
+        .bind(seeded.agent).execute(&db.su).await.unwrap();
+
+    let notifier = db.role("momo_notifier", "momo_notifier_dev_pw").await;
+    let actual_role: String = sqlx::query_scalar("SELECT current_user::text")
+        .fetch_one(&notifier)
+        .await
+        .unwrap();
+    assert_eq!(actual_role, "momo_notifier");
+    let may_update: bool =
+        sqlx::query_scalar("SELECT has_any_column_privilege(current_user,'membership','UPDATE')")
+            .fetch_one(&notifier)
+            .await
+            .unwrap();
+    assert!(
+        !may_update,
+        "membership remains SELECT-only for the notifier"
+    );
+    let expired = approval_sweep::sweep_expired_approvals(&notifier, 32)
+        .await
+        .unwrap();
+    assert_eq!(
+        expired.expired, 1,
+        "the whole expiry transaction must commit in a DM: {expired:?}"
+    );
+    let stalled_stats = momo_notifier::run_stall_sweep::sweep_stalled_runs(
+        &notifier,
+        momo_outbox::StallPolicy::default(),
+        32,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        stalled_stats.lease_abandoned, 1,
+        "the stall line must commit in a DM: {stalled_stats:?}"
+    );
+    let status: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&db.su)
+        .await
+        .unwrap();
+    assert_eq!(status, "expired");
+    for run in [seeded.parked_run, stalled] {
+        let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
+            .bind(run)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
+        assert_eq!(status, "timed_out");
+        let lines: i64 = sqlx::query_scalar("SELECT count(*) FROM message WHERE channel_id=$1 AND author_member_id=$2 AND run_id=$3")
+            .bind(seeded.channel).bind(seeded.agent).bind(run).fetch_one(&db.su).await.unwrap();
+        assert_eq!(lines, 1, "one durable agent-authored line for each sweep");
+    }
+    notifier.close().await;
+    db.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "needs a pgvector/pg18 superuser DB (DATABASE_URL); creates and drops a database"]
 async fn the_notifier_role_has_no_delete_and_no_table_it_does_not_name() {
     let db = ProdDb::create().await;
     let offenders: Vec<String> = sqlx::query_scalar(

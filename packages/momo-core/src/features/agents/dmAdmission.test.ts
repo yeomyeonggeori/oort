@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Channel, RosterMember } from "../../lib/api";
+import type { Channel, Message, RosterMember } from "../../lib/api";
 import {
   makeDirectory,
   dmPeer,
@@ -11,6 +11,7 @@ import { approvalCardNote } from "../timeline/approvalNote";
 import {
   dmAdmissionCandidates,
   dmAdmissionHint,
+  dmMembershipRevision,
   removableDmAgents,
 } from "./dmAdmission";
 
@@ -45,6 +46,17 @@ const channel: Channel = {
 const directory = makeDirectory([self, peer, agent]);
 
 describe("consented agent DM", () => {
+  it("refreshes membership only for server membership notices", () => {
+    const notice = (id: string, type: Message["type"], kind: string) =>
+      ({ id, type, props: { kind } });
+    expect(dmMembershipRevision([
+      notice("joined", "system", "dm_agent_membership"),
+      notice("ordinary", "text", "dm_agent_membership"),
+      notice("other", "system", "another_notice"),
+      notice("removed", "system", "dm_agent_membership"),
+    ])).toBe("joined,removed");
+    expect(dmMembershipRevision([])).toBe("");
+  });
   it("explains the other person's consent and ongoing reading before sending", () => {
     expect(dmAdmissionHint("@grok help", channel, directory, self.id)).toBe(
       "Peer님이 허락하면 grok이 이 대화에 들어와요. 이후 대화를 봐요."

@@ -1,8 +1,22 @@
-import type { Channel, RosterMember } from "../../lib/api";
+import type { Channel, Message, RosterMember } from "../../lib/api";
 import type { Directory } from "../workspace/directory";
 import { idKey } from "../workspace/directory";
 import { mentionedAgents } from "../routing/mentionTargets";
 import { attachParticle } from "../../lib/koreanParticle";
+
+/** Server membership notices invalidate the conversation roster on both clients. */
+export function dmMembershipRevision(
+  messages: readonly Pick<Message, "id" | "type" | "props">[]
+): string {
+  return messages
+    .filter(
+      (message) =>
+        message.type === "system" &&
+        message.props?.kind === "dm_agent_membership"
+    )
+    .map((message) => message.id)
+    .join(",");
+}
 
 /** Display eligibility. The server re-proves the full invocation policy. */
 export function dmCallableAgent(agent: RosterMember, selfId: string): boolean {

@@ -27,6 +27,8 @@
 | `routes/agent_mentions.rs` | 미착석 멘션은 허락 카드를 만들 뿐 run job을 내보내지 않는다. 착석 뒤는 기존 멘션 gate·직렬화·멱등성으로 전달한다. |
 | `momo-messaging/src/message.rs`의 최근 대화, worker A2A | 에이전트마다 다른 착석 하한이므로 최근 대화 캐시를 에이전트 사이에 공유하지 않는다. BYPASSRLS worker도 명시적 가시성 함수를 통과한다. |
 | Agent Port `oort_conversation_read`, jobs claim/start, REST history·thread·search | 인증된 에이전트의 request-local 읽기 주체를 tx GUC에 묶고 message의 restrictive SELECT RLS로 과거 글을 거른다. 인용·스레드·검색의 하위 조회도 같은 경계다. 사람이 읽는 이력은 그대로다. |
+| 팀 AI 읽기 도구 `team_ai_read` | 요청자 권한·답장 청중과 함께 팀 AI 자신의 request-local 에이전트 주체를 읽기 tx에 묶는다. `momo_helper_read`는 NOBYPASSRLS·SELECT 전용이며 admission 조회만 더한다. 채널 지정/워크스페이스 검색·대화·스레드 모두 현재 착석 하한을 따른다. |
+| 공통 `guard_dm_agent_write`·착석/내보내기 | 해당 `(workspace, channel, agent)` admission 행이 있거나 `admitted:` DM인 경우에만 새 좌석의 현재 멤버 조건을 적용한다. 기존 개인 에이전트 안내·persona 카드·정지/은퇴 뒤 옛 카드 갱신은 기존 계약을 유지한다. 쓰기는 같은 workspace·channel·agent 키의 공유 transaction advisory 잠금, 착석/내보내기는 배타 잠금을 쓰며 membership UPDATE 권한을 추가하지 않는다. 서버 경로는 channel_seq 다음에 좌석 잠금을 잡는다. |
 | `momo-messaging/src/dm.rs` open/list·`channel.dm_key` | 열기는 기존 정확히 둘 API. 합류한 대화는 id를 보존하고 pair key를 은퇴시킨다. 목록의 `memberIds`는 활성 전체다. |
 | 코어 `workspace/directory.ts`의 `dmPeer`·`channelLabelParts`·`dmAutoReplyAgent` | 상대 한 명을 임의 선택하지 않는다. 그룹은 멤버 이름과 인원, 개인 상태 점·개인 프로필 열기는 실제 1:1만. 자동 답장 안내도 실제 1:1만. |
 | 폰 `ConversationHeader`·`ConversationInfoPage`, 웹 채널 머리·사이드바 | 그룹 멤버 이름·인원 및 에이전트 표시. 멤버 메뉴에서 현재 에이전트 내보내기. 합류/내보내기 시스템 줄은 서버가 쓴 사실이다. |
@@ -43,7 +45,7 @@
 - **동의 없는 착석/사칭**: 서버 전용 action, 사람 principal + 활성 DM membership + pinned target. 전원 승인·만료·청중 고정을 DB에서 재증명한다. 클라이언트 props가 권한이 되지 않는다.
 - **런타임 바꿔치기**: 동의한 hosted connection id를 고정한다. 연결 재등록·권한/주체 변화는 재동의 경로를 요구한다.
 - **답 폭주**: 1:1 자동 답장 규칙 불변, 그룹 명시 호출, 중복 대기 카드 병합, job 멱등키, 기존 A2A 예산/깊이.
-- **내보낸 뒤 쓰기**: 진행 run 취소 + 공통 message INSERT/UPDATE 트리거의 현재 membership 잠금. BYPASSRLS worker에도 적용한다. 이미 시작한 쓰기와 내보내기는 직렬화해 제거 commit 뒤 새 쓰기를 허용하지 않는다.
+- **내보낸 뒤 쓰기**: 진행 run 취소 + 동의 좌석/대화의 공통 message INSERT/UPDATE 트리거와 현재 membership 검사. BYPASSRLS worker에도 적용한다. 공유/배타 transaction advisory 잠금으로 이미 시작한 쓰기와 내보내기를 직렬화해 제거 commit 뒤 새 쓰기를 허용하지 않는다.
 
 ## 검증과 전달
 

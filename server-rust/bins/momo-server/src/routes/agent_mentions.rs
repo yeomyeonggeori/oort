@@ -2068,6 +2068,144 @@ async fn paused(
     Ok(())
 }
 
+/// Test the ordinary invocation gates with only the proposed seat/room approval supplied.
+pub(crate) fn dm_admission_invocable(agent: &MentionCandidate, send: &MentionSend<'_>) -> bool {
+    matches!(delivery_gate(agent, send), DeliveryGate::Open { .. })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn admission_send<'a>(
+    state: &'a crate::AppState,
+    ws: Uuid,
+    channel: Uuid,
+    requester: Uuid,
+    message: Uuid,
+    seq: i64,
+    body: &'a str,
+    connector_trial: &'a momo_agent::ConnectorTrialAttest,
+) -> MentionSend<'a> {
+    MentionSend {
+        workspace_id: ws,
+        channel_id: channel,
+        message_id: message,
+        message_seq: seq,
+        root_id: None,
+        author_member_id: requester,
+        author_is_agent: false,
+        author_is_human: true,
+        body,
+        hlc_ts: chrono::Utc::now().timestamp_millis(),
+        via_token_id: None,
+        gateway_enabled: state.agent_gateway.enabled(),
+        hosted_delivery_enabled: state.agent_port.config.hosted_delivery_enabled,
+        subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
+        claude_subscription_agents_enabled: state
+            .agent_port
+            .config
+            .claude_subscription_agents_enabled,
+        connector_trial,
+        context_max_messages: state.mentions.context_max_messages,
+        inplace_grant_enabled: false,
+        routing: None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn reprove_dm_admission_in_tx(
+    conn: &mut PgConnection,
+    state: &crate::AppState,
+    ws: Uuid,
+    channel: Uuid,
+    requester: Uuid,
+    target: Uuid,
+    connection: Option<Uuid>,
+) -> Result<bool, DbError> {
+    let candidates = load_mention_candidates_in_tx(conn, ws, channel).await?;
+    let Some(mut agent) = candidates.into_iter().find(|a| a.member_id == target) else {
+        return Ok(false);
+    };
+    if agent.hosted_active_connection_id != connection
+        || (connection.is_some() && !agent.hosted_confirmed_by_owner)
+    {
+        return Ok(false);
+    }
+    agent.is_channel_member = true;
+    agent.hosted_channel_approved = true;
+    let attest = state.cohosted.config.attest();
+    Ok(dm_admission_invocable(
+        &agent,
+        &admission_send(state, ws, channel, requester, Uuid::nil(), 0, "", &attest),
+    ))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn enqueue_dm_admission_trigger_in_tx(
+    conn: &mut PgConnection,
+    state: &crate::AppState,
+    ws: Uuid,
+    channel: Uuid,
+    requester: Uuid,
+    target: Uuid,
+    message: Uuid,
+    requested: Option<&RequestedRouting>,
+) -> Result<(), DbError> {
+    let row = momo_messaging::find_message_in_tx(conn, channel, message)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
+    if row.author_member_id != requester || row.state == "deleted" {
+        return Err(sqlx::Error::RowNotFound.into());
+    }
+    let seq = row.seq;
+    let body = row.body.unwrap_or_default();
+    let attest = state.cohosted.config.attest();
+    let mut send = admission_send(state, ws, channel, requester, message, seq, &body, &attest);
+    send.routing = requested;
+    let candidates = load_mention_candidates_in_tx(conn, ws, channel).await?;
+    let agent = candidates
+        .iter()
+        .find(|a| a.member_id == target)
+        .ok_or(sqlx::Error::RowNotFound)?;
+    let DeliveryGate::Open {
+        hosted_connection_id,
+    } = delivery_gate(agent, &send)
+    else {
+        return Err(sqlx::Error::Protocol("admitted agent failed delivery gate".into()).into());
+    };
+    let trigger = MentionTrigger {
+        workspace_id: ws,
+        channel_id: channel,
+        message_id: message,
+        message_seq: seq,
+        author_member_id: requester,
+        body: &body,
+        hlc_ts: send.hlc_ts,
+    };
+    let routing = resolve_mention_routing(agent, requested)
+        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+    enqueue_turn_in_tx(
+        conn,
+        &send,
+        &trigger,
+        agent,
+        Turn {
+            trigger: RunTrigger::Mention {
+                message_id: message,
+                agent_member_id: target,
+            },
+            addressing: Addressing::Mention,
+            requested,
+            wake_reason: None,
+            queued_action: MENTION_QUEUED_ACTION,
+            announce_offline_queue: false,
+        },
+        hosted_connection_id,
+        &routing,
+        &mut None,
+    )
+    .await?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2681,142 +2819,4 @@ mod tests {
         assert_eq!(unique.len(), actions.len());
         assert_eq!(THREAD_REPLY_WAKE_REASON, Addressing::ThreadReply.as_label());
     }
-}
-
-/// Test the ordinary invocation gates with only the proposed seat/room approval supplied.
-pub(crate) fn dm_admission_invocable(agent: &MentionCandidate, send: &MentionSend<'_>) -> bool {
-    matches!(delivery_gate(agent, send), DeliveryGate::Open { .. })
-}
-
-#[allow(clippy::too_many_arguments)]
-fn admission_send<'a>(
-    state: &'a crate::AppState,
-    ws: Uuid,
-    channel: Uuid,
-    requester: Uuid,
-    message: Uuid,
-    seq: i64,
-    body: &'a str,
-    connector_trial: &'a momo_agent::ConnectorTrialAttest,
-) -> MentionSend<'a> {
-    MentionSend {
-        workspace_id: ws,
-        channel_id: channel,
-        message_id: message,
-        message_seq: seq,
-        root_id: None,
-        author_member_id: requester,
-        author_is_agent: false,
-        author_is_human: true,
-        body,
-        hlc_ts: chrono::Utc::now().timestamp_millis(),
-        via_token_id: None,
-        gateway_enabled: state.agent_gateway.enabled(),
-        hosted_delivery_enabled: state.agent_port.config.hosted_delivery_enabled,
-        subscription_agents_enabled: state.agent_port.config.subscription_agents_enabled,
-        claude_subscription_agents_enabled: state
-            .agent_port
-            .config
-            .claude_subscription_agents_enabled,
-        connector_trial,
-        context_max_messages: state.mentions.context_max_messages,
-        inplace_grant_enabled: false,
-        routing: None,
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn reprove_dm_admission_in_tx(
-    conn: &mut PgConnection,
-    state: &crate::AppState,
-    ws: Uuid,
-    channel: Uuid,
-    requester: Uuid,
-    target: Uuid,
-    connection: Option<Uuid>,
-) -> Result<bool, DbError> {
-    let candidates = load_mention_candidates_in_tx(conn, ws, channel).await?;
-    let Some(mut agent) = candidates.into_iter().find(|a| a.member_id == target) else {
-        return Ok(false);
-    };
-    if agent.hosted_active_connection_id != connection
-        || (connection.is_some() && !agent.hosted_confirmed_by_owner)
-    {
-        return Ok(false);
-    }
-    agent.is_channel_member = true;
-    agent.hosted_channel_approved = true;
-    let attest = state.cohosted.config.attest();
-    Ok(dm_admission_invocable(
-        &agent,
-        &admission_send(state, ws, channel, requester, Uuid::nil(), 0, "", &attest),
-    ))
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn enqueue_dm_admission_trigger_in_tx(
-    conn: &mut PgConnection,
-    state: &crate::AppState,
-    ws: Uuid,
-    channel: Uuid,
-    requester: Uuid,
-    target: Uuid,
-    message: Uuid,
-    requested: Option<&RequestedRouting>,
-) -> Result<(), DbError> {
-    let row = momo_messaging::find_message_in_tx(conn, channel, message)
-        .await?
-        .ok_or(sqlx::Error::RowNotFound)?;
-    if row.author_member_id != requester || row.state == "deleted" {
-        return Err(sqlx::Error::RowNotFound.into());
-    }
-    let seq = row.seq;
-    let body = row.body.unwrap_or_default();
-    let attest = state.cohosted.config.attest();
-    let mut send = admission_send(state, ws, channel, requester, message, seq, &body, &attest);
-    send.routing = requested;
-    let candidates = load_mention_candidates_in_tx(conn, ws, channel).await?;
-    let agent = candidates
-        .iter()
-        .find(|a| a.member_id == target)
-        .ok_or(sqlx::Error::RowNotFound)?;
-    let DeliveryGate::Open {
-        hosted_connection_id,
-    } = delivery_gate(agent, &send)
-    else {
-        return Err(sqlx::Error::Protocol("admitted agent failed delivery gate".into()).into());
-    };
-    let trigger = MentionTrigger {
-        workspace_id: ws,
-        channel_id: channel,
-        message_id: message,
-        message_seq: seq,
-        author_member_id: requester,
-        body: &body,
-        hlc_ts: send.hlc_ts,
-    };
-    let routing = resolve_mention_routing(agent, requested)
-        .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
-    enqueue_turn_in_tx(
-        conn,
-        &send,
-        &trigger,
-        agent,
-        Turn {
-            trigger: RunTrigger::Mention {
-                message_id: message,
-                agent_member_id: target,
-            },
-            addressing: Addressing::Mention,
-            requested,
-            wake_reason: None,
-            queued_action: MENTION_QUEUED_ACTION,
-            announce_offline_queue: false,
-        },
-        hosted_connection_id,
-        &routing,
-        &mut None,
-    )
-    .await?;
-    Ok(())
 }

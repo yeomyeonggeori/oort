@@ -1,4 +1,7 @@
-import {removableDmAgents} from '@momo/core/features/agents/dmAdmission';
+import {
+  dmMembershipRevision,
+  removableDmAgents,
+} from '@momo/core/features/agents/dmAdmission';
 import {removeDmAgent} from '@momo/core/lib/api';
 import {
   openDirectMessage,
@@ -1114,7 +1117,7 @@ export default function ConversationScreen({
   const composerInputRef = useRef<TextInput | null>(null);
 
   const messages = timeline.state.messages;
-  const membershipRevision = messages.filter(m => m.type === 'system' && m.props?.kind === 'dm_agent_membership').map(m => m.id).join(',');
+  const membershipRevision = dmMembershipRevision(messages);
   useEffect(() => {
     if (membershipRevision === '') return;
     void refetchChannels(); void refetchDirectory();

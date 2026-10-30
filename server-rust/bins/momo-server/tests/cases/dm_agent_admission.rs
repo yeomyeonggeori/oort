@@ -344,6 +344,96 @@ async fn dm_admission_time_and_sequence_floor_filter_history_and_worker_context(
 
 #[tokio::test]
 #[ignore = "dedicated real PG"]
+async fn dm_admission_an_unseated_agent_cannot_write_in_an_admitted_room() {
+    let f = Fixture::new().await;
+    f.admit().await;
+    let stranger = seed_agent(&f.su, &f.tenant, "not-consented", false).await;
+    let (ws, channel) = (f.tenant.workspace, f.channel);
+    let result = momo_db::with_tenant_tx(&f.su, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::send_message_in_tx(
+                conn,
+                ws,
+                momo_messaging::NewMessage::text(channel, stranger, "not seated".to_string()),
+            )
+            .await
+        })
+    })
+    .await;
+    let error = result.expect_err("no admission row must not bypass an admitted room's gate");
+    assert!(
+        error
+            .to_string()
+            .contains("agent is not an active DM member"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG"]
+async fn dm_admission_removal_waits_for_an_inflight_message_edit_then_rejects_later_edits() {
+    let f = Fixture::new().await;
+    f.admit().await;
+    let (ws, channel, agent) = (f.tenant.workspace, f.channel, f.agent);
+    let sent = momo_db::with_tenant_tx(&f.su, ws, move |conn| {
+        Box::pin(async move {
+            momo_messaging::send_message_in_tx(
+                conn,
+                ws,
+                momo_messaging::NewMessage::text(channel, agent, "answer".to_string()),
+            )
+            .await
+        })
+    })
+    .await
+    .unwrap();
+    // An edit holds no channel_seq lock: only the trigger's shared advisory
+    // lock can make the HTTP remover wait for this transaction.
+    let mut edit = f.su.begin().await.unwrap();
+    let holder: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *edit)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE message SET body='edited before removal' WHERE id=$1")
+        .bind(sent.message.id)
+        .execute(&mut *edit)
+        .await
+        .unwrap();
+    let client = f.http.clone();
+    let url = format!(
+        "{}/v1/workspaces/{ws}/channels/{channel}/dm-agents/{agent}",
+        f.base
+    );
+    let token = f.peer_token.clone();
+    let removal =
+        tokio::spawn(async move { client.delete(url).bearer_auth(token).send().await.unwrap() });
+    let waiting = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let blocked: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND mode='ExclusiveLock' AND NOT granted AND $1=ANY(pg_blocking_pids(pid)))")
+                .bind(holder).fetch_one(&f.su).await.unwrap();
+            if blocked { break; }
+            assert!(!removal.is_finished(), "removal must wait for the in-flight edit's shared seat lock");
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    }).await;
+    edit.commit().await.unwrap();
+    assert!(
+        waiting.is_ok(),
+        "the real remover must acquire the exclusive seat lock"
+    );
+    assert_eq!(removal.await.unwrap().status(), 200);
+    let late = sqlx::query("UPDATE message SET body='edited after removal' WHERE id=$1")
+        .bind(sent.message.id)
+        .execute(&f.su)
+        .await;
+    assert!(
+        late.is_err(),
+        "even a superuser cannot edit as the removed agent"
+    );
+}
+
+#[tokio::test]
+#[ignore = "dedicated real PG"]
 async fn dm_admission_remove_revokes_read_write_and_rejoin_resets_history() {
     let f = Fixture::new().await;
     f.admit().await;
