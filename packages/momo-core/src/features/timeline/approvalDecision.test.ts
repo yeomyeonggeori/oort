@@ -111,6 +111,19 @@ describe("영수증이 아닌 답 (2R, 리뷰 M5 이관)", () => {
 // "누가, 언제"뿐이었다. 그 둘은 웹 카드의 「승인」 원장 줄이 서는 조건 그 자체라,
 // 결정한 직후 그 줄이 통째로 사라진다 — 오류 하나 없이.
 describe("영수증은 두 표기를 모두 읽는다 (2R N2)", () => {
+  it("이미 취소된 승인의 200 영수증은 cancelled 상태를 보존한다 (ADR-0217)", () => {
+    expect(interpretReceipt(200, {
+      approvalId: "a",
+      status: "cancelled",
+      decidedBy: null,
+      decidedAtMs: 1_700_000_000_000,
+    })).toEqual({
+      kind: "committed",
+      status: "cancelled",
+      decidedAtMs: 1_700_000_000_000,
+    });
+  });
+
   const snake = {
     approval_id: "a",
     status: "approved",

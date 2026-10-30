@@ -57,8 +57,8 @@ use momo_agent::{
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{DbError, PgConnection};
 use momo_messaging::{
-    agent_auto_reply_streak_in_tx, agent_context_window_in_tx, contains_mention_with_aliases,
-    send_message_in_tx, MessageType, NewMessage,
+    agent_auto_reply_streak_in_tx, agent_context_window_for_member_in_tx,
+    contains_mention_with_aliases, send_message_in_tx, MessageType, NewMessage,
 };
 use serde_json::Value;
 use uuid::Uuid;
@@ -159,10 +159,6 @@ pub async fn route_a2a_mentions_in_tx(
         body: send.body,
         hlc_ts: send.hlc_ts,
     };
-
-    // One window for the whole reply, read lazily — same rule as B5.2: every
-    // agent mentioned in the same utterance sees the same channel.
-    let mut context_window: Option<Vec<Value>> = None;
 
     for agent in &mentioned {
         // An agent mentioning itself. Not a Swift gate (Swift has no A2A spawn),
@@ -364,18 +360,14 @@ pub async fn route_a2a_mentions_in_tx(
             continue;
         }
 
-        if context_window.is_none() {
-            context_window = Some(
-                agent_context_window_in_tx(
-                    &mut *conn,
-                    send.channel_id,
-                    send.message_id,
-                    send.context_max_messages,
-                )
-                .await?,
-            );
-        }
-        let window = context_window.as_deref().unwrap_or_default();
+        let window = agent_context_window_for_member_in_tx(
+            &mut *conn,
+            send.channel_id,
+            send.message_id,
+            send.context_max_messages,
+            Some(agent.member_id),
+        )
+        .await?;
 
         let delivery = if send.gateway_enabled {
             momo_agent::MENTION_JOB_METHOD_GATEWAY
@@ -387,7 +379,7 @@ pub async fn route_a2a_mentions_in_tx(
             agent,
             &routing_choice,
             created.id,
-            window,
+            &window,
             depth,
             delivery,
         );

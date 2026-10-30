@@ -663,7 +663,7 @@ async fn b51_1_a_turn_answers_in_the_channel_and_bills_the_run() {
     // 4. The turn is billed once, with the measured token counts.
     let ledger = sqlx::query(
         "SELECT model, prompt_tokens, completion_tokens, cached_tokens, \
-                reasoning_tokens, was_estimated \
+                reasoning_tokens, was_estimated, source \
            FROM usage_ledger WHERE workspace_id = $1 AND run_id = $2",
     )
     .bind(tenant.workspace_id)
@@ -672,6 +672,7 @@ async fn b51_1_a_turn_answers_in_the_channel_and_bills_the_run() {
     .await
     .expect("read ledger");
     assert_eq!(ledger.len(), 1, "exactly one immutable ledger row per run");
+    assert_eq!(ledger[0].get::<String, _>("source"), "measured");
     assert_eq!(ledger[0].get::<String, _>("model"), AGENT_MODEL);
     assert_eq!(ledger[0].get::<i32, _>("prompt_tokens"), 11);
     assert_eq!(ledger[0].get::<i32, _>("completion_tokens"), 7);

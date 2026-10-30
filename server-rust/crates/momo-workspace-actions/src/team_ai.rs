@@ -869,6 +869,10 @@ async fn requester_could_approve_in_tx(
                 false
             }
         }
+        // A DM admission card is decided only by the participant pinned on it (ADR-0217);
+        // the team AI never proposes `dm.agent.admit` (not on `TEAM_AI_ACTION_IDS`), so this
+        // arm stays exhaustive and fail-closed.
+        RequiredRole::DmParticipant => false,
         // Only the human who started this run, for either self-profile action (v7).
         RequiredRole::RequestingMember => {
             matches!(subject, GateSubject::Member(target) if target == requester)

@@ -1,14 +1,15 @@
 # oort default Hermes config (ADR-0203 D6 tool lock; #4072). The compose `agents` profile mounts this read-only
 # and the Railway `hermes` service receives it base64 in HERMES_CONFIG_B64. It is copied to /opt/data/config.yaml on
 # EVERY start and checked by lockgate.py BEFORE the Hermes entrypoint (so before any listener) runs.
-# Deny-list is Hermes' only switch (agent.disabled_toolsets); lockgate.py adds the allow-list.
-# Remaining chat-only surface after this list: memory, todo, session_search.
+# api_server selects the search-only `search` toolset, never the combined `web` toolset (#4794).
+# agent.disabled_toolsets keeps the other locks; lockgate.py checks the final tool names and search backend.
+# Surface: memory, todo, session_search + Codex subscription web_search. web_extract stays outside the allow-list.
 #
 # No `model:` section and no `mcp_servers` on purpose. Model auth (API key / OAuth) is a separate step
 # (#4073): without it Hermes still starts and answers /health and /v1/models, and the first chat turn fails
 # until a model is set. `mcp_servers` empty = no connector mode (see google-connectors.config.yaml for that).
 agent:
-  max_turns: 12           # chat-only agent: bound tool-loop cost (Hermes default is 500)
+  max_turns: 12           # bound tool-loop cost (Hermes default is 500)
   disabled_toolsets:
     - terminal        # OWNER-MANDATED. Shell: terminal + process_manage (a tool inside this toolset, not a toolset). Verified: ran an echo with no approval
     - code_execution  # OWNER-MANDATED. execute_code (arbitrary Python)
@@ -18,7 +19,6 @@ agent:
     - delegation      # delegate_task: sub-agents (children inherit this list; off for cost and blast radius)
     - cronjob         # cronjob_manage: unattended scheduled runs that outlive the chat
     - computer_use    # desktop control (Hermes already drops it for api_server; explicit on purpose)
-    - web             # web_search/web_extract: model-directed outbound fetches = exfil path for chat content (private ranges are blocked by Hermes)
     - vision          # vision_analyze: model-chosen image URLs or paths
     - image_gen       # image_generate (outbound provider call)
     - video           # video_analyze
@@ -34,6 +34,16 @@ agent:
     - discord_admin   # discord admin tool
     - yuanbao         # yuanbao messaging tools
     - a2a             # agent-to-agent calls to other endpoints
+platform_toolsets:
+  api_server:
+    - memory
+    - todo
+    - session_search
+    - search          # Hermes v0.22.2: web_search only; adding `web` would fail the lockgate
+web:
+  search_backend: openai-native  # Codex Responses server-side search; requires existing openai-codex OAuth
+  keyless_fallback: false        # no anonymous third-party search fallback
+# Connector mode is a separate config: it MUST disable the entire `web` toolset (ADR-0203 K4-1).
 approvals:
   mode: manual            # never "off"; no HERMES_YOLO_MODE
   unattended_mode: deny   # API sessions cannot approve anything

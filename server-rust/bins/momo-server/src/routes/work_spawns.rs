@@ -595,6 +595,20 @@ async fn spawn_in_tx(
                 "only the owner's own personal agent can be named here",
             )));
         }
+        if !momo_messaging::dm::dm_agent_can_speak_in_tx(
+            conn,
+            workspace_id,
+            request.channel_id,
+            agent,
+        )
+        .await?
+        {
+            return Ok(Err(ApiError::coded(
+                StatusCode::CONFLICT,
+                "dm_agent_consent_required",
+                "this personal agent cannot start work in this group DM; use a conversation with its owner",
+            )));
+        }
     }
     if !origin_is_valid_in_tx(
         conn,

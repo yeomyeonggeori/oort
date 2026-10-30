@@ -45,6 +45,7 @@ pub mod device_link;
 pub mod devices;
 /// ADR-0165 / LIVE-1 — 관전 라이브 화면: the display half of the attach plane.
 pub mod display_attach;
+pub mod dm_agents;
 /// ADR-0177 증보 D7 / #4227 — `PUT|DELETE …/channels/{ch}/closure`: the member's own DM closure watermark.
 pub mod dm_closure;
 pub mod dms;
