@@ -75,6 +75,7 @@ export interface UsageBudget {
 }
 
 export interface UsageSummary {
+  scope?: "visible";
   range: UsageRange;
   totals: UsageTotals;
   buckets: UsageBucket[];
@@ -129,6 +130,7 @@ export function parseUsageSummary(raw: unknown): UsageSummary {
   const budget = asRecord(root["budget"]);
 
   return {
+    ...(root["scope"] === "visible" ? { scope: "visible" as const } : {}),
     range: {
       from: str(range, "from"),
       to: str(range, "to"),

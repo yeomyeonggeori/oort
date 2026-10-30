@@ -1,3 +1,4 @@
+import { AgentUsageLine, HiddenAgentUsage } from "@/features/settings/AgentUsage";
 import {
   useEffect,
   useMemo,
@@ -247,6 +248,7 @@ function AgentListRow({
           {/* 「활성」은 증명이 한 번 성공했다는 뜻이다. 지금 응답하는지는 이 라벨이 따로
               말한다(ADR-0200 D4): 목록에서 두 낱말이 한 행에 나란히 서야 혼동되지 않는다. */}
           <AgentLivenessLabel agentId={agent.id} />
+          <AgentUsageLine agentId={agent.id} />
           {current && (
             <span className="flex items-center gap-1">
               <AgentTurnBadge
@@ -446,6 +448,7 @@ export function AgentHubRoute() {
 
       <div className="agent-hub-layout">
         <aside className="agent-hub-roster">
+          <HiddenAgentUsage workspaceId={workspaceId} />
           {directoryQuery.isPending && agents.length === 0 ? (
             <AgentHubLoading
               message="에이전트 명부를 불러오는 중이에요."
@@ -533,6 +536,7 @@ export function AgentHubRoute() {
                     </p>
                     {/* 지금 살아 있는가(ADR-0200 D4)와 다시 깨우기. 「활성」 같은 연결
                         상태와 다른 사실이다. */}
+                    <AgentUsageLine agentId={selected.id} />
                     <AgentLivenessBar
                       key={normalizedId(selected.id)}
                       agentId={selected.id}
