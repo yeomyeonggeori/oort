@@ -14945,6 +14945,7 @@ components:
         - kind
         - sourceUrl
         - prompt
+        - sourceAttachmentId
         properties:
           kind:
             enum:
@@ -14962,6 +14963,15 @@ components:
             type: string
             minLength: 1
             maxLength: 2000
+          sourceAttachmentId:
+            oneOf:
+            - type: string
+              minLength: 36
+              maxLength: 36
+              pattern: ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+            - nullable: true
+              enum:
+              - null
     ExpressionSmallImage:
       oneOf:
       - type: object
@@ -15560,6 +15570,12 @@ components:
             - source_invalid_media
             - video_processing_unavailable
             - video_conversion_failed
+            - generation_failed
+            - assembly_source_invalid
+            - assembly_source_too_large
+            - assembly_output_too_large
+            - assembly_timeout
+            - assembly_busy
           media:
             nullable: true
             enum:
@@ -18843,11 +18859,14 @@ components:
         that human's approval. It reuses PATCH /members/me normalization,
         rename, broadcast and audit. Handle and past mention text stay unchanged.
         `expression.create` (`{candidates:[1-4 x {name,displayName,tags,subjectMemberId,
-        image:{source:attachment|url|generated}}]}`, `expression_adder`; ADR-0186
+        image:{source:attachment|url|generated|assembled}}]}`, `expression_adder`; ADR-0186
         amendment v8, ADR-0218 appendix B, #4829) lets an external agent offer up to four
         candidate pictures for ONE team expression. The server fetches/decodes every candidate
         itself (an attachment of the person who called the agent in this conversation, one
-        public HTTPS link on port 443, or bytes the agent made, at most 1 MiB), stores each
+        public HTTPS link on port 443, bytes the agent made, at most 1 MiB, or one candidate
+        of a motion assembly the server kept for this agent, `{source:assembled,assemblyId,
+        index}`, ADR-0218 G3.6 / #4820 C2b: another agent's, another person's, an expired or an
+        unknown assembly are one and the same `invalid arguments`), stores each
         as a draft, and the approval card (`props.action.expression`, ADR-0218 `Approval`)
         shows the stored pictures; approving takes the person's
         `expressionChoice:{draftId,revision,sha256}` and registers exactly that one. A

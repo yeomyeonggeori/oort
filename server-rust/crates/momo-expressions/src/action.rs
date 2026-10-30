@@ -21,8 +21,8 @@ use crate::store::{
     metadata, put_images, unexpired,
 };
 use crate::{
-    hash, valid_source_url, version, Actor, Choice, Error, ImageInfo, Metadata, Origin, QUOTA,
-    SOURCE_CODES,
+    hash, valid_source_url, version, Actor, Choice, Error, ImageInfo, Metadata, Origin,
+    FAILURE_CODES, QUOTA, SOURCE_CODES,
 };
 
 /// ADR-0218 appendix B: `candidates` is 1-4.
@@ -36,6 +36,10 @@ pub const PREPARE_DEADLINE: std::time::Duration = std::time::Duration::from_secs
 pub struct Candidate {
     pub meta: Metadata,
     pub origin: Origin,
+    /// ADR-0218 G1: the attachment this picture was made from, the server's own reading (an
+    /// assembly keeps what it proved at assemble time). Only a `generated` origin may carry one
+    /// (migration 161 CHECKs it); `None` is "words alone" and the only value of every other kind.
+    pub source_attachment_id: Option<Uuid>,
     /// `Some` = a ready picture; `None` = a manual card, with `code`.
     pub media: Option<Processed>,
     pub code: Option<&'static str>,
@@ -72,6 +76,9 @@ pub fn candidate_origin_ok(origin: &Origin, has_media: bool, code: Option<&str>)
         && match (has_media, code) {
             (true, None) => true,
             (false, Some("video_processing_unavailable")) => origin.kind != "generated",
+            // A slot the server could not make (G3.8): the picture is `generated`, the reason is
+            // one of the six card codes. A link's reasons stay the link's.
+            (false, Some(code)) if origin.kind == "generated" => FAILURE_CODES.contains(&code),
             (false, Some(code)) => origin.kind == "url" && SOURCE_CODES.contains(&code),
             (false, None) | (true, Some(_)) => false,
         }
@@ -159,15 +166,17 @@ pub async fn insert_candidates_in_tx(
         item.meta.validate()?;
         if item.meta.subject_member_id != face
             || !candidate_origin_ok(&item.origin, item.media.is_some(), item.code)
+            || (item.source_attachment_id.is_some() && item.origin.kind != "generated")
         {
             return Err(Error::Invalid);
         }
         let ready = item.media.is_some();
-        sqlx::query("INSERT INTO expression_draft(workspace_id,id,name,display_name,tags,subject_member_id,origin,creator,approval_id,candidate_index,state,code,expires_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+        sqlx::query("INSERT INTO expression_draft(workspace_id,id,name,display_name,tags,subject_member_id,origin,creator,approval_id,candidate_index,state,code,expires_at,origin_source_attachment_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)")
             .bind(workspace).bind(id).bind(&item.meta.name).bind(&item.meta.display_name)
             .bind(json!(item.meta.tags)).bind(item.meta.subject_member_id).bind(json!(item.origin))
             .bind(proposer).bind(approval_id).bind(index as i32)
             .bind(if ready { "ready" } else { "manual_upload_required" }).bind(item.code).bind(expires_at)
+            .bind(item.source_attachment_id)
             .execute(&mut *conn).await?;
         let sha256 = item
             .media
@@ -334,10 +343,13 @@ pub async fn choose_in_tx(
         })),
     )
     .await?;
-    let created = sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,proposed_by,approval_id,version) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING *")
+    // The original-photo pointer travels with the chosen draft (ADR-0218 G1): the registered
+    // expression records what it was made from exactly as the card showed it.
+    let source_attachment_id: Option<Uuid> = row.try_get("origin_source_attachment_id")?;
+    let created = sqlx::query("INSERT INTO expression(workspace_id,id,name,display_name,tags,subject_member_id,origin,created_by,proposed_by,approval_id,version,origin_source_attachment_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *")
         .bind(ws).bind(id).bind(&meta.name).bind(&meta.display_name).bind(json!(meta.tags))
         .bind(meta.subject_member_id).bind(json!(origin)).bind(decider.member).bind(proposer)
-        .bind(approval_id).bind(version_after).fetch_one(&mut *conn).await?;
+        .bind(approval_id).bind(version_after).bind(source_attachment_id).fetch_one(&mut *conn).await?;
     sqlx::query("INSERT INTO expression_image(workspace_id,expression_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT workspace_id,draft_id,variant,mime,bytes,sha256,width,height,frame_count,duration_ms FROM expression_draft_image WHERE workspace_id=$1 AND draft_id=$2")
         .bind(ws).bind(id).execute(&mut *conn).await?;
     let receipt = json!({"workspaceId": ws, "version": version_after.to_string(),

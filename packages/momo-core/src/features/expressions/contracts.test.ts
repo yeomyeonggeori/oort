@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { assertExpressionContract, matchesExpressionContract } from "./contracts";
-import { FIXTURE_APPROVAL, FIXTURE_CHANNEL_ID, FIXTURE_EXPRESSIONS, FIXTURE_HIDDEN_DELTA, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_READY_DRAFT, FIXTURE_RESULT, fixtureManualDraft } from "./fixtures";
+import { FIXTURE_AI_APPROVAL, FIXTURE_APPROVAL, FIXTURE_CHANNEL_ID, FIXTURE_EXPRESSIONS, FIXTURE_HIDDEN_DELTA, FIXTURE_LIST, FIXTURE_MEDIA_SET, FIXTURE_READY_DRAFT, FIXTURE_RESULT, fixtureManualDraft } from "./fixtures";
 import { expressionChoice } from "./cards";
-import { MANUAL_UPLOAD_CODES } from "./types";
+import { EXPRESSION_FAILURE_CODES, MANUAL_UPLOAD_CODES } from "./types";
 
 const choice = expressionChoice(FIXTURE_READY_DRAFT, 0)!;
 const metadata = { name: "happy_dance", displayName: "신나는 춤", tags: ["축하"], subjectMemberId: null };
@@ -17,7 +17,8 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     assertExpressionContract("List", FIXTURE_HIDDEN_DELTA);
     assertExpressionContract("Media", FIXTURE_MEDIA_SET);
     assertExpressionContract("Draft", FIXTURE_READY_DRAFT);
-    for (const code of MANUAL_UPLOAD_CODES) assertExpressionContract("Draft", fixtureManualDraft(code));
+    // `Draft.code` is the link-import codes followed by the six G3.8 card codes (G7, merged on #4820 C2b).
+    for (const code of [...MANUAL_UPLOAD_CODES, ...EXPRESSION_FAILURE_CODES]) assertExpressionContract("Draft", fixtureManualDraft(code));
     assertExpressionContract("Approval", FIXTURE_APPROVAL);
     assertExpressionContract("Result", FIXTURE_RESULT);
     assertExpressionContract("Choice", choice);
@@ -91,5 +92,46 @@ describe("ADR-0218 closed wire-schema fixture assertions", () => {
     expect(matchesExpressionContract("Metadata", { ...metadata, tags: ["가".repeat(17)] })).toBe(false);
     expect(matchesExpressionContract("Metadata", { ...metadata, displayName: "<admin>" })).toBe(false);
     expect(() => assertExpressionContract("Draft", { ...FIXTURE_READY_DRAFT, media: null })).toThrow("Invalid expression contract: Draft");
+  });
+});
+
+describe("ADR-0218 G7 delta (#4820 C2b): assembled source, original-photo pointer, six card codes", () => {
+  // Hex letters on purpose: an all-digit id upper-cases to itself and the case below would test nothing.
+  const assemblyId = "0000000a-0000-4000-8000-00000000004b";
+  const assembled = { source: "assembled", assemblyId, index: 2 };
+  const generated = FIXTURE_AI_APPROVAL.candidates[0].origin;
+  it("takes an assembled source and the AI-made approval the screen already shows", () => {
+    const candidates = [{ ...candidate, image: assembled }, { ...candidate, name: "second", image: { ...assembled, index: 3 } }];
+    assertExpressionContract("AgentAction", { ...action, args: { candidates } });
+    assertExpressionContract("Approval", FIXTURE_AI_APPROVAL);
+    assertExpressionContract("Origin", generated);
+    assertExpressionContract("Origin", { ...generated, sourceAttachmentId: null });
+  });
+  it("closes the assembled source: the id, the index and the keys are all the server's to read", () => {
+    for (const image of [
+      { source: "assembled", assemblyId: "not-a-uuid", index: 0 },
+      { source: "assembled", assemblyId: assemblyId.toUpperCase(), index: 0 },
+      { source: "assembled", assemblyId, index: 4 },
+      { source: "assembled", assemblyId, index: -1 },
+      { source: "assembled", assemblyId, index: 1.5 },
+      { source: "assembled", assemblyId },
+      { source: "assembled", index: 0 },
+      // The origin of an assembled candidate is what the server kept, never what the agent says here.
+      { source: "assembled", assemblyId, index: 0, prompt: "mine" },
+      { source: "assembled", assemblyId, index: 0, sourceAttachmentId: FIXTURE_CHANNEL_ID },
+    ]) expect(matchesExpressionContract("AgentAction", { ...action, args: { candidates: [{ ...candidate, image }] } })).toBe(false);
+    expect(assemblyId).not.toBe(assemblyId.toUpperCase());
+  });
+  it("makes a generated origin carry its pointer (a uuid, or null for words alone) and nothing else may", () => {
+    const { sourceAttachmentId: _pointer, ...bare } = generated;
+    expect(matchesExpressionContract("Origin", bare)).toBe(false);
+    expect(matchesExpressionContract("Origin", { ...generated, sourceAttachmentId: "not-a-uuid" })).toBe(false);
+    expect(matchesExpressionContract("Origin", { ...generated, sourceAttachmentId: 7 })).toBe(false);
+    expect(matchesExpressionContract("Origin", { kind: "url", sourceUrl: "https://giphy.com/gifs/example", prompt: null, sourceAttachmentId: null })).toBe(false);
+    expect(matchesExpressionContract("Origin", { kind: "upload", sourceUrl: null, prompt: null, sourceAttachmentId: null })).toBe(false);
+  });
+  it("keeps `assembly_params_invalid` out of the card codes: it is a call error with no card", () => {
+    expect(EXPRESSION_FAILURE_CODES).not.toContain("assembly_params_invalid");
+    expect(matchesExpressionContract("Draft", { ...fixtureManualDraft(), code: "assembly_params_invalid" })).toBe(false);
   });
 });

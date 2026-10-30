@@ -302,21 +302,28 @@ fn rendition(row: &PgRow) -> Result<Rendition, Error> {
     })
 }
 
-/// Read one assembly back for `agent`: ready, unexpired and **its own**. An unknown id, another
-/// agent's, another workspace's (RLS) and an expired one are the same `None`.
+/// Read one assembly back for `agent` on behalf of `requester`: ready, unexpired, **its own** and
+/// made for **that person** (G3.6). Both are arguments, not afterthoughts a caller may forget:
+/// the SQL itself refuses, so an unknown id, another agent's, another person's, another
+/// workspace's (RLS) and an expired one are the same `None`. The `expression_assembly_agent`
+/// policy only helps on a request that binds `app.agent_member_id`; a path that does not (the
+/// hosted door) has these two predicates and nothing else.
 pub async fn get_in_tx(
     conn: &mut PgConnection,
     workspace: Uuid,
     agent: Uuid,
+    requester: Uuid,
     id: Uuid,
 ) -> Result<Option<Held>, Error> {
     let Some(header) = sqlx::query(
         "SELECT * FROM expression_assembly WHERE workspace_id = $1 AND id = $2 \
-            AND agent_member_id = $3 AND state = 'ready' AND expires_at > clock_timestamp()",
+            AND agent_member_id = $3 AND requester_member_id = $4 \
+            AND state = 'ready' AND expires_at > clock_timestamp()",
     )
     .bind(workspace)
     .bind(id)
     .bind(agent)
+    .bind(requester)
     .fetch_optional(&mut *conn)
     .await?
     else {
@@ -387,6 +394,31 @@ pub async fn get_in_tx(
         candidates,
         failed,
     }))
+}
+
+/// Lock one assembly for the proposal that is about to take it (ADR-0218 G3.6): `true` while it
+/// is still ready, unexpired and **this agent's**, and then no other transaction can take or
+/// sweep it until this one ends. Two proposals that both read the same assembly and both reach
+/// their write step meet here: the second waits for the first's [`reclaim_in_tx`], then finds it
+/// `expired` and gets `false`. Unknown, another agent's, another tenant's (RLS) and expired are
+/// the same `false`.
+pub async fn lock_ready_in_tx(
+    conn: &mut PgConnection,
+    workspace: Uuid,
+    agent: Uuid,
+    id: Uuid,
+) -> Result<bool, Error> {
+    Ok(sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM expression_assembly WHERE workspace_id = $1 AND id = $2 \
+            AND agent_member_id = $3 AND state = 'ready' AND expires_at > clock_timestamp() \
+            FOR UPDATE",
+    )
+    .bind(workspace)
+    .bind(id)
+    .bind(agent)
+    .fetch_optional(&mut *conn)
+    .await?
+    .is_some())
 }
 
 /// Reclaim the bytes of one assembly (a proposal that took what it needed, a cancelled or

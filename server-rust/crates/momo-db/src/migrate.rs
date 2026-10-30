@@ -711,12 +711,22 @@ mod tests {
     ///
     /// 158 is #4676's custom expression store (ADR-0218): six tenant tables under RLS ENABLE + FORCE
     /// and `ws_isolation`, with composite workspace foreign keys.
+    ///
+    /// 159 is #4820 C1b's motion-assembly keep (ADR-0218 G3.6): two tenant tables (`expression_assembly`
+    /// and its images) under RLS ENABLE + FORCE, `ws_isolation` and a RESTRICTIVE per-agent policy.
+    ///
+    /// 160 is #4820 C2a's `self_media_token` (ADR-0218 G4/G8): the hash of a short-lived, single-use
+    /// address of the requester's own photo, under RLS ENABLE + FORCE and `ws_isolation`.
+    ///
+    /// 161 is #4820 C2b's original-photo pointer (ADR-0218 G1/G7): `origin_source_attachment_id` on
+    /// `expression` and `expression_draft` (generated origin only) and the six G3.8 card codes in the
+    /// draft's `code` CHECK. No new table.
     #[test]
-    fn discovers_contiguous_migrations_001_to_158() {
+    fn discovers_contiguous_migrations_001_to_161() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=158).collect();
+        let expected: Vec<i64> = (1..=161).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -724,7 +734,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=158 under {}",
+            "expected contiguous 001..=161 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -732,7 +742,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("158_workspace_expressions"));
+            .starts_with("161_expression_origin_source"));
     }
 
     #[test]

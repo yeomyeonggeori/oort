@@ -89,10 +89,11 @@ export const MANUAL_UPLOAD_CODES = [
 export type ManualUploadCode = typeof MANUAL_UPLOAD_CODES[number];
 
 /**
- * ADR-0218 §7 G3.8: why a generated or assembled picture is missing. A closed list kept
- * apart from `MANUAL_UPLOAD_CODES` on purpose: that one is the `Draft.code` enum of
- * `contracts.schema.json`, and the schema merge (G7) belongs to the server stage (C).
- * `assembly_params_invalid` is a call error with no card, so it is not here.
+ * ADR-0218 §7 G3.8: why a generated or assembled picture is missing. The `Draft.code` enum of
+ * `contracts.schema.json` is `MANUAL_UPLOAD_CODES` followed by these six (merged on #4820 C2b,
+ * G7); the lists stay apart because the link-import codes and the generation codes have
+ * different owners and show different cards. `assembly_params_invalid` is a call error with no
+ * card, so it is not here.
  */
 export const EXPRESSION_FAILURE_CODES = [
   "generation_failed", "assembly_source_invalid", "assembly_source_too_large",
@@ -144,7 +145,9 @@ export interface ExpressionReportRequest {
 export type ExpressionAgentImage =
   | { source: "attachment"; attachmentId: string }
   | { source: "generated"; mime: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; dataBase64: string; prompt: string }
-  | { source: "url"; url: string };
+  | { source: "url"; url: string }
+  // ADR-0218 G3.6: one candidate of what the server assembled and kept under `assemblyId`.
+  | { source: "assembled"; assemblyId: string; index: number };
 export interface ExpressionAgentCandidate extends ExpressionMetadata {
   image: ExpressionAgentImage;
 }

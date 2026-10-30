@@ -2321,11 +2321,16 @@ async fn action_propose(
             let mut expression_drafts: Option<(
                 Vec<Uuid>,
                 Vec<momo_expressions::action::Candidate>,
+                Option<Uuid>,
             )> = None;
             if let crate::routes::actions::ActionArgs::ExpressionCreate { candidates, .. } =
                 &resolved.validated.args
             {
-                let Some(prepared) = prepared_expression.take() else {
+                let Some(PreparedExpression {
+                    candidates: prepared,
+                    assembly,
+                }) = prepared_expression.take()
+                else {
                     return Ok(Err(ToolFailure::InvalidArguments));
                 };
                 if prepared.len() != candidates.len()
@@ -2336,10 +2341,28 @@ async fn action_propose(
                 {
                     return Ok(Err(ToolFailure::InvalidArguments));
                 }
+                // **A kept assembly is taken by exactly one proposal** (G3.6). The pictures were
+                // read before this transaction; here the assembly's row is locked and proved
+                // again — still this agent's, still live — so two proposals that both read it
+                // cannot both take it: the second waits, finds it reclaimed, and is refused like
+                // an unknown id. A refusal here is before the park below, like every other.
+                if let Some(assembly) = assembly {
+                    if !momo_expressions::assembly::lock_ready_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        caller.agent_member_id,
+                        assembly,
+                    )
+                    .await
+                    .map_err(crate::routes::approvals::expression_db_error)?
+                    {
+                        return Ok(Err(ToolFailure::InvalidArguments));
+                    }
+                }
                 let ids: Vec<Uuid> = (0..prepared.len()).map(|_| Uuid::new_v4()).collect();
                 resolved.validated.normalized =
                     json!({"drafts": ids.iter().map(Uuid::to_string).collect::<Vec<_>>()});
-                expression_drafts = Some((ids, prepared));
+                expression_drafts = Some((ids, prepared, assembly));
             }
             // A pin card's structured preview (ADR-0186 증보 v5 U-e): the ids a client opens the
             // message by and the length the approver weighs the quote against. All of it is the
@@ -2409,7 +2432,7 @@ async fn action_propose(
             // The drafts stand behind the approval row (the FK), so they are inserted now, in
             // this same transaction; the card shows them exactly as stored.
             let mut expression_card: Option<Value> = None;
-            if let Some((ids, items)) = expression_drafts.take() {
+            if let Some((ids, items, assembly)) = expression_drafts.take() {
                 momo_expressions::action::insert_candidates_in_tx(
                     conn,
                     caller.workspace_id,
@@ -2421,6 +2444,13 @@ async fn action_propose(
                 )
                 .await
                 .map_err(crate::routes::approvals::expression_db_error)?;
+                // The bytes moved into the drafts in this very transaction: the kept copy is
+                // reclaimed with them (idempotent; the row stays as a record, `expired`).
+                if let Some(assembly) = assembly {
+                    momo_expressions::assembly::reclaim_in_tx(conn, caller.workspace_id, assembly)
+                        .await
+                        .map_err(crate::routes::approvals::expression_db_error)?;
+                }
                 expression_card = Some(
                     momo_expressions::action::card_in_tx(conn, caller.workspace_id, approval_id)
                         .await
@@ -2599,7 +2629,7 @@ async fn prepare_expression(
     caller: HostedCaller,
     args: &crate::routes::actions::ActionArgs,
     raw_handle: &str,
-) -> Result<Option<Vec<momo_expressions::action::Candidate>>, ToolFailure> {
+) -> Result<Option<PreparedExpression>, ToolFailure> {
     use crate::routes::actions::{ActionArgs, ExpressionImageSpec};
     use base64::Engine as _;
     use momo_expressions::{intake, media, Origin};
@@ -2610,13 +2640,29 @@ async fn prepare_expression(
     let remaining = || momo_expressions::action::PREPARE_DEADLINE.saturating_sub(started.elapsed());
     let secret = state.agent_port.envelope_secret().to_string();
     let raw_handle = raw_handle.to_string();
-    let wanted: Vec<Option<Uuid>> = candidates
+    let wanted: Vec<Wanted> = candidates
         .iter()
         .map(|candidate| match candidate.image {
-            ExpressionImageSpec::Attachment(id) => Some(id),
-            _ => None,
+            ExpressionImageSpec::Attachment(id) => Wanted::Attachment(id),
+            ExpressionImageSpec::Assembled { assembly_id, index } => {
+                Wanted::Assembled(assembly_id, index)
+            }
+            _ => Wanted::Nothing,
         })
         .collect();
+    // The shape of the assembled part is refused before anything is opened (ADR-0218 G3.6): a
+    // proposal draws on at most ONE kept assembly, and never names one candidate twice.
+    let mut assembly: Option<Uuid> = None;
+    let mut named: Vec<(Uuid, u8)> = Vec::new();
+    for want in &wanted {
+        if let Wanted::Assembled(id, index) = want {
+            if assembly.is_some_and(|first| first != *id) || named.contains(&(*id, *index)) {
+                return Err(ToolFailure::InvalidArguments);
+            }
+            assembly = Some(*id);
+            named.push((*id, *index));
+        }
+    }
     let looked_up = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
             let identity =
@@ -2654,10 +2700,43 @@ async fn prepare_expression(
                 return Ok(Err(ToolFailure::InvalidArguments));
             };
             let mut sources = Vec::with_capacity(wanted.len());
-            for attachment in &wanted {
-                sources.push(match attachment {
-                    None => None,
-                    Some(id) => {
+            let mut kept: Option<momo_expressions::assembly::Held> = None;
+            for want in &wanted {
+                sources.push(match want {
+                    Wanted::Nothing => Looked::Nothing,
+                    // **A kept assembly** (G3.6): read here, with the cheap proofs, so that the
+                    // decoder is never asked about it. Unknown, another agent's, another tenant's,
+                    // expired, made for another person, and an index the assembly has no slot for
+                    // are one and the same answer.
+                    Wanted::Assembled(id, index) => {
+                        if kept.is_none() {
+                            // The agent and the person the run was raised by are arguments of
+                            // the read: the SQL refuses an assembly made for anybody else.
+                            let Some(held) = momo_expressions::assembly::get_in_tx(
+                                conn,
+                                caller.workspace_id,
+                                caller.agent_member_id,
+                                requester,
+                                *id,
+                            )
+                            .await
+                            .map_err(crate::routes::approvals::expression_db_error)?
+                            else {
+                                return Ok(Err(ToolFailure::InvalidArguments));
+                            };
+                            kept = Some(held);
+                        }
+                        let Some(held) = kept.as_ref() else {
+                            return Ok(Err(ToolFailure::InvalidArguments));
+                        };
+                        match picked_from_assembly(held, *index) {
+                            Some(picked) => Looked::Assembled(Box::new(picked)),
+                            None => {
+                                return Ok(Err(ToolFailure::InvalidArguments));
+                            }
+                        }
+                    }
+                    Wanted::Attachment(id) => {
                         let found = momo_messaging::find_requester_attachment_for_in_tx(
                             conn,
                             caller.workspace_id,
@@ -2671,7 +2750,7 @@ async fn prepare_expression(
                         )
                         .await?;
                         match found {
-                            Some(found) => Some(found),
+                            Some(found) => Looked::Attachment(found),
                             None => return Ok(Err(ToolFailure::InvalidArguments)),
                         }
                     }
@@ -2692,9 +2771,23 @@ async fn prepare_expression(
         if remaining().is_zero() {
             return Err(ToolFailure::Unavailable);
         }
-        let (origin, picture) = match &candidate.image {
+        let (origin, picture, pointer) = match &candidate.image {
+            ExpressionImageSpec::Assembled { .. } => {
+                let Looked::Assembled(picked) = source else {
+                    return Err(ToolFailure::InvalidArguments);
+                };
+                // What the assembly stored is the candidate, verbatim (G3.6): the bytes already went
+                // through the D3 path when they were assembled, so there is no second decode here.
+                (
+                    picked.origin,
+                    (picked.media, picked.code),
+                    picked.source_attachment_id,
+                )
+            }
             ExpressionImageSpec::Attachment(_) => {
-                let source = source.ok_or(ToolFailure::InvalidArguments)?;
+                let Looked::Attachment(source) = source else {
+                    return Err(ToolFailure::InvalidArguments);
+                };
                 let content = state
                     .drive
                     .file_content(&source.drive_file_id, source.size_bytes)
@@ -2718,7 +2811,7 @@ async fn prepare_expression(
                     Ok(intake::Picture::Manual(_)) => return Err(ToolFailure::InvalidArguments),
                     Err(intake::DecoderBusy) => return Err(ToolFailure::Unavailable),
                 };
-                (Origin::attachment(), picture)
+                (Origin::attachment(), picture, None)
             }
             ExpressionImageSpec::Url(raw) => {
                 // Malformed, credentialed, fragment, http, private-from-the-start (any spelling)
@@ -2728,7 +2821,7 @@ async fn prepare_expression(
                 let origin = Origin::url(url.origin());
                 if !state.unfurl_enabled {
                     // The instance's outgoing-request switch is off: no request is made.
-                    (origin, (None, Some("source_unavailable")))
+                    (origin, (None, Some("source_unavailable")), None)
                 } else {
                     // The fetch slot (eight at a time, process-wide) is held for the fetch
                     // and **given back as soon as the bytes are here** — before the wait for
@@ -2758,7 +2851,7 @@ async fn prepare_expression(
                         }
                         Err(refused) => (None, Some(refused.code())),
                     };
-                    (origin, outcome)
+                    (origin, outcome, None)
                 }
             }
             ExpressionImageSpec::Generated {
@@ -2791,17 +2884,89 @@ async fn prepare_expression(
                         prompt: Some(prompt.clone()),
                     },
                     (Some(processed), None),
+                    None,
                 )
             }
         };
         prepared.push(momo_expressions::action::Candidate {
             meta: candidate.meta.clone(),
             origin,
+            source_attachment_id: pointer,
             media: picture.0,
             code: picture.1,
         });
     }
-    Ok(Some(prepared))
+    Ok(Some(PreparedExpression {
+        candidates: prepared,
+        assembly,
+    }))
+}
+
+/// What `prepare_expression` hands the proposal's transaction.
+struct PreparedExpression {
+    candidates: Vec<momo_expressions::action::Candidate>,
+    /// The one kept assembly the candidates draw on, if any. The transaction locks it, proves it
+    /// is still this agent's and live, and reclaims its bytes once the drafts exist (G3.6).
+    assembly: Option<Uuid>,
+}
+
+/// What one candidate of `expression.create` needs from the read transaction.
+enum Wanted {
+    Nothing,
+    Attachment(Uuid),
+    Assembled(Uuid, u8),
+}
+
+/// What the read transaction proved for it.
+enum Looked {
+    Nothing,
+    Attachment(momo_messaging::AvatarAttachmentSource),
+    Assembled(Box<PickedAssembled>),
+}
+
+/// One slot of a kept assembly as a candidate: its stored picture (or the reason the slot has
+/// none), the prompt and the original-photo pointer the server kept at assemble time.
+struct PickedAssembled {
+    origin: momo_expressions::Origin,
+    source_attachment_id: Option<Uuid>,
+    media: Option<momo_expressions::media::Processed>,
+    code: Option<&'static str>,
+}
+
+/// The slot `index` of a kept assembly: a ready picture, or a hole the assembler left because the
+/// result was too large (G3.8: it stays on the card as `manual_upload_required` + its code).
+/// `None` for an index the assembly has no slot for.
+fn picked_from_assembly(
+    held: &momo_expressions::assembly::Held,
+    index: u8,
+) -> Option<PickedAssembled> {
+    let origin = momo_expressions::Origin {
+        kind: "generated".into(),
+        source_url: None,
+        prompt: Some(held.prompt.clone()),
+    };
+    if let Some(ready) = held
+        .candidates
+        .iter()
+        .find(|candidate| candidate.index == index)
+    {
+        return Some(PickedAssembled {
+            origin,
+            source_attachment_id: held.source_attachment_id,
+            media: Some(ready.media.clone()),
+            code: None,
+        });
+    }
+    let hole = held.failed.iter().find(|slot| slot.index == index)?;
+    let code = momo_expressions::FAILURE_CODES
+        .into_iter()
+        .find(|code| *code == hole.code)?;
+    Some(PickedAssembled {
+        origin,
+        source_attachment_id: held.source_attachment_id,
+        media: None,
+        code: Some(code),
+    })
 }
 
 /// An avatar image the server has already re-encoded, ready to be staged.

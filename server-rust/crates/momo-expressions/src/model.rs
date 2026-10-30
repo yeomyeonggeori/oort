@@ -20,6 +20,20 @@ pub const SOURCE_CODES: [&str; 6] = [
     "source_timeout",
     "source_invalid_media",
 ];
+
+/// ADR-0218 G3.8: why a **generated or assembled** picture is missing, in the table's order. The
+/// `expression_draft.code` CHECK (migration 161), `Draft.code` of the contract and the neutral
+/// sentences of the failure card (`packages/momo-core/.../expression-failure-copy.json`) are
+/// the same six words; a test pins each against this list. `assembly_params_invalid` is a call
+/// error with no card, so it is not here.
+pub const FAILURE_CODES: [&str; 6] = [
+    "generation_failed",
+    "assembly_source_invalid",
+    "assembly_source_too_large",
+    "assembly_output_too_large",
+    "assembly_timeout",
+    "assembly_busy",
+];
 pub const INPUT_BYTES: usize = 5 * 1024 * 1024;
 pub const REQUEST_BYTES: usize = 6 * 1024 * 1024;
 
