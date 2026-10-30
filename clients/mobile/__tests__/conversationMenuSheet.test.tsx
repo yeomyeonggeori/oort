@@ -155,9 +155,9 @@ describe('항목은 코어 표의 답에서 거른다 — 새로 짓지 않는�
 
   it('낱말·위험색·진행 낱말은 코어 표의 것 그대로다 — 알림은 상태로 뒤집히고, 나가기만 위험색이다', () => {
     const [off] = conversationMenuActionItems(target({muted: false}));
-    expect([off.label, off.busyLabel]).toEqual(['알림 끄기', '알림 끄는 중']);
+    expect([off.label, off.busyLabel]).toEqual(['알림 켜짐', undefined]);
     const [on] = conversationMenuActionItems(target({muted: true}));
-    expect([on.label, on.busyLabel]).toEqual(['알림 켜기', '알림 켜는 중']);
+    expect([on.label, on.busyLabel]).toEqual(['알림 꺼짐', undefined]);
     const leave = conversationMenuActionItems(target()).find(item => item.key === 'leave');
     expect([leave?.label, leave?.tone]).toEqual([CHANNEL_LEAVE_LABEL, 'danger']);
     // 「대화 닫기」는 되돌릴 수 있는 닫기라 위험색이 아니다(웹·사이드바 시트와 같은 표).
@@ -374,10 +374,10 @@ describe('시트 — 닫는 길: 문은 시트를 먼저 내리고, 행동은 �
     expect(channel.onClose).not.toHaveBeenCalled();
   });
 
-  it('왕복 중인 행은 진행 낱말로 바뀌고 busy 를 말한다 — 잠그거나 흐리게 하지 않는다', () => {
+  it('왕복 중에도 현재 알림 상태를 유지하고 busy 를 말한다 — 잠그거나 흐리게 하지 않는다', () => {
     renderSheet({items: [MUTE_OFF, CLOSE_DM], isPending: key => key === 'mute'});
     const mute = screen.getByTestId('conversation-menu-mute-toggle');
-    expect(mute).toHaveTextContent('알림 끄는 중');
+    expect(mute).toHaveTextContent(/알림 켜짐/);
     expect(mute.props.accessibilityState).toMatchObject({busy: true, disabled: false});
     const close = screen.getByTestId('conversation-menu-close-dm');
     expect(close.props.accessibilityState).toMatchObject({busy: false});
@@ -780,7 +780,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await openConversationMenu();
     expect(screen.getByTestId('conversation-menu-title')).toHaveTextContent('# general');
     expect(menuKeys()).toEqual(['info', 'pins', 'mute-toggle', 'leave']);
-    expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 끄기');
+    expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 켜짐/);
     expect(screen.getByTestId('conversation-menu-leave')).toHaveTextContent(CHANNEL_LEAVE_LABEL);
   });
 
@@ -795,7 +795,7 @@ describe('셸 — ⋮ 시트의 항목은 대화마다 다르다 (#4319)', () =>
     await mountShell();
     await openConversation(ROW.quiet);
     await openConversationMenu();
-    expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 켜기');
+    expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 꺼짐/);
   });
 
   it('사람 DM(서버가 닫기를 싣고 다 읽음): 고정 · 알림 · 대화 닫기 — 머리는 상대 이름이고 나가기는 없다', async () => {
@@ -929,7 +929,7 @@ describe('셸 — 알림 끄기·켜기 (#4319)', () => {
     // 서버가 진실이다: 채널 목록을 다시 읽어 새 값이 흘러 내려온다.
     await openConversationMenu();
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 켜기'),
+      expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 꺼짐/),
     );
   });
 
@@ -946,13 +946,13 @@ describe('셸 — 알림 끄기·켜기 (#4319)', () => {
     expect(spoken).toHaveBeenCalledWith('알림을 켰습니다.');
   });
 
-  it('요청이 도는 동안 시트는 열려 있고 행이 「알림 끄는 중」으로 바뀐다 — 끝나야 닫힌다', async () => {
+  it('요청이 도는 동안 시트는 열려 있고 행이 「알림 꺼짐」으로 바뀐다 — 끝나야 닫힌다', async () => {
     await mountShell({hold: ['mute']});
     await openConversation(ROW.general);
     await openConversationMenu();
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 끄는 중'),
+      expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 꺼짐/),
     );
     expect(screen.getByTestId('conversation-menu-mute-toggle').props.accessibilityState).toMatchObject({
       busy: true,
@@ -968,7 +968,7 @@ describe('셸 — 알림 끄기·켜기 (#4319)', () => {
     await openConversationMenu();
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 끄는 중'),
+      expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 꺼짐/),
     );
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
     fireEvent.press(screen.getByTestId('conversation-menu-mute-toggle'));
@@ -987,7 +987,7 @@ describe('셸 — 알림 끄기·켜기 (#4319)', () => {
     expect(screen.getByTestId('conversation-menu-error')).toHaveTextContent(CHANNEL_MUTE_FAILURE);
     expect(spoken).toHaveBeenCalledWith(CHANNEL_MUTE_FAILURE);
     expect(screen.getByTestId('conversation-menu-sheet')).toBeTruthy();
-    expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent('알림 끄기');
+    expect(screen.getByTestId('conversation-menu-mute-toggle')).toHaveTextContent(/알림 켜짐/);
     expect(muted.has('ch-general')).toBe(false);
   });
 
@@ -1412,14 +1412,14 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     await mountShell();
     await openConversation(ROW.general);
     await openInfoPage();
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await waitFor(() => expect(callsTo('/notification-pref')).toHaveLength(1));
     expect(callsTo('/notification-pref')[0].url).toContain('/channels/ch-general/notification-pref');
     expect(callsTo('/notification-pref')[0].body).toEqual({muted: true});
     // 서버가 진실이다: 채널 목록을 다시 읽어 새 값이 흘러 내려오면 같은 행이 다른 낱말을 말한다.
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true)),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true))),
     );
     expect(spoken).toHaveBeenCalledWith('알림을 껐습니다.');
     // 시트였다면 성공에서 걷히는 자리다 — 페이지는 남고, ⋮ 시트는 서지 않는다.
@@ -1431,29 +1431,29 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     await mountShell();
     await openConversation(ROW.quiet);
     await openInfoPage();
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true)));
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await waitFor(() => expect(callsTo('/notification-pref')).toHaveLength(1));
     expect(callsTo('/notification-pref')[0].body).toEqual({muted: false});
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false)),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false))),
     );
   });
 
-  it('요청이 도는 동안 행이 「알림 끄는 중」이 되고 다시 눌러도 요청은 한 번이다', async () => {
+  it('요청이 도는 동안 행이 「알림 꺼짐」이 되고 다시 눌러도 요청은 한 번이다', async () => {
     await mountShell({hold: ['mute']});
     await openConversation(ROW.general);
     await openInfoPage();
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent('알림 끄는 중'),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(/알림 꺼짐/),
     );
     expect(screen.getByTestId('conversation-info-mute-toggle').props.accessibilityState).toMatchObject({busy: true});
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     fireEvent.press(screen.getByTestId('conversation-info-mute-toggle'));
     await act(async () => releaseHeld());
     await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(true)),
+      expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(true))),
     );
     expect(callsTo('/notification-pref')).toHaveLength(1);
   });
@@ -1469,7 +1469,7 @@ describe('셸 — 정보 페이지의 알림 끄기·켜기 (#4319)', () => {
     expect(spoken).toHaveBeenCalledWith(CHANNEL_MUTE_FAILURE);
     // 훅의 `failed` 는 시트를 다시 세우는 길(`setActive`)이다 — 정보 페이지는 둘째 인스턴스를 읽어서 ⋮ 시트가 서지 않는다.
     expect(screen.queryByTestId('conversation-menu-sheet')).toBeNull();
-    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(channelMuteToggleLabel(false));
+    expect(screen.getByTestId('conversation-info-mute-toggle')).toHaveTextContent(new RegExp(channelMuteToggleLabel(false)));
     expect(muted.has('ch-general')).toBe(false);
   });
 

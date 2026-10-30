@@ -15,6 +15,7 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import AppShell from '../src/shell/AppShell';
+import {setHapticMode} from '../src/lib/haptics';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
@@ -399,6 +400,7 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
   });
 
   it('다음 당김이 서면 안내가 사라진다', async () => {
+    setHapticMode('basic'); // 안내 초기화 시험은 기존 완료 햅틱을 기다리는 조건을 보존한다.
     const world = await inboxWithFailureNotice();
     world.failMessages = false;
     pullInbox();
@@ -463,6 +465,7 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
   });
 
   it('에이전트 탭: 이 서버에 실행 이력 경로가 없으면(404) 실패가 아니다 — 화면이 미제공으로 접는 오류다', async () => {
+    setHapticMode('basic'); // 서버의 미제공 판별은 기존 성공 햅틱으로 완료를 확인한다.
     const world = fullWorld();
     installFetch(world);
     await openInbox();
@@ -479,12 +482,16 @@ describe('인박스 당겨서 새로고침 (#3962)', () => {
     expect(screen.queryByTestId('pull-refresh-failed', {includeHiddenElements: true})).toBeNull();
   });
 
-  it('모두 잘 읽히면 성공 햅틱이고 실패 안내는 없다', async () => {
+  it('풍부는 모두 잘 읽혀도 성공 햅틱이 없고 실패 안내도 없다', async () => {
     installFetch(fullWorld());
     await openInbox();
     await waitFor(() => expect(rowKeys().length).toBe(5), {timeout: 10_000});
     pullInbox();
-    await waitFor(() => expect(notifications()).toEqual(['notification:success']), {timeout: 10_000});
+    expect(screen.getByTestId('inbox-list').props.refreshControl.props.refreshing).toBe(true);
+    await waitFor(() => expect(screen.getByTestId('inbox-list').props.refreshControl.props.refreshing).toBe(false), {
+      timeout: 10_000,
+    });
+    expect(notifications()).toEqual([]);
     expect(failedNotice()).toBeNull();
   });
 });

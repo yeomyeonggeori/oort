@@ -14,50 +14,15 @@ import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 // reconnect photographed mid-flight while REST, auth and the timeline were all
 // fine.
 //
-// The rule now:
-//
-//   before the first `connected`   report the raw status. The opening
-//                                  handshake is honestly 「연결 중」, and a
-//                                  session the server refuses outright is
-//                                  honestly disconnected.
-//   after it                       keep reporting `connected` through a gap for
-//                                  up to `DISPLAY_GRACE_MS`. Only a gap that
-//                                  outlives it becomes `disconnected`, and it
-//                                  becomes that ONCE — a long outage's retry
-//                                  loop does not blink the label back to
-//                                  「연결 중」 on every attempt.
-//   a return to the foreground     with no live socket reads `connecting` and
-//                                  gets a fresh grace. The app was away; the
-//                                  reconnect it starts now is an opening, not a
-//                                  fault, and a timer that expired while iOS had
-//                                  the app suspended must not fire the moment it
-//                                  wakes up and claim an outage that has had no
-//                                  chance to heal.
-//
-// The shape of `RealtimeStatus` is unchanged — three values — so every reader
-// (the conversation header, the activity rail, the ADE panel) keeps its own
-// wording and simply stops seeing the blips.
-//
-// Pure reducer + a thin timer driver, the same split as `backgroundPolicy.ts`,
-// so the grace is asserted rather than watched.
-// =============================================================================
+// Every gap reads `connecting` for ten seconds, including the first handshake.
+// Retry events do not restart the deadline. A foreground return gets one fresh
+// deadline because time spent suspended is not foreground recovery time (#4783).
 
-/**
- * How long a reconnect may run before it is shown as a disconnection.
- *
- * The issue's band is 3–5 s. The measured reconnects in the RCA trace were 0.3 s
- * (a client-initiated reconnect), 1.6–1.7 s (one backoff step) and, after a
- * token expiry, ~2.6 s including the token round-trip. 4 s clears all three
- * with room for a slow cellular TLS handshake, and is still short enough that a
- * real outage is admitted within a breath.
- */
-export const DISPLAY_GRACE_MS = 4_000;
+export const DISPLAY_GRACE_MS = 10_000;
 
 export interface DisplayState {
   /** What readers see. */
   shown: RealtimeStatus;
-  /** Has this transport ever reached `connected`? */
-  everConnected: boolean;
   /** Is a grace timer running? */
   graceArmed: boolean;
 }
@@ -67,7 +32,7 @@ export type DisplayEvent =
   | {kind: 'raw'; status: RealtimeStatus}
   /** The grace timer ran out. */
   | {kind: 'grace-expired'}
-  /** The app came back to the foreground and there is no live socket. */
+  /** Foreground return or an explicit request to check the socket. */
   | {kind: 'resume'};
 
 export type DisplayAction = {kind: 'arm'} | {kind: 'cancel'};
@@ -78,7 +43,7 @@ export interface DisplayStep {
 }
 
 export function initialDisplayState(): DisplayState {
-  return {shown: 'connecting', everConnected: false, graceArmed: false};
+  return {shown: 'connecting', graceArmed: false};
 }
 
 export function displayStep(
@@ -89,24 +54,17 @@ export function displayStep(
     case 'raw': {
       if (event.status === 'connected') {
         return {
-          state: {shown: 'connected', everConnected: true, graceArmed: false},
+          state: {shown: 'connected', graceArmed: false},
           actions: state.graceArmed ? [{kind: 'cancel'}] : [],
         };
       }
-      if (!state.everConnected) {
-        // Opening handshake (or an outright refusal): say what is happening.
-        return {state: {...state, shown: event.status}, actions: []};
-      }
-      if (state.shown === 'disconnected') {
-        // Already admitted. Retry attempts inside a long outage must not flip
-        // the label back and forth.
+      if (state.shown === 'disconnected' || state.graceArmed) {
         return {state, actions: []};
       }
-      if (state.graceArmed) {
-        return {state, actions: []};
-      }
-      // A gap has opened. Keep showing what was shown and start the clock.
-      return {state: {...state, graceArmed: true}, actions: [{kind: 'arm'}]};
+      return {
+        state: {...state, shown: 'connecting', graceArmed: true},
+        actions: [{kind: 'arm'}],
+      };
     }
 
     case 'grace-expired': {
@@ -126,8 +84,7 @@ export function displayStep(
       const actions: DisplayAction[] = state.graceArmed
         ? [{kind: 'cancel'}, {kind: 'arm'}]
         : [{kind: 'arm'}];
-      const shown: RealtimeStatus =
-        state.shown === 'disconnected' ? 'connecting' : state.shown;
+      const shown: RealtimeStatus = 'connecting';
       return {state: {...state, shown, graceArmed: true}, actions};
     }
 

@@ -218,6 +218,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  jest.restoreAllMocks();
   queryClient?.clear();
   queryClient = null;
   __resetSpawnPort();
@@ -253,13 +254,18 @@ describe('+ 메뉴 → AI 시트', () => {
     expect(screen.getByTestId('ai-sheet')).toBeTruthy();
   });
 
-  it('시트를 여는 누름은 햅틱 light 한 번이다 (+ 의 한 번과 합쳐 두 번 — 누름 두 번)', async () => {
+  it.each<[number, string[]]>([
+    [0, ['impact:light']],
+    [100, ['impact:light', 'impact:light']],
+  ])('풍부에서 + 누름 %ims 뒤 AI 시트 열기는 100ms 중복 억제를 지킨다', async (elapsed, expected) => {
+    const clock = jest.spyOn(performance, 'now').mockReturnValue(0);
     installFetch();
     await renderReady();
     fireEvent.press(screen.getByTestId('shell-plus'));
     expect(hapticCalls).toEqual(['impact:light']);
+    clock.mockReturnValue(elapsed);
     fireEvent.press(screen.getByTestId('plus-menu-ai'));
-    expect(hapticCalls).toEqual(['impact:light', 'impact:light']);
+    expect(hapticCalls).toEqual(expected);
   });
 });
 
@@ -459,9 +465,11 @@ describe('개인 에이전트 거르기', () => {
 
 describe('행 선택', () => {
   it('「작업 맡기기」가 N8 시트를 열고 AI 시트를 닫는다 — 햅틱 selection 한 번', async () => {
+    const clock = jest.spyOn(performance, 'now').mockReturnValue(0);
     installFetch();
     await renderReady();
     await openAi();
+    clock.mockReturnValue(100); // 풍부 모드: 시트를 연 누름과 행 선택을 100ms 띄운다.
     hapticCalls.length = 0;
     fireEvent.press(screen.getByTestId('ai-row-delegate'));
     // 햅틱은 누르는 순간 동기로 한 번이고, 이동은 시트가 미끄러져 내려간 **뒤**다(#4458) — 누른 순간에는 AI 시트가
@@ -477,10 +485,12 @@ describe('행 선택', () => {
   });
 
   it('「내 맥에 물어보기」가 T6b 시트를 연다', async () => {
+    const clock = jest.spyOn(performance, 'now').mockReturnValue(0);
     wirePort();
     installFetch();
     await renderReady();
     await openAi();
+    clock.mockReturnValue(100);
     hapticCalls.length = 0;
     fireEvent.press(screen.getByTestId('ai-row-ask-mac'));
     expect(hapticCalls).toEqual(['selection']);

@@ -13,8 +13,8 @@
 //                answering a message elsewhere. Dropping instantly means the
 //                person pays a full reconnect, a token fetch and a recovery
 //                replay to look at their own home screen. Wait 15s first.
-//   foreground   resume. Cancel a pending drop if the grace has not elapsed,
-//                which is the case that makes the whole policy worth having.
+//   foreground   resume. Cancel a pending drop if the grace has not elapsed.
+//                The transport checks the route by reopening on return (#4783).
 //   network type FORCE a reconnect. This one is not an optimisation: a socket
 //                held across a Wi-Fi -> cellular handover often survives as an
 //                object while being attached to a dead route, so it neither
@@ -54,8 +54,8 @@ export type RealtimeAction =
    *  Unlike `connect`, this must also cut short a reconnect backoff that is
    *  already under way — centrifuge-js ignores `connect()` while it is
    *  `connecting`, so a return during a 20-second backoff would otherwise wait
-   *  out the rest of it (#2751). A socket that is already connected is left
-   *  alone: tearing down a healthy socket on every glance is its own churn. */
+   *  out the rest of it (#2751). #4783 also checks seemingly connected sockets
+   *  on return: iOS can leave one half-open across a lock. */
   | {kind: 'resume'}
   /** Close it. Only ever reached by a grace timer that ran to completion. */
   | {kind: 'disconnect'}
@@ -153,14 +153,14 @@ export function policyStep(
       if (foreground) {
         const actions: RealtimeAction[] = [];
         if (state.gracePending) {
-          // The whole point of the grace period: back within 15s, socket kept,
-          // no reconnect and no replay.
+          // Prevent the old background deadline from closing the returning
+          // connection. The transport resumes on the same client.
           actions.push({kind: 'cancel-grace'});
         }
         // Either the grace elapsed while away and the socket was dropped, or it
         // was kept but may have died with the radio while the app was away and
         // is now sitting in a backoff. `resume` rebuilds the first and cuts the
-        // second short; a socket that survived is left untouched (#2751).
+        // second short, including a half-open connected socket (#4783).
         actions.push({kind: 'resume'});
         return {state: {...next, gracePending: false}, actions};
       }

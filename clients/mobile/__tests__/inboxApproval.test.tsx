@@ -994,16 +994,23 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
 });
 
 describe('인박스 필터 칩의 햅틱 (#3580)', () => {
-  it('다른 칩으로 넘어갈 때 selection 한 번, 이미 고른 칩을 다시 누르면 0번', async () => {
+  it('풍부는 칩 전환의 100ms 안 중복을 막고, 이미 고른 칩은 시간이 지나도 무음이다', async () => {
+    const clock = jest.spyOn(performance, 'now').mockReturnValue(0);
     const calls = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
     installFetch();
     await openPendingRow();
+    clock.mockReturnValue(100); // 인박스를 연 누름과 필터 선택을 띄운다.
     calls.length = 0;
     fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     expect(calls).toEqual(['selection']);
     fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     expect(calls).toEqual(['selection']);
     fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    expect(calls).toEqual(['selection']);
+    clock.mockReturnValue(200);
+    fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    expect(calls).toEqual(['selection']);
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     expect(calls).toEqual(['selection', 'selection']);
   });
 });

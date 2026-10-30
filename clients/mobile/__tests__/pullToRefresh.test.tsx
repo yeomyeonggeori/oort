@@ -29,9 +29,8 @@ import {
 // 그러니 이 배치가 더한 것은 조회 경로가 아니라 그 경로의 새 입구 하나이고, 아래
 // 단정도 그렇게 쓰여 있다 — 당기기 전후로 **같은 라우트**가 다시 불렸는가.
 //
-// 대화 타임라인은 일부러 빠져 있다(패킷 §Goal 2). 그 표면의 정본은 리얼타임이고,
-// 당김은 위로 올라가는 이력 페이지네이션과 같은 제스처를 두고 다툰다. 마지막
-// 테스트가 그 부재를 못 박는다 — 「빠뜨렸다」와 「빼기로 했다」는 다르다.
+// Owner 2026-10-30 (#4783): 「대화 화면 당겨서 새로고침 = 다시 맞추기」.
+// connected 에서는 이전 이력을 다 읽은 뒤에만, 복구 중에는 이력이 남아 있어도 다시 맞춘다.
 // =============================================================================
 
 const WS = '22222222-2222-4222-8222-222222222222';
@@ -105,6 +104,7 @@ function jsonResponse(status: number, body: unknown): Response {
 interface Overrides {
   emptyRoster?: boolean;
   emptyChannels?: boolean;
+  timelineHasOlder?: boolean;
 }
 
 function installFetch(overrides: Overrides = {}): jest.Mock {
@@ -131,7 +131,14 @@ function installFetch(overrides: Overrides = {}): jest.Mock {
     if (url.includes('/read-state')) {
       return jsonResponse(200, {read_states: READ_STATES});
     }
-    if (url.includes('/messages')) return jsonResponse(200, {messages: []});
+    if (url.includes('/messages')) return jsonResponse(200, {messages:
+      overrides.timelineHasOlder ? Array.from({length: 50}, (_, i) => ({
+        id: `history-${i}`, channelId: 'ch-general', seq: i + 1,
+        hlcTs: i + 1, hlcCount: 0, authorMemberId: SELF_ID, type: 'text',
+        body: `history ${i}`, state: 'sent', createdAtMs: 1_800_000_000_000,
+      })) : [],
+      ...(overrides.timelineHasOlder ? {nextBefore: 1} : {}),
+    });
     if (url.includes('/approvals')) return jsonResponse(200, {approvals: []});
     if (url.includes('/agent-runs') || url.includes('/runs')) {
       return jsonResponse(200, {runs: []});
@@ -299,21 +306,60 @@ describe('인박스', () => {
   });
 });
 
-describe('대화 타임라인은 빠져 있다 — 빠뜨린 것이 아니라', () => {
-  it('타임라인에는 당김 컨트롤이 없다', async () => {
-    installFetch();
+describe('대화 당겨서 다시 맞추기 — owner 10-30 (#4783)', () => {
+  it('이력을 모두 읽었으면 당겨서 소켓을 다시 열고 최신 메시지를 읽는다', async () => {
+    const fetchMock = installFetch();
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
-    await waitFor(() =>
-      expect(screen.queryByTestId('timeline-list') ?? screen.getByTestId('timeline-empty')).toBeTruthy(),
-    );
+    // 머리 고지(#4789 headerContent)가 있으면 빈 상태는 바깥 스크롤 안에 서고, 당김은 그 바깥 스크롤이 받는다.
+    const emptyPullTarget = () => screen.queryByTestId('timeline-empty-scroll') ? 'timeline-empty-scroll' : 'timeline-empty';
+    await waitFor(() => expect(screen.getByTestId(emptyPullTarget()).props.refreshControl).toBeTruthy());
+    const clients = (jest.requireMock('centrifuge') as {__clients: {connectCount: number}[]}).__clients;
+    const client = clients[clients.length - 1];
+    const connects = client.connectCount;
+    const reads = callsTo(fetchMock, '/messages');
+    pull(emptyPullTarget());
+    await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
+    expect(client.connectCount).toBe(connects + 1);
+  });
 
-    const list = screen.queryByTestId('timeline-list');
-    if (list !== null) expect(list.props.refreshControl).toBeUndefined();
-    // 리얼타임이 이 표면의 정본이고, 위로 당기는 제스처는 이미 이력 페이지네이션의
-    // 것이다. 둘을 한 제스처에 겹치면 「더 읽기」와 「다시 읽기」가 같은 손짓이 된다.
-    expect(screen.queryByTestId('timeline-empty')?.props.refreshControl).toBeUndefined();
+  it.each([0, 10_000])('연결 복구 %dms 뒤에도 이전 이력이 남은 방을 당기면 다시 맞춘다', async elapsedMs => {
+    const fetchMock = installFetch({timelineHasOlder: true});
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
+    await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
+    expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined();
+    const clients = (jest.requireMock('centrifuge') as {
+      __clients: {connectCount: number; disconnect: () => void}[];
+    }).__clients;
+    const client = clients[clients.length - 1];
+    act(() => {
+      client.disconnect();
+      jest.advanceTimersByTime(elapsedMs);
+    });
+    await waitFor(() => expect(screen.getByTestId('timeline-list').props.refreshControl).toBeTruthy());
+    const connects = client.connectCount;
+    const reads = callsTo(fetchMock, '/messages');
+    pull('timeline-list');
+    await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
+    expect(client.connectCount).toBe(connects + 1);
+    await waitFor(() => expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined());
+  });
+
+  it('연결됐고 더 읽을 이전 이력이 있으면 당김 대신 이전 대화를 불러온다', async () => {
+    const fetchMock = installFetch({timelineHasOlder: true});
+    renderShell();
+    await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
+    fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
+    await waitFor(() => expect(screen.getByTestId('timeline-list')).toBeTruthy());
+    expect(screen.getByTestId('timeline-list').props.refreshControl).toBeUndefined();
+    fireEvent(screen.getByTestId('timeline-list'), 'scrollBeginDrag');
+    const reads = callsTo(fetchMock, '/messages');
+    fireEvent(screen.getByTestId('timeline-list'), 'startReached', {distanceFromStart: 0});
+    await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes('before=1'))).toBe(true);
   });
 });
 

@@ -1,3 +1,4 @@
+import {haptics} from '../../lib/haptics';
 import {uuidEq, type Channel, type Message, type RosterMember} from '@momo/core/lib/api';
 import {
   buildTimelineItems,
@@ -61,6 +62,7 @@ import {
 } from './jumpPills';
 import {EmptyState, ErrorState, LoadingState} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {PULL_FILL, usePullRefresh, withPullScroll} from '../../design/refresh';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
@@ -79,6 +81,7 @@ import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
+const noRefresh = async (): Promise<void> => {};
 const NO_RUNS: readonly AgentRunProgress[] = [];
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
@@ -264,7 +267,12 @@ import {
 // is shorter, the rows sit on top of the composer where a lift cannot reach them.
 // It is also what every messenger does with a new conversation, for this reason
 // rather than for a stylistic one.
-const CONTENT_ALIGNMENT = {flexGrow: 1, justifyContent: 'flex-end'} as const;
+const CONTENT_ALIGNMENT = {...PULL_FILL, justifyContent: 'flex-end'} as const;
+
+// RN 0.86의 FlatList는 scroll/refresh props만 바뀌어도 renderItem을 새 함수로 감싼다.
+// 당김 컨트롤의 연결 상태·로더·고지는 셀 데이터가 아니다. RN의 renderer memo를 켜서
+// renderItem/extraData가 바뀔 때만 셀로 전달한다. legacy TS 표에는 없는 RN 정식 prop이다.
+const MEMOIZED_ITEM_RENDERER = {strictMode: true};
 
 /** How near the bottom still counts as "following", in points. */
 const FOLLOW_THRESHOLD_PX = 120;
@@ -854,8 +862,10 @@ function TimelineInner({
   myMemberId,
   loadingOlder,
   reachedStart,
+  realtimeConnected = true,
   nowMs,
   onStartReached,
+  onRefresh,
   onRetry,
   onResend,
   onResendPending,
@@ -942,8 +952,11 @@ function TimelineInner({
   myMemberId: string;
   loadingOlder?: boolean;
   reachedStart?: boolean;
+  /** 연결 복구 중에는 이전 이력이 남아 있어도 당겨서 다시 맞출 수 있다. */
+  realtimeConnected?: boolean;
   nowMs: number;
   onStartReached?: () => void;
+  onRefresh?: () => Promise<void>;
   onRetry?: () => void;
   onResend?: (message: Message) => void;
   onResendPending?: (clientMsgId: string) => void;
@@ -2772,6 +2785,7 @@ function TimelineInner({
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
   // 벌어야 한다.
   const jumpToLatest = useCallback(() => {
+    haptics.event('jumpToLatest');
     convergeToEnd('latest');
   }, [convergeToEnd]);
 
@@ -3273,6 +3287,16 @@ function TimelineInner({
     [tailNodeRef, styles, tailGap],
   );
 
+  // #4783: 연결 복구 중에는 언제든 당겨서 다시 맞춘다. 연결됐으면 이전 이력을 다 읽은 뒤에만 켠다.
+  const pullEnabled = onRefresh !== undefined &&
+    (!realtimeConnected || (reachedStart === true && !loadingOlder));
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
+    onRefresh ?? noRefresh, 'timeline-refresh', {resetKey: channelId},
+  );
+  const pullScroll = useMemo(
+    () => withPullScroll(onScroll, pullEnabled ? scrollProps : undefined),
+    [onScroll, pullEnabled, scrollProps],
+  );
   // 빈 목록·로딩·오류에서도 원래 제공하던 고지의 닫기·근거 동작을 유지한다.
   const withNotices = (state: React.ReactElement) => headerContent ? (
     <ScrollView contentContainerStyle={contentStyle}>
@@ -3302,12 +3326,31 @@ function TimelineInner({
 
   if (status === 'ready' && empty) {
     const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null);
-    return withNotices(
+    // 고지(머리 내용)가 있으면 바깥 스크롤이 당김을 받는다 — 안쪽 빈 상태의 스크롤은 내용 높이로 늘어나 당김을 못 받는다.
+    const emptyState = (
       <EmptyState
         headline={copy.headline}
         detail={copy.detail}
+        refreshControl={pullEnabled && !headerContent ? refreshControl : undefined}
+        scrollProps={pullEnabled && !headerContent ? scrollProps : undefined}
         testID="timeline-empty"
       />
+    );
+    return (
+      <>
+        {notice}
+        {headerContent ? (
+          <ScrollView
+            testID="timeline-empty-scroll"
+            contentContainerStyle={contentStyle}
+            refreshControl={pullEnabled ? refreshControl : undefined}
+            {...(pullEnabled ? scrollProps : undefined)}
+          >
+            {headerContent}
+            {emptyState}
+          </ScrollView>
+        ) : emptyState}
+      </>
     );
   }
 
@@ -3319,6 +3362,7 @@ function TimelineInner({
       testID="timeline-list"
       data={items}
       renderItem={renderItem}
+      {...MEMOIZED_ITEM_RENDERER}
       keyExtractor={keyExtractor}
       onScrollToIndexFailed={onScrollToIndexFailed}
       // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
@@ -3344,7 +3388,8 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      onScroll={onScroll}
+      refreshControl={pullEnabled ? refreshControl : undefined}
+      onScroll={pullScroll.onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}
       onTouchMove={tapTouch.onTouchMove}
@@ -3409,6 +3454,7 @@ function TimelineInner({
   // 부모의 직접 자식)은 그대로다.
   const motionScope = (
     <ReduceMotionRefContext.Provider value={reduceMotionRef}>
+      {notice}
       {list}
     </ReduceMotionRefContext.Provider>
   );
