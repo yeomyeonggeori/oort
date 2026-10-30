@@ -1,8 +1,9 @@
+import { runBundleSnapshot, requestBundleState, REQUEST_BUNDLE_CHIP_KIND, type RequestBundleSnapshot } from "../timeline/requestBundle";
 import type { AgentRunProgress, Message } from "../../lib/api";
 import { turnRecordRunId } from "../timeline/cascadeModel";
 import { RAIL_WORD } from "./activityRail";
 import { UNCLAIMED_END_REASONS } from "./runException";
-import { runPhaseLabel, serverFactsOf } from "./runPhase";
+import { approvalEndState, isOpenRunPhase, REQUEST_WORD, runPhaseLabel, serverFactsOf } from "./runPhase";
 import { isUncollected, UNCOLLECTED_WORD, type RoutineHint } from "./runWaiting";
 import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 
@@ -41,7 +42,9 @@ export type TriggerChipKind =
   | "answered"
   | "uncollected"
   | "timed_out"
-  | "failed";
+  | "failed"
+  | "declined"
+  | "expired";
 
 /**
  * 칩 글자 곁의 표지. 모양이 뜻을 말한다(색에만 기대지 않는다): 점(작업 중)·체크(답함)·느낌표(아직 받지
@@ -49,7 +52,7 @@ export type TriggerChipKind =
  * 느낌표였고 색만 달랐다 — 색을 못 보는 사람에게 같은 말이 되므로 실패에 자기 모양(가위표)을, 가져간 뒤 끝난
  * 것에 자기 모양(시계)을 줬다(아이콘만 남는 좁은 줄에서 「아직 받지 않았어요」와 「시간 초과」가 같은 글리프가 되지 않게).
  */
-export type TriggerChipMark = "none" | "dot" | "check" | "alert" | "clock" | "cross";
+export type TriggerChipMark = "none" | "dot" | "check" | "alert" | "clock" | "cross" | "ban";
 
 /** 칩 그릇의 톤. 표면이 토큰 클래스에 매긴다. */
 export type TriggerChipTone = "muted" | "working" | "ok" | "warn" | "danger";
@@ -78,7 +81,9 @@ export const CHIP_WORD_SIGNAL_LOST = runPhaseLabel({
 
 /** 급한 순서(클수록 앞). */
 const PRIORITY: Readonly<Record<TriggerChipKind, number>> = {
-  failed: 7,
+  failed: 9,
+  expired: 8,
+  declined: 7,
   timed_out: 6,
   uncollected: 5,
   approval: 4,
@@ -97,6 +102,8 @@ const MARK: Readonly<Record<TriggerChipKind, TriggerChipMark>> = {
   uncollected: "alert",
   timed_out: "clock",
   failed: "cross",
+  expired: "clock",
+  declined: "ban",
 };
 
 /**
@@ -110,6 +117,9 @@ export const TRIGGER_CHIP_FACES: readonly { word: string; mark: TriggerChipMark 
   { word: RAIL_WORD.approval, mark: MARK.approval },
   { word: RAIL_WORD.paused, mark: MARK.approval },
   { word: CHIP_WORD_ANSWERED, mark: MARK.answered },
+  { word: REQUEST_WORD.done, mark: MARK.answered },
+  { word: REQUEST_WORD.expired, mark: MARK.expired },
+  { word: REQUEST_WORD.declined, mark: MARK.declined },
   { word: CHIP_WORD_UNCOLLECTED, mark: MARK.uncollected },
   { word: CHIP_WORD_TIMED_OUT, mark: MARK.timed_out },
   { word: CHIP_WORD_SIGNAL_LOST, mark: MARK.timed_out },
@@ -125,6 +135,8 @@ const TONE: Readonly<Record<TriggerChipKind, TriggerChipTone>> = {
   uncollected: "warn",
   timed_out: "warn",
   failed: "danger",
+  expired: "warn",
+  declined: "muted",
 };
 
 /** 답 메시지 한 건: 이동에는 id와 seq가 함께 필요하다(`onJumpToMessage`). */
@@ -143,15 +155,26 @@ export interface TriggerChip {
   label: string;
   /** 「답함」일 때, 누르면 가야 할 답 메시지. 모르면 없다(그러면 칩은 누르는 것이 아니다). */
   answer?: AnswerRef;
+  /** 묶음 카드로 가는 닻. 말로 답한 메시지와 구분해요. */
+  bundleTarget?: AnswerRef;
   /** 칩이 말하는 run들. */
   runIds: readonly string[];
 }
 
 export interface TriggerChipContext {
+  /** 서버 읽기 확장이 아직 없는 표면도 카드의 공개 묶음을 건넬 수 있어요. */
+  bundleFor?: (run: AgentRunProgress) => RequestBundleSnapshot | undefined;
   graceMs?: number;
   routineFor?: (memberId: string) => RoutineHint | undefined;
   /** 이 run의 답 메시지. 모르면 undefined. */
   answerFor?: (run: AgentRunProgress) => AnswerRef | undefined;
+  bundleTargetFor?: (run: AgentRunProgress) => AnswerRef | undefined;
+}
+
+/** #4763의 DTO가 보존할 가산 bundle. API 트리 변경 없이도 읽는 자리예요. */
+export type TriggerRunProgress = AgentRunProgress & { bundle?: unknown };
+function bundleOf(run: TriggerRunProgress, context: TriggerChipContext): RequestBundleSnapshot | undefined {
+  return context.bundleFor?.(run) ?? runBundleSnapshot(run);
 }
 
 function kindOf(
@@ -159,6 +182,17 @@ function kindOf(
   nowMs: number,
   context: TriggerChipContext
 ): TriggerChipKind | null {
+  const bundle = bundleOf(run, context);
+  if (bundle !== undefined) {
+    const state = requestBundleState({ ...bundle, run, nowMs });
+    // 전달·생존은 묶음 상태로 승격하지 않아요. 승인 종결만 그 낱말을 대체해요.
+    if (!(run.phase === "timed_out" && !["declined", "expired", "cancelled"].includes(state)) &&
+        !(["queued", "claimed"].includes(run.phase) && state === "thinking")) {
+      return REQUEST_BUNDLE_CHIP_KIND[state];
+    }
+  }
+  const approvalEnd = !isOpenRunPhase(run.phase) ? approvalEndState(run.endReason) : null;
+  if (approvalEnd !== null) return approvalEnd;
   switch (run.phase) {
     case "queued":
       return isUncollected(
@@ -190,7 +224,7 @@ function kindOf(
   }
 }
 
-function wordOf(kind: TriggerChipKind, run: AgentRunProgress): string {
+function wordOf(kind: TriggerChipKind, run: AgentRunProgress, context: TriggerChipContext): string {
   switch (kind) {
     case "received":
       return RAIL_WORD.received;
@@ -200,9 +234,13 @@ function wordOf(kind: TriggerChipKind, run: AgentRunProgress): string {
       return RAIL_WORD.working;
     // 승인 대기와 일시 정지는 서버의 phase가 낱말을 정한다(`runPhaseLabel`).
     case "approval":
-      return runPhaseLabel(serverFactsOf(run));
+      return bundleOf(run, context) !== undefined ? REQUEST_WORD.approval : runPhaseLabel(serverFactsOf(run));
     case "answered":
-      return CHIP_WORD_ANSWERED;
+      return bundleOf(run, context) !== undefined ? REQUEST_WORD.done : CHIP_WORD_ANSWERED;
+    case "declined":
+      return REQUEST_WORD.declined;
+    case "expired":
+      return REQUEST_WORD.expired;
     case "uncollected":
       return CHIP_WORD_UNCOLLECTED;
     case "timed_out":
@@ -217,7 +255,8 @@ function wordOf(kind: TriggerChipKind, run: AgentRunProgress): string {
 function labelOf(
   kind: TriggerChipKind,
   group: readonly AgentRunProgress[],
-  nameFor: AgentNameLookup
+  nameFor: AgentNameLookup,
+  context: TriggerChipContext
 ): string {
   const names: string[] = [];
   for (const run of group) {
@@ -237,7 +276,11 @@ function labelOf(
     case "approval":
       return turnHubSentence(who, "awaiting_approval", facts);
     case "answered":
-      return `${who} 에이전트가 답했어요.`;
+      return bundleOf(group[0]!, context) !== undefined ? `${who} 에이전트의 요청이 끝났어요.` : `${who} 에이전트가 답했어요.`;
+    case "declined":
+      return `${who} 에이전트의 요청이 거부됐어요.`;
+    case "expired":
+      return `${who} 에이전트의 요청이 만료됐어요.`;
     case "uncollected":
       return `${who} 에이전트가 요청을 가져가지 않았어요.`;
     case "timed_out":
@@ -252,7 +295,7 @@ function labelOf(
  * `runs`는 먼저 생긴 것이 앞이다(`runsByTriggerMessage`).
  */
 export function triggerChip(
-  runs: readonly AgentRunProgress[],
+  runs: readonly TriggerRunProgress[],
   nameFor: AgentNameLookup,
   nowMs: number,
   context: TriggerChipContext = {}
@@ -270,15 +313,17 @@ export function triggerChip(
   const group = classified.filter((entry) => entry.kind === top).map((e) => e.run);
   const answer =
     top === "answered"
-      ? group.map((run) => context.answerFor?.(run)).find((ref) => ref !== undefined)
+      ? group.map((run) => bundleOf(run, context) !== undefined ? context.bundleTargetFor?.(run) : context.answerFor?.(run)).find((ref) => ref !== undefined)
       : undefined;
+  const bundleTarget = bundleOf(group[0]!, context) !== undefined ? context.bundleTargetFor?.(group[0]!) : undefined;
   return {
     kind: top,
-    word: wordOf(top, group[0]!),
+    word: wordOf(top, group[0]!, context),
     mark: MARK[top],
     tone: TONE[top],
-    label: labelOf(top, group, nameFor),
+    label: labelOf(top, group, nameFor, context),
     ...(answer !== undefined ? { answer } : {}),
+    ...(bundleTarget !== undefined ? { bundleTarget } : {}),
     runIds: group.map((run) => run.id),
   };
 }

@@ -1,3 +1,4 @@
+import { REQUEST_WORD } from "../agents/runPhase";
 import type { Approval, AgentRun, Message } from "../../lib/api";
 import { uuidEq } from "../../lib/api";
 import type { SpawnExecutionPlan } from "../../lib/executionPlan";
@@ -328,11 +329,11 @@ const APPROVAL_OUTCOME: Record<
   { label: string | null; tone: OutcomeTone }
 > = {
   pending: { label: null, tone: "muted" },
-  approved: { label: "승인됨", tone: "ok" },
-  rejected: { label: "거절됨", tone: "danger" },
+  approved: { label: REQUEST_WORD.done, tone: "ok" },
+  rejected: { label: REQUEST_WORD.declined, tone: "muted" },
   // Absence is not failure: an unanswered request ran out of time (ADR-0132).
-  expired: { label: "만료됨", tone: "warn" },
-  cancelled: { label: "취소됨", tone: "muted" },
+  expired: { label: REQUEST_WORD.expired, tone: "warn" },
+  cancelled: { label: REQUEST_WORD.cancelled, tone: "muted" },
 };
 
 export function approvalItem(
@@ -403,11 +404,11 @@ const RUN_OUTCOME: Record<
 > = {
   queued: { label: null, tone: "muted" },
   running: { label: null, tone: "muted" },
-  awaiting_approval: { label: "승인 대기", tone: "warn" },
+  awaiting_approval: { label: REQUEST_WORD.approval, tone: "warn" },
   paused: { label: "멈춤", tone: "warn" },
   succeeded: { label: "완료", tone: "ok" },
   failed: { label: "실패", tone: "danger" },
-  cancelled: { label: "취소됨", tone: "muted" },
+  cancelled: { label: REQUEST_WORD.cancelled, tone: "muted" },
   // Silence is stalled, never an error story we did not observe.
   timed_out: { label: "응답 없음", tone: "warn" },
 };

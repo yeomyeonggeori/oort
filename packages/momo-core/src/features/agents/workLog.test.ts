@@ -151,16 +151,16 @@ describe("workLog — phase 전이", () => {
     ]);
   });
 
-  it("승인 대기는 작업 중이 아니다", () => {
+  it("승인 필요는 작업 중이 아니다", () => {
     let l = log();
     l = appendProgress(l, status("thinking", "running", T0), T0);
     expect(l.state).toBe("working");
     l = appendProgress(l, status("thinking", "awaiting_approval", T0 + 1), T0 + 1);
     expect(l.state).toBe("awaiting_approval");
-    expect(workLogStateLabel(l, workLogLiveness(l, T0 + 2))).toBe("승인 대기");
+    expect(workLogStateLabel(l, workLogLiveness(l, T0 + 2))).toBe("승인 필요");
   });
 
-  it("partial은 승인 대기를 작업 중으로 되돌리지 못한다", () => {
+  it("partial은 승인 필요를 작업 중으로 되돌리지 못한다", () => {
     let l = log();
     l = appendProgress(l, status("thinking", "awaiting_approval", T0), T0);
     l = appendProgress(

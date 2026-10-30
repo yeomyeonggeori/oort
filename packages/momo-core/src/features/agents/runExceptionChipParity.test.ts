@@ -1,3 +1,7 @@
+import type { Approval, Message } from "../../lib/api";
+import { agentRequestBundle } from "../timeline/agentCardModel";
+import { approvalItem } from "../inbox/model";
+import { runPhaseLabel } from "./runPhase";
 import { describe, expect, it } from "vitest";
 import type { AgentRunPhase, AgentRunProgress } from "../../lib/api";
 import { activityRail } from "./activityRail";
@@ -275,12 +279,12 @@ describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말
     expect(seen).toBeGreaterThan(20);
   });
 
-  it("줄도 칩도 없는 상태: 취소는 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·답함·승인 대기뿐이다", () => {
+  it("줄도 칩도 없는 상태: 취소는 둘 다 없다. 줄 없이 칩만 있는 상태는 진행 중·답함·승인 필요뿐이다", () => {
     for (const { where, exception, chip } of rows) {
       if (exception !== null) continue;
       if (chip === null) continue;
       expect(
-        ["received", "claimed", "working", "approval", "answered"],
+        ["received", "claimed", "working", "approval", "answered", "declined", "expired"],
         where
       ).toContain(chip.kind);
     }
@@ -288,4 +292,62 @@ describe("카드·줄·칩·레일이 같은 run을 같은 판정·같은 낱말
     expect(runException(cancelled, T + HOUR)).toBeNull();
     expect(triggerChip([cancelled], nameFor, T + HOUR)).toBeNull();
   });
+});
+
+it("승인 종결은 카드·칩·인박스·문장이 같은 낱말이고 예외 줄은 없다", () => {
+  for (const [status, phase, endReason, word, sentence] of [
+    ["rejected", "cancelled", "approval_rejected", "거부", "거부됐어요"],
+    [
+      "expired",
+      "timed_out",
+      "approval_expired",
+      "만료",
+      "승인을 기다리다 만료됐어요",
+    ],
+  ] as const) {
+    const r = run({ phase, status: phase, endReason });
+    const message: Message = {
+      id: "card",
+      channelId: r.channelId,
+      authorMemberId: AGENT,
+      type: "approval_request",
+      seq: 1,
+      hlcTs: T,
+      hlcCount: 0,
+      createdAtMs: T,
+      props: { approval_id: "approval", status, action_type: "tool_call" },
+    };
+    const card = agentRequestBundle(message, { nowMs: T })!;
+    const chip = triggerChip([r], nameFor, T)!;
+    const approval: Approval = {
+      id: "approval",
+      workspaceId: "workspace",
+      runId: r.id,
+      channelId: r.channelId,
+      requestedBy: AGENT,
+      actionType: "tool_call",
+      status,
+    };
+    const row = approvalItem(
+      approval,
+      { name: "달무리봇", isAgent: true },
+      "실험실",
+      T
+    );
+    expect([
+      card.word,
+      chip.word,
+      row.outcome,
+      runPhaseLabel(serverFactsOf(r)),
+    ]).toEqual([word, word, word, word]);
+    expect(card.sentence).toBe(sentence);
+    expect(runException(r, T)).toBeNull();
+    // 끝 코드가 아직 run에 없더라도 같은 bundle을 받으면 예외 줄은 서지 않아요.
+    const stale = {
+      ...run({ phase: "failed", status: "failed" }),
+      bundle: { status },
+    };
+    expect(runException(stale, T)).toBeNull();
+    expect(triggerChip([stale], nameFor, T)?.word).toBe(word);
+  }
 });

@@ -128,9 +128,30 @@ export function elapsedSpan(sinceMs: number, nowMs: number): string | undefined 
   return `${Math.floor(hours / 24)}일`;
 }
 
+/** 요청 고리의 낱말 정본. 칩·카드·인박스가 그대로 읽어요. */
+export const REQUEST_WORD = {
+  thinking: "생각 중",
+  approval: "승인 필요",
+  executing: "실행 중",
+  done: "끝",
+  declined: "거부",
+  expired: "만료",
+  failed: "실패",
+  cancelled: "취소",
+} as const;
+
+export const APPROVAL_EXPIRED_SENTENCE = "승인을 기다리다 만료됐어요";
+
+export function approvalEndState(code: string | undefined): "declined" | "expired" | null {
+  if (code === "approval_rejected") return "declined";
+  if (code === "approval_expired") return "expired";
+  return null;
+}
+
 /** 서버가 쓴 닫힌 종료 코드 → 사람의 문장. 모르는 코드는 문장을 만들지 않는다. */
 const END_REASON_TEXT: Record<string, string> = {
-  approval_expired: "승인이 만료됐어요",
+  approval_expired: APPROVAL_EXPIRED_SENTENCE,
+  approval_rejected: "거부됐어요",
   unclaimed_expired: "아무도 가져가지 않아 끝냈어요",
   // ADR-0200 증보 3 E4(#4284): 초인종이 닿았는데 가져가지 않아 30분 뒤 서버가 끝낸 run.
   woken_not_collected: "깨웠지만 가져가지 않아 끝냈어요",
@@ -164,6 +185,8 @@ export function isSignalLostByServer(facts: ServerRunFacts): boolean {
  *                       끝냈으면 신호 소실
  */
 export function runPhaseLabel(facts: ServerRunFacts): string {
+  const approvalEnd = !isOpenRunPhase(facts.phase) ? approvalEndState(facts.endReason) : null;
+  if (approvalEnd !== null) return REQUEST_WORD[approvalEnd];
   switch (facts.phase) {
     case "queued":
       return facts.queuePosition !== undefined
@@ -177,7 +200,7 @@ export function runPhaseLabel(facts: ServerRunFacts): string {
       // (design-review U1 M-3). 에이전트가 보고한 단계는 근거 줄이 말한다.
       return "작업 중";
     case "awaiting_approval":
-      return "승인 대기";
+      return REQUEST_WORD.approval;
     case "paused":
       return "일시 정지";
     case "succeeded":
