@@ -32,6 +32,9 @@ const LEGACY_VERSION: &str = "2025-11-25";
 const PATH: &str = "/v1/mcp/agent-port";
 const AUDIENCE: &str = "/v1/mcp/agent-port";
 
+#[path = "agent_port_tools/hosted_approval_connection.rs"]
+mod hosted_approval_connection;
+
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to an isolated PostgreSQL 18 URL")
 }
@@ -22677,7 +22680,7 @@ async fn a_full_channel_refuses_the_tap_without_spending_the_approval_and_a_long
 }
 
 /// **A pin in the owner's 1:1 DM with the agent** — the room this action is most often asked in.
-/// A DM has no name (`channel.name` is NULL there, 001_init.sql), so its card says 「1:1 대화」 and
+/// A DM has no name (`channel.name` is NULL there, 001_init.sql), so its card says 「이 대화」 and
 /// has no 공개 범위 row. Reading that name as text made every proposal in such a room answer 500,
 /// while every other pin test here draws its card in a named channel.
 #[tokio::test]
@@ -22740,7 +22743,7 @@ async fn a_pin_in_the_owners_dm_with_the_agent_is_drawn_without_a_name_and_pins_
     let approval = proposed_approval_3706(&proposed);
     let card = Uuid::parse_str(structured(&proposed)["cardMessageId"].as_str().unwrap()).unwrap();
     let props = message_props(&su, card).await;
-    assert_eq!(card_row(&props, "채널").as_deref(), Some("1:1 대화"));
+    assert_eq!(card_row(&props, "채널").as_deref(), Some("이 대화"));
     assert!(
         card_row(&props, "공개 범위").is_none(),
         "a DM has no 공개 범위 row"

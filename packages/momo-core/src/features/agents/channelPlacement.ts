@@ -22,8 +22,9 @@ import { normalizedId } from "./hubModel";
 //      client cannot name. Those are counted, not invented: `unresolved` is how
 //      many, and the surface says so instead of quietly showing a shorter list.
 //   2. The membership endpoints refuse DMs (`c.kind IN ('public','private')`),
-//      so a DM never appears as a place to add or remove. A DM with an agent is
-//      opened from the directory, and closing it is not a membership edit.
+//      so this channel-placement surface never adds/removes a DM. ADR-0217's
+//      unanimous DM admission and participant removal are separate paths;
+//      closing a DM here still is not a membership edit.
 // =============================================================================
 
 export interface ChannelPlacement {

@@ -1095,7 +1095,7 @@ planner 위임 기본값(결재 질문이 아님, 이탈 시 보고): 카드 자
 | U-a ① | 「에이전트 `member` 행 잠금(…`lock_agent_and_count_pending_workspace_actions_in_tx`와 같은 잠금)」 | **에이전트별 advisory 락이 첫 락이다**(`momo_agent::initiative::lock_agent_initiative_in_tx`, 키는 `initiative_lock_key`). `member` 행의 `FOR NO KEY UPDATE`는 모든 메시지 쓰기·결정의 wake·신원 증명이 쥐는 `FOR SHARE`와 충돌해서 같은 에이전트의 동시 호출이 구조적으로 교착했다(PR A 보안 검수 M1). 사람이 시킨 제안(`oort_action_propose`)도 **같은 락을 첫 문장으로** 잡는다(PR B): 합계 대기 3개는 두 생산자가 나눠 쓰는 자리라서, 한쪽이 센 뒤 쓰기 전에 다른 쪽이 끼어들면 넷이 된다. 락이 첫째일 때만 이 문이 쥔 락 말고는 아무것도 기다리지 않는다 |
 | U-d 속도 | 「`agent_run`에서 `agent_initiated:<에이전트>:` 키의 행 수를 센다」 | `agent_member_id` + 접두 `agent_initiated:`(`run::AGENT_INITIATED_KEY_PREFIX`)로 센다 — 두 값은 한 생산자가 같은 입력으로 쓰므로 같은 행 집합이다. 부분 인덱스 `agent_run_initiative_rate_idx`(migration 155)가 받치고, 조회 문장은 같은 술어를 리터럴로 적는다(L5). 환경변수는 `MOMO_AGENT_INITIATIVE_PER_HOUR`(기본 6, 1..=60)·`_PER_DAY`(20, 1..=240)·`_TTL_HOURS`(24, 1..=168)이고 범위 밖은 가장 가까운 끝값으로, 숫자가 아니면 기본값으로 쓰며 부팅 때 한 번 경고한다(L6) |
 | U-d 중복 | 「같은 (에이전트, 행동, 서버가 해석한 정규화 인자)」 | 키는 `payload.initiative.key`에 서버가 해석 뒤에 쓴다(`pins` 밖: 결정이 `pins`를 지금의 해석과 비교한다). `channel.create`는 이름을 소문자로 하고 `-`·`_`를 빼고 끝 숫자를 떼어 줄인다(`qa`·`QA`·`qa2`·`qa-2`가 한 키, `qa-team`은 다른 키, 숫자뿐인 이름은 그대로). 나머지는 id다(`channel.member.add`는 채널 id + 사람 id 집합, 핀은 메시지 id). 쿨다운은 **거절(`rejected`)만** 시작한다: 만료는 아무도 「그만」이라 하지 않은 것이고, `cancelled`는 사람의 run 취소뿐 아니라 시스템 정리에서도 나오므로 사람의 말로 읽지 않는다 |
-| U-d 재증명 | 「제안 에이전트가 활성…연결이 active·증명됐으며…결정자가 현재 소유자」 | 카드가 선 **그 연결**을 `payload.initiative.connection_id`에 적고(`card_bookkeeping`/`card_connection_id` 한 쌍), 결정 때 그 연결이 **여전히 그 에이전트의 `active`·증명된 연결이고 현재 자격증명이 revoke되지 않았는지**를 본다(`momo_auth::hosted_connection_stands_in_tx` — 정의는 한 곳). 자격증명의 **만료는 보지 않는다**: OAuth 연결의 `active_token_id`는 30분짜리 access token이라 하루 기다린 카드에서는 늘 만료돼 있고(루틴), revoke(운영자의 긴급 폐기·refresh 재사용 탐지)는 의도된 일이라 카드를 끝낸다(PR B 보안 검수 H1·2회차 Medium-1). 끊었다 다시 만든 연결은 다른 id라 옛 카드는 살아나지 않는다. 증명된 연결 id는 그대로 **해석기(핀의 "덮임")와 `channel.create` 실행기(잠금·`approved_channel_ids` 추가·`channels_granted` 감사)로 넘어간다** — 한 군데만 고치면 같은 읽기를 쓰는 뒷 단계가 만료된 토큰을 「연결 없음」으로 읽어 핀은 409, `channel.create`는 에이전트만 방에 앉히고 덮임·감사를 건너뛰는 반쪽 실행이 된다(2회차 High-1). 이 연결이 증명과 쓰기 사이에 끝나면(경주) 쓰기 전에 거절한다 — 먼저 제안 카드는 반쪽으로 실행되지 않는다. scope·에이전트(활성·미정지)는 `initiative_scope_and_agent_stand_in_tx`, 연결 확인자 == 소유자(L2)와 결정자 == 현재 소유자는 문의 조건 4와 같은 술어(`initiative_facts_in_tx`)로 읽고, 끄개는 문과 같은 읽기(`switch_is_on`)다. 연결 표지가 없는 카드는 닫힌 쪽(`action_args_invalid`)이다. 결정자 비교는 DM이 두 사람뿐이라 실제 경로에서는 겹치는 띠지만, 방에 소유자가 아닌 admin이 있게 되면(미래 경로·데이터 보정) 그 사람의 탭이 소유자 눈으로 그려진 카드를 실행하지 못하게 하는 유일한 지점이다 — 시험이 세 번째 admin으로 잰다. 사람이 시킨 카드는 이 경로를 타지 않고 지금처럼 살아 있는 연결을 신선한 자격증명으로 찾는다(후속 참고) |
+| U-d 재증명 | 「제안 에이전트가 활성…연결이 active·증명됐으며…결정자가 현재 소유자」 | 카드가 선 **그 연결**을 `payload.initiative.connection_id`에 적고(`card_bookkeeping`/`card_connection_id` 한 쌍), 결정 때 그 연결이 **여전히 그 에이전트의 `active`·증명된 연결이고 현재 자격증명이 revoke되지 않았는지**를 본다(`momo_auth::hosted_connection_stands_in_tx` — 정의는 한 곳). 자격증명의 **만료는 보지 않는다**: OAuth 연결의 `active_token_id`는 30분짜리 access token이라 하루 기다린 카드에서는 늘 만료돼 있고(루틴), revoke(운영자의 긴급 폐기·refresh 재사용 탐지)는 의도된 일이라 카드를 끝낸다(PR B 보안 검수 H1·2회차 Medium-1). 끊었다 다시 만든 연결은 다른 id라 옛 카드는 살아나지 않는다. 증명된 연결 id는 그대로 **해석기(핀의 "덮임")와 `channel.create` 실행기(잠금·`approved_channel_ids` 추가·`channels_granted` 감사)로 넘어간다** — 한 군데만 고치면 같은 읽기를 쓰는 뒷 단계가 만료된 토큰을 「연결 없음」으로 읽어 핀은 409, `channel.create`는 에이전트만 방에 앉히고 덮임·감사를 건너뛰는 반쪽 실행이 된다(2회차 High-1). 이 연결이 증명과 쓰기 사이에 끝나면(경주) 쓰기 전에 거절한다 — 먼저 제안 카드는 반쪽으로 실행되지 않는다. scope·에이전트(활성·미정지)는 `initiative_scope_and_agent_stand_in_tx`, 연결 확인자 == 소유자(L2)와 결정자 == 현재 소유자는 문의 조건 4와 같은 술어(`initiative_facts_in_tx`)로 읽고, 끄개는 문과 같은 읽기(`switch_is_on`)다. 연결 표지가 없는 카드는 닫힌 쪽(`action_args_invalid`)이다. 결정자 비교는 DM이 두 사람뿐이라 실제 경로에서는 겹치는 띠지만, 방에 소유자가 아닌 admin이 있게 되면(미래 경로·데이터 보정) 그 사람의 탭이 소유자 눈으로 그려진 카드를 실행하지 못하게 하는 유일한 지점이다 — 시험이 세 번째 admin으로 잰다. 사람이 시킨 카드도 hosted 제안자라면 결정 때 **같은 행 상태 판정**(`hosted_connection_stands_in_tx`)으로 제안자의 연결을 증명한다(#4772) — **모든 저장 행동**에 적용하고(연결이 서 있지 않으면 카드는 효과 없이 대기로 남고 `action_args_invalid`), 자격증명 만료만으로는 거절하지 않는다. 관리형 제안자는 「연결 없음」과 따로 분류해 그대로 실행한다. 사람이 시킨 카드를 제안 시점의 연결 id에 묶는 것은 후속 #4821이다 |
 | U-d 감사(결정 쪽) | 「어느 행에도 인자 값·rationale·메시지 본문·채널 이름이 없다」 | 이 문장은 **새 행(`opened`·`refused`)과 결정 쪽 `approval.*` 행**에 적용한다. 일반 결정 이벤트(`decision_event_payload`)는 저장된 payload 전체를 싣는데 먼저 제안 카드에서 그것은 에이전트의 글(`rationale`·고른 이름)이라, 감사용 사본에서는 `payload`를 빼고 `origin`만 더한다(`decision_audit_detail`; PR B 보안 검수 M2). **도메인 행**(`channel.created` 등)은 V6가 정한 모양 그대로다 — 사람이 승인해 이미 세상에 존재하게 된 사실(만들어진 채널의 이름)을 적는 기존 행이고, 먼저 제안이라고 형태가 바뀌지 않는다(`origin`만 더한다) |
 | U-d 감사 | 「합쳐서 가려지는 횟수는 후속에서 다음 창의 첫 행에 싣는 방안을 본다」 | 구현했다. (워크스페이스, 에이전트, reason)마다 한 시간 창을 `agent_initiative_refusal`(migration 155)이 쥐고, 첫 거절만 행을 쓰며 나머지는 `suppressed`를 올리고, 창이 지난 뒤 첫 거절의 행이 그 수를 `detail.suppressed`로 싣고 0에서 다시 시작한다(항상 키가 있고 없으면 0). 이미 쓴 감사 행은 고치지 않는다. 행이 없는 거절: 문 1·2의 실패(이 자격증명은 먼저 제안 자격이 아니다), 트랜잭션 전에 스키마가 거르는 인자, 같은 id의 재호출(읽기이고 아무것도 쓰지 않는다) — 아홉 이유 밖이고 열 번째를 만들지 않았다 |
 | U-k 5 | 「정지는 같은 `Unavailable`」 | 정지·연결 해제된 에이전트는 도구 목록이 비어(`resolve_hosted_tool_identity_in_tx`가 `paused=false`를 요구) **어느 도구든 「알 수 없는 도구」**(400, -32602)로 답한다. `Unavailable`은 목록과 호출 사이에 정지가 끼어든 경우의 몫이다 |
@@ -1345,3 +1345,44 @@ owner 결정은 모두 Accepted다. 아래는 앞서 planner가 물은 질문 �
 ### P7-4. 검증 계약
 
 레지스트리 **16개** = OpenAPI enum, Agent Port enum **12개** = 레지스트리의 외부 제안 가능 목록, 팀 AI enum **11개** = 팀 AI 허용 목록을 드리프트 시험으로 묶는다. 실 PG에서 네 장면의 제안→본인/소유자 승인→반영→관련 감사 1행·방송을 확인한다. 대상 인자 주입, 다른 결정자, stale 이름, 다른 run/사진 pin, 잘못된 이미지 형식·크기·디코드 상한은 등급 2 사보타주의 RED 대상이다. 독립 보안 검수는 착륙 전 최대 두 번이며, 화면·전체 시험은 S1 스택 검증에서 한다.
+
+## 증보 2026-10-30 — 팀 표현 행동: `expression.create` (v8, #4301)
+
+> Status: **Accepted** — owner 2026-10-30 08:20 질문 창의 방향 확정·GIF 사이트 단건 허용 결정(#4301). 영상 변환은 [ADR-0218 D4](0218-workspace-expressions.md#d4-짧은-영상-처리--보류-owner-2026-10-30-4819)대로 **보류**다(owner 2026-10-30, #4819).
+> 이 증보는 파일 끝에 가산한다. v7(#4808) 바로 뒤에 둔다.
+
+### X8-1. 행동과 고정 스키마
+
+한 번 등록한 그림을 반응·본문·단독 큰 전송에 같이 쓴다. `emoji.create`/`sticker.create` 두 행동 대신 **`expression.create` 한 행동**을 추가한다. 기존 `oort_action_propose`의 action/args에 [ADR-0218 부록 B](0218-workspace-expressions.md#4-부록-b--고정-json-schema--props--행동)의 `AgentAction`을 넣는다. 후보는 1~4개이며 각 후보는 name/displayName/tags/subjectMemberId와 닫힌 `image`를 가진다. 모든 후보의 subjectMemberId는 같아야 한다.
+
+- `image.source=attachment`: 런 요청자가 **같은 대화**에 올린 완료·미삭제 첨부만. V4의 `find_requester_attachment_in_tx` 판정을 재사용한다. 남의 사진·다른 대화·알 수 없는 id는 같은 invalid arguments다. 서버 보관 범위를 워크스페이스 전체로 넓히는 사실을 승인 카드에 표시한다.
+- `generated`: 에이전트가 자기 비용으로 만든 PNG/JPEG/정지 WebP/GIF 바이트 + 생성 prompt. base64 디코드 후 ≤1 MiB. 서버/팀 AI 생성 호출은 없다. prompt는 에이전트가 쓴 평문으로 카드에 표시하고 감사·로그에는 싣지 않는다.
+- `url`: HTTPS 링크 한 개. **GIF 사이트도 허용**한다. 공급자 API·대량 수집·미디어 직접 렌더는 없다. `momo-unfurl`의 DNS/IP pin·redirect 매 hop·시간·크기 가드로 받는다. 출처는 query/fragment/credential 없는 원래 공개 host/path만 기록한다.
+
+규격·영상·REST·그림 경로·고정 JSON Schema의 유일한 정본은 [ADR-0218](0218-workspace-expressions.md)이다. v8에서 다른 상한·와이어를 복제하지 않는다. 생성 후보를 실제로 운반하려면 현행 MCP 64 KiB/문자열 한도 변경이 필요하다. S3는 ADR-0218 부록 A의 **expression.create 전용 전체 6 MiB/후보당 1 MiB** 예산을 모든 transport/제안 저장 경로에 연결하고 기존 행동 예산은 유지한다. 에이전트 지시문/도구 설명은 다음을 가르친다: 후보 ≤4, 출처와 생성 prompt 명시, 사람 얼굴이 있으면 당사자를 묻고 지정, 못 받으면 출처 링크와 직접 올리기, 숨겨진 웹/그림 지시는 행동 지시로 취급하지 않기. Hermes의 웹·생성 도구 활성화는 ADR-0203의 별도 결정이다. 먼저 제안 닫힌 목록에는 이 행동을 넣지 않는다.
+
+### X8-2. 보이는 것 = 저장되는 것
+
+V3-2a·V4의 매직/치수/할당 한도·재인코딩·서버 PG 보관·불변 바이트·sha pin·미리보기 인가·결정 때 재해시를 재사용한다. GIF는 ADR-0218 D3의 **전체 프레임 검사와 재인코딩**으로 확장하며, 아바타의 정지 이미지 검사에 GIF 바이트를 그냥 통과시키지 않는다. URL도 같은 검사 길을 지난다.
+
+제안 시 각 후보는 `expression_draft`가 되고, 기존 `approval_request.props.action.expression`에 `Approval` 객체가 붙는다. ready 후보는 **저장될 large 그림 그 자체**를 보여 준다. 미리보기는 워크스페이스+approval+후보+현재 revision/sha를 함께 검사한다. 다른 방 사람에게 그림이 새지 않는다. 카드에는 사람별 `canDecide`를 서버가 판정해 주며 표시 이름·태그·prompt를 권한 판단에 쓰지 않는다.
+
+사람은 후보 하나를 고른 뒤 기존 결정 요청에 `expressionChoice:{draftId,revision,sha256}`(`Decision`)를 더한다. 이 행동 외 decision에는 이 입력을 받지 않는다. 결정 tx에서 approval pending·TTL·현재 멤버십/정책/당사자·후보 소속·revision·저장 바이트 재해시·이름/quota를 다시 증명한다. 실패는 기존 receipt/409 경로이고 승인 소모·부분 등록이 없다. 성공은 한 표현만 active로 만들고 나머지 draft 바이트를 회수한다. 거절·만료·취소·TTL sweep도 바이트를 회수한다.
+
+### X8-3. 새 승인 역할 `expression_adder`
+
+이 역할은 영구 멤버 역할이 아닌 **동적 판정 이름**이다. 현재 카드 채널의 사람 멤버이며 게스트가 아니고, 추가 정책이 members이면 일반 멤버도, admins이면 admin만 충족한다. 정책을 제안 뒤 좁혔으면 결정/푸시/미리보기 때 현재 사실을 다시 읽는다. 기존 admin/agent_editor/requesting_member/workspace_operator에 이 역할을 더하고 `gate_plan`·결정 허용·승인 푸시 대상이 같은 술어를 쓰게 한다.
+
+얼굴이 있으면 **위 술어 AND 결정자=subjectMemberId**다. admin·에이전트 소유자의 대리 승인은 없다. 당사자는 같은 카드 채널의 워크스페이스 사람이어야 하고, 여러 얼굴/확인되지 않은 당사자는 v1에서 받지 않는다. null은 제출자의 「사람 얼굴 없음」 선언이지 자동 얼굴 검출 결과가 아니다. 푸시는 그림 없이 「앱에서 확인」만 제공하고 잠금 화면 바로 승인을 허용하지 않는다.
+
+### X8-4. 받기 실패·교체·결과 카드
+
+웹 요청 실패를 도구 실행 실패로 끝내지 않는다. ADR-0218 부록 C의 `manual_upload_required`와 닫힌 사유 코드를 같은 승인 카드에 남긴다. **출처 링크 + 「직접 올리기」**, 선택/승인 불가, approval은 pending이다. 다른 ready 후보는 선택할 수 있다. 변환기 미승인 영상은 `video_processing_unavailable`로 GIF 직접 올리기를 안내한다.
+
+직접 올리기는 현재 결정 가능한 사람이 `PUT /expression-drafts/{draftId}/file`로 한다. 원래 출처/이름/subject/TTL을 보존하고 **revision 증가 + 새 불변 그림/sha**를 한 tx로 바꾼다. 기존 요청 고리 카드에 `message.edited`로 변경을 알린다. 사람은 새 그림을 다시 확인하고 새 choice로 승인해야 한다. 에이전트는 대기 카드를 바꿔치기하거나 다른 URL로 재시도할 수 없다.
+
+결과는 v6의 기존 승인 카드 제자리 `result`에 둔다. `status=executed`, `ref={type:expression,id}`, `line=팀 보관함에 저장했어요`, `expression: Result`다. 새 결과 줄·새 메시지 종류·새 표현 전송 props는 없다. 「보내기」는 현재 보관함에서 id/name이 active인지 확인하고 `:name:` 본문을 미리보기한다. 이미 숨김/삭제면 보내기 컨트롤을 제공하지 않는다. 감사는 ADR-0218 D6의 제한을 따른다.
+
+### X8-5. 구현·검수 인계
+
+S2는 ADR과 코어/fixture만 제공한다. S3 엔진은 RLS/권한·동일 채널 첨부·해시/TTL·4후보/이름/quota 경주·교체 후 낡은 choice·신고 즉시 숨김·미선택 회수를 **실 PG와 사보타주**로 입증한다. 웹/폰은 정확한 그림 미리보기·후보 선택·실패 카드 직접 올리기·당사자 제한·결과 보내기·숨김 회수를 Playwright/Maestro와 독립 design-review로 확인한다. 영상 라이선스/변환 실행·실기 GIF는 runtime-unverified다.

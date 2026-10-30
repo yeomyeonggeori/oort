@@ -1,3 +1,4 @@
+import { DmAgentsMenu } from "./DmAgentsMenu";
 import {
   useCallback,
   useEffect,
@@ -276,6 +277,14 @@ export function ChatShell() {
     dmAgent,
   });
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
+  const refetchChannels = channelsQuery.refetch;
+  const refetchDirectory = directoryQuery.refetch;
+  const membershipRevision = messages.filter((m) => m.type === "system" && m.props?.kind === "dm_agent_membership").map((m) => m.id).join(",");
+  useEffect(() => {
+    if (membershipRevision === "") return;
+    void refetchChannels(); void refetchDirectory();
+  }, [membershipRevision, refetchChannels, refetchDirectory]);
+
   const welcome = useWelcomeKickoff({
     workspaceId,
     memberId: session.member.id,
@@ -1231,6 +1240,7 @@ export function ChatShell() {
                 onRetry={timeline.reloadPins}
               />
             )}
+            {stressCount === 0 && channel?.kind === "dm" && <DmAgentsMenu workspaceId={workspaceId} channel={channel} directory={directory} onChanged={() => Promise.all([channelsQuery.refetch(), directoryQuery.refetch()])} />}
             {stressCount === 0 && channel && channel.kind !== "dm" && (
               <ChannelMemberPanel
                 channelName={channel.name ?? label}
@@ -1551,6 +1561,7 @@ export function ChatShell() {
         {stressCount === 0 && channelId !== null && <LongPressHint />}
         {stressCount === 0 && channelId !== null && (
           <Composer
+            channel={channel}
             workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}

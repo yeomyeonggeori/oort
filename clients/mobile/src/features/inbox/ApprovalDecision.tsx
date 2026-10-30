@@ -408,6 +408,9 @@ const buildStyles = (color: Palette) => StyleSheet.create({
  * 그때 "이미 결정되었습니다"만 말하면 사람은 자기가 누른 대로 됐다고 읽는다.
  */
 export function decisionReceiptCopy(outcome: DecisionOutcome): string {
+  if (outcome.kind === 'committed' && outcome.status === 'cancelled') {
+    return '이 요청은 취소되어 있었어요.';
+  }
   if (outcome.kind === 'superseded') {
     if (outcome.status === 'approved') {
       return '이미 승인으로 기록되어 있었어요.';

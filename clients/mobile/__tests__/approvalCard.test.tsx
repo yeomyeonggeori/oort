@@ -109,6 +109,7 @@ const GATE: ApprovalGate = {
 };
 
 function renderCard(props: {
+  viewerMemberId?: string;
   message?: Message;
   gates?: ReadonlyMap<string, ApprovalGate>;
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
@@ -122,6 +123,7 @@ function renderCard(props: {
     <QueryClientProvider client={client}>
       <SessionProvider member={ME}>
         <MessageRow
+          actions={props.viewerMemberId ? {myMemberId: props.viewerMemberId} as never : undefined}
           message={props.message ?? card()}
           startsGroup
           directory={DIRECTORY}
@@ -780,5 +782,19 @@ describe('B-1 — 판정 입력 셋이 각자 다른 사실을 나른다', () =>
     for (const key of ['settled:', 'hasTarget:', 'pendingHere:']) {
       expect(code).toContain(key);
     }
+  });
+});
+
+
+describe('DM admission names the person whose consent this card requires', () => {
+  const message = card({action: {id: 'dm.agent.admit', rows: [], required_role: 'dm_participant', target_member_id: SELF}});
+  it('another viewer waits without approval controls', () => {
+    const view = renderCard({message, gates: new Map([['ap-1', GATE]]), viewerMemberId: AGENT});
+    expect(view.getByText('이 카드에 표시된 참여자의 허락을 기다려요.')).toBeTruthy();
+    expect(view.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+  });
+  it('the named human can decide on the existing approval control', () => {
+    const view = renderCard({message, gates: new Map([['ap-1', GATE]]), viewerMemberId: SELF});
+    expect(view.getByTestId('card-approval-ap-1-approve')).toBeTruthy();
   });
 });
