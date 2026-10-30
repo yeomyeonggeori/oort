@@ -100,7 +100,9 @@ describe('재시도 등록부 (#4708) — 이슈가 달린 시험만 · 1회 · 
       }
       const run = spawnSync(
         process.execPath,
-        [jestBin, file, '--maxWorkers=1', '--json', `--outputFile=${resultPath}`],
+        // Match the outer phone test command in isolated workers; Watchman state
+        // lives outside their writable roots and is unrelated to retry behavior.
+        [jestBin, file, '--watchman=false', '--maxWorkers=1', '--json', `--outputFile=${resultPath}`],
         {
           cwd: ROOT,
           encoding: 'utf8',

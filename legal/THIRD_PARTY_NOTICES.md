@@ -184,6 +184,19 @@ missing from this table or from that file).
 
 ### Phone client direct additions
 
+The ADR-0213 / #4833 Intl addition has a separate attribution bundle:
+[`generated/MOBILE_INTL_NOTICES.txt`](generated/MOBILE_INTL_NOTICES.txt), including
+the shared core's exact FormatJS versions and the phone's complete polyfill
+dependency closure, with unmodified MIT/BSD license texts. Regenerate with
+`node clients/mobile/scripts/generate-intl-notices.mjs`; append `--check` to check
+freshness. Ship this addition alongside the phone's other notices. It does not
+claim to inventory the full React Native/CocoaPods graph or change the GHCR bundle.
+
+Pinned phone polyfills are `@formatjs/intl-locale@5.3.12`,
+`@formatjs/intl-pluralrules@6.3.16`, and
+`@formatjs/intl-relativetimeformat@12.3.16` (MIT). Only ko/en per-language data is
+imported; Locale's built-in canonicalization/likely-subtag tables remain upstream.
+
 Direct phone dependencies or copied assets that an ADR or design issue introduced. The
 full transitive graph is still only license-gated, not bundled.
 

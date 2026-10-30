@@ -1,4 +1,5 @@
 export { createMessageService, SAFE_MESSAGE } from './service';
+export { localeAutonyms } from './autonyms';
 export { loadMessageCatalog } from './catalogs';
 export { supportedLocales, matchDeviceLocale, isLocalePreference, resolveLocaleContext, weekStartForRegion, validTimeZone } from './locale';
 export type { SupportedLocale, LocalePreference, LocaleContext, DeviceLocaleFacts, WeekStartsOn, HourCycle } from './locale';

@@ -7,8 +7,8 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
  *
  * The core is a package OUTSIDE this project directory (`packages/momo-core`),
  * it ships raw TypeScript (`exports: {"./*": "./src/*.ts"}`), and it declares
- * **zero runtime dependencies** on purpose — the purity gate fails if that ever
- * stops being true.
+ * one approved runtime dependency, FormatJS (ADR-0213). Its workspace install
+ * must be visible to Metro as well as the core's TypeScript source.
  *
  * Three things follow, and each maps to one setting below:
  *
@@ -37,6 +37,7 @@ const {getDefaultConfig, mergeConfig} = require('@react-native/metro-config');
  */
 const CORE_SRC = path.resolve(__dirname, '../../packages/momo-core/src');
 const PROJECT_NODE_MODULES = path.resolve(__dirname, 'node_modules');
+const WORKSPACE_NODE_MODULES = path.resolve(__dirname, '../../node_modules');
 
 /** `lib/api` -> `<core>/src/lib/api.ts`, trying the extensions Metro would. */
 function resolveCoreSource(rest) {
@@ -56,7 +57,8 @@ function resolveCoreSource(rest) {
 }
 
 const config = {
-  watchFolders: [CORE_SRC],
+  // Without the workspace install Metro silently serializes FormatJS as null.
+  watchFolders: [CORE_SRC, WORKSPACE_NODE_MODULES],
   resolver: {
     nodeModulesPaths: [PROJECT_NODE_MODULES],
     extraNodeModules: {

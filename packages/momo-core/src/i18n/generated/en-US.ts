@@ -50,6 +50,60 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "mobile.ios.cameraUsage": [
+    {
+      "type": 0,
+      "value": "Use the camera to attach photos to conversations or scan a QR code to connect this device to a workspace."
+    }
+  ],
+  "mobile.ios.faceIdUsage": [
+    {
+      "type": 0,
+      "value": "Use Face ID to confirm instructions sent to agents from this device."
+    }
+  ],
+  "mobile.ios.localNetworkUsage": [
+    {
+      "type": 0,
+      "value": "Use the local network to connect to an oort server on the same network."
+    }
+  ],
+  "mobile.ios.microphoneUsage": [
+    {
+      "type": 0,
+      "value": "oort does not record audio. All features work without microphone access."
+    }
+  ],
+  "mobile.ios.photoLibraryAddUsage": [
+    {
+      "type": 0,
+      "value": "oort does not save photos to your library. All features work without this permission."
+    }
+  ],
+  "mobile.ios.photoLibraryUsage": [
+    {
+      "type": 0,
+      "value": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded."
+    }
+  ],
+  "mobile.locale.backToSettings": [
+    {
+      "type": 0,
+      "value": "Back to settings"
+    }
+  ],
+  "mobile.locale.permissionNotice": [
+    {
+      "type": 0,
+      "value": "Permission prompts follow the iOS language setting. Changing the app language may not change these prompts immediately."
+    }
+  ],
+  "mobile.locale.saving": [
+    {
+      "type": 0,
+      "value": "Applying language…"
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,

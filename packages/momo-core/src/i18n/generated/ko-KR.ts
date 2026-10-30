@@ -29,6 +29,60 @@ export const catalog: MessageCatalog = {
       "value": "명"
     }
   ],
+  "mobile.ios.cameraUsage": [
+    {
+      "type": 0,
+      "value": "사진을 찍어 대화에 첨부하거나 QR 코드로 이 기기를 워크스페이스에 연결할 때 카메라를 써요."
+    }
+  ],
+  "mobile.ios.faceIdUsage": [
+    {
+      "type": 0,
+      "value": "에이전트에게 보내는 지시를 이 기기에서 확인할 때 Face ID를 써요."
+    }
+  ],
+  "mobile.ios.localNetworkUsage": [
+    {
+      "type": 0,
+      "value": "같은 네트워크에 있는 oort 서버에 연결할 때 로컬 네트워크를 써요."
+    }
+  ],
+  "mobile.ios.microphoneUsage": [
+    {
+      "type": 0,
+      "value": "oort는 소리를 녹음하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+    }
+  ],
+  "mobile.ios.photoLibraryAddUsage": [
+    {
+      "type": 0,
+      "value": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+    }
+  ],
+  "mobile.ios.photoLibraryUsage": [
+    {
+      "type": 0,
+      "value": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요."
+    }
+  ],
+  "mobile.locale.backToSettings": [
+    {
+      "type": 0,
+      "value": "설정으로 돌아가기"
+    }
+  ],
+  "mobile.locale.permissionNotice": [
+    {
+      "type": 0,
+      "value": "권한 요청 창은 iOS 언어 설정을 따라요. 앱 언어를 바꿔도 바로 바뀌지 않을 수 있어요."
+    }
+  ],
+  "mobile.locale.saving": [
+    {
+      "type": 0,
+      "value": "언어를 적용하는 중이에요."
+    }
+  ],
   "settings.profile.languageBeta": [
     {
       "type": 0,
