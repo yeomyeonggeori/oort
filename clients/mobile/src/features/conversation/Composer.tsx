@@ -1,3 +1,5 @@
+import {dmAdmissionCandidates, dmAdmissionHint} from '@momo/core/features/agents/dmAdmission';
+import type {Channel} from '@momo/core/lib/api';
 import type {MessageAttachment, RosterMember} from '@momo/core/lib/api';
 import {
   ATTACH_COPY,
@@ -1081,6 +1083,7 @@ const SLASH_GLYPH = 16;
 
 export function Composer({
   channelLabel,
+  channel,
   recipient,
   directory,
   viewerHumanId,
@@ -1099,6 +1102,7 @@ export function Composer({
   onKeyBlockedChange,
 }: {
   channelLabel: string;
+  channel?: Channel | null;
   /**
    * 이 label 이 **방 이름인가 사람 이름인가** (#1384). DM 의 label 은 상대의
    * displayName 이므로(`channelLabelParts`) 조사가 갈린다: 방은 에, 사람은
@@ -1429,9 +1433,10 @@ export function Composer({
 
   const query = mentionOpen && !showSlash ? mentionQueryAt(text, caret) : null;
   const candidates = useMemo(
-    () => (query ? matchMembers(directory.members, query.text) : []),
-    [query, directory.members],
+    () => (query ? matchMembers(dmAdmissionCandidates(channel, directory.members, viewerHumanId ?? ''), query.text) : []),
+    [query, directory.members, channel, viewerHumanId],
   );
+  const admissionHint = dmAdmissionHint(text, channel, directory, viewerHumanId ?? '');
   const showMentions = candidates.length > 0;
   // 후보의 AI 보조 줄 (AIH-9b). 문장은 전부 코어 `mentionAnnotation` 이 만든다 — 폰은
   // 그리기만 한다. 서버가 쓰는 AI를 안 알려 준 에이전트(구서버)는 null 이라 줄이 없다.
@@ -2317,6 +2322,7 @@ export function Composer({
         </View>
       ) : null}
 
+      {admissionHint !== null ? <Text style={styles.hint} accessibilityLiveRegion="polite" testID="composer-dm-admission-hint">{admissionHint}</Text> : null}
       {dmHint !== undefined ? (
         dmHint !== null && text.trim() === '' ? (
           <Text style={styles.hint} testID="composer-dm-hint">

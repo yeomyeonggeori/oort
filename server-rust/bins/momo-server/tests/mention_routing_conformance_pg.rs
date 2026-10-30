@@ -2564,3 +2564,6 @@ async fn join_channel_to(su: &PgPool, tenant: &Tenant, channel: Uuid, member: Uu
         .await
         .expect("join channel");
 }
+
+#[path = "cases/dm_agent_admission.rs"]
+mod dm_agent_admission;

@@ -1271,6 +1271,24 @@ pub async fn find_client_message_in_tx(
         .map_err(DbError::from)
 }
 
+/// Find one live read projection without widening the caller's message RLS.
+pub async fn find_message_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    message_id: Uuid,
+) -> Result<Option<StoredMessage>, DbError> {
+    let sql = format!("SELECT {STORED_COLS} FROM message WHERE channel_id=$1 AND id=$2 LIMIT 1");
+    let row = sqlx::query(&sql)
+        .bind(channel_id)
+        .bind(message_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref()
+        .map(decode_stored)
+        .transpose()
+        .map_err(DbError::from)
+}
+
 /// Shallow-merge a patch into a stored message's `props` (Swift
 /// `ApprovalDecisionRoutes.patchApprovalRequestMessage` :668-693).
 ///
@@ -2045,6 +2063,18 @@ pub async fn agent_context_window_in_tx(
     trigger_message_id: Uuid,
     max_messages: i64,
 ) -> Result<Vec<Value>, DbError> {
+    agent_context_window_for_member_in_tx(conn, channel_id, trigger_message_id, max_messages, None)
+        .await
+}
+
+/// ADR-0217: each agent has its own DM history floor; never share a window across agents.
+pub async fn agent_context_window_for_member_in_tx(
+    conn: &mut PgConnection,
+    channel_id: Uuid,
+    trigger_message_id: Uuid,
+    max_messages: i64,
+    agent_member_id: Option<Uuid>,
+) -> Result<Vec<Value>, DbError> {
     if max_messages <= 0 {
         return Ok(Vec::new());
     }
@@ -2069,12 +2099,14 @@ pub async fn agent_context_window_in_tx(
                    JOIN member mem ON mem.id = m.author_member_id \
                   WHERE m.channel_id = $1 AND (m.root_id = $2 OR m.id = $2) \
                     AND {CONTEXT_FILTER} \
+                    AND ($4::uuid IS NULL OR dm_agent_message_visible(m.workspace_id, m.channel_id, $4, m.id, m.created_at, m.seq)) \
                   ORDER BY m.seq DESC LIMIT $3"
             );
             let thread_rows = sqlx::query(&thread_sql)
                 .bind(channel_id)
                 .bind(root_id)
                 .bind(max_messages)
+                .bind(agent_member_id)
                 .fetch_all(&mut *conn)
                 .await?;
             let remaining = max_messages - thread_rows.len() as i64;
@@ -2086,6 +2118,7 @@ pub async fn agent_context_window_in_tx(
                       WHERE m.channel_id = $1 AND m.id <> $2 \
                         AND m.root_id IS DISTINCT FROM $2 \
                         AND {CONTEXT_FILTER} \
+                    AND ($4::uuid IS NULL OR dm_agent_message_visible(m.workspace_id, m.channel_id, $4, m.id, m.created_at, m.seq)) \
                       ORDER BY m.seq DESC LIMIT $3"
                 );
                 rows.extend(
@@ -2093,6 +2126,7 @@ pub async fn agent_context_window_in_tx(
                         .bind(channel_id)
                         .bind(root_id)
                         .bind(remaining)
+                        .bind(agent_member_id)
                         .fetch_all(&mut *conn)
                         .await?,
                 );
@@ -2103,12 +2137,14 @@ pub async fn agent_context_window_in_tx(
                 "SELECT {CONTEXT_COLS} FROM message m \
                    JOIN member mem ON mem.id = m.author_member_id \
                   WHERE m.channel_id = $1 AND {CONTEXT_FILTER} \
+                    AND ($3::uuid IS NULL OR dm_agent_message_visible(m.workspace_id, m.channel_id, $3, m.id, m.created_at, m.seq)) \
                   ORDER BY m.seq DESC LIMIT $2"
             );
             rows.extend(
                 sqlx::query(&sql)
                     .bind(channel_id)
                     .bind(max_messages)
+                    .bind(agent_member_id)
                     .fetch_all(&mut *conn)
                     .await?,
             );

@@ -478,6 +478,8 @@ export function frameSentence(frame: ActionFrame): string {
  * 한 글자도 다르지 않게 그린다.
  */
 export interface AgentApprovalAction {
+  /** ADR-0217: only this named human may decide this admission card. */
+  targetMemberId?: string;
   /** 레지스트리의 행동 id(`invite.create`). 화면에는 그리지 않는다. */
   id: string;
   /** 사람이 판단할 사실. 서버가 이름 붙여 보낸 것만, 보낸 순서대로. */
@@ -556,6 +558,7 @@ export function parseApprovalAction(value: unknown): AgentApprovalAction | null 
       typeof raw.required_role === "string" && raw.required_role !== ""
         ? raw.required_role
         : null,
+    ...(id === "dm.agent.admit" && typeof raw.target_member_id === "string" ? { targetMemberId: raw.target_member_id } : {}),
     ...(preview !== null ? { preview } : {}),
     ...(messagePreview !== null ? { messagePreview } : {}),
   };

@@ -81,17 +81,18 @@ use momo_agent::actions::{
     AUDIT_UNFURL_SETTING_UPDATED_SCHEMA, AUDIT_WORKSPACE_SETTING_UPDATED,
     AUDIT_WORKSPACE_SETTING_UPDATED_SCHEMA, AUDIT_WORK_TIER_POLICY_CHANGED,
     AUDIT_WORK_TIER_POLICY_CHANGED_SCHEMA, DEFAULT_INVITE_EXPIRES_IN_DAYS, INVITE_RESULT_NEXT,
-    REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION, REF_TYPE_INVITE, REF_TYPE_MEMBER,
-    REF_TYPE_MESSAGE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
-    SECRET_ONCE_PAIRING,
+    LAST_ATTEMPT_PROPS_KEY, REF_TYPE_AGENT, REF_TYPE_CHANNEL, REF_TYPE_HOSTED_CONNECTION,
+    REF_TYPE_INVITE, REF_TYPE_MEMBER, REF_TYPE_MESSAGE, REF_TYPE_WORKSPACE_SETTINGS, ROLE_REQUIRED,
+    SECRET_ONCE_INVITE_LINK, SECRET_ONCE_PAIRING,
 };
 use momo_agent::approval::{
-    decision_broadcast_payload, decision_event_payload, decision_receipt, decision_stamp_in_tx,
-    default_execution_host, existing_decision_in_tx, is_active_channel_member_in_tx,
-    is_active_human_member_in_tx, is_overdue, list_approvals_in_tx, lock_approval_in_tx,
-    mark_approval_decided_in_tx, mark_approval_expired_in_tx, normalized_reason,
-    offers_host_choice, record_decision_in_tx, reference_execution_host, resume_job_payload,
-    selectable_host_ids, validated_limit, validated_status, ApprovalListRow, LockedApproval,
+    decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
+    decision_stamp_in_tx, default_execution_host, existing_decision_in_tx,
+    is_active_channel_member_in_tx, is_active_human_member_in_tx, is_overdue, list_approvals_in_tx,
+    lock_approval_in_tx, mark_approval_decided_in_tx, mark_approval_expired_in_tx,
+    normalized_reason, offers_host_choice, record_decision_in_tx, reference_execution_host,
+    resume_job_payload, selectable_host_ids, validated_limit, validated_status, ApprovalListRow,
+    LockedApproval,
 };
 use momo_agent::approval_outcome::approval_card_outcome;
 use momo_agent::decider::{action_required_role, decider_gate, GatePlan};
@@ -102,8 +103,8 @@ use momo_agent::{
 };
 use momo_auth::{
     active_hosted_connection_in_tx, append_approved_channels_in_tx, grant_hosted_channels_in_tx,
-    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, Principal, PrincipalKind,
-    AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
+    hosted_action_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
+    Principal, PrincipalKind, AUDIT_VIA_PUSH_ACTION, MAX_HOSTED_APPROVED_CHANNELS,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::PgConnection;
@@ -111,10 +112,11 @@ use momo_messaging::{
     add_channel_member_in_tx, apply_agent_card_in_tx, apply_avatar_image_in_tx,
     apply_human_avatar_image_in_tx, cent_channel, clear_avatar_image_in_tx,
     create_channel_detailed_in_tx, delete_staged_avatar_image_in_tx, emit_message_edited_in_tx,
-    lock_agent_card_in_tx, normalize_channel_kind, patch_message_props_in_tx,
-    read_avatar_image_bytes_in_tx, read_avatar_image_in_tx, rename_agent_display_name_in_tx,
-    set_pin_in_tx, settle_approval_card_in_tx, staged_image_matches_pin_in_tx, AgentCard,
-    AgentCardPatch, CardStatusPatch, FieldPatch, NewChannel, PinAction,
+    lock_agent_card_in_tx, normalize_channel_kind, patch_and_prune_message_props_in_tx,
+    patch_message_props_in_tx, read_avatar_image_bytes_in_tx, read_avatar_image_in_tx,
+    rename_agent_display_name_in_tx, set_pin_in_tx, settle_approval_card_in_tx,
+    staged_image_matches_pin_in_tx, AgentCard, AgentCardPatch, CardStatusPatch, FieldPatch,
+    NewChannel, PinAction,
 };
 use momo_outbox::{emit_outbox, OutboxKind, RESUME_APPROVAL_JOB_METHOD};
 use momo_settings::{
@@ -595,6 +597,7 @@ async fn decide(
         let outcome = agent_tenant_tx(&state.pool, workspace_id, {
             let reason = reason.clone();
             let public_origin = public_origin.clone();
+            let admission_state = state.clone();
             move |conn| {
                 Box::pin(async move {
                     decide_in_tx(
@@ -615,6 +618,7 @@ async fn decide(
                             operator_scope,
                             deliver_secret_to_agent,
                             context_max_messages,
+                            admission_state: Some(&admission_state),
                         },
                     )
                     .await
@@ -714,6 +718,7 @@ struct DecisionInput<'a> {
     /// `MentionSettings::context_max_messages` — the recent-conversation window
     /// of the job an approved in-place channel grant releases (ADR-0162 증보 5 G3).
     context_max_messages: i64,
+    admission_state: Option<&'a AppState>,
 }
 
 /// Name the door a decision came through in one of its OWN audit rows
@@ -770,6 +775,9 @@ fn deliver_flag_refused(
 /// raised unasked (it stands in its owner's one-to-one direct message and says what the agent wants
 /// to do there). One definition for both decision routes' two places that ask.
 fn card_is_hidden_from_outsiders(approval: &LockedApproval) -> bool {
+    if super::dm_agents::is_admission(&approval.payload) {
+        return true;
+    }
     momo_agent::in_place_grant::is_in_place_grant(&approval.payload)
         || momo_agent::initiative::is_unasked_card(approval)
 }
@@ -964,9 +972,92 @@ async fn decide_in_tx(conn: &mut PgConnection, input: DecisionInput<'_>) -> DbRe
                 decided_at,
                 Some(&format!("approval is already {status}")),
             ),
-            status: StatusCode::CONFLICT,
+            // The server has already stopped this action. Acknowledge the
+            // terminal card without resurrecting work or recording a new vote.
+            status: if status == "cancelled" {
+                StatusCode::OK
+            } else {
+                StatusCode::CONFLICT
+            },
             secret_once: None,
         }));
+    }
+
+    if super::dm_agents::is_admission(&approval.payload) {
+        let Some(state) = input.admission_state else {
+            return Err(protocol_error("missing DM admission settings"));
+        };
+        let status = match super::dm_agents::vote_in_tx(
+            conn,
+            &approval,
+            input.member_id,
+            input.approve,
+            state,
+        )
+        .await?
+        {
+            Ok(status) => status,
+            Err(code) => {
+                return Ok(Ok(refusal(
+                    approval.id,
+                    input.member_id,
+                    code,
+                    "only the named DM participant may decide an unchanged request",
+                    StatusCode::FORBIDDEN,
+                    now,
+                )))
+            }
+        };
+        let decided_by = (status != "expired").then_some(input.member_id);
+        let receipt = decision_receipt(approval.id, status, decided_by, now, input.reason);
+        if let Some(message_id) = approval.request_message_id {
+            patch_and_prune_message_props_in_tx(
+                conn,
+                input.workspace_id,
+                message_id,
+                &decided_props_patch(status, decided_by, now, input.reason),
+                &[LAST_ATTEMPT_PROPS_KEY],
+            )
+            .await?;
+            announce_card_edit(conn, input.workspace_id, message_id).await?;
+        }
+        record_decision_in_tx(
+            conn,
+            input.workspace_id,
+            approval.id,
+            input.client_decision_id,
+            input.member_id,
+            input.approve,
+            status,
+            input.reason,
+            &receipt,
+        )
+        .await?;
+        let event = decision_event_payload(&approval, status, decided_by, now, input.reason);
+        emit_outbox(
+            &mut *conn,
+            input.workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &decision_broadcast_payload(
+                &cent_channel(input.workspace_id, approval.channel_id),
+                &approval,
+                status,
+                &event,
+                now,
+            ),
+            Some(approval.channel_id),
+        )
+        .await?;
+        write_audit(
+            conn,
+            &AuditEntry::new(input.workspace_id, format!("dm.agent.consent.{status}"))
+                .by(input.member_id)
+                .target("approval", approval.id)
+                .via_token(input.via_token_id),
+        )
+        .await?;
+        return Ok(Ok(Decision::ok(receipt)));
     }
 
     // The `work_control` this approval owns, if any (Swift :196). A malformed
@@ -1541,7 +1632,7 @@ async fn role_required_refusal(
             Some(RequiredRole::AgentEditor) => {
                 "this workspace action must be approved by the target agent's owner or a workspace admin"
             }
-            Some(RequiredRole::RequestingMember) => {
+            Some(RequiredRole::RequestingMember | RequiredRole::DmParticipant) => {
                 "this workspace action must be approved by the member it changes"
             }
             Some(RequiredRole::WorkspaceOperator) => {
@@ -2516,6 +2607,8 @@ async fn execute_channel_create(
     // read finds the connection *through the credential's expiry*; for a card that waited a day it
     // finds nothing, and the agent would be seated in a room its connection does not cover with the
     // grant and its audit row skipped (security review of #4704 PR B, round 2, H1).
+    // A requested card proves the proposer's own connection by the same standing rule. Only a
+    // managed proposer has no connection to widen; an ended hosted connection refuses the action.
     let connection = if add_proposer {
         match card_connection {
             Some(card_connection) => {
@@ -2537,9 +2630,37 @@ async fn execute_channel_create(
                 Some((card_connection, covered))
             }
             None => {
-                lock_active_hosted_connection_in_tx(conn, input.workspace_id, approval.requested_by)
-                    .await
-                    .map_err(momo_db::DbError::from)?
+                match hosted_action_connection_in_tx(
+                    conn,
+                    input.workspace_id,
+                    approval.requested_by,
+                )
+                .await
+                .map_err(momo_db::DbError::from)?
+                {
+                    HostedActionConnection::Managed => None,
+                    HostedActionConnection::Standing(connection_id) => {
+                        let Some(covered) = lock_hosted_connection_in_tx(
+                            conn,
+                            input.workspace_id,
+                            approval.requested_by,
+                            connection_id,
+                        )
+                        .await
+                        .map_err(momo_db::DbError::from)?
+                        else {
+                            return Ok(Execution::Refused(args_invalid_refusal(
+                                approval, input, now,
+                            )));
+                        };
+                        Some((connection_id, covered))
+                    }
+                    HostedActionConnection::Unavailable => {
+                        return Ok(Execution::Refused(args_invalid_refusal(
+                            approval, input, now,
+                        )));
+                    }
+                }
             }
         }
     } else {
@@ -4573,6 +4694,7 @@ mod tests {
             operator_scope: false,
             deliver_secret_to_agent: false,
             context_max_messages: 30,
+            admission_state: None,
         }
     }
 
