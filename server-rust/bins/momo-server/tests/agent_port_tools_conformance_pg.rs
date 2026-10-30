@@ -26736,6 +26736,71 @@ async fn requesting_member_generated_avatar_round_trip_4791() {
 }
 
 async fn assert_profile_result_broadcast_4791(pool: &PgPool, ws: Uuid, approval: Uuid) {
+    let cards: Vec<(Uuid, Value, String)> = sqlx::query_as(
+        "SELECT id, props, body FROM message WHERE workspace_id=$1 \
+         AND type='approval_request' AND props->>'approval_id'=$2",
+    )
+    .bind(ws)
+    .bind(approval.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(cards.len(), 1, "the profile outcome stays on its one card");
+    let (card, props, body) = &cards[0];
+    let request_message: Option<Uuid> = sqlx::query_scalar(
+        "SELECT request_message_id FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(ws)
+    .bind(approval)
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        request_message,
+        Some(*card),
+        "the original request is patched"
+    );
+    assert_eq!(props["status"], "approved");
+    assert_eq!(props["approval_status"], "approved");
+    assert_eq!(props["code"], "approval_approved");
+    assert_eq!(props["result"]["status"], "executed");
+    assert_eq!(props["result"]["approval_id"], approval.to_string());
+    assert_eq!(props["result"]["line"], *body);
+    assert!(!body.trim().is_empty(), "the result is visible on the card");
+    // A refused tap can edit last_attempt while the card is still pending.
+    // Only the terminal edit carries the result that must appear once.
+    let edits: Vec<Value> = sqlx::query_scalar(
+        "SELECT payload->'data'->'payload' FROM outbox \
+         WHERE workspace_id=$1 AND kind='broadcast' \
+         AND payload->'data'->>'type'='message.edited' \
+         AND payload->'data'->'payload'->>'id'=$2 \
+         AND payload->'data'->'payload'->'props'->>'status'='approved'",
+    )
+    .bind(ws)
+    .bind(card.to_string())
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        edits.len(),
+        1,
+        "the profile card settlement is broadcast once"
+    );
+    assert_eq!(edits[0]["props"], *props);
+    assert_eq!(edits[0]["body"], *body);
+    let legacy_rows: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 \
+         AND props->'momo.action_result'->>'approval_id'=$2",
+    )
+    .bind(ws)
+    .bind(approval.to_string())
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        legacy_rows, 0,
+        "no separate profile result message is written"
+    );
     let frames: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='broadcast' \
          AND payload->'data'->>'type'='message.new' \
@@ -26746,7 +26811,7 @@ async fn assert_profile_result_broadcast_4791(pool: &PgPool, ws: Uuid, approval:
     .fetch_one(pool)
     .await
     .unwrap();
-    assert_eq!(frames, 1, "the profile action result is broadcast once");
+    assert_eq!(frames, 0, "no separate profile result message is broadcast");
 }
 
 fn profile_context_4791(

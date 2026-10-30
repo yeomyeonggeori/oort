@@ -1,6 +1,8 @@
 //! ADR-0204 addendum 6 D6-5 exception: approval-settlement candidates read
 //! `source`, then use only the requester arm, at judgment time. Their category
 //! is mention and their dispatch key differs from the original approval push.
+//! Rollout: deploy the notifier before or together with the server, so an
+//! already-settled approval is not pushed to deciders a second time.
 //! Judgment v0 — **the** single place notification judgment lives (ux-bible P9).
 //!
 //! Port of `NotifierService.judgeTargets` / `unreadBadge`
