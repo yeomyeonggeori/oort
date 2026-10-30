@@ -2309,13 +2309,10 @@ pub const ACTION_RESULT_PROPS_KEY: &str = "momo.action_result";
 /// `momo.action_result.v1`.
 pub const ACTION_RESULT_VERSION: i64 = 1;
 
-/// 부록 B `status` — the one this executor writes.
-///
-/// The vocabulary is `executed | rejected | expired | role_required`; the other
-/// three belong to arms that already have their own outcome line (the
-/// rejection's and the sweep's `tool_result`, and the card patch a refused
-/// decision leaves), so widening those here would put **two** lines under one
-/// card.
+/// The executed action's result status. ADR-0186 v6 R-b puts this object
+/// inside the existing approval card's `result`; rejection, expiry and human
+/// cancellation use the same card, with their own status. No outcome line is
+/// inserted. `role_required` remains a nonterminal attempt on a pending card.
 pub const ACTION_RESULT_EXECUTED: &str = "executed";
 
 /// The card patch a decision refused for want of authority leaves behind
@@ -2356,7 +2353,9 @@ pub const ACTION_RESULT_NEXT_HREF: &str = "/settings?section=members";
 /// The label beside [`ACTION_RESULT_NEXT_HREF`], spelled as the nav spells it.
 pub const ACTION_RESULT_NEXT_LABEL: &str = "설정 › 멤버와 초대에서 보기";
 
-/// The `client_msg_id` of the `action_result` line an executed action posts.
+/// The reserved `client_msg_id` of legacy executed-action result lines.
+/// New decisions patch the request card (ADR-0186 v6 R-b); keep this key stable
+/// because existing rows and future announcement keys must never collide.
 ///
 /// **Not the approval id, and not the card's id either.** Three messages can now
 /// share `(channel_id, author_member_id)` for one approval — the proposal card

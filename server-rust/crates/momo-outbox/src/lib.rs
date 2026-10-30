@@ -68,7 +68,8 @@ pub use gateway::{
     HOSTED_LEASE_SECONDS_DEFAULT, HOSTED_LEASE_SECONDS_MAX, HOSTED_LEASE_SECONDS_MIN,
 };
 pub use push::{
-    claim_push_candidate_batch, emit_stream_closed_push_candidate, reclaim_stuck_push_candidates,
+    claim_push_candidate_batch, emit_approval_settled_push_candidate,
+    emit_stream_closed_push_candidate, reclaim_stuck_push_candidates,
     stream_closed_candidate_payload, ClaimedPushCandidate, PUSH_CANDIDATE_SCHEMA,
     PUSH_CANDIDATE_SOURCE_STREAM_CLOSED,
 };

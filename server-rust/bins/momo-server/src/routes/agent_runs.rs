@@ -1423,27 +1423,9 @@ pub(super) async fn cancel_run_and_cleanup_in_tx(
         return Ok(false);
     }
     retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
-    let cards: Vec<Uuid> = momo_db::sqlx::query_scalar(
-        "SELECT request_message_id FROM approval WHERE workspace_id=$1 AND run_id=$2 \
-         AND status='pending' AND request_message_id IS NOT NULL FOR UPDATE",
-    )
-    .bind(workspace_id)
-    .bind(run_id)
-    .fetch_all(&mut *conn)
-    .await?;
-    let now = chrono::Utc::now();
-    cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, now).await?;
-    for card in cards {
-        momo_messaging::patch_and_prune_message_props_in_tx(
-            conn,
-            workspace_id,
-            card,
-            &momo_agent::approval::decided_props_patch("cancelled", None, now, None),
-            &["last_attempt"],
-        )
-        .await?;
-        momo_messaging::emit_message_edited_in_tx(conn, workspace_id, card).await?;
-    }
+    let decided_at = chrono::Utc::now();
+    let cancelled_approvals =
+        cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, decided_at).await?;
     // A hosted runtime learns the stop by polling its inbox, even when the
     // delivery job is already done. This is a run reference, never a new job.
     if let Some(connection_id) =
@@ -1456,6 +1438,63 @@ pub(super) async fn cancel_run_and_cleanup_in_tx(
             connection_id,
             channel_id,
             run_id,
+        )
+        .await?;
+    }
+    // The hosted inbox lock above precedes the card lock (ADR-0186 v6 R-b).
+    // A stop retires each pending card once and never sends a result push.
+    for approval in cancelled_approvals {
+        if let Some(message_id) = approval.request_message_id {
+            if super::dm_agents::is_admission(&approval.payload) {
+                // ADR-0217: an admission card keeps its own words; only its status settles.
+                momo_messaging::patch_and_prune_message_props_in_tx(
+                    conn,
+                    workspace_id,
+                    message_id,
+                    &momo_agent::approval::decided_props_patch("cancelled", None, decided_at, None),
+                    &["last_attempt"],
+                )
+                .await?;
+                momo_messaging::emit_message_edited_in_tx(conn, workspace_id, message_id).await?;
+            } else {
+                let outcome = momo_agent::approval_outcome::approval_card_outcome(
+                    &approval,
+                    "cancelled",
+                    None,
+                    decided_at,
+                    None,
+                );
+                momo_messaging::settle_approval_card_in_tx(
+                    conn,
+                    workspace_id,
+                    message_id,
+                    &outcome.patch,
+                    &outcome.body,
+                    false,
+                )
+                .await?;
+            }
+        }
+        let event = momo_agent::approval::decision_event_payload(
+            &approval,
+            "cancelled",
+            None,
+            decided_at,
+            None,
+        );
+        emit_outbox(
+            &mut *conn,
+            workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &momo_agent::approval::decision_broadcast_payload(
+                &momo_messaging::cent_channel(workspace_id, approval.channel_id),
+                &approval,
+                "cancelled",
+                &event,
+                decided_at,
+            ),
+            Some(approval.channel_id),
         )
         .await?;
     }

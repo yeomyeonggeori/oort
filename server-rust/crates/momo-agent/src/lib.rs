@@ -143,6 +143,7 @@ pub mod actions;
 pub mod app_notice;
 pub mod app_tool_grants;
 pub mod approval;
+pub mod approval_outcome;
 pub mod card_suggest;
 pub mod connector_trial;
 pub mod decider;

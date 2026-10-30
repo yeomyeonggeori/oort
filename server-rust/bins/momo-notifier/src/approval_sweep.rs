@@ -43,13 +43,12 @@ use momo_agent::approval::{
     decision_broadcast_payload, decision_event_payload, lock_approval_in_tx,
     mark_approval_expired_in_tx, workspaces_with_overdue_approvals, LockedApproval,
 };
-use momo_agent::tools::{ToolResult, TOOL_AUDIT_SCHEMA};
-use momo_agent::{
-    end_parked_run_in_tx, run_trigger_message_in_tx, RunStatus, PROP_ANSWERS_MESSAGE_ID,
-};
+use momo_agent::approval_outcome::approval_card_outcome;
+use momo_agent::tools::TOOL_AUDIT_SCHEMA;
+use momo_agent::{end_parked_run_in_tx, RunStatus};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError, PgConnection, PgPool};
-use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
+use momo_messaging::{cent_channel, settle_approval_card_in_tx};
 use momo_outbox::{emit_outbox, OutboxKind};
 use serde_json::json;
 use uuid::Uuid;
@@ -70,7 +69,6 @@ pub struct ApprovalSweepStats {
 /// The sentence the channel gets. Deliberately about the deadline, not about
 /// the person: nobody failed to act, the window closed.
 const EXPIRED_REASON: &str = "Approval expired before a human decision.";
-const EXPIRED_TOOL_RESULT_BODY: &str = "Tool call expired without a human approval.";
 
 /// Settle every overdue pending approval, oldest first.
 pub async fn sweep_expired_approvals(
@@ -181,16 +179,26 @@ async fn settle_expired_in_tx(
     if !mark_approval_expired_in_tx(&mut *conn, approval.id, now, EXPIRED_REASON).await? {
         return Ok(false);
     }
-    if let Some(card) = approval.request_message_id {
-        momo_messaging::patch_and_prune_message_props_in_tx(
-            conn,
-            workspace_id,
-            card,
-            &momo_agent::approval::decided_props_patch("expired", None, now, Some(EXPIRED_REASON)),
-            &["last_attempt"],
-        )
-        .await?;
-        momo_messaging::emit_message_edited_in_tx(conn, workspace_id, card).await?;
+    // ADR-0217: an admission card keeps its own words; only its status settles.
+    // Every other card is settled in place below (ADR-0186 v6 R-b).
+    let admission = approval.payload["origin"] == "dm_agent_admission";
+    if admission {
+        if let Some(card) = approval.request_message_id {
+            momo_messaging::patch_and_prune_message_props_in_tx(
+                conn,
+                workspace_id,
+                card,
+                &momo_agent::approval::decided_props_patch(
+                    "expired",
+                    None,
+                    now,
+                    Some(EXPIRED_REASON),
+                ),
+                &["last_attempt"],
+            )
+            .await?;
+            momo_messaging::emit_message_edited_in_tx(conn, workspace_id, card).await?;
+        }
     }
 
     // THE line this whole module exists for: the run leaves `RunStatus::LIVE`,
@@ -234,71 +242,19 @@ async fn settle_expired_in_tx(
 
     // ADR-0217: a lapsed admission never speaks as the unseated agent. The
     // per-person card's deadline/status already says it expired; no job exists.
-    if approval.payload["origin"] == "dm_agent_admission" {
+    if admission {
         return Ok(true);
     }
 
-    // Tell the channel, through the message spine like everything else — the
-    // person who asked deserves to see that the request lapsed rather than to
-    // find a conversation that simply stops.
-    let call_id = approval
-        .payload
-        .get("tool_call")
-        .and_then(|call| call.get("call_id"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
-    // ADR-0162 증보 5 G4 — an expired in-place channel-grant card tells the
-    // person who called, in words, that nothing ran and how to try again.
-    let body = if momo_agent::in_place_grant::is_in_place_grant(&approval.payload) {
-        momo_agent::in_place_grant::IN_PLACE_GRANT_EXPIRED_BODY
-    } else {
-        EXPIRED_TOOL_RESULT_BODY
-    };
-    let mut props = ToolResult::error(call_id, body).message_props();
-    if let Some(object) = props.as_object_mut() {
-        object.insert("approval_id".into(), json!(approval.id.to_string()));
-        object.insert("run_id".into(), json!(approval.run_id.to_string()));
-        object.insert("status".into(), json!("expired"));
-        object.insert("decided_at_ms".into(), json!(now.timestamp_millis()));
-        // ADR-0204 D8 (#3929): this line is the answer to a request that lapsed, so it
-        // names the message it answers — the person who asked is pushed (unless they
-        // are looking at the channel). A run nobody said anything to raise (a work
-        // run) has no trigger and the line stays what it was: silent.
-        if let Some(trigger) =
-            run_trigger_message_in_tx(&mut *conn, workspace_id, approval.run_id).await?
-        {
-            object.insert(PROP_ANSWERS_MESSAGE_ID.into(), json!(trigger.to_string()));
-        }
-    }
-    // The ledger/card/audit still settle after the speaker has left. Do not
-    // manufacture a fresh agent utterance in a room it can no longer enter.
-    if momo_messaging::dm::dm_agent_can_speak_in_tx(
-        conn,
-        workspace_id,
-        approval.channel_id,
-        approval.requested_by,
-    )
-    .await?
-    {
-        send_message_in_tx(
-            &mut *conn,
+    if let Some(message_id) = approval.request_message_id {
+        let outcome = approval_card_outcome(approval, "expired", None, now, None);
+        settle_approval_card_in_tx(
+            conn,
             workspace_id,
-            NewMessage {
-                channel_id: approval.channel_id,
-                author_member_id: approval.requested_by,
-                message_type: MessageType::ToolResult,
-                body: Some(body.to_string()),
-                props,
-                root_id: None,
-                reply_to_id: None,
-                // One expiry line per approval. Shares the key space with the
-                // rejection line for the same approval, which is correct: an
-                // approval ends exactly once, so only one of the two can exist.
-                client_msg_id: Some(approval.id),
-                run_id: Some(approval.run_id),
-                hlc_ts: None,
-                hlc_count: None,
-            },
+            message_id,
+            &outcome.patch,
+            &outcome.body,
+            outcome.notify_requester,
         )
         .await?;
     }

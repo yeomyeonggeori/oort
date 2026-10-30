@@ -1136,7 +1136,7 @@ async fn expiry_settles_the_held_run_and_there_is_no_job_to_reclaim() {
     assert!(!room_granted(&su, &f, f.room).await);
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND type='tool_result' AND client_msg_id=$3",
+           AND type='approval_request' AND props->>'approval_id'=$3::text",
     )
     .bind(f.workspace)
     .bind(f.room)
@@ -1144,10 +1144,7 @@ async fn expiry_settles_the_held_run_and_there_is_no_job_to_reclaim() {
     .fetch_one(&su)
     .await
     .unwrap();
-    assert_eq!(
-        line,
-        "시간이 지나 요청을 처리하지 않았어요. 다시 불러 주세요."
-    );
+    assert_eq!(line, "승인을 기다리다 만료됐어요");
     // The 24-hour stall sweep has nothing of this run to reclaim: it was never
     // queued or running.
     let reclaimable: i64 = sqlx::query_scalar(
@@ -1468,7 +1465,7 @@ async fn rejection_ends_the_held_run_with_a_reason_the_caller_reads() {
     assert!(!room_granted(&su, &f, f.room).await);
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND type='tool_result' AND client_msg_id=$3",
+           AND type='approval_request' AND props->>'approval_id'=$3::text",
     )
     .bind(f.workspace)
     .bind(f.room)
@@ -1476,10 +1473,7 @@ async fn rejection_ends_the_held_run_with_a_reason_the_caller_reads() {
     .fetch_one(&su)
     .await
     .unwrap();
-    assert_eq!(
-        line,
-        "관리자가 이 채널에서 쓰기를 승인하지 않아서 요청을 처리하지 않았어요."
-    );
+    assert_eq!(line, "거부됐어요");
 
     // After a rejection, calling again asks again.
     send(

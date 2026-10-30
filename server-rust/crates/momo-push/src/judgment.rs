@@ -1,3 +1,8 @@
+//! ADR-0204 addendum 6 D6-5 exception: approval-settlement candidates read
+//! `source`, then use only the requester arm, at judgment time. Their category
+//! is mention and their dispatch key differs from the original approval push.
+//! Rollout: deploy the notifier before or together with the server, so an
+//! already-settled approval is not pushed to deciders a second time.
 //! Judgment v0 — **the** single place notification judgment lives (ux-bible P9).
 //!
 //! Port of `NotifierService.judgeTargets` / `unreadBadge`
@@ -247,12 +252,40 @@ pub async fn judge_targets(
     workspace_id: Uuid,
     message_id: Uuid,
 ) -> Result<Vec<JudgedTarget>, DbError> {
+    judge_targets_for_source(conn, workspace_id, message_id, false, None).await
+}
+
+/// Consume the source of an id-only candidate. Keep the original message-only
+/// entry point for callers judging an INSERT/stream-close candidate.
+pub async fn judge_candidate_targets(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    candidate: &crate::PushCandidate,
+) -> Result<Vec<JudgedTarget>, DbError> {
+    judge_targets_for_source(
+        conn,
+        workspace_id,
+        candidate.message_id,
+        candidate.is_approval_settlement(),
+        Some(candidate.channel_id),
+    )
+    .await
+}
+
+async fn judge_targets_for_source(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    approval_settled: bool,
+    channel_id: Option<Uuid>,
+) -> Result<Vec<JudgedTarget>, DbError> {
     let rows = sqlx::query(
         "WITH msg AS ( \
            SELECT m.id, m.channel_id, m.author_member_id, \
                   m.type::text AS message_type, \
                   COALESCE(m.props->'mention_member_ids', '[]'::jsonb) AS mention_ids, \
                   m.props->>'kind' AS props_kind, \
+                  m.props#>>'{result,status}' AS result_status, \
                   m.props->>'owner_member_id' AS owner_member_id, \
                   m.props->>'session_id' AS session_id, \
                   m.props->'turn_started_ms' AS turn_started_ms, \
@@ -276,7 +309,25 @@ pub async fn judge_targets(
              FROM message m \
              JOIN channel c ON c.id = m.channel_id \
             WHERE m.id = $2 \
-              AND m.workspace_id = $1 \
+              AND m.workspace_id = $1 AND ($8::uuid IS NULL OR m.channel_id = $8) \
+         ), \
+         card AS ( \
+           SELECT a.id, a.run_id, a.requested_by, a.decided_by, a.status, a.action_type, \
+                  jsonb_build_object( \
+                  'action', jsonb_build_object( \
+                              'id', a.payload#>'{action,id}', \
+                              'pins', a.payload#>'{action,pins}', \
+                              'args', CASE \
+                                WHEN jsonb_typeof(a.payload#>'{action,args}') = 'object' \
+                                 AND jsonb_exists(a.payload#>'{action,args}', 'avatar') \
+                                  THEN jsonb_build_object('avatar', true) \
+                                ELSE '{}'::jsonb END), \
+                  'tool_call', jsonb_build_object('name', a.payload#>'{tool_call,name}'), \
+                  'execution', a.payload->'execution', \
+                  'origin', a.payload->'origin') AS approval_payload \
+             FROM msg \
+             JOIN approval a ON a.workspace_id = $1 AND a.request_message_id = msg.id \
+                            AND a.channel_id = msg.channel_id \
          ), \
          wrun AS ( \
            SELECT r.id AS run_id, \
@@ -307,9 +358,41 @@ pub async fn judge_targets(
             WHERE msg.author_kind = 'agent' \
               AND msg.run_id IS NOT NULL \
          ), \
+         settled AS ( \
+           SELECT trigger.author_member_id AS requester_id, a.decided_by \
+             FROM msg \
+             JOIN card a ON a.run_id = msg.run_id AND a.requested_by = msg.author_member_id \
+             JOIN agent_run run ON run.workspace_id = $1 AND run.id = a.run_id \
+             JOIN message trigger ON trigger.workspace_id = $1 \
+                                 AND trigger.channel_id = msg.channel_id \
+                                 AND trigger.id = run.trigger_message_id \
+            WHERE $7::boolean AND msg.message_type = 'approval_request' \
+              AND msg.author_kind = 'agent' \
+              AND (a.status IN ('rejected', 'expired') \
+                   OR (a.status = 'approved' AND a.action_type = 'workspace_action' \
+                       AND msg.result_status = 'executed')) \
+         ), \
          recipients AS ( \
            SELECT ms.member_id, \
                   CASE \
+                    WHEN $7::boolean THEN \
+                      CASE WHEN mem.id = (SELECT requester_id FROM settled) \
+                             AND mem.id IS DISTINCT FROM (SELECT decided_by FROM settled) \
+                             AND NOT EXISTS ( \
+                               SELECT 1 FROM read_state seen \
+                                WHERE seen.workspace_id = $1 \
+                                  AND seen.channel_id = (SELECT channel_id FROM msg) \
+                                  AND seen.member_id = mem.id \
+                                  AND seen.last_read_at >= now() \
+                                      - make_interval(secs => $4::double precision)) \
+                             AND NOT EXISTS ( \
+                               SELECT 1 FROM channel_viewing viewing \
+                                WHERE viewing.workspace_id = $1 \
+                                  AND viewing.channel_id = (SELECT channel_id FROM msg) \
+                                  AND viewing.member_id = mem.id \
+                                  AND viewing.seen_at >= now() \
+                                      - make_interval(secs => $4::double precision)) \
+                        THEN 'mention' END \
                     WHEN (SELECT props_kind FROM msg) = 'resume_offer' \
                          AND lower(mem.id::text) = lower((SELECT owner_member_id FROM msg)) \
                       THEN 'resume_offer' \
@@ -366,7 +449,9 @@ pub async fn judge_targets(
                             ) \
                         THEN 'work_run_done' END \
                     WHEN (SELECT message_type FROM msg) = 'approval_request' \
-                         AND mem.kind = 'human' THEN 'approval_request' \
+                         AND mem.kind = 'human' THEN \
+                      CASE WHEN EXISTS (SELECT 1 FROM card WHERE status = 'pending') \
+                           THEN 'approval_request' END \
                     WHEN EXISTS ( \
                       SELECT 1 FROM jsonb_array_elements_text((SELECT mention_ids FROM msg)) t(v) \
                        WHERE lower(t.v) = lower(ms.member_id::text) \
@@ -428,18 +513,7 @@ pub async fn judge_targets(
                 (SELECT props_kind FROM msg) AS props_kind, \
                 a.id AS approval_id, \
                 a.action_type AS approval_action_type, \
-                jsonb_build_object( \
-                  'action', jsonb_build_object( \
-                              'id', a.payload#>'{action,id}', \
-                              'pins', a.payload#>'{action,pins}', \
-                              'args', CASE \
-                                WHEN jsonb_typeof(a.payload#>'{action,args}') = 'object' \
-                                 AND jsonb_exists(a.payload#>'{action,args}', 'avatar') \
-                                  THEN jsonb_build_object('avatar', true) \
-                                ELSE '{}'::jsonb END), \
-                  'tool_call', jsonb_build_object('name', a.payload#>'{tool_call,name}'), \
-                  'execution', a.payload->'execution', \
-                  'origin', a.payload->'origin') AS approval_payload \
+                a.approval_payload AS approval_payload \
            FROM recipients r \
            JOIN push_token t \
              ON t.member_id = r.member_id \
@@ -455,10 +529,7 @@ pub async fn judge_targets(
            LEFT JOIN notification_rule nr \
              ON nr.workspace_id = $1 \
             AND nr.member_id = r.member_id \
-           LEFT JOIN approval a \
-             ON a.workspace_id = $1 \
-            AND a.request_message_id = $2 \
-            AND a.channel_id = (SELECT channel_id FROM msg) \
+           LEFT JOIN card a ON true \
           WHERE r.reason IS NOT NULL \
             AND NOT ( \
               COALESCE(nr.dnd, false) \
@@ -479,6 +550,8 @@ pub async fn judge_targets(
     .bind(WORK_COMPLETE_FOREGROUND_WINDOW_SECS)
     .bind(PROP_ANSWERS_MESSAGE_ID)
     .bind(STREAM_PROPS_KEY)
+    .bind(approval_settled)
+    .bind(channel_id)
     .fetch_all(&mut *conn)
     .await?;
 
@@ -556,7 +629,11 @@ pub async fn judge_targets(
         let opens = card
             .as_ref()
             .is_some_and(|card| opens_in_app(&card.action_type, &card.payload));
-        let category = category_for(&message_type, props_kind.as_deref(), reason, opens);
+        let category = if approval_settled {
+            PushCategory::Mention
+        } else {
+            category_for(&message_type, props_kind.as_deref(), reason, opens)
+        };
 
         targets.push(JudgedTarget {
             member_id,
