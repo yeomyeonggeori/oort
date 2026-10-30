@@ -1,4 +1,5 @@
-import type {Member, Message, RosterMember} from '@momo/core/lib/api';
+import type {AgentRunProgress, Member, Message, RosterMember} from '@momo/core/lib/api';
+import {fireEvent} from '@testing-library/react-native';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {cleanup, render, within} from './fixtures/darkWorld';
@@ -114,6 +115,8 @@ function renderCard(props: {
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
   offline?: boolean;
   approvalsProvided?: boolean;
+  viewerMemberId?: string;
+  run?: AgentRunProgress;
 }) {
   const client = new QueryClient({
     defaultOptions: {queries: {retry: false, gcTime: 0}},
@@ -132,6 +135,11 @@ function renderCard(props: {
           approvalOffline={props.offline}
           approvalsProvided={props.approvalsProvided}
           onApprovalSettled={() => {}}
+          requestRun={props.run}
+          actions={props.viewerMemberId ? {
+            myMemberId: props.viewerMemberId,
+            onToggleReaction: async () => {}, onEdit: async () => {}, onDelete: async () => {},
+          } : undefined}
         />
       </SessionProvider>
     </QueryClientProvider>,
@@ -139,6 +147,82 @@ function renderCard(props: {
 }
 
 const DEAD_END = '이 결정은 인박스나 데스크톱 앱에서 할 수 있어요.';
+
+describe('요청 묶음 카드', () => {
+  const gates = new Map([['ap-1', GATE]]);
+  const modern = (over: Record<string, unknown> = {}) => card({
+    intent: '자기 소개를 바꾸려고 해요', can_decide: true, decision_mode: 'inline',
+    action_type: 'workspace_action',
+    action: {id: 'agent.profile.update', rows: [
+      {label: '소개', value: '다음 소개', before: '이전 소개', after: '다음 소개'},
+      {label: '이름', value: '새 이름'}, {label: '설명', value: '새 설명'},
+    ], rationale: '요청한 소개를 반영해요'}, ...over,
+  });
+  it('문장과 값 둘만 먼저 말하고, 사유와 나머지 값은 자세히에서 읽어요', () => {
+    const view = renderCard({message: modern(), gates, viewerMemberId: SELF});
+    expect(view.getByTestId('request-bundle-headline')).toHaveTextContent('김인턴 · 자기 소개를 바꾸려고 해요');
+    expect(view.getAllByTestId('request-bundle-value')).toHaveLength(2);
+    expect(view.getByLabelText('소개: 이전 값 이전 소개, 이후 값 다음 소개')).toBeTruthy();
+    expect(view.getByText('외 1건')).toBeTruthy();
+    expect(view.queryByTestId('request-bundle-details')).toBeNull();
+    fireEvent.press(view.getByTestId('request-bundle-details-toggle'));
+    expect(view.getByText(/사유 · 요청한 소개를 반영해요/)).toBeTruthy();
+    expect(view.queryByText(/원장 번호/)).toBeNull();
+  });
+  it('결정할 사람에게만 44 표적의 채움·윤곽 한 쌍과 승인·거부 로터가 서요', () => {
+    const view = renderCard({message: modern(), gates, viewerMemberId: SELF});
+    const approve = view.getByTestId('card-approval-ap-1-approve');
+    const reject = view.getByTestId('card-approval-ap-1-reject');
+    expect(StyleSheet.flatten(approve.props.style).minHeight).toBe(44);
+    expect(StyleSheet.flatten(reject.props.style).minHeight).toBe(44);
+    expect(StyleSheet.flatten(reject.props.style).borderWidth).toBe(1);
+    expect(approve.props.accessibilityLabel).toMatch(/자기 소개.*승인$/);
+    expect(view.getByTestId('message-row').props.accessibilityActions).toEqual(expect.arrayContaining([
+      {name: 'momoApprove', label: '승인'}, {name: 'momoReject', label: '거부'},
+    ]));
+  });
+  it.each([
+    ['다른 결정자', SELF, {can_decide: false}, false],
+    ['요청 에이전트 본인', AGENT, {}, false],
+    ['연결 없음', SELF, {}, true],
+  ])('%s에게는 결정 버튼이 서지 않아요', (_label, viewer, over, offline) => {
+    const view = renderCard({message: modern(over), gates, viewerMemberId: viewer, offline});
+    expect(view.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+    expect(view.queryByTestId('card-approval-ap-1-reject')).toBeNull();
+    expect(view.getByTestId('request-bundle-waiting')).toBeTruthy();
+    expect(view.getByTestId('message-row').props.accessibilityActions).not.toEqual(expect.arrayContaining([{name: 'momoApprove', label: '승인'}]));
+  });
+  it.each([
+    ['thinking', 'thinking', '생각 중'], ['pending', 'approval', '승인 필요'],
+    ['executing', 'executing', '실행 중'], ['succeeded', 'done', '끝'],
+    ['rejected', 'declined', '거부'], ['expired', 'expired', '만료'],
+    ['failed', 'failed', '실패'], ['cancelled', 'cancelled', '취소'],
+  ])('%s를 같은 카드의 %s 상태로 읽어요', (status, state, word) => {
+    const view = renderCard({message: modern({approval_status: status, action_type: 'tool_call'}), gates, viewerMemberId: SELF});
+    expect(view.getByTestId(`request-state-${state}`)).toHaveTextContent(word);
+    expect(view.getAllByTestId('request-bundle-card')).toHaveLength(1);
+    if (status !== 'pending') expect(view.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+  });
+  it('서버의 결과 한 줄을 같은 카드에서 말해요', () => {
+    const view = renderCard({message: modern({approval_status: 'approved', result: {status: 'succeeded', line: '소개를 바꿨어요', rows: []}}), viewerMemberId: SELF});
+    expect(view.getByTestId('request-bundle-sentence')).toHaveTextContent('소개를 바꿨어요');
+  });
+  it('거부 영수증이 대기 칩을 덮어요', () => {
+    const settled = renderCard({message: modern(), gates, viewerMemberId: SELF,
+      receipts: new Map([['ap-1', {status: 'rejected', note: '거부를 기록했어요.'}]])});
+    expect(settled.getByTestId('request-state-declined')).toHaveTextContent('거부');
+    expect(settled.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+  });
+  it('기한이 10분 안이면 조용한 줄이 초 숫자 없이 알려 줘요', () => {
+    const view = renderCard({message: modern({expires_at_ms: BASE_MS + 9 * 60_000}), gates, viewerMemberId: SELF});
+    expect(view.getByTestId('request-bundle-details-toggle')).toHaveTextContent('10분 안에 만료돼요 · 자세히');
+  });
+  it('묶음 필드를 보내지 않는 서버는 현행 카드로 폴백해요', () => {
+    const view = renderCard({gates});
+    expect(view.queryByTestId('request-bundle-card')).toBeNull();
+    expect(view.getByTestId('agent-card')).toBeTruthy();
+  });
+});
 
 /** 잉크의 밝기. 「격상이 실제로 격상인가」를 값으로 묻는 데만 쓴다. */
 function brightness(hex: string): number {

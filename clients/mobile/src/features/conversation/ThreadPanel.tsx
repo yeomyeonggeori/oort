@@ -20,6 +20,9 @@ import type {MessageRowActions} from './MessageRow';
 import type {UseTimelineResult} from './useTimeline';
 import type {MemoryEvidenceLink} from '@momo/core/features/memory/model';
 import {MissedDigestCard} from '../memory/MissedDigestCard';
+import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
+import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
+import {hasAgentRequest} from './requestLoop';
 
 // =============================================================================
 // 스레드 — 한 메시지 아래에 달린 답글들.
@@ -69,8 +72,18 @@ export function ThreadPanel({
   onOpenProfile,
   onReaderTookList,
   memory,
+  approvalGates,
+  approvalReceipts,
+  approvalsProvided,
+  onApprovalSettled,
+  onOpenMessage,
 }: {
   root: Message;
+  approvalGates?: ReadonlyMap<string, ApprovalGate>;
+  approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
+  approvalsProvided?: boolean;
+  onApprovalSettled?: (approvalId: string, outcome: DecisionOutcome) => void;
+  onOpenMessage?: (channelId: string, messageId: string) => void;
   /** Production supplies both; isolated legacy render fixtures may omit them. */
   workspaceId?: string;
   channelId?: string;
@@ -248,6 +261,7 @@ export function ThreadPanel({
       onOpenProfile,
       workspaceId,
       onOpenMemoryEvidence: openEvidence,
+      onOpenMessage,
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
       // No `onQuote` either, and that absence is a decision rather than an
@@ -269,6 +283,7 @@ export function ThreadPanel({
       onOpenProfile,
       workspaceId,
       openEvidence,
+      onOpenMessage,
     ],
   );
 
@@ -406,6 +421,13 @@ export function ThreadPanel({
                 // 불과하다. 핸들러가 없으니 글로 그려지긴 했지만, 문제는 눌리느냐가
                 // 아니라 **그 줄이 여기서 할 말이 없다**는 것이었다.
                 showRollup={false}
+                requestThoughts
+                requestRootId={hasAgentRequest(liveRoot, directory) ? root.id : undefined}
+                approvalGates={approvalGates}
+                approvalReceipts={approvalReceipts}
+                approvalOffline={!online}
+                approvalsProvided={approvalsProvided}
+                onApprovalSettled={onApprovalSettled}
                 // 답글의 메아리는 **이 목록에만** 선다(`useTimeline` 의 `channelPending`). 보낸 메시지의 등장 보류도 이 표면의 것이라,
                 // 확정된 답글을 아래 깔린 채널 목록이 메아리로 한 번 더 그리지 않게 이름을 준다(#4455 design-review r2 M4).
                 arrivalSurface={threadArrivalSurface(root.id)}

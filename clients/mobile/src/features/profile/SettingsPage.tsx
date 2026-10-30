@@ -743,7 +743,6 @@ export function SettingsContent({
               />
             ))}
           </View>
-          <SettingsNote>끔은 앱이 더하는 햅틱을 꺼요. 시스템 컨트롤의 햅틱은 기기 설정을 따라요.</SettingsNote>
           {/* 알림이 어떻게 보이는가 (#4316, ADR-0204 증보 5). 이 폰의 선택이라 서버를 부르지 않고, 확장은
               MMKV 를 읽지 못해서 바꿀 때 App Group 으로도 쓴다(`push/presentation.ts`). 「보낸 사람 표시」를
               끄면 건넨 사진·채널 이름과 시스템에 기부한 기록이 함께 지워진다. */}
@@ -877,6 +876,7 @@ export function SettingsContent({
             />
           )}
         </GroupCard>
+        <SettingsNote testID="settings-haptics-note">끔은 앱이 더하는 햅틱을 꺼요. 시스템 컨트롤의 햅틱은 기기 설정을 따라요.</SettingsNote>
         {push.failed ? (
           <SettingsNote tone="danger" testID="push-failure">
             {PUSH_SWITCH_OFF_FAILED}
