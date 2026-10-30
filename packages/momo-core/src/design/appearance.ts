@@ -329,7 +329,7 @@ function fromV2Record<T extends string>(
   });
 }
 
-/** v2 원문을 읽는다(폰: 테마는 첫 파티 id뿐). v2가 아니거나 JSON이 아니면 `null`(다음 키로 넘어간다). */
+/** 첫 파티 전용 v2 호환 파서. v2가 아니거나 JSON이 아니면 `null`(다음 키로 넘어간다). */
 export function parseAppearanceV2(raw: string | null | undefined): AppearanceV2 | null {
   const record = parseJsonObject(raw);
   if (!record || record.v !== 2) return null;
@@ -388,14 +388,14 @@ export function readWebAppearance(stored: {
   );
 }
 
-/** 폰: 새 키 → 옛 스킴 키 순서로 읽는다. */
+/** 폰: 새 키 → 옛 스킴 키. 카탈로그 참조를 읽고 사용자 테마(P2)는 기본으로 돌린다. */
 export function readMobileAppearance(stored: {
   current?: string | null;
   legacyScheme?: string | null;
-}): AppearanceV2 {
-  return (
-    parseAppearanceV2(stored.current) ?? migrateLegacyScheme(stored.legacyScheme) ?? DEFAULT_APPEARANCE
-  );
+}): AppearanceV2<ThemeRef> {
+  const current = parseWebAppearanceV2(stored.current);
+  if (current) return current.theme.startsWith("user:") ? { ...current, theme: DEFAULT_THEME_ID } : current;
+  return migrateLegacyScheme(stored.legacyScheme) ?? DEFAULT_APPEARANCE;
 }
 
 /** 쓸 문자열. 기본값인 선택 필드는 빠진다(정규 형태). 키 순서는 고정이다. */

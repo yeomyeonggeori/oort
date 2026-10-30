@@ -1310,6 +1310,14 @@ describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => 
 
 
 describe('햅틱 설정 (#4298)', () => {
+  it('햅틱 메모는 카드 밖에서 같은 묶음의 다른 메모와 같은 시작선을 쓴다 (#4839)', async () => {
+    await openPage();
+    const card = screen.getByTestId('settings-notify-card');
+    const note = screen.getByTestId('settings-haptics-note');
+    expect(within(card).queryByTestId('settings-haptics-note')).toBeNull();
+    // 공용 SettingsNote의 카드 밖 여백을 그대로 쓴다. 카드 안이면 GroupCard의 구분선·안 여백이 더해진다.
+    expect(StyleSheet.flatten(note.props.style).paddingHorizontal).toBe(4);
+  });
   it('풍부로 시작하고, 기본·끔 선택은 저장되며 다시 열어도 남는다', async () => {
     await openPage();
     expect(getHapticMode()).toBe('rich');

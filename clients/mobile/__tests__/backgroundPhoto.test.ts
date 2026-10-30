@@ -5,7 +5,7 @@ import {
   type PhotoPorts,
   type PickOutcome,
 } from '../src/design/background/photo';
-import {PHOTO_MAX_BYTES, PHOTO_MAX_LONG_SIDE} from '../src/design/background/model';
+import {PHOTO_MAX_BYTES, PHOTO_MAX_LONG_SIDE} from '@momo/core/design/mobileBackground';
 
 // =============================================================================
 // ADR-0189 증보 2 — 내 사진: 긴 변 ≤ 1600px · JPEG · ~1MB (#3907).

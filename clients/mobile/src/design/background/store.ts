@@ -4,7 +4,7 @@ import {
   parseBackground,
   serializeBackground,
   type BackgroundChoice,
-} from './model';
+} from '@momo/core/design/mobileBackground';
 import {importPhoto, type ImportOutcome, type PhotoPorts} from './photo';
 
 // =============================================================================

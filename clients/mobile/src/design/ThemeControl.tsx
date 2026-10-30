@@ -9,8 +9,6 @@ import {
   View,
 } from 'react-native';
 import {
-  resolvePreset,
-  resolveSignal,
   SIGNAL_ADJUSTED_COPY,
   SIGNAL_PRESET_IDS,
   SIGNAL_PRESETS,
@@ -28,12 +26,13 @@ import {
   SOLIDS,
   type PresetId,
   type SolidId,
-} from './background/model';
+} from '@momo/core/design/mobileBackground';
 import {IMPORT_FAILURE_COPY, type PhotoPorts} from './background/photo';
 import {backgroundPhotoUri, chooseBackgroundPhoto} from './background/store';
-import {THEMES, THEME_IDS, type ThemeId} from './ds2Tokens';
+import {ThemePickerModal, ThemePreview} from './ThemePickerPage';
+import {resolveThemeTokens, resolvePhoneSignal, resolvePhonePreset} from './themeCatalog';
 import {SHEET_ICON_SIZE, SHEET_ICONS} from './icons';
-import {ChoiceRow, GroupCard, GroupLabel} from './sheetParts';
+import {ChoiceRow, GroupCard, GroupLabel, ListRow} from './sheetParts';
 import {
   normalizeCustomHex,
   THEME_CHOICES,
@@ -84,7 +83,7 @@ import {ds2Radius, font, radius, space, type Palette} from './tokens';
 // 구분선)와 `ChoiceRow`(강조색·굵게·✓ 세 신호)로 선다. 옛 `GroupSection`·`GroupRow`(반경 8·전폭 구분선)가 아니다.
 // 모양만 옮겼다 — testID·접근성 이름·고르는 동작은 그대로다.
 //
-// 세 묶음이다: 화면 모드(라이트·시스템·다크, #4526) / 테마(새벽하늘·흑연·노을띠) / 강조색
+// 세 묶음이다: 화면 모드(라이트·시스템·다크, #4526) / 테마 스타일(첫 파티·카탈로그) / 강조색
 // (기본·프리셋 4종·직접 입력). 미리보기는 따로 그리지 않는다 — 고르는 순간 프로바이더가
 // 앱 전체를 다시 칠하므로 지금 보고 있는 이 화면이 곧 미리보기다(바탕·카드·강조색). **배경**만 예외다: 설정 페이지는
 // 불투명한 층(`bg`)이라 고른 배경이 이 화면 뒤로 비치지 않고 대화 화면에서 보인다(design-review #4457 r1 L9). 테마 타일과
@@ -207,80 +206,24 @@ function Choice({
 
 // ---- 테마 --------------------------------------------------------------------
 
-/**
- * 한 테마를 **라이트·다크 두 반쪽**으로 보이는 작은 타일: 반쪽마다 바닥 세 정지점, 표면
- * 조각, 신호 점. 현재 모드만 그리면 다크에서 새벽하늘과 노을띠가 거의 같아 보인다(리뷰
- * M-1) — 두 반쪽이 있으면 모드를 바꾸지 않고도 테마의 차이가 보인다(웹 증보 1 D3 의 쌍
- * 미리보기와 같은 뜻).
- */
 /** 내 사진 썸네일의 한 변 — 행의 앞 칸 폭과 같은 값이다. */
 const PHOTO_THUMB = 36;
 
 /** 테마 견본의 폭 — `styles.swatch.width` 와 같은 값이다(앞 칸 폭과 카드 `inset` 이 이 값을 쓴다). */
 const SWATCH_WIDTH = 44;
 
-function ThemeSwatch({id}: {id: ThemeId}): React.JSX.Element {
-  const styles = useStyles(buildStyles);
-  return (
-    <View
-      accessibilityElementsHidden
-      importantForAccessibility="no-hide-descendants"
-      style={styles.swatch}
-      testID={`appearance-swatch-${id}`}>
-      {(['light', 'dark'] as const).map(mode => {
-        const t = THEMES[id][mode];
-        const [top, mid, bottom] = t.canvas;
-        return (
-          <View
-            key={mode}
-            style={[
-              styles.swatchHalf,
-              {
-                experimental_backgroundImage: `linear-gradient(180deg, ${top} 0%, ${mid} 50%, ${bottom} 100%)`,
-              },
-            ]}
-            testID={`appearance-swatch-${id}-${mode}`}>
-            <View style={[styles.swatchSurface, {backgroundColor: t.color.surface}]} />
-            <View style={[styles.swatchDot, {backgroundColor: t.color.signal}]} />
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-/** 노을띠의 남색 띠는 폰에서 그리지 않는다(ADR-0189 증보 1 「폰 구현」). 고르는 사람이 알도록 말한다. */
-const THEME_DETAIL: Partial<Record<ThemeId, string>> = {
-  noeul: '폰에서는 남색 띠 없이 평평한 바닥으로 보여요.',
-};
-
 function ThemeGroup(): React.JSX.Element {
-  const {themeId, setTheme} = useTheme();
+  const {themeId} = useTheme();
+  const [open, setOpen] = useState(false);
   return (
     <GroupSection label="테마">
-      <View
-        accessibilityRole="radiogroup"
-        accessibilityLabel="테마"
-        testID="appearance-theme-group">
-        {/* 견본 폭(44)이 앞 칸이고, 구분선이 글자 열에서 시작하도록 카드의 `inset` 이 같은 값이다. */}
-        <GroupCard inset={SWATCH_WIDTH} testID="appearance-theme-list">
-          {THEME_IDS.map(id => (
-            <ChoiceRow
-              key={id}
-              title={themeIdLabel(id)}
-              detail={THEME_DETAIL[id]}
-              selected={id === themeId}
-              onPress={() => setTheme(id)}
-              accessibilityLabel={themeIdLabel(id)}
-              leading={<ThemeSwatch id={id} />}
-              leadingWidth={SWATCH_WIDTH}
-              leadingAlign="center"
-              testID={`appearance-theme-${id}`}
-              checkTestID={`appearance-theme-${id}-check`}
-            />
-          ))}
-        </GroupCard>
-      </View>
+      <GroupCard inset={SWATCH_WIDTH} testID="appearance-theme-list">
+        <ListRow title="테마 스타일" value={themeIdLabel(themeId)} accessory="chevron"
+          leading={<ThemePreview theme={themeId} />} leadingWidth={SWATCH_WIDTH}
+          accessibilityLabel={`테마 스타일, ${themeIdLabel(themeId)}`}
+          onPress={() => setOpen(true)} testID="appearance-theme-picker" />
+      </GroupCard>
+      {open ? <ThemePickerModal onDone={() => setOpen(false)} /> : null}
     </GroupSection>
   );
 }
@@ -318,7 +261,7 @@ function SignalGroup(): React.JSX.Element {
       reject(SIGNAL_REJECTION_COPY['invalid-hex']);
       return;
     }
-    const result = resolveSignal(hex, themeId, scheme);
+    const result = resolvePhoneSignal(themeId, scheme, {custom: hex});
     if (!result.ok) {
       reject(result.message);
       return;
@@ -362,14 +305,14 @@ function SignalGroup(): React.JSX.Element {
             selected={usingDefault}
             onPress={() => pick(null)}
             accessibilityLabel="기본, 강조색"
-            leading={<Dot color={THEMES[themeId][scheme].color.signal} testID="appearance-dot-default" />}
+            leading={<Dot color={resolveThemeTokens(themeId, scheme).color.signal} testID="appearance-dot-default" />}
             leadingWidth={SWATCH_WIDTH}
             leadingAlign="center"
             testID="appearance-signal-default"
             checkTestID="appearance-signal-default-check"
           />
           {SIGNAL_PRESET_IDS.map(id => {
-            const solved = resolvePreset(id, themeId, scheme);
+            const solved = resolvePhonePreset(id, themeId, scheme);
             return (
               <ChoiceRow
                 key={id}
@@ -667,32 +610,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     width: SHEET_ICON_SIZE.check,
     height: SHEET_ICON_SIZE.check,
     tintColor: color.accentText,
-  },
-  swatch: {
-    width: SWATCH_WIDTH,
-    height: 36,
-    flexDirection: 'row',
-    borderRadius: ds2Radius.badge,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: color.border,
-    overflow: 'hidden',
-  },
-  swatchHalf: {flex: 1},
-  swatchSurface: {
-    position: 'absolute',
-    left: 3,
-    right: 3,
-    bottom: 4,
-    height: 11,
-    borderRadius: radius.sm,
-  },
-  swatchDot: {
-    position: 'absolute',
-    top: 5,
-    right: 4,
-    width: 7,
-    height: 7,
-    borderRadius: radius.pill,
   },
   dot: {
     width: 20,
