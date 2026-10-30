@@ -4489,6 +4489,15 @@ expect agent-credential-revoke-replay post \
 guard_jq '.revokedNow == false and .alreadyRevoked == true' \
   "credential revoke replay is idempotent"
 
+# ADR-0218 appendix A — same running deployment image, including binary media
+# and a completed self-uploaded attachment. Credential stays in the gate's
+# registered private file; the sampler only retains expression response data.
+set_curl_bearer "$ACCESS"
+"$PYTHON_BIN" "$SCRIPT_DIR/sample_expression_contract.py" \
+  --base-url "$BASE_URL" --workspace "$WS" --channel "$GENERAL_CHANNEL_ID" \
+  --auth-config "$CURL_AUTH_CONFIG" --out-dir "$TMP_DIR/expression-samples" \
+  --manifest "$MANIFEST"
+
 # 로그아웃은 자기가 쓴 자격증명을 죽이므로 정말 마지막이다.
 sample logout post "/v1/auth/logout" "/v1/auth/logout" 200 \
   "$(refresh_request_body "$REFRESH")" "$ACCESS"
