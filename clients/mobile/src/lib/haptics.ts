@@ -46,8 +46,8 @@ function subscribe(listener: () => void): () => void {
 }
 export function getHapticMode(): HapticMode {
   const stored = nonSecretStore().getString(NON_SECRET_KEYS.hapticMode);
-  // An unset preference preserves the existing screens' feedback. Extra pulses are opt-in.
-  return stored === 'rich' || stored === 'off' ? stored : 'basic';
+  // Start rich when unset; preserve every previously saved choice.
+  return stored === 'basic' || stored === 'off' ? stored : 'rich';
 }
 export function setHapticMode(mode: HapticMode): void {
   if (getHapticMode() === mode) return;

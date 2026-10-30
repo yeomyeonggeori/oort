@@ -20,6 +20,7 @@ import {DS2_COMBOS} from '../src/design/ds2Tokens';
 import {EASE_OUT, TAB_FADE_MS} from '../src/design/motion';
 import {GlassSurface, LiquidGlassAllowed, resetBlurSupportForTests, resetLiquidGlassSupportForTests} from '../src/design/glass';
 import {HOME_ICONS} from '../src/design/icons';
+import {setHapticMode} from '../src/lib/haptics';
 import {SHEET_RADIUS, SHEET_TOP} from '../src/design/PageSheet';
 import {GroupCard, InputPill} from '../src/design/sheetParts';
 import {
@@ -1109,7 +1110,7 @@ afterEach(() => {
 });
 
 describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
-  it('탭이 **바뀔 때** selection 한 번이고, 같은 탭을 다시 누르면 0번이다', async () => {
+  it('풍부는 탭 전환에 selection 한 번이고, 같은 탭과 100ms 안 연타에는 추가로 울리지 않는다', async () => {
     installFetch();
     await renderReady();
     expect(hapticCalls).toEqual([]);
@@ -1118,6 +1119,11 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     fireEvent.press(screen.getByTestId('tab-inbox'));
     expect(hapticCalls).toEqual(['selection']);
     fireEvent.press(screen.getByTestId('tab-search'));
+    expect(hapticCalls).toEqual(['selection']);
+    act(() => jest.advanceTimersByTime(100));
+    fireEvent.press(screen.getByTestId('tab-search'));
+    expect(hapticCalls).toEqual(['selection']); // 같은 탭 무음은 중복 억제 창 밖에서도 지킨다.
+    fireEvent.press(screen.getByTestId('tab-home'));
     expect(hapticCalls).toEqual(['selection', 'selection']);
   });
 
@@ -1148,11 +1154,14 @@ describe('햅틱 — 사용자가 만든 순간에 한 번 (#3580)', () => {
     await waitFor(() => expect(screen.getByTestId('settings-page')).toBeTruthy());
   });
 
-  it('사이드바 섹션 접기·펴기는 누를 때마다 selection 한 번', async () => {
+  it('풍부는 사이드바 접기·펴기의 100ms 안 중복을 막고 100ms 뒤 누름은 울린다', async () => {
     installFetch();
     await renderReady();
     const toggle = screen.getAllByTestId(/^home-section-toggle-/)[0];
     fireEvent.press(toggle);
+    fireEvent.press(toggle);
+    expect(hapticCalls).toEqual(['selection']);
+    act(() => jest.advanceTimersByTime(100));
     fireEvent.press(toggle);
     expect(hapticCalls).toEqual(['selection', 'selection']);
   });
@@ -1248,9 +1257,11 @@ describe('탭 전환 모션 — 캡슐과 페이드 (#3580)', () => {
   });
 
   it('연타해도 입력이 잠기지 않는다: 도중에 다른 탭을 눌러도 마지막 탭에 서고 목표는 마지막 자리다', async () => {
+    // 전환 모션 시험은 기본 모드의 각 누름을 보존하는 조건에서 잰다.
     const spring = jest.spyOn(Animated, 'spring');
     installFetch();
     await renderReady();
+    setHapticMode('basic');
     spring.mockClear();
     fireEvent.press(screen.getByTestId('tab-inbox'));
     fireEvent.press(screen.getByTestId('tab-search'));
@@ -1259,7 +1270,6 @@ describe('탭 전환 모션 — 캡슐과 페이드 (#3580)', () => {
       66 + SHELL.barGap,
       (66 + SHELL.barGap) * 2,
     ]);
-    // CI 수리: 기본의 서로 다른 누름은 각각 울린다. #4298 전 base의 2회 기대를 복원한다.
     expect(hapticCalls).toEqual(['selection', 'selection']);
     spring.mockRestore();
   });

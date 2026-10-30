@@ -1549,11 +1549,14 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
 
 // #4298: native call map; tactile quality remains owner-device verification.
 describe('사건 햅틱 공통 정책 (#4298)', () => {
-  it('설정이 없으면 기본이고 첫 누름부터 기존 light·selection을 횟수 그대로 낸다', () => {
+  it('설정이 없으면 풍부이고 첫 누름부터 100ms 안 중복 햅틱을 막는다', () => {
     nonSecretStore().remove(NON_SECRET_KEYS.hapticMode);
-    expect(getHapticMode()).toBe('basic');
+    expect(getHapticMode()).toBe('rich');
     haptics.light(); haptics.light(); haptics.selection();
-    expect(haptic.__calls).toEqual(['impact:light', 'impact:light', 'selection']);
+    expect(haptic.__calls).toEqual(['impact:light']);
+    jest.advanceTimersByTime(100);
+    haptics.selection();
+    expect(haptic.__calls).toEqual(['impact:light', 'selection']);
   });
 
   it('기본 당김은 문턱 light와 성공 success를 각각 한 번 보존한다', async () => {
