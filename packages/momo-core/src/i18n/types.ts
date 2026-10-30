@@ -17,6 +17,10 @@ export interface MessageDiagnostic {
 /** P0-2 composes this service into createLocaleService(context); P0-3/4 load catalogs first. */
 export interface MessageServiceOptions {
   messageLocale: string;
+  /** P0-2 supplies the same explicit zone used by the regional date context. */
+  timeZone?: string;
+  /** P0-2 preserves the selected language's device region inside ICU formats too. */
+  formatLocale?: string;
   catalog?: MessageCatalog;
   /** Defaults to the bundled English AST; injection supports isolated P0-5/6 tests. */
   fallbackCatalog?: MessageCatalog;

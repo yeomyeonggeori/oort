@@ -4480,6 +4480,13 @@
   }
 }
 
+/* 요청 고리 §3.3: 흐르는 글의 상한은 픽셀이 아니라 여덟 글줄이에요.
+ * 큰 글자에서도 같은 줄 수를 지키며 안쪽에서 스크롤해요. */
+@utility request-thought-stream {
+  max-block-size: 8lh;
+  overflow-y: auto;
+}
+
 @keyframes momo-responding {
   0%,
   80%,

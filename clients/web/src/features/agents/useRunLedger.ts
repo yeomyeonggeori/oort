@@ -29,6 +29,7 @@ export const RUN_LEDGER_POLL_MS = 30_000;
 
 export interface RunLedgerView {
   rows: RunLedgerRow[];
+  counts?: { tools?: number; approvals: number };
   /** 원장의 깨우는 신호(행이 없거나 아직 못 읽었으면 null). */
   doorbell: DoorbellFact | null;
   isLoading: boolean;
@@ -84,7 +85,8 @@ export function useRunLedgerFrames(
 
 export function useRunLedger(
   runId: string | null,
-  facts: ServerRunFacts | null
+  facts: ServerRunFacts | null,
+  includeCounts = false
 ): RunLedgerView {
   const { workspaceId } = useSession();
   // 서버가 모르는 run(관리형·BYOA·옛 서버)의 원장은 비어 있다. 물어볼 이유가 없다.
@@ -113,5 +115,16 @@ export function useRunLedger(
     [query.data]
   );
   const doorbell = useMemo(() => doorbellFactOf(query.data?.events), [query.data]);
-  return { rows, doorbell, isLoading: enabled && query.isLoading, isError: query.isError };
+  const events = query.data?.events ?? [];
+  return {
+    rows, doorbell,
+    ...(includeCounts && query.data !== undefined ? { counts: {
+      // 현재 코어 읽기는 tools include/tally를 보존하지 않아요. 부재를 0회로 말하지 않아요.
+      ...(events.some((event) => event.rawKind === "tool_call" || event.rawKind === "agent_port.call") ? {
+        tools: events.filter((event) => event.rawKind === "tool_call" || event.rawKind === "agent_port.call").length,
+      } : {}),
+      approvals: events.filter((event) => event.kind === "approval_requested").length,
+    } } : {}),
+    isLoading: enabled && query.isLoading, isError: query.isError,
+  };
 }

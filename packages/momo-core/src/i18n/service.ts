@@ -33,7 +33,7 @@ export function createMessageService(options: MessageServiceOptions): MessageSer
   const initialize = (locale: string, messages: MessageCatalog): IntlShape | undefined => {
     try {
       return createIntl({
-        locale, messages, defaultLocale: 'en-US', fallbackOnEmptyString: false,
+        locale, messages, timeZone: options.timeZone, defaultLocale: 'en-US', fallbackOnEmptyString: false,
         // FormatJS normally returns source text/IDs after an error. Throw into our fallback instead.
         onError: () => { throw new Error('i18n-format-failed'); },
         onWarn: () => {},
@@ -57,7 +57,7 @@ export function createMessageService(options: MessageServiceOptions): MessageSer
       }
       try {
         const intl = isSelected
-          ? (selectedIntl ??= initialize(locale, messages))
+          ? (selectedIntl ??= initialize(options.formatLocale ?? locale, messages))
           : (fallbackIntl ??= initialize(locale, messages));
         if (!intl) continue;
         const result = intl.formatMessage({ id: key }, values);
