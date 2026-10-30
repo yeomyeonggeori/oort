@@ -9,6 +9,7 @@ import {
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
+import { openRunDecisionStage } from "@/features/decisionStage/stageEntry";
 import { AgentCard } from "./AgentCard";
 import { ThreadRequestSummary } from "./ThreadRequestSummary";
 import { RequestThoughtLine } from "@/features/agents/RequestThoughtLine";
@@ -459,7 +460,7 @@ export function MessageRow({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [remindOpen, setRemindOpen] = useState(false);
   const [remindError, setRemindError] = useState<string | null>(null);
-  const { workspaceId } = useSession();
+  const { workspaceId, session } = useSession();
   const reminderMutations = useReminderMutations(workspaceId);
   const markUnread = useMarkUnread(workspaceId);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
@@ -706,6 +707,11 @@ export function MessageRow({
   // and its 저장/취소 belong to a focused editing context and are reached by Tab
   // like any form.
   const rowRef = useRef<HTMLElement | null>(null);
+  const openRunStage = (opener: HTMLElement | null, runIds?: readonly string[]) => {
+    openRunDecisionStage({ runs: (runStatus ?? []).filter((run) => !runIds || runIds.includes(run.id)),
+      member: session.member, directory, workspaceId, channelId: message.channelId,
+      triggerSeq: message.seq, opener, fallback: () => onOpenThread?.(message) });
+  };
   const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
@@ -977,7 +983,11 @@ export function MessageRow({
                 directory={directory}
                 {...(runAnswers !== undefined ? { runAnswers } : {})}
                 {...(onJumpToMessage ? { onJump: onJumpToMessage } : {})}
-                {...(onOpenThread ? { onOpenBundle: () => onOpenThread(message) } : {})}
+                onOpenBundle={onOpenThread || runStatus.some((run) => run.phase === "awaiting_approval" || run.phase === "paused") ? (opener, runIds) => {
+                  const awaiting = runStatus.some((run) => runIds.includes(run.id) && (run.phase === "awaiting_approval" || run.phase === "paused"));
+                  if (awaiting) openRunStage(opener, runIds);
+                  else onOpenThread?.(message);
+                } : undefined}
               />
             )}
           </div>
@@ -1224,7 +1234,7 @@ export function MessageRow({
             )}
           </div>
         )}
-        {hasRequestBundle && showRollup && onOpenThread && runStatus && <ThreadRequestSummary runs={runStatus} onOpen={() => onOpenThread(message)} />}
+        {hasRequestBundle && showRollup && onOpenThread && runStatus && <ThreadRequestSummary runs={runStatus} onOpen={(event?: React.MouseEvent<HTMLButtonElement>) => openRunStage(event?.currentTarget ?? null)} />}
         {/* 에이전트를 부른 메시지(누가 불렀든)의 **예외 줄** (#3824 → #4619): 평소의 진행은 레일과 칩이 말하고, 이 줄은
             아직 받지 않았어요·깨우는 신호가 닿지 않음·실패·시간 초과일 때만 선다. 행동 단추는 요청자와 owner/admin에게만. */}
         {runStatus !== undefined && (

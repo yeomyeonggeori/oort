@@ -7,6 +7,7 @@ import {
   type RealtimeHandle,
   type RealtimeStatus,
 } from "@/lib/realtime";
+import { DecisionStageHost } from "@/features/decisionStage/DecisionStage";
 import { SessionProvider } from "@/app/session";
 import {
   ROUTE_REGION_DOM_ID,
@@ -492,6 +493,7 @@ export function AppShell({
             </main>
           </div>
           {/* Global keyboard paths that must work from any route (R-1 §2). */}
+          <DecisionStageHost />
           <InboxHotkeys />
           {/* Renders nothing; watches the rail so a mention or an approval
            * request reaches the OS while the window is in the background
