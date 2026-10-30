@@ -66,7 +66,9 @@ function Harness() {
         {Array.from({ length: 12 }, (_, index) => <p key={index} className="p-4">설계 의견 {index + 1}</p>)}
         <p id="above-card" className="p-4">카드 위에서 읽던 행</p>
         <AgentCard card={card} directory={directory} />
-        <p className="p-4">이어서 이야기해요</p>
+        {/* 카드 아래에도 한 화면 넘게 둬요. 짧으면 「위 행을 읽는 중」이 스크롤 끝에
+            걸려(최대 스크롤로 잘려) 바닥 붙임 장면이 돼요 — §8.1은 둘을 따로 재요. */}
+        {Array.from({ length: 8 }, (_, index) => <p key={`after-${index}`} className="p-4">이어서 이야기해요 {index + 1}</p>)}
       </section>
     </main>
   );
