@@ -542,6 +542,46 @@ impl AgentWorker {
             );
         }
 
+        let prepared_avatar = if let Some(action) = momo_agent::actions::action_by_id(&action_id) {
+            match momo_workspace_actions::action_resolve::validated_action_args(
+                action,
+                &args,
+                chrono::Utc::now().timestamp_millis(),
+            ) {
+                Ok(validated) => {
+                    momo_workspace_actions::profile_avatar::prepare(
+                        &self.pool,
+                        self.drive.as_ref(),
+                        workspace_id,
+                        run_id,
+                        agent,
+                        &validated.args,
+                    )
+                    .await
+                }
+                Err(_) => Err("invalid_arguments"),
+            }
+        } else {
+            Err("invalid_arguments")
+        };
+        let prepared_avatar = match prepared_avatar {
+            Ok(prepared) => prepared,
+            Err(_) => {
+                return Some(
+                    self.team_ai_fallback_traced(
+                        job,
+                        payload,
+                        run_id,
+                        &requester,
+                        &gathered.candidates,
+                        FallbackReason::CouldNotPropose,
+                        usage,
+                        &trace,
+                    )
+                    .await,
+                )
+            }
+        };
         let now = chrono::Utc::now();
         let expires_at = momo_agent::default_expires_at(now, self.config.approval_ttl_seconds);
         let via = ViaAi {
@@ -574,9 +614,15 @@ impl AgentWorker {
                     expires_at,
                     via,
                 };
-                let outcome =
-                    team_ai::propose_in_tx(conn, &context, &action_id, &args, rationale.as_deref())
-                        .await?;
+                let outcome = team_ai::propose_with_avatar_in_tx(
+                    conn,
+                    &context,
+                    &action_id,
+                    &args,
+                    rationale.as_deref(),
+                    prepared_avatar.as_ref(),
+                )
+                .await?;
                 // The ledger row is written whether or not a card came of it: the
                 // tokens were spent, and the daily ceiling reads this table.
                 let mut resolved =
@@ -1016,9 +1062,51 @@ async fn sqlx_body(
     .fetch_optional(&mut *conn)
     .await?
     .flatten();
-    Ok(body.unwrap_or_default())
+    let images =
+        momo_messaging::image_attachments_for_messages_in_tx(conn, workspace_id, &[message_id])
+            .await?;
+    let ids = images
+        .into_iter()
+        .filter_map(|(_, id, _, _, size)| {
+            (size <= momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT as i64).then_some(id)
+        })
+        .take(20)
+        .collect::<Vec<_>>();
+    Ok(trigger_turn_with_images(&body.unwrap_or_default(), &ids))
+}
+
+// Reserve room for this trigger's server-owned image ids. The caller bounds the
+// final user turn again; appending after truncation would silently lose the ids.
+fn trigger_turn_with_images(body: &str, ids: &[Uuid]) -> String {
+    let mut suffix = String::new();
+    if !ids.is_empty() {
+        suffix.push_str("\n[데이터: 이 메시지의 이미지 attachmentId]\n");
+        for id in ids.iter().take(20) {
+            suffix.push_str(&format!("{id}\n"));
+        }
+    }
+    let body_budget = team_ai::MAX_TRIGGER_CHARS.saturating_sub(suffix.chars().count());
+    let mut turn: String = body.chars().take(body_budget).collect();
+    turn.push_str(&suffix);
+    turn
 }
 
 fn millis(since: Instant) -> i64 {
     i64::try_from(since.elapsed().as_millis()).unwrap_or(i64::MAX)
+}
+
+#[cfg(test)]
+mod profile_tests_4791 {
+    use super::*;
+    #[test]
+    fn a_long_profile_request_keeps_its_image_ids_inside_the_final_turn_budget() {
+        let ids = (1..=20).map(Uuid::from_u128).collect::<Vec<_>>();
+        let turn = trigger_turn_with_images(&"가".repeat(2000), &ids);
+        let final_turn = team_ai::user_turn(&turn);
+        assert_eq!(final_turn.chars().count(), team_ai::MAX_TRIGGER_CHARS);
+        for id in ids {
+            assert!(final_turn.contains(&id.to_string()));
+        }
+        assert_eq!(trigger_turn_with_images("짧은 부탁", &[]), "짧은 부탁");
+    }
 }

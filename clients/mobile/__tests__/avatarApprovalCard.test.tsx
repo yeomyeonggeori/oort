@@ -16,7 +16,7 @@ import {
 } from '../src/features/conversation/memberAvatarImage';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {SessionProvider} from '../src/session/useSession';
-import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
+import {__resetSessionStore, sessionPort, replacePersistedMember} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 import type {ApprovalGate} from '../src/features/conversation/approvalGate';
 
@@ -210,7 +210,7 @@ describe('#4394 — member.avatar.set 승인 카드 (폰)', () => {
   it('결정 권한 줄은 관리자가 아니라 사진 주인 본인을 말한다', async () => {
     renderRow(approvalMessage(avatarProps()));
     await screen.findByTestId('approval-avatar-image');
-    expect(screen.getByTestId('approval-action-role')).toHaveTextContent(/사진 주인 본인만 승인할 수 있어요\./);
+    expect(screen.getByTestId('approval-action-role')).toHaveTextContent(/요청한 본인만 승인할 수 있어요\./);
     expect(JSON.stringify(screen.toJSON())).not.toContain('requesting_member');
   });
 
@@ -301,5 +301,74 @@ describe('#4394 — member.avatar.set 결과 카드 (폰)', () => {
   it('실행됨은 기본 문장이다', () => {
     renderRow(resultMessage('executed'));
     expect(screen.getByText('실행을 마쳤어요.')).toBeTruthy();
+  });
+});
+
+describe('#4791 — 이름과 에이전트 사진 승인', () => {
+  it('내 이름 카드가 전후 글자와 본인 권한을 보여 준다', () => {
+    const props = avatarProps({
+      title: '내 이름 바꾸기',
+      action: {
+        id: 'member.display_name.set',
+        required_role: 'requesting_member',
+        rows: [
+          { label: '바꾸기 전', value: '하늘' },
+          { label: '바꾼 뒤', value: '별하늘' },
+        ],
+      },
+    });
+    renderRow(approvalMessage(props));
+    expect(screen.getByText('바꾸기 전')).toBeTruthy();
+    expect(screen.getByText('하늘')).toBeTruthy();
+    expect(screen.getByText('바꾼 뒤')).toBeTruthy();
+    expect(screen.getByText('별하늘')).toBeTruthy();
+    expect(screen.getByTestId('approval-action-role')).toHaveTextContent(
+      /요청한 본인만 승인할 수 있어요\./,
+    );
+    expect(screen.queryByTestId('approval-avatar-preview')).toBeNull();
+  });
+
+  it('에이전트 사진도 이전 사진과 제안 사진을 베어러로 읽어 그린다', async () => {
+    const props = avatarProps();
+    const action = props.action as Record<string, unknown>;
+    action.id = 'agent.profile.update';
+    action.required_role = 'agent_editor';
+    const before = `/v1/workspaces/${WS}/members/${AGENT}/avatar/content?v=previous-image`;
+    (action.preview as Record<string, unknown>).previousAvatarUrl = before;
+    renderRow(approvalMessage(props));
+    expect(await screen.findByLabelText('바꾸기 전 프로필 사진')).toBeTruthy();
+    expect(
+      await screen.findByLabelText('에이전트의 프로필 사진으로 제안된 사진'),
+    ).toBeTruthy();
+    expect(screen.getByText('바꾸기 전')).toBeTruthy();
+    expect(screen.getByText('바꾼 뒤')).toBeTruthy();
+    expect(downloads().some(row => row.url === `${BASE}${before}`)).toBe(true);
+    expect(downloads()).toHaveLength(2);
+    for (const row of downloads()) {
+      expect(row.options.headers).toEqual({
+        Authorization: 'Bearer access-token-1',
+      });
+    }
+  });
+});
+
+describe('#4791 — 확정된 내 이름의 세션 반영', () => {
+  it('서버에서 읽은 자기 프로필만 바꾸고 두 자격 증명은 그대로 둔다', () => {
+    const before = sessionPort.getPersistedSession()!;
+    const access = sessionPort.getAccessToken();
+    replacePersistedMember({ ...before.member, displayName: '새 이름' });
+    expect(sessionPort.getPersistedSession()?.member.displayName).toBe(
+      '새 이름',
+    );
+    expect(sessionPort.getAccessToken()).toBe(access);
+    expect(sessionPort.getRefreshToken()).toBe(before.refreshToken);
+    replacePersistedMember({
+      ...before.member,
+      id: 'another-person',
+      displayName: '다른 이름',
+    });
+    expect(sessionPort.getPersistedSession()?.member.displayName).toBe(
+      '새 이름',
+    );
   });
 });

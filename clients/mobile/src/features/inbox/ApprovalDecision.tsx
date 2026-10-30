@@ -9,7 +9,10 @@ import {
   preselectedHostId,
   spawnHostGate,
 } from '@momo/core/features/timeline/spawnHostChoice';
-import React, {useCallback, useImperativeHandle, useRef, useState} from 'react';
+import React, {useCallback, useContext, useImperativeHandle, useRef, useState} from 'react';
+import {QueryClientContext} from '@tanstack/react-query';
+import {refreshProfileAfterApproval} from '@momo/core/features/approvals/profileChange';
+import {replacePersistedMember} from '../../storage/secureSession';
 import {AccessibilityInfo, Pressable, StyleSheet, Text, View} from 'react-native';
 import {font, radius, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import {Sentence} from '../../design/atoms';
@@ -147,6 +150,7 @@ export function ApprovalDecision({
   const styles = useStyles(buildStyles);
   const pill = shape === 'pill';
   const {workspaceId} = useSession();
+  const queryClient = useContext(QueryClientContext);
   /** 지금 서버에 나가 있는 결정의 방향. 없으면 `null`. */
   const [sending, setSending] = useState<Direction | null>(null);
   /** 같은 틱의 두 번째 탭을 거르는 동기 문. state 는 다음 렌더에야 바뀐다. */
@@ -225,6 +229,9 @@ export function ApprovalDecision({
         // 일은 던지지 않고(`dismissApprovalNotifications`), 화면은 이미 결정을 안다.
         void dismissApprovalNotifications(approvalId);
         onSettled(outcome);
+        void refreshProfileAfterApproval(outcome, replacePersistedMember, (workspace, rows) => {
+          queryClient?.setQueryData(['roster', workspace], rows);
+        });
         // 로터로 결정한 사람에게는 성공도 소리로 말한다(#3854 design-review H-2).
         // 카드에 서는 영수증은 행의 낭독 라벨에 들어가지 않고, 로터의 「승인」·
         // 「거부」는 말없이 사라진다. 낱말은 카드 영수증과 같은 함수가 짓는다.
@@ -243,6 +250,7 @@ export function ApprovalDecision({
       forbiddenCopy,
       hostGate.canApprove,
       onSettled,
+      queryClient,
       workspaceId,
     ],
   );
