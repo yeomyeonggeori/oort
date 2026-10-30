@@ -6,6 +6,7 @@ import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import { ENTER_CONVERSATION_ANIMATION_NAME, ENTER_CONVERSATION_CLASS } from "@/design/motion";
 import { AT_BOTTOM_SLACK_PX } from "./navigation";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * Chromium half of Timeline burst (#2050 R5). Node environment so
@@ -30,6 +31,8 @@ const CORE_SRC = join(WEB_ROOT, "../../packages/momo-core/src");
 const HARNESS = join(HERE, "timelineBurst.harness.tsx");
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();

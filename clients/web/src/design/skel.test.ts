@@ -7,6 +7,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { compile } from "tailwindcss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { EmptyInvite, Skeleton } from "../features/common/States";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * UX-R1c / ADR-0179 D3 — skeleton → content blur crossfade.
@@ -69,6 +70,8 @@ const SIDEBAR_SRC = readFileSync(
  * package or missing executable → skip (never a silent green: warn + skipIf).
  */
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();
