@@ -1,7 +1,10 @@
-import {resolvePreset, resolveSignal, type SignalRejection, type SignalValues} from '@momo/core/design/signal';
+import type {SignalRejection, SignalValues} from '@momo/core/design/signal';
 import type {SignalChoice} from '@momo/core/design/appearance';
 import {paletteFrom, type Palette} from './tokens';
-import type {Mode, ThemeId} from './ds2Tokens';
+import {isThemeId} from '@momo/core/design/themes';
+import type {Mode} from './ds2Tokens';
+import type {ThemeRef} from '@momo/core/design/themeResolve';
+import {resolvePhoneSignal, resolveThemeTokens, phoneThemeMode} from './themeCatalog';
 
 // =============================================================================
 // 테마 × 모드 × 신호 → 팔레트 (ADR-0189 D3, #2719 폰 부분).
@@ -42,11 +45,9 @@ export function signalKey(choice: SignalChoice): string {
 const palettes = new Map<string, Palette>();
 const states = new Map<string, SignalState>();
 
-function solve(theme: ThemeId, mode: Mode, choice: SignalChoice) {
+function solve(theme: ThemeRef, mode: Mode, choice: SignalChoice) {
   if (choice == null) return null;
-  return 'preset' in choice
-    ? resolvePreset(choice.preset, theme, mode)
-    : resolveSignal(choice.custom, theme, mode);
+  return resolvePhoneSignal(theme, mode, choice);
 }
 
 /**
@@ -57,11 +58,12 @@ function solve(theme: ThemeId, mode: Mode, choice: SignalChoice) {
  * `StyleSheet.create` 를 부르게 만든다.
  */
 export function resolveAppearance(
-  theme: ThemeId,
+  theme: ThemeRef,
   mode: Mode,
   choice: SignalChoice,
   onImage = false,
 ): ResolvedAppearance {
+  mode = phoneThemeMode(theme, mode);
   const key = `${theme}/${mode}/${signalKey(choice)}${onImage ? '/image' : ''}`;
   const cachedPalette = palettes.get(key);
   const cachedState = states.get(key);
@@ -86,7 +88,8 @@ export function resolveAppearance(
       };
     }
   }
-  const palette = paletteFrom(theme, mode, values, onImage);
+  const source = isThemeId(theme) ? theme : resolveThemeTokens(theme, mode, choice);
+  const palette = paletteFrom(source, mode, values, onImage);
   palettes.set(key, palette);
   states.set(key, state);
   return {palette, signal: state};

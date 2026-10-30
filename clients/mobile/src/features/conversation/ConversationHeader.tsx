@@ -1,6 +1,6 @@
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import type {Directory} from '@momo/core/features/workspace/directory';
-import React, {useCallback, useEffect} from 'react';
+import React, {useCallback, useEffect, useState} from 'react';
 import {
   Image,
   type LayoutChangeEvent,
@@ -116,6 +116,10 @@ export function ConversationHeader({
   // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
   const online = useOnline();
   const {width: windowWidth, fontScale} = useWindowDimensions();
+  const [headerHeight, setHeaderHeight] = useState<number | null>(null);
+  const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
+    setHeaderHeight(event.nativeEvent.layout.height);
+  }, []);
 
   const onBannerLayout = useCallback(
     (event: LayoutChangeEvent) => onBannerInset?.(event.nativeEvent.layout.height),
@@ -192,7 +196,7 @@ export function ConversationHeader({
   );
 
   return (
-    <View testID="conversation-header" pointerEvents="box-none" style={[styles.root, {paddingTop: insets.top}]}>
+    <View testID="conversation-header" pointerEvents="box-none" onLayout={onHeaderLayout} style={[styles.root, {paddingTop: insets.top}]}>
       {/* 정적인 공간 페이드다. 불투명도 애니메이션은 유리 조상에 걸지 않는다. */}
       <View pointerEvents="none" style={[styles.statusFade, {height: insets.top + CONV.headHeight}]} testID="conversation-status-fade" />
       <View pointerEvents="box-none" style={styles.row} testID="conversation-header-row">
@@ -269,7 +273,7 @@ export function ConversationHeader({
         <View
           pointerEvents="none"
           onLayout={onBannerLayout}
-          style={styles.bannerLayer}
+          style={[styles.bannerLayer, {top: headerHeight ?? insets.top + CONV.headHeight}, headerHeight === null && styles.bannerUnmeasured]}
           testID="connection-banner-layer">
           <View
             accessibilityRole="text"
@@ -370,16 +374,18 @@ const buildStyles = (color: Palette) =>
     // 머리가 `Screen` 직속이면 뒤에 서는 전면 덮개(스레드 · 고정 목록 · 작업 목록) **위로** 올라온다. `ConversationScreen` 은 머리 · 목록을
     // `collapsable={false}` 틀 하나에 담아 이 `zIndex` 가 틀 안에서만 겨루게 한다(시험이 잠근다).
     root: {zIndex: 1},
-    // 흐름 밖. `top: '100%'` 는 원·알약 줄과 기존 요약 줄의 밑 가장자리다.
+    // RN Yoga 호환 모드의 절대 % 위치는 부모의 안쪽 높이를 기준으로 삼아 안전 영역 패딩을 빠뜨린다.
+    // onLayout 이 알린 전체 높이(안전 영역·머리·요약 줄)를 pt 로 써서 부모의 아래 끝에 건다.
     bannerLayer: {
       position: 'absolute',
-      top: '100%',
       left: 0,
       right: 0,
       alignItems: 'center',
       // 긴 문장(다른 언어 · 큰 글자)이 화면 가장자리에 닿지 않게 알약의 폭을 한계 안에 둔다.
       paddingHorizontal: space.md,
     },
+    // 첫 배치가 알려 오기 전에는 이름 위에 한 프레임도 그리지 않는다. 흐름 밖이라 측정 높이는 같다.
+    bannerUnmeasured: {opacity: 0},
     banner: {
       flexDirection: 'row',
       alignItems: 'center',

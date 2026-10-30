@@ -483,12 +483,16 @@ describe('머리 — 가운데 이름·상태 알약, 정보 페이지의 문 (#
       await act(async () => {});
       const banner = flatten(screen.getByTestId('connection-banner-layer').props.style);
       expect(banner.position).toBe('absolute');
-      expect(banner.top).toBe('100%');
+      fireEvent(screen.getByTestId('conversation-header'), 'layout', {
+        nativeEvent: {layout: {x: 0, y: 0, width: 393, height: CONV.headHeight}},
+      });
+      expect(flatten(screen.getByTestId('connection-banner-layer').props.style).top).toBe(CONV.headHeight);
       expect(JSON.stringify(metrics())).toBe(JSON.stringify(calm));
       // 머리 뿌리의 `zIndex` 는 호출자가 틀로 봉인한다 — 있어야 띠가 목록 위에 뜬다.
       expect(metrics().root.zIndex).toBe(1);
     });
   });
+
 
   describe('색 — 원(뒤로·⋮)과 같은 토큰 가족이고 두 모드에서 읽힌다', () => {
     for (const scheme of ['light', 'dark'] as const) {

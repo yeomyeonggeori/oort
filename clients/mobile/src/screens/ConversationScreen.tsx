@@ -1,4 +1,5 @@
 import {haptics} from '../lib/haptics';
+import {useChannelRuns} from '../features/agents/agentRunProgressStore';
 import {
   openDirectMessage,
   uuidEq,
@@ -1996,6 +1997,21 @@ export default function ConversationScreen({
     </>
   ), [jumpMissed, cancelJump, notificationNotice, dismissNotificationNotice, boundary, memoryEligible, workspaceId, channelId, memoryHeadSeq, openMemoryEvidence, styles.notice]);
 
+  const requestRuns = useChannelRuns(channelId);
+  const railTurns = useMemo(() => {
+    if (dmAgent === null) return turns;
+    const messageIds = new Set(timeline.state.messages.map(message => message.id.toLowerCase()));
+    const shown = new Set<string>();
+    const runIds = new Set<string>();
+    for (const run of requestRuns) {
+      const trigger = run.triggerMessageId?.toLowerCase();
+      if (trigger === undefined || !messageIds.has(trigger) || shown.has(trigger)) continue;
+      shown.add(trigger);
+      runIds.add(run.id.toLowerCase());
+    }
+    return turns.filter(turn => turn.runId === undefined || !runIds.has(turn.runId.toLowerCase()));
+  }, [dmAgent, turns, requestRuns, timeline.state.messages]);
+
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
     <Screen style={styles.screen}>
@@ -2051,6 +2067,7 @@ export default function ConversationScreen({
               directory={directory}
               status={timeline.status}
               channelKind={channel?.kind}
+              requestThoughts={dmAgent !== null}
               peer={peer}
               lastReadSeq={boundary?.lastReadSeq ?? null}
               unreadCount={boundary?.unreadCount ?? 0}
@@ -2109,7 +2126,7 @@ export default function ConversationScreen({
                 the web bar does — the header is where the channel's identity
                 lives, and a turn is not an identity. */}
             <AgentActivityBar
-              turns={turns}
+              turns={railTurns}
               directory={directory}
               nowMs={turnNowMs}
               live={railLive}
@@ -2203,6 +2220,11 @@ export default function ConversationScreen({
           timeline={timeline}
           directory={directory}
           myMemberId={member.id}
+          approvalGates={approvalGates}
+          approvalReceipts={approvalReceipts}
+          approvalsProvided={approvalsProvided}
+          onApprovalSettled={onApprovalSettled}
+          onOpenMessage={openApprovalMessage}
           nowMs={nowMs}
           onClose={closeThread}
           onReplySent={bumpSelfSend}

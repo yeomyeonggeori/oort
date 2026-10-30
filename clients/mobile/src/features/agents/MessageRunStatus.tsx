@@ -1,5 +1,5 @@
 import type {AgentRunProgress} from '@momo/core/lib/api';
-import {isOpenRunPhase} from '@momo/core/features/agents/runPhase';
+import {approvalEndState, isOpenRunPhase} from '@momo/core/features/agents/runPhase';
 import {
   doorbellFactOf,
   keepsRunReceipt,
@@ -104,7 +104,7 @@ function RunStatusRow({
   const doorbell = useMemo(() => doorbellFactOf(ledger.data?.events), [ledger.data]);
   const keeps = keepsRunReceipt(progress, doorbell);
   const nowMs = useTickingNow(keeps && isOpenRunPhase(progress.phase));
-  if (!keeps) {
+  if (!keeps || approvalEndState(progress.endReason) !== null) {
     return null;
   }
   const status = runStatusLine(progress, doorbell, nowMs);

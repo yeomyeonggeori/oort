@@ -252,18 +252,18 @@ enum MomoPushActionLedgerStatus: String, Equatable, Sendable {
 
 enum MomoPushActionOutcome: Equatable, Sendable {
   /// This tap recorded the decision (200, which also covers a replayed tap).
-  case decided(MomoPushActionDirection)
+  case decided(MomoPushActionDirection, line: String? = nil)
   /// The approval was already settled, in the direction the LEDGER holds — which
   /// may not be the one this button asked for.
-  case alreadySettled(MomoPushActionLedgerStatus)
+  case alreadySettled(MomoPushActionLedgerStatus, line: String? = nil)
   case failed(MomoPushActionFailure)
 
   /// The one thing about an outcome that is written to the log: a name. No id, no
   /// token, no body.
   var logName: String {
     switch self {
-    case .decided(let direction): return direction.approved ? "decided(approve)" : "decided(reject)"
-    case .alreadySettled(let status): return "alreadySettled(\(status.rawValue))"
+    case .decided(let direction, _): return direction.approved ? "decided(approve)" : "decided(reject)"
+    case .alreadySettled(let status, _): return "alreadySettled(\(status.rawValue))"
     case .failed(let reason): return "failed(\(reason.rawValue))"
     }
   }
@@ -319,13 +319,15 @@ enum MomoPushActionRequestBuilder {
 
 enum MomoPushActionClassifier {
   /// The route answers the same receipt shape on 200, 403, 404 and 409; only
-  /// `status` is read, and nothing else of the body is kept or logged.
+  /// Only status and the optional public receipt.line are read. Neither the
+  /// receipt nor its line is logged; older servers keep the current wording.
   static func classify(
     httpStatus: Int,
     body: Data,
     direction: MomoPushActionDirection
   ) -> MomoPushActionOutcome {
     let ledger = ledgerStatus(in: body)
+    let line = receiptLine(in: body)
     switch httpStatus {
     case 200:
       // The server's own receipt (`decision_receipt`, always with a `status`) is what
@@ -336,16 +338,16 @@ enum MomoPushActionClassifier {
       case .approved, .rejected:
         // The ledger can only contradict the button here if the server is wrong;
         // saying what it holds is still the one thing that cannot mislead.
-        return ledger == direction.ledgerStatus ? .decided(direction) : .alreadySettled(ledger)
+        return ledger == direction.ledgerStatus ? .decided(direction, line: line) : .alreadySettled(ledger, line: line)
       case .expired, .cancelled:
         // A REPLAY of a key whose first call found the approval settled: the server
         // answers the stored receipt with a 200 (`decide_in_tx`, idempotency first), and
         // the stored receipt says what happened to the approval.
-        return .alreadySettled(ledger)
+        return .alreadySettled(ledger, line: line)
       }
     case 201...299: return .failed(.unclearAnswer)
     case 409:
-      if let ledger { return .alreadySettled(ledger) }
+      if let ledger { return .alreadySettled(ledger, line: line) }
       return .failed(.conflict)
     case 401: return .failed(.unauthorized)
     case 403: return .failed(.refused)
@@ -361,6 +363,14 @@ enum MomoPushActionClassifier {
       let status = object["status"] as? String
     else { return nil }
     return MomoPushActionLedgerStatus(rawValue: status)
+  }
+
+  private static func receiptLine(in body: Data) -> String? {
+    guard let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+      let line = object["line"] as? String,
+      !line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    else { return nil }
+    return line
   }
 }
 
@@ -585,16 +595,16 @@ enum MomoPushActionPlanner {
     -> MomoPushActionLine
   {
     switch outcome {
-    case .decided(let direction):
+    case .decided(let direction, let line):
       return MomoPushActionLine(
-        text: MomoPushActionCopy.decided(direction, title: intent.title),
+        text: line ?? MomoPushActionCopy.decided(direction, title: intent.title),
         detail: nil,
         alerts: false,
         removesSiblings: true
       )
-    case .alreadySettled(let status):
+    case .alreadySettled(let status, let line):
       return MomoPushActionLine(
-        text: MomoPushActionCopy.alreadySettled(status),
+        text: line ?? MomoPushActionCopy.alreadySettled(status),
         detail: nil,
         alerts: false,
         removesSiblings: true
