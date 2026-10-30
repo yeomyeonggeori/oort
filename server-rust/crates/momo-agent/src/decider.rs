@@ -100,7 +100,9 @@ pub fn action_required_role(payload: &Value) -> Option<RequiredRole> {
 pub fn gate_plan(role: Option<RequiredRole>) -> GatePlan {
     match role {
         Some(RequiredRole::AgentEditor) => GatePlan::TargetAgent,
-        Some(RequiredRole::RequestingMember) => GatePlan::RequestingMember,
+        Some(RequiredRole::RequestingMember | RequiredRole::DmParticipant) => {
+            GatePlan::RequestingMember
+        }
         Some(RequiredRole::WorkspaceOperator) => GatePlan::Operator,
         Some(RequiredRole::Admin) | None => GatePlan::Admin,
     }
@@ -125,6 +127,8 @@ pub fn decider_gate(action_type: &str, payload: &Value, approve: bool) -> GatePl
         } else {
             GatePlan::ChannelMember
         }
+    } else if payload["origin"] == "dm_agent_admission" {
+        GatePlan::RequestingMember
     } else if is_in_place_grant(payload) {
         GatePlan::Admin
     } else {

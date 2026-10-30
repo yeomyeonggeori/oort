@@ -1101,6 +1101,7 @@ export function MessageRow({
         ) : (
           card && (
             <AgentCard
+              viewerMemberId={actions?.myMemberId}
               card={card}
               directory={directory}
               {...(onOpenWorkSession !== undefined

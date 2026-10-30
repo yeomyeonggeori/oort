@@ -153,12 +153,17 @@ describe("dmAutoReplyAgent", () => {
   it("is null for a group DM, which is back to \"who did you mean\"", () => {
     const group: Channel = {
       ...dm(INTERN_AGENT.id),
+      dmKey: "admitted:group",
       memberIds: [DEMO.id, INTERN_AGENT.id, SEONGJAE.id],
     };
     expect(dmAutoReplyAgent(group, DIRECTORY, DEMO.id)).toBeNull();
-    // …while `dmPeer` still answers with one of the two, which is exactly why
-    // the hint may not be built on it.
-    expect(dmPeer(group, DIRECTORY, DEMO.id)).not.toBeNull();
+    expect(dmPeer(group, DIRECTORY, DEMO.id)).toBeNull();
+  });
+
+  it("requires the human sender to be one of exactly two participants", () => {
+    expect(dmAutoReplyAgent({ ...dm(INTERN_AGENT.id), memberIds: [INTERN_AGENT.id] }, DIRECTORY, DEMO.id)).toBeNull();
+    expect(dmAutoReplyAgent(dm(INTERN_AGENT.id), DIRECTORY, SEONGJAE.id)).toBeNull();
+    expect(dmAutoReplyAgent(dm(INTERN_AGENT.id), DIRECTORY, INTERN_AGENT.id)).toBeNull();
   });
 
   it("is null for a group channel however few members it has", () => {

@@ -18,6 +18,11 @@ use uuid::Uuid;
 
 use crate::error::DbError;
 
+tokio::task_local! {
+    /// ADR-0217: server-authenticated agent, never a request argument.
+    pub static REQUEST_AGENT_MEMBER: Uuid;
+}
+
 /// Set the tenant RLS GUC on an open transaction. `SET LOCAL` semantics via
 /// `set_config(_, _, is_local => true)`, byte-for-byte the Swift statement so
 /// the RLS policies behave identically.
@@ -27,6 +32,13 @@ async fn bind_workspace_guc(
 ) -> Result<(), DbError> {
     sqlx::query("SELECT set_config('app.workspace_id', $1, true)")
         .bind(workspace_id.to_string())
+        .execute(&mut **tx)
+        .await?;
+    let agent = REQUEST_AGENT_MEMBER
+        .try_with(|id| id.to_string())
+        .unwrap_or_default();
+    sqlx::query("SELECT set_config('app.agent_member_id', $1, true)")
+        .bind(agent)
         .execute(&mut **tx)
         .await?;
     Ok(())

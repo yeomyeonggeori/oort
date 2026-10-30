@@ -201,9 +201,10 @@ pub use memory::{
     MEM_ITEM_SEARCH_LIMIT_MAX, MEM_PROPOSAL_LIMIT_DEFAULT, MEM_PROPOSAL_LIMIT_MAX,
 };
 pub use message::{
-    agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,
-    build_thread_updated_payload, cent_channel, clamp_history_limit, clamp_replies_limit,
-    context_message_body, fetch_thread_rollup_in_tx, find_client_message_in_tx, list_channel_page,
+    agent_auto_reply_streak_in_tx, agent_context_window_for_member_in_tx,
+    agent_context_window_in_tx, build_broadcast_payload, build_thread_updated_payload,
+    cent_channel, clamp_history_limit, clamp_replies_limit, context_message_body,
+    fetch_thread_rollup_in_tx, find_client_message_in_tx, find_message_in_tx, list_channel_page,
     list_messages, list_thread_replies, parse_replies_cursor, patch_and_prune_message_props_in_tx,
     patch_message_props_in_tx, send_message, send_message_in_tx, send_message_with_mentions_in_tx,
     send_message_with_mentions_via_in_tx, send_signed_message_in_tx, send_thread_notice_in_tx,

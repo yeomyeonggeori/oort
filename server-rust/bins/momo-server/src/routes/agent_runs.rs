@@ -1323,9 +1323,11 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     // ---- writes ------------------------------------------------------------
     let linked_json: Vec<String> = linked.iter().map(Uuid::to_string).collect();
 
-    let cancelled = cancel_run_in_tx(
+    let cancelled = cancel_run_and_cleanup_in_tx(
         conn,
         workspace_id,
+        run.channel_id,
+        run.agent_member_id,
         run_id,
         &json!({
             "code": CANCEL_ERROR_CODE,
@@ -1341,35 +1343,6 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
         // them, not a client outcome. Surfacing it as a 500 beats reporting a
         // cancellation that never happened.
         return Err(momo_db::DbError::from(sqlx::Error::RowNotFound));
-    }
-
-    retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
-    cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, chrono::Utc::now()).await?;
-
-    // ADR-0162 HAP-E5 — the `agent_run` inbox reference, in this transaction.
-    //
-    // Retiring the job is what stops a *managed* runtime: it never claims the
-    // row. A hosted runtime may already hold the lease, and it learns about the
-    // world only by polling its own inbox — so the stop has to be an inbox
-    // event or the agent keeps working on a turn the human ended. Written where
-    // the cancel is written, so a rolled-back cancel takes the notice with it.
-    //
-    // It is a **run** reference rather than a job one on purpose: the job may
-    // already be `done` and the thing that changed is the run's state.
-    if let Some(connection_id) =
-        momo_auth::active_hosted_connection_in_tx(conn, workspace_id, run.agent_member_id)
-            .await
-            .map_err(momo_db::DbError::from)?
-    {
-        momo_messaging::append_run_reference_in_tx(
-            conn,
-            workspace_id,
-            run.agent_member_id,
-            connection_id,
-            run.channel_id,
-            run_id,
-        )
-        .await?;
     }
 
     // The system line goes through the message spine, so it takes a real
@@ -1432,22 +1405,103 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     )
     .await?;
 
-    // The rail hears the stop too (goal SRV-B3c). The system line above tells
-    // the ROOM; this tells the badge. Without it a stopped agent keeps showing
-    // 작업 중 until the client's own 90s idle TTL expires it — which is the exact
-    // shape of failure ADR-0132's 휴먼 정지권 exists to prevent: a person taps
-    // stop, the room is told, and the indicator keeps insisting it is working.
+    Ok(Ok(linked))
+}
+
+/// The standard stop, shared by human cancellation and agent departure. The
+/// caller owns authorization; run, jobs, approvals, cards and hosted reference
+/// are settled atomically here, before it announces the departure.
+pub(super) async fn cancel_run_and_cleanup_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    agent_member_id: Uuid,
+    run_id: Uuid,
+    error: &Value,
+) -> Result<bool, momo_db::DbError> {
+    if !cancel_run_in_tx(conn, workspace_id, run_id, error).await? {
+        return Ok(false);
+    }
+    retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
+    let cards: Vec<Uuid> = momo_db::sqlx::query_scalar(
+        "SELECT request_message_id FROM approval WHERE workspace_id=$1 AND run_id=$2 \
+         AND status='pending' AND request_message_id IS NOT NULL FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(run_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    let now = chrono::Utc::now();
+    cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, now).await?;
+    for card in cards {
+        momo_messaging::patch_and_prune_message_props_in_tx(
+            conn,
+            workspace_id,
+            card,
+            &momo_agent::approval::decided_props_patch("cancelled", None, now, None),
+            &["last_attempt"],
+        )
+        .await?;
+        momo_messaging::emit_message_edited_in_tx(conn, workspace_id, card).await?;
+    }
+    // A hosted runtime learns the stop by polling its inbox, even when the
+    // delivery job is already done. This is a run reference, never a new job.
+    if let Some(connection_id) =
+        momo_auth::active_hosted_connection_in_tx(conn, workspace_id, agent_member_id).await?
+    {
+        momo_messaging::append_run_reference_in_tx(
+            conn,
+            workspace_id,
+            agent_member_id,
+            connection_id,
+            channel_id,
+            run_id,
+        )
+        .await?;
+    }
     emit_terminal_agent_status(
         conn,
         workspace_id,
-        run.channel_id,
-        run.agent_member_id,
+        channel_id,
+        agent_member_id,
         run_id,
-        momo_agent::RunStatus::Cancelled,
+        RunStatus::Cancelled,
     )
     .await?;
+    Ok(true)
+}
 
-    Ok(Ok(linked))
+/// Stop one agent's runs, optionally limited to the seat it is leaving. Member
+/// lifecycle routes also call this for workspace-wide suspension/removal.
+pub(super) async fn cancel_agent_runs_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+    channel_id: Option<Uuid>,
+    actor: Uuid,
+) -> Result<(), momo_db::DbError> {
+    let runs: Vec<(Uuid, Uuid)> = momo_db::sqlx::query_as(
+        "SELECT id, channel_id FROM agent_run WHERE workspace_id=$1 AND agent_member_id=$2 \
+         AND ($3::uuid IS NULL OR channel_id=$3) \
+         AND status IN ('queued','running','awaiting_approval','paused') ORDER BY id FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .bind(channel_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    for (run_id, channel) in runs {
+        cancel_run_and_cleanup_in_tx(
+            conn,
+            workspace_id,
+            channel,
+            agent_member_id,
+            run_id,
+            &json!({"code":"agent_departed", "cancelled_by":actor}),
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 /// Validate + normalize the work input (Swift `WorkRunInput.require` :1197-1205

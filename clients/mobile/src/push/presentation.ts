@@ -206,7 +206,7 @@ export function presentationChannels(
     if (channel.archivedAtMs !== undefined) continue;
     if (out.length >= MAX_CHANNELS) break;
     const id = channel.id.toLowerCase();
-    const memberCount = channel.kind === 'dm' ? 2 : counts.get(id);
+    const memberCount = channel.kind === 'dm' ? (channel.memberIds?.length ?? counts.get(id) ?? 2) : counts.get(id);
     out.push({
       id,
       kind: channel.kind,
