@@ -168,7 +168,8 @@ pub async fn sweep_expired(read_pool: &PgPool, write_pool: &PgPool) -> Result<u6
     if !safe {
         return Err(Error::Role);
     }
-    let workspaces:Vec<Uuid>=sqlx::query_scalar("SELECT DISTINCT workspace_id FROM expression_draft WHERE state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() LIMIT 100")
+    // Expired drafts and expired held assemblies (ADR-0218 G3.6) are found together: one sweep.
+    let workspaces:Vec<Uuid>=sqlx::query_scalar("SELECT workspace_id FROM (SELECT workspace_id FROM expression_draft WHERE state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp() UNION SELECT workspace_id FROM expression_assembly WHERE state='ready' AND expires_at<=clock_timestamp()) due LIMIT 100")
         .fetch_all(read_pool).await?;
     let mut bytes = 0;
     for ws in workspaces {
@@ -193,7 +194,8 @@ pub async fn sweep_in_tx(conn: &mut PgConnection, ws: Uuid) -> Result<u64, Error
         .bind(ws).execute(&mut *conn).await?.rows_affected();
     sqlx::query("UPDATE expression_draft SET state='expired',code=NULL WHERE workspace_id=$1 AND state IN ('ready','manual_upload_required') AND expires_at<=clock_timestamp()")
         .bind(ws).execute(&mut *conn).await?;
-    Ok(n)
+    // Held assemblies (G3.6) follow the same hour and the same rule.
+    Ok(n + crate::assembly::sweep_in_tx(conn, ws).await?)
 }
 
 pub(crate) async fn put_images(

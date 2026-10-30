@@ -678,6 +678,9 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_run_complete",
             "oort_action_propose",
             "oort_action_claim_secret",
+            // ADR-0218 G3.7 (a): rides the propose scope, so a hosted credential that may
+            // propose sees it and no other credential does.
+            "oort_expression_assemble",
             "oort_card_suggest",
             "oort_ping",
         ]
@@ -766,7 +769,9 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        13,
+        // The thirteen it had, plus `oort_expression_assemble` (ADR-0218 G3.7 (a)): the propose scope
+        // this token carries opens it.
+        14,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -847,7 +852,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        13,
+        14,
         "restoring the connection restores the catalog"
     );
 
@@ -28634,4 +28639,1506 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
         "a cancelled run reclaims"
     );
     let _ = &mut propose;
+}
+
+// ===========================================================================
+// #4820 C1b — `oort_expression_assemble` (ADR-0218 G3.6/G3.7 (a)).
+//
+// The tool puts motion on ONE picture through the isolated assembler child and keeps the
+// candidates for an hour under an `assemblyId` that belongs to the workspace, the requesting
+// agent and the person the run was raised by. Real PG18 (the NOBYPASSRLS `momo_app` role), real
+// HTTP, the real child. Build the child first: `cargo build -p momo-expressions --bins`; run with
+// `--test-threads=1` (one decoder semaphore of two is shared by the whole process).
+//
+// Sabotage map (each line → the test that goes red when it is broken):
+//   * `find_requester_attachment_in_tx`: drop `m.author_member_id = $4` → `…strangers_attachment…`
+//   * the declared-tool check in `routes/agent_port.rs` (`is_none_or(… call_shape …)`)
+//                                                        → `…budget_is_one_tools_and_a_declared_name_must_be_the_real_one`
+//   * `momo_expressions::media::decoder_slots()` in `expression_assemble` replaced by a fresh
+//     semaphore                                          → `…failure_codes_are_results…` (busy)
+//   * `expires_at > clock_timestamp()` / the +1 hour default / `HELD_MAX` → `…twelve_and_the_hour…`
+//   * the closed audit detail of `keep_in_tx`            → `…keeps_what_the_assembler_built…`
+//   * the rate limit spent once: `pre_admission` reuse    → `…the_rate_limit_is_spent_once…`
+// ===========================================================================
+
+fn assembler_4820() -> std::path::PathBuf {
+    if let Some(path) = std::env::var_os("OORT_EXPRESSION_ASSEMBLER") {
+        return path.into();
+    }
+    let exe = std::env::current_exe().expect("test executable");
+    let mut dir = exe.parent().expect("target dir").to_path_buf();
+    if dir.file_name() == Some(std::ffi::OsStr::new("deps")) {
+        dir.pop();
+    }
+    let path = dir.join("momo-expression-assembler");
+    assert!(
+        path.is_file(),
+        "build the assembler first: cargo build -p momo-expressions --bins ({path:?})"
+    );
+    path
+}
+
+/// A Drive that makes every content read wait first: the slow part of a call whose clock the
+/// test wants to see running while the picture is fetched.
+#[derive(Debug)]
+struct SlowDrive4820 {
+    inner: Arc<MemDrive3787>,
+    delay: std::time::Duration,
+}
+
+#[async_trait::async_trait]
+impl momo_drive::DriveArchive for SlowDrive4820 {
+    async fn create_resumable_upload(
+        &self,
+        channel_id: Uuid,
+        name: &str,
+        mime: &str,
+        size_bytes: i64,
+    ) -> Result<momo_drive::DriveUploadSession, momo_drive::DriveError> {
+        self.inner
+            .create_resumable_upload(channel_id, name, mime, size_bytes)
+            .await
+    }
+
+    async fn file_metadata(
+        &self,
+        file_id: &str,
+    ) -> Result<momo_drive::DriveFile, momo_drive::DriveError> {
+        self.inner.file_metadata(file_id).await
+    }
+
+    async fn file_content(
+        &self,
+        file_id: &str,
+        max_bytes: i64,
+    ) -> Result<momo_drive::DriveContent, momo_drive::DriveError> {
+        tokio::time::sleep(self.delay).await;
+        self.inner.file_content(file_id, max_bytes).await
+    }
+}
+
+/// [`world_4829`] with the assembler pinned in the server's own state (no process-wide variable
+/// for concurrent tests to race on) and the token budget the test asks for (0 = none).
+async fn world_4820(per_token_limit: u32, assembler: Option<std::path::PathBuf>) -> World4829 {
+    build_world_4820(per_token_limit, assembler, None).await
+}
+
+async fn build_world_4820(
+    per_token_limit: u32,
+    assembler: Option<std::path::PathBuf>,
+    drive_delay: Option<std::time::Duration>,
+) -> World4829 {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let mock = Arc::new(Mock4829 {
+        calls: Default::default(),
+        replies: Default::default(),
+    });
+    let served: Arc<dyn momo_drive::DriveArchive> = match drive_delay {
+        Some(delay) => Arc::new(SlowDrive4820 {
+            inner: drive.clone(),
+            delay,
+        }),
+        None => drive.clone(),
+    };
+    let state = AppState::new(
+        app.clone(),
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(served)
+    .with_unfurl_http(mock.clone())
+    .with_unfurl_enabled(true)
+    .with_assembler_program(assembler.unwrap_or_else(assembler_4820))
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    let (requester, requester_jwt) = seed_human_3708(&su, &fixture, "req", "member").await;
+    let (face, face_jwt) = seed_human_3708(&su, &fixture, "face", "member").await;
+    let (guest, guest_jwt) = seed_human_3708(&su, &fixture, "guest", "guest").await;
+    let (_outsider, outsider_jwt) = seed_human_3708(&su, &fixture, "out", "member").await;
+    World4829 {
+        su,
+        app,
+        base: format!("http://{address}"),
+        client: reqwest::Client::new(),
+        fixture,
+        drive,
+        mock,
+        requester,
+        requester_jwt,
+        face,
+        face_jwt,
+        guest,
+        guest_jwt,
+        outsider_jwt,
+    }
+}
+
+/// The requester mentions the agent in the fixture channel and the agent claims the job: a
+/// live lease handle of a run raised by that person, in that conversation.
+async fn claim_run_4820(w: &World4829) -> String {
+    let handle_name = hosted_handle(&w.su, w.fixture.hosted_agent).await;
+    let trigger: Value = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/channels/{}/messages",
+            w.base, w.fixture.workspace, w.fixture.channel
+        ))
+        .bearer_auth(&w.requester_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 움직이는 이모티콘으로 만들어 줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+    let (status, claimed) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a lease handle")
+        .to_string()
+}
+
+async fn assemble_4820(w: &World4829, handle: &str, args: Value) -> (u16, Value) {
+    let mut args = args;
+    args["handle"] = json!(handle);
+    call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_expression_assemble",
+        args,
+    )
+    .await
+}
+
+/// Four colour blocks, so a turned picture can be told from a straight one.
+fn picture_4820(width: u32, height: u32) -> Vec<u8> {
+    let image = image::RgbaImage::from_fn(width, height, |x, y| {
+        if x < width / 2 {
+            image::Rgba([220, 30, 30, 255])
+        } else if y < height / 2 {
+            image::Rgba([30, 30, 220, 255])
+        } else {
+            image::Rgba([30, 180, 60, 255])
+        }
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+/// 256 px of 16-level noise: at 240 `pulse` and `bounce` fit, `sparkle` (20 frames) is built under
+/// 1 MiB but breaks the 256 KiB cap of the small rendition → `assembly_output_too_large`.
+fn noise_4820() -> Vec<u8> {
+    let mut state = 0x9E37_79B9u32 ^ 1;
+    let image = image::RgbaImage::from_fn(256, 256, |_, _| {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let b = state.to_le_bytes();
+        let level = |v: u8| ((u32::from(v) % 16) * 15) as u8;
+        image::Rgba([level(b[0]), level(b[1]), level(b[2]), 255])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+fn crc32_4820(bytes: &[u8]) -> u32 {
+    let mut crc = 0xFFFF_FFFFu32;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = if crc & 1 == 1 {
+                (crc >> 1) ^ 0xEDB8_8320
+            } else {
+                crc >> 1
+            };
+        }
+    }
+    !crc
+}
+
+/// `png` grown to exactly `total` bytes by one `tEXt` ancillary chunk after the header: a valid
+/// picture with the byte weight of a big one, which decodes as fast as the small one.
+fn padded_png_4820(png: &[u8], total: usize) -> Vec<u8> {
+    let data_len = total - png.len() - 12;
+    let mut data = b"Comment\0".to_vec();
+    data.resize(data_len, b'A');
+    let mut chunk = Vec::with_capacity(data_len + 12);
+    chunk.extend_from_slice(&(data_len as u32).to_be_bytes());
+    chunk.extend_from_slice(b"tEXt");
+    chunk.extend_from_slice(&data);
+    let mut checked = b"tEXt".to_vec();
+    checked.extend_from_slice(&data);
+    chunk.extend_from_slice(&crc32_4820(&checked).to_be_bytes());
+    // 8-byte signature + IHDR (4 length + 4 type + 13 data + 4 crc).
+    let mut out = png[..33].to_vec();
+    out.extend_from_slice(&chunk);
+    out.extend_from_slice(&png[33..]);
+    assert_eq!(out.len(), total);
+    out
+}
+
+/// A `tools/call` of `name` with the transport headers a modern client mirrors, sent as given.
+/// `declared` is the `Mcp-Name` header (None: not sent), `bearer` the credential.
+async fn raw_call_4820(
+    w: &World4829,
+    bearer: &str,
+    declared: Option<&str>,
+    body_tool: &str,
+    arguments: Value,
+) -> reqwest::Response {
+    let body = modern_body(
+        "tools/call",
+        json!("1"),
+        json!({"name": body_tool, "arguments": arguments}),
+    );
+    let mut request = w
+        .client
+        .post(format!("{}{PATH}", w.base))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MODERN_VERSION)
+        .header("mcp-method", "tools/call")
+        .bearer_auth(bearer);
+    if let Some(name) = declared {
+        request = request.header("mcp-name", name);
+    }
+    request.json(&body).send().await.expect("responds")
+}
+
+async fn assembly_rows_4820(su: &PgPool, ws: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM expression_assembly WHERE workspace_id=$1")
+        .bind(ws)
+        .fetch_one(su)
+        .await
+        .unwrap()
+}
+
+/// How many of the secrets appear in any audit row, outbox row or run-event row of the tenant.
+async fn leaked_4820(su: &PgPool, ws: Uuid, secrets: &[String]) -> Vec<String> {
+    let mut found = Vec::new();
+    for secret in secrets {
+        let in_audit: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND (detail::text LIKE '%'||$2||'%' OR coalesce(target_id::text,'') LIKE '%'||$2||'%')",
+        )
+        .bind(ws)
+        .bind(secret)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        let in_outbox: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload::text LIKE '%'||$2||'%'",
+        )
+        .bind(ws)
+        .bind(secret)
+        .fetch_one(su)
+        .await
+        .unwrap();
+        if in_audit + in_outbox > 0 {
+            found.push(secret.clone());
+        }
+    }
+    found
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_keeps_what_the_assembler_built_for_both_sources_and_leaks_nothing() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let agent = w.fixture.hosted_agent;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine-4820-drive-id".into(), picture_4820(300, 200));
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "mine-4820-drive-id",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let handle = claim_run_4820(&w).await;
+
+    // ---- an attachment of this conversation, two presets ----------------------------------
+    let before = chrono::Utc::now().timestamp_millis();
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({
+            "source": {"from": "attachment", "attachmentId": attachment},
+            "motion": {"kind": "preset", "presets": ["bounce", "pulse"]},
+            "size": 240,
+            "prompt": "PROMPT-SECRET-4820 빨강 파랑 초록 그림",
+            "sourceAttachmentId": attachment,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(answer["result"]["isError"], json!(false), "{answer}");
+    let result = structured(&answer);
+    let assembly_id = Uuid::parse_str(result["assemblyId"].as_str().expect("assemblyId")).unwrap();
+    let expires = result["expiresAtMs"].as_i64().expect("expiresAtMs");
+    assert!(
+        (3_590_000..=3_620_000).contains(&(expires - before)),
+        "one hour, got {}ms",
+        expires - before
+    );
+    let candidates = result["candidates"].as_array().expect("candidates");
+    assert_eq!(candidates.len(), 2, "{result}");
+    for (position, (motion, frames, duration)) in
+        [("bounce", 16, 640), ("pulse", 12, 600)].iter().enumerate()
+    {
+        let candidate = &candidates[position];
+        assert_eq!(candidate["index"], json!(position));
+        assert_eq!(candidate["motion"], json!(motion));
+        assert_eq!(candidate["frames"], json!(frames));
+        assert_eq!(candidate["durationMs"], json!(duration));
+        let bytes = candidate["bytes"].as_u64().expect("bytes");
+        assert!((1..=1_048_576).contains(&bytes), "≤ 1 MiB, got {bytes}");
+        assert_eq!(candidate["sha256"].as_str().map(str::len), Some(64));
+        // Exactly the G7 candidate shape and nothing else.
+        assert_eq!(candidate.as_object().unwrap().len(), 6, "{candidate}");
+    }
+    assert_eq!(
+        result.as_object().unwrap().len(),
+        3,
+        "G7 AssembleResult: {result}"
+    );
+
+    // What was stored is what was reported: three renditions each, the large one a GIF89a with
+    // the same hash and size, bound to this agent and this requester.
+    let header: (Uuid, Uuid, String, Option<Uuid>, String) = sqlx::query_as(
+        "SELECT agent_member_id, requester_member_id, prompt, source_attachment_id, state FROM expression_assembly WHERE id=$1",
+    )
+    .bind(assembly_id)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(header.0, agent);
+    assert_eq!(header.1, w.requester);
+    assert!(header.2.contains("PROMPT-SECRET-4820"));
+    assert_eq!(header.3, Some(attachment), "the verified pointer is kept");
+    assert_eq!(header.4, "ready");
+    let images: Vec<(i32, String, String, i32, Vec<u8>)> = sqlx::query_as(
+        "SELECT candidate_index, motion, sha256, octet_length(bytes), substring(bytes from 1 for 6) FROM expression_assembly_image WHERE assembly_id=$1 AND variant='large' ORDER BY candidate_index",
+    )
+    .bind(assembly_id)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(images.len(), 2);
+    for (position, image) in images.iter().enumerate() {
+        assert_eq!(image.2, candidates[position]["sha256"].as_str().unwrap());
+        assert_eq!(
+            image.3 as u64,
+            candidates[position]["bytes"].as_u64().unwrap()
+        );
+        assert_eq!(image.4, b"GIF89a");
+    }
+    let total: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression_assembly_image WHERE assembly_id=$1")
+            .bind(assembly_id)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(total, 6);
+
+    // ---- bytes the agent drew, one sprite sheet (3 poses in a row, played 0,1,2,1) ------------
+    let sheet = picture_4820(300, 100);
+    let b64 = b64_3787(&sheet);
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64},
+            "motion": {"kind": "sprite", "frames": 3, "sequence": [0, 1, 2, 1], "frameMs": 125},
+            "prompt": "스프라이트 시트",
+            "sourceAttachmentId": null,
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let sprite = &structured(&answer)["candidates"][0];
+    assert_eq!(sprite["motion"], json!("sprite"));
+    assert_eq!(sprite["frames"], json!(4));
+    // frameMs counts in 10 ms steps and rounds down: 125 → 120, so 4 steps play 480 ms.
+    assert_eq!(sprite["durationMs"], json!(480), "{sprite}");
+    let sprite_assembly =
+        Uuid::parse_str(structured(&answer)["assemblyId"].as_str().unwrap()).unwrap();
+    let pointer: Option<Uuid> =
+        sqlx::query_scalar("SELECT source_attachment_id FROM expression_assembly WHERE id=$1")
+            .bind(sprite_assembly)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(pointer, None, "null stays null: nothing is invented");
+
+    // ---- nothing the agent sent is anywhere but the assembly's own row -----------------------
+    let secrets = vec![
+        "PROMPT-SECRET-4820".to_string(),
+        attachment.to_string(),
+        "mine-4820-drive-id".to_string(),
+        b64[..120].to_string(),
+    ];
+    assert_eq!(leaked_4820(&w.su, ws, &secrets).await, Vec::<String>::new());
+    assert!(!answer.to_string().contains(&b64[..120]));
+    let audit: String = sqlx::query_scalar("SELECT detail::text FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled' AND target_id=$2")
+        .bind(ws)
+        .bind(assembly_id)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert!(
+        audit.contains(&assembly_id.to_string()) && audit.contains("bounce"),
+        "{audit}"
+    );
+    // The call ledger saw the tool by name, on the run the handle names, and never an argument.
+    let recorded: i64 = sqlx::query_scalar("SELECT count(*) FROM agent_run_event WHERE workspace_id=$1 AND kind='tool_call' AND tool='oort_expression_assemble'")
+        .bind(ws)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(recorded, 2);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_refuses_a_strangers_attachment_and_an_unknown_id_alike_and_writes_nothing() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    for id in ["theirs", "pending", "elsewhere", "gone"] {
+        w.drive
+            .files
+            .lock()
+            .unwrap()
+            .insert(id.into(), picture_4820(300, 200));
+    }
+    let message = |author: Uuid, channel: Uuid| {
+        let su = w.su.clone();
+        async move { seed_message_4385(&su, ws, channel, author, "사진").await }
+    };
+    // A file somebody ELSE put in this very conversation.
+    let theirs = {
+        let m = message(w.face, w.fixture.channel).await;
+        seed_attachment_4385(
+            &w.su,
+            ws,
+            w.fixture.channel,
+            w.face,
+            Some(m),
+            "theirs",
+            "image/png",
+            "complete",
+        )
+        .await
+    };
+    // The requester's own file, not complete yet.
+    let pending = {
+        let m = message(w.requester, w.fixture.channel).await;
+        seed_attachment_4385(
+            &w.su,
+            ws,
+            w.fixture.channel,
+            w.requester,
+            Some(m),
+            "pending",
+            "image/png",
+            "pending",
+        )
+        .await
+    };
+    // The requester's own complete file, in ANOTHER conversation.
+    let other_channel: Uuid = sqlx::query_scalar("SELECT id FROM channel WHERE workspace_id=$1 AND id<>$2 AND kind IN ('public','private') LIMIT 1")
+        .bind(ws)
+        .bind(w.fixture.channel)
+        .fetch_optional(&w.su)
+        .await
+        .unwrap()
+        .unwrap_or_else(Uuid::nil);
+    assert!(
+        !other_channel.is_nil(),
+        "the fixture has a second conversation to put a file in"
+    );
+    let elsewhere = {
+        let m = message(w.requester, other_channel).await;
+        seed_attachment_4385(
+            &w.su,
+            ws,
+            other_channel,
+            w.requester,
+            Some(m),
+            "elsewhere",
+            "image/png",
+            "complete",
+        )
+        .await
+    };
+    // The requester's own file on a message that was deleted.
+    let gone = {
+        let m = message(w.requester, w.fixture.channel).await;
+        let id = seed_attachment_4385(
+            &w.su,
+            ws,
+            w.fixture.channel,
+            w.requester,
+            Some(m),
+            "gone",
+            "image/png",
+            "complete",
+        )
+        .await;
+        sqlx::query("UPDATE message SET state='deleted', deleted_at=now() WHERE id=$1")
+            .bind(m)
+            .execute(&w.su)
+            .await
+            .unwrap();
+        id
+    };
+    let handle = claim_run_4820(&w).await;
+    let motion = json!({"kind": "preset", "presets": ["bounce"]});
+    let mut refusals = Vec::new();
+    let ids = vec![
+        ("a stranger's file", theirs),
+        ("not complete", pending),
+        ("unknown", Uuid::new_v4()),
+        ("deleted message", gone),
+        ("another conversation", elsewhere),
+    ];
+    for (what, id) in &ids {
+        // As the picture itself...
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({
+            "source": {"from": "attachment", "attachmentId": id}, "motion": motion,
+            "size": 240, "prompt": "p", "sourceAttachmentId": null}),
+        )
+        .await;
+        assert_eq!(status, 400, "{what}: {answer}");
+        refusals.push((what.to_string(), answer["error"].clone()));
+        // ...and as the claimed origin of a picture the agent drew itself.
+        let (status, answer) = assemble_4820(&w, &handle, json!({
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(64, 64))},
+            "motion": motion, "size": 240, "prompt": "p", "sourceAttachmentId": id})).await;
+        assert_eq!(status, 400, "{what} as a pointer: {answer}");
+        refusals.push((format!("{what} (pointer)"), answer["error"].clone()));
+    }
+    // One answer for every refusal: nobody learns which of them exists.
+    let first = refusals[0].1.clone();
+    for (what, error) in &refusals {
+        assert_eq!(error, &first, "{what} reads differently from the others");
+    }
+    assert_eq!(error_code(&json!({"error": first})), -32602);
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        0,
+        "a refusal keeps nothing"
+    );
+    let audited: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.assembled'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(audited, 0);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_the_6_mib_budget_is_one_tools_and_a_declared_name_must_be_the_real_one() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let handle = claim_run_4820(&w).await;
+    let base = picture_4820(300, 200);
+    let bearer = w.fixture.hosted_bearer.clone();
+    let assemble = "oort_expression_assemble";
+    let args = |bytes: &[u8]| {
+        json!({
+            "handle": handle,
+            "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(bytes)},
+            "motion": {"kind": "preset", "presets": ["pulse"]},
+            "size": 240, "prompt": "p", "sourceAttachmentId": null
+        })
+    };
+
+    // ---- exactly 4 MiB decoded is 5,592,408 characters: carried and assembled -----------------
+    let four_mib = padded_png_4820(&base, 4 * 1024 * 1024);
+    let body = args(&four_mib);
+    assert_eq!(
+        body["source"]["dataBase64"].as_str().unwrap().len(),
+        5_592_408
+    );
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "a 4 MiB picture rides the 6 MiB budget"
+    );
+    let answer: Value = response.json().await.unwrap();
+    assert_eq!(
+        structured(&answer)["candidates"].as_array().map(Vec::len),
+        Some(1),
+        "{answer}"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 1);
+
+    // ---- 4 MiB + 1 byte is the SAME 5,592,408 characters (the bound is a group of three) -------
+    // but it is over the decoded limit: the assembler's own coded refusal, nothing kept.
+    let over = padded_png_4820(&base, 4 * 1024 * 1024 + 1);
+    let body = args(&over);
+    assert_eq!(
+        body["source"]["dataBase64"].as_str().unwrap().len(),
+        5_592_408
+    );
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(response.status().as_u16(), 200);
+    let answer: Value = response.json().await.unwrap();
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_source_too_large"}),
+        "{answer}"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        1,
+        "a refusal keeps nothing"
+    );
+
+    // ---- one character past the base64 bound never reaches the tool ---------------------------
+    let mut body = args(&base);
+    body["source"]["dataBase64"] = json!("A".repeat(5_592_409));
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(
+        response.status().as_u16(),
+        400,
+        "the bulk bound is the picture's, to the character"
+    );
+
+    // ---- the whole request is at most 6 MiB ---------------------------------------------------
+    let mut body = args(&base);
+    body["pad"] = json!("y".repeat(6 * 1024 * 1024 + 10));
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, body).await;
+    assert_eq!(response.status().as_u16(), 413, "past 6 MiB is refused");
+
+    // ---- the header is a claim, the body is the fact ------------------------------------------
+    let medium = args(&padded_png_4820(&base, 100 * 1024)); // a body past 64 KiB
+    for (what, declared, body_tool, arguments) in [
+        ("not declared at all", None, assemble, medium.clone()),
+        (
+            "declared as the other large-budget tool",
+            Some("oort_action_propose"),
+            assemble,
+            medium.clone(),
+        ),
+        (
+            "declared as assemble, another tool inside",
+            Some(assemble),
+            "oort_message_post",
+            json!({"pad": "x".repeat(100 * 1024)}),
+        ),
+        (
+            "declared as ping",
+            Some("oort_ping"),
+            assemble,
+            medium.clone(),
+        ),
+    ] {
+        let response = raw_call_4820(&w, &bearer, declared, body_tool, arguments).await;
+        assert_eq!(
+            response.status().as_u16(),
+            413,
+            "{what} must not get the 6 MiB budget"
+        );
+    }
+    // The other large-budget body, declared as assemble, is refused too; declared as itself it is
+    // not refused for its size.
+    // (A handle that opens nothing: this proposal is judged for its SIZE only and must not park
+    // the run the control call below still needs.)
+    let create = json!({"handle": "not-a-handle", "actionId": "expression.create", "args": {"candidates": [{
+        "name": "aa", "displayName": "a", "tags": [], "subjectMemberId": null,
+        "image": {"source": "generated", "mime": "image/png",
+                  "dataBase64": b64_3787(&padded_png_4820(&base, 100 * 1024)), "prompt": "p"}}]}});
+    let response = raw_call_4820(
+        &w,
+        &bearer,
+        Some(assemble),
+        "oort_action_propose",
+        create.clone(),
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        413,
+        "expression.create's body declared as assemble"
+    );
+    let response = raw_call_4820(
+        &w,
+        &bearer,
+        Some("oort_action_propose"),
+        "oort_action_propose",
+        create,
+    )
+    .await;
+    assert_ne!(
+        response.status().as_u16(),
+        413,
+        "declared as itself, its own budget holds"
+    );
+    // Control: the very body the checks above refused is served when it is what it says it is.
+    let response = raw_call_4820(&w, &bearer, Some(assemble), assemble, medium).await;
+    assert_eq!(response.status().as_u16(), 200);
+
+    // ---- who may read a large body: authenticated callers with the propose scope --------------
+    let response =
+        raw_call_4820(&w, "not-a-token", Some(assemble), assemble, args(&four_mib)).await;
+    assert_eq!(
+        response.status().as_u16(),
+        401,
+        "authentication comes before the large body"
+    );
+    let response = raw_call_4820(
+        &w,
+        &w.fixture.connect_only_bearer,
+        Some(assemble),
+        assemble,
+        args(&four_mib),
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        413,
+        "without the propose scope the budget stays 64 KiB"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        2,
+        "only the two calls that were served"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_the_rate_limit_is_spent_once() {
+    // Two requests in the window: the claim and the assemble. A call that spent the budget twice
+    // (once before its body, once after) would be refused itself.
+    let w = world_4820(2, None).await;
+    let handle = claim_run_4820(&w).await;
+    let assemble = "oort_expression_assemble";
+    let response = raw_call_4820(
+        &w,
+        &w.fixture.hosted_bearer,
+        Some(assemble),
+        assemble,
+        json!({"handle": handle,
+               "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(300, 200))},
+               "motion": {"kind": "preset", "presets": ["pulse"]}, "size": 240, "prompt": "p",
+               "sourceAttachmentId": null}),
+    )
+    .await;
+    assert_eq!(
+        response.status().as_u16(),
+        200,
+        "the call is charged exactly once"
+    );
+    // The budget really is spent: the very next call is the one that is refused.
+    let response = raw_call_4820(
+        &w,
+        &w.fixture.hosted_bearer,
+        Some("oort_ping"),
+        "oort_ping",
+        json!({}),
+    )
+    .await;
+    assert_eq!(response.status().as_u16(), 429);
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_is_the_shared_slots(
+) {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let handle = claim_run_4820(&w).await;
+    let picture = b64_3787(&picture_4820(300, 200));
+    let drawn = json!({"from": "base64", "mime": "image/png", "dataBase64": picture});
+    let one = |motion: Value, source: Value| {
+        let (w, handle) = (&w, handle.clone());
+        async move {
+            assemble_4820(
+                w,
+                &handle,
+                json!({"source": source, "motion": motion, "size": 240,
+                "prompt": "p", "sourceAttachmentId": null}),
+            )
+            .await
+        }
+    };
+    let bounce = json!({"kind": "preset", "presets": ["bounce"]});
+
+    // ---- parameters: a call error (-32602), nothing built, nothing kept ------------------------
+    for (what, motion) in [
+        (
+            "a duplicate preset",
+            json!({"kind": "preset", "presets": ["bounce", "bounce"]}),
+        ),
+        (
+            "a cell outside the grid",
+            json!({"kind": "sprite", "frames": 2, "sequence": [0, 2], "frameMs": 100}),
+        ),
+        (
+            "a play longer than 10 s",
+            json!({"kind": "sprite", "frames": 2, "sequence": vec![0; 24], "frameMs": 500}),
+        ),
+    ] {
+        let (status, answer) = one(motion, drawn.clone()).await;
+        assert_eq!(
+            (status, error_code(&answer)),
+            (400, -32602),
+            "{what}: {answer}"
+        );
+        assert!(answer["result"].is_null(), "{what} is not a result");
+    }
+    for (what, prompt) in [
+        ("an empty prompt", String::new()),
+        ("a control character", "a\u{7}b".into()),
+        ("over 2,000 characters", "가".repeat(2001)),
+    ] {
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({"source": drawn, "motion": bounce,
+            "size": 240, "prompt": prompt, "sourceAttachmentId": null}),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&answer)),
+            (400, -32602),
+            "{what}: {answer}"
+        );
+    }
+    // A prompt of 2,000 characters is the limit and is fine, in bytes up to 6,000.
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({"source": drawn, "motion": bounce,
+        "size": 240, "prompt": "가".repeat(2000), "sourceAttachmentId": null}),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let kept = assembly_rows_4820(&w.su, ws).await;
+    assert_eq!(kept, 1, "only the call that was fine kept anything");
+
+    // ---- a picture that cannot be animated: a coded RESULT, not a protocol error --------------
+    for (what, source) in [
+        (
+            "bytes that are no picture",
+            json!({"from": "base64", "mime": "image/png", "dataBase64": b64_3787(b"not a picture at all")}),
+        ),
+        (
+            "an animated GIF",
+            json!({"from": "base64", "mime": "image/gif", "dataBase64": b64_3787(&gif_4829())}),
+        ),
+    ] {
+        let (status, answer) = one(bounce.clone(), source).await;
+        assert_eq!(status, 200, "{what}: {answer}");
+        assert_eq!(
+            answer["result"]["isError"],
+            json!(false),
+            "{what}: a refusal the card can show is a result"
+        );
+        assert_eq!(
+            structured(&answer),
+            &json!({"code": "assembly_source_invalid"}),
+            "{what}"
+        );
+    }
+
+    // ---- built too large: every candidate → one code with the measured size; some → holes ----
+    let noise =
+        json!({"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&noise_4820())});
+    let (status, answer) = one(
+        json!({"kind": "preset", "presets": ["sparkle"]}),
+        noise.clone(),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let refusal = structured(&answer);
+    assert_eq!(refusal["code"], json!("assembly_output_too_large"));
+    let measured = refusal["bytes"].as_u64().expect("the measured size");
+    assert!(
+        measured > 256 * 1024,
+        "the size that was measured is the animation's own: {measured}"
+    );
+    assert_eq!(refusal.as_object().unwrap().len(), 2);
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        kept,
+        "all too large keeps nothing"
+    );
+    // Partial: pulse and bounce fit, sparkle does not. The hole keeps its index.
+    let (status, answer) = one(
+        json!({"kind": "preset", "presets": ["pulse", "sparkle", "bounce"]}),
+        noise,
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    let candidates = structured(&answer)["candidates"].as_array().unwrap();
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|c| (c["index"].as_u64().unwrap(), c["motion"].as_str().unwrap()))
+            .collect::<Vec<_>>(),
+        [(0, "pulse"), (2, "bounce")],
+        "{answer}"
+    );
+    let assembly = Uuid::parse_str(structured(&answer)["assemblyId"].as_str().unwrap()).unwrap();
+    let failed: Value = sqlx::query_scalar("SELECT failed FROM expression_assembly WHERE id=$1")
+        .bind(assembly)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(failed[0]["index"], json!(1));
+    assert_eq!(failed[0]["motion"], json!("sparkle"));
+    assert_eq!(failed[0]["code"], json!("assembly_output_too_large"));
+    assert!(failed[0]["bytes"].as_u64().unwrap() > 256 * 1024);
+    let slots: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression_assembly_image WHERE assembly_id=$1")
+            .bind(assembly)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        slots, 6,
+        "two candidates, three renditions each; the hole holds no bytes"
+    );
+
+    // ---- busy: the decoder's two slots are ONE semaphore for every source ---------------------
+    let slots = momo_expressions::media::decoder_slots();
+    let held = (
+        slots.clone().acquire_owned().await.unwrap(),
+        slots.clone().acquire_owned().await.unwrap(),
+    );
+    let started = std::time::Instant::now();
+    let (status, answer) = one(bounce.clone(), drawn.clone()).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "busy is not a timeout"
+    );
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(4),
+        "busy answers at once, it does not queue"
+    );
+    // The same two slots serve a link/upload decode: with them taken, so is that one.
+    assert_eq!(
+        momo_expressions::media::process(picture_4820(8, 8))
+            .await
+            .err(),
+        Some(momo_expressions::media::Rejected::Busy),
+        "the decoder and the assembler are one pool"
+    );
+    drop(held);
+    let (status, answer) = one(bounce, drawn).await;
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_an_assembler_that_cannot_run_is_a_5xx_and_never_a_card_code() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("assembler-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let script = |name: &str, body: &str| {
+        let path = dir.join(name);
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        path
+    };
+    let arguments = |handle: &str| {
+        json!({"handle": handle,
+               "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(64, 64))},
+               "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+               "sourceAttachmentId": null})
+    };
+    for (what, program) in [
+        ("no such binary", dir.join("does-not-exist")),
+        (
+            "a child that exits with an error",
+            script("exits", "exit 3"),
+        ),
+        ("a child that says nothing", script("silent", "exit 0")),
+        (
+            "a child that answers in prose",
+            script("prose", "echo 'sorry, no'"),
+        ),
+    ] {
+        let w = world_4820(0, Some(program)).await;
+        let handle = claim_run_4820(&w).await;
+        let (status, answer) = call(
+            &w.client,
+            &w.base,
+            &w.fixture.hosted_bearer,
+            "oort_expression_assemble",
+            arguments(&handle),
+        )
+        .await;
+        assert_eq!(
+            (status, error_code(&answer)),
+            (500, -32603),
+            "{what}: {answer}"
+        );
+        assert!(
+            answer["result"].is_null(),
+            "{what}: an operator fault is never a result the card could show"
+        );
+        assert!(
+            !answer.to_string().contains("assembly_"),
+            "{what}: {answer}"
+        );
+        assert_eq!(
+            assembly_rows_4820(&w.su, w.fixture.workspace).await,
+            0,
+            "{what}"
+        );
+    }
+    // A child that a limit killed (a signal) is the request's own doing: a time-out, as a result.
+    let w = world_4820(0, Some(script("signalled", "kill -9 $$"))).await;
+    let handle = claim_run_4820(&w).await;
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_expression_assemble",
+        arguments(&handle),
+    )
+    .await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(structured(&answer), &json!({"code": "assembly_timeout"}));
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_one_ten_second_clock_covers_the_fetch_and_the_child_is_killed_and_the_slot_returns(
+) {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = std::path::Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("assembler-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let pid_file = dir.join("pid");
+    let path = dir.join("never-answers");
+    // Writes its own pid, then becomes `sleep`: the same process, so the pid stays its own.
+    std::fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\necho $$ > '{}'\nexec sleep 60\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The picture takes 4 s to come from Drive: the child is left what is left of ONE 10 s.
+    let w = build_world_4820(0, Some(path), Some(std::time::Duration::from_secs(4))).await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("slow".into(), picture_4820(300, 200));
+    let message = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(message),
+        "slow",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let handle = claim_run_4820(&w).await;
+    let started = std::time::Instant::now();
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({
+        "source": {"from": "attachment", "attachmentId": attachment},
+        "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+        "sourceAttachmentId": null}),
+    )
+    .await;
+    let took = started.elapsed();
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_timeout"}),
+        "a result, and not a busy"
+    );
+    assert!(
+        (std::time::Duration::from_secs(9)..std::time::Duration::from_millis(11_500))
+            .contains(&took),
+        "the 4 s fetch and the child share one 10 s, got {took:?}"
+    );
+    // The child is gone (reaped), the pool is whole again, nothing was kept.
+    let pid = std::fs::read_to_string(&pid_file)
+        .expect("the child ran")
+        .trim()
+        .to_string();
+    let alive = std::process::Command::new("kill")
+        .args(["-0", &pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success();
+    assert!(!alive, "the assembler child {pid} outlived its call");
+    assert_eq!(
+        momo_expressions::media::decoder_slots().available_permits(),
+        2,
+        "the slot came back"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, ws).await, 0);
+}
+
+/// `jpeg` with an EXIF APP1 segment saying `orientation`, right after SOI.
+fn exif_jpeg_4820(jpeg: &[u8], orientation: u16, little_endian: bool) -> Vec<u8> {
+    let mut tiff = Vec::new();
+    let put16 = |tiff: &mut Vec<u8>, value: u16| {
+        tiff.extend_from_slice(&if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        })
+    };
+    let put32 = |tiff: &mut Vec<u8>, value: u32| {
+        tiff.extend_from_slice(&if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        })
+    };
+    tiff.extend_from_slice(if little_endian { b"II*\0" } else { b"MM\0*" });
+    put32(&mut tiff, 8); // IFD0 follows the 8-byte header
+    put16(&mut tiff, 1); // one entry
+    put16(&mut tiff, 0x0112); // Orientation
+    put16(&mut tiff, 3); // SHORT
+    put32(&mut tiff, 1); // one value
+    put16(&mut tiff, orientation);
+    tiff.extend_from_slice(&[0, 0]); // the value field is 4 bytes wide
+    put32(&mut tiff, 0); // no next IFD
+    let mut app1 = b"Exif\0\0".to_vec();
+    app1.extend_from_slice(&tiff);
+    let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&app1);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_applies_the_exif_orientation_of_a_phone_photo() {
+    use image::AnimationDecoder as _;
+    let w = world_4820(0, None).await;
+    let handle = claim_run_4820(&w).await;
+    // 240 x 120: red on the left, blue on the right. A phone stores it lying and says how to turn it.
+    let wide = image::RgbaImage::from_fn(240, 120, |x, _| {
+        if x < 120 {
+            image::Rgba([220, 30, 30, 255])
+        } else {
+            image::Rgba([30, 30, 220, 255])
+        }
+    });
+    let mut jpeg = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgb8(image::DynamicImage::ImageRgba8(wide).to_rgb8())
+        .write_to(&mut jpeg, image::ImageFormat::Jpeg)
+        .unwrap();
+    let jpeg = jpeg.into_inner();
+    let colour = |p: &image::Rgba<u8>| {
+        if p[0] > 170 && p[2] < 100 {
+            "red"
+        } else if p[2] > 170 && p[0] < 100 {
+            "blue"
+        } else {
+            "margin"
+        }
+    };
+    for (orientation, little_endian, upper, lower) in
+        [(6u16, false, "red", "blue"), (8, true, "blue", "red")]
+    {
+        let (status, answer) = assemble_4820(&w, &handle, json!({
+            "source": {"from": "base64", "mime": "image/jpeg", "dataBase64": b64_3787(&exif_jpeg_4820(&jpeg, orientation, little_endian))},
+            "motion": {"kind": "preset", "presets": ["sparkle"]}, "size": 240, "prompt": "p",
+            "sourceAttachmentId": null})).await;
+        assert_eq!(status, 200, "orientation {orientation}: {answer}");
+        let assembly =
+            Uuid::parse_str(structured(&answer)["assemblyId"].as_str().unwrap()).unwrap();
+        let gif: Vec<u8> = sqlx::query_scalar(
+            "SELECT bytes FROM expression_assembly_image WHERE assembly_id=$1 AND variant='large'",
+        )
+        .bind(assembly)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+        let frame = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(gif))
+            .unwrap()
+            .into_frames()
+            .next()
+            .unwrap()
+            .unwrap()
+            .into_buffer();
+        assert_eq!(
+            colour(frame.get_pixel(120, 60)),
+            upper,
+            "orientation {orientation}: top"
+        );
+        assert_eq!(
+            colour(frame.get_pixel(120, 180)),
+            lower,
+            "orientation {orientation}: bottom"
+        );
+        // The picture stands (192 tall, 96 wide) instead of lying (96 tall, 192 wide).
+        let height = (0..240)
+            .filter(|y| colour(frame.get_pixel(120, *y)) != "margin")
+            .count();
+        let width = (0..240)
+            .filter(|x| colour(frame.get_pixel(*x, 120)) != "margin")
+            .count();
+        assert!(
+            height > width,
+            "orientation {orientation}: {width}x{height}"
+        );
+    }
+}
+
+/// Header and renditions of one held assembly of `candidates` ready candidates, written the way
+/// `keep_in_tx` writes them but without building anything (the arithmetic is the domain suite's;
+/// here it is what the DOOR says about a full agent).
+async fn hold_4820(su: &PgPool, ws: Uuid, agent: Uuid, requester: Uuid, candidates: i32) -> Uuid {
+    let id: Uuid = sqlx::query_scalar("INSERT INTO expression_assembly(workspace_id,agent_member_id,requester_member_id,prompt) VALUES($1,$2,$3,'held') RETURNING id")
+        .bind(ws)
+        .bind(agent)
+        .bind(requester)
+        .fetch_one(su)
+        .await
+        .unwrap();
+    for index in 0..candidates {
+        for (variant, mime, frames, duration) in [
+            ("small", "image/gif", 2, 100),
+            ("large", "image/gif", 2, 100),
+            ("thumb", "image/png", 1, 0),
+        ] {
+            sqlx::query("INSERT INTO expression_assembly_image(workspace_id,assembly_id,candidate_index,motion,variant,mime,bytes,sha256,width,height,frame_count,duration_ms) SELECT $1,$2,$3,'bounce',$4,$5,b,encode(sha256(b),'hex'),8,8,$6,$7 FROM (SELECT '\x474946'::bytea AS b) held")
+                .bind(ws)
+                .bind(id)
+                .bind(index)
+                .bind(variant)
+                .bind(mime)
+                .bind(frames)
+                .bind(duration)
+                .execute(su)
+                .await
+                .unwrap();
+        }
+    }
+    id
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_an_agent_holds_twelve_candidates_and_the_hour_gives_the_room_back() {
+    let w = world_4820(0, None).await;
+    let ws = w.fixture.workspace;
+    let (agent, requester) = (w.fixture.hosted_agent, w.requester);
+    let handle = claim_run_4820(&w).await;
+    let drawn = json!({"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(300, 200))});
+    let ask = |presets: Value| {
+        let (w, handle, drawn) = (&w, handle.clone(), drawn.clone());
+        async move {
+            assemble_4820(
+                w,
+                &handle,
+                json!({"source": drawn, "size": 240, "prompt": "p",
+                "motion": {"kind": "preset", "presets": presets}, "sourceAttachmentId": null}),
+            )
+            .await
+        }
+    };
+    hold_4820(&w.su, ws, agent, requester, 4).await;
+    hold_4820(&w.su, ws, agent, requester, 4).await;
+    let aging = hold_4820(&w.su, ws, agent, requester, 3).await; // eleven
+                                                                 // 11 held: one more fits; two more would be 13: refused at once, writing nothing.
+    let rows = assembly_rows_4820(&w.su, ws).await;
+    let (status, answer) = ask(json!(["bounce", "pulse"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "the twelve are a G3.8 `busy`"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        rows,
+        "a refusal keeps nothing"
+    );
+    let (status, answer) = ask(json!(["bounce"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert!(structured(&answer)["assemblyId"].is_string(), "{answer}");
+    // 12 held: nothing fits any more.
+    let (_, answer) = ask(json!(["pulse"])).await;
+    assert_eq!(
+        structured(&answer),
+        &json!({"code": "assembly_busy"}),
+        "{answer}"
+    );
+    // The hour is up for the three-candidate assembly: its room is back, swept or not.
+    let mut tx = w.su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_assembly DISABLE TRIGGER expression_assembly_identity")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_assembly SET expires_at=clock_timestamp()-interval '1 second' WHERE id=$1").bind(aging).execute(&mut *tx).await.unwrap();
+    sqlx::query("ALTER TABLE expression_assembly ENABLE TRIGGER expression_assembly_identity")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    let (status, answer) = ask(json!(["pulse", "wobble"])).await;
+    assert_eq!(status, 200, "{answer}");
+    assert_eq!(
+        structured(&answer)["candidates"].as_array().map(Vec::len),
+        Some(2),
+        "{answer}"
+    );
+    // Another agent's twelve are its own: nothing here limited it. (Checked through the
+    // domain suite; the door only ever speaks for the credential it authenticated.)
+}
+
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn assemble_needs_the_propose_scope_and_a_handle_that_is_this_agents() {
+    let w = world_4820(0, None).await;
+    let arguments = |handle: &str| {
+        json!({"handle": handle,
+               "source": {"from": "base64", "mime": "image/png", "dataBase64": b64_3787(&picture_4820(64, 64))},
+               "motion": {"kind": "preset", "presets": ["bounce"]}, "size": 240, "prompt": "p",
+               "sourceAttachmentId": null})
+    };
+    // A credential without the scope cannot even see the tool: the answer is the unknown tool's.
+    let handle = claim_run_4820(&w).await;
+    let (status, refused) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.connect_only_bearer,
+        "oort_expression_assemble",
+        arguments(&handle),
+    )
+    .await;
+    let (unknown_status, unknown) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.connect_only_bearer,
+        "oort_no_such_tool",
+        arguments(&handle),
+    )
+    .await;
+    assert_eq!(
+        (status, &refused["error"]["message"]),
+        (unknown_status, &unknown["error"]["message"]),
+        "{refused} / {unknown}"
+    );
+    assert!(
+        !list_tools(&w.client, &w.base, &w.fixture.connect_only_bearer)
+            .await
+            .contains(&"oort_expression_assemble".to_string())
+    );
+    // A handle that does not open is the agent's own stale flow, refused as one.
+    for garbage in ["not-a-handle", &"x".repeat(512)] {
+        let (status, answer) = call(
+            &w.client,
+            &w.base,
+            &w.fixture.hosted_bearer,
+            "oort_expression_assemble",
+            arguments(garbage),
+        )
+        .await;
+        assert_eq!((status, error_code(&answer)), (403, -32003), "{answer}");
+    }
+    // A lease that was given back is stale: the run is not this agent's to speak for any more,
+    // however well the handle still opens. (`card_suggest` and `action_propose` answer the same.)
+    let handle = claim_run_4820(&w).await;
+    let (status, released) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_job_release",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(status, 200, "{released}");
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_expression_assemble",
+        arguments(&handle),
+    )
+    .await;
+    assert_eq!(
+        (status, error_code(&answer)),
+        (409, -32005),
+        "a released lease: {answer}"
+    );
+    assert_eq!(assembly_rows_4820(&w.su, w.fixture.workspace).await, 0);
 }

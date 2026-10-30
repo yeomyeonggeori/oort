@@ -59,7 +59,11 @@ impl Processed {
     }
 }
 
-fn semaphore() -> Arc<Semaphore> {
+/// The two decoder slots every picture path shares: a direct upload, a link import, an agent's
+/// candidates and the motion assembler (ADR-0218 G3.5: one semaphore of two across all sources).
+/// There is deliberately one: a caller takes a permit from **this** and hands it to its child
+/// process, so the cap holds however the work arrives.
+pub fn decoder_slots() -> Arc<Semaphore> {
     static SEM: OnceLock<Arc<Semaphore>> = OnceLock::new();
     SEM.get_or_init(|| Arc::new(Semaphore::new(2))).clone()
 }
@@ -68,7 +72,7 @@ pub async fn process(bytes: Vec<u8>) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
-    supervised(bytes, decoder_path()?, DEADLINE, semaphore()).await
+    supervised(bytes, decoder_path()?, DEADLINE, decoder_slots()).await
 }
 
 /// [`process`], but a busy decoder is **waited for** up to `wait` instead of refused at
@@ -80,7 +84,7 @@ pub async fn process_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Processed
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
     }
-    let permit = tokio::time::timeout(wait, semaphore().acquire_owned())
+    let permit = tokio::time::timeout(wait, decoder_slots().acquire_owned())
         .await
         .map_err(|_| Rejected::Busy)?
         .map_err(|_| Rejected::Invalid)?;

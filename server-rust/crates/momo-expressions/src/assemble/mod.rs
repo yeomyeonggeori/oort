@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use image::codecs::gif::{GifEncoder, Repeat};
+use image::metadata::Orientation;
 use image::{ColorType, Delay, DynamicImage, Frame, ImageDecoder, ImageReader, Limits, RgbaImage};
 use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -143,6 +144,13 @@ impl AssembleRequest {
             motion,
             size: DEFAULT_SIZE,
         }
+    }
+
+    /// The motion of every candidate slot this request asks for, in request order: the order the
+    /// answer's [`Outcome`]s come back in (a slot that was built too large carries no
+    /// [`Candidate`] to say which motion it was, so the keeper asks the request).
+    pub fn slot_kinds(&self) -> Vec<MotionKind> {
+        Plan::of(self).iter().map(Plan::kind).collect()
     }
 
     /// G3.2/G3.8 `assembly_params_invalid`: every wrong parameter by name, nothing else.
@@ -507,13 +515,19 @@ fn decode_source(
     limits.max_image_height = Some(4096);
     limits.max_alloc = Some(SCRATCH);
     reader.limits(limits);
-    let decoder = reader
+    let mut decoder = reader
         .into_decoder()
         .map_err(|_| late(AssembleError::SourceInvalid, end))?;
     let (w, h) = decoder.dimensions();
     if (w, h) != claimed {
         return Err(AssembleError::SourceInvalid); // the codec disagrees with the container
     }
+    // The orientation the camera recorded (EXIF). A phone photo is stored as its sensor saw it
+    // and says how to turn it: without this a portrait photo would be put on the canvas lying
+    // down. It is read before the pixels are decoded and applied below, so the 80% fit, the
+    // margin colour and the sheet grid all work on the picture as a person sees it. A picture
+    // with no orientation, an unreadable one, or a format that carries none is upright as it is.
+    let orientation = decoder.orientation().unwrap_or(Orientation::NoTransforms);
     let pixels = u64::from(w) * u64::from(h);
     let native = decoder.total_bytes();
     // The RGBA copy exists beside the native buffer unless the picture is already RGBA8.
@@ -522,11 +536,23 @@ fn decode_source(
     } else {
         pixels * 4
     };
-    if !within_allocation_budget(native, copy, bytes.len(), allocation) {
+    // A quarter turn (or a turn plus a flip) builds the turned picture beside the first one.
+    let turned = match orientation {
+        Orientation::NoTransforms
+        | Orientation::Rotate180
+        | Orientation::FlipHorizontal
+        | Orientation::FlipVertical => 0,
+        Orientation::Rotate90
+        | Orientation::Rotate270
+        | Orientation::Rotate90FlipH
+        | Orientation::Rotate270FlipH => native,
+    };
+    if !within_allocation_budget(native + turned, copy, bytes.len(), allocation) {
         return Err(AssembleError::Timeout); // G3.8: the allocation limit is `assembly_timeout`
     }
-    let image =
+    let mut image =
         DynamicImage::from_decoder(decoder).map_err(|_| late(AssembleError::SourceInvalid, end))?;
+    image.apply_orientation(orientation);
     let rgba = image.into_rgba8();
     let fill = render::edge_fill(&rgba);
     Ok((rgba, fill))
@@ -844,7 +870,10 @@ pub async fn try_assemble(
     try_assemble_with_program(&assembler_path()?, DEADLINE, request, source, from, slots).await
 }
 
-#[doc(hidden)]
+/// [`try_assemble`] with the assembler program and the budget of the call given by the caller:
+/// the form the server uses (the program from its own state, and what is left of the call's
+/// 10 s once the picture has been fetched). A call that has no budget left is the caller's
+/// `assembly_timeout` to answer before it asks for a slot.
 pub async fn try_assemble_with_program(
     program: &Path,
     deadline: Duration,
@@ -1452,6 +1481,65 @@ mod in_process {
             assemble_within(&req, &rgb, SourceFrom::Request, end, 20 * 1024 * 1024).err(),
             Some(AssembleError::Timeout)
         );
+    }
+
+    /// A JPEG that carries an EXIF orientation (the whole of what a reader needs: the marker, a
+    /// TIFF header and one IFD0 entry).
+    fn jpeg_turned(image: &RgbImage, orientation: u16) -> Vec<u8> {
+        let mut jpeg = Cursor::new(Vec::new());
+        DynamicImage::ImageRgb8(image.clone())
+            .write_to(&mut jpeg, ImageFormat::Jpeg)
+            .unwrap();
+        let jpeg = jpeg.into_inner();
+        let mut tiff = b"MM\0*".to_vec();
+        tiff.extend_from_slice(&8u32.to_be_bytes());
+        tiff.extend_from_slice(&1u16.to_be_bytes());
+        tiff.extend_from_slice(&0x0112u16.to_be_bytes());
+        tiff.extend_from_slice(&3u16.to_be_bytes());
+        tiff.extend_from_slice(&1u32.to_be_bytes());
+        tiff.extend_from_slice(&orientation.to_be_bytes());
+        tiff.extend_from_slice(&[0, 0]);
+        tiff.extend_from_slice(&0u32.to_be_bytes());
+        let mut app1 = b"Exif\0\0".to_vec();
+        app1.extend_from_slice(&tiff);
+        let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+        out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+        out.extend_from_slice(&app1);
+        out.extend_from_slice(&jpeg[2..]);
+        out
+    }
+
+    /// A quarter turn builds the turned picture beside the first one, so the 192 MiB budget must
+    /// count that second buffer; a half turn and the flips work in place and must not.
+    #[test]
+    fn a_quarter_turn_budgets_the_second_buffer_it_builds_and_a_flip_does_not() {
+        let end = Instant::now() + LONG;
+        let image = RgbImage::from_pixel(1000, 600, Rgb([9, 9, 9]));
+        // RGB8 1000x600: native 1.8 MB and an RGBA copy of 2.4 MB.
+        let (native, copy) = (1_800_000u64, 2_400_000u64);
+        // EXIF 1 normal, 2 flip, 3 half turn, 4 flip | 5, 6, 7, 8 are quarter turns (with a flip).
+        for (orientation, turned) in [
+            (1u16, 0),
+            (2, 0),
+            (3, 0),
+            (4, 0),
+            (5, native),
+            (6, native),
+            (7, native),
+            (8, native),
+        ] {
+            let bytes = jpeg_turned(&image, orientation);
+            let need = native + turned + copy + SCRATCH + bytes.len() as u64;
+            assert!(
+                decode_source(&bytes, end, need).is_ok(),
+                "orientation {orientation} fits the budget it is owed"
+            );
+            assert_eq!(
+                decode_source(&bytes, end, need - 1).err(),
+                Some(AssembleError::Timeout),
+                "orientation {orientation}: one byte under that budget"
+            );
+        }
     }
 
     /// What a GIF consists of, read block by block.

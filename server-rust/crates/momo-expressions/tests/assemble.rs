@@ -642,6 +642,162 @@ async fn every_still_format_of_d3_is_accepted() {
     }
 }
 
+// ---- EXIF orientation (#4820 C1b, planner decision 5) --------------------------------------
+/// `jpeg` with an EXIF APP1 segment that says `orientation` (tag 0x0112), right after SOI. A real
+/// camera segment is bigger, but this is the whole of what an orientation reader needs: the
+/// `Exif\0\0` marker, a TIFF header in either byte order, and one IFD0 entry.
+fn with_exif_orientation(jpeg: &[u8], orientation: u16, little_endian: bool) -> Vec<u8> {
+    let mut tiff = Vec::new();
+    let put16 = |tiff: &mut Vec<u8>, value: u16| {
+        tiff.extend_from_slice(&if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        })
+    };
+    let put32 = |tiff: &mut Vec<u8>, value: u32| {
+        tiff.extend_from_slice(&if little_endian {
+            value.to_le_bytes()
+        } else {
+            value.to_be_bytes()
+        })
+    };
+    tiff.extend_from_slice(if little_endian { b"II*\0" } else { b"MM\0*" });
+    put32(&mut tiff, 8); // IFD0 follows the 8-byte header
+    put16(&mut tiff, 1); // one entry
+    put16(&mut tiff, 0x0112); // Orientation
+    put16(&mut tiff, 3); // SHORT
+    put32(&mut tiff, 1); // one value
+    put16(&mut tiff, orientation);
+    tiff.extend_from_slice(&[0, 0]); // the value field is 4 bytes wide
+    put32(&mut tiff, 0); // no next IFD
+    let mut app1 = b"Exif\0\0".to_vec();
+    app1.extend_from_slice(&tiff);
+    let mut out = vec![0xFF, 0xD8, 0xFF, 0xE1];
+    out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&app1);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+fn colour_of(p: &Rgba<u8>) -> &'static str {
+    if p[0] > 170 && p[2] < 100 {
+        "red"
+    } else if p[2] > 170 && p[0] < 100 {
+        "blue"
+    } else {
+        "margin"
+    }
+}
+
+/// How far the picture reaches (red or blue, not margin) along the middle column and the middle row
+/// of the canvas: `(height, width)` of the picture as it was laid down.
+fn reach(frame: &RgbaImage) -> (u32, u32) {
+    let (w, h) = frame.dimensions();
+    let column = (0..h)
+        .filter(|y| colour_of(frame.get_pixel(w / 2, *y)) != "margin")
+        .count() as u32;
+    let row = (0..w)
+        .filter(|x| colour_of(frame.get_pixel(*x, h / 2)) != "margin")
+        .count() as u32;
+    (column, row)
+}
+
+#[tokio::test]
+async fn a_phone_photos_exif_orientation_is_applied_so_it_does_not_lie_down() {
+    // 240 x 120 (bigger than the 192 fit box, so it is scaled down to 192 x 96 and never
+    // enlarged): the left half red, the right half blue.
+    let mut wide = solid(240, 120, [30, 30, 220]);
+    fill_rect(&mut wide, (0, 0, 120, 120), [220, 30, 30]);
+    let jpeg = encode(&wide, ImageFormat::Jpeg);
+    // `sparkle` keeps the picture still, so frame 0 is how it was laid on the canvas (240: the
+    // fit box is 192).
+    let frame_zero = |made: &[Candidate]| frames_of(made[0].gif())[0].0.clone();
+    let (centre, quarter) = (120u32, 60u32);
+
+    // No orientation segment: lying as stored: wide, red to the left, blue to the right.
+    let made = candidates(&presets(&[Preset::Sparkle], 240), jpeg.clone()).await;
+    let frame = frame_zero(&made);
+    let (height, width) = reach(&frame);
+    assert!(
+        (186..=194).contains(&width) && (90..=100).contains(&height),
+        "{width}x{height}"
+    );
+    assert_eq!(colour_of(frame.get_pixel(centre - quarter, centre)), "red");
+    assert_eq!(colour_of(frame.get_pixel(centre + quarter, centre)), "blue");
+    // An explicit "normal" is the same picture.
+    let made = candidates(
+        &presets(&[Preset::Sparkle], 240),
+        with_exif_orientation(&jpeg, 1, false),
+    )
+    .await;
+    assert_eq!(
+        frame_zero(&made).as_raw(),
+        frame.as_raw(),
+        "orientation 1 changes nothing"
+    );
+
+    // Orientation 6: turn 90 degrees clockwise to display. The left half (red) goes to the top
+    // and the picture stands: 96 wide, 192 tall. Orientation 8 (little-endian segment): the other
+    // way, red at the bottom.
+    for (orientation, little_endian, upper, lower) in
+        [(6u16, false, "red", "blue"), (8, true, "blue", "red")]
+    {
+        let bytes = with_exif_orientation(&jpeg, orientation, little_endian);
+        let made = candidates(&presets(&[Preset::Sparkle], 240), bytes).await;
+        let frame = frame_zero(&made);
+        let (height, width) = reach(&frame);
+        assert!(
+            (186..=194).contains(&height) && (90..=100).contains(&width),
+            "orientation {orientation}: the picture must stand up, got {width}x{height}"
+        );
+        assert_eq!(
+            colour_of(frame.get_pixel(centre, centre - quarter)),
+            upper,
+            "orientation {orientation}: top"
+        );
+        assert_eq!(
+            colour_of(frame.get_pixel(centre, centre + quarter)),
+            lower,
+            "orientation {orientation}: bottom"
+        );
+        // Every frame of the animation is of the turned picture, and the result is still the
+        // ADR table's `sparkle`.
+        assert_eq!(made[0].frames(), 20);
+    }
+}
+
+#[tokio::test]
+async fn an_unreadable_orientation_is_an_upright_picture_not_a_refusal() {
+    let mut wide = solid(240, 120, [30, 30, 220]);
+    fill_rect(&mut wide, (0, 0, 120, 120), [220, 30, 30]);
+    let jpeg = encode(&wide, ImageFormat::Jpeg);
+    // Orientation 9 does not exist; a segment that stops short is not a segment at all.
+    let broken = [with_exif_orientation(&jpeg, 9, false), {
+        let mut cut = with_exif_orientation(&jpeg, 6, false);
+        // Keep the segment's length field but lose its tail: the reader gets half a TIFF.
+        let app1_end = 4 + 2 + 6 + 12;
+        cut.splice(app1_end..app1_end + 14, std::iter::empty());
+        cut
+    }];
+    for bytes in broken {
+        let result = run(&presets(&[Preset::Sparkle], 240), bytes).await;
+        // Either the picture is taken as stored or it is `assembly_source_invalid`: what it must
+        // never be is a turned guess.
+        match result {
+            Ok(outcomes) => {
+                let made = outcomes.into_iter().next().unwrap().unwrap();
+                let (height, width) = reach(&frames_of(made.gif())[0].0);
+                assert!(
+                    width > height,
+                    "an unreadable orientation lays the picture as stored"
+                );
+            }
+            Err(error) => assert_eq!(error, AssembleError::SourceInvalid),
+        }
+    }
+}
+
 // ---- determinism ------------------------------------------------------------------------------
 #[tokio::test]
 async fn the_same_input_is_the_same_bytes_and_one_changed_bit_is_not() {
