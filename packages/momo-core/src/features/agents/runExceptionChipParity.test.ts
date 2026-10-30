@@ -351,3 +351,35 @@ it("승인 종결은 카드·칩·인박스·문장이 같은 낱말이고 예�
     expect(triggerChip([stale], nameFor, T)?.word).toBe(word);
   }
 });
+
+it.each([
+  { name: "승인 직후(run 미수신)", status: "approved", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
+  { name: "승인 직후(대기 run)", status: "approved", phase: "awaiting_approval", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
+  { name: "실행 중", status: "approved", phase: "running", state: "executing", word: "실행 중", chipKind: "working", chipWord: "작업 중" },
+  { name: "성공", status: "approved", phase: "succeeded", state: "done", word: "끝", chipKind: "answered", chipWord: "끝" },
+  { name: "실패", status: "approved", phase: "failed", endReason: "agent_error", state: "failed", word: "실패", chipKind: "failed", chipWord: "실패" },
+  { name: "결과 성공(run 미수신)", status: "approved", resultStatus: "executed", state: "done", word: "끝", chipKind: "answered", chipWord: "끝" },
+  { name: "결과 실패(run 미수신)", status: "approved", resultStatus: "failed", state: "failed", word: "실패", chipKind: "failed", chipWord: "실패" },
+  { name: "만료", status: "expired", phase: "timed_out", endReason: "approval_expired", state: "expired", word: "만료", chipKind: "expired", chipWord: "만료" },
+] as const)("도구 승인 $name: 카드·인박스·칩이 같은 상태를 말한다", (row) => {
+  const phase = "phase" in row ? row.phase : undefined;
+  const endReason = "endReason" in row ? row.endReason : undefined;
+  const r = phase === undefined ? undefined : run({ phase, status: phase, endReason });
+  const result = "resultStatus" in row ? { status: row.resultStatus, rows: [], omittedRows: 0 } : undefined;
+  const bundle = { status: row.status, actionType: "tool_call", result };
+  const card = agentRequestBundle({
+    id: "card", channelId: "channel", authorMemberId: AGENT, type: "approval_request",
+    seq: 1, hlcTs: T, hlcCount: 0, createdAtMs: T,
+    props: { approval_id: "approval", status: row.status, action_type: "tool_call", result },
+  }, { nowMs: T, run: r })!;
+  const inbox = approvalItem({
+    id: "approval", workspaceId: "workspace", runId: "run", channelId: "channel",
+    requestedBy: AGENT, actionType: "tool_call", status: row.status,
+  }, { name: "달무리봇", isAgent: true }, "실험실", T, { run: r, result });
+  // run을 아직 받지 못했으면 전달 상태에 머물러도 같은 승인 bundle을 읽어요.
+  const chip = triggerChip([r ?? run({})], nameFor, T, { bundleFor: () => bundle });
+  expect(card.state).toBe(row.state);
+  expect(card.word).toBe(row.word);
+  expect(inbox.outcome).toBe(row.word);
+  expect(chip).toMatchObject({ kind: row.chipKind, word: row.chipWord });
+});

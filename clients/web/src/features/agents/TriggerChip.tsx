@@ -1,4 +1,4 @@
-import { Check, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion } from "lucide-react";
+import { Ban, Check, CircleAlert, CircleDot, CircleX, Clock, Eye, Hand, ShieldQuestion, type LucideIcon } from "lucide-react";
 import type { AgentRunProgress } from "@momo/core/lib/api";
 import { nextUncollectedDeadlineMs } from "@momo/core/features/agents/runException";
 import { UNKNOWN_AGENT_NAME } from "@momo/core/features/agents/turnCopy";
@@ -62,6 +62,7 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
       {mark === "alert" && <CircleAlert aria-hidden="true" className="size-3" />}
       {mark === "clock" && <Clock aria-hidden="true" className="size-3" />}
       {mark === "cross" && <CircleX aria-hidden="true" className="size-3" />}
+      {mark === "ban" && <Ban aria-hidden="true" className="size-3" />}
       {word}
     </span>
   );
@@ -74,28 +75,23 @@ function Face({ word, mark }: { word: string; mark: TriggerChipMark }) {
  * 모두 lucide다(§2.8: 손으로 그린 `<svg>`는 예외 목록 밖이면 `iconSystem.test`가 붉다). 상태 원 셋(작업 중·주의·오류)은
  * 같은 원 계열이라 한 가족으로 읽힌다.
  */
+const MARK_GLYPH: Record<TriggerChipKind, LucideIcon> = {
+  received: Eye,
+  claimed: Hand,
+  // SVG 대체 요소가 다른 글리프와 같은 기준선·줄 높이를 지켜요.
+  working: CircleDot,
+  approval: ShieldQuestion,
+  answered: Check,
+  uncollected: CircleAlert,
+  timed_out: Clock,
+  failed: CircleX,
+  declined: Ban,
+  expired: Clock,
+};
+
 function MarkGlyph({ kind }: { kind: TriggerChipKind }) {
-  const icon = "size-3";
-  switch (kind) {
-    case "received":
-      return <Eye aria-hidden="true" className={icon} />;
-    case "claimed":
-      return <Hand aria-hidden="true" className={icon} />;
-    case "working":
-      // 점도 **SVG 글리프**여야 한다: 다른 글리프와 같은 대체 요소여야 줄 상자의 높이(기준선)가 같다(`<span>` 점은 기준선이
-      // 달라 칩이 2px 낮아졌다, 실제 엔진에서 잰 값). 손으로 그린 `<svg>`는 아이콘 경계(ADR-0172)가 막으므로 lucide의 원 안의 점이다.
-      return <CircleDot aria-hidden="true" className={icon} />;
-    case "approval":
-      return <ShieldQuestion aria-hidden="true" className={icon} />;
-    case "answered":
-      return <Check aria-hidden="true" className={icon} />;
-    case "uncollected":
-      return <CircleAlert aria-hidden="true" className={icon} />;
-    case "timed_out":
-      return <Clock aria-hidden="true" className={icon} />;
-    case "failed":
-      return <CircleX aria-hidden="true" className={icon} />;
-  }
+  const Glyph = MARK_GLYPH[kind];
+  return <Glyph aria-hidden="true" className="size-3" />;
 }
 
 /**

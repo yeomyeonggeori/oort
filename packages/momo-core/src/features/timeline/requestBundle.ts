@@ -243,6 +243,10 @@ export function requestBundleState(
   if (result !== null) return result;
   const status = terminalState(input.status);
   if (status !== null) return status;
+  // 행동 승인은 결정과 실행이 같은 tx에서 끝나요. 재개한 run의 후속
+  // 실패·거부·취소가 이미 완료된 행동의 결과를 덮지 않아요.
+  if (input.status === "approved" && input.actionType === "workspace_action")
+    return "done";
   const explicitPhase = input.result?.status ?? input.status;
   if (explicitPhase === "thinking") return "thinking";
   if (explicitPhase === "running" || explicitPhase === "executing")
@@ -266,18 +270,9 @@ export function requestBundleState(
   )
     return "expired";
   if (input.status === "approved") {
-    return input.actionType === "tool_call" &&
-      (input.result?.status === "approved" ||
-        (phase !== undefined &&
-          [
-            "queued",
-            "claimed",
-            "running",
-            "awaiting_approval",
-            "paused",
-          ].includes(phase)))
-      ? "executing"
-      : "done";
+    // 승인은 실행 허가예요. 도구의 성공 결과나 run 종결이 오기 전에는
+    // run 정보가 없어도 완료를 추측하지 않아요.
+    return input.actionType === "tool_call" ? "executing" : "done";
   }
   if (input.status === "pending" || phase === "awaiting_approval")
     return "approval";

@@ -34,17 +34,11 @@ import { agentLabel, turnHubSentence, type AgentNameLookup } from "./turnCopy";
 // 「답함」이 아니다. 취소는 사람이 직접 한 일이라 알릴 새 소식이 아니므로 칩에 세지 않는다.
 // =============================================================================
 
-export type TriggerChipKind =
-  | "received"
-  | "claimed"
-  | "working"
-  | "approval"
-  | "answered"
-  | "uncollected"
-  | "timed_out"
-  | "failed"
-  | "declined"
-  | "expired";
+export const TRIGGER_CHIP_KINDS = [
+  "received", "claimed", "working", "approval", "answered",
+  "uncollected", "timed_out", "failed", "declined", "expired",
+] as const;
+export type TriggerChipKind = (typeof TRIGGER_CHIP_KINDS)[number];
 
 /**
  * 칩 글자 곁의 표지. 모양이 뜻을 말한다(색에만 기대지 않는다): 점(작업 중)·체크(답함)·느낌표(아직 받지

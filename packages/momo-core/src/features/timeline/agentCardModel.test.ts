@@ -939,9 +939,11 @@ describe("요청 묶음", () => {
         const terminal = ["succeeded", "failed", "timed_out", "cancelled"].includes(phase);
         const ending = terminal ? ({ approval_rejected: "declined", approval_expired: "expired" } as Record<string, string>)[endReason ?? ""] : undefined;
         const phaseEnd = ({ succeeded: "done", failed: "failed", cancelled: "cancelled" } as Record<string, string>)[phase];
-        const approved = actionType === "tool_call" && !terminal ? "executing" : "done";
-        const expected = status === "pending" || status === "approved"
-          ? ending ?? phaseEnd ?? (status === "approved" ? approved : "approval") : statusEnds[status];
+        const approved = actionType === "tool_call" ? "executing" : "done";
+        const expected = status === "approved" && actionType === "workspace_action"
+          ? "done"
+          : status === "pending" || status === "approved"
+            ? ending ?? phaseEnd ?? (status === "approved" ? approved : "approval") : statusEnds[status];
         const state = requestBundleState({ status, actionType, run: { phase, endReason } });
         expect(state, `${status}/${phase}/${endReason}/${actionType}`).toBe(expected);
         const face = REQUEST_BUNDLE_FACE[state];
@@ -951,6 +953,21 @@ describe("요청 묶음", () => {
     }
     seen.add(requestBundleState({}));
     expect([...seen].sort()).toEqual(Object.keys(faces).sort());
+  });
+
+  it.each([
+    ["failed", "agent_error"],
+    ["cancelled", "approval_rejected"],
+    ["cancelled", "human_cancelled"],
+  ] as const)("완료된 행동 승인은 후속 run %s/%s 뒤에도 완료로 남는다", (phase, endReason) => {
+    const card = message({
+      action_type: "workspace_action",
+      action: { id: "hosted.channels.grant", rows: [] },
+      status: "approved",
+    });
+    const model = agentRequestBundle(card, { ...context, run: { phase, endReason } });
+    expect(model).toMatchObject({ state: "done", word: "끝", sentence: "실행을 마쳤어요" });
+    expect(model?.sentence).not.toContain("다시 요청");
   });
 
   it("도구·행동 모두 코드와 result만으로 종결하고 옛 영어 본문을 한국어로 말한다", () => {
@@ -1038,7 +1055,7 @@ describe("요청 묶음", () => {
       [{ action: { id: "channel.create", rows: [] } }, "inline"], [{ action: { id: "invite.create", rows: [] } }, "open"],
       [{ action: { id: "message.pin", rows: [] } }, "open"], [{ action: { id: "new.action", rows: [] } }, "open"],
     ] as const) expect(agentRequestBundle(message(props), context)?.decisionMode).toBe(expected);
-    expect(agentRequestBundle(message({ status: "approved" }), context)?.state).toBe("done");
+    expect(agentRequestBundle(message({ status: "approved" }), context)?.state).toBe("executing");
     expect(agentRequestBundle(message({ status: "approved" }), { ...context, run: { phase: "running" } })?.state).toBe("executing");
     expect(agentRequestBundle(message({ action_type: "workspace_action", action: { id: "channel.create", rows: [] }, status: "approved" }), { ...context, run: { phase: "running" } })?.state).toBe("done");
   });
