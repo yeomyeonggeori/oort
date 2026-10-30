@@ -3129,6 +3129,123 @@ async fn a_switched_off_alias_is_not_called_at_all() {
 
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_non_owner_can_mention_a_personal_alias_in_a_human_dm_without_rolling_back_the_send() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    let alias = unique_alias("dm-personal");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let dm = s.open_dm(&s.access, s.teammate).await;
+    let called = s
+        .say(&s.other_access, dm, None, &format!("@{alias} 확인해 줘"))
+        .await;
+    assert_eq!(
+        s.skip_reason(called, agent).await.as_deref(),
+        Some("owner_only_non_owner")
+    );
+    assert_eq!(
+        s.spoken_by(agent).await.len(),
+        1,
+        "the alias posts its existing owner-only notice"
+    );
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
+    let persisted: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM message WHERE id=$1 AND channel_id=$2)")
+            .bind(called)
+            .bind(dm)
+            .fetch_one(&s.su)
+            .await
+            .unwrap();
+    assert!(
+        persisted,
+        "the human's send commits together with its notice"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_personal_session_in_a_human_dm_keeps_its_card_after_the_alias_is_disabled() {
+    let _lock = test_lock().await;
+    for status in ["suspended", "deleted"] {
+        let s = stage(true).await;
+        s.host_online(s.host, true).await;
+        let alias = unique_alias("dm-personal");
+        let agent = s.on(&s.access, "claude_code", &alias).await;
+        let dm = s.open_dm(&s.access, s.teammate).await;
+        let origin = s
+            .say(&s.access, dm, None, &format!("@{alias} 빌드 봐 줘"))
+            .await;
+        let mut req = s.req();
+        req.channel = dm;
+        req.agent = Some(agent);
+        req.origin = Some(origin);
+        let (code, body, _) = s.spawn(&req).await;
+        assert_eq!(
+            code, 201,
+            "the owner can call the persona in a human DM: {body}"
+        );
+        let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+        let session = s.host_runs(control, dm, &req).await;
+        let ((author, _, _), _) = s.card_and_thread(session).await;
+        assert_eq!(author, agent);
+        let seated: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM membership WHERE channel_id=$1 AND member_id=$2 AND left_at IS NULL)")
+            .bind(dm).bind(agent).fetch_one(&s.su).await.unwrap();
+        assert!(!seated, "a legacy persona is not a consent-managed seat");
+        sqlx::query("UPDATE member SET status=$2::member_status WHERE id=$1")
+            .bind(agent)
+            .bind(status)
+            .execute(&s.su)
+            .await
+            .unwrap();
+        // PATCH -> event/idle -> update_session_card_props_in_tx -> UPDATE message.
+        s.host_reports(session, dm).await;
+        let card_status: String = sqlx::query_scalar("SELECT m.props->>'status' FROM message m JOIN work_session s ON s.root_message_id=m.id WHERE s.id=$1")
+            .bind(session).fetch_one(&s.su).await.unwrap();
+        assert_eq!(
+            card_status, "idle",
+            "the historical card is updated after {status}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn a_human_dm_card_keeps_updating_after_its_member_alias_is_disabled() {
+    let _lock = test_lock().await;
+    for status in ["suspended", "deleted"] {
+        let s = stage(true).await;
+        s.host_online(s.host, true).await;
+        let alias = unique_alias("legacy-dm");
+        let agent = s.on(&s.access, "claude_code", &alias).await;
+        // This legacy 1:1 has an active agent membership at creation, so the
+        // old trigger reaches the later UPDATE before rejecting its status.
+        let dm = s.open_dm(&s.access, agent).await;
+        let origin = s.say(&s.access, dm, None, "빌드 봐 줘").await;
+        let mut req = s.req();
+        req.channel = dm;
+        req.agent = Some(agent);
+        req.origin = Some(origin);
+        let (code, body, _) = s.spawn(&req).await;
+        assert_eq!(code, 201, "{body}");
+        let control = Uuid::parse_str(body["workControl"]["id"].as_str().unwrap()).unwrap();
+        let session = s.host_runs(control, dm, &req).await;
+        sqlx::query("UPDATE member SET status=$2::member_status WHERE id=$1")
+            .bind(agent)
+            .bind(status)
+            .execute(&s.su)
+            .await
+            .unwrap();
+        s.host_reports(session, dm).await;
+        let card_status: String = sqlx::query_scalar("SELECT m.props->>'status' FROM message m JOIN work_session s ON s.root_message_id=m.id WHERE s.id=$1")
+            .bind(session).fetch_one(&s.su).await.unwrap();
+        assert_eq!(
+            card_status, "idle",
+            "a legacy card still updates after {status}"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
 async fn a_called_session_speaks_as_the_alias_where_it_was_called() {
     let _lock = test_lock().await;
     let s = stage(true).await;
@@ -3397,4 +3514,55 @@ async fn invisible_and_carriage_return_text_is_refused_before_the_nonce_is_spent
         0,
         "refused before the signature spent a nonce"
     );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn an_unseated_personal_alias_in_an_admitted_dm_skips_notice_and_refuses_spawn_cleanly() {
+    let _lock = test_lock().await;
+    let s = stage(true).await;
+    s.host_online(s.host, true).await;
+    let alias = unique_alias("admitted-personal");
+    let agent = s.on(&s.access, "claude_code", &alias).await;
+    let dm = s.open_dm(&s.access, s.teammate).await;
+    // Same canonical marker written when unanimous consent makes a group DM.
+    sqlx::query("UPDATE channel SET dm_key='admitted:' || id::text WHERE id=$1")
+        .bind(dm)
+        .execute(&s.su)
+        .await
+        .unwrap();
+    let other = s
+        .say(&s.other_access, dm, None, &format!("@{alias} 확인해 줘"))
+        .await;
+    assert_eq!(
+        s.skip_reason(other, agent).await.as_deref(),
+        Some("owner_only_non_owner")
+    );
+    assert!(
+        s.spoken_by(agent).await.is_empty(),
+        "no unseated alias notice is inserted"
+    );
+    let persisted: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM message WHERE id=$1)")
+        .bind(other)
+        .fetch_one(&s.su)
+        .await
+        .unwrap();
+    assert!(
+        persisted,
+        "the human send commits even though the alias cannot speak"
+    );
+    let origin = s
+        .say(&s.access, dm, None, &format!("@{alias} 빌드 봐 줘"))
+        .await;
+    let mut req = s.req();
+    req.channel = dm;
+    req.agent = Some(agent);
+    req.origin = Some(origin);
+    let (status, body, _) = s.spawn(&req).await;
+    assert_eq!(
+        status, 409,
+        "personal spawn has a deliberate refusal: {body}"
+    );
+    assert_eq!(code(&body), Some("dm_agent_consent_required"));
+    assert_eq!(s.runs_and_jobs().await, (0, 0));
 }

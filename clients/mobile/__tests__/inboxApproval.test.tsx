@@ -781,6 +781,22 @@ describe('기한이 지난 요청 (2R M4)', () => {
 });
 
 describe('영수증 (2R H3/M6)', () => {
+  it('이미 취소된 승인의 200 영수증은 취소를 말한다 (ADR-0217)', async () => {
+    installFetch({
+      decision: approvalId => jsonResponse(200, receipt(approvalId, 'cancelled')),
+    });
+    await openPendingRow();
+    armAndCommit(PENDING, 'approve');
+    await waitForSettled(() =>
+      expect(screen.getByTestId(`decision-receipt-approval:${PENDING}`)).toHaveTextContent(
+        '이 요청은 취소되어 있었어요.',
+      ),
+    );
+    expect(screen.getByTestId(`decision-receipt-approval:${PENDING}`)).not.toHaveTextContent(
+      '결정을 보냈어요.',
+    );
+  });
+
   it('두 번째 결정이 첫 번째 답을 덮어쓰지 않는다', async () => {
     const SECOND = 'dddddddd-1111-4111-8111-dddddddddddd';
     installFetch({

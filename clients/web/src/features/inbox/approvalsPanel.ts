@@ -179,6 +179,9 @@ function supersededCopy(outcome: DecisionOutcome): string {
 }
 
 export function decisionNote(outcome: DecisionOutcome): DecisionNote {
+  if (outcome.kind === "committed" && outcome.status === "cancelled") {
+    return { tone: "neutral", text: supersededCopy(outcome) };
+  }
   if (outcome.kind === "superseded") {
     return { tone: "neutral", text: supersededCopy(outcome) };
   }

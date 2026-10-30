@@ -729,8 +729,11 @@ pub async fn require_principal(
     if let Some(claimed_workspace) = agent_bearer_workspace_id(&raw_token) {
         let principal =
             authenticate_agent(&state, &raw_token, claimed_workspace, &method, &path).await?;
+        let agent = principal.member_id;
         request.extensions_mut().insert(principal);
-        return Ok(next.run(request).await);
+        return Ok(momo_db::tenant::REQUEST_AGENT_MEMBER
+            .scope(agent, next.run(request))
+            .await);
     }
     // ADR-0216 (#4660): a developer envelope — `momo_dev_v1…` (card, access) or
     // `momo_devr_v1…` (refresh), well-formed or not — is the developer door's alone.
@@ -829,8 +832,15 @@ pub async fn require_principal(
         }
         None => {}
     }
+    let agent_member_id = (principal.kind == PrincipalKind::Agent).then_some(principal.member_id);
     request.extensions_mut().insert(principal);
-    Ok(next.run(request).await)
+    Ok(if let Some(agent) = agent_member_id {
+        momo_db::tenant::REQUEST_AGENT_MEMBER
+            .scope(agent, next.run(request))
+            .await
+    } else {
+        next.run(request).await
+    })
 }
 
 /// The `MomoHost` branch: verify the v2 request signature and install a

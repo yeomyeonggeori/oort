@@ -31,7 +31,8 @@ use momo_agent::actions::{
     INVITE_MAX_USES_CEILING, INVITE_PROPOSABLE_ROLES,
 };
 use momo_auth::{
-    active_hosted_connection_in_tx, lock_active_hosted_connection_in_tx,
+    active_hosted_connection_in_tx, hosted_action_connection_in_tx,
+    lock_active_hosted_connection_in_tx, lock_hosted_connection_in_tx, HostedActionConnection,
     MAX_HOSTED_APPROVED_CHANNELS,
 };
 
@@ -2012,10 +2013,10 @@ pub enum PinScope {
 /// [`resolve_pin_target_in_tx`] with its channel rule named (see [`PinScope`]).
 ///
 /// `covering_connection` names **which connection decides what is "covered"**. `None` is the
-/// proposer's own live connection, found by its fresh credential — right for a card a person asked
-/// for, whose agent was just called. `Some(id)` is a connection the caller has already proved to
+/// proposer's own live connection, found by its fresh credential at proposal time.
+/// `Some(id)` is a connection the caller has already proved to
 /// stand ([`momo_auth::hosted_connection_stands_in_tx`]) and is the one to read: the decision of a
-/// card an agent raised unasked, which waited for its owner past the lifetime of the OAuth access
+/// card, which waited for its approver past the lifetime of the OAuth access
 /// token it was raised under, must be judged by the connection the card stands on and not by
 /// whether the agent happens to hold a fresh credential at the moment a person taps (security
 /// review of #4704 PR B, round 2, H1).
@@ -2353,6 +2354,19 @@ pub async fn resolve_stored_action_in_tx(
     now_ms: i64,
     approval_id: Uuid,
 ) -> ResolveOutcome<ResolvedAction> {
+    // A person's approval can outlive the access token used to raise the card.
+    // Keep hosted-unavailable separate from managed, and share the proved
+    // connection with every coverage read below, just as unasked cards do.
+    let covering_connection =
+        match hosted_action_connection_in_tx(conn, workspace_id, proposer_member_id).await? {
+            HostedActionConnection::Managed => None,
+            HostedActionConnection::Standing(connection) => Some(connection),
+            HostedActionConnection::Unavailable => {
+                return Ok(Err(ActionRejection::new(
+                    "hosted connection is unavailable",
+                )))
+            }
+        };
     resolve_action_with_origin_in_tx(
         conn,
         workspace_id,
@@ -2364,14 +2378,14 @@ pub async fn resolve_stored_action_in_tx(
         ArgsOrigin::Stored,
         Some(approval_id),
         CardAudience::RunChannel,
-        None,
+        covering_connection,
     )
     .await
 }
 
 /// The core of every resolution above. `covering_connection` is [`resolve_pin_target_scoped_in_tx`]'s:
 /// `None` finds the proposer's live connection by its fresh credential, `Some(id)` reads the one the
-/// caller has proved (the decision of an unasked card).
+/// caller has proved (a human decision, requested or unasked).
 #[allow(clippy::too_many_arguments)]
 pub async fn resolve_action_with_origin_in_tx(
     conn: &mut PgConnection,
@@ -2605,9 +2619,14 @@ pub async fn resolve_action_with_origin_in_tx(
             // connection before channel and membership rows). Only the
             // proposer's OWN live connection can be found; no argument names
             // another agent's.
-            let Some((connection_id, approved_before)) =
+            let connection_state = if let Some(connection_id) = covering_connection {
+                lock_hosted_connection_in_tx(conn, workspace_id, proposer_member_id, connection_id)
+                    .await?
+                    .map(|count| (connection_id, count))
+            } else {
                 lock_active_hosted_connection_in_tx(conn, workspace_id, proposer_member_id).await?
-            else {
+            };
+            let Some((connection_id, approved_before)) = connection_state else {
                 return Ok(Err(ActionRejection::new("no live hosted connection")));
             };
             let approved: Vec<Uuid> = momo_db::sqlx::query_scalar(

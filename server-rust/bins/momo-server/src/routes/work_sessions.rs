@@ -639,6 +639,20 @@ async fn create_in_tx(
     };
     let persona_member_id = call.and_then(|call| call.persona_member_id);
     let card_author_member_id = persona_member_id.unwrap_or(session_owner_member_id);
+    if !momo_messaging::dm::dm_agent_can_speak_in_tx(
+        conn,
+        workspace_id,
+        channel_id,
+        card_author_member_id,
+    )
+    .await?
+    {
+        return Ok(Err(ApiError::coded(
+            StatusCode::CONFLICT,
+            "dm_agent_consent_required",
+            "this agent cannot start work in this group DM without consent",
+        )));
+    }
     let session_id = allocate_uuid_v7(conn).await?;
     let props = card_props(session_id, tool, label, "running", None, None, None, None);
 
