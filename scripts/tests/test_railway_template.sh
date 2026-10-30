@@ -268,7 +268,7 @@ for mutation in start-bare-api start-bare-relay start-no-exec predeploy-raw \
   api-chown-skipped push-key-reassigned predeploy-run-redefined relay-as-root \
   relay-superuser-dsn sender-cent-api-key hermes-no-gate hermes-gate-nonfatal \
   hermes-public hermes-public-string hermes-extra-key hermes-gate-sha-stale \
-  hermes-no-sha-check hermes-image-floating hermes-oort-secret hermes-cors-open \
+  hermes-no-sha-check hermes-guard-sha-stale hermes-no-guard-install hermes-image-floating hermes-oort-secret hermes-cors-open \
   hermes-key-literal api-hermes-wildcard-host api-hermes-attest-dropped \
   worker-hermes-attest api-relay-key-chat-key api-relay-url-wrong worker-relay-key hermes-relay-key-chat-key hermes-relay-stale-sha \
   hermes-relay-key-not-unset hermes-relay-unconditional \
@@ -286,12 +286,22 @@ pass "catalog: start commands = canonical command lists (operators, order, value
 # ①b #4072 — the Hermes default config and the tool-lock gate's own rules. The
 # catalog above pins the start command to these files' sha256, so a gate that
 # is wrong here is wrong in both shapes. Stdlib only (no PyYAML skip).
-(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py infra/hermes/test_login_relay.py) \
+(cd "$ROOT" && python3 -m unittest infra/hermes/test_default_config.py infra/hermes/test_lockgate_connectors.py infra/hermes/test_image_guard.py infra/hermes/test_lockgate_image_guard.py infra/hermes/test_login_relay.py) \
   >"$TMP_ROOT/hermes-unit.out" 2>&1 || {
   cat "$TMP_ROOT/hermes-unit.out" >&2
   fail "infra/hermes offline tests failed"
 }
-pass "hermes: default config (24 toolsets off, no model, no connector), gate rules + volume .env, login relay sidecar (fixed argv, URL allow-list, paste rebuild, key/env separation, process-group kill; fake CLI), offline"
+pass "hermes: default config (22 toolsets off, no model, no connector), gate rules + volume .env, image guard plugin (accept/refuse table, zero network or file access) + its pinned files, config, SSRF switches and canary, login relay sidecar (fixed argv, URL allow-list, paste rebuild, key/env separation, process-group kill; fake CLI), offline"
+
+# ①c #4820 review — the REAL pinned Hermes image (the digest compose and railway.json share): the real lockgate.py, the oort
+# image guard plugin and Hermes' own dispatch path with NO network, the start-command text of compose and railway.json up to
+# the point where they would exec Hermes, and a live gateway boot whose `report` must stay clean. ~40 s, docker only.
+HERMES_GUARD_PROOF="$TMP_ROOT/hermes-image-guard"
+bash "$ROOT/scripts/tests/test_hermes_image_guard_docker.sh" "$HERMES_GUARD_PROOF" >"$TMP_ROOT/hermes-image-guard.out" 2>&1 || {
+  cat "$TMP_ROOT/hermes-image-guard.out" >&2
+  fail "in-image proof of the oort image guard failed (scripts/tests/test_hermes_image_guard_docker.sh)"
+}
+pass "hermes image guard in the pinned image, no network: gate passes with the plugin loaded by Hermes itself and a canary (10 refused before the tool, 4 accepted); missing/edited/widened plugin, plugins.enabled, SAFE_MODE, proxy, private-url switches and a BOM .env are refused; compose and railway start commands reach exec, an edited or missing guard variable stops them before the gate; a live gateway boots with a clean report"
 
 # ---------------------------------------------------------------------------
 # ②b #2066 R2 — T2 has no env file, so the `--ensure-managed-keys` backfill
