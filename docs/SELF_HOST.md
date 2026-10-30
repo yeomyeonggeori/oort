@@ -455,7 +455,8 @@ it none of these exist and no Hermes is started.
   network only, with no published port. It runs `infra/hermes/lockgate.py gate`
   before the Hermes entrypoint (chat, Codex subscription search and Codex
   subscription image generation allow-list, without `web_extract`; connectors keep
-  all `web` tools and `image_gen` off): a failing
+  all `web` tools and `image_gen` off) and checks the oort image guard plugin, which
+  refuses image addresses and file paths before the tool runs: a failing
   gate means a container that restarts and never listens, so the probe
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate

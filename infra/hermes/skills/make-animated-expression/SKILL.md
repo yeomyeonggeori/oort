@@ -28,7 +28,7 @@ If you do not have an image-generation tool (`image_generate`), answer exactly: 
 ## Step 2 - draw one still or one sprite sheet
 
 - Call the image tool with a plain prompt: one character, sticker style, centered, flat colors, plain solid background, no text, no logo, no watermark, `aspect_ratio: "square"`. Describe what you saw in the original in words. You make a new picture; you do not copy a person's photo.
-- Never put an external web address in any image-tool argument. Use no `image_url` or `reference_image_urls` unless oort handed you that exact address in this conversation (it does not today).
+- Never use `image_url` or `reference_image_urls`. A guard in front of the image tool refuses every web address, file path and anything that is not a small inline picture (`data:image/png|jpeg|webp|gif;base64,` up to 4 MiB) before the tool runs, and the refusal names the argument. If you see it, call the tool again with the text prompt only.
 - The tool only returns a file path. If your runtime delivers files with `MEDIA:<path>`, put that line, with the exact path from the tool result, alone on its own line in your final answer so oort can receive the picture. Never try to write the picture out as base64.
 - Sprite sheet (optional): draw 2, 3 or 4 poses of the SAME character on ONE square picture in equal cells, same size, same ground line, no grid lines or labels. 2 poses = 2 columns x 1 row, 3 poses = 3 x 1, 4 poses = 2 x 2. Cells are numbered 0, 1, 2, 3 from left to right, then top to bottom.
 
