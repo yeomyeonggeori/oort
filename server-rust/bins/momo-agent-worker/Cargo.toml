@@ -28,6 +28,7 @@ path = "src/main.rs"
 momo-agent = { path = "../../crates/momo-agent" }
 momo-workspace-actions = { path = "../../crates/momo-workspace-actions" }
 momo-db = { path = "../../crates/momo-db" }
+momo-drive = { path = "../../crates/momo-drive" }
 momo-messaging = { path = "../../crates/momo-messaging" }
 momo-outbox = { path = "../../crates/momo-outbox" }
 momo-settings = { path = "../../crates/momo-settings" }

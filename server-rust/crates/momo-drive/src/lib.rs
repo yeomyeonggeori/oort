@@ -503,6 +503,19 @@ pub async fn build_archive(config: &DriveBackendConfig) -> Arc<dyn DriveArchive>
     }
 }
 
+/// Attachment reader for the team AI. Opening a local writer here would clear
+/// the API's pending uploads and require a writable volume; readers do neither.
+pub async fn build_archive_reader(config: &DriveBackendConfig) -> Arc<dyn DriveArchive> {
+    if config.mode == LOCAL_BACKEND {
+        match LocalDriveArchive::open_reader(config.local_dir.as_deref()) {
+            Ok(archive) => Arc::new(archive),
+            Err(_) => Arc::new(UnavailableDriveArchive),
+        }
+    } else {
+        build_archive(config).await
+    }
+}
+
 fn local_or_unavailable(config: &DriveBackendConfig) -> Arc<dyn DriveArchive> {
     let base = if config.local_base_url.trim().is_empty() {
         config.stub_base_url.as_str()

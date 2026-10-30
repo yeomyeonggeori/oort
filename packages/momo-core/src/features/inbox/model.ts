@@ -524,6 +524,7 @@ const WORKSPACE_ACTION_LABELS: Record<string, string> = {
   "workspace.settings.update": "워크스페이스 설정 바꾸기",
   // ADR-0186 증보 v4 (#4385·#4394): 서버 레지스트리 title 과 같은 말.
   "member.avatar.set": "내 프로필 사진 바꾸기",
+  "member.display_name.set": "내 이름 바꾸기",
   // ADR-0201 증보 v2 H6-1: 도우미만 제안하는 설정 액션 셋.
   "workspace.unfurl.update": "링크 미리보기 설정 바꾸기",
   // 인자가 `{enabled?: false, paused?: boolean}` 이라 같은 id 가 멈춤과 **재개**를 둘 다

@@ -2202,6 +2202,15 @@ async fn action_propose(
                     "sizeBytes": prepared.image.bytes.len(),
                     "origin": prepared.origin,
                 }));
+                if let Some(preview) = avatar_preview.as_mut() {
+                    momo_workspace_actions::profile_avatar::add_previous_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        target,
+                        preview,
+                    )
+                    .await?;
+                }
             }
             // Backstop for the invariant the handler promises: no raw avatar input
             // (bytes, a file id the agent chose) reaches the stored arguments.
@@ -2353,6 +2362,7 @@ async fn action_propose(
                         let mut detail = preview.clone();
                         if let Some(object) = detail.as_object_mut() {
                             object.remove("kind");
+                            object.remove("previousAvatarUrl");
                             if let Some(sha) = object.get("sha256").and_then(Value::as_str) {
                                 let prefix = sha.chars().take(12).collect::<String>();
                                 object.remove("sha256");
@@ -2531,13 +2541,27 @@ async fn prepare_avatar(
         ..
     } = args
     {
-        return prepare_member_avatar(state, caller, raw_handle, *attachment_id).await;
+        return prepare_member_avatar(
+            state,
+            caller,
+            raw_handle,
+            &crate::routes::actions::AvatarIntent::Attachment(*attachment_id),
+        )
+        .await;
     }
-    let crate::routes::actions::ActionArgs::AgentProfileUpdate { avatar, .. } = args else {
-        return Ok(None);
+    let avatar = match args {
+        crate::routes::actions::ActionArgs::AgentProfileUpdate { avatar, .. }
+        | crate::routes::actions::ActionArgs::MemberAvatarSet { avatar, .. } => avatar,
+        _ => return Ok(None),
     };
     match avatar {
         crate::routes::actions::AvatarIntent::Generated(encoded) => {
+            if matches!(
+                args,
+                crate::routes::actions::ActionArgs::MemberAvatarSet { .. }
+            ) {
+                return prepare_member_avatar(state, caller, raw_handle, avatar).await;
+            }
             // Authorise before spending decode capacity (A1 review M1): a caller
             // without the propose scope must not be able to occupy the shared permits.
             let allowed = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
@@ -2572,6 +2596,8 @@ async fn prepare_avatar(
         crate::routes::actions::AvatarIntent::Attachment(attachment_id) => {
             let attachment_id = *attachment_id;
             let max = momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT;
+            let raw_handle = raw_handle.to_string();
+            let secret = state.agent_port.envelope_secret().to_string();
             let found = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
                 Box::pin(async move {
                     let identity =
@@ -2581,11 +2607,46 @@ async fn prepare_avatar(
                             Ok(identity) => identity,
                             Err(_) => return Ok(None),
                         };
-                    momo_messaging::find_visible_image_attachment_in_tx(
+                    let visible = momo_messaging::find_visible_image_attachment_in_tx(
                         conn,
                         caller.workspace_id,
                         caller.agent_member_id,
                         &identity.approved_channel_ids,
+                        attachment_id,
+                        max as i64,
+                    )
+                    .await?;
+                    if visible.is_some() {
+                        return Ok(visible);
+                    }
+                    // #4791: a photo the requester sent in this run's conversation
+                    // also works in their DM. No routing/DM scope is widened here:
+                    // the live connection and signed lease still bind this very run.
+                    let Ok(handle) = bound_handle(&identity, caller, &raw_handle, &secret) else {
+                        return Ok(None);
+                    };
+                    let Some((requester, channel)) = momo_messaging::requester_of_run_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        handle.run_id,
+                        caller.agent_member_id,
+                    )
+                    .await?
+                    else {
+                        return Ok(None);
+                    };
+                    if channel != handle.channel_id
+                        || !momo_messaging::is_channel_member(conn, channel, caller.agent_member_id)
+                            .await?
+                        || !momo_messaging::is_channel_member(conn, channel, requester).await?
+                    {
+                        return Ok(None);
+                    }
+                    momo_messaging::find_requester_attachment_in_tx(
+                        conn,
+                        caller.workspace_id,
+                        requester,
+                        channel,
                         attachment_id,
                         max as i64,
                     )
@@ -2636,11 +2697,16 @@ async fn prepare_member_avatar(
     state: &AppState,
     caller: HostedCaller,
     raw_handle: &str,
-    attachment_id: Uuid,
+    avatar: &crate::routes::actions::AvatarIntent,
 ) -> Result<Option<PreparedAvatar>, ToolFailure> {
     let max = momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_ATTACHMENT;
     let secret = state.agent_port.envelope_secret().to_string();
     let raw_handle = raw_handle.to_string();
+    let attachment_id = match avatar {
+        crate::routes::actions::AvatarIntent::Attachment(id) => Some(*id),
+        crate::routes::actions::AvatarIntent::Generated(_) => None,
+        _ => return Err(ToolFailure::InvalidArguments),
+    };
     let looked_up = momo_db::with_tenant_tx(&state.pool, caller.workspace_id, move |conn| {
         Box::pin(async move {
             let identity =
@@ -2692,23 +2758,28 @@ async fn prepare_member_avatar(
                     momo_agent::actions::MEMBER_AVATAR_RATE_LIMITED_REASON,
                 )));
             }
-            let source = momo_messaging::find_requester_attachment_in_tx(
-                conn,
-                caller.workspace_id,
-                person,
-                channel_id,
-                attachment_id,
-                max as i64,
-            )
-            .await?;
-            Ok(match source {
-                Some(source) => Ok((person, source)),
-                None => Err((
-                    ToolFailure::InvalidArguments,
-                    Some(person),
-                    "attachment_not_available",
-                )),
-            })
+            let source = if let Some(attachment_id) = attachment_id {
+                let source = momo_messaging::find_requester_attachment_in_tx(
+                    conn,
+                    caller.workspace_id,
+                    person,
+                    channel_id,
+                    attachment_id,
+                    max as i64,
+                )
+                .await?;
+                let Some(source) = source else {
+                    return Ok(Err((
+                        ToolFailure::InvalidArguments,
+                        Some(person),
+                        "attachment_not_available",
+                    )));
+                };
+                Some(source)
+            } else {
+                None
+            };
+            Ok(Ok((person, source)))
         })
     })
     .await
@@ -2723,6 +2794,18 @@ async fn prepare_member_avatar(
         }
     };
     let fetched = async {
+        if let crate::routes::actions::AvatarIntent::Generated(encoded) = avatar {
+            use base64::Engine as _;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(encoded)
+                .map_err(|_| "invalid_base64")?;
+            return process_avatar_bytes_coded(
+                bytes,
+                momo_messaging::AGENT_AVATAR_IN_MAX_BYTES_GENERATED,
+            )
+            .await;
+        }
+        let source = source.ok_or("attachment_not_available")?;
         let content = state
             .drive
             .file_content(&source.drive_file_id, source.size_bytes)
@@ -2743,7 +2826,11 @@ async fn prepare_member_avatar(
     match fetched {
         Ok(image) => Ok(Some(PreparedAvatar {
             image,
-            origin: "attachment",
+            origin: if attachment_id.is_some() {
+                "attachment"
+            } else {
+                "generated"
+            },
             for_member: Some(person),
         })),
         Err(reason) => {

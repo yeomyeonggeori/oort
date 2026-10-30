@@ -622,6 +622,12 @@ mod tests {
                 "{}: minProperties differs between the tool and the catalog",
                 action.id
             );
+            assert_eq!(
+                branch.get("oneOf"),
+                registry_args.get("oneOf"),
+                "{}: exclusive image sources differ",
+                action.id
+            );
             let required = required_of(&registry_args);
             assert_eq!(
                 required_of(branch),
