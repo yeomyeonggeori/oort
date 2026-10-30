@@ -1349,11 +1349,10 @@ async fn dm_expiry_and_stall_lines_run_as_the_production_notifier_without_member
         .execute(&db.su)
         .await
         .unwrap();
-    let approval = Uuid::new_v4();
-    sqlx::query("INSERT INTO approval(id,workspace_id,run_id,channel_id,requested_by,action_type,payload,status,expires_at) \
-        VALUES($1,$2,$3,$4,$5,'workspace_action','{\"action\":{\"id\":\"channel.create\",\"args\":{}}}','pending',now()-interval '1 minute')")
-        .bind(approval).bind(seeded.workspace).bind(seeded.parked_run).bind(seeded.channel).bind(seeded.agent)
-        .execute(&db.su).await.unwrap();
+    // #3982: expiry settles the request card in place (ADR-0186 v6 R-b) instead of writing a
+    // result line, so an approval without a card would prove no write at all. Seed the DM card
+    // through the production app role, as the admitted agent.
+    let (approval, card) = add_dm_expiry_card(&db, &seeded, seeded.parked_run).await;
     let stalled = Uuid::new_v4();
     sqlx::query("INSERT INTO agent_run(id,workspace_id,agent_member_id,channel_id,status,input,idempotency_key,started_at,updated_at) \
         VALUES($1,$2,$3,$4,'running','{}',$5,now()-interval '5 hours',now()-interval '4 hours')")
@@ -1403,6 +1402,19 @@ async fn dm_expiry_and_stall_lines_run_as_the_production_notifier_without_member
         .await
         .unwrap();
     assert_eq!(status, "expired");
+    let card_status: Option<String> =
+        sqlx::query_scalar("SELECT props->>'status' FROM message WHERE id=$1")
+            .bind(card)
+            .fetch_one(&db.su)
+            .await
+            .unwrap();
+    assert_eq!(
+        card_status.as_deref(),
+        Some("expired"),
+        "the notifier settles the DM card in place"
+    );
+    // One durable agent-authored message per run: the settled card for the expiry, the
+    // timeout line for the stall.
     for run in [seeded.parked_run, stalled] {
         let status: String = sqlx::query_scalar("SELECT status::text FROM agent_run WHERE id=$1")
             .bind(run)
