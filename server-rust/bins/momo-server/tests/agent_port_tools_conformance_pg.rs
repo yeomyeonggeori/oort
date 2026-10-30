@@ -32,6 +32,9 @@ const LEGACY_VERSION: &str = "2025-11-25";
 const PATH: &str = "/v1/mcp/agent-port";
 const AUDIENCE: &str = "/v1/mcp/agent-port";
 
+#[path = "agent_port_tools/hosted_approval_connection.rs"]
+mod hosted_approval_connection;
+
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to an isolated PostgreSQL 18 URL")
 }
