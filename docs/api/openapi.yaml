@@ -17021,10 +17021,17 @@ components:
         authority — the install carries no grant and no token (D1-A, D2); each
         member connects for themselves. Its result `ref` is the same
         `{type: workspace_settings, id: <workspace id>}`.
-        `member.avatar.set` (`{attachmentId}`, `requesting_member`; ADR-0186
+        `member.display_name.set` (`{displayName}`, `requesting_member`; ADR-0186
+        amendment v7, #4791) changes only the human who started the run, with
+        that human's approval. It reuses PATCH /members/me normalization,
+        rename, broadcast and audit. Handle and past mention text stay unchanged.
+        `member.avatar.set` (`{attachmentId}` or
+        `{avatar:{source:generated,dataBase64}}`, `requesting_member`; ADR-0186
         증보 2026-10-25 v4, #4385) lets an agent propose that **the person who
         called it** wear a picture **that person attached in the same
-        conversation** as their own profile picture. There is no target
+        conversation**, or a generated/retrieved PNG/JPEG/WebP (strict base64,
+        <=44000 decoded bytes), as their own profile picture. Both team AI and
+        Agent Port offer all four name/photo changes (human self and agent). There is no target
         argument: the person is the author of the message that started the
         run, derived by the server. Only that person can approve it (not an
         admin, not the agent's owner); the card shows the staged image
@@ -17051,7 +17058,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
 
     InitiativeActionId:
       type: string

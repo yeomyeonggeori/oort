@@ -399,6 +399,7 @@ impl ResolvedTransport {
 
 pub struct AgentWorker {
     pool: PgPool,
+    drive: Arc<dyn momo_drive::DriveArchive>,
     provider: Arc<dyn ChatProvider>,
     /// The OAuth token endpoint client (ADR-0147 결정 2). A seam, so the
     /// conformance suite can point it at its own server rather than the internet.
@@ -437,9 +438,22 @@ impl AgentWorker {
             config.request_timeout,
             config.egress.clone(),
         ));
-        Ok(AgentWorker::with_refresher(
-            pool, provider, refresher, config,
-        ))
+        let value = |key: &str| std::env::var(key).ok().filter(|v| !v.trim().is_empty());
+        let drive = momo_drive::build_archive_reader(&momo_drive::DriveBackendConfig {
+            mode: value("MOMO_DRIVE_ARCHIVE_BACKEND")
+                .or_else(|| value("MOMO_DRIVE_BACKEND"))
+                .unwrap_or_default()
+                .trim()
+                .to_lowercase(),
+            sa_key_path: value("MOMO_DRIVE_SA_KEY_PATH"),
+            shared_drive_id: value("MOMO_DRIVE_SHARED_DRIVE_ID"),
+            local_dir: value("MOMO_DRIVE_LOCAL_DIR"),
+            // Read-only use; no upload capability is minted by the worker.
+            stub_base_url: String::new(),
+            local_base_url: String::new(),
+        })
+        .await;
+        Ok(AgentWorker::with_refresher(pool, provider, refresher, config).with_drive(drive))
     }
 
     /// Build from an existing pool + provider (conformance tests), with the real
@@ -464,6 +478,7 @@ impl AgentWorker {
         let config_memory = config.memory.clone();
         AgentWorker {
             pool,
+            drive: Arc::new(momo_drive::UnavailableDriveArchive),
             provider,
             refresher,
             config,
@@ -482,6 +497,11 @@ impl AgentWorker {
     /// is otherwise built from `MEMORY_EMBED_*` and loads lazily.
     pub fn with_embed_service(mut self, service: embed::EmbedService) -> AgentWorker {
         self.embed = service;
+        self
+    }
+
+    pub fn with_drive(mut self, drive: Arc<dyn momo_drive::DriveArchive>) -> AgentWorker {
+        self.drive = drive;
         self
     }
 
