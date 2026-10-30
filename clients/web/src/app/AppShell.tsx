@@ -1,3 +1,4 @@
+import { TeamExpressionsProvider } from "@/features/expressions/ExpressionsProvider";
 import { useCallback, useEffect, useRef, useState, type FocusEvent } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import type { LoginResponse, Member } from "@momo/core/lib/api";
@@ -337,6 +338,7 @@ export function AppShell({
         replaceSessionMember,
       }}
     >
+      <TeamExpressionsProvider>
       {/* app-shell is the named two-pane grid from tokens.css (sidebar --w-sidebar,
        * viewport height), so the shell needs no arbitrary grid-cols value. The
        * switcher is a portalled dialog and deliberately sits outside that grid.
@@ -534,6 +536,7 @@ export function AppShell({
       </AddWorkspaceProvider>
       </CreateChannelProvider>
       </ShellNavProvider>
+      </TeamExpressionsProvider>
     </SessionProvider>
   );
 }

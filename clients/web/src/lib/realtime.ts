@@ -1,3 +1,5 @@
+import type { ExpressionChanged } from "@momo/core/features/expressions/types";
+import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
 import { Centrifuge, type Subscription } from "centrifuge";
 import { fetchRealtimeToken } from "@momo/core/lib/api";
 import {
@@ -133,6 +135,13 @@ export function resolveSpikeRealtimeUrl(
     /* leave malformed URLs untouched */
   }
   return url;
+}
+
+type ExpressionWatcher = (workspaceId: string, changed: (frame: ExpressionChanged) => void, resync: () => void) => () => void;
+const expressionWatchers = new WeakMap<RealtimeHandle, ExpressionWatcher>();
+/** ADR-0218: a dedicated, subscribe-proxied workspace catalogue rail. */
+export function watchExpressionChanges(handle: RealtimeHandle, workspaceId: string, changed: (frame: ExpressionChanged) => void, resync: () => void): () => void {
+  return expressionWatchers.get(handle)?.(workspaceId, changed, resync) ?? (() => {});
 }
 
 export function createRealtime(
@@ -647,7 +656,7 @@ export function createRealtime(
     );
   }
 
-  return {
+  const handle: RealtimeHandle = {
     subscribeInbox,
     subscribeScheduled,
     subscribeWorkHostNotices,
@@ -664,8 +673,21 @@ export function createRealtime(
       client.connect();
     },
     dispose: () => {
+      expressionWatchers.delete(handle);
       shared.clear();
       client.disconnect();
     },
   };
+  expressionWatchers.set(handle, (workspaceId, changed, resync) => attach(
+    `expressions:ws${workspaceId.toUpperCase()}`, { recoverable: true, positioned: true }, (sub) => {
+      const onSubscribed = () => resync();
+      const onPublication = (ctx: { data?: unknown }) => {
+        if (matchesExpressionContract("Changed", ctx.data)) changed(ctx.data as ExpressionChanged);
+      };
+      sub.on("subscribed", onSubscribed);
+      sub.on("publication", onPublication);
+      return () => { sub.off("subscribed", onSubscribed); sub.off("publication", onPublication); };
+    }
+  ));
+  return handle;
 }
