@@ -1739,6 +1739,11 @@ export default function ConversationScreen({
     await reconnect?.();
     await catchUpTimeline();
   }, [reconnect, catchUpTimeline]);
+  // 끊김 띠의 「지금 다시 연결」(#4895) — 전송의 `resume` 과 같은 길이다. 레일이 다시 붙으면 재구독이 놓친 글을 메우므로(복구 또는
+  // 지금 읽기) 여기서 `catchUp` 을 따로 부르지 않는다. 실패는 띠 자신이 이미 말하고 있다(10초 뒤 다시 「끊겼습니다」).
+  const reconnectNow = useCallback(() => {
+    void reconnect?.().catch(() => undefined);
+  }, [reconnect]);
   // 「레일이 다시 붙었다」를 세는 값. **복구 표지의 개수가 아니다**(#4292): 표지는 「메운 것이 있을 때만」 서므로 아무것도
   // 놓치지 않은 재연결에는 서지 않고, 서 있던 표지도 새 메시지가 오면 걷힌다 — 개수는 재연결을 세는 값이 아니다. 재구독 횟수는
   // 재연결이 일어날 때마다 곧바로 하나 는다.
@@ -2046,6 +2051,7 @@ export default function ConversationScreen({
         // 정보 페이지는 종류를 알 때만 연다 — 채널 목록이 오기 전에는 무엇의 정보인지 모른다(알약은 단추가 아니라 이름만 선다).
         onOpenInfo={channel !== null ? openInfo : undefined}
         railStatus={railStatus}
+        onReconnect={reconnect ? reconnectNow : undefined}
         onBannerInset={setBannerInset}
       >
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지

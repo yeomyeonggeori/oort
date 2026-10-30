@@ -67,3 +67,35 @@ it('a healed or disposed socket cannot later report an outage from its old timer
   expect(display.current()).toBe('connecting');
   expect(jest.getTimerCount()).toBe(0);
 });
+
+it('a socket that ended and will not be reopened is an outage at once, not ten seconds of 「연결 중」 (#4895)', () => {
+  const {display, changes} = drive();
+  display.push({kind: 'raw', status: 'connected'});
+  display.push({kind: 'raw', status: 'disconnected'});
+  expect(display.current()).toBe('connecting');
+  display.push({kind: 'terminal'});
+  expect(display.current()).toBe('disconnected');
+  // The grace the raw event armed was cancelled: nothing fires later.
+  expect(jest.getTimerCount()).toBe(0);
+  jest.advanceTimersByTime(20_000);
+  expect(changes).toEqual(['connected', 'connecting', 'disconnected']);
+
+  // Asking for a reconnect is a recovery with a fresh ten seconds, and it can end the same way.
+  display.push({kind: 'resume'});
+  expect(display.current()).toBe('connecting');
+  jest.advanceTimersByTime(9_999);
+  expect(display.current()).toBe('connecting');
+  display.push({kind: 'terminal'});
+  expect(display.current()).toBe('disconnected');
+  expect(jest.getTimerCount()).toBe(0);
+  display.dispose();
+});
+
+it('terminal on a socket that never reported anything else still shows the outage and arms nothing', () => {
+  const {display, changes} = drive();
+  display.push({kind: 'terminal'});
+  expect(display.current()).toBe('disconnected');
+  expect(changes).toEqual(['disconnected']);
+  expect(jest.getTimerCount()).toBe(0);
+  display.dispose();
+});

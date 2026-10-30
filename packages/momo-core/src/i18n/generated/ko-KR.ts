@@ -137,6 +137,12 @@ export const catalog: MessageCatalog = {
       "value": "윈도우"
     }
   ],
+  "mobile.connection.reconnectNow": [
+    {
+      "type": 0,
+      "value": "지금 다시 연결"
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,
