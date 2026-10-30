@@ -1,6 +1,6 @@
 # ADR-0218: 팀 표현 보관함 — 한 등록으로 반응·본문·큰 그림, 에이전트 후보와 직접 올리기
 
-> Status: Accepted — owner 2026-10-30 08:20 질문 창 결정 「이대로」와 GIF 사이트 단건 허용 결정(#4301). **D4의 영상 변환 절만 Proposed — owner 확인 필요**다.
+> Status: Accepted — owner 2026-10-30 08:20 질문 창 결정 「이대로」와 GIF 사이트 단건 허용 결정(#4301). **D4의 영상 변환 절만 보류**다(owner 2026-10-30 「다음 이슈로 미루자」, #4819).
 > Date: 2026-10-30
 > Scope: #4301(S2 칸 6, base `track/engine`): 설계 S0 + 플랫폼 독립 코어 C1. 서버·웹·폰 구현은 #4676·#4677·#4678(S3).
 > Consumes: [ADR-0100](0100-decision-governance.md), [ADR-0137](0137-mobile-react-native-migration.md), [ADR-0151](0151-attachments-v0-drive-contract-port.md), [ADR-0170](0170-link-unfurl-server-surface.md), [ADR-0186 증보 v8](0186-agent-workspace-actions.md#증보-2026-10-30--팀-표현-행동-expressioncreate-v8-4301).
@@ -73,15 +73,17 @@
 
 그림 경로는 항상 워크스페이스 멤버 bearer + active 검사 + variant별 정확한 sha 검사다. 숨김/삭제/타 테넌트/틀린 sha/비멤버는 동일 404. `Content-Type`은 저장 MIME, `nosniff`, `CSP: default-src 'none'; sandbox`, **`Cache-Control: private, no-store`**. 인증된 앱 메모리 캐시만 허용하고 logout/계정·워크스페이스 전환/숨김·삭제 이벤트/재연결 전체 갱신 때 디코드 중인 것도 폐기한다. offline에서는 문자열/정지 자리표시만 쓴다. 네트워크가 끊긴 화면까지 즉시 회수할 수 있다고 주장하지 않는다. 웹·Tauri는 bearer로 받아 data URL, 폰은 세션 범위의 임시 파일을 쓰며 공개 미인증 URL·CSP 확장은 없다.
 
-### D4. 짧은 영상 처리 — **Proposed — owner 확인 필요**
+### D4. 짧은 영상 처리 — **보류 (owner 2026-10-30, #4819)**
+
+owner가 2026-10-30에 영상→GIF 변환을 다음 이슈로 미뤘다(「지금은 조금 과할거같아서」). 그때까지 영상 입력은 `video_processing_unavailable` 카드로 끝나고 출처 링크와 GIF 직접 올리기를 안내한다. 움직이는 그림은 GIF로 직접 올리거나 에이전트가 GIF로 만들어 제안한다(#4820). 아래 비교와 고정 처리 계약은 #4819를 다시 열 때의 출발점이다.
 
 | 경로 | 장점 | 비용·판정 |
 |---|---|---|
-| **(a) 서버에서 GIF로 변환** | 링크로 찾은 영상·폰 업로드도 같은 3벌을 만들고 반응/격자/큰 전송 모두 기존 Image 경로로 표시 | **선택하되 이 절은 Proposed.** 새 서버 영상 디코더 공격면과 FFmpeg 배포 라이선스 승인이 필요 |
+| **(a) 서버에서 GIF로 변환** | 링크로 찾은 영상·폰 업로드도 같은 3벌을 만들고 반응/격자/큰 전송 모두 기존 Image 경로로 표시 | **다시 열 때의 첫 후보(보류, #4819).** 새 서버 영상 디코더 공격면과 FFmpeg 배포 라이선스 승인이 필요 |
 | (b) 무음 반복 영상 보존 | 압축 효율이 높음, 웹 video로 재생 가능 | 폰에 영상 재생 의존성이 없음(`expo-video` 등 추가 시 라이선스·Pod/네이티브 빌드 영향), 반응마다 video 플레이어, 서버 thumb 추출에는 결국 디코더 필요. 기각 |
 | (c) 올리는 기기에서 변환 | 웹·데스크탑 canvas + [gifenc(MIT)](https://raw.githubusercontent.com/mattdesl/gifenc/master/LICENSE.md) 같은 permissive 인코더 가능 | 폰은 별도 네이티브 프레임 추출, 브라우저 코덱 차이·CORS·기기 자원 한도. 에이전트 URL 영상은 서버가 못 처리하므로 사람이 받아 다시 변환해야 한다. 중심 흐름이 기기마다 달라져 기각 |
 
-[FFmpeg 공식 라이선스](https://ffmpeg.org/legal.html)(10-30 확인)는 기본 LGPL-2.1-or-later, 선택한 구성에 따라 GPL 적용이라고 설명한다. **별도 실행 파일로 호출해도 이미지에 실어 배포하는 의무는 없어지지 않는다.** 현행 `deny.toml` 허용 목록에 LGPL/GPL이 없으며 `NOTICE`의 OS-layer copyleft 인벤토리는 새 앱 기능 의존의 승인이 아니다. 이 PR은 FFmpeg 설치·정책 파일·NOTICE를 바꾸지 않는다. owner가 배포 구성/의무와 정책 예외를 승인하기 전 **영상 디코더를 실행하지 않는다**. S3는 `video_processing_unavailable` 카드와 GIF 직접 올리기를 먼저 구현할 수 있다. 이 절의 Proposed를 전체 기능 Accepted로 덮어 승인했다고 해석하지 않는다.
+[FFmpeg 공식 라이선스](https://ffmpeg.org/legal.html)(10-30 확인)는 기본 LGPL-2.1-or-later, 선택한 구성에 따라 GPL 적용이라고 설명한다. **별도 실행 파일로 호출해도 이미지에 실어 배포하는 의무는 없어지지 않는다.** 현행 `deny.toml` 허용 목록에 LGPL/GPL이 없으며 `NOTICE`의 OS-layer copyleft 인벤토리는 새 앱 기능 의존의 승인이 아니다. 이 PR은 FFmpeg 설치·정책 파일·NOTICE를 바꾸지 않는다. owner가 배포 구성/의무와 정책 예외를 승인하기 전 **영상 디코더를 실행하지 않는다**. S3는 `video_processing_unavailable` 카드와 GIF 직접 올리기를 먼저 구현할 수 있다. 이 절의 보류를 전체 기능 Accepted로 덮어 승인했다고 해석하지 않는다.
 
 승인 뒤의 고정 처리 계약: 입력 MP4/MOV(H.264), WebM(VP8/VP9) ≤5 MiB·≤5초·가로세로 ≤1280·총 ≤921,600 px·≤30fps·≤150프레임. 오디오는 버리고 10fps 이하 GIF로 두 크기와 thumb를 만든다. D3 출력 한도를 똑같이 적용하며 초과/코덱 미지원은 카드에 남긴다. 사전 probe 역시 격리 안에서 한다. 셸 문자열 보간 없이 고정 인수·고정 바이너리·인코더 목록, 외부 URL을 디코더에 주지 않고 가드로 받은 로컬 파일만 입력한다. 전용 비권한 프로세스, network 없음, 읽기 전용 root, 전용 임시 디렉터리 32 MiB, RSS 256 MiB, CPU 5초/벽시계 10초, 동시 1(공통 semaphore에도 포함), 하위 프로세스 포함 강제 종료·파일 회수·환경/시크릿 미전달이 필수다. 파이프/playlist/외부 참조·임의 프로토콜은 거절한다. `--enable-gpl`·`--enable-nonfree`를 쓰지 않는 구성을 검토하되 이것만으로 permissive라고 부르지 않는다. 실제 변환·격리·라이선스·자원 실측은 **runtime-unverified**다.
 
