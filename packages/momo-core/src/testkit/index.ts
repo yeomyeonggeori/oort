@@ -5,4 +5,5 @@ export {loginBody, selfMember} from './session';
 export {createMount, createFlush} from './render';
 export {createCopy} from './copy';
 export type {CopyKey} from './copy';
+export {createMessageCopy} from './i18n';
 export {blankCopy, copyStringCount, missingKeys} from './catalog';
