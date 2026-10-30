@@ -1,3 +1,4 @@
+import { ExpressionSendPreview } from "@/features/expressions/ExpressionSendPreview";
 import { dmAdmissionCandidates, dmAdmissionHint } from "@momo/core/features/agents/dmAdmission";
 import {
   useEffect,
@@ -922,6 +923,7 @@ export function Composer({
         </p>
       )}
 
+      <ExpressionSendPreview body={text} />
       <form
         onSubmit={onSubmit}
         className="relative p-3 data-rail:pt-0"

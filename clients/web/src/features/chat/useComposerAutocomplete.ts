@@ -1,3 +1,6 @@
+import { useExpressions } from "@/features/expressions/context";
+import { searchExpressions } from "@momo/core/features/expressions/search";
+import { expressionToken } from "@momo/core/features/expressions/message";
 import { useCallback, useEffect, useMemo, useState, type RefObject } from "react";
 import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { ComposerKeyIntent } from "@momo/core/features/chat/composerKeys";
@@ -143,6 +146,7 @@ export function useComposerAutocomplete({
   const queryText = query?.text ?? null;
   const catalog = useEmojiCatalog(kind === "emoji");
   const entries = catalog.entries;
+  const { cache: expressionCache, usage: expressionUsage } = useExpressions();
   const candidates = useMemo(() => {
     if (kind === null || queryText === null) return NO_CANDIDATES;
     if (kind === "mention") return memberCandidates(members, queryText, undefined, viewerHumanId);
@@ -152,7 +156,10 @@ export function useComposerAutocomplete({
         ? commandCandidates(queryText, undefined, commandCardAvailable)
         : NO_CANDIDATES;
     }
-    return emojiCandidates(entries, queryText, tone);
+    const team: ComposerCandidate[] = searchExpressions(expressionCache.items, queryText, expressionUsage).slice(0, 6).map((item) => ({
+      kind: "emoji", id: item.id, lead: expressionToken(item.name), hint: `${item.displayName} · 우리 팀`, insert: `${expressionToken(item.name)} `,
+    }));
+    return [...team, ...emojiCandidates(entries, queryText, tone)].slice(0, 6);
   }, [
     kind,
     queryText,
@@ -160,6 +167,8 @@ export function useComposerAutocomplete({
     viewerHumanId,
     channels,
     entries,
+    expressionCache.items,
+    expressionUsage,
     tone,
     commandsEnabled,
     commandCardAvailable,
@@ -179,7 +188,7 @@ export function useComposerAutocomplete({
   const status: ComposerListStatus =
     kind === null || spec.deferred === undefined
       ? "ready"
-      : catalog.status === "loading" || catalog.status === "idle"
+      : candidates.length > 0 ? "ready" : catalog.status === "loading" || catalog.status === "idle"
         ? "loading"
         : catalog.status === "error"
           ? "error"
