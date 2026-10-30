@@ -1,3 +1,6 @@
+import {ExpressionComposerModal} from '../expressions/ExpressionComposerPicker';
+import {useEmojiTriggerFocus} from '../emoji/useEmojiTriggerFocus';
+import {EXPRESSION_ICONS} from '../../design/icons/expressionIcons';
 import {dmAdmissionCandidates, dmAdmissionHint} from '@momo/core/features/agents/dmAdmission';
 import type {Channel} from '@momo/core/lib/api';
 import type {MessageAttachment, RosterMember} from '@momo/core/lib/api';
@@ -1263,6 +1266,8 @@ export function Composer({
     onKeyBlockedChangeRef.current?.(next);
   }, []);
   const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
+  const [expressionPickerOpen, setExpressionPickerOpen] = useState(false);
+  const expressionTrigger = useEmojiTriggerFocus(expressionPickerOpen);
   const ownInputRef = useRef<TextInput | null>(null);
   const inputRef = externalInputRef ?? ownInputRef;
   // Mirrors `text` for the caret derivation below without making `onChangeText`
@@ -2606,6 +2611,20 @@ export function Composer({
           <Animated.View
             style={[styles.tools, {height: toolsHeight, opacity: progress}]}
             testID="composer-tools">
+            <Pressable
+              ref={expressionTrigger}
+              accessibilityRole="button"
+              accessibilityLabel="이모지 고르기"
+              accessibilityState={{disabled: offline}}
+              disabled={offline}
+              onPress={() => {
+                Keyboard.dismiss();
+                setExpressionPickerOpen(true);
+              }}
+              style={styles.tool}
+              testID="composer-tool-emoji">
+              <Image source={EXPRESSION_ICONS.smile} style={[styles.attachGlyph, {tintColor: palette.icon}]} />
+            </Pressable>
             {TOOL_SLOTS.includes('mention') ? (
               <Pressable
                 accessibilityRole="button"
@@ -2647,6 +2666,16 @@ export function Composer({
         </Pressable>
       </View>
       </GlassSurface>
+      {expressionPickerOpen ? (
+          <ExpressionComposerModal
+            onClose={() => setExpressionPickerOpen(false)}
+            onInsert={glyph => {
+              onChangeText(currentTextRef.current + glyph);
+              inputRef.current?.focus();
+            }}
+            onSend={body => { if (!offline) onSend(body); }}
+          />
+      ) : null}
       <AttachMenu
         visible={attachmentPickerOpen}
         anchorRef={attachRef}

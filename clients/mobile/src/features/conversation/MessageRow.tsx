@@ -1,3 +1,10 @@
+import {
+  expressionAltText,
+  expressionMessageModel,
+  tokenizeExpressionReaction,
+} from '@momo/core/features/expressions/message';
+import {useExpressionItems} from '../expressions/ExpressionProvider';
+import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
@@ -727,6 +734,17 @@ function Chips({
   onToggle?: (emoji: string) => void;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
+  const expressions = useExpressionItems();
+  const label = (value: string) => {
+    const token = tokenizeExpressionReaction(value, expressions);
+    return token.type === 'expression' ? expressionAltText(token.expression) : value;
+  };
+  const renderEmoji = (value: string) => {
+    const token = tokenizeExpressionReaction(value, expressions);
+    return token.type === 'expression'
+      ? <ExpressionImage expression={token.expression} size="reaction" />
+      : <Text style={styles.chipEmoji}>{value}</Text>;
+  };
   if (chips.length === 0) return null;
   return (
     <View style={styles.chipRow} testID="reaction-chips">
@@ -735,7 +753,7 @@ function Chips({
           key={chip.emoji}
           accessibilityRole="button"
           accessibilityState={{selected: chip.mine}}
-          accessibilityLabel={`${chip.emoji} 반응 ${chip.count}개, ${
+          accessibilityLabel={`${label(chip.emoji)} 반응 ${chip.count}개, ${
             chip.mine ? '내 반응 취소' : '나도 반응하기'
           }`}
           disabled={onToggle === undefined}
@@ -747,7 +765,7 @@ function Chips({
             pressed && styles.chipPressed,
           ]}
           testID={`reaction-chip-${chip.emoji}`}>
-          <Text style={styles.chipEmoji}>{chip.emoji}</Text>
+          {renderEmoji(chip.emoji)}
           <Text style={[styles.chipCount, chip.mine && styles.chipCountMine]}>
             {chip.count}
           </Text>
@@ -2408,6 +2426,10 @@ function MessageRowInner({
   standby,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const expressions = useExpressionItems();
+  const spokenExpression = (value: string) => expressionMessageModel(value, expressions).tokens
+    .map(token => token.type === 'expression' ? expressionAltText(token.expression) : token.text)
+    .join('');
   rowRenders += 1;
   // 정리(cleanup) 형식의 ref — 떼는 쪽이 자기가 붙인 노드를 지목한다(R1 M-3).
   const messageId = message.id;
@@ -2964,10 +2986,10 @@ function MessageRowInner({
       accessible
       accessibilityLabel={[
         rowAccessibilityLabel({
-        message,
+        message: {...message, body: spokenExpression(message.body ?? '')},
         authorLabel,
         authorIsAgent: memberFor(directory, message.authorMemberId)?.kind === 'agent',
-        chips,
+        chips: chips.map(chip => ({...chip, emoji: spokenExpression(chip.emoji)})),
         tail,
         deleted,
         tombstoneText,

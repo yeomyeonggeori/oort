@@ -1,3 +1,4 @@
+import {TeamExpressionPicker} from '../expressions/TeamExpressionPicker';
 import type {Message} from '@momo/core/lib/api';
 import {attachmentPreviewLine} from '@momo/core/features/attachments/model';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
@@ -246,6 +247,7 @@ function SheetBody({
     return (
       <EmojiPicker
         onClose={() => setPickerOpen(false)}
+        team={{render: ({query}) => <TeamExpressionPicker query={query} onSelect={token => afterClose(() => onToggleReaction(token))} />}}
         onSelect={glyph => afterClose(() => onToggleReaction(glyph))}
       />
     );
