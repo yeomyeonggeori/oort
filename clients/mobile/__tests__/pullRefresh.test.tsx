@@ -1447,10 +1447,11 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
     'src/screens/HostedConnectionsScreen.tsx',
     'src/screens/WorkSessionDetailScreen.tsx',
     'src/features/work/WorkConversation.tsx',
+    'src/features/conversation/Timeline.tsx',
     'src/design/atoms.tsx',
   ];
 
-  it('스캔이 알려진 아홉 곳을 모두 찾는다', () => {
+  it('스캔이 알려진 열 곳을 모두 찾는다', () => {
     expect(users.map(u => u.rel).sort()).toEqual(expect.arrayContaining([...KNOWN].sort()));
   });
 
@@ -1473,7 +1474,9 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
   const callers = users.filter(u => /\busePullRefresh\((?!\))/.test(u.text));
   const RENDERS_NOTICE = /\{notice\}|:\s*\(?\s*notice\s*\)?\s*\}|notice=\{notice\}/;
 
-  it('스캔이 훅을 부르는 여덟 화면을 모두 찾는다', () => {
+  // Owner 2026-10-30 (#4783): 「대화 화면 당겨서 새로고침 = 다시 맞추기」.
+  // 기존 대화 화면 제외 결정을 뒤집었으므로 Timeline 이 아홉 번째 호출 화면이다.
+  it('스캔이 훅을 부르는 아홉 화면을 모두 찾는다', () => {
     expect(callers.map(u => u.rel).sort()).toEqual(
       [
         'src/screens/InboxScreen.tsx',
@@ -1484,6 +1487,7 @@ describe('모든 화면이 scrollProps 를 펼친다 (소스 스캔, src 전수)
         'src/screens/HostedConnectionsScreen.tsx',
         'src/screens/WorkSessionDetailScreen.tsx',
         'src/screens/AppsScreen.tsx', // U-4 #3951
+        'src/features/conversation/Timeline.tsx', // owner 10-30 #4783
       ].sort(),
     );
   });

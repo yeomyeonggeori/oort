@@ -378,7 +378,7 @@ export default function ConversationScreen({
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
-  const {rail, status: railStatus} = useRealtime();
+  const {rail, status: railStatus, reconnect} = useRealtime();
   // 연결 띠는 머리 아래에 뜨고 목록의 viewport·첫 여백을 바꾸지 않는다.
   // 날짜·안 읽음 필만 띠의 실제 높이만큼 더 내려간다(#4292).
   const [bannerInset, setBannerInset] = useState(0);
@@ -1733,6 +1733,10 @@ export default function ConversationScreen({
   // 늦게 온 답이 잡은 목록을 옮기면 안 된다. `cancelJump` 의 「닫기가 곧 취소」와 같은
   // 규율이고, 이 기다림에는 상자가 없으니 손가락이 그 닫기다.
   const catchUpTimeline = timeline.catchUp;
+  const refreshTimeline = useCallback(async () => {
+    await reconnect?.();
+    await catchUpTimeline();
+  }, [reconnect, catchUpTimeline]);
   // 「레일이 다시 붙었다」를 세는 값. **복구 표지의 개수가 아니다**(#4292): 표지는 「메운 것이 있을 때만」 서므로 아무것도
   // 놓치지 않은 재연결에는 서지 않고, 서 있던 표지도 새 메시지가 오면 걷힌다 — 개수는 재연결을 세는 값이 아니다. 재구독 횟수는
   // 재연결이 일어날 때마다 곧바로 하나 는다.
@@ -2058,10 +2062,12 @@ export default function ConversationScreen({
               myMemberId={member.id}
               loadingOlder={timeline.loadingOlder}
               reachedStart={timeline.reachedStart}
+              realtimeConnected={railLive}
               nowMs={nowMs}
               actions={actions}
               selfSendToken={selfSendToken}
               onStartReached={onStartReached}
+              onRefresh={refreshTimeline}
               onRetry={reload}
               onResend={onResend}
               onResendPending={onResendPending}

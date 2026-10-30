@@ -481,9 +481,7 @@ export function SettingsContent({
   const updateOffer = useAppUpdateOffer();
   const [updateSheetOpen, setUpdateSheetOpen] = useState(false);
 
-  // 버전 줄을 길게 누르면 실시간 연결 기록을 복사한다(#2751). 폰 소켓이 왜 끊겼는지는 서버 로그로
-  // 판정되지 않았고, 이유 코드는 클라이언트에만 있다. 기록에는 코드·수명·네트워크 종류만 있고 식별
-  // 정보는 없다(`diagnostics.ts`). 숨은 동작이라 화면에는 영수증 한 줄만 잠깐 보인다.
+  // 설정 › 정보의 명시적인 복사 경로 (#4783). 기존 버전 줄의 길게 누르기도 유지한다.
   const copyDiagnostics = useCallback(() => {
     const text = `${currentAppVersionLabel()}\n${formatRealtimeDiagnostics()}`;
     void copyText(text).then(ok => {
@@ -987,6 +985,14 @@ export function SettingsContent({
             testID="sign-out"
           />
         )}
+      </GroupCard>
+
+      <GroupCard label="정보" testID="settings-about-card">
+        <ListRow
+          title={diagCopied ? '연결 기록 복사됨' : '연결 기록 복사'}
+          onPress={copyDiagnostics}
+          testID="settings-copy-connection-log"
+        />
       </GroupCard>
 
       <Text

@@ -28,7 +28,7 @@
 // No channel names (they embed workspace and channel ids), no token, no URL, no
 // user or member id, no error MESSAGE text from the token fetch (it is
 // `e.toString()` of whatever the HTTP layer threw and may carry a URL or a
-// body). Codes, library reason strings, policy action kinds, app-state names and
+// body). Codes, allowlisted policy action kinds, app-state names and
 // the network TYPE ("wifi" / "cellular" / "none") only. That is what makes it
 // safe to paste into an issue.
 //
@@ -55,20 +55,30 @@ export interface RealtimeDiagnostic {
   kind: RealtimeDiagnosticKind;
   /** centrifuge-js code (connecting/disconnected/error). */
   code?: number;
-  /** Library/server reason text, or the policy action / app state / network
-   *  type / error type. Never free-form user data. */
+  /** Allowlisted policy action / app state / network type / error type. */
   detail?: string;
   /** For a transition out of `connected`: how long that connection lived. */
   lifetimeMs?: number;
 }
 
-const MAX_DETAIL = 64;
+const SAFE_DETAILS: Partial<Record<RealtimeDiagnosticKind, readonly string[]>> = {
+  policy: ['connect', 'disconnect', 'resume', 'force-reconnect', 'arm-grace', 'cancel-grace', 'token-cleared'],
+  'app-state': ['active', 'inactive', 'background', 'unknown', 'extension'],
+  error: ['connectToken', 'refreshToken', 'transport', 'timeout', 'refresh', 'connect'],
+};
+const NETWORK = '(?:unknown|none|cellular|wifi|bluetooth|ethernet|wimax|vpn|other|\\?)';
+const NETWORK_DETAIL = new RegExp(`^${NETWORK}->${NETWORK}( offline)?$`);
+function safeDetail(entry: RealtimeDiagnostic): string | undefined {
+  if (entry.detail === undefined) return undefined;
+  if (entry.kind === 'network') return NETWORK_DETAIL.test(entry.detail) ? entry.detail : undefined;
+  return SAFE_DETAILS[entry.kind]?.includes(entry.detail) ? entry.detail : undefined;
+}
 
 let entries: RealtimeDiagnostic[] = [];
 
 export function recordRealtimeDiagnostic(entry: RealtimeDiagnostic): void {
   const next: RealtimeDiagnostic = {...entry};
-  if (next.detail !== undefined) next.detail = next.detail.slice(0, MAX_DETAIL);
+  next.detail = safeDetail(entry);
   entries.push(next);
   if (entries.length > DIAGNOSTICS_CAPACITY) {
     entries = entries.slice(entries.length - DIAGNOSTICS_CAPACITY);
@@ -95,7 +105,8 @@ export function formatRealtimeDiagnostics(
     .map(entry => {
       const parts = [new Date(entry.at).toISOString(), entry.kind];
       if (entry.code !== undefined) parts.push(`code=${entry.code}`);
-      if (entry.detail !== undefined) parts.push(entry.detail);
+      const detail = safeDetail(entry);
+      if (detail !== undefined) parts.push(detail);
       if (entry.lifetimeMs !== undefined) {
         parts.push(`lifetime=${(entry.lifetimeMs / 1000).toFixed(1)}s`);
       }
