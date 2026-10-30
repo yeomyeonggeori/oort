@@ -29,6 +29,114 @@ export const catalog: MessageCatalog = {
       "value": "명"
     }
   ],
+  "desktop.menu.close": [
+    {
+      "type": 0,
+      "value": "윈도우 닫기"
+    }
+  ],
+  "desktop.menu.copy": [
+    {
+      "type": 0,
+      "value": "복사"
+    }
+  ],
+  "desktop.menu.cut": [
+    {
+      "type": 0,
+      "value": "잘라내기"
+    }
+  ],
+  "desktop.menu.edit": [
+    {
+      "type": 0,
+      "value": "편집"
+    }
+  ],
+  "desktop.menu.file": [
+    {
+      "type": 0,
+      "value": "파일"
+    }
+  ],
+  "desktop.menu.fullscreen": [
+    {
+      "type": 0,
+      "value": "전체 화면"
+    }
+  ],
+  "desktop.menu.help": [
+    {
+      "type": 0,
+      "value": "도움말"
+    }
+  ],
+  "desktop.menu.hide": [
+    {
+      "type": 0,
+      "value": "oort 가리기"
+    }
+  ],
+  "desktop.menu.hideOthers": [
+    {
+      "type": 0,
+      "value": "기타 가리기"
+    }
+  ],
+  "desktop.menu.maximize": [
+    {
+      "type": 0,
+      "value": "확대/축소"
+    }
+  ],
+  "desktop.menu.minimize": [
+    {
+      "type": 0,
+      "value": "최소화"
+    }
+  ],
+  "desktop.menu.paste": [
+    {
+      "type": 0,
+      "value": "붙여넣기"
+    }
+  ],
+  "desktop.menu.quit": [
+    {
+      "type": 0,
+      "value": "oort 종료"
+    }
+  ],
+  "desktop.menu.redo": [
+    {
+      "type": 0,
+      "value": "다시 실행"
+    }
+  ],
+  "desktop.menu.selectAll": [
+    {
+      "type": 0,
+      "value": "모두 선택"
+    }
+  ],
+  "desktop.menu.undo": [
+    {
+      "type": 0,
+      "value": "실행 취소"
+    }
+  ],
+  "desktop.menu.view": [
+    {
+      "type": 0,
+      "value": "보기"
+    }
+  ],
+  "desktop.menu.window": [
+    {
+      "type": 0,
+      "value": "윈도우"
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,

@@ -95,7 +95,10 @@ export function ApprovalDecision({
   shape = 'box',
   subject,
   decisionRef,
+  onBusyChange,
 }: {
+  /** 무대는 요청 중에 장을 바꾸지 않아요. 결정 경로는 이 컴포넌트 한 곳이에요. */
+  onBusyChange?: (busy: boolean) => void;
   /** 로터 동작이 같은 결정을 부를 손잡이 (#2595). 인박스는 버튼에 직접 닿으므로 넘기지 않는다. */
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /**
@@ -182,6 +185,7 @@ export function ApprovalDecision({
       const approve = direction === 'approve';
       keys.current[direction] ??= newDecisionId();
       sendingRef.current = true;
+      onBusyChange?.(true);
       setSending(direction);
       setErrorCopy(null);
       try {
@@ -236,6 +240,7 @@ export function ApprovalDecision({
         }
       } finally {
         sendingRef.current = false;
+        onBusyChange?.(false);
         setSending(null);
       }
     },
@@ -246,6 +251,7 @@ export function ApprovalDecision({
       forbiddenCopy,
       hostGate.canApprove,
       onSettled,
+      onBusyChange,
       workspaceId,
     ],
   );

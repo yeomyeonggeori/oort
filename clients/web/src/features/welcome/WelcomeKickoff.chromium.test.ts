@@ -11,6 +11,7 @@ import {
   WELCOME_KICKOFF_EXIT_CLASS,
 } from "@/design/motion";
 import { WELCOME_BAND_JOY_HOLD_MS } from "./welcomeKickoff";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * Chromium half of UX-R2b / #2817. Node environment (not jsdom) so esbuild's
@@ -27,6 +28,8 @@ const CORE_SRC = join(WEB_ROOT, "../../packages/momo-core/src");
 const HARNESS = join(HERE, "welcomeKickoff.harness.tsx");
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();

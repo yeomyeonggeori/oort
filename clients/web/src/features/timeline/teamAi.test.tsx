@@ -181,7 +181,14 @@ function approvalProps(withVia: boolean): Record<string, unknown> {
 function mountApproval(withVia: boolean): HTMLElement {
   const card = agentCardModel(message({ type: "approval_request", props: approvalProps(withVia) }));
   if (card === null) throw new Error("no card");
-  return mount(createElement(AgentCard, { card, directory: DIRECTORY }));
+  const view = mount(createElement(AgentCard, { card, directory: DIRECTORY }));
+  openDetails(view);
+  return view;
+}
+
+function openDetails(view: HTMLElement) {
+  const details = view.querySelector<HTMLDetailsElement>('[data-testid="request-bundle-details"]')!;
+  act(() => { details.open = true; details.dispatchEvent(new Event("toggle")); });
 }
 
 describe("도우미 승인 카드 (ADR-0201 D6-3)", () => {
@@ -415,6 +422,7 @@ describe("도우미의 워크스페이스 설정 카드 (v2 H6-1)", () => {
 
   it("설정 액션 카드는 서버 행 아래에 「적용 범위: 워크스페이스 전체」를 말한다", () => {
     const view = mountAction("workspace.unfurl.update");
+    openDetails(view);
     const row = view.querySelector('[data-testid="approval-workspace-wide"]');
     expect(row?.querySelector("dt")?.textContent).toBe("적용 범위");
     expect(row?.textContent).toContain("워크스페이스 전체");

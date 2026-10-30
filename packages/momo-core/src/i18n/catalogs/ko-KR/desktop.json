@@ -1,0 +1,20 @@
+{
+  "desktop.menu.file": "파일",
+  "desktop.menu.edit": "편집",
+  "desktop.menu.view": "보기",
+  "desktop.menu.window": "윈도우",
+  "desktop.menu.help": "도움말",
+  "desktop.menu.undo": "실행 취소",
+  "desktop.menu.redo": "다시 실행",
+  "desktop.menu.cut": "잘라내기",
+  "desktop.menu.copy": "복사",
+  "desktop.menu.paste": "붙여넣기",
+  "desktop.menu.selectAll": "모두 선택",
+  "desktop.menu.minimize": "최소화",
+  "desktop.menu.maximize": "확대/축소",
+  "desktop.menu.close": "윈도우 닫기",
+  "desktop.menu.fullscreen": "전체 화면",
+  "desktop.menu.hide": "oort 가리기",
+  "desktop.menu.hideOthers": "기타 가리기",
+  "desktop.menu.quit": "oort 종료"
+}

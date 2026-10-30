@@ -10,6 +10,7 @@ import {
   POPOVER_MOTION,
 } from "../motion";
 import { buttonVariants } from "./button";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 /**
  * UX-R1a / ADR-0179 D4 — overlay enter/exit.
@@ -64,6 +65,8 @@ const FILES = {
 } as const;
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return { ok: false, path: blocked };
   try {
     const { chromium } = require_("playwright") as typeof import("playwright");
     const exe = chromium.executablePath();

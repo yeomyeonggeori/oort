@@ -2,7 +2,7 @@
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
@@ -226,7 +226,10 @@ function mountRail(path = "/"): HTMLElement {
       createElement(
         SessionProvider,
         { value: sessionValue() },
-        createElement(DesktopNotifications)
+        createElement(() => {
+          const location = useLocation();
+          return createElement("div", null, createElement(DesktopNotifications), createElement("output", { "data-testid": "notification-route" }, location.pathname + location.search));
+        })
       )
     )
   );
@@ -337,7 +340,7 @@ describe("DesktopNotifications", () => {
     expect(showNotification).toHaveBeenCalledTimes(1);
   });
 
-  it("#3738: 행동 승인 카드(channel.create)도 「승인 필요」로 나가고 본문은 카드 제목이다", async () => {
+  it("행동 승인 알림은 에이전트 이름과 구 서버 카드 제목을 읽는다", async () => {
     mountRail();
     const base = approvalEvent();
     const actionApproval = {
@@ -364,7 +367,7 @@ describe("DesktopNotifications", () => {
       await Promise.resolve();
     });
     expect(showNotification).toHaveBeenCalledTimes(1);
-    expect(String(showNotification.mock.calls[0]?.[0])).toContain("승인 필요");
+    expect(String(showNotification.mock.calls[0]?.[0])).toBe("나간 멤버");
     expect(String(showNotification.mock.calls[0]?.[1])).toBe("채널 만들기");
   });
 
@@ -374,6 +377,16 @@ describe("DesktopNotifications", () => {
     const card = "019F96A4-E717-7F82-9750-58B2D7D28226";
     const armed = armOpen(null, IDS.channel, 1_000, undefined, card);
     expect(openTarget(armed, 1_001)).toBe(messageAnchorPath(IDS.channel, card));
+  });
+  it("요청 스레드의 알림은 질문을 말하고 창이 앞에 오면 root와 카드 둘 다 가진 주소로 간다", async () => {
+    const host = mountRail();
+    const event = approvalEvent();
+    event.payload.root_id = "00000000-0000-7000-8000-000000000311";
+    event.payload.body = "소개를 바꿔도 될까요?";
+    await act(async () => { onMessage?.(event); osNotifier().flush(); });
+    expect(showNotification.mock.calls[0]?.[1]).toBe("소개를 바꿔도 될까요?");
+    act(() => window.dispatchEvent(new Event("focus")));
+    expect(host.querySelector('[data-testid="notification-route"]')?.textContent).toBe(`${messageAnchorPath(IDS.channel, event.payload.id)}&thread=${event.payload.root_id}`);
   });
 });
 

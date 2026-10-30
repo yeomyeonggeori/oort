@@ -50,6 +50,114 @@ export const catalog: MessageCatalog = {
       "pluralType": "cardinal"
     }
   ],
+  "desktop.menu.close": [
+    {
+      "type": 0,
+      "value": "Close window"
+    }
+  ],
+  "desktop.menu.copy": [
+    {
+      "type": 0,
+      "value": "Copy"
+    }
+  ],
+  "desktop.menu.cut": [
+    {
+      "type": 0,
+      "value": "Cut"
+    }
+  ],
+  "desktop.menu.edit": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "desktop.menu.file": [
+    {
+      "type": 0,
+      "value": "File"
+    }
+  ],
+  "desktop.menu.fullscreen": [
+    {
+      "type": 0,
+      "value": "Enter full screen"
+    }
+  ],
+  "desktop.menu.help": [
+    {
+      "type": 0,
+      "value": "Help"
+    }
+  ],
+  "desktop.menu.hide": [
+    {
+      "type": 0,
+      "value": "Hide oort"
+    }
+  ],
+  "desktop.menu.hideOthers": [
+    {
+      "type": 0,
+      "value": "Hide others"
+    }
+  ],
+  "desktop.menu.maximize": [
+    {
+      "type": 0,
+      "value": "Zoom"
+    }
+  ],
+  "desktop.menu.minimize": [
+    {
+      "type": 0,
+      "value": "Minimize"
+    }
+  ],
+  "desktop.menu.paste": [
+    {
+      "type": 0,
+      "value": "Paste"
+    }
+  ],
+  "desktop.menu.quit": [
+    {
+      "type": 0,
+      "value": "Quit oort"
+    }
+  ],
+  "desktop.menu.redo": [
+    {
+      "type": 0,
+      "value": "Redo"
+    }
+  ],
+  "desktop.menu.selectAll": [
+    {
+      "type": 0,
+      "value": "Select all"
+    }
+  ],
+  "desktop.menu.undo": [
+    {
+      "type": 0,
+      "value": "Undo"
+    }
+  ],
+  "desktop.menu.view": [
+    {
+      "type": 0,
+      "value": "View"
+    }
+  ],
+  "desktop.menu.window": [
+    {
+      "type": 0,
+      "value": "Window"
+    }
+  ],
   "mobile.ios.cameraUsage": [
     {
       "type": 0,

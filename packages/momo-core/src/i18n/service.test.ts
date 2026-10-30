@@ -10,6 +10,7 @@ describe('ADR-0213 compiled message service', () => {
     const en = createMessageService({ messageLocale: 'en-US' });
     expect(messageKeys.length).toBeGreaterThan(0);
     expect(new Set(messageKeys).size).toBe(messageKeys.length);
+    expect(messageKeys).toContain('desktop.menu.edit');
     for (const locale of ['en-US', 'ko-KR'] as const) {
       expect(Object.keys(await loadMessageCatalog(locale)).sort()).toEqual([...messageKeys].sort());
     }

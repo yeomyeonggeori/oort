@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
+import { browserLaunchBlocked } from "@/testing/agentSandbox";
 
 // =============================================================================
 // 시험용: `tokens.css`를 Tailwind 컴파일러로 **진짜로** 컴파일해 CSS 문자열을 돌려주고, 이 컴퓨터에
@@ -12,6 +13,7 @@ import { compile } from "tailwindcss";
 //
 // 엔진은 WebKit(사파리·WKWebView의 엔진)과 Chromium 중 설치된 것 전부다. 둘 다 없으면 경고를 남기고
 // 빈 목록을 돌려주며, 시험은 `skipIf`로 건너뛴다(다른 브라우저 시험과 같은 규약, CI 레인은 #2129).
+// 에이전트 격리 안이면 설치돼 있어도 띄우지 않고 같은 길로 건너뛴다(`@/testing/agentSandbox`, #4861).
 // =============================================================================
 
 const require_ = createRequire(import.meta.url);
@@ -21,6 +23,8 @@ export const TOKENS_PATH = join(DESIGN_DIR, "tokens.css");
 export type EngineName = "webkit" | "chromium";
 
 function engineMissing(name: EngineName): string | null {
+  const blocked = browserLaunchBlocked();
+  if (blocked !== null) return blocked;
   try {
     const playwright = require_("playwright") as typeof import("playwright");
     const exe = playwright[name].executablePath();
