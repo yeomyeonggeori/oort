@@ -3,11 +3,14 @@ import {Centrifuge} from 'centrifuge';
 import {fetchFreshRealtimeToken} from '@momo/core/lib/api';
 import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 import {AppState, type AppStateStatus} from 'react-native';
+import {isOnlineFromNetInfo} from '../query/queryClient';
 import {
+  DISCONNECT_CALLED,
   initialPolicyState,
   policyStart,
   policyStep,
   policyStop,
+  reconnectCeilingMs,
   type AppVisibility,
   type RealtimeAction,
   type RealtimePolicyState,
@@ -136,6 +139,10 @@ export function createRealtimeTransport(
 
   let client: Centrifuge | null = null;
   let graceTimer: Timer | null = null;
+  /** The pending reopen after a token ending (`terminal-retry`), if any. */
+  let retryTimer: Timer | null = null;
+  /** After `dispose()` nothing may dispatch: `onPolicy` would undo the provider's cleanup. */
+  let disposed = false;
   /** When the current connection reached `connected`, null while it is not. */
   let connectedAt: number | null = null;
   const display = createConnectionDisplay(status => onStatus?.(status));
@@ -164,6 +171,12 @@ export function createRealtimeTransport(
   // RN-T2 gave `socketWanted` to the agent rail; now it decides whether 32
   // subscriptions exist, so the wrong opening value is a rail that starts silent.
   let state = initialPolicyState(AppState.currentState !== 'background');
+  /**
+   * The retry ceiling the client was last given. It only changes when the policy
+   * says so (`reconnectCeilingMs`), and it only governs the NEXT delay centrifuge
+   * schedules — a wait already running is not shortened here; `resume` ends it.
+   */
+  let appliedCeiling = reconnectCeilingMs(state);
 
   /**
    * Adopt a new policy state and tell whoever is listening. Every assignment to
@@ -173,6 +186,11 @@ export function createRealtimeTransport(
    */
   function commit(next: RealtimePolicyState): void {
     state = next;
+    const ceiling = reconnectCeilingMs(next);
+    if (ceiling !== appliedCeiling) {
+      appliedCeiling = ceiling;
+      if (client !== null) setReconnectCeiling(client, ceiling);
+    }
     onPolicy?.(next);
   }
 
@@ -180,15 +198,22 @@ export function createRealtimeTransport(
     const next = new Centrifuge(url, {
       getToken,
       minReconnectDelay: 500,
-      maxReconnectDelay: 20_000,
+      maxReconnectDelay: appliedCeiling,
     });
     next.on('connecting', ctx => leave('connecting', ctx));
     next.on('connected', () => {
       connectedAt = now();
       recordRealtimeDiagnostic({at: Date.now(), kind: 'connected'});
       display.push({kind: 'raw', status: 'connected'});
+      clearRetryTimer();
+      dispatch({kind: 'connected'});
     });
-    next.on('disconnected', ctx => leave('disconnected', ctx));
+    next.on('disconnected', ctx => {
+      leave('disconnected', ctx);
+      // The real client always gives a code; the test fake may not, and "no code"
+      // must read as "we closed it" rather than as a server refusal.
+      dispatch({kind: 'ended', code: ctx?.code ?? DISCONNECT_CALLED});
+    });
     next.on('error', ctx => {
       // Type and code only. The message of a `connectToken` error is whatever
       // the HTTP layer threw, and may carry a URL or a response body.
@@ -225,9 +250,17 @@ export function createRealtimeTransport(
   /** Reopen on the SAME client: even `connected` can be a half-open socket
    * after an inactive-only lock. Reopening checks the route immediately rather
    * than waiting 35 seconds for the ping timer, and preserves recovery offsets.
+   *
+   * One path for every explicit recovery: a foreground return, a network kind
+   * change (`force-reconnect`), reachability coming back (`online-reconnect`), a
+   * token ending's retry and the person's 「지금 다시 연결」 (`manual-reconnect`,
+   * `reconnect()`). It also works from `disconnected`: `connect()` only refuses
+   * while connecting or connected.
    */
   function resume(): void {
     if (!state.wantConnected) return;
+    // An explicit recovery supersedes a token-ending retry that is still waiting.
+    clearRetryTimer();
     const current = ensureClient();
     display.push({kind: 'resume'});
     // Do not duplicate an opening token request/handshake. Its token source
@@ -241,6 +274,13 @@ export function createRealtimeTransport(
     current.connect(); // public connect() resets retry attempts to zero
   }
 
+  function clearRetryTimer(): void {
+    if (retryTimer !== null) {
+      clearTimeout(retryTimer);
+      retryTimer = null;
+    }
+  }
+
   function ensureClient(): Centrifuge {
     client ??= build();
     return client;
@@ -248,7 +288,12 @@ export function createRealtimeTransport(
 
   function apply(actions: RealtimeAction[]): void {
     for (const action of actions) {
-      recordRealtimeDiagnostic({at: Date.now(), kind: 'policy', detail: action.kind});
+      recordRealtimeDiagnostic({
+        at: Date.now(),
+        kind: 'policy',
+        detail: action.kind,
+        code: 'code' in action ? action.code : undefined,
+      });
       switch (action.kind) {
         case 'connect':
           ensureClient().connect();
@@ -286,12 +331,36 @@ export function createRealtimeTransport(
           if (visibility === 'active') resume();
           break;
         case 'force-reconnect':
+        case 'online-reconnect':
+        case 'manual-reconnect':
           // Disconnect and connect on the SAME client rather than rebuilding:
           // centrifuge-js keeps the recovery offset across a reconnect, which is
           // what lets `createReplayGate` receive a recovery batch instead of a
           // cold subscribe. A fresh client would throw that away and force the
           // full REST re-sync this product deliberately does not do.
           resume();
+          break;
+        case 'terminal-retry':
+          // centrifuge-js stopped by itself (`disconnected`) because the token was
+          // refused. `resume` clears the token, so the reopen fetches a new one.
+          clearRetryTimer();
+          retryTimer = setTimeout(() => {
+            retryTimer = null;
+            // Still ended, still wanted, still in front? Anything else has
+            // already moved on (a return, a tap, a network change reopened it).
+            if (
+              client !== null &&
+              String(client.state) === 'disconnected' &&
+              state.wantConnected &&
+              state.foreground
+            ) {
+              resume();
+            }
+          }, action.delayMs);
+          break;
+        case 'terminal-hold':
+          // Nothing will reopen it, so there is no gap to wait ten seconds out.
+          display.push({kind: 'terminal'});
           break;
         default:
           break;
@@ -300,6 +369,7 @@ export function createRealtimeTransport(
   }
 
   function dispatch(signal: RealtimeSignal): void {
+    if (disposed) return;
     const step = policyStep(state, signal);
     commit(step.state);
     apply(step.actions);
@@ -319,17 +389,32 @@ export function createRealtimeTransport(
 
   const netInfoUnsub = NetInfo.addEventListener(netState => {
     const type = netState.type ?? null;
-    if (type !== state.networkType) {
+    // Reachability, not just connectivity — the same rule the rest of the app
+    // reads (`isOnlineFromNetInfo`): unknown counts as online. A Wi-Fi whose
+    // uplink dropped or a cellular dead zone keeps its KIND and loses only this.
+    const online = isOnlineFromNetInfo({
+      isConnected: netState.isConnected ?? null,
+      isInternetReachable: netState.isInternetReachable ?? null,
+    });
+    if (type !== state.networkType || online !== state.online) {
+      const reading =
+        netState.isConnected === false
+          ? ' offline'
+          : netState.isInternetReachable === false
+            ? ' unreachable'
+            : '';
       recordRealtimeDiagnostic({
         at: Date.now(),
         kind: 'network',
-        detail: `${state.networkType ?? '?'}->${type ?? '?'}${netState.isConnected === false ? ' offline' : ''}`,
+        detail: `${state.networkType ?? '?'}->${type ?? '?'}${reading}`,
       });
     }
     dispatch({
       kind: 'network',
-      networkType: netState.type ?? null,
-      online: netState.isConnected !== false,
+      networkType: type,
+      online,
+      at: now(),
+      socketUp: client !== null && String(client.state) === 'connected',
     });
   });
 
@@ -345,11 +430,15 @@ export function createRealtimeTransport(
       apply(step.actions);
     },
     reconnect() {
-      resume();
+      // 「지금 다시 연결」 and pull to refresh: the policy decides (and records)
+      // it, and it goes through the same `resume` as a foreground return.
+      dispatch({kind: 'manual'});
       return ensureClient().ready(10_000);
     },
     client: ensureClient,
     dispose() {
+      disposed = true;
+      clearRetryTimer();
       if (graceTimer !== null) {
         clearTimeout(graceTimer);
         graceTimer = null;
@@ -390,4 +479,31 @@ function toVisibility(status: AppStateStatus): AppVisibility {
  */
 export function attemptInFlight(client: Centrifuge): boolean {
   return (client as unknown as {_reconnecting?: unknown})._reconnecting === true;
+}
+
+/**
+ * Give a running client a new retry ceiling (#4895).
+ *
+ * centrifuge-js reads `maxReconnectDelay` from its own config every time it
+ * schedules a delay, but offers no setter, and the ceiling has to follow the
+ * foreground/online state while ONE client lives on (a new client would drop the
+ * recovery offsets). So this writes the private `_config`, defensively, like
+ * `attemptInFlight` reads `_reconnecting`: a library that moves it makes this
+ * answer `false` (the client keeps the ceiling it was built with — a 5 s ceiling
+ * in the background instead of 20 s, a degradation and not a failure). Whether it
+ * still works is pinned against the real library in `outageRecovery.test.ts`, so
+ * an upgrade that changes it fails there.
+ */
+export function setReconnectCeiling(client: Centrifuge, ms: number): boolean {
+  const config = (client as unknown as {_config?: {maxReconnectDelay?: unknown}})
+    ._config;
+  if (
+    config === undefined ||
+    config === null ||
+    typeof config.maxReconnectDelay !== 'number'
+  ) {
+    return false;
+  }
+  config.maxReconnectDelay = ms;
+  return true;
 }

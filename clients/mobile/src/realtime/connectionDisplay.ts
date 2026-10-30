@@ -17,6 +17,12 @@ import type {RealtimeStatus} from '@momo/core/lib/realtimeEvents';
 // Every gap reads `connecting` for ten seconds, including the first handshake.
 // Retry events do not restart the deadline. A foreground return gets one fresh
 // deadline because time spent suspended is not foreground recovery time (#4783).
+//
+// One exception: an ENDED socket that nothing is going to reopen (the server said
+// "do not reconnect", #4895). There is no gap to wait out, so showing
+// 「연결 중…」 for ten seconds would be a lie about something that is not
+// happening — it is shown as an outage at once, and the person can ask for a
+// reconnect from the banner.
 
 export const DISPLAY_GRACE_MS = 10_000;
 
@@ -33,7 +39,9 @@ export type DisplayEvent =
   /** The grace timer ran out. */
   | {kind: 'grace-expired'}
   /** Foreground return or an explicit request to check the socket. */
-  | {kind: 'resume'};
+  | {kind: 'resume'}
+  /** The socket ended and nothing will reopen it: an outage now, not a gap. */
+  | {kind: 'terminal'};
 
 export type DisplayAction = {kind: 'arm'} | {kind: 'cancel'};
 
@@ -86,6 +94,13 @@ export function displayStep(
         : [{kind: 'arm'}];
       const shown: RealtimeStatus = 'connecting';
       return {state: {...state, shown, graceArmed: true}, actions};
+    }
+
+    case 'terminal': {
+      return {
+        state: {shown: 'disconnected', graceArmed: false},
+        actions: state.graceArmed ? [{kind: 'cancel'}] : [],
+      };
     }
 
     default:
