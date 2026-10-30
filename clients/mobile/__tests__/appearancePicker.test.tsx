@@ -89,6 +89,12 @@ function mount() {
   );
 }
 
+function pickTheme(id: string) {
+  fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+  fireEvent.press(screen.getByTestId(`appearance-theme-${id}`));
+  fireEvent.press(screen.getByTestId('theme-picker-done'));
+}
+
 describe('테마 — 스킴을 고정한 채 바꿔도 memo 소비자가 따라간다', () => {
   it('새벽하늘 → 흑연 → 노을띠, 다크에서 매번 본문 잉크가 그 테마의 것이다', () => {
     mount();
@@ -99,15 +105,16 @@ describe('테마 — 스킴을 고정한 채 바꿔도 memo 소비자가 따라�
     expect(new Set([ink('dawnsky'), ink('graphite'), ink('noeul')]).size).toBe(3);
 
     expect(colorOf('probe-ink')).toBe(ink('dawnsky'));
-    fireEvent.press(screen.getByTestId('appearance-theme-graphite'));
+    pickTheme('graphite');
     expect(colorOf('probe-ink')).toBe(ink('graphite'));
-    fireEvent.press(screen.getByTestId('appearance-theme-noeul'));
+    pickTheme('noeul');
     expect(colorOf('probe-ink')).toBe(ink('noeul'));
     expect(saved()).toMatchObject({v: 2, scheme: 'dark', theme: 'noeul', signal: null});
   });
 
   it('고른 테마만 selected 이고 체크가 따라간다 — 셋 중 하나', () => {
     mount();
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
     const sel = () =>
       ['dawnsky', 'graphite', 'noeul'].map(
         id => screen.getByTestId(`appearance-theme-${id}`).props.accessibilityState?.selected,
@@ -115,7 +122,7 @@ describe('테마 — 스킴을 고정한 채 바꿔도 memo 소비자가 따라�
     expect(sel()).toEqual([true, false, false]);
     fireEvent.press(screen.getByTestId('appearance-theme-graphite'));
     expect(sel()).toEqual([false, true, false]);
-    expect(screen.getByTestId('appearance-theme-graphite-check')).toBeTruthy();
+    expect(screen.getByTestId('appearance-theme-graphite-check', {includeHiddenElements: true})).toBeTruthy();
     expect(screen.queryByTestId('appearance-theme-dawnsky-check')).toBeNull();
   });
 
@@ -159,7 +166,7 @@ describe('강조색 — 프리셋과 기본', () => {
         .reduce<Record<string, unknown>>((acc, part) => ({...acc, ...(part as object)}), {})
         .backgroundColor;
     for (const theme of ['dawnsky', 'noeul'] as const) {
-      fireEvent.press(screen.getByTestId(`appearance-theme-${theme}`));
+      pickTheme(theme);
       const solved = resolvePreset('seongun', theme, 'dark');
       expect(solved.ok).toBe(true);
       if (solved.ok) expect(dot('seongun')).toBe(solved.values.signal);
@@ -307,11 +314,11 @@ describe('카드 구분선은 앞 칸을 비켜 글자 열에서 시작한다 (#
     expect(swatch).toBeGreaterThan(0);
     // 앞 표지가 있는 두 카드는 같은 폭의 앞 칸을 쓴다 — 글자 시작이 같다(design-review #4457 r1 H1: 세 카드가 모두 달랐다).
     const leadWidth = (testID: string) => StyleSheet.flatten(screen.getByTestId(testID).props.style).width;
-    expect(leadWidth('appearance-theme-dawnsky-lead')).toBe(swatch);
+    expect(leadWidth('appearance-theme-picker-lead')).toBe(swatch);
     for (const id of ['default', ...SIGNAL_PRESET_IDS]) {
       expect(leadWidth(`appearance-signal-${id}-lead`)).toBe(swatch);
     }
-    expect(new Set(indentsOf('appearance-theme-list-card'))).toEqual(new Set([dividerIndent(swatch)]));
+    expect(within(screen.getByTestId('appearance-theme-list-card')).queryAllByTestId('group-divider')).toHaveLength(0);
     expect(new Set(indentsOf('appearance-signal-list-card'))).toEqual(new Set([dividerIndent(swatch)]));
     expect(new Set(indentsOf('theme-scheme-card'))).toEqual(new Set([dividerIndent('plain')]));
     // 대조군: 앞 칸 있는 열과 없는 열은 다르다 — 같으면 위 단정이 아무것도 가르지 못한다.
@@ -322,9 +329,10 @@ describe('카드 구분선은 앞 칸을 비켜 글자 열에서 시작한다 (#
 describe('테마 타일 (design-review M-1)', () => {
   it('라이트·다크 두 반쪽을 모두 보인다 — 다크에서도 테마 차이가 보인다', () => {
     mount();
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
     for (const id of ['dawnsky', 'graphite', 'noeul'] as const) {
       for (const mode of ['light', 'dark'] as const) {
-        const half = screen.getByTestId(`appearance-swatch-${id}-${mode}`, {includeHiddenElements: true});
+        const half = within(screen.getByTestId('theme-picker-grid')).getByTestId(`appearance-swatch-${id}-${mode}`, {includeHiddenElements: true});
         const image = (StyleSheet.flatten(half.props.style) ?? {}).experimental_backgroundImage;
         expect(String(image)).toContain(THEMES[id][mode].canvas[1]);
       }
@@ -333,6 +341,7 @@ describe('테마 타일 (design-review M-1)', () => {
 
   it('노을띠 행은 폰에서 띠가 없다는 사실을 말한다', () => {
     mount();
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
     expect(screen.getByText(/폰에서는 남색 띠 없이/)).toBeTruthy();
     expect(screen.getAllByText(/남색 띠/)).toHaveLength(1);
   });
@@ -381,5 +390,61 @@ describe('FixedScheme (하네스)', () => {
     );
     expect(colorOf('probe-ink')).toBe(paletteFrom('graphite', 'light').text);
     act(() => {});
+  });
+});
+
+describe('AP-6 테마 고르기 페이지', () => {
+  it('모드 필터·2열 격자·VoiceOver 라벨·선택 상태를 제공해요', () => {
+    mount();
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+    expect(screen.getByTestId('theme-picker-grid').props).toMatchObject({accessibilityRole: 'radiogroup', accessibilityLabel: '테마 스타일'});
+    const nord = screen.getByRole('radio', {name: 'Nord, 다크'});
+    expect(nord.props.accessibilityState.selected).toBe(false);
+    expect(StyleSheet.flatten(nord.props.style).width).toBe('48%');
+    expect(within(screen.getByTestId('theme-picker-page')).getAllByRole('radio').length).toBe(43 + 3);
+    fireEvent.press(screen.getByTestId('theme-picker-filter-system'));
+    expect(screen.queryByTestId('appearance-theme-catalog:nord')).toBeNull();
+    expect(within(screen.getByTestId('theme-picker-page')).getAllByRole('radio').length).toBe(19 + 3);
+    fireEvent.press(screen.getByTestId('theme-picker-filter-light'));
+    expect(within(screen.getByTestId('theme-picker-page')).getAllByRole('radio').length).toBe(20 + 3);
+    expect(screen.getByRole('radio', {name: 'GitHub, 라이트·다크 짝'})).toBeTruthy();
+  });
+
+  it('바로 적용하고 되돌리기는 진입 당시 테마와 모드를 함께 복원해요', () => {
+    mount();
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+    expect(screen.getByTestId('theme-picker-undo').props.accessibilityState.disabled).toBe(true);
+    fireEvent.press(screen.getByTestId('appearance-theme-catalog:nord'));
+    expect(saved()).toMatchObject({theme: 'catalog:nord', scheme: 'dark'});
+    expect(colorOf('probe-ink')).toBe(paletteFrom('catalog:nord', 'dark').text);
+    fireEvent.press(screen.getByTestId('theme-picker-filter-light'));
+    expect(saved()).toMatchObject({theme: 'dawnsky', scheme: 'light'});
+    fireEvent.press(screen.getByTestId('theme-picker-undo'));
+    expect(saved()).toMatchObject({theme: 'dawnsky', scheme: 'dark'});
+    expect(colorOf('probe-ink')).toBe(paletteFrom('dawnsky', 'dark').text);
+    fireEvent.press(screen.getByTestId('theme-picker-done'));
+    expect(screen.queryByTestId('theme-picker-page')).toBeNull();
+  });
+
+  it('완료 후 다시 들어가면 새 스냅샷이고, 재실행도 카탈로그 테마로 시작해요', () => {
+    const first = mount();
+    pickTheme('catalog:nord');
+    first.unmount();
+    mount();
+    expect(colorOf('probe-ink')).toBe(paletteFrom('catalog:nord', 'dark').text);
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+    fireEvent.press(screen.getByTestId('appearance-theme-graphite'));
+    fireEvent.press(screen.getByTestId('theme-picker-undo'));
+    expect(saved()).toMatchObject({theme: 'catalog:nord', scheme: 'dark'});
+  });
+
+  it('단일 모드 저장은 그 모드로 그리고, 시스템 필터에서는 짝 테마로 옮겨요', () => {
+    store.map.set(NON_SECRET_KEYS.appearance, JSON.stringify({v: 2, theme: 'catalog:nord', scheme: 'light'}));
+    mount();
+    expect(colorOf('probe-ink')).toBe(paletteFrom('catalog:nord', 'dark').text);
+    fireEvent.press(screen.getByTestId('appearance-theme-picker'));
+    fireEvent.press(screen.getByTestId('theme-picker-filter-system'));
+    expect(saved()).toMatchObject({theme: 'dawnsky', scheme: 'system'});
+    expect(screen.getByTestId('theme-picker-notice')).toHaveTextContent(/한쪽 모드만 있어서/);
   });
 });

@@ -884,7 +884,8 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     });
     const pending = await openPendingRow();
     const settled = screen.getByTestId(`feed-row-approval:${SETTLED}`);
-    expect(settled).toHaveTextContent(/승인됨/);
+    // 도구 승인은 결정 뒤 실행이 이어져요(요청 고리 §2.2). 결정 컨트롤은 없어요.
+    expect(settled).toHaveTextContent(/→ 실행 중/);
     // **test id가 아니라 라벨로 묻는다.** id는 `approvalId`에서 나오므로, 게이트가
     // 사라져 컨트롤이 id 없이 그려지면 id로 묻는 단언은 그것을 못 보고 초록으로
     // 남는다 (이 파일을 쓰면서 실제로 그 구멍에 한 번 빠졌다). 사람이 보는 것은
@@ -1065,7 +1066,7 @@ describe('오프라인', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-offline-approval:${PENDING}`),
-      ).toHaveTextContent(/연결이 끊겨 지금은 결정할 수 없습니다/),
+      ).toHaveTextContent(/^연결이 끊겨 지금은 결정할 수 없어요\. 다시 연결되면 여기서 승인하거나 거부할 수 있어요\.$/),
     );
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-approve`)).toBeNull();
   });

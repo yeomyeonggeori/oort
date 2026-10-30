@@ -965,7 +965,7 @@ function StepRow({
 function StatusChip({label, tone}: {label: string; tone: 'ok' | 'warn' | 'danger' | 'muted'}) {
   const styles = useStyles(buildStyles);
   return (
-    <View style={[styles.statusChip, styles[`statusChip_${tone}`]]}>
+    <View testID="agent-status-chip" style={[styles.statusChip, styles[`statusChip_${tone}`]]}>
       <Text style={[styles.statusChipText, styles[`statusChipText_${tone}`]]}>
         {label}
       </Text>

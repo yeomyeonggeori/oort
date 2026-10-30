@@ -16,28 +16,13 @@
 // 경로를 읽지 않는다).
 // =============================================================================
 
-import {BACKDROP_PRESETS, BACKDROP_SOLIDS} from '../tokens';
+import {WALLPAPER_PRESETS, WALLPAPER_SOLIDS, isSolidId, isPresetId, type SolidId, type PresetId} from './wallpaper';
+export {SOLID_IDS, PRESET_IDS, isSolidId, isPresetId, type SolidId, type PresetId} from './wallpaper';
 
 export const BACKGROUND_ENTRY = 'momo.mobile.background.v1';
 
-export const SOLID_IDS = [
-  'slate',
-  'rose',
-  'amber',
-  'sage',
-  'sky',
-  'plum',
-  'clay',
-  'ink',
-] as const;
-export type SolidId = (typeof SOLID_IDS)[number];
-
-export const SOLIDS = BACKDROP_SOLIDS;
-
-export const PRESET_IDS = ['saebyeok', 'noeul', 'angae', 'sup', 'bam', 'jinju'] as const;
-export type PresetId = (typeof PRESET_IDS)[number];
-
-export const PRESETS = BACKDROP_PRESETS;
+export const SOLIDS = WALLPAPER_SOLIDS;
+export const PRESETS = WALLPAPER_PRESETS;
 
 /** 내 사진의 처리 상한 — 긴 변 1600px, JPEG, 약 1MB 이하(ADR-0189 증보 2). */
 export const PHOTO_MAX_LONG_SIDE = 1600;
@@ -58,14 +43,6 @@ export type BackgroundChoice =
 export const NO_BACKGROUND: BackgroundChoice = {kind: 'none'};
 
 const PHOTO_FILE = /^bg-[0-9]{1,16}\.jpg$/;
-
-export function isSolidId(value: unknown): value is SolidId {
-  return typeof value === 'string' && (SOLID_IDS as readonly string[]).includes(value);
-}
-
-export function isPresetId(value: unknown): value is PresetId {
-  return typeof value === 'string' && (PRESET_IDS as readonly string[]).includes(value);
-}
 
 /**
  * 저장된 원문을 읽는다. 모르는 값·깨진 JSON·경로처럼 생긴 파일 이름은 **없음**이다 —
@@ -117,9 +94,10 @@ export function backgroundLabel(choice: BackgroundChoice): string {
 }
 
 /** 시스템 접근성 설정이 배경을 끄는 이유. 둘 다 불투명 기본 바닥으로 돌아간다. */
-export type BackgroundFallback = 'reduce-transparency' | 'increase-contrast';
+export type BackgroundFallback = 'reduce-transparency' | 'increase-contrast' | 'theme-contrast';
 
 export const BACKGROUND_FALLBACK_COPY: Readonly<Record<BackgroundFallback, string>> = {
+  'theme-contrast': '이 테마에서는 배경 위 글자 대비를 지키기 어려워 기본 바닥으로 보여요.',
   'reduce-transparency': '시스템 설정이 투명 효과를 끄고 있어서 기본 바닥으로 보여요.',
   'increase-contrast': '시스템 설정이 대비를 높이고 있어서 기본 바닥으로 보여요.',
 };

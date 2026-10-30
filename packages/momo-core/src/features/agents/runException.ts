@@ -1,5 +1,8 @@
+import { runBundleSnapshot, requestBundleState, type RequestBundleSnapshot } from "../timeline/requestBundle";
 import type { AgentLiveness, AgentRunProgress } from "../../lib/api";
 import {
+  approvalEndState,
+  isOpenRunPhase,
   endReasonText,
   runPhaseLabel,
   serverFactsOf,
@@ -121,6 +124,7 @@ export interface RunException {
 }
 
 export interface RunExceptionContext {
+  bundle?: RequestBundleSnapshot;
   graceMs?: number;
   /** 에이전트의 확인 박자(#4621). 모르면 undefined. */
   routine?: RoutineHint;
@@ -150,6 +154,9 @@ export function runException(
   nowMs: number,
   context: RunExceptionContext = {}
 ): RunException | null {
+  if (!isOpenRunPhase(progress.phase) && approvalEndState(progress.endReason) !== null) return null;
+  const bundle = context.bundle ?? runBundleSnapshot(progress);
+  if (bundle !== undefined && ["declined", "expired"].includes(requestBundleState({ ...bundle, run: progress }))) return null;
   const facts = serverFactsOf(progress);
   const base = {
     runId: progress.id,

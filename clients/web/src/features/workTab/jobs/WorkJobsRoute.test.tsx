@@ -228,12 +228,12 @@ describe("「작업」 한 화면: 결과 중심 줄 (ADR-0202 D1)", () => {
     expect(screen.getByTestId("work-jobs-running").textContent).toBe("지금 진행 1");
   });
 
-  it("승인 대기 줄은 맨 위에 서고, 승인 단추 없이 카드가 있는 채널로 간다(대신 승인 없음, D5)", async () => {
+  it("승인 필요 줄은 맨 위에 서고, 승인 단추 없이 카드가 있는 채널로 간다(대신 승인 없음, D5)", async () => {
     serve({ mine: [mineRun, approvalRun], team: [] });
     render(mount());
     const rows = await screen.findAllByTestId("work-job-row");
     expect(rows[0]!.dataset.jobId).toBe(approvalRun.sessionId);
-    expect(within(rows[0]!).getByTestId("team-board-state").textContent).toBe("승인 대기");
+    expect(within(rows[0]!).getByTestId("team-board-state").textContent).toBe("승인 필요");
     const link = screen.getByTestId("work-job-approval-link");
     expect(link.getAttribute("href")).toBe(`/c/${CH_AGENT_LAB}`);
     // 「작업」 화면에는 결정 단추가 없다.

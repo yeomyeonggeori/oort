@@ -1,0 +1,71 @@
+appId: app.momo.ios
+name: 4194-theme-catalog-capture
+---
+# AP-6 스택 검증용 6장. 워커는 실행하지 않아요.
+# 전용 fixture 기기에서 -momoMeasure THEME-LIVE 표면을 띄운 뒤 실행해요.
+# maestro --device <udid> test -e SHOT=4194 clients/mobile/maestro/4194-theme-catalog-capture.yaml
+# 같은 흐름을 SE·16 Pro 및 큰 글씨에서 확인하고, VoiceOver 라디오 이름·선택됨은 수동 확인해요.
+# THEME-LIVE의 인물은 가상이며, 실제 사용자 기기·데이터에는 실행하지 않아요.
+- extendedWaitUntil:
+    visible:
+      id: "theme-live-caption"
+    timeout: 120000
+- scrollUntilVisible:
+    element:
+      id: "appearance-theme-picker"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "appearance-theme-picker"
+- tapOn:
+    id: "theme-picker-filter-light"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-1-light-grid
+- tapOn:
+    id: "theme-picker-filter-system"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-2-system-pairs
+- tapOn:
+    id: "theme-picker-filter-dark"
+- scrollUntilVisible:
+    element:
+      id: "appearance-theme-catalog:nord"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "appearance-theme-catalog:nord"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-3-nord-selected
+- tapOn:
+    id: "theme-picker-done"
+- scrollUntilVisible:
+    element:
+      id: "theme-live-top"
+    direction: UP
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-4-message-repaint
+- scrollUntilVisible:
+    element:
+      id: "appearance-theme-picker"
+    direction: DOWN
+    timeout: 30000
+- tapOn:
+    id: "appearance-theme-picker"
+- tapOn:
+    id: "theme-picker-filter-light"
+- tapOn:
+    id: "appearance-theme-graphite"
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-5-graphite-preview
+- tapOn:
+    id: "theme-picker-undo"
+- scrollUntilVisible:
+    element:
+      id: "appearance-theme-catalog:nord"
+    direction: DOWN
+    timeout: 30000
+- waitForAnimationToEnd
+- takeScreenshot: ${SHOT}-6-restored-nord
+- tapOn:
+    id: "theme-picker-done"

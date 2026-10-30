@@ -7,7 +7,7 @@ import React, {
   useState,
   useSyncExternalStore,
 } from 'react';
-import {Appearance, useColorScheme} from 'react-native';
+import {AccessibilityInfo, Appearance, useColorScheme} from 'react-native';
 import {
   DEFAULT_APPEARANCE,
   readMobileAppearance,
@@ -24,11 +24,17 @@ import {
   NO_BACKGROUND,
   type BackgroundChoice,
   type BackgroundFallback,
-} from './background/model';
+} from '@momo/core/design/mobileBackground';
 import {getBackground, setBackground, subscribeBackground} from './background/store';
-import {DEFAULT_THEME_ID, THEME_IDS, THEME_LABELS, type ThemeId} from './ds2Tokens';
+import {DEFAULT_THEME_ID, THEME_IDS} from './ds2Tokens';
 import {lightPalette, darkPalette, type Palette} from './tokens';
 import {NON_SECRET_KEYS, nonSecretStore} from '../storage/kv';
+
+import {themeLabel, schemeForThemePick, pickNotice} from '@momo/core/design/themeGallery';
+import {effectiveScheme, modesOf, themeMoveForScheme, moveNotice, type ThemeRef} from '@momo/core/design/themeResolve';
+import {phoneThemeRef, phoneThemeMode} from './themeCatalog';
+
+type MobileAppearance = AppearanceV2<ThemeRef>;
 
 // =============================================================================
 // 스킴을 고르는 곳 (U2 · `docs/planning/2026-08-05-uxui-elevation-points.md` §1).
@@ -131,14 +137,14 @@ export function themeChoiceLabel(choice: ThemeChoice): string {
 }
 
 /** 테마(새벽하늘·흑연·노을띠) 이름. 고르는 값 `ThemeChoice` 와 다른 축이다. */
-export function themeIdLabel(id: ThemeId): string {
-  return THEME_LABELS[id];
+export function themeIdLabel(id: ThemeRef): string {
+  return themeLabel(id);
 }
 
 export {THEME_IDS};
 
 /** 설정 「테마」 줄의 값 — 「새벽하늘 · 라이트」. */
-export function themeSummary(id: ThemeId, choice: ThemeChoice): string {
+export function themeSummary(id: ThemeRef, choice: ThemeChoice): string {
   return `${themeIdLabel(id)} · ${themeChoiceLabel(choice)}`;
 }
 
@@ -151,7 +157,7 @@ export function paletteFor(scheme: ColorScheme): Palette {
  * 폰의 기본 외양. core 의 기본(`DEFAULT_APPEARANCE` — 웹·데스크탑의 것이고 스킴이 시스템이다)에서
  * **스킴만** 폰의 기본으로 바꾼 것이다. 테마·신호·밀도는 core 기본 그대로다.
  */
-export const MOBILE_DEFAULT_APPEARANCE: AppearanceV2 = {
+export const MOBILE_DEFAULT_APPEARANCE: MobileAppearance = {
   ...DEFAULT_APPEARANCE,
   scheme: DEFAULT_THEME_CHOICE,
 };
@@ -180,13 +186,14 @@ function isUnset(raw: string | undefined): boolean {
  * 그렸다가 고른 색으로 뒤집히는 깜빡임이 있었을 것이고, 그것이 `storage/kv.ts` 가 MMKV 인
  * 이유이기도 하다.
  */
-function readStoredAppearance(): AppearanceV2 {
+function readStoredAppearance(): MobileAppearance {
   try {
     const store = nonSecretStore();
     const current = store.getString(NON_SECRET_KEYS.appearance);
     const legacyScheme = store.getString(NON_SECRET_KEYS.themeChoice);
     if (isUnset(current) && isUnset(legacyScheme)) return MOBILE_DEFAULT_APPEARANCE;
-    return readMobileAppearance({current, legacyScheme});
+    const stored = readMobileAppearance({current, legacyScheme});
+    return {...stored, scheme: schemeForThemePick(stored.scheme, stored.theme).scheme};
   } catch {
     // 네이티브 모듈이 없는 환경(단위 테스트, 하네스의 일부)에서 색이 아예 안
     // 나오는 것보다 기본을 따르는 편이 낫다. 읽을 저장소가 없다는 것도 「안 고름」이다.
@@ -194,7 +201,7 @@ function readStoredAppearance(): AppearanceV2 {
   }
 }
 
-function writeStoredAppearance(next: AppearanceV2): void {
+function writeStoredAppearance(next: MobileAppearance): void {
   try {
     nonSecretStore().set(NON_SECRET_KEYS.appearance, serializeAppearance(next));
   } catch {
@@ -233,8 +240,9 @@ interface ThemeValue {
   /** 지금 화면에 서 있는 팔레트(테마 × 모드 × 신호가 풀린 결과). */
   palette: Palette;
   /** 고른 테마(새벽하늘·흑연·노을띠). 스킴과 다른 축이다. */
-  themeId: ThemeId;
-  setTheme: (id: ThemeId) => void;
+  themeId: ThemeRef;
+  setTheme: (id: ThemeRef) => void;
+  restoreTheme: (theme: ThemeRef, scheme: ThemeChoice) => void;
   /** 사람이 고른 신호(저장된 그대로). 지금 모드에서 풀린 결과는 `signalState`. */
   signal: SignalChoice;
   /** 지금 테마 × 모드에서 신호가 어떻게 풀렸는가 — 보정됐는지, 거절됐는지. */
@@ -290,6 +298,7 @@ const DETACHED: ThemeValue = {
   },
   themeId: DEFAULT_THEME_ID,
   setTheme: () => {},
+  restoreTheme: () => {},
   signal: null,
   signalState: {kind: 'default'},
   setSignal: () => {},
@@ -387,7 +396,7 @@ export function ThemeProvider({
 }): React.JSX.Element {
   // 초기값을 lazy initializer 로 읽는다: MMKV 읽기는 싸지만 매 렌더 할 일은
   // 아니고, 무엇보다 **첫 렌더에 이미 답이 있어야** 한다.
-  const [appearance, setAppearance] = useState<AppearanceV2>(readStoredAppearance);
+  const [appearance, setAppearance] = useState<MobileAppearance>(readStoredAppearance);
   // 앱 전체에서 시스템을 구독하는 **유일한** 자리다 (파일 머리 주석).
   const system = useColorScheme();
   // 배경은 React 밖의 저장소가 들고(로그아웃이 그곳을 부른다) 프로바이더는 구독만 한다.
@@ -397,14 +406,24 @@ export function ThemeProvider({
   // 최신 값은 ref 에도 둔다: 한 틱에 두 번 고르면(테마, 이어서 신호) 두 번째가 첫째를
   // 덮어쓰지 않아야 하고, 저장은 상태 갱신 함수 안이 아니라 밖에서 한다.
   const latest = useRef(appearance);
-  const update = useCallback((patch: Partial<Omit<AppearanceV2, 'v'>>) => {
-    const next: AppearanceV2 = {...latest.current, ...patch};
+  const update = useCallback((patch: Partial<Omit<MobileAppearance, 'v'>>) => {
+    const next: MobileAppearance = {...latest.current, ...patch};
     latest.current = next;
     setAppearance(next);
     writeStoredAppearance(next);
   }, []);
-  const setChoice = useCallback((next: ThemeChoice) => update({scheme: next}), [update]);
-  const setTheme = useCallback((id: ThemeId) => update({theme: id}), [update]);
+  const setChoice = useCallback((next: ThemeChoice) => {
+    const move = themeMoveForScheme(latest.current.theme, next);
+    update({scheme: next, ...(move ? {theme: move.to} : {})});
+    if (move) AccessibilityInfo.announceForAccessibility?.(moveNotice(move));
+  }, [update]);
+  const setTheme = useCallback((id: ThemeRef) => {
+    const theme = phoneThemeRef(id);
+    const picked = schemeForThemePick(latest.current.scheme, theme);
+    update({theme, scheme: picked.scheme});
+    if (picked.adjusted) AccessibilityInfo.announceForAccessibility?.(pickNotice(picked.adjusted));
+  }, [update]);
+  const restoreTheme = useCallback((theme: ThemeRef, scheme: ThemeChoice) => update({theme, scheme}), [update]);
   const setSignal = useCallback((next: SignalChoice) => update({signal: next}), [update]);
 
   const setBubble = useCallback(
@@ -421,7 +440,7 @@ export function ThemeProvider({
     // 「시스템은 지금 무엇인가」에 답할 것이 `scheme` 밖에 없었다.
     const fromSystem: ColorScheme = system === 'light' ? 'light' : 'dark';
     const choice = appearance.scheme;
-    const scheme = resolveChoice(choice, fromSystem);
+    const scheme = effectiveScheme(choice, modesOf(appearance.theme)) ?? fromSystem;
     const shown = effectiveBackground(background, reduceTransparency, increaseContrast);
     const resolved = resolveAppearance(appearance.theme, scheme, appearance.signal, shown.active);
     return {
@@ -432,13 +451,14 @@ export function ThemeProvider({
       palette: resolved.palette,
       themeId: appearance.theme,
       setTheme,
+      restoreTheme,
       signal: appearance.signal,
       signalState: resolved.signal,
       setSignal,
       background,
       setBackground,
-      backgroundActive: shown.active,
-      backgroundFallback: shown.fallback,
+      backgroundActive: resolved.palette.backdrop === 'image',
+      backgroundFallback: shown.active && resolved.palette.backdrop !== 'image' ? 'theme-contrast' : shown.fallback,
       bubble: appearance.bubble,
       setBubble,
     };
@@ -455,6 +475,7 @@ export function ThemeProvider({
     increaseContrast,
     setChoice,
     setTheme,
+    restoreTheme,
     setSignal,
     bubbleKey,
     setBubble,
@@ -481,7 +502,7 @@ export function FixedScheme({
   children,
 }: {
   scheme: ColorScheme;
-  theme?: ThemeId;
+  theme?: ThemeRef;
   signal?: SignalChoice;
   /** 하네스가 배경이 깔린 모습을 찍는다. 접근성 설정은 여기서 꺼진 것으로 본다. */
   background?: BackgroundChoice;
@@ -497,21 +518,23 @@ export function FixedScheme({
   const bubbleKey = JSON.stringify(bubble ?? null);
   const value = useMemo<ThemeValue>(() => {
     const active = background.kind !== 'none';
-    const resolved = resolveAppearance(theme, scheme, signal, active);
+    const effective = phoneThemeMode(theme, scheme);
+    const resolved = resolveAppearance(theme, effective, signal, active);
     return {
-      choice: scheme,
-      scheme,
+      choice: effective,
+      scheme: effective,
       systemScheme: scheme,
       setChoice: () => {},
       palette: resolved.palette,
       themeId: theme,
       setTheme: () => {},
+      restoreTheme: () => {},
       signal,
       signalState: resolved.signal,
       setSignal: () => {},
       background,
       setBackground: () => {},
-      backgroundActive: active,
+      backgroundActive: resolved.palette.backdrop === 'image',
       backgroundFallback: null,
       bubble,
       setBubble: () => {},

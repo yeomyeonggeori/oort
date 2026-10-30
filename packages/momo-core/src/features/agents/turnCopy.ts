@@ -1,3 +1,4 @@
+import { REQUEST_WORD } from "./runPhase";
 import type { AgentLiveness } from "../../lib/api";
 import { particleFor } from "../../lib/koreanParticle";
 import { runPhaseDetail, runPhaseLabel } from "./runPhase";
@@ -373,7 +374,7 @@ function badgeWord(
     case "working":
       return "작업 중";
     case "awaiting_approval":
-      return "승인 대기";
+      return REQUEST_WORD.approval;
     case "queued":
       return shown.length === 1 && shown[0].server !== undefined
         ? runPhaseLabel(shown[0].server)
@@ -392,7 +393,7 @@ export function turnWord(
   if (state === "queued") {
     return server === undefined ? "대기 중" : runPhaseLabel(server);
   }
-  return state === "working" ? "작업 중" : "승인 대기";
+  return state === "working" ? "작업 중" : REQUEST_WORD.approval;
 }
 
 /** 허브 칩의 접근성 이름: 「<이름> 에이전트가 …요.」 */
