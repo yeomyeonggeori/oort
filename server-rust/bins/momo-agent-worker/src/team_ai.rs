@@ -625,7 +625,9 @@ impl AgentWorker {
                 .await?;
                 // The ledger row is written whether or not a card came of it: the
                 // tokens were spent, and the daily ceiling reads this table.
-                let resolved = RunUsageReport::resolve(Some(&ledger), &fallback_model, None, None);
+                let mut resolved =
+                    RunUsageReport::resolve(Some(&ledger), &fallback_model, None, None);
+                resolved.source = momo_agent::UsageSource::Measured;
                 record_run_usage_in_tx(conn, workspace_id, run_id, agent, channel_id, &resolved)
                     .await?;
                 team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches).await?;
@@ -927,7 +929,8 @@ impl AgentWorker {
                 )
                 .await?;
                 if let Some(report) = ledger {
-                    let resolved = RunUsageReport::resolve(Some(&report), &model, None, None);
+                    let mut resolved = RunUsageReport::resolve(Some(&report), &model, None, None);
+                    resolved.source = momo_agent::UsageSource::Measured;
                     record_run_usage_in_tx(
                         conn,
                         workspace_id,

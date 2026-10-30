@@ -585,12 +585,12 @@ pub async fn mark_approval_decided_in_tx(
     decided_by: Uuid,
     decided_at: DateTime<Utc>,
     reason: Option<&str>,
-) -> Result<(), DbError> {
-    sqlx::query(
+) -> Result<bool, DbError> {
+    let result = sqlx::query(
         "UPDATE approval \
             SET status = $2::approval_status, decided_by = $3, decided_at = $4, \
                 decision_reason = $5 \
-          WHERE id = $1",
+          WHERE id = $1 AND status = 'pending'",
     )
     .bind(approval_id)
     .bind(status)
@@ -599,7 +599,7 @@ pub async fn mark_approval_decided_in_tx(
     .bind(reason)
     .execute(&mut *conn)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() == 1)
 }
 
 /// Record the claim grant on a just-decided approval (ADR-0186 증보 v3 V3-4). Called
@@ -686,26 +686,42 @@ pub const RUN_CANCELLED_DECISION_REASON: &str = "agent run cancelled by human";
 /// permits a decider only for `approved`/`rejected`, so naming one here would be
 /// refused by the database anyway.
 ///
-/// Returns how many approvals were retired, which the caller records rather than
-/// asserts on: zero is the ordinary case, because most runs raise no approval.
+/// Returns the approvals actually retired, still locked, so the caller settles
+/// their cards and broadcasts in this same transaction. An empty list is ordinary.
 pub async fn cancel_pending_approvals_for_run_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     run_id: Uuid,
     decided_at: DateTime<Utc>,
-) -> Result<u64, DbError> {
-    let result = sqlx::query(
-        "UPDATE approval \
-            SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
-          WHERE workspace_id = $1 AND run_id = $2 AND status = 'pending'",
+) -> Result<Vec<LockedApproval>, DbError> {
+    let ids: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM approval WHERE workspace_id = $1 AND run_id = $2 \
+         AND status = 'pending' ORDER BY id FOR UPDATE",
     )
     .bind(workspace_id)
     .bind(run_id)
-    .bind(decided_at)
-    .bind(RUN_CANCELLED_DECISION_REASON)
-    .execute(&mut *conn)
+    .fetch_all(&mut *conn)
     .await?;
-    Ok(result.rows_affected())
+    let mut cancelled = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(approval) = lock_approval_in_tx(conn, workspace_id, id).await? else {
+            continue;
+        };
+        let result = sqlx::query(
+            "UPDATE approval SET status = 'cancelled', decided_at = $3, decision_reason = $4 \
+             WHERE workspace_id = $1 AND id = $2 AND status = 'pending'",
+        )
+        .bind(workspace_id)
+        .bind(id)
+        .bind(decided_at)
+        .bind(RUN_CANCELLED_DECISION_REASON)
+        .execute(&mut *conn)
+        .await?;
+        if result.rows_affected() == 1 {
+            cancelled.push(approval);
+        }
+    }
+    Ok(cancelled)
 }
 
 /// The idempotency ledger row (Swift :277-288).
@@ -968,8 +984,8 @@ pub fn approval_request_props(
         "action_type": action_type,
         "call_id": call.call_id,
         "tool_name": call.name,
-        "title": format!("Approve {}", call.name),
-        "summary": "Review the proposed tool call before oort executes it.",
+        "title": format!("도구 「{}」 실행", call.name),
+        "summary": "실행할 도구를 확인하고 결정해 주세요.",
         "arguments": raw_arguments,
         "status": "pending",
         "expires_at_ms": expires_at.timestamp_millis(),
@@ -1151,7 +1167,7 @@ fn apply_login_handoff_props(props: &mut Value, call: &ToolCall) {
 
 /// The one-line body of an `approval_request` message (Swift :1618).
 pub fn approval_request_body(tool_name: &str) -> String {
-    format!("Approval required: {tool_name}")
+    format!("도구 「{tool_name}」을 실행해도 될까요?")
 }
 
 /// The receipt a decision returns and stores (Swift `ApprovalDecisionReceiptDTO`).
@@ -1578,10 +1594,10 @@ mod tests {
             None,
         );
         assert!(props.get("kind").is_none());
-        assert_eq!(props["title"], json!("Approve work.session.end"));
+        assert_eq!(props["title"], json!("도구 「work.session.end」 실행"));
         assert_eq!(
             props["summary"],
-            json!("Review the proposed tool call before oort executes it.")
+            json!("실행할 도구를 확인하고 결정해 주세요.")
         );
         // The overlay reads `reason` and `session_id` out of the arguments, and
         // it must not do that for a tool that happens to use the same words.

@@ -925,3 +925,34 @@ owner의 답이 오면 Status 줄만 `Accepted (날짜, owner 결정 인용)`로
 ### 바뀌지 않는 것
 
 D1~D9·K1~K7·A1·A2·A5·L0~L6(Q1~Q3 포함)·M1~M5·F1~F9(F3 마지막 항·F6 railway 계획 문구 제외), 기본(플래그 없음) T2 stdout·stderr·종료 코드와 정본 키 집합 46, compose의 `--with-agents` 동작, `infra/railway/railway.json`의 서비스·변수·시작 명령과 `check_railway_catalog.py`의 규칙·mutation, `infra/hermes/`의 게이트·사이드카, `--claim`, T2의 다른 거절들, `OORT_COHOSTED_AGENT_TOOLS_LOCKED`가 api 전용 리터럴이라는 것, 서버 코드, oort가 구독 OAuth 토큰·원본 provider 키를 받지도 저장하지도 않는다는 불변식.
+
+## 증보 2026-10-30 — Codex 구독 웹 검색만 허용 (#4794)
+
+- Status: **Accepted (2026-10-30, owner 결정)**. 근거: [#4794의 10-30 결정 댓글](https://github.com/yeomyeonggeori/oort/issues/4794#issuecomment-6510851984). Codex 구독 검색만 켜고 `web_extract`는 계속 막으며, 커넥터를 켠 동안은 `web` 전부 끈다.
+- 범위: 공동 호스팅 Hermes의 저장소 기본 설정·잠금 게이트·시험·공개 보안 설명. 서비스 배포·환경변수·로그인·개인 Hermes 인스턴스 변경은 별도 미션이다.
+
+### W1. 먼저 확인한 잠긴 버전의 능력 [소스]
+
+고정 이미지는 `infra/rust/docker-compose.rust.yml`과 `infra/railway/railway.json`의 공식 v0.22.2 index digest `sha256:36099926da316742423544e055d4734777105ffe6341873af5459b957d0c2919`다. 아래는 최신 main이 아니라 [v0.22.2 태그](https://github.com/NousResearch/hermes-agent/releases/tag/v0.22.2)의 commit `d923a5eb487a17c0a68801bba9ef0f56c81040a8`에서 확인했다.
+
+1. **검색만 선택할 수 있다.** [`toolsets.py:76–77`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/toolsets.py#L76-L77)의 `web`은 `web_search`·`web_extract`, `search`는 `web_search` 하나다. [`hermes_cli/tools_config.py:561–637`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/hermes_cli/tools_config.py#L561-L637)는 `platform_toolsets.api_server`의 명시 목록과 `search` 같은 사용자 선택을 해석한다. `agent.disabled_toolsets`는 마지막에 도구 단위로 빼므로([`model_tools.py:316–338`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/model_tools.py#L316-L338)), 기본 설정에서는 `web` 금지를 빼고 API 목록을 `memory`·`todo`·`session_search`·`search`로 좁힌다. `web`을 금지한 채 `search`만 더하면 검색도 사라진다.
+2. **Codex 구독 검색에 별도 공급자 키는 필요 없다.** [`plugins/web/openai_native/provider.py:1–14`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/plugins/web/openai_native/provider.py#L1-L14)와 [같은 버전 문서:383–399](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/website/docs/user-guide/features/web-search.md#L383-L399)는 `web.search_backend: openai-native`와 기존 `openai-codex` OAuth를 사용한다. [`agent/transports/codex.py:238–244`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/agent/transports/codex.py#L238-L244)는 이미 허용된 클라이언트 `web_search`를 Codex Responses의 서버 측 검색 도구로 1:1 교체한다. 검색이 원래 없는 세션에는 추가하지 않는다. Hermes가 Firecrawl 등으로 직접 검색하는 방식과 다르다.
+3. **다른 모델 경로로 검색 권한을 넓히지 않는다.** 네이티브 검색은 Codex Responses 전용이다. OAuth가 없거나 다른 모델·호환 엔드포인트를 쓰면 지원하지 않는 검색으로 실패한다([`provider.py:72–79`](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/plugins/web/openai_native/provider.py#L72-L79)). 기존 모델 선택·fallback은 유지한다. Claude/API 키 모델로 대화가 전환되어도 별도 검색 공급자를 자동으로 골라 성공시키지 않는다.
+
+### W2. 허용 표면과 검색어 유출 위협
+
+- `lockgate.ALLOWED_TOOLS`는 `memory`·`todo_list`·`session_search`·`web_search`다. `web_extract`·터미널·파일·브라우저 등 나머지는 계속 거절한다. `web` 전체를 켜서 추출 도구가 선택되면 자격증명 유무와 무관하게 기동 전 검사에서 실패한다.
+- 검색이 선택되면 게이트는 `web.search_backend`가 정확히 `openai-native`, `web.keyless_fallback`이 명시적인 `false`인지 확인한다. 임의 공급자·자동 선택·익명 검색 fallback은 기본 계약에 없다. 구독 토큰은 기존 Hermes 볼륨 경계를 따른다(D7, ADR-0004).
+- **검색어는 외부로 나간다.** 모델이 대화의 일부를 검색어에 넣을 수 있고 그 검색어가 OpenAI의 검색 처리에 전달된다. 검색 결과도 신뢰할 수 없는 외부 입력이다. 검색 단독 허용은 데이터 유출·프롬프트 인젝션을 없애는 보장이 아니다. 쿼리 정화·개인정보 차단·공급자 내부 검색/페이지 처리 통제·무보관을 증명하거나 약속하지 않는다. 여기서 페이지 열기 금지는 Hermes의 `web_extract`를 허용하지 않는다는 뜻이다.
+
+### W3. 커넥터와 검색은 배타적이다 — K4-1 유지
+
+`mcp_servers`가 비어 있지 않으면 기존 K4 규칙이 모두 적용되고 `agent.disabled_toolsets`에 `web`이 있어야 한다. 기존 커넥터 참조 설정은 바꾸지 않는다. 이에 더해 `tool_problems`는 **선택된 도구**에 `web_search`나 `web_extract`가 있으면 커넥터 설정을 거절한다. 기동 전에는 가용성 필터 전 목록을 검사한다. 기동 후 1회 보고는 API가 보고한 도구와 그때 읽은 설정에서 재해석한 도구의 합집합에 같은 규칙을 적용한다. 위반은 PID 1 종료를 요청하며 설정을 읽을 수 없으면 검증 성공으로 기록하지 않는다.
+
+이로써 메일·드라이브를 읽는 Hermes에 검색 경로를 함께 더하지 않는다. 서버 측 검색도 기존 `web_search`가 있어야만 주입되는 W1-2의 조건을 따른다. **관측 한계:** [v0.22.2 API 구현:2944–2971](https://github.com/NousResearch/hermes-agent/blob/d923a5eb487a17c0a68801bba9ef0f56c81040a8/gateway/platforms/api_server.py#L2944-L2971)은 설정 UI의 범주만 열거하므로 `search`를 보여주지 않는다. 보고의 `live_tools`와 `selected_tools`를 구분하고 `unreported_selected_tools`로 이 차이를 드러낸다. 설정 재해석은 프로세스 내부 도구 목록의 관측이 아니다. 이 검사는 운영자 설정·Hermes가 보고하는 표면에 대한 것이며, 벤더 MCP의 자기 보고를 검증하는 보장이나 지속 감시가 아니다(K4의 한계 유지).
+
+### W4. 되돌리기와 검증 경계
+
+- 되돌릴 때 기본 API 목록에서 `search`를 빼고 `agent.disabled_toolsets`에 `web`을 복원하며, 게이트 허용 목록에서 `web_search`를 뺀다. 검색 설정도 제거할 수 있다. `memory`·`todo_list`·`session_search`만 남는 기존 대화 경로가 양쪽 게이트 시험의 양성 대조다. 커넥터를 켤 때는 검색 설정을 재사용하는 대신 기존 K4 설정을 적용한다.
+- 오프라인 회귀·음성 대조는 [`test_default_config.py`](../../infra/hermes/test_default_config.py)의 `WebToolPolicy`·`EnforcedWebToolPolicy`, [`test_lockgate_connectors.py`](../../infra/hermes/test_lockgate_connectors.py)의 `test_selected_web_tools_are_refused_even_with_the_connector_deny_list`에 있다. 부트 게이트·실행 후 보고의 실제 진입점을 시험하고 Hermes 모듈·HTTP·PID 1만 모의로 둔다. 실제 OAuth·검색 공급자 호출은 하지 않는다.
+- `runtime-unverified`: 고정 Docker 이미지의 실제 기동·`/v1/toolsets`·Codex 구독 검색 성공·커넥터 배타의 컨테이너 검증은 planner의 S3 스택 검증에 남긴다. 저장소 변경이 Railway의 실행 중 설정을 갱신하거나 배포를 승인하지 않는다.
