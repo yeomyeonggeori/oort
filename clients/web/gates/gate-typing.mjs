@@ -927,7 +927,7 @@ async function exercise(browser) {
     );
   }
   const narrowVisible = (await visibleTypingText(page)) ?? "";
-  if (!narrowVisible.endsWith("작성 중…")) {
+  if (!narrowVisible.endsWith("작성 중")) {
     throw new Error(
       `잘린 줄이 문장으로 끝나지 않는다: "${narrowVisible}" (리뷰 M-3)`
     );
@@ -1207,14 +1207,20 @@ async function exercise(browser) {
     AGGREGATE_THRESHOLD,
     { timeout: 5_000 }
   );
+  const dots = typingLine(page).getByTestId("responding-dots");
+  if ((await dots.getAttribute("data-motion")) !== "still" ||
+      await dots.locator(".responding-dot").count() !== 0 ||
+      await dots.locator(":scope > span").count() !== 3) {
+    throw new Error("human typing dots must stand still under reduced motion");
+  }
   const collapsed = (await visibleTypingText(page)) ?? "";
-  if (collapsed !== `${AGGREGATE_THRESHOLD}명이 작성 중…`) {
+  if (collapsed !== `이도현 외 ${AGGREGATE_THRESHOLD - 1}명 작성 중`) {
     throw new Error(
-      `at the server's threshold the names collapse to a count, read "${collapsed}"`
+      `three or more typists retain the first name and remaining count, read "${collapsed}"`
     );
   }
-  if (collapsed.includes("이도현") || collapsed.includes("김민서")) {
-    throw new Error(`a collapsed line must not still carry names: "${collapsed}"`);
+  if (collapsed.includes("김민서") || collapsed.includes("박지우")) {
+    throw new Error(`a collapsed line must retain only the first name: "${collapsed}"`);
   }
   // ---- N-2. 집계 숫자는 자릿폭이 고정이다 -----------------------------------
   // 2 → 3 → 4명으로 바뀌는 숫자다. 26px 아래 같은 컴포저의 「외 N명」이 이미 이

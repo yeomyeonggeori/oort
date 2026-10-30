@@ -1,0 +1,36 @@
+appId: app.momo.ios
+name: 4783-connection-resync
+---
+# S1 planner only; worker does not run this flow.
+# SCENE=info: open Settings first. Checks the visible diagnostics entry/receipt.
+# SCENE=conversation: open a short agent DM with all history loaded first.
+# While its socket is unavailable, commit a fixture agent reply. EXPECTED_REPLY
+# is that fixture text. Pulling at the top must reopen the socket and fetch it.
+# Repeat in light/dark, large text and Reduce Motion. Also test offline failure
+# notice + another pull after recovery. History-bearing rooms must paginate
+# first and offer resync only once nextBefore is absent.
+# Device-only: lock/unlock without background; notification tap on 5G before/
+# after JWT expiry. Measure connected latency and attempts via copied log.
+- runFlow:
+    when:
+      true: ${SCENE == 'info'}
+    commands:
+      - scrollUntilVisible:
+          element:
+            id: settings-copy-connection-log
+          direction: DOWN
+          timeout: 15000
+      - tapOn:
+          id: settings-copy-connection-log
+      - assertVisible: 연결 기록 복사됨
+- runFlow:
+    when:
+      true: ${SCENE == 'conversation'}
+    commands:
+      - swipe:
+          start: 50%, 35%
+          end: 50%, 85%
+          duration: 700
+      - extendedWaitUntil:
+          visible: ${EXPECTED_REPLY}
+          timeout: 15000

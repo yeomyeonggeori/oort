@@ -244,3 +244,21 @@ describe("폰 셸 폭: Enter 도 줄바꿈이다", () => {
     expect(sends).toEqual([{ body: "가\n나" }]);
   });
 });
+
+
+it("#4790 입력창 호출부도 다섯 줄에서 멈추고 내부 스크롤한다", async () => {
+  const height = vi.spyOn(HTMLTextAreaElement.prototype, "scrollHeight", "get").mockReturnValue(600);
+  try {
+    await mount();
+    const input = document.querySelector("textarea")!;
+    // jsdom에서 CSS 없는 기본값은 16px × 1.5 = 24px다.
+    const css = window.getComputedStyle(input);
+    const row = Number.parseFloat(css.lineHeight) || (Number.parseFloat(css.fontSize) || 16) * 1.5;
+    const frame = [css.paddingTop, css.paddingBottom, css.borderTopWidth, css.borderBottomWidth]
+      .reduce((sum, value) => sum + (Number.parseFloat(value) || 0), 0);
+    expect(Number.parseFloat(input.style.height)).toBe(Math.round(5 * row + frame));
+    expect(input.style.overflowY).toBe("auto");
+  } finally {
+    height.mockRestore();
+  }
+});

@@ -1,4 +1,5 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
+import { runProgressSnapshot, subscribeRunProgress } from "../agents/agentRunProgressStore";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchAgentRuns,
@@ -228,6 +229,7 @@ export function useInvalidateApprovals(): () => void {
 
 export function useNeedsAction(enabled: boolean): Feed {
   const context = useFeedContext();
+  const progress = useSyncExternalStore(subscribeRunProgress, runProgressSnapshot, runProgressSnapshot);
   const query = useApprovalPage("pending", enabled);
 
   const items = useMemo(() => {
@@ -238,11 +240,12 @@ export function useNeedsAction(enabled: boolean): Feed {
           approval,
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
-          nowMs
+          nowMs,
+          { run: progress.get(approval.channelId.toLowerCase())?.find((run) => uuidEq(run.id, approval.runId)) }
         )
       )
     );
-  }, [query.data, context]);
+  }, [query.data, context, progress]);
 
   return {
     items,
@@ -450,6 +453,7 @@ export function useAgentFeed(
 ): Feed {
   const { workspaceId } = useSession();
   const context = useFeedContext();
+  const progress = useSyncExternalStore(subscribeRunProgress, runProgressSnapshot, runProgressSnapshot);
   const channelsQuery = useChannels(workspaceId);
   const client = useQueryClient();
 
@@ -525,7 +529,8 @@ export function useAgentFeed(
           approval,
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
-          nowMs
+          nowMs,
+          { run: progress.get(approval.channelId.toLowerCase())?.find((run) => uuidEq(run.id, approval.runId)) }
         )
       );
     }
@@ -541,7 +546,7 @@ export function useAgentFeed(
       );
     }
     return orderFeed(rows);
-  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy]);
+  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, progress]);
 
   const refetch = useCallback(() => {
     void client.invalidateQueries({ queryKey: ["approvals", workspaceId] });

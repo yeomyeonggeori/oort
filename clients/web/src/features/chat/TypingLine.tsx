@@ -1,9 +1,10 @@
 import {
   typingLabel,
   typingLead,
-  typingSegments,
+  typingVisualSegments,
   typingTail,
 } from "@momo/core/features/chat/typing";
+import { RespondingDots } from "@/features/agents/RespondingIndicator";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 
 // =============================================================================
@@ -26,7 +27,7 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 //   | 시계 | 없다 | 경과 시간이 붙는다 |
 //   | 누를 수 있나 | 아니다 | 작업 패널이 열린다 |
 //   | 이름 색 | `--ink` (사람의 잉크) | `--agent` |
-//   | 이름 뒤 | 「님」 | 없다 |
+//   | 이름 뒤 | 점 파도(낭독은 기존 존대 문장) | 없다 |
 //   | 사라지는 법 | 6초 TTL, 스스로 | 턴이 끝나면 |
 //
 // **셋째 축은 문서였다가 이제 마크업이다** (design-review PR 1059 M-1). 1차는 문장
@@ -142,7 +143,7 @@ export function TypingLine({
   const names = memberIds
     .map((id) => memberFor(directory, id)?.displayName)
     .filter((name): name is string => Boolean(name));
-  const segments = typingSegments(names, threshold);
+  const segments = typingVisualSegments(names);
 
   if (segments.length === 0) {
     // 문장은 없고 가로 슬롯만 있다. 액션 행 높이는 버튼이 지므로 zero-width-space나
@@ -190,7 +191,7 @@ export function TypingLine({
           segment.kind === "name" ? (
             // 사람의 잉크 (M-1). 에이전트 줄의 `--agent`와 대조되는 축이고, 이 앱이
             // 메시지 행에서 이미 쓰는 규칙과 같다: 이름은 `--ink`, 부속물은 muted.
-            <span key={index} className="text-ink">
+            <span key={index} className="font-bold text-ink">
               {segment.text}
             </span>
           ) : segment.kind === "count" ? (
@@ -212,6 +213,7 @@ export function TypingLine({
           여기가 아니라 앞부분에 있다: 조사는 자기가 붙는 낱말과 함께 잘려야 한다.
           `whitespace-pre`가 앞의 빈칸을 지킨다 — 잘린 이름과 서술어가 붙어 버리면
           `플랫폼…작성 중…`이 된다. */}
+      <RespondingDots />
       {tail !== null && (
         <span
           className="shrink-0 whitespace-pre text-ink-muted"

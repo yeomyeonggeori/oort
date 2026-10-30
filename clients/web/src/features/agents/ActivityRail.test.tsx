@@ -218,7 +218,7 @@ describe("레일 칸과 한 줄", () => {
     expect(frames).not.toMatch(/transform|margin|width|height|top|left/);
   });
 
-  it("받음·승인 대기에는 점이 없다(일하는 중이 아니다). 승인 대기는 사람 몫의 색이다", () => {
+  it("받음·승인 필요에는 점이 없다(일하는 중이 아니다). 승인 필요는 사람 몫의 색이다", () => {
     reduceMotion(false);
     const received = mountView([turn()], { nowMs: T + 10_000 });
     expect(q(received, "composer-working-text")?.textContent).toBe("달무리봇 · 받음");
@@ -229,7 +229,7 @@ describe("레일 칸과 한 줄", () => {
     host?.remove();
 
     const waiting = mountView([turn({ phase: "awaiting_approval", status: "awaiting_approval", startedAtMs: T })]);
-    expect(q(waiting, "composer-working-text")?.textContent).toBe("달무리봇 · 승인 대기");
+    expect(q(waiting, "composer-working-text")?.textContent).toBe("달무리봇 · 승인 필요");
     expect(q(waiting, "responding-dots")).toBeNull();
     expect(q(waiting, "composer-working-open")?.className).toContain("text-warn");
   });

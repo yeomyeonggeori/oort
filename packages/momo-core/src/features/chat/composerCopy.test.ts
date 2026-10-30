@@ -28,10 +28,11 @@ describe("컴포저 오프라인 문장", () => {
     // 이 모양이 곧 웹 문장을 기각한 근거다: "쓰던 글은 그대로 남습니다."로
     // 끝나면 언제·어디서 다시 보낼 수 있는지가 없다. 같은 상황에서 승인 카드는
     // 그것을 말해 주는데 컴포저만 안 말하면, 두 줄은 같은 앱의 말이 아니다.
-    for (const copy of [COMPOSER_OFFLINE_COPY, APPROVAL_OFFLINE_COPY]) {
-      expect(copy).toMatch(/^연결이 끊겨 지금은 .+? 수 없습니다\./);
-      expect(copy).toMatch(/다시 연결되면 여기서 .+ 수 있습니다\.$/);
-    }
+    expect(COMPOSER_OFFLINE_COPY).toMatch(/^연결이 끊겨 지금은 .+? 수 없습니다\./);
+    expect(COMPOSER_OFFLINE_COPY).toMatch(/다시 연결되면 여기서 .+ 수 있습니다\.$/);
+    // 승인 고리의 문체는 해요체예요. 막힌 때와 다시 할 자리는 같은 문법이에요.
+    expect(APPROVAL_OFFLINE_COPY).toMatch(/^연결이 끊겨 지금은 .+? 수 없어요\./);
+    expect(APPROVAL_OFFLINE_COPY).toMatch(/다시 연결되면 여기서 .+ 수 있어요\.$/);
   });
 
   it("초안이 어떻게 되는지까지 말한다 — 컴포저에만 있는 절이다", () => {

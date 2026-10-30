@@ -191,3 +191,10 @@ beforeAll(async () => {
     );
   }
 }, WARM_TIMEOUT_MS);
+
+// Haptic calls require an active app. RN's preset uses a function for currentState.
+// Each fake test clock starts a fresh global 100ms window (mocked modules may omit it).
+beforeEach(() => {
+  require('react-native').AppState.currentState = 'active';
+  require('./src/lib/haptics').__resetHapticClockForTests?.();
+});

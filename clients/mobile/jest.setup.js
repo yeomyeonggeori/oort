@@ -635,6 +635,11 @@ jest.mock('centrifuge', () => {
     __emit(event, ctx) {
       for (const fn of [...(this.handlers.get(event) ?? [])]) fn(ctx);
     }
+    ready() {
+      return this.state === 'connected'
+        ? Promise.resolve()
+        : Promise.reject(new Error('not connected'));
+    }
     connect() {
       this.connectCount += 1;
       if (this.state === 'connected') return;

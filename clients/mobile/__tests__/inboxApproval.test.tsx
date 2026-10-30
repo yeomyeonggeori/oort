@@ -884,7 +884,8 @@ describe('RED PROOF ②: pending 아닌 항목에는 결정 컨트롤이 없다'
     });
     const pending = await openPendingRow();
     const settled = screen.getByTestId(`feed-row-approval:${SETTLED}`);
-    expect(settled).toHaveTextContent(/승인됨/);
+    // 도구 승인은 결정 뒤 실행이 이어져요(요청 고리 §2.2). 결정 컨트롤은 없어요.
+    expect(settled).toHaveTextContent(/→ 실행 중/);
     // **test id가 아니라 라벨로 묻는다.** id는 `approvalId`에서 나오므로, 게이트가
     // 사라져 컨트롤이 id 없이 그려지면 id로 묻는 단언은 그것을 못 보고 초록으로
     // 남는다 (이 파일을 쓰면서 실제로 그 구멍에 한 번 빠졌다). 사람이 보는 것은
@@ -993,16 +994,23 @@ describe('아직 배포되지 않은 서버 (3R N-A)', () => {
 });
 
 describe('인박스 필터 칩의 햅틱 (#3580)', () => {
-  it('다른 칩으로 넘어갈 때 selection 한 번, 이미 고른 칩을 다시 누르면 0번', async () => {
+  it('풍부는 칩 전환의 100ms 안 중복을 막고, 이미 고른 칩은 시간이 지나도 무음이다', async () => {
+    const clock = jest.spyOn(performance, 'now').mockReturnValue(0);
     const calls = (jest.requireMock('expo-haptics') as {__calls: string[]}).__calls;
     installFetch();
     await openPendingRow();
+    clock.mockReturnValue(100); // 인박스를 연 누름과 필터 선택을 띄운다.
     calls.length = 0;
     fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     expect(calls).toEqual(['selection']);
     fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     expect(calls).toEqual(['selection']);
     fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    expect(calls).toEqual(['selection']);
+    clock.mockReturnValue(200);
+    fireEvent.press(screen.getByTestId('inbox-tab-needs-action'));
+    expect(calls).toEqual(['selection']);
+    fireEvent.press(screen.getByTestId('inbox-tab-mentions'));
     expect(calls).toEqual(['selection', 'selection']);
   });
 });
@@ -1058,7 +1066,7 @@ describe('오프라인', () => {
     await waitForSettled(() =>
       expect(
         screen.getByTestId(`decision-offline-approval:${PENDING}`),
-      ).toHaveTextContent(/연결이 끊겨 지금은 결정할 수 없습니다/),
+      ).toHaveTextContent(/^연결이 끊겨 지금은 결정할 수 없어요\. 다시 연결되면 여기서 승인하거나 거부할 수 있어요\.$/),
     );
     expect(screen.queryByTestId(`inbox-approval-${PENDING}-approve`)).toBeNull();
   });

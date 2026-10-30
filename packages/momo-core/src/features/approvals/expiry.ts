@@ -1,3 +1,5 @@
+import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
+
 // =============================================================================
 // 승인의 기한 — 「곧 만료」와 「이미 만료」를 클라이언트가 어떻게 아는가 (#3738)
 //
@@ -55,7 +57,7 @@ export const EXPIRED_CARD_COPY =
   "승인 시간이 지나서 더 이상 결정할 수 없어요.";
 
 /** 만료 뒤의 다음 행동 버튼. */
-export const REPROPOSE_LABEL = "다시 제안해 달라고 하기";
+export const REPROPOSE_LABEL = "다시 요청";
 
 /**
  * 「다시 제안해 달라고 하기」가 입력창에 넣는 초안.
@@ -71,7 +73,7 @@ export function reproposeDraft(handle: string): string {
  * 인박스 「처리할 일」 줄의 기한 말. 서버가 정한 기한이 이미 지난 줄은 결정 컨트롤이
  * 서지 않는다(`FeedItem.deadlinePassed`) — 여기는 그 줄이 무엇을 말하는지만 정한다.
  */
-export const EXPIRED_ROW_COPY = "시간이 지났어요";
+export const EXPIRED_ROW_COPY = REQUEST_WORD.expired;
 
 /**
  * 서버 만료 스윕이 승인 카드 아래에 남기는 줄의 한국어 문구 (#4705, ADR-0186 v5 검수 L4).
@@ -82,8 +84,8 @@ export const EXPIRED_ROW_COPY = "시간이 지났어요";
  * 부르지 않은 카드가 조용히 만료된 것은 실패가 아니라 소식이 없는 것이다(ADR-0132: 침묵은 실패가
  * 아니다). 그래서 한국어 한 줄과 「만료됨」(중립)으로 그린다.
  */
-export const EXPIRED_LINE_TITLE = "승인 시간이 지났어요";
-export const EXPIRED_LINE_NOTE = "기한이 지나 실행하지 않았어요.";
+export const EXPIRED_LINE_TITLE = REQUEST_WORD.expired;
+export const EXPIRED_LINE_NOTE = APPROVAL_EXPIRED_SENTENCE;
 
 /**
  * 스윕 줄이 말할 문장. 서버가 이미 **한국어**로 쓴 줄(인플레이스 카드의 「시간이 지나 요청을 처리하지
@@ -103,7 +105,7 @@ export function isApprovalExpiryLine(
   if (props === undefined || props === null) return false;
   const approvalId = props["approval_id"];
   return (
-    props["status"] === "expired" &&
+    (props["status"] === "expired" || props["code"] === "approval_expired") &&
     typeof approvalId === "string" &&
     approvalId !== ""
   );

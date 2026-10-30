@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, type MutableRefObject} from 'react';
+import {useCallback, useEffect, useMemo, useRef, type MutableRefObject} from 'react';
 import {
   Animated,
   PanResponder,
@@ -126,7 +126,7 @@ import {
 //
 // ## 닫는 것은 호출부의 일이다
 //
-// 놓은 뒤의 사라짐은 Modal 이 한다(시스템 페이드 — 끌던 자리에서 그대로 옅어진다). 이 훅은 사진을
+// 놓은 뒤의 사라짐은 호출부의 hero가 한다(#4775 — 끌던 자리를 이어 썸네일로 간다). 이 훅은 사진을
 // 미끄러뜨려 내보내지 않는다. 그래서 「동작 줄이기」에서 달라지는 것은 **모자라 놓았을 때의
 // 복귀**뿐이다: 스프링 대신 즉시 제자리다.
 // =============================================================================
@@ -137,6 +137,8 @@ export type ViewerProgressRef = MutableRefObject<number | null>;
 export interface ViewerDismiss {
   /** 끄는 거리(pt). 0 이상. 모든 모양이 이 한 값에서 `interpolate` 로 파생한다. */
   drag: Animated.Value;
+  /** Last finger position is already in JS; do not await a native getValue callback during close. */
+  getOffset: () => number;
   /**
    * **쪽**(가로 `ScrollView` 의 **자손**)에 펼친다 — 사진 위에 닿은 손가락을 쥐는 자리다. 뿌리에
    * 펼치면 안 된다: 조상이 JS 응답자이면 iOS 스크롤뷰는 스크롤을 시작하지 못한다(위 ②).
@@ -216,7 +218,10 @@ export function useViewerDismiss({
   /** 마지막으로 쓴 거리. 놓은 순간 사람이 본 위치다. */
   const atRef = useRef(0);
 
-  useEffect(() => () => drag.stopAnimation(), [drag]);
+  useEffect(() => {
+    const listener = drag.addListener(({value}) => { atRef.current = value; });
+    return () => { drag.removeListener(listener); drag.stopAnimation(); };
+  }, [drag]);
 
   const responder = useMemo(() => {
     const setDragging = (value: boolean) => {
@@ -327,5 +332,6 @@ export function useViewerDismiss({
     return subset;
   }, [responder]);
 
-  return {drag, pageHandlers: responder.panHandlers, frameHandlers};
+  const getOffset = useCallback(() => atRef.current, []);
+  return {drag, getOffset, pageHandlers: responder.panHandlers, frameHandlers};
 }

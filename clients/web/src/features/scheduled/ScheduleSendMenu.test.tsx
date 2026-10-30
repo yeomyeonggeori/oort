@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
 import { act, createElement } from "react";
-import { createRoot, type Root } from "react-dom/client";
+import {cleanupMounts, control, createCopy, flush, mount as mountUi} from "@/testkit";
+import {SCHEDULED_COPY} from "@momo/core/features/scheduled/copy";
+
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { scheduleGate, type ScheduleGate } from "@momo/core/features/scheduled/gate";
 import { scheduledPresets, scheduledZoneLine } from "@momo/core/features/scheduled/presets";
 import { ScheduleSendMenu, type ScheduleSendMenuProps } from "./ScheduleSendMenu";
+
+const copy = createCopy(SCHEDULED_COPY);
 
 // =============================================================================
 // ADR-0208 부록 B 1.1·1.3·1.10(#4215): 보내기 옆 ▾와 예약 메뉴를 호스트 없이 잰다. 판정(`scheduleGate`)은 진짜이고
@@ -16,7 +20,6 @@ const NOW = new Date("2026-10-22T14:30:00+09:00").getTime();
 const SUNDAY = new Date("2026-10-25T22:00:00+09:00").getTime();
 
 const reactActEnvironment = globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean };
-let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 
 beforeAll(() => {
@@ -27,9 +30,7 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
 });
 afterEach(() => {
-  if (mountedRoot) act(() => mountedRoot?.unmount());
-  mountedRoot = null;
-  host?.remove();
+  cleanupMounts();
   host = null;
   document.body.innerHTML = "";
   vi.useRealTimers();
@@ -71,24 +72,15 @@ function propsOf(over: Partial<ScheduleSendMenuProps> = {}): ScheduleSendMenuPro
 
 let parentClicks = 0;
 async function mount(props: ScheduleSendMenuProps) {
-  host = document.createElement("div");
-  document.body.append(host);
-  mountedRoot = createRoot(host);
   parentClicks = 0;
   await act(async () => {
-    mountedRoot?.render(
+    host = mountUi(
       createElement("div", { "data-testid": "parent", onClick: () => { parentClicks += 1; } }, createElement(ScheduleSendMenu, props))
     );
   });
 }
 
-async function settle(rounds = 2) {
-  for (let i = 0; i < rounds; i += 1) {
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
-  }
-}
+const settle = (rounds = 2) => flush(rounds);
 
 const byId = (testId: string): HTMLElement | null => document.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
 function need(testId: string): HTMLElement {
@@ -96,7 +88,7 @@ function need(testId: string): HTMLElement {
   if (!el) throw new Error(`없다: ${testId}`);
   return el;
 }
-const trigger = () => need("composer-schedule-trigger");
+const trigger = () => control(host!, "button", copy("trigger.label"));
 
 async function openByPointer() {
   await act(async () => {
@@ -130,7 +122,7 @@ describe("입구", () => {
 
   it("▾의 이름·역할: 「예약해서 보내기」, aria-haspopup=menu, aria-expanded", async () => {
     await mount(propsOf());
-    expect(trigger().getAttribute("aria-label")).toBe("예약해서 보내기");
+    expect(trigger().getAttribute("aria-label")).toBe(copy("trigger.label"));
     expect(trigger().getAttribute("aria-haspopup")).toBe("menu");
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     expect(trigger().hasAttribute("aria-disabled")).toBe(false);
@@ -222,16 +214,16 @@ describe("막힌 ▾는 눌러서 이유를 듣는다", () => {
   const blocked = () =>
     propsOf({
       gate: gateOf({ quoting: true }),
-      blockedTitle: "인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요.",
+      blockedTitle: `${copy("disabled.quote.reason")}. ${copy("disabled.quote.next")}.`,
     });
 
   it("aria-disabled(disabled 아님)로 흐리고 title과 aria-describedby가 이유를 합쳐 싣는다", async () => {
     await mount(blocked());
     expect(trigger().getAttribute("aria-disabled")).toBe("true");
     expect(trigger().hasAttribute("disabled")).toBe(false);
-    expect(trigger().getAttribute("title")).toBe("인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요.");
+    expect(trigger().getAttribute("title")).toBe(`${copy("disabled.quote.reason")}. ${copy("disabled.quote.next")}.`);
     const reason = document.getElementById(trigger().getAttribute("aria-describedby") ?? "");
-    expect(reason?.textContent).toBe("인용 답장은 예약할 수 없어요. 인용을 지우면 예약할 수 있어요.");
+    expect(reason?.textContent).toBe(`${copy("disabled.quote.reason")}. ${copy("disabled.quote.next")}.`);
     expect(reason?.className).toContain("sr-only");
   });
 
@@ -286,7 +278,7 @@ describe("한도와 모델 지정 안내", () => {
     await mount(props);
     await openByPointer();
     const limit = need("composer-schedule-limit");
-    expect(limit.textContent).toBe("예약은 50개까지 걸 수 있어요. 대기 중인 예약을 지우거나 지금 보낸 뒤에 다시 해 보세요.");
+    expect(limit.textContent).toBe(copy("disabled.limit"));
     expect(need("composer-schedule-menu").firstElementChild).toBe(limit);
     const items = [...need("composer-schedule-menu").querySelectorAll('[role="menuitem"]')];
     expect(items).toHaveLength(3);
@@ -320,7 +312,7 @@ describe("한도와 모델 지정 안내", () => {
   it("모델 지정이 켜져 있으면 「모델 지정은 예약에 담기지 않아요」 한 줄이 선다", async () => {
     await mount(propsOf({ gate: gateOf({ routingSet: true }) }));
     await openByPointer();
-    expect(need("composer-schedule-routing-note").textContent).toBe("모델 지정은 예약에 담기지 않아요");
+    expect(need("composer-schedule-routing-note").textContent).toBe(copy("menu.routingNote"));
   });
 
   it("모델 지정이 없으면 그 줄이 없다", async () => {

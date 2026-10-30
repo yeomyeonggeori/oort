@@ -1,0 +1,15 @@
+{
+  "terminalCopy": [
+    { "code": "approval_rejected", "word": "거부", "sentence": "거부됐어요" },
+    { "code": "approval_expired", "word": "만료", "sentence": "승인을 기다리다 만료됐어요" },
+    { "code": "succeeded", "word": "끝", "sentence": "실행을 마쳤어요" },
+    { "code": "agent_error", "word": "실패", "sentence": "실행을 끝내지 못했어요 · 다시 요청해 보세요" },
+    { "code": "human_cancelled", "word": "취소", "sentence": "요청이 취소됐어요" }
+  ],
+  "particles": [
+    { "value": "목", "object": "을", "direction": "으로" },
+    { "value": "예비", "object": "를", "direction": "로" },
+    { "value": "서울", "object": "을", "direction": "로" }
+  ],
+  "valueOnly": ["목", "예비", "서울", "API", "123", "#", "🙂"]
+}

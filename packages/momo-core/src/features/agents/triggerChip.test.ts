@@ -69,10 +69,10 @@ describe("run 하나 → 칩", () => {
     { name: "가져감", extra: { phase: "claimed", leaseState: "live" }, kind: "claimed", word: "가져감", mark: "none", tone: "muted" },
     { name: "작업 중", extra: RUNNING, kind: "working", word: "작업 중", mark: "dot", tone: "working" },
     {
-      name: "승인 대기",
+      name: "승인 필요",
       extra: { phase: "awaiting_approval", status: "awaiting_approval" },
       kind: "approval",
-      word: "승인 대기",
+      word: "승인 필요",
       mark: "none",
       tone: "warn",
     },
@@ -96,10 +96,10 @@ describe("run 하나 → 칩", () => {
       tone: "warn",
     },
     {
-      name: "가져간 뒤 시간 초과",
+      name: "승인을 기다리다 만료",
       extra: { phase: "timed_out", status: "timed_out", endReason: "approval_expired" },
-      kind: "timed_out",
-      word: "시간 초과",
+      kind: "expired",
+      word: "만료",
       mark: "clock",
       tone: "warn",
     },
@@ -173,7 +173,7 @@ describe("한 메시지가 여러 에이전트를 불렀을 때: 가장 급한 �
   const NOW = T + 30 * SEC;
   const pick = (runs: AgentRunProgress[], now = NOW) => triggerChip(runs, nameFor, now);
 
-  it("실패 > 시간 초과 > 아직 받지 않았어요 > 승인 대기 > 작업 중 > 가져감 > 받음 > 답함", () => {
+  it("실패 > 시간 초과 > 아직 받지 않았어요 > 승인 필요 > 작업 중 > 가져감 > 받음 > 답함", () => {
     expect(pick([run(DONE), run(FAILED)])?.kind).toBe("failed");
     expect(pick([run(FAILED), run({ agentMemberId: B })], T + 10 * MIN)?.kind).toBe("failed");
     // 시간 초과(가져간 뒤 서버가 끝냄)는 실패보다 약하고 아직 받지 않았어요보다 강하다.
@@ -399,5 +399,137 @@ describe("목록이 넘기는 답 지도", () => {
     );
     expect([...map.keys()]).toEqual([RUN_OK]);
     expect(map.get(RUN_OK)).toEqual({ id: "answer-1", seq: 7 });
+  });
+});
+
+describe("요청 묶음 칩", () => {
+  it("실패 > 만료 > 거부 > 시간 초과 순으로 고르고 직접 취소는 세지 않는다", () => {
+    const cases = [
+      { ...run(FAILED), expected: "failed" },
+      {
+        ...run({
+          phase: "timed_out",
+          status: "timed_out",
+          endReason: "approval_expired",
+        }),
+        expected: "expired",
+      },
+      {
+        ...run({
+          phase: "cancelled",
+          status: "cancelled",
+          endReason: "approval_rejected",
+        }),
+        expected: "declined",
+      },
+      {
+        ...run({ phase: "timed_out", status: "timed_out" }),
+        expected: "timed_out",
+      },
+    ];
+    for (let i = 0; i < cases.length; i++) {
+      const remaining = cases.slice(i).reverse();
+      expect(triggerChip(remaining, nameFor, T)?.kind).toBe(cases[i]!.expected);
+    }
+    expect(
+      triggerChip(
+        [
+          run({
+            phase: "cancelled",
+            status: "cancelled",
+            endReason: "human_cancelled",
+          }),
+        ],
+        nameFor,
+        T
+      )
+    ).toBeNull();
+  });
+
+  it("묶음의 끝과 말로 답함을 구분하고 생각·실행은 상위 낱말 작업 중으로 읽는다", () => {
+    const done = run(DONE);
+    expect(triggerChip([done], nameFor, T)?.word).toBe("답함");
+    expect(
+      triggerChip(
+        [
+          {
+            ...done,
+            bundle: { status: "approved", result: { status: "succeeded" } },
+          },
+        ],
+        nameFor,
+        T
+      )?.word
+    ).toBe("끝");
+    const bundled = { ...done, bundle: { status: "approved", result: { status: "succeeded" } } };
+    const destination = { id: "approval-card", seq: 12 };
+    const textAnswer = { id: "text-answer", seq: 13 };
+    const routed = triggerChip([bundled], nameFor, T, { answerFor: () => textAnswer, bundleTargetFor: () => destination });
+    expect(routed?.answer).toEqual(destination);
+    expect(routed?.bundleTarget).toEqual(destination);
+    expect(triggerChip([bundled], nameFor, T, { answerFor: () => textAnswer })?.answer).toBeUndefined();
+    for (const status of [undefined, "approved"]) {
+      expect(
+        triggerChip(
+          [
+            {
+              ...run(RUNNING),
+              bundle: { status, action_type: "tool_call", code: "running" },
+            },
+          ],
+          nameFor,
+          T
+        )
+      ).toMatchObject({ kind: "working", word: "작업 중" });
+    }
+    expect(
+      triggerChip([run(RUNNING)], nameFor, T, {
+        bundleFor: () => ({ status: "expired" }),
+      })
+    ).toMatchObject({ kind: "expired", word: "만료", tone: "warn" });
+    expect(
+      triggerChip(
+        [{ ...run(RUNNING), bundle: { status: "pending" } }],
+        nameFor,
+        T
+      )
+    ).toMatchObject({ kind: "approval", word: "승인 필요" });
+    for (const bundle of [{}, { status: "pending" }]) {
+      expect(
+        triggerChip(
+          [
+            {
+              ...run({
+                phase: "timed_out",
+                status: "timed_out",
+                endReason: "lease_abandoned",
+              }),
+              bundle,
+            },
+          ],
+          nameFor,
+          T
+        )
+      ).toMatchObject({ kind: "timed_out", word: "신호 소실" });
+    }
+  });
+
+  it("고정 폭 측정 얼굴에 끝·답함·거부·만료가 모두 있고 거부는 실패와 다른 모양이다", () => {
+    for (const word of ["끝", "답함", "거부", "만료", "승인 필요"])
+      expect(TRIGGER_CHIP_FACES.some((face) => face.word === word)).toBe(true);
+    const declined = triggerChip(
+      [
+        run({
+          phase: "cancelled",
+          status: "cancelled",
+          endReason: "approval_rejected",
+        }),
+      ],
+      nameFor,
+      T
+    )!;
+    const failed = triggerChip([run(FAILED)], nameFor, T)!;
+    expect(declined.tone).toBe("muted");
+    expect(declined.mark).not.toBe(failed.mark);
   });
 });

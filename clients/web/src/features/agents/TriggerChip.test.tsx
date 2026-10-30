@@ -10,8 +10,10 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { UNCOLLECTED_AFTER_MS, UNCOLLECTED_WORD } from "@momo/core/features/agents/runWaiting";
 import {
   TRIGGER_CHIP_FACES,
+  TRIGGER_CHIP_KINDS,
   triggerChip,
   type AnswerRef,
+  type TriggerChipKind,
 } from "@momo/core/features/agents/triggerChip";
 import {
   GutterTriggerChip,
@@ -113,12 +115,12 @@ describe("칩의 그림", () => {
   const chipOf = (extra: Partial<AgentRunProgress>, at = now) =>
     triggerChip([run(now, extra)], nameFor, at)!;
 
-  it("낱말과 표지: 점(작업 중) · 체크(답함) · 느낌표(아직 받지 않았어요) · 시계(시간 초과·신호 소실) · 가위표(실패) · 표지 없음(받음·가져감·승인 대기)", () => {
+  it("낱말과 표지: 점(작업 중) · 체크(답함) · 느낌표(아직 받지 않았어요) · 시계(시간 초과·신호 소실) · 가위표(실패) · 표지 없음(받음·가져감·승인 필요)", () => {
     const cases: [Partial<AgentRunProgress>, number, string, "dot" | "check" | "alert" | "clock" | "cross" | "none"][] = [
       [{}, now, "받음", "none"],
       [{ phase: "claimed", leaseState: "live" }, now, "가져감", "none"],
       [RUNNING(now), now, "작업 중", "dot"],
-      [{ phase: "awaiting_approval", status: "awaiting_approval" }, now, "승인 대기", "none"],
+      [{ phase: "awaiting_approval", status: "awaiting_approval" }, now, "승인 필요", "none"],
       [DONE(now), now, "답함", "check"],
       [{}, now + 10 * MIN, UNCOLLECTED_WORD, "alert"],
       [{ phase: "timed_out", status: "timed_out" }, now, "시간 초과", "clock"],
@@ -293,7 +295,7 @@ describe("스레드 요약 줄의 「작업 중」 칩 (E)", () => {
     unmount();
   });
 
-  it("받음·승인 대기·답함·실패·아직 받지 않았어요에는 서지 않는다(그 말은 머리 줄의 칩이 한다)", () => {
+  it("받음·승인 필요·답함·실패·아직 받지 않았어요에는 서지 않는다(그 말은 머리 줄의 칩이 한다)", () => {
     for (const extra of [
       {},
       { phase: "awaiting_approval", status: "awaiting_approval" },
@@ -328,7 +330,7 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     ["받음", {}, now],
     ["가져감", { phase: "claimed", leaseState: "live" }, now],
     ["작업 중", RUNNING(now), now],
-    ["승인 대기", { phase: "awaiting_approval", status: "awaiting_approval" }, now],
+    ["승인 필요", { phase: "awaiting_approval", status: "awaiting_approval" }, now],
     ["답함", DONE(now), now],
     [UNCOLLECTED_WORD, {}, now + 10 * MIN],
     ["시간 초과", { phase: "timed_out", status: "timed_out" }, now],
@@ -338,6 +340,39 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     const svg = q(el, "trigger-chip-mark")?.querySelector("svg");
     return svg?.getAttribute("class") ?? "";
   };
+
+  it("모든 kind는 좁은 머리 줄·거터에서 글리프와 접근성 이름을 갖는다", () => {
+    const expected = {
+      received: "eye", claimed: "hand", working: "circle-dot",
+      approval: "shield-question", answered: "check", uncollected: "circle-alert",
+      timed_out: "clock", failed: "circle-x", declined: "ban", expired: "clock",
+    } satisfies Record<TriggerChipKind, string>;
+    for (const kind of TRIGGER_CHIP_KINDS) {
+      for (const variant of ["word", "mark"] as const) {
+        const chip = { ...chipOf(RUNNING(now)), kind };
+        const el = render(createElement(TriggerChipView, { chip, variant }));
+        expect(q(el, "trigger-chip-mark")?.querySelectorAll("svg"), kind).toHaveLength(1);
+        expect(glyphOf(el), kind).toContain(`lucide-${expected[kind]}`);
+        expect(q(el, "trigger-chip")?.getAttribute("aria-label"), kind).toBe(chip.label);
+        unmount();
+      }
+    }
+  });
+
+  it.each([
+    ["cancelled", "approval_rejected", "declined", "거부", "ban"],
+    ["timed_out", "approval_expired", "expired", "만료", "clock"],
+  ] as const)("%s/%s는 낱말·표지·툴팁·접근성 이름에 같은 상태를 말한다", (phase, endReason, kind, word, glyph) => {
+    const chip = chipOf({ phase, endReason });
+    expect(chip.kind).toBe(kind);
+    expect(chip.word).toBe(word);
+    expect(chip.label).toContain(word);
+    const el = render(createElement(TriggerChipView, { chip }));
+    expect(q(el, "trigger-chip-word")?.textContent).toBe(word);
+    expect(q(el, "trigger-chip-word")?.querySelector("svg")?.getAttribute("class")).toContain(`lucide-${glyph}`);
+    expect(q(el, "trigger-chip-mark")?.getAttribute("title")).toBe(word);
+    expect(glyphOf(el)).toContain(`lucide-${glyph}`);
+  });
 
   it("낱말 칩은 아이콘 층을 함께 들고 있고, 좁은 줄(@max-sm)에서만 그 층이 서고 낱말 층이 접힌다", () => {
     const el = render(createElement(TriggerChipView, { chip: chipOf(RUNNING(now)) }));
@@ -366,7 +401,7 @@ describe("아이콘 칩 (#4619 planner 결정 2·6): 좁은 머리 줄과 이어
     expect(glyphs.get("가져감")).toContain("lucide-hand");
     // 손으로 그린 `<svg>`가 아니라 lucide의 원 안의 점이다(ADR-0172 아이콘 경계, design-review r1 H1).
     expect(glyphs.get("작업 중")).toContain("lucide-circle-dot");
-    expect(glyphs.get("승인 대기")).toContain("lucide-shield-question");
+    expect(glyphs.get("승인 필요")).toContain("lucide-shield-question");
     expect(glyphs.get("답함")).toContain("lucide-check");
     expect(glyphs.get(UNCOLLECTED_WORD)).toContain("lucide-circle-alert");
     expect(glyphs.get("시간 초과")).toContain("lucide-clock");
