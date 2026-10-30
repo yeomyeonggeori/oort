@@ -2269,6 +2269,22 @@ fi
 record_sample agent-credential-create post \
   "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials" 201
 
+# #4781: keep the cost contract covered by the real response-shape gate.
+sample usage-agents get \
+  "/v1/workspaces/{workspaceId}/usage/agents" \
+  "/v1/workspaces/$WS/usage/agents" 200 "" "$ACCESS"
+sample usage-summary get \
+  "/v1/workspaces/{workspaceId}/usage/summary" \
+  "/v1/workspaces/$WS/usage/summary" 200 "" "$ACCESS"
+sample agent-subscription-fee put \
+  "/v1/workspaces/{workspaceId}/agents/{agentMemberId}/subscription-fee" \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/subscription-fee" 200 \
+  '{"monthlyMicroUsd":30000000,"label":"External plan"}' "$ACCESS"
+sample agent-subscription-fee-clear put \
+  "/v1/workspaces/{workspaceId}/agents/{agentMemberId}/subscription-fee" \
+  "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/subscription-fee" 200 \
+  '{"monthlyMicroUsd":null}' "$ACCESS"
+
 sample agent-credential-list get \
   "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials" \
   "/v1/workspaces/$WS/agents/$GATE_AGENT_ID/credentials" 200 "" "$ACCESS"

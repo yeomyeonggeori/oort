@@ -17,7 +17,7 @@
 //! | [`agent_job::claim_agent_job_batch`](crate::agent_job::claim_agent_job_batch) | `agent_job` | `publish` |
 //! | [`claim_push_candidate_batch`] | `push_candidate` | any |
 //!
-//! The rows are produced by **two** writers, both in the same transaction as the
+//! The rows are produced by **three** writers, each in the same transaction as the
 //! write that earns the candidate — which is what makes a candidate impossible to
 //! lose and impossible to observe before its source commits:
 //!
@@ -30,12 +30,15 @@
 //!    [`emit_stream_closed_push_candidate`] (ADR-0204 증보 1 D8-a, #3987): one more,
 //!    because a streamed answer is *born* unfinished and the trigger fires only at its
 //!    birth. Same payload shape plus `source: "stream_closed"`; the
-//!    notifier cannot tell them apart and does not need to (judgment reads the message,
-//!    not the candidate). A person whose push for the message has already settled is
+//!    notifier judges these two sources from the message. A person whose push for the message has already settled is
 //!    skipped when the second candidate is judged (`collapse_id` and the dispatch-log
 //!    unique index); a push that was only attempted and failed is retried, not duplicated.
 //!
-//! No other code emits this kind (see [`emit::OutboxKind::PushCandidate`](crate::emit::OutboxKind)).
+//! 3. approval-card settlement (ADR-0204 addendum 6 D6-5), with
+//!    `source: "approval_settled"`. Judgment reads this source to select only the
+//!    requester, with its own collapse key, rather than asking approvers again.
+//!
+//! No other code emits this kind without an Accepted ADR.
 
 use serde_json::{json, Value};
 use sqlx::{PgExecutor, PgPool};
@@ -43,12 +46,44 @@ use uuid::Uuid;
 
 use crate::emit::{emit_outbox, OutboxKind};
 
-/// `payload.schema` of every `push_candidate` row, whichever of the two writers made it.
+/// `payload.schema` of every `push_candidate` row, whichever of the three writers made it.
 pub const PUSH_CANDIDATE_SCHEMA: &str = "momo.push_candidate.v1";
 
 /// `payload.source` of the candidate a streamed message's closing write enqueues. The
 /// trigger's rows do not carry the key.
 pub const PUSH_CANDIDATE_SOURCE_STREAM_CLOSED: &str = "stream_closed";
+
+pub const PUSH_CANDIDATE_SOURCE_APPROVAL_SETTLED: &str = "approval_settled";
+
+/// The third producer authorized by ADR-0204 addendum 6 D6-5. Id-only, like
+/// the insert and stream-close producers. The caller won the pending transition.
+pub async fn emit_approval_settled_push_candidate<'e, E>(
+    executor: E,
+    workspace_id: Uuid,
+    message_id: Uuid,
+    channel_id: Uuid,
+    author_member_id: Uuid,
+) -> Result<i64, sqlx::Error>
+where
+    E: PgExecutor<'e>,
+{
+    emit_outbox(
+        executor,
+        workspace_id,
+        OutboxKind::PushCandidate,
+        "notify",
+        &json!({
+            "schema": PUSH_CANDIDATE_SCHEMA,
+            "message_id": message_id,
+            "channel_id": channel_id,
+            "author_member_id": author_member_id,
+            "message_type": "approval_request",
+            "source": PUSH_CANDIDATE_SOURCE_APPROVAL_SETTLED,
+        }),
+        Some(channel_id),
+    )
+    .await
+}
 
 /// The payload of the candidate a stream's closing write enqueues: the trigger's
 /// (`011_push_notifier.sql:47-69`) — ids and the message type label, never a body —
