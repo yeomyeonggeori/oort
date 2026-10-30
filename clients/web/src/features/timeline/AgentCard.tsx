@@ -94,7 +94,7 @@ import {
 } from "./ApprovalActions";
 import { ActionResultBody } from "./ActionResultCard";
 import { AvatarPreviewBlock } from "./AvatarPreviewBlock";
-import { isMemberAvatarSetAction } from "@momo/core/features/approvals/avatarPreview";
+import { hasProfileAvatarPreview } from "@momo/core/features/approvals/avatarPreview";
 import {
   approvalRoleCopy,
   roleRequiredCopy,
@@ -529,7 +529,7 @@ function ApprovalBody({
       // 「내 프로필 사진 바꾸기」(#4394): 사진과 한 문장은 서버 행 아래, 버튼 바로 위에 선다.
       // 결정이 난 카드에는 서지 않는다 — 사진은 결정 전에 보는 것이고 결과는 결과 카드가 말한다.
       note={
-        !settled && isMemberAvatarSetAction(card.action?.id) ? (
+        !settled && hasProfileAvatarPreview(card.action) ? (
           <AvatarPreviewBlock
             card={card}
             agentName={

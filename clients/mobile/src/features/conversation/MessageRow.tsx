@@ -1,4 +1,4 @@
-import {isMemberAvatarSetAction} from '@momo/core/features/approvals/avatarPreview';
+import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
   threadRollup,
@@ -1772,7 +1772,7 @@ function AgentCard({
         ) : null}
         {/* 「내 프로필 사진 바꾸기」(#4394): 한 문장과 제안된 사진은 서버 행 아래, 버튼 위에
             선다. 결정이 난 카드에는 서지 않는다 — 결과는 결과 카드가 말한다. */}
-        {settledStatus === 'pending' && isMemberAvatarSetAction(card.action?.id) ? (
+        {settledStatus === 'pending' && hasProfileAvatarPreview(card.action) ? (
           <ApprovalAvatarPreview
             card={card}
             agentName={memberFor(directory, card.requestedByMemberId)?.displayName ?? null}

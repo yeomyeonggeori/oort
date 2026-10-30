@@ -246,7 +246,7 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
     stubPreviewFetch(200);
     const host = await mountCard(avatarProps());
     expect(byTestId(host, "approval-action-role")[0]?.textContent).toContain(
-      "사진 주인 본인만 승인할 수 있어요."
+      "요청한 본인만 승인할 수 있어요."
     );
     expect(host.textContent ?? "").not.toContain("requesting_member");
   });
@@ -309,7 +309,7 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
       await Promise.resolve();
     });
     const error = byTestId(host, "approval-error")[0];
-    expect(error?.textContent).toContain("사진 주인 본인이 승인해야 해요.");
+    expect(error?.textContent).toContain("요청한 본인이 승인해야 해요.");
     expect(error?.textContent).not.toContain("관리자");
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
   });
@@ -435,4 +435,42 @@ it("DM admission only offers decision controls to the server-named participant",
   const host = await mountCardOnly(props, AGENT);
   expect(host.textContent).toContain("이 카드에 표시된 참여자의 허락을 기다려요.");
   expect(host.querySelector('[data-testid$="-approve"]')).toBeNull();
+});
+
+// #4791: both profile subjects share the existing, authenticated picture card.
+describe("네 프로필 장면 (#4791)", () => {
+  it("내 이름 카드가 전후 글자와 본인 권한을 보여 준다", async () => {
+    const props = avatarProps({ title: "내 이름 바꾸기", action: {
+      id: "member.display_name.set", required_role: "requesting_member",
+      rows: [{ label: "바꾸기 전", value: "하늘" }, { label: "바꾼 뒤", value: "별하늘" }],
+    } });
+    const host = await mountCard(props);
+    expect(host.textContent).toContain("바꾸기 전하늘");
+    expect(host.textContent).toContain("바꾼 뒤별하늘");
+    expect(byTestId(host, "approval-action-role")[0]?.textContent).toContain("요청한 본인만 승인할 수 있어요.");
+    expect(byTestId(host, "approval-avatar-preview")).toHaveLength(0);
+  });
+
+  it("에이전트 사진 카드도 이전 사진과 승인할 사진을 베어러로 읽어 보여 준다", async () => {
+    const fetchMock = stubPreviewFetch(200);
+    const props = avatarProps();
+    const action = props.action as Record<string, unknown>;
+    action.id = "agent.profile.update";
+    action.required_role = "agent_editor";
+    const before = `/v1/workspaces/${WORKSPACE_ID}/members/${AGENT}/avatar/content?v=previous-image`;
+    (action.preview as Record<string, unknown>).previousAvatarUrl = before;
+    const host = await mountCard(props);
+    await untilCalled(fetchMock, 2);
+    for (let turn = 0; turn < TURNS && host.querySelector('img[alt="바꾸기 전 프로필 사진"]') === null; turn += 1) {
+      await act(async () => undefined);
+    }
+    expect(host.querySelector('img[alt="바꾸기 전 프로필 사진"]')).not.toBeNull();
+    expect(host.querySelector('img[alt="에이전트의 프로필 사진으로 제안된 사진"]')).not.toBeNull();
+    expect(host.textContent).toContain("바꾸기 전");
+    expect(host.textContent).toContain("바꾼 뒤");
+    expect(fetchMock.mock.calls.map(call => String(call[0])).some(url => url.endsWith(before))).toBe(true);
+    for (const [, init] of fetchMock.mock.calls as unknown as [string, { headers: Headers }][]) {
+      expect(init.headers.get("Authorization")).toBe("Bearer access");
+    }
+  });
 });

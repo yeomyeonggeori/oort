@@ -1,0 +1,79 @@
+appId: app.momo.ios
+name: 4791-profile-actions
+# S1 stack verification only. Seed four pending cards in PROFILE_CHANNEL_ID through
+# the real agent tools first (all ids below are returned by those proposals).
+# Use two Agent Port proposers, two cards each: one proposer may hold only three
+# pending cards. Team AI verification proposes and decides each scene sequentially.
+# Run separately in light/dark, large text, and Reduce Motion. This flow is not a
+# model test; its companion PG tests prove the durable four-conversation loop.
+---
+- launchApp:
+    appId: app.momo.ios
+- runFlow: subflows/ensure-signed-in.yaml
+- tapOn:
+    id: "sidebar-row-channel:${PROFILE_CHANNEL_ID}"
+- extendedWaitUntil:
+    visible:
+      id: "composer-input"
+    timeout: 60000
+
+- scrollUntilVisible:
+    element:
+      id: "card-approval-${MY_NAME_APPROVAL_ID}-approve"
+    direction: UP
+- assertVisible: "바꾸기 전"
+- assertVisible: "바꾼 뒤"
+- assertVisible: "요청한 본인만 승인할 수 있어요."
+- tapOn:
+    id: "card-approval-${MY_NAME_APPROVAL_ID}-approve"
+- extendedWaitUntil:
+    notVisible:
+      id: "card-approval-${MY_NAME_APPROVAL_ID}-approve"
+    timeout: 30000
+- assertVisible: "내 이름을 바꿨어요"
+
+- scrollUntilVisible:
+    element:
+      id: "card-approval-${MY_PHOTO_APPROVAL_ID}-approve"
+    direction: DOWN
+- extendedWaitUntil:
+    visible:
+      id: "approval-avatar-image"
+    timeout: 30000
+- assertVisible: "바꾸기 전"
+- assertVisible: "바꾼 뒤"
+- tapOn:
+    id: "card-approval-${MY_PHOTO_APPROVAL_ID}-approve"
+- extendedWaitUntil:
+    notVisible:
+      id: "card-approval-${MY_PHOTO_APPROVAL_ID}-approve"
+    timeout: 30000
+- assertVisible: "프로필 사진을 바꿨어요"
+
+- scrollUntilVisible:
+    element:
+      id: "card-approval-${AGENT_NAME_APPROVAL_ID}-approve"
+    direction: DOWN
+- tapOn:
+    id: "card-approval-${AGENT_NAME_APPROVAL_ID}-approve"
+- extendedWaitUntil:
+    notVisible:
+      id: "card-approval-${AGENT_NAME_APPROVAL_ID}-approve"
+    timeout: 30000
+
+- scrollUntilVisible:
+    element:
+      id: "card-approval-${AGENT_PHOTO_APPROVAL_ID}-approve"
+    direction: DOWN
+- extendedWaitUntil:
+    visible:
+      id: "approval-avatar-image"
+    timeout: 30000
+- assertVisible: "바꾸기 전"
+- assertVisible: "바꾼 뒤"
+- tapOn:
+    id: "card-approval-${AGENT_PHOTO_APPROVAL_ID}-approve"
+- extendedWaitUntil:
+    notVisible:
+      id: "card-approval-${AGENT_PHOTO_APPROVAL_ID}-approve"
+    timeout: 30000

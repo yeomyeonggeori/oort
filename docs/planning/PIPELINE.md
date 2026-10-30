@@ -1,13 +1,13 @@
 # 실행 레인 — 모델·도구·병렬 판단 정본
 
-기준: 2026-09-23 성재 지시(ADR-0187 D7). 공용 운영 계약은 [AGENTS](../../AGENTS.md), 기획 방식은 [README](README.md), 트랙/승격 권한은 [TRACKS](../TRACKS.md)에 있다. 아래 값을 다른 문서에 복사하지 않는다.
+기준: 2026-09-23 성재 지시(ADR-0187 D7). §1 워커 줄·§2 병렬·§5 스택은 2026-10-29·10-30 성재 지시로 그 당시 값을 대체한다. 공용 운영 계약은 [AGENTS](../../AGENTS.md), 기획 방식은 [README](README.md), 트랙/승격 권한은 [TRACKS](../TRACKS.md)에 있다. 아래 값을 다른 문서에 복사하지 않는다.
 
 ## 1. 레인
 | 레인 | 역할 | 현재 구성 |
 |---|---|---|
 | product-owner | 방향·ADR·로드맵·출시 권한 | 성재 |
 | planner / orchestrator | 기획·검수·워커 지시·체크포인트·통합 | **Opus 5.5 / Claude Code**(2026-09-23 성재가 세션 모델을 전환 — 레인 기본값 확정은 성재 확인 대기), **Fable / Claude Code**, **GPT-6 Astra / Codex**. 동등한 역할이며 작업 범위별 owner는 하나 |
-| worker | 구현·관련 시험·PR·인계 | **Opus 5.5 서브에이전트**(Claude Code Agent 도구, 부모 모델 상속). Grok 레인은 2026-09-23 은퇴 |
+| worker | 구현·관련 시험·커밋(스택 칸 하나). push·PR·인계는 planner가 대신 한다 | **Codex(gpt-6.1-sol)**(2026-10-29 성재). Claude Code 서브에이전트(Sonnet 5.5)는 보조·검수, 그리고 Codex 샌드박스가 못 하는 일(시뮬레이터·Docker 등)에 쓴다. Grok 레인은 2026-09-23 은퇴 |
 | reviewer-code | 구현 맥락과 분리한 변경·회귀·증거 검수 | fresh 컨텍스트 서브에이전트. diff 사본과 변경 후 파일 사본을 검수 대상으로 삼고, 사실 확인을 위해 레포를 읽기 전용으로 본다 |
 | reviewer-design | 해당 표면의 캡처·preflight·루브릭 검수 | design-review 에이전트 fresh 컨텍스트 |
 | integrator / momo-main | 순차 트랙 통합·승인 범위의 승격·sync | 공용 `integration` 범위를 맡은 orchestrator 한 세션 |
@@ -15,7 +15,7 @@
 승인된 레인 모델끼리만 전환하고, 전환 전에 공용 체크포인트로 owner·진행 결과를 인계한다. 지정 모델을 쓸 수 없으면 다른 모델로 임의 대체하지 않고 진행 결과와 남은 작업을 보존한다. 체크포인트에 실제 사용 모델을 기록한다.
 
 ## 2. 병렬 판단과 위치
-고정 병렬 상한은 두지 않는다(2026-09-23 성재). orchestrator가 아래 기준으로 판단한다.
+워커는 스택 단위로 돈다(§5, 한 스택 최대 8칸). 그 안의 자원 순서는 orchestrator가 아래 기준으로 판단한다.
 - 호스트 1분 load가 코어 수를 넘으면 새 무거운 작업을 미룬다.
 - 동시에 돌리면 결과가 흔들리는 작업은 호스트 전체에서 한 번에 하나만 돌린다: 병합 트리 게이트, Docker 스택 게이트, iOS 빌드·시뮬레이터 캡처, 캡처 기반 측정.
 - 같은 파일군을 만지는 워커는 순서를 정하거나 파일 소유권을 나눈다.
@@ -26,7 +26,7 @@
 | 로컬 관례 | `~/projects/momo-tracks/{engine,uxui}`, 개별 작업은 그 아래 `momo-worktrees/` |
 | 공용 실행 기록 | 해당 저장소의 `git-common-dir/oort-coordination/` |
 | 기획 문서 랜딩 | **track/engine**. main 직행 금지 |
-| UI 트랙 랜딩 | 독립 design-review **B0·H0**, 해당 표면 게이트 |
+| UI 랜딩 | 트랙 착륙은 §5 가벼운 착륙. 독립 design-review **B0·H0**와 해당 표면 게이트는 스택 검증에서 한 번, 승격 전 필수 |
 | 엔진→UXUI 전달 | UI가 소비하는 계약이 준비되면 ENGINE_HANDOFF에 ready 기록 |
 
 ## 3. 실행·인계
@@ -35,6 +35,24 @@
 모든 worker가 PR 뒤 멈추더라도 orchestrator는 검수·수정·통합의 요청 범위를 계속 수행한다. 현재 base가 이미 필요한 main을 포함하면 관성적으로 merge하지 않는다. 워커의 완료 선언만으로 완료 처리하지 않고 실제 diff/커밋·검증 산출물·PR을 확인한다.
 
 ## 4. 권한
-track→main은 product-owner의 명시 승인 범위에서만 집행한다. 상시 위임은 TRACKS §3의 **묶음 단위 승격 + 양 트랙 sync**다. 이것은 다른 owner의 작업 인수, 새 제품 결정, release/유료 workflow 권한을 추가하지 않는다. 배포는 AGENTS의 M7 등급과 owner 승인을 따른다.
+track→main은 product-owner의 명시 승인 범위에서만 집행한다. 상시 위임은 TRACKS §3의 **묶음 단위 승격 + 양 트랙 sync**다. 스택 PR이 든 트랙은 그 스택의 검증 PASS 뒤에만 승격하고, 올리는 때는 owner 신호를 따른다(§5). 이것은 다른 owner의 작업 인수, 새 제품 결정, release/유료 workflow 권한을 추가하지 않는다. 배포는 AGENTS의 M7 등급과 owner 승인을 따른다.
 
 소유권이 불명확하면 다른 작업을 중복 실행하지 않는다. 한 범위만 조율하고 나머지 독립 작업은 진행한다.
+
+## 5. 스택 — 묶음 단위 실행과 시험
+기준(성재): 2026-10-29 「내가 8개 워커 맞춰서 진행해 하면 진행 + 8개 돌면 끝내기(아예)」, 2026-10-30 「테스트는 큰 작업단위로. stack pr 느낌으로 말이지. 앞으로도 그렇게 진행할 수 있도록 원칙을 세워서 하자.」·「내가 계속 요청하는 건들은 잘 나눠서 그것도 stack에 포함하는 느낌으로 가자.」 여기서 **스택은 PR 묶음**이다(기술 스택·Docker 스택과 다른 말).
+
+| 항목 | 규칙 |
+|---|---|
+| 단위 | 스택 하나 = 최대 8칸 = GitHub 마일스톤 하나(`S<n> …`). **칸은 워커 PR 하나**다. 한 PR이 함께 닫는 이슈, 운영·문서 이슈는 마일스톤에 같이 둘 수 있지만 칸에 세지 않는다. 다음 스택들의 마일스톤이 로드맵이고, CURRENT_STATE가 지금 스택과 다음 스택을 가리킨다 |
+| 시작 | owner가 고른 스택만, 「진행해」 한 마디에 모든 칸이 동시에 출발한다. 준비(이슈·지시문·워크트리·의존성·전용 PG)는 미리 해 두되 발사하지 않는다 |
+| 사슬 | 서로 기다리는 일은 같은 스택에 넣지 않는다. 계약·설계(ADR)는 스택 N, 그 위의 구현은 스택 N+1이다. 같은 파일군을 만지는 요청은 한 칸으로 묶거나 지시문에 파일 소유를 나눠 적는다 |
+| 워커 | 구현은 Codex(§1)가 하고 커밋까지 한다. push·PR·인계는 planner가 대신 한다. 워커의 빠른 확인: 바뀐 트리의 타입 검사, 린트(웹 eslint, Rust `cargo fmt --all --check`·`cargo clippy --workspace --all-targets -- -D warnings`), 바뀐 행동 시험. 실 PG 시험은 planner가 준비한 전용 PG(`DATABASE_URL`)로 워커가 돌린다. 시뮬레이터·Xcode·Docker·캡처·로컬 전체 시험은 하지 않는다. 증거 상한: S 이하 바뀐 행동 ≤5케이스·45분, M ≤15케이스·90분, L·등급 2는 이슈 계약대로(사보타주 전체·실 PG) |
+| PR 본문 | AGENTS의 증거에 더해 「스택 검증 메모」(바뀐 화면·확인할 장면·다시 돌릴 흐름)를 적는다. Docker·런타임 프로필이 필요한 변경(SQL·infra·runtime)은 planner가 착륙 전에 해당 `scripts/local_gate.sh` 프로필로 돌리고, 돌리지 못한 런타임은 `runtime-unverified`로 적었다가 스택 검증에서 지운다 |
+| 착륙 | 가벼운 착륙: PR CI·Policy integrity green + exact-base verifier + `scripts/verify_merge_tree.sh --base origin/track/<트랙> --head <PR 브랜치> --typecheck-only`(증거에 모드를 적는다). 등급 2(보안) 칸은 실 PG 증거를 갖춘 뒤 착륙 전 보안 검수(최대 2회)를 그대로 한다. 전체 병합 트리·화면 검수는 착륙마다 하지 않는다 |
+| 스택 검증 | 모든 칸이 착륙했거나 실패를 보고하면(막힌 칸은 다음 스택 후보) 두 트랙을 합친 트리에서 한 번: `scripts/verify_merge_tree.sh --base origin/track/engine --head origin/track/uxui`(전체 모드), Rust `cargo test --workspace`(실 PG), 폰 빌드 1회 + Maestro 흐름, 웹·데스크탑 흐름, 측정, 바뀐 UI 전체에 독립 design-review 1회(B0·H0) |
+| 기록 | 스택 검증의 실행표·두 트랙 끝 커밋·남은 `runtime-unverified`는 승격 PR 본문에 남긴다(증거 정본은 PR 본문, AGENTS) |
+| 수리 | Blocker·High만 같은 스택의 수리 PR로 고친다(8칸에 세지 않는다). 수리가 착륙하면 바뀐 범위의 레인을 다시 돌려 승격 PR 본문에 덧붙인다. Medium 이하는 다음 스택 후보로 올린다 |
+| 끝 | 순서는 스택 검증 → 수리 → 재검증 → **완전히 멈춤**이다. 빈칸 채우기·다음 스택 미리 발사를 하지 않는다. **스택 PR이 든 트랙은 그 스택의 검증 PASS 전에 승격하지 않는다**(일부 칸만 착륙하고 멈춘 경우 포함). 승격·배포·빌드는 owner의 신호로 한다 |
+| 새 요청 | owner 메시지 → planner가 한 PR 크기 이슈로 나눔 → **다음 열린 스택** 마일스톤에 배정한다. 도는 스택에는 끼워 넣지 않는다. owner가 「다음 업데이트 필수」라고 한 것은 가장 가까운 스택에 먼저 넣고, 넘치면 그다음 스택으로 넘긴다 |
+| 업데이트 | 업데이트(팀 배포·빌드)는 스택 하나 이상을 묶어 owner 신호로 낸다. 그때 사용자에게 보이는 변화를 CHANGELOG `[Unreleased]`와 팀 채널 소식으로 함께 낸다 |
