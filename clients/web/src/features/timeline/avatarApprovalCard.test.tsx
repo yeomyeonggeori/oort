@@ -205,6 +205,11 @@ function byTestId(host: HTMLElement, id: string): HTMLElement[] {
   return [...host.querySelectorAll(`[data-testid="${id}"]`)] as HTMLElement[];
 }
 
+function openDetails(host: HTMLElement) {
+  const details = host.querySelector<HTMLDetailsElement>('[data-testid="request-bundle-details"]')!;
+  act(() => { details.open = true; details.dispatchEvent(new Event("toggle")); });
+}
+
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 function stubPreviewFetch(status: number): ReturnType<typeof vi.fn> {
@@ -235,7 +240,9 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
     expect(String(url).endsWith(PREVIEW_PATH)).toBe(true);
     expect(init.headers.get("Authorization")).toBe("Bearer access");
 
-    // 서버 행은 그대로 서고, 사진은 승인·거부 버튼 앞에 있다.
+    // 서버 행은 자세히 안에 있고, 사진은 승인·거부 버튼 앞에 있다.
+    expect(byTestId(host, "approval-action-row")).toHaveLength(0);
+    openDetails(host);
     expect(byTestId(host, "approval-action-row")).toHaveLength(3);
     const preview = byTestId(host, "approval-avatar-preview")[0] as HTMLElement;
     const approve = byTestId(host, "approval-approve")[0] as HTMLElement;
@@ -245,6 +252,7 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
   it("결정 권한 줄은 관리자가 아니라 사진 주인 본인을 말한다", async () => {
     stubPreviewFetch(200);
     const host = await mountCard(avatarProps());
+    openDetails(host);
     expect(byTestId(host, "approval-action-role")[0]?.textContent).toContain(
       "사진 주인 본인만 승인할 수 있어요."
     );
@@ -270,6 +278,7 @@ describe("member.avatar.set 승인 카드 (#4394)", () => {
     const host = await mountCard(props);
     expect(fetchMock).not.toHaveBeenCalled();
     expect(byTestId(host, "approval-avatar-caption")[0]?.textContent).toContain("본인만");
+    openDetails(host);
     expect(byTestId(host, "approval-action-row")).toHaveLength(3);
   });
 

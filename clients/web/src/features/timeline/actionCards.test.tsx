@@ -200,7 +200,8 @@ function unmount(): void {
 
 function mountCard(
   props: Record<string, unknown>,
-  over: Partial<Message> = {}
+  over: Partial<Message> = {},
+  directory = DIRECTORY
 ): HTMLElement {
   const card = agentCardModel(
     message({ type: "approval_request", props, ...over } as Partial<Message>)
@@ -212,7 +213,7 @@ function mountCard(
   const tree: ReactElement = createElement(
     SessionProvider,
     { value: sessionValue() },
-    createElement(AgentCard, { card, directory: DIRECTORY })
+    createElement(AgentCard, { card, directory })
   );
   act(() => {
     mountedRoot?.render(tree);
@@ -228,6 +229,11 @@ function approvalProps(): Record<string, unknown> {
 
 function byTestId(host: HTMLElement, id: string): HTMLElement[] {
   return [...host.querySelectorAll(`[data-testid="${id}"]`)] as HTMLElement[];
+}
+
+function openDetails(host: HTMLElement) {
+  const details = host.querySelector<HTMLDetailsElement>('[data-testid="request-bundle-details"]')!;
+  act(() => { details.open = true; details.dispatchEvent(new Event("toggle")); });
 }
 
 /** 한 번 누르면 결정이 나간다 (#3819). 반환은 응답이 반영된 뒤의 호스트. */
@@ -252,8 +258,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("행동 승인 카드 (ADR-0186 부록 A)", () => {
-  it("행·사유·결정 권한을 카드 표면에 그린다", () => {
+  it("행·사유·결정 권한은 자세히를 열면 그린다", () => {
     const host = mountCard(approvalProps());
+    expect(byTestId(host, "approval-action-row")).toHaveLength(0);
+    openDetails(host);
     const rows = byTestId(host, "approval-action-row").map(
       (row) => row.textContent ?? ""
     );
@@ -396,7 +404,7 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     const init = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[1];
     const body = JSON.parse(String(init.body));
     expect(body.approve).toBe(false);
-    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("거부");
+    expect(byTestId(host, "request-bundle-state")[0]?.textContent).toBe("거부");
     // 눌린 버튼은 영수증 줄로 바뀌며 사라진다 — 초점은 카드가 받는다(body 로 떨어지지 않는다).
     expect(document.activeElement).toBe(byTestId(host, "agent-card")[0]);
   });
@@ -497,7 +505,7 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
       jsonResponse({ approval_id: APPROVAL_ID, status: "role_required" }, 403)
     );
     // 칩은 여전히 「승인 필요」다 — §5: approval 은 여전히 pending 이다.
-    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("승인 필요");
+    expect(byTestId(host, "request-bundle-state")[0]?.textContent).toBe("승인 필요");
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
   });
 
@@ -784,7 +792,9 @@ describe("서버가 이미 결정한 옛 카드는 버튼이 없다 (#3818)", ()
       decided_by: ME,
       decided_at_ms: 1_753_400_000_000,
     });
+    openDetails(host);
     expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("곽성재");
+    expect(byTestId(host, "approval-ledger")[0]?.textContent).toContain("원장 #");
   });
 
   it("status 없는 대기 카드는 여전히 버튼을 그린다 (과잉 숨김 방지)", () => {
@@ -834,7 +844,9 @@ describe("먼저 제안 카드와 고정 카드 (#4705)", () => {
   }
 
   function mountPin(props: Record<string, unknown>): HTMLElement {
-    return mountCard(props, { authorMemberId: PLANNER });
+    const host = mountCard(props, { authorMemberId: PLANNER });
+    openDetails(host);
+    return host;
   }
 
   const headTitle = (host: HTMLElement) =>
@@ -1023,5 +1035,68 @@ describe("만료 스윕이 남긴 줄 (#4705, 검수 L4)", () => {
   it("스윕 줄이 아닌 오류 도구 결과는 지금처럼 실패 칩이다", () => {
     const host = mountSweepLine({ status: "failed", output: "boom" });
     expect(byTestId(host, "agent-status-chip")[0]?.dataset.status).toBe("error");
+  });
+});
+
+describe("요청 묶음 카드", () => {
+  it("결과의 다음 행동은 이 앱에 실제로 있는 목적지만 연다", () => {
+    const host = mountCard({ ...approvalProps(), status: "approved", result: { status: "succeeded", next: { label: "초대에서 보기", href: "/settings?section=invites" } } });
+    expect(host.querySelector('a[href="#/settings?section=invites"]')).toBeNull();
+  });
+  it("머리·값 둘·단추 쌍·조용한 줄만 서고 자세히를 닫으면 라벨 행이 DOM에도 없다", () => {
+    const host = mountCard({ ...approvalProps(), intent: "팀원 초대 링크를 만들려고 해요", expires_at_ms: Date.now() + 3_600_000 });
+    expect(byTestId(host, "request-bundle-headline")[0]?.textContent).toBe("팀원 초대 링크를 만들려고 해요");
+    expect(byTestId(host, "request-bundle-values")[0]?.querySelectorAll('[role="group"]')).toHaveLength(2);
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+    expect(byTestId(host, "approval-reject")).toHaveLength(1);
+    expect(byTestId(host, "request-bundle-details")[0]?.textContent).toMatch(/시간 남음 · 자세히/);
+    expect(host.querySelector("dt")).toBeNull();
+    expect(byTestId(host, "agent-payload")).toHaveLength(0);
+    openDetails(host);
+    expect(byTestId(host, "approval-action-row")).toHaveLength(3);
+    const details = byTestId(host, "request-bundle-details")[0] as HTMLDetailsElement;
+    act(() => { details.open = false; details.dispatchEvent(new Event("toggle")); });
+    expect(host.querySelector("dt")).toBeNull();
+  });
+
+  it("구조화된 값은 이전·이후를 접근성 이름에도 담고, 일반 멤버에게 원장·원본 데이터가 없다", () => {
+    const host = mountCard({ ...approvalProps(), status: "approved", decided_by: ME, decided_at_ms: Date.now(),
+      action: { id: "agent.profile.update", rows: [{ label: "소개", before: "기존 소개", after: "새 소개" }] },
+    }, {}, makeDirectory([]));
+    expect(host.querySelector('[aria-label="소개: 이전 값 기존 소개, 이후 값 새 소개"]')).not.toBeNull();
+    expect(host.querySelector("s")?.textContent).toBe("기존 소개");
+    openDetails(host);
+    expect(byTestId(host, "agent-payload")).toHaveLength(0);
+    expect(host.textContent).not.toContain("원장 #");
+  });
+
+  it("서버가 결정할 수 없다고 한 카드는 버튼·키보드 결정을 숨기고 기다릴 사람을 말한다", () => {
+    const host = mountCard({ ...approvalProps(), can_decide: false, decision_mode: "inline" });
+    expect(byTestId(host, "approval-approve")).toHaveLength(0);
+    expect(byTestId(host, "approval-reject")).toHaveLength(0);
+    expect(byTestId(host, "agent-card")[0]?.getAttribute("aria-keyshortcuts")).toBeNull();
+    expect(host.textContent).toContain("관리자의 승인을 기다려요");
+  });
+
+  it.each([
+    [{ result: { status: "succeeded", line: "소개를 바꿨어요" } }, "끝"],
+    [{ code: "approval_rejected" }, "거부"],
+  ])("기한이 지난 pending 스냅샷의 종결 코드를 만료로 덮지 않는다", (terminal, word) => {
+    const host = mountCard({ ...approvalProps(), expires_at_ms: Date.now() - 1000, ...terminal });
+    expect(byTestId(host, "request-bundle-state")[0]?.textContent).toBe(word);
+    expect(byTestId(host, "approval-expired")).toHaveLength(0);
+    expect(byTestId(host, "approval-approve")).toHaveLength(0);
+  });
+
+  it.each([
+    ["thinking", {}, "생각 중"], ["pending", {}, "승인 필요"],
+    ["approved", { action_type: "tool_call", action: undefined, tool_name: "shell" }, "실행 중"],
+    ["approved", {}, "끝"], ["rejected", {}, "거부"], ["expired", {}, "만료"],
+    ["pending", { result: { status: "failed" } }, "실패"], ["cancelled", {}, "취소"],
+  ])("%s 상태를 같은 카드 한 장에서 코어 낱말 %s로 읽는다", (status, extra, word) => {
+    const host = mountCard({ ...approvalProps(), status, ...extra });
+    expect(byTestId(host, "agent-card")).toHaveLength(1);
+    expect(byTestId(host, "request-bundle-state")[0]?.textContent).toBe(word);
+    if (word !== "승인 필요") expect(byTestId(host, "approval-approve")).toHaveLength(0);
   });
 });

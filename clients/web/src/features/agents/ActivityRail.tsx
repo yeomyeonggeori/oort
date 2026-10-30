@@ -19,6 +19,7 @@ import {
 } from "./agentWorkingSignal";
 import { RespondingAvatar, RespondingDots } from "./RespondingIndicator";
 import { openWorkPanel } from "./workLogStore";
+import { useVisibleThoughtRuns } from "./visibleThoughtRuns";
 
 // =============================================================================
 // 입력창 레일: 「에이전트가 지금 일하는 중」의 **유일한** 실시간 자리 (#4619, #4577 권장 A).
@@ -314,6 +315,7 @@ export function ComposerActivityRail({
   const signals = useAgentWorkingSignals();
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && live);
   const approvalWaits = useApprovalWaits();
+  const visibleThoughtRuns = useVisibleThoughtRuns();
   // 승인 원장이 레일보다 이긴다(#3738): 이 채널에서 사람을 기다리는 카드가 있으면 그 에이전트는 승인 대기다.
   const turns = applyApprovalWaits(
     agentTurnsInChannel(signals, channelId, nowMs),
@@ -322,7 +324,7 @@ export function ComposerActivityRail({
     nowMs
   );
   const rail = activityRail(
-    turns,
+    turns.filter((turn) => turn.runId === undefined || !visibleThoughtRuns.has(turn.runId.toLowerCase())),
     (memberId) => memberNameParts(directory, memberId, UNKNOWN_AGENT_NAME),
     nowMs
   );

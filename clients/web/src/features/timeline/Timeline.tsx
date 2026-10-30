@@ -63,6 +63,7 @@ import { useEndedRuns } from "@/features/agents/endedRuns";
 import { useChannelRuns } from "@/features/agents/agentRunProgressStore";
 import { runsByTriggerMessage } from "@momo/core/features/agents/runStatusLine";
 import { runAnswerMap } from "@momo/core/features/agents/triggerChip";
+import { shouldFoldBundleLine } from "@momo/core/features/timeline/requestBundle";
 import { runStatusForMessage } from "./runStatus";
 
 import {
@@ -383,6 +384,8 @@ export function Timeline({
   // 의존성에 넣으면 스트림이 매 렌더 새로 만들어지고, 그 동일성은 이 목록의
   // 앵커 보정이 기대는 것이다.
   const myMemberIdForFold = actions?.myMemberId;
+  // 서버가 소속 root를 준 답글만 본류에서 빼요. 옛 서버의 root 없는 카드는 그대로예요.
+  const mainMessages = useMemo(() => messages.filter((message) => !message.rootId), [messages]);
 
   // 연달아 지워진 메시지는 한 줄로 접힌다 (감사 M-1). 폰이 먼저 고쳤고, 코어 승격과
   // 함께 실측한 결과 **웹도 같은 결함을 갖고 있었다**: 이 스트림은
@@ -398,13 +401,13 @@ export function Timeline({
   const showIntro = shouldShowChannelIntro({
     status,
     reachedStart,
-    messageCount: messages.length,
+    messageCount: mainMessages.length,
   });
   // A local echo counts as content: it must appear under the intro the moment
   // it is sent, not after the server round trip, and it must not remount the
   // list (that remount was the empty-state layout shift).
   const empty =
-    messages.length === 0 && (pending === undefined || pending.length === 0);
+    mainMessages.length === 0 && (pending === undefined || pending.length === 0);
   const showWelcome =
     welcomePhase === "stage" ||
     welcomePhase === "exiting" ||
@@ -425,7 +428,7 @@ export function Timeline({
 
   const items = useMemo(() => {
     const folded = foldDeletedRuns(
-      buildTimelineItems(messages, {
+      buildTimelineItems(mainMessages.filter((message) => !shouldFoldBundleLine(message, mainMessages)), {
         lastReadSeq,
         unreadCount,
         recoveryMarkers,
@@ -440,7 +443,7 @@ export function Timeline({
     );
     return showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
   }, [
-    messages,
+    mainMessages,
     lastReadSeq,
     unreadCount,
     recoveryMarkers,
@@ -462,7 +465,7 @@ export function Timeline({
   // #4619 — 「답함 ✓」 칩이 누르면 가는 답 메시지. 로드된 메시지를 한 번 색인해 끝난 run마다 답을 찾는다
   // (행마다 찾으면 목록 전체를 행 수만큼 훑는다). 답이 아직 로드되지 않았거나 이을 길이 없으면 그 run은
   // 지도에 없고, 칩은 「답함」을 말하되 눌리지 않는다.
-  const runAnswers = useMemo(() => runAnswerMap(channelRuns, messages), [channelRuns, messages]);
+  const runAnswers = useMemo(() => runAnswerMap(channelRuns, mainMessages), [channelRuns, mainMessages]);
   const runStatusFor = (message: Message): readonly AgentRunProgress[] | undefined =>
     runStatusForMessage({ message, myMemberId: myMemberIdForFold, directory, runsByMessage });
 
@@ -895,6 +898,7 @@ export function Timeline({
               onResend={onResend}
               runEnded={isStreamRunEnded(item.message, endedRuns)}
               runStatus={runStatusFor(item.message)}
+              showThought={channelKind === "dm" && peer?.kind === "agent"}
               runAnswers={runAnswers}
             />
           );
