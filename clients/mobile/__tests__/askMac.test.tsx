@@ -62,7 +62,9 @@ import {NON_SECRET_KEYS, nonSecretStore} from '../src/storage/kv';
 // =============================================================================
 
 jest.mock('../src/lib/haptics', () => ({
+  ...jest.requireActual('../src/lib/haptics'),
   haptics: {
+    event: jest.fn(),
     selection: jest.fn(),
     light: jest.fn(),
     medium: jest.fn(),

@@ -335,7 +335,8 @@ describe('Buzz 식 첨부 (#3820)', () => {
     expect(screen.queryByText(/4 KB|이미지 ·/)).toBeNull();
     fireEvent.press(screen.getByTestId('attachment-item'));
     expect(screen.getByTestId('attachment-viewer')).toBeTruthy();
-    fireEvent.press(screen.getByTestId('attachment-viewer-back'));
+    // #4775: the Modal opens immediately; controls arrive after source measurement/hero.
+    fireEvent.press(await screen.findByTestId('attachment-viewer-back'));
     expect(screen.queryByTestId('attachment-viewer')).toBeNull();
   });
 
@@ -350,6 +351,7 @@ describe('Buzz 식 첨부 (#3820)', () => {
     );
     expect(screen.getAllByTestId('attachment-image-group')).toHaveLength(1);
     fireEvent.press(screen.getAllByTestId('attachment-item')[1] as never);
-    expect(screen.getByTestId('attachment-viewer-position').props.children).toBe('3장 중 2번');
+    // #4775: position is in the controls that arrive after the opening hero.
+    expect((await screen.findByTestId('attachment-viewer-position')).props.children).toBe('3장 중 2번');
   });
 });

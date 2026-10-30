@@ -1,9 +1,11 @@
+import {getHapticMode} from '../src/lib/haptics';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
   cleanup,
+  cleanupAsync,
   fireEvent,
   render,
   screen,
@@ -617,14 +619,14 @@ describe('설정 페이지', () => {
     expect(screen.getByTestId('profile-version')).toHaveTextContent('oort 9.8.7 (65)');
   });
 
-  it('버전 줄을 길게 누르면 실시간 연결 기록이 복사된다 — 식별 정보 없이 (#2751)', async () => {
+  it('정보의 연결 기록 복사를 누르면 식별 정보 없이 복사한다 (#4783)', async () => {
     const clipboard = jest.requireMock('expo-clipboard') as {
       __box: {value: string | null};
     };
     clipboard.__box.value = null;
     await openPage();
     await act(async () => {
-      fireEvent(screen.getByTestId('profile-version'), 'longPress');
+      fireEvent.press(screen.getByTestId('settings-copy-connection-log'));
     });
     const copied = clipboard.__box.value ?? '';
     expect(copied.split('\n')[0]).toBe('oort 9.8.7 (65)');
@@ -1303,5 +1305,22 @@ describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => 
     await waitFor(() => expect(screen.getByTestId('dev-tools-empty')).toBeTruthy());
     fireEvent.press(screen.getByTestId('settings-back'));
     await waitFor(() => expect(within(page).queryByTestId(ROW)).toBeNull());
+  });
+});
+
+
+describe('햅틱 설정 (#4298)', () => {
+  // CI 수리: 기본 설정은 기존 화면의 햅틱을 보존하고 풍부는 명시적으로 고른다.
+  it('기본으로 시작하고 풍부·끔 선택은 저장되며 다시 열어도 남는다', async () => {
+    await openPage();
+    expect(screen.getByTestId('haptics-basic').props.accessibilityState.selected).toBe(true);
+    fireEvent.press(screen.getByTestId('haptics-rich'));
+    expect(getHapticMode()).toBe('rich');
+    expect(screen.getByTestId('haptics-rich').props.accessibilityState.selected).toBe(true);
+    fireEvent.press(screen.getByTestId('haptics-off'));
+    expect(getHapticMode()).toBe('off');
+    await cleanupAsync();
+    await openPage();
+    expect(screen.getByTestId('haptics-off').props.accessibilityState.selected).toBe(true);
   });
 });

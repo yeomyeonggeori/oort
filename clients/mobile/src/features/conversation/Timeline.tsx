@@ -1,3 +1,4 @@
+import {haptics} from '../../lib/haptics';
 import {uuidEq, type Channel, type Message, type RosterMember} from '@momo/core/lib/api';
 import {
   buildTimelineItems,
@@ -16,6 +17,7 @@ import {
   ActivityIndicator,
   FlatList,
   Keyboard,
+  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -60,6 +62,7 @@ import {
 } from './jumpPills';
 import {EmptyState, ErrorState, LoadingState} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
+import {PULL_FILL, usePullRefresh, withPullScroll} from '../../design/refresh';
 import {usePalette, useStyles} from '../../design/theme';
 import {
   DayDivider,
@@ -78,6 +81,7 @@ import {useChannelRuns} from '../agents/agentRunProgressStore';
 import {runsByTriggerMessage} from '@momo/core/features/agents/runStatusLine';
 import type {AgentRunProgress} from '@momo/core/lib/api';
 
+const noRefresh = async (): Promise<void> => {};
 const NO_RUNS: readonly AgentRunProgress[] = [];
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
@@ -263,7 +267,12 @@ import {
 // is shorter, the rows sit on top of the composer where a lift cannot reach them.
 // It is also what every messenger does with a new conversation, for this reason
 // rather than for a stylistic one.
-const CONTENT_ALIGNMENT = {flexGrow: 1, justifyContent: 'flex-end'} as const;
+const CONTENT_ALIGNMENT = {...PULL_FILL, justifyContent: 'flex-end'} as const;
+
+// RN 0.86의 FlatList는 scroll/refresh props만 바뀌어도 renderItem을 새 함수로 감싼다.
+// 당김 컨트롤의 연결 상태·로더·고지는 셀 데이터가 아니다. RN의 renderer memo를 켜서
+// renderItem/extraData가 바뀔 때만 셀로 전달한다. legacy TS 표에는 없는 RN 정식 prop이다.
+const MEMOIZED_ITEM_RENDERER = {strictMode: true};
 
 /** How near the bottom still counts as "following", in points. */
 const FOLLOW_THRESHOLD_PX = 120;
@@ -853,8 +862,10 @@ function TimelineInner({
   myMemberId,
   loadingOlder,
   reachedStart,
+  realtimeConnected = true,
   nowMs,
   onStartReached,
+  onRefresh,
   onRetry,
   onResend,
   onResendPending,
@@ -874,6 +885,8 @@ function TimelineInner({
   pillsRef,
   tailRef,
   tailGap,
+  headerContent,
+  contentTopInset = 0,
   topPillInset = 0,
   metricsRef,
   scrollLogRef,
@@ -939,8 +952,11 @@ function TimelineInner({
   myMemberId: string;
   loadingOlder?: boolean;
   reachedStart?: boolean;
+  /** 연결 복구 중에는 이전 이력이 남아 있어도 당겨서 다시 맞출 수 있다. */
+  realtimeConnected?: boolean;
   nowMs: number;
   onStartReached?: () => void;
+  onRefresh?: () => Promise<void>;
   onRetry?: () => void;
   onResend?: (message: Message) => void;
   onResendPending?: (clientMsgId: string) => void;
@@ -1072,9 +1088,13 @@ function TimelineInner({
    *
    * 대화 머리의 연결 띠는 목록 위에 **뜬다**(흐름에 끼면 띠가 설 때마다 목록의 보이는 높이가 바뀐다). 띠와 이 필들은
    * 같은 자리(목록 위 가운데)를 쓰므로, 띠가 서 있는 동안 필은 그 밑에 쌓인다 — 아니면 필이 띠 뒤에 숨은 채 눌리는
-   * 컨트롤이 된다. 띠가 없으면 0. 필은 목록 위에 떠 있으므로 이 값은 목록의 배치를 바꾸지 않는다.
+   * 컨트롤이 된다. 대화 화면은 머리의 실제 높이 + 안전 영역 + 띠 높이를 준다. 이 값 자체는 목록의 배치를 바꾸지 않는다.
    */
   topPillInset?: number;
+  /** 실제 그려지는 고지·요약. null 인 카드는 목록 안에서 높이를 차지하지 않는다. */
+  headerContent?: React.ReactNode;
+  /** 떠 있는 머리의 실제 높이 + 위 안전 영역. 스크롤 안쪽 여백이라 목록은 머리 뒤로 흐른다. */
+  contentTopInset?: number;
   /**
    * Same seam, for the geometry: the list's own last scroll report, written
    * without a re-render. What a harness wants to know after a send is how far
@@ -1659,6 +1679,7 @@ function TimelineInner({
    * `onScrollToIndexFailed` 의 회복이 같은 자리에 다시 놓으려면 이 값을 알아야 한다.
    */
   const scrollViewPositionRef = useRef(0.5);
+  const scrollViewOffsetRef = useRef(0);
 
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -1966,14 +1987,15 @@ function TimelineInner({
 
   /** 걸린 이동 안에서만 `scrollToIndex` 를 부른다. 이 파일의 유일한 호출이다. */
   const scrollToIndexInTravel = useCallback(
-    (index: number, viewPosition: number, animated: boolean) => {
+    (index: number, viewPosition: number, animated: boolean, viewOffset = 0) => {
       if (jumpTravelRef.current === null) {
         failWithoutTravel('scrollToIndex was asked for outside a jump travel');
         return;
       }
       // `onScrollToIndexFailed` 의 회복이 같은 자리에 다시 놓으려면 이 값을 안다.
       scrollViewPositionRef.current = viewPosition;
-      listRef.current?.scrollToIndex({index, viewPosition, animated});
+      scrollViewOffsetRef.current = viewOffset;
+      listRef.current?.scrollToIndex({index, viewPosition, viewOffset, animated});
     },
     [listRef],
   );
@@ -1988,9 +2010,10 @@ function TimelineInner({
       viewPosition: number,
       animated: boolean,
       onLanded?: (delayMs: number) => void,
+      viewOffset = 0,
     ) => {
       beginJumpTravel(onLanded);
-      scrollToIndexInTravel(index, viewPosition, animated);
+      scrollToIndexInTravel(index, viewPosition, animated, viewOffset);
     },
     [beginJumpTravel, scrollToIndexInTravel],
   );
@@ -2742,15 +2765,19 @@ function TimelineInner({
     // VoiceOver 가 한 번 더 스크롤한다. 착지가 틈을 메우는 활강을 걸었으면 그 활강이
     // 끝난 뒤다(#2618 N-2).
     const focusTarget = firstMessageIdAfter(itemsRef.current, index);
-    travelToIndex(index, 0, !reduceMotionRef.current, delayMs =>
-      focusRow(focusTarget, delayMs),
+    travelToIndex(
+      index, 0, !reduceMotionRef.current,
+      delayMs => focusRow(focusTarget, delayMs),
+      Math.max(contentTopInset, topPillInset),
     );
   }, [
     cancelConvergence,
     cancelFocus,
+    contentTopInset,
     focusRow,
     reduceMotionRef,
     settleEntry,
+    topPillInset,
     travelToIndex,
   ]);
 
@@ -2758,6 +2785,7 @@ function TimelineInner({
   // 닦았고(측정된 클램프를 오르는 즉시 라운드), 두 번째 길을 내면 그 수리를 다시
   // 벌어야 한다.
   const jumpToLatest = useCallback(() => {
+    haptics.event('jumpToLatest');
     convergeToEnd('latest');
   }, [convergeToEnd]);
 
@@ -3167,7 +3195,7 @@ function TimelineInner({
       travel.recovering = true;
       travel.lastMotionAt = Date.now();
       listRef.current?.scrollToOffset({
-        offset: info.averageItemLength * info.index,
+        offset: Math.max(0, info.averageItemLength * info.index - scrollViewOffsetRef.current),
         animated: false,
       });
       if (recoveryFrameRef.current !== undefined) {
@@ -3179,7 +3207,7 @@ function TimelineInner({
         travel.recovering = false;
         travel.lastMotionAt = Date.now();
         // 실패하기 전 그 요청이 원한 자리 — 인용은 가운데, 안읽음 필은 위 (#1892).
-        scrollToIndexInTravel(info.index, scrollViewPositionRef.current, false);
+        scrollToIndexInTravel(info.index, scrollViewPositionRef.current, false, scrollViewOffsetRef.current);
       });
     },
     [listRef, scrollToIndexInTravel],
@@ -3207,20 +3235,27 @@ function TimelineInner({
   // 되고, `FlatList` 의 `PureComponent` 비교는 거기서 언제나 실패한다. 즉 이 목록은
   // "무엇 하나 바뀌지 않았다"를 말할 방법이 없었다. 머리는 자기가 그리는 세 값에만,
   // 꼬리는 아무것에도 매이지 않는다.
+  const contentStyle = useMemo(
+    () => contentTopInset > 0 ? [CONTENT_ALIGNMENT, {paddingTop: contentTopInset}] : CONTENT_ALIGNMENT,
+    [contentTopInset],
+  );
   const listHeader = useMemo(
     () => (
-      <View style={styles.header}>
-        {loadingOlder ? (
-          <ActivityIndicator color={palette.accentText} />
-        ) : reachedStart && items.length > 0 ? (
-          <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
-        ) : null}
-      </View>
+      <>
+        {headerContent}
+        <View style={styles.header}>
+          {loadingOlder ? (
+            <ActivityIndicator color={palette.accentText} />
+          ) : reachedStart && items.length > 0 ? (
+            <Text style={styles.headerLabel}>대화의 시작입니다.</Text>
+          ) : null}
+        </View>
+      </>
     ),
     // 스킴이 바뀌면 `styles` 는 **다른 객체**가 되고, 그때 이 메모도 다시 계산되어야
     // 한다 (U2). `useStyles` 의 캐시가 (팩토리 × 스킴) 당 하나이므로 같은 스킴이
     // 이어지는 동안 이 참조는 변하지 않고, 메모는 스킴이 실제로 바뀔 때만 깨진다.
-    [loadingOlder, reachedStart, items.length, palette, styles],
+    [headerContent, loadingOlder, reachedStart, items.length, palette, styles],
   );
 
   // 정리(cleanup) 형식의 ref — `renderItem` 안의 앵커 래퍼와 같은 이유다: 떼어내는
@@ -3252,8 +3287,26 @@ function TimelineInner({
     [tailNodeRef, styles, tailGap],
   );
 
+  // #4783: 연결 복구 중에는 언제든 당겨서 다시 맞춘다. 연결됐으면 이전 이력을 다 읽은 뒤에만 켠다.
+  const pullEnabled = onRefresh !== undefined &&
+    (!realtimeConnected || (reachedStart === true && !loadingOlder));
+  const {refreshControl, scrollProps, notice} = usePullRefresh(
+    onRefresh ?? noRefresh, 'timeline-refresh', {resetKey: channelId},
+  );
+  const pullScroll = useMemo(
+    () => withPullScroll(onScroll, pullEnabled ? scrollProps : undefined),
+    [onScroll, pullEnabled, scrollProps],
+  );
+  // 빈 목록·로딩·오류에서도 원래 제공하던 고지의 닫기·근거 동작을 유지한다.
+  const withNotices = (state: React.ReactElement) => headerContent ? (
+    <ScrollView contentContainerStyle={contentStyle}>
+      {headerContent}
+      {state}
+    </ScrollView>
+  ) : state;
+
   if (status === 'error') {
-    return (
+    return withNotices(
       <ErrorState
         headline="이 대화를 불러오지 못했습니다."
         detail="연결을 확인한 뒤 다시 시도하세요."
@@ -3268,17 +3321,36 @@ function TimelineInner({
   const empty = messages.length === 0 && items.length === 0;
 
   if (status === 'loading' && empty) {
-    return <LoadingState label="대화를 불러오는 중입니다." testID="timeline-loading" />;
+    return withNotices(<LoadingState label="대화를 불러오는 중입니다." testID="timeline-loading" />);
   }
 
   if (status === 'ready' && empty) {
     const copy = emptyOverride ?? emptyChannelCopy(channelKind, peer ?? null);
-    return (
+    // 고지(머리 내용)가 있으면 바깥 스크롤이 당김을 받는다 — 안쪽 빈 상태의 스크롤은 내용 높이로 늘어나 당김을 못 받는다.
+    const emptyState = (
       <EmptyState
         headline={copy.headline}
         detail={copy.detail}
+        refreshControl={pullEnabled && !headerContent ? refreshControl : undefined}
+        scrollProps={pullEnabled && !headerContent ? scrollProps : undefined}
         testID="timeline-empty"
       />
+    );
+    return (
+      <>
+        {notice}
+        {headerContent ? (
+          <ScrollView
+            testID="timeline-empty-scroll"
+            contentContainerStyle={contentStyle}
+            refreshControl={pullEnabled ? refreshControl : undefined}
+            {...(pullEnabled ? scrollProps : undefined)}
+          >
+            {headerContent}
+            {emptyState}
+          </ScrollView>
+        ) : emptyState}
+      </>
     );
   }
 
@@ -3290,11 +3362,12 @@ function TimelineInner({
       testID="timeline-list"
       data={items}
       renderItem={renderItem}
+      {...MEMOIZED_ITEM_RENDERER}
       keyExtractor={keyExtractor}
       onScrollToIndexFailed={onScrollToIndexFailed}
       // See `CONTENT_ALIGNMENT`: a conversation shorter than the screen packs to
       // the bottom, because the keyboard lifts this list's top edge out of sight.
-      contentContainerStyle={CONTENT_ALIGNMENT}
+      contentContainerStyle={contentStyle}
       // `renderItem` closes over these, and a `FlatList` cell will happily keep
       // rendering with a stale closure otherwise. The measurement seam found
       // this the hard way: moving `anchorSeq` to another row left the wrapper on
@@ -3315,7 +3388,8 @@ function TimelineInner({
       // 먼 「최신으로」가 가는 동안만 한 판·창을 넓힌다(#4689 원인 B, `FAR_LATEST_BATCH`). `undefined` 는 목록의 기본값(10·21)이다.
       maxToRenderPerBatch={widenTail ? FAR_LATEST_BATCH : undefined}
       windowSize={widenTail ? FAR_LATEST_WINDOW : undefined}
-      onScroll={onScroll}
+      refreshControl={pullEnabled ? refreshControl : undefined}
+      onScroll={pullScroll.onScroll}
       // 탭 판정(#4614): 읽기만 하는 터치 처리기 넷. 아래 `keyboardShouldPersistTaps` 주석이 왜 이것이 필요한지 말한다.
       onTouchStart={tapTouch.onTouchStart}
       onTouchMove={tapTouch.onTouchMove}
@@ -3380,6 +3454,7 @@ function TimelineInner({
   // 부모의 직접 자식)은 그대로다.
   const motionScope = (
     <ReduceMotionRefContext.Provider value={reduceMotionRef}>
+      {notice}
       {list}
     </ReduceMotionRefContext.Provider>
   );
@@ -3418,6 +3493,7 @@ function TimelineInner({
         <JumpPillDock side="bottom">
           <JumpPill
             direction="down"
+            newCount={newCount}
             testID="jump-latest"
             segments={jumpLatestSegments(newCount)}
             accessibilityLabel={jumpLatestAccessibilityLabel(newCount)}

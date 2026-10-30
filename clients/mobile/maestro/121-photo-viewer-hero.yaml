@@ -1,0 +1,42 @@
+appId: app.momo.ios
+name: "121-photo-viewer-hero"
+---
+# PHOTO-VIEWER-MULTI fixture; run in light/dark, large type and reduced motion.
+# Planner records mid-transition frames and conversation scroll offset separately (no capture in worker).
+- extendedWaitUntil:
+    visible:
+      id: "attachment-preview-image"
+    timeout: 30000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "attachment-item"
+    index: 0
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-back"
+- tapOn:
+    id: "attachment-viewer-thumb"
+    index: 2
+- waitForAnimationToEnd
+- assertVisible:
+    id: "attachment-viewer-position"
+    text: "3장 중 3번.*"
+- tapOn:
+    id: "attachment-viewer-back"
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+- tapOn:
+    id: "attachment-item"
+    index: 1
+- waitForAnimationToEnd
+- runScript: subflows/native-double-tap.js
+- waitForAnimationToEnd
+# Back while enlarged: fit first, then return to page 2's thumbnail in the conversation.
+- tapOn:
+    id: "attachment-viewer-back"
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "attachment-viewer"
+- assertVisible:
+    id: "attachment-item"

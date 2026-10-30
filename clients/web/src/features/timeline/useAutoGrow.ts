@@ -13,6 +13,9 @@ import { useLayoutEffect, type RefObject } from "react";
 // 재고, 최소·최대 줄수 사이로 자른다. 최대를 넘으면 그때부터 스크롤한다.
 // =============================================================================
 
+/** owner 10-30 #4790: 데스크탑 일반·스레드 입력창의 공통 상한. */
+export const COMPOSER_MAX_ROWS = 5;
+
 export interface AutoGrowOptions {
   minRows: number;
   maxRows: number;
@@ -53,7 +56,12 @@ export function useAutoGrow(
     node.style.height = "auto";
     const min = line * minRows + frame;
     const max = line * maxRows + frame;
-    const wanted = node.scrollHeight;
+    // scrollHeight는 패딩을 포함하고 테두리는 제외한다. border-box 높이와
+    // 비교할 때 테두리를 더해야 마지막 줄이 테두리 두께만큼 잘리지 않는다.
+    const wanted =
+      node.scrollHeight +
+      pxOf(styles.borderTopWidth, 0) +
+      pxOf(styles.borderBottomWidth, 0);
     node.style.height = `${Math.round(Math.min(max, Math.max(min, wanted)))}px`;
     node.style.overflowY = wanted > max ? "auto" : "hidden";
   }, [ref, value, minRows, maxRows]);

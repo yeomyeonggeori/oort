@@ -78,6 +78,7 @@ export interface ImageLightboxZoom {
   chip: string | null;
   /** 맞춤으로 돌아간다(Esc·⌘0). */
   reset: () => void;
+  fitForClose: () => Promise<void>;
   /** ⌘+ ⌘- ⌘0. 먹었으면 `true`: 호출자가 `preventDefault`한다. */
   handleKey: (event: {
     key: string;
@@ -92,7 +93,10 @@ export interface ImageLightboxZoom {
  * @param resetKey 이 값이 바뀌면 맞춤으로 돌아간다. 열린 사진의 id(닫혀 있으면 `null`)를 넘기면 다른 장으로 넘길 때도,
  *   닫았다 다시 열 때도 맞춤에서 시작한다.
  */
-export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }): ImageLightboxZoom {
+export function useImageLightboxZoom({ resetKey, enabled = true }: { resetKey: string | null; enabled?: boolean }): ImageLightboxZoom {
+  const enabledRef = useRef(enabled);
+  enabledRef.current = enabled;
+  const fitCleanups = useRef(new Set<() => void>());
   const viewerNode = useRef<HTMLElement | null>(null);
   const [viewer, setViewer] = useState<HTMLElement | null>(null);
   const photoNode = useRef<HTMLImageElement | null>(null);
@@ -218,10 +222,38 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
   );
 
   const reset = useCallback(() => fit(true, true), [fit]);
+  const fitForClose = useCallback(() => new Promise<void>(resolve => {
+    drag.current = null;
+    gesture.current = null;
+    setDragging(false);
+    const node = photoNode.current;
+    if (!node || isLightboxFit(view.current.zoom) || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      fit(false, false);
+      resolve();
+      return;
+    }
+    const finish = () => {
+      clearTimeout(timer);
+      node.removeEventListener('transitionend', end);
+      fitCleanups.current.delete(finish);
+      resolve();
+    };
+    const end = (event: TransitionEvent) => {
+      if (event.target === node && event.propertyName === 'transform') finish();
+    };
+    node.addEventListener('transitionend', end);
+    fitCleanups.current.add(finish);
+    fit(true, false);
+    // The CSS ladder owns the duration. Fallback covers zero-duration CSS and interrupted transitions.
+    const duration = getComputedStyle(node).transitionDuration.split(',').reduce((max, value) =>
+      Math.max(max, parseFloat(value) * (value.trim().endsWith('ms') ? 1 : 1000) || 0), 0);
+    const timer = setTimeout(finish, duration * 2); // Watchdog only: transitionend is authoritative; leave a paint margin.
+  }), [fit]);
+
 
   const handleKey = useCallback<ImageLightboxZoom["handleKey"]>(
     (event) => {
-      if (photoNode.current === null) return false;
+      if (!enabledRef.current || photoNode.current === null) return false;
       const action = lightboxZoomKeyAction(event);
       if (action === null) return false;
       if (action === "fit") fit(true, true);
@@ -243,6 +275,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
   useEffect(
     () => () => {
       if (chipTimer.current !== null) clearTimeout(chipTimer.current);
+      for (const finish of [...fitCleanups.current]) finish();
     },
     []
   );
@@ -252,6 +285,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
     if (viewer === null) return;
     const onWheel = (event: WheelEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
+      if (!enabledRef.current) { event.preventDefault(); return; }
       event.preventDefault();
       if (gesture.current !== null) return;
       zoomTo(
@@ -262,6 +296,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
     };
     const onGestureStart = (event: Event) => {
       event.preventDefault();
+      if (!enabledRef.current) return;
       gesture.current = { baseZoom: view.current.zoom };
     };
     const onGestureChange = (event: Event) => {
@@ -292,7 +327,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLImageElement>) => {
-      if (event.button !== 0 || !isZoomed()) return;
+      if (!enabledRef.current || event.button !== 0 || !isZoomed()) return;
       const measured = measure();
       if (measured === null) return;
       drag.current = {
@@ -315,7 +350,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
   const onPointerMove = useCallback(
     (event: ReactPointerEvent<HTMLImageElement>) => {
       const active = drag.current;
-      if (active === null || event.pointerId !== active.pointerId) return;
+      if (!enabledRef.current || active === null || event.pointerId !== active.pointerId) return;
       paint(
         clampLightboxView(
           {
@@ -345,6 +380,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
 
   const onDoubleClick = useCallback(
     (event: ReactMouseEvent<HTMLImageElement>) => {
+      if (!enabledRef.current) return;
       if (isZoomed()) {
         fit(true, true);
         return;
@@ -360,6 +396,7 @@ export function useImageLightboxZoom({ resetKey }: { resetKey: string | null }):
     isZoomed,
     chip,
     reset,
+    fitForClose,
     handleKey,
     photo: {
       ref: photoRef,
