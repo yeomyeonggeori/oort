@@ -2367,7 +2367,7 @@ pub async fn resolve_stored_action_in_tx(
                 )))
             }
         };
-    resolve_action_with_origin_in_tx(
+    let resolved = resolve_action_with_origin_in_tx(
         conn,
         workspace_id,
         proposer_member_id,
@@ -2380,7 +2380,20 @@ pub async fn resolve_stored_action_in_tx(
         CardAudience::RunChannel,
         covering_connection,
     )
-    .await
+    .await?;
+    Ok(resolved.map(|mut resolved| {
+        // Re-prove the identity pinned by the authenticated proposal, including
+        // actions that do not resolve a connection themselves (e.g. channel.create).
+        // A reconnect or a legacy card without this pin fails the caller's pin
+        // comparison; a managed proposal keeps its existing pins.
+        if let Some(connection) = covering_connection {
+            if resolved.pins.is_null() {
+                resolved.pins = json!({});
+            }
+            resolved.pins["hostedConnection"] = json!(connection);
+        }
+        resolved
+    }))
 }
 
 /// The core of every resolution above. `covering_connection` is [`resolve_pin_target_scoped_in_tx`]'s:
