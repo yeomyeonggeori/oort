@@ -343,7 +343,7 @@ describe("웹 테마 참조 (themeResolve 문법)", () => {
     }
   });
 
-  it("폰은 아직 첫 파티 id만 안다: 참조는 새벽하늘", () => {
+  it("첫 파티 전용 호환 파서는 참조를 새벽하늘로 읽는다", () => {
     expect(parseAppearanceV2(rec("catalog:nord"))?.theme).toBe("dawnsky");
     expect(parseAppearanceV2(rec("noeul"))?.theme).toBe("noeul");
   });
@@ -407,4 +407,15 @@ describe("bubble: 말풍선 덮어쓰기 필드(#4383)", () => {
     const raw = JSON.stringify({ v: 2, scheme: "dark", theme: "dawnsky", signal: null, density: "comfortable", bubble: "row" });
     expect(parseAppearanceV2(raw)?.bubble).toBeUndefined();
   });
+});
+
+
+it("AP-6 폰은 카탈로그를 재실행해도 보존하고 미지원 사용자·모르는 항목은 기본으로 읽는다", () => {
+  const rec = (theme: string) => JSON.stringify({ v: 2, theme, scheme: "dark" });
+  expect(readMobileAppearance({ current: rec("catalog:nord") }).theme).toBe("catalog:nord");
+  for (const ref of ["catalog:missing", "user:custom", "catalog:Nord"]) {
+    expect(readMobileAppearance({ current: rec(ref) }).theme).toBe("dawnsky");
+  }
+  const state = readMobileAppearance({ current: rec("catalog:github") });
+  expect(readMobileAppearance({ current: serializeAppearance(state) })).toEqual(state);
 });

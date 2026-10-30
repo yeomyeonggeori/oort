@@ -355,7 +355,9 @@ describe('themeDefault (#4526)', () => {
       // `update` 가 레코드를 통째로 쓰기 때문이다. 이 폰은 이제 「고른 폰」이라 스킴은 기본을 따라가지
       // 않는다 — 기본이 또 바뀌어도 이 폰이 보던 모습은 그대로다.
       mount(<ThemeControl />);
+      fireEvent.press(screen.getByTestId('appearance-theme-picker'));
       fireEvent.press(screen.getByTestId('appearance-theme-graphite'));
+      fireEvent.press(screen.getByTestId('theme-picker-done'));
       expect(JSON.parse(store.map.get(NON_SECRET_KEYS.appearance) ?? 'null')).toMatchObject({
         scheme: 'light',
         theme: 'graphite',

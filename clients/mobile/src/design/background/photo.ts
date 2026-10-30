@@ -1,4 +1,4 @@
-import {PHOTO_MAX_BYTES, PHOTO_MAX_LONG_SIDE, type BackgroundChoice} from './model';
+import {PHOTO_MAX_BYTES, PHOTO_MAX_LONG_SIDE, type BackgroundChoice} from '@momo/core/design/mobileBackground';
 
 // =============================================================================
 // 내 사진 → 앱 샌드박스의 JPEG 한 장 (ADR-0189 증보 2, #3907).

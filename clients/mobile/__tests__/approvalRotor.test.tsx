@@ -87,6 +87,8 @@ function renderRow(props: {
   receipts?: ReadonlyMap<string, ApprovalReceipt>;
   offline?: boolean;
   onSettled?: jest.Mock;
+  viewer?: boolean;
+  onOpenDecision?: (approvalId: string) => void;
 }) {
   const client = new QueryClient({defaultOptions: {queries: {retry: false, gcTime: 0}}});
   return render(
@@ -102,6 +104,8 @@ function renderRow(props: {
           approvalReceipts={props.receipts}
           approvalOffline={props.offline}
           onApprovalSettled={props.onSettled ?? (() => {})}
+          actions={props.viewer ? {myMemberId: SELF, onOpenDecision: props.onOpenDecision,
+            onToggleReaction: async () => {}, onEdit: async () => {}, onDelete: async () => {}} : undefined}
         />
       </SessionProvider>
     </QueryClientProvider>,
@@ -135,6 +139,28 @@ afterEach(() => {
 });
 
 describe('#2595 — 로터에서 승인·거부에 닿는다', () => {
+  it('묶음 카드는 자신의 접근성 그룹에서 같은 승인 함수를 한 번 호출해요', async () => {
+    renderRow({viewer: true, gates: GATES, message: card({intent: '소개를 바꾸려고 해요', can_decide: true, decision_mode: 'inline'})});
+    const bundle = screen.getByTestId('request-bundle-card');
+    expect(bundle.props.accessible).toBe(true);
+    expect(screen.getByTestId('message-row').props.accessible).toBe(false);
+    expect(bundle.props.accessibilityActions).toEqual(expect.arrayContaining([
+      {name: 'approve', label: '승인'}, {name: 'reject', label: '거부'}, {name: 'details', label: '자세히'},
+    ]));
+    await act(async () => fireEvent(bundle, 'accessibilityAction', {nativeEvent: {actionName: 'approve'}}));
+    expect(mockDecide).toHaveBeenCalledTimes(1);
+    expect(mockDecide.mock.calls[0].slice(0, 3)).toEqual([WS, 'ap-1', true]);
+  });
+  it('결정 무대 prop이 있으면 그 자리만 열고 카드에서 결정하지 않아요', async () => {
+    const open = jest.fn();
+    renderRow({viewer: true, onOpenDecision: open, gates: GATES, message: card({intent: '비공개 채널을 만들려고 해요', can_decide: true, decision_mode: 'open'})});
+    const bundle = screen.getByTestId('request-bundle-card');
+    expect(bundle.props.accessibilityActions).toEqual(expect.arrayContaining([{name: 'openDecision', label: '열어서 결정'}]));
+    expect(screen.queryByTestId('card-approval-ap-1-approve')).toBeNull();
+    await act(async () => fireEvent(bundle, 'accessibilityAction', {nativeEvent: {actionName: 'openDecision'}}));
+    expect(open).toHaveBeenCalledWith('ap-1');
+    expect(mockDecide).not.toHaveBeenCalled();
+  });
   it('행은 여전히 요소 하나이고, 그 요소가 「승인」·「거부」 동작을 낸다', () => {
     renderRow({gates: GATES});
     const row = screen.getByTestId('message-row');
