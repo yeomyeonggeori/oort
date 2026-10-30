@@ -4,6 +4,7 @@ export * from "./cache";
 export * from "./search";
 export * from "./message";
 export * from "./cards";
+export * from "./cardCopy";
 export * from "./usage";
 export * from "./make";
 export * from "./fixtures";

@@ -1,6 +1,7 @@
 import { record, expressionResultPayload } from "./cards";
 import { useEffect, useRef, useState } from "react";
 import { authedResponse } from "@momo/core/lib/api";
+import { expressionApprovalSummary } from "@momo/core/features/expressions/cards";
 import { expressionResultMessage } from "@momo/core/features/expressions/message";
 import type { ExpressionApproval, ExpressionChoice, ExpressionDraft, ExpressionResult } from "@momo/core/features/expressions/types";
 import { interpretReceipt, newDecisionId, type ApprovalDecisionReceipt } from "@momo/core/features/timeline/approvalDecision";
@@ -9,6 +10,7 @@ import { useSettledApproval, rememberSettledApproval } from "@/features/timeline
 import { seedComposerText } from "@/features/chat/draftStore";
 import { Button } from "@/design/ui/button";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
+import { ExpressionSourceRow } from "./ExpressionSourceRow";
 import { useExpressions } from "./context";
 
 export function ExpressionResultSend({ result, channelId }: { result: ExpressionResult; channelId?: string }) {
@@ -46,6 +48,8 @@ export function ExpressionApprovalCard({ card, payload, result }: { card: AgentA
   }, [card.expiresAtMs]);
   const status = remembered?.status ?? card.status;
   const validScope = drafts.every((draft) => draft.workspaceId === store?.workspaceId);
+  // The head says what the candidates below say, so it is not made when they are not shown.
+  const head = validScope ? expressionApprovalSummary(drafts) : null;
   const pending = status === "pending" && (!card.expiresAtMs || now < card.expiresAtMs);
   async function decide(choice?: ExpressionChoice) {
     if (!store || !card.approvalId || !pending || lock.current || offline || (choice && !validScope)) return;
@@ -72,6 +76,10 @@ export function ExpressionApprovalCard({ card, payload, result }: { card: AgentA
     {(!payload || !validScope) && pending && <p role="alert" className="text-body">그림 후보를 읽지 못했어요. 에이전트에게 다시 제안해 달라고 해 주세요.</p>}
     {pending ? <>
       <p className="text-meta text-ink-muted">후보 중 한 장만 골라 팀 보관함에 등록해요.</p>
+      {head && (head.countLabel !== null || head.sources.length > 0) && <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-meta text-ink-muted" data-testid="expression-approval-head">
+        {head.countLabel !== null && <span data-numeric data-testid="expression-approval-count">{head.countLabel}</span>}
+        {head.sources.map((line) => <ExpressionSourceRow key={line.attachmentId ?? "none"} line={line} workspaceId={store.workspaceId} channelId={card.channelId} offline={offline} />)}
+      </div>}
       {validScope && drafts.map((draft: ExpressionDraft) => <ExpressionDraftCard key={draft.draftId} draft={draft} busy={busy || (!!draft.subjectMemberId && draft.subjectMemberId !== store.memberId)} onReplace={(next) => setDrafts((items) => items.map((item) => item.draftId === next.draftId ? next : item))} onApprove={decide} />)}
       {drafts.some((draft) => draft.subjectMemberId && draft.subjectMemberId !== store.memberId) && <p className="text-meta text-ink-muted">얼굴 당사자만 승인할 수 있어요.</p>}
       <Button type="button" variant="secondary" disabled={busy || offline} onClick={() => { void decide().catch(() => {}); }}>거부하기</Button>
