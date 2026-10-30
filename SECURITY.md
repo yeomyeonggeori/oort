@@ -209,6 +209,17 @@ amendments, by kind:
 The model provider or Hermes you choose is a separate trust boundary: oort sends
 it bounded work context directly.
 
+The repository's shared-hosted Hermes default selects Codex subscription web
+search (`web_search`). Search queries can include conversation content and go
+to OpenAI's search processing; returned content is untrusted. We do not promise
+query redaction or no retention. The configured surface excludes Hermes page
+extraction (`web_extract`), and connector configurations disable the whole `web`
+toolset. This describes repository configuration, not a verified live deployment.
+See [ADR-0203 W1–W4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-웹-검색만-허용-4794),
+the [default config](infra/hermes/config.yaml), and the offline
+[gate](infra/hermes/test_default_config.py) and
+[connector](infra/hermes/test_lockgate_connectors.py) tests.
+
 For deployment, rotation, backup, and incident procedures, follow
 [`docs/SELF_HOST.md`](docs/SELF_HOST.md) and
 [`docs/runbooks/pgbackrest-pitr.md`](docs/runbooks/pgbackrest-pitr.md).

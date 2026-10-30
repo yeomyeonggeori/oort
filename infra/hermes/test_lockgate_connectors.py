@@ -122,10 +122,19 @@ class ConnectorRules(unittest.TestCase):
         self.assertOnly(self.problems(cfg), "single-line https:// address")
 
     def test_cronjob_delegation_and_web_must_stay_disabled(self):
-        for toolset in lockgate.CONNECTOR_REQUIRED_DISABLED:
+        for toolset in ("cronjob", "delegation", "web"):
             cfg = healthy()
             cfg["agent"]["disabled_toolsets"].remove(toolset)
             self.assertOnly(self.problems(cfg), toolset)
+
+    def test_selected_web_tools_are_refused_even_with_the_connector_deny_list(self):
+        cfg = healthy()
+        cfg["web"] = {"search_backend": "openai-native", "keyless_fallback": False}
+        self.assertEqual(self.problems(cfg), [])
+        self.assertEqual(lockgate.tool_problems(cfg, {"memory", "todo_list", "session_search"}), [])
+        for tool in ("web_search", "web_extract"):
+            with self.subTest(tool=tool):
+                self.assertOnly(lockgate.tool_problems(cfg, {"memory", tool}), "connector mode forbids all web")
 
     def test_the_app_id_to_server_key_rule(self):
         self.assertEqual(lockgate.app_server_key("com.momo.plugins.google-calendar"), "google_calendar")
