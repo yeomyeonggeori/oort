@@ -57,6 +57,37 @@ pub const MAX_BULK_BASE64_BYTES: usize = 58_700;
 pub const BULK_BASE64_KEY: &str = "dataBase64";
 pub const MAX_COLLECTION_ITEMS: usize = 256;
 
+/// ADR-0218 appendix A / ADR-0186 v8 X8-1: the whole JSON-RPC request of an
+/// `oort_action_propose` for **`expression.create`** may be up to 6 MiB (four generated
+/// candidates of at most 1 MiB each, base64, plus the envelope). It is a budget of that one
+/// action, not a wider limit: every other call, and every other action, keeps
+/// [`MAX_BODY_BYTES`] / [`MAX_BULK_BASE64_BYTES`], and a body between the two limits is
+/// admitted only after it parses as exactly this call ([`is_expression_create_call`]).
+pub const MAX_EXPRESSION_REQUEST_BYTES: usize = 6 * 1024 * 1024;
+/// One generated candidate's `dataBase64` under that budget: base64 of 1 MiB.
+pub const MAX_EXPRESSION_BASE64_BYTES: usize = 1_398_104;
+/// The action id the larger budget belongs to (the registry's `expression.create`).
+pub const EXPRESSION_CREATE_ACTION_ID: &str = "expression.create";
+
+/// Is `request` (already parsed) a `tools/call` of `oort_action_propose` naming
+/// `expression.create`? The one shape allowed past [`MAX_BODY_BYTES`]. A huge string hidden in
+/// another action, another tool or an unknown field never matches.
+pub fn is_expression_create_call(request: &Value) -> bool {
+    request.get("method").and_then(Value::as_str) == Some("tools/call")
+        && request.pointer("/params/name").and_then(Value::as_str) == Some(TOOL_ACTION_PROPOSE)
+        && request
+            .pointer("/params/arguments/actionId")
+            .and_then(Value::as_str)
+            == Some(EXPRESSION_CREATE_ACTION_ID)
+}
+
+/// Cheap pre-filter before a body past [`MAX_BODY_BYTES`] is parsed at all: the action id must
+/// appear in it. (Necessary, not sufficient: the parsed shape is what admits it.)
+fn mentions_expression_create(body: &[u8]) -> bool {
+    let needle = EXPRESSION_CREATE_ACTION_ID.as_bytes();
+    body.windows(needle.len()).any(|window| window == needle)
+}
+
 pub const JSON_CONTENT_TYPE: &str = "application/json";
 pub const REQUIRED_ACCEPT_JSON: &str = "application/json";
 pub const REQUIRED_ACCEPT_SSE: &str = "text/event-stream";
@@ -581,7 +612,13 @@ fn dispatch_inner(
     view: &ToolView,
     call: &mut Option<ToolCall>,
 ) -> HttpResponse {
-    if request.body.len() > MAX_BODY_BYTES {
+    // The body limit: 64 KiB for every call. Past it, only an `expression.create` proposal
+    // within its own 6 MiB budget is let through, and that is proved after parsing below.
+    let past_standard_limit = request.body.len() > MAX_BODY_BYTES;
+    if past_standard_limit
+        && (request.body.len() > MAX_EXPRESSION_REQUEST_BYTES
+            || !mentions_expression_create(request.body))
+    {
         return error(
             413,
             Value::Null,
@@ -614,7 +651,24 @@ fn dispatch_inner(
         Ok(value) => value.0,
         Err(_) => return error(400, Value::Null, -32700, "parse error", None),
     };
-    if let Err(message) = validate_bounds(&value) {
+    let expression_budget = is_expression_create_call(&value);
+    if past_standard_limit && !expression_budget {
+        return error(
+            413,
+            Value::Null,
+            -32600,
+            "request body exceeds the limit",
+            None,
+        );
+    }
+    if let Err(message) = validate_bounds(
+        &value,
+        if expression_budget {
+            MAX_EXPRESSION_BASE64_BYTES
+        } else {
+            MAX_BULK_BASE64_BYTES
+        },
+    ) {
         // The bound violation may itself be the id. Never reflect attacker-sized
         // strings or collections in an error response.
         return error(400, Value::Null, -32600, message, None);
@@ -1427,7 +1481,7 @@ impl<'de> Visitor<'de> for UniqueValueVisitor {
     }
 }
 
-fn validate_bounds(root: &Value) -> Result<(), &'static str> {
+fn validate_bounds(root: &Value, bulk_limit: usize) -> Result<(), &'static str> {
     let mut stack = vec![(root, 1usize)];
     while let Some((value, depth)) = stack.pop() {
         if depth > MAX_JSON_DEPTH {
@@ -1454,7 +1508,7 @@ fn validate_bounds(root: &Value) -> Result<(), &'static str> {
                     // The single bulk exception (see `MAX_BULK_BASE64_BYTES`).
                     if key == BULK_BASE64_KEY {
                         if let Value::String(text) = value {
-                            if text.len() > MAX_BULK_BASE64_BYTES {
+                            if text.len() > bulk_limit {
                                 return Err("JSON string exceeds the limit");
                             }
                             continue;
@@ -1486,6 +1540,108 @@ mod tests {
             mcp_name: None,
             body,
         }
+    }
+
+    /// A `tools/call` of `oort_action_propose` as the wire carries it (legacy shape: the
+    /// size gate is era-independent and runs first).
+    fn propose_body(action_id: &str, args: serde_json::Value, rationale: &str) -> Vec<u8> {
+        serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": TOOL_ACTION_PROPOSE, "arguments": {
+                "handle": "h", "actionId": action_id, "args": args, "rationale": rationale}}
+        }))
+        .unwrap()
+    }
+
+    fn candidate(base64_len: usize) -> serde_json::Value {
+        serde_json::json!({
+            "name": "happy", "displayName": "happy", "tags": [], "subjectMemberId": null,
+            "image": {"source": "generated", "mime": "image/png",
+                      "dataBase64": "A".repeat(base64_len), "prompt": "p"}
+        })
+    }
+
+    fn verdict(body: &[u8]) -> (u16, String) {
+        let response = dispatch(request(Some(LEGACY_PROTOCOL_VERSION), None, body));
+        let text = String::from_utf8_lossy(&response.body.unwrap_or_default()).to_string();
+        (response.status, text)
+    }
+
+    /// ADR-0218 appendix A: `expression.create` alone may carry four 1 MiB candidates in a
+    /// request of up to 6 MiB. Every bound that makes the budget one action's, not a wider
+    /// limit, is a red test below if its line goes.
+    #[test]
+    fn only_an_expression_create_proposal_may_exceed_the_standard_body_limit() {
+        // Four candidates at the per-candidate maximum: past 64 KiB, within 6 MiB, accepted
+        // by the size gate (the empty view then refuses the tool, which is not a size error).
+        let big = propose_body(
+            EXPRESSION_CREATE_ACTION_ID,
+            serde_json::json!({"candidates": [candidate(MAX_EXPRESSION_BASE64_BYTES),
+                candidate(MAX_EXPRESSION_BASE64_BYTES), candidate(MAX_EXPRESSION_BASE64_BYTES),
+                candidate(MAX_EXPRESSION_BASE64_BYTES)]}),
+            "r",
+        );
+        assert!(big.len() > MAX_BODY_BYTES && big.len() <= MAX_EXPRESSION_REQUEST_BYTES);
+        let (status, text) = verdict(&big);
+        assert_ne!(status, 413, "{text}");
+        assert!(!text.contains("exceeds the limit"), "{text}");
+
+        // One base64 character past a candidate's budget: refused.
+        let over = propose_body(
+            EXPRESSION_CREATE_ACTION_ID,
+            serde_json::json!({"candidates": [candidate(MAX_EXPRESSION_BASE64_BYTES + 1)]}),
+            "r",
+        );
+        let (status, text) = verdict(&over);
+        assert_eq!(
+            (status, text.contains("exceeds the limit")),
+            (400, true),
+            "{text}"
+        );
+
+        // Past 6 MiB in total: refused before a byte is parsed.
+        let mut too_big = propose_body(EXPRESSION_CREATE_ACTION_ID, serde_json::json!({}), "r");
+        too_big.extend(vec![b' '; MAX_EXPRESSION_REQUEST_BYTES]);
+        assert_eq!(verdict(&too_big).0, 413);
+
+        // The same bytes dressed as ANOTHER action (the id is only mentioned), another tool, or
+        // `member.avatar.set`'s own 1 MiB base64: all refused at the standard limits.
+        let other_action = propose_body(
+            "member.avatar.set",
+            serde_json::json!({"avatar": {"source": "generated",
+                "dataBase64": "A".repeat(MAX_EXPRESSION_BASE64_BYTES)}}),
+            "expression.create",
+        );
+        assert_eq!(verdict(&other_action).0, 413);
+        let mentioned = propose_body(
+            "invite.create",
+            serde_json::json!({}),
+            &format!("expression.create {}", "x".repeat(MAX_BODY_BYTES)),
+        );
+        assert_eq!(verdict(&mentioned).0, 413);
+        let other_tool = serde_json::to_vec(&serde_json::json!({
+            "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": TOOL_MESSAGE_POST, "arguments": {
+                "actionId": EXPRESSION_CREATE_ACTION_ID,
+                "pad": "x".repeat(MAX_BODY_BYTES)}}
+        }))
+        .unwrap();
+        assert_eq!(verdict(&other_tool).0, 413);
+        // ...and the avatar's 58,700-character bulk bound is untouched by the new budget.
+        let avatar_over = propose_body(
+            "member.avatar.set",
+            serde_json::json!({"avatar": {"source": "generated",
+                "dataBase64": "A".repeat(MAX_BULK_BASE64_BYTES + 1)}}),
+            "r",
+        );
+        assert_eq!(verdict(&avatar_over).0, 400);
+        // A string that is not a base64 field keeps the 8 KiB bound even under the budget.
+        let long_prompt_key = propose_body(
+            EXPRESSION_CREATE_ACTION_ID,
+            serde_json::json!({"candidates": [candidate(8)]}),
+            &"r".repeat(MAX_STRING_BYTES + 1),
+        );
+        assert_eq!(verdict(&long_prompt_key).0, 400);
     }
 
     #[test]
@@ -1576,14 +1732,17 @@ mod tests {
         let big = |len: usize| "A".repeat(len);
         let ok =
             serde_json::json!({"args": {"avatar": {"dataBase64": big(MAX_BULK_BASE64_BYTES)}}});
-        assert!(validate_bounds(&ok).is_ok());
+        assert!(validate_bounds(&ok, MAX_BULK_BASE64_BYTES).is_ok());
         let over = serde_json::json!({"dataBase64": big(MAX_BULK_BASE64_BYTES + 1)});
-        assert_eq!(validate_bounds(&over), Err("JSON string exceeds the limit"));
+        assert_eq!(
+            validate_bounds(&over, MAX_BULK_BASE64_BYTES),
+            Err("JSON string exceeds the limit")
+        );
         // Any other key keeps the 8 KiB rule — including a near miss in spelling.
         for key in ["data", "database64", "dataBase64 ", "body"] {
             let other = serde_json::json!({ key: big(MAX_STRING_BYTES + 1) });
             assert_eq!(
-                validate_bounds(&other),
+                validate_bounds(&other, MAX_BULK_BASE64_BYTES),
                 Err("JSON string exceeds the limit"),
                 "{key}"
             );
@@ -1591,6 +1750,9 @@ mod tests {
         // A string of the allowed size is fine; one byte over the ordinary limit under
         // another key is not, and the exception does not extend to an array of strings.
         let list = serde_json::json!({"dataBase64": [big(MAX_STRING_BYTES + 1)]});
-        assert_eq!(validate_bounds(&list), Err("JSON string exceeds the limit"));
+        assert_eq!(
+            validate_bounds(&list, MAX_BULK_BASE64_BYTES),
+            Err("JSON string exceeds the limit")
+        );
     }
 }

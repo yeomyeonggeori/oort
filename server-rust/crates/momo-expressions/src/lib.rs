@@ -1,4 +1,6 @@
 //! ADR-0218 D1–D3/D6: tenant expression storage. No downloader or agent action.
+pub mod action;
+pub mod intake;
 pub mod media;
 pub mod model;
 pub mod store;

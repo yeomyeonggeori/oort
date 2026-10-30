@@ -31,6 +31,11 @@ pub enum Rejected {
     Video,
     #[error("image processing timed out")]
     Timeout,
+    /// Both decoder slots are taken. A retryable state of the **server**, not a property of
+    /// the picture and not a time limit it exceeded: a link import never records it as
+    /// `source_timeout` (ADR-0218 appendix C), it answers 503 or waits for a slot.
+    #[error("image processing is busy")]
+    Busy,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -66,6 +71,103 @@ pub async fn process(bytes: Vec<u8>) -> Result<Processed, Rejected> {
     supervised(bytes, decoder_path()?, DEADLINE, semaphore()).await
 }
 
+/// The longest [`process_waiting`] stands in line for a decoder slot, whatever its caller's
+/// own deadline allows. A person's direct upload and import never wait (`try_acquire`), and
+/// the semaphore hands a freed slot to the line before anybody else: so a long wait is a long
+/// stretch in which a person is told "busy" because an agent's candidate is queued.
+pub const WAIT_MAX: Duration = Duration::from_secs(3);
+/// How many callers of [`process_waiting`] may stand in line at once, **process-wide** (every
+/// tenant, every agent). A third one is refused at once instead of lengthening the line.
+pub const WAITERS_MAX: usize = 2;
+
+/// [`process`], but a busy decoder is **waited for** instead of refused at once: at most
+/// `wait` (and never more than [`WAIT_MAX`]), and only if the line is shorter than
+/// [`WAITERS_MAX`]. Used by the agent action, whose candidates are decoded one after another
+/// inside one deadline. The wait is the only difference: the input bound, the two slots, the
+/// supervised child and its limits are the same ones, and a line that is full or a wait that
+/// runs out is [`Rejected::Busy`], never `Timeout`.
+pub async fn process_waiting(bytes: Vec<u8>, wait: Duration) -> Result<Processed, Rejected> {
+    if bytes.len() > INPUT_BYTES {
+        return Err(Rejected::TooLarge);
+    }
+    waiting(
+        bytes,
+        decoder_path()?,
+        DEADLINE,
+        semaphore(),
+        &Line::process_wide(),
+        wait,
+    )
+    .await
+}
+
+/// The line behind the decoder slots: how many may stand in it and for how long.
+struct Line<'a> {
+    standing: &'a std::sync::atomic::AtomicUsize,
+    max: usize,
+    longest: Duration,
+}
+
+impl Line<'static> {
+    fn process_wide() -> Self {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        Line {
+            standing: &STANDING,
+            max: WAITERS_MAX,
+            longest: WAIT_MAX,
+        }
+    }
+}
+
+/// One place in the line. Dropping it gives the place back — also when the waiting future is
+/// cancelled with the request that made it.
+struct Place<'a>(&'a std::sync::atomic::AtomicUsize);
+
+impl<'a> Place<'a> {
+    fn take(line: &Line<'a>) -> Option<Self> {
+        use std::sync::atomic::Ordering;
+        line.standing
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < line.max).then_some(n + 1)
+            })
+            .ok()
+            .map(|_| Place(line.standing))
+    }
+}
+
+impl Drop for Place<'_> {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
+async fn waiting(
+    bytes: Vec<u8>,
+    path: std::path::PathBuf,
+    deadline: Duration,
+    semaphore: Arc<Semaphore>,
+    line: &Line<'_>,
+    wait: Duration,
+) -> Result<Processed, Rejected> {
+    // A free slot is taken without standing in line.
+    let permit = match semaphore.clone().try_acquire_owned() {
+        Ok(permit) => permit,
+        Err(_) => {
+            // Both slots are busy. The line has room for `max` callers, each for `longest` at
+            // most; the place is held until the slot is ours (or the wait ends) and not a
+            // moment longer, so decoding never occupies it.
+            let Some(_place) = Place::take(line) else {
+                return Err(Rejected::Busy);
+            };
+            tokio::time::timeout(wait.min(line.longest), semaphore.acquire_owned())
+                .await
+                .map_err(|_| Rejected::Busy)?
+                .map_err(|_| Rejected::Invalid)?
+        }
+    };
+    run_with_permit(bytes, path, deadline, permit).await
+}
+
 async fn supervised(
     bytes: Vec<u8>,
     path: std::path::PathBuf,
@@ -74,9 +176,16 @@ async fn supervised(
 ) -> Result<Processed, Rejected> {
     // Admission happens before detaching: canceled callers cannot accumulate
     // an unbounded queue of 5 MiB inputs waiting behind the two codec slots.
-    let permit = semaphore
-        .try_acquire_owned()
-        .map_err(|_| Rejected::Timeout)?;
+    let permit = semaphore.try_acquire_owned().map_err(|_| Rejected::Busy)?;
+    run_with_permit(bytes, path, deadline, permit).await
+}
+
+async fn run_with_permit(
+    bytes: Vec<u8>,
+    path: std::path::PathBuf,
+    deadline: Duration,
+    permit: tokio::sync::OwnedSemaphorePermit,
+) -> Result<Processed, Rejected> {
     // The supervisor survives cancellation of the HTTP request and retains its
     // permit until the actual child has exited and been reaped.
     let task = tokio::spawn(async move {
@@ -495,6 +604,47 @@ fn preflight(format: ImageFormat, b: &[u8]) -> Result<(u32, u32), Rejected> {
 #[cfg(test)]
 thread_local! { static CODEC_STARTS:std::cell::Cell<usize>=const {std::cell::Cell::new(0)}; }
 
+/// ISO base media (MP4/MOV) whose major brand is one of the video brands.
+fn is_mp4_video(bytes: &[u8]) -> bool {
+    bytes.get(4..8) == Some(b"ftyp")
+        && matches!(
+            bytes.get(8..12),
+            Some(b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"qt  ")
+        )
+}
+/// The EBML header that opens WebM/Matroska.
+fn is_ebml(bytes: &[u8]) -> bool {
+    bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3])
+}
+
+/// What a body's leading bytes claim to be (ADR-0218 D3: names, MIME types and
+/// extensions are never believed). Decoding stays the only authority on whether an
+/// image is acceptable. This only lets the link importer tell "a web page or some
+/// other format" (`source_unsupported`) from "an image we could not decode"
+/// (`source_invalid_media`) without starting a codec process for either (#4829).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sniffed {
+    /// PNG, JPEG, WebP or GIF magic: worth decoding.
+    Image,
+    /// MP4/MOV with a video brand, or WebM/Matroska: [`decode`] answers `Video`.
+    Video,
+    /// Anything else: HTML, SVG, HEIC/AVIF, a script, an empty body.
+    Unsupported,
+}
+
+/// Classify by magic only; never reads past the first bytes.
+pub fn sniff(bytes: &[u8]) -> Sniffed {
+    if is_mp4_video(bytes) || is_ebml(bytes) {
+        return Sniffed::Video;
+    }
+    match image::guess_format(bytes) {
+        Ok(ImageFormat::Png | ImageFormat::Jpeg | ImageFormat::WebP | ImageFormat::Gif) => {
+            Sniffed::Image
+        }
+        _ => Sniffed::Unsupported,
+    }
+}
+
 pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
     if bytes.len() > INPUT_BYTES {
         return Err(Rejected::TooLarge);
@@ -503,16 +653,13 @@ pub fn decode(bytes: &[u8], end: Instant) -> Result<Processed, Rejected> {
         return Err(Rejected::Timeout);
     }
     if bytes.get(4..8) == Some(b"ftyp") {
-        return if matches!(
-            bytes.get(8..12),
-            Some(b"isom" | b"iso2" | b"mp41" | b"mp42" | b"avc1" | b"M4V " | b"qt  ")
-        ) {
+        return if is_mp4_video(bytes) {
             Err(Rejected::Video)
         } else {
             Err(Rejected::Invalid)
         };
     }
-    if bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+    if is_ebml(bytes) {
         return Err(Rejected::Video);
     }
     let format = image::guess_format(bytes).map_err(|_| Rejected::Invalid)?;
@@ -650,13 +797,230 @@ mod tests {
             )
             .await;
             assert!(
-                matches!(result, Ok(Err(Rejected::Timeout))),
+                matches!(result, Ok(Err(Rejected::Busy))),
                 "busy inputs must finish without a queued supervisor"
             );
         }
         drop(held);
         assert_eq!(sem.available_permits(), 2);
     }
+    const NO_DECODER: &str = "/nonexistent-expression-decoder";
+
+    /// Wait until `standing` reads `want` (the waiters registered themselves), or fail.
+    async fn until_standing(standing: &std::sync::atomic::AtomicUsize, want: usize) {
+        tokio::time::timeout(Duration::from_secs(3), async {
+            while standing.load(std::sync::atomic::Ordering::Acquire) != want {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the line never reached {want}: {}",
+                standing.load(std::sync::atomic::Ordering::Acquire)
+            )
+        });
+    }
+
+    #[tokio::test]
+    async fn a_waiter_never_stands_in_line_longer_than_the_cap_whatever_it_is_allowed() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        let line = Line {
+            standing: &STANDING,
+            max: 2,
+            longest: Duration::from_millis(150),
+        };
+        let started = Instant::now();
+        // The caller allows 40 s; the line's own cap is 150 ms. The outer 3 s is only the
+        // test's way of failing instead of hanging if the cap is gone.
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(3),
+            waiting(
+                vec![0; 8],
+                std::path::PathBuf::from(NO_DECODER),
+                DEADLINE,
+                sem.clone(),
+                &line,
+                Duration::from_secs(40),
+            ),
+        )
+        .await;
+        let waited = started.elapsed();
+        assert!(
+            matches!(outcome, Ok(Err(Rejected::Busy))),
+            "a wait that ran out is Busy: {outcome:?}"
+        );
+        assert!(
+            waited >= Duration::from_millis(120),
+            "it did stand in line for the cap: {waited:?}"
+        );
+        assert!(
+            waited < Duration::from_secs(2),
+            "and not for the 40 s it was allowed: {waited:?}"
+        );
+        assert_eq!(
+            STANDING.load(std::sync::atomic::Ordering::Acquire),
+            0,
+            "the place went back with the wait"
+        );
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn only_the_cap_may_stand_in_line_and_the_next_is_refused_at_once() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let line = || Line {
+            standing: &STANDING,
+            max: 2,
+            longest: Duration::from_secs(5),
+        };
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        let mut queued = Vec::new();
+        for _ in 0..2 {
+            let sem = sem.clone();
+            queued.push(tokio::spawn(async move {
+                waiting(
+                    vec![0; 8],
+                    std::path::PathBuf::from(NO_DECODER),
+                    DEADLINE,
+                    sem,
+                    &line(),
+                    Duration::from_secs(5),
+                )
+                .await
+            }));
+        }
+        until_standing(&STANDING, 2).await;
+        // The line is full: a third caller is refused without waiting at all.
+        let started = Instant::now();
+        let third = tokio::time::timeout(
+            Duration::from_millis(500),
+            waiting(
+                vec![0; 8],
+                std::path::PathBuf::from(NO_DECODER),
+                DEADLINE,
+                sem.clone(),
+                &line(),
+                Duration::from_secs(5),
+            ),
+        )
+        .await;
+        assert!(
+            matches!(third, Ok(Err(Rejected::Busy))),
+            "a full line refuses at once: {third:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(400));
+        assert_eq!(
+            STANDING.load(std::sync::atomic::Ordering::Acquire),
+            2,
+            "the refused caller took no place"
+        );
+        // The two in line were really queued, not refused: once the slots free up they run
+        // (and meet the missing decoder, which is `Invalid`, not `Busy`).
+        drop(held);
+        for waiter in queued {
+            let outcome = tokio::time::timeout(Duration::from_secs(3), waiter)
+                .await
+                .expect("a queued waiter is served when a slot frees")
+                .expect("the waiter task finished");
+            assert!(
+                matches!(outcome, Err(Rejected::Invalid)),
+                "served, not refused: {outcome:?}"
+            );
+        }
+        assert_eq!(STANDING.load(std::sync::atomic::Ordering::Acquire), 0);
+        assert_eq!(sem.available_permits(), 2);
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_waiter_gives_its_place_back() {
+        static STANDING: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let sem = Arc::new(Semaphore::new(2));
+        let held = sem.clone().acquire_many_owned(2).await.unwrap();
+        let waiter = tokio::spawn({
+            let sem = sem.clone();
+            async move {
+                waiting(
+                    vec![0; 8],
+                    std::path::PathBuf::from(NO_DECODER),
+                    DEADLINE,
+                    sem,
+                    &Line {
+                        standing: &STANDING,
+                        max: 1,
+                        longest: Duration::from_secs(30),
+                    },
+                    Duration::from_secs(30),
+                )
+                .await
+            }
+        });
+        until_standing(&STANDING, 1).await;
+        waiter.abort();
+        assert!(waiter.await.unwrap_err().is_cancelled());
+        until_standing(&STANDING, 0).await;
+        drop(held);
+    }
+
+    /// The line **`process_waiting` really stands in** — the process-wide one, with the
+    /// documented caps — and not one a test built for itself: two places, three seconds. (One
+    /// test, because the slots and the line are the process's own and other tests of this
+    /// binary must not meet it half-way.)
+    #[tokio::test]
+    async fn process_waiting_stands_in_the_process_wide_line_for_two_places_and_three_seconds() {
+        let held = semaphore().acquire_many_owned(2).await.unwrap();
+        // A caller that would wait 40 s waits `WAIT_MAX`, and is told Busy.
+        let started = Instant::now();
+        let outcome = tokio::time::timeout(
+            WAIT_MAX + Duration::from_secs(4),
+            process_waiting(vec![0; 8], Duration::from_secs(40)),
+        )
+        .await;
+        let waited = started.elapsed();
+        assert!(
+            matches!(outcome, Ok(Err(Rejected::Busy))),
+            "a wait that ran out is Busy: {outcome:?}"
+        );
+        assert!(
+            waited >= WAIT_MAX - Duration::from_millis(200)
+                && waited < WAIT_MAX + Duration::from_secs(2),
+            "it stood in line for the cap and no longer: {waited:?}"
+        );
+        // Two callers fill the line; the third is refused at once.
+        let queued: Vec<_> = (0..WAITERS_MAX)
+            .map(|_| tokio::spawn(process_waiting(vec![0; 8], Duration::from_secs(40))))
+            .collect();
+        until_standing(Line::process_wide().standing, WAITERS_MAX).await;
+        let started = Instant::now();
+        let third = tokio::time::timeout(
+            Duration::from_millis(500),
+            process_waiting(vec![0; 8], Duration::from_secs(40)),
+        )
+        .await;
+        assert!(
+            matches!(third, Ok(Err(Rejected::Busy))),
+            "a full line refuses at once: {third:?}"
+        );
+        assert!(started.elapsed() < Duration::from_millis(400));
+        // Free the slots: the two in line are served (whatever the decoder makes of eight
+        // zero bytes, it is not `Busy`), and the line empties.
+        drop(held);
+        for waiter in queued {
+            let outcome = tokio::time::timeout(Duration::from_secs(5), waiter)
+                .await
+                .expect("a queued caller is served when the slots free up")
+                .expect("the caller's task finished");
+            assert!(
+                !matches!(outcome, Err(Rejected::Busy)),
+                "served, not refused: {outcome:?}"
+            );
+        }
+        until_standing(Line::process_wide().standing, 0).await;
+    }
+
     #[test]
     fn webp_inner_dimension_bomb_never_constructs_a_codec() {
         let bomb=hex::decode("524946462800000057454250565038580a00000000000000000000000000565038200a0000001000009d012aff3fff3f").unwrap();

@@ -4,6 +4,7 @@ GET /v1/workspaces/{ws}/expressions
 POST /v1/workspaces/{ws}/expressions
 POST /v1/workspaces/{ws}/expressions/uploads
 POST /v1/workspaces/{ws}/expressions/from-attachment
+POST /v1/workspaces/{ws}/expressions/import
 GET /v1/workspaces/{ws}/expression-drafts/{draftId}
 PUT /v1/workspaces/{ws}/expression-drafts/{draftId}/file
 GET /v1/workspaces/{ws}/expression-drafts/{draftId}/image

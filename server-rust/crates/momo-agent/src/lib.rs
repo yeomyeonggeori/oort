@@ -223,8 +223,8 @@ pub use card_suggest::{
     SUGGESTABLE_COMMANDS,
 };
 pub use decider::{
-    action_required_role, decider_gate, gate_plan, pinned_target_agent, pinned_target_member,
-    GatePlan,
+    action_required_role, decider_gate, gate_plan, pinned_expression_subject, pinned_target_agent,
+    pinned_target_member, GatePlan,
 };
 pub use tools::{
     approval_reason, is_executable, requires_approval, ApprovalReason, ToolCall, ToolGrant,

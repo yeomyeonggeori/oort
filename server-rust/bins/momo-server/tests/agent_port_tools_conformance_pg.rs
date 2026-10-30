@@ -27281,3 +27281,2255 @@ async fn agent_port_four_profile_conversations_in_dm_4791() {
     assert!(member_pointers_4385(&w.su, person).await.1.is_some());
     assert!(member_pointers_4385(&w.su, agent).await.1.is_some());
 }
+
+// ---------------------------------------------------------------------------
+// ADR-0186 증보 2026-10-30 v8 (#4829 stage 2) — expression.create
+//
+// 「에이전트가 찾아 등록하기」: an agent offers 1-4 candidate pictures; a person looks at the
+// STORED pixels, picks one and approves; exactly that one is registered. Sabotage targets
+// (recorded in the stage-2 handoff):
+//   * `adder_allows`: drop the subject arm / the guest arm / the policy arm      → admin
+//     proxy, guest, or a narrowed policy approves (`..._only_the_face_...`);
+//   * `choose_in_tx`: drop the re-hash, the revision check, the membership check, the
+//     name/quota checks, or `reclaim_in_tx`                                       → red below;
+//   * `candidate_row`: drop the channel-membership / approval-pending / adder arm → a
+//     stranger or another room previews the picture;
+//   * `replace_candidate_in_tx`: drop `revision+1` or the adder arm              → stale choice
+//     passes / a stranger replaces;
+//   * `expression_choice_refused`: always None                                   → choice
+//     accepted on a reject / another action / absent on approve;
+//   * `is_expression_create_call` / the 64 KiB bound                              → budget tests.
+// ---------------------------------------------------------------------------
+
+struct Mock4829 {
+    calls: std::sync::Mutex<Vec<String>>,
+    replies: std::sync::Mutex<
+        std::collections::HashMap<String, Result<Vec<u8>, momo_unfurl::FetchError>>,
+    >,
+    /// How long every outside request takes to answer, in milliseconds (0: at once). The
+    /// request is **counted before** it waits, so a test can see a fetch that has begun.
+    delay_ms: std::sync::atomic::AtomicU64,
+}
+
+#[async_trait::async_trait]
+impl momo_unfurl::UnfurlHttp for Mock4829 {
+    async fn fetch(
+        &self,
+        url: &str,
+        _kind: momo_unfurl::FetchKind,
+    ) -> Result<momo_unfurl::Fetched, momo_unfurl::FetchError> {
+        self.calls.lock().unwrap().push(url.to_string());
+        let delay = self.delay_ms.load(std::sync::atomic::Ordering::Relaxed);
+        if delay > 0 {
+            tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+        }
+        let key = url.split('?').next().unwrap_or(url).to_string();
+        match self.replies.lock().unwrap().get(&key).cloned() {
+            Some(Ok(body)) => Ok(momo_unfurl::Fetched {
+                final_url: url.to_string(),
+                content_type: "image/gif".into(),
+                body,
+            }),
+            Some(Err(error)) => Err(error),
+            None => Err(momo_unfurl::FetchError::Failed("unscripted".into())),
+        }
+    }
+}
+
+struct World4829 {
+    su: PgPool,
+    app: PgPool,
+    base: String,
+    client: reqwest::Client,
+    fixture: Fixture,
+    drive: Arc<MemDrive3787>,
+    mock: Arc<Mock4829>,
+    requester: Uuid,
+    requester_jwt: String,
+    face: Uuid,
+    face_jwt: String,
+    guest: Uuid,
+    guest_jwt: String,
+    outsider_jwt: String,
+}
+
+async fn world_4829() -> World4829 {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let drive = Arc::new(MemDrive3787::default());
+    let mock = Arc::new(Mock4829 {
+        calls: Default::default(),
+        replies: Default::default(),
+        delay_ms: Default::default(),
+    });
+    let state = AppState::new(
+        app.clone(),
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_drive(drive.clone())
+    .with_unfurl_http(mock.clone())
+    .with_unfurl_enabled(true)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit: 0,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind");
+    let address: SocketAddr = listener.local_addr().expect("address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    let (requester, requester_jwt) = seed_human_3708(&su, &fixture, "req", "member").await;
+    let (face, face_jwt) = seed_human_3708(&su, &fixture, "face", "member").await;
+    let (guest, guest_jwt) = seed_human_3708(&su, &fixture, "guest", "guest").await;
+    let (outsider, outsider_jwt) = seed_human_3708(&su, &fixture, "out", "member").await;
+    sqlx::query("DELETE FROM membership WHERE member_id=$1")
+        .bind(outsider)
+        .execute(&su)
+        .await
+        .unwrap();
+    World4829 {
+        su,
+        app,
+        base: format!("http://{address}"),
+        client: reqwest::Client::new(),
+        fixture,
+        drive,
+        mock,
+        requester,
+        requester_jwt,
+        face,
+        face_jwt,
+        guest,
+        guest_jwt,
+        outsider_jwt,
+    }
+}
+
+fn noise_png_4829(side: u32, seed: u32) -> Vec<u8> {
+    let mut state = 0x9E37_79B9u32 ^ seed;
+    let image = image::RgbaImage::from_fn(side, side, |_, _| {
+        state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+        let b = state.to_le_bytes();
+        image::Rgba([b[0], b[1], b[2], 255])
+    });
+    let mut out = std::io::Cursor::new(Vec::new());
+    image::DynamicImage::ImageRgba8(image)
+        .write_to(&mut out, image::ImageFormat::Png)
+        .unwrap();
+    out.into_inner()
+}
+
+fn gif_4829() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..3u8 {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(8, 8, image::Rgba([20 + n * 60, 200, 50, 255])),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+fn candidate_4829(name: &str, subject: Value, image: Value) -> Value {
+    json!({"name": name, "displayName": name, "tags": ["t"], "subjectMemberId": subject, "image": image})
+}
+
+fn generated_4829(bytes: &[u8], prompt: &str) -> Value {
+    json!({"source": "generated", "mime": "image/png", "dataBase64": b64_3787(bytes), "prompt": prompt})
+}
+
+async fn propose_4829(w: &World4829, candidates: Value) -> (u16, Value) {
+    propose_requester_action_4791(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        "expression.create",
+        json!({"candidates": candidates}),
+    )
+    .await
+}
+
+async fn decide_4829(
+    w: &World4829,
+    jwt: &str,
+    approval: Uuid,
+    approve: bool,
+    choice: Option<Value>,
+) -> (u16, Value) {
+    let mut body =
+        json!({"approvalId": approval, "approve": approve, "clientDecisionId": Uuid::new_v4()});
+    if let Some(choice) = choice {
+        body["expressionChoice"] = choice;
+    }
+    let response = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/approvals/{approval}/decision",
+            w.base, w.fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .json(&body)
+        .send()
+        .await
+        .expect("decision responds");
+    let status = response.status().as_u16();
+    (status, response.json().await.unwrap_or(Value::Null))
+}
+
+async fn card_4829(w: &World4829, approval: Uuid) -> Value {
+    sqlx::query_scalar(
+        "SELECT m.props FROM message m JOIN approval a ON a.request_message_id=m.id WHERE a.id=$1",
+    )
+    .bind(approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap()
+}
+
+/// `{draftId, revision, sha256}` of candidate `index` as the card shows it.
+fn choice_4829(card: &Value, index: usize) -> Value {
+    let draft = &card["action"]["expression"]["candidates"][index];
+    json!({"draftId": draft["draftId"], "revision": draft["revision"], "sha256": draft["media"]["large"]["sha256"]})
+}
+
+async fn draft_get_4829(w: &World4829, jwt: &str, draft: &Value, path: &str) -> reqwest::Response {
+    let id = draft["draftId"].as_str().unwrap();
+    let url = match path {
+        "image" => format!(
+            "{}/v1/workspaces/{}/expression-drafts/{id}/image?size=large&v={}",
+            w.base,
+            w.fixture.workspace,
+            draft["media"]["large"]["sha256"]
+                .as_str()
+                .unwrap_or(&"0".repeat(64))
+        ),
+        _ => format!(
+            "{}/v1/workspaces/{}/expression-drafts/{id}",
+            w.base, w.fixture.workspace
+        ),
+    };
+    w.client.get(url).bearer_auth(jwt).send().await.unwrap()
+}
+
+async fn open_images_4829(w: &World4829, approval: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM expression_draft_image i JOIN expression_draft d ON (d.workspace_id,d.id)=(i.workspace_id,i.draft_id) WHERE d.approval_id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap()
+}
+
+/// The whole loop with all three sources, a failed link, a direct upload that replaces a
+/// candidate, a stale choice, two decisions racing, and the reclaim of what was not chosen.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_offers_three_sources_and_registers_exactly_the_one_chosen() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    // The requester's own attachment in this conversation + a link + a failing link + bytes.
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("mine".into(), tiny_png_3787());
+    let msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "내 사진").await;
+    let attachment = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.requester,
+        Some(msg),
+        "mine",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    w.mock.replies.lock().unwrap().insert(
+        "https://cdn.example.test/blocked.gif".into(),
+        Err(momo_unfurl::FetchError::Blocked),
+    );
+    let prompt = "고양이가 춤추는 그림 PROMPT-SECRET";
+    let (status, proposed) = propose_4829(&w, json!([
+        candidate_4829("from_attachment", Value::Null, json!({"source": "attachment", "attachmentId": attachment.to_string()})),
+        candidate_4829("from_link", Value::Null, json!({"source": "url", "url": "https://cdn.example.test/ok.gif?token=Q-SECRET"})),
+        candidate_4829("from_blocked", Value::Null, json!({"source": "url", "url": "https://cdn.example.test/blocked.gif?token=Q-SECRET2"})),
+        candidate_4829("from_agent", Value::Null, generated_4829(&tiny_png_3787(), prompt)),
+    ])).await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    assert!(
+        w.mock
+            .calls
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|c| c.contains("Q-SECRET")),
+        "the query is used to fetch"
+    );
+
+    // ---- what was stored: drafts behind the approval, never bytes/prompt/query in args ----
+    let rows: Vec<(String, Option<String>, i32, bool)> = sqlx::query_as(
+        "SELECT d.state, d.code, d.candidate_index, d.expires_at = a.expires_at FROM expression_draft d JOIN approval a ON (a.workspace_id,a.id)=(d.workspace_id,d.approval_id) WHERE a.id=$1 ORDER BY d.candidate_index")
+        .bind(approval).fetch_all(&w.su).await.unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|r| (r.0.as_str(), r.1.as_deref()))
+            .collect::<Vec<_>>(),
+        [
+            ("ready", None),
+            ("ready", None),
+            ("manual_upload_required", Some("source_blocked")),
+            ("ready", None)
+        ]
+    );
+    assert!(
+        rows.iter().all(|r| r.3),
+        "an action draft follows the approval's own expiry"
+    );
+    let (status_text, payload): (String, Value) =
+        sqlx::query_as("SELECT status::text, payload FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(status_text, "pending");
+    let stored = payload.to_string();
+    assert_eq!(
+        payload["action"]["args"]["drafts"].as_array().map(Vec::len),
+        Some(4),
+        "{payload}"
+    );
+    assert!(payload["action"]["pins"]["subject"].is_null());
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64", "mine"] {
+        assert!(
+            !stored.contains(secret),
+            "the stored arguments carry {secret}: {stored}"
+        );
+    }
+    let audits: String = sqlx::query_scalar("SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1 AND action IN ('expression.staged')")
+        .bind(ws).fetch_one(&w.su).await.unwrap();
+    assert!(
+        audits.contains("source_blocked") && audits.contains("cdn.example.test"),
+        "{audits}"
+    );
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
+        assert!(!audits.contains(secret), "audit carries {secret}");
+    }
+    let card = card_4829(&w, approval).await;
+    let candidates = card["action"]["expression"]["candidates"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(candidates.len(), 4);
+    assert_eq!(candidates[2]["state"], "manual_upload_required");
+    assert_eq!(
+        candidates[2]["origin"]["sourceUrl"],
+        "https://cdn.example.test/blocked.gif"
+    );
+    assert_eq!(
+        candidates[3]["origin"]["prompt"], prompt,
+        "the card shows the agent's prompt"
+    );
+    assert!(
+        card.to_string().contains("보관 범위"),
+        "an attachment source widens the keeping scope on the card"
+    );
+    assert!(!card.to_string().contains("Q-SECRET"));
+
+    // ---- preview: the exact stored bytes, to people who may decide, nobody else --------
+    let ready = &candidates[0];
+    let image = draft_get_4829(&w, &w.requester_jwt, ready, "image").await;
+    assert_eq!(image.status(), 200);
+    assert_eq!(image.headers()["cache-control"], "private, no-store");
+    assert_eq!(
+        draft_get_4829(&w, &admin_jwt, ready, "image")
+            .await
+            .status(),
+        200,
+        "an admin may decide a faceless card"
+    );
+    assert_eq!(
+        draft_get_4829(&w, &w.guest_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "a guest may not"
+    );
+    assert_eq!(
+        draft_get_4829(&w, &w.outsider_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "nor a member of another room"
+    );
+    let foreign = seed(&w.su).await;
+    assert_eq!(
+        draft_get_4829(&w, &foreign.human_jwt, ready, "image")
+            .await
+            .status(),
+        404,
+        "nor another tenant"
+    );
+    let mut wrong = ready.clone();
+    wrong["media"]["large"]["sha256"] = json!("0".repeat(64));
+    assert_eq!(
+        draft_get_4829(&w, &w.requester_jwt, &wrong, "image")
+            .await
+            .status(),
+        404,
+        "a wrong hash is the same 404"
+    );
+
+    // ---- refusals that spend nothing -------------------------------------------------
+    let good = choice_4829(&card, 0);
+    for (label, jwt, approve, choice, want) in [
+        (
+            "no choice",
+            &w.requester_jwt,
+            true,
+            None,
+            (400, "expression_choice_required"),
+        ),
+        (
+            "choice on a rejection",
+            &w.requester_jwt,
+            false,
+            Some(good.clone()),
+            (400, "expression_choice_not_allowed"),
+        ),
+        (
+            "a guest",
+            &w.guest_jwt,
+            true,
+            Some(good.clone()),
+            (403, "role_required"),
+        ),
+        (
+            "the failed link",
+            &w.requester_jwt,
+            true,
+            Some(
+                json!({"draftId": candidates[2]["draftId"], "revision": "1", "sha256": "0".repeat(64)}),
+            ),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a wrong hash",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": ready["draftId"], "revision": "1", "sha256": "1".repeat(64)})),
+            (409, "expression_preview_stale"),
+        ),
+        (
+            "a stranger's draft",
+            &w.requester_jwt,
+            true,
+            Some(json!({"draftId": Uuid::new_v4(), "revision": "1", "sha256": "1".repeat(64)})),
+            (409, "expression_preview_stale"),
+        ),
+    ] {
+        let (status, receipt) = decide_4829(&w, jwt, approval, approve, choice).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            want,
+            "{label}: {receipt}"
+        );
+        let pending: String = sqlx::query_scalar("SELECT status::text FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+        assert_eq!(pending, "pending", "{label} must not spend the approval");
+    }
+    // another action's decision rejects the field too, and does not run
+    let (invite, _) = propose_invite(&w.client, &w.base, &w.su, &w.fixture, json!({})).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, invite, true, Some(good.clone())).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (400, "expression_choice_not_allowed"),
+        "{receipt}"
+    );
+    assert_eq!(approval_status_4385(&w.su, invite).await, "pending");
+    let (status, _) = decide_4829(&w, &admin_jwt, invite, false, None).await;
+    assert_eq!(
+        status, 200,
+        "the invite card is rejected to free the pending slot"
+    );
+
+    // ---- a direct upload replaces the failed link; a replaced picture makes the old choice stale
+    let put = |jwt: String, draft: String, bytes: Vec<u8>| {
+        let (client, url) = (
+            w.client.clone(),
+            format!(
+                "{}/v1/workspaces/{ws}/expression-drafts/{draft}/file",
+                w.base
+            ),
+        );
+        async move {
+            let boundary = "oort-expr-4829";
+            let mut body = format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.png\"\r\nContent-Type: image/png\r\n\r\n").into_bytes();
+            body.extend_from_slice(&bytes);
+            body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+            client
+                .put(url)
+                .bearer_auth(jwt)
+                .header(
+                    "content-type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(body)
+                .send()
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(
+        put(
+            w.guest_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 1)
+        )
+        .await
+        .status(),
+        403,
+        "a guest cannot replace (the add role)"
+    );
+    assert_eq!(
+        put(
+            w.outsider_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 1)
+        )
+        .await
+        .status(),
+        404,
+        "nor another room"
+    );
+    let replaced = put(
+        w.face_jwt.clone(),
+        candidates[2]["draftId"].as_str().unwrap().into(),
+        noise_png_4829(20, 1),
+    )
+    .await;
+    assert_eq!(
+        replaced.status(),
+        200,
+        "any current decider may upload by hand"
+    );
+    let replaced: Value = replaced.json().await.unwrap();
+    assert_eq!(
+        (replaced["state"].as_str(), replaced["revision"].as_str()),
+        (Some("ready"), Some("2"))
+    );
+    assert_eq!(
+        replaced["origin"], candidates[2]["origin"],
+        "the origin is kept, never laundered into an upload"
+    );
+    let card2 = card_4829(&w, approval).await;
+    assert_eq!(
+        card2["action"]["expression"]["candidates"][2]["revision"], "2",
+        "the card shows the new revision"
+    );
+    // The old choice on a candidate whose picture was just replaced is stale; the replaced one is chosen later.
+    // The NEW hash with the OLD revision: only the revision guard can refuse it.
+    let stale_choice = json!({"draftId": candidates[2]["draftId"], "revision": "1",
+        "sha256": card2["action"]["expression"]["candidates"][2]["media"]["large"]["sha256"]});
+    let (status, receipt) =
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(stale_choice)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_preview_stale"),
+        "{receipt}"
+    );
+    // The preview of the replaced picture is the new one.
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.requester_jwt,
+            &card2["action"]["expression"]["candidates"][2],
+            "image"
+        )
+        .await
+        .status(),
+        200
+    );
+
+    // ---- two decisions race (an admin and the requester): exactly one registers -----------
+    let pick = choice_4829(&card2, 1);
+    let (a, b) = tokio::join!(
+        decide_4829(&w, &admin_jwt, approval, true, Some(pick.clone())),
+        decide_4829(&w, &w.requester_jwt, approval, true, Some(pick.clone())),
+    );
+    let mut statuses = [a.0, b.0];
+    statuses.sort_unstable();
+    assert_eq!(
+        statuses,
+        [200, 409],
+        "one wins, the other sees an approved card: {a:?} {b:?}"
+    );
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(registered, 1, "a row lock registers it once");
+    let (name, created_by, proposed_by): (String, Uuid, Uuid) =
+        sqlx::query_as("SELECT name, created_by, proposed_by FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(name, "from_link");
+    assert_eq!(proposed_by, w.fixture.hosted_agent);
+    assert!(
+        [w.fixture.human, w.requester].contains(&created_by),
+        "the deciding person is the creator"
+    );
+    let images: i64 = sqlx::query_scalar("SELECT count(*) FROM expression_image i JOIN expression e ON (e.workspace_id,e.id)=(i.workspace_id,i.expression_id) WHERE e.approval_id=$1").bind(approval).fetch_one(&w.su).await.unwrap();
+    assert_eq!(images, 3);
+    assert_eq!(
+        open_images_4829(&w, approval).await,
+        0,
+        "every draft's bytes are gone, the chosen one's moved to the expression"
+    );
+    let states: Vec<String> = sqlx::query_scalar(
+        "SELECT state FROM expression_draft WHERE approval_id=$1 ORDER BY candidate_index",
+    )
+    .bind(approval)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(states, ["expired", "activated", "expired", "expired"]);
+    // The card settled in place with the result, and the audit has no bytes/prompt.
+    let settled = card_4829(&w, approval).await;
+    assert_eq!(
+        settled["result"]["expression"]["name"], "from_link",
+        "{settled}"
+    );
+    assert_eq!(settled["result"]["expression"]["token"], ":from_link:");
+    let changed: i64 = sqlx::query_scalar("SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'").bind(ws).fetch_one(&w.su).await.unwrap();
+    assert!(changed >= 1);
+    let all_audit: String = sqlx::query_scalar(
+        "SELECT COALESCE(string_agg(detail::text, ' '), '') FROM audit_log WHERE workspace_id=$1",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    for secret in ["PROMPT-SECRET", "Q-SECRET", "dataBase64"] {
+        assert!(!all_audit.contains(secret), "audit carries {secret}");
+    }
+    // The outbox: the agent's prompt is only in the approval CARD's own broadcast (it must be, to
+    // be drawn); the link's query and any base64 are in no outbox row at all, and the
+    // `expression.changed` / decision events never carry a prompt.
+    let card_message: Uuid =
+        sqlx::query_scalar("SELECT request_message_id FROM approval WHERE id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let prompt_rows: Vec<String> = sqlx::query_scalar(
+        "SELECT payload::text FROM outbox WHERE workspace_id=$1 AND payload::text LIKE '%PROMPT-SECRET%'",
+    )
+    .bind(ws)
+    .fetch_all(&w.su)
+    .await
+    .unwrap();
+    assert!(
+        !prompt_rows.is_empty(),
+        "the card itself carries the prompt it shows"
+    );
+    for row in &prompt_rows {
+        assert!(
+            row.contains(&card_message.to_string()),
+            "a prompt outside the card's own broadcast: {row}"
+        );
+    }
+    let leaked: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND (payload::text LIKE '%Q-SECRET%' OR payload::text LIKE '%dataBase64%')",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(leaked, 0, "no outbox row carries a link query or base64");
+    let created_audit: i64 = sqlx::query_scalar("SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.created' AND detail->>'approval_id'=$2").bind(ws).bind(approval.to_string()).fetch_one(&w.su).await.unwrap();
+    assert_eq!(created_audit, 1);
+    // A late replacement on a settled card is gone.
+    assert_eq!(
+        put(
+            w.requester_jwt.clone(),
+            candidates[2]["draftId"].as_str().unwrap().into(),
+            noise_png_4829(20, 2)
+        )
+        .await
+        .status(),
+        404
+    );
+    // And no plain message can dress itself as one of these cards.
+    let forged = w.client.post(format!("{}/v1/workspaces/{ws}/channels/{}/messages", w.base, w.fixture.channel)).bearer_auth(&w.requester_jwt)
+        .json(&json!({"clientMsgId": Uuid::new_v4(), "body": ":from_link:", "props": {"action": "x", "result": "y", "expression": "z"}})).send().await.unwrap();
+    assert!(forged.status().is_success());
+    let forged: Value = forged.json().await.unwrap();
+    let stored_props: Value = sqlx::query_scalar("SELECT props FROM message WHERE id=$1::uuid")
+        .bind(forged["id"].as_str().unwrap())
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    for key in ["action", "result", "expression"] {
+        assert!(
+            stored_props.get(key).is_none(),
+            "{key} survived into {stored_props}"
+        );
+    }
+    assert_eq!(forged["type"].as_str().unwrap_or("text"), "text");
+}
+
+async fn set_policy_4829(w: &World4829, policy: &str) {
+    sqlx::query("INSERT INTO expression_catalog(workspace_id, add_policy) VALUES($1,$2) ON CONFLICT (workspace_id) DO UPDATE SET add_policy=EXCLUDED.add_policy")
+        .bind(w.fixture.workspace)
+        .bind(policy)
+        .execute(&w.su)
+        .await
+        .unwrap();
+}
+
+/// Who the push would wake, by the ONE predicate the decision route asks too.
+async fn may_approve_4829(w: &World4829, approval: Uuid, member: Uuid) -> bool {
+    let payload: Value = sqlx::query_scalar("SELECT payload FROM approval WHERE id=$1")
+        .bind(approval)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    let mut conn = w.su.acquire().await.unwrap();
+    momo_push::may_approve_in_tx(
+        &mut conn,
+        w.fixture.workspace,
+        &momo_push::ApprovalCard {
+            approval_id: approval,
+            action_type: "workspace_action".into(),
+            payload,
+        },
+        member,
+    )
+    .await
+    .unwrap()
+}
+
+/// What a registration writes **first** (`changed` in `store.rs`): the catalog's version, an
+/// `expression.created` audit row and an `expression.changed` outbox event. A refused decision
+/// commits (it answers a receipt), so anything written before the refusal would stay.
+async fn registration_writes_4829(w: &World4829) -> (i64, i64, i64) {
+    let ws = w.fixture.workspace;
+    let version: i64 = sqlx::query_scalar(
+        "SELECT COALESCE((SELECT version FROM expression_catalog WHERE workspace_id=$1), 0)",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let audits: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action='expression.created'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    let events: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND payload->'data'->>'type'='expression.changed'",
+    )
+    .bind(ws)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    (version, audits, events)
+}
+
+/// A face means that person AND the add policy as it is now: no admin proxy, no guest, and a
+/// policy narrowed after the proposal is read again by the decision, the push audience and the
+/// preview alike.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_only_the_face_who_the_policy_allows_decides() {
+    let w = world_4829().await;
+    let admin = w.fixture.human;
+    let admin_jwt = w.fixture.human_jwt.clone();
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "my_face",
+            json!(w.face.to_string()),
+            generated_4829(&tiny_png_3787(), "p"),
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let approval = proposed_approval_3706(&proposed);
+    let card = card_4829(&w, approval).await;
+    let choice = choice_4829(&card, 0);
+    assert!(
+        card.to_string().contains("그 본인만"),
+        "the card says only that person approves"
+    );
+    // The push audience and the route agree about every person: only the face.
+    for (who, label, want) in [
+        (admin, "admin", false),
+        (w.requester, "requester", false),
+        (w.guest, "guest", false),
+        (w.face, "face", true),
+    ] {
+        assert_eq!(
+            may_approve_4829(&w, approval, who).await,
+            want,
+            "audience: {label}"
+        );
+    }
+    for (jwt, label) in [
+        (&admin_jwt, "an admin"),
+        (&w.requester_jwt, "the requester"),
+        (&w.guest_jwt, "a guest"),
+    ] {
+        let (status, receipt) = decide_4829(&w, jwt, approval, true, Some(choice.clone())).await;
+        assert_eq!(
+            (status, receipt["status"].as_str().unwrap_or("")),
+            (403, "role_required"),
+            "{label}: {receipt}"
+        );
+    }
+    // Neither does the face's picture preview leak to a non-decider: the admin may preview
+    // only because they are... not the face: 404.
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &admin_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        404,
+        "an admin who may not decide may not preview a face"
+    );
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.face_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        200
+    );
+    // The policy is narrowed AFTER the proposal: the face (a plain member) is now refused,
+    // and nobody can approve (the admin is not the face).
+    set_policy_4829(&w, "admins").await;
+    let (status, receipt) =
+        decide_4829(&w, &w.face_jwt, approval, true, Some(choice.clone())).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (403, "role_required"),
+        "{receipt}"
+    );
+    assert!(
+        !may_approve_4829(&w, approval, w.face).await,
+        "the push audience reads the policy now"
+    );
+    assert!(
+        !may_approve_4829(&w, approval, admin).await,
+        "an admin is still not the face"
+    );
+    assert_eq!(
+        draft_get_4829(
+            &w,
+            &w.face_jwt,
+            &card["action"]["expression"]["candidates"][0],
+            "image"
+        )
+        .await
+        .status(),
+        404,
+        "the preview reads the policy now"
+    );
+    set_policy_4829(&w, "members").await;
+    let (status, receipt) = decide_4829(&w, &w.face_jwt, approval, true, Some(choice)).await;
+    assert_eq!(status, 200, "{receipt}");
+    let subject: Option<Uuid> =
+        sqlx::query_scalar("SELECT subject_member_id FROM expression WHERE approval_id=$1")
+            .bind(approval)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(subject, Some(w.face));
+    // A faceless card under an admins-only policy: an admin may, a plain member may not.
+    set_policy_4829(&w, "admins").await;
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "no_face",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let faceless = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, faceless).await, 0);
+    let before = registration_writes_4829(&w).await;
+    assert_eq!(
+        decide_4829(&w, &w.requester_jwt, faceless, true, Some(pick.clone()))
+            .await
+            .0,
+        403
+    );
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        before,
+        "a refused role wrote nothing"
+    );
+    assert_eq!(
+        decide_4829(&w, &admin_jwt, faceless, true, Some(pick))
+            .await
+            .0,
+        200
+    );
+    // The measurement can see a registration: exactly one version, one audit row, one event.
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        (before.0 + 1, before.1 + 1, before.2 + 1),
+        "a registration is one version, one `expression.created` row and one event"
+    );
+    set_policy_4829(&w, "members").await;
+    // The name is permanent: a second card for a name already registered is refused at the
+    // decision (409), nothing spent, nothing registered.
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "no_face",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let taken = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, taken).await, 0);
+    let written = registration_writes_4829(&w).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, taken, true, Some(pick)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_name_reserved"),
+        "{receipt}"
+    );
+    assert_eq!(approval_status_4385(&w.su, taken).await, "pending");
+    // The refusal commits, so anything the registration writes FIRST would still be here: a
+    // version bump, an `expression.created` audit row, an `expression.changed` event for an
+    // expression that was never made. Proofs first, writes after.
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        written,
+        "a reserved name wrote no version, no audit row and no event"
+    );
+    // The library is full at 1,000 (active + hidden): the same card is refused for room.
+    sqlx::query("INSERT INTO expression(workspace_id, name, display_name, tags, origin, created_by, version) SELECT $1, 'fill_' || g, 'f', '[]'::jsonb, '{\"kind\":\"upload\",\"sourceUrl\":null,\"prompt\":null}'::jsonb, $2, 100 + g FROM generate_series(1, 999) g")
+        .bind(w.fixture.workspace)
+        .bind(w.requester)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "one_too_many",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let last = proposed_approval_3706(&proposed);
+    let pick = choice_4829(&card_4829(&w, last).await, 0);
+    let written = registration_writes_4829(&w).await;
+    let (status, receipt) = decide_4829(&w, &admin_jwt, last, true, Some(pick)).await;
+    assert_eq!(
+        (status, receipt["status"].as_str().unwrap_or("")),
+        (409, "expression_quota"),
+        "{receipt}"
+    );
+    assert_eq!(
+        approval_status_4385(&w.su, last).await,
+        "pending",
+        "a full library spends nothing"
+    );
+    assert_eq!(
+        registration_writes_4829(&w).await,
+        written,
+        "a full library wrote no version, no audit row and no event"
+    );
+}
+
+/// What the server refuses before it stores anything, and the transport budget that belongs to
+/// this action alone.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_bad_proposals_and_keeps_its_budget_to_itself() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("theirs".into(), tiny_png_3787());
+    w.drive
+        .files
+        .lock()
+        .unwrap()
+        .insert("elsewhere".into(), tiny_png_3787());
+    let theirs_msg = seed_message_4385(&w.su, ws, w.fixture.channel, w.face, "남의 사진").await;
+    let theirs = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.channel,
+        w.face,
+        Some(theirs_msg),
+        "theirs",
+        "image/png",
+        "complete",
+    )
+    .await;
+    let else_msg =
+        seed_message_4385(&w.su, ws, w.fixture.private_channel, w.requester, "다른 방").await;
+    let elsewhere = seed_attachment_4385(
+        &w.su,
+        ws,
+        w.fixture.private_channel,
+        w.requester,
+        Some(else_msg),
+        "elsewhere",
+        "image/png",
+        "complete",
+    )
+    .await;
+    w.mock.replies.lock().unwrap().insert(
+        "https://inside.example.test/x.gif".into(),
+        Err(momo_unfurl::FetchError::OriginBlocked),
+    );
+    let outsider: Uuid =
+        sqlx::query_scalar("SELECT id FROM member WHERE workspace_id=$1 AND handle LIKE 'out-%'")
+            .bind(ws)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    let html = b64_3787(b"<html><script>alert(1)</script></html>");
+    let too_big = b64_3787(&vec![0u8; 1024 * 1024 + 1]);
+    let one = |image: Value| json!([candidate_4829("probe", Value::Null, image)]);
+    let png = generated_4829(&tiny_png_3787(), "p");
+    let cases: Vec<(&str, Value)> = vec![
+        (
+            "another person's attachment",
+            one(json!({"source": "attachment", "attachmentId": theirs.to_string()})),
+        ),
+        (
+            "the requester's file in another conversation",
+            one(json!({"source": "attachment", "attachmentId": elsewhere.to_string()})),
+        ),
+        (
+            "an unknown attachment id",
+            one(json!({"source": "attachment", "attachmentId": Uuid::new_v4().to_string()})),
+        ),
+        (
+            "a private literal",
+            one(json!({"source": "url", "url": "https://127.0.0.1/x.gif"})),
+        ),
+        (
+            "plain http",
+            one(json!({"source": "url", "url": "http://cdn.example.test/x.gif"})),
+        ),
+        (
+            "a port other than 443",
+            one(json!({"source": "url", "url": "https://cdn.example.test:8443/x.gif"})),
+        ),
+        (
+            "a name that resolves private at the first hop",
+            one(json!({"source": "url", "url": "https://inside.example.test/x.gif"})),
+        ),
+        (
+            "credentials in the link",
+            one(json!({"source": "url", "url": "https://u:p@cdn.example.test/x.gif"})),
+        ),
+        (
+            "a fifth candidate",
+            json!([0, 1, 2, 3, 4].map(|n| candidate_4829(
+                &format!("n{n}"),
+                Value::Null,
+                png.clone()
+            ))),
+        ),
+        (
+            "two different faces",
+            json!([
+                candidate_4829("a1", Value::Null, png.clone()),
+                candidate_4829("a2", json!(w.face.to_string()), png.clone())
+            ]),
+        ),
+        (
+            "a face outside this conversation",
+            json!([candidate_4829(
+                "a1",
+                json!(outsider.to_string()),
+                png.clone()
+            )]),
+        ),
+        (
+            "an absent face declaration",
+            json!([{"name": "a1", "displayName": "a1", "tags": [], "image": png.clone()}]),
+        ),
+        (
+            "invalid base64",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": "!!!!", "prompt": "p"}),
+            ),
+        ),
+        (
+            "a web page as bytes",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": html, "prompt": "p"}),
+            ),
+        ),
+        (
+            "more than 1 MiB decoded",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": too_big, "prompt": "p"}),
+            ),
+        ),
+        (
+            "an empty prompt",
+            one(
+                json!({"source": "generated", "mime": "image/png", "dataBase64": b64_3787(&tiny_png_3787()), "prompt": ""}),
+            ),
+        ),
+        (
+            "a bad name",
+            json!([candidate_4829("Bad Name!", Value::Null, png.clone())]),
+        ),
+    ];
+    let count = |sql: &'static str| {
+        let su = w.su.clone();
+        async move {
+            sqlx::query_scalar::<_, i64>(sql)
+                .fetch_one(&su)
+                .await
+                .unwrap()
+        }
+    };
+    let (approvals, drafts) = (
+        count("SELECT count(*) FROM approval").await,
+        count("SELECT count(*) FROM expression_draft").await,
+    );
+    for (label, candidates) in cases {
+        let (status, refused) = propose_4829(&w, candidates).await;
+        assert_eq!(status, 400, "{label}: {refused}");
+    }
+    assert_eq!(
+        count("SELECT count(*) FROM approval").await,
+        approvals,
+        "no approval was created"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM expression_draft").await,
+        drafts,
+        "no draft was stored"
+    );
+
+    // ---- the budget: four ~1 MB candidates make it end to end (> 64 KiB, < 6 MiB) ------------
+    let big: Vec<Value> = (0..4u32)
+        .map(|n| {
+            candidate_4829(
+                &format!("big{n}"),
+                Value::Null,
+                generated_4829(&noise_png_4829(500, n), "p"),
+            )
+        })
+        .collect();
+    let body_len = serde_json::to_vec(&big).unwrap().len();
+    assert!(
+        body_len > 4_000_000 && body_len < 6 * 1024 * 1024,
+        "{body_len}"
+    );
+    let (status, proposed) = propose_4829(&w, json!(big)).await;
+    assert_eq!(status, 200, "four 1 MB candidates round-trip: {proposed}");
+    let big_approval = proposed_approval_3706(&proposed);
+    let ready: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM expression_draft WHERE approval_id=$1 AND state='ready'",
+    )
+    .bind(big_approval)
+    .fetch_one(&w.su)
+    .await
+    .unwrap();
+    assert_eq!(ready, 4);
+    // Rejecting it reclaims all four pictures' bytes (and keeps the rows as records).
+    assert!(open_images_4829(&w, big_approval).await >= 12);
+    let (status, _) = decide_4829(&w, &w.requester_jwt, big_approval, false, None).await;
+    assert_eq!(status, 200);
+    assert_eq!(
+        open_images_4829(&w, big_approval).await,
+        0,
+        "a rejection reclaims the bytes"
+    );
+    let states: Vec<String> =
+        sqlx::query_scalar("SELECT state FROM expression_draft WHERE approval_id=$1")
+            .bind(big_approval)
+            .fetch_all(&w.su)
+            .await
+            .unwrap();
+    assert!(states.iter().all(|s| s == "expired"), "{states:?}");
+
+    // ---- other actions and other callers keep the 64 KiB ceiling --------------------------------
+    let handle = |bearer: String, extra: Value, name: &'static str| {
+        let (client, url) = (w.client.clone(), format!("{}{PATH}", w.base));
+        async move {
+            let body = modern_body(
+                "tools/call",
+                json!("1"),
+                json!({"name": name, "arguments": extra}),
+            );
+            client
+                .post(url)
+                .header("content-type", "application/json")
+                .header("accept", "application/json, text/event-stream")
+                .header("mcp-protocol-version", MODERN_VERSION)
+                .header("mcp-method", "tools/call")
+                .header("mcp-name", name)
+                .bearer_auth(bearer)
+                .json(&body)
+                .send()
+                .await
+                .unwrap()
+                .status()
+                .as_u16()
+        }
+    };
+    let huge = "x".repeat(2 * 1024 * 1024);
+    assert_eq!(handle(w.fixture.hosted_bearer.clone(), json!({"handle": "h", "actionId": "member.avatar.set", "args": {"avatar": {"source": "generated", "dataBase64": huge.clone()}}, "rationale": "expression.create"}), "oort_action_propose").await, 413, "avatar.set cannot borrow the budget");
+    assert_eq!(
+        handle(
+            w.fixture.hosted_bearer.clone(),
+            json!({"pad": huge.clone(), "actionId": "expression.create"}),
+            "oort_ping"
+        )
+        .await,
+        413,
+        "another tool cannot"
+    );
+    assert_eq!(
+        handle(
+            "not-a-token".into(),
+            json!({"handle": "h", "actionId": "expression.create", "args": {"pad": huge.clone()}}),
+            "oort_action_propose"
+        )
+        .await,
+        401,
+        "authentication comes before the large body is collected"
+    );
+    let over = "y".repeat(6 * 1024 * 1024 + 10);
+    assert_eq!(
+        handle(
+            w.fixture.hosted_bearer.clone(),
+            json!({"handle": "h", "actionId": "expression.create", "args": {"pad": over}}),
+            "oort_action_propose"
+        )
+        .await,
+        413,
+        "past 6 MiB is refused"
+    );
+
+    // ---- RLS: another tenant sees no draft of this approval ------------------------------------
+    let foreign = seed(&w.su).await;
+    let seen: i64 = momo_db::with_tenant_tx(&w.app, foreign.workspace, move |conn| {
+        Box::pin(async move {
+            Ok::<_, momo_db::DbError>(
+                sqlx::query_scalar("SELECT count(*) FROM expression_draft WHERE approval_id=$1")
+                    .bind(big_approval)
+                    .fetch_one(&mut *conn)
+                    .await?,
+            )
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(seen, 0);
+    let unprivileged: (bool, bool) =
+        sqlx::query_as("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user")
+            .fetch_one(&w.app)
+            .await
+            .unwrap();
+    assert_eq!(
+        unprivileged,
+        (false, false),
+        "the runtime role under test is not privileged"
+    );
+}
+
+/// Every way a card closes takes its candidates' bytes with it: a late tap that settles it as
+/// expired, the TTL sweep, and a run that is cancelled.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_every_close_reclaims_the_candidate_bytes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let mut propose = |name: &'static str| {
+        let w = &w;
+        async move {
+            let (status, proposed) = propose_4829(
+                w,
+                json!([candidate_4829(
+                    name,
+                    Value::Null,
+                    generated_4829(&tiny_png_3787(), "p")
+                )]),
+            )
+            .await;
+            assert_eq!(status, 200, "{proposed}");
+            proposed_approval_3706(&proposed)
+        }
+    };
+    // (1) a late tap: the approval is past its expiry, so approving settles it as expired.
+    let late = propose("late_tap").await;
+    let pick = choice_4829(&card_4829(&w, late).await, 0);
+    assert_eq!(open_images_4829(&w, late).await, 3);
+    sqlx::query("UPDATE approval SET expires_at = now() - interval '1 minute' WHERE id=$1")
+        .bind(late)
+        .execute(&w.su)
+        .await
+        .unwrap();
+    let (status, receipt) = decide_4829(&w, &w.requester_jwt, late, true, Some(pick)).await;
+    assert_ne!(status, 200, "an expired card registers nothing: {receipt}");
+    assert_eq!(
+        open_images_4829(&w, late).await,
+        0,
+        "the expiry arm reclaims"
+    );
+    let registered: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM expression WHERE approval_id=$1")
+            .bind(late)
+            .fetch_one(&w.su)
+            .await
+            .unwrap();
+    assert_eq!(registered, 0);
+    // (2) the TTL sweep: a draft past its own expiry loses its bytes without any decision.
+    let swept = propose("ttl_sweep").await;
+    let mut clock = w.su.begin().await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft DISABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE expression_draft SET expires_at = clock_timestamp() - interval '1 second' WHERE approval_id=$1").bind(swept).execute(&mut *clock).await.unwrap();
+    sqlx::query("ALTER TABLE expression_draft ENABLE TRIGGER expression_draft_identity")
+        .execute(&mut *clock)
+        .await
+        .unwrap();
+    clock.commit().await.unwrap();
+    assert_eq!(open_images_4829(&w, swept).await, 3);
+    momo_expressions::sweep_expired(&w.su, &w.app)
+        .await
+        .unwrap();
+    assert_eq!(open_images_4829(&w, swept).await, 0, "the sweep reclaims");
+    // (3) a run that is cancelled retires its pending card and the candidates with it.
+    let cancelled = propose("cancel_run").await;
+    let run: Uuid = sqlx::query_scalar("SELECT run_id FROM approval WHERE id=$1")
+        .bind(cancelled)
+        .fetch_one(&w.su)
+        .await
+        .unwrap();
+    assert_eq!(open_images_4829(&w, cancelled).await, 3);
+    momo_db::with_tenant_tx(&w.app, ws, move |conn| {
+        Box::pin(async move {
+            momo_agent::approval::cancel_pending_approvals_for_run_in_tx(
+                conn,
+                ws,
+                run,
+                chrono::Utc::now(),
+            )
+            .await?;
+            Ok::<_, momo_db::DbError>(())
+        })
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        open_images_4829(&w, cancelled).await,
+        0,
+        "a cancelled run reclaims"
+    );
+    let _ = &mut propose;
+}
+
+// ---------------------------------------------------------------------------
+// #4829 security review round 1 (planner decisions 10-31).
+//
+//   * the cheap refusals come BEFORE the fetch and the decode: a stale lease, a parked run and a
+//     full agent fetch nothing (`prepare_expression`'s read transaction);
+//   * one preparation per agent at a time;
+//   * the 6 MiB door's guarantees are measured **on the wire**, with raw TCP: it authenticates
+//     before it reads, it opens the budget only to an agent that holds the propose scope, it
+//     spends one rate-limit unit per call, and it reads under a deadline;
+//   * a GIF and a video are sources of an attachment (`find_requester_attachment_for_in_tx`).
+//
+// Sabotage targets (the fix handoff has the RED → GREEN table):
+//   * `prepare_expression`: the cheap gate after the fetch / its lease arm / its run-state arm /
+//     its ceiling arm / the `Preparing` guard      → `..._refuses_the_cheap_things_...`,
+//                                                    `..._prepares_one_proposal_per_agent_...`;
+//   * `media::process_waiting`: the line cap / the wait cap                   → unit tests there;
+//   * `agent_port::post`: the big body read before authentication / the scope check dropped /
+//     authentication asked twice / no deadline     → `the_big_body_...` (below, and
+//                                                    `agent_port_transport.rs`);
+//   * `choose_in_tx`: `changed()` ahead of the proofs → `..._only_the_face_...`;
+//   * the expression use of the attachment judgement → `..._gif_and_a_video_attachment_...`.
+// ---------------------------------------------------------------------------
+
+async fn mention_4829(w: &World4829) {
+    let handle_name = hosted_handle(&w.su, w.fixture.hosted_agent).await;
+    let trigger: Value = w
+        .client
+        .post(format!(
+            "{}/v1/workspaces/{}/channels/{}/messages",
+            w.base, w.fixture.workspace, w.fixture.channel
+        ))
+        .bearer_auth(&w.requester_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 내 사진을 이걸로 바꿔 줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+}
+
+/// Claim every job that can be claimed; the lease handles.
+async fn claim_handles_4829(w: &World4829) -> Vec<String> {
+    let (status, claimed) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    structured(&claimed)["jobs"]
+        .as_array()
+        .expect("jobs")
+        .iter()
+        .map(|job| {
+            job["leaseHandle"]
+                .as_str()
+                .expect("a lease handle")
+                .to_string()
+        })
+        .collect()
+}
+
+/// `expression.create` with an existing lease handle (the proposal helpers above mention,
+/// claim and propose in one go; these tests need to propose again with the same handle).
+async fn propose_with_4829(w: &World4829, handle: &str, candidates: Value) -> (u16, Value) {
+    let (status, answer) = call(
+        &w.client,
+        &w.base,
+        &w.fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "expression.create", "args": {"candidates": candidates}}),
+    )
+    .await;
+    remember_handle_3789(&answer, handle);
+    (status, answer)
+}
+
+/// How many requests the server has made to an outside address so far.
+fn fetches_4829(w: &World4829) -> usize {
+    w.mock.calls.lock().unwrap().len()
+}
+
+/// A count of this world's own workspace (`$1` in `sql`): the database is shared by every test.
+async fn count_4829(w: &World4829, sql: &'static str) -> i64 {
+    sqlx::query_scalar::<_, i64>(sql)
+        .bind(w.fixture.workspace)
+        .fetch_one(&w.su)
+        .await
+        .unwrap()
+}
+
+/// A picture that is tiny on the wire and slow to decode: 3000 x 3000 grey pixels of one
+/// value. It is inside every limit of the decoder (a side <= 4096, <= 16 MP) and inside the
+/// 1 MiB an agent may send, so only the order of the refusals keeps it from costing anything.
+fn heavy_png_4829() -> Vec<u8> {
+    use image::ImageEncoder;
+    let pixels = vec![127u8; 3000 * 3000];
+    let mut out = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut out)
+        .write_image(&pixels, 3000, 3000, image::ExtendedColorType::L8)
+        .unwrap();
+    out
+}
+
+/// A person's own direct upload (`POST …/expressions/uploads`): the metadata part, then the file.
+async fn upload_4829(w: &World4829, jwt: &str, name: &str, file: &[u8]) -> u16 {
+    let boundary = "oort-4829-upload";
+    let metadata =
+        json!({"name": name, "displayName": name, "tags": [], "subjectMemberId": null}).to_string();
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{metadata}\r\n").as_bytes(),
+    );
+    body.extend_from_slice(
+        format!("--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"image.png\"\r\nContent-Type: application/octet-stream\r\n\r\n").as_bytes(),
+    );
+    body.extend_from_slice(file);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    w.client
+        .post(format!(
+            "{}/v1/workspaces/{}/expressions/uploads",
+            w.base, w.fixture.workspace
+        ))
+        .bearer_auth(jwt)
+        .header(
+            "content-type",
+            format!("multipart/form-data; boundary={boundary}"),
+        )
+        .body(body)
+        .send()
+        .await
+        .expect("upload responds")
+        .status()
+        .as_u16()
+}
+
+/// **The cheap refusals come before the fetch and the decode.** The pending ceiling of three is
+/// the only flood defence this door has; it defends only if what costs something happens after
+/// it. Every refusal below is the answer the proposal's own transaction gives (the same
+/// function), and every one is measured as a number: how many outside requests the server made.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_refuses_the_cheap_things_before_it_fetches_or_decodes() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    let link = |name: &str| {
+        candidate_4829(
+            name,
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
+        )
+    };
+    let heavy = heavy_png_4829();
+
+    // (1) A lease that is no longer ours: the job was taken over by a newer claim. The stale
+    // handle still decodes and still binds, and it is refused before a single request goes out.
+    mention_4829(&w).await;
+    let claimed = claim_handles_4829(&w).await;
+    assert_eq!(claimed.len(), 1);
+    let stale = claimed[0].clone();
+    sqlx::query(
+        "UPDATE outbox SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(ws)
+    .bind(w.fixture.hosted_agent)
+    .execute(&w.su)
+    .await
+    .unwrap();
+    let reclaimed = claim_handles_4829(&w).await;
+    assert_eq!(reclaimed.len(), 1);
+    let fresh = reclaimed[0].clone();
+    assert_ne!(
+        fresh, stale,
+        "a takeover must mint a new lease, or this proves nothing"
+    );
+    let (status, refused) = propose_with_4829(&w, &stale, json!([link("stale")])).await;
+    assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    assert_eq!(fetches_4829(&w), 0, "a stale lease fetches nothing");
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        0
+    );
+
+    // (2) The live lease proposes: one fetch, and the run is parked. A parked run refuses
+    // every further proposal on its handle, and it does so before any outside request or
+    // decode: five repeats at once, each carrying a link and a heavy picture, fetch nothing
+    // and leave a person's own upload (sent meanwhile) unhindered.
+    let (status, proposed) = propose_with_4829(&w, &fresh, json!([link("first")])).await;
+    assert_eq!(status, 200, "{proposed}");
+    assert_eq!(fetches_4829(&w), 1);
+    let approvals = count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await;
+    let drafts = count_4829(
+        &w,
+        "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+    )
+    .await;
+    let burst = (0..5).map(|n| {
+        propose_with_4829(
+            &w,
+            &fresh,
+            json!([
+                link(&format!("again_{n}")),
+                candidate_4829(
+                    &format!("heavy_{n}"),
+                    Value::Null,
+                    generated_4829(&heavy, "p")
+                )
+            ]),
+        )
+    });
+    let (answers, upload) = tokio::join!(futures::future::join_all(burst), async {
+        // Let the burst get going first: this is the person who arrives in the middle of it.
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        upload_4829(&w, &w.requester_jwt, "my_own", &tiny_png_3787()).await
+    });
+    assert_eq!(
+        upload, 201,
+        "a person's own upload is not told 'busy' by an agent's refused repeats"
+    );
+    for (n, (status, answer)) in answers.iter().enumerate() {
+        assert_eq!(
+            (*status, error_code(answer)),
+            (409, -32005),
+            "repeat {n} of a parked run: {answer}"
+        );
+    }
+    assert_eq!(
+        fetches_4829(&w),
+        1,
+        "five refused repeats of a parked run made no outside request"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts + 1,
+        "only the person's own upload added a draft"
+    );
+
+    // (3) Three cards waiting is the most an agent may have: the fourth is refused before it
+    // fetches anything.
+    for name in ["second", "third"] {
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                name,
+                Value::Null,
+                generated_4829(&tiny_png_3787(), "p")
+            )]),
+        )
+        .await;
+        assert_eq!(status, 200, "{proposed}");
+    }
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM approval WHERE workspace_id=$1 AND status::text='pending' AND action_type='workspace_action'"
+        )
+        .await,
+        3
+    );
+    let before = fetches_4829(&w);
+    let (status, refused) = propose_4829(&w, json!([link("fourth")])).await;
+    assert_eq!((status, error_code(&refused)), (409, -32005), "{refused}");
+    assert_eq!(fetches_4829(&w), before, "a full agent fetches nothing");
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals + 2,
+        "the refused fourth wrote no approval"
+    );
+}
+
+/// **One preparation per agent at a time.** Two runs of one agent propose at once with a slow
+/// link: one is prepared, the other is told to come back (409 / -32004) without a request of its
+/// own; when the first is done the agent prepares again at once.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_prepares_one_proposal_per_agent_at_a_time() {
+    let w = world_4829().await;
+    w.mock
+        .replies
+        .lock()
+        .unwrap()
+        .insert("https://cdn.example.test/ok.gif".into(), Ok(gif_4829()));
+    w.mock
+        .delay_ms
+        .store(700, std::sync::atomic::Ordering::Relaxed);
+    mention_4829(&w).await;
+    mention_4829(&w).await;
+    let handles = claim_handles_4829(&w).await;
+    assert_eq!(handles.len(), 2, "two mentions, two jobs");
+    let link = |name: &str| {
+        candidate_4829(
+            name,
+            Value::Null,
+            json!({"source": "url", "url": "https://cdn.example.test/ok.gif"}),
+        )
+    };
+    let (a, b) = tokio::join!(
+        propose_with_4829(&w, &handles[0], json!([link("slow_one")])),
+        propose_with_4829(&w, &handles[1], json!([link("slow_two")])),
+    );
+    let code = |answer: &Value| answer["error"]["code"].as_i64().unwrap_or(0);
+    let mut answers = vec![(a.0, code(&a.1)), (b.0, code(&b.1))];
+    answers.sort();
+    assert_eq!(
+        answers,
+        vec![(200, 0), (409, -32004)],
+        "one proposal is prepared, the other is told to come back: {a:?} {b:?}"
+    );
+    assert_eq!(
+        fetches_4829(&w),
+        1,
+        "the one that was told to come back made no outside request"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        1
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        1
+    );
+
+    // The place went back with the first preparation: the same agent prepares again at once.
+    w.mock
+        .delay_ms
+        .store(0, std::sync::atomic::Ordering::Relaxed);
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829(
+            "slow_three",
+            Value::Null,
+            generated_4829(&tiny_png_3787(), "p")
+        )]),
+    )
+    .await;
+    assert_eq!(status, 200, "the place is given back: {proposed}");
+}
+
+/// One raw HTTP/1.1 POST to the Agent Port: the request head (which declares `content_length`),
+/// then `sent` bytes of the body, then silence. The first line of the answer, if one comes within
+/// `patience`. Raw TCP on purpose: a client library would not stop in the middle of a body.
+async fn raw_post_4829(
+    base: &str,
+    bearer: Option<&str>,
+    declare_propose: bool,
+    content_length: usize,
+    sent: &[u8],
+    patience: std::time::Duration,
+) -> Option<String> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let address = base.trim_start_matches("http://");
+    let mut stream = tokio::net::TcpStream::connect(address)
+        .await
+        .expect("connect to the wire server");
+    let mut head = format!(
+        "POST {PATH} HTTP/1.1\r\nHost: {address}\r\nContent-Type: application/json\r\n\
+         Accept: application/json, text/event-stream\r\nMCP-Protocol-Version: {MODERN_VERSION}\r\n"
+    );
+    if declare_propose {
+        head += "Mcp-Method: tools/call\r\nMcp-Name: oort_action_propose\r\n";
+    }
+    if let Some(bearer) = bearer {
+        head += &format!("Authorization: Bearer {bearer}\r\n");
+    }
+    head += &format!("Content-Length: {content_length}\r\nConnection: close\r\n\r\n");
+    let mut wire = head.into_bytes();
+    wire.extend_from_slice(sent);
+    // The server may answer (and close) before it has read all of this: that is the point.
+    let _ = stream.write_all(&wire).await;
+    let mut answer = vec![0u8; 512];
+    match tokio::time::timeout(patience, stream.read(&mut answer)).await {
+        Ok(Ok(read)) if read > 0 => Some(
+            String::from_utf8_lossy(&answer[..read])
+                .lines()
+                .next()
+                .unwrap_or("")
+                .to_string(),
+        ),
+        _ => None,
+    }
+}
+
+/// A server with its own Agent Port limits and body deadline, for the tests that measure the wire.
+async fn start_wire_server_4829(
+    pool: PgPool,
+    per_token_limit: u32,
+    large_body_deadline: std::time::Duration,
+) -> String {
+    let state = AppState::new(
+        pool,
+        TEST_JWT_SECRET.to_string(),
+        "ws://127.0.0.1:8000/connection/websocket".to_string(),
+    )
+    .with_large_body_deadline(large_body_deadline)
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        hosted_lease_seconds: momo_outbox::HOSTED_LEASE_SECONDS_DEFAULT,
+        subscription_agents_enabled: true,
+        claude_subscription_agents_enabled: true,
+        oauth: Default::default(),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind wire server");
+    let address: SocketAddr = listener.local_addr().expect("wire server address");
+    tokio::spawn(async move {
+        let _ = axum::serve(
+            listener,
+            build_app(state).into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
+    });
+    format!("http://{address}")
+}
+
+const SIX_MIB_4829: usize = 6 * 1024 * 1024;
+
+/// **The 6 MiB door authenticates before it reads, and only an agent that holds the propose scope
+/// is read that far.** A declared `oort_action_propose` whose credential is missing or wrong is
+/// answered `401` from the head alone (the body is never read: 1 KiB of 6 MiB is all that
+/// was sent, and nothing more will come); a live credential **without** the propose scope keeps
+/// the 64 KiB ceiling and is refused `413` at once; the propose-scoped agent is read from (it is
+/// still waiting for the rest of its body).
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_door_reads_only_after_it_knows_who_asks_and_only_for_the_propose_scope() {
+    let w = world_4829().await;
+    let patience = std::time::Duration::from_secs(3);
+    let kib = vec![b'x'; 1024];
+    // (G1) refused from the head alone: no credential, a malformed one, a well-formed unknown one.
+    let unknown = raw_credential(w.fixture.workspace);
+    for (label, bearer) in [
+        ("no credential", None),
+        ("a malformed credential", Some("not-a-token")),
+        ("an unknown agent credential", Some(unknown.as_str())),
+    ] {
+        let answer = raw_post_4829(&w.base, bearer, true, SIX_MIB_4829, &kib, patience).await;
+        assert!(
+            answer.as_deref().is_some_and(|line| line.contains(" 401")),
+            "{label}: the body is not read before the credential is judged: {answer:?}"
+        );
+    }
+    // (G2) a live credential without the propose scope: the budget stays 64 KiB. Two bytes past
+    // it are enough to be refused, without waiting for the other 6 MiB.
+    let past_ceiling = vec![b'x'; momo_mcp::MAX_BODY_BYTES + 2];
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.connect_only_bearer),
+        true,
+        SIX_MIB_4829,
+        &past_ceiling,
+        patience,
+    )
+    .await;
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 413")),
+        "a credential without the propose scope is held to 64 KiB: {answer:?}"
+    );
+    // …and the propose-scoped agent is read from: the same bytes get no answer, because the
+    // server is waiting for the rest of a body it is allowed to read.
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.hosted_bearer),
+        true,
+        SIX_MIB_4829,
+        &past_ceiling,
+        std::time::Duration::from_millis(1200),
+    )
+    .await;
+    assert_eq!(
+        answer, None,
+        "the propose scope opens the 6 MiB budget, so the server is still reading"
+    );
+    // The same agent's request that does NOT declare itself `oort_action_propose` gets no
+    // budget at all: past 64 KiB it is refused at once, whatever its credential can do.
+    let answer = raw_post_4829(
+        &w.base,
+        Some(&w.fixture.hosted_bearer),
+        false,
+        SIX_MIB_4829,
+        &past_ceiling,
+        patience,
+    )
+    .await;
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 413")),
+        "an undeclared body keeps the 64 KiB ceiling: {answer:?}"
+    );
+}
+
+/// **One call spends one rate-limit unit.** The credential is asked once, before the big body is
+/// read, and that answer is the one the request carries on: with 4 units a window, the first
+/// four declared proposals are answered and the fifth is `429`. (Asked twice, the second call
+/// would already be refused.) This is the only test that runs with the limit on.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_door_spends_one_rate_limit_unit_per_call() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base =
+        start_wire_server_4829(momo_app_pool().await, 4, std::time::Duration::from_secs(15)).await;
+    let client = reqwest::Client::new();
+    let mut statuses = Vec::new();
+    for _ in 0..5 {
+        let (status, _) = call(
+            &client,
+            &base,
+            &fixture.hosted_bearer,
+            "oort_action_propose",
+            json!({"handle": "not-a-lease", "actionId": "expression.create",
+                   "args": {"candidates": []}}),
+        )
+        .await;
+        statuses.push(status);
+    }
+    assert!(
+        statuses[..4].iter().all(|status| *status != 429),
+        "the first four calls fit the limit: {statuses:?}"
+    );
+    assert_eq!(
+        statuses[4], 429,
+        "the fifth is over it, and it is the fifth: {statuses:?}"
+    );
+    // The credential was used four times, not eight: one `used` audit row per call.
+    let used: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM audit_log WHERE workspace_id=$1 AND action=$2 AND via_token_id=$3",
+    )
+    .bind(fixture.workspace)
+    .bind(momo_auth::AUDIT_ACTION_USED)
+    .bind(fixture.hosted_token)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(used, 4, "one authentication per call");
+}
+
+/// **The 6 MiB body has a deadline.** An authenticated, propose-scoped agent that starts the big
+/// body and then goes quiet is answered `408` when the deadline passes (here 700 ms; 15 s in the
+/// server) instead of holding its connection and the part it sent as long as it likes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn the_big_body_has_a_deadline() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_wire_server_4829(
+        momo_app_pool().await,
+        0,
+        std::time::Duration::from_millis(700),
+    )
+    .await;
+    let started = std::time::Instant::now();
+    let answer = raw_post_4829(
+        &base,
+        Some(&fixture.hosted_bearer),
+        true,
+        SIX_MIB_4829,
+        &vec![b'x'; 1024],
+        std::time::Duration::from_secs(5),
+    )
+    .await;
+    let took = started.elapsed();
+    assert!(
+        answer.as_deref().is_some_and(|line| line.contains(" 408")),
+        "a body that stops coming is answered 408: {answer:?}"
+    );
+    assert!(
+        took >= std::time::Duration::from_millis(600) && took < std::time::Duration::from_secs(4),
+        "…when the deadline passes, not before and not much later: {took:?}"
+    );
+}
+
+fn animated_gif_4829(frames: u32) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    {
+        let mut encoder = image::codecs::gif::GifEncoder::new_with_speed(&mut bytes, 30);
+        encoder
+            .set_repeat(image::codecs::gif::Repeat::Infinite)
+            .unwrap();
+        for n in 0..frames {
+            encoder
+                .encode_frame(image::Frame::from_parts(
+                    image::RgbaImage::from_pixel(
+                        8,
+                        8,
+                        image::Rgba([((n * 7) % 200) as u8, 200, 50, 255]),
+                    ),
+                    0,
+                    0,
+                    image::Delay::from_numer_denom_ms(80, 1),
+                ))
+                .unwrap();
+        }
+    }
+    bytes
+}
+
+fn mp4_4829() -> Vec<u8> {
+    let mut bytes = vec![0, 0, 0, 0x18];
+    bytes.extend_from_slice(b"ftypisom\0\0\x02\0isomiso2mp41");
+    bytes.extend_from_slice(&[0; 64]);
+    bytes
+}
+
+fn webm_4829() -> Vec<u8> {
+    let mut bytes = vec![0x1a, 0x45, 0xdf, 0xa3, 0x9f];
+    bytes.extend_from_slice(&[0; 64]);
+    bytes
+}
+
+/// **A GIF and a video are sources of an attachment** (ADR-0186 X8-1/X8-2): the media types the
+/// expression use of the attachment judgement accepts. A GIF goes through the decoder's
+/// full-frame check (ADR-0218 D3: 100 frames pass, 101 do not), a video becomes the
+/// `video_processing_unavailable` card (D4 is on hold), and the avatar use of the same judgement
+/// is exactly what it was: neither is a source of a person's avatar.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_takes_a_gif_and_a_video_attachment_as_sources() {
+    let w = world_4829().await;
+    let ws = w.fixture.workspace;
+    let message =
+        seed_message_4385(&w.su, ws, w.fixture.channel, w.requester, "움직이는 그림").await;
+    let attach = |drive_id: &'static str, mime: &'static str, bytes: Vec<u8>| {
+        let w = &w;
+        async move {
+            w.drive.files.lock().unwrap().insert(drive_id.into(), bytes);
+            seed_attachment_4385(
+                &w.su,
+                ws,
+                w.fixture.channel,
+                w.requester,
+                Some(message),
+                drive_id,
+                mime,
+                "complete",
+            )
+            .await
+        }
+    };
+    let source = |id: Uuid| json!({"source": "attachment", "attachmentId": id.to_string()});
+    let reads = || {
+        w.drive
+            .content_reads
+            .load(std::sync::atomic::Ordering::Relaxed)
+    };
+
+    // A GIF within the limits: accepted, and stored as a GIF with its frames.
+    let gif = attach("gif100", "image/gif", animated_gif_4829(100)).await;
+    let (status, proposed) = propose_4829(
+        &w,
+        json!([candidate_4829("moving", Value::Null, source(gif))]),
+    )
+    .await;
+    assert_eq!(status, 200, "a GIF attachment is a source: {proposed}");
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    let draft = &card["action"]["expression"]["candidates"][0];
+    assert_eq!(draft["state"], "ready", "{draft}");
+    assert_eq!(draft["media"]["large"]["mime"], "image/gif", "{draft}");
+    assert_eq!(draft["media"]["large"]["frameCount"], 100, "{draft}");
+    assert_eq!(draft["origin"]["kind"], "attachment", "{draft}");
+
+    // One frame over the limit: found, fetched, and refused by the frame check — not by the
+    // lookup. (The read counter is what tells the two apart.)
+    let too_long = attach("gif101", "image/gif", animated_gif_4829(101)).await;
+    let (approvals, drafts) = (
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1",
+        )
+        .await,
+    );
+    let before = reads();
+    let (status, refused) = propose_4829(
+        &w,
+        json!([candidate_4829("too_long", Value::Null, source(too_long))]),
+    )
+    .await;
+    assert_eq!(status, 400, "an animation over the limit: {refused}");
+    assert_eq!(
+        reads(),
+        before + 1,
+        "the file was found and fetched; the frame check refused it"
+    );
+    assert_eq!(
+        count_4829(&w, "SELECT count(*) FROM approval WHERE workspace_id=$1").await,
+        approvals
+    );
+    assert_eq!(
+        count_4829(
+            &w,
+            "SELECT count(*) FROM expression_draft WHERE workspace_id=$1"
+        )
+        .await,
+        drafts,
+        "a refused animation leaves no draft"
+    );
+
+    // A video: the manual card, with the source kept as an attachment.
+    for (drive_id, mime, bytes) in [
+        ("video_mp4", "video/mp4", mp4_4829()),
+        ("video_webm", "video/webm", webm_4829()),
+    ] {
+        let video = attach(drive_id, mime, bytes).await;
+        let (status, proposed) = propose_4829(
+            &w,
+            json!([candidate_4829(
+                &format!("clip_{}", &drive_id[6..]),
+                Value::Null,
+                source(video)
+            )]),
+        )
+        .await;
+        assert_eq!(
+            status, 200,
+            "{mime}: a video is a card, not an error: {proposed}"
+        );
+        let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+        let draft = &card["action"]["expression"]["candidates"][0];
+        assert_eq!(draft["state"], "manual_upload_required", "{mime}: {draft}");
+        assert_eq!(
+            draft["code"], "video_processing_unavailable",
+            "{mime}: {draft}"
+        );
+        assert_eq!(draft["origin"]["kind"], "attachment", "{mime}: {draft}");
+        assert!(draft["media"].is_null(), "{mime}: no picture was made");
+    }
+
+    // The avatar use is exactly what it was: a GIF is not a source of a person's avatar, and the
+    // refusal comes from the lookup (nothing was fetched).
+    let before = reads();
+    let (status, refused) = propose_member_avatar_4385(
+        &w.client,
+        &w.base,
+        &w.su,
+        &w.fixture,
+        &w.requester_jwt,
+        json!({"attachmentId": gif.to_string()}),
+    )
+    .await;
+    assert_eq!(status, 400, "an avatar is never an animation: {refused}");
+    assert_eq!(
+        reads(),
+        before,
+        "the avatar lookup did not even fetch the GIF"
+    );
+}
+
+/// **A link's fetch slot goes back as soon as the bytes are here**, before the wait for a decoder
+/// slot. The eight fetch slots are process-wide and a person's `/import` needs one; holding one
+/// through somebody else's decoding queue would let a slow picture starve them. The picture
+/// here is tiny on the wire and slow to decode, and the slot count is read while it decodes.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn expression_create_gives_the_fetch_slot_back_before_it_waits_for_the_decoder() {
+    let w = world_4829().await;
+    w.mock.replies.lock().unwrap().insert(
+        "https://cdn.example.test/heavy.png".into(),
+        Ok(heavy_png_4829()),
+    );
+    let slots = momo_expressions::intake::import_slots();
+    assert_eq!(
+        slots.available_permits(),
+        momo_expressions::intake::IMPORTS_IN_FLIGHT,
+        "no fetch is in flight when the test starts"
+    );
+    let ((status, proposed), (during_fetch_done, took_after_fetch)) = tokio::join!(
+        propose_4829(
+            &w,
+            json!([candidate_4829(
+                "heavy_link",
+                Value::Null,
+                json!({"source": "url", "url": "https://cdn.example.test/heavy.png"})
+            )])
+        ),
+        async {
+            // The fetch is made at once (the mock answers at once); what follows is the decode.
+            while fetches_4829(&w) == 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+            let fetched_at = std::time::Instant::now();
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            (slots.available_permits(), fetched_at.elapsed())
+        }
+    );
+    assert_eq!(status, 200, "{proposed}");
+    let card = card_4829(&w, proposed_approval_3706(&proposed)).await;
+    assert_eq!(
+        card["action"]["expression"]["candidates"][0]["state"], "ready",
+        "the picture was really decoded: {card}"
+    );
+    assert!(
+        took_after_fetch >= std::time::Duration::from_millis(250),
+        "{took_after_fetch:?}"
+    );
+    assert_eq!(
+        during_fetch_done,
+        momo_expressions::intake::IMPORTS_IN_FLIGHT,
+        "250 ms after the fetch, while the picture is still being decoded, the fetch slot is back"
+    );
+}
