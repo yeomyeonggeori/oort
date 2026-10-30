@@ -115,6 +115,7 @@ export function dmPeer(
   selfMemberId: string
 ): RosterMember | null {
   if (channel.kind !== "dm") return null;
+  if ((channel.memberIds ?? []).length !== 2) return null;
   const other = (channel.memberIds ?? []).find(
     (id) => idKey(id) !== idKey(selfMemberId)
   );
@@ -129,12 +130,9 @@ export function dmPeer(
  * written clause for clause against it so the composer never promises something
  * the send path will not do.
  *
- * Two deliberate differences from [`dmPeer`], both of which are the rule rather
- * than a refinement of it:
- *   * `length !== 1` instead of "the first other id" — a group DM is back to
- *     "who did you mean", and `dmPeer` answering with one of three would put the
- *     hint on a channel that ignores it;
- *   * `kind === "agent"` — a human counterpart does not run.
+ * Like [`dmPeer`], this requires an actual pair. The sender must be a human
+ * participant and the counterpart an active agent; a consented group keeps
+ * explicit mentions even when it contains only one agent.
  *
  * The server stays the authority. This is what the client can see of the same
  * decision, which is why the result is a hint and never a control.
@@ -145,11 +143,14 @@ export function dmAutoReplyAgent(
   selfMemberId: string
 ): RosterMember | null {
   if (channel.kind !== "dm") return null;
-  const others = (channel.memberIds ?? []).filter(
-    (id) => idKey(id) !== idKey(selfMemberId)
-  );
-  if (others.length !== 1) return null;
-  const peer = memberFor(directory, others[0]);
+  const memberIds = channel.memberIds ?? [];
+  if (
+    memberIds.length !== 2 ||
+    !memberIds.some((id) => idKey(id) === idKey(selfMemberId))
+  )
+    return null;
+  if (memberFor(directory, selfMemberId)?.kind !== "human") return null;
+  const peer = dmPeer(channel, directory, selfMemberId);
   if (!peer || peer.kind !== "agent" || peer.status !== "active") return null;
   return peer;
 }
@@ -158,6 +159,7 @@ export function dmAutoReplyAgent(
 export type ChannelLabelKind =
   | "channel"
   | "peer"
+  | "group"
   | "self"
   | "pending"
   | "gone";
@@ -237,6 +239,13 @@ export function channelLabelParts(
       isAgent: false,
       kind: "channel",
     };
+  }
+  if ((channel.memberIds ?? []).length > 2) {
+    const names = (channel.memberIds ?? [])
+      .filter((id) => idKey(id) !== idKey(selfMemberId))
+      .map((id) => memberNameParts(directory, id, missingMemberLabel(directory)))
+      .map((part) => part.handle ? `${part.name} ${part.handle}` : part.name);
+    return { text: `${names.join(", ")} · ${channel.memberIds!.length}명`, handle: null, isAgent: false, kind: "group" };
   }
   const member = dmPeer(channel, directory, selfMemberId);
   if (member) {

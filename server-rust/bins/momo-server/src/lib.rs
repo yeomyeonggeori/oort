@@ -1933,6 +1933,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/usage/summary",
             get(routes::usage::summary),
         )
+        .route(
+            "/v1/workspaces/{ws}/usage/agents",
+            get(routes::usage::agents),
+        )
+        .route(
+            "/v1/workspaces/{ws}/agents/{agent}/subscription-fee",
+            put(routes::usage::put_subscription_fee),
+        )
         // #1222 (T13) — the two webhook families, both workspace owner/admin.
         //
         // They are mounted together because they are one decision surface even
@@ -2024,6 +2032,10 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/event-subscriptions/{subscription}",
             put(routes::event_subscriptions::update).delete(routes::event_subscriptions::delete),
+        )
+        .route(
+            "/v1/workspaces/{workspace}/channels/{channel}/dm-agents/{agent}",
+            axum::routing::delete(routes::dm_agents::remove),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

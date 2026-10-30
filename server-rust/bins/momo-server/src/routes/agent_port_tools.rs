@@ -2257,6 +2257,14 @@ async fn action_propose(
                 rationale.as_deref(),
                 caller.agent_member_id,
             );
+            // Bind the card to the authenticated connection that raised it,
+            // rather than whichever connection exists when a person decides.
+            // The decision resolver re-proves this id without requiring an
+            // unexpired access token (#4821, ADR-0186 U-d).
+            if resolved.pins.is_null() {
+                resolved.pins = json!({});
+            }
+            resolved.pins["hostedConnection"] = json!(identity.connection_id);
             if let Some(action_block) = payload.get_mut("action").and_then(Value::as_object_mut) {
                 // The ids the names resolved to, for the decision to compare.
                 action_block.insert("pins".into(), resolved.pins.clone());

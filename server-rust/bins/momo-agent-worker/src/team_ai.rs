@@ -625,7 +625,9 @@ impl AgentWorker {
                 .await?;
                 // The ledger row is written whether or not a card came of it: the
                 // tokens were spent, and the daily ceiling reads this table.
-                let resolved = RunUsageReport::resolve(Some(&ledger), &fallback_model, None, None);
+                let mut resolved =
+                    RunUsageReport::resolve(Some(&ledger), &fallback_model, None, None);
+                resolved.source = momo_agent::UsageSource::Measured;
                 record_run_usage_in_tx(conn, workspace_id, run_id, agent, channel_id, &resolved)
                     .await?;
                 team_ai::record_web_searches_in_tx(conn, workspace_id, run_id, searches).await?;
@@ -682,7 +684,9 @@ impl AgentWorker {
 
     /// One read tool, as the requester (H4-2): `SET LOCAL ROLE momo_helper_read`
     /// first, the audience computed from the reply channel, then the domain
-    /// function. Read-only; nothing else happens in this transaction.
+    /// function. The authenticated helper also binds the agent read floor: the
+    /// requester's access and reply audience cannot widen its current DM seat.
+    /// Read-only; nothing else happens in this transaction.
     async fn team_ai_read(
         &self,
         workspace_id: Uuid,
@@ -694,21 +698,25 @@ impl AgentWorker {
     ) -> Result<ToolOutcome, DbError> {
         let tool = tool.to_string();
         let args = args.clone();
-        with_tenant_tx(&self.pool, workspace_id, move |conn| {
-            Box::pin(async move {
-                team_ai_tools::enter_helper_read_role(conn).await?;
-                let scope = team_ai_tools::load_scope_in_tx(
-                    conn,
-                    workspace_id,
-                    helper,
-                    requester,
-                    reply_channel,
-                )
-                .await?;
-                team_ai_tools::execute_read_tool_in_tx(conn, &scope, &tool, &args).await
-            })
-        })
-        .await
+        momo_db::tenant::REQUEST_AGENT_MEMBER
+            .scope(
+                helper,
+                with_tenant_tx(&self.pool, workspace_id, move |conn| {
+                    Box::pin(async move {
+                        team_ai_tools::enter_helper_read_role(conn).await?;
+                        let scope = team_ai_tools::load_scope_in_tx(
+                            conn,
+                            workspace_id,
+                            helper,
+                            requester,
+                            reply_channel,
+                        )
+                        .await?;
+                        team_ai_tools::execute_read_tool_in_tx(conn, &scope, &tool, &args).await
+                    })
+                }),
+            )
+            .await
     }
 
     /// End the run without posting anything (switch off, no human asked).
@@ -921,7 +929,8 @@ impl AgentWorker {
                 )
                 .await?;
                 if let Some(report) = ledger {
-                    let resolved = RunUsageReport::resolve(Some(&report), &model, None, None);
+                    let mut resolved = RunUsageReport::resolve(Some(&report), &model, None, None);
+                    resolved.source = momo_agent::UsageSource::Measured;
                     record_run_usage_in_tx(
                         conn,
                         workspace_id,

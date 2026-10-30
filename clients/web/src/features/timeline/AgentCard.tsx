@@ -1,3 +1,5 @@
+import { ExpressionApprovalCard } from "@/features/expressions/ExpressionApprovalCard";
+import { expressionApprovalPayload, expressionResultPayload } from "@/features/expressions/cards";
 import { useEffect, useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { seedComposerText } from "@/features/chat/draftStore";
@@ -409,9 +411,11 @@ function ExpiredApprovalFooter({
 function ApprovalBody({
   card,
   directory,
+  viewerMemberId,
 }: {
   card: AgentApprovalCard;
   directory: Directory;
+  viewerMemberId?: string;
 }) {
   const [local, setLocal] = useState<{
     status: ApprovalStatus;
@@ -483,6 +487,7 @@ function ApprovalBody({
   // 행 하나가 남았다.
   const note = approvalCardNote({
     receiptNote: receipt?.note ?? null,
+    waitingForParticipant: card.action?.id === "dm.agent.admit" && card.action.targetMemberId?.toLowerCase() !== viewerMemberId?.toLowerCase(),
     isResumeOffer: card.isResumeOffer,
     resumeOfferText: RESUME_OFFER_COPY,
     settled,
@@ -1393,11 +1398,15 @@ export function CardFrame({
 
 export function AgentCard({
   card,
+  expressionProps,
   directory,
+  viewerMemberId,
   onOpenWorkSession,
 }: {
   card: AgentCardModel;
+  expressionProps?: unknown;
   directory: Directory;
+  viewerMemberId?: string;
   /**
    * 작업 세션 상세로 가는 문. 로그인 핸드오프 카드만 쓴다. 없으면 딥링크 자체가
    * 그려지지 않는다 — 없는 방으로 가는 문을 그리지 않는다는 이 레포의 규율.
@@ -1405,7 +1414,8 @@ export function AgentCard({
   onOpenWorkSession?: OpenWorkSession;
 }) {
   if (card.kind === "approval") {
-    return <ApprovalBody card={card} directory={directory} />;
+    if (card.action?.id === "expression.create") return <ExpressionApprovalCard card={card} payload={expressionApprovalPayload(expressionProps)} result={expressionResultPayload(expressionProps)} />;
+    return <ApprovalBody card={card} directory={directory} viewerMemberId={viewerMemberId} />;
   }
   if (card.kind === "login_handoff") {
     return (

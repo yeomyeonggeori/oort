@@ -78,7 +78,7 @@ POST /v1/workspaces/{ws}/expressions/{id}/report
 #       POST|DELETE /v1/workspaces/{ws}/channels/{ch}/members[/{member}]
 #       POST …/channels/{ch}/agent-runs
 #       POST|GET|DELETE /v1/workspaces/{ws}/devices[/{device}]
-#       GET …/work-sessions/{session}/reattach · GET …/usage/summary
+#       GET …/work-sessions/{session}/reattach
 #       POST /v1/agent-runs/{run}/approval-decisions
 #       GET /v1/provider/quota-snapshots (work-host-engine 은 #3584 로 삭제)
 #       POST /v1/centrifugo/subscribe · agent gateway 5 경로
@@ -319,3 +319,8 @@ GET /v1/workspaces/{workspaceId}/work-hosts/{workHostId}/pending-controls
 GET /v1/workspaces/{workspaceId}/work-auto-approvals
 PUT /v1/workspaces/{workspaceId}/work-auto-approvals/{tool}
 DELETE /v1/workspaces/{workspaceId}/work-auto-approvals/{tool}
+
+# #4781 — cost visibility and shared-agent subscription amount (real PG samples).
+GET /v1/workspaces/{workspaceId}/usage/agents
+GET /v1/workspaces/{workspaceId}/usage/summary
+PUT /v1/workspaces/{workspaceId}/agents/{agentMemberId}/subscription-fee

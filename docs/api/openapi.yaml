@@ -4124,6 +4124,84 @@ paths:
         "403": {description: Not a human workspace member, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "404": {description: "error.code `personal_agent_not_found`", content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/usage/agents:
+    get:
+      tags: [agents]
+      operationId: getAgentUsage
+      summary: Read agent cost facts visible to the active workspace member.
+      description: >
+        ADR-0147 (2026-10-30), model A. Shared agents plus the viewer's personal
+        agents; owner/admin may read all agents and group agentMemberId through
+        the roster's owner facts. Guests are additionally restricted to their
+        roster. Identity, brain, channel, run and daily series are not returned.
+        Token counts times applicable USD list prices, computed at read time;
+        unpriced runs contribute tokens/runs but no dollars. Long-context tiers that
+        cannot be reconstructed per request use base prices and estimatedRuns. Callback-supplied
+        dollars are ignored. Subscription fees are separate and never added to
+        spend. Non-admin totals have mine/shared only, with no workspace total.
+        Default window is the current UTC calendar month through now. Explicit
+        from/to are inclusive, with a maximum range of 93 days.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+      responses:
+        "200": {description: Visible cost facts, content: {application/json: {schema: {$ref: "#/components/schemas/AgentUsageResponse"}}}}
+        "400": {description: Invalid time window, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Active workspace membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/usage/summary:
+    get:
+      tags: [agents]
+      operationId: getUsageSummary
+      summary: Read the existing usage summary with the same agent visibility filter.
+      description: >
+        Every projection (totals, buckets, byModel and byAgent) is recomputed
+        from the same visible agent set as usage/agents. Non-admin responses
+        include scope=visible and omit budget to prevent hidden-cost inference.
+        Owner/admin retain the legacy response, including budget (possibly
+        null), displayName and recorded ledger dollar amounts. Default range
+        remains the legacy trailing 30 days; endpoints are inclusive, UTC.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: from, in: query, schema: {type: string, format: date-time}}
+        - {name: to, in: query, schema: {type: string, format: date-time}}
+        - {name: bucket, in: query, schema: {type: string, enum: [day, week, month], default: day}}
+      responses:
+        "200": {description: Usage in the authorized scope, content: {application/json: {schema: {$ref: "#/components/schemas/UsageSummaryResponse"}}}}
+        "400": {description: Invalid time window, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Active workspace membership required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/agents/{agentMemberId}/subscription-fee:
+    put:
+      tags: [agents]
+      operationId: putAgentSubscriptionFee
+      summary: Set or clear a shared agent's monthly subscription amount.
+      description: >
+        Human workspace owner/admin only, with no platform-scope bypass and no
+        agent bearer. Personal owner_only agents return 409. Monthly amounts are
+        recorded separately from metered spend. Audit detail contains the amount
+        only; label is not audited. A null monthlyMicroUsd clears the setting.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: agentMemberId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/PutAgentSubscriptionFee"}}}
+      responses:
+        "200": {description: Current setting, content: {application/json: {schema: {$ref: "#/components/schemas/AgentSubscriptionFeeResponse"}}}}
+        "400": {description: Invalid amount or label length, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Agent not found in this workspace, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Personal agent, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "422": {description: Malformed or unknown input fields}
+
   /v1/workspaces/{workspaceId}/hosted-agent-connections:
     post:
       tags: [agents]
@@ -12337,7 +12415,11 @@ paths:
               $ref: "#/components/schemas/ApprovalDecisionRequest"
       responses:
         "200":
-          description: Decision committed (or identical idempotent retry).
+          description: >
+            Decision committed (or identical idempotent retry), or an already
+            cancelled approval acknowledged with `status: cancelled` (ADR-0217).
+            A cancelled receipt does not execute an action, record a new vote,
+            widen a grant, or create a job.
           headers:
             Cache-Control:
               description: Always `no-store` (ADR-0186 D4).
@@ -12412,8 +12494,9 @@ paths:
                 $ref: "#/components/schemas/ApprovalDecisionReceipt"
         "409":
           description: >
-            Receipt-shaped expected failure — already decided, expired before
-            decision, idempotency conflict, or (ADR-0186) a workspace action
+            Receipt-shaped expected failure — already decided (except cancelled,
+            which returns 200), expired before decision, idempotency conflict,
+            or (ADR-0186) a workspace action
             this server could not carry through: `action_unavailable`,
             `action_args_invalid`, `public_origin_unavailable` (all three refuse
             before the first write), and `run_not_parked` — the run left its
@@ -13198,7 +13281,11 @@ paths:
         the run read returns it as a top-level `appsUsed` array, absent when
         nothing was reported. The Hermes REST gateway completion accepts the same
         `appsUsed` (the code drops a malformed one so telemetry cannot cost the
-        answer; the Agent Port refuses it). ADR-0113 증보 2 E8·E10 (#4054):
+        answer; the Agent Port refuses it). The REST completion's optional
+        `usage.costMicroUsd` (alias `cost_micro_usd`) is an integer in
+        0..1000000000000 inclusive; `usage.model` is at most 128 UTF-8 bytes,
+        matching the Agent Port. Values outside these limits return HTTP 400.
+        ADR-0113 증보 2 E8·E10 (#4054):
         the answer message written by the completion now also carries the
         validated `appsUsed` in its own `props.appsUsed` (so a row need not
         fetch the run), and both doors accept one more optional argument,
@@ -14085,6 +14172,33 @@ paths:
               schema: {$ref: "#/components/schemas/ProviderEffortTableResponse"}
         "401": {$ref: "#/components/responses/Unauthorized"}
         "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspace}/channels/{channel}/dm-agents/{agent}:
+    delete:
+      operationId: removeDmAgent
+      summary: Remove a consented agent from the same DM (ADR-0217).
+      description: >
+        Any active human participant of this DM may remove an agent admitted by
+        unanimous consent. Revokes the current admission and membership and cancels
+        live runs in one transaction. Further reads and writes are refused, including
+        writes by the worker. Existing human/agent one-to-one DM opening is unchanged.
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: workspace, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: channel, in: path, required: true, schema: {type: string, format: uuid}}
+        - {name: agent, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: The agent left this DM.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [removed]
+                properties: {removed: {type: boolean, enum: [true]}}
+        '401': {description: Authentication required.}
+        '403': {description: An active human DM participant is required.}
+        '404': {description: No current consented agent seat visible to this participant.}
 
 components:
   securitySchemes:
@@ -15470,6 +15584,447 @@ components:
           type: string
           minLength: 0
           maxLength: 500
+    AgentUsageMetrics:
+      type: object
+      required:
+      - runs
+      - reportedRuns
+      - promptTokens
+      - completionTokens
+      - cachedTokens
+      - costMicroUsd
+      - unpricedRuns
+      - unpricedModels
+      - estimatedRuns
+      - source
+      properties:
+        runs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Completed runs with a ledger row in the selected window.
+        reportedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Runs with token counts (including measured explicit zero).
+        promptTokens:
+          type: integer
+          format: int64
+        completionTokens:
+          type: integer
+          format: int64
+        cachedTokens:
+          type: integer
+          format: int64
+        costMicroUsd:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Token times list price; excludes unpriced runs and subscriptions.
+        unpricedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        unpricedModels:
+          type: array
+          maxItems: 8
+          items:
+            type: string
+        estimatedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        source:
+          type: string
+          nullable: true
+          enum:
+          - measured
+          - self_reported
+          - null
+          description: Self-reported wins when sources are mixed; null means no ledger rows.
+    AgentUsage:
+      type: object
+      required:
+      - runs
+      - reportedRuns
+      - promptTokens
+      - completionTokens
+      - cachedTokens
+      - costMicroUsd
+      - unpricedRuns
+      - unpricedModels
+      - estimatedRuns
+      - source
+      - agentMemberId
+      properties:
+        runs:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Completed runs with a ledger row in the selected window.
+        reportedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Runs with token counts (including measured explicit zero).
+        promptTokens:
+          type: integer
+          format: int64
+        completionTokens:
+          type: integer
+          format: int64
+        cachedTokens:
+          type: integer
+          format: int64
+        costMicroUsd:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Token times list price; excludes unpriced runs and subscriptions.
+        unpricedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        unpricedModels:
+          type: array
+          maxItems: 8
+          items:
+            type: string
+        estimatedRuns:
+          type: integer
+          format: int64
+          minimum: 0
+        source:
+          type: string
+          nullable: true
+          enum:
+          - measured
+          - self_reported
+          - null
+          description: Self-reported wins when sources are mixed; null means no ledger rows.
+        agentMemberId:
+          type: string
+          format: uuid
+        subscriptionFee:
+          $ref: '#/components/schemas/AgentSubscriptionFee'
+    AgentUsageResponse:
+      type: object
+      required:
+      - range
+      - agents
+      - totals
+      - hiddenPersonalAgents
+      properties:
+        range:
+          $ref: '#/components/schemas/UsageSummaryRange'
+        agents:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentUsage'
+        totals:
+          type: object
+          required:
+          - mine
+          - shared
+          properties:
+            mine:
+              $ref: '#/components/schemas/AgentUsageMetrics'
+            shared:
+              $ref: '#/components/schemas/AgentUsageMetrics'
+            workspace:
+              description: Present only for workspace owner/admin. Includes other members' personal agents.
+              type: object
+              required:
+              - runs
+              - reportedRuns
+              - promptTokens
+              - completionTokens
+              - cachedTokens
+              - costMicroUsd
+              - unpricedRuns
+              - unpricedModels
+              - estimatedRuns
+              - source
+              properties:
+                runs:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Completed runs with a ledger row in the selected window.
+                reportedRuns:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Runs with token counts (including measured explicit zero).
+                promptTokens:
+                  type: integer
+                  format: int64
+                completionTokens:
+                  type: integer
+                  format: int64
+                cachedTokens:
+                  type: integer
+                  format: int64
+                costMicroUsd:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                  description: Token times list price; excludes unpriced runs and subscriptions.
+                unpricedRuns:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                unpricedModels:
+                  type: array
+                  maxItems: 8
+                  items:
+                    type: string
+                estimatedRuns:
+                  type: integer
+                  format: int64
+                  minimum: 0
+                source:
+                  type: string
+                  nullable: true
+                  enum:
+                  - measured
+                  - self_reported
+                  - null
+                  description: Self-reported wins when sources are mixed; null means no ledger rows.
+        hiddenPersonalAgents:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Count only; guests count only agents visible in their roster.
+    AgentSubscriptionFee:
+      type: object
+      required:
+      - monthlyMicroUsd
+      - label
+      properties:
+        monthlyMicroUsd:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 1000000000000
+        label:
+          type: string
+          nullable: true
+          maxLength: 120
+    PutAgentSubscriptionFee:
+      type: object
+      additionalProperties: false
+      properties:
+        monthlyMicroUsd:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+          maximum: 1000000000000
+          description: Null or omitted clears the setting.
+        label:
+          type: string
+          nullable: true
+          maxLength: 120
+    AgentSubscriptionFeeResponse:
+      type: object
+      required:
+      - agentMemberId
+      - subscriptionFee
+      properties:
+        agentMemberId:
+          type: string
+          format: uuid
+        subscriptionFee:
+          nullable: true
+          type: object
+          required:
+          - monthlyMicroUsd
+          - label
+          properties:
+            monthlyMicroUsd:
+              type: integer
+              format: int64
+              minimum: 0
+              maximum: 1000000000000
+            label:
+              type: string
+              nullable: true
+              maxLength: 120
+    UsageSummaryRange:
+      type: object
+      required:
+      - from
+      - to
+      - bucket
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+        bucket:
+          type: string
+          enum:
+          - day
+          - week
+          - month
+    UsageSummaryTotals:
+      type: object
+      required:
+      - costMicroUsd
+      - estimatedMicroUsd
+      - promptTokens
+      - completionTokens
+      properties:
+        costMicroUsd:
+          type: integer
+          format: int64
+        estimatedMicroUsd:
+          type: integer
+          format: int64
+        promptTokens:
+          type: integer
+          format: int64
+        completionTokens:
+          type: integer
+          format: int64
+    UsageSummaryAmounts:
+      type: object
+      required:
+      - costMicroUsd
+      - promptTokens
+      - completionTokens
+      properties:
+        costMicroUsd:
+          type: integer
+          format: int64
+        promptTokens:
+          type: integer
+          format: int64
+        completionTokens:
+          type: integer
+          format: int64
+    UsageSummaryResponse:
+      type: object
+      required:
+      - range
+      - totals
+      - buckets
+      - byModel
+      - byAgent
+      properties:
+        range:
+          $ref: '#/components/schemas/UsageSummaryRange'
+        scope:
+          type: string
+          enum:
+          - visible
+          description: Non-admin only. All projections use the visible agent set.
+        totals:
+          $ref: '#/components/schemas/UsageSummaryTotals'
+        buckets:
+          type: array
+          items:
+            type: object
+            required:
+            - costMicroUsd
+            - promptTokens
+            - completionTokens
+            - start
+            properties:
+              costMicroUsd:
+                type: integer
+                format: int64
+              promptTokens:
+                type: integer
+                format: int64
+              completionTokens:
+                type: integer
+                format: int64
+              start:
+                type: string
+                format: date-time
+        byModel:
+          type: array
+          items:
+            type: object
+            required:
+            - costMicroUsd
+            - promptTokens
+            - completionTokens
+            - model
+            properties:
+              costMicroUsd:
+                type: integer
+                format: int64
+              promptTokens:
+                type: integer
+                format: int64
+              completionTokens:
+                type: integer
+                format: int64
+              model:
+                type: string
+        byAgent:
+          type: array
+          items:
+            type: object
+            required:
+            - costMicroUsd
+            - promptTokens
+            - completionTokens
+            - agentMemberId
+            - displayName
+            properties:
+              costMicroUsd:
+                type: integer
+                format: int64
+              promptTokens:
+                type: integer
+                format: int64
+              completionTokens:
+                type: integer
+                format: int64
+              agentMemberId:
+                type: string
+                format: uuid
+              displayName:
+                type: string
+        budget:
+          type: object
+          nullable: true
+          description: Legacy workspace budget; included only for owner/admin, even when null.
+          required:
+          - grain
+          - limitMicroUsd
+          - spentMicroUsd
+          - reservedMicroUsd
+          - state
+          - periodStart
+          properties:
+            grain:
+              type: string
+            limitMicroUsd:
+              type: integer
+              format: int64
+            spentMicroUsd:
+              type: integer
+              format: int64
+            reservedMicroUsd:
+              type: integer
+              format: int64
+            state:
+              type: string
+              enum:
+              - normal
+              - soft_limit
+              - hard_limit
+            periodStart:
+              type: string
+              format: date-time
     # ---- Error envelope (Hummingbird HTTPError) ------------------------------
     ErrorResponse:
       type: object
@@ -18105,6 +18660,8 @@ components:
     WorkspaceActionId:
       type: string
       description: >
+        `dm.agent.admit` is raised only by the server after a human DM mention,
+        with one approval per other human participant (ADR-0217); agents cannot propose it.
         The closed set of workspace actions an agent may propose (ADR-0186 D1).
         The canonical list is `momo_agent::actions::ACTIONS`; this enum and that
         registry are held equal by one test
@@ -18165,7 +18722,7 @@ components:
         `props.action.preview` carries `{kind: message, messageId, channelId,
         totalChars, truncated}` so a client can open the whole message. These
         two are always decided in the app, never from a lock-screen action.
-      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install"]
+      enum: ["invite.create", "channel.create", "channel.member.add", "agent.rename", "hosted.channels.grant", "workspace.settings.update", "agent.profile.update", "agent.invite", "member.avatar.set", "member.display_name.set", "message.pin", "message.unpin", "workspace.unfurl.update", "workspace.memory.update", "workspace.work_tier.update", "plugin.install", "dm.agent.admit"]
 
     InitiativeActionId:
       type: string
@@ -18243,9 +18800,11 @@ components:
         workspace owner/admin or a platform operator. `requesting_member` is
         **the person the action changes and nobody else** (`member.avatar.set`:
         the human who called the agent, derived by the server from the run).
+        `dm_participant` is the exact other human named on a DM admission card,
+        without an admin or agent-owner override (ADR-0217).
         The canonical list is `momo_agent::actions::RequiredRole`; held equal by
         `routes::actions::the_required_roles_are_one_list_in_two_places`.
-      enum: ["admin", "agent_editor", "requesting_member", "workspace_operator"]
+      enum: ["admin", "agent_editor", "requesting_member", "dm_participant", "workspace_operator"]
 
     ListWorkspaceActionsResponse:
       type: object
@@ -23814,7 +24373,20 @@ components:
             wrote the line. A client draws the notification line only when
             `source` is `github` and the message's `authorMemberId` equals
             `github_author_member_id`; a display name alone is not proof. On a `type: tool_result` row the props are
-            `{call_id, output, is_error}` and `body` repeats `output`. A tool
+            `{call_id, output, is_error}` and `body` repeats `output`. ADR-0186
+            addendum v6 R-b/R-d (#3982): approval settlement updates the existing
+            `approval_request` card instead of inserting an execution, rejection,
+            or expiry result line (both workspace actions and tool approvals).
+            Server-owned card props include `status`, `approval_status`, `code`
+            (`approval_approved`, `approval_rejected`, `approval_expired`, or
+            `human_cancelled`), `decided_by` (null for expiry/cancellation), and
+            `decided_at_ms`. `result` is the v1 action-result object plus `line`,
+            with status `executed`, `rejected`, `expired`, or `cancelled`; tool
+            approval and in-place approval omit it when their run resumes.
+            `body` is the Korean result line (the decision sentence when there
+            is no result). A full `message.edited` frame publishes this change
+            without changing `seq`, `state`, or `edited_at`. Actual tool execution
+            results remain ordinary `tool_result` rows. A tool
             call the server refuses is answered with `is_error: true`, and an
             `output` that names the refusal's stable word in parentheses — the
             sentence may be reworded, the word is not. `work.session.spawn`
@@ -25377,8 +25949,9 @@ components:
       type: object
       description: >
         What an approved workspace action produced (ADR-0186 부록 C). `ref`
-        names the durable object and is repeated in the persistent result card's
-        props (`momo.action_result.ref`), so one id matches across both.
+        names the durable object and is repeated in the settled approval card's
+        props (`result.ref`, ADR-0186 v6 R-b; legacy rows use
+        `momo.action_result.ref`), so one id matches across both.
       additionalProperties: false
       required: [actionId, ref]
       properties:

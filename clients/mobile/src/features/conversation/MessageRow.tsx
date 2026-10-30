@@ -1,3 +1,10 @@
+import {
+  expressionAltText,
+  expressionMessageModel,
+  tokenizeExpressionReaction,
+} from '@momo/core/features/expressions/message';
+import {useExpressionItems} from '../expressions/ExpressionProvider';
+import {ExpressionImage} from '../expressions/ExpressionImage';
 import {hasProfileAvatarPreview} from '@momo/core/features/approvals/avatarPreview';
 import {missingMemberLabel} from '@momo/core/features/workspace/directory';
 import {
@@ -727,6 +734,17 @@ function Chips({
   onToggle?: (emoji: string) => void;
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
+  const expressions = useExpressionItems();
+  const label = (value: string) => {
+    const token = tokenizeExpressionReaction(value, expressions);
+    return token.type === 'expression' ? expressionAltText(token.expression) : value;
+  };
+  const renderEmoji = (value: string) => {
+    const token = tokenizeExpressionReaction(value, expressions);
+    return token.type === 'expression'
+      ? <ExpressionImage expression={token.expression} size="reaction" />
+      : <Text style={styles.chipEmoji}>{value}</Text>;
+  };
   if (chips.length === 0) return null;
   return (
     <View style={styles.chipRow} testID="reaction-chips">
@@ -735,7 +753,7 @@ function Chips({
           key={chip.emoji}
           accessibilityRole="button"
           accessibilityState={{selected: chip.mine}}
-          accessibilityLabel={`${chip.emoji} 반응 ${chip.count}개, ${
+          accessibilityLabel={`${label(chip.emoji)} 반응 ${chip.count}개, ${
             chip.mine ? '내 반응 취소' : '나도 반응하기'
           }`}
           disabled={onToggle === undefined}
@@ -747,7 +765,7 @@ function Chips({
             pressed && styles.chipPressed,
           ]}
           testID={`reaction-chip-${chip.emoji}`}>
-          <Text style={styles.chipEmoji}>{chip.emoji}</Text>
+          {renderEmoji(chip.emoji)}
           <Text style={[styles.chipCount, chip.mine && styles.chipCountMine]}>
             {chip.count}
           </Text>
@@ -1608,11 +1626,13 @@ export function readApprovalCard(
     approvalReceipts,
     approvalOffline,
     approvalsProvided,
+    viewerMemberId,
   }: {
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
     approvalsProvided?: boolean;
+    viewerMemberId?: string;
   },
 ) {
   // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
@@ -1625,6 +1645,7 @@ export function readApprovalCard(
   const settledStatus = receipt?.status ?? card.status;
   const note = approvalCardNote({
     receiptNote: receipt?.note ?? null,
+    waitingForParticipant: card.action?.id === 'dm.agent.admit' && card.action.targetMemberId?.toLowerCase() !== viewerMemberId?.toLowerCase(),
     isResumeOffer: card.isResumeOffer,
     // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
     // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
@@ -1665,6 +1686,7 @@ export function readApprovalCard(
 function AgentCard({
   card,
   directory,
+  viewerMemberId,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -1679,6 +1701,7 @@ function AgentCard({
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
   directory: Directory;
+  viewerMemberId?: string;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   approvalOffline?: boolean;
@@ -1695,6 +1718,12 @@ function AgentCard({
   const styles = useStyles(buildStyles);
   const approvalNoteStyle = useStyles(buildApprovalNoteStyle);
   const completionToneStyle = useStyles(buildCompletionToneStyle);
+  const avatarKey = card.kind === 'approval' && hasProfileAvatarPreview(card.action)
+    ? `${card.approvalId}:${card.action?.preview?.sha256}` : null;
+  const [avatarReady, setAvatarReady] = useState<{key: string | null; ready: boolean} | null>(null);
+  const onAvatarReady = useCallback((ready: boolean) => {
+    setAvatarReady({key: avatarKey, ready});
+  }, [avatarKey]);
   if (card.kind === 'approval') {
     // 카드가 무엇을 말하는지(문장 / 컨트롤 / 둘 다 아님)는 `readApprovalCard` 한
     // 곳에서 읽는다. 행의 로터(#2595)도 같은 답을 보고 「승인」·「거부」를 세운다 —
@@ -1704,6 +1733,7 @@ function AgentCard({
       approvalReceipts,
       approvalOffline,
       approvalsProvided,
+      viewerMemberId,
     });
     // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
     const messagePreview = openableMessagePreview(
@@ -1768,8 +1798,10 @@ function AgentCard({
             선다. 결정이 난 카드에는 서지 않는다 — 결과는 결과 카드가 말한다. */}
         {settledStatus === 'pending' && hasProfileAvatarPreview(card.action) ? (
           <ApprovalAvatarPreview
+            key={avatarKey}
             card={card}
             agentName={memberFor(directory, card.requestedByMemberId)?.displayName ?? null}
+            onReadyChange={onAvatarReady}
           />
         ) : null}
         {/* 고정·고정 풀기 카드(#4705): 앞 120자만 보고 누르지 않게 전문으로 가는 문 하나가
@@ -1819,6 +1851,7 @@ function AgentCard({
         ) : approval !== null ? (
           <ApprovalDecision
             approvalId={approval.approvalId}
+            approveDisabled={avatarKey !== null && !(avatarReady?.key === avatarKey && avatarReady.ready)}
             deadlinePassed={deadlinePassed(approval, nowMs)}
             forbiddenCopy={
               card.action?.requiredRole
@@ -2393,6 +2426,10 @@ function MessageRowInner({
   standby,
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const expressions = useExpressionItems();
+  const spokenExpression = (value: string) => expressionMessageModel(value, expressions).tokens
+    .map(token => token.type === 'expression' ? expressionAltText(token.expression) : token.text)
+    .join('');
   rowRenders += 1;
   // 정리(cleanup) 형식의 ref — 떼는 쪽이 자기가 붙인 노드를 지목한다(R1 M-3).
   const messageId = message.id;
@@ -2465,6 +2502,7 @@ function MessageRowInner({
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
     const read = readApprovalCard(card, {
+      viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
       approvalOffline,
@@ -2475,6 +2513,7 @@ function MessageRowInner({
     return {canApprove: spawnHostGate(card.execution).canApprove};
   }, [
     presentation.card,
+    actions?.myMemberId,
     approvalGates,
     approvalReceipts,
     approvalOffline,
@@ -2488,6 +2527,7 @@ function MessageRowInner({
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
     const read = readApprovalCard(card, {
+      viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
       approvalOffline,
@@ -2496,6 +2536,7 @@ function MessageRowInner({
     return openableMessagePreview(card, read.settledStatus, onOpenMessage !== undefined);
   }, [
     presentation.card,
+    actions?.myMemberId,
     approvalGates,
     approvalReceipts,
     approvalOffline,
@@ -2945,10 +2986,10 @@ function MessageRowInner({
       accessible
       accessibilityLabel={[
         rowAccessibilityLabel({
-        message,
+        message: {...message, body: spokenExpression(message.body ?? '')},
         authorLabel,
         authorIsAgent: memberFor(directory, message.authorMemberId)?.kind === 'agent',
-        chips,
+        chips: chips.map(chip => ({...chip, emoji: spokenExpression(chip.emoji)})),
         tail,
         deleted,
         tombstoneText,
@@ -3174,6 +3215,7 @@ function MessageRowInner({
               />
             ) : presentation.card ? (
               <AgentCard
+                viewerMemberId={actions?.myMemberId}
                 card={presentation.card}
                 directory={directory}
                 approvalGates={approvalGates}

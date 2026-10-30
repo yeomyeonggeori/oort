@@ -622,12 +622,30 @@ mod tests {
                 "{}: minProperties differs between the tool and the catalog",
                 action.id
             );
-            assert_eq!(
-                branch.get("oneOf"),
-                registry_args.get("oneOf"),
-                "{}: exclusive image sources differ",
-                action.id
-            );
+            if action.id == actions::ACTION_MEMBER_AVATAR_SET {
+                // Neither schema has a `oneOf`: exclusivity is enforced by the
+                // normalizer. Pin actual fields so deleting both copies is red too.
+                for schema in [branch, &registry_args] {
+                    assert_eq!(schema["minProperties"], json!(1));
+                    assert_eq!(
+                        schema["properties"]
+                            .as_object()
+                            .expect("image sources")
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                        ["attachmentId", "avatar"]
+                    );
+                    assert_eq!(
+                        schema["properties"]["avatar"]["required"],
+                        json!(["source", "dataBase64"])
+                    );
+                    assert_eq!(
+                        schema["properties"]["avatar"]["properties"]["source"]["enum"],
+                        json!(["generated"])
+                    );
+                }
+            }
             let required = required_of(&registry_args);
             assert_eq!(
                 required_of(branch),
@@ -915,6 +933,18 @@ mod tests {
     #[test]
     fn every_action_has_a_normaliser() {
         for action in actions::ACTIONS {
+            if action.proposers == actions::Proposers::ServerOnly {
+                for door in [
+                    actions::ProposalDoor::AgentPort,
+                    actions::ProposalDoor::TeamAi,
+                ] {
+                    assert!(
+                        !action.proposable_through(door),
+                        "server-raised consent has no model arguments"
+                    );
+                }
+                continue;
+            }
             if let Err(error) = validated_action_args(action, &json!({}), NOW_MS) {
                 assert_ne!(
                     error.message, "unknown workspace action",
@@ -1785,6 +1815,31 @@ mod tests {
     }
 
     // ---- ADR-0186 증보 v3 A1: the avatar argument ------------------------------
+
+    #[test]
+    fn a_member_avatar_proposal_refuses_both_image_sources() {
+        let action = actions::action_by_id(actions::ACTION_MEMBER_AVATAR_SET).unwrap();
+        let attachment = json!("0190d3a0-0000-7000-8000-000000000001");
+        let avatar = json!({"source": "generated", "dataBase64": "AAAA"});
+        // Each source alone is valid: rejection must be the mutual-exclusion guard.
+        for args in [
+            json!({"attachmentId": attachment}),
+            json!({"avatar": avatar}),
+        ] {
+            assert!(
+                validated_action_args(action, &args, NOW_MS).is_ok(),
+                "{args}"
+            );
+        }
+        let error = validated_action_args(
+            action,
+            &json!({"attachmentId": attachment, "avatar": avatar}),
+            NOW_MS,
+        )
+        .unwrap_err();
+        assert_eq!(error.status, 400);
+        assert_eq!(error.message, "choose one image source");
+    }
 
     fn avatar_of(args: Value) -> Result<AvatarIntent, ActionRejection> {
         parse_profile(args).map(|validated| match validated.args {

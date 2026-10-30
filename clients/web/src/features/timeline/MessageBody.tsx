@@ -1,3 +1,6 @@
+import { PreparedExpressionText } from "@/features/expressions/ExpressionMarkdown";
+import { ExpressionMarkdownContext, ExpressionLinkContext, prepareExpressionMarkdown } from "@/features/expressions/markdown";
+import { useExpressions } from "@/features/expressions/context";
 import { Fragment, useMemo, useState } from "react";
 import { mentionableNames } from "@momo/core/features/routing/helperAliases";
 import { cn } from "@/design/lib/cn";
@@ -100,7 +103,7 @@ function InlineNode({
   node: Inline;
   mentions: MentionRendering;
 }) {
-  if (node.kind === "text") return <>{node.text}</>;
+  if (node.kind === "text") return <PreparedExpressionText text={node.text} />;
   if (node.kind === "strong") {
     return (
       <strong className="font-semibold">
@@ -156,7 +159,7 @@ function InlineNode({
       }}
       className="text-signal-text underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
     >
-      <InlineNodes nodes={node.children} mentions={mentions} />
+      <ExpressionLinkContext.Provider value={true}><InlineNodes nodes={node.children} mentions={mentions} /></ExpressionLinkContext.Provider>
     </a>
   );
 }
@@ -272,7 +275,7 @@ function BlockNode({
  * 이 파일이 원래 그리던 것과 정확히 같은 마크업으로 나간다** — 채널의 대부분인
  * 짧은 메시지는 이 goal 이후에도 한 픽셀도 달라지지 않아야 한다.
  */
-export function MessageBody({
+function MessageBodyContent({
   body,
   muted = false,
   foldKey,
@@ -332,7 +335,7 @@ export function MessageBody({
           muted && "text-ink-muted"
         )}
       >
-        {expanded ? body : fold.text}
+        <PreparedExpressionText text={expanded ? body : fold.text} />
       </p>
     );
     if (fold.hiddenLines === 0) return paragraph;
@@ -371,4 +374,12 @@ export function MessageBody({
       )}
     </div>
   );
+}
+
+export function MessageBody(props: Parameters<typeof MessageBodyContent>[0]) {
+  const { cache } = useExpressions();
+  const prepared = useMemo(() => prepareExpressionMarkdown(props.body, cache.items), [props.body, cache.items]);
+  return <ExpressionMarkdownContext.Provider value={prepared}>
+    <MessageBodyContent {...props} body={prepared.text} />
+  </ExpressionMarkdownContext.Provider>;
 }

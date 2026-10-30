@@ -703,7 +703,7 @@ async fn create_spawn_approval_in_tx(
         "expires_at_ms": expires_at.timestamp_millis(),
         "execution": execution,
     });
-    let body = format!("Approval required: spawn {tool} — {label}");
+    let body = format!("도구 「{tool}」로 {label} 작업을 시작해도 될까요?");
 
     let card = send_message_in_tx(
         conn,

@@ -453,7 +453,8 @@ it none of these exist and no Hermes is started.
 
 - The `hermes` service is the official image pinned by digest, on the private
   network only, with no published port. It runs `infra/hermes/lockgate.py gate`
-  before the Hermes entrypoint (24 toolsets off, chat-only allow-list): a failing
+  before the Hermes entrypoint (chat and Codex subscription search allow-list,
+  without `web_extract`; connectors keep all `web` tools off): a failing
   gate means a container that restarts and never listens, so the probe
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate

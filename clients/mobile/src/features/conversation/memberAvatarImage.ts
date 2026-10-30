@@ -227,10 +227,23 @@ function isBearerAvatarPath(path: string): boolean {
 }
 
 /** 같은 경로는 한 번만 받는다. 실패하면 `null`(이니셜이 선다). */
-export function loadMemberAvatar(path: string): Promise<string | null> {
+export function loadMemberAvatar(path: string, reload = false): Promise<string | null> {
   if (!isBearerAvatarPath(path)) return Promise.resolve(null);
   const key = memberAvatarCacheKey(path);
   adoptExisting(); // 렌더 밖(첫 사용)에서 한 번
+  // 명시적인 재시도는 이 사진의 실패 유예·표시하지 못한 파일만 비운다.
+  // 진행 중인 요청은 아래에서 공유해 연속 탭도 다운로드를 겹치지 않는다.
+  if (reload) {
+    failedUntil.delete(key);
+    const name = hashName(key);
+    const cached = index.get(name);
+    index.delete(name);
+    try {
+      if (cached?.file.exists) cached.file.delete();
+    } catch {
+      // 다운로드의 idempotent 덮어쓰기가 다시 시도한다.
+    }
+  }
   const known = peekMemberAvatar(key);
   if (known !== null) return Promise.resolve(known);
   const active = inflight.get(key);

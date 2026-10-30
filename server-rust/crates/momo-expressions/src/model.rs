@@ -39,7 +39,7 @@ pub fn standard_names() -> &'static HashSet<String> {
     NAMES.get_or_init(|| {
         // Same committed emojibase + iamcal canonical source as the picker (#4322).
         let catalog: serde_json::Value = serde_json::from_str(include_str!(
-            "../../../../clients/web/src/features/emoji/emojiCatalog.json"
+            "../../../../packages/momo-core/src/features/emoji/emojiCatalog.json"
         ))
         .expect("committed emoji catalog");
         catalog["items"]

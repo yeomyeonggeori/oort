@@ -321,6 +321,16 @@ SCAN_SCOPE = [
         ),
     },
     {
+        # #3982 (#4822): the expiry sweep settles the card in place through the
+        # shared settlement instead of posting a new message.
+        "path": "server-rust/crates/momo-messaging/src/approval_card.rs",
+        "mode": "all",
+        "why": (
+            "approval_sweep.rs:208 settle_approval_card_in_tx "
+            "(UPDATE message props/body, SELECT agent_run)"
+        ),
+    },
+    {
         "path": "server-rust/crates/momo-messaging/src/interaction.rs",
         "mode": "symbols",
         "symbols": ["reread_interaction_in_tx", "emit_message_edited_in_tx"],

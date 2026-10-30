@@ -249,7 +249,14 @@ pub async fn post(State(state): State<AppState>, request: Request) -> Response {
             response
         }
         momo_mcp::Outcome::Tool(call) => match caller {
-            Some(caller) => crate::routes::agent_port_tools::execute(&state, caller, call).await,
+            Some(caller) => {
+                momo_db::tenant::REQUEST_AGENT_MEMBER
+                    .scope(
+                        caller.agent_member_id,
+                        crate::routes::agent_port_tools::execute(&state, caller, call),
+                    )
+                    .await
+            }
             // Unreachable: a non-empty view requires a hosted caller. Answering
             // like an unknown tool keeps the impossible case fail-closed.
             None => momo_mcp::tool_failure(&call, momo_mcp::ToolFailure::NotAuthorized),

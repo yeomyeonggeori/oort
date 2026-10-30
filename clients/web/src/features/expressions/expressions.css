@@ -1,0 +1,6 @@
+/* ADR-0218 D1: preserve aspect ratio, bounded independently of text zoom. */
+.expression-image { display: inline-block; object-fit: contain; max-width: 100%; vertical-align: middle; }
+.expression-image[data-size="large"] { width: auto; height: auto; max-height: 200px; max-width: min(100%, 200px); }
+.expression-image[data-size="medium"] { width: auto; height: auto; max-height: 64px; max-width: min(100%, 64px); }
+.expression-image[data-size="inline"] { width: auto; height: 1em; }
+.expression-image[data-size="reaction"] { width: auto; height: 20px; max-width: 20px; }

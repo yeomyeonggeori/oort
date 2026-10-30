@@ -214,7 +214,7 @@ RUN set -eux; \
 # committed Cargo.lock: a build can never silently resolve a different version.
 COPY server-rust/crates crates
 COPY server-rust/bins bins
-COPY clients/web/src/features/emoji/emojiCatalog.json ../clients/web/src/features/emoji/emojiCatalog.json
+COPY packages/momo-core/src/features/emoji/emojiCatalog.json ../packages/momo-core/src/features/emoji/emojiCatalog.json
 RUN set -eux; \
     # cargo rebuild detection is mtime-based and COPY'd files can carry stale
     # timestamps, so the stub-compiled (empty) workspace rlibs would be reused

@@ -31,6 +31,8 @@ flowchart LR
 
 외부 agent/provider는 별도 신뢰 경계다. oort는 제한된 작업 컨텍스트를 해당 backend로 직접 보내며 Dawn을 경유하지 않는다. 구독 로그인(ChatGPT/Codex, Claude)은 운영자의 Hermes가 자기 볼륨에 보관하고, oort가 DB에 두는 provider 자격은 봉인된 암호문뿐이다. 자세한 것은 아래 「자격증명과 provider」다. [근거: ADR-0004 Boundary 표 22–33행](../adr/0004-codex-oauth-hermes-provider-boundary.md#L22-L33), [증보 6 350–359행](../adr/0004-codex-oauth-hermes-provider-boundary.md#L350-L359)
 
+공동 호스팅 Hermes의 **저장소 기본 설정**은 Codex 구독의 서버 측 웹 검색(`web_search`)을 선택한다. 검색어에는 대화의 일부가 담겨 OpenAI의 검색 처리로 나갈 수 있고, 검색 결과도 신뢰할 수 없는 외부 입력이다. 검색어의 개인정보 제거·무보관을 보장하지 않는다. 설정의 허용 표면에서 페이지 추출(`web_extract`)은 제외하고, 커넥터 설정은 `web` 전체를 끈다. 이 설명은 실행 중인 서비스의 배포 확인이 아니다. [결정·범위·한계: ADR-0203 W1–W4](../adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-웹-검색만-허용-4794), [설정](../../infra/hermes/config.yaml), [오프라인 게이트 시험 `WebToolPolicy`·`EnforcedWebToolPolicy`](../../infra/hermes/test_default_config.py)·[커넥터 음성 대조](../../infra/hermes/test_lockgate_connectors.py)
+
 ## 적용된 통제
 
 ### 테넌트 격리와 DB 역할

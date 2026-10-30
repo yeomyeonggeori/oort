@@ -56,6 +56,6 @@ pub use dispatch_log::{
 };
 pub use error::{DeviceInputError, DeviceRejection, PushError};
 pub use judgment::{
-    judge_targets, unread_badge, JudgedTarget, WORK_COMPLETE_FOREGROUND_WINDOW_SECS,
-    WORK_COMPLETE_MIN_RAN_MS,
+    judge_candidate_targets, judge_targets, unread_badge, JudgedTarget,
+    WORK_COMPLETE_FOREGROUND_WINDOW_SECS, WORK_COMPLETE_MIN_RAN_MS,
 };

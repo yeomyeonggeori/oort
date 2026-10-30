@@ -95,3 +95,6 @@ Named runtime companions operators actually run next to these images:
 - pgBackRest (MIT)
 - libssh2 (BSD-3-Clause/ISC)
 - Centrifugo v6 (companion service; not baked into the app image)
+
+Emoji catalog: emojibase-data 18.0.0, Copyright (c) 2017-2019 Miles Johnson (MIT).
+Includes Unicode CLDR annotations; see packages/momo-core/src/features/emoji/LICENSE.emojibase.

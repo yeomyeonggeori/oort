@@ -1,3 +1,4 @@
+import { AgentUsageLine, HiddenAgentUsage } from "@/features/settings/AgentUsage";
 import { useEffect, useLayoutEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -92,6 +93,7 @@ function AgentRow({ row, highlighted }: { row: AgentTableRow; highlighted: boole
       <td role="cell" className={`${TD} group-data-wide:whitespace-nowrap`} data-testid={`ai-agent-cost-${row.handle}`}>
         <CellLabel>{COPY.columns.cost}</CellLabel>
         {labels.cost ?? <span className="text-meta text-ink-muted">{COPY.unknownBrain}</span>}
+        <AgentUsageLine agentId={row.id} />
       </td>
       <td role="cell" className={`${TD} col-span-2 group-data-wide:col-auto group-data-wide:w-full`} data-testid={`ai-agent-status-${row.handle}`}>
         <CellLabel>{COPY.columns.status}</CellLabel>
@@ -177,6 +179,7 @@ export function AiAgentsPane() {
 
   return (
     <div className="flex min-w-0 flex-col gap-4" data-testid="ai-hub-pane-agents">
+      <HiddenAgentUsage workspaceId={workspaceId} />
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col gap-1">
           <h2 className="text-display font-bold text-ink">{entry.term}</h2>

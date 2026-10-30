@@ -20,6 +20,7 @@ import { installDesktopFullscreenMark } from "@/lib/desktopFullscreen";
 import { installDesktopEffects } from "@/features/settings/appearance/desktopEffects";
 import { IS_TAURI } from "@/lib/env";
 import "@/design/tokens.css";
+import "@/features/expressions/expressions.css";
 
 // 셸 높이의 근거 (goal B9). 첫 렌더보다 먼저 켠다: 로그인 화면도 셸 밖의 표면이라
 // 같은 높이를 쓰고, 컴포저가 있는 첫 프레임이 이미 맞아 있어야 한다. 해제 함수는
