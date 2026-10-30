@@ -3371,10 +3371,29 @@ struct AssembleCall {
     source_attachment_id: Option<Uuid>,
 }
 
+/// `assembly_params_invalid` (ADR-0218 G3.8) as the call error it is: the same -32602 as any
+/// malformed argument, plus `error.data {code, params}` naming the wrong parameters — the names
+/// of `momo_mcp::ASSEMBLE_PARAMS`, never a value. The names are logged too. A name the closed
+/// list does not hold (the two lists drifting) falls back to the plain `InvalidArguments`: a
+/// name that is not on the list is never said.
+fn params_failure(params: &[momo_expressions::assemble::Param]) -> ToolFailure {
+    let names: Vec<&'static str> = params.iter().map(|param| param.name()).collect();
+    tracing::info!(
+        params = ?names,
+        "oort_expression_assemble refused: assembly_params_invalid"
+    );
+    momo_mcp::AssembleParams::from_names(names.iter().copied()).map_or(
+        ToolFailure::InvalidArguments,
+        ToolFailure::InvalidAssembleParams,
+    )
+}
+
 /// The pure half of the call: shape, strict base64, the prompt rule and the assembler's own
-/// parameter validation. A wrong shape, a duplicate preset, a sequence cell outside the grid or a
-/// play length over 10 s is the same `InvalidArguments` as any malformed argument: the answer
-/// carries no cause (the closed `ToolFailure` set), and the names are logged, never the values.
+/// parameter validation. A wrong parameter the published schema cannot say (a duplicate preset, a
+/// sequence cell outside the grid, a play length over 10 s, a size inside the range but not one
+/// of the three) is `InvalidAssembleParams` and names it ([`params_failure`]); any other wrong
+/// shape is the same `InvalidArguments` as any malformed argument and carries no cause (the
+/// closed `ToolFailure` set).
 fn parse_assemble(arguments_value: &Value) -> Result<AssembleCall, ToolFailure> {
     use base64::Engine as _;
     use momo_expressions::assemble::AssembleRequest;
@@ -3398,13 +3417,12 @@ fn parse_assemble(arguments_value: &Value) -> Result<AssembleCall, ToolFailure> 
     let request: AssembleRequest = serde_json::from_value(Value::Object(request))
         .map_err(|_| ToolFailure::InvalidArguments)?;
     if let Err(error) = request.validate() {
-        if let momo_expressions::assemble::AssembleError::ParamsInvalid { params } = &error {
-            tracing::info!(
-                params = ?params.iter().map(|param| param.name()).collect::<Vec<_>>(),
-                "oort_expression_assemble refused: assembly_params_invalid"
-            );
-        }
-        return Err(ToolFailure::InvalidArguments);
+        return Err(match &error {
+            momo_expressions::assemble::AssembleError::ParamsInvalid { params } => {
+                params_failure(params)
+            }
+            _ => ToolFailure::InvalidArguments,
+        });
     }
     let source = args
         .get("source")
@@ -3627,8 +3645,9 @@ async fn expression_assemble(
     let outcomes = match answer {
         Ok(outcomes) => outcomes,
         // Already proved by `parse_assemble`; the child repeats it, so it can only come back
-        // if the two ever disagree. The agent's call is the thing that is wrong either way.
-        Err(AssembleError::ParamsInvalid { .. }) => return Err(ToolFailure::InvalidArguments),
+        // if the two ever disagree. The agent's call is the thing that is wrong either way, and
+        // it hears the same names as it would have from the door.
+        Err(AssembleError::ParamsInvalid { params }) => return Err(params_failure(&params)),
         Err(AssembleError::Unavailable) => {
             // An operator fault (no binary, a child that died for no limit's reason): a 5xx,
             // never a card code. Nothing of the request is in the log line.
@@ -4340,5 +4359,32 @@ mod tests {
     fn no_human_requester_is_unavailable_on_the_wire() {
         assert_eq!(NO_HUMAN_REQUESTER_FAILURE, ToolFailure::Unavailable);
         assert_eq!(NO_HUMAN_REQUESTER_FAILURE.wire().1, -32004);
+    }
+
+    /// ADR-0218 G3.8: the names an `assembly_params_invalid` answer may carry
+    /// (`momo_mcp::ASSEMBLE_PARAMS`, the adapter's closed list) and the assembler's own
+    /// `Param::ALL` are one list in one order. A parameter the assembler can name and the list
+    /// cannot would turn a wrong call into a nameless refusal, so the two are pinned together;
+    /// and what the door says is exactly the names it was given, in that order, with no value.
+    #[test]
+    fn the_adapters_parameter_names_are_the_assemblers() {
+        use momo_expressions::assemble::Param;
+        assert_eq!(Param::ALL.map(Param::name), momo_mcp::ASSEMBLE_PARAMS);
+        for param in Param::ALL {
+            let ToolFailure::InvalidAssembleParams(named) = params_failure(&[param]) else {
+                panic!("{param:?} is not named");
+            };
+            assert_eq!(named.names().collect::<Vec<_>>(), [param.name()]);
+        }
+        let everything = params_failure(&[Param::Size, Param::Presets, Param::FrameMs]);
+        assert_eq!(
+            everything.data(),
+            Some(json!({
+                "code": "assembly_params_invalid",
+                "params": ["presets", "frameMs", "size"]
+            })),
+            "named once each, in the closed list's order"
+        );
+        assert_eq!(everything.wire(), (400, -32602, "invalid tool arguments"));
     }
 }

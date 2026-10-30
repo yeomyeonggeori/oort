@@ -28659,6 +28659,8 @@ async fn expression_create_every_close_reclaims_the_candidate_bytes() {
 //   * `expires_at > clock_timestamp()` / the +1 hour default / `HELD_MAX` → `…twelve_and_the_hour…`
 //   * the closed audit detail of `keep_in_tx`            → `…keeps_what_the_assembler_built…`
 //   * the rate limit spent once: `pre_admission` reuse    → `…the_rate_limit_is_spent_once…`
+//   * the names of `assembly_params_invalid`: `params_failure` (the assembler's own check) or
+//     `assemble_fault_params` (the schema's) returning nothing → `…failure_codes_are_results…`
 // ===========================================================================
 
 fn assembler_4820() -> std::path::PathBuf {
@@ -29525,28 +29527,127 @@ async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_
     let bounce = json!({"kind": "preset", "presets": ["bounce"]});
 
     // ---- parameters: a call error (-32602), nothing built, nothing kept ------------------------
-    for (what, motion) in [
+    // ADR-0218 G3.8: the answer names the wrong parameters (the closed list's names, in its
+    // order, never a value) in `error.data`, under the same fixed sentence as any malformed
+    // argument. Two layers find them and answer the same envelope: the published schema (a
+    // range, an enum, a count: it runs first) and the assembler's own check (what a schema
+    // cannot say).
+    let sprite = |frames: u64, sequence: Value, frame_ms: u64| json!({"kind": "sprite", "frames": frames, "sequence": sequence, "frameMs": frame_ms});
+    for (what, motion, size, names, values) in [
+        // The assembler's own check:
         (
             "a duplicate preset",
             json!({"kind": "preset", "presets": ["bounce", "bounce"]}),
+            240,
+            vec!["presets"],
+            vec![],
         ),
         (
             "a cell outside the grid",
-            json!({"kind": "sprite", "frames": 2, "sequence": [0, 2], "frameMs": 100}),
+            sprite(2, json!([0, 2]), 100),
+            240,
+            vec!["sequence"],
+            vec![],
         ),
         (
             "a play longer than 10 s",
-            json!({"kind": "sprite", "frames": 2, "sequence": vec![0; 24], "frameMs": 500}),
+            sprite(2, json!(vec![0; 24]), 500),
+            240,
+            vec!["sequence", "frameMs"],
+            vec![],
+        ),
+        (
+            "a size inside the range that is not one of the three",
+            bounce.clone(),
+            301,
+            vec!["size"],
+            vec!["301"],
+        ),
+        // The published schema:
+        (
+            "a size outside the range",
+            bounce.clone(),
+            4711,
+            vec!["size"],
+            vec!["4711"],
+        ),
+        (
+            "five presets",
+            json!({"kind": "preset", "presets": ["bounce", "wobble", "pulse", "sparkle", "bounce"]}),
+            240,
+            vec!["presets"],
+            vec![],
+        ),
+        (
+            "an unknown preset",
+            json!({"kind": "preset", "presets": ["zzspin"]}),
+            240,
+            vec!["presets"],
+            vec!["zzspin"],
+        ),
+        (
+            "frames 5",
+            sprite(5, json!([0, 1]), 100),
+            240,
+            vec!["frames"],
+            vec![],
+        ),
+        (
+            "a sequence of 25",
+            sprite(2, json!(vec![0; 25]), 100),
+            240,
+            vec!["sequence"],
+            vec![],
+        ),
+        (
+            "a frame time far outside the range",
+            sprite(2, json!([0, 1]), 98765),
+            240,
+            vec!["frameMs"],
+            vec!["98765"],
+        ),
+        // The schema runs first: a call both layers would refuse is named by the schema alone
+        // (`sequence` is the assembler's, and comes the next time).
+        (
+            "both layers at fault",
+            sprite(2, json!([0, 2]), 98765),
+            240,
+            vec!["frameMs"],
+            vec!["98765"],
         ),
     ] {
-        let (status, answer) = one(motion, drawn.clone()).await;
+        let (status, answer) = assemble_4820(
+            &w,
+            &handle,
+            json!({"source": drawn, "motion": motion, "size": size,
+            "prompt": "p", "sourceAttachmentId": null}),
+        )
+        .await;
         assert_eq!(
             (status, error_code(&answer)),
             (400, -32602),
             "{what}: {answer}"
         );
         assert!(answer["result"].is_null(), "{what} is not a result");
+        assert_eq!(
+            answer["error"]["message"],
+            json!("invalid tool arguments"),
+            "{what}: the sentence is the fixed one"
+        );
+        assert_eq!(
+            answer["error"]["data"],
+            json!({"code": "assembly_params_invalid", "params": names}),
+            "{what}: the names, and nothing else"
+        );
+        // The error object, not the envelope: the JSON-RPC id of this call is a random uuid.
+        for value in values {
+            assert!(
+                !answer["error"].to_string().contains(value),
+                "{what}: the value {value} is never on the wire: {answer}"
+            );
+        }
     }
+    // A fault that is none of the five names nothing: the same answer as any malformed argument.
     for (what, prompt) in [
         ("an empty prompt", String::new()),
         ("a control character", "a\u{7}b".into()),
@@ -29564,7 +29665,28 @@ async fn assemble_failure_codes_are_results_parameters_are_call_errors_and_busy_
             (400, -32602),
             "{what}: {answer}"
         );
+        assert!(
+            answer["error"].get("data").is_none(),
+            "{what} names no parameter: {answer}"
+        );
     }
+    let (status, answer) = assemble_4820(
+        &w,
+        &handle,
+        json!({"source": drawn, "motion": bounce, "size": 240,
+        "prompt": "p", "sourceAttachmentId": null, "extra": 1}),
+    )
+    .await;
+    assert_eq!((status, error_code(&answer)), (400, -32602), "{answer}");
+    assert!(
+        answer["error"].get("data").is_none(),
+        "an unknown key names no parameter: {answer}"
+    );
+    assert_eq!(
+        assembly_rows_4820(&w.su, ws).await,
+        0,
+        "a refused call keeps nothing"
+    );
     // A prompt of 2,000 characters is the limit and is fine, in bytes up to 6,000.
     let (status, answer) = assemble_4820(
         &w,
