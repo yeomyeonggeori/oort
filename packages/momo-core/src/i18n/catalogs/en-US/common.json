@@ -1,0 +1,5 @@
+{
+  "common.feedback.unavailable": "Content is unavailable. Please try again.",
+  "common.members.count": "{count, plural, one {# member} other {# members}}",
+  "common.invitation.received": "{actorName} invited you."
+}
