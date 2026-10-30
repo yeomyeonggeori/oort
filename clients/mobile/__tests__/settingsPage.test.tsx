@@ -1310,17 +1310,19 @@ describe('「연결」 카드의 「명령줄·AI 도구」 행 (#4663)', () => 
 
 
 describe('햅틱 설정 (#4298)', () => {
-  // CI 수리: 기본 설정은 기존 화면의 햅틱을 보존하고 풍부는 명시적으로 고른다.
-  it('기본으로 시작하고 풍부·끔 선택은 저장되며 다시 열어도 남는다', async () => {
+  it('풍부로 시작하고, 기본·끔 선택은 저장되며 다시 열어도 남는다', async () => {
     await openPage();
-    expect(screen.getByTestId('haptics-basic').props.accessibilityState.selected).toBe(true);
-    fireEvent.press(screen.getByTestId('haptics-rich'));
     expect(getHapticMode()).toBe('rich');
     expect(screen.getByTestId('haptics-rich').props.accessibilityState.selected).toBe(true);
-    fireEvent.press(screen.getByTestId('haptics-off'));
-    expect(getHapticMode()).toBe('off');
-    await cleanupAsync();
-    await openPage();
-    expect(screen.getByTestId('haptics-off').props.accessibilityState.selected).toBe(true);
+    for (const mode of ['basic', 'off'] as const) {
+      fireEvent.press(screen.getByTestId(`haptics-${mode}`));
+      expect(mmkvStore.get(NON_SECRET_KEYS.hapticMode)).toBe(mode);
+      expect(getHapticMode()).toBe(mode);
+      expect(screen.getByTestId(`haptics-${mode}`).props.accessibilityState.selected).toBe(true);
+      await cleanupAsync();
+      await openPage();
+      expect(getHapticMode()).toBe(mode);
+      expect(screen.getByTestId(`haptics-${mode}`).props.accessibilityState.selected).toBe(true);
+    }
   });
 });
