@@ -1,7 +1,7 @@
 #!/opt/hermes/.venv/bin/python
 """oort Hermes tool-lock gate (ADR-0203 D6, K4). Fail-closed. Python 3, stdlib + the image's own Hermes modules.
 
-Why a gate: Hermes has only a deny-list switch (`agent.disabled_toolsets`), and its container boot
+Why a gate: Hermes' platform toolset selection and deny-list do not enforce our exact allow-list, and its container boot
 (`02-reconcile-profiles`) starts the gateway BEFORE the CMD runs. So the only place to refuse to start is
 in front of the image entrypoint. This script is the allow-list that the deny-list lacks.
 
@@ -9,8 +9,8 @@ in front of the image entrypoint. This script is the allow-list that the deny-li
                                      resolve what the api_server platform would expose, exit 3 unless
                                      every resolved tool is in ALLOWED_TOOLS (and env invariants hold).
   lockgate.py report                 post-start (background): wait for /health, then read the LIVE
-                                     /v1/toolsets and check auth/CORS/dashboard. Prints one LOCKREPORT line.
-                                     SIGTERMs PID 1 only on a definitive violation (live tool outside ALLOWED).
+                                     /v1/toolsets, re-resolve config (the API omits `search`), check auth/CORS/dashboard.
+                                     SIGTERMs PID 1 on a definitive live tool-policy violation.
 
 Exit codes (gate): 0 verified | 3 lock violated | 4 could not verify (also a failure).
 Never prints secret values: only names, counts, booleans and the config sha256.
@@ -44,7 +44,8 @@ import time
 import urllib.error
 import urllib.request
 
-ALLOWED_TOOLS = frozenset({"memory", "todo_list", "session_search"})  # chat-only surface
+ALLOWED_TOOLS = frozenset({"memory", "todo_list", "session_search", "web_search"})
+WEB_TOOLS = frozenset({"web_search", "web_extract"})
 REQUIRED_TOOL = "memory"  # positive control: the allow-list must resolve something real
 INSTALL = "/opt/hermes"
 TRUTHY = ("1", "true", "yes", "on")
@@ -141,6 +142,28 @@ def connector_problems(cfg, env):
     return problems
 
 
+def tool_problems(cfg, tools):
+    """Judge pre-filter tool names at boot and observed live tools with the same policy (#4794).
+
+    Search is subscription-only. A connector config narrows the allow-list back to chat-only even if
+    Hermes ever stops honoring the required `disabled_toolsets: [web]`. No credentials are read here.
+    """
+    tools = set(tools)
+    problems = []
+    extra = sorted(tools - ALLOWED_TOOLS)
+    if extra:
+        problems.append("tools outside the allow-list would be exposed: " + ",".join(extra))
+    if cfg.get("mcp_servers") and tools & WEB_TOOLS:
+        problems.append("connector mode forbids all web tools: " + ",".join(sorted(tools & WEB_TOOLS)))
+    if "web_search" in tools:
+        web = cfg.get("web") or {}
+        if not isinstance(web, dict) or web.get("search_backend") != "openai-native":
+            problems.append("web.search_backend must be exactly 'openai-native' when web_search is exposed")
+        if not isinstance(web, dict) or web.get("keyless_fallback") is not False:
+            problems.append("web.keyless_fallback must be explicitly false when web_search is exposed")
+    return problems
+
+
 DATA_DIR = "/opt/data"  # the Hermes volume; the gate judges a scratch HERMES_HOME, so the volume's .env is read here
 VOLUME_ENV_TRUTHY_KEYS = ("HERMES_YOLO_MODE", "HERMES_DASHBOARD")
 
@@ -228,9 +251,7 @@ def gate(cfg_path):
                                     skip_tool_search_assembly=True)
         resolved = sorted({d["function"]["name"] for d in defs})
 
-        extra = sorted(set(selected) - ALLOWED_TOOLS)
-        if extra:
-            problems.append("tools outside the allow-list would be exposed: " + ",".join(extra))
+        problems.extend(tool_problems(cfg, selected))
         if REQUIRED_TOOL not in resolved:
             problems.append(f"positive control failed: {REQUIRED_TOOL} did not resolve (gate cannot be trusted)")
         problems.extend(connector_problems(cfg, os.environ))
@@ -297,7 +318,20 @@ def report():
         return 1
     enabled = sorted(t["name"] for t in data if t.get("enabled"))
     tools = sorted({x for t in data if t.get("enabled") for x in t.get("tools", [])})
-    extra = sorted(set(tools) - ALLOWED_TOOLS)
+    try:
+        sys.path.insert(0, INSTALL)
+        from hermes_cli.config import load_config  # noqa: E402
+        from hermes_cli.tools_config import _get_platform_tools  # noqa: E402
+        from model_tools import _select_tool_names  # noqa: E402
+        live_cfg = load_config()
+        # v0.22.2 /v1/toolsets enumerates configurable categories only: the `search` toolset is absent.
+        # Re-resolve the config as well, keeping inferred names separate from observed API names below.
+        disabled = (live_cfg.get("agent") or {}).get("disabled_toolsets") or []
+        selected = sorted(_select_tool_names(sorted(_get_platform_tools(live_cfg, "api_server")), disabled, True))
+        violations = tool_problems(live_cfg, set(tools) | set(selected))
+    except Exception as exc:
+        emit("LOCKREPORT", ok=False, why=f"cannot verify live tool policy: {type(exc).__name__}")
+        return 1
     dash = False
     try:
         socket.create_connection(("127.0.0.1", 9119), timeout=1).close()
@@ -305,7 +339,7 @@ def report():
     except OSError:
         pass
     checks = {
-        "live_tools_within_allowlist": not extra,
+        "tools_within_policy": not violations,
         "models_requires_auth": _status(base + "/v1/models")[0] == 401,
         "toolsets_requires_auth": _status(base + "/v1/toolsets")[0] == 401,
         "wrong_key_rejected": _status(base + "/v1/models", {"Authorization": "Bearer " + "x" * 40})[0] == 401,
@@ -314,9 +348,10 @@ def report():
         "dashboard_9119_closed": not dash,
     }
     ok = all(checks.values())
-    emit("LOCKREPORT", ok=ok, enabled_toolsets=enabled, live_tools=tools, checks=checks)
-    if extra:  # definitive violation: do not keep serving
-        emit("LOCKREPORT", ok=False, action="SIGTERM pid 1", live_tools_outside_allowlist=extra)
+    emit("LOCKREPORT", ok=ok, enabled_toolsets=enabled, live_tools=tools, selected_tools=selected,
+         unreported_selected_tools=sorted(set(selected) - set(tools)), checks=checks, problems=violations)
+    if violations:  # definitive violation: do not keep serving
+        emit("LOCKREPORT", ok=False, action="SIGTERM pid 1", problems=violations)
         os.kill(1, signal.SIGTERM)
         return 3
     return 0 if ok else 1

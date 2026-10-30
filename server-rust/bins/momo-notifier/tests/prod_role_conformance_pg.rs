@@ -2901,6 +2901,30 @@ async fn an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_wit
     .await
     .expect("channel_seq catch-up");
 
+    // #3982: exercise the actual props/body UPDATE and its triggers, rather
+    // than settling an approval with no request_message_id (which proves no grants).
+    let (ws, channel, agent, run) = (
+        seeded.workspace,
+        seeded.channel,
+        seeded.agent,
+        seeded.parked_run,
+    );
+    let card = momo_db::with_tenant_tx(&app, ws, move |conn| Box::pin(async move {
+        send_message_in_tx(conn, ws, NewMessage {
+            channel_id: channel, author_member_id: agent, message_type: MessageType::ApprovalRequest,
+            body: Some("채널을 만들어도 될까요?".into()),
+            props: serde_json::json!({"approval_id": approval, "status":"pending", "last_attempt":"role_required"}),
+            root_id: None, reply_to_id: None, client_msg_id: Some(Uuid::new_v4()),
+            run_id: Some(run), hlc_ts: None, hlc_count: None,
+        }).await
+    })).await.expect("request card through the production app role");
+    sqlx::query("UPDATE approval SET request_message_id=$2 WHERE id=$1")
+        .bind(approval)
+        .bind(card.message.id)
+        .execute(&db.su)
+        .await
+        .unwrap();
+
     let stats = approval_sweep::sweep_expired_approvals(&notifier, 32)
         .await
         .expect("the sweep runs as the production notifier role");
@@ -2921,6 +2945,36 @@ async fn an_expired_hosted_proposal_is_swept_by_the_production_notifier_role_wit
         (approval_status.as_str(), run_status.as_str()),
         ("expired", "timed_out")
     );
+    let (props, body, state, edited): (
+        serde_json::Value,
+        String,
+        String,
+        Option<chrono::DateTime<chrono::Utc>>,
+    ) = sqlx::query_as("SELECT props,body,state::text,edited_at FROM message WHERE id=$1")
+        .bind(card.message.id)
+        .fetch_one(&db.su)
+        .await
+        .unwrap();
+    assert_eq!(
+        props["status"], "expired",
+        "notifier updated the actual card under production grants"
+    );
+    assert_eq!(props["result"]["line"], body);
+    assert_eq!(body, "승인을 기다리다 만료됐어요");
+    assert!(props.get("last_attempt").is_none());
+    assert_eq!(state, "sent");
+    assert!(edited.is_none());
+    let frames: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 \
+        AND payload->'data'->>'type'='message.edited' AND payload->'data'->'payload'->>'id'=$2",
+    )
+    .bind(ws)
+    .bind(card.message.id.to_string())
+    .fetch_one(&db.su)
+    .await
+    .unwrap();
+    assert_eq!(frames, 1, "the notifier can publish the full row too");
+
     let inbox_rows = |su: PgPool| async move {
         let events: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM hosted_agent_inbox_event WHERE connection_id = $1",

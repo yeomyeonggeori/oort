@@ -2558,13 +2558,31 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: open,
         },
+        Card {
+            label: "agent.profile.update changing the name: the app shows the new name",
+            action_type: "workspace_action",
+            payload: profile_update(room, json!({"displayName": "새 이름"})),
+            audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
+            category: open,
+        },
+        Card {
+            label: "member.display_name.set: the requester sees the new name in the app",
+            action_type: "workspace_action",
+            payload: json!({"action": {
+                "id": "member.display_name.set",
+                "args": {"displayName": "새 이름"},
+                "pins": {"target": room.id(Who::Owner).to_string()},
+            }}),
+            audience: vec![Who::Owner],
+            category: open,
+        },
         // Not reachable (the resolver stores an object), but it is the one input on which
         // Postgres' `jsonb_exists` alone would disagree with `opens_in_app`: it says yes
         // to an array holding the text "avatar". The projection asks for an object first.
         Card {
             label: "agent.profile.update whose args are not an object: no avatar key, decided as words",
             action_type: "workspace_action",
-            payload: profile_update(room, json!(["avatar"])),
+            payload: profile_update(room, json!(["avatar", "displayName"])),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
             category: inline,
         },
@@ -2587,7 +2605,7 @@ fn cards(room: &ApprovalRoom) -> Vec<Card> {
             action_type: "workspace_action",
             payload: workspace_action("agent.rename", json!({"target": room.pet.to_string()})),
             audience: vec![Who::Owner, Who::Admin, Who::AgentOwner],
-            category: inline,
+            category: open,
         },
         Card {
             label: "invite.create: admins; the link is shown once, so the app opens it",
@@ -2736,7 +2754,8 @@ async fn an_approval_push_goes_only_to_the_people_who_may_approve_it() {
 /// **ADR-0204 D7, the category.** The lock screen decides an approval behind Face
 /// ID (`momo.approval`) except where a banner cannot do the job: an action that
 /// mints a value shown once, a spawn that asks which machine, the login handoff and
-/// a profile update that changes the picture (planner 2026-10-17). Those are
+/// a profile update that changes the picture (planner 2026-10-17), or a name change
+/// (#4810). Those are
 /// `momo.approval.open` — one 「열어서 결정」 button, no 승인·거절.
 ///
 /// Both categories name their approval.
@@ -3651,6 +3670,22 @@ async fn an_expired_approval_and_a_stalled_run_reach_the_person_who_asked_throug
     .await
     .expect("insert an overdue approval");
 
+    // Approval outcomes now update their own card; give this fixture the card
+    // the real producer creates, and preserve its server-owned run association.
+    let expiry_card: Uuid = sqlx::query_scalar(
+        "INSERT INTO message(workspace_id,channel_id,seq,hlc_ts,hlc_count,author_member_id,type,body,props,run_id) \
+         VALUES($1,$2,$3,$3,0,$4,'approval_request','도구 실행 승인', \
+             jsonb_build_object('approval_id',$5::text,'status','pending'),$6) RETURNING id")
+        .bind(room.workspace_id).bind(room.channel_id).bind(room.next_seq())
+        .bind(room.requester).bind(approval.to_string()).bind(parked)
+        .fetch_one(&su).await.unwrap();
+    sqlx::query("UPDATE approval SET request_message_id=$2 WHERE id=$1")
+        .bind(approval)
+        .bind(expiry_card)
+        .execute(&su)
+        .await
+        .unwrap();
+
     // ---- a hosted run that went quiet ----------------------------------------
     let stalled_question = human_says(&su, &room, room.channel_id, asker).await;
     let hosted = seed_hosted_sentinel(&su, &room).await;
@@ -3715,14 +3750,14 @@ async fn an_expired_approval_and_a_stalled_run_reach_the_person_who_asked_throug
     }
     assert!(abandoned_total >= 1, "the stalled run was swept");
 
-    let expiry_line: Uuid = sqlx::query_scalar(
-        "SELECT id FROM message WHERE workspace_id = $1 AND client_msg_id = $2 AND type = 'tool_result'",
-    )
-    .bind(room.workspace_id)
-    .bind(approval)
-    .fetch_one(&su)
-    .await
-    .expect("the sweep wrote the expiry line");
+    let expiry_line = expiry_card;
+    let expired_status: String =
+        sqlx::query_scalar("SELECT props->>'status' FROM message WHERE id=$1")
+            .bind(expiry_card)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(expired_status, "expired");
     let stall_line: Uuid = sqlx::query_scalar(
         "SELECT id FROM message WHERE workspace_id = $1 AND run_id = $2 \
             AND props->>'kind' = 'agent_run_timed_out'",
@@ -3734,7 +3769,7 @@ async fn an_expired_approval_and_a_stalled_run_reach_the_person_who_asked_throug
     .expect("the sweep wrote the stall notice");
 
     // What the producers stamped (read back, not assumed).
-    for (line, request) in [(expiry_line, question), (stall_line, stalled_question)] {
+    for (line, request) in [(stall_line, stalled_question)] {
         let stamped: Option<String> =
             sqlx::query_scalar("SELECT props->>'answers_message_id' FROM message WHERE id = $1")
                 .bind(line)

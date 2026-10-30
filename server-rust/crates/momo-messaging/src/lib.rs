@@ -49,6 +49,7 @@
 
 pub mod agent_avatar;
 pub mod agent_card;
+pub mod approval_card;
 pub mod attachment;
 pub mod attachment_reclaim;
 pub mod avatar_reclaim;
@@ -86,6 +87,8 @@ pub mod search;
 /// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
 pub mod sidebar_prefs;
 pub mod workspace_avatar;
+
+pub use approval_card::settle_approval_card_in_tx;
 
 pub use agent_avatar::{
     apply_avatar_image_in_tx, apply_human_avatar_image_in_tx, bind_staged_image_to_approval_in_tx,

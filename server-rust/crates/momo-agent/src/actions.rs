@@ -359,6 +359,15 @@ pub fn changes_avatar(payload: &Value) -> bool {
         .is_some_and(|args| args.contains_key("avatar"))
 }
 
+/// Like the avatar marker, only key presence is needed to open a name change.
+fn changes_display_name(payload: &Value) -> bool {
+    payload
+        .get("action")
+        .and_then(|action| action.get("args"))
+        .and_then(Value::as_object)
+        .is_some_and(|args| args.contains_key("displayName"))
+}
+
 /// Must this approval be opened in the app to be decided — i.e. may its push
 /// **not** carry the lock-screen 승인·거절 buttons? (ADR-0204 D7: the category
 /// `momo.approval.open` instead of `momo.approval`.)
@@ -373,8 +382,9 @@ pub fn changes_avatar(payload: &Value) -> bool {
 ///    having looked at the picker;
 /// 3. a tool call the lock screen cannot show ([`OPEN_IN_APP_TOOL_NAMES`] — the login
 ///    handoff, planner decision 2026-10-17);
-/// 4. an `agent.profile.update` that changes the avatar ([`changes_avatar`], same
-///    decision) and every `member.avatar.set` (its whole point is a picture);
+/// 4. an `agent.profile.update` that changes the avatar or name, every
+///    `member.avatar.set`, `member.display_name.set` and `agent.rename`: the person
+///    sees the picture or the before/after name in the app (#4810);
 /// 5. every `message.pin` and `message.unpin` (ADR-0186 증보 v5 U-e): the card names a
 ///    message by its first 120 characters, and a pin endorses all of it;
 /// 6. ADR-0188 D5's work-host permission requests. They are `work_permission_request`
@@ -405,7 +415,7 @@ pub fn changes_avatar(payload: &Value) -> bool {
 ///
 /// ## What it may read
 ///
-/// Only `action.id`, whether `action.args` is an object with an `avatar` key,
+/// Only `action.id`, whether `action.args` is an object with an `avatar` or `displayName` key,
 /// `tool_call.name`, `execution` — the paths the push judgment's payload projection
 /// carries (`momo_push` `judgment.rs`). Never an argument's value. The projection and
 /// this function must say the same thing about the same card: the push judges the
@@ -441,7 +451,11 @@ pub fn opens_in_app(action_type: &str, payload: &Value) -> bool {
                     // (ADR-0186 증보 v5 U-c). Reads `origin`, a path the push projection carries.
                     || crate::initiative::is_agent_initiated(payload)
                     || ONE_TIME_SECRET_ACTION_IDS.contains(&id)
-                    || (id == ACTION_AGENT_PROFILE_UPDATE && changes_avatar(payload))
+                    || (id == ACTION_AGENT_PROFILE_UPDATE
+                        && (changes_avatar(payload) || changes_display_name(payload)))
+                    // A name change is decided with the before/after name visible (#4810).
+                    || id == ACTION_MEMBER_DISPLAY_NAME_SET
+                    || id == ACTION_AGENT_RENAME
                     // A picture cannot be judged from a banner — and this card has no
                     // other kind of proposal, so it is always opened (ADR-0186 증보 v4).
                     || id == ACTION_MEMBER_AVATAR_SET
@@ -2309,13 +2323,10 @@ pub const ACTION_RESULT_PROPS_KEY: &str = "momo.action_result";
 /// `momo.action_result.v1`.
 pub const ACTION_RESULT_VERSION: i64 = 1;
 
-/// 부록 B `status` — the one this executor writes.
-///
-/// The vocabulary is `executed | rejected | expired | role_required`; the other
-/// three belong to arms that already have their own outcome line (the
-/// rejection's and the sweep's `tool_result`, and the card patch a refused
-/// decision leaves), so widening those here would put **two** lines under one
-/// card.
+/// The executed action's result status. ADR-0186 v6 R-b puts this object
+/// inside the existing approval card's `result`; rejection, expiry and human
+/// cancellation use the same card, with their own status. No outcome line is
+/// inserted. `role_required` remains a nonterminal attempt on a pending card.
 pub const ACTION_RESULT_EXECUTED: &str = "executed";
 
 /// The card patch a decision refused for want of authority leaves behind
@@ -2356,7 +2367,9 @@ pub const ACTION_RESULT_NEXT_HREF: &str = "/settings?section=members";
 /// The label beside [`ACTION_RESULT_NEXT_HREF`], spelled as the nav spells it.
 pub const ACTION_RESULT_NEXT_LABEL: &str = "설정 › 멤버와 초대에서 보기";
 
-/// The `client_msg_id` of the `action_result` line an executed action posts.
+/// The reserved `client_msg_id` of legacy executed-action result lines.
+/// New decisions patch the request card (ADR-0186 v6 R-b); keep this key stable
+/// because existing rows and future announcement keys must never collide.
 ///
 /// **Not the approval id, and not the card's id either.** Three messages can now
 /// share `(channel_id, author_member_id)` for one approval — the proposal card
@@ -3440,12 +3453,14 @@ mod tests {
             );
         }
         for action in ACTIONS {
-            // `member.avatar.set` is a picture and the two pin actions are a message the card
-            // only quotes: they open for those reasons (pinned by
+            // Pictures, name changes and the two pin actions require the app's full
+            // preview: they open for those reasons (pinned by
             // `a_member_avatar_card_always_opens_in_the_app` and
             // `a_pin_card_always_opens_in_the_app`).
             if !ONE_TIME_SECRET_ACTION_IDS.contains(&action.id)
                 && action.id != ACTION_MEMBER_AVATAR_SET
+                && action.id != ACTION_MEMBER_DISPLAY_NAME_SET
+                && action.id != ACTION_AGENT_RENAME
                 && action.id != ACTION_DM_AGENT_ADMIT
                 && action.id != ACTION_MESSAGE_PIN
                 && action.id != ACTION_MESSAGE_UNPIN
@@ -3525,15 +3540,15 @@ mod tests {
             (ACTION_AGENT_INVITE, true),   // the pairing code is shown once
             (ACTION_CHANNEL_CREATE, false),
             (ACTION_CHANNEL_MEMBER_ADD, false),
-            (ACTION_AGENT_RENAME, false),
+            (ACTION_AGENT_RENAME, true),
             (ACTION_HOSTED_CHANNELS_GRANT, false),
             (ACTION_WORKSPACE_SETTINGS_UPDATE, false),
-            // False for a card with no `avatar` key; one with it is opened (see
-            // `a_profile_update_that_changes_the_avatar_opens_in_the_app`).
+            // False for a card with neither `avatar` nor `displayName`; see
+            // `a_profile_update_that_changes_the_avatar_or_name_opens_in_the_app`.
             (ACTION_AGENT_PROFILE_UPDATE, false),
             // A picture on a lock-screen banner cannot be judged: always opened.
             (ACTION_MEMBER_AVATAR_SET, true),
-            (ACTION_MEMBER_DISPLAY_NAME_SET, false),
+            (ACTION_MEMBER_DISPLAY_NAME_SET, true),
             // A message the card only quotes (120 characters of up to thousands): the approver
             // reads it in the app (ADR-0186 증보 v5 U-e, review M4).
             (ACTION_MESSAGE_PIN, true),
@@ -3876,12 +3891,12 @@ mod tests {
         }
     }
 
-    /// Planner decision 2026-10-17: a picture is not approved from a banner. An
+    /// Planner decision 2026-10-17 / #4810: a picture or name is approved in the app. An
     /// `agent.profile.update` that carries an `avatar` key — preset, attachment, a
     /// staged image, or `null` to remove it — is opened; the same action changing only
-    /// words is not.
+    /// words other than its name is not.
     #[test]
-    fn a_profile_update_that_changes_the_avatar_opens_in_the_app() {
+    fn a_profile_update_that_changes_the_avatar_or_name_opens_in_the_app() {
         let update = |args: serde_json::Value| serde_json::json!({"action": {"id": ACTION_AGENT_PROFILE_UPDATE, "args": args}});
         let sha = "a".repeat(64);
         for (label, args) in [
@@ -3907,6 +3922,7 @@ mod tests {
                 "words and a picture",
                 serde_json::json!({"tagline": "새 소개", "avatar": {"source": "preset", "presetId": "p1"}}),
             ),
+            ("a name", serde_json::json!({"displayName": "새 이름"})),
         ] {
             assert!(
                 opens_in_app(ACTION_TYPE_WORKSPACE_ACTION, &update(args)),
@@ -3915,7 +3931,6 @@ mod tests {
         }
         for (label, args) in [
             ("words only", serde_json::json!({"tagline": "새 소개"})),
-            ("a name", serde_json::json!({"displayName": "새 이름"})),
             (
                 "a status",
                 serde_json::json!({"statusText": "회의 중", "statusEmoji": "📅"}),
