@@ -94,6 +94,7 @@ import {
   type ApprovalReceipt,
 } from '../features/conversation/approvalGate';
 import {useOnline} from '../features/inbox/useOnline';
+import {DecisionStageScope} from '../features/decisionStage/DecisionStageScope';
 import {usePendingApprovals} from '../features/conversation/usePendingApprovals';
 import {
   jumpMissedNotice,
@@ -2014,6 +2015,8 @@ export default function ConversationScreen({
 
   return (
     <ChannelAudienceContext.Provider value={channelAudience}>
+    <DecisionStageScope key={`${workspaceId}:${channelId}`} messages={messages} runs={requestRuns} directory={directory} viewerMemberId={member.id}
+      gates={approvalGates} receipts={approvalReceipts} nowMs={nowMs} offline={!networkOnline} onSettled={onApprovalSettled}>
     <Screen style={styles.screen}>
       {/* 사용자 배경(ADR-0189 증보 2) — 꺼져 있으면 아무것도 그리지 않는다. */}
       <AppBackground />
@@ -2366,6 +2369,7 @@ export default function ConversationScreen({
         />
       ) : null}
     </Screen>
+    </DecisionStageScope>
     </ChannelAudienceContext.Provider>
   );
 }

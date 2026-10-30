@@ -1,0 +1,42 @@
+appId: app.momo.ios
+name: "122-decision-stage"
+---
+# Stack fixture: a conversation/thread with exactly THREE request-bundle cards, all pending,
+# ordered oldest first, all decidable by the signed-in human. The second approval
+# must return a normal approved receipt (not a one-time secret). This flow consumes it.
+# Run in light/dark and AX3; planner also checks VoiceOver, reduce motion/transparency.
+- extendedWaitUntil:
+    visible:
+      id: "request-bundle-card"
+    timeout: 30000
+- runFlow: subflows/dismiss-dev-logbox.yaml
+- tapOn:
+    id: "request-bundle-headline"
+    index: 0
+- waitForAnimationToEnd
+- assertVisible:
+    id: "decision-stage-position"
+    text: "3건 중 1번"
+- swipe:
+    from:
+      id: "decision-stage-drag"
+    direction: LEFT
+    duration: 600
+- waitForAnimationToEnd
+- assertVisible:
+    id: "decision-stage-position"
+    text: "3건 중 2번"
+- tapOn:
+    id: "decision-stage-approve"
+- extendedWaitUntil:
+    visible:
+      id: "decision-stage-position"
+      text: "3건 중 3번"
+    timeout: 10000
+- tapOn:
+    id: "decision-stage-close"
+- waitForAnimationToEnd
+- assertNotVisible:
+    id: "decision-stage"
+- assertVisible:
+    id: "request-bundle-card"

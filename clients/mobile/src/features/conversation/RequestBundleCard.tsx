@@ -46,6 +46,7 @@ import type {ApprovalGate, ApprovalReceipt} from './approvalGate';
 import {deadlinePassed} from './approvalGate';
 import {phoneRequestBundle} from './requestLoop';
 import {copyText} from './copy';
+import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
 import {spawnHostGate} from '@momo/core/features/timeline/spawnHostChoice';
 
 export function RequestBundleCard({
@@ -76,6 +77,9 @@ export function RequestBundleCard({
   onOpenDecision?: (approvalId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const stage = useOpenDecisionStage();
+  const stageSource = useRef<View | null>(null);
+  const openDecision = onOpenDecision ?? (stage ? (id: string) => stage(id, stageSource) : undefined);
   const [expanded, setExpanded] = useState(false);
   const decision = useRef<ApprovalDecisionHandle | null>(null);
   useImperativeHandle(
@@ -114,7 +118,7 @@ export function RequestBundleCard({
   const openStage =
     model.canDecide &&
     model.decisionMode === 'open' &&
-    onOpenDecision !== undefined;
+    openDecision !== undefined;
   const canApprove = spawnHostGate(card.execution).canApprove;
   const resultTarget =
     model.ref?.type === 'message' &&
@@ -130,7 +134,7 @@ export function RequestBundleCard({
           {name: 'reject', label: '거부'},
         ]
       : []),
-    ...(openStage ? [{name: 'openDecision', label: '열어서 결정'}] : []),
+    ...(openDecision ? [{name: 'openDecision', label: openStage ? '열어서 결정' : '결정 보기'}] : []),
     {name: 'details', label: expanded ? '자세히 접기' : '자세히'},
     ...(resultTarget ? [{name: 'result', label: resultLabel}] : []),
     ...(receipt?.secretOnce
@@ -144,6 +148,8 @@ export function RequestBundleCard({
   );
   return (
     <View
+      ref={stageSource}
+      collapsable={false}
       style={styles.card}
       accessible
       accessibilityRole="summary"
@@ -169,7 +175,7 @@ export function RequestBundleCard({
             decision.current?.decide('reject');
             break;
           case 'openDecision':
-            if (gate) onOpenDecision?.(gate.approvalId);
+            if (card.approvalId) openDecision?.(card.approvalId);
             break;
           case 'details':
             setExpanded(value => !value);
@@ -189,7 +195,7 @@ export function RequestBundleCard({
       }}
       testID="request-bundle-card"
     >
-      <View style={styles.head}>
+      <Pressable style={styles.head} accessibilityRole="button" accessibilityLabel="결정 보기" disabled={!openDecision || !card.approvalId} onPress={() => { if (card.approvalId) openDecision?.(card.approvalId); }}>
         <Sentence
           numberOfLines={2}
           style={styles.headline}
@@ -198,7 +204,7 @@ export function RequestBundleCard({
           {headline}
         </Sentence>
         <RequestStateFace state={model.state} />
-      </View>
+      </Pressable>
       {card.proposedVia !== undefined ? (
         <Sentence style={styles.meta}>
           {teamAiProposalLine(
@@ -255,11 +261,11 @@ export function RequestBundleCard({
         <ApprovalMessagePreview preview={preview} onOpen={onOpenMessage} />
       ) : null}
       {model.canDecide && gate !== null ? (
-        model.decisionMode === 'open' && onOpenDecision ? (
+        model.decisionMode === 'open' && openDecision ? (
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="열어서 결정"
-            onPress={() => onOpenDecision(gate.approvalId)}
+            onPress={() => openDecision(gate.approvalId)}
             style={styles.open}
           >
             <Text style={styles.openLabel}>열어서 결정</Text>
@@ -351,7 +357,7 @@ const buildStyles = (color: Palette) =>
       padding: space.md,
       gap: space.sm,
     },
-    head: {gap: space.xs},
+    head: {gap: space.xs, minHeight: TOUCH_TARGET},
     headline: {
       fontSize: font.body,
       lineHeight: line.body,
