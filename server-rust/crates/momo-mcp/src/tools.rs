@@ -636,7 +636,7 @@ pub const TOOL_COUNT_KEYS: [&str; 6] = ["run", "edit", "read", "search", "web", 
 /// `docs/api/openapi.yaml`'s `WorkspaceActionId` against each other. Adding an
 /// action means editing three lines; forgetting one of them is a red test, not a
 /// production surprise.
-const WORKSPACE_ACTION_IDS: [&str; 11] = [
+const WORKSPACE_ACTION_IDS: [&str; 12] = [
     "invite.create",
     "channel.create",
     "channel.member.add",
@@ -646,6 +646,7 @@ const WORKSPACE_ACTION_IDS: [&str; 11] = [
     "agent.profile.update",
     "agent.invite",
     "member.avatar.set",
+    "member.display_name.set",
     "message.pin",
     "message.unpin",
 ];
@@ -799,6 +800,11 @@ fn action_args_branches() -> Vec<Value> {
             }),
         ),
         member_avatar_set_branch(),
+        action_args_branch(
+            "member.display_name.set",
+            &["displayName"],
+            json!({"displayName": required_text(400)}),
+        ),
         message_pin_branch("message.pin"),
         message_pin_branch("message.unpin"),
     ]
@@ -835,25 +841,39 @@ fn message_pin_branch(action_id: &str) -> Value {
     branch
 }
 
-/// `member.avatar.set` (ADR-0186 증보 v4): one key. The description is the instruction an
+/// `member.avatar.set` (ADR-0186 증보 v7): one image source. The description is the instruction an
 /// agent runtime shows its model — it says who the target is (the person who called you,
 /// never an argument), where the picture must come from, and what to do when the server
 /// refuses.
 fn member_avatar_set_branch() -> Value {
     let mut branch = action_args_branch(
         "member.avatar.set",
-        &["attachmentId"],
+        &[],
         json!({
-            "attachmentId": required_text(WORKSPACE_AVATAR_ID_MAX_CHARS)
+            "attachmentId": nullable(required_text(WORKSPACE_AVATAR_ID_MAX_CHARS)),
+            "avatar": {
+                "type": ["object", "null"], "additionalProperties": false,
+                "required": ["source", "dataBase64"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["generated"]},
+                    "dataBase64": required_text(WORKSPACE_AVATAR_B64_MAX_CHARS)
+                }
+            }
         }),
     );
+    branch["minProperties"] = json!(1);
     branch["description"] = json!(
         "When the person who called you attaches a picture and asks you to make it THEIR profile \
          picture, propose this with that picture's id (imageAttachments[].id from \
          oort_conversation_read): one image THEY attached in THIS conversation. The target is \
          always that person — you cannot name anyone else, and another person's or another \
          conversation's picture is refused. They see the picture on an approval card and only \
-         they can approve it. Pictures over 4096 px on a side (or 16 megapixels), GIF and animated images \
+         they can approve it. Alternatively send avatar:{source:'generated',dataBase64} for an image \
+         you generated or retrieved (PNG/JPEG/WebP, strict base64, at most 44000 decoded bytes; \
+         downscale to 256x256 first). Never send a URL or a target. \
+         To change THEIR name use member.display_name.set with displayName only. \
+         To change YOUR name use agent.rename, and YOUR photo use agent.profile.update avatar. \
+         Pictures over 4096 px on a side (or 16 megapixels), GIF and animated images \
          are refused; an iPhone HEIC photo is not supported either (and is not listed in \
          imageAttachments): ask them to send it as a JPEG (\"사진을 JPEG로 보내 주세요\")."
     );
@@ -1266,7 +1286,9 @@ pub const TOOL_CATALOG: [ToolDescriptor; 14] = [
         name: TOOL_ACTION_PROPOSE,
         title: "Propose a workspace action",
         description: "Ask a person to approve one workspace change (an invite link, a channel, \
-                      channel members, an agent's name or profile card or picture, bringing \
+                      channel members, the requester's own name (member.display_name.set) or photo \
+                      (member.avatar.set), your agent name (agent.rename) or profile card or picture \
+                      (agent.profile.update avatar), bringing \
                       another agent in, your own channel reach, pinning or unpinning one \
                       message of this conversation, or the welcome/role-label settings). Name \
                       channels and people by name or handle, never by id; a message you pin is \

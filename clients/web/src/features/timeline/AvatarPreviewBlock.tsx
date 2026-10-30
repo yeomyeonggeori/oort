@@ -5,10 +5,11 @@ import {
   AVATAR_PREVIEW_CAPTION,
   AVATAR_PREVIEW_UNAVAILABLE,
   approvalAvatarPreviewPath,
-  memberAvatarSetHeadline,
+  profileAvatarHeadline,
 } from "@momo/core/features/approvals/avatarPreview";
 import type { AgentApprovalCard } from "@momo/core/features/timeline/agentCardModel";
 import { useApprovalAvatarPreview } from "./useApprovalAvatarPreview";
+import { useMemberAvatar } from "../sidebar/useMemberAvatar";
 
 // =============================================================================
 // `member.avatar.set` 승인 카드의 머리: 한 문장 + 제안된 사진 (#4394, ADR-0186 증보 v4)
@@ -32,7 +33,8 @@ export function AvatarPreviewBlock({
   const preview = action?.preview ?? null;
   const path = approvalAvatarPreviewPath(workspaceId, card.approvalId, preview);
   const image = useApprovalAvatarPreview(path);
-  const headline = memberAvatarSetHeadline(action?.id, agentName);
+  const previous = useMemberAvatar(preview?.previousAvatarUrl ?? undefined);
+  const headline = profileAvatarHeadline(action?.id, agentName);
   if (headline === null) return null;
 
   return (
@@ -40,7 +42,19 @@ export function AvatarPreviewBlock({
       <p className="break-keep text-body font-medium text-ink" data-testid="approval-avatar-headline">
         {headline}
       </p>
-      <div className="mt-2 flex items-center gap-3">
+      <div className="mt-2 flex flex-wrap items-start gap-3">
+        <div className="flex flex-col gap-1">
+          <p className="text-meta text-ink-muted">바꾸기 전</p>
+          <span className="flex size-avatar-preview shrink-0 items-center justify-center overflow-hidden rounded-full border border-line bg-pane text-ink-muted">
+            {previous !== null ? (
+              <img src={previous} alt="바꾸기 전 프로필 사진" referrerPolicy="no-referrer" className="size-full object-cover" />
+            ) : (
+              <UserRound className="size-6" aria-label={preview?.previousAvatarUrl ? "현재 사진을 불러와요" : "등록된 사진이 없어요"} />
+            )}
+          </span>
+        </div>
+        <div className="flex flex-col gap-1">
+        <p className="text-meta text-ink-muted">바꾼 뒤</p>
         <span
           className="flex size-avatar-preview shrink-0 items-center justify-center overflow-hidden rounded-full border border-line bg-pane text-ink-muted"
           data-testid="approval-avatar-frame"
@@ -49,7 +63,7 @@ export function AvatarPreviewBlock({
           {image.state === "ready" ? (
             <img
               src={image.src}
-              alt={AVATAR_PREVIEW_ALT}
+              alt={action?.id === "agent.profile.update" ? "에이전트의 프로필 사진으로 제안된 사진" : AVATAR_PREVIEW_ALT}
               referrerPolicy="no-referrer"
               className="size-full object-cover"
               data-testid="approval-avatar-image"
@@ -58,13 +72,16 @@ export function AvatarPreviewBlock({
             <UserRound className="size-6" aria-hidden="true" />
           )}
         </span>
+        </div>
+      </div>
         <p
-          className="min-w-0 flex-1 break-keep text-meta text-ink-muted"
+          className="mt-2 break-keep text-meta text-ink-muted"
           data-testid="approval-avatar-caption"
         >
-          {image.state === "unavailable" ? AVATAR_PREVIEW_UNAVAILABLE : AVATAR_PREVIEW_CAPTION}
+          {image.state === "unavailable" ?
+            (action?.id === "agent.profile.update" ? "사진을 불러오지 못했어요. 다시 열어 확인해 주세요." : AVATAR_PREVIEW_UNAVAILABLE)
+            : action?.id === "agent.profile.update" ? "승인하면 에이전트의 프로필 사진이 이 사진으로 바뀌어요." : AVATAR_PREVIEW_CAPTION}
         </p>
-      </div>
     </div>
   );
 }

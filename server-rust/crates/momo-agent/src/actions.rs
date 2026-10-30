@@ -81,8 +81,8 @@ pub const ACTION_WORKSPACE_SETTINGS_UPDATE: &str = "workspace.settings.update";
 /// `agent.profile.update` — change an agent's profile **card**: the proposer's
 /// own or that of an agent of the same owner (V4-M), limited to display name,
 /// tagline, status line and role label (ADR-0186 증보 2026-10-13 v3 V3-2).
-/// Avatar sources arrive with their own slice; `instructions` and everything
-/// that steers behaviour are not reachable from here.
+/// Avatar sources include presets, attachments and generated/retrieved images;
+/// `instructions` and everything that steers behaviour are not reachable here.
 pub const ACTION_AGENT_PROFILE_UPDATE: &str = "agent.profile.update";
 
 /// `agent.invite` — bring another, external agent into the workspace: the approver
@@ -112,12 +112,14 @@ pub const ACTION_WORKSPACE_WORK_TIER_UPDATE: &str = "workspace.work_tier.update"
 /// card — that is the member's own consent (ADR-0113 D2).
 pub const ACTION_PLUGIN_INSTALL: &str = "plugin.install";
 
-/// 「이 사진으로 내 프로필 사진 바꿔줘」 (ADR-0186 증보 2026-10-25 v4, #4385): an agent
-/// proposes that **the person who called it** wear an image **that person attached in
-/// the same conversation** as their own avatar. The target is never an argument — the
-/// server derives it from the run (the author of the message that started it) — and only
-/// that person may approve.
+/// The requesting human's own avatar (ADR-0186 v4 + amendment v7, #4791).
+/// Sources are their image attachment in this conversation or generated/retrieved
+/// image bytes. The run supplies the subject and only that person may approve.
 pub const ACTION_MEMBER_AVATAR_SET: &str = "member.avatar.set";
+
+/// The requesting human's own display name (ADR-0186 amendment v7, #4791).
+/// The run supplies the subject; neither an argument nor an admin may substitute it.
+pub const ACTION_MEMBER_DISPLAY_NAME_SET: &str = "member.display_name.set";
 
 /// `message.pin` — pin one message to the head of the channel it is in, **as the
 /// approver**, through the very function a person's own pin uses (ADR-0186 증보 v5 U-e).
@@ -191,7 +193,7 @@ impl RequiredRole {
         match self {
             RequiredRole::Admin | RequiredRole::WorkspaceOperator => "관리자",
             RequiredRole::AgentEditor => "대상 에이전트의 소유자 또는 관리자",
-            RequiredRole::RequestingMember => "사진 주인 본인",
+            RequiredRole::RequestingMember => "요청한 본인",
         }
     }
 
@@ -259,7 +261,7 @@ pub const MAX_PENDING_WORKSPACE_ACTIONS: i64 = 3;
 /// Still outside (H6-2): `invite.create` and `agent.invite` (one-time secrets),
 /// `hosted.channels.grant` (widens access), and everything declared but not
 /// executable (`webhook.create`, `member.role.set`).
-pub const TEAM_AI_ACTION_IDS: [&str; 9] = [
+pub const TEAM_AI_ACTION_IDS: [&str; 11] = [
     ACTION_AGENT_PROFILE_UPDATE,
     ACTION_AGENT_RENAME,
     ACTION_CHANNEL_CREATE,
@@ -269,6 +271,8 @@ pub const TEAM_AI_ACTION_IDS: [&str; 9] = [
     ACTION_WORKSPACE_MEMORY_UPDATE,
     ACTION_WORKSPACE_WORK_TIER_UPDATE,
     ACTION_PLUGIN_INSTALL,
+    ACTION_MEMBER_AVATAR_SET,
+    ACTION_MEMBER_DISPLAY_NAME_SET,
 ];
 
 /// Whether an action's one-time secret may go to the **proposing agent** instead
@@ -749,24 +753,39 @@ fn agent_profile_update_args_schema() -> Value {
     })
 }
 
-/// `member.avatar.set` arguments (ADR-0186 증보 v4): **one** key, the id of an image the
-/// person attached in this conversation. There is no target (the person who called the
-/// agent is the target, derived by the server), no URL, no bytes and no preset: the
-/// avatar of a person is theirs to draw, and what an agent may do is carry a picture the
-/// person themselves sent.
+/// Exactly one image source: the requester's attachment in this conversation,
+/// or generated/retrieved base64 (v7). Closed keys; the normalizer also enforces
+/// mutual exclusion. The target always comes from the run.
 fn member_avatar_set_args_schema() -> Value {
     json!({
         "type": "object",
         "additionalProperties": false,
-        "required": ["attachmentId"],
+        "minProperties": 1,
         "properties": {
             "attachmentId": {
                 "type": "string",
                 "minLength": 1,
                 "maxLength": AVATAR_ID_TEXT_MAX_CHARS,
                 "description": "The id (imageAttachments[].id from oort_conversation_read) of an image the person who called you attached in THIS conversation."
+            },
+            "avatar": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["source", "dataBase64"],
+                "properties": {
+                    "source": {"type": "string", "enum": ["generated"]},
+                    "dataBase64": {"type": "string", "minLength": 1, "maxLength": AVATAR_GENERATED_B64_MAX_CHARS}
+                },
+                "description": "An image you generated or retrieved, PNG/JPEG/WebP, strict base64, at most 44000 input bytes. No URL; retrieve and downscale it first."
             }
         }
+    })
+}
+
+fn member_display_name_set_args_schema() -> Value {
+    json!({
+        "type": "object", "additionalProperties": false, "required": ["displayName"],
+        "properties": {"displayName": {"type": "string", "minLength": 1, "maxLength": 400}}
     })
 }
 
@@ -1363,7 +1382,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
         id: ACTION_AGENT_PROFILE_UPDATE,
         title: "에이전트 프로필 바꾸기",
-        summary: "에이전트 한 명의 이름·소개·상태 문구·역할 라벨을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이에요.",
+        summary: "에이전트 한 명의 이름·사진·소개·상태 문구·역할 라벨을 바꿔요. 자기 자신이나 같은 소유자의 에이전트만 대상이에요.",
         risk: Risk::Approval,
         required_role: RequiredRole::AgentEditor,
         secret_delivery: SecretDelivery::None,
@@ -1388,7 +1407,7 @@ pub const ACTIONS: &[WorkspaceAction] = &[
     WorkspaceAction {
         id: ACTION_MEMBER_AVATAR_SET,
         title: "내 프로필 사진 바꾸기",
-        summary: "내가 이 대화에 보낸 사진으로 내 프로필 사진을 바꿔요. 대상은 말을 건 본인뿐이고, 본인만 승인할 수 있어요.",
+        summary: "이 대화에 보낸 사진이나 에이전트가 가져온 이미지로 내 프로필 사진을 바꿔요. 요청한 본인만 승인할 수 있어요.",
         risk: Risk::Approval,
         required_role: RequiredRole::RequestingMember,
         secret_delivery: SecretDelivery::None,
@@ -1396,6 +1415,18 @@ pub const ACTIONS: &[WorkspaceAction] = &[
         initiative: false,
         effect: "카드에 보이는 이미지로 내 프로필 사진을 바꿔요",
         args_schema: member_avatar_set_args_schema,
+    },
+    WorkspaceAction {
+        id: ACTION_MEMBER_DISPLAY_NAME_SET,
+        title: "내 이름 바꾸기",
+        summary: "말을 건 본인의 표시 이름을 바꿔요. 요청한 본인만 승인할 수 있고, 핸들과 과거 멘션은 그대로예요.",
+        risk: Risk::Approval,
+        required_role: RequiredRole::RequestingMember,
+        secret_delivery: SecretDelivery::None,
+        proposers: Proposers::Any,
+        initiative: false,
+        effect: "카드에 보이는 이름으로 내 표시 이름을 바꿔요",
+        args_schema: member_display_name_set_args_schema,
     },
     // ADR-0186 증보 v5 U-e: the pin a person does by hand, done as the approver. Admin, not
     // "any channel member": a new role would grow `RequiredRole`, the gate plan, the push
@@ -2457,6 +2488,7 @@ mod tests {
                 "agent.profile.update",
                 "agent.invite",
                 "member.avatar.set",
+                "member.display_name.set",
                 "message.pin",
                 "message.unpin",
                 "workspace.unfurl.update",
@@ -2492,6 +2524,8 @@ mod tests {
                 "workspace.memory.update",
                 "workspace.work_tier.update",
                 "plugin.install",
+                "member.avatar.set",
+                "member.display_name.set",
             ]
         );
         for id in TEAM_AI_ACTION_IDS {
@@ -2534,6 +2568,7 @@ mod tests {
                 "agent.profile.update",
                 "agent.invite",
                 "member.avatar.set",
+                "member.display_name.set",
                 "message.pin",
                 "message.unpin"
             ]
@@ -3457,6 +3492,7 @@ mod tests {
             (ACTION_AGENT_PROFILE_UPDATE, false),
             // A picture on a lock-screen banner cannot be judged: always opened.
             (ACTION_MEMBER_AVATAR_SET, true),
+            (ACTION_MEMBER_DISPLAY_NAME_SET, false),
             // A message the card only quotes (120 characters of up to thousands): the approver
             // reads it in the app (ADR-0186 증보 v5 U-e, review M4).
             (ACTION_MESSAGE_PIN, true),
@@ -3648,21 +3684,18 @@ mod tests {
         assert!(
             proposable_action_by_id(ACTION_MEMBER_AVATAR_SET, ProposalDoor::AgentPort).is_some()
         );
-        assert!(
-            !TEAM_AI_ACTION_IDS.contains(&ACTION_MEMBER_AVATAR_SET),
-            "the helper cannot raise it: it has no run whose caller could be the person"
-        );
+        assert!(TEAM_AI_ACTION_IDS.contains(&ACTION_MEMBER_AVATAR_SET));
         let schema = action.args_schema();
         assert_eq!(schema["additionalProperties"], serde_json::json!(false));
-        assert_eq!(schema["required"], serde_json::json!(["attachmentId"]));
+        assert_eq!(schema["minProperties"], serde_json::json!(1));
         let keys: Vec<&String> = schema["properties"]
             .as_object()
             .expect("properties")
             .keys()
             .collect();
-        assert_eq!(keys, ["attachmentId"]);
+        assert_eq!(keys, ["attachmentId", "avatar"]);
         // The sentence an approver reads names whose authority it is.
-        assert!(proposal_summary(action).contains("사진 주인 본인"));
+        assert!(proposal_summary(action).contains("요청한 본인"));
     }
 
     /// Planner decision 2026-10-17: the login handoff is approved with the card in
