@@ -221,16 +221,22 @@ the [default config](infra/hermes/config.yaml), and the offline
 [connector](infra/hermes/test_lockgate_connectors.py) tests.
 
 The same default also selects Codex subscription image generation
-(`image_generate`, provider `openai-codex` only). Image prompts, and any
-reference image or address the model passes to the tool, go to OpenAI's image
-processing, and the tool can fetch a model-chosen public address itself, which
-configuration cannot turn off. Generated pictures are untrusted model output.
-We do not promise prompt redaction or no retention. The lock gate refuses other
-image providers, code execution and `web_extract`, and connector configurations
-disable `image_gen` as well. This describes repository configuration, not a
-verified live deployment. See
-[ADR-0203 I1–I4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820)
-and the offline [gate tests](infra/hermes/test_default_config.py).
+(`image_generate`, provider `openai-codex` only). The image prompt, and any
+inline `data:` picture the model passes as a source, go to OpenAI's image
+processing. Addresses are not accepted: an oort-owned Hermes plugin refuses every
+`image_url` / `reference_image_urls` value that is not empty or a small inline
+picture before the tool runs, so through the image tool's source arguments Hermes
+never downloads an address the model chose and never reads a path it wrote. The lock gate requires that plugin (pinned
+bytes, enabled, and exercised with refused and accepted examples at every start),
+refuses the settings and environment variables that turn Hermes' private-address
+filter or the plugin off, and refuses other image providers, code execution and
+`web_extract`; connector configurations disable `image_gen` as well. Generated
+pictures are untrusted model output. We do not promise prompt redaction or no
+retention. This describes repository configuration, not a verified live
+deployment. See [ADR-0203 I1–I4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820), the offline
+[plugin](infra/hermes/test_image_guard.py) and
+[gate](infra/hermes/test_lockgate_image_guard.py) tests, and the in-image proof
+[`scripts/tests/test_hermes_image_guard_docker.sh`](scripts/tests/test_hermes_image_guard_docker.sh).
 
 For deployment, rotation, backup, and incident procedures, follow
 [`docs/SELF_HOST.md`](docs/SELF_HOST.md) and

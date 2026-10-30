@@ -10,6 +10,7 @@ import io
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import types
@@ -47,6 +48,14 @@ def disabled_toolsets(text):
 
 def top_level_keys(text):
     return {m.group(1) for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_]*):", text, re.M)}
+
+
+def install_guard_files(data_dir):
+    """The shipped image-guard plugin under a fake Hermes volume, as the start command leaves it (#4820 review)."""
+    root = os.path.join(data_dir, "plugins", lockgate.IMAGE_GUARD_PLUGIN)
+    os.makedirs(root)
+    for name in lockgate.IMAGE_GUARD_FILES:
+        shutil.copyfile(os.path.join(HERE, "plugins", lockgate.IMAGE_GUARD_PLUGIN, name), os.path.join(root, name))
 
 
 def cfg_from_text(text):
@@ -280,6 +289,7 @@ class EnforcedWebToolPolicy(unittest.TestCase):
 
     def boot(self, cfg, tools, extra_env=None):
         with tempfile.TemporaryDirectory() as tmp:
+            install_guard_files(tmp)  # the canary itself is exercised in test_lockgate_image_guard.py; stubbed here
             path = os.path.join(tmp, "config.yaml")
             with open(path, "w") as handle:
                 handle.write("# isolated boot fixture; load_config is doubled\n")
@@ -288,6 +298,7 @@ class EnforcedWebToolPolicy(unittest.TestCase):
                     mock.patch.dict(sys.modules, self.hermes_modules(cfg, tools)), \
                     mock.patch.object(sys, "path", list(sys.path)), \
                     mock.patch.object(lockgate.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)), \
+                    mock.patch.object(lockgate, "hermes_image_guard_canary", return_value=([], {"stubbed": True})), \
                     mock.patch.object(lockgate, "emit") as emit:
                 rc = lockgate.gate(path)
                 return rc, emit.call_args.kwargs
@@ -303,7 +314,10 @@ class EnforcedWebToolPolicy(unittest.TestCase):
             data = [{"name": "web", "enabled": False, "tools": ["web_search", "web_extract"]}]
             data += [{"name": name, "enabled": True, "tools": [name]} for name in sorted(reported_tools)]
         body = json.dumps({"data": data}).encode()
-        with mock.patch.dict(os.environ, {"API_SERVER_KEY": "test-only-" * 4}, clear=True), \
+        volume = tempfile.TemporaryDirectory()
+        self.addCleanup(volume.cleanup)
+        install_guard_files(volume.name)
+        with mock.patch.dict(os.environ, {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": volume.name}, clear=True), \
                 mock.patch.dict(sys.modules, modules), \
                 mock.patch.object(sys, "path", list(sys.path)), \
                 mock.patch.object(lockgate, "_status", side_effect=lambda url, *args: (200 if url.endswith("/health") else 401, {})), \
@@ -377,7 +391,8 @@ class EnforcedWebToolPolicy(unittest.TestCase):
 
     # --- image generation through the same two entry points (ADR-0203 augmentation, #4820) ---------------------
     def image_cfg(self, **over):
-        return {**self.cfg, "image_gen": {"provider": "openai-codex"}, **over}
+        return {**self.cfg, "image_gen": {"provider": "openai-codex"},
+                "plugins": {"enabled": [lockgate.IMAGE_GUARD_PLUGIN], "isolation": "in_process"}, **over}
 
     def image_tools(self):
         return self.tools | {"image_generate"}

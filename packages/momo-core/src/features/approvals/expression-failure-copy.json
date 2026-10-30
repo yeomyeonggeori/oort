@@ -1,0 +1,8 @@
+[
+  {"code":"generation_failed","line":"그림을 만들지 못했어요","en":"Could not create the picture"},
+  {"code":"assembly_source_invalid","line":"이 그림에는 움직임을 입힐 수 없어요","en":"This picture cannot be animated"},
+  {"code":"assembly_source_too_large","line":"그림이 너무 커서 움직임을 입힐 수 없어요","en":"The picture is too large to animate"},
+  {"code":"assembly_output_too_large","line":"움직이는 그림이 너무 커요","en":"The animated picture is too large"},
+  {"code":"assembly_timeout","line":"움직임을 입히다가 시간이 다 됐어요","en":"Ran out of time while animating the picture"},
+  {"code":"assembly_busy","line":"지금 다른 그림을 처리하고 있어요. 잠시 뒤에 다시 해 주세요","en":"Busy with another picture right now. Please try again in a moment"}
+]

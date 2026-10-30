@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { MoreHorizontal, Plus } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ArrowLeft, MoreHorizontal, Plus } from "lucide-react";
 import { fetchRoster } from "@momo/core/lib/api";
 import { searchExpressions } from "@momo/core/features/expressions/search";
 import { matchesExpressionContract } from "@momo/core/features/expressions/contracts";
@@ -14,15 +14,22 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { ExpressionDraftCard } from "./ExpressionDraftCard";
+import { ExpressionMakeForm } from "./ExpressionMakeForm";
 import { EXPRESSION_FILE_ACCEPT, validExpressionFile } from "./media";
 import { ExpressionImage } from "./ExpressionImage";
 import { useExpressions } from "./context";
 
-export function TeamExpressionsPanel({ onPick, purpose }: { onPick: (token: string) => void; purpose: "reaction" | "insert" }) {
+// 「＋」는 메뉴다: 가져오기(직접 올리기·출처 링크)와 AI와 만들기. 두 길은 권한(canAdd)과 오프라인 규칙이 같다.
+type PanelMode = "list" | "import" | "make";
+
+export function TeamExpressionsPanel({ onPick, purpose, onClose }: { onPick: (token: string) => void; purpose: "reaction" | "insert"; /** 요청을 보낸 뒤 고르개를 닫는다. 없으면 열어 둔 채로 둔다. */ onClose?: () => void }) {
   const { store, cache, usage, status, offline } = useExpressions();
   const [query, setQuery] = useState("");
   const [view, setView] = useState("emoji");
-  const [adding, setAdding] = useState(false);
+  const [mode, setMode] = useState<PanelMode>("list");
+  const addTrigger = useRef<HTMLButtonElement>(null);
+  const backButton = useRef<HTMLButtonElement>(null);
+  const focusTrigger = useRef(false);
   const [admin, setAdmin] = useState(false);
   const menuOpener = useRef<HTMLElement | null>(null);
   const [target, setTarget] = useState<{ item: Expression; action: "delete" | "report"; opener: HTMLElement } | null>(null);
@@ -39,7 +46,14 @@ export function TeamExpressionsPanel({ onPick, purpose }: { onPick: (token: stri
     }, () => {});
     return () => { live = false; };
   }, [store]);
+  // 메뉴가 닫히며 트리거가 사라지므로(양식 모드에서는 「목록으로」가 그 자리다) 초점을 직접 옮긴다.
+  // 양식이 열리면 「목록으로」, 목록으로 돌아오면 「추가하기」다.
+  useLayoutEffect(() => {
+    if (mode !== "list") backButton.current?.focus();
+    else if (focusTrigger.current) { focusTrigger.current = false; addTrigger.current?.focus(); }
+  }, [mode]);
   if (!store) return null;
+  function backToList() { focusTrigger.current = true; setMode("list"); }
   const items = searchExpressions(cache.items, query.replace(/^:|:$/g, ""), usage).filter((item) => view !== "gif" || item.media?.large.mime === "image/gif");
   async function confirm() {
     if (!store || !target || lock.current || offline) return;
@@ -51,14 +65,19 @@ export function TeamExpressionsPanel({ onPick, purpose }: { onPick: (token: stri
     finally { lock.current = false; setBusy(false); }
   }
   return <div className="flex min-h-0 flex-col gap-2" data-testid="team-expressions">
-    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-body font-semibold">우리 팀</p><Button type="button" variant="secondary" size="sm" disabled={!canAdd || offline} onClick={() => setAdding((value) => !value)}><Plus aria-hidden="true" />{adding ? "목록으로" : "올리기"}</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-2"><p className="text-body font-semibold">우리 팀</p>
+      {mode === "list" ? <DropdownMenu><DropdownMenuTrigger asChild disabled={!canAdd || offline}><Button ref={addTrigger} type="button" variant="secondary" size="sm" disabled={!canAdd || offline} data-testid="expression-add-menu"><Plus aria-hidden="true" />추가하기</Button></DropdownMenuTrigger><DropdownMenuContent align="end">
+        <DropdownMenuItem data-testid="expression-add-import" onSelect={() => setMode("import")}>가져오기</DropdownMenuItem>
+        <DropdownMenuItem data-testid="expression-add-make" onSelect={() => setMode("make")}>AI와 만들기</DropdownMenuItem>
+      </DropdownMenuContent></DropdownMenu> : <Button ref={backButton} type="button" variant="secondary" size="sm" onClick={backToList}><ArrowLeft aria-hidden="true" />목록으로</Button>}
+    </div>
     {!canAdd && <p className="text-meta text-ink-muted">이 팀은 관리자만 새 그림을 올릴 수 있어요.</p>}
     {offline && <InlineBanner message="연결이 끊겼어요. 연결되면 그림을 다시 불러와요." separator={false} />}
-    {adding ? <ExpressionUploadForm onDone={() => setAdding(false)} /> : <>
+    {mode === "import" ? <ExpressionUploadForm onDone={backToList} /> : mode === "make" ? <ExpressionMakeForm onImport={() => setMode("import")} onClose={onClose} /> : <>
       <SegmentedControl legend="팀 표현 보기" value={view} onValueChange={setView} options={[{ value: "emoji", label: "이모지" }, { value: "sticker", label: "스티커" }, { value: "gif", label: "팀 GIF" }]} />
       <Input type="search" aria-label="우리 팀 표현 검색" placeholder="이름, 태그, 초성으로 검색" value={query} onChange={(event) => setQuery(event.target.value)} />
       <p className="text-meta text-ink-muted">한 보관함의 그림을 반응이나 메시지에 쓸 수 있어요.</p>
-      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setAdding(true)}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
+      {status === "loading" ? <Skeleton ready={false} rows={4} /> : status === "error" ? <InlineBanner message="팀 그림을 불러오지 못했어요. 다시 시도해 주세요." actionLabel="다시 시도" onAction={() => void store.refresh()} separator={false} /> : items.length === 0 ? <EmptyInvite headline={query ? "맞는 팀 그림이 없어요" : "아직 팀 그림이 없어요"} actions={<Button type="button" variant="secondary" disabled={!canAdd || offline} onClick={() => query ? setQuery("") : setMode("import")}>{query ? "검색 지우기" : "첫 그림 올리기"}</Button>} /> :
         <ul className="min-h-0 max-h-pane overflow-y-auto" aria-label="팀 표현 목록">{items.map((item) => <li key={item.id} className="flex items-center gap-2 border-b border-line py-1">
           <button type="button" disabled={offline} className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-md p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring disabled:opacity-50" aria-label={`${item.displayName} ${purpose === "reaction" ? "반응으로 고르기" : "메시지에 넣기"}`} onClick={() => {
             const active = store.getSnapshot().cache.items.find((entry) => entry.id === item.id && entry.name === item.name);

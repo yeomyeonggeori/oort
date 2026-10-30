@@ -157,6 +157,8 @@ compose's default (`${CENTRIFUGO_LOG_LEVEL:-info}`). Paste them decoded, e.g.
 | hermes | `API_SERVER_KEY` | `${{shared.HERMES_API_KEY}}` — the shared variable you create by hand, see Hermes |
 | hermes | `HERMES_CONFIG_B64` | `base64 < infra/hermes/config.yaml \| tr -d '\n'` (one line) |
 | hermes | `HERMES_LOCKGATE_B64` | `base64 < infra/hermes/lockgate.py \| tr -d '\n'` (one line) |
+| hermes | `HERMES_IMAGE_GUARD_B64` | `base64 < infra/hermes/plugins/oort-image-guard/__init__.py \| tr -d '\n'` (one line) — the oort guard that refuses every `image_generate` address, path and non-inline value before the tool runs (#4820, ADR-0203 I2) |
+| hermes | `HERMES_IMAGE_GUARD_MANIFEST_B64` | `base64 < infra/hermes/plugins/oort-image-guard/plugin.yaml \| tr -d '\n'` (one line) |
 | hermes | `HERMES_LOGIN_RELAY_KEY` | `${{shared.HERMES_LOGIN_RELAY_KEY}}` — the login relay sidecar's own shared secret (`openssl rand -hex 32`, never the chat key); leave the shared variable out and the sidecar does not start (oort answers `login_relay_off`) |
 | hermes | `HERMES_LOGIN_RELAY_B64` | `base64 < infra/hermes/login_relay.py \| tr -d '\n'` (one line; needed only with the relay key) |
 | hermes | `HERMES_LOGIN_PROBE_B64` | `base64 < infra/hermes/mcp_login_probe.py \| tr -d '\n'` (one line; needed only with the relay key) |
@@ -197,16 +199,22 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    `HERMES_API_KEY=$(openssl rand -hex 32)` as a project shared variable. hermes
    reads it as `API_SERVER_KEY`; api and agent-worker as `HERMES_API_KEY`
    (the gate refuses a key under 32 characters).
-2. **Two base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
+2. **Four base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
    from `infra/hermes/config.yaml` (22 toolsets off, Codex subscription search and
-   image generation on, approvals manual/deny, no model, no connector) and `HERMES_LOCKGATE_B64` from
-   `infra/hermes/lockgate.py`.
-3. **Start order.** The start command writes the config and the gate, checks
-   both against the sha256 of the repo files (an empty, stale or swapped
-   variable stops the service; `check_railway_catalog.py` recomputes the hashes,
-   so changing `config.yaml` or `lockgate.py` means updating the command in the
+   image generation on, the image guard enabled, approvals manual/deny, no model, no connector),
+   `HERMES_LOCKGATE_B64` from `infra/hermes/lockgate.py`, and the two files of the oort image guard
+   plugin, `HERMES_IMAGE_GUARD_B64` (`plugins/oort-image-guard/__init__.py`) and
+   `HERMES_IMAGE_GUARD_MANIFEST_B64` (`plugins/oort-image-guard/plugin.yaml`).
+3. **Start order.** The start command writes the config, the gate and the guard plugin
+   (into `/opt/data/plugins/oort-image-guard`), checks all four against the sha256 of the repo files (an empty,
+   stale or swapped variable stops the service; `check_railway_catalog.py` recomputes the hashes,
+   so changing `config.yaml`, `lockgate.py` or a plugin file means updating the command in the
    same change), runs `lockgate.py gate` and only then `exec`s the Hermes
-   dispatcher. A non-zero gate (`set -e`) means the service never listens.
+   dispatcher. A non-zero gate (`set -e`) means the service never listens. When image generation is
+   exposed the gate also hashes the installed plugin again, requires it as the only entry of
+   `plugins.enabled`, refuses the switches that turn Hermes' private-address filter or the plugin off
+   (private-URL settings, proxies, safe mode, project plugins) and runs a canary through the real
+   dispatch path: refused examples must be blocked before the tool runs, an allowed one must reach it.
    **Login relay (#4078, ADR-0203 증보 2026-10-19):** with `HERMES_LOGIN_RELAY_KEY` set, the start
    command also decodes `login_relay.py` and `mcp_login_probe.py` (pinned by sha256 the same way) and,
    after the gate, starts the sidecar in the background on `:8643` (private, no domain). The sidecar

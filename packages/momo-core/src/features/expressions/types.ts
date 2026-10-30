@@ -27,6 +27,13 @@ export interface ExpressionOrigin {
   sourceUrl: string | null;
   /** Agent-authored plain text, displayed as such; never audit/log content. */
   prompt: string | null;
+  /**
+   * ADR-0218 §7 G1/G7: only `generated` can carry it. A record pointer to the attachment
+   * in the same conversation this picture was made from, never a key to open it. `null` =
+   * made from a prompt alone; absent = the server (C2) does not say yet. Optional on
+   * purpose: a payload without it must still read and show exactly as before.
+   */
+  sourceAttachmentId?: string | null;
 }
 
 export interface ExpressionImage {
@@ -81,6 +88,18 @@ export const MANUAL_UPLOAD_CODES = [
 ] as const;
 export type ManualUploadCode = typeof MANUAL_UPLOAD_CODES[number];
 
+/**
+ * ADR-0218 §7 G3.8: why a generated or assembled picture is missing. A closed list kept
+ * apart from `MANUAL_UPLOAD_CODES` on purpose: that one is the `Draft.code` enum of
+ * `contracts.schema.json`, and the schema merge (G7) belongs to the server stage (C).
+ * `assembly_params_invalid` is a call error with no card, so it is not here.
+ */
+export const EXPRESSION_FAILURE_CODES = [
+  "generation_failed", "assembly_source_invalid", "assembly_source_too_large",
+  "assembly_output_too_large", "assembly_timeout", "assembly_busy",
+] as const;
+export type ExpressionFailureCode = typeof EXPRESSION_FAILURE_CODES[number];
+
 interface ExpressionDraftBase extends ExpressionMetadata {
   draftId: string;
   workspaceId: string;
@@ -91,7 +110,7 @@ interface ExpressionDraftBase extends ExpressionMetadata {
 
 export type ExpressionDraft = ExpressionDraftBase & (
   | { state: "ready"; code: null; media: ExpressionMedia }
-  | { state: "manual_upload_required"; code: ManualUploadCode; media: null }
+  | { state: "manual_upload_required"; code: ManualUploadCode | ExpressionFailureCode; media: null }
 );
 
 export interface ExpressionImportRequest extends ExpressionMetadata {

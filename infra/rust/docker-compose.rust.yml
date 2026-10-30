@@ -610,6 +610,12 @@ services:
   # before a listener exists. The config is copied from the read-only mount on every
   # start, so editing the volume's config.yaml does nothing.
   #
+  # #4820 review (ADR-0203 I2): the oort image guard (a Hermes user plugin that refuses every image_generate
+  # address, path and non-inline value before the tool runs) is copied from its read-only mount into
+  # /opt/data/plugins/oort-image-guard before the gate. Compose has no sha256sum line in this command, so the
+  # gate is the check: it hashes those two files against the values pinned in lockgate.py, requires the plugin in
+  # plugins.enabled, and exercises it with a canary. The Railway twin pins the same bytes in its start command.
+  #
   # No `ports:` and the `private` network only: reachable as http://hermes:8642 from
   # api and agent-worker, never published on the host. Model auth is not here (#4073):
   # without a model Hermes still starts and answers /health + /v1/models.
@@ -621,7 +627,7 @@ services:
     profiles: ["agents"]
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - set -eu; umask 022; mkdir -p /opt/data; cp /oort/config.yaml /opt/data/config.yaml; /opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; [ -z "$${HERMES_LOGIN_RELAY_KEY:-}" ] || OORT_LOGIN_RELAY_PROBE=/oort/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /oort/login_relay.py launch & unset HERMES_LOGIN_RELAY_KEY; /opt/hermes/.venv/bin/python /oort/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run
+      - set -eu; umask 022; mkdir -p /opt/data/plugins/oort-image-guard; cp /oort/config.yaml /opt/data/config.yaml; cp /oort/plugins/oort-image-guard/__init__.py /oort/plugins/oort-image-guard/plugin.yaml /opt/data/plugins/oort-image-guard/; /opt/hermes/.venv/bin/python /oort/lockgate.py gate /opt/data/config.yaml; [ -z "$${HERMES_LOGIN_RELAY_KEY:-}" ] || OORT_LOGIN_RELAY_PROBE=/oort/mcp_login_probe.py /opt/hermes/.venv/bin/python -B /oort/login_relay.py launch & unset HERMES_LOGIN_RELAY_KEY; /opt/hermes/.venv/bin/python /oort/lockgate.py report & exec /opt/hermes/docker/entrypoint-dispatch.sh gateway run
     mem_limit: ${MOMO_HERMES_MEM_LIMIT:-2g}
     cpus: 1
     labels: *momo-janitor-labels
@@ -643,6 +649,7 @@ services:
       - hermesdata:/opt/data
       - ../hermes/config.yaml:/oort/config.yaml:ro
       - ../hermes/lockgate.py:/oort/lockgate.py:ro
+      - ../hermes/plugins/oort-image-guard:/oort/plugins/oort-image-guard:ro
       - ../hermes/login_relay.py:/oort/login_relay.py:ro
       - ../hermes/mcp_login_probe.py:/oort/mcp_login_probe.py:ro
     healthcheck:
