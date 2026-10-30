@@ -915,6 +915,18 @@ mod tests {
     #[test]
     fn every_action_has_a_normaliser() {
         for action in actions::ACTIONS {
+            if action.proposers == actions::Proposers::ServerOnly {
+                for door in [
+                    actions::ProposalDoor::AgentPort,
+                    actions::ProposalDoor::TeamAi,
+                ] {
+                    assert!(
+                        !action.proposable_through(door),
+                        "server-raised consent has no model arguments"
+                    );
+                }
+                continue;
+            }
             if let Err(error) = validated_action_args(action, &json!({}), NOW_MS) {
                 assert_ne!(
                     error.message, "unknown workspace action",

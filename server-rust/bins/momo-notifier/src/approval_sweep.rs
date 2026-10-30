@@ -63,6 +63,8 @@ pub struct ApprovalSweepStats {
     /// Rows that were no longer expirable by the time the lock was taken — a
     /// human decided in the meantime, which is the race working correctly.
     pub raced: usize,
+    /// Failed approvals remain pending and are retried on the next tick.
+    pub failed: usize,
 }
 
 /// The sentence the channel gets. Deliberately about the deadline, not about
@@ -93,9 +95,10 @@ pub async fn sweep_expired_approvals(
         .await;
 
         match settled {
-            Ok((expired, raced)) => {
+            Ok((expired, raced, failed)) => {
                 stats.expired += expired;
                 stats.raced += raced;
+                stats.failed += failed;
             }
             Err(error) => {
                 // One tenant's failure must not stop the others: the next tick
@@ -125,33 +128,46 @@ async fn sweep_workspace_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     batch: i64,
-) -> Result<(usize, usize), DbError> {
+) -> Result<(usize, usize, usize), DbError> {
     let candidates =
         momo_agent::approval::overdue_approvals_in_tx(&mut *conn, workspace_id, batch).await?;
     let mut expired = 0usize;
     let mut raced = 0usize;
+    let mut failed = 0usize;
 
     for candidate in candidates {
-        // Re-read under `FOR UPDATE` through the same loader the decision route
-        // uses, so the sweep and a tap racing on one approval serialize on the
-        // same row — and so the payload builders below get exactly the object
-        // they get on the route.
-        let Some(approval) = lock_approval_in_tx(&mut *conn, workspace_id, candidate.id).await?
-        else {
-            raced += 1;
-            continue;
-        };
-        if approval.status != "pending" {
-            raced += 1;
-            continue;
+        // One broken card cannot roll back the other expiries in this tenant.
+        let mut savepoint = momo_db::sqlx::Connection::begin(&mut *conn).await?;
+        let settled = async {
+            let Some(approval) =
+                lock_approval_in_tx(&mut savepoint, workspace_id, candidate.id).await?
+            else {
+                return Ok(false);
+            };
+            if approval.status != "pending" {
+                return Ok(false);
+            }
+            settle_expired_in_tx(&mut savepoint, &approval).await
         }
-        if settle_expired_in_tx(&mut *conn, &approval).await? {
-            expired += 1;
-        } else {
-            raced += 1;
+        .await;
+        match settled {
+            Ok(true) => {
+                savepoint.commit().await?;
+                expired += 1;
+            }
+            Ok(false) => {
+                savepoint.rollback().await?;
+                raced += 1;
+            }
+            Err(error) => {
+                tracing::warn!(%workspace_id, approval_id = %candidate.id, %error,
+                    "approval expiry sweep could not settle one approval; retrying next tick");
+                savepoint.rollback().await?;
+                failed += 1;
+            }
         }
     }
-    Ok((expired, raced))
+    Ok((expired, raced, failed))
 }
 
 /// Expire one approval and release its run.
@@ -164,6 +180,17 @@ async fn settle_expired_in_tx(
 
     if !mark_approval_expired_in_tx(&mut *conn, approval.id, now, EXPIRED_REASON).await? {
         return Ok(false);
+    }
+    if let Some(card) = approval.request_message_id {
+        momo_messaging::patch_and_prune_message_props_in_tx(
+            conn,
+            workspace_id,
+            card,
+            &momo_agent::approval::decided_props_patch("expired", None, now, Some(EXPIRED_REASON)),
+            &["last_attempt"],
+        )
+        .await?;
+        momo_messaging::emit_message_edited_in_tx(conn, workspace_id, card).await?;
     }
 
     // THE line this whole module exists for: the run leaves `RunStatus::LIVE`,
@@ -205,6 +232,12 @@ async fn settle_expired_in_tx(
         }
     }
 
+    // ADR-0217: a lapsed admission never speaks as the unseated agent. The
+    // per-person card's deadline/status already says it expired; no job exists.
+    if approval.payload["origin"] == "dm_agent_admission" {
+        return Ok(true);
+    }
+
     // Tell the channel, through the message spine like everything else — the
     // person who asked deserves to see that the request lapsed rather than to
     // find a conversation that simply stops.
@@ -237,27 +270,38 @@ async fn settle_expired_in_tx(
             object.insert(PROP_ANSWERS_MESSAGE_ID.into(), json!(trigger.to_string()));
         }
     }
-    send_message_in_tx(
-        &mut *conn,
+    // The ledger/card/audit still settle after the speaker has left. Do not
+    // manufacture a fresh agent utterance in a room it can no longer enter.
+    if momo_messaging::dm::dm_agent_can_speak_in_tx(
+        conn,
         workspace_id,
-        NewMessage {
-            channel_id: approval.channel_id,
-            author_member_id: approval.requested_by,
-            message_type: MessageType::ToolResult,
-            body: Some(body.to_string()),
-            props,
-            root_id: None,
-            reply_to_id: None,
-            // One expiry line per approval. Shares the key space with the
-            // rejection line for the same approval, which is correct: an
-            // approval ends exactly once, so only one of the two can exist.
-            client_msg_id: Some(approval.id),
-            run_id: Some(approval.run_id),
-            hlc_ts: None,
-            hlc_count: None,
-        },
+        approval.channel_id,
+        approval.requested_by,
     )
-    .await?;
+    .await?
+    {
+        send_message_in_tx(
+            &mut *conn,
+            workspace_id,
+            NewMessage {
+                channel_id: approval.channel_id,
+                author_member_id: approval.requested_by,
+                message_type: MessageType::ToolResult,
+                body: Some(body.to_string()),
+                props,
+                root_id: None,
+                reply_to_id: None,
+                // One expiry line per approval. Shares the key space with the
+                // rejection line for the same approval, which is correct: an
+                // approval ends exactly once, so only one of the two can exist.
+                client_msg_id: Some(approval.id),
+                run_id: Some(approval.run_id),
+                hlc_ts: None,
+                hlc_count: None,
+            },
+        )
+        .await?;
+    }
 
     let event = decision_event_payload(approval, "expired", None, now, Some(EXPIRED_REASON));
     write_audit(

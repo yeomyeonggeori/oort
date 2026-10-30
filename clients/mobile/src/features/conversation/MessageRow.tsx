@@ -1608,11 +1608,13 @@ export function readApprovalCard(
     approvalReceipts,
     approvalOffline,
     approvalsProvided,
+    viewerMemberId,
   }: {
     approvalGates?: ReadonlyMap<string, ApprovalGate>;
     approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
     approvalOffline?: boolean;
     approvalsProvided?: boolean;
+    viewerMemberId?: string;
   },
 ) {
   // 카드가 이미 파싱돼 있으므로 여기서 맞춰 본다 — 목록 쪽에서 하려면 이
@@ -1625,6 +1627,7 @@ export function readApprovalCard(
   const settledStatus = receipt?.status ?? card.status;
   const note = approvalCardNote({
     receiptNote: receipt?.note ?? null,
+    waitingForParticipant: card.action?.id === 'dm.agent.admit' && card.action.targetMemberId?.toLowerCase() !== viewerMemberId?.toLowerCase(),
     isResumeOffer: card.isResumeOffer,
     // 폰에는 재개 제안에 할 말이 아직 없다. 웹의 문장은 **작업 세션 패널**로
     // 가라는 안내인데(`AgentCard.tsx` — 「내 세션에서 온라인 호스트를
@@ -1665,6 +1668,7 @@ export function readApprovalCard(
 function AgentCard({
   card,
   directory,
+  viewerMemberId,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -1679,6 +1683,7 @@ function AgentCard({
   decisionRef?: React.Ref<ApprovalDecisionHandle>;
   /** 결과 카드의 「결정」 줄이 사람 이름을 푸는 데 쓴다. */
   directory: Directory;
+  viewerMemberId?: string;
   approvalGates?: ReadonlyMap<string, ApprovalGate>;
   approvalReceipts?: ReadonlyMap<string, ApprovalReceipt>;
   approvalOffline?: boolean;
@@ -1704,6 +1709,7 @@ function AgentCard({
       approvalReceipts,
       approvalOffline,
       approvalsProvided,
+      viewerMemberId,
     });
     // 「전문 보기」를 세울 카드인가. 행의 로터(`MessageRowInner`)가 같은 함수로 같은 답을 읽는다.
     const messagePreview = openableMessagePreview(
@@ -2465,6 +2471,7 @@ function MessageRowInner({
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
     const read = readApprovalCard(card, {
+      viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
       approvalOffline,
@@ -2475,6 +2482,7 @@ function MessageRowInner({
     return {canApprove: spawnHostGate(card.execution).canApprove};
   }, [
     presentation.card,
+    actions?.myMemberId,
     approvalGates,
     approvalReceipts,
     approvalOffline,
@@ -2488,6 +2496,7 @@ function MessageRowInner({
     const card = presentation.card;
     if (card?.kind !== 'approval') return null;
     const read = readApprovalCard(card, {
+      viewerMemberId: actions?.myMemberId,
       approvalGates,
       approvalReceipts,
       approvalOffline,
@@ -2496,6 +2505,7 @@ function MessageRowInner({
     return openableMessagePreview(card, read.settledStatus, onOpenMessage !== undefined);
   }, [
     presentation.card,
+    actions?.myMemberId,
     approvalGates,
     approvalReceipts,
     approvalOffline,
@@ -3174,6 +3184,7 @@ function MessageRowInner({
               />
             ) : presentation.card ? (
               <AgentCard
+                viewerMemberId={actions?.myMemberId}
                 card={presentation.card}
                 directory={directory}
                 approvalGates={approvalGates}

@@ -485,6 +485,9 @@ BEGIN
   IF to_regclass('public.membership') IS NOT NULL THEN
     GRANT SELECT ON TABLE membership TO momo_notifier;
   END IF;
+  IF to_regclass('public.dm_agent_admission') IS NOT NULL THEN
+    GRANT SELECT ON TABLE dm_agent_admission TO momo_notifier;
+  END IF;
   IF to_regclass('public.member') IS NOT NULL THEN
     GRANT SELECT ON TABLE member TO momo_notifier;
   END IF;

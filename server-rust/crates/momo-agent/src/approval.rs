@@ -245,7 +245,8 @@ pub async fn lock_agent_and_count_pending_workspace_actions_in_tx(
 /// [`count_pending_workspace_actions_in_tx`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PendingWorkspaceActions {
-    /// Every pending, unexpired `workspace_action` of the agent except an in-place grant card —
+    /// Every pending, unexpired `workspace_action` of the agent except server-owned
+    /// in-place grant and DM consent cards —
     /// the number [`crate::actions::MAX_PENDING_WORKSPACE_ACTIONS`] caps.
     pub all: i64,
     /// Of those, the ones the agent raised **unasked** (`payload.origin = agent_initiated`,
@@ -270,7 +271,8 @@ pub async fn count_pending_workspace_actions_in_tx(
           WHERE workspace_id = $1 AND requested_by = $2 \
             AND action_type = 'workspace_action' AND status = 'pending' \
             AND (expires_at IS NULL OR expires_at > now()) \
-            AND payload->>'origin' IS DISTINCT FROM 'server_in_place'",
+            AND payload->>'origin' IS DISTINCT FROM 'server_in_place' \
+            AND payload->>'origin' IS DISTINCT FROM 'dm_agent_admission'",
     )
     .bind(workspace_id)
     .bind(agent_member_id)
