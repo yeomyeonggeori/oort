@@ -13482,6 +13482,19 @@ paths:
           $ref: "#/components/responses/AgentPortUnauthorized"
         "403":
           $ref: "#/components/responses/AgentPortForbidden"
+        "408":
+          description: >
+            The body of an `expression.create` proposal did not arrive within 15
+            seconds (ADR-0218 appendix A). Only that call is read past 64 KiB
+            (up to 6 MiB), and only for a credential that holds
+            `workspace:propose`; every other body keeps the 64 KiB bound and is
+            answered `413` when it is over. The body is deliberately empty.
+          headers:
+            Cache-Control:
+              description: Agent Port responses are private and must never be stored.
+              schema:
+                type: string
+                enum: ["private, no-store"]
         "413":
           description: Request body exceeds the Agent Port byte bound.
           headers:

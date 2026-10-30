@@ -3293,13 +3293,17 @@ pub async fn resolve_action_with_origin_in_tx(
                 for candidate in candidates.iter() {
                     if let ExpressionImageSpec::Attachment(attachment_id) = &candidate.image {
                         from_attachment = true;
-                        let found = momo_messaging::find_requester_attachment_in_tx(
+                        // The expression's own use of the judgement: a GIF and a video are
+                        // sources too (ADR-0186 X8-1/X8-2). `prepare_expression` asks for the
+                        // same use, so the two never disagree about which file exists.
+                        let found = momo_messaging::find_requester_attachment_for_in_tx(
                             conn,
                             workspace_id,
                             requester,
                             run_channel,
                             *attachment_id,
                             momo_expressions::INPUT_BYTES as i64,
+                            momo_messaging::RequesterAttachmentUse::ExpressionSource,
                         )
                         .await?;
                         if found.is_none() {
