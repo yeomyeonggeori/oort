@@ -1344,7 +1344,9 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
     }
 
     retire_pending_agent_jobs_for_run_in_tx(conn, workspace_id, run_id).await?;
-    cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, chrono::Utc::now()).await?;
+    let decided_at = chrono::Utc::now();
+    let cancelled_approvals =
+        cancel_pending_approvals_for_run_in_tx(conn, workspace_id, run_id, decided_at).await?;
 
     // ADR-0162 HAP-E5 — the `agent_run` inbox reference, in this transaction.
     //
@@ -1368,6 +1370,51 @@ async fn cancel_in_tx(conn: &mut PgConnection, input: CancelInput) -> DbRejectab
             connection_id,
             run.channel_id,
             run_id,
+        )
+        .await?;
+    }
+
+    // The hosted inbox lock above precedes the card lock (ADR-0186 v6 R-b).
+    // A human stop retires each pending card once and never sends a result push.
+    for approval in cancelled_approvals {
+        let outcome = momo_agent::approval_outcome::approval_card_outcome(
+            &approval,
+            "cancelled",
+            None,
+            decided_at,
+            None,
+        );
+        if let Some(message_id) = approval.request_message_id {
+            momo_messaging::settle_approval_card_in_tx(
+                conn,
+                workspace_id,
+                message_id,
+                &outcome.patch,
+                &outcome.body,
+                false,
+            )
+            .await?;
+        }
+        let event = momo_agent::approval::decision_event_payload(
+            &approval,
+            "cancelled",
+            None,
+            decided_at,
+            None,
+        );
+        emit_outbox(
+            &mut *conn,
+            workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &momo_agent::approval::decision_broadcast_payload(
+                &momo_messaging::cent_channel(workspace_id, approval.channel_id),
+                &approval,
+                "cancelled",
+                &event,
+                decided_at,
+            ),
+            Some(approval.channel_id),
         )
         .await?;
     }

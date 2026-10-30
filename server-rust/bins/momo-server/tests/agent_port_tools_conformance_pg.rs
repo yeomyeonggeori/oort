@@ -3007,26 +3007,26 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     let messages_after = channel_message_count(&su, fixture.workspace, fixture.channel).await;
     assert_eq!(
         messages_after - messages_before,
-        1,
-        "the rejection must add exactly one message (the tool_result) beside the card"
+        0,
+        "the rejection updates the existing card without another message"
     );
     let (result_author, result_props): (Uuid, Value) = sqlx::query_as(
         "SELECT author_member_id, props FROM message \
-          WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+          WHERE workspace_id=$1 AND channel_id=$2 AND type='approval_request' AND props->>'status'='rejected' \
           ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
     .fetch_one(&su)
     .await
-    .expect("the rejection tool_result is in the channel");
+    .expect("the rejected approval card is in the channel");
     assert_eq!(
         result_author, fixture.hosted_agent,
         "the outcome is authored by the agent whose proposal it was"
     );
     assert_eq!(result_props["approval_id"], json!(approval_id.to_string()));
     assert_eq!(result_props["status"], json!("rejected"));
-    // The card and its outcome are two distinct rows with two distinct keys.
+    // The card retains its proposal key; old result-line keys stay reserved.
     let card_key: Option<Uuid> =
         sqlx::query_scalar("SELECT client_msg_id FROM message WHERE workspace_id=$1 AND id=$2")
             .bind(fixture.workspace)
@@ -3113,8 +3113,8 @@ async fn a_proposal_parks_the_run_and_opens_no_other_path() {
     .await
     .unwrap();
     assert_eq!(
-        expiry_line, 1,
-        "the expiry tool_result must not collide with its own proposal card"
+        expiry_line, 0,
+        "expiry updates the existing card without a tool_result"
     );
 }
 
@@ -3809,7 +3809,7 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         Option<Uuid>,
     ) = sqlx::query_as(
         "SELECT author_member_id, props, body, client_msg_id FROM message \
-              WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+              WHERE workspace_id=$1 AND channel_id=$2 AND type='approval_request' AND props->'result'->>'status'='executed' \
               ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
@@ -3826,7 +3826,7 @@ async fn an_approved_workspace_action_mints_the_invite_and_shows_the_link_once()
         Some(approval_id),
         "the result line must not take the key the rejection and expiry lines use"
     );
-    let card = &result_props["momo.action_result"];
+    let card = &result_props["result"];
     assert_eq!(card["v"], json!(1));
     assert_eq!(card["action_id"], json!("invite.create"));
     assert_eq!(card["status"], json!("executed"));
@@ -8257,7 +8257,7 @@ async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant
     // ---- the agent can read the id and then speak in the new channel -------
     let line: (String, Value) = sqlx::query_as(
         "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
@@ -8266,7 +8266,7 @@ async fn an_approved_channel_create_is_one_step_for_channel_membership_and_grant
     .unwrap();
     assert!(line.0.contains(&channel_id.to_string()), "{}", line.0);
     assert!(
-        line.1["momo.action_result"].get("next").is_none(),
+        line.1["result"].get("next").is_none(),
         "no dead settings link on a channel result"
     );
     let (status, read) = call(
@@ -10250,7 +10250,7 @@ async fn a_channel_grant_widens_only_the_proposers_own_connection() {
     assert_eq!(status, 200, "{posted}");
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
@@ -10714,7 +10714,7 @@ async fn an_approved_settings_update_changes_only_the_two_keys() {
     );
     let line: String = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .bind(fixture.channel)
@@ -17274,8 +17274,8 @@ async fn an_agent_receives_a_pairing_code_only_when_the_approver_chose_to_hand_i
     assert_eq!(grant["kind"], json!("pairing"));
     assert!(grant.get("claimedAtMs").is_none());
     let result_rows: Value = sqlx::query_scalar(
-        "SELECT props->'momo.action_result'->'rows' FROM message \
-          WHERE workspace_id=$1 AND type='tool_result' ORDER BY seq DESC LIMIT 1",
+        "SELECT props->'result'->'rows' FROM message \
+          WHERE workspace_id=$1 AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(fixture.workspace)
     .fetch_one(&su)
@@ -19286,10 +19286,10 @@ async fn the_plugin_install_card_installs_as_the_approver_and_equals_the_rest_ro
     assert_eq!(detail["approval_id"], json!(approval.to_string()));
     assert_eq!(detail["plugin_id"], json!(GITHUB));
     assert_eq!(detail["egress_domains"], json!(["api.githubcopilot.com"]));
-    // The outcome line is the helper's, in the channel.
+    // The outcome remains on the helper's existing approval card.
     let outcome: Option<String> = sqlx::query_scalar(
         "SELECT body FROM message WHERE workspace_id = $1 AND author_member_id = $2 \
-         AND type = 'tool_result' ORDER BY seq DESC LIMIT 1",
+         AND type = 'approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(workspace)
     .bind(helper)
@@ -21735,19 +21735,12 @@ async fn a_refused_tap_leaves_no_agent_run_reference_and_the_decision_after_it_l
     );
 }
 
-/// **The reference's lock order against the message spine, measured as an outcome.** The tap
-/// takes the proposer's connection and inbox counter *before* the channel's counter; the spine
-/// takes the channel first and fans out to the same connection after. Here the spine holds the
-/// channel's counter and then asks for the inbox counter the tap holds — a cycle — and
-/// PostgreSQL aborts the one that has waited longest, the person's tap. The tap must be run again
-/// and succeed (once, one reference, 200), not answer 500.
-///
-/// Timing-shaped: the spine's second statement follows the tap's park within a few tens of
-/// milliseconds, well inside `deadlock_timeout` (1 s), so the tap — the longer waiter — is the one
-/// PostgreSQL aborts. Sabotage: delete the retry in `decide` and this answers 500.
+/// ADR-0186 v6 R-b (#3982): replacing the outcome INSERT with a card
+/// update also removes its channel counter wait. Exercise the former deadlock
+/// fixture and require the decision to finish while a message owns that counter.
 #[tokio::test]
 #[ignore = "needs verifier-owned isolated PostgreSQL 18"]
-async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_succeeds() {
+async fn a_card_settlement_does_not_wait_on_a_message_sends_channel_counter() {
     ensure_schema_and_roles();
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
@@ -21778,11 +21771,6 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
         .fetch_one(&mut *spine)
         .await
         .expect("hold the channel counter");
-    let spine_pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
-        .fetch_one(&mut *spine)
-        .await
-        .expect("the spine's backend");
-
     let decision = tokio::spawn({
         let client = client.clone();
         let base = base.clone();
@@ -21790,31 +21778,15 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
         async move { decide_as(&client, &base, ws, &jwt, card, true, Uuid::new_v4()).await }
     });
 
-    // Wait for a condition: the tap has written its reference and is parked behind the spine,
-    // waiting for the channel's counter for its outcome line.
-    let mut parked = false;
-    for _ in 0..400 {
-        let waiting: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM pg_stat_activity \
-              WHERE datname = current_database() AND $1 = ANY(pg_blocking_pids(pid))",
-        )
-        .bind(spine_pid)
-        .fetch_one(&su)
+    // #3982 removed the result INSERT. The decision must finish even while
+    // a concurrent message send holds channel_seq: the former counter/inbox
+    // deadlock no longer exists, and no transaction replay is needed here.
+    let (status, _h, body) = tokio::time::timeout(std::time::Duration::from_secs(3), decision)
         .await
-        .expect("read pg_stat_activity");
-        if waiting > 0 {
-            parked = true;
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-    assert!(
-        parked,
-        "the tap never reached its outcome line behind the spine"
-    );
+        .expect("card settlement must not wait for channel_seq")
+        .expect("the decision task");
+    assert_eq!(status, 200, "{body}");
 
-    // The spine fans the message out to the same connection: it wants the inbox counter the tap
-    // holds. PostgreSQL breaks the cycle by aborting the tap, which has waited longest.
     let fan_out = sqlx::query(
         "SELECT last_seq FROM hosted_agent_inbox_counter WHERE connection_id=$1 FOR UPDATE",
     )
@@ -21823,19 +21795,14 @@ async fn a_decision_that_loses_a_deadlock_with_a_message_send_is_run_again_and_s
     .await;
     assert!(
         fan_out.is_ok(),
-        "PostgreSQL aborted the spine, not the tap — the tap had waited longest, so rerun this: {fan_out:?}"
+        "the message fan-out can follow the completed settlement: {fan_out:?}"
     );
     spine.commit().await.expect("the spine commits its message");
 
-    let (status, _h, body) = decision.await.expect("the decision task");
-    assert_eq!(
-        status, 200,
-        "the tap was the deadlock's victim and must have been run again: {body}"
-    );
     assert_eq!(
         agent_run_references(&su, ws, fixture.hosted_connection).await,
         vec![(run, fixture.channel)],
-        "the retry wrote the proposer's reference once"
+        "the settlement wrote the proposer's reference once"
     );
     assert_eq!(approval_status_3708(&su, card).await, "approved");
 }
@@ -22103,7 +22070,7 @@ async fn an_approved_pin_is_the_approvers_own_pin_and_no_audit_row_holds_a_word_
     assert_eq!(leaked, 0, "no audit row holds a word of the message");
     let line: (String, Value) = sqlx::query_as(
         "SELECT body, props FROM message WHERE workspace_id=$1 AND channel_id=$2 \
-           AND props ? 'momo.action_result' ORDER BY seq DESC LIMIT 1",
+           AND type='approval_request' AND props->'result'->>'status'='executed' ORDER BY seq DESC LIMIT 1",
     )
     .bind(ws)
     .bind(fixture.channel)
@@ -22115,10 +22082,7 @@ async fn an_approved_pin_is_the_approvers_own_pin_and_no_audit_row_holds_a_word_
         "{}",
         line.0
     );
-    assert_eq!(
-        line.1["momo.action_result"]["ref"]["type"],
-        json!("message")
-    );
+    assert_eq!(line.1["result"]["ref"]["type"], json!("message"));
     assert_eq!(
         agent_job_count(&su, ws, fixture.hosted_agent).await,
         jobs_before,
@@ -26431,3 +26395,6 @@ async fn a_failing_test_puts_the_slow_deadlock_detection_back() {
         "a panic does not leave the slow detector behind"
     );
 }
+
+#[path = "support/approval_card_cases.rs"]
+mod approval_card_cases;

@@ -1283,10 +1283,10 @@ pub async fn find_client_message_in_tx(
 /// and leaves every other key the producer wrote (`tool_name`, `arguments`,
 /// `call_id`, …) untouched. A whole-object replace would blank the card.
 ///
-/// Deliberately emits **no** broadcast. The decided card is announced by the
-/// `approval.decided` envelope on the channel, which already carries every
-/// decision field a client needs; a second realtime event for one fact is how
-/// two envelopes come to claim the same channel version.
+/// Emits no broadcast: the caller publishes its updated full row explicitly.
+/// Approval settlement uses `settle_approval_card_in_tx` (ADR-0186 v6 R-b),
+/// which updates props and body together and emits `message.edited`; timelines
+/// do not consume `approval.decided`.
 pub async fn patch_message_props_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

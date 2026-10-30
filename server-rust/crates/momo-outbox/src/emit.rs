@@ -26,7 +26,7 @@ pub enum OutboxKind {
     AgentJob,
     /// Push-notification candidate, consumed by the NotifierWorker.
     ///
-    /// **Two writers emit this kind, and no others.**
+    /// **Three writers emit this kind, and no others.**
     ///
     /// 1. The `push_candidate_enqueue_trg` AFTER INSERT trigger on `message`
     ///    (`011_push_notifier.sql:47-69`) — one per message, inside the transaction of
@@ -42,8 +42,10 @@ pub enum OutboxKind {
     ///    streamed answer is born unfinished, so the trigger judges it at its birth; the
     ///    end is the moment it becomes the answer, and no INSERT happens then, so the
     ///    trigger is silent. That is the one second writer the ADR allows, and why this is
-    ///    not "an invitation to enqueue one": a third writer needs the same kind of
-    ///    decision (an Accepted ADR), not a copy of this call.
+    ///    not an invitation to enqueue arbitrary candidates.
+    /// 3. [`crate::push::emit_approval_settled_push_candidate`], in the approval
+    ///    card's settlement transaction (ADR-0204 addendum 6 D6-5, the D8-a
+    ///    exception). It replaces the retired outcome lines' requester push.
     ///
     /// The variant exists so the Rust enum is a faithful mirror of the DB enum and so
     /// consumers can name the label.
