@@ -60,7 +60,7 @@ describe("원장 → 기록 줄 (ADR-0200 D2)", () => {
       "승인이 만료됐어요",
       "시간이 초과됐어요",
     ]);
-    expect(rows[6]?.reason).toBe("승인이 만료됐어요");
+    expect(rows[6]?.reason).toBe("승인을 기다리다 만료됐어요");
     expect(rows[4]?.approvalId).toBe("AP1");
   });
 

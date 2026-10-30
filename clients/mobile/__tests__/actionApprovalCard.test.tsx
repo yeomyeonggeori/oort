@@ -40,9 +40,6 @@ import {
 } from '@momo/core/features/timeline/agentCardModel';
 import {
   ACTION_RESULT_SECRET_ONCE_NOTE,
-  ACTION_RESULT_STATUS_LABEL,
-  ACTION_RESULT_STATUS_NOTE,
-  type ActionResultStatus,
 } from '@momo/core/features/timeline/actionResultCard';
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import type {RowPresentation} from '@momo/core/features/timeline/rowModel';
@@ -485,7 +482,7 @@ describe('#1084 — 403 은 「관리자가 승인해야 해요」라는 조용�
     // 요청은 여전히 대기다 — 다른 사람이 이어받을 수 있다.
     expect(screen.getByTestId(`${PREFIX}-approve`)).toBeTruthy();
     expect(screen.getByTestId(`${PREFIX}-reject`)).toBeTruthy();
-    expect(within(screen.getByTestId('agent-card')).getByText('승인 대기')).toBeTruthy();
+    expect(within(screen.getByTestId('agent-card')).getByTestId('agent-status-chip')).toHaveTextContent(/^승인 필요$/);
     // 엄지 밑의 버튼이 바뀐 것을 소리로도 말한다.
     expect(announce).toHaveBeenCalledWith(ROLE_COPY);
   });
@@ -1193,17 +1190,17 @@ describe('#2513 — 영속 결과 카드 (부록 B)', () => {
   });
 
   it('네 상태가 각자의 칩과 문장을 세운다', () => {
-    for (const status of [
-      'executed',
-      'rejected',
-      'expired',
-      'role_required',
-    ] as ActionResultStatus[]) {
+    for (const [status, label, note] of [
+      ['executed', '끝', '실행을 마쳤어요.'],
+      ['rejected', '거부', '승인하지 않아 실행하지 않았어요.'],
+      ['expired', '만료', '승인을 기다리다 만료됐어요'],
+      ['role_required', '권한 필요', '관리자가 승인해야 해요.'],
+    ] as const) {
       const view = renderResult({status, secret_shown_once: false});
       const card = view.getByTestId('agent-card');
-      expect(within(card).getByText(ACTION_RESULT_STATUS_LABEL[status])).toBeTruthy();
+      expect(within(card).getByTestId('agent-status-chip')).toHaveTextContent(new RegExp(`^${label}$`));
       expect(view.getByTestId('action-result-note').props.children).toBe(
-        ACTION_RESULT_STATUS_NOTE[status],
+        note,
       );
       expect(view.queryByTestId('action-result-secret-once')).toBeNull();
       view.unmount();
@@ -1271,9 +1268,9 @@ describe('모델 소비 단일점 — 폰은 코어가 읽어 준 모델만 그�
       message: resultMessage(appendixB({secret_shown_once: false})),
       gates: new Map(),
     });
-    expect(screen.getByText(ACTION_RESULT_STATUS_LABEL.expired)).toBeTruthy();
+    expect(screen.getByTestId('agent-status-chip')).toHaveTextContent(/^만료$/);
     expect(screen.getByTestId('action-result-note').props.children).toBe(
-      ACTION_RESULT_STATUS_NOTE.expired,
+      '승인을 기다리다 만료됐어요',
     );
     expect(screen.getByText('모델:member')).toBeTruthy();
     expect(screen.queryByText('member')).toBeNull();
@@ -1511,7 +1508,7 @@ describe('D4 — 1회 링크는 폰 메모리에만 있고, 다시 열면 사라
     await screen.findByTestId('action-result-secret-once', {}, SETTLE);
     expect(screen.queryByTestId('card-approval-link-once')).toBeNull();
     expect(renderedText()).not.toContain(SECRET);
-    expect(screen.getByText('승인됨')).toBeTruthy();
+    expect(screen.getAllByTestId('agent-status-chip').map(chip => chip.props.children.props.children)).toEqual(['끝', '끝']);
     expect(screen.getByTestId('action-result-note').props.children).toBe(
       '실행을 마쳤어요.',
     );

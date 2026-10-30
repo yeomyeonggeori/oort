@@ -104,11 +104,12 @@ describe("여러 run 목록", () => {
       [...sections[i].querySelectorAll('[data-testid="agent-work-panel-run"]')].map((b) => b.textContent);
     expect(labels(0).join("|")).toContain("채널 정리");
     expect(labels(0)).toHaveLength(2);
-    expect(labels(0).join("|")).toContain("승인 대기");
+    expect(labels(0).join("|")).toContain("승인 필요");
     expect(labels(1)[0]).toContain("대기 1번째");
     expect(labels(1)[1]).toContain("대기 2번째");
-    expect(labels(2)[0]).toContain("시간 초과");
-    expect(labels(2)[0]).toContain("승인이 만료됐어요");
+    expect(labels(2)[0]).toContain("만료");
+    expect(labels(2)[0]).not.toContain("시간 초과");
+    expect(labels(2)[0]).toContain("승인을 기다리다 만료됐어요");
     expect(el.querySelector('[data-selected]')?.getAttribute("data-run-id")).toBe("r-q1");
   });
 
@@ -228,13 +229,13 @@ describe("기록 줄과 승인 링크", () => {
     expect(el.textContent).toContain("이 앱이 아직 모르는 기록이에요");
   });
 
-  it("승인 대기 안내는 카드로 가는 링크를 둔다", () => {
+  it("승인 필요 안내는 카드로 가는 링크를 둔다", () => {
     const el = render(createElement(ApprovalLink, { href: "/c/ch?msg=m1" }));
     expect(el.querySelector('[data-testid="agent-work-panel-approval-link"]')?.getAttribute("href")).toBe("/c/ch?msg=m1");
     expect(el.textContent).toContain("승인을 기다리고 있어요");
   });
 
-  it("승인 대기인데 카드를 찾지 못하면 침묵하지 않고 이유를 말한다", () => {
+  it("승인 필요인데 카드를 찾지 못하면 침묵하지 않고 이유를 말한다", () => {
     const el = render(createElement(ApprovalMissing));
     expect(el.querySelector('[data-testid="agent-work-panel-approval-missing"]')?.textContent).toContain(
       "이미 결정됐거나 만료됐을 수 있어요"

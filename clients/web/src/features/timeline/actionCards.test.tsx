@@ -396,7 +396,7 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     const init = (fetchSpy.mock.calls[0] as unknown as [string, RequestInit])[1];
     const body = JSON.parse(String(init.body));
     expect(body.approve).toBe(false);
-    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("거부됨");
+    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("거부");
     // 눌린 버튼은 영수증 줄로 바뀌며 사라진다 — 초점은 카드가 받는다(body 로 떨어지지 않는다).
     expect(document.activeElement).toBe(byTestId(host, "agent-card")[0]);
   });
@@ -496,8 +496,8 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
       host,
       jsonResponse({ approval_id: APPROVAL_ID, status: "role_required" }, 403)
     );
-    // 칩은 여전히 「승인 대기」다 — §5: approval 은 여전히 pending 이다.
-    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("승인 대기");
+    // 칩은 여전히 「승인 필요」다 — §5: approval 은 여전히 pending 이다.
+    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("승인 필요");
     expect(byTestId(host, "approval-approve")).toHaveLength(1);
   });
 
@@ -668,9 +668,9 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
   it("네 상태가 각자 다른 칩과 문장을 세운다", () => {
     const seen = new Set<string>();
     for (const [status, label, note] of [
-      ["executed", "실행됨", "실행을 마쳤어요."],
-      ["rejected", "거부됨", "승인하지 않아 실행하지 않았어요."],
-      ["expired", "만료됨", "기한이 지나 실행하지 않았어요."],
+      ["executed", "끝", "실행을 마쳤어요."],
+      ["rejected", "거부", "승인하지 않아 실행하지 않았어요."],
+      ["expired", "만료", "승인을 기다리다 만료됐어요"],
       ["role_required", "권한 필요", "관리자가 승인해야 해요."],
     ] as const) {
       const host = mountResult({ status });

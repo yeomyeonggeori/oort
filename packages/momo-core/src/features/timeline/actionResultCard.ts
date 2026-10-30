@@ -1,3 +1,4 @@
+import { APPROVAL_EXPIRED_SENTENCE, REQUEST_WORD } from "../agents/runPhase";
 import { payloadDetail, type PayloadDetail, type PayloadRow } from "./agentCardModel";
 
 // =============================================================================
@@ -74,9 +75,9 @@ const STATUSES: ReadonlySet<string> = new Set<ActionResultStatus>([
 export const ACTION_RESULT_STATUS_LABEL: Readonly<
   Record<ActionResultStatus, string>
 > = {
-  executed: "실행됨",
-  rejected: "거부됨",
-  expired: "만료됨",
+  executed: REQUEST_WORD.done,
+  rejected: REQUEST_WORD.declined,
+  expired: REQUEST_WORD.expired,
   role_required: "권한 필요",
 };
 
@@ -92,7 +93,7 @@ export const ACTION_RESULT_STATUS_NOTE: Readonly<
 > = {
   executed: "실행을 마쳤어요.",
   rejected: "승인하지 않아 실행하지 않았어요.",
-  expired: "기한이 지나 실행하지 않았어요.",
+  expired: APPROVAL_EXPIRED_SENTENCE,
   role_required: "관리자가 승인해야 해요.",
 };
 

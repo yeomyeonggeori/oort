@@ -1,3 +1,4 @@
+import { REQUEST_WORD } from "./runPhase";
 import type {
   AgentProfile,
   AgentRunStatus,
@@ -71,7 +72,7 @@ export function mergeRunPages(
 const RUN_STATUS_LABELS: Record<AgentRunStatus, string> = {
   queued: "대기 중",
   running: "실행 중",
-  awaiting_approval: "승인 대기",
+  awaiting_approval: REQUEST_WORD.approval,
   paused: "일시정지",
   succeeded: "완료",
   failed: "실패",
