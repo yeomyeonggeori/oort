@@ -540,6 +540,28 @@ pub(crate) async fn per_ip_refused(
     key_prefix: &'static str,
     limit_of: fn(&RateLimitConfig) -> u32,
 ) -> Response {
+    per_ip_refused_by(
+        state,
+        request,
+        next,
+        key_prefix,
+        limit_of,
+        StatusCode::UNAUTHORIZED,
+    )
+    .await
+}
+
+/// [`per_ip_refused`] for a surface whose one refusal is a different status. `refused` is the
+/// status that spends the address's budget; every other answer — a served response above all —
+/// spends nothing. #4820 C2a: the self-media route answers every refusal with one 404.
+pub(crate) async fn per_ip_refused_by(
+    state: AppState,
+    request: Request,
+    next: Next,
+    key_prefix: &'static str,
+    limit_of: fn(&RateLimitConfig) -> u32,
+    refused: StatusCode,
+) -> Response {
     let config: &RateLimitConfig = &state.rate_limit.config;
     let limit = limit_of(config);
     let peer = request
@@ -560,7 +582,7 @@ pub(crate) async fn per_ip_refused(
     }
 
     let response = next.run(request).await;
-    if limit == 0 || response.status() != StatusCode::UNAUTHORIZED {
+    if limit == 0 || response.status() != refused {
         return response;
     }
     let Some(ip) = ip else {
@@ -584,6 +606,28 @@ pub(crate) async fn per_ip_refused(
         );
     }
     too_many_requests(verdict.retry_after_seconds)
+}
+
+/// Per-IP budget for **refused** self-media addresses (#4820 C2a): the public
+/// `GET /v1/self-media/{ws}/{token}` answers one 404 for everything it refuses (unknown, other
+/// workspace, expired, spent, run over, not the requester's file). Only that 404 spends the
+/// address's budget, and an address whose budget is spent is turned away before the handler and
+/// its database transaction run. A served picture spends nothing. Reuses the claim budget on an
+/// independent key, like device-link redeem.
+pub async fn per_ip_self_media(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    per_ip_refused_by(
+        state,
+        request,
+        next,
+        "ip:self-media",
+        |config| config.claim_per_ip_limit,
+        StatusCode::NOT_FOUND,
+    )
+    .await
 }
 
 /// The upload budget's own key prefix — never the join/claim prefixes, so

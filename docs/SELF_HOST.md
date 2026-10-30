@@ -456,7 +456,9 @@ it none of these exist and no Hermes is started.
   before the Hermes entrypoint (chat, Codex subscription search and Codex
   subscription image generation allow-list, without `web_extract`; connectors keep
   all `web` tools and `image_gen` off) and checks the oort image guard plugin, which
-  refuses image addresses and file paths before the tool runs: a failing
+  refuses image addresses and file paths before the tool runs (the one exception,
+  when `OORT_SELF_MEDIA_ORIGIN` is set, is this oort's own short-lived address of the
+  photo a requester attached, so the agent can edit that photo): a failing
   gate means a container that restarts and never listens, so the probe
   reports `unreachable` (not connectable) instead of an unlocked Hermes.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1` is your own declaration; here the gate

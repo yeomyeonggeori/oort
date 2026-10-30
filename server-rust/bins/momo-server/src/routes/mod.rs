@@ -104,6 +104,8 @@ pub mod roster;
 /// ADR-0208 / #4214 — scheduled messages (human-only, owner-scoped, outbox event on every change).
 pub mod scheduled_messages;
 pub mod search;
+/// #4820 C2a — the single-use address of the requester's own picture for the co-hosted Hermes picture tool.
+pub mod self_media;
 /// #1873 — BZ-4e self display-name rename (`PATCH …/members/me`).
 pub mod self_profile;
 pub mod shared;

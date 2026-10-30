@@ -13,6 +13,7 @@ import builtins
 import hashlib
 import importlib.util
 import io
+import json
 import os
 import pathlib
 import re
@@ -147,7 +148,17 @@ REFUSED = {
 }
 
 
-class Table(unittest.TestCase):
+class ExceptionOff(unittest.TestCase):
+    """The tests written before the self-media exception run with the variable unset: the guard is what it was."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        os.environ.pop(guard.SELF_ORIGIN_ENV, None)
+
+
+class Table(ExceptionOff):
     def test_every_accepted_shape_passes_with_no_directive(self):
         for name, args in ACCEPTED.items():
             with self.subTest(name):
@@ -195,7 +206,7 @@ class Table(unittest.TestCase):
         self.assertEqual(guard.MAX_BASE64_CHARS, 5_592_408)
 
 
-class OnlyTheGuardedToolIsJudged(unittest.TestCase):
+class OnlyTheGuardedToolIsJudged(ExceptionOff):
     def test_other_tools_pass_whatever_their_arguments_look_like(self):
         for tool in ("web_search", "memory", "todo_list", "session_search", "image_generator", "video_generate", "", None, 5):
             with self.subTest(tool=tool):
@@ -207,7 +218,7 @@ class OnlyTheGuardedToolIsJudged(unittest.TestCase):
                 self.assertEqual(verdict({"image_url": "https://leak.example/x"}, tool=tool)["action"], "block")
 
 
-class NeverTouchesTheNetworkOrAFile(unittest.TestCase):
+class NeverTouchesTheNetworkOrAFile(ExceptionOff):
     """The refusal comes before any download, DNS lookup or file read: count every such call while judging all inputs."""
 
     def test_zero_network_and_file_access_for_every_input(self):
@@ -256,7 +267,7 @@ class NeverTouchesTheNetworkOrAFile(unittest.TestCase):
         self.assertEqual(sum(1 for r in results if r is None), len(ACCEPTED))
         self.assertEqual(sum(1 for r in results if r is not None), len(REFUSED))
 
-    def test_the_source_imports_only_re_and_calls_no_io(self):
+    def test_the_source_imports_only_re_and_os_and_calls_no_io(self):
         with open(os.path.join(PLUGIN_DIR, "__init__.py"), encoding="utf-8") as handle:
             tree = ast.parse(handle.read())
         imported = set()
@@ -265,12 +276,20 @@ class NeverTouchesTheNetworkOrAFile(unittest.TestCase):
                 imported |= {alias.name for alias in node.names}
             elif isinstance(node, ast.ImportFrom):
                 imported.add(node.module)
-        self.assertEqual(imported, {"re"})
+        self.assertEqual(imported, {"os", "re"})
         called = {n.func.id for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)}
         self.assertFalse(called & {"open", "exec", "eval", "compile", "__import__", "getattr", "setattr"}, called)
+        # `os` is there for ONE read: os.environ.get(...). No path, listing, process or other module attribute.
+        os_attributes = {n.attr for n in ast.walk(tree)
+                         if isinstance(n, ast.Attribute) and isinstance(n.value, ast.Name) and n.value.id == "os"}
+        self.assertEqual(os_attributes, {"environ"})
+        on_environ = {n.func.attr for n in ast.walk(tree)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                      and isinstance(n.func.value, ast.Attribute) and n.func.value.attr == "environ"}
+        self.assertEqual(on_environ, {"get"})
 
 
-class NeverRaisesAndFailsClosed(unittest.TestCase):
+class NeverRaisesAndFailsClosed(ExceptionOff):
     def test_hostile_values_get_a_refusal_not_an_exception(self):
         class Boom(str):
             def startswith(self, *args, **kwargs):
@@ -315,6 +334,211 @@ class NeverRaisesAndFailsClosed(unittest.TestCase):
         before = repr(args)
         verdict(args)
         self.assertEqual(repr(args), before)
+
+
+SELF_ORIGIN_VECTORS = json.load(open(os.path.join(HERE, "self_media_vectors.json"), encoding="utf-8"))["origin"]
+ORIGIN = "https://oort.example.com"
+WS = "01234567-89ab-cdef-0123-456789abcdef"
+TOKEN = "Zm9vYmFyYmF6cXV4MTIzNDU2Nzg5MGFiY2RlZmdoaWo"
+TAIL = WS + "/" + TOKEN
+GOOD = ORIGIN + "/v1/self-media/" + TAIL
+
+
+def address_under(origin):
+    return origin + "/v1/self-media/" + TAIL
+
+
+# Everything near the one allowed address that must stay refused: each is different BYTES, so none needs parsing.
+BYPASS = {
+    "scheme in capitals": "HTTPS" + GOOD[len("https"):],
+    "host in capitals": "https://OORT.EXAMPLE.COM/v1/self-media/" + TAIL,
+    "host in mixed case": "https://Oort.example.com/v1/self-media/" + TAIL,
+    "default port written out": "https://oort.example.com:443/v1/self-media/" + TAIL,
+    "another port": "https://oort.example.com:8443/v1/self-media/" + TAIL,
+    "an empty port": "https://oort.example.com:/v1/self-media/" + TAIL,
+    "userinfo": "https://user@oort.example.com/v1/self-media/" + TAIL,
+    "userinfo with a password": "https://user:pw@oort.example.com/v1/self-media/" + TAIL,
+    "the origin as userinfo of another host": "https://oort.example.com@evil.example/v1/self-media/" + TAIL,
+    "the origin as a label of another host": "https://oort.example.com.evil.example/v1/self-media/" + TAIL,
+    "another label in front": "https://evil.oort.example.com/v1/self-media/" + TAIL,
+    "a lookalike first letter": "https://\u043eort.example.com/v1/self-media/" + TAIL,
+    "a trailing dot on the host": "https://oort.example.com./v1/self-media/" + TAIL,
+    "plain http": "http://oort.example.com/v1/self-media/" + TAIL,
+    "scheme-relative": "//oort.example.com/v1/self-media/" + TAIL,
+    "leading space": " " + GOOD,
+    "trailing space": GOOD + " ",
+    "trailing newline": GOOD + "\n",
+    "leading tab": "\t" + GOOD,
+    "a dot segment": ORIGIN + "/v1/self-media/../self-media/" + TAIL,
+    "a single-dot segment": ORIGIN + "/v1/./self-media/" + TAIL,
+    "a dot segment inside the tail": ORIGIN + "/v1/self-media/" + WS + "/../" + WS + "/" + TOKEN,
+    "an encoded dot segment": ORIGIN + "/v1/self-media/%2e%2e/self-media/" + TAIL,
+    "an upper-case encoded dot segment": ORIGIN + "/v1/self-media/%2E%2E/self-media/" + TAIL,
+    "an encoded slash in the prefix": ORIGIN + "/v1%2Fself-media/" + TAIL,
+    "an encoded slash after the prefix": ORIGIN + "/v1/self-media%2F" + TAIL,
+    "a doubled slash before the path": ORIGIN + "//v1/self-media/" + TAIL,
+    "a doubled slash inside the prefix": ORIGIN + "/v1//self-media/" + TAIL,
+    "a doubled slash after the prefix": ORIGIN + "/v1/self-media//" + TAIL,
+    "a doubled slash inside the tail": ORIGIN + "/v1/self-media/" + WS + "//" + TOKEN,
+    "a query": GOOD + "?q=1",
+    "an empty query": GOOD + "?",
+    "a fragment": GOOD + "#f",
+    "an empty fragment": GOOD + "#",
+    "a trailing slash": GOOD + "/",
+    "an extra segment": GOOD + "/x",
+    "the address twice": GOOD + GOOD,
+    "text before the address": "image_url=" + GOOD,
+    "a JSON-encoded list holding the address": '["' + GOOD + '"]',
+    "another path under the origin": ORIGIN + "/v1/attachments/" + TAIL,
+    "the login route": ORIGIN + "/v1/auth/login",
+    "the prefix with no tail": ORIGIN + "/v1/self-media/",
+    "the prefix with no slash": ORIGIN + "/v1/self-media",
+    "another API version": ORIGIN + "/v2/self-media/" + TAIL,
+    "the prefix in capitals": ORIGIN + "/V1/SELF-MEDIA/" + TAIL,
+    "the prefix in mixed case": ORIGIN + "/v1/Self-Media/" + TAIL,
+    "an upper-case workspace": ORIGIN + "/v1/self-media/" + WS.upper() + "/" + TOKEN,
+    "a workspace that is not a uuid": ORIGIN + "/v1/self-media/not-a-uuid/" + TOKEN,
+    "a workspace of 35 characters": ORIGIN + "/v1/self-media/" + WS[:-1] + "/" + TOKEN,
+    "a token one character short": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-1],
+    "a token one character long": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN + "A",
+    "a token with padding": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-1] + "=",
+    "a token with a dot": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-1] + ".",
+    "a token with an encoded character": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-3] + "%41",
+    "a token in standard base64": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-1] + "+",
+    "a token with a slash": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-1] + "/",
+    "a token with a non-ASCII letter": ORIGIN + "/v1/self-media/" + WS + "/" + TOKEN[:-1] + "\u00e9",
+    "another origin entirely": "https://leak.example/v1/self-media/" + TAIL,
+    "an address with the conversation in the host": "https://q-secret-text.oort.example.com/v1/self-media/" + TAIL,
+}
+
+
+class SelfMediaAddress(unittest.TestCase):
+    """The owner's 10-30 exception: `image_url` -- only `image_url` -- may be this instance's own photo address."""
+
+    def setUp(self):
+        patcher = mock.patch.dict(os.environ, {guard.SELF_ORIGIN_ENV: ORIGIN})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_the_fixtures_are_what_they_claim_to_be(self):
+        self.assertEqual(len(TOKEN), 43)
+        self.assertEqual(len(WS), 36)
+        self.assertEqual(guard.SELF_ORIGIN_ENV, "OORT_SELF_MEDIA_ORIGIN")
+        self.assertEqual(guard.SELF_MEDIA_PATH_PREFIX, "/v1/self-media/")
+        self.assertGreaterEqual(len(BYPASS), 50)
+        self.assertNotIn(GOOD, BYPASS.values())
+
+    def test_exactly_one_address_passes_and_only_as_image_url(self):
+        self.assertIsNone(verdict({"prompt": "a cat", "image_url": GOOD}))
+        self.assertIsNone(verdict({"prompt": "a cat", "image_url": GOOD, "reference_image_urls": [PNG_URL]}))
+        self.assertIsNone(verdict({"prompt": "a cat", "image_url": GOOD, "reference_image_urls": []}))
+
+    def test_every_bypass_variant_is_refused_and_names_the_field(self):
+        for name, value in BYPASS.items():
+            with self.subTest(name):
+                result = verdict({"prompt": "a cat", "image_url": value})
+                self.assertIsInstance(result, dict, name)
+                self.assertEqual(result["action"], "block")
+                self.assertIn(guard.MARKER, result["message"])
+                self.assertIn("image_url", result["message"])
+
+    def test_the_address_is_never_accepted_as_a_reference(self):
+        for name, value in (("one reference", [GOOD]), ("a bare reference string", GOOD), ("after a good one", [PNG_URL, GOOD]),
+                            ("a tuple", (GOOD,))):
+            with self.subTest(name):
+                result = verdict({"prompt": "a cat", "reference_image_urls": value})
+                self.assertEqual(result["action"], "block")
+                self.assertIn("reference_image_urls", result["message"])
+
+    def test_a_good_address_does_not_excuse_the_other_argument(self):
+        for other in (["https://leak.example/x"], [GOOD], "/etc/passwd", ["/etc/passwd"]):
+            with self.subTest(other=repr(other)[:30]):
+                self.assertEqual(verdict({"image_url": GOOD, "reference_image_urls": other})["action"], "block")
+        self.assertEqual(verdict({"image_url": BYPASS["a query"], "reference_image_urls": [PNG_URL]})["action"], "block")
+
+    def test_the_refusal_never_echoes_the_address_or_its_token(self):
+        for value in (GOOD + "?q=1", BYPASS["userinfo"], BYPASS["a doubled slash inside the tail"]):
+            message = verdict({"image_url": value})["message"]
+            self.assertNotIn(TOKEN, message)
+            self.assertNotIn(WS, message)
+            self.assertNotIn("oort.example.com", message)
+
+    def test_the_exception_is_off_unless_the_origin_is_exactly_canonical(self):
+        for origin in SELF_ORIGIN_VECTORS["reject"]:
+            with self.subTest(origin=origin):
+                with mock.patch.dict(os.environ, {guard.SELF_ORIGIN_ENV: origin}):
+                    self.assertEqual(verdict({"image_url": address_under(origin)})["action"], "block")
+                    self.assertEqual(verdict({"image_url": GOOD})["action"], "block")
+        for state in ("unset", "empty", "whitespace"):
+            with self.subTest(state=state):
+                with mock.patch.dict(os.environ):
+                    if state == "unset":
+                        os.environ.pop(guard.SELF_ORIGIN_ENV)
+                    else:
+                        os.environ[guard.SELF_ORIGIN_ENV] = "" if state == "empty" else "  "
+                    self.assertEqual(verdict({"image_url": GOOD})["action"], "block")
+
+    def test_the_exception_follows_exactly_the_configured_origin(self):
+        for origin in SELF_ORIGIN_VECTORS["accept"]:
+            with self.subTest(origin=origin):
+                with mock.patch.dict(os.environ, {guard.SELF_ORIGIN_ENV: origin}):
+                    self.assertIsNone(verdict({"image_url": address_under(origin)}))
+                    self.assertEqual(verdict({"image_url": GOOD})["action"] if origin != ORIGIN else "block", "block")
+        with mock.patch.dict(os.environ, {guard.SELF_ORIGIN_ENV: "https://oort.example.org"}):
+            self.assertEqual(verdict({"image_url": GOOD})["action"], "block")
+            self.assertIsNone(verdict({"image_url": address_under("https://oort.example.org")}))
+
+    def test_the_origin_is_read_on_every_call(self):
+        self.assertIsNone(verdict({"image_url": GOOD}))
+        with mock.patch.dict(os.environ):
+            os.environ.pop(guard.SELF_ORIGIN_ENV)
+            self.assertEqual(verdict({"image_url": GOOD})["action"], "block")
+        self.assertIsNone(verdict({"image_url": GOOD}))
+
+    def test_no_network_and_no_file_access_even_for_the_allowed_address(self):
+        calls = []
+
+        def trap(label):
+            def _trap(*args, **kwargs):
+                calls.append(label)
+                raise AssertionError("forbidden call: " + label)
+            return _trap
+        patches = [mock.patch.object(socket, name, trap("socket." + name))
+                   for name in ("getaddrinfo", "gethostbyname", "create_connection")]
+        patches += [mock.patch.object(builtins, "open", trap("open")), mock.patch.object(io, "open", trap("io.open")),
+                    mock.patch.object(urllib.request, "urlopen", trap("urlopen"))]
+        for patch in patches:
+            patch.start()
+        try:
+            self.assertIsNone(verdict({"image_url": GOOD}))
+            for value in BYPASS.values():
+                verdict({"image_url": value})
+        finally:
+            for patch in reversed(patches):
+                patch.stop()
+        self.assertEqual(calls, [])
+
+
+class OriginGrammarIsShared(unittest.TestCase):
+    """The plugin, the lock gate and the Rust worker (momo-messaging self_media.rs) accept the same origins."""
+
+    def test_the_plugin_and_the_gate_judge_the_shared_vectors_alike(self):
+        self.assertGreaterEqual(len(SELF_ORIGIN_VECTORS["accept"]), 4)
+        self.assertGreaterEqual(len(SELF_ORIGIN_VECTORS["reject"]), 25)
+        for origin in SELF_ORIGIN_VECTORS["accept"]:
+            self.assertEqual(guard.canonical_origin(origin), origin, origin)
+            self.assertEqual(lockgate.canonical_origin(origin), origin, origin)
+        for origin in SELF_ORIGIN_VECTORS["reject"]:
+            self.assertIsNone(guard.canonical_origin(origin), origin)
+            self.assertIsNone(lockgate.canonical_origin(origin), origin)
+
+    def test_the_two_python_halves_agree_on_everything_else_too(self):
+        samples = ["https://a.b", "https://a.b:1", "https://a.b:65535", "https://a.b:65536", "https://a.b:443", "https://a.b:0",
+                   "https://a.b:00080", "https://a.b:08", "https://a.b/", "https://a", "https://a.1", "https://a.b1",
+                   "https://" + "a" * 63 + ".com", "https://" + "a" * 64 + ".com", "https://" + ("a" * 60 + ".") * 5 + "com",
+                   "https://a.b\n", "https://a.b\x00", "https://a.b\u200b", 5, None, b"https://a.b"]
+        for sample in samples:
+            self.assertEqual(guard.canonical_origin(sample), lockgate.canonical_origin(sample), repr(sample))
 
 
 class Registration(unittest.TestCase):

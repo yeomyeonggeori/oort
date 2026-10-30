@@ -803,6 +803,31 @@ def hermes_errors(services: dict, compose: str, repo_root: Path) -> list[str]:
     return errors
 
 
+SELF_MEDIA_VAR = "OORT_SELF_MEDIA_ORIGIN"
+SELF_MEDIA_SERVICES = ("agent-worker", "hermes")
+
+
+def self_media_errors(services: dict) -> list[str]:
+    """#4820 C2a (owner 10-30 decision): the origin of the requester's short-lived photo address reaches exactly two services.
+
+    agent-worker builds the address under it and hermes' image guard lets `image_url` carry exactly that origin, so both
+    hold the one value `https://${{shared.OORT_SITE_ADDRESS}}` (the edge's own host; lockgate.py refuses anything that is not
+    that shape) and no other service has the variable by name or by reference. It is a separate name on purpose:
+    MOMO_PUBLIC_BASE_URL stays api only (ADR-0205 D1, see github_errors)."""
+    errors: list[str] = []
+    for name in SELF_MEDIA_SERVICES:
+        got = (services[name].get("variables") or {}).get(SELF_MEDIA_VAR)
+        if got != PUBLIC_BASE_VALUE:
+            errors.append(
+                "%s %s %r must be %s (the one origin the image guard accepts; without it no photo address is minted)"
+                % (name, SELF_MEDIA_VAR, got, PUBLIC_BASE_VALUE)
+            )
+    for name, svc in services.items():
+        if name not in SELF_MEDIA_SERVICES and SELF_MEDIA_VAR in (svc.get("variables") or {}):
+            errors.append("%s must not carry %s (agent-worker and hermes only, #4820 C2a)" % (name, SELF_MEDIA_VAR))
+    return errors
+
+
 def github_errors(services: dict) -> list[str]:
     """ADR-0205 / #4221: the GitHub App key and public address reach api only, in the one shape the api accepts.
 
@@ -979,6 +1004,7 @@ def collect_errors(
 
     # -- GitHub App key + public address: api only (ADR-0205, #4221) ----------
     errors.extend(github_errors(services))
+    errors.extend(self_media_errors(services))
 
     # -- Postgres image service ----------------------------------------------
     pg = services["postgres"]
@@ -1356,6 +1382,12 @@ def mutate_catalog(kind: str, data: dict) -> None:
         api["variables"][PUBLIC_BASE_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
     elif kind == "worker-public-base":
         services["agent-worker"]["variables"][PUBLIC_BASE_VAR] = PUBLIC_BASE_VALUE
+    elif kind == "worker-self-media-dropped":
+        del services["agent-worker"]["variables"][SELF_MEDIA_VAR]
+    elif kind == "hermes-self-media-wrong-host":
+        services["hermes"]["variables"][SELF_MEDIA_VAR] = "https://${{shared.MOMO_CENTRIFUGO_WS_URL}}"
+    elif kind == "relay-self-media-origin":
+        services["relay"]["variables"][SELF_MEDIA_VAR] = PUBLIC_BASE_VALUE
     else:
         raise SystemExit("unknown catalog mutation %s" % kind)
 
@@ -1439,6 +1471,9 @@ CATALOG_MUTATIONS: tuple[tuple[str, str], ...] = (
     ("api-public-base-http", "api MOMO_PUBLIC_BASE_URL"),
     ("api-public-base-wrong-host", "api MOMO_PUBLIC_BASE_URL"),
     ("worker-public-base", "MOMO_PUBLIC_BASE_URL belongs to api only"),
+    ("worker-self-media-dropped", "agent-worker OORT_SELF_MEDIA_ORIGIN"),
+    ("hermes-self-media-wrong-host", "hermes OORT_SELF_MEDIA_ORIGIN"),
+    ("relay-self-media-origin", "relay must not carry OORT_SELF_MEDIA_ORIGIN"),
 )
 
 

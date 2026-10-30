@@ -17,7 +17,21 @@ listing = [{k: p.get(k) for k in ("name", "source", "enabled", "hooks", "error")
 refused = _dispatch_pre_tool_call_hooks("image_generate", {"prompt": "x", "image_url": "https://canary.invalid/x"},
                                         tool_call_id="live-1", turn_id="live-1")[0]
 accepted = _dispatch_pre_tool_call_hooks("image_generate", {"prompt": "x"}, tool_call_id="live-2", turn_id="live-2")[0]
+# The owner's 10-30 exception: with OORT_SELF_MEDIA_ORIGIN in the container's environment the one allowed address passes
+# and a bypass variant of it is blocked, asked of the same dispatcher.
+origin = os.environ.get("OORT_SELF_MEDIA_ORIGIN", "")
+tail = "0000000a-0000-4000-8000-00000000000b/" + "C" * 43
+self_address = origin + "/v1/self-media/" + tail
+self_ok = _dispatch_pre_tool_call_hooks("image_generate", {"prompt": "x", "image_url": self_address},
+                                        tool_call_id="live-3", turn_id="live-3")[0]
+self_variant = _dispatch_pre_tool_call_hooks("image_generate", {"prompt": "x", "image_url": self_address + "?q=1"},
+                                             tool_call_id="live-4", turn_id="live-4")[0]
+self_reference = _dispatch_pre_tool_call_hooks("image_generate", {"prompt": "x", "reference_image_urls": [self_address]},
+                                               tool_call_id="live-5", turn_id="live-5")[0]
 print("PROBE " + json.dumps({
     "uid": os.getuid(), "home": os.environ["HERMES_HOME"], "plugin": listing,
     "refused_is_block": isinstance(refused, str) and "[oort-image-guard]" in refused, "accepted_is_none": accepted is None,
+    "origin_set": bool(origin), "self_address_is_none": self_ok is None,
+    "self_variant_is_block": isinstance(self_variant, str) and "[oort-image-guard]" in self_variant,
+    "self_as_reference_is_block": isinstance(self_reference, str) and "[oort-image-guard]" in self_reference,
 }, sort_keys=True))

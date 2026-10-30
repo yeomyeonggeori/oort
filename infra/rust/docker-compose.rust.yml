@@ -581,6 +581,11 @@ services:
       # `OORT_COHOSTED_AGENT_*` is not given here — api only (ADR-0203 증보 K-S2).
       HERMES_BASE_URL: ${HERMES_BASE_URL:-}
       HERMES_API_KEY: ${HERMES_API_KEY:-}
+      # #4820 C2a (owner 10-30 decision): this instance's own public origin (https://<host>[:port], nothing after
+      # it), the one the Hermes image guard lets `image_url` carry — the worker builds the short-lived photo address
+      # of the requester's attachment under it. Unset = no address is minted. Not MOMO_PUBLIC_BASE_URL: that reaches
+      # api only (ADR-0205 D1). The same value goes to `hermes` below.
+      OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
       # #3431 (ADR-0193 D18): same key and rule as api — the spawn tool keeps Claude
       # Code off shared hosts unless an exact `true`.
       MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED: ${MOMO_CLAUDE_SUBSCRIPTION_AGENTS_ENABLED:-}
@@ -643,6 +648,10 @@ services:
       # dedicated uid) and UNSETS it before the Hermes dispatcher, so the gateway and every `hermes` child
       # have no copy. Not the chat key: a leaked HERMES_API_KEY must not carry login authority.
       HERMES_LOGIN_RELAY_KEY: ${HERMES_LOGIN_RELAY_KEY:-}
+      # #4820 C2a: the one origin the image guard lets `image_url` carry (an address under /v1/self-media/ the worker
+      # minted). lockgate.py refuses a value that is not https://<lowercase host>[:port] and refuses the name in the
+      # volume's .env; empty or unset = the exception is off and every address stays refused.
+      OORT_SELF_MEDIA_ORIGIN: ${OORT_SELF_MEDIA_ORIGIN:-}
       # Deliberately NOT passed: DATABASE_URL, WORKER_DATABASE_URL, PROVIDER_LINK_MASTER_KEY,
       # JWT_HMAC, any other oort secret (ADR-0203 D6-2), HERMES_YOLO_MODE, API_SERVER_CORS_ORIGINS.
     volumes:
