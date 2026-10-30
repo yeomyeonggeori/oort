@@ -252,6 +252,21 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 describe("행동 승인 카드 (ADR-0186 부록 A)", () => {
+  it("이미 취소된 승인의 200 영수증은 카드에 취소를 말한다 (ADR-0217)", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse({
+      approval_id: APPROVAL_ID,
+      status: "cancelled",
+      decided_at_ms: 1_753_400_000_000,
+    }));
+    expect(host.textContent).toContain("이 요청은 취소되어 있었어요.");
+    expect(host.textContent).not.toContain("결정을 보냈어요.");
+    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("취소됨");
+    expect(byTestId(host, "approval-approve")).toHaveLength(0);
+    expect(byTestId(host, "approval-reject")).toHaveLength(0);
+    expect(byTestId(host, "link-once")).toHaveLength(0);
+  });
+
   it("행·사유·결정 권한을 카드 표면에 그린다", () => {
     const host = mountCard(approvalProps());
     const rows = byTestId(host, "approval-action-row").map(

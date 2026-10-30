@@ -12105,7 +12105,11 @@ paths:
               $ref: "#/components/schemas/ApprovalDecisionRequest"
       responses:
         "200":
-          description: Decision committed (or identical idempotent retry).
+          description: >
+            Decision committed (or identical idempotent retry), or an already
+            cancelled approval acknowledged with `status: cancelled` (ADR-0217).
+            A cancelled receipt does not execute an action, record a new vote,
+            widen a grant, or create a job.
           headers:
             Cache-Control:
               description: Always `no-store` (ADR-0186 D4).
@@ -12180,8 +12184,9 @@ paths:
                 $ref: "#/components/schemas/ApprovalDecisionReceipt"
         "409":
           description: >
-            Receipt-shaped expected failure — already decided, expired before
-            decision, idempotency conflict, or (ADR-0186) a workspace action
+            Receipt-shaped expected failure — already decided (except cancelled,
+            which returns 200), expired before decision, idempotency conflict,
+            or (ADR-0186) a workspace action
             this server could not carry through: `action_unavailable`,
             `action_args_invalid`, `public_origin_unavailable` (all three refuse
             before the first write), and `run_not_parked` — the run left its
