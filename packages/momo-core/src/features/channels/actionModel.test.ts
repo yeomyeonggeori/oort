@@ -451,7 +451,7 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
       channelActionItems(ALL, REST).map((i) => [i.key, i.busyLabel])
     );
     expect(busy.get("mark-read")).toBe("읽음 처리 중");
-    expect(busy.get("mute")).toBe("알림 끄는 중");
+    expect(busy.get("mute")).toBeUndefined();
     // 복사는 영수증이 낱말을 바꾸고, 다이얼로그 인계는 왕복이 아니다.
     expect(busy.get("copy-link")).toBeUndefined();
     expect(busy.get("copy-name")).toBeUndefined();
@@ -474,9 +474,13 @@ describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
     expect(unread?.busyLabel).toBe("읽지 않음으로 표시 중");
   });
 
-  it("진행 낱말도 방향을 지킨다", () => {
-    const muted = channelActionItems(ALL, { ...REST, muted: true });
-    expect(muted.find((i) => i.key === "mute")?.busyLabel).toBe("알림 켜는 중");
+  it("알림은 두 상태의 이름과 아이콘만 쓰며 진행 낱말은 없다", () => {
+    for (const muted of [false, true]) {
+      const item = channelActionItems(ALL, { ...REST, muted }).find(i => i.key === "mute");
+      expect(item?.label).toBe(muted ? "알림 꺼짐" : "알림 켜짐");
+      expect(item?.icon).toBe(muted ? "🔕" : "🔔");
+      expect(item?.busyLabel).toBeUndefined();
+    }
   });
 
   it("메뉴 이름이 DM 을 「채널」이라 부르지 않는다", () => {

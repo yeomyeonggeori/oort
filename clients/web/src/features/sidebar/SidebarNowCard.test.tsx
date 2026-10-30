@@ -118,9 +118,9 @@ describe("SidebarNowCard", () => {
     expect(screen.getByTestId("sidebar-now-line").textContent).toContain("외 1건");
   });
 
-  it("승인 대기는 그 낱말로, 마지막 줄 없이 말한다", () => {
+  it("승인 필요는 그 낱말로, 마지막 줄 없이 말한다", () => {
     mount([signal({ state: "awaiting_approval" })]);
-    expect(screen.getByTestId("sidebar-now-state").textContent).toBe("승인 대기");
+    expect(screen.getByTestId("sidebar-now-state").textContent).toBe("승인 필요");
     expect(screen.getByTestId("sidebar-now-line").textContent).toBe("#general");
   });
 

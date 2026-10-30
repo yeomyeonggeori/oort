@@ -264,7 +264,7 @@ describe('모르는 것을 안다고 말하지 않는다', () => {
 describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인다', () => {
   it('영수증이 있으면 상태 칩도 원장이 답한 것을 말한다', () => {
     // 사진이 이 모순을 잡아냈다: 영수증은 「승인을 기록했습니다」인데 칩은
-    // 여전히 「승인 대기」였다. 칩은 카드 **스냅샷**의 status 를 읽고, 그
+    // 여전히 「승인 필요」였다. 칩은 카드 **스냅샷**의 status 를 읽고, 그
     // 스냅샷은 서버가 새 프레임을 보낼 때까지 갱신되지 않는다.
     const view = renderCard({
       gates: new Map(),
@@ -273,7 +273,7 @@ describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인�
       ]),
     });
     const agentCard = view.getByTestId('agent-card');
-    expect(within(agentCard).queryByText('승인 대기')).toBeNull();
+    expect(within(agentCard).queryByText('승인 필요')).toBeNull();
   });
 
   it('원장이 상태를 모르면 칩은 스냅샷을 그대로 둔다 — 지어내지 않는다', () => {
@@ -284,8 +284,8 @@ describe('영수증과 컨트롤은 같은 순간에 서로 반대로 움직인�
       ]),
     });
     expect(
-      within(view.getByTestId('agent-card')).getByText('승인 대기'),
-    ).toBeTruthy();
+      within(view.getByTestId('agent-card')).getByTestId('agent-status-chip'),
+    ).toHaveTextContent(/^승인 필요$/);
   });
 
   it('영수증이 있으면 컨트롤 대신 영수증이다', () => {
@@ -399,7 +399,7 @@ describe('오프라인 — 같은 컨트롤은 화면마다 같은 결을 갖는
       'features/inbox/useOnline.ts',
     ]) {
       expect(codeOnly2(SRC2(file))).not.toContain(
-        '연결이 끊겨 지금은 결정할 수 없습니다',
+        '연결이 끊겨 지금은 결정할 수 없어요',
       );
     }
     // 인박스는 이름으로 부르고(그 화면의 진입점이 `useOnline.ts` 다), 그 이름은
@@ -767,7 +767,7 @@ describe('B-1 — 판정 입력 셋이 각자 다른 사실을 나른다', () =>
     expect(
       within(agentCard).queryByTestId('card-approval-ap-1-actions'),
     ).toBeNull();
-    expect(within(agentCard).getByText('승인됨')).toBeTruthy();
+    expect(within(agentCard).getByTestId('agent-status-chip')).toHaveTextContent(/^끝$/);
   });
 
   it('옛 이름을 다시 넣으면 여기서 빨강이다 — tsc 한 줄이 화면 전체였다', () => {

@@ -21,7 +21,11 @@ import {
   type Directory,
 } from '@momo/core/features/workspace/directory';
 import {useQueries, useQuery, useQueryClient} from '@tanstack/react-query';
-import {useCallback, useMemo} from 'react';
+import {useCallback, useMemo, useSyncExternalStore} from 'react';
+import {
+  runProgressSnapshot,
+  subscribeRunProgress,
+} from '../agents/agentRunProgressStore';
 import {useNow} from '../../lib/useNow';
 import {invalidateAndReport} from '../../query/invalidateReport';
 import {
@@ -219,6 +223,11 @@ export function useInvalidateInboxLedgers(): () => void {
 export function useNeedsAction(enabled: boolean): Feed {
   const {workspaceId} = useSession();
   const context = useFeedContext();
+  const progress = useSyncExternalStore(
+    subscribeRunProgress,
+    runProgressSnapshot,
+    runProgressSnapshot,
+  );
   const query = useQuery({
     queryKey: ['approvals', workspaceId, 'pending'],
     queryFn: () => fetchApprovals(workspaceId, 'pending'),
@@ -236,10 +245,15 @@ export function useNeedsAction(enabled: boolean): Feed {
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
           nowMs,
+          {
+            run: progress
+              .get(approval.channelId.toLowerCase())
+              ?.find(run => uuidEq(run.id, approval.runId)),
+          },
         ),
       ),
     );
-  }, [query.data, context, nowMs]);
+  }, [query.data, context, nowMs, progress]);
 
   return {
     items,
@@ -355,6 +369,11 @@ export function useMentions(enabled: boolean): Feed {
 export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
   const {workspaceId} = useSession();
   const context = useFeedContext();
+  const progress = useSyncExternalStore(
+    subscribeRunProgress,
+    runProgressSnapshot,
+    runProgressSnapshot,
+  );
   const channelsQuery = useChannels(workspaceId);
   const client = useQueryClient();
 
@@ -427,6 +446,11 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
           context.actorFor(approval.requestedBy),
           context.labelFor(approval.channelId),
           nowMs,
+          {
+            run: progress
+              .get(approval.channelId.toLowerCase())
+              ?.find(run => uuidEq(run.id, approval.runId)),
+          },
         ),
       );
     }
@@ -442,7 +466,7 @@ export function useAgentFeed(enabled: boolean, ownedBy: string): Feed {
       );
     }
     return orderFeed(rows);
-  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, nowMs]);
+  }, [approvalQueries.approvals, runQueries.runs, context, ownedBy, nowMs, progress]);
 
   // Invalidation rather than a list of `refetch()` calls: this feed fans out
   // over four approval status pages and up to twelve channels, and the fan-out

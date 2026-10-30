@@ -232,7 +232,7 @@ export interface ApprovalCardNoteInput {
  * 그것이고, 이제 그 「두 화면」이 두 클라가 됐다.
  */
 export const APPROVAL_OFFLINE_COPY =
-  "연결이 끊겨 지금은 결정할 수 없습니다. 다시 연결되면 여기서 승인하거나 거부할 수 있습니다.";
+  "연결이 끊겨 지금은 결정할 수 없어요. 다시 연결되면 여기서 승인하거나 거부할 수 있어요.";
 
 /** 이 표면에서는 결정할 수 없고 다른 자리가 있는 경우. 폰의 문장 그대로. */
 export const APPROVAL_ELSEWHERE_COPY =

@@ -1,3 +1,4 @@
+import { REQUEST_WORD } from "../agents/runPhase";
 import type {
   SharedWorkSession,
   SharedWorkSessionDiff,
@@ -74,7 +75,7 @@ export const TEAM_BOARD_COPY = {
 /** 목록 한 줄의 상태 칩 말(시안 ④). 색만으로 말하지 않고 글자가 붙는다. */
 export function stateChipLabel(item: SharedWorkSession): string {
   // 새 서버가 phase를 실은 run이 승인을 기다린다(ADR-0202 D1). 보드 어휘로는 `running`이다.
-  if (isAwaitingApproval(item)) return "승인 대기";
+  if (isAwaitingApproval(item)) return REQUEST_WORD.approval;
   // 실행 줄의 `idle`은 큐에서 시작을 기다리는 것이다(`sharedWorkSessionFromWire`).
   if (isRunItem(item) && item.state === "idle") return "시작 전";
   switch (item.state) {

@@ -61,3 +61,8 @@ export const TOOLTIP_DELAY_MS = 500;
 
 /** 툴팁 나타남. 정지(`motion-reduce`)면 애니메이션 없이 즉시 선다. */
 export const TOOLTIP_MOTION = "motion-tooltip-enter motion-reduce:animate-none";
+
+/** Photo/decision stage (#4775): existing phone VIEWER_SNAP_SPRING (260ms, bounce .14).
+ * WAAPI samples the same damped spring within the ladder's arrival window. No motion library. */
+export const STAGE_HERO_SPRING = { stiffness: 584, damping: 41.6, mass: 1 } as const;
+export const STAGE_HERO_WINDOW_MS = 500;

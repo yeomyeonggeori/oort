@@ -1,5 +1,5 @@
 import {
-  typingSegments,
+  typingVisualSegments,
   typingLabel,
 } from '@momo/core/features/chat/typing';
 import {cleanup, render, screen} from './fixtures/darkWorld';
@@ -82,7 +82,7 @@ describe('H-3 — 자리를 예약한다', () => {
   it('있을 때와 없을 때의 높이가 같다 — 그것이 「안 움직인다」의 뜻이다', () => {
     const {rerender} = render(<TypingBar segments={[]} />);
     const emptyStyle = flatten(line().props.style);
-    rerender(<TypingBar segments={typingSegments(['김민수'])} />);
+    rerender(<TypingBar segments={typingVisualSegments(['김민수'])} />);
     const fullStyle = flatten(line().props.style);
     expect(fullStyle.minHeight).toBe(emptyStyle.minHeight);
     expect(fullStyle.lineHeight).toBe(emptyStyle.lineHeight);
@@ -100,33 +100,50 @@ describe('H-3 — 자리를 예약한다', () => {
 
 describe('M-4 — 이름에 눈에 보이는 축을 준다', () => {
   it('이름 조각만 다르게 칠한다', () => {
-    render(<TypingBar segments={typingSegments(['김민수'])} />);
+    render(<TypingBar segments={typingVisualSegments(['김민수'])} />);
     // 이름은 자기 `Text` 를 갖고, 나머지는 부모의 잉크를 쓴다.
     const name = screen.getByText('김민수');
     expect(flatten(name.props.style).color).toBe(color.text);
   });
 
-  it('문장을 짓지 않는다 — 조각을 잇지도 않는다', () => {
+  it('문장을 짓지 않는다 — 화면 조각을 잇지도 않는다', () => {
     // 「작성 중」이라는 낱말도, 「님이」라는 조사도 이 파일에 없다. 전부 코어가
     // 지은 조각으로 들어온다.
     const code = codeOnly(SRC);
     expect(code).not.toContain('작성 중');
     expect(code).not.toContain('님이');
     expect(code).not.toContain('작업');
-    // 조각을 `join` 하지도 않는다 — 순서대로 그릴 뿐이다.
-    expect(code).not.toMatch(/segments[\s\S]{0,40}\.join\(/);
+    // #4797: 화면은 이름 + 점 + 서술어로 나뉜다. 낭독 라벨의 fallback join은
+    // 허용하되, 보이는 조각은 여전히 합치지 않아 이름 강조·한 줄 배치를 보존한다.
+    const visibleStart = code.indexOf('{!empty ? (');
+    expect(visibleStart).toBeGreaterThan(-1);
+    const visible = code.slice(visibleStart);
+    expect(visible).not.toMatch(/\.join\(/);
   });
 
   it('한 줄이다 — 읽던 자리를 밀어내지 않는다', () => {
-    render(<TypingBar segments={typingSegments(['김민수', '이하늘'])} />);
-    expect(screen.getByTestId('composer-typing').props.numberOfLines).toBe(1);
+    render(<TypingBar segments={typingVisualSegments(['김민수', '이하늘'])} />);
+    // #4797: 바깥은 점을 함께 담는 View, 한 줄 제한은 이름 Text가 진다.
+    expect(flatten(line().props.style).flexDirection).toBe('row');
+    const lead = screen.getByText('김민수, 이하늘');
+    expect(lead.props.numberOfLines).toBe(1);
+    expect(flatten(lead.props.style).flexShrink).toBe(1);
+    expect(flatten(screen.getByText(' 작성 중').props.style).flexShrink).toBe(0);
   });
 
-  it('집계 문구에는 이름 조각이 없다 — 강조할 이름이 애초에 없다', () => {
+  it('세 명부터 첫 이름 외 N명으로 접고, 낭독은 전체 인원수를 말한다', () => {
+    // #4797 owner 요청: 화면은 첫 이름 + 외 N명, 기존 낭독 집계 문장은 유지한다.
     render(
-      <TypingBar segments={typingSegments(['김민수', '이하늘', '박도윤'])} />,
+      <TypingBar
+        segments={typingVisualSegments(['김민수', '이하늘', '박도윤'])}
+        label={typingLabel(['김민수', '이하늘', '박도윤'])}
+      />,
     );
-    expect(screen.getByText(/3명이 작성 중/)).toBeTruthy();
+    expect(screen.getByText('김민수 외 2명')).toBeTruthy();
+    expect(flatten(screen.getByText('김민수').props.style).color).toBe(color.text);
+    expect(screen.queryByText('이하늘')).toBeNull();
+    expect(screen.queryByText('박도윤')).toBeNull();
+    expect(line().props.accessibilityLabel).toBe('3명이 작성 중');
   });
 });
 
@@ -134,8 +151,9 @@ describe('M-6 — 이 줄이 AA 를 지난다', () => {
   it('textFaint 를 쓰지 않는다', () => {
     // 실측: textFaint on bg = 3.562:1 (본문 AA 4.5 미달) · textMuted = 6.358:1.
     // 토큰 전면 재조정은 U2 소관이고 여기서는 **용례만** 옮긴다.
-    render(<TypingBar segments={typingSegments(['김민수'])} />);
-    const style = flatten(screen.getByTestId('composer-typing').props.style);
+    render(<TypingBar segments={typingVisualSegments(['김민수'])} />);
+    // #4797: View에는 글자색이 없다. 실제 서술어 Text의 잉크를 잰다.
+    const style = flatten(screen.getByText(' 작성 중').props.style);
     expect(style.color).toBe(color.textMuted);
     expect(style.color).not.toBe(color.textFaint);
   });
@@ -146,7 +164,7 @@ describe('N-4 — 무동작인 방어를 남겨 두지 않는다', () => {
     // 그 prop 은 **안드로이드 전용**이라 iOS 에서 아무 일도 하지 않는다. 즉 첫
     // 판의 주석은 이 플랫폼에서 참인 적이 없었다. 무동작인 채 주석만 남으면
     // 다음 사람이 그 방어가 서 있다고 믿는다.
-    render(<TypingBar segments={typingSegments(['김민수'])} />);
+    render(<TypingBar segments={typingVisualSegments(['김민수'])} />);
     expect(
       screen.getByTestId('composer-typing').props.accessibilityLiveRegion,
     ).toBeUndefined();
@@ -156,7 +174,7 @@ describe('N-4 — 무동작인 방어를 남겨 두지 않는다', () => {
   it('보조기술 라벨은 여전히 말줄임표가 없다', () => {
     render(
       <TypingBar
-        segments={typingSegments(['김민수'])}
+        segments={typingVisualSegments(['김민수'])}
         label={typingLabel(['김민수'])}
       />,
     );

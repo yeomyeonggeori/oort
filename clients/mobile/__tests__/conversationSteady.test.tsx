@@ -59,7 +59,7 @@ import {
 // 80~120pt 를 튕겼다. 시뮬레이터 실측(`measure/steady.tsx`, 맨 아래 행의 창 좌표를 프레임마다): 메시지 0개로 재연결 세 번에
 // 이동 합 772pt · 반전 10회(수리 뒤 73pt · 1회).
 //
-// 연결 띠(4초 넘는 끊김에서만 선다)도 목록을 움직였다. 머리 밑 **흐름 안**에 서서 머리가 36.7pt 자라 목록의 보이는 높이가 그만큼
+// 예전 연결 띠(4초 넘는 끊김에서만 섰다)도 목록을 움직였다. 머리 밑 **흐름 안**에 서서 머리가 36.7pt 자라 목록의 보이는 높이가 그만큼
 // 줄었다 돌아왔고, 목록은 그 변화를 한 프레임 늦게 알아채 끝으로 따라가므로 그 한 프레임 동안 맨 아래 줄이 36.7pt 밀렸다 돌아왔다
 // (시뮬레이터 실측). 지금은 띠가 목록 위에 **뜬다** — 아래 마지막 묶음이 그 구조(흐름 밖 층 + 머리 뿌리 `zIndex`)를 잠근다. 제스트에는
 // 레이아웃이 없어 높이 자체는 못 잰다: 「높이 변화 0」의 증거는 PR 본문의 시뮬레이터 표(`measure/steady.tsx`)이고, 이 시험은 그 0 을
@@ -382,7 +382,7 @@ afterEach(() => {
   jest.restoreAllMocks();
 });
 
-/** 소켓이 죽었다가 이어지고 모든 구독이 다시 구독된다. `outageMs` 가 4초 유예를 넘으면 연결 띠가 선다. */
+/** 소켓이 죽었다가 이어지고 모든 구독이 다시 구독된다. 10초 유예를 넘으면 연결 중 띠가 끊김 문장으로 바뀐다. */
 async function reconnect(
   probe: Probe,
   options: {outageMs: number; recovered: boolean; publications?: unknown[]},
@@ -429,7 +429,7 @@ describe('메시지가 오지 않는 동안 목록은 제자리다', () => {
     resetMessageRowRenderCount();
     resetTimelineRenderItemCount();
 
-    // 네 번: 4초 안에 이어지는 끊김(되쏘기 성공, 받은 것 없음) · 띠가 서는 끊김(되쏘기 실패, REST 꼬리가 빈손) 을 번갈아.
+    // 네 번: 유예 안에 이어지는 끊김(되쏘기 성공, 받은 것 없음) · 유예 넘는 끊김(되쏘기 실패, REST 꼬리가 빈손)을 번갈아.
     for (let cycle = 0; cycle < 4; cycle += 1) {
       await reconnect(probe, {
         outageMs: cycle % 2 === 0 ? 1_000 : DISPLAY_GRACE_MS + 1_000,
@@ -598,7 +598,7 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
   const flat = (style: unknown): Record<string, unknown> =>
     (StyleSheet.flatten(style as never) ?? {}) as Record<string, unknown>;
 
-  it('4초 넘게 끊겨 띠가 서도 띠는 머리 밑에 매달려 목록 위에 뜬다 — 머리의 흐름 높이를 늘리지 않는다', async () => {
+  it('연결 중부터 10초 뒤 끊김까지 띠는 머리 밑에 매달려 목록 위에 뜬다 — 머리의 흐름 높이를 늘리지 않는다', async () => {
     await openDm();
     // 연결돼 있으면 띠가 없다.
     expect(screen.queryByTestId('connection-banner')).toBeNull();
@@ -608,17 +608,22 @@ describe('연결 띠는 목록의 높이를 바꾸지 않는다', () => {
       client.state = 'connecting';
       client.__emit('connecting', {code: 1, reason: 'transport closed'});
     });
-    // 4초 유예 안에는 서지 않는다 — 아래에서 서는 띠가 「서는 끊김」의 결과이지 처음부터 있던 것이 아니다.
+    // #4783은 복구를 숨기는 대신 10초 동안 「연결 중」을 보인다(PR의 의도된 표시 변경).
+    // 띠가 없다는 옛 기대만 문장 전환으로 바꾼다. 두 상태 모두 같은 흐름 밖 층이어야 한다.
+    const header = screen.getByTestId('conversation-header');
+    const connectingLayer = within(header).getByTestId('connection-banner-layer');
+    expect(within(connectingLayer).getByTestId('connection-banner')).toHaveTextContent('연결 중…');
+    expect(flat(connectingLayer.props.style)).toMatchObject({position: 'absolute', top: '100%'});
     await settle(DISPLAY_GRACE_MS - 1_000);
-    expect(screen.queryByTestId('connection-banner')).toBeNull();
+    expect(screen.getByTestId('connection-banner')).toHaveTextContent('연결 중…');
     await settle(2_000);
 
-    const header = screen.getByTestId('conversation-header');
     const banner = within(header).getByTestId('connection-banner');
     expect(banner).toHaveTextContent('연결이 끊겼습니다');
 
     // (a) 띠를 진 층은 **흐름 밖**이다. 흐름 안에 있으면 띠가 설 때마다 머리가 자라 목록의 보이는 높이가 줄었다 돌아온다.
     const layer = within(header).getByTestId('connection-banner-layer');
+    expect(layer).toBe(connectingLayer);
     expect(flat(layer.props.style)).toMatchObject({position: 'absolute', top: '100%'});
     // (b) 알약은 그 층 안에 있다 — 흐름에 끼는 형제로 따로 서 있지 않다.
     expect(within(layer).getByTestId('connection-banner')).toHaveTextContent('연결이 끊겼습니다');

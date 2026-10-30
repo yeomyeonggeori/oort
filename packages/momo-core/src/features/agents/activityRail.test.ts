@@ -95,7 +95,7 @@ describe("국면 → 한 줄", () => {
       "깨움",
       "가져감",
       "작업 중",
-      "승인 대기",
+      "승인 필요",
       "일시 정지",
     ]);
   });
@@ -110,7 +110,7 @@ describe("국면 → 한 줄", () => {
     expect(noStage?.lead.stage).toBeUndefined();
   });
 
-  it("받음 · 깨움 · 가져감 · 승인 대기 · 일시 정지", () => {
+  it("받음 · 깨움 · 가져감 · 승인 필요 · 일시 정지", () => {
     expect(activityRail([turn()], nameFor, T + 10 * SEC)?.text).toBe("달무리봇 · 받음");
 
     const bell = (failed: boolean) => (runId: string) =>
@@ -125,7 +125,7 @@ describe("국면 → 한 줄", () => {
 
     expect(activityRail([turn(CLAIMED)], nameFor, T + MIN)?.text).toBe("달무리봇 · 가져감");
     const approval = activityRail([turn(APPROVAL)], nameFor, T + MIN);
-    expect(approval?.text).toBe("달무리봇 · 승인 대기");
+    expect(approval?.text).toBe("달무리봇 · 승인 필요");
     expect(approval).toMatchObject({ needsHuman: true, active: false });
     expect(
       activityRail([turn({ phase: "paused", status: "paused", startedAtMs: T })], nameFor, T + MIN)
@@ -201,7 +201,7 @@ describe("여러 에이전트는 한 줄로 합친다", () => {
     expect(three?.text).not.toContain("설계 문서");
   });
 
-  it("줄을 이끄는 쪽: 승인 대기 > 작업 중 > 가져감, 같으면 먼저 시작한 쪽", () => {
+  it("줄을 이끄는 쪽: 승인 필요 > 작업 중 > 가져감, 같으면 먼저 시작한 쪽", () => {
     // 입력 순서와 무관하다.
     expect(activityRail([b(), a()], nameFor, T + 2 * MIN)?.lead.memberId).toBe(A);
     expect(activityRail([c(), b(), a()], nameFor, T + 2 * MIN)?.agents.map((x) => x.memberId)).toEqual(
@@ -211,7 +211,7 @@ describe("여러 에이전트는 한 줄로 합친다", () => {
     const waiting = turn({ ...APPROVAL, id: "0199aa11-2222-7000-8000-0000000000a4", agentMemberId: B, startedAtMs: T + 5 * MIN });
     const lead = activityRail([a(), waiting], nameFor, T + 6 * MIN);
     // 합친 줄도 사람을 기다리는 쪽의 낱말을 남긴다(색 하나로만 전하지 않는다, M5).
-    expect(lead?.text).toBe("모래시계봇 · 승인 대기 +1");
+    expect(lead?.text).toBe("모래시계봇 · 승인 필요 +1");
     expect(lead?.needsHuman).toBe(true);
     // 합친 줄에서도 사람이 할 일이 있다는 사실은 사라지지 않는다.
     expect(lead?.label).toContain("승인을 기다려요");
@@ -221,7 +221,7 @@ describe("여러 에이전트는 한 줄로 합친다", () => {
     expect(activityRail([a(), c()], nameFor, T + 2 * MIN)?.text).toBe("달무리봇 +1");
     const waiting = turn({ ...APPROVAL, id: "0199aa11-2222-7000-8000-0000000000a4", agentMemberId: B, startedAtMs: T + 5 * MIN });
     const paused = turn({ ...APPROVAL, phase: "paused", status: "paused", id: "0199aa11-2222-7000-8000-0000000000a5", agentMemberId: C });
-    expect(activityRail([a(), waiting, paused], nameFor, T + 6 * MIN)?.text).toBe("모래시계봇 · 승인 대기 +2");
+    expect(activityRail([a(), waiting, paused], nameFor, T + 6 * MIN)?.text).toBe("모래시계봇 · 승인 필요 +2");
     // 일시 정지는 줄을 이끌 수는 있어도(작업 중보다 앞선다) 「사람이 할 일이 있다」(`needsHuman`)가 아니라 낱말이 남지 않는다.
     const withPaused = activityRail([a(), paused], nameFor, T + 6 * MIN);
     expect(withPaused?.lead.memberId).toBe(C);

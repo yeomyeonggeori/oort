@@ -6391,3 +6391,22 @@ progress[data-upload-progress]:indeterminate::-webkit-progress-bar {
 :root[data-font-mono] :is(.font-mono, code, pre, kbd, samp) {
   font-family: var(--font-user-mono);
 }
+
+/* The stage's reusable floating crop. It never occupies conversation layout. */
+@utility stage-hero {
+  position: fixed;
+  object-fit: cover;
+  transform: none;
+  visibility: visible;
+  pointer-events: none;
+  max-width: none;
+  max-height: none;
+  z-index: var(--layer-content-float);
+}
+
+/* Exit snapshots have no dialog role, input handling or focus ownership. */
+@utility stage-hero-layer {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}

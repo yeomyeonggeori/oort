@@ -159,15 +159,15 @@ describe("approval rows", () => {
       "엔진",
       NOW
     );
-    expect(item.outcome).toBe("거절됨");
-    expect(item.outcomeTone).toBe("danger");
+    expect(item.outcome).toBe("거부");
+    expect(item.outcomeTone).toBe("muted");
     expect(item.timeLabel).toBe("30분 전");
     expect(item.detail).toContain("승인 안 함");
   });
 
   it("frames an unanswered request as expiry, never as an error", () => {
     const item = approvalItem(approval({ status: "expired" }), agent, "엔진", NOW);
-    expect(item.outcome).toBe("만료됨");
+    expect(item.outcome).toBe("만료");
     expect(item.outcomeTone).toBe("warn");
   });
 

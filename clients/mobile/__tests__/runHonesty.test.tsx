@@ -171,7 +171,7 @@ describe('홈 카드: 서버가 말한 단계 그대로', () => {
     expect(model?.accessibilityLabel).not.toContain('시작함');
   });
 
-  it('가져감·작업 중(에이전트가 보고한 단계)·승인 대기', () => {
+  it('가져감·작업 중(에이전트가 보고한 단계)·승인 필요', () => {
     expect(
       card(signalOf({phase: 'claimed', leaseState: 'live', claimedAtMs: Date.now() - 20_000}))
         ?.liveText,
@@ -189,7 +189,7 @@ describe('홈 카드: 서버가 말한 단계 그대로', () => {
     expect(running?.headline).toBe('채널 이름 확인');
     expect(
       card(signalOf({phase: 'awaiting_approval', status: 'awaiting_approval'}))?.liveText,
-    ).toBe('승인 대기');
+    ).toBe('승인 필요');
   });
 
   it('가져간 뒤 lease가 만료됐어도 끊겼다고 하지 않는다', () => {
@@ -246,7 +246,7 @@ describe('대화 위 활동 줄', () => {
     );
   });
 
-  it('승인 대기에는 근거 줄이 없다', () => {
+  it('승인 필요에는 근거 줄이 없다', () => {
     render(
       <AgentActivityBar
         turns={[signalOf({phase: 'awaiting_approval', status: 'awaiting_approval'})]}

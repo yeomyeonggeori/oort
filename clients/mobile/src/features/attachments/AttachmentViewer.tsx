@@ -7,6 +7,7 @@ import React, {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type MutableRefObject,
@@ -44,17 +45,23 @@ import {
 import {
   EASE_OUT,
   VIEWER_CHROME_HIDE_MS,
+  VIEWER_SNAP_SPRING,
+  MENU_CLOSE_WATCHDOG_MS,
   VIEWER_CHROME_SHOW_MS,
 } from '../../design/motion';
 import { font, line, radius, space, type Palette } from '../../design/tokens';
 import { useStyles } from '../../design/theme';
 import { useReduceMotion } from '../../lib/useReduceMotion';
-import { useAttachmentPreview } from './content';
+import { useAttachmentPreview, measuredAttachmentSize, rememberAttachmentSize } from './content';
+import {initialStage, stageTransition, fitStageRect, stageExitRect, type StageRect} from '@momo/core/lib/stageTransition';
+import {StageHero} from './StageHero';
+import type {MeasureHeroSource} from './heroSource';
 import { useShareAttachment } from './useShareAttachment';
 import { useViewerDismiss, type ViewerProgressRef } from './useViewerDismiss';
 import {
   backdropStops,
   chromeStops,
+  evaluate,
   scaleStops,
   type DragPoint,
 } from './viewerDismiss';
@@ -148,6 +155,13 @@ import {
 //
 // **한 번 탭은 두 번 탭 문턱(`DOUBLE_TAP_MS`)만큼 늦다**: 두 번째 탭이 오는지 보고서야 조작을 숨긴다(안 그러면 두 번 탭이 조작을 깜박이게 한다).
 //
+// ## Hero와 확대의 경계 (#4775)
+//
+// Modal 자체의 전환은 없다. 썸네일을 잰 뒤 `StageHero`가 맞춤 사진 영역으로 자라고, 조작은 도착 후에 선다.
+// 닫기는 현재 첨부 ID를 다시 잰다. 확대 중이면 네이티브 맞춤 완료 후 hero가 시작하고, 끌어 닫기는 놓은 위치를 잇는다.
+// 확대 스크롤 내용도 실제 맞춤 사진 크기다(검은 여백을 확대·팬하지 않는다). 사진 밖의 손짓은 가로 pager 자손인
+// 전체 쪽 wrapper가 받으므로, 여백에서 시작한 옆 넘기기도 살아 있다. 상태 기계는 공용 `stageTransition`에 있다.
+//
 // ## 조작을 숨길 때 보조기술
 //
 // 숨은 조작은 보이지 않을 뿐 아니라 **읽히지도 않는다**(`accessibilityElementsHidden`) — 보이지 않는 단추에 초점이 가면 사람은
@@ -163,6 +177,23 @@ interface PageZoom {
   reset: (animated: boolean) => void;
 }
 
+/** Both the pager and hero read the same fitted geometry, including grid photos first measured on open. */
+function usePhotoSize(id: string, uri: string | null) {
+  const [measured, setMeasured] = useState<{id: string; size: ReturnType<typeof measuredAttachmentSize>}>(() => ({id, size: measuredAttachmentSize(id)}));
+  useEffect(() => {
+    const cached = measuredAttachmentSize(id);
+    if (cached) { setMeasured({id, size: cached}); return; }
+    if (!uri) return;
+    let live = true;
+    Image.getSize(uri, (width, height) => {
+      const size = rememberAttachmentSize(id, width, height);
+      if (live) setMeasured({id, size});
+    }, () => {});
+    return () => { live = false; };
+  }, [id, uri]);
+  return measuredAttachmentSize(id) ?? (measured.id === id ? measured.size : null);
+}
+
 /** 전체 화면 보기의 한 쪽. 쪽마다 자기 미리보기를 받고, 확대 스크롤뷰 안에 사진을 놓는다. */
 function ViewerPage({
   workspaceId,
@@ -172,6 +203,7 @@ function ViewerPage({
   width,
   height,
   responder,
+  blankResponder,
   zoomPages,
   onZoomedChange,
 }: {
@@ -185,6 +217,8 @@ function ViewerPage({
   height: number;
   /** 사진 위에 닿은 손가락을 쥐는 핸들러 — 확대 스크롤뷰의 **자손**에 펼친다(파일 머리 「확대」). */
   responder: GestureResponderHandlers;
+  /** Full-page blank margins remain descendants of the horizontal pager after zoom content is fitted. */
+  blankResponder: GestureResponderHandlers;
   /** 프레임이 쥔 확대 손잡이 모음. 쪽은 올라와 있는 동안 자기 자리를 채운다. */
   zoomPages: MutableRefObject<Array<PageZoom | null>>;
   /** 이 쪽의 확대 여부가 **바뀔 때만** 부른다. */
@@ -197,6 +231,8 @@ function ViewerPage({
     attachment,
     true,
   );
+  const natural = usePhotoSize(attachment.id, preview.status === 'ready' ? preview.uri : null);
+  const fitted = fitStageRect(natural, {width, height});
   const ready = preview.status === 'ready';
   const zoomRef = useRef<ScrollView>(null);
   const [zoomed, setZoomed] = useState(false);
@@ -219,17 +255,18 @@ function ViewerPage({
     // 따로 적어 둘 뿐 네이티브 명령에 닿지 않는다. 둘 다 같은 값을 줘야 꺼지고, 둘째 인자만 주면 폐기 경고가 뜬다.
     const zoomTo = (rect: ZoomRect, animated: boolean) =>
       zoomRef.current?.scrollResponderZoomTo({ ...rect, animated }, animated);
-    const size = { width, height };
+    const size = {width: fitted.width, height: fitted.height};
     return {
       toggleAt: (point, animated) => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
-        else if (ready) zoomTo(zoomRectAt(point, size), animated);
+        // centerContent places the fitted content at the hero's window-space origin.
+        else if (ready) zoomTo(zoomRectAt({x: point.x - fitted.x, y: point.y - fitted.y}, size), animated);
       },
       reset: animated => {
         if (zoomedRef.current) zoomTo(fullRect(size), animated);
       },
     };
-  }, [width, height, ready]);
+  }, [fitted.x, fitted.y, fitted.width, fitted.height, ready]);
   useEffect(() => {
     const pages = zoomPages.current; // 모음 자체는 바뀌지 않는다 — 칸만 채우고 비운다
     pages[position] = handle;
@@ -239,14 +276,16 @@ function ViewerPage({
   }, [zoomPages, position, handle]);
 
   return (
+    <View style={{width, height}} {...blankResponder}>
     <ScrollView
       ref={zoomRef}
-      style={[styles.zoomScroll, { width }]}
-      contentContainerStyle={styles.zoomContent}
+      style={[styles.zoomScroll, { width, height }]}
+      contentContainerStyle={[styles.zoomContent, {width: fitted.width, height: fitted.height}]}
       // 사진이 아직 없으면 키울 것이 없다(「불러오는 중」 글자를 키우지 않는다) — 최소와 같으면 iOS 는 확대를 켜지 않는다.
       maximumZoomScale={ready ? ZOOM_MAX : ZOOM_MIN}
       minimumZoomScale={ZOOM_MIN}
       bouncesZoom
+      bounces={false}
       centerContent
       // 원래 크기에서 팬을 시작하지 못하게 한다 — 이 둘이 켜져 있으면(세로 스크롤뷰의 기본) 스크롤뷰가 아래로 쓸기·옆으로 넘기기를 가져간다.
       alwaysBounceVertical={false}
@@ -260,7 +299,7 @@ function ViewerPage({
       testID="attachment-viewer-zoom"
     >
       <View
-        style={styles.viewerPage}
+        style={[styles.viewerPage, {width: fitted.width, height: fitted.height}]}
         // 레이아웃 속성만 있는 View 는 평탄화되어 네이티브 뷰가 사라질 수 있다 — 그러면 닿는 대상이 못 된다.
         collapsable={false}
         testID="attachment-viewer-page"
@@ -287,6 +326,7 @@ function ViewerPage({
         )}
       </View>
     </ScrollView>
+    </View>
   );
 }
 
@@ -433,22 +473,26 @@ export interface AttachmentViewerProps {
   dismissEnabled?: boolean;
   /** 시험이 끄는 거리를 읽는 이음매(`EdgeSwipeBack` 의 `progressRef` 와 같다). */
   progressRef?: ViewerProgressRef;
+  /** Opening source in window coordinates; destinations are remeasured by ID when closing. */
+  origin?: StageRect | null;
+  /** Present the Modal while its opening source is still being measured. */
+  originPending?: boolean;
+  measureSource?: MeasureHeroSource;
 }
 
 export function AttachmentViewer({
   onClose,
   ...frame
 }: AttachmentViewerProps): React.JSX.Element {
-  // 「동작 줄이기」면 Modal 이 시스템 페이드 없이 바로 서고 바로 내려간다. 첫 답이 오기 전에는
-  // 켜지 않은 것으로 본다(`false`): Modal 은 첫 렌더의 값으로 이미 떠 버리므로, 모르는 동안
-  // 켜진 것으로 보면 모두의 첫 모습이 바뀐다.
-  const reduceMotion = useReduceMotion(false);
+  const closeRequest = useRef(onClose);
+  const [presented, setPresented] = useState(false);
   return (
     <Modal
       visible
       transparent
-      animationType={reduceMotion ? 'none' : 'fade'}
-      onRequestClose={onClose}
+      animationType="none"
+      onShow={() => setPresented(true)}
+      onRequestClose={() => closeRequest.current()}
       testID="attachment-viewer-modal"
     >
       <SafeAreaProvider>
@@ -463,7 +507,7 @@ export function AttachmentViewer({
           onStartShouldSetResponder={CLAIM_EVERY_START}
           testID="attachment-viewer-shield"
         >
-          <ViewerFrame onClose={onClose} {...frame} />
+          <ViewerFrame onClose={onClose} {...frame} closeRequest={closeRequest} presented={presented} />
         </View>
       </SafeAreaProvider>
     </Modal>
@@ -480,11 +524,22 @@ function ViewerFrame({
   sentAtMs,
   dismissEnabled = true,
   progressRef,
-}: AttachmentViewerProps): React.JSX.Element {
+  origin = null,
+  originPending = false,
+  measureSource,
+  closeRequest,
+  presented,
+}: AttachmentViewerProps & {closeRequest: MutableRefObject<() => void>; presented: boolean}): React.JSX.Element {
   const styles = useStyles(buildStyles);
+  const latestClose = useRef(onClose);
+  latestClose.current = onClose;
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const reduceMotion = useReduceMotion(false);
+  const [transition, dispatch] = useReducer(stageTransition, reduceMotion || (!originPending && origin === null), initialStage);
+  const stageFade = useRef(new Animated.Value(transition.phase === 'opening' ? 0 : 1)).current;
+  const heroRect = useRef<StageRect | null>(origin);
+  const [closingFrame, setClosingFrame] = useState<{from: StageRect; to: StageRect} | null>(null);
   const screenReader = useScreenReader();
   const [index, setIndex] = useState(startIndex);
   // 끌기를 쥐는 동안 가로 스크롤을 잠근다(대각선으로 내릴 때 옆 장이 끌려 들어오는 것을 막는다).
@@ -512,12 +567,88 @@ function ViewerFrame({
     if (position === indexRef.current) setZoomed(next);
   }, []);
 
+  const preview = useAttachmentPreview(workspaceId, channelId, current as MessageAttachment, true);
+  const natural = usePhotoSize(current?.id ?? '', preview.status === 'ready' ? preview.uri : null);
+  const fitted = fitStageRect(natural, {width, height});
+  const requestClose = useCallback(() => {
+    if (pendingTap.current) { clearTimeout(pendingTap.current.timer); pendingTap.current = null; }
+    dispatch({type: 'close', zoomed, reduceMotion: reduceMotion || (!origin && !measureSource)});
+  }, [zoomed, reduceMotion, origin, measureSource]);
+  closeRequest.current = requestClose;
+  useEffect(() => {
+    if (origin && heroRect.current === null) heroRect.current = origin;
+    if (!originPending && origin === null && transition.phase === 'opening') {
+      stageFade.setValue(1);
+      dispatch({type: 'arrived', ticket: transition.ticket});
+    }
+  }, [originPending, origin, transition.phase, transition.ticket, stageFade]);
+  useEffect(() => {
+    if (reduceMotion) dispatch({type: 'reduce'});
+  }, [reduceMotion]);
+  useEffect(() => {
+    if (transition.phase === 'closed') latestClose.current();
+    if (transition.phase !== 'fitting') return;
+    zoomPages.current[index]?.reset(!reduceMotion);
+    if (!zoomed) { dispatch({type: 'fit'}); return; }
+    // OS/background interruptions may omit the final zoom callback. Settle before exiting in that case too.
+    const timeout = setTimeout(() => {
+      zoomPages.current[index]?.reset(false);
+      dispatch({type: 'fit'});
+    }, MENU_CLOSE_WATCHDOG_MS);
+    return () => clearTimeout(timeout);
+  }, [transition.phase, zoomed, index, reduceMotion]);
+  useEffect(() => {
+    if (transition.phase !== 'closing') return;
+    let live = true;
+    // Keep the pager at its released drag position until measurement has finished.
+    void (measureSource && current ? measureSource(current.id) : Promise.resolve(null)).then(source => {
+      if (!live) return;
+      drag.stopAnimation();
+      const offset = getOffset();
+      const scaleAtRelease = evaluate(scaleStops(height), offset);
+      const from = heroRect.current && transition.ticket === 1 && origin ? heroRect.current : {
+        x: fitted.x + fitted.width * (1 - scaleAtRelease) / 2,
+        y: height / 2 + (fitted.y - height / 2) * scaleAtRelease + offset,
+        width: fitted.width * scaleAtRelease, height: fitted.height * scaleAtRelease,
+      };
+      setClosingFrame({from, to: stageExitRect(source, fitted, {width, height})});
+    });
+    return () => { live = false; };
+    // Snapshot once for this close; later content or dimension updates cannot redirect it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [transition.phase]);
+  const heroActive = !reduceMotion && ((transition.phase === 'opening' && origin !== null) ||
+    (transition.phase === 'closing' && closingFrame !== null));
+  useEffect(() => {
+    if (!presented || originPending || (transition.phase === 'closing' && !closingFrame)) return;
+    if (transition.phase !== 'opening' && transition.phase !== 'closing') return;
+    const ticket = transition.ticket;
+    const animation = Animated.spring(stageFade, {
+      toValue: transition.phase === 'opening' ? 1 : 0,
+      ...VIEWER_SNAP_SPRING, overshootClamping: true, useNativeDriver: true,
+    });
+    animation.start(({finished}) => {
+      if (finished && !heroActive) dispatch({type: 'arrived', ticket});
+    });
+    return () => animation.stop();
+  }, [presented, originPending, transition.phase, transition.ticket, closingFrame, heroActive, stageFade]);
+  useEffect(() => {
+    if (!presented || !heroActive) return;
+    const ticket = transition.ticket;
+    const watchdog = setTimeout(() => dispatch({type: 'arrived', ticket}), MENU_CLOSE_WATCHDOG_MS);
+    return () => clearTimeout(watchdog);
+  }, [presented, heroActive, transition.ticket]);
+  useEffect(() => {
+    if (reduceMotion) { stageFade.stopAnimation(); stageFade.setValue(1); }
+  }, [reduceMotion, stageFade]);
+
   // 첫 탭은 두 번째 탭이 오는지 보고서야 한 번 탭(조작 숨김)이 된다. 두 번째 탭이 같은 자리에 문턱 안에 오면 두 번 탭 — 확대한다.
   const pendingTap = useRef<{
     point: DragPoint;
     timer: ReturnType<typeof setTimeout>;
   } | null>(null);
   const onTap = (point: DragPoint) => {
+    if (transition.phase !== 'open') return;
     const pending = pendingTap.current;
     pendingTap.current = null;
     if (pending !== null) {
@@ -543,15 +674,15 @@ function ViewerFrame({
     [],
   );
 
-  const { drag, pageHandlers, frameHandlers } = useViewerDismiss({
-    enabled: dismissEnabled && !zoomed,
+  const { drag, getOffset, pageHandlers, frameHandlers } = useViewerDismiss({
+    enabled: dismissEnabled && !zoomed && transition.phase === 'open',
     height,
-    onDismiss: onClose,
+    onDismiss: requestClose,
     progressRef,
     onDraggingChange: setDragging,
     onTap,
   });
-  const shown = !hidden || screenReader;
+  const shown = (!hidden || screenReader) && transition.phase === 'open';
 
   // 다른 장으로 넘어가면(썸네일·넘기기) 앞 장의 확대가 풀린다. 이 장은 원래 크기에서 시작한다.
   useEffect(() => {
@@ -578,8 +709,8 @@ function ViewerFrame({
 
   // 끄는 거리(`drag`) 한 값에서 세 모양이 파생한다. 표는 `viewerDismiss.ts` 에 한 벌이다.
   const backdropOpacity = useMemo(
-    () => drag.interpolate({ ...backdropStops(), extrapolate: 'clamp' }),
-    [drag],
+    () => Animated.multiply(stageFade, drag.interpolate({ ...backdropStops(), extrapolate: 'clamp' })),
+    [drag, stageFade],
   );
   const dragChromeOpacity = useMemo(
     () => drag.interpolate({ ...chromeStops(), extrapolate: 'clamp' }),
@@ -591,7 +722,7 @@ function ViewerFrame({
   );
 
   // 조작의 보임·숨김: 불투명도 하나(1 ↔ 0). 쓸어 닫는 동안의 옅어짐(`dragChromeOpacity`)과 곱해 한 값으로 쓴다.
-  const chromeFade = useRef(new Animated.Value(1)).current;
+  const chromeFade = useRef(new Animated.Value(shown ? 1 : 0)).current;
   const chromeOpacity = useMemo(
     () => Animated.multiply(dragChromeOpacity, chromeFade),
     [dragChromeOpacity, chromeFade],
@@ -599,7 +730,7 @@ function ViewerFrame({
   const fadeStarted = useRef(false);
   useEffect(() => {
     if (!fadeStarted.current) {
-      fadeStarted.current = true; // 첫 렌더는 이미 1(보임)이다 — 움직일 것이 없다.
+      fadeStarted.current = true; // 첫 렌더는 현재 전환 상태의 보임값이다.
       return;
     }
     const toValue = shown ? 1 : 0;
@@ -681,13 +812,19 @@ function ViewerFrame({
       : ('no-hide-descendants' as const),
   };
 
+  // The retained native Modal paints only an inaccessible exit stage after close.
+  const exiting = (origin !== null || measureSource !== undefined) &&
+    (transition.phase === 'fitting' || transition.phase === 'closing' || transition.phase === 'closed');
   return (
     <View
-      accessibilityViewIsModal
+      accessibilityViewIsModal={!exiting}
+      accessibilityElementsHidden={exiting}
+      importantForAccessibility={exiting ? 'no-hide-descendants' : 'auto'}
+      pointerEvents={exiting ? 'none' : 'auto'}
       // VoiceOver 두 손가락 문지르기(escape)가 닫는다 — 단추를 찾지 못하는 사람의 길이다.
-      onAccessibilityEscape={onClose}
+      onAccessibilityEscape={requestClose}
       style={styles.viewer}
-      testID="attachment-viewer"
+      testID={exiting ? "attachment-viewer-exit" : "attachment-viewer"}
       // 사진 밖에 닿은 손가락만 쥔다(부분 집합). 사진 위는 쪽이 쥔다 — 위 「응답을 쥐는 자리」.
       {...frameHandlers}
     >
@@ -704,7 +841,8 @@ function ViewerFrame({
         testID="attachment-viewer-backdrop"
       />
       <Animated.View
-        style={[styles.pager, { transform: [{ translateY: drag }, { scale }] }]}
+        style={[styles.pager, heroActive && styles.heroHidden, {transform: [{ translateY: drag }, { scale }] }]}
+        pointerEvents={transition.phase === 'open' ? 'auto' : 'none'}
         testID="attachment-viewer-pager"
       >
         <ScrollView
@@ -730,14 +868,25 @@ function ViewerFrame({
               width={width}
               height={height}
               responder={pageHandlers}
+              blankResponder={frameHandlers}
               zoomPages={zoomPages}
               onZoomedChange={onZoomedChange}
             />
           ))}
         </ScrollView>
       </Animated.View>
+      {heroActive ? <StageHero
+        key={transition.ticket}
+        uri={preview.status === 'ready' ? preview.uri : null}
+        from={closingFrame?.from ?? origin ?? fitted}
+        to={closingFrame?.to ?? fitted}
+        closing={transition.phase === 'closing'}
+        running={presented}
+        rectRef={heroRect}
+        onArrive={() => dispatch({type: 'arrived', ticket: transition.ticket})}
+      /> : null}
       {/* 리퀴드 글래스는 조상의 불투명도가 움직이는 곳에서 쓸 수 없다 — 파일 머리 「조작은 리퀴드 글래스를 쓰지 않는다」. */}
-      <LiquidGlassAllowed.Provider value={false}>
+      {!exiting ? <LiquidGlassAllowed.Provider value={false}>
         <Animated.View
           {...chromeProps}
           style={[
@@ -765,7 +914,7 @@ function ViewerFrame({
           />
           <GlassButton
             label="뒤로"
-            onPress={onClose}
+            onPress={requestClose}
             testID="attachment-viewer-back"
           >
             <Image source={CONV_ICONS.left} style={styles.backGlyph} />
@@ -919,7 +1068,7 @@ function ViewerFrame({
             </GlassButton>
           </View>
         </Animated.View>
-      </LiquidGlassAllowed.Provider>
+      </LiquidGlassAllowed.Provider> : null}
     </View>
   );
 }
@@ -934,11 +1083,12 @@ const buildStyles = (_color: Palette) =>
     backdrop: { backgroundColor: VIEWER_STAGE.bg },
     // 사진은 화면 가득이다 — 조작이 그 위에 뜬다.
     pager: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0 },
-    // 쪽 하나 = 확대 스크롤뷰(폭은 창 폭, 높이는 가로 스크롤뷰가 채운다). 늘어나거나 줄지 않는다 — 폭이 쪽 간격이다.
+    // 확대 프레임은 창 전체다. 높이를 생략하면 가로 사진의 맞춤 높이로 줄어 hero 도착 위치와 어긋나고 확대가 잘린다.
     zoomScroll: { flexGrow: 0, flexShrink: 0 },
-    // 내용이 스크롤뷰와 **정확히 같은 크기**여야 원래 크기에서 팬이 시작하지 않는다(1pt 라도 남으면 쓸어 닫기를 스크롤뷰가 가져간다).
-    zoomContent: { flexGrow: 1 },
-    viewerPage: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+    heroHidden: {opacity: 0},
+    // 내용만 맞춤 사진 크기다. centerContent가 창 중앙에 놓아 hero·두 번 탭이 같은 fitted 원점을 쓴다.
+    zoomContent: { alignItems: 'center', justifyContent: 'center' },
+    viewerPage: { alignItems: 'center', justifyContent: 'center' },
     viewerImage: { width: '100%', height: '100%' },
     viewerState: {
       fontSize: font.meta,

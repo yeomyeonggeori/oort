@@ -750,7 +750,8 @@ describe("design-review #1937 R1 수리", () => {
     await flush();
     const busyRow = item("mute-toggle");
     expect(busyRow?.getAttribute("aria-busy")).toBe("true");
-    expect(busyRow?.textContent?.trim()).toBe("알림 끄는 중");
+    expect(busyRow?.textContent?.trim()).toBe("알림 꺼짐");
+    expect(busyRow?.querySelector("svg.lucide-bell-off")).not.toBeNull();
     expect(busyRow?.hasAttribute("disabled")).toBe(false);
     // 흐림 규칙(`data-[disabled]:opacity-50`)은 이 그릇에 늘 적혀 있지만 그
     // 변형의 열쇠가 없으므로 발동하지 않는다 — 잠그지 않으면 흐려지지도 않는다.
