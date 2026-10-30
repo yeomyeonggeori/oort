@@ -23,7 +23,10 @@ spec.loader.exec_module(lockgate)
 
 # ADR-0203 D6 owner-mandated three, then what K-S1b measured as bypasses of them.
 MANDATED = {"terminal", "code_execution", "browser"}
-MEASURED_BYPASSES = {"file", "connections", "delegation", "cronjob", "skills", "vision", "image_gen"}
+# `image_gen` was measured as a bypass in K-S1b and left this set on purpose: the 2026-10-30 augmentation for #4820 (I1-I4)
+# turns it on in the default config with the Codex subscription provider only. The connector reference config still
+# denies it, and the lockgate rules below (provider, FAL_KEY, connector exclusivity) are what keep that door narrow.
+MEASURED_BYPASSES = {"file", "connections", "delegation", "cronjob", "skills", "vision"}
 
 
 def disabled_toolsets(text):
@@ -46,6 +49,22 @@ def top_level_keys(text):
     return {m.group(1) for m in re.finditer(r"^([A-Za-z_][A-Za-z0-9_]*):", text, re.M)}
 
 
+def cfg_from_text(text):
+    """The `web` and `image_gen` sections of a config written in this repo's flat style, as `tool_problems` reads them.
+
+    Stdlib only, like the readers above: it reads exactly `  key: value` lines under a top-level section."""
+    cfg = {}
+    for section in ("web", "image_gen"):
+        match = re.search(r"(?m)^%s:\n((?:  [a-z_]+: .*\n)+)" % section, text)
+        if not match:
+            continue
+        values = {}
+        for key, raw in re.findall(r"(?m)^  ([a-z_]+): (\S+)", match.group(1)):
+            values[key] = {"true": True, "false": False}.get(raw, raw)
+        cfg[section] = values
+    return cfg
+
+
 class DefaultConfig(unittest.TestCase):
     def setUp(self):
         self.text = open(os.path.join(HERE, "config.yaml")).read()
@@ -56,18 +75,32 @@ class DefaultConfig(unittest.TestCase):
         self.assertTrue(MANDATED <= off, "missing: %s" % sorted(MANDATED - off))
         self.assertTrue(MEASURED_BYPASSES <= off, "missing: %s" % sorted(MEASURED_BYPASSES - off))
 
-    def test_only_web_differs_from_the_connector_reference_config(self):
-        # The connector reference remains fully web-disabled; the default enables search only (#4794).
-        self.assertEqual(disabled_toolsets(self.text), [x for x in disabled_toolsets(self.google) if x != "web"])
-        self.assertEqual(len(disabled_toolsets(self.text)), 23)
+    def test_only_web_and_image_gen_differ_from_the_connector_reference_config(self):
+        # The connector reference remains fully web- and image-disabled; the default enables search only (#4794)
+        # and the Codex subscription image tool (#4820).
+        self.assertEqual(disabled_toolsets(self.text),
+                         [x for x in disabled_toolsets(self.google) if x not in ("web", "image_gen")])
+        self.assertEqual(len(disabled_toolsets(self.text)), 22)
+        self.assertIn("image_gen", disabled_toolsets(self.google))
+        self.assertNotIn("image_gen", disabled_toolsets(self.text))
 
     def test_api_server_uses_the_search_only_toolset_and_subscription_backend(self):
         # Read this small list without depending on optional PyYAML, as for the deny-list above.
         match = re.search(r"(?m)^platform_toolsets:\n  api_server:\n((?:    - .*\n)+)", self.text)
         self.assertIsNotNone(match)
         selected = re.findall(r"(?m)^    - ([a-z_]+)\b", match.group(1))
-        self.assertEqual(selected, ["memory", "todo", "session_search", "search"])
+        self.assertEqual(selected, ["memory", "todo", "session_search", "search", "image_gen"])
+        self.assertNotIn("web", selected, "the combined `web` toolset would add web_extract")
         self.assertRegex(self.text, r"(?m)^web:\n  search_backend: openai-native\b.*\n  keyless_fallback: false\b")
+
+    def test_image_generation_is_the_codex_subscription_provider_only(self):
+        self.assertRegex(self.text, r"(?m)^image_gen:\n  provider: openai-codex\b")
+        # No credential-bearing or alternative provider setting rides in the default config.
+        body = re.sub(r"(?m)#.*$", "", self.text)
+        for other in ("fal", "openai-api", "krea", "xai", "nous"):
+            self.assertNotRegex(body, r"(?m)^\s+provider:\s*%s\b" % other)
+        self.assertNotIn("FAL_KEY", body)
+        self.assertEqual(lockgate.tool_problems(cfg_from_text(self.text), lockgate.ALLOWED_TOOLS), [])
 
     def test_no_connector_mode_and_no_model_here(self):
         keys = top_level_keys(self.text)
@@ -86,8 +119,13 @@ class DefaultConfig(unittest.TestCase):
         self.assertRegex(self.text, r"(?m)^    send: false\b")
         self.assertRegex(self.text, r"(?m)^  check: false\b")
 
-    def test_the_gate_allows_search_and_keeps_extraction_out(self):
-        self.assertEqual(set(lockgate.ALLOWED_TOOLS), {"memory", "todo_list", "session_search", "web_search"})
+    def test_the_gate_allows_search_and_image_generation_and_keeps_extraction_and_execution_out(self):
+        self.assertEqual(set(lockgate.ALLOWED_TOOLS),
+                         {"memory", "todo_list", "session_search", "web_search", "image_generate"})
+        for tool in ("web_extract", "terminal", "process_manage", "execute_code", "browser_navigate", "read_file",
+                     "write_file", "delegate_task", "skill_manage", "manage_connections", "cronjob_manage",
+                     "vision_analyze", "video_generate", "xai_video_edit", "text_to_speech", "x_search"):
+            self.assertNotIn(tool, lockgate.ALLOWED_TOOLS, tool)
 
     def test_dropping_a_mandated_toolset_is_detected(self):
         # The sabotage the gate-side test relies on: removing `terminal` must change what this file's reader sees.
@@ -125,6 +163,14 @@ class VolumeEnv(unittest.TestCase):
                 self.assertNotIn("evil.example", found[0])
                 self.assertNotIn("short", found[0].replace("shorter", ""))
 
+    def test_another_image_provider_key_is_named_without_its_value(self):
+        found = self.problems("OPENROUTER_API_KEY=keep\nexport FAL_KEY=fixture-secret-value\n")
+        self.assertEqual(len(found), 1)
+        self.assertIn("FAL_KEY", found[0])
+        self.assertNotIn("fixture-secret-value", found[0])
+        # An empty value or a comment is not a credential.
+        self.assertEqual(self.problems("FAL_KEY=\n# FAL_KEY=x\n"), [])
+
     def test_an_unreadable_env_is_a_problem_not_a_pass(self):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(len(lockgate.volume_env_problems(tmp)), 1)  # a directory cannot be read as a file
@@ -135,7 +181,8 @@ class WebToolPolicy(unittest.TestCase):
         self.cfg = {"web": {"search_backend": "openai-native", "keyless_fallback": False}}
 
     def test_chat_with_subscription_search_is_allowed_and_chat_alone_can_roll_back(self):
-        self.assertEqual(lockgate.tool_problems(self.cfg, lockgate.ALLOWED_TOOLS), [])
+        # Search alone, without the image tool: rolling image generation back must leave this passing (ADR-0203 I4).
+        self.assertEqual(lockgate.tool_problems(self.cfg, lockgate.ALLOWED_TOOLS - lockgate.IMAGE_TOOLS), [])
         self.assertEqual(lockgate.tool_problems({}, {"memory", "todo_list", "session_search"}), [])
 
     def test_extraction_and_preexisting_bypasses_are_refused(self):
@@ -157,6 +204,61 @@ class WebToolPolicy(unittest.TestCase):
                 self.assertTrue(any("web.keyless_fallback" in p for p in lockgate.tool_problems(cfg, {"web_search"})))
 
 
+class ImageToolPolicy(unittest.TestCase):
+    """image_generate is allowed with exactly one provider and never beside connectors (ADR-0203 augmentation, #4820)."""
+
+    def setUp(self):
+        self.cfg = {"web": {"search_backend": "openai-native", "keyless_fallback": False},
+                    "image_gen": {"provider": "openai-codex"}}
+
+    def test_the_full_default_surface_is_allowed_and_each_half_can_roll_back_alone(self):
+        self.assertEqual(lockgate.tool_problems(self.cfg, lockgate.ALLOWED_TOOLS), [])
+        # Image generation rolled back: no image config is needed and nothing else changes.
+        self.assertEqual(lockgate.tool_problems({"web": self.cfg["web"]}, lockgate.ALLOWED_TOOLS - lockgate.IMAGE_TOOLS), [])
+        # Search rolled back, image kept.
+        self.assertEqual(lockgate.tool_problems({"image_gen": self.cfg["image_gen"]},
+                                                {"memory", "todo_list", "session_search", "image_generate"}), [])
+
+    def test_any_provider_but_the_codex_subscription_is_refused(self):
+        for image in (None, "openai-codex", {}, {"provider": None}, {"provider": ""}, {"provider": "fal"},
+                      {"provider": "nous"}, {"provider": "openai"}, {"provider": "openai-api"}, {"provider": "krea"},
+                      {"provider": "xai"}, {"provider": "OpenAI-Codex"}, {"provider": " openai-codex"},
+                      {"provider": ["openai-codex"]}, {"model": "gpt-image-2", "providers": "openai-codex"}):
+            cfg = copy.deepcopy(self.cfg)
+            if image is None:
+                del cfg["image_gen"]
+            else:
+                cfg["image_gen"] = image
+            with self.subTest(image=image):
+                found = lockgate.tool_problems(cfg, {"memory", "image_generate"})
+                self.assertTrue(any("image_gen.provider" in p for p in found), found)
+
+    def test_the_provider_rule_only_applies_when_the_tool_is_exposed(self):
+        # A config that does not select image generation needs no provider; the rule must not reject chat-only configs.
+        self.assertEqual(lockgate.tool_problems({}, {"memory", "todo_list", "session_search"}), [])
+        self.assertEqual(lockgate.tool_problems({"image_gen": {"provider": "fal"}}, {"memory"}), [])
+
+    def test_code_execution_files_urls_and_other_generators_stay_refused_beside_the_image_tool(self):
+        for tool in ("execute_code", "terminal", "process_manage", "read_file", "write_file", "patch", "browser_navigate",
+                     "web_extract", "delegate_task", "skill_manage", "manage_connections", "cronjob_manage",
+                     "vision_analyze", "video_generate", "xai_video_edit", "text_to_speech", "x_search"):
+            with self.subTest(tool=tool):
+                found = lockgate.tool_problems(self.cfg, {"memory", "image_generate", tool})
+                self.assertTrue(any(tool in p and "allow-list" in p for p in found), found)
+
+    def test_connector_mode_refuses_the_image_tool_even_with_the_right_provider(self):
+        cfg = {**self.cfg, "mcp_servers": {"gmail": {}}}
+        found = lockgate.tool_problems(cfg, {"memory", "image_generate"})
+        self.assertTrue(any("connector mode forbids image generation" in p for p in found), found)
+        # ...while the same connector config without the image tool is not touched by this rule.
+        self.assertFalse(any("image" in p for p in lockgate.tool_problems(cfg, {"memory"})))
+
+    def test_the_connector_rules_require_image_gen_in_the_deny_list(self):
+        off = [x for x in lockgate.CONNECTOR_REQUIRED_DISABLED]
+        self.assertIn("image_gen", off)
+        self.assertIn("web", off)
+
+
 class EnforcedWebToolPolicy(unittest.TestCase):
     """Exercise the actual pre-start/monitor entry points. Only Hermes, HTTP and PID 1 are doubles.
 
@@ -176,12 +278,13 @@ class EnforcedWebToolPolicy(unittest.TestCase):
         modules["model_tools"].get_tool_definitions = mock.Mock(return_value=[{"function": {"name": "memory"}}])
         return modules
 
-    def boot(self, cfg, tools):
+    def boot(self, cfg, tools, extra_env=None):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "config.yaml")
             with open(path, "w") as handle:
                 handle.write("# isolated boot fixture; load_config is doubled\n")
-            with mock.patch.dict(os.environ, {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp}, clear=True), \
+            env = {"API_SERVER_KEY": "test-only-" * 4, "HERMES_DATA_DIR": tmp, **(extra_env or {})}
+            with mock.patch.dict(os.environ, env, clear=True), \
                     mock.patch.dict(sys.modules, self.hermes_modules(cfg, tools)), \
                     mock.patch.object(sys, "path", list(sys.path)), \
                     mock.patch.object(lockgate.subprocess, "run", return_value=types.SimpleNamespace(returncode=0)), \
@@ -271,6 +374,64 @@ class EnforcedWebToolPolicy(unittest.TestCase):
         self.assertEqual(rc, 3)
         self.assertEqual(kills, [mock.call(1, lockgate.signal.SIGTERM)])
         self.assertTrue(any("web_extract" in p for p in record["problems"]))
+
+    # --- image generation through the same two entry points (ADR-0203 augmentation, #4820) ---------------------
+    def image_cfg(self, **over):
+        return {**self.cfg, "image_gen": {"provider": "openai-codex"}, **over}
+
+    def image_tools(self):
+        return self.tools | {"image_generate"}
+
+    def test_image_generation_with_the_codex_provider_passes_both_entry_points(self):
+        cfg, tools = self.image_cfg(), self.image_tools()
+        rc, record = self.boot(cfg, tools)
+        self.assertEqual((rc, record["problems"]), (0, []))
+        rc, kills, _ = self.monitor(cfg, tools)
+        self.assertEqual((rc, kills), (0, []))
+
+    def test_prestart_refuses_another_image_provider_a_connector_and_a_second_provider_key(self):
+        tools = self.image_tools()
+        for cfg, extra_env, fragment in (
+            (self.image_cfg(image_gen={"provider": "fal"}), {}, "image_gen.provider"),
+            (self.image_cfg(image_gen={}), {}, "image_gen.provider"),
+            ({**self.cfg}, {}, "image_gen.provider"),
+            (self.image_cfg(mcp_servers={"gmail": {}}), {}, "connector mode forbids image generation"),
+            (self.image_cfg(), {"FAL_KEY": "fixture-not-a-key"}, "FAL_KEY"),
+        ):
+            with self.subTest(cfg=cfg, extra_env=sorted(extra_env)):
+                rc, record = self.boot(cfg, tools, extra_env)
+                self.assertEqual(rc, 3)
+                self.assertFalse(record["ok"])
+                self.assertTrue(any(fragment in p for p in record["problems"]), record["problems"])
+                self.assertNotIn("fixture-not-a-key", json.dumps(record))
+
+    def test_prestart_refuses_code_execution_beside_the_image_tool(self):
+        for tool in ("execute_code", "terminal", "web_extract"):
+            with self.subTest(tool=tool):
+                rc, record = self.boot(self.image_cfg(), self.image_tools() | {tool})
+                self.assertEqual(rc, 3)
+                self.assertTrue(any(tool in p for p in record["problems"]), record["problems"])
+
+    def test_live_provider_drift_and_connector_image_request_shutdown(self):
+        tools = self.image_tools()
+        for cfg in (self.image_cfg(image_gen={"provider": "fal"}), {**self.cfg},
+                    self.image_cfg(mcp_servers={"gmail": {}})):
+            with self.subTest(cfg=cfg):
+                rc, kills, record = self.monitor(cfg, tools)
+                self.assertEqual(rc, 3)
+                self.assertEqual(kills, [mock.call(1, lockgate.signal.SIGTERM)])
+                self.assertTrue(record["problems"])
+
+    def test_real_api_shape_keeps_judging_the_image_provider(self):
+        # /v1/toolsets lists the configurable `image_gen` category with its tool when enabled.
+        tools = self.image_tools()
+        rc, kills, record = self.monitor(self.image_cfg(), tools, reported_tools=tools - {"web_search"})
+        self.assertEqual((rc, kills), (0, []))
+        self.assertIn("image_generate", record["live_tools"])
+        rc, kills, record = self.monitor(self.image_cfg(image_gen={"provider": "openai"}), tools,
+                                         reported_tools=tools - {"web_search"})
+        self.assertEqual(rc, 3)
+        self.assertEqual(kills, [mock.call(1, lockgate.signal.SIGTERM)])
 
 
 if __name__ == "__main__":

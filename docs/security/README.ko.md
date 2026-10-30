@@ -33,6 +33,8 @@ flowchart LR
 
 공동 호스팅 Hermes의 **저장소 기본 설정**은 Codex 구독의 서버 측 웹 검색(`web_search`)을 선택한다. 검색어에는 대화의 일부가 담겨 OpenAI의 검색 처리로 나갈 수 있고, 검색 결과도 신뢰할 수 없는 외부 입력이다. 검색어의 개인정보 제거·무보관을 보장하지 않는다. 설정의 허용 표면에서 페이지 추출(`web_extract`)은 제외하고, 커넥터 설정은 `web` 전체를 끈다. 이 설명은 실행 중인 서비스의 배포 확인이 아니다. [결정·범위·한계: ADR-0203 W1–W4](../adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-웹-검색만-허용-4794), [설정](../../infra/hermes/config.yaml), [오프라인 게이트 시험 `WebToolPolicy`·`EnforcedWebToolPolicy`](../../infra/hermes/test_default_config.py)·[커넥터 음성 대조](../../infra/hermes/test_lockgate_connectors.py)
 
+같은 기본 설정은 Codex 구독의 그림 생성(`image_generate`, 공급자는 `openai-codex`만)도 선택한다. 그림 prompt와 모델이 도구에 넘기는 참조 이미지·주소는 OpenAI의 이미지 처리로 나가고, 이 도구는 모델이 고른 공개 주소를 Hermes가 직접 내려받을 수 있으며 설정으로 끌 수 없다. 만들어진 그림은 신뢰할 수 없는 모델 출력이다. prompt의 개인정보 제거·무보관을 보장하지 않는다. 잠금 게이트는 다른 그림 공급자·코드 실행·페이지 추출(`web_extract`)을 거절하고, 커넥터 설정은 `image_gen`도 끈다. 이 설명은 실행 중인 서비스의 배포 확인이 아니다. [결정·범위·한계: ADR-0203 I1–I4](../adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820), [설정](../../infra/hermes/config.yaml), [오프라인 게이트 시험 `ImageToolPolicy`](../../infra/hermes/test_default_config.py)·[커넥터 음성 대조](../../infra/hermes/test_lockgate_connectors.py)
+
 ## 적용된 통제
 
 ### 테넌트 격리와 DB 역할

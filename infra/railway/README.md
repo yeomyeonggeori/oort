@@ -198,8 +198,8 @@ variable**: not `DATABASE_URL`, not `PROVIDER_LINK_MASTER_KEY`, not a JWT key.
    reads it as `API_SERVER_KEY`; api and agent-worker as `HERMES_API_KEY`
    (the gate refuses a key under 32 characters).
 2. **Two base64 variables on hermes** (hand-mapped table): `HERMES_CONFIG_B64`
-   from `infra/hermes/config.yaml` (24 toolsets off, approvals manual/deny, no
-   model, no connector) and `HERMES_LOCKGATE_B64` from
+   from `infra/hermes/config.yaml` (22 toolsets off, Codex subscription search and
+   image generation on, approvals manual/deny, no model, no connector) and `HERMES_LOCKGATE_B64` from
    `infra/hermes/lockgate.py`.
 3. **Start order.** The start command writes the config and the gate, checks
    both against the sha256 of the repo files (an empty, stale or swapped

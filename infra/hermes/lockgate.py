@@ -44,8 +44,13 @@ import time
 import urllib.error
 import urllib.request
 
-ALLOWED_TOOLS = frozenset({"memory", "todo_list", "session_search", "web_search"})
+ALLOWED_TOOLS = frozenset({"memory", "todo_list", "session_search", "web_search", "image_generate"})
 WEB_TOOLS = frozenset({"web_search", "web_extract"})
+IMAGE_TOOLS = frozenset({"image_generate"})
+IMAGE_PROVIDER = "openai-codex"  # the only image provider: gpt-image-2 through the Codex subscription OAuth (#4820)
+# Another image provider's credential. Hermes' tool entry point probes FAL before the explicitly configured provider and falls
+# through to FAL when plugin discovery raises (v0.22.2 tools/image_generation_tool.py), so a key here would be a second door.
+IMAGE_KEY_ENV_NAMES = ("FAL_KEY",)
 REQUIRED_TOOL = "memory"  # positive control: the allow-list must resolve something real
 INSTALL = "/opt/hermes"
 TRUTHY = ("1", "true", "yes", "on")
@@ -54,7 +59,7 @@ TRUTHY = ("1", "true", "yes", "on")
 APPS_ENV = "OORT_COHOSTED_AGENT_CONNECTOR_APPS"  # the same list as oort's env, set on THIS service too
 PLUGIN_PREFIX = "com.momo.plugins."
 PLUGIN_ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,127}$")  # plugin_registry_id_ck
-CONNECTOR_REQUIRED_DISABLED = ("cronjob", "delegation", "web")  # K4-1 on top of D6
+CONNECTOR_REQUIRED_DISABLED = ("cronjob", "delegation", "web", "image_gen")  # K4-1 on top of D6; image_gen: #4820 I3
 HTTPS_URL_RE = re.compile(r"^https://[^\s]+$")  # one line, no whitespace: a value Hermes reads as ONE address
 GLOB_CHARS = ("*", "?", "[")  # Hermes matches `tools.include` entries containing these as fnmatch globs
 
@@ -143,10 +148,11 @@ def connector_problems(cfg, env):
 
 
 def tool_problems(cfg, tools):
-    """Judge pre-filter tool names at boot and observed live tools with the same policy (#4794).
+    """Judge pre-filter tool names at boot and observed live tools with the same policy (#4794, #4820).
 
-    Search is subscription-only. A connector config narrows the allow-list back to chat-only even if
-    Hermes ever stops honoring the required `disabled_toolsets: [web]`. No credentials are read here.
+    Search and image generation are subscription-only. A connector config narrows the allow-list back to
+    chat-only even if Hermes ever stops honoring the required `disabled_toolsets: [web, image_gen]`.
+    No credentials are read here.
     """
     tools = set(tools)
     problems = []
@@ -155,12 +161,18 @@ def tool_problems(cfg, tools):
         problems.append("tools outside the allow-list would be exposed: " + ",".join(extra))
     if cfg.get("mcp_servers") and tools & WEB_TOOLS:
         problems.append("connector mode forbids all web tools: " + ",".join(sorted(tools & WEB_TOOLS)))
+    if cfg.get("mcp_servers") and tools & IMAGE_TOOLS:
+        problems.append("connector mode forbids image generation: " + ",".join(sorted(tools & IMAGE_TOOLS)))
     if "web_search" in tools:
         web = cfg.get("web") or {}
         if not isinstance(web, dict) or web.get("search_backend") != "openai-native":
             problems.append("web.search_backend must be exactly 'openai-native' when web_search is exposed")
         if not isinstance(web, dict) or web.get("keyless_fallback") is not False:
             problems.append("web.keyless_fallback must be explicitly false when web_search is exposed")
+    if tools & IMAGE_TOOLS:
+        image = cfg.get("image_gen") or {}
+        if not isinstance(image, dict) or image.get("provider") != IMAGE_PROVIDER:
+            problems.append("image_gen.provider must be exactly 'openai-codex' when image_generate is exposed")
     return problems
 
 
@@ -197,6 +209,8 @@ def volume_env_problems(env_path):
             problems.append("the volume's .env sets API_SERVER_CORS_ORIGINS")
         elif key == "API_SERVER_KEY" and len(value) < 32:
             problems.append("the volume's .env sets an API_SERVER_KEY shorter than 32 characters")
+        elif key in IMAGE_KEY_ENV_NAMES and value:
+            problems.append(f"the volume's .env sets {key} (another image provider's credential)")
     return problems
 
 
@@ -222,6 +236,9 @@ def gate(cfg_path):
         problems.append("API_SERVER_KEY is shorter than 32 characters")
     if env.get("HERMES_DASHBOARD", "").strip().lower() in TRUTHY:
         problems.append("HERMES_DASHBOARD is enabled")
+    for name in IMAGE_KEY_ENV_NAMES:
+        if env.get(name, "").strip():
+            problems.append(f"{name} is set (another image provider's credential)")
 
     problems.extend(volume_env_problems(os.path.join(os.environ.get("HERMES_DATA_DIR", DATA_DIR), ".env")))
 

@@ -414,8 +414,9 @@ scripts/self_host_env.sh --compose up -d --wait
 않아요.
 
 - `hermes` 서비스는 digest로 고정한 공식 이미지이고, 사설 네트워크에만 있으며 공개
-  포트가 없어요. Hermes 엔트리포인트 앞에서 `infra/hermes/lockgate.py gate`(toolset
-  24개 끔, 대화 전용 허용목록)를 돌려요. 게이트가 실패하면 컨테이너는 재시작만
+  포트가 없어요. Hermes 엔트리포인트 앞에서 `infra/hermes/lockgate.py gate`(대화·Codex
+  구독 검색·Codex 구독 그림 생성만 허용하는 허용목록, `web_extract`는 제외, 커넥터를
+  켜면 `web`·`image_gen` 전부 끔)를 돌려요. 게이트가 실패하면 컨테이너는 재시작만
   반복하고 listen하지 않아서, 프로브는 잠기지 않은 Hermes 대신 `unreachable`(연결 불가)을
   보고해요.
 - `OORT_COHOSTED_AGENT_TOOLS_LOCKED=1`은 운영자 본인의 선언이고 여기서는 게이트가

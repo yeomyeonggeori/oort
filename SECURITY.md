@@ -220,6 +220,18 @@ the [default config](infra/hermes/config.yaml), and the offline
 [gate](infra/hermes/test_default_config.py) and
 [connector](infra/hermes/test_lockgate_connectors.py) tests.
 
+The same default also selects Codex subscription image generation
+(`image_generate`, provider `openai-codex` only). Image prompts, and any
+reference image or address the model passes to the tool, go to OpenAI's image
+processing, and the tool can fetch a model-chosen public address itself, which
+configuration cannot turn off. Generated pictures are untrusted model output.
+We do not promise prompt redaction or no retention. The lock gate refuses other
+image providers, code execution and `web_extract`, and connector configurations
+disable `image_gen` as well. This describes repository configuration, not a
+verified live deployment. See
+[ADR-0203 I1–I4](docs/adr/0203-cohosted-agent-detection.md#증보-2026-10-30--codex-구독-그림-생성만-허용-4820)
+and the offline [gate tests](infra/hermes/test_default_config.py).
+
 For deployment, rotation, backup, and incident procedures, follow
 [`docs/SELF_HOST.md`](docs/SELF_HOST.md) and
 [`docs/runbooks/pgbackrest-pitr.md`](docs/runbooks/pgbackrest-pitr.md).
