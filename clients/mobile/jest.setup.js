@@ -8,6 +8,14 @@
  */
 
 // ---- react-native-mmkv -------------------------------------------------------
+// Native defaults behind RN's real Settings.watchKeys/settingsUpdated adapter.
+// Language tests exercise the JS observer; no iOS runtime is claimed here.
+jest.mock('react-native/Libraries/Settings/NativeSettingsManager', () => ({
+  getConstants: () => ({settings: {AppleLanguages: ['ko-KR'], AppleLocale: 'ko_KR'}}),
+  setValues: jest.fn(),
+  deleteValues: jest.fn(),
+}));
+
 // The non-secret store. `__store` is exposed so a test can look inside and prove
 // what is (and is not) in there.
 jest.mock('react-native-mmkv', () => {

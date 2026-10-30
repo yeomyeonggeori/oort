@@ -21,6 +21,15 @@ export const messageKeys = [
   "desktop.menu.undo",
   "desktop.menu.view",
   "desktop.menu.window",
+  "mobile.ios.cameraUsage",
+  "mobile.ios.faceIdUsage",
+  "mobile.ios.localNetworkUsage",
+  "mobile.ios.microphoneUsage",
+  "mobile.ios.photoLibraryAddUsage",
+  "mobile.ios.photoLibraryUsage",
+  "mobile.locale.backToSettings",
+  "mobile.locale.permissionNotice",
+  "mobile.locale.saving",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -59,6 +68,15 @@ export const argumentSpecs = {
   "desktop.menu.undo": {},
   "desktop.menu.view": {},
   "desktop.menu.window": {},
+  "mobile.ios.cameraUsage": {},
+  "mobile.ios.faceIdUsage": {},
+  "mobile.ios.localNetworkUsage": {},
+  "mobile.ios.microphoneUsage": {},
+  "mobile.ios.photoLibraryAddUsage": {},
+  "mobile.ios.photoLibraryUsage": {},
+  "mobile.locale.backToSettings": {},
+  "mobile.locale.permissionNotice": {},
+  "mobile.locale.saving": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -93,6 +111,15 @@ export interface MessageArgs {
   "desktop.menu.undo": Record<string, never>;
   "desktop.menu.view": Record<string, never>;
   "desktop.menu.window": Record<string, never>;
+  "mobile.ios.cameraUsage": Record<string, never>;
+  "mobile.ios.faceIdUsage": Record<string, never>;
+  "mobile.ios.localNetworkUsage": Record<string, never>;
+  "mobile.ios.microphoneUsage": Record<string, never>;
+  "mobile.ios.photoLibraryAddUsage": Record<string, never>;
+  "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.locale.backToSettings": Record<string, never>;
+  "mobile.locale.permissionNotice": Record<string, never>;
+  "mobile.locale.saving": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;

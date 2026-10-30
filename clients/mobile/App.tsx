@@ -14,6 +14,7 @@ import {RESTORE_UNREACHABLE_NOTICE} from './src/session/authGate';
 import {useAuthGate} from './src/session/useSession';
 import AppShell from './src/shell/AppShell';
 import {initSessionStore} from './src/storage/secureSession';
+import {MobileLocaleProvider} from './src/i18n/LocaleProvider';
 
 // =============================================================================
 // The app tree.
@@ -49,7 +50,9 @@ export default function App(): React.JSX.Element {
   // `Gate` 아래 있으면 앱을 열 때마다 다크 한 프레임이 먼저 지나간다.
   return (
     <ThemeProvider>
-      <AppChrome />
+      <MobileLocaleProvider>
+        <AppChrome />
+      </MobileLocaleProvider>
     </ThemeProvider>
   );
 }

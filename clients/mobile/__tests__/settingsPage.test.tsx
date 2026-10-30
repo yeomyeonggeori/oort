@@ -1,4 +1,6 @@
 import {getHapticMode} from '../src/lib/haptics';
+import {MobileLocaleProvider} from '../src/i18n/LocaleProvider';
+import {createMobileLocaleController} from '../src/i18n/controller';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import type {Member, RosterMember} from '@momo/core/lib/api';
 import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
@@ -642,6 +644,7 @@ describe('설정 페이지', () => {
 describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는 왼쪽 위: 설정 페이지 전수 (#4691)', () => {
   // 안쪽 장이 하나 늘면 이 표가 타입 오류를 낸다 — 새 장의 머리도 같은 약속을 지켜야 한다.
   const SUB_PAGES: Record<SettingsSubPage, true> = {
+    language: true,
     theme: true,
     deviceKey: true,
     devTools: true,
@@ -650,12 +653,18 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
     dndUntil: true,
   };
 
-  function mountPage(initialPage: SettingsPageName) {
+  const createLocale = () => createMobileLocaleController({port: {
+    readPreference: () => 'system', writePreference: () => {},
+    readDevice: () => ({languages: ['ko-KR'], timeZone: 'Asia/Seoul'}),
+  }});
+
+  async function mountPage(initialPage: SettingsPageName) {
     queryClient = new QueryClient({
       defaultOptions: {queries: {retry: false, gcTime: 0}, mutations: {retry: false, gcTime: 0}},
     });
-    return render(
+    render(
       <ThemeProvider>
+        <MobileLocaleProvider createController={createLocale}>
         <QueryClientProvider client={queryClient}>
           <SettingsPage
             workspaceId={WS}
@@ -667,8 +676,10 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
             initialPage={initialPage}
           />
         </QueryClientProvider>
+        </MobileLocaleProvider>
       </ThemeProvider>,
     );
+    await screen.findByTestId(initialPage === 'main' ? 'settings-header' : 'settings-sub-header');
   }
 
   /** 머리의 세 칸([왼쪽, 제목, 오른쪽])에 서 있는 단추의 이름. 칸이 셋이 아니면 제목이 가운데에 서지 않는다. */
@@ -684,15 +695,15 @@ describe('머리의 자리 — 닫기 X 는 오른쪽 위, 안쪽 장의 ‹ 는
     );
   }
 
-  it('첫 장(모달 페이지): 왼쪽은 비고, 「설정」 제목, 오른쪽에 「설정 닫기」 X 하나다', () => {
-    mountPage('main');
+  it('첫 장(모달 페이지): 왼쪽은 비고, 「설정」 제목, 오른쪽에 「설정 닫기」 X 하나다', async () => {
+    await mountPage('main');
     expect(buttonsBySlot('settings-header')).toEqual([[], [], ['설정 닫기']]);
   });
 
   it.each(Object.keys(SUB_PAGES) as SettingsSubPage[])(
     '안쪽 장 %s: 왼쪽에 ‹ 뒤로 하나, 오른쪽은 비고 X 는 없다',
-    page => {
-      mountPage(page);
+    async page => {
+      await mountPage(page);
       expect(buttonsBySlot('settings-sub-header')).toEqual([['설정으로 돌아가기'], [], []]);
       expect(within(screen.getByTestId('settings-sub-header')).queryByLabelText(/닫기/)).toBeNull();
     },
