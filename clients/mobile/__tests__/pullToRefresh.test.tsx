@@ -312,12 +312,14 @@ describe('대화 당겨서 다시 맞추기 — owner 10-30 (#4783)', () => {
     renderShell();
     await waitFor(() => expect(screen.getByTestId('sidebar-list')).toBeTruthy());
     fireEvent.press(screen.getByTestId('sidebar-row-channel:ch-general'));
-    await waitFor(() => expect(screen.getByTestId('timeline-empty').props.refreshControl).toBeTruthy());
+    // 머리 고지(#4789 headerContent)가 있으면 빈 상태는 바깥 스크롤 안에 서고, 당김은 그 바깥 스크롤이 받는다.
+    const emptyPullTarget = () => screen.queryByTestId('timeline-empty-scroll') ? 'timeline-empty-scroll' : 'timeline-empty';
+    await waitFor(() => expect(screen.getByTestId(emptyPullTarget()).props.refreshControl).toBeTruthy());
     const clients = (jest.requireMock('centrifuge') as {__clients: {connectCount: number}[]}).__clients;
     const client = clients[clients.length - 1];
     const connects = client.connectCount;
     const reads = callsTo(fetchMock, '/messages');
-    pull('timeline-empty');
+    pull(emptyPullTarget());
     await waitFor(() => expect(callsTo(fetchMock, '/messages')).toBeGreaterThan(reads));
     expect(client.connectCount).toBe(connects + 1);
   });
