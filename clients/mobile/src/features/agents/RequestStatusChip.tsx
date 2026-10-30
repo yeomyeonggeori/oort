@@ -3,7 +3,7 @@ import {
   REQUEST_BUNDLE_FACE,
   type RequestBundleState,
 } from '@momo/core/features/timeline/requestBundle';
-import React from 'react';
+import React, {useRef} from 'react';
 import {
   Image,
   Pressable,
@@ -55,10 +55,11 @@ export function RequestStatusChip({
 }: {
   chip: TriggerChip;
   sentence?: string;
-  onOpen?: () => void;
+  onOpen?: (source: React.RefObject<View | null>) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {fontScale} = useWindowDimensions();
+  const source = useRef<View | null>(null);
   const scale = Math.min(fontScale, BAR_CONTROL_MAX_SCALE);
   const height = line.meta * scale;
   const style = [
@@ -102,7 +103,8 @@ export function RequestStatusChip({
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={label}
-      onPress={onOpen}
+      ref={source}
+      onPress={() => onOpen(source)}
       hitSlop={{top: slopTo(height), bottom: slopTo(height)}}
       style={style}
       testID="request-status-chip"

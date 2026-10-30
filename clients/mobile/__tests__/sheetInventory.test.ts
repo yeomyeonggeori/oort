@@ -159,6 +159,7 @@ describe('sheetInventory (#4458)', () => {
         'features/deviceLink/QrScannerSheet.tsx', // 전체 화면 카메라
         'features/attachments/AttachMenu.tsx', // 앵커 팝오버 — 시트가 아니다
         'features/attachments/AttachmentViewer.tsx', // 전체 화면 사진 뷰어
+        'features/decisionStage/DecisionStage.tsx', // #4827 전체 화면 결정 무대 — S1 hero로 열고 닫으며 바텀시트가 아니다
         'features/directory/AvatarViewer.tsx', // 전체 화면 프로필 사진 뷰어(#4319) — 첨부 뷰어의 형제, 시트가 아니다
       ]);
       const offenders = sources()
