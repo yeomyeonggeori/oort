@@ -248,6 +248,7 @@ import {MemoryProposalCards} from '../memory/MemoryProposalCard';
 import {MemoryReceiptChip} from '../memory/MemoryReceiptChip';
 import {MessageRunStatus} from '../agents/MessageRunStatus';
 import type {TriggerChip} from '@momo/core/features/agents/triggerChip';
+import {useOpenDecisionStage} from '../decisionStage/openDecisionStage';
 import {RequestStatusChip} from '../agents/RequestStatusChip';
 import {RequestThinkingLine} from '../agents/RequestThinkingLine';
 import {RequestBundleCard} from './RequestBundleCard';
@@ -2422,6 +2423,7 @@ function MessageRowInner({
 }: MessageRowProps): React.JSX.Element {
   const styles = useStyles(buildStyles);
   rowRenders += 1;
+  const openDecisionStage = useOpenDecisionStage();
   // 정리(cleanup) 형식의 ref — 떼는 쪽이 자기가 붙인 노드를 지목한다(R1 M-3).
   const messageId = message.id;
   const rowNodeRef = useCallback(
@@ -3119,7 +3121,7 @@ function MessageRowInner({
             time={timeLabel(message.createdAtMs)}
             requestChip={requestChip ? <RequestStatusChip chip={requestChip}
               sentence={requestSentence}
-              onOpen={requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
+              onOpen={requestCardTarget && requestChip.kind === 'approval' && openDecisionStage ? source => { const card = rowPresentation(requestCardTarget).card; if (card?.kind === 'approval' && card.approvalId) openDecisionStage(card.approvalId, source); } : requestCardTarget && actions?.onOpenMessage ? () => actions.onOpenMessage?.(requestCardTarget.channelId, requestCardTarget.id) : actions?.onOpenThread ? () => actions.onOpenThread?.(message) : undefined} /> : null}
           />
         ) : null}
 
