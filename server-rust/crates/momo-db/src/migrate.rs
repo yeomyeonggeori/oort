@@ -708,12 +708,15 @@ mod tests {
     /// 155 is #4704's PR B (ADR-0186 증보 v5 U-d): two partial indexes (the rate window over `agent_run`,
     /// the duplicate and cooldown reads over `approval`) and `agent_initiative_refusal`, the per-(agent,
     /// reason) one-hour window of the refusal audit row, under RLS ENABLE + FORCE and `ws_isolation`.
+    ///
+    /// 158 is #4676's custom expression store (ADR-0218): six tenant tables under RLS ENABLE + FORCE
+    /// and `ws_isolation`, with composite workspace foreign keys.
     #[test]
-    fn discovers_contiguous_migrations_001_to_157() {
+    fn discovers_contiguous_migrations_001_to_158() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
-        let expected: Vec<i64> = (1..=157).collect();
+        let expected: Vec<i64> = (1..=158).collect();
         let found: Vec<i64> = migrations
             .iter()
             .map(|migration| migration.version)
@@ -721,7 +724,7 @@ mod tests {
         assert_eq!(
             found,
             expected,
-            "expected contiguous 001..=157 under {}",
+            "expected contiguous 001..=158 under {}",
             dir.display()
         );
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
@@ -729,7 +732,7 @@ mod tests {
             .last()
             .unwrap()
             .name
-            .starts_with("157_agent_usage_visibility"));
+            .starts_with("158_workspace_expressions"));
     }
 
     #[test]

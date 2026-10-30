@@ -1,21 +1,21 @@
 {
   "counts": {
-    "cargo": 407,
+    "cargo": 416,
     "npm": 469,
-    "unique_blobs": 441
+    "unique_blobs": 450
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "f1bb915000890090d0ed8bfe97ab1317a61f28f5857ed0289d1c2970cc9d5abf",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "01c9d19b7606999d352e9b92fc9dac268cb3ee25f665f7ed4d0357d57c6141dd",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
-    "NOTICE": "c8844dfb45b5f2700354cd567a50e9a09ebbcf40eac747692dffd06d819f2d38",
-    "THIRD_PARTY_NOTICES.md": "282951658f360ab4b5b374c5f01d1ec6c81333dd9ee6a2ecfdfe3a12814ea485"
+    "NOTICE": "5ca71780a50b93f8a4ae12a988dd3328e51e47e8c90cbcb8921acb5add428b73",
+    "THIRD_PARTY_NOTICES.md": "23184b17c44c9f9605f65e4adb8e97b8df4d3ffa7fa856a2e2df3ea8646cc5ac"
   },
   "inputs": {
     "clarify_sha256": "366b7c68569c49f9fab915342fc2c620d1ee6318ab3567d337fd4f7d1a0f79c3",
     "clients_web_package_lock_sha256": "f1bc70d19c96ea279755dc0abb0c4315e65b9f4cfd1243b9b06d9f9306d02b68",
-    "server_rust_cargo_lock_sha256": "0c9817ed638c3cc7864fbb0d6f2bb757575d8da90b9176a2c15aa068efa784b4",
+    "server_rust_cargo_lock_sha256": "64ac5e2d3d03b178c13e04eabed01a55b0122585056292f4be5f0c370dd2465f",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
       "Apache-2.0.txt": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "f1bb915000890090d0ed8bfe97ab1317a61f28f5857ed0289d1c2970cc9d5abf",
-    "sha256_manifest_sha256": "aaf3b3605f01f776f6c941c8cbcc3b86dcf00558d7370284dd868a49ea150b42"
+    "bundle_sha256": "01c9d19b7606999d352e9b92fc9dac268cb3ee25f665f7ed4d0357d57c6141dd",
+    "sha256_manifest_sha256": "212e4c79f646c1e2d2b57dcc0323fc1f277f7db53c35966037d5cd688beff621"
   },
   "packages": [
     {
@@ -843,6 +843,22 @@
       "version": "0.5.4"
     },
     {
+      "copyright": "Copyright (c) 2016 PistonDevelopers",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "592dc80f1a865d20d61a2006a2d29ce34a2bc28cd7e868ab300fdeed6da154ca",
+          "source": "package-tree"
+        }
+      ],
+      "name": "color_quant",
+      "repository": "https://github.com/image-rs/color_quant.git",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "1.1.0"
+    },
+    {
       "copyright": "Copyright (c) 2021 Parker Timmerman",
       "ecosystem": "cargo",
       "files": [
@@ -941,6 +957,27 @@
       "source": "package-tree",
       "spdx": "MIT OR Apache-2.0",
       "version": "0.8.7"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "8569ebf6bf52937b961d9c9c934d8400a2bb6b09651a9afacbb3fc18fe5c09b1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "core_detect",
+      "repository": "https://github.com/thomcc/core_detect",
+      "source": "package-tree",
+      "spdx": "MIT/Apache-2.0",
+      "version": "1.0.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -1694,6 +1731,37 @@
       "ecosystem": "cargo",
       "files": [
         {
+          "name": "COPYRIGHT",
+          "sha256": "11789f45bb180841cd362a5eee6789c68ddb573a11105e30768c308a6add0190",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-WHATWG",
+          "sha256": "838118388fe5c2e7f1dbbaeed13e1c7f3ebf88be91319c7c1d77c18e987d1a50",
+          "source": "package-tree"
+        }
+      ],
+      "name": "encoding_rs",
+      "repository": "https://github.com/hsivonen/encoding_rs",
+      "source": "package-tree",
+      "spdx": "(Apache-2.0 OR MIT) AND BSD-3-Clause",
+      "version": "0.8.42"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
           "name": "LICENSE-APACHE",
           "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
           "source": "package-tree"
@@ -2345,6 +2413,27 @@
       "source": "package-tree",
       "spdx": "Apache-2.0 OR MIT",
       "version": "0.5.1"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "77257f3d2181236b1aee78920238062ae64efe13c5d858b2db126e79c9e1b14f",
+          "source": "package-tree"
+        }
+      ],
+      "name": "gif",
+      "repository": "https://github.com/image-rs/image-gif",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.14.2"
     },
     {
       "copyright": "copyright assignment is required to contribute to the \"group\" library.; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
@@ -3754,6 +3843,48 @@
       "source": "package-tree",
       "spdx": "BSD-3-Clause OR Apache-2.0",
       "version": "0.8.1"
+    },
+    {
+      "copyright": "Copyright (c) 2020 Rousan Ali",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "cfb47b4c5832e5a204d86140ba385e683309e3c82f670e65dfaf491b13c5e2c4",
+          "source": "package-tree"
+        }
+      ],
+      "name": "multer",
+      "repository": "https://github.com/rwf2/multer",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.1.0"
+    },
+    {
+      "copyright": "Copyright Mozilla Foundation; copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "COPYRIGHT",
+          "sha256": "d2a809eafabba137f508bea16a1b93d8ff24df7da6f38129d830db9bc118bdfe",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "3fa4ca83dcc9237839b1bdeb2e6d16bdfb5ec0c5ce42b24694d8bbf0dcbef72c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "multiversion_no_op",
+      "repository": "https://github.com/hsivonen/multiversion_no_op",
+      "source": "package-tree",
+      "spdx": "Apache-2.0 OR MIT",
+      "version": "1.0.0"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
@@ -5230,6 +5361,22 @@
       "version": "0.17.14"
     },
     {
+      "copyright": "Copyright (c) 2019 Nugine",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "fc31d8e912ec0a1ac0ebe75b18d377026bece4ac1ce008a166d5137189cf1eb3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rlimit",
+      "repository": "https://github.com/Nugine/rlimit/",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.10.2"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
       "ecosystem": "cargo",
       "files": [
@@ -5869,6 +6016,27 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "0.3.10"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-Apache",
+          "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "simdutf8",
+      "repository": "https://github.com/rusticstuff/simdutf8",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.1.5"
     },
     {
       "copyright": "Copyright (c) 2017 Adam Wick",
@@ -7490,6 +7658,27 @@
       "source": "package-tree",
       "spdx": "CDLA-Permissive-2.0",
       "version": "1.0.10"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright [yyyy] [name of copyright owner]",
+      "ecosystem": "cargo",
+      "files": [
+        {
+          "name": "LICENSE-APACHE",
+          "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+          "source": "package-tree"
+        },
+        {
+          "name": "LICENSE-MIT",
+          "sha256": "573f5227db835cd30bbdd3aed3f82615f80119a4d5c82b4daf642dbfe2b6afde",
+          "source": "package-tree"
+        }
+      ],
+      "name": "weezl",
+      "repository": "https://github.com/image-rs/weezl",
+      "source": "package-tree",
+      "spdx": "MIT OR Apache-2.0",
+      "version": "0.1.12"
     },
     {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",

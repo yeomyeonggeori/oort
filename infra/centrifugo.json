@@ -2,6 +2,18 @@
   "channel": {
     "namespaces": [
       {
+        "name": "expressions",
+        "presence": false,
+        "join_leave": false,
+        "force_push_join_leave": false,
+        "allow_history_for_subscriber": false,
+        "allow_presence_for_subscriber": false,
+        "history_size": 0,
+        "history_ttl": "0s",
+        "subscribe_proxy_enabled": true,
+        "channel_regex": "^ws[0-9A-F-]{36}$"
+      },
+      {
         "name": "ch",
         "presence": true,
         "join_leave": true,
