@@ -23,6 +23,7 @@ import {
 import {usePalette, useStyles} from '../../design/theme';
 import {ds2Radius, font, space, TOUCH_TARGET, type Palette} from '../../design/tokens';
 import type {StatusDotTone} from '@momo/core/features/presence/statusDot';
+import {useMobileLocale} from '../../i18n/LocaleProvider';
 import {StatusDot} from '../presence/StatusDot';
 import {useOnline} from '../inbox/useOnline';
 import {Avatar} from './Avatar';
@@ -53,6 +54,13 @@ export function connectionBannerText(status: RealtimeStatus): string | null {
   return status === 'connecting' ? '연결 중…' : '연결이 끊겼습니다';
 }
 
+/**
+ * 끊김 띠를 눌렀을 때의 이름(#4895). 사전(`mobile.connection.reconnectNow`, ko·en)이 정본이고, 이 낱말은
+ * 사전 없이 올라오는 격리 하네스를 위한 폴백이다 — 같은 낱말을 두 곳에 적는 것은 알지만, 머리의 나머지 문장이
+ * 아직 리터럴이라 이관(ADR-0213 P1)이 끝나기 전까지는 이 파일이 폴백을 들고 있는다.
+ */
+export const RECONNECT_NOW_LABEL = '지금 다시 연결';
+
 export function ConversationHeader({
   title,
   memberCount,
@@ -66,6 +74,7 @@ export function ConversationHeader({
   onOpenInfo,
   huddle,
   railStatus,
+  onReconnect,
   onBannerInset,
   children,
   backLabel = '뒤로',
@@ -99,6 +108,12 @@ export function ConversationHeader({
   huddle?: HuddleSlot;
   railStatus: RealtimeStatus;
   /**
+   * 끊김 띠를 누르면 부른다(「지금 다시 연결」, #4895) — 화면은 이것을 전송의 `resume` 과 같은 길(`useRealtime().reconnect`)로
+   * 잇는다. **「연결이 끊겼습니다」일 때만** 단추가 선다: 「연결 중…」은 이미 시도하는 중이라 누를 것이 없다. 없으면 띠는
+   * 단추가 아니라 문장만 선다(열 것이 없는 단추는 만들지 않는다 — ⋮·허들 자리와 같은 규칙).
+   */
+  onReconnect?: () => void;
+  /**
    * 뜬 띠가 목록 위 가장자리를 가린 높이(pt, 띠 위 여백 포함). 띠가 서면 그 높이, 걷히면 0. 목록의 떠 있는 필이 그
    * 밑에 쌓이도록 화면이 `Timeline.topPillInset` 에 건넨다(#4292).
    */
@@ -112,9 +127,22 @@ export function ConversationHeader({
   const palette = usePalette();
   const insets = useSafeAreaInsets();
   const banner = connectionBannerText(railStatus);
+  const reconnectable = railStatus === 'disconnected' && onReconnect !== undefined;
+  const reconnectLabel =
+    useMobileLocale()?.locale.formatMessage('mobile.connection.reconnectNow') ?? RECONNECT_NOW_LABEL;
   // 기기가 오프라인이면(NetInfo) 레일 재시도가 닿을 수 없다. 웹 배너의 browser-offline 과 같은 규칙으로
   // 같은 마크가 멈춘다(#3961 design-review M-2). 문장은 그대로다.
   const online = useOnline();
+  // 띠의 안쪽(로더 + 문장)은 문장이든 단추든 같다. 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을
+  // 시도하는 동안이라 같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다.
+  const bannerBody = banner ? (
+    <>
+      <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
+      <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
+        {banner}
+      </Text>
+    </>
+  ) : null;
   const {width: windowWidth, fontScale} = useWindowDimensions();
   const [headerHeight, setHeaderHeight] = useState<number | null>(null);
   const onHeaderLayout = useCallback((event: LayoutChangeEvent) => {
@@ -269,24 +297,34 @@ export function ConversationHeader({
       {children}
       {banner ? (
         // 머리 밑 가장자리에 매달려 목록 위에 뜬다. 문장이 아닌 띠 바깥은 손을 받지 않는다 — 알약 밑의 메시지가
-        // 눌려야 하고, 이 줄은 누르는 것이 아니다.
+        // 눌려야 한다. 끊김일 때만 알약 **자신**이 단추다(#4895): 층은 `box-none` 이라 손을 받는 것은 알약뿐이다.
         <View
-          pointerEvents="none"
+          pointerEvents={reconnectable ? 'box-none' : 'none'}
           onLayout={onBannerLayout}
           style={[styles.bannerLayer, {top: headerHeight ?? insets.top + CONV.headHeight}, headerHeight === null && styles.bannerUnmeasured]}
           testID="connection-banner-layer">
-          <View
-            accessibilityRole="text"
-            accessibilityLiveRegion="polite"
-            style={styles.banner}
-            testID="connection-banner">
-            {/* 두 문장(「연결 중…」·「연결이 끊겼습니다」) 모두 레일이 다시 연결을 시도하는 동안이라
-                같은 로더가 돈다(#3961). 문장은 그대로고 로더는 곁들일 뿐이다. 기기가 오프라인이면 멈춘다. */}
-            <OortLoader size={BANNER_LOADER_SIZE} still={!online} testID="connection-loader" />
-            <Text style={styles.bannerText} maxFontSizeMultiplier={BAR_CONTROL_MAX_SCALE}>
-              {banner}
-            </Text>
-          </View>
+          {reconnectable ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={reconnectLabel}
+              // 이름은 행동(「지금 다시 연결」)이고, 지금 상태(「연결이 끊겼습니다」)는 값으로 따라 읽힌다.
+              accessibilityValue={{text: banner}}
+              accessibilityLiveRegion="polite"
+              onPress={onReconnect}
+              hitSlop={BANNER_SLOP}
+              style={({pressed}) => [styles.banner, pressed && styles.bannerPressed]}
+              testID="connection-banner">
+              {bannerBody}
+            </Pressable>
+          ) : (
+            <View
+              accessibilityRole="text"
+              accessibilityLiveRegion="polite"
+              style={styles.banner}
+              testID="connection-banner">
+              {bannerBody}
+            </View>
+          )}
         </View>
       ) : null}
     </View>
@@ -297,6 +335,13 @@ export function ConversationHeader({
 const CIRCLE_SLOP = (TOUCH_TARGET - CONV.circle) / 2;
 /** 알약(최소 높이 42)을 엄지에 44 로 만드는 여유 — 위아래 한 변에 1. 가로는 이미 넉넉하다. */
 const PILL_SLOP = {top: CIRCLE_SLOP, bottom: CIRCLE_SLOP} as const;
+
+/**
+ * 끊김 띠(눌리는 알약, 높이 약 29)를 엄지에 가깝게 만드는 여유. RN 의 `hitSlop` 은 **부모 경계를 넘지 못해서**(RN 문서), 층 안에
+ * 머무는 만큼만 번다: 위는 알약 위 여백(`space.sm`) 안이라 머리의 줄과 겹치지 않고, 옆은 층이 화면 폭이라 넉넉하다. 아래로는 층이
+ * 알약에서 끝나 벌 수 없다 — 층을 키우면 `onBannerInset`(목록 위 필의 자리)이 움직이므로 키우지 않았다. 눌리는 높이는 약 36.
+ */
+const BANNER_SLOP = {top: space.sm - 1, bottom: 0, left: space.md, right: space.md} as const;
 
 /**
  * 연결 띠의 로더 한 변(pt). 12pt 문장 한 줄 옆에 서는 자리라 small 마크가 읽히는 20: 글자 대비 1.67배로
@@ -402,5 +447,7 @@ const buildStyles = (color: Palette) =>
       // `shadowOpacity` 레시피의 검정 18% 는 어두운 바닥 위에서 3단계밖에 못 누른다).
       boxShadow: color.elevationRest,
     },
+    // 눌리는 띠(끊김)의 눌림 — 머리 알약·원과 같은 자리의 같은 토큰이다(`pillPressed`).
+    bannerPressed: {borderColor: color.textFaint},
     bannerText: {fontSize: font.meta, color: color.text, fontWeight: '600', flexShrink: 1},
   });

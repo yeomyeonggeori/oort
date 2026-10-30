@@ -7,5 +7,6 @@
   "mobile.ios.localNetworkUsage": "Use the local network to connect to an oort server on the same network.",
   "mobile.ios.microphoneUsage": "oort does not record audio. All features work without microphone access.",
   "mobile.ios.photoLibraryUsage": "Read your photo library to show recent photos for conversation attachments. Only photos you select are uploaded.",
-  "mobile.ios.photoLibraryAddUsage": "oort does not save photos to your library. All features work without this permission."
+  "mobile.ios.photoLibraryAddUsage": "oort does not save photos to your library. All features work without this permission.",
+  "mobile.connection.reconnectNow": "Reconnect now"
 }

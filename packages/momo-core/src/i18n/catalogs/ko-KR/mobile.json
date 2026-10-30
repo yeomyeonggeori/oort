@@ -7,5 +7,6 @@
   "mobile.ios.localNetworkUsage": "같은 네트워크에 있는 oort 서버에 연결할 때 로컬 네트워크를 써요.",
   "mobile.ios.microphoneUsage": "oort는 소리를 녹음하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.",
   "mobile.ios.photoLibraryUsage": "대화에 첨부할 최근 사진을 보여 주고 고르게 하려고 사진 보관함을 읽어요. 고른 사진만 올라가요.",
-  "mobile.ios.photoLibraryAddUsage": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요."
+  "mobile.ios.photoLibraryAddUsage": "oort는 사진을 보관함에 저장하지 않아요. 허용하지 않아도 모든 기능을 쓸 수 있어요.",
+  "mobile.connection.reconnectNow": "지금 다시 연결"
 }
