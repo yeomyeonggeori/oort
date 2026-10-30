@@ -65,15 +65,19 @@ import {
 // 한 벌**이고 두 번째는 첫 벌이 죽었을 때만 두드리는 문이라 부팅 예산은 그대로다.
 // -----------------------------------------------------------------------------
 
-/** 재시도가 두드리는 문. 번들러가 이 파일을 자산으로 함께 낸다. */
-const CATALOG_URL = new URL("./emojiCatalog.json", import.meta.url).href;
+/** 재시도가 두드리는 문. 번들러가 이 파일을 자산으로 함께 낸다. 원본은 폰과 같은
+ * 코어 한 벌이다(#4322) — 웹에 사본·링크를 두지 않는다. */
+const CATALOG_URL = new URL(
+  "../../../../../packages/momo-core/src/features/emoji/emojiCatalog.json",
+  import.meta.url
+).href;
 
 let catalogPromise: Promise<CatalogEmoji[]> | undefined;
 /** 모듈 맵이 이 specifier 를 실패로 기억한다 — 이후 적재는 `fetch` 로 간다. */
 let importFailed = false;
 
 async function importCatalog(): Promise<CatalogEmoji[]> {
-  const mod = await import("./emojiCatalog.json");
+  const mod = await import("@momo/core/features/emoji/emojiCatalog.json");
   return parseCatalog(mod.default as unknown as RawCatalog);
 }
 
