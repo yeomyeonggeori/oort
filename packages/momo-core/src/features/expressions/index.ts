@@ -5,6 +5,7 @@ export * from "./search";
 export * from "./message";
 export * from "./cards";
 export * from "./usage";
+export * from "./make";
 export * from "./fixtures";
 export * from "./fixtureServer";
 export * from "./fixtureMedia";
