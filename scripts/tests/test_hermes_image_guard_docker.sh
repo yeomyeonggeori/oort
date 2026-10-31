@@ -29,6 +29,13 @@
 #                            takes one spelling) or present in the volume's .env: refused before listening
 #   media-policy ........... the premise, measured with Hermes' own validate_media_delivery_path: strict keeps an old file
 #                            outside Hermes' cache dirs from being delivered (`true` too), unset delivers it
+#   env-shapes / env-inert-shapes  (#4886) the volume's .env read like Hermes' loader, by the REAL gate with this image's own
+#                            python-dotenv: an inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment and a
+#                            `${NAME:-default}` are refused; a comment, an unterminated quote, a name with no value and the like are not
+#   hermes-home-other ...... a HERMES_HOME that names another folder than the one the gate reads is refused (the image sets /opt/data)
+#   env-parser-parity ...... the input table and rule tables of infra/hermes/test_lockgate_env.py (and the two test files that
+#                            changed with it), run by this image's python with python-dotenv: the fallback parser and the real one
+#                            reproduce every row, and nothing may be skipped (OORT_REQUIRE_DOTENV=1)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -36,6 +43,9 @@ COMPOSE="$ROOT/infra/rust/docker-compose.rust.yml"
 IMG="$(grep -o 'nousresearch/hermes-agent@sha256:[0-9a-f]*' "$COMPOSE" | head -1)"
 OUT="${1:-$(mktemp -d "${TMPDIR:-/tmp}/hermes-image-guard.XXXXXX")}"
 KEY="$(python3 -c 'print("fixture-api-key-" * 3)')"
+# python-dotenv in the pinned Hermes image: the uv.lock of Hermes v0.22.2 (the image's source) pins 1.2.2, and the input table of
+# infra/hermes/test_lockgate_env.py was measured on it. Moving the image to another version means measuring that table again.
+EXPECTED_DOTENV="1.2.2"
 fail() { echo "[hermes-image-guard] FAIL: $*" >&2; exit 1; }
 say() { echo "[hermes-image-guard] $*"; }
 
@@ -62,7 +72,8 @@ scenario() {  # scenario <name> -> $OUT/<name>.json (the RESULT line)
 
 for name in healthy no-plugin edited-plugin widened-plugin not-enabled extra-image-gen-key security-private-urls \
   safe-mode proxy-env private-env bom-env-file clean-env-file self-origin self-origin-bad self-origin-env-file \
-  prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy; do
+  prefix-only-plugin strict-missing strict-wrong strict-env-file media-policy env-shapes env-inert-shapes hermes-home-other \
+  env-parser-parity; do
   scenario "$name"
 done
 
@@ -154,9 +165,9 @@ docker inspect -f '{{.State.Running}}' "$NAME" >"$OUT/gateway-boot.running" 2>&1
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 
 # --- judge ---------------------------------------------------------------------------------------------------------------
-python3 - "$OUT" <<'PY'
+python3 - "$OUT" "$EXPECTED_DOTENV" <<'PY'
 import json, sys
-out = sys.argv[1]
+out, expected_dotenv = sys.argv[1], sys.argv[2]
 failures = []
 
 
@@ -181,6 +192,10 @@ def expect(name, rc, fragments=(), absent=()):
 
 h = expect("healthy", 0)
 guard = (h["lockgate"] or {}).get("image_guard") or {}
+# #4886: inside the image the gate reads the volume's .env with the image's own python-dotenv, not the fallback
+if (h["lockgate"] or {}).get("env_parser") != {"impl": "python-dotenv", "version": expected_dotenv}:
+    failures.append("healthy: the gate did not read the volume's .env with the image's python-dotenv %s: %r"
+                    % (expected_dotenv, (h["lockgate"] or {}).get("env_parser")))
 canary = guard.get("canary") or {}
 if not guard.get("files_verified"):
     failures.append("healthy: files were not verified")
@@ -224,6 +239,23 @@ if not any("did not refuse the example" in problem for problem in (p_only["lockg
 expect("strict-missing", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"])
 expect("strict-wrong", 3, ["must set HERMES_MEDIA_DELIVERY_STRICT=1"])
 expect("strict-env-file", 3, ["the volume's .env sets HERMES_MEDIA_DELIVERY_STRICT"])
+# #4886: the volume's .env as Hermes' loader reads it. The REAL gate, the image's python-dotenv: every spelling the loader applies
+# is refused by name (never with its value), what it ignores is not, a HERMES_HOME that is not the folder read is refused, and the
+# tables of the changed test files pass in this image with python-dotenv present (nothing skipped).
+shapes = expect("env-shapes", 3, [
+    "the volume's .env enables HERMES_SAFE_MODE", "the volume's .env enables HERMES_ALLOW_PRIVATE_URLS",
+    "the volume's .env enables HERMES_ENABLE_PROJECT_PLUGINS", "the volume's .env enables HERMES_YOLO_MODE",
+    "the volume's .env enables HERMES_DASHBOARD", "the volume's .env sets OORT_SELF_MEDIA_ORIGIN",
+    "the volume's .env sets HERMES_MEDIA_DELIVERY_STRICT", "the volume's .env sets HTTPS_PROXY"],
+    absent=["proxy.invalid", "oort.example.com"])
+if ((shapes["lockgate"] or {}).get("env_parser") or {}).get("impl") != "python-dotenv":
+    failures.append("env-shapes: the gate did not use the image's python-dotenv: %r" % ((shapes["lockgate"] or {}).get("env_parser"),))
+expect("env-inert-shapes", 0)
+expect("hermes-home-other", 3, ["HERMES_HOME is not the folder this gate reads"], absent=["not-the-volume"])
+expect("env-parser-parity", 0)
+unit = ((result("env-parser-parity")["lockgate"] or {}).get("unittest")) or {}
+if unit.get("rc") != 0 or not isinstance(unit.get("ran"), int) or unit["ran"] < 100 or unit.get("skipped"):
+    failures.append("env-parser-parity: the changed tests did not all run and pass here with python-dotenv: %r" % (unit,))
 # the premise, from Hermes' own validate_media_delivery_path in the pinned image: strict (and `true`) keeps an old file outside
 # Hermes' cache dirs from being delivered, a file in a cache dir still goes out; unset delivers the outside file too.
 policy = ((result("media-policy")["lockgate"] or {}).get("media_policy")) or {}
@@ -297,6 +329,7 @@ if failures:
 print("OK: %d in-image scenarios (gate) + 6 start-command runs + the live gateway boot" % len(
     ["healthy", "no-plugin", "edited-plugin", "widened-plugin", "not-enabled", "extra-image-gen-key", "security-private-urls",
      "safe-mode", "proxy-env", "private-env", "bom-env-file", "clean-env-file", "self-origin", "self-origin-bad",
-     "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy"]))
+     "self-origin-env-file", "prefix-only-plugin", "strict-missing", "strict-wrong", "strict-env-file", "media-policy",
+     "env-shapes", "env-inert-shapes", "hermes-home-other", "env-parser-parity"]))
 PY
 say "PASS (evidence in $OUT)"

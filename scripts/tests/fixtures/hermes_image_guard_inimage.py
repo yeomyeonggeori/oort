@@ -213,6 +213,67 @@ def scenario_strict_env_file():
     return run_gate()
 
 
+ENV_SHAPES_APPLIED = (
+    "HERMES_SAFE_MODE=1 # note",
+    "export\tHERMES_ALLOW_PRIVATE_URLS=true",
+    "'HERMES_ENABLE_PROJECT_PLUGINS'=1",
+    'HERMES_YOLO_MODE="1" # c',
+    "HERMES_DASHBOARD=${OORT_PROOF_UNSET:-1}",
+    "export\t'OORT_SELF_MEDIA_ORIGIN'=\"https://oort.example.com\" # c",
+    "'HERMES_MEDIA_DELIVERY_STRICT'=1",
+    'export  HTTPS_PROXY="http://proxy.invalid:3128" # c',
+)
+ENV_SHAPES_IGNORED = (
+    "# HERMES_SAFE_MODE=1",
+    'HERMES_SAFE_MODE="1',
+    "HERMES_SAFE_MODE",
+    "HERMES_SAFE_MODE=0 # =1",
+    "hermes_safe_mode=1",
+    'HERMES_SAFE_MODE="1" junk',
+    "OORT_SELF_MEDIA_ORIGIN",
+    "HERMES_YOLO_MODE=1\nHERMES_YOLO_MODE=0",
+)
+
+
+def scenario_env_shapes():
+    """#4886: spellings of the volume's .env that Hermes' loader (python-dotenv, then its own `${}` resolution) APPLIES and the old
+    reader did not see: inline comment, `export<TAB>`, a single-quoted name, a quoted value + comment, a `${NAME:-default}`. The REAL
+    gate reads them with the REAL python-dotenv of this image; every name must be refused."""
+    install()
+    write(os.path.join(DATA, ".env"), ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_APPLIED) + "\n").encode("utf-8"))
+    return run_gate()
+
+
+def scenario_env_inert_shapes():
+    """#4886: the other half: what the loader ignores (a comment, an unterminated quote, a name with no value, a lower-case name,
+    junk after the closing quote, a name repeated with a harmless last value) must not stop the start."""
+    install()
+    write(os.path.join(DATA, ".env"), ("OPENROUTER_API_KEY=keep\n" + "\n".join(ENV_SHAPES_IGNORED) + "\n").encode("utf-8"))
+    return run_gate()
+
+
+def scenario_hermes_home_other():
+    """#4886: the gate reads /opt/data; Hermes loads $HERMES_HOME/.env. This image sets HERMES_HOME=/opt/data (the healthy scenario
+    passes with it); a HERMES_HOME that names another folder is refused."""
+    install()
+    return run_gate(env={"HERMES_HOME": "/tmp/not-the-volume"})
+
+
+def scenario_env_parser_parity():
+    """#4886: the input table and the rule tables of infra/hermes/test_lockgate_env.py (plus the two other test files that changed),
+    run by THIS image's python with the REAL python-dotenv: the fallback parser and the installed one must both reproduce every row.
+    OORT_REQUIRE_DOTENV=1 makes a missing python-dotenv a failure and never a skip. Not a gate run: the record carries the counts."""
+    environment = dict(os.environ, OORT_REQUIRE_DOTENV="1", PYTHONDONTWRITEBYTECODE="1")
+    done = subprocess.run([PY, "-B", "-m", "unittest", "-v", "test_lockgate_env", "test_lockgate_image_guard", "test_default_config"],
+                          cwd=OORT, capture_output=True, text=True, timeout=900, env=environment)
+    output = done.stderr + "\n" + done.stdout
+    ran, skipped = re.search(r"Ran (\d+) tests?", output), re.search(r"skipped=(\d+)", output)
+    record = {"ok": done.returncode == 0, "problems": [],
+              "unittest": {"rc": done.returncode, "ran": int(ran.group(1)) if ran else None,
+                           "skipped": int(skipped.group(1)) if skipped else 0, "tail": output.strip().splitlines()[-8:]}}
+    return done.returncode, record, None
+
+
 MEDIA_PROBE = r'''
 import json, os, sys, tempfile
 home = tempfile.mkdtemp(prefix="oort-media-home-")
