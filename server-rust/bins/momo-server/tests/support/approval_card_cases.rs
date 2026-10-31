@@ -634,3 +634,75 @@ async fn a_triggerless_run_never_produces_a_requester_notification() {
         assert_eq!(count, 0, "nobody requested this run");
     }
 }
+
+/// ADR-0204 증보 6 D6-2 · D6-3, from the real Agent Port producer: the card a proposal leaves
+/// behind says **one question** (never the old 「승인 요청: …」, never English), quotes a channel's
+/// name after the sentence and never inside it, and carries `props.decision_mode` — the word the
+/// one function answers for the payload that was stored. A client reads that word; it does not
+/// work the answer out again.
+///
+/// Revert: put `stamp_decision_mode` back out of the props at the producer, or write the body
+/// from `action.title` again.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_proposal_card_asks_one_question_and_carries_the_decision_mode() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let base = start_server(momo_app_pool().await, true).await;
+    let client = reqwest::Client::new();
+    for (action_id, args, body, mode) in [
+        (
+            "invite.create",
+            json!({"role": "member", "maxUses": 1, "expiresInDays": 7}),
+            "팀원 초대 링크를 만들어도 될까요?",
+            "open",
+        ),
+        (
+            "channel.create",
+            json!({"name": "qa-asked", "kind": "private"}),
+            "비공개 채널을 만들어도 될까요? · 「qa-asked」",
+            "inline",
+        ),
+        (
+            "channel.create",
+            json!({"name": "team2", "kind": "public"}),
+            "채널을 만들어도 될까요? · 「team2」",
+            "inline",
+        ),
+    ] {
+        let f = seed(&su).await;
+        let (status, proposed) =
+            try_propose_action_3706(&client, &base, &su, &f, action_id, args).await;
+        assert_eq!(status, 200, "{action_id}: {proposed}");
+        let approval = proposed_approval_3706(&proposed);
+        let card = Uuid::parse_str(
+            structured(&proposed)["cardMessageId"]
+                .as_str()
+                .expect("cardMessageId"),
+        )
+        .expect("uuid");
+        let (card_body, props): (String, Value) =
+            sqlx::query_as("SELECT body, props FROM message WHERE id=$1")
+                .bind(card)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        assert_eq!(card_body, body, "{action_id}");
+        assert!(
+            !card_body.contains("승인 요청") && !card_body.contains("Approval required"),
+            "{card_body}"
+        );
+        assert_eq!(props["decision_mode"], mode, "{action_id}");
+        let (action_type, payload): (String, Value) =
+            sqlx::query_as("SELECT action_type, payload FROM approval WHERE id=$1")
+                .bind(approval)
+                .fetch_one(&su)
+                .await
+                .unwrap();
+        assert_eq!(
+            momo_agent::actions::decision_mode(&action_type, &payload).as_str(),
+            mode,
+            "{action_id}: the card carries the one function's own answer"
+        );
+    }
+}
