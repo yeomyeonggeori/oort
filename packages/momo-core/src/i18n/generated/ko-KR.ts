@@ -1136,6 +1136,12 @@ export const catalog: MessageCatalog = {
       "value": "일부 화면은 아직 한국어예요."
     }
   ],
+  "settings.profile.languageReload": [
+    {
+      "type": 0,
+      "value": "새로고침"
+    }
+  ],
   "settings.profile.languageRetry": [
     {
       "type": 0,
