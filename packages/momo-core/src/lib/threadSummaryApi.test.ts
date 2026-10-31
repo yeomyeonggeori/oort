@@ -135,6 +135,29 @@ describe("threadRollup — 답글 단 사람 (#4877)", () => {
   });
 });
 
+describe("threadRollup — 안 읽은 답글 수 (#4889 2단계)", () => {
+  const base = { reply_count: 4, last_reply_seq: 12, last_reply_at: 1 };
+
+  it("따라가는 스레드의 값은 unreadReplyCount 로 옮기고, 0도 올바른 값이다", () => {
+    expect(threadRollup(rootWith({ ...base, unread_reply_count: 3 }))?.unreadReplyCount).toBe(3);
+    expect(threadRollup(rootWith({ ...base, unread_reply_count: 0 }))?.unreadReplyCount).toBe(0);
+  });
+
+  it("값이 없으면 키 자체가 없다 — 0이 아니라 「말하지 않음」(따라가지 않는 스레드·옛 서버)", () => {
+    const rollup = threadRollup(rootWith(base));
+    expect(rollup).not.toBeNull();
+    expect(rollup).not.toHaveProperty("unreadReplyCount");
+  });
+
+  it("깨진 값(음수·소수·문자열)은 말하지 않음으로 읽는다 — 칩에 NaN·음수가 가지 않는다", () => {
+    for (const broken of [-1, 1.5, "2" as unknown as number, null as unknown as number]) {
+      const rollup = threadRollup(rootWith({ ...base, unread_reply_count: broken }));
+      expect(rollup).not.toHaveProperty("unreadReplyCount");
+      expect(rollup?.replyCount).toBe(4);
+    }
+  });
+});
+
 describe("대화에도 보내기 (#4887) — 보내는 쪽", () => {
   it("스레드 답글을 켜면 alsoInChannel: true 가 rootId 와 함께 간다", async () => {
     installHost();

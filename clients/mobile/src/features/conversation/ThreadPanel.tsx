@@ -239,13 +239,15 @@ export function ThreadPanel({
     [landingMessageId, landingToken, status],
   );
 
-  const {toggleReaction, editBody, removeMessage, togglePin} = timeline;
+  const {toggleReaction, editBody, removeMessage, removeUnfurls, togglePin} = timeline;
   const actions = useMemo<MessageRowActions>(
     () => ({
       myMemberId,
       onToggleReaction: toggleReaction,
       onEdit: editBody,
       onDelete: removeMessage,
+      // 링크 미리보기 지우기(#4883) — 답글에 달린 카드도 같은 길로, 채널과 같은 상태를 지운다.
+      onRemoveUnfurls: removeUnfurls,
       // 이슈 #1146 M1 — **a reply is pinned from where it is read**, which is
       // the sentence the web thread panel has carried since #1112. The phone
       // did not, and that split had no reason: it was the one action the web
@@ -279,6 +281,7 @@ export function ThreadPanel({
       toggleReaction,
       editBody,
       removeMessage,
+      removeUnfurls,
       togglePin,
       onOpenProfile,
       workspaceId,
@@ -404,6 +407,8 @@ export function ThreadPanel({
                 // `Timeline` 이 여기서 유도하므로, 이것 없이 `onTogglePin` 만 주면
                 // 이미 고정된 답글이 「고정하기」라고 말한다.
                 pins={timeline.pins}
+                // 링크 카드(#4883) — 채널과 **같은 지도**다. 답글에 달린 링크의 카드가 여기서도 선다.
+                unfurls={timeline.unfurls}
                 myMemberId={myMemberId}
                 // A thread has no older page to fetch: `loadReplies` walks every
                 // cursor before it resolves.

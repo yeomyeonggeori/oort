@@ -129,7 +129,7 @@ docker exec -i -u hermes "$HC" /opt/hermes/.venv/bin/python - < <scratch>/hermes
 1. 브라우저로 `http://127.0.0.1:18688`을 열고 owner로 로그인한다(이메일과 비밀번호는 env 파일의 `MOMO_INITIAL_OWNER_EMAIL`·`MOMO_INITIAL_OWNER_PASSWORD`에 있다. 화면에 찍지 않는다).
 2. 인스턴스 운영자 화면에서 같은 서버 Hermes를 연결한다(ADR-0203 D3·D4, `docs/SELF_HOST_AGENT.md`의 co-hosted Hermes 절). 모델은 `openai-codex` 목록에서 고른다(ADR-0203 증보 2026-10-20 M2·M3). 핀 종류가 `operator_env`여야 하고 §8의 SQL (0)으로 확인한다.
 3. 합성 그림을 만든다(부록 C): `python3 -I <scratch>/make_synthetic.py <scratch>/synthetic` (새 폴더가 없을 때만 만든다).
-4. (선택, 그림 1장 소비) **대조 C1**: 문이 닫힌 지금 합성 그림 한 장으로 「AI와 만들기」를 한 번 보낸다. 카드 없이 평소 답이 와야 한다(문 닫힘 = 평소 턴).
+4. (선택, 그림 1장 소비) **대조 C1**: 문이 닫힌 지금 합성 그림 한 장으로 「AI와 만들기」를 한 번 보낸다. 카드 없이 평소 답이 와야 한다(문 닫힘 = 평소 턴). #4908 뒤로는 답에 그림 주소가 있었다면 그 자리에 안내 문장 한 줄이 서고 base64는 남지 않아야 한다.
 
 ### 7.2 문 열기
 

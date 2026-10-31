@@ -28,9 +28,33 @@ export const messageKeys = [
   "mobile.ios.microphoneUsage",
   "mobile.ios.photoLibraryAddUsage",
   "mobile.ios.photoLibraryUsage",
+  "mobile.linkCard.cancel",
+  "mobile.linkCard.copied",
+  "mobile.linkCard.copy",
+  "mobile.linkCard.copyFailed",
+  "mobile.linkCard.loading",
+  "mobile.linkCard.remove",
+  "mobile.linkCard.removeConfirm",
+  "mobile.linkCard.removeDetail",
+  "mobile.linkCard.removeFailed",
+  "mobile.linkCard.removePending",
+  "mobile.linkCard.removeTitle",
+  "mobile.linkCard.share",
+  "mobile.linkCard.sheetClose",
+  "mobile.linkCard.sheetTitle",
+  "mobile.linkPreview.compactHint",
+  "mobile.linkPreview.richHint",
+  "mobile.linkPreview.scopeNote",
+  "mobile.linkPreview.title",
   "mobile.locale.backToSettings",
   "mobile.locale.permissionNotice",
   "mobile.locale.saving",
+  "settings.appearance.linkPreviewCompact",
+  "settings.appearance.linkPreviewCompactHint",
+  "settings.appearance.linkPreviewOff",
+  "settings.appearance.linkPreviewOffHint",
+  "settings.appearance.linkPreviewRich",
+  "settings.appearance.linkPreviewRichHint",
   "settings.profile.languageBeta",
   "settings.profile.languageCurrent",
   "settings.profile.languageHint",
@@ -38,7 +62,9 @@ export const messageKeys = [
   "settings.profile.languageLoadError",
   "settings.profile.languagePartialNotice",
   "settings.profile.languageRetry",
-  "settings.profile.languageSystem"
+  "settings.profile.languageSystem",
+  "timeline.unfurl.label",
+  "timeline.unfurl.video"
 ] as const;
 
 export type MessageKey = typeof messageKeys[number];
@@ -76,9 +102,33 @@ export const argumentSpecs = {
   "mobile.ios.microphoneUsage": {},
   "mobile.ios.photoLibraryAddUsage": {},
   "mobile.ios.photoLibraryUsage": {},
+  "mobile.linkCard.cancel": {},
+  "mobile.linkCard.copied": {},
+  "mobile.linkCard.copy": {},
+  "mobile.linkCard.copyFailed": {},
+  "mobile.linkCard.loading": {},
+  "mobile.linkCard.remove": {},
+  "mobile.linkCard.removeConfirm": {},
+  "mobile.linkCard.removeDetail": {},
+  "mobile.linkCard.removeFailed": {},
+  "mobile.linkCard.removePending": {},
+  "mobile.linkCard.removeTitle": {},
+  "mobile.linkCard.share": {},
+  "mobile.linkCard.sheetClose": {},
+  "mobile.linkCard.sheetTitle": {},
+  "mobile.linkPreview.compactHint": {},
+  "mobile.linkPreview.richHint": {},
+  "mobile.linkPreview.scopeNote": {},
+  "mobile.linkPreview.title": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.permissionNotice": {},
   "mobile.locale.saving": {},
+  "settings.appearance.linkPreviewCompact": {},
+  "settings.appearance.linkPreviewCompactHint": {},
+  "settings.appearance.linkPreviewOff": {},
+  "settings.appearance.linkPreviewOffHint": {},
+  "settings.appearance.linkPreviewRich": {},
+  "settings.appearance.linkPreviewRichHint": {},
   "settings.profile.languageBeta": {},
   "settings.profile.languageCurrent": {
     "languageName": "string"
@@ -88,7 +138,12 @@ export const argumentSpecs = {
   "settings.profile.languageLoadError": {},
   "settings.profile.languagePartialNotice": {},
   "settings.profile.languageRetry": {},
-  "settings.profile.languageSystem": {}
+  "settings.profile.languageSystem": {},
+  "timeline.unfurl.label": {
+    "domain": "string",
+    "title": "string"
+  },
+  "timeline.unfurl.video": {}
 } as const;
 
 export interface MessageArgs {
@@ -120,9 +175,33 @@ export interface MessageArgs {
   "mobile.ios.microphoneUsage": Record<string, never>;
   "mobile.ios.photoLibraryAddUsage": Record<string, never>;
   "mobile.ios.photoLibraryUsage": Record<string, never>;
+  "mobile.linkCard.cancel": Record<string, never>;
+  "mobile.linkCard.copied": Record<string, never>;
+  "mobile.linkCard.copy": Record<string, never>;
+  "mobile.linkCard.copyFailed": Record<string, never>;
+  "mobile.linkCard.loading": Record<string, never>;
+  "mobile.linkCard.remove": Record<string, never>;
+  "mobile.linkCard.removeConfirm": Record<string, never>;
+  "mobile.linkCard.removeDetail": Record<string, never>;
+  "mobile.linkCard.removeFailed": Record<string, never>;
+  "mobile.linkCard.removePending": Record<string, never>;
+  "mobile.linkCard.removeTitle": Record<string, never>;
+  "mobile.linkCard.share": Record<string, never>;
+  "mobile.linkCard.sheetClose": Record<string, never>;
+  "mobile.linkCard.sheetTitle": Record<string, never>;
+  "mobile.linkPreview.compactHint": Record<string, never>;
+  "mobile.linkPreview.richHint": Record<string, never>;
+  "mobile.linkPreview.scopeNote": Record<string, never>;
+  "mobile.linkPreview.title": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.permissionNotice": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "settings.appearance.linkPreviewCompact": Record<string, never>;
+  "settings.appearance.linkPreviewCompactHint": Record<string, never>;
+  "settings.appearance.linkPreviewOff": Record<string, never>;
+  "settings.appearance.linkPreviewOffHint": Record<string, never>;
+  "settings.appearance.linkPreviewRich": Record<string, never>;
+  "settings.appearance.linkPreviewRichHint": Record<string, never>;
   "settings.profile.languageBeta": Record<string, never>;
   "settings.profile.languageCurrent": { languageName: string };
   "settings.profile.languageHint": Record<string, never>;
@@ -131,4 +210,6 @@ export interface MessageArgs {
   "settings.profile.languagePartialNotice": Record<string, never>;
   "settings.profile.languageRetry": Record<string, never>;
   "settings.profile.languageSystem": Record<string, never>;
+  "timeline.unfurl.label": { domain: string; title: string };
+  "timeline.unfurl.video": Record<string, never>;
 }

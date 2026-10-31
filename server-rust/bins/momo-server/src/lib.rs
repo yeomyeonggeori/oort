@@ -823,6 +823,13 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/follow",
             put(routes::thread_follow::follow).delete(routes::thread_follow::unfollow),
         )
+        // #4889 stage 2 — 「여기까지 읽었어요」: move the caller's read position in a followed
+        // thread forward. Personal like the follow verbs; the signal is explicit because a
+        // `GET …/replies` is also the inbox's and the work panels' read.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/messages/{root}/read",
+            put(routes::thread_follow::mark_read),
+        )
         // B11 — the things you can do to a message that is already sent.
         // Message-scoped, not channel-scoped: Swift mounts these under
         // `/workspaces/{ws}/messages/{id}` (`MessageRoutes.swift:28-31`) because
