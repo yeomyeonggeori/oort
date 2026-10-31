@@ -879,6 +879,148 @@ export const catalog: MessageCatalog = {
       "value": "Applying language…"
     }
   ],
+  "releaseNotes.action.close": [
+    {
+      "type": 0,
+      "value": "Close"
+    }
+  ],
+  "releaseNotes.action.details": [
+    {
+      "type": 0,
+      "value": "See details"
+    }
+  ],
+  "releaseNotes.detail.back": [
+    {
+      "type": 0,
+      "value": "Back to What's new"
+    }
+  ],
+  "releaseNotes.detail.changed": [
+    {
+      "type": 0,
+      "value": "What changed"
+    }
+  ],
+  "releaseNotes.detail.tryIt": [
+    {
+      "type": 0,
+      "value": "Try it like this"
+    }
+  ],
+  "releaseNotes.page.description": [
+    {
+      "type": 0,
+      "value": "What changed in each version and how to try it."
+    }
+  ],
+  "releaseNotes.page.empty": [
+    {
+      "type": 0,
+      "value": "There are no updates to show yet."
+    }
+  ],
+  "releaseNotes.page.openHint": [
+    {
+      "type": 0,
+      "value": "See what changed in each version."
+    }
+  ],
+  "releaseNotes.page.title": [
+    {
+      "type": 0,
+      "value": "What's new"
+    }
+  ],
+  "releaseNotes.popup.close": [
+    {
+      "type": 0,
+      "value": "Close What's new"
+    }
+  ],
+  "releaseNotes.popup.more": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more change"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more changes"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "releaseNotes.popup.title": [
+    {
+      "type": 0,
+      "value": "What's new"
+    }
+  ],
+  "releaseNotes.surface.desktop": [
+    {
+      "type": 0,
+      "value": "Desktop"
+    }
+  ],
+  "releaseNotes.surface.label": [
+    {
+      "type": 0,
+      "value": "Shown on"
+    }
+  ],
+  "releaseNotes.surface.phone": [
+    {
+      "type": 0,
+      "value": "Phone"
+    }
+  ],
+  "releaseNotes.version.current": [
+    {
+      "type": 0,
+      "value": "Your version"
+    }
+  ],
+  "releaseNotes.version.label": [
+    {
+      "type": 0,
+      "value": "Version "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    }
+  ],
+  "releaseNotes.version.releasedOn": [
+    {
+      "type": 0,
+      "value": "Released "
+    },
+    {
+      "type": 1,
+      "value": "date"
+    }
+  ],
   "reply.card.cancel": [
     {
       "type": 0,

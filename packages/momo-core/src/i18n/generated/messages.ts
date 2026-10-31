@@ -131,6 +131,24 @@ export const messageKeys = [
   "mobile.ios.photoLibraryUsage",
   "mobile.locale.backToSettings",
   "mobile.locale.saving",
+  "releaseNotes.action.close",
+  "releaseNotes.action.details",
+  "releaseNotes.detail.back",
+  "releaseNotes.detail.changed",
+  "releaseNotes.detail.tryIt",
+  "releaseNotes.page.description",
+  "releaseNotes.page.empty",
+  "releaseNotes.page.openHint",
+  "releaseNotes.page.title",
+  "releaseNotes.popup.close",
+  "releaseNotes.popup.more",
+  "releaseNotes.popup.title",
+  "releaseNotes.surface.desktop",
+  "releaseNotes.surface.label",
+  "releaseNotes.surface.phone",
+  "releaseNotes.version.current",
+  "releaseNotes.version.label",
+  "releaseNotes.version.releasedOn",
   "reply.card.cancel",
   "reply.card.excerptEmpty",
   "reply.card.excerptExpression",
@@ -307,6 +325,30 @@ export const argumentSpecs = {
   "mobile.ios.photoLibraryUsage": {},
   "mobile.locale.backToSettings": {},
   "mobile.locale.saving": {},
+  "releaseNotes.action.close": {},
+  "releaseNotes.action.details": {},
+  "releaseNotes.detail.back": {},
+  "releaseNotes.detail.changed": {},
+  "releaseNotes.detail.tryIt": {},
+  "releaseNotes.page.description": {},
+  "releaseNotes.page.empty": {},
+  "releaseNotes.page.openHint": {},
+  "releaseNotes.page.title": {},
+  "releaseNotes.popup.close": {},
+  "releaseNotes.popup.more": {
+    "count": "number"
+  },
+  "releaseNotes.popup.title": {},
+  "releaseNotes.surface.desktop": {},
+  "releaseNotes.surface.label": {},
+  "releaseNotes.surface.phone": {},
+  "releaseNotes.version.current": {},
+  "releaseNotes.version.label": {
+    "version": "string"
+  },
+  "releaseNotes.version.releasedOn": {
+    "date": "string"
+  },
   "reply.card.cancel": {},
   "reply.card.excerptEmpty": {},
   "reply.card.excerptExpression": {},
@@ -461,6 +503,24 @@ export interface MessageArgs {
   "mobile.ios.photoLibraryUsage": Record<string, never>;
   "mobile.locale.backToSettings": Record<string, never>;
   "mobile.locale.saving": Record<string, never>;
+  "releaseNotes.action.close": Record<string, never>;
+  "releaseNotes.action.details": Record<string, never>;
+  "releaseNotes.detail.back": Record<string, never>;
+  "releaseNotes.detail.changed": Record<string, never>;
+  "releaseNotes.detail.tryIt": Record<string, never>;
+  "releaseNotes.page.description": Record<string, never>;
+  "releaseNotes.page.empty": Record<string, never>;
+  "releaseNotes.page.openHint": Record<string, never>;
+  "releaseNotes.page.title": Record<string, never>;
+  "releaseNotes.popup.close": Record<string, never>;
+  "releaseNotes.popup.more": { count: number };
+  "releaseNotes.popup.title": Record<string, never>;
+  "releaseNotes.surface.desktop": Record<string, never>;
+  "releaseNotes.surface.label": Record<string, never>;
+  "releaseNotes.surface.phone": Record<string, never>;
+  "releaseNotes.version.current": Record<string, never>;
+  "releaseNotes.version.label": { version: string };
+  "releaseNotes.version.releasedOn": { date: string };
   "reply.card.cancel": Record<string, never>;
   "reply.card.excerptEmpty": Record<string, never>;
   "reply.card.excerptExpression": Record<string, never>;

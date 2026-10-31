@@ -1,0 +1,20 @@
+{
+  "releaseNotes.page.title": "What's new",
+  "releaseNotes.page.description": "What changed in each version and how to try it.",
+  "releaseNotes.page.empty": "There are no updates to show yet.",
+  "releaseNotes.page.openHint": "See what changed in each version.",
+  "releaseNotes.version.label": "Version {version}",
+  "releaseNotes.version.current": "Your version",
+  "releaseNotes.version.releasedOn": "Released {date}",
+  "releaseNotes.detail.back": "Back to What's new",
+  "releaseNotes.detail.changed": "What changed",
+  "releaseNotes.detail.tryIt": "Try it like this",
+  "releaseNotes.surface.label": "Shown on",
+  "releaseNotes.surface.phone": "Phone",
+  "releaseNotes.surface.desktop": "Desktop",
+  "releaseNotes.popup.title": "What's new",
+  "releaseNotes.popup.close": "Close What's new",
+  "releaseNotes.popup.more": "{count, plural, one {# more change} other {# more changes}}",
+  "releaseNotes.action.details": "See details",
+  "releaseNotes.action.close": "Close"
+}

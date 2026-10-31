@@ -1,0 +1,20 @@
+{
+  "releaseNotes.page.title": "업데이트 소식",
+  "releaseNotes.page.description": "버전마다 바뀐 점과 써 보는 방법을 모았어요.",
+  "releaseNotes.page.empty": "아직 보여 줄 업데이트 소식이 없어요.",
+  "releaseNotes.page.openHint": "버전별로 바뀐 점을 봐요.",
+  "releaseNotes.version.label": "버전 {version}",
+  "releaseNotes.version.current": "지금 쓰는 버전",
+  "releaseNotes.version.releasedOn": "{date} 공개",
+  "releaseNotes.detail.back": "업데이트 소식으로 돌아가기",
+  "releaseNotes.detail.changed": "바뀐 점",
+  "releaseNotes.detail.tryIt": "이렇게 써 보세요",
+  "releaseNotes.surface.label": "보이는 화면",
+  "releaseNotes.surface.phone": "폰",
+  "releaseNotes.surface.desktop": "데스크탑",
+  "releaseNotes.popup.title": "업데이트 소식",
+  "releaseNotes.popup.close": "업데이트 소식 닫기",
+  "releaseNotes.popup.more": "그 밖에 {count, number}가지",
+  "releaseNotes.action.details": "자세히 보기",
+  "releaseNotes.action.close": "닫기"
+}
