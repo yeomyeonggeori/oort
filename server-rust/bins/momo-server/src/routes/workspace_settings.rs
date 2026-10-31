@@ -128,6 +128,33 @@ pub async fn patch(
             else {
                 return Ok(Err(ApiError::not_found("workspace not found")));
             };
+            // What was just written is audited NOW, before anything below can answer with a
+            // refusal: a handled refusal COMMITS (the provisioning block says so), so an audit
+            // that waited for the success path would be missing from exactly the commits that
+            // need one. Every commit this handler can make carries these rows.
+            //
+            // The switches that actually moved, by name (never a value): one row per write.
+            if roles_touched {
+                let moved = changed_keys(&roles_before, &roles_after);
+                if !moved.is_empty() {
+                    write_audit(
+                        conn,
+                        &roles_changed_audit(workspace_id, member_id, via, &moved, None),
+                    )
+                    .await?;
+                }
+            }
+            write_audit(
+                conn,
+                &AuditEntry::new(workspace_id, "workspace_setting.updated")
+                    .by(member_id)
+                    .via_token(via)
+                    .with_schema(
+                        "momo.workspace_setting.updated.v1",
+                        json!({ "keys": patch_keys }),
+                    ),
+            )
+            .await?;
             // ADR-0201 D8: the switch also provisions (or pauses) the team AI member.
             // Same transaction: a switch that says "on" with no member behind it
             // cannot commit.
@@ -167,28 +194,6 @@ pub async fn patch(
                     .await?
                     .unwrap_or(stored);
             }
-            // The switches that actually moved, by name (never a value): one row per write.
-            if roles_touched {
-                let moved = changed_keys(&roles_before, &roles_after);
-                if !moved.is_empty() {
-                    write_audit(
-                        conn,
-                        &roles_changed_audit(workspace_id, member_id, via, &moved, None),
-                    )
-                    .await?;
-                }
-            }
-            write_audit(
-                conn,
-                &AuditEntry::new(workspace_id, "workspace_setting.updated")
-                    .by(member_id)
-                    .via_token(via)
-                    .with_schema(
-                        "momo.workspace_setting.updated.v1",
-                        json!({ "keys": patch_keys }),
-                    ),
-            )
-            .await?;
             Ok(Ok(as_object(Some(stored))))
         })
     })

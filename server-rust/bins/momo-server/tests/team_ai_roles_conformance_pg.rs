@@ -145,6 +145,17 @@ struct Harness {
 }
 
 async fn harness(base: Option<String>, app: &PgPool, su: &PgPool) -> Harness {
+    harness_with(base, app, su, true).await
+}
+
+/// [`harness`] with the team AI left off when `enable_helper` is `false`, so a test can set up
+/// what the switch will find (`h.helper` is nil until it is on).
+async fn harness_with(
+    base: Option<String>,
+    app: &PgPool,
+    su: &PgPool,
+    enable_helper: bool,
+) -> Harness {
     let workspace = Uuid::new_v4();
     let owner = Uuid::new_v4();
     let member = Uuid::new_v4();
@@ -265,6 +276,9 @@ async fn harness(base: Option<String>, app: &PgPool, su: &PgPool) -> Harness {
         channel,
         helper: Uuid::nil(),
     };
+    if !enable_helper {
+        return h;
+    }
     let (status, body) = h
         .patch(&h.owner_token, json!({"team_ai_fast_path": true}))
         .await;
@@ -1149,4 +1163,103 @@ async fn s8_another_workspaces_switches_are_not_touched() {
         "another workspace's admin cannot approve this card"
     );
     assert!(b.roles().await.is_on(roles::CODE));
+}
+
+// --- repairs from the independent security review (#4964, round 1) -------------------------------
+
+/// What a settings PATCH commits is on the audit record, also when the handler then answers with a
+/// refusal. In a workspace where another agent already holds the helper's handle, a PATCH that
+/// carries role switches AND the helper's own switch answers 409 `team_ai_unavailable`. The settings
+/// API's rule for that refusal is that the rest of the request stays committed — so the roles audit
+/// row (key names only) and the settings audit row must exist for it, exactly as on the success path.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn s9_what_a_settings_patch_commits_is_audited_when_it_answers_409() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = app_pool().await;
+    let h = harness_with(None, &app, &su, false).await;
+    let holder = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, status, display_name, handle) \
+         VALUES ($1, $2, 'agent', 'active', '다른 에이전트', $3)",
+    )
+    .bind(holder)
+    .bind(h.workspace)
+    .bind(team_ai::TEAM_AI_HANDLE)
+    .execute(&su)
+    .await
+    .expect("another agent holds the helper's handle");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, owner_human_id) \
+         VALUES ($1, $2, 'grok', 'https://x.invalid/v1', $3)",
+    )
+    .bind(holder)
+    .bind(h.workspace)
+    .bind(h.owner)
+    .execute(&su)
+    .await
+    .expect("its agent row");
+    let roles_rows = h.audit_rows("team_ai.roles.changed").await.len();
+    let updated_rows = h.audit_rows("workspace_setting.updated").await.len();
+
+    let (status, body) = h
+        .patch(
+            &h.owner_token,
+            json!({"team_ai_fast_path": true, "team_ai_roles": {"files": false}}),
+        )
+        .await;
+    assert_eq!(status, 409, "{body}");
+    assert_eq!(body["error"]["code"], "team_ai_unavailable");
+    let settings = h.settings().await;
+    assert_eq!(
+        settings["team_ai_roles"],
+        json!({"files": false}),
+        "the refusal commits the rest of the request"
+    );
+    assert_eq!(
+        settings["team_ai_fast_path"],
+        json!(false),
+        "and the helper's own switch is back out"
+    );
+    let changed = h.audit_rows("team_ai.roles.changed").await;
+    assert_eq!(
+        changed.len(),
+        roles_rows + 1,
+        "the committed role switch is audited: {changed:?}"
+    );
+    let row = changed.last().expect("the new row");
+    assert_eq!(row["keys"], json!(["files"]));
+    assert_eq!(row["source"], "settings");
+    assert!(
+        !row.to_string().contains("false"),
+        "key names, never values: {row}"
+    );
+    assert_eq!(
+        h.audit_rows("workspace_setting.updated").await.len(),
+        updated_rows + 1,
+        "so is the write itself"
+    );
+
+    // The success path writes the same two rows once the handle is free.
+    sqlx::query("UPDATE member SET handle = 'renamed-agent' WHERE id = $1")
+        .bind(holder)
+        .execute(&su)
+        .await
+        .expect("the other agent is renamed");
+    let (status, body) = h
+        .patch(
+            &h.owner_token,
+            json!({"team_ai_fast_path": true, "team_ai_roles": {"files": true}}),
+        )
+        .await;
+    assert_eq!(status, 200, "{body}");
+    assert_eq!(
+        h.audit_rows("team_ai.roles.changed").await.len(),
+        roles_rows + 2
+    );
+    assert_eq!(
+        h.audit_rows("workspace_setting.updated").await.len(),
+        updated_rows + 2
+    );
 }
