@@ -14,7 +14,7 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {AccessibilityInfo, ActionSheetIOS, StyleSheet} from 'react-native';
+import {AccessibilityInfo, ActionSheetIOS, Image, StyleSheet} from 'react-native';
 
 import '../src/boot/polyfills';
 import '../src/boot/coreHost';
@@ -1728,5 +1728,60 @@ describe('홈 — 채널 줄의 아이콘과 큰 글씨 (#4953)', () => {
     expect(chipIds('ch-general')).toEqual([]);
     // 음소거는 읽음 투영이 아니라 채널이 말하는 사실이다.
     expect(titleStyle('ch-hush', 'hush').color).toBe(darkPalette.textMuted);
+  });
+});
+
+// 섹션 머리의 글리프는 [머리 아이콘, 메뉴(…), 접기(⌄)] 세 개다 (`SectionHead`).
+function headGlyphs(key: 'channels' | 'dms') {
+  return within(screen.getByTestId(`home-section-${key}`)).UNSAFE_queryAllByType(Image);
+}
+
+describe.each([
+  ['라이트', 'light', lightPalette],
+  ['다크', 'dark', darkPalette],
+] as const)('홈 — 섹션 머리 아이콘, %s 스킴 (#4979)', (_name, scheme, p) => {
+  it('채널 머리는 줄의 #·자물쇠가 아닌 layers, DM 머리는 dms 그대로다 — 실제로 그려지는 자산을 잰다', async () => {
+    // testID 는 이미지와 따로 계산된다(#4953) — 그래서 머리가 **실제로 그리는 자산**을 잰다. 등록한 자산이 옛 것과 구별되지
+    // 않으면 아래 단정은 머리가 옛 `#` 로 돌아가도 초록이다(`layers` 가 `hash.png` 를 가리키는 사보타주).
+    expect(HOME_ICONS.layers).not.toEqual(HOME_ICONS.hash);
+    expect(HOME_ICONS.layers).not.toEqual(HOME_ICONS.lock);
+    expect(HOME_ICONS.layers).not.toEqual(HOME_ICONS.dms);
+    await mountHomeIn(scheme);
+    expect(headGlyphs('channels').map(node => node.props.source)).toEqual([
+      HOME_ICONS.layers,
+      HOME_ICONS.more,
+      HOME_ICONS.down,
+    ]);
+    // DM 머리는 손대지 않는다: 아이콘은 `dms`, 뒤의 두 글리프는 채널 머리와 같다.
+    expect(headGlyphs('dms').map(node => node.props.source)).toEqual([
+      HOME_ICONS.dms,
+      HOME_ICONS.more,
+      HOME_ICONS.down,
+    ]);
+  });
+
+  it('머리 아이콘은 22 이고 본문색(text)으로 칠한다 — tintColor 로 칠하는 PNG 라 색이 빠지면 검은 채로 남는다', async () => {
+    await mountHomeIn(scheme);
+    const icon = flat(headGlyphs('channels')[0].props.style);
+    expect(icon.width).toBe(HOME_ICON_SIZE.layers);
+    expect(icon.height).toBe(HOME_ICON_SIZE.layers);
+    expect(icon.tintColor).toBe(p.text);
+  });
+
+  it('접근성은 그대로다 — 이름은 머리 글자가 말하고 아이콘은 장식이다', async () => {
+    await mountHomeIn(scheme);
+    const head = screen.getByTestId('home-section-channels');
+    expect(within(head).getByRole('header')).toHaveTextContent('채널');
+    expect(screen.getByTestId('home-section-menu-channels').props.accessibilityLabel).toBe(
+      '채널 섹션 메뉴',
+    );
+    expect(screen.getByTestId('home-section-toggle-channels').props.accessibilityLabel).toBe(
+      '채널 섹션',
+    );
+    // 머리 아이콘에는 이름도 대체 글도 없고 보조기술이 따로 멈추는 자리도 아니다.
+    const props = headGlyphs('channels')[0].props;
+    expect(props.accessibilityLabel).toBeUndefined();
+    expect(props.alt).toBeUndefined();
+    expect(props.accessible).not.toBe(true);
   });
 });
